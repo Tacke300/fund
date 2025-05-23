@@ -3,37 +3,27 @@ name: Deploy to VPS
 on:
   push:
     branches:
-      - main  
+      - main
+  pull_request:
+    branches:
+      - main
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v3
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Deploy Stack
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.GL_SSH_HOST }}
+          username: ${{ secrets.GL_SSH_USERNAME }}
+          # password: ${{ secrets.GL_SSH_PASSWORD }}
+          key: ${{ secrets.GL_SSH_SECRET }}
+          script: |
+            chmod +x /home/tacke300/tz800/auto_pull.sh
+            /home/tacke300/tz800/auto_pull.sh
 
-    - name: Copy code to VPS via SSH
-      uses: appleboy/scp-action@v0.1.4
-      with:
-        host: ${{ secrets.VPS_IP }}
-        username: tacke300
-        key: ${{ secrets.SSH_PRIVATE_KEY }}
-        source: "."
-        target: "/home/tacke300/tz800"
-
-    - name: Run deploy commands on VPS
-      uses: appleboy/ssh-action@v0.1.7
-      with:
-        host: ${{ secrets.VPS_IP }}
-        username: tacke300
-        key: ${{ secrets.SSH_PRIVATE_KEY }}
-        script: |
-          cd /home/tacke300/tz800
-          # Ví dụ chạy python bot
-          python3 -m venv venv
-          source venv/bin/activate
-          pip install -r requirements.txt
-          # Khởi động bot (tùy bạn dùng screen, tmux hay pm2)
-          pkill -f main.py || true
-          nohup python3 main.py > bot.log 2>&1 &
+      
