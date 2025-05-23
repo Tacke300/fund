@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Supabase Auth</title>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/supabase.min.js"></script>
+  <style>
+    body {
+      margin: 0;
+      background-color: #121212;
+      font-family: sans-serif;
+      color: white;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+    }
+
+    .container {
+      background: #1e1e1e;
+      padding: 20px;
+      border-radius: 10px;
+      width: 90%;
+      max-width: 350px;
+      box-sizing: border-box;
+    }
+
+    h2 { text-align: center; }
+
+    input, button {
+      width: 100%;
+      margin: 8px 0;
+      padding: 10px;
+      border: none;
+      border-radius: 6px;
+      font-size: 16px;
+      box-sizing: border-box;
+    }
+
+    input {
+      background: #2b2b2b;
+      color: white;
+    }
+
+    button {
+      background-color: #3b82f6;
+      color: white;
+      font-weight: bold;
+      cursor: pointer;
+    }
+
+    .link {
+      text-align: center;
+      margin-top: 10px;
+      color: #a0a0a0;
+      cursor: pointer;
+    }
+
+    .popup-overlay, .welcome-popup {
+      display: none;
+      position: fixed;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+      background: rgba(0, 0, 0, 0.8);
+      justify-content: center;
+      align-items: center;
+      z-index: 1000;
+      flex-direction: column;
+    }
+
+    .popup-overlay.active,
+    .welcome-popup.active {
+      display: flex;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Đăng nhập -->
+  <div class="container" id="login-container">
+    <h2>Đăng nhập</h2>
+    <input id="login-username" type="text" placeholder="Username" />
+    <input id="login-password" type="password" placeholder="Password" />
+    <button onclick="login()">Đăng nhập</button>
+    <div class="link" onclick="showRegister()">Chưa có tài khoản? Đăng ký</div>
+  </div>
+
+  <!-- Popup đăng ký -->
+  <div class="popup-overlay" id="register-popup">
+    <div class="container">
+      <h2>Đăng ký</h2>
+      <input id="reg-username" type="text" placeholder="Username" />
+      <input id="reg-password" type="password" placeholder="Password" />
+      <input id="reg-repassword" type="password" placeholder="Nhập lại Password" />
+      <button onclick="register()">Tạo tài khoản</button>
+      <div class="link" onclick="hideRegister()">Hủy</div>
+    </div>
+  </div>
+
+  <!-- Welcome popup -->
+  <div class="welcome-popup" id="welcome">
+    <h1>Welcome!</h1>
+  </div>
+
+  <script>
+    const supabase = supabase.createClient(
+      'https://tramnanrzruzvkehpydl.supabase.co', // THAY BẰNG CỦA BẠN
+      'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRyYW1uYW5yenJ1enZrZWhweWRsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDU3NTM1NTMsImV4cCI6MjA2MTMyOTU1M30.L0Ytkxi80AbYjkjpDfGyQtfyfqjfHLF98OrVce9Hi-0'
+    );
+
+    function showRegister() {
+      document.getElementById('register-popup').classList.add('active');
+    }
+
+    function hideRegister() {
+      document.getElementById('register-popup').classList.remove('active');
+    }
+
+    async function register() {
+      const user = document.getElementById('reg-username').value.trim();
+      const pass = document.getElementById('reg-password').value;
+      const repass = document.getElementById('reg-repassword').value;
+
+      if (!user || !pass || pass !== repass) {
+        alert('Vui lòng kiểm tra lại thông tin');
+        return;
+      }
+
+      const { data, error } = await supabase
+        .from('users')
+        .insert([{ username: user, password: pass }]);
+
+      if (error) {
+        alert('Đăng ký thất bại: ' + error.message);
+      } else {
+        alert('Tạo tài khoản thành công');
+        hideRegister();
+      }
+    }
+
+    async function login() {
+      const user = document.getElementById('login-username').value.trim();
+      const pass = document.getElementById('login-password').value;
+
+      const { data, error } = await supabase
+        .from('users')
+        .select('*')
+        .eq('username', user)
+        .eq('password', pass);
+
+      if (error || !data || data.length === 0) {
+        alert('Sai thông tin đăng nhập');
+      } else {
+        document.getElementById('login-container').style.display = 'none';
+        document.getElementById('welcome').classList.add('active');
+      }
+    }
+  </script>
+</body>
+</html>
