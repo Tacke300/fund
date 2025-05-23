@@ -1,0 +1,39 @@
+name: Deploy to VPS
+
+on:
+  push:
+    branches:
+      - main  # Hoặc branch bạn muốn deploy
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    - name: Copy code to VPS via SSH
+      uses: appleboy/scp-action@v0.1.4
+      with:
+        host: ${{ secrets.VPS_IP }}
+        username: your_vps_username
+        key: ${{ secrets.VPS_SSH_KEY }}
+        source: "."
+        target: "/home/tacke300/tz800"
+
+    - name: Run deploy commands on VPS
+      uses: appleboy/ssh-action@v0.1.7
+      with:
+        host: ${{ secrets.VPS_IP }}
+        username: fundingbotpromax
+        key: ${{ secrets.SSH_PRIVATE_KEY }}
+        script: |
+          cd /home/tacke300/tz800
+          # Ví dụ chạy python bot
+          python3 -m venv venv
+          source venv/bin/activate
+          pip install -r requirements.txt
+          # Khởi động bot (tùy bạn dùng screen, tmux hay pm2)
+          pkill -f main.py || true
+          nohup python3 main.py > bot.log 2>&1 &
