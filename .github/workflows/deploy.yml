@@ -2,11 +2,7 @@ name: Deploy to VPS
 
 on:
   push:
-    branches:
-      - main
-  pull_request:
-    branches:
-      - main
+    branches: [ main ]
 
 jobs:
   deploy:
@@ -14,16 +10,15 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
-      - name: Deploy Stack
-        uses: appleboy/ssh-action@master
-        with:
-          host: ${{ secrets.GL_SSH_HOST }}
-          username: ${{ secrets.GL_SSH_USERNAME }}
-          # password: ${{ secrets.GL_SSH_PASSWORD }}
-          key: ${{ secrets.GL_SSH_SECRET }}
-          script: |
-            chmod +x /home/tacke300/tz800/auto_pull.sh
-            /home/tacke300/tz800/auto_pull.sh
+        uses: actions/checkout@v3
 
-      
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H 34.142.248.96 >> ~/.ssh/known_hosts
+
+      - name: Deploy to VPS
+        run: |
+          ssh -i ~/.ssh/id_ed25519 tacke300@34.142.248.96 "cd /path/to/your/app && git pull && ./autopull.sh"
