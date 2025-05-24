@@ -28,7 +28,7 @@ git pull --rebase origin main && echo "[B3] Pull thành công." || {
 }
 
 # Copy souce code vào folder nginx
-cp -r . /var/www/html/fundingbotpromax
+
 ls -al /var/www/html/fundingbotpromax
 
 echo "===== DEPLOY THÀNH CÔNG ====="
