@@ -54,7 +54,7 @@
     }
 
     .bot {
-      width: 100%;
+      
       flex: 0 1 300px;
       border: 1px solid #aaa;
       display: flex;
@@ -64,6 +64,8 @@
       transition: all 0.3s ease;
       padding: 10px;
       border-radius: 10px;
+      width: 100% !important;
+    min-width: unset;
     }
 
     .bot button {
@@ -80,7 +82,7 @@
     
   button {
       width: 100%;
-      padding: 12px;
+      padding: 5px;
       font-size: 1rem;
       color: white;
       background-color: #007bff;
@@ -98,7 +100,7 @@
     .input-wrapper input {
       width: 100%;
       height: 40px;
-      padding: 0 30px 0 10px;
+      padding: 0 5px 0 5px;
       border: 1px solid #aaa;
       border-radius: 6px;
     }
@@ -219,6 +221,15 @@
       border-color: #888;  
     }  
   .tab-004{
+    max-width: 400px;  
+      margin: 5px auto 0;  
+      background: #222;  
+      padding: 5px;  
+      border-radius: 12px;  
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);  
+      border: 1px solid #555;  
+      color: white;  
+      font-family: 'Baloo 2', cursive;
     background: #222;}
   #api-form {  
       display: none;  
@@ -250,7 +261,10 @@
       padding: 16px;
     }
   
-  
+  /* Responsive Mobile Fix cho phần cài API */
+
+
+
   </style>  
 </head>  
 <body>  
@@ -261,8 +275,8 @@
 <div class="tab-002">
   <div style="padding: 10px; font-size: 20px;">
     <div class="tab-002001">
-      <p class="left-text">ID của bạn:</p>
-      <p id="user_id" class="right-text">74447831114</p>
+      <p class="left-text">Tài khoản:</p>
+      <p id="user_id" class="right-text">777777</p>
     </div>
     <div class="tab-002001">
       <p class="left-text">Hôm nay:</p>
@@ -317,8 +331,8 @@
     <div class="tab-004">  
       <!-- Nút Cài đặt API -->  
       <!-- Nút mở API -->  
-      <div style="text-align: center; margin-top: 40px; "class="bot">  
-        <button id="api-01" style="padding: 12px 24px; font-size: 18px; width: 100%; font-weight: bold; cursor: pointer;">Cài đặt API</button>  
+      <div style="text-align: center; "class="bot">  
+        <button id="api-01" style="padding: 12px 24px; font-size: 18px; font-weight: bold; width: 100%; cursor: pointer;">Cài đặt</button>  
       </div>  
   
       <!-- Popup chọn sàn -->  
@@ -344,6 +358,9 @@
         <button onclick="submitApiForm()" style="width: 100%; padding: 12px; font-size: 16px; font-weight: bold; cursor: pointer;">Submit</button>  
       </div>  
     </div>  
+  <div style="text-align: center; margin-top: 20px;" class="tab-004">
+<button onclick="logoutParent()">Đăng xuất</button>
+</div>
 </div>
 
   <script>  
@@ -436,7 +453,25 @@ function resetBot(botId) {
     input.value = '';  
     closeApiForm();  
   }  
+    //777
+// hien user name
+    function showUserId() {
+  // Hiển thị tên người dùng
+  const user = localStorage.getItem('loggedInUser');
+  document.getElementById('user_id').textContent = `${user}`;
+}
+
+// dang xuat
+  function logoutParent() {
+    // Gọi hàm logout của trang cha để xóa đăng nhập
+    if (parent && typeof parent.logout === 'function') {
+      parent.logout();
+    } else {
+      // Nếu không gọi được logout, có thể chuyển trang cha về login
+      parent.location.href = 'index.html'; // hoặc '/' tùy cấu trúc bạn
+    }
+  }
+
 </script>
     
     
-    </script>
