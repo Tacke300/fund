@@ -2,7 +2,7 @@
 
 echo "===== BẮT ĐẦU DEPLOY ====="
 
-cd /home/tacke300/tz800 || {
+cd /home/tacke300/fundingbotpromax || {
   echo "[LỖI] Không vào được thư mục dự án!"
   exit 1
 }
