@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Bot Controller</title>
+  <link href="https://fonts.googleapis.com/css2?family=Baloo+2&display=swap" rel="stylesheet" />
+  <style>
+    * { box-sizing: border-box; }
+
+    html, body {
+      margin: 0;
+      padding: 0;
+      color: white;
+      font-family: 'Baloo 2', cursive;
+      height: 100%;
+      width: 100%;
+      overflow: hidden;
+    }
+
+    .banner {
+      font-size: 64px;
+      margin-top: 40px;
+      margin-bottom: 40px;
+      text-align: center;
+      background: linear-gradient(270deg, #00ffff, #ff00ff, #ffff00, #00ffff);
+      background-size: 800% 800%;
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      animation: titanColor 8s ease infinite;
+    }
+
+    .tab-002 {
+      padding-left: 3px;
+      font-family: 'Roboto', Arial, sans-serif;
+    }
+
+    .tab-002001 {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .tab-002001 p {
+      margin: 0;
+      font-size: 15px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 30px;
+    }
+
+    table, th, td {
+      border: 1px solid white;
+    }
+
+    th, td {
+      padding: 10px;
+      text-align: center;
+    }
+
+    @keyframes titanColor {
+      0% {background-position: 0% 50%;}
+      50% {background-position: 100% 50%;}
+      100% {background-position: 0% 50%;}
+    }
+  </style>
+</head>
+<body>
+  <div class="tab-001">
+    <p class="banner">Funding Bot</p>
+  </div>
+
+  <div class="tab-002">
+    <div style="padding: 10px; font-size: 20px;">
+      <div class="tab-002001">
+        <p class="left-text">Tài khoản:</p>
+        <p id="user_id" class="right-text"></p>
+      </div>
+      <div class="tab-002001">
+        <p class="left-text">Hôm nay:</p>
+        <p id="today" class="right-text">+14.64 USDT</p>
+      </div>
+      <div class="tab-002001">
+        <p class="left-text">Tuần này:</p>
+        <p id="week" class="right-text">+112.96 USDT</p>
+      </div>
+      <div class="tab-002001">
+        <p class="left-text">Tháng này:</p>
+        <p id="month" class="right-text">+468.20 USDT</p>
+      </div>
+      <div class="tab-002001">
+        <p class="left-text">Tổng lỗ:</p>
+        <p id="lose" class="right-text">-684.00 USDT</p>
+      </div>
+      <div class="tab-002001">
+        <p class="left-text">Tổng lợi nhuận:</p>
+        <p id="win" class="right-text">+8,190.00 USDT</p>
+      </div>
+      <div class="tab-002001">
+        <p class="left-text">Tổng P&L từ trước tới nay:</p>
+        <p id="total" class="right-text">+8,874.00 USDT</p>
+      </div>
+    </div>
+  </div>
+
+
+  <script>
+    const user = localStorage.getItem('loggedInUser');
+
+    // Nếu user chưa đăng nhập thì báo luôn, khỏi gọi API linh tinh
+    if (!user) {
+      document.getElementById('user_id').textContent = 'Chưa đăng nhập';
+      document.getElementById('error-message').textContent = 'Vui lòng đăng nhập để xem dữ liệu.';
+    } else {
+      document.getElementById('user_id').textContent = user;
+      const apiUrl = `https://tramnanrzruzvkehpydl.supabase.co/rest/v1/users?user_id=eq.${encodeURIComponent(user)}&select=*`;
+
+      async function fetchPnLData() {
+        const errorDiv = document.getElementById('error-message');
+        errorDiv.textContent = ''; // reset lỗi trước
+
+        try {
+          const response = await fetch(apiUrl, {
+            method: 'GET',
+            headers: {
+              'Authorization': 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRyYW1uYW5yenJ1enZrZWhweWRsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDU3NTM1NTMsImV4cCI6MjA2MTMyOTU1M30.L0Ytkxi80AbYjkjpDfGyQtfyfqjfHLF98OrVce9Hi-0',
+              'apikey': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRyYW1uYW5yenJ1enZrZWhweWRsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDU3NTM1NTMsImV4cCI6MjA2MTMyOTU1M30.L0Ytkxi80AbYjkjpDfGyQtfyfqjfHLF98OrVce9Hi-0',
+              'Content-Type': 'application/json'
+            }
+          });
+
+          if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+
+          const data = await response.json();
+          displayPnLData(data);
+
+        } catch (error) {
+          console.error('Error fetching PnL data:', error.message);
+          errorDiv.textContent = `Lỗi: ${error.message}`;
+        }
+      }
+
+      function displayPnLData(data) {
+  if (data.length === 0) return; // Nếu không có dữ liệu thì thôi
+
+  const row = data[0]; // Lấy dòng đầu tiên vì chỉ in 1 user thôi
+
+  document.getElementById('user_id').textContent = row.user_id || 'N/A';
+  document.getElementById('today').textContent = row.pnl_today || '0';
+  document.getElementById('week').textContent = row.pnl_7days || '0';
+  document.getElementById('month').textContent = row.pnl_30days || '0';
+  document.getElementById('win').textContent = row.total_win || '0';
+  document.getElementById('lose').textContent = row.total_loss || '0';
+  document.getElementById('total').textContent = row.total_net || '0';
+}
+
+      window.addEventListener('DOMContentLoaded', () => {
+        fetchPnLData();
+      });
+    }
+  </script>
+</body>
+</html>
