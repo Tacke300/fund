@@ -14,37 +14,16 @@
       margin: 0;  
       padding: 0;  
       color: white;  
-      background-color: black;  
+      background: #1e1e2f;
       font-family: 'Baloo 2', cursive;  
       height: 100%;
   width: 100%;
   overflow: hidden;
     }  
-  /* banner */
-    .banner {  
-      font-size: 64px;  
-      margin-top: 40px;  
-      margin-bottom: 40px;  
-      text-align: center;  
-      background: linear-gradient(270deg, #00ffff, #ff00ff, #ffff00, #00ffff);  
-      background-size: 800% 800%;  
-      -webkit-background-clip: text;  
-      -webkit-text-fill-color: transparent;  
-      animation: titanColor 8s ease infinite;  
-    }  
+  
   
     
-  /* tab002*/
-  .tab-002001 {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.tab-002001 p {
-  margin: 0; /* Xoá khoảng cách mặc định */
-  font-size: 15px;
-}
+  
     .container {
       display: flex;
       width: 100%;
@@ -256,9 +235,10 @@
  .all {
       max-width: 480px;
       margin: auto;
-      border-radius: 8px;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+      border-radius: 20px;
+      box-shadow: 0 2px 20px rgba(0,0,0,0.1);
       padding: 16px;
+     height: 100vh;
     }
   
   /* Responsive Mobile Fix cho phần cài API */
@@ -269,42 +249,8 @@
 </head>  
 <body>  
   <div class="all">
-  <div class="tab-001">  
-    <p class="banner">Funding Bot</p>  
-  </div>  
-<div class="tab-002">
-  <div style="padding: 10px; font-size: 20px;">
-    <div class="tab-002001">
-      <p class="left-text">Tài khoản:</p>
-      <p id="user_id" class="right-text">777777</p>
-    </div>
-    <div class="tab-002001">
-      <p class="left-text">Hôm nay:</p>
-      <p id="today" class="right-text">+14.64 USDT</p>
-    </div>
-    <div class="tab-002001">
-      <p class="left-text">Tuần này:</p>
-      <p id="week" class="right-text">+112.96 USDT</p>
-    </div>
-    <div class="tab-002001">
-      <p class="left-text">Tháng này:</p>
-      <p id="month" class="right-text">+468.20 USDT</p>
-    </div>
-    <div class="tab-002001">
-      <p class="left-text">Tổng lỗ:</p>
-      <p id="lose" class="right-text">-684.00 USDT</p>
-    </div>
-    <div class="tab-002001">
-      <p class="left-text">Tổng lợi nhuận:</p>
-      <p id="win" class="right-text">+8,190.00 USDT</p>
-    </div>
-    <div class="tab-002001">
-      <p class="left-text">Tổng P&L từ trước tới nay:</p>
-      <p id="total" class="right-text">+8,874.00 USDT</p>
-    </div>
-  </div>
-</div>
   
+  <iframe src="top.html" width="100%" height="400px" style="border:none;"></iframe>
     <div class="tab-003">
     <div class="container">
       <div class="bot" id="bot1">
@@ -327,7 +273,7 @@
       </div>
     </div>
   </div>
-    </div>  
+    
     <div class="tab-004">  
       <!-- Nút Cài đặt API -->  
       <!-- Nút mở API -->  
@@ -366,7 +312,7 @@
 <button onclick="logoutParent()">Đăng xuất</button>
 </div>
 </div>
-
+</div>  
   <script>  
   // Bật/tắt input nhập tiền và đổi nút Khởi chạy <-> Dừng lại  
   function handleClick(botId) {
@@ -457,20 +403,7 @@ function resetBot(botId) {
     input.value = '';  
     closeApiForm();  
   }  
-    //777
-// hien user name
-    function showUserId() {
-      document.getElementById('login-container').style.display = 'none';
-  document.getElementById('register-container').style.display = 'none';
-  document.getElementById('funding-container').style.display = 'block';
-  // Hiển thị tên người dùng
-  const user = localStorage.getItem('loggedInUser');
-  document.getElementById('user_id').textContent = `${user}`;
-}
-//api
 
-
-    
 // dang xuat
   function logoutParent() {
     // Gọi hàm logout của trang cha để xóa đăng nhập
