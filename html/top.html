@@ -136,10 +136,7 @@
           const data = await response.json();
           displayPnLData(data);
 
-        } catch (error) {
-          console.error('Error fetching PnL data:', error.message);
-          errorDiv.textContent = `Lỗi: ${error.message}`;
-        }
+        } catch {}
       }
 
       function displayPnLData(data) {
