@@ -21,8 +21,6 @@ const binance = new Binance().options({
   APISECRET: 'pYTcusasHde67ajzvaOmgmSReqbZ7f0j2uwfR3VaeHai1emhuWRcacmlBCnrRglH'
 });
 
-
-  
 app.get('/balance', async (req, res) => {
   try {
     addLog('>>> /balance được gọi');
@@ -32,8 +30,8 @@ app.get('/balance', async (req, res) => {
   } catch (error) {
     addLog('Lỗi trong /balance: ' + error.message);
     res.status(500).json({ error: error.message });
-  
-});
+  }
+}); // <-- ĐÃ FIX: thêm dấu } bị thiếu
 
 app.use(express.static(__dirname));
 
@@ -240,7 +238,6 @@ ${htmlLogs}
 </body>
 </html>`);
 });
-
 
 app.get('/funding', async (req, res) => {
   try {
