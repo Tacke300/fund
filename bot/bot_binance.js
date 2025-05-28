@@ -22,12 +22,7 @@ const binance = new Binance().options({
 });
 
 
-  response.forEach(item => {
-    console.log(item.symbol, item.fundingRate);
-    // xử lý item là object, có trường symbol, fundingRate...
-  });
-});
-
+  
 app.get('/balance', async (req, res) => {
   try {
     addLog('>>> /balance được gọi');
@@ -37,7 +32,7 @@ app.get('/balance', async (req, res) => {
   } catch (error) {
     addLog('Lỗi trong /balance: ' + error.message);
     res.status(500).json({ error: error.message });
-  }
+  
 });
 
 app.use(express.static(__dirname));
