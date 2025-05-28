@@ -111,20 +111,25 @@ async function getFundingRatesFromBinance() {
   });
 }
 
-async function getMaxLeverage(symbol) {
+let leverageCache = null;
+
+async function getMaxLeverageCached(symbol) {
   try {
-    addLog(`>>> Đang lấy max leverage của ${symbol} từ exchangeInfo`);
-    const res = await fetch('https://fapi.binance.com/fapi/v1/exchangeInfo');
-    if (!res.ok) throw new Error('Failed to get exchangeInfo');
-    const data = await res.json();
-    const symbolInfo = data.symbols.find(s => s.symbol === symbol);
-    if (!symbolInfo) throw new Error(`Symbol ${symbol} not found in exchangeInfo`);
-    const leverageFilter = symbolInfo.filters.find(f => f.filterType === 'LEVERAGE');
-    const maxLeverage = leverageFilter ? parseInt(leverageFilter.maxLeverage) : null;
-    addLog(`>>> Max leverage của ${symbol}: ${maxLeverage}`);
+    if (!leverageCache) {
+      const res = await fetch('https://fapi.binance.com/fapi/v1/exchangeInfo');
+      if (!res.ok) throw new Error('Failed to get exchangeInfo');
+      const data = await res.json();
+      leverageCache = {};
+      data.symbols.forEach(s => {
+        const levFilter = s.filters.find(f => f.filterType === 'LEVERAGE');
+        if (levFilter) leverageCache[s.symbol] = parseInt(levFilter.maxLeverage);
+      });
+    }
+    const maxLeverage = leverageCache[symbol] || null;
+    addLog(`>>> Max leverage cached của ${symbol}: ${maxLeverage}`);
     return maxLeverage;
   } catch (error) {
-    addLog('Lỗi khi lấy max leverage từ exchangeInfo: ' + error.message);
+    addLog('Lỗi khi lấy max leverage cached: ' + error.message);
     return null;
   }
 }
