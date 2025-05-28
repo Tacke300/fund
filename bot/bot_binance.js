@@ -33,7 +33,7 @@ app.get('/balance', async (req, res) => {
   }
 }); // <-- ĐÃ FIX: thêm dấu } bị thiếu
 
-app.use(express.static(__dirname));
+app.use('/bot', express.static(path.join(__dirname, 'bot')));
 
 const cron = require('node-cron');
 addLog('>>> [Cron] Bắt đầu chạy rồi nè!');
