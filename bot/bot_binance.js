@@ -16,8 +16,8 @@ const app = express();
 const port = 3000;
 
 // === API KEY & SECRET ===
-const apiKey = 'VH1bYvlcOCFNeBy7TOnAidQUkRU9wxbGd3x6zPo6fWQwAteErrv9YG94OQtw2o6A'; // Your API Key
-const apiSecret = 'ONVCARicwK01xzQA7bCOHiawmU2WuY4buei955zJau9Yvmyf51IWh6wQ9wNI7Xjm'; // Your API Secret
+const apiKey = 'cZ1Y2O0kggVEggEaPvhFcYQHS5b1EsT2OWZb8zdY9C0jGqNROvXRZHTJjnQ7OG4Q'; // Your API Key
+const apiSecret = 'oU6pZFHgEvbpD9NmFXp5ZVnYFMQ7EIkBiz88aTzvmC3SpT9nEf4fcDf0pEnFzoTc'; // Your API Secret
 
 // === BASE URL CỦA BINANCE FUTURES API ===
 const BASE_URL = 'fapi.binance.com';
