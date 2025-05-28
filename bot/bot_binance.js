@@ -148,13 +148,13 @@ async function placeShortOrder(symbol) {
     const account = await binance.futuresAccount();
     const usdtAsset = account.assets.find(a => a.asset === 'USDT');
     const balance = usdtAsset ? parseFloat(usdtAsset.availableBalance) : 0;
-    const maxLeverage = await getMaxLeverageCached(symbol);
+    
     if (balance < 0.15) {
       addLog(`>>> Không đủ balance để mở lệnh. Balance hiện tại: ${balance}`);
       return;
     }
 
-    const maxLeverage = await getMaxLeverage(symbol);
+    const maxLeverage = await getMaxLeverageCached(symbol);
     if (!maxLeverage) {
       addLog('>>> Không lấy được đòn bẩy, hủy mở lệnh.');
       return;
