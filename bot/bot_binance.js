@@ -72,41 +72,43 @@ async function callSignedAPI(endpoint, method = 'GET', params = {}) {
   const timestamp = Date.now() + serverTimeOffset; // Sử dụng timestamp đã đồng bộ
   const recvWindow = 60000; // Có thể tăng nếu mạng latency cao
 
-  // === ĐẢM BẢO TẤT CẢ CÁC THAM SỐ LÀ STRING KHI TẠO querySring ===
-  // Binance đôi khi yêu cầu các giá trị số cũng phải là string trong queryString.
-  // Chuyển đổi mọi giá trị trong params thành string (ngoại trừ các giá trị boolean nếu có)
-  const formattedParams = {};
-  for (const key in params) {
-    if (Object.prototype.hasOwnProperty.call(params, key)) {
-      formattedParams[key] = String(params[key]);
-    }
-  }
-
-  const allParams = {
-    timestamp: String(timestamp), // Đảm bảo timestamp là string
-    recvWindow: String(recvWindow), // Đảm bảo recvWindow là string
-    ...formattedParams
+  // === Bước 1: Chuẩn bị tham số cho việc tạo Signature (chuyển thành String, KHÔNG URL-encode) ===
+  const allParamsForSignature = {
+    timestamp: String(timestamp),
+    recvWindow: String(recvWindow),
+    ...params // Giả định các giá trị trong params đã là số hoặc chuỗi hợp lệ
   };
 
-  // Sắp xếp tham số theo thứ tự bảng chữ cái (quan trọng cho signature)
-  const sortedKeys = Object.keys(allParams).sort();
-  const queryString = sortedKeys
-    .map(key => `${key}=${allParams[key]}`)
+  // Sắp xếp các khóa theo thứ tự bảng chữ cái để tạo chuỗi ký
+  const sortedKeysForSignature = Object.keys(allParamsForSignature).sort();
+
+  // Tạo chuỗi truy vấn (query string) cho việc tạo chữ ký
+  // CÁC GIÁ TRỊ KHÔNG ĐƯỢC URL-ENCODE TẠI BƯỚC NÀY
+  const queryStringForSignature = sortedKeysForSignature
+    .map(key => `${key}=${allParamsForSignature[key]}`)
     .join('&');
 
-  const signature = getSignature(queryString, apiSecret);
-  const fullPath = `${endpoint}?${queryString}&signature=${signature}`;
+  const signature = getSignature(queryStringForSignature, apiSecret);
 
-  // DEBUG LOGS (Đã có ở các phiên bản trước, giữ lại để kiểm tra)
+  // === Bước 2: Chuẩn bị tham số cho URL Request (URL-encode các giá trị) ===
+  // Tạo chuỗi truy vấn (query string) cho URL thực tế, CÁC GIÁ TRỊ CẦN ĐƯỢC URL-ENCODE
+  const queryStringForUrl = sortedKeysForSignature
+    .map(key => `${key}=${encodeURIComponent(allParamsForSignature[key])}`)
+    .join('&');
+
+  // Xây dựng đường dẫn đầy đủ với signature
+  const fullPath = `${endpoint}?${queryStringForUrl}&signature=${signature}`;
+
+  // DEBUG LOGS ĐÃ CẬP NHẬT để hiển thị rõ các chuỗi
   console.log('\n--- DEBUG API CALL ---');
   console.log(`Endpoint: ${endpoint}`);
   console.log(`Method: ${method}`);
   console.log(`Initial Params: ${JSON.stringify(params)}`);
-  console.log(`Formatted Params (all strings): ${JSON.stringify(formattedParams)}`); // LOG MỚI
-  console.log(`All Params (with timestamp, recvWindow, all strings): ${JSON.stringify(allParams)}`); // LOG MỚI
+  console.log(`All Params for Signature (string values): ${JSON.stringify(allParamsForSignature)}`);
   console.log(`Calculated Timestamp (local + offset): ${timestamp}`);
-  console.log(`Sorted Query String (for signature): ${queryString}`);
+  console.log(`Query String for Signature (SIGNED): ${queryStringForSignature}`); // Chuỗi dùng để ký
   console.log(`Generated Signature: ${signature}`);
+  console.log(`Query String for URL (URL-ENCODED): ${queryStringForUrl}`); // Chuỗi gửi trong URL
   console.log(`Full Path (sent to Binance): https://${BASE_URL}${fullPath}`);
   console.log('--- END DEBUG API CALL ---\n');
 
@@ -234,21 +236,25 @@ app.listen(port, async () => {
 /***************** HÀM LẤY THÔNG TIN SÀN  *****************/
 
 async function getExchangeInfo() {
-  if (leverageCache) return leverageCache;
+  if (leverageCache) {
+    addLog('>>> Đã có cache exchangeInfo. Trả về cache.');
+    return leverageCache;
+  }
 
+  addLog('>>> Đang lấy exchangeInfo từ Binance...');
   try {
     const url = `https://${BASE_URL}/fapi/v1/exchangeInfo`;
-    addLog(`[DEBUG] Gọi ExchangeInfo URL: ${url}`); // Thêm log này
+    addLog(`[DEBUG] Gọi ExchangeInfo URL: ${url}`);
     const res = await fetch(url);
     
     if (!res.ok) {
-      const errorText = await res.text(); // Lấy cả text để xem Binance trả về gì
-      addLog(`❌ Lỗi HTTP khi lấy exchangeInfo: ${res.status} - ${errorText}`); // Thêm log này
+      const errorText = await res.text();
+      addLog(`❌ Lỗi HTTP khi lấy exchangeInfo: ${res.status} - ${errorText}`);
       throw new Error(`Failed to get exchangeInfo: ${res.statusText}`);
     }
     
     const data = await res.json();
-    addLog(`✅ Đã nhận được exchangeInfo. Số lượng symbols: ${data.symbols.length}`); // Thêm log này
+    addLog(`✅ Đã nhận được exchangeInfo. Số lượng symbols: ${data.symbols.length}`);
     
     leverageCache = {};
     data.symbols.forEach(s => {
@@ -296,6 +302,7 @@ async function getCurrentPrice(symbol) {
 async function placeShortOrder(symbol) {
   try {
     addLog(`>>> Bắt đầu mở lệnh SHORT cho ${symbol}`);
+    // Đây là lệnh API có ký đầu tiên trong luồng này.
     const account = await callSignedAPI('/fapi/v2/account');
     const usdtAsset = account.assets.find(a => a.asset === 'USDT');
     const balance = usdtAsset ? parseFloat(usdtAsset.availableBalance) : 0;
@@ -318,11 +325,11 @@ async function placeShortOrder(symbol) {
         return;
     }
 
-    // === FIX: Đảm bảo leverage là string khi gửi đi ===
+    // Đặt đòn bẩy
     addLog(`[DEBUG] Đang đặt đòn bẩy. symbol: ${symbol}, leverage: ${maxLeverage}`);
     await callSignedAPI('/fapi/v1/leverage', 'POST', {
       symbol: symbol,
-      leverage: String(maxLeverage) // FIX Ở ĐÂY: Chuyển maxLeverage thành string
+      leverage: maxLeverage // leverage sẽ được chuyển thành string và encode trong callSignedAPI
     });
     addLog(`Đã đặt đòn bẩy ${maxLeverage}x cho ${symbol}.`);
 
@@ -350,13 +357,13 @@ async function placeShortOrder(symbol) {
       return;
     }
 
-    // === FIX: Đảm bảo quantity là string khi gửi đi ===
+    // Đặt lệnh SHORT (SELL) MARKET
     addLog(`[DEBUG] Đang đặt lệnh SHORT. symbol: ${symbol}, quantity: ${quantity}`);
     const order = await callSignedAPI('/fapi/v1/order', 'POST', {
       symbol: symbol,
       side: 'SELL',
       type: 'MARKET',
-      quantity: String(quantity) // FIX Ở ĐÂY: Chuyển quantity thành string
+      quantity: quantity // quantity sẽ được chuyển thành string và encode trong callSignedAPI
     });
 
     addLog(`>>> Đã mở lệnh SHORT ${symbol}`);
@@ -424,13 +431,12 @@ async function closeShortPosition(symbol, qtyToClose = null) {
 
       qtyToClose = parseFloat(qtyToClose.toFixed(quantityPrecision));
 
-      // === FIX: Đảm bảo quantity là string khi gửi đi ===
       addLog(`[DEBUG] Đang đóng lệnh SHORT. symbol: ${symbol}, quantity: ${qtyToClose}`);
       await callSignedAPI('/fapi/v1/order', 'POST', {
         symbol: symbol,
         side: 'BUY',
         type: 'MARKET',
-        quantity: String(qtyToClose), // FIX Ở ĐÂY: Chuyển qtyToClose thành string
+        quantity: qtyToClose, // qtyToClose sẽ được chuyển thành string và encode trong callSignedAPI
         reduceOnly: 'true'
       });
 
@@ -445,6 +451,28 @@ async function closeShortPosition(symbol, qtyToClose = null) {
   }
 }
 
+// Đây là hàm getFundingRatesFromBinance mà bạn đã gọi trong cron job
+// Đã được thêm vào để code hoàn chỉnh hơn, nếu bạn chưa có.
+async function getFundingRatesFromBinance() {
+  try {
+    const opts = { hostname: BASE_URL, path: '/fapi/v1/premiumIndex', method: 'GET' };
+    const fundingRates = await new Promise((resolve, reject) => {
+      const r = https.request(opts, rs => {
+        let d = ''; rs.on('data', c => d += c);
+        rs.on('end', () => {
+          try { resolve(JSON.parse(d)); }
+          catch (e) { reject(new Error('Lỗi parse JSON từ /fapi/v1/premiumIndex: ' + d)); }
+        });
+      });
+      r.on('error', reject); r.end();
+    });
+    return fundingRates;
+  } catch (error) {
+    addLog('Lỗi khi lấy funding rates từ Binance: ' + error.message);
+    throw error; // Re-throw để cron job catch được
+  }
+}
+
 cron.schedule('*/1 * * * *', async () => {
   if (!botRunning) {
     addLog('[Cron] Bot đang tắt, không kiểm tra funding.');
@@ -452,7 +480,7 @@ cron.schedule('*/1 * * * *', async () => {
   }
   addLog('>>> [Cron] Đã tới giờ hoàng đạo kiếm tiền uống bia, đang kiểm tra funding...');
   try {
-    const allFundingData = await getFundingRatesFromBinance();
+    const allFundingData = await getFundingRatesFromBinance(); // Đảm bảo hàm này tồn tại
     const fundingRates = allFundingData.map(item => ({
       symbol: item.symbol,
       fundingRate: item.lastFundingRate,
