@@ -2,6 +2,7 @@ const express = require('express');
 const Binance = require('node-binance-api');
 const app = express();
 const port = 3000;
+const path = require('path');
 
 let logs = [];
 function addLog(message) {
