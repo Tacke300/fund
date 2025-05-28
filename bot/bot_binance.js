@@ -4,7 +4,7 @@ const app = express();
 const port = 3000;
 const path = require('path');
 const https = require('https');
-
+const fetch = require('node-fetch');
 
 let logs = [];
 function addLog(message) {
@@ -147,18 +147,25 @@ fundingRates.forEach(rate => {
 
 async function getMaxLeverage(symbol) {
   try {
-    addLog(`>>> Đang lấy max leverage của ${symbol}`);
-    const leverageInfo = await binance.futuresLeverageBracket(symbol);
-    if (leverageInfo && leverageInfo.length > 0) {
-      const leverage = leverageInfo[0].brackets[0].initialLeverage;
-      
-      addLog(`Leverage | ${symbol}: ${leverage}`);
-     // addLog(`>>> Max leverage của ${symbol} là ${leverage}`);
-      return leverage;
+    addLog(`>>> Đang lấy max leverage của ${symbol} từ exchangeInfo`);
+    const res = await fetch('https://fapi.binance.com/fapi/v1/exchangeInfo');
+    if (!res.ok) {
+      throw new Error('Failed to get exchangeInfo');
     }
-    return null;
+
+    const data = await res.json();
+    const symbolInfo = data.symbols.find(s => s.symbol === symbol);
+    if (!symbolInfo) {
+      throw new Error(`Symbol ${symbol} not found in exchangeInfo`);
+    }
+
+    const leverageFilter = symbolInfo.filters.find(f => f.filterType === 'LEVERAGE');
+    const maxLeverage = leverageFilter ? parseInt(leverageFilter.maxLeverage) : null;
+
+    addLog(`>>> Max leverage của ${symbol}: ${maxLeverage}`);
+    return maxLeverage;
   } catch (error) {
-    addLog('Lỗi lấy leverage: ' + error.message);
+    addLog('Lỗi khi lấy max leverage từ exchangeInfo: ' + error.message);
     return null;
   }
 }
