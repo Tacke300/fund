@@ -111,22 +111,32 @@ fundingRates.forEach(rate => {
       .sort((a, b) => parseFloat(a.fundingRate) - parseFloat(b.fundingRate));
 
     if (negativeRates.length > 0) {
-      const best = negativeRates[0];
-      selectedSymbol = best.symbol;
-      const fundingTime = best.fundingTime;
-      const now = Date.now();
-      const waitTime = fundingTime + 500 - now;
+  const best = negativeRates[0];
+  selectedSymbol = best.symbol;
+  const fundingTime = best.fundingTime;
+  const now = Date.now();
+  const waitTime = fundingTime + 500 - now;
 
-      addLog(`>>> Chọn được coin: ${selectedSymbol} với funding rate ${best.fundingRate}`);
-      if (waitTime > 0) {
-        addLog(`>>> Sẽ mở lệnh sau ${(waitTime / 1000).toFixed(1)} giây nữa`);
-        await delay(waitTime);
-      }
+  // Lấy leverage và balance để log thêm
+  const maxLeverage = await getMaxLeverage(selectedSymbol);
+  const account = await binance.futuresAccount();
+  const usdtAsset = account.assets.find(asset => asset.asset === 'USDT');
+  const balance = parseFloat(usdtAsset.availableBalance);
+  const capital = balance * 0.8;
 
-      addLog(`>>> Delay 500ms sau funding để chắc chắn nhận funding`);
-      await delay(500);
-      await placeShortOrder(selectedSymbol);
-    } else {
+  addLog(`>>> Chọn được coin: ${selectedSymbol} | Funding rate: ${best.fundingRate}`);
+  addLog(`- Leverage: ${maxLeverage}`);
+  addLog(`- Số tiền sẽ vào lệnh: ${capital.toFixed(2)} USDT`);
+  addLog(`- Sẽ mở lệnh sau ${(waitTime / 1000).toFixed(1)} giây`);
+
+  if (waitTime > 0) {
+    await delay(waitTime);
+  }
+
+  addLog(`>>> Delay 500ms sau funding để chắc chắn nhận funding`);
+  await delay(500);
+  await placeShortOrder(selectedSymbol);
+} else {
       addLog('>>> Không có coin sắp tới mở lệnh đâu. Đi uống bia chú em ơi!');
       selectedSymbol = null;
     }
