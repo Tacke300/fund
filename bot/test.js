@@ -45,3 +45,31 @@ function callFuturesAccount() {
 }
 
 callFuturesAccount();
+
+
+
+const recvWindow = 5000; // 5 giây
+const queryString = `timestamp=${timestamp}&recvWindow=${recvWindow}`;
+
+const options = {
+  hostname: 'fapi.binance.com',
+  path: '/fapi/v1/ticker/price?symbol=BTCUSDT',
+  method: 'GET',
+};
+
+
+
+
+const req = https.request(options, (res) => {
+  let data = '';
+  res.on('data', chunk => data += chunk);
+  res.on('end', () => {
+    console.log('Ticker price:', JSON.parse(data));
+  });
+});
+
+req.on('error', (e) => {
+  console.error('Lỗi request:', e);
+});
+
+req.end();
