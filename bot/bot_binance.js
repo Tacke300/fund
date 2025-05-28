@@ -57,6 +57,11 @@ cron.schedule('*/1 * * * *', async () => {
   try {
     const fundingRates = await binance.futuresFundingRate();
     addLog(`>>> Đã lấy ${fundingRates.length} coin từ API Binance`);
+fundingRates.forEach(rate => {
+  addLog(`Funding | ${rate.symbol}: ${rate.fundingRate}`);
+});
+    
+    //addLog(`>>> Đã lấy ${fundingRates.length} coin từ API Binance`);
 
     const negativeRates = fundingRates
       .filter(rate => parseFloat(rate.fundingRate) < -0.0001)
@@ -93,7 +98,9 @@ async function getMaxLeverage(symbol) {
     const leverageInfo = await binance.futuresLeverageBracket(symbol);
     if (leverageInfo && leverageInfo.length > 0) {
       const leverage = leverageInfo[0].brackets[0].initialLeverage;
-      addLog(`>>> Max leverage của ${symbol} là ${leverage}`);
+      
+      addLog(`Leverage | ${symbol}: ${leverage}`);
+     // addLog(`>>> Max leverage của ${symbol} là ${leverage}`);
       return leverage;
     }
     return null;
