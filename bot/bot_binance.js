@@ -21,9 +21,10 @@ function addLog(message) {
 }
 
 const binance = new Binance().options({
-  apiKey: 'ynfUQ5PxqWQJdwPsAVREudagiF1WEN3HAENgLZIwWC3VrsNnT74wlRwY29hGXZky',
-  apiSecret: 'pYTcusasHde67ajzvaOmgmSReqbZ7f0j2uwfR3VaeHai1emhuWRcacmlBCnrRglH',
-  useServerTime: true
+  APIKEY: 'ynfUQ5PxqWQJdwPsAVREudagiF1WEN3HAENgLZIwWC3VrsNnT74wlRwY29hGXZky',
+  APISECRET: 'pYTcusasHde67ajzvaOmgmSReqbZ7f0j2uwfR3VaeHai1emhuWRcacmlBCnrRglH',
+  useServerTime: true,
+  recvWindow: 60000
 });
 
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
