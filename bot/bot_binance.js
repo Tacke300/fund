@@ -2,7 +2,8 @@
 const express = require('express');
 const https = require('https'); // Cần thiết cho các request thủ công
 const crypto = require('crypto'); // Cần thiết cho việc tạo signature thủ công
-const fetch = require('node-fetch'); // Cần thiết cho các request không ký (premiumIndex, exchangeInfo)
+import fetch from 'node-fetch';
+ // Cần thiết cho các request không ký (premiumIndex, exchangeInfo)
 const path = require('path');
 const cron = require('node-cron');
 
