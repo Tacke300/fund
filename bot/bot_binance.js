@@ -12,7 +12,7 @@ function addLog(message) {
   const logEntry = `[${time}] ${message}`;
   console.log(logEntry);
   logs.push(logEntry);
-  if (logs.length > 100) logs.shift();
+  if (logs.length > 10000) logs.shift();
 }
 
 app.get('/', (req, res) => {
