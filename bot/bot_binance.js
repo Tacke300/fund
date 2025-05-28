@@ -264,9 +264,9 @@ async function getExchangeInfo() {
     leverageCache = {};
     data.symbols.forEach(s => {
       let maxLeverage = null;
-      // CÁCH MỚI: DUYỆT QUA leverageBrackets ĐỂ LẤY MAX initialLeverage
+      // CÁCH MỚI NHẤT: Lấy initialLeverage từ bracket cuối cùng (thường là max leverage)
       if (s.leverageBrackets && s.leverageBrackets.length > 0) {
-        maxLeverage = Math.max(...s.leverageBrackets.map(b => parseInt(b.initialLeverage)));
+        maxLeverage = parseInt(s.leverageBrackets[s.leverageBrackets.length - 1].initialLeverage);
       }
 
       const lotSizeFilter = s.filters.find(f => f.filterType === 'LOT_SIZE');
@@ -274,7 +274,7 @@ async function getExchangeInfo() {
       const minNotionalFilter = s.filters.find(f => f.filterType === 'MIN_NOTIONAL');
 
       leverageCache[s.symbol] = {
-        maxLeverage: maxLeverage, // Đã sửa ở đây
+        maxLeverage: maxLeverage,
         minQty: lotSizeFilter ? parseFloat(lotSizeFilter.minQty) : (marketLotSizeFilter ? parseFloat(marketLotSizeFilter.minQty) : 0),
         maxQty: lotSizeFilter ? parseFloat(lotSizeFilter.maxQty) : (marketLotSizeFilter ? parseFloat(marketLotSizeFilter.maxQty) : Infinity),
         stepSize: lotSizeFilter ? parseFloat(lotSizeFilter.stepSize) : (marketLotSizeFilter ? parseFloat(marketLotSizeFilter.stepSize) : 0.001),
@@ -568,7 +568,7 @@ cron.schedule('*/1 * * * *', async () => {
       addLog(`>>> Dự kiến lệnh mở lúc: ${formattedProjectedOpenTime}`);
       addLog(`>>> Funding rate: ${best.fundingRate}`);
       addLog(`>>> Đòn bẩy tối đa: ${best.maxLeverage}x`);
-      addLog(`>>> Số tiền USDT vào lệnh (ước tính): ${best.estimatedCapital} USDT`); // Dòng mới được thêm
+      addLog(`>>> Số tiền USDT vào lệnh (ước tính): ${best.estimatedCapital} USDT`);
       addLog(`>>> Giá hiện tại của ${selectedSymbol}: ${best.currentPrice}`); // Log giá hiện tại
 
       if (waitTime > 0) {
