@@ -1,13 +1,16 @@
-
 /***************** CẤU HÌNH CHUNG  *****************/
 import express from 'express';
-import https from 'https'; // Cần thiết cho các request thủ công
-import crypto from 'crypto'; // Cần thiết cho việc tạo signature thủ công
-import fetch from 'node-fetch'; // Cần thiết cho các request không ký (premiumIndex, exchangeInfo)
+import https from 'https';
+import crypto from 'crypto';
+import fetch from 'node-fetch';
 import path from 'path';
-import cron from 'node-cron'; // Đây là một thư viện CommonJS, cần import đặc biệt một chút
+import cron from 'node-cron'; // node-cron vẫn có thể import trực tiếp như này trong đa số trường hợp
 
-
+// Để thay thế __dirname trong ES Modules
+import { fileURLToPath } from 'url';
+import { dirname } from 'path';
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 const app = express();
 const port = 3000;
@@ -96,7 +99,7 @@ async function callSignedAPI(endpoint, method = 'GET', params = {}) {
   // === Bước 2: Chuẩn bị tham số cho URL Request (URL-encode các giá trị) ===
   // Tạo chuỗi truy vấn (query string) cho URL thực tế, CÁC GIÁ TRỊ CẦN ĐƯỢC URL-ENCODE
   const queryStringForUrl = sortedKeysForSignature
-    .map(key => `${key}=${encodeURIComponent(allParamsForSignature[key])}`)
+    .map(key => `${key}=${encodeURIComponent(allParamsForSignature[key])}`) // URL-encode the value here
     .join('&');
 
   // Xây dựng đường dẫn đầy đủ với signature
@@ -157,6 +160,7 @@ async function callSignedAPI(endpoint, method = 'GET', params = {}) {
 
 /***************** ROUTES HTTP  *****************/
 app.use(express.json());
+// Sử dụng __dirname đã định nghĩa cho ES Modules
 app.use('/bot', express.static(path.join(__dirname)));
 app.get('/', (req, res) => res.send('Funding bot is running!'));
 
@@ -249,16 +253,16 @@ async function getExchangeInfo() {
     const url = `https://${BASE_URL}/fapi/v1/exchangeInfo`;
     addLog(`[DEBUG] Gọi ExchangeInfo URL: ${url}`);
     const res = await fetch(url);
-    
+
     if (!res.ok) {
       const errorText = await res.text();
       addLog(`❌ Lỗi HTTP khi lấy exchangeInfo: ${res.status} - ${errorText}`);
       throw new Error(`Failed to get exchangeInfo: ${res.statusText}`);
     }
-    
+
     const data = await res.json();
     addLog(`✅ Đã nhận được exchangeInfo. Số lượng symbols: ${data.symbols.length}`);
-    
+
     leverageCache = {};
     data.symbols.forEach(s => {
       const levFilter = s.filters.find(f => f.filterType === 'LEVERAGE');
@@ -309,7 +313,7 @@ async function placeShortOrder(symbol) {
     const account = await callSignedAPI('/fapi/v2/account');
     const usdtAsset = account.assets.find(a => a.asset === 'USDT');
     const balance = usdtAsset ? parseFloat(usdtAsset.availableBalance) : 0;
-    
+
     if (balance < 0.15) {
       addLog(`>>> Không đủ balance để mở lệnh. Balance hiện tại: ${balance}`);
       return;
@@ -342,7 +346,7 @@ async function placeShortOrder(symbol) {
     const minQty = symbolFilters.minQty;
     const maxQty = symbolFilters.maxQty;
     const stepSize = symbolFilters.stepSize;
-    const minNotional = symbolFilters.minNotional;
+    const minNotional = symbolFilters.minional;
     const quantityPrecision = symbolFilters.quantityPrecision;
 
     quantity = Math.floor(quantity / stepSize) * stepSize;
