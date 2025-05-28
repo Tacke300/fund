@@ -1,0 +1,14 @@
+{
+  "name": "your-bot-name",
+  "version": "1.0.0",
+  "main": "bot_binance.js",
+  "type": "module",  
+  "scripts": {
+    "start": "node bot_binance.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "node-fetch": "^3.3.2",  
+    "node-cron": "^3.0.3"
+  }
+}
