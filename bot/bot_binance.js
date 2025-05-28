@@ -1,11 +1,13 @@
+
 /***************** CẤU HÌNH CHUNG  *****************/
-const express = require('express');
-const https = require('https'); // Cần thiết cho các request thủ công
-const crypto = require('crypto'); // Cần thiết cho việc tạo signature thủ công
-import fetch from 'node-fetch';
- // Cần thiết cho các request không ký (premiumIndex, exchangeInfo)
-const path = require('path');
-const cron = require('node-cron');
+import express from 'express';
+import https from 'https'; // Cần thiết cho các request thủ công
+import crypto from 'crypto'; // Cần thiết cho việc tạo signature thủ công
+import fetch from 'node-fetch'; // Cần thiết cho các request không ký (premiumIndex, exchangeInfo)
+import path from 'path';
+import cron from 'node-cron'; // Đây là một thư viện CommonJS, cần import đặc biệt một chút
+
+
 
 const app = express();
 const port = 3000;
