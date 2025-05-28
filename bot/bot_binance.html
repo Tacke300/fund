@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Bot Binance Design By TunggBeoo</title>
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@700&display=swap" rel="stylesheet">
+  <style>
+    body {
+      font-family: 'Orbitron', sans-serif;
+      background: #000;
+      color: #eee;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      margin: 0;
+    }
+
+    #top {
+      font-size: 133px;
+      background: linear-gradient(270deg, #00ffe1, #0066ff, #00ffe1);
+      background-size: 300% 300%;
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      animation: moveGradient 5s ease infinite;
+      margin-bottom: 20px;
+      text-align: center;
+      height: 20vh;
+    }
+
+    @keyframes moveGradient {
+      0% { background-position: 0% 50%; }
+      50% { background-position: 100% 50%; }
+      100% { background-position: 0% 50%; }
+    }
+
+    #log {
+      height: 40vh;
+      width: 95%;
+      overflow-y: auto;
+      background: #111;
+      padding: 10px;
+      font-size: 33px;
+      border: 1px solid #333;
+      margin-bottom: 20px;
+      font-family: Arial, Helvetica, sans-serif;
+    }
+
+    .button-row {
+      display: flex;
+      gap: 20px;
+      height: 10vh;
+    }
+
+    button {
+      padding: 15px 25px;
+      font-size: 33px;
+      border: none;
+      cursor: pointer;
+      border-radius: 8px;
+      transition: 0.3s;
+      font-family: 'Orbitron', sans-serif;
+    }
+
+    .start-btn {
+      background: #00cc66;
+      color: white;
+    }
+
+    .stop-btn {
+      background: #cc0000;
+      color: white;
+    }
+
+    button:hover {
+      transform: scale(1.05);
+      opacity: 0.9;
+    }
+
+    .copyright {
+      margin-top: 20px;
+      font-size: 20px;
+      color: #666;
+      font-family: monospace;
+    }
+  </style>
+</head>
+<body>
+  <h1 id="top">BOT BINANCE</h1>
+
+  <div id="log"></div>
+
+  <div class="button-row">
+    <button class="start-btn" onclick="startBot()">Start Bot</button>
+    <button class="stop-btn" onclick="stopBot()">Stop Bot</button>
+
+    
+  </div>
+<div class="copyright">&copy; 2025 TunggBeoo. All rights reserved.</div>
+
+  
+  <script>
+    const logDiv = document.getElementById('log');
+
+    async function fetchLogs() {
+      try {
+        const res = await fetch('/logs');
+        const logs = await res.json();
+        logDiv.innerHTML = logs.map(l => l.replace(/</g, '&lt;')).join('<br>');
+        logDiv.scrollTop = logDiv.scrollHeight;
+      } catch (e) {
+        console.error('Failed to fetch logs', e);
+      }
+    }
+
+    function startBot() {
+      fetch('/start').then(res => res.text()).then(alert);
+    }
+
+    function stopBot() {
+      fetch('/stop').then(res => res.text()).then(alert);
+    }
+
+    setInterval(fetchLogs, 3000);
+    fetchLogs();
+  </script>
+</body>
+</html>
