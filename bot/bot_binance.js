@@ -8,7 +8,7 @@ import cron from 'node-cron';
 
 // Để thay thế __dirname trong ES Modules
 import { fileURLToPath } from 'url';
-import { dirname } from 'path';
+import { dirname } = from 'path';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
@@ -250,7 +250,8 @@ async function getExchangeInfo() {
   addLog('>>> Đang lấy exchangeInfo từ Binance...');
   try {
     const url = `https://${BASE_URL}/fapi/v1/exchangeInfo`;
-    const res = await fetch(url);
+    // CHỈ DÙNG fetch TRỰC TIẾP, KHÔNG CẦN KÝ (UNSIGNED ENDPOINT)
+    const res = await fetch(url); 
 
     if (!res.ok) {
       const errorText = await res.text();
@@ -264,7 +265,7 @@ async function getExchangeInfo() {
     leverageCache = {};
     data.symbols.forEach(s => {
       let maxLeverage = null;
-      // CÁCH MỚI NHẤT: Lấy initialLeverage từ bracket cuối cùng (thường là max leverage)
+      // Lấy initialLeverage từ bracket cuối cùng, đây là cách lấy max leverage chính xác nhất
       if (s.leverageBrackets && s.leverageBrackets.length > 0) {
         maxLeverage = parseInt(s.leverageBrackets[s.leverageBrackets.length - 1].initialLeverage);
       }
@@ -565,7 +566,7 @@ cron.schedule('*/1 * * * *', async () => {
       const formattedProjectedOpenTime = `${projectedOpenTime.toLocaleDateString()} ${projectedOpenTime.toLocaleTimeString('en-US', { hour12: false })}.${String(projectedOpenTime.getMilliseconds()).padStart(3, '0')}`;
 
       addLog(`>>> Đã chọn được đồng coin: ${selectedSymbol}`);
-      addLog(`>>> Dự kiến lệnh mở lúc: ${formattedProjectedOpenTime}`);
+      addLog(`>>> Dự kiến lệnh mở lúc: ${formattedOpenTime}`);
       addLog(`>>> Funding rate: ${best.fundingRate}`);
       addLog(`>>> Đòn bẩy tối đa: ${best.maxLeverage}x`);
       addLog(`>>> Số tiền USDT vào lệnh (ước tính): ${best.estimatedCapital} USDT`);
