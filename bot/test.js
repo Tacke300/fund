@@ -2,7 +2,7 @@ const crypto = require('crypto');
 const https = require('https');
 
 const apiKey = 'ynfUQ5PxqqWQJdwPsAVREudagiF1WEN3HAENgLZIwWC3VrsNnT74wlRwY29hGXZky';
-const apiSecret = 'pYTcusasHde67ajzvaOmgmSReqbZ7f0j2uwfR3VaeHai1emhuWRcacmlBCnrRglH';
+const apiSecret = 'pYTcusasHde67ajzvaOmgmSReqbZ7f0j2uwfR3VaeHai1emhuWRcacmlBCnrRgIH';
 
 function getSignature(queryString, secret) {
   return crypto.createHmac('sha256', secret).update(queryString).digest('hex');
