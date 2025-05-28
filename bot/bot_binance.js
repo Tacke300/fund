@@ -250,7 +250,6 @@ async function getExchangeInfo() {
   addLog('>>> Đang lấy exchangeInfo từ Binance...');
   try {
     const url = `https://${BASE_URL}/fapi/v1/exchangeInfo`;
-    // addLog(`[DEBUG] Gọi ExchangeInfo URL: ${url}`); // Bỏ debug log này để giảm bớt log
     const res = await fetch(url);
 
     if (!res.ok) {
@@ -264,9 +263,11 @@ async function getExchangeInfo() {
 
     leverageCache = {};
     data.symbols.forEach(s => {
-      // CÁCH MỚI: TRUY CẬP maxLeverage TRỰC TIẾP TRONG OBJECT SYMBOL
-      // Binance thường để maxLeverage trực tiếp trong symbol object
-      const maxLeverage = parseInt(s.leverage) || parseInt(s.maxLeverage) || null; // Kiểm tra các trường có thể có
+      let maxLeverage = null;
+      // CÁCH MỚI: DUYỆT QUA leverageBrackets ĐỂ LẤY MAX initialLeverage
+      if (s.leverageBrackets && s.leverageBrackets.length > 0) {
+        maxLeverage = Math.max(...s.leverageBrackets.map(b => parseInt(b.initialLeverage)));
+      }
 
       const lotSizeFilter = s.filters.find(f => f.filterType === 'LOT_SIZE');
       const marketLotSizeFilter = s.filters.find(f => f.filterType === 'MARKET_LOT_SIZE');
@@ -379,6 +380,9 @@ async function placeShortOrder(symbol, currentFundingRate, bestFundingTime) {
     });
 
     // Thông tin sau khi lệnh được mở thành công (log này sẽ hiển thị nếu lệnh thành công)
+    const openTime = new Date(); // Thời gian ngay khi lệnh được mở
+    const formattedOpenTime = `${openTime.toLocaleDateString()} ${openTime.toLocaleTimeString('en-US', { hour12: false })}.${String(openTime.getMilliseconds()).padStart(3, '0')}`;
+    addLog(`Lệnh mở lúc: ${formattedOpenTime}`);
     addLog(`>>> Đã mở lệnh SHORT thành công cho ${symbol}`);
     addLog(`  + Funding Rate: ${currentFundingRate}`);
     addLog(`  + Đòn bẩy sử dụng: ${maxLeverage}x`);
@@ -519,6 +523,7 @@ cron.schedule('*/1 * * * *', async () => {
     const candidates = []; // Dùng mảng tạm để lưu các coin đủ điều kiện
 
     // Luôn tải exchangeInfo một lần trước khi lặp qua các symbol
+    // Đây là nơi cache được làm mới, đảm bảo dữ liệu mới nhất
     await getExchangeInfo();
 
     for (const r of fundingRates) {
@@ -563,7 +568,7 @@ cron.schedule('*/1 * * * *', async () => {
       addLog(`>>> Dự kiến lệnh mở lúc: ${formattedProjectedOpenTime}`);
       addLog(`>>> Funding rate: ${best.fundingRate}`);
       addLog(`>>> Đòn bẩy tối đa: ${best.maxLeverage}x`);
-      addLog(`>>> Số tiền USDT vào lệnh (ước tính): ${best.estimatedCapital} USDT`);
+      addLog(`>>> Số tiền USDT vào lệnh (ước tính): ${best.estimatedCapital} USDT`); // Dòng mới được thêm
       addLog(`>>> Giá hiện tại của ${selectedSymbol}: ${best.currentPrice}`); // Log giá hiện tại
 
       if (waitTime > 0) {
