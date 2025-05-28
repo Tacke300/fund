@@ -7,8 +7,8 @@ import path from 'path';
 import cron from 'node-cron';
 
 // Để thay thế __dirname trong ES Modules
-import { fileURLToPath } = from 'url';
-import { dirname } = from 'path';
+import { fileURLToPath } from 'url';
+import { dirname } from 'path';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
@@ -399,6 +399,8 @@ async function placeShortOrder(symbol, currentFundingRate, bestFundingTime) {
     addLog(`  + Số tiền USDT vào lệnh: ${capital.toFixed(2)} USDT`); // Đây là số tiền vốn thực tế được sử dụng để tính qty
     addLog(`  + Khối lượng: ${quantity} ${symbol}`);
     addLog(`  + Giá vào lệnh: ${price}`);
+
+
     const entryPrice = parseFloat(order.avgFillPrice || price);
     const tpSlValue = (maxLeverage / 100) * capital; // Tính toán giá trị TP/SL dựa trên vốn và đòn bẩy
     const tpPrice = entryPrice - (tpSlValue / quantity);
