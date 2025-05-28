@@ -1,5 +1,5 @@
 {
-  "name": "your-bot-name",
+  "name": "bot_binance",
   "version": "1.0.0",
   "main": "bot_binance.js",
   "type": "module",  
