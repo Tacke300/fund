@@ -1,7 +1,7 @@
 const crypto = require('crypto');
 const https = require('https');
 
-const apiKey = 'ynfUQ5PxqqWQJdwPsAVREudagiF1WEN3HAENgLZIwWC3VrsNnT74wlRwY29hGXZky';
+const apiKey = 'ynfUQ5PxqWQJdwPsAVREudagiF1WEN3HAENgLZIwWC3VrsNnT74wlRwY29hGXZky';
 const apiSecret = 'pYTcusasHde67ajzvaOmgmSReqbZ7f0j2uwfR3VaeHai1emhuWRcacmlBCnrRgIH';
 
 function getSignature(queryString, secret) {
@@ -10,8 +10,8 @@ function getSignature(queryString, secret) {
 
 function callFuturesAccount() {
   const timestamp = Date.now();
-  const queryString = `timestamp=${timestamp}`;
-
+  const recvWindow = 5000;
+  const queryString = `timestamp=${timestamp}&recvWindow=${recvWindow}`;
   const signature = getSignature(queryString, apiSecret);
 
   const path = `/fapi/v2/account?${queryString}&signature=${signature}`;
@@ -30,46 +30,18 @@ function callFuturesAccount() {
     res.on('data', chunk => data += chunk);
     res.on('end', () => {
       if (res.statusCode === 200) {
-        console.log('Futures account info:', JSON.parse(data));
+        console.log('✅ Futures account info:', JSON.parse(data));
       } else {
-        console.error('API lỗi:', res.statusCode, data);
+        console.error('❌ API lỗi:', res.statusCode, data);
       }
     });
   });
 
   req.on('error', (e) => {
-    console.error('Lỗi request:', e);
+    console.error('❌ Lỗi request:', e);
   });
 
   req.end();
 }
 
 callFuturesAccount();
-
-
-
-const recvWindow = 5000; // 5 giây
-const queryString = `timestamp=${timestamp}&recvWindow=${recvWindow}`;
-
-const options = {
-  hostname: 'fapi.binance.com',
-  path: '/fapi/v1/ticker/price?symbol=BTCUSDT',
-  method: 'GET',
-};
-
-
-
-
-const req = https.request(options, (res) => {
-  let data = '';
-  res.on('data', chunk => data += chunk);
-  res.on('end', () => {
-    console.log('Ticker price:', JSON.parse(data));
-  });
-});
-
-req.on('error', (e) => {
-  console.error('Lỗi request:', e);
-});
-
-req.end();
