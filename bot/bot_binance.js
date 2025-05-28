@@ -3,6 +3,8 @@ const Binance = require('node-binance-api');
 const app = express();
 const port = 3000;
 const path = require('path');
+const https = require('https');
+
 
 let logs = [];
 function addLog(message) {
@@ -48,6 +50,41 @@ app.listen(port, () => {
 
 let botRunning = false;
 
+const https = require('https');
+
+function getFundingRatesFromBinance() {
+  return new Promise((resolve, reject) => {
+    const options = {
+      hostname: 'fapi.binance.com',
+      path: '/fapi/v1/premiumIndex',
+      method: 'GET',
+    };
+
+    const req = https.request(options, (res) => {
+      let data = '';
+
+      res.on('data', chunk => {
+        data += chunk;
+      });
+
+      res.on('end', () => {
+        try {
+          const parsed = JSON.parse(data);
+          resolve(parsed);
+        } catch (err) {
+          reject(new Error('Lỗi parse JSON: ' + err.message));
+        }
+      });
+    });
+
+    req.on('error', err => {
+      reject(new Error('Lỗi khi gọi API Binance: ' + err.message));
+    });
+
+    req.end();
+  });
+}
+
 cron.schedule('*/1 * * * *', async () => {
   if (!botRunning) {
     addLog('[Cron] Bot đang tắt, không kiểm tra funding.');
@@ -56,7 +93,12 @@ cron.schedule('*/1 * * * *', async () => {
 
   addLog(`>>> [Cron] Đã tới giờ hoàng đạo kiếm tiền uống bia, đang kiểm tra funding...`);
   try {
-    const fundingRates = await binance.futuresFundingRate();
+    const allFundingData = await getFundingRatesFromBinance();
+const fundingRates = allFundingData.map(item => ({
+  symbol: item.symbol,
+  fundingRate: item.lastFundingRate,
+  fundingTime: item.nextFundingTime
+}));
     addLog(`>>> Đã lấy ${fundingRates.length} coin từ API Binance`);
 fundingRates.forEach(rate => {
   addLog(`Funding | ${rate.symbol}: ${rate.fundingRate}`);
