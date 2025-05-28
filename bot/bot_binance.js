@@ -300,14 +300,19 @@ async function getCurrentPrice(symbol) {
   }
   const data = await response.json();
   const price = parseFloat(data.price);
-  addLog(`>>> Giá hiện tại của ${symbol} là ${price}`);
+  // addLog(`>>> Giá hiện tại của ${symbol} là ${price}`); // Bỏ dòng này để tránh log quá nhiều
   return price;
 }
 
 /***************** ĐẶT & ĐÓNG LỆNH  *****************/
-async function placeShortOrder(symbol, currentFundingRate) {
+async function placeShortOrder(symbol, currentFundingRate, bestFundingTime) { // Thêm bestFundingTime
   try {
-    addLog(`>>> Bắt đầu mở lệnh SHORT cho ${symbol}`);
+    const openTime = new Date(); // Thời gian ngay khi lệnh được mở
+    const formattedOpenTime = `${openTime.toLocaleDateString()} ${openTime.toLocaleTimeString('en-US', { hour12: false })}.${String(openTime.getMilliseconds()).padStart(3, '0')}`;
+
+    addLog(`Lệnh mở lúc: ${formattedOpenTime}`);
+    addLog(`>>> Bắt đầu mở lệnh SHORT cho đồng: ${symbol}`);
+
     const account = await callSignedAPI('/fapi/v2/account');
     const usdtAsset = account.assets.find(a => a.asset === 'USDT');
     const balance = usdtAsset ? parseFloat(usdtAsset.availableBalance) : 0;
@@ -318,9 +323,10 @@ async function placeShortOrder(symbol, currentFundingRate) {
     }
 
     const symbolFilters = await getMaxLeverageAndFilters(symbol);
-    if (!symbolFilters || !symbolFilters.maxLeverage) {
-      addLog(`>>> Không lấy được thông tin đòn bẩy hoặc bộ lọc cho ${symbol}, hủy mở lệnh.`);
-      return;
+    // Kiểm tra lại lần nữa để đảm bảo có thông tin đòn bẩy trước khi đặt lệnh
+    if (!symbolFilters || !symbolFilters.maxLeverage || symbolFilters.maxLeverage <= 1) {
+        addLog(`>>> Lỗi: Không có thông tin đòn bẩy hợp lệ cho ${symbol} khi mở lệnh.`);
+        return;
     }
 
     const maxLeverage = symbolFilters.maxLeverage;
@@ -344,7 +350,7 @@ async function placeShortOrder(symbol, currentFundingRate) {
     const minQty = symbolFilters.minQty;
     const maxQty = symbolFilters.maxQty;
     const stepSize = symbolFilters.stepSize;
-    const minNotional = symbolFilters.minNotional; // Sử dụng minNotional
+    const minNotional = symbolFilters.minNotional;
     const quantityPrecision = symbolFilters.quantityPrecision;
 
     quantity = Math.floor(quantity / stepSize) * stepSize;
@@ -371,17 +377,14 @@ async function placeShortOrder(symbol, currentFundingRate) {
       quantity: quantity
     });
 
-    // === Log mới theo yêu cầu của bạn ===
-    const openTime = new Date(); // Thời gian ngay khi lệnh được mở
-    const formattedOpenTime = `${openTime.toLocaleDateString()} ${openTime.toLocaleTimeString('en-US', { hour12: false })}.${String(openTime.getMilliseconds()).padStart(3, '0')}`;
-    addLog(`Lệnh mở lúc: ${formattedOpenTime}`);
-    addLog(`>>> Đã mở lệnh SHORT thành công cho đồng: ${symbol}`);
+    // Thông tin sau khi lệnh được mở thành công (log này sẽ hiển thị nếu lệnh thành công)
+    addLog(`>>> Đã mở lệnh SHORT thành công cho ${symbol}`);
     addLog(`  + Funding Rate: ${currentFundingRate}`);
-    addLog(`  + Đòn bẩy được sử dụng: ${maxLeverage}x`);
+    addLog(`  + Đòn bẩy sử dụng: ${maxLeverage}x`);
     addLog(`  + Số tiền USDT vào lệnh (ước tính): ${capital.toFixed(2)} USDT`);
     addLog(`  + Khối lượng: ${quantity} ${symbol}`);
     addLog(`  + Giá vào lệnh: ${price}`);
-    // === Kết thúc Log mới ===
+
 
     const entryPrice = parseFloat(order.avgFillPrice || price);
     const tpSlValue = (maxLeverage / 100) * capital; // Tính toán giá trị TP/SL dựa trên vốn và đòn bẩy
@@ -392,7 +395,7 @@ async function placeShortOrder(symbol, currentFundingRate) {
     let checkCount = 0;
     const maxCheck = 180; // 3 phút (180 giây)
 
-    addLog(`Lệnh sẽ đóng sau ${maxCheck} giây hoặc khi đạt TP/SL.`); // Thêm log này
+    addLog(`Lệnh sẽ đóng sau ${maxCheck} giây hoặc khi đạt TP/SL.`);
 
     const checkInterval = setInterval(async () => {
       if (!botRunning) {
@@ -403,8 +406,8 @@ async function placeShortOrder(symbol, currentFundingRate) {
       try {
         checkCount++;
         const currentPrice = await getCurrentPrice(symbol);
-        
-        // Cập nhật log đếm giây ở cuối (giữ như yêu cầu)
+
+        // Cập nhật log đếm giây ở cuối
         addLog(`>>> Đang kiểm tra TP/SL cho ${symbol}... Đã kiểm tra ${checkCount} / ${maxCheck} giây`);
 
         if (currentPrice <= tpPrice) {
@@ -505,25 +508,53 @@ cron.schedule('*/1 * * * *', async () => {
     }));
     addLog(`>>> Đã lấy ${fundingRates.length} coin từ API Binance`);
 
-    const negativeRates = fundingRates
-      .filter(r => parseFloat(r.fundingRate) < -0.0001)
-      .sort((a, b) => parseFloat(a.fundingRate) - parseFloat(b.fundingRate));
+    const candidates = []; // Dùng mảng tạm để lưu các coin đủ điều kiện
+    for (const r of fundingRates) {
+        if (parseFloat(r.fundingRate) < -0.0001) {
+            const symbolFilters = await getMaxLeverageAndFilters(r.symbol);
+            if (symbolFilters && symbolFilters.maxLeverage && symbolFilters.maxLeverage > 1) {
+                // Lấy balance và giá hiện tại để ước tính số tiền vào lệnh
+                const currentPrice = await getCurrentPrice(r.symbol);
+                if (!currentPrice) {
+                    addLog(`[DEBUG] Bỏ qua ${r.symbol}: Không lấy được giá hiện tại để ước tính vốn.`);
+                    continue; // Bỏ qua nếu không lấy được giá
+                }
+                const account = await callSignedAPI('/fapi/v2/account');
+                const usdtAsset = account.assets.find(a => a.asset === 'USDT');
+                const balance = usdtAsset ? parseFloat(usdtAsset.availableBalance) : 0;
+                const estimatedCapital = (balance * 0.8).toFixed(2); // Ước tính 80% vốn
 
-    if (negativeRates.length > 0) {
-      const best = negativeRates[0];
+                candidates.push({
+                    ...r,
+                    maxLeverage: symbolFilters.maxLeverage,
+                    estimatedCapital: estimatedCapital,
+                    currentPrice: currentPrice // Lưu giá hiện tại để dùng cho log
+                });
+            } else {
+                addLog(`[DEBUG] Bỏ qua ${r.symbol} vì không tìm thấy đòn bẩy hợp lệ (${symbolFilters ? symbolFilters.maxLeverage : 'N/A'}x).`);
+            }
+        }
+    }
+    candidates.sort((a, b) => parseFloat(a.fundingRate) - parseFloat(b.fundingRate));
+
+    if (candidates.length > 0) {
+      const best = candidates[0];
       selectedSymbol = best.symbol;
       const waitTime = best.fundingTime + 500 - (Date.now() + serverTimeOffset); // Đợi thêm 500ms sau funding
 
-      // Log chi tiết hơn khi chọn được coin
-      const symbolFilters = await getMaxLeverageAndFilters(selectedSymbol); // Lấy thông tin đòn bẩy
-      const maxLeverage = symbolFilters ? symbolFilters.maxLeverage : 'N/A';
+      // === Log chi tiết khi chọn được coin (theo yêu cầu mới) ===
+      const projectedOpenTime = new Date(Date.now() + waitTime);
+      const formattedProjectedOpenTime = `${projectedOpenTime.toLocaleDateString()} ${projectedOpenTime.toLocaleTimeString('en-US', { hour12: false })}.${String(projectedOpenTime.getMilliseconds()).padStart(3, '0')}`;
 
       addLog(`>>> Đã chọn được đồng coin: ${selectedSymbol}`);
+      addLog(`>>> Dự kiến lệnh mở lúc: ${formattedProjectedOpenTime}`);
       addLog(`>>> Funding rate: ${best.fundingRate}`);
-      addLog(`>>> Đòn bẩy tối đa: ${maxLeverage}x`);
+      addLog(`>>> Đòn bẩy tối đa: ${best.maxLeverage}x`);
+      addLog(`>>> Số tiền USDT vào lệnh (ước tính): ${best.estimatedCapital} USDT`);
+      addLog(`>>> Giá hiện tại của ${selectedSymbol}: ${best.currentPrice}`); // Log giá hiện tại
 
       if (waitTime > 0) {
-        addLog(`- Sẽ mở lệnh sau ${(waitTime / 1000).toFixed(1)} giây`);
+        addLog(`- Lệnh sẽ được mở sau ${(waitTime / 1000).toFixed(1)} giây.`);
         await delay(waitTime);
       } else {
          addLog(`- Đã qua thời điểm funding cho ${selectedSymbol}. Tiến hành mở lệnh ngay.`);
@@ -531,9 +562,9 @@ cron.schedule('*/1 * * * *', async () => {
 
       addLog('>>> Delay 500ms sau funding để chắc chắn nhận funding');
       await delay(500);
-      await placeShortOrder(selectedSymbol, best.fundingRate); // Truyền funding rate vào hàm placeShortOrder
+      await placeShortOrder(selectedSymbol, best.fundingRate, best.fundingTime); // Truyền thêm bestFundingTime vào hàm placeShortOrder
     } else {
-      addLog('>>> Không có coin có funding rate đủ tốt để mở lệnh. Đi uống bia');
+      addLog('>>> Không có coin có funding rate đủ tốt hoặc không hỗ trợ đòn bẩy để mở lệnh. Đi uống bia');
     }
   } catch (error) {
     addLog('Lỗi cron job: ' + error.message);
