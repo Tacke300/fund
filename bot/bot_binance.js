@@ -16,8 +16,8 @@ const app = express();
 const port = 3000;
 
 // === API KEY & SECRET ===
-const apiKey = 'VH1bYvlcOCFNeBy7TOnAidQUkRU9wxbGd3x6zPo6fWQwAteErrv9YG94OQtw2o6A';
-const apiSecret = 'ONVCARicwK01xzQA7bCOHiawmU2WuY4buei955zJau9Yvmyf51IWh6wQ9wNI7Xjm';
+const apiKey = 'VH1bYvlcOCFNeBy7TOnAidQUkRU9wxbGd3x6zPo6fWQwAteErrv9YG94OQtw2o6A'; // Your API Key
+const apiSecret = 'ONVCARicwK01xzQA7bCOHiawmU2WuY4buei955zJau9Yvmyf51IWh6wQ9wNI7Xjm'; // Your API Secret
 
 // === BASE URL CỦA BINANCE FUTURES API ===
 const BASE_URL = 'fapi.binance.com';
@@ -107,17 +107,17 @@ async function callSignedAPI(endpoint, method = 'GET', params = {}) {
   const fullPath = `${endpoint}?${queryStringForUrl}&signature=${signature}`;
 
   // DEBUG LOGS ĐÃ CẬP NHẬT để hiển thị rõ các chuỗi
-  console.log('\n--- DEBUG API CALL ---');
-  console.log(`Endpoint: ${endpoint}`);
-  console.log(`Method: ${method}`);
-  console.log(`Initial Params: ${JSON.stringify(params)}`);
-  console.log(`All Params for Signature (string values): ${JSON.stringify(allParamsForSignature)}`);
-  console.log(`Calculated Timestamp (local + offset): ${timestamp}`);
-  console.log(`Query String for Signature (SIGNED): ${queryStringForSignature}`);
-  console.log(`Generated Signature: ${signature}`);
-  console.log(`Query String for URL (URL-ENCODED): ${queryStringForUrl}`);
-  console.log(`Full Path (sent to Binance): https://${BASE_URL}${fullPath}`);
-  console.log('--- END DEBUG API CALL ---\n');
+  // console.log('\n--- DEBUG API CALL ---');
+  // console.log(`Endpoint: ${endpoint}`);
+  // console.log(`Method: ${method}`);
+  // console.log(`Initial Params: ${JSON.stringify(params)}`);
+  // console.log(`All Params for Signature (string values): ${JSON.stringify(allParamsForSignature)}`);
+  // console.log(`Calculated Timestamp (local + offset): ${timestamp}`);
+  // console.log(`Query String for Signature (SIGNED): ${queryStringForSignature}`);
+  // console.log(`Generated Signature: ${signature}`);
+  // console.log(`Query String for URL (URL-ENCODED): ${queryStringForUrl}`);
+  // console.log(`Full Path (sent to Binance): https://${BASE_URL}${fullPath}`);
+  // console.log('--- END DEBUG API CALL ---\n');
 
   const options = {
     hostname: BASE_URL,
@@ -250,7 +250,7 @@ async function getExchangeInfo() {
   addLog('>>> Đang lấy exchangeInfo từ Binance...');
   try {
     const url = `https://${BASE_URL}/fapi/v1/exchangeInfo`;
-    addLog(`[DEBUG] Gọi ExchangeInfo URL: ${url}`);
+    // addLog(`[DEBUG] Gọi ExchangeInfo URL: ${url}`); // Bỏ debug log này để giảm bớt log
     const res = await fetch(url);
 
     if (!res.ok) {
@@ -264,13 +264,16 @@ async function getExchangeInfo() {
 
     leverageCache = {};
     data.symbols.forEach(s => {
-      const levFilter = s.filters.find(f => f.filterType === 'LEVERAGE');
+      // CÁCH MỚI: TRUY CẬP maxLeverage TRỰC TIẾP TRONG OBJECT SYMBOL
+      // Binance thường để maxLeverage trực tiếp trong symbol object
+      const maxLeverage = parseInt(s.leverage) || parseInt(s.maxLeverage) || null; // Kiểm tra các trường có thể có
+
       const lotSizeFilter = s.filters.find(f => f.filterType === 'LOT_SIZE');
       const marketLotSizeFilter = s.filters.find(f => f.filterType === 'MARKET_LOT_SIZE');
       const minNotionalFilter = s.filters.find(f => f.filterType === 'MIN_NOTIONAL');
 
       leverageCache[s.symbol] = {
-        maxLeverage: levFilter ? parseInt(levFilter.maxLeverage) : null,
+        maxLeverage: maxLeverage, // Đã sửa ở đây
         minQty: lotSizeFilter ? parseFloat(lotSizeFilter.minQty) : (marketLotSizeFilter ? parseFloat(marketLotSizeFilter.minQty) : 0),
         maxQty: lotSizeFilter ? parseFloat(lotSizeFilter.maxQty) : (marketLotSizeFilter ? parseFloat(marketLotSizeFilter.maxQty) : Infinity),
         stepSize: lotSizeFilter ? parseFloat(lotSizeFilter.stepSize) : (marketLotSizeFilter ? parseFloat(marketLotSizeFilter.stepSize) : 0.001),
@@ -294,25 +297,23 @@ async function getMaxLeverageAndFilters(symbol) {
 }
 
 async function getCurrentPrice(symbol) {
-  const response = await fetch(`https://${BASE_URL}/fapi/v1/ticker/price?symbol=${symbol}`);
-  if (!response.ok) {
-    throw new Error(`Failed to get price for ${symbol}: ${response.statusText}`);
+  try {
+    const response = await fetch(`https://${BASE_URL}/fapi/v1/ticker/price?symbol=${symbol}`);
+    if (!response.ok) {
+      throw new Error(`Failed to get price for ${symbol}: ${response.statusText}`);
+    }
+    const data = await response.json();
+    const price = parseFloat(data.price);
+    return price;
+  } catch (error) {
+    addLog(`Lỗi khi lấy giá cho ${symbol}: ${error.message}`);
+    return null;
   }
-  const data = await response.json();
-  const price = parseFloat(data.price);
-  // addLog(`>>> Giá hiện tại của ${symbol} là ${price}`); // Bỏ dòng này để tránh log quá nhiều
-  return price;
 }
 
 /***************** ĐẶT & ĐÓNG LỆNH  *****************/
-async function placeShortOrder(symbol, currentFundingRate, bestFundingTime) { // Thêm bestFundingTime
+async function placeShortOrder(symbol, currentFundingRate, bestFundingTime) {
   try {
-    const openTime = new Date(); // Thời gian ngay khi lệnh được mở
-    const formattedOpenTime = `${openTime.toLocaleDateString()} ${openTime.toLocaleTimeString('en-US', { hour12: false })}.${String(openTime.getMilliseconds()).padStart(3, '0')}`;
-
-    addLog(`Lệnh mở lúc: ${formattedOpenTime}`);
-    addLog(`>>> Bắt đầu mở lệnh SHORT cho đồng: ${symbol}`);
-
     const account = await callSignedAPI('/fapi/v2/account');
     const usdtAsset = account.assets.find(a => a.asset === 'USDT');
     const balance = usdtAsset ? parseFloat(usdtAsset.availableBalance) : 0;
@@ -325,7 +326,7 @@ async function placeShortOrder(symbol, currentFundingRate, bestFundingTime) { //
     const symbolFilters = await getMaxLeverageAndFilters(symbol);
     // Kiểm tra lại lần nữa để đảm bảo có thông tin đòn bẩy trước khi đặt lệnh
     if (!symbolFilters || !symbolFilters.maxLeverage || symbolFilters.maxLeverage <= 1) {
-        addLog(`>>> Lỗi: Không có thông tin đòn bẩy hợp lệ cho ${symbol} khi mở lệnh.`);
+        addLog(`>>> Lỗi: Không có thông tin đòn bẩy hợp lệ cho ${symbol} khi mở lệnh. (MaxLeverage: ${symbolFilters ? symbolFilters.maxLeverage : 'N/A'})`);
         return;
     }
 
@@ -381,7 +382,7 @@ async function placeShortOrder(symbol, currentFundingRate, bestFundingTime) { //
     addLog(`>>> Đã mở lệnh SHORT thành công cho ${symbol}`);
     addLog(`  + Funding Rate: ${currentFundingRate}`);
     addLog(`  + Đòn bẩy sử dụng: ${maxLeverage}x`);
-    addLog(`  + Số tiền USDT vào lệnh (ước tính): ${capital.toFixed(2)} USDT`);
+    addLog(`  + Số tiền USDT vào lệnh: ${capital.toFixed(2)} USDT`); // Đây là số tiền vốn thực tế được sử dụng để tính qty
     addLog(`  + Khối lượng: ${quantity} ${symbol}`);
     addLog(`  + Giá vào lệnh: ${price}`);
 
@@ -410,18 +411,20 @@ async function placeShortOrder(symbol, currentFundingRate, bestFundingTime) { //
         // Cập nhật log đếm giây ở cuối
         addLog(`>>> Đang kiểm tra TP/SL cho ${symbol}... Đã kiểm tra ${checkCount} / ${maxCheck} giây`);
 
-        if (currentPrice <= tpPrice) {
-          addLog(`>>> Giá đạt TP: ${currentPrice.toFixed(symbolFilters.pricePrecision)}. Đóng lệnh ngay.`);
-          clearInterval(checkInterval);
-          await closeShortPosition(symbol, quantity);
-        } else if (currentPrice >= slPrice) {
-          addLog(`>>> Giá đạt SL: ${currentPrice.toFixed(symbolFilters.pricePrecision)}. Đóng lệnh ngay.`);
-          clearInterval(checkInterval);
-          await closeShortPosition(symbol, quantity);
-        } else if (checkCount >= maxCheck) {
-          addLog(`>>> Quá ${maxCheck} giây chưa đạt TP/SL. Đóng lệnh.`);
-          clearInterval(checkInterval);
-          await closeShortPosition(symbol, quantity);
+        if (currentPrice !== null) { // Đảm bảo giá không null
+          if (currentPrice <= tpPrice) {
+            addLog(`>>> Giá đạt TP: ${currentPrice.toFixed(symbolFilters.pricePrecision)}. Đóng lệnh ngay.`);
+            clearInterval(checkInterval);
+            await closeShortPosition(symbol, quantity);
+          } else if (currentPrice >= slPrice) {
+            addLog(`>>> Giá đạt SL: ${currentPrice.toFixed(symbolFilters.pricePrecision)}. Đóng lệnh ngay.`);
+            clearInterval(checkInterval);
+            await closeShortPosition(symbol, quantity);
+          } else if (checkCount >= maxCheck) {
+            addLog(`>>> Quá ${maxCheck} giây chưa đạt TP/SL. Đóng lệnh.`);
+            clearInterval(checkInterval);
+            await closeShortPosition(symbol, quantity);
+          }
         }
       } catch (error) {
         addLog('Lỗi khi check TP/SL: ' + error.message);
@@ -445,6 +448,11 @@ async function closeShortPosition(symbol, qtyToClose = null) {
       }
 
       const closePrice = await getCurrentPrice(symbol);
+      if (!closePrice) {
+          addLog(`Không thể lấy giá đóng lệnh cho ${symbol}. Hủy đóng lệnh.`);
+          return;
+      }
+
       const entryPrice = parseFloat(position.entryPrice);
       const symbolFilters = await getMaxLeverageAndFilters(symbol);
       const quantityPrecision = symbolFilters ? symbolFilters.quantityPrecision : 3;
@@ -509,9 +517,14 @@ cron.schedule('*/1 * * * *', async () => {
     addLog(`>>> Đã lấy ${fundingRates.length} coin từ API Binance`);
 
     const candidates = []; // Dùng mảng tạm để lưu các coin đủ điều kiện
+
+    // Luôn tải exchangeInfo một lần trước khi lặp qua các symbol
+    await getExchangeInfo();
+
     for (const r of fundingRates) {
         if (parseFloat(r.fundingRate) < -0.0001) {
             const symbolFilters = await getMaxLeverageAndFilters(r.symbol);
+            // Kiểm tra xem có maxLeverage hợp lệ và lớn hơn 1 không
             if (symbolFilters && symbolFilters.maxLeverage && symbolFilters.maxLeverage > 1) {
                 // Lấy balance và giá hiện tại để ước tính số tiền vào lệnh
                 const currentPrice = await getCurrentPrice(r.symbol);
@@ -562,7 +575,7 @@ cron.schedule('*/1 * * * *', async () => {
 
       addLog('>>> Delay 500ms sau funding để chắc chắn nhận funding');
       await delay(500);
-      await placeShortOrder(selectedSymbol, best.fundingRate, best.fundingTime); // Truyền thêm bestFundingTime vào hàm placeShortOrder
+      await placeShortOrder(selectedSymbol, best.fundingRate, best.fundingTime);
     } else {
       addLog('>>> Không có coin có funding rate đủ tốt hoặc không hỗ trợ đòn bẩy để mở lệnh. Đi uống bia');
     }
