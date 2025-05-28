@@ -50,7 +50,7 @@ app.listen(port, () => {
 
 let botRunning = false;
 
-const https = require('https');
+
 
 function getFundingRatesFromBinance() {
   return new Promise((resolve, reject) => {
