@@ -14,7 +14,7 @@ const __dirname = path.dirname(__filename);
 // Đảm bảo không có khoảng trắng thừa khi copy/paste.
 // SỬ DỤNG API KEY VÀ SECRET KEY CỦA BINGX, KHÔNG PHẢI BINANCE!
 const API_KEY = 'WhRrdudEgBMTiFnTiqrZe2LlNGeK68lcMAZhOyn0AY00amysW5ep2LJ45smFxONwoIE0l72b4zc5muDGw'.trim();     // <--- THAY THẾ BẰNG API KEY THẬT CỦA BINGX
-const SECRET_KEY = 'AiRyJvGCVIDNVPQkBYo2WaxdgzbJlkGQvmvJmPXET5JTyqcZxThb16a2kZNU7M5LKLJicA2hLtckejMtyFzPA'.trim(); // <--- THAY THẾ BẰNG SECRET KEY THẬT CỦA BINGX
+const SECRET_KEY = 'AiRyJvGCVIDNVPQkBYo2WaxhgdJlkGQvmvJmPXET5JTyqcZxThb16a2kZNU7M5LKLJicA2hLtckejMtyFzPA'.trim(); // <--- THAY THẾ BẰNG SECRET KEY THẬT CỦA BINGX
 
 // === BASE URL CỦA BINGX SWAP V2 API ===
 const BASE_HOST = 'open-api-swap.bingx.com'; // Futures/Swap API Host
@@ -68,11 +68,19 @@ const WEB_SERVER_PORT = 3003; // Cổng cho giao diện web
 
 // NEW: Cấu hình TÊN CỦA BOT và LOG FILE. Bạn có thể thay đổi tên này.
 // Tên này sẽ được dùng cho PM2 process và tên file log.
-const BOT_NAME = 'bingx'; // <--- TẠO TÊN RIÊNG CỦA BẠN CHO BOT
-const BOT_LOG_FILE = path.join(__dirname, `${BOT_NAME}-out.log`); // Log file sẽ nằm cùng thư mục với script
-// const BOT_ERR_LOG_FILE = path.join(__dirname, `${BOT_NAME}-err.log`); // File log lỗi (tùy chọn)
+const BOT_NAME = 'bingx'; 
 
-// Hàm addLog để ghi nhật ký (chỉ ra console)
+// === Cấu hình đường dẫn log file ===
+// Đường dẫn log file mà bot cố gắng ghi vào trong thư mục của nó
+const BOT_LOG_FILE_CUSTOM = path.join(__dirname, `${BOT_NAME}-out.log`); 
+const BOT_ERROR_LOG_FILE_CUSTOM = path.join(__dirname, `${BOT_NAME}-err.log`);
+
+// Đường dẫn log file mặc định của PM2 (để đọc log nếu bot không ghi được vào file custom)
+// process.env.HOME hoặc process.env.USERPROFILE sẽ trả về thư mục home của người dùng
+const PM2_DEFAULT_OUT_LOG = path.join(process.env.HOME || process.env.USERPROFILE || '/', `.pm2/logs/${BOT_NAME}-out.log`); 
+const PM2_DEFAULT_ERROR_LOG = path.join(process.env.HOME || process.env.USERPROFILE || '/', `.pm2/logs/${BOT_NAME}-error.log`); 
+
+// Hàm addLog để ghi nhật ký
 function addLog(message, isImportant = false) {
     const now = new Date();
     const time = `${now.toLocaleDateString('en-GB')} ${now.toLocaleTimeString('en-US', { hour12: false })}.${String(now.getMilliseconds()).padStart(3, '0')}`;
@@ -89,9 +97,9 @@ function addLog(message, isImportant = false) {
         logEntry = `\x1b[36m${logEntry}\x1b[0m`; // Cyan for important messages
     }
 
-    // Ghi vào file log (chỉ nếu botRunning hoặc khi khởi động/dừng)
-    fs.appendFile(BOT_LOG_FILE, logEntry + '\n', (err) => {
-        if (err) console.error('Error writing to log file:', err);
+    // Ghi vào file log custom của bot
+    fs.appendFile(BOT_LOG_FILE_CUSTOM, logEntry + '\n', (err) => {
+        if (err) console.error('Error writing to custom log file:', err);
     });
 
     console.log(logEntry);
@@ -833,184 +841,4 @@ async function scheduleNextMainCycle() {
 
     if (currentMinute < 58) {
         delayUntilNext58Minute = (58 - currentMinute) * 60 * 1000 - new Date(now).getUTCSeconds() * 1000 - new Date(now).getUTCMilliseconds();
-    } else {
-        delayUntilNext58Minute = (60 - currentMinute + 58) * 60 * 1000 - new Date(now).getUTCSeconds() * 1000 - new Date(now).getUTCMilliseconds();
     }
-
-    if (delayUntilNext58Minute <= 0) {
-        delayUntilNext58Minute = 1000; 
-    }
-
-    const nextScanMoment = new Date(now + delayUntilNext58Minute);
-
-    addLog(`>>> Bot đang đi uống bia sẽ trở lại lúc **${formatTimeUTC7(nextScanMoment)}**).`, true);
-
-    nextScheduledTimeout = setTimeout(async () => {
-        if(botRunning) {
-            await runTradingLogic();
-        } else {
-            addLog('Bot đã bị dừng.', true);
-        }
-    }, delayUntilNext58Minute);
-}
-
-// --- Hàm khởi động bot logic chính (nội bộ, không phải PM2 start) ---
-async function startBotLogicInternal() {
-    if (botRunning) {
-        addLog('Bot logic hiện đang chạy. Không cần khởi động lại.', true);
-        return 'Bot logic hiện đang chạy.';
-    }
-
-    addLog('--- Khởi động Bot ---', true);
-    addLog('>>> Đang kiểm tra kết nối API Key với BingX Swap...', true);
-
-    try {
-        // NEW: Tạo file log nếu nó chưa tồn tại
-        fs.writeFileSync(BOT_LOG_FILE, '', { flag: 'a' }); // Tạo file nếu chưa có, không ghi đè
-        addLog(`✅ Đảm bảo log file (${BOT_LOG_FILE}) đã sẵn sàng.`);
-
-        await syncServerTime(); 
-
-        const account = await callSignedAPI('/user/account', 'GET');
-        const usdtBalanceInfo = account.balances.find(a => a.asset === 'USDT');
-        const usdtBalance = usdtBalanceInfo ? usdtBalanceInfo.availableBalance : 0;
-        addLog(`✅ API Key hoạt động bình thường! Số dư USDT khả dụng: ${parseFloat(usdtBalance).toFixed(2)}`, true);
-
-        await getExchangeInfo();
-        if (!exchangeInfoCache) {
-            addLog('❌ Lỗi load sàn (exchangeInfo). Bot sẽ dừng.', true);
-            return 'Không thể load sàn (exchangeInfo).';
-        }
-
-        botRunning = true;
-        botStartTime = new Date();
-        addLog(`--- Bot đã chạy lúc ${formatTimeUTC7(botStartTime)} ---`, true);
-
-        scheduleNextMainCycle();
-
-        if (!positionCheckInterval) { 
-            positionCheckInterval = setInterval(async () => {
-                if (botRunning && currentOpenPosition) {
-                    await manageOpenPosition();
-                } else if (!botRunning && positionCheckInterval) {
-                    clearInterval(positionCheckInterval);
-                    positionCheckInterval = null;
-                }
-            }, 1000); 
-        }
-        startCountdownFrontend(); 
-
-        return 'Bot đã khởi động thành công.';
-
-    } catch (error) {
-        const errorMsg = error.msg || error.message;
-        addLog('❌ [Lỗi nghiêm trọng khi khởi động bot] ' + errorMsg, true);
-        addLog('   -> Bot sẽ dừng hoạt động. Vui lòng kiểm tra và khởi động lại.', true);
-       
-        botRunning = false; 
-        return `Lỗi khi khởi động bot: ${errorMsg}`;
-    }
-}
-
-// --- Hàm dừng bot logic chính (nội bộ, không phải PM2 stop) ---
-function stopBotLogicInternal() {
-    if (!botRunning) {
-        addLog('Bot logic hiện không chạy. Không cần dừng.', true);
-        return 'Bot logic hiện không chạy.';
-    }
-    botRunning = false;
-    clearTimeout(nextScheduledTimeout); 
-    if (positionCheckInterval) {
-        clearInterval(positionCheckInterval); 
-        positionCheckInterval = null;
-    }
-    stopCountdownFrontend(); 
-    addLog('--- Bot đã được dừng ---', true);
-    botStartTime = null;
-    return 'Bot đã dừng.';
-}
-
-// === KHỞI TẠO SERVER WEB VÀ CÁC API ENDPOINT ===
-const app = express();
-
-app.get('/', (req, res) => {
-    res.sendFile(path.join(__dirname, 'index.html'));
-});
-
-// API endpoint để lấy log từ file
-app.get('/api/logs', (req, res) => {
-    // NEW: Kiểm tra xem file log có tồn tại không trước khi đọc
-    fs.access(BOT_LOG_FILE, fs.constants.F_OK, (err) => {
-        if (err) {
-            // File không tồn tại, trả về thông báo lỗi tùy chỉnh
-            return res.status(404).send(`Log file not found at ${BOT_LOG_FILE}. Please ensure the bot is running.`);
-        }
-
-        fs.readFile(BOT_LOG_FILE, 'utf8', (err, data) => {
-            if (err) {
-                console.error('Error reading log file:', err);
-                return res.status(500).send('Error reading log file');
-            }
-            const cleanData = data.replace(/[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g, '');
-            res.send(cleanData);
-        });
-    });
-});
-
-
-// API endpoint để lấy trạng thái bot từ PM2
-app.get('/api/status', async (req, res) => {
-    try {
-        const pm2List = await new Promise((resolve, reject) => {
-            exec('pm2 jlist', (error, stdout, stderr) => {
-                if (error) reject(stderr || error.message);
-                resolve(stdout);
-            });
-        });
-        const processes = JSON.parse(pm2List);
-        // NEW: Sử dụng BOT_NAME thay vì THIS_BOT_PM2_NAME cố định
-        const botProcess = processes.find(p => p.name === BOT_NAME);
-
-        let statusMessage = 'MÁY CHỦ: KHÔNG RÕ (PM2)';
-        if (botProcess) {
-            statusMessage = `MÁY CHỦ: ${botProcess.pm2_env.status.toUpperCase()} (Restarts: ${botProcess.pm2_env.restart_time})`;
-            if (botProcess.pm2_env.status === 'online') {
-                statusMessage += ` | TRẠNG THÁI: ${botRunning ? 'ĐANG CHẠY' : 'ĐÃ DỪNG'}`;
-                if (botStartTime) {
-                    const uptimeMs = Date.now() - botStartTime.getTime();
-                    const uptimeMinutes = Math.floor(uptimeMs / (1000 * 60));
-                    statusMessage += ` | ĐÃ CHẠY: ${uptimeMinutes} phút`;
-                }
-            }
-        } else {
-            statusMessage = `Bot Status: Không tìm thấy trong PM2 (Tên: ${BOT_NAME})`; // NEW: Tên bot có thể thay đổi
-        }
-        res.send(statusMessage);
-    } catch (error) {
-        console.error('Error fetching PM2 status:', error);
-        res.status(500).send(`Bot Status: Lỗi khi lấy trạng thái. (${error})`);
-    }
-});
-
-// API endpoint để lấy thông báo đếm ngược
-app.get('/api/countdown', (req, res) => {
-    res.send(currentCountdownMessage);
-});
-
-// API endpoint để khởi động bot logic chính (nội bộ)
-app.get('/start_bot_logic', async (req, res) => {
-    const message = await startBotLogicInternal();
-    res.send(message);
-});
-
-// API endpoint để dừng bot logic chính (nội bộ)
-app.get('/stop_bot_logic', (req, res) => {
-    const message = stopBotLogicInternal();
-    res.send(message);
-});
-
-// === DÒNG QUAN TRỌNG ĐỂ LẮNG NGHE CỔNG ===
-app.listen(WEB_SERVER_PORT, () => {
-    console.log(`Bot chờ khởi chạy:${WEB_SERVER_PORT}`);
-    console.log(`Truy cập:${WEB_SERVER_PORT}`);
-});
