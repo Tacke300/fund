@@ -281,8 +281,8 @@ const TP_SL_RISK_PERCENTAGE = 0.005; // 0.5% rủi ro/lợi nhuận trên tổng
 const MAX_POSITION_LIFETIME_SECONDS = 300; // Thời gian tối đa giữ một vị thế (tính bằng giây), ví dụ: 300 giây = 5 phút
 
 // Cấu hình thời gian chạy bot theo giờ UTC MỚI
-const SCAN_MINUTE_UTC = 48; // Phút thứ 48 để quét và chọn đồng coin
-const OPEN_ORDER_MINUTE_UTC = 50; // Phút thứ 50 để mở lệnh
+const SCAN_MINUTE_UTC = 50; // Phút thứ 50 để quét và chọn đồng coin
+const OPEN_ORDER_MINUTE_UTC = 52; // Phút thứ 52 để mở lệnh
 const TARGET_SECOND_UTC = 0;  // Giây thứ 0
 const TARGET_MILLISECOND_UTC = 500; // mili giây thứ 500
 
@@ -541,11 +541,11 @@ async function runTradingLogic() {
         }
 
         const now = new Date();
-        // Tính thời gian đến phút :50
+        // Tính thời gian đến phút :52
         let targetOpenTime = new Date(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 
                                       now.getUTCHours(), OPEN_ORDER_MINUTE_UTC, TARGET_SECOND_UTC, TARGET_MILLISECOND_UTC);
         
-        // Nếu thời gian :50 đã qua trong giờ hiện tại, chuyển sang :50 của giờ tiếp theo
+        // Nếu thời gian :52 đã qua trong giờ hiện tại, chuyển sang :52 của giờ tiếp theo
         if (targetOpenTime.getTime() <= now.getTime()) {
             targetOpenTime.setUTCHours(targetOpenTime.getUTCHours() + 1);
         }
