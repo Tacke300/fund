@@ -21,6 +21,9 @@ let serverTimeOffset = 0; // Giữ nguyên để tương thích
 // Biến cache cho exchangeInfo
 let exchangeInfoCache = null;
 
+// Biến cờ để tránh việc gửi nhiều lệnh đóng cùng lúc
+let isClosingPosition = false;
+
 // Hàm addLog để ghi nhật ký
 function addLog(message) {
     const now = new Date();
@@ -274,16 +277,28 @@ async function getCurrentPrice(symbol) {
 }
 
 // === Cấu hình Bot ===
-const MIN_USDT_BALANCE_TO_OPEN = 0.1; // Số dư USDT tối thiểu để mở lệnh (ví dụ: 10 USDT)
+const MIN_USDT_BALANCE_TO_OPEN = 0.1; // Số dư USDT tối thiểu để mở lệnh (ví dụ: 0.1 USDT)
 const CAPITAL_PERCENTAGE_PER_TRADE = 0.5; // Phần trăm vốn sử dụng cho mỗi lệnh (50% tài khoản)
-// TP/SL = 50% vốn mở lệnh (trên giá trị vị thế sau đòn bẩy)
-const TP_SL_RISK_PERCENTAGE = 0.5; // 50% rủi ro/lợi nhuận trên tổng giá trị vị thế (sau đòn bẩy)
-const MIN_FUNDING_RATE_THRESHOLD = -0.0001; // Ngưỡng funding rate âm tối thiểu để xem xét (ví dụ: -0.01% = -0.0001)
-const MAX_POSITION_LIFETIME_SECONDS = 300; // Thời gian tối đa giữ một vị thế (tính bằng giây), ví dụ: 300 giây = 5 phút
 
-// Cấu hình thời gian chạy bot theo giờ UTC MỚI
-const SCAN_MINUTE_UTC = 29; // Phút thứ 24 để quét và chọn đồng coin
-const OPEN_ORDER_MINUTE_UTC = 30; // Phút thứ 25 để mở lệnh
+// Cấu hình TP/SL theo yêu cầu mới
+const STOP_LOSS_PERCENTAGE = 0.70; // SL cố định 70% của vốn đầu tư ban đầu
+
+// Bảng ánh xạ maxLeverage với Take Profit percentage
+const TAKE_PROFIT_PERCENTAGES = {
+    20: 0.20,
+    25: 0.25,
+    50: 0.50,
+    75: 0.75,
+    100: 1.00,
+    125: 1.25,
+};
+
+const MIN_FUNDING_RATE_THRESHOLD = -0.0001; // Ngưỡng funding rate âm tối thiểu để xem xét (ví dụ: -0.01% = -0.0001)
+const MAX_POSITION_LIFETIME_SECONDS = 60; // Thời gian tối đa giữ một vị thế (tính bằng giây), ví dụ: 300 giây = 5 phút
+
+// Cấu hình thời gian chạy bot theo giờ UTC
+const SCAN_MINUTE_UTC = 50; // Phút thứ 24 để quét và chọn đồng coin
+const OPEN_ORDER_MINUTE_UTC = 55; // Phút thứ 25 để mở lệnh
 const TARGET_SECOND_UTC = 0;  // Giây thứ 0
 const TARGET_MILLISECOND_UTC = 500; // mili giây thứ 500
 
@@ -375,8 +390,8 @@ async function openShortPosition(symbol, fundingRate, usdtBalance) {
         addLog(`[DEBUG] Giá hiện tại của ${symbol}: ${currentPrice.toFixed(pricePrecision)}`);
 
         // 4. Tính toán khối lượng lệnh
-        const capitalToUse = usdtBalance * CAPITAL_PERCENTAGE_PER_TRADE;
-        let quantity = (capitalToUse * maxLeverage) / currentPrice;
+        const capitalToUse = usdtBalance * CAPITAL_PERCENTAGE_PER_TRADE; // Vốn USDT đầu tư
+        let quantity = (capitalToUse * maxLeverage) / currentPrice; // Khối lượng theo giá trị đòn bẩy
 
         quantity = Math.floor(quantity / stepSize) * stepSize;
         quantity = parseFloat(quantity.toFixed(quantityPrecision));
@@ -385,7 +400,8 @@ async function openShortPosition(symbol, fundingRate, usdtBalance) {
 
         const currentNotional = quantity * currentPrice;
         if (currentNotional < minNotional) {
-            addLog(`⚠️ Giá trị hợp đồng (${currentNotional.toFixed(pricePrecision)}) quá nhỏ so với minNotional (${minNotional}) cho ${symbol}. Không mở lệnh.`);
+            addLog(`⚠️ Giá trị hợp đồng (${currentNotional.toFixed(pricePrecision)} USDT) quá nhỏ so với minNotional (${minNotional} USDT) cho ${symbol}. Không mở lệnh.`);
+            addLog(`   Vốn USDT đầu tư: ${capitalToUse.toFixed(2)} USDT. Vị thế ước tính (đòn bẩy ${maxLeverage}x): ${currentNotional.toFixed(2)} USDT.`);
             scheduleNextMainCycle(); // Quay lại chế độ chờ
             return;
         }
@@ -415,21 +431,27 @@ async function openShortPosition(symbol, fundingRate, usdtBalance) {
         addLog(`  + Khối lượng: ${quantity} ${symbol}`);
         addLog(`  + Giá vào lệnh: ${entryPrice.toFixed(pricePrecision)}`);
         
-        // 6. Thiết lập TP/SL
-        const positionValue = entryPrice * quantity; 
-        const tpSlAmount = positionValue * TP_SL_RISK_PERCENTAGE; // TP/SL là 50% giá trị vị thế sau đòn bẩy
+        // 6. Tính toán TP/SL theo yêu cầu mới (dựa trên vốn đầu tư ban đầu)
+        const slAmountUSDT = capitalToUse * STOP_LOSS_PERCENTAGE; // Số tiền SL dựa trên vốn đầu tư
+        const tpPercentage = TAKE_PROFIT_PERCENTAGES[maxLeverage] || 0; // Lấy TP % theo maxLeverage
+        const tpAmountUSDT = capitalToUse * tpPercentage; // Số tiền TP dựa trên vốn đầu tư
 
-        let tpPrice = entryPrice - (tpSlAmount / quantity); 
-        let slPrice = entryPrice + (tpSlAmount / quantity); 
+        // SL cho lệnh SHORT: giá tăng lên (giá hòa vốn + (số tiền SL / khối lượng))
+        let slPrice = entryPrice + (slAmountUSDT / quantity); 
+        // TP cho lệnh SHORT: giá giảm xuống (giá hòa vốn - (số tiền TP / khối lượng))
+        let tpPrice = entryPrice - (tpAmountUSDT / quantity); 
         
         // Làm tròn TP/SL theo tickSize của sàn
-        tpPrice = Math.floor(tpPrice / tickSize) * tickSize;
-        slPrice = Math.ceil(slPrice / tickSize) * tickSize;
+        slPrice = Math.ceil(slPrice / tickSize) * tickSize; // SL luôn làm tròn lên
+        tpPrice = Math.floor(tpPrice / tickSize) * tickSize; // TP luôn làm tròn xuống
 
-        tpPrice = parseFloat(tpPrice.toFixed(pricePrecision));
         slPrice = parseFloat(slPrice.toFixed(pricePrecision));
+        tpPrice = parseFloat(tpPrice.toFixed(pricePrecision));
 
         addLog(`>>> Giá TP: ${tpPrice.toFixed(pricePrecision)}, Giá SL: ${slPrice.toFixed(pricePrecision)}`);
+        addLog(`   (SL: ${STOP_LOSS_PERCENTAGE*100}% của ${capitalToUse.toFixed(2)} USDT = ${slAmountUSDT.toFixed(2)} USDT)`);
+        addLog(`   (TP: ${tpPercentage*100}% của ${capitalToUse.toFixed(2)} USDT = ${tpAmountUSDT.toFixed(2)} USDT)`);
+
 
         // Lưu thông tin vị thế đang mở
         currentOpenPosition = {
@@ -458,10 +480,13 @@ async function openShortPosition(symbol, fundingRate, usdtBalance) {
 
 // --- Hàm kiểm tra và quản lý vị thế đang mở ---
 async function manageOpenPosition() {
-    if (!currentOpenPosition) {
-        clearInterval(positionCheckInterval);
-        positionCheckInterval = null;
-        scheduleNextMainCycle(); // Lên lịch quét mới nếu không còn vị thế
+    // Nếu không có vị thế hoặc đang trong quá trình đóng, thoát
+    if (!currentOpenPosition || isClosingPosition) { 
+        if (!currentOpenPosition && positionCheckInterval) { // Nếu không có vị thế nhưng interval vẫn chạy
+            clearInterval(positionCheckInterval);
+            positionCheckInterval = null;
+            scheduleNextMainCycle(); // Lên lịch quét mới nếu không còn vị thế
+        }
         return; 
     }
 
@@ -481,20 +506,32 @@ async function manageOpenPosition() {
         const timeLeft = MAX_POSITION_LIFETIME_SECONDS - Math.floor(elapsedTimeSeconds);
         process.stdout.write(`>>> Vị thế ${symbol}: Đang mở, còn lại ${timeLeft} giây. Giá hiện tại: ${currentPrice.toFixed(pricePrecision)} | TP: ${tpPrice.toFixed(pricePrecision)} | SL: ${slPrice.toFixed(pricePrecision)}           \r`);
 
+        let shouldClose = false;
+        let closeReason = '';
 
         if (currentPrice <= tpPrice) {
             addLog(`\n✅ Vị thế ${symbol} đạt TP tại giá ${currentPrice.toFixed(pricePrecision)}. Đóng lệnh.`);
-            await closeShortPosition(symbol, quantity, 'TP');
+            shouldClose = true;
+            closeReason = 'TP';
         } else if (currentPrice >= slPrice) {
             addLog(`\n❌ Vị thế ${symbol} đạt SL tại giá ${currentPrice.toFixed(pricePrecision)}. Đóng lệnh.`);
-            await closeShortPosition(symbol, quantity, 'SL');
+            shouldClose = true;
+            closeReason = 'SL';
         } else if (elapsedTimeSeconds >= MAX_POSITION_LIFETIME_SECONDS) {
             addLog(`\n⏱️ Vị thế ${symbol} vượt quá thời gian tối đa (${MAX_POSITION_LIFETIME_SECONDS}s). Đóng lệnh.`);
-            await closeShortPosition(symbol, quantity, 'Hết thời gian');
+            shouldClose = true;
+            closeReason = 'Hết thời gian';
+        }
+
+        if (shouldClose) {
+            isClosingPosition = true; // Đặt cờ để ngăn các lệnh đóng trùng lặp
+            await closeShortPosition(symbol, quantity, closeReason);
+            isClosingPosition = false; // Xóa cờ sau khi hoàn tất
         }
 
     } catch (error) {
         addLog(`❌ Lỗi khi quản lý vị thế mở cho ${symbol}: ${error.msg || error.message}`);
+        isClosingPosition = false; // Đảm bảo cờ được xóa ngay cả khi có lỗi
     }
 }
 
@@ -507,8 +544,8 @@ async function runTradingLogic() {
 
     addLog('>>> Đang quét tìm symbol có funding rate âm...');
     const accountInfo = await callSignedAPI('/fapi/v2/account', 'GET');
-    const usdtAsset = accountInfo.assets.find(a => a.asset === 'USDT');
-    const availableBalance = usdtAsset ? parseFloat(usdtAsset.availableBalance) : 0;
+    const usdtAsset = accountInfo.assets.find(a => a.asset === 'USDT')?.availableBalance || 0;
+    const availableBalance = parseFloat(usdtAsset); // Đảm bảo là số
 
     if (availableBalance < MIN_USDT_BALANCE_TO_OPEN) {
         addLog(`⚠️ Số dư USDT khả dụng (${availableBalance.toFixed(2)}) dưới ngưỡng tối thiểu (${MIN_USDT_BALANCE_TO_OPEN}). Không tìm kiếm cơ hội.`);
@@ -527,12 +564,17 @@ async function runTradingLogic() {
                 // Kiểm tra xem có đủ minNotional để mở lệnh không (sau khi tính toán vốn và đòn bẩy)
                 const estimatedCapitalAtMaxLeverage = (availableBalance * CAPITAL_PERCENTAGE_PER_TRADE) * symbolInfo.maxLeverage;
                 if (estimatedCapitalAtMaxLeverage >= symbolInfo.minNotional) {
-                    candidates.push({
-                        symbol: item.symbol,
-                        fundingRate: fundingRate,
-                        nextFundingTime: item.nextFundingTime, // Thời gian funding tiếp theo
-                        maxLeverage: symbolInfo.maxLeverage
-                    });
+                    // Kiểm tra xem maxLeverage có nằm trong các TP được định nghĩa không
+                    if (TAKE_PROFIT_PERCENTAGES[symbolInfo.maxLeverage] !== undefined) {
+                        candidates.push({
+                            symbol: item.symbol,
+                            fundingRate: fundingRate,
+                            nextFundingTime: item.nextFundingTime, // Thời gian funding tiếp theo
+                            maxLeverage: symbolInfo.maxLeverage
+                        });
+                    } else {
+                        addLog(`[DEBUG] ${item.symbol}: Đòn bẩy tối đa (${symbolInfo.maxLeverage}x) không có cấu hình TP. Bỏ qua.`);
+                    }
                 } else {
                     addLog(`[DEBUG] ${item.symbol}: Vốn (${availableBalance.toFixed(2)}) * Đòn bẩy (${symbolInfo.maxLeverage}x) không đủ MinNotional (${symbolInfo.minNotional}). Bỏ qua.`);
                 }
