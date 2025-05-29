@@ -44,7 +44,7 @@ function addLog(message) {
 
 const delay = ms => new Promise(resolve => setTimeout(ms));
 
-/***************** CÁC HÀM API CHÍNH (GỘP CHÍNH XÁC TỪ TEST.JS CỦA BẠN) *****************/
+/***************** CÁC HÀM API CHÍNH (GỘP CHÍNH XÁC TỪ TEST.JS CỦA BẠN, CÓ CHỈNH SỬA NHỎ CHO POST REQUEST) *****************/
 
 /**
  * Tạo chữ ký HMAC SHA256 cho chuỗi truy vấn.
@@ -61,16 +61,16 @@ function createSignature(queryString, apiSecret) {
  * (Gộp chính xác từ test.js, ĐÃ THÊM postData để hỗ trợ POST requests của bot)
  * @param {string} method - Phương thức HTTP (GET, POST).
  * @param {string} hostname - Hostname của API (ví dụ: 'fapi.binance.com').
- * @param {string} fullPath - Đường dẫn đầy đủ của API (ví dụ: '/fapi/v1/account?params=...').
+ * @param {string} path - Đường dẫn của API (ví dụ: '/fapi/v1/account').
  * @param {object} headers - Các HTTP headers.
  * @param {string} postData - Dữ liệu body cho POST request (được thêm vào).
  * @returns {Promise<string>} Dữ liệu phản hồi dạng chuỗi JSON.
  */
-function makeHttpRequest(method, hostname, fullPath, headers, postData = '') { // Đã thêm postData
+function makeHttpRequest(method, hostname, path, headers, postData = '') { // Đã thêm postData
     return new Promise((resolve, reject) => {
         const options = {
             hostname: hostname,
-            path: fullPath,
+            path: path, // path giờ sẽ là đường dẫn không có query string cho POST
             method: method,
             headers: headers,
         };
@@ -112,15 +112,15 @@ function makeHttpRequest(method, hostname, fullPath, headers, postData = '') { /
 
 /**
  * Gửi yêu cầu ĐÃ KÝ tới API Binance Futures.
- * (Gộp chính xác từ signedRequest của test.js, chỉ đổi tên hàm)
+ * (Đã sửa đổi để xử lý cả GET và POST một cách chính xác)
  * @param {string} fullEndpointPath - Đường dẫn đầy đủ của API (ví dụ: '/fapi/v2/account').
  * @param {string} method - Phương thức HTTP (GET, POST).
  * @param {object} params - Các tham số truy vấn.
  * @returns {Promise<object>} Dữ liệu trả về từ API.
  */
-async function callSignedAPI(fullEndpointPath, method = 'GET', params = {}) { // Đã thêm method
-    const recvWindow = 5000; // Từ test.js
-    const timestamp = Date.now(); // Lấy timestamp hiện tại của máy cục bộ (như test.js)
+async function callSignedAPI(fullEndpointPath, method = 'GET', params = {}) {
+    const recvWindow = 5000;
+    const timestamp = Date.now(); // Sử dụng timestamp như trong test.js
 
     let queryString = Object.keys(params)
                             .map(key => `${key}=${params[key]}`)
@@ -129,19 +129,27 @@ async function callSignedAPI(fullEndpointPath, method = 'GET', params = {}) { //
     queryString += (queryString ? '&' : '') + `timestamp=${timestamp}&recvWindow=${recvWindow}`;
 
     const signature = createSignature(queryString, SECRET_KEY);
-    const fullPathWithQuery = `${fullEndpointPath}?${queryString}&signature=${signature}`;
+    
+    // --- ĐIỂM QUAN TRỌNG ĐÃ SỬA ĐỔI CHO POST REQUEST ---
+    let requestPath;
+    let postData = '';
+
+    if (method === 'GET') {
+        requestPath = `${fullEndpointPath}?${queryString}&signature=${signature}`;
+    } else if (method === 'POST') {
+        requestPath = fullEndpointPath; // Đối với POST, path không có query string
+        postData = `${queryString}&signature=${signature}`; // Toàn bộ query string và signature đi vào body
+    } else {
+        throw new Error(`Unsupported method: ${method}`);
+    }
+    // --- KẾT THÚC ĐIỂM SỬA ĐỔI ---
 
     const headers = {
         'X-MBX-APIKEY': API_KEY,
-        'Content-Type': 'application/json',
+        'Content-Type': 'application/x-www-form-urlencoded', // Quan trọng: Đây là định dạng cho POST requests có tham số trong body
     };
 
     try {
-        // Đối với POST, makeHttpRequest cần chuỗi truy vấn trong body
-        const postData = (method === 'POST') ? queryString + `&signature=${signature}` : ''; 
-        // fullPathWithQuery sẽ chỉ là fullEndpointPath cho POST, query và signature nằm trong postData
-        const requestPath = (method === 'POST') ? fullEndpointPath : fullPathWithQuery;
-
         const rawData = await makeHttpRequest(method, BASE_HOST, requestPath, headers, postData); 
         return JSON.parse(rawData);
     } catch (error) {
@@ -152,7 +160,10 @@ async function callSignedAPI(fullEndpointPath, method = 'GET', params = {}) { //
             addLog("  Gợi ý: Lỗi xác thực API Key. Vui lòng kiểm tra lại API_KEY, SECRET_KEY và quyền truy cập Futures của bạn.");
         } else if (error.code === -1021) {
             addLog("  Gợi ý: Lỗi lệch thời gian. Đảm bảo đồng hồ máy tính của bạn chính xác (sử dụng NTP) hoặc nếu vẫn gặp lỗi, hãy báo lại để chúng ta thêm cơ chế đồng bộ thời gian nâng cao.");
-        } else if (error.code === 404) {
+        } else if (error.code === -1022) { // Thêm gợi ý cho lỗi -1022
+            addLog("  Gợi ý: Lỗi chữ ký không hợp lệ. Điều này có thể do API Key/Secret bị sai, hoặc có vấn đề trong cách bạn xây dựng chuỗi tham số để ký (ví dụ: thiếu tham số, sai thứ tự, hoặc khoảng trắng không mong muốn).");
+        }
+        else if (error.code === 404) {
             addLog("  Gợi ý: Lỗi 404 Not Found. Đường dẫn API không đúng. Kiểm tra lại tài liệu API của Binance.");
         } else if (error.code === 'NETWORK_ERROR') {
              addLog("  Gợi ý: Kiểm tra kết nối mạng của bạn.");
@@ -179,6 +190,7 @@ async function callPublicAPI(fullEndpointPath, params = {}) {
     };
 
     try {
+        // Luôn là GET cho public API
         const rawData = await makeHttpRequest('GET', BASE_HOST, fullPathWithQuery, headers);
         return JSON.parse(rawData);
     } catch (error) {
@@ -253,7 +265,7 @@ app.get('/balance', async (req, res) => {
   try {
     addLog('>>> /balance được gọi');
     // Sử dụng callSignedAPI (đã gộp từ signedRequest của test.js)
-    const account = await callSignedAPI('/fapi/v2/account');
+    const account = await callSignedAPI('/fapi/v2/account', 'GET'); // Thêm method GET rõ ràng
     const usdtAsset = account.assets.find(a => a.asset === 'USDT');
     res.json({ balance: usdtAsset ? parseFloat(usdtAsset.availableBalance) : 0 });
   } catch (error) {
@@ -394,7 +406,7 @@ async function placeShortOrder(symbol, currentFundingRate, bestFundingTime) {
     // Lấy số dư hiện tại của bạn
     addLog('>>> Đang kiểm tra số dư khả dụng...');
     // Sử dụng callSignedAPI (đã gộp từ signedRequest của test.js)
-    const account = await callSignedAPI('/fapi/v2/account');
+    const account = await callSignedAPI('/fapi/v2/account', 'GET');
     const usdtAsset = account.assets.find(a => a.asset === 'USDT');
     const balance = usdtAsset ? parseFloat(usdtAsset.availableBalance) : 0;
     addLog(`Số dư khả dụng hiện tại: ${balance.toFixed(2)} USDT`);
@@ -530,7 +542,7 @@ async function closeShortPosition(symbol, qtyToClose = null) {
   try {
     addLog(`>>> Đang đóng lệnh SHORT cho ${symbol}`);
     // Sử dụng callSignedAPI (đã gộp từ signedRequest của test.js)
-    const positions = await callSignedAPI('/fapi/v2/positionRisk');
+    const positions = await callSignedAPI('/fapi/v2/positionRisk', 'GET'); // Thêm method GET rõ ràng
     const position = positions.find(p => p.symbol === symbol);
 
     if (position && parseFloat(position.positionAmt) !== 0) {
@@ -604,7 +616,7 @@ cron.schedule('*/1 * * * *', async () => {
 
             if (typeof maxLeverageForCandidate === 'number' && maxLeverageForCandidate > 1) {
                 // Sử dụng callSignedAPI (đã gộp từ signedRequest của test.js)
-                const account = await callSignedAPI('/fapi/v2/account');
+                const account = await callSignedAPI('/fapi/v2/account', 'GET');
                 const usdtAsset = account.assets.find(a => a.asset === 'USDT');
                 const balance = usdtAsset ? parseFloat(usdtAsset.availableBalance) : 0;
                 
@@ -669,7 +681,7 @@ cron.schedule('*/1 * * * *', async () => {
   addLog('>>> [Khởi động] Đang kiểm tra API Key với Binance...');
   try {
     // Sử dụng callSignedAPI (đã gộp từ signedRequest của test.js)
-    const account = await callSignedAPI('/fapi/v2/account');
+    const account = await callSignedAPI('/fapi/v2/account', 'GET');
     addLog('✅ [Khởi động] API Key hoạt động bình thường! Balance: ' + account.assets.find(a => a.asset === 'USDT')?.availableBalance);
   } catch (error) {
     addLog('❌ [Khởi động] API Key không hoạt động hoặc có lỗi: ' + (error.msg || error.message));
