@@ -59,26 +59,33 @@
       width: 95%;
       max-width: 900px;
       overflow-y: auto;
-      overflow-x: hidden; /* Chắc chắn ẩn cuộn ngang */
-      background: #111;
-      padding: 15px;
-      font-size: 0.3rem; /* Kích thước chữ như bạn muốn */
+      overflow-x: hidden;
+      background: #111; /* Màu nền tổng thể của khung log */
+      padding: 0; /* Đặt padding bằng 0 ở đây để các dòng log con có thể padding riêng */
+      font-size: 0.3rem;
       border: 1px solid #333;
       margin-bottom: 20px;
       font-family: 'Courier New', Courier, monospace;
       box-sizing: border-box;
-      white-space: pre-wrap; /* Giữ định dạng, nhưng cho phép xuống dòng */
-      word-break: break-all; /* Ngắt từ khi cần để không tràn */
-      overflow-wrap: break-word; /* Cách mới hơn để ngắt từ dài */
-      color: #fff;
+      color: #0f0; /* Màu chữ mặc định */
     }
-    #log pre {
-        margin: 0;
+
+    /* Định dạng cho từng dòng log */
+    #log div.log-line {
+        padding: 5px 15px; /* Padding cho từng dòng log */
         line-height: 1.4;
-        /* Các thuộc tính này thừa nếu đã đặt trên #log, nhưng giữ lại để đảm bảo */
-        white-space: pre-wrap;
-        word-break: break-all;
-        overflow-wrap: break-word;
+        white-space: pre-wrap; /* Giữ định dạng, cho phép xuống dòng */
+        word-break: break-all; /* Ngắt từ khi cần */
+        overflow-wrap: break-word; /* Cách mới hơn để ngắt từ dài */
+    }
+
+    /* Màu nền xen kẽ */
+    #log div.log-line:nth-child(odd) {
+        background-color: #1a1a1a; /* Xám đậm hơn */
+    }
+
+    #log div.log-line:nth-child(even) {
+        background-color: #0d0d0d; /* Đen xám */
     }
 
     .button-row {
@@ -132,7 +139,8 @@
     @media (max-width: 768px) {
       #top { font-size: 10vw; margin-bottom: 15px; }
       .status-bar { font-size: 1rem; padding: 8px 10px; }
-      #log { font-size: 0.8rem; padding: 10px; height: 35vh; }
+      #log { font-size: 0.3rem; height: 35vh; }
+      #log div.log-line { padding: 5px 10px; }
       button { font-size: 1.2rem; padding: 10px 15px; min-width: unset; }
       .button-row { flex-direction: column; gap: 10px; }
     }
@@ -140,7 +148,8 @@
     @media (max-width: 480px) {
         #top { font-size: 12vw; }
         .status-bar { font-size: 0.9rem; }
-        #log { font-size: 0.8rem; height: 30vh; padding: 8px; }
+        #log { font-size: 0.3rem; height: 30vh; }
+        #log div.log-line { padding: 4px 8px; }
         button { font-size: 1rem; padding: 8px 12px; }
         .copyright { font-size: 0.8rem; }
     }
@@ -152,7 +161,7 @@
   <div class="status-bar" id="statusBar">Bot Status: Loading...</div>
 
   <div id="log">
-    <pre>Loading logs...</pre>
+    <div class="log-line">Loading logs...</div>
   </div>
 
   <div class="button-row">
@@ -176,14 +185,22 @@
             .then(data => {
                 const isScrolledToBottom = logDiv.scrollHeight - logDiv.clientHeight <= logDiv.scrollTop + 1;
                 const cleanData = data.replace(/[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g, '');
-                logDiv.innerHTML = `<pre>${cleanData}</pre>`;
+
+                // Chia dữ liệu log thành từng dòng và bọc mỗi dòng trong một div
+                const logLines = cleanData.split('\n').filter(line => line.trim() !== ''); // Tách theo xuống dòng và loại bỏ dòng trống
+                let htmlContent = '';
+                logLines.forEach(line => {
+                    htmlContent += `<div class="log-line">${line}</div>`;
+                });
+
+                logDiv.innerHTML = htmlContent; // Gán toàn bộ nội dung mới
                 if (isScrolledToBottom) {
                     logDiv.scrollTop = logDiv.scrollHeight;
                 }
             })
             .catch(error => {
                 console.error('Error fetching logs:', error);
-                logDiv.innerHTML = `<pre style="color: red;">Error loading logs: ${error.message || error}. Check bot server.</pre>`;
+                logDiv.innerHTML = `<div class="log-line" style="color: red;">Error loading logs: ${error.message || error}. Check bot server.</div>`;
             });
     }
 
@@ -208,7 +225,6 @@
         try {
             const response = await fetch('/start_bot_logic');
             const message = await response.text();
-            // alert(message); // Đã xóa dòng này
             fetchStatus();
             fetchLogs();
         } catch (error) {
@@ -221,7 +237,6 @@
         try {
             const response = await fetch('/stop_bot_logic');
             const message = await response.text();
-            // alert(message); // Đã xóa dòng này
             fetchStatus();
             fetchLogs();
         } catch (error) {
