@@ -8,7 +8,7 @@ dotenv.config();
 
 const app = express();
 
-const PORT = process.env.PORT || 3333;
+const PORT = process.env.PORT || 3334;
 
 // Kiểm tra API key
 if (!process.env.BINANCE_API_KEY || !process.env.BINANCE_API_SECRET) {
