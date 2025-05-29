@@ -152,44 +152,42 @@ async function publicRequest(fullEndpointPath, params = {}) {
     }
 }
 
-
-async function getAllFuturesLeverageAndBalance() {
+/**
+ * Lấy thông tin đòn bẩy cho một symbol cụ thể từ endpoint /fapi/v1/leverageBracket.
+ * @param {string} symbol - Tên cặp giao dịch (ví dụ: 'BTCUSDT').
+ * @returns {Promise<string>} Đòn bẩy tối đa (ví dụ: '125' hoặc 'N/A' nếu không tìm thấy).
+ */
+async function getLeverageBracketForSymbol(symbol) {
     try {
-        console.log("\n--- THÔNG TIN ĐÒN BẨY TỐI ĐA CỦA CÁC CẶP GIAO DỊCH FUTURES ---");
+        const response = await signedRequest('/fapi/v1/leverageBracket', { symbol: symbol });
 
-        // Lấy thông tin trao đổi công khai
-        const exchangeInfo = await publicRequest('/fapi/v1/exchangeInfo');
-
-        let leverageData = [];
-        let debugCount = 0; // Biến đếm để chỉ in vài cặp đầu tiên
-
-        for (const s of exchangeInfo.symbols) {
-            if (s.status === 'TRADING') {
-                // --- DEBUG: In ra cấu trúc dữ liệu cho vài cặp đầu tiên ---
-                if (debugCount < 5) { // In ra 5 cặp đầu tiên
-                    console.log(`\n--- DEBUG DỮ LIỆU CẶP: ${s.symbol} ---`);
-                    console.log(JSON.stringify(s, null, 2)); // In đối tượng s đẹp hơn
-                    console.log(`-----------------------------------`);
-                    debugCount++;
-                }
-                // --- KẾT THÚC DEBUG ---
-
-                let maxLev = 'N/A';
-                if (s.leverageBracket && Array.isArray(s.leverageBracket) && s.leverageBracket.length > 0) {
-                    // Kiểm tra cả initialLeverage và maxInitialLeverage
-                    if (s.leverageBracket[0].initialLeverage !== undefined) {
-                        maxLev = s.leverageBracket[0].initialLeverage;
-                    } else if (s.leverageBracket[0].maxInitialLeverage !== undefined) {
-                        maxLev = s.leverageBracket[0].maxInitialLeverage;
-                    }
-                }
-                leverageData.push(`  - Cặp: ${s.symbol}, Đòn bẩy tối đa: ${maxLev}x`);
+        // Phản hồi là một mảng, mỗi phần tử là thông tin đòn bẩy cho một bracket
+        // response[0] là đối tượng cho symbol được yêu cầu
+        // response[0].brackets là mảng các bracket đòn bẩy
+        if (response && Array.isArray(response) && response.length > 0 && response[0].brackets && response[0].brackets.length > 0) {
+            const firstBracket = response[0].brackets[0]; // Lấy bracket đầu tiên
+            if (firstBracket.maxInitialLeverage !== undefined) {
+                return firstBracket.maxInitialLeverage;
+            } else if (firstBracket.initialLeverage !== undefined) {
+                return firstBracket.initialLeverage;
             }
         }
+        return 'N/A'; // Không tìm thấy thông tin đòn bẩy
+    } catch (error) {
+        console.error(`Lỗi khi lấy đòn bẩy cho ${symbol}:`, error.msg || error.message);
+        return 'N/A';
+    }
+}
 
-        leverageData.sort();
-        leverageData.forEach(line => console.log(line));
 
+async function getSpecificCoinLeverageAndBalance() {
+    try {
+        // --- Cấu hình đồng coin bạn muốn lấy đòn bẩy ---
+        const targetSymbol = 'BTCUSDT'; // THAY ĐỔI TÊN ĐỒNG COIN Ở ĐÂY NẾU BẠN MUỐN
+
+        console.log(`\n--- LẤY ĐÒN BẨY TỐI ĐA CHO ${targetSymbol} ---`);
+        const maxLeverage = await getLeverageBracketForSymbol(targetSymbol);
+        console.log(`  - Cặp: ${targetSymbol}, Đòn bẩy tối đa: ${maxLeverage}x`);
 
         console.log(`\n--- SỐ DƯ TÀI KHOẢN FUTURES CỦA BẠN ---`);
         // Lấy thông tin tài khoản Futures (yêu cầu ký)
@@ -207,10 +205,10 @@ async function getAllFuturesLeverageAndBalance() {
         });
 
     } catch (error) {
-        console.error("\nCó lỗi xảy ra trong hàm chính getAllFuturesLeverageAndBalance.");
+        console.error("\nCó lỗi xảy ra trong hàm chính getSpecificCoinLeverageAndBalance.");
         // Lỗi đã được xử lý chi tiết trong các hàm publicRequest/signedRequest
     }
 }
 
 // Gọi hàm chính để bắt đầu lấy thông tin
-getAllFuturesLeverageAndBalance();
+getSpecificCoinLeverageAndBalance();
