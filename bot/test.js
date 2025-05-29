@@ -2,6 +2,7 @@ import axios from 'axios';
 import crypto from 'crypto';
 import dotenv from 'dotenv';
 
+import dotenv from 'dotenv';
 dotenv.config();
 
 const apiKey = process.env.BINANCE_API_KEY;
