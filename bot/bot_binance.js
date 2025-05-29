@@ -277,7 +277,7 @@ async function getCurrentPrice(symbol) {
 }
 
 // === Cấu hình Bot ===
-const MIN_USDT_BALANCE_TO_OPEN = 0.1; // Số dư USDT tối thiểu để mở lệnh (ví dụ: 0.1 USDT)
+const MIN_USDT_BALANCE_TO_OPEN = 0.2; // Số dư USDT tối thiểu để mở lệnh (0.1 USDT)
 const CAPITAL_PERCENTAGE_PER_TRADE = 0.5; // Phần trăm vốn sử dụng cho mỗi lệnh (50% tài khoản)
 
 // Cấu hình TP/SL theo yêu cầu mới
@@ -294,13 +294,16 @@ const TAKE_PROFIT_PERCENTAGES = {
 };
 
 const MIN_FUNDING_RATE_THRESHOLD = -0.0001; // Ngưỡng funding rate âm tối thiểu để xem xét (ví dụ: -0.01% = -0.0001)
-const MAX_POSITION_LIFETIME_SECONDS = 60; // Thời gian tối đa giữ một vị thế (tính bằng giây), ví dụ: 300 giây = 5 phút
+const MAX_POSITION_LIFETIME_SECONDS = 300; // Thời gian tối đa giữ một vị thế (tính bằng giây), ví dụ: 300 giây = 5 phút
 
-// Cấu hình thời gian chạy bot theo giờ UTC
-const SCAN_MINUTE_UTC = 50; // Phút thứ 24 để quét và chọn đồng coin
-const OPEN_ORDER_MINUTE_UTC = 55; // Phút thứ 25 để mở lệnh
+// Cấu hình thời gian chạy bot theo giờ UTC MỚI
+const SCAN_MINUTE_UTC = 58; // Phút thứ 58 để quét và chọn đồng coin
+const OPEN_ORDER_MINUTE_UTC = 0; // Giờ XX:00:00:100 để mở lệnh (được tính toán cụ thể trong code)
 const TARGET_SECOND_UTC = 0;  // Giây thứ 0
-const TARGET_MILLISECOND_UTC = 500; // mili giây thứ 500
+const TARGET_MILLISECOND_UTC = 100; // mili giây thứ 100
+
+// Các giờ funding rate của Binance Futures (UTC)
+const FUNDING_HOURS_UTC = [0, 8, 16]; 
 
 let currentOpenPosition = null; // Biến toàn cục để theo dõi vị thế đang mở
 let positionCheckInterval = null; // Biến để lưu trữ setInterval cho việc kiểm tra vị thế
@@ -308,7 +311,7 @@ let nextScheduledTimeout = null; // Biến để lưu trữ setTimeout cho lần
 
 // --- Hàm chính để đóng lệnh Short ---
 async function closeShortPosition(symbol, quantityToClose, reason = 'manual') {
-    addLog(`>>> Đang cố gắng đóng lệnh SHORT cho ${symbol} với khối lượng ${quantityToClose}.`);
+    addLog(`\n>>> Đang cố gắng đóng lệnh SHORT cho ${symbol} với khối lượng ${quantityToClose}.`);
     try {
         const symbolInfo = await getSymbolFiltersAndMaxLeverage(symbol);
         if (!symbolInfo) {
@@ -355,7 +358,7 @@ async function closeShortPosition(symbol, quantityToClose, reason = 'manual') {
 
 // --- Hàm chính để mở lệnh Short ---
 async function openShortPosition(symbol, fundingRate, usdtBalance) {
-    addLog(`>>> Đang cố gắng mở lệnh SHORT cho ${symbol} với Funding Rate: ${fundingRate}`);
+    addLog(`\n>>> Đang cố gắng mở lệnh SHORT cho ${symbol} với Funding Rate: ${fundingRate}`);
     try {
         // 1. Lấy thông tin symbol và đòn bẩy
         const symbolInfo = await getSymbolFiltersAndMaxLeverage(symbol);
@@ -498,13 +501,15 @@ async function manageOpenPosition() {
 
         const currentPrice = await getCurrentPrice(symbol);
         if (currentPrice === null) {
-            process.stdout.write(`>>> Đang kiểm tra vị thế ${symbol} (${quantity}). Đã mở ${elapsedTimeSeconds.toFixed(0)}/${MAX_POSITION_LIFETIME_SECONDS} giây. (Đang lấy giá...)     \r`);
+            // Không log gì nếu không lấy được giá, chỉ cập nhật dòng cũ
+            process.stdout.write(`\r>>> Đang kiểm tra vị thế ${symbol} (${quantity}). Đã mở ${elapsedTimeSeconds.toFixed(0)}/${MAX_POSITION_LIFETIME_SECONDS} giây. (Đang lấy giá...)     `);
             return;
         }
         
         // Log đếm ngược thời gian còn lại trên cùng một dòng
         const timeLeft = MAX_POSITION_LIFETIME_SECONDS - Math.floor(elapsedTimeSeconds);
-        process.stdout.write(`>>> Vị thế ${symbol}: Đang mở, còn lại ${timeLeft} giây. Giá hiện tại: ${currentPrice.toFixed(pricePrecision)} | TP: ${tpPrice.toFixed(pricePrecision)} | SL: ${slPrice.toFixed(pricePrecision)}           \r`);
+        process.stdout.write(`\r>>> Vị thế ${symbol}: Đang mở, còn lại ${timeLeft} giây. Giá hiện tại: ${currentPrice.toFixed(pricePrecision)} | TP: ${tpPrice.toFixed(pricePrecision)} | SL: ${slPrice.toFixed(pricePrecision)}           `);
+
 
         let shouldClose = false;
         let closeReason = '';
@@ -530,16 +535,23 @@ async function manageOpenPosition() {
         }
 
     } catch (error) {
-        addLog(`❌ Lỗi khi quản lý vị thế mở cho ${symbol}: ${error.msg || error.message}`);
+        addLog(`\n❌ Lỗi khi quản lý vị thế mở cho ${symbol}: ${error.msg || error.message}`);
         isClosingPosition = false; // Đảm bảo cờ được xóa ngay cả khi có lỗi
     }
 }
 
 // Hàm chạy logic tìm kiếm cơ hội
-async function runTradingLogic() {
+async function runTradingLogic(isFundingScanFlag) {
     if (currentOpenPosition) {
         addLog('>>> Có vị thế đang mở. Bỏ qua tìm kiếm cơ hội mới.');
-        return; // Không tìm kiếm cơ hội mới nếu đang có vị thế
+        return; 
+    }
+
+    // Nếu không phải là phiên quét cho giờ funding, chỉ ngủ và lên lịch lại
+    if (!isFundingScanFlag) {
+        addLog('>>> Hiện tại không phải là phiên quét chuẩn bị cho giờ trả Funding. Bot sẽ ngủ tới phiên quét Funding tiếp theo.');
+        scheduleNextMainCycle();
+        return;
     }
 
     addLog('>>> Đang quét tìm symbol có funding rate âm...');
@@ -602,23 +614,28 @@ async function runTradingLogic() {
         }
 
         const now = new Date();
-        // Tính thời gian đến phút :25 giây :00 mili giây :500 của cùng giờ
-        let targetOpenTime = new Date(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 
-                                      now.getUTCHours(), OPEN_ORDER_MINUTE_UTC, TARGET_SECOND_UTC, TARGET_MILLISECOND_UTC);
+        // Lệnh sẽ được mở vào giờ funding tiếp theo (ví dụ nếu đang 07:58, sẽ mở 08:00:00:100)
+        let finalOrderOpenTime = new Date(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 
+                                      now.getUTCHours() + 1, OPEN_ORDER_MINUTE_UTC, TARGET_SECOND_UTC, TARGET_MILLISECOND_UTC);
         
-        // Nếu đã qua thời gian mục tiêu trong giờ hiện tại, chuyển sang giờ tiếp theo
-        if (targetOpenTime.getTime() <= now.getTime()) {
-            targetOpenTime.setUTCHours(targetOpenTime.getUTCHours() + 1);
+        // Đảm bảo thời gian mở lệnh là đúng
+        if (finalOrderOpenTime.getTime() <= now.getTime()) {
+            // Nếu vì lý do nào đó mà thời gian đã qua, thì chuyển sang giờ tiếp theo nữa (ví dụ: quét 07:59:59, nhưng giờ mở lệnh 08:00:00:100 vẫn sau)
+            finalOrderOpenTime.setUTCHours(finalOrderOpenTime.getUTCHours() + 1);
+            // Đảm bảo các thành phần phút, giây, mili giây đúng
+            finalOrderOpenTime.setUTCMinutes(OPEN_ORDER_MINUTE_UTC);
+            finalOrderOpenTime.setUTCSeconds(TARGET_SECOND_UTC);
+            finalOrderOpenTime.setUTCMilliseconds(TARGET_MILLISECOND_UTC);
         }
 
-        const timeLeftMs = targetOpenTime.getTime() - now.getTime();
+        const timeLeftMs = finalOrderOpenTime.getTime() - now.getTime();
         const timeLeftSeconds = Math.max(0, Math.ceil(timeLeftMs / 1000));
 
         addLog(`\n✅ Đã chọn đồng coin: **${selectedCandidate.symbol}**`);
         addLog(`  + Funding Rate: **${selectedCandidate.fundingRate}**`);
         addLog(`  + Đòn bẩy tối đa: **${selectedCandidate.maxLeverage}x**`);
         addLog(`  + Số tiền dự kiến mở lệnh: **${capitalToUse.toFixed(2)} USDT** (Khối lượng ước tính: **${estimatedQuantity} ${selectedCandidate.symbol}**)`);
-        addLog(`  + Lệnh sẽ được mở vào lúc **${targetOpenTime.toLocaleTimeString('en-GB', { hour12: false, timeZone: 'UTC' })}:${String(targetOpenTime.getMilliseconds()).padStart(3, '0')} UTC** (còn khoảng **${timeLeftSeconds} giây** đếm ngược).`);
+        addLog(`  + Lệnh sẽ được mở vào lúc **${finalOrderOpenTime.toLocaleTimeString('en-GB', { hour12: false, timeZone: 'UTC' })}:${String(finalOrderOpenTime.getMilliseconds()).padStart(3, '0')} UTC** (còn khoảng **${timeLeftSeconds} giây** đếm ngược).`);
         
         addLog(`>>> Đang chờ đến thời điểm mở lệnh...`);
         await delay(timeLeftMs);
@@ -643,28 +660,69 @@ async function scheduleNextMainCycle() {
     clearTimeout(nextScheduledTimeout); // Xóa bất kỳ lịch trình cũ nào
 
     if (currentOpenPosition) {
-        // Nếu đang có vị thế, thì quản lý vị thế sẽ tự động gọi scheduleNextMainCycle sau khi đóng.
-        // Không cần lên lịch một chu kỳ chính khác ngay lập tức.
-        return; 
+        return; // Managed by manageOpenPosition
     }
     
     const now = new Date();
-    let nextRunMoment = new Date(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 
+    let nextScanMoment = new Date(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 
                                    now.getUTCHours(), SCAN_MINUTE_UTC, TARGET_SECOND_UTC, TARGET_MILLISECOND_UTC);
     
-    // Nếu thời gian quét đã qua trong giờ hiện tại, chuyển sang giờ tiếp theo
-    if (nextRunMoment.getTime() <= now.getTime()) {
-        nextRunMoment.setUTCHours(nextRunMoment.getUTCHours() + 1);
+    // Nếu thời gian hiện tại đã qua phút quét (XX:58), chuyển sang giờ tiếp theo để quét
+    if (now.getUTCMinutes() >= SCAN_MINUTE_UTC) {
+        nextScanMoment.setUTCHours(nextScanMoment.getUTCHours() + 1);
+    }
+    // Đảm bảo giây và mili giây được đặt lại cho thời điểm quét
+    nextScanMoment.setUTCSeconds(0);
+    nextScanMoment.setUTCMilliseconds(0);
+
+    let nextScheduledRunTime = nextScanMoment;
+    let isFundingScan = false;
+    let targetOrderOpenHourUTC = (nextScanMoment.getUTCHours() + 1) % 24; // Giờ mà lệnh sẽ được mở (ví dụ: quét 07:58 -> mở 08:00)
+
+    // Kiểm tra xem giờ mà lệnh sẽ được mở có phải là giờ Funding không
+    if (FUNDING_HOURS_UTC.includes(targetOrderOpenHourUTC)) {
+        isFundingScan = true;
+        addLog(`>>> Lịch trình: Phiên quét sắp tới (${nextScanMoment.toLocaleTimeString('en-GB', { hour12: false, timeZone: 'UTC' })} UTC) là để chuẩn bị cho giờ Funding **${targetOrderOpenHourUTC}:00 UTC**.`);
+    } else {
+        // Nếu không phải giờ Funding, tìm giờ Funding kế tiếp
+        addLog(`>>> Lịch trình: Phiên quét ${nextScanMoment.toLocaleTimeString('en-GB', { hour12: false, timeZone: 'UTC' })} UTC không phải cho giờ Funding. Tìm phiên quét Funding kế tiếp.`);
+        isFundingScan = false;
+        let foundNextFundingScan = false;
+        let tempScanTime = new Date(nextScanMoment.getTime()); // Bắt đầu từ thời gian quét được tính hiện tại
+
+        while (!foundNextFundingScan) {
+            tempScanTime.setUTCHours(tempScanTime.getUTCHours() + 1); // Kiểm tra giờ tiếp theo
+            tempScanTime.setUTCMinutes(SCAN_MINUTE_UTC);
+            tempScanTime.setUTCSeconds(0);
+            tempScanTime.setUTCMilliseconds(0);
+
+            let potentialOrderOpenHourForTemp = (tempScanTime.getUTCHours() + 1) % 24;
+            if (FUNDING_HOURS_UTC.includes(potentialOrderOpenHourForTemp)) {
+                foundNextFundingScan = true;
+                nextScheduledRunTime = tempScanTime;
+                targetOrderOpenHourUTC = potentialOrderOpenHourForTemp;
+            }
+            if (tempScanTime.getTime() > now.getTime() + (24 * 60 * 60 * 1000 * 2)) { // Giới hạn tìm kiếm trong 2 ngày
+                addLog('⚠️ Không tìm thấy giờ Funding trong 2 ngày tới. Vui lòng kiểm tra lại cấu hình.');
+                break; // Thoát vòng lặp để tránh vòng lặp vô hạn
+            }
+        }
+        addLog(`>>> Bot sẽ ngủ tới phiên quét Funding tiếp theo vào: **${nextScheduledRunTime.toLocaleTimeString('en-GB', { hour12: false, timeZone: 'UTC' })}:${String(nextScheduledRunTime.getMilliseconds()).padStart(3, '0')} UTC** (để mở lệnh vào giờ Funding **${targetOrderOpenHourUTC}:00 UTC**).`);
     }
     
-    const delayMs = nextRunMoment.getTime() - now.getTime();
+    const delayMs = nextScheduledRunTime.getTime() - now.getTime();
 
-    addLog(`>>> Bot sẽ tạm dừng tới phiên quét tiếp theo lúc: ${nextRunMoment.toLocaleTimeString('en-GB', { hour12: false, timeZone: 'UTC' })}:${String(nextRunMoment.getMilliseconds()).padStart(3, '0')} UTC.`);
+    if (delayMs < 0) { // Trường hợp đặc biệt nếu tính toán bị âm (hiếm khi xảy ra với logic trên)
+        addLog(`⚠️ [Lỗi Lịch trình] Thời gian chờ âm: ${delayMs} ms. Đang điều chỉnh lại.`);
+        // Nếu thời gian đã qua, lên lịch lại ngay lập tức
+        scheduleNextMainCycle();
+        return;
+    }
+
+    addLog(`>>> Bot sẽ chạy logic quét vào lúc: ${nextScheduledRunTime.toLocaleTimeString('en-GB', { hour12: false, timeZone: 'UTC' })}:${String(nextScheduledRunTime.getMilliseconds()).padStart(3, '0')} UTC.`);
     
     nextScheduledTimeout = setTimeout(async () => {
-        await runTradingLogic(); // Chạy logic tìm kiếm cơ hội
-        // runTradingLogic sẽ tự gọi scheduleNextMainCycle nếu không mở lệnh hoặc gặp lỗi
-        // Hoặc manageOpenPosition sẽ gọi nếu lệnh đóng
+        await runTradingLogic(isFundingScan); // Truyền cờ isFundingScan
     }, delayMs);
 }
 
