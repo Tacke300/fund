@@ -1,8 +1,11 @@
-const express = require('express');
-const fetch = require('node-fetch');
-const crypto = require('crypto');
+import express from 'express';
+import fetch from 'node-fetch';
+import crypto from 'crypto';
+
 const app = express();
 const port = 3000;
+
+// ... các code khác giữ nguyên, chỉ thay require => import
 
 // ==== Binance API Key/Secret (giữ bí mật) ====
 const APIKEY = 'cZ1Y2O0kggVEggEaPvhFcYQHS5b1EsT2OWZb8zdY9C0jGqNROvXRZHTJjnQ7OG4Q';
