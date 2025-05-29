@@ -2,46 +2,45 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Binance Signed Request Test</title>
+  <title>Lấy Leverage Binance Futures</title>
 </head>
 <body>
-  <button onclick="testSigned()">Gửi yêu cầu signed</button>
-  <pre id="result"></pre>
+  <h2>Lấy leverage tất cả cặp USDT (Binance Futures)</h2>
+  <button onclick="getLeverage()">Lấy Leverage</button>
+  <pre id="result">...</pre>
 
   <script>
-    const apiKey = 'YOUR_API_KEY';
-    const apiSecret = 'YOUR_API_SECRET';
-    const baseUrl = 'https://api.binance.com';
+    const apiKey = 'cZ1Y2O0kggVEggEaPvhFcYQHS5b1EsT2OWZb8zdY9C0jGqNROvXRZHTJjnQ7OG4Q';     // <-- THAY THẾ
+    const apiSecret = 'oU6pZFHgEvbpD9NmFXp5ZVnYFMQ7EIkBiz88qTzvmC3SpT9nEf4fcDf0pEnFzoTc'; // <-- THAY THẾ
+    const baseUrl = 'https://fapi.binance.com';
 
-    // Lấy thời gian server
     async function getServerTime(baseUrl) {
-      const res = await fetch(`${baseUrl}/api/v3/time`);
+      const res = await fetch(`${baseUrl}/fapi/v1/time`);
       const data = await res.json();
       return data.serverTime;
     }
 
-    // Tính HMAC SHA256 từ text + secret (WebCrypto API)
     async function hmacSHA256(secret, message) {
       const enc = new TextEncoder();
       const key = await crypto.subtle.importKey(
-        "raw", enc.encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]
+        "raw", enc.encode(secret),
+        { name: "HMAC", hash: "SHA-256" },
+        false, ["sign"]
       );
-      const signature = await crypto.subtle.sign("HMAC", key, enc.encode(message));
-      return Array.from(new Uint8Array(signature)).map(b => b.toString(16).padStart(2, '0')).join('');
+      const sig = await crypto.subtle.sign("HMAC", key, enc.encode(message));
+      return Array.from(new Uint8Array(sig)).map(b => b.toString(16).padStart(2, '0')).join('');
     }
 
-    // Tạo query string an toàn, đúng thứ tự
     function buildQueryString(params) {
       return Object.entries(params)
-        .sort()  // đảm bảo đúng thứ tự ký
-        .map(([key, val]) => `${key}=${encodeURIComponent(val)}`)
+        .sort()
+        .map(([k, v]) => `${k}=${encodeURIComponent(v)}`)
         .join('&');
     }
 
-    // Hàm gửi request signed
-    async function binanceSignedRequest(apiKey, apiSecret, endpoint, baseUrl, extraParams = {}) {
-      const timestamp = await getServerTime(baseUrl) - 500; // buffer chống lệch thời gian
-      const queryObj = { ...extraParams, timestamp };
+    async function binanceSignedRequest(endpoint, baseUrl, params = {}) {
+      const timestamp = await getServerTime(baseUrl) - 500;
+      const queryObj = { ...params, timestamp };
       const query = buildQueryString(queryObj);
       const signature = await hmacSHA256(apiSecret, query);
       const url = `${baseUrl}${endpoint}?${query}&signature=${signature}`;
@@ -51,24 +50,43 @@
       });
 
       const text = await res.text();
-      if (!res.ok) throw new Error(`Lỗi Binance API: ${res.status} ${text}`);
+      if (!res.ok) throw new Error(`Lỗi Binance: ${res.status} ${text}`);
       return JSON.parse(text);
     }
 
-    // Gọi thử hàm
-    async function testSigned() {
-      try {
-        const data = await binanceSignedRequest(
-          apiKey,
-          apiSecret,
-          '/api/v3/account',
-          baseUrl,
-          {}
-        );
-        document.getElementById('result').innerText = JSON.stringify(data, null, 2);
-      } catch (err) {
-        document.getElementById('result').innerText = err.toString();
+    async function getAllSymbolsUSDT() {
+      const res = await fetch(`${baseUrl}/fapi/v1/exchangeInfo`);
+      const data = await res.json();
+      return data.symbols
+        .filter(s => s.contractType === 'PERPETUAL' && s.quoteAsset === 'USDT')
+        .map(s => s.symbol);
+    }
+
+    async function getLeverage() {
+      const symbols = await getAllSymbolsUSDT();
+      const result = [];
+
+      for (const symbol of symbols) {
+        try {
+          const data = await binanceSignedRequest('/fapi/v1/leverageBracket', baseUrl, { symbol });
+          const brackets = data[0].brackets || [];
+
+          const maxLev = brackets.map(b => ({
+            symbol,
+            maxNotional: b.notionalCap,
+            maxLeverage: b.initialLeverage
+          }));
+
+          result.push(...maxLev);
+        } catch (e) {
+          console.warn(`Lỗi lấy leverage ${symbol}: ${e.message}`);
+        }
+
+        // Binance rate limit: tránh bị chặn, delay 50ms mỗi request
+        await new Promise(r => setTimeout(r, 50));
       }
+
+      document.getElementById('result').innerText = JSON.stringify(result, null, 2);
     }
   </script>
 </body>
