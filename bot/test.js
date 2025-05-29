@@ -1,14 +1,14 @@
-// Không sử dụng dotenv nữa, API Key và Secret Key sẽ được đặt trực tiếp
-// import 'dotenv/config'; // Dòng này không cần nữa
-
 // Import thư viện Binance mới theo cú pháp ES Module
-import Binance from 'binance-api-node';
+// CHÚ Ý: 'binanceApi' (hoặc một tên bất kỳ) thay vì 'Binance' (viết hoa)
+import binanceApi from 'binance-api-node';
 
 // --- CẤU HÌNH API KEY VÀ SECRET KEY TRỰC TIẾP TẠI ĐÂY ---
-// THAY THẾ "YOUR_BINANCE_API_KEY" BẰNG API KEY THẬT CỦA BẠN
+// THAY THẾ "cZ1Y2O0kggVEggEaPvhFcYQHS5b1EsT2OWZb8zdY9C0jGqNROvXRZHTJjnQ7OG4Q"
+// BẰNG API KEY THẬT CỦA BẠN
 const API_KEY = "cZ1Y2O0kggVEggEaPvhFcYQHS5b1EsT2OWZb8zdY9C0jGqNROvXRZHTJjnQ7OG4Q";
-// THAY THẾ "YOUR_BINANCE_SECRET_KEY" BẰNG SECRET KEY THẬT CỦA BẠN
-const SECRET_KEY = "oU6pZFHgEvbpD9NmFXp5ZVnYFMQ7EIkBiz88aTzvmC3SpT9nEf4fcDf0pEnFzoTc";
+// THAY THẾ "oU6pZFHgEvbpD9NmFXp5ZVnYFMQ7EIkBiz88aTzvmC3SpT9nEf4fcDf0pEnFzoTc"
+// BẰNG SECRET KEY THẬT CỦA BẠN
+const SECRET_KEY = "oU6pZFHgEvbpD9NmFXp5ZVnYFMQ7EIkBiz88aTzvmC3SpT9nEf4fccDf0pEnFzoTc";
 
 // Kiểm tra nhanh để đảm bảo bạn đã thay thế khóa API
 if (API_KEY === "YOUR_BINANCE_API_KEY" || SECRET_KEY === "YOUR_BINANCE_SECRET_KEY") {
@@ -17,8 +17,9 @@ if (API_KEY === "YOUR_BINANCE_API_KEY" || SECRET_KEY === "YOUR_BINANCE_SECRET_KE
 }
 
 // --- KHỞI TẠO CLIENT BINANCE FUTURES ---
-// Với binance-api-node, bạn khởi tạo client và chỉ định là Futures bằng cách sử dụng domain phù hợp
-const client = Binance({
+// Với binance-api-node, bạn khởi tạo client bằng cách gọi hàm đã import.
+// CHÚ Ý: Gọi 'binanceApi' (tên biến bạn đã import) như một hàm.
+const client = binanceApi({
   apiKey: API_KEY,
   apiSecret: SECRET_KEY,
   // Thư viện này tự động xử lý thời gian server và domain cho Futures
@@ -37,7 +38,31 @@ async function getAllFuturesLeverageAndBalance() {
             // Chỉ lấy thông tin của các cặp đang TRADING (đang hoạt động)
             if (s.status === 'TRADING') {
                 // binance-api-node trả về maxLeverage trực tiếp trong symbol
-                let maxLev = s.leverageFilter ? s.leverageFilter.maxLeverage : s.maxLeverage || 'N/A';
+                // Cần kiểm tra kỹ cấu trúc exchangeInfo trả về để đảm bảo trường maxLeverage tồn tại
+                let maxLev = 'N/A';
+                if (s.filters && s.filters.length > 0) {
+                    const marketLotSizeFilter = s.filters.find(f => f.filterType === 'MARKET_LOT_SIZE');
+                    if (marketLotSizeFilter && marketLotSizeFilter.maxLeverage) {
+                        maxLev = marketLotSizeFilter.maxLeverage;
+                    } else {
+                        // Một số symbol có thể không có filter này nhưng có maxLeverage trực tiếp
+                        const leverageBracketFilter = s.filters.find(f => f.filterType === 'NOTIONAL'); // Hoặc PRICE_FILTER, MIN_NOTIONAL
+                         if (leverageBracketFilter && leverageBracketFilter.maxLeverage) {
+                            maxLev = leverageBracketFilter.maxLeverage;
+                        }
+                    }
+                }
+                if (s.maxLeverage) { // Trường hợp maxLeverage nằm trực tiếp trên symbol (ít phổ biến hơn)
+                    maxLev = s.maxLeverage;
+                }
+
+                // Điều chỉnh để hiển thị maxLev nếu nó vẫn là N/A và có một giá trị leverage
+                // (Điều này có thể xảy ra nếu binance-api-node có cách trả về maxLeverage khác)
+                if (maxLev === 'N/A' && s.leverageBracket && s.leverageBracket.length > 0) {
+                    maxLev = s.leverageBracket[0].maxInitialLeverage; // Lấy đòn bẩy tối đa từ bracket đầu tiên
+                }
+
+
                 leverageData.push(`  - Cặp: ${s.symbol}, Đòn bẩy tối đa: ${maxLev}x`);
             }
         }
@@ -48,12 +73,11 @@ async function getAllFuturesLeverageAndBalance() {
 
 
         console.log(`\n--- SỐ DƯ TÀI KHOẢN FUTURES CỦA BẠN ---`);
-        // Lấy thông tin tài khoản Futures. Lưu ý đây là futuresAccountInfo, không phải accountInfo.
+        // Lấy thông tin tài khoản Futures. Lưu ý đây là futuresAccountInfo.
         const accountInfo = await client.futuresAccountInfo();
 
-        // Một số trường của accountInfo trong binance-api-node có thể hơi khác.
-        // Kiểm tra cấu trúc dữ liệu trả về hoặc dùng các trường tương đương.
-        console.log(`Tổng số dư ví (crossWalletBalance): ${accountInfo.totalWalletBalance} USDT`); // Tên trường có thể khác
+        // binance-api-node có tên trường khác một chút so với node-binance-api
+        console.log(`Tổng số dư ví (totalWalletBalance): ${accountInfo.totalWalletBalance} USDT`);
         console.log(`Số dư khả dụng (availableBalance): ${accountInfo.availableBalance} USDT`);
         console.log(`Tổng PnL chưa thực hiện (totalUnrealizedProfit): ${accountInfo.totalUnrealizedProfit} USDT`);
 
