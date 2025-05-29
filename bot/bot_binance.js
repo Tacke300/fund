@@ -7,7 +7,7 @@ import path from 'path';
 import cron from 'node-cron';
 
 // Để thay thế __dirname trong ES Modules
-import { fileURLToPath } from 'url';
+import { fileURLToPath } = from 'url';
 import { dirname } from 'path';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -16,6 +16,8 @@ const app = express();
 const port = 3000;
 
 // === API KEY & SECRET ===
+// GIỮ NGUYÊN API KEY VÀ SECRET CỦA BẠN NHƯ BẠN ĐÃ CUNG CẤP.
+// Đã thêm .trim() để đảm bảo không có khoảng trắng thừa, dù bạn đã kiểm tra kỹ.
 const apiKey = 'cZ1Y2O0kggVEggEaPvhFcYQHS5b1EsT2OWZb8zdY9C0jGqNROvXRZHTJjnQ7OG4Q'.trim(); // Your API Key
 const apiSecret = 'oU6pZFHgEvbpD9NmFXp5ZVnYFMQ7EIkBiz88aTzvmC3SpT9nEf4fcDf0pEnFzoTc'.trim(); // Your API Secret
 
@@ -42,7 +44,7 @@ function addLog(message) {
   if (logs.length > 1000) logs.shift(); // Giới hạn số lượng log
 }
 
-const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+const delay = ms => new Promise(resolve => setTimeout(ms));
 
 /***************** HÀM KÝ & GỌI API THỦ CÔNG (Được nhúng vào) *****************/
 function getSignature(queryString, secret) {
@@ -78,8 +80,9 @@ async function syncServerTime() {
  * @returns {Promise<Object>} Dữ liệu JSON trả về từ API.
  */
 async function callSignedAPI(endpoint, method = 'GET', params = {}) {
-  const timestamp = Date.now() + serverTimeOffset; // Sử dụng timestamp đã đồng bộ
-  const recvWindow = 60000; // Có thể tăng nếu mạng latency cao
+  // Đảm bảo timestamp được tạo ngay trước khi gửi request
+  const timestamp = Date.now() + serverTimeOffset; 
+  const recvWindow = 60000; // Có thể tăng nếu mạng latency cao, thử 5000 hoặc 10000 trước khi lên 60000
 
   const allParamsForSignature = {
     timestamp: String(timestamp),
@@ -95,6 +98,12 @@ async function callSignedAPI(endpoint, method = 'GET', params = {}) {
 
   const signature = getSignature(queryStringForSignature, apiSecret);
 
+  // Debug log để kiểm tra chuỗi ký và chữ ký
+  addLog(`[DEBUG SIGNATURE] Endpoint: ${endpoint}`);
+  addLog(`[DEBUG SIGNATURE] Query String for Signature: ${queryStringForSignature}`);
+  addLog(`[DEBUG SIGNATURE] Generated Signature: ${signature}`);
+
+
   const queryStringForUrl = sortedKeysForSignature
     .map(key => `${key}=${encodeURIComponent(allParamsForSignature[key])}`)
     .join('&');
@@ -107,8 +116,13 @@ async function callSignedAPI(endpoint, method = 'GET', params = {}) {
     method,
     headers: {
       'X-MBX-APIKEY': apiKey,
+      'User-Agent': 'Binance-Node-Bot-Client' // Thêm User-Agent header
     }
   };
+
+  // Debug log để kiểm tra full URL và headers (chỉ một phần API Key)
+  addLog(`[DEBUG API CALL] Full Request URL: https://${options.hostname}${options.path}`);
+  addLog(`[DEBUG API CALL] API Key Sent (first 5 chars): ${apiKey.substring(0, 5)}...`); 
 
   return new Promise((resolve, reject) => {
     const req = https.request(options, res => {
@@ -131,11 +145,15 @@ async function callSignedAPI(endpoint, method = 'GET', params = {}) {
           } catch (parseError) {
             // Không thể parse JSON, giữ nguyên body
           }
+          addLog(`❌ Lỗi API phản hồi cho ${endpoint}: ${res.statusCode} - ${errorMsg}`); // Log lỗi phản hồi
           reject(new Error(`API lỗi ${endpoint}: ${res.statusCode} - ${errorMsg}`));
         }
       });
     });
-    req.on('error', err => reject(new Error(`Lỗi request đến ${endpoint}: ${err.message}`)));
+    req.on('error', err => {
+        addLog(`❌ Lỗi request đến ${endpoint}: ${err.message}`); // Log lỗi network
+        reject(new Error(`Lỗi request đến ${endpoint}: ${err.message}`));
+    });
     req.end();
   });
 }
@@ -597,7 +615,17 @@ cron.schedule('*/1 * * * *', async () => {
     addLog('Lỗi cron job: ' + error.message);
   }
 });
+
+// Thêm một đoạn code nhỏ để kiểm tra API ngay khi khởi động
+// Điều này giúp bạn thấy log lỗi ngay lập tức
 (async () => {
-  const res = await callSignedAPI('/fapi/v2/account');
-  console.log(res);
+  addLog('>>> [Khởi động] Đang kiểm tra API Key với Binance...');
+  try {
+    const account = await callSignedAPI('/fapi/v2/account');
+    addLog('✅ [Khởi động] API Key hoạt động bình thường! Balance: ' + account.assets.find(a => a.asset === 'USDT')?.availableBalance);
+  } catch (error) {
+    addLog('❌ [Khởi động] API Key không hoạt động hoặc có lỗi: ' + error.message);
+    addLog('   -> Nếu lỗi là "-2014 API-key format invalid.", hãy kiểm tra lại API Key/Secret của bạn (chữ hoa/thường, khoảng trắng) hoặc giới hạn IP trên Binance.');
+    addLog('   -> Nếu lỗi là "-1021 Timestamp for this request is outside of the recvWindow.", hãy kiểm tra lại việc đồng bộ thời gian trên VPS (`sudo ntpdate pool.ntp.org` và `sudo timedatectl set-timezone UTC`).');
+  }
 })();
