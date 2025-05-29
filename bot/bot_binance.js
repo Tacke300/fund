@@ -52,7 +52,7 @@ const TAKE_PROFIT_PERCENTAGES = {
     125: 1.25,
 };
 
-const MIN_FUNDING_RATE_THRESHOLD = -0.003; // Ngưỡng funding rate âm tối thiểu để xem xét (ví dụ: -0.01% = -0.0001)
+const MIN_FUNDING_RATE_THRESHOLD = -0.004; // Ngưỡng funding rate âm tối thiểu để xem xét (ví dụ: -0.01% = -0.0001)
 const MAX_POSITION_LIFETIME_SECONDS = 60; // Thời gian tối đa giữ một vị thế (tính bằng giây), ví dụ: 60 giây = 1 phút
 
 // Cấu hình thời gian chạy bot theo giờ UTC
