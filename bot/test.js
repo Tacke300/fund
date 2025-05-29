@@ -1,16 +1,19 @@
-// Sử dụng cú pháp ES Module để tải biến môi trường
-import 'dotenv/config';
+// Không sử dụng dotenv nữa, API Key và Secret Key sẽ được đặt trực tiếp
+// import 'dotenv/config'; // Dòng này không cần nữa
 
 // Import thư viện Binance theo cú pháp ES Module
 import Binance from 'node-binance-api';
 
-// --- CẤU HÌNH API KEY VÀ SECRET KEY ---
-const API_KEY = process.env.BINANCE_API_KEY;
-const SECRET_KEY = process.env.BINANCE_SECRET_KEY;
+// --- CẤU HÌNH API KEY VÀ SECRET KEY TRỰC TIẾP TẠI ĐÂY ---
+// THAY THẾ "YOUR_BINANCE_API_KEY" BẰNG API KEY THẬT CỦA BẠN
+const API_KEY = "cZ1Y2O0kggVEggEaPvhFcYQHS5b1EsT2OWZb8zdY9C0jGqNROvXRZHTJjnQ7OG4Q";
+// THAY THẾ "YOUR_BINANCE_SECRET_KEY" BẰNG SECRET KEY THẬT CỦA BẠN
+const SECRET_KEY = "oU6pZFHgEvbpD9NmFXp5ZVnYFMQ7EIkBiz88aTzvmC3SpT9nEf4fcDf0pEnFzoTc";
 
-if (!API_KEY || !SECRET_KEY) {
-    console.error("Lỗi: Vui lòng cung cấp BINANCE_API_KEY và BINANCE_SECRET_KEY trong tệp .env");
-    process.exit(1); // Thoát chương trình nếu thiếu khóa
+// Bạn có thể bỏ qua kiểm tra này nếu bạn chắc chắn đã đặt khóa đúng
+if (API_KEY === "YOUR_BINANCE_API_KEY" || SECRET_KEY === "YOUR_BINANCE_SECRET_KEY") {
+    console.error("Lỗi: Vui lòng thay thế 'YOUR_BINANCE_API_KEY' và 'YOUR_BINANCE_SECRET_KEY' bằng khóa API thật của bạn trong tệp test.js.");
+    process.exit(1);
 }
 
 // --- CẤU HÌNH CHO BINANCE FUTURES API ---
@@ -32,13 +35,13 @@ async function getAllFuturesLeverageAndBalance() {
         console.log("\n--- THÔNG TIN ĐÒN BẨY TỐI ĐA CỦA CÁC CẶP GIAO DỊCH FUTURES ---");
 
         // Lấy thông tin trao đổi để tìm max leverage cho tất cả các symbol
-        // binance.futuresExchangeInfo() sẽ dùng base URL đã cấu hình
         const exchangeInfo = await binance.futuresExchangeInfo();
 
         let leverageData = [];
         for (const s of exchangeInfo.symbols) {
             if (s.status === 'TRADING') {
                 let maxLev = 'N/A';
+                // Đòn bẩy tối đa thường nằm trong filter loại MARKET_LOT_SIZE hoặc trực tiếp trong symbol
                 const leverageFilter = s.filters.find(f => f.filterType === 'MARKET_LOT_SIZE' && f.maxLeverage);
                 if (leverageFilter) {
                     maxLev = leverageFilter.maxLeverage;
@@ -54,7 +57,6 @@ async function getAllFuturesLeverageAndBalance() {
 
 
         console.log(`\n--- SỐ DƯ TÀI KHOẢN FUTURES CỦA BẠN ---`);
-        // binance.futuresAccount() sẽ dùng base URL đã cấu hình
         const accountInfo = await binance.futuresAccount();
 
         console.log(`Tổng số dư ví (crossWalletBalance): ${accountInfo.crossWalletBalance} USDT`);
