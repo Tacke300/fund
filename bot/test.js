@@ -1,7 +1,10 @@
 // Tải các biến môi trường từ tệp .env
 require('dotenv').config();
+import dotenv from 'dotenv';
+dotenv.config(); // Hoặc bạn có thể dùng import 'dotenv/config'; nếu muốn ngắn gọn hơn
 
-const Binance = require('node-binance-api');
+import Binance from 'node-binance-api';
+
 
 // --- CẤU HÌNH API KEY VÀ SECRET KEY ---
 const API_KEY = process.env.BINANCE_API_KEY;
