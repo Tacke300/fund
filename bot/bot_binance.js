@@ -24,11 +24,23 @@ let exchangeInfoCache = null;
 // Biến cờ để tránh việc gửi nhiều lệnh đóng cùng lúc
 let isClosingPosition = false;
 
-// Hàm addLog để ghi nhật ký
+// Hàm addLog để ghi nhật ký, giờ hiển thị theo UTC+7 (giờ VN)
 function addLog(message) {
     const now = new Date();
-    const time = `${now.toLocaleDateString('en-GB')} ${now.toLocaleTimeString('en-US', { hour12: false })}.${String(now.getMilliseconds()).padStart(3, '0')}`;
-    const logEntry = `[${time}] ${message}`;
+    // Tạo đối tượng Intl.DateTimeFormat để định dạng theo múi giờ UTC+7
+    const formatter = new Intl.DateTimeFormat('en-GB', {
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        fractionalSecondDigits: 3, // Hiển thị mili giây
+        hour12: false,
+        timeZone: 'Asia/Ho_Chi_Minh' // Múi giờ Việt Nam
+    });
+    const time = formatter.format(now);
+    const logEntry = `[${time}] ${message}\n----------------------------------------------------`; // Thêm đường ngang
     console.log(logEntry);
 }
 
@@ -94,7 +106,7 @@ async function callSignedAPI(fullEndpointPath, method = 'GET', params = {}) {
 
     let queryString = Object.keys(params)
                                     .map(key => `${key}=${params[key]}`)
-                                    .join('&');
+                                .join('&');
 
     queryString += (queryString ? '&' : '') + `timestamp=${timestamp}&recvWindow=${recvWindow}`;
 
@@ -277,7 +289,7 @@ async function getCurrentPrice(symbol) {
 }
 
 // === Cấu hình Bot ===
-const MIN_USDT_BALANCE_TO_OPEN = 0.2; // Số dư USDT tối thiểu để mở lệnh (0.1 USDT)
+const MIN_USDT_BALANCE_TO_OPEN = 0.1; // Số dư USDT tối thiểu để mở lệnh (0.1 USDT)
 const CAPITAL_PERCENTAGE_PER_TRADE = 0.5; // Phần trăm vốn sử dụng cho mỗi lệnh (50% tài khoản)
 
 // Cấu hình TP/SL theo yêu cầu mới
@@ -425,7 +437,19 @@ async function openShortPosition(symbol, fundingRate, usdtBalance) {
 
         const entryPrice = parseFloat(orderResult.avgFillPrice || currentPrice);
         const openTime = new Date();
-        const formattedOpenTime = `${openTime.toLocaleDateString('en-GB')} ${openTime.toLocaleTimeString('en-US', { hour12: false })}.${String(openTime.getMilliseconds()).padStart(3, '0')}`;
+        // Định dạng thời gian mở lệnh theo UTC+7
+        const formatter = new Intl.DateTimeFormat('en-GB', {
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit',
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit',
+            fractionalSecondDigits: 3,
+            hour12: false,
+            timeZone: 'Asia/Ho_Chi_Minh'
+        });
+        const formattedOpenTime = formatter.format(openTime);
         
         addLog(`✅ Đã mở lệnh SHORT thành công cho ${symbol} vào lúc ${formattedOpenTime}`);
         addLog(`  + Funding Rate: ${fundingRate}`);
@@ -631,11 +655,26 @@ async function runTradingLogic(isFundingScanFlag) {
         const timeLeftMs = finalOrderOpenTime.getTime() - now.getTime();
         const timeLeftSeconds = Math.max(0, Math.ceil(timeLeftMs / 1000));
 
+        // Định dạng thời gian hiển thị cho người dùng theo UTC+7
+        const formatter = new Intl.DateTimeFormat('en-GB', {
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit',
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit',
+            fractionalSecondDigits: 3,
+            hour12: false,
+            timeZone: 'Asia/Ho_Chi_Minh' // Múi giờ Việt Nam
+        });
+        const formattedFinalOrderOpenTime = formatter.format(finalOrderOpenTime);
+
+
         addLog(`\n✅ Đã chọn đồng coin: **${selectedCandidate.symbol}**`);
         addLog(`  + Funding Rate: **${selectedCandidate.fundingRate}**`);
         addLog(`  + Đòn bẩy tối đa: **${selectedCandidate.maxLeverage}x**`);
         addLog(`  + Số tiền dự kiến mở lệnh: **${capitalToUse.toFixed(2)} USDT** (Khối lượng ước tính: **${estimatedQuantity} ${selectedCandidate.symbol}**)`);
-        addLog(`  + Lệnh sẽ được mở vào lúc **${finalOrderOpenTime.toLocaleTimeString('en-GB', { hour12: false, timeZone: 'UTC' })}:${String(finalOrderOpenTime.getMilliseconds()).padStart(3, '0')} UTC** (còn khoảng **${timeLeftSeconds} giây** đếm ngược).`);
+        addLog(`  + Lệnh sẽ được mở vào lúc **${formattedFinalOrderOpenTime}** (còn khoảng **${timeLeftSeconds} giây** đếm ngược).`);
         
         addLog(`>>> Đang chờ đến thời điểm mở lệnh...`);
         await delay(timeLeftMs);
@@ -682,10 +721,10 @@ async function scheduleNextMainCycle() {
     // Kiểm tra xem giờ mà lệnh sẽ được mở có phải là giờ Funding không
     if (FUNDING_HOURS_UTC.includes(targetOrderOpenHourUTC)) {
         isFundingScan = true;
-        addLog(`>>> Lịch trình: Phiên quét sắp tới (${nextScanMoment.toLocaleTimeString('en-GB', { hour12: false, timeZone: 'UTC' })} UTC) là để chuẩn bị cho giờ Funding **${targetOrderOpenHourUTC}:00 UTC**.`);
+        addLog(`>>> Lịch trình: Phiên quét sắp tới (${formatTimeUTC7(nextScanMoment)}) là để chuẩn bị cho giờ Funding **${targetOrderOpenHourUTC}:00 UTC**.`);
     } else {
         // Nếu không phải giờ Funding, tìm giờ Funding kế tiếp
-        addLog(`>>> Lịch trình: Phiên quét ${nextScanMoment.toLocaleTimeString('en-GB', { hour12: false, timeZone: 'UTC' })} UTC không phải cho giờ Funding. Tìm phiên quét Funding kế tiếp.`);
+        addLog(`>>> Lịch trình: Phiên quét ${formatTimeUTC7(nextScanMoment)} không phải cho giờ Funding. Tìm phiên quét Funding kế tiếp.`);
         isFundingScan = false;
         let foundNextFundingScan = false;
         let tempScanTime = new Date(nextScanMoment.getTime()); // Bắt đầu từ thời gian quét được tính hiện tại
@@ -707,7 +746,7 @@ async function scheduleNextMainCycle() {
                 break; // Thoát vòng lặp để tránh vòng lặp vô hạn
             }
         }
-        addLog(`>>> Bot sẽ ngủ tới phiên quét Funding tiếp theo vào: **${nextScheduledRunTime.toLocaleTimeString('en-GB', { hour12: false, timeZone: 'UTC' })}:${String(nextScheduledRunTime.getMilliseconds()).padStart(3, '0')} UTC** (để mở lệnh vào giờ Funding **${targetOrderOpenHourUTC}:00 UTC**).`);
+        addLog(`>>> Bot sẽ ngủ tới phiên quét Funding tiếp theo vào: **${formatTimeUTC7(nextScheduledRunTime)}** (để mở lệnh vào giờ Funding **${targetOrderOpenHourUTC}:00 UTC**).`);
     }
     
     const delayMs = nextScheduledRunTime.getTime() - now.getTime();
@@ -719,11 +758,27 @@ async function scheduleNextMainCycle() {
         return;
     }
 
-    addLog(`>>> Bot sẽ chạy logic quét vào lúc: ${nextScheduledRunTime.toLocaleTimeString('en-GB', { hour12: false, timeZone: 'UTC' })}:${String(nextScheduledRunTime.getMilliseconds()).padStart(3, '0')} UTC.`);
+    addLog(`>>> Bot sẽ chạy logic quét vào lúc: ${formatTimeUTC7(nextScheduledRunTime)}.`);
     
     nextScheduledTimeout = setTimeout(async () => {
         await runTradingLogic(isFundingScan); // Truyền cờ isFundingScan
     }, delayMs);
+}
+
+// Hàm tiện ích để định dạng thời gian Date object sang string theo UTC+7
+function formatTimeUTC7(dateObject) {
+    const formatter = new Intl.DateTimeFormat('en-GB', {
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        fractionalSecondDigits: 3,
+        hour12: false,
+        timeZone: 'Asia/Ho_Chi_Minh'
+    });
+    return formatter.format(dateObject);
 }
 
 
