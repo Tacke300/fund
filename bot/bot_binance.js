@@ -18,7 +18,7 @@ const SECRET_KEY = 'oU6pZFHgEvbpD9NmFXp5ZVnYFMQ7EIkBiz88hTzvmC3SpT9nEf4fcDf0pEnF
 // === BASE URL CỦA BINANCE FUTURES API ===
 const BASE_HOST = 'fapi.binance.com';
 
-let serverTimeOffset = 0;
+let serverTimeOffset = 0; // Giữ nguyên, nếu bạn có logic đồng bộ thời gian thì nó sẽ dùng
 
 // Biến cache cho exchangeInfo
 let exchangeInfoCache = null;
@@ -66,12 +66,6 @@ const FUNDING_WINDOW_MINUTES = 30;
 // Ngưỡng thời gian còn lại (tính bằng giây) để bot coi là "sắp trả funding" và tiến hành mở lệnh.
 // Chỉ mở lệnh nếu nextFundingTime của đồng coin được chọn còn lại <= X giây.
 const ONLY_OPEN_IF_FUNDING_IN_SECONDS = 120; // Ví dụ: chỉ mở nếu còn lại <= 2 phút
-
-// Cấu hình thời gian quét bot
-// Bot sẽ quét định kỳ, không cố định vào phút :58 nữa.
-// Thay vào đó, nó sẽ tự động tính toán thời gian quét dựa trên nextFundingTime của các đồng coin.
-// Ví dụ: mỗi 1 phút bot sẽ kiểm tra xem có đồng nào sắp đến giờ funding trong window không.
-const SCAN_INTERVAL_SECONDS = 60; // Quét mỗi 60 giây (đã bị ghi đè bởi logic phút :58)
 
 // === Cấu hình Server Web ===
 const WEB_SERVER_PORT = 3000; // Cổng cho giao diện web
@@ -683,7 +677,8 @@ async function runTradingLogic() {
 
         for (const item of allFundingData) {
             const fundingRate = parseFloat(item.lastFundingRate);
-            const nextFundingTime = parseInt(item.nextFundingTime); // nextFundingTime trực tiếp từ Binance API
+            // LẤY TRỰC TIẾP NEXT FUNDING TIME TỪ BINANCE API
+            const nextFundingTime = parseInt(item.nextFundingTime);
 
             // Điều kiện 1: Funding rate đủ âm và là cặp USDT
             if (fundingRate < MIN_FUNDING_RATE_THRESHOLD && item.symbol.endsWith('USDT')) {
@@ -691,7 +686,10 @@ async function runTradingLogic() {
                 const timeToFundingMs = nextFundingTime - now;
                 const timeToFundingMinutes = timeToFundingMs / (1000 * 60);
 
-                if (timeToFundingMinutes > 0 && timeToFundingMinutes <= FUNDING_WINDOW_MINUTES) { // Lọc sơ bộ để chỉ xem xét các coin sắp đến giờ funding
+                // Lọc sơ bộ để chỉ xem xét các coin sắp đến giờ funding
+                // Kiểm tra nếu thời gian còn lại đến funding lớn hơn 0 (chưa qua)
+                // VÀ nhỏ hơn hoặc bằng FUNDING_WINDOW_MINUTES (ví dụ: 30 phút)
+                if (timeToFundingMinutes > 0 && timeToFundingMinutes <= FUNDING_WINDOW_MINUTES) {
                     const symbolInfo = await getSymbolFiltersAndMaxLeverage(item.symbol);
                     if (symbolInfo && typeof symbolInfo.maxLeverage === 'number' && symbolInfo.maxLeverage > 1) {
                         const capitalToUse = availableBalance * CAPITAL_PERCENTAGE_PER_TRADE;
@@ -710,7 +708,7 @@ async function runTradingLogic() {
                             eligibleCandidates.push({
                                 symbol: item.symbol,
                                 fundingRate: fundingRate,
-                                nextFundingTime: nextFundingTime,
+                                nextFundingTime: nextFundingTime, // Sử dụng nextFundingTime từ API
                                 maxLeverage: symbolInfo.maxLeverage
                             });
                         } else {
@@ -741,7 +739,7 @@ async function runTradingLogic() {
                 const timeToOpenMs = candidate.nextFundingTime - nowRefreshed;
                 const delayForExactOpenMs = timeToOpenMs + 100; // Đợi thêm 100ms sau giờ funding
 
-                // Kiểm tra điều kiện "sắp trả funding" hợp lệ:
+                // Kiểm tra điều kiện "sắp trả funding" hợp lệ cho CHÍNH ĐỒNG COIN ĐÓ:
                 // 1. Còn thời gian để chờ (delayForExactOpenMs > 0)
                 // 2. Thời gian chờ thực tế đến funding (timeToOpenMs) phải rất gần (<= ONLY_OPEN_IF_FUNDING_IN_SECONDS)
                 // 3. Giờ funding của nó chưa qua (timeToOpenMs >= 0)
