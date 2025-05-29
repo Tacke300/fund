@@ -30,7 +30,7 @@ const binance = new Binance().futures().options({ // THAY ĐỔI Ở ĐÂY
           // Tùy chọn cho IPv4 nếu bạn gặp vấn đề kết nối
     urls: {
         base: 'https://fapi.binance.com/fapi/v1/', // Đây là URL chính xác cho API Futures của Binance
-    }
+    
 });
 
 async function getAllFuturesLeverageAndBalance() {
