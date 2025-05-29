@@ -13,8 +13,8 @@ const __dirname = dirname(__filename);
 // === API KEY & SECRET ===
 // !!! QUAN TRỌNG: DÁN API Key và Secret Key THẬT của bạn vào đây. !!!
 // Đảm bảo không có khoảng trắng thừa khi copy/paste.
-const API_KEY = 'cZ1Y2O0kggVEggEaPvhFcYQHS5b1EsT2OWZb8zdY9C0jGqNROvXRZHTJjnQ7OG4Q'.trim();
-const SECRET_KEY = 'oU6pZFHgEvbpD9NmFXp5ZVnYFMQ7EIkBiz88aTzvmC3SpT9nEf4fcDf0pEnFzoTc'.trim();
+const API_KEY = 'DÁN_API_KEY_CỦA_BẠN_VÀO_ĐÂY'.trim();
+const SECRET_KEY = 'DÁN_SECRET_KEY_CỦA_BẠN_VÀO_ĐÂY'.trim();
 
 // === BASE URL CỦA BINANCE FUTURES API ===
 const BASE_HOST = 'fapi.binance.com';
@@ -24,7 +24,7 @@ let serverTimeOffset = 0; // Giữ nguyên để tương thích
 // Biến cache cho exchangeInfo
 let exchangeInfoCache = null;
 
-// Biến cờ để tránh việc gửi nhiều lệnh đóng cùng lúc
+// Biến cờ để tránh việc gửi nhiều lệnh đóng cùng cùng lúc
 let isClosingPosition = false;
 
 let botRunning = false; // Biến cờ kiểm soát trạng thái chạy của bot
@@ -47,15 +47,15 @@ wss.on('connection', ws => {
     addLog('Websocket client connected.', true); // Gửi log đặc biệt cho kết nối WS
     // Gửi trạng thái hiện tại của bot cho client mới kết nối
     if (botRunning) {
-        wsClient.send(JSON.stringify({ type: 'status', message: `Bot is running.` }));
+        wsClient.send(JSON.stringify({ type: 'status', message: `Bot Status: Bot is running.` }));
     } else {
-        wsClient.send(JSON.stringify({ type: 'status', message: `Bot is stopped.` }));
+        wsClient.send(JSON.stringify({ type: 'status', message: `Bot Status: Bot is stopped.` }));
     }
     // Cập nhật vị thế hiện tại nếu có
     if (currentOpenPosition) {
-        wsClient.send(JSON.stringify({ type: 'status', message: `Current position: ${currentOpenPosition.symbol}` }));
+        wsClient.send(JSON.stringify({ type: 'status', message: `Bot Status: Current position: ${currentOpenPosition.symbol}` }));
     } else {
-        wsClient.send(JSON.stringify({ type: 'status', message: `Current position: None` }));
+        wsClient.send(JSON.stringify({ type: 'status', message: `Bot Status: Current position: None` }));
     }
 });
 
@@ -616,7 +616,7 @@ async function manageOpenPosition() {
         
         process.stdout.write(statusMessage); // In ra console
         if (wsClient && wsClient.readyState === wsClient.OPEN) { // Gửi qua WebSocket
-            wsClient.send(JSON.stringify({ type: 'status', message: statusMessage }));
+            wsClient.send(JSON.stringify({ type: 'status', message: `Bot Status: ${statusMessage}` }));
         }
 
         let shouldClose = false;
@@ -747,6 +747,7 @@ async function runTradingLogic(isFundingScanFlag) {
             // Định dạng thời gian hiển thị cho người dùng theo UTC+7
             const formatter = new Intl.DateTimeFormat('en-GB', {
                 year: 'numeric',
+                month: '2-digit',
                 month: '2-digit',
                 day: '2-digit',
                 hour: '2-digit',
@@ -964,6 +965,6 @@ function stopBot() {
     addLog('--- Bot đã được dừng ---');
     botStartTime = null;
     if (wsClient && wsClient.readyState === wsClient.OPEN) {
-        wsClient.send(JSON.stringify({ type: 'status', message: 'Bot has been STOPPED.' }));
+        wsClient.send(JSON.stringify({ type: 'status', message: 'Bot Status: Bot has been STOPPED.' }));
     }
 }
