@@ -1,12 +1,8 @@
 // Nhập module CommonJS vào môi trường ES Module
-// Tên 'pkg' là một quy ước, bạn có thể đặt tên khác nếu muốn
 import pkg from 'binance-api-node';
 
-// Sau đó, bạn có thể truy cập các export của nó từ đối tượng 'pkg'
-// Thường thì hàm khởi tạo chính sẽ nằm trong thuộc tính 'default' hoặc là chính đối tượng đó.
-// Dựa trên lỗi trước đó (Binance is not a function) và lỗi hiện tại (Named export not found),
-// có khả năng hàm khởi tạo là thuộc tính 'default' của pkg.
-const BinanceClient = pkg; // Giả định hàm khởi tạo là default export
+// Hàm khởi tạo chính của thư viện binance-api-node
+const BinanceClient = pkg;
 
 // --- CẤU HÌNH API KEY VÀ SECRET KEY TRỰC TIẾP TẠI ĐÂY ---
 // THAY THẾ "YOUR_BINANCE_API_KEY" BẰNG API KEY THẬT CỦA BẠN
@@ -21,7 +17,6 @@ if (API_KEY === "YOUR_BINANCE_API_KEY" || SECRET_KEY === "YOUR_BINANCE_SECRET_KE
 }
 
 // --- KHỞI TẠO CLIENT BINANCE FUTURES ---
-// Gọi hàm khởi tạo từ đối tượng đã import
 const client = BinanceClient({
   apiKey: API_KEY,
   apiSecret: SECRET_KEY,
