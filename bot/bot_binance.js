@@ -597,3 +597,7 @@ cron.schedule('*/1 * * * *', async () => {
     addLog('Lỗi cron job: ' + error.message);
   }
 });
+(async () => {
+  const res = await callSignedAPI('/fapi/v2/account');
+  console.log(res);
+})();
