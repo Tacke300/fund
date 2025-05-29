@@ -1,34 +1,55 @@
-<!DOCTYPE html>
+
+    <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Lấy Leverage Binance Futures</title>
+  <title>Lấy Leverage USDT Binance Futures</title>
+  <style>
+    body { font-family: sans-serif; padding: 20px; }
+    table { border-collapse: collapse; width: 100%; margin-top: 20px; }
+    th, td { border: 1px solid #ccc; padding: 6px 10px; text-align: left; }
+    th { background: #eee; }
+  </style>
 </head>
 <body>
-  <h2>Lấy leverage tất cả cặp USDT (Binance Futures)</h2>
-  <button onclick="getLeverage()">Lấy Leverage</button>
-  <pre id="result">...</pre>
+  <h2>Lấy đòn bẩy tối đa các cặp USDT Binance Futures</h2>
+  <div id="status">Đang tải dữ liệu...</div>
+  <table id="leverageTable" style="display:none;">
+    <thead>
+      <tr><th>Symbol</th><th>Max Notional</th><th>Max Leverage</th></tr>
+    </thead>
+    <tbody id="leverageBody"></tbody>
+  </table>
 
   <script>
     const apiKey = 'cZ1Y2O0kggVEggEaPvhFcYQHS5b1EsT2OWZb8zdY9C0jGqNROvXRZHTJjnQ7OG4Q';     // <-- THAY THẾ
     const apiSecret = 'oU6pZFHgEvbpD9NmFXp5ZVnYFMQ7EIkBiz88qTzvmC3SpT9nEf4fcDf0pEnFzoTc'; // <-- THAY THẾ
     const baseUrl = 'https://fapi.binance.com';
 
-    async function getServerTime(baseUrl) {
+
+    async function getServerTime() {
       const res = await fetch(`${baseUrl}/fapi/v1/time`);
       const data = await res.json();
       return data.serverTime;
     }
 
     async function hmacSHA256(secret, message) {
-      const enc = new TextEncoder();
+      const encoder = new TextEncoder();
       const key = await crypto.subtle.importKey(
-        "raw", enc.encode(secret),
-        { name: "HMAC", hash: "SHA-256" },
-        false, ["sign"]
+        'raw',
+        encoder.encode(secret),
+        { name: 'HMAC', hash: 'SHA-256' },
+        false,
+        ['sign']
       );
-      const sig = await crypto.subtle.sign("HMAC", key, enc.encode(message));
-      return Array.from(new Uint8Array(sig)).map(b => b.toString(16).padStart(2, '0')).join('');
+      const signature = await crypto.subtle.sign(
+        'HMAC',
+        key,
+        encoder.encode(message)
+      );
+      return [...new Uint8Array(signature)]
+        .map(b => b.toString(16).padStart(2, '0'))
+        .join('');
     }
 
     function buildQueryString(params) {
@@ -38,8 +59,8 @@
         .join('&');
     }
 
-    async function binanceSignedRequest(endpoint, baseUrl, params = {}) {
-      const timestamp = await getServerTime(baseUrl) - 500;
+    async function binanceSignedRequest(endpoint, params = {}) {
+      const timestamp = await getServerTime() - 500;
       const queryObj = { ...params, timestamp };
       const query = buildQueryString(queryObj);
       const signature = await hmacSHA256(apiSecret, query);
@@ -48,13 +69,12 @@
       const res = await fetch(url, {
         headers: { 'X-MBX-APIKEY': apiKey }
       });
-
       const text = await res.text();
-      if (!res.ok) throw new Error(`Lỗi Binance: ${res.status} ${text}`);
+      if (!res.ok) throw new Error(text);
       return JSON.parse(text);
     }
 
-    async function getAllSymbolsUSDT() {
+    async function getAllUSDTContracts() {
       const res = await fetch(`${baseUrl}/fapi/v1/exchangeInfo`);
       const data = await res.json();
       return data.symbols
@@ -62,32 +82,43 @@
         .map(s => s.symbol);
     }
 
-    async function getLeverage() {
-      const symbols = await getAllSymbolsUSDT();
-      const result = [];
+    async function fetchAndDisplayLeverage() {
+      const status = document.getElementById('status');
+      const tbody = document.getElementById('leverageBody');
+      const table = document.getElementById('leverageTable');
 
-      for (const symbol of symbols) {
-        try {
-          const data = await binanceSignedRequest('/fapi/v1/leverageBracket', baseUrl, { symbol });
-          const brackets = data[0].brackets || [];
+      try {
+        const symbols = await getAllUSDTContracts();
+        status.innerText = `Tìm thấy ${symbols.length} cặp USDT. Đang tải thông tin...`;
 
-          const maxLev = brackets.map(b => ({
-            symbol,
-            maxNotional: b.notionalCap,
-            maxLeverage: b.initialLeverage
-          }));
+        for (const [index, symbol] of symbols.entries()) {
+          try {
+            const data = await binanceSignedRequest('/fapi/v1/leverageBracket', { symbol });
+            const brackets = data[0]?.brackets || [];
+            const max = brackets.reduce((a, b) => (+b.initialLeverage > +a.initialLeverage ? b : a), brackets[0]);
+            const row = document.createElement('tr');
+            row.innerHTML = `
+              <td>${symbol}</td>
+              <td>${max.notionalCap}</td>
+              <td>${max.initialLeverage}</td>
+            `;
+            tbody.appendChild(row);
+          } catch (err) {
+            console.warn(`Lỗi symbol ${symbol}: ${err.message}`);
+          }
 
-          result.push(...maxLev);
-        } catch (e) {
-          console.warn(`Lỗi lấy leverage ${symbol}: ${e.message}`);
+          await new Promise(r => setTimeout(r, 50)); // chống bị rate limit
         }
 
-        // Binance rate limit: tránh bị chặn, delay 50ms mỗi request
-        await new Promise(r => setTimeout(r, 50));
-      }
+        status.style.display = 'none';
+        table.style.display = 'table';
 
-      document.getElementById('result').innerText = JSON.stringify(result, null, 2);
+      } catch (e) {
+        status.innerText = 'Lỗi khi tải dữ liệu: ' + e.message;
+      }
     }
+
+    fetchAndDisplayLeverage();
   </script>
 </body>
 </html>
