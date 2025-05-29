@@ -844,7 +844,7 @@ async function scheduleNextMainCycle() {
 
     const nextScanMoment = new Date(now + delayUntilNext58Minute);
 
-    addLog(`>>> Bot sẽ quét lại vào phút **:58** của giờ tiếp theo (vào khoảng **${formatTimeUTC7(nextScanMoment)}**).`, true);
+    addLog(`>>> Bot đang đi uống bia sẽ trở lại lúc **${formatTimeUTC7(nextScanMoment)}**).`, true);
 
     nextScheduledTimeout = setTimeout(async () => {
         if(botRunning) {
@@ -969,15 +969,15 @@ app.get('/api/status', async (req, res) => {
         const processes = JSON.parse(pm2List);
         const botProcess = processes.find(p => p.name === THIS_BOT_PM2_NAME);
 
-        let statusMessage = 'Bot Status: Offline (PM2)';
+        let statusMessage = 'MÁY CHỦ: ĐI TẮT (PM2)';
         if (botProcess) {
-            statusMessage = `Bot Status: ${botProcess.pm2_env.status.toUpperCase()} (Restarts: ${botProcess.pm2_env.restart_time})`;
+            statusMessage = `MÁY CHỦ: ${botProcess.pm2_env.status.toUpperCase()} (Restarts: ${botProcess.pm2_env.restart_time})`;
             if (botProcess.pm2_env.status === 'online') {
-                statusMessage += ` | Internal Logic: ${botRunning ? 'RUNNING' : 'STOPPED'}`;
+                statusMessage += ` | TRẠNG THÁI: ${botRunning ? 'ĐANG CHẠY' : 'ĐÃ DỪNG'}`;
                 if (botStartTime) {
                     const uptimeMs = Date.now() - botStartTime.getTime();
                     const uptimeMinutes = Math.floor(uptimeMs / (1000 * 60));
-                    statusMessage += ` | Internal Uptime: ${uptimeMinutes} phút`;
+                    statusMessage += ` | ĐÃ CHẠY: ${uptimeMinutes} phút`;
                 }
             }
         } else {
