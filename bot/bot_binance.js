@@ -52,8 +52,8 @@ const TAKE_PROFIT_PERCENTAGES = {
     25: 0.28,
     50: 0.56,
     75: 0.86,
-    100: 1.23,
-    125: 1.38,
+    100: 1.08,
+    125: 1.36,
 };
 
 // ĐÃ SỬA: Ngưỡng funding rate âm tối thiểu để xem xét (từ -0.0002 xuống -0.002)
