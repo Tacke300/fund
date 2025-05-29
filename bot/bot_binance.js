@@ -274,7 +274,7 @@ async function getCurrentPrice(symbol) {
 }
 
 // === Cấu hình Bot ===
-const MIN_USDT_BALANCE_TO_OPEN = 10; // Số dư USDT tối thiểu để mở lệnh (ví dụ: 10 USDT)
+const MIN_USDT_BALANCE_TO_OPEN = 0.1; // Số dư USDT tối thiểu để mở lệnh (ví dụ: 10 USDT)
 const CAPITAL_PERCENTAGE_PER_TRADE = 0.5; // Phần trăm vốn sử dụng cho mỗi lệnh (50% tài khoản)
 // TP/SL = 50% vốn mở lệnh (trên giá trị vị thế sau đòn bẩy)
 const TP_SL_RISK_PERCENTAGE = 0.5; // 50% rủi ro/lợi nhuận trên tổng giá trị vị thế (sau đòn bẩy)
@@ -282,8 +282,8 @@ const MIN_FUNDING_RATE_THRESHOLD = -0.0001; // Ngưỡng funding rate âm tối 
 const MAX_POSITION_LIFETIME_SECONDS = 300; // Thời gian tối đa giữ một vị thế (tính bằng giây), ví dụ: 300 giây = 5 phút
 
 // Cấu hình thời gian chạy bot theo giờ UTC MỚI
-const SCAN_MINUTE_UTC = 24; // Phút thứ 24 để quét và chọn đồng coin
-const OPEN_ORDER_MINUTE_UTC = 25; // Phút thứ 25 để mở lệnh
+const SCAN_MINUTE_UTC = 26; // Phút thứ 24 để quét và chọn đồng coin
+const OPEN_ORDER_MINUTE_UTC = 27; // Phút thứ 25 để mở lệnh
 const TARGET_SECOND_UTC = 0;  // Giây thứ 0
 const TARGET_MILLISECOND_UTC = 500; // mili giây thứ 500
 
