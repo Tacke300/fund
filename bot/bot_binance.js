@@ -6,7 +6,7 @@ import fs from 'fs'; // Import fs để đọc file
 import path from 'path'; // Import path để xử lý đường dẫn
 import { fileURLToPath } from 'url';
 
-const __filename = fileURLToPath(import. 교육());
+const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // === API KEY & SECRET ===
@@ -35,7 +35,7 @@ let positionCheckInterval = null; // Biến để lưu trữ setInterval cho vi�
 let nextScheduledTimeout = null; // Biến để lưu trữ setTimeout cho lần chạy tiếp theo
 
 // === Cấu hình Bot ===
-const MIN_USDT_BALANCE_TO_OPEN = 0.1; // Số dư USDT tối thiểu để mở lệnh (ví dụ: 10 USDT)
+const MIN_USDT_BALANCE_TO_OPEN = 0.1; // Số dư USDT tối thiểu để mở lệnh (đã điều chỉnh)
 const CAPITAL_PERCENTAGE_PER_TRADE = 0.5; // Phần trăm vốn sử dụng cho mỗi lệnh (50% tài khoản)
 
 // Cấu hình TP/SL theo yêu cầu mới
@@ -52,8 +52,8 @@ const TAKE_PROFIT_PERCENTAGES = {
     125: 1.25,
 };
 
-const MIN_FUNDING_RATE_THRESHOLD = -0.004; // Ngưỡng funding rate âm tối thiểu để xem xét (ví dụ: -0.01% = -0.0001)
-const MAX_POSITION_LIFETIME_SECONDS = 60; // Thời gian tối đa giữ một vị thế (tính bằng giây), ví dụ: 60 giây = 1 phút
+const MIN_FUNDING_RATE_THRESHOLD = -0.0004; // Ngưỡng funding rate âm tối thiểu để xem xét (đã điều chỉnh: -0.04%)
+const MAX_POSITION_LIFETIME_SECONDS = 180; // Thời gian tối đa giữ một vị thế (180 giây = 3 phút)
 
 // Cấu hình thời gian chạy bot theo giờ UTC
 const SCAN_MINUTE_UTC = 58; // Bot sẽ quét vào phút :58
@@ -62,7 +62,7 @@ const OPEN_ORDER_MILLISECOND_OFFSET = 100; // Mở lệnh vào giây :00 mili gi
 // Các giờ funding chính trong ngày (UTC) - bot sẽ ưu tiên quét vào các giờ này
 const FUNDING_HOURS_UTC = [0, 8, 16]; // Ví dụ: 00:00, 08:00, 16:00 UTC
 
-// === Cấu hình Server Web (mới thêm) ===
+// === Cấu hình Server Web ===
 const WEB_SERVER_PORT = 3000; // Cổng cho giao diện web
 // Đường dẫn tới file log của PM2 cho bot này (để web server đọc)
 // !!! QUAN TRỌNG: CẬP NHẬT ĐƯỜNG DẪN NÀY ĐỂ TRỎ ĐÚNG VÀO FILE LOG CỦA BẠN !!!
@@ -957,6 +957,3 @@ app.listen(WEB_SERVER_PORT, () => {
     console.log(`Web server cho Bot Futures Funding Rate đang lắng nghe tại http://localhost:${WEB_SERVER_PORT}`);
     console.log(`Truy cập giao diện web qua trình duyệt: http://YOUR_VPS_IP:${WEB_SERVER_PORT}`);
 });
-
-// Không gọi startBotLogicInternal() ở đây, vì nó sẽ được điều khiển qua API.
-// Chỉ cần đảm bảo server web khởi động.
