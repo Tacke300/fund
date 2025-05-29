@@ -8,10 +8,9 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 // === API KEY & SECRET ===
-// !!! QUAN TRỌNG: ĐẢM BẢO ĐÂY LÀ API KEY VÀ SECRET KEY THẬT CỦA BẠN !!!
-// DÁN API Key và Secret Key THẬT của bạn vào đây.
-// Đã thêm .trim() để loại bỏ bất kỳ khoảng trắng thừa nào khi bạn copy.
-const API_KEY = 'cZ1Y2O0kggVEggEaPvhFcYQHS5b1EsT2OWZb8zdY9C0jGqNROvXRZHTJjnQ7OG4Q'.trim(); 
+// !!! QUAN TRỌNG: DÁN API Key và Secret Key THẬT của bạn vào đây. !!!
+// Đảm bảo không có khoảng trắng thừa khi copy/paste.
+const API_KEY = 'cZ1Y2O0kggVEggEaPvhFcYQHS5b1EsT2OWZb8zdY9C0jGqNROvXRZHTJjnQ7OG4Q'.trim();
 const SECRET_KEY = 'oU6pZFHgEvbpD9NmFXp5ZVnYFMQ7EIkBiz88aTzvmC3SpT9nEf4fcDf0pEnFzoTc'.trim();
 
 // === BASE URL CỦA BINANCE FUTURES API ===
@@ -275,21 +274,21 @@ async function getCurrentPrice(symbol) {
 
 // === Cấu hình Bot ===
 const MIN_USDT_BALANCE_TO_OPEN = 10; // Số dư USDT tối thiểu để mở lệnh (ví dụ: 10 USDT)
-const CAPITAL_PERCENTAGE_PER_TRADE = 0.8; // Phần trăm vốn sử dụng cho mỗi lệnh (80% tài khoản)
+const CAPITAL_PERCENTAGE_PER_TRADE = 0.5; // Phần trăm vốn sử dụng cho mỗi lệnh (50% tài khoản)
 // TP/SL = 50% vốn mở lệnh (trên giá trị vị thế sau đòn bẩy)
 const TP_SL_RISK_PERCENTAGE = 0.5; // 50% rủi ro/lợi nhuận trên tổng giá trị vị thế (sau đòn bẩy)
 const MIN_FUNDING_RATE_THRESHOLD = -0.0001; // Ngưỡng funding rate âm tối thiểu để xem xét (ví dụ: -0.01% = -0.0001)
 const MAX_POSITION_LIFETIME_SECONDS = 300; // Thời gian tối đa giữ một vị thế (tính bằng giây), ví dụ: 300 giây = 5 phút
 
 // Cấu hình thời gian chạy bot theo giờ UTC MỚI
-const SCAN_MINUTE_UTC = 58; // Phút thứ 58 để quét và chọn đồng coin
-const OPEN_ORDER_MINUTE_UTC = 0; // Phút thứ 00 của giờ tiếp theo để mở lệnh
+const SCAN_MINUTE_UTC = 8; // Phút thứ 8 để quét và chọn đồng coin
+const OPEN_ORDER_MINUTE_UTC = 10; // Phút thứ 10 để mở lệnh
 const TARGET_SECOND_UTC = 0;  // Giây thứ 0
 const TARGET_MILLISECOND_UTC = 500; // mili giây thứ 500
 
 let currentOpenPosition = null; // Biến toàn cục để theo dõi vị thế đang mở
 let positionCheckInterval = null; // Biến để lưu trữ setInterval cho việc kiểm tra vị thế
-let nextScanScheduledTime = null; // Biến để lưu trữ thời gian quét tiếp theo
+let nextScheduledTimeout = null; // Biến để lưu trữ setTimeout cho lần chạy tiếp theo
 
 // --- Hàm chính để đóng lệnh Short ---
 async function closeShortPosition(symbol, quantityToClose, reason = 'manual') {
@@ -331,7 +330,7 @@ async function closeShortPosition(symbol, quantityToClose, reason = 'manual') {
         positionCheckInterval = null;
 
         // Lên lịch cho lần quét tiếp theo sau khi đóng lệnh
-        scheduleNextScan();
+        scheduleNextMainCycle();
 
     } catch (error) {
         addLog(`❌ Lỗi khi đóng lệnh SHORT cho ${symbol}: ${error.msg || error.message}`);
@@ -346,6 +345,7 @@ async function openShortPosition(symbol, fundingRate, usdtBalance) {
         const symbolInfo = await getSymbolFiltersAndMaxLeverage(symbol);
         if (!symbolInfo || typeof symbolInfo.maxLeverage !== 'number' || symbolInfo.maxLeverage <= 1) {
             addLog(`❌ Không thể lấy thông tin đòn bẩy hợp lệ cho ${symbol}. Không mở lệnh.`);
+            scheduleNextMainCycle(); // Quay lại chế độ chờ
             return;
         }
         const maxLeverage = symbolInfo.maxLeverage;
@@ -368,6 +368,7 @@ async function openShortPosition(symbol, fundingRate, usdtBalance) {
         const currentPrice = await getCurrentPrice(symbol);
         if (!currentPrice) {
             addLog(`❌ Không thể lấy giá hiện tại cho ${symbol}. Không mở lệnh.`);
+            scheduleNextMainCycle(); // Quay lại chế độ chờ
             return;
         }
         addLog(`[DEBUG] Giá hiện tại của ${symbol}: ${currentPrice.toFixed(pricePrecision)}`);
@@ -384,10 +385,12 @@ async function openShortPosition(symbol, fundingRate, usdtBalance) {
         const currentNotional = quantity * currentPrice;
         if (currentNotional < minNotional) {
             addLog(`⚠️ Giá trị hợp đồng (${currentNotional.toFixed(pricePrecision)}) quá nhỏ so với minNotional (${minNotional}) cho ${symbol}. Không mở lệnh.`);
+            scheduleNextMainCycle(); // Quay lại chế độ chờ
             return;
         }
         if (quantity <= 0) {
             addLog(`⚠️ Khối lượng tính toán cho ${symbol} là ${quantity}. Quá nhỏ hoặc không hợp lệ. Không mở lệnh.`);
+            scheduleNextMainCycle(); // Quay lại chế độ chờ
             return;
         }
 
@@ -448,7 +451,7 @@ async function openShortPosition(symbol, fundingRate, usdtBalance) {
         addLog(`❌ Lỗi khi mở lệnh SHORT cho ${symbol}: ${error.msg || error.message}`);
         // Nếu có lỗi khi mở lệnh, đảm bảo bot có thể tìm kiếm cơ hội mới
         // bằng cách lên lịch quét lại.
-        scheduleNextScan();
+        scheduleNextMainCycle();
     }
 }
 
@@ -457,7 +460,7 @@ async function manageOpenPosition() {
     if (!currentOpenPosition) {
         clearInterval(positionCheckInterval);
         positionCheckInterval = null;
-        scheduleNextScan(); // Lên lịch quét mới nếu không còn vị thế
+        scheduleNextMainCycle(); // Lên lịch quét mới nếu không còn vị thế
         return; 
     }
 
@@ -494,31 +497,6 @@ async function manageOpenPosition() {
     }
 }
 
-// Hàm lên lịch chạy logic tìm kiếm cơ hội
-async function scheduleNextScan() {
-    clearTimeout(nextScanScheduledTime); // Clear lịch trình cũ nếu có
-
-    const now = new Date();
-    let nextScanMoment = new Date(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 
-                                   now.getUTCHours(), SCAN_MINUTE_UTC, TARGET_SECOND_UTC, TARGET_MILLISECOND_UTC);
-    
-    // Nếu thời gian quét đã qua trong giờ hiện tại, chuyển sang giờ tiếp theo
-    if (nextScanMoment.getTime() <= now.getTime()) {
-        nextScanMoment.setUTCHours(nextScanMoment.getUTCHours() + 1);
-    }
-    
-    const delayMs = nextScanMoment.getTime() - now.getTime();
-
-    addLog(`>>> Bot sẽ tạm dừng tới phiên quét tiếp theo lúc: ${nextScanMoment.toLocaleTimeString('en-GB', { hour12: false, timeZone: 'UTC' })}:${String(nextScanMoment.getMilliseconds()).padStart(3, '0')} UTC.`);
-    
-    nextScanScheduledTime = setTimeout(async () => {
-        await runTradingLogic(); // Chạy logic tìm kiếm cơ hội
-        // runTradingLogic sẽ tự gọi scheduleNextScan nếu không mở lệnh
-        // Hoặc manageOpenPosition sẽ gọi nếu lệnh đóng
-    }, delayMs);
-}
-
-
 // Hàm chạy logic tìm kiếm cơ hội
 async function runTradingLogic() {
     if (currentOpenPosition) {
@@ -533,7 +511,7 @@ async function runTradingLogic() {
 
     if (availableBalance < MIN_USDT_BALANCE_TO_OPEN) {
         addLog(`⚠️ Số dư USDT khả dụng (${availableBalance.toFixed(2)}) dưới ngưỡng tối thiểu (${MIN_USDT_BALANCE_TO_OPEN}). Không tìm kiếm cơ hội.`);
-        scheduleNextScan(); // Lên lịch quét lại
+        scheduleNextMainCycle(); // Lên lịch quét lại
         return;
     }
 
@@ -569,7 +547,7 @@ async function runTradingLogic() {
         const currentPrice = await getCurrentPrice(selectedCandidate.symbol);
         if (!currentPrice) {
             addLog(`❌ Không thể lấy giá hiện tại cho ${selectedCandidate.symbol}. Bỏ qua cơ hội này.`);
-            scheduleNextScan(); // Lên lịch quét lại
+            scheduleNextMainCycle(); // Lên lịch quét lại
             return;
         }
         
@@ -581,13 +559,13 @@ async function runTradingLogic() {
         }
 
         const now = new Date();
-        // Tính thời gian đến phút :00 giây :00 mili giây :500 của giờ tiếp theo
+        // Tính thời gian đến phút :10 giây :00 mili giây :500 của cùng giờ
         let targetOpenTime = new Date(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 
                                       now.getUTCHours(), OPEN_ORDER_MINUTE_UTC, TARGET_SECOND_UTC, TARGET_MILLISECOND_UTC);
         
-        // Nếu thời gian :00 đã qua trong giờ hiện tại (tức là đã 00:00:00.500 hoặc sau đó), chuyển sang :00 của giờ tiếp theo
-        // Nếu hiện tại là 11:58, thì nextOpenTime sẽ là 12:00:00.500
-        // Nếu hiện tại là 12:01, thì nextOpenTime sẽ là 13:00:00.500
+        // Nếu đã qua thời gian 12:10:00:500 trong giờ hiện tại (ví dụ, đang là 12:11),
+        // thì đặt lịch cho 13:10:00:500.
+        // Ngược lại, nếu đang là 12:08 (thời gian quét), thì đặt lịch cho 12:10:00:500.
         if (targetOpenTime.getTime() <= now.getTime()) {
             targetOpenTime.setUTCHours(targetOpenTime.getUTCHours() + 1);
         }
@@ -601,7 +579,7 @@ async function runTradingLogic() {
         addLog(`  + Số tiền dự kiến mở lệnh: **${capitalToUse.toFixed(2)} USDT** (Khối lượng ước tính: **${estimatedQuantity} ${selectedCandidate.symbol}**)`);
         addLog(`  + Lệnh sẽ được mở vào lúc **${targetOpenTime.toLocaleTimeString('en-GB', { hour12: false, timeZone: 'UTC' })}:${String(targetOpenTime.getMilliseconds()).padStart(3, '0')} UTC** (còn khoảng **${timeLeftSeconds} giây** đếm ngược).`);
         
-        addLog(`>>> Đang chờ đến ${OPEN_ORDER_MINUTE_UTC} phút để mở lệnh...`);
+        addLog(`>>> Đang chờ đến thời điểm mở lệnh...`);
         await delay(timeLeftMs);
         
         // Sau khi chờ, kiểm tra lại xem có vị thế nào được mở trong khi chờ không
@@ -610,22 +588,54 @@ async function runTradingLogic() {
         } else {
             addLog(`⚠️ Đã có vị thế được mở trong khi chờ (bởi luồng khác). Bỏ qua việc mở lệnh mới.`);
             // Vì đã có lệnh khác mở, không cần lên lịch quét lại ngay,
-            // manageOpenPosition sẽ lo việc đóng lệnh và sau đó gọi scheduleNextScan.
+            // manageOpenPosition sẽ lo việc đóng lệnh và sau đó gọi scheduleNextMainCycle.
         }
 
     } else {
         addLog('>>> Không tìm thấy cơ hội Shorting với funding rate đủ tốt. Bot sẽ ngủ cho đến phiên quét tiếp theo.');
-        scheduleNextScan(); // Lên lịch quét lại nếu không tìm thấy cơ hội
+        scheduleNextMainCycle(); // Lên lịch quét lại nếu không tìm thấy cơ hội
     }
 }
 
-// --- Hàm chính để chạy bot ---
+// Hàm lên lịch chu kỳ chính của bot (quét hoặc chờ)
+async function scheduleNextMainCycle() {
+    clearTimeout(nextScheduledTimeout); // Xóa bất kỳ lịch trình cũ nào
+
+    if (currentOpenPosition) {
+        // Nếu đang có vị thế, thì quản lý vị thế sẽ tự động gọi scheduleNextMainCycle sau khi đóng.
+        // Không cần lên lịch một chu kỳ chính khác ngay lập tức.
+        return; 
+    }
+    
+    const now = new Date();
+    let nextRunMoment = new Date(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 
+                                   now.getUTCHours(), SCAN_MINUTE_UTC, TARGET_SECOND_UTC, TARGET_MILLISECOND_UTC);
+    
+    // Nếu thời gian quét đã qua trong giờ hiện tại, chuyển sang giờ tiếp theo
+    if (nextRunMoment.getTime() <= now.getTime()) {
+        nextRunMoment.setUTCHours(nextRunMoment.getUTCHours() + 1);
+    }
+    
+    const delayMs = nextRunMoment.getTime() - now.getTime();
+
+    addLog(`>>> Bot sẽ tạm dừng tới phiên quét tiếp theo lúc: ${nextRunMoment.toLocaleTimeString('en-GB', { hour12: false, timeZone: 'UTC' })}:${String(nextRunMoment.getMilliseconds()).padStart(3, '0')} UTC.`);
+    
+    nextScheduledTimeout = setTimeout(async () => {
+        await runTradingLogic(); // Chạy logic tìm kiếm cơ hội
+        // runTradingLogic sẽ tự gọi scheduleNextMainCycle nếu không mở lệnh hoặc gặp lỗi
+        // Hoặc manageOpenPosition sẽ gọi nếu lệnh đóng
+    }, delayMs);
+}
+
+
+// --- Hàm khởi động bot ---
 async function startBot() {
     addLog('--- Khởi động Bot Futures Funding Rate ---');
     addLog('>>> Đang kiểm tra kết nối API Key với Binance Futures...');
     
-    if (API_KEY === 'cZ1Y2O0kggVEggEaPvhFcYQHS5b1EsT2OWZb8zdY9C0jGqNROvXRZHTJjnQ7OG4Q' || SECRET_KEY === 'oU6pZFHgEvbpD9NmFXp5ZVnYFMQ7EIkBiz88aTzvmC3SpT9nEf4fcDf0pEnFzoTc') {
-        addLog('❌ LỖI CẤU HÌNH: Vui lòng thay thế các giá trị mặc định của API_KEY và SECRET_KEY bằng API Key và Secret Key THẬT của bạn.');
+    // Kiểm tra API Key và Secret Key đã được thay thế chưa
+    if (API_KEY === 'DÁN_API_KEY_CỦA_BẠN_VÀO_ĐÂY' || SECRET_KEY === 'DÁN_SECRET_KEY_CỦA_BẠN_VÀO_ĐÂY') {
+        addLog('❌ LỖI CẤU HÌNH: Vui lòng thay thế "DÁN_API_KEY_CỦA_BẠN_VÀO_ĐÂY" và "DÁN_SECRET_KEY_CỦA_BẠN_VÀO_ĐÂY" bằng API Key và Secret Key THẬT của bạn.');
         return; // Dừng bot nếu cấu hình sai
     }
 
@@ -644,11 +654,11 @@ async function startBot() {
             return;
         }
 
-        // Bắt đầu chu kỳ quét đầu tiên
-        scheduleNextScan();
+        // Bắt đầu chu kỳ chính của bot (quét hoặc chờ)
+        scheduleNextMainCycle();
 
-        // Thiết lập kiểm tra vị thế định kỳ (dù không có lệnh vẫn chạy để đảm bảo nếu có lệnh mở từ đâu đó thì cũng được quản lý)
-        // Đây là interval riêng để chỉ quản lý vị thế, không phải để quét lệnh mới
+        // Thiết lập kiểm tra vị thế định kỳ (dù không có lệnh vẫn chạy để đảm bảo
+        // nếu có lệnh mở từ đâu đó thì cũng được quản lý)
         setInterval(async () => {
             if (currentOpenPosition) {
                 await manageOpenPosition();
