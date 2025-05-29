@@ -282,8 +282,8 @@ const MIN_FUNDING_RATE_THRESHOLD = -0.0001; // Ngưỡng funding rate âm tối 
 const MAX_POSITION_LIFETIME_SECONDS = 300; // Thời gian tối đa giữ một vị thế (tính bằng giây), ví dụ: 300 giây = 5 phút
 
 // Cấu hình thời gian chạy bot theo giờ UTC MỚI
-const SCAN_MINUTE_UTC = 14; // Phút thứ 8 để quét và chọn đồng coin
-const OPEN_ORDER_MINUTE_UTC = 15; // Phút thứ 10 để mở lệnh
+const SCAN_MINUTE_UTC = 17; // Phút thứ 8 để quét và chọn đồng coin
+const OPEN_ORDER_MINUTE_UTC = 18; // Phút thứ 10 để mở lệnh
 const TARGET_SECOND_UTC = 0;  // Giây thứ 0
 const TARGET_MILLISECOND_UTC = 500; // mili giây thứ 500
 
