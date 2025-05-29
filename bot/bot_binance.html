@@ -3,6 +3,7 @@
 <head>
   <title>Bot Binance Design By TunggBeoo</title>
   <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@700&display=swap" rel="stylesheet">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <style>
     body {
       font-family: 'Orbitron', sans-serif;
@@ -12,12 +13,17 @@
       flex-direction: column;
       justify-content: center;
       align-items: center;
-      height: 100vh;
+      /* Đặt min-height thay vì height để cho phép nội dung vượt quá chiều cao viewport nếu cần */
+      min-height: 100vh; 
       margin: 0;
+      padding: 20px 10px; /* Thêm padding tổng thể để nội dung không bị dính sát cạnh */
+      box-sizing: border-box; /* Đảm bảo padding không làm tràn width */
     }
 
     #top {
-      font-size: 133px;
+      /* Sử dụng vw để font-size co giãn theo chiều rộng viewport */
+      font-size: 8vw; /* Kích thước font sẽ là 8% của chiều rộng viewport */
+      line-height: 1; /* Đảm bảo chiều cao dòng không quá lớn */
       background: linear-gradient(270deg, #00ffe1, #0066ff, #00ffe1);
       background-size: 300% 300%;
       -webkit-background-clip: text;
@@ -25,7 +31,8 @@
       animation: moveGradient 5s ease infinite;
       margin-bottom: 20px;
       text-align: center;
-      height: 20vh;
+      /* Bỏ fixed height để font size tự điều chỉnh */
+      /* height: 20vh; */
     }
 
     @keyframes moveGradient {
@@ -35,31 +42,44 @@
     }
 
     #log {
+      /* Giữ vh nhưng điều chỉnh font-size bằng rem hoặc vw */
       height: 40vh;
-      width: 95%;
+      width: 95%; /* Vẫn giữ 95% width */
+      max-width: 900px; /* Giới hạn chiều rộng tối đa trên màn hình lớn */
       overflow-y: auto;
       background: #111;
-      padding: 10px;
-      font-size: 33px;
+      padding: 15px; /* Tăng padding một chút */
+      font-size: 1.2rem; /* Sử dụng rem cho font-size, 1.2 lần font-size gốc của body */
       border: 1px solid #333;
       margin-bottom: 20px;
       font-family: Arial, Helvetica, sans-serif;
+      box-sizing: border-box; /* Đảm bảo padding và border không làm tràn width */
+      word-wrap: break-word; /* Đảm bảo text dài tự động xuống dòng */
+      white-space: pre-wrap; /* Giữ định dạng dòng mới và khoảng trắng */
     }
 
     .button-row {
       display: flex;
-      gap: 20px;
-      height: 10vh;
+      flex-wrap: wrap; /* Cho phép các nút xuống dòng trên màn hình nhỏ */
+      justify-content: center;
+      gap: 15px; /* Giảm gap một chút */
+      /* Bỏ fixed height để các nút tự điều chỉnh */
+      /* height: 10vh; */
+      width: 95%; /* Đảm bảo button-row cũng tuân theo width của layout */
+      max-width: 900px;
     }
 
     button {
-      padding: 15px 25px;
-      font-size: 33px;
+      padding: 12px 20px; /* Giảm padding một chút để phù hợp hơn trên di động */
+      font-size: 1.5rem; /* Sử dụng rem cho font-size nút */
       border: none;
       cursor: pointer;
       border-radius: 8px;
       transition: 0.3s;
       font-family: 'Orbitron', sans-serif;
+      flex-grow: 1; /* Cho phép nút giãn ra để lấp đầy không gian */
+      min-width: 150px; /* Đảm bảo nút không quá nhỏ */
+      box-sizing: border-box;
     }
 
     .start-btn {
@@ -79,10 +99,58 @@
 
     .copyright {
       margin-top: 20px;
-      font-size: 20px;
+      font-size: 0.9rem; /* Sử dụng rem và giảm kích thước font */
       color: #666;
       font-family: monospace;
+      text-align: center;
+      padding: 0 10px;
     }
+
+    /* --- MEDIA QUERIES CHO MÀN HÌNH NHỎ HƠN --- */
+
+    /* Điều chỉnh cho màn hình có chiều rộng tối đa 768px (điện thoại, máy tính bảng dọc) */
+    @media (max-width: 768px) {
+      #top {
+        font-size: 10vw; /* Tăng vw cho font-size ở màn hình nhỏ hơn để chữ to hơn chút */
+        margin-bottom: 15px;
+      }
+
+      #log {
+        font-size: 1rem; /* Giảm font-size của log */
+        padding: 10px;
+      }
+
+      button {
+        font-size: 1.2rem; /* Giảm font-size của nút */
+        padding: 10px 15px;
+        min-width: unset; /* Bỏ min-width để flex-grow làm nhiệm vụ */
+      }
+      
+      .button-row {
+          flex-direction: column; /* Đặt nút theo cột trên màn hình nhỏ */
+          gap: 10px;
+      }
+    }
+
+    /* Điều chỉnh cho màn hình cực nhỏ (ví dụ: iPhone 5/SE) */
+    @media (max-width: 480px) {
+        #top {
+            font-size: 12vw; /* Tăng font-size hơn nữa cho dễ nhìn trên màn hình rất nhỏ */
+        }
+        #log {
+            font-size: 0.9rem; /* Giảm font-size của log để vừa hơn */
+            height: 35vh; /* Giảm chiều cao log một chút */
+            padding: 8px;
+        }
+        button {
+            font-size: 1rem; /* Giảm font-size nút hơn nữa */
+            padding: 8px 12px;
+        }
+        .copyright {
+            font-size: 0.8rem;
+        }
+    }
+
   </style>
 </head>
 <body>
@@ -93,12 +161,9 @@
   <div class="button-row">
     <button class="start-btn" onclick="startBot()">Start Bot</button>
     <button class="stop-btn" onclick="stopBot()">Stop Bot</button>
-
-    
   </div>
-<div class="copyright">&copy; 2025 TunggBeoo. All rights reserved.</div>
+  <div class="copyright">&copy; 2025 TunggBeoo. All rights reserved.</div>
 
-  
   <script>
     const logDiv = document.getElementById('log');
 
@@ -106,7 +171,8 @@
       try {
         const res = await fetch('/logs');
         const logs = await res.json();
-        logDiv.innerHTML = logs.map(l => l.replace(/</g, '&lt;')).join('<br>');
+        // Cải thiện hiển thị log: đảm bảo mỗi log trên một dòng và không bị lỗi HTML
+        logDiv.innerHTML = logs.map(l => `<span style="display:block;">${l.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</span>`).join('');
         logDiv.scrollTop = logDiv.scrollHeight;
       } catch (e) {
         console.error('Failed to fetch logs', e);
@@ -114,14 +180,28 @@
     }
 
     function startBot() {
-      fetch('/start').then(res => res.text()).then(alert);
+      fetch('/start').then(res => res.text()).then(response => {
+        alert(response);
+        fetchLogs(); // Refresh logs after action
+      }).catch(e => {
+        alert('Lỗi khi khởi động bot: ' + e.message);
+        console.error('Lỗi khi khởi động bot:', e);
+      });
     }
 
     function stopBot() {
-      fetch('/stop').then(res => res.text()).then(alert);
+      fetch('/stop').then(res => res.text()).then(response => {
+        alert(response);
+        fetchLogs(); // Refresh logs after action
+      }).catch(e => {
+        alert('Lỗi khi dừng bot: ' + e.message);
+        console.error('Lỗi khi dừng bot:', e);
+      });
     }
 
+    // Tần suất fetch logs, 3 giây một lần là hợp lý
     setInterval(fetchLogs, 3000);
+    // Fetch logs lần đầu khi tải trang
     fetchLogs();
   </script>
 </body>
