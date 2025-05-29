@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Bot Binance Design By TunggBeoo</title>
-  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght[700]&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@700&display=swap" rel="stylesheet">
   <style>
     body {
       font-family: 'Orbitron', sans-serif;
@@ -58,16 +58,17 @@
       height: 40vh;
       width: 95%;
       max-width: 900px;
-      overflow-y: auto;
+      overflow-y: auto; /* Chỉ cuộn dọc */
+      overflow-x: hidden; /* Chặn cuộn ngang */
       background: #111;
       padding: 15px;
-      font-size: 0.5rem;
+      font-size: 0.8rem; /* Đã điều chỉnh kích thước chữ */
       border: 1px solid #333;
       margin-bottom: 20px;
       font-family: 'Courier New', Courier, monospace;
       box-sizing: border-box;
-      word-wrap: break-word;
-      white-space: pre-wrap;
+      word-wrap: break-word; /* Tự động xuống dòng các từ dài */
+      white-space: pre-wrap; /* Giữ nguyên định dạng khoảng trắng và xuống dòng của pre */
       color: #0f0;
     }
     #log pre {
@@ -126,7 +127,7 @@
     @media (max-width: 768px) {
       #top { font-size: 10vw; margin-bottom: 15px; }
       .status-bar { font-size: 1rem; padding: 8px 10px; }
-      #log { font-size: 1rem; padding: 10px; height: 35vh; }
+      #log { font-size: 0.9rem; /* Điều chỉnh cho tablet */ padding: 10px; height: 35vh; }
       button { font-size: 1.2rem; padding: 10px 15px; min-width: unset; }
       .button-row { flex-direction: column; gap: 10px; }
     }
@@ -134,7 +135,7 @@
     @media (max-width: 480px) {
         #top { font-size: 12vw; }
         .status-bar { font-size: 0.9rem; }
-        #log { font-size: 0.9rem; height: 30vh; padding: 8px; }
+        #log { font-size: 0.8rem; /* Điều chỉnh cho điện thoại */ height: 30vh; padding: 8px; }
         button { font-size: 1rem; padding: 8px 12px; }
         .copyright { font-size: 0.8rem; }
     }
@@ -170,6 +171,7 @@
             })
             .then(data => {
                 const isScrolledToBottom = logDiv.scrollHeight - logDiv.clientHeight <= logDiv.scrollTop + 1;
+                // Xóa các ký tự màu sắc ANSI để hiển thị sạch hơn trên trình duyệt
                 const cleanData = data.replace(/[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g, '');
                 logDiv.innerHTML = `<pre>${cleanData}</pre>`;
                 if (isScrolledToBottom) {
