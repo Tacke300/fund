@@ -1,4 +1,3 @@
-
 import https from 'https';
 import crypto from 'crypto';
 import { fileURLToPath } from 'url';
@@ -30,13 +29,14 @@ function addLog(message) {
     console.log(logEntry);
 }
 
-const delay = ms => new Promise(resolve => setTimeout(ms));
+// Sửa lỗi: Hàm delay giờ nhận một callback để setTimeout hoạt động đúng
+const delay = ms => new Promise(resolve => setTimeout(() => resolve(), ms));
 
 // Hàm tạo chữ ký HMAC SHA256
 function createSignature(queryString, apiSecret) {
     return crypto.createHmac('sha256', apiSecret)
-                 .update(queryString)
-                 .digest('hex');
+                         .update(queryString)
+                         .digest('hex');
 }
 
 // Hàm gửi HTTP request
@@ -90,8 +90,8 @@ async function callSignedAPI(fullEndpointPath, method = 'GET', params = {}) {
     const timestamp = Date.now();
 
     let queryString = Object.keys(params)
-                            .map(key => `${key}=${params[key]}`)
-                            .join('&');
+                                    .map(key => `${key}=${params[key]}`)
+                                    .join('&');
 
     queryString += (queryString ? '&' : '') + `timestamp=${timestamp}&recvWindow=${recvWindow}`;
 
@@ -139,8 +139,8 @@ async function callSignedAPI(fullEndpointPath, method = 'GET', params = {}) {
 // Hàm gọi API công khai
 async function callPublicAPI(fullEndpointPath, params = {}) {
     const queryString = Object.keys(params)
-                            .map(key => `${key}=${params[key]}`)
-                            .join('&');
+                                    .map(key => `${key}=${params[key]}`)
+                                    .join('&');
     const fullPathWithQuery = `${fullEndpointPath}` + (queryString ? `?${queryString}` : '');
 
     const headers = {
@@ -274,7 +274,7 @@ async function getCurrentPrice(symbol) {
 }
 
 // === Cấu hình Bot ===
-const MIN_USDT_BALANCE_TO_OPEN = 0.1; // Số dư USDT tối thiểu để mở lệnh (ví dụ: 10 USDT)
+const MIN_USDT_BALANCE_TO_OPEN = 10; // Số dư USDT tối thiểu để mở lệnh (ví dụ: 10 USDT)
 const CAPITAL_PERCENTAGE_PER_TRADE = 0.5; // Phần trăm vốn sử dụng cho mỗi lệnh (50% tài khoản)
 // TP/SL = 50% vốn mở lệnh (trên giá trị vị thế sau đòn bẩy)
 const TP_SL_RISK_PERCENTAGE = 0.5; // 50% rủi ro/lợi nhuận trên tổng giá trị vị thế (sau đòn bẩy)
@@ -282,8 +282,8 @@ const MIN_FUNDING_RATE_THRESHOLD = -0.0001; // Ngưỡng funding rate âm tối 
 const MAX_POSITION_LIFETIME_SECONDS = 300; // Thời gian tối đa giữ một vị thế (tính bằng giây), ví dụ: 300 giây = 5 phút
 
 // Cấu hình thời gian chạy bot theo giờ UTC MỚI
-const SCAN_MINUTE_UTC = 17; // Phút thứ 8 để quét và chọn đồng coin
-const OPEN_ORDER_MINUTE_UTC = 18; // Phút thứ 10 để mở lệnh
+const SCAN_MINUTE_UTC = 24; // Phút thứ 24 để quét và chọn đồng coin
+const OPEN_ORDER_MINUTE_UTC = 25; // Phút thứ 25 để mở lệnh
 const TARGET_SECOND_UTC = 0;  // Giây thứ 0
 const TARGET_MILLISECOND_UTC = 500; // mili giây thứ 500
 
@@ -451,7 +451,7 @@ async function openShortPosition(symbol, fundingRate, usdtBalance) {
     } catch (error) {
         addLog(`❌ Lỗi khi mở lệnh SHORT cho ${symbol}: ${error.msg || error.message}`);
         // Nếu có lỗi khi mở lệnh, đảm bảo bot có thể tìm kiếm cơ hội mới
-        // bằng cách lên lịch quét lại.
+        // bằng cách lên lịch lại.
         scheduleNextMainCycle();
     }
 }
@@ -560,13 +560,11 @@ async function runTradingLogic() {
         }
 
         const now = new Date();
-        // Tính thời gian đến phút :10 giây :00 mili giây :500 của cùng giờ
+        // Tính thời gian đến phút :25 giây :00 mili giây :500 của cùng giờ
         let targetOpenTime = new Date(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 
                                       now.getUTCHours(), OPEN_ORDER_MINUTE_UTC, TARGET_SECOND_UTC, TARGET_MILLISECOND_UTC);
         
-        // Nếu đã qua thời gian 12:10:00:500 trong giờ hiện tại (ví dụ, đang là 12:11),
-        // thì đặt lịch cho 13:10:00:500.
-        // Ngược lại, nếu đang là 12:08 (thời gian quét), thì đặt lịch cho 12:10:00:500.
+        // Nếu đã qua thời gian mục tiêu trong giờ hiện tại, chuyển sang giờ tiếp theo
         if (targetOpenTime.getTime() <= now.getTime()) {
             targetOpenTime.setUTCHours(targetOpenTime.getUTCHours() + 1);
         }
