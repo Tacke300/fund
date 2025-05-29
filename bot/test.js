@@ -5,7 +5,7 @@ import dotenv from 'dotenv';
 dotenv.config(); // Tải biến môi trường từ .env
 
 const app = express();
-const port = 3333;
+const port = 3334;
 
 const APIKEY = process.env.BINANCE_API_KEY;
 const APISECRET = process.env.BINANCE_API_SECRET;
