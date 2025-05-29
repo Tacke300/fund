@@ -1,18 +1,14 @@
 import https from 'https';
 import crypto from 'crypto';
-import { fileURLToPath } from 'url';
-import { dirname } from 'path';
-import WebSocket from 'ws'; // Import WebSocket cho giao diện web
-
-// Để thay thế __dirname trong ES Modules
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
+// Không cần import fileURLToPath và dirname nếu không dùng __dirname hay path.join với file hệ thống.
+// Nếu bạn có dùng __dirname ở đâu đó khác thì cần giữ lại.
+// Hiện tại bot này không dùng đến, nên tôi tạm bỏ để code gọn hơn.
 
 // === API KEY & SECRET ===
 // !!! QUAN TRỌNG: DÁN API Key và Secret Key THẬT của bạn vào đây. !!!
 // Đảm bảo không có khoảng trắng thừa khi copy/paste.
-const API_KEY = 'cZ1Y2O0kggVEggEaPvhFcYQHS5b1EsT2OWZb8zdY9C0jGqNROvXRZHTJjnQ7OG4Q '.trim(); // Thay thế bằng API Key của bạn
-const SECRET_KEY = 'oU6pZFHgEvbpD9NmFXp5ZVnYFMQ7EIkBiz88aTzvmC3SpT9nEf4fcDf0pEnFzoTc '.trim(); // Thay thế bằng Secret Key của bạn
+const API_KEY = 'cZ1Y2O0kggVEggEaPvhFcYQHS5b1EsT2OWZb8zdY9C0jGqNROvXRZHTJjnQ7OG4Q'.trim(); // Thay thế bằng API Key của bạn
+const SECRET_KEY = 'oU6pZFHgEvbpD9NmFXp5ZVnYFMQ7EIkBiz88aTzvmC3SpT9nEf4fcDf0pEnFzoTc'.trim(); // Thay thế bằng Secret Key của bạn
 
 // === BASE URL CỦA BINANCE FUTURES API ===
 const BASE_HOST = 'fapi.binance.com';
@@ -32,16 +28,6 @@ let botStartTime = null;
 let currentOpenPosition = null; // Biến toàn cục để theo dõi vị thế đang mở
 let positionCheckInterval = null; // Biến để lưu trữ setInterval cho việc kiểm tra vị thế
 let nextScheduledTimeout = null; // Biến để lưu trữ setTimeout cho lần chạy tiếp theo
-
-// --- Cấu hình Web Server ---
-const PORT = 3000;
-import express from 'express';
-const app = express();
-import { createServer } from 'http';
-const server = createServer(app);
-const wss = new WebSocket.Server({ server });
-
-let wsClient = null; // Biến để lưu trữ kết nối WebSocket với trình duyệt
 
 // === Cấu hình Bot ===
 const MIN_USDT_BALANCE_TO_OPEN = 10; // Số dư USDT tối thiểu để mở lệnh (ví dụ: 10 USDT)
@@ -75,7 +61,7 @@ const TARGET_MILLISECOND_UTC = 500; // mili giây thứ 500
 // Các giờ funding chính trong ngày (UTC) - bot sẽ ưu tiên quét vào các giờ này
 const FUNDING_HOURS_UTC = [0, 8, 16]; // Ví dụ: 00:00, 08:00, 16:00 UTC
 
-// Hàm addLog để ghi nhật ký và gửi lên giao diện web
+// Hàm addLog để ghi nhật ký (chỉ ra console)
 function addLog(message, isImportant = false) {
     const now = new Date();
     const time = `${now.toLocaleDateString('en-GB')} ${now.toLocaleTimeString('en-US', { hour12: false })}.${String(now.getMilliseconds()).padStart(3, '0')}`;
@@ -93,11 +79,6 @@ function addLog(message, isImportant = false) {
     }
 
     console.log(logEntry);
-
-    // Gửi log qua WebSocket nếu có client kết nối
-    if (wsClient && wsClient.readyState === wsClient.OPEN) {
-        wsClient.send(JSON.stringify({ type: 'log', message: logEntry }));
-    }
 }
 
 // Hàm tiện ích để định dạng thời gian Date object sang string theo UTC+7
@@ -117,7 +98,7 @@ function formatTimeUTC7(dateObject) {
 }
 
 
-// Sửa lỗi: Hàm delay giờ nhận một callback để setTimeout hoạt động đúng
+// Hàm delay
 const delay = ms => new Promise(resolve => setTimeout(() => resolve(), ms));
 
 // Hàm tạo chữ ký HMAC SHA256
@@ -391,7 +372,7 @@ async function closeShortPosition(symbol, quantityToClose, reason = 'manual') {
                 positionCheckInterval = null;
             }
             isClosingPosition = false;
-            scheduleNextMainCycle(); // Lên lịch cho lần quét tiếp theo sau khi đóng lệnh
+            if(botRunning) scheduleNextMainCycle(); // Lên lịch cho lần quét tiếp theo nếu bot đang chạy
             return;
         }
         
@@ -413,7 +394,7 @@ async function closeShortPosition(symbol, quantityToClose, reason = 'manual') {
             positionCheckInterval = null;
         }
         isClosingPosition = false;
-        scheduleNextMainCycle(); // Lên lịch cho lần quét tiếp theo sau khi đóng lệnh
+        if(botRunning) scheduleNextMainCycle(); // Lên lịch cho lần quét tiếp theo nếu bot đang chạy
 
     } catch (error) {
         addLog(`❌ Lỗi khi đóng lệnh SHORT cho ${symbol}: ${error.msg || error.message}`);
@@ -425,7 +406,7 @@ async function closeShortPosition(symbol, quantityToClose, reason = 'manual') {
 async function openShortPosition(symbol, fundingRate, usdtBalance) {
     if (currentOpenPosition) {
         addLog(`⚠️ Đã có vị thế đang mở (${currentOpenPosition.symbol}). Bỏ qua việc mở lệnh mới cho ${symbol}.`);
-        scheduleNextMainCycle(); // Quay lại chế độ chờ
+        if(botRunning) scheduleNextMainCycle(); // Quay lại chế độ chờ nếu bot đang chạy
         return;
     }
 
@@ -435,7 +416,7 @@ async function openShortPosition(symbol, fundingRate, usdtBalance) {
         const symbolInfo = await getSymbolFiltersAndMaxLeverage(symbol);
         if (!symbolInfo || typeof symbolInfo.maxLeverage !== 'number' || symbolInfo.maxLeverage <= 1) {
             addLog(`❌ Không thể lấy thông tin đòn bẩy hợp lệ cho ${symbol}. Không mở lệnh.`, true);
-            scheduleNextMainCycle(); // Quay lại chế độ chờ
+            if(botRunning) scheduleNextMainCycle(); // Quay lại chế độ chờ nếu bot đang chạy
             return;
         }
         const maxLeverage = symbolInfo.maxLeverage;
@@ -458,7 +439,7 @@ async function openShortPosition(symbol, fundingRate, usdtBalance) {
         const currentPrice = await getCurrentPrice(symbol);
         if (!currentPrice) {
             addLog(`❌ Không thể lấy giá hiện tại cho ${symbol}. Không mở lệnh.`, true);
-            scheduleNextMainCycle(); // Quay lại chế độ chờ
+            if(botRunning) scheduleNextMainCycle(); // Quay lại chế độ chờ nếu bot đang chạy
             return;
         }
         addLog(`[DEBUG] Giá hiện tại của ${symbol}: ${currentPrice.toFixed(pricePrecision)}`);
@@ -478,12 +459,12 @@ async function openShortPosition(symbol, fundingRate, usdtBalance) {
         if (currentNotional < minNotional) {
             addLog(`⚠️ Giá trị hợp đồng (${currentNotional.toFixed(pricePrecision)} USDT) quá nhỏ so với minNotional (${minNotional} USDT) cho ${symbol}. Không mở lệnh.`, true);
             addLog(`   Vốn USDT đầu tư: ${capitalToUse.toFixed(2)} USDT. Vị thế ước tính (đòn bẩy ${maxLeverage}x): ${currentNotional.toFixed(2)} USDT.`);
-            scheduleNextMainCycle(); // Quay lại chế độ chờ
+            if(botRunning) scheduleNextMainCycle(); // Quay lại chế độ chờ nếu bot đang chạy
             return;
         }
         if (quantity <= 0) {
             addLog(`⚠️ Khối lượng tính toán cho ${symbol} là ${quantity}. Quá nhỏ hoặc không hợp lệ. Không mở lệnh.`, true);
-            scheduleNextMainCycle(); // Quay lại chế độ chờ
+            if(botRunning) scheduleNextMainCycle(); // Quay lại chế độ chờ nếu bot đang chạy
             return;
         }
 
@@ -558,7 +539,7 @@ async function openShortPosition(symbol, fundingRate, usdtBalance) {
         addLog(`❌ Lỗi khi mở lệnh SHORT cho ${symbol}: ${error.msg || error.message}`, true);
         // Nếu có lỗi khi mở lệnh, đảm bảo bot có thể tìm kiếm cơ hội mới
         // bằng cách lên lịch lại.
-        scheduleNextMainCycle();
+        if(botRunning) scheduleNextMainCycle();
     }
 }
 
@@ -641,7 +622,7 @@ async function runTradingLogic(isFundingScan = false) {
 
         if (availableBalance < MIN_USDT_BALANCE_TO_OPEN) {
             addLog(`⚠️ Số dư USDT khả dụng (${availableBalance.toFixed(2)}) dưới ngưỡng tối thiểu (${MIN_USDT_BALANCE_TO_OPEN}). Không tìm kiếm cơ hội.`, true);
-            scheduleNextMainCycle(); // Lên lịch quét lại
+            if(botRunning) scheduleNextMainCycle(); // Lên lịch quét lại nếu bot đang chạy
             return;
         }
 
@@ -684,7 +665,7 @@ async function runTradingLogic(isFundingScan = false) {
             const currentPrice = await getCurrentPrice(selectedCandidate.symbol);
             if (!currentPrice) {
                 addLog(`❌ Không thể lấy giá hiện tại cho ${selectedCandidate.symbol}. Bỏ qua cơ hội này.`, true);
-                scheduleNextMainCycle(); // Lên lịch quét lại
+                if(botRunning) scheduleNextMainCycle(); // Lên lịch quét lại nếu bot đang chạy
                 return;
             }
             
@@ -712,7 +693,7 @@ async function runTradingLogic(isFundingScan = false) {
             addLog(`  + Funding Rate: **${selectedCandidate.fundingRate}**`);
             addLog(`  + Đòn bẩy tối đa: **${selectedCandidate.maxLeverage}x**`);
             addLog(`  + Số tiền dự kiến mở lệnh: **${capitalToUse.toFixed(2)} USDT** (Khối lượng ước tính: **${estimatedQuantity} ${selectedCandidate.symbol}**)`);
-            addLog(`  + Lệnh sẽ được mở vào lúc **${targetOpenTime.toLocaleTimeString('en-GB', { hour12: false, timeZone: 'UTC' })}:${String(targetOpenTime.getMilliseconds()).padStart(3, '0')} UTC** (còn khoảng **${timeLeftSeconds} giây** đếm ngược).`);
+            addLog(`  + Lệnh sẽ được mở vào lúc **${formatTimeUTC7(targetOpenTime)}** (còn khoảng **${timeLeftSeconds} giây** đếm ngược).`);
             
             addLog(`>>> Đang chờ đến thời điểm mở lệnh...`, true);
             await delay(timeLeftMs);
@@ -722,7 +703,7 @@ async function runTradingLogic(isFundingScan = false) {
                 await openShortPosition(selectedCandidate.symbol, selectedCandidate.fundingRate, availableBalance);
             } else if (!botRunning) {
                 addLog('Bot đã bị dừng trong khi chờ. Hủy bỏ việc mở lệnh.', true);
-                scheduleNextMainCycle(); // Cố gắng lên lịch lại nếu bot đã dừng
+                if(botRunning) scheduleNextMainCycle(); // Cố gắng lên lịch lại nếu bot đã dừng
             } else {
                 addLog(`⚠️ Đã có vị thế được mở trong khi chờ (bởi luồng khác). Bỏ qua việc mở lệnh mới.`, true);
                 // Vì đã có lệnh khác mở, không cần lên lịch quét lại ngay,
@@ -731,11 +712,11 @@ async function runTradingLogic(isFundingScan = false) {
 
         } else {
             addLog('>>> Không tìm thấy cơ hội Shorting với funding rate đủ tốt. Bot sẽ ngủ cho đến phiên quét tiếp theo.', true);
-            scheduleNextMainCycle(); // Lên lịch quét lại nếu không tìm thấy cơ hội
+            if(botRunning) scheduleNextMainCycle(); // Lên lịch quét lại nếu không tìm thấy cơ hội
         }
     } catch (error) {
         addLog('❌ Lỗi trong quá trình tìm kiếm cơ hội: ' + (error.msg || error.message), true);
-        scheduleNextMainCycle(); // Lên lịch quét lại nếu có lỗi
+        if(botRunning) scheduleNextMainCycle(); // Lên lịch quét lại nếu có lỗi
     }
 }
 
@@ -798,73 +779,92 @@ async function scheduleNextMainCycle() {
 }
 
 
-// --- Cấu hình Web Server để tương tác với Bot ---
-app.use(express.static(__dirname + '/public')); // Phục vụ file tĩnh từ thư mục public
-
-// Endpoint để khởi động bot
-app.get('/start_bot', (req, res) => {
-    startBot();
-    res.send('Bot đang được khởi động...');
-});
-
-// Endpoint để dừng bot
-app.get('/stop_bot', (req, res) => {
-    stopBot();
-    res.send('Bot đang được dừng...');
-});
-
-// Endpoint để lấy trạng thái bot (nếu cần)
-app.get('/bot_status', (req, res) => {
-    let statusMessage = "Bot Status: ";
+// --- Hàm khởi động bot ---
+async function startBot() {
     if (botRunning) {
-        statusMessage += `ĐANG CHẠY từ ${botStartTime.toLocaleTimeString('en-GB', { hour12: false, timeZone: 'Asia/Ho_Chi_Minh' })}.`;
-        if (currentOpenPosition) {
-            statusMessage += ` Đang có vị thế: ${currentOpenPosition.symbol} (${currentOpenPosition.quantity.toFixed(currentOpenPosition.pricePrecision)}) ở giá ${currentOpenPosition.entryPrice.toFixed(currentOpenPosition.pricePrecision)}.`;
-        } else {
-            statusMessage += ` Đang chờ đến phiên quét tiếp theo.`;
-        }
-    } else {
-        statusMessage += "ĐÃ DỪNG.";
+        addLog('Bot hiện đang chạy. Không cần khởi động lại.', true);
+        return;
     }
-    res.json({ status: statusMessage });
-});
 
-// WebSocket Server cho log và trạng thái thời gian thực
-wss.on('connection', function connection(ws) {
-    wsClient = ws; // Lưu trữ kết nối client hiện tại
-    addLog('✅ Giao diện web đã kết nối.', true);
+    addLog('--- Khởi động Bot Futures Funding Rate ---', true);
+    addLog('>>> Đang kiểm tra kết nối API Key với Binance Futures...', true);
+    
+    // Kiểm tra API Key và Secret Key đã được thay thế chưa
+    if (API_KEY === 'DÁN_API_KEY_CỦA_BẠN_VÀO_ĐÂY' || SECRET_KEY === 'DÁN_SECRET_KEY_CỦA_BẠN_VÀO_ĐÂY') {
+        addLog('❌ LỖI CẤU HÌNH: Vui lòng thay thế "DÁN_API_KEY_CỦA_BẠN_VÀO_ĐÂY" và "DÁN_SECRET_KEY_CỦA_BẠN_VÀO_ĐÂY" bằng API Key và Secret Key THẬT của bạn.', true);
+        return; // Dừng bot nếu cấu hình sai
+    }
 
-    // Gửi trạng thái ban đầu khi client kết nối
-    ws.send(JSON.stringify({ 
-        type: 'status', 
-        message: botRunning ? 
-            `Bot Status: ĐANG CHẠY từ ${botStartTime ? botStartTime.toLocaleTimeString('en-GB', { hour12: false, timeZone: 'Asia/Ho_Chi_Minh' }) : ''}.` : 
-            'Bot Status: ĐÃ DỪNG.' 
-    }));
-});
+    try {
+        await syncServerTime(); // Đồng bộ thời gian trước
 
-// Khởi động server
-server.listen(PORT, () => {
-    addLog(`Server bot đang lắng nghe tại http://localhost:${PORT} (truy cập từ trình duyệt: http://${process.env.PUBLIC_IP || 'your_vps_ip'}:${PORT}/bot_binance.html)`, true);
-    addLog('Đợi lệnh START từ giao diện web hoặc console.', true);
-});
+        // Kiểm tra API Key bằng cách lấy thông tin tài khoản
+        const account = await callSignedAPI('/fapi/v2/account', 'GET');
+        const usdtBalance = account.assets.find(a => a.asset === 'USDT')?.availableBalance || 0;
+        addLog(`✅ API Key hoạt động bình thường! Số dư USDT khả dụng: ${parseFloat(usdtBalance).toFixed(2)}`, true);
+
+        // Load exchange info một lần khi khởi động
+        await getExchangeInfo(); 
+        if (!exchangeInfoCache) { 
+            addLog('❌ Không thể tải thông tin sàn (exchangeInfo). Bot sẽ dừng.', true);
+            return;
+        }
+
+        botRunning = true;
+        botStartTime = new Date();
+        addLog(`--- Bot đã được KHỞI ĐỘNG thành công vào lúc ${formatTimeUTC7(botStartTime)} ---`, true);
+        
+        // Bắt đầu chu kỳ chính của bot (quét hoặc chờ)
+        scheduleNextMainCycle();
+
+        // Thiết lập kiểm tra vị thế định kỳ (dù không có lệnh vẫn chạy để đảm bảo
+        // nếu có lệnh mở từ đâu đó thì cũng được quản lý)
+        // Interval này sẽ chỉ thực sự xử lý nếu currentOpenPosition không null
+        if (!positionCheckInterval) { // Tránh tạo trùng lặp
+            positionCheckInterval = setInterval(async () => {
+                if (botRunning && currentOpenPosition) {
+                    await manageOpenPosition();
+                } else if (!botRunning && positionCheckInterval) {
+                    // Nếu bot dừng, clear interval này
+                    clearInterval(positionCheckInterval);
+                    positionCheckInterval = null;
+                }
+            }, 1000); // Kiểm tra mỗi giây nếu có vị thế đang mở
+        }
+        
+    } catch (error) {
+        addLog('❌ [Lỗi nghiêm trọng khi khởi động bot] ' + (error.msg || error.message), true);
+        addLog('   -> Bot sẽ dừng hoạt động. Vui lòng kiểm tra và khởi động lại.', true);
+        addLog('   -> Gợi ý: Nếu lỗi là "-1022 Signature for this request is not valid.", hãy kiểm tra lại API Key/Secret và đặc biệt là danh sách IP trắng trên Binance.', true);
+        addLog('   -> Gợi ý: Nếu lỗi là "-1021 Timestamp for this request is outside of the recvWindow.", hãy kiểm tra lại đồng bộ thời gian trên VPS (`sudo ntpdate pool.ntp.org` và `timedatectl status`).', true);
+        botRunning = false; // Đảm bảo cờ botRunning được đặt lại false nếu khởi động thất bại
+    }
+}
 
 // --- Hàm dừng bot ---
 function stopBot() {
-    if (!botRunning) {
-        addLog('Bot hiện không chạy. Không cần dừng.', true);
-        return;
-    }
-    botRunning = false;
-    clearTimeout(nextScheduledTimeout); // Hủy lịch trình tiếp theo
-    if (positionCheckInterval) {
-        clearInterval(positionCheckInterval); // Dừng kiểm tra vị thế
-        positionCheckInterval = null;
-    }
-    addLog('--- Bot đã được dừng ---', true);
-    botStartTime = null;
-    // Gửi trạng thái dừng đến giao diện web
-    if (wsClient && wsClient.readyState === wsClient.OPEN) {
-        wsClient.send(JSON.stringify({ type: 'status', message: 'Bot Status: Bot has been STOPPED.' }));
-    }
-}
+    if (!botRunning) {                   
+        addLog('Bot hiện không chạy. Không cần dừng.', true);                     
+        return;                          
+    }                                    
+    botRunning = false;                  
+    clearTimeout(nextScheduledTimeout); // Hủy lịch trình tiếp theo               
+    if (positionCheckInterval) {         
+        clearInterval(positionCheckInterval); // Dừng kiểm tra vị thế             
+        positionCheckInterval = null;    
+    }                                    
+    addLog('--- Bot đã được dừng ---', true);  
+    botStartTime = null;                 
+}                                        
+
+// --- Lệnh để điều khiển bot từ console (nếu cần) ---
+// Bạn có thể gọi startBot() hoặc stopBot() trực tiếp từ đây
+// Hoặc thông qua pm2 restart/start/stop, nó sẽ chạy lại file này
+// và hàm startBot() sẽ được gọi tự động.
+
+// Khởi chạy bot khi script được chạy
+startBot();
+
+// Export hàm stopBot để có thể gọi từ bên ngoài (ví dụ: PM2 action, hoặc script khác)
+// Mặc dù trong trường hợp PM2, bạn thường dùng pm2 stop/restart name.
+// export { stopBot }; // Giữ lại nếu bạn muốn dùng module khác để gọi stopBot
