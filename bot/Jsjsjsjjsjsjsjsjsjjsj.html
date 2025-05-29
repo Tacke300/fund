@@ -1,10 +1,11 @@
+
 import https from 'https';
 import crypto from 'crypto';
 import express from 'express';
 import { exec } from 'child_process';
 import fs from 'fs';
 import path from 'path';
-import { fileURLToPath } = from 'url';
+import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -13,12 +14,12 @@ const __dirname = path.dirname(__filename);
 // !!! QUAN TRỌNG: DÁN API Key và Secret Key THẬT của bạn vào đây. !!!
 // Đảm bảo không có khoảng trắng thừa khi copy/paste.
 const API_KEY = 'cZ1Y2O0kggVEggEaPvhFcYQHS5b1EsT2OWZb8zdY9C0jGqNROvXRZHTJjnQ7OG4Q'.trim();   // <--- THAY THẾ BẰNG API KEY THẬT CỦA BẠN
-const SECRET_KEY = 'oU6pZFHgEvbpD9NmFXp5ZVnYFMQ7EIkBiz88TzvmC3SpT9nEf4fcDf0pEnFzoTc'.trim(); // <--- THAY THẾ BẰNG SECRET KEY THẬT CỦA BẠN
+const SECRET_KEY = 'oU6pZFHgEvbpD9NmFXp5ZVnYFMQ7EIkBiz88aTzvmC3SpT9nEf4fcDf0pEnFzoTc'.trim(); // <--- THAY THẾ BẰNG SECRET KEY THẬT CỦA BẠN
 
 // === BASE URL CỦA BINANCE FUTURES API ===
 const BASE_HOST = 'fapi.binance.com';
 
-let serverTimeOffset = 0; // Giữ nguyên, nếu bạn có logic đồng bộ thời gian thì nó sẽ dùng
+let serverTimeOffset = 0;
 
 // Biến cache cho exchangeInfo
 let exchangeInfoCache = null;
@@ -60,18 +61,13 @@ const MIN_FUNDING_RATE_THRESHOLD = -0.0002; // Ngưỡng funding rate âm tối 
 const MAX_POSITION_LIFETIME_SECONDS = 180; // Thời gian tối đa giữ một vị thế (180 giây = 3 phút)
 
 // Thời gian trước giờ funding mà bot sẽ xem xét mở lệnh (đơn vị: phút)
-// Sử dụng để lọc sơ bộ các đồng coin.
-const FUNDING_WINDOW_MINUTES = 30; 
-
-// Ngưỡng thời gian còn lại (tính bằng giây) để bot coi là "sắp trả funding" và tiến hành mở lệnh.
-// Chỉ mở lệnh nếu nextFundingTime của đồng coin được chọn còn lại <= X giây.
-const ONLY_OPEN_IF_FUNDING_IN_SECONDS = 120; // Ví dụ: chỉ mở nếu còn lại <= 2 phút
+const FUNDING_WINDOW_MINUTES = 30; // Bot sẽ mở lệnh nếu nextFundingTime trong vòng 30 phút tới
 
 // Cấu hình thời gian quét bot
 // Bot sẽ quét định kỳ, không cố định vào phút :58 nữa.
 // Thay vào đó, nó sẽ tự động tính toán thời gian quét dựa trên nextFundingTime của các đồng coin.
 // Ví dụ: mỗi 1 phút bot sẽ kiểm tra xem có đồng nào sắp đến giờ funding trong window không.
-const SCAN_INTERVAL_SECONDS = 60; // Quét mỗi 60 giây (đã bị ghi đè bởi logic phút :58)
+const SCAN_INTERVAL_SECONDS = 60; // Quét mỗi 60 giây
 
 // === Cấu hình Server Web ===
 const WEB_SERVER_PORT = 3000; // Cổng cho giao diện web
@@ -664,61 +660,35 @@ async function runTradingLogic() {
         return;
     }
 
-    addLog('>>> Đang quét cơ hội mở lệnh (chỉ vào phút :58)...', true);
+    addLog('>>> Đang quét cơ hội mở lệnh...', true);
     try {
         const accountInfo = await callSignedAPI('/fapi/v2/account', 'GET');
         const usdtAsset = accountInfo.assets.find(a => a.asset === 'USDT')?.availableBalance || 0;
-        const availableBalance = parseFloat(usdtAsset);
+        const availableBalance = parseFloat(usdtAsset); // Đảm bảo là số
 
         if (availableBalance < MIN_USDT_BALANCE_TO_OPEN) {
             addLog(`⚠️ Số dư USDT khả dụng (${availableBalance.toFixed(2)}) dưới ngưỡng tối thiểu (${MIN_USDT_BALANCE_TO_OPEN}). Tắt điện thoại đi uống bia đê`, true);
-            scheduleNextMainCycle();
+            scheduleNextMainCycle(); // Lên lịch quét lại nếu bot đang chạy
             return;
         }
 
         const allFundingData = await callPublicAPI('/fapi/v1/premiumIndex');
-        const now = Date.now();
-        const currentMinute = new Date(now).getUTCMinutes(); // Lấy phút hiện tại theo UTC
+        const now = Date.now(); // Thời gian hiện tại theo UTC
 
-        let eligibleCandidates = []; // Danh sách các đồng coin thỏa mãn điều kiện cơ bản
+        const candidatesForOpening = []; // Các ứng viên đủ điều kiện để mở lệnh
+        const otherNegativeFundingSymbols = []; // Các symbol có funding âm nhưng không đủ điều kiện mở
 
         for (const item of allFundingData) {
             const fundingRate = parseFloat(item.lastFundingRate);
-            
-            // Tính toán thời gian funding tiếp theo dựa trên giờ hiện tại
-            // Funding xảy ra vào các phút :00, :08, :16, :24, :32, :40, :48, :56 của mỗi giờ.
-            // Chúng ta cần tìm funding event gần nhất.
-            const currentHourMs = new Date(now).setUTCMinutes(0, 0, 0); // Đầu giờ hiện tại
-            let nextFundingTimeMs = 0;
-            const fundingMinutes = [0, 8, 16, 24, 32, 40, 48, 56];
-            
-            // Tìm funding minute gần nhất trong giờ hiện tại hoặc giờ tiếp theo
-            let foundNextFundingMinute = false;
-            for (const fm of fundingMinutes) {
-                const fundingEventTimeCandidate = currentHourMs + fm * 60 * 1000;
-                if (fundingEventTimeCandidate > now) {
-                    nextFundingTimeMs = fundingEventTimeCandidate;
-                    foundNextFundingMinute = true;
-                    break;
-                }
-            }
-
-            // Nếu không tìm thấy trong giờ hiện tại, chuyển sang giờ tiếp theo
-            if (!foundNextFundingMinute) {
-                const nextHourMs = currentHourMs + 60 * 60 * 1000;
-                nextFundingTimeMs = nextHourMs + fundingMinutes[0] * 60 * 1000; // Lấy funding đầu tiên của giờ tiếp theo (phút :00)
-            }
-
+            const nextFundingTime = parseInt(item.nextFundingTime); // Thời gian trả funding tiếp theo (timestamp)
 
             // Điều kiện 1: Funding rate đủ âm và là cặp USDT
             if (fundingRate < MIN_FUNDING_RATE_THRESHOLD && item.symbol.endsWith('USDT')) {
-                // Điều kiện 2: nextFundingTime của đồng coin này phải còn trong cửa sổ xem xét
-                const timeToFundingMs = nextFundingTimeMs - now;
+                // Điều kiện 2: Kiểm tra thời gian trả funding
+                const timeToFundingMs = nextFundingTime - now;
                 const timeToFundingMinutes = timeToFundingMs / (1000 * 60);
 
-                // Lọc sơ bộ để chỉ xem xét các coin sắp đến giờ funding
-                // Kiểm tra nếu thời gian còn lại đến funding lớn hơn 0 (chưa qua)
-                // VÀ nhỏ hơn hoặc bằng FUNDING_WINDOW_MINUTES (ví dụ: 30 phút)
+                // Nếu nextFundingTime nằm trong cửa sổ thời gian (ví dụ 0-30 phút tới)
                 if (timeToFundingMinutes > 0 && timeToFundingMinutes <= FUNDING_WINDOW_MINUTES) {
                     const symbolInfo = await getSymbolFiltersAndMaxLeverage(item.symbol);
                     if (symbolInfo && typeof symbolInfo.maxLeverage === 'number' && symbolInfo.maxLeverage > 1) {
@@ -726,6 +696,7 @@ async function runTradingLogic() {
                         const currentPrice = await getCurrentPrice(item.symbol);
                         if (currentPrice === null) {
                             addLog(`[DEBUG] Không thể lấy giá hiện tại ${item.symbol}. Bỏ qua.`);
+                            otherNegativeFundingSymbols.push({ symbol: item.symbol, fundingRate: fundingRate, nextFundingTime: nextFundingTime, reason: 'Giá không lấy được' });
                             continue;
                         }
                         let estimatedQuantity = (capitalToUse * symbolInfo.maxLeverage) / currentPrice;
@@ -735,96 +706,96 @@ async function runTradingLogic() {
                         const currentNotional = estimatedQuantity * currentPrice;
 
                         if (currentNotional >= symbolInfo.minNotional && estimatedQuantity > 0 && TAKE_PROFIT_PERCENTAGES[symbolInfo.maxLeverage] !== undefined) {
-                            eligibleCandidates.push({
+                            candidatesForOpening.push({
                                 symbol: item.symbol,
                                 fundingRate: fundingRate,
-                                nextFundingTime: nextFundingTimeMs,
-                                maxLeverage: symbolInfo.maxLeverage
+                                nextFundingTime: nextFundingTime,
+                                maxLeverage: symbolInfo.maxLeverage,
+                                timeToFundingMinutes: timeToFundingMinutes // Thêm để dễ sắp xếp
                             });
                         } else {
                             let reason = 'Không rõ';
-                            if (currentNotional < symbolInfo.minNotional) reason = `Không đủ minNotional (${symbolInfo.minNotional.toFixed(2)})`;
+                            if (currentNotional < symbolInfo.minNotional) reason = `Không đủ minNotional (${symbolInfo.minNotional})`;
                             else if (estimatedQuantity <= 0) reason = `Khối lượng quá nhỏ (${estimatedQuantity})`;
                             else if (TAKE_PROFIT_PERCENTAGES[symbolInfo.maxLeverage] === undefined) reason = `Đòn bẩy ${symbolInfo.maxLeverage}x không có cấu hình TP`;
                             addLog(`[DEBUG] ${item.symbol}: Funding âm (${fundingRate}), gần giờ funding, nhưng KHÔNG ĐỦ ĐIỀU KIỆN mở lệnh. Lý do: ${reason}.`);
+                            otherNegativeFundingSymbols.push({ symbol: item.symbol, fundingRate: fundingRate, nextFundingTime: nextFundingTime, reason: reason });
                         }
                     } else {
                         addLog(`[DEBUG] ${item.symbol}: Funding âm (${fundingRate}), gần giờ funding, nhưng không tìm thấy thông tin đòn bẩy hoặc đòn bẩy <= 1. Bỏ qua.`);
+                        otherNegativeFundingSymbols.push({ symbol: item.symbol, fundingRate: fundingRate, nextFundingTime: nextFundingTime, reason: 'Không có thông tin đòn bẩy hoặc đòn bẩy <= 1' });
                     }
                 } else {
-                    addLog(`[DEBUG] ${item.symbol}: Funding âm (${fundingRate}), nhưng KHÔNG GẦN giờ funding (còn ${timeToFundingMinutes.toFixed(1)} phút hoặc đã qua). Bỏ qua.`);
+                    addLog(`[DEBUG] ${item.symbol}: Funding âm (${fundingRate}), nhưng KHÔNG GẦN giờ funding (còn ${timeToFundingMinutes.toFixed(1)} phút). Bỏ qua.`);
+                    otherNegativeFundingSymbols.push({ symbol: item.symbol, fundingRate: fundingRate, nextFundingTime: nextFundingTime, reason: `Không gần giờ funding (còn ${timeToFundingMinutes.toFixed(1)} phút)` });
                 }
             }
         }
 
-        if (eligibleCandidates.length > 0) {
-            // Sắp xếp ưu tiên: Funding rate âm nhất
-            eligibleCandidates.sort((a, b) => a.fundingRate - b.fundingRate);
+        // Log các đồng có funding âm nhưng không đủ điều kiện
+        if (otherNegativeFundingSymbols.length > 0) {
+            addLog(`⚠️ Các đồng coin có funding âm nhưng không đủ điều kiện mở lệnh:`);
+            otherNegativeFundingSymbols.forEach(c => {
+                addLog(`  - ${c.symbol} (Funding: ${c.fundingRate}, Thời gian funding: ${formatTimeUTC7(new Date(c.nextFundingTime))}, Lý do: ${c.reason})`);
+            });
+        }
 
-            let selectedCandidateToOpen = null; // Biến để lưu trữ đồng coin cuối cùng được chọn để mở lệnh
-
-            // Duyệt qua các ứng viên đã sắp xếp (từ âm nhất)
-            for (const candidate of eligibleCandidates) {
-                const nowRefreshed = Date.now(); // Lấy lại thời gian hiện tại để đảm bảo chính xác
-                const timeToOpenMs = candidate.nextFundingTime - nowRefreshed;
-                const delayForExactOpenMs = timeToOpenMs + 100; // Đợi thêm 100ms sau giờ funding
-
-                // Kiểm tra điều kiện "sắp trả funding" hợp lệ cho CHÍNH ĐỒNG COIN ĐÓ:
-                // 1. Còn thời gian để chờ (delayForExactOpenMs > 0)
-                // 2. Thời gian chờ thực tế đến funding (timeToOpenMs) phải rất gần (<= ONLY_OPEN_IF_FUNDING_IN_SECONDS)
-                // 3. Giờ funding của nó chưa qua (timeToOpenMs >= 0)
-                if (delayForExactOpenMs > 0 && timeToOpenMs <= (ONLY_OPEN_IF_FUNDING_IN_SECONDS * 1000) && timeToOpenMs >= 0) {
-                    selectedCandidateToOpen = candidate; // Tìm thấy ứng viên phù hợp
-                    break; // Thoát vòng lặp, chúng ta đã tìm được đồng coin âm nhất và sắp trả funding
-                } else {
-                    addLog(`[DEBUG] Bỏ qua ${candidate.symbol} (Funding: ${candidate.fundingRate}, Giờ Funding: ${formatTimeUTC7(new Date(candidate.nextFundingTime))}, còn ${Math.ceil(timeToOpenMs / 1000)}s) - không phải đồng coin sắp trả funding trong cửa sổ mở lệnh (còn > ${ONLY_OPEN_IF_FUNDING_IN_SECONDS}s). Tiếp tục xét đồng khác.`, false);
+        if (candidatesForOpening.length > 0) {
+            // Sắp xếp ưu tiên: Funding rate âm nhất, sau đó đến thời gian funding sớm nhất
+            candidatesForOpening.sort((a, b) => {
+                if (a.fundingRate !== b.fundingRate) {
+                    return a.fundingRate - b.fundingRate; // Âm hơn thì lên trước
                 }
+                return a.nextFundingTime - b.nextFundingTime; // Thời gian funding sớm hơn thì lên trước
+            });
+
+            const selectedCandidate = candidatesForOpening[0]; // Lấy ứng viên tốt nhất
+
+            const capitalToUse = availableBalance * CAPITAL_PERCENTAGE_PER_TRADE;
+            const currentPrice = await getCurrentPrice(selectedCandidate.symbol); // Lấy lại giá ngay trước khi in log
+            if (currentPrice === null) {
+                addLog(`❌ Không thể lấy giá hiện tại cho ${selectedCandidate.symbol}. Bỏ qua mở lệnh.`, true);
+                scheduleNextMainCycle(); // Lên lịch quét lại
+                return;
             }
 
-            if (selectedCandidateToOpen) { // Nếu tìm được một ứng viên thực sự phù hợp để mở lệnh
-                const nowFinal = Date.now(); // Lấy lại thời gian cuối cùng trước khi tính toán
-                const timeToOpenMs = selectedCandidateToOpen.nextFundingTime - nowFinal;
-                const delayForExactOpenMs = timeToOpenMs + 100;
-
-                const capitalToUse = availableBalance * CAPITAL_PERCENTAGE_PER_TRADE;
-                const currentPrice = await getCurrentPrice(selectedCandidateToOpen.symbol);
-                let estimatedQuantity = 0;
-                if (currentPrice !== null) {
-                    estimatedQuantity = (capitalToUse * selectedCandidateToOpen.maxLeverage) / currentPrice;
-                    const symbolInfo = exchangeInfoCache[selectedCandidateToOpen.symbol];
-                    if (symbolInfo) {
-                        estimatedQuantity = Math.floor(estimatedQuantity / symbolInfo.stepSize) * symbolInfo.stepSize;
-                        estimatedQuantity = parseFloat(estimatedQuantity.toFixed(symbolInfo.quantityPrecision));
-                    }
-                }
-
-                addLog(`\n✅ Đã chọn đồng coin: **${selectedCandidateToOpen.symbol}**`, true);
-                addLog(`  + Funding Rate: **${selectedCandidateToOpen.fundingRate}**`);
-                addLog(`  + Giờ trả Funding tiếp theo (tính toán): **${formatTimeUTC7(new Date(selectedCandidateToOpen.nextFundingTime))}**`);
-                addLog(`  + Đòn bẩy tối đa: **${selectedCandidateToOpen.maxLeverage}x**`);
-                addLog(`  + Số tiền dự kiến mở lệnh: **${capitalToUse.toFixed(2)} USDT** (Khối lượng ước tính: **${estimatedQuantity} ${selectedCandidateToOpen.symbol}**)`);
-                addLog(`  + Lệnh sẽ được mở sau khoảng **${Math.ceil(delayForExactOpenMs / 1000)} giây** (vào lúc **${formatTimeUTC7(new Date(selectedCandidateToOpen.nextFundingTime + 100))}**).`, true);
-
-                addLog(`>>> Đang chờ đến thời điểm mở lệnh chính xác...`, true);
-                clearTimeout(nextScheduledTimeout); // Hủy lịch trình quét :58 nếu có
-                nextScheduledTimeout = setTimeout(async () => {
-                    if (!currentOpenPosition && botRunning) {
-                        addLog(`>>> Đã đến giờ funding cho ${selectedCandidateToOpen.symbol}. Đang thực hiện mở lệnh.`, true);
-                        await openShortPosition(selectedCandidateToOpen.symbol, selectedCandidateToOpen.fundingRate, availableBalance);
-                    } else if (!botRunning) {
-                        addLog('Bot đã bị dừng trong khi chờ. Hủy bỏ việc mở lệnh.', true);
-                    } else {
-                        addLog(`⚠️ Đã có vị thế được mở trong khi chờ (bởi luồng khác). Bỏ qua việc mở lệnh mới.`, true);
-                    }
-                }, delayForExactOpenMs);
-            } else { // Không tìm thấy đồng coin nào phù hợp sau khi duyệt qua tất cả
-                addLog('>>> Không tìm thấy đồng coin nào thỏa mãn cả điều kiện funding âm và sắp trả funding trong chu kỳ này. Đang chờ chu kỳ quét tiếp theo (vào phút :58).', true);
-                scheduleNextMainCycle();
+            let estimatedQuantity = (capitalToUse * selectedCandidate.maxLeverage) / currentPrice;
+            const symbolInfo = exchangeInfoCache[selectedCandidate.symbol]; // Lấy từ cache
+            if (symbolInfo) {
+                estimatedQuantity = Math.floor(estimatedQuantity / symbolInfo.stepSize) * symbolInfo.stepSize;
+                estimatedQuantity = parseFloat(estimatedQuantity.toFixed(symbolInfo.quantityPrecision));
             }
 
-        } else { // Không có đồng coin nào đạt điều kiện sơ bộ
-            addLog('>>> Không tìm thấy cơ hội mở lệnh đủ điều kiện tại thời điểm này. Đang chờ chu kỳ quét tiếp theo (vào phút :58).', true);
-            scheduleNextMainCycle();
+            const timeToOpenMs = selectedCandidate.nextFundingTime - now; // Thời gian thực tế còn lại cho đến giờ funding
+            const timeToOpenSeconds = Math.max(0, Math.ceil(timeToOpenMs / 1000));
+
+
+            addLog(`\n✅ Đã chọn đồng coin: **${selectedCandidate.symbol}**`, true);
+            addLog(`  + Funding Rate: **${selectedCandidate.fundingRate}**`);
+            addLog(`  + Giờ trả Funding tiếp theo: **${formatTimeUTC7(new Date(selectedCandidate.nextFundingTime))}**`);
+            addLog(`  + Đòn bẩy tối đa: **${selectedCandidate.maxLeverage}x**`);
+            addLog(`  + Số tiền dự kiến mở lệnh: **${capitalToUse.toFixed(2)} USDT** (Khối lượng ước tính: **${estimatedQuantity} ${selectedCandidate.symbol}**)`);
+            addLog(`  + Lệnh sẽ được mở vào lúc **${formatTimeUTC7(new Date(selectedCandidate.nextFundingTime))}** (còn khoảng **${timeToOpenSeconds} giây** đếm ngược).`);
+
+            addLog(`>>> Đang chờ đến thời điểm mở lệnh...`, true);
+            await delay(timeToOpenMs); // Đợi chính xác cho đến giờ funding
+
+            // Sau khi chờ, kiểm tra lại xem có vị thế nào được mở trong khi chờ không
+            if (!currentOpenPosition && botRunning) { // Chỉ mở nếu bot đang chạy và chưa có vị thế
+                addLog(`>>> Đã đến giờ funding cho ${selectedCandidate.symbol}. Đang thực hiện mở lệnh.`, true);
+                await openShortPosition(selectedCandidate.symbol, selectedCandidate.fundingRate, availableBalance);
+            } else if (!botRunning) {
+                addLog('Bot đã bị dừng trong khi chờ. Hủy bỏ việc mở lệnh.', true);
+                // scheduleNextMainCycle() sẽ không được gọi vì botRunning là false
+            } else {
+                addLog(`⚠️ Đã có vị thế được mở trong khi chờ (bởi luồng khác). Bỏ qua việc mở lệnh mới.`, true);
+                // Vì đã có lệnh khác mở, không cần lên lịch quét lại ngay,
+                // manageOpenPosition sẽ lo việc đóng lệnh và sau đó gọi scheduleNextMainCycle.
+            }
+
+        } else {
+            addLog('>>> Không tìm thấy cơ hội mở lệnh đủ điều kiện tại thời điểm này. Đang chờ chu kỳ quét tiếp theo.', true);
+            scheduleNextMainCycle(); // Lên lịch quét lại nếu không tìm thấy cơ hội
         }
     } catch (error) {
         addLog('❌ Lỗi tìm kiếm: ' + (error.msg || error.message), true);
@@ -834,47 +805,33 @@ async function runTradingLogic() {
 
 // Hàm lên lịch chu kỳ chính của bot (quét hoặc chờ)
 async function scheduleNextMainCycle() {
-    if (!botRunning) {
+    if (!botRunning) { // Nếu bot đã bị dừng, không lên lịch nữa
         addLog('Bot đã dừng.', true);
         clearTimeout(nextScheduledTimeout);
         return;
     }
 
     if (currentOpenPosition) {
-        addLog('>>> Có vị thế đang mở. Bot sẽ không lên lịch quét mới mà chờ đóng vị thế hiện tại.', true);
-        return; // manageOpenPosition sẽ tự động gọi scheduleNextMainCycle sau khi đóng
+        addLog('>>> Có vị thế đang mở. Bot sẽ không lên lịch quét mới mà chờ đóng vị thế hiện tại.');
+        // ManageOpenPosition sẽ tự động gọi scheduleNextMainCycle sau khi đóng.
+        return; // Managed by manageOpenPosition
     }
 
     clearTimeout(nextScheduledTimeout); // Xóa bất kỳ lịch trình cũ nào
 
     const now = Date.now();
-    const currentMinute = new Date(now).getUTCMinutes(); // Lấy phút hiện tại theo UTC
-    let delayUntilNext58Minute;
+    // Lên lịch quét tiếp theo sau SCAN_INTERVAL_SECONDS
+    const nextScanMoment = now + (SCAN_INTERVAL_SECONDS * 1000);
 
-    if (currentMinute < 58) {
-        // Nếu đang ở phút < 58, chờ đến phút 58 của giờ hiện tại
-        delayUntilNext58Minute = (58 - currentMinute) * 60 * 1000 - new Date(now).getUTCSeconds() * 1000 - new Date(now).getUTCMilliseconds();
-    } else {
-        // Nếu đang ở phút 58 hoặc sau 58, chờ đến phút 58 của giờ tiếp theo
-        delayUntilNext58Minute = (60 - currentMinute + 58) * 60 * 1000 - new Date(now).getUTCSeconds() * 1000 - new Date(now).getUTCMilliseconds();
-    }
-
-    // Đảm bảo delay không âm (ví dụ: nếu chạy lúc 58:00:00, delay phải rất nhỏ)
-    if (delayUntilNext58Minute <= 0) {
-        delayUntilNext58Minute = 1000; // Chờ ít nhất 1 giây để tránh lỗi setTimeout với giá trị 0
-    }
-
-    const nextScanMoment = new Date(now + delayUntilNext58Minute);
-
-    addLog(`>>> Bot sẽ quét lại vào phút **:58** của giờ tiếp theo (vào khoảng **${formatTimeUTC7(nextScanMoment)}**).`, true);
+    addLog(`>>> Bot sẽ quét lại sau **${SCAN_INTERVAL_SECONDS} giây** (vào khoảng **${formatTimeUTC7(new Date(nextScanMoment))}**).`, true);
 
     nextScheduledTimeout = setTimeout(async () => {
-        if(botRunning) {
-            await runTradingLogic();
+        if(botRunning) { // Chỉ chạy nếu bot vẫn đang hoạt động
+            await runTradingLogic(); // Chạy logic tìm kiếm cơ hội
         } else {
             addLog('Bot đã bị dừng.', true);
         }
-    }, delayUntilNext58Minute);
+    }, SCAN_INTERVAL_SECONDS * 1000); // Lên lịch sau X giây
 }
 
 // --- Hàm khởi động bot logic chính (nội bộ, không phải PM2 start) ---
