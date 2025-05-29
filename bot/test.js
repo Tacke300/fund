@@ -20,8 +20,16 @@ function sign(queryString) {
 
 // ==== Lấy server time ====
 async function getServerTime() {
-  const res = await fetch('https://fapi.binance.com/fapi/v1/time');
-  const data = await res.json();
+  const res = await fetch(url);
+const text = await res.text();
+
+try {
+  const data = JSON.parse(text);
+  // xử lý data JSON
+} catch (err) {
+  console.error("Không phải JSON, trả về:", text);
+  throw err;
+}
   return data.serverTime;
 }
 
