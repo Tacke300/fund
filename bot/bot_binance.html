@@ -1,9 +1,10 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Bot Binance Design By TunggBeoo</title>
   <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@700&display=swap" rel="stylesheet">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <style>
     body {
       font-family: 'Orbitron', sans-serif;
@@ -11,7 +12,7 @@
       color: #eee;
       display: flex;
       flex-direction: column;
-      justify-content: flex-start; /* Thay đổi từ center để nội dung bắt đầu từ trên */
+      justify-content: flex-start;
       align-items: center;
       min-height: 100vh;
       margin: 0;
@@ -178,10 +179,10 @@
 <body>
   <h1 id="top">BOT BINANCE</h1>
 
-  <div class="status-bar" id="statusBar">Bot Status: Disconnected</div>
+  <div class="status-bar" id="statusBar">Bot Status: Loading...</div>
 
   <div id="log">
-    <p>Connecting to bot...</p>
+    <p>Loading logs...</p>
   </div>
 
   <div class="button-row">
@@ -193,77 +194,84 @@
   <script>
     const logDiv = document.getElementById('log');
     const statusBar = document.getElementById('statusBar');
-    const ws = new WebSocket('ws://localhost:3000'); // Kết nối tới WebSocket server của bot
 
-    function appendLog(message) {
-        const p = document.createElement('p');
-        p.textContent = message;
-        logDiv.appendChild(p);
-        logDiv.scrollTop = logDiv.scrollHeight; // Cuộn xuống cuối
+    // Hàm để lấy log từ server
+    function fetchLogs() {
+        fetch('/api/logs')
+            .then(response => {
+                if (!response.ok) {
+                    return response.text().then(text => { throw new Error(text) });
+                }
+                return response.text();
+            })
+            .then(data => {
+                const isScrolledToBottom = logDiv.scrollHeight - logDiv.clientHeight <= logDiv.scrollTop + 1;
+                logDiv.innerHTML = `<pre>${data}</pre>`;
+                if (isScrolledToBottom) {
+                    logDiv.scrollTop = logDiv.scrollHeight; // Cuộn xuống cuối nếu người dùng đang ở cuối
+                }
+            })
+            .catch(error => {
+                console.error('Error fetching logs:', error);
+                logDiv.innerHTML = `<div style="color: red;">Error loading logs: ${error.message || error}. Please check server and log file path.</div>`;
+            });
     }
 
-    function updateStatusBar(message) {
-        statusBar.textContent = `Bot Status: ${message}`;
+    // Hàm để lấy trạng thái bot từ server
+    function fetchStatus() {
+        fetch('/api/status')
+            .then(response => {
+                if (!response.ok) {
+                    return response.text().then(text => { throw new Error(text) });
+                }
+                return response.text();
+            })
+            .then(data => {
+                statusBar.textContent = data;
+            })
+            .catch(error => {
+                console.error('Error fetching status:', error);
+                statusBar.textContent = `Bot Status: Error fetching status. (${error.message || error})`;
+            });
     }
 
-    ws.onopen = () => {
-        appendLog('Connected to bot WebSocket.');
-        updateStatusBar('Connected, awaiting commands.');
-    };
-
-    ws.onmessage = event => {
-        try {
-            const data = JSON.parse(event.data);
-            if (data.type === 'log') {
-                // Thêm log mới, loại bỏ ký tự \r nếu có
-                appendLog(data.message.replace(/\r/g, ''));
-            } else if (data.type === 'status') {
-                // Cập nhật dòng trạng thái trên thanh trạng thái
-                updateStatusBar(data.message.replace(/\r/g, ''));
-            }
-        } catch (e) {
-            appendLog('Error parsing message from bot: ' + event.data);
-            console.error('Error parsing message from bot:', e);
-        }
-    };
-
-    ws.onclose = () => {
-        appendLog('Disconnected from bot WebSocket. Please restart the bot process.');
-        updateStatusBar('Disconnected.');
-    };
-
-    ws.onerror = error => {
-        appendLog('WebSocket error: ' + error.message);
-        updateStatusBar('WebSocket Error!');
-        console.error('WebSocket error:', error);
-    };
-
+    // Gửi lệnh khởi động bot
     async function startBot() {
         try {
             const response = await fetch('/start');
             const message = await response.text();
-            alert(message); // Hiển thị alert từ phản hồi của server
+            alert(message);
+            // Sau khi gửi lệnh, cập nhật trạng thái và log ngay lập tức
+            fetchStatus();
+            fetchLogs();
         } catch (error) {
-            appendLog('Error sending start command: ' + error.message);
             alert('Lỗi khi khởi động bot: ' + error.message);
             console.error('Lỗi khi khởi động bot:', error);
         }
     }
 
+    // Gửi lệnh dừng bot
     async function stopBot() {
         try {
             const response = await fetch('/stop');
             const message = await response.text();
-            alert(message); // Hiển thị alert từ phản hồi của server
+            alert(message);
+            // Sau khi gửi lệnh, cập nhật trạng thái và log ngay lập tức
+            fetchStatus();
+            fetchLogs();
         } catch (error) {
-            appendLog('Error sending stop command: ' + error.message);
             alert('Lỗi khi dừng bot: ' + error.message);
             console.error('Lỗi khi dừng bot:', error);
         }
     }
 
-    // Không cần fetchLogs định kỳ nữa vì đã dùng WebSocket
-    // Loại bỏ setInterval(fetchLogs, 3000); và fetchLogs();
+    // Lấy log và trạng thái mỗi 3 giây
+    setInterval(fetchLogs, 3000);
+    setInterval(fetchStatus, 5000); // Lấy trạng thái ít thường xuyên hơn để giảm tải
+
+    // Lần đầu tải trang, lấy log và trạng thái
+    fetchLogs();
+    fetchStatus();
   </script>
 </body>
 </html>
