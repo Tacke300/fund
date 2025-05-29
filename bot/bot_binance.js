@@ -2,7 +2,7 @@
 import express from 'express';
 import https from 'https';
 import crypto from 'crypto';
-import fetch from 'node-fetch'; // Giữ lại fetch nếu có các API khác cần, nhưng các hàm callSignedAPI/callPublicAPI sẽ dùng https module.
+import fetch from 'node-fetch'; 
 import path from 'path';
 import cron from 'node-cron';
 
@@ -18,13 +18,14 @@ const port = 3000;
 // === API KEY & SECRET ===
 // !!! QUAN TRỌNG: ĐẢM BẢO ĐÂY LÀ API KEY VÀ SECRET KEY THẬT CỦA BẠN !!!
 const API_KEY = 'cZ1Y2O0kggVEggEaPvhFcYQHS5b1EsT2OWZb8zdY9C0jGqNROvXRZHTJjnQ7OG4Q'.trim(); 
-const SECRET_KEY = 'oU6pZFHgEvbpD9NmFXp5ZVnYFMQ7EIkBiz88TzvmC3SpT9nEf4fccDf0pEnFzoTc'.trim(); 
+const SECRET_KEY = 'oU6pZFHgEvbpD9NmFXp5ZVnYFMQ7EIkBiz88aTzvmC3SpT9nEf4fccDf0pEnFzoTc'.trim(); 
 
 // === BASE URL CỦA BINANCE FUTURES API ===
 const BASE_HOST = 'fapi.binance.com';
 
-// Biến lưu trữ lệch thời gian với server Binance
-let serverTimeOffset = 0;
+// Biến này sẽ không được dùng trong signedRequest/publicRequest nữa,
+// nhưng tôi vẫn giữ lại để tương thích nếu bạn muốn đồng bộ thời gian thủ công sau này.
+let serverTimeOffset = 0; 
 
 /***************** HÀM TIỆN ÍCH CHUNG *****************/
 let logs = [];
@@ -43,7 +44,7 @@ function addLog(message) {
 
 const delay = ms => new Promise(resolve => setTimeout(ms));
 
-/***************** HÀM KÝ & GỌI API (ĐƯỢC GỘP CHÍNH XÁC TỪ TEST.JS CỦA BẠN) *****************/
+/***************** CÁC HÀM API CHÍNH (GỘP CHÍNH XÁC TỪ TEST.JS CỦA BẠN) *****************/
 
 /**
  * Tạo chữ ký HMAC SHA256 cho chuỗi truy vấn.
@@ -57,10 +58,15 @@ function createSignature(queryString, apiSecret) {
 
 /**
  * Hàm helper để gửi yêu cầu HTTP.
- * (Gộp chính xác từ test.js)
- * Lưu ý: Trong test.js hàm này chỉ dùng cho GET. Nếu cần POST, có thể phải thêm postData vào options.
+ * (Gộp chính xác từ test.js, ĐÃ THÊM postData để hỗ trợ POST requests của bot)
+ * @param {string} method - Phương thức HTTP (GET, POST).
+ * @param {string} hostname - Hostname của API (ví dụ: 'fapi.binance.com').
+ * @param {string} fullPath - Đường dẫn đầy đủ của API (ví dụ: '/fapi/v1/account?params=...').
+ * @param {object} headers - Các HTTP headers.
+ * @param {string} postData - Dữ liệu body cho POST request (được thêm vào).
+ * @returns {Promise<string>} Dữ liệu phản hồi dạng chuỗi JSON.
  */
-function makeHttpRequest(method, hostname, fullPath, headers) {
+function makeHttpRequest(method, hostname, fullPath, headers, postData = '') { // Đã thêm postData
     return new Promise((resolve, reject) => {
         const options = {
             hostname: hostname,
@@ -86,31 +92,35 @@ function makeHttpRequest(method, hostname, fullPath, headers) {
                     } catch (e) {
                         errorDetails.msg += ` - Raw Response: ${data.substring(0, 200)}...`;
                     }
-                    addLog(`❌ makeHttpRequest lỗi: ${errorDetails.msg}`); // Sử dụng addLog
+                    addLog(`❌ makeHttpRequest lỗi: ${errorDetails.msg}`); 
                     reject(errorDetails);
                 }
             });
         });
 
         req.on('error', (e) => {
-            addLog(`❌ makeHttpRequest lỗi network: ${e.message}`); // Sử dụng addLog
+            addLog(`❌ makeHttpRequest lỗi network: ${e.message}`); 
             reject({ code: 'NETWORK_ERROR', msg: e.message });
         });
 
+        if (method === 'POST' && postData) { // Logic để gửi POST data
+            req.write(postData);
+        }
         req.end();
     });
 }
 
 /**
- * Gửi yêu cầu GET đã ký tới API Binance Futures.
- * (Gộp chính xác từ signedRequest của test.js, chỉ thay đổi tên và thêm serverTimeOffset)
+ * Gửi yêu cầu ĐÃ KÝ tới API Binance Futures.
+ * (Gộp chính xác từ signedRequest của test.js, chỉ đổi tên hàm)
  * @param {string} fullEndpointPath - Đường dẫn đầy đủ của API (ví dụ: '/fapi/v2/account').
+ * @param {string} method - Phương thức HTTP (GET, POST).
  * @param {object} params - Các tham số truy vấn.
  * @returns {Promise<object>} Dữ liệu trả về từ API.
  */
-async function callSignedAPI(fullEndpointPath, params = {}) {
+async function callSignedAPI(fullEndpointPath, method = 'GET', params = {}) { // Đã thêm method
     const recvWindow = 5000; // Từ test.js
-    const timestamp = Date.now() + serverTimeOffset; // Sử dụng serverTimeOffset
+    const timestamp = Date.now(); // Lấy timestamp hiện tại của máy cục bộ (như test.js)
 
     let queryString = Object.keys(params)
                             .map(key => `${key}=${params[key]}`)
@@ -127,16 +137,21 @@ async function callSignedAPI(fullEndpointPath, params = {}) {
     };
 
     try {
-        const rawData = await makeHttpRequest('GET', BASE_HOST, fullPathWithQuery, headers);
+        // Đối với POST, makeHttpRequest cần chuỗi truy vấn trong body
+        const postData = (method === 'POST') ? queryString + `&signature=${signature}` : ''; 
+        // fullPathWithQuery sẽ chỉ là fullEndpointPath cho POST, query và signature nằm trong postData
+        const requestPath = (method === 'POST') ? fullEndpointPath : fullPathWithQuery;
+
+        const rawData = await makeHttpRequest(method, BASE_HOST, requestPath, headers, postData); 
         return JSON.parse(rawData);
     } catch (error) {
-        addLog("❌ Lỗi khi gửi yêu cầu ký tới Binance API:"); // Sử dụng addLog
+        addLog("❌ Lỗi khi gửi yêu cầu ký tới Binance API:"); 
         addLog(`  Mã lỗi: ${error.code || 'UNKNOWN'}`);
         addLog(`  Thông báo: ${error.msg || error.message || 'Lỗi không xác định'}`);
         if (error.code === -2015) {
             addLog("  Gợi ý: Lỗi xác thực API Key. Vui lòng kiểm tra lại API_KEY, SECRET_KEY và quyền truy cập Futures của bạn.");
         } else if (error.code === -1021) {
-            addLog("  Gợi ý: Lỗi lệch thời gian. Đảm bảo đồng hồ máy tính của bạn chính xác hoặc xem xét cơ chế đồng bộ thời gian với server Binance.");
+            addLog("  Gợi ý: Lỗi lệch thời gian. Đảm bảo đồng hồ máy tính của bạn chính xác (sử dụng NTP) hoặc nếu vẫn gặp lỗi, hãy báo lại để chúng ta thêm cơ chế đồng bộ thời gian nâng cao.");
         } else if (error.code === 404) {
             addLog("  Gợi ý: Lỗi 404 Not Found. Đường dẫn API không đúng. Kiểm tra lại tài liệu API của Binance.");
         } else if (error.code === 'NETWORK_ERROR') {
@@ -148,7 +163,7 @@ async function callSignedAPI(fullEndpointPath, params = {}) {
 
 /**
  * Gửi yêu cầu GET KHÔNG ký tới API Binance Futures (cho các endpoint công khai).
- * (Gộp chính xác từ publicRequest của test.js)
+ * (Gộp chính xác từ publicRequest của test.js, chỉ đổi tên hàm)
  * @param {string} fullEndpointPath - Đường dẫn đầy đủ của API (ví dụ: '/fapi/v1/exchangeInfo').
  * @param {object} params - Các tham số truy vấn.
  * @returns {Promise<object>} Dữ liệu trả về từ API.
@@ -167,7 +182,7 @@ async function callPublicAPI(fullEndpointPath, params = {}) {
         const rawData = await makeHttpRequest('GET', BASE_HOST, fullPathWithQuery, headers);
         return JSON.parse(rawData);
     } catch (error) {
-        addLog("❌ Lỗi khi gửi yêu cầu công khai tới Binance API:"); // Sử dụng addLog
+        addLog("❌ Lỗi khi gửi yêu cầu công khai tới Binance API:"); 
         addLog(`  Mã lỗi: ${error.code || 'UNKNOWN'}`);
         addLog(`  Thông báo: ${error.msg || error.message || 'Lỗi không xác định'}`);
         if (error.code === 404) {
@@ -181,7 +196,7 @@ async function callPublicAPI(fullEndpointPath, params = {}) {
 
 /**
  * Hàm để lấy thời gian server Binance và tính toán độ lệch.
- * Nên chạy hàm này một lần khi khởi động bot, và có thể chạy lại định kỳ (ví dụ: mỗi giờ).
+ * (Giữ lại hàm này để lấy offset, nhưng offset sẽ không được sử dụng bởi callSignedAPI/callPublicAPI nữa)
  */
 async function syncServerTime() {
   try {
@@ -189,23 +204,24 @@ async function syncServerTime() {
     const binanceServerTime = data.serverTime;
     const localTime = Date.now();
     serverTimeOffset = binanceServerTime - localTime;
-    addLog(`✅ Đồng bộ thời gian với Binance server. Độ lệch: ${serverTimeOffset} ms.`);
+    addLog(`✅ Đồng bộ thời gian với Binance server. Độ lệch: ${serverTimeOffset} ms. (Lưu ý: Độ lệch này hiện không được dùng bởi các hàm API chính mà chỉ để ghi log)`);
   } catch (error) {
-    addLog(`❌ Lỗi khi đồng bộ thời gian với Binance: ${error.message}. Sử dụng thời gian cục bộ.`);
-    serverTimeOffset = 0; // Đặt về 0 nếu có lỗi để tránh các lỗi timestamp khác
+    addLog(`❌ Lỗi khi đồng bộ thời gian với Binance: ${error.message}.`);
+    serverTimeOffset = 0; 
   }
 }
 
 /**
  * Lấy thông tin đòn bẩy cho một symbol cụ thể từ endpoint /fapi/v1/leverageBracket.
- * (Đã gộp chính xác từ test.js, chỉ thay đổi tên và cách trả về)
+ * (Gộp chính xác từ test.js, chỉ đổi tên hàm)
  * @param {string} symbol - Tên cặp giao dịch (ví dụ: 'BTCUSDT').
  * @returns {Promise<number|null>} Đòn bẩy tối đa (ví dụ: 125) hoặc null nếu không tìm thấy hoặc lỗi.
  */
 async function getLeverageBracketForSymbol(symbol) {
     try {
         addLog(`[DEBUG getLeverageBracketForSymbol] Đang cố gắng lấy leverageBracket cho ${symbol} theo cách của test.js...`);
-        const response = await callSignedAPI('/fapi/v1/leverageBracket', { symbol: symbol });
+        // Lời gọi đến callSignedAPI (đã là signedRequest được đổi tên)
+        const response = await callSignedAPI('/fapi/v1/leverageBracket', 'GET', { symbol: symbol });
 
         if (response && Array.isArray(response) && response.length > 0 && response[0].brackets && response[0].brackets.length > 0) {
             const firstBracket = response[0].brackets[0]; // Lấy bracket đầu tiên
@@ -236,6 +252,7 @@ app.get('/', (req, res) => res.send('Funding bot is running!'));
 app.get('/balance', async (req, res) => {
   try {
     addLog('>>> /balance được gọi');
+    // Sử dụng callSignedAPI (đã gộp từ signedRequest của test.js)
     const account = await callSignedAPI('/fapi/v2/account');
     const usdtAsset = account.assets.find(a => a.asset === 'USDT');
     res.json({ balance: usdtAsset ? parseFloat(usdtAsset.availableBalance) : 0 });
@@ -247,6 +264,7 @@ app.get('/balance', async (req, res) => {
 
 app.get('/funding', async (req, res) => {
   try {
+    // Sử dụng callPublicAPI (đã gộp từ publicRequest của test.js)
     const fundingRates = await callPublicAPI('/fapi/v1/premiumIndex');
 
     const simplified = fundingRates.map(item => ({
@@ -311,6 +329,7 @@ async function getExchangeInfo() {
 
   addLog('>>> Đang lấy exchangeInfo từ Binance...');
   try {
+    // Sử dụng callPublicAPI (đã gộp từ publicRequest của test.js)
     const data = await callPublicAPI('/fapi/v1/exchangeInfo');
     addLog(`✅ Đã nhận được exchangeInfo. Số lượng symbols: ${data.symbols.length}`);
 
@@ -347,6 +366,7 @@ async function getSymbolFiltersAndMaxLeverage(symbol) {
     return null;
   }
   
+  // Sử dụng getLeverageBracketForSymbol (đã gộp từ test.js)
   const maxLeverage = await getLeverageBracketForSymbol(symbol); 
 
   return {
@@ -358,6 +378,7 @@ async function getSymbolFiltersAndMaxLeverage(symbol) {
 
 async function getCurrentPrice(symbol) {
   try {
+    // Sử dụng callPublicAPI (đã gộp từ publicRequest của test.js)
     const data = await callPublicAPI('/fapi/v1/ticker/price', { symbol: symbol });
     const price = parseFloat(data.price);
     return price;
@@ -372,6 +393,7 @@ async function placeShortOrder(symbol, currentFundingRate, bestFundingTime) {
   try {
     // Lấy số dư hiện tại của bạn
     addLog('>>> Đang kiểm tra số dư khả dụng...');
+    // Sử dụng callSignedAPI (đã gộp từ signedRequest của test.js)
     const account = await callSignedAPI('/fapi/v2/account');
     const usdtAsset = account.assets.find(a => a.asset === 'USDT');
     const balance = usdtAsset ? parseFloat(usdtAsset.availableBalance) : 0;
@@ -399,10 +421,7 @@ async function placeShortOrder(symbol, currentFundingRate, bestFundingTime) {
 
     // Đặt đòn bẩy cho symbol này
     addLog(`[DEBUG] Đang đặt đòn bẩy. symbol: ${symbol}, leverage: ${maxLeverage}`);
-    // Hàm makeHttpRequest trong test.js không có tham số postData.
-    // Đối với POST request, chúng ta cần truyền body data.
-    // Binance API dùng form-urlencoded hoặc query string cho POST, không phải JSON body.
-    // Hàm callSignedAPI đã được sửa để xử lý POST với params được thêm vào queryString.
+    // Sử dụng callSignedAPI (đã gộp từ signedRequest của test.js), truyền method POST
     await callSignedAPI('/fapi/v1/leverage', 'POST', {
       symbol: symbol,
       leverage: maxLeverage
@@ -437,6 +456,7 @@ async function placeShortOrder(symbol, currentFundingRate, bestFundingTime) {
 
     // Đặt lệnh SHORT (SELL) MARKET
     addLog(`[DEBUG] Đang đặt lệnh SHORT. symbol: ${symbol}, quantity: ${quantity}`);
+    // Sử dụng callSignedAPI (đã gộp từ signedRequest của test.js), truyền method POST
     const order = await callSignedAPI('/fapi/v1/order', 'POST', {
       symbol: symbol,
       side: 'SELL',
@@ -509,6 +529,7 @@ async function placeShortOrder(symbol, currentFundingRate, bestFundingTime) {
 async function closeShortPosition(symbol, qtyToClose = null) {
   try {
     addLog(`>>> Đang đóng lệnh SHORT cho ${symbol}`);
+    // Sử dụng callSignedAPI (đã gộp từ signedRequest của test.js)
     const positions = await callSignedAPI('/fapi/v2/positionRisk');
     const position = positions.find(p => p.symbol === symbol);
 
@@ -531,7 +552,7 @@ async function closeShortPosition(symbol, qtyToClose = null) {
       qtyToClose = parseFloat(qtyToClose.toFixed(quantityPrecision));
 
       addLog(`[DEBUG] Đang đóng lệnh SHORT. symbol: ${symbol}, quantity: ${qtyToClose}`);
-      // Lệnh đóng vị thế cũng là một POST request
+      // Sử dụng callSignedAPI (đã gộp từ signedRequest của test.js), truyền method POST
       await callSignedAPI('/fapi/v1/order', 'POST', {
         symbol: symbol,
         side: 'BUY',
@@ -559,6 +580,7 @@ cron.schedule('*/1 * * * *', async () => {
   }
   addLog('>>> [Cron] Đã tới giờ hoàng đạo kiếm tiền uống bia, đang kiểm tra funding...');
   try {
+    // Sử dụng callPublicAPI (đã gộp từ publicRequest của test.js)
     const allFundingData = await callPublicAPI('/fapi/v1/premiumIndex');
     const fundingRates = allFundingData.map(item => ({
       symbol: item.symbol,
@@ -573,6 +595,7 @@ cron.schedule('*/1 * * * *', async () => {
 
     for (const r of fundingRates) {
         if (parseFloat(r.fundingRate) < -0.0001) {
+            // Sử dụng getLeverageBracketForSymbol (đã gộp từ test.js)
             const maxLeverageForCandidate = await getLeverageBracketForSymbol(r.symbol); 
             
             if (maxLeverageForCandidate) {
@@ -580,6 +603,7 @@ cron.schedule('*/1 * * * *', async () => {
             }
 
             if (typeof maxLeverageForCandidate === 'number' && maxLeverageForCandidate > 1) {
+                // Sử dụng callSignedAPI (đã gộp từ signedRequest của test.js)
                 const account = await callSignedAPI('/fapi/v2/account');
                 const usdtAsset = account.assets.find(a => a.asset === 'USDT');
                 const balance = usdtAsset ? parseFloat(usdtAsset.availableBalance) : 0;
@@ -607,7 +631,9 @@ cron.schedule('*/1 * * * *', async () => {
     if (candidates.length > 0) {
       const best = candidates[0];
       selectedSymbol = best.symbol;
-      const waitTime = best.fundingTime + 500 - (Date.now() + serverTimeOffset); 
+      // Trong test.js, timestamp được lấy không có serverTimeOffset.
+      // Do đó, logic waitTime cũng sẽ chỉ dựa trên thời gian cục bộ.
+      const waitTime = best.fundingTime + 500 - (Date.now()); 
 
       const projectedOpenTime = new Date(Date.now() + waitTime);
       const formattedProjectedOpenTime = `${projectedOpenTime.toLocaleDateString('en-GB')} ${projectedOpenTime.toLocaleTimeString('en-US', { hour12: false })}.${String(projectedOpenTime.getMilliseconds()).padStart(3, '0')}`;
@@ -642,12 +668,13 @@ cron.schedule('*/1 * * * *', async () => {
 (async () => {
   addLog('>>> [Khởi động] Đang kiểm tra API Key với Binance...');
   try {
+    // Sử dụng callSignedAPI (đã gộp từ signedRequest của test.js)
     const account = await callSignedAPI('/fapi/v2/account');
     addLog('✅ [Khởi động] API Key hoạt động bình thường! Balance: ' + account.assets.find(a => a.asset === 'USDT')?.availableBalance);
   } catch (error) {
     addLog('❌ [Khởi động] API Key không hoạt động hoặc có lỗi: ' + (error.msg || error.message));
-    addLog('   -> Nếu lỗi là "-2015 API-key format invalid.", hãy kiểm tra lại API Key/Secret của bạn (chữ hoa/thường, khoảng trắng) hoặc giới hạn IP trên Binance.');
-    addLog('   -> Nếu lỗi là "-1021 Timestamp for this request is outside of the recvWindow.", hãy kiểm tra lại việc đồng bộ thời gian trên VPS (`sudo ntpdate pool.ntp.org` và `sudo timedatectl set-timezone UTC`).');
-    addLog('   -> Nếu lỗi liên quan đến giới hạn IP, hãy thêm IP của VPS vào danh sách trắng trên Binance.');
+    addLog('   -> Nếu lỗi là "-2014 API-key format invalid.", hãy kiểm tra lại API Key/Secret của bạn (chữ hoa/thường, khoảng trắng) hoặc giới hạn IP trên Binance.');
+    addLog('   -> **QUAN TRỌNG**: Nếu lỗi là "-1021 Timestamp for this request is outside of the recvWindow.", điều này có nghĩa đồng hồ trên máy chủ của bạn không chính xác. Bạn cần đồng bộ thời gian bằng cách chạy lệnh `sudo ntpdate pool.ntp.org` và `sudo timedatectl set-timezone UTC` trên VPS. Đây là vấn đề phổ biến nhất khi code `test.js` hoạt động nhưng bot không.');
+    addLog('   -> Nếu lỗi liên quan đến giới hạn IP, hãy thêm IP của VPS của bạn vào danh sách trắng trên Binance.');
   }
 })();
