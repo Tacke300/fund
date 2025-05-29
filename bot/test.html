@@ -1,79 +1,44 @@
-
-
-
- <!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Binance Futures Max Leverage</title>
+  <title>Binance USDT Futures Leverage</title>
   <style>
-    body { font-family: Arial, sans-serif; margin: 20px; background: #f5f5f5; color: #333; }
-    table { border-collapse: collapse; width: 100%; background: #fff; margin-top: 10px; }
-    th, td { border: 1px solid #ccc; padding: 6px 12px; text-align: left; }
-    th { background-color: #eee; }
-    h2 { margin-bottom: 10px; }
+    body { font-family: Arial; background: #f9f9f9; padding: 20px; }
+    table { border-collapse: collapse; width: 100%; background: white; }
+    th, td { border: 1px solid #ccc; padding: 8px; }
+    th { background: #eee; }
   </style>
 </head>
 <body>
-  <h2>Binance Futures - Max Leverage (USDT-M)</h2>
-  <div id="status">Đang tải dữ liệu...</div>
-  <table>
-    <thead>
-      <tr><th>Symbol</th><th>Max Leverage</th></tr>
-    </thead>
-    <tbody id="levTable"></tbody>
+  <h2>Max Leverage - Binance USDT Futures</h2>
+  <p id="loading">Loading...</p>
+  <table id="levTable" style="display:none">
+    <thead><tr><th>Symbol</th><th>Max Leverage</th></tr></thead>
+    <tbody></tbody>
   </table>
 
   <script>
-    const apiKey = 'cZ1Y2O0kggVEggEaPvhFcYQHS5b1EsT2OWZb8zdY9C0jGqNROvXRZHTJjnQ7OG4Q';     // <-- THAY THẾ
-    const apiSecret = 'oU6pZFHgEvbpD9NmFXp5ZVnYFMQ7EIkBiz88qTzvmC3SpT9nEf4fcDf0pEnFzoTc'; // <-- THAY THẾ
-  
-    async function hmacSHA256(secret, message) {
-      const encoder = new TextEncoder();
-      const keyData = encoder.encode(secret);
-      const cryptoKey = await crypto.subtle.importKey('raw', keyData, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
-      const sig = await crypto.subtle.sign('HMAC', cryptoKey, encoder.encode(message));
-      return Array.from(new Uint8Array(sig)).map(b => b.toString(16).padStart(2, '0')).join('');
-    }
-
-    async function getServerTime() {
-      const res = await fetch('https://fapi.binance.com/fapi/v1/time');
-      const data = await res.json();
-      return data.serverTime;
-    }
-
-    async function binanceSignedRequest(endpoint) {
-      const base = 'https://fapi.binance.com';
-      const timestamp = await getServerTime();
-      const query = `timestamp=${timestamp}`;
-      const signature = await hmacSHA256(APISECRET, query);
-      const url = `${base}${endpoint}?${query}&signature=${signature}`;
-      const res = await fetch(url, { headers: { 'X-MBX-APIKEY': APIKEY } });
-      if (!res.ok) throw new Error(await res.text());
-      return res.json();
-    }
-
-    async function loadLeverageData() {
-      const status = document.getElementById('status');
-      const tbody = document.getElementById('levTable');
-
+    async function loadLeverage() {
       try {
-        const data = await binanceSignedRequest('/fapi/v1/leverageBracket');
-        status.innerText = `Tải xong ${data.length} cặp.`;
+        const res = await fetch('/api/leverage');
+        const data = await res.json();
+        const tbody = document.querySelector('#levTable tbody');
+        document.getElementById('loading').style.display = 'none';
+        document.getElementById('levTable').style.display = 'table';
+
         data.sort((a, b) => a.symbol.localeCompare(b.symbol)).forEach(item => {
-          const maxLev = Math.max(...item.brackets.map(b => b.initialLeverage));
-          const row = document.createElement('tr');
-          row.innerHTML = `<td>${item.symbol}</td><td>${maxLev}x</td>`;
-          tbody.appendChild(row);
+          const tr = document.createElement('tr');
+          tr.innerHTML = `<td>${item.symbol}</td><td>${item.maxLeverage}x</td>`;
+          tbody.appendChild(tr);
         });
       } catch (e) {
-        status.innerText = 'Lỗi: ' + e.message;
-        console.error(e);
+        document.getElementById('loading').textContent = 'Lỗi: ' + e.message;
       }
     }
 
-    loadLeverageData();
+    loadLeverage();
   </script>
 </body>
-</html>   
+</html>
