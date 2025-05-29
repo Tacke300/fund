@@ -1,14 +1,8 @@
 // test.js
 //
-// Đây là cách đúng để import thư viện binance-api-node khi Node.js project của bạn
-// được cấu hình là "type": "module" trong package.json,
-// hoặc khi bạn đang chạy file .js với Node.js phiên bản mới hỗ trợ ES Modules.
-import pkg from 'binance-api-node';
-
-// Lấy hàm khởi tạo 'Binance' từ đối tượng default export của gói CommonJS.
-// Thư viện binance-api-node xuất hàm chính của nó dưới dạng named export 'Binance'
-// bên trong đối tượng default export khi được import theo cú pháp ES Module.
-const { Binance } = pkg;
+// Đây là cách phổ biến nhất để import một thư viện CommonJS
+// mà hàm chính của nó là default export vào môi trường ES Module.
+import Binance from 'binance-api-node';
 
 // --- CẤU HÌNH API KEY VÀ SECRET KEY TRỰC TIẾP TẠI ĐÂY ---
 // !!! QUAN TRỌNG: THAY THẾ CHUỖI BÊN DƯỚI BẰNG API KEY THẬT CỦA BẠN !!!
@@ -24,11 +18,12 @@ if (API_KEY === "YOUR_BINANCE_API_KEY" || SECRET_KEY === "YOUR_BINANCE_SECRET_KE
 }
 
 // --- KHỞI TẠO CLIENT BINANCE FUTURES ---
-// Thư viện binance-api-node tự động xử lý các endpoint Futures
-// khi API Key có quyền truy cập Futures.
+// Gọi hàm Binance đã import trực tiếp
 const client = Binance({
   apiKey: API_KEY,
   apiSecret: SECRET_KEY,
+  // Thư viện này thường tự xử lý thời gian server và domain cho Futures
+  // Đối với Futures, bạn chỉ cần đảm bảo API Key có quyền Futures
 });
 
 async function getAllFuturesLeverageAndBalance() {
