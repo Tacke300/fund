@@ -6,7 +6,7 @@ import fs from 'fs'; // Import fs để đọc file
 import path from 'path'; // Import path để xử lý đường dẫn
 import { fileURLToPath } from 'url';
 
-const __filename = fileURLToPath(import.meta.url);
+const __filename = fileURLToPath(import. 교육());
 const __dirname = path.dirname(__filename);
 
 // === API KEY & SECRET ===
@@ -35,7 +35,7 @@ let positionCheckInterval = null; // Biến để lưu trữ setInterval cho vi�
 let nextScheduledTimeout = null; // Biến để lưu trữ setTimeout cho lần chạy tiếp theo
 
 // === Cấu hình Bot ===
-const MIN_USDT_BALANCE_TO_OPEN = 10; // Số dư USDT tối thiểu để mở lệnh (ví dụ: 10 USDT)
+const MIN_USDT_BALANCE_TO_OPEN = 0.1; // Số dư USDT tối thiểu để mở lệnh (ví dụ: 10 USDT)
 const CAPITAL_PERCENTAGE_PER_TRADE = 0.5; // Phần trăm vốn sử dụng cho mỗi lệnh (50% tài khoản)
 
 // Cấu hình TP/SL theo yêu cầu mới
@@ -66,7 +66,7 @@ const FUNDING_HOURS_UTC = [0, 8, 16]; // Ví dụ: 00:00, 08:00, 16:00 UTC
 const WEB_SERVER_PORT = 3000; // Cổng cho giao diện web
 // Đường dẫn tới file log của PM2 cho bot này (để web server đọc)
 // !!! QUAN TRỌNG: CẬP NHẬT ĐƯỜNG DẪN NÀY ĐỂ TRỎ ĐÚNG VÀO FILE LOG CỦA BẠN !!!
-const BOT_LOG_FILE = '/home/tacke300/.pm2/logs/bot_binance-out.log';
+const BOT_LOG_FILE = '/home/tacke300/.pm2/logs/bot_binance_unified-out.log'; // Ví dụ
 const THIS_BOT_PM2_NAME = 'bot_binance_unified'; // Tên của tiến trình bot trong PM2
 
 // Hàm addLog để ghi nhật ký (chỉ ra console)
@@ -812,7 +812,7 @@ async function startBotLogicInternal() {
     addLog('>>> Đang kiểm tra kết nối API Key với Binance Futures...', true);
     
     // Kiểm tra API Key và Secret Key đã được thay thế chưa
-    if (API_KEY === 'cZ1Y2O0kggVEggEaPvhFcYQHS5b1EsT2OWZb8zdY9C0jGqNROXHRZHTJjnQ7OG4Q'.trim() || SECRET_KEY === 'oU6pZFHgEvbpD9NmFXp5ZVnYFMQ7EIkBiz88TzvmC3SpT9nEf4fcDf0pEnFzoTc'.trim()) {
+    if (API_KEY === 'cZ1Y2O0kggVEggEaPvhFcYQHS5b1EsT2OWZb8zdY9C0jGqNROvXRZHTJjnQ7OG4Q'.trim() || SECRET_KEY === 'oU6pZFHgEvbpD9NmFXp5ZVnYFMQ7EIkBiz88TzvmC3SpT9nEf4fcDf0pEnFzoTc'.trim()) {
         addLog('❌ LỖI CẤU HÌNH: Vui lòng thay thế API Key và Secret Key THẬT của bạn.', true);
         return 'LỖI CẤU HÌNH: Vui lòng thay thế API Key và Secret Key THẬT của bạn.';
     }
@@ -923,9 +923,12 @@ app.get('/api/status', async (req, res) => {
         if (botProcess) {
             statusMessage = `Bot Status: ${botProcess.pm2_env.status.toUpperCase()} (Restarts: ${botProcess.pm2_env.restart_time})`;
             if (botProcess.pm2_env.status === 'online') {
-                statusMessage += ` | Uptime: ${Math.floor(botProcess.pm2_env.uptime / (1000 * 60))} phút`;
-                // Kiểm tra thêm trạng thái logic bot nội bộ
                 statusMessage += ` | Internal Logic: ${botRunning ? 'RUNNING' : 'STOPPED'}`;
+                if (botStartTime) {
+                    const uptimeMs = Date.now() - botStartTime.getTime();
+                    const uptimeMinutes = Math.floor(uptimeMs / (1000 * 60));
+                    statusMessage += ` | Internal Uptime: ${uptimeMinutes} phút`;
+                }
             }
         } else {
              statusMessage = `Bot Status: Not found in PM2 (Name: ${THIS_BOT_PM2_NAME})`;
@@ -949,7 +952,7 @@ app.get('/stop_bot_logic', (req, res) => {
     res.send(message);
 });
 
-// Khởi động server web
+// === DÒNG QUAN TRỌNG ĐỂ LẮNG NGHE CỔNG ===
 app.listen(WEB_SERVER_PORT, () => {
     console.log(`Web server cho Bot Futures Funding Rate đang lắng nghe tại http://localhost:${WEB_SERVER_PORT}`);
     console.log(`Truy cập giao diện web qua trình duyệt: http://YOUR_VPS_IP:${WEB_SERVER_PORT}`);
