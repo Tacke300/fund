@@ -1,8 +1,9 @@
 // Nhập module CommonJS vào môi trường ES Module
 import pkg from 'binance-api-node';
 
-// Hàm khởi tạo chính của thư viện binance-api-node
-const BinanceClient = pkg;
+// Lấy named export 'Binance' từ đối tượng pkg
+// Đây là cách đúng theo gợi ý của Node.js từ lỗi trước đó
+const { Binance } = pkg;
 
 // --- CẤU HÌNH API KEY VÀ SECRET KEY TRỰC TIẾP TẠI ĐÂY ---
 // THAY THẾ "YOUR_BINANCE_API_KEY" BẰNG API KEY THẬT CỦA BẠN
@@ -17,7 +18,8 @@ if (API_KEY === "YOUR_BINANCE_API_KEY" || SECRET_KEY === "YOUR_BINANCE_SECRET_KE
 }
 
 // --- KHỞI TẠO CLIENT BINANCE FUTURES ---
-const client = BinanceClient({
+// Gọi hàm khởi tạo Binance đã lấy ra từ pkg
+const client = Binance({
   apiKey: API_KEY,
   apiSecret: SECRET_KEY,
 });
