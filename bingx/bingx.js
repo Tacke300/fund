@@ -13,8 +13,8 @@ const __dirname = path.dirname(__filename);
 // !!! QUAN TRỌNG: DÁN API Key và Secret Key THẬT của bạn vào đây. !!!
 // Đảm bảo không có khoảng trắng thừa khi copy/paste.
 // SỬ DỤNG API KEY VÀ SECRET KEY CỦA BINGX, KHÔNG PHẢI BINANCE!
-const API_KEY = 'YOUR_BINGX_API_KEY'.trim();     // <--- THAY THẾ BẰNG API KEY THẬT CỦA BINGX
-const SECRET_KEY = 'YOUR_BINGX_SECRET_KEY'.trim(); // <--- THAY THẾ BẰNG SECRET KEY THẬT CỦA BINGX
+const API_KEY = 'WhRrdudEgBMTiFnTiqrZe2LlNGeK68lcMAZhOyn0AY00amysW5ep2LJ45smFxONwoIE0l72b4zc5muDGw'.trim();     // <--- THAY THẾ BẰNG API KEY THẬT CỦA BINGX
+const SECRET_KEY = 'AiRyJvGCVIDNVPQkBYo2WaxdgzbJlkGQvmvJmPXET5JTyqcZxThb16a2kZNU7M5LKLJicA2hLtckejMtyFzPA'.trim(); // <--- THAY THẾ BẰNG SECRET KEY THẬT CỦA BINGX
 
 // === BASE URL CỦA BINGX SWAP V2 API ===
 const BASE_HOST = 'open-api-swap.bingx.com'; // Futures/Swap API Host
@@ -1059,4 +1059,3 @@ app.listen(WEB_SERVER_PORT, () => {
     console.log(`Bot chờ khởi chạy:${WEB_SERVER_PORT}`);
     console.log(`Truy cập:${WEB_SERVER_PORT}`);
 });
-
