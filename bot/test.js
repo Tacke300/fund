@@ -183,7 +183,7 @@ async function getLeverageBracketForSymbol(symbol) {
 async function getSpecificCoinLeverageAndBalance() {
     try {
         // --- Cấu hình đồng coin bạn muốn lấy đòn bẩy ---
-        const targetSymbol = 'BTCUSDT'; // THAY ĐỔI TÊN ĐỒNG COIN Ở ĐÂY NẾU BẠN MUỐN
+        const targetSymbol = 'B3USDT'; // THAY ĐỔI TÊN ĐỒNG COIN Ở ĐÂY NẾU BẠN MUỐN
 
         console.log(`\n--- LẤY ĐÒN BẨY TỐI ĐA CHO ${targetSymbol} ---`);
         const maxLeverage = await getLeverageBracketForSymbol(targetSymbol);
