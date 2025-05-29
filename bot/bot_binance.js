@@ -16,8 +16,7 @@ const app = express();
 const port = 3000;
 
 // === API KEY & SECRET ===
-// GIỮ NGUYÊN API KEY VÀ SECRET CỦA BẠN NHƯ BẠN ĐÃ CUNG CẤP.
-// Đã thêm .trim() để đảm bảo không có khoảng trắng thừa, dù bạn đã kiểm tra kỹ.
+// GIỮ NGUYÊN API KEY VÀ SECRET CỦA BẠN NHƯ BẠN ĐÃ CUNG CẤN
 const apiKey = 'cZ1Y2O0kggVEggEaPvhFcYQHS5b1EsT2OWZb8zdY9C0jGqNROvXRZHTJjnQ7OG4Q'.trim(); // Your API Key
 const apiSecret = 'oU6pZFHgEvbpD9NmFXp5ZVnYFMQ7EIkBiz88aTzvmC3SpT9nEf4fccDf0pEnFzoTc'.trim(); // Your API Secret
 
@@ -97,12 +96,6 @@ async function callSignedAPI(endpoint, method = 'GET', params = {}) {
 
   const signature = getSignature(queryStringForSignature, apiSecret);
 
-  // Debug log để kiểm tra chuỗi ký và chữ ký
-  // addLog(`[DEBUG SIGNATURE] Endpoint: ${endpoint}`); // Có thể tắt để tránh log quá nhiều
-  // addLog(`[DEBUG SIGNATURE] Query String for Signature: ${queryStringForSignature}`);
-  // addLog(`[DEBUG SIGNATURE] Generated Signature: ${signature}`);
-
-
   const queryStringForUrl = sortedKeysForSignature
     .map(key => `${key}=${encodeURIComponent(allParamsForSignature[key])}`)
     .join('&');
@@ -118,10 +111,6 @@ async function callSignedAPI(endpoint, method = 'GET', params = {}) {
       'User-Agent': 'Binance-Node-Bot-Client' // Thêm User-Agent header
     }
   };
-
-  // Debug log để kiểm tra full URL và headers (chỉ một phần API Key)
-  // addLog(`[DEBUG API CALL] Full Request URL: https://${options.hostname}${options.path}`); // Có thể tắt để tránh log quá nhiều
-  // addLog(`[DEBUG API CALL] API Key Sent (first 5 chars): ${apiKey.substring(0, 5)}...`); 
 
   return new Promise((resolve, reject) => {
     const req = https.request(options, res => {
@@ -285,46 +274,42 @@ async function getExchangeInfo() {
 }
 
 /**
- * Hàm mới để lấy đòn bẩy tối đa cho một symbol cụ thể từ API leverageBracket.
- * Endpoint này cần ký.
+ * Hàm để lấy đòn bẩy tối đa cho một symbol cụ thể từ endpoint /fapi/v1/leverageBracket.
+ * (Đây là hàm tương đương với getLeverageBracketForSymbol từ ví dụ thủ công)
  * @param {string} symbol - Tên cặp giao dịch (ví dụ: 'BTCUSDT').
  * @returns {Promise<number|null>} Đòn bẩy tối đa (ví dụ: 125) hoặc null nếu không tìm thấy.
  */
-async function getLeverageBracket(symbol) {
+async function getSingleSymbolMaxLeverage(symbol) {
   try {
-    addLog(`[DEBUG getLeverageBracket] Đang cố gắng lấy leverageBracket cho ${symbol}...`);
+    addLog(`[DEBUG getSingleSymbolMaxLeverage] Đang cố gắng lấy leverageBracket cho ${symbol}...`);
     // Endpoint /fapi/v1/leverageBracket yêu cầu ký!
-    // Sử dụng callSignedAPI thay vì fetch trực tiếp
     const response = await callSignedAPI('/fapi/v1/leverageBracket', 'GET', { symbol: symbol });
     
-    // Phản hồi là một mảng, phần tử đầu tiên (index 0) của mảng thường chứa thông tin đòn bẩy tối đa
-    // response[0].brackets là mảng các bracket đòn bẩy
     if (response && Array.isArray(response) && response.length > 0 && response[0].brackets && response[0].brackets.length > 0) {
         const brackets = response[0].brackets;
-        // Lấy initialLeverage của bracket cuối cùng, đây thường là đòn bẩy tối đa
         const maxLeverage = parseInt(brackets[brackets.length - 1].initialLeverage);
-        addLog(`[DEBUG getLeverageBracket] Đã lấy được đòn bẩy ${maxLeverage}x cho ${symbol}.`);
+        addLog(`[DEBUG getSingleSymbolMaxLeverage] Đã lấy được đòn bẩy ${maxLeverage}x cho ${symbol}.`);
         return maxLeverage;
     }
-    addLog(`[DEBUG getLeverageBracket] Không tìm thấy thông tin đòn bẩy hợp lệ cho ${symbol}.`);
+    addLog(`[DEBUG getSingleSymbolMaxLeverage] Không tìm thấy thông tin đòn bẩy hợp lệ cho ${symbol}.`);
     return null; 
   } catch (error) {
-    addLog(`❌ Lỗi khi lấy leverageBracket cho ${symbol}: ${error.message}`);
+    addLog(`❌ Lỗi khi lấy getSingleSymbolMaxLeverage cho ${symbol}: ${error.message}`);
     return null;
   }
 }
 
-// Hàm kết hợp để lấy tất cả filters và maxLeverage
-async function getMaxLeverageAndFilters(symbol) {
+// Hàm kết hợp để lấy tất cả filters và maxLeverage (chức năng tương tự như trước)
+async function getSymbolFiltersAndMaxLeverage(symbol) {
   const filters = await getExchangeInfo(); // Lấy các filter từ exchangeInfo (minQty, stepSize, ...)
 
   if (!filters || !filters[symbol]) {
-    addLog(`[DEBUG getMaxLeverageAndFilters] Không tìm thấy filters cho ${symbol}.`);
+    addLog(`[DEBUG getSymbolFiltersAndMaxLeverage] Không tìm thấy filters cho ${symbol}.`);
     return null;
   }
   
-  // Gọi getLeverageBracket riêng biệt để lấy maxLeverage
-  const maxLeverage = await getLeverageBracket(symbol);
+  // Gọi getSingleSymbolMaxLeverage để lấy maxLeverage
+  const maxLeverage = await getSingleSymbolMaxLeverage(symbol);
 
   return {
     ...filters[symbol],
@@ -353,30 +338,34 @@ async function getCurrentPrice(symbol) {
 /***************** ĐẶT & ĐÓNG LỆNH  *****************/
 async function placeShortOrder(symbol, currentFundingRate, bestFundingTime) {
   try {
+    // Lấy số dư hiện tại của bạn
+    addLog('>>> Đang kiểm tra số dư khả dụng...');
     const account = await callSignedAPI('/fapi/v2/account');
     const usdtAsset = account.assets.find(a => a.asset === 'USDT');
     const balance = usdtAsset ? parseFloat(usdtAsset.availableBalance) : 0;
+    addLog(`Số dư khả dụng hiện tại: ${balance.toFixed(2)} USDT`);
 
     if (balance < 0.15) {
       addLog(`>>> Không đủ balance để mở lệnh. Balance hiện tại: ${balance} USDT`);
       return;
     }
 
-    const symbolFilters = await getMaxLeverageAndFilters(symbol);
-    // Kiểm tra lại lần nữa để đảm bảo có thông tin đòn bẩy trước khi đặt lệnh
-    if (!symbolFilters || typeof symbolFilters.maxLeverage !== 'number' || symbolFilters.maxLeverage <= 1) {
-        addLog(`>>> Lỗi: Không có thông tin đòn bẩy hợp lệ cho ${symbol} khi mở lệnh. (MaxLeverage: ${symbolFilters ? symbolFilters.maxLeverage : 'N/A'})`);
+    // Lấy tất cả thông tin cần thiết cho symbol (filters và maxLeverage)
+    const symbolInfo = await getSymbolFiltersAndMaxLeverage(symbol);
+    
+    if (!symbolInfo || typeof symbolInfo.maxLeverage !== 'number' || symbolInfo.maxLeverage <= 1) {
+        addLog(`>>> Lỗi: Không có thông tin đòn bẩy hợp lệ cho ${symbol} khi mở lệnh. (MaxLeverage: ${symbolInfo ? symbolInfo.maxLeverage : 'N/A'})`);
         return;
     }
 
-    const maxLeverage = symbolFilters.maxLeverage;
+    const maxLeverage = symbolInfo.maxLeverage;
     const price = await getCurrentPrice(symbol);
     if (!price) {
         addLog(`Không thể lấy giá cho ${symbol}. Hủy mở lệnh.`);
         return;
     }
 
-    // Đặt đòn bẩy
+    // Đặt đòn bẩy cho symbol này
     addLog(`[DEBUG] Đang đặt đòn bẩy. symbol: ${symbol}, leverage: ${maxLeverage}`);
     await callSignedAPI('/fapi/v1/leverage', 'POST', {
       symbol: symbol,
@@ -388,11 +377,11 @@ async function placeShortOrder(symbol, currentFundingRate, bestFundingTime) {
     // Công thức tính quantity: (vốn * đòn bẩy) / giá
     let quantity = (capital * maxLeverage) / price;
 
-    const minQty = symbolFilters.minQty;
-    const maxQty = symbolFilters.maxQty;
-    const stepSize = symbolFilters.stepSize;
-    const minNotional = symbolFilters.minNotional;
-    const quantityPrecision = symbolFilters.quantityPrecision;
+    const minQty = symbolInfo.minQty;
+    const maxQty = symbolInfo.maxQty;
+    const stepSize = symbolInfo.stepSize;
+    const minNotional = symbolInfo.minNotional;
+    const quantityPrecision = symbolInfo.quantityPrecision;
 
     // Điều chỉnh quantity theo stepSize và precision
     quantity = Math.floor(quantity / stepSize) * stepSize;
@@ -401,7 +390,7 @@ async function placeShortOrder(symbol, currentFundingRate, bestFundingTime) {
 
     const currentNotional = quantity * price;
     if (currentNotional < minNotional) {
-        addLog(`Giá trị notional (${currentNotional.toFixed(symbolFilters.pricePrecision)}) cho ${symbol} quá thấp. Cần tối thiểu ${minNotional} USDT. Hủy mở lệnh.`);
+        addLog(`Giá trị notional (${currentNotional.toFixed(symbolInfo.pricePrecision)}) cho ${symbol} quá thấp. Cần tối thiểu ${minNotional} USDT. Hủy mở lệnh.`);
         return;
     }
 
@@ -428,21 +417,17 @@ async function placeShortOrder(symbol, currentFundingRate, bestFundingTime) {
     addLog(`  + Đòn bẩy sử dụng: ${maxLeverage}x`);
     addLog(`  + Số tiền USDT vào lệnh: ${capital.toFixed(2)} USDT`); // Đây là số tiền vốn thực tế được sử dụng để tính qty
     addLog(`  + Khối lượng: ${quantity} ${symbol}`);
-    addLog(`  + Giá vào lệnh: ${parseFloat(order.avgFillPrice || price).toFixed(symbolFilters.pricePrecision)}`);
+    addLog(`  + Giá vào lệnh: ${parseFloat(order.avgFillPrice || price).toFixed(symbolInfo.pricePrecision)}`);
 
 
     const entryPrice = parseFloat(order.avgFillPrice || price);
-    // Tính toán TP/SL: Ví dụ, 1% của vốn ban đầu sau đòn bẩy.
-    // tpSlValue = (vốn * đòn bẩy) * %_rủi_ro_mong_muốn
-    // Ở đây tôi giả định bạn muốn TP/SL tương đương 1% tổng giá trị vị thế (vốn * đòn bẩy)
     const riskPercentage = 0.01; // 1% rủi ro/lợi nhuận trên tổng giá trị vị thế
     const tpSlAmount = (capital * maxLeverage) * riskPercentage; 
     
-    // Tính giá TP và SL dựa trên amount PnL mong muốn
     const tpPrice = entryPrice - (tpSlAmount / quantity); // SHORT: TP thấp hơn giá vào
     const slPrice = entryPrice + (tpSlAmount / quantity); // SHORT: SL cao hơn giá vào
 
-    addLog(`>>> Giá TP: ${tpPrice.toFixed(symbolFilters.pricePrecision)}, Giá SL: ${slPrice.toFixed(symbolFilters.pricePrecision)}`);
+    addLog(`>>> Giá TP: ${tpPrice.toFixed(symbolInfo.pricePrecision)}, Giá SL: ${slPrice.toFixed(symbolInfo.pricePrecision)}`);
 
     let checkCount = 0;
     const maxCheck = 180; // 3 phút (180 giây)
@@ -459,16 +444,15 @@ async function placeShortOrder(symbol, currentFundingRate, bestFundingTime) {
         checkCount++;
         const currentPrice = await getCurrentPrice(symbol);
 
-        // Cập nhật log đếm giây ở cuối (sử dụng \r để ghi đè dòng)
         process.stdout.write(`>>> Đang kiểm tra TP/SL cho ${symbol}... Đã kiểm tra ${checkCount} / ${maxCheck} giây     \r`);
 
-        if (currentPrice !== null) { // Đảm bảo giá không null
+        if (currentPrice !== null) { 
           if (currentPrice <= tpPrice) {
-            addLog(`\n>>> Giá đạt TP: ${currentPrice.toFixed(symbolFilters.pricePrecision)}. Đóng lệnh ngay.`);
+            addLog(`\n>>> Giá đạt TP: ${currentPrice.toFixed(symbolInfo.pricePrecision)}. Đóng lệnh ngay.`);
             clearInterval(checkInterval);
             await closeShortPosition(symbol, quantity);
           } else if (currentPrice >= slPrice) {
-            addLog(`\n>>> Giá đạt SL: ${currentPrice.toFixed(symbolFilters.pricePrecision)}. Đóng lệnh ngay.`);
+            addLog(`\n>>> Giá đạt SL: ${currentPrice.toFixed(symbolInfo.pricePrecision)}. Đóng lệnh ngay.`);
             clearInterval(checkInterval);
             await closeShortPosition(symbol, quantity);
           } else if (checkCount >= maxCheck) {
@@ -505,8 +489,8 @@ async function closeShortPosition(symbol, qtyToClose = null) {
       }
 
       const entryPrice = parseFloat(position.entryPrice);
-      const symbolFilters = await getMaxLeverageAndFilters(symbol); // Lấy filters để có quantityPrecision
-      const quantityPrecision = symbolFilters ? symbolFilters.quantityPrecision : 3;
+      const symbolInfo = await getSymbolFiltersAndMaxLeverage(symbol); // Lấy filters để có quantityPrecision
+      const quantityPrecision = symbolInfo ? symbolInfo.quantityPrecision : 3;
 
       qtyToClose = parseFloat(qtyToClose.toFixed(quantityPrecision));
 
@@ -520,7 +504,7 @@ async function closeShortPosition(symbol, qtyToClose = null) {
       });
 
       const pnl = (entryPrice - closePrice) * qtyToClose;
-      addLog(`>>> Đã đóng lệnh SHORT ${symbol} tại giá ${closePrice.toFixed(symbolFilters ? symbolFilters.pricePrecision : 8)}`);
+      addLog(`>>> Đã đóng lệnh SHORT ${symbol} tại giá ${closePrice.toFixed(symbolInfo ? symbolInfo.pricePrecision : 8)}`);
       addLog(`>>> Lợi nhuận tạm tính: ${pnl.toFixed(2)} USDT`);
     } else {
       addLog('>>> Không có vị thế SHORT để đóng.');
@@ -552,7 +536,6 @@ async function getFundingRatesFromBinance() {
 }
 
 // Cron job chính để kiểm tra funding rates và mở lệnh
-// Sẽ chạy mỗi phút (*/1 * * * *)
 cron.schedule('*/1 * * * *', async () => {
   if (!botRunning) {
     addLog('[Cron] Bot đang tắt, không kiểm tra funding.');
@@ -570,21 +553,21 @@ cron.schedule('*/1 * * * *', async () => {
 
     const candidates = []; // Dùng mảng tạm để lưu các coin đủ điều kiện
 
-    // Luôn tải exchangeInfo một lần trước khi lặp qua các symbol (chỉ lấy filters, không có maxLeverage ở đây)
-    // Điều này đảm bảo exchangeInfoCache luôn có sẵn trước khi gọi getMaxLeverageAndFilters
+    // Luôn tải exchangeInfo một lần trước khi lặp qua các symbol
     await getExchangeInfo(); 
 
     for (const r of fundingRates) {
         if (parseFloat(r.fundingRate) < -0.0001) { // Lọc các cặp có funding rate âm
-            const symbolData = await getMaxLeverageAndFilters(r.symbol); // Hàm này giờ lấy cả filters và maxLeverage
+            // Lấy đòn bẩy tối đa của từng cặp đang xét
+            const maxLeverageForCandidate = await getSingleSymbolMaxLeverage(r.symbol); 
             
             // Debug: In ra đòn bẩy nếu có
-            if (symbolData && symbolData.maxLeverage) {
-                addLog(`[DEBUG] ${r.symbol}: Funding Rate = ${r.fundingRate}, Max Leverage = ${symbolData.maxLeverage}x`);
+            if (maxLeverageForCandidate) {
+                addLog(`[DEBUG] ${r.symbol}: Funding Rate = ${r.fundingRate}, Max Leverage = ${maxLeverageForCandidate}x`);
             }
 
             // Kiểm tra xem có maxLeverage hợp lệ và lớn hơn 1 không
-            if (symbolData && typeof symbolData.maxLeverage === 'number' && symbolData.maxLeverage > 1) {
+            if (typeof maxLeverageForCandidate === 'number' && maxLeverageForCandidate > 1) {
                 // Lấy balance và giá hiện tại để ước tính số tiền vào lệnh
                 const currentPrice = await getCurrentPrice(r.symbol);
                 if (!currentPrice) {
@@ -598,12 +581,12 @@ cron.schedule('*/1 * * * *', async () => {
 
                 candidates.push({
                     ...r,
-                    maxLeverage: symbolData.maxLeverage, // Sử dụng maxLeverage đã lấy được
+                    maxLeverage: maxLeverageForCandidate, // Sử dụng maxLeverage đã lấy được
                     estimatedCapital: estimatedCapital,
                     currentPrice: currentPrice // Lưu giá hiện tại để dùng cho log
                 });
             } else {
-                addLog(`[DEBUG] Bỏ qua ${r.symbol} vì không tìm thấy đòn bẩy hợp lệ (${symbolData ? symbolData.maxLeverage : 'N/A'}x hoặc không phải số).`);
+                addLog(`[DEBUG] Bỏ qua ${r.symbol} vì không tìm thấy đòn bẩy hợp lệ (${maxLeverageForCandidate ? maxLeverageForCandidate : 'N/A'}x hoặc không phải số).`);
             }
         }
     }
@@ -621,7 +604,7 @@ cron.schedule('*/1 * * * *', async () => {
       addLog(`>>> Đã chọn được đồng coin: ${selectedSymbol}`);
       addLog(`>>> Dự kiến lệnh mở lúc: ${formattedProjectedOpenTime}`);
       addLog(`>>> Funding rate: ${best.fundingRate}`);
-      addLog(`>>> Đòn bẩy tối đa: ${best.maxLeverage}x`);
+      addLog(`>>> Đòn bẩy tối đa: ${best.maxLeverage}x`); // In ra đòn bẩy đã lấy được
       addLog(`>>> Số tiền USDT vào lệnh (ước tính): ${best.estimatedCapital} USDT`);
       addLog(`>>> Giá hiện tại của ${selectedSymbol}: ${best.currentPrice}`);
 
@@ -634,6 +617,8 @@ cron.schedule('*/1 * * * *', async () => {
 
       addLog('>>> Delay 500ms sau funding để chắc chắn nhận funding');
       await delay(500); // Đợi thêm 500ms sau khi thời gian funding qua đi
+      
+      // Gọi hàm đặt lệnh với thông tin đã lấy được
       await placeShortOrder(selectedSymbol, best.fundingRate, best.fundingTime);
     } else {
       addLog('>>> Không có coin có funding rate đủ tốt hoặc không hỗ trợ đòn bẩy để mở lệnh. Đi uống bia');
