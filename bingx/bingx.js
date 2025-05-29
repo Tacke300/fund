@@ -58,30 +58,19 @@ const TAKE_PROFIT_PERCENTAGES = {
     125: 1.36,
 };
 
-// ĐÃ SỬA: Ngưỡng funding rate âm tối thiểu để xem xét (từ -0.0002 xuống -0.002)
 const MIN_FUNDING_RATE_THRESHOLD = -0.003; 
 const MAX_POSITION_LIFETIME_SECONDS = 180; // Thời gian tối đa giữ một vị thế (180 giây = 3 phút)
-
-// Thời gian trước giờ funding mà bot sẽ xem xét mở lệnh (đơn vị: phút)
-// Sử dụng để lọc sơ bộ các đồng coin.
 const FUNDING_WINDOW_MINUTES = 30; 
-
-// Ngưỡng thời gian còn lại (tính bằng giây) để bot coi là "sắp trả funding" và tiến hành mở lệnh.
-// Chỉ mở lệnh nếu nextFundingTime của đồng coin được chọn còn lại <= X giây.
-const ONLY_OPEN_IF_FUNDING_IN_SECONDS = 179; // Ví dụ: chỉ mở nếu còn lại <= 2 phút
-
-// Cấu hình thời gian quét bot
-// Bot sẽ quét định kỳ, không cố định vào phút :58 nữa.
-// Thay vào đó, nó sẽ tự động tính toán thời gian quét dựa trên nextFundingTime của các đồng coin.
-// Ví dụ: mỗi 1 phút bot sẽ kiểm tra xem có đồng nào sắp đến giờ funding trong window không.
-// const SCAN_INTERVAL_SECONDS = 60; // Quét mỗi 60 giây (đã bị ghi đè bởi logic phút :58)
-// Giữ lại logic quét vào phút :58 như yêu cầu ban đầu.
+const ONLY_OPEN_IF_FUNDING_IN_SECONDS = 179; 
 
 // === Cấu hình Server Web ===
-const WEB_SERVER_PORT = 3002; // Cổng cho giao diện web
-// Đường dẫn tới file log của PM2 cho bot này (để web server đọc)
-const BOT_LOG_FILE = '/home/tacke300/.pm2/logs/bot-bingx-out.log'; // Đổi tên log file cho BingX
-// Đổi tên PM2 process cho BingX
+const WEB_SERVER_PORT = 3000; // Cổng cho giao diện web
+
+// NEW: Cấu hình TÊN CỦA BOT và LOG FILE. Bạn có thể thay đổi tên này.
+// Tên này sẽ được dùng cho PM2 process và tên file log.
+const BOT_NAME = 'funding_bingx_bot'; // <--- TẠO TÊN RIÊNG CỦA BẠN CHO BOT
+const BOT_LOG_FILE = path.join(__dirname, `${BOT_NAME}-out.log`); // Log file sẽ nằm cùng thư mục với script
+// const BOT_ERR_LOG_FILE = path.join(__dirname, `${BOT_NAME}-err.log`); // File log lỗi (tùy chọn)
 
 // Hàm addLog để ghi nhật ký (chỉ ra console)
 function addLog(message, isImportant = false) {
@@ -99,6 +88,11 @@ function addLog(message, isImportant = false) {
     } else if (isImportant) {
         logEntry = `\x1b[36m${logEntry}\x1b[0m`; // Cyan for important messages
     }
+
+    // Ghi vào file log (chỉ nếu botRunning hoặc khi khởi động/dừng)
+    fs.appendFile(BOT_LOG_FILE, logEntry + '\n', (err) => {
+        if (err) console.error('Error writing to log file:', err);
+    });
 
     console.log(logEntry);
 }
@@ -203,9 +197,6 @@ async function callSignedAPI(endpointPath, method = 'GET', params = {}) {
         requestPath = `${BASE_PATH}${endpointPath}` + (queryString ? `?${queryString}` : '');
     } else if (method === 'POST') {
         requestPath = `${BASE_PATH}${endpointPath}`;
-        // Đối với POST, body sẽ là JSON hoặc form-urlencoded. BingX thường yêu cầu JSON cho body.
-        // Tuy nhiên, tài liệu lại bảo ký với body là queryString, nên chúng ta sẽ gửi queryString làm body nếu là POST và có params
-        // Nếu API thực tế yêu cầu JSON body, đoạn này cần điều chỉnh
         headers['Content-Type'] = 'application/x-www-form-urlencoded'; // Mặc định dùng form-urlencoded cho body, để khớp với cách ký
     } else {
         throw new Error(`Unsupported method: ${method}`);
@@ -484,19 +475,7 @@ async function openShortPosition(symbol, fundingRate, usdtBalance) {
         const stepSize = symbolInfo.stepSize;
         const tickSize = symbolInfo.tickSize;
 
-        // 2. Đặt đòn bẩy cho cặp giao dịch
-        // BingX không có endpoint riêng để điều chỉnh đòn bẩy trước khi đặt lệnh như Binance.
-        // Đòn bẩy được chọn khi đặt lệnh, hoặc điều chỉnh margin mode, leverage trong settings.
-        // Giả định bot đang giao dịch ở chế độ Cross/Isolated với đòn bẩy mặc định hoặc đã cài đặt thủ công.
-        // Nếu cần đặt đòn bẩy qua API, cần tìm endpoint 'trade/setLeverage' và gọi nó.
-        // Hiện tại, bỏ qua bước này vì bot không có API đặt đòn bẩy tường minh trước khi mở lệnh.
-        // addLog(`[DEBUG] Đang thiết lập đòn bẩy ${maxLeverage}x cho ${symbol}. (Nếu BingX có API hỗ trợ)`);
-        // await callSignedAPI('/trade/setLeverage', 'POST', { symbol: symbol, leverage: maxLeverage }); // Ví dụ endpoint
-        // addLog(`✅ Đã thiết lập đòn bẩy ${maxLeverage}x cho ${symbol}.`);
-
         // BingX API có endpoint /trade/setLeverage, cần xem tài liệu để dùng đúng.
-        // "V1 API: openApi/swap/v1/trade/setLeverage"
-        // "V2 API: openApi/swap/v2/trade/setLeverage"
         addLog(`[DEBUG] Đang thiết lập đòn bẩy ${maxLeverage}x cho ${symbol} qua API.`);
         try {
             await callSignedAPI('/trade/setLeverage', 'POST', {
@@ -507,9 +486,6 @@ async function openShortPosition(symbol, fundingRate, usdtBalance) {
             addLog(`✅ Đã thiết lập đòn bẩy ${maxLeverage}x cho ${symbol} ở chế độ ISOLATED.`);
         } catch (setLeverageError) {
             addLog(`❌ Lỗi khi thiết lập đòn bẩy ${maxLeverage}x cho ${symbol}: ${setLeverageError.msg || setLeverageError.message}. Tiếp tục mở lệnh với đòn bẩy hiện tại (nếu có).`);
-            // Nếu không thể đặt đòn bẩy, bot có thể dừng hoặc tiếp tục với đòn bẩy hiện tại.
-            // Để đảm bảo an toàn, tốt hơn là dừng nếu không thể đặt đòn bẩy mong muốn.
-            // Để đơn giản, bot sẽ cố gắng tiếp tục, nhưng người dùng cần lưu ý.
             if(botRunning) scheduleNextMainCycle();
             return;
         }
@@ -619,8 +595,6 @@ async function openShortPosition(symbol, fundingRate, usdtBalance) {
 
     } catch (error) {
         addLog(`❌ Lỗi mở SHORT ${symbol}: ${error.msg || error.message}`, true);
-        // Nếu có lỗi khi mở lệnh, đảm bảo bot có thể tìm kiếm cơ hội mới
-        // bằng cách lên lịch lại.
         if(botRunning) scheduleNextMainCycle();
     }
 }
@@ -653,7 +627,6 @@ async function manageOpenPosition() {
 
         const currentPrice = await getCurrentPrice(symbol);
         if (currentPrice === null) {
-            // Log lỗi giá, không dừng bot.
             addLog(`⚠️ Không thể lấy giá hiện tại cho ${symbol} khi quản lý vị thế. Đang thử lại...`);
             return;
         }
@@ -677,7 +650,6 @@ async function manageOpenPosition() {
 
     } catch (error) {
         addLog(`❌ Lỗi khi quản lý vị thế mở cho ${symbol}: ${error.msg || error.message}`);
-        // Không xóa cờ isClosingPosition ở đây, nó sẽ được xử lý khi closeShortPosition hoàn tất
     }
 }
 
@@ -722,27 +694,17 @@ async function runTradingLogic() {
 
         for (const item of allFundingData) {
             const fundingRate = parseFloat(item.fundingRate); // BingX dùng 'fundingRate'
-            // BingX trả về nextFundingTime là timestamp, chính xác rồi
             const nextFundingTimeMs = item.nextFundingTime; 
             
-            // Điều kiện 1: Funding rate đủ âm và là cặp USDT (item.symbol đã là USDT theo getExchangeInfo)
-            // BingX API /market/fundingRate không trả về trực tiếp symbol, mà là contractId
-            // Tuy nhiên, nếu dùng contracts (exchangeInfo) thì sẽ có symbol
-            // Giả định item ở đây đã là một đối tượng có symbol và phù hợp
-            // Cần ánh xạ contractId từ /market/fundingRate với symbol trong exchangeInfo
             const symbolFromContractId = exchangeInfoCache ? Object.values(exchangeInfoCache).find(s => s.symbol === item.symbol) : null;
             if (!symbolFromContractId || !item.symbol.endsWith('USDT')) { // Kiểm tra lại symbol
-                continue; // Bỏ qua nếu không phải cặp USDT hoặc không tìm thấy symbol trong cache
+                continue; 
             }
 
             if (fundingRate < MIN_FUNDING_RATE_THRESHOLD) {
-                // Điều kiện 2: nextFundingTime của đồng coin này phải còn trong cửa sổ xem xét
                 const timeToFundingMs = nextFundingTimeMs - now;
                 const timeToFundingMinutes = timeToFundingMs / (1000 * 60);
 
-                // Lọc sơ bộ để chỉ xem xét các coin sắp đến giờ funding
-                // Kiểm tra nếu thời gian còn lại đến funding lớn hơn 0 (chưa qua)
-                // VÀ nhỏ hơn hoặc bằng FUNDING_WINDOW_MINUTES (ví dụ: 30 phút)
                 if (timeToFundingMinutes > 0 && timeToFundingMinutes <= FUNDING_WINDOW_MINUTES) {
                     const symbolInfo = await getSymbolFiltersAndMaxLeverage(item.symbol);
                     if (symbolInfo && typeof symbolInfo.maxLeverage === 'number' && symbolInfo.maxLeverage > 1) {
@@ -762,7 +724,7 @@ async function runTradingLogic() {
                             eligibleCandidates.push({
                                 symbol: item.symbol,
                                 fundingRate: fundingRate,
-                                nextFundingTime: nextFundingTimeMs, // Sử dụng nextFundingTime trực tiếp
+                                nextFundingTime: nextFundingTimeMs, 
                                 maxLeverage: symbolInfo.maxLeverage
                             });
                         } else {
@@ -782,31 +744,25 @@ async function runTradingLogic() {
         }
 
         if (eligibleCandidates.length > 0) {
-            // Sắp xếp ưu tiên: Funding rate âm nhất
             eligibleCandidates.sort((a, b) => a.fundingRate - b.fundingRate);
 
-            let selectedCandidateToOpen = null; // Biến để lưu trữ đồng coin cuối cùng được chọn để mở lệnh
+            let selectedCandidateToOpen = null; 
 
-            // Duyệt qua các ứng viên đã sắp xếp (từ âm nhất)
             for (const candidate of eligibleCandidates) {
-                const nowRefreshed = Date.now(); // Lấy lại thời gian hiện tại để đảm bảo chính xác
+                const nowRefreshed = Date.now(); 
                 const timeToOpenMs = candidate.nextFundingTime - nowRefreshed;
-                const delayForExactOpenMs = timeToOpenMs + 100; // Đợi thêm 100ms sau giờ funding
+                const delayForExactOpenMs = timeToOpenMs + 100; 
 
-                // Kiểm tra điều kiện "sắp trả funding" hợp lệ cho CHÍNH ĐỒNG COIN ĐÓ:
-                // 1. Còn thời gian để chờ (delayForExactOpenMs > 0)
-                // 2. Thời gian chờ thực tế đến funding (timeToOpenMs) phải rất gần (<= ONLY_OPEN_IF_FUNDING_IN_SECONDS)
-                // 3. Giờ funding của nó chưa qua (timeToOpenMs >= 0)
                 if (delayForExactOpenMs > 0 && timeToOpenMs <= (ONLY_OPEN_IF_FUNDING_IN_SECONDS * 1000) && timeToOpenMs >= 0) {
-                    selectedCandidateToOpen = candidate; // Tìm thấy ứng viên phù hợp
-                    break; // Thoát vòng lặp, chúng ta đã tìm được đồng coin âm nhất và sắp trả funding
+                    selectedCandidateToOpen = candidate; 
+                    break; 
                 } else {
                     addLog(`[DEBUG] Bỏ qua ${candidate.symbol} (Funding: ${candidate.fundingRate}, Giờ Funding: ${formatTimeUTC7(new Date(candidate.nextFundingTime))}, còn ${Math.ceil(timeToOpenMs / 1000)}s) - không phải đồng coin sắp trả funding trong cửa sổ mở lệnh (còn > ${ONLY_OPEN_IF_FUNDING_IN_SECONDS}s). Tiếp tục xét đồng khác.`, false);
                 }
             }
 
-            if (selectedCandidateToOpen) { // Nếu tìm được một ứng viên thực sự phù hợp để mở lệnh
-                const nowFinal = Date.now(); // Lấy lại thời gian cuối cùng trước khi tính toán
+            if (selectedCandidateToOpen) { 
+                const nowFinal = Date.now(); 
                 const timeToOpenMs = selectedCandidateToOpen.nextFundingTime - nowFinal;
                 const delayForExactOpenMs = timeToOpenMs + 100;
 
@@ -830,7 +786,7 @@ async function runTradingLogic() {
                 addLog(`  + Lệnh sẽ được mở sau khoảng **${Math.ceil(delayForExactOpenMs / 1000)} giây** (vào lúc **${formatTimeUTC7(new Date(selectedCandidateToOpen.nextFundingTime + 100))}**).`, true);
 
                 addLog(`>>> Đang chờ đến thời điểm mở lệnh chính xác...`, true);
-                clearTimeout(nextScheduledTimeout); // Hủy lịch trình quét :58 nếu có
+                clearTimeout(nextScheduledTimeout); 
                 nextScheduledTimeout = setTimeout(async () => {
                     if (!currentOpenPosition && botRunning) {
                         addLog(`>>> Đã đến giờ funding cho ${selectedCandidateToOpen.symbol}. Đang thực hiện mở lệnh.`, true);
@@ -841,18 +797,18 @@ async function runTradingLogic() {
                         addLog(`⚠️ Đã có vị thế được mở trong khi chờ (bởi luồng khác). Bỏ qua việc mở lệnh mới.`, true);
                     }
                 }, delayForExactOpenMs);
-            } else { // Không tìm thấy đồng coin nào phù hợp sau khi duyệt qua tất cả
+            } else { 
                 addLog('>>> Không tìm thấy đồng coin nào thỏa mãn cả điều kiện funding âm và sắp trả funding trong chu kỳ này. Đang chờ chu kỳ quét tiếp theo (vào phút :58).', true);
                 scheduleNextMainCycle();
             }
 
-        } else { // Không có đồng coin nào đạt điều kiện sơ bộ
+        } else { 
             addLog('>>> Không tìm thấy cơ hội mở lệnh đủ điều kiện tại thời điểm này. Đang chờ chu kỳ quét tiếp theo (vào phút :58).', true);
             scheduleNextMainCycle();
         }
     } catch (error) {
         addLog('❌ Lỗi tìm kiếm: ' + (error.msg || error.message), true);
-        scheduleNextMainCycle(); // Lên lịch quét lại nếu có lỗi
+        scheduleNextMainCycle(); 
     }
 }
 
@@ -866,26 +822,23 @@ async function scheduleNextMainCycle() {
 
     if (currentOpenPosition) {
         addLog('>>> Có vị thế đang mở. Bot sẽ không lên lịch quét mới mà chờ đóng vị thế hiện tại.', true);
-        return; // manageOpenPosition sẽ tự động gọi scheduleNextMainCycle sau khi đóng
+        return; 
     }
 
-    clearTimeout(nextScheduledTimeout); // Xóa bất kỳ lịch trình cũ nào
+    clearTimeout(nextScheduledTimeout); 
 
     const now = Date.now();
-    const currentMinute = new Date(now).getUTCMinutes(); // Lấy phút hiện tại theo UTC
+    const currentMinute = new Date(now).getUTCMinutes(); 
     let delayUntilNext58Minute;
 
     if (currentMinute < 58) {
-        // Nếu đang ở phút < 58, chờ đến phút 58 của giờ hiện tại
         delayUntilNext58Minute = (58 - currentMinute) * 60 * 1000 - new Date(now).getUTCSeconds() * 1000 - new Date(now).getUTCMilliseconds();
     } else {
-        // Nếu đang ở phút 58 hoặc sau 58, chờ đến phút 58 của giờ tiếp theo
         delayUntilNext58Minute = (60 - currentMinute + 58) * 60 * 1000 - new Date(now).getUTCSeconds() * 1000 - new Date(now).getUTCMilliseconds();
     }
 
-    // Đảm bảo delay không âm (ví dụ: nếu chạy lúc 58:00:00, delay phải rất nhỏ)
     if (delayUntilNext58Minute <= 0) {
-        delayUntilNext58Minute = 1000; // Chờ ít nhất 1 giây để tránh lỗi setTimeout với giá trị 0
+        delayUntilNext58Minute = 1000; 
     }
 
     const nextScanMoment = new Date(now + delayUntilNext58Minute);
@@ -912,15 +865,17 @@ async function startBotLogicInternal() {
     addLog('>>> Đang kiểm tra kết nối API Key với BingX Swap...', true);
 
     try {
-        await syncServerTime(); // Đồng bộ thời gian trước
+        // NEW: Tạo file log nếu nó chưa tồn tại
+        fs.writeFileSync(BOT_LOG_FILE, '', { flag: 'a' }); // Tạo file nếu chưa có, không ghi đè
+        addLog(`✅ Đảm bảo log file (${BOT_LOG_FILE}) đã sẵn sàng.`);
 
-        // Kiểm tra API Key bằng cách lấy thông tin tài khoản
+        await syncServerTime(); 
+
         const account = await callSignedAPI('/user/account', 'GET');
         const usdtBalanceInfo = account.balances.find(a => a.asset === 'USDT');
         const usdtBalance = usdtBalanceInfo ? usdtBalanceInfo.availableBalance : 0;
         addLog(`✅ API Key hoạt động bình thường! Số dư USDT khả dụng: ${parseFloat(usdtBalance).toFixed(2)}`, true);
 
-        // Load exchange info một lần khi khởi động
         await getExchangeInfo();
         if (!exchangeInfoCache) {
             addLog('❌ Lỗi load sàn (exchangeInfo). Bot sẽ dừng.', true);
@@ -931,24 +886,19 @@ async function startBotLogicInternal() {
         botStartTime = new Date();
         addLog(`--- Bot đã chạy lúc ${formatTimeUTC7(botStartTime)} ---`, true);
 
-        // Bắt đầu chu kỳ chính của bot (quét hoặc chờ)
         scheduleNextMainCycle();
 
-        // Thiết lập kiểm tra vị thế định kỳ (dù không có lệnh vẫn chạy để đảm bảo
-        // nếu có lệnh mở từ đâu đó thì cũng được quản lý)
-        // Interval này sẽ chỉ thực sự xử lý nếu currentOpenPosition không null
-        if (!positionCheckInterval) { // Tránh tạo trùng lặp
+        if (!positionCheckInterval) { 
             positionCheckInterval = setInterval(async () => {
                 if (botRunning && currentOpenPosition) {
                     await manageOpenPosition();
                 } else if (!botRunning && positionCheckInterval) {
-                    // Nếu bot dừng, clear interval này
                     clearInterval(positionCheckInterval);
                     positionCheckInterval = null;
                 }
-            }, 1000); // Kiểm tra mỗi giây nếu có vị thế đang mở
+            }, 1000); 
         }
-        startCountdownFrontend(); // Khởi động bộ đếm ngược frontend ngay khi bot bắt đầu
+        startCountdownFrontend(); 
 
         return 'Bot đã khởi động thành công.';
 
@@ -957,7 +907,7 @@ async function startBotLogicInternal() {
         addLog('❌ [Lỗi nghiêm trọng khi khởi động bot] ' + errorMsg, true);
         addLog('   -> Bot sẽ dừng hoạt động. Vui lòng kiểm tra và khởi động lại.', true);
        
-        botRunning = false; // Đảm bảo cờ botRunning được đặt lại false nếu khởi động thất bại
+        botRunning = false; 
         return `Lỗi khi khởi động bot: ${errorMsg}`;
     }
 }
@@ -969,12 +919,12 @@ function stopBotLogicInternal() {
         return 'Bot logic hiện không chạy.';
     }
     botRunning = false;
-    clearTimeout(nextScheduledTimeout); // Hủy lịch trình tiếp theo
+    clearTimeout(nextScheduledTimeout); 
     if (positionCheckInterval) {
-        clearInterval(positionCheckInterval); // Dừng kiểm tra vị thế
+        clearInterval(positionCheckInterval); 
         positionCheckInterval = null;
     }
-    stopCountdownFrontend(); // Dừng bộ đếm ngược trên frontend
+    stopCountdownFrontend(); 
     addLog('--- Bot đã được dừng ---', true);
     botStartTime = null;
     return 'Bot đã dừng.';
@@ -983,26 +933,30 @@ function stopBotLogicInternal() {
 // === KHỞI TẠO SERVER WEB VÀ CÁC API ENDPOINT ===
 const app = express();
 
-// Phục vụ file index.html từ thư mục hiện tại (sau khi đã đổi tên)
 app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'index.html'));
 });
 
 // API endpoint để lấy log từ file
 app.get('/api/logs', (req, res) => {
-    fs.readFile(BOT_LOG_FILE, 'utf8', (err, data) => {
+    // NEW: Kiểm tra xem file log có tồn tại không trước khi đọc
+    fs.access(BOT_LOG_FILE, fs.constants.F_OK, (err) => {
         if (err) {
-            console.error('Error reading log file:', err);
-            if (err.code === 'ENOENT') {
-                return res.status(404).send(`Log file not found: ${BOT_LOG_FILE}. Please ensure the path is correct and PM2 is running this bot with correct log output.`);
-            }
-            return res.status(500).send('Error reading log file');
+            // File không tồn tại, trả về thông báo lỗi tùy chỉnh
+            return res.status(404).send(`Log file not found at ${BOT_LOG_FILE}. Please ensure the bot is running.`);
         }
-        // Xóa các ký tự màu sắc ANSI để hiển thị sạch hơn trên trình duyệt
-        const cleanData = data.replace(/[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g, '');
-        res.send(cleanData);
+
+        fs.readFile(BOT_LOG_FILE, 'utf8', (err, data) => {
+            if (err) {
+                console.error('Error reading log file:', err);
+                return res.status(500).send('Error reading log file');
+            }
+            const cleanData = data.replace(/[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g, '');
+            res.send(cleanData);
+        });
     });
 });
+
 
 // API endpoint để lấy trạng thái bot từ PM2
 app.get('/api/status', async (req, res) => {
@@ -1014,9 +968,10 @@ app.get('/api/status', async (req, res) => {
             });
         });
         const processes = JSON.parse(pm2List);
-        const botProcess = processes.find(p => p.name === THIS_BOT_PM2_NAME);
+        // NEW: Sử dụng BOT_NAME thay vì THIS_BOT_PM2_NAME cố định
+        const botProcess = processes.find(p => p.name === BOT_NAME);
 
-        let statusMessage = 'MÁY CHỦ: ĐI TẮT (PM2)';
+        let statusMessage = 'MÁY CHỦ: KHÔNG RÕ (PM2)';
         if (botProcess) {
             statusMessage = `MÁY CHỦ: ${botProcess.pm2_env.status.toUpperCase()} (Restarts: ${botProcess.pm2_env.restart_time})`;
             if (botProcess.pm2_env.status === 'online') {
@@ -1028,16 +983,16 @@ app.get('/api/status', async (req, res) => {
                 }
             }
         } else {
-            statusMessage = `Bot Status: Not found in PM2 (Name: ${THIS_BOT_PM2_NAME})`;
+            statusMessage = `Bot Status: Không tìm thấy trong PM2 (Tên: ${BOT_NAME})`; // NEW: Tên bot có thể thay đổi
         }
         res.send(statusMessage);
     } catch (error) {
         console.error('Error fetching PM2 status:', error);
-        res.status(500).send(`Bot Status: Error fetching status. (${error})`);
+        res.status(500).send(`Bot Status: Lỗi khi lấy trạng thái. (${error})`);
     }
 });
 
-// NEW: API endpoint để lấy thông báo đếm ngược
+// API endpoint để lấy thông báo đếm ngược
 app.get('/api/countdown', (req, res) => {
     res.send(currentCountdownMessage);
 });
