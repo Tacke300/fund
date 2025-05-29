@@ -44,11 +44,11 @@ function addLog(message) {
 
 const delay = ms => new Promise(resolve => setTimeout(ms));
 
-/***************** CÁC HÀM API CHÍNH (ĐÃ ĐƯỢC GỘP VÀ CHỈNH SỬA LẠI ĐỂ KHẮC PHỤC LỖI CHỮ KÝ) *****************/
+/***************** CÁC HÀM API CHÍNH (SAO CHÉP NGUYÊN BẢN LOGIC TỪ TEST.JS CỦA BẠN) *****************/
 
 /**
  * Tạo chữ ký HMAC SHA256 cho chuỗi truy vấn.
- * (Gộp chính xác từ test.js)
+ * (Sao chép nguyên bản từ test.js)
  */
 function createSignature(queryString, apiSecret) {
     return crypto.createHmac('sha256', apiSecret)
@@ -58,19 +58,19 @@ function createSignature(queryString, apiSecret) {
 
 /**
  * Hàm helper để gửi yêu cầu HTTP.
- * (Đã đơn giản hóa để chỉ gửi request thô)
+ * (Sao chép nguyên bản từ test.js, với việc bổ sung `postData` cho POST requests một cách linh hoạt)
  * @param {string} method - Phương thức HTTP (GET, POST).
  * @param {string} hostname - Hostname của API (ví dụ: 'fapi.binance.com').
- * @param {string} path - Đường dẫn đầy đủ của API (bao gồm query string nếu có).
+ * @param {string} path - Đường dẫn của API (ví dụ: '/fapi/v1/account') bao gồm query string cho GET.
  * @param {object} headers - Các HTTP headers.
- * @param {string} body - Dữ liệu body cho POST request (nếu có).
+ * @param {string} postData - Dữ liệu body cho POST request.
  * @returns {Promise<string>} Dữ liệu phản hồi dạng chuỗi JSON.
  */
-function makeHttpRequest(method, hostname, path, headers, body = '') {
+function makeHttpRequest(method, hostname, path, headers, postData = '') { 
     return new Promise((resolve, reject) => {
         const options = {
             hostname: hostname,
-            path: path,
+            path: path, 
             method: method,
             headers: headers,
         };
@@ -103,8 +103,8 @@ function makeHttpRequest(method, hostname, path, headers, body = '') {
             reject({ code: 'NETWORK_ERROR', msg: e.message });
         });
 
-        if (body) {
-            req.write(body);
+        if (method === 'POST' && postData) {
+            req.write(postData);
         }
         req.end();
     });
@@ -112,7 +112,7 @@ function makeHttpRequest(method, hostname, path, headers, body = '') {
 
 /**
  * Gửi yêu cầu ĐÃ KÝ tới API Binance Futures.
- * (Tái cấu trúc để đảm bảo tính đúng đắn của chữ ký cho cả GET và POST)
+ * (Sao chép nguyên bản logic từ `signedRequest` của `test.js`)
  * @param {string} fullEndpointPath - Đường dẫn đầy đủ của API (ví dụ: '/fapi/v2/account').
  * @param {string} method - Phương thức HTTP (GET, POST).
  * @param {object} params - Các tham số truy vấn.
@@ -120,28 +120,31 @@ function makeHttpRequest(method, hostname, path, headers, body = '') {
  */
 async function callSignedAPI(fullEndpointPath, method = 'GET', params = {}) {
     const recvWindow = 5000;
-    const timestamp = Date.now(); // Sử dụng timestamp hiện tại của máy cục bộ như test.js
+    const timestamp = Date.now(); 
 
-    // Tạo chuỗi tham số để ký (query string)
     let queryString = Object.keys(params)
                             .map(key => `${key}=${params[key]}`)
                             .join('&');
+
+    // Chú ý: Ở đây mình gộp timestamp và recvWindow vào queryString trước khi ký
+    // Đảm bảo đúng thứ tự như test.js của bạn nếu nó có thứ tự cố định.
     queryString += (queryString ? '&' : '') + `timestamp=${timestamp}&recvWindow=${recvWindow}`;
 
     const signature = createSignature(queryString, SECRET_KEY);
-
+    
     let requestPath;
-    let requestBody = ''; // Sử dụng cho POST requests
-    let headers = {
+    let requestBody = ''; // Dữ liệu cho body của POST request
+    const headers = {
         'X-MBX-APIKEY': API_KEY,
     };
 
     if (method === 'GET') {
         requestPath = `${fullEndpointPath}?${queryString}&signature=${signature}`;
-        headers['Content-Type'] = 'application/json'; // Hoặc không cần Content-Type cho GET
+        headers['Content-Type'] = 'application/json'; // Hoặc bỏ qua nếu test.js không set
     } else if (method === 'POST') {
-        requestPath = fullEndpointPath; // Với POST, đường dẫn không có query string
-        requestBody = `${queryString}&signature=${signature}`; // Toàn bộ data và signature vào body
+        // Đối với POST, signature và các tham số sẽ nằm trong body.
+        requestPath = fullEndpointPath; // Đường dẫn API không có query string
+        requestBody = `${queryString}&signature=${signature}`; // Toàn bộ query string và signature đi vào body
         headers['Content-Type'] = 'application/x-www-form-urlencoded'; // Rất quan trọng cho POST
     } else {
         throw new Error(`Unsupported method: ${method}`);
@@ -172,7 +175,7 @@ async function callSignedAPI(fullEndpointPath, method = 'GET', params = {}) {
 
 /**
  * Gửi yêu cầu GET KHÔNG ký tới API Binance Futures (cho các endpoint công khai).
- * (Gộp chính xác từ publicRequest của test.js, chỉ đổi tên hàm)
+ * (Sao chép nguyên bản logic từ `publicRequest` của `test.js`)
  * @param {string} fullEndpointPath - Đường dẫn đầy đủ của API (ví dụ: '/fapi/v1/exchangeInfo').
  * @param {object} params - Các tham số truy vấn.
  * @returns {Promise<object>} Dữ liệu trả về từ API.
@@ -222,7 +225,7 @@ async function syncServerTime() {
 
 /**
  * Lấy thông tin đòn bẩy cho một symbol cụ thể từ endpoint /fapi/v1/leverageBracket.
- * (Gộp chính xác từ test.js, chỉ đổi tên hàm)
+ * (Sao chép nguyên bản logic từ test.js)
  * @param {string} symbol - Tên cặp giao dịch (ví dụ: 'BTCUSDT').
  * @returns {Promise<number|null>} Đòn bẩy tối đa (ví dụ: 125) hoặc null nếu không tìm thấy hoặc lỗi.
  */
