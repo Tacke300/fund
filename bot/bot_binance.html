@@ -11,19 +11,17 @@
       color: #eee;
       display: flex;
       flex-direction: column;
-      justify-content: center;
+      justify-content: flex-start; /* Thay đổi từ center để nội dung bắt đầu từ trên */
       align-items: center;
-      /* Đặt min-height thay vì height để cho phép nội dung vượt quá chiều cao viewport nếu cần */
-      min-height: 100vh; 
+      min-height: 100vh;
       margin: 0;
-      padding: 20px 10px; /* Thêm padding tổng thể để nội dung không bị dính sát cạnh */
-      box-sizing: border-box; /* Đảm bảo padding không làm tràn width */
+      padding: 20px 10px;
+      box-sizing: border-box;
     }
 
     #top {
-      /* Sử dụng vw để font-size co giãn theo chiều rộng viewport */
-      font-size: 8vw; /* Kích thước font sẽ là 8% của chiều rộng viewport */
-      line-height: 1; /* Đảm bảo chiều cao dòng không quá lớn */
+      font-size: 8vw;
+      line-height: 1;
       background: linear-gradient(270deg, #00ffe1, #0066ff, #00ffe1);
       background-size: 300% 300%;
       -webkit-background-clip: text;
@@ -31,8 +29,6 @@
       animation: moveGradient 5s ease infinite;
       margin-bottom: 20px;
       text-align: center;
-      /* Bỏ fixed height để font size tự điều chỉnh */
-      /* height: 20vh; */
     }
 
     @keyframes moveGradient {
@@ -41,45 +37,65 @@
       100% { background-position: 0% 50%; }
     }
 
+    .status-bar {
+        width: 95%;
+        max-width: 900px;
+        background: #222;
+        color: #00ff00; /* Màu xanh lá cây cho trạng thái */
+        padding: 10px 15px;
+        margin-bottom: 15px;
+        border-radius: 5px;
+        font-size: 1.1rem;
+        text-align: center;
+        box-sizing: border-box;
+        white-space: pre-wrap; /* Đảm bảo text dài tự động xuống dòng */
+        word-wrap: break-word;
+        border: 1px solid #00ff00; /* Thêm border màu xanh lá */
+    }
+
+
     #log {
-      /* Giữ vh nhưng điều chỉnh font-size bằng rem hoặc vw */
       height: 40vh;
-      width: 95%; /* Vẫn giữ 95% width */
-      max-width: 900px; /* Giới hạn chiều rộng tối đa trên màn hình lớn */
+      width: 95%;
+      max-width: 900px;
       overflow-y: auto;
       background: #111;
-      padding: 15px; /* Tăng padding một chút */
-      font-size: 1.2rem; /* Sử dụng rem cho font-size, 1.2 lần font-size gốc của body */
+      padding: 15px;
+      font-size: 1.2rem;
       border: 1px solid #333;
       margin-bottom: 20px;
-      font-family: Arial, Helvetica, sans-serif;
-      box-sizing: border-box; /* Đảm bảo padding và border không làm tràn width */
-      word-wrap: break-word; /* Đảm bảo text dài tự động xuống dòng */
-      white-space: pre-wrap; /* Giữ định dạng dòng mới và khoảng trắng */
+      font-family: 'Courier New', Courier, monospace; /* Đổi font sang monospace để log dễ đọc hơn */
+      box-sizing: border-box;
+      word-wrap: break-word;
+      white-space: pre-wrap;
+      color: #0f0; /* Màu chữ xanh lá cho log */
+    }
+    #log p {
+        margin: 0;
+        line-height: 1.4;
     }
 
     .button-row {
       display: flex;
-      flex-wrap: wrap; /* Cho phép các nút xuống dòng trên màn hình nhỏ */
+      flex-wrap: wrap;
       justify-content: center;
-      gap: 15px; /* Giảm gap một chút */
-      /* Bỏ fixed height để các nút tự điều chỉnh */
-      /* height: 10vh; */
-      width: 95%; /* Đảm bảo button-row cũng tuân theo width của layout */
+      gap: 15px;
+      width: 95%;
       max-width: 900px;
     }
 
     button {
-      padding: 12px 20px; /* Giảm padding một chút để phù hợp hơn trên di động */
-      font-size: 1.5rem; /* Sử dụng rem cho font-size nút */
+      padding: 12px 20px;
+      font-size: 1.5rem;
       border: none;
       cursor: pointer;
       border-radius: 8px;
       transition: 0.3s;
       font-family: 'Orbitron', sans-serif;
-      flex-grow: 1; /* Cho phép nút giãn ra để lấp đầy không gian */
-      min-width: 150px; /* Đảm bảo nút không quá nhỏ */
+      flex-grow: 1;
+      min-width: 150px;
       box-sizing: border-box;
+      box-shadow: 0 4px 8px rgba(0, 0, 0, 0.4); /* Thêm shadow cho nút */
     }
 
     .start-btn {
@@ -99,7 +115,7 @@
 
     .copyright {
       margin-top: 20px;
-      font-size: 0.9rem; /* Sử dụng rem và giảm kích thước font */
+      font-size: 0.9rem;
       color: #666;
       font-family: monospace;
       text-align: center;
@@ -108,42 +124,48 @@
 
     /* --- MEDIA QUERIES CHO MÀN HÌNH NHỎ HƠN --- */
 
-    /* Điều chỉnh cho màn hình có chiều rộng tối đa 768px (điện thoại, máy tính bảng dọc) */
     @media (max-width: 768px) {
       #top {
-        font-size: 10vw; /* Tăng vw cho font-size ở màn hình nhỏ hơn để chữ to hơn chút */
+        font-size: 10vw;
         margin-bottom: 15px;
       }
 
+      .status-bar {
+          font-size: 1rem;
+          padding: 8px 10px;
+      }
+
       #log {
-        font-size: 1rem; /* Giảm font-size của log */
+        font-size: 1rem;
         padding: 10px;
       }
 
       button {
-        font-size: 1.2rem; /* Giảm font-size của nút */
+        font-size: 1.2rem;
         padding: 10px 15px;
-        min-width: unset; /* Bỏ min-width để flex-grow làm nhiệm vụ */
+        min-width: unset;
       }
       
       .button-row {
-          flex-direction: column; /* Đặt nút theo cột trên màn hình nhỏ */
+          flex-direction: column;
           gap: 10px;
       }
     }
 
-    /* Điều chỉnh cho màn hình cực nhỏ (ví dụ: iPhone 5/SE) */
     @media (max-width: 480px) {
         #top {
-            font-size: 12vw; /* Tăng font-size hơn nữa cho dễ nhìn trên màn hình rất nhỏ */
+            font-size: 12vw;
+        }
+        .status-bar {
+            font-size: 0.9rem;
         }
         #log {
-            font-size: 0.9rem; /* Giảm font-size của log để vừa hơn */
-            height: 35vh; /* Giảm chiều cao log một chút */
+            font-size: 0.9rem;
+            height: 35vh;
             padding: 8px;
         }
         button {
-            font-size: 1rem; /* Giảm font-size nút hơn nữa */
+            font-size: 1rem;
             padding: 8px 12px;
         }
         .copyright {
@@ -156,7 +178,11 @@
 <body>
   <h1 id="top">BOT BINANCE</h1>
 
-  <div id="log"></div>
+  <div class="status-bar" id="statusBar">Bot Status: Disconnected</div>
+
+  <div id="log">
+    <p>Connecting to bot...</p>
+  </div>
 
   <div class="button-row">
     <button class="start-btn" onclick="startBot()">Start Bot</button>
@@ -166,43 +192,78 @@
 
   <script>
     const logDiv = document.getElementById('log');
+    const statusBar = document.getElementById('statusBar');
+    const ws = new WebSocket('ws://localhost:3000'); // Kết nối tới WebSocket server của bot
 
-    async function fetchLogs() {
-      try {
-        const res = await fetch('/logs');
-        const logs = await res.json();
-        // Cải thiện hiển thị log: đảm bảo mỗi log trên một dòng và không bị lỗi HTML
-        logDiv.innerHTML = logs.map(l => `<span style="display:block;">${l.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</span>`).join('');
-        logDiv.scrollTop = logDiv.scrollHeight;
-      } catch (e) {
-        console.error('Failed to fetch logs', e);
-      }
+    function appendLog(message) {
+        const p = document.createElement('p');
+        p.textContent = message;
+        logDiv.appendChild(p);
+        logDiv.scrollTop = logDiv.scrollHeight; // Cuộn xuống cuối
     }
 
-    function startBot() {
-      fetch('/start').then(res => res.text()).then(response => {
-        alert(response);
-        fetchLogs(); // Refresh logs after action
-      }).catch(e => {
-        alert('Lỗi khi khởi động bot: ' + e.message);
-        console.error('Lỗi khi khởi động bot:', e);
-      });
+    function updateStatusBar(message) {
+        statusBar.textContent = `Bot Status: ${message}`;
     }
 
-    function stopBot() {
-      fetch('/stop').then(res => res.text()).then(response => {
-        alert(response);
-        fetchLogs(); // Refresh logs after action
-      }).catch(e => {
-        alert('Lỗi khi dừng bot: ' + e.message);
-        console.error('Lỗi khi dừng bot:', e);
-      });
+    ws.onopen = () => {
+        appendLog('Connected to bot WebSocket.');
+        updateStatusBar('Connected, awaiting commands.');
+    };
+
+    ws.onmessage = event => {
+        try {
+            const data = JSON.parse(event.data);
+            if (data.type === 'log') {
+                // Thêm log mới, loại bỏ ký tự \r nếu có
+                appendLog(data.message.replace(/\r/g, ''));
+            } else if (data.type === 'status') {
+                // Cập nhật dòng trạng thái trên thanh trạng thái
+                updateStatusBar(data.message.replace(/\r/g, ''));
+            }
+        } catch (e) {
+            appendLog('Error parsing message from bot: ' + event.data);
+            console.error('Error parsing message from bot:', e);
+        }
+    };
+
+    ws.onclose = () => {
+        appendLog('Disconnected from bot WebSocket. Please restart the bot process.');
+        updateStatusBar('Disconnected.');
+    };
+
+    ws.onerror = error => {
+        appendLog('WebSocket error: ' + error.message);
+        updateStatusBar('WebSocket Error!');
+        console.error('WebSocket error:', error);
+    };
+
+    async function startBot() {
+        try {
+            const response = await fetch('/start');
+            const message = await response.text();
+            alert(message); // Hiển thị alert từ phản hồi của server
+        } catch (error) {
+            appendLog('Error sending start command: ' + error.message);
+            alert('Lỗi khi khởi động bot: ' + error.message);
+            console.error('Lỗi khi khởi động bot:', error);
+        }
     }
 
-    // Tần suất fetch logs, 3 giây một lần là hợp lý
-    setInterval(fetchLogs, 3000);
-    // Fetch logs lần đầu khi tải trang
-    fetchLogs();
+    async function stopBot() {
+        try {
+            const response = await fetch('/stop');
+            const message = await response.text();
+            alert(message); // Hiển thị alert từ phản hồi của server
+        } catch (error) {
+            appendLog('Error sending stop command: ' + error.message);
+            alert('Lỗi khi dừng bot: ' + error.message);
+            console.error('Lỗi khi dừng bot:', error);
+        }
+    }
+
+    // Không cần fetchLogs định kỳ nữa vì đã dùng WebSocket
+    // Loại bỏ setInterval(fetchLogs, 3000); và fetchLogs();
   </script>
 </body>
 </html>
