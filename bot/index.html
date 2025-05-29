@@ -21,7 +21,7 @@
     }
 
     #top {
-      font-size: 5px;
+      font-size: 8vw;
       line-height: 1;
       background: linear-gradient(270deg, #00ffe1, #0066ff, #00ffe1);
       background-size: 300% 300%;
@@ -58,17 +58,17 @@
       height: 40vh;
       width: 95%;
       max-width: 900px;
-      overflow-y: auto; /* Chỉ cuộn dọc */
-      overflow-x: hidden; /* **Đã đảm bảo chặn cuộn ngang** */
+      overflow-y: auto;
+      overflow-x: hidden; /* **Đã thêm lại: Chặn cuộn ngang** */
       background: #111;
       padding: 15px;
-      font-size: 0.8rem; /* **Đã điều chỉnh kích thước chữ nhỏ hơn** */
+      font-size: 0.8rem; /* **Đã chỉnh lại kích thước chữ mặc định** */
       border: 1px solid #333;
       margin-bottom: 20px;
       font-family: 'Courier New', Courier, monospace;
       box-sizing: border-box;
-      white-space: pre-wrap; /* Giữ nguyên định dạng khoảng trắng và xuống dòng của pre */
-      word-break: break-all; /* **Đảm bảo các chuỗi dài sẽ tự động xuống dòng** */
+      white-space: pre-wrap;
+      word-break: break-all; /* Đảm bảo các chuỗi dài tự xuống dòng */
       color: #0f0;
     }
     #log pre {
@@ -127,7 +127,7 @@
     @media (max-width: 768px) {
       #top { font-size: 10vw; margin-bottom: 15px; }
       .status-bar { font-size: 1rem; padding: 8px 10px; }
-      #log { font-size: 0.8rem; /* **Đã điều chỉnh kích thước chữ cho tablet** */ padding: 10px; height: 35vh; }
+      #log { font-size: 0.7rem; /* **Đã chỉnh lại kích thước chữ cho tablet** */ padding: 10px; height: 35vh; }
       button { font-size: 1.2rem; padding: 10px 15px; min-width: unset; }
       .button-row { flex-direction: column; gap: 10px; }
     }
@@ -135,7 +135,7 @@
     @media (max-width: 480px) {
         #top { font-size: 12vw; }
         .status-bar { font-size: 0.9rem; }
-        #log { font-size: 0.7rem; /* **Đã điều chỉnh kích thước chữ cho điện thoại nhỏ hơn nữa** */ height: 30vh; padding: 8px; }
+        #log { font-size: 0.6rem; /* **Đã chỉnh lại kích thước chữ cho điện thoại** */ height: 30vh; padding: 8px; }
         button { font-size: 1rem; padding: 8px 12px; }
         .copyright { font-size: 0.8rem; }
     }
@@ -162,7 +162,7 @@
 
     // Hàm để lấy log từ server
     function fetchLogs() {
-        fetch('/api/logs') // API endpoint trong bot_binance.js
+        fetch('/api/logs')
             .then(response => {
                 if (!response.ok) {
                     return response.text().then(text => { throw new Error(text) });
@@ -171,7 +171,6 @@
             })
             .then(data => {
                 const isScrolledToBottom = logDiv.scrollHeight - logDiv.clientHeight <= logDiv.scrollTop + 1;
-                // Xóa các ký tự màu sắc ANSI để hiển thị sạch hơn trên trình duyệt
                 const cleanData = data.replace(/[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g, '');
                 logDiv.innerHTML = `<pre>${cleanData}</pre>`;
                 if (isScrolledToBottom) {
@@ -186,7 +185,7 @@
 
     // Hàm để lấy trạng thái bot từ server
     function fetchStatus() {
-        fetch('/api/status') // API endpoint trong bot_binance.js
+        fetch('/api/status')
             .then(response => {
                 if (!response.ok) {
                     return response.text().then(text => { throw new Error(text) });
@@ -205,11 +204,11 @@
     // Gửi lệnh khởi động bot
     async function startBot() {
         try {
-            const response = await fetch('/start_bot_logic'); // API endpoint trong bot_binance.js
+            const response = await fetch('/start_bot_logic');
             const message = await response.text();
             alert(message);
-            fetchStatus(); // Cập nhật trạng thái ngay lập tức
-            fetchLogs();    // Cập nhật log ngay lập tức
+            fetchStatus();
+            fetchLogs();
         } catch (error) {
             alert('Lỗi khi gửi lệnh khởi động bot: ' + error.message);
             console.error('Lỗi khi gửi lệnh khởi động bot:', error);
@@ -219,11 +218,11 @@
     // Gửi lệnh dừng bot
     async function stopBot() {
         try {
-            const response = await fetch('/stop_bot_logic'); // API endpoint trong bot_binance.js
+            const response = await fetch('/stop_bot_logic');
             const message = await response.text();
             alert(message);
-            fetchStatus(); // Cập nhật trạng thái ngay lập tức
-            fetchLogs();    // Cập nhật log ngay lập tức
+            fetchStatus();
+            fetchLogs();
         } catch (error) {
             alert('Lỗi khi gửi lệnh dừng bot: ' + error.message);
             console.error('Lỗi khi gửi lệnh dừng bot:', error);
