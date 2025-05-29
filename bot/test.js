@@ -166,19 +166,33 @@ async function getAllFuturesLeverageAndBalance() {
         const exchangeInfo = await publicRequest('/fapi/v1/exchangeInfo');
 
         let leverageData = [];
+                        let debugCount = 0; // Biến đếm để chỉ in vài cặp đầu tiên
+
         for (const s of exchangeInfo.symbols) {
             if (s.status === 'TRADING') {
+                // --- DEBUG: In ra cấu trúc dữ liệu cho vài cặp đầu tiên ---
+                if (debugCount < 5) {
+                    console.log(`\n--- DEBUG DỮ LIỆU CẶP: ${s.symbol} ---`);
+                    console.log(JSON.stringify(s, null, 2)); // In đối tượng s đẹp hơn
+                    console.log(`-----------------------------------`);
+                    debugCount++;
+                }
+                // --- KẾT THÚC DEBUG ---
+
                 let maxLev = 'N/A';
-                // Kiểm tra kỹ cấu trúc của leverageBracket
-                                        if (s.leverageBracket && Array.isArray(s.leverageBracket) && s.leverageBracket.length > 0) {
-                // Lấy initialLeverage từ bracket đầu tiên, đây thường là đòn bẩy tối đa mặc định
-                maxLev = s.leverageBracket[0].initialLeverage;
-            }
-
-
+                if (s.leverageBracket && Array.isArray(s.leverageBracket) && s.leverageBracket.length > 0) {
+                    // Thử cả hai trường có thể có: initialLeverage và maxInitialLeverage
+                    if (s.leverageBracket[0].initialLeverage !== undefined) {
+                        maxLev = s.leverageBracket[0].initialLeverage;
+                    } else if (s.leverageBracket[0].maxInitialLeverage !== undefined) {
+                        maxLev = s.leverageBracket[0].maxInitialLeverage;
+                    }
+                }
                 leverageData.push(`  - Cặp: ${s.symbol}, Đòn bẩy tối đa: ${maxLev}x`);
             }
         }
+
+
 
         leverageData.sort();
         leverageData.forEach(line => console.log(line));
