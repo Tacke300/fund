@@ -10,7 +10,8 @@ const SECRET_KEY = "oU6pZFHgEvbpD9NmFXp5ZVnYFMQ7EIkBiz88aTzvmC3SpT9nEf4fcDf0pEnF
 
 // Host và Path Base cho Binance Futures API
 const BASE_HOST = 'fapi.binance.com';
-const BASE_PATH = '/fapi/v1';
+// KHÔNG cần BASE_PATH ở đây nữa vì endpoint sẽ là đường dẫn đầy đủ
+// ví dụ: /fapi/v1/exchangeInfo, /fapi/v2/account
 
 // Kiểm tra nhanh để đảm bảo bạn đã thay thế khóa API
 if (API_KEY === "YOUR_BINANCE_API_KEY" || SECRET_KEY === "YOUR_BINANCE_SECRET_KEY") {
@@ -34,15 +35,15 @@ function createSignature(queryString, apiSecret) {
  * Hàm helper để gửi yêu cầu HTTP.
  * @param {string} method - Phương thức HTTP (GET).
  * @param {string} hostname - Hostname của API (ví dụ: 'fapi.binance.com').
- * @param {string} path - Đường dẫn của API (ví dụ: '/fapi/v1/account').
+ * @param {string} fullPath - Đường dẫn đầy đủ của API (ví dụ: '/fapi/v1/account?params=...').
  * @param {object} headers - Các HTTP headers.
  * @returns {Promise<string>} Dữ liệu phản hồi dạng chuỗi JSON.
  */
-function makeHttpRequest(method, hostname, path, headers) {
+function makeHttpRequest(method, hostname, fullPath, headers) {
     return new Promise((resolve, reject) => {
         const options = {
             hostname: hostname,
-            path: path,
+            path: fullPath,
             method: method,
             headers: headers,
         };
@@ -56,14 +57,15 @@ function makeHttpRequest(method, hostname, path, headers) {
                 if (res.statusCode >= 200 && res.statusCode < 300) {
                     resolve(data);
                 } else {
-                    // Xử lý lỗi từ server
-                    const errorMsg = `HTTP Error: ${res.statusCode} ${res.statusMessage} - ${data}`;
+                    const errorMsg = `HTTP Error: ${res.statusCode} ${res.statusMessage}`;
                     let errorDetails = { code: res.statusCode, msg: errorMsg };
                     try {
+                        // Cố gắng parse data nếu là JSON
                         const parsedData = JSON.parse(data);
                         errorDetails = { ...errorDetails, ...parsedData };
                     } catch (e) {
-                        // Không phải JSON, giữ nguyên errorDetails
+                        // Không parse được, giữ nguyên thông báo lỗi
+                        errorDetails.msg += ` - Raw Response: ${data.substring(0, 200)}...`; // Giới hạn độ dài
                     }
                     reject(errorDetails);
                 }
@@ -80,11 +82,11 @@ function makeHttpRequest(method, hostname, path, headers) {
 
 /**
  * Gửi yêu cầu GET đã ký tới API Binance Futures.
- * @param {string} endpoint - Endpoint của API (ví dụ: '/exchangeInfo', '/account').
+ * @param {string} fullEndpointPath - Đường dẫn đầy đủ của API (ví dụ: '/fapi/v2/account').
  * @param {object} params - Các tham số truy vấn.
  * @returns {Promise<object>} Dữ liệu trả về từ API.
  */
-async function signedRequest(endpoint, params = {}) {
+async function signedRequest(fullEndpointPath, params = {}) {
     const recvWindow = 5000; // Thời gian hiệu lực của yêu cầu (5000ms = 5 giây)
     const timestamp = Date.now(); // Lấy timestamp hiện tại của máy cục bộ
 
@@ -95,15 +97,15 @@ async function signedRequest(endpoint, params = {}) {
     queryString += (queryString ? '&' : '') + `timestamp=${timestamp}&recvWindow=${recvWindow}`;
 
     const signature = createSignature(queryString, SECRET_KEY);
-    const fullPath = `${BASE_PATH}${endpoint}?${queryString}&signature=${signature}`;
+    const fullPathWithQuery = `${fullEndpointPath}?${queryString}&signature=${signature}`;
 
     const headers = {
         'X-MBX-APIKEY': API_KEY,
-        'Content-Type': 'application/json', // Mặc dù là GET, vẫn nên có
+        'Content-Type': 'application/json', // Nên có
     };
 
     try {
-        const rawData = await makeHttpRequest('GET', BASE_HOST, fullPath, headers);
+        const rawData = await makeHttpRequest('GET', BASE_HOST, fullPathWithQuery, headers);
         return JSON.parse(rawData);
     } catch (error) {
         console.error("Lỗi khi gửi yêu cầu ký tới Binance API:");
@@ -113,55 +115,63 @@ async function signedRequest(endpoint, params = {}) {
             console.error("  Gợi ý: Lỗi xác thực API Key. Vui lòng kiểm tra lại API_KEY, SECRET_KEY và quyền truy cập Futures của bạn.");
         } else if (error.code === -1021) {
             console.error("  Gợi ý: Lỗi lệch thời gian. Đảm bảo đồng hồ máy tính của bạn chính xác hoặc xem xét cơ chế đồng bộ thời gian với server Binance.");
+        } else if (error.code === 404) {
+            console.error("  Gợi ý: Lỗi 404 Not Found. Đường dẫn API không đúng. Kiểm tra lại tài liệu API của Binance.");
         } else if (error.code === 'NETWORK_ERROR') {
-             console.error("  Gợi ý: Kiểm tra kết nối mạng của bạn.");
-        }
-        throw error; // Ném lại lỗi để hàm gọi có thể xử lý
-    }
-}
-
-/**
- * Gửi yêu cầu GET KHÔNG ký tới API Binance Futures (cho các endpoint công khai).
- * @param {string} endpoint - Endpoint của API (ví dụ: '/exchangeInfo', '/ticker/price').
- * @param {object} params - Các tham số truy vấn.
- * @returns {Promise<object>} Dữ liệu trả về từ API.
- */
-async function publicRequest(endpoint, params = {}) {
-    const queryString = Object.keys(params)
-                            .map(key => `${key}=${params[key]}`)
-                            .join('&');
-    const fullPath = `${BASE_PATH}${endpoint}` + (queryString ? `?${queryString}` : '');
-
-    const headers = {
-        'Content-Type': 'application/json',
-    };
-
-    try {
-        const rawData = await makeHttpRequest('GET', BASE_HOST, fullPath, headers);
-        return JSON.parse(rawData);
-    } catch (error) {
-        console.error("Lỗi khi gửi yêu cầu công khai tới Binance API:");
-        console.error("  Mã lỗi:", error.code || 'UNKNOWN');
-        console.error("  Thông báo:", error.msg || error.message || 'Lỗi không xác định');
-        if (error.code === 'NETWORK_ERROR') {
              console.error("  Gợi ý: Kiểm tra kết nối mạng của bạn.");
         }
         throw error;
     }
 }
 
+/**
+ * Gửi yêu cầu GET KHÔNG ký tới API Binance Futures (cho các endpoint công khai).
+ * @param {string} fullEndpointPath - Đường dẫn đầy đủ của API (ví dụ: '/fapi/v1/exchangeInfo').
+ * @param {object} params - Các tham số truy vấn.
+ * @returns {Promise<object>} Dữ liệu trả về từ API.
+ */
+async function publicRequest(fullEndpointPath, params = {}) {
+    const queryString = Object.keys(params)
+                            .map(key => `${key}=${params[key]}`)
+                            .join('&');
+    const fullPathWithQuery = `${fullEndpointPath}` + (queryString ? `?${queryString}` : '');
+
+    const headers = {
+        'Content-Type': 'application/json',
+    };
+
+    try {
+        const rawData = await makeHttpRequest('GET', BASE_HOST, fullPathWithQuery, headers);
+        return JSON.parse(rawData);
+    } catch (error) {
+        console.error("Lỗi khi gửi yêu cầu công khai tới Binance API:");
+        console.error("  Mã lỗi:", error.code || 'UNKNOWN');
+        console.error("  Thông báo:", error.msg || error.message || 'Lỗi không xác định');
+        if (error.code === 404) {
+            console.error("  Gợi ý: Lỗi 404 Not Found. Đường dẫn API không đúng. Kiểm tra lại tài liệu API của Binance.");
+        } else if (error.code === 'NETWORK_ERROR') {
+             console.error("  Gợi ý: Kiểm tra kết nối mạng của bạn.");
+        }
+        throw error;
+    }
+}
+
+
 async function getAllFuturesLeverageAndBalance() {
     try {
         console.log("\n--- THÔNG TIN ĐÒN BẨY TỐI ĐA CỦA CÁC CẶP GIAO DỊCH FUTURES ---");
 
         // Lấy thông tin trao đổi công khai
-        const exchangeInfo = await publicRequest('/exchangeInfo');
+        // Endpoint đúng cho Futures Exchange Info là /fapi/v1/exchangeInfo
+        const exchangeInfo = await publicRequest('/fapi/v1/exchangeInfo');
 
         let leverageData = [];
         for (const s of exchangeInfo.symbols) {
             if (s.status === 'TRADING') {
                 let maxLev = 'N/A';
-                if (s.leverageBracket && s.leverageBracket.length > 0) {
+                // Kiểm tra kỹ cấu trúc của leverageBracket
+                if (s.leverageBracket && Array.isArray(s.leverageBracket) && s.leverageBracket.length > 0) {
+                    // Lấy maxInitialLeverage từ bracket đầu tiên (thường là mặc định cho đòn bẩy cao nhất)
                     maxLev = s.leverageBracket[0].maxInitialLeverage;
                 }
                 leverageData.push(`  - Cặp: ${s.symbol}, Đòn bẩy tối đa: ${maxLev}x`);
@@ -174,7 +184,8 @@ async function getAllFuturesLeverageAndBalance() {
 
         console.log(`\n--- SỐ DƯ TÀI KHOẢN FUTURES CỦA BẠN ---`);
         // Lấy thông tin tài khoản Futures (yêu cầu ký)
-        const accountInfo = await signedRequest('/account'); // Endpoint cho thông tin tài khoản futures
+        // Endpoint đúng cho Futures Account Info là /fapi/v2/account
+        const accountInfo = await signedRequest('/fapi/v2/account');
 
         console.log(`Tổng số dư ví (totalWalletBalance): ${accountInfo.totalWalletBalance} USDT`);
         console.log(`Số dư khả dụng (availableBalance): ${accountInfo.availableBalance} USDT`);
