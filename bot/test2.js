@@ -8,8 +8,8 @@ const __dirname = dirname(__filename);
 
 // === NHẬP API KEY VÀ SECRET KEY MỚI TẠO TỪ BƯỚC 1 VÀO ĐÂY ===
 // Đảm bảo không có khoảng trắng thừa!
-const API_KEY = 'NHAP_API_KEY_MOI_CUA_BAN_VAO_DAY'.trim();
-const SECRET_KEY = 'NHAP_SECRET_KEY_MOI_CUA_BAN_VAO_DAY'.trim();
+const API_KEY = 'cZ1Y2O0kggVEggEaPvhFcYQHS5b1EsT2OWZb8zdY9C0jGqNROvXRZHTJjnQ7OG4Q'.trim();
+const SECRET_KEY = 'oU6pZFHgEvbpD9NmFXp5ZVnYFMQ7EIkBiz88aTzvmC3SpT9nEf4fcDf0pEnFzoTc'.trim();
 
 const BASE_HOST = 'fapi.binance.com';
 
