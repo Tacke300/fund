@@ -12,8 +12,8 @@ const __dirname = path.dirname(__filename);
 // === API KEY & SECRET ===
 // !!! QUAN TRỌNG: DÁN API Key và Secret Key THẬT của bạn vào đây. !!!
 // Đảm bảo không có khoảng trắng thừa khi copy/paste.
-const API_KEY = 'cZ1Y2O0kggVEggEaPvhFcYQHS5b1EsT2OWZb8zdY9C0jGqNROvXRZHTJjnQ7OG4Q'.trim(); // Thay thế bằng API Key của bạn
-const SECRET_KEY = 'oU6pZFHgEvbpD9NmFXp5ZVnYFMQ7EIkBiz88aTzvmC3SpT9nEf4fcDf0pEnFzoTc'.trim(); // Thay thế bằng Secret Key của bạn
+const API_KEY = 'cZ1Y2O0kggVEggEaPvhFcYQHS5b1EsT2OWZb8zdY9C0jGqNROvXRZHTJjnQ7OG4Q'.trim();   // <--- THAY THẾ BẰNG API KEY THẬT CỦA BẠN
+const SECRET_KEY = 'oU6pZFHgEvbpD9NmFXp5ZVnYFMQ7EIkBiz88aTzvmC3SpT9nEf4fcDf0pEnFzoTc'.trim(); // <--- THAY THẾ BẰNG SECRET KEY THẬT CỦA BẠN
 
 // === BASE URL CỦA BINANCE FUTURES API ===
 const BASE_HOST = 'fapi.binance.com';
@@ -65,9 +65,9 @@ const FUNDING_HOURS_UTC = [0, 8, 16]; // Ví dụ: 00:00, 08:00, 16:00 UTC
 // === Cấu hình Server Web ===
 const WEB_SERVER_PORT = 3000; // Cổng cho giao diện web
 // Đường dẫn tới file log của PM2 cho bot này (để web server đọc)
-// !!! QUAN TRỌNG: ĐÃ SỬA ĐƯỜNG DẪN NÀY ĐỂ TRỎ ĐÚNG VÀO FILE LOG CỦA BẠN !!!
-const BOT_LOG_FILE = '/home/tacke300/.pm2/logs/bot-binance-out.log'; // Đã sửa
-const THIS_BOT_PM2_NAME = 'bot_bina'; // Đã sửa để khớp với tên bạn đang dùng
+// ĐÃ CHỈNH SỬA ĐƯỜNG DẪN LOG VÀ TÊN PM2 ĐỂ KHỚP VỚI CÁCH BẠN ĐÃ DÙNG TRƯỚC ĐÓ: 'bot_bina'
+const BOT_LOG_FILE = '/home/tacke300/.pm2/logs/bot-bina-out.log';
+const THIS_BOT_PM2_NAME = 'bot_bina';
 
 // Hàm addLog để ghi nhật ký (chỉ ra console)
 function addLog(message, isImportant = false) {
@@ -811,11 +811,8 @@ async function startBotLogicInternal() {
     addLog('--- Khởi động Bot Futures Funding Rate ---', true);
     addLog('>>> Đang kiểm tra kết nối API Key với Binance Futures...', true);
 
-    // Kiểm tra API Key và Secret Key đã được thay thế chưa
-    if (API_KEY === 'cZ1Y2O0kggVEggEaPvhFcYQHS5b1EsT2OWZb8zdY9C0jGqNROvXRZHTJjnQ7OG4Q'.trim() || SECRET_KEY === 'oU6pZFHgEvbpD9NmFXp5ZVnYFMQ7EIkBiz88TzvmC3SpT9nEf4fcDf0pEnFzoTc'.trim()) {
-        addLog('❌ LỖI CẤU HÌNH: Vui lòng thay thế API Key và Secret Key THẬT của bạn.', true);
-        return 'LỖI CẤU HÌNH: Vui lòng thay thế API Key và Secret Key THẬT của bạn.';
-    }
+    // KHÔNG CÒN ĐOẠN KIỂM TRA API KEY MẪU NỮA.
+    // Bot sẽ kiểm tra kết nối API Key bằng cách gọi API Binance thực tế.
 
     try {
         await syncServerTime(); // Đồng bộ thời gian trước
