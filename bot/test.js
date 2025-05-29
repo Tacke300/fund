@@ -1,6 +1,12 @@
-// Import thư viện Binance mới theo cú pháp ES Module
-// CHÚ Ý: Lấy named export 'Binance' (chữ B hoa) từ gói
-import { Binance } from 'binance-api-node';
+// Nhập module CommonJS vào môi trường ES Module
+// Tên 'pkg' là một quy ước, bạn có thể đặt tên khác nếu muốn
+import pkg from 'binance-api-node';
+
+// Sau đó, bạn có thể truy cập các export của nó từ đối tượng 'pkg'
+// Thường thì hàm khởi tạo chính sẽ nằm trong thuộc tính 'default' hoặc là chính đối tượng đó.
+// Dựa trên lỗi trước đó (Binance is not a function) và lỗi hiện tại (Named export not found),
+// có khả năng hàm khởi tạo là thuộc tính 'default' của pkg.
+const BinanceClient = pkg; // Giả định hàm khởi tạo là default export
 
 // --- CẤU HÌNH API KEY VÀ SECRET KEY TRỰC TIẾP TẠI ĐÂY ---
 // THAY THẾ "YOUR_BINANCE_API_KEY" BẰNG API KEY THẬT CỦA BẠN
@@ -15,45 +21,36 @@ if (API_KEY === "YOUR_BINANCE_API_KEY" || SECRET_KEY === "YOUR_BINANCE_SECRET_KE
 }
 
 // --- KHỞI TẠO CLIENT BINANCE FUTURES ---
-// Với binance-api-node, bạn khởi tạo client bằng cách gọi hàm Binance đã import.
-// CHÚ Ý: 'Binance' (viết hoa B) là một hàm constructor hoặc factory function.
-const client = Binance({
+// Gọi hàm khởi tạo từ đối tượng đã import
+const client = BinanceClient({
   apiKey: API_KEY,
   apiSecret: SECRET_KEY,
-  // Thư viện này tự động xử lý thời gian server và domain cho Futures
-  // Đối với Futures, bạn chỉ cần đảm bảo API Key có quyền Futures
 });
 
 async function getAllFuturesLeverageAndBalance() {
     try {
         console.log("\n--- THÔNG TIN ĐÒN BẨY TỐI ĐA CỦA CÁC CẶP GIAO DỊCH FUTURES ---");
 
-        // Lấy thông tin trao đổi. binance-api-node có phương thức riêng cho futures.
         const exchangeInfo = await client.futuresExchangeInfo();
 
         let leverageData = [];
         for (const s of exchangeInfo.symbols) {
-            // Chỉ lấy thông tin của các cặp đang TRADING (đang hoạt động)
             if (s.status === 'TRADING') {
                 let maxLev = 'N/A';
-                // binance-api-node thường trả về maxLeverage trong leverageBracket
                 if (s.leverageBracket && s.leverageBracket.length > 0) {
-                    maxLev = s.leverageBracket[0].maxInitialLeverage; // Lấy đòn bẩy tối đa từ bracket đầu tiên
+                    maxLev = s.leverageBracket[0].maxInitialLeverage;
                 }
                 leverageData.push(`  - Cặp: ${s.symbol}, Đòn bẩy tối đa: ${maxLev}x`);
             }
         }
 
-        // Sắp xếp các cặp theo tên để dễ đọc hơn
         leverageData.sort();
         leverageData.forEach(line => console.log(line));
 
 
         console.log(`\n--- SỐ DƯ TÀI KHOẢN FUTURES CỦA BẠN ---`);
-        // Lấy thông tin tài khoản Futures. Lưu ý đây là futuresAccountInfo.
         const accountInfo = await client.futuresAccountInfo();
 
-        // binance-api-node có tên trường khác một chút so với node-binance-api
         console.log(`Tổng số dư ví (totalWalletBalance): ${accountInfo.totalWalletBalance} USDT`);
         console.log(`Số dư khả dụng (availableBalance): ${accountInfo.availableBalance} USDT`);
         console.log(`Tổng PnL chưa thực hiện (totalUnrealizedProfit): ${accountInfo.totalUnrealizedProfit} USDT`);
@@ -67,8 +64,7 @@ async function getAllFuturesLeverageAndBalance() {
 
     } catch (error) {
         console.error("Có lỗi xảy ra:");
-        // binance-api-node có thể trả về lỗi theo cách khác
-        if (error.code) { // Lỗi từ Binance API
+        if (error.code) {
             console.error("Mã lỗi:", error.code);
             console.error("Thông báo:", error.message);
             if (error.code === -2015) {
@@ -82,5 +78,4 @@ async function getAllFuturesLeverageAndBalance() {
     }
 }
 
-// Gọi hàm chính để bắt đầu lấy thông tin
 getAllFuturesLeverageAndBalance();
