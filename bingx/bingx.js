@@ -68,7 +68,7 @@ const WEB_SERVER_PORT = 3003; // Cổng cho giao diện web
 
 // NEW: Cấu hình TÊN CỦA BOT và LOG FILE. Bạn có thể thay đổi tên này.
 // Tên này sẽ được dùng cho PM2 process và tên file log.
-const BOT_NAME = 'funding_bingx_bot'; // <--- TẠO TÊN RIÊNG CỦA BẠN CHO BOT
+const BOT_NAME = 'bingx'; // <--- TẠO TÊN RIÊNG CỦA BẠN CHO BOT
 const BOT_LOG_FILE = path.join(__dirname, `${BOT_NAME}-out.log`); // Log file sẽ nằm cùng thư mục với script
 // const BOT_ERR_LOG_FILE = path.join(__dirname, `${BOT_NAME}-err.log`); // File log lỗi (tùy chọn)
 
