@@ -13,31 +13,24 @@ if (!API_KEY || !SECRET_KEY) {
     process.exit(1); // Thoát chương trình nếu thiếu khóa
 }
 
-// ... (các import và API_KEY, SECRET_KEY giữ nguyên)
-
 // --- KHẮC PHỤC LỖI QUAN TRỌNG TẠI ĐÂY ---
-// Khởi tạo client Binance, chỉ định rõ là Futures
-const binance = new Binance().futures().options({ // THAY ĐỔI Ở ĐÂY
-    apiKey: API_KEY,
-    apiSecret: SECRET_KEY,
-    useServerTime: true, // Đồng bộ thời gian với server Binance để tránh lỗi timestamp
+// Khởi tạo client Binance, chỉ định rõ là Futures API
+// Sử dụng .futures().options() và truyền APIKEY/APISECRET (viết HOA)
+const binance = new Binance().futures().options({
+    APIKEY: API_KEY,      // KEY: Sử dụng APIKEY (viết HOA)
+    APISECRET: SECRET_KEY, // KEY: Sử dụng APISECRET (viết HOA)
+    useServerTime: true,  // Đồng bộ thời gian với server Binance để tránh lỗi timestamp
     // verbose: true,      // Bỏ ghi log chi tiết nếu không cần, hoặc bật lên để debug
-    family: 4,          // Tùy chọn cho IPv4 nếu bạn gặp vấn đề kết nối
-    // Không cần chỉ định urls.base ở đây nữa, vì .futures() đã lo rồi
-});
-
-// ... (phần còn lại của code giữ nguyên)
-          // Tùy chọn cho IPv4 nếu bạn gặp vấn đề kết nối
-    urls: {
-        base: 'https://fapi.binance.com/fapi/v1/', // Đây là URL chính xác cho API Futures của Binance
-    
+    family: 4,            // Tùy chọn cho IPv4 nếu bạn gặp vấn đề kết nối
+    // Khi dùng .futures(), không cần chỉ định urls.base nữa, nó tự động trỏ đến Futures API
 });
 
 async function getAllFuturesLeverageAndBalance() {
     try {
+        // --- LẤY ĐÒN BẨY TỐI ĐA CỦA TẤT CẢ CÁC CẶP GIAO DỊCH FUTURES ---
         console.log("\n--- THÔNG TIN ĐÒN BẨY TỐI ĐA CỦA CÁC CẶP GIAO DỊCH FUTURES ---");
-
-        // Lấy thông tin trao đổi để tìm max leverage cho tất cả các symbol
+        
+        // Gọi API Futures Exchange Information
         const exchangeInfo = await binance.futuresExchangeInfo();
 
         let leverageData = [];
@@ -63,6 +56,8 @@ async function getAllFuturesLeverageAndBalance() {
 
         // --- LẤY SỐ DƯ TÀI KHOẢN FUTURES CỦA BẠN ---
         console.log(`\n--- SỐ DƯ TÀI KHOẢN FUTURES CỦA BẠN ---`);
+        
+        // Gọi API Futures Account Information
         const accountInfo = await binance.futuresAccount();
 
         // Hiển thị tổng số dư và số dư khả dụng
