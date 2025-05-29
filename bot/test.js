@@ -1,14 +1,16 @@
 import express from 'express';
 import crypto from 'crypto';
+import dotenv from 'dotenv';
+
+dotenv.config(); // Tải biến môi trường từ .env
 
 const app = express();
 const port = 3333;
 
-// ==== Binance API Key/Secret (GIỮ BÍ MẬT) ====
-const APIKEY = 'cZ1Y2O0kggVEggEaPvhFcYQHS5b1EsT2OWZb8zdY9C0jGqNROvXRZHTJjnQ7OG4Q';
-const APISECRET = 'oU6pZFHgEvbpD9NmFXp5ZVnYFMQ7EIkBiz88aTzvmC3SpT9nEf4fcDf0pEnFzoTc';
+const APIKEY = process.env.BINANCE_API_KEY;
+const APISECRET = process.env.BINANCE_API_SECRET;
 
-// ==== HMAC SHA256 ký ====
+// ==== Ký HMAC SHA256 ====
 function sign(queryString) {
   return crypto.createHmac('sha256', APISECRET).update(queryString).digest('hex');
 }
@@ -20,15 +22,14 @@ async function getServerTime() {
   const text = await res.text();
 
   try {
-    const data = JSON.parse(text);
-    return data.serverTime;
+    return JSON.parse(text).serverTime;
   } catch (err) {
-    console.error("Không phải JSON, trả về:", text);
+    console.error("Không thể parse JSON, có thể bị trả về HTML:", text);
     throw err;
   }
 }
 
-// ==== Gọi API Binance có ký ====
+// ==== Gọi API Binance đã ký ====
 async function binanceSignedRequest(endpoint, params = {}) {
   const timestamp = await getServerTime();
   const query = new URLSearchParams({ ...params, timestamp }).toString();
@@ -39,15 +40,17 @@ async function binanceSignedRequest(endpoint, params = {}) {
     headers: { 'X-MBX-APIKEY': APIKEY }
   });
 
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`Binance API error: ${res.status} ${text}`);
-  }
+  const text = await res.text();
 
-  return res.json();
+  try {
+    return JSON.parse(text);
+  } catch (err) {
+    console.error("Phản hồi không phải JSON:", text);
+    throw new Error(`Lỗi API Binance: ${res.status} - ${text}`);
+  }
 }
 
-// ==== API endpoint lấy leverage các cặp USDT-M ====
+// ==== Lấy leverage các cặp USDT-M ====
 app.get('/api/leverage', async (req, res) => {
   try {
     const data = await binanceSignedRequest('/fapi/v1/leverageBracket');
@@ -61,6 +64,16 @@ app.get('/api/leverage', async (req, res) => {
   }
 });
 
+// ==== Endpoint test server time ====
+app.get('/api/time', async (req, res) => {
+  try {
+    const serverTime = await getServerTime();
+    res.json({ serverTime });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.listen(port, () => {
-  console.log(`Server running at http://localhost:${port}`);
+  console.log(`✅ Server running at http://localhost:${port}`);
 });
