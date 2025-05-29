@@ -1,3 +1,4 @@
+
 import https from 'https';
 import crypto from 'crypto';
 import express from 'express';
@@ -56,7 +57,7 @@ const TAKE_PROFIT_PERCENTAGES = {
     125: 1.25,
 };
 
-const MIN_FUNDING_RATE_THRESHOLD = -0.0004; // Ngưỡng funding rate âm tối thiểu để xem xét (đã điều chỉnh: -0.04%)
+const MIN_FUNDING_RATE_THRESHOLD = -0.0002; // Ngưỡng funding rate âm tối thiểu để xem xét (đã điều chỉnh: -0.04%)
 const MAX_POSITION_LIFETIME_SECONDS = 180; // Thời gian tối đa giữ một vị thế (180 giây = 3 phút)
 
 // Thời gian trước giờ funding mà bot sẽ xem xét mở lệnh (đơn vị: phút)
