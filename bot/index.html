@@ -59,21 +59,26 @@
       width: 95%;
       max-width: 900px;
       overflow-y: auto;
-      overflow-x: hidden;
+      overflow-x: hidden; /* Chắc chắn ẩn cuộn ngang */
       background: #111;
       padding: 15px;
-      font-size: 0.5rem;
+      font-size: 0.3rem; /* Kích thước chữ như bạn muốn */
       border: 1px solid #333;
       margin-bottom: 20px;
       font-family: 'Courier New', Courier, monospace;
       box-sizing: border-box;
-      white-space: pre-wrap;
-      word-break: break-all;
+      white-space: pre-wrap; /* Giữ định dạng, nhưng cho phép xuống dòng */
+      word-break: break-all; /* Ngắt từ khi cần để không tràn */
+      overflow-wrap: break-word; /* Cách mới hơn để ngắt từ dài */
       color: #fff;
     }
     #log pre {
         margin: 0;
         line-height: 1.4;
+        /* Các thuộc tính này thừa nếu đã đặt trên #log, nhưng giữ lại để đảm bảo */
+        white-space: pre-wrap;
+        word-break: break-all;
+        overflow-wrap: break-word;
     }
 
     .button-row {
@@ -127,7 +132,7 @@
     @media (max-width: 768px) {
       #top { font-size: 10vw; margin-bottom: 15px; }
       .status-bar { font-size: 1rem; padding: 8px 10px; }
-      #log { font-size: 0.5rem; padding: 10px; height: 35vh; }
+      #log { font-size: 0.8rem; padding: 10px; height: 35vh; }
       button { font-size: 1.2rem; padding: 10px 15px; min-width: unset; }
       .button-row { flex-direction: column; gap: 10px; }
     }
@@ -135,7 +140,7 @@
     @media (max-width: 480px) {
         #top { font-size: 12vw; }
         .status-bar { font-size: 0.9rem; }
-        #log { font-size: 0.5rem; height: 30vh; padding: 8px; }
+        #log { font-size: 0.8rem; height: 30vh; padding: 8px; }
         button { font-size: 1rem; padding: 8px 12px; }
         .copyright { font-size: 0.8rem; }
     }
@@ -157,7 +162,6 @@
   <div class="copyright">&copy; 2025 TunggBeoo. All rights reserved.</div>
 
   <script>
-    // console.log("Script loaded: TunggBeoo bot interface JS."); // Đã xóa dòng này
     const logDiv = document.getElementById('log');
     const statusBar = document.getElementById('statusBar');
 
@@ -209,7 +213,7 @@
             fetchLogs();
         } catch (error) {
             alert('Lỗi khi gửi lệnh khởi động bot: ' + error.message);
-            console.error('Lỗi chạy bot:', error);
+            console.error('Lỗi khi gửi lệnh khởi động bot:', error);
         }
     }
 
@@ -222,7 +226,7 @@
             fetchLogs();
         } catch (error) {
             alert('Lỗi khi gửi lệnh dừng bot: ' + error.message);
-            console.error('Lỗi dừng bot:', error);
+            console.error('Lỗi khi gửi lệnh dừng bot:', error);
         }
     }
 
