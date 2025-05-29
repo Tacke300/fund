@@ -13,8 +13,8 @@ const __dirname = dirname(__filename);
 // === API KEY & SECRET ===
 // !!! QUAN TRỌNG: DÁN API Key và Secret Key THẬT của bạn vào đây. !!!
 // Đảm bảo không có khoảng trắng thừa khi copy/paste.
-const API_KEY = 'DÁN_API_KEY_CỦA_BẠN_VÀO_ĐÂY'.trim();
-const SECRET_KEY = 'DÁN_SECRET_KEY_CỦA_BẠN_VÀO_ĐÂY'.trim();
+const API_KEY = 'cZ1Y2O0kggVEggEaPvhFcYQHS5b1EsT2OWZb8zdY9C0jGqNROvXRZHTJjnQ7OG4Q'.trim();
+const SECRET_KEY = 'oU6pZFHgEvbpD9NmFXp5ZVnYFMQ7EIkBiz88aTzvmC3SpT9nEf4fcDf0pEnFzoTc'.trim();
 
 // === BASE URL CỦA BINANCE FUTURES API ===
 const BASE_HOST = 'fapi.binance.com';
@@ -660,11 +660,12 @@ async function runTradingLogic(isFundingScanFlag) {
     }
 
     // Nếu không phải là phiên quét cho giờ funding, chỉ ngủ và lên lịch lại
-    if (!isFundingScanFlag) {
-        addLog('>>> Hiện tại không phải là phiên quét chuẩn bị cho giờ trả Funding. Bot sẽ ngủ tới phiên quét Funding tiếp theo.');
-        if(botRunning) scheduleNextMainCycle();
-        return;
-    }
+    // (Đã thay đổi logic để quét mỗi giờ, nên đoạn này không còn cần ưu tiên Funding Hour nữa)
+    // if (!isFundingScanFlag) {
+    //     addLog('>>> Hiện tại không phải là phiên quét chuẩn bị cho giờ trả Funding. Bot sẽ ngủ tới phiên quét Funding tiếp theo.');
+    //     if(botRunning) scheduleNextMainCycle();
+    //     return;
+    // }
 
     addLog('>>> Đang quét tìm symbol có funding rate âm...');
     try {
@@ -803,6 +804,7 @@ async function scheduleNextMainCycle() {
     }
 
     if (currentOpenPosition) {
+        addLog('>>> Có vị thế đang mở. Bot sẽ không lên lịch quét mới mà chờ đóng vị thế hiện tại.');
         return; // Managed by manageOpenPosition
     }
     
@@ -811,49 +813,24 @@ async function scheduleNextMainCycle() {
                                    now.getUTCHours(), SCAN_MINUTE_UTC, TARGET_SECOND_UTC, TARGET_MILLISECOND_UTC);
     
     // Nếu thời gian hiện tại đã qua phút quét (XX:58), chuyển sang giờ tiếp theo để quét
-    if (now.getUTCMinutes() >= SCAN_MINUTE_UTC) {
+    if (now.getUTCMinutes() >= SCAN_MINUTE_UTC || (now.getUTCMinutes() === SCAN_MINUTE_UTC && now.getUTCSeconds() > TARGET_SECOND_UTC)) {
         nextScanMoment.setUTCHours(nextScanMoment.getUTCHours() + 1);
     }
     // Đảm bảo giây và mili giây được đặt lại cho thời điểm quét
-    nextScanMoment.setUTCSeconds(0);
-    nextScanMoment.setUTCMilliseconds(0);
+    nextScanMoment.setUTCSeconds(TARGET_SECOND_UTC);
+    nextScanMoment.setUTCMilliseconds(TARGET_MILLISECOND_UTC);
 
-    let nextScheduledRunTime = nextScanMoment;
-    let isFundingScan = false;
-    let targetOrderOpenHourUTC = (nextScanMoment.getUTCHours() + 1) % 24; // Giờ mà lệnh sẽ được mở (ví dụ: quét 07:58 -> mở 08:00)
-
-    // Kiểm tra xem giờ mà lệnh sẽ được mở có phải là giờ Funding không
-    if (FUNDING_HOURS_UTC.includes(targetOrderOpenHourUTC)) {
-        isFundingScan = true;
-        addLog(`>>> Lịch trình: Phiên quét sắp tới (${formatTimeUTC7(nextScanMoment)}) là để chuẩn bị cho giờ Funding **${targetOrderOpenHourUTC}:00 UTC**.`);
+    // Xác định xem phiên quét này có phải là phiên funding chính hay không
+    let isFundingScan = FUNDING_HOURS_UTC.includes(nextScanMoment.getUTCHours());
+    
+    // In log tùy thuộc vào việc đây có phải là giờ funding hay không
+    if (isFundingScan) {
+        addLog(`>>> Lịch trình: Phiên quét sắp tới vào **${formatTimeUTC7(nextScanMoment)}** sẽ tập trung cho giờ Funding **${nextScanMoment.getUTCHours()}:00 UTC**.`);
     } else {
-        // Nếu không phải giờ Funding, tìm giờ Funding kế tiếp
-        addLog(`>>> Lịch trình: Phiên quét ${formatTimeUTC7(nextScanMoment)} không phải cho giờ Funding. Tìm phiên quét Funding kế tiếp.`);
-        isFundingScan = false;
-        let foundNextFundingScan = false;
-        let tempScanTime = new Date(nextScanMoment.getTime()); // Bắt đầu từ thời gian quét được tính hiện tại
-
-        while (!foundNextFundingScan) {
-            tempScanTime.setUTCHours(tempScanTime.getUTCHours() + 1); // Kiểm tra giờ tiếp theo
-            tempScanTime.setUTCMinutes(SCAN_MINUTE_UTC);
-            tempScanTime.setUTCSeconds(0);
-            tempScanTime.setUTCMilliseconds(0);
-
-            let potentialOrderOpenHourForTemp = (tempScanTime.getUTCHours() + 1) % 24;
-            if (FUNDING_HOURS_UTC.includes(potentialOrderOpenHourForTemp)) {
-                foundNextFundingScan = true;
-                nextScheduledRunTime = tempScanTime;
-                targetOrderOpenHourUTC = potentialOrderOpenHourForTemp;
-            }
-            if (tempScanTime.getTime() > now.getTime() + (24 * 60 * 60 * 1000 * 2)) { // Giới hạn tìm kiếm trong 2 ngày
-                addLog('⚠️ Không tìm thấy giờ Funding trong 2 ngày tới. Vui lòng kiểm tra lại cấu hình.');
-                break; // Thoát vòng lặp để tránh vòng lặp vô hạn
-            }
-        }
-        addLog(`>>> Bot sẽ ngủ tới phiên quét Funding tiếp theo vào: **${formatTimeUTC7(nextScheduledRunTime)}** (để mở lệnh vào giờ Funding **${targetOrderOpenHourUTC}:00 UTC**).`);
+        addLog(`>>> Lịch trình: Bot sẽ quét vào **${formatTimeUTC7(nextScanMoment)}** (không phải giờ Funding chính, nhưng vẫn quét để tìm cơ hội).`);
     }
     
-    const delayMs = nextScheduledRunTime.getTime() - now.getTime();
+    const delayMs = nextScanMoment.getTime() - now.getTime();
 
     if (delayMs < 0) { // Trường hợp đặc biệt nếu tính toán bị âm (hiếm khi xảy ra với logic trên)
         addLog(`⚠️ [Lỗi Lịch trình] Thời gian chờ âm: ${delayMs} ms. Đang điều chỉnh lại.`);
@@ -862,7 +839,7 @@ async function scheduleNextMainCycle() {
         return;
     }
 
-    addLog(`>>> Bot sẽ chạy logic quét vào lúc: ${formatTimeUTC7(nextScheduledRunTime)}.`);
+    addLog(`>>> Bot sẽ chạy logic quét vào lúc: ${formatTimeUTC7(nextScanMoment)}. Thời gian chờ: ${Math.round(delayMs / 1000)} giây.`);
     
     nextScheduledTimeout = setTimeout(async () => {
         if(botRunning) { // Chỉ chạy nếu bot vẫn đang hoạt động
