@@ -1,79 +1,46 @@
-import express from 'express';
+import axios from 'axios';
 import crypto from 'crypto';
 import dotenv from 'dotenv';
 
-dotenv.config(); // Tải biến môi trường từ .env
+dotenv.config();
 
-const app = express();
-const port = 3334;
+const apiKey = process.env.BINANCE_API_KEY;
+const apiSecret = process.env.BINANCE_API_SECRET;
 
-const APIKEY = process.env.BINANCE_API_KEY;
-const APISECRET = process.env.BINANCE_API_SECRET;
-
-// ==== Ký HMAC SHA256 ====
-function sign(queryString) {
-  return crypto.createHmac('sha256', APISECRET).update(queryString).digest('hex');
+if (!apiKey || !apiSecret) {
+  console.error('❌ Missing Binance API_KEY or API_SECRET in .env');
+  process.exit(1);
 }
 
-// ==== Lấy server time từ Binance ====
-async function getServerTime() {
-  const url = 'https://fapi.binance.com/fapi/v1/time';
-  const res = await fetch(url);
-  const text = await res.text();
+const BASE_URL = 'https://fapi.binance.com'; // Binance Futures mainnet
 
-  try {
-    return JSON.parse(text).serverTime;
-  } catch (err) {
-    console.error("Không thể parse JSON, có thể bị trả về HTML:", text);
-    throw err;
-  }
+// Hàm tạo query string + ký HMAC SHA256
+function sign(queryString, secret) {
+  return crypto.createHmac('sha256', secret).update(queryString).digest('hex');
 }
 
-// ==== Gọi API Binance đã ký ====
-async function binanceSignedRequest(endpoint, params = {}) {
-  const timestamp = await getServerTime();
-  const query = new URLSearchParams({ ...params, timestamp }).toString();
-  const signature = sign(query);
-  const url = `https://fapi.binance.com${endpoint}?${query}&signature=${signature}`;
-
-  const res = await fetch(url, {
-    headers: { 'X-MBX-APIKEY': APIKEY }
-  });
-
-  const text = await res.text();
-
+// Lấy account info (balance, positions...)
+async function getAccountInfo() {
   try {
-    return JSON.parse(text);
-  } catch (err) {
-    console.error("Phản hồi không phải JSON:", text);
-    throw new Error(`Lỗi API Binance: ${res.status} - ${text}`);
+    const timestamp = Date.now();
+    const query = `timestamp=${timestamp}`;
+    const signature = sign(query, apiSecret);
+    const url = `${BASE_URL}/fapi/v2/account?${query}&signature=${signature}`;
+
+    const headers = {
+      'X-MBX-APIKEY': apiKey,
+    };
+
+    const res = await axios.get(url, { headers });
+    console.log('✅ Binance Futures Account Info:', res.data);
+  } catch (error) {
+    console.error('❌ Error getting account info:');
+    if (error.response) {
+      console.error(error.response.status, error.response.data);
+    } else {
+      console.error(error.message);
+    }
   }
 }
 
-// ==== Lấy leverage các cặp USDT-M ====
-app.get('/api/leverage', async (req, res) => {
-  try {
-    const data = await binanceSignedRequest('/fapi/v1/leverageBracket');
-    const result = data.map(item => {
-      const maxLev = Math.max(...item.brackets.map(b => b.initialLeverage));
-      return { symbol: item.symbol, maxLeverage: maxLev };
-    });
-    res.json(result);
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
-// ==== Endpoint test server time ====
-app.get('/api/time', async (req, res) => {
-  try {
-    const serverTime = await getServerTime();
-    res.json({ serverTime });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
-app.listen(port, () => {
-  console.log(`✅ Server running at http://localhost:${port}`);
-});
+getAccountInfo();
