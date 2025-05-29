@@ -286,8 +286,8 @@ async function getCurrentPrice(symbol) {
 }
 
 // === Cấu hình Bot ===
-const MIN_USDT_BALANCE_TO_OPEN = 1.0; // Số dư USDT tối thiểu để mở lệnh (ví dụ: 1 USDT)
-const CAPITAL_PERCENTAGE_PER_TRADE = 0.8; // Phần trăm vốn sử dụng cho mỗi lệnh (ví dụ: 0.8 = 80%)
+const MIN_USDT_BALANCE_TO_OPEN = 0.1; // Số dư USDT tối thiểu để mở lệnh (ví dụ: 1 USDT)
+const CAPITAL_PERCENTAGE_PER_TRADE = 0.5; // Phần trăm vốn sử dụng cho mỗi lệnh (ví dụ: 0.8 = 80%)
 const MIN_FUNDING_RATE_THRESHOLD = -0.0001; // Ngưỡng funding rate âm tối thiểu để xem xét (ví dụ: -0.01% = -0.0001)
 const TP_SL_RISK_PERCENTAGE = 0.005; // 0.5% rủi ro/lợi nhuận trên tổng giá trị vị thế (sau đòn bẩy)
 const POSITION_CHECK_INTERVAL_SECONDS = 10; // Khoảng thời gian kiểm tra vị thế và TP/SL (tính bằng giây)
