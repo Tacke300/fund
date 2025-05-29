@@ -2,7 +2,7 @@
 import express from 'express';
 import https from 'https';
 import crypto from 'crypto';
-import fetch from 'node-fetch'; // Giữ lại fetch nếu có các API khác cần, nhưng các hàm callSignedAPI/callPublicAPI sẽ dùng https module.
+import fetch from 'node-fetch'; 
 import path from 'path';
 import cron from 'node-cron';
 
@@ -16,7 +16,6 @@ const app = express();
 const port = 3000;
 
 // === API KEY & SECRET ===
-// GIỮ NGUYÊN API KEY VÀ SECRET CỦA BẠN NHƯ BẠN ĐÃ CUNG CẤP
 const API_KEY = 'cZ1Y2O0kggVEggEaPvhFcYQHS5b1EsT2OWZb8zdY9C0jGqNROvXRZHTJjnQ7OG4Q'.trim(); // Your API Key
 const SECRET_KEY = 'oU6pZFHgEvbpD9NmFXp5ZVnYFMQ7EIkBiz88aTzvmC3SpT9nEf4fccDf0pEnFzoTc'.trim(); // Your API Secret
 
@@ -43,10 +42,11 @@ function addLog(message) {
 
 const delay = ms => new Promise(resolve => setTimeout(ms));
 
-/***************** HÀM KÝ & GỌI API (ĐƯỢC LẤY TỪ TEST.JS CỦA BẠN) *****************/
+/***************** HÀM KÝ & GỌI API (ĐƯỢC GỘP TỪ TEST.JS CỦA BẠN) *****************/
 
 /**
  * Tạo chữ ký HMAC SHA256 cho chuỗi truy vấn.
+ * (Đã gộp từ test.js)
  * @param {string} queryString - Chuỗi truy vấn cần ký.
  * @param {string} apiSecret - Secret Key của API Binance.
  * @returns {string} Chữ ký HMAC SHA256.
@@ -59,6 +59,7 @@ function createSignature(queryString, apiSecret) {
 
 /**
  * Hàm helper để gửi yêu cầu HTTP.
+ * (Đã gộp từ test.js)
  * @param {string} method - Phương thức HTTP (GET, POST).
  * @param {string} hostname - Hostname của API (ví dụ: 'fapi.binance.com').
  * @param {string} fullPath - Đường dẫn đầy đủ của API (ví dụ: '/fapi/v1/account?params=...').
@@ -111,15 +112,16 @@ function makeHttpRequest(method, hostname, fullPath, headers, postData = '') {
 }
 
 /**
- * Gửi yêu cầu GET ĐÃ KÝ tới API Binance Futures.
- * (Hàm này được chuyển đổi từ signedRequest của test.js)
+ * Gửi yêu cầu ĐÃ KÝ tới API Binance Futures.
+ * (Đã gộp và tinh chỉnh từ signedRequest của test.js)
  * @param {string} fullEndpointPath - Đường dẫn đầy đủ của API (ví dụ: '/fapi/v2/account').
+ * @param {string} method - Phương thức HTTP (GET, POST).
  * @param {object} params - Các tham số truy vấn.
  * @returns {Promise<object>} Dữ liệu trả về từ API.
  */
-async function callSignedAPI(fullEndpointPath, method = 'GET', params = {}) { // Thêm method để linh hoạt hơn
-    const recvWindow = 5000; // Thời gian hiệu lực của yêu cầu (5000ms = 5 giây) - Từ test.js
-    const timestamp = Date.now() + serverTimeOffset; // Lấy timestamp hiện tại của máy cục bộ + offset
+async function callSignedAPI(fullEndpointPath, method = 'GET', params = {}) {
+    const recvWindow = 5000; // Từ test.js
+    const timestamp = Date.now() + serverTimeOffset; 
 
     let queryString = Object.keys(params)
                             .map(key => `${key}=${params[key]}`)
@@ -137,7 +139,7 @@ async function callSignedAPI(fullEndpointPath, method = 'GET', params = {}) { //
     };
 
     try {
-        const rawData = await makeHttpRequest(method, BASE_HOST, fullPathWithQuery, headers); // Sử dụng method truyền vào
+        const rawData = await makeHttpRequest(method, BASE_HOST, fullPathWithQuery, headers);
         return JSON.parse(rawData);
     } catch (error) {
         addLog("❌ Lỗi khi gửi yêu cầu ký tới Binance API:");
@@ -158,7 +160,7 @@ async function callSignedAPI(fullEndpointPath, method = 'GET', params = {}) { //
 
 /**
  * Gửi yêu cầu GET KHÔNG ký tới API Binance Futures.
- * (Hàm này được chuyển đổi từ publicRequest của test.js)
+ * (Đã gộp và tinh chỉnh từ publicRequest của test.js)
  * @param {string} fullEndpointPath - Đường dẫn đầy đủ của API (ví dụ: '/fapi/v1/exchangeInfo').
  * @param {object} params - Các tham số truy vấn.
  * @returns {Promise<object>} Dữ liệu trả về từ API.
@@ -208,14 +210,13 @@ async function syncServerTime() {
 
 /**
  * Lấy thông tin đòn bẩy cho một symbol cụ thể từ endpoint /fapi/v1/leverageBracket.
- * (Đây là hàm được lấy trực tiếp từ code test.js của bạn)
+ * (Đây là hàm được lấy trực tiếp từ code test.js của bạn và đã được gộp)
  * @param {string} symbol - Tên cặp giao dịch (ví dụ: 'BTCUSDT').
  * @returns {Promise<number|null>} Đòn bẩy tối đa (ví dụ: 125) hoặc null nếu không tìm thấy hoặc lỗi.
  */
 async function getLeverageBracketForSymbol(symbol) {
     try {
         addLog(`[DEBUG getLeverageBracketForSymbol] Đang cố gắng lấy leverageBracket cho ${symbol} theo cách của test.js...`);
-        // Sử dụng callSignedAPI (đã có trong bot) thay vì signedRequest của test.js
         const response = await callSignedAPI('/fapi/v1/leverageBracket', 'GET', { symbol: symbol });
 
         if (response && Array.isArray(response) && response.length > 0 && response[0].brackets && response[0].brackets.length > 0) {
@@ -231,7 +232,7 @@ async function getLeverageBracketForSymbol(symbol) {
             }
         }
         addLog(`[DEBUG getLeverageBracketForSymbol] Không tìm thấy thông tin đòn bẩy hợp lệ cho ${symbol} từ response.`);
-        return null; // Trả về null nếu không tìm thấy
+        return null;
     } catch (error) {
         addLog(`❌ Lỗi khi lấy getLeverageBracketForSymbol cho ${symbol}: ${error.msg || error.message}`);
         return null;
@@ -347,7 +348,7 @@ async function getExchangeInfo() {
   }
 }
 
-// Hàm kết hợp để lấy tất cả filters và maxLeverage (chức năng tương tự như trước)
+// Hàm kết hợp để lấy tất cả filters và maxLeverage
 async function getSymbolFiltersAndMaxLeverage(symbol) {
   const filters = await getExchangeInfo();
 
