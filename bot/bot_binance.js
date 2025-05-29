@@ -285,14 +285,26 @@ async function getExchangeInfo() {
     return null;
   }
 }
-
 // Hàm mới để lấy đòn bẩy tối đa từ API leverageBracket
 async function getLeverageBracket(symbol) {
   try {
     const url = `https://${BASE_URL}/fapi/v1/leverageBracket?symbol=${symbol}`;
-    const res = await fetch(url);
+    // THÊM DÒNG LOG NÀY VÀO
+    addLog(`[DEBUG getLeverageBracket] Đang cố gắng lấy leverageBracket cho ${symbol} từ URL: ${url}`);
+    
+    // Ở đây, leverageBracket là một public endpoint, không cần ký. 
+    // Tuy nhiên, lỗi -2014 cho thấy nó đang được callSignedAPI xử lý, 
+    // HOẶC, nếu bạn thay đổi nó thành fetch trực tiếp (như dưới đây), 
+    // lỗi -2014 vẫn có thể xảy ra nếu nó yêu cầu quyền Futures đặc biệt.
+    
+    // Hiện tại, code của bạn đang gọi nó bằng fetch TRỰC TIẾP, KHÔNG THÔNG QUA callSignedAPI.
+    // Điều này càng khẳng định vấn đề là quyền API key hoặc IP.
+    const res = await fetch(url); // Đây là fetch trực tiếp, không phải callSignedAPI
+
     if (!res.ok) {
       const errorText = await res.text();
+      // Debug: Log toàn bộ phản hồi lỗi nếu có
+      addLog(`[DEBUG getLeverageBracket ERROR] Phản hồi lỗi: ${errorText}`);
       throw new Error(`Failed to get leverageBracket for ${symbol}: ${res.status} - ${errorText}`);
     }
     const data = await res.json();
@@ -309,6 +321,7 @@ async function getLeverageBracket(symbol) {
     return null;
   }
 }
+
 
 // Hàm kết hợp để lấy tất cả filters và maxLeverage
 async function getMaxLeverageAndFilters(symbol) {
