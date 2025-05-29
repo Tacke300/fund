@@ -116,7 +116,9 @@ server.listen(PORT, () => {
 
 
 // Sửa lỗi: Hàm delay giờ nhận một callback để setTimeout hoạt động đúng
-const delay = ms => new Promise(resolve => setTimeout(() => resolve(), ms));
+// Đã sửa lỗi TypeError [ERR_INVALID_ARG_TYPE]
+const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+
 
 // Hàm tạo chữ ký HMAC SHA256
 function createSignature(queryString, apiSecret) {
