@@ -14,22 +14,26 @@ if (!API_KEY || !SECRET_KEY) {
 }
 
 // --- KHẮC PHỤC LỖI QUAN TRỌNG TẠI ĐÂY ---
-// Khởi tạo client Binance, chỉ định rõ là Futures API
-// Sử dụng .futures().options() và truyền APIKEY/APISECRET (viết HOA)
-const binance = new Binance().futures().options({
-    APIKEY: API_KEY,      // KEY: Sử dụng APIKEY (viết HOA)
-    APISECRET: SECRET_KEY, // KEY: Sử dụng APISECRET (viết HOA)
+// Khởi tạo client Binance, truyền trực tiếp đối tượng options vào hàm tạo.
+// Đây là cách an toàn nhất và tương thích rộng rãi.
+const binance = new Binance({
+    apiKey: API_KEY,      // Đảm bảo là apiKey (viết thường)
+    apiSecret: SECRET_KEY, // Đảm bảo là apiSecret (viết thường)
     useServerTime: true,  // Đồng bộ thời gian với server Binance để tránh lỗi timestamp
     // verbose: true,      // Bỏ ghi log chi tiết nếu không cần, hoặc bật lên để debug
     family: 4,            // Tùy chọn cho IPv4 nếu bạn gặp vấn đề kết nối
-    // Khi dùng .futures(), không cần chỉ định urls.base nữa, nó tự động trỏ đến Futures API
+    urls: {
+        // Đây là URL chính xác cho API Futures của Binance.
+        // Điều này buộc thư viện gọi API Futures, không phải Spot.
+        base: 'https://fapi.binance.com/fapi/v1/',
+    }
 });
 
 async function getAllFuturesLeverageAndBalance() {
     try {
         // --- LẤY ĐÒN BẨY TỐI ĐA CỦA TẤT CẢ CÁC CẶP GIAO DỊCH FUTURES ---
         console.log("\n--- THÔNG TIN ĐÒN BẨY TỐI ĐA CỦA CÁC CẶP GIAO DỊCH FUTURES ---");
-        
+
         // Gọi API Futures Exchange Information
         const exchangeInfo = await binance.futuresExchangeInfo();
 
@@ -56,7 +60,7 @@ async function getAllFuturesLeverageAndBalance() {
 
         // --- LẤY SỐ DƯ TÀI KHOẢN FUTURES CỦA BẠN ---
         console.log(`\n--- SỐ DƯ TÀI KHOẢN FUTURES CỦA BẠN ---`);
-        
+
         // Gọi API Futures Account Information
         const accountInfo = await binance.futuresAccount();
 
