@@ -170,10 +170,11 @@ async function getAllFuturesLeverageAndBalance() {
             if (s.status === 'TRADING') {
                 let maxLev = 'N/A';
                 // Kiểm tra kỹ cấu trúc của leverageBracket
-                if (s.leverageBracket && Array.isArray(s.leverageBracket) && s.leverageBracket.length > 0) {
-                    // Lấy maxInitialLeverage từ bracket đầu tiên (thường là mặc định cho đòn bẩy cao nhất)
-                    maxLev = s.leverageBracket[0].maxInitialLeverage;
-                }
+                            if (s.leverageBracket && Array.isArray(s.leverageBracket) && s.leverageBracket.length > 0) {
+                // Lấy maxInitialLeverage từ bracket đầu tiên (thường là mặc định cho đòn bẩy cao nhất)
+                maxLev = s.leverageBracket[0].maxInitialLeverage;
+            }
+
                 leverageData.push(`  - Cặp: ${s.symbol}, Đòn bẩy tối đa: ${maxLev}x`);
             }
         }
