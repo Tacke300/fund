@@ -8,10 +8,8 @@ const API_KEY = "cZ1Y2O0kggVEggEaPvhFcYQHS5b1EsT2OWZb8zdY9C0jGqNROvXRZHTJjnQ7OG4
 // !!! QUAN TRỌNG: THAY THẾ CHUỖI BÊN DƯỚI BẰNG SECRET KEY THẬT CỦA BẠN !!!
 const SECRET_KEY = "oU6pZFHgEvbpD9NmFXp5ZVnYFMQ7EIkBiz88aTzvmC3SpT9nEf4fcDf0pEnFzoTc"; // Ví dụ: "oU6pZFHgEvbpD9NmFXp5ZVnYFMQ7EIkBiz88aTzvmC3SpT9nEf4fccDf0pEnFzoTc";
 
-// Host và Path Base cho Binance Futures API
+// Host cho Binance Futures API
 const BASE_HOST = 'fapi.binance.com';
-// KHÔNG cần BASE_PATH ở đây nữa vì endpoint sẽ là đường dẫn đầy đủ
-// ví dụ: /fapi/v1/exchangeInfo, /fapi/v2/account
 
 // Kiểm tra nhanh để đảm bảo bạn đã thay thế khóa API
 if (API_KEY === "YOUR_BINANCE_API_KEY" || SECRET_KEY === "YOUR_BINANCE_SECRET_KEY") {
@@ -60,12 +58,10 @@ function makeHttpRequest(method, hostname, fullPath, headers) {
                     const errorMsg = `HTTP Error: ${res.statusCode} ${res.statusMessage}`;
                     let errorDetails = { code: res.statusCode, msg: errorMsg };
                     try {
-                        // Cố gắng parse data nếu là JSON
                         const parsedData = JSON.parse(data);
                         errorDetails = { ...errorDetails, ...parsedData };
                     } catch (e) {
-                        // Không parse được, giữ nguyên thông báo lỗi
-                        errorDetails.msg += ` - Raw Response: ${data.substring(0, 200)}...`; // Giới hạn độ dài
+                        errorDetails.msg += ` - Raw Response: ${data.substring(0, 200)}...`;
                     }
                     reject(errorDetails);
                 }
@@ -101,7 +97,7 @@ async function signedRequest(fullEndpointPath, params = {}) {
 
     const headers = {
         'X-MBX-APIKEY': API_KEY,
-        'Content-Type': 'application/json', // Nên có
+        'Content-Type': 'application/json',
     };
 
     try {
@@ -162,16 +158,15 @@ async function getAllFuturesLeverageAndBalance() {
         console.log("\n--- THÔNG TIN ĐÒN BẨY TỐI ĐA CỦA CÁC CẶP GIAO DỊCH FUTURES ---");
 
         // Lấy thông tin trao đổi công khai
-        // Endpoint đúng cho Futures Exchange Info là /fapi/v1/exchangeInfo
         const exchangeInfo = await publicRequest('/fapi/v1/exchangeInfo');
 
         let leverageData = [];
-                        let debugCount = 0; // Biến đếm để chỉ in vài cặp đầu tiên
+        let debugCount = 0; // Biến đếm để chỉ in vài cặp đầu tiên
 
         for (const s of exchangeInfo.symbols) {
             if (s.status === 'TRADING') {
                 // --- DEBUG: In ra cấu trúc dữ liệu cho vài cặp đầu tiên ---
-                if (debugCount < 5) {
+                if (debugCount < 5) { // In ra 5 cặp đầu tiên
                     console.log(`\n--- DEBUG DỮ LIỆU CẶP: ${s.symbol} ---`);
                     console.log(JSON.stringify(s, null, 2)); // In đối tượng s đẹp hơn
                     console.log(`-----------------------------------`);
@@ -181,7 +176,7 @@ async function getAllFuturesLeverageAndBalance() {
 
                 let maxLev = 'N/A';
                 if (s.leverageBracket && Array.isArray(s.leverageBracket) && s.leverageBracket.length > 0) {
-                    // Thử cả hai trường có thể có: initialLeverage và maxInitialLeverage
+                    // Kiểm tra cả initialLeverage và maxInitialLeverage
                     if (s.leverageBracket[0].initialLeverage !== undefined) {
                         maxLev = s.leverageBracket[0].initialLeverage;
                     } else if (s.leverageBracket[0].maxInitialLeverage !== undefined) {
@@ -192,15 +187,12 @@ async function getAllFuturesLeverageAndBalance() {
             }
         }
 
-
-
         leverageData.sort();
         leverageData.forEach(line => console.log(line));
 
 
         console.log(`\n--- SỐ DƯ TÀI KHOẢN FUTURES CỦA BẠN ---`);
         // Lấy thông tin tài khoản Futures (yêu cầu ký)
-        // Endpoint đúng cho Futures Account Info là /fapi/v2/account
         const accountInfo = await signedRequest('/fapi/v2/account');
 
         console.log(`Tổng số dư ví (totalWalletBalance): ${accountInfo.totalWalletBalance} USDT`);
