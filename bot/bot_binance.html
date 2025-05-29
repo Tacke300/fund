@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Bot Binance Design By TunggBeoo</title>
-  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght[700]&display=swap" rel="stylesheet">
   <style>
     body {
       font-family: 'Orbitron', sans-serif;
@@ -42,18 +42,17 @@
         width: 95%;
         max-width: 900px;
         background: #222;
-        color: #00ff00; /* Màu xanh lá cây cho trạng thái */
+        color: #00ff00;
         padding: 10px 15px;
         margin-bottom: 15px;
         border-radius: 5px;
         font-size: 1.1rem;
         text-align: center;
         box-sizing: border-box;
-        white-space: pre-wrap; /* Đảm bảo text dài tự động xuống dòng */
+        white-space: pre-wrap;
         word-wrap: break-word;
-        border: 1px solid #00ff00; /* Thêm border màu xanh lá */
+        border: 1px solid #00ff00;
     }
-
 
     #log {
       height: 40vh;
@@ -65,13 +64,13 @@
       font-size: 1.2rem;
       border: 1px solid #333;
       margin-bottom: 20px;
-      font-family: 'Courier New', Courier, monospace; /* Đổi font sang monospace để log dễ đọc hơn */
+      font-family: 'Courier New', Courier, monospace;
       box-sizing: border-box;
       word-wrap: break-word;
       white-space: pre-wrap;
-      color: #0f0; /* Màu chữ xanh lá cho log */
+      color: #0f0;
     }
-    #log p {
+    #log pre {
         margin: 0;
         line-height: 1.4;
     }
@@ -96,7 +95,7 @@
       flex-grow: 1;
       min-width: 150px;
       box-sizing: border-box;
-      box-shadow: 0 4px 8px rgba(0, 0, 0, 0.4); /* Thêm shadow cho nút */
+      box-shadow: 0 4px 8px rgba(0, 0, 0, 0.4);
     }
 
     .start-btn {
@@ -123,57 +122,22 @@
       padding: 0 10px;
     }
 
-    /* --- MEDIA QUERIES CHO MÀN HÌNH NHỎ HƠN --- */
-
+    /* --- MEDIA QUERIES --- */
     @media (max-width: 768px) {
-      #top {
-        font-size: 10vw;
-        margin-bottom: 15px;
-      }
-
-      .status-bar {
-          font-size: 1rem;
-          padding: 8px 10px;
-      }
-
-      #log {
-        font-size: 1rem;
-        padding: 10px;
-      }
-
-      button {
-        font-size: 1.2rem;
-        padding: 10px 15px;
-        min-width: unset;
-      }
-      
-      .button-row {
-          flex-direction: column;
-          gap: 10px;
-      }
+      #top { font-size: 10vw; margin-bottom: 15px; }
+      .status-bar { font-size: 1rem; padding: 8px 10px; }
+      #log { font-size: 1rem; padding: 10px; height: 35vh; }
+      button { font-size: 1.2rem; padding: 10px 15px; min-width: unset; }
+      .button-row { flex-direction: column; gap: 10px; }
     }
 
     @media (max-width: 480px) {
-        #top {
-            font-size: 12vw;
-        }
-        .status-bar {
-            font-size: 0.9rem;
-        }
-        #log {
-            font-size: 0.9rem;
-            height: 35vh;
-            padding: 8px;
-        }
-        button {
-            font-size: 1rem;
-            padding: 8px 12px;
-        }
-        .copyright {
-            font-size: 0.8rem;
-        }
+        #top { font-size: 12vw; }
+        .status-bar { font-size: 0.9rem; }
+        #log { font-size: 0.9rem; height: 30vh; padding: 8px; }
+        button { font-size: 1rem; padding: 8px 12px; }
+        .copyright { font-size: 0.8rem; }
     }
-
   </style>
 </head>
 <body>
@@ -182,7 +146,7 @@
   <div class="status-bar" id="statusBar">Bot Status: Loading...</div>
 
   <div id="log">
-    <p>Loading logs...</p>
+    <pre>Loading logs...</pre>
   </div>
 
   <div class="button-row">
@@ -197,7 +161,7 @@
 
     // Hàm để lấy log từ server
     function fetchLogs() {
-        fetch('/api/logs')
+        fetch('/api/logs') // API endpoint trong bot_binance.js
             .then(response => {
                 if (!response.ok) {
                     return response.text().then(text => { throw new Error(text) });
@@ -206,20 +170,21 @@
             })
             .then(data => {
                 const isScrolledToBottom = logDiv.scrollHeight - logDiv.clientHeight <= logDiv.scrollTop + 1;
-                logDiv.innerHTML = `<pre>${data}</pre>`;
+                const cleanData = data.replace(/[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g, '');
+                logDiv.innerHTML = `<pre>${cleanData}</pre>`;
                 if (isScrolledToBottom) {
-                    logDiv.scrollTop = logDiv.scrollHeight; // Cuộn xuống cuối nếu người dùng đang ở cuối
+                    logDiv.scrollTop = logDiv.scrollHeight;
                 }
             })
             .catch(error => {
                 console.error('Error fetching logs:', error);
-                logDiv.innerHTML = `<div style="color: red;">Error loading logs: ${error.message || error}. Please check server and log file path.</div>`;
+                logDiv.innerHTML = `<pre style="color: red;">Error loading logs: ${error.message || error}. Check bot server.</pre>`;
             });
     }
 
     // Hàm để lấy trạng thái bot từ server
     function fetchStatus() {
-        fetch('/api/status')
+        fetch('/api/status') // API endpoint trong bot_binance.js
             .then(response => {
                 if (!response.ok) {
                     return response.text().then(text => { throw new Error(text) });
@@ -238,36 +203,34 @@
     // Gửi lệnh khởi động bot
     async function startBot() {
         try {
-            const response = await fetch('/start');
+            const response = await fetch('/start_bot_logic'); // API endpoint trong bot_binance.js
             const message = await response.text();
             alert(message);
-            // Sau khi gửi lệnh, cập nhật trạng thái và log ngay lập tức
-            fetchStatus();
-            fetchLogs();
+            fetchStatus(); // Cập nhật trạng thái ngay lập tức
+            fetchLogs();    // Cập nhật log ngay lập tức
         } catch (error) {
-            alert('Lỗi khi khởi động bot: ' + error.message);
-            console.error('Lỗi khi khởi động bot:', error);
+            alert('Lỗi khi gửi lệnh khởi động bot: ' + error.message);
+            console.error('Lỗi khi gửi lệnh khởi động bot:', error);
         }
     }
 
     // Gửi lệnh dừng bot
     async function stopBot() {
         try {
-            const response = await fetch('/stop');
+            const response = await fetch('/stop_bot_logic'); // API endpoint trong bot_binance.js
             const message = await response.text();
             alert(message);
-            // Sau khi gửi lệnh, cập nhật trạng thái và log ngay lập tức
-            fetchStatus();
-            fetchLogs();
+            fetchStatus(); // Cập nhật trạng thái ngay lập tức
+            fetchLogs();    // Cập nhật log ngay lập tức
         } catch (error) {
-            alert('Lỗi khi dừng bot: ' + error.message);
-            console.error('Lỗi khi dừng bot:', error);
+            alert('Lỗi khi gửi lệnh dừng bot: ' + error.message);
+            console.error('Lỗi khi gửi lệnh dừng bot:', error);
         }
     }
 
-    // Lấy log và trạng thái mỗi 3 giây
+    // Lấy log và trạng thái mỗi vài giây
     setInterval(fetchLogs, 3000);
-    setInterval(fetchStatus, 5000); // Lấy trạng thái ít thường xuyên hơn để giảm tải
+    setInterval(fetchStatus, 5000);
 
     // Lần đầu tải trang, lấy log và trạng thái
     fetchLogs();
