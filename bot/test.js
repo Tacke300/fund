@@ -13,14 +13,21 @@ if (!API_KEY || !SECRET_KEY) {
     process.exit(1); // Thoát chương trình nếu thiếu khóa
 }
 
+// ... (các import và API_KEY, SECRET_KEY giữ nguyên)
+
 // --- KHẮC PHỤC LỖI QUAN TRỌNG TẠI ĐÂY ---
-// Truyền trực tiếp đối tượng options vào hàm tạo Binance
-const binance = new Binance({
+// Khởi tạo client Binance, chỉ định rõ là Futures
+const binance = new Binance().futures().options({ // THAY ĐỔI Ở ĐÂY
     apiKey: API_KEY,
     apiSecret: SECRET_KEY,
     useServerTime: true, // Đồng bộ thời gian với server Binance để tránh lỗi timestamp
     // verbose: true,      // Bỏ ghi log chi tiết nếu không cần, hoặc bật lên để debug
     family: 4,          // Tùy chọn cho IPv4 nếu bạn gặp vấn đề kết nối
+    // Không cần chỉ định urls.base ở đây nữa, vì .futures() đã lo rồi
+});
+
+// ... (phần còn lại của code giữ nguyên)
+          // Tùy chọn cho IPv4 nếu bạn gặp vấn đề kết nối
     urls: {
         base: 'https://fapi.binance.com/fapi/v1/', // Đây là URL chính xác cho API Futures của Binance
     }
