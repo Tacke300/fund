@@ -78,7 +78,7 @@ const ONLY_OPEN_IF_FUNDING_IN_SECONDS = 179; // Ví dụ: chỉ mở nếu còn 
 // Giữ lại logic quét vào phút :58 như yêu cầu ban đầu.
 
 // === Cấu hình Server Web ===
-const WEB_SERVER_PORT = 3000; // Cổng cho giao diện web
+const WEB_SERVER_PORT = 3002; // Cổng cho giao diện web
 // Đường dẫn tới file log của PM2 cho bot này (để web server đọc)
 const BOT_LOG_FILE = '/home/tacke300/.pm2/logs/bot-bingx-out.log'; // Đổi tên log file cho BingX
 const THIS_BOT_PM2_NAME = 'bot_bingx'; // Đổi tên PM2 process cho BingX
