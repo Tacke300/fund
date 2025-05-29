@@ -64,7 +64,7 @@ const FUNDING_WINDOW_MINUTES = 30;
 const ONLY_OPEN_IF_FUNDING_IN_SECONDS = 179; 
 
 // === Cấu hình Server Web ===
-const WEB_SERVER_PORT = 3000; // Cổng cho giao diện web
+const WEB_SERVER_PORT = 3003; // Cổng cho giao diện web
 
 // NEW: Cấu hình TÊN CỦA BOT và LOG FILE. Bạn có thể thay đổi tên này.
 // Tên này sẽ được dùng cho PM2 process và tên file log.
