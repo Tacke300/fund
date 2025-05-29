@@ -48,16 +48,16 @@ const STOP_LOSS_PERCENTAGE = 0.70; // SL cố định 70% của vốn đầu tư
 // Bảng ánh xạ maxLeverage với Take Profit percentage
 // Đảm bảo các giá trị đòn bẩy được định nghĩa ở đây.
 const TAKE_PROFIT_PERCENTAGES = {
-    20: 0.20,
-    25: 0.25,
-    50: 0.50,
-    75: 0.75,
-    100: 1.00,
-    125: 1.25,
+    20: 0.23,
+    25: 0.28,
+    50: 0.56,
+    75: 0.86,
+    100: 1.23,
+    125: 1.38,
 };
 
 // ĐÃ SỬA: Ngưỡng funding rate âm tối thiểu để xem xét (từ -0.0002 xuống -0.002)
-const MIN_FUNDING_RATE_THRESHOLD = -0.002; 
+const MIN_FUNDING_RATE_THRESHOLD = -0.004404; 
 const MAX_POSITION_LIFETIME_SECONDS = 180; // Thời gian tối đa giữ một vị thế (180 giây = 3 phút)
 
 // Thời gian trước giờ funding mà bot sẽ xem xét mở lệnh (đơn vị: phút)
@@ -66,7 +66,7 @@ const FUNDING_WINDOW_MINUTES = 30;
 
 // Ngưỡng thời gian còn lại (tính bằng giây) để bot coi là "sắp trả funding" và tiến hành mở lệnh.
 // Chỉ mở lệnh nếu nextFundingTime của đồng coin được chọn còn lại <= X giây.
-const ONLY_OPEN_IF_FUNDING_IN_SECONDS = 120; // Ví dụ: chỉ mở nếu còn lại <= 2 phút
+const ONLY_OPEN_IF_FUNDING_IN_SECONDS = 179; // Ví dụ: chỉ mở nếu còn lại <= 2 phút
 
 // Cấu hình thời gian quét bot
 // Bot sẽ quét định kỳ, không cố định vào phút :58 nữa.
