@@ -92,32 +92,25 @@
         status.innerText = `Tìm thấy ${symbols.length} cặp USDT. Đang tải thông tin...`;
 
         for (const [index, symbol] of symbols.entries()) {
-          try {
-            const data = await binanceSignedRequest('/fapi/v1/leverageBracket', { symbol });
-            const brackets = data[0]?.brackets || [];
-            const max = brackets.reduce((a, b) => (+b.initialLeverage > +a.initialLeverage ? b : a), brackets[0]);
-            const row = document.createElement('tr');
-            row.innerHTML = `
-              <td>${symbol}</td>
-              <td>${max.notionalCap}</td>
-              <td>${max.initialLeverage}</td>
-            `;
-            tbody.appendChild(row);
-          } catch (err) {
-            console.warn(`Lỗi symbol ${symbol}: ${err.message}`);
-          }
+  try {
+    const data = await binanceSignedRequest('/fapi/v1/leverageBracket', { symbol });
+    const brackets = data[0]?.brackets || [];
+    const max = brackets.reduce((a, b) => (+b.initialLeverage > +a.initialLeverage ? b : a), brackets[0]);
+    const row = document.createElement('tr');
+    row.innerHTML = `
+      <td>${symbol}</td>
+      <td>${max.notionalCap}</td>
+      <td>${max.initialLeverage}</td>
+    `;
+    tbody.appendChild(row);
+    status.innerText = `Đang tải ${index + 1}/${symbols.length}: ${symbol}`;
+  } catch (err) {
+    console.warn(`Lỗi symbol ${symbol}: ${err.message}`);
+  }
 
-          await new Promise(r => setTimeout(r, 50)); // chống bị rate limit
-        }
-
-        status.style.display = 'none';
-        table.style.display = 'table';
-
-      } catch (e) {
-        status.innerText = 'Lỗi khi tải dữ liệu: ' + e.message;
-      }
-    }
-
+  // Delay an toàn 250ms để không bị chặn
+  await new Promise(r => setTimeout(r, 250));
+}
     fetchAndDisplayLeverage();
   </script>
 </body>
