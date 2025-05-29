@@ -1,11 +1,19 @@
 import https from 'https';
 import crypto from 'crypto';
+import express from 'express'; // Import express
+import { exec } from 'child_process'; // Import exec để chạy lệnh shell
+import fs from 'fs'; // Import fs để đọc file
+import path from 'path'; // Import path để xử lý đường dẫn
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 // === API KEY & SECRET ===
 // !!! QUAN TRỌNG: DÁN API Key và Secret Key THẬT của bạn vào đây. !!!
 // Đảm bảo không có khoảng trắng thừa khi copy/paste.
 const API_KEY = 'cZ1Y2O0kggVEggEaPvhFcYQHS5b1EsT2OWZb8zdY9C0jGqNROvXRZHTJjnQ7OG4Q'.trim(); // Thay thế bằng API Key của bạn
-const SECRET_KEY = 'oU6pZFHgEvbpD9NmFXp5ZVnYFMQ7EIkBiz88aTzvmC3SpT9nEf4fcDf0pEnFzoTc'.trim(); // Thay thế bằng Secret Key của bạn
+const SECRET_KEY = 'oU6pZFHgEvbpD9NmFXp5ZVnYFMQ7EIkBiz88TzvmC3SpT9nEf4fcDf0pEnFzoTc'.trim(); // Thay thế bằng Secret Key của bạn
 
 // === BASE URL CỦA BINANCE FUTURES API ===
 const BASE_HOST = 'fapi.binance.com';
@@ -54,6 +62,13 @@ const OPEN_ORDER_MILLISECOND_OFFSET = 100; // Mở lệnh vào giây :00 mili gi
 // Các giờ funding chính trong ngày (UTC) - bot sẽ ưu tiên quét vào các giờ này
 const FUNDING_HOURS_UTC = [0, 8, 16]; // Ví dụ: 00:00, 08:00, 16:00 UTC
 
+// === Cấu hình Server Web (mới thêm) ===
+const WEB_SERVER_PORT = 3000; // Cổng cho giao diện web
+// Đường dẫn tới file log của PM2 cho bot này (để web server đọc)
+// !!! QUAN TRỌNG: CẬP NHẬT ĐƯỜNG DẪN NÀY ĐỂ TRỎ ĐÚNG VÀO FILE LOG CỦA BẠN !!!
+const BOT_LOG_FILE = '/home/tacke300/.pm2/logs/bot_binance-out.log';
+const THIS_BOT_PM2_NAME = 'bot_binance_unified'; // Tên của tiến trình bot trong PM2
+
 // Hàm addLog để ghi nhật ký (chỉ ra console)
 function addLog(message, isImportant = false) {
     const now = new Date();
@@ -89,7 +104,6 @@ function formatTimeUTC7(dateObject) {
     });
     return formatter.format(dateObject);
 }
-
 
 // Hàm delay
 const delay = ms => new Promise(resolve => setTimeout(() => resolve(), ms));
@@ -732,7 +746,7 @@ async function runTradingLogic() {
 // Hàm lên lịch chu kỳ chính của bot (quét hoặc chờ)
 async function scheduleNextMainCycle() {
     if (!botRunning) { // Nếu bot đã bị dừng, không lên lịch nữa
-        addLog('Bot đã dừng. Hủy lịch trình tiếp theo.', true);
+        addLog('Bot đã dừng. Không chạy logic giao dịch hoặc lên lịch tiếp theo.', true);
         clearTimeout(nextScheduledTimeout); 
         return;                          
     }                                    
@@ -787,21 +801,20 @@ async function scheduleNextMainCycle() {
     }, delayMs);
 }
 
-
-// --- Hàm khởi động bot ---
-async function startBot() {
+// --- Hàm khởi động bot logic chính (nội bộ, không phải PM2 start) ---
+async function startBotLogicInternal() {
     if (botRunning) {
-        addLog('Bot hiện đang chạy. Không cần khởi động lại.', true);
-        return;
+        addLog('Bot logic hiện đang chạy. Không cần khởi động lại.', true);
+        return 'Bot logic hiện đang chạy.';
     }
 
     addLog('--- Khởi động Bot Futures Funding Rate ---', true);
     addLog('>>> Đang kiểm tra kết nối API Key với Binance Futures...', true);
     
     // Kiểm tra API Key và Secret Key đã được thay thế chưa
-    if (API_KEY === 'DÁN_API_KEY_CỦA_BẠN_VÀO_ĐÂY' || SECRET_KEY === 'DÁN_SECRET_KEY_CỦA_BẠN_VÀO_ĐÂY') {
-        addLog('❌ LỖI CẤU HÌNH: Vui lòng thay thế "DÁN_API_KEY_CỦA_BẠN_VÀO_ĐÂY" và "DÁN_SECRET_KEY_CỦA_BẠN_VÀO_ĐÂY" bằng API Key và Secret Key THẬT của bạn.', true);
-        return; // Dừng bot nếu cấu hình sai
+    if (API_KEY === 'cZ1Y2O0kggVEggEaPvhFcYQHS5b1EsT2OWZb8zdY9C0jGqNROXHRZHTJjnQ7OG4Q'.trim() || SECRET_KEY === 'oU6pZFHgEvbpD9NmFXp5ZVnYFMQ7EIkBiz88TzvmC3SpT9nEf4fcDf0pEnFzoTc'.trim()) {
+        addLog('❌ LỖI CẤU HÌNH: Vui lòng thay thế API Key và Secret Key THẬT của bạn.', true);
+        return 'LỖI CẤU HÌNH: Vui lòng thay thế API Key và Secret Key THẬT của bạn.';
     }
 
     try {
@@ -816,7 +829,7 @@ async function startBot() {
         await getExchangeInfo(); 
         if (!exchangeInfoCache) { 
             addLog('❌ Không thể tải thông tin sàn (exchangeInfo). Bot sẽ dừng.', true);
-            return;
+            return 'Không thể tải thông tin sàn (exchangeInfo).';
         }
 
         botRunning = true;
@@ -840,21 +853,24 @@ async function startBot() {
                 }
             }, 1000); // Kiểm tra mỗi giây nếu có vị thế đang mở
         }
+        return 'Bot đã khởi động thành công.';
         
     } catch (error) {
-        addLog('❌ [Lỗi nghiêm trọng khi khởi động bot] ' + (error.msg || error.message), true);
+        const errorMsg = error.msg || error.message;
+        addLog('❌ [Lỗi nghiêm trọng khi khởi động bot] ' + errorMsg, true);
         addLog('   -> Bot sẽ dừng hoạt động. Vui lòng kiểm tra và khởi động lại.', true);
         addLog('   -> Gợi ý: Nếu lỗi là "-1022 Signature for this request is not valid.", hãy kiểm tra lại API Key/Secret và đặc biệt là danh sách IP trắng trên Binance.', true);
         addLog('   -> Gợi ý: Nếu lỗi là "-1021 Timestamp for this request is outside of the recvWindow.", hãy kiểm tra lại đồng bộ thời gian trên VPS (`sudo ntpdate pool.ntp.org` và `timedatectl status`).', true);
         botRunning = false; // Đảm bảo cờ botRunning được đặt lại false nếu khởi động thất bại
+        return `Lỗi khi khởi động bot: ${errorMsg}`;
     }
 }
 
-// --- Hàm dừng bot ---
-function stopBot() {
+// --- Hàm dừng bot logic chính (nội bộ, không phải PM2 stop) ---
+function stopBotLogicInternal() {
     if (!botRunning) {                   
-        addLog('Bot hiện không chạy. Không cần dừng.', true);                     
-        return;                          
+        addLog('Bot logic hiện không chạy. Không cần dừng.', true);                     
+        return 'Bot logic hiện không chạy.';                          
     }                                    
     botRunning = false;                  
     clearTimeout(nextScheduledTimeout); // Hủy lịch trình tiếp theo               
@@ -864,9 +880,80 @@ function stopBot() {
     }                                    
     addLog('--- Bot đã được dừng ---', true);  
     botStartTime = null;                 
-}                                        
+    return 'Bot đã dừng.';
+}      
 
-// Khởi chạy bot khi script được chạy
-startBot();
+// === KHỞI TẠO SERVER WEB VÀ CÁC API ENDPOINT ===
+const app = express();
 
-// export { stopBot }; 
+// Phục vụ file index.html từ thư mục hiện tại
+app.get('/', (req, res) => {
+    res.sendFile(path.join(__dirname, 'index.html'));
+});
+
+// API endpoint để lấy log từ file
+app.get('/api/logs', (req, res) => {
+    fs.readFile(BOT_LOG_FILE, 'utf8', (err, data) => {
+        if (err) {
+            console.error('Error reading log file:', err);
+            if (err.code === 'ENOENT') {
+                 return res.status(404).send(`Log file not found: ${BOT_LOG_FILE}. Please ensure the path is correct and PM2 is running this bot with correct log output.`);
+            }
+            return res.status(500).send('Error reading log file');
+        }
+        // Xóa các ký tự màu sắc ANSI để hiển thị sạch hơn trên trình duyệt
+        const cleanData = data.replace(/[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g, '');
+        res.send(cleanData);
+    });
+});
+
+// API endpoint để lấy trạng thái bot từ PM2
+app.get('/api/status', async (req, res) => {
+    try {
+        const pm2List = await new Promise((resolve, reject) => {
+            exec('pm2 jlist', (error, stdout, stderr) => {
+                if (error) reject(stderr || error.message);
+                resolve(stdout);
+            });
+        });
+        const processes = JSON.parse(pm2List);
+        const botProcess = processes.find(p => p.name === THIS_BOT_PM2_NAME);
+
+        let statusMessage = 'Bot Status: Offline (PM2)';
+        if (botProcess) {
+            statusMessage = `Bot Status: ${botProcess.pm2_env.status.toUpperCase()} (Restarts: ${botProcess.pm2_env.restart_time})`;
+            if (botProcess.pm2_env.status === 'online') {
+                statusMessage += ` | Uptime: ${Math.floor(botProcess.pm2_env.uptime / (1000 * 60))} phút`;
+                // Kiểm tra thêm trạng thái logic bot nội bộ
+                statusMessage += ` | Internal Logic: ${botRunning ? 'RUNNING' : 'STOPPED'}`;
+            }
+        } else {
+             statusMessage = `Bot Status: Not found in PM2 (Name: ${THIS_BOT_PM2_NAME})`;
+        }
+        res.send(statusMessage);
+    } catch (error) {
+        console.error('Error fetching PM2 status:', error);
+        res.status(500).send(`Bot Status: Error fetching status. (${error})`);
+    }
+});
+
+// API endpoint để khởi động bot logic chính (nội bộ)
+app.get('/start_bot_logic', async (req, res) => {
+    const message = await startBotLogicInternal();
+    res.send(message);
+});
+
+// API endpoint để dừng bot logic chính (nội bộ)
+app.get('/stop_bot_logic', (req, res) => {
+    const message = stopBotLogicInternal();
+    res.send(message);
+});
+
+// Khởi động server web
+app.listen(WEB_SERVER_PORT, () => {
+    console.log(`Web server cho Bot Futures Funding Rate đang lắng nghe tại http://localhost:${WEB_SERVER_PORT}`);
+    console.log(`Truy cập giao diện web qua trình duyệt: http://YOUR_VPS_IP:${WEB_SERVER_PORT}`);
+});
+
+// Không gọi startBotLogicInternal() ở đây, vì nó sẽ được điều khiển qua API.
+// Chỉ cần đảm bảo server web khởi động.
