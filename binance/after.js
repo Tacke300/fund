@@ -40,7 +40,7 @@ let countdownIntervalFrontend = null; // Để gửi đếm ngược cho fronten
 
 // === Cấu hình Bot ===
 const MIN_USDT_BALANCE_TO_OPEN = 0.1; // Số dư USDT tối thiểu để mở lệnh (đã điều chỉnh)
-const CAPITAL_PERCENTAGE_PER_TRADE = 0.2; // Phần trăm vốn sử dụng cho mỗi lệnh (50% tài khoản)
+const CAPITAL_PERCENTAGE_PER_TRADE = 0.9; // Phần trăm vốn sử dụng cho mỗi lệnh (50% tài khoản)
 
 // Cấu hình TP/SL theo yêu cầu mới
 // THAY ĐỔI TẠI ĐÂY: Nhiều mức SL tính theo % của vốn đầu tư ban đầu
@@ -60,7 +60,7 @@ const TAKE_PROFIT_PERCENTAGES = {
 
 // ĐÃ SỬA: Ngưỡng funding rate âm tối thiểu để xem xét (từ -0.0002 xuống -0.002)
 const MIN_FUNDING_RATE_THRESHOLD = -0.01; 
-const MAX_POSITION_LIFETIME_SECONDS = 6; // Thời gian tối đa giữ một vị thế (180 giây = 3 phút)
+const MAX_POSITION_LIFETIME_SECONDS = 6.1; // Thời gian tối đa giữ một vị thế (180 giây = 3 phút)
 
 // Thời gian trước giờ funding mà bot sẽ xem xét mở lệnh (đơn vị: phút)
 // Sử dụng để lọc sơ bộ các đồng coin.
