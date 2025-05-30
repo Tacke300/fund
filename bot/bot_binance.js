@@ -66,11 +66,11 @@ const FUNDING_WINDOW_MINUTES = 1;
 
 // Ngưỡng thời gian còn lại (tính bằng giây) để bot coi là "sắp trả funding" và tiến hành mở lệnh.
 // Vẫn giữ hẹp để phù hợp với việc quét tại phút :59
-const ONLY_OPEN_IF_FUNDING_IN_SECONDS = 62; // Chỉ mở nếu còn lại <= 60 giây (tức là chỉ trong phút :59)
+const ONLY_OPEN_IF_FUNDING_IN_SECONDS = 60; // Chỉ mở nếu còn lại <= 60 giây (tức là chỉ trong phút :59)
 
 // Cấu hình thời điểm mở lệnh
 const OPEN_TRADE_BEFORE_FUNDING_SECONDS = 1; // 1 giây trước giờ funding (tức là vào giây :59 của phút :59)
-const OPEN_TRADE_AFTER_SECOND_OFFSET_MS = 750; // Thêm 797ms sau khi giây là 59
+const OPEN_TRADE_AFTER_SECOND_OFFSET_MS = 700; // Thêm 797ms sau khi giây là 59
 
 // === Cấu hình Server Web ===
 const WEB_SERVER_PORT = 3000; // Cổng cho giao diện web
