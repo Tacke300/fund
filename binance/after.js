@@ -81,8 +81,8 @@ const SCAN_INTERVAL_SECONDS = 60; // Quét mỗi 60 giây (đã bị ghi đè b�
 // === Cấu hình Server Web ===
 const WEB_SERVER_PORT = 3005; // Cổng cho giao diện web
 // Đường dẫn tới file log của PM2 cho bot này (để web server đọc)
-const BOT_LOG_FILE = '/home/tacke300/.pm2/logs/bot-bina-out.log';
-const THIS_BOT_PM2_NAME = 'bot_bina';
+const BOT_LOG_FILE = '/home/tacke300/.pm2/logs/afbina-out.log';
+const THIS_BOT_PM2_NAME = 'afbina';
 
 // Hàm addLog để ghi nhật ký (chỉ ra console)
 function addLog(message, isImportant = false) {
