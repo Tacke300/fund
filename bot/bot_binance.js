@@ -58,7 +58,7 @@ const TAKE_PROFIT_PERCENTAGES = {
 
 // ĐÃ SỬA: Ngưỡng funding rate âm tối thiểu để xem xét (từ -0.0002 xuống -0.002)
 const MIN_FUNDING_RATE_THRESHOLD = -0.003; 
-const MAX_POSITION_LIFETIME_SECONDS = 100; // Thời gian tối đa giữ một vị thế (180 giây = 3 phút)
+const MAX_POSITION_LIFETIME_SECONDS = 179; // Thời gian tối đa giữ một vị thế (180 giây = 3 phút)
 
 // Thời gian trước giờ funding mà bot sẽ xem xét mở lệnh (đơn vị: phút)
 // Sử dụng để lọc sơ bộ các đồng coin.
@@ -66,7 +66,7 @@ const FUNDING_WINDOW_MINUTES = 30;
 
 // Ngưỡng thời gian còn lại (tính bằng giây) để bot coi là "sắp trả funding" và tiến hành mở lệnh.
 // Chỉ mở lệnh nếu nextFundingTime của đồng coin được chọn còn lại <= X giây.
-const ONLY_OPEN_IF_FUNDING_IN_SECONDS = 179; // Ví dụ: chỉ mở nếu còn lại <= 2 phút
+const ONLY_OPEN_IF_FUNDING_IN_SECONDS = 100; // Ví dụ: chỉ mở nếu còn lại <= 2 phút
 
 // NEW: Cấu hình thời điểm mở lệnh
 const OPEN_TRADE_BEFORE_FUNDING_SECONDS = 60; // 60 giây (tức là 1 phút trước giờ funding, vào phút :59)
