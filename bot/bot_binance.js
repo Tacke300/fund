@@ -79,7 +79,7 @@ const OPEN_TRADE_AFTER_SECOND_OFFSET_MS = 100; // Thêm 100ms sau khi giây là 
 const SCAN_INTERVAL_SECONDS = 60; // Quét mỗi 60 giây (đã bị ghi đè bởi logic phút :58)
 
 // === Cấu hình Server Web ===
-const WEB_SERVER_PORT = 3005; // Cổng cho giao diện web
+const WEB_SERVER_PORT = 3000; // Cổng cho giao diện web
 // Đường dẫn tới file log của PM2 cho bot này (để web server đọc)
 const BOT_LOG_FILE = '/home/tacke300/.pm2/logs/bot-bina-out.log';
 const THIS_BOT_PM2_NAME = 'bot_bina';
