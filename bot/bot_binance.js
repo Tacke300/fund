@@ -70,7 +70,7 @@ const ONLY_OPEN_IF_FUNDING_IN_SECONDS = 60; // Chỉ mở nếu còn lại <= 60
 
 // Cấu hình thời điểm mở lệnh
 const OPEN_TRADE_BEFORE_FUNDING_SECONDS = 1; // 1 giây trước giờ funding (tức là vào giây :59 của phút :59)
-const OPEN_TRADE_AFTER_SECOND_OFFSET_MS = 690; // Thêm 797ms sau khi giây là 59
+const OPEN_TRADE_AFTER_SECOND_OFFSET_MS = 733; // Thêm 797ms sau khi giây là 59
 
 // === Cấu hình Server Web ===
 const WEB_SERVER_PORT = 3000; // Cổng cho giao diện web
