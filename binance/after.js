@@ -79,7 +79,7 @@ const OPEN_TRADE_AFTER_SECOND_OFFSET_MS = 54000; // Thêm 100ms sau khi giây l�
 const SCAN_INTERVAL_SECONDS = 60; // Quét mỗi 60 giây (đã bị ghi đè bởi logic phút :58)
 
 // NEW: Ngưỡng cho maxLeverage * fundingRate
-const MIN_LEVERAGE_FUNDING_PRODUCT = 1.38; // Điều kiện mới: maxLeverage * fundingRate >= 1.5
+const MIN_LEVERAGE_FUNDING_PRODUCT = 1.15; // Điều kiện mới: maxLeverage * fundingRate >= 1.5
 
 // === Cấu hình Server Web ===
 const WEB_SERVER_PORT = 3005; // Cổng cho giao diện web
