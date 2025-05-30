@@ -43,7 +43,7 @@ const MIN_USDT_BALANCE_TO_OPEN = 0.1; // Số dư USDT tối thiểu để mở 
 const CAPITAL_PERCENTAGE_PER_TRADE = 0.5; // Phần trăm vốn sử dụng cho mỗi lệnh (50% tài khoản)
 
 // Cấu hình TP/SL theo yêu cầu mới
-const STOP_LOSS_PERCENTAGE = 0.70; // SL cố định 70% của vốn đầu tư ban đầu
+const STOP_LOSS_PERCENTAGE = 0.66; // SL cố định 70% của vốn đầu tư ban đầu
 
 // Bảng ánh xạ maxLeverage với Take Profit percentage
 // Đảm bảo các giá trị đòn bẩy được định nghĩa ở đây.
@@ -52,8 +52,8 @@ const TAKE_PROFIT_PERCENTAGES = {
     25: 0.28,
     50: 0.56,
     75: 0.86,
-    100: 1.08,
-    125: 1.36,
+    100: 1.2,
+    125: 1.5,
 };
 
 // ĐÃ SỬA: Ngưỡng funding rate âm tối thiểu để xem xét (từ -0.0002 xuống -0.002)
@@ -70,7 +70,7 @@ const ONLY_OPEN_IF_FUNDING_IN_SECONDS = 179; // Ví dụ: chỉ mở nếu còn 
 
 // NEW: Cấu hình thời điểm mở lệnh
 const OPEN_TRADE_BEFORE_FUNDING_SECONDS = 60; // 60 giây (tức là 1 phút trước giờ funding, vào phút :59)
-const OPEN_TRADE_AFTER_SECOND_OFFSET_MS = 100; // Thêm 100ms sau khi giây là 00
+const OPEN_TRADE_AFTER_SECOND_OFFSET_MS = 57000; // Thêm 100ms sau khi giây là 00
 
 // Cấu hình thời gian quét bot
 // Bot sẽ quét định kỳ, không cố định vào phút :58 nữa.
