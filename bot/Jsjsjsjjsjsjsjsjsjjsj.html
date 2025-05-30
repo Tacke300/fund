@@ -1,3 +1,4 @@
+
 import https from 'https';
 import crypto from 'crypto';
 import express from 'express';
@@ -40,25 +41,25 @@ let countdownIntervalFrontend = null; // Để gửi đếm ngược cho fronten
 
 // === Cấu hình Bot ===
 const MIN_USDT_BALANCE_TO_OPEN = 0.1; // Số dư USDT tối thiểu để mở lệnh (đã điều chỉnh)
-const CAPITAL_PERCENTAGE_PER_TRADE = 0.5; // Phần trăm vốn sử dụng cho mỗi lệnh (50% tài khoản)
+const CAPITAL_PERCENTAGE_PER_TRADE = 0.1; // Phần trăm vốn sử dụng cho mỗi lệnh (50% tài khoản)
 
 // Cấu hình TP/SL theo yêu cầu mới
-const STOP_LOSS_PERCENTAGE = 0.70; // SL cố định 70% của vốn đầu tư ban đầu
+const STOP_LOSS_PERCENTAGE = 1.997; // SL cố định 70% của vốn đầu tư ban đầu
 
 // Bảng ánh xạ maxLeverage với Take Profit percentage
 // Đảm bảo các giá trị đòn bẩy được định nghĩa ở đây.
 const TAKE_PROFIT_PERCENTAGES = {
-    20: 0.23,
-    25: 0.28,
-    50: 0.35,
-    75: 0.50,
-    100: 0.7,
-    125: 1.1,
+    20: 0.25,
+    25: 0.35,
+    50: 0.55,
+    75: 0.85,
+    100: 0.115,
+    125: 0.115,
 };
 
 // ĐÃ SỬA: Ngưỡng funding rate âm tối thiểu để xem xét (từ -0.0002 xuống -0.002)
-const MIN_FUNDING_RATE_THRESHOLD = -0.002; 
-const MAX_POSITION_LIFETIME_SECONDS = 180; // Thời gian tối đa giữ một vị thế (180 giây = 3 phút)
+const MIN_FUNDING_RATE_THRESHOLD = -0.005; 
+const MAX_POSITION_LIFETIME_SECONDS = 150; // Thời gian tối đa giữ một vị thế (180 giây = 3 phút)
 
 // Thời gian trước giờ funding mà bot sẽ xem xét mở lệnh (đơn vị: phút)
 // Sử dụng để lọc sơ bộ các đồng coin.
@@ -66,7 +67,11 @@ const FUNDING_WINDOW_MINUTES = 30;
 
 // Ngưỡng thời gian còn lại (tính bằng giây) để bot coi là "sắp trả funding" và tiến hành mở lệnh.
 // Chỉ mở lệnh nếu nextFundingTime của đồng coin được chọn còn lại <= X giây.
-const ONLY_OPEN_IF_FUNDING_IN_SECONDS = 179; // Ví dụ: chỉ mở nếu còn lại <= 2 phút
+const ONLY_OPEN_IF_FUNDING_IN_SECONDS = 180; // Ví dụ: chỉ mở nếu còn lại <= 2 phút
+
+// NEW: Cấu hình thời điểm mở lệnh
+const OPEN_TRADE_BEFORE_FUNDING_SECONDS = 1; // 60 giây (tức là 1 phút trước giờ funding, vào phút :59)
+const OPEN_TRADE_AFTER_SECOND_OFFSET_MS = 797; // Thêm 100ms sau khi giây là 00
 
 // Cấu hình thời gian quét bot
 // Bot sẽ quét định kỳ, không cố định vào phút :58 nữa.
@@ -744,25 +749,27 @@ async function runTradingLogic() {
             // Duyệt qua các ứng viên đã sắp xếp (từ âm nhất)
             for (const candidate of eligibleCandidates) {
                 const nowRefreshed = Date.now(); // Lấy lại thời gian hiện tại để đảm bảo chính xác
-                const timeToOpenMs = candidate.nextFundingTime - nowRefreshed;
-                const delayForExactOpenMs = timeToOpenMs + 100; // Đợi thêm 100ms sau giờ funding
+                
+                // Tính toán thời điểm target để mở lệnh (1 phút trước giờ funding + 100ms)
+                const targetOpenTimeMs = candidate.nextFundingTime - (OPEN_TRADE_BEFORE_FUNDING_SECONDS * 1000) + OPEN_TRADE_AFTER_SECOND_OFFSET_MS;
+                const delayForExactOpenMs = targetOpenTimeMs - nowRefreshed; // Thời gian thực sự phải chờ từ bây giờ
 
                 // Kiểm tra điều kiện "sắp trả funding" hợp lệ cho CHÍNH ĐỒNG COIN ĐÓ:
-                // 1. Còn thời gian để chờ (delayForExactOpenMs > 0)
-                // 2. Thời gian chờ thực tế đến funding (timeToOpenMs) phải rất gần (<= ONLY_OPEN_IF_FUNDING_IN_SECONDS)
-                // 3. Giờ funding của nó chưa qua (timeToOpenMs >= 0)
-                if (delayForExactOpenMs > 0 && timeToOpenMs <= (ONLY_OPEN_IF_FUNDING_IN_SECONDS * 1000) && timeToOpenMs >= 0) {
+                // 1. delayForExactOpenMs phải dương (thời điểm mở lệnh còn ở tương lai).
+                // 2. delayForExactOpenMs phải nằm trong cửa sổ cho phép mở lệnh (ví dụ: trong vòng 3 phút tới so với thời điểm bạn muốn mở)
+                if (delayForExactOpenMs > 0 && delayForExactOpenMs <= (ONLY_OPEN_IF_FUNDING_IN_SECONDS * 1000)) {
                     selectedCandidateToOpen = candidate; // Tìm thấy ứng viên phù hợp
                     break; // Thoát vòng lặp, chúng ta đã tìm được đồng coin âm nhất và sắp trả funding
                 } else {
-                    addLog(`[DEBUG] Bỏ qua ${candidate.symbol} (Funding: ${candidate.fundingRate}, Giờ Funding: ${formatTimeUTC7(new Date(candidate.nextFundingTime))}, còn ${Math.ceil(timeToOpenMs / 1000)}s) - không phải đồng coin sắp trả funding trong cửa sổ mở lệnh (còn > ${ONLY_OPEN_IF_FUNDING_IN_SECONDS}s). Tiếp tục xét đồng khác.`, false);
+                    addLog(`[DEBUG] Bỏ qua ${candidate.symbol} (Funding: ${candidate.fundingRate}, Giờ Funding: ${formatTimeUTC7(new Date(candidate.nextFundingTime))}). Thời điểm mở lệnh mong muốn (${formatTimeUTC7(new Date(targetOpenTimeMs))}) không nằm trong cửa sổ chờ hợp lệ (còn ${Math.ceil(delayForExactOpenMs / 1000)}s, max ${ONLY_OPEN_IF_FUNDING_IN_SECONDS}s). Tiếp tục xét đồng khác.`, false);
                 }
             }
 
             if (selectedCandidateToOpen) { // Nếu tìm được một ứng viên thực sự phù hợp để mở lệnh
                 const nowFinal = Date.now(); // Lấy lại thời gian cuối cùng trước khi tính toán
-                const timeToOpenMs = selectedCandidateToOpen.nextFundingTime - nowFinal;
-                const delayForExactOpenMs = timeToOpenMs + 100;
+                // Tính toán lại độ trễ cuối cùng trước khi đặt setTimeout
+                const targetOpenTimeMs = selectedCandidateToOpen.nextFundingTime - (OPEN_TRADE_BEFORE_FUNDING_SECONDS * 1000) + OPEN_TRADE_AFTER_SECOND_OFFSET_MS;
+                const delayForExactOpenMs = targetOpenTimeMs - nowFinal;
 
                 const capitalToUse = availableBalance * CAPITAL_PERCENTAGE_PER_TRADE;
                 const currentPrice = await getCurrentPrice(selectedCandidateToOpen.symbol);
@@ -781,13 +788,12 @@ async function runTradingLogic() {
                 addLog(`  + Giờ trả Funding tiếp theo (tính toán): **${formatTimeUTC7(new Date(selectedCandidateToOpen.nextFundingTime))}**`);
                 addLog(`  + Đòn bẩy tối đa: **${selectedCandidateToOpen.maxLeverage}x**`);
                 addLog(`  + Số tiền dự kiến mở lệnh: **${capitalToUse.toFixed(2)} USDT** (Khối lượng ước tính: **${estimatedQuantity} ${selectedCandidateToOpen.symbol}**)`);
-                addLog(`  + Lệnh sẽ được mở sau khoảng **${Math.ceil(delayForExactOpenMs / 1000)} giây** (vào lúc **${formatTimeUTC7(new Date(selectedCandidateToOpen.nextFundingTime + 100))}**).`, true);
-
+                addLog(`  + Lệnh sẽ được mở sau khoảng **${Math.ceil(delayForExactOpenMs / 1000)} giây** (vào lúc **${formatTimeUTC7(new Date(targetOpenTimeMs))}**).`, true);
                 addLog(`>>> Đang chờ đến thời điểm mở lệnh chính xác...`, true);
                 clearTimeout(nextScheduledTimeout); // Hủy lịch trình quét :58 nếu có
                 nextScheduledTimeout = setTimeout(async () => {
                     if (!currentOpenPosition && botRunning) {
-                        addLog(`>>> Đã đến giờ funding cho ${selectedCandidateToOpen.symbol}. Đang thực hiện mở lệnh.`, true);
+                        addLog(`>>> Đã đến giờ mở lệnh cho ${selectedCandidateToOpen.symbol} (phút :59). Đang thực hiện mở lệnh.`, true);
                         await openShortPosition(selectedCandidateToOpen.symbol, selectedCandidateToOpen.fundingRate, availableBalance);
                     } else if (!botRunning) {
                         addLog('Bot đã bị dừng trong khi chờ. Hủy bỏ việc mở lệnh.', true);
@@ -969,15 +975,15 @@ app.get('/api/status', async (req, res) => {
         const processes = JSON.parse(pm2List);
         const botProcess = processes.find(p => p.name === THIS_BOT_PM2_NAME);
 
-        let statusMessage = 'MÁY CHỦ: ĐI TẮT (PM2)';
+        let statusMessage = 'MAY CHU: DA TAT (PM2)';
         if (botProcess) {
-            statusMessage = `MÁY CHỦ: ${botProcess.pm2_env.status.toUpperCase()} (Restarts: ${botProcess.pm2_env.restart_time})`;
+            statusMessage = `MAY CHU: ${botProcess.pm2_env.status.toUpperCase()} (  Restarts: ${botProcess.pm2_env.restart_time})`;
             if (botProcess.pm2_env.status === 'online') {
-                statusMessage += ` | TRẠNG THÁI: ${botRunning ? 'ĐANG CHẠY' : 'ĐÃ DỪNG'}`;
+                statusMessage += ` | TRANG THAI: ${botRunning ? 'DANG CHAY' : 'DA DUNG'}`;
                 if (botStartTime) {
                     const uptimeMs = Date.now() - botStartTime.getTime();
                     const uptimeMinutes = Math.floor(uptimeMs / (1000 * 60));
-                    statusMessage += ` | ĐÃ CHẠY: ${uptimeMinutes} phút`;
+                    statusMessage += ` | DA CHAY: ${uptimeMinutes} phút`;
                 }
             }
         } else {
