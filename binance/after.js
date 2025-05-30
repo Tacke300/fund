@@ -40,7 +40,7 @@ let countdownIntervalFrontend = null; // Để gửi đếm ngược cho fronten
 
 // === Cấu hình Bot ===
 const MIN_USDT_BALANCE_TO_OPEN = 0.1; // Số dư USDT tối thiểu để mở lệnh (đã điều chỉnh)
-const CAPITAL_PERCENTAGE_PER_TRADE = 0.97; // Phần trăm vốn sử dụng cho mỗi lệnh (50% tài khoản)
+const CAPITAL_PERCENTAGE_PER_TRADE = 0.2; // Phần trăm vốn sử dụng cho mỗi lệnh (50% tài khoản)
 
 // Cấu hình TP/SL theo yêu cầu mới
 // THAY ĐỔI TẠI ĐÂY: Nhiều mức SL tính theo % của vốn đầu tư ban đầu
@@ -81,7 +81,7 @@ const OPEN_TRADE_AFTER_SECOND_OFFSET_MS = 54000; // Thêm 100ms sau khi giây l�
 const SCAN_INTERVAL_SECONDS = 60; // Quét mỗi 60 giây (đã bị ghi đè bởi logic phút :58)
 
 // NEW: Ngưỡng cho maxLeverage * fundingRate
-const MIN_LEVERAGE_FUNDING_PRODUCT = 1.15; // Điều kiện mới: maxLeverage * fundingRate >= 1.5
+const MIN_LEVERAGE_FUNDING_PRODUCT = 0.1; // Điều kiện mới: maxLeverage * fundingRate >= 1.5
 
 // === Cấu hình Server Web ===
 const WEB_SERVER_PORT = 3005; // Cổng cho giao diện web
