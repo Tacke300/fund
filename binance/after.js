@@ -68,11 +68,11 @@ const FUNDING_WINDOW_MINUTES = 30;
 
 // Ngưỡng thời gian còn lại (tính bằng giây) để bot coi là "sắp trả funding" và tiến hành mở lệnh.
 // Chỉ mở lệnh nếu nextFundingTime của đồng coin được chọn còn lại <= X giây.
-const ONLY_OPEN_IF_FUNDING_IN_SECONDS = 100; // Ví dụ: chỉ mở nếu còn lại <= 2 phút
+const ONLY_OPEN_IF_FUNDING_IN_SECONDS = 1000; // Ví dụ: chỉ mở nếu còn lại <= 2 phút
 
 // NEW: Cấu hình thời điểm mở lệnh
-const OPEN_TRADE_BEFORE_FUNDING_SECONDS = 60; // 60 giây (tức là 1 phút trước giờ funding, vào phút :59)
-const OPEN_TRADE_AFTER_SECOND_OFFSET_MS = 54000; // Thêm 100ms sau khi giây là 00
+const OPEN_TRADE_BEFORE_FUNDING_SECONDS = 6; // 60 giây (tức là 1 phút trước giờ funding, vào phút :59)
+const OPEN_TRADE_AFTER_SECOND_OFFSET_MS = 0; // Thêm 100ms sau khi giây là 00
 
 // Cấu hình thời gian quét bot
 // Bot sẽ quét định kỳ, không cố định vào phút :58 nữa.
