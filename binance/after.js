@@ -40,7 +40,7 @@ let countdownIntervalFrontend = null; // Để gửi đếm ngược cho fronten
 
 // === Cấu hình Bot ===
 const MIN_USDT_BALANCE_TO_OPEN = 0.1; // Số dư USDT tối thiểu để mở lệnh (đã điều chỉnh)
-const CAPITAL_PERCENTAGE_PER_TRADE = 0.9; // Phần trăm vốn sử dụng cho mỗi lệnh (50% tài khoản)
+const CAPITAL_PERCENTAGE_PER_TRADE = 0.97; // Phần trăm vốn sử dụng cho mỗi lệnh (50% tài khoản)
 
 // Cấu hình TP/SL theo yêu cầu mới
 // THAY ĐỔI TẠI ĐÂY: Nhiều mức SL tính theo % của vốn đầu tư ban đầu
