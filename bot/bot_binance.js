@@ -48,7 +48,7 @@ const STOP_LOSS_PERCENTAGE = 1.997; // SL cố định 70% của vốn đầu t�
 // Bảng ánh xạ maxLeverage với Take Profit percentage
 // Đảm bảo các giá trị đòn bẩy được định nghĩa ở đây.
 const TAKE_PROFIT_PERCENTAGES = {
-    20: 0.5
+    20: 0.5,
     25: 0.9,
     50: 1.2,
     75: 1.5,
