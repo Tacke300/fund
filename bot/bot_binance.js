@@ -71,7 +71,7 @@ const ONLY_OPEN_IF_FUNDING_IN_SECONDS = 180; // Ví dụ: chỉ mở nếu còn 
 
 // NEW: Cấu hình thời điểm mở lệnh
 const OPEN_TRADE_BEFORE_FUNDING_SECONDS = 1; // 60 giây (tức là 1 phút trước giờ funding, vào phút :59)
-const OPEN_TRADE_AFTER_SECOND_OFFSET_MS = 666; // Thêm 100ms sau khi giây là 00
+const OPEN_TRADE_AFTER_SECOND_OFFSET_MS = 777; // Thêm 100ms sau khi giây là 00
 
 // Cấu hình thời gian quét bot
 // Bot sẽ quét định kỳ, không cố định vào phút :58 nữa.
