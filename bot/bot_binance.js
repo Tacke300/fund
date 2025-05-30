@@ -974,15 +974,15 @@ app.get('/api/status', async (req, res) => {
         const processes = JSON.parse(pm2List);
         const botProcess = processes.find(p => p.name === THIS_BOT_PM2_NAME);
 
-        let statusMessage = 'MÁY CHỦ: ĐI TẮT (PM2)';
+        let statusMessage = 'MAY CHU: DA TAT (PM2)';
         if (botProcess) {
-            statusMessage = `MÁY CHỦ: ${botProcess.pm2_env.status.toUpperCase()} (Restarts: ${botProcess.pm2_env.restart_time})`;
+            statusMessage = `MAY CHU: ${botProcess.pm2_env.status.toUpperCase()} (  Restarts: ${botProcess.pm2_env.restart_time})`;
             if (botProcess.pm2_env.status === 'online') {
-                statusMessage += ` | TRẠNG THÁI: ${botRunning ? 'ĐANG CHẠY' : 'ĐÃ DỪNG'}`;
+                statusMessage += ` | TRANG THAI: ${botRunning ? 'DANG CHAY' : 'DA DUNG'}`;
                 if (botStartTime) {
                     const uptimeMs = Date.now() - botStartTime.getTime();
                     const uptimeMinutes = Math.floor(uptimeMs / (1000 * 60));
-                    statusMessage += ` | ĐÃ CHẠY: ${uptimeMinutes} phút`;
+                    statusMessage += ` | DA CHAY: ${uptimeMinutes} phút`;
                 }
             }
         } else {
