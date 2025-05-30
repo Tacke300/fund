@@ -41,10 +41,10 @@ let countdownIntervalFrontend = null; // Để gửi đếm ngược cho fronten
 
 // === Cấu hình Bot ===
 const MIN_USDT_BALANCE_TO_OPEN = 0.1; // Số dư USDT tối thiểu để mở lệnh (đã điều chỉnh)
-const CAPITAL_PERCENTAGE_PER_TRADE = 0.5; // Phần trăm vốn sử dụng cho mỗi lệnh (50% tài khoản)
+const CAPITAL_PERCENTAGE_PER_TRADE = 0.1; // Phần trăm vốn sử dụng cho mỗi lệnh (50% tài khoản)
 
 // Cấu hình TP/SL theo yêu cầu mới
-const STOP_LOSS_PERCENTAGE = 0.66; // SL cố định 70% của vốn đầu tư ban đầu
+const STOP_LOSS_PERCENTAGE = 0.86; // SL cố định 70% của vốn đầu tư ban đầu
 
 // Bảng ánh xạ maxLeverage với Take Profit percentage
 // Đảm bảo các giá trị đòn bẩy được định nghĩa ở đây.
