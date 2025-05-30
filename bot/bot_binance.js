@@ -48,12 +48,12 @@ const STOP_LOSS_PERCENTAGE = 1.997; // SL cố định 70% của vốn đầu t�
 // Bảng ánh xạ maxLeverage với Take Profit percentage
 // Đảm bảo các giá trị đòn bẩy được định nghĩa ở đây.
 const TAKE_PROFIT_PERCENTAGES = {
-    20: 0.3,
-    25: 0.5,
-    50: 0.7,
-    75: 0.9,
-    100: 0.12,
-    125: 0.15,
+    20: 0.5
+    25: 0.9,
+    50: 1.2,
+    75: 1.5,
+    100: 2,
+    125: 2.5,
 };
 
 // Ngưỡng funding rate âm tối thiểu để xem xét
@@ -70,7 +70,7 @@ const ONLY_OPEN_IF_FUNDING_IN_SECONDS = 60; // Chỉ mở nếu còn lại <= 60
 
 // Cấu hình thời điểm mở lệnh
 const OPEN_TRADE_BEFORE_FUNDING_SECONDS = 1; // 1 giây trước giờ funding (tức là vào giây :59 của phút :59)
-const OPEN_TRADE_AFTER_SECOND_OFFSET_MS = 700; // Thêm 797ms sau khi giây là 59
+const OPEN_TRADE_AFTER_SECOND_OFFSET_MS = 690; // Thêm 797ms sau khi giây là 59
 
 // === Cấu hình Server Web ===
 const WEB_SERVER_PORT = 3000; // Cổng cho giao diện web
