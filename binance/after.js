@@ -78,6 +78,9 @@ const OPEN_TRADE_AFTER_SECOND_OFFSET_MS = 100; // Thêm 100ms sau khi giây là 
 // Ví dụ: mỗi 1 phút bot sẽ kiểm tra xem có đồng nào sắp đến giờ funding trong window không.
 const SCAN_INTERVAL_SECONDS = 60; // Quét mỗi 60 giây (đã bị ghi đè bởi logic phút :58)
 
+// NEW: Ngưỡng cho maxLeverage * fundingRate
+const MIN_LEVERAGE_FUNDING_PRODUCT = 1.5; // Điều kiện mới: maxLeverage * fundingRate >= 1.5
+
 // === Cấu hình Server Web ===
 const WEB_SERVER_PORT = 3005; // Cổng cho giao diện web
 // Đường dẫn tới file log của PM2 cho bot này (để web server đọc)
@@ -704,30 +707,38 @@ async function runTradingLogic() {
                 if (timeToFundingMinutes > 0 && timeToFundingMinutes <= FUNDING_WINDOW_MINUTES) {
                     const symbolInfo = await getSymbolFiltersAndMaxLeverage(item.symbol);
                     if (symbolInfo && typeof symbolInfo.maxLeverage === 'number' && symbolInfo.maxLeverage > 1) {
+                        const maxLeverage = symbolInfo.maxLeverage;
+                        // NEW CONDITION: maxLeverage * fundingRate >= 1.5
+                        // Vì fundingRate là số âm, để điều kiện này có ý nghĩa, ta sẽ lấy trị tuyệt đối của fundingRate
+                        if (Math.abs(maxLeverage * fundingRate) < MIN_LEVERAGE_FUNDING_PRODUCT) {
+                            addLog(`[DEBUG] Bỏ qua ${item.symbol}: (maxLev * fundingRate = ${maxLeverage} * ${fundingRate} = ${maxLeverage * fundingRate}). Không đạt ngưỡng ${MIN_LEVERAGE_FUNDING_PRODUCT}.`);
+                            continue; // Bỏ qua đồng này nếu không thỏa mãn điều kiện mới
+                        }
+
                         const capitalToUse = availableBalance * CAPITAL_PERCENTAGE_PER_TRADE;
                         const currentPrice = await getCurrentPrice(item.symbol);
                         if (currentPrice === null) {
                             addLog(`[DEBUG] Không thể lấy giá hiện tại ${item.symbol}. Bỏ qua.`);
                             continue;
                         }
-                        let estimatedQuantity = (capitalToUse * symbolInfo.maxLeverage) / currentPrice;
+                        let estimatedQuantity = (capitalToUse * maxLeverage) / currentPrice;
                         estimatedQuantity = Math.floor(estimatedQuantity / symbolInfo.stepSize) * symbolInfo.stepSize;
                         estimatedQuantity = parseFloat(estimatedQuantity.toFixed(symbolInfo.quantityPrecision));
 
                         const currentNotional = estimatedQuantity * currentPrice;
 
-                        if (currentNotional >= symbolInfo.minNotional && estimatedQuantity > 0 && TAKE_PROFIT_PERCENTAGES[symbolInfo.maxLeverage] !== undefined) {
+                        if (currentNotional >= symbolInfo.minNotional && estimatedQuantity > 0 && TAKE_PROFIT_PERCENTAGES[maxLeverage] !== undefined) {
                             eligibleCandidates.push({
                                 symbol: item.symbol,
                                 fundingRate: fundingRate,
                                 nextFundingTime: nextFundingTimeMs, // Sử dụng nextFundingTime trực tiếp
-                                maxLeverage: symbolInfo.maxLeverage
+                                maxLeverage: maxLeverage // Sử dụng maxLeverage đã lấy
                             });
                         } else {
                             let reason = 'Không rõ';
                             if (currentNotional < symbolInfo.minNotional) reason = `Không đủ minNotional (${symbolInfo.minNotional.toFixed(2)})`;
                             else if (estimatedQuantity <= 0) reason = `Khối lượng quá nhỏ (${estimatedQuantity})`;
-                            else if (TAKE_PROFIT_PERCENTAGES[symbolInfo.maxLeverage] === undefined) reason = `Đòn bẩy ${symbolInfo.maxLeverage}x không có cấu hình TP`;
+                            else if (TAKE_PROFIT_PERCENTAGES[maxLeverage] === undefined) reason = `Đòn bẩy ${maxLeverage}x không có cấu hình TP`;
                             addLog(`[DEBUG] ${item.symbol}: Funding âm (${fundingRate}), gần giờ funding, nhưng KHÔNG ĐỦ ĐIỀU KIỆN mở lệnh. Lý do: ${reason}.`);
                         }
                     } else {
@@ -786,6 +797,7 @@ async function runTradingLogic() {
                 addLog(`  + Funding Rate: **${selectedCandidateToOpen.fundingRate}**`);
                 addLog(`  + Giờ trả Funding tiếp theo (tính toán): **${formatTimeUTC7(new Date(selectedCandidateToOpen.nextFundingTime))}**`);
                 addLog(`  + Đòn bẩy tối đa: **${selectedCandidateToOpen.maxLeverage}x**`);
+                addLog(`  + Tích FundingRate * Đòn bẩy: **${selectedCandidateToOpen.maxLeverage * selectedCandidateToOpen.fundingRate}**`); // Thêm log giá trị này
                 addLog(`  + Số tiền dự kiến mở lệnh: **${capitalToUse.toFixed(2)} USDT** (Khối lượng ước tính: **${estimatedQuantity} ${selectedCandidateToOpen.symbol}**)`);
                 addLog(`  + Lệnh sẽ được mở sau khoảng **${Math.ceil(delayForExactOpenMs / 1000)} giây** (vào lúc **${formatTimeUTC7(new Date(targetOpenTimeMs))}**).`, true);
                 addLog(`>>> Đang chờ đến thời điểm mở lệnh chính xác...`, true);
