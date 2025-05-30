@@ -48,12 +48,12 @@ const STOP_LOSS_PERCENTAGE = 0.70; // SL cố định 70% của vốn đầu tư
 // Bảng ánh xạ maxLeverage với Take Profit percentage
 // Đảm bảo các giá trị đòn bẩy được định nghĩa ở đây.
 const TAKE_PROFIT_PERCENTAGES = {
-    20: 0.20,
-    25: 0.25,
-    50: 0.50,
-    75: 0.75,
-    100: 1.00,
-    125: 1.25,
+    20: 0.23,
+    25: 0.28,
+    50: 0.35,
+    75: 0.50,
+    100: 0.7,
+    125: 1.1,
 };
 
 // ĐÃ SỬA: Ngưỡng funding rate âm tối thiểu để xem xét (từ -0.0002 xuống -0.002)
@@ -66,7 +66,7 @@ const FUNDING_WINDOW_MINUTES = 30;
 
 // Ngưỡng thời gian còn lại (tính bằng giây) để bot coi là "sắp trả funding" và tiến hành mở lệnh.
 // Chỉ mở lệnh nếu nextFundingTime của đồng coin được chọn còn lại <= X giây.
-const ONLY_OPEN_IF_FUNDING_IN_SECONDS = 120; // Ví dụ: chỉ mở nếu còn lại <= 2 phút
+const ONLY_OPEN_IF_FUNDING_IN_SECONDS = 179; // Ví dụ: chỉ mở nếu còn lại <= 2 phút
 
 // Cấu hình thời gian quét bot
 // Bot sẽ quét định kỳ, không cố định vào phút :58 nữa.
@@ -844,7 +844,7 @@ async function scheduleNextMainCycle() {
 
     const nextScanMoment = new Date(now + delayUntilNext58Minute);
 
-    addLog(`>>> Bot sẽ quét lại vào phút **:58** của giờ tiếp theo (vào khoảng **${formatTimeUTC7(nextScanMoment)}**).`, true);
+    addLog(`>>> Bot đang đi uống bia sẽ trở lại lúc **${formatTimeUTC7(nextScanMoment)}**).`, true);
 
     nextScheduledTimeout = setTimeout(async () => {
         if(botRunning) {
@@ -969,15 +969,15 @@ app.get('/api/status', async (req, res) => {
         const processes = JSON.parse(pm2List);
         const botProcess = processes.find(p => p.name === THIS_BOT_PM2_NAME);
 
-        let statusMessage = 'Bot Status: Offline (PM2)';
+        let statusMessage = 'MÁY CHỦ: ĐI TẮT (PM2)';
         if (botProcess) {
-            statusMessage = `Bot Status: ${botProcess.pm2_env.status.toUpperCase()} (Restarts: ${botProcess.pm2_env.restart_time})`;
+            statusMessage = `MÁY CHỦ: ${botProcess.pm2_env.status.toUpperCase()} (Restarts: ${botProcess.pm2_env.restart_time})`;
             if (botProcess.pm2_env.status === 'online') {
-                statusMessage += ` | Internal Logic: ${botRunning ? 'RUNNING' : 'STOPPED'}`;
+                statusMessage += ` | TRẠNG THÁI: ${botRunning ? 'ĐANG CHẠY' : 'ĐÃ DỪNG'}`;
                 if (botStartTime) {
                     const uptimeMs = Date.now() - botStartTime.getTime();
                     const uptimeMinutes = Math.floor(uptimeMs / (1000 * 60));
-                    statusMessage += ` | Internal Uptime: ${uptimeMinutes} phút`;
+                    statusMessage += ` | ĐÃ CHẠY: ${uptimeMinutes} phút`;
                 }
             }
         } else {
