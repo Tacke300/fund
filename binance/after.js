@@ -43,7 +43,9 @@ const MIN_USDT_BALANCE_TO_OPEN = 0.1; // Số dư USDT tối thiểu để mở 
 const CAPITAL_PERCENTAGE_PER_TRADE = 0.97; // Phần trăm vốn sử dụng cho mỗi lệnh (50% tài khoản)
 
 // Cấu hình TP/SL theo yêu cầu mới
-const STOP_LOSS_PERCENTAGE = 0.5; // SL cố định 70% của vốn đầu tư ban đầu
+// THAY ĐỔI TẠI ĐÂY: Nhiều mức SL tính theo % của vốn đầu tư ban đầu
+// Các giá trị này nên được sắp xếp từ nhỏ nhất đến lớn nhất để Math.min hoạt động đúng
+const STOP_LOSS_PERCENTAGES = [0.45, 0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.80, 0.85, 0.90, 0.95, 1.00]; // SL 45%, 50%, ..., 100%
 
 // Bảng ánh xạ maxLeverage với Take Profit percentage
 // Đảm bảo các giá trị đòn bẩy được định nghĩa ở đây.
@@ -548,24 +550,30 @@ async function openShortPosition(symbol, fundingRate, usdtBalance) {
         addLog(`  + Giá vào lệnh: ${entryPrice.toFixed(pricePrecision)}`);
 
         // 6. Tính toán TP/SL theo yêu cầu mới (dựa trên vốn đầu tư ban đầu)
-        const slAmountUSDT = capitalToUse * STOP_LOSS_PERCENTAGE; // Số tiền SL dựa trên vốn đầu tư
         const tpPercentage = TAKE_PROFIT_PERCENTAGES[maxLeverage]; // Lấy TP % theo maxLeverage
         const tpAmountUSDT = capitalToUse * tpPercentage; // Số tiền TP dựa trên vốn đầu tư
 
-        // SL cho lệnh SHORT: giá tăng lên (giá hòa vốn + (số tiền SL / khối lượng))
-        let slPrice = entryPrice + (slAmountUSDT / quantity);
+        // Tính toán nhiều mức SL và chọn mức "gắt" nhất (gần giá vào lệnh nhất)
+        let calculatedSlPrices = [];
+        STOP_LOSS_PERCENTAGES.forEach(sl_percent => {
+            // Đối với lệnh SHORT, SL là khi giá tăng.
+            // sl_price = entryPrice + (investedCapitalUsdt * sl_percent / quantity);
+            const slPriceForPercent = entryPrice + (capitalToUse * sl_percent / quantity);
+            // Làm tròn SL theo tickSize và pricePrecision
+            const roundedSlPrice = parseFloat((Math.ceil(slPriceForPercent / tickSize) * tickSize).toFixed(pricePrecision));
+            calculatedSlPrices.push(roundedSlPrice);
+        });
+
+        // Chọn mức SL "gắt" nhất (nghĩa là mức giá SL thấp nhất cho lệnh SHORT)
+        // Mức SL thấp nhất sẽ là mức SL đầu tiên được chạm khi giá tăng.
+        const finalSlPrice = Math.min(...calculatedSlPrices); // Lấy giá SL thấp nhất trong các mức đã tính
+
         // TP cho lệnh SHORT: giá giảm xuống (giá hòa vốn - (số tiền TP / khối lượng))
         let tpPrice = entryPrice - (tpAmountUSDT / quantity);
-
-        // Làm tròn TP/SL theo tickSize của sàn
-        slPrice = Math.ceil(slPrice / tickSize) * tickSize; // SL luôn làm tròn lên để đảm bảo giá SL nằm trên giá vào lệnh
-        tpPrice = Math.floor(tpPrice / tickSize) * tickSize; // TP luôn làm tròn xuống để đảm bảo giá TP nằm dưới giá vào lệnh
-
-        slPrice = parseFloat(slPrice.toFixed(pricePrecision));
-        tpPrice = parseFloat(tpPrice.toFixed(pricePrecision));
-
-        addLog(`>>> Giá TP: ${tpPrice.toFixed(pricePrecision)}, Giá SL: ${slPrice.toFixed(pricePrecision)}`, true);
-        addLog(`   (SL: ${STOP_LOSS_PERCENTAGE*100}% của ${capitalToUse.toFixed(2)} USDT = ${slAmountUSDT.toFixed(2)} USDT)`);
+        tpPrice = parseFloat((Math.floor(tpPrice / tickSize) * tickSize).toFixed(pricePrecision)); // TP luôn làm tròn xuống
+        
+        addLog(`>>> Giá TP: ${tpPrice.toFixed(pricePrecision)}, Giá SL cuối cùng: ${finalSlPrice.toFixed(pricePrecision)}`, true);
+        addLog(`   (SL được tính từ các mức: ${STOP_LOSS_PERCENTAGES.map(p => `${(p*100).toFixed(0)}%`).join(', ')})`, true);
         addLog(`   (TP: ${tpPercentage*100}% của ${capitalToUse.toFixed(2)} USDT = ${tpAmountUSDT.toFixed(2)} USDT)`);
 
 
@@ -575,7 +583,7 @@ async function openShortPosition(symbol, fundingRate, usdtBalance) {
             quantity: quantity,
             entryPrice: entryPrice,
             tpPrice: tpPrice,
-            slPrice: slPrice,
+            slPrice: finalSlPrice, // SỬ DỤNG MỨC SL ĐÃ CHỌN
             openTime: openTime,
             pricePrecision: pricePrecision,
             tickSize: tickSize
