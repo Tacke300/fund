@@ -1,3 +1,4 @@
+
 import https from 'https';
 import crypto from 'crypto';
 import express from 'express';
@@ -49,11 +50,11 @@ const STOP_LOSS_PERCENTAGE = 0.66; // SL cố định 70% của vốn đầu tư
 // Đảm bảo các giá trị đòn bẩy được định nghĩa ở đây.
 const TAKE_PROFIT_PERCENTAGES = {
     20: 0.25,
-    25: 0.30,
-    50: 0.4,
-    75: 0.5,
-    100: 0.55,
-    125: 0.65,
+    25: 0.35,
+    50: 0.55,
+    75: 0.85,
+    100: 0.115,
+    125: 0.115,
 };
 
 // ĐÃ SỬA: Ngưỡng funding rate âm tối thiểu để xem xét (từ -0.0002 xuống -0.002)
@@ -70,7 +71,7 @@ const ONLY_OPEN_IF_FUNDING_IN_SECONDS = 180; // Ví dụ: chỉ mở nếu còn 
 
 // NEW: Cấu hình thời điểm mở lệnh
 const OPEN_TRADE_BEFORE_FUNDING_SECONDS = 1; // 60 giây (tức là 1 phút trước giờ funding, vào phút :59)
-const OPEN_TRADE_AFTER_SECOND_OFFSET_MS = 800; // Thêm 100ms sau khi giây là 00
+const OPEN_TRADE_AFTER_SECOND_OFFSET_MS = 700; // Thêm 100ms sau khi giây là 00
 
 // Cấu hình thời gian quét bot
 // Bot sẽ quét định kỳ, không cố định vào phút :58 nữa.
