@@ -58,7 +58,7 @@ const STOP_LOSS_PERCENTAGE = 0.5; // 0.5 = 50% của vốn đầu tư ban đầu
 // Bảng ánh xạ maxLeverage với Take Profit percentage.
 // TP được tính dựa trên X% của vốn đầu tư ban đầu (tính từ PERCENTAGE_OF_BALANCE_PER_TRADE).
 const TAKE_PROFIT_PERCENTAGES = {
-    20: 0.23,  // 50% TP nếu đòn bẩy 20x
+    20: 0.25,  // 50% TP nếu đòn bẩy 20x
     25: 0.33,  // 80% TP nếu đòn bẩy 25x
     50: 0.45,    // 100% TP nếu đòn bẩy 50x
     75: 0.6,    // 100% TP nếu đòn bẩy 75x
@@ -84,7 +84,7 @@ const ONLY_OPEN_IF_FUNDING_IN_SECONDS = 60;
 const OPEN_TRADE_BEFORE_FUNDING_SECONDS = 1; 
 // Thời gian (mili giây) LỆCH so với giây :59 để mở lệnh (để tránh quá tải).
 // Đặt là 755ms để lệnh được gửi vào 59.755s.
-const OPEN_TRADE_AFTER_SECOND_OFFSET_MS = 755; 
+const OPEN_TRADE_AFTER_SECOND_OFFSET_MS = 740; 
 
 // --- CẤU HÌNH WEB SERVER VÀ LOG PM2 ---
 const WEB_SERVER_PORT = 3000; // Cổng cho giao diện web
