@@ -50,7 +50,7 @@ const MIN_USDT_BALANCE_TO_OPEN = 0.1;
 // Ví dụ: 0.01 = 1% của số dư USDT khả dụng.
 // ĐẢM BẢO GIÁ TRỊ NÀY ĐỦ LỚN ĐỂ KHI ĐƯỢC TÍNH TOÁN, NÓ VƯỢT QUA minNotional CỦA SÀN.
 // Nếu 1% quá nhỏ (ví dụ: 1% của 10 USDT là 0.1 USDT), bot sẽ không thể mở lệnh.
-const PERCENT_ACCOUNT_PER_TRADE = 0.25; // Ví dụ: 0.01 = 1%
+const PERCENT_ACCOUNT_PER_TRADE = 0.97; // Ví dụ: 0.01 = 1%
 
 // Cấu hình Stop Loss:
 // SL cố định X% của vốn đầu tư ban đầu (số tiền được tính từ PERCENT_ACCOUNT_PER_TRADE)
@@ -60,12 +60,12 @@ const STOP_LOSS_PERCENTAGE = 0.4; // 0.5 = 50% của vốn đầu tư ban đầu
 // TP được tính dựa trên X% của vốn đầu tư ban đầu (số tiền được tính từ PERCENT_ACCOUNT_PER_TRADE).
 // Đã điều chỉnh để phù hợp với việc giữ lệnh 10 giây (giá trị TP có thể rất nhỏ hoặc không thể đạt)
 const TAKE_PROFIT_PERCENTAGES = {
-    20: 0.05,  // 5% TP nếu đòn bẩy 20x
-    25: 0.06,  // 6% TP nếu đòn bẩy 25x
-    50: 0.08,  // 8% TP nếu đòn bẩy 50x
-    75: 0.10,  // 10% TP nếu đòn bẩy 75x
-    100: 0.12, // 12% TP nếu đòn bẩy 100x
-    125: 0.15, // 15% TP nếu đòn bẩy 125x
+    20: 0.015,  // 5% TP nếu đòn bẩy 20x
+    25: 0.015,  // 6% TP nếu đòn bẩy 25x
+    50: 0.02,  // 8% TP nếu đòn bẩy 50x
+    75: 0.20,  // 10% TP nếu đòn bẩy 75x
+    100: 0.25, // 12% TP nếu đòn bẩy 100x
+    125: 0.30, // 15% TP nếu đòn bẩy 125x
 };
 
 // Ngưỡng funding rate âm tối thiểu để xem xét mở lệnh (ví dụ: -0.005 = -0.5%)
