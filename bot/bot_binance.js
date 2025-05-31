@@ -651,7 +651,7 @@ async function openShortPosition(symbol, fundingRate, usdtBalance, maxLeverage) 
         addLog(`  + Giá vào lệnh: ${entryPrice.toFixed(pricePrecision)}`);
 
         // Tính toán TP/SL dựa trên initialMargin
-        const slAmountUSDT = initialMargin * STOP_LOSS_PERCENTAGE * 5; // SL = 5 lần STOP_LOSS_PERCENTAGE
+        const slAmountUSDT = initialMargin * STOP_LOSS_PERCENTAGE * 1.5; // SL = 5 lần STOP_LOSS_PERCENTAGE
         const tpPercentage = TAKE_PROFIT_PERCENTAGES[maxLeverage]; 
         const tpAmountUSDT = initialMargin * tpPercentage * 2.5; // TP = 2.5 lần TAKE_PROFIT_PERCENTAGES
 
@@ -668,7 +668,7 @@ async function openShortPosition(symbol, fundingRate, usdtBalance, maxLeverage) 
         tpPrice = parseFloat(tpPrice.toFixed(pricePrecision));
 
         addLog(`>>> Giá TP: ${tpPrice.toFixed(pricePrecision)}, Giá SL: ${slPrice.toFixed(pricePrecision)}`, true);
-        addLog(`   (SL: ${(STOP_LOSS_PERCENTAGE * 5 * 100).toFixed(0)}% của ${initialMargin.toFixed(2)} USDT = ${slAmountUSDT.toFixed(2)} USDT)`); 
+        addLog(`   (SL: ${(STOP_LOSS_PERCENTAGE * 1.5 * 100).toFixed(0)}% của ${initialMargin.toFixed(2)} USDT = ${slAmountUSDT.toFixed(2)} USDT)`); 
         addLog(`   (TP: ${(tpPercentage * 2.5 * 100).toFixed(0)}% của ${initialMargin.toFixed(2)} USDT = ${tpAmountUSDT.toFixed(2)} USDT)`);
 
 
