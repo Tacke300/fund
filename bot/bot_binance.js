@@ -57,8 +57,8 @@ const STOP_LOSS_PERCENTAGE = 0.5; // 1 = 100% của vốn đầu tư ban đầu
 // Bảng ánh xạ maxLeverage với Take Profit percentage.
 // TP được tính dựa trên X% của vốn đầu tư ban đầu.
 const TAKE_PROFIT_PERCENTAGES = {
-    20: 0.16,  // 50% TP nếu đòn bẩy 20x
-    25: 0.16,  // 80% TP nếu đòn bẩy 25x
+    20: 0.2,  // 50% TP nếu đòn bẩy 20x
+    25: 0.2,  // 80% TP nếu đòn bẩy 25x
     50: 0.30,    // 100% TP nếu đòn bẩy 50x
     75: 0.45,    // 100% TP nếu đòn bẩy 75x
     100: 0.65, // 150% TP nếu đòn bẩy 100x
