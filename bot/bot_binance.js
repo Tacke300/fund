@@ -39,26 +39,26 @@ let currentCountdownMessage = "Không có lệnh đang chờ đóng.";
 let countdownIntervalFrontend = null; // Để gửi đếm ngược cho frontend
 
 // === Cấu hình Bot ===
-const MIN_USDT_BALANCE_TO_OPEN = 0.1; // Số dư USDT tối thiểu để mở lệnh (đã điều chỉnh)
-const CAPITAL_PERCENTAGE_PER_TRADE = 0.15; // Phần trăm vốn sử dụng cho mỗi lệnh (50% tài khoản)
+const MIN_USDT_BALANCE_TO_OPEN = 0.1; // Số dư USDT tối thiểu để bot bắt đầu hoạt động (đã điều chỉnh)
+const FIXED_USDT_AMOUNT_PER_TRADE = 0.15; // SỐ TIỀN USDT CỤ THỂ SẼ DÙNG CHO MỖI LỆNH. THAY ĐỔI GIÁ TRỊ NÀY THEO Ý BẠN!
 
 // Cấu hình TP/SL theo yêu cầu mới
-const STOP_LOSS_PERCENTAGE = 1.997; // SL cố định 70% của vốn đầu tư ban đầu
+const STOP_LOSS_PERCENTAGE = 1; // SL cố định 70% của vốn đầu tư ban đầu (dựa trên FIXED_USDT_AMOUNT_PER_TRADE)
 
 // Bảng ánh xạ maxLeverage với Take Profit percentage
 // Đảm bảo các giá trị đòn bẩy được định nghĩa ở đây.
 const TAKE_PROFIT_PERCENTAGES = {
     20: 0.5,
-    25: 0.9,
-    50: 1.2,
-    75: 1.5,
-    100: 2,
-    125: 2.5,
+    25: 0.8,
+    50: 1,
+    75: 1,
+    100: 1.5,
+    125: 2,
 };
 
 // Ngưỡng funding rate âm tối thiểu để xem xét
 const MIN_FUNDING_RATE_THRESHOLD = -0.005; 
-const MAX_POSITION_LIFETIME_SECONDS = 100; // Thời gian tối đa giữ một vị thế (180 giây = 3 phút)
+const MAX_POSITION_LIFETIME_SECONDS = 90; // Thời gian tối đa giữ một vị thế (180 giây = 3 phút)
 
 // Thời gian trước giờ funding mà bot sẽ xem xét mở lệnh (đơn vị: phút)
 // Vẫn giữ cửa sổ hẹp nếu bạn chỉ muốn quét vào phút :59
@@ -70,7 +70,7 @@ const ONLY_OPEN_IF_FUNDING_IN_SECONDS = 60; // Chỉ mở nếu còn lại <= 60
 
 // Cấu hình thời điểm mở lệnh
 const OPEN_TRADE_BEFORE_FUNDING_SECONDS = 1; // 1 giây trước giờ funding (tức là vào giây :59 của phút :59)
-const OPEN_TRADE_AFTER_SECOND_OFFSET_MS = 733; // Thêm 797ms sau khi giây là 59
+const OPEN_TRADE_AFTER_SECOND_OFFSET_MS = 755; // Thêm 755ms sau khi giây là 59
 
 // === Cấu hình Server Web ===
 const WEB_SERVER_PORT = 3000; // Cổng cho giao diện web
@@ -250,16 +250,16 @@ async function callPublicAPI(fullEndpointPath, params = {}) {
 
 // Hàm lấy thời gian server Binance
 async function syncServerTime() {
-try {
-    const data = await callPublicAPI('/fapi/v1/time');
-    const binanceServerTime = data.serverTime;
-    const localTime = Date.now();
-    serverTimeOffset = binanceServerTime - localTime;
-    addLog(`✅ Đồng bộ thời gian với Binance server. Độ lệch: ${serverTimeOffset} ms.`, true);
-} catch (error) {
-    addLog(`❌ Lỗi khi đồng bộ thời gian với Binance: ${error.message}.`, true);
-    serverTimeOffset = 0; // Đặt về 0 nếu không đồng bộ được để tránh lỗi timestamp
-}
+    try {
+        const data = await callPublicAPI('/fapi/v1/time');
+        const binanceServerTime = data.serverTime;
+        const localTime = Date.now();
+        serverTimeOffset = binanceServerTime - localTime;
+        addLog(`✅ Đồng bộ thời gian với Binance server. Độ lệch: ${serverTimeOffset} ms.`, true);
+    } catch (error) {
+        addLog(`❌ Lỗi khi đồng bộ thời gian với Binance: ${error.message}.`, true);
+        serverTimeOffset = 0; // Đặt về 0 nếu không đồng bộ được để tránh lỗi timestamp
+    }
 }
 
 // Hàm lấy thông tin đòn bẩy cho một symbol
@@ -290,7 +290,7 @@ async function getLeverageBracketForSymbol(symbol) {
     }
 }
 
-// NEW: Hàm thiết lập đòn bẩy cho một symbol
+// Hàm thiết lập đòn bẩy cho một symbol
 async function setLeverage(symbol, leverage) {
     try {
         addLog(`[DEBUG] Đang thiết lập đòn bẩy ${leverage}x cho ${symbol}.`);
@@ -308,72 +308,72 @@ async function setLeverage(symbol, leverage) {
 
 // Hàm lấy thông tin sàn (exchangeInfo)
 async function getExchangeInfo() {
-if (exchangeInfoCache) {
-    return exchangeInfoCache;
-}
+    if (exchangeInfoCache) {
+        return exchangeInfoCache;
+    }
 
-addLog('>>> Đang lấy exchangeInfo từ Binance...', true);
-try {
-    const data = await callPublicAPI('/fapi/v1/exchangeInfo');
-    addLog(`✅ Đã nhận được exchangeInfo. Số lượng symbols: ${data.symbols.length}`, true);
+    addLog('>>> Đang lấy exchangeInfo từ Binance...', true);
+    try {
+        const data = await callPublicAPI('/fapi/v1/exchangeInfo');
+        addLog(`✅ Đã nhận được exchangeInfo. Số lượng symbols: ${data.symbols.length}`, true);
 
-    exchangeInfoCache = {};
-    data.symbols.forEach(s => {
-    // Tìm các bộ lọc cần thiết
-    const lotSizeFilter = s.filters.find(f => f.filterType === 'LOT_SIZE');
-    const marketLotSizeFilter = s.filters.find(f => f.filterType === 'MARKET_LOT_SIZE');
-    const minNotionalFilter = s.filters.find(f => f.filterType === 'MIN_NOTIONAL');
-    const priceFilter = s.filters.find(f => f.filterType === 'PRICE_FILTER');
+        exchangeInfoCache = {};
+        data.symbols.forEach(s => {
+            // Tìm các bộ lọc cần thiết
+            const lotSizeFilter = s.filters.find(f => f.filterType === 'LOT_SIZE');
+            const marketLotSizeFilter = s.filters.find(f => f.filterType === 'MARKET_LOT_SIZE');
+            const minNotionalFilter = s.filters.find(f => f.filterType === 'MIN_NOTIONAL');
+            const priceFilter = s.filters.find(f => f.filterType === 'PRICE_FILTER');
 
-    exchangeInfoCache[s.symbol] = {
-        minQty: lotSizeFilter ? parseFloat(lotSizeFilter.minQty) : (marketLotSizeFilter ? parseFloat(marketLotSizeFilter.minQty) : 0),
-        maxQty: lotSizeFilter ? parseFloat(lotSizeFilter.maxQty) : (marketLotSizeFilter ? parseFloat(marketLotSizeFilter.maxQty) : Infinity),
-        stepSize: lotSizeFilter ? parseFloat(lotSizeFilter.stepSize) : (marketLotSizeFilter ? parseFloat(marketLotSizeFilter.stepSize) : 0.001),
-        minNotional: minNotionalFilter ? parseFloat(minNotionalFilter.notional) : 0,
-        pricePrecision: s.pricePrecision,
-        quantityPrecision: s.quantityPrecision,
-        minPrice: priceFilter ? parseFloat(priceFilter.minPrice) : 0,
-        maxPrice: priceFilter ? parseFloat(priceFilter.maxPrice) : Infinity,
-        tickSize: priceFilter ? parseFloat(priceFilter.tickSize) : 0.001
-    };
-    });
-    addLog('>>> Đã tải thông tin sàn và cache.', true);
-    return exchangeInfoCache;
-} catch (error) {
-    addLog('❌ Lỗi khi lấy exchangeInfo: ' + (error.msg || error.message), true);
-    exchangeInfoCache = null;
-    return null;
-}
+            exchangeInfoCache[s.symbol] = {
+                minQty: lotSizeFilter ? parseFloat(lotSizeFilter.minQty) : (marketLotSizeFilter ? parseFloat(marketLotSizeFilter.minQty) : 0),
+                maxQty: lotSizeFilter ? parseFloat(lotSizeFilter.maxQty) : (marketLotSizeFilter ? parseFloat(marketLotSizeFilter.maxQty) : Infinity),
+                stepSize: lotSizeFilter ? parseFloat(lotSizeFilter.stepSize) : (marketLotSizeFilter ? parseFloat(marketLotSizeFilter.stepSize) : 0.001),
+                minNotional: minNotionalFilter ? parseFloat(minNotionalFilter.notional) : 0,
+                pricePrecision: s.pricePrecision,
+                quantityPrecision: s.quantityPrecision,
+                minPrice: priceFilter ? parseFloat(priceFilter.minPrice) : 0,
+                maxPrice: priceFilter ? parseFloat(priceFilter.maxPrice) : Infinity,
+                tickSize: priceFilter ? parseFloat(priceFilter.tickSize) : 0.001
+            };
+        });
+        addLog('>>> Đã tải thông tin sàn và cache.', true);
+        return exchangeInfoCache;
+    } catch (error) {
+        addLog('❌ Lỗi khi lấy exchangeInfo: ' + (error.msg || error.message), true);
+        exchangeInfoCache = null;
+        return null;
+    }
 }
 
 // Hàm kết hợp để lấy tất cả filters và maxLeverage
 async function getSymbolFiltersAndMaxLeverage(symbol) {
-const filters = await getExchangeInfo();
+    const filters = await getExchangeInfo();
 
-if (!filters || !filters[symbol]) {
-    addLog(`[DEBUG getSymbolFiltersAndMaxLeverage] Không tìm thấy filters cho ${symbol}.`);
-    return null;
-}
+    if (!filters || !filters[symbol]) {
+        addLog(`[DEBUG getSymbolFiltersAndMaxLeverage] Không tìm thấy filters cho ${symbol}.`);
+        return null;
+    }
 
-const maxLeverage = await getLeverageBracketForSymbol(symbol);
+    const maxLeverage = await getLeverageBracketForSymbol(symbol);
 
-return {
-    ...filters[symbol],
-    maxLeverage: maxLeverage
-};
+    return {
+        ...filters[symbol],
+        maxLeverage: maxLeverage
+    };
 }
 
 // Hàm lấy giá hiện tại
 async function getCurrentPrice(symbol) {
-try {
-    const data = await callPublicAPI('/fapi/v1/ticker/price', { symbol: symbol });
-    const price = parseFloat(data.price);
-    return price;
-} catch (error) {
-    // Không in log lỗi ở đây nếu lỗi thường xuyên (ví dụ: mất mạng tạm thời)
-    // addLog(`❌ Lỗi khi lấy giá cho ${symbol}: ` + (error.msg || error.message));
-    return null;
-}
+    try {
+        const data = await callPublicAPI('/fapi/v1/ticker/price', { symbol: symbol });
+        const price = parseFloat(data.price);
+        return price;
+    } catch (error) {
+        // Không in log lỗi ở đây nếu lỗi thường xuyên (ví dụ: mất mạng tạm thời)
+        // addLog(`❌ Lỗi khi lấy giá cho ${symbol}: ` + (error.msg || error.message));
+        return null;
+    }
 }
 
 // --- Hàm chính để đóng lệnh Short ---
@@ -468,7 +468,7 @@ function stopCountdownFrontend() {
 }
 
 // --- Hàm chính để mở lệnh Short ---
-async function openShortPosition(symbol, fundingRate, usdtBalance, maxLeverage) { // *** THÊM THAM SỐ maxLeverage ***
+async function openShortPosition(symbol, fundingRate, usdtBalance, maxLeverage) {
     if (currentOpenPosition) {
         addLog(`⚠️ Đã có vị thế đang mở (${currentOpenPosition.symbol}). Bỏ qua việc mở lệnh mới cho ${symbol}.`);
         if(botRunning) scheduleNextMainCycle(); // Quay lại chế độ chờ nếu bot đang chạy
@@ -511,8 +511,15 @@ async function openShortPosition(symbol, fundingRate, usdtBalance, maxLeverage) 
         }
         addLog(`[DEBUG] Giá hiện tại của ${symbol}: ${currentPrice.toFixed(pricePrecision)}`);
 
-        // 3. Tính toán khối lượng lệnh
-        const capitalToUse = usdtBalance * CAPITAL_PERCENTAGE_PER_TRADE; // Vốn USDT đầu tư
+        // 3. Tính toán khối lượng lệnh DỰA TRÊN SỐ TIỀN CỐ ĐỊNH
+        const capitalToUse = FIXED_USDT_AMOUNT_PER_TRADE; // Vốn USDT đầu tư là số tiền cố định
+
+        if (usdtBalance < capitalToUse) {
+            addLog(`⚠️ Số dư USDT khả dụng (${usdtBalance.toFixed(2)}) không đủ để mở lệnh với ${capitalToUse} USDT. Hủy mở lệnh.`, true);
+            if(botRunning) scheduleNextMainCycle();
+            return;
+        }
+        
         let quantity = (capitalToUse * maxLeverage) / currentPrice; // Khối lượng theo giá trị đòn bẩy
 
         // Làm tròn quantity theo stepSize và quantityPrecision
@@ -520,7 +527,12 @@ async function openShortPosition(symbol, fundingRate, usdtBalance, maxLeverage) 
         quantity = parseFloat(quantity.toFixed(quantityPrecision));
 
         // Đảm bảo quantity không nhỏ hơn minQty
-        quantity = Math.max(minQty, quantity);
+        // Một số đồng coin có minQty khá cao, có thể cần adjust `FIXED_USDT_AMOUNT_PER_TRADE`
+        // hoặc logic nếu bạn muốn trade những đồng đó.
+        if (quantity < minQty) {
+            addLog(`⚠️ Khối lượng tính toán (${quantity.toFixed(quantityPrecision)}) nhỏ hơn minQty (${minQty}) cho ${symbol}. Điều chỉnh khối lượng lên minQty.`, true);
+            quantity = minQty;
+        }
 
         const currentNotional = quantity * currentPrice;
         if (currentNotional < minNotional) {
@@ -551,11 +563,11 @@ async function openShortPosition(symbol, fundingRate, usdtBalance, maxLeverage) 
         addLog(`✅ Đã mở SHORT ${symbol} vào lúc ${formattedOpenTime}`, true);
         addLog(`  + Funding Rate: ${fundingRate}`);
         addLog(`  + Đòn bẩy: ${maxLeverage}x`);
-        addLog(`  + Số tiền: ${capitalToUse.toFixed(2)} USDT`);
+        addLog(`  + Số tiền đầu tư: ${capitalToUse.toFixed(2)} USDT`); // Hiển thị số tiền cố định đã dùng
         addLog(`  + Khối lượng: ${quantity} ${symbol}`);
         addLog(`  + Giá vào lệnh: ${entryPrice.toFixed(pricePrecision)}`);
 
-        // 5. Tính toán TP/SL theo yêu cầu mới (dựa trên vốn đầu tư ban đầu)
+        // 5. Tính toán TP/SL theo yêu cầu mới (dựa trên số tiền đầu tư ban đầu FIXED_USDT_AMOUNT_PER_TRADE)
         const slAmountUSDT = capitalToUse * STOP_LOSS_PERCENTAGE; // Số tiền SL dựa trên vốn đầu tư
         const tpPercentage = TAKE_PROFIT_PERCENTAGES[maxLeverage]; // Lấy TP % theo maxLeverage
         const tpAmountUSDT = capitalToUse * tpPercentage; // Số tiền TP dựa trên vốn đầu tư
@@ -680,7 +692,7 @@ async function runTradingLogic() {
         return;
     }
 
-    // --- THAY ĐỔI: Sửa thông báo quét để phản ánh việc quét vào phút :59 ---
+    // --- Sửa thông báo quét để phản ánh việc quét vào phút :59 ---
     addLog('>>> Đang quét cơ hội mở lệnh (chỉ vào phút :59)...', true);
     try {
         const accountInfo = await callSignedAPI('/fapi/v2/account', 'GET');
@@ -688,7 +700,14 @@ async function runTradingLogic() {
         const availableBalance = parseFloat(usdtAsset);
 
         if (availableBalance < MIN_USDT_BALANCE_TO_OPEN) {
-            addLog(`⚠️ Số dư USDT khả dụng (${availableBalance.toFixed(2)}) dưới ngưỡng tối thiểu (${MIN_USDT_BALANCE_TO_OPEN}). Tắt điện thoại đi uống bia đê`, true);
+            addLog(`⚠️ Số dư USDT khả dụng (${availableBalance.toFixed(2)}) dưới ngưỡng tối thiểu để bot chạy (${MIN_USDT_BALANCE_TO_OPEN}). Tắt điện thoại đi uống bia đê`, true);
+            scheduleNextMainCycle();
+            return;
+        }
+        
+        // KIỂM TRA ĐIỀU KIỆN SỐ DƯ ĐỂ VÀO LỆNH VỚI SỐ TIỀN CỐ ĐỊNH
+        if (availableBalance < FIXED_USDT_AMOUNT_PER_TRADE) {
+            addLog(`⚠️ Số dư USDT khả dụng (${availableBalance.toFixed(2)}) dưới số tiền cố định để vào lệnh (${FIXED_USDT_AMOUNT_PER_TRADE}). Không thể mở lệnh.`, true);
             scheduleNextMainCycle();
             return;
         }
@@ -714,7 +733,8 @@ async function runTradingLogic() {
                 if (timeToFundingMinutes > 0 && timeToFundingMinutes <= FUNDING_WINDOW_MINUTES) {
                     const symbolInfo = await getSymbolFiltersAndMaxLeverage(item.symbol);
                     if (symbolInfo && typeof symbolInfo.maxLeverage === 'number' && symbolInfo.maxLeverage > 1) {
-                        const capitalToUse = availableBalance * CAPITAL_PERCENTAGE_PER_TRADE;
+                        // SỬ DỤNG FIXED_USDT_AMOUNT_PER_TRADE ĐỂ ƯỚC TÍNH KHỐI LƯỢNG
+                        const capitalToUse = FIXED_USDT_AMOUNT_PER_TRADE;
                         const currentPrice = await getCurrentPrice(item.symbol);
                         if (currentPrice === null) {
                             addLog(`[DEBUG] Không thể lấy giá hiện tại ${item.symbol}. Bỏ qua.`);
@@ -726,7 +746,8 @@ async function runTradingLogic() {
 
                         const currentNotional = estimatedQuantity * currentPrice;
 
-                        if (currentNotional >= symbolInfo.minNotional && estimatedQuantity > 0 && TAKE_PROFIT_PERCENTAGES[symbolInfo.maxLeverage] !== undefined) {
+                        // Kiểm tra minNotional, minQty, và TP config
+                        if (currentNotional >= symbolInfo.minNotional && estimatedQuantity >= symbolInfo.minQty && TAKE_PROFIT_PERCENTAGES[symbolInfo.maxLeverage] !== undefined) {
                             eligibleCandidates.push({
                                 symbol: item.symbol,
                                 fundingRate: fundingRate,
@@ -736,7 +757,7 @@ async function runTradingLogic() {
                         } else {
                             let reason = 'Không rõ';
                             if (currentNotional < symbolInfo.minNotional) reason = `Không đủ minNotional (${symbolInfo.minNotional.toFixed(2)})`;
-                            else if (estimatedQuantity <= 0) reason = `Khối lượng quá nhỏ (${estimatedQuantity})`;
+                            else if (estimatedQuantity < symbolInfo.minQty) reason = `Khối lượng ước tính (${estimatedQuantity}) nhỏ hơn minQty (${symbolInfo.minQty})`;
                             else if (TAKE_PROFIT_PERCENTAGES[symbolInfo.maxLeverage] === undefined) reason = `Đòn bẩy ${symbolInfo.maxLeverage}x không có cấu hình TP`;
                             addLog(`[DEBUG] ${item.symbol}: Funding âm (${fundingRate}), gần giờ funding, nhưng KHÔNG ĐỦ ĐIỀU KIỆN mở lệnh. Lý do: ${reason}.`);
                         }
@@ -789,7 +810,8 @@ async function runTradingLogic() {
                     return;
                 }
 
-                const capitalToUse = availableBalance * CAPITAL_PERCENTAGE_PER_TRADE;
+                // ƯỚC TÍNH SỐ LƯỢNG CHO LOG
+                const capitalToUse = FIXED_USDT_AMOUNT_PER_TRADE;
                 const currentPrice = await getCurrentPrice(selectedCandidateToOpen.symbol);
                 let estimatedQuantity = 0;
                 if (currentPrice !== null) {
@@ -811,7 +833,7 @@ async function runTradingLogic() {
                 clearTimeout(nextScheduledTimeout); // Hủy lịch trình quét cũ
                 nextScheduledTimeout = setTimeout(async () => {
                     if (!currentOpenPosition && botRunning) {
-                        // --- THAY ĐỔI: Gọi openShortPosition (đã bao gồm cài đòn bẩy) ---
+                        // --- GỌI openShortPosition ĐÃ BAO GỒM CÀI ĐÒN BẨY VÀ TÍNH TOÁN DỰA TRÊN FIXED_USDT_AMOUNT_PER_TRADE ---
                         addLog(`>>> Đã đến giờ mở lệnh cho ${selectedCandidateToOpen.symbol} (phút :59). Đang thực hiện mở lệnh.`, true);
                         await openShortPosition(selectedCandidateToOpen.symbol, selectedCandidateToOpen.fundingRate, availableBalance, selectedCandidateToOpen.maxLeverage);
                     } else if (!botRunning) {
@@ -821,25 +843,25 @@ async function runTradingLogic() {
                     }
                 }, delayForExactOpenMs);
             } else { // Không tìm thấy đồng coin nào phù hợp sau khi duyệt qua tất cả
-                // --- THAY ĐỔI: Quay lại logic chờ đến phút :59 tiếp theo ---
+                // --- Quay lại logic chờ đến phút :59 tiếp theo ---
                 addLog('>>> Không tìm thấy đồng coin nào thỏa mãn điều kiện trong chu kỳ này. Đang chờ chu kỳ quét tiếp theo (vào phút :59).', true);
                 scheduleNextMainCycle();
             }
 
         } else { // Không có đồng coin nào đạt điều kiện sơ bộ
-            // --- THAY ĐỔI: Quay lại logic chờ đến phút :59 tiếp theo ---
+            // --- Quay lại logic chờ đến phút :59 tiếp theo ---
             addLog('>>> Không tìm thấy cơ hội mở lệnh đủ điều kiện tại thời điểm này. Đang chờ chu kỳ quét tiếp theo (vào phút :59).', true);
             scheduleNextMainCycle();
         }
     } catch (error) {
         addLog('❌ Lỗi tìm kiếm: ' + (error.msg || error.message), true);
-        // --- THAY ĐỔI: Quay lại logic chờ đến phút :59 tiếp theo nếu có lỗi ---
+        // --- Quay lại logic chờ đến phút :59 tiếp theo nếu có lỗi ---
         scheduleNextMainCycle(); 
     }
 }
 
 // Hàm lên lịch chu kỳ chính của bot (quét hoặc chờ)
-// --- THAY ĐỔI: Trả lại logic chờ đến phút :59 ---
+// --- Trả lại logic chờ đến phút :59 ---
 async function scheduleNextMainCycle() {
     if (!botRunning) {
         addLog('Bot đã dừng.', true);
@@ -1000,7 +1022,7 @@ app.get('/api/status', async (req, res) => {
 
         let statusMessage = 'MAY CHU: DA TAT (PM2)';
         if (botProcess) {
-            statusMessage = `MAY CHU: ${botProcess.pm2_env.status.toUpperCase()} (  Restarts: ${botProcess.pm2_env.restart_time})`;
+            statusMessage = `MAY CHU: ${botProcess.pm2_env.status.toUpperCase()} (Restarts: ${botProcess.pm2_env.restart_time})`;
             if (botProcess.pm2_env.status === 'online') {
                 statusMessage += ` | TRANG THAI: ${botRunning ? 'DANG CHAY' : 'DA DUNG'}`;
                 if (botStartTime) {
@@ -1036,8 +1058,4 @@ app.get('/stop_bot_logic', (req, res) => {
     res.send(message);
 });
 
-// === DÒNG QUAN TRỌNG ĐỂ LẮNG NGHE CỔNG ===
-app.listen(WEB_SERVER_PORT, () => {
-    console.log(`Bot chờ khởi chạy:${WEB_SERVER_PORT}`);
-    console.log(`Truy cập:${WEB_SERVER_PORT}`);
-});
+// === D
