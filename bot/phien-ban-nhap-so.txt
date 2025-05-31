@@ -45,31 +45,32 @@ let countdownIntervalFrontend = null;
 // --- CẤU HÌNH BOT CÁC THAM SỐ GIAO DỊCH ---
 // Số dư USDT tối thiểu trong ví futures để bot được phép mở lệnh
 const MIN_USDT_BALANCE_TO_OPEN = 0.1; 
-// SỐ TIỀN USDT CỐ ĐỊNH SẼ DÙNG CHO MỖI LỆNH ĐẦU TƯ BAN ĐẦU.
-// ĐẢM BẢO GIÁ TRỊ NÀY ĐỦ LỚN ĐỂ VƯỢT QUA minNotional CỦA SÀN.
-// Ví dụ: 0.15 USDT có thể quá nhỏ cho nhiều cặp giao dịch trên Binance Futures.
-// Hãy đặt nó lên 10, 20 hoặc 50 USDT để tránh lỗi 'minNotional'.
-const FIXED_USDT_AMOUNT_PER_TRADE = 0.1; // Ví dụ: đặt 10 hoặc 20 cho minNotional.
+
+// SỐ PHẦN TRĂM CỦA TÀI KHOẢN USDT KHẢ DỤNG SẼ DÙNG CHO MỖI LỆNH ĐẦU TƯ BAN ĐẦU.
+// Ví dụ: 0.01 = 1% của số dư USDT khả dụng.
+// ĐẢM BẢO GIÁ TRỊ NÀY ĐỦ LỚN ĐỂ KHI ĐƯỢC TÍNH TOÁN, NÓ VƯỢT QUA minNotional CỦA SÀN.
+// Nếu 1% quá nhỏ (ví dụ: 1% của 10 USDT là 0.1 USDT), bot sẽ không thể mở lệnh.
+const PERCENT_ACCOUNT_PER_TRADE = 0.1; // Ví dụ: 0.01 = 1%
 
 // Cấu hình Stop Loss:
-// SL cố định X% của vốn đầu tư ban đầu (FIXED_USDT_AMOUNT_PER_TRADE)
-const STOP_LOSS_PERCENTAGE = 0.5; // 1 = 100% của FIXED_USDT_AMOUNT_PER_TRADE
+// SL cố định X% của vốn đầu tư ban đầu (số tiền được tính từ PERCENT_ACCOUNT_PER_TRADE)
+const STOP_LOSS_PERCENTAGE = 0.5; // 0.5 = 50% của vốn đầu tư ban đầu
 
 // Bảng ánh xạ maxLeverage với Take Profit percentage.
-// TP được tính dựa trên X% của vốn đầu tư ban đầu (FIXED_USDT_AMOUNT_PER_TRADE).
+// TP được tính dựa trên X% của vốn đầu tư ban đầu (số tiền được tính từ PERCENT_ACCOUNT_PER_TRADE).
 const TAKE_PROFIT_PERCENTAGES = {
-    20: 0.5,  // 50% TP nếu đòn bẩy 20x
-    25: 0.5,  // 80% TP nếu đòn bẩy 25x
-    50: 0.75,    // 100% TP nếu đòn bẩy 50x
-    75: 1,    // 100% TP nếu đòn bẩy 75x
-    100: 1.25, // 150% TP nếu đòn bẩy 100x
-    125: 1.5,   // 200% TP nếu đòn bẩy 125x
+    20: 0.23,  // 50% TP nếu đòn bẩy 20x
+    25: 0.23,  // 80% TP nếu đòn bẩy 25x
+    50: 0.36,    // 100% TP nếu đòn bẩy 50x
+    75: 0.52,    // 100% TP nếu đòn bẩy 75x
+    100: 0.63, // 150% TP nếu đòn bẩy 100x
+    125: 0.79,   // 200% TP nếu đòn bẩy 125x
 };
 
 // Ngưỡng funding rate âm tối thiểu để xem xét mở lệnh (ví dụ: -0.005 = -0.5%)
-const MIN_FUNDING_RATE_THRESHOLD = -0.00123; 
+const MIN_FUNDING_RATE_THRESHOLD = -0.001; 
 // Thời gian tối đa giữ một vị thế (ví dụ: 90 giây = 1 phút 30 giây)
-const MAX_POSITION_LIFETIME_SECONDS = 90; 
+const MAX_POSITION_LIFETIME_SECONDS = 297; 
 
 // Cửa sổ thời gian (tính bằng phút) TRƯỚC giờ funding mà bot sẽ bắt đầu quét.
 // Đặt là 1 phút để chỉ quét vào phút :59.
@@ -437,9 +438,7 @@ async function closeShortPosition(symbol, quantityToClose, reason = 'manual') {
         }
 
         const quantityPrecision = symbolInfo.quantityPrecision;
-        const adjustedQuantity = parseFloat(quantityToClose.toFixed(quantityPrecision));
-
-        // Kiểm tra vị thế thực tế trên Binance để đảm bảo có vị thế để đóng
+        // Sử dụng khối lượng thực tế trên sàn để đảm bảo đóng chính xác
         const positions = await callSignedAPI('/fapi/v2/positionRisk', 'GET');
         const currentPositionOnBinance = positions.find(p => p.symbol === symbol && parseFloat(p.positionAmt) < 0); // Tìm vị thế SHORT
 
@@ -562,11 +561,11 @@ async function openShortPosition(symbol, fundingRate, usdtBalance, maxLeverage) 
         }
         addLog(`[DEBUG] Giá hiện tại của ${symbol}: ${currentPrice.toFixed(pricePrecision)}`);
 
-        // Tính toán khối lượng lệnh dựa trên số tiền cố định (FIXED_USDT_AMOUNT_PER_TRADE)
-        const capitalToUse = FIXED_USDT_AMOUNT_PER_TRADE; 
+        // Tính toán khối lượng lệnh dựa trên số phần trăm tài khoản
+        const capitalToUse = usdtBalance * PERCENT_ACCOUNT_PER_TRADE; 
 
-        if (usdtBalance < capitalToUse) {
-            addLog(`⚠️ Số dư USDT khả dụng (${usdtBalance.toFixed(2)}) không đủ để mở lệnh với ${capitalToUse} USDT. Hủy mở lệnh.`, true);
+        if (usdtBalance < capitalToUse) { // Logic này chỉ để an toàn thêm, thực tế capitalToUse sẽ <= usdtBalance
+            addLog(`⚠️ Số dư USDT khả dụng (${usdtBalance.toFixed(2)}) không đủ để mở lệnh với ${capitalToUse.toFixed(2)} USDT. Hủy mở lệnh.`, true);
             if(botRunning) scheduleNextMainCycle();
             return;
         }
@@ -581,7 +580,7 @@ async function openShortPosition(symbol, fundingRate, usdtBalance, maxLeverage) 
         // Đảm bảo quantity không nhỏ hơn minQty
         if (quantity < minQty) {
             addLog(`⚠️ Khối lượng tính toán (${quantity.toFixed(quantityPrecision)}) nhỏ hơn minQty (${minQty}) cho ${symbol}. Không thể mở lệnh.`, true);
-            addLog(`   Vui lòng tăng FIXED_USDT_AMOUNT_PER_TRADE hoặc chọn cặp có minQty nhỏ hơn.`);
+            addLog(`   Vui lòng tăng PERCENT_ACCOUNT_PER_TRADE hoặc chọn cặp có minQty nhỏ hơn.`);
             if(botRunning) scheduleNextMainCycle(); 
             return;
         }
@@ -620,7 +619,7 @@ async function openShortPosition(symbol, fundingRate, usdtBalance, maxLeverage) 
         addLog(`  + Khối lượng: ${quantity} ${symbol}`);
         addLog(`  + Giá vào lệnh: ${entryPrice.toFixed(pricePrecision)}`);
 
-        // Tính toán TP/SL dựa trên FIXED_USDT_AMOUNT_PER_TRADE
+        // Tính toán TP/SL dựa trên capitalToUse (được tính từ PERCENT_ACCOUNT_PER_TRADE)
         const slAmountUSDT = capitalToUse * STOP_LOSS_PERCENTAGE; 
         const tpPercentage = TAKE_PROFIT_PERCENTAGES[maxLeverage]; 
         const tpAmountUSDT = capitalToUse * tpPercentage; 
@@ -723,7 +722,7 @@ async function manageOpenPosition() {
         return;
     }
 
-    const { symbol, quantity, tpPrice, slPrice, openTime, pricePrecision } = currentOpenPosition;
+    const { symbol, quantity, openTime } = currentOpenPosition; // Loại bỏ tpPrice, slPrice vì Binance tự xử lý
 
     try {
         const currentTime = new Date();
@@ -735,25 +734,6 @@ async function manageOpenPosition() {
             await closeShortPosition(symbol, quantity, 'Hết thời gian');
             return; 
         }
-
-        const currentPrice = await getCurrentPrice(symbol);
-        if (currentPrice === null) {
-            addLog(`⚠️ Không thể lấy giá hiện tại cho ${symbol} khi quản lý vị thế. Đang thử lại...`);
-            return;
-        }
-
-        // Note: Logic TP/SL tự động của Binance sẽ xử lý việc đóng lệnh khi giá đạt TP/SL.
-        // Tuy nhiên, chúng ta vẫn giữ logic kiểm tra này để xử lý timeout và dự phòng.
-        // Nếu đã đặt lệnh TP/SL trên sàn, thường không cần kiểm tra giá ở đây nữa.
-        // Tuy nhiên, để an toàn và quản lý timeout, vẫn giữ lại phần này.
-        // Chỉ cần bỏ qua việc gọi closeShortPosition nếu lệnh TP/SL đã được Binance xử lý.
-        // Để đơn giản, bot sẽ chỉ dựa vào TP/SL của Binance, và chỉ đóng khi hết thời gian.
-        
-        // Cập nhật lại: Sau khi triển khai TP/SL trên Binance,
-        // hàm manageOpenPosition này chủ yếu để xử lý trường hợp timeout.
-        // Các trường hợp TP/SL sẽ được Binance tự động kích hoạt.
-        // Ta chỉ cần đảm bảo rằng khi vị thế được đóng (do TP/SL hoặc timeout),
-        // `currentOpenPosition` được reset và các lệnh chờ được hủy.
         
         // Kiểm tra vị thế thực tế trên Binance để đảm bảo cập nhật trạng thái
         const positions = await callSignedAPI('/fapi/v2/positionRisk', 'GET');
@@ -805,9 +785,13 @@ async function runTradingLogic() {
             return;
         }
         
-        // Kiểm tra số dư đủ để vào lệnh với số tiền cố định
-        if (availableBalance < FIXED_USDT_AMOUNT_PER_TRADE) {
-            addLog(`⚠️ Số dư USDT khả dụng (${availableBalance.toFixed(2)}) dưới số tiền cố định để vào lệnh (${FIXED_USDT_AMOUNT_PER_TRADE}). Không thể mở lệnh.`, true);
+        // Tính toán số vốn sẽ dùng cho mỗi lệnh dựa trên phần trăm tài khoản
+        const estimatedCapitalToUse = availableBalance * PERCENT_ACCOUNT_PER_TRADE;
+
+        // Kiểm tra số dư đủ để vào lệnh với số tiền tính toán
+        // MIN_USDT_BALANCE_TO_OPEN được dùng làm ngưỡng tối thiểu cho estimatedCapitalToUse
+        if (availableBalance < estimatedCapitalToUse || estimatedCapitalToUse < MIN_USDT_BALANCE_TO_OPEN) {
+            addLog(`⚠️ Số dư USDT khả dụng (${availableBalance.toFixed(2)}) không đủ để mở lệnh với ${PERCENT_ACCOUNT_PER_TRADE*100}% tài khoản (${estimatedCapitalToUse.toFixed(2)} USDT) hoặc số tiền này quá nhỏ (<${MIN_USDT_BALANCE_TO_OPEN} USDT). Không thể mở lệnh.`, true);
             scheduleNextMainCycle();
             return;
         }
@@ -834,13 +818,14 @@ async function runTradingLogic() {
                     // Đảm bảo có thông tin đòn bẩy và TP được cấu hình
                     if (symbolDetails && typeof symbolDetails.maxLeverage === 'number' && symbolDetails.maxLeverage > 1 && TAKE_PROFIT_PERCENTAGES[symbolDetails.maxLeverage] !== undefined) {
                         // ƯỚC TÍNH KHỐI LƯỢNG để kiểm tra minNotional/minQty
-                        const capitalToUse = FIXED_USDT_AMOUNT_PER_TRADE;
+                        const capitalToUseForEstimate = availableBalance * PERCENT_ACCOUNT_PER_TRADE;
                         const currentPrice = await getCurrentPrice(item.symbol);
                         if (currentPrice === null) {
                             addLog(`[DEBUG] Không thể lấy giá hiện tại cho ${item.symbol}. Bỏ qua.`);
                             continue;
                         }
-                        let estimatedQuantity = (capitalToUse * symbolDetails.maxLeverage) / currentPrice;
+                        
+                        let estimatedQuantity = (capitalToUseForEstimate * symbolDetails.maxLeverage) / currentPrice;
                         estimatedQuantity = Math.floor(estimatedQuantity / symbolDetails.stepSize) * symbolDetails.stepSize;
                         estimatedQuantity = parseFloat(estimatedQuantity.toFixed(symbolDetails.quantityPrecision));
 
@@ -905,12 +890,12 @@ async function runTradingLogic() {
                 }
 
                 // ƯỚC TÍNH SỐ LƯỢNG CHO LOG ĐỂ HIỂN THỊ TRƯỚC
-                const capitalToUse = FIXED_USDT_AMOUNT_PER_TRADE;
+                const capitalToUseForLog = availableBalance * PERCENT_ACCOUNT_PER_TRADE;
                 const currentPrice = await getCurrentPrice(selectedCandidateToOpen.symbol);
                 let estimatedQuantity = 0;
                 if (currentPrice !== null && exchangeInfoCache[selectedCandidateToOpen.symbol]) {
                     const symbolInfo = exchangeInfoCache[selectedCandidateToOpen.symbol];
-                    estimatedQuantity = (capitalToUse * selectedCandidateToOpen.maxLeverage) / currentPrice;
+                    estimatedQuantity = (capitalToUseForLog * selectedCandidateToOpen.maxLeverage) / currentPrice;
                     estimatedQuantity = Math.floor(estimatedQuantity / symbolInfo.stepSize) * symbolInfo.stepSize;
                     estimatedQuantity = parseFloat(estimatedQuantity.toFixed(symbolInfo.quantityPrecision));
                 }
@@ -919,7 +904,7 @@ async function runTradingLogic() {
                 addLog(`  + Funding Rate: **${selectedCandidateToOpen.fundingRate}**`);
                 addLog(`  + Giờ trả Funding tiếp theo: **${formatTimeUTC7(new Date(selectedCandidateToOpen.nextFundingTime))}**`);
                 addLog(`  + Đòn bẩy tối đa: **${selectedCandidateToOpen.maxLeverage}x**`);
-                addLog(`  + Số tiền dự kiến mở lệnh: **${capitalToUse.toFixed(2)} USDT** (Khối lượng ước tính: **${estimatedQuantity} ${selectedCandidateToOpen.symbol}**)`);
+                addLog(`  + Số tiền dự kiến mở lệnh: **${capitalToUseForLog.toFixed(2)} USDT** (Khối lượng ước tính: **${estimatedQuantity} ${selectedCandidateToOpen.symbol}**)`);
                 addLog(`  + Lệnh sẽ được mở sau khoảng **${Math.ceil(delayForExactOpenMs / 1000)} giây** (vào lúc **${formatTimeUTC7(new Date(targetOpenTimeMs))}**).`, true);
                 addLog(`>>> Đang chờ đến thời điểm mở lệnh chính xác...`, true);
                 
