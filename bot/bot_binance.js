@@ -4,7 +4,7 @@ import express from 'express';
 import { exec } from 'child_process';
 import fs from 'fs';
 import path from 'path';
-import { fileURLToPath } from 'url'; // Đã sửa lỗi cú pháp tại đây
+import { fileURLToPath } from 'url';
 
 // Lấy __filename và __dirname trong ES modules
 const __filename = fileURLToPath(import.meta.url);
@@ -86,6 +86,9 @@ const OPEN_TRADE_BEFORE_FUNDING_SECONDS = 1;
 // Thời gian (mili giây) LỆNH so với giây :59 để mở lệnh (để tránh quá tải).
 // Đặt là 755ms để lệnh được gửi vào 59.755s.
 const OPEN_TRADE_AFTER_SECOND_OFFSET_MS = 755; 
+
+// Thời gian chờ (ms) sau khi chạm TP/SL Tầng 1 trước khi kiểm tra chuyển sang Tầng 2
+const DELAY_AFTER_INITIAL_TP_SL_MS = 5000; // 5 giây
 
 // --- CẤU HÌNH WEB SERVER VÀ LOG PM2 ---
 const WEB_SERVER_PORT = 3000; // Cổng cho giao diện web
@@ -345,7 +348,7 @@ async function setMarginType(symbol, marginType) {
         addLog(`✅ Đã thiết lập chế độ ký quỹ ${marginType} cho ${symbol}.`);
         return true;
     } catch (error) {
-        // THÊM ĐIỀU KIỆN XỬ LÝ LỖI -4046 TẠI ĐÂY
+        // Xử lý lỗi -4046: "No need to change margin type" (đã là chế độ mong muốn)
         if (error.code === -4046 && error.msg === 'No need to change margin type.') {
             addLog(`⚠️ Chế độ ký quỹ ${marginType} cho ${symbol} đã được thiết lập. Tiếp tục.`, true);
             return true; // Coi như thành công vì đã ở chế độ mong muốn
@@ -354,6 +357,26 @@ async function setMarginType(symbol, marginType) {
         return false;
     }
 }
+
+/**
+ * Lấy chế độ ký quỹ hiện tại cho một symbol.
+ * @param {string} symbol - Symbol của cặp giao dịch.
+ * @returns {string|null} 'ISOLATED', 'CROSSED', hoặc null nếu lỗi.
+ */
+async function getMarginType(symbol) {
+    try {
+        const response = await callSignedAPI('/fapi/v1/positionRisk', 'GET');
+        const symbolPosition = response.find(p => p.symbol === symbol);
+        if (symbolPosition) {
+            return symbolPosition.marginType;
+        }
+        return null;
+    } catch (error) {
+        addLog(`❌ Lỗi khi lấy chế độ ký quỹ cho ${symbol}: ${error.code} - ${error.msg || error.message}`);
+        return null;
+    }
+}
+
 
 // Lấy thông tin sàn (exchangeInfo) và cache lại
 async function getExchangeInfo() {
@@ -437,12 +460,29 @@ async function cancelOpenOrdersForSymbol(symbol) {
         addLog(`✅ Đã hủy thành công tất cả các lệnh mở cho ${symbol}.`);
         return true;
     } catch (error) {
+        if (error.code === -2011 && error.msg === 'Unknown order sent.') {
+            addLog(`⚠️ Không có lệnh mở nào để hủy cho ${symbol}.`);
+            return true; // Coi như thành công vì không có gì để hủy
+        }
         addLog(`❌ Lỗi khi hủy lệnh mở cho ${symbol}: ${error.code} - ${error.msg || error.message}`);
-        // Xử lý các lỗi cụ thể nếu cần, ví dụ: không có lệnh nào để hủy
         return false;
     }
 }
 
+/**
+ * Lấy tất cả các lệnh mở (open orders) cho một symbol.
+ * @param {string} symbol - Symbol của cặp giao dịch.
+ * @returns {Array} Danh sách các lệnh mở.
+ */
+async function getOpenOrders(symbol) {
+    try {
+        const orders = await callSignedAPI('/fapi/v1/openOrders', 'GET', { symbol: symbol });
+        return orders;
+    } catch (error) {
+        addLog(`❌ Lỗi khi lấy lệnh mở cho ${symbol}: ${error.code} - ${error.msg || error.message}`);
+        return [];
+    }
+}
 
 // --- HÀM QUẢN LÝ LỆNH ---
 
@@ -568,12 +608,17 @@ async function openShortPosition(symbol, fundingRate, usdtBalance, maxLeverage) 
             return;
         }
         
-        // 1. Thiết lập chế độ ký quỹ CROSSED
-        const setMarginTypeSuccess = await setMarginType(symbol, 'CROSSED'); 
-        if (!setMarginTypeSuccess) {
-            addLog(`❌ Không thể cài đặt chế độ ký quỹ CROSSED cho ${symbol}. Hủy mở lệnh.`, true);
-            if(botRunning) scheduleNextMainCycle();
-            return;
+        // 1. Kiểm tra và thiết lập chế độ ký quỹ CROSSED nếu chưa phải là CROSSED
+        const currentMarginType = await getMarginType(symbol);
+        if (currentMarginType !== 'CROSSED') {
+            const setMarginTypeSuccess = await setMarginType(symbol, 'CROSSED'); 
+            if (!setMarginTypeSuccess) {
+                addLog(`❌ Không thể cài đặt chế độ ký quỹ CROSSED cho ${symbol}. Hủy mở lệnh.`, true);
+                if(botRunning) scheduleNextMainCycle();
+                return;
+            }
+        } else {
+            addLog(`[DEBUG] Chế độ ký quỹ cho ${symbol} đã là CROSSED. Không cần thay đổi.`);
         }
 
         // 2. Thiết lập đòn bẩy
@@ -677,8 +722,7 @@ async function openShortPosition(symbol, fundingRate, usdtBalance, maxLeverage) 
         addLog(`   (TP: ${(tpPercentage * 100).toFixed(0)}% của ${initialMargin.toFixed(2)} USDT = ${tpAmountUSDT.toFixed(2)} USDT)`);
 
 
-        // ĐẶT LỆNH TP VÀ SL BẰNG STOP_MARKET VÀ TAKE_PROFIT_MARKET
-        // Các lệnh này vẫn được đặt để tận dụng cơ chế của sàn trước.
+        // ĐẶT LỆNH TP VÀ SL BẰNG STOP_MARKET VÀ TAKE_PROFIT_MARKET NGAY SAU KHI VỊ THẾ MỞ
         try {
             // Lệnh Stop Loss (Mua để đóng vị thế Short khi giá tăng)
             await callSignedAPI('/fapi/v1/order', 'POST', {
@@ -692,7 +736,7 @@ async function openShortPosition(symbol, fundingRate, usdtBalance, maxLeverage) 
             });
             addLog(`✅ Đã đặt lệnh STOP_MARKET (SL) cho ${symbol} tại giá ${slPrice.toFixed(pricePrecision)}.`, true);
         } catch (slError) {
-            addLog(`❌ Lỗi khi đặt lệnh SL cho ${symbol}: ${slError.msg || slError.message}.`, true);
+            addLog(`❌ Lỗi khi đặt lệnh SL cho ${symbol}: ${slError.msg || slError.message}. TP/SL Tầng 1 có thể không được đặt.`, true);
         }
 
         try {
@@ -708,7 +752,7 @@ async function openShortPosition(symbol, fundingRate, usdtBalance, maxLeverage) 
             });
             addLog(`✅ Đã đặt lệnh TAKE_PROFIT_MARKET (TP) cho ${symbol} tại giá ${tpPrice.toFixed(pricePrecision)}.`, true);
         } catch (tpError) {
-            addLog(`❌ Lỗi khi đặt lệnh TP cho ${symbol}: ${tpError.msg || tpError.message}.`, true);
+            addLog(`❌ Lỗi khi đặt lệnh TP cho ${symbol}: ${tpError.msg || tpError.message}. TP/SL Tầng 1 có thể không được đặt.`, true);
         }
 
 
@@ -719,15 +763,14 @@ async function openShortPosition(symbol, fundingRate, usdtBalance, maxLeverage) 
             entryPrice: entryPrice,
             initialTPPrice: tpPrice, // Lưu TP ban đầu
             initialSLPrice: slPrice, // Lưu SL ban đầu
-            initialMargin: initialMargin, // <-- ĐÃ THÊM DÒNG NÀY ĐỂ LƯU VỐN KÝ QUỸ BAN ĐẦU
+            initialMargin: initialMargin, // Đã thêm dòng này để lưu vốn ký quỹ ban đầu
             currentTPPrice: null, // TP hiện tại, sẽ được tính khi tầng 2 kích hoạt
             currentSLPrice: null, // SL hiện tại, sẽ được tính khi tầng 2 kích hoạt
             openTime: openTime,
             pricePrecision: pricePrecision,
             isManuallyManaged: false, // Ban đầu KHÔNG quản lý thủ công
-            hasCrossedInitialTP: false, // Cờ báo hiệu đã chạm TP tầng 1
-            hasCrossedInitialSL: false, // Cờ báo hiệu đã chạm SL tầng 1
-            delayBeforeManualCheckAfterTP_SL: null // Thời điểm bắt đầu kiểm tra thủ công sau khi chạm TP/SL ban đầu
+            initialTPCrossedTime: null, // Thời điểm giá chạm TP tầng 1
+            initialSLCrossedTime: null, // Thời điểm giá chạm SL tầng 1
         };
 
         // Bắt đầu interval kiểm tra vị thế và cập nhật đếm ngược frontend
@@ -758,7 +801,7 @@ async function checkAndClosePositionManually() {
         return;
     }
 
-    const { symbol, quantity, entryPrice, initialTPPrice, initialSLPrice, pricePrecision, initialMargin } = currentOpenPosition; // Lấy initialMargin
+    const { symbol, quantity, entryPrice, initialTPPrice, initialSLPrice, pricePrecision, initialMargin, openTime } = currentOpenPosition; 
     const currentTime = Date.now();
 
     try {
@@ -767,6 +810,11 @@ async function checkAndClosePositionManually() {
             addLog(`⚠️ Không thể lấy giá hiện tại cho ${symbol} để kiểm tra đóng lệnh thủ công.`);
             return;
         }
+
+        // Lấy danh sách các lệnh mở (để kiểm tra lệnh TP/SL tầng 1)
+        const openOrders = await getOpenOrders(symbol);
+        const hasTPLimitOrder = openOrders.some(order => order.type === 'TAKE_PROFIT_MARKET');
+        const hasSLLimitOrder = openOrders.some(order => order.type === 'STOP_MARKET');
 
         // Nếu đã ở chế độ quản lý thủ công (tầng 2 đã kích hoạt)
         if (currentOpenPosition.isManuallyManaged) {
@@ -788,67 +836,91 @@ async function checkAndClosePositionManually() {
         } 
         // Nếu chưa ở chế độ quản lý thủ công (vẫn đang đợi TP/SL tầng 1 hoặc thời gian chờ)
         else {
-            // Kiểm tra xem giá đã chạm TP/SL tầng 1 chưa
             const crossedTP = currentPrice <= initialTPPrice;
             const crossedSL = currentPrice >= initialSLPrice;
 
-            if (crossedTP && !currentOpenPosition.hasCrossedInitialTP) {
-                addLog(`[DEBUG] Vị thế ${symbol}: Giá đã chạm TP tầng 1 (${currentPrice.toFixed(pricePrecision)} <= ${initialTPPrice.toFixed(pricePrecision)}). Đang đợi thêm 5s trước khi kích hoạt TP/SL tầng 2.`);
-                currentOpenPosition.hasCrossedInitialTP = true;
-                currentOpenPosition.delayBeforeManualCheckAfterTP_SL = currentTime + 5000; // Đặt thời điểm bắt đầu kiểm tra thủ công
-            } else if (crossedSL && !currentOpenPosition.hasCrossedInitialSL) {
-                addLog(`[DEBUG] Vị thế ${symbol}: Giá đã chạm SL tầng 1 (${currentPrice.toFixed(pricePrecision)} >= ${initialSLPrice.toFixed(pricePrecision)}). Đang đợi thêm 5s trước khi kích hoạt TP/SL tầng 2.`);
-                currentOpenPosition.hasCrossedSL = true;
-                currentOpenPosition.delayBeforeManualCheckAfterTP_SL = currentTime + 5000; // Đặt thời điểm bắt đầu kiểm tra thủ công
+            // Ghi nhận thời điểm chạm TP/SL tầng 1
+            if (crossedTP && currentOpenPosition.initialTPCrossedTime === null) {
+                addLog(`[DEBUG] Vị thế ${symbol}: Giá đã chạm TP tầng 1 (${currentPrice.toFixed(pricePrecision)} <= ${initialTPPrice.toFixed(pricePrecision)}). Ghi nhận thời điểm.`);
+                currentOpenPosition.initialTPCrossedTime = currentTime;
             }
-            // Nếu đã chạm TP/SL tầng 1 VÀ đã qua thời gian chờ 5s VÀ chưa kích hoạt TP/SL tầng 2
-            if ((currentOpenPosition.hasCrossedInitialTP || currentOpenPosition.hasCrossedInitialSL) && currentOpenPosition.delayBeforeManualCheckAfterTP_SL !== null && currentTime >= currentOpenPosition.delayBeforeManualCheckAfterTP_SL) {
-                
-                // Kiểm tra vị thế thực tế trên Binance lần cuối trước khi kích hoạt tầng 2
-                const positions = await callSignedAPI('/fapi/v2/positionRisk', 'GET');
-                const currentPositionOnBinance = positions.find(p => p.symbol === symbol && parseFloat(p.positionAmt) < 0);
+            if (crossedSL && currentOpenPosition.initialSLCrossedTime === null) {
+                addLog(`[DEBUG] Vị thế ${symbol}: Giá đã chạm SL tầng 1 (${currentPrice.toFixed(pricePrecision)} >= ${initialSLPrice.toFixed(pricePrecision)}). Ghi nhận thời điểm.`);
+                currentOpenPosition.initialSLCrossedTime = currentTime;
+            }
 
-                if (currentPositionOnBinance && parseFloat(currentPositionOnBinance.positionAmt) !== 0) {
-                    addLog(`[DEBUG] Vị thế ${symbol}: Đã qua 5s sau khi chạm TP/SL tầng 1 VÀ vị thế vẫn mở. Đang chuyển sang quản lý thủ công (TP/SL tầng 2).`);
-                    
-                    // Lấy lại các thông tin cần thiết từ currentOpenPosition và symbolDetails
-                    const symbolInfo = await getSymbolDetails(symbol);
-                    if (!symbolInfo || !symbolInfo.maxLeverage) {
-                        addLog(`❌ Không thể lấy thông tin đòn bẩy cho ${symbol} để tính TP/SL Tầng 2. Vị thế sẽ được quản lý thủ công (Timeout hoặc thủ công nếu cần).`, true);
-                        currentOpenPosition.isManuallyManaged = true; // Vẫn chuyển sang quản lý thủ công nhưng không có TP/SL mới
-                        return; 
-                    }
-                    const maxLeverage = symbolInfo.maxLeverage;
-
-                    // Tính toán số tiền SL/TP gốc (Tầng 1) dựa trên phần trăm vốn đã cấu hình
-                    const slAmountUSDT_T1 = initialMargin * STOP_LOSS_PERCENTAGE;
-                    const tpPercentage = TAKE_PROFIT_PERCENTAGES[maxLeverage]; 
-                    const tpAmountUSDT_T1 = initialMargin * tpPercentage;
-
-                    // Tính toán số tiền TP/SL cho Tầng 2 dựa trên phần trăm vốn gốc
-                    const slAmountUSDT_T2 = slAmountUSDT_T1 * 1.5; // SL Tầng 2 là 1.5 lần SL Tầng 1
-                    const tpAmountUSDT_T2 = tpAmountUSDT_T1 * 5;   // TP Tầng 2 là 5 lần TP Tầng 1
-
-                    // Tính toán giá TP/SL mới (tầng 2)
-                    // TP mới = Giá vào lệnh - (TP Amount Tầng 2 / Khối lượng)
-                    currentOpenPosition.currentTPPrice = entryPrice - (tpAmountUSDT_T2 / quantity);
-                    // SL mới = Giá vào lệnh + (SL Amount Tầng 2 / Khối lượng)
-                    currentOpenPosition.currentSLPrice = entryPrice + (slAmountUSDT_T2 / quantity);
-
-
-                    // Làm tròn theo pricePrecision và tickSize
-                    currentOpenPosition.currentTPPrice = Math.floor(currentOpenPosition.currentTPPrice / symbolInfo.tickSize) * symbolInfo.tickSize;
-                    currentOpenPosition.currentSLPrice = Math.ceil(currentOpenPosition.currentSLPrice / symbolInfo.tickSize) * symbolInfo.tickSize;
-                    currentOpenPosition.currentTPPrice = parseFloat(currentOpenPosition.currentTPPrice.toFixed(pricePrecision));
-                    currentOpenPosition.currentSLPrice = parseFloat(currentOpenPosition.currentSLPrice.toFixed(pricePrecision));
-
-                    currentOpenPosition.isManuallyManaged = true; // Đánh dấu đã chuyển sang quản lý thủ công
-                    addLog(`✅ TP/SL tầng 2 cho ${symbol} ĐÃ KÍCH HOẠT: TP = ${currentOpenPosition.currentTPPrice.toFixed(pricePrecision)}, SL = ${currentOpenPosition.currentSLPrice.toFixed(pricePrecision)}`);
-                    addLog(`   (SL Tầng 2: ${(STOP_LOSS_PERCENTAGE * 1.5 * 100).toFixed(0)}% vốn, TP Tầng 2: ${(tpPercentage * 5 * 100).toFixed(0)}% vốn)`);
-                } else {
-                    addLog(`[DEBUG] Vị thế ${symbol}: Đã qua 5s sau khi chạm TP/SL tầng 1, nhưng vị thế ĐÃ ĐÓNG trên sàn. Không cần kích hoạt TP/SL tầng 2.`);
-                    // Nếu vị thế đã đóng, manageOpenPosition sẽ xử lý việc reset currentOpenPosition
+            // --- LOGIC CHUYỂN SANG TẦNG 2 ---
+            // Chỉ xem xét chuyển sang Tầng 2 nếu có một trong hai điều kiện chạm tầng 1 đã xảy ra
+            if (currentOpenPosition.initialTPCrossedTime !== null || currentOpenPosition.initialSLCrossedTime !== null) {
+                let checkTime = null;
+                // Lấy thời điểm chạm sớm nhất để tính DELAY
+                if (currentOpenPosition.initialTPCrossedTime && currentOpenPosition.initialSLCrossedTime) {
+                    checkTime = Math.min(currentOpenPosition.initialTPCrossedTime, currentOpenPosition.initialSLCrossedTime);
+                } else if (currentOpenPosition.initialTPCrossedTime) {
+                    checkTime = currentOpenPosition.initialTPCrossedTime;
+                } else if (currentOpenPosition.initialSLCrossedTime) {
+                    checkTime = currentOpenPosition.initialSLCrossedTime;
                 }
+
+                // Nếu đã qua thời gian chờ DELAY_AFTER_INITIAL_TP_SL_MS
+                if (checkTime !== null && currentTime >= checkTime + DELAY_AFTER_INITIAL_TP_SL_MS) {
+                    
+                    addLog(`[DEBUG] Vị thế ${symbol}: Đã qua ${DELAY_AFTER_INITIAL_TP_SL_MS / 1000}s sau khi chạm TP/SL tầng 1.`);
+
+                    // KIỂM TRA LỆNH TẦNG 1 CÒN KHÔNG VÀ VỊ THẾ CÒN MỞ KHÔNG
+                    if ((!hasTPLimitOrder && !hasSLLimitOrder)) { // Nếu KHÔNG CÓ lệnh TP/SL tầng 1 nào còn trên sàn
+                        const positions = await callSignedAPI('/fapi/v2/positionRisk', 'GET');
+                        const currentPositionOnBinance = positions.find(p => p.symbol === symbol && parseFloat(p.positionAmt) < 0);
+
+                        if (currentPositionOnBinance && parseFloat(currentPositionOnBinance.positionAmt) !== 0) {
+                            addLog(`[DEBUG] Vị thế ${symbol}: Lệnh TP/SL tầng 1 ĐÃ MẤT VÀ vị thế vẫn MỞ. Đang chuyển sang quản lý thủ công (TP/SL tầng 2).`, true);
+                            
+                            // Lấy lại các thông tin cần thiết từ currentOpenPosition và symbolDetails
+                            const symbolInfo = await getSymbolDetails(symbol);
+                            if (!symbolInfo || !symbolInfo.maxLeverage) {
+                                addLog(`❌ Không thể lấy thông tin đòn bẩy cho ${symbol} để tính TP/SL Tầng 2. Vị thế sẽ được quản lý thủ công (Timeout hoặc thủ công nếu cần).`, true);
+                                currentOpenPosition.isManuallyManaged = true; // Vẫn chuyển sang quản lý thủ công nhưng không có TP/SL mới
+                                return; 
+                            }
+                            const maxLeverage = symbolInfo.maxLeverage;
+
+                            // Tính toán số tiền SL/TP gốc (Tầng 1) dựa trên phần trăm vốn đã cấu hình
+                            const slAmountUSDT_T1 = initialMargin * STOP_LOSS_PERCENTAGE;
+                            const tpPercentage = TAKE_PROFIT_PERCENTAGES[maxLeverage]; 
+                            const tpAmountUSDT_T1 = initialMargin * tpPercentage;
+
+                            // Tính toán số tiền TP/SL cho Tầng 2 dựa trên phần trăm vốn gốc
+                            const slAmountUSDT_T2 = slAmountUSDT_T1 * 1.5; // SL Tầng 2 là 1.5 lần SL Tầng 1
+                            const tpAmountUSDT_T2 = tpAmountUSDT_T1 * 5;   // TP Tầng 2 là 5 lần TP Tầng 1
+
+                            // Tính toán giá TP/SL mới (tầng 2)
+                            // TP mới = Giá vào lệnh - (TP Amount Tầng 2 / Khối lượng)
+                            currentOpenPosition.currentTPPrice = entryPrice - (tpAmountUSDT_T2 / quantity);
+                            // SL mới = Giá vào lệnh + (SL Amount Tầng 2 / Khối lượng)
+                            currentOpenPosition.currentSLPrice = entryPrice + (slAmountUSDT_T2 / quantity);
+
+
+                            // Làm tròn theo pricePrecision và tickSize
+                            currentOpenPosition.currentTPPrice = Math.floor(currentOpenPosition.currentTPPrice / symbolInfo.tickSize) * symbolInfo.tickSize;
+                            currentOpenPosition.currentSLPrice = Math.ceil(currentOpenPosition.currentSLPrice / symbolInfo.tickSize) * symbolInfo.tickSize;
+                            currentOpenPosition.currentTPPrice = parseFloat(currentOpenPosition.currentTPPrice.toFixed(pricePrecision));
+                            currentOpenPosition.currentSLPrice = parseFloat(currentOpenPosition.currentSLPrice.toFixed(pricePrecision));
+
+                            currentOpenPosition.isManuallyManaged = true; // Đánh dấu đã chuyển sang quản lý thủ công
+                            addLog(`✅ TP/SL tầng 2 cho ${symbol} ĐÃ KÍCH HOẠT: TP = ${currentOpenPosition.currentTPPrice.toFixed(pricePrecision)}, SL = ${currentOpenPosition.currentSLPrice.toFixed(pricePrecision)}`);
+                            addLog(`   (SL Tầng 2: ${(STOP_LOSS_PERCENTAGE * 1.5 * 100).toFixed(0)}% vốn, TP Tầng 2: ${(tpPercentage * 5 * 100).toFixed(0)}% vốn)`);
+                        } else {
+                            addLog(`[DEBUG] Vị thế ${symbol}: Lệnh TP/SL tầng 1 ĐÃ MẤT, VỊ THẾ CŨNG ĐÃ ĐÓNG trên sàn. Không cần kích hoạt TP/SL tầng 2.`);
+                            // Nếu vị thế đã đóng, manageOpenPosition sẽ xử lý việc reset currentOpenPosition
+                        }
+                    } else {
+                        addLog(`[DEBUG] Vị thế ${symbol}: Lệnh TP/SL tầng 1 VẪN CÒN (${hasTPLimitOrder ? 'TP' : ''}${hasSLLimitOrder ? 'SL' : ''}). Không kích hoạt TP/SL tầng 2.`, true);
+                    }
+                } else {
+                    addLog(`[DEBUG] Vị thế ${symbol}: Đã chạm TP/SL tầng 1, nhưng chưa đủ ${DELAY_AFTER_INITIAL_TP_SL_MS / 1000}s chờ.`, false);
+                }
+            } else {
+                addLog(`[DEBUG] Vị thế ${symbol}: Chưa chạm TP/SL tầng 1.`, false);
             }
         }
     } catch (error) {
