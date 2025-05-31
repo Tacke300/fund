@@ -49,7 +49,7 @@ const MIN_USDT_BALANCE_TO_OPEN = 0.1;
 // ĐẢM BẢO GIÁ TRỊ NÀY ĐỦ LỚN ĐỂ VƯỢT QUA minNotional CỦA SÀN.
 // Ví dụ: 0.15 USDT có thể quá nhỏ cho nhiều cặp giao dịch trên Binance Futures.
 // Hãy đặt nó lên 10, 20 hoặc 50 USDT để tránh lỗi 'minNotional'.
-const FIXED_USDT_AMOUNT_PER_TRADE = 0.2; // Ví dụ: đặt 10 hoặc 20 cho minNotional.
+const FIXED_USDT_AMOUNT_PER_TRADE = 0.1; // Ví dụ: đặt 10 hoặc 20 cho minNotional.
 
 // Cấu hình Stop Loss:
 // SL cố định X% của vốn đầu tư ban đầu (FIXED_USDT_AMOUNT_PER_TRADE)
