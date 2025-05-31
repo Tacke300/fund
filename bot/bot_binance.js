@@ -60,18 +60,18 @@ const STOP_LOSS_PERCENTAGE = 0.5; // 1 = 100% của FIXED_USDT_AMOUNT_PER_TRADE
 // Bảng ánh xạ maxLeverage với Take Profit percentage.
 // TP được tính dựa trên X% của vốn đầu tư ban đầu (FIXED_USDT_AMOUNT_PER_TRADE).
 const TAKE_PROFIT_PERCENTAGES = {
-    20: 0.2,  // 50% TP nếu đòn bẩy 20x
-    25: 0.3,  // 80% TP nếu đòn bẩy 25x
-    50: 0.4,    // 100% TP nếu đòn bẩy 50x
-    75: 0.5,    // 100% TP nếu đòn bẩy 75x
-    100: 0.6, // 150% TP nếu đòn bẩy 100x
-    125: 0.7,   // 200% TP nếu đòn bẩy 125x
+    20: 0.23,  // 50% TP nếu đòn bẩy 20x
+    25: 0.33,  // 80% TP nếu đòn bẩy 25x
+    50: 0.45,    // 100% TP nếu đòn bẩy 50x
+    75: 0.58,    // 100% TP nếu đòn bẩy 75x
+    100: 0.75, // 150% TP nếu đòn bẩy 100x
+    125: 0.85,   // 200% TP nếu đòn bẩy 125x
 };
 
 // Ngưỡng funding rate âm tối thiểu để xem xét mở lệnh (ví dụ: -0.005 = -0.5%)
-const MIN_FUNDING_RATE_THRESHOLD = -0.00123; 
+const MIN_FUNDING_RATE_THRESHOLD = -0.001; 
 // Thời gian tối đa giữ một vị thế (ví dụ: 90 giây = 1 phút 30 giây)
-const MAX_POSITION_LIFETIME_SECONDS = 90; 
+const MAX_POSITION_LIFETIME_SECONDS = 180; 
 
 // Cửa sổ thời gian (tính bằng phút) TRƯỚC giờ funding mà bot sẽ bắt đầu quét.
 // Đặt là 1 phút để chỉ quét vào phút :59.
