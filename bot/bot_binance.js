@@ -4,17 +4,17 @@ import express from 'express';
 import { exec } from 'child_process';
 import fs from 'fs';
 import path from 'path';
-import { fileURLToPath } from 'url'; // Sửa lỗi ở đây: fileURLToPath chứ không phải fileURLrLToPath
+import { fileURLToPath } = from 'url';
 
 // Lấy __filename và __dirname trong ES modules
-const __filename = fileURLToPath(import.meta.url); // Sửa lỗi ở đây: fileURLToPath
+const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // --- CẤU HÌNH API KEY VÀ SECRET KEY ---
 // !!! QUAN TRỌNG: DÁN API Key và Secret Key THẬT của bạn vào đây. !!!
 // Đảm bảo không có khoảng trắng thừa khi copy/paste.
 const API_KEY = 'cZ1Y2O0kggVEggEaPvhFcYQHS5b1EsT2OWZb8zdY9C0jGqNROvXRZHTJjnQ7OG4Q'.trim(); // THAY THẾ BẰNG API KEY THẬT CỦA BẠN
-const SECRET_KEY = 'oU6pZFHgEvbpD9NmFXp5ZVnYFMQ7EIkBiz88aTzvmC3SpT9nEf4fcDf0pEnFzoTc'.trim(); // THAY THAY THẾ BẰNG SECRET KEY THẬT CỦA BẠN
+const SECRET_KEY = 'oU6pZFHgEvbpD9NmFXp5ZVnYFMQ7EIkBiz88TzvmC3SpT9nEf4fcDf0pEnFzoTc'.trim(); // THAY THAY THẾ BẰNG SECRET KEY THẬT CỦA BẠN
 
 // --- BASE URL CỦA BINANCE FUTURES API ---
 const BASE_HOST = 'fapi.binance.com';
@@ -563,10 +563,10 @@ async function openShortPosition(symbol, fundingRate, usdtBalance, maxLeverage) 
             return;
         }
         
-        // 1. Thiết lập chế độ ký quỹ ISOLATED
-        const setMarginTypeSuccess = await setMarginType(symbol, 'ISOLATED');
+        // 1. Thiết lập chế độ ký quỹ CROSSED
+        const setMarginTypeSuccess = await setMarginType(symbol, 'CROSSED'); 
         if (!setMarginTypeSuccess) {
-            addLog(`❌ Không thể cài đặt chế độ ký quỹ ISOLATED cho ${symbol}. Hủy mở lệnh.`, true);
+            addLog(`❌ Không thể cài đặt chế độ ký quỹ CROSSED cho ${symbol}. Hủy mở lệnh.`, true);
             if(botRunning) scheduleNextMainCycle();
             return;
         }
@@ -590,7 +590,7 @@ async function openShortPosition(symbol, fundingRate, usdtBalance, maxLeverage) 
         }
         addLog(`[DEBUG] Giá hiện tại của ${symbol}: ${currentPrice.toFixed(pricePrecision)}`);
 
-        // Tính toán số vốn (USD) sẽ dùng cho mỗi lệnh (đây là số tiền ký quỹ ban đầu)
+        // Tính toán số vốn (USD) sẽ dùng cho mỗi lệnh (đây là số tiền ký quỹ ban đầu giả định)
         const initialMargin = usdtBalance * PERCENT_ACCOUNT_PER_TRADE; 
 
         if (usdtBalance < initialMargin) {
@@ -644,14 +644,14 @@ async function openShortPosition(symbol, fundingRate, usdtBalance, maxLeverage) 
 
         addLog(`✅ Đã mở SHORT ${symbol} vào lúc ${formattedOpenTime}`, true);
         addLog(`  + Funding Rate: ${fundingRate}`);
-        addLog(`  + Chế độ ký quỹ: ISOLATED`);
+        addLog(`  + Chế độ ký quỹ: CROSSED`); 
         addLog(`  + Đòn bẩy: ${maxLeverage}x`);
-        addLog(`  + Ký quỹ ban đầu: ${initialMargin.toFixed(2)} USDT`); 
+        addLog(`  + Ký quỹ ban đầu ước tính: ${initialMargin.toFixed(2)} USDT`); 
         addLog(`  + Khối lượng: ${quantity} ${symbol}`);
         addLog(`  + Giá vào lệnh: ${entryPrice.toFixed(pricePrecision)}`);
 
-        // Tính toán TP/SL dựa trên initialMargin
-        const slAmountUSDT = initialMargin * STOP_LOSS_PERCENTAGE * 1.5; // SL = 5 lần STOP_LOSS_PERCENTAGE
+        // Tính toán TP/SL ban đầu dựa trên initialMargin
+        const slAmountUSDT = initialMargin * STOP_LOSS_PERCENTAGE * 5; // SL = 5 lần STOP_LOSS_PERCENTAGE
         const tpPercentage = TAKE_PROFIT_PERCENTAGES[maxLeverage]; 
         const tpAmountUSDT = initialMargin * tpPercentage * 2.5; // TP = 2.5 lần TAKE_PROFIT_PERCENTAGES
 
@@ -667,14 +667,15 @@ async function openShortPosition(symbol, fundingRate, usdtBalance, maxLeverage) 
         slPrice = parseFloat(slPrice.toFixed(pricePrecision));
         tpPrice = parseFloat(tpPrice.toFixed(pricePrecision));
 
-        addLog(`>>> Giá TP: ${tpPrice.toFixed(pricePrecision)}, Giá SL: ${slPrice.toFixed(pricePrecision)}`, true);
-        addLog(`   (SL: ${(STOP_LOSS_PERCENTAGE * 1.5 * 100).toFixed(0)}% của ${initialMargin.toFixed(2)} USDT = ${slAmountUSDT.toFixed(2)} USDT)`); 
+        addLog(`>>> Giá TP (ban đầu): ${tpPrice.toFixed(pricePrecision)}, Giá SL (ban đầu): ${slPrice.toFixed(pricePrecision)}`, true);
+        addLog(`   (SL: ${(STOP_LOSS_PERCENTAGE * 5 * 100).toFixed(0)}% của ${initialMargin.toFixed(2)} USDT = ${slAmountUSDT.toFixed(2)} USDT)`); 
         addLog(`   (TP: ${(tpPercentage * 2.5 * 100).toFixed(0)}% của ${initialMargin.toFixed(2)} USDT = ${tpAmountUSDT.toFixed(2)} USDT)`);
 
 
-        // ĐẶT LỆNH TP VÀ SL
-        // Lệnh Stop Loss (Mua để đóng vị thế Short khi giá tăng)
+        // ĐẶT LỆNH TP VÀ SL BẰNG STOP_MARKET VÀ TAKE_PROFIT_MARKET
+        // Các lệnh này vẫn được đặt để tận dụng cơ chế của sàn trước.
         try {
+            // Lệnh Stop Loss (Mua để đóng vị thế Short khi giá tăng)
             await callSignedAPI('/fapi/v1/order', 'POST', {
                 symbol: symbol,
                 side: 'BUY', 
@@ -687,18 +688,14 @@ async function openShortPosition(symbol, fundingRate, usdtBalance, maxLeverage) 
             addLog(`✅ Đã đặt lệnh STOP_MARKET (SL) cho ${symbol} tại giá ${slPrice.toFixed(pricePrecision)}.`, true);
         } catch (slError) {
             addLog(`❌ Lỗi khi đặt lệnh SL cho ${symbol}: ${slError.msg || slError.message}.`, true);
-            // Nếu không đặt được SL, cân nhắc hủy lệnh mở hoặc đóng vị thế ngay
-            addLog(`   -> Đóng vị thế ${symbol} để tránh rủi ro do không đặt được SL.`, true);
-            await closeShortPosition(symbol, quantity, 'SL_Failed');
-            return;
         }
 
-        // Lệnh Take Profit (Mua để đóng vị thế Short khi giá giảm)
         try {
+            // Lệnh Take Profit (Mua để đóng vị thế Short khi giá giảm)
             await callSignedAPI('/fapi/v1/order', 'POST', {
                 symbol: symbol,
                 side: 'BUY', 
-                type: 'TAKE_PROFIT_MARKET', // Sử dụng TAKE_PROFIT_MARKET
+                type: 'TAKE_PROFIT_MARKET', 
                 quantity: quantity, 
                 stopPrice: tpPrice, 
                 closePosition: 'true', // Đảm bảo lệnh này đóng vị thế
@@ -707,7 +704,6 @@ async function openShortPosition(symbol, fundingRate, usdtBalance, maxLeverage) 
             addLog(`✅ Đã đặt lệnh TAKE_PROFIT_MARKET (TP) cho ${symbol} tại giá ${tpPrice.toFixed(pricePrecision)}.`, true);
         } catch (tpError) {
             addLog(`❌ Lỗi khi đặt lệnh TP cho ${symbol}: ${tpError.msg || tpError.message}.`, true);
-            // Nếu không đặt được TP, vẫn tiếp tục nhưng cần theo dõi
         }
 
 
@@ -716,18 +712,19 @@ async function openShortPosition(symbol, fundingRate, usdtBalance, maxLeverage) 
             symbol: symbol,
             quantity: quantity,
             entryPrice: entryPrice,
-            tpPrice: tpPrice,
-            slPrice: slPrice,
+            initialTPPrice: tpPrice, // Lưu TP ban đầu
+            initialSLPrice: slPrice, // Lưu SL ban đầu
+            currentTPPrice: null, // TP hiện tại, sẽ được tính khi tầng 2 kích hoạt
+            currentSLPrice: null, // SL hiện tại, sẽ được tính khi tầng 2 kích hoạt
             openTime: openTime,
-            pricePrecision: pricePrecision
+            pricePrecision: pricePrecision,
+            isManuallyManaged: false, // Ban đầu KHÔNG quản lý thủ công
+            hasCrossedInitialTP: false, // Cờ báo hiệu đã chạm TP tầng 1
+            hasCrossedInitialSL: false, // Cờ báo hiệu đã chạm SL tầng 1
+            delayBeforeManualCheckAfterTP_SL: null // Thời điểm bắt đầu kiểm tra thủ công sau khi chạm TP/SL ban đầu
         };
 
-        // Thêm delay 5 giây trước khi bắt đầu quét kiểm tra vị thế
-        addLog(`>>> Đang đợi 5 giây trước khi bắt đầu quét kiểm tra vị thế TP/SL thủ công...`);
-        await delay(5000); // Đợi 5 giây
-
         // Bắt đầu interval kiểm tra vị thế và cập nhật đếm ngược frontend
-        // Interval này sẽ gọi manageOpenPosition, bên trong manageOpenPosition sẽ có checkAndClosePositionManually
         if(!positionCheckInterval) { 
             positionCheckInterval = setInterval(async () => {
                 if(botRunning) { // Chỉ chạy nếu bot đang chạy
@@ -755,41 +752,80 @@ async function checkAndClosePositionManually() {
         return;
     }
 
-    const { symbol, quantity, entryPrice, tpPrice, slPrice, pricePrecision } = currentOpenPosition;
+    const { symbol, quantity, entryPrice, initialTPPrice, initialSLPrice, pricePrecision } = currentOpenPosition;
+    const currentTime = Date.now();
 
     try {
-        // 1. Lấy tất cả các lệnh mở hiện tại
-        const openOrders = await callSignedAPI('/fapi/v1/openOrders', 'GET', { symbol: symbol });
-        const hasStopMarketSL = openOrders.some(order => order.type === 'STOP_MARKET' && order.side === 'BUY' && parseFloat(order.stopPrice) >= entryPrice);
-        const hasTakeProfitTP = openOrders.some(order => order.type === 'TAKE_PROFIT_MARKET' && order.side === 'BUY' && parseFloat(order.stopPrice) <= entryPrice);
-
-        // 2. Lấy giá hiện tại
         const currentPrice = await getCurrentPrice(symbol);
         if (currentPrice === null) {
             addLog(`⚠️ Không thể lấy giá hiện tại cho ${symbol} để kiểm tra đóng lệnh thủ công.`);
             return;
         }
 
-        // Kiểm tra xem lệnh TP/SL đã được đặt trên sàn chưa
-        // Nếu không có cả TP và SL stop-market, thì bot sẽ tự quản lý.
-        // Hoặc nếu bot đang quản lý thủ công (do không đặt được TP/SL ban đầu)
-        const shouldManuallyManage = (!hasStopMarketSL || !hasTakeProfitTP); // Thay đổi logic kiểm tra
-        if (shouldManuallyManage) {
-            addLog(`[DEBUG] Vị thế ${symbol}: Không tìm thấy lệnh TP/SL stop-market trên sàn. Đang kiểm tra đóng lệnh thủ công...`);
-            addLog(`[DEBUG] Giá hiện tại: ${currentPrice.toFixed(pricePrecision)}, TP: ${tpPrice.toFixed(pricePrecision)}, SL: ${slPrice.toFixed(pricePrecision)}`);
+        // Nếu đã ở chế độ quản lý thủ công (tầng 2 đã kích hoạt)
+        if (currentOpenPosition.isManuallyManaged) {
+            addLog(`[DEBUG] Quản lý thủ công (tầng 2) ${symbol}: Giá hiện tại: ${currentPrice.toFixed(pricePrecision)}, TP: ${currentOpenPosition.currentTPPrice.toFixed(pricePrecision)}, SL: ${currentOpenPosition.currentSLPrice.toFixed(pricePrecision)}`);
 
-            // Kiểm tra điều kiện Take Profit
-            if (currentPrice <= tpPrice) {
-                addLog(`✅ Vị thế ${symbol} đạt TP thủ công! Giá hiện tại (${currentPrice.toFixed(pricePrecision)}) <= Giá TP (${tpPrice.toFixed(pricePrecision)}). Đang đóng lệnh...`, true);
-                await closeShortPosition(symbol, quantity, 'TP_Thủ_Công');
-                return; // Thoát sau khi đã đóng lệnh
+            // Kiểm tra điều kiện Take Profit tầng 2
+            if (currentPrice <= currentOpenPosition.currentTPPrice) {
+                addLog(`✅ Vị thế ${symbol} đạt TP tầng 2! Giá hiện tại (${currentPrice.toFixed(pricePrecision)}) <= Giá TP (${currentOpenPosition.currentTPPrice.toFixed(pricePrecision)}). Đang đóng lệnh...`, true);
+                await closeShortPosition(symbol, quantity, 'TP_Tầng_2');
+                return; 
             }
 
-            // Kiểm tra điều kiện Stop Loss
-            if (currentPrice >= slPrice) {
-                addLog(`❌ Vị thế ${symbol} đạt SL thủ công! Giá hiện tại (${currentPrice.toFixed(pricePrecision)}) >= Giá SL (${slPrice.toFixed(pricePrecision)}). Đang đóng lệnh...`, true);
-                await closeShortPosition(symbol, quantity, 'SL_Thủ_Công');
-                return; // Thoát sau khi đã đóng lệnh
+            // Kiểm tra điều kiện Stop Loss tầng 2
+            if (currentPrice >= currentOpenPosition.currentSLPrice) {
+                addLog(`❌ Vị thế ${symbol} đạt SL tầng 2! Giá hiện tại (${currentPrice.toFixed(pricePrecision)}) >= Giá SL (${currentOpenPosition.currentSLPrice.toFixed(pricePrecision)}). Đang đóng lệnh...`, true);
+                await closeShortPosition(symbol, quantity, 'SL_Tầng_2');
+                return; 
+            }
+        } 
+        // Nếu chưa ở chế độ quản lý thủ công (vẫn đang đợi TP/SL tầng 1 hoặc thời gian chờ)
+        else {
+            // Kiểm tra xem giá đã chạm TP/SL tầng 1 chưa
+            const crossedTP = currentPrice <= initialTPPrice;
+            const crossedSL = currentPrice >= initialSLPrice;
+
+            if (crossedTP && !currentOpenPosition.hasCrossedInitialTP) {
+                addLog(`[DEBUG] Vị thế ${symbol}: Giá đã chạm TP tầng 1 (${currentPrice.toFixed(pricePrecision)} <= ${initialTPPrice.toFixed(pricePrecision)}). Đang đợi thêm 5s trước khi kích hoạt TP/SL tầng 2.`);
+                currentOpenPosition.hasCrossedInitialTP = true;
+                currentOpenPosition.delayBeforeManualCheckAfterTP_SL = currentTime + 5000; // Đặt thời điểm bắt đầu kiểm tra thủ công
+            } else if (crossedSL && !currentOpenPosition.hasCrossedInitialSL) {
+                addLog(`[DEBUG] Vị thế ${symbol}: Giá đã chạm SL tầng 1 (${currentPrice.toFixed(pricePrecision)} >= ${initialSLPrice.toFixed(pricePrecision)}). Đang đợi thêm 5s trước khi kích hoạt TP/SL tầng 2.`);
+                currentOpenPosition.hasCrossedInitialSL = true;
+                currentOpenPosition.delayBeforeManualCheckAfterTP_SL = currentTime + 5000; // Đặt thời điểm bắt đầu kiểm tra thủ công
+            }
+            // Nếu đã chạm TP/SL tầng 1 VÀ đã qua thời gian chờ 5s VÀ chưa kích hoạt TP/SL tầng 2
+            if ((currentOpenPosition.hasCrossedInitialTP || currentOpenPosition.hasCrossedInitialSL) && currentOpenPosition.delayBeforeManualCheckAfterTP_SL !== null && currentTime >= currentOpenPosition.delayBeforeManualCheckAfterTP_SL) {
+                
+                // Kiểm tra vị thế thực tế trên Binance lần cuối trước khi kích hoạt tầng 2
+                const positions = await callSignedAPI('/fapi/v2/positionRisk', 'GET');
+                const currentPositionOnBinance = positions.find(p => p.symbol === symbol && parseFloat(p.positionAmt) < 0);
+
+                if (currentPositionOnBinance && parseFloat(currentPositionOnBinance.positionAmt) !== 0) {
+                    addLog(`[DEBUG] Vị thế ${symbol}: Đã qua 5s sau khi chạm TP/SL tầng 1 VÀ vị thế vẫn mở. Đang chuyển sang quản lý thủ công (TP/SL tầng 2).`);
+                    
+                    // Tính toán TP/SL mới (tầng 2)
+                    // TP mới = Giá vào lệnh - ((Giá vào lệnh - TP ban đầu) * 5)
+                    currentOpenPosition.currentTPPrice = entryPrice - ((entryPrice - initialTPPrice) * 5);
+                    // SL mới = Giá vào lệnh + ((SL ban đầu - Giá vào lệnh) * 1.5)
+                    currentOpenPosition.currentSLPrice = entryPrice + ((initialSLPrice - entryPrice) * 1.5);
+
+                    // Làm tròn theo pricePrecision và tickSize
+                    const symbolInfo = await getSymbolDetails(symbol);
+                    if (symbolInfo) {
+                        currentOpenPosition.currentTPPrice = Math.floor(currentOpenPosition.currentTPPrice / symbolInfo.tickSize) * symbolInfo.tickSize;
+                        currentOpenPosition.currentSLPrice = Math.ceil(currentOpenPosition.currentSLPrice / symbolInfo.tickSize) * symbolInfo.tickSize;
+                        currentOpenPosition.currentTPPrice = parseFloat(currentOpenPosition.currentTPPrice.toFixed(pricePrecision));
+                        currentOpenPosition.currentSLPrice = parseFloat(currentOpenPosition.currentSLPrice.toFixed(pricePrecision));
+                    }
+
+                    currentOpenPosition.isManuallyManaged = true; // Đánh dấu đã chuyển sang quản lý thủ công
+                    addLog(`✅ TP/SL tầng 2 cho ${symbol} ĐÃ KÍCH HOẠT: TP = ${currentOpenPosition.currentTPPrice.toFixed(pricePrecision)}, SL = ${currentOpenPosition.currentSLPrice.toFixed(pricePrecision)}`);
+                } else {
+                    addLog(`[DEBUG] Vị thế ${symbol}: Đã qua 5s sau khi chạm TP/SL tầng 1, nhưng vị thế ĐÃ ĐÓNG trên sàn. Không cần kích hoạt TP/SL tầng 2.`);
+                    // Nếu vị thế đã đóng, manageOpenPosition sẽ xử lý việc reset currentOpenPosition
+                }
             }
         }
     } catch (error) {
@@ -811,7 +847,7 @@ async function manageOpenPosition() {
         return;
     }
 
-    const { symbol, quantity, openTime } = currentOpenPosition; // Loại bỏ tpPrice, slPrice vì Binance tự xử lý
+    const { symbol, quantity, openTime } = currentOpenPosition; 
 
     try {
         const currentTime = new Date();
@@ -1105,7 +1141,6 @@ async function startBotLogicInternal() {
         scheduleNextMainCycle();
 
         // Thiết lập kiểm tra vị thế định kỳ (dù không có lệnh vẫn chạy để đảm bảo quản lý)
-        // Thay đổi interval của positionCheckInterval thành 300ms
         if (!positionCheckInterval) { 
             positionCheckInterval = setInterval(async () => {
                 if (botRunning && currentOpenPosition) { // Chỉ chạy nếu bot đang chạy và có vị thế mở
