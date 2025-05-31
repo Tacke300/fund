@@ -53,7 +53,7 @@ const FIXED_USDT_AMOUNT_PER_TRADE = 0.2; // Ví dụ: đặt 10 hoặc 20 cho mi
 
 // Cấu hình Stop Loss:
 // SL cố định X% của vốn đầu tư ban đầu (FIXED_USDT_AMOUNT_PER_TRADE)
-const STOP_LOSS_PERCENTAGE = 1; // 1 = 100% của FIXED_USDT_AMOUNT_PER_TRADE
+const STOP_LOSS_PERCENTAGE = 0.5; // 1 = 100% của FIXED_USDT_AMOUNT_PER_TRADE
 
 // Bảng ánh xạ maxLeverage với Take Profit percentage.
 // TP được tính dựa trên X% của vốn đầu tư ban đầu (FIXED_USDT_AMOUNT_PER_TRADE).
