@@ -50,7 +50,7 @@ const MIN_USDT_BALANCE_TO_OPEN = 0.1;
 // Ví dụ: 0.01 = 1% của số dư USDT khả dụng.
 // ĐẢM BẢO GIÁ TRỊ NÀY ĐỦ LỚN ĐỂ KHI ĐƯỢC TÍNH TOÁN, NÓ VƯỢT QUA minNotional CỦA SÀN.
 // Nếu 1% quá nhỏ (ví dụ: 1% của 10 USDT là 0.1 USDT), bot sẽ không thể mở lệnh.
-const PERCENT_ACCOUNT_PER_TRADE = 0.3; // Ví dụ: 0.01 = 1%
+const PERCENT_ACCOUNT_PER_TRADE = 0.1; // Ví dụ: 0.01 = 1%
 
 // Cấu hình Stop Loss:
 // SL cố định X% của vốn đầu tư ban đầu (số tiền được tính từ PERCENT_ACCOUNT_PER_TRADE)
@@ -816,6 +816,12 @@ async function checkAndClosePositionManually() {
         const hasTPLimitOrder = openOrders.some(order => order.type === 'TAKE_PROFIT_MARKET');
         const hasSLLimitOrder = openOrders.some(order => order.type === 'STOP_MARKET');
 
+        // Lấy thông tin vị thế thực tế trên Binance
+        const positions = await callSignedAPI('/fapi/v2/positionRisk', 'GET');
+        const currentPositionOnBinance = positions.find(p => p.symbol === symbol && parseFloat(p.positionAmt) < 0);
+        const isPositionStillOpenOnBinance = (currentPositionOnBinance && parseFloat(currentPositionOnBinance.positionAmt) !== 0);
+
+
         // Nếu đã ở chế độ quản lý thủ công (tầng 2 đã kích hoạt)
         if (currentOpenPosition.isManuallyManaged) {
             addLog(`[DEBUG] Quản lý thủ công (tầng 2) ${symbol}: Giá hiện tại: ${currentPrice.toFixed(pricePrecision)}, TP: ${currentOpenPosition.currentTPPrice.toFixed(pricePrecision)}, SL: ${currentOpenPosition.currentSLPrice.toFixed(pricePrecision)}`);
@@ -867,54 +873,57 @@ async function checkAndClosePositionManually() {
                     
                     addLog(`[DEBUG] Vị thế ${symbol}: Đã qua ${DELAY_AFTER_INITIAL_TP_SL_MS / 1000}s sau khi chạm TP/SL tầng 1.`);
 
-                    // KIỂM TRA LỆNH TẦNG 1 CÒN KHÔNG VÀ VỊ THẾ CÒN MỞ KHÔNG
-                    if ((!hasTPLimitOrder && !hasSLLimitOrder)) { // Nếu KHÔNG CÓ lệnh TP/SL tầng 1 nào còn trên sàn
-                        const positions = await callSignedAPI('/fapi/v2/positionRisk', 'GET');
-                        const currentPositionOnBinance = positions.find(p => p.symbol === symbol && parseFloat(p.positionAmt) < 0);
+                    // --- ĐIỀU KIỆN KÍCH HOẠT TẦNG 2 CHÍNH XÁC ---
+                    // 1. Vị thế CÒN MỞ trên Binance
+                    // 2. MỘT TRONG HAI LỆNH TP/SL Tầng 1 KHÔNG CÒN TỒN TẠI trên sàn
+                    const shouldActivateTier2 = isPositionStillOpenOnBinance && (!hasTPLimitOrder || !hasSLLimitOrder);
 
-                        if (currentPositionOnBinance && parseFloat(currentPositionOnBinance.positionAmt) !== 0) {
-                            addLog(`[DEBUG] Vị thế ${symbol}: Lệnh TP/SL tầng 1 ĐÃ MẤT VÀ vị thế vẫn MỞ. Đang chuyển sang quản lý thủ công (TP/SL tầng 2).`, true);
-                            
-                            // Lấy lại các thông tin cần thiết từ currentOpenPosition và symbolDetails
-                            const symbolInfo = await getSymbolDetails(symbol);
-                            if (!symbolInfo || !symbolInfo.maxLeverage) {
-                                addLog(`❌ Không thể lấy thông tin đòn bẩy cho ${symbol} để tính TP/SL Tầng 2. Vị thế sẽ được quản lý thủ công (Timeout hoặc thủ công nếu cần).`, true);
-                                currentOpenPosition.isManuallyManaged = true; // Vẫn chuyển sang quản lý thủ công nhưng không có TP/SL mới
-                                return; 
-                            }
-                            const maxLeverage = symbolInfo.maxLeverage;
-
-                            // Tính toán số tiền SL/TP gốc (Tầng 1) dựa trên phần trăm vốn đã cấu hình
-                            const slAmountUSDT_T1 = initialMargin * STOP_LOSS_PERCENTAGE;
-                            const tpPercentage = TAKE_PROFIT_PERCENTAGES[maxLeverage]; 
-                            const tpAmountUSDT_T1 = initialMargin * tpPercentage;
-
-                            // Tính toán số tiền TP/SL cho Tầng 2 dựa trên phần trăm vốn gốc
-                            const slAmountUSDT_T2 = slAmountUSDT_T1 * 1.5; // SL Tầng 2 là 1.5 lần SL Tầng 1
-                            const tpAmountUSDT_T2 = tpAmountUSDT_T1 * 5;   // TP Tầng 2 là 5 lần TP Tầng 1
-
-                            // Tính toán giá TP/SL mới (tầng 2)
-                            // TP mới = Giá vào lệnh - (TP Amount Tầng 2 / Khối lượng)
-                            currentOpenPosition.currentTPPrice = entryPrice - (tpAmountUSDT_T2 / quantity);
-                            // SL mới = Giá vào lệnh + (SL Amount Tầng 2 / Khối lượng)
-                            currentOpenPosition.currentSLPrice = entryPrice + (slAmountUSDT_T2 / quantity);
-
-
-                            // Làm tròn theo pricePrecision và tickSize
-                            currentOpenPosition.currentTPPrice = Math.floor(currentOpenPosition.currentTPPrice / symbolInfo.tickSize) * symbolInfo.tickSize;
-                            currentOpenPosition.currentSLPrice = Math.ceil(currentOpenPosition.currentSLPrice / symbolInfo.tickSize) * symbolInfo.tickSize;
-                            currentOpenPosition.currentTPPrice = parseFloat(currentOpenPosition.currentTPPrice.toFixed(pricePrecision));
-                            currentOpenPosition.currentSLPrice = parseFloat(currentOpenPosition.currentSLPrice.toFixed(pricePrecision));
-
-                            currentOpenPosition.isManuallyManaged = true; // Đánh dấu đã chuyển sang quản lý thủ công
-                            addLog(`✅ TP/SL tầng 2 cho ${symbol} ĐÃ KÍCH HOẠT: TP = ${currentOpenPosition.currentTPPrice.toFixed(pricePrecision)}, SL = ${currentOpenPosition.currentSLPrice.toFixed(pricePrecision)}`);
-                            addLog(`   (SL Tầng 2: ${(STOP_LOSS_PERCENTAGE * 1.5 * 100).toFixed(0)}% vốn, TP Tầng 2: ${(tpPercentage * 5 * 100).toFixed(0)}% vốn)`);
-                        } else {
-                            addLog(`[DEBUG] Vị thế ${symbol}: Lệnh TP/SL tầng 1 ĐÃ MẤT, VỊ THẾ CŨNG ĐÃ ĐÓNG trên sàn. Không cần kích hoạt TP/SL tầng 2.`);
-                            // Nếu vị thế đã đóng, manageOpenPosition sẽ xử lý việc reset currentOpenPosition
+                    if (shouldActivateTier2) {
+                        addLog(`[DEBUG] Vị thế ${symbol}: Điều kiện kích hoạt TP/SL tầng 2 được đáp ứng (Vị thế còn mở, và một hoặc cả hai lệnh Tầng 1 đã biến mất).`, true);
+                        
+                        // Lấy lại các thông tin cần thiết từ currentOpenPosition và symbolDetails
+                        const symbolInfo = await getSymbolDetails(symbol);
+                        if (!symbolInfo || !symbolInfo.maxLeverage) {
+                            addLog(`❌ Không thể lấy thông tin đòn bẩy cho ${symbol} để tính TP/SL Tầng 2. Vị thế sẽ được quản lý thủ công (Timeout hoặc thủ công nếu cần).`, true);
+                            currentOpenPosition.isManuallyManaged = true; // Vẫn chuyển sang quản lý thủ công nhưng không có TP/SL mới
+                            return; 
                         }
-                    } else {
-                        addLog(`[DEBUG] Vị thế ${symbol}: Lệnh TP/SL tầng 1 VẪN CÒN (${hasTPLimitOrder ? 'TP' : ''}${hasSLLimitOrder ? 'SL' : ''}). Không kích hoạt TP/SL tầng 2.`, true);
+                        const maxLeverage = symbolInfo.maxLeverage;
+
+                        // Tính toán số tiền SL/TP gốc (Tầng 1) dựa trên phần trăm vốn đã cấu hình
+                        const slAmountUSDT_T1 = initialMargin * STOP_LOSS_PERCENTAGE;
+                        const tpPercentage = TAKE_PROFIT_PERCENTAGES[maxLeverage]; 
+                        const tpAmountUSDT_T1 = initialMargin * tpPercentage;
+
+                        // Tính toán số tiền TP/SL cho Tầng 2 dựa trên phần trăm vốn gốc
+                        const slAmountUSDT_T2 = slAmountUSDT_T1 * 1.5; // SL Tầng 2 là 1.5 lần SL Tầng 1
+                        const tpAmountUSDT_T2 = tpAmountUSDT_T1 * 5;   // TP Tầng 2 là 5 lần TP Tầng 1
+
+                        // Tính toán giá TP/SL mới (tầng 2)
+                        // TP mới = Giá vào lệnh - (TP Amount Tầng 2 / Khối lượng)
+                        currentOpenPosition.currentTPPrice = entryPrice - (tpAmountUSDT_T2 / quantity);
+                        // SL mới = Giá vào lệnh + (SL Amount Tầng 2 / Khối lượng)
+                        currentOpenPosition.currentSLPrice = entryPrice + (slAmountUSDT_T2 / quantity);
+
+
+                        // Làm tròn theo pricePrecision và tickSize
+                        currentOpenPosition.currentTPPrice = Math.floor(currentOpenPosition.currentTPPrice / symbolInfo.tickSize) * symbolInfo.tickSize;
+                        currentOpenPosition.currentSLPrice = Math.ceil(currentOpenPosition.currentSLPrice / symbolInfo.tickSize) * symbolInfo.tickSize;
+                        currentOpenPosition.currentTPPrice = parseFloat(currentOpenPosition.currentTPPrice.toFixed(pricePrecision));
+                        currentOpenPosition.currentSLPrice = parseFloat(currentOpenPosition.currentSLPrice.toFixed(pricePrecision));
+
+                        currentOpenPosition.isManuallyManaged = true; // Đánh dấu đã chuyển sang quản lý thủ công
+                        addLog(`✅ TP/SL tầng 2 cho ${symbol} ĐÃ KÍCH HOẠT: TP = ${currentOpenPosition.currentTPPrice.toFixed(pricePrecision)}, SL = ${currentOpenPosition.currentSLPrice.toFixed(pricePrecision)}`);
+                        addLog(`   (SL Tầng 2: ${(STOP_LOSS_PERCENTAGE * 1.5 * 100).toFixed(0)}% vốn, TP Tầng 2: ${(tpPercentage * 5 * 100).toFixed(0)}% vốn)`);
+                        
+                        // Hủy bất kỳ lệnh nào còn lại trên sàn (TP/SL tầng 1, nếu có 1 lệnh còn lại)
+                        await cancelOpenOrdersForSymbol(symbol);
+
+                    } else if (!isPositionStillOpenOnBinance) {
+                        addLog(`[DEBUG] Vị thế ${symbol}: Đã qua thời gian chờ, nhưng VỊ THẾ ĐÃ ĐÓNG trên sàn. Không cần kích hoạt TP/SL tầng 2.`);
+                        // Logic manageOpenPosition sẽ xử lý việc reset currentOpenPosition sau khi vị thế đóng
+                    } else { // isPositionStillOpenOnBinance is true, but (hasTPLimitOrder && hasSLLimitOrder) is true OR (hasTPLimitOrder || hasSLLimitOrder) is false for some reason (e.g. only one order missing)
+                        addLog(`[DEBUG] Vị thế ${symbol}: Đã qua thời gian chờ, nhưng VỊ THẾ VẪN MỞ và LỆNH TP/SL TẦNG 1 VẪN CÒN (${hasTPLimitOrder ? 'TP' : ''}${hasSLLimitOrder ? 'SL' : ''}). Không kích hoạt TP/SL tầng 2, chờ sàn xử lý.`, true);
                     }
                 } else {
                     addLog(`[DEBUG] Vị thế ${symbol}: Đã chạm TP/SL tầng 1, nhưng chưa đủ ${DELAY_AFTER_INITIAL_TP_SL_MS / 1000}s chờ.`, false);
