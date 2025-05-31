@@ -50,21 +50,21 @@ const MIN_USDT_BALANCE_TO_OPEN = 0.1;
 // Ví dụ: 0.01 = 1% của số dư USDT khả dụng.
 // ĐẢM BẢO GIÁ TRỊ NÀY ĐỦ LỚN ĐỂ KHI ĐƯỢC TÍNH TOÁN, NÓ VƯỢT QUA minNotional CỦA SÀN.
 // Nếu 1% quá nhỏ (ví dụ: 1% của 10 USDT là 0.1 USDT), bot sẽ không thể mở lệnh.
-const PERCENT_ACCOUNT_PER_TRADE = 0.1; // Ví dụ: 0.01 = 1%
+const PERCENT_ACCOUNT_PER_TRADE = 0.25; // Ví dụ: 0.01 = 1%
 
 // Cấu hình Stop Loss:
 // SL cố định X% của vốn đầu tư ban đầu (số tiền được tính từ PERCENT_ACCOUNT_PER_TRADE)
-const STOP_LOSS_PERCENTAGE = 0.5; // 0.5 = 50% của vốn đầu tư ban đầu
+const STOP_LOSS_PERCENTAGE = 0.4; // 0.5 = 50% của vốn đầu tư ban đầu
 
 // Bảng ánh xạ maxLeverage với Take Profit percentage.
 // TP được tính dựa trên X% của vốn đầu tư ban đầu (số tiền được tính từ PERCENT_ACCOUNT_PER_TRADE).
 const TAKE_PROFIT_PERCENTAGES = {
-    20: 0.23,  // 50% TP nếu đòn bẩy 20x
-    25: 0.23,  // 80% TP nếu đòn bẩy 25x
-    50: 0.36,    // 100% TP nếu đòn bẩy 50x
-    75: 0.52,    // 100% TP nếu đòn bẩy 75x
-    100: 0.63, // 150% TP nếu đòn bẩy 100x
-    125: 0.79,   // 200% TP nếu đòn bẩy 125x
+    20: 0.25,  // 50% TP nếu đòn bẩy 20x
+    25: 0.30,  // 80% TP nếu đòn bẩy 25x
+    50: 0.35,    // 100% TP nếu đòn bẩy 50x
+    75: 0.40,    // 100% TP nếu đòn bẩy 75x
+    100: 0.45, // 150% TP nếu đòn bẩy 100x
+    125: 0.55,   // 200% TP nếu đòn bẩy 125x
 };
 
 // Ngưỡng funding rate âm tối thiểu để xem xét mở lệnh (ví dụ: -0.005 = -0.5%)
@@ -897,7 +897,7 @@ async function checkAndClosePositionManually() {
 
                         // Tính toán số tiền TP/SL cho Tầng 2 dựa trên phần trăm vốn gốc
                         const slAmountUSDT_T2 = slAmountUSDT_T1 * 1.5; // SL Tầng 2 là 1.5 lần SL Tầng 1
-                        const tpAmountUSDT_T2 = tpAmountUSDT_T1 * 5;   // TP Tầng 2 là 5 lần TP Tầng 1
+                        const tpAmountUSDT_T2 = tpAmountUSDT_T1 * 3;   // TP Tầng 2 là 5 lần TP Tầng 1
 
                         // Tính toán giá TP/SL mới (tầng 2)
                         // TP mới = Giá vào lệnh - (TP Amount Tầng 2 / Khối lượng)
