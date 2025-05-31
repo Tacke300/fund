@@ -62,12 +62,12 @@ const TAKE_PROFIT_PERCENTAGES = {
     25: 0.5,  // 80% TP nếu đòn bẩy 25x
     50: 0.75,    // 100% TP nếu đòn bẩy 50x
     75: 1,    // 100% TP nếu đòn bẩy 75x
-    100: 1.5, // 150% TP nếu đòn bẩy 100x
-    125: 2,   // 200% TP nếu đòn bẩy 125x
+    100: 1.25, // 150% TP nếu đòn bẩy 100x
+    125: 1.5,   // 200% TP nếu đòn bẩy 125x
 };
 
 // Ngưỡng funding rate âm tối thiểu để xem xét mở lệnh (ví dụ: -0.005 = -0.5%)
-const MIN_FUNDING_RATE_THRESHOLD = -0.005; 
+const MIN_FUNDING_RATE_THRESHOLD = -0.00123; 
 // Thời gian tối đa giữ một vị thế (ví dụ: 90 giây = 1 phút 30 giây)
 const MAX_POSITION_LIFETIME_SECONDS = 90; 
 
