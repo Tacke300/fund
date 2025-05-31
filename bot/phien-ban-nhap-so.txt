@@ -213,6 +213,9 @@ async function callSignedAPI(fullEndpointPath, method = 'GET', params = {}) {
         requestPath = fullEndpointPath;
         requestBody = `${queryString}&signature=${signature}`;
         headers['Content-Type'] = 'application/x-www-form-urlencoded';
+    } else if (method === 'DELETE') { // <-- Đã thêm nhánh này cho phương thức DELETE
+        requestPath = `${fullEndpointPath}?${queryString}&signature=${signature}`;
+        headers['Content-Type'] = 'application/json'; // Thường là 'application/json' hoặc 'application/x-www-form-urlencoded'
     } else {
         throw new Error(`Unsupported method: ${method}`);
     }
