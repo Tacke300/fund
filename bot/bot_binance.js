@@ -4,7 +4,8 @@ import express from 'express';
 import { exec } from 'child_process';
 import fs from 'fs';
 import path from 'path';
-import { fileURLToPath } = from 'url';
+import { fileURLToPath } from 'url';
+
 
 // Lấy __filename và __dirname trong ES modules
 const __filename = fileURLToPath(import.meta.url);
