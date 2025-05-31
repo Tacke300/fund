@@ -914,7 +914,7 @@ async function checkAndClosePositionManually() {
 
                         currentOpenPosition.isManuallyManaged = true; // Đánh dấu đã chuyển sang quản lý thủ công
                         addLog(`✅ TP/SL tầng 2 cho ${symbol} ĐÃ KÍCH HOẠT: TP = ${currentOpenPosition.currentTPPrice.toFixed(pricePrecision)}, SL = ${currentOpenPosition.currentSLPrice.toFixed(pricePrecision)}`);
-                        addLog(`   (SL Tầng 2: ${(STOP_LOSS_PERCENTAGE * 1.5 * 100).toFixed(0)}% vốn, TP Tầng 2: ${(tpPercentage * 5 * 100).toFixed(0)}% vốn)`);
+                        addLog(`   (SL Tầng 2: ${(STOP_LOSS_PERCENTAGE * 1.5 * 100).toFixed(0)}% vốn, TP Tầng 2: ${(tpPercentage * 3 * 100).toFixed(0)}% vốn)`);
                         
                         // Hủy bất kỳ lệnh nào còn lại trên sàn (TP/SL tầng 1, nếu có 1 lệnh còn lại)
                         await cancelOpenOrdersForSymbol(symbol);
