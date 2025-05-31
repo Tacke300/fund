@@ -7,7 +7,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 
 // Lấy __filename và __dirname trong ES modules
-const __filename = fileURLToPath(import.meta.url);
+const __filename = fileURLrLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // --- CẤU HÌNH API KEY VÀ SECRET KEY ---
@@ -214,9 +214,9 @@ async function callSignedAPI(fullEndpointPath, method = 'GET', params = {}) {
         requestPath = fullEndpointPath;
         requestBody = `${queryString}&signature=${signature}`;
         headers['Content-Type'] = 'application/x-www-form-urlencoded';
-    } else if (method === 'DELETE') { // <-- Đã thêm nhánh này cho phương thức DELETE
+    } else if (method === 'DELETE') { 
         requestPath = `${fullEndpointPath}?${queryString}&signature=${signature}`;
-        headers['Content-Type'] = 'application/json'; // Thường là 'application/json' hoặc 'application/x-www-form-urlencoded'
+        headers['Content-Type'] = 'application/json'; 
     } else {
         throw new Error(`Unsupported method: ${method}`);
     }
@@ -325,6 +325,27 @@ async function setLeverage(symbol, leverage) {
     } catch (error) {
         addLog(`❌ Lỗi khi thiết lập đòn bẩy ${leverage}x cho ${symbol}: ${error.msg || error.message}`);
         // Xử lý lỗi cụ thể nếu cần, ví dụ: đòn bẩy không hợp lệ
+        return false;
+    }
+}
+
+/**
+ * Thiết lập chế độ ký quỹ (MARGIN_TYPE) cho một symbol.
+ * @param {string} symbol - Symbol của cặp giao dịch.
+ * @param {string} marginType - Chế độ ký quỹ ('ISOLATED' hoặc 'CROSSED').
+ * @returns {boolean} True nếu thành công, false nếu thất bại.
+ */
+async function setMarginType(symbol, marginType) {
+    try {
+        addLog(`[DEBUG] Đang thiết lập chế độ ký quỹ ${marginType} cho ${symbol}.`);
+        await callSignedAPI('/fapi/v1/marginType', 'POST', {
+            symbol: symbol,
+            marginType: marginType
+        });
+        addLog(`✅ Đã thiết lập chế độ ký quỹ ${marginType} cho ${symbol}.`);
+        return true;
+    } catch (error) {
+        addLog(`❌ Lỗi khi thiết lập chế độ ký quỹ ${marginType} cho ${symbol}: ${error.code} - ${error.msg || error.message}`);
         return false;
     }
 }
@@ -542,7 +563,15 @@ async function openShortPosition(symbol, fundingRate, usdtBalance, maxLeverage) 
             return;
         }
         
-        // Thiết lập đòn bẩy trước khi mở lệnh
+        // 1. Thiết lập chế độ ký quỹ ISOLATED
+        const setMarginTypeSuccess = await setMarginType(symbol, 'ISOLATED');
+        if (!setMarginTypeSuccess) {
+            addLog(`❌ Không thể cài đặt chế độ ký quỹ ISOLATED cho ${symbol}. Hủy mở lệnh.`, true);
+            if(botRunning) scheduleNextMainCycle();
+            return;
+        }
+
+        // 2. Thiết lập đòn bẩy
         const leverageSetSuccess = await setLeverage(symbol, maxLeverage);
         if (!leverageSetSuccess) {
             addLog(`❌ Không thể cài đặt đòn bẩy ${maxLeverage}x cho ${symbol}. Hủy mở lệnh.`, true);
@@ -561,17 +590,18 @@ async function openShortPosition(symbol, fundingRate, usdtBalance, maxLeverage) 
         }
         addLog(`[DEBUG] Giá hiện tại của ${symbol}: ${currentPrice.toFixed(pricePrecision)}`);
 
-        // Tính toán khối lượng lệnh dựa trên số phần trăm tài khoản
-        const capitalToUse = usdtBalance * PERCENT_ACCOUNT_PER_TRADE; 
+        // Tính toán số vốn (USD) sẽ dùng cho mỗi lệnh (đây là số tiền ký quỹ ban đầu)
+        const initialMargin = usdtBalance * PERCENT_ACCOUNT_PER_TRADE; 
 
-        if (usdtBalance < capitalToUse) { // Logic này chỉ để an toàn thêm, thực tế capitalToUse sẽ <= usdtBalance
-            addLog(`⚠️ Số dư USDT khả dụng (${usdtBalance.toFixed(2)}) không đủ để mở lệnh với ${capitalToUse.toFixed(2)} USDT. Hủy mở lệnh.`, true);
+        if (usdtBalance < initialMargin) {
+            addLog(`⚠️ Số dư USDT khả dụng (${usdtBalance.toFixed(2)}) không đủ để mở lệnh với ${initialMargin.toFixed(2)} USDT ký quỹ. Hủy mở lệnh.`, true);
             if(botRunning) scheduleNextMainCycle();
             return;
         }
-        
-        // Khối lượng tính toán (quantity)
-        let quantity = (capitalToUse * maxLeverage) / currentPrice; 
+
+        // Tính toán khối lượng lệnh dựa trên initialMargin và đòn bẩy
+        // Khối lượng = (Số tiền ký quỹ * Đòn bẩy) / Giá hiện tại
+        let quantity = (initialMargin * maxLeverage) / currentPrice; 
 
         // Làm tròn quantity theo stepSize và quantityPrecision của sàn
         quantity = Math.floor(quantity / stepSize) * stepSize;
@@ -589,7 +619,7 @@ async function openShortPosition(symbol, fundingRate, usdtBalance, maxLeverage) 
         const currentNotional = quantity * currentPrice;
         if (currentNotional < minNotional) {
             addLog(`⚠️ Giá trị hợp đồng (${currentNotional.toFixed(pricePrecision)} USDT) quá nhỏ so với minNotional (${minNotional} USDT) cho ${symbol}. Không thể mở lệnh.`, true);
-            addLog(`   Vốn USDT đầu tư: ${capitalToUse.toFixed(2)} USDT. Vị thế ước tính (đòn bẩy ${maxLeverage}x): ${currentNotional.toFixed(2)} USDT.`);
+            addLog(`   Vốn USDT đầu tư: ${initialMargin.toFixed(2)} USDT. Vị thế ước tính (đòn bẩy ${maxLeverage}x): ${currentNotional.toFixed(2)} USDT.`);
             if(botRunning) scheduleNextMainCycle(); 
             return;
         }
@@ -614,15 +644,16 @@ async function openShortPosition(symbol, fundingRate, usdtBalance, maxLeverage) 
 
         addLog(`✅ Đã mở SHORT ${symbol} vào lúc ${formattedOpenTime}`, true);
         addLog(`  + Funding Rate: ${fundingRate}`);
+        addLog(`  + Chế độ ký quỹ: ISOLATED`);
         addLog(`  + Đòn bẩy: ${maxLeverage}x`);
-        addLog(`  + Số tiền đầu tư: ${capitalToUse.toFixed(2)} USDT`); 
+        addLog(`  + Ký quỹ ban đầu: ${initialMargin.toFixed(2)} USDT`); 
         addLog(`  + Khối lượng: ${quantity} ${symbol}`);
         addLog(`  + Giá vào lệnh: ${entryPrice.toFixed(pricePrecision)}`);
 
-        // Tính toán TP/SL dựa trên capitalToUse (được tính từ PERCENT_ACCOUNT_PER_TRADE)
-        const slAmountUSDT = capitalToUse * STOP_LOSS_PERCENTAGE * 5; // SL = 5 lần STOP_LOSS_PERCENTAGE
+        // Tính toán TP/SL dựa trên initialMargin
+        const slAmountUSDT = initialMargin * STOP_LOSS_PERCENTAGE * 5; // SL = 5 lần STOP_LOSS_PERCENTAGE
         const tpPercentage = TAKE_PROFIT_PERCENTAGES[maxLeverage]; 
-        const tpAmountUSDT = capitalToUse * tpPercentage * 2.5; // TP = 2.5 lần TAKE_PROFIT_PERCENTAGES
+        const tpAmountUSDT = initialMargin * tpPercentage * 2.5; // TP = 2.5 lần TAKE_PROFIT_PERCENTAGES
 
         // Tính toán giá SL (giá tăng lên so với giá vào lệnh)
         let slPrice = entryPrice + (slAmountUSDT / quantity);
@@ -637,8 +668,8 @@ async function openShortPosition(symbol, fundingRate, usdtBalance, maxLeverage) 
         tpPrice = parseFloat(tpPrice.toFixed(pricePrecision));
 
         addLog(`>>> Giá TP: ${tpPrice.toFixed(pricePrecision)}, Giá SL: ${slPrice.toFixed(pricePrecision)}`, true);
-        addLog(`   (SL: ${(STOP_LOSS_PERCENTAGE * 5 * 100).toFixed(0)}% của ${capitalToUse.toFixed(2)} USDT = ${slAmountUSDT.toFixed(2)} USDT)`); // Cập nhật log
-        addLog(`   (TP: ${(tpPercentage * 2.5 * 100).toFixed(0)}% của ${capitalToUse.toFixed(2)} USDT = ${tpAmountUSdt.toFixed(2)} USDT)`); // Cập nhật log
+        addLog(`   (SL: ${(STOP_LOSS_PERCENTAGE * 5 * 100).toFixed(0)}% của ${initialMargin.toFixed(2)} USDT = ${slAmountUSDT.toFixed(2)} USDT)`); 
+        addLog(`   (TP: ${(tpPercentage * 2.5 * 100).toFixed(0)}% của ${initialMargin.toFixed(2)} USDT = ${tpAmountUSDT.toFixed(2)} USDT)`);
 
 
         // ĐẶT LỆNH TP VÀ SL
