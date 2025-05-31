@@ -59,8 +59,8 @@ const STOP_LOSS_PERCENTAGE = 0.5; // 1 = 100% của FIXED_USDT_AMOUNT_PER_TRADE
 // TP được tính dựa trên X% của vốn đầu tư ban đầu (FIXED_USDT_AMOUNT_PER_TRADE).
 const TAKE_PROFIT_PERCENTAGES = {
     20: 0.5,  // 50% TP nếu đòn bẩy 20x
-    25: 0.8,  // 80% TP nếu đòn bẩy 25x
-    50: 1,    // 100% TP nếu đòn bẩy 50x
+    25: 0.5,  // 80% TP nếu đòn bẩy 25x
+    50: 0.75,    // 100% TP nếu đòn bẩy 50x
     75: 1,    // 100% TP nếu đòn bẩy 75x
     100: 1.5, // 150% TP nếu đòn bẩy 100x
     125: 2,   // 200% TP nếu đòn bẩy 125x
