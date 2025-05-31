@@ -4,8 +4,7 @@ import express from 'express';
 import { exec } from 'child_process';
 import fs from 'fs';
 import path from 'path';
-import { fileURLToPath } from 'url';
-
+import { fileURLToPath } from 'url'; // Đã sửa lỗi cú pháp tại đây
 
 // Lấy __filename và __dirname trong ES modules
 const __filename = fileURLToPath(import.meta.url);
@@ -346,6 +345,11 @@ async function setMarginType(symbol, marginType) {
         addLog(`✅ Đã thiết lập chế độ ký quỹ ${marginType} cho ${symbol}.`);
         return true;
     } catch (error) {
+        // THÊM ĐIỀU KIỆN XỬ LÝ LỖI -4046 TẠI ĐÂY
+        if (error.code === -4046 && error.msg === 'No need to change margin type.') {
+            addLog(`⚠️ Chế độ ký quỹ ${marginType} cho ${symbol} đã được thiết lập. Tiếp tục.`, true);
+            return true; // Coi như thành công vì đã ở chế độ mong muốn
+        }
         addLog(`❌ Lỗi khi thiết lập chế độ ký quỹ ${marginType} cho ${symbol}: ${error.code} - ${error.msg || error.message}`);
         return false;
     }
@@ -652,9 +656,9 @@ async function openShortPosition(symbol, fundingRate, usdtBalance, maxLeverage) 
         addLog(`  + Giá vào lệnh: ${entryPrice.toFixed(pricePrecision)}`);
 
         // Tính toán TP/SL ban đầu dựa trên initialMargin
-        const slAmountUSDT = initialMargin * STOP_LOSS_PERCENTAGE * 5; // SL = 5 lần STOP_LOSS_PERCENTAGE
+        const slAmountUSDT = initialMargin * STOP_LOSS_PERCENTAGE; // SL = PERCENTAGE của vốn ban đầu
         const tpPercentage = TAKE_PROFIT_PERCENTAGES[maxLeverage]; 
-        const tpAmountUSDT = initialMargin * tpPercentage * 2.5; // TP = 2.5 lần TAKE_PROFIT_PERCENTAGES
+        const tpAmountUSDT = initialMargin * tpPercentage; // TP = PERCENTAGE của vốn ban đầu
 
         // Tính toán giá SL (giá tăng lên so với giá vào lệnh)
         let slPrice = entryPrice + (slAmountUSDT / quantity);
@@ -669,8 +673,8 @@ async function openShortPosition(symbol, fundingRate, usdtBalance, maxLeverage) 
         tpPrice = parseFloat(tpPrice.toFixed(pricePrecision));
 
         addLog(`>>> Giá TP (ban đầu): ${tpPrice.toFixed(pricePrecision)}, Giá SL (ban đầu): ${slPrice.toFixed(pricePrecision)}`, true);
-        addLog(`   (SL: ${(STOP_LOSS_PERCENTAGE * 5 * 100).toFixed(0)}% của ${initialMargin.toFixed(2)} USDT = ${slAmountUSDT.toFixed(2)} USDT)`); 
-        addLog(`   (TP: ${(tpPercentage * 2.5 * 100).toFixed(0)}% của ${initialMargin.toFixed(2)} USDT = ${tpAmountUSDT.toFixed(2)} USDT)`);
+        addLog(`   (SL: ${(STOP_LOSS_PERCENTAGE * 100).toFixed(0)}% của ${initialMargin.toFixed(2)} USDT = ${slAmountUSDT.toFixed(2)} USDT)`); 
+        addLog(`   (TP: ${(tpPercentage * 100).toFixed(0)}% của ${initialMargin.toFixed(2)} USDT = ${tpAmountUSDT.toFixed(2)} USDT)`);
 
 
         // ĐẶT LỆNH TP VÀ SL BẰNG STOP_MARKET VÀ TAKE_PROFIT_MARKET
@@ -715,6 +719,7 @@ async function openShortPosition(symbol, fundingRate, usdtBalance, maxLeverage) 
             entryPrice: entryPrice,
             initialTPPrice: tpPrice, // Lưu TP ban đầu
             initialSLPrice: slPrice, // Lưu SL ban đầu
+            **initialMargin: initialMargin,** // <-- ĐÃ THÊM DÒNG NÀY ĐỂ LƯU VỐN KÝ QUỸ BAN ĐẦU
             currentTPPrice: null, // TP hiện tại, sẽ được tính khi tầng 2 kích hoạt
             currentSLPrice: null, // SL hiện tại, sẽ được tính khi tầng 2 kích hoạt
             openTime: openTime,
@@ -753,7 +758,7 @@ async function checkAndClosePositionManually() {
         return;
     }
 
-    const { symbol, quantity, entryPrice, initialTPPrice, initialSLPrice, pricePrecision } = currentOpenPosition;
+    const { symbol, quantity, entryPrice, initialTPPrice, initialSLPrice, pricePrecision, initialMargin } = currentOpenPosition; // Lấy initialMargin
     const currentTime = Date.now();
 
     try {
@@ -793,7 +798,7 @@ async function checkAndClosePositionManually() {
                 currentOpenPosition.delayBeforeManualCheckAfterTP_SL = currentTime + 5000; // Đặt thời điểm bắt đầu kiểm tra thủ công
             } else if (crossedSL && !currentOpenPosition.hasCrossedInitialSL) {
                 addLog(`[DEBUG] Vị thế ${symbol}: Giá đã chạm SL tầng 1 (${currentPrice.toFixed(pricePrecision)} >= ${initialSLPrice.toFixed(pricePrecision)}). Đang đợi thêm 5s trước khi kích hoạt TP/SL tầng 2.`);
-                currentOpenPosition.hasCrossedInitialSL = true;
+                currentOpenPosition.hasCrossedSL = true;
                 currentOpenPosition.delayBeforeManualCheckAfterTP_SL = currentTime + 5000; // Đặt thời điểm bắt đầu kiểm tra thủ công
             }
             // Nếu đã chạm TP/SL tầng 1 VÀ đã qua thời gian chờ 5s VÀ chưa kích hoạt TP/SL tầng 2
@@ -806,23 +811,40 @@ async function checkAndClosePositionManually() {
                 if (currentPositionOnBinance && parseFloat(currentPositionOnBinance.positionAmt) !== 0) {
                     addLog(`[DEBUG] Vị thế ${symbol}: Đã qua 5s sau khi chạm TP/SL tầng 1 VÀ vị thế vẫn mở. Đang chuyển sang quản lý thủ công (TP/SL tầng 2).`);
                     
-                    // Tính toán TP/SL mới (tầng 2)
-                    // TP mới = Giá vào lệnh - ((Giá vào lệnh - TP ban đầu) * 5)
-                    currentOpenPosition.currentTPPrice = entryPrice - ((entryPrice - initialTPPrice) * 5);
-                    // SL mới = Giá vào lệnh + ((SL ban đầu - Giá vào lệnh) * 1.5)
-                    currentOpenPosition.currentSLPrice = entryPrice + ((initialSLPrice - entryPrice) * 1.5);
+                    // Lấy lại các thông tin cần thiết từ currentOpenPosition và symbolDetails
+                    const symbolInfo = await getSymbolDetails(symbol);
+                    if (!symbolInfo || !symbolInfo.maxLeverage) {
+                        addLog(`❌ Không thể lấy thông tin đòn bẩy cho ${symbol} để tính TP/SL Tầng 2. Vị thế sẽ được quản lý thủ công (Timeout hoặc thủ công nếu cần).`, true);
+                        currentOpenPosition.isManuallyManaged = true; // Vẫn chuyển sang quản lý thủ công nhưng không có TP/SL mới
+                        return; 
+                    }
+                    const maxLeverage = symbolInfo.maxLeverage;
+
+                    // Tính toán số tiền SL/TP gốc (Tầng 1) dựa trên phần trăm vốn đã cấu hình
+                    const slAmountUSDT_T1 = initialMargin * STOP_LOSS_PERCENTAGE;
+                    const tpPercentage = TAKE_PROFIT_PERCENTAGES[maxLeverage]; 
+                    const tpAmountUSDT_T1 = initialMargin * tpPercentage;
+
+                    // Tính toán số tiền TP/SL cho Tầng 2 dựa trên phần trăm vốn gốc
+                    const slAmountUSDT_T2 = slAmountUSDT_T1 * 1.5; // SL Tầng 2 là 1.5 lần SL Tầng 1
+                    const tpAmountUSDT_T2 = tpAmountUSDT_T1 * 5;   // TP Tầng 2 là 5 lần TP Tầng 1
+
+                    // Tính toán giá TP/SL mới (tầng 2)
+                    // TP mới = Giá vào lệnh - (TP Amount Tầng 2 / Khối lượng)
+                    currentOpenPosition.currentTPPrice = entryPrice - (tpAmountUSDT_T2 / quantity);
+                    // SL mới = Giá vào lệnh + (SL Amount Tầng 2 / Khối lượng)
+                    currentOpenPosition.currentSLPrice = entryPrice + (slAmountUSDT_T2 / quantity);
+
 
                     // Làm tròn theo pricePrecision và tickSize
-                    const symbolInfo = await getSymbolDetails(symbol);
-                    if (symbolInfo) {
-                        currentOpenPosition.currentTPPrice = Math.floor(currentOpenPosition.currentTPPrice / symbolInfo.tickSize) * symbolInfo.tickSize;
-                        currentOpenPosition.currentSLPrice = Math.ceil(currentOpenPosition.currentSLPrice / symbolInfo.tickSize) * symbolInfo.tickSize;
-                        currentOpenPosition.currentTPPrice = parseFloat(currentOpenPosition.currentTPPrice.toFixed(pricePrecision));
-                        currentOpenPosition.currentSLPrice = parseFloat(currentOpenPosition.currentSLPrice.toFixed(pricePrecision));
-                    }
+                    currentOpenPosition.currentTPPrice = Math.floor(currentOpenPosition.currentTPPrice / symbolInfo.tickSize) * symbolInfo.tickSize;
+                    currentOpenPosition.currentSLPrice = Math.ceil(currentOpenPosition.currentSLPrice / symbolInfo.tickSize) * symbolInfo.tickSize;
+                    currentOpenPosition.currentTPPrice = parseFloat(currentOpenPosition.currentTPPrice.toFixed(pricePrecision));
+                    currentOpenPosition.currentSLPrice = parseFloat(currentOpenPosition.currentSLPrice.toFixed(pricePrecision));
 
                     currentOpenPosition.isManuallyManaged = true; // Đánh dấu đã chuyển sang quản lý thủ công
                     addLog(`✅ TP/SL tầng 2 cho ${symbol} ĐÃ KÍCH HOẠT: TP = ${currentOpenPosition.currentTPPrice.toFixed(pricePrecision)}, SL = ${currentOpenPosition.currentSLPrice.toFixed(pricePrecision)}`);
+                    addLog(`   (SL Tầng 2: ${(STOP_LOSS_PERCENTAGE * 1.5 * 100).toFixed(0)}% vốn, TP Tầng 2: ${(tpPercentage * 5 * 100).toFixed(0)}% vốn)`);
                 } else {
                     addLog(`[DEBUG] Vị thế ${symbol}: Đã qua 5s sau khi chạm TP/SL tầng 1, nhưng vị thế ĐÃ ĐÓNG trên sàn. Không cần kích hoạt TP/SL tầng 2.`);
                     // Nếu vị thế đã đóng, manageOpenPosition sẽ xử lý việc reset currentOpenPosition
