@@ -58,19 +58,21 @@ const STOP_LOSS_PERCENTAGE = 0.4; // 0.5 = 50% của vốn đầu tư ban đầu
 
 // Bảng ánh xạ maxLeverage với Take Profit percentage.
 // TP được tính dựa trên X% của vốn đầu tư ban đầu (số tiền được tính từ PERCENT_ACCOUNT_PER_TRADE).
+// Đã điều chỉnh để phù hợp với việc giữ lệnh 10 giây (giá trị TP có thể rất nhỏ hoặc không thể đạt)
 const TAKE_PROFIT_PERCENTAGES = {
-    20: 0.25,  // 50% TP nếu đòn bẩy 20x
-    25: 0.30,  // 80% TP nếu đòn bẩy 25x
-    50: 0.35,    // 100% TP nếu đòn bẩy 50x
-    75: 0.40,    // 100% TP nếu đòn bẩy 75x
-    100: 0.45, // 150% TP nếu đòn bẩy 100x
-    125: 0.55,   // 200% TP nếu đòn bẩy 125x
+    20: 0.05,  // 5% TP nếu đòn bẩy 20x
+    25: 0.06,  // 6% TP nếu đòn bẩy 25x
+    50: 0.08,  // 8% TP nếu đòn bẩy 50x
+    75: 0.10,  // 10% TP nếu đòn bẩy 75x
+    100: 0.12, // 12% TP nếu đòn bẩy 100x
+    125: 0.15, // 15% TP nếu đòn bẩy 125x
 };
 
 // Ngưỡng funding rate âm tối thiểu để xem xét mở lệnh (ví dụ: -0.005 = -0.5%)
 const MIN_FUNDING_RATE_THRESHOLD = -0.0001; 
 // Thời gian tối đa giữ một vị thế (ví dụ: 90 giây = 1 phút 30 giây)
-const MAX_POSITION_LIFETIME_SECONDS = 297; 
+// ĐÃ SỬA ĐỔI THÀNH 10 GIÂY THEO YÊU CẦU
+const MAX_POSITION_LIFETIME_SECONDS = 10; 
 
 // Cửa sổ thời gian (tính bằng phút) TRƯỚC giờ funding mà bot sẽ bắt đầu quét.
 // Đặt là 1 phút để chỉ quét vào phút :59.
@@ -86,9 +88,6 @@ const OPEN_TRADE_BEFORE_FUNDING_SECONDS = 1;
 // Thời gian (mili giây) LỆNH so với giây :59 để mở lệnh (để tránh quá tải).
 // Đặt là 755ms để lệnh được gửi vào 59.755s.
 const OPEN_TRADE_AFTER_SECOND_OFFSET_MS = 755; 
-
-// Thời gian chờ (ms) sau khi chạm TP/SL Tầng 1 trước khi kiểm tra chuyển sang Tầng 2
-const DELAY_AFTER_INITIAL_TP_SL_MS = 5000; // 5 giây
 
 // --- CẤU HÌNH WEB SERVER VÀ LOG PM2 ---
 const WEB_SERVER_PORT = 3000; // Cổng cho giao diện web
@@ -517,7 +516,7 @@ async function closeShortPosition(symbol, quantityToClose, reason = 'manual') {
             }
             stopCountdownFrontend(); // Dừng đếm ngược trên frontend
             
-            // XÓA TẤT CẢ LỆNH CHƯA KHỚP SAU KHI ĐÓNG VỊ THẾ
+            // HỦY TẤT CẢ LỆNH CHƯA KHỚP SAU KHI ĐÓNG VỊ THẾ
             await cancelOpenOrdersForSymbol(symbol);
 
             if(botRunning) scheduleNextMainCycle(); // Lên lịch cho lần quét tiếp theo nếu bot đang chạy
@@ -548,7 +547,7 @@ async function closeShortPosition(symbol, quantityToClose, reason = 'manual') {
         }
         stopCountdownFrontend(); // Dừng đếm ngược trên frontend
         
-        // XÓA TẤT CẢ LỆNH CHƯA KHỚP SAU KHI ĐÓNG VỊ THẾ
+        // HỦY TẤT CẢ LỆNH CHƯA KHỚP SAU KHI ĐÓNG VỊ THẾ
         await cancelOpenOrdersForSymbol(symbol);
 
         if(botRunning) scheduleNextMainCycle(); // Lên lịch cho lần quét tiếp theo nếu bot đang chạy
@@ -573,7 +572,7 @@ function startCountdownFrontend() {
             if (timeLeft >= 0) {
                 currentCountdownMessage = `Vị thế ${currentOpenPosition.symbol}: Đang mở, còn lại ${timeLeft} giây.`;
             } else {
-                currentCountdownMessage = `Vị thế ${currentOpenPosition.symbol}: Đã vượt quá thời gian tối đa. Đang chờ đóng.`;
+                currentCountdownMessage = `Vị thế ${currentOpenPosition.symbol}: Đã vượt quá thời gian tối đa (${MAX_POSITION_LIFETIME_SECONDS}s). Đang chờ đóng.`;
             }
         } else {
             stopCountdownFrontend(); // Dừng nếu không có vị thế
@@ -701,9 +700,9 @@ async function openShortPosition(symbol, fundingRate, usdtBalance, maxLeverage) 
         addLog(`  + Giá vào lệnh: ${entryPrice.toFixed(pricePrecision)}`);
 
         // Tính toán TP/SL ban đầu dựa trên initialMargin
-        const slAmountUSDT = initialMargin * STOP_LOSS_PERCENTAGE; // SL = PERCENTAGE của vốn ban đầu
+        const slAmountUSDT = initialMargin * STOP_LOSS_PERCENTAGE; 
         const tpPercentage = TAKE_PROFIT_PERCENTAGES[maxLeverage]; 
-        const tpAmountUSDT = initialMargin * tpPercentage; // TP = PERCENTAGE của vốn ban đầu
+        const tpAmountUSDT = initialMargin * tpPercentage; 
 
         // Tính toán giá SL (giá tăng lên so với giá vào lệnh)
         let slPrice = entryPrice + (slAmountUSDT / quantity);
@@ -711,18 +710,21 @@ async function openShortPosition(symbol, fundingRate, usdtBalance, maxLeverage) 
         let tpPrice = entryPrice - (tpAmountUSDT / quantity);
 
         // Làm tròn TP/SL theo tickSize của sàn
-        slPrice = Math.ceil(slPrice / tickSize) * tickSize; // SL làm tròn lên để đảm bảo giá SL trên giá vào lệnh
-        tpPrice = Math.floor(tpPrice / tickSize) * tickSize; // TP làm tròn xuống để đảm bảo giá TP dưới giá vào lệnh
+        slPrice = Math.ceil(slPrice / tickSize) * tickSize; 
+        tpPrice = Math.floor(tpPrice / tickSize) * tickSize; 
 
         slPrice = parseFloat(slPrice.toFixed(pricePrecision));
         tpPrice = parseFloat(tpPrice.toFixed(pricePrecision));
 
-        addLog(`>>> Giá TP (ban đầu): ${tpPrice.toFixed(pricePrecision)}, Giá SL (ban đầu): ${slPrice.toFixed(pricePrecision)}`, true);
+        addLog(`>>> Giá TP: ${tpPrice.toFixed(pricePrecision)}, Giá SL: ${slPrice.toFixed(pricePrecision)}`, true);
         addLog(`   (SL: ${(STOP_LOSS_PERCENTAGE * 100).toFixed(0)}% của ${initialMargin.toFixed(2)} USDT = ${slAmountUSDT.toFixed(2)} USDT)`); 
         addLog(`   (TP: ${(tpPercentage * 100).toFixed(0)}% của ${initialMargin.toFixed(2)} USDT = ${tpAmountUSDT.toFixed(2)} USDT)`);
 
 
         // ĐẶT LỆNH TP VÀ SL BẰNG STOP_MARKET VÀ TAKE_PROFIT_MARKET NGAY SAU KHI VỊ THẾ MỞ
+        // Cần kiểm tra giá TP/SL có hợp lệ không (ví dụ: không kích hoạt ngay lập tức)
+        // Lỗi "Order would immediately trigger" là do giá quá gần.
+        // Bạn có thể cân nhắc một khoảng đệm nhỏ hoặc logic retry nếu cần.
         try {
             // Lệnh Stop Loss (Mua để đóng vị thế Short khi giá tăng)
             await callSignedAPI('/fapi/v1/order', 'POST', {
@@ -736,7 +738,7 @@ async function openShortPosition(symbol, fundingRate, usdtBalance, maxLeverage) 
             });
             addLog(`✅ Đã đặt lệnh STOP_MARKET (SL) cho ${symbol} tại giá ${slPrice.toFixed(pricePrecision)}.`, true);
         } catch (slError) {
-            addLog(`❌ Lỗi khi đặt lệnh SL cho ${symbol}: ${slError.msg || slError.message}. TP/SL Tầng 1 có thể không được đặt.`, true);
+            addLog(`❌ Lỗi khi đặt lệnh SL cho ${symbol}: ${slError.msg || slError.message}. SL có thể không được đặt.`, true);
         }
 
         try {
@@ -752,7 +754,7 @@ async function openShortPosition(symbol, fundingRate, usdtBalance, maxLeverage) 
             });
             addLog(`✅ Đã đặt lệnh TAKE_PROFIT_MARKET (TP) cho ${symbol} tại giá ${tpPrice.toFixed(pricePrecision)}.`, true);
         } catch (tpError) {
-            addLog(`❌ Lỗi khi đặt lệnh TP cho ${symbol}: ${tpError.msg || tpError.message}. TP/SL Tầng 1 có thể không được đặt.`, true);
+            addLog(`❌ Lỗi khi đặt lệnh TP cho ${symbol}: ${tpError.msg || tpError.message}. TP có thể không được đặt.`, true);
         }
 
 
@@ -761,16 +763,11 @@ async function openShortPosition(symbol, fundingRate, usdtBalance, maxLeverage) 
             symbol: symbol,
             quantity: quantity,
             entryPrice: entryPrice,
-            initialTPPrice: tpPrice, // Lưu TP ban đầu
-            initialSLPrice: slPrice, // Lưu SL ban đầu
-            initialMargin: initialMargin, // Đã thêm dòng này để lưu vốn ký quỹ ban đầu
-            currentTPPrice: null, // TP hiện tại, sẽ được tính khi tầng 2 kích hoạt
-            currentSLPrice: null, // SL hiện tại, sẽ được tính khi tầng 2 kích hoạt
+            initialTPPrice: tpPrice, 
+            initialSLPrice: slPrice, 
+            initialMargin: initialMargin, 
             openTime: openTime,
             pricePrecision: pricePrecision,
-            isManuallyManaged: false, // Ban đầu KHÔNG quản lý thủ công
-            initialTPCrossedTime: null, // Thời điểm giá chạm TP tầng 1
-            initialSLCrossedTime: null, // Thời điểm giá chạm SL tầng 1
         };
 
         // Bắt đầu interval kiểm tra vị thế và cập nhật đếm ngược frontend
@@ -793,152 +790,9 @@ async function openShortPosition(symbol, fundingRate, usdtBalance, maxLeverage) 
 }
 
 /**
- * Hàm kiểm tra và đóng vị thế thủ công bằng lệnh MARKET nếu lệnh TP/SL stop-maket không tồn tại.
- * Chạy liên tục mỗi 300ms khi có vị thế mở.
+ * Hàm kiểm tra và quản lý vị thế đang mở (SL/TP/Timeout)
+ * Đã loại bỏ hoàn toàn logic TP/SL tầng 2
  */
-async function checkAndClosePositionManually() {
-    if (!currentOpenPosition || isClosingPosition) {
-        return;
-    }
-
-    const { symbol, quantity, entryPrice, initialTPPrice, initialSLPrice, pricePrecision, initialMargin, openTime } = currentOpenPosition; 
-    const currentTime = Date.now();
-
-    try {
-        const currentPrice = await getCurrentPrice(symbol);
-        if (currentPrice === null) {
-            addLog(`⚠️ Không thể lấy giá hiện tại cho ${symbol} để kiểm tra đóng lệnh thủ công.`);
-            return;
-        }
-
-        // Lấy danh sách các lệnh mở (để kiểm tra lệnh TP/SL tầng 1)
-        const openOrders = await getOpenOrders(symbol);
-        const hasTPLimitOrder = openOrders.some(order => order.type === 'TAKE_PROFIT_MARKET');
-        const hasSLLimitOrder = openOrders.some(order => order.type === 'STOP_MARKET');
-
-        // Lấy thông tin vị thế thực tế trên Binance
-        const positions = await callSignedAPI('/fapi/v2/positionRisk', 'GET');
-        const currentPositionOnBinance = positions.find(p => p.symbol === symbol && parseFloat(p.positionAmt) < 0);
-        const isPositionStillOpenOnBinance = (currentPositionOnBinance && parseFloat(currentPositionOnBinance.positionAmt) !== 0);
-
-
-        // Nếu đã ở chế độ quản lý thủ công (tầng 2 đã kích hoạt)
-        if (currentOpenPosition.isManuallyManaged) {
-            addLog(`[DEBUG] Quản lý thủ công (tầng 2) ${symbol}: Giá hiện tại: ${currentPrice.toFixed(pricePrecision)}, TP: ${currentOpenPosition.currentTPPrice.toFixed(pricePrecision)}, SL: ${currentOpenPosition.currentSLPrice.toFixed(pricePrecision)}`);
-
-            // Kiểm tra điều kiện Take Profit tầng 2
-            if (currentPrice <= currentOpenPosition.currentTPPrice) {
-                addLog(`✅ Vị thế ${symbol} đạt TP tầng 2! Giá hiện tại (${currentPrice.toFixed(pricePrecision)}) <= Giá TP (${currentOpenPosition.currentTPPrice.toFixed(pricePrecision)}). Đang đóng lệnh...`, true);
-                await closeShortPosition(symbol, quantity, 'TP_Tầng_2');
-                return; 
-            }
-
-            // Kiểm tra điều kiện Stop Loss tầng 2
-            if (currentPrice >= currentOpenPosition.currentSLPrice) {
-                addLog(`❌ Vị thế ${symbol} đạt SL tầng 2! Giá hiện tại (${currentPrice.toFixed(pricePrecision)}) >= Giá SL (${currentOpenPosition.currentSLPrice.toFixed(pricePrecision)}). Đang đóng lệnh...`, true);
-                await closeShortPosition(symbol, quantity, 'SL_Tầng_2');
-                return; 
-            }
-        } 
-        // Nếu chưa ở chế độ quản lý thủ công (vẫn đang đợi TP/SL tầng 1 hoặc thời gian chờ)
-        else {
-            const crossedTP = currentPrice <= initialTPPrice;
-            const crossedSL = currentPrice >= initialSLPrice;
-
-            // Ghi nhận thời điểm chạm TP/SL tầng 1
-            if (crossedTP && currentOpenPosition.initialTPCrossedTime === null) {
-                addLog(`[DEBUG] Vị thế ${symbol}: Giá đã chạm TP tầng 1 (${currentPrice.toFixed(pricePrecision)} <= ${initialTPPrice.toFixed(pricePrecision)}). Ghi nhận thời điểm.`);
-                currentOpenPosition.initialTPCrossedTime = currentTime;
-            }
-            if (crossedSL && currentOpenPosition.initialSLCrossedTime === null) {
-                addLog(`[DEBUG] Vị thế ${symbol}: Giá đã chạm SL tầng 1 (${currentPrice.toFixed(pricePrecision)} >= ${initialSLPrice.toFixed(pricePrecision)}). Ghi nhận thời điểm.`);
-                currentOpenPosition.initialSLCrossedTime = currentTime;
-            }
-
-            // --- LOGIC CHUYỂN SANG TẦNG 2 ---
-            // Chỉ xem xét chuyển sang Tầng 2 nếu có một trong hai điều kiện chạm tầng 1 đã xảy ra
-            if (currentOpenPosition.initialTPCrossedTime !== null || currentOpenPosition.initialSLCrossedTime !== null) {
-                let checkTime = null;
-                // Lấy thời điểm chạm sớm nhất để tính DELAY
-                if (currentOpenPosition.initialTPCrossedTime && currentOpenPosition.initialSLCrossedTime) {
-                    checkTime = Math.min(currentOpenPosition.initialTPCrossedTime, currentOpenPosition.initialSLCrossedTime);
-                } else if (currentOpenPosition.initialTPCrossedTime) {
-                    checkTime = currentOpenPosition.initialTPCrossedTime;
-                } else if (currentOpenPosition.initialSLCrossedTime) {
-                    checkTime = currentOpenPosition.initialSLCrossedTime;
-                }
-
-                // Nếu đã qua thời gian chờ DELAY_AFTER_INITIAL_TP_SL_MS
-                if (checkTime !== null && currentTime >= checkTime + DELAY_AFTER_INITIAL_TP_SL_MS) {
-                    
-                    addLog(`[DEBUG] Vị thế ${symbol}: Đã qua ${DELAY_AFTER_INITIAL_TP_SL_MS / 1000}s sau khi chạm TP/SL tầng 1.`);
-
-                    // --- ĐIỀU KIỆN KÍCH HOẠT TẦNG 2 CHÍNH XÁC ---
-                    // 1. Vị thế CÒN MỞ trên Binance
-                    // 2. MỘT TRONG HAI LỆNH TP/SL Tầng 1 KHÔNG CÒN TỒN TẠI trên sàn
-                    const shouldActivateTier2 = isPositionStillOpenOnBinance && (!hasTPLimitOrder || !hasSLLimitOrder);
-
-                    if (shouldActivateTier2) {
-                        addLog(`[DEBUG] Vị thế ${symbol}: Điều kiện kích hoạt TP/SL tầng 2 được đáp ứng (Vị thế còn mở, và một hoặc cả hai lệnh Tầng 1 đã biến mất).`, true);
-                        
-                        // Lấy lại các thông tin cần thiết từ currentOpenPosition và symbolDetails
-                        const symbolInfo = await getSymbolDetails(symbol);
-                        if (!symbolInfo || !symbolInfo.maxLeverage) {
-                            addLog(`❌ Không thể lấy thông tin đòn bẩy cho ${symbol} để tính TP/SL Tầng 2. Vị thế sẽ được quản lý thủ công (Timeout hoặc thủ công nếu cần).`, true);
-                            currentOpenPosition.isManuallyManaged = true; // Vẫn chuyển sang quản lý thủ công nhưng không có TP/SL mới
-                            return; 
-                        }
-                        const maxLeverage = symbolInfo.maxLeverage;
-
-                        // Tính toán số tiền SL/TP gốc (Tầng 1) dựa trên phần trăm vốn đã cấu hình
-                        const slAmountUSDT_T1 = initialMargin * STOP_LOSS_PERCENTAGE;
-                        const tpPercentage = TAKE_PROFIT_PERCENTAGES[maxLeverage]; 
-                        const tpAmountUSDT_T1 = initialMargin * tpPercentage;
-
-                        // Tính toán số tiền TP/SL cho Tầng 2 dựa trên phần trăm vốn gốc
-                        const slAmountUSDT_T2 = slAmountUSDT_T1 * 1.5; // SL Tầng 2 là 1.5 lần SL Tầng 1
-                        const tpAmountUSDT_T2 = tpAmountUSDT_T1 * 3;   // TP Tầng 2 là 5 lần TP Tầng 1
-
-                        // Tính toán giá TP/SL mới (tầng 2)
-                        // TP mới = Giá vào lệnh - (TP Amount Tầng 2 / Khối lượng)
-                        currentOpenPosition.currentTPPrice = entryPrice - (tpAmountUSDT_T2 / quantity);
-                        // SL mới = Giá vào lệnh + (SL Amount Tầng 2 / Khối lượng)
-                        currentOpenPosition.currentSLPrice = entryPrice + (slAmountUSDT_T2 / quantity);
-
-
-                        // Làm tròn theo pricePrecision và tickSize
-                        currentOpenPosition.currentTPPrice = Math.floor(currentOpenPosition.currentTPPrice / symbolInfo.tickSize) * symbolInfo.tickSize;
-                        currentOpenPosition.currentSLPrice = Math.ceil(currentOpenPosition.currentSLPrice / symbolInfo.tickSize) * symbolInfo.tickSize;
-                        currentOpenPosition.currentTPPrice = parseFloat(currentOpenPosition.currentTPPrice.toFixed(pricePrecision));
-                        currentOpenPosition.currentSLPrice = parseFloat(currentOpenPosition.currentSLPrice.toFixed(pricePrecision));
-
-                        currentOpenPosition.isManuallyManaged = true; // Đánh dấu đã chuyển sang quản lý thủ công
-                        addLog(`✅ TP/SL tầng 2 cho ${symbol} ĐÃ KÍCH HOẠT: TP = ${currentOpenPosition.currentTPPrice.toFixed(pricePrecision)}, SL = ${currentOpenPosition.currentSLPrice.toFixed(pricePrecision)}`);
-                        addLog(`   (SL Tầng 2: ${(STOP_LOSS_PERCENTAGE * 1.5 * 100).toFixed(0)}% vốn, TP Tầng 2: ${(tpPercentage * 3 * 100).toFixed(0)}% vốn)`);
-                        
-                        // Hủy bất kỳ lệnh nào còn lại trên sàn (TP/SL tầng 1, nếu có 1 lệnh còn lại)
-                        await cancelOpenOrdersForSymbol(symbol);
-
-                    } else if (!isPositionStillOpenOnBinance) {
-                        addLog(`[DEBUG] Vị thế ${symbol}: Đã qua thời gian chờ, nhưng VỊ THẾ ĐÃ ĐÓNG trên sàn. Không cần kích hoạt TP/SL tầng 2.`);
-                        // Logic manageOpenPosition sẽ xử lý việc reset currentOpenPosition sau khi vị thế đóng
-                    } else { // isPositionStillOpenOnBinance is true, but (hasTPLimitOrder && hasSLLimitOrder) is true OR (hasTPLimitOrder || hasSLLimitOrder) is false for some reason (e.g. only one order missing)
-                        addLog(`[DEBUG] Vị thế ${symbol}: Đã qua thời gian chờ, nhưng VỊ THẾ VẪN MỞ và LỆNH TP/SL TẦNG 1 VẪN CÒN (${hasTPLimitOrder ? 'TP' : ''}${hasSLLimitOrder ? 'SL' : ''}). Không kích hoạt TP/SL tầng 2, chờ sàn xử lý.`, true);
-                    }
-                } else {
-                    addLog(`[DEBUG] Vị thế ${symbol}: Đã chạm TP/SL tầng 1, nhưng chưa đủ ${DELAY_AFTER_INITIAL_TP_SL_MS / 1000}s chờ.`, false);
-                }
-            } else {
-                addLog(`[DEBUG] Vị thế ${symbol}: Chưa chạm TP/SL tầng 1.`, false);
-            }
-        }
-    } catch (error) {
-        addLog(`❌ Lỗi khi kiểm tra đóng lệnh thủ công cho ${symbol}: ${error.msg || error.message}`);
-    }
-}
-
-
-// Hàm kiểm tra và quản lý vị thế đang mở (SL/TP/Timeout)
 async function manageOpenPosition() {
     // Nếu không có vị thế hoặc đang trong quá trình đóng, thoát
     if (!currentOpenPosition || isClosingPosition) {
@@ -946,7 +800,7 @@ async function manageOpenPosition() {
             clearInterval(positionCheckInterval);
             positionCheckInterval = null;
             stopCountdownFrontend(); 
-            if(botRunning) scheduleNextMainCycle(); 
+            if(botRunning) scheduleNextMainCycle(); // Quay lại chu kỳ chính nếu không có vị thế
         }
         return;
     }
@@ -957,7 +811,7 @@ async function manageOpenPosition() {
         const currentTime = new Date();
         const elapsedTimeSeconds = (currentTime.getTime() - openTime.getTime()) / 1000;
 
-        // Nếu vị thế vượt quá thời gian tối đa, đóng lệnh
+        // ƯU TIÊN KIỂM TRA HẾT THỜI GIAN ĐỂ ĐÓNG VỊ THẾ
         if (elapsedTimeSeconds >= MAX_POSITION_LIFETIME_SECONDS) {
             addLog(`⏱️ Vị thế ${symbol} vượt quá thời gian tối đa (${MAX_POSITION_LIFETIME_SECONDS}s). Đóng lệnh.`, true);
             await closeShortPosition(symbol, quantity, 'Hết thời gian');
@@ -976,14 +830,14 @@ async function manageOpenPosition() {
                 positionCheckInterval = null;
             }
             stopCountdownFrontend();
-            // XÓA TẤT CẢ CÁC LỆNH CHƯA KHỚP (SL/TP còn lại)
+            // HỦY TẤT CẢ CÁC LỆNH CHƯA KHỚP (SL/TP còn lại)
             await cancelOpenOrdersForSymbol(symbol);
             if(botRunning) scheduleNextMainCycle();
             return;
         }
 
-        // Thêm hàm kiểm tra và đóng lệnh thủ công vào đây
-        await checkAndClosePositionManually();
+        // Không cần checkAndClosePositionManually nữa vì TP/SL sẽ được xử lý bởi STOP_MARKET/TAKE_PROFIT_MARKET
+        // và lệnh sẽ đóng theo MAX_POSITION_LIFETIME_SECONDS.
 
     } catch (error) {
         addLog(`❌ Lỗi khi quản lý vị thế mở cho ${symbol}: ${error.msg || error.message}`);
@@ -1023,7 +877,7 @@ async function runTradingLogic() {
         // Kiểm tra số dư đủ để vào lệnh với số tiền tính toán
         // MIN_USDT_BALANCE_TO_OPEN được dùng làm ngưỡng tối thiểu cho estimatedCapitalToUse
         if (availableBalance < estimatedCapitalToUse || estimatedCapitalToUse < MIN_USDT_BALANCE_TO_OPEN) {
-            addLog(`⚠️ Số dư USDT khả dụng (${availableBalance.toFixed(2)}) không đủ để mở lệnh với ${PERCENT_ACCOUNT_PER_TRADE*100}% tài khoản (${estimatedCapitalToUse.toFixed(2)} USDT) hoặc số tiền này quá nhỏ (<${MIN_USDT_BALANCE_TO_OPEN} USDT). Không thể mở lệnh.`, true);
+            addLog(`⚠️ Số dư USDT khả dụng (${availableBalance.toFixed(2)}) không đủ để mở lệnh với ${(PERCENT_ACCOUNT_PER_TRADE*100).toFixed(2)}% tài khoản (${estimatedCapitalToUse.toFixed(2)} USDT) hoặc số tiền này quá nhỏ (<${MIN_USDT_BALANCE_TO_OPEN} USDT). Không thể mở lệnh.`, true);
             scheduleNextMainCycle();
             return;
         }
@@ -1132,12 +986,12 @@ async function runTradingLogic() {
                     estimatedQuantity = parseFloat(estimatedQuantity.toFixed(symbolInfo.quantityPrecision));
                 }
 
-                addLog(`\n✅ Đã chọn đồng coin: **${selectedCandidateToOpen.symbol}**`, true);
-                addLog(`  + Funding Rate: **${selectedCandidateToOpen.fundingRate}**`);
-                addLog(`  + Giờ trả Funding tiếp theo: **${formatTimeUTC7(new Date(selectedCandidateToOpen.nextFundingTime))}**`);
-                addLog(`  + Đòn bẩy tối đa: **${selectedCandidateToOpen.maxLeverage}x**`);
-                addLog(`  + Số tiền dự kiến mở lệnh: **${capitalToUseForLog.toFixed(2)} USDT** (Khối lượng ước tính: **${estimatedQuantity} ${selectedCandidateToOpen.symbol}**)`);
-                addLog(`  + Lệnh sẽ được mở sau khoảng **${Math.ceil(delayForExactOpenMs / 1000)} giây** (vào lúc **${formatTimeUTC7(new Date(targetOpenTimeMs))}**).`, true);
+                addLog(`\n✅ Đã chọn đồng coin: ${selectedCandidateToOpen.symbol}`, true);
+                addLog(`  + Funding Rate: ${selectedCandidateToOpen.fundingRate}`);
+                addLog(`  + Giờ trả Funding tiếp theo: ${formatTimeUTC7(new Date(selectedCandidateToOpen.nextFundingTime))}`);
+                addLog(`  + Đòn bẩy tối đa: ${selectedCandidateToOpen.maxLeverage}x`);
+                addLog(`  + Số tiền dự kiến mở lệnh: ${capitalToUseForLog.toFixed(2)} USDT (Khối lượng ước tính: ${estimatedQuantity} ${selectedCandidateToOpen.symbol})`);
+                addLog(`  + Lệnh sẽ được mở sau khoảng ${Math.ceil(delayForExactOpenMs / 1000)} giây (vào lúc ${formatTimeUTC7(new Date(targetOpenTimeMs))}).`, true);
                 addLog(`>>> Đang chờ đến thời điểm mở lệnh chính xác...`, true);
                 
                 clearTimeout(nextScheduledTimeout); // Hủy lịch trình quét cũ để chờ mở lệnh
@@ -1200,7 +1054,7 @@ async function scheduleNextMainCycle() {
 
     const nextScanMoment = new Date(now + delayUntilNext59Minute);
 
-    addLog(`>>> Bot đang đi uống bia sẽ trở lại lúc **${formatTimeUTC7(nextScanMoment)}**).`, true);
+    addLog(`>>> Bot đang đi uống bia sẽ trở lại lúc ${formatTimeUTC7(nextScanMoment)}.`);
 
     nextScheduledTimeout = setTimeout(async () => {
         if(botRunning) {
@@ -1244,13 +1098,15 @@ async function startBotLogicInternal() {
         // Bắt đầu chu kỳ chính của bot (quét hoặc chờ)
         scheduleNextMainCycle();
 
-        // Thiết lập kiểm tra vị thế định kỳ (dù không có lệnh vẫn chạy để đảm bảo quản lý)
+        // Thiết lập kiểm tra vị thế định kỳ
         if (!positionCheckInterval) { 
             positionCheckInterval = setInterval(async () => {
-                if (botRunning && currentOpenPosition) { // Chỉ chạy nếu bot đang chạy và có vị thế mở
+                // Kiểm tra currentOpenPosition trước khi gọi manageOpenPosition
+                if (botRunning && currentOpenPosition) { 
                     await manageOpenPosition();
                 } else if (!botRunning && positionCheckInterval) {
-                    clearInterval(positionCheckInterval); // Nếu bot dừng, clear interval này
+                    // Nếu bot dừng hoặc không có vị thế, clear interval này
+                    clearInterval(positionCheckInterval); 
                     positionCheckInterval = null;
                 }
             }, 300); // Kiểm tra mỗi 300ms
