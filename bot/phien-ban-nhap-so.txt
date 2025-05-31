@@ -49,7 +49,7 @@ const MIN_USDT_BALANCE_TO_OPEN = 0.1;
 // ĐẢM BẢO GIÁ TRỊ NÀY ĐỦ LỚN ĐỂ VƯỢT QUA minNotional CỦA SÀN.
 // Ví dụ: 0.15 USDT có thể quá nhỏ cho nhiều cặp giao dịch trên Binance Futures.
 // Hãy đặt nó lên 10, 20 hoặc 50 USDT để tránh lỗi 'minNotional'.
-const FIXED_USDT_AMOUNT_PER_TRADE = 0.2; // Ví dụ: đặt 10 hoặc 20 cho minNotional.
+const FIXED_USDT_AMOUNT_PER_TRADE = 0.1; // Ví dụ: đặt 10 hoặc 20 cho minNotional.
 
 // Cấu hình Stop Loss:
 // SL cố định X% của vốn đầu tư ban đầu (FIXED_USDT_AMOUNT_PER_TRADE)
@@ -62,12 +62,12 @@ const TAKE_PROFIT_PERCENTAGES = {
     25: 0.5,  // 80% TP nếu đòn bẩy 25x
     50: 0.75,    // 100% TP nếu đòn bẩy 50x
     75: 1,    // 100% TP nếu đòn bẩy 75x
-    100: 1.5, // 150% TP nếu đòn bẩy 100x
-    125: 2,   // 200% TP nếu đòn bẩy 125x
+    100: 1.25, // 150% TP nếu đòn bẩy 100x
+    125: 1.5,   // 200% TP nếu đòn bẩy 125x
 };
 
 // Ngưỡng funding rate âm tối thiểu để xem xét mở lệnh (ví dụ: -0.005 = -0.5%)
-const MIN_FUNDING_RATE_THRESHOLD = -0.005; 
+const MIN_FUNDING_RATE_THRESHOLD = -0.00123; 
 // Thời gian tối đa giữ một vị thế (ví dụ: 90 giây = 1 phút 30 giây)
 const MAX_POSITION_LIFETIME_SECONDS = 90; 
 
@@ -396,6 +396,24 @@ async function getCurrentPrice(symbol) {
     }
 }
 
+/**
+ * Hủy tất cả các lệnh mở cho một symbol cụ thể.
+ * @param {string} symbol - Symbol của cặp giao dịch.
+ */
+async function cancelOpenOrdersForSymbol(symbol) {
+    try {
+        addLog(`>>> Đang hủy tất cả các lệnh mở cho ${symbol}...`);
+        await callSignedAPI('/fapi/v1/allOpenOrders', 'DELETE', { symbol: symbol });
+        addLog(`✅ Đã hủy thành công tất cả các lệnh mở cho ${symbol}.`);
+        return true;
+    } catch (error) {
+        addLog(`❌ Lỗi khi hủy lệnh mở cho ${symbol}: ${error.code} - ${error.msg || error.message}`);
+        // Xử lý các lỗi cụ thể nếu cần, ví dụ: không có lệnh nào để hủy
+        return false;
+    }
+}
+
+
 // --- HÀM QUẢN LÝ LỆNH ---
 
 // Hàm đóng lệnh Short
@@ -430,6 +448,10 @@ async function closeShortPosition(symbol, quantityToClose, reason = 'manual') {
                 positionCheckInterval = null;
             }
             stopCountdownFrontend(); // Dừng đếm ngược trên frontend
+            
+            // XÓA TẤT CẢ LỆNH CHƯA KHỚP SAU KHI ĐÓNG VỊ THẾ
+            await cancelOpenOrdersForSymbol(symbol);
+
             if(botRunning) scheduleNextMainCycle(); // Lên lịch cho lần quét tiếp theo nếu bot đang chạy
             isClosingPosition = false;
             return;
@@ -457,6 +479,10 @@ async function closeShortPosition(symbol, quantityToClose, reason = 'manual') {
             positionCheckInterval = null;
         }
         stopCountdownFrontend(); // Dừng đếm ngược trên frontend
+        
+        // XÓA TẤT CẢ LỆNH CHƯA KHỚP SAU KHI ĐÓNG VỊ THẾ
+        await cancelOpenOrdersForSymbol(symbol);
+
         if(botRunning) scheduleNextMainCycle(); // Lên lịch cho lần quét tiếp theo nếu bot đang chạy
         isClosingPosition = false; // Xóa cờ sau khi hoàn tất
 
@@ -612,6 +638,45 @@ async function openShortPosition(symbol, fundingRate, usdtBalance, maxLeverage) 
         addLog(`   (SL: ${STOP_LOSS_PERCENTAGE*100}% của ${capitalToUse.toFixed(2)} USDT = ${slAmountUSDT.toFixed(2)} USDT)`);
         addLog(`   (TP: ${tpPercentage*100}% của ${capitalToUse.toFixed(2)} USDT = ${tpAmountUSDT.toFixed(2)} USDT)`);
 
+        // ĐẶT LỆNH TP VÀ SL
+        // Lệnh Stop Loss (Mua để đóng vị thế Short khi giá tăng)
+        try {
+            await callSignedAPI('/fapi/v1/order', 'POST', {
+                symbol: symbol,
+                side: 'BUY', 
+                type: 'STOP_MARKET', 
+                quantity: quantity, 
+                stopPrice: slPrice, 
+                closePosition: 'true', // Đảm bảo lệnh này đóng vị thế
+                newOrderRespType: 'FULL'
+            });
+            addLog(`✅ Đã đặt lệnh STOP_MARKET (SL) cho ${symbol} tại giá ${slPrice.toFixed(pricePrecision)}.`, true);
+        } catch (slError) {
+            addLog(`❌ Lỗi khi đặt lệnh SL cho ${symbol}: ${slError.msg || slError.message}.`, true);
+            // Nếu không đặt được SL, cân nhắc hủy lệnh mở hoặc đóng vị thế ngay
+            addLog(`   -> Đóng vị thế ${symbol} để tránh rủi ro do không đặt được SL.`, true);
+            await closeShortPosition(symbol, quantity, 'SL_Failed');
+            return;
+        }
+
+        // Lệnh Take Profit (Mua để đóng vị thế Short khi giá giảm)
+        try {
+            await callSignedAPI('/fapi/v1/order', 'POST', {
+                symbol: symbol,
+                side: 'BUY', 
+                type: 'TAKE_PROFIT_MARKET', // Sử dụng TAKE_PROFIT_MARKET
+                quantity: quantity, 
+                stopPrice: tpPrice, 
+                closePosition: 'true', // Đảm bảo lệnh này đóng vị thế
+                newOrderRespType: 'FULL'
+            });
+            addLog(`✅ Đã đặt lệnh TAKE_PROFIT_MARKET (TP) cho ${symbol} tại giá ${tpPrice.toFixed(pricePrecision)}.`, true);
+        } catch (tpError) {
+            addLog(`❌ Lỗi khi đặt lệnh TP cho ${symbol}: ${tpError.msg || tpError.message}.`, true);
+            // Nếu không đặt được TP, vẫn tiếp tục nhưng cần theo dõi
+        }
+
+
         // Lưu thông tin vị thế đang mở
         currentOpenPosition = {
             symbol: symbol,
@@ -674,21 +739,35 @@ async function manageOpenPosition() {
             return;
         }
 
-        let shouldClose = false;
-        let closeReason = '';
-
-        if (currentPrice <= tpPrice) {
-            addLog(`✅ Vị thế ${symbol} đạt TP tại giá ${currentPrice.toFixed(pricePrecision)}. Đóng lệnh.`, true);
-            shouldClose = true;
-            closeReason = 'TP';
-        } else if (currentPrice >= slPrice) {
-            addLog(`❌ Vị thế ${symbol} đạt SL tại giá ${currentPrice.toFixed(pricePrecision)}. Đóng lệnh.`, true);
-            shouldClose = true;
-            closeReason = 'SL';
-        }
-
-        if (shouldClose) {
-            await closeShortPosition(symbol, quantity, closeReason);
+        // Note: Logic TP/SL tự động của Binance sẽ xử lý việc đóng lệnh khi giá đạt TP/SL.
+        // Tuy nhiên, chúng ta vẫn giữ logic kiểm tra này để xử lý timeout và dự phòng.
+        // Nếu đã đặt lệnh TP/SL trên sàn, thường không cần kiểm tra giá ở đây nữa.
+        // Tuy nhiên, để an toàn và quản lý timeout, vẫn giữ lại phần này.
+        // Chỉ cần bỏ qua việc gọi closeShortPosition nếu lệnh TP/SL đã được Binance xử lý.
+        // Để đơn giản, bot sẽ chỉ dựa vào TP/SL của Binance, và chỉ đóng khi hết thời gian.
+        
+        // Cập nhật lại: Sau khi triển khai TP/SL trên Binance,
+        // hàm manageOpenPosition này chủ yếu để xử lý trường hợp timeout.
+        // Các trường hợp TP/SL sẽ được Binance tự động kích hoạt.
+        // Ta chỉ cần đảm bảo rằng khi vị thế được đóng (do TP/SL hoặc timeout),
+        // `currentOpenPosition` được reset và các lệnh chờ được hủy.
+        
+        // Kiểm tra vị thế thực tế trên Binance để đảm bảo cập nhật trạng thái
+        const positions = await callSignedAPI('/fapi/v2/positionRisk', 'GET');
+        const currentPositionOnBinance = positions.find(p => p.symbol === symbol && parseFloat(p.positionAmt) < 0);
+        
+        if (!currentPositionOnBinance || parseFloat(currentPositionOnBinance.positionAmt) === 0) {
+            addLog(`>>> Vị thế ${symbol} đã đóng trên sàn (có thể do TP/SL được kích hoạt). Cập nhật trạng thái bot.`, true);
+            currentOpenPosition = null;
+            if (positionCheckInterval) {
+                clearInterval(positionCheckInterval);
+                positionCheckInterval = null;
+            }
+            stopCountdownFrontend();
+            // XÓA TẤT CẢ CÁC LỆNH CHƯA KHỚP (SL/TP còn lại)
+            await cancelOpenOrdersForSymbol(symbol);
+            if(botRunning) scheduleNextMainCycle();
+            return;
         }
 
     } catch (error) {
