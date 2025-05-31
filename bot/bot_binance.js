@@ -48,7 +48,7 @@ const MIN_USDT_BALANCE_TO_OPEN = 0.1;
 
 // SỐ PHẦN TRĂM (%) SỐ DƯ TÀI KHOẢN SẼ DÙNG CHO MỖI LỆNH.
 // Ví dụ: 0.01 = 1% số dư tài khoản.
-const PERCENTAGE_BALANCE_PER_TRADE = 0.01; // Sử dụng 1% số dư tài khoản cho mỗi lệnh
+const PERCENTAGE_BALANCE_PER_TRADE = 0.1; // Sử dụng 1% số dư tài khoản cho mỗi lệnh
 
 // Cấu hình Stop Loss:
 // SL cố định X% của vốn đầu tư ban đầu (dựa trên số tiền đã dùng)
@@ -57,12 +57,12 @@ const STOP_LOSS_PERCENTAGE = 0.5; // 1 = 100% của vốn đầu tư ban đầu
 // Bảng ánh xạ maxLeverage với Take Profit percentage.
 // TP được tính dựa trên X% của vốn đầu tư ban đầu.
 const TAKE_PROFIT_PERCENTAGES = {
-    20: 0.5,  // 50% TP nếu đòn bẩy 20x
-    25: 0.5,  // 80% TP nếu đòn bẩy 25x
-    50: 0.75,    // 100% TP nếu đòn bẩy 50x
-    75: 1,    // 100% TP nếu đòn bẩy 75x
-    100: 1.25, // 150% TP nếu đòn bẩy 100x
-    125: 1.5,   // 200% TP nếu đòn bẩy 125x
+    20: 0.13,  // 50% TP nếu đòn bẩy 20x
+    25: 0.16,  // 80% TP nếu đòn bẩy 25x
+    50: 0.30,    // 100% TP nếu đòn bẩy 50x
+    75: 0.45,    // 100% TP nếu đòn bẩy 75x
+    100: 0.65, // 150% TP nếu đòn bẩy 100x
+    125: 0.8,   // 200% TP nếu đòn bẩy 125x
 };
 
 // Ngưỡng funding rate âm tối thiểu để xem xét mở lệnh (ví dụ: -0.005 = -0.5%)
