@@ -719,7 +719,7 @@ async function openShortPosition(symbol, fundingRate, usdtBalance, maxLeverage) 
             entryPrice: entryPrice,
             initialTPPrice: tpPrice, // Lưu TP ban đầu
             initialSLPrice: slPrice, // Lưu SL ban đầu
-            **initialMargin: initialMargin,** // <-- ĐÃ THÊM DÒNG NÀY ĐỂ LƯU VỐN KÝ QUỸ BAN ĐẦU
+            initialMargin: initialMargin, // <-- ĐÃ THÊM DÒNG NÀY ĐỂ LƯU VỐN KÝ QUỸ BAN ĐẦU
             currentTPPrice: null, // TP hiện tại, sẽ được tính khi tầng 2 kích hoạt
             currentSLPrice: null, // SL hiện tại, sẽ được tính khi tầng 2 kích hoạt
             openTime: openTime,
