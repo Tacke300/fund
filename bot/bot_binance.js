@@ -620,9 +620,9 @@ async function openShortPosition(symbol, fundingRate, usdtBalance, maxLeverage) 
         addLog(`  + Giá vào lệnh: ${entryPrice.toFixed(pricePrecision)}`);
 
         // Tính toán TP/SL dựa trên capitalToUse (được tính từ PERCENT_ACCOUNT_PER_TRADE)
-        const slAmountUSDT = capitalToUse * STOP_LOSS_PERCENTAGE; 
+        const slAmountUSDT = capitalToUse * STOP_LOSS_PERCENTAGE * 5; // SL = 5 lần STOP_LOSS_PERCENTAGE
         const tpPercentage = TAKE_PROFIT_PERCENTAGES[maxLeverage]; 
-        const tpAmountUSDT = capitalToUse * tpPercentage; 
+        const tpAmountUSDT = capitalToUse * tpPercentage * 2.5; // TP = 2.5 lần TAKE_PROFIT_PERCENTAGES
 
         // Tính toán giá SL (giá tăng lên so với giá vào lệnh)
         let slPrice = entryPrice + (slAmountUSDT / quantity);
@@ -637,8 +637,9 @@ async function openShortPosition(symbol, fundingRate, usdtBalance, maxLeverage) 
         tpPrice = parseFloat(tpPrice.toFixed(pricePrecision));
 
         addLog(`>>> Giá TP: ${tpPrice.toFixed(pricePrecision)}, Giá SL: ${slPrice.toFixed(pricePrecision)}`, true);
-        addLog(`   (SL: ${STOP_LOSS_PERCENTAGE*100}% của ${capitalToUse.toFixed(2)} USDT = ${slAmountUSDT.toFixed(2)} USDT)`);
-        addLog(`   (TP: ${tpPercentage*100}% của ${capitalToUse.toFixed(2)} USDT = ${tpAmountUSDT.toFixed(2)} USDT)`);
+        addLog(`   (SL: ${(STOP_LOSS_PERCENTAGE * 5 * 100).toFixed(0)}% của ${capitalToUse.toFixed(2)} USDT = ${slAmountUSDT.toFixed(2)} USDT)`); // Cập nhật log
+        addLog(`   (TP: ${(tpPercentage * 2.5 * 100).toFixed(0)}% của ${capitalToUse.toFixed(2)} USDT = ${tpAmountUSdt.toFixed(2)} USDT)`); // Cập nhật log
+
 
         // ĐẶT LỆNH TP VÀ SL
         // Lệnh Stop Loss (Mua để đóng vị thế Short khi giá tăng)
@@ -690,6 +691,10 @@ async function openShortPosition(symbol, fundingRate, usdtBalance, maxLeverage) 
             pricePrecision: pricePrecision
         };
 
+        // Thêm delay 5 giây trước khi bắt đầu quét kiểm tra vị thế
+        addLog(`>>> Đang đợi 5 giây trước khi bắt đầu quét kiểm tra vị thế TP/SL thủ công...`);
+        await delay(5000); // Đợi 5 giây
+
         // Bắt đầu interval kiểm tra vị thế và cập nhật đếm ngược frontend
         // Interval này sẽ gọi manageOpenPosition, bên trong manageOpenPosition sẽ có checkAndClosePositionManually
         if(!positionCheckInterval) { 
@@ -711,7 +716,7 @@ async function openShortPosition(symbol, fundingRate, usdtBalance, maxLeverage) 
 }
 
 /**
- * Hàm kiểm tra và đóng vị thế thủ công bằng lệnh MARKET nếu lệnh TP/SL stop-market không tồn tại.
+ * Hàm kiểm tra và đóng vị thế thủ công bằng lệnh MARKET nếu lệnh TP/SL stop-maket không tồn tại.
  * Chạy liên tục mỗi 300ms khi có vị thế mở.
  */
 async function checkAndClosePositionManually() {
