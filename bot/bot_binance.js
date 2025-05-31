@@ -14,7 +14,7 @@ const __dirname = path.dirname(__filename);
 // !!! QUAN TRỌNG: DÁN API Key và Secret Key THẬT của bạn vào đây. !!!
 // Đảm bảo không có khoảng trắng thừa khi copy/paste.
 const API_KEY = 'cZ1Y2O0kggVEggEaPvhFcYQHS5b1EsT2OWZb8zdY9C0jGqNROvXRZHTJjnQ7OG4Q'.trim(); // THAY THẾ BẰNG API KEY THẬT CỦA BẠN
-const SECRET_KEY = 'oU6pZFHgEvbpD9NmFXp5ZVnYFMQ7EIkBiz88aTzvmC3SpT9nEf4fcDf0pEnFzoTc'.trim(); // THAY THẾ BẰNG SECRET KEY THẬT CỦA BẠN
+const SECRET_KEY = 'oU6pZFHgEvbpD9NmFXp5ZVnYFMQ7EIkBiz88TzvmC3SpT9nEf4fcDf0pEnFzoTc'.trim(); // THAY THẾ BẰNG SECRET KEY THẬT CỦA BẠN
 
 // --- BASE URL CỦA BINANCE FUTURES API ---
 const BASE_HOST = 'fapi.binance.com';
@@ -83,7 +83,7 @@ const ONLY_OPEN_IF_FUNDING_IN_SECONDS = 60;
 // Thời gian (giây) TRƯỚC giờ funding chính xác mà bot sẽ cố gắng đặt lệnh.
 // Đặt là 1 để cố gắng mở lệnh vào giây :59.
 const OPEN_TRADE_BEFORE_FUNDING_SECONDS = 1; 
-// Thời gian (mili giây) LỆCH so với giây :59 để mở lệnh (để tránh quá tải).
+// Thời gian (mili giây) LỆNH so với giây :59 để mở lệnh (để tránh quá tải).
 // Đặt là 755ms để lệnh được gửi vào 59.755s.
 const OPEN_TRADE_AFTER_SECOND_OFFSET_MS = 755; 
 
@@ -691,15 +691,16 @@ async function openShortPosition(symbol, fundingRate, usdtBalance, maxLeverage) 
         };
 
         // Bắt đầu interval kiểm tra vị thế và cập nhật đếm ngược frontend
+        // Interval này sẽ gọi manageOpenPosition, bên trong manageOpenPosition sẽ có checkAndClosePositionManually
         if(!positionCheckInterval) { 
             positionCheckInterval = setInterval(async () => {
                 if(botRunning) { // Chỉ chạy nếu bot đang chạy
                     await manageOpenPosition();
                 } else {
-                    clearInterval(positionCheckInterval);
+                    clearInterval(positionCheckInterval); 
                     positionCheckInterval = null;
                 }
-            }, 1000); // Kiểm tra mỗi giây
+            }, 300); // Đặt interval này 300ms để chạy liên tục
         }
         startCountdownFrontend(); // Bắt đầu bộ đếm ngược trên frontend
 
@@ -708,6 +709,58 @@ async function openShortPosition(symbol, fundingRate, usdtBalance, maxLeverage) 
         if(botRunning) scheduleNextMainCycle(); // Quay lại chế độ chờ để tìm cơ hội mới
     }
 }
+
+/**
+ * Hàm kiểm tra và đóng vị thế thủ công bằng lệnh MARKET nếu lệnh TP/SL stop-market không tồn tại.
+ * Chạy liên tục mỗi 300ms khi có vị thế mở.
+ */
+async function checkAndClosePositionManually() {
+    if (!currentOpenPosition || isClosingPosition) {
+        return;
+    }
+
+    const { symbol, quantity, entryPrice, tpPrice, slPrice, pricePrecision } = currentOpenPosition;
+
+    try {
+        // 1. Lấy tất cả các lệnh mở hiện tại
+        const openOrders = await callSignedAPI('/fapi/v1/openOrders', 'GET', { symbol: symbol });
+        const hasStopMarketSL = openOrders.some(order => order.type === 'STOP_MARKET' && order.side === 'BUY' && parseFloat(order.stopPrice) >= entryPrice);
+        const hasTakeProfitTP = openOrders.some(order => order.type === 'TAKE_PROFIT_MARKET' && order.side === 'BUY' && parseFloat(order.stopPrice) <= entryPrice);
+
+        // 2. Lấy giá hiện tại
+        const currentPrice = await getCurrentPrice(symbol);
+        if (currentPrice === null) {
+            addLog(`⚠️ Không thể lấy giá hiện tại cho ${symbol} để kiểm tra đóng lệnh thủ công.`);
+            return;
+        }
+
+        // Kiểm tra xem lệnh TP/SL đã được đặt trên sàn chưa
+        // Nếu không có cả TP và SL stop-market, thì bot sẽ tự quản lý.
+        // Hoặc nếu bot đang quản lý thủ công (do không đặt được TP/SL ban đầu)
+        const shouldManuallyManage = (!hasStopMarketSL || !hasTakeProfitTP); // Thay đổi logic kiểm tra
+        if (shouldManuallyManage) {
+            addLog(`[DEBUG] Vị thế ${symbol}: Không tìm thấy lệnh TP/SL stop-market trên sàn. Đang kiểm tra đóng lệnh thủ công...`);
+            addLog(`[DEBUG] Giá hiện tại: ${currentPrice.toFixed(pricePrecision)}, TP: ${tpPrice.toFixed(pricePrecision)}, SL: ${slPrice.toFixed(pricePrecision)}`);
+
+            // Kiểm tra điều kiện Take Profit
+            if (currentPrice <= tpPrice) {
+                addLog(`✅ Vị thế ${symbol} đạt TP thủ công! Giá hiện tại (${currentPrice.toFixed(pricePrecision)}) <= Giá TP (${tpPrice.toFixed(pricePrecision)}). Đang đóng lệnh...`, true);
+                await closeShortPosition(symbol, quantity, 'TP_Thủ_Công');
+                return; // Thoát sau khi đã đóng lệnh
+            }
+
+            // Kiểm tra điều kiện Stop Loss
+            if (currentPrice >= slPrice) {
+                addLog(`❌ Vị thế ${symbol} đạt SL thủ công! Giá hiện tại (${currentPrice.toFixed(pricePrecision)}) >= Giá SL (${slPrice.toFixed(pricePrecision)}). Đang đóng lệnh...`, true);
+                await closeShortPosition(symbol, quantity, 'SL_Thủ_Công');
+                return; // Thoát sau khi đã đóng lệnh
+            }
+        }
+    } catch (error) {
+        addLog(`❌ Lỗi khi kiểm tra đóng lệnh thủ công cho ${symbol}: ${error.msg || error.message}`);
+    }
+}
+
 
 // Hàm kiểm tra và quản lý vị thế đang mở (SL/TP/Timeout)
 async function manageOpenPosition() {
@@ -752,6 +805,9 @@ async function manageOpenPosition() {
             if(botRunning) scheduleNextMainCycle();
             return;
         }
+
+        // Thêm hàm kiểm tra và đóng lệnh thủ công vào đây
+        await checkAndClosePositionManually();
 
     } catch (error) {
         addLog(`❌ Lỗi khi quản lý vị thế mở cho ${symbol}: ${error.msg || error.message}`);
@@ -1013,6 +1069,7 @@ async function startBotLogicInternal() {
         scheduleNextMainCycle();
 
         // Thiết lập kiểm tra vị thế định kỳ (dù không có lệnh vẫn chạy để đảm bảo quản lý)
+        // Thay đổi interval của positionCheckInterval thành 300ms
         if (!positionCheckInterval) { 
             positionCheckInterval = setInterval(async () => {
                 if (botRunning && currentOpenPosition) { // Chỉ chạy nếu bot đang chạy và có vị thế mở
@@ -1021,7 +1078,7 @@ async function startBotLogicInternal() {
                     clearInterval(positionCheckInterval); // Nếu bot dừng, clear interval này
                     positionCheckInterval = null;
                 }
-            }, 1000); // Kiểm tra mỗi giây
+            }, 300); // Kiểm tra mỗi 300ms
         }
         startCountdownFrontend(); // Khởi động bộ đếm ngược frontend ngay khi bot bắt đầu
 
