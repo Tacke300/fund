@@ -22,13 +22,13 @@
 
     #top {
       font-size: 8vw;
-      line-height: 1.2; /* Tăng khoảng cách dòng */
+      line-height: 1.2;
       background: linear-gradient(270deg, #00ffe1, #0066ff, #00ffe1);
       background-size: 300% 300%;
       -webkit-background-clip: text;
       -webkit-text-fill-color: transparent;
       animation: moveGradient 5s ease infinite;
-      margin-bottom: 40px; /* Tăng khoảng cách dưới #top */
+      margin-bottom: 40px;
       text-align: center;
     }
 
@@ -49,33 +49,33 @@
         font-size: 1.1rem;
         text-align: center;
         box-sizing: border-box;
-        white-space: pre-wrap;
-        word-wrap: break-word;
+        white-space: pre-wrap; /* Giữ nguyên khoảng trắng và xuống dòng */
+        word-wrap: break-word; /* Đảm bảo từ dài sẽ ngắt */
         border: 1px solid #00ff00;
     }
 
     #log {
-      height: 70vh; /* Tăng chiều cao log */
+      height: 70vh;
       width: 95%;
       max-width: 900px;
       overflow-y: auto;
-      overflow-x: hidden;
+      overflow-x: hidden; /* Ẩn thanh cuộn ngang nếu có */
       background: #111;
       padding: 0;
-      font-size: 0.5rem; /* Tăng kích thước chữ log */
+      font-size: 0.9rem; /* Điều chỉnh kích thước chữ log hợp lý hơn */
       border: 1px solid #333;
-      margin-bottom: 30px; /* Tăng margin bottom log */
-      font-family: 'Courier New', Courier, monospace;
+      margin-bottom: 30px;
+      font-family: 'Courier New', Courier, monospace; /* Font đơn cách giúp log dễ đọc hơn */
       box-sizing: border-box;
       color: #fff;
     }
 
     #log div.log-line {
-        padding: 5px 10px; /* Tăng padding dòng log */
-        line-height: 1.3; /* Tăng khoảng cách dòng trong log */
-        white-space: pre-wrap;
-        word-break: break-all;
-        overflow-wrap: break-word;
+        padding: 5px 10px;
+        line-height: 1.4; /* Tăng khoảng cách dòng trong log để dễ đọc hơn */
+        white-space: pre-wrap; /* **QUAN TRỌNG: Giúp hiển thị đúng các khoảng trắng và xuống dòng từ dữ liệu gốc, đồng thời cho phép tự động xuống dòng khi đầy container.** */
+        word-break: break-word; /* Đảm bảo từ dài sẽ bị ngắt để không tràn ra ngoài */
+        overflow-wrap: break-word; /* Một lựa chọn thay thế hiện đại hơn cho word-break: break-word; nên dùng cả hai để tương thích tốt hơn */
     }
 
     #log div.log-line:nth-child(odd) {
@@ -93,11 +93,11 @@
       gap: 15px;
       width: 95%;
       max-width: 900px;
-      margin-bottom: 20px; /* Thêm margin bottom cho button row */
+      margin-bottom: 20px;
     }
 
     button {
-      padding: 15px 25px; /* Tăng padding nút */
+      padding: 15px 25px;
       font-size: 1.5rem;
       border: none;
       cursor: pointer;
@@ -136,19 +136,19 @@
 
     /* --- MEDIA QUERIES --- */
     @media (max-width: 768px) {
-      #top { font-size: 10vw; margin-bottom: 30px; } /* Điều chỉnh margin-bottom */
+      #top { font-size: 10vw; margin-bottom: 30px; }
       .status-bar { font-size: 1rem; padding: 8px 10px; }
-      #log { font-size: 0.9rem; height: 50vh; margin-bottom: 25px; } /* Điều chỉnh chiều cao và margin-bottom */
-      #log div.log-line { padding: 6px 12px; line-height: 1.4; } /* Điều chỉnh padding và line-height */
+      #log { font-size: 0.8rem; height: 50vh; margin-bottom: 25px; } /* Điều chỉnh chiều cao và margin-bottom */
+      #log div.log-line { padding: 6px 12px; line-height: 1.3; } /* Điều chỉnh padding và line-height */
       button { font-size: 1.2rem; padding: 10px 15px; min-width: unset; }
-      .button-row { flex-direction: column; gap: 10px; margin-bottom: 15px; } /* Điều chỉnh margin-bottom */
+      .button-row { flex-direction: column; gap: 10px; margin-bottom: 15px; }
     }
 
     @media (max-width: 480px) {
-        #top { font-size: 12vw; margin-bottom: 25px; } /* Điều chỉnh margin-bottom */
+        #top { font-size: 12vw; margin-bottom: 25px; }
         .status-bar { font-size: 0.9rem; }
-        #log { font-size: 0.8rem; height: 40vh; margin-bottom: 20px; } /* Điều chỉnh chiều cao và margin-bottom */
-        #log div.log-line { padding: 5px 10px; line-height: 1.3; } /* Điều chỉnh padding và line-height */
+        #log { font-size: 0.75rem; height: 40vh; margin-bottom: 20px; } /* Điều chỉnh chiều cao và margin-bottom */
+        #log div.log-line { padding: 4px 8px; line-height: 1.2; } /* Điều chỉnh padding và line-height */
         button { font-size: 1rem; padding: 8px 12px; }
         .copyright { font-size: 0.8rem; }
     }
@@ -158,20 +158,26 @@
   <h1 id="top">BOT BINANCE</h1>
 
   <div class="status-bar" id="statusBar">Bot Status: Loading...</div>
-<p>Version: 1.0.1 -- After FD</p>
+  <p style="color: #bbb; font-size: 0.9rem; margin-top: -10px; margin-bottom: 20px; text-align: center;">Version: 1.0.1 -- After FD</p>
+
   <div id="log">
-    <div class="log-line">Loading logs...</div>
+    <div class="log-line">Đang tải nhật ký...</div>
   </div>
 
   <div class="button-row">
-    <button class="start-btn" onclick="startBot()">Start Bot</button>
-    <button class="stop-btn" onclick="stopBot()">Stop Bot</button>
+    <button class="start-btn" onclick="startBot()">Khởi động Bot</button>
+    <button class="stop-btn" onclick="stopBot()">Dừng Bot</button>
   </div>
-  <div class="copyright">&copy; 2025 TunggBeoo. All rights reserved.</div>
+  <div class="copyright">&copy; 2025 TunggBeoo. Mọi quyền được bảo lưu.</div>
 
   <script>
     const logDiv = document.getElementById('log');
     const statusBar = document.getElementById('statusBar');
+
+    // Hàm cuộn xuống cuối log
+    function scrollToBottomLog() {
+        logDiv.scrollTop = logDiv.scrollHeight;
+    }
 
     function fetchLogs() {
         fetch('/api/logs')
@@ -182,7 +188,9 @@
                 return response.text();
             })
             .then(data => {
-                const isScrolledToBottom = logDiv.scrollHeight - logDiv.clientHeight <= logDiv.scrollTop + 1;
+                // Kiểm tra xem người dùng có đang cuộn lên trên không
+                const isScrolledToBottom = logDiv.scrollHeight - logDiv.clientHeight <= logDiv.scrollTop + 5; // Thêm 5px dung sai
+
                 // Loại bỏ các mã màu ANSI (ví dụ: \u001b[32m)
                 const cleanData = data.replace(/[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g, '');
 
@@ -194,13 +202,15 @@
                 });
 
                 logDiv.innerHTML = htmlContent; // Gán toàn bộ nội dung mới
+                
+                // Nếu người dùng đang ở cuối log, tự động cuộn xuống
                 if (isScrolledToBottom) {
-                    logDiv.scrollTop = logDiv.scrollHeight;
+                    scrollToBottomLog();
                 }
             })
             .catch(error => {
-                console.error('Error fetching logs:', error);
-                logDiv.innerHTML = `<div class="log-line" style="color: red;">Error loading logs: ${error.message || error}. Check bot server.</div>`;
+                console.error('Lỗi khi tải nhật ký:', error);
+                logDiv.innerHTML = `<div class="log-line" style="color: red;">Lỗi tải nhật ký: ${error.message || error}. Vui lòng kiểm tra máy chủ bot.</div>`;
             });
     }
 
@@ -216,38 +226,48 @@
                 statusBar.textContent = data;
             })
             .catch(error => {
-                console.error('Error fetching status:', error);
-                statusBar.textContent = `Bot Status: Error fetching status. (${error.message || error})`;
+                console.error('Lỗi khi tải trạng thái:', error);
+                statusBar.textContent = `Trạng thái Bot: Lỗi khi tải trạng thái. (${error.message || error})`;
             });
     }
 
     async function startBot() {
+        statusBar.textContent = 'Trạng thái Bot: Đang gửi lệnh khởi động...';
         try {
             const response = await fetch('/start_bot_logic');
             const message = await response.text();
-            fetchStatus();
-            fetchLogs();
+            // Không cần alert, status bar sẽ cập nhật
+            // alert('Lệnh khởi động bot đã được gửi: ' + message); 
+            fetchStatus(); // Cập nhật trạng thái ngay lập tức
+            fetchLogs();   // Cập nhật nhật ký ngay lập tức
         } catch (error) {
             alert('Lỗi khi gửi lệnh khởi động bot: ' + error.message);
             console.error('Lỗi khi gửi lệnh khởi động bot:', error);
+            statusBar.textContent = `Trạng thái Bot: Lỗi khởi động. (${error.message || error})`;
         }
     }
 
     async function stopBot() {
+        statusBar.textContent = 'Trạng thái Bot: Đang gửi lệnh dừng...';
         try {
             const response = await fetch('/stop_bot_logic');
             const message = await response.text();
-            fetchStatus();
-            fetchLogs();
+            // Không cần alert, status bar sẽ cập nhật
+            // alert('Lệnh dừng bot đã được gửi: ' + message);
+            fetchStatus(); // Cập nhật trạng thái ngay lập tức
+            fetchLogs();   // Cập nhật nhật ký ngay lập tức
         } catch (error) {
             alert('Lỗi khi gửi lệnh dừng bot: ' + error.message);
             console.error('Lỗi khi gửi lệnh dừng bot:', error);
+            statusBar.textContent = `Trạng thái Bot: Lỗi dừng. (${error.message || error})`;
         }
     }
 
-    setInterval(fetchLogs, 3000);
-    setInterval(fetchStatus, 5000);
+    // Thiết lập tự động tải log và trạng thái
+    setInterval(fetchLogs, 3000); // Mỗi 3 giây
+    setInterval(fetchStatus, 5000); // Mỗi 5 giây
 
+    // Tải log và trạng thái lần đầu khi trang được tải
     fetchLogs();
     fetchStatus();
   </script>
