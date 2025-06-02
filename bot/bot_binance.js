@@ -54,25 +54,25 @@ const PERCENT_ACCOUNT_PER_TRADE = 0.5; // Ví dụ: 0.01 = 1%
 
 // Cấu hình Stop Loss:
 // SL cố định X% của vốn đầu tư ban đầu (số tiền được tính từ PERCENT_ACCOUNT_PER_TRADE)
-const STOP_LOSS_PERCENTAGE = 0.4; // 0.5 = 50% của vốn đầu tư ban đầu
+const STOP_LOSS_PERCENTAGE = 0.05; // 0.5 = 50% của vốn đầu tư ban đầu
 
 // Bảng ánh xạ maxLeverage với Take Profit percentage.
 // TP được tính dựa trên X% của vốn đầu tư ban đầu (số tiền được tính từ PERCENT_ACCOUNT_PER_TRADE).
 // Đã điều chỉnh để phù hợp với việc giữ lệnh 10 giây (giá trị TP có thể rất nhỏ hoặc không thể đạt)
 const TAKE_PROFIT_PERCENTAGES = {
-    20: 0.25,  // 5% TP nếu đòn bẩy 20x
-    25: 0.25,  // 6% TP nếu đòn bẩy 25x
-    50: 0.28,  // 8% TP nếu đòn bẩy 50x
-    75: 0.3,  // 10% TP nếu đòn bẩy 75x
-    100: 0.35, // 12% TP nếu đòn bẩy 100x
-    125: 0.4, // 15% TP nếu đòn bẩy 125x
+    20: 0.15,  // 5% TP nếu đòn bẩy 20x
+    25: 0.15,  // 6% TP nếu đòn bẩy 25x
+    50: 0.18,  // 8% TP nếu đòn bẩy 50x
+    75: 0.2,  // 10% TP nếu đòn bẩy 75x
+    100: 0.25, // 12% TP nếu đòn bẩy 100x
+    125: 0.33, // 15% TP nếu đòn bẩy 125x
 };
 
 // Ngưỡng funding rate âm tối thiểu để xem xét mở lệnh (ví dụ: -0.005 = -0.5%)
 const MIN_FUNDING_RATE_THRESHOLD = -0.0001; 
 // Thời gian tối đa giữ một vị thế (ví dụ: 90 giây = 1 phút 30 giây)
 // ĐÃ SỬA ĐỔI THÀNH 10 GIÂY THEO YÊU CẦU
-const MAX_POSITION_LIFETIME_SECONDS = 6; 
+const MAX_POSITION_LIFETIME_SECONDS = 180; 
 
 // Cửa sổ thời gian (tính bằng phút) TRƯỚC giờ funding mà bot sẽ bắt đầu quét.
 // Đặt là 1 phút để chỉ quét vào phút :59.
