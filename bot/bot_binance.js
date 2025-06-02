@@ -90,7 +90,7 @@ const TAKE_PROFIT_PERCENTAGES = {
 };
 
 // Ngưỡng funding rate âm tối thiểu để xem xét mở lệnh (ví dụ: -0.005 = -0.5%)
-const MIN_FUNDING_RATE_THRESHOLD = -0.0001; 
+const MIN_FUNDING_RATE_THRESHOLD = -0.00000001; 
 // Thời gian tối đa giữ một vị thế (ví dụ: 90 giây = 1 phút 30 giây)
 // ĐÃ SỬA ĐỔI THÀNH 10 GIÂY THEO YÊU CẦU
 const MAX_POSITION_LIFETIME_SECONDS = 180; 
