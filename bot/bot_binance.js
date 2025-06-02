@@ -108,7 +108,7 @@ const ONLY_OPEN_IF_FUNDING_IN_SECONDS = 60;
 const OPEN_TRADE_BEFORE_FUNDING_SECONDS = 1; 
 // Thời gian (mili giây) LỆNH so với giây :59 để mở lệnh (để tránh quá tải).
 // Đặt là 755ms để lệnh được gửi vào 59.755s.
-const OPEN_TRADE_AFTER_SECOND_OFFSET_MS = 755; 
+const OPEN_TRADE_AFTER_SECOND_OFFSET_MS = 740; 
 
 // --- CẤU HÌNH WEB SERVER VÀ LOG PM2 ---
 const WEB_SERVER_PORT = 3000; // Cổng cho giao diện web
