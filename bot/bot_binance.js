@@ -68,7 +68,7 @@ class CriticalApiError extends Error {
 const MIN_USDT_BALANCE_TO_OPEN = 0.1; 
 
 // SỐ PHẦN TRĂM CỦA TÀI KHOẢN USDT KHẢ DỤNG SẼ DÙNG CHO MỖI LỆNH ĐẦU TƯ BAN ĐẦU.
-const PERCENT_ACCOUNT_PER_TRADE = 0.03; // Ví dụ: 0.01 = 1%
+const PERCENT_ACCOUNT_PER_TRADE = 0.3; // Ví dụ: 0.01 = 1%
 
 // Cấu hình Stop Loss:
 // SL cố định X% của vốn đầu tư ban đầu (số tiền được tính từ PERCENT_ACCOUNT_PER_TRADE)
