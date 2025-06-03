@@ -71,9 +71,6 @@ const STOP_LOSS_PERCENTAGE_MAIN = 0.18;   // 18% lỗ trên VỐN
 // Số lần thua liên tiếp tối đa trước khi reset về lệnh ban đầu
 const MAX_CONSECUTIVE_LOSSES = 5;
 
-// Thời gian tối đa giữ một vị thế (đặt rất lớn để vô hiệu hóa)
-const MAX_POSITION_LIFETIME_SECONDS = 9999999999999999999999999999; 
-
 // THAY ĐỔI MỚI: Số lần thử lại kiểm tra vị thế sau khi đóng và thời gian delay (đã loại bỏ delay)
 const RETRY_CHECK_POSITION_ATTEMPTS = 0; // 0 lần thử lại
 const RETRY_CHECK_POSITION_DELAY_MS = 0; // 0 giây delay
@@ -419,10 +416,10 @@ async function closePosition(symbol, quantityToClose, reason = 'manual') {
     }
     isClosingPosition = true;
 
-    // Lấy thông tin vị thế hiện tại để xác định loại lệnh đóng
-    const currentPositionSide = currentOpenPosition?.side; // Lấy từ currentOpenPosition
+    // Lấy thông tin vị thế hiện tại để xác định loại lệnh đóng TRƯỚC KHI currentOpenPosition có thể bị reset
+    const positionSideBeforeClose = currentOpenPosition?.side; 
 
-    addLog(`Đóng lệnh ${currentPositionSide || 'UNKNOWN'} ${symbol} (Lý do: ${reason}). Qty: ${quantityToClose}.`); 
+    addLog(`Đóng lệnh ${positionSideBeforeClose || 'UNKNOWN'} ${symbol} (Lý do: ${reason}). Qty: ${quantityToClose}.`); 
     try {
         const symbolInfo = await getSymbolDetails(symbol);
         if (!symbolInfo) {
@@ -445,7 +442,7 @@ async function closePosition(symbol, quantityToClose, reason = 'manual') {
             // Xác định 'side' để đóng vị thế hiện tại
             const closeSide = (parseFloat(currentPositionOnBinance.positionAmt) < 0) ? 'BUY' : 'SELL'; // BUY để đóng SHORT, SELL để đóng LONG
 
-            addLog(`Gửi lệnh đóng ${currentPositionSide}: ${symbol}, ${closeSide}, MARKET, Qty: ${adjustedActualQuantity}`); 
+            addLog(`Gửi lệnh đóng ${positionSideBeforeClose}: ${symbol}, ${closeSide}, MARKET, Qty: ${adjustedActualQuantity}`); 
 
             await callSignedAPI('/fapi/v1/order', 'POST', {
                 symbol: symbol,
@@ -455,14 +452,14 @@ async function closePosition(symbol, quantityToClose, reason = 'manual') {
                 reduceOnly: 'true'
             });
 
-            addLog(`Đã gửi lệnh đóng ${currentPositionSide} ${symbol}. Lý do: ${reason}.`); 
+            addLog(`Đã gửi lệnh đóng ${positionSideBeforeClose} ${symbol}. Lý do: ${reason}.`); 
         }
         
         // --- Xử lý logic reset vốn/lượt lỗ và xác định hướng lệnh tiếp theo ---
         if (reason.includes('TP')) { // Vị thế đóng do đạt TP
             consecutiveLossCount = 0; // Reset số lần lỗ liên tiếp
             currentInvestmentAmount = INITIAL_INVESTMENT_AMOUNT; // Về lại vốn ban đầu
-            nextTradeDirection = currentPositionSide; // Giữ nguyên hướng lệnh
+            nextTradeDirection = positionSideBeforeClose; // Giữ nguyên hướng lệnh
             addLog(`Đã đạt TP. Reset vốn về ${currentInvestmentAmount} USDT và lượt lỗ về 0. Lệnh tiếp theo: ${nextTradeDirection}.`);
         } else if (reason.includes('SL') || reason.includes('Hết thời gian')) { // Vị thế đóng do chạm SL hoặc hết thời gian
             consecutiveLossCount++; // Tăng số lần lỗ liên tiếp
@@ -475,8 +472,8 @@ async function closePosition(symbol, quantityToClose, reason = 'manual') {
                 currentInvestmentAmount *= 2; // Gấp đôi vốn cho lệnh tiếp theo
                 addLog(`Gấp đôi vốn cho lệnh tiếp theo: ${currentInvestmentAmount} USDT.`);
             }
-            // Đảo ngược hướng lệnh
-            nextTradeDirection = (currentPositionSide === 'LONG' ? 'SHORT' : 'LONG'); 
+            // Đảo ngược hướng lệnh dựa trên hướng lệnh đã bị đóng
+            nextTradeDirection = (positionSideBeforeClose === 'LONG' ? 'SHORT' : 'LONG'); 
             addLog(`Lệnh tiếp theo: ${nextTradeDirection}.`);
         } else {
             // Các lý do đóng khác (ví dụ: đóng thủ công, lỗi không rõ, không đủ số dư)
@@ -488,7 +485,7 @@ async function closePosition(symbol, quantityToClose, reason = 'manual') {
         }
         // --- Kết thúc xử lý logic ---
 
-        currentOpenPosition = null;
+        currentOpenPosition = null; // Chỉ reset sau khi đã xử lý logic nextTradeDirection
         if (positionCheckInterval) {
             clearInterval(positionCheckInterval); 
             positionCheckInterval = null;
@@ -795,16 +792,6 @@ async function manageOpenPosition() {
     const { symbol, quantity, openTime, initialTPPrice, initialSLPrice, side } = currentOpenPosition; 
 
     try {
-        const currentTime = new Date();
-        const elapsedTimeSeconds = (currentTime.getTime() - openTime.getTime()) / 1000;
-
-        // Kiểm tra quá hạn vị thế (vẫn giữ nhưng với thời gian rất dài)
-        if (elapsedTimeSeconds >= MAX_POSITION_LIFETIME_SECONDS) {
-            addLog(`Vị thế ${symbol} quá hạn (thời gian rất dài). Đóng lệnh.`); 
-            await closePosition(symbol, quantity, 'Hết thời gian');
-            return; 
-        }
-        
         const positions = await callSignedAPI('/fapi/v2/positionRisk', 'GET');
         const currentPositionOnBinance = positions.find(p => p.symbol === symbol && parseFloat(p.positionAmt) !== 0);
         
