@@ -4,7 +4,7 @@ import express from 'express';
 import { exec } from 'child_process';
 import fs from 'fs';
 import path from 'path';
-import { fileURLToPath } from 'url'; 
+import { fileURLToPath } = from 'url'; 
 
 // Lấy __filename và __dirname trong ES modules
 const __filename = fileURLToPath(import.meta.url);
@@ -38,8 +38,13 @@ let currentDisplayMessage = "Bot đang chờ lệnh đầu tiên.";
 let displayUpdateIntervalFrontend = null; 
 
 // --- CẤU HÌNH BOT CÁC THAM SỐ GIAO DỊCH ---
-const SYMBOL = 'ETHUSDT'; // Đồng coin áp dụng chiến lược này (hoặc BTCUSDT)
-const INITIAL_TRADE_AMOUNT_USDT = 0.2; // Số USD ban đầu cho lệnh đầu tiên (ví dụ: 0.2$)
+const SYMBOL = 'YFIUSDT'; // Đồng coin áp dụng chiến lược này (hoặc BTCUSDT)
+
+// THAY ĐỔI CÁCH CẤU HÌNH VỐN BAN ĐẦU:
+// Thay vì cố định số USDT, giờ đây là % số dư USDT khả dụng
+const INITIAL_TRADE_AMOUNT_PERCENTAGE = 15; // 1% số dư USDT khả dụng cho lệnh đầu tiên
+// Lưu ý: Giá trị này sẽ được tính toán thành USDT thực tế khi bot khởi động.
+let INITIAL_TRADE_AMOUNT_USDT_ACTUAL = 0; // Số vốn USDT thực tế được tính toán
 
 // Cấu hình Stop Loss và Take Profit
 // TP mặc định cho tất cả lệnh = 125% vốn của lệnh đó
@@ -48,13 +53,13 @@ const TAKE_PROFIT_PERCENTAGE = 1.25;
 const STOP_LOSS_PERCENTAGE = 0.8; 
 
 // Đòn bẩy cố định cho tất cả các lệnh
-const LEVERAGE = 125; // Ví dụ: 20x
+const LEVERAGE = 75; // Ví dụ: 20x
 
 // Vòng lặp nếu lỗ 6 lần liên tiếp => trở lại mức ban đầu
 const MAX_CONSECUTIVE_LOSSES = 6;
 
 // --- BIẾN THEO DÕI TRẠNG THÁI CHIẾN LƯỢC ---
-let currentTradeAmountUSDT = INITIAL_TRADE_AMOUNT_USDT; // Vốn cho lệnh hiện tại
+let currentTradeAmountUSDT = 0; // Vốn cho lệnh hiện tại, sẽ được gán từ INITIAL_TRADE_AMOUNT_USDT_ACTUAL
 let currentTradeDirection = 'LONG'; // Hướng của lệnh hiện tại ('LONG' hoặc 'SHORT')
 let consecutiveLosses = 0; // Đếm số lệnh lỗ liên tiếp
 
@@ -325,7 +330,7 @@ async function setLeverage(symbol, leverage) {
             symbol: symbol,
             leverage: leverage
         });
-        addLog(`✅ Đã đặt đòn bẩy ${leverage}x cho ${symbol}.`);
+        addLog(`✅ Đã đặt đòn bòn bẩy ${leverage}x cho ${symbol}.`);
         return true;
     } catch (error) {
         // Lỗi nếu đòn bẩy đã được đặt rồi có thể bỏ qua
@@ -342,7 +347,7 @@ async function setLeverage(symbol, leverage) {
  * Đóng vị thế hiện tại và mở một vị thế mới dựa trên kết quả của lệnh trước.
  * @param {boolean} isProfit - True nếu lệnh trước lãi, False nếu lỗ.
  */
-async function closeAndOpenNewPosition(isProfit) {
+async function closeAndOpenNewPosition(isProfit, currentPosition = null) { // Thêm currentPosition để tái sử dụng thông tin nếu có
     addLog(`\n--- Bắt đầu chu kỳ mới: ${isProfit ? 'LÃI' : 'LỖ'} ---`, true);
     currentDisplayMessage = `Lệnh trước: ${isProfit ? 'LÃI' : 'LỖ'}. Đang chuẩn bị lệnh mới...`;
 
@@ -353,26 +358,36 @@ async function closeAndOpenNewPosition(isProfit) {
     
     // --- 2. Kiểm tra và đóng vị thế hiện có trên sàn (nếu có vị thế sót) ---
     // Điều này quan trọng nếu bot bị dừng đột ngột và có vị thế mở mà chưa được đóng bởi TP/SL
-    try {
-        const positions = await callSignedAPI('/fapi/v2/positionRisk', 'GET');
-        const openPositionOnBinance = positions.find(p => p.symbol === symbol && parseFloat(p.positionAmt) !== 0);
+    // Hoặc trong trường hợp TP/SL bị mất nhưng vị thế vẫn còn, ta buộc phải đóng nó.
+    let actualOpenPosition = currentPosition;
+    if (!actualOpenPosition) { // Chỉ gọi API nếu chưa có thông tin vị thế truyền vào
+        try {
+            const positions = await callSignedAPI('/fapi/v2/positionRisk', 'GET');
+            actualOpenPosition = positions.find(p => p.symbol === symbol && parseFloat(p.positionAmt) !== 0);
+        } catch (error) {
+            addLog(`❌ Lỗi khi lấy vị thế để đóng: ${error.code} - ${error.msg || error.message}`);
+            // Tiếp tục, nhưng ghi nhận lỗi
+        }
+    }
+    
 
-        if (openPositionOnBinance) {
-            const positionAmt = parseFloat(openPositionOnBinance.positionAmt);
-            const sideToClose = positionAmt > 0 ? 'SELL' : 'BUY'; // Nếu positionAmt > 0 (LONG), thì SELL để đóng. Ngược lại.
-            const quantityToClose = Math.abs(positionAmt);
-            const symbolInfo = await getSymbolDetails(symbol);
+    if (actualOpenPosition) {
+        const positionAmt = parseFloat(actualOpenPosition.positionAmt);
+        const sideToClose = positionAmt > 0 ? 'SELL' : 'BUY'; // Nếu positionAmt > 0 (LONG), thì SELL để đóng. Ngược lại.
+        const quantityToClose = Math.abs(positionAmt);
+        const symbolInfo = await getSymbolDetails(symbol);
 
-            if (!symbolInfo) {
-                addLog(`❌ Lỗi lấy symbol info ${symbol}. Không thể đóng vị thế sót.`, true);
-                // Vẫn tiếp tục để mở lệnh mới nếu có thể
-            } else {
-                // Đảm bảo quantity khớp với precision của sàn
-                const adjustedQuantityToClose = parseFloat(quantityToClose.toFixed(symbolInfo.quantityPrecision));
+        if (!symbolInfo) {
+            addLog(`❌ Lỗi lấy symbol info ${symbol}. Không thể đóng vị thế sót.`, true);
+            // Vẫn tiếp tục để mở lệnh mới nếu có thể
+        } else {
+            // Đảm bảo quantity khớp với precision của sàn
+            const adjustedQuantityToClose = parseFloat(quantityToClose.toFixed(symbolInfo.quantityPrecision));
 
-                addLog(`>>> Phát hiện vị thế đang mở trên sàn: ${positionAmt} ${symbol}. Đang đóng...`);
-                
-                await callSignedAPI('/fapi/v1/order', 'POST', {
+            addLog(`>>> Phát hiện vị thế đang mở trên sàn: ${positionAmt} ${symbol}. Đang đóng...`);
+            
+            try {
+                 await callSignedAPI('/fapi/v1/order', 'POST', {
                     symbol: symbol,
                     side: sideToClose,
                     type: 'MARKET',
@@ -382,19 +397,24 @@ async function closeAndOpenNewPosition(isProfit) {
                 addLog(`✅ Đã đóng vị thế ${positionAmt} ${symbol} trên sàn.`, true);
                 await delay(1000); // Đợi 1 giây để lệnh market khớp hoàn toàn
                 await cancelOpenOrdersForSymbol(symbol); // Hủy lại đảm bảo không còn lệnh chờ nào sau khi đóng
+            } catch (closeError) {
+                // Lỗi -2011: No position found on this symbol. Có thể vị thế đã đóng ngay trước khi bot gửi lệnh.
+                if (closeError.code === -2011 || closeError.msg.includes('No position found')) {
+                    addLog(`⚠️ Đã cố gắng đóng vị thế nhưng không còn vị thế mở cho ${symbol}.`, true);
+                } else {
+                    addLog(`❌ Lỗi khi cố gắng đóng vị thế hiện có trên sàn: ${closeError.code} - ${closeError.msg || closeError.message}`);
+                }
             }
-        } else {
-            addLog(`>>> Không có vị thế mở nào của ${symbol} trên sàn.`, true);
         }
-    } catch (error) {
-        addLog(`❌ Lỗi khi cố gắng đóng vị thế hiện có trên sàn: ${error.code} - ${error.msg || error.message}`);
-        // Tiếp tục logic, nhưng ghi nhận lỗi
+    } else {
+        addLog(`>>> Không có vị thế mở nào của ${symbol} trên sàn.`, true);
     }
 
     // --- 3. Cập nhật trạng thái và chuẩn bị cho lệnh mới ---
     if (isProfit) {
         consecutiveLosses = 0; // Reset số lệnh lỗ liên tiếp
-        currentTradeAmountUSDT = INITIAL_TRADE_AMOUNT_USDT; // Vốn trở lại ban đầu
+        // Dùng INITIAL_TRADE_AMOUNT_USDT_ACTUAL để đảm bảo vốn ban đầu luôn là 1% của số dư hiện tại
+        currentTradeAmountUSDT = INITIAL_TRADE_AMOUNT_USDT_ACTUAL; 
         // currentTradeDirection KHÔNG ĐỔI nếu lãi (theo yêu cầu "mở 1 lệnh cùng chiều vị thế hiện tại").
         // Nếu lệnh ban đầu là Long, và nó lãi, lệnh tiếp theo là Long.
         // Nếu lệnh Long ban đầu lỗ, thành Short. Nếu Short này lãi, lệnh tiếp theo là Short.
@@ -404,11 +424,12 @@ async function closeAndOpenNewPosition(isProfit) {
         consecutiveLosses++;
         if (consecutiveLosses >= MAX_CONSECUTIVE_LOSSES) {
             addLog(`⚠️ Đã lỗ ${consecutiveLosses} lần liên tiếp. Reset về vốn ban đầu và chiều LONG.`, true);
-            currentTradeAmountUSDT = INITIAL_TRADE_AMOUNT_USDT;
+            // Dùng INITIAL_TRADE_AMOUNT_USDT_ACTUAL để đảm bảo vốn ban đầu luôn là 1% của số dư hiện tại
+            currentTradeAmountUSDT = INITIAL_TRADE_AMOUNT_USDT_ACTUAL;
             currentTradeDirection = 'LONG'; // Reset về Long
             consecutiveLosses = 0; // Reset lại số lệnh lỗ liên tiếp
         } else {
-            currentTradeAmountUSDT *= 1.2; // Gấp đôi vốn
+            currentTradeAmountUSDT *= 2; // Gấp đôi vốn
             currentTradeDirection = (currentTradeDirection === 'LONG' ? 'SHORT' : 'LONG'); // Đảo chiều
             addLog(`❌ Lệnh trước đã lỗ. Vốn mới: ${currentTradeAmountUSDT.toFixed(2)} USDT (gấp đôi). Chiều: ${currentTradeDirection}.`, true);
         }
@@ -508,7 +529,7 @@ async function openNewPosition(symbol, tradeAmountUSDT, side) {
         // SL (Stop Market): giá phải chạm hoặc vượt qua để kích hoạt
         // TP (Take Profit Market): giá phải chạm hoặc vượt qua để kích hoạt
         // Đối với Long: SL nên được làm tròn xuống (để chắc chắn giá chạm stopPrice nếu giá giảm), TP làm tròn xuống (để chắc chắn giá chạm stopPrice nếu giá tăng)
-        // Đối với Short: SL nên được làm tròn lên, TP làm tròn lên
+        // Đối với Short: SL nên được làm tròn lên (để chắc chắn giá chạm stopPrice nếu giá tăng), TP làm tròn lên (để chắc chắn giá chạm stopPrice nếu giá giảm)
         if (side === 'LONG') {
             slPrice = Math.floor(slPrice / tickSize) * tickSize; // làm tròn xuống
             tpPrice = Math.floor(tpPrice / tickSize) * tickSize; // làm tròn xuống
@@ -533,7 +554,7 @@ async function openNewPosition(symbol, tradeAmountUSDT, side) {
                 type: 'STOP_MARKET',
                 quantity: quantity,
                 stopPrice: slPrice,
-                closePosition: 'true', // Chỉ định lệnh này để đóng vị thế
+                closePosition: 'true', // Chỉ định lệnh này chỉ dùng để đóng vị thế
                 newOrderRespType: 'FULL'
             });
             orderId_sl = slOrderResult.orderId;
@@ -550,7 +571,7 @@ async function openNewPosition(symbol, tradeAmountUSDT, side) {
                 type: 'TAKE_PROFIT_MARKET',
                 quantity: quantity,
                 stopPrice: tpPrice, // Với TAKE_PROFIT_MARKET, stopPrice là giá kích hoạt
-                closePosition: 'true', // Chỉ định lệnh này để đóng vị thế
+                closePosition: 'true', // Chỉ định lệnh này chỉ dùng để đóng vị thế
                 newOrderRespType: 'FULL'
             });
             orderId_tp = tpOrderResult.orderId;
@@ -595,9 +616,10 @@ async function monitorCurrentPosition() {
         return;
     }
 
-    const { symbol, quantity, orderId_sl, orderId_tp } = currentTradeDetails;
+    const { symbol, quantity, entryPrice, side, initialTradeAmountUSDT, initialTPPrice, initialSLPrice, pricePrecision, quantityPrecision, orderId_sl, orderId_tp } = currentTradeDetails;
     // Cập nhật trạng thái hiển thị
-    currentDisplayMessage = `Đang theo dõi: ${currentTradeDetails.side} ${symbol} Qty: ${quantity}. Vốn: ${currentTradeAmountUSDT.toFixed(2)} USDT. Lỗ liên tiếp: ${consecutiveLosses}.`;
+    let pnl = 0; // PnL chưa thực hiện
+    let pnlPercentage = 0; // Phần trăm PnL chưa thực hiện
 
     try {
         // --- BƯỚC 1: Lấy tất cả lệnh mở trên sàn để kiểm tra trạng thái SL/TP ---
@@ -614,76 +636,97 @@ async function monitorCurrentPosition() {
         const positions = await callSignedAPI('/fapi/v2/positionRisk', 'GET');
         const openPositionOnBinance = positions.find(p => p.symbol === symbol && parseFloat(p.positionAmt) !== 0);
 
-        // --- BƯỚC 3: Xác định xem vị thế đã đóng hay chưa ---
-        // Vị thế được coi là đóng nếu:
-        // 1. Không còn vị thế mở nào trên sàn (positionAmt = 0)
-        // HOẶC
-        // 2. Cả 2 lệnh TP/SL đã không còn tồn tại trên sàn (đã khớp hoặc bị hủy)
-        if (!openPositionOnBinance || (slOrderStatus === 'NOT_EXIST' && tpOrderStatus === 'NOT_EXIST')) {
-            addLog(`>>> Vị thế ${symbol} đã đóng hoặc lệnh TP/SL đã không còn. Đang xác định kết quả...`, true);
-            
-            // Hủy các lệnh SL/TP còn lại (nếu có bất kỳ) để đảm bảo sạch sẽ
-            await cancelOpenOrdersForSymbol(symbol);
+        // Lấy giá hiện tại để tính PnL và kiểm tra kích hoạt TP/SL
+        const currentPrice = await getCurrentPrice(symbol);
+        if (!currentPrice) {
+            addLog(`❌ Không thể lấy giá hiện tại cho ${symbol}. Không thể theo dõi vị thế.`, true);
+            return; // Dừng nếu không có giá để tránh lỗi
+        }
 
+        // Tính PnL chưa thực hiện (unrealized PnL) cho hiển thị
+        if (side === 'LONG') {
+            pnl = (currentPrice - entryPrice) * quantity;
+        } else { // SHORT
+            pnl = (entryPrice - currentPrice) * quantity;
+        }
+        pnlPercentage = (pnl / initialTradeAmountUSDT) * 100;
+        currentDisplayMessage = `Đang mở: ${side} ${symbol} @ ${entryPrice.toFixed(pricePrecision)}. Giá hiện tại: ${currentPrice.toFixed(pricePrecision)}. PnL: ${pnl.toFixed(2)} USDT (${pnlPercentage.toFixed(2)}%). Lỗ liên tiếp: ${consecutiveLosses}. TP: ${initialTPPrice.toFixed(pricePrecision)}, SL: ${initialSLPrice.toFixed(pricePrecision)}.`;
+
+
+        // --- BƯỚC 3: Xử lý dựa trên trạng thái vị thế và lệnh TP/SL ---
+
+        // Trường hợp 1: Vị thế đã đóng trên sàn (hoặc số lượng positionAmt rất nhỏ không đáng kể)
+        if (!openPositionOnBinance) {
+            addLog(`>>> Vị thế ${symbol} đã đóng trên sàn. Đang xác định kết quả...`, true);
+            await cancelOpenOrdersForSymbol(symbol); // Hủy bất kỳ lệnh chờ nào còn sót lại
+            
             let isProfit = false;
-            // --- Ưu tiên kiểm tra PnL thực tế từ lịch sử giao dịch gần nhất ---
             try {
                 const pnlResult = await callSignedAPI('/fapi/v2/income', 'GET', {
                     symbol: symbol,
                     incomeType: 'REALIZED_PNL',
-                    startTime: new Date(Date.now() - (5 * 60 * 1000)).getTime(), // Lấy PnL trong 5 phút gần nhất
-                    limit: 5 // Lấy vài record để đối chiếu nếu cần
+                    startTime: new Date(Date.now() - (10 * 60 * 1000)).getTime(), // Lấy PnL trong 10 phút gần nhất
+                    limit: 5
                 });
                 
                 if (pnlResult && pnlResult.length > 0) {
-                    // Lấy PnL gần nhất sau khi lệnh đóng
-                    const latestPnlEntry = pnlResult.sort((a,b) => b.time - a.time)[0]; // Sắp xếp giảm dần theo thời gian
+                    const latestPnlEntry = pnlResult.sort((a,b) => b.time - a.time)[0];
                     addLog(`[DEBUG] Latest REALIZED_PNL from API: ${latestPnlEntry.income} (Time: ${formatTimeUTC7(new Date(latestPnlEntry.time))})`);
                     isProfit = parseFloat(latestPnlEntry.income) > 0;
                 } else {
-                    addLog(`[DEBUG] Không có REALIZED_PNL nào được tìm thấy trong lịch sử gần đây. Dựa vào trạng thái lệnh.`);
-                    // Fallback: nếu không có PnL, dựa vào trạng thái của lệnh TP/SL
-                    if (tpOrderStatus === 'NOT_EXIST' && slOrderStatus !== 'NOT_EXIST') { // TP không tồn tại, SL vẫn còn => TP đã khớp
-                        isProfit = true;
-                        addLog(`[DEBUG] TP order (${orderId_tp}) không còn tồn tại, SL (${orderId_sl}) vẫn còn. Coi là LÃI.`);
-                    } else if (slOrderStatus === 'NOT_EXIST' && tpOrderStatus !== 'NOT_EXIST') { // SL không tồn tại, TP vẫn còn => SL đã khớp
-                        isProfit = false;
-                        addLog(`[DEBUG] SL order (${orderId_sl}) không còn tồn tại, TP (${orderId_tp}) vẫn còn. Coi là LỖ.`);
-                    } else {
-                         // Nếu cả SL và TP đều không rõ trạng thái FILLED, hoặc không có PnL
-                        addLog(`⚠️ Vị thế ${symbol} đã đóng nhưng không thể xác định kết quả chính xác (SL/TP chưa rõ, PnL chưa có). Mặc định là lỗ để an toàn.`, true);
-                        isProfit = false;
-                    }
+                    addLog(`⚠️ Không tìm thấy REALIZED_PNL. Mặc định là LỖ để chuyển sang chu kỳ mới.`, true);
+                    isProfit = false; // Fallback an toàn nếu không thể xác định PnL thực tế
                 }
             } catch (pnlError) {
-                addLog(`❌ Lỗi khi lấy REALIZED_PNL: ${pnlError.msg || pnlError.message}. Dựa vào trạng thái SL/TP.`, true);
-                if (tpOrderStatus === 'NOT_EXIST' && slOrderStatus !== 'NOT_EXIST') {
-                    isProfit = true;
-                } else {
-                    isProfit = false;
-                }
+                addLog(`❌ Lỗi khi lấy REALIZED_PNL: ${pnlError.msg || pnlError.message}. Mặc định là LỖ.`, true);
+                isProfit = false;
+            }
+            await closeAndOpenNewPosition(isProfit);
+            return; // Kết thúc chu kỳ monitor
+        }
+
+        // Trường hợp 2: Vị thế vẫn mở
+        // Check nếu TP hoặc SL gốc không còn trên sàn. (hoặc orderId_sl/orderId_tp là null do lỗi đặt lệnh ban đầu)
+        if (!slOrderStillOpen || !tpOrderStillOpen || orderId_sl === null || orderId_tp === null) {
+            addLog(`⚠️ Vị thế ${symbol} đang mở nhưng TP/SL đã mất hoặc không được đặt. Đang theo dõi giá để đóng vị thế.`, true);
+            currentDisplayMessage = `⚠️ TP/SL bị mất! Đang theo dõi giá để đóng vị thế ${side} ${symbol} @ ${currentPrice.toFixed(pricePrecision)}. PnL: ${pnl.toFixed(2)} USDT.`;
+
+            let actionTaken = false;
+            let finalIsProfit = false;
+
+            // Kiểm tra xem giá đã chạm SL (dù lệnh SL đã mất)
+            if (side === 'LONG' && currentPrice <= initialSLPrice) {
+                addLog(`🔥 Giá chạm SL (${initialSLPrice.toFixed(pricePrecision)}) cho LONG position. Đang đóng vị thế!`, true);
+                finalIsProfit = false;
+                actionTaken = true;
+            } else if (side === 'SHORT' && currentPrice >= initialSLPrice) {
+                addLog(`🔥 Giá chạm SL (${initialSLPrice.toFixed(pricePrecision)}) cho SHORT position. Đang đóng vị thế!`, true);
+                finalIsProfit = false;
+                actionTaken = true;
+            } 
+            // Kiểm tra xem giá đã chạm TP (dù lệnh TP đã mất)
+            else if (side === 'LONG' && currentPrice >= initialTPPrice) {
+                addLog(`✅ Giá chạm TP (${initialTPPrice.toFixed(pricePrecision)}) cho LONG position. Đang đóng vị thế!`, true);
+                finalIsProfit = true;
+                actionTaken = true;
+            } else if (side === 'SHORT' && currentPrice <= initialTPPrice) {
+                addLog(`✅ Giá chạm TP (${initialTPPrice.toFixed(pricePrecision)}) cho SHORT position. Đang đóng vị thế!`, true);
+                finalIsProfit = true;
+                actionTaken = true;
             }
 
-            // Gọi hàm đóng và mở lệnh mới
-            await closeAndOpenNewPosition(isProfit);
-            return; // Dừng vòng lặp kiểm tra hiện tại để bắt đầu chu kỳ mới
+            if (actionTaken) {
+                // Hủy các lệnh còn lại (nếu có) trước khi đóng
+                await cancelOpenOrdersForSymbol(symbol); 
+                // Gọi hàm đóng vị thế và mở lệnh mới (lưu ý: closeAndOpenNewPosition sẽ tự kiểm tra và đóng vị thế nếu còn)
+                await closeAndOpenNewPosition(finalIsProfit, openPositionOnBinance);
+                return; // Kết thúc chu kỳ monitor này để bắt đầu chu kỳ mới
+            }
         }
         
-        // Vị thế vẫn đang mở, cập nhật trạng thái hiển thị PnL chưa thực hiện
-        const currentPrice = await getCurrentPrice(symbol);
-        if (currentPrice) {
-            let pnl = 0;
-            // Tính PnL chưa thực hiện (unrealized PnL)
-            if (currentTradeDetails.side === 'LONG') {
-                pnl = (currentPrice - currentTradeDetails.entryPrice) * quantity;
-            } else { // SHORT
-                pnl = (currentTradeDetails.entryPrice - currentPrice) * quantity; // ĐÃ SỬA LỖI CÚ PHÁP Ở ĐÂY
-            }
-            // Tính phần trăm PnL so với vốn ban đầu (đã bao gồm đòn bẩy)
-            const pnlPercentage = (pnl / currentTradeDetails.initialTradeAmountUSDT) * 100;
-            currentDisplayMessage = `Đang mở: ${currentTradeDetails.side} ${symbol} @ ${currentTradeDetails.entryPrice.toFixed(currentTradeDetails.pricePrecision)}. Giá hiện tại: ${currentPrice.toFixed(currentTradeDetails.pricePrecision)}. PnL: ${pnl.toFixed(2)} USDT (${pnlPercentage.toFixed(2)}%). Lỗ liên tiếp: ${consecutiveLosses}. TP: ${currentTradeDetails.initialTPPrice.toFixed(currentTradeDetails.pricePrecision)}, SL: ${currentTradeDetails.initialSLPrice.toFixed(currentTradeDetails.pricePrecision)}.`;
-        }
-
+        // Nếu không có gì đặc biệt xảy ra (vị thế đang mở, TP/SL vẫn hoạt động), chỉ cập nhật hiển thị PnL
+        // Logic hiển thị đã được đưa lên trên để luôn cập nhật trạng thái
+        
     } catch (error) {
         addLog(`❌ Lỗi quản lý vị thế ${symbol}: ${error.msg || error.message}. Bot tạm dừng.`, true);
         currentDisplayMessage = `Lỗi theo dõi: ${error.msg || error.message}. Bot dừng.`;
@@ -729,8 +772,15 @@ async function startBotLogicInternal() {
         await syncServerTime();
 
         const account = await callSignedAPI('/fapi/v2/account', 'GET');
-        const usdtBalance = account.assets.find(a => a.asset === 'USDT')?.availableBalance || 0;
-        addLog(`✅ API Key OK! USDT khả dụng: ${parseFloat(usdtBalance).toFixed(2)}`, true);
+        const usdtBalance = parseFloat(account.assets.find(a => a.asset === 'USDT')?.availableBalance || 0);
+        addLog(`✅ API Key OK! USDT khả dụng: ${usdtBalance.toFixed(2)}`, true);
+
+        // --- CẬP NHẬT: Tính toán INITIAL_TRADE_AMOUNT_USDT_ACTUAL dựa trên % số dư ---
+        INITIAL_TRADE_AMOUNT_USDT_ACTUAL = usdtBalance * (INITIAL_TRADE_AMOUNT_PERCENTAGE / 100);
+        addLog(`>>> Vốn ban đầu cho lệnh đầu tiên (dựa trên ${INITIAL_TRADE_AMOUNT_PERCENTAGE}% số dư): ${INITIAL_TRADE_AMOUNT_USDT_ACTUAL.toFixed(2)} USDT`, true);
+        // Cập nhật currentTradeAmountUSDT ban đầu
+        currentTradeAmountUSDT = INITIAL_TRADE_AMOUNT_USDT_ACTUAL;
+
 
         await getExchangeInfo();
         if (!exchangeInfoCache) {
@@ -740,6 +790,47 @@ async function startBotLogicInternal() {
             return 'Không thể tải exchangeInfo.';
         }
 
+        // --- CẬP NHẬT: Kiểm tra số dư có đủ để mở lệnh tối thiểu của sàn không ---
+        const symbolDetails = await getSymbolDetails(SYMBOL);
+        if (!symbolDetails) {
+            addLog(`❌ Lỗi lấy chi tiết symbol ${SYMBOL}. Không thể kiểm tra điều kiện đủ vốn. Bot dừng.`, true);
+            currentDisplayMessage = `Lỗi khởi động: Không thể lấy chi tiết symbol ${SYMBOL}.`;
+            stopBotLogicInternal();
+            return 'Không thể lấy chi tiết symbol.';
+        }
+
+        const currentPrice = await getCurrentPrice(SYMBOL);
+        if (!currentPrice) {
+            addLog(`❌ Lỗi lấy giá hiện tại cho ${SYMBOL}. Không thể kiểm tra điều kiện đủ vốn. Bot dừng.`, true);
+            currentDisplayMessage = `Lỗi khởi động: Không thể lấy giá hiện tại cho ${SYMBOL}.`;
+            stopBotLogicInternal();
+            return 'Không thể lấy giá hiện tại.';
+        }
+
+        const minNotionalNeeded = symbolDetails.minNotional; // Ví dụ: 5.0 USDT là giá trị tối thiểu cho lệnh
+        const minQtyNeeded = symbolDetails.minQty; // Số lượng tối thiểu
+        
+        // Tính toán số lượng tối thiểu có thể mua với INITIAL_TRADE_AMOUNT_USDT_ACTUAL để kiểm tra minNotional
+        // minNotional là giá trị hợp đồng tối thiểu (quantity * price)
+        const currentInvestmentNotional = INITIAL_TRADE_AMOUNT_USDT_ACTUAL * LEVERAGE;
+
+        if (currentInvestmentNotional < minNotionalNeeded) {
+            addLog(`❌ Số vốn ${INITIAL_TRADE_AMOUNT_USDT_ACTUAL.toFixed(2)} USDT (${INITIAL_TRADE_AMOUNT_PERCENTAGE}% số dư) không đủ để đạt Notional tối thiểu của sàn (${minNotionalNeeded} USDT). Bot dừng.`, true);
+            currentDisplayMessage = `Lỗi khởi động: Vốn không đủ. Cần ít nhất ${minNotionalNeeded.toFixed(2)} USDT Notional (vốn * đòn bẩy).`;
+            stopBotLogicInternal();
+            return `Vốn không đủ để mở lệnh tối thiểu.`;
+        }
+        
+        // Kiểm tra minQty (có thể bỏ qua nếu đã check minNotional chặt chẽ hơn)
+        // let quantityForMinNotional = minNotionalNeeded / currentPrice;
+        // quantityForMinNotional = Math.ceil(quantityForMinNotional / symbolDetails.stepSize) * symbolDetails.stepSize;
+        // if (quantityForMinNotional * currentPrice < minNotionalNeeded) {
+        //     addLog(`[DEBUG] minNotional is ${minNotionalNeeded}. Calculated quantity ${quantityForMinNotional.toFixed(symbolDetails.quantityPrecision)}. Actual Notional ${ (quantityForMinNotional * currentPrice).toFixed(2)}`);
+        // }
+
+        addLog(`✅ Số vốn ban đầu đủ điều kiện Notional tối thiểu của sàn (${minNotionalNeeded.toFixed(2)} USDT).`, true);
+
+
         botRunning = true;
         botStartTime = new Date();
         addLog(`--- Bot đã chạy lúc ${formatTimeUTC7(botStartTime)} ---`, true);
@@ -748,8 +839,8 @@ async function startBotLogicInternal() {
         // Nếu bot được khởi động lại và có lệnh cũ (currentTradeDetails không null), tiếp tục theo dõi
         // Ngược lại, bắt đầu lệnh đầu tiên
         if (!currentTradeDetails) {
-            addLog(`>>> Đang bắt đầu lệnh đầu tiên (${currentTradeDirection} ${SYMBOL}) với ${INITIAL_TRADE_AMOUNT_USDT} USDT...`, true);
-            await openNewPosition(SYMBOL, INITIAL_TRADE_AMOUNT_USDT, currentTradeDirection);
+            addLog(`>>> Đang bắt đầu lệnh đầu tiên (${currentTradeDirection} ${SYMBOL}) với vốn ${currentTradeAmountUSDT.toFixed(2)} USDT...`, true);
+            await openNewPosition(SYMBOL, currentTradeAmountUSDT, currentTradeDirection);
         } else {
             addLog(`>>> Phát hiện lệnh cũ đang hoạt động. Tiếp tục theo dõi...`, true);
         }
@@ -796,7 +887,7 @@ function stopBotLogicInternal() {
     botStartTime = null;
     currentTradeDetails = null; // Reset trade details khi dừng bot hoàn toàn
     consecutiveLosses = 0; // Reset số lệnh thua
-    currentTradeAmountUSDT = INITIAL_TRADE_AMOUNT_USDT; // Reset vốn
+    currentTradeAmountUSDT = INITIAL_TRADE_AMOUNT_USDT_ACTUAL; // Reset vốn về giá trị ban đầu (từ % tài khoản)
     currentTradeDirection = 'LONG'; // Reset chiều
 
     // Hủy tất cả các lệnh mở còn sót lại khi bot dừng
