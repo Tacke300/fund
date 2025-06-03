@@ -4,7 +4,7 @@ import express from 'express';
 import { exec } from 'child_process';
 import fs from 'fs';
 import path from 'path';
-import { fileURLToPath } from 'url';
+import { fileURLToPath } from 'url'; 
 
 // Lấy __filename và __dirname trong ES modules
 const __filename = fileURLToPath(import.meta.url);
@@ -39,7 +39,7 @@ let displayUpdateIntervalFrontend = null;
 
 // --- CẤU HÌNH BOT CÁC THAM SỐ GIAO DỊCH ---
 const SYMBOL = 'ETHUSDT'; // Đồng coin áp dụng chiến lược này (hoặc BTCUSDT)
-const INITIAL_TRADE_AMOUNT_USDT = 0.2; // Số USD ban đầu cho lệnh đầu tiên (ví dụ: 1$)
+const INITIAL_TRADE_AMOUNT_USDT = 0.2; // Số USD ban đầu cho lệnh đầu tiên (ví dụ: 0.2$)
 
 // Cấu hình Stop Loss và Take Profit
 // TP mặc định cho tất cả lệnh = 125% vốn của lệnh đó
@@ -163,7 +163,7 @@ async function makeHttpRequest(method, hostname, path, headers, postData = '') {
 
 // Gọi API Binance có chữ ký (dùng cho các thao tác tài khoản, lệnh)
 async function callSignedAPI(fullEndpointPath, method = 'GET', params = {}) {
-    const recvWindow = 5000;
+    const recvWindow = 5000; // Có thể tăng lên 10000 hoặc 15000 nếu gặp lỗi timestamp/network
     const timestamp = Date.now() + serverTimeOffset;
 
     let queryString = Object.keys(params)
@@ -259,7 +259,7 @@ async function getExchangeInfo() {
 
             exchangeInfoCache[s.symbol] = {
                 minQty: lotSizeFilter ? parseFloat(lotSizeFilter.minQty) : (marketLotSizeFilter ? parseFloat(marketLotSizeFilter.minQty) : 0),
-                stepSize: lotSizeFilter ? parseFloat(lotSizeFilter.stepSize) : (marketLotSizeFilter ? parseFloat(marketLotSizeFilter.minQty) : 0.001), // Use minQty for market_lot_size if stepSize missing
+                stepSize: lotSizeFilter ? parseFloat(lotSizeFilter.stepSize) : (marketLotSizeFilter ? parseFloat(marketLotSizeFilter.minQty) : 0.001), 
                 minNotional: minNotionalFilter ? parseFloat(minNotionalFilter.notional) : 0,
                 pricePrecision: s.pricePrecision,
                 quantityPrecision: s.quantityPrecision,
@@ -408,7 +408,7 @@ async function closeAndOpenNewPosition(isProfit) {
             currentTradeDirection = 'LONG'; // Reset về Long
             consecutiveLosses = 0; // Reset lại số lệnh lỗ liên tiếp
         } else {
-            currentTradeAmountUSDT *= 1.3; // Gấp đôi vốn
+            currentTradeAmountUSDT *= 1.2; // Gấp đôi vốn
             currentTradeDirection = (currentTradeDirection === 'LONG' ? 'SHORT' : 'LONG'); // Đảo chiều
             addLog(`❌ Lệnh trước đã lỗ. Vốn mới: ${currentTradeAmountUSDT.toFixed(2)} USDT (gấp đôi). Chiều: ${currentTradeDirection}.`, true);
         }
@@ -436,7 +436,7 @@ async function closeAndOpenNewPosition(isProfit) {
  * @param {string} symbol - Cặp giao dịch (ví dụ: 'BTCUSDT').
  * @param {number} tradeAmountUSDT - Số vốn USDT để mở lệnh.
  * @param {string} side - Hướng lệnh ('LONG' hoặc 'SHORT').
- */
+*/
 async function openNewPosition(symbol, tradeAmountUSDT, side) {
     try {
         await setLeverage(symbol, LEVERAGE); // Đặt đòn bẩy
@@ -584,7 +584,7 @@ async function openNewPosition(symbol, tradeAmountUSDT, side) {
 /**
  * Hàm kiểm tra và quản lý vị thế đang mở.
  * Sẽ gọi `closeAndOpenNewPosition` khi TP/SL khớp hoặc vị thế đã đóng.
- */
+*/
 async function monitorCurrentPosition() {
     if (!botRunning) {
         return;
@@ -600,42 +600,33 @@ async function monitorCurrentPosition() {
     currentDisplayMessage = `Đang theo dõi: ${currentTradeDetails.side} ${symbol} Qty: ${quantity}. Vốn: ${currentTradeAmountUSDT.toFixed(2)} USDT. Lỗ liên tiếp: ${consecutiveLosses}.`;
 
     try {
-        // Lấy trạng thái của các lệnh TP/SL đã đặt (nếu có)
-        let slOrderStatus = null;
-        let tpOrderStatus = null;
+        // --- BƯỚC 1: Lấy tất cả lệnh mở trên sàn để kiểm tra trạng thái SL/TP ---
+        const openOrdersOnBinance = await callSignedAPI('/fapi/v1/openOrders', 'GET', { symbol: symbol });
+        const slOrderStillOpen = openOrdersOnBinance.find(o => o.orderId == orderId_sl);
+        const tpOrderStillOpen = openOrdersOnBinance.find(o => o.orderId == orderId_tp);
 
-        if (orderId_sl) {
-            try {
-                const slOrder = await callSignedAPI('/fapi/v1/order', 'GET', { symbol: symbol, orderId: orderId_sl });
-                slOrderStatus = slOrder.status; // status có thể là NEW, PARTIALLY_FILLED, FILLED, CANCELED, EXPIRED
-            } catch (err) {
-                if (err.code === -2013) slOrderStatus = 'CANCELLED_OR_FILLED'; // Order not found: có thể đã bị hủy hoặc đã khớp và bị xóa khỏi danh sách
-                else addLog(`❌ Lỗi kiểm tra trạng thái SL order ${orderId_sl}: ${err.msg || err.message}`);
-            }
-        }
-        if (orderId_tp) {
-            try {
-                const tpOrder = await callSignedAPI('/fapi/v1/order', 'GET', { symbol: symbol, orderId: orderId_tp });
-                tpOrderStatus = tpOrder.status;
-            } catch (err) {
-                if (err.code === -2013) tpOrderStatus = 'CANCELLED_OR_FILLED';
-                else addLog(`❌ Lỗi kiểm tra trạng thái TP order ${orderId_tp}: ${err.msg || err.message}`);
-            }
-        }
+        let slOrderStatus = slOrderStillOpen ? slOrderStillOpen.status : 'NOT_EXIST';
+        let tpOrderStatus = tpOrderStillOpen ? tpOrderStillOpen.status : 'NOT_EXIST';
 
-        // Kiểm tra vị thế thực tế trên sàn để đảm bảo không còn vị thế mở
+        // addLog(`[DEBUG] SL status: ${slOrderStatus}, TP status: ${tpOrderStatus}`); // Bỏ comment để debug chi tiết hơn
+
+        // --- BƯỚC 2: Kiểm tra vị thế thực tế trên sàn ---
         const positions = await callSignedAPI('/fapi/v2/positionRisk', 'GET');
         const openPositionOnBinance = positions.find(p => p.symbol === symbol && parseFloat(p.positionAmt) !== 0);
 
-        if (!openPositionOnBinance || Math.abs(parseFloat(openPositionOnBinance.positionAmt)) < (quantity * 0.05)) { // Vị thế đã đóng hoặc giảm đáng kể (<5% lượng ban đầu)
-            addLog(`>>> Vị thế ${symbol} đã đóng hoặc giảm số lượng đáng kể. Đang xác định kết quả...`, true);
+        // --- BƯỚC 3: Xác định xem vị thế đã đóng hay chưa ---
+        // Vị thế được coi là đóng nếu:
+        // 1. Không còn vị thế mở nào trên sàn (positionAmt = 0)
+        // HOẶC
+        // 2. Cả 2 lệnh TP/SL đã không còn tồn tại trên sàn (đã khớp hoặc bị hủy)
+        if (!openPositionOnBinance || (slOrderStatus === 'NOT_EXIST' && tpOrderStatus === 'NOT_EXIST')) {
+            addLog(`>>> Vị thế ${symbol} đã đóng hoặc lệnh TP/SL đã không còn. Đang xác định kết quả...`, true);
             
-            // Hủy các lệnh SL/TP còn lại (nếu có) để tránh lỗi hoặc các lệnh không mong muốn
+            // Hủy các lệnh SL/TP còn lại (nếu có bất kỳ) để đảm bảo sạch sẽ
             await cancelOpenOrdersForSymbol(symbol);
 
             let isProfit = false;
-
-            // Ưu tiên kiểm tra PnL thực tế từ lịch sử giao dịch gần nhất
+            // --- Ưu tiên kiểm tra PnL thực tế từ lịch sử giao dịch gần nhất ---
             try {
                 const pnlResult = await callSignedAPI('/fapi/v2/income', 'GET', {
                     symbol: symbol,
@@ -650,16 +641,14 @@ async function monitorCurrentPosition() {
                     addLog(`[DEBUG] Latest REALIZED_PNL from API: ${latestPnlEntry.income} (Time: ${formatTimeUTC7(new Date(latestPnlEntry.time))})`);
                     isProfit = parseFloat(latestPnlEntry.income) > 0;
                 } else {
-                    addLog(`[DEBUG] Không có REALIZED_PNL nào được tìm thấy trong lịch sử gần đây.`);
-                    // Nếu không có PnL thực tế, dựa vào trạng thái của lệnh SL/TP
-                    if (tpOrderStatus === 'FILLED' || (tpOrderStatus === 'CANCELLED_OR_FILLED' && (slOrderStatus === 'NEW' || slOrderStatus === null))) {
-                        // Nếu TP khớp hoặc TP bị hủy (và SL không khớp/không tồn tại) -> coi là lãi
+                    addLog(`[DEBUG] Không có REALIZED_PNL nào được tìm thấy trong lịch sử gần đây. Dựa vào trạng thái lệnh.`);
+                    // Fallback: nếu không có PnL, dựa vào trạng thái của lệnh TP/SL
+                    if (tpOrderStatus === 'NOT_EXIST' && slOrderStatus !== 'NOT_EXIST') { // TP không tồn tại, SL vẫn còn => TP đã khớp
                         isProfit = true;
-                        addLog(`[DEBUG] TP order (${orderId_tp}) khớp hoặc đã bị hủy/thực hiện. Coi là LÃI.`);
-                    } else if (slOrderStatus === 'FILLED' || (slOrderStatus === 'CANCELLED_OR_FILLED' && (tpOrderStatus === 'NEW' || tpOrderStatus === null))) {
-                        // Nếu SL khớp hoặc SL bị hủy (và TP không khớp/không tồn tại) -> coi là lỗ
+                        addLog(`[DEBUG] TP order (${orderId_tp}) không còn tồn tại, SL (${orderId_sl}) vẫn còn. Coi là LÃI.`);
+                    } else if (slOrderStatus === 'NOT_EXIST' && tpOrderStatus !== 'NOT_EXIST') { // SL không tồn tại, TP vẫn còn => SL đã khớp
                         isProfit = false;
-                        addLog(`[DEBUG] SL order (${orderId_sl}) khớp hoặc đã bị hủy/thực hiện. Coi là LỖ.`);
+                        addLog(`[DEBUG] SL order (${orderId_sl}) không còn tồn tại, TP (${orderId_tp}) vẫn còn. Coi là LỖ.`);
                     } else {
                          // Nếu cả SL và TP đều không rõ trạng thái FILLED, hoặc không có PnL
                         addLog(`⚠️ Vị thế ${symbol} đã đóng nhưng không thể xác định kết quả chính xác (SL/TP chưa rõ, PnL chưa có). Mặc định là lỗ để an toàn.`, true);
@@ -668,7 +657,7 @@ async function monitorCurrentPosition() {
                 }
             } catch (pnlError) {
                 addLog(`❌ Lỗi khi lấy REALIZED_PNL: ${pnlError.msg || pnlError.message}. Dựa vào trạng thái SL/TP.`, true);
-                if (tpOrderStatus === 'FILLED' || (tpOrderStatus === 'CANCELLED_OR_FILLED' && (slOrderStatus === 'NEW' || slOrderStatus === null))) {
+                if (tpOrderStatus === 'NOT_EXIST' && slOrderStatus !== 'NOT_EXIST') {
                     isProfit = true;
                 } else {
                     isProfit = false;
@@ -688,7 +677,7 @@ async function monitorCurrentPosition() {
             if (currentTradeDetails.side === 'LONG') {
                 pnl = (currentPrice - currentTradeDetails.entryPrice) * quantity;
             } else { // SHORT
-                pnl = (currentTradeDetails.entryPrice - currentTradeDetails.entryPrice) * quantity;
+                pnl = (currentTradeDetails.entryPrice - currentPrice) * quantity; // ĐÃ SỬA LỖI CÚ PHÁP Ở ĐÂY
             }
             // Tính phần trăm PnL so với vốn ban đầu (đã bao gồm đòn bẩy)
             const pnlPercentage = (pnl / currentTradeDetails.initialTradeAmountUSDT) * 100;
@@ -805,8 +794,11 @@ function stopBotLogicInternal() {
     stopDisplayUpdateFrontend();
     addLog('--- Bot đã dừng ---', true);
     botStartTime = null;
-    currentDisplayMessage = "Bot đã dừng.";
-    
+    currentTradeDetails = null; // Reset trade details khi dừng bot hoàn toàn
+    consecutiveLosses = 0; // Reset số lệnh thua
+    currentTradeAmountUSDT = INITIAL_TRADE_AMOUNT_USDT; // Reset vốn
+    currentTradeDirection = 'LONG'; // Reset chiều
+
     // Hủy tất cả các lệnh mở còn sót lại khi bot dừng
     cancelOpenOrdersForSymbol(SYMBOL)
         .then(() => addLog('✅ Đã hủy tất cả lệnh mở khi dừng bot.', true))
@@ -818,13 +810,8 @@ function stopBotLogicInternal() {
 // --- KHỞI TẠO SERVER WEB VÀ CÁC API ENDPOINT ---
 const app = express();
 
-app.use(express.static(__dirname)); // Serve static files from the current directory (binance)
- // Serve static files from 'public' directory
-// Nếu bạn không muốn tạo thư mục public, có thể dùng:
-// app.get('/', (req, res) => {
-//     res.sendFile(path.join(__dirname, 'index.html'));
-// });
-
+// Phục vụ file index.html từ thư mục hiện tại (binance)
+app.use(express.static(__dirname));
 
 app.get('/api/logs', (req, res) => {
     fs.readFile(BOT_LOG_FILE, 'utf8', (err, data) => {
