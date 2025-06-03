@@ -1,7 +1,7 @@
 import https from 'https';
 import crypto from 'crypto';
 import express from 'express';
-import { exec } = from 'child_process';
+import { exec } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
