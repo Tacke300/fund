@@ -818,7 +818,8 @@ function stopBotLogicInternal() {
 // --- KHỞI TẠO SERVER WEB VÀ CÁC API ENDPOINT ---
 const app = express();
 
-app.use(express.static(path.join(__dirname, 'public'))); // Serve static files from 'public' directory
+app.use(express.static(__dirname)); // Serve static files from the current directory (binance)
+ // Serve static files from 'public' directory
 // Nếu bạn không muốn tạo thư mục public, có thể dùng:
 // app.get('/', (req, res) => {
 //     res.sendFile(path.join(__dirname, 'index.html'));
