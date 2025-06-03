@@ -41,7 +41,7 @@ let displayUpdateIntervalFrontend = null;
 let totalRealizedPnl = 0;
 
 // --- CẤU HÌNH BOT CÁC THAM SỐ GIAO DỊCH ---
-const SYMBOL = 'RPLUSDT'; // Đồng coin áp dụng chiến lược này (hoặc BTCUSDT)
+const SYMBOL = 'ALCHUSDT'; // Đồng coin áp dụng chiến lược này (hoặc BTCUSDT)
 
 // THAY ĐỔI CÁCH CẤU HÌNH VỐN BAN ĐẦU:
 // Thay vì cố định số USDT, giờ đây là % số dư USDT khả dụng
