@@ -372,7 +372,7 @@ async function getExchangeInfo() {
 
             exchangeInfoCache[s.symbol] = {
                 minQty: lotSizeFilter ? parseFloat(lotSizeFilter.minQty) : (marketLotSizeFilter ? parseFloat(marketLotSizeFilter.minQty) : 0),
-                stepSize: lotSizeFilter ? parseFloat(lotSizeFilter.stepSize) : (marketLotSizeFilter ? parseFloat(marketLotSizeFilter.stepSize) : 0.001),
+                stepSize: lotSizeFilter ? parseFloat(lotSizeFilter.stepSize) : (marketLotSizeFilter ? parseFloat(marketLotSizeFilter.minQty) : 0.001),
                 minNotional: minNotionalFilter ? parseFloat(minNotionalFilter.notional) : 0,
                 pricePrecision: s.pricePrecision,
                 quantityPrecision: s.quantityPrecision,
@@ -523,7 +523,7 @@ async function closePosition(symbol, side, quantityToClose, reason = 'manual') {
         // Sau khi gửi lệnh, chờ một chút để lệnh được thực hiện
         await delay(1000); // Chờ 1 giây để lệnh thị trường khớp
 
-        // Quan trọng: Sau khi gửi lệnh đóng, chờ cho đến khi vị thế thực sự đóng trên sàn
+        // Quan trọng: Sau khi gửi lệnh, chờ cho đến khi vị thế thực sự đóng trên sàn
         await confirmPositionClosedOnExchange(symbol, actualPositionSide);
         
         // Sau khi xác nhận đóng, manageOpenPosition sẽ được gọi và xử lý phần còn lại
@@ -857,11 +857,47 @@ async function openPosition(symbol, side, capitalAmount, leverage) {
             tpPrice = entryPrice - (pnlForTp / (quantity * leverage));
         }
 
-        // --- ĐIỂM ĐÃ SỬA LỖI PRECISION ---
-        // Làm tròn SL/TP theo pricePrecision. Rất quan trọng để tránh lỗi "Order would immediately trigger"
-        slPrice = roundToPrecision(slPrice, pricePrecision, side === 'LONG' ? 'floor' : 'ceil');
-        tpPrice = roundToPrecision(tpPrice, pricePrecision, side === 'LONG' ? 'ceil' : 'floor');
-        // --- KẾT THÚC ĐIỂM SỬA LỖI ---
+        // --- ĐIỂM SỬA LỖI QUAN TRỌNG: LÀM TRÒN GIÁ TP/SL THEO TICKSIZE VÀ ĐẢM BẢO KHOẢNG CÁCH ---
+        // Hàm làm tròn theo tickSize
+        const roundToTickSize = (price, tick) => {
+            return Math.round(price / tick) * tick;
+        };
+        
+        // Điều chỉnh và làm tròn SL
+        slPrice = roundToTickSize(slPrice, tickSize);
+        if (side === 'LONG') {
+            // Đảm bảo SL luôn NHỎ HƠN giá vào lệnh một khoảng ít nhất là tickSize
+            if (slPrice >= entryPrice) {
+                slPrice = roundToTickSize(entryPrice - tickSize, tickSize);
+                // Nếu giá vào lệnh - tickSize vẫn không hợp lệ (ví dụ: chạm giới hạn 0), xử lý thêm
+                if (slPrice < 0) slPrice = tickSize; // Đảm bảo không âm
+            }
+        } else { // SHORT
+            // Đảm bảo SL luôn LỚN HƠN giá vào lệnh một khoảng ít nhất là tickSize
+            if (slPrice <= entryPrice) {
+                slPrice = roundToTickSize(entryPrice + tickSize, tickSize);
+            }
+        }
+        slPrice = parseFloat(slPrice.toFixed(pricePrecision)); // Làm tròn lại theo precision cuối cùng
+
+
+        // Điều chỉnh và làm tròn TP
+        tpPrice = roundToTickSize(tpPrice, tickSize);
+        if (side === 'LONG') {
+            // Đảm bảo TP luôn LỚN HƠN giá vào lệnh một khoảng ít nhất là tickSize
+            if (tpPrice <= entryPrice) {
+                tpPrice = roundToTickSize(entryPrice + tickSize, tickSize);
+            }
+        } else { // SHORT
+            // Đảm bảo TP luôn NHỎ HƠN giá vào lệnh một khoảng ít nhất là tickSize
+            if (tpPrice >= entryPrice) {
+                tpPrice = roundToTickSize(entryPrice - tickSize, tickSize);
+                // Nếu giá vào lệnh - tickSize vẫn không hợp lệ (ví dụ: chạm giới hạn 0), xử lý thêm
+                if (tpPrice < 0) tpPrice = tickSize; // Đảm bảo không âm
+            }
+        }
+        tpPrice = parseFloat(tpPrice.toFixed(pricePrecision)); // Làm tròn lại theo precision cuối cùng
+        // --- KẾT THÚC ĐIỂM SỬA LỖI QUAN TRỌNG ---
 
 
         addLog(`>>> TP: ${tpPrice.toFixed(pricePrecision)}, SL: ${slPrice.toFixed(pricePrecision)}`, true);
@@ -1177,7 +1213,7 @@ async function scheduleNextMainCycle() {
     // mà sẽ để manageOpenPosition lo việc kiểm tra và đóng vị thế.
     if (currentOpenPosition) {
         addLog('>>> Có vị thế mở. Chờ đóng vị thế hiện tại trước khi tìm cơ hội mới.');
-        // Đảm bảo manageOpenPosition đang chạy để giám sát vị thế
+        // Đảm bảo interval kiểm tra vị thế đang chạy
         if (!positionCheckInterval) {
             positionCheckInterval = setInterval(async () => {
                 if (botRunning && currentOpenPosition) {
