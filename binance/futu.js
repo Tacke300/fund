@@ -985,16 +985,8 @@ app.get('/api/status', async (req, res) => {
 
         let statusResponse = {
             pm2_status: 'stopped',
-            pm2_message: `Bot: Không tìm thấy trong PM2 (Tên: ${THIS_BOT_PM2_NAME}). Đảm bảo bot đã được khởi chạy bằng PM2.`,
             bot_logic_status: botRunning ? 'running' : 'stopped',
-            bot_start_time: botStartTime ? formatTimeUTC7(botStartTime) : null,
-            uptime_minutes: botStartTime ? Math.floor((Date.now() - botStartTime.getTime()) / (1000 * 60)) : 0,
-            current_trade_details: currentTradeDetails,
-            consecutive_losses: consecutiveLosses,
-            current_trade_amount_usdt: currentTradeAmountUSDT,
-            current_trade_direction: currentTradeDirection,
-            display_message: currentDisplayMessage, // Message cho frontend
-            total_realized_pnl: totalRealizedPnl // Thêm tổng PnL vào status
+            PNL: totalRealizedPnl // Thêm tổng PnL vào status
         };
 
         if (botProcess) {
