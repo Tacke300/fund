@@ -68,7 +68,7 @@ class CriticalApiError extends Error {
 const MIN_USDT_BALANCE_TO_OPEN = 0.1; 
 
 // SỐ PHẦN TRĂM CỦA TÀI KHOẢN USDT KHẢ DỤNG SẼ DÙNG CHO MỖI LỆNH ĐẦU TƯ BAN ĐẦU.
-const PERCENT_ACCOUNT_PER_TRADE = 0.3; // Ví dụ: 0.01 = 1%
+const PERCENT_ACCOUNT_PER_TRADE = 1; // Ví dụ: 0.01 = 1%
 
 // Cấu hình Stop Loss:
 // SL cố định X% của vốn đầu tư ban đầu (số tiền được tính từ PERCENT_ACCOUNT_PER_TRADE)
@@ -85,7 +85,7 @@ const TAKE_PROFIT_PERCENTAGES = {
 };
 
 // Ngưỡng funding rate âm tối thiểu để xem xét mở lệnh (ví dụ: -0.005 = -0.5%)
-const MIN_FUNDING_RATE_THRESHOLD = -0.00001; 
+const MIN_FUNDING_RATE_THRESHOLD = -0.01; 
 // Thời gian tối đa giữ một vị thế (ví dụ: 180 giây = 3 phút)
 const MAX_POSITION_LIFETIME_SECONDS = 180; 
 
