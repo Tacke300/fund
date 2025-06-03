@@ -65,7 +65,7 @@ const INITIAL_INVESTMENT_AMOUNT = 0.08; // Ví dụ: 0.08 USDT
 
 // Cấu hình Take Profit & Stop Loss
 // LƯU Ý: Các giá trị này bây giờ là % VỐN, không phải % giá coin
-const TAKE_PROFIT_PERCENTAGE_MAIN = 0.60; // 50% lãi trên VỐN
+const TAKE_PROFIT_PERCENTAGE_MAIN = 0.50; // 50% lãi trên VỐN
 const STOP_LOSS_PERCENTAGE_MAIN = 0.18;   // 18% lỗ trên VỐN
 
 // Số lần thua liên tiếp tối đa trước khi reset về lệnh ban đầu
@@ -348,7 +348,7 @@ async function getExchangeInfo() {
 
             exchangeInfoCache[s.symbol] = {
                 minQty: lotSizeFilter ? parseFloat(lotSizeFilter.minQty) : (marketLotSizeFilter ? parseFloat(marketLotSizeFilter.minQty) : 0),
-                stepSize: lotSizeFilter ? parseFloat(lotSizeFilter.stepSize) : (marketLotSizeFilter ? parseFloat(marketLotSizeFilter.stepSize) : 0.001),
+                stepSize: lotSizeFilter ? parseFloat(lotSizeFilter.stepSize) : (marketLotSizeFilter ? parseFloat(marketLotSizeFilter.minQty) : 0.001),
                 minNotional: minNotionalFilter ? parseFloat(minNotionalFilter.notional) : 0,
                 pricePrecision: s.pricePrecision,
                 quantityPrecision: s.quantityPrecision,
@@ -480,7 +480,10 @@ async function closePosition(symbol, quantityToClose, reason = 'manual') {
             // Giả định là một trường hợp cần reset trạng thái về ban đầu
             currentInvestmentAmount = INITIAL_INVESTMENT_AMOUNT;
             consecutiveLossCount = 0;
-            nextTradeDirection = 'SHORT'; // Về mặc định SHORT nếu không rõ lý do
+            // Ở đây, không reset nextTradeDirection về 'SHORT' mà giữ nguyên hoặc để logic khác quyết định.
+            // Ví dụ, nếu đây là một lỗi không mong muốn, có thể giữ hướng lệnh cũ để thử lại hoặc để logic manageOpenPosition quyết định.
+            // Để đảm bảo đảo chiều, chúng ta có thể làm như sau:
+            nextTradeDirection = (positionSideBeforeClose === 'LONG' ? 'SHORT' : 'LONG'); // Vẫn đảo chiều nếu lý do không rõ là do lỗi
             addLog(`Lệnh đóng do lý do đặc biệt (${reason}). Reset vốn về ${currentInvestmentAmount} USDT và lượt lỗ về 0. Lệnh tiếp theo: ${nextTradeDirection}.`);
         }
         // --- Kết thúc xử lý logic ---
@@ -585,8 +588,8 @@ async function openPosition(symbol, tradeDirection, usdtBalance, maxLeverage) {
             // Reset về lệnh ban đầu khi không đủ số dư
             currentInvestmentAmount = INITIAL_INVESTMENT_AMOUNT;
             consecutiveLossCount = 0;
-            nextTradeDirection = 'SHORT'; // Nếu không đủ tiền, về mặc định SHORT
-            addLog(`Số dư không đủ. Reset vốn về ${currentInvestmentAmount} USDT và lượt lỗ về 0. Lệnh tiếp theo: ${nextTradeDirection}.`);
+            // nextTradeDirection KHÔNG ĐƯỢC RESET VỀ 'SHORT' TẠI ĐÂY
+            addLog(`Số dư không đủ. Reset vốn về ${currentInvestmentAmount} USDT và lượt lỗ về 0. Lệnh tiếp theo vẫn là: ${nextTradeDirection}.`);
             if(botRunning) scheduleNextMainCycle();
             return;
         }
@@ -777,7 +780,7 @@ async function openPosition(symbol, tradeDirection, usdtBalance, maxLeverage) {
 }
 
 /**
- * Hàm kiểm tra và quản lý vị thế đang mở (SL/TP/Timeout)
+ * Hàm kiểm tra và quản lý vị thế đang mở (SL/TP)
  */
 async function manageOpenPosition() {
     if (!currentOpenPosition || isClosingPosition) {
@@ -789,7 +792,7 @@ async function manageOpenPosition() {
         return;
     }
 
-    const { symbol, quantity, openTime, initialTPPrice, initialSLPrice, side } = currentOpenPosition; 
+    const { symbol, quantity, initialTPPrice, initialSLPrice, side } = currentOpenPosition; 
 
     try {
         const positions = await callSignedAPI('/fapi/v2/positionRisk', 'GET');
@@ -887,8 +890,8 @@ async function runTradingLogic() {
             addLog(`Số dư USDT (${availableBalance.toFixed(2)}) không đủ để mở lệnh (${currentInvestmentAmount.toFixed(2)} USDT). Trở về lệnh ban đầu.`);
             currentInvestmentAmount = INITIAL_INVESTMENT_AMOUNT;
             consecutiveLossCount = 0;
-            nextTradeDirection = 'SHORT'; 
-            addLog(`Số dư không đủ. Reset vốn về ${currentInvestmentAmount} USDT và lượt lỗ về 0. Lệnh tiếp theo: ${nextTradeDirection}.`);
+            // nextTradeDirection KHÔNG ĐƯỢC RESET VỀ 'SHORT' TẠI ĐÂY
+            addLog(`Số dư không đủ. Reset vốn về ${currentInvestmentAmount} USDT và lượt lỗ về 0. Lệnh tiếp theo vẫn là: ${nextTradeDirection}.`);
             // Gọi lại hàm scheduleNextMainCycle ngay lập tức
             scheduleNextMainCycle();
             return;
@@ -985,7 +988,7 @@ async function startBotLogicInternal() {
         // Khởi tạo lại các biến trạng thái khi bot khởi động
         currentInvestmentAmount = INITIAL_INVESTMENT_AMOUNT;
         consecutiveLossCount = 0;
-        nextTradeDirection = 'SHORT'; 
+        nextTradeDirection = 'SHORT'; // Đây là khởi tạo ban đầu, không ảnh hưởng đến việc đảo chiều sau đó.
 
         // Bắt đầu chu kỳ chính ngay lập tức
         scheduleNextMainCycle();
