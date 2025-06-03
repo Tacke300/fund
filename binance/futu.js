@@ -61,11 +61,12 @@ class CriticalApiError extends Error {
 
 // --- CẤU HÌNH BOT CÁC THAM SỐ GIAO DỊCH ---
 // SỐ TIỀN USDT CỐ ĐỊNH BAN ĐẦU SẼ DÙNG CHO MỖI LỆNH ĐẦU TƯ.
-const INITIAL_INVESTMENT_AMOUNT = 0.08; // Ví dụ: 5 USDT
+const INITIAL_INVESTMENT_AMOUNT = 0.08; // Ví dụ: 0.08 USDT
 
 // Cấu hình Take Profit & Stop Loss
-const TAKE_PROFIT_PERCENTAGE_MAIN = 0.50; // 50% lãi
-const STOP_LOSS_PERCENTAGE_MAIN = 0.18;   // 18% lỗ
+// LƯU Ý: Các giá trị này bây giờ là % VỐN, không phải % giá coin
+const TAKE_PROFIT_PERCENTAGE_MAIN = 0.50; // 50% lãi trên VỐN
+const STOP_LOSS_PERCENTAGE_MAIN = 0.18;   // 18% lỗ trên VỐN
 
 // Số lần thua liên tiếp tối đa trước khi reset về lệnh ban đầu
 const MAX_CONSECUTIVE_LOSSES = 5;
@@ -631,25 +632,51 @@ async function openPosition(symbol, tradeDirection, usdtBalance, maxLeverage) {
         let slPrice, tpPrice;
         let slOrderSide, tpOrderSide;
 
+        // --- BẮT ĐẦU TÍNH TOÁN TP/SL THEO % VỐN ---
+        const profitTargetUSDT = capitalToUse * TAKE_PROFIT_PERCENTAGE_MAIN;
+        const lossLimitUSDT = capitalToUse * STOP_LOSS_PERCENTAGE_MAIN;
+
+        // Tính toán sự thay đổi giá cần thiết để đạt TP/SL
+        // Đòn bẩy đã được áp dụng trong quantity, nên lợi nhuận/lỗ tính trên total notional value
+        // NOTIONAL_VALUE = quantity * entryPrice
+        // PNL_PERCENTAGE_OF_NOTIONAL = (TP_PERCENTAGE_OF_CAPITAL / MAX_LEVERAGE)
+        // PRICE_CHANGE = (PNL_PERCENTAGE_OF_NOTIONAL * entryPrice)
+        // Tuy nhiên, để đơn giản, PNL thực tế trên vốn (currentInvestmentAmount)
+        // Sẽ được phản ánh qua sự thay đổi giá của positionAmt (quantity).
+        // PnL = (currentPrice - entryPrice) * positionAmt (for LONG)
+        // PnL = (entryPrice - currentPrice) * positionAmt (for SHORT)
+
+        // Tính toán mức thay đổi giá cần thiết trên mỗi đơn vị coin để đạt được TP/SL trên vốn
+        // Lãi/Lỗ trên 1 đơn vị coin = (Lãi/Lỗ USDT mục tiêu) / số lượng coin (quantity)
+        const priceChangeForTP = profitTargetUSDT / quantity;
+        const priceChangeForSL = lossLimitUSDT / quantity;
+
         if (tradeDirection === 'LONG') {
             // Đối với lệnh LONG: SL dưới giá vào, TP trên giá vào
-            slPrice = entryPrice * (1 - STOP_LOSS_PERCENTAGE_MAIN);
-            tpPrice = entryPrice * (1 + TAKE_PROFIT_PERCENTAGE_MAIN);
+            slPrice = entryPrice - priceChangeForSL;
+            tpPrice = entryPrice + priceChangeForTP;
             slOrderSide = 'SELL'; // Bán để đóng LONG
             tpOrderSide = 'SELL'; // Bán để đóng LONG
 
             // Làm tròn giá: SL LONG (làm tròn lên), TP LONG (làm tròn xuống)
-            slPrice = Math.ceil(slPrice / tickSize) * tickSize; 
+            // Cẩn thận với làm tròn giá SL/TP. Giá SL nên được làm tròn "ra xa" giá vào
+            // để tránh trigger sớm nếu biến động nhỏ.
+            // LONG SL: làm tròn xuống (floor) để mức giá thấp hơn vẫn được giữ (tránh khớp sớm)
+            // LONG TP: làm tròn xuống (floor) để đảm bảo giá TP vẫn đạt được (tránh miss)
+            slPrice = Math.floor(slPrice / tickSize) * tickSize; 
             tpPrice = Math.floor(tpPrice / tickSize) * tickSize; 
+
         } else { // SHORT
             // Đối với lệnh SHORT: SL trên giá vào, TP dưới giá vào
-            slPrice = entryPrice * (1 + STOP_LOSS_PERCENTAGE_MAIN);
-            tpPrice = entryPrice * (1 - TAKE_PROFIT_PERCENTAGE_MAIN);
+            slPrice = entryPrice + priceChangeForSL;
+            tpPrice = entryPrice - priceChangeForTP;
             slOrderSide = 'BUY'; // Mua để đóng SHORT
             tpOrderSide = 'BUY'; // Mua để đóng SHORT
 
             // Làm tròn giá: SL SHORT (làm tròn xuống), TP SHORT (làm tròn lên)
-            slPrice = Math.floor(slPrice / tickSize) * tickSize; 
+            // SHORT SL: làm tròn lên (ceil) để mức giá cao hơn vẫn được giữ (tránh khớp sớm)
+            // SHORT TP: làm tròn lên (ceil) để đảm bảo giá TP vẫn đạt được (tránh miss)
+            slPrice = Math.ceil(slPrice / tickSize) * tickSize; 
             tpPrice = Math.ceil(tpPrice / tickSize) * tickSize; 
         }
 
@@ -780,10 +807,12 @@ async function manageOpenPosition() {
                 );
 
                 if (latestTrade) {
+                    // Kiểm tra xem giá khớp gần với giá TP/SL đã đặt không
                     const priceDiffTP = Math.abs(latestTrade.price - initialTPPrice);
                     const priceDiffSL = Math.abs(latestTrade.price - initialSLPrice);
                     const tickSize = exchangeInfoCache[symbol].tickSize;
 
+                    // Cho phép một sai số nhỏ (2 tickSize) do biến động thị trường hoặc cách khớp lệnh
                     if (priceDiffTP <= tickSize * 2) { 
                         closeReason = "TP khớp";
                     } else if (priceDiffSL <= tickSize * 2) { 
