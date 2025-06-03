@@ -14,7 +14,7 @@ const __dirname = path.dirname(__filename);
 // !!! QUAN TRỌNG: DÁN API Key và Secret Key THẬT của bạn vào đây. !!!
 // Đảm bảo không có khoảng trắng thừa khi copy/paste.
 const API_KEY = 'cZ1Y2O0kggVEggEaPvhFcYQHS5b1EsT2OWZb8zdY9C0jGqNROvXRZHTJjnQ7OG4Q'.trim(); // THAY THẾ BẰNG API KEY THẬT CỦA BẠN
-const SECRET_KEY = 'oU6pZFHgEvbpD9NmFXp5ZVnYFMQ7EIkBiz88aTzvmC3SpT9nEf4fcDf0pEnFzoTc'.trim(); // THAY THẾ BẰNG SECRET KEY THẬT CỦA BẠN
+const SECRET_KEY = 'oU6pZFHgEvbpD9NmFXp5ZVnYFMQ7EIkBiz88TzvmC3SpT9nEf4fcDf0pEnFzoTc'.trim(); // THAY THAY THẾ BẰNG SECRET KEY THẬT CỦA BẠN
 
 // --- BASE URL CỦA BINANCE FUTURES API ---
 const BASE_HOST = 'fapi.binance.com';
@@ -37,6 +37,9 @@ let nextScheduledTimeout = null;
 let currentDisplayMessage = "Bot đang chờ lệnh đầu tiên.";
 let displayUpdateIntervalFrontend = null; 
 
+// Biến để lưu trữ tổng PnL từ lúc bot chạy
+let totalRealizedPnl = 0;
+
 // --- CẤU HÌNH BOT CÁC THAM SỐ GIAO DỊCH ---
 const SYMBOL = 'YFIUSDT'; // Đồng coin áp dụng chiến lược này (hoặc BTCUSDT)
 
@@ -48,12 +51,12 @@ let INITIAL_TRADE_AMOUNT_USDT_ACTUAL = 0; // Số vốn USDT thực tế đượ
 
 // Cấu hình Stop Loss và Take Profit
 // TP mặc định cho tất cả lệnh = 125% vốn của lệnh đó
-const TAKE_PROFIT_PERCENTAGE = 0.11; 
+const TAKE_PROFIT_PERCENTAGE = 0.15; 
 // SL mặc định cho tất cả lệnh = 80% vốn của lệnh đó
 const STOP_LOSS_PERCENTAGE = 0.11; 
 
-// Đòn bẩy cố định cho tất cả các lệnh
-const LEVERAGE = 75; // Ví dụ: 20x
+// XÓA BIẾN LEVERAGE CỐ ĐỊNH, SẼ LẤY TỪ EXCHANGEINFO
+// const LEVERAGE = 75; 
 
 // Vòng lặp nếu lỗ 6 lần liên tiếp => trở lại mức ban đầu
 const MAX_CONSECUTIVE_LOSSES = 6;
@@ -93,6 +96,31 @@ function addLog(message, isImportant = false) {
     }
 
     console.log(logEntry);
+}
+
+// Hàm để hiển thị log tóm tắt cho PM2 (theo yêu cầu)
+function displaySummaryLogForPM2() {
+    if (!botRunning) {
+        return; // Không hiển thị nếu bot không chạy
+    }
+    const uptimeMs = botStartTime ? (Date.now() - botStartTime.getTime()) : 0;
+    const uptimeSeconds = Math.floor(uptimeMs / 1000);
+    const hours = Math.floor(uptimeSeconds / 3600);
+    const minutes = Math.floor((uptimeSeconds % 3600) / 60);
+    const seconds = uptimeSeconds % 60;
+    const uptimeString = `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+
+    let tradeStatus = "Chưa có lệnh";
+    if (currentTradeDetails) {
+        tradeStatus = `${currentTradeDetails.side} ${currentTradeDetails.symbol}`;
+    }
+
+    // Định dạng log cho PM2 theo yêu cầu
+    console.log(`${SYMBOL}: Tổng PnL: ${totalRealizedPnl.toFixed(2)} USDT`);
+    console.log(`Thời gian chạy: ${uptimeString}`);
+    console.log(`Trạng thái: ${currentDisplayMessage}`); // Hiển thị chi tiết trạng thái lệnh
+    console.log(`Lỗ liên tiếp: ${consecutiveLosses}`);
+    console.log(`-----`); // Dấu phân cách cho dễ nhìn
 }
 
 // Định dạng thời gian từ Date object sang string theo múi giờ UTC+7 (Asia/Ho_Chi_Minh)
@@ -262,13 +290,22 @@ async function getExchangeInfo() {
             const minNotionalFilter = s.filters.find(f => f.filterType === 'MIN_NOTIONAL');
             const priceFilter = s.filters.find(f => f.filterType === 'PRICE_FILTER');
 
+            let maxLeverage = null;
+            if (s.leverageBrackets && s.leverageBrackets.length > 0) {
+                // Lấy maxLeverage từ bracket đầu tiên, hoặc tìm maxLeverage cao nhất nếu cần
+                maxLeverage = parseFloat(s.leverageBrackets[0].maxLeverage);
+                // Để lấy đòn bẩy cao nhất trong tất cả các bracket (phòng trường hợp đòn bẩy giảm theo khối lượng):
+                // maxLeverage = Math.max(...s.leverageBrackets.map(b => parseFloat(b.maxLeverage)));
+            }
+
             exchangeInfoCache[s.symbol] = {
                 minQty: lotSizeFilter ? parseFloat(lotSizeFilter.minQty) : (marketLotSizeFilter ? parseFloat(marketLotSizeFilter.minQty) : 0),
                 stepSize: lotSizeFilter ? parseFloat(lotSizeFilter.stepSize) : (marketLotSizeFilter ? parseFloat(marketLotSizeFilter.minQty) : 0.001), 
                 minNotional: minNotionalFilter ? parseFloat(minNotionalFilter.notional) : 0,
                 pricePrecision: s.pricePrecision,
                 quantityPrecision: s.quantityPrecision,
-                tickSize: priceFilter ? parseFloat(priceFilter.tickSize) : 0.001
+                tickSize: priceFilter ? parseFloat(priceFilter.tickSize) : 0.001,
+                maxLeverage: maxLeverage // LƯU MAX LEVERAGE VÀO CACHE CHO TỪNG SYMBOL
             };
         });
         addLog('>>> Đã tải thông tin sàn.', true);
@@ -410,6 +447,28 @@ async function closeAndOpenNewPosition(isProfit, currentPosition = null) { // Th
         addLog(`>>> Không có vị thế mở nào của ${symbol} trên sàn.`, true);
     }
 
+    // --- CẬP NHẬT TỔNG PNL ---
+    try {
+        const pnlResult = await callSignedAPI('/fapi/v2/income', 'GET', {
+            symbol: symbol,
+            incomeType: 'REALIZED_PNL',
+            startTime: new Date(Date.now() - (5 * 60 * 1000)).getTime(), // Lấy PnL trong 5 phút gần nhất
+            limit: 1 // Chỉ lấy giao dịch gần nhất
+        });
+        if (pnlResult && pnlResult.length > 0) {
+            const latestPnlEntry = pnlResult.sort((a,b) => b.time - a.time)[0]; // Đảm bảo lấy cái mới nhất
+            const realizedPnlThisTrade = parseFloat(latestPnlEntry.income);
+            totalRealizedPnl += realizedPnlThisTrade;
+            addLog(`[DEBUG] PnL thực hiện của lệnh vừa rồi: ${realizedPnlThisTrade.toFixed(2)} USDT. Tổng PnL: ${totalRealizedPnl.toFixed(2)} USDT.`);
+            isProfit = realizedPnlThisTrade > 0; // Cập nhật lại isProfit dựa trên PnL thực tế
+        } else {
+            addLog(`⚠️ Không tìm thấy REALIZED_PNL cho lệnh vừa đóng. Không cập nhật tổng PnL.`);
+        }
+    } catch (pnlError) {
+        addLog(`❌ Lỗi khi lấy REALIZED_PNL để cập nhật tổng PnL: ${pnlError.msg || pnlError.message}`);
+    }
+
+
     // --- 3. Cập nhật trạng thái và chuẩn bị cho lệnh mới ---
     if (isProfit) {
         consecutiveLosses = 0; // Reset số lệnh lỗ liên tiếp
@@ -419,7 +478,7 @@ async function closeAndOpenNewPosition(isProfit, currentPosition = null) { // Th
         // Nếu lệnh ban đầu là Long, và nó lãi, lệnh tiếp theo là Long.
         // Nếu lệnh Long ban đầu lỗ, thành Short. Nếu Short này lãi, lệnh tiếp theo là Short.
         
-        addLog(`✅ Lệnh trước đã lãi. Vốn mới: ${currentTradeAmountUSDT.toFixed(2)} USDT. Chiều: ${currentTradeDirection}.`, true);
+        addLog(`✅ Lệnh trước đã lãi. Vốn mới: ${currentTradeAmountUSdt.toFixed(2)} USDT. Chiều: ${currentTradeDirection}.`, true);
     } else { // Lỗ
         consecutiveLosses++;
         if (consecutiveLosses >= MAX_CONSECUTIVE_LOSSES) {
@@ -460,13 +519,21 @@ async function closeAndOpenNewPosition(isProfit, currentPosition = null) { // Th
 */
 async function openNewPosition(symbol, tradeAmountUSDT, side) {
     try {
-        await setLeverage(symbol, LEVERAGE); // Đặt đòn bẩy
-
         const symbolDetails = await getSymbolDetails(symbol);
         if (!symbolDetails) {
             addLog(`❌ Lỗi lấy chi tiết symbol ${symbol}. Không mở lệnh.`, true);
             throw new Error('Không thể lấy chi tiết symbol.');
         }
+
+        // Lấy đòn bẩy tối đa từ exchangeInfo, fallback về 20 nếu không tìm thấy
+        const actualLeverage = symbolDetails.maxLeverage || 20; 
+        if (!actualLeverage) {
+            addLog(`❌ Không tìm thấy đòn bẩy tối đa cho ${symbol}. Không mở lệnh.`, true);
+            throw new Error('Không thể xác định đòn bẩy tối đa.');
+        }
+        await setLeverage(symbol, actualLeverage); // Đặt đòn bẩy thực tế đã lấy được
+        addLog(`[DEBUG] Đòn bẩy đã đặt cho ${symbol}: ${actualLeverage}x`);
+
 
         const { pricePrecision, quantityPrecision, minNotional, minQty, stepSize, tickSize } = symbolDetails;
 
@@ -478,7 +545,7 @@ async function openNewPosition(symbol, tradeAmountUSDT, side) {
         addLog(`[DEBUG] Giá ${symbol}: ${currentPrice.toFixed(pricePrecision)}`);
 
         // Tính toán số lượng (quantity) dựa trên vốn, đòn bẩy và giá hiện tại
-        let quantity = (tradeAmountUSDT * LEVERAGE) / currentPrice;
+        let quantity = (tradeAmountUSDT * actualLeverage) / currentPrice;
         // Làm tròn quantity theo stepSize của sàn (để đảm bảo tính hợp lệ)
         quantity = Math.floor(quantity / stepSize) * stepSize;
         quantity = parseFloat(quantity.toFixed(quantityPrecision));
@@ -502,17 +569,17 @@ async function openNewPosition(symbol, tradeAmountUSDT, side) {
         const entryPrice = parseFloat(orderResult.avgFillPrice || currentPrice);
         addLog(`✅ Đã mở lệnh ${side} ${symbol} với ${quantity} Qty @ ${entryPrice.toFixed(pricePrecision)}.`);
 
-        // Tính toán SL/TP dựa trên phần trăm vốn và đòn bẩy
+        // Tính toán SL/TP dựa trên phần trăm vốn và đòn bẩy (actualLeverage)
         let slPrice, tpPrice;
         
         if (side === 'LONG') {
             // SL: Giá giảm 80% vốn / đòn bẩy. TP: Giá tăng 125% vốn / đòn bẩy
-            slPrice = entryPrice * (1 - STOP_LOSS_PERCENTAGE / LEVERAGE); 
-            tpPrice = entryPrice * (1 + TAKE_PROFIT_PERCENTAGE / LEVERAGE); 
+            slPrice = entryPrice * (1 - STOP_LOSS_PERCENTAGE / actualLeverage); 
+            tpPrice = entryPrice * (1 + TAKE_PROFIT_PERCENTAGE / actualLeverage); 
         } else { // SHORT
             // SL: Giá tăng 80% vốn / đòn bẩy. TP: Giá giảm 125% vốn / đòn bẩy
-            slPrice = entryPrice * (1 + STOP_LOSS_PERCENTAGE / LEVERAGE);
-            tpPrice = entryPrice * (1 - TAKE_PROFIT_PERCENTAGE / LEVERAGE);
+            slPrice = entryPrice * (1 + STOP_LOSS_PERCENTAGE / actualLeverage);
+            tpPrice = entryPrice * (1 - TAKE_PROFIT_PERCENTAGE / actualLeverage);
         }
 
         // Đảm bảo TP/SL nằm ngoài giá vào để tránh bị kích hoạt ngay lập tức (phòng trường hợp tính toán sai số nhỏ)
@@ -613,6 +680,7 @@ async function monitorCurrentPosition() {
 
     if (!currentTradeDetails) {
         currentDisplayMessage = "Bot đang chờ lệnh đầu tiên hoặc đã kết thúc chu kỳ.";
+        displaySummaryLogForPM2(); // Vẫn hiển thị log tóm tắt
         return;
     }
 
@@ -640,6 +708,7 @@ async function monitorCurrentPosition() {
         const currentPrice = await getCurrentPrice(symbol);
         if (!currentPrice) {
             addLog(`❌ Không thể lấy giá hiện tại cho ${symbol}. Không thể theo dõi vị thế.`, true);
+            displaySummaryLogForPM2(); // Vẫn hiển thị log tóm tắt
             return; // Dừng nếu không có giá để tránh lỗi
         }
 
@@ -652,6 +721,7 @@ async function monitorCurrentPosition() {
         pnlPercentage = (pnl / initialTradeAmountUSDT) * 100;
         currentDisplayMessage = `Đang mở: ${side} ${symbol} @ ${entryPrice.toFixed(pricePrecision)}. Giá hiện tại: ${currentPrice.toFixed(pricePrecision)}. PnL: ${pnl.toFixed(2)} USDT (${pnlPercentage.toFixed(2)}%). Lỗ liên tiếp: ${consecutiveLosses}. TP: ${initialTPPrice.toFixed(pricePrecision)}, SL: ${initialSLPrice.toFixed(pricePrecision)}.`;
 
+        displaySummaryLogForPM2(); // Hiển thị log tóm tắt cho PM2
 
         // --- BƯỚC 3: Xử lý dựa trên trạng thái vị thế và lệnh TP/SL ---
 
@@ -660,28 +730,8 @@ async function monitorCurrentPosition() {
             addLog(`>>> Vị thế ${symbol} đã đóng trên sàn. Đang xác định kết quả...`, true);
             await cancelOpenOrdersForSymbol(symbol); // Hủy bất kỳ lệnh chờ nào còn sót lại
             
-            let isProfit = false;
-            try {
-                const pnlResult = await callSignedAPI('/fapi/v2/income', 'GET', {
-                    symbol: symbol,
-                    incomeType: 'REALIZED_PNL',
-                    startTime: new Date(Date.now() - (10 * 60 * 1000)).getTime(), // Lấy PnL trong 10 phút gần nhất
-                    limit: 5
-                });
-                
-                if (pnlResult && pnlResult.length > 0) {
-                    const latestPnlEntry = pnlResult.sort((a,b) => b.time - a.time)[0];
-                    addLog(`[DEBUG] Latest REALIZED_PNL from API: ${latestPnlEntry.income} (Time: ${formatTimeUTC7(new Date(latestPnlEntry.time))})`);
-                    isProfit = parseFloat(latestPnlEntry.income) > 0;
-                } else {
-                    addLog(`⚠️ Không tìm thấy REALIZED_PNL. Mặc định là LỖ để chuyển sang chu kỳ mới.`, true);
-                    isProfit = false; // Fallback an toàn nếu không thể xác định PnL thực tế
-                }
-            } catch (pnlError) {
-                addLog(`❌ Lỗi khi lấy REALIZED_PNL: ${pnlError.msg || pnlError.message}. Mặc định là LỖ.`, true);
-                isProfit = false;
-            }
-            await closeAndOpenNewPosition(isProfit);
+            // Hàm closeAndOpenNewPosition sẽ tự động xác định PnL thực hiện và cập nhật totalRealizedPnl
+            await closeAndOpenNewPosition(false); // isProfit ban đầu chỉ là placeholder, sẽ được xác định lại bên trong
             return; // Kết thúc chu kỳ monitor
         }
 
@@ -810,29 +860,22 @@ async function startBotLogicInternal() {
         const minNotionalNeeded = symbolDetails.minNotional; // Ví dụ: 5.0 USDT là giá trị tối thiểu cho lệnh
         const minQtyNeeded = symbolDetails.minQty; // Số lượng tối thiểu
         
-        // Tính toán số lượng tối thiểu có thể mua với INITIAL_TRADE_AMOUNT_USDT_ACTUAL để kiểm tra minNotional
-        // minNotional là giá trị hợp đồng tối thiểu (quantity * price)
-        const currentInvestmentNotional = INITIAL_TRADE_AMOUNT_USDT_ACTUAL * LEVERAGE;
+        // DÙNG maxLeverage TỪ symbolDetails ĐỂ TÍNH TOÁN NOTIONAL HIỆN TẠI
+        const currentInvestmentNotional = INITIAL_TRADE_AMOUNT_USDT_ACTUAL * (symbolDetails.maxLeverage || 20); // Dùng maxLeverage hoặc fallback về 20
 
         if (currentInvestmentNotional < minNotionalNeeded) {
-            addLog(`❌ Số vốn ${INITIAL_TRADE_AMOUNT_USDT_ACTUAL.toFixed(2)} USDT (${INITIAL_TRADE_AMOUNT_PERCENTAGE}% số dư) không đủ để đạt Notional tối thiểu của sàn (${minNotionalNeeded} USDT). Bot dừng.`, true);
+            addLog(`❌ Số vốn ${INITIAL_TRADE_AMOUNT_USDT_ACTUAL.toFixed(2)} USDT (${INITIAL_TRADE_AMOUNT_PERCENTAGE}% số dư) không đủ để đạt Notional tối thiểu của sàn (${minNotionalNeeded} USDT) với đòn bẩy tối đa. Bot dừng.`, true);
             currentDisplayMessage = `Lỗi khởi động: Vốn không đủ. Cần ít nhất ${minNotionalNeeded.toFixed(2)} USDT Notional (vốn * đòn bẩy).`;
             stopBotLogicInternal();
             return `Vốn không đủ để mở lệnh tối thiểu.`;
         }
         
-        // Kiểm tra minQty (có thể bỏ qua nếu đã check minNotional chặt chẽ hơn)
-        // let quantityForMinNotional = minNotionalNeeded / currentPrice;
-        // quantityForMinNotional = Math.ceil(quantityForMinNotional / symbolDetails.stepSize) * symbolDetails.stepSize;
-        // if (quantityForMinNotional * currentPrice < minNotionalNeeded) {
-        //     addLog(`[DEBUG] minNotional is ${minNotionalNeeded}. Calculated quantity ${quantityForMinNotional.toFixed(symbolDetails.quantityPrecision)}. Actual Notional ${ (quantityForMinNotional * currentPrice).toFixed(2)}`);
-        // }
-
         addLog(`✅ Số vốn ban đầu đủ điều kiện Notional tối thiểu của sàn (${minNotionalNeeded.toFixed(2)} USDT).`, true);
 
 
         botRunning = true;
         botStartTime = new Date();
+        totalRealizedPnl = 0; // Reset tổng PnL khi khởi động bot
         addLog(`--- Bot đã chạy lúc ${formatTimeUTC7(botStartTime)} ---`, true);
         currentDisplayMessage = "Bot đã khởi động thành công. Đang chờ lệnh đầu tiên...";
 
@@ -889,6 +932,7 @@ function stopBotLogicInternal() {
     consecutiveLosses = 0; // Reset số lệnh thua
     currentTradeAmountUSDT = INITIAL_TRADE_AMOUNT_USDT_ACTUAL; // Reset vốn về giá trị ban đầu (từ % tài khoản)
     currentTradeDirection = 'LONG'; // Reset chiều
+    totalRealizedPnl = 0; // Reset tổng PnL khi dừng bot
 
     // Hủy tất cả các lệnh mở còn sót lại khi bot dừng
     cancelOpenOrdersForSymbol(SYMBOL)
@@ -949,7 +993,8 @@ app.get('/api/status', async (req, res) => {
             consecutive_losses: consecutiveLosses,
             current_trade_amount_usdt: currentTradeAmountUSDT,
             current_trade_direction: currentTradeDirection,
-            display_message: currentDisplayMessage // Message cho frontend
+            display_message: currentDisplayMessage, // Message cho frontend
+            total_realized_pnl: totalRealizedPnl // Thêm tổng PnL vào status
         };
 
         if (botProcess) {
