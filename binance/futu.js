@@ -12,7 +12,7 @@ const __dirname = path.dirname(__filename);
 
 // --- CẤU HÌNH API KEY VÀ SECRET KEY (NHẬP TRỰC TIẾP) ---
 const API_KEY = "cZ1Y2O0kggVEggEaPvhFcYQHS5b1EsT2OWZb8zdY9C0jGqNROvXRZHTJjnQ7OG4Q";
-const SECRET_KEY = "oU6pZFHgEvbpD9NmFXp5ZVnYFMQ7EIkBiz88aTzvmC3SpT9nEf4fcDf0pEnFzoTc";
+const SECRET_KEY = "oU6pZFHgEvbpD9NmFXp5ZVnYFMQ7EIkBiz88eTzvmC3SpT9nEf4fcDf0pEnFzoTc";
 
 // --- BASE URL CỦA BINANCE FUTURES API ---
 const BASE_HOST = 'fapi.binance.com';
@@ -67,7 +67,7 @@ const TARGET_LEVERAGE = 75; // Đòn bẩy tối đa
 const MIN_USDT_BALANCE_TO_OPEN = 0.01; // Số dư USDT tối thiểu để bot được phép mở lệnh
 
 // Vốn ban đầu cho mỗi lệnh (USD)
-const AMOUNT_USDT_PER_TRADE_INITIAL = 0.08; // 10 USD
+const AMOUNT_USDT_PER_TRADE_INITIAL = 0.08; // 0.08 USD
 
 // Cấu hình Take Profit & Stop Loss
 const TAKE_PROFIT_PERCENTAGE_INITIAL = 0.20; // 20% lợi nhuận trên vốn ban đầu
@@ -88,11 +88,11 @@ let totalPnlUsdt = 0;
 let totalInitialCapitalUsed = 0; // Tổng vốn đã dùng từ lúc bot chạy, để tính % PNL
 
 // Hằng số cho thời gian chờ hủy lệnh sau khi đóng vị thế
-const DELAY_BEFORE_CANCEL_ORDERS_MS = 0.1 * 60 * 1000; // 3.5 phút = 210000 ms
+const DELAY_BEFORE_CANCEL_ORDERS_MS = 0.1 * 60 * 1000; // 0.1 phút = 6 giây
 
 // Số lần thử lại kiểm tra vị thế sau khi đóng và thời gian delay
-const RETRY_CHECK_POSITION_ATTEMPTS = 1; // 6 lần
-const RETRY_CHECK_POSITION_DELAY_MS = 1000; // 30 giây
+const RETRY_CHECK_POSITION_ATTEMPTS = 1; // 1 lần
+const RETRY_CHECK_POSITION_DELAY_MS = 1000; // 1 giây
 
 // --- CẤU HÌNH WEB SERVER VÀ LOG PM2 ---
 const WEB_SERVER_PORT = 3333; // Cổng cho giao diện web
@@ -332,7 +332,8 @@ async function getLeverageBracketForSymbol(symbol) {
         }
         addLog(`[DEBUG] Không tìm thấy đòn bẩy hợp lệ cho ${symbol}.`);
         return null;
-    } catch (error) {
+    }
+    catch (error) {
         addLog(`❌ Lỗi lấy đòn bẩy cho ${symbol}: ${error.msg || error.message}`);
         return null;
     }
@@ -609,7 +610,7 @@ async function checkAndHandleRemainingPosition(symbol, attempt = 1) {
                     return;
                 }
                 if (priceTooLowForLongTP || priceTooLowForShortTP) {
-                    addLog(`⚠️ Giá ${symbol} (${currentPrice}) chạm TP (${initialTPPrice}). Đóng vị thế.`, true);
+                    addLog(`⚠️ Giá ${symbol} (${currentPrice}) chạm TP (${tpPrice}). Đóng vị thế.`, true);
                     await closePosition(symbol, actualPositionSide, actualQuantity, 'Giá chạm TP (sót)');
                     return;
                 }
@@ -722,12 +723,18 @@ async function openPosition(symbol, side, capitalAmount, leverage) {
         const usdtAsset = accountInfo.assets.find(a => a.asset === 'USDT')?.availableBalance || 0;
         const availableBalance = parseFloat(usdtAsset);
 
+        // --- Bổ sung logic kiểm tra và reset vốn nếu số dư không đủ ---
         if (availableBalance < capitalAmount) {
-            addLog(`⚠️ Số dư USDT (${availableBalance.toFixed(2)}) không đủ để mở lệnh ${side} với vốn ${capitalAmount.toFixed(2)}. Hủy.`, true);
-            if(botRunning) scheduleNextMainCycle();
+            addLog(`⚠️ Số dư USDT (${availableBalance.toFixed(2)}) không đủ để mở lệnh ${side} với vốn ${capitalAmount.toFixed(2)}.`, true);
+            // Reset Martingale về ban đầu và thử lại với vốn ban đầu
+            martingaleLevel = 0;
+            currentTradeCapital = AMOUNT_USDT_PER_TRADE_INITIAL;
+            currentTradeSide = 'LONG'; // Quay lại hướng mặc định ban đầu
+            addLog(`>>> Reset Martingale về level 0 và vốn ${currentTradeCapital.toFixed(2)} USDT.`, true);
+            if(botRunning) scheduleNextMainCycle(); // Lên lịch chạy lại chu kỳ với vốn mới
             return;
         }
-
+        // --- Kết thúc bổ sung logic ---
 
         const orderResult = await callSignedAPI('/fapi/v1/order', 'POST', {
             symbol: symbol,
@@ -927,6 +934,7 @@ async function manageOpenPosition() {
             } else {
                 addLog(`❌ Lệnh thua lỗ. Tăng Martingale level từ ${martingaleLevel} lên ${martingaleLevel + 1}.`, true);
                 martingaleLevel++;
+                // Kiểm tra nếu đã vượt quá Martingale MAX LEVEL
                 if (martingaleLevel > MARTINGALE_MAX_LEVEL) {
                     addLog(`⚠️ Đạt giới hạn Martingale (${MARTINGALE_MAX_LEVEL} lần). Reset về level 0 và vốn ban đầu.`, true);
                     martingaleLevel = 0;
@@ -1007,10 +1015,14 @@ async function runTradingLogic() {
             return;
         }
 
-        // Đảm bảo đủ vốn cho lệnh hiện tại
+        // Bổ sung logic kiểm tra và reset vốn nếu số dư không đủ TRƯỚC KHI cố gắng mở lệnh
         if (availableBalance < currentTradeCapital) {
-            addLog(`⚠️ Số dư USDT (${availableBalance.toFixed(2)}) không đủ để mở lệnh ${currentTradeSide} với vốn ${currentTradeCapital.toFixed(2)}. Tạm dừng, cần thêm vốn.`, true);
-            scheduleNextMainCycle();
+            addLog(`⚠️ Số dư USDT (${availableBalance.toFixed(2)}) không đủ để mở lệnh ${currentTradeSide} với vốn ${currentTradeCapital.toFixed(2)}.`, true);
+            martingaleLevel = 0;
+            currentTradeCapital = AMOUNT_USDT_PER_TRADE_INITIAL;
+            currentTradeSide = 'LONG'; // Quay lại hướng mặc định ban đầu
+            addLog(`>>> Reset Martingale về level 0 và vốn ${currentTradeCapital.toFixed(2)} USDT.`, true);
+            scheduleNextMainCycle(); // Lên lịch chạy lại chu kỳ với vốn mới
             return;
         }
 
@@ -1122,7 +1134,8 @@ async function startBotLogicInternal() {
         addLog(`  + Đòn bẩy: ${TARGET_LEVERAGE}x`);
         addLog(`  + Vốn vào lệnh ban đầu: ${AMOUNT_USDT_PER_TRADE_INITIAL} USDT`);
 
-        scheduleNextMainCycle();
+        // Gọi runTradingLogic ngay lập tức khi bot khởi động
+        await runTradingLogic();
 
         // Kiểm tra vị thế định kỳ ngay cả khi không có lệnh mới được mở (để xử lý vị thế sót)
         if (!positionCheckInterval) {
