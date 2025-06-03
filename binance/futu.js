@@ -65,7 +65,7 @@ const INITIAL_INVESTMENT_AMOUNT = 0.08; // Ví dụ: 0.08 USDT
 
 // Cấu hình Take Profit & Stop Loss
 // LƯU Ý: Các giá trị này bây giờ là % VỐN, không phải % giá coin
-const TAKE_PROFIT_PERCENTAGE_MAIN = 0.50; // 50% lãi trên VỐN
+const TAKE_PROFIT_PERCENTAGE_MAIN = 0.60; // 50% lãi trên VỐN
 const STOP_LOSS_PERCENTAGE_MAIN = 0.18;   // 18% lỗ trên VỐN
 
 // Số lần thua liên tiếp tối đa trước khi reset về lệnh ban đầu
