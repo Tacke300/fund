@@ -41,11 +41,11 @@ let displayUpdateIntervalFrontend = null;
 let totalRealizedPnl = 0;
 
 // --- CẤU HÌNH BOT CÁC THAM SỐ GIAO DỊCH ---
-const SYMBOL = 'ALCHUSDT'; // Đồng coin áp dụng chiến lược này (hoặc BTCUSDT)
+const SYMBOL = 'NEIROUSDT'; // Đồng coin áp dụng chiến lược này (hoặc BTCUSDT)
 
 // THAY ĐỔI CÁCH CẤU HÌNH VỐN BAN ĐẦU:
 // Thay vì cố định số USDT, giờ đây là % số dư USDT khả dụng
-const INITIAL_TRADE_AMOUNT_PERCENTAGE = 25; // 1% số dư USDT khả dụng cho lệnh đầu tiên
+const INITIAL_TRADE_AMOUNT_PERCENTAGE = 20; // 1% số dư USDT khả dụng cho lệnh đầu tiên
 // Lưu ý: Giá trị này sẽ được tính toán thành USDT thực tế khi bot khởi động.
 let INITIAL_TRADE_AMOUNT_USDT_ACTUAL = 0; // Số vốn USDT thực tế được tính toán
 
@@ -53,7 +53,7 @@ let INITIAL_TRADE_AMOUNT_USDT_ACTUAL = 0; // Số vốn USDT thực tế đượ
 // TP mặc định cho tất cả lệnh = 125% vốn của lệnh đó
 const TAKE_PROFIT_PERCENTAGE = 0.15; 
 // SL mặc định cho tất cả lệnh = 80% vốn của lệnh đó
-const STOP_LOSS_PERCENTAGE = 0.11; 
+const STOP_LOSS_PERCENTAGE = 0.9; 
 
 // XÓA BIẾN LEVERAGE CỐ ĐỊNH, SẼ LẤY TỪ EXCHANGEINFO
 // const LEVERAGE = 75; 
