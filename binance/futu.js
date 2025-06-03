@@ -70,13 +70,14 @@ const MIN_USDT_BALANCE_TO_OPEN = 0.01; // Số dư USDT tối thiểu để bot 
 const AMOUNT_USDT_PER_TRADE_INITIAL = 0.08; // 0.08 USD
 
 // Cấu hình Take Profit & Stop Loss
-const TAKE_PROFIT_PERCENTAGE_INITIAL = 0.30; // 20% lợi nhuận trên vốn ban đầu
-const STOP_LOSS_PERCENTAGE_INITIAL = 0.18; // 8% thua lỗ trên vốn ban đầu
+const TAKE_PROFIT_PERCENTAGE_INITIAL = 0.30; // 30% lợi nhuận trên vốn ban đầu
+const STOP_LOSS_PERCENTAGE_INITIAL = 0.18; // 18% thua lỗ trên vốn ban đầu
 
 // Cấu hình Martingale
 const MARTINGALE_MAX_LEVEL = 5; // Số lần gấp lệnh tối đa
 const MARTINGALE_MULTIPLIER = 2; // Hệ số gấp lệnh (ví dụ: x2 vốn)
-const TAKE_PROFIT_PERCENTAGE_MARTINGALE = 0.05; // 5% lợi nhuận cộng thêm cho mỗi lệnh gấp
+// Tăng TAKE_PROFIT_PERCENTAGE_MARTINGALE để đảm bảo biên độ TP đủ lớn, tránh lỗi "Order would immediately trigger"
+const TAKE_PROFIT_PERCENTAGE_MARTINGALE = 0.005; // 0.5% lợi nhuận trên tổng giá trị vị thế cho mỗi lệnh gấp (Tăng từ 0.05%!)
 
 // Biến trạng thái Martingale
 let martingaleLevel = 0; // Level Martingale hiện tại (0 = lệnh ban đầu)
@@ -468,7 +469,7 @@ async function closePosition(symbol, side, quantityToClose, reason = 'manual') {
         const symbolInfo = await getSymbolDetails(symbol);
         if (!symbolInfo) {
             addLog(`❌ Lỗi lấy symbol info ${symbol}. Không đóng lệnh.`, true);
-            isClosingPosition = false;
+            isClosingPosition = false; // Reset cờ ngay cả khi lỗi
             // Nếu bot đang chạy, lên lịch chu kỳ mới ngay cả khi có lỗi lấy symbol info
             if(botRunning) scheduleNextMainCycle();
             return;
@@ -497,7 +498,7 @@ async function closePosition(symbol, side, quantityToClose, reason = 'manual') {
                 await cancelOpenOrdersForSymbol(symbol);
                 await checkAndHandleRemainingPosition(symbol);
                 if(botRunning) scheduleNextMainCycle(); 
-                isClosingPosition = false; 
+                isClosingPosition = false; // Reset cờ sau khi mọi thứ hoàn tất
             }, DELAY_BEFORE_CANCEL_ORDERS_MS);
             return;
         }
@@ -561,8 +562,6 @@ async function confirmPositionClosedOnExchange(symbol, expectedSide) {
                 const currentSide = currentPositionAmount > 0 ? 'LONG' : 'SHORT';
                 if (currentSide !== expectedSide) {
                     addLog(`⚠️ Vị thế ${symbol} đổi hướng? Hiện tại ${currentSide} (${currentPositionAmount}). Cố gắng đóng lại.`, true);
-                    // Có thể gọi lại closePosition ở đây nếu vị thế đã đảo ngược,
-                    // nhưng logic chính là bot sẽ quay về manageOpenPosition và xử lý.
                     return false; // Vẫn báo chưa đóng theo mong đợi ban đầu
                 }
                 addLog(`[DEBUG] Vị thế ${symbol} vẫn còn mở (${currentPositionAmount} ${currentSide}). Thử lại ${attempt}/${maxAttempts}.`);
@@ -792,11 +791,12 @@ async function openPosition(symbol, side, capitalAmount, leverage) {
             if(botRunning) scheduleNextMainCycle();
             return;
         }
-        if (quantity <= 0) {
+        if (quantity <= 0) { // Đảm bảo số lượng không âm hoặc bằng 0
             addLog(`⚠️ Qty cho ${symbol} là ${quantity}. Không hợp lệ. Hủy.`, true);
             if(botRunning) scheduleNextMainCycle();
             return;
         }
+
 
         // Kiểm tra số dư khả dụng một lần nữa trước khi đặt lệnh
         const accountInfo = await callSignedAPI('/fapi/v2/account', 'GET');
@@ -844,7 +844,9 @@ async function openPosition(symbol, side, capitalAmount, leverage) {
         if (martingaleLevel === 0) { // Lệnh ban đầu
             pnlForTp = capitalAmount * TAKE_PROFIT_PERCENTAGE_INITIAL;
         } else { // Lệnh Martingale
-            pnlForTp = capitalCapital * TAKE_PROFIT_PERCENTAGE_MARTINGALE;
+            // Tính PNL cho TP Martingale trên tổng giá trị vị thế để có biên độ đủ lớn
+            // Sử dụng TAKE_PROFIT_PERCENTAGE_MARTINGALE đã được điều chỉnh
+            pnlForTp = (capitalAmount * leverage) * TAKE_PROFIT_PERCENTAGE_MARTINGALE;
         }
 
         if (side === 'LONG') {
@@ -856,7 +858,7 @@ async function openPosition(symbol, side, capitalAmount, leverage) {
         }
 
         // --- ĐIỂM ĐÃ SỬA LỖI PRECISION ---
-        // Làm tròn SL/TP theo pricePrecision
+        // Làm tròn SL/TP theo pricePrecision. Rất quan trọng để tránh lỗi "Order would immediately trigger"
         slPrice = roundToPrecision(slPrice, pricePrecision, side === 'LONG' ? 'floor' : 'ceil');
         tpPrice = roundToPrecision(tpPrice, pricePrecision, side === 'LONG' ? 'ceil' : 'floor');
         // --- KẾT THÚC ĐIỂM SỬA LỖI ---
@@ -946,7 +948,7 @@ async function openPosition(symbol, side, capitalAmount, leverage) {
                     clearInterval(positionCheckInterval);
                     positionCheckInterval = null;
                 }
-            }, 300); // Tần suất kiểm tra vị thế (0.3 giây)
+            }, 1000); // Tần suất kiểm tra vị thế (1 giây)
         }
         startCountdownFrontend(); // Bắt đầu cập nhật trạng thái trên frontend
 
@@ -1113,7 +1115,7 @@ async function runTradingLogic() {
                     clearInterval(positionCheckInterval);
                     positionCheckInterval = null;
                 }
-            }, 300); // Tần suất kiểm tra vị thế
+            }, 1000); // Tần suất kiểm tra vị thế
         }
         return; // Quan trọng: Thoát khỏi hàm nếu đã có vị thế mở
     }
@@ -1125,7 +1127,7 @@ async function runTradingLogic() {
         const availableBalance = parseFloat(usdtAsset);
 
         if (availableBalance < MIN_USDT_BALANCE_TO_OPEN) {
-            addLog(`⚠️ Số dư USDT (${availableBalance.toFixed(2)}) dưới min (${MIN_USdt_BALANCE_TO_OPEN}). Tắt điện thoại đi uống bia đê`, true);
+            addLog(`⚠️ Số dư USDT (${availableBalance.toFixed(2)}) dưới min (${MIN_USDT_BALANCE_TO_OPEN}). Tắt điện thoại đi uống bia đê`, true);
             scheduleNextMainCycle();
             return;
         }
@@ -1200,7 +1202,7 @@ async function scheduleNextMainCycle() {
                     clearInterval(positionCheckInterval);
                     positionCheckInterval = null;
                 }
-            }, 300);
+            }, 1000); // Tần suất kiểm tra vị thế
         }
         return;
     }
