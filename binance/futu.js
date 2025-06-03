@@ -494,7 +494,7 @@ async function closePosition(symbol, quantityToClose, reason = 'manual') {
         }
         await cancelOpenOrdersForSymbol(symbol);
         await checkAndHandleRemainingPosition(symbol); 
-        if(botRunning) scheduleNextMainCycle();
+        if(botRunning) scheduleNextMainCycle(); // Kích hoạt chu kỳ chính ngay lập tức để mở lệnh mới
         isClosingPosition = false;
 
     } catch (error) {
@@ -817,11 +817,41 @@ async function runTradingLogic() {
         return;
     }
 
-    addLog('Quét cơ hội mở lệnh...'); 
+    addLog('Cố gắng mở lệnh NEIROUSDT không phanh...'); 
     try {
         const accountInfo = await callSignedAPI('/fapi/v2/account', 'GET');
         const usdtAsset = accountInfo.assets.find(a => a.asset === 'USDT')?.availableBalance || 0;
         const availableBalance = parseFloat(usdtAsset);
+
+        // --- Cặp giao dịch cố định: NEIROUSDT ---
+        const targetSymbol = 'NEIROUSDT'; 
+        let eligibleSymbol = null;
+
+        const symbolDetails = await getSymbolDetails(targetSymbol);
+        if (symbolDetails && typeof symbolDetails.maxLeverage === 'number' && symbolDetails.maxLeverage > 1) {
+            const currentPrice = await getCurrentPrice(targetSymbol);
+            if (currentPrice === null) {
+                addLog(`Lỗi lấy giá cho ${targetSymbol}. Bỏ qua. Sẽ thử lại ngay.`); 
+            } else {
+                let estimatedQuantity = (currentInvestmentAmount * symbolDetails.maxLeverage) / currentPrice;
+                estimatedQuantity = Math.floor(estimatedQuantity / symbolDetails.stepSize) * symbolDetails.stepSize;
+                estimatedQuantity = parseFloat(estimatedQuantity.toFixed(symbolDetails.quantityPrecision));
+
+                const currentNotional = estimatedQuantity * currentPrice;
+
+                // Kiểm tra điều kiện minNotional và minQty
+                if (currentNotional >= symbolDetails.minNotional && estimatedQuantity >= symbolDetails.minQty) {
+                    eligibleSymbol = {
+                        symbol: targetSymbol,
+                        maxLeverage: symbolDetails.maxLeverage 
+                    };
+                } else {
+                    addLog(`${targetSymbol}: KHÔNG ĐỦ ĐIỀU KIỆN mở lệnh (minNotional/minQty). Sẽ thử lại ngay.`); 
+                }
+            }
+        } else {
+            addLog(`${targetSymbol}: Không có đòn bẩy hợp lệ hoặc không tìm thấy symbol. Sẽ thử lại ngay.`); 
+        }
 
         if (availableBalance < currentInvestmentAmount) {
             addLog(`Số dư USDT (${availableBalance.toFixed(2)}) không đủ để mở lệnh (${currentInvestmentAmount.toFixed(2)} USDT). Trở về lệnh ban đầu.`);
@@ -834,35 +864,6 @@ async function runTradingLogic() {
             return;
         }
         
-        // Chỉ giao dịch NEIRUSDT
-        const targetSymbol = 'NEIRUSDT'; 
-        let eligibleSymbol = null;
-
-        const symbolDetails = await getSymbolDetails(targetSymbol);
-        if (symbolDetails && typeof symbolDetails.maxLeverage === 'number' && symbolDetails.maxLeverage > 1) {
-            const currentPrice = await getCurrentPrice(targetSymbol);
-            if (currentPrice === null) {
-                addLog(`Lỗi lấy giá cho ${targetSymbol}. Bỏ qua.`); 
-            } else {
-                let estimatedQuantity = (currentInvestmentAmount * symbolDetails.maxLeverage) / currentPrice;
-                estimatedQuantity = Math.floor(estimatedQuantity / symbolDetails.stepSize) * symbolDetails.stepSize;
-                estimatedQuantity = parseFloat(estimatedQuantity.toFixed(symbolDetails.quantityPrecision));
-
-                const currentNotional = estimatedQuantity * currentPrice;
-
-                if (currentNotional >= symbolDetails.minNotional && estimatedQuantity >= symbolDetails.minQty) {
-                    eligibleSymbol = {
-                        symbol: targetSymbol,
-                        maxLeverage: symbolDetails.maxLeverage 
-                    };
-                } else {
-                    addLog(`${targetSymbol}: KHÔNG ĐỦ ĐIỀU KIỆN mở lệnh.`); 
-                }
-            }
-        } else {
-            addLog(`${targetSymbol}: Không có đòn bẩy hợp lệ hoặc không tìm thấy.`); 
-        }
-
         if (eligibleSymbol) {
             addLog(`\nChọn: ${eligibleSymbol.symbol}`); 
             addLog(`  + Đòn bẩy: ${eligibleSymbol.maxLeverage}x | Vốn: ${currentInvestmentAmount.toFixed(2)} USDT`); 
@@ -872,12 +873,12 @@ async function runTradingLogic() {
             await openPosition(eligibleSymbol.symbol, nextTradeDirection, availableBalance, eligibleSymbol.maxLeverage);
 
         } else { 
-            addLog(`Không tìm thấy cơ hội mở lệnh ${nextTradeDirection} cho ${targetSymbol}.`); 
-            // Gọi lại hàm scheduleNextMainCycle ngay lập tức nếu không tìm thấy cơ hội
+            // Nếu không thể mở lệnh, lên lịch chạy lại ngay lập tức để thử lại
+            addLog(`Không thể mở lệnh ${nextTradeDirection} cho ${targetSymbol}. Sẽ thử lại ngay.`); 
             if(botRunning) scheduleNextMainCycle();
         }
     } catch (error) {
-        addLog('Lỗi trong tìm kiếm cơ hội: ' + (error.msg || error.message));
+        addLog('Lỗi trong chu kỳ giao dịch: ' + (error.msg || error.message));
         if (error instanceof CriticalApiError) {
             addLog(`Bot dừng do lỗi API lặp lại. Tự động thử lại sau ${ERROR_RETRY_DELAY_MS / 1000}s.`); 
             stopBotLogicInternal();
