@@ -59,7 +59,7 @@ class CriticalApiError extends Error {
 // === END - BIẾN QUẢN LÝ LỖI VÀ TẦN SUẤT LOG ===
 
 
-// --- CẤU HÌNH BOT CÁC THAM SỐ GIAO DỊCH ---
+// --- CẤU HÌNH BOT CÁC THAM SỐ GIAO DỊCHTRADING PARAMETERS ---
 // SỐ TIỀN USDT CỐ ĐỊNH BAN ĐẦU SẼ DÙNG CHO MỖI LỆNH ĐẦU TƯ.
 const INITIAL_INVESTMENT_AMOUNT = 0.08; // Ví dụ: 0.08 USDT
 
@@ -541,6 +541,11 @@ async function checkAndHandleRemainingPosition(symbol) {
     }
 }
 
+// Hàm chờ một khoảng thời gian
+function sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
+
 // Hàm mở lệnh (Long hoặc Short)
 async function openPosition(symbol, tradeDirection, usdtBalance, maxLeverage) {
     if (currentOpenPosition) {
@@ -568,13 +573,13 @@ async function openPosition(symbol, tradeDirection, usdtBalance, maxLeverage) {
 
         const { pricePrecision, quantityPrecision, minNotional, minQty, stepSize, tickSize } = symbolDetails;
 
-        const currentPrice = await getCurrentPrice(symbol);
+        const currentPrice = await getCurrentPrice(symbol); // Giá thị trường tại thời điểm gửi lệnh
         if (!currentPrice) {
             addLog(`Lỗi lấy giá hiện tại cho ${symbol}. Không mở lệnh.`); 
             if(botRunning) scheduleNextMainCycle(); 
             return;
         }
-        addLog(`Giá ${symbol}: ${currentPrice.toFixed(pricePrecision)}`); 
+        addLog(`Giá ${symbol} tại thời điểm gửi lệnh: ${currentPrice.toFixed(pricePrecision)}`); 
 
         const capitalToUse = currentInvestmentAmount; 
 
@@ -613,6 +618,7 @@ async function openPosition(symbol, tradeDirection, usdtBalance, maxLeverage) {
 
         const orderSide = (tradeDirection === 'LONG') ? 'BUY' : 'SELL';
 
+        // Gửi lệnh thị trường
         const orderResult = await callSignedAPI('/fapi/v1/order', 'POST', {
             symbol: symbol,
             side: orderSide,
@@ -621,35 +627,49 @@ async function openPosition(symbol, tradeDirection, usdtBalance, maxLeverage) {
             newOrderRespType: 'FULL' 
         });
 
-        const entryPrice = parseFloat(orderResult.avgFillPrice || currentPrice); 
-        const openTime = new Date();
+        addLog(`Đã gửi lệnh MARKET để mở ${tradeDirection} ${symbol}.`); 
+
+        // --- Đợi 1 giây để lệnh khớp và vị thế được cập nhật trên Binance ---
+        await sleep(1000); 
+        addLog(`Đã đợi 1 giây sau khi gửi lệnh mở. Đang lấy giá vào lệnh thực tế từ Binance.`);
+
+        // Lấy thông tin vị thế đang mở để có entryPrice chính xác
+        const positions = await callSignedAPI('/fapi/v2/positionRisk', 'GET');
+        const openPositionOnBinance = positions.find(p => p.symbol === symbol && Math.abs(parseFloat(p.positionAmt)) > 0);
+
+        if (!openPositionOnBinance) {
+            addLog(`Không tìm thấy vị thế mở cho ${symbol} sau 1 giây. Có thể lệnh không khớp hoặc đã đóng ngay lập tức.`);
+            // Trường hợp này cần xử lý cẩn thận, có thể lệnh đã khớp và bị đóng ngay lập tức do SL/TP quá gần, hoặc lỗi.
+            // Để an toàn, chúng ta sẽ kết thúc chu trình này và để hàm closePosition hoặc chu trình tiếp theo xử lý.
+            if(botRunning) scheduleNextMainCycle(); 
+            return;
+        }
+
+        const entryPrice = parseFloat(openPositionOnBinance.entryPrice);
+        const actualQuantity = Math.abs(parseFloat(openPositionOnBinance.positionAmt)); // Lấy số lượng thực tế của vị thế
+        const openTime = new Date(parseFloat(openPositionOnBinance.updateTime || Date.now())); // Thời gian cập nhật vị thế
         const formattedOpenTime = formatTimeUTC7(openTime);
 
         addLog(`Đã mở ${tradeDirection} ${symbol} lúc ${formattedOpenTime}`);
         addLog(`  + Đòn bẩy: ${maxLeverage}x`);
-        addLog(`  + Ký quỹ: ${capitalToUse.toFixed(2)} USDT | Qty: ${quantity} ${symbol} | Giá vào: ${entryPrice.toFixed(pricePrecision)}`); 
+        addLog(`  + Ký quỹ: ${capitalToUse.toFixed(2)} USDT | Qty thực tế: ${actualQuantity} ${symbol} | Giá vào thực tế: ${entryPrice.toFixed(pricePrecision)}`); 
 
-        let slPrice, tpPrice;
-        let slOrderSide, tpOrderSide;
+        // --- Hủy tất cả các lệnh chờ hiện tại (TP/SL) nếu có trước khi đặt lại ---
+        await cancelOpenOrdersForSymbol(symbol);
+        addLog(`Đã hủy các lệnh chờ cũ (nếu có) cho ${symbol}.`);
 
-        // --- BẮT ĐẦU TÍNH TOÁN TP/SL THEO % VỐN ---
+        // --- BẮT ĐẦU TÍNH TOÁN TP/SL THEO % VỐN (dùng giá vào lệnh thực tế và số lượng thực tế) ---
         const profitTargetUSDT = capitalToUse * TAKE_PROFIT_PERCENTAGE_MAIN;
         const lossLimitUSDT = capitalToUse * STOP_LOSS_PERCENTAGE_MAIN;
 
-        // Tính toán sự thay đổi giá cần thiết để đạt TP/SL
-        // Đòn bẩy đã được áp dụng trong quantity, nên lợi nhuận/lỗ tính trên total notional value
-        // NOTIONAL_VALUE = quantity * entryPrice
-        // PNL_PERCENTAGE_OF_NOTIONAL = (TP_PERCENTAGE_OF_CAPITAL / MAX_LEVERAGE)
-        // PRICE_CHANGE = (PNL_PERCENTAGE_OF_NOTIONAL * entryPrice)
-        // Tuy nhiên, để đơn giản, PNL thực tế trên vốn (currentInvestmentAmount)
-        // Sẽ được phản ánh qua sự thay đổi giá của positionAmt (quantity).
-        // PnL = (currentPrice - entryPrice) * positionAmt (for LONG)
-        // PnL = (entryPrice - currentPrice) * positionAmt (for SHORT)
-
         // Tính toán mức thay đổi giá cần thiết trên mỗi đơn vị coin để đạt được TP/SL trên vốn
-        // Lãi/Lỗ trên 1 đơn vị coin = (Lãi/Lỗ USDT mục tiêu) / số lượng coin (quantity)
-        const priceChangeForTP = profitTargetUSDT / quantity;
-        const priceChangeForSL = lossLimitUSDT / quantity;
+        // Lãi/Lỗ trên 1 đơn vị coin = (Lãi/Lỗ USDT mục tiêu) / số lượng coin (actualQuantity)
+        // Lưu ý: actualQuantity có thể khác một chút so với quantity đã gửi ban đầu do làm tròn.
+        const priceChangeForTP = profitTargetUSDT / actualQuantity;
+        const priceChangeForSL = lossLimitUSDT / actualQuantity;
+
+        let slPrice, tpPrice;
+        let slOrderSide, tpOrderSide;
 
         if (tradeDirection === 'LONG') {
             // Đối với lệnh LONG: SL dưới giá vào, TP trên giá vào
@@ -658,11 +678,7 @@ async function openPosition(symbol, tradeDirection, usdtBalance, maxLeverage) {
             slOrderSide = 'SELL'; // Bán để đóng LONG
             tpOrderSide = 'SELL'; // Bán để đóng LONG
 
-            // Làm tròn giá: SL LONG (làm tròn lên), TP LONG (làm tròn xuống)
-            // Cẩn thận với làm tròn giá SL/TP. Giá SL nên được làm tròn "ra xa" giá vào
-            // để tránh trigger sớm nếu biến động nhỏ.
-            // LONG SL: làm tròn xuống (floor) để mức giá thấp hơn vẫn được giữ (tránh khớp sớm)
-            // LONG TP: làm tròn xuống (floor) để đảm bảo giá TP vẫn đạt được (tránh miss)
+            // Làm tròn giá: SL LONG (làm tròn xuống), TP LONG (làm tròn xuống)
             slPrice = Math.floor(slPrice / tickSize) * tickSize; 
             tpPrice = Math.floor(tpPrice / tickSize) * tickSize; 
 
@@ -673,9 +689,7 @@ async function openPosition(symbol, tradeDirection, usdtBalance, maxLeverage) {
             slOrderSide = 'BUY'; // Mua để đóng SHORT
             tpOrderSide = 'BUY'; // Mua để đóng SHORT
 
-            // Làm tròn giá: SL SHORT (làm tròn xuống), TP SHORT (làm tròn lên)
-            // SHORT SL: làm tròn lên (ceil) để mức giá cao hơn vẫn được giữ (tránh khớp sớm)
-            // SHORT TP: làm tròn lên (ceil) để đảm bảo giá TP vẫn đạt được (tránh miss)
+            // Làm tròn giá: SL SHORT (làm tròn lên), TP SHORT (làm tròn lên)
             slPrice = Math.ceil(slPrice / tickSize) * tickSize; 
             tpPrice = Math.ceil(tpPrice / tickSize) * tickSize; 
         }
@@ -690,7 +704,7 @@ async function openPosition(symbol, tradeDirection, usdtBalance, maxLeverage) {
                 symbol: symbol,
                 side: slOrderSide, 
                 type: 'STOP_MARKET', 
-                quantity: quantity, 
+                quantity: actualQuantity, // Sử dụng số lượng thực tế
                 stopPrice: slPrice, 
                 closePosition: 'true', 
                 newOrderRespType: 'FULL'
@@ -701,7 +715,7 @@ async function openPosition(symbol, tradeDirection, usdtBalance, maxLeverage) {
             // Nếu đặt SL thất bại, có thể giá đã vượt, đóng lệnh ngay
             if (slError.code === -2021 || (slError.msg && slError.msg.includes('Order would immediately trigger'))) {
                 addLog(`SL kích hoạt ngay lập tức cho ${symbol}. Đóng vị thế.`);
-                await closePosition(symbol, quantity, 'SL kích hoạt ngay');
+                await closePosition(symbol, actualQuantity, 'SL kích hoạt ngay');
                 return;
             }
         }
@@ -711,7 +725,7 @@ async function openPosition(symbol, tradeDirection, usdtBalance, maxLeverage) {
                 symbol: symbol,
                 side: tpOrderSide, 
                 type: 'TAKE_PROFIT_MARKET', 
-                quantity: quantity, 
+                quantity: actualQuantity, // Sử dụng số lượng thực tế
                 stopPrice: tpPrice, 
                 closePosition: 'true', 
                 newOrderRespType: 'FULL'
@@ -722,21 +736,21 @@ async function openPosition(symbol, tradeDirection, usdtBalance, maxLeverage) {
             // Nếu đặt TP thất bại, có thể giá đã vượt, đóng lệnh ngay
             if (tpError.code === -2021 || (tpError.msg && tpError.msg.includes('Order would immediately trigger'))) {
                 addLog(`TP kích hoạt ngay lập tức cho ${symbol}. Đóng vị thế.`);
-                await closePosition(symbol, quantity, 'TP kích hoạt ngay');
+                await closePosition(symbol, actualQuantity, 'TP kích hoạt ngay');
                 return;
             }
         }
 
         currentOpenPosition = {
             symbol: symbol,
-            quantity: quantity,
-            entryPrice: entryPrice,
+            quantity: actualQuantity, // Cập nhật quantity thực tế
+            entryPrice: entryPrice,    // Cập nhật entryPrice thực tế
             initialTPPrice: tpPrice, 
             initialSLPrice: slPrice, 
-            initialMargin: capitalToUse, // Vốn thực tế dùng cho lệnh này
+            initialMargin: capitalToUse, 
             openTime: openTime,
             pricePrecision: pricePrecision,
-            side: tradeDirection // Lưu hướng lệnh (LONG/SHORT)
+            side: tradeDirection 
         };
 
         // positionCheckInterval vẫn được giữ để kiểm tra vị thế liên tục (300ms)
