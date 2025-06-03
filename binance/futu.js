@@ -1225,4 +1225,101 @@ function stopBotLogicInternal() {
     if (retryBotTimeout) {
         clearTimeout(retryBotTimeout);
         retryBotTimeout = null;
-        addLog('Hủy lịch tự động khởi
+        addLog('Hủy lịch tự động khởi động lại bot.', true);
+    }
+    addLog('--- Bot đã dừng ---', true);
+    botStartTime = null;
+    currentOpenPosition = null; // Đảm bảo vị thế được reset khi bot dừng
+    martingaleLevel = 0; // Reset martingale level khi bot dừng
+    currentTradeCapital = AMOUNT_USDT_PER_TRADE_INITIAL; // Reset vốn khi bot dừng
+    currentTradeSide = 'LONG';
+    totalPnlUsdt = 0; // Reset PNL khi bot dừng
+    totalInitialCapitalUsed = 0; // Reset tổng vốn khi bot dừng
+    return 'Bot đã dừng.';
+}
+
+// --- KHỞI TẠO SERVER WEB VÀ CÁC API ENDPOINT ---
+const app = express();
+
+app.get('/', (req, res) => {
+    res.sendFile(path.join(__dirname, 'index.html'));
+});
+
+app.get('/api/logs', (req, res) => {
+    fs.readFile(BOT_LOG_FILE, 'utf8', (err, data) => {
+        if (err) {
+            console.error('Lỗi đọc log file:', err);
+            if (err.code === 'ENOENT') {
+                return res.status(404).send(`Không tìm thấy log file: ${BOT_LOG_FILE}. Đảm bảo đường dẫn chính xác và file tồn tại.`);
+            }
+            return res.status(500).send('Lỗi đọc log file');
+        }
+        // Xóa các ký tự màu sắc ANSI để hiển thị trên web tốt hơn
+        const cleanData = data.replace(/[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g, '');
+
+        const lines = cleanData.split('\n');
+        const maxDisplayLines = 500;
+        const startIndex = Math.max(0, lines.length - maxDisplayLines);
+        const limitedLogs = lines.slice(startIndex).join('\n');
+
+        res.send(limitedLogs);
+    });
+});
+
+app.get('/api/status', async (req, res) => {
+    try {
+        const pm2List = await new Promise((resolve, reject) => {
+            exec('pm2 jlist', (error, stdout, stderr) => {
+                if (error) reject(stderr || error.message);
+                resolve(stdout);
+            });
+        });
+        const processes = JSON.parse(pm2List);
+        const botProcess = processes.find(p => p.name === THIS_BOT_PM2_NAME);
+
+        let statusMessage = 'MAY CHU: DA TAT (PM2)';
+        if (botProcess) {
+            statusMessage = `MAY CHU: ${botProcess.pm2_env.status.toUpperCase()} (Restarts: ${botProcess.pm2_env.restart_time})`;
+            if (botProcess.pm2_env.status === 'online') {
+                statusMessage += ` | TRANG THAI: ${botRunning ? 'DANG CHAY' : 'DA DUNG'}`;
+                if (botStartTime) {
+                    const uptimeMs = Date.now() - botStartTime.getTime();
+                    const uptimeMinutes = Math.floor(uptimeMs / (1000 * 60));
+                    statusMessage += ` | DA CHAY: ${uptimeMinutes} phút`;
+                }
+                statusMessage += ` | COIN: ${TARGET_SYMBOL}`;
+                statusMessage += ` | PNL TONG: ${totalPnlUsdt.toFixed(2)} USDT`;
+                if (totalInitialCapitalUsed > 0) {
+                    statusMessage += ` (${(totalPnlUsdt / totalInitialCapitalUsed * 100).toFixed(2)}%)`;
+                } else {
+                    statusMessage += ` (0.00%)`;
+                }
+            }
+        } else {
+            statusMessage = `Bot: Không tìm thấy trong PM2 (Tên: ${THIS_BOT_PM2_NAME})`;
+        }
+        res.send(statusMessage);
+    } catch (error) {
+        console.error('Lỗi lấy trạng thái PM2:', error);
+        res.status(500).send(`Bot: Lỗi lấy trạng thái. (${error})`);
+    }
+});
+
+app.get('/api/countdown', (req, res) => {
+    res.send(currentCountdownMessage);
+});
+
+app.get('/start_bot_logic', async (req, res) => {
+    const message = await startBotLogicInternal();
+    res.send(message);
+});
+
+app.get('/stop_bot_logic', (req, res) => {
+    const message = stopBotLogicInternal();
+    res.send(message);
+});
+
+app.listen(WEB_SERVER_PORT, () => {
+    addLog(`Web server trên cổng ${WEB_SERVER_PORT}`, true);
+    addLog(`Truy cập: http://localhost:${WEB_SERVER_PORT}`, true);
+});
