@@ -48,9 +48,9 @@ let INITIAL_TRADE_AMOUNT_USDT_ACTUAL = 0; // Số vốn USDT thực tế đượ
 
 // Cấu hình Stop Loss và Take Profit
 // TP mặc định cho tất cả lệnh = 125% vốn của lệnh đó
-const TAKE_PROFIT_PERCENTAGE = 1.25; 
+const TAKE_PROFIT_PERCENTAGE = 0.11; 
 // SL mặc định cho tất cả lệnh = 80% vốn của lệnh đó
-const STOP_LOSS_PERCENTAGE = 0.8; 
+const STOP_LOSS_PERCENTAGE = 0.11; 
 
 // Đòn bẩy cố định cho tất cả các lệnh
 const LEVERAGE = 75; // Ví dụ: 20x
