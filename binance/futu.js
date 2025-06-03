@@ -432,6 +432,28 @@ async function cancelOpenOrdersForSymbol(symbol) {
     }
 }
 
+/**
+ * Hàm làm tròn một giá trị đến số chữ số thập phân (`precision`) nhất định.
+ * Có thể làm tròn lên (ceil), xuống (floor), hoặc làm tròn thông thường (round).
+ * @param {number} value - Giá trị cần làm tròn.
+ * @param {number} precision - Số chữ số thập phân mong muốn.
+ * @param {'round'|'floor'|'ceil'} method - Phương pháp làm tròn.
+ * @returns {number} Giá trị đã được làm tròn.
+ */
+function roundToPrecision(value, precision, method = 'round') {
+    const factor = Math.pow(10, precision);
+    let roundedValue;
+    if (method === 'floor') {
+        roundedValue = Math.floor(value * factor) / factor;
+    } else if (method === 'ceil') {
+        roundedValue = Math.ceil(value * factor) / factor;
+    } else { // default to round
+        roundedValue = Math.round(value * factor) / factor;
+    }
+    return parseFloat(roundedValue.toFixed(precision)); // toFixed để đảm bảo số chữ số thập phân
+}
+
+
 // Hàm đóng vị thế (Short hoặc Long)
 async function closePosition(symbol, side, quantityToClose, reason = 'manual') {
     if (isClosingPosition) {
@@ -445,8 +467,10 @@ async function closePosition(symbol, side, quantityToClose, reason = 'manual') {
     try {
         const symbolInfo = await getSymbolDetails(symbol);
         if (!symbolInfo) {
-            addLog(`❌ Lỗi lấy symbol info ${symbol}. Không đóng lệnh.`);
+            addLog(`❌ Lỗi lấy symbol info ${symbol}. Không đóng lệnh.`, true);
             isClosingPosition = false;
+            // Nếu bot đang chạy, lên lịch chu kỳ mới ngay cả khi có lỗi lấy symbol info
+            if(botRunning) scheduleNextMainCycle();
             return;
         }
 
@@ -457,9 +481,12 @@ async function closePosition(symbol, side, quantityToClose, reason = 'manual') {
 
         if (!currentPositionOnBinance || parseFloat(currentPositionOnBinance.positionAmt) === 0) {
             addLog(`>>> ${symbol} đã đóng trên sàn hoặc không có vị thế. Lý do: ${reason}.`, true);
-            // Quan trọng: Chỉ reset currentOpenPosition và các biến liên quan ở đây
-            // nếu thực sự không có vị thế trên sàn.
-            currentOpenPosition = null;
+            
+            // Xử lý PNL và Martingale ngay cả khi không có vị thế trên sàn
+            // (trường hợp này xảy ra nếu lệnh đã khớp và bot chỉ vừa nhận ra)
+            await processPnlAndMartingale(symbol); // Tách logic xử lý PNL ra hàm riêng
+
+            currentOpenPosition = null; // Đảm bảo đã reset
             if (positionCheckInterval) {
                 clearInterval(positionCheckInterval);
                 positionCheckInterval = null;
@@ -471,9 +498,8 @@ async function closePosition(symbol, side, quantityToClose, reason = 'manual') {
                 addLog(`>>> Hủy lệnh chờ cho ${symbol}.`);
                 await cancelOpenOrdersForSymbol(symbol);
                 await checkAndHandleRemainingPosition(symbol);
-                // Sau khi đóng và xử lý vị thế sót, nếu bot đang chạy, lên lịch chu kỳ chính
-                if(botRunning) scheduleNextMainCycle();
-                isClosingPosition = false;
+                if(botRunning) scheduleNextMainCycle(); // Quan trọng: lên lịch chu kỳ mới sau khi xử lý đóng lệnh
+                isClosingPosition = false; // Reset cờ sau khi hoàn tất mọi thao tác
             }, DELAY_BEFORE_CANCEL_ORDERS_MS);
             return;
         }
@@ -498,11 +524,11 @@ async function closePosition(symbol, side, quantityToClose, reason = 'manual') {
         await delay(1000); // Chờ 1 giây để lệnh thị trường khớp
 
         // Gọi manageOpenPosition để kiểm tra lại và cập nhật trạng thái
-        // Nó sẽ tự động xóa currentOpenPosition nếu vị thế đã đóng.
-        await manageOpenPosition();
+        // Nó sẽ tự động xóa currentOpenPosition nếu vị thế đã đóng và gọi scheduleNextMainCycle()
+        await manageOpenPosition(); // manageOpenPosition sẽ xử lý reset isClosingPosition sau khi hoàn tất
 
     } catch (error) {
-        addLog(`❌ Lỗi đóng ${side} ${symbol}: ${error.msg || error.message}`);
+        addLog(`❌ Lỗi đóng ${side} ${symbol}: ${error.msg || error.message}`, true);
         isClosingPosition = false; // Đảm bảo cờ được reset ngay cả khi lỗi
         if(botRunning) scheduleNextMainCycle(); // Cố gắng lên lịch chu kỳ tiếp theo nếu bot vẫn chạy
     }
@@ -542,7 +568,6 @@ async function checkAndHandleRemainingPosition(symbol, attempt = 1) {
 
             // Cố gắng đóng vị thế sót một lần nữa
             // Sử dụng closePosition để đảm bảo logic đóng lệnh được thực thi đầy đủ
-            // Truyền true vào tham số isRetry để tránh lặp lại isClosingPosition check
             await closePosition(symbol, actualPositionSide, Math.abs(currentPositionAmount), 'Vị thế sót');
 
         } else {
@@ -580,6 +605,87 @@ function stopCountdownFrontend() {
     currentCountdownMessage = `Không có lệnh đang chờ đóng. PNL Tổng: ${totalPnlUsdt.toFixed(2)} USDT (${pnlPercentage}%)`;
 }
 
+
+/**
+ * Hàm xử lý PNL và logic Martingale sau khi một vị thế đóng.
+ * Được gọi khi bot phát hiện vị thế đã đóng trên sàn.
+ * @param {string} symbol - Symbol của cặp giao dịch.
+ */
+async function processPnlAndMartingale(symbol) {
+    if (!currentOpenPosition) {
+        addLog(`[DEBUG] Không có currentOpenPosition để xử lý PNL và Martingale cho ${symbol}.`);
+        return;
+    }
+
+    addLog(`>>> Vị thế ${symbol} đã đóng trên sàn. Bắt đầu xử lý PNL và Martingale.`, true);
+
+    // Fetch recent trades to calculate realized PnL
+    const recentTrades = await callSignedAPI('/fapi/v1/userTrades', 'GET', { 
+        symbol: symbol, 
+        limit: 50, // Tăng giới hạn để đảm bảo lấy đủ các lệnh khớp
+        startTime: currentOpenPosition.openTime.getTime() - (10 * 60 * 1000) // Tìm kiếm trong 10 phút gần nhất từ lúc mở lệnh
+    }); 
+    
+    let pnlTrade = 0;
+    let closeReason = "đã đóng trên sàn (không rõ lý do)";
+
+    // Lọc các giao dịch khớp lệnh đóng vị thế
+    // Một lệnh LONG được đóng bởi lệnh SELL, một lệnh SHORT được đóng bởi lệnh BUY
+    const closingTrades = recentTrades.filter(t => 
+        (currentOpenPosition.side === 'LONG' && t.side === 'SELL' && parseFloat(t.qty) > 0 && parseFloat(t.realizedPnl) !== 0) ||
+        (currentOpenPosition.side === 'SHORT' && t.side === 'BUY' && parseFloat(t.qty) > 0 && parseFloat(t.realizedPnl) !== 0)
+    ).sort((a, b) => new Date(b.time) - new Date(a.time)); // Sắp xếp giảm dần theo thời gian
+
+    if (closingTrades.length > 0) {
+        const totalRealizedPnlForPosition = closingTrades.reduce((sum, trade) => sum + parseFloat(trade.realizedPnl), 0);
+        pnlTrade = totalRealizedPnlForPosition;
+
+        if (pnlTrade > 0) {
+            closeReason = "do TP khớp (lãi)";
+        } else if (pnlTrade < 0) {
+            closeReason = "do SL khớp (lỗ)";
+        } else {
+            closeReason = "đóng lệnh (hòa)"; // Có thể là hòa nếu PNL = 0
+        }
+    } else {
+        // Nếu không tìm thấy trade có realizedPnl, đây có thể là lệnh đóng thủ công hoặc hòa
+        // hoặc API chưa kịp cập nhật. Dùng PNL tạm tính nếu cần.
+        addLog(`⚠️ Không tìm thấy giao dịch đóng vị thế với PNL thực tế cho ${symbol}.`, true);
+        // Có thể bổ sung logic tính PNL dự kiến dựa trên giá đóng nếu cần
+        // hoặc coi là hòa để Martingale reset.
+        pnlTrade = 0; // Giả định là hòa hoặc không rõ PNL để Martingale reset
+        closeReason = "đóng lệnh (không có PNL cụ thể)";
+    }
+
+    addLog(`>>> Vị thế ${symbol} ${closeReason}. Cập nhật bot.`, true);
+
+    // Cập nhật PNL tổng
+    totalPnlUsdt += pnlTrade;
+    addLog(`  + PNL lệnh: ${pnlTrade.toFixed(2)} USDT. Tổng PNL: ${totalPnlUsdt.toFixed(2)} USDT.`);
+
+    // Xử lý Martingale
+    if (pnlTrade > 0) {
+        addLog(`✅ Lệnh thành công! Reset Martingale level từ ${martingaleLevel} về 0.`, true);
+        martingaleLevel = 0;
+        currentTradeCapital = AMOUNT_USDT_PER_TRADE_INITIAL;
+        currentTradeSide = 'LONG';
+    } else {
+        addLog(`❌ Lệnh thua lỗ. Tăng Martingale level từ ${martingaleLevel} lên ${martingaleLevel + 1}.`, true);
+        martingaleLevel++;
+        // Kiểm tra nếu đã vượt quá Martingale MAX LEVEL
+        if (martingaleLevel > MARTINGALE_MAX_LEVEL) {
+            addLog(`⚠️ Đạt giới hạn Martingale (${MARTINGALE_MAX_LEVEL} lần). Reset về level 0 và vốn ban đầu.`, true);
+            martingaleLevel = 0;
+            currentTradeCapital = AMOUNT_USDT_PER_TRADE_INITIAL;
+            currentTradeSide = 'LONG';
+        } else {
+            currentTradeCapital *= MARTINGALE_MULTIPLIER;
+            currentTradeSide = (currentTradeSide === 'LONG') ? 'SHORT' : 'LONG';
+            addLog(`>>> Vốn cho lệnh tiếp theo: ${currentTradeCapital.toFixed(2)} USDT. Hướng: ${currentTradeSide}.`, true);
+        }
+    }
+}
+
 // Hàm mở lệnh
 async function openPosition(symbol, side, capitalAmount, leverage) {
     if (currentOpenPosition) {
@@ -589,7 +695,7 @@ async function openPosition(symbol, side, capitalAmount, leverage) {
     }
     if (isClosingPosition) {
         addLog(`⚠️ Đang trong quá trình đóng lệnh. Bỏ qua mở lệnh mới cho ${symbol}.`);
-        if(botRunning) scheduleNextMainCycle();
+        if(botRunning) scheduleNextNextCycle(); // Gọi hàm lặp lại sau 5s thay vì ngay lập tức
         return;
     }
 
@@ -660,13 +766,12 @@ async function openPosition(symbol, side, capitalAmount, leverage) {
         }
         // --- Kết thúc bổ sung logic ---
 
-        // CHỖ SỬA LỖI INVALID SIDE
         // Khi mở lệnh MARKET, Binance mong đợi side là BUY hoặc SELL
         const orderSideForOpen = side === 'LONG' ? 'BUY' : 'SELL';
 
         const orderResult = await callSignedAPI('/fapi/v1/order', 'POST', {
             symbol: symbol,
-            side: orderSideForOpen, // <-- Đã sửa ở đây
+            side: orderSideForOpen,
             type: 'MARKET',
             quantity: quantity,
             newOrderRespType: 'FULL'
@@ -700,12 +805,12 @@ async function openPosition(symbol, side, capitalAmount, leverage) {
             tpPrice = entryPrice - (pnlForTp / (quantity * leverage));
         }
 
-        slPrice = parseFloat(slPrice.toFixed(pricePrecision));
-        tpPrice = parseFloat(tpPrice.toFixed(pricePrecision));
+        // --- ĐIỂM ĐÃ SỬA LỖI PRECISION ---
+        // Làm tròn SL/TP theo pricePrecision
+        slPrice = roundToPrecision(slPrice, pricePrecision, side === 'LONG' ? 'floor' : 'ceil');
+        tpPrice = roundToPrecision(tpPrice, pricePrecision, side === 'LONG' ? 'ceil' : 'floor');
+        // --- KẾT THÚC ĐIỂM SỬA LỖI ---
 
-        // Điều chỉnh SL/TP theo tickSize
-        slPrice = side === 'LONG' ? Math.floor(slPrice / tickSize) * tickSize : Math.ceil(slPrice / tickSize) * tickSize;
-        tpPrice = side === 'LONG' ? Math.ceil(tpPrice / tickSize) * tickSize : Math.floor(tpPrice / tickSize) * tickSize;
 
         addLog(`>>> TP: ${tpPrice.toFixed(pricePrecision)}, SL: ${slPrice.toFixed(pricePrecision)}`, true);
 
@@ -818,8 +923,14 @@ async function openPosition(symbol, side, capitalAmount, leverage) {
  * Hàm kiểm tra và quản lý vị thế đang mở (SL/TP/Timeout)
  */
 async function manageOpenPosition() {
-    if (!botRunning || isClosingPosition) {
-        // addLog('DEBUG: manageOpenPosition: Bot not running or closing position.', true); // Too verbose
+    if (!botRunning) {
+        // addLog('DEBUG: manageOpenPosition: Bot not running.', true); // Too verbose
+        return;
+    }
+
+    // Nếu đang trong quá trình đóng lệnh, chờ cho đến khi hoàn tất
+    if (isClosingPosition) {
+        addLog('⚠️ Đang trong quá trình đóng lệnh. Bỏ qua kiểm tra vị thế mới cho NEIROUSDT.', true);
         return;
     }
 
@@ -846,72 +957,11 @@ async function manageOpenPosition() {
 
         if (!currentPositionOnBinance || parseFloat(currentPositionOnBinance.positionAmt) === 0) {
             // Vị thế đã đóng trên sàn, giờ tính PNL và xử lý Martingale
-            addLog(`>>> Vị thế ${symbol} đã đóng trên sàn. Bắt đầu xử lý PNL và Martingale.`, true);
-
-            // Fetch recent trades to calculate realized PnL
-            // Use currentOpenPosition.openTime to filter trades
-            const recentTrades = await callSignedAPI('/fapi/v1/userTrades', 'GET', { 
-                symbol: symbol, 
-                limit: 20, // Increased limit for better chance of finding all trades
-                startTime: currentOpenPosition.openTime.getTime() - (2 * 60 * 60 * 1000) // Look back 2 hours
-            }); 
-            
-            let pnlTrade = 0;
-            let closeReason = "đã đóng trên sàn (không rõ lý do)";
-
-            // Filter for trades that closed the position
-            // A long position is closed by a SELL trade, a short position by a BUY trade
-            const closingTrades = recentTrades.filter(t => 
-                (currentOpenPosition.side === 'LONG' && t.side === 'SELL' && parseFloat(t.qty) > 0) ||
-                (currentOpenPosition.side === 'SHORT' && t.side === 'BUY' && parseFloat(t.qty) > 0)
-            ).sort((a, b) => new Date(b.time) - new Date(a.time)); // Sort descending by time to get the most recent closing trades first
-
-            if (closingTrades.length > 0) {
-                // Sum up realizedPnl from all relevant closing trades for this position
-                // Binance's 'realizedPnl' already accounts for entry/exit price and quantity
-                const totalRealizedPnlForPosition = closingTrades.reduce((sum, trade) => sum + parseFloat(trade.realizedPnl), 0);
-                pnlTrade = totalRealizedPnlForPosition;
-
-                if (pnlTrade > 0) {
-                    closeReason = "do TP khớp (lãi)";
-                } else if (pnlTrade < 0) {
-                    closeReason = "do SL khớp (lỗ)";
-                } else {
-                    closeReason = "đóng lệnh (hòa)";
-                }
-            }
-
-            addLog(`>>> Vị thế ${symbol} ${closeReason}. Cập nhật bot.`, true);
-
-            // Cập nhật PNL tổng
-            totalPnlUsdt += pnlTrade;
-            addLog(`  + PNL lệnh: ${pnlTrade.toFixed(2)} USDT. Tổng PNL: ${totalPnlUsdt.toFixed(2)} USDT.`);
-
-            // Xử lý Martingale
-            if (pnlTrade > 0) {
-                addLog(`✅ Lệnh thành công! Reset Martingale level từ ${martingaleLevel} về 0.`, true);
-                martingaleLevel = 0;
-                currentTradeCapital = AMOUNT_USDT_PER_TRADE_INITIAL;
-                currentTradeSide = 'LONG';
-            } else {
-                addLog(`❌ Lệnh thua lỗ. Tăng Martingale level từ ${martingaleLevel} lên ${martingaleLevel + 1}.`, true);
-                martingaleLevel++;
-                // Kiểm tra nếu đã vượt quá Martingale MAX LEVEL
-                if (martingaleLevel > MARTINGALE_MAX_LEVEL) {
-                    addLog(`⚠️ Đạt giới hạn Martingale (${MARTINGALE_MAX_LEVEL} lần). Reset về level 0 và vốn ban đầu.`, true);
-                    martingaleLevel = 0;
-                    currentTradeCapital = AMOUNT_USDT_PER_TRADE_INITIAL;
-                    currentTradeSide = 'LONG';
-                } else {
-                    currentTradeCapital *= MARTINGALE_MULTIPLIER;
-                    currentTradeSide = (currentTradeSide === 'LONG') ? 'SHORT' : 'LONG';
-                    addLog(`>>> Vốn cho lệnh tiếp theo: ${currentTradeCapital.toFixed(2)} USDT. Hướng: ${currentTradeSide}.`, true);
-                }
-            }
+            await processPnlAndMartingale(symbol); // Gọi hàm xử lý PNL và Martingale
 
             // RESET TRẠNG THÁI BOT SAU KHI LỆNH ĐÓNG THÀNH CÔNG
             currentOpenPosition = null;
-            isClosingPosition = false; // Đảm bảo cờ đóng lệnh được reset
+            // isClosingPosition được xử lý trong closePosition.
             if (positionCheckInterval) {
                 clearInterval(positionCheckInterval);
                 positionCheckInterval = null;
@@ -944,10 +994,10 @@ async function manageOpenPosition() {
 
             // Kiểm tra và đóng vị thế nếu chạm SL/TP
             if (reachedSL) {
-                addLog(`⚠️ Giá ${symbol} (${currentPrice}) chạm SL (${slPrice}). Đóng vị thế.`, true);
+                addLog(`⚠️ Giá ${symbol} (${currentPrice.toFixed(currentOpenPosition.pricePrecision)}) chạm SL (${slPrice.toFixed(currentOpenPosition.pricePrecision)}). Đóng vị thế.`, true);
                 await closePosition(symbol, side, quantity, 'Giá chạm SL');
             } else if (reachedTP) {
-                addLog(`⚠️ Giá ${symbol} (${currentPrice}) chạm TP (${tpPrice}). Đóng vị thế.`, true);
+                addLog(`⚠️ Giá ${symbol} (${currentPrice.toFixed(currentOpenPosition.pricePrecision)}) chạm TP (${tpPrice.toFixed(currentOpenPosition.pricePrecision)}). Đóng vị thế.`, true);
                 await closePosition(symbol, side, quantity, 'Giá chạm TP');
             } else {
                 // Log trạng thái hiện tại nếu không có gì đặc biệt xảy ra, nhưng có cooldown
@@ -956,7 +1006,7 @@ async function manageOpenPosition() {
         }
 
     } catch (error) {
-        addLog(`❌ Lỗi quản lý vị thế mở cho ${symbol}: ${error.msg || error.message}`);
+        addLog(`❌ Lỗi quản lý vị thế mở cho ${symbol}: ${error.msg || error.message}`, true);
         if(error instanceof CriticalApiError) {
              addLog(`⚠️ Bot dừng do lỗi API trong quản lý vị thế.`, true);
              stopBotLogicInternal();
@@ -979,9 +1029,10 @@ async function runTradingLogic() {
         return;
     }
 
+    // Nếu có vị thế mở, chuyển sang quản lý vị thế hiện tại
     if (currentOpenPosition) {
         addLog('>>> Có vị thế mở. Bỏ qua quét mới và chờ vị thế đóng.', true);
-        // Nếu có vị thế mở, đảm bảo interval kiểm tra vị thế đang chạy
+        // Đảm bảo interval kiểm tra vị thế đang chạy
         if (!positionCheckInterval) {
             positionCheckInterval = setInterval(async () => {
                 if (botRunning && currentOpenPosition) {
@@ -1086,6 +1137,31 @@ async function scheduleNextMainCycle() {
     }, delayBetweenCycles);
 }
 
+
+// Hàm lên lịch chu kỳ tiếp theo sau khi đang trong quá trình đóng lệnh
+// (Chỉ gọi khi isClosingPosition = true để tránh vòng lặp)
+async function scheduleNextNextCycle() {
+    if (!botRunning) {
+        addLog('Bot dừng. Không lên lịch chu kỳ tiếp theo.', true);
+        clearTimeout(nextScheduledTimeout);
+        return;
+    }
+
+    clearTimeout(nextScheduledTimeout);
+
+    const delayBetweenCycles = 5000; // 5 giây (có thể điều chỉnh)
+    addLog(`>>> Bot sẽ quét lại sau ${delayBetweenCycles / 1000}s để tìm cơ hội mở lệnh.`);
+
+    nextScheduledTimeout = setTimeout(async () => {
+        if(botRunning) { // Kiểm tra lại botRunning trước khi chạy
+            await runTradingLogic();
+        } else {
+            addLog('Bot dừng khi chờ. Không tiếp tục chu kỳ.', true);
+        }
+    }, delayBetweenCycles);
+}
+
+
 // --- HÀM KHỞI ĐỘNG/DỪNG LOGIC BOT (nội bộ, không phải lệnh PM2) ---
 
 async function startBotLogicInternal() {
@@ -1129,9 +1205,8 @@ async function startBotLogicInternal() {
             const existingSide = parseFloat(currentPositionOnBinance.positionAmt) > 0 ? 'LONG' : 'SHORT';
             const existingQuantity = Math.abs(parseFloat(currentPositionOnBinance.positionAmt));
             // Đóng vị thế hiện có để đảm bảo bot bắt đầu từ trạng thái sạch
+            // Khi đóng vị thế, nó sẽ tự động gọi processPnlAndMartingale và scheduleNextMainCycle()
             await closePosition(TARGET_SYMBOL, existingSide, existingQuantity, 'Khởi động bot');
-            // Sau khi closePosition kết thúc, nó sẽ tự động gọi scheduleNextMainCycle()
-            // và reset martingaleLevel nếu lệnh đóng thành công.
             currentOpenPosition = null; // Đặt về null ngay sau khi gọi closePosition để tránh vòng lặp
         } else {
             addLog(`✅ Không có vị thế ${TARGET_SYMBOL} nào đang mở trên sàn. Bắt đầu từ lệnh mới.`);
