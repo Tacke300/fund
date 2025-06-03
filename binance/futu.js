@@ -7,12 +7,12 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 
 // Lấy __filename và __dirname trong ES modules
-const __filename fileURLToPath(import.meta.url);
-const __dirname path.dirname(__filename);
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 // --- CẤU HÌNH API KEY VÀ SECRET KEY (NHẬP TRỰC TIẾP) ---
 const API_KEY = "cZ1Y2O0kggVEggEaPvhFcYQHS5b1EsT2OWZb8zdY9C0jGqNROvXRZHTJjnQ7OG4Q";
-const SECRET_KEY = "oU6pZFHgEvbpD9NmFXp5ZVnYFMQ7EIkBiz88eTzvmC3SpT9nEf4fcDf0pEnFzoTc";
+const SECRET_KEY = "oU6pZFHgEvbpD9NmFXp5ZVnYFMQ7EIkBiz88aTzvmC3SpT9nEf4fcDf0pEnFzoTc";
 
 // --- BASE URL CỦA BINANCE FUTURES API ---
 const BASE_HOST = 'fapi.binance.com';
