@@ -857,7 +857,7 @@ async function runTradingLogic() {
         const availableBalance = parseFloat(usdtAsset);
 
         // --- Cặp giao dịch cố định: NEIROUSDT ---
-        const targetSymbol = 'NEIROUSDT'; 
+        const targetSymbol = 'ALCHUSDT'; 
         let eligibleSymbol = null;
 
         const symbolDetails = await getSymbolDetails(targetSymbol);
