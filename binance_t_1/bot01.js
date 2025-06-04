@@ -15,8 +15,6 @@ const WebSocket = require('ws'); // For real-time log streaming to UI
 dotenv.config();
 
 // Get __filename and __dirname in CommonJS
-const __filename = process.argv[1]; // Or simply use __filename provided by Node.js in CommonJS modules
-const __dirname = path.dirname(__filename);
 
 // --- SECURE API KEY AND SECRET KEY LOADING ---
 // It's highly recommended to load these from environment variables
