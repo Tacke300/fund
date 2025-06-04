@@ -71,6 +71,31 @@ async function binanceRequest(method, endpoint, params = {}, signed = false) {
 
 // ==================== LOGIC GIAO DỊCH ====================
 async function openTrade() {
+// Thêm vào file server.js
+async function placeRealOrder(side, quantity) {
+    try {
+        const order = await binanceRequest('POST', '/fapi/v1/order', {
+            symbol: config.symbol,
+            side: side,
+            type: 'MARKET',
+            quantity: quantity.toFixed(6), // Làm tròn 6 số thập phân
+            newOrderRespType: 'FULL' // Nhận phản hồi đầy đủ từ Binance
+        }, true);
+
+        console.log("Phản hồi từ Binance:", order);
+        
+        if (order.status === 'FILLED') {
+            log(`✅ Đã khớp lệnh ${side} ${config.symbol} | ID: ${order.orderId}`);
+            return true;
+        }
+    } catch (error) {
+        log(`❌ Lỗi đặt lệnh: ${error.response?.data || error.message}`);
+    }
+    return false;
+}
+
+// Sửa hàm openTrade
+async function openTrade() {
     if (!bot.running || bot.position) return;
 
     try {
@@ -79,81 +104,33 @@ async function openTrade() {
             symbol: config.symbol
         });
         
-        const filters = symbolInfo.symbols[0].filters;
-        const minQty = parseFloat(filters.find(f => f.filterType === 'LOT_SIZE').minQty);
-        const stepSize = parseFloat(filters.find(f => f.filterType === 'LOT_SIZE').stepSize);
+        // 2. Lấy giá và số dư
+        const [ticker, account] = await Promise.all([
+            binanceRequest('GET', '/fapi/v1/ticker/price', { symbol: config.symbol }),
+            binanceRequest('GET', '/fapi/v2/account', {}, true)
+        ]);
 
-        // 2. Lấy giá hiện tại
-        const ticker = await binanceRequest('GET', '/fapi/v1/ticker/price', {
-            symbol: config.symbol
-        });
         const price = parseFloat(ticker.price);
+        const usdtBalance = parseFloat(account.availableBalance);
 
-        // 3. Tính khối lượng
-        let quantity = config.amount / price;
-        quantity = Math.floor(quantity / stepSize) * stepSize;
-        
-        if (quantity < minQty) {
-            log(`Khối lượng ${quantity} nhỏ hơn mức tối thiểu ${minQty}`);
+        if (usdtBalance < config.amount) {
+            log(`Số dư không đủ: ${usdtBalance} < ${config.amount}`);
             return;
         }
 
-        // 4. Đặt lệnh
-        const order = await binanceRequest('POST', '/fapi/v1/order', {
-            symbol: config.symbol,
-            side: 'BUY',
-            type: 'MARKET',
-            quantity: quantity.toFixed(8)
-        }, true);
-
-        log(`✅ Đã mở lệnh ${config.symbol} | Khối lượng: ${quantity} | Giá: ${price}`);
-
-        // 5. Lưu vị thế
-        bot.position = {
-            symbol: config.symbol,
-            entryPrice: price,
-            quantity: quantity,
-            time: new Date()
-        };
-
-    } catch (error) {
-        log(`❌ Lỗi mở lệnh: ${error.message}`);
-    }
-}
-
-async function closeTrade(reason) {
-    if (!bot.position) return;
-
-    try {
-        const pos = bot.position;
+        // 3. Đặt lệnh thực tế
+        const success = await placeRealOrder('BUY', config.amount / price);
         
-        // 1. Đặt lệnh đóng
-        const order = await binanceRequest('POST', '/fapi/v1/order', {
-            symbol: pos.symbol,
-            side: 'SELL',
-            type: 'MARKET',
-            quantity: pos.quantity.toFixed(8)
-        }, true);
-
-        // 2. Tính PNL
-        const ticker = await binanceRequest('GET', '/fapi/v1/ticker/price', {
-            symbol: pos.symbol
-        });
-        const exitPrice = parseFloat(ticker.price);
-        const pnl = (exitPrice - pos.entryPrice) * pos.quantity;
-
-        // 3. Cập nhật thống kê
-        if (pnl > 0) bot.stats.profit += pnl;
-        else bot.stats.loss += Math.abs(pnl);
-        bot.stats.net = bot.stats.profit - bot.stats.loss;
-
-        log(`🔴 Đã đóng lệnh ${pos.symbol} | PNL: ${pnl.toFixed(2)} | Lý do: ${reason}`);
-
-        // 4. Reset vị thế
-        bot.position = null;
-
+        if (success) {
+            bot.position = {
+                symbol: config.symbol,
+                entryPrice: price,
+                quantity: config.amount / price,
+                time: new Date()
+            };
+        }
     } catch (error) {
-        log(`❌ Lỗi đóng lệnh: ${error.message}`);
+        log(`Lỗi hệ thống: ${error.message}`);
     }
 }
 
