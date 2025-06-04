@@ -398,29 +398,82 @@ async function getCurrentPrice(symbol) {
  * Hủy tất cả các lệnh mở cho một symbol cụ thể.
  * @param {string} symbol - Symbol của cặp giao dịch.
  */
-async function cancelOpenOrdersForSymbol(symbol) {
+async function manageOpenPosition() {
+    if (!currentOpenPosition || isClosingPosition) return;
+
+    const { symbol, quantity, entryPrice, initialTPPrice, initialSLPrice, side } = currentOpenPosition;
+
     try {
-        addLog(`Hủy lệnh mở cho ${symbol}...`);
-        await callSignedAPI('/fapi/v1/allOpenOrders', 'DELETE', { symbol: symbol });
-        addLog(`Đã hủy lệnh mở cho ${symbol}.`);
-        return true;
-    } catch (error) {
-        if (error.code === -2011 && error.msg === 'Unknown order sent.') {
-            addLog(`Không có lệnh mở cho ${symbol}.`);
-            return true;
+        const positions = await callSignedAPI('/fapi/v2/positionRisk', 'GET');
+        const currentPosition = positions.find(p => p.symbol === symbol && parseFloat(p.positionAmt) !== 0);
+
+        // Nếu vị thế đã đóng trên sàn
+        if (!currentPosition || parseFloat(currentPosition.positionAmt) === 0) {
+            const recentTrades = await callSignedAPI('/fapi/v1/userTrades', 'GET', { 
+                symbol: symbol, 
+                limit: 10 
+            });
+
+            let closeReason = "Đóng thủ công";
+            const latestTrade = recentTrades.find(t => 
+                (side === 'LONG' && t.side === 'SELL') || 
+                (side === 'SHORT' && t.side === 'BUY')
+            );
+
+            if (latestTrade) {
+                const closePrice = parseFloat(latestTrade.price);
+                
+                // SỬA LỖI: Kiểm tra đúng hướng TP/SL
+                if ((side === 'LONG' && closePrice >= initialTPPrice) || 
+                    (side === 'SHORT' && closePrice <= initialTPPrice)) {
+                    closeReason = "TP khớp";
+                } 
+                else if ((side === 'LONG' && closePrice <= initialSLPrice) || 
+                         (side === 'SHORT' && closePrice >= initialSLPrice)) {
+                    closeReason = "SL khớp";
+                }
+
+                // DEBUG LOG
+                addLog([
+                    `🔴 Đã đóng ${side} ${symbol}`,
+                    `├─ Giá vào: ${entryPrice}`,
+                    `├─ Giá đóng: ${closePrice}`,
+                    `├─ TP: ${initialTPPrice} | SL: ${initialSLPrice}`,
+                    `└─ Lý do: ${closeReason}`
+                ].join('\n'));
+            }
+
+            await closePosition(symbol, quantity, closeReason);
         }
-        addLog(`Lỗi hủy lệnh mở cho ${symbol}: ${error.code} - ${error.msg || error.message}`);
-        return false;
+    } catch (error) {
+        addLog(`Lỗi kiểm tra vị thế: ${error.message}`);
     }
 }
 
-// Hàm đóng lệnh Long/Short
-async function closePosition(symbol, quantityToClose, reason = 'manual') {
-    if (isClosingPosition) {
-        addLog(`Đang đóng lệnh. Bỏ qua yêu cầu mới cho ${symbol}.`);
-        return;
+async function closePosition(symbol, quantityToClose, reason) {
+    // ... (phần trước giữ nguyên)
+
+    // SỬA LOGIC XỬ LÝ LÃI/LỖ
+    if (reason.includes("TP")) {
+        consecutiveLossCount = 0;
+        currentInvestmentAmount = INITIAL_INVESTMENT_AMOUNT;
+        nextTradeDirection = currentOpenPosition.side; // Giữ nguyên hướng
+        addLog(`✅ TP - Giữ hướng: ${nextTradeDirection}`);
+    } 
+    else if (reason.includes("SL")) {
+        if (APPLY_DOUBLE_STRATEGY) {
+            consecutiveLossCount++;
+            currentInvestmentAmount = (consecutiveLossCount >= MAX_CONSECUTIVE_LOSSES) 
+                ? INITIAL_INVESTMENT_AMOUNT 
+                : currentInvestmentAmount * 2;
+        }
+        nextTradeDirection = currentOpenPosition.side === 'LONG' ? 'SHORT' : 'LONG'; // Đảo chiều
+        addLog(`❌ SL - Đảo chiều thành: ${nextTradeDirection}`);
     }
-    isClosingPosition = true;
+
+    // ... (phần sau giữ nguyên)
+}
+
 
     // Lấy thông tin vị thế hiện tại để xác định loại lệnh đóng TRƯỚC KHI currentOpenPosition có thể bị reset
     const positionSideBeforeClose = currentOpenPosition?.side;
