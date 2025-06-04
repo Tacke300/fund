@@ -1,3 +1,4 @@
+// server.js
 const https = require('https');
 const crypto = require('crypto');
 const express = require('express');
@@ -5,136 +6,154 @@ const fs = require('fs');
 const path = require('path');
 
 // ==================== CẤU HÌNH ====================
-const BASE_HOST = 'fapi.binance.com';
-const WEB_SERVER_PORT = 1997;
-const BOT_LOG_FILE = './bot.log';
+const PORT = 1997;
+const LOG_FILE = 'bot.log';
 
 // ==================== BIẾN TOÀN CỤC ====================
 let config = {
-    API_KEY: '',
-    SECRET_KEY: '',
-    TARGET_COIN_SYMBOL: 'ETHUSDT',
-    INITIAL_INVESTMENT_AMOUNT: 0.12,
-    APPLY_DOUBLE_STRATEGY: false,
-    TOTAL_INVESTMENT_CAP: 0
+    apiKey: '',
+    secretKey: '',
+    symbol: 'ETHUSDT',
+    amount: 0.12,
+    doubleStrategy: false,
+    totalInvestment: 0
 };
 
-let botStatus = {
+let bot = {
     running: false,
-    startTime: null,
-    currentPosition: null,
-    totalProfit: 0,
-    totalLoss: 0,
-    netPNL: 0
+    position: null,
+    stats: {
+        profit: 0,
+        loss: 0,
+        net: 0
+    }
 };
 
 // ==================== HÀM TIỆN ÍCH ====================
-function addLog(message) {
-    const timestamp = new Date().toISOString();
-    const logEntry = `[${timestamp}] ${message}\n`;
+function log(message) {
+    const time = new Date().toISOString();
+    const entry = `[${time}] ${message}\n`;
     
-    console.log(logEntry);
-    fs.appendFileSync(BOT_LOG_FILE, logEntry);
+    console.log(entry);
+    fs.appendFileSync(LOG_FILE, entry);
 }
 
-// ==================== API GIAO DỊCH ====================
-async function callBinanceAPI(endpoint, method = 'GET', params = {}, signed = false) {
-    const query = new URLSearchParams(params).toString();
-    let url = `${endpoint}?${query}`;
+// ==================== API BINANCE ====================
+async function binanceRequest(method, endpoint, params = {}, signed = false) {
+    const baseUrl = 'https://fapi.binance.com';
+    let query = new URLSearchParams(params).toString();
     
     if (signed) {
-        const timestamp = Date.now() - 1000; // Đồng bộ thời gian
-        const signature = crypto
-            .createHmac('sha256', config.SECRET_KEY)
+        const timestamp = Date.now() - 1000;
+        const signature = crypto.createHmac('sha256', config.secretKey)
             .update(`${query}&timestamp=${timestamp}`)
             .digest('hex');
-        url += `&timestamp=${timestamp}&signature=${signature}`;
+        query += `&timestamp=${timestamp}&signature=${signature}`;
     }
 
     return new Promise((resolve, reject) => {
-        https.get(`https://${BASE_HOST}${url}`, {
-            headers: signed ? { 'X-MBX-APIKEY': config.API_KEY } : {}
-        }, (res) => {
+        const req = https.request(`${baseUrl}${endpoint}?${query}`, {
+            method,
+            headers: signed ? { 'X-MBX-APIKEY': config.apiKey } : {}
+        }, res => {
             let data = '';
             res.on('data', chunk => data += chunk);
             res.on('end', () => {
-                try { resolve(JSON.parse(data)); } 
+                try { resolve(JSON.parse(data)); }
                 catch (e) { reject(e); }
             });
-        }).on('error', reject);
+        });
+
+        req.on('error', reject);
+        req.end();
     });
 }
 
-// ==================== LOGIC BOT ====================
-async function openPosition() {
-    if (!botStatus.running || botStatus.currentPosition) return;
+// ==================== LOGIC GIAO DỊCH ====================
+async function openTrade() {
+    if (!bot.running || bot.position) return;
 
     try {
-        // 1. Lấy giá hiện tại
-        const ticker = await callBinanceAPI('/fapi/v1/ticker/price', 'GET', {
-            symbol: config.TARGET_COIN_SYMBOL
+        // 1. Lấy thông tin symbol
+        const symbolInfo = await binanceRequest('GET', '/fapi/v1/exchangeInfo', {
+            symbol: config.symbol
         });
-        const currentPrice = parseFloat(ticker.price);
+        
+        const filters = symbolInfo.symbols[0].filters;
+        const minQty = parseFloat(filters.find(f => f.filterType === 'LOT_SIZE').minQty);
+        const stepSize = parseFloat(filters.find(f => f.filterType === 'LOT_SIZE').stepSize);
 
-        // 2. Tính toán khối lượng
-        const quantity = (config.INITIAL_INVESTMENT_AMOUNT / currentPrice).toFixed(4);
+        // 2. Lấy giá hiện tại
+        const ticker = await binanceRequest('GET', '/fapi/v1/ticker/price', {
+            symbol: config.symbol
+        });
+        const price = parseFloat(ticker.price);
 
-        // 3. Gửi lệnh mở
-        const order = await callBinanceAPI('/fapi/v1/order', 'POST', {
-            symbol: config.TARGET_COIN_SYMBOL,
+        // 3. Tính khối lượng
+        let quantity = config.amount / price;
+        quantity = Math.floor(quantity / stepSize) * stepSize;
+        
+        if (quantity < minQty) {
+            log(`Khối lượng ${quantity} nhỏ hơn mức tối thiểu ${minQty}`);
+            return;
+        }
+
+        // 4. Đặt lệnh
+        const order = await binanceRequest('POST', '/fapi/v1/order', {
+            symbol: config.symbol,
             side: 'BUY',
             type: 'MARKET',
-            quantity: quantity
+            quantity: quantity.toFixed(8)
         }, true);
 
-        // 4. Lưu vị thế
-        botStatus.currentPosition = {
-            symbol: config.TARGET_COIN_SYMBOL,
-            entryPrice: currentPrice,
+        log(`✅ Đã mở lệnh ${config.symbol} | Khối lượng: ${quantity} | Giá: ${price}`);
+
+        // 5. Lưu vị thế
+        bot.position = {
+            symbol: config.symbol,
+            entryPrice: price,
             quantity: quantity,
-            openTime: new Date()
+            time: new Date()
         };
 
-        addLog(`✅ Đã mở lệnh ${config.TARGET_COIN_SYMBOL} | Giá: ${currentPrice} | Khối lượng: ${quantity}`);
-
     } catch (error) {
-        addLog(`❌ Lỗi mở lệnh: ${error.message}`);
+        log(`❌ Lỗi mở lệnh: ${error.message}`);
     }
 }
 
-async function closePosition(reason) {
-    if (!botStatus.currentPosition) return;
+async function closeTrade(reason) {
+    if (!bot.position) return;
 
     try {
-        const position = botStatus.currentPosition;
+        const pos = bot.position;
         
-        // 1. Gửi lệnh đóng
-        const order = await callBinanceAPI('/fapi/v1/order', 'POST', {
-            symbol: position.symbol,
+        // 1. Đặt lệnh đóng
+        const order = await binanceRequest('POST', '/fapi/v1/order', {
+            symbol: pos.symbol,
             side: 'SELL',
             type: 'MARKET',
-            quantity: position.quantity
+            quantity: pos.quantity.toFixed(8)
         }, true);
 
         // 2. Tính PNL
-        const ticker = await callBinanceAPI('/fapi/v1/ticker/price', 'GET', {
-            symbol: position.symbol
+        const ticker = await binanceRequest('GET', '/fapi/v1/ticker/price', {
+            symbol: pos.symbol
         });
         const exitPrice = parseFloat(ticker.price);
-        const pnl = (exitPrice - position.entryPrice) * position.quantity;
+        const pnl = (exitPrice - pos.entryPrice) * pos.quantity;
 
         // 3. Cập nhật thống kê
-        if (pnl > 0) botStatus.totalProfit += pnl;
-        else botStatus.totalLoss += Math.abs(pnl);
-        botStatus.netPNL = botStatus.totalProfit - botStatus.totalLoss;
+        if (pnl > 0) bot.stats.profit += pnl;
+        else bot.stats.loss += Math.abs(pnl);
+        bot.stats.net = bot.stats.profit - bot.stats.loss;
 
-        addLog(`🔴 Đã đóng lệnh ${position.symbol} | Lý do: ${reason} | PNL: ${pnl.toFixed(2)}`);
+        log(`🔴 Đã đóng lệnh ${pos.symbol} | PNL: ${pnl.toFixed(2)} | Lý do: ${reason}`);
 
         // 4. Reset vị thế
-        botStatus.currentPosition = null;
+        bot.position = null;
 
     } catch (error) {
-        addLog(`❌ Lỗi đóng lệnh: ${error.message}`);
+        log(`❌ Lỗi đóng lệnh: ${error.message}`);
     }
 }
 
@@ -143,19 +162,19 @@ const app = express();
 app.use(express.json());
 app.use(express.static('public'));
 
-// API nhận cấu hình từ front-end
+// API Cấu hình
 app.post('/api/configure', (req, res) => {
     try {
         config = {
-            API_KEY: req.body.apiKey,
-            SECRET_KEY: req.body.secretKey,
-            TARGET_COIN_SYMBOL: req.body.coinSymbol,
-            INITIAL_INVESTMENT_AMOUNT: parseFloat(req.body.initialAmount),
-            APPLY_DOUBLE_STRATEGY: req.body.applyDoubleStrategy,
-            TOTAL_INVESTMENT_CAP: parseFloat(req.body.totalInvestment)
+            apiKey: req.body.apiKey.trim(),
+            secretKey: req.body.secretKey.trim(),
+            symbol: req.body.coinSymbol.trim().toUpperCase(),
+            amount: parseFloat(req.body.initialAmount),
+            doubleStrategy: req.body.applyDoubleStrategy === 'true',
+            totalInvestment: parseFloat(req.body.totalInvestment) || 0
         };
 
-        addLog(`⚙️ Cập nhật cấu hình: ${JSON.stringify(config)}`);
+        log(`⚙️ Cập nhật cấu hình: ${JSON.stringify(config)}`);
         res.json({ success: true });
 
     } catch (error) {
@@ -163,57 +182,54 @@ app.post('/api/configure', (req, res) => {
     }
 });
 
-// API khởi động bot
-app.get('/start_bot_logic', async (req, res) => {
-    if (botStatus.running) {
-        return res.send('Bot đang chạy');
-    }
+// API Điều khiển bot
+app.get('/start_bot_logic', (req, res) => {
+    if (bot.running) return res.send('Bot đang chạy');
 
-    botStatus = {
-        running: true,
-        startTime: new Date(),
-        currentPosition: null,
-        totalProfit: 0,
-        totalLoss: 0,
-        netPNL: 0
-    };
-
-    addLog('🚀 Bot đã khởi động');
-    res.send('Bot đã khởi động');
+    bot.running = true;
+    log('🚀 Bot đã khởi động');
 
     // Bắt đầu giao dịch
     setInterval(() => {
-        if (botStatus.running) openPosition();
+        if (bot.running) openTrade();
     }, 5000);
+
+    res.send('Bot đã khởi động');
 });
 
-// API dừng bot
 app.get('/stop_bot_logic', async (req, res) => {
-    if (!botStatus.running) {
-        return res.send('Bot chưa chạy');
-    }
+    if (!bot.running) return res.send('Bot chưa chạy');
 
-    await closePosition('Dừng bot thủ công');
-    botStatus.running = false;
-    addLog('🛑 Bot đã dừng');
+    await closeTrade('Dừng thủ công');
+    bot.running = false;
+    log('🛑 Bot đã dừng');
     res.send('Bot đã dừng');
 });
 
-// API trạng thái bot
+// API Trạng thái
 app.get('/api/status', (req, res) => {
-    res.json(botStatus);
+    res.json({
+        running: bot.running,
+        position: bot.position,
+        stats: bot.stats
+    });
 });
 
-// API đọc log
+// API Logs
 app.get('/api/logs', (req, res) => {
     try {
-        const logs = fs.readFileSync(BOT_LOG_FILE, 'utf-8');
+        const logs = fs.readFileSync(LOG_FILE, 'utf-8');
         res.send(logs);
     } catch (error) {
         res.status(500).send('Lỗi đọc log');
     }
 });
 
-app.listen(WEB_SERVER_PORT, () => {
-    addLog(`🌐 Server chạy tại http://localhost:${WEB_SERVER_PORT}`);
+// Phục vụ file tĩnh
+app.get('/', (req, res) => {
+    res.sendFile(path.join(__dirname, 'index.html'));
+});
+
+app.listen(PORT, () => {
+    log(`🌐 Server chạy tại http://localhost:${PORT}`);
 });
