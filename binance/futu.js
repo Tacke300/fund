@@ -850,14 +850,14 @@ async function runTradingLogic() {
         return;
     }
 
-    addLog('Cố gắng mở lệnh NEIROUSDT không phanh...'); 
+    addLog('Cố gắng mở lệnh không phanh...'); 
     try {
         const accountInfo = await callSignedAPI('/fapi/v2/account', 'GET');
         const usdtAsset = accountInfo.assets.find(a => a.asset === 'USDT')?.availableBalance || 0;
         const availableBalance = parseFloat(usdtAsset);
 
         // --- Cặp giao dịch cố định: NEIROUSDT ---
-        const targetSymbol = 'ALCHUSDT'; 
+        const targetSymbol = 'TRBUSDT'; 
         let eligibleSymbol = null;
 
         const symbolDetails = await getSymbolDetails(targetSymbol);
