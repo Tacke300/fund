@@ -395,29 +395,77 @@ async function getCurrentPrice(symbol) {
  * Hủy tất cả các lệnh mở cho một symbol cụ thể.
  * @param {string} symbol - Symbol của cặp giao dịch.
  */
-async function cancelOpenOrdersForSymbol(symbol) {
-    try {
-        addLog(`Hủy lệnh mở cho ${symbol}...`); 
-        await callSignedAPI('/fapi/v1/allOpenOrders', 'DELETE', { symbol: symbol });
-        addLog(`Đã hủy lệnh mở cho ${symbol}.`); 
-        return true;
-    } catch (error) {
-        if (error.code === -2011 && error.msg === 'Unknown order sent.') {
-            addLog(`Không có lệnh mở cho ${symbol}.`); 
-            return true;
+async function manageOpenPosition() {
+    if (!currentOpenPosition || isClosingPosition) return;
+
+    const { symbol, quantity, entryPrice, initialTPPrice, initialSLPrice, side } = currentOpenPosition;
+
+try {
+        // Tính TP/SL chính xác
+        const profitTargetUSDT = capitalToUse * maxLeverage * TAKE_PROFIT_PERCENTAGE_MAIN;
+        const lossLimitUSDT = capitalToUse * maxLeverage * STOP_LOSS_PERCENTAGE_MAIN;
+
+        const priceChangeForTP = profitTargetUSDT / (actualQuantity * entryPrice);
+        const priceChangeForSL = lossLimitUSDT / (actualQuantity * entryPrice);
+
+        // Tính giá TP/SL và làm tròn theo tickSize
+        let slPrice, tpPrice;
+        if (tradeDirection === 'LONG') {
+            slPrice = entryPrice - priceChangeForSL;
+            tpPrice = entryPrice + priceChangeForTP;
+        } else { // SHORT
+            slPrice = entryPrice + priceChangeForSL;
+            tpPrice = entryPrice - priceChangeForTP;
         }
-        addLog(`Lỗi hủy lệnh mở cho ${symbol}: ${error.code} - ${error.msg || error.message}`);
-        return false;
+
+        slPrice = Math.floor(slPrice / tickSize) * tickSize;
+        tpPrice = Math.floor(tpPrice / tickSize) * tickSize;
+
+        // DEBUG LOG
+        addLog([
+            `📊 Tính TP/SL cho ${tradeDirection} ${symbol}`,
+            `├─ Vốn: ${capitalToUse} USDT`,
+            `├─ Đòn bẩy: ${maxLeverage}x`,
+            `├─ Giá vào: ${entryPrice}`,
+            `├─ TP: ${tpPrice} (${TAKE_PROFIT_PERCENTAGE_MAIN * 100}%)`,
+            `└─ SL: ${slPrice} (${STOP_LOSS_PERCENTAGE_MAIN * 100}%)`
+        ].join('\n'));
+
+        
+
+            }
+
+            await closePosition(symbol, quantity, closeReason);
+        }
+    } catch (error) {
+        addLog(`Lỗi kiểm tra vị thế: ${error.message}`);
     }
 }
 
-// Hàm đóng lệnh Long/Short
-async function closePosition(symbol, quantityToClose, reason = 'manual') {
-    if (isClosingPosition) {
-        addLog(`Đang đóng lệnh. Bỏ qua yêu cầu mới cho ${symbol}.`); 
-        return; 
+async function closePosition(symbol, quantityToClose, reason) {
+    // ... (phần trước giữ nguyên)
+
+    // SỬA LOGIC XỬ LÝ LÃI/LỖ
+    if (reason.includes("TP")) {
+        consecutiveLossCount = 0;
+        currentInvestmentAmount = INITIAL_INVESTMENT_AMOUNT;
+        nextTradeDirection = currentOpenPosition.side; // Giữ nguyên hướng
+        addLog(`✅ TP - Giữ hướng: ${nextTradeDirection}`);
+    } 
+    else if (reason.includes("SL")) {
+        if (APPLY_DOUBLE_STRATEGY) {
+            consecutiveLossCount++;
+            currentInvestmentAmount = (consecutiveLossCount >= MAX_CONSECUTIVE_LOSSES) 
+                ? INITIAL_INVESTMENT_AMOUNT 
+                : currentInvestmentAmount * 2;
+        }
+        nextTradeDirection = currentOpenPosition.side === 'LONG' ? 'SHORT' : 'LONG'; // Đảo chiều
+        addLog(`❌ SL - Đảo chiều thành: ${nextTradeDirection}`);
     }
-    isClosingPosition = true;
+
+    // ... (phần sau giữ nguyên)
+}
+
 
     // Lấy thông tin vị thế hiện tại để xác định loại lệnh đóng TRƯỚC KHI currentOpenPosition có thể bị reset
     const positionSideBeforeClose = currentOpenPosition?.side; 
