@@ -376,7 +376,7 @@ app.get('/api/logs', (req, res) => {
 
 // Phục vụ file tĩnh (ví dụ: index.html)
 app.get('/', (req, res) => {
-    res.sendFile(path.join(__dirname, 'public', 'index.html')); // Đảm bảo index.html nằm trong thư mục 'public'
+    res.sendFile(path.join(__dirname, 'index.html')); // Đảm bảo index.html nằm trong thư mục 'public'
 });
 
 // Khởi chạy server
