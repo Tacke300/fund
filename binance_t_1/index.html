@@ -125,8 +125,8 @@
             border-bottom: none;
         }
         .popup {
-            display: none;
-            position: fixed;
+            display: none; 
+            position: fixed; 
             left: 50%;
             top: 50%;
             transform: translate(-50%, -50%);
@@ -149,16 +149,10 @@
 </head>
 <body>
     <div class="container">
-
-        <div class="status-box" id="botStatus">
-    Đang tải trạng thái...
-    <div id="pnlInfo">
-        Tổng Lãi: <span id="totalProfit">0</span> USDT |
-        Tổng Lỗ: <span id="totalLoss">0</span> USDT |
-        PNL Ròng: <span id="netPNL">0</span> USDT
-    </div>
-</div>
-
+        
+<div class="status-box" id="botStatus">
+            Đang tải trạng thái...
+        </div>
         <div class="form-group">
             <label for="apiKey">API Key:</label>
             <input type="password" id="apiKey" placeholder="Nhập API Key của bạn">
@@ -173,31 +167,26 @@
         </div>
         <div class="form-group">
             <label for="initialAmount">Số USDT mở lệnh:</label>
-            <input type="number" id="initialAmount" value="10" min="0.01" step="0.01">
-        </div>
-        <div class="form-group">
-            <label for="totalInvestment">Tổng $ đầu tư ban đầu (để dừng bot khi PNL đạt ngưỡng):</label>
-            <input type="number" id="totalInvestment" value="0" min="0" step="1">
-            <small>Nhập 0 nếu không muốn đặt mục tiêu dừng bot theo PNL.</small>
+            <input type="number" id="initialAmount" value="" min="0.01" step="0.01">
         </div>
         <div class="form-group">
             <input type="checkbox" id="applyDoubleStrategy">
             <label for="applyDoubleStrategy">
                 <p>• Nếu tích vào nút trên sẽ bật chế độ giảm rủi ro nếu đảo chiều liên tục. Nhưng bạn phải đảm bảo số USDT mở lệnh phải lớn hơn Số Tiền Tối Thiểu mở lệnh của Binance và nhỏ hơn 3% Số Dư Tổng Tài Khoản</p>
-
+                
             </label>
         </div>
 
         <div class="button-group">
             <button class="btn btn-primary" id="saveConfigBtn">Lưu cấu hình</button>
-
+            
             <button class="btn btn-success" id="startBotBtn">Start Bot</button>
             <button class="btn btn-danger" id="stopBotBtn">Stop Bot</button>
         </div>
 
-        <div class="log-box" id="logContainer"></div>
+        
 
-
+        
     </div>
 
     <div id="popupMessage" class="popup"></div>
@@ -207,7 +196,6 @@
         const secretKeyInput = document.getElementById('secretKey');
         const coinSymbolInput = document.getElementById('coinSymbol');
         const initialAmountInput = document.getElementById('initialAmount');
-        const totalInvestmentInput = document.getElementById('totalInvestment'); // Thêm input mới
         const applyDoubleStrategyCheckbox = document.getElementById('applyDoubleStrategy');
         const saveConfigBtn = document.getElementById('saveConfigBtn');
         const startBotBtn = document.getElementById('startBotBtn');
@@ -229,9 +217,8 @@
         function loadConfig() {
             apiKeyInput.value = localStorage.getItem('apiKey') || '';
             secretKeyInput.value = localStorage.getItem('secretKey') || '';
-            coinSymbolInput.value = localStorage.getItem('coinSymbol') || 'ETHUSDT';
+            coinSymbolInput.value = localStorage.getItem('coinSymbol') || 'NEIROUSDT';
             initialAmountInput.value = localStorage.getItem('initialAmount') || '10';
-            totalInvestmentInput.value = localStorage.getItem('totalInvestment') || '0'; // Tải giá trị mới
             applyDoubleStrategyCheckbox.checked = localStorage.getItem('applyDoubleStrategy') === 'true';
         }
 
@@ -241,21 +228,19 @@
             localStorage.setItem('secretKey', secretKeyInput.value);
             localStorage.setItem('coinSymbol', coinSymbolInput.value);
             localStorage.setItem('initialAmount', initialAmountInput.value);
-            localStorage.setItem('totalInvestment', totalInvestmentInput.value); // Lưu giá trị mới
             localStorage.setItem('applyDoubleStrategy', applyDoubleStrategyCheckbox.checked);
         }
 
         // Gửi cấu hình đến backend
         saveConfigBtn.addEventListener('click', async () => {
             saveConfigToLocalStorage(); // Lưu vào local storage trước
-
+            
             const config = {
                 apiKey: apiKeyInput.value,
                 secretKey: secretKeyInput.value,
                 coinSymbol: coinSymbolInput.value,
                 initialAmount: parseFloat(initialAmountInput.value),
-                applyDoubleStrategy: applyDoubleStrategyCheckbox.checked,
-                totalInvestment: parseFloat(totalInvestmentInput.value) // Gửi giá trị mới
+                applyDoubleStrategy: applyDoubleStrategyCheckbox.checked
             };
 
             if (!config.apiKey || !config.secretKey) {
@@ -270,11 +255,6 @@
                 showPopup('Lỗi: Số USDT ban đầu phải là số dương.');
                 return;
             }
-             if (isNaN(config.totalInvestment) || config.totalInvestment < 0) {
-                showPopup('Lỗi: Tổng $ đầu tư phải là số không âm.');
-                return;
-            }
-
 
             try {
                 const response = await fetch('/api/configure', {
@@ -329,8 +309,7 @@
                 secretKey: secretKeyInput.value,
                 coinSymbol: coinSymbolInput.value,
                 initialAmount: parseFloat(initialAmountInput.value),
-                applyDoubleStrategy: applyDoubleStrategyCheckbox.checked,
-                totalInvestment: parseFloat(totalInvestmentInput.value) // Gửi giá trị mới
+                applyDoubleStrategy: applyDoubleStrategyCheckbox.checked
             };
 
             if (!config.apiKey || !config.secretKey) {
@@ -343,10 +322,6 @@
             }
             if (isNaN(config.initialAmount) || config.initialAmount <= 0) {
                 showPopup('Lỗi: Số USDT ban đầu phải là số dương trước khi khởi động.');
-                return;
-            }
-            if (isNaN(config.totalInvestment) || config.totalInvestment < 0) {
-                showPopup('Lỗi: Tổng $ đầu tư phải là số không âm.');
                 return;
             }
 
