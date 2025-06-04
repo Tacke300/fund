@@ -1,13 +1,12 @@
-import https from 'https';
-import crypto from 'crypto';
-import express from 'express';
-import { exec } from 'child_process';
-import fs from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
+const https = require('https');
+const crypto = require('crypto');
+const express = require('express');
+const { exec } = require('child_process');
+const fs = require('fs');
+const path = require('path');
 
-// Lấy __filename và __dirname trong ES modules
-const __filename = fileURLToPath(import.meta.url);
+// Lấy __filename và __dirname trong CommonJS
+const __filename = path.resolve();
 const __dirname = path.dirname(__filename);
 
 // --- CẤU HÌNH API KEY VÀ SECRET KEY (BAN ĐẦU RỖNG) ---
@@ -91,7 +90,7 @@ const WEB_SERVER_PORT = 1997; // Cổng cho giao diện web
 // Đảm bảo đường dẫn này chính xác với cấu hình PM2 của bạn.
 const BOT_LOG_FILE = '/home/tacke300/.pm2/logs/bot-bina-out.log'; // Cần điều chỉnh nếu dùng PM2
 // Tên của bot trong PM2, phải khớp với tên bạn đã dùng khi start bot bằng PM2.
-const THIS_BOT_PM2_NAME = 'tung01'; // Cần điều chỉnh nếu dùng PM2
+const THIS_BOT_PM2_NAME = '1997'; // Cần điều chỉnh nếu dùng PM2
 
 // --- HÀM TIỆN ÍCH ---
 
@@ -148,7 +147,7 @@ function createSignature(queryString, apiSecret) {
 }
 
 // Gửi HTTP request cơ bản
-async function makeHttpRequest(method, hostname, path, headers, postData = '') {
+function makeHttpRequest(method, hostname, path, headers, postData = '') {
     return new Promise((resolve, reject) => {
         const options = {
             hostname: hostname,
