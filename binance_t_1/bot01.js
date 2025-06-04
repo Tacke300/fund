@@ -7,7 +7,9 @@ const path = require('path');
 
 // Lấy __filename và __dirname trong CommonJS
 
+const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
 
 // --- CẤU HÌNH API KEY VÀ SECRET KEY (BAN ĐẦU RỖNG) ---
 let API_KEY = '';
