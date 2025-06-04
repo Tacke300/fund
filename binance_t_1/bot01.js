@@ -1228,7 +1228,9 @@ app.get('/stop_bot_logic', (req, res) => {
     const message = stopBotLogicInternal();
     res.send(message);
 });
-
+app.get('/', (req, res) => {
+    res.sendFile(path.join(__dirname, 'index.html'));
+});
 app.listen(WEB_SERVER_PORT, () => {
     addLog(`Web server trên cổng ${WEB_SERVER_PORT}`);
     addLog(`Truy cập: http://localhost:${WEB_SERVER_PORT}`);
