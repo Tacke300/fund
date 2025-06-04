@@ -380,4 +380,6 @@ app.get('/', (req, res) => {
 });
 
 // Khởi chạy server
-app.listen(PORT
+app.listen(PORT, () => {
+    log(`🌐 Server chạy tại http://localhost:${PORT}`);
+});
