@@ -4,11 +4,12 @@ const crypto = require('crypto');
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
-const { fileURLToPath } = require('url'); // Chỉ cần nếu bạn dùng ES module syntax, nhưng có vẻ bạn dùng CommonJS
+// const { fileURLToPath } = require('url'); // Bỏ comment nếu bạn đang dùng ES Modules, nhưng code này là CommonJS
 
 // ==================== CẤU HÌNH ====================
 const PORT = 1997;
 const LOG_FILE = 'bot.log';
+const INDEX_HTML_FILE = 'index.html'; // Tên file index.html (nằm cùng cấp với server.js)
 
 // ==================== BIẾN TOÀN CỤC ====================
 let config = {
@@ -88,19 +89,19 @@ async function binanceRequest(method, endpoint, params = {}, signed = false) {
 // Hàm đặt lệnh thực tế lên Binance
 async function placeRealOrder(side, quantity) {
     try {
-        log(`Đang đặt lệnh ${side} với số lượng ${quantity.toFixed(6)} cho ${config.symbol}...`);
+        log(`Đang đặt lệnh ${side} với số lượng ${quantity.toFixed(8)} cho ${config.symbol}...`);
         const order = await binanceRequest('POST', '/fapi/v1/order', {
             symbol: config.symbol,
             side: side,
             type: 'MARKET', // Lệnh thị trường
-            quantity: quantity.toFixed(6), // Làm tròn 6 số thập phân
+            quantity: quantity.toFixed(8), // Dùng 8 số thập phân tạm thời, sẽ được điều chỉnh chính xác hơn
             newOrderRespType: 'FULL' // Nhận phản hồi đầy đủ từ Binance
         }, true);
 
         // console.log("Phản hồi từ Binance:", order); // Dùng để debug
 
         if (order && order.status === 'FILLED') {
-            log(`✅ Đã khớp lệnh ${side} ${config.symbol} | ID: ${order.orderId} | Khối lượng: ${order.executedQty} | Giá: ${order.avgPrice}`);
+            log(`✅ Đã khớp lệnh ${side} ${config.symbol} | ID: ${order.orderId} | Khối lượng: ${parseFloat(order.executedQty).toFixed(6)} | Giá: ${parseFloat(order.avgPrice).toFixed(3)}`);
             return order; // Trả về thông tin lệnh đã khớp
         } else {
             log(`⚠️ Lệnh ${side} không khớp hoàn toàn hoặc có lỗi: ${order ? JSON.stringify(order) : 'Không có phản hồi'}`);
@@ -122,7 +123,8 @@ async function cancelAllOpenOrders() {
         if (response && response.code === 200) {
             log(`Đã hủy các lệnh chờ cũ (nếu có) cho ${config.symbol}.`);
         } else {
-            log(`Đã hủy các lệnh chờ cũ (nếu có) cho ${config.symbol}.`); // Binance trả về mảng rỗng nếu không có lệnh nào để hủy, không phải lỗi
+            // Binance trả về mảng rỗng nếu không có lệnh nào để hủy, không phải lỗi
+            log(`Đã hủy các lệnh chờ cũ (nếu có) cho ${config.symbol}.`);
         }
     } catch (error) {
         // Lỗi 20011 nếu không có lệnh chờ, không cần log là lỗi nghiêm trọng
@@ -134,7 +136,6 @@ async function cancelAllOpenOrders() {
     }
 }
 
-
 // Hàm mở giao dịch
 async function openTrade() {
     if (!bot.running || bot.position) {
@@ -145,11 +146,35 @@ async function openTrade() {
         // Hủy các lệnh chờ cũ trước khi mở lệnh mới để tránh xung đột
         await cancelAllOpenOrders();
 
-        // Lấy giá hiện tại
+        // 1. Lấy thông tin symbol và bộ lọc từ Binance
+        const exchangeInfo = await binanceRequest('GET', '/fapi/v1/exchangeInfo');
+        const symbolData = exchangeInfo.symbols.find(s => s.symbol === config.symbol);
+
+        if (!symbolData) {
+            log(`❌ Không tìm thấy thông tin symbol ${config.symbol} trên sàn Binance.`);
+            bot.running = false; // Dừng bot nếu symbol không hợp lệ
+            return;
+        }
+
+        const lotSizeFilter = symbolData.filters.find(f => f.filterType === 'LOT_SIZE');
+        if (!lotSizeFilter) {
+            log(`❌ Không tìm thấy bộ lọc LOT_SIZE cho ${config.symbol}.`);
+            bot.running = false; // Dừng bot nếu không có thông tin cần thiết
+            return;
+        }
+
+        const minQty = parseFloat(lotSizeFilter.minQty);
+        const maxQty = parseFloat(lotSizeFilter.maxQty);
+        const stepSize = parseFloat(lotSizeFilter.stepSize);
+        // Xác định số chữ số thập phân của stepSize để làm tròn chính xác
+        const stepSizePrecision = (stepSize.toString().split('.')[1] || '').length;
+
+
+        // 2. Lấy giá hiện tại
         const ticker = await binanceRequest('GET', '/fapi/v1/ticker/price', { symbol: config.symbol });
         const price = parseFloat(ticker.price);
 
-        // Lấy số dư tài khoản
+        // 3. Lấy số dư tài khoản
         const account = await binanceRequest('GET', '/fapi/v2/account', {}, true);
         const usdtBalance = parseFloat(account.availableBalance);
 
@@ -159,11 +184,25 @@ async function openTrade() {
             return;
         }
 
-        // Tính toán số lượng coin dựa trên số tiền và giá
-        const quantity = config.amount / price;
+        // 4. Tính toán và điều chỉnh số lượng coin theo quy tắc của Binance
+        let quantity = config.amount / price;
+        // Làm tròn số lượng theo stepSize
+        let adjustedQuantity = Math.floor(quantity / stepSize) * stepSize;
+        adjustedQuantity = parseFloat(adjustedQuantity.toFixed(stepSizePrecision)); // Đảm bảo đúng số thập phân
 
-        // Đặt lệnh MUA (BUY)
-        const order = await placeRealOrder('BUY', quantity);
+        // Kiểm tra min/max quantity
+        if (adjustedQuantity < minQty) {
+            log(`Số lượng tính toán (${adjustedQuantity}) quá nhỏ cho ${config.symbol}. MinQty là ${minQty}. Không thể mở lệnh.`);
+            // bot.running = false; // Có thể dừng bot nếu số lượng luôn quá nhỏ
+            return;
+        }
+        if (adjustedQuantity > maxQty) {
+            adjustedQuantity = maxQty;
+            log(`Số lượng tính toán (${adjustedQuantity}) quá lớn cho ${config.symbol}. MaxQty là ${maxQty}. Đã điều chỉnh.`);
+        }
+
+        // 5. Đặt lệnh MUA (BUY)
+        const order = await placeRealOrder('BUY', adjustedQuantity);
 
         if (order) {
             bot.position = {
@@ -172,31 +211,28 @@ async function openTrade() {
                 quantity: parseFloat(order.executedQty), // Khối lượng khớp lệnh thực tế
                 time: new Date()
             };
-            log(`✅ Đã mở lệnh ${config.symbol} | Khối lượng: ${bot.position.quantity.toFixed(6)} | Giá: ${bot.position.entryPrice.toFixed(3)}`);
+            log(`✅ Đã mở lệnh ${config.symbol} | Khối lượng: ${bot.position.quantity.toFixed(stepSizePrecision)} | Giá: ${bot.position.entryPrice.toFixed(3)}`);
 
-            // Đặt TP/SL sau khi mở lệnh thành công (ví dụ đơn giản)
+            // 6. Đặt TP/SL sau khi mở lệnh thành công
+            // TP/SL nên được tính toán dựa trên % hợp lý hoặc chiến lược cụ thể
             const takeProfitPrice = bot.position.entryPrice * 1.01; // Ví dụ: 1% lợi nhuận
             const stopLossPrice = bot.position.entryPrice * 0.99;   // Ví dụ: 1% lỗ
 
             log(`TP: ${takeProfitPrice.toFixed(3)}, SL: ${stopLossPrice.toFixed(3)}`);
 
-            // Đặt lệnh SL
-            // Binance API không cho phép đặt lệnh Stop Loss và Take Profit cùng lúc cho lệnh MARKET
-            // Bạn cần đặt chúng dưới dạng lệnh chờ OCO (One Cancels the Other) hoặc riêng lẻ
-            // Dưới đây là ví dụ đặt lệnh Stop Market và Take Profit Limit riêng lẻ.
-            // Để đảm bảo an toàn, hãy nghiên cứu kỹ cách Binance Futures xử lý TP/SL.
-
             // Đặt lệnh Stop Loss (Stop Market Order)
             try {
+                // Đối với lệnh STOP_MARKET/TAKE_PROFIT_MARKET, stopPrice không cần độ chính xác cao như giá khớp
+                // Lấy thông tin về giá chính xác (tickSize) nếu cần thiết
                 const slOrder = await binanceRequest('POST', '/fapi/v1/order', {
                     symbol: config.symbol,
                     side: 'SELL', // Để đóng lệnh MUA ban đầu
                     type: 'STOP_MARKET',
-                    quantity: bot.position.quantity.toFixed(6),
-                    stopPrice: stopLossPrice.toFixed(3),
+                    quantity: bot.position.quantity.toFixed(stepSizePrecision),
+                    stopPrice: stopLossPrice.toFixed(2), // Làm tròn stopPrice
                     closePosition: 'true' // Đảm bảo đóng toàn bộ vị thế
                 }, true);
-                log(`Đã đặt SL cho ${config.symbol} @ ${stopLossPrice.toFixed(3)}. ID: ${slOrder.orderId}`);
+                log(`Đã đặt SL cho ${config.symbol} @ ${stopLossPrice.toFixed(2)}. ID: ${slOrder.orderId}`);
             } catch (slError) {
                 log(`❌ Lỗi đặt SL: ${slError.message}`);
             }
@@ -207,11 +243,11 @@ async function openTrade() {
                     symbol: config.symbol,
                     side: 'SELL', // Để đóng lệnh MUA ban đầu
                     type: 'TAKE_PROFIT_MARKET',
-                    quantity: bot.position.quantity.toFixed(6),
-                    stopPrice: takeProfitPrice.toFixed(3), // Dùng stopPrice cho lệnh TP_MARKET
+                    quantity: bot.position.quantity.toFixed(stepSizePrecision),
+                    stopPrice: takeProfitPrice.toFixed(2), // Làm tròn stopPrice
                     closePosition: 'true'
                 }, true);
-                log(`Đã đặt TP cho ${config.symbol} @ ${takeProfitPrice.toFixed(3)}. ID: ${tpOrder.orderId}`);
+                log(`Đã đặt TP cho ${config.symbol} @ ${takeProfitPrice.toFixed(2)}. ID: ${tpOrder.orderId}`);
             } catch (tpError) {
                 log(`❌ Lỗi đặt TP: ${tpError.message}`);
             }
@@ -221,6 +257,8 @@ async function openTrade() {
         }
     } catch (error) {
         log(`❌ Lỗi trong quá trình mở giao dịch: ${error.message}`);
+        // Nếu lỗi xảy ra liên tục, có thể dừng bot ở đây để tránh spam API
+        // bot.running = false;
     }
 }
 
@@ -228,7 +266,7 @@ async function openTrade() {
 async function closeTrade(reason = 'Không rõ lý do') {
     if (!bot.position) {
         log('Không có vị thế nào để đóng.');
-        return;
+        return false; // Trả về false vì không có gì để đóng
     }
 
     try {
@@ -238,7 +276,7 @@ async function closeTrade(reason = 'Không rõ lý do') {
         const quantityToClose = bot.position.quantity;
 
         // Đặt lệnh BÁN (SELL) để đóng vị thế MUA
-        log(`Đang đóng lệnh ${config.symbol} với khối lượng ${quantityToClose.toFixed(6)}...`);
+        log(`Đang đóng lệnh ${config.symbol} với khối lượng ${quantityToClose.toFixed(8)}...`); // Giữ 8 số thập phân khi đặt lệnh
         const closeOrder = await placeRealOrder('SELL', quantityToClose);
 
         if (closeOrder) {
@@ -266,7 +304,7 @@ async function closeTrade(reason = 'Không rõ lý do') {
 // ==================== WEB SERVER ====================
 const app = express();
 app.use(express.json());
-app.use(express.static('public')); // Thư mục chứa file index.html và các tài nguyên tĩnh
+// app.use(express.static('public')); // Bỏ comment nếu bạn muốn phục vụ các file tĩnh khác từ thư mục 'public'
 
 // API Cấu hình
 app.post('/api/configure', (req, res) => {
@@ -366,7 +404,6 @@ app.get('/api/status', (req, res) => {
 app.get('/api/logs', (req, res) => {
     try {
         const logs = fs.readFileSync(LOG_FILE, 'utf-8');
-        // Trả về logs dưới dạng HTML hoặc text để dễ đọc trên trình duyệt
         res.setHeader('Content-Type', 'text/plain; charset=utf-8');
         res.send(logs);
     } catch (error) {
@@ -374,9 +411,9 @@ app.get('/api/logs', (req, res) => {
     }
 });
 
-// Phục vụ file tĩnh (ví dụ: index.html)
+// Phục vụ file tĩnh index.html (từ thư mục gốc của dự án)
 app.get('/', (req, res) => {
-    res.sendFile(path.join(__dirname, 'index.html')); // Đảm bảo index.html nằm trong thư mục 'public'
+    res.sendFile(path.join(__dirname, INDEX_HTML_FILE));
 });
 
 // Khởi chạy server
