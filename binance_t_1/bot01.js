@@ -12,7 +12,7 @@ const WebSocket = require('ws'); // For real-time log streaming to UI
 // --- INITIALIZATION AND CONFIGURATION ---
 
 // Load environment variables from .env file
-dotenv.config();
+
 
 // Get __filename and __dirname in CommonJS
 
