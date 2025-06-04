@@ -441,29 +441,66 @@ try {
         addLog(`Lỗi kiểm tra vị thế: ${error.message}`);
     }
 }
+async function closePosition(symbol, quantity, reason) {
+    isClosingPosition = true;
+    
+    try {
+        // Lấy thông tin vị thế đóng
+        const positions = await callSignedAPI('/fapi/v2/positionRisk', 'GET');
+        const closedPosition = positions.find(p => p.symbol === symbol && Math.abs(parseFloat(p.positionAmt)) > 0);
 
-async function closePosition(symbol, quantityToClose, reason) {
-    // ... (phần trước giữ nguyên)
+        if (closedPosition) {
+            const entryPrice = parseFloat(closedPosition.entryPrice);
+            const closePrice = await getCurrentPrice(symbol);
+            const pnl = (currentOpenPosition.side === 'LONG')
+                ? (closePrice - entryPrice) * quantity
+                : (entryPrice - closePrice) * quantity;
 
-    // SỬA LOGIC XỬ LÝ LÃI/LỖ
-    if (reason.includes("TP")) {
-        consecutiveLossCount = 0;
-        currentInvestmentAmount = INITIAL_INVESTMENT_AMOUNT;
-        nextTradeDirection = currentOpenPosition.side; // Giữ nguyên hướng
-        addLog(`✅ TP - Giữ hướng: ${nextTradeDirection}`);
-    } 
-    else if (reason.includes("SL")) {
-        if (APPLY_DOUBLE_STRATEGY) {
-            consecutiveLossCount++;
-            currentInvestmentAmount = (consecutiveLossCount >= MAX_CONSECUTIVE_LOSSES) 
-                ? INITIAL_INVESTMENT_AMOUNT 
-                : currentInvestmentAmount * 2;
+            // Cập nhật tổng lời/lỗ
+            if (pnl > 0) {
+                totalProfit += pnl;
+            } else {
+                totalLoss += Math.abs(pnl);
+            }
+            netPNL = totalProfit - totalLoss;
+
+            // Log PNL
+            addLog([
+                `🔴 Đã đóng ${currentOpenPosition.side} ${symbol}`,
+                `├─ Lý do: ${reason}`,
+                `├─ PNL: ${pnl.toFixed(2)} USDT`,
+                `├─ Tổng Lời: ${totalProfit.toFixed(2)} USDT`,
+                `├─ Tổng Lỗ: ${totalLoss.toFixed(2)} USDT`,
+                `└─ PNL Ròng: ${netPNL.toFixed(2)} USDT`
+            ].join('\n'));
         }
-        nextTradeDirection = currentOpenPosition.side === 'LONG' ? 'SHORT' : 'LONG'; // Đảo chiều
-        addLog(`❌ SL - Đảo chiều thành: ${nextTradeDirection}`);
-    }
 
-    // ... (phần sau giữ nguyên)
+        // XỬ LÝ LOGIC LÃI/LỖ
+        if (reason.includes("TP")) {
+            consecutiveLossCount = 0;
+            currentInvestmentAmount = INITIAL_INVESTMENT_AMOUNT;
+            nextTradeDirection = currentOpenPosition.side; // GIỮ NGUYÊN HƯỚNG
+            addLog(`💰 TP - Giữ hướng: ${nextTradeDirection}`);
+        } 
+        else if (reason.includes("SL")) {
+            if (APPLY_DOUBLE_STRATEGY) {
+                consecutiveLossCount++;
+                currentInvestmentAmount = (consecutiveLossCount >= MAX_CONSECUTIVE_LOSSES) 
+                    ? INITIAL_INVESTMENT_AMOUNT 
+                    : currentInvestmentAmount * 2;
+            }
+            nextTradeDirection = currentOpenPosition.side === 'LONG' ? 'SHORT' : 'LONG'; // ĐẢO CHIỀU
+            addLog(`💸 SL - Đảo chiều thành: ${nextTradeDirection}`);
+        }
+
+        currentOpenPosition = null;
+        if (botRunning) scheduleNextMainCycle();
+
+    } catch (error) {
+        addLog(`Lỗi đóng lệnh: ${error.message}`);
+    } finally {
+        isClosingPosition = false;
+    }
 }
 
 
