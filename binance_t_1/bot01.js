@@ -56,7 +56,6 @@ class CriticalApiError extends Error {
 }
 // === END - BIẾN QUẢN LÝ LỖI VÀ TẦN SUẤT LOG ===
 
-
 // --- CẤU HÌNH BOT CÁC THAM SỐ GIAO DỊCH (GIÁ TRỊ MẶC ĐỊNH) ---
 let INITIAL_INVESTMENT_AMOUNT = 1; // Mặc định 10 USDT (sẽ được cập nhật từ UI)
 let TARGET_COIN_SYMBOL = 'ETHUSDT'; // Mặc định NEIROUSDT (sẽ được cập nhật từ UI)
@@ -461,7 +460,7 @@ async function closePosition(symbol, quantityToClose, reason = 'manual') {
                     // Ta sẽ giả định PNL dựa trên lý do đóng (TP/SL) và initialMargin.
                     // Hoặc tốt hơn, lấy realizedPnl từ /fapi/v2/account hoặc /fapi/v2/income
                     // Hiện tại, ta sẽ ước tính PNL dựa trên TAKE_PROFIT_PERCENTAGE_MAIN và STOP_LOSS_PERCENTAGE_MAIN
-                    
+
                     if (reason.includes('TP')) {
                         pnlForClosedPosition = initialMarginBeforeClose * TAKE_PROFIT_PERCENTAGE_MAIN;
                         addLog(`Ước tính PNL lời (TP): +${pnlForClosedPosition.toFixed(2)} USDT.`);
@@ -1011,7 +1010,6 @@ async function scheduleNextMainCycle() {
     await runTradingLogic();
 }
 
-
 // --- HÀM KHỞI ĐỘNG/DỪNG LOGIC BOT (nội bộ, không phải lệnh PM2) ---
 
 async function startBotLogicInternal() {
@@ -1219,7 +1217,6 @@ app.post('/api/configure', (req, res) => {
     addLog(`  Số vốn ban đầu: ${INITIAL_INVESTMENT_AMOUNT} USDT`);
     addLog(`  Chiến lược x2 vốn: ${APPLY_DOUBLE_STRATEGY ? 'Bật' : 'Tắt'}`);
     addLog(`  Tổng $ đầu tư (mục tiêu PNL để dừng bot): ${totalInvestmentCap > 0 ? totalInvestmentCap : 'Không đặt'}`);
-
 
     res.json({ success: true, message: 'Cấu hình đã được cập nhật.' });
 });
