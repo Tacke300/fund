@@ -10,7 +10,7 @@
             margin: 20px;
             background-color: #f4f7f6;
             color: #333;
-            line-height: 1.6;
+            line-height: 1;
         }
         .container {
             max-width: 900px;
@@ -98,7 +98,7 @@
             padding: 15px;
             border-radius: 8px;
             margin-top: 20px;
-            font-size: 1.1em;
+            font-size: 0.8em;
             font-weight: bold;
             text-align: center;
             color: #333;
@@ -149,8 +149,10 @@
 </head>
 <body>
     <div class="container">
-        <h1>Binance Futures Trading Bot UI</h1>
-
+        <h1>Bot Cuốn Theo Chiều Gió</h1>
+<div class="status-box" id="botStatus">
+            Đang tải trạng thái...
+        </div>
         <div class="form-group">
             <label for="apiKey">API Key:</label>
             <input type="password" id="apiKey" placeholder="Nhập API Key của bạn">
@@ -160,31 +162,33 @@
             <input type="password" id="secretKey" placeholder="Nhập Secret Key của bạn">
         </div>
         <div class="form-group">
-            <label for="coinSymbol">Tên đồng coin (ví dụ: NEIROUSDT):</label>
-            <input type="text" id="coinSymbol" value="NEIROUSDT" placeholder="Nhập tên đồng coin">
+            <label for="coinSymbol">Tên coin (ví dụ: ETHUSDT):</label>
+            <input type="text" id="coinSymbol" value="ETHUSDT" placeholder="Nhập tên đồng coin">
         </div>
         <div class="form-group">
-            <label for="initialAmount">Số USDT ban đầu mở lệnh:</label>
-            <input type="number" id="initialAmount" value="10" min="0.01" step="0.01">
+            <label for="initialAmount">Số USDT mở lệnh:</label>
+            <input type="number" id="initialAmount" value="" min="0.01" step="0.01">
         </div>
         <div class="form-group">
             <input type="checkbox" id="applyDoubleStrategy">
-            <label for="applyDoubleStrategy">Áp dụng chiến lược: nếu lỗ sẽ x2 vốn lệnh trước (sau 5 lần lỗ reset)</label>
+            <label for="applyDoubleStrategy">
+                <p>• Nếu tích vào nút trên bạn phải đảm bảo số USDT mở lệnh phải lớn hơn số tiền tối thiểu mở lệnh của Binance và nhỏ hơn 3% số dư tổng tài khoản</p>
+                <p>• Mở app Binance - Future - kéo max bẩy - chạm vào nút số $ mở lệnh - nhập số tiền tối thiểu Binance yêu cầu trên màn hình - nút Long/Short dòng chi phí chính là số tiền tối thiểu.</p>
+                <p>• Ưu điểm: đảm bảo với những biến động nhỏ nếu lệnh đảo chiều liên tục không quá 5 lần =>> lãi 60%-510% số $ ban đầu</p>
+                <p>• Nhược điểm: nếu đảo chiều quá 5 lần =>> bạn mất 480% của số $ mở lệnh.</p>
+            </label>
         </div>
 
         <div class="button-group">
             <button class="btn btn-primary" id="saveConfigBtn">Lưu cấu hình</button>
+            <p>Tất cả lợi nhuận, lỗ đã được tính bao gồm cả chi phí!</p>
             <button class="btn btn-success" id="startBotBtn">Start Bot</button>
             <button class="btn btn-danger" id="stopBotBtn">Stop Bot</button>
         </div>
 
-        <div class="status-box" id="botStatus">
-            Đang tải trạng thái...
-        </div>
+        
 
-        <h2>Logs</h2>
-        <div class="log-box" id="logContainer">
-            </div>
+        
     </div>
 
     <div id="popupMessage" class="popup"></div>
