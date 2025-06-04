@@ -1,21 +1,21 @@
-import https from 'https';
-import crypto from 'crypto';
-import express from 'express';
-import { exec } from 'child_process';
-import fs from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
-import dotenv from 'dotenv'; // For secure environment variable loading
-import winston from 'winston'; // For advanced logging
-import WebSocket from 'ws'; // For real-time log streaming to UI
+// bot01.js (Converted to CommonJS)
+const https = require('https');
+const crypto = require('crypto');
+const express = require('express');
+const { exec } = require('child_process');
+const fs = require('fs');
+const path = require('path');
+const dotenv = require('dotenv'); // For secure environment variable loading
+const winston = require('winston'); // For advanced logging
+const WebSocket = require('ws'); // For real-time log streaming to UI
 
 // --- INITIALIZATION AND CONFIGURATION ---
 
 // Load environment variables from .env file
 dotenv.config();
 
-// Get __filename and __dirname in ES modules
-const __filename = fileURLToPath(import.meta.url);
+// Get __filename and __dirname in CommonJS
+const __filename = process.argv[1]; // Or simply use __filename provided by Node.js in CommonJS modules
 const __dirname = path.dirname(__filename);
 
 // --- SECURE API KEY AND SECRET KEY LOADING ---
@@ -1131,7 +1131,8 @@ async function startBotLogicInternal() {
                 if (botRunning && currentOpenPosition) {
                     try {
                         await manageOpenPosition();
-                    } catch (error) {
+                    }
+                    catch (error) {
                         logger.error(`Error during periodic position check: ${error.msg || error.message}.`);
                         if (error instanceof CriticalApiError) {
                             logger.critical(`Bot stopping due to critical API error during position check.`);
@@ -1384,4 +1385,3 @@ process.on('SIGTERM', async () => {
         process.exit(0);
     }
 });
-
