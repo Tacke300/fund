@@ -61,11 +61,11 @@ class CriticalApiError extends Error {
 
 // --- CẤU HÌNH BOT CÁC THAM SỐ GIAO DỊCHTRADING PARAMETERS ---
 // SỐ TIỀN USDT CỐ ĐỊNH BAN ĐẦU SẼ DÙNG CHO MỖI LỆNH ĐẦU TƯ.
-const INITIAL_INVESTMENT_AMOUNT = 0.08; // Ví dụ: 0.08 USDT
+const INITIAL_INVESTMENT_AMOUNT = 0.12; // Ví dụ: 0.08 USDT
 
 // Cấu hình Take Profit & Stop Loss
 // LƯU Ý: Các giá trị này bây giờ là % VỐN, không phải % giá coin
-const TAKE_PROFIT_PERCENTAGE_MAIN = 0.50; // 50% lãi trên VỐN
+const TAKE_PROFIT_PERCENTAGE_MAIN = 0.60; // 50% lãi trên VỐN
 const STOP_LOSS_PERCENTAGE_MAIN = 0.18;   // 18% lỗ trên VỐN
 
 // Số lần thua liên tiếp tối đa trước khi reset về lệnh ban đầu
@@ -88,7 +88,7 @@ const WEB_SERVER_PORT = 3333; // Cổng cho giao diện web
 // Đảm bảo đường dẫn này chính xác với cấu hình PM2 của bạn.
 const BOT_LOG_FILE = '/home/tacke300/.pm2/logs/bot-bina-out.log';
 // Tên của bot trong PM2, phải khớp với tên bạn đã dùng khi start bot bằng PM2.
-const THIS_BOT_PM2_NAME = 'bot_bina';
+const THIS_BOT_PM2_NAME = 'futu';
 
 // --- HÀM TIỆN ÍCH ---
 
