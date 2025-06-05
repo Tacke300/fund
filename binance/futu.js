@@ -58,12 +58,12 @@ class CriticalApiError extends Error {
 
 
 // --- CẤU HÌNH BOT CÁC THAM SỐ GIAO DỊCH (GIÁ TRỊ MẶC ĐỊNH) ---
-let INITIAL_INVESTMENT_AMOUNT = 1; // Mặc định 10 USDT (sẽ được cập nhật từ UI)
-let TARGET_COIN_SYMBOL = 'ETHUSDT'; // Mặc định NEIROUSDT (sẽ được cập nhật từ UI)
+let INITIAL_INVESTMENT_AMOUNT = 0.12; // Mặc định 10 USDT (sẽ được cập nhật từ UI)
+let TARGET_COIN_SYMBOL = 'RVNUSDT'; // Mặc định NEIROUSDT (sẽ được cập nhật từ UI)
 let APPLY_DOUBLE_STRATEGY = false; // Mặc định false (sẽ được cập nhật từ UI)
 
 // Cấu hình Take Profit & Stop Loss
-const TAKE_PROFIT_PERCENTAGE_MAIN = 0.60; // 50% lãi trên VỐN
+const TAKE_PROFIT_PERCENTAGE_MAIN = 0.30; // 50% lãi trên VỐN
 const STOP_LOSS_PERCENTAGE_MAIN = 0.175;   // 18% lỗ trên VỐN
 
 // Số lần thua liên tiếp tối đa trước khi reset về lệnh ban đầu
