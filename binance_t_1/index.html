@@ -45,16 +45,6 @@
             box-sizing: border-box;
             transition: border-color 0.3s ease;
         }
-        .form-group input[type="text"]:focus,
-        .form-group input[type="number"]:focus,
-        .form-group input[type="password"]:focus {
-            border-color: #007bff;
-            outline: none;
-        }
-        .form-group input[type="checkbox"] {
-            margin-right: 10px;
-            transform: scale(1.2);
-        }
         .button-group {
             text-align: center;
             margin-top: 30px;
@@ -66,7 +56,7 @@
             cursor: pointer;
             font-size: 0.6em;
             font-weight: bold;
-            transition: background-color 0.3s ease, transform 0.2s ease;
+            transition: background-color 0.3s ease;
             margin: 0 10px;
         }
         .btn-primary {
@@ -75,7 +65,6 @@
         }
         .btn-primary:hover {
             background-color: #0056b3;
-            transform: translateY(-2px);
         }
         .btn-success {
             background-color: #28a745;
@@ -83,7 +72,6 @@
         }
         .btn-success:hover {
             background-color: #218838;
-            transform: translateY(-2px);
         }
         .btn-danger {
             background-color: #dc3545;
@@ -91,68 +79,11 @@
         }
         .btn-danger:hover {
             background-color: #c82333;
-            transform: translateY(-2px);
-        }
-        .status-box {
-            background-color: #e9ecef;
-            padding: 15px;
-            border-radius: 8px;
-            margin-top: 20px;
-            font-size: 0.6em;
-            font-weight: bold;
-            text-align: center;
-            color: #333;
-        }
-        .log-box {
-            background-color: #ecf0f1;
-            border: 1px solid #dee2e6;
-            padding: 15px;
-            margin-top: 25px;
-            border-radius: 8px;
-            height: 300px;
-            overflow-y: scroll;
-            font-family: 'Consolas', 'Monaco', monospace;
-            font-size: 0.6em;
-            color: #444;
-            white-space: pre-wrap; /* Giữ định dạng xuống dòng */
-            word-wrap: break-word; /* Ngắt từ khi quá dài */
-        }
-        .log-box div {
-            padding: 3px 0;
-            border-bottom: 1px dotted #ccc;
-        }
-        .log-box div:last-child {
-            border-bottom: none;
-        }
-        .popup {
-            display: none; 
-            position: fixed; 
-            left: 50%;
-            top: 50%;
-            transform: translate(-50%, -50%);
-            background-color: #ffc107; /* Warning color */
-            color: white;
-            padding: 15px 25px;
-            border-radius: 8px;
-            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.3);
-            z-index: 1000;
-            opacity: 0;
-            transition: opacity 0.5s ease-in-out;
-            font-weight: bold;
-            text-align: center;
-        }
-        .popup.show {
-            display: block;
-            opacity: 1;
         }
     </style>
 </head>
 <body>
     <div class="container">
-        
-<div class="status-box" id="botStatus">
-            Đang tải trạng thái...
-        </div>
         <div class="form-group">
             <label for="apiKey">API Key:</label>
             <input type="password" id="apiKey" placeholder="Nhập API Key của bạn">
@@ -161,184 +92,52 @@
             <label for="secretKey">Secret Key:</label>
             <input type="password" id="secretKey" placeholder="Nhập Secret Key của bạn">
         </div>
-        <div class="form-group">
-            <label for="coinSymbol">Tên coin (ví dụ: ETHUSDT):</label>
-            <input type="text" id="coinSymbol" value="ETHUSDT" placeholder="Nhập tên đồng coin">
-        </div>
-        <div class="form-group">
-            <label for="initialAmount">Số USDT mở lệnh:</label>
-            <input type="number" id="initialAmount" value="" min="0.01" step="0.01">
-        </div>
-        <div class="form-group">
-            <input type="checkbox" id="applyDoubleStrategy">
-            <label for="applyDoubleStrategy">
-                <p>• Nếu tích vào nút trên sẽ bật chế độ giảm rủi ro nếu đảo chiều liên tục. Nhưng bạn phải đảm bảo số USDT mở lệnh phải lớn hơn Số Tiền Tối Thiểu mở lệnh của Binance và nhỏ hơn 3% Số Dư Tổng Tài Khoản</p>
-                
-            </label>
-        </div>
 
         <div class="button-group">
             <button class="btn btn-primary" id="saveConfigBtn">Lưu cấu hình</button>
-            
             <button class="btn btn-success" id="startBotBtn">Start Bot</button>
             <button class="btn btn-danger" id="stopBotBtn">Stop Bot</button>
         </div>
 
-        
-
-        
+        <div id="botStatus" style="margin-top: 20px;"></div>
     </div>
-
-    <div id="popupMessage" class="popup"></div>
 
     <script>
         const apiKeyInput = document.getElementById('apiKey');
         const secretKeyInput = document.getElementById('secretKey');
-        const coinSymbolInput = document.getElementById('coinSymbol');
-        const initialAmountInput = document.getElementById('initialAmount');
-        const applyDoubleStrategyCheckbox = document.getElementById('applyDoubleStrategy');
         const saveConfigBtn = document.getElementById('saveConfigBtn');
         const startBotBtn = document.getElementById('startBotBtn');
         const stopBotBtn = document.getElementById('stopBotBtn');
         const botStatusDiv = document.getElementById('botStatus');
-        const logContainer = document.getElementById('logContainer');
-        const popupMessageDiv = document.getElementById('popupMessage');
 
-        // Hàm hiển thị popup
-        function showPopup(message, duration = 3000) {
-            popupMessageDiv.textContent = message;
-            popupMessageDiv.classList.add('show');
-            setTimeout(() => {
-                popupMessageDiv.classList.remove('show');
-            }, duration);
-        }
-
-        // Tải cấu hình đã lưu (nếu có) khi trang load
-        function loadConfig() {
-            apiKeyInput.value = localStorage.getItem('apiKey') || '';
-            secretKeyInput.value = localStorage.getItem('secretKey') || '';
-            coinSymbolInput.value = localStorage.getItem('coinSymbol') || 'NEIROUSDT';
-            initialAmountInput.value = localStorage.getItem('initialAmount') || '10';
-            applyDoubleStrategyCheckbox.checked = localStorage.getItem('applyDoubleStrategy') === 'true';
-        }
-
-        // Lưu cấu hình vào Local Storage
-        function saveConfigToLocalStorage() {
-            localStorage.setItem('apiKey', apiKeyInput.value);
-            localStorage.setItem('secretKey', secretKeyInput.value);
-            localStorage.setItem('coinSymbol', coinSymbolInput.value);
-            localStorage.setItem('initialAmount', initialAmountInput.value);
-            localStorage.setItem('applyDoubleStrategy', applyDoubleStrategyCheckbox.checked);
-        }
-
-        // Gửi cấu hình đến backend
         saveConfigBtn.addEventListener('click', async () => {
-            saveConfigToLocalStorage(); // Lưu vào local storage trước
-            
             const config = {
                 apiKey: apiKeyInput.value,
                 secretKey: secretKeyInput.value,
-                coinSymbol: coinSymbolInput.value,
-                initialAmount: parseFloat(initialAmountInput.value),
-                applyDoubleStrategy: applyDoubleStrategyCheckbox.checked
             };
-
-            if (!config.apiKey || !config.secretKey) {
-                showPopup('Lỗi: API Key và Secret Key không được để trống.');
-                return;
-            }
-            if (!config.coinSymbol) {
-                showPopup('Lỗi: Tên đồng coin không được để trống.');
-                return;
-            }
-            if (isNaN(config.initialAmount) || config.initialAmount <= 0) {
-                showPopup('Lỗi: Số USDT ban đầu phải là số dương.');
-                return;
-            }
 
             try {
                 const response = await fetch('/api/configure', {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify(config)
-                });
-                const data = await response.json();
-                if (data.success) {
-                    showPopup(data.message);
-                } else {
-                    showPopup('Lỗi lưu cấu hình: ' + data.message);
-                }
-            } catch (error) {
-                console.error('Error saving config:', error);
-                showPopup('Lỗi kết nối server khi lưu cấu hình.');
-            }
-        });
-
-        // Hàm lấy trạng thái bot
-        async function getBotStatus() {
-            try {
-                const response = await fetch('/api/status');
-                const text = await response.text();
-                botStatusDiv.textContent = text;
-            } catch (error) {
-                console.error('Error fetching bot status:', error);
-                botStatusDiv.textContent = 'Lỗi: Không thể kết nối với server.';
-            }
-        }
-
-        // Hàm lấy logs
-        async function fetchLogs() {
-            try {
-                const response = await fetch('/api/logs');
-                const text = await response.text();
-                logContainer.innerHTML = text.split('\n').map(line => `<div>${line}</div>`).join('');
-                logContainer.scrollTop = logContainer.scrollHeight; // Cuộn xuống dưới cùng
-            } catch (error) {
-                console.error('Error fetching logs:', error);
-                logContainer.innerHTML = '<div>Lỗi: Không thể tải log.</div>';
-            }
-        }
-
-        // Điều khiển bot (Start/Stop)
-        startBotBtn.addEventListener('click', async () => {
-            // Cần lưu cấu hình trước khi Start
-            const config = {
-                apiKey: apiKeyInput.value,
-                secretKey: secretKeyInput.value,
-                coinSymbol: coinSymbolInput.value,
-                initialAmount: parseFloat(initialAmountInput.value),
-                applyDoubleStrategy: applyDoubleStrategyCheckbox.checked
-            };
-
-            if (!config.apiKey || !config.secretKey) {
-                showPopup('Lỗi: API Key và Secret Key không được để trống trước khi khởi động.');
-                return;
-            }
-            if (!config.coinSymbol) {
-                showPopup('Lỗi: Tên đồng coin không được để trống trước khi khởi động.');
-                return;
-            }
-            if (isNaN(config.initialAmount) || config.initialAmount <= 0) {
-                showPopup('Lỗi: Số USDT ban đầu phải là số dương trước khi khởi động.');
-                return;
-            }
-
-            // Gửi cấu hình trước khi Start lệnh
-            try {
-                await fetch('/api/configure', {
-                    method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(config)
                 });
+                const data = await response.json();
+                botStatusDiv.innerText = data.message;
+            } catch (error) {
+                console.error('Error saving config:', error);
+                botStatusDiv.innerText = 'Lỗi kết nối server khi lưu cấu hình.';
+            }
+        });
+
+        startBotBtn.addEventListener('click', async () => {
+            try {
                 const response = await fetch('/start_bot_logic');
                 const message = await response.text();
-                showPopup(message);
-                getBotStatus(); // Cập nhật trạng thái ngay lập tức
+                botStatusDiv.innerText = message;
             } catch (error) {
                 console.error('Error starting bot:', error);
-                showPopup('Lỗi kết nối server khi khởi động bot.');
+                botStatusDiv.innerText = 'Lỗi kết nối server khi khởi động bot.';
             }
         });
 
@@ -346,24 +145,12 @@
             try {
                 const response = await fetch('/stop_bot_logic');
                 const message = await response.text();
-                showPopup(message);
-                getBotStatus(); // Cập nhật trạng thái ngay lập tức
+                botStatusDiv.innerText = message;
             } catch (error) {
                 console.error('Error stopping bot:', error);
-                showPopup('Lỗi kết nối server khi dừng bot.');
+                botStatusDiv.innerText = 'Lỗi kết nối server khi dừng bot.';
             }
         });
-
-        // Tải cấu hình khi trang được tải
-        loadConfig();
-
-        // Cập nhật trạng thái và logs định kỳ
-        setInterval(getBotStatus, 3000); // Cập nhật trạng thái mỗi 3 giây
-        setInterval(fetchLogs, 1000);   // Cập nhật logs mỗi 1 giây
-
-        // Lần đầu tải trang
-        getBotStatus();
-        fetchLogs();
     </script>
 </body>
 </html>
