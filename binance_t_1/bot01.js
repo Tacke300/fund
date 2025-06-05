@@ -1,14 +1,9 @@
-import https from 'https';
-import crypto from 'crypto';
-import express from 'express';
-import { exec } from 'child_process';
-import fs from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
-
-// Lấy __filename và __dirname trong ES modules
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+const https = require('https');
+const crypto = require('crypto');
+const express = require('express');
+const { exec } = require('child_process');
+const fs = require('fs');
+const path = require('path');
 
 // --- CẤU HÌNH API KEY VÀ SECRET KEY (BAN ĐẦU RỖNG) ---
 let API_KEY = ''; // Thay thế bằng API Key của bạn
@@ -19,17 +14,14 @@ const BASE_HOST = 'fapi.binance.com';
 let serverTimeOffset = 0; // Offset thời gian để đồng bộ với server Binance
 let exchangeInfoCache = null; // Biến cache cho exchangeInfo
 
-// --- CẤU HÌNH PARAMETERS GIAO DỊCH ---
-let INITIAL_INVESTMENT_AMOUNT = 1; // Mặc định 1 USDT
-let TARGET_COIN_SYMBOL = 'TRBUSDT'; // Món đầu vào
-let APPLY_DOUBLE_STRATEGY = false; // Mặc định không áp dụng chiến lược gấp đôi
+// --- CẤU HÌNH THAM SỐ GIAO DỊCH ---
+const INITIAL_INVESTMENT_AMOUNT = 1; // Mặc định 1 USDT
+const TARGET_COIN_SYMBOL = 'TRBUSDT'; // Cặp tiền mục tiêu
+const APPLY_DOUBLE_STRATEGY = false; // Mặc định không áp dụng chiến lược gấp đôi
 const TAKE_PROFIT_PERCENTAGE_MAIN = 0.60; // 60% lãi
 const STOP_LOSS_PERCENTAGE_MAIN = 0.175; // 17.5% lỗ
 const MAX_CONSECUTIVE_LOSSES = 5; // Số lần thua tối đa trước khi reset
 const MIN_ORDER_QUANTITY = 0.1; // Số lượng tối thiểu để mở lệnh
-
-// --- WEB SERVER CÀI ĐẶT ---
-const WEB_SERVER_PORT = 1234; // Cổng cho Server
 
 // --- BIẾN QUẢN LÝ TRẠNG THÁI ---
 let botRunning = false; // Trạng thái bot
