@@ -461,7 +461,7 @@ async function closePosition(symbol, quantity, reason) {
         }
         
         // --- ĐỢI 1 GIÂY ĐỂ BINANCE CẬP NHẬT TRẠNG THÁI ---
-        await sleep(1000); 
+        await sleep(250); 
         addLog(`Đã đợi 1 giây sau khi gửi lệnh đóng. Đang xác minh vị thế trên Binance.`);
 
         // --- KIỂM TRA LẠI VỊ THẾ VÀ LẤY PNL CHÍNH XÁC ---
