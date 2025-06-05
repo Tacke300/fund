@@ -330,15 +330,7 @@
                         Thích thì nhích ✔️
                     </label>
                 </div>
-                <button class="btn btn-danger remove-coin-btn">Xóa</button>
-            `;
-            // Thêm sự kiện cho nút xóa
-            div.querySelector('.remove-coin-btn').addEventListener('click', () => {
-                div.remove();
-                saveConfigToLocalStorage(); // Lưu lại ngay sau khi xóa
-            });
-            coinConfigContainer.appendChild(div);
-        }
+                
 
         // Tải cấu hình đã lưu (nếu có) khi trang load
         function loadConfig() {
