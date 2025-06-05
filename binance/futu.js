@@ -692,7 +692,9 @@ async function manageOpenPosition(symbol) {
                 entryPrice: entryPrice,
                 currentPrice: currentPrice,
                 unrealizedPnl: unrealizedPnl,
-                quantity: Math.abs(positionAmount)
+                quantity: Math.abs(positionAmount),
+                initialTPPrice: coinConfig.currentOpenPosition.initialTPPrice, // Thêm để hiển thị
+                initialSLPrice: coinConfig.currentOpenPosition.initialSLPrice  // Thêm để hiển thị
             };
 
             if (existingOpenPosIndex > -1) {
@@ -1003,6 +1005,7 @@ async function openPosition(symbol, tradeDirection, usdtBalance, maxLeverage) {
         }
 
         // Làm tròn giá TP/SL theo pricePrecision và tickSize của symbol
+        // Sử dụng Math.round để làm tròn đến tick gần nhất
         tpPrice = Math.round(tpPrice / tickSize) * tickSize;
         slPrice = Math.round(slPrice / tickSize) * tickSize;
         tpPrice = parseFloat(tpPrice.toFixed(pricePrecision));
