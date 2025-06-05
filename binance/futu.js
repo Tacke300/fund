@@ -61,7 +61,7 @@ class CriticalApiError extends Error {
 // const APPLY_DOUBLE_STRATEGY_DEFAULT = false;
 
 // Cấu hình Take Profit & Stop Loss (áp dụng chung cho tất cả các cặp)
-const TAKE_PROFIT_PERCENTAGE_MAIN = 2.5; // 2.2% lãi trên VỐN
+const TAKE_PROFIT_PERCENTAGE_MAIN = 2.2; // 2.5% lãi trên VỐN
 const STOP_LOSS_PERCENTAGE_MAIN = 0.9;   // 0.9% lỗ trên VỐN
 
 // Số lần thua liên tiếp tối đa trước khi reset về lệnh ban đầu
@@ -925,28 +925,34 @@ async function openPosition(symbol, tradeDirection, usdtBalance, maxLeverage) {
         let slOrderSide, tpOrderSide;
 
         if (tradeDirection === 'LONG') {
+            // Đối với LONG: SL nằm dưới giá vào, TP nằm trên giá vào
+            // Lệnh SL sẽ là SELL, lệnh TP sẽ là SELL
             slPrice = entryPrice - priceChangeForSL;
             tpPrice = entryPrice + priceChangeForTP;
             slOrderSide = 'SELL';
             tpOrderSide = 'SELL';
 
-            slPrice = Math.max(0, Math.floor(slPrice / tickSize) * tickSize);
-            tpPrice = Math.floor(tpPrice / tickSize) * tickSize;
+            // Làm tròn SL xuống theo tickSize, đảm bảo không âm
+            slPrice = Math.max(0, parseFloat((Math.floor(slPrice / tickSize) * tickSize).toFixed(pricePrecision)));
+            // Làm tròn TP xuống theo tickSize
+            tpPrice = parseFloat((Math.floor(tpPrice / tickSize) * tickSize).toFixed(pricePrecision));
 
         } else { // SHORT
+            // Đối với SHORT: SL nằm trên giá vào, TP nằm dưới giá vào
+            // Lệnh SL sẽ là BUY, lệnh TP sẽ là BUY
             slPrice = entryPrice + priceChangeForSL;
             tpPrice = entryPrice - priceChangeForTP;
             slOrderSide = 'BUY';
             tpOrderSide = 'BUY';
 
-            slPrice = Math.ceil(slPrice / tickSize) * tickSize;
-            tpPrice = Math.max(0, Math.ceil(tpPrice / tickSize) * tickSize);
+            // Làm tròn SL lên theo tickSize (không cần Math.max(0,...) vì luôn dương)
+            slPrice = parseFloat((Math.ceil(slPrice / tickSize) * tickSize).toFixed(pricePrecision));
+            // Làm tròn TP lên theo tickSize, đảm bảo không âm
+            tpPrice = Math.max(0, parseFloat((Math.ceil(tpPrice / tickSize) * tickSize).toFixed(pricePrecision)));
         }
 
-        slPrice = parseFloat(slPrice.toFixed(pricePrecision));
-        tpPrice = parseFloat(tpPrice.toFixed(pricePrecision));
-
-        addLog(`[${symbol}] TP: ${tpPrice.toFixed(pricePrecision)}, SL: ${slPrice.toFixed(pricePrecision)}`);
+        // Thêm log để xác nhận giá TP/SL đã tính toán trước khi gửi lên Binance
+        addLog(`[${symbol}] TP đã tính: ${tpPrice.toFixed(pricePrecision)}, SL đã tính: ${slPrice.toFixed(pricePrecision)}`);
 
         try {
             await callSignedAPI('/fapi/v1/order', 'POST', {
@@ -965,6 +971,10 @@ async function openPosition(symbol, tradeDirection, usdtBalance, maxLeverage) {
                 addLog(`[${symbol}] SL kích hoạt ngay lập tức. Đóng vị thế.`);
                 await closePosition(symbol, actualQuantity, 'SL kích hoạt ngay');
                 return;
+            } else if (slError.code === -4006 && slError.msg && slError.msg.includes('Stop price less than zero')) {
+                // Xử lý cụ thể lỗi "Stop price less than zero"
+                addLog(`[${symbol}] LỖI NGHIÊM TRỌNG: Giá SL tính toán là ${slPrice.toFixed(pricePrecision)} gây ra lỗi 'Stop price less than zero'. Vui lòng kiểm tra lại logic tính toán giá SL cho lệnh SHORT.`);
+                // Tùy chọn: Dừng bot hoặc thực hiện hành động khác tùy theo mức độ nghiêm trọng
             }
         }
 
