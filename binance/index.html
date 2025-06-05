@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Binance Futures Trading Bot</title>
+    <title>Binance Futures Trading Bot v1.1</title>
     <style>
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
@@ -54,6 +54,11 @@
         .form-group input[type="checkbox"] {
             margin-right: 10px;
             transform: scale(1.2);
+            vertical-align: middle; /* Căn chỉnh checkbox với label */
+        }
+        .form-group .checkbox-label {
+            display: inline; /* Giữ label trên cùng dòng với checkbox */
+            margin-bottom: 0;
         }
         .button-group {
             text-align: center;
@@ -64,10 +69,11 @@
             border: none;
             border-radius: 8px;
             cursor: pointer;
-            font-size: 0.6em;
+            font-size: 0.9em; /* Tăng font size nút */
             font-weight: bold;
             transition: background-color 0.3s ease, transform 0.2s ease;
             margin: 0 10px;
+            min-width: 120px; /* Đảm bảo nút có kích thước đủ */
         }
         .btn-primary {
             background-color: #007bff;
@@ -98,7 +104,7 @@
             padding: 15px;
             border-radius: 8px;
             margin-top: 20px;
-            font-size: 0.6em;
+            font-size: 0.9em; /* Tăng font size */
             font-weight: bold;
             text-align: center;
             color: #333;
@@ -112,7 +118,7 @@
             height: 300px;
             overflow-y: scroll;
             font-family: 'Consolas', 'Monaco', monospace;
-            font-size: 0.6em;
+            font-size: 0.8em; /* Tăng font size */
             color: #444;
             white-space: pre-wrap; /* Giữ định dạng xuống dòng */
             word-wrap: break-word; /* Ngắt từ khi quá dài */
@@ -145,12 +151,41 @@
             display: block;
             opacity: 1;
         }
+        .coin-entry {
+            border: 1px solid #e0e0e0;
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 20px;
+            background-color: #fcfcfc;
+            position: relative;
+        }
+        .coin-entry .remove-coin-btn {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background-color: #dc3545;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            padding: 5px 10px;
+            font-size: 0.7em;
+            cursor: pointer;
+        }
+        .coin-entry .remove-coin-btn:hover {
+            background-color: #c82333;
+        }
+        hr {
+            border: 0;
+            height: 1px;
+            background-image: linear-gradient(to right, rgba(0, 0, 0, 0), rgba(0, 0, 0, 0.25), rgba(0, 0, 0, 0));
+            margin: 25px 0;
+        }
     </style>
 </head>
 <body>
     <div class="container">
-        
-<div class="status-box" id="botStatus">
+        <h1>Binance Futures Trading Bot v1.1</h1>
+        <div class="status-box" id="botStatus">
             Đang tải trạng thái...
         </div>
         <div class="form-group">
@@ -161,32 +196,20 @@
             <label for="secretKey">Secret Key:</label>
             <input type="password" id="secretKey" placeholder="Nhập Secret Key của bạn">
         </div>
-        <div class="form-group">
-            <label for="coinSymbol">Tên coin (ví dụ: ETHUSDT):</label>
-            <input type="text" id="coinSymbol" value="ETHUSDT" placeholder="Nhập tên đồng coin">
-        </div>
-        <div class="form-group">
-            <label for="initialAmount">Số USDT mở lệnh:</label>
-            <input type="number" id="initialAmount" value="" min="0.01" step="0.01">
-        </div>
-        <div class="form-group">
-            <input type="checkbox" id="applyDoubleStrategy">
-            <label for="applyDoubleStrategy">
-                <p>• Nếu tích vào nút trên sẽ bật chế độ giảm rủi ro nếu đảo chiều liên tục. Nhưng bạn phải đảm bảo số USDT mở lệnh phải lớn hơn Số Tiền Tối Thiểu mở lệnh của Binance và nhỏ hơn 3% Số Dư Tổng Tài Khoản</p>
-                
-            </label>
-        </div>
+
+        <h2>Cấu hình các cặp giao dịch</h2>
+        <div id="coinConfigContainer">
+            </div>
+        <button class="btn btn-primary" id="addCoinBtn">Thêm cặp Coin</button>
 
         <div class="button-group">
             <button class="btn btn-primary" id="saveConfigBtn">Lưu cấu hình</button>
-            
             <button class="btn btn-success" id="startBotBtn">Start Bot</button>
             <button class="btn btn-danger" id="stopBotBtn">Stop Bot</button>
         </div>
 
-        
-
-        
+        <div class="log-box" id="logContainer">
+            </div>
     </div>
 
     <div id="popupMessage" class="popup"></div>
@@ -194,15 +217,15 @@
     <script>
         const apiKeyInput = document.getElementById('apiKey');
         const secretKeyInput = document.getElementById('secretKey');
-        const coinSymbolInput = document.getElementById('coinSymbol');
-        const initialAmountInput = document.getElementById('initialAmount');
-        const applyDoubleStrategyCheckbox = document.getElementById('applyDoubleStrategy');
         const saveConfigBtn = document.getElementById('saveConfigBtn');
         const startBotBtn = document.getElementById('startBotBtn');
         const stopBotBtn = document.getElementById('stopBotBtn');
         const botStatusDiv = document.getElementById('botStatus');
         const logContainer = document.getElementById('logContainer');
         const popupMessageDiv = document.getElementById('popupMessage');
+
+        const coinConfigContainer = document.getElementById('coinConfigContainer');
+        const addCoinBtn = document.getElementById('addCoinBtn');
 
         // Hàm hiển thị popup
         function showPopup(message, duration = 3000) {
@@ -213,48 +236,119 @@
             }, duration);
         }
 
+        // Tạo một mục cấu hình coin mới trong UI
+        function createCoinEntry(symbol = '', initialAmount = '10', applyDoubleStrategy = false) {
+            const div = document.createElement('div');
+            div.classList.add('coin-entry');
+            div.innerHTML = `
+                <div class="form-group">
+                    <label>Tên coin (ví dụ: ETHUSDT):</label>
+                    <input type="text" class="coinSymbol" value="${symbol}" placeholder="Nhập tên đồng coin">
+                </div>
+                <div class="form-group">
+                    <label class="checkbox-label">Số USDT mở lệnh:</label>
+                    <input type="number" class="initialAmount" value="${initialAmount}" min="0.01" step="0.01">
+                </div>
+                <div class="form-group">
+                    <input type="checkbox" class="applyDoubleStrategy" ${applyDoubleStrategy ? 'checked' : ''}>
+                    <label class="checkbox-label">
+                        Chiến lược x2 vốn khi lỗ liên tiếp (Tối đa 5 lần lỗ)
+                        <br>
+                        <small>Số vốn phải lớn hơn số tiền tối thiểu mở lệnh của Binance và nhỏ hơn 3% tổng số dư tài khoản.</small>
+                    </label>
+                </div>
+                <button class="btn btn-danger remove-coin-btn">Xóa</button>
+            `;
+            // Thêm sự kiện cho nút xóa
+            div.querySelector('.remove-coin-btn').addEventListener('click', () => {
+                div.remove();
+                saveConfigToLocalStorage(); // Lưu lại ngay sau khi xóa
+            });
+            coinConfigContainer.appendChild(div);
+        }
+
         // Tải cấu hình đã lưu (nếu có) khi trang load
         function loadConfig() {
             apiKeyInput.value = localStorage.getItem('apiKey') || '';
             secretKeyInput.value = localStorage.getItem('secretKey') || '';
-            coinSymbolInput.value = localStorage.getItem('coinSymbol') || 'NEIROUSDT';
-            initialAmountInput.value = localStorage.getItem('initialAmount') || '10';
-            applyDoubleStrategyCheckbox.checked = localStorage.getItem('applyDoubleStrategy') === 'true';
+
+            const savedCoinConfigs = JSON.parse(localStorage.getItem('coinConfigs') || '[]');
+            if (savedCoinConfigs.length > 0) {
+                savedCoinConfigs.forEach(config => {
+                    createCoinEntry(config.symbol, config.initialAmount, config.applyDoubleStrategy);
+                });
+            } else {
+                // Tạo một cấu hình mặc định nếu chưa có gì
+                createCoinEntry('ETHUSDT', '10', false);
+            }
         }
 
         // Lưu cấu hình vào Local Storage
         function saveConfigToLocalStorage() {
             localStorage.setItem('apiKey', apiKeyInput.value);
             localStorage.setItem('secretKey', secretKeyInput.value);
-            localStorage.setItem('coinSymbol', coinSymbolInput.value);
-            localStorage.setItem('initialAmount', initialAmountInput.value);
-            localStorage.setItem('applyDoubleStrategy', applyDoubleStrategyCheckbox.checked);
+
+            const coinEntries = document.querySelectorAll('.coin-entry');
+            const coinConfigsToSave = [];
+            coinEntries.forEach(entry => {
+                coinConfigsToSave.push({
+                    symbol: entry.querySelector('.coinSymbol').value.trim(),
+                    initialAmount: parseFloat(entry.querySelector('.initialAmount').value),
+                    applyDoubleStrategy: entry.querySelector('.applyDoubleStrategy').checked
+                });
+            });
+            localStorage.setItem('coinConfigs', JSON.stringify(coinConfigsToSave));
         }
+
+        // Thêm cặp coin mới khi nhấn nút
+        addCoinBtn.addEventListener('click', () => {
+            createCoinEntry(); // Tạo một dòng input trống
+            saveConfigToLocalStorage(); // Lưu lại ngay sau khi thêm
+        });
 
         // Gửi cấu hình đến backend
         saveConfigBtn.addEventListener('click', async () => {
             saveConfigToLocalStorage(); // Lưu vào local storage trước
             
-            const config = {
+            const coinEntries = document.querySelectorAll('.coin-entry');
+            const coinConfigs = [];
+            let isValid = true;
+
+            if (!apiKeyInput.value.trim() || !secretKeyInput.value.trim()) {
+                showPopup('Lỗi: API Key và Secret Key không được để trống.');
+                isValid = false;
+            }
+
+            if (coinEntries.length === 0) {
+                showPopup('Lỗi: Cần cấu hình ít nhất một cặp coin.');
+                isValid = false;
+            }
+
+            coinEntries.forEach(entry => {
+                const symbol = entry.querySelector('.coinSymbol').value.trim().toUpperCase();
+                const initialAmount = parseFloat(entry.querySelector('.initialAmount').value);
+                const applyDoubleStrategy = entry.querySelector('.applyDoubleStrategy').checked;
+
+                if (!symbol) {
+                    showPopup('Lỗi: Tên đồng coin không được để trống.');
+                    isValid = false;
+                    return;
+                }
+                if (isNaN(initialAmount) || initialAmount <= 0) {
+                    showPopup(`Lỗi: Số USDT ban đầu cho ${symbol} phải là số dương.`);
+                    isValid = false;
+                    return;
+                }
+                coinConfigs.push({ symbol, initialAmount, applyDoubleStrategy });
+            });
+
+            if (!isValid) return; // Dừng nếu có lỗi validation
+
+            const configToSend = {
                 apiKey: apiKeyInput.value,
                 secretKey: secretKeyInput.value,
-                coinSymbol: coinSymbolInput.value,
-                initialAmount: parseFloat(initialAmountInput.value),
-                applyDoubleStrategy: applyDoubleStrategyCheckbox.checked
+                coinConfigs: coinConfigs // Gửi mảng các cấu hình coin
             };
-
-            if (!config.apiKey || !config.secretKey) {
-                showPopup('Lỗi: API Key và Secret Key không được để trống.');
-                return;
-            }
-            if (!config.coinSymbol) {
-                showPopup('Lỗi: Tên đồng coin không được để trống.');
-                return;
-            }
-            if (isNaN(config.initialAmount) || config.initialAmount <= 0) {
-                showPopup('Lỗi: Số USDT ban đầu phải là số dương.');
-                return;
-            }
 
             try {
                 const response = await fetch('/api/configure', {
@@ -262,7 +356,7 @@
                     headers: {
                         'Content-Type': 'application/json'
                     },
-                    body: JSON.stringify(config)
+                    body: JSON.stringify(configToSend)
                 });
                 const data = await response.json();
                 if (data.success) {
@@ -303,35 +397,50 @@
 
         // Điều khiển bot (Start/Stop)
         startBotBtn.addEventListener('click', async () => {
-            // Cần lưu cấu hình trước khi Start
-            const config = {
+            // Validate và gửi cấu hình trước khi Start
+            const coinEntries = document.querySelectorAll('.coin-entry');
+            const coinConfigs = [];
+            let isValid = true;
+
+            if (!apiKeyInput.value.trim() || !secretKeyInput.value.trim()) {
+                showPopup('Lỗi: API Key và Secret Key không được để trống trước khi khởi động.');
+                isValid = false;
+            }
+            if (coinEntries.length === 0) {
+                showPopup('Lỗi: Cần cấu hình ít nhất một cặp coin để khởi động.');
+                isValid = false;
+            }
+
+            coinEntries.forEach(entry => {
+                const symbol = entry.querySelector('.coinSymbol').value.trim().toUpperCase();
+                const initialAmount = parseFloat(entry.querySelector('.initialAmount').value);
+                const applyDoubleStrategy = entry.querySelector('.applyDoubleStrategy').checked;
+                if (!symbol || isNaN(initialAmount) || initialAmount <= 0) {
+                    isValid = false;
+                    return;
+                }
+                coinConfigs.push({ symbol, initialAmount, applyDoubleStrategy });
+            });
+
+            if (!isValid) {
+                // Popup lỗi đã được hiển thị bên trong vòng lặp validation
+                return;
+            }
+
+            const configToSend = {
                 apiKey: apiKeyInput.value,
                 secretKey: secretKeyInput.value,
-                coinSymbol: coinSymbolInput.value,
-                initialAmount: parseFloat(initialAmountInput.value),
-                applyDoubleStrategy: applyDoubleStrategyCheckbox.checked
+                coinConfigs: coinConfigs
             };
 
-            if (!config.apiKey || !config.secretKey) {
-                showPopup('Lỗi: API Key và Secret Key không được để trống trước khi khởi động.');
-                return;
-            }
-            if (!config.coinSymbol) {
-                showPopup('Lỗi: Tên đồng coin không được để trống trước khi khởi động.');
-                return;
-            }
-            if (isNaN(config.initialAmount) || config.initialAmount <= 0) {
-                showPopup('Lỗi: Số USDT ban đầu phải là số dương trước khi khởi động.');
-                return;
-            }
-
-            // Gửi cấu hình trước khi Start lệnh
             try {
+                // Gửi cấu hình trước khi Start lệnh
                 await fetch('/api/configure', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(config)
+                    body: JSON.stringify(configToSend)
                 });
+
                 const response = await fetch('/start_bot_logic');
                 const message = await response.text();
                 showPopup(message);
