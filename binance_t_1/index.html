@@ -10,7 +10,7 @@
             margin: 20px;
             background-color: #f4f7f6;
             color: #333;
-            line-height: 1;
+            line-height: 1.6; /* Tăng line-height cho dễ đọc */
         }
         .container {
             max-width: 900px;
@@ -37,7 +37,7 @@
         .form-group input[type="text"],
         .form-group input[type="number"],
         .form-group input[type="password"] {
-            width: calc(100% - 20px);
+            width: calc(100% - 24px); /* Điều chỉnh padding và border */
             padding: 12px;
             border: 1px solid #ddd;
             border-radius: 8px;
@@ -45,19 +45,30 @@
             box-sizing: border-box;
             transition: border-color 0.3s ease;
         }
+        .form-group input[type="checkbox"] {
+            margin-right: 10px;
+            transform: scale(1.2); /* Phóng to checkbox */
+        }
         .button-group {
             text-align: center;
             margin-top: 30px;
+            display: flex; /* Dùng flexbox để căn chỉnh các nút */
+            justify-content: center;
+            gap: 20px; /* Khoảng cách giữa các nút */
+            flex-wrap: wrap; /* Cho phép các nút xuống dòng nếu màn hình nhỏ */
         }
         .btn {
             padding: 12px 25px;
             border: none;
             border-radius: 8px;
             cursor: pointer;
-            font-size: 0.6em;
+            font-size: 0.9em; /* Tăng kích thước font cho nút */
             font-weight: bold;
-            transition: background-color 0.3s ease;
-            margin: 0 10px;
+            transition: background-color 0.3s ease, transform 0.2s ease;
+            white-space: nowrap; /* Ngăn nút bị ngắt dòng chữ */
+        }
+        .btn:hover {
+            transform: translateY(-2px); /* Hiệu ứng nổi nhẹ khi hover */
         }
         .btn-primary {
             background-color: #007bff;
@@ -80,10 +91,45 @@
         .btn-danger:hover {
             background-color: #c82333;
         }
+        #botStatus {
+            margin-top: 30px;
+            padding: 15px;
+            background-color: #e9ecef;
+            border-radius: 8px;
+            font-size: 0.9em;
+            text-align: center;
+            color: #495057;
+            border: 1px solid #dee2e6;
+        }
+        .pnl-summary {
+            margin-top: 30px;
+            padding: 20px;
+            background-color: #eaf6fd;
+            border-radius: 10px;
+            border: 1px solid #cce5ff;
+            text-align: center;
+        }
+        .pnl-summary div {
+            font-size: 1.1em;
+            margin-bottom: 8px;
+            font-weight: bold;
+        }
+        .pnl-summary .profit {
+            color: #28a745; /* Xanh lá */
+        }
+        .pnl-summary .loss {
+            color: #dc3545; /* Đỏ */
+        }
+        .pnl-summary .net {
+            color: #007bff; /* Xanh dương */
+            font-size: 1.2em;
+        }
     </style>
 </head>
 <body>
     <div class="container">
+        <h1>Binance Futures Trading Bot</h1>
+
         <div class="form-group">
             <label for="apiKey">API Key:</label>
             <input type="password" id="apiKey" placeholder="Nhập API Key của bạn">
@@ -92,28 +138,86 @@
             <label for="secretKey">Secret Key:</label>
             <input type="password" id="secretKey" placeholder="Nhập Secret Key của bạn">
         </div>
+        <div class="form-group">
+            <label for="coinSymbol">Đồng Coin (Ví dụ: BTCUSDT):</label>
+            <input type="text" id="coinSymbol" value="BTCUSDT">
+        </div>
+        <div class="form-group">
+            <label for="initialAmount">Vốn Ban Đầu (USDT):</label>
+            <input type="number" id="initialAmount" value="10" min="1">
+        </div>
+        <div class="form-group">
+            <input type="checkbox" id="applyDoubleStrategy">
+            <label for="applyDoubleStrategy" style="display: inline;">Áp dụng chiến lược x2 vốn khi lỗ</label>
+        </div>
 
         <div class="button-group">
             <button class="btn btn-primary" id="saveConfigBtn">Lưu cấu hình</button>
-            <button class="btn btn-success" id="startBotBtn">Start Bot</button>
-            <button class="btn btn-danger" id="stopBotBtn">Stop Bot</button>
+            <button class="btn btn-success" id="startBotBtn">Khởi động Bot</button>
+            <button class="btn btn-danger" id="stopBotBtn">Dừng Bot</button>
         </div>
 
-        <div id="botStatus" style="margin-top: 20px;"></div>
+        <div id="botStatus"></div>
+
+        <div class="pnl-summary">
+            <h2>Tổng Quan PNL</h2>
+            <div class="profit">Tổng Lãi: <span id="totalProfit">0.00</span> USDT</div>
+            <div class="loss">Tổng Lỗ: <span id="totalLoss">0.00</span> USDT</div>
+            <div class="net">PNL Ròng: <span id="netPNL">0.00</span> USDT</div>
+        </div>
     </div>
 
     <script>
         const apiKeyInput = document.getElementById('apiKey');
         const secretKeyInput = document.getElementById('secretKey');
+        const coinSymbolInput = document.getElementById('coinSymbol');
+        const initialAmountInput = document.getElementById('initialAmount');
+        const applyDoubleStrategyInput = document.getElementById('applyDoubleStrategy');
+
         const saveConfigBtn = document.getElementById('saveConfigBtn');
         const startBotBtn = document.getElementById('startBotBtn');
         const stopBotBtn = document.getElementById('stopBotBtn');
         const botStatusDiv = document.getElementById('botStatus');
 
+        const totalProfitSpan = document.getElementById('totalProfit');
+        const totalLossSpan = document.getElementById('totalLoss');
+        const netPNLSpan = document.getElementById('netPNL');
+
+        // Hàm để cập nhật trạng thái PNL
+        async function updatePNLDisplay() {
+            try {
+                const response = await fetch('/api/pnl');
+                const data = await response.json();
+                totalProfitSpan.innerText = data.totalProfit;
+                totalLossSpan.innerText = data.totalLoss;
+                netPNLSpan.innerText = data.netPNL;
+
+                // Cập nhật màu sắc cho PNL ròng
+                if (parseFloat(data.netPNL) > 0) {
+                    netPNLSpan.style.color = '#28a745'; // Xanh lá
+                } else if (parseFloat(data.netPNL) < 0) {
+                    netPNLSpan.style.color = '#dc3545'; // Đỏ
+                } else {
+                    netPNLSpan.style.color = '#007bff'; // Xanh dương
+                }
+
+            } catch (error) {
+                console.error('Lỗi cập nhật PNL:', error);
+            }
+        }
+
+        // Lấy và hiển thị PNL lần đầu khi tải trang
+        updatePNLDisplay();
+        // Cập nhật PNL mỗi 5 giây
+        setInterval(updatePNLDisplay, 5000);
+
         saveConfigBtn.addEventListener('click', async () => {
             const config = {
                 apiKey: apiKeyInput.value,
                 secretKey: secretKeyInput.value,
+                coinSymbol: coinSymbolInput.value,
+                initialAmount: initialAmountInput.value,
+                applyDoubleStrategy: applyDoubleStrategyInput.checked
             };
 
             try {
@@ -124,6 +228,8 @@
                 });
                 const data = await response.json();
                 botStatusDiv.innerText = data.message;
+                // Sau khi lưu cấu hình, cập nhật lại PNL (nó đã được reset trong server)
+                updatePNLDisplay();
             } catch (error) {
                 console.error('Error saving config:', error);
                 botStatusDiv.innerText = 'Lỗi kết nối server khi lưu cấu hình.';
@@ -151,6 +257,22 @@
                 botStatusDiv.innerText = 'Lỗi kết nối server khi dừng bot.';
             }
         });
+
+        // Hàm cập nhật trạng thái bot từ PM2 và nội bộ
+        async function updateBotStatus() {
+            try {
+                const response = await fetch('/api/status');
+                const text = await response.text();
+                botStatusDiv.innerText = text;
+            } catch (error) {
+                console.error('Lỗi cập nhật trạng thái bot:', error);
+                botStatusDiv.innerText = 'Lỗi: Không thể lấy trạng thái bot từ server.';
+            }
+        }
+
+        // Cập nhật trạng thái bot mỗi 3 giây
+        setInterval(updateBotStatus, 3000);
+        updateBotStatus(); // Cập nhật ngay khi tải trang
     </script>
 </body>
 </html>
