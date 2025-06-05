@@ -60,8 +60,8 @@ const MAX_CONSECUTIVE_LOSSES = 5;
 
 // === MỚI THÊM/ĐIỀU CHỈNH: TỶ LỆ CHỐT LỜI/CẮT LỖ (Dạng thập phân) ===
 // Cấu hình tỷ lệ chốt lời và cắt lỗ cho từng cặp coin (áp dụng khi mở lệnh)
-const TAKE_PROFIT_PERCENTAGE_MAIN = 0.005; // 0.5%
-const STOP_LOSS_PERCENTAGE_MAIN = 0.005;   // 0.5%
+const TAKE_PROFIT_PERCENTAGE_MAIN = 0.6; // 0.5%
+const STOP_LOSS_PERCENTAGE_MAIN = 0.4;   // 0.5%
 
 
 // Tổng PNL (lời/lỗ) để hiển thị trong log và trên UI (tổng cộng của tất cả các cặp)
