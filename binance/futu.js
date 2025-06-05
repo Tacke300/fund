@@ -63,8 +63,8 @@ let TARGET_COIN_SYMBOL = 'RVNUSDT'; // Mặc định NEIROUSDT (sẽ được c�
 let APPLY_DOUBLE_STRATEGY = false; // Mặc định false (sẽ được cập nhật từ UI)
 
 // Cấu hình Take Profit & Stop Loss
-const TAKE_PROFIT_PERCENTAGE_MAIN = 0.60; // 50% lãi trên VỐN
-const STOP_LOSS_PERCENTAGE_MAIN = 0.175;   // 18% lỗ trên VỐN
+const TAKE_PROFIT_PERCENTAGE_MAIN = 1; // 50% lãi trên VỐN
+const STOP_LOSS_PERCENTAGE_MAIN = 0.275;   // 18% lỗ trên VỐN
 
 // Số lần thua liên tiếp tối đa trước khi reset về lệnh ban đầu
 const MAX_CONSECUTIVE_LOSSES = 5;
