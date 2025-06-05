@@ -1,41 +1,27 @@
+const express = require('express');
 const https = require('https');
 const crypto = require('crypto');
-const express = require('express');
-const { exec } = require('child_process');
-const fs = require('fs');
-const path = require('path');
+const bodyParser = require('body-parser');
 
-// --- CẤU HÌNH API KEY VÀ SECRET KEY (BAN ĐẦU RỖNG) ---
+const app = express();
+const PORT = 1234;
+
+app.use(bodyParser.json());
+app.use(express.static('.')); // Để phục vụ tệp HTML từ thư mục hiện tại
+
 let API_KEY = ''; // Thay thế bằng API Key của bạn
 let SECRET_KEY = ''; // Thay thế bằng Secret Key của bạn
-
-// --- BASE URL CỦA BINANCE FUTURES API ---
-const BASE_HOST = 'fapi.binance.com';
-let serverTimeOffset = 0; // Offset thời gian để đồng bộ với server Binance
-let exchangeInfoCache = null; // Biến cache cho exchangeInfo
-
-// --- CẤU HÌNH THAM SỐ GIAO DỊCH ---
-const INITIAL_INVESTMENT_AMOUNT = 1; // Mặc định 1 USDT
-const TARGET_COIN_SYMBOL = 'TRBUSDT'; // Cặp tiền mục tiêu
-const APPLY_DOUBLE_STRATEGY = false; // Mặc định không áp dụng chiến lược gấp đôi
-const TAKE_PROFIT_PERCENTAGE_MAIN = 0.60; // 60% lãi
-const STOP_LOSS_PERCENTAGE_MAIN = 0.175; // 17.5% lỗ
-const MAX_CONSECUTIVE_LOSSES = 5; // Số lần thua tối đa trước khi reset
-const MIN_ORDER_QUANTITY = 0.1; // Số lượng tối thiểu để mở lệnh
-
-// --- BIẾN QUẢN LÝ TRẠNG THÁI ---
 let botRunning = false; // Trạng thái bot
 let currentOpenPosition = null; // Vị thế đang mở
-let currentInvestmentAmount = INITIAL_INVESTMENT_AMOUNT; // Vốn hiện tại cho lệnh
-let consecutiveLossCount = 0; // Số lần lỗ liên tiếp
 
-// --- CÁC HÀM TIỆN ÍCH ---
+// Hàm tạo chữ ký cho API
 function createSignature(queryString, apiSecret) {
     return crypto.createHmac('sha256', apiSecret)
                  .update(queryString)
                  .digest('hex');
 }
 
+// Hàm gửi yêu cầu HTTP
 async function makeHttpRequest(method, hostname, path, headers, postData = '') {
     return new Promise((resolve, reject) => {
         const options = {
@@ -70,13 +56,14 @@ async function makeHttpRequest(method, hostname, path, headers, postData = '') {
     });
 }
 
+// Hàm gọi API Binance đã ký
 async function callSignedAPI(fullEndpointPath, method = 'GET', params = {}) {
     if (!API_KEY || !SECRET_KEY) {
         throw new Error("API Key hoặc Secret Key chưa được cấu hình.");
     }
 
     const recvWindow = 5000;
-    const timestamp = Date.now() + serverTimeOffset;
+    const timestamp = Date.now();
 
     let queryString = Object.keys(params)
                             .map(key => `${key}=${params[key]}`)
@@ -93,13 +80,14 @@ async function callSignedAPI(fullEndpointPath, method = 'GET', params = {}) {
     };
 
     try {
-        const rawData = await makeHttpRequest(method, BASE_HOST, requestPath, headers);
+        const rawData = await makeHttpRequest(method, 'fapi.binance.com', requestPath, headers);
         return JSON.parse(rawData);
     } catch (error) {
         throw error; // Ném lại lỗi để caller xử lý
     }
 }
 
+// Hàm gọi API Binance công khai
 async function callPublicAPI(fullEndpointPath, params = {}) {
     const queryString = Object.keys(params)
                               .map(key => `${key}=${params[key]}`)
@@ -111,58 +99,24 @@ async function callPublicAPI(fullEndpointPath, params = {}) {
     };
 
     try {
-        const rawData = await makeHttpRequest('GET', BASE_HOST, fullPathWithQuery, headers);
+        const rawData = await makeHttpRequest('GET', 'fapi.binance.com', fullPathWithQuery, headers);
         return JSON.parse(rawData);
     } catch (error) {
         throw error; // Ném lỗi để caller xử lý
     }
 }
 
+// Hàm đồng bộ thời gian với server Binance
 async function syncServerTime() {
     try {
         const data = await callPublicAPI('/fapi/v1/time');
-        const binanceServerTime = data.serverTime;
-        const localTime = Date.now();
-        serverTimeOffset = binanceServerTime - localTime;
+        console.log(`Đồng bộ thời gian thành công: ${data.serverTime}`);
     } catch (error) {
         console.error(`Lỗi đồng bộ thời gian: ${error.message}.`);
-        serverTimeOffset = 0; 
     }
 }
 
-async function getExchangeInfo() {
-    if (exchangeInfoCache) {
-        return exchangeInfoCache;
-    }
-
-    try {
-        const data = await callPublicAPI('/fapi/v1/exchangeInfo');
-        exchangeInfoCache = {};
-        data.symbols.forEach(s => {
-            const lotSizeFilter = s.filters.find(f => f.filterType === 'LOT_SIZE');
-            exchangeInfoCache[s.symbol] = {
-                minQty: lotSizeFilter ? parseFloat(lotSizeFilter.minQty) : 0,
-                stepSize: lotSizeFilter ? parseFloat(lotSizeFilter.stepSize) : 0.001
-            };
-        });
-        return exchangeInfoCache;
-    } catch (error) {
-        console.error('Lỗi lấy exchangeInfo: ' + error.message);
-        exchangeInfoCache = null;
-        throw error;
-    }
-}
-
-async function getCurrentPrice(symbol) {
-    try {
-        const data = await callPublicAPI('/fapi/v1/ticker/price', { symbol: symbol });
-        return parseFloat(data.price);
-    } catch (error) {
-        console.error(`Lỗi lấy giá hiện tại cho ${symbol}: ${error.message}`);
-        return null;
-    }
-}
-
+// Hàm để mở lệnh
 async function openPosition(symbol, tradeDirection) {
     if (currentOpenPosition) {
         console.log(`Đã có vị thế mở (${currentOpenPosition.symbol}). Bỏ qua mở lệnh mới cho ${symbol}.`); 
@@ -175,15 +129,9 @@ async function openPosition(symbol, tradeDirection) {
         return;
     }
 
-    let quantity = (currentInvestmentAmount * 10) / currentPrice; // Tính số lượng theo tài khoản
-    if (quantity < MIN_ORDER_QUANTITY) {
-        console.log(`Số lượng tính toán (${quantity}) quá nhỏ cho ${symbol}. MinQty là ${MIN_ORDER_QUANTITY}. Không thể mở lệnh.`);
-        return; // Không đủ số lượng tối thiểu
-    }
-    
+    let quantity = 1; // Số lượng có thể điều chỉnh theo logic của bạn
     const orderSide = (tradeDirection === 'LONG') ? 'BUY' : 'SELL';
 
-    // Gửi lệnh mở
     try {
         await callSignedAPI('/fapi/v1/order', 'POST', {
             symbol: symbol,
@@ -191,78 +139,53 @@ async function openPosition(symbol, tradeDirection) {
             type: 'MARKET',
             quantity: quantity
         });
-        currentOpenPosition = { symbol: symbol, quantity: quantity, side: tradeDirection };
+        currentOpenPosition = { symbol: symbol, side: tradeDirection };
         console.log(`Đã mở ${tradeDirection} ${symbol} với số lượng ${quantity}.`);
     } catch (error) {
         console.error(`Lỗi khi mở lệnh ${tradeDirection} cho ${symbol}: ${error.message}`);
     }
 }
 
-async function manageOpenPosition() {
-    if (!currentOpenPosition) {
-        console.log(`Không có vị thế để quản lý.`);
-        return;
-    }
-
-    const symbol = currentOpenPosition.symbol;
-    const currentPositionAmount = currentOpenPosition.quantity;
-    
-    const currentPrice = await getCurrentPrice(symbol);
-    if (!currentPrice) return; // Nếu không lấy được giá, thoát
-
-    let profitTarget = (TAKE_PROFIT_PERCENTAGE_MAIN * currentPrice) + currentPrice; // Giá mục tiêu lợi nhuận
-    let lossLimit = currentPrice - (STOP_LOSS_PERCENTAGE_MAIN * currentPrice); // Giá ngừng lỗ
-
-    // Kiểm tra lỗ và chốt lời
-    if (currentPrice >= profitTarget) {
-        console.log(`Chốt lời ${symbol} với giá ${currentPrice}.`);
-        await closePosition(symbol, currentPositionAmount, "Chốt lời");
-    } else if (currentPrice <= lossLimit) {
-        console.log(`Ngừng lỗ ${symbol} với giá ${currentPrice}.`);
-        await closePosition(symbol, currentPositionAmount, "Ngừng lỗ");
-    }
-}
-
-// Đóng vị thế
-async function closePosition(symbol, quantity, reason) {
+// Lấy giá hiện tại của một symbol
+async function getCurrentPrice(symbol) {
     try {
-        await callSignedAPI('/fapi/v1/order', 'POST', {
-            symbol: symbol,
-            side: (currentOpenPosition.side === 'SHORT') ? 'BUY' : 'SELL',
-            type: 'MARKET',
-            quantity: quantity
-        });
-        console.log(`Đã đóng vị thế ${symbol} ${reason}.`);
-        currentOpenPosition = null; // Reset vị thế sau khi đóng
+        const data = await callPublicAPI('/fapi/v1/ticker/price', { symbol: symbol });
+        return parseFloat(data.price);
     } catch (error) {
-        console.error(`Lỗi khi đóng vị thế ${symbol}: ${error.message}`);
+        console.error(`Lỗi lấy giá hiện tại cho ${symbol}: ${error.message}`);
+        return null;
     }
 }
 
-// Khởi động bot
-async function startBotLogic() {
-    if (botRunning) {
-        console.log('Bot đã chạy.');
-        return;
+// Endpoint lưu cấu hình cho bot
+app.post('/api/configure', (req, res) => {
+    const { apiKey, secretKey } = req.body;
+
+    if (apiKey && secretKey) {
+        API_KEY = apiKey;
+        SECRET_KEY = secretKey;
+        return res.json({ success: true, message: 'Cấu hình đã được lưu thành công.' });
     }
 
-    try {
-        await syncServerTime(); // Đồng bộ thời gian
-        await getExchangeInfo(); // Tải thông tin sàn
-        botRunning = true;
-        console.log('Bot đã khởi động thành công.');
-        
-        // Vòng lặp để kiểm tra một cách liên tục
-        setInterval(async () => {
-            await manageOpenPosition();
-            await openPosition(TARGET_COIN_SYMBOL, 'LONG'); // Hoặc 'SHORT' dựa vào logic của bạn
-        }, 5000); // cứ 5 giây kiểm tra
+    return res.json({ success: false, message: 'API Key và Secret Key không hợp lệ.' });
+});
 
-    } catch (error) {
-        console.error(`Lỗi trong quá trình khởi động bot: ${error.message}`);
-    }
-}
+// Điều khiển bot (start/stop)
+app.get('/start_bot_logic', (req, res) => {
+    syncServerTime(); // Đồng bộ thời gian mỗi khi khởi động bot
+    botRunning = true; // Cập nhật trạng thái bot
+    // Bắt đầu logic kinh doanh của bạn ở đây...
+    console.log('Bot đã khởi động!');
+    return res.send('Bot đã khởi động!');
+});
 
-// Khởi động bot
-startBotLogic();
+app.get('/stop_bot_logic', (req, res) => {
+    botRunning = false; // Cập nhật trạng thái bot
+    console.log('Bot đã dừng lại.');
+    return res.send('Bot đã dừng lại.');
+});
 
+// Bắt đầu server
+app.listen(PORT, () => {
+    console.log(`Server đang chạy trên cổng ${PORT}`);
+});
