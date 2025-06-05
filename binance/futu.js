@@ -39,7 +39,7 @@ let retryBotTimeout = null;
 // === START - BIẾN QUẢN LÝ LỖI VÀ TẦN SUẤT LOG ===
 let consecutiveApiErrors = 0; // Đếm số lỗi API liên tiếp
 const MAX_CONSECUTIVE_API_ERRORS = 5; // Số lỗi API liên tiếp tối đa cho phép trước khi tạm dừng bot
-const ERROR_RETRY_DELAY_MS = 5000; // Độ trễ (ms) khi bot tạm dừng sau nhiều lỗi (ví dụ: 5 giây)
+const ERROR_RETRY_DELAY_MS = 1000; // Độ trễ (ms) khi bot tạm dừng sau nhiều lỗi (ví dụ: 5 giây)
 
 // Cache các thông điệp log để tránh spam quá nhiều dòng giống nhau liên tiếp
 const logCounts = {}; // { messageHash: { count: number, lastLoggedTime: Date } }
@@ -61,7 +61,7 @@ class CriticalApiError extends Error {
 // const APPLY_DOUBLE_STRATEGY_DEFAULT = false;
 
 // Cấu hình Take Profit & Stop Loss (áp dụng chung cho tất cả các cặp)
-const TAKE_PROFIT_PERCENTAGE_MAIN = 2.2; // 2.5% lãi trên VỐN
+const TAKE_PROFIT_PERCENTAGE_MAIN = 0.2; // 2.5% lãi trên VỐN
 const STOP_LOSS_PERCENTAGE_MAIN = 0.9;   // 0.9% lỗ trên VỐN
 
 // Số lần thua liên tiếp tối đa trước khi reset về lệnh ban đầu
@@ -465,7 +465,7 @@ async function closePosition(symbol, quantity, reason) {
         }
 
         // --- BƯỚC 2: ĐỢI VỊ THẾ ĐƯỢC CẬP NHẬT HOÀN TOÀN TRÊN BINANCE ---
-        await sleep(750); // Tăng lên 0.75s để đảm bảo Binance kịp xử lý
+        await sleep(50); // Tăng lên 0.75s để đảm bảo Binance kịp xử lý
         addLog(`Đã đợi 0.75 giây sau khi gửi lệnh đóng. Đang xác minh vị thế và tìm giao dịch trên Binance.`);
 
         // --- BƯỚC 3: XÁC MINH VỊ THẾ VÀ LẤY PNL CHÍNH XÁC ---
