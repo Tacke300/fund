@@ -213,7 +213,7 @@ async function callSignedAPI(fullEndpointPath, method = 'GET', params = {}) {
 
     try {
         const rawData = await makeHttpRequest(method, BASE_HOST, requestPath, headers, requestBody);
-        consecutiveApiErrors = 0;
+        consecutiveApiErrors = 0; // Reset lỗi nếu thành công
         return JSON.parse(rawData);
     } catch (error) {
         consecutiveApiErrors++;
@@ -234,7 +234,7 @@ async function callSignedAPI(fullEndpointPath, method = 'GET', params = {}) {
             addLog(`Lỗi API liên tiếp. Dừng bot.`, true);
             throw new CriticalApiError("Lỗi API nghiêm trọng, bot dừng.");
         }
-        throw error;
+        throw error; // Vẫn throw lỗi để logic gọi có thể xử lý (ví dụ: sleep và retry)
     }
 }
 
@@ -251,7 +251,7 @@ async function callPublicAPI(fullEndpointPath, params = {}) {
 
     try {
         const rawData = await makeHttpRequest('GET', BASE_HOST, fullPathWithQuery, headers);
-        consecutiveApiErrors = 0;
+        consecutiveApiErrors = 0; // Reset lỗi nếu thành công
         return JSON.parse(rawData);
     } catch (error) {
         consecutiveApiErrors++;
@@ -265,7 +265,7 @@ async function callPublicAPI(fullEndpointPath, params = {}) {
             addLog(`Lỗi API liên tiếp. Dừng bot.`, true);
             throw new CriticalApiError("Lỗi API nghiêm trọng, bot dừng.");
         }
-        throw error;
+        throw error; // Vẫn throw lỗi để logic gọi có thể xử lý
     }
 }
 
@@ -279,8 +279,8 @@ async function syncServerTime() {
         addLog(`Đồng bộ thời gian. Lệch: ${serverTimeOffset} ms.`);
     } catch (error) {
         addLog(`Lỗi đồng bộ thời gian: ${error.message}.`);
-        serverTimeOffset = 0;
-        throw error;
+        serverTimeOffset = 0; // Đặt về 0 để không gây lỗi lệch thời gian thêm
+        throw error; // Vẫn throw để dừng khởi động nếu không đồng bộ được
     }
 }
 
@@ -299,7 +299,8 @@ async function getLeverageBracketForSymbol(symbol) {
         return null;
     } catch (error) {
         addLog(`Lỗi lấy đòn bẩy cho ${symbol}: ${error.msg || error.message}`);
-        return null;
+        if (error instanceof CriticalApiError) throw error; // Re-throw critical errors
+        return null; // Trả về null nếu lỗi không nghiêm trọng
     }
 }
 
@@ -315,6 +316,7 @@ async function setLeverage(symbol, leverage) {
         return true;
     } catch (error) {
         addLog(`Lỗi đặt đòn bẩy ${leverage}x cho ${symbol}: ${error.msg || error.message}`);
+        if (error instanceof CriticalApiError) throw error; // Re-throw critical errors
         return false;
     }
 }
@@ -351,19 +353,26 @@ async function getExchangeInfo() {
     } catch (error) {
         addLog('Lỗi lấy exchangeInfo: ' + (error.msg || error.message));
         exchangeInfoCache = null;
-        throw error;
+        throw error; // Throw để dừng bot nếu không lấy được exchangeInfo
     }
 }
 
 // Hàm kết hợp để lấy tất cả filters và maxLeverage cho một symbol
 async function getSymbolDetails(symbol) {
-    const filters = await getExchangeInfo();
-    if (!filters || !filters[symbol]) {
-        addLog(`Không tìm thấy filters cho ${symbol}.`);
-        return null;
+    try {
+        const filters = await getExchangeInfo();
+        if (!filters || !filters[symbol]) {
+            addLog(`Không tìm thấy filters cho ${symbol}.`);
+            return null;
+        }
+        const maxLeverage = await getLeverageBracketForSymbol(symbol);
+        return { ...filters[symbol], maxLeverage: maxLeverage };
+    } catch (error) {
+        // CriticalApiError từ getExchangeInfo hoặc getLeverageBracketForSymbol sẽ được re-throw
+        // và xử lý ở tầng cao hơn (startBotLogicInternal, runTradingLogic, closePosition)
+        addLog(`Lỗi tổng hợp chi tiết symbol cho ${symbol}: ${error.msg || error.message}`);
+        throw error;
     }
-    const maxLeverage = await getLeverageBracketForSymbol(symbol);
-    return { ...filters[symbol], maxLeverage: maxLeverage };
 }
 
 // Lấy giá hiện tại của một symbol
@@ -372,9 +381,8 @@ async function getCurrentPrice(symbol) {
         const data = await callPublicAPI('/fapi/v1/ticker/price', { symbol: symbol });
         return parseFloat(data.price);
     } catch (error) {
-        if (error instanceof CriticalApiError) {
-             addLog(`Lỗi nghiêm trọng khi lấy giá cho ${symbol}: ${error.msg || error.message}`);
-        }
+        addLog(`Lỗi khi lấy giá cho ${symbol}: ${error.msg || error.message}`);
+        if (error instanceof CriticalApiError) throw error; // Re-throw critical errors
         return null;
     }
 }
@@ -393,6 +401,7 @@ async function cancelOpenOrdersForSymbol(symbol) {
             addLog(`Không có lệnh chờ nào cho ${symbol} để hủy.`);
         } else {
             addLog(`Lỗi hủy lệnh chờ cho ${symbol}: ${error.msg || error.message}`);
+            if (error instanceof CriticalApiError) throw error; // Re-throw critical errors
         }
     }
 }
@@ -442,7 +451,15 @@ async function closePosition(symbol, quantity, reason) {
         const quantityPrecision = symbolInfo.quantityPrecision;
 
         // --- BƯỚC 1: HỦY TẤT CẢ LỆNH CHỜ HIỆN TẠI (TP/SL) ---
-        await cancelOpenOrdersForSymbol(symbol);
+        // Bắt lỗi cụ thể của CriticalApiError ở đây để không dừng toàn bộ bot ngay lập tức
+        try {
+            await cancelOpenOrdersForSymbol(symbol);
+        } catch (error) {
+            addLog(`[${symbol}] Cảnh báo: Không thể hủy lệnh chờ do lỗi: ${error.msg || error.message}. Sẽ thử lại sau.`);
+            // Không re-throw CriticalApiError ở đây, chỉ log và tiếp tục cố gắng đóng vị thế
+            // Nếu đây là CriticalApiError thực sự, nó sẽ được bắt ở khối catch lớn hơn.
+        }
+
 
         // --- BƯỚC 2: GỬI LỆNH ĐÓNG MARKET (Nếu vẫn còn vị thế) ---
         let currentPositionOnBinance;
@@ -451,7 +468,8 @@ async function closePosition(symbol, quantity, reason) {
              currentPositionOnBinance = positions.find(p => p.symbol === symbol && parseFloat(p.positionAmt) !== 0);
         } catch (error) {
             addLog(`[${symbol}] Lỗi kiểm tra vị thế trước khi đóng lệnh: ${error.msg || error.message}. Có thể đã mất kết nối hoặc API lỗi. Sẽ thử lại sau.`);
-            coinConfig.isClosingPosition = false;
+            coinConfig.isClosingPosition = false; // Reset cờ
+            if (error instanceof CriticalApiError) throw error; // Re-throw critical API errors
             return;
         }
 
@@ -480,6 +498,7 @@ async function closePosition(symbol, quantity, reason) {
                 } else {
                     addLog(`[${symbol}] Lỗi gửi lệnh đóng MARKET: ${orderError.msg || orderError.message}.`);
                     coinConfig.isClosingPosition = false;
+                    if (orderError instanceof CriticalApiError) throw orderError; // Re-throw critical API errors
                     return;
                 }
             }
@@ -509,7 +528,9 @@ async function closePosition(symbol, quantity, reason) {
             } catch (error) {
                 addLog(`[${symbol}] Lỗi khi kiểm tra vị thế trong lúc chờ đóng: ${error.msg || error.message}. Sẽ thử lại sau ${checkPositionIntervalMs / 1000}s.`);
                 await sleep(checkPositionIntervalMs);
-                if (error instanceof CriticalApiError) throw error; // Re-throw critical API errors
+                if (error instanceof CriticalApiError) { // Nếu lỗi API nghiêm trọng, re-throw để dừng bot
+                    throw error;
+                }
             }
         }
 
@@ -545,6 +566,11 @@ async function closePosition(symbol, quantity, reason) {
                     const isMatchingLongClose = (positionSideBeforeClose === 'LONG' && tradeSide === 'SELL' && Math.abs(tradeQty - quantity) < 0.000001);
                     const isMatchingShortClose = (positionSideBeforeClose === 'SHORT' && tradeSide === 'BUY' && Math.abs(tradeQty - quantity) < 0.000001);
 
+                    // Kiểm tra thêm commission để xác nhận đây là một giao dịch thực sự, không phải một entry hay lỗi
+                    // if (parseFloat(t.commission) > 0) { // Đảm bảo có commission
+                    //     return (isMatchingLongClose || isMatchingShortClose);
+                    // }
+                    // Bỏ kiểm tra commission nếu trade không có fee, quan trọng là PNL
                     return (isMatchingLongClose || isMatchingShortClose);
                 });
 
@@ -557,7 +583,9 @@ async function closePosition(symbol, quantity, reason) {
             } catch (error) {
                 addLog(`[${symbol}] Lỗi khi tìm giao dịch trong lịch sử: ${error.msg || error.message}. Sẽ thử lại sau ${checkTradeIntervalMs / 1000}s.`);
                 await sleep(checkTradeIntervalMs);
-                if (error instanceof CriticalApiError) throw error; // Re-throw critical API errors
+                if (error instanceof CriticalApiError) { // Nếu lỗi API nghiêm trọng, re-throw để dừng bot
+                    throw error;
+                }
             }
         }
 
@@ -597,7 +625,7 @@ async function closePosition(symbol, quantity, reason) {
             }
         } else {
              addLog(`[${symbol}] LỖI NGHIÊM TRỌNG: Đã đóng vị thế nhưng KHÔNG THỂ tìm thấy giao dịch đóng lệnh gần nhất. PNL sẽ không chính xác.`);
-             pnlValue = 0;
+             pnlValue = 0; // Đảm bảo PNL là 0 hoặc một giá trị mặc định nếu không tìm thấy trade
         }
 
         // --- BƯỚC 6: CẬP NHẬT TỔNG LỜI/LỖ TOÀN BỘ BOT ---
@@ -655,6 +683,9 @@ async function closePosition(symbol, quantity, reason) {
 
         // --- BƯỚC 8: DỌN DẸP TRẠNG THÁI CHO CẶP COIN NÀY ---
         coinConfig.currentOpenPosition = null;
+        // Xóa vị thế khỏi overallBotStats.currentOpenPositions
+        overallBotStats.currentOpenPositions = overallBotStats.currentOpenPositions.filter(pos => pos.symbol !== symbol);
+
         if (coinConfig.positionCheckInterval) {
             clearInterval(coinConfig.positionCheckInterval);
             coinConfig.positionCheckInterval = null;
@@ -746,6 +777,19 @@ async function manageOpenPosition(symbol) {
         addLog(`Lỗi quản lý vị thế mở cho ${symbol}: ${error.msg || error.message}`);
         if(error instanceof CriticalApiError) {
              addLog(`Bot dừng do lỗi API nghiêm trọng khi quản lý vị thế của ${symbol}.`);
+             stopBotLogicInternal();
+             if (!retryBotTimeout) {
+                addLog(`Lên lịch tự động khởi động lại sau ${ERROR_RETRY_DELAY_MS / 1000}s.`);
+                retryBotTimeout = setTimeout(async () => {
+                    addLog('Thử khởi động lại bot...');
+                    await startBotLogicInternal(Array.from(configuredCoinPairs.values()).map(cfg => ({
+                        symbol: cfg.symbol,
+                        initialAmount: cfg.initialInvestmentAmount,
+                        applyDoubleStrategy: cfg.applyDoubleStrategy
+                    }))); // Truyền lại cấu hình cũ
+                    retryBotTimeout = null;
+                }, ERROR_RETRY_DELAY_MS);
+            }
         }
     }
 }
@@ -782,11 +826,12 @@ async function runTradingLogic(symbol) {
         const targetSymbol = symbol;
         let eligibleSymbol = null;
 
-        const symbolDetails = await getSymbolDetails(targetSymbol);
+        const symbolDetails = await getSymbolDetails(targetSymbol); // getSymbolDetails có thể throw CriticalApiError
         if (symbolDetails && typeof symbolDetails.maxLeverage === 'number' && symbolDetails.maxLeverage > 1) {
-            const currentPrice = await getCurrentPrice(targetSymbol);
+            const currentPrice = await getCurrentPrice(targetSymbol); // getCurrentPrice có thể throw CriticalApiError
             if (currentPrice === null) {
                 addLog(`[${targetSymbol}] Lỗi lấy giá. Bỏ qua. Sẽ thử lại ngay.`);
+                // scheduleNextMainCycle(symbol); // Vẫn cố gắng schedule lại nếu không phải lỗi nghiêm trọng
             } else {
                 let estimatedQuantity = (coinConfig.currentInvestmentAmount * symbolDetails.maxLeverage) / currentPrice;
                 estimatedQuantity = Math.floor(estimatedQuantity / symbolDetails.stepSize) * symbolDetails.stepSize;
@@ -812,7 +857,7 @@ async function runTradingLogic(symbol) {
             coinConfig.currentInvestmentAmount = coinConfig.initialInvestmentAmount;
             coinConfig.consecutiveLossCount = 0;
             addLog(`[${targetSymbol}] Số dư không đủ. Reset vốn về ${coinConfig.currentInvestmentAmount} USDT và lượt lỗ về 0. Lệnh tiếp theo vẫn là: ${coinConfig.nextTradeDirection}.`);
-            if(botRunning) scheduleNextMainCycle(symbol);
+            if(botRunning) scheduleNextMainCycle(symbol); // Schedule lại ngay lập tức
             return;
         }
 
@@ -825,7 +870,7 @@ async function runTradingLogic(symbol) {
 
         } else {
             addLog(`[${targetSymbol}] Không thể mở lệnh ${coinConfig.nextTradeDirection}. Sẽ thử lại ngay.`);
-            if(botRunning) scheduleNextMainCycle(symbol);
+            if(botRunning) scheduleNextMainCycle(symbol); // Schedule lại ngay lập tức
         }
     } catch (error) {
         addLog(`Lỗi trong chu kỳ giao dịch của ${symbol}: ${error.msg || error.message}`);
@@ -845,7 +890,7 @@ async function runTradingLogic(symbol) {
                 }, ERROR_RETRY_DELAY_MS);
             }
         } else {
-            if(botRunning) scheduleNextMainCycle(symbol);
+            if(botRunning) scheduleNextMainCycle(symbol); // Schedule lại ngay lập tức cho các lỗi không nghiêm trọng
         }
     }
 }
@@ -873,9 +918,11 @@ async function scheduleNextMainCycle(symbol) {
     // Xóa bất kỳ lịch trình cũ nào
     if (coinConfig.nextScheduledCycleTimeout) {
         clearTimeout(coinConfig.nextScheduledCycleTimeout);
+        coinConfig.nextScheduledCycleTimeout = null;
     }
 
-    // Chạy logic ngay lập tức
+    // Chạy logic ngay lập tức (không có độ trễ)
+    // Nếu runTradingLogic không mở được lệnh, nó sẽ tự động schedule lại chính nó
     await runTradingLogic(symbol);
 }
 
@@ -891,21 +938,21 @@ async function openPosition(symbol, tradeDirection, usdtBalance, maxLeverage) {
     const coinConfig = configuredCoinPairs.get(symbol);
     if (!coinConfig || coinConfig.currentOpenPosition || coinConfig.isClosingPosition) {
         addLog(`[${symbol}] Đã có vị thế mở hoặc đang đóng lệnh. Bỏ qua mở lệnh mới.`);
-        if(botRunning) scheduleNextMainCycle(symbol);
+        if(botRunning) scheduleNextMainCycle(symbol); // Vẫn schedule lại phòng trường hợp lỗi
         return;
     }
 
     addLog(`[${symbol}] Mở ${tradeDirection}.`);
     addLog(`[${symbol}] Mở lệnh với số vốn: ${coinConfig.currentInvestmentAmount} USDT.`);
     try {
-        const symbolDetails = await getSymbolDetails(symbol);
+        const symbolDetails = await getSymbolDetails(symbol); // Có thể throw CriticalApiError
         if (!symbolDetails) {
             addLog(`[${symbol}] Lỗi lấy chi tiết symbol. Không mở lệnh.`);
             if(botRunning) scheduleNextMainCycle(symbol);
             return;
         }
 
-        const leverageSetSuccess = await setLeverage(symbol, maxLeverage);
+        const leverageSetSuccess = await setLeverage(symbol, maxLeverage); // Có thể throw CriticalApiError
         if (!leverageSetSuccess) {
             addLog(`[${symbol}] Lỗi đặt đòn bẩy ${maxLeverage}x. Hủy mở lệnh.`);
             if(botRunning) scheduleNextMainCycle(symbol);
@@ -914,7 +961,7 @@ async function openPosition(symbol, tradeDirection, usdtBalance, maxLeverage) {
 
         const { pricePrecision, quantityPrecision, minNotional, minQty, stepSize, tickSize } = symbolDetails;
 
-        const currentPrice = await getCurrentPrice(symbol);
+        const currentPrice = await getCurrentPrice(symbol); // Có thể throw CriticalApiError
         if (!currentPrice) {
             addLog(`[${symbol}] Lỗi lấy giá hiện tại. Không mở lệnh.`);
             if(botRunning) scheduleNextMainCycle(symbol);
@@ -968,12 +1015,12 @@ async function openPosition(symbol, tradeDirection, usdtBalance, maxLeverage) {
         addLog(`[${symbol}] Đã gửi lệnh MARKET để mở ${tradeDirection}.`);
 
         // --- ĐỢI VỊ THẾ XUẤT HIỆN TRÊN BINANCE (Quan trọng) ---
-        addLog(`[${symbol}] Đang chờ vị thế mở xuất hiện trên Binance...`);
+        addLog(`[${symbol}] Đang chờ vị thế mở xuất hiện trên Binance... (Chờ vô cực)`);
         let openPositionOnBinance = null;
         const checkOpenPosIntervalMs = 500;
         let openPosAttempts = 0;
 
-        while (!openPositionOnBinance && botRunning && openPosAttempts < 20) { // Giới hạn 20 lần thử (10 giây) để tránh vòng lặp vô hạn nếu lệnh không khớp
+        while (!openPositionOnBinance && botRunning /* && openPosAttempts < 20 */) { // Bỏ giới hạn số lần thử
             openPosAttempts++;
             try {
                 const positions = await callSignedAPI('/fapi/v2/positionRisk', 'GET');
@@ -985,13 +1032,13 @@ async function openPosition(symbol, tradeDirection, usdtBalance, maxLeverage) {
             } catch (error) {
                 addLog(`[${symbol}] Lỗi khi kiểm tra vị thế mở: ${error.msg || error.message}.`);
                 await sleep(checkOpenPosIntervalMs);
-                if (error instanceof CriticalApiError) throw error;
+                if (error instanceof CriticalApiError) throw error; // Re-throw critical errors
             }
         }
 
         if (!openPositionOnBinance) {
             addLog(`[${symbol}] LỖI NGHIÊM TRỌNG: Không tìm thấy vị thế mở sau nhiều lần thử. Có thể lệnh không khớp hoặc đã đóng ngay lập tức. Hủy chu kỳ.`);
-            await cancelOpenOrdersForSymbol(symbol);
+            await cancelOpenOrdersForSymbol(symbol); // Hủy các lệnh chờ khác để làm sạch
             if(botRunning) scheduleNextMainCycle(symbol);
             return;
         }
@@ -1005,6 +1052,7 @@ async function openPosition(symbol, tradeDirection, usdtBalance, maxLeverage) {
         addLog(`[${symbol}] + Đòn bẩy: ${maxLeverage}x`);
         addLog(`[${symbol}] + Ký quỹ: ${capitalToUse.toFixed(2)} USDT | Qty thực tế: ${actualQuantity} | Giá vào thực tế: ${entryPrice.toFixed(pricePrecision)}`);
 
+        // Đảm bảo các lệnh chờ cũ đã được hủy
         await cancelOpenOrdersForSymbol(symbol);
         addLog(`[${symbol}] Đã hủy các lệnh chờ cũ (nếu có).`);
 
@@ -1015,6 +1063,7 @@ async function openPosition(symbol, tradeDirection, usdtBalance, maxLeverage) {
         // Tránh chia cho 0 nếu quantity không hợp lệ
         if (actualQuantity === 0) {
             addLog(`[${symbol}] Lỗi: ActualQuantity là 0. Không thể tính TP/SL. Đóng vị thế (nếu có) và thử lại.`);
+            // Gọi closePosition để xử lý việc đóng vị thế này, nó sẽ tự động schedule chu kỳ tiếp theo
             await closePosition(symbol, quantity, 'Lỗi Qty = 0 khi mở');
             return;
         }
@@ -1088,8 +1137,11 @@ async function openPosition(symbol, tradeDirection, usdtBalance, maxLeverage) {
                 return;
             } else if (slError.code === -4006 && slError.msg && slError.msg.includes('Stop price less than zero')) {
                 addLog(`[${symbol}] LỖI NGHIÊM TRỌNG: Giá SL tính toán là ${slPrice.toFixed(pricePrecision)} gây ra lỗi 'Stop price less than zero'. Vui lòng kiểm tra lại logic tính toán giá SL cho lệnh SHORT.`);
+                // Nếu đây là lỗi nghiêm trọng, ta có thể dừng bot hoặc chỉ log và tiếp tục
+                if (slError instanceof CriticalApiError) throw slError; // Re-throw critical errors
             } else {
                 addLog(`[${symbol}] Lỗi không xác định khi đặt SL. Sẽ tiếp tục nhưng cần kiểm tra.`);
+                if (slError instanceof CriticalApiError) throw slError; // Re-throw critical errors
             }
         }
 
@@ -1112,6 +1164,7 @@ async function openPosition(symbol, tradeDirection, usdtBalance, maxLeverage) {
                 return;
             } else {
                  addLog(`[${symbol}] Lỗi không xác định khi đặt TP. Sẽ tiếp tục nhưng cần kiểm tra.`);
+                 if (tpError instanceof CriticalApiError) throw tpError; // Re-throw critical errors
             }
         }
 
@@ -1122,6 +1175,7 @@ async function openPosition(symbol, tradeDirection, usdtBalance, maxLeverage) {
                     try {
                         await manageOpenPosition(symbol);
                     } catch (error) {
+                        // Lỗi trong manageOpenPosition đã được xử lý (critical error sẽ dừng bot)
                         addLog(`Lỗi kiểm tra vị thế định kỳ cho ${symbol}: ${error.msg || error.message}.`);
                     }
                 } else if (!botRunning && coinConfig.positionCheckInterval) {
@@ -1135,7 +1189,21 @@ async function openPosition(symbol, tradeDirection, usdtBalance, maxLeverage) {
         addLog(`Lỗi mở ${tradeDirection} ${symbol}: ${error.msg || error.message}`);
         if(error instanceof CriticalApiError) {
             addLog(`Bot dừng do lỗi API nghiêm trọng khi mở lệnh.`);
+            stopBotLogicInternal(); // Dừng toàn bộ bot
+            if (!retryBotTimeout) {
+                addLog(`Lên lịch tự động khởi động lại sau ${ERROR_RETRY_DELAY_MS / 1000}s.`);
+                retryBotTimeout = setTimeout(async () => {
+                    addLog('Thử khởi động lại bot...');
+                    await startBotLogicInternal(Array.from(configuredCoinPairs.values()).map(cfg => ({
+                        symbol: cfg.symbol,
+                        initialAmount: cfg.initialInvestmentAmount,
+                        applyDoubleStrategy: cfg.applyDoubleStrategy
+                    })));
+                    retryBotTimeout = null;
+                }, ERROR_RETRY_DELAY_MS);
+            }
         } else if(botRunning) {
+            // Nếu không phải lỗi nghiêm trọng, schedule lại chu kỳ để thử lại
             scheduleNextMainCycle(symbol);
         }
     }
@@ -1168,18 +1236,18 @@ async function startBotLogicInternal(configs) { // configs là một mảng cấ
     addLog('Kiểm tra kết nối API Binance Futures...');
 
     try {
-        await syncServerTime();
+        await syncServerTime(); // Có thể throw CriticalApiError
 
-        const account = await callSignedAPI('/fapi/v2/account', 'GET');
-        const usdtBalance = account.assets.find(a => a.asset === 'USDT')?.availableBalance || 0;
-        addLog(`API Key OK! USDT khả dụng: ${parseFloat(usdtBalance).toFixed(2)}`);
+        const account = await callSignedAPI('/fapi/v2/account', 'GET'); // Có thể throw CriticalApiError
+        const usdtAsset = account.assets.find(a => a.asset === 'USDT')?.availableBalance || 0;
+        addLog(`API Key OK! USDT khả dụng: ${parseFloat(usdtAsset).toFixed(2)}`);
 
-        consecutiveApiErrors = 0;
+        consecutiveApiErrors = 0; // Đặt lại sau khi xác minh API thành công
 
-        await getExchangeInfo();
+        await getExchangeInfo(); // Có thể throw CriticalApiError
         if (!exchangeInfoCache) {
             addLog('Lỗi tải exchangeInfo. Bot dừng.');
-            botRunning = false;
+            botRunning = false; // Đảm bảo bot dừng nếu không tải được exchangeInfo
             return 'Không thể tải exchangeInfo.';
         }
 
@@ -1224,6 +1292,7 @@ async function startBotLogicInternal(configs) { // configs là một mảng cấ
                                  await manageOpenPosition(symbol);
                              } catch (error) {
                                  addLog(`Lỗi kiểm tra vị thế định kỳ cho ${symbol}: ${error.msg || error.message}.`);
+                                 // manageOpenPosition sẽ tự xử lý CriticalApiError
                              }
                          } else if (!botRunning && coinConfig.positionCheckInterval) {
                              clearInterval(coinConfig.positionCheckInterval);
@@ -1252,7 +1321,7 @@ async function startBotLogicInternal(configs) { // configs là một mảng cấ
         addLog('[Lỗi khởi động bot] ' + errorMsg);
         addLog('   -> Bot dừng. Kiểm tra và khởi động lại.');
 
-        stopBotLogicInternal();
+        stopBotLogicInternal(); // Dừng tất cả các hoạt động nếu khởi động thất bại
         if (error instanceof CriticalApiError && !retryBotTimeout) {
             addLog(`Lên lịch tự động khởi động lại sau ${ERROR_RETRY_DELAY_MS / 1000}s.`);
             retryBotTimeout = setTimeout(async () => {
