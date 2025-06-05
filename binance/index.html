@@ -54,11 +54,12 @@
         .form-group input[type="checkbox"] {
             margin-right: 10px;
             transform: scale(1.2);
-            vertical-align: middle; /* Căn chỉnh checkbox với label */
+            vertical-align: middle;
         }
         .form-group .checkbox-label {
-            display: inline; /* Giữ label trên cùng dòng với checkbox */
+            display: inline;
             margin-bottom: 0;
+            vertical-align: middle;
         }
         .button-group {
             text-align: center;
@@ -69,11 +70,11 @@
             border: none;
             border-radius: 8px;
             cursor: pointer;
-            font-size: 0.9em; /* Tăng font size nút */
+            font-size: 0.9em;
             font-weight: bold;
             transition: background-color 0.3s ease, transform 0.2s ease;
             margin: 0 10px;
-            min-width: 120px; /* Đảm bảo nút có kích thước đủ */
+            min-width: 120px;
         }
         .btn-primary {
             background-color: #007bff;
@@ -104,7 +105,7 @@
             padding: 15px;
             border-radius: 8px;
             margin-top: 20px;
-            font-size: 0.9em; /* Tăng font size */
+            font-size: 0.9em;
             font-weight: bold;
             text-align: center;
             color: #333;
@@ -118,10 +119,10 @@
             height: 300px;
             overflow-y: scroll;
             font-family: 'Consolas', 'Monaco', monospace;
-            font-size: 0.8em; /* Tăng font size */
+            font-size: 0.8em;
             color: #444;
-            white-space: pre-wrap; /* Giữ định dạng xuống dòng */
-            word-wrap: break-word; /* Ngắt từ khi quá dài */
+            white-space: pre-wrap;
+            word-wrap: break-word;
         }
         .log-box div {
             padding: 3px 0;
@@ -131,12 +132,12 @@
             border-bottom: none;
         }
         .popup {
-            display: none; 
-            position: fixed; 
+            display: none;
+            position: fixed;
             left: 50%;
             top: 50%;
             transform: translate(-50%, -50%);
-            background-color: #ffc107; /* Warning color */
+            background-color: #ffc107;
             color: white;
             padding: 15px 25px;
             border-radius: 8px;
@@ -180,6 +181,46 @@
             background-image: linear-gradient(to right, rgba(0, 0, 0, 0), rgba(0, 0, 0, 0.25), rgba(0, 0, 0, 0));
             margin: 25px 0;
         }
+        .trading-stats {
+            margin-top: 30px;
+            padding: 20px;
+            background-color: #e0f2f7;
+            border-radius: 10px;
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.05);
+        }
+        .trading-stats h2 {
+            color: #0288d1;
+        }
+        .trading-stats table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 15px;
+        }
+        .trading-stats th, .trading-stats td {
+            border: 1px solid #c5e0e9;
+            padding: 10px;
+            text-align: left;
+        }
+        .trading-stats th {
+            background-color: #b3e5fc;
+            font-weight: bold;
+            color: #212121;
+        }
+        .trading-stats td {
+            background-color: #e1f5fe;
+        }
+        .trading-stats .positive {
+            color: #28a745; /* Green */
+            font-weight: bold;
+        }
+        .trading-stats .negative {
+            color: #dc3545; /* Red */
+            font-weight: bold;
+        }
+        .trading-stats .neutral {
+            color: #555;
+            font-weight: bold;
+        }
     </style>
 </head>
 <body>
@@ -208,6 +249,43 @@
             <button class="btn btn-danger" id="stopBotBtn">Stop Bot</button>
         </div>
 
+        <hr>
+
+        <div class="trading-stats">
+            <h2>Thống kê Giao dịch Tổng thể</h2>
+            <table>
+                <tr>
+                    <th>Tổng Lãi Bot</th>
+                    <td id="totalProfitValue" class="neutral">0.00 USDT</td>
+                </tr>
+                <tr>
+                    <th>Tổng Lỗ Bot</th>
+                    <td id="totalLossValue" class="neutral">0.00 USDT</td>
+                </tr>
+                <tr>
+                    <th>PNL Ròng (Lãi - Lỗ)</th>
+                    <td id="netPnlValue" class="neutral">0.00 USDT</td>
+                </tr>
+            </table>
+
+            <h3>Vị thế đang mở</h3>
+            <table id="currentPositionsTable">
+                <thead>
+                    <tr>
+                        <th>Đồng Coin</th>
+                        <th>Vị thế</th>
+                        <th>Giá vào</th>
+                        <th>Giá hiện tại</th>
+                        <th>PNL chưa thực hiện</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    </tbody>
+            </table>
+        </div>
+
+        <hr>
+
         <div class="log-box" id="logContainer">
             </div>
     </div>
@@ -226,6 +304,13 @@
 
         const coinConfigContainer = document.getElementById('coinConfigContainer');
         const addCoinBtn = document.getElementById('addCoinBtn');
+
+        // Elements for trading stats table
+        const totalProfitValueSpan = document.getElementById('totalProfitValue');
+        const totalLossValueSpan = document.getElementById('totalLossValue');
+        const netPnlValueSpan = document.getElementById('netPnlValue');
+        const currentPositionsTableBody = document.querySelector('#currentPositionsTable tbody');
+
 
         // Hàm hiển thị popup
         function showPopup(message, duration = 3000) {
@@ -309,7 +394,7 @@
         // Gửi cấu hình đến backend
         saveConfigBtn.addEventListener('click', async () => {
             saveConfigToLocalStorage(); // Lưu vào local storage trước
-            
+
             const coinEntries = document.querySelectorAll('.coin-entry');
             const coinConfigs = [];
             let isValid = true;
@@ -395,6 +480,65 @@
             }
         }
 
+        // Hàm cập nhật bảng thống kê giao dịch
+        async function updateTradingStats() {
+            try {
+                const response = await fetch('/api/bot_stats');
+                const data = await response.json();
+
+                if (data.success) {
+                    const stats = data.data;
+
+                    totalProfitValueSpan.textContent = `${stats.totalProfit.toFixed(2)} USDT`;
+                    totalLossValueSpan.textContent = `${stats.totalLoss.toFixed(2)} USDT`;
+                    netPnlValueSpan.textContent = `${stats.netPNL.toFixed(2)} USDT`;
+
+                    // Apply color based on PNL
+                    if (stats.netPNL > 0) {
+                        netPnlValueSpan.className = 'positive';
+                    } else if (stats.netPNL < 0) {
+                        netPnlValueSpan.className = 'negative';
+                    } else {
+                        netPnlValueSpan.className = 'neutral';
+                    }
+
+                    // Clear existing rows
+                    currentPositionsTableBody.innerHTML = '';
+
+                    if (stats.currentOpenPositions.length === 0) {
+                        const row = currentPositionsTableBody.insertRow();
+                        const cell = row.insertCell(0);
+                        cell.colSpan = 5;
+                        cell.textContent = 'Không có vị thế đang mở.';
+                        cell.style.textAlign = 'center';
+                        cell.style.fontStyle = 'italic';
+                    } else {
+                        stats.currentOpenPositions.forEach(pos => {
+                            const row = currentPositionsTableBody.insertRow();
+                            row.insertCell(0).textContent = pos.symbol;
+                            row.insertCell(1).textContent = `${pos.side} (${pos.quantity.toFixed(4)})`; // Hiển thị số lượng
+                            row.insertCell(2).textContent = parseFloat(pos.entryPrice).toFixed(pos.pricePrecision || 6); // entryPrice
+                            row.insertCell(3).textContent = parseFloat(pos.currentPrice).toFixed(pos.pricePrecision || 6); // currentPrice (nếu có)
+
+                            const pnlCell = row.insertCell(4);
+                            pnlCell.textContent = `${pos.unrealizedPnl.toFixed(2)} USDT`;
+                            if (pos.unrealizedPnl > 0) {
+                                pnlCell.classList.add('positive');
+                            } else if (pos.unrealizedPnl < 0) {
+                                pnlCell.classList.add('negative');
+                            } else {
+                                pnlCell.classList.add('neutral');
+                            }
+                        });
+                    }
+                }
+            } catch (error) {
+                console.error('Error fetching trading stats:', error);
+                currentPositionsTableBody.innerHTML = '<tr><td colspan="5" style="text-align: center; color: red;">Lỗi tải thống kê.</td></tr>';
+            }
+        }
+
+
         // Điều khiển bot (Start/Stop)
         startBotBtn.addEventListener('click', async () => {
             // Validate và gửi cấu hình trước khi Start
@@ -417,34 +561,40 @@
                 const applyDoubleStrategy = entry.querySelector('.applyDoubleStrategy').checked;
                 if (!symbol || isNaN(initialAmount) || initialAmount <= 0) {
                     isValid = false;
+                    showPopup(`Lỗi: Cấu hình "${symbol}" không hợp lệ. Vui lòng kiểm tra lại.`);
                     return;
                 }
                 coinConfigs.push({ symbol, initialAmount, applyDoubleStrategy });
             });
 
             if (!isValid) {
-                // Popup lỗi đã được hiển thị bên trong vòng lặp validation
                 return;
             }
 
             const configToSend = {
                 apiKey: apiKeyInput.value,
-                secretKey: secretKeyInput.value,
+                secretKey: secretKey.value, // Đảm bảo lấy đúng secretKey
                 coinConfigs: coinConfigs
             };
 
             try {
                 // Gửi cấu hình trước khi Start lệnh
-                await fetch('/api/configure', {
+                const configResponse = await fetch('/api/configure', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(configToSend)
                 });
+                const configData = await configResponse.json();
+                if (!configData.success) {
+                    showPopup('Lỗi cấu hình trước khi khởi động: ' + configData.message);
+                    return;
+                }
 
                 const response = await fetch('/start_bot_logic');
                 const message = await response.text();
                 showPopup(message);
                 getBotStatus(); // Cập nhật trạng thái ngay lập tức
+                updateTradingStats(); // Cập nhật bảng thống kê
             } catch (error) {
                 console.error('Error starting bot:', error);
                 showPopup('Lỗi kết nối server khi khởi động bot.');
@@ -457,6 +607,7 @@
                 const message = await response.text();
                 showPopup(message);
                 getBotStatus(); // Cập nhật trạng thái ngay lập tức
+                updateTradingStats(); // Cập nhật bảng thống kê
             } catch (error) {
                 console.error('Error stopping bot:', error);
                 showPopup('Lỗi kết nối server khi dừng bot.');
@@ -466,13 +617,15 @@
         // Tải cấu hình khi trang được tải
         loadConfig();
 
-        // Cập nhật trạng thái và logs định kỳ
+        // Cập nhật trạng thái, logs và thống kê định kỳ
         setInterval(getBotStatus, 3000); // Cập nhật trạng thái mỗi 3 giây
         setInterval(fetchLogs, 1000);   // Cập nhật logs mỗi 1 giây
+        setInterval(updateTradingStats, 2000); // Cập nhật bảng thống kê mỗi 2 giây
 
         // Lần đầu tải trang
         getBotStatus();
         fetchLogs();
+        updateTradingStats();
     </script>
 </body>
 </html>
