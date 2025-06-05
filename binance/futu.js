@@ -61,8 +61,8 @@ class CriticalApiError extends Error {
 // const APPLY_DOUBLE_STRATEGY_DEFAULT = false;
 
 // Cấu hình Take Profit & Stop Loss (áp dụng chung cho tất cả các cặp)
-const TAKE_PROFIT_PERCENTAGE_MAIN = 255; // 2.2% lãi trên VỐN
-const STOP_LOSS_PERCENTAGE_MAIN = 97;   // 0.9% lỗ trên VỐN
+const TAKE_PROFIT_PERCENTAGE_MAIN = 2.5; // 2.2% lãi trên VỐN
+const STOP_LOSS_PERCENTAGE_MAIN = 0.9;   // 0.9% lỗ trên VỐN
 
 // Số lần thua liên tiếp tối đa trước khi reset về lệnh ban đầu
 const MAX_CONSECUTIVE_LOSSES = 5;
