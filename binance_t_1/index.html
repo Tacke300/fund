@@ -1,0 +1,613 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Binance Futures Trading Bot v1.1</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 20px;
+            background-color: #f4f7f6;
+            color: #333;
+            line-height: 1;
+            text-align: center;
+        }
+        .container {
+            max-width: 900px;
+            margin: 30px auto;
+            background-color: #fff;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.08);
+        }
+        h1, h2 {
+            color: #2c3e50;
+            text-align: center;
+            margin-bottom: 20px;
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        .form-group label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: bold;
+            color: #555;
+        }
+        .form-group input[type="text"],
+        .form-group input[type="number"],
+        .form-group input[type="password"] {
+            width: calc(100% - 20px);
+            padding: 12px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            font-size: 1em;
+            box-sizing: border-box;
+            transition: border-color 0.3s ease;
+        }
+        .form-group input[type="text"]:focus,
+        .form-group input[type="number"]:focus,
+        .form-group input[type="password"]:focus {
+            border-color: #007bff;
+            outline: none;
+        }
+        .form-group input[type="checkbox"] {
+            margin-right: 10px;
+            transform: scale(1.2);
+            vertical-align: middle;
+        }
+        .form-group .checkbox-label {
+            display: inline;
+            margin-bottom: 0;
+            vertical-align: middle;
+        }
+        .button-group {
+            text-align: center;
+            margin-top: 30px;
+        }
+        .btn {
+            padding: 12px 25px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 0.9em;
+            font-weight: bold;
+            transition: background-color 0.3s ease, transform 0.2s ease;
+            margin: 0 10px;
+            min-width: 120px;
+        }
+        .btn-primary {
+            background-color: #007bff;
+            color: white;
+        }
+        .btn-primary:hover {
+            background-color: #0056b3;
+            transform: translateY(-2px);
+        }
+        .btn-success {
+            background-color: #28a745;
+            color: white;
+        }
+        .btn-success:hover {
+            background-color: #218838;
+            transform: translateY(-2px);
+        }
+        .btn-danger {
+            background-color: #dc3545;
+            color: white;
+        }
+        .btn-danger:hover {
+            background-color: #c82333;
+            transform: translateY(-2px);
+        }
+        .status-box {
+            background-color: #e9ecef;
+            padding: 15px;
+            border-radius: 8px;
+            margin-top: 20px;
+            font-size: 0.9em;
+            font-weight: bold;
+            text-align: center;
+            color: #333;
+        }
+        .log-box {
+            background-color: #ecf0f1;
+            border: 1px solid #dee2e6;
+            padding: 15px;
+            margin-top: 25px;
+            border-radius: 8px;
+            height: 300px;
+            overflow-y: scroll;
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 0.8em;
+            color: #444;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+        .log-box div {
+            padding: 3px 0;
+            border-bottom: 1px dotted #ccc;
+        }
+        .log-box div:last-child {
+            border-bottom: none;
+        }
+        .popup {
+            display: none;
+            position: fixed;
+            left: 50%;
+            top: 50%;
+            transform: translate(-50%, -50%);
+            background-color: #ffc107;
+            color: white;
+            padding: 15px 25px;
+            border-radius: 8px;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.3);
+            z-index: 1000;
+            opacity: 0;
+            transition: opacity 0.5s ease-in-out;
+            font-weight: bold;
+            text-align: center;
+        }
+        .popup.show {
+            display: block;
+            opacity: 1;
+        }
+        .coin-entry {
+            border: 1px solid #e0e0e0;
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 20px;
+            background-color: #fcfcfc;
+            position: relative;
+        }
+        hr {
+            border: 0;
+            height: 1px;
+            background-image: linear-gradient(to right, rgba(0, 0, 0, 0), rgba(0, 0, 0, 0.25), rgba(0, 0, 0, 0));
+            margin: 25px 0;
+        }
+        .trading-stats {
+            margin-top: 30px;
+            padding: 20px;
+            background-color: #e0f2f7;
+            border-radius: 10px;
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.05);
+        }
+        .trading-stats h2 {
+            color: #0288d1;
+        }
+        .trading-stats table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 15px;
+        }
+        .trading-stats th, .trading-stats td {
+            border: 1px solid #c5e0e9;
+            padding: 10px;
+            text-align: left;
+        }
+        .trading-stats th {
+            background-color: #b3e5fc;
+            font-weight: bold;
+            color: #212121;
+        }
+        .trading-stats td {
+            background-color: #e1f5fe;
+        }
+        .trading-stats .positive {
+            color: #28a745; /* Green */
+            font-weight: bold;
+        }
+        .trading-stats .negative {
+            color: #dc3545; /* Red */
+            font-weight: bold;
+        }
+        .trading-stats .neutral {
+            color: #555;
+            font-weight: bold;
+        }
+
+        /* --- Styles for 1/2 size from API downwards --- */
+        .half-size * {
+            font-size: 0.9em !important; /* Apply to all children elements */
+        }
+        .half-size input, .half-size select, .half-size textarea, .half-size button {
+            padding: 6px 12px !important; /* Adjust padding for smaller elements */
+            border-radius: 4px !important; /* Adjust border radius */
+        }
+        .half-size .button-group .btn {
+            min-width: 60px !important; /* Adjust min-width for buttons */
+            padding: 6px 12px !important;
+        }
+        .half-size .trading-stats table th,
+        .half-size .trading-stats table td {
+            padding: 5px !important; /* Adjust padding for table cells */
+        }
+        .half-size .log-box {
+            height: 150px !important; /* Adjust log box height */
+            padding: 7px !important;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Binance Futures Trading Bot v1.1</h1>
+        <div class="status-box" id="botStatus">
+            Đang tải trạng thái...
+        </div>
+
+        <div class="trading-stats">
+            <h2>Thống kê Giao dịch Tổng thể</h2>
+            <table>
+                <tr>
+                    <th>Tổng Lãi Bot</th>
+                    <td id="totalProfitValue" class="neutral">0.00 USDT</td>
+                </tr>
+                <tr>
+                    <th>Tổng Lỗ Bot</th>
+                    <td id="totalLossValue" class="neutral">0.00 USDT</td>
+                </tr>
+                <tr>
+                    <th>PNL Ròng (Lãi - Lỗ)</th>
+                    <td id="netPnlValue" class="neutral">0.00 USDT</td>
+                </tr>
+            </table>
+
+            
+                <tbody>
+                    </tbody>
+            </table>
+        </div>
+
+        <hr>
+
+        <div class="button-group">
+            <button class="btn btn-success" id="startBotBtn">Start Bot</button>
+            <button class="btn btn-danger" id="stopBotBtn">Stop Bot</button>
+        </div>
+
+        <hr>
+
+        <div class="half-size"> <div class="form-group">
+                <label for="apiKey">API Key:</label>
+                <input type="password" id="apiKey" placeholder="Nhập API Key của bạn">
+            </div>
+            <div class="form-group">
+                <label for="secretKey">Secret Key:</label>
+                <input type="password" id="secretKey" placeholder="Nhập Secret Key của bạn">
+            </div>
+
+            <h2>Cấu hình cặp giao dịch</h2>
+            <div id="coinConfigContainer">
+                </div>
+
+            <div class="button-group">
+                <button class="btn btn-primary" id="saveConfigBtn">Lưu cấu hình</button>
+            </div>
+
+            <hr>
+
+            
+        </div>
+    </div>
+
+    <div id="popupMessage" class="popup"></div>
+
+    <script>
+        const apiKeyInput = document.getElementById('apiKey');
+        const secretKeyInput = document.getElementById('secretKey');
+        const saveConfigBtn = document.getElementById('saveConfigBtn');
+        const startBotBtn = document.getElementById('startBotBtn');
+        const stopBotBtn = document.getElementById('stopBotBtn');
+        const botStatusDiv = document.getElementById('botStatus');
+        const logContainer = document.getElementById('logContainer');
+        const popupMessageDiv = document.getElementById('popupMessage');
+
+        const coinConfigContainer = document.getElementById('coinConfigContainer');
+
+        // Elements for trading stats table
+        const totalProfitValueSpan = document.getElementById('totalProfitValue');
+        const totalLossValueSpan = document.getElementById('totalLossValue');
+        const netPnlValueSpan = document.getElementById('netPnlValue');
+        const currentPositionsTableBody = document.querySelector('#currentPositionsTable tbody');
+
+
+        // Hàm hiển thị popup
+        function showPopup(message, duration = 3000) {
+            popupMessageDiv.textContent = message;
+            popupMessageDiv.classList.add('show');
+            setTimeout(() => {
+                popupMessageDiv.classList.remove('show');
+            }, duration);
+        }
+
+        // Tạo một mục cấu hình coin mới trong UI (chỉ một mục duy nhất)
+        function createCoinEntry(symbol = '', initialAmount = '10', applyDoubleStrategy = false) {
+            coinConfigContainer.innerHTML = ''; // Clear existing content
+            const div = document.createElement('div');
+            div.classList.add('coin-entry');
+            div.innerHTML = `
+                <div class="form-group">
+                    <label>Tên coin (ví dụ: ETHUSDT):</label>
+                    <input type="text" class="coinSymbol" value="${symbol}" placeholder="Nhập tên đồng coin">
+                </div>
+                <div class="form-group">
+                    <label class="checkbox-label">Số USDT mở lệnh:</label>
+                    <input type="number" class="initialAmount" value="${initialAmount}" min="0.01" step="0.01">
+                </div>
+                <div class="form-group">
+                    <input type="checkbox" class="applyDoubleStrategy" ${applyDoubleStrategy ? 'checked' : ''}>
+                    <label class="checkbox-label">
+                         ◀️⏺️▶️
+                    </label>
+                </div>
+            `;
+            coinConfigContainer.appendChild(div);
+        }
+
+        // Tải cấu hình đã lưu (nếu có) khi trang load
+        function loadConfig() {
+            apiKeyInput.value = localStorage.getItem('apiKey') || '';
+            secretKeyInput.value = localStorage.getItem('secretKey') || '';
+
+            const savedCoinConfigs = JSON.parse(localStorage.getItem('coinConfigs') || '[]');
+            if (savedCoinConfigs.length > 0) {
+                // Load only the first configuration
+                const config = savedCoinConfigs[0];
+                createCoinEntry(config.symbol, config.initialAmount, config.applyDoubleStrategy);
+            } else {
+                // Tạo một cấu hình mặc định nếu chưa có gì
+                createCoinEntry('ETHUSDT', '10', false);
+            }
+        }
+
+        // Lưu cấu hình vào Local Storage
+        function saveConfigToLocalStorage() {
+            localStorage.setItem('apiKey', apiKeyInput.value);
+            localStorage.setItem('secretKey', secretKeyInput.value);
+
+            const coinEntry = document.querySelector('.coin-entry');
+            const coinConfigsToSave = [];
+            if (coinEntry) {
+                coinConfigsToSave.push({
+                    symbol: coinEntry.querySelector('.coinSymbol').value.trim(),
+                    initialAmount: parseFloat(coinEntry.querySelector('.initialAmount').value),
+                    applyDoubleStrategy: coinEntry.querySelector('.applyDoubleStrategy').checked
+                });
+            }
+            localStorage.setItem('coinConfigs', JSON.stringify(coinConfigsToSave));
+        }
+
+        // Gửi cấu hình đến backend
+        saveConfigBtn.addEventListener('click', async () => {
+            saveConfigToLocalStorage(); // Lưu vào local storage trước
+
+            const coinEntry = document.querySelector('.coin-entry');
+            let isValid = true;
+
+            if (!apiKeyInput.value.trim() || !secretKeyInput.value.trim()) {
+                showPopup('Lỗi: API Key và Secret Key không được để trống.');
+                isValid = false;
+            }
+
+            const coinConfigs = [];
+            if (coinEntry) {
+                const symbol = coinEntry.querySelector('.coinSymbol').value.trim().toUpperCase();
+                const initialAmount = parseFloat(coinEntry.querySelector('.initialAmount').value);
+                const applyDoubleStrategy = coinEntry.querySelector('.applyDoubleStrategy').checked;
+
+                if (!symbol) {
+                    showPopup('Lỗi: Tên đồng coin không được để trống.');
+                    isValid = false;
+                }
+                if (isNaN(initialAmount) || initialAmount <= 0) {
+                    showPopup(`Lỗi: Số USDT ban đầu cho ${symbol} phải là số dương.`);
+                    isValid = false;
+                }
+                coinConfigs.push({ symbol, initialAmount, applyDoubleStrategy });
+            } else {
+                showPopup('Lỗi: Cần cấu hình ít nhất một cặp coin.');
+                isValid = false;
+            }
+
+            if (!isValid) return; // Dừng nếu có lỗi validation
+
+            const configToSend = {
+                apiKey: apiKeyInput.value,
+                secretKey: secretKeyInput.value,
+                coinConfigs: coinConfigs // Gửi mảng các cấu hình coin (chỉ có 1 phần tử)
+            };
+
+            try {
+                const response = await fetch('/api/configure', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(configToSend)
+                });
+                const data = await response.json();
+                if (data.success) {
+                    showPopup(data.message);
+                } else {
+                    showPopup('Lỗi lưu cấu hình: ' + data.message);
+                }
+            } catch (error) {
+                console.error('Error saving config:', error);
+                showPopup('Lỗi kết nối server khi lưu cấu hình.');
+            }
+        });
+
+        // Hàm lấy trạng thái bot
+        async function getBotStatus() {
+            try {
+                const response = await fetch('/api/status');
+                const text = await response.text();
+                botStatusDiv.textContent = text;
+            } catch (error) {
+                console.error('Error fetching bot status:', error);
+                botStatusDiv.textContent = 'Lỗi: Không thể kết nối với server.';
+            }
+        }
+
+        // Hàm lấy logs
+        async function fetchLogs() {
+            try {
+                const response = await fetch('/api/logs');
+                const text = await response.text();
+                logContainer.innerHTML = text.split('\n').map(line => `<div>${line}</div>`).join('');
+                logContainer.scrollTop = logContainer.scrollHeight; // Cuộn xuống dưới cùng
+            } catch (error) {
+                console.error('Error fetching logs:', error);
+                logContainer.innerHTML = '<div>Lỗi: Không thể tải log.</div>';
+            }
+        }
+
+        // Hàm cập nhật bảng thống kê giao dịch
+        async function updateTradingStats() {
+            try {
+                const response = await fetch('/api/bot_stats');
+                const data = await response.json();
+
+                if (data.success) {
+                    const stats = data.data;
+
+                    totalProfitValueSpan.textContent = `${stats.totalProfit.toFixed(2)} USDT`;
+                    totalLossValueSpan.textContent = `${stats.totalLoss.toFixed(2)} USDT`;
+                    netPnlValueSpan.textContent = `${stats.netPNL.toFixed(2)} USDT`;
+
+                    // Apply color based on PNL
+                    if (stats.netPNL > 0) {
+                        netPnlValueSpan.className = 'positive';
+                    } else if (stats.netPNL < 0) {
+                        netPnlValueSpan.className = 'negative';
+                    } else {
+                        netPnlValueSpan.className = 'neutral';
+                    }
+
+                    // Clear existing rows
+                    currentPositionsTableBody.innerHTML = '';
+
+                    if (stats.currentOpenPositions.length === 0) {
+                        const row = currentPositionsTableBody.insertRow();
+                        const cell = row.insertCell(0);
+                        cell.colSpan = 5;
+                        cell.textContent = 'Không có vị thế đang mở.';
+                        cell.style.textAlign = 'center';
+                        cell.style.fontStyle = 'italic';
+                    } else {
+                        stats.currentOpenPositions.forEach(pos => {
+                            const row = currentPositionsTableBody.insertRow();
+                            row.insertCell(0).textContent = pos.symbol;
+                            row.insertCell(1).textContent = `${pos.side} (${pos.quantity.toFixed(4)})`; // Hiển thị số lượng
+                            row.insertCell(2).textContent = parseFloat(pos.entryPrice).toFixed(pos.pricePrecision || 6); // entryPrice
+                            row.insertCell(3).textContent = parseFloat(pos.currentPrice).toFixed(pos.pricePrecision || 6); // currentPrice (nếu có)
+
+                            const pnlCell = row.insertCell(4);
+                            pnlCell.textContent = `${pos.unrealizedPnl.toFixed(2)} USDT`;
+                            if (pos.unrealizedPnl > 0) {
+                                pnlCell.classList.add('positive');
+                            } else if (pos.unrealizedPnl < 0) {
+                                pnlCell.classList.add('negative');
+                            } else {
+                                pnlCell.classList.add('neutral');
+                            }
+                        });
+                    }
+                }
+            } catch (error) {
+                console.error('Error fetching trading stats:', error);
+                currentPositionsTableBody.innerHTML = '<tr><td colspan="5" style="text-align: center; color: red;">Lỗi tải thống kê.</td></tr>';
+            }
+        }
+
+
+        // Điều khiển bot (Start/Stop)
+        startBotBtn.addEventListener('click', async () => {
+            // Validate và gửi cấu hình trước khi Start
+            const coinEntry = document.querySelector('.coin-entry');
+            let isValid = true;
+
+            if (!apiKeyInput.value.trim() || !secretKeyInput.value.trim()) {
+                showPopup('Lỗi: API Key và Secret Key không được để trống trước khi khởi động.');
+                isValid = false;
+            }
+
+            const coinConfigs = [];
+            if (coinEntry) {
+                const symbol = coinEntry.querySelector('.coinSymbol').value.trim().toUpperCase();
+                const initialAmount = parseFloat(coinEntry.querySelector('.initialAmount').value);
+                const applyDoubleStrategy = coinEntry.querySelector('.applyDoubleStrategy').checked;
+                if (!symbol || isNaN(initialAmount) || initialAmount <= 0) {
+                    isValid = false;
+                    showPopup(`Lỗi: Cấu hình "${symbol}" không hợp lệ. Vui lòng kiểm tra lại.`);
+                }
+                coinConfigs.push({ symbol, initialAmount, applyDoubleStrategy });
+            } else {
+                showPopup('Lỗi: Cần cấu hình ít nhất một cặp coin để khởi động.');
+                isValid = false;
+            }
+
+            if (!isValid) {
+                return;
+            }
+
+            const configToSend = {
+                apiKey: apiKeyInput.value,
+                secretKey: secretKeyInput.value,
+                coinConfigs: coinConfigs
+            };
+
+            try {
+                // Gửi cấu hình trước khi Start lệnh
+                const configResponse = await fetch('/api/configure', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(configToSend)
+                });
+                const configData = await configResponse.json();
+                if (!configData.success) {
+                    showPopup('Lỗi cấu hình trước khi khởi động: ' + configData.message);
+                    return;
+                }
+
+                const response = await fetch('/start_bot_logic');
+                const message = await response.text();
+                showPopup(message);
+                getBotStatus(); // Cập nhật trạng thái ngay lập tức
+                updateTradingStats(); // Cập nhật bảng thống kê
+            } catch (error) {
+                console.error('Error starting bot:', error);
+                showPopup('Lỗi kết nối server khi khởi động bot.');
+            }
+        });
+
+        stopBotBtn.addEventListener('click', async () => {
+            try {
+                const response = await fetch('/stop_bot_logic');
+                const message = await response.text();
+                showPopup(message);
+                getBotStatus(); // Cập nhật trạng thái ngay lập tức
+                updateTradingStats(); // Cập nhật bảng thống kê
+            } catch (error) {
+                console.error('Error stopping bot:', error);
+                showPopup('Lỗi kết nối server khi dừng bot.');
+            }
+        });
+
+        // Tải cấu hình khi trang được tải
+        loadConfig();
+
+        // Cập nhật trạng thái, logs và thống kê định kỳ
+        setInterval(getBotStatus, 3000); // Cập nhật trạng thái mỗi 3 giây
+        setInterval(fetchLogs, 1000);   // Cập nhật logs mỗi 1 giây
+        setInterval(updateTradingStats, 2000); // Cập nhật bảng thống kê mỗi 2 giây
+
+        // Lần đầu tải trang
+        getBotStatus();
+        fetchLogs();
+        updateTradingStats();
+    </script>
+</body>
+</html>
