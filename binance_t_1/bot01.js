@@ -1150,7 +1150,7 @@ app.use(express.json()); // Để parse JSON trong body của request POST
 // Ví dụ:
 const WEB_SERVER_PORT = 1236; // Cần thay đổi cho mỗi bản sao bot
 const BOT_LOG_FILE = '/home/tacke300/.pm2/logs/bot-bina-eth-out.log'; // Cần thay đổi cho mỗi bản sao bot
-const THIS_BOT_PM2_NAME = 'tung01-eth'; // Cần thay đổi cho mỗi bản sao bot
+const THIS_BOT_PM2_NAME = 'tung01'; // Cần thay đổi cho mỗi bản sao bot
 
 // Khởi tạo một instance bot duy nhất cho file này
 // Các giá trị mặc định, sẽ được cập nhật từ UI
