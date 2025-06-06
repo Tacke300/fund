@@ -41,7 +41,7 @@ let retryBotTimeout = null;
 // === START - BIẾN QUẢN LÝ LỖI VÀ TẦN SUẤT LOG ===
 let consecutiveApiErrors = 0; // Đếm số lỗi API liên tiếp
 const MAX_CONSECUTIVE_API_ERRORS = 5; // Số lỗi API liên tiếp tối đa cho phép trước khi tạm dừng bot
-const ERROR_RETRY_DELAY_MS = 1000; // Độ trễ (ms) khi bot tạm dừng sau nhiều lỗi (ví dụ: 1 giây)
+const ERROR_RETRY_DELAY_MS = 5000; // Độ trễ (ms) khi bot tạm dừng sau nhiều lỗi (ví dụ: 5 giây)
 
 // Cache các thông điệp log để tránh spam quá nhiều dòng giống nhau liên tiếp
 const logCounts = {}; // { messageHash: { count: number, lastLoggedTime: Date } }
@@ -70,8 +70,8 @@ const STOP_LOSS_PERCENTAGE_MAIN = 0.15;   // 18% lỗ trên VỐN
 const MAX_CONSECUTIVE_LOSSES = 5;
 
 // THAY ĐỔI MỚI: Số lần thử lại kiểm tra vị thế sau khi đóng và thời gian delay (đã loại bỏ delay)
-const RETRY_CHECK_POSITION_ATTEMPTS = 0;
-const RETRY_CHECK_POSITION_DELAY_MS = 0;
+const RETRY_CHECK_POSITION_ATTEMPTS = 0; // Đã loại bỏ, sẽ xử lý trong checkAndHandleRemainingPosition
+const RETRY_CHECK_POSITION_DELAY_MS = 0; // Đã loại bỏ, sẽ xử lý trong checkAndHandleRemainingPosition
 
 // Biến theo dõi vốn hiện tại cho lệnh
 let currentInvestmentAmount = INITIAL_INVESTMENT_AMOUNT;
@@ -413,7 +413,7 @@ async function cancelOpenOrdersForSymbol(symbol) {
 /**
  * Hàm đóng vị thế hiện tại và xử lý logic sau khi đóng.
  * @param {string} symbol - Symbol của cặp giao dịch.
- * @param {number} quantity - Số lượng của vị thế cần đóng.
+ * @param {number} quantity - Số lượng của vị thế cần đóng (để tham chiếu).
  * @param {string} reason - Lý do đóng vị thế (ví dụ: "TP khớp", "SL khớp", "Thủ công", "Vị thế sót").
  */
 async function closePosition(symbol, quantity, reason) {
@@ -458,71 +458,74 @@ async function closePosition(symbol, quantity, reason) {
             addLog(`Đã gửi lệnh đóng ${positionSideBeforeClose} ${symbol}. Lý do: ${reason}.`);
         }
 
-        await sleep(1000); // Đợi 1 giây để lệnh đóng khớp và cập nhật lịch sử giao dịch
-
         // --- BẮT ĐẦU XỬ LÝ LOGIC PNL và HƯỚNG LỆNH TIẾP THEO ---
         let pnlForClosedTrade = 0;
         let pnlCalculated = false;
+        const MAX_TRADE_FETCH_RETRIES = 5; // Số lần thử lại tối đa để lấy lịch sử giao dịch
+        const TRADE_FETCH_RETRY_DELAY_MS = 500; // Độ trễ giữa các lần thử lại (ms)
 
-        // Lấy lịch sử giao dịch để tìm PNL của lệnh vừa đóng
-        try {
-            // Lấy giao dịch gần nhất của symbol
-            const recentTrades = await callSignedAPI('/fapi/v1/userTrades', 'GET', { symbol: symbol, limit: 5 });
+        for (let i = 0; i < MAX_TRADE_FETCH_RETRIES; i++) {
+            await sleep(TRADE_FETCH_RETRY_DELAY_MS); // Đợi để lịch sử giao dịch được cập nhật
+            try {
+                // Lấy giao dịch gần nhất của symbol
+                // Sử dụng startTime để chỉ lấy các giao dịch sau khi vị thế được mở
+                const recentTrades = await callSignedAPI('/fapi/v1/userTrades', 'GET', {
+                    symbol: symbol,
+                    limit: 20, // Tăng giới hạn để có nhiều cơ hội tìm thấy trade hơn
+                    startTime: currentOpenPosition?.openTime?.getTime() // Lọc từ thời điểm mở lệnh
+                });
 
-            // Tìm giao dịch khớp với lệnh đóng (ví dụ: giao dịch bán nếu trước đó là LONG, hoặc mua nếu trước đó là SHORT)
-            // Lọc các giao dịch có thời gian sau khi vị thế được mở (nếu có currentOpenPosition)
-            // Hoặc đơn giản là lấy giao dịch gần nhất nếu không có currentOpenPosition (đã đóng).
-            const relevantTrade = recentTrades.find(t => {
-                // Logic phức tạp hơn có thể cần thiết để khớp chính xác lệnh đóng
-                // Ở đây, ta đơn giản hóa bằng cách tìm một trade có quantity gần với quantity của lệnh đóng
-                // và side ngược lại với positionSideBeforeClose.
-                // Lưu ý: Đây là cách tiếp cận đơn giản và có thể không chính xác 100% trong mọi trường hợp phức tạp.
-                // Để chính xác hơn, cần lưu trữ orderId của lệnh mở và tìm trade có orderId tương ứng.
-                const tradeQty = parseFloat(t.qty);
-                const tradePrice = parseFloat(t.price);
-                const tradeSide = t.side; // BUY hoặc SELL
+                const relevantTrade = recentTrades.find(t => {
+                    const tradeQty = parseFloat(t.qty);
+                    const tradeSide = t.side; // BUY hoặc SELL
+                    const tradeRealizedPnl = parseFloat(t.realizedPnl); // Lấy realizedPnl trực tiếp
 
-                const isClosingLongTrade = (positionSideBeforeClose === 'LONG' && tradeSide === 'SELL' && Math.abs(tradeQty - quantity) < 0.000001);
-                const isClosingShortTrade = (positionSideBeforeClose === 'SHORT' && tradeSide === 'BUY' && Math.abs(tradeQty - quantity) < 0.000001);
+                    // Kiểm tra xem đây có phải là giao dịch đóng vị thế và có PNL thực tế
+                    const isClosingTrade = (
+                        (positionSideBeforeClose === 'LONG' && tradeSide === 'SELL') ||
+                        (positionSideBeforeClose === 'SHORT' && tradeSide === 'BUY')
+                    ) && tradeRealizedPnl !== 0; // PNL phải khác 0
 
-                return (isClosingLongTrade || isClosingShortTrade);
-            });
+                    // Kiểm tra số lượng khớp gần đúng (có thể có sai số do precision)
+                    const isQuantityMatch = Math.abs(tradeQty - quantity) < 0.000001;
 
-            if (relevantTrade) {
-                const entryPrice = parseFloat(currentOpenPosition?.entryPrice || 0); // Sử dụng entryPrice từ currentOpenPosition nếu có
-                const closePrice = parseFloat(relevantTrade.price);
-                const tradeQty = parseFloat(relevantTrade.qty);
+                    // Đảm bảo thời gian giao dịch sau thời điểm mở lệnh
+                    const isAfterOpenTime = currentOpenPosition?.openTime ? (parseFloat(t.time) >= currentOpenPosition.openTime.getTime()) : true;
 
-                if (entryPrice > 0) { // Đảm bảo có entryPrice để tính toán
-                    if (positionSideBeforeClose === 'LONG') {
-                        pnlForClosedTrade = (closePrice - entryPrice) * tradeQty;
-                    } else if (positionSideBeforeClose === 'SHORT') {
-                        pnlForClosedTrade = (entryPrice - closePrice) * tradeQty;
-                    }
+                    return isClosingTrade && isQuantityMatch && isAfterOpenTime;
+                });
+
+                if (relevantTrade && relevantTrade.realizedPnl !== undefined && relevantTrade.realizedPnl !== null) {
+                    pnlForClosedTrade = parseFloat(relevantTrade.realizedPnl);
                     pnlCalculated = true;
-                    addLog(`PNL thực tế từ lịch sử giao dịch: ${pnlForClosedTrade.toFixed(4)} USDT.`);
+                    addLog(`PNL thực tế từ lịch sử giao dịch (realizedPnl): ${pnlForClosedTrade.toFixed(4)} USDT.`);
+                    break; // Thoát vòng lặp retry nếu đã tìm thấy PNL
                 } else {
-                    addLog(`Không đủ thông tin (entryPrice) để tính PNL từ lịch sử giao dịch cho ${symbol}.`);
+                    addLog(`Không tìm thấy realizedPnl trong lịch sử gần đây cho ${symbol} hoặc không khớp. Thử lại ${i + 1}/${MAX_TRADE_FETCH_RETRIES}...`);
                 }
-            } else {
-                addLog(`Không tìm thấy giao dịch đóng khớp trong lịch sử gần đây cho ${symbol}.`);
+            } catch (tradeError) {
+                addLog(`Lỗi khi cố gắng lấy lịch sử giao dịch (thử lại ${i + 1}/${MAX_TRADE_FETCH_RETRIES}): ${tradeError.msg || tradeError.message}`);
             }
-        } catch (tradeError) {
-            addLog(`Lỗi khi cố gắng lấy lịch sử giao dịch để tính PNL: ${tradeError.msg || tradeError.message}`);
         }
 
-        // Nếu không tính được PNL từ lịch sử, có thể thử lấy từ vị thế đã đóng (nếu còn)
-        // Lưu ý: positionRisk API chỉ hiển thị vị thế đang mở. Sau khi đóng, PNL sẽ không còn ở đây.
-        // Cần dựa vào userTrades.
-        if (!pnlCalculated && currentOpenPosition) { // Fallback, nhưng ít có khả năng chính xác sau khi lệnh đã đóng hoàn toàn.
-            const currentPrice = await getCurrentPrice(symbol);
-            if (currentPrice) {
-                if (currentOpenPosition.side === 'LONG') {
-                    pnlForClosedTrade = (currentPrice - currentOpenPosition.entryPrice) * currentOpenPosition.quantity;
-                } else { // SHORT
-                    pnlForClosedTrade = (currentOpenPosition.entryPrice - currentPrice) * currentOpenPosition.quantity;
+        // Fallback: Nếu không tính được PNL từ realizedPnl, cố gắng tính thủ công
+        if (!pnlCalculated) {
+            addLog(`Không thể tìm thấy realizedPnl từ lịch sử sau ${MAX_TRADE_FETCH_RETRIES} lần thử. Cố gắng tính PNL thủ công.`);
+            // Sử dụng entryPrice từ currentOpenPosition nếu còn
+            if (currentOpenPosition && currentOpenPosition.entryPrice > 0) {
+                const currentPrice = await getCurrentPrice(symbol); // Lấy giá hiện tại
+                if (currentPrice) {
+                    if (positionSideBeforeClose === 'LONG') {
+                        pnlForClosedTrade = (currentPrice - currentOpenPosition.entryPrice) * currentOpenPosition.quantity;
+                    } else { // SHORT
+                        pnlForClosedTrade = (currentOpenPosition.entryPrice - currentPrice) * currentOpenPosition.quantity;
+                    }
+                    addLog(`PNL ước tính từ giá hiện tại (fallback thủ công): ${pnlForClosedTrade.toFixed(4)} USDT.`);
+                } else {
+                    addLog(`Không đủ thông tin (currentPrice) để tính PNL thủ công cho ${symbol}.`);
                 }
-                addLog(`PNL ước tính từ giá hiện tại (fallback): ${pnlForClosedTrade.toFixed(4)} USDT.`);
+            } else {
+                addLog(`Không đủ thông tin (entryPrice) để tính PNL thủ công cho ${symbol}.`);
             }
         }
 
@@ -571,25 +574,38 @@ async function closePosition(symbol, quantity, reason) {
         }
         // --- KẾT THÚC XỬ LÝ LOGIC PNL và HƯỚNG LỆNH TIẾP THEO ---
 
-        currentOpenPosition = null; // Chỉ reset sau khi đã xử lý logic nextTradeDirection
+        // RESET currentOpenPosition SAU KHI ĐÃ XỬ LÝ TOÀN BỘ LOGIC PNL VÀ HƯỚNG LỆNH TIẾP THEO
+        currentOpenPosition = null;
+        
+        // Dọn dẹp các lệnh chờ và kiểm tra vị thế sót
         if (positionCheckInterval) {
             clearInterval(positionCheckInterval);
             positionCheckInterval = null;
         }
         await cancelOpenOrdersForSymbol(symbol);
         await checkAndHandleRemainingPosition(symbol); // Đảm bảo không còn vị thế sót
-        if(botRunning) scheduleNextMainCycle(); // Kích hoạt chu kỳ chính ngay lập tức để mở lệnh mới
+        
+        // Kích hoạt chu kỳ chính ngay lập tức để mở lệnh mới
+        if(botRunning) scheduleNextMainCycle(); 
         isClosingPosition = false;
 
     } catch (error) {
         addLog(`Lỗi đóng vị thế ${symbol}: ${error.msg || error.message}`);
         isClosingPosition = false;
+        // Nếu có lỗi nghiêm trọng khi đóng, có thể cần dừng bot hoặc thông báo
+        if (error instanceof CriticalApiError) {
+            addLog(`Lỗi API nghiêm trọng khi cố gắng đóng vị thế. Bot dừng.`);
+            stopBotLogicInternal();
+        }
     }
 }
 
-// Hàm kiểm tra và xử lý vị thế còn sót lại (đã bỏ delay và retry)
-async function checkAndHandleRemainingPosition(symbol) {
-    addLog(`Kiểm tra vị thế còn sót cho ${symbol}...`);
+// Hàm kiểm tra và xử lý vị thế còn sót lại
+async function checkAndHandleRemainingPosition(symbol, retryCount = 0) {
+    const MAX_RETRY_CHECK_POSITION = 3; // Số lần thử lại tối đa để kiểm tra vị thế sót
+    const CHECK_POSITION_RETRY_DELAY_MS = 500; // Độ trễ giữa các lần thử lại (ms)
+
+    addLog(`Kiểm tra vị thế còn sót cho ${symbol} (Lần ${retryCount + 1}/${MAX_RETRY_CHECK_POSITION + 1})...`);
 
     try {
         const positions = await callSignedAPI('/fapi/v2/positionRisk', 'GET');
@@ -600,27 +616,34 @@ async function checkAndHandleRemainingPosition(symbol) {
             const currentPrice = await getCurrentPrice(symbol);
             const positionSide = currentPositionAmount > 0 ? 'LONG' : 'SHORT';
 
-            addLog(`Vị thế ${symbol} còn sót: ${currentPositionAmount} (${positionSide}) @ ${currentPrice}. Cố gắng đóng lại.`);
+            addLog(`Vị thế ${symbol} còn sót: ${currentPositionAmount} (${positionSide}) @ ${currentPrice}.`);
 
-            // Cố gắng đóng vị thế sót nếu còn
-            const estimatedSide = currentPositionAmount < 0 ? 'SHORT' : 'LONG';
-            currentOpenPosition = { // Tạo tạm currentOpenPosition để hàm closePosition hoạt động
-                symbol: symbol,
-                quantity: Math.abs(currentPositionAmount),
-                entryPrice: parseFloat(remainingPosition.entryPrice),
-                initialTPPrice: 0,
-                initialSLPrice: 0,
-                initialMargin: 0,
-                openTime: new Date(parseFloat(remainingPosition.updateTime)),
-                pricePrecision: (exchangeInfoCache[symbol] ? exchangeInfoCache[symbol].pricePrecision : 8), // Mặc định 8 nếu không tìm thấy
-                side: estimatedSide
-            };
-            await closePosition(symbol, Math.abs(currentPositionAmount), 'Vị thế sót');
+            if (retryCount < MAX_RETRY_CHECK_POSITION) {
+                addLog(`Vị thế sót vẫn còn. Thử lại sau ${CHECK_POSITION_RETRY_DELAY_MS}ms.`);
+                await sleep(CHECK_POSITION_RETRY_DELAY_MS);
+                await checkAndHandleRemainingPosition(symbol, retryCount + 1); // Gọi đệ quy để thử lại
+            } else {
+                addLog(`Đã thử ${MAX_RETRY_CHECK_POSITION + 1} lần, vị thế ${symbol} vẫn còn sót. Cố gắng đóng lại lần cuối.`);
+                // Tạo tạm currentOpenPosition để hàm closePosition hoạt động với thông tin cần thiết
+                currentOpenPosition = {
+                    symbol: symbol,
+                    quantity: Math.abs(currentPositionAmount),
+                    entryPrice: parseFloat(remainingPosition.entryPrice),
+                    initialTPPrice: 0,
+                    initialSLPrice: 0,
+                    initialMargin: 0,
+                    openTime: new Date(parseFloat(remainingPosition.updateTime)),
+                    pricePrecision: (exchangeInfoCache[symbol] ? exchangeInfoCache[symbol].pricePrecision : 8),
+                    side: positionSide
+                };
+                await closePosition(symbol, Math.abs(currentPositionAmount), 'Vị thế sót cuối cùng');
+            }
         } else {
             addLog(`Đã xác nhận không còn vị thế ${symbol}.`);
         }
     } catch (error) {
         addLog(`Lỗi kiểm tra vị thế sót cho ${symbol}: ${error.code} - ${error.msg || error.message}.`);
+        // Không rethrow lỗi ở đây để không làm gián đoạn chu trình chính của bot
     }
 }
 
@@ -1047,7 +1070,7 @@ async function startBotLogicInternal() {
 
         currentInvestmentAmount = INITIAL_INVESTMENT_AMOUNT;
         consecutiveLossCount = 0;
-        nextTradeDirection = 'SHORT';
+        nextTradeDirection = 'SHORT'; // Reset hướng lệnh về ban đầu khi khởi động
 
         scheduleNextMainCycle();
 
