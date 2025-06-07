@@ -487,14 +487,15 @@ async function processTradeResult(pnlForClosedTrade, positionSideBeforeClose, sy
  */
 async function getAndProcessRealizedPnl(symbol, originalQuantity, positionSide, openTime) {
     let pnlForClosedTrade = 0;
-    const MAX_TRADE_FETCH_RETRIES = 10; // Đã tăng số lần thử lại
-    const TRADE_FETCH_RETRY_DELAY_MS = 1000; // Đã tăng độ trễ
-    let pnlFound = false;
+    const TRADE_FETCH_RETRY_DELAY_MS = 1000; // Độ trễ giữa các lần thử lại (1 giây)
+    let pnlFound = false; // Biến cờ để kiểm tra đã tìm thấy PNL hay chưa
 
     addLog(`Đang cố gắng tìm kiếm PNL thực tế cho ${symbol} (qty: ${originalQuantity}, side: ${positionSide})...`);
 
-    for (let i = 0; i < MAX_TRADE_FETCH_RETRIES; i++) {
-        await sleep(TRADE_FETCH_RETRY_DELAY_MS);
+    // --- BẮT ĐẦU VÒNG LẶP VÔ TẬN ---
+    while (!pnlFound) { // Lặp cho đến khi pnlFound là true
+        await sleep(TRADE_FETCH_RETRY_DELAY_MS); // Đợi 1 giây trước mỗi lần thử
+
         try {
             const recentTrades = await callSignedAPI('/fapi/v1/userTrades', 'GET', {
                 symbol: symbol,
@@ -525,42 +526,22 @@ async function getAndProcessRealizedPnl(symbol, originalQuantity, positionSide, 
             });
 
 
-            if (relevantTrade) { // Đã sửa: Bỏ kiểm tra undefined/null vì đã có isNaN
+            if (relevantTrade) {
                 pnlForClosedTrade = parseFloat(relevantTrade.realizedPnl);
-                pnlFound = true;
+                pnlFound = true; // Đặt cờ là true để thoát vòng lặp
                 addLog(`PNL thực tế từ lịch sử giao dịch (realizedPnl): ${pnlForClosedTrade.toFixed(4)} USDT.`);
-                break; // Thoát vòng lặp retry nếu đã tìm thấy PNL
             } else {
-                addLog(`Không tìm thấy realizedPnl khớp trong lịch sử gần đây cho ${symbol} (lần thử ${i + 1}/${MAX_TRADE_FETCH_RETRIES}).`);
+                addLog(`Không tìm thấy realizedPnl khớp trong lịch sử gần đây cho ${symbol}. Thử lại sau ${TRADE_FETCH_RETRY_DELAY_MS / 1000}s.`);
             }
         } catch (tradeError) {
-            addLog(`Lỗi khi cố gắng lấy lịch sử giao dịch (thử lại ${i + 1}/${MAX_TRADE_FETCH_RETRIES}): ${tradeError.msg || tradeError.message}`);
+            addLog(`Lỗi khi cố gắng lấy lịch sử giao dịch: ${tradeError.msg || tradeError.message}. Thử lại sau ${TRADE_FETCH_RETRY_DELAY_MS / 1000}s.`);
+            // Không cần throw lỗi ở đây, chỉ cần log và tiếp tục vòng lặp
         }
     }
+    // --- KẾT THÚC VÒNG LẶP VÔ TẬN ---
 
-    // Fallback: Nếu không tính được PNL từ realizedPnl, cố gắng tính thủ công
-    if (!pnlFound) {
-        addLog(`Không thể tìm thấy realizedPnl từ lịch sử sau ${MAX_TRADE_FETCH_RETRIES} lần thử. Cố gắng tính PNL thủ công.`);
-        // Sử dụng entryPrice từ currentOpenPosition nếu còn (nhưng nó có thể đã null nếu vị thế đã đóng lâu)
-        // Cách tốt hơn là truyền entryPrice vào đây từ currentOpenPosition khi gọi closePosition
-        if (currentOpenPosition && currentOpenPosition.entryPrice > 0) { // Kiểm tra lại currentOpenPosition
-            const currentPrice = await getCurrentPrice(symbol);
-            if (currentPrice) {
-                if (positionSide === 'LONG') {
-                    pnlForClosedTrade = (currentPrice - currentOpenPosition.entryPrice) * originalQuantity;
-                } else { // SHORT
-                    pnlForClosedTrade = (currentOpenPosition.entryPrice - currentPrice) * originalQuantity;
-                }
-                addLog(`PNL ước tính từ giá hiện tại (fallback thủ công): ${pnlForClosedTrade.toFixed(4)} USDT.`);
-            } else {
-                addLog(`Không đủ thông tin (currentPrice) để tính PNL thủ công cho ${symbol}.`);
-            }
-        } else {
-            addLog(`Không đủ thông tin (entryPrice) để tính PNL thủ công cho ${symbol}.`);
-        }
-    }
-
-    // Sau khi xác định được PNL (dù là từ realizedPnl hay ước tính), gọi hàm xử lý kết quả và điều chỉnh vốn
+    // Sau khi pnlFound là true, quá trình xử lý PNL sẽ tiếp tục
+    addLog(`Đã tìm thấy PNL. Tiến hành xử lý kết quả giao dịch.`);
     await processTradeResult(pnlForClosedTrade, positionSide, symbol, originalQuantity);
 }
 
@@ -892,8 +873,8 @@ async function openPosition(symbol, tradeDirection, usdtBalance, maxLeverage) {
         if(error instanceof CriticalApiError) {
             addLog(`Bot dừng do lỗi API nghiêm trọng khi mở lệnh.`);
             stopBotLogicInternal(); // Dừng bot nếu lỗi API nghiêm trọng
-        } else if(botRunning) {
-            scheduleNextMainCycle();
+        } else {
+            if(botRunning) scheduleNextMainCycle();
         }
     }
 }
