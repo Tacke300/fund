@@ -477,7 +477,7 @@ async function processTradeResult(pnlForClosedTrade, positionSideBeforeClose, sy
                 addLog(`Đã lỗ ${MAX_CONSECUTIVE_LOSSES} lần liên tiếp. Reset vốn về ${currentInvestmentAmount} USDT và lượt lỗ về 0.`);
             } else {
                 addLog(`[DEBUG] Trước khi nhân đôi: currentInvestmentAmount = ${currentInvestmentAmount}`);
-                currentInvestmentAmount *= 2; // Gấp đôi vốn cho lệnh tiếp theo
+                currentInvestmentAmount *= 1.6; // Gấp đôi vốn cho lệnh tiếp theo
                 addLog(`Gấp đôi vốn cho lệnh tiếp theo: ${currentInvestmentAmount} USDT.`);
             }
         } else {
