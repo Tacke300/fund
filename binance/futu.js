@@ -841,7 +841,7 @@ async function openPosition(symbol, tradeDirection, usdtBalance, maxLeverage) {
                     clearInterval(positionCheckInterval);
                     positionCheckInterval = null;
                 }
-            }, 5000); // Tăng interval lên 5 giây
+            }, 2000); // Tăng interval lên 5 giây
         }
 
     } catch (error) {
@@ -928,7 +928,7 @@ async function scheduleNextMainCycle() {
     clearTimeout(nextScheduledCycleTimeout);
 
     addLog(`Lên lịch chu kỳ giao dịch tiếp theo sau 5 giây...`);
-    nextScheduledCycleTimeout = setTimeout(runTradingLogic, 5000); // Đợi 5 giây
+    nextScheduledCycleTimeout = setTimeout(runTradingLogic, 2000); // Đợi 5 giây
 }
 
 // --- HÀM CHO WEBSOCKET LISTENKEY VÀ KẾT NỐI ---
@@ -1151,8 +1151,8 @@ async function runTradingLogic() {
             stopBotLogicInternal();
         } else {
             // Tạm dừng một chút sau lỗi rồi mới lên lịch lại để tránh spam
-            addLog(`Đợi 5 giây trước khi lên lịch chu kỳ mới sau lỗi trong runTradingLogic.`);
-            await sleep(5000);
+            addLog(`Đợi 2 giây trước khi lên lịch chu kỳ mới sau lỗi trong runTradingLogic.`);
+            await sleep(2000);
             if(botRunning) scheduleNextMainCycle();
         }
     }
