@@ -5,7 +5,7 @@ import { exec } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import WebSocket from 'ws'; // Đảm bảo bạn đã cài đặt 'ws'
+import WebSocket from 'ws';
 
 // Lấy __filename và __dirname trong ES modules
 const __filename = fileURLToPath(import.meta.url);
@@ -96,15 +96,7 @@ let currentMarketPrice = null; // Cache giá từ WebSocket cho TARGET_COIN_SYMB
 // Mỗi bot cần một cổng riêng và tên riêng trong PM2
 const WEB_SERVER_PORT = parseInt(process.env.WEB_SERVER_PORT || '1236');
 
-// Thay đổi logic xác định BOT_LOG_FILE để PM2 tự tạo
 const THIS_BOT_PM2_NAME = process.env.PM2_APP_NAME || 'futu'; // Tên của bot trong PM2, lấy từ ecosystem.config.js
-// PM2 sẽ tự động ghi log vào các file được cấu hình trong ecosystem.config.js
-// Để đọc được, chúng ta sẽ sử dụng đường dẫn mà PM2 đang ghi vào.
-// Điều này yêu cầu bạn định nghĩa out_file và error_file trong ecosystem.config.js
-// và truyền chúng vào biến môi trường nếu muốn truy cập trực tiếp từ bot.
-// Tuy nhiên, cách tốt nhất là để PM2 quản lý log và truy cập chúng qua pm2 logs <app_name>.
-// Nếu bạn vẫn muốn đọc file log trực tiếp, bạn cần đảm bảo biến môi trường này được set trong PM2.
-// Nếu không, bạn cần một đường dẫn mặc định nơi PM2 ghi log.
 const BOT_LOG_FILE = process.env.PM2_LOG_FILE || path.join(process.env.HOME || '/home/tacke300', '.pm2', 'logs', `${THIS_BOT_PM2_NAME}-out.log`);
 const BOT_ERROR_LOG_FILE = process.env.PM2_ERROR_LOG_FILE || path.join(process.env.HOME || '/home/tacke300', '.pm2', 'logs', `${THIS_BOT_PM2_NAME}-error.log`);
 
@@ -138,7 +130,6 @@ function addLog(message) {
         logCounts[messageHash] = { count: 1, lastLoggedTime: now };
         console.log(logEntry); // Log lần đầu tiên
     }
-    // console.log(logEntry); // Ghi ra console của server, PM2 sẽ tự động bắt
 }
 // === END - Cải tiến hàm addLog ===
 
@@ -241,7 +232,7 @@ async function callSignedAPI(fullEndpointPath, method = 'GET', params = {}) {
         headers['Content-Type'] = 'application/x-www-form-urlencoded';
     } else if (method === 'PUT') {
         requestPath = fullEndpointPath;
-        requestBody = `${queryString}&signature=${signature}`;
+        requestBody = `${queryString}&signature=${queryString}`;
         headers['Content-Type'] = 'application/x-www-form-urlencoded';
     }
     else if (method === 'DELETE') {
@@ -695,7 +686,7 @@ async function openPosition(symbol, tradeDirection, usdtBalance, maxLeverage) {
         }
         await sleep(500); // Thêm độ trễ sau setLeverage
 
-        const { pricePrecision, quantityPrecision, minNotional, stepSize, tickSize } = symbolDetails; // Đã bỏ minQty khỏi destructuring vì không dùng trực tiếp nữa
+        const { pricePrecision, quantityPrecision, minNotional, stepSize, tickSize, minQty } = symbolDetails; // Đã thêm minQty
 
         const currentPrice = await getCurrentPrice(symbol); // Lấy giá từ REST API cho symbol này
         if (!currentPrice) {
@@ -721,8 +712,8 @@ async function openPosition(symbol, tradeDirection, usdtBalance, maxLeverage) {
         quantity = parseFloat(quantity.toFixed(quantityPrecision));
 
         // Kiểm tra minQty sau khi tính toán và làm tròn
-        if (quantity < symbolDetails.minQty) { // Sử dụng symbolDetails.minQty
-            addLog(`Qty (${quantity.toFixed(quantityPrecision)}) < minQty (${symbolDetails.minQty}) cho ${symbol}. Hủy.`);
+        if (quantity < minQty) { // Sử dụng symbolDetails.minQty đã được destructuring
+            addLog(`Qty (${quantity.toFixed(quantityPrecision)}) < minQty (${minQty}) cho ${symbol}. Hủy.`);
             if(botRunning) scheduleNextMainCycle();
             return;
         }
@@ -1370,6 +1361,7 @@ function stopBotLogicInternal() {
 const app = express();
 app.use(express.json()); // Để parse JSON trong body của request POST
 
+// Phục vụ file HTML
 app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'index.html'));
 });
@@ -1460,23 +1452,55 @@ app.get('/api/bot_stats', async (req, res) => {
 
 // Endpoint để cấu hình các tham số từ frontend
 app.post('/api/configure', (req, res) => {
+    // === DÒNG NÀY RẤT QUAN TRỌNG ĐỂ DEBUG ===
+    addLog(`Nhận request cấu hình. req.body: ${JSON.stringify(req.body)}`);
+
     const { apiKey, secretKey, coinConfigs } = req.body;
 
-    API_KEY = apiKey.trim();
-    SECRET_KEY = secretKey.trim();
-
-    if (coinConfigs && coinConfigs.length > 0) {
-        const config = coinConfigs[0];
-        TARGET_COIN_SYMBOL = config.symbol.trim().toUpperCase();
-        INITIAL_INVESTMENT_AMOUNT = parseFloat(config.initialAmount);
-        APPLY_DOUBLE_STRATEGY = !!config.applyDoubleStrategy;
+    // Cập nhật API_KEY và SECRET_KEY
+    if (apiKey && typeof apiKey === 'string') {
+        API_KEY = apiKey.trim();
     } else {
-        addLog("Cảnh báo: Không có cấu hình đồng coin nào được gửi.");
+        addLog("Cảnh báo: API Key không hợp lệ hoặc bị thiếu, giữ giá trị cũ hoặc mặc định.");
     }
 
+    if (secretKey && typeof secretKey === 'string') {
+        SECRET_KEY = secretKey.trim();
+    } else {
+        addLog("Cảnh báo: Secret Key không hợp lệ hoặc bị thiếu, giữ giá trị cũ hoặc mặc định.");
+    }
+
+    // Xử lý coinConfigs
+    if (Array.isArray(coinConfigs) && coinConfigs.length > 0) {
+        const config = coinConfigs[0]; // Lấy cấu hình đầu tiên
+
+        if (config.symbol && typeof config.symbol === 'string') {
+            TARGET_COIN_SYMBOL = config.symbol.trim().toUpperCase();
+        } else {
+            addLog("Cảnh báo: Tên đồng coin không hợp lệ hoặc bị thiếu. Sử dụng mặc định.");
+            // Giữ TARGET_COIN_SYMBOL hiện tại hoặc gán giá trị mặc định ban đầu nếu muốn
+            TARGET_COIN_SYMBOL = 'ETHUSDT'; // Ví dụ, gán lại mặc định
+        }
+
+        if (typeof config.initialAmount === 'number' && !isNaN(config.initialAmount) && config.initialAmount > 0) {
+            INITIAL_INVESTMENT_AMOUNT = parseFloat(config.initialAmount);
+        } else {
+            addLog("Cảnh báo: Số vốn ban đầu không hợp lệ hoặc bị thiếu. Sử dụng mặc định.");
+            // Giữ INITIAL_INVESTMENT_AMOUNT hiện tại hoặc gán giá trị mặc định ban đầu
+            INITIAL_INVESTMENT_AMOUNT = 1; // Ví dụ, gán lại mặc định
+        }
+
+        // Chuyển đổi giá trị boolean một cách an toàn
+        APPLY_DOUBLE_STRATEGY = !!config.applyDoubleStrategy;
+
+    } else {
+        addLog("Cảnh báo: Không có cấu hình đồng coin nào được gửi hoặc không hợp lệ. Sử dụng cấu hình mặc định.");
+    }
+
+    // Reset các biến trạng thái giao dịch khi cấu hình thay đổi
     currentInvestmentAmount = INITIAL_INVESTMENT_AMOUNT;
     consecutiveLossCount = 0;
-    nextTradeDirection = 'SHORT';
+    nextTradeDirection = 'SHORT'; // Luôn reset hướng lệnh về ban đầu khi cấu hình mới
 
     addLog(`Đã cập nhật cấu hình:`);
     addLog(`  API Key: ${API_KEY ? 'Đã thiết lập' : 'Chưa thiết lập'}`);
@@ -1484,6 +1508,10 @@ app.post('/api/configure', (req, res) => {
     addLog(`  Đồng coin: ${TARGET_COIN_SYMBOL}`);
     addLog(`  Số vốn ban đầu: ${INITIAL_INVESTMENT_AMOUNT} USDT`);
     addLog(`  Chiến lược x2 vốn: ${APPLY_DOUBLE_STRATEGY ? 'Bật' : 'Tắt'}`);
+    addLog(`  Hướng lệnh tiếp theo (reset): ${nextTradeDirection}`);
+    addLog(`  Vốn hiện tại (reset): ${currentInvestmentAmount}`);
+    addLog(`  Số lần lỗ liên tiếp (reset): ${consecutiveLossCount}`);
+
 
     // Khi cấu hình thay đổi, nếu bot đang chạy, cần khởi tạo lại WS stream với symbol mới
     if (botRunning && TARGET_COIN_SYMBOL && marketWs?.readyState === WebSocket.OPEN) {
@@ -1491,7 +1519,7 @@ app.post('/api/configure', (req, res) => {
         setupMarketDataStream(TARGET_COIN_SYMBOL);
     }
 
-    res.json({ success: true, message: 'Cấu hình đã được cập nhật.' });
+    res.json({ success: true, message: 'Cấu hình đã được cập nhật thành công.' });
 });
 
 app.get('/start_bot_logic', async (req, res) => {
