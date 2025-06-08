@@ -6,7 +6,7 @@
     <title>Binance Futures Bot Control - {{THIS_BOT_PM2_NAME}}</title>
     <style>
         body { font-family: Arial, sans-serif; margin: 20px; background-color: #f4f4f4; color: #333; }
-        .container { max-width: 900px; margin: auto; background: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba{0,0,0,0.1}; }
+        .container { max-width: 900px; margin: auto; background: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); } /* Sửa lỗi cú pháp rgba{} */
         .section { margin-bottom: 20px; padding: 15px; border: 1px solid #ddd; border-radius: 5px; background-color: #f9f9f9; }
         h1, h2 { color: #0056b3; }
         label { display: block; margin-bottom: 5px; font-weight: bold; }
@@ -127,8 +127,7 @@
                     <div class="value" id="netPNL">0.00</div>
                 </div>
             </div>
-            <h3>Vị thế Đang Mở ({{TARGET_COIN_SYMBOL}})</h3>
-            <div id="currentOpenPositions">Không có vị thế mở.</div>
+            <h3>Vị thế Đang Mở (<span id="displayedTargetSymbol"></span>)</h3> <div id="currentOpenPositions">Không có vị thế mở.</div>
         </div>
 
         <div class="section">
@@ -139,13 +138,14 @@
     </div>
 
     <script>
-        const THIS_BOT_PM2_NAME = "{{THIS_BOT_PM2_NAME}}"; // Biến này sẽ được thay thế bởi Node.js server khi gửi HTML
-        const TARGET_COIN_SYMBOL_JS = "{{TARGET_COIN_SYMBOL}}"; // Biến này cũng sẽ được thay thế
+        // Các biến này được thay thế bởi server, nhưng sẽ được cập nhật lại bởi loadSavedConfig
+        const THIS_BOT_PM2_NAME = "{{THIS_BOT_PM2_NAME}}";
+        let TARGET_COIN_SYMBOL_JS = "{{TARGET_COIN_SYMBOL}}"; // Sử dụng let để có thể cập nhật
 
-        document.title = `Binance Futures Bot Control - ${THIS_BOT_PM2_NAME}`; // Cập nhật tiêu đề trang
-        // Cập nhật các element placeholder với giá trị từ biến môi trường
+        document.title = `Binance Futures Bot Control - ${THIS_BOT_PM2_NAME}`;
         document.querySelector('h1').textContent = `Binance Futures Bot Control - ${THIS_BOT_PM2_NAME}`;
-        document.querySelector('h3').textContent = `Vị thế Đang Mở (${TARGET_COIN_SYMBOL_JS})`;
+        // Ban đầu có thể hiển thị placeholder, sau đó loadSavedConfig sẽ cập nhật
+        document.getElementById('displayedTargetSymbol').textContent = TARGET_COIN_SYMBOL_JS;
 
 
         // Hàm hiển thị thông báo
@@ -157,6 +157,35 @@
                 element.textContent = '';
                 element.className = 'status-message';
             }, 5000);
+        }
+
+        // Hàm tải cấu hình hiện tại từ server và điền vào form
+        async function loadSavedConfig() {
+            try {
+                const response = await fetch('/api/config');
+                const result = await response.json();
+                if (result.success && result.data) {
+                    const config = result.data;
+                    document.getElementById('apiKey').value = config.apiKey;
+                    // Không điền secretKey trực tiếp vì lý do bảo mật, người dùng phải nhập lại nếu muốn thay đổi
+                    // document.getElementById('secretKey').value = config.secretKey; // Đừng làm điều này!
+
+                    document.getElementById('targetSymbol').value = config.targetSymbol;
+                    document.getElementById('initialAmount').value = config.initialAmount;
+                    document.getElementById('applyDoubleStrategy').checked = config.applyDoubleStrategy;
+
+                    // Cập nhật biến JS và hiển thị cho người dùng
+                    TARGET_COIN_SYMBOL_JS = config.targetSymbol;
+                    document.getElementById('displayedTargetSymbol').textContent = TARGET_COIN_SYMBOL_JS;
+
+                    showMessage('configMessage', 'Đã tải cấu hình hiện tại.', true);
+                } else {
+                    showMessage('configMessage', 'Lỗi khi tải cấu hình hiện tại: ' + result.message, false);
+                }
+            } catch (error) {
+                console.error('Lỗi khi tải cấu hình:', error);
+                showMessage('configMessage', 'Lỗi kết nối để tải cấu hình: ' + error.message, false);
+            }
         }
 
         // Hàm lưu cấu hình
@@ -197,6 +226,9 @@
                 const result = await response.json();
                 if (result.success) {
                     showMessage('configMessage', result.message, true);
+                    // Cập nhật TARGET_COIN_SYMBOL_JS ngay sau khi lưu thành công
+                    TARGET_COIN_SYMBOL_JS = targetSymbol.toUpperCase();
+                    document.getElementById('displayedTargetSymbol').textContent = TARGET_COIN_SYMBOL_JS;
                 } else {
                     showMessage('configMessage', 'Lỗi: ' + result.message, false);
                 }
@@ -306,6 +338,7 @@
 
         // Tải ban đầu và cập nhật định kỳ
         document.addEventListener('DOMContentLoaded', () => {
+            loadSavedConfig(); // Tải cấu hình khi trang được load
             updateStatus();
             refreshLogs();
             updateBotStats();
