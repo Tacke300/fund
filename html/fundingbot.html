@@ -1,420 +1,346 @@
-<!DOCTYPE html>  
-<html lang="en">  
-<head>  
-  <meta charset="UTF-8" />  
-  <title>Bot Controller</title>  
-  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@700&display=swap" rel="stylesheet" />  
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Danh sách Ví và Lợi nhuận</title>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <style>
+        /* Modern CSS Reset */
+        *, *::before, *::after {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
 
-  <style>  
-    * {  
-      box-sizing: border-box;  
-    }  
-  
-    html,body {  
-      margin: 0;  
-      padding: 0;  
-      color: white;  
-      background: #1e1e2f;
-      font-family: 'Baloo 2', cursive;  
-      height: 100%;
-  width: 100%;
-  overflow: hidden;
-    }  
-  
-  
-    
-  
-    .container {
-      display: flex;
-      width: 100%;
-      height: 60px;
-      justify-content: center;
-      gap: 20px;
-    }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f0f2f5;
+            color: #333;
+            line-height: 1.6;
+            padding: 20px;
+        }
 
-    .bot {
-      
-      flex: 0 1 300px;
-      border: 1px solid #aaa;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      position: relative;
-      transition: all 0.3s ease;
-      padding: 10px;
-      border-radius: 10px;
-      width: 100% !important;
-    min-width: unset;
-    }
+        .container {
+            max-width: 1200px;
+            margin: 20px auto;
+            background-color: #ffffff;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+            padding: 30px;
+        }
 
-    .bot button {
-      height: 40px;
-      background: #222;
-      border: none;
-      border-radius: 6px;
-      cursor: pointer;
-      font-weight: bold;
-      padding: 0 5px;
-  
-      color:white;
-    }
-    
-  button {
-      width: 100%;
-      padding: 5px;
-      font-size: 1rem;
-      color: white;
-      background-color: #007bff;
-      border: none;
-      border-radius: 6px;
-      cursor: pointer;
-      transition: background-color 0.3s;
-    }
-    .input-wrapper {
-      position: relative;
-      width: 180px;
-      display: none;
-    }
+        h1 {
+            color: #2c3e50;
+            text-align: center;
+            margin-bottom: 30px;
+            font-size: 2.2em;
+            font-weight: 600;
+        }
 
-    .input-wrapper input {
-      width: 100%;
-      height: 40px;
-      padding: 0 5px 0 5px;
-      border: 1px solid #aaa;
-      border-radius: 6px;
-    }
+        /* Search and Sort Section */
+        .controls {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 25px;
+            gap: 15px;
+            flex-wrap: wrap;
+        }
 
-    .input-wrapper .close {
-      position: absolute;
-      right: 8px;
-      top: 50%;
-      transform: translateY(-50%);
-      font-size: 18px;
-      cursor: pointer;
-      user-select: none;
-      color: #666;
-    }
+        .controls input[type="text"] {
+            flex-grow: 1;
+            padding: 12px 15px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            font-size: 1em;
+            transition: border-color 0.3s ease;
+            min-width: 200px;
+        }
 
-    .start {
-      background-color: #4CAF50 !important;
-      color: white;
-    }
+        .controls input[type="text"]:focus {
+            border-color: #007bff;
+            outline: none;
+        }
 
-    .stop {
-      background-color: #f44336 !important;
-      color: white;
-    }
+        .controls .sort-buttons button {
+            background-color: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 0.95em;
+            margin-left: 10px;
+            transition: background-color 0.3s ease, transform 0.2s ease;
+        }
 
-    .input-group {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 10px;
-      width: 100%;
-    }
-    .api-sub {  
-      position: fixed;  
-      top: 0;  
-      left: 0;  
-      right: 0;  
-      background: #111;  
-      z-index: 10000;  
-      padding: 40px 20px;  
-      text-align: center;  
-      animation: slideUp 0.3s ease;  
-    }
-    @keyframes slideUp {  
-      from {  
-        transform: translateY(100%);  
-        opacity: 0;  
-      }  
-      to {  
-        transform: translateY(0);  
-        opacity: 1;  
-      }  
-    }  
-  /* tab003*/
-  
-    .tab-003{  
-      max-width: 400px;  
-      margin: 40px auto 0;  
-      background: #222;  
-      padding: 20px;  
-      border-radius: 12px;  
-      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);  
-      border: 1px solid #555;  
-      color: white;  
-      font-family: 'Baloo 2', cursive;  
-    
-    }  
-  
-    /* Sửa lại popup api-02 giống popup kiểu fixed trượt lên */  
-  
-    #api-02 {  
-      display: none;  
-      position: fixed;  
-      bottom: 0;  
-      left: 0;  
-      right: 0;  
-      max-width: 400px;  
-      margin: 0 auto;  
-      background: #111;  
-      padding: 20px 30px;  
-      border-radius: 12px 12px 0 0;  
-      box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.7);  
-      z-index: 10001;  
-      animation: slideUp 0.3s ease forwards;  
-      text-align: center;  
-      height: 80vh;
-    }  
-  
-    #api-02 div[style*="text-align: right"] {  
-      font-size: 24px;  
-      cursor: pointer;  
-      color: #eee;  
-      user-select: none;  
-    }  
-  
-    #api-02 div[style*="text-align: right"]:hover {  
-      color: #f44336;  
-    }  
-  
-    .api-option {  
-      padding: 14px 20px;  
-      border: 1px solid #444;  
-      border-radius: 10px;  
-      background: #222;  
-      cursor: pointer;  
-      text-align: center;  
-      font-weight: bold;  
-      font-size: 16px;  
-      box-shadow: 0 0 8px rgba(255, 255, 255, 0.05);  
-      transition: background 0.2s, border-color 0.2s;  
-      margin-bottom: 12px;  
-      color: white;  
-      user-select: none;  
-    }  
-  
-    .api-option:hover {  
-      background: #336;  
-      border-color: #888;  
-    }  
-  .tab-004{
-    max-width: 400px;  
-      margin: 5px auto 0;  
-      background: #222;  
-      padding: 5px;  
-      border-radius: 12px;  
-      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);  
-      border: 1px solid #555;  
-      color: white;  
-      font-family: 'Baloo 2', cursive;
-    background: #222;}
-  #api-form {  
-      display: none;  
-      position: fixed;  
-      bottom: 0;  
-      left: 0;  
-      right: 0;  
-      max-width: 400px;  
-      margin: 0 auto;  
-      background: #111;  
-      padding: 20px 30px;  
-      border-radius: 12px 12px 0 0;  
-      box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.7);  
-      z-index: 10001;  
-      animation: slideUp 0.3s ease forwards;  
-      text-align: center;  
-      height: 80vh;
-    }  
-  
-  .tab-002{
-    padding-left: 3px;
-    font-family: 'Roboto', Arial, sans-serif;
-  }
- .all {
-      max-width: 480px;
-      margin: auto;
-      border-radius: 20px;
-      box-shadow: 0 2px 20px rgba(0,0,0,0.1);
-      padding: 16px;
-     height: 100vh;
-    }
-  
-  /* Responsive Mobile Fix cho phần cài API */
+        .controls .sort-buttons button:hover {
+            background-color: #0056b3;
+            transform: translateY(-2px);
+        }
 
+        .controls .sort-buttons button:active {
+            transform: translateY(0);
+        }
 
+        /* Table Styling */
+        .data-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
 
-  </style>  
-</head>  
-<body>  
-  <div class="all">
-  
-  <iframe src="top.html" width="100%" height="400px" style="border:none;"></iframe>
-    <div class="tab-003">
+        .data-table th, .data-table td {
+            padding: 15px;
+            text-align: left;
+            border-bottom: 1px solid #eee;
+        }
+
+        .data-table th {
+            background-color: #e9ecef;
+            color: #555;
+            font-weight: 600;
+            text-transform: uppercase;
+            font-size: 0.9em;
+        }
+
+        .data-table tr:hover {
+            background-color: #f8f9fa;
+        }
+
+        .data-table td a {
+            color: #007bff;
+            text-decoration: none;
+            font-weight: 500;
+            transition: color 0.3s ease;
+        }
+
+        .data-table td a:hover {
+            color: #0056b3;
+            text-decoration: underline;
+        }
+
+        .data-table .pnl-positive {
+            color: #28a745; /* Green */
+            font-weight: 600;
+        }
+
+        .data-table .pnl-negative {
+            color: #dc3545; /* Red */
+            font-weight: 600;
+        }
+
+        /* Popup Styling */
+        .popup-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.85); /* Darker overlay */
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+            opacity: 0;
+            visibility: hidden;
+            transition: opacity 0.3s ease, visibility 0.3s ease;
+        }
+
+        .popup-overlay.active {
+            opacity: 1;
+            visibility: visible;
+        }
+
+        .popup-content {
+            background-color: #ffffff;
+            border-radius: 8px;
+            box-shadow: 0 8px 25px rgba(0, 0, 0, 0.3);
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden; /* Ensure iframe fits */
+        }
+
+        .popup-header {
+            padding: 15px 20px;
+            background-color: #f8f9fa;
+            border-bottom: 1px solid #eee;
+            display: flex;
+            justify-content: flex-start;
+            align-items: center;
+        }
+
+        .popup-header button {
+            background-color: #6c757d;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 1em;
+            transition: background-color 0.3s ease;
+        }
+
+        .popup-header button:hover {
+            background-color: #5a6268;
+        }
+
+        .popup-iframe {
+            flex-grow: 1; /* Make iframe take remaining space */
+            width: 100%;
+            border: none;
+        }
+    </style>
+</head>
+<body>
     <div class="container">
-      <div class="bot" id="bot1">
-        <div class="input-group">
-          <div class="input-wrapper">
-            <input type="number" placeholder="Nhập số tiền" />
-            <span class="close" onclick="resetBot('bot1')">×</span>
-          </div>
-          <button onclick="handleClick('bot1')">BOT trước funding</button>
+        <h1>Bảng Thông tin Giao dịch</h1>
+
+        <div class="controls">
+            <input type="text" id="searchInput" placeholder="Tìm kiếm theo Symbol...">
+            <div class="sort-buttons">
+                <button onclick="sortData('pnl_today', 'asc')">PNL Hôm nay (Thấp-Cao)</button>
+                <button onclick="sortData('pnl_today', 'desc')">PNL Hôm nay (Cao-Thấp)</button>
+                <button onclick="sortData('pnl_all', 'asc')">PNL Tổng (Thấp-Cao)</button>
+                <button onclick="sortData('pnl_all', 'desc')">PNL Tổng (Cao-Thấp)</button>
+            </div>
         </div>
-      </div>
-      <div class="bot" id="bot2">
-        <div class="input-group">
-          <div class="input-wrapper">
-            <input type="number" placeholder="Nhập số tiền" />
-            <span class="close" onclick="resetBot('bot2')">×</span>
-          </div>
-          <button onclick="handleClick('bot2')">BOT sau funding</button>
-        </div>
-      </div>
+
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Symbol</th>
+                    <th>Vol ($)</th>
+                    <th>PNL Hôm nay</th>
+                    <th>PNL Tổng</th>
+                </tr>
+            </thead>
+            <tbody id="dataTableBody">
+                </tbody>
+        </table>
     </div>
-  </div>
-    
-    <div class="tab-004">  
-      <!-- Nút Cài đặt API -->  
-      <!-- Nút mở API -->  
-      <div style="text-align: center; "class="bot">  
-        <button id="api-01" style="padding: 12px 24px; font-size: 18px; font-weight: bold; width: 100%; cursor: pointer;">Cài đặt</button>  
-      </div>  
-  
-      <!-- Popup chọn sàn -->  
-      <div id="api-02">  
-        <h1> Sever Api</h1>
-        <div style="text-align: right;" onclick="closePopup()">×</div>  
-        <div style="display: flex; flex-direction: column; gap: 20px; margin-top: 20px;">  
-          <div class="api-option" onclick="openApiForm('okx')">OKX</div>  
-          <div class="api-option" onclick="openApiForm('binance')">Binance</div>  
-          <div class="api-option" onclick="openApiForm('bitget')">Bitget</div>  
-          <div class="api-option" onclick="openApiForm('bingx')">Bingx</div>  
 
-          
+    <div class="popup-overlay" id="popupOverlay">
+        <div class="popup-content">
+            <div class="popup-header">
+                <button onclick="closePopup()">Trở lại</button>
+            </div>
+            <iframe id="popupIframe" class="popup-iframe" src="" frameborder="0"></iframe>
+        </div>
+    </div>
 
-  
-        </div>  
-      </div>  
-  
-      <!-- Các popup nhập API -->  
-      <div id="api-form" style="display: none; max-width: 400px; margin: 40px auto 0; background: #333; padding: 30px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.6);">  
-        <div style="text-align: right; font-size: 20px; cursor: pointer;" onclick="closeApiForm()">×</div>  
-        <h2 id="api-form-title" style="margin: 20px 0 30px; text-align: center; font-size: 24px;">Set API</h2>  
-        <input type="text" placeholder="Nhập API key..." style="width: 100%; padding: 10px; font-size: 16px; margin-bottom: 20px; border-radius: 6px; border: 1px solid #888;" />  
-        
-        
-        
-        <button onclick="submitApiForm()" style="width: 100%; padding: 12px; font-size: 16px; font-weight: bold; cursor: pointer;">Submit</button>  
-      </div>  
-    </div>  
-  <div style="text-align: center; margin-top: 20px;" class="tab-004">
-<button onclick="logoutParent()">Đăng xuất</button>
-</div>
-</div>
-</div>  
-  <script>  
-  // Bật/tắt input nhập tiền và đổi nút Khởi chạy <-> Dừng lại  
-  function handleClick(botId) {
-  const bot = document.getElementById(botId);
-  const inputWrapper = bot.querySelector('.input-wrapper');
-  const button = bot.querySelector('button');
-  const otherBot = document.getElementById(botId === 'bot1' ? 'bot2' : 'bot1');
+    <script>
+        // CẤU HÌNH SUPABASE CỦA BẠN
+        // Thay thế 'YOUR_SUPABASE_URL' và 'YOUR_SUPABASE_ANON_KEY' bằng thông tin thật của bạn
+        const SUPABASE_URL = 'YOUR_SUPABASE_URL';
+        const SUPABASE_ANON_KEY = 'YOUR_SUPABASE_ANON_KEY';
 
-  const isInitial =
-    (botId === 'bot1' && button.innerText === 'BOT trước funding') ||
-    (botId === 'bot2' && button.innerText === 'BOT sau funding');
+        const supabase = Supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-  if (isInitial) {
-    inputWrapper.style.display = 'block';
-    button.innerText = 'Bắt đầu';
-    button.classList.add('start');
-    otherBot.style.display = 'none';
-  } else if (button.innerText === 'Bắt đầu') {
-    inputWrapper.style.display = 'none';
-    button.innerText = 'Dừng bot';
-    button.classList.remove('start');
-    button.classList.add('stop');
-    otherBot.style.display = 'flex';
-  } else {
-    resetBot(botId);
-  }
-}
+        const dataTableBody = document.getElementById('dataTableBody');
+        const searchInput = document.getElementById('searchInput');
+        const popupOverlay = document.getElementById('popupOverlay');
+        const popupIframe = document.getElementById('popupIframe');
 
-function resetBot(botId) {
-  const bot = document.getElementById(botId);
-  const input = bot.querySelector('input');
-  const button = bot.querySelector('button');
-  const inputWrapper = bot.querySelector('.input-wrapper');
+        let tableData = []; // Dữ liệu sẽ được tải từ Supabase
 
-  input.value = '';
-  inputWrapper.style.display = 'none';
+        // Hàm để tải dữ liệu từ Supabase
+        async function fetchSupabaseData() {
+            console.log('Đang tải dữ liệu từ Supabase...');
+            const { data, error } = await supabase
+                .from('list') // Tên bảng của bạn là 'list'
+                .select('*'); // Lấy tất cả các cột
 
-  // Gán lại nhãn đúng với từng bot
-  if (botId === 'bot1') {
-    button.innerText = 'BOT trước funding';
-  } else if (botId === 'bot2') {
-    button.innerText = 'BOT sau funding';
-  }
+            if (error) {
+                console.error('Lỗi khi tải dữ liệu từ Supabase:', error.message);
+                return [];
+            } else {
+                console.log('Dữ liệu đã tải:', data);
+                return data;
+            }
+        }
 
-  button.classList.remove('start', 'stop');
-  document.getElementById('bot1').style.display = 'flex';
-  document.getElementById('bot2').style.display = 'flex';
-}
-  
-  // Mở popup chọn sàn API  
-  const api02 = document.getElementById('api-02');  
-  document.getElementById('api-01').addEventListener('click', () => {  
-    api02.style.display = 'block';  
-  });  
-  
-  // Đóng popup chọn sàn API  
-  function closePopup() {  
-    api02.style.display = 'none';  
-  }  
-  
-  // Mở form nhập API tương ứng với sàn đã chọn  
-  const apiForm = document.getElementById('api-form');  
-  const apiFormTitle = document.getElementById('api-form-title');  
-  
-  function openApiForm(exchange) {  
-    apiForm.style.display = 'block';  
-    api02.style.display = 'none';  
-    apiFormTitle.textContent = `Set API ${exchange.toUpperCase()}`;  
-  }  
-  
-  // Đóng form nhập API  
-  function closeApiForm() {  
-    apiForm.style.display = 'none';  
-  }  
-  
-  // Xử lý submit API (chưa thực hiện logic lưu)  
-  function submitApiForm() {  
-    // Lấy input API key  
-    const input = apiForm.querySelector('input[type="text"]');  
-    const apiKey = input.value.trim();  
-    if (!apiKey) {  
-      alert('Vui lòng nhập API key');  
-      return;  
-    }  
-    // TODO: Thêm logic lưu hoặc gửi API key ở đây  
-  
-    alert('API key đã được gửi');  
-    input.value = '';  
-    closeApiForm();  
-  }  
+        function renderTable(data) {
+            dataTableBody.innerHTML = ''; // Xóa các hàng hiện có
+            if (data.length === 0) {
+                dataTableBody.innerHTML = '<tr><td colspan="4" style="text-align: center;">Không có dữ liệu để hiển thị.</td></tr>';
+                return;
+            }
+            data.forEach(item => {
+                const row = dataTableBody.insertRow();
 
-// dang xuat
-  function logoutParent() {
-    // Gọi hàm logout của trang cha để xóa đăng nhập
-    if (parent && typeof parent.logout === 'function') {
-      parent.logout();
-    } else {
-      // Nếu không gọi được logout, có thể chuyển trang cha về login
-      parent.location.href = 'index.html'; // hoặc '/' tùy cấu trúc bạn
-    }
-  }
+                const symbolCell = row.insertCell();
+                const symbolLink = document.createElement('a');
+                symbolLink.href = '#';
+                symbolLink.textContent = item.symbol;
+                symbolLink.onclick = (e) => {
+                    e.preventDefault(); // Ngăn chặn hành vi mặc định của link
+                    openPopup('http://34.142.248.96:1997');
+                };
+                symbolCell.appendChild(symbolLink);
 
-</script>
-    
-    
+                row.insertCell().textContent = item.vol.toLocaleString('en-US', { style: 'currency', currency: 'USD' });
+
+                const pnlTodayCell = row.insertCell();
+                pnlTodayCell.textContent = item.pnl_today.toFixed(2);
+                pnlTodayCell.classList.add(item.pnl_today >= 0 ? 'pnl-positive' : 'pnl-negative');
+
+                const pnlAllCell = row.insertCell();
+                pnlAllCell.textContent = item.pnl_all.toFixed(2);
+                pnlAllCell.classList.add(item.pnl_all >= 0 ? 'pnl-positive' : 'pnl-negative');
+            });
+        }
+
+        function sortData(key, order) {
+            tableData.sort((a, b) => {
+                let valA = a[key];
+                let valB = b[key];
+
+                if (order === 'asc') {
+                    return valA - valB;
+                } else {
+                    return valB - valA;
+                }
+            });
+            filterAndRender(); // Hiển thị lại với dữ liệu đã sắp xếp và lọc
+        }
+
+        function filterAndRender() {
+            const searchTerm = searchInput.value.toLowerCase();
+            const filteredData = tableData.filter(item =>
+                item.symbol.toLowerCase().includes(searchTerm)
+            );
+            renderTable(filteredData);
+        }
+
+        function openPopup(url) {
+            popupIframe.src = url;
+            popupOverlay.classList.add('active');
+        }
+
+        function closePopup() {
+            popupOverlay.classList.remove('active');
+            popupIframe.src = ''; // Xóa src của iframe để dừng mọi media/script
+        }
+
+        // Tải dữ liệu khi trang được tải và hiển thị
+        document.addEventListener('DOMContentLoaded', async () => {
+            tableData = await fetchSupabaseData();
+            filterAndRender(); // Lần hiển thị ban đầu (sau khi tải dữ liệu)
+        });
+
+        // Event listener cho thanh tìm kiếm
+        searchInput.addEventListener('keyup', filterAndRender);
+
+        // Tùy chọn: Đóng popup khi click vào vùng phủ (ngoài nội dung popup)
+        popupOverlay.addEventListener('click', (e) => {
+            if (e.target === popupOverlay) {
+                closePopup();
+            }
+        });
+    </script>
+</body>
+</html>
