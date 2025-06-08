@@ -1378,22 +1378,10 @@ app.get('/api/logs', (req, res) => {
     fs.readFile(BOT_LOG_FILE, 'utf8', (err, data) => {
         if (err) {
             console.error('Lỗi đọc log file:', err);
-            // Cố gắng đọc từ error log file nếu out log không có
-            fs.readFile(BOT_ERROR_LOG_FILE, 'utf8', (err_err, data_err) => {
-                if (err_err) {
-                    if (err_err.code === 'ENOENT') {
-                        return res.status(404).send(`Không tìm thấy log file: ${BOT_LOG_FILE} hoặc ${BOT_ERROR_LOG_FILE}. Đảm bảo PM2 đã tạo file log này và cấu hình trong ecosystem.config.js.`);
-                    }
-                    return res.status(500).send(`Lỗi đọc log file: ${err.message} và ${err_err.message}`);
-                }
-                const cleanData = data_err.replace(/[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g, '');
-                const lines = cleanData.split('\n');
-                const maxDisplayLines = 500;
-                const startIndex = Math.max(0, lines.length - maxDisplayLines);
-                const limitedLogs = lines.slice(startIndex).join('\n');
-                res.send(limitedLogs);
-            });
-            return; // Quan trọng: return để không gửi hai phản hồi
+            if (err.code === 'ENOENT') {
+                return res.status(404).send(`Không tìm thấy log file: ${BOT_LOG_FILE}.`);
+            }
+            return res.status(500).send('Lỗi đọc log file');
         }
         const cleanData = data.replace(/[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g, '');
 
@@ -1415,20 +1403,18 @@ app.get('/api/status', async (req, res) => {
             });
         });
         const processes = JSON.parse(pm2List);
-        // Tìm đúng tiến trình PM2 của bot này dựa vào THIS_BOT_PM2_NAME
         const botProcess = processes.find(p => p.name === THIS_BOT_PM2_NAME);
 
-        let statusMessage = `MAY CHU: DA TAT (PM2 cho ${THIS_BOT_PM2_NAME})`;
+        let statusMessage = 'MAY CHU: DA TAT (PM2)';
         if (botProcess) {
             statusMessage = `MAY CHU: ${botProcess.pm2_env.status.toUpperCase()} (Restarts: ${botProcess.pm2_env.restart_time})`;
             if (botProcess.pm2_env.status === 'online') {
-                statusMessage += ` | TRANG THAI BOT: ${botRunning ? 'DANG CHAY' : 'DA DUNG'}`;
+                statusMessage += ` | TRANG THAI: ${botRunning ? 'DANG CHAY' : 'DA DUNG'}`;
                 if (botStartTime) {
                     const uptimeMs = Date.now() - botStartTime.getTime();
                     const uptimeMinutes = Math.floor(uptimeMs / (1000 * 60));
                     statusMessage += ` | DA CHAY: ${uptimeMinutes} phút`;
                 }
-                statusMessage += ` | COIN: ${TARGET_COIN_SYMBOL}`;
             }
         } else {
             statusMessage = `Bot: Không tìm thấy trong PM2 (Tên: ${THIS_BOT_PM2_NAME})`;
@@ -1444,8 +1430,7 @@ app.get('/api/status', async (req, res) => {
 app.get('/api/bot_stats', async (req, res) => {
     try {
         let openPositionsData = [];
-        // Chỉ trả về vị thế của TARGET_COIN_SYMBOL của bot này
-        if (currentOpenPosition && currentOpenPosition.symbol === TARGET_COIN_SYMBOL) {
+        if (currentOpenPosition) {
             openPositionsData.push({
                 symbol: currentOpenPosition.symbol,
                 side: currentOpenPosition.side,
@@ -1460,12 +1445,6 @@ app.get('/api/bot_stats', async (req, res) => {
         res.json({
             success: true,
             data: {
-                targetCoin: TARGET_COIN_SYMBOL, // Bổ sung thông tin coin mà bot này đang xử lý
-                initialInvestment: INITIAL_INVESTMENT_AMOUNT,
-                currentInvestment: currentInvestmentAmount,
-                applyDoubleStrategy: APPLY_DOUBLE_STRATEGY,
-                consecutiveLosses: consecutiveLossCount,
-                nextTradeDir: nextTradeDirection,
                 totalProfit: totalProfit,
                 totalLoss: totalLoss,
                 netPNL: netPNL,
@@ -1481,70 +1460,36 @@ app.get('/api/bot_stats', async (req, res) => {
 
 // Endpoint để cấu hình các tham số từ frontend
 app.post('/api/configure', (req, res) => {
-    // Trích xuất đúng cấu trúc dữ liệu: apiKey, secretKey là trực tiếp, coinConfigs là một mảng
     const { apiKey, secretKey, coinConfigs } = req.body;
 
-    // Cập nhật API Key và Secret Key cho bot này
-    API_KEY = apiKey ? apiKey.trim() : ''; // Đảm bảo apiKey không phải undefined trước khi gọi trim()
-    SECRET_KEY = secretKey ? secretKey.trim() : ''; // Đảm bảo secretKey không phải undefined trước khi gọi trim()
+    API_KEY = apiKey.trim();
+    SECRET_KEY = secretKey.trim();
 
-    // Lấy cấu hình coin đầu tiên từ mảng coinConfigs
-    if (coinConfigs && Array.isArray(coinConfigs) && coinConfigs.length > 0) {
-        const coinConfig = coinConfigs[0]; // Lấy object cấu hình coin đầu tiên
-        // Trích xuất các biến từ object cấu hình coin
-        const { symbol, initialAmount, applyDoubleStrategy } = coinConfig;
-
-        // Cập nhật cấu hình giao dịch cho bot này
-        TARGET_COIN_SYMBOL = symbol ? symbol.trim().toUpperCase() : TARGET_COIN_SYMBOL; // Kiểm tra symbol
-        INITIAL_INVESTMENT_AMOUNT = parseFloat(initialAmount) || INITIAL_INVESTMENT_AMOUNT; // Kiểm tra initialAmount
-        APPLY_DOUBLE_STRATEGY = (typeof applyDoubleStrategy === 'boolean') ? applyDoubleStrategy : APPLY_DOUBLE_STRATEGY; // Kiểm tra applyDoubleStrategy
+    if (coinConfigs && coinConfigs.length > 0) {
+        const config = coinConfigs[0];
+        TARGET_COIN_SYMBOL = config.symbol.trim().toUpperCase();
+        INITIAL_INVESTMENT_AMOUNT = parseFloat(config.initialAmount);
+        APPLY_DOUBLE_STRATEGY = !!config.applyDoubleStrategy;
     } else {
-        addLog('Lỗi cấu hình: Dữ liệu cấu hình coin không hợp lệ hoặc bị thiếu.');
-        return res.status(400).json({ success: false, message: 'Dữ liệu cấu hình coin không hợp lệ.' });
+        addLog("Cảnh báo: Không có cấu hình đồng coin nào được gửi.");
     }
 
     currentInvestmentAmount = INITIAL_INVESTMENT_AMOUNT;
     consecutiveLossCount = 0;
-    nextTradeDirection = 'SHORT'; // Reset hướng lệnh về ban đầu khi cấu hình
+    nextTradeDirection = 'SHORT';
 
-    addLog(`Đã cập nhật cấu hình cho ${TARGET_COIN_SYMBOL}:`);
+    addLog(`Đã cập nhật cấu hình:`);
     addLog(`  API Key: ${API_KEY ? 'Đã thiết lập' : 'Chưa thiết lập'}`);
     addLog(`  Secret Key: ${SECRET_KEY ? 'Đã thiết lập' : 'Chưa thiết lập'}`);
     addLog(`  Đồng coin: ${TARGET_COIN_SYMBOL}`);
     addLog(`  Số vốn ban đầu: ${INITIAL_INVESTMENT_AMOUNT} USDT`);
     addLog(`  Chiến lược x2 vốn: ${APPLY_DOUBLE_STRATEGY ? 'Bật' : 'Tắt'}`);
 
-    // Khi cấu hình thay đổi, nếu bot đang chạy, cần khởi tạo lại WS market data với symbol mới
+    // Khi cấu hình thay đổi, nếu bot đang chạy, cần khởi tạo lại WS stream với symbol mới
     if (botRunning && TARGET_COIN_SYMBOL && marketWs?.readyState === WebSocket.OPEN) {
         addLog(`Cấu hình symbol thay đổi, khởi tạo lại Market Data Stream cho ${TARGET_COIN_SYMBOL}.`);
         setupMarketDataStream(TARGET_COIN_SYMBOL);
     }
-    // Cần khởi động lại User Data Stream nếu API Key/Secret thay đổi
-    // Cần kiểm tra xem API_KEY và SECRET_KEY hiện tại (sau khi đã cập nhật) có khác với biến môi trường cũ không
-    // Lưu ý: process.env.BINANCE_API_KEY/SECRET_KEY không tự động cập nhật khi bạn gán giá trị mới cho API_KEY/SECRET_KEY trong mã.
-    // Để đảm bảo PM2 dùng biến môi trường mới, bạn cần khởi động lại PM2 hoặc dùng lệnh pm2 reload <app_name> --update-env
-    // Việc này chỉ cập nhật trong phạm vi của tiến trình Node.js hiện tại.
-    if (botRunning && (API_KEY !== process.env.BINANCE_API_KEY || SECRET_KEY !== process.env.BINANCE_SECRET_KEY)) {
-        addLog('Cấu hình API Key/Secret thay đổi, làm mới Listen Key và User Data Stream.');
-        if (listenKeyRefreshInterval) clearInterval(listenKeyRefreshInterval);
-        userDataWs?.close();
-        listenKey = null;
-        // Cần cập nhật biến môi trường của tiến trình để các cuộc gọi API sau này dùng key mới
-        process.env.BINANCE_API_KEY = API_KEY;
-        process.env.BINANCE_SECRET_KEY = SECRET_KEY;
-        // Đặt timeout nhỏ để tránh Race condition khi API Key/Secret đang cập nhật
-        setTimeout(async () => {
-            listenKey = await getListenKey();
-            if (listenKey) setupUserDataStream(listenKey);
-        }, 1000);
-    } else if (botRunning && listenKey) { // Nếu bot đang chạy và không thay đổi key nhưng có thể cần refresh nếu key bị lỗi
-        addLog('Cấu hình không thay đổi API Key/Secret, nhưng kiểm tra lại User Data Stream.');
-        // Đặt timeout nhỏ để tránh Race condition khi API Key/Secret đang cập nhật
-        setTimeout(async () => {
-            await keepAliveListenKey(); // Thử làm mới key
-        }, 1000);
-    }
-
 
     res.json({ success: true, message: 'Cấu hình đã được cập nhật.' });
 });
@@ -1562,13 +1507,4 @@ app.get('/stop_bot_logic', (req, res) => {
 app.listen(WEB_SERVER_PORT, () => {
     addLog(`Web server trên cổng ${WEB_SERVER_PORT}`);
     addLog(`Truy cập: http://localhost:${WEB_SERVER_PORT}`);
-    // Đọc cấu hình ban đầu từ biến môi trường của PM2 khi khởi động
-    if (process.env.BINANCE_API_KEY) API_KEY = process.env.BINANCE_API_KEY;
-    if (process.env.BINANCE_SECRET_KEY) SECRET_KEY = process.env.BINANCE_SECRET_KEY;
-    if (process.env.TARGET_COIN_SYMBOL) TARGET_COIN_SYMBOL = process.env.TARGET_COIN_SYMBOL.toUpperCase();
-    if (process.env.INITIAL_INVESTMENT_AMOUNT) INITIAL_INVESTMENT_AMOUNT = parseFloat(process.env.INITIAL_INVESTMENT_AMOUNT);
-    if (process.env.APPLY_DOUBLE_STRATEGY) APPLY_DOUBLE_STRATEGY = process.env.APPLY_DOUBLE_STRATEGY === 'true';
-
-    // Log cấu hình ban đầu
-    addLog(`Cấu hình khởi động: Symbol: ${TARGET_COIN_SYMBOL}, Vốn: ${INITIAL_INVESTMENT_AMOUNT}, Double Strategy: ${APPLY_DOUBLE_STRATEGY}`);
 });
