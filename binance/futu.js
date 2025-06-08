@@ -94,7 +94,7 @@ let currentMarketPrice = null; // Cache giá từ WebSocket cho TARGET_COIN_SYMB
 
 // --- CẤU HÌNH WEB SERVER VÀ LOG PM2 (ĐỌC TỪ BIẾN MÔI TRƯỜNG) ---
 // Mỗi bot cần một cổng riêng và tên riêng trong PM2
-const WEB_SERVER_PORT = parseInt(process.env.WEB_SERVER_PORT || '1235');
+const WEB_SERVER_PORT = parseInt(process.env.WEB_SERVER_PORT || '1236');
 
 // Thay đổi logic xác định BOT_LOG_FILE để PM2 tự tạo
 const THIS_BOT_PM2_NAME = process.env.PM2_APP_NAME || 'futu'; // Tên của bot trong PM2, lấy từ ecosystem.config.js
