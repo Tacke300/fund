@@ -65,8 +65,8 @@ let TARGET_COIN_SYMBOL = 'ETHUSDT'; // Mặc định ETHUSDT (sẽ được cậ
 let APPLY_DOUBLE_STRATEGY = false; // Mặc định false (sẽ được cập nhật từ UI)
 
 // Cấu hình Take Profit & Stop Loss
-const TAKE_PROFIT_PERCENTAGE_MAIN = 1.55; // 155% lãi trên VỐN HIỆN TẠI
-const STOP_LOSS_PERCENTAGE_MAIN = 0.8;   // 80% lỗ trên VỐN HIỆN TẠI
+const TAKE_PROFIT_PERCENTAGE_MAIN = 1.1; // 155% lãi trên VỐN HIỆN TẠI
+const STOP_LOSS_PERCENTAGE_MAIN = 0.4;   // 80% lỗ trên VỐN HIỆN TẠI
 
 // Số lần thua liên tiếp tối đa trước khi reset về lệnh ban đầu
 const MAX_CONSECUTIVE_LOSSES = 5;
