@@ -369,7 +369,7 @@
                 const value = parseFloat(initialAmountInput.value);
                 if (!isNaN(value)) {
                     const result = value * 1500;
-                    minAmountDisplay.textContent = `Số tiền tối thiểu trong tài khoản future binance của bạn cần có ${result.toFixed(2)}`;
+                    minAmountDisplay.textContent = `Số tiền mở lệnh phải lớn hơn số tiền tối thiểu mở lệnh của BINANCE và trong tài khoản cần có ${result.toFixed(2)}`;
                 }
             }
         }
