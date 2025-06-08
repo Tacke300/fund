@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Danh sách Ví và Lợi nhuận</title>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <style>
+        /* Modern CSS Reset */
+        *, *::before, *::after {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f0f2f5;
+            color: #333;
+            line-height: 1.6;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 20px auto;
+            background-color: #ffffff;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+            padding: 30px;
+        }
+
+        h1 {
+            color: #2c3e50;
+            text-align: center;
+            margin-bottom: 30px;
+            font-size: 2.2em;
+            font-weight: 600;
+        }
+
+        /* Search and Sort Section */
+        .controls {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 25px;
+            gap: 15px;
+            flex-wrap: wrap;
+        }
+
+        .controls input[type="text"] {
+            flex-grow: 1;
+            padding: 12px 15px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            font-size: 1em;
+            transition: border-color 0.3s ease;
+            min-width: 200px;
+        }
+
+        .controls input[type="text"]:focus {
+            border-color: #007bff;
+            outline: none;
+        }
+
+        .controls .sort-buttons button {
+            background-color: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 0.95em;
+            margin-left: 10px;
+            transition: background-color 0.3s ease, transform 0.2s ease;
+        }
+
+        .controls .sort-buttons button:hover {
+            background-color: #0056b3;
+            transform: translateY(-2px);
+        }
+
+        .controls .sort-buttons button:active {
+            transform: translateY(0);
+        }
+
+        /* Table Styling */
+        .data-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+
+        .data-table th, .data-table td {
+            padding: 15px;
+            text-align: left;
+            border-bottom: 1px solid #eee;
+        }
+
+        .data-table th {
+            background-color: #e9ecef;
+            color: #555;
+            font-weight: 600;
+            text-transform: uppercase;
+            font-size: 0.9em;
+        }
+
+        .data-table tr:hover {
+            background-color: #f8f9fa;
+        }
+
+        .data-table td a {
+            color: #007bff;
+            text-decoration: none;
+            font-weight: 500;
+            transition: color 0.3s ease;
+        }
+
+        .data-table td a:hover {
+            color: #0056b3;
+            text-decoration: underline;
+        }
+
+        .data-table .pnl-positive {
+            color: #28a745; /* Green */
+            font-weight: 600;
+        }
+
+        .data-table .pnl-negative {
+            color: #dc3545; /* Red */
+            font-weight: 600;
+        }
+
+        /* Popup Styling */
+        .popup-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.85); /* Darker overlay */
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+            opacity: 0;
+            visibility: hidden;
+            transition: opacity 0.3s ease, visibility 0.3s ease;
+        }
+
+        .popup-overlay.active {
+            opacity: 1;
+            visibility: visible;
+        }
+
+        .popup-content {
+            background-color: #ffffff;
+            border-radius: 8px;
+            box-shadow: 0 8px 25px rgba(0, 0, 0, 0.3);
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden; /* Ensure iframe fits */
+        }
+
+        .popup-header {
+            padding: 15px 20px;
+            background-color: #f8f9fa;
+            border-bottom: 1px solid #eee;
+            display: flex;
+            justify-content: flex-start;
+            align-items: center;
+        }
+
+        .popup-header button {
+            background-color: #6c757d;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 1em;
+            transition: background-color 0.3s ease;
+        }
+
+        .popup-header button:hover {
+            background-color: #5a6268;
+        }
+
+        .popup-iframe {
+            flex-grow: 1; /* Make iframe take remaining space */
+            width: 100%;
+            border: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Bảng Thông tin Giao dịch</h1>
+
+        <div class="controls">
+            <input type="text" id="searchInput" placeholder="Tìm kiếm theo Symbol...">
+            <div class="sort-buttons">
+                <button onclick="sortData('pnl_today', 'asc')">PNL Hôm nay (Thấp-Cao)</button>
+                <button onclick="sortData('pnl_today', 'desc')">PNL Hôm nay (Cao-Thấp)</button>
+                <button onclick="sortData('pnl_all', 'asc')">PNL Tổng (Thấp-Cao)</button>
+                <button onclick="sortData('pnl_all', 'desc')">PNL Tổng (Cao-Thấp)</button>
+            </div>
+        </div>
+
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Symbol</th>
+                    <th>Vol ($)</th>
+                    <th>PNL Hôm nay</th>
+                    <th>PNL Tổng</th>
+                </tr>
+            </thead>
+            <tbody id="dataTableBody">
+                </tbody>
+        </table>
+    </div>
+
+    <div class="popup-overlay" id="popupOverlay">
+        <div class="popup-content">
+            <div class="popup-header">
+                <button onclick="closePopup()">Trở lại</button>
+            </div>
+            <iframe id="popupIframe" class="popup-iframe" src="" frameborder="0"></iframe>
+        </div>
+    </div>
+
+    <script>
+        // CẤU HÌNH SUPABASE CỦA BẠN
+        // Thay thế 'YOUR_SUPABASE_URL' và 'YOUR_SUPABASE_ANON_KEY' bằng thông tin thật của bạn
+        const SUPABASE_URL = 'YOUR_SUPABASE_URL';
+        const SUPABASE_ANON_KEY = 'YOUR_SUPABASE_ANON_KEY';
+
+        const supabase = Supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+        const dataTableBody = document.getElementById('dataTableBody');
+        const searchInput = document.getElementById('searchInput');
+        const popupOverlay = document.getElementById('popupOverlay');
+        const popupIframe = document.getElementById('popupIframe');
+
+        let tableData = []; // Dữ liệu sẽ được tải từ Supabase
+
+        // Hàm để tải dữ liệu từ Supabase
+        async function fetchSupabaseData() {
+            console.log('Đang tải dữ liệu từ Supabase...');
+            const { data, error } = await supabase
+                .from('list') // Tên bảng của bạn là 'list'
+                .select('*'); // Lấy tất cả các cột
+
+            if (error) {
+                console.error('Lỗi khi tải dữ liệu từ Supabase:', error.message);
+                return [];
+            } else {
+                console.log('Dữ liệu đã tải:', data);
+                return data;
+            }
+        }
+
+        function renderTable(data) {
+            dataTableBody.innerHTML = ''; // Xóa các hàng hiện có
+            if (data.length === 0) {
+                dataTableBody.innerHTML = '<tr><td colspan="4" style="text-align: center;">Không có dữ liệu để hiển thị.</td></tr>';
+                return;
+            }
+            data.forEach(item => {
+                const row = dataTableBody.insertRow();
+
+                const symbolCell = row.insertCell();
+                const symbolLink = document.createElement('a');
+                symbolLink.href = '#';
+                symbolLink.textContent = item.symbol;
+                symbolLink.onclick = (e) => {
+                    e.preventDefault(); // Ngăn chặn hành vi mặc định của link
+                    openPopup('http://34.142.248.96:1997');
+                };
+                symbolCell.appendChild(symbolLink);
+
+                row.insertCell().textContent = item.vol.toLocaleString('en-US', { style: 'currency', currency: 'USD' });
+
+                const pnlTodayCell = row.insertCell();
+                pnlTodayCell.textContent = item.pnl_today.toFixed(2);
+                pnlTodayCell.classList.add(item.pnl_today >= 0 ? 'pnl-positive' : 'pnl-negative');
+
+                const pnlAllCell = row.insertCell();
+                pnlAllCell.textContent = item.pnl_all.toFixed(2);
+                pnlAllCell.classList.add(item.pnl_all >= 0 ? 'pnl-positive' : 'pnl-negative');
+            });
+        }
+
+        function sortData(key, order) {
+            tableData.sort((a, b) => {
+                let valA = a[key];
+                let valB = b[key];
+
+                if (order === 'asc') {
+                    return valA - valB;
+                } else {
+                    return valB - valA;
+                }
+            });
+            filterAndRender(); // Hiển thị lại với dữ liệu đã sắp xếp và lọc
+        }
+
+        function filterAndRender() {
+            const searchTerm = searchInput.value.toLowerCase();
+            const filteredData = tableData.filter(item =>
+                item.symbol.toLowerCase().includes(searchTerm)
+            );
+            renderTable(filteredData);
+        }
+
+        function openPopup(url) {
+            popupIframe.src = url;
+            popupOverlay.classList.add('active');
+        }
+
+        function closePopup() {
+            popupOverlay.classList.remove('active');
+            popupIframe.src = ''; // Xóa src của iframe để dừng mọi media/script
+        }
+
+        // Tải dữ liệu khi trang được tải và hiển thị
+        document.addEventListener('DOMContentLoaded', async () => {
+            tableData = await fetchSupabaseData();
+            filterAndRender(); // Lần hiển thị ban đầu (sau khi tải dữ liệu)
+        });
+
+        // Event listener cho thanh tìm kiếm
+        searchInput.addEventListener('keyup', filterAndRender);
+
+        // Tùy chọn: Đóng popup khi click vào vùng phủ (ngoài nội dung popup)
+        popupOverlay.addEventListener('click', (e) => {
+            if (e.target === popupOverlay) {
+                closePopup();
+            }
+        });
+    </script>
+</body>
+</html>
