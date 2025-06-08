@@ -1,10 +1,10 @@
 import https from 'https';
 import crypto from 'crypto';
 import express from 'express';
-import { exec } from 'child_process';
+import { exec } = from 'child_process';
 import fs from 'fs';
 import path from 'path';
-import { fileURLToPath } from 'url';
+import { fileURLToPath } = from 'url';
 import WebSocket from 'ws'; // Đảm bảo bạn đã cài đặt 'ws'
 
 // Lấy __filename và __dirname trong ES modules
@@ -60,7 +60,7 @@ class CriticalApiError extends Error {
 }
 // === END - BIẾN QUẢN LÝ LỖI VÀ TẦN SUẤT LOG ===
 
-// --- CẤU HÌNH BOT CÁC THAM SỐ GIAO DỊCH (ĐỌC TỪ BIẾN MÔI TRƯỜNG) ---
+// --- CẤU HÌNH BOT CÁC THAM SỐ GIAO DỊC (ĐỌC TỪ BIẾN MÔI TRƯỜNG) ---
 // Mỗi bot sẽ có TARGET_COIN_SYMBOL, INITIAL_INVESTMENT_AMOUNT, APPLY_DOUBLE_STRATEGY riêng
 let INITIAL_INVESTMENT_AMOUNT = parseFloat(process.env.INITIAL_INVESTMENT_AMOUNT || '1');
 let TARGET_COIN_SYMBOL = process.env.TARGET_COIN_SYMBOL ? process.env.TARGET_COIN_SYMBOL.toUpperCase() : 'ETHUSDT';
@@ -1481,16 +1481,27 @@ app.get('/api/bot_stats', async (req, res) => {
 
 // Endpoint để cấu hình các tham số từ frontend
 app.post('/api/configure', (req, res) => {
-    const { apiKey, secretKey, initialAmount, symbol, applyDoubleStrategy } = req.body;
+    // Trích xuất đúng cấu trúc dữ liệu: apiKey, secretKey là trực tiếp, coinConfigs là một mảng
+    const { apiKey, secretKey, coinConfigs } = req.body;
 
     // Cập nhật API Key và Secret Key cho bot này
-    API_KEY = apiKey.trim();
-    SECRET_KEY = secretKey.trim();
+    API_KEY = apiKey ? apiKey.trim() : ''; // Đảm bảo apiKey không phải undefined trước khi gọi trim()
+    SECRET_KEY = secretKey ? secretKey.trim() : ''; // Đảm bảo secretKey không phải undefined trước khi gọi trim()
 
-    // Cập nhật cấu hình giao dịch cho bot này
-    TARGET_COIN_SYMBOL = symbol.trim().toUpperCase();
-    INITIAL_INVESTMENT_AMOUNT = parseFloat(initialAmount);
-    APPLY_DOUBLE_STRATEGY = !!applyDoubleStrategy;
+    // Lấy cấu hình coin đầu tiên từ mảng coinConfigs
+    if (coinConfigs && Array.isArray(coinConfigs) && coinConfigs.length > 0) {
+        const coinConfig = coinConfigs[0]; // Lấy object cấu hình coin đầu tiên
+        // Trích xuất các biến từ object cấu hình coin
+        const { symbol, initialAmount, applyDoubleStrategy } = coinConfig;
+
+        // Cập nhật cấu hình giao dịch cho bot này
+        TARGET_COIN_SYMBOL = symbol ? symbol.trim().toUpperCase() : TARGET_COIN_SYMBOL; // Kiểm tra symbol
+        INITIAL_INVESTMENT_AMOUNT = parseFloat(initialAmount) || INITIAL_INVESTMENT_AMOUNT; // Kiểm tra initialAmount
+        APPLY_DOUBLE_STRATEGY = (typeof applyDoubleStrategy === 'boolean') ? applyDoubleStrategy : APPLY_DOUBLE_STRATEGY; // Kiểm tra applyDoubleStrategy
+    } else {
+        addLog('Lỗi cấu hình: Dữ liệu cấu hình coin không hợp lệ hoặc bị thiếu.');
+        return res.status(400).json({ success: false, message: 'Dữ liệu cấu hình coin không hợp lệ.' });
+    }
 
     currentInvestmentAmount = INITIAL_INVESTMENT_AMOUNT;
     consecutiveLossCount = 0;
@@ -1509,6 +1520,10 @@ app.post('/api/configure', (req, res) => {
         setupMarketDataStream(TARGET_COIN_SYMBOL);
     }
     // Cần khởi động lại User Data Stream nếu API Key/Secret thay đổi
+    // Cần kiểm tra xem API_KEY và SECRET_KEY hiện tại (sau khi đã cập nhật) có khác với biến môi trường cũ không
+    // Lưu ý: process.env.BINANCE_API_KEY/SECRET_KEY không tự động cập nhật khi bạn gán giá trị mới cho API_KEY/SECRET_KEY trong mã.
+    // Để đảm bảo PM2 dùng biến môi trường mới, bạn cần khởi động lại PM2 hoặc dùng lệnh pm2 reload <app_name> --update-env
+    // Việc này chỉ cập nhật trong phạm vi của tiến trình Node.js hiện tại.
     if (botRunning && (API_KEY !== process.env.BINANCE_API_KEY || SECRET_KEY !== process.env.BINANCE_SECRET_KEY)) {
         addLog('Cấu hình API Key/Secret thay đổi, làm mới Listen Key và User Data Stream.');
         if (listenKeyRefreshInterval) clearInterval(listenKeyRefreshInterval);
