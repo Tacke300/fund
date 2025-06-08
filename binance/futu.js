@@ -5,7 +5,7 @@ import { exec } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import WebSocket from 'ws';
+import WebSocket from 'ws'; // Đảm bảo bạn đã cài đặt 'ws'
 
 // Lấy __filename và __dirname trong ES modules
 const __filename = fileURLToPath(import.meta.url);
@@ -95,8 +95,19 @@ let currentMarketPrice = null; // Cache giá từ WebSocket cho TARGET_COIN_SYMB
 // --- CẤU HÌNH WEB SERVER VÀ LOG PM2 (ĐỌC TỪ BIẾN MÔI TRƯỜNG) ---
 // Mỗi bot cần một cổng riêng và tên riêng trong PM2
 const WEB_SERVER_PORT = parseInt(process.env.WEB_SERVER_PORT || '1235');
-const THIS_BOT_PM2_NAME = process.env.PM2_APP_NAME || 'futu'; // Tên của bot trong PM2
-const BOT_LOG_FILE = process.env.PM2_LOG_FILE || `/home/tacke300/.pm2/logs/${THIS_BOT_PM2_NAME}-out.log`;
+
+// Thay đổi logic xác định BOT_LOG_FILE để PM2 tự tạo
+const THIS_BOT_PM2_NAME = process.env.PM2_APP_NAME || 'futu'; // Tên của bot trong PM2, lấy từ ecosystem.config.js
+// PM2 sẽ tự động ghi log vào các file được cấu hình trong ecosystem.config.js
+// Để đọc được, chúng ta sẽ sử dụng đường dẫn mà PM2 đang ghi vào.
+// Điều này yêu cầu bạn định nghĩa out_file và error_file trong ecosystem.config.js
+// và truyền chúng vào biến môi trường nếu muốn truy cập trực tiếp từ bot.
+// Tuy nhiên, cách tốt nhất là để PM2 quản lý log và truy cập chúng qua pm2 logs <app_name>.
+// Nếu bạn vẫn muốn đọc file log trực tiếp, bạn cần đảm bảo biến môi trường này được set trong PM2.
+// Nếu không, bạn cần một đường dẫn mặc định nơi PM2 ghi log.
+const BOT_LOG_FILE = process.env.PM2_LOG_FILE || path.join(process.env.HOME || '/home/tacke300', '.pm2', 'logs', `${THIS_BOT_PM2_NAME}-out.log`);
+const BOT_ERROR_LOG_FILE = process.env.PM2_ERROR_LOG_FILE || path.join(process.env.HOME || '/home/tacke300', '.pm2', 'logs', `${THIS_BOT_PM2_NAME}-error.log`);
+
 
 // --- HÀM TIỆN ÍCH ---
 
@@ -116,16 +127,18 @@ function addLog(message) {
             return;
         } else {
             if (logCounts[messageHash].count > 1) {
+                // Chỉ log số lần lặp lại khi có sự thay đổi hoặc sau cooldown
                 console.log(`[${time}] [${TARGET_COIN_SYMBOL}] (Lặp lại x${logCounts[messageHash].count}) ${message}`);
+            } else {
+                console.log(logEntry);
             }
             logCounts[messageHash] = { count: 1, lastLoggedTime: now };
         }
     } else {
         logCounts[messageHash] = { count: 1, lastLoggedTime: now };
+        console.log(logEntry); // Log lần đầu tiên
     }
-    console.log(logEntry); // Ghi ra console của server
-    // Gửi log qua WebSocket nếu có (chưa triển khai WebSocket ở đây, chỉ là ví dụ)
-    // ws.send(logEntry);
+    // console.log(logEntry); // Ghi ra console của server, PM2 sẽ tự động bắt
 }
 // === END - Cải tiến hàm addLog ===
 
@@ -682,7 +695,7 @@ async function openPosition(symbol, tradeDirection, usdtBalance, maxLeverage) {
         }
         await sleep(500); // Thêm độ trễ sau setLeverage
 
-        const { pricePrecision, quantityPrecision, minNotional, minQty, stepSize, tickSize } = symbolDetails;
+        const { pricePrecision, quantityPrecision, minNotional, stepSize, tickSize } = symbolDetails; // Đã bỏ minQty khỏi destructuring vì không dùng trực tiếp nữa
 
         const currentPrice = await getCurrentPrice(symbol); // Lấy giá từ REST API cho symbol này
         if (!currentPrice) {
@@ -707,8 +720,9 @@ async function openPosition(symbol, tradeDirection, usdtBalance, maxLeverage) {
         quantity = Math.floor(quantity / stepSize) * stepSize;
         quantity = parseFloat(quantity.toFixed(quantityPrecision));
 
-        if (quantity < minQty) {
-            addLog(`Qty (${quantity.toFixed(quantityPrecision)}) < minQty (${minQty}) cho ${symbol}. Hủy.`);
+        // Kiểm tra minQty sau khi tính toán và làm tròn
+        if (quantity < symbolDetails.minQty) { // Sử dụng symbolDetails.minQty
+            addLog(`Qty (${quantity.toFixed(quantityPrecision)}) < minQty (${symbolDetails.minQty}) cho ${symbol}. Hủy.`);
             if(botRunning) scheduleNextMainCycle();
             return;
         }
@@ -964,7 +978,8 @@ async function scheduleNextMainCycle() {
         return;
     }
 
-    if (currentOpenPosition) { // currentOpenPosition chỉ có thể là của TARGET_COIN_SYMBOL
+    // Đảm bảo chỉ kiểm tra vị thế của chính nó
+    if (currentOpenPosition && currentOpenPosition.symbol === TARGET_COIN_SYMBOL) {
         addLog(`Có vị thế mở cho ${currentOpenPosition.symbol}. Bỏ qua quét mới.`);
         return;
     }
@@ -1363,10 +1378,22 @@ app.get('/api/logs', (req, res) => {
     fs.readFile(BOT_LOG_FILE, 'utf8', (err, data) => {
         if (err) {
             console.error('Lỗi đọc log file:', err);
-            if (err.code === 'ENOENT') {
-                return res.status(404).send(`Không tìm thấy log file: ${BOT_LOG_FILE}. Đảm bảo PM2 đã tạo file log này.`);
-            }
-            return res.status(500).send('Lỗi đọc log file');
+            // Cố gắng đọc từ error log file nếu out log không có
+            fs.readFile(BOT_ERROR_LOG_FILE, 'utf8', (err_err, data_err) => {
+                if (err_err) {
+                    if (err_err.code === 'ENOENT') {
+                        return res.status(404).send(`Không tìm thấy log file: ${BOT_LOG_FILE} hoặc ${BOT_ERROR_LOG_FILE}. Đảm bảo PM2 đã tạo file log này và cấu hình trong ecosystem.config.js.`);
+                    }
+                    return res.status(500).send(`Lỗi đọc log file: ${err.message} và ${err_err.message}`);
+                }
+                const cleanData = data_err.replace(/[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g, '');
+                const lines = cleanData.split('\n');
+                const maxDisplayLines = 500;
+                const startIndex = Math.max(0, lines.length - maxDisplayLines);
+                const limitedLogs = lines.slice(startIndex).join('\n');
+                res.send(limitedLogs);
+            });
+            return; // Quan trọng: return để không gửi hai phản hồi
         }
         const cleanData = data.replace(/[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g, '');
 
@@ -1482,18 +1509,27 @@ app.post('/api/configure', (req, res) => {
         setupMarketDataStream(TARGET_COIN_SYMBOL);
     }
     // Cần khởi động lại User Data Stream nếu API Key/Secret thay đổi
-    if (botRunning && listenKey) {
+    if (botRunning && (API_KEY !== process.env.BINANCE_API_KEY || SECRET_KEY !== process.env.BINANCE_SECRET_KEY)) {
         addLog('Cấu hình API Key/Secret thay đổi, làm mới Listen Key và User Data Stream.');
         if (listenKeyRefreshInterval) clearInterval(listenKeyRefreshInterval);
         userDataWs?.close();
         listenKey = null;
-        // setupUserDataStream(listenKey); // Sẽ gọi getListenKey() bên trong
+        // Cần cập nhật biến môi trường của tiến trình để các cuộc gọi API sau này dùng key mới
+        process.env.BINANCE_API_KEY = API_KEY;
+        process.env.BINANCE_SECRET_KEY = SECRET_KEY;
         // Đặt timeout nhỏ để tránh Race condition khi API Key/Secret đang cập nhật
         setTimeout(async () => {
             listenKey = await getListenKey();
             if (listenKey) setupUserDataStream(listenKey);
         }, 1000);
+    } else if (botRunning && listenKey) { // Nếu bot đang chạy và không thay đổi key nhưng có thể cần refresh nếu key bị lỗi
+        addLog('Cấu hình không thay đổi API Key/Secret, nhưng kiểm tra lại User Data Stream.');
+        // Đặt timeout nhỏ để tránh Race condition khi API Key/Secret đang cập nhật
+        setTimeout(async () => {
+            await keepAliveListenKey(); // Thử làm mới key
+        }, 1000);
     }
+
 
     res.json({ success: true, message: 'Cấu hình đã được cập nhật.' });
 });
@@ -1511,4 +1547,13 @@ app.get('/stop_bot_logic', (req, res) => {
 app.listen(WEB_SERVER_PORT, () => {
     addLog(`Web server trên cổng ${WEB_SERVER_PORT}`);
     addLog(`Truy cập: http://localhost:${WEB_SERVER_PORT}`);
+    // Đọc cấu hình ban đầu từ biến môi trường của PM2 khi khởi động
+    if (process.env.BINANCE_API_KEY) API_KEY = process.env.BINANCE_API_KEY;
+    if (process.env.BINANCE_SECRET_KEY) SECRET_KEY = process.env.BINANCE_SECRET_KEY;
+    if (process.env.TARGET_COIN_SYMBOL) TARGET_COIN_SYMBOL = process.env.TARGET_COIN_SYMBOL.toUpperCase();
+    if (process.env.INITIAL_INVESTMENT_AMOUNT) INITIAL_INVESTMENT_AMOUNT = parseFloat(process.env.INITIAL_INVESTMENT_AMOUNT);
+    if (process.env.APPLY_DOUBLE_STRATEGY) APPLY_DOUBLE_STRATEGY = process.env.APPLY_DOUBLE_STRATEGY === 'true';
+
+    // Log cấu hình ban đầu
+    addLog(`Cấu hình khởi động: Symbol: ${TARGET_COIN_SYMBOL}, Vốn: ${INITIAL_INVESTMENT_AMOUNT}, Double Strategy: ${APPLY_DOUBLE_STRATEGY}`);
 });
