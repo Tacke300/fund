@@ -875,7 +875,7 @@ async function openPosition(symbol, tradeDirection, usdtBalance, maxLeverage) {
         // Đảm bảo positionCheckInterval chỉ được thiết lập một lần
         if(!positionCheckInterval) {
             positionCheckInterval = setInterval(async () => {
-                if (botRunning && currentOpenPosition) {
+                if (botRunning && currentOpenPosition && currentOpenPosition.symbol === TARGET_COIN_SYMBOL) {
                     try {
                         await manageOpenPosition(); // manageOpenPosition sẽ tự kiểm tra symbol
                     }
@@ -918,8 +918,8 @@ async function manageOpenPosition() {
 
     // Đảm bảo chỉ quản lý vị thế của symbol được cấu hình cho bot này
     if (currentOpenPosition.symbol !== TARGET_COIN_SYMBOL) {
-        // addLog(`[Cảnh báo] Vị thế hiện tại (${currentOpenPosition.symbol}) không khớp với TARGET_COIN_SYMBOL của bot (${TARGET_COIN_SYMBOL}). Bỏ qua quản lý vị thế.`); // Hạn chế log này
-        currentOpenPosition = null; // Có thể reset để tránh lỗi nếu có vị thế không mong muốn
+        addLog(`[Cảnh báo] Vị thế hiện tại (${currentOpenPosition.symbol}) không khớp với TARGET_COIN_SYMBOL của bot (${TARGET_COIN_SYMBOL}). Reset vị thế bot.`, true); // Force log để cảnh báo
+        currentOpenPosition = null; // Reset để tránh lỗi nếu có vị thế không mong muốn
         if (positionCheckInterval) clearInterval(positionCheckInterval);
         positionCheckInterval = null;
         if(botRunning) scheduleNextMainCycle();
@@ -1292,7 +1292,7 @@ async function startBotLogicInternal() {
         // Đảm bảo positionCheckInterval được thiết lập nếu bot đang chạy
         if (!positionCheckInterval) {
             positionCheckInterval = setInterval(async () => {
-                if (botRunning && currentOpenPosition) { // currentOpenPosition chỉ có thể là của TARGET_COIN_SYMBOL
+                if (botRunning && currentOpenPosition && currentOpenPosition.symbol === TARGET_COIN_SYMBOL) { // currentOpenPosition chỉ có thể là của TARGET_COIN_SYMBOL
                     try {
                         await manageOpenPosition(); // manageOpenPosition sẽ tự kiểm tra symbol
                     }
@@ -1376,6 +1376,21 @@ app.get('/', (req, res) => {
     htmlContent = htmlContent.replace(/{{TARGET_COIN_SYMBOL}}/g, TARGET_COIN_SYMBOL);
     res.send(htmlContent);
 });
+
+// Endpoint mới để lấy cấu hình hiện tại của bot
+app.get('/api/config', (req, res) => {
+    res.json({
+        success: true,
+        data: {
+            apiKey: API_KEY, // Không gửi secretKey về frontend vì lý do bảo mật
+            secretKey: SECRET_KEY ? '******' : '', // Gửi chuỗi ẩn để biết có tồn tại hay không
+            targetSymbol: TARGET_COIN_SYMBOL,
+            initialAmount: INITIAL_INVESTMENT_AMOUNT,
+            applyDoubleStrategy: APPLY_DOUBLE_STRATEGY
+        }
+    });
+});
+
 
 app.get('/api/logs', (req, res) => {
     fs.readFile(BOT_LOG_FILE, 'utf8', (err, data) => {
@@ -1463,10 +1478,11 @@ app.get('/api/bot_stats', async (req, res) => {
 
 // Endpoint để cấu hình các tham số từ frontend
 app.post('/api/configure', (req, res) => {
-    // === DÒNG NÀY RẤT QUAN TRỌNG ĐỂ DEBUG ===
-    addLog(`Nhận request cấu hình. req.body: ${JSON.stringify(req.body)}`);
+    addLog(`Nhận request cấu hình. req.body: ${JSON.stringify(req.body)}`, true); // Force log để dễ debug
 
     const { apiKey, secretKey, coinConfigs } = req.body;
+
+    const oldTargetSymbol = TARGET_COIN_SYMBOL; // Lưu lại symbol cũ để so sánh
 
     // Cập nhật API_KEY và SECRET_KEY
     if (apiKey && typeof apiKey === 'string') {
@@ -1489,7 +1505,6 @@ app.post('/api/configure', (req, res) => {
             TARGET_COIN_SYMBOL = config.symbol.trim().toUpperCase();
         } else {
             addLog("Cảnh báo: Tên đồng coin không hợp lệ hoặc bị thiếu. Sử dụng mặc định.");
-            // Giữ TARGET_COIN_SYMBOL hiện tại hoặc gán giá trị mặc định ban đầu nếu muốn
             TARGET_COIN_SYMBOL = 'ETHUSDT'; // Ví dụ, gán lại mặc định
         }
 
@@ -1497,7 +1512,6 @@ app.post('/api/configure', (req, res) => {
             INITIAL_INVESTMENT_AMOUNT = parseFloat(config.initialAmount);
         } else {
             addLog("Cảnh báo: Số vốn ban đầu không hợp lệ hoặc bị thiếu. Sử dụng mặc định.");
-            // Giữ INITIAL_INVESTMENT_AMOUNT hiện tại hoặc gán giá trị mặc định ban đầu
             INITIAL_INVESTMENT_AMOUNT = 1; // Ví dụ, gán lại mặc định
         }
 
@@ -1524,11 +1538,17 @@ app.post('/api/configure', (req, res) => {
     addLog(`  Số lần lỗ liên tiếp (reset): ${consecutiveLossCount}`);
 
 
-    // Khi cấu hình thay đổi, nếu bot đang chạy, cần khởi tạo lại WS stream với symbol mới
-    if (botRunning && TARGET_COIN_SYMBOL && marketWs?.readyState === WebSocket.OPEN) {
-        addLog(`Cấu hình symbol thay đổi, khởi tạo lại Market Data Stream cho ${TARGET_COIN_SYMBOL}.`);
+    // Khi cấu hình symbol thay đổi, nếu bot đang chạy, cần khởi tạo lại WS stream với symbol mới
+    if (botRunning && oldTargetSymbol !== TARGET_COIN_SYMBOL) {
+        addLog(`Cấu hình symbol thay đổi từ ${oldTargetSymbol} sang ${TARGET_COIN_SYMBOL}. Khởi tạo lại Market Data Stream.`, true);
         setupMarketDataStream(TARGET_COIN_SYMBOL);
+        // Nếu có vị thế mở cho symbol cũ, cần cảnh báo và reset
+        if (currentOpenPosition && currentOpenPosition.symbol === oldTargetSymbol) {
+             addLog(`Cảnh báo: Vị thế đang mở cho ${oldTargetSymbol} (cũ) đã được thiết lập lại về null do thay đổi symbol.`, true);
+             currentOpenPosition = null; // Rất quan trọng để tránh lỗi nếu người dùng đổi coin khi đang có lệnh
+        }
     }
+    // Nếu bot đang chạy và có vị thế mở cho symbol mới (nếu trước đó đã đổi mà chưa lưu), thì manageOpenPosition sẽ xử lý
 
     res.json({ success: true, message: 'Cấu hình đã được cập nhật thành công.' });
 });
@@ -1552,3 +1572,4 @@ app.listen(WEB_SERVER_PORT, () => {
         webServerStartedLogged = true;
     }
 });
+
