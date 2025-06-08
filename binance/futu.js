@@ -69,7 +69,7 @@ const TAKE_PROFIT_PERCENTAGE_MAIN = 4.1; // 155% lãi trên VỐN HIỆN TẠI
 const STOP_LOSS_PERCENTAGE_MAIN = 1.9;   // 80% lỗ trên VỐN HIỆN TẠI
 
 // Số lần thua liên tiếp tối đa trước khi reset về lệnh ban đầu
-const MAX_CONSECUTIVE_LOSSES = 9;
+const MAX_CONSECUTIVE_LOSSES = 5;
 
 // Biến theo dõi vốn hiện tại cho lệnh
 let currentInvestmentAmount = INITIAL_INVESTMENT_AMOUNT;
