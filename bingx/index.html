@@ -228,28 +228,35 @@
             height: 150px !important; /* Adjust log box height */
             padding: 7px !important;
         }
+        .min-amount-display {
+            color: red;
+            font-weight: bold;
+            margin-top: 5px; /* Add some spacing */
+            display: block; /* Ensure it takes its own line */
+        }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>Đang lỗi k chạy bot!!! </h1>
+        <h1>Futu - 1235</h1>
         <div class="status-box" id="botStatus">
             Đang tải trạng thái...
         </div>
 
         <div class="trading-stats">
-            <h2>Thống kê Giao dịch Tổng thể</h2>
+            <h2>Thống kê PNL
+           </h2>
             <table>
                 <tr>
-                    <th>Tổng Lãi Bot</th>
+                    <th>Tổng Lãi</th>
                     <td id="totalProfitValue" class="neutral">0.00 USDT</td>
                 </tr>
                 <tr>
-                    <th>Tổng Lỗ Bot</th>
+                    <th>Tổng Lỗ</th>
                     <td id="totalLossValue" class="neutral">0.00 USDT</td>
                 </tr>
                 <tr>
-                    <th>PNL Ròng (Lãi - Lỗ)</th>
+                    <th>PNL Ròng</th>
                     <td id="netPnlValue" class="neutral">0.00 USDT</td>
                 </tr>
             </table>
@@ -335,15 +342,37 @@
                 <div class="form-group">
                     <label class="checkbox-label">Số USDT mở lệnh:</label>
                     <input type="number" class="initialAmount" value="${initialAmount}" min="0.01" step="0.01">
+                    <span class="min-amount-display" id="minAmountDisplay"></span>
                 </div>
                 <div class="form-group">
                     <input type="checkbox" class="applyDoubleStrategy" ${applyDoubleStrategy ? 'checked' : ''}>
                     <label class="checkbox-label">
-                         ◀️⏺️▶️
+                         📌📌📌
                     </label>
                 </div>
             `;
             coinConfigContainer.appendChild(div);
+
+            // Add event listener for the initialAmount input
+            const initialAmountInput = div.querySelector('.initialAmount');
+            const minAmountDisplay = div.querySelector('#minAmountDisplay');
+            initialAmountInput.addEventListener('input', () => {
+                const value = parseFloat(initialAmountInput.value);
+                if (!isNaN(value)) {
+                    const result = value * 1500;
+                    minAmountDisplay.textContent = `Số tiền mở lệnh phải lớn hơn số tiền tối thiểu mở lệnh của binance và trong tài khoản cần có ${result.toFixed(2)}.`;
+                } else {
+                    minAmountDisplay.textContent = '';
+                }
+            });
+            // Trigger calculation on load if there's an initial amount
+            if (initialAmountInput.value) {
+                const value = parseFloat(initialAmountInput.value);
+                if (!isNaN(value)) {
+                    const result = value * 1500;
+                    minAmountDisplay.textContent = `Số tiền mở lệnh phải lớn hơn số tiền tối thiểu mở lệnh của BINANCE và trong tài khoản cần có ${result.toFixed(2)}`;
+                }
+            }
         }
 
         // Tải cấu hình đã lưu (nếu có) khi trang load
