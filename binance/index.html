@@ -228,6 +228,12 @@
             height: 150px !important; /* Adjust log box height */
             padding: 7px !important;
         }
+        .min-amount-display {
+            color: red;
+            font-weight: bold;
+            margin-top: 5px; /* Add some spacing */
+            display: block; /* Ensure it takes its own line */
+        }
     </style>
 </head>
 <body>
@@ -335,6 +341,7 @@
                 <div class="form-group">
                     <label class="checkbox-label">Số USDT mở lệnh:</label>
                     <input type="number" class="initialAmount" value="${initialAmount}" min="0.01" step="0.01">
+                    <span class="min-amount-display" id="minAmountDisplay"></span>
                 </div>
                 <div class="form-group">
                     <input type="checkbox" class="applyDoubleStrategy" ${applyDoubleStrategy ? 'checked' : ''}>
@@ -344,6 +351,27 @@
                 </div>
             `;
             coinConfigContainer.appendChild(div);
+
+            // Add event listener for the initialAmount input
+            const initialAmountInput = div.querySelector('.initialAmount');
+            const minAmountDisplay = div.querySelector('#minAmountDisplay');
+            initialAmountInput.addEventListener('input', () => {
+                const value = parseFloat(initialAmountInput.value);
+                if (!isNaN(value)) {
+                    const result = value * 1500;
+                    minAmountDisplay.textContent = `Số tiền tối thiểu trong tài khoản future binance của bạn cần có ${result.toFixed(2)}`;
+                } else {
+                    minAmountDisplay.textContent = '';
+                }
+            });
+            // Trigger calculation on load if there's an initial amount
+            if (initialAmountInput.value) {
+                const value = parseFloat(initialAmountInput.value);
+                if (!isNaN(value)) {
+                    const result = value * 1500;
+                    minAmountDisplay.textContent = `Số tiền tối thiểu trong tài khoản future binance của bạn cần có ${result.toFixed(2)}`;
+                }
+            }
         }
 
         // Tải cấu hình đã lưu (nếu có) khi trang load
