@@ -5,15 +5,16 @@ import { exec } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import WebSocket from 'ws'; // Thêm WebSocket
+import WebSocket from 'ws';
 
 // Lấy __filename và __dirname trong ES modules
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// --- CẤU HÌNH API KEY VÀ SECRET KEY (BAN ĐẦU RỖNG) ---
-let API_KEY = '';
-let SECRET_KEY = '';
+// --- CẤU HÌNH API KEY VÀ SECRET KEY (BAN ĐẦU RỖNG HOẶC ĐỌC TỪ BIẾN MÔI TRƯỜNG) ---
+// Ưu tiên đọc từ biến môi trường. Nếu không có, sẽ để rỗng để cấu hình qua UI.
+let API_KEY = process.env.BINANCE_API_KEY || '';
+let SECRET_KEY = process.env.BINANCE_SECRET_KEY || '';
 
 // --- BASE URL CỦA BINANCE FUTURES API ---
 const BASE_HOST = 'fapi.binance.com';
@@ -32,7 +33,7 @@ let isClosingPosition = false;
 let botRunning = false;
 let botStartTime = null; // Thời điểm bot được khởi động
 
-// Biến để theo dõi vị thế đang mở
+// Biến để theo dõi vị thế đang mở (chỉ cho TARGET_COIN_SYMBOL của bot này)
 let currentOpenPosition = null;
 // Biến để lưu trữ setInterval cho việc kiểm tra vị thế đang mở
 let positionCheckInterval = null;
@@ -43,8 +44,8 @@ let retryBotTimeout = null;
 
 // === START - BIẾN QUẢN LÝ LỖI VÀ TẦN SUẤT LOG ===
 let consecutiveApiErrors = 0; // Đếm số lỗi API liên tiếp
-const MAX_CONSECUTIVE_API_ERRORS = 3; // Số lỗi API liên tiếp tối đa cho phép trước khi tạm dừng bot (ĐÃ GIẢM)
-const ERROR_RETRY_DELAY_MS = 10000; // Độ trễ (ms) khi bot tạm dừng sau nhiều lỗi (10 giây) (ĐÃ TĂNG)
+const MAX_CONSECUTIVE_API_ERRORS = 3; // Số lỗi API liên tiếp tối đa cho phép trước khi tạm dừng bot
+const ERROR_RETRY_DELAY_MS = 10000; // Độ trễ (ms) khi bot tạm dừng sau nhiều lỗi (10 giây)
 
 // Cache các thông điệp log để tránh spam quá nhiều dòng giống nhau liên tiếp
 const logCounts = {}; // { messageHash: { count: number, lastLoggedTime: Date } }
@@ -59,17 +60,18 @@ class CriticalApiError extends Error {
 }
 // === END - BIẾN QUẢN LÝ LỖI VÀ TẦN SUẤT LOG ===
 
-// --- CẤU HÌNH BOT CÁC THAM SỐ GIAO DỊC (GIÁ TRỊ MẶC ĐỊNH) ---
-let INITIAL_INVESTMENT_AMOUNT = 1; // Mặc định 1 USDT (sẽ được cập nhật từ UI)
-let TARGET_COIN_SYMBOL = 'ETHUSDT'; // Mặc định ETHUSDT (sẽ được cập nhật từ UI)
-let APPLY_DOUBLE_STRATEGY = false; // Mặc định false (sẽ được cập nhật từ UI)
+// --- CẤU HÌNH BOT CÁC THAM SỐ GIAO DỊCH (ĐỌC TỪ BIẾN MÔI TRƯỜNG) ---
+// Mỗi bot sẽ có TARGET_COIN_SYMBOL, INITIAL_INVESTMENT_AMOUNT, APPLY_DOUBLE_STRATEGY riêng
+let INITIAL_INVESTMENT_AMOUNT = parseFloat(process.env.INITIAL_INVESTMENT_AMOUNT || '1');
+let TARGET_COIN_SYMBOL = process.env.TARGET_COIN_SYMBOL ? process.env.TARGET_COIN_SYMBOL.toUpperCase() : 'ETHUSDT';
+let APPLY_DOUBLE_STRATEGY = process.env.APPLY_DOUBLE_STRATEGY === 'true';
 
-// Cấu hình Take Profit & Stop Loss
-const TAKE_PROFIT_PERCENTAGE_MAIN = 5.1; // 155% lãi trên VỐN HIỆN TẠI
-const STOP_LOSS_PERCENTAGE_MAIN = 2.4;   // 80% lỗ trên VỐN HIỆN TẠI
+// Cấu hình Take Profit & Stop Loss (các giá trị mặc định sẽ bị ghi đè bởi getTPandSLPercentages)
+let TAKE_PROFIT_PERCENTAGE_MAIN = 0;
+let STOP_LOSS_PERCENTAGE_MAIN = 0;
 
 // Số lần thua liên tiếp tối đa trước khi reset về lệnh ban đầu
-const MAX_CONSECUTIVE_LOSSES = 6;
+const MAX_CONSECUTIVE_LOSSES = parseInt(process.env.MAX_CONSECUTIVE_LOSSES || '6');
 
 // Biến theo dõi vốn hiện tại cho lệnh
 let currentInvestmentAmount = INITIAL_INVESTMENT_AMOUNT;
@@ -84,19 +86,17 @@ let totalLoss = 0;
 let netPNL = 0;
 
 // --- BIẾN TRẠNG THÁI WEBSOCKET ---
-let marketWs = null; // WebSocket cho giá thị trường (Mark Price)
+let marketWs = null; // WebSocket cho giá thị trường (Mark Price) của TARGET_COIN_SYMBOL
 let userDataWs = null; // WebSocket cho user data (tài khoản)
 let listenKey = null; // Key để duy trì User Data Stream
 let listenKeyRefreshInterval = null; // Interval để làm mới listenKey
-let currentMarketPrice = null; // Cache giá từ WebSocket
+let currentMarketPrice = null; // Cache giá từ WebSocket cho TARGET_COIN_SYMBOL
 
-// --- CẤU HÌNH WEB SERVER VÀ LOG PM2 ---
-const WEB_SERVER_PORT = 1235; // Cổng cho giao diện web
-// Đường dẫn tới file log của PM2 cho bot này (để web server đọc).
-// Đảm bảo đường dẫn này chính xác với cấu hình PM2 của bạn.
-const BOT_LOG_FILE = '/home/tacke300/.pm2/logs/bot-bina-out.log'; // Cần điều chỉnh nếu dùng PM2
-// Tên của bot trong PM2, phải khớp với tên bạn đã dùng khi start bot bằng PM2.
-const THIS_BOT_PM2_NAME = 'futu'; // Cần điều chỉnh nếu dùng PM2
+// --- CẤU HÌNH WEB SERVER VÀ LOG PM2 (ĐỌC TỪ BIẾN MÔI TRƯỜNG) ---
+// Mỗi bot cần một cổng riêng và tên riêng trong PM2
+const WEB_SERVER_PORT = parseInt(process.env.WEB_SERVER_PORT || '1235');
+const THIS_BOT_PM2_NAME = process.env.PM2_APP_NAME || 'futu_default'; // Tên của bot trong PM2
+const BOT_LOG_FILE = process.env.PM2_LOG_FILE || `/home/tacke300/.pm2/logs/${THIS_BOT_PM2_NAME}-out.log`;
 
 // --- HÀM TIỆN ÍCH ---
 
@@ -104,7 +104,7 @@ const THIS_BOT_PM2_NAME = 'futu'; // Cần điều chỉnh nếu dùng PM2
 function addLog(message) {
     const now = new Date();
     const time = `${now.toLocaleDateString('en-GB')} ${now.toLocaleTimeString('en-US', { hour12: false })}.${String(now.getMilliseconds()).padStart(3, '0')}`;
-    let logEntry = `[${time}] ${message}`;
+    let logEntry = `[${time}] [${TARGET_COIN_SYMBOL}] ${message}`; // Thêm symbol vào log
 
     const messageHash = crypto.createHash('md5').update(message).digest('hex');
 
@@ -116,7 +116,7 @@ function addLog(message) {
             return;
         } else {
             if (logCounts[messageHash].count > 1) {
-                console.log(`[${time}] (Lặp lại x${logCounts[messageHash].count}) ${message}`);
+                console.log(`[${time}] [${TARGET_COIN_SYMBOL}] (Lặp lại x${logCounts[messageHash].count}) ${message}`);
             }
             logCounts[messageHash] = { count: 1, lastLoggedTime: now };
         }
@@ -226,7 +226,7 @@ async function callSignedAPI(fullEndpointPath, method = 'GET', params = {}) {
         requestPath = fullEndpointPath;
         requestBody = `${queryString}&signature=${signature}`;
         headers['Content-Type'] = 'application/x-www-form-urlencoded';
-    } else if (method === 'PUT') { // Thêm method PUT
+    } else if (method === 'PUT') {
         requestPath = fullEndpointPath;
         requestBody = `${queryString}&signature=${signature}`;
         headers['Content-Type'] = 'application/x-www-form-urlencoded';
@@ -260,7 +260,7 @@ async function callSignedAPI(fullEndpointPath, method = 'GET', params = {}) {
         }
 
         if (consecutiveApiErrors >= MAX_CONSECUTIVE_API_ERRORS) {
-            addLog(`Lỗi API liên tiếp (${consecutiveApiErrors}/${MAX_CONSECUTIVE_API_ERRORS}). Dừng bot.`, true);
+            addLog(`Lỗi API liên tiếp (${consecutiveApiErrors}/${MAX_CONSECUTIVE_API_ERRORS}). Dừng bot.`);
             throw new CriticalApiError("Lỗi API nghiêm trọng, bot dừng.");
         }
         throw error;
@@ -293,7 +293,7 @@ async function callPublicAPI(fullEndpointPath, params = {}) {
             addLog("  -> Lỗi mạng.");
         }
         if (consecutiveApiErrors >= MAX_CONSECUTIVE_API_ERRORS) {
-            addLog(`Lỗi API liên tiếp (${consecutiveApiErrors}/${MAX_CONSECUTIVE_API_ERRORS}). Dừng bot.`, true);
+            addLog(`Lỗi API liên tiếp (${consecutiveApiErrors}/${MAX_CONSECUTIVE_API_ERRORS}). Dừng bot.`);
             throw new CriticalApiError("Lỗi API nghiêm trọng, bot dừng.");
         }
         throw error;
@@ -316,6 +316,7 @@ async function syncServerTime() {
 }
 
 // Lấy thông tin đòn bẩy tối đa cho một symbol cụ thể
+// Luôn truyền TARGET_COIN_SYMBOL vào hàm này
 async function getLeverageBracketForSymbol(symbol) {
     try {
         const response = await callSignedAPI('/fapi/v1/leverageBracket', 'GET', { symbol: symbol });
@@ -335,6 +336,7 @@ async function getLeverageBracketForSymbol(symbol) {
 }
 
 // Thiết lập đòn bẩy cho một symbol
+// Luôn truyền TARGET_COIN_SYMBOL vào hàm này
 async function setLeverage(symbol, leverage) {
     try {
         addLog(`Đặt đòn bẩy ${leverage}x cho ${symbol}.`);
@@ -387,6 +389,7 @@ async function getExchangeInfo() {
 }
 
 // Hàm kết hợp để lấy tất cả filters và maxLeverage cho một symbol
+// Luôn truyền TARGET_COIN_SYMBOL vào hàm này
 async function getSymbolDetails(symbol) {
     const filters = await getExchangeInfo();
     if (!filters || !filters[symbol]) {
@@ -397,7 +400,8 @@ async function getSymbolDetails(symbol) {
     return { ...filters[symbol], maxLeverage: maxLeverage };
 }
 
-// Lấy giá hiện tại của một symbol (ĐÃ CHỈNH SỬA: CHỈ DÙNG REST API)
+// Lấy giá hiện tại của một symbol (CHỈ DÙNG REST API)
+// Luôn truyền TARGET_COIN_SYMBOL vào hàm này
 async function getCurrentPrice(symbol) {
     addLog(`Lấy giá ${symbol} từ REST API.`);
     try {
@@ -415,7 +419,25 @@ async function getCurrentPrice(symbol) {
 }
 
 /**
+ * Hàm xác định tỷ lệ TP/SL dựa trên Max Leverage.
+ * @param {number} maxLeverage - Đòn bẩy tối đa của symbol.
+ * @returns {object} - Đối tượng chứa tpPercentage và slPercentage.
+ */
+function getTPandSLPercentages(maxLeverage) {
+    if (maxLeverage < 25) {
+        return { tpPercentage: 1.60, slPercentage: 0.80 }; // 160% TP, 80% SL
+    } else if (maxLeverage <= 50) {
+        return { tpPercentage: 3.50, slPercentage: 1.50 }; // 350% TP, 150% SL
+    } else if (maxLeverage <= 75) {
+        return { tpPercentage: 5.00, slPercentage: 2.40 }; // 500% TP, 240% SL
+    } else { // maxLeverage > 100 (bao gồm cả 125)
+        return { tpPercentage: 7.00, slPercentage: 3.00 }; // 700% TP, 300% SL
+    }
+}
+
+/**
  * Hủy tất cả các lệnh mở cho một symbol cụ thể.
+ * Luôn truyền TARGET_COIN_SYMBOL vào hàm này.
  * @param {string} symbol - Symbol của cặp giao dịch.
  */
 async function cancelOpenOrdersForSymbol(symbol) {
@@ -436,13 +458,20 @@ async function cancelOpenOrdersForSymbol(symbol) {
 /**
  * Hàm xử lý kết quả giao dịch và điều chỉnh vốn.
  * Hàm này sẽ được gọi khi User Data Stream báo cáo realizedPnl.
+ * symbol ở đây sẽ là symbol từ sự kiện WS, cần kiểm tra với TARGET_COIN_SYMBOL
  * @param {number} pnlForClosedTrade - PNL thực tế của giao dịch đã đóng.
  * @param {string} positionSideBeforeClose - Hướng của vị thế trước khi đóng (LONG/SHORT).
- * @param {string} symbol - Symbol của cặp giao dịch.
+ * @param {string} eventSymbol - Symbol của cặp giao dịch từ sự kiện WS.
  * @param {number} closedQuantity - Số lượng đã đóng.
  */
-async function processTradeResult(pnlForClosedTrade, positionSideBeforeClose, symbol, closedQuantity) {
-    addLog(`Đang xử lý kết quả giao dịch ${symbol} (${positionSideBeforeClose}) với PNL: ${pnlForClosedTrade.toFixed(4)}`);
+async function processTradeResult(pnlForClosedTrade, positionSideBeforeClose, eventSymbol, closedQuantity) {
+    // Đảm bảo rằng sự kiện PNL này thuộc về TARGET_COIN_SYMBOL của bot này
+    if (eventSymbol !== TARGET_COIN_SYMBOL) {
+        addLog(`[Bỏ qua] Sự kiện PNL cho ${eventSymbol} không khớp với TARGET_COIN_SYMBOL của bot (${TARGET_COIN_SYMBOL}).`);
+        return;
+    }
+
+    addLog(`Đang xử lý kết quả giao dịch ${eventSymbol} (${positionSideBeforeClose}) với PNL: ${pnlForClosedTrade.toFixed(4)}`);
 
     // Cập nhật tổng lời/lỗ
     if (pnlForClosedTrade > 0.000001) { // PNL dương đáng kể
@@ -453,7 +482,7 @@ async function processTradeResult(pnlForClosedTrade, positionSideBeforeClose, sy
     netPNL = totalProfit - totalLoss;
 
     addLog([
-        `🔴 Đã đóng ${positionSideBeforeClose || 'UNKNOWN'} ${symbol}`,
+        `🔴 Đã đóng ${positionSideBeforeClose || 'UNKNOWN'} ${eventSymbol}`,
         `├─ PNL: ${pnlForClosedTrade.toFixed(2)} USDT`,
         `├─ Tổng Lời: ${totalProfit.toFixed(2)} USDT`,
         `├─ Tổng Lỗ: ${totalLoss.toFixed(2)} USDT`,
@@ -477,7 +506,7 @@ async function processTradeResult(pnlForClosedTrade, positionSideBeforeClose, sy
                 addLog(`Đã lỗ ${MAX_CONSECUTIVE_LOSSES} lần liên tiếp. Reset vốn về ${currentInvestmentAmount} USDT và lượt lỗ về 0.`);
             } else {
                 addLog(`[DEBUG] Trước khi nhân đôi: currentInvestmentAmount = ${currentInvestmentAmount}`);
-                currentInvestmentAmount *= 1.6; // Gấp đôi vốn cho lệnh tiếp theo
+                currentInvestmentAmount *= 2; // Gấp đôi vốn cho lệnh tiếp theo
                 addLog(`Gấp đôi vốn cho lệnh tiếp theo: ${currentInvestmentAmount} USDT.`);
             }
         } else {
@@ -495,24 +524,23 @@ async function processTradeResult(pnlForClosedTrade, positionSideBeforeClose, sy
         clearInterval(positionCheckInterval);
         positionCheckInterval = null;
     }
-    await cancelOpenOrdersForSymbol(symbol); // Hủy các lệnh chờ cũ (TP/SL)
-    await checkAndHandleRemainingPosition(symbol); // Đảm bảo không còn vị thế sót
+    await cancelOpenOrdersForSymbol(eventSymbol); // Hủy các lệnh chờ cũ (TP/SL) cho symbol này
+    await checkAndHandleRemainingPosition(eventSymbol); // Đảm bảo không còn vị thế sót cho symbol này
 
     // Kích hoạt chu kỳ chính để mở lệnh mới
     if(botRunning) scheduleNextMainCycle();
 }
 
+
 /**
  * Hàm đóng vị thế hiện tại và xử lý logic sau khi đóng.
- * LƯU Ý: Hàm này chỉ gửi lệnh đóng. Logic xử lý PNL và điều chỉnh vốn
- * sẽ nằm trong callback của User Data Stream khi nhận được sự kiện 'ORDER_TRADE_UPDATE'
- * có 'realizedPnl' khác 0.
- * @param {string} symbol - Symbol của cặp giao dịch.
+ * Luôn truyền TARGET_COIN_SYMBOL vào hàm này.
+ * @param {string} symbol - Symbol của cặp giao dịch (sẽ là TARGET_COIN_SYMBOL của bot này).
  * @param {number} quantity - Số lượng của vị thế cần đóng (để tham chiếu).
  * @param {string} reason - Lý do đóng vị thế (ví dụ: "TP khớp", "SL khớp", "Thủ công", "Vị thế sót").
  */
 async function closePosition(symbol, quantity, reason) {
-    // Đảm bảo chỉ có một lần gọi đóng vị thế được xử lý tại một thời điểm
+    // Đảm bảo chỉ có một lần gọi đóng vị thế được xử lý tại một thời điểm cho symbol này
     if (isClosingPosition) {
         addLog(`Đang trong quá trình đóng vị thế ${symbol}. Bỏ qua yêu cầu đóng mới.`);
         return;
@@ -521,12 +549,12 @@ async function closePosition(symbol, quantity, reason) {
 
     // Lưu lại các thông tin cần thiết trước khi currentOpenPosition có thể bị xóa
     const positionSideBeforeClose = currentOpenPosition?.side; // Lấy side trước khi currentOpenPosition bị reset
-    const initialQuantity = currentOpenPosition?.quantity; // Lấy quantity ban đầu để theo dõi
+    // const initialQuantity = currentOpenPosition?.quantity; // Lấy quantity ban đầu để theo dõi - không dùng trực tiếp ở đây
 
     addLog(`Đóng lệnh ${positionSideBeforeClose || 'UNKNOWN'} ${symbol} (Lý do: ${reason}).`);
 
     try {
-        const symbolInfo = await getSymbolDetails(symbol);
+        const symbolInfo = await getSymbolDetails(symbol); // Lấy details cho symbol của bot này
         if (!symbolInfo) {
             addLog(`Lỗi lấy symbol info ${symbol}. Không đóng lệnh.`);
             isClosingPosition = false;
@@ -535,6 +563,7 @@ async function closePosition(symbol, quantity, reason) {
 
         const quantityPrecision = symbolInfo.quantityPrecision;
         const positions = await callSignedAPI('/fapi/v2/positionRisk', 'GET');
+        // Chỉ tìm vị thế của TARGET_COIN_SYMBOL của bot này
         const currentPositionOnBinance = positions.find(p => p.symbol === symbol && parseFloat(p.positionAmt) !== 0);
 
         if (!currentPositionOnBinance || parseFloat(currentPositionOnBinance.positionAmt) === 0) {
@@ -555,7 +584,7 @@ async function closePosition(symbol, quantity, reason) {
             addLog(`Gửi lệnh đóng ${positionSideBeforeClose || closeSide}: ${symbol}, ${closeSide}, MARKET, Qty: ${adjustedActualQuantity}`);
 
             await callSignedAPI('/fapi/v1/order', 'POST', {
-                symbol: symbol,
+                symbol: symbol, // Gửi lệnh đóng cho symbol của bot này
                 side: closeSide,
                 type: 'MARKET',
                 quantity: adjustedActualQuantity,
@@ -573,7 +602,7 @@ async function closePosition(symbol, quantity, reason) {
     } catch (error) {
         addLog(`Lỗi đóng vị thế ${symbol}: ${error.msg || error.message}`);
         if (error instanceof CriticalApiError) {
-            addLog(`Lỗi API nghiêm trọng khi cố gắng đóng vị thế. Bot dừng.`);
+            addLog(`Bot dừng do lỗi API nghiêm trọng khi cố gắng đóng vị thế.`);
             stopBotLogicInternal();
         }
     } finally {
@@ -583,19 +612,21 @@ async function closePosition(symbol, quantity, reason) {
 
 
 // Hàm kiểm tra và xử lý vị thế còn sót lại
+// Luôn truyền TARGET_COIN_SYMBOL vào hàm này
 async function checkAndHandleRemainingPosition(symbol, retryCount = 0) {
     const MAX_RETRY_CHECK_POSITION = 3; // Số lần thử lại tối đa để kiểm tra vị thế sót
-    const CHECK_POSITION_RETRY_DELAY_MS = 1000; // Độ trễ giữa các lần thử lại (ms) (ĐÃ TĂNG)
+    const CHECK_POSITION_RETRY_DELAY_MS = 1000; // Độ trễ giữa các lần thử lại (ms)
 
     addLog(`Kiểm tra vị thế còn sót cho ${symbol} (Lần ${retryCount + 1}/${MAX_RETRY_CHECK_POSITION + 1})...`);
 
     try {
         const positions = await callSignedAPI('/fapi/v2/positionRisk', 'GET');
+        // Chỉ tìm vị thế của TARGET_COIN_SYMBOL của bot này
         const remainingPosition = positions.find(p => p.symbol === symbol && parseFloat(p.positionAmt) !== 0);
 
         if (remainingPosition && Math.abs(parseFloat(remainingPosition.positionAmt)) > 0) {
             const currentPositionAmount = parseFloat(remainingPosition.positionAmt);
-            const currentPrice = await getCurrentPrice(symbol); // Lấy giá từ REST API
+            const currentPrice = await getCurrentPrice(symbol); // Lấy giá từ REST API cho symbol này
             const positionSide = currentPositionAmount > 0 ? 'LONG' : 'SHORT';
 
             addLog(`Vị thế ${symbol} còn sót: ${currentPositionAmount} (${positionSide}) @ ${currentPrice}.`);
@@ -608,7 +639,7 @@ async function checkAndHandleRemainingPosition(symbol, retryCount = 0) {
                 addLog(`Đã thử ${MAX_RETRY_CHECK_POSITION + 1} lần, vị thế ${symbol} vẫn còn sót. Cố gắng đóng lại lần cuối.`);
                 // Lấy thông tin positionSide từ vị thế sót hiện tại nếu currentOpenPosition đã bị reset
                 const sideToClose = currentOpenPosition?.side || positionSide;
-                await closePosition(symbol, Math.abs(currentPositionAmount), 'Vị thế sót cuối cùng');
+                await closePosition(symbol, Math.abs(currentPositionAmount), 'Vị thế sót cuối cùng'); // Đóng vị thế sót cho symbol này
             }
         } else {
             addLog(`Đã xác nhận không còn vị thế ${symbol}.`);
@@ -625,8 +656,9 @@ function sleep(ms) {
 }
 
 // Hàm mở lệnh (Long hoặc Short)
+// Luôn truyền TARGET_COIN_SYMBOL vào hàm này
 async function openPosition(symbol, tradeDirection, usdtBalance, maxLeverage) {
-    if (currentOpenPosition) {
+    if (currentOpenPosition) { // currentOpenPosition chỉ có thể là của TARGET_COIN_SYMBOL
         addLog(`Đã có vị thế mở (${currentOpenPosition.symbol}). Bỏ qua mở lệnh mới cho ${symbol}.`);
         if(botRunning) scheduleNextMainCycle();
         return;
@@ -635,14 +667,14 @@ async function openPosition(symbol, tradeDirection, usdtBalance, maxLeverage) {
     addLog(`Mở ${tradeDirection} ${symbol}.`);
     addLog(`Mở lệnh với số vốn: ${currentInvestmentAmount} USDT.`);
     try {
-        const symbolDetails = await getSymbolDetails(symbol);
+        const symbolDetails = await getSymbolDetails(symbol); // Lấy details cho symbol của bot này
         if (!symbolDetails) {
             addLog(`Lỗi lấy chi tiết symbol ${symbol}. Không mở lệnh.`);
             if(botRunning) scheduleNextMainCycle();
             return;
         }
 
-        const leverageSetSuccess = await setLeverage(symbol, maxLeverage);
+        const leverageSetSuccess = await setLeverage(symbol, maxLeverage); // Đặt leverage cho symbol của bot này
         if (!leverageSetSuccess) {
             addLog(`Lỗi đặt đòn bẩy ${maxLeverage}x cho ${symbol}. Hủy mở lệnh.`);
             if(botRunning) scheduleNextMainCycle();
@@ -652,8 +684,7 @@ async function openPosition(symbol, tradeDirection, usdtBalance, maxLeverage) {
 
         const { pricePrecision, quantityPrecision, minNotional, minQty, stepSize, tickSize } = symbolDetails;
 
-        // Vị trí quan trọng: Hàm getCurrentPrice ở đây sẽ gọi REST API
-        const currentPrice = await getCurrentPrice(symbol); // <--- ĐÂY LÀ CHỖ CHỈ DÙNG REST API
+        const currentPrice = await getCurrentPrice(symbol); // Lấy giá từ REST API cho symbol này
         if (!currentPrice) {
             addLog(`Lỗi lấy giá hiện tại cho ${symbol}. Không mở lệnh.`);
             if(botRunning) scheduleNextMainCycle();
@@ -698,7 +729,7 @@ async function openPosition(symbol, tradeDirection, usdtBalance, maxLeverage) {
 
         // Gửi lệnh thị trường
         const orderResult = await callSignedAPI('/fapi/v1/order', 'POST', {
-            symbol: symbol,
+            symbol: symbol, // Gửi lệnh cho symbol của bot này
             side: orderSide,
             type: 'MARKET',
             quantity: quantity,
@@ -713,11 +744,12 @@ async function openPosition(symbol, tradeDirection, usdtBalance, maxLeverage) {
 
         // Lấy thông tin vị thế đang mở để có entryPrice chính xác
         const positions = await callSignedAPI('/fapi/v2/positionRisk', 'GET');
+        // Chỉ tìm vị thế của TARGET_COIN_SYMBOL của bot này
         const openPositionOnBinance = positions.find(p => p.symbol === symbol && Math.abs(parseFloat(p.positionAmt)) > 0);
 
         if (!openPositionOnBinance) {
             addLog(`Không tìm thấy vị thế mở cho ${symbol} sau 1 giây. Có thể lệnh không khớp hoặc đã đóng ngay lập tức.`);
-            await cancelOpenOrdersForSymbol(symbol);
+            await cancelOpenOrdersForSymbol(symbol); // Hủy lệnh chờ cho symbol này
             if(botRunning) scheduleNextMainCycle();
             return;
         }
@@ -731,13 +763,16 @@ async function openPosition(symbol, tradeDirection, usdtBalance, maxLeverage) {
         addLog(`  + Đòn bẩy: ${maxLeverage}x | Vốn: ${capitalToUse.toFixed(2)} USDT | Qty thực tế: ${actualQuantity} ${symbol} | Giá vào thực tế: ${entryPrice.toFixed(pricePrecision)}`);
 
         // --- Hủy tất cả các lệnh chờ hiện tại (TP/SL) nếu có trước khi đặt lại ---
-        await cancelOpenOrdersForSymbol(symbol);
+        await cancelOpenOrdersForSymbol(symbol); // Hủy lệnh chờ cho symbol của bot này
         addLog(`Đã hủy các lệnh chờ cũ (nếu có) cho ${symbol}.`);
         await sleep(500); // Thêm độ trễ sau hủy lệnh
 
         // --- BẮT ĐẦU TÍNH TOÁN TP/SL THEO % VỐN (dùng giá vào lệnh thực tế và số lượng thực tế) ---
-        const profitTargetUSDT = capitalToUse * TAKE_PROFIT_PERCENTAGE_MAIN; // 155% của vốn hiện tại
-        const lossLimitUSDT = capitalToUse * STOP_LOSS_PERCENTAGE_MAIN;     // 80% của vốn hiện tại
+        // Lấy TP/SL percentages dựa trên maxLeverage
+        const { tpPercentage, slPercentage } = getTPandSLPercentages(maxLeverage);
+
+        const profitTargetUSDT = capitalToUse * tpPercentage;
+        const lossLimitUSDT = capitalToUse * slPercentage;
 
         const priceChangeForTP = profitTargetUSDT / actualQuantity;
         const priceChangeForSL = lossLimitUSDT / actualQuantity;
@@ -751,7 +786,7 @@ async function openPosition(symbol, tradeDirection, usdtBalance, maxLeverage) {
             slOrderSide = 'SELL';
             tpOrderSide = 'SELL';
 
-            slPrice = Math.floor(slPrice / tickSize) * tickSize;
+            slPrice = Math.max(0, Math.floor(slPrice / tickSize) * tickSize); // Đảm bảo giá SL không âm
             tpPrice = Math.floor(tpPrice / tickSize) * tickSize;
 
         } else { // SHORT
@@ -761,18 +796,18 @@ async function openPosition(symbol, tradeDirection, usdtBalance, maxLeverage) {
             tpOrderSide = 'BUY';
 
             slPrice = Math.ceil(slPrice / tickSize) * tickSize;
-            tpPrice = Math.ceil(tpPrice / tickSize) * tickSize;
+            tpPrice = Math.max(0, Math.ceil(tpPrice / tickSize) * tickSize); // Đảm bảo giá TP không âm
         }
 
         slPrice = parseFloat(slPrice.toFixed(pricePrecision));
         tpPrice = parseFloat(tpPrice.toFixed(pricePrecision));
 
         addLog(`Giá Entry: ${entryPrice.toFixed(pricePrecision)}`);
-        addLog(`TP: ${tpPrice.toFixed(pricePrecision)}, SL: ${slPrice.toFixed(pricePrecision)}`);
+        addLog(`TP: ${tpPrice.toFixed(pricePrecision)} (${(tpPercentage * 100).toFixed(0)}%), SL: ${slPrice.toFixed(pricePrecision)} (${(slPercentage * 100).toFixed(0)}%)`);
 
         try {
             await callSignedAPI('/fapi/v1/order', 'POST', {
-                symbol: symbol,
+                symbol: symbol, // Đặt lệnh SL cho symbol của bot này
                 side: slOrderSide,
                 type: 'STOP_MARKET',
                 quantity: actualQuantity,
@@ -786,14 +821,14 @@ async function openPosition(symbol, tradeDirection, usdtBalance, maxLeverage) {
             addLog(`Lỗi đặt SL cho ${symbol}: ${slError.msg || slError.message}.`);
             if (slError.code === -2021 || (slError.msg && slError.msg.includes('Order would immediately trigger'))) {
                 addLog(`SL kích hoạt ngay lập tức cho ${symbol}. Đóng vị thế.`);
-                await closePosition(symbol, actualQuantity, 'SL kích hoạt ngay');
+                await closePosition(symbol, actualQuantity, 'SL kích hoạt ngay'); // Đóng vị thế cho symbol này
                 return;
             }
         }
 
         try {
             await callSignedAPI('/fapi/v1/order', 'POST', {
-                symbol: symbol,
+                symbol: symbol, // Đặt lệnh TP cho symbol của bot này
                 side: tpOrderSide,
                 type: 'TAKE_PROFIT_MARKET',
                 quantity: actualQuantity,
@@ -807,11 +842,12 @@ async function openPosition(symbol, tradeDirection, usdtBalance, maxLeverage) {
             addLog(`Lỗi đặt TP cho ${symbol}: ${tpError.msg || tpError.message}.`);
             if (tpError.code === -2021 || (tpError.msg && tpError.msg.includes('Order would immediately trigger'))) {
                 addLog(`TP kích hoạt ngay lập tức cho ${symbol}. Đóng vị thế.`);
-                await closePosition(symbol, actualQuantity, 'TP kích hoạt ngay');
+                await closePosition(symbol, actualQuantity, 'TP kích hoạt ngay'); // Đóng vị thế cho symbol này
                 return;
             }
         }
 
+        // Lưu trữ thông tin vị thế đang mở cho riêng bot này
         currentOpenPosition = {
             symbol: symbol,
             quantity: actualQuantity,
@@ -829,7 +865,7 @@ async function openPosition(symbol, tradeDirection, usdtBalance, maxLeverage) {
             positionCheckInterval = setInterval(async () => {
                 if (botRunning && currentOpenPosition) {
                     try {
-                        await manageOpenPosition();
+                        await manageOpenPosition(); // manageOpenPosition sẽ tự kiểm tra symbol
                     }
                     catch (error) {
                         addLog(`Lỗi kiểm tra vị thế định kỳ: ${error.msg || error.message}.`);
@@ -838,7 +874,7 @@ async function openPosition(symbol, tradeDirection, usdtBalance, maxLeverage) {
                     clearInterval(positionCheckInterval);
                     positionCheckInterval = null;
                 }
-            }, 2000); // Tăng interval lên 5 giây
+            }, 5000); // Tăng interval lên 5 giây
         }
 
     } catch (error) {
@@ -867,10 +903,21 @@ async function manageOpenPosition() {
         return;
     }
 
-    const { symbol, quantity, side } = currentOpenPosition;
+    // Đảm bảo chỉ quản lý vị thế của symbol được cấu hình cho bot này
+    if (currentOpenPosition.symbol !== TARGET_COIN_SYMBOL) {
+        addLog(`[Cảnh báo] Vị thế hiện tại (${currentOpenPosition.symbol}) không khớp với TARGET_COIN_SYMBOL của bot (${TARGET_COIN_SYMBOL}). Bỏ qua quản lý vị thế.`);
+        currentOpenPosition = null; // Có thể reset để tránh lỗi nếu có vị thế không mong muốn
+        if (positionCheckInterval) clearInterval(positionCheckInterval);
+        positionCheckInterval = null;
+        if(botRunning) scheduleNextMainCycle();
+        return;
+    }
+
+    const { symbol, quantity, side } = currentOpenPosition; // Lúc này symbol đã là TARGET_COIN_SYMBOL
 
     try {
         const positions = await callSignedAPI('/fapi/v2/positionRisk', 'GET');
+        // Chỉ tìm vị thế của TARGET_COIN_SYMBOL của bot này
         const currentPositionOnBinance = positions.find(p => p.symbol === symbol && parseFloat(p.positionAmt) !== 0);
 
         if (!currentPositionOnBinance || parseFloat(currentPositionOnBinance.positionAmt) === 0) {
@@ -881,15 +928,14 @@ async function manageOpenPosition() {
                 clearInterval(positionCheckInterval);
                 positionCheckInterval = null;
             }
-            await cancelOpenOrdersForSymbol(symbol);
-            await checkAndHandleRemainingPosition(symbol);
+            await cancelOpenOrdersForSymbol(symbol); // Hủy lệnh chờ cho symbol này
+            await checkAndHandleRemainingPosition(symbol); // Kiểm tra vị thế sót cho symbol này
             if(botRunning) scheduleNextMainCycle();
             return;
         }
 
         // Cập nhật PNL chưa hiện thực hóa để hiển thị trên UI
-        // Ở đây vẫn có thể dùng WebSocket nếu bạn muốn cập nhật giá nhanh hơn cho mục đích hiển thị UI
-        const currentPrice = currentMarketPrice !== null && TARGET_COIN_SYMBOL === symbol ? currentMarketPrice : await getCurrentPrice(symbol); // Lấy giá từ WebSocket HOẶC REST API (fallback)
+        const currentPrice = currentMarketPrice !== null ? currentMarketPrice : await getCurrentPrice(symbol); // Lấy giá từ WebSocket HOẶC REST API (fallback) cho symbol này
         if (currentPrice) {
             let unrealizedPnl = 0;
             if (side === 'LONG') {
@@ -918,15 +964,15 @@ async function scheduleNextMainCycle() {
         return;
     }
 
-    if (currentOpenPosition) {
-        addLog('Có vị thế mở. Bỏ qua quét mới.');
+    if (currentOpenPosition) { // currentOpenPosition chỉ có thể là của TARGET_COIN_SYMBOL
+        addLog(`Có vị thế mở cho ${currentOpenPosition.symbol}. Bỏ qua quét mới.`);
         return;
     }
 
     clearTimeout(nextScheduledCycleTimeout);
 
-    addLog(`Lên lịch chu kỳ giao dịch tiếp theo sau 5 giây...`);
-    nextScheduledCycleTimeout = setTimeout(runTradingLogic, 2000); // Đợi 5 giây
+    addLog(`Lên lịch chu kỳ giao dịch tiếp theo cho ${TARGET_COIN_SYMBOL} sau 2 giây...`);
+    nextScheduledCycleTimeout = setTimeout(runTradingLogic, 2000); // Đợi 2 giây
 }
 
 // --- HÀM CHO WEBSOCKET LISTENKEY VÀ KẾT NỐI ---
@@ -973,6 +1019,7 @@ async function keepAliveListenKey() {
     }
 }
 
+// Hàm này sẽ khởi tạo WebSocket Market Data cho TARGET_COIN_SYMBOL của riêng bot này
 function setupMarketDataStream(symbol) {
     if (marketWs) {
         addLog('Đóng kết nối Market WebSocket cũ...');
@@ -980,10 +1027,10 @@ function setupMarketDataStream(symbol) {
         marketWs = null;
     }
 
-    // Sử dụng stream markPrice mỗi 1 giây
+    // Sử dụng stream markPrice mỗi 1 giây cho symbol của bot này
     const streamUrl = `${WS_BASE_URL}${WS_USER_DATA_ENDPOINT}/${symbol.toLowerCase()}@markPrice@1s`;
 
-    addLog(`Kết nối Market WebSocket: ${streamUrl}`);
+    addLog(`Kết nối Market WebSocket cho ${symbol}: ${streamUrl}`);
     marketWs = new WebSocket(streamUrl);
 
     marketWs.onopen = () => {
@@ -993,7 +1040,7 @@ function setupMarketDataStream(symbol) {
     marketWs.onmessage = (event) => {
         try {
             const data = JSON.parse(event.data);
-            if (data.e === 'markPriceUpdate') {
+            if (data.e === 'markPriceUpdate' && data.s === symbol) { // Chỉ cập nhật giá nếu nó thuộc về symbol của bot này
                 currentMarketPrice = parseFloat(data.p);
                 // addLog(`Giá ${symbol} (Mark Price): ${currentMarketPrice}`); // Quá nhiều log, chỉ dùng để debug ban đầu
             }
@@ -1017,6 +1064,8 @@ function setupMarketDataStream(symbol) {
     };
 }
 
+// Hàm này khởi tạo WebSocket User Data Stream.
+// Cần thêm điều kiện kiểm tra symbol trong onmessage để mỗi bot chỉ xử lý lệnh của nó.
 function setupUserDataStream(key) {
     if (userDataWs) {
         addLog('Đóng kết nối User Data WebSocket cũ...');
@@ -1042,24 +1091,31 @@ function setupUserDataStream(key) {
             if (data.e === 'ORDER_TRADE_UPDATE') {
                 const order = data.o;
                 if (order.X === 'FILLED' && parseFloat(order.rp) !== 0) { // Nếu lệnh đã khớp và có realizedPnl khác 0
-                    addLog(`Phát hiện lệnh đóng vị thế khớp. Symbol: ${order.s}, Side: ${order.S}, PNL: ${order.rp}`);
-                    // Kiểm tra nếu đây là lệnh đóng vị thế đang mở của bot
-                    // Có thể thêm kiểm tra order.q khớp với currentOpenPosition.quantity để chắc chắn hơn
-                    if (currentOpenPosition && order.s === currentOpenPosition.symbol) {
-                        const isClosingLong = currentOpenPosition.side === 'LONG' && order.S === 'SELL';
-                        const isClosingShort = currentOpenPosition.side === 'SHORT' && order.S === 'BUY';
-                        
-                        // Đảm bảo số lượng của lệnh khớp là đủ lớn để đóng vị thế
-                        const orderQuantity = parseFloat(order.q);
-                        const positionQuantity = currentOpenPosition.quantity;
-                        const quantityTolerance = 0.00001; // Sai số nhỏ cho số lượng
+                    // *** ĐIỂM QUAN TRỌNG: CHỈ XỬ LÝ NẾU LỆNH THUỘC VỀ TARGET_COIN_SYMBOL CỦA BOT NÀY ***
+                    if (order.s === TARGET_COIN_SYMBOL) {
+                        addLog(`Phát hiện lệnh đóng vị thế khớp cho ${order.s}. PNL: ${order.rp}`);
+                        // Kiểm tra nếu đây là lệnh đóng vị thế đang mở của bot
+                        if (currentOpenPosition && order.s === currentOpenPosition.symbol) {
+                            const isClosingLong = currentOpenPosition.side === 'LONG' && order.S === 'SELL';
+                            const isClosingShort = currentOpenPosition.side === 'SHORT' && order.S === 'BUY';
 
-                        if ((isClosingLong || isClosingShort) && Math.abs(orderQuantity - positionQuantity) < quantityTolerance) {
-                            addLog(`Xử lý PNL từ User Data Stream: ${parseFloat(order.rp)}`);
-                            await processTradeResult(parseFloat(order.rp), currentOpenPosition.side, currentOpenPosition.symbol, orderQuantity);
+                            // Đảm bảo số lượng của lệnh khớp là đủ lớn để đóng vị thế
+                            const orderQuantity = parseFloat(order.q);
+                            const positionQuantity = currentOpenPosition.quantity;
+                            const quantityTolerance = 0.00001; // Sai số nhỏ cho số lượng
+
+                            if ((isClosingLong || isClosingShort) && Math.abs(orderQuantity - positionQuantity) < quantityTolerance) {
+                                addLog(`Xử lý PNL từ User Data Stream cho ${TARGET_COIN_SYMBOL}: ${parseFloat(order.rp)}`);
+                                await processTradeResult(parseFloat(order.rp), currentOpenPosition.side, currentOpenPosition.symbol, orderQuantity);
+                            } else {
+                               addLog(`Sự kiện ORDER_TRADE_UPDATE cho ${order.s} không khớp với vị thế hiện tại hoặc đã được xử lý (hoặc không phải số lượng đầy đủ).`);
+                            }
                         } else {
-                           addLog(`Sự kiện ORDER_TRADE_UPDATE không khớp với vị thế hiện tại hoặc đã được xử lý.`);
+                             addLog(`Sự kiện ORDER_TRADE_UPDATE cho ${order.s} được nhận nhưng không có vị thế mở phù hợp trong bot này.`);
                         }
+                    } else {
+                        // Bỏ qua các sự kiện lệnh khớp của các symbol khác (được xử lý bởi bot khác)
+                        // addLog(`[Bỏ qua] Sự kiện ORDER_TRADE_UPDATE cho ${order.s}. Không phải ${TARGET_COIN_SYMBOL} của bot này.`);
                     }
                 }
             } else if (data.e === 'ACCOUNT_UPDATE') {
@@ -1112,10 +1168,9 @@ async function runTradingLogic() {
         return;
     }
 
-    if (currentOpenPosition) {
-        addLog(`Đã có vị thế mở (${currentOpenPosition.symbol}). Không mở lệnh mới. Tiếp tục theo dõi.`);
-        // Vẫn giữ lại manageOpenPosition trong interval, không gọi trực tiếp ở đây
-        // scheduleNextMainCycle(); // Không cần gọi lại nếu có vị thế
+    // Đảm bảo chỉ kiểm tra vị thế của chính nó
+    if (currentOpenPosition && currentOpenPosition.symbol === TARGET_COIN_SYMBOL) {
+        addLog(`Đã có vị thế mở cho ${currentOpenPosition.symbol}. Không mở lệnh mới. Tiếp tục theo dõi.`);
         return;
     }
 
@@ -1127,12 +1182,12 @@ async function runTradingLogic() {
         addLog(`USDT khả dụng: ${parseFloat(usdtAsset).toFixed(2)}`);
 
         if (usdtAsset < INITIAL_INVESTMENT_AMOUNT) {
-            addLog(`Số dư USDT quá thấp (${usdtAsset.toFixed(2)} USDT). Dừng mở lệnh. Đợi số dư đủ.`);
+            addLog(`Số dư USDT (${usdtAsset.toFixed(2)}) quá thấp (${INITIAL_INVESTMENT_AMOUNT} USDT) để mở lệnh cho ${TARGET_COIN_SYMBOL}. Dừng mở lệnh.`);
             if(botRunning) scheduleNextMainCycle();
             return;
         }
 
-        const symbolInfo = await getSymbolDetails(TARGET_COIN_SYMBOL);
+        const symbolInfo = await getSymbolDetails(TARGET_COIN_SYMBOL); // Lấy thông tin cho TARGET_COIN_SYMBOL của bot này
         if (!symbolInfo || !symbolInfo.maxLeverage) {
             addLog(`Không thể lấy thông tin chi tiết hoặc đòn bẩy cho ${TARGET_COIN_SYMBOL}. Hủy chu kỳ.`);
             if(botRunning) scheduleNextMainCycle();
@@ -1140,7 +1195,7 @@ async function runTradingLogic() {
         }
 
         addLog(`Chuẩn bị mở lệnh ${nextTradeDirection} cho ${TARGET_COIN_SYMBOL} với vốn ${currentInvestmentAmount} USDT và đòn bẩy ${symbolInfo.maxLeverage}x.`);
-        await openPosition(TARGET_COIN_SYMBOL, nextTradeDirection, usdtAsset, symbolInfo.maxLeverage);
+        await openPosition(TARGET_COIN_SYMBOL, nextTradeDirection, usdtAsset, symbolInfo.maxLeverage); // Mở vị thế cho TARGET_COIN_SYMBOL
 
     } catch (error) {
         addLog(`Lỗi trong chu kỳ giao dịch chính: ${error.msg || error.message}`);
@@ -1177,6 +1232,7 @@ async function startBotLogicInternal() {
     }
 
     addLog('--- Khởi động Bot ---');
+    addLog(`Symbol được cài đặt: ${TARGET_COIN_SYMBOL}`); // Log symbol mà bot này sẽ xử lý
     addLog('Kiểm tra kết nối API Binance Futures...');
 
     try {
@@ -1203,7 +1259,7 @@ async function startBotLogicInternal() {
             addLog("Không thể khởi tạo User Data Stream. Bot sẽ tiếp tục nhưng có thể thiếu thông tin cập nhật PNL.");
         }
 
-        // Khởi tạo Market Data Stream với symbol mục tiêu (cho mục đích cập nhật PNL chưa hiện thực hóa UI)
+        // Khởi tạo Market Data Stream với symbol mục tiêu của bot này
         setupMarketDataStream(TARGET_COIN_SYMBOL);
         // --- KẾT THÚC KHỞI TẠO WEBSOCKET ---
 
@@ -1222,23 +1278,12 @@ async function startBotLogicInternal() {
         // Đảm bảo positionCheckInterval được thiết lập nếu bot đang chạy
         if (!positionCheckInterval) {
             positionCheckInterval = setInterval(async () => {
-                if (botRunning && currentOpenPosition) {
+                if (botRunning && currentOpenPosition) { // currentOpenPosition chỉ có thể là của TARGET_COIN_SYMBOL
                     try {
-                        await manageOpenPosition();
-                    } catch (error) {
+                        await manageOpenPosition(); // manageOpenPosition sẽ tự kiểm tra symbol
+                    }
+                    catch (error) {
                         addLog(`Lỗi kiểm tra vị thế định kỳ: ${error.msg || error.message}.`);
-                        if(error instanceof CriticalApiError) {
-                            addLog(`Bot dừng do lỗi API trong kiểm tra vị thế.`);
-                            stopBotLogicInternal();
-                            if (!retryBotTimeout) {
-                                addLog(`Lên lịch tự động khởi động lại sau ${ERROR_RETRY_DELAY_MS / 1000}s.`);
-                                retryBotTimeout = setTimeout(async () => {
-                                    addLog('Thử khởi động lại bot...');
-                                    await startBotLogicInternal();
-                                    retryBotTimeout = null;
-                                }, ERROR_RETRY_DELAY_MS);
-                            }
-                        }
                     }
                 } else if (!botRunning && positionCheckInterval) {
                     clearInterval(positionCheckInterval);
@@ -1319,7 +1364,7 @@ app.get('/api/logs', (req, res) => {
         if (err) {
             console.error('Lỗi đọc log file:', err);
             if (err.code === 'ENOENT') {
-                return res.status(404).send(`Không tìm thấy log file: ${BOT_LOG_FILE}.`);
+                return res.status(404).send(`Không tìm thấy log file: ${BOT_LOG_FILE}. Đảm bảo PM2 đã tạo file log này.`);
             }
             return res.status(500).send('Lỗi đọc log file');
         }
@@ -1343,18 +1388,20 @@ app.get('/api/status', async (req, res) => {
             });
         });
         const processes = JSON.parse(pm2List);
+        // Tìm đúng tiến trình PM2 của bot này dựa vào THIS_BOT_PM2_NAME
         const botProcess = processes.find(p => p.name === THIS_BOT_PM2_NAME);
 
-        let statusMessage = 'MAY CHU: DA TAT (PM2)';
+        let statusMessage = `MAY CHU: DA TAT (PM2 cho ${THIS_BOT_PM2_NAME})`;
         if (botProcess) {
             statusMessage = `MAY CHU: ${botProcess.pm2_env.status.toUpperCase()} (Restarts: ${botProcess.pm2_env.restart_time})`;
             if (botProcess.pm2_env.status === 'online') {
-                statusMessage += ` | TRANG THAI: ${botRunning ? 'DANG CHAY' : 'DA DUNG'}`;
+                statusMessage += ` | TRANG THAI BOT: ${botRunning ? 'DANG CHAY' : 'DA DUNG'}`;
                 if (botStartTime) {
                     const uptimeMs = Date.now() - botStartTime.getTime();
                     const uptimeMinutes = Math.floor(uptimeMs / (1000 * 60));
                     statusMessage += ` | DA CHAY: ${uptimeMinutes} phút`;
                 }
+                statusMessage += ` | COIN: ${TARGET_COIN_SYMBOL}`;
             }
         } else {
             statusMessage = `Bot: Không tìm thấy trong PM2 (Tên: ${THIS_BOT_PM2_NAME})`;
@@ -1370,7 +1417,8 @@ app.get('/api/status', async (req, res) => {
 app.get('/api/bot_stats', async (req, res) => {
     try {
         let openPositionsData = [];
-        if (currentOpenPosition) {
+        // Chỉ trả về vị thế của TARGET_COIN_SYMBOL của bot này
+        if (currentOpenPosition && currentOpenPosition.symbol === TARGET_COIN_SYMBOL) {
             openPositionsData.push({
                 symbol: currentOpenPosition.symbol,
                 side: currentOpenPosition.side,
@@ -1385,6 +1433,12 @@ app.get('/api/bot_stats', async (req, res) => {
         res.json({
             success: true,
             data: {
+                targetCoin: TARGET_COIN_SYMBOL, // Bổ sung thông tin coin mà bot này đang xử lý
+                initialInvestment: INITIAL_INVESTMENT_AMOUNT,
+                currentInvestment: currentInvestmentAmount,
+                applyDoubleStrategy: APPLY_DOUBLE_STRATEGY,
+                consecutiveLosses: consecutiveLossCount,
+                nextTradeDir: nextTradeDirection,
                 totalProfit: totalProfit,
                 totalLoss: totalLoss,
                 netPNL: netPNL,
@@ -1400,35 +1454,45 @@ app.get('/api/bot_stats', async (req, res) => {
 
 // Endpoint để cấu hình các tham số từ frontend
 app.post('/api/configure', (req, res) => {
-    const { apiKey, secretKey, coinConfigs } = req.body;
+    const { apiKey, secretKey, initialAmount, symbol, applyDoubleStrategy } = req.body;
 
+    // Cập nhật API Key và Secret Key cho bot này
     API_KEY = apiKey.trim();
     SECRET_KEY = secretKey.trim();
 
-    if (coinConfigs && coinConfigs.length > 0) {
-        const config = coinConfigs[0];
-        TARGET_COIN_SYMBOL = config.symbol.trim().toUpperCase();
-        INITIAL_INVESTMENT_AMOUNT = parseFloat(config.initialAmount);
-        APPLY_DOUBLE_STRATEGY = !!config.applyDoubleStrategy;
-    } else {
-        addLog("Cảnh báo: Không có cấu hình đồng coin nào được gửi.");
-    }
+    // Cập nhật cấu hình giao dịch cho bot này
+    TARGET_COIN_SYMBOL = symbol.trim().toUpperCase();
+    INITIAL_INVESTMENT_AMOUNT = parseFloat(initialAmount);
+    APPLY_DOUBLE_STRATEGY = !!applyDoubleStrategy;
 
     currentInvestmentAmount = INITIAL_INVESTMENT_AMOUNT;
     consecutiveLossCount = 0;
-    nextTradeDirection = 'SHORT';
+    nextTradeDirection = 'SHORT'; // Reset hướng lệnh về ban đầu khi cấu hình
 
-    addLog(`Đã cập nhật cấu hình:`);
+    addLog(`Đã cập nhật cấu hình cho ${TARGET_COIN_SYMBOL}:`);
     addLog(`  API Key: ${API_KEY ? 'Đã thiết lập' : 'Chưa thiết lập'}`);
     addLog(`  Secret Key: ${SECRET_KEY ? 'Đã thiết lập' : 'Chưa thiết lập'}`);
     addLog(`  Đồng coin: ${TARGET_COIN_SYMBOL}`);
     addLog(`  Số vốn ban đầu: ${INITIAL_INVESTMENT_AMOUNT} USDT`);
     addLog(`  Chiến lược x2 vốn: ${APPLY_DOUBLE_STRATEGY ? 'Bật' : 'Tắt'}`);
 
-    // Khi cấu hình thay đổi, nếu bot đang chạy, cần khởi tạo lại WS stream với symbol mới
+    // Khi cấu hình thay đổi, nếu bot đang chạy, cần khởi tạo lại WS market data với symbol mới
     if (botRunning && TARGET_COIN_SYMBOL && marketWs?.readyState === WebSocket.OPEN) {
         addLog(`Cấu hình symbol thay đổi, khởi tạo lại Market Data Stream cho ${TARGET_COIN_SYMBOL}.`);
         setupMarketDataStream(TARGET_COIN_SYMBOL);
+    }
+    // Cần khởi động lại User Data Stream nếu API Key/Secret thay đổi
+    if (botRunning && listenKey) {
+        addLog('Cấu hình API Key/Secret thay đổi, làm mới Listen Key và User Data Stream.');
+        if (listenKeyRefreshInterval) clearInterval(listenKeyRefreshInterval);
+        userDataWs?.close();
+        listenKey = null;
+        // setupUserDataStream(listenKey); // Sẽ gọi getListenKey() bên trong
+        // Đặt timeout nhỏ để tránh Race condition khi API Key/Secret đang cập nhật
+        setTimeout(async () => {
+            listenKey = await getListenKey();
+            if (listenKey) setupUserDataStream(listenKey);
+        }, 1000);
     }
 
     res.json({ success: true, message: 'Cấu hình đã được cập nhật.' });
