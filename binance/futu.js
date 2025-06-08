@@ -5,7 +5,7 @@ import { exec } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import WebSocket from 'ws'; // Giữ lại nếu bạn vẫn muốn dùng WebSocket cho User Data Stream hoặc các mục đích khác
+import WebSocket from 'ws'; // Thêm WebSocket
 
 // Lấy __filename và __dirname trong ES modules
 const __filename = fileURLToPath(import.meta.url);
@@ -65,8 +65,8 @@ let TARGET_COIN_SYMBOL = 'ETHUSDT'; // Mặc định ETHUSDT (sẽ được cậ
 let APPLY_DOUBLE_STRATEGY = false; // Mặc định false (sẽ được cập nhật từ UI)
 
 // Cấu hình Take Profit & Stop Loss
-const TAKE_PROFIT_PERCENTAGE_MAIN = 1.1; // 155% lãi trên VỐN HIỆN TẠI
-const STOP_LOSS_PERCENTAGE_MAIN = 0.4;   // 80% lỗ trên VỐN HIỆN TẠI
+const TAKE_PROFIT_PERCENTAGE_MAIN = 1.55; // 155% lãi trên VỐN HIỆN TẠI
+const STOP_LOSS_PERCENTAGE_MAIN = 0.8;   // 80% lỗ trên VỐN HIỆN TẠI
 
 // Số lần thua liên tiếp tối đa trước khi reset về lệnh ban đầu
 const MAX_CONSECUTIVE_LOSSES = 5;
@@ -84,11 +84,11 @@ let totalLoss = 0;
 let netPNL = 0;
 
 // --- BIẾN TRẠNG THÁI WEBSOCKET ---
-// marketWs = null; // Bỏ biến này vì không dùng WebSocket cho Mark Price nữa
+let marketWs = null; // WebSocket cho giá thị trường (Mark Price)
 let userDataWs = null; // WebSocket cho user data (tài khoản)
 let listenKey = null; // Key để duy trì User Data Stream
 let listenKeyRefreshInterval = null; // Interval để làm mới listenKey
-// currentMarketPrice = null; // Bỏ biến này vì không dùng cache giá từ WebSocket nữa
+let currentMarketPrice = null; // Cache giá từ WebSocket
 
 // --- CẤU HÌNH WEB SERVER VÀ LOG PM2 ---
 const WEB_SERVER_PORT = 1235; // Cổng cho giao diện web
@@ -397,24 +397,16 @@ async function getSymbolDetails(symbol) {
     return { ...filters[symbol], maxLeverage: maxLeverage };
 }
 
-/**
- * Lấy Mark Price hiện tại của cặp giao dịch từ Binance Futures REST API.
- * Hàm này LUÔN gọi REST API để lấy giá mới nhất.
- * @param {string} symbol Cặp giao dịch (ví dụ: 'FUNUSDT').
- * @returns {Promise<number|null>} Mark Price hoặc null nếu có lỗi.
- */
+// Lấy giá hiện tại của một symbol (ĐÃ CHỈNH SỬA: CHỈ DÙNG REST API)
 async function getCurrentPrice(symbol) {
-    addLog(`Đang lấy Mark Price cho ${symbol} từ REST API...`);
+    addLog(`Lấy giá ${symbol} từ REST API.`);
     try {
-        const response = await callPublicAPI('/fapi/v1/premiumIndex', { symbol: symbol });
-        if (response && response.markPrice) {
-            const price = parseFloat(response.markPrice);
-            addLog(`Mark Price của ${symbol}: ${price}`);
-            return price;
-        }
-        throw new Error('Không tìm thấy markPrice trong phản hồi.');
+        const data = await callPublicAPI('/fapi/v1/ticker/price', { symbol: symbol });
+        const price = parseFloat(data.price);
+        addLog(`Đã lấy giá ${symbol} từ REST API: ${price}`);
+        return price;
     } catch (error) {
-        addLog(`Lỗi khi lấy Mark Price cho ${symbol} từ REST API: ${error.msg || error.message}`);
+        addLog(`Lỗi lấy giá hiện tại cho ${symbol} từ REST API: ${error.msg || error.message}`);
         if (error instanceof CriticalApiError) {
              addLog(`Lỗi nghiêm trọng khi lấy giá cho ${symbol}: ${error.msg || error.message}`);
         }
@@ -660,10 +652,10 @@ async function openPosition(symbol, tradeDirection, usdtBalance, maxLeverage) {
 
         const { pricePrecision, quantityPrecision, minNotional, minQty, stepSize, tickSize } = symbolDetails;
 
-        // --- QUAN TRỌNG: LẤY GIÁ THỊ TRƯỜNG HIỆN TẠI TỪ REST API ---
-        const currentPrice = await getCurrentPrice(symbol); // Luôn gọi REST API
+        // Vị trí quan trọng: Hàm getCurrentPrice ở đây sẽ gọi REST API
+        const currentPrice = await getCurrentPrice(symbol); // <--- ĐÂY LÀ CHỖ CHỈ DÙNG REST API
         if (!currentPrice) {
-            addLog(`Lỗi lấy giá hiện tại cho ${symbol} từ REST API. Không mở lệnh.`);
+            addLog(`Lỗi lấy giá hiện tại cho ${symbol}. Không mở lệnh.`);
             if(botRunning) scheduleNextMainCycle();
             return;
         }
@@ -759,13 +751,8 @@ async function openPosition(symbol, tradeDirection, usdtBalance, maxLeverage) {
             slOrderSide = 'SELL';
             tpOrderSide = 'SELL';
 
-            // Làm tròn và đảm bảo TP > Entry > SL
-            tpPrice = roundToNearestTickSize(tpPrice, tickSize, 'down');
-            slPrice = roundToNearestTickSize(slPrice, tickSize, 'up');
-            
-            if (tpPrice <= entryPrice) tpPrice = entryPrice + tickSize;
-            if (slPrice >= entryPrice) slPrice = entryPrice - tickSize;
-
+            slPrice = Math.floor(slPrice / tickSize) * tickSize;
+            tpPrice = Math.floor(tpPrice / tickSize) * tickSize;
 
         } else { // SHORT
             slPrice = entryPrice + priceChangeForSL;
@@ -773,12 +760,8 @@ async function openPosition(symbol, tradeDirection, usdtBalance, maxLeverage) {
             slOrderSide = 'BUY';
             tpOrderSide = 'BUY';
 
-            // Làm tròn và đảm bảo TP < Entry < SL
-            tpPrice = roundToNearestTickSize(tpPrice, tickSize, 'up');
-            slPrice = roundToNearestTickSize(slPrice, tickSize, 'down');
-            
-            if (tpPrice >= entryPrice) tpPrice = entryPrice - tickSize;
-            if (slPrice <= entryPrice) slPrice = entryPrice + tickSize;
+            slPrice = Math.ceil(slPrice / tickSize) * tickSize;
+            tpPrice = Math.ceil(tpPrice / tickSize) * tickSize;
         }
 
         slPrice = parseFloat(slPrice.toFixed(pricePrecision));
@@ -855,7 +838,7 @@ async function openPosition(symbol, tradeDirection, usdtBalance, maxLeverage) {
                     clearInterval(positionCheckInterval);
                     positionCheckInterval = null;
                 }
-            }, 2000); // Tăng interval lên 2 giây
+            }, 2000); // Tăng interval lên 5 giây
         }
 
     } catch (error) {
@@ -905,17 +888,17 @@ async function manageOpenPosition() {
         }
 
         // Cập nhật PNL chưa hiện thực hóa để hiển thị trên UI
-        // Lấy giá hiện tại từ REST API để cập nhật PNL chưa thực hiện
-        const currentPriceFromRest = await getCurrentPrice(symbol);
-        if (currentPriceFromRest) {
+        // Ở đây vẫn có thể dùng WebSocket nếu bạn muốn cập nhật giá nhanh hơn cho mục đích hiển thị UI
+        const currentPrice = currentMarketPrice !== null && TARGET_COIN_SYMBOL === symbol ? currentMarketPrice : await getCurrentPrice(symbol); // Lấy giá từ WebSocket HOẶC REST API (fallback)
+        if (currentPrice) {
             let unrealizedPnl = 0;
             if (side === 'LONG') {
-                unrealizedPnl = (currentPriceFromRest - currentOpenPosition.entryPrice) * currentOpenPosition.quantity;
+                unrealizedPnl = (currentPrice - currentOpenPosition.entryPrice) * currentOpenPosition.quantity;
             } else { // SHORT
-                unrealizedPnl = (currentOpenPosition.entryPrice - currentPriceFromRest) * currentOpenPosition.quantity;
+                unrealizedPnl = (currentOpenPosition.entryPrice - currentPrice) * currentOpenPosition.quantity;
             }
             currentOpenPosition.unrealizedPnl = unrealizedPnl;
-            currentOpenPosition.currentPrice = currentPriceFromRest; // Cập nhật giá hiện tại trong trạng thái
+            currentOpenPosition.currentPrice = currentPrice;
         }
 
 
@@ -928,7 +911,7 @@ async function manageOpenPosition() {
     }
 }
 
-// Hàm lên lịch chu kỳ chính của bot
+// Hàm lên lịch chu kỳ chính của bot (đã bỏ delay)
 async function scheduleNextMainCycle() {
     if (!botRunning) {
         addLog('Bot dừng. Hủy chu kỳ quét.');
@@ -942,8 +925,8 @@ async function scheduleNextMainCycle() {
 
     clearTimeout(nextScheduledCycleTimeout);
 
-    addLog(`Lên lịch chu kỳ giao dịch tiếp theo sau 2 giây...`);
-    nextScheduledCycleTimeout = setTimeout(runTradingLogic, 2000); // Đợi 2 giây
+    addLog(`Lên lịch chu kỳ giao dịch tiếp theo sau 5 giây...`);
+    nextScheduledCycleTimeout = setTimeout(runTradingLogic, 2000); // Đợi 5 giây
 }
 
 // --- HÀM CHO WEBSOCKET LISTENKEY VÀ KẾT NỐI ---
@@ -990,10 +973,6 @@ async function keepAliveListenKey() {
     }
 }
 
-// Hàm này không còn dùng cho việc lấy Mark Price nữa.
-// Giữ lại nếu bạn có ý định dùng WebSocket cho Market Data khác (ví dụ: Depth).
-// Nếu không, có thể xóa hoàn toàn hàm này.
-/*
 function setupMarketDataStream(symbol) {
     if (marketWs) {
         addLog('Đóng kết nối Market WebSocket cũ...');
@@ -1001,6 +980,7 @@ function setupMarketDataStream(symbol) {
         marketWs = null;
     }
 
+    // Sử dụng stream markPrice mỗi 1 giây
     const streamUrl = `${WS_BASE_URL}${WS_USER_DATA_ENDPOINT}/${symbol.toLowerCase()}@markPrice@1s`;
 
     addLog(`Kết nối Market WebSocket: ${streamUrl}`);
@@ -1014,8 +994,8 @@ function setupMarketDataStream(symbol) {
         try {
             const data = JSON.parse(event.data);
             if (data.e === 'markPriceUpdate') {
-                // currentMarketPrice = parseFloat(data.p); // Không cache vào đây nữa
-                // addLog(`Giá ${symbol} (Mark Price): ${currentMarketPrice}`);
+                currentMarketPrice = parseFloat(data.p);
+                // addLog(`Giá ${symbol} (Mark Price): ${currentMarketPrice}`); // Quá nhiều log, chỉ dùng để debug ban đầu
             }
         } catch (e) {
             addLog(`Lỗi phân tích cú pháp Market WebSocket message: ${e.message}`);
@@ -1024,6 +1004,7 @@ function setupMarketDataStream(symbol) {
 
     marketWs.onerror = (error) => {
         addLog(`Market WebSocket lỗi cho ${symbol}: ${error.message}. Đang thử kết nối lại...`);
+        // Đặt timeout trước khi cố gắng kết nối lại
         setTimeout(() => setupMarketDataStream(symbol), 5000);
     };
 
@@ -1035,7 +1016,6 @@ function setupMarketDataStream(symbol) {
         }
     };
 }
-*/
 
 function setupUserDataStream(key) {
     if (userDataWs) {
@@ -1215,7 +1195,7 @@ async function startBotLogicInternal() {
             return 'Không thể tải exchangeInfo.';
         }
 
-        // --- KHỞI TẠO WEBSOCKET (CHỈ USER DATA STREAM) ---
+        // --- KHỞI TẠO WEBSOCKET ---
         listenKey = await getListenKey(); // Lấy listenKey lần đầu
         if (listenKey) {
             setupUserDataStream(listenKey);
@@ -1223,8 +1203,8 @@ async function startBotLogicInternal() {
             addLog("Không thể khởi tạo User Data Stream. Bot sẽ tiếp tục nhưng có thể thiếu thông tin cập nhật PNL.");
         }
 
-        // KHÔNG CẦN Market Data Stream nữa vì lấy giá qua REST API
-        // setupMarketDataStream(TARGET_COIN_SYMBOL);
+        // Khởi tạo Market Data Stream với symbol mục tiêu (cho mục đích cập nhật PNL chưa hiện thực hóa UI)
+        setupMarketDataStream(TARGET_COIN_SYMBOL);
         // --- KẾT THÚC KHỞI TẠO WEBSOCKET ---
 
         botRunning = true;
@@ -1298,11 +1278,11 @@ function stopBotLogicInternal() {
         clearInterval(positionCheckInterval);
         positionCheckInterval = null;
     }
-    // --- ĐÓNG WEBSOCKET (CHỈ USER DATA STREAM) ---
-    // if (marketWs) { // Bỏ dòng này
-    //     marketWs.close();
-    //     marketWs = null;
-    // }
+    // --- ĐÓNG WEBSOCKET ---
+    if (marketWs) {
+        marketWs.close();
+        marketWs = null;
+    }
     if (userDataWs) {
         userDataWs.close();
         userDataWs = null;
@@ -1312,7 +1292,7 @@ function stopBotLogicInternal() {
         listenKeyRefreshInterval = null;
     }
     listenKey = null; // Reset listenKey
-    // currentMarketPrice = null; // Bỏ dòng này
+    currentMarketPrice = null; // Reset cached price
     // --- KẾT THÚC ĐÓNG WEBSOCKET ---
 
     consecutiveApiErrors = 0;
@@ -1326,7 +1306,7 @@ function stopBotLogicInternal() {
     return 'Bot đã dừng.';
 }
 
-// --- KHỞI TẠO SERVER WEB VÀ CÁC API ENDPOINT ---
+// --- KHỞI TẠO WEB SERVER VÀ CÁC API ENDPOINT ---
 const app = express();
 app.use(express.json()); // Để parse JSON trong body của request POST
 
@@ -1445,15 +1425,11 @@ app.post('/api/configure', (req, res) => {
     addLog(`  Số vốn ban đầu: ${INITIAL_INVESTMENT_AMOUNT} USDT`);
     addLog(`  Chiến lược x2 vốn: ${APPLY_DOUBLE_STRATEGY ? 'Bật' : 'Tắt'}`);
 
-    // Khi cấu hình thay đổi, nếu bot đang chạy và User Data Stream đang mở, không cần khởi tạo lại market data
-    // Nếu User Data Stream chưa mở, nó sẽ được khởi tạo khi bot Start
-    if (botRunning && userDataWs?.readyState === WebSocket.OPEN && TARGET_COIN_SYMBOL) {
-        addLog(`Cấu hình symbol thay đổi. User Data Stream vẫn đang hoạt động.`);
-        // Không cần làm gì đặc biệt với Market Data Stream vì đã bỏ nó
-    } else if (botRunning && !userDataWs?.readyState === WebSocket.OPEN) {
-        addLog(`Cấu hình symbol thay đổi, nhưng User Data Stream chưa hoạt động. Sẽ khởi tạo khi bot được start.`);
+    // Khi cấu hình thay đổi, nếu bot đang chạy, cần khởi tạo lại WS stream với symbol mới
+    if (botRunning && TARGET_COIN_SYMBOL && marketWs?.readyState === WebSocket.OPEN) {
+        addLog(`Cấu hình symbol thay đổi, khởi tạo lại Market Data Stream cho ${TARGET_COIN_SYMBOL}.`);
+        setupMarketDataStream(TARGET_COIN_SYMBOL);
     }
-
 
     res.json({ success: true, message: 'Cấu hình đã được cập nhật.' });
 });
