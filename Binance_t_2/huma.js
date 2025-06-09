@@ -93,9 +93,13 @@ let currentMarketPrice = null; // Cache giá từ WebSocket
 // --- CẤU HÌNH WEB SERVER VÀ LOG PM2 ---
 const WEB_SERVER_PORT = 1238; // Cổng cho giao diện web
 // Đường dẫn tới file log của PM2 cho bot này. CẦN CHỈNH SỬA ĐỂ KHỚP VỚI TÊN PM2 CỦA BẠN
-const BOT_LOG_FILE = `/home/tacke300/.pm2/logs/${process.env.name || 'bot02'}-out.log`; 
+const BOT_LOG_FILE = `/home/tacke300/.pm2/logs/${process.env.name || 'huma'}-out.log`; 
 // Tên của bot trong PM2, phải khớp với tên bạn đã dùng khi start bot bằng PM2.
-const THIS_BOT_PM2_NAME = process.env.name || 'bot02'; // SỬA ĐỂ LẤY TỪ PM2 ENV HOẶC MẶC ĐỊNH
+const THIS_BOT_PM2_NAME = process.env.name || 'huma'; // SỬA ĐỂ LẤY TỪ PM2 ENV HOẶC MẶC ĐỊNH
+
+// --- LOGGING TO FILE ---
+const CUSTOM_LOG_FILE = path.join(__dirname, 'pm2.log'); // Define your custom log file path
+const LOG_TO_CUSTOM_FILE = true; // Set to true to enable logging to pm2.log
 
 // --- HÀM TIỆN ÍCH ---
 
@@ -112,25 +116,39 @@ function addLog(message) {
         logCounts[messageHash].count++;
         const lastLoggedTime = logCounts[messageHash].lastLoggedTime;
 
-        // Nếu message đã được log gần đây, không log lại mà chỉ cập nhật số đếm
+        // If message has been logged recently, don't log again, just update the count
         if ((now.getTime() - lastLoggedTime.getTime()) < LOG_COOLDOWN_MS) {
-            // Không in ra console ngay lập tức
-            return;
+            return; // Don't print to console immediately
         } else {
-            // Nếu đã qua cooldown hoặc là log đầu tiên sau cooldown, in ra
+            // If cooldown passed or it's the first log after cooldown, print
             if (logCounts[messageHash].count > 1) {
-                // In ra thông báo kèm số lần lặp lại nếu có
+                // Print with repetition count if repeated
                 console.log(`[${time}] (Lặp lại x${logCounts[messageHash].count}) ${message}`);
+                 if (LOG_TO_CUSTOM_FILE) {
+                    fs.appendFile(CUSTOM_LOG_FILE, `[${time}] (Lặp lại x${logCounts[messageHash].count}) ${message}\n`, (err) => {
+                        if (err) console.error('Lỗi khi ghi log vào file tùy chỉnh:', err);
+                    });
+                }
             } else {
-                // In ra log bình thường nếu không lặp lại
+                // Print normal log if not repeated
                 console.log(logEntry);
+                if (LOG_TO_CUSTOM_FILE) {
+                    fs.appendFile(CUSTOM_LOG_FILE, logEntry + '\n', (err) => {
+                        if (err) console.error('Lỗi khi ghi log vào file tùy chỉnh:', err);
+                    });
+                }
             }
-            // Reset số đếm và thời gian log cuối cùng cho message này
+            // Reset count and last logged time for this message
             logCounts[messageHash] = { count: 1, lastLoggedTime: now };
         }
     } else {
-        // Nếu đây là message mới, in ra và khởi tạo số đếm
+        // If it's a new message, print it and initialize the count
         console.log(logEntry);
+        if (LOG_TO_CUSTOM_FILE) {
+            fs.appendFile(CUSTOM_LOG_FILE, logEntry + '\n', (err) => {
+                if (err) console.error('Lỗi khi ghi log vào file tùy chỉnh:', err);
+            });
+        }
         logCounts[messageHash] = { count: 1, lastLoggedTime: now };
     }
 }
@@ -1416,23 +1434,34 @@ app.get('/', (req, res) => {
 });
 
 app.get('/api/logs', (req, res) => {
-    fs.readFile(BOT_LOG_FILE, 'utf8', (err, data) => {
-        if (err) {
-            console.error('Lỗi đọc log file:', err);
-            if (err.code === 'ENOENT') {
-                return res.status(404).send(`Không tìm thấy log file: ${BOT_LOG_FILE}. Đảm bảo PM2 đang chạy và tên log chính xác.`);
-            }
-            return res.status(500).send('Lỗi đọc log file');
+    // Ưu tiên đọc từ CUSTOM_LOG_FILE nếu nó tồn tại và có dữ liệu
+    fs.readFile(CUSTOM_LOG_FILE, 'utf8', (err, customLogData) => {
+        if (!err && customLogData && customLogData.trim().length > 0) {
+            // Xóa các ký tự mã màu ANSI (nếu có từ console.log)
+            const cleanData = customLogData.replace(/[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g, '');
+            const lines = cleanData.split('\n');
+            const maxDisplayLines = 500;
+            const startIndex = Math.max(0, lines.length - maxDisplayLines);
+            const limitedLogs = lines.slice(startIndex).join('\n');
+            res.send(limitedLogs);
+        } else {
+            // Nếu không có custom log file hoặc rỗng, fallback về PM2 log
+            fs.readFile(BOT_LOG_FILE, 'utf8', (err, pm2LogData) => {
+                if (err) {
+                    console.error('Lỗi đọc log file:', err);
+                    if (err.code === 'ENOENT') {
+                        return res.status(404).send(`Không tìm thấy log file: ${BOT_LOG_FILE}. Đảm bảo PM2 đang chạy và tên log chính xác.`);
+                    }
+                    return res.status(500).send('Lỗi đọc log file');
+                }
+                const cleanData = pm2LogData.replace(/[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g, '');
+                const lines = cleanData.split('\n');
+                const maxDisplayLines = 500;
+                const startIndex = Math.max(0, lines.length - maxDisplayLines);
+                const limitedLogs = lines.slice(startIndex).join('\n');
+                res.send(limitedLogs);
+            });
         }
-        // Xóa các ký tự mã màu ANSI mà PM2 có thể thêm vào log
-        const cleanData = data.replace(/[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g, '');
-
-        const lines = cleanData.split('\n');
-        const maxDisplayLines = 500;
-        const startIndex = Math.max(0, lines.length - maxDisplayLines);
-        const limitedLogs = lines.slice(startIndex).join('\n');
-
-        res.send(limitedLogs);
     });
 });
 
