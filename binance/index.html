@@ -259,8 +259,8 @@
 </head>
 <body>
     <div class="container">
-        <div class="back-home-link"><a href="http://fundingbot.duckdns.org/html/tunggbeoo/list.html">Back Home</a>
-        </div>
+        <div class="back-home-link"><a href="http://fundingbot.duckdns.org/html/tunggbeoo/list.html">Back Home</a></div>
+
         <div class="status-box" id="botStatus">
             Đang tải trạng thái...
         </div>
@@ -281,8 +281,7 @@
                     <td id="netPnlValue" class="neutral">0.00 USDT</td>
                 </tr>
             </table>
-
-            </div>
+        </div>
 
         <hr>
 
@@ -310,7 +309,7 @@
     <div id="popupMessage" class="popup"></div>
 
     <script>
-        // REMOVE THESE TWO LINES:
+        // ĐÃ XÓA CÁC ĐỊNH NGHĨA apiKeyInput VÀ secretKeyInput TẠI ĐÂY
         // const apiKeyInput = document.getElementById('apiKey');
         // const secretKeyInput = document.getElementById('secretKey');
 
@@ -323,33 +322,85 @@
 
         const coinConfigContainer = document.getElementById('coinConfigContainer');
 
+        // Elements for trading stats table
         const totalProfitValueSpan = document.getElementById('totalProfitValue');
         const totalLossValueSpan = document.getElementById('totalLossValue');
         const netPnlValueSpan = document.getElementById('netPnlValue');
-        // const currentPositionsTableBody = document.querySelector('#currentPositionsTable tbody'); // Keep this if you re-add the table
+        // const currentPositionsTableBody = document.querySelector('#currentPositionsTable tbody'); // Element này không tồn tại trong HTML của bạn
 
-        // ... (rest of your existing JavaScript) ...
+        // Hàm hiển thị popup
+        function showPopup(message, duration = 3000) {
+            popupMessageDiv.textContent = message;
+            popupMessageDiv.classList.add('show');
+            setTimeout(() => {
+                popupMessageDiv.classList.remove('show');
+            }, duration);
+        }
 
-        // Modify loadConfig and saveConfigToLocalStorage functions:
+        // Tạo một mục cấu hình coin mới trong UI (chỉ một mục duy nhất)
+        function createCoinEntry(symbol = '', initialAmount = '10', applyDoubleStrategy = false) {
+            coinConfigContainer.innerHTML = ''; // Clear existing content
+            const div = document.createElement('div');
+            div.classList.add('coin-entry');
+            div.innerHTML = `
+                <div class="form-group">
+                    <label>Tên coin (ví dụ: ETHUSDT):</label>
+                    <input type="text" class="coinSymbol" value="${symbol}" placeholder="Nhập tên đồng coin">
+                </div>
+                <div class="form-group">
+                    <label class="checkbox-label">Số USDT mở lệnh:</label>
+                    <input type="number" class="initialAmount" value="${initialAmount}" min="0.01" step="0.01">
+                    <span class="min-amount-display" id="minAmountDisplay"></span>
+                </div>
+                <div class="form-group">
+                    <input type="checkbox" class="applyDoubleStrategy" ${applyDoubleStrategy ? 'checked' : ''}>
+                    <label class="checkbox-label">
+                         📌📌📌
+                    </label>
+                </div>
+            `;
+            coinConfigContainer.appendChild(div);
+
+            // Add event listener for the initialAmount input
+            const initialAmountInput = div.querySelector('.initialAmount');
+            const minAmountDisplay = div.querySelector('#minAmountDisplay');
+            initialAmountInput.addEventListener('input', () => {
+                const value = parseFloat(initialAmountInput.value);
+                if (!isNaN(value)) {
+                    const result = value * 20; // Corrected calculation based on typical leverage consideration
+                    minAmountDisplay.textContent = `Số tiền mở lệnh phải lớn hơn số tiền tối thiểu mở lệnh của BINANCE và trong tài khoản cần có ${result.toFixed(2)}`;
+                } else {
+                    minAmountDisplay.textContent = '';
+                }
+            });
+            // Trigger calculation on load if there's an initial amount
+            if (initialAmountInput.value) {
+                const value = parseFloat(initialAmountInput.value);
+                if (!isNaN(value)) {
+                    const result = value * 20; // Corrected calculation
+                    minAmountDisplay.textContent = `Số tiền mở lệnh phải lớn hơn số tiền tối thiểu mở lệnh của BINANCE và trong tài khoản cần có ${result.toFixed(2)}`;
+                }
+            }
+        }
+
+        // Tải cấu hình đã lưu (nếu có) khi trang load
         function loadConfig() {
-            // REMOVE THESE TWO LINES:
-            // apiKeyInput.value = localStorage.getItem('apiKey') || '';
-            // secretKeyInput.value = localStorage.getItem('secretKey') || '';
-
+            // ĐÃ XÓA CÁC DÒNG ĐỌC API KEY VÀ SECRET KEY TỪ LOCAL STORAGE
             const savedCoinConfigs = JSON.parse(localStorage.getItem('coinConfigs') || '[]');
             if (savedCoinConfigs.length > 0) {
+                // Load only the first configuration
                 const config = savedCoinConfigs[0];
                 createCoinEntry(config.symbol, config.initialAmount, config.applyDoubleStrategy);
-            } else {
+            }
+            else {
+                // Tạo một cấu hình mặc định nếu chưa có gì
                 createCoinEntry('ETHUSDT', '10', false);
             }
         }
 
+        // Lưu cấu hình vào Local Storage
         function saveConfigToLocalStorage() {
-            // REMOVE THESE TWO LINES:
-            // localStorage.setItem('apiKey', apiKeyInput.value);
-            // localStorage.setItem('secretKey', secretKeyInput.value);
-
+            // ĐÃ XÓA CÁC DÒNG LƯU API KEY VÀ SECRET KEY VÀO LOCAL STORAGE
             const coinEntry = document.querySelector('.coin-entry');
             const coinConfigsToSave = [];
             if (coinEntry) {
@@ -362,17 +413,12 @@
             localStorage.setItem('coinConfigs', JSON.stringify(coinConfigsToSave));
         }
 
+        // Gửi cấu hình đến backend
         saveConfigBtn.addEventListener('click', async () => {
-            saveConfigToLocalStorage();
+            saveConfigToLocalStorage(); // Lưu vào local storage trước
 
             const coinEntry = document.querySelector('.coin-entry');
             let isValid = true;
-
-            // REMOVE THIS BLOCK (API Key/Secret Key validation):
-            // if (!apiKeyInput.value.trim() || !secretKeyInput.value.trim()) {
-            //     showPopup('Lỗi: API Key và Secret Key không được để trống.');
-            //     isValid = false;
-            // }
 
             const coinConfigs = [];
             if (coinEntry) {
@@ -394,19 +440,19 @@
                 isValid = false;
             }
 
-            if (!isValid) return;
+            if (!isValid) return; // Dừng nếu có lỗi validation
 
             const configToSend = {
-                // REMOVE THESE TWO LINES:
-                // apiKey: apiKeyInput.value,
-                // secretKey: secretKeyInput.value,
-                coinConfigs: coinConfigs
+                // ĐÃ XÓA API KEY VÀ SECRET KEY KHỎI ĐỐI TƯỢNG GỬI ĐI
+                coinConfigs: coinConfigs // Gửi mảng các cấu hình coin (chỉ có 1 phần tử)
             };
 
             try {
                 const response = await fetch('/api/configure', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
                     body: JSON.stringify(configToSend)
                 });
                 const data = await response.json();
@@ -421,15 +467,69 @@
             }
         });
 
+        // Hàm lấy trạng thái bot
+        async function getBotStatus() {
+            try {
+                const response = await fetch('/api/status');
+                const text = await response.text();
+                botStatusDiv.textContent = text;
+            } catch (error) {
+                console.error('Error fetching bot status:', error);
+                botStatusDiv.textContent = 'Lỗi: Không thể kết nối với server.';
+            }
+        }
+
+        // Hàm lấy logs
+        async function fetchLogs() {
+            try {
+                const response = await fetch('/api/logs');
+                const text = await response.text();
+                logContainer.innerHTML = text.split('\n').map(line => `<div>${line}</div>`).join('');
+                logContainer.scrollTop = logContainer.scrollHeight; // Cuộn xuống dưới cùng
+            } catch (error) {
+                console.error('Error fetching logs:', error);
+                // Check if logContainer is null before attempting to set innerHTML
+                if (logContainer) {
+                    logContainer.innerHTML = '<div>Lỗi: Không thể tải log.</div>';
+                }
+            }
+        }
+
+        // Hàm cập nhật bảng thống kê giao dịch
+        async function updateTradingStats() {
+            try {
+                const response = await fetch('/api/bot_stats');
+                const data = await response.json();
+
+                if (data.success) {
+                    const stats = data.data;
+
+                    totalProfitValueSpan.textContent = `${stats.totalProfit.toFixed(2)} USDT`;
+                    totalLossValueSpan.textContent = `${stats.totalLoss.toFixed(2)} USDT`;
+                    netPnlValueSpan.textContent = `${stats.netPNL.toFixed(2)} USDT`;
+
+                    // Apply color based on PNL
+                    if (stats.netPNL > 0) {
+                        netPnlValueSpan.className = 'positive';
+                    } else if (stats.netPNL < 0) {
+                        netPnlValueSpan.className = 'negative';
+                    } else {
+                        netPnlValueSpan.className = 'neutral';
+                    }
+
+                    // No need to clear or add rows for current positions as the table for it is commented out
+                }
+            } catch (error) {
+                console.error('Error fetching trading stats:', error);
+            }
+        }
+
+
+        // Điều khiển bot (Start/Stop)
         startBotBtn.addEventListener('click', async () => {
+            // Validate và gửi cấu hình trước khi Start
             const coinEntry = document.querySelector('.coin-entry');
             let isValid = true;
-
-            // REMOVE THIS BLOCK (API Key/Secret Key validation):
-            // if (!apiKeyInput.value.trim() || !secretKeyInput.value.trim()) {
-            //     showPopup('Lỗi: API Key và Secret Key không được để trống trước khi khởi động.');
-            //     isValid = false;
-            // }
 
             const coinConfigs = [];
             if (coinEntry) {
@@ -451,13 +551,12 @@
             }
 
             const configToSend = {
-                // REMOVE THESE TWO LINES:
-                // apiKey: apiKeyInput.value,
-                // secretKey: secretKeyInput.value,
+                // ĐÃ XÓA API KEY VÀ SECRET KEY KHỎI ĐỐI TƯỢNG GỬI ĐI
                 coinConfigs: coinConfigs
             };
 
             try {
+                // Gửi cấu hình trước khi Start lệnh
                 const configResponse = await fetch('/api/configure', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -472,14 +571,39 @@
                 const response = await fetch('/start_bot_logic');
                 const message = await response.text();
                 showPopup(message);
-                getBotStatus();
-                updateTradingStats();
+                getBotStatus(); // Cập nhật trạng thái ngay lập tức
+                updateTradingStats(); // Cập nhật bảng thống kê
             } catch (error) {
                 console.error('Error starting bot:', error);
                 showPopup('Lỗi kết nối server khi khởi động bot.');
             }
         });
-        // ... (rest of your existing JavaScript) ...
+
+        stopBotBtn.addEventListener('click', async () => {
+            try {
+                const response = await fetch('/stop_bot_logic');
+                const message = await response.text();
+                showPopup(message);
+                getBotStatus(); // Cập nhật trạng thái ngay lập tức
+                updateTradingStats(); // Cập nhật bảng thống kê
+            } catch (error) {
+                console.error('Error stopping bot:', error);
+                showPopup('Lỗi kết nối server khi dừng bot.');
+            }
+        });
+
+        // Tải cấu hình khi trang được tải
+        loadConfig();
+
+        // Cập nhật trạng thái, logs và thống kê định kỳ
+        setInterval(getBotStatus, 3000); // Cập nhật trạng thái mỗi 3 giây
+        setInterval(fetchLogs, 1000);   // Cập nhật logs mỗi 1 giây
+        setInterval(updateTradingStats, 2000); // Cập nhật bảng thống kê mỗi 2 giây
+
+        // Lần đầu tải trang
+        getBotStatus();
+        fetchLogs();
+        updateTradingStats();
     </script>
 </body>
 </html>
