@@ -1,0 +1,14 @@
+{
+  "name": "afbina",
+  "version": "1.0.0",
+  "main": "after.js",
+  "type": "module",  
+  "scripts": {
+    "start": "node after.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "node-fetch": "^3.3.2",  
+    "node-cron": "^3.0.3"
+  }
+}
