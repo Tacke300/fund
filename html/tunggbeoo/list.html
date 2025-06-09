@@ -3,8 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Danh sách Ví và Lợi nhuận</title>
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <title>Danh sách Symbol Futures Binance</title>
     <style>
         /* Modern CSS Reset */
         *, *::before, *::after {
@@ -63,27 +62,6 @@
             outline: none;
         }
 
-        .controls .sort-buttons button {
-            background-color: #007bff;
-            color: white;
-            border: none;
-            padding: 10px 20px;
-            border-radius: 5px;
-            cursor: pointer;
-            font-size: 0.95em;
-            margin-left: 10px;
-            transition: background-color 0.3s ease, transform 0.2s ease;
-        }
-
-        .controls .sort-buttons button:hover {
-            background-color: #0056b3;
-            transform: translateY(-2px);
-        }
-
-        .controls .sort-buttons button:active {
-            transform: translateY(0);
-        }
-
         /* Table Styling */
         .data-table {
             width: 100%;
@@ -103,6 +81,23 @@
             font-weight: 600;
             text-transform: uppercase;
             font-size: 0.9em;
+            cursor: pointer; /* Cho phép click để sắp xếp */
+            position: relative; /* Để định vị mũi tên */
+        }
+
+        .data-table th .sort-icon {
+            margin-left: 5px;
+            font-size: 0.8em;
+            position: absolute;
+            right: 10px;
+            top: 50%;
+            transform: translateY(-50%);
+            opacity: 0.4;
+            transition: opacity 0.3s ease;
+        }
+
+        .data-table th.sorted .sort-icon {
+            opacity: 1;
         }
 
         .data-table tr:hover {
@@ -120,17 +115,7 @@
             color: #0056b3;
             text-decoration: underline;
         }
-
-        .data-table .pnl-positive {
-            color: #28a745; /* Green */
-            font-weight: 600;
-        }
-
-        .data-table .pnl-negative {
-            color: #dc3545; /* Red */
-            font-weight: 600;
-        }
-
+        
         /* Popup Styling */
         .popup-overlay {
             position: fixed;
@@ -197,25 +182,16 @@
 </head>
 <body>
     <div class="container">
-        <h1>Bảng Thông tin Giao dịch</h1>
+        <h1>Danh sách Symbol Futures USD&#x24C8;-M Binance</h1>
 
         <div class="controls">
             <input type="text" id="searchInput" placeholder="Tìm kiếm theo Symbol...">
-            <div class="sort-buttons">
-                <button onclick="sortData('pnl_today', 'asc')">PNL Hôm nay (Thấp-Cao)</button>
-                <button onclick="sortData('pnl_today', 'desc')">PNL Hôm nay (Cao-Thấp)</button>
-                <button onclick="sortData('pnl_all', 'asc')">PNL Tổng (Thấp-Cao)</button>
-                <button onclick="sortData('pnl_all', 'desc')">PNL Tổng (Cao-Thấp)</button>
-            </div>
         </div>
 
         <table class="data-table">
             <thead>
                 <tr>
-                    <th>Symbol</th>
-                    <th>Vol ($)</th>
-                    <th>PNL Hôm nay</th>
-                    <th>PNL Tổng</th>
+                    <th onclick="sortData('symbol')" data-sort-key="symbol">Symbol <span class="sort-icon"></span></th>
                 </tr>
             </thead>
             <tbody id="dataTableBody">
@@ -233,89 +209,113 @@
     </div>
 
     <script>
-        // CẤU HÌNH SUPABASE CỦA BẠN
-        // Thay thế 'YOUR_SUPABASE_URL' và 'YOUR_SUPABASE_ANON_KEY' bằng thông tin thật của bạn
-        const SUPABASE_URL = 'YOUR_SUPABASE_URL';
-        const SUPABASE_ANON_KEY = 'YOUR_SUPABASE_ANON_KEY';
-
-        const supabase = Supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-
         const dataTableBody = document.getElementById('dataTableBody');
         const searchInput = document.getElementById('searchInput');
         const popupOverlay = document.getElementById('popupOverlay');
         const popupIframe = document.getElementById('popupIframe');
 
-        let tableData = []; // Dữ liệu sẽ được tải từ Supabase
+        let allBinanceSymbols = []; // Danh sách tất cả các symbol từ Binance
+        let currentSortKey = null;
+        let currentSortOrder = 'asc'; // 'asc' hoặc 'desc'
 
-        // Hàm để tải dữ liệu từ Supabase
-        async function fetchSupabaseData() {
-            console.log('Đang tải dữ liệu từ Supabase...');
-            const { data, error } = await supabase
-                .from('list') // Tên bảng của bạn là 'list'
-                .select('*'); // Lấy tất cả các cột
-
-            if (error) {
-                console.error('Lỗi khi tải dữ liệu từ Supabase:', error.message);
-                return [];
-            } else {
-                console.log('Dữ liệu đã tải:', data);
-                return data;
+        // --- Hàm tải danh sách các cặp giao dịch từ Binance ---
+        async function fetchBinanceUSDMSymbols() {
+            console.log('Đang tải danh sách symbol từ Binance...');
+            try {
+                const response = await fetch('https://fapi.binance.com/fapi/v1/exchangeInfo');
+                if (!response.ok) {
+                    throw new Error(`Lỗi HTTP! status: ${response.status}`);
+                }
+                const data = await response.json();
+                
+                // Lọc chỉ các cặp giao dịch có status 'TRADING' và contractType 'PERPETUAL'
+                // và kết thúc bằng 'USDT' hoặc 'BUSD' (các cặp USDⓈ-M)
+                allBinanceSymbols = data.symbols
+                    .filter(s => s.status === 'TRADING' && s.contractType === 'PERPETUAL' && (s.symbol.endsWith('USDT') || s.symbol.endsWith('BUSD')))
+                    .map(s => s.symbol);
+                
+                console.log(`Đã tải ${allBinanceSymbols.length} symbol từ Binance.`);
+            } catch (error) {
+                console.error('Lỗi khi tải danh sách symbol từ Binance:', error);
+                allBinanceSymbols = []; // Đảm bảo mảng rỗng nếu lỗi
             }
         }
 
-        function renderTable(data) {
+        // --- Hàm hiển thị dữ liệu lên bảng HTML ---
+        function renderTable(symbols) {
             dataTableBody.innerHTML = ''; // Xóa các hàng hiện có
-            if (data.length === 0) {
-                dataTableBody.innerHTML = '<tr><td colspan="4" style="text-align: center;">Không có dữ liệu để hiển thị.</td></tr>';
+            if (symbols.length === 0) {
+                dataTableBody.innerHTML = '<tr><td colspan="1" style="text-align: center;">Không có symbol để hiển thị.</td></tr>';
                 return;
             }
-            data.forEach(item => {
+            symbols.forEach(symbol => {
                 const row = dataTableBody.insertRow();
-
                 const symbolCell = row.insertCell();
                 const symbolLink = document.createElement('a');
                 symbolLink.href = '#';
-                symbolLink.textContent = item.symbol;
+                symbolLink.textContent = symbol;
+                // Gán tạm thời link cho popup
                 symbolLink.onclick = (e) => {
                     e.preventDefault(); // Ngăn chặn hành vi mặc định của link
                     openPopup('http://34.142.248.96:1997');
                 };
                 symbolCell.appendChild(symbolLink);
-
-                row.insertCell().textContent = item.vol.toLocaleString('en-US', { style: 'currency', currency: 'USD' });
-
-                const pnlTodayCell = row.insertCell();
-                pnlTodayCell.textContent = item.pnl_today.toFixed(2);
-                pnlTodayCell.classList.add(item.pnl_today >= 0 ? 'pnl-positive' : 'pnl-negative');
-
-                const pnlAllCell = row.insertCell();
-                pnlAllCell.textContent = item.pnl_all.toFixed(2);
-                pnlAllCell.classList.add(item.pnl_all >= 0 ? 'pnl-positive' : 'pnl-negative');
             });
         }
 
-        function sortData(key, order) {
-            tableData.sort((a, b) => {
-                let valA = a[key];
-                let valB = b[key];
+        // --- Hàm sắp xếp dữ liệu và cập nhật mũi tên ---
+        function sortData(key) {
+            // Đối với symbol, ta sắp xếp theo thứ tự chữ cái
+            if (currentSortKey === key) {
+                currentSortOrder = currentSortOrder === 'asc' ? 'desc' : 'asc';
+            } else {
+                currentSortKey = key;
+                currentSortOrder = 'asc'; // Mặc định sắp xếp tăng dần khi đổi cột
+            }
 
-                if (order === 'asc') {
-                    return valA - valB;
+            allBinanceSymbols.sort((a, b) => {
+                if (currentSortOrder === 'asc') {
+                    return a.localeCompare(b);
                 } else {
-                    return valB - valA;
+                    return b.localeCompare(a);
                 }
             });
+            updateSortIcons(); // Cập nhật biểu tượng mũi tên
             filterAndRender(); // Hiển thị lại với dữ liệu đã sắp xếp và lọc
         }
 
-        function filterAndRender() {
-            const searchTerm = searchInput.value.toLowerCase();
-            const filteredData = tableData.filter(item =>
-                item.symbol.toLowerCase().includes(searchTerm)
-            );
-            renderTable(filteredData);
+        // --- Hàm cập nhật biểu tượng mũi tên sắp xếp ---
+        function updateSortIcons() {
+            document.querySelectorAll('.data-table th').forEach(header => {
+                header.classList.remove('sorted');
+                const icon = header.querySelector('.sort-icon');
+                if (icon) {
+                    icon.textContent = ''; // Xóa biểu tượng cũ
+                }
+            });
+
+            if (currentSortKey) {
+                const activeHeader = document.querySelector(`.data-table th[data-sort-key="${currentSortKey}"]`);
+                if (activeHeader) {
+                    activeHeader.classList.add('sorted');
+                    const icon = activeHeader.querySelector('.sort-icon');
+                    if (icon) {
+                        icon.textContent = currentSortOrder === 'asc' ? '▲' : '▼';
+                    }
+                }
+            }
         }
 
+        // --- Hàm lọc và hiển thị dữ liệu ---
+        async function filterAndRender() {
+            const searchTerm = searchInput.value.toLowerCase();
+            const filteredSymbols = allBinanceSymbols.filter(symbol =>
+                symbol.toLowerCase().includes(searchTerm)
+            );
+            renderTable(filteredSymbols);
+        }
+
+        // --- Hàm mở/đóng Popup ---
         function openPopup(url) {
             popupIframe.src = url;
             popupOverlay.classList.add('active');
@@ -326,14 +326,21 @@
             popupIframe.src = ''; // Xóa src của iframe để dừng mọi media/script
         }
 
-        // Tải dữ liệu khi trang được tải và hiển thị
+        // --- Khởi tạo trang ---
         document.addEventListener('DOMContentLoaded', async () => {
-            tableData = await fetchSupabaseData();
-            filterAndRender(); // Lần hiển thị ban đầu (sau khi tải dữ liệu)
+            await fetchBinanceUSDMSymbols(); // Tải danh sách symbol từ Binance
+            filterAndRender(); // Hiển thị bảng ban đầu
+
+            // Có thể thêm cập nhật định kỳ nếu danh sách symbol thay đổi (ít khi xảy ra)
+            // setInterval(async () => {
+            //     await fetchBinanceUSDMSymbols();
+            //     filterAndRender();
+            // }, 300000); // Ví dụ: cập nhật mỗi 5 phút
         });
 
         // Event listener cho thanh tìm kiếm
         searchInput.addEventListener('keyup', filterAndRender);
+        searchInput.addEventListener('change', filterAndRender); // Để xử lý khi paste
 
         // Tùy chọn: Đóng popup khi click vào vùng phủ (ngoài nội dung popup)
         popupOverlay.addEventListener('click', (e) => {
