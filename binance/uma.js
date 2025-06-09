@@ -90,7 +90,7 @@ let listenKeyRefreshInterval = null; // Interval để làm mới listenKey
 let currentMarketPrice = null; // Cache giá từ WebSocket
 
 // --- CẤU HÌNH WEB SERVER VÀ LOG PM2 ---
-const WEB_SERVER_PORT = 1260; // Cổng cho giao diện web
+const WEB_SERVER_PORT = 1261; // Cổng cho giao diện web
 // Đường dẫn tới file log của PM2 cho bot này. CẦN CHỈNH SỬA ĐỂ KHỚP VỚI TÊN PM2 CỦA BẠN
 const BOT_LOG_FILE = `/home/tacke300/.pm2/logs/${process.env.name || 'uma'}-out.log`;
 // Tên của bot trong PM2, phải khớp với tên bạn đã dùng khi start bot bằng PM2.
