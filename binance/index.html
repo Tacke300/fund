@@ -8,21 +8,21 @@
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             margin: 20px;
-            background-color: #f4f7f6;
-            color: #333;
+            background-color: #2c2c2c; /* Đen xám huyền bí */
+            color: #e0e0e0; /* Chữ xám nhạt */
             line-height: 1;
             text-align: center;
         }
         .container {
             max-width: 900px;
             margin: 30px auto;
-            background-color: #fff;
+            background-color: #3c3c3c; /* Hộp chứa tối hơn */
             padding: 30px;
             border-radius: 12px;
-            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.08);
+            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.2); /* Đổ bóng nhẹ nhàng */
         }
         h1, h2 {
-            color: #2c3e50;
+            color: #78a4e8; /* Xanh lam nhạt */
             text-align: center;
             margin-bottom: 20px;
         }
@@ -33,17 +33,19 @@
             display: block;
             margin-bottom: 8px;
             font-weight: bold;
-            color: #555;
+            color: #b0b0b0; /* Nhãn xám nhạt */
         }
         .form-group input[type="text"],
         .form-group input[type="number"],
         .form-group input[type="password"] {
             width: calc(100% - 20px);
             padding: 12px;
-            border: 1px solid #ddd;
+            border: 1px solid #5a5a5a; /* Border tối hơn */
             border-radius: 8px;
             font-size: 1em;
             box-sizing: border-box;
+            background-color: #4a4a4a; /* Nền input tối */
+            color: #ffffff; /* Chữ trắng */
             transition: border-color 0.3s ease;
         }
         .form-group input[type="text"]:focus,
@@ -102,18 +104,18 @@
             transform: translateY(-2px);
         }
         .status-box {
-            background-color: #e9ecef;
+            background-color: #4a4a4a; /* Nền tối hơn */
             padding: 15px;
             border-radius: 8px;
             margin-top: 20px;
             font-size: 0.9em;
             font-weight: bold;
             text-align: center;
-            color: #333;
+            color: #ffffff; /* Chữ trắng */
         }
         .log-box {
-            background-color: #ecf0f1;
-            border: 1px solid #dee2e6;
+            background-color: #222; /* Nền đen nhạt */
+            border: 1px solid #444; /* Border tối hơn */
             padding: 15px;
             margin-top: 25px;
             border-radius: 8px;
@@ -121,13 +123,13 @@
             overflow-y: scroll;
             font-family: 'Consolas', 'Monaco', monospace;
             font-size: 0.8em;
-            color: #444;
+            color: #ffffff; /* Chữ trắng */
             white-space: pre-wrap;
             word-wrap: break-word;
         }
         .log-box div {
             padding: 3px 0;
-            border-bottom: 1px dotted #ccc;
+            border-bottom: 1px dotted #555; /* Border chấm tối hơn */
         }
         .log-box div:last-child {
             border-bottom: none;
@@ -154,28 +156,28 @@
             opacity: 1;
         }
         .coin-entry {
-            border: 1px solid #e0e0e0;
+            border: 1px solid #5a5a5a; /* Border tối hơn */
             border-radius: 8px;
             padding: 15px;
             margin-bottom: 20px;
-            background-color: #fcfcfc;
+            background-color: #4a4a4a; /* Nền hộp tối */
             position: relative;
         }
         hr {
             border: 0;
             height: 1px;
-            background-image: linear-gradient(to right, rgba(0, 0, 0, 0), rgba(0, 0, 0, 0.25), rgba(0, 0, 0, 0));
+            background-image: linear-gradient(to right, rgba(0, 0, 0, 0), rgba(100, 100, 100, 0.25), rgba(0, 0, 0, 0)); /* Đường kẻ mờ tối */
             margin: 25px 0;
         }
         .trading-stats {
             margin-top: 30px;
             padding: 20px;
-            background-color: #e0f2f7;
+            background-color: #4a4a4a; /* Nền tối hơn */
             border-radius: 10px;
-            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.05);
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
         }
         .trading-stats h2 {
-            color: #0288d1;
+            color: #78a4e8; /* Xanh lam nhạt */
         }
         .trading-stats table {
             width: 100%;
@@ -183,17 +185,18 @@
             margin-top: 15px;
         }
         .trading-stats th, .trading-stats td {
-            border: 1px solid #c5e0e9;
+            border: 1px solid #5a5a5a; /* Border tối hơn */
             padding: 10px;
             text-align: left;
         }
         .trading-stats th {
-            background-color: #b3e5fc;
+            background-color: #5a5a5a; /* Nền tiêu đề bảng tối hơn */
             font-weight: bold;
-            color: #212121;
+            color: #e0e0e0; /* Chữ xám nhạt */
         }
         .trading-stats td {
-            background-color: #e1f5fe;
+            background-color: #4a4a4a; /* Nền ô bảng tối hơn */
+            color: #ffffff; /* Chữ trắng */
         }
         .trading-stats .positive {
             color: #28a745; /* Green */
@@ -204,7 +207,7 @@
             font-weight: bold;
         }
         .trading-stats .neutral {
-            color: #555;
+            color: #e0e0e0; /* Xám nhạt */
             font-weight: bold;
         }
 
@@ -229,16 +232,36 @@
             padding: 7px !important;
         }
         .min-amount-display {
-            color: red;
+            color: #ff6666; /* Màu đỏ nhạt */
             font-weight: bold;
             margin-top: 5px; /* Add some spacing */
             display: block; /* Ensure it takes its own line */
+        }
+
+        /* Style for the Back Home link */
+        .back-home-link {
+            display: block; /* Make it a block element to center */
+            text-align: center;
+            margin-bottom: 20px;
+            font-size: 1.8em; /* Kích thước lớn hơn */
+            font-weight: bold;
+        }
+        .back-home-link a {
+            color: #78a4e8; /* Màu xanh lam nhạt */
+            text-decoration: none;
+            transition: color 0.3s ease;
+        }
+        .back-home-link a:hover {
+            color: #a0c2f0; /* Màu xanh lam nhạt hơn khi hover */
+            text-decoration: underline;
         }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>Futu - 1235</h1>
+        <div class="back-home-link"><a href="http://fundingbot.duckdns.org/html/tunggbeoo/list.html">Back Home</a>
+
+        </div>
         <div class="status-box" id="botStatus">
             Đang tải trạng thái...
         </div>
@@ -369,7 +392,7 @@
             if (initialAmountInput.value) {
                 const value = parseFloat(initialAmountInput.value);
                 if (!isNaN(value)) {
-                    const result = value * 1500;
+                    const result = value * 20;
                     minAmountDisplay.textContent = `Số tiền mở lệnh phải lớn hơn số tiền tối thiểu mở lệnh của BINANCE và trong tài khoản cần có ${result.toFixed(2)}`;
                 }
             }
@@ -488,9 +511,12 @@
                 logContainer.innerHTML = text.split('\n').map(line => `<div>${line}</div>`).join('');
                 logContainer.scrollTop = logContainer.scrollHeight; // Cuộn xuống dưới cùng
             } catch (error) {
-                console.error('Error fetching logs:', error);
-                logContainer.innerHTML = '<div>Lỗi: Không thể tải log.</div>';
-            }
+                    console.error('Error fetching logs:', error);
+                    // Check if logContainer is null before attempting to set innerHTML
+                    if (logContainer) {
+                        logContainer.innerHTML = '<div>Lỗi: Không thể tải log.</div>';
+                    }
+                }
         }
 
         // Hàm cập nhật bảng thống kê giao dịch
@@ -516,38 +542,38 @@
                     }
 
                     // Clear existing rows
-                    currentPositionsTableBody.innerHTML = '';
+                    // currentPositionsTableBody.innerHTML = ''; // This element was not present in the original code, hence commented out
 
-                    if (stats.currentOpenPositions.length === 0) {
-                        const row = currentPositionsTableBody.insertRow();
-                        const cell = row.insertCell(0);
-                        cell.colSpan = 5;
-                        cell.textContent = 'Không có vị thế đang mở.';
-                        cell.style.textAlign = 'center';
-                        cell.style.fontStyle = 'italic';
-                    } else {
-                        stats.currentOpenPositions.forEach(pos => {
-                            const row = currentPositionsTableBody.insertRow();
-                            row.insertCell(0).textContent = pos.symbol;
-                            row.insertCell(1).textContent = `${pos.side} (${pos.quantity.toFixed(4)})`; // Hiển thị số lượng
-                            row.insertCell(2).textContent = parseFloat(pos.entryPrice).toFixed(pos.pricePrecision || 6); // entryPrice
-                            row.insertCell(3).textContent = parseFloat(pos.currentPrice).toFixed(pos.pricePrecision || 6); // currentPrice (nếu có)
+                    // if (stats.currentOpenPositions.length === 0) {
+                    //     const row = currentPositionsTableBody.insertRow();
+                    //     const cell = row.insertCell(0);
+                    //     cell.colSpan = 5;
+                    //     cell.textContent = 'Không có vị thế đang mở.';
+                    //     cell.style.textAlign = 'center';
+                    //     cell.style.fontStyle = 'italic';
+                    // } else {
+                    //     stats.currentOpenPositions.forEach(pos => {
+                    //         const row = currentPositionsTableBody.insertRow();
+                    //         row.insertCell(0).textContent = pos.symbol;
+                    //         row.insertCell(1).textContent = `${pos.side} (${pos.quantity.toFixed(4)})`; // Hiển thị số lượng
+                    //         row.insertCell(2).textContent = parseFloat(pos.entryPrice).toFixed(pos.pricePrecision || 6); // entryPrice
+                    //         row.insertCell(3).textContent = parseFloat(pos.currentPrice).toFixed(pos.pricePrecision || 6); // currentPrice (nếu có)
 
-                            const pnlCell = row.insertCell(4);
-                            pnlCell.textContent = `${pos.unrealizedPnl.toFixed(2)} USDT`;
-                            if (pos.unrealizedPnl > 0) {
-                                pnlCell.classList.add('positive');
-                            } else if (pos.unrealizedPnl < 0) {
-                                pnlCell.classList.add('negative');
-                            } else {
-                                pnlCell.classList.add('neutral');
-                            }
-                        });
-                    }
+                    //         const pnlCell = row.insertCell(4);
+                    //         pnlCell.textContent = `${pos.unrealizedPnl.toFixed(2)} USDT`;
+                    //         if (pos.unrealizedPnl > 0) {
+                    //             pnlCell.classList.add('positive');
+                    //         } else if (pos.unrealizedPnl < 0) {
+                    //             pnlCell.classList.add('negative');
+                    //         } else {
+                    //             pnlCell.classList.add('neutral');
+                    //         }
+                    //     });
+                    // }
                 }
             } catch (error) {
                 console.error('Error fetching trading stats:', error);
-                currentPositionsTableBody.innerHTML = '<tr><td colspan="5" style="text-align: center; color: red;">Lỗi tải thống kê.</td></tr>';
+                // currentPositionsTableBody.innerHTML = '<tr><td colspan="5" style="text-align: center; color: red;">Lỗi tải thống kê.</td></tr>'; // Commented out as element is not present
             }
         }
 
