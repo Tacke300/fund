@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Danh sách Symbol Futures Binance</title>
+    <title>Danh sách Symbol Futures Binance - Tím Mộng Mơ</title>
     <style>
         /* Modern CSS Reset */
         *, *::before, *::after {
@@ -14,8 +14,9 @@
 
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background-color: #f0f2f5;
-            color: #333;
+            /* Nền tối tím */
+            background-color: #1a0f2b; /* Tím than đậm */
+            color: #e0d9ed; /* Màu chữ sáng nhạt */
             line-height: 1.6;
             padding: 20px;
         }
@@ -23,18 +24,21 @@
         .container {
             max-width: 1200px;
             margin: 20px auto;
-            background-color: #ffffff;
-            border-radius: 8px;
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+            /* Nền container tím đậm hơn */
+            background-color: #2b1a45; /* Tím đậm */
+            border-radius: 12px; /* Bo góc mềm mại hơn */
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4); /* Bóng đổ sâu hơn */
             padding: 30px;
+            border: 1px solid #4a2c7a; /* Viền tím nhẹ */
         }
 
         h1 {
-            color: #2c3e50;
+            color: #d1b8fa; /* Tím Lavender sáng */
             text-align: center;
             margin-bottom: 30px;
-            font-size: 2.2em;
-            font-weight: 600;
+            font-size: 2.5em; /* Kích thước lớn hơn */
+            font-weight: 700;
+            text-shadow: 0 0 10px rgba(209, 184, 250, 0.6); /* Hiệu ứng phát sáng nhẹ */
         }
 
         /* Search and Sort Section */
@@ -49,17 +53,23 @@
 
         .controls input[type="text"] {
             flex-grow: 1;
-            padding: 12px 15px;
-            border: 1px solid #ddd;
-            border-radius: 5px;
-            font-size: 1em;
-            transition: border-color 0.3s ease;
-            min-width: 200px;
+            padding: 14px 18px; /* Lớn hơn một chút */
+            border: 1px solid #5a3c8a; /* Viền tím */
+            border-radius: 8px; /* Bo góc hơn */
+            font-size: 1.1em;
+            background-color: #3d265a; /* Nền input tím sẫm */
+            color: #e0d9ed; /* Chữ input sáng */
+            transition: border-color 0.3s ease, box-shadow 0.3s ease;
+        }
+
+        .controls input[type="text"]::placeholder {
+            color: #a08cbf; /* Màu placeholder mờ hơn */
         }
 
         .controls input[type="text"]:focus {
-            border-color: #007bff;
+            border-color: #8a4bff; /* Viền sáng hơn khi focus */
             outline: none;
+            box-shadow: 0 0 15px rgba(138, 75, 255, 0.5); /* Bóng phát sáng */
         }
 
         /* Table Styling */
@@ -67,53 +77,58 @@
             width: 100%;
             border-collapse: collapse;
             margin-top: 20px;
+            background-color: #362054; /* Nền bảng tím đậm */
+            border-radius: 8px;
+            overflow: hidden; /* Đảm bảo bo góc cho bảng */
         }
 
         .data-table th, .data-table td {
-            padding: 15px;
+            padding: 18px 20px; /* Padding lớn hơn */
             text-align: left;
-            border-bottom: 1px solid #eee;
+            border-bottom: 1px solid #4a2c7a; /* Viền tím */
         }
 
         .data-table th {
-            background-color: #e9ecef;
-            color: #555;
+            background-color: #4a2c7a; /* Nền header tím sẫm */
+            color: #d1b8fa; /* Chữ header tím sáng */
             font-weight: 600;
             text-transform: uppercase;
-            font-size: 0.9em;
-            cursor: pointer; /* Cho phép click để sắp xếp */
-            position: relative; /* Để định vị mũi tên */
+            font-size: 1em;
+            cursor: pointer;
+            position: relative;
         }
 
         .data-table th .sort-icon {
-            margin-left: 5px;
-            font-size: 0.8em;
+            margin-left: 8px; /* Khoảng cách lớn hơn */
+            font-size: 0.9em;
             position: absolute;
-            right: 10px;
+            right: 20px; /* Đẩy sang phải hơn */
             top: 50%;
             transform: translateY(-50%);
-            opacity: 0.4;
+            opacity: 0.6; /* Mũi tên mặc định mờ */
             transition: opacity 0.3s ease;
+            color: #d1b8fa; /* Màu mũi tên */
         }
 
         .data-table th.sorted .sort-icon {
-            opacity: 1;
+            opacity: 1; /* Mũi tên sáng khi sắp xếp */
         }
 
         .data-table tr:hover {
-            background-color: #f8f9fa;
+            background-color: #432a68; /* Nền hàng hover tím nhạt hơn */
         }
 
         .data-table td a {
-            color: #007bff;
+            color: #8a4bff; /* Link tím sáng */
             text-decoration: none;
             font-weight: 500;
-            transition: color 0.3s ease;
+            transition: color 0.3s ease, text-shadow 0.3s ease;
         }
 
         .data-table td a:hover {
-            color: #0056b3;
+            color: #b080ff; /* Link tím sáng hơn khi hover */
             text-decoration: underline;
+            text-shadow: 0 0 8px rgba(176, 128, 255, 0.5); /* Hiệu ứng phát sáng nhẹ */
         }
         
         /* Popup Styling */
@@ -123,14 +138,14 @@
             left: 0;
             width: 100%;
             height: 100%;
-            background-color: rgba(0, 0, 0, 0.85); /* Darker overlay */
+            background-color: rgba(0, 0, 0, 0.95); /* Overlay tối hơn */
             display: flex;
             justify-content: center;
             align-items: center;
             z-index: 1000;
             opacity: 0;
             visibility: hidden;
-            transition: opacity 0.3s ease, visibility 0.3s ease;
+            transition: opacity 0.4s ease, visibility 0.4s ease; /* Hiệu ứng chuyển động mượt mà hơn */
         }
 
         .popup-overlay.active {
@@ -139,42 +154,48 @@
         }
 
         .popup-content {
-            background-color: #ffffff;
-            border-radius: 8px;
-            box-shadow: 0 8px 25px rgba(0, 0, 0, 0.3);
+            background-color: #1a0f2b; /* Nền popup tối tím */
+            border-radius: 12px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6); /* Bóng sâu hơn */
             width: 100%;
             height: 100%;
             display: flex;
             flex-direction: column;
-            overflow: hidden; /* Ensure iframe fits */
+            overflow: hidden;
+            border: 2px solid #6a3abf; /* Viền popup tím nổi bật */
         }
 
         .popup-header {
             padding: 15px 20px;
-            background-color: #f8f9fa;
-            border-bottom: 1px solid #eee;
+            background-color: #2b1a45; /* Nền header popup tím đậm */
+            border-bottom: 1px solid #4a2c7a; /* Viền dưới header tím */
             display: flex;
             justify-content: flex-start;
             align-items: center;
         }
 
         .popup-header button {
-            background-color: #6c757d;
+            background-color: #6a3abf; /* Nút tím */
             color: white;
             border: none;
-            padding: 10px 20px;
-            border-radius: 5px;
+            padding: 12px 25px; /* Lớn hơn */
+            border-radius: 6px;
             cursor: pointer;
-            font-size: 1em;
-            transition: background-color 0.3s ease;
+            font-size: 1.1em;
+            transition: background-color 0.3s ease, transform 0.2s ease;
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2); /* Bóng cho nút */
         }
 
         .popup-header button:hover {
-            background-color: #5a6268;
+            background-color: #8a4bff; /* Nút tím sáng hơn khi hover */
+            transform: translateY(-2px); /* Hiệu ứng nhấc nhẹ */
+        }
+        .popup-header button:active {
+            transform: translateY(0);
         }
 
         .popup-iframe {
-            flex-grow: 1; /* Make iframe take remaining space */
+            flex-grow: 1;
             width: 100%;
             border: none;
         }
@@ -218,6 +239,22 @@
         let currentSortKey = null;
         let currentSortOrder = 'asc'; // 'asc' hoặc 'desc'
 
+        // --- ĐỐI TƯỢNG ÁNH XẠ SYMBOL VỚI LINK RIÊNG BIỆT ---
+        // Bạn có thể thêm/sửa các cặp symbol: link tại đây
+        const symbolLinks = {
+            'BTCUSDT': 'https://www.binance.com/vi/futures/BTCUSDT',
+            'ETHUSDT': 'https://www.binance.com/vi/futures/ETHUSDT',
+            'BNBUSDT': 'https://www.binance.com/vi/futures/BNBUSDT',
+            'XRPUSDT': 'https://www.binance.com/vi/futures/XRPUSDT',
+            'SOLUSDT': 'https://www.binance.com/vi/futures/SOLUSDT',
+            'ADAUSDT': 'https://www.binance.com/vi/futures/ADAUSDT',
+            'DOGEUSDT': 'https://www.binance.com/vi/futures/DOGEUSDT',
+            'LINKUSDT': 'https://www.binance.com/vi/futures/LINKUSDT',
+            // Thêm các cặp khác mà bạn muốn có link riêng
+            // Ví dụ: 'CUSTOMUSDT': 'https://mycustomsite.com/custom-coin',
+        };
+        const DEFAULT_POPUP_URL = 'http://34.142.248.96:1997'; // Link mặc định nếu không tìm thấy trong symbolLinks
+
         // --- Hàm tải danh sách các cặp giao dịch từ Binance ---
         async function fetchBinanceUSDMSymbols() {
             console.log('Đang tải danh sách symbol từ Binance...');
@@ -228,8 +265,6 @@
                 }
                 const data = await response.json();
                 
-                // Lọc chỉ các cặp giao dịch có status 'TRADING' và contractType 'PERPETUAL'
-                // và kết thúc bằng 'USDT' hoặc 'BUSD' (các cặp USDⓈ-M)
                 allBinanceSymbols = data.symbols
                     .filter(s => s.status === 'TRADING' && s.contractType === 'PERPETUAL' && (s.symbol.endsWith('USDT') || s.symbol.endsWith('BUSD')))
                     .map(s => s.symbol);
@@ -245,7 +280,7 @@
         function renderTable(symbols) {
             dataTableBody.innerHTML = ''; // Xóa các hàng hiện có
             if (symbols.length === 0) {
-                dataTableBody.innerHTML = '<tr><td colspan="1" style="text-align: center;">Không có symbol để hiển thị.</td></tr>';
+                dataTableBody.innerHTML = '<tr><td colspan="1" style="text-align: center; color: #a08cbf;">Không có symbol để hiển thị.</td></tr>';
                 return;
             }
             symbols.forEach(symbol => {
@@ -254,10 +289,13 @@
                 const symbolLink = document.createElement('a');
                 symbolLink.href = '#';
                 symbolLink.textContent = symbol;
-                // Gán tạm thời link cho popup
+                
+                // --- LOGIC XÁC ĐỊNH LINK POPUP ---
+                const targetUrl = symbolLinks[symbol] || DEFAULT_POPUP_URL;
+
                 symbolLink.onclick = (e) => {
                     e.preventDefault(); // Ngăn chặn hành vi mặc định của link
-                    openPopup('http://34.142.248.96:1997');
+                    openPopup(targetUrl); // Mở popup với URL đã xác định
                 };
                 symbolCell.appendChild(symbolLink);
             });
@@ -265,12 +303,11 @@
 
         // --- Hàm sắp xếp dữ liệu và cập nhật mũi tên ---
         function sortData(key) {
-            // Đối với symbol, ta sắp xếp theo thứ tự chữ cái
             if (currentSortKey === key) {
                 currentSortOrder = currentSortOrder === 'asc' ? 'desc' : 'asc';
             } else {
                 currentSortKey = key;
-                currentSortOrder = 'asc'; // Mặc định sắp xếp tăng dần khi đổi cột
+                currentSortOrder = 'asc';
             }
 
             allBinanceSymbols.sort((a, b) => {
@@ -280,8 +317,8 @@
                     return b.localeCompare(a);
                 }
             });
-            updateSortIcons(); // Cập nhật biểu tượng mũi tên
-            filterAndRender(); // Hiển thị lại với dữ liệu đã sắp xếp và lọc
+            updateSortIcons();
+            filterAndRender();
         }
 
         // --- Hàm cập nhật biểu tượng mũi tên sắp xếp ---
@@ -290,7 +327,7 @@
                 header.classList.remove('sorted');
                 const icon = header.querySelector('.sort-icon');
                 if (icon) {
-                    icon.textContent = ''; // Xóa biểu tượng cũ
+                    icon.textContent = '';
                 }
             });
 
@@ -323,26 +360,20 @@
 
         function closePopup() {
             popupOverlay.classList.remove('active');
-            popupIframe.src = ''; // Xóa src của iframe để dừng mọi media/script
+            popupIframe.src = '';
         }
 
         // --- Khởi tạo trang ---
         document.addEventListener('DOMContentLoaded', async () => {
             await fetchBinanceUSDMSymbols(); // Tải danh sách symbol từ Binance
             filterAndRender(); // Hiển thị bảng ban đầu
-
-            // Có thể thêm cập nhật định kỳ nếu danh sách symbol thay đổi (ít khi xảy ra)
-            // setInterval(async () => {
-            //     await fetchBinanceUSDMSymbols();
-            //     filterAndRender();
-            // }, 300000); // Ví dụ: cập nhật mỗi 5 phút
         });
 
         // Event listener cho thanh tìm kiếm
         searchInput.addEventListener('keyup', filterAndRender);
-        searchInput.addEventListener('change', filterAndRender); // Để xử lý khi paste
+        searchInput.addEventListener('change', filterAndRender);
 
-        // Tùy chọn: Đóng popup khi click vào vùng phủ (ngoài nội dung popup)
+        // Tùy chọn: Đóng popup khi click vào vùng phủ
         popupOverlay.addEventListener('click', (e) => {
             if (e.target === popupOverlay) {
                 closePopup();
