@@ -14,7 +14,6 @@
 
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            /* Nền tối sâu */
             background-color: #121212; /* Gần như đen */
             color: #E0E0E0; /* Màu chữ xám nhạt, dễ đọc */
             line-height: 1.6;
@@ -24,12 +23,11 @@
         .container {
             max-width: 1200px;
             margin: 20px auto;
-            /* Nền container xám đậm */
             background-color: #1E1E1E; /* Xám đậm */
             border-radius: 12px;
-            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6); /* Bóng đổ sâu hơn, rõ nét hơn trên nền tối */
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
             padding: 30px;
-            border: 1px solid #333333; /* Viền xám tinh tế */
+            border: 1px solid #333333;
         }
 
         h1 {
@@ -38,7 +36,7 @@
             margin-bottom: 30px;
             font-size: 2.5em;
             font-weight: 700;
-            text-shadow: 0 0 15px rgba(187, 134, 252, 0.7); /* Hiệu ứng phát sáng mạnh hơn */
+            text-shadow: 0 0 15px rgba(187, 134, 252, 0.7);
         }
 
         /* Search and Sort Section */
@@ -54,22 +52,22 @@
         .controls input[type="text"] {
             flex-grow: 1;
             padding: 14px 18px;
-            border: 1px solid #444444; /* Viền input xám */
+            border: 1px solid #444444;
             border-radius: 8px;
             font-size: 1.1em;
-            background-color: #2C2C2C; /* Nền input xám than */
+            background-color: #2C2C2C;
             color: #E0E0E0;
             transition: border-color 0.3s ease, box-shadow 0.3s ease;
         }
 
         .controls input[type="text"]::placeholder {
-            color: #999999; /* Màu placeholder xám nhạt */
+            color: #999999;
         }
 
         .controls input[type="text"]:focus {
-            border-color: #BB86FC; /* Viền tím điện tử khi focus */
+            border-color: #BB86FC;
             outline: none;
-            box-shadow: 0 0 15px rgba(187, 134, 252, 0.6); /* Bóng phát sáng tím */
+            box-shadow: 0 0 15px rgba(187, 134, 252, 0.6);
         }
 
         /* Table Styling */
@@ -77,7 +75,7 @@
             width: 100%;
             border-collapse: collapse;
             margin-top: 20px;
-            background-color: #252525; /* Nền bảng xám đậm hơn một chút */
+            background-color: #252525;
             border-radius: 8px;
             overflow: hidden;
         }
@@ -85,12 +83,12 @@
         .data-table th, .data-table td {
             padding: 18px 20px;
             text-align: left;
-            border-bottom: 1px solid #3A3A3A; /* Viền dưới xám */
+            border-bottom: 1px solid #3A3A3A;
         }
 
         .data-table th {
-            background-color: #333333; /* Nền header xám */
-            color: #E0E0E0; /* Chữ header xám nhạt */
+            background-color: #333333;
+            color: #E0E0E0;
             font-weight: 600;
             text-transform: uppercase;
             font-size: 1em;
@@ -107,7 +105,7 @@
             transform: translateY(-50%);
             opacity: 0.6;
             transition: opacity 0.3s ease;
-            color: #BB86FC; /* Màu mũi tên tím */
+            color: #BB86FC;
         }
 
         .data-table th.sorted .sort-icon {
@@ -115,7 +113,7 @@
         }
 
         .data-table tr:hover {
-            background-color: #2F2F2F; /* Nền hàng hover xám nhẹ */
+            background-color: #2F2F2F;
         }
 
         .data-table td a {
@@ -123,84 +121,18 @@
             text-decoration: none;
             font-weight: 500;
             transition: color 0.3s ease, text-shadow 0.3s ease;
+            display: block; /* Đảm bảo link chiếm toàn bộ ô để dễ click */
+            padding: inherit; /* Kế thừa padding từ td */
+            margin: -18px -20px; /* Bù lại padding của td để link bao phủ hoàn toàn */
+            line-height: inherit; /* Kế thừa line-height */
+            height: 100%; /* Đảm bảo chiều cao 100% của ô */
+            width: 100%; /* Đảm bảo chiều rộng 100% của ô */
         }
 
         .data-table td a:hover {
-            color: #66FFCC; /* Xanh ngọc sáng hơn khi hover */
+            color: #66FFCC;
             text-decoration: underline;
-            text-shadow: 0 0 8px rgba(3, 218, 198, 0.5); /* Hiệu ứng phát sáng xanh */
-        }
-        
-        /* Popup Styling */
-        .popup-overlay {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background-color: rgba(0, 0, 0, 0.98); /* Overlay gần như đen hoàn toàn */
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            z-index: 1000;
-            opacity: 0;
-            visibility: hidden;
-            transition: opacity 0.4s ease, visibility 0.4s ease;
-        }
-
-        .popup-overlay.active {
-            opacity: 1;
-            visibility: visible;
-        }
-
-        .popup-content {
-            background-color: #121212; /* Nền popup siêu tối */
-            border-radius: 12px;
-            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.8); /* Bóng sâu và sắc nét */
-            width: 100%;
-            height: 100%;
-            display: flex;
-            flex-direction: column;
-            overflow: hidden;
-            border: 2px solid #BB86FC; /* Viền popup tím điện tử nổi bật */
-        }
-
-        .popup-header {
-            padding: 15px 20px;
-            background-color: #1E1E1E; /* Nền header popup xám đậm */
-            border-bottom: 1px solid #333333; /* Viền dưới header xám */
-            display: flex;
-            justify-content: flex-start;
-            align-items: center;
-        }
-
-        .popup-header button {
-            background-color: #BB86FC; /* Nút tím điện tử */
-            color: #121212; /* Chữ màu đen trên nút tím */
-            border: none;
-            padding: 12px 25px;
-            border-radius: 6px;
-            cursor: pointer;
-            font-size: 1.1em;
-            font-weight: 600; /* Chữ đậm hơn */
-            transition: background-color 0.3s ease, transform 0.2s ease, box-shadow 0.3s ease;
-            box-shadow: 0 4px 10px rgba(187, 134, 252, 0.3); /* Bóng phát sáng cho nút */
-        }
-
-        .popup-header button:hover {
-            background-color: #D1B8FA; /* Nút tím sáng hơn khi hover */
-            transform: translateY(-2px);
-            box-shadow: 0 6px 15px rgba(187, 134, 252, 0.5);
-        }
-        .popup-header button:active {
-            transform: translateY(0);
-            box-shadow: 0 2px 5px rgba(187, 134, 252, 0.3);
-        }
-
-        .popup-iframe {
-            flex-grow: 1;
-            width: 100%;
-            border: none;
+            text-shadow: 0 0 8px rgba(3, 218, 198, 0.5);
         }
     </style>
 </head>
@@ -223,37 +155,33 @@
         </table>
     </div>
 
-    <div class="popup-overlay" id="popupOverlay">
-        <div class="popup-content">
-            <div class="popup-header">
-                <button onclick="closePopup()">Trở lại</button>
-            </div>
-            <iframe id="popupIframe" class="popup-iframe" src="" frameborder="0"></iframe>
-        </div>
-    </div>
-
     <script>
         const dataTableBody = document.getElementById('dataTableBody');
         const searchInput = document.getElementById('searchInput');
-        const popupOverlay = document.getElementById('popupOverlay');
-        const popupIframe = document.getElementById('popupIframe');
 
         let allBinanceSymbols = [];
         let currentSortKey = null;
         let currentSortOrder = 'asc';
 
+        // --- ĐỐI TƯỢNG ÁNH XẠ SYMBOL VỚI LINK RIÊNG BIỆT ---
+        // Sử dụng các URL mà bạn muốn chuyển hướng đến
         const symbolLinks = {
-            'BTCUSDT': 'http://google.com',
+            'BTCUSDT': 'https://www.binance.com/vi/futures/BTCUSDT',
             'ETHUSDT': 'https://www.binance.com/vi/futures/ETHUSDT',
             'BNBUSDT': 'https://www.binance.com/vi/futures/BNBUSDT',
             'XRPUSDT': 'https://www.binance.com/vi/futures/XRPUSDT',
             'SOLUSDT': 'https://www.binance.com/vi/futures/SOLUSDT',
             'ADAUSDT': 'https://www.binance.com/vi/futures/ADAUSDT',
+            // Đây là các link ví dụ của bạn, giờ sẽ chuyển hướng trực tiếp
             'HUMAUSDT': 'http://34.142.248.96:1238',
             'ANINEUSDT': 'http://34.142.248.96:1236',
+            // Thêm các cặp khác mà bạn muốn có link riêng
         };
-        const DEFAULT_POPUP_URL = 'http://google.com';
+        // URL mặc định khi không tìm thấy link riêng trong symbolLinks
+        // Bạn có thể đổi cái này thành một trang lỗi, hoặc trang mặc định của bạn
+        const DEFAULT_URL = 'https://www.binance.com/vi/futures'; 
 
+        // --- Hàm tải danh sách các cặp giao dịch từ Binance ---
         async function fetchBinanceUSDMSymbols() {
             console.log('Đang tải danh sách symbol từ Binance...');
             try {
@@ -274,6 +202,7 @@
             }
         }
 
+        // --- Hàm hiển thị dữ liệu lên bảng HTML ---
         function renderTable(symbols) {
             dataTableBody.innerHTML = '';
             if (symbols.length === 0) {
@@ -284,26 +213,20 @@
                 const row = dataTableBody.insertRow();
                 const symbolCell = row.insertCell();
                 const symbolLink = document.createElement('a');
-                symbolLink.href = '#';
+                
+                // Gán trực tiếp href cho thẻ <a>
+                const targetUrl = symbolLinks[symbol] || DEFAULT_URL;
+                symbolLink.href = targetUrl; 
                 symbolLink.textContent = symbol;
                 
-                const targetUrl = symbolLinks[symbol] || DEFAULT_POPUP_URL;
-
-                symbolLink.onclick = (e) => {
-                    e.preventDefault();
-                    
-                    if (targetUrl.includes('google.com') || targetUrl.includes('binance.com')) {
-                        window.open(targetUrl, '_blank');
-                        console.log(`Đã mở ${targetUrl} trong tab mới.`);
-                    } else {
-                        openPopup(targetUrl);
-                        console.log(`Đã mở ${targetUrl} trong popup.`);
-                    }
-                };
+                // Loại bỏ onclick và thay bằng hành vi mặc định của link
+                // symbolLink.onclick = (e) => { e.preventDefault(); window.location.href = targetUrl; };
+                
                 symbolCell.appendChild(symbolLink);
             });
         }
 
+        // --- Hàm sắp xếp dữ liệu và cập nhật mũi tên ---
         function sortData(key) {
             if (currentSortKey === key) {
                 currentSortOrder = currentSortOrder === 'asc' ? 'desc' : 'asc';
@@ -323,6 +246,7 @@
             filterAndRender();
         }
 
+        // --- Hàm cập nhật biểu tượng mũi tên sắp xếp ---
         function updateSortIcons() {
             document.querySelectorAll('.data-table th').forEach(header => {
                 header.classList.remove('sorted');
@@ -344,6 +268,7 @@
             }
         }
 
+        // --- Hàm lọc và hiển thị dữ liệu ---
         async function filterAndRender() {
             const searchTerm = searchInput.value.toLowerCase();
             const filteredSymbols = allBinanceSymbols.filter(symbol =>
@@ -352,29 +277,15 @@
             renderTable(filteredSymbols);
         }
 
-        function openPopup(url) {
-            popupIframe.src = url;
-            popupOverlay.classList.add('active');
-        }
-
-        function closePopup() {
-            popupOverlay.classList.remove('active');
-            popupIframe.src = '';
-        }
-
+        // --- Khởi tạo trang ---
         document.addEventListener('DOMContentLoaded', async () => {
-            await fetchBinanceUSDMSymbols();
-            filterAndRender();
+            await fetchBinanceUSDMSymbols(); // Tải danh sách symbol từ Binance
+            filterAndRender(); // Hiển thị bảng ban đầu
         });
 
+        // Event listener cho thanh tìm kiếm
         searchInput.addEventListener('keyup', filterAndRender);
         searchInput.addEventListener('change', filterAndRender);
-
-        popupOverlay.addEventListener('click', (e) => {
-            if (e.target === popupOverlay) {
-                closePopup();
-            }
-        });
     </script>
 </body>
 </html>
