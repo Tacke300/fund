@@ -318,9 +318,7 @@
 
             <hr>
 
-            <div class="log-box" id="logContainer">
-                <div>Đang tải log...</div>
-            </div>
+            
         </div>
     </div>
 
@@ -394,7 +392,7 @@
             if (initialAmountInput.value) {
                 const value = parseFloat(initialAmountInput.value);
                 if (!isNaN(value)) {
-                    const result = value * 1500;
+                    const result = value * 20;
                     minAmountDisplay.textContent = `Số tiền mở lệnh phải lớn hơn số tiền tối thiểu mở lệnh của BINANCE và trong tài khoản cần có ${result.toFixed(2)}`;
                 }
             }
