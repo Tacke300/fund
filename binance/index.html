@@ -5,7 +5,256 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Binance Futures Trading Bot v1.1</title>
     <style>
-        /* ... (your existing CSS) ... */
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 20px;
+            background-color: #2c2c2c; /* Đen xám huyền bí */
+            color: #e0e0e0; /* Chữ xám nhạt */
+            line-height: 1;
+            text-align: center;
+        }
+        .container {
+            max-width: 900px;
+            margin: 30px auto;
+            background-color: #3c3c3c; /* Hộp chứa tối hơn */
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.2); /* Đổ bóng nhẹ nhàng */
+        }
+        h1, h2 {
+            color: #78a4e8; /* Xanh lam nhạt */
+            text-align: center;
+            margin-bottom: 20px;
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        .form-group label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: bold;
+            color: #b0b0b0; /* Nhãn xám nhạt */
+        }
+        .form-group input[type="text"],
+        .form-group input[type="number"],
+        .form-group input[type="password"] {
+            width: calc(100% - 20px);
+            padding: 12px;
+            border: 1px solid #5a5a5a; /* Border tối hơn */
+            border-radius: 8px;
+            font-size: 1em;
+            box-sizing: border-box;
+            background-color: #4a4a4a; /* Nền input tối */
+            color: #ffffff; /* Chữ trắng */
+            transition: border-color 0.3s ease;
+        }
+        .form-group input[type="text"]:focus,
+        .form-group input[type="number"]:focus,
+        .form-group input[type="password"]:focus {
+            border-color: #007bff;
+            outline: none;
+        }
+        .form-group input[type="checkbox"] {
+            margin-right: 10px;
+            transform: scale(1.2);
+            vertical-align: middle;
+        }
+        .form-group .checkbox-label {
+            display: inline;
+            margin-bottom: 0;
+            vertical-align: middle;
+        }
+        .button-group {
+            text-align: center;
+            margin-top: 30px;
+        }
+        .btn {
+            padding: 12px 25px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 0.9em;
+            font-weight: bold;
+            transition: background-color 0.3s ease, transform 0.2s ease;
+            margin: 0 10px;
+            min-width: 120px;
+        }
+        .btn-primary {
+            background-color: #007bff;
+            color: white;
+        }
+        .btn-primary:hover {
+            background-color: #0056b3;
+            transform: translateY(-2px);
+        }
+        .btn-success {
+            background-color: #28a745;
+            color: white;
+        }
+        .btn-success:hover {
+            background-color: #218838;
+            transform: translateY(-2px);
+        }
+        .btn-danger {
+            background-color: #dc3545;
+            color: white;
+        }
+        .btn-danger:hover {
+            background-color: #c82333;
+            transform: translateY(-2px);
+        }
+        .status-box {
+            background-color: #4a4a4a; /* Nền tối hơn */
+            padding: 15px;
+            border-radius: 8px;
+            margin-top: 20px;
+            font-size: 0.9em;
+            font-weight: bold;
+            text-align: center;
+            color: #ffffff; /* Chữ trắng */
+        }
+        .log-box {
+            background-color: #222; /* Nền đen nhạt */
+            border: 1px solid #444; /* Border tối hơn */
+            padding: 15px;
+            margin-top: 25px;
+            border-radius: 8px;
+            height: 300px;
+            overflow-y: scroll;
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 0.8em;
+            color: #ffffff; /* Chữ trắng */
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+        .log-box div {
+            padding: 3px 0;
+            border-bottom: 1px dotted #555; /* Border chấm tối hơn */
+        }
+        .log-box div:last-child {
+            border-bottom: none;
+        }
+        .popup {
+            display: none;
+            position: fixed;
+            left: 50%;
+            top: 50%;
+            transform: translate(-50%, -50%);
+            background-color: #ffc107;
+            color: white;
+            padding: 15px 25px;
+            border-radius: 8px;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.3);
+            z-index: 1000;
+            opacity: 0;
+            transition: opacity 0.5s ease-in-out;
+            font-weight: bold;
+            text-align: center;
+        }
+        .popup.show {
+            display: block;
+            opacity: 1;
+        }
+        .coin-entry {
+            border: 1px solid #5a5a5a; /* Border tối hơn */
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 20px;
+            background-color: #4a4a4a; /* Nền hộp tối */
+            position: relative;
+        }
+        hr {
+            border: 0;
+            height: 1px;
+            background-image: linear-gradient(to right, rgba(0, 0, 0, 0), rgba(100, 100, 100, 0.25), rgba(0, 0, 0, 0)); /* Đường kẻ mờ tối */
+            margin: 25px 0;
+        }
+        .trading-stats {
+            margin-top: 30px;
+            padding: 20px;
+            background-color: #4a4a4a; /* Nền tối hơn */
+            border-radius: 10px;
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
+        }
+        .trading-stats h2 {
+            color: #78a4e8; /* Xanh lam nhạt */
+        }
+        .trading-stats table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 15px;
+        }
+        .trading-stats th, .trading-stats td {
+            border: 1px solid #5a5a5a; /* Border tối hơn */
+            padding: 10px;
+            text-align: left;
+        }
+        .trading-stats th {
+            background-color: #5a5a5a; /* Nền tiêu đề bảng tối hơn */
+            font-weight: bold;
+            color: #e0e0e0; /* Chữ xám nhạt */
+        }
+        .trading-stats td {
+            background-color: #4a4a4a; /* Nền ô bảng tối hơn */
+            color: #ffffff; /* Chữ trắng */
+        }
+        .trading-stats .positive {
+            color: #28a745; /* Green */
+            font-weight: bold;
+        }
+        .trading-stats .negative {
+            color: #dc3545; /* Red */
+            font-weight: bold;
+        }
+        .trading-stats .neutral {
+            color: #e0e0e0; /* Xám nhạt */
+            font-weight: bold;
+        }
+
+        /* --- Styles for 1/2 size from API downwards --- */
+        .half-size * {
+            font-size: 0.9em !important; /* Apply to all children elements */
+        }
+        .half-size input, .half-size select, .half-size textarea, .half-size button {
+            padding: 6px 12px !important; /* Adjust padding for smaller elements */
+            border-radius: 4px !important; /* Adjust border radius */
+        }
+        .half-size .button-group .btn {
+            min-width: 60px !important; /* Adjust min-width for buttons */
+            padding: 6px 12px !important;
+        }
+        .half-size .trading-stats table th,
+        .half-size .trading-stats table td {
+            padding: 5px !important; /* Adjust padding for table cells */
+        }
+        .half-size .log-box {
+            height: 150px !important; /* Adjust log box height */
+            padding: 7px !important;
+        }
+        .min-amount-display {
+            color: #ff6666; /* Màu đỏ nhạt */
+            font-weight: bold;
+            margin-top: 5px; /* Add some spacing */
+            display: block; /* Ensure it takes its own line */
+        }
+
+        /* Style for the Back Home link */
+        .back-home-link {
+            display: block; /* Make it a block element to center */
+            text-align: center;
+            margin-bottom: 20px;
+            font-size: 1.8em; /* Kích thước lớn hơn */
+            font-weight: bold;
+        }
+        .back-home-link a {
+            color: #78a4e8; /* Màu xanh lam nhạt */
+            text-decoration: none;
+            transition: color 0.3s ease;
+        }
+        .back-home-link a:hover {
+            color: #a0c2f0; /* Màu xanh lam nhạt hơn khi hover */
+            text-decoration: underline;
+        }
     </style>
 </head>
 <body>
