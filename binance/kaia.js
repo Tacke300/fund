@@ -91,11 +91,11 @@ let listenKeyRefreshInterval = null; // Interval để làm mới listenKey
 let currentMarketPrice = null; // Cache giá từ WebSocket
 
 // --- CẤU HÌNH WEB SERVER VÀ LOG PM2 ---
-const WEB_SERVER_PORT = 1239; // Cổng cho giao diện web
+const WEB_SERVER_PORT = 1242; // Cổng cho giao diện web
 // Đường dẫn tới file log của PM2 cho bot này. CẦN CHỈNH SỬA ĐỂ KHỚP VỚI TÊN PM2 CỦA BẠN
-const BOT_LOG_FILE = `/home/tacke300/.pm2/logs/${process.env.name || 'vvv'}-out.log`; 
+const BOT_LOG_FILE = `/home/tacke300/.pm2/logs/${process.env.name || 'kaia'}-out.log`; 
 // Tên của bot trong PM2, phải khớp với tên bạn đã dùng khi start bot bằng PM2.
-const THIS_BOT_PM2_NAME = process.env.name || 'vvv'; // SỬA ĐỂ LẤY TỪ PM2 ENV HOẶC MẶC ĐỊNH
+const THIS_BOT_PM2_NAME = process.env.name || 'kaia'; // SỬA ĐỂ LẤY TỪ PM2 ENV HOẶC MẶC ĐỊNH
 
 // --- LOGGING TO FILE ---
 const CUSTOM_LOG_FILE = path.join(__dirname, 'pm2.log'); // Define your custom log file path
