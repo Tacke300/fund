@@ -7,13 +7,12 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import WebSocket from 'ws'; // Thêm WebSocket
 
+// Import API_KEY và SECRET_KEY từ config.js
+import { API_KEY, SECRET_KEY } from './config.js'; // <--- ĐÃ THÊM DÒNG NÀY
+
 // Lấy __filename và __dirname trong ES modules
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-
-// --- CẤU HÌNH API KEY VÀ SECRET KEY (BAN ĐẦU RỖNG) ---
-let API_KEY = '';
-let SECRET_KEY = '';
 
 // --- BASE URL CỦA BINANCE FUTURES API ---
 const BASE_HOST = 'fapi.binance.com';
@@ -93,7 +92,7 @@ let currentMarketPrice = null; // Cache giá từ WebSocket
 // --- CẤU HÌNH WEB SERVER VÀ LOG PM2 ---
 const WEB_SERVER_PORT = 1251; // Cổng cho giao diện web
 // Đường dẫn tới file log của PM2 cho bot này. CẦN CHỈNH SỬA ĐỂ KHỚP VỚI TÊN PM2 CỦA BẠN
-const BOT_LOG_FILE = `/home/tacke300/.pm2/logs/${process.env.name || 'xrp'}-out.log`; 
+const BOT_LOG_FILE = `/home/tacke300/.pm2/logs/${process.env.name || 'xrp'}-out.log`;
 // Tên của bot trong PM2, phải khớp với tên bạn đã dùng khi start bot bằng PM2.
 const THIS_BOT_PM2_NAME = process.env.name || 'xrp'; // SỬA ĐỂ LẤY TỪ PM2 ENV HOẶC MẶC ĐỊNH
 
@@ -621,7 +620,7 @@ async function closePosition(symbol, quantity, reason) {
     } catch (error) {
         addLog(`Lỗi đóng vị thế ${symbol}: ${error.msg || error.message}`);
         if (error instanceof CriticalApiError) {
-            addLog(`Lỗi API nghiêm trọng khi cố gắng đóng vị thế. Bot dừng.`);
+            addLog(`Bot dừng do lỗi API nghiêm trọng khi cố gắng đóng vị thế. Bot dừng.`);
             stopBotLogicInternal();
         }
     } finally {
@@ -1254,9 +1253,10 @@ async function startBotLogicInternal() {
         return 'Bot đang chạy.';
     }
 
+    // Đảm bảo API_KEY và SECRET_KEY đã được import từ config.js
     if (!API_KEY || !SECRET_KEY) {
-        addLog('Lỗi: API Key hoặc Secret Key chưa được cấu hình.');
-        return 'Lỗi: API Key hoặc Secret Key chưa được cấu hình.';
+        addLog('Lỗi: API Key hoặc Secret Key chưa được cấu hình. Vui lòng kiểm tra file config.js.');
+        return 'Lỗi: API Key hoặc Secret Key chưa được cấu hình. Vui lòng kiểm tra file config.js.';
     }
 
     if (retryBotTimeout) {
@@ -1537,10 +1537,10 @@ app.get('/api/bot_stats', async (req, res) => {
 
 // Endpoint để cấu hình các tham số từ frontend
 app.post('/api/configure', (req, res) => {
-    const { apiKey, secretKey, coinConfigs } = req.body;
+    const { coinConfigs } = req.body; // <--- ĐÃ LOẠI BỎ apiKey, secretKey KHỎI ĐÂY
 
-    API_KEY = apiKey.trim();
-    SECRET_KEY = secretKey.trim();
+    // API_KEY = apiKey.trim();   // <--- ĐÃ LOẠI BỎ DÒNG NÀY
+    // SECRET_KEY = secretKey.trim(); // <--- ĐÃ LOẠI BỎ DÒNG NÀY
 
     if (coinConfigs && coinConfigs.length > 0) {
         const config = coinConfigs[0];
@@ -1572,8 +1572,8 @@ app.post('/api/configure', (req, res) => {
     }
 
     addLog(`Đã cập nhật cấu hình:`);
-    addLog(`  API Key: ${API_KEY ? 'Đã thiết lập' : 'Chưa thiết lập'}`);
-    addLog(`  Secret Key: ${SECRET_KEY ? 'Đã thiết lập' : 'Chưa thiết lập'}`);
+    addLog(`  API Key: Đã thiết lập từ file config.js`); // <--- CẬP NHẬT THÔNG BÁO LOG
+    addLog(`  Secret Key: Đã thiết lập từ file config.js`); // <--- CẬP NHẬT THÔNG BÁO LOG
     addLog(`  Đồng coin: ${TARGET_COIN_SYMBOL}`);
     addLog(`  Số vốn ban đầu: ${INITIAL_INVESTMENT_AMOUNT} USDT`);
     addLog(`  Chiến lược x2 vốn: ${APPLY_DOUBLE_STRATEGY ? 'Bật' : 'Tắt'}`);
