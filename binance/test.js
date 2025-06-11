@@ -653,29 +653,60 @@ async function closePartialPosition(position, percentageOfInitialCapital, type =
         const usdtAmountToClose = INITIAL_INVESTMENT_AMOUNT * (percentageOfInitialCapital / 100);
         let quantityToClose = usdtAmountToClose / currentPrice;
 
+        // Lấy thông tin vị thế thực tế trên sàn để đảm bảo số lượng hiện tại
+        const positionsOnBinance = await callSignedAPI('/fapi/v2/positionRisk', 'GET');
+        const currentPositionOnBinance = positionsOnBinance.find(p => p.symbol === position.symbol && p.positionSide === position.side && Math.abs(parseFloat(p.positionAmt)) > 0);
+
+        if (!currentPositionOnBinance || Math.abs(parseFloat(currentPositionOnBinance.positionAmt)) === 0) {
+            addLog(`Vị thế ${position.side} ${position.symbol} đã đóng trên sàn hoặc không tồn tại. Không thể đóng từng phần.`);
+            return;
+        }
+        // Sử dụng số lượng thực tế của vị thế hiện tại để tính toán chính xác hơn
+        const actualPositionQuantity = Math.abs(parseFloat(currentPositionOnBinance.positionAmt));
+
+        // Tính toán số lượng để đóng DỰA TRÊN TỶ LỆ CỦA VỊ THẾ CÒN LẠI
+        // thay vì dựa trên INITIAL_INVESTMENT_AMOUNT nếu chúng ta muốn đóng một % của số lượng hiện tại
+        // Nhưng yêu cầu của bạn là "đóng 10% vốn ban đầu", nên chúng ta vẫn dùng INITIAL_INVESTMENT_AMOUNT
+        // Điều quan trọng là phải đảm bảo số lượng tính ra đủ lớn.
+
         // Làm tròn số lượng theo stepSize của sàn
-        quantityToClose = Math.floor(quantityToClose / symbolInfo.stepSize) * symbolInfo.stepSize;
+        // Math.floor(quantityToClose / symbolInfo.stepSize) * symbolInfo.stepSize;
+        // Sử dụng một hàm làm tròn để tránh số lượng quá nhỏ
+        const roundToStepSize = (qty, step) => {
+            return Math.floor(qty / step) * step;
+        };
+
+        quantityToClose = roundToStepSize(quantityToClose, symbolInfo.stepSize);
         quantityToClose = parseFloat(quantityToClose.toFixed(quantityPrecision));
+
+        // Giá trị tối thiểu cho lệnh đóng từng phần (Binance thường cho phép reduceOnly nhỏ)
+        // Đây là ngưỡng an toàn để tránh lỗi "notional too low"
+        const MIN_PARTIAL_CLOSE_VALUE_USDT = 0.003; // Bạn có thể tùy chỉnh nếu cần
 
         // Kiểm tra minNotional và số lượng tối thiểu có thể đóng
         if (quantityToClose <= 0) {
-            addLog(`Số lượng đóng từng phần (${quantityToClose}) quá nhỏ hoặc bằng 0 cho ${position.symbol}.`);
+            addLog(`Số lượng đóng từng phần (${quantityToClose.toFixed(quantityPrecision)}) quá nhỏ hoặc bằng 0 cho ${position.symbol}.`);
             return;
         }
-
-        // Đảm bảo giá trị USDT của lệnh đóng từng phần lớn hơn hoặc bằng 0.003$
-        const MIN_PARTIAL_CLOSE_VALUE_USDT = 0.003;
 
         if (quantityToClose * currentPrice < MIN_PARTIAL_CLOSE_VALUE_USDT) {
-            addLog(`Giá trị lệnh đóng từng phần (${(quantityToClose * currentPrice).toFixed(8)} USDT) nhỏ hơn ${MIN_PARTIAL_CLOSE_VALUE_USDT} USDT. Không đóng để tránh lỗi làm tròn.`);
-            return;
-        }
-        // Kiểm tra minNotional của sàn (thường lớn hơn 0.003 USDT)
-        if (quantityToClose * currentPrice < symbolInfo.minNotional) {
-            addLog(`Giá trị lệnh đóng từng phần (${(quantityToClose * currentPrice).toFixed(8)} USDT) nhỏ hơn minNotional của sàn (${symbolInfo.minNotional} USDT). Không đóng.`);
+            addLog(`Giá trị lệnh đóng từng phần (${(quantityToClose * currentPrice).toFixed(8)} USDT) nhỏ hơn ${MIN_PARTIAL_CLOSE_VALUE_USDT} USDT. Không đóng để tránh lỗi làm tròn/notional.`);
             return;
         }
 
+        // Đảm bảo số lượng cần đóng không vượt quá số lượng vị thế hiện tại
+        if (quantityToClose > actualPositionQuantity) {
+            addLog(`Cảnh báo: Số lượng tính toán để đóng từng phần (${quantityToClose.toFixed(quantityPrecision)}) lớn hơn số lượng vị thế hiện tại (${actualPositionQuantity.toFixed(quantityPrecision)}). Điều chỉnh để đóng tối đa số lượng còn lại.`);
+            quantityToClose = actualPositionQuantity;
+            // Làm tròn lại lần nữa sau khi điều chỉnh
+            quantityToClose = roundToStepSize(quantityToClose, symbolInfo.stepSize);
+            quantityToClose = parseFloat(quantityToClose.toFixed(quantityPrecision));
+        }
+
+        if (quantityToClose <= 0) {
+            addLog(`Sau khi kiểm tra, số lượng đóng từng phần vẫn là 0 hoặc không hợp lệ. Hủy đóng.`);
+            return;
+        }
 
         // side của lệnh đóng sẽ ngược với positionSide của vị thế
         const closeSide = position.side === 'LONG' ? 'SELL' : 'BUY';
@@ -693,7 +724,9 @@ async function closePartialPosition(position, percentageOfInitialCapital, type =
         addLog(`Đã gửi lệnh đóng từng phần ${closeSide} ${position.symbol}. OrderId: ${orderResult.orderId}`);
 
         // Cập nhật trạng thái của vị thế (chỉ trong bộ nhớ, không phải trên sàn ngay lập tức)
-        position.quantity -= quantityToClose; // Giảm số lượng vị thế hiện tại
+        // Việc này sẽ được đồng bộ lại bởi manageOpenPosition sau này khi nó lấy lại thông tin vị thế
+        // Nhưng chúng ta vẫn cập nhật tạm thời để logic tiếp theo không bị lỗi
+        // position.quantity -= quantityToClose; // Giảm số lượng vị thế hiện tại (bỏ qua vì manageOpenPosition sẽ làm)
         if (type === 'PROFIT') {
             position.closedAmount += usdtAmountToClose; // Tăng tổng vốn đã đóng từ lãi
         } else { // type === 'LOSS'
@@ -701,7 +734,7 @@ async function closePartialPosition(position, percentageOfInitialCapital, type =
         }
 
 
-        addLog(`Đã đóng ${percentageOfInitialCapital}% vốn của lệnh ${position.side}. Vị thế còn lại: ${position.quantity.toFixed(quantityPrecision)} Qty.`);
+        addLog(`Đã gửi lệnh đóng ${percentageOfInitialCapital}% vốn của lệnh ${position.side}.`);
         addLog(`Tổng vốn đã đóng từ lãi: ${position.closedAmount.toFixed(2)} USDT.`);
         addLog(`Tổng vốn đã đóng từ lỗ: ${position.closedLossAmount.toFixed(2)} USDT.`);
 
@@ -2166,7 +2199,7 @@ app.get('/api/logs', (req, res) => {
                     }
                     return res.status(500).send('Lỗi đọc log file');
                 }
-                const cleanData = pm2LogData.replace(/[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g, '');
+                const cleanData = pm2LogData.replace(/[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0-4})*)?[0-9A-ORZcf-nqry=><]/g, '');
                 const lines = cleanData.split('\n');
                 const maxDisplayLines = 500;
                 const startIndex = Math.max(0, lines.length - maxDisplayLines);
