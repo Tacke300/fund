@@ -195,6 +195,8 @@ async function makeHttpRequest(method, hostname, path, headers, postData = '') {
 }
 
 async function callSignedAPI(fullEndpointPath, method = 'GET', params = {}) {
+    // API_KEY và SECRET_KEY đã được import trực tiếp từ config.js ở đầu file.
+    // Không cần dùng process.env ở đây.
     if (!API_KEY || !SECRET_KEY) {
         throw new CriticalApiError("API Key hoặc Secret Key chưa được cấu hình.");
     }
@@ -212,7 +214,7 @@ async function callSignedAPI(fullEndpointPath, method = 'GET', params = {}) {
     let requestPath;
     let requestBody = '';
     const headers = {
-        'X-MBX-APIKEY': API_KEY,
+        'X-MBX-APIKEY': API_KEY, // Sử dụng API_KEY đã import
     };
 
     if (method === 'GET') {
@@ -1327,6 +1329,8 @@ async function scheduleNextMainCycle() {
 // --- HÀM CHO WEBSOCKET LISTENKEY VÀ KẾT NỐI ---
 
 async function getListenKey() {
+    // API_KEY và SECRET_KEY đã được import trực tiếp từ config.js ở đầu file.
+    // Không cần dùng process.env ở đây.
     if (!API_KEY || !SECRET_KEY) {
         addLog("API Key hoặc Secret Key chưa được cấu hình. Không thể lấy listenKey.");
         return null;
@@ -1609,6 +1613,7 @@ async function startBotLogicInternal() {
         return 'Bot đang chạy.';
     }
 
+    // Đảm bảo API_KEY và SECRET_KEY được sử dụng từ config.js
     if (!API_KEY || !SECRET_KEY) {
         addLog('Lỗi: API Key hoặc Secret Key chưa được cấu hình. Vui lòng kiểm tra file config.js.');
         return 'Lỗi: API Key hoặc Secret Key chưa được cấu hình. Vui lòng kiểm tra file config.js.';
@@ -1701,7 +1706,7 @@ async function startBotLogicInternal() {
             }
         }
 
-        const usdtAsset = account.assets.find(a => a.asset === 'USDT')?.availableBalance || 0;
+        const usdtAsset = (await callSignedAPI('/fapi/v2/account', 'GET')).assets.find(a => a.asset === 'USDT')?.availableBalance || 0;
         addLog(`API Key OK! USDT khả dụng: ${parseFloat(usdtAsset).toFixed(2)}`);
 
         consecutiveApiErrors = 0;
