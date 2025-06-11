@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Binance Futures Hedging Bot</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #1a1a2e;
+            color: #e0e0e0;
+            line-height: 1.6;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 20px auto;
+            background-color: #16213e;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 0 15px rgba(0, 0, 0, 0.5);
+        }
+        h1, h2 {
+            color: #0f3460;
+            border-bottom: 2px solid #0f3460;
+            padding-bottom: 10px;
+            margin-bottom: 20px;
+        }
+        .section {
+            margin-bottom: 30px;
+            padding: 20px;
+            background-color: #0f3460;
+            border-radius: 8px;
+            box-shadow: inset 0 0 8px rgba(0, 0, 0, 0.3);
+        }
+        .input-group {
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+        }
+        .input-group label {
+            flex: 1;
+            margin-right: 15px;
+            font-weight: bold;
+            color: #e94560;
+        }
+        .input-group input[type="text"],
+        .input-group input[type="number"] {
+            flex: 2;
+            padding: 10px;
+            border-radius: 5px;
+            border: 1px solid #e94560;
+            background-color: #3b3b54;
+            color: #e0e0e0;
+            font-size: 1em;
+        }
+        .input-group input[type="text"]:focus,
+        .input-group input[type="number"]:focus {
+            outline: none;
+            border-color: #533483;
+            box-shadow: 0 0 5px rgba(83, 52, 131, 0.7);
+        }
+        .button-group {
+            display: flex;
+            gap: 15px;
+            margin-top: 20px;
+            justify-content: center;
+        }
+        .button-group button {
+            padding: 12px 25px;
+            border: none;
+            border-radius: 5px;
+            font-size: 1.1em;
+            cursor: pointer;
+            transition: background-color 0.3s ease, transform 0.2s ease;
+            color: white;
+            font-weight: bold;
+        }
+        .button-group button.start {
+            background-color: #388e3c; /* Green */
+        }
+        .button-group button.start:hover {
+            background-color: #2e7d32;
+            transform: translateY(-2px);
+        }
+        .button-group button.stop {
+            background-color: #d32f2f; /* Red */
+        }
+        .button-group button.stop:hover {
+            background-color: #c62828;
+            transform: translateY(-2px);
+        }
+        .button-group button.configure {
+            background-color: #1976d2; /* Blue */
+        }
+        .button-group button.configure:hover {
+            background-color: #1565c0;
+            transform: translateY(-2px);
+        }
+        .status-message {
+            margin-top: 25px;
+            padding: 15px;
+            background-color: #2c3e50;
+            border-left: 5px solid #0f3460;
+            border-radius: 5px;
+            font-size: 1.1em;
+            color: #e0e0e0;
+            word-wrap: break-word;
+            white-space: pre-wrap; /* For line breaks */
+        }
+        .log-output {
+            background-color: #0a0a1a;
+            color: #00ff41; /* Green text for logs */
+            padding: 15px;
+            border-radius: 8px;
+            min-height: 300px;
+            max-height: 600px;
+            overflow-y: scroll;
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 0.9em;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            border: 1px solid #0f3460;
+        }
+        .stats-output div {
+            margin-bottom: 8px;
+            padding: 8px;
+            background-color: #1a2a4a;
+            border-left: 3px solid #e94560;
+            border-radius: 4px;
+        }
+        .stats-output strong {
+            color: #ffb74d; /* Orange for emphasis */
+        }
+        .position-details {
+            margin-top: 10px;
+            padding: 10px;
+            background-color: #2c3e50;
+            border-radius: 5px;
+        }
+        .position-details h4 {
+            color: #e94560;
+            margin-top: 0;
+            margin-bottom: 10px;
+        }
+        .position-details p {
+            margin: 5px 0;
+            font-size: 0.95em;
+        }
+        .profit { color: #4CAF50; } /* Green for profit */
+        .loss { color: #F44336; } /* Red for loss */
+        .neutral { color: #e0e0e0; } /* Grey for neutral */
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>BINANCE FUTURES HEDGING BOT</h1>
+
+        <div class="section">
+            <h2>Cấu hình Bot</h2>
+            <div class="input-group">
+                <label for="targetCoinSymbol">Đồng Coin Giao Dịch (Ví dụ: ETHUSDT):</label>
+                <input type="text" id="targetCoinSymbol" value="ETHUSDT">
+            </div>
+            <div class="input-group">
+                <label for="initialInvestmentAmount">Số Vốn Ban Đầu Mỗi Lệnh (USDT):</label>
+                <input type="number" id="initialInvestmentAmount" value="10" step="1">
+            </div>
+            <div class="button-group">
+                <button class="configure" onclick="configureBot()">Lưu Cấu Hình</button>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>Điều Khiển Bot</h2>
+            <div class="button-group">
+                <button class="start" onclick="startBot()">Khởi Động Bot</button>
+                <button class="stop" onclick="stopBot()">Dừng Bot</button>
+            </div>
+            <div class="status-message" id="botStatus">Đang tải trạng thái...</div>
+        </div>
+
+        <div class="section">
+            <h2>Thống Kê & Vị Thế</h2>
+            <div class="stats-output" id="botStats">
+                <div>Tổng Lời: <strong id="totalProfit">0.00</strong> USDT</div>
+                <div>Tổng Lỗ: <strong id="totalLoss">0.00</strong> USDT</div>
+                <div>PNL Ròng: <strong id="netPNL">0.00</strong> USDT</div>
+                <div>Vốn ban đầu mỗi lệnh: <strong id="currentInvestmentAmount">0.00</strong> USDT</div>
+                <h3>Vị Thế Đang Mở:</h3>
+                <div id="openPositions">Không có vị thế nào đang mở.</div>
+            </div>
+        </div>
+
+        
+    </div>
+
+    <script>
+        const BOT_ENDPOINT = window.location.origin; // Dynamically get origin
+
+        async function fetchBotStatus() {
+            try {
+                const response = await fetch(`${BOT_ENDPOINT}/api/status`);
+                const text = await response.text();
+                document.getElementById('botStatus').innerText = text;
+            } catch (error) {
+                document.getElementById('botStatus').innerText = `Lỗi lấy trạng thái: ${error.message}`;
+            }
+        }
+
+        async function fetchBotStats() {
+            try {
+                const response = await fetch(`${BOT_ENDPOINT}/api/bot_stats`);
+                const data = await response.json();
+                if (data.success) {
+                    document.getElementById('totalProfit').innerText = parseFloat(data.data.totalProfit).toFixed(2);
+                    document.getElementById('totalProfit').className = data.data.totalProfit > 0 ? 'profit' : 'neutral';
+
+                    document.getElementById('totalLoss').innerText = parseFloat(data.data.totalLoss).toFixed(2);
+                    document.getElementById('totalLoss').className = data.data.totalLoss > 0 ? 'loss' : 'neutral';
+
+                    document.getElementById('netPNL').innerText = parseFloat(data.data.netPNL).toFixed(2);
+                    document.getElementById('netPNL').className = data.data.netPNL > 0 ? 'profit' : (data.data.netPNL < 0 ? 'loss' : 'neutral');
+
+                    document.getElementById('currentInvestmentAmount').innerText = parseFloat(data.data.currentInvestmentAmount).toFixed(2);
+
+                    const openPositionsDiv = document.getElementById('openPositions');
+                    openPositionsDiv.innerHTML = ''; // Clear previous content
+
+                    if (data.data.currentOpenPositions && data.data.currentOpenPositions.length > 0) {
+                        data.data.currentOpenPositions.forEach(pos => {
+                            const pnlClass = pos.unrealizedPnl > 0 ? 'profit' : (pos.unrealizedPnl < 0 ? 'loss' : 'neutral');
+                            openPositionsDiv.innerHTML += `
+                                <div class="position-details">
+                                    <h4>Vị thế ${pos.side} ${pos.symbol}</h4>
+                                    <p>Số lượng: ${pos.quantity.toFixed(pos.pricePrecision)}</p>
+                                    <p>Giá vào: ${pos.entryPrice.toFixed(pos.pricePrecision)}</p>
+                                    <p>Giá hiện tại: ${pos.currentPrice.toFixed(pos.pricePrecision)}</p>
+                                    <p>PNL chưa thực tế: <strong class="${pnlClass}">${pos.unrealizedPnl.toFixed(2)} USDT</strong></p>
+                                    <p>Vốn ban đầu: ${pos.initialMargin.toFixed(2)} USDT</p>
+                                    <p>Tổng vốn đã đóng từng phần: ${pos.closedAmount.toFixed(2)} USDT</p>
+                                    <p>Mốc đóng từng phần tiếp theo: ${pos.nextPartialCloseIndex < pos.partialCloseLevels.length ? pos.partialCloseLevels[pos.nextPartialCloseIndex] + '%' : 'Đã đạt tất cả'} </p>
+                                    <p>SL điều chỉnh 200% lãi: <strong>${pos.hasAdjustedSLTo200PercentProfit ? 'Đã kích hoạt' : 'Chưa'}</strong></p>
+                                    <p>SL điều chỉnh 500% lãi: <strong>${pos.hasAdjustedSLTo500PercentProfit ? 'Đã kích hoạt' : 'Chưa'}</strong></p>
+                                </div>
+                            `;
+                        });
+                    } else {
+                        openPositionsDiv.innerText = 'Không có vị thế nào đang mở.';
+                    }
+                } else {
+                    openPositionsDiv.innerText = `Lỗi tải thống kê: ${data.message}`;
+                }
+            } catch (error) {
+                document.getElementById('botStats').innerHTML = `Lỗi lấy thống kê bot: ${error.message}`;
+            }
+        }
+
+        async function fetchLogs() {
+            try {
+                const response = await fetch(`${BOT_ENDPOINT}/api/logs`);
+                const text = await response.text();
+                const logOutput = document.getElementById('logOutput');
+                logOutput.innerText = text;
+                logOutput.scrollTop = logOutput.scrollHeight; // Auto-scroll to bottom
+            } catch (error) {
+                document.getElementById('logOutput').innerText = `Lỗi lấy log: ${error.message}`;
+            }
+        }
+
+        async function startBot() {
+            try {
+                document.getElementById('botStatus').innerText = 'Đang khởi động bot...';
+                const response = await fetch(`${BOT_ENDPOINT}/start_bot_logic`);
+                const text = await response.text();
+                document.getElementById('botStatus').innerText = text;
+            } catch (error) {
+                document.getElementById('botStatus').innerText = `Lỗi khi gửi lệnh khởi động: ${error.message}`;
+            } finally {
+                // Fetch status and logs again after a short delay
+                setTimeout(() => {
+                    fetchBotStatus();
+                    fetchBotStats();
+                    fetchLogs();
+                }, 1000);
+            }
+        }
+
+        async function stopBot() {
+            try {
+                document.getElementById('botStatus').innerText = 'Đang dừng bot...';
+                const response = await fetch(`${BOT_ENDPOINT}/stop_bot_logic`);
+                const text = await response.text();
+                document.getElementById('botStatus').innerText = text;
+            } catch (error) {
+                document.getElementById('botStatus').innerText = `Lỗi khi gửi lệnh dừng: ${error.message}`;
+            } finally {
+                // Fetch status and logs again after a short delay
+                setTimeout(() => {
+                    fetchBotStatus();
+                    fetchBotStats();
+                    fetchLogs();
+                }, 1000);
+            }
+        }
+
+        async function configureBot() {
+            const targetCoinSymbol = document.getElementById('targetCoinSymbol').value;
+            const initialInvestmentAmount = document.getElementById('initialInvestmentAmount').value;
+
+            if (!targetCoinSymbol || !initialInvestmentAmount || parseFloat(initialInvestmentAmount) <= 0) {
+                alert('Vui lòng nhập đầy đủ và chính xác thông tin cấu hình.');
+                return;
+            }
+
+            try {
+                const response = await fetch(`${BOT_ENDPOINT}/api/configure`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        coinConfigs: [{
+                            symbol: targetCoinSymbol,
+                            initialAmount: initialInvestmentAmount
+                        }]
+                    })
+                });
+                const data = await response.json();
+                alert(data.message);
+            } catch (error) {
+                alert(`Lỗi cấu hình bot: ${error.message}`);
+            } finally {
+                // Fetch status and stats to reflect new configuration
+                setTimeout(() => {
+                    fetchBotStatus();
+                    fetchBotStats();
+                    fetchLogs();
+                }, 500);
+            }
+        }
+
+        // Fetch initial status, stats, and logs when the page loads
+        document.addEventListener('DOMContentLoaded', () => {
+            fetchBotStatus();
+            fetchBotStats();
+            fetchLogs();
+            // Refresh status, stats, and logs every 5 seconds
+            setInterval(() => {
+                fetchBotStatus();
+                fetchBotStats();
+                fetchLogs();
+            }, 5000);
+        });
+    </script>
+</body>
+</html>
