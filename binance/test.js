@@ -35,7 +35,9 @@ let botStartTime = null; // Thời điểm bot được khởi động
 // Thêm trường `closedAmount` và `partialCloseLevels`
 // Thêm `maxLeverageUsed` để không cần gọi API nhiều lần để lấy đòn bẩy
 // `positionSide` sẽ là 'LONG' hoặc 'SHORT'
-let currentLongPosition = null; // { symbol, quantity, entryPrice, initialTPPrice, initialSLPrice, initialMargin, openTime, pricePrecision, side, currentPrice, unrealizedPnl, currentTPId, currentSLId, closedAmount, partialCloseLevels, nextPartialCloseIndex, hasAdjustedSLTo200PercentProfit, hasAdjustedSLTo500PercentProfit, maxLeverageUsed }
+// Thêm `partialCloseLossLevels` để theo dõi các mốc đóng lệnh lỗ
+// Thêm `nextPartialCloseLossIndex` để theo dõi mốc đóng lệnh lỗ tiếp theo
+let currentLongPosition = null; // { symbol, quantity, entryPrice, initialTPPrice, initialSLPrice, initialMargin, openTime, pricePrecision, side, currentPrice, unrealizedPnl, currentTPId, currentSLId, closedAmount, partialCloseLevels, nextPartialCloseIndex, hasAdjustedSLTo200PercentProfit, hasAdjustedSLTo500PercentProfit, maxLeverageUsed, closedLossAmount, partialCloseLossLevels, nextPartialCloseLossIndex }
 let currentShortPosition = null; // Tương tự như trên
 
 // Biến để lưu trữ setInterval cho việc kiểm tra vị thế đang mở
@@ -628,10 +630,10 @@ async function closePosition(symbol, quantity, reason, positionSide) {
  * Cần chỉ định rõ positionSide để đóng lệnh trong Hedge Mode.
  * @param {object} position - Vị thế cần đóng từng phần.
  * @param {number} percentageOfInitialCapital - Tỷ lệ phần trăm vốn ban đầu để đóng (ví dụ: 10).
- * @param {string} reason - Lý do đóng từng phần ('PROFIT' hoặc 'LOSS').
+ * @param {string} type - 'PROFIT' hoặc 'LOSS'.
  */
-async function closePartialPosition(position, percentageOfInitialCapital, reason = 'PROFIT') {
-    addLog(`Đang đóng ${percentageOfInitialCapital}% vốn ban đầu của lệnh ${position.side} ${position.symbol} (${reason === 'PROFIT' ? 'lãi' : 'lỗ'}).`);
+async function closePartialPosition(position, percentageOfInitialCapital, type = 'PROFIT') {
+    addLog(`Đang đóng ${percentageOfInitialCapital}% vốn ban đầu của lệnh ${position.side} ${position.symbol} (type: ${type === 'PROFIT' ? 'lãi' : 'lỗ'}).`);
 
     try {
         const symbolInfo = await getSymbolDetails(position.symbol);
@@ -662,18 +664,15 @@ async function closePartialPosition(position, percentageOfInitialCapital, reason
         }
 
         // Đảm bảo giá trị USDT của lệnh đóng từng phần lớn hơn hoặc bằng 0.003$
-        // Nếu minNotional của sàn đã đủ nhỏ, thì không cần thêm kiểm tra này.
-        // Tuy nhiên, để đáp ứng yêu cầu của bạn về 0.003$, chúng ta sẽ kiểm tra.
-        const orderValueUSDT = quantityToClose * currentPrice;
         const MIN_PARTIAL_CLOSE_VALUE_USDT = 0.003; 
 
-        if (orderValueUSDT < MIN_PARTIAL_CLOSE_VALUE_USDT) {
-            addLog(`Giá trị lệnh đóng từng phần (${orderValueUSDT.toFixed(8)} USDT) nhỏ hơn ${MIN_PARTIAL_CLOSE_VALUE_USDT} USDT. Không đóng để tránh lỗi làm tròn.`);
+        if (quantityToClose * currentPrice < MIN_PARTIAL_CLOSE_VALUE_USDT) {
+            addLog(`Giá trị lệnh đóng từng phần (${(quantityToClose * currentPrice).toFixed(8)} USDT) nhỏ hơn ${MIN_PARTIAL_CLOSE_VALUE_USDT} USDT. Không đóng để tránh lỗi làm tròn.`);
             return;
         }
         // Kiểm tra minNotional của sàn (thường lớn hơn 0.003 USDT)
-        if (orderValueUSDT < symbolInfo.minNotional) {
-            addLog(`Giá trị lệnh đóng từng phần (${orderValueUSDT.toFixed(8)} USDT) nhỏ hơn minNotional của sàn (${symbolInfo.minNotional} USDT). Không đóng.`);
+        if (quantityToClose * currentPrice < symbolInfo.minNotional) {
+            addLog(`Giá trị lệnh đóng từng phần (${(quantityToClose * currentPrice).toFixed(8)} USDT) nhỏ hơn minNotional của sàn (${symbolInfo.minNotional} USDT). Không đóng.`);
             return;
         }
 
@@ -695,9 +694,17 @@ async function closePartialPosition(position, percentageOfInitialCapital, reason
 
         // Cập nhật trạng thái của vị thế (chỉ trong bộ nhớ, không phải trên sàn ngay lập tức)
         position.quantity -= quantityToClose; // Giảm số lượng vị thế hiện tại
-        position.closedAmount += usdtAmountToClose; // Tăng tổng vốn đã đóng
+        if (type === 'PROFIT') {
+            position.closedAmount += usdtAmountToClose; // Tăng tổng vốn đã đóng từ lãi
+        } else { // type === 'LOSS'
+            position.closedLossAmount += usdtAmountToClose; // Tăng tổng vốn đã đóng từ lỗ
+        }
 
-        addLog(`Đã đóng ${percentageOfInitialCapital}% vốn của lệnh ${position.side}. Vị thế còn lại: ${position.quantity.toFixed(quantityPrecision)} Qty, Tổng vốn đã đóng: ${position.closedAmount.toFixed(2)} USDT.`);
+
+        addLog(`Đã đóng ${percentageOfInitialCapital}% vốn của lệnh ${position.side}. Vị thế còn lại: ${position.quantity.toFixed(quantityPrecision)} Qty.`);
+        addLog(`Tổng vốn đã đóng từ lãi: ${position.closedAmount.toFixed(2)} USDT.`);
+        addLog(`Tổng vốn đã đóng từ lỗ: ${position.closedLossAmount.toFixed(2)} USDT.`);
+
 
         await sleep(1000); // Đợi lệnh khớp
 
@@ -718,14 +725,15 @@ async function closePartialPosition(position, percentageOfInitialCapital, reason
  * Cần chỉ định rõ positionSide để mở lệnh trong Hedge Mode.
  * @param {object} position - Vị thế cần mở thêm.
  * @param {number} amountToReopen - Số vốn USDT cần mở thêm.
+ * @param {string} type - 'PROFIT' hoặc 'LOSS'. Xác định số tiền này là để bù cho khoản đã đóng từ lãi hay lỗ.
  */
-async function addPosition(position, amountToReopen) {
+async function addPosition(position, amountToReopen, type = 'PROFIT') {
     if (amountToReopen <= 0) {
         addLog(`Không có số vốn để mở thêm cho lệnh ${position.side} ${position.symbol}.`);
         return;
     }
 
-    addLog(`Đang mở thêm ${amountToReopen.toFixed(2)} USDT cho lệnh ${position.side} ${position.symbol}.`);
+    addLog(`Đang mở thêm ${amountToReopen.toFixed(2)} USDT cho lệnh ${position.side} ${position.symbol} (type: ${type === 'PROFIT' ? 'bù lãi đã chốt' : 'bù lỗ đã cắt'}).`);
 
     try {
         const symbolDetails = await getSymbolDetails(position.symbol);
@@ -787,9 +795,15 @@ async function addPosition(position, amountToReopen) {
 
             addLog(`Đã mở thêm thành công cho ${position.side} ${position.symbol}. Số lượng mới: ${position.quantity.toFixed(quantityPrecision)}, Giá vào trung bình mới: ${newEntryPrice.toFixed(pricePrecision)}.`);
 
-            // Reset closedAmount về 0 sau khi đã mở thêm
-            position.closedAmount = 0;
-            position.nextPartialCloseIndex = 0; // Reset index để có thể đóng từng phần lại từ đầu
+            // Reset closedAmount hoặc closedLossAmount tương ứng
+            if (type === 'PROFIT') {
+                position.closedAmount = 0;
+                position.nextPartialCloseIndex = 0; // Reset index để có thể đóng từng phần lại từ đầu
+            } else { // type === 'LOSS'
+                position.closedLossAmount = 0;
+                position.nextPartialCloseLossIndex = 0; // Reset index đóng lỗ
+            }
+            
             position.hasAdjustedSLTo200PercentProfit = false; // Reset cờ điều chỉnh SL
             position.hasAdjustedSLTo500PercentProfit = false; // Reset cờ điều chỉnh SL
 
@@ -997,8 +1011,8 @@ async function openPosition(symbol, tradeDirection, usdtBalance, maxLeverage) {
 
         // --- BẮT ĐẦU TÍNH TOÁN TP/SL THEO % VỐN (dùng giá vào lệnh thực tế và số lượng thực tế) ---
         let TAKE_PROFIT_MULTIPLIER; // Ví dụ: 10 cho 1000%
-        // let STOP_LOSS_MULTIPLIER; // Đã cố định ở 700%
         let partialCloseSteps = []; // Các mốc % lãi để đóng từng phần
+        let partialCloseLossSteps = []; // Các mốc % lãi của lệnh lãi để đóng lệnh lỗ
 
         // --- Cố định STOP_LOSS_MULTIPLIER = 7 (700%) theo yêu cầu ---
         const STOP_LOSS_MULTIPLIER = 7;
@@ -1006,16 +1020,20 @@ async function openPosition(symbol, tradeDirection, usdtBalance, maxLeverage) {
         if (maxLeverage >= 75) {
             TAKE_PROFIT_MULTIPLIER = 10; // 1000%
             for (let i = 1; i <= 9; i++) partialCloseSteps.push(i * 100); // 100%, 200%, ..., 900%
+            partialCloseLossSteps = [300, 500, 700]; // Đóng lỗ khi lãi đạt 300%, 500%, 700%
         } else if (maxLeverage === 50) {
             TAKE_PROFIT_MULTIPLIER = 5;  // 500%
             for (let i = 1; i <= 9; i++) partialCloseSteps.push(i * 50); // 50%, 100%, ..., 450%
+            partialCloseLossSteps = [150, 250, 350]; // Đóng lỗ khi lãi đạt 150%, 250%, 350%
         } else if (maxLeverage < 25) { // Đòn bẩy dưới 25
             TAKE_PROFIT_MULTIPLIER = 3.5; // 350%
             for (let i = 1; i <= 9; i++) partialCloseSteps.push(i * 35); // 35%, 70%, 105%, ..., 315%
+            partialCloseLossSteps = [100, 200, 300]; // Đóng lỗ khi lãi đạt 100%, 200%, 300%
         } else {
             addLog(`Cảnh báo: maxLeverage ${maxLeverage} không khớp với các quy tắc TP/SL/Partial Close. Sử dụng mặc định (TP 350%, SL 700% cố định, Partial 35%).`);
             TAKE_PROFIT_MULTIPLIER = 3.5;
             for (let i = 1; i <= 9; i++) partialCloseSteps.push(i * 35);
+            partialCloseLossSteps = [100, 200, 300]; // Default
         }
 
         const profitTargetUSDT = capitalToUse * TAKE_PROFIT_MULTIPLIER;
@@ -1114,9 +1132,13 @@ async function openPosition(symbol, tradeDirection, usdtBalance, maxLeverage) {
             unrealizedPnl: 0, // Sẽ cập nhật liên tục
             currentTPId: placedTPOrderId, // OrderId của lệnh TP
             currentSLId: placedSLOrderId, // OrderId của lệnh SL
-            closedAmount: 0, // Tổng số vốn (ban đầu) đã đóng từng phần
-            partialCloseLevels: partialCloseSteps, // Các mốc % lãi để đóng từng phần
-            nextPartialCloseIndex: 0, // Index của mốc đóng từng phần tiếp theo
+            closedAmount: 0, // Tổng số vốn (ban đầu) đã đóng từng phần từ lệnh lãi
+            partialCloseLevels: partialCloseSteps, // Các mốc % lãi để đóng từng phần lệnh lãi
+            nextPartialCloseIndex: 0, // Index của mốc đóng từng phần lệnh lãi tiếp theo
+            closedLossAmount: 0, // Tổng số vốn (ban đầu) đã đóng từng phần từ lệnh lỗ
+            partialCloseLossLevels: partialCloseLossSteps, // Các mốc % lãi của lệnh lãi để đóng lệnh lỗ
+            nextPartialCloseLossIndex: 0, // Index của mốc đóng lệnh lỗ tiếp theo
+
             // Thêm các cờ để quản lý trạng thái SL điều chỉnh
             hasAdjustedSLTo200PercentProfit: false, // Cờ này sẽ chuyển thành true khi SL được điều chỉnh về mốc 200% lãi
             hasAdjustedSLTo500PercentProfit: false, // Cờ này sẽ chuyển thành true khi SL được điều chỉnh về mốc 500% lãi
@@ -1243,23 +1265,19 @@ async function manageOpenPosition() {
 
         // --- Logic đóng từng phần và điều chỉnh SL cho CẢ HAI LỆNH ---
         let winningPos = null;
-        let otherPos = null; // Lệnh đối ứng hoặc lệnh lỗ
+        let losingPos = null; // Lệnh đối ứng hoặc lệnh lỗ
 
         if (currentLongPosition && currentLongPosition.unrealizedPnl > 0) {
             winningPos = currentLongPosition;
-            otherPos = currentShortPosition;
+            losingPos = currentShortPosition;
         } else if (currentShortPosition && currentShortPosition.unrealizedPnl > 0) {
             winningPos = currentShortPosition;
-            otherPos = currentLongPosition;
+            losingPos = currentLongPosition;
         } else {
-             // Nếu không có lệnh nào lãi, vẫn có thể có lệnh lỗ cần xử lý
-             if (currentLongPosition && currentLongPosition.unrealizedPnl < 0) {
-                 otherPos = currentLongPosition;
-             } else if (currentShortPosition && currentShortPosition.unrealizedPnl < 0) {
-                 otherPos = currentShortPosition;
-             }
+            // Trường hợp cả 2 lệnh đều lỗ hoặc hòa vốn
+            if (currentLongPosition && currentLongPosition.unrealizedPnl < 0) losingPos = currentLongPosition;
+            if (currentShortPosition && currentShortPosition.unrealizedPnl < 0 && (!losingPos || currentShortPosition.unrealizedPnl < losingPos.unrealizedPnl)) losingPos = currentShortPosition;
         }
-
 
         // 1. Logic đóng từng phần lệnh lãi
         if (winningPos) {
@@ -1272,7 +1290,6 @@ async function manageOpenPosition() {
             }
 
             // 2. Logic điều chỉnh SL cho CẢ HAI LỆNH (chỉ khi đạt 500% và 800%)
-            const maxLeverage = winningPos.maxLeverageUsed;
             const symbolDetails = await getSymbolDetails(winningPos.symbol);
             const tickSize = symbolDetails ? symbolDetails.tickSize : 0.001;
             const pricePrecision = symbolDetails ? symbolDetails.pricePrecision : 8;
@@ -1296,58 +1313,61 @@ async function manageOpenPosition() {
             slPriceForWinningPos_500PercentProfit = parseFloat(slPriceForWinningPos_500PercentProfit.toFixed(pricePrecision));
 
             // Giá SL cho lệnh đối ứng (hòa vốn)
-            let slPriceForOtherPos_Breakeven = otherPos ? parseFloat(otherPos.entryPrice.toFixed(pricePrecision)) : null;
+            let slPriceForLosingPos_Breakeven = losingPos ? parseFloat(losingPos.entryPrice.toFixed(pricePrecision)) : null;
 
             if (currentWinningProfitPercentage >= 800 && !winningPos.hasAdjustedSLTo500PercentProfit) {
                 addLog(`Lệnh ${winningPos.side} đạt ${currentWinningProfitPercentage.toFixed(2)}% lãi. Điều chỉnh SL của lệnh lãi về 500% lãi và SL của lệnh đối ứng về hòa vốn (mốc 800%).`);
                 await updateStopLoss(winningPos, slPriceForWinningPos_500PercentProfit); // SL lệnh lãi về 500% lãi
-                if (otherPos) {
-                    await updateStopLoss(otherPos, slPriceForOtherPos_Breakeven); // SL lệnh đối ứng về hòa vốn
+                if (losingPos) {
+                    await updateStopLoss(losingPos, slPriceForLosingPos_Breakeven); // SL lệnh đối ứng về hòa vốn
                 }
                 winningPos.hasAdjustedSLTo500PercentProfit = true;
                 winningPos.hasAdjustedSLTo200PercentProfit = true; // Đảm bảo cờ 200% cũng được bật
             } else if (currentWinningProfitPercentage >= 500 && !winningPos.hasAdjustedSLTo200PercentProfit) {
                 addLog(`Lệnh ${winningPos.side} đạt ${currentWinningProfitPercentage.toFixed(2)}% lãi. Điều chỉnh SL của lệnh lãi về 200% lãi và SL của lệnh đối ứng về hòa vốn (mốc 500%).`);
                 await updateStopLoss(winningPos, slPriceForWinningPos_200PercentProfit); // SL lệnh lãi về 200% lãi
-                if (otherPos) {
-                    await updateStopLoss(otherPos, slPriceForOtherPos_Breakeven); // SL lệnh đối ứng về hòa vốn
+                if (losingPos) {
+                    await updateStopLoss(losingPos, slPriceForLosingPos_Breakeven); // SL lệnh đối ứng về hòa vốn
                 }
                 winningPos.hasAdjustedSLTo200PercentProfit = true;
             }
-        }
 
-        // 3. Logic đóng từng phần lệnh lỗ (mới thêm)
-        if (otherPos && otherPos.unrealizedPnl < 0) {
-            const currentLossPercentage = Math.abs((otherPos.unrealizedPnl / otherPos.initialMargin) * 100);
-            const lossCloseThreshold = 50; // Ví dụ: Đóng 10% vốn ban đầu nếu lỗ đạt 50%
-            const partialCloseAmountForLoss = 10; // Đóng 10% vốn ban đầu
-
-            // Chỉ đóng một lần cho mỗi ngưỡng
-            if (currentLossPercentage >= lossCloseThreshold && otherPos.closedAmount === 0) { // Giả sử chỉ đóng 1 lần
-                addLog(`Lệnh ${otherPos.side} đạt mốc lỗ ${currentLossPercentage.toFixed(2)}%. Đang đóng ${partialCloseAmountForLoss}% vốn ban đầu của lệnh lỗ.`);
-                await closePartialPosition(otherPos, partialCloseAmountForLoss, 'LOSS');
-                // Bạn có thể cần một cờ khác để theo dõi các mức đóng lỗ khác nhau nếu có nhiều hơn 1 ngưỡng
-            }
-            // Logic để mở lại lệnh lỗ nếu giá trở lại (giống với lệnh lãi)
-            // Cần suy nghĩ kỹ về chiến lược cho lệnh lỗ: có nên mở lại không?
-            if (otherPos.closedAmount > 0) {
-                 // Nếu lệnh lỗ đã đóng từng phần, kiểm tra xem nó có trở lại hòa vốn không
-                 // Nếu lệnh lỗ trở về 0% (hoặc lãi) sau khi đã đóng từng phần, có thể bạn muốn mở lại để cân bằng.
-                 // Tuy nhiên, đây là một chiến lược phức tạp và cần cân nhắc kỹ.
-                 // Để giữ đơn giản, hiện tại chỉ lệnh lãi mới có logic "mở thêm".
+            // --- 3. Logic đóng từng phần lệnh lỗ dựa trên % lãi của lệnh lãi ---
+            if (losingPos && losingPos.unrealizedPnl < 0) { // Đảm bảo có lệnh lỗ và đang lỗ
+                const nextLossCloseLevel = winningPos.partialCloseLossLevels[winningPos.nextPartialCloseLossIndex];
+                if (nextLossCloseLevel && currentWinningProfitPercentage >= nextLossCloseLevel) {
+                    addLog(`Lệnh ${winningPos.side} đạt mốc lãi ${nextLossCloseLevel}%. Đang đóng 10% vốn ban đầu của lệnh ${losingPos.side} (lệnh lỗ).`);
+                    await closePartialPosition(losingPos, 10, 'LOSS'); // Đóng 10% vốn ban đầu của lệnh lỗ
+                    winningPos.nextPartialCloseLossIndex++; // Chuyển sang mốc đóng lỗ tiếp theo
+                }
             }
         }
-
 
         // 4. Logic "giá lệnh lãi trở về 0% => mở thêm số $ đã đóng"
-        if (winningPos && winningPos.closedAmount > 0) { // Chỉ xử lý nếu đã có đóng từng phần
-            const currentProfitPercentage = (winningPos.unrealizedPnl / winningPos.initialMargin) * 100;
+        if (currentLongPosition && currentLongPosition.closedAmount > 0) {
+            const currentProfitPercentage = (currentLongPosition.unrealizedPnl / currentLongPosition.initialMargin) * 100;
             if (currentProfitPercentage <= 0.1) { // Coi như 0% lãi (có thể thêm một ngưỡng nhỏ để tránh rung lắc)
-                addLog(`Lệnh ${winningPos.side} đã đóng từng phần và lãi trở về 0% (${currentProfitPercentage.toFixed(2)}%). Đang mở thêm số vốn đã đóng.`);
-                await addPosition(winningPos, winningPos.closedAmount);
+                addLog(`Lệnh LONG đã đóng từng phần lãi và lãi trở về 0% (${currentProfitPercentage.toFixed(2)}%). Đang mở thêm số vốn đã đóng.`);
+                await addPosition(currentLongPosition, currentLongPosition.closedAmount, 'PROFIT');
             }
         }
-
+        if (currentShortPosition && currentShortPosition.closedAmount > 0) {
+            const currentProfitPercentage = (currentShortPosition.unrealizedPnl / currentShortPosition.initialMargin) * 100;
+            if (currentProfitPercentage <= 0.1) { // Coi như 0% lãi
+                addLog(`Lệnh SHORT đã đóng từng phần lãi và lãi trở về 0% (${currentProfitPercentage.toFixed(2)}%). Đang mở thêm số vốn đã đóng.`);
+                await addPosition(currentShortPosition, currentShortPosition.closedAmount, 'PROFIT');
+            }
+        }
+        
+        // 5. Logic "giá lệnh lỗ trở về 0% => mở thêm số $ đã cắt lỗ"
+        if (currentLongPosition && currentLongPosition.closedLossAmount > 0 && currentLongPosition.unrealizedPnl >= 0) {
+            addLog(`Lệnh LONG đã đóng từng phần lỗ và hiện đã hòa vốn hoặc lãi. Đang mở thêm số vốn đã cắt lỗ.`);
+            await addPosition(currentLongPosition, currentLongPosition.closedLossAmount, 'LOSS');
+        }
+        if (currentShortPosition && currentShortPosition.closedLossAmount > 0 && currentShortPosition.unrealizedPnl >= 0) {
+            addLog(`Lệnh SHORT đã đóng từng phần lỗ và hiện đã hòa vốn hoặc lãi. Đang mở thêm số vốn đã cắt lỗ.`);
+            await addPosition(currentShortPosition, currentShortPosition.closedLossAmount, 'LOSS');
+        }
 
         if (!hasActivePosition) {
             addLog(`Đã xác nhận không còn vị thế mở nào cho ${TARGET_COIN_SYMBOL}.`);
@@ -1718,14 +1738,19 @@ async function startBotLogicInternal() {
             }
 
             let partialCloseSteps = [];
+            let partialCloseLossSteps = [];
             if (maxLeverage >= 75) {
                 for (let i = 1; i <= 9; i++) partialCloseSteps.push(i * 100);
+                partialCloseLossSteps = [300, 500, 700];
             } else if (maxLeverage === 50) {
                 for (let i = 1; i <= 9; i++) partialCloseSteps.push(i * 50);
+                partialCloseLossSteps = [150, 250, 350];
             } else if (maxLeverage < 25) {
                 for (let i = 1; i <= 9; i++) partialCloseSteps.push(i * 35);
+                partialCloseLossSteps = [100, 200, 300];
             } else {
                 for (let i = 1; i <= 9; i++) partialCloseSteps.push(i * 35); // Default
+                partialCloseLossSteps = [100, 200, 300]; // Default
             }
 
             for (const pos of positionsOnBinance) {
@@ -1749,6 +1774,9 @@ async function startBotLogicInternal() {
                     closedAmount: 0, // KHI KHỞI ĐỘNG LẠI, CLOSED_AMOUNT VÀ NEXT_PARTIAL_CLOSE_INDEX ĐƯỢC RESET VỀ 0. CẦN LƯU VÀO DB ĐỂ KHÔI PHỤC CHÍNH XÁC.
                     partialCloseLevels: partialCloseSteps,
                     nextPartialCloseIndex: 0, // KHI KHỞI ĐỘNG LẠI, CLOSED_AMOUNT VÀ NEXT_PARTIAL_CLOSE_INDEX ĐƯỢC RESET VỀ 0. CẦN LƯU VÀO DB ĐỂ KHÔI PHỤC CHÍNH XÁC.
+                    closedLossAmount: 0, // Reset khi khởi động lại
+                    partialCloseLossLevels: partialCloseLossSteps,
+                    nextPartialCloseLossIndex: 0, // Reset khi khởi động lại
                     hasAdjustedSLTo200PercentProfit: false, // Reset cờ điều chỉnh SL khi khởi động lại
                     hasAdjustedSLTo500PercentProfit: false, // Reset cờ điều chỉnh SL khi khởi động lại
                     maxLeverageUsed: maxLeverage, // Lưu đòn bẩy đã sử dụng
@@ -2014,8 +2042,11 @@ app.get('/api/bot_stats', async (req, res) => {
                 SLId: currentLongPosition.currentSLId,
                 initialMargin: currentLongPosition.initialMargin,
                 closedAmount: currentLongPosition.closedAmount,
-                nextPartialCloseIndex: currentLongPosition.nextPartialCloseIndex,
                 partialCloseLevels: currentLongPosition.partialCloseLevels,
+                nextPartialCloseIndex: currentLongPosition.nextPartialCloseIndex,
+                closedLossAmount: currentLongPosition.closedLossAmount,
+                partialCloseLossLevels: currentLongPosition.partialCloseLossLevels,
+                nextPartialCloseLossIndex: currentLongPosition.nextPartialCloseLossIndex,
                 hasAdjustedSLTo200PercentProfit: currentLongPosition.hasAdjustedSLTo200PercentProfit,
                 hasAdjustedSLTo500PercentProfit: currentLongPosition.hasAdjustedSLTo500PercentProfit,
             });
@@ -2033,8 +2064,11 @@ app.get('/api/bot_stats', async (req, res) => {
                 SLId: currentShortPosition.currentSLId,
                 initialMargin: currentShortPosition.initialMargin,
                 closedAmount: currentShortPosition.closedAmount,
-                nextPartialCloseIndex: currentShortPosition.nextPartialCloseIndex,
                 partialCloseLevels: currentShortPosition.partialCloseLevels,
+                nextPartialCloseIndex: currentShortPosition.nextPartialCloseIndex,
+                closedLossAmount: currentShortPosition.closedLossAmount,
+                partialCloseLossLevels: currentShortPosition.partialCloseLossLevels,
+                nextPartialCloseLossIndex: currentShortPosition.nextPartialCloseLossIndex,
                 hasAdjustedSLTo200PercentProfit: currentShortPosition.hasAdjustedSLTo200PercentProfit,
                 hasAdjustedSLTo500PercentProfit: currentShortPosition.hasAdjustedSLTo500PercentProfit,
             });
