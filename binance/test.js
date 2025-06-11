@@ -201,7 +201,7 @@ async function makeHttpRequest(method, hostname, path, headers, postData = '') {
 async function callSignedAPI(fullEndpointPath, method = 'GET', params = {}) {
     if (!API_KEY || !SECRET_KEY) {
         // Log này trước đây chỉ kiểm tra process.env, gây nhầm lẫn. Đã chỉnh sửa để sử dụng API_KEY đã import.
-        throw new CriticalApiError("❌ Missing Binance API_KEY or API_SECRET. Vui lòng kiểm tra file config.js.");
+        throw new CriticalApiError("❌ Missing Binance API_KEY hoặc API_SECRET. Vui lòng kiểm tra file config.js.");
     }
     const recvWindow = 5000;
     const timestamp = Date.now() + serverTimeOffset;
@@ -847,8 +847,18 @@ async function updateTPandSLForTotalPosition(position, maxLeverage) {
             await sleep(500);
         }
 
-        // --- Cố định STOP_LOSS_MULTIPLIER = 7 cho 700% ---
-        const STOP_LOSS_MULTIPLIER = 7;
+        // --- Xác định STOP_LOSS_MULTIPLIER dựa trên đòn bẩy
+        let STOP_LOSS_MULTIPLIER;
+        if (maxLeverage >= 75) {
+            STOP_LOSS_MULTIPLIER = 6.66; // 666%
+        } else if (maxLeverage === 50) {
+            STOP_LOSS_MULTIPLIER = 3.33; // 333%
+        } else if (maxLeverage < 50) { // Đòn bẩy dưới 50 (bao gồm x25)
+            STOP_LOSS_MULTIPLIER = 2.22; // 222%
+        } else {
+            addLog(`Cảnh báo: maxLeverage ${maxLeverage} không khớp với các quy tắc SL. Sử dụng mặc định 222%.`);
+            STOP_LOSS_MULTIPLIER = 2.22;
+        }
 
         const lossLimitUSDT = INITIAL_INVESTMENT_AMOUNT * STOP_LOSS_MULTIPLIER; // Luôn dùng vốn ban đầu cho 1 lệnh
         const priceChangeForSL = lossLimitUSDT / position.quantity; // Chia cho tổng quantity hiện tại
@@ -1011,33 +1021,36 @@ async function openPosition(symbol, tradeDirection, usdtBalance, maxLeverage) {
 
         // --- BẮT ĐẦU TÍNH TOÁN TP/SL THEO % VỐN (dùng giá vào lệnh thực tế và số lượng thực tế) ---
         let TAKE_PROFIT_MULTIPLIER; // Ví dụ: 10 cho 1000%
-        let partialCloseSteps = []; // Các mốc % lãi để đóng từng phần
+        let STOP_LOSS_MULTIPLIER; // Ví dụ: 7 cho 700%
+        let partialCloseSteps = []; // Các mốc % lãi để đóng từng phần lệnh lãi
         let partialCloseLossSteps = []; // Các mốc % lãi của lệnh lãi để đóng lệnh lỗ
 
-        // --- Cố định STOP_LOSS_MULTIPLIER = 7 (700%) theo yêu cầu ---
-        const STOP_LOSS_MULTIPLIER = 7;
-
+        // Cấu hình SL ban đầu, TP và các mốc đóng từng phần theo đòn bẩy
         if (maxLeverage >= 75) {
             TAKE_PROFIT_MULTIPLIER = 10; // 1000%
+            STOP_LOSS_MULTIPLIER = 6.66; // **666%**
             for (let i = 1; i <= 9; i++) partialCloseSteps.push(i * 100); // 100%, 200%, ..., 900%
             for (let i = 1; i <= 8; i++) partialCloseLossSteps.push(i * 100); // 100%, 200%, ..., 800% (cho 8 lần đóng)
         } else if (maxLeverage === 50) {
             TAKE_PROFIT_MULTIPLIER = 5;  // 500%
+            STOP_LOSS_MULTIPLIER = 3.33; // **333%**
             for (let i = 1; i <= 9; i++) partialCloseSteps.push(i * 50); // 50%, 100%, ..., 450%
             for (let i = 1; i <= 8; i++) partialCloseLossSteps.push(i * 50); // 50%, 100%, ..., 400% (cho 8 lần đóng)
         } else if (maxLeverage < 50) { // Đòn bẩy dưới 50 (bao gồm x25)
             TAKE_PROFIT_MULTIPLIER = 3.5; // 350%
+            STOP_LOSS_MULTIPLIER = 2.22; // **222%**
             for (let i = 1; i <= 9; i++) partialCloseSteps.push(i * 35); // 35%, 70%, 105%, ..., 315%
             for (let i = 1; i <= 8; i++) partialCloseLossSteps.push(i * 35); // 35%, 70%, ..., 280% (cho 8 lần đóng)
         } else {
-            addLog(`Cảnh báo: maxLeverage ${maxLeverage} không khớp với các quy tắc TP/SL/Partial Close. Sử dụng mặc định (TP 350%, SL 700% cố định, Partial 35%).`);
+            addLog(`Cảnh báo: maxLeverage ${maxLeverage} không khớp với các quy tắc TP/SL/Partial Close. Sử dụng mặc định (TP 350%, SL 222%, Partial 35%).`);
             TAKE_PROFIT_MULTIPLIER = 3.5;
+            STOP_LOSS_MULTIPLIER = 2.22;
             for (let i = 1; i <= 9; i++) partialCloseSteps.push(i * 35);
             for (let i = 1; i <= 8; i++) partialCloseLossSteps.push(i * 35);
         }
 
         const profitTargetUSDT = capitalToUse * TAKE_PROFIT_MULTIPLIER;
-        const lossLimitUSDT = capitalToUse * STOP_LOSS_MULTIPLIER; // Sử dụng giá trị đã cố định
+        const lossLimitUSDT = capitalToUse * STOP_LOSS_MULTIPLIER;
 
         const priceChangeForTP = profitTargetUSDT / actualQuantity;
         const priceChangeForSL = lossLimitUSDT / actualQuantity;
@@ -1363,43 +1376,112 @@ async function manageOpenPosition() {
             const tickSize = symbolDetails ? symbolDetails.tickSize : 0.001;
             const pricePrecision = symbolDetails ? symbolDetails.pricePrecision : 8;
 
-            // Tính toán giá SL cho lệnh lãi (bảo vệ lợi nhuận)
-            let slPriceForWinningPos_200PercentProfit; // Mốc 200% lãi
-            let slPriceForWinningPos_500PercentProfit; // Mốc 500% lãi
+            let slPriceForWinningPos_SpecificProfit; // Giá SL cho lệnh lãi
+            let slPriceForLosingPos_Breakeven = losingPos ? parseFloat(losingPos.entryPrice.toFixed(pricePrecision)) : null; // Giá SL cho lệnh lỗ về hòa vốn
 
-            if (winningPos.side === 'LONG') {
-                slPriceForWinningPos_200PercentProfit = winningPos.entryPrice + (winningPos.initialMargin * 200 / 100 / winningPos.quantity);
-                slPriceForWinningPos_200PercentProfit = Math.floor(slPriceForWinningPos_200PercentProfit / tickSize) * tickSize;
-                slPriceForWinningPos_500PercentProfit = winningPos.entryPrice + (winningPos.initialMargin * 500 / 100 / winningPos.quantity);
-                slPriceForWinningPos_500PercentProfit = Math.floor(slPriceForWinningPos_500PercentProfit / tickSize) * tickSize;
-            } else { // SHORT
-                slPriceForWinningPos_200PercentProfit = winningPos.entryPrice - (winningPos.initialMargin * 200 / 100 / winningPos.quantity);
-                slPriceForWinningPos_200PercentProfit = Math.ceil(slPriceForWinningPos_200PercentProfit / tickSize) * tickSize;
-                slPriceForWinningPos_500PercentProfit = winningPos.entryPrice - (winningPos.initialMargin * 500 / 100 / winningPos.quantity);
-                slPriceForWinningPos_500PercentProfit = Math.ceil(slPriceForWinningPos_500PercentProfit / tickSize) * tickSize;
-            }
-            slPriceForWinningPos_200PercentProfit = parseFloat(slPriceForWinningPos_200PercentProfit.toFixed(pricePrecision));
-            slPriceForWinningPos_500PercentProfit = parseFloat(slPriceForWinningPos_500PercentProfit.toFixed(pricePrecision));
+            // Dựa vào đòn bẩy đã sử dụng
+            const maxLeverage = winningPos.maxLeverageUsed;
 
-            // Giá SL cho lệnh đối ứng (hòa vốn)
-            let slPriceForLosingPos_Breakeven = losingPos ? parseFloat(losingPos.entryPrice.toFixed(pricePrecision)) : null;
+            if (maxLeverage >= 75) {
+                // Đòn bẩy 75:
+                // Mốc 500% (mốc 5) -> SL về 200% lãi
+                if (currentWinningProfitPercentage >= 500 && !winningPos.hasAdjustedSLTo200PercentProfit) {
+                    slPriceForWinningPos_SpecificProfit = winningPos.side === 'LONG'
+                        ? winningPos.entryPrice + (winningPos.initialMargin * 200 / 100 / winningPos.quantity)
+                        : winningPos.entryPrice - (winningPos.initialMargin * 200 / 100 / winningPos.quantity);
+                    slPriceForWinningPos_SpecificProfit = winningPos.side === 'LONG' ? Math.floor(slPriceForWinningPos_SpecificProfit / tickSize) * tickSize : Math.ceil(slPriceForWinningPos_SpecificProfit / tickSize) * tickSize;
+                    slPriceForWinningPos_SpecificProfit = parseFloat(slPriceForWinningPos_SpecificProfit.toFixed(pricePrecision));
 
-            if (currentWinningProfitPercentage >= 800 && !winningPos.hasAdjustedSLTo500PercentProfit) {
-                addLog(`Lệnh ${winningPos.side} đạt ${currentWinningProfitPercentage.toFixed(2)}% lãi. Điều chỉnh SL của lệnh lãi về 500% lãi và SL của lệnh đối ứng về hòa vốn (mốc 800%).`);
-                await updateStopLoss(winningPos, slPriceForWinningPos_500PercentProfit); // SL lệnh lãi về 500% lãi
-                if (losingPos) {
-                    await updateStopLoss(losingPos, slPriceForLosingPos_Breakeven); // SL lệnh đối ứng về hòa vốn
+                    addLog(`Lệnh ${winningPos.side} (x${maxLeverage}) đạt ${currentWinningProfitPercentage.toFixed(2)}% lãi. Điều chỉnh SL của lệnh lãi về 200% lãi và SL của lệnh đối ứng về hòa vốn (mốc 500%).`);
+                    await updateStopLoss(winningPos, slPriceForWinningPos_SpecificProfit);
+                    if (losingPos) {
+                        await updateStopLoss(losingPos, slPriceForLosingPos_Breakeven);
+                    }
+                    winningPos.hasAdjustedSLTo200PercentProfit = true;
                 }
-                winningPos.hasAdjustedSLTo500PercentProfit = true;
-                winningPos.hasAdjustedSLTo200PercentProfit = true; // Đảm bảo cờ 200% cũng được bật
-            } else if (currentWinningProfitPercentage >= 500 && !winningPos.hasAdjustedSLTo200PercentProfit) {
-                addLog(`Lệnh ${winningPos.side} đạt ${currentWinningProfitPercentage.toFixed(2)}% lãi. Điều chỉnh SL của lệnh lãi về 200% lãi và SL của lệnh đối ứng về hòa vốn (mốc 500%).`);
-                await updateStopLoss(winningPos, slPriceForWinningPos_200PercentProfit); // SL lệnh lãi về 200% lãi
-                if (losingPos) {
-                    await updateStopLoss(losingPos, slPriceForLosingPos_Breakeven); // SL lệnh đối ứng về hòa vốn
+                // Mốc 800% (mốc 8) -> SL về 500% lãi
+                if (currentWinningProfitPercentage >= 800 && !winningPos.hasAdjustedSLTo500PercentProfit) {
+                    slPriceForWinningPos_SpecificProfit = winningPos.side === 'LONG'
+                        ? winningPos.entryPrice + (winningPos.initialMargin * 500 / 100 / winningPos.quantity)
+                        : winningPos.entryPrice - (winningPos.initialMargin * 500 / 100 / winningPos.quantity);
+                    slPriceForWinningPos_SpecificProfit = winningPos.side === 'LONG' ? Math.floor(slPriceForWinningPos_SpecificProfit / tickSize) * tickSize : Math.ceil(slPriceForWinningPos_SpecificProfit / tickSize) * tickSize;
+                    slPriceForWinningPos_SpecificProfit = parseFloat(slPriceForWinningPos_SpecificProfit.toFixed(pricePrecision));
+
+                    addLog(`Lệnh ${winningPos.side} (x${maxLeverage}) đạt ${currentWinningProfitPercentage.toFixed(2)}% lãi. Điều chỉnh SL của lệnh lãi về 500% lãi và SL của lệnh đối ứng về hòa vốn (mốc 800%).`);
+                    await updateStopLoss(winningPos, slPriceForWinningPos_SpecificProfit);
+                    if (losingPos) {
+                        await updateStopLoss(losingPos, slPriceForLosingPos_Breakeven);
+                    }
+                    winningPos.hasAdjustedSLTo500PercentProfit = true;
+                    winningPos.hasAdjustedSLTo200PercentProfit = true; // Đảm bảo cờ 200% cũng được bật
                 }
-                winningPos.hasAdjustedSLTo200PercentProfit = true;
+            } else if (maxLeverage === 50) {
+                // Đòn bẩy 50:
+                // Mốc 250% -> SL về 100% lãi
+                if (currentWinningProfitPercentage >= 250 && !winningPos.hasAdjustedSLTo200PercentProfit) { // Đặt cờ này để đại diện cho mốc 100%
+                    slPriceForWinningPos_SpecificProfit = winningPos.side === 'LONG'
+                        ? winningPos.entryPrice + (winningPos.initialMargin * 100 / 100 / winningPos.quantity)
+                        : winningPos.entryPrice - (winningPos.initialMargin * 100 / 100 / winningPos.quantity);
+                    slPriceForWinningPos_SpecificProfit = winningPos.side === 'LONG' ? Math.floor(slPriceForWinningPos_SpecificProfit / tickSize) * tickSize : Math.ceil(slPriceForWinningPos_SpecificProfit / tickSize) * tickSize;
+                    slPriceForWinningPos_SpecificProfit = parseFloat(slPriceForWinningPos_SpecificProfit.toFixed(pricePrecision));
+
+                    addLog(`Lệnh ${winningPos.side} (x${maxLeverage}) đạt ${currentWinningProfitPercentage.toFixed(2)}% lãi. Điều chỉnh SL của lệnh lãi về 100% lãi và SL của lệnh đối ứng về hòa vốn (mốc 250%).`);
+                    await updateStopLoss(winningPos, slPriceForWinningPos_SpecificProfit);
+                    if (losingPos) {
+                        await updateStopLoss(losingPos, slPriceForLosingPos_Breakeven);
+                    }
+                    winningPos.hasAdjustedSLTo200PercentProfit = true; // Sử dụng cờ này cho mốc 100%
+                }
+                // Mốc 400% -> SL về 250% lãi
+                if (currentWinningProfitPercentage >= 400 && !winningPos.hasAdjustedSLTo500PercentProfit) { // Đặt cờ này để đại diện cho mốc 250%
+                    slPriceForWinningPos_SpecificProfit = winningPos.side === 'LONG'
+                        ? winningPos.entryPrice + (winningPos.initialMargin * 250 / 100 / winningPos.quantity)
+                        : winningPos.entryPrice - (winningPos.initialMargin * 250 / 100 / winningPos.quantity);
+                    slPriceForWinningPos_SpecificProfit = winningPos.side === 'LONG' ? Math.floor(slPriceForWinningPos_SpecificProfit / tickSize) * tickSize : Math.ceil(slPriceForWinningPos_SpecificProfit / tickSize) * tickSize;
+                    slPriceForWinningPos_SpecificProfit = parseFloat(slPriceForWinningPos_SpecificProfit.toFixed(pricePrecision));
+
+                    addLog(`Lệnh ${winningPos.side} (x${maxLeverage}) đạt ${currentWinningProfitPercentage.toFixed(2)}% lãi. Điều chỉnh SL của lệnh lãi về 250% lãi và SL của lệnh đối ứng về hòa vốn (mốc 400%).`);
+                    await updateStopLoss(winningPos, slPriceForWinningPos_SpecificProfit);
+                    if (losingPos) {
+                        await updateStopLoss(losingPos, slPriceForLosingPos_Breakeven);
+                    }
+                    winningPos.hasAdjustedSLTo500PercentProfit = true; // Sử dụng cờ này cho mốc 250%
+                    winningPos.hasAdjustedSLTo200PercentProfit = true; // Đảm bảo cờ trước đó cũng được bật
+                }
+            } else if (maxLeverage < 50) { // Đòn bẩy dưới 50 (bao gồm x25)
+                // Mốc 175% -> SL về 70% lãi
+                if (currentWinningProfitPercentage >= 175 && !winningPos.hasAdjustedSLTo200PercentProfit) { // Cờ này đại diện cho 70%
+                    slPriceForWinningPos_SpecificProfit = winningPos.side === 'LONG'
+                        ? winningPos.entryPrice + (winningPos.initialMargin * 70 / 100 / winningPos.quantity)
+                        : winningPos.entryPrice - (winningPos.initialMargin * 70 / 100 / winningPos.quantity);
+                    slPriceForWinningPos_SpecificProfit = winningPos.side === 'LONG' ? Math.floor(slPriceForWinningPos_SpecificProfit / tickSize) * tickSize : Math.ceil(slPriceForWinningPos_SpecificProfit / tickSize) * tickSize;
+                    slPriceForWinningPos_SpecificProfit = parseFloat(slPriceForWinningPos_SpecificProfit.toFixed(pricePrecision));
+
+                    addLog(`Lệnh ${winningPos.side} (x${maxLeverage}) đạt ${currentWinningProfitPercentage.toFixed(2)}% lãi. Điều chỉnh SL của lệnh lãi về 70% lãi và SL của lệnh đối ứng về hòa vốn (mốc 175%).`);
+                    await updateStopLoss(winningPos, slPriceForWinningPos_SpecificProfit);
+                    if (losingPos) {
+                        await updateStopLoss(losingPos, slPriceForLosingPos_Breakeven);
+                    }
+                    winningPos.hasAdjustedSLTo200PercentProfit = true; // Sử dụng cờ này cho mốc 70%
+                }
+                // Mốc 280% -> SL về 175% lãi
+                if (currentWinningProfitPercentage >= 280 && !winningPos.hasAdjustedSLTo500PercentProfit) { // Cờ này đại diện cho 175%
+                    slPriceForWinningPos_SpecificProfit = winningPos.side === 'LONG'
+                        ? winningPos.entryPrice + (winningPos.initialMargin * 175 / 100 / winningPos.quantity)
+                        : winningPos.entryPrice - (winningPos.initialMargin * 175 / 100 / winningPos.quantity);
+                    slPriceForWinningPos_SpecificProfit = winningPos.side === 'LONG' ? Math.floor(slPriceForWinningPos_SpecificProfit / tickSize) * tickSize : Math.ceil(slPriceForWinningPos_SpecificProfit / tickSize) * tickSize;
+                    slPriceForWinningPos_SpecificProfit = parseFloat(slPriceForWinningPos_SpecificProfit.toFixed(pricePrecision));
+
+                    addLog(`Lệnh ${winningPos.side} (x${maxLeverage}) đạt ${currentWinningProfitPercentage.toFixed(2)}% lãi. Điều chỉnh SL của lệnh lãi về 175% lãi và SL của lệnh đối ứng về hòa vốn (mốc 280%).`);
+                    await updateStopLoss(winningPos, slPriceForWinningPos_SpecificProfit);
+                    if (losingPos) {
+                        await updateStopLoss(losingPos, slPriceForLosingPos_Breakeven);
+                    }
+                    winningPos.hasAdjustedSLTo500PercentProfit = true; // Sử dụng cờ này cho mốc 175%
+                    winningPos.hasAdjustedSLTo200PercentProfit = true; // Đảm bảo cờ trước đó cũng được bật
+                }
             }
+
 
             // --- 3. Logic đóng từng phần lệnh lỗ dựa trên % lãi của lệnh lãi ---
             if (losingPos && losingPos.unrealizedPnl < 0) { // Đảm bảo có lệnh lỗ và đang lỗ
