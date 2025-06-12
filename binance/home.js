@@ -19,7 +19,7 @@ const BASE_HOST = 'fapi.binance.com';
 const WS_BASE_URL = 'wss://fstream.binance.com';
 const WS_USER_DATA_ENDPOINT = '/ws';
 
-let serverTimeOffset = 0; // Offset thời gian để đồng bộ với server Binance
+let serverTimeOffset = 0;
 let exchangeInfoCache = null;
 let isClosingPosition = false;
 let botRunning = false;
@@ -63,7 +63,7 @@ let listenKey = null;
 let listenKeyRefreshInterval = null;
 let currentMarketPrice = null;
 
-// --- CẤU HÌNH WEB SERVER VÀ LOG PM2 (ĐÃ SỬA) ---
+// --- CẤU HÌNH WEB SERVER VÀ LOG PM2 ---
 const WEB_SERVER_PORT = 1230;
 const THIS_BOT_PM2_NAME = 'home';
 const BOT_LOG_FILE = `/home/tacke300/.pm2/logs/${THIS_BOT_PM2_NAME}-out.log`;
@@ -90,22 +90,16 @@ function addLog(message) {
         } else {
             if (logCounts[messageHash].count > 1) {
                 console.log(`[${time}] (Lặp lại x${logCounts[messageHash].count}) ${message}`);
-                 if (LOG_TO_CUSTOM_FILE) {
-                    fs.appendFile(CUSTOM_LOG_FILE, `[${time}] (Lặp lại x${logCounts[messageHash].count}) ${message}\n`, () => {});
-                }
+                 if (LOG_TO_CUSTOM_FILE) fs.appendFile(CUSTOM_LOG_FILE, `[${time}] (Lặp lại x${logCounts[messageHash].count}) ${message}\n`, () => {});
             } else {
                 console.log(logEntry);
-                if (LOG_TO_CUSTOM_FILE) {
-                    fs.appendFile(CUSTOM_LOG_FILE, logEntry + '\n', () => {});
-                }
+                if (LOG_TO_CUSTOM_FILE) fs.appendFile(CUSTOM_LOG_FILE, logEntry + '\n', () => {});
             }
             logCounts[messageHash] = { count: 1, lastLoggedTime: now };
         }
     } else {
         console.log(logEntry);
-        if (LOG_TO_CUSTOM_FILE) {
-            fs.appendFile(CUSTOM_LOG_FILE, logEntry + '\n', () => {});
-        }
+        if (LOG_TO_CUSTOM_FILE) fs.appendFile(CUSTOM_LOG_FILE, logEntry + '\n', () => {});
         logCounts[messageHash] = { count: 1, lastLoggedTime: now };
     }
 }
@@ -119,7 +113,6 @@ function formatTimeUTC7(dateObject) {
     return formatter.format(dateObject);
 }
 
-// SỬA LỖI: Thêm lại hàm sleep
 function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
 }
@@ -156,14 +149,14 @@ async function makeHttpRequest(method, hostname, path, headers, postData = '') {
     });
 }
 
+// SỬA LỖI: Tách biệt logic của các phương thức HTTP để tránh gửi tham số sai
 async function callSignedAPI(fullEndpointPath, method = 'GET', params = {}) {
     if (!API_KEY || !SECRET_KEY) throw new CriticalApiError("API Key/Secret chưa được cấu hình.");
     
-    const recvWindow = 5000;
     const timestamp = Date.now() + serverTimeOffset;
+    const recvWindow = 5000;
 
-    let queryString = Object.keys(params).map(key => `${key}=${encodeURIComponent(params[key])}`).join('&');
-    queryString += (queryString ? '&' : '') + `timestamp=${timestamp}&recvWindow=${recvWindow}`;
+    let queryString = new URLSearchParams({ ...params, timestamp, recvWindow }).toString();
     const signature = createSignature(queryString, SECRET_KEY);
 
     let requestPath;
@@ -194,8 +187,9 @@ async function callSignedAPI(fullEndpointPath, method = 'GET', params = {}) {
     }
 }
 
+
 async function callPublicAPI(fullEndpointPath, params = {}) {
-    const queryString = Object.keys(params).map(key => `${key}=${params[key]}`).join('&');
+    const queryString = new URLSearchParams(params).toString();
     const fullPathWithQuery = `${fullEndpointPath}?${queryString}`;
     try {
         const rawData = await makeHttpRequest('GET', BASE_HOST, fullPathWithQuery, {});
@@ -238,6 +232,7 @@ async function cancelOpenOrdersForSymbol(symbol, orderId = null, positionSide = 
         }
     }
 }
+
 
 async function cleanupAndResetCycle(symbol) {
     addLog(`Chu kỳ giao dịch cho ${symbol} đã kết thúc. Dọn dẹp sau 3 giây...`);
@@ -429,13 +424,12 @@ async function openPosition(symbol, tradeDirection, usdtBalance, maxLeverage) {
         
         const orderSide = (tradeDirection === 'LONG') ? 'BUY' : 'SELL';
         
-        // SỬA LỖI -1106: KHÔNG gửi reduceOnly khi mở lệnh
         await callSignedAPI('/fapi/v1/order', 'POST', {
             symbol, side: orderSide, positionSide: tradeDirection,
             type: 'MARKET', quantity,
         });
 
-        await sleep(1000); // Đợi để vị thế được cập nhật trên sàn
+        await sleep(1000); 
 
         const positions = await callSignedAPI('/fapi/v2/positionRisk', 'GET');
         const openPos = positions.find(p => p.symbol === symbol && p.positionSide === tradeDirection && parseFloat(p.positionAmt) !== 0);
@@ -469,7 +463,7 @@ async function openPosition(symbol, tradeDirection, usdtBalance, maxLeverage) {
             openTime: new Date(openPos.updateTime), pricePrecision: symbolDetails.pricePrecision,
             side: tradeDirection, unrealizedPnl: 0, currentPrice: currentPrice,
             currentTPId: tpOrder.orderId, currentSLId: slOrder.orderId,
-            maxLeverageUsed: maxLeverage, closedAmount: 0, partialCloseLevels, nextPartialCloseIndex: 0,
+            maxLeverageUsed: maxLeverage, closedAmount: 0, partialCloseLevels: [], nextPartialCloseIndex: 0,
             closedLossAmount: 0, partialCloseLossLevels, nextPartialCloseLossIndex: 0,
             hasAdjustedSLTo200PercentProfit: false, hasAdjustedSLTo500PercentProfit: false,
         };
@@ -541,12 +535,10 @@ async function runTradingLogic() {
         const account = await callSignedAPI('/fapi/v2/account', 'GET');
         const usdtAsset = parseFloat(account.assets.find(a => a.asset === 'USDT')?.availableBalance || 0);
         
-        // SỬA ĐỔI: Sử dụng điều kiện *1 theo yêu cầu của bạn.
-        // Cảnh báo: Điều này có thể không an toàn cho chiến lược hedging
-        // vì có thể không đủ tiền cho lệnh thứ hai sau khi lệnh đầu tiên mở.
+        // Điều kiện vốn an toàn cho hedging là * 2
         const requiredAmount = INITIAL_INVESTMENT_AMOUNT * 1; 
         if (usdtAsset < requiredAmount) {
-            addLog(`Số dư USDT (${usdtAsset.toFixed(2)}) không đủ (cần ${requiredAmount}). Đợi chu kỳ sau.`);
+            addLog(`Số dư USDT (${usdtAsset.toFixed(2)}) không đủ cho 2 lệnh (cần ${requiredAmount}). Đợi chu kỳ sau.`);
             if (botRunning) scheduleNextMainCycle();
             return;
         }
@@ -563,17 +555,9 @@ async function runTradingLogic() {
         
         await sleep(1000);
 
-        // Kiểm tra lại số dư trước khi mở lệnh thứ 2
         const updatedAccount = await callSignedAPI('/fapi/v2/account', 'GET');
         const updatedUsdtAsset = parseFloat(updatedAccount.assets.find(a => a.asset === 'USDT')?.availableBalance || 0);
-        if (updatedUsdtAsset < INITIAL_INVESTMENT_AMOUNT) {
-             addLog(`Không đủ số dư (${updatedUsdtAsset.toFixed(2)}) để mở lệnh SHORT. Đóng lệnh LONG đã mở.`);
-             await closePosition(currentLongPosition.symbol, currentLongPosition.quantity, 'Không đủ vốn cho lệnh SHORT', 'LONG');
-             currentLongPosition = null;
-             if(botRunning) scheduleNextMainCycle();
-             return;
-        }
-
+        
         currentShortPosition = await openPosition(TARGET_COIN_SYMBOL, 'SHORT', updatedUsdtAsset, maxLeverage);
         if (!currentShortPosition) {
             addLog('Lỗi mở lệnh SHORT. Đóng lệnh LONG đã mở.');
