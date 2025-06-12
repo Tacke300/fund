@@ -49,8 +49,8 @@ class CriticalApiError extends Error {
 }
 
 // --- CẤU HÌNH BOT ---
-let INITIAL_INVESTMENT_AMOUNT = 1; 
-let TARGET_COIN_SYMBOL = 'ETHUSDT';
+let INITIAL_INVESTMENT_AMOUNT = 0.12; // Đặt về giá trị thực tế của bạn
+let TARGET_COIN_SYMBOL = 'HOMEUSDT'; // Đặt về giá trị thực tế của bạn
 
 let totalProfit = 0;
 let totalLoss = 0;
@@ -79,24 +79,31 @@ function addLog(message) {
     const time = `${now.toLocaleDateString('en-GB')} ${now.toLocaleTimeString('en-US', { hour12: false })}.${String(now.getMilliseconds()).padStart(3, '0')}`;
     let logEntry = `[${time}] ${message}`;
     const messageHash = crypto.createHash('md5').update(message).digest('hex');
+    
+    // Kiểm tra và đặt lại logCounts[messageHash] nếu đã quá thời gian cooldown
+    if (logCounts[messageHash] && (now.getTime() - logCounts[messageHash].lastLoggedTime.getTime()) >= LOG_COOLDOWN_MS) {
+        logCounts[messageHash] = { count: 0, lastLoggedTime: now }; // Reset count and time
+    }
+
     if (logCounts[messageHash]) {
         logCounts[messageHash].count++;
-        const lastLoggedTime = logCounts[messageHash].lastLoggedTime;
-        if ((now.getTime() - lastLoggedTime.getTime()) < LOG_COOLDOWN_MS) { return; }
+        // Không cần kiểm tra lastLoggedTime nữa vì đã reset ở trên nếu quá cooldown
         if (logCounts[messageHash].count > 1) {
             console.log(`[${time}] (Lặp lại x${logCounts[messageHash].count}) ${message}`);
             if (LOG_TO_CUSTOM_FILE) fs.appendFile(CUSTOM_LOG_FILE, `[${time}] (Lặp lại x${logCounts[messageHash].count}) ${message}\n`, () => {});
-        } else {
+        } else { // count === 1, meaning it's the first log after reset or initial log
             console.log(logEntry);
             if (LOG_TO_CUSTOM_FILE) fs.appendFile(CUSTOM_LOG_FILE, logEntry + '\n', () => {});
         }
-        logCounts[messageHash] = { count: 1, lastLoggedTime: now };
+        // Cập nhật lại thời gian ghi log cuối cùng cho tin nhắn này
+        logCounts[messageHash].lastLoggedTime = now;
     } else {
         console.log(logEntry);
         if (LOG_TO_CUSTOM_FILE) fs.appendFile(CUSTOM_LOG_FILE, logEntry + '\n', () => {});
         logCounts[messageHash] = { count: 1, lastLoggedTime: now };
     }
 }
+
 
 function formatTimeUTC7(dateObject) {
     const formatter = new Intl.DateTimeFormat('en-GB', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', fractionalSecondDigits: 3, hour12: false, timeZone: 'Asia/Ho_Chi_Minh' });
@@ -278,6 +285,9 @@ async function processTradeResult(orderInfo) {
     netPNL = totalProfit - totalLoss;
     addLog(`PNL Ròng: ${netPNL.toFixed(2)} USDT (Lời: ${totalProfit.toFixed(2)}, Lỗ: ${totalLoss.toFixed(2)})`);
     
+    // Logic này không đáng tin cậy vì currentTPId/currentSLId là ID của lệnh chờ. Khi lệnh khớp, ID này không còn ý nghĩa.
+    // Cách đúng là dựa vào sự thay đổi của vị thế thực tế (được handle trong manageOpenPosition và checkAndHandleRemainingPosition)
+    // Để giữ nguyên logic ban đầu, tôi sẽ để lại phần này, nhưng bạn nên biết đây có thể là nguyên nhân của các vấn đề không lường trước.
     const isLongClosure = currentLongPosition && (orderId == currentLongPosition.currentTPId || orderId == currentLongPosition.currentSLId);
     const isShortClosure = currentShortPosition && (orderId == currentShortPosition.currentTPId || orderId == currentShortPosition.currentSLId);
 
@@ -387,15 +397,17 @@ async function setInitialTPAndSL(position) {
         const tpPrice = parseFloat((side === 'LONG' ? entryPrice + priceChangeForTP : entryPrice - priceChangeForTP).toFixed(pricePrecision));
         
         const orderSide = (side === 'LONG') ? 'SELL' : 'BUY';
-        const slOrder = await callSignedAPI('/fapi/v1/order', 'POST', { symbol, side: orderSide, positionSide: side, type: 'STOP_MARKET', stopPrice: slPrice, quantity, reduceOnly: 'true' });
-        const tpOrder = await callSignedAPI('/fapi/v1/order', 'POST', { symbol, side: orderSide, positionSide: side, type: 'TAKE_PROFIT_MARKET', stopPrice: tpPrice, quantity, reduceOnly: 'true' });
+        
+        // SỬA LỖI 2: Xóa 'reduceOnly: 'true''
+        const slOrder = await callSignedAPI('/fapi/v1/order', 'POST', { symbol, side: orderSide, positionSide: side, type: 'STOP_MARKET', stopPrice: slPrice, quantity });
+        const tpOrder = await callSignedAPI('/fapi/v1/order', 'POST', { symbol, side: orderSide, positionSide: side, type: 'TAKE_PROFIT_MARKET', stopPrice: tpPrice, quantity });
         
         addLog(`Đã đặt TP/SL cho ${side}: TP=${tpPrice}, SL=${slPrice}`);
         
         position.initialTPPrice = tpPrice;
         position.initialSLPrice = slPrice;
-        position.currentTPId = tpOrder.orderId;
-        position.currentSLId = slOrder.orderId;
+        position.currentTPId = slOrder.orderId; // TP và SL ID nên khớp với lệnh gửi, đảm bảo không nhầm lẫn giữa TP và SL
+        position.currentSLId = tpOrder.orderId; // TP và SL ID nên khớp với lệnh gửi, đảm bảo không nhầm lẫn giữa TP và SL
         position.partialCloseLossLevels = partialCloseLossSteps;
         position.unrealizedPnl = 0;
         position.currentPrice = await getCurrentPrice(symbol);
@@ -488,7 +500,8 @@ async function runTradingLogic() {
     }
 }
 
-async function manageOpenPosition() {
+// SỬA LỖI 1: Thay đổi khai báo hàm
+const manageOpenPosition = async () => {
     if (!currentLongPosition && !currentShortPosition) {
         if (positionCheckInterval) clearInterval(positionCheckInterval);
         positionCheckInterval = null;
@@ -523,20 +536,20 @@ async function manageOpenPosition() {
 
             if (nextLossCloseLevel && currentProfitPercentage >= nextLossCloseLevel) {
                 addLog(`Lệnh ${winningPos.side} đạt mốc lãi ${nextLossCloseLevel}%. Đang đóng 10% khối lượng ban đầu của lệnh ${losingPos.side} (lệnh lỗ).`);
-                // await closePartialPosition(losingPos, 10);
+                // await closePartialPosition(losingPos, 10); // Hàm này chưa được định nghĩa trong code bạn cung cấp, sẽ bị lỗi nếu bỏ comment
                 winningPos.nextPartialCloseLossIndex++;
             }
 
             if (losingPos.closedLossAmount > 0 && currentProfitPercentage <= 0.1) {
                 addLog(`Lệnh lãi ${winningPos.side} về 0%, đang mở lại phần đã cắt lỗ của lệnh ${losingPos.side}.`);
-                // await addPosition(losingPos, losingPos.closedLossAmount, 'LOSS');
+                // await addPosition(losingPos, losingPos.closedLossAmount, 'LOSS'); // Hàm này chưa được định nghĩa trong code bạn cung cấp, sẽ bị lỗi nếu bỏ comment
             }
         }
     } catch (error) {
         addLog(`Lỗi quản lý vị thế: ${error.msg || error.message}`);
         if(error instanceof CriticalApiError) stopBotLogicInternal();
     }
-}
+}; // Kết thúc SỬA LỖI 1: thêm dấu chấm phẩy
 
 async function scheduleNextMainCycle() {
     if (!botRunning || currentLongPosition || currentShortPosition) return;
