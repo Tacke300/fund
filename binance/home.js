@@ -81,9 +81,9 @@ let listenKeyRefreshInterval = null;
 let currentMarketPrice = null; // Cache giá từ WebSocket
 
 // --- CẤU HÌNH WEB SERVER VÀ LOG PM2 ---
-const WEB_SERVER_PORT = 1111;
-const BOT_LOG_FILE = `/home/tacke300/.pm2/logs/${process.env.name || 'test'}-out.log`;
-const THIS_BOT_PM2_NAME = process.env.name || 'test';
+const WEB_SERVER_PORT = 1230;
+const BOT_LOG_FILE = `/home/tacke300/.pm2/logs/${process.env.name || 'home'}-out.log`;
+const THIS_BOT_PM2_NAME = process.env.name || 'home';
 
 // --- LOGGING TO FILE ---
 const CUSTOM_LOG_FILE = path.join(__dirname, 'pm2.log');
@@ -895,14 +895,14 @@ async function updateTPandSLForTotalPosition(position, maxLeverage) {
         // --- Xác định STOP_LOSS_MULTIPLIER dựa trên đòn bẩy
         let STOP_LOSS_MULTIPLIER;
         if (maxLeverage >= 75) {
-            STOP_LOSS_MULTIPLIER = 6.66; // 666%
+            STOP_LOSS_MULTIPLIER = 6; // 666%
         } else if (maxLeverage === 50) {
-            STOP_LOSS_MULTIPLIER = 3.33; // 333%
+            STOP_LOSS_MULTIPLIER = 3; // 333%
         } else if (maxLeverage < 50) { // Đòn bẩy dưới 50 (bao gồm x25)
-            STOP_LOSS_MULTIPLIER = 2.22; // 222%
+            STOP_LOSS_MULTIPLIER = 2; // 222%
         } else {
             addLog(`Cảnh báo: maxLeverage ${maxLeverage} không khớp với các quy tắc SL. Sử dụng mặc định 222%.`);
-            STOP_LOSS_MULTIPLIER = 2.22;
+            STOP_LOSS_MULTIPLIER = 2;
         }
 
         const lossLimitUSDT = INITIAL_INVESTMENT_AMOUNT * STOP_LOSS_MULTIPLIER; // Luôn dùng vốn ban đầu cho 1 lệnh
@@ -1074,23 +1074,23 @@ async function openPosition(symbol, tradeDirection, usdtBalance, maxLeverage) {
         // Cấu hình SL ban đầu, TP và các mốc đóng từng phần theo đòn bẩy
         if (maxLeverage >= 75) {
             TAKE_PROFIT_MULTIPLIER = 10; // 1000%
-            STOP_LOSS_MULTIPLIER = 6.66; // **666%**
+            STOP_LOSS_MULTIPLIER = 6; // **666%**
             for (let i = 1; i <= 9; i++) partialCloseSteps.push(i * 100); // 100%, 200%, ..., 900%
             for (let i = 1; i <= 8; i++) partialCloseLossSteps.push(i * 100); // 100%, 200%, ..., 800% (cho 8 lần đóng)
         } else if (maxLeverage === 50) {
             TAKE_PROFIT_MULTIPLIER = 5;  // 500%
-            STOP_LOSS_MULTIPLIER = 3.33; // **333%**
+            STOP_LOSS_MULTIPLIER = 3; // **333%**
             for (let i = 1; i <= 9; i++) partialCloseSteps.push(i * 50); // 50%, 100%, ..., 450%
             for (let i = 1; i <= 8; i++) partialCloseLossSteps.push(i * 50); // 50%, 100%, ..., 400% (cho 8 lần đóng)
         } else if (maxLeverage < 50) { // Đòn bẩy dưới 50 (bao gồm x25)
             TAKE_PROFIT_MULTIPLIER = 3.5; // 350%
-            STOP_LOSS_MULTIPLIER = 2.22; // **222%**
+            STOP_LOSS_MULTIPLIER = 2; // **222%**
             for (let i = 1; i <= 9; i++) partialCloseSteps.push(i * 35); // 35%, 70%, 105%, ..., 315%
             for (let i = 1; i <= 8; i++) partialCloseLossSteps.push(i * 35); // 35%, 70%, ..., 280% (cho 8 lần đóng)
         } else {
             addLog(`Cảnh báo: maxLeverage ${maxLeverage} không khớp với các quy tắc TP/SL/Partial Close. Sử dụng mặc định (TP 350%, SL 222%, Partial 35%).`);
             TAKE_PROFIT_MULTIPLIER = 3.5;
-            STOP_LOSS_MULTIPLIER = 2.22;
+            STOP_LOSS_MULTIPLIER = 2;
             for (let i = 1; i <= 9; i++) partialCloseSteps.push(i * 35);
             for (let i = 1; i <= 8; i++) partialCloseLossSteps.push(i * 35);
         }
@@ -1368,47 +1368,8 @@ async function manageOpenPosition() {
         const positions = await callSignedAPI('/fapi/v2/positionRisk', 'GET');
         let hasActivePosition = false;
 
-        // Cập nhật trạng thái cho Long Position
-        if (currentLongPosition) {
-            const longPosOnBinance = positions.find(p => p.symbol === TARGET_COIN_SYMBOL && p.positionSide === 'LONG' && parseFloat(p.positionAmt) > 0);
-            if (!longPosOnBinance || parseFloat(longPosOnBinance.positionAmt) === 0) {
-                addLog(`Vị thế LONG ${TARGET_COIN_SYMBOL} đã đóng trên sàn. Cập nhật bot.`);
-                currentLongPosition = null;
-                // Sửa đổi 3: Khi có 1 vị thế bị đóng hoàn toàn với bất kỳ lý do gì => đóng nốt vị thế còn lại để chạy chu kỳ mới.
-                // Nếu LONG bị đóng, kiểm tra và đóng SHORT nếu còn.
-                if (currentShortPosition && Math.abs(currentShortPosition.quantity) > 0) {
-                    addLog(`Vị thế LONG đã đóng. Đang đóng nốt vị thế SHORT còn lại.`);
-                    await closePosition(currentShortPosition.symbol, currentShortPosition.quantity, 'Lệnh đối ứng LONG đã đóng', currentShortPosition.side);
-                    currentShortPosition = null; // Đảm bảo reset trạng thái
-                }
-            } else {
-                currentLongPosition.unrealizedPnl = parseFloat(longPosOnBinance.unRealizedProfit);
-                currentLongPosition.currentPrice = parseFloat(longPosOnBinance.markPrice);
-                currentLongPosition.quantity = Math.abs(parseFloat(longPosOnBinance.positionAmt)); // Cập nhật lại số lượng thực tế
-                hasActivePosition = true;
-            }
-        }
-
-        // Cập nhật trạng thái cho Short Position
-        if (currentShortPosition) {
-            const shortPosOnBinance = positions.find(p => p.symbol === TARGET_COIN_SYMBOL && p.positionSide === 'SHORT' && parseFloat(p.positionAmt) < 0);
-            if (!shortPosOnBinance || parseFloat(shortPosOnBinance.positionAmt) === 0) {
-                addLog(`Vị thế SHORT ${TARGET_COIN_SYMBOL} đã đóng trên sàn. Cập nhật bot.`);
-                currentShortPosition = null;
-                // Sửa đổi 3: Khi có 1 vị thế bị đóng hoàn toàn với bất kỳ lý do gì => đóng nốt vị thế còn lại để chạy chu kỳ mới.
-                // Nếu SHORT bị đóng, kiểm tra và đóng LONG nếu còn.
-                if (currentLongPosition && Math.abs(currentLongPosition.quantity) > 0) {
-                    addLog(`Vị thế SHORT đã đóng. Đang đóng nốt vị thế LONG còn lại.`);
-                    await closePosition(currentLongPosition.symbol, currentLongPosition.quantity, 'Lệnh đối ứng SHORT đã đóng', currentLongPosition.side);
-                    currentLongPosition = null; // Đảm bảo reset trạng thái
-                }
-            } else {
-                currentShortPosition.unrealizedPnl = parseFloat(shortPosOnBinance.unRealizedProfit);
-                currentShortPosition.currentPrice = parseFloat(shortPosOnBinance.markPrice);
-                currentShortPosition.quantity = Math.abs(parseFloat(shortPosOnBinance.positionAmt)); // Cập nhật lại số lượng thực tế
-                hasActivePosition = true;
-            }
-        }
+        
+        
 
         // --- Logic đóng từng phần và điều chỉnh SL cho CẢ HAI LỆNH ---
         let winningPos = null;
@@ -1426,15 +1387,7 @@ async function manageOpenPosition() {
             if (currentShortPosition && currentShortPosition.unrealizedPnl < 0 && (!losingPos || currentShortPosition.unrealizedPnl < losingPos.unrealizedPnl)) losingPos = currentShortPosition;
         }
 
-        // 1. Logic đóng từng phần lệnh lãi
-        if (winningPos) {
-            const currentWinningProfitPercentage = (winningPos.unrealizedPnl / winningPos.initialMargin) * 100;
-            const nextCloseLevel = winningPos.partialCloseLevels[winningPos.nextPartialCloseIndex];
-            if (nextCloseLevel && currentWinningProfitPercentage >= nextCloseLevel) {
-                addLog(`Lệnh ${winningPos.side} đạt mốc lãi ${nextCloseLevel}%. Đang đóng 10% khối lượng ban đầu.`);
-                await closePartialPosition(winningPos, 0, 'PROFIT'); // Đóng 10% khối lượng ban đầu
-                winningPos.nextPartialCloseIndex++; // Chuyển sang mốc tiếp theo
-            }
+        
 
             // 2. Logic điều chỉnh SL cho CẢ HAI LỆNH
             const symbolDetails = await getSymbolDetails(winningPos.symbol);
