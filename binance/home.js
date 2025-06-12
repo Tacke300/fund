@@ -200,19 +200,46 @@ async function getCurrentPrice(symbol) { try { const d = await callPublicAPI('/f
 
 // --- LOGIC GIAO DỊCH ---
 
-async function cancelOpenOrdersForSymbol(symbol, orderId = null, positionSide = null) {
+async function cancelOpenOrdersForSymbol(symbol, positionSide = null) {
+    addLog(`Đang hủy lệnh chờ cho ${symbol} (Side: ${positionSide || 'Tất cả'})...`);
     try {
-        let params = { symbol: symbol };
-        if (orderId) params.orderId = orderId;
-        if (positionSide) params.positionSide = positionSide;
+        const openOrders = await callSignedAPI('/fapi/v1/openOrders', 'GET', { symbol });
+        if (!openOrders || openOrders.length === 0) {
+            addLog("Không có lệnh chờ nào để hủy.");
+            return;
+        }
+
+        let ordersToCancel = openOrders;
+        if (positionSide && (positionSide === 'LONG' || positionSide === 'SHORT')) {
+            ordersToCancel = openOrders.filter(o => o.positionSide === positionSide);
+        }
         
-        const endpoint = orderId ? '/fapi/v1/order' : '/fapi/v1/allOpenOrders';
-        addLog(`Đang hủy ${orderId ? `lệnh ${orderId}` : 'tất cả lệnh chờ'} cho ${symbol} (Side: ${positionSide || 'Tất cả'}).`);
-        await callSignedAPI(endpoint, 'DELETE', params);
+        if (ordersToCancel.length === 0) {
+            addLog(`Không có lệnh chờ nào khớp với side: ${positionSide}.`);
+            return;
+        }
+
+        addLog(`Tìm thấy ${ordersToCancel.length} lệnh để hủy. Bắt đầu hủy...`);
+        for (const order of ordersToCancel) {
+            try {
+                await callSignedAPI('/fapi/v1/order', 'DELETE', {
+                    symbol: symbol,
+                    orderId: order.orderId,
+                });
+                addLog(` -> Đã hủy lệnh ${order.orderId}`);
+            } catch (innerError) {
+                 if (innerError.code !== -2011) { // Lỗi -2011 (Unknown order) có thể bỏ qua nếu lệnh đã khớp/hủy
+                    addLog(`Lỗi khi hủy lệnh ${order.orderId}: ${innerError.msg || innerError.message}`);
+                 }
+            }
+            await sleep(100); 
+        }
+        addLog("Hoàn tất việc hủy lệnh chờ.");
+
     } catch (error) {
         if (error.code !== -2011) {
-             addLog(`Lỗi khi hủy lệnh chờ cho ${symbol}: ${error.msg || error.message}`);
-             if (error instanceof CriticalApiError) stopBotLogicInternal();
+            addLog(`Lỗi khi lấy danh sách lệnh chờ: ${error.msg || error.message}`);
+            if (error instanceof CriticalApiError) stopBotLogicInternal();
         }
     }
 }
@@ -229,7 +256,7 @@ async function cleanupAndResetCycle(symbol) {
         positionCheckInterval = null;
     }
 
-    await cancelOpenOrdersForSymbol(symbol, null, 'BOTH');
+    await cancelOpenOrdersForSymbol(symbol);
     await checkAndHandleRemainingPosition(symbol);
 
     if (botRunning) {
@@ -346,7 +373,7 @@ async function setInitialTPAndSL(position) {
     const { symbol, side, quantity, entryPrice, initialMargin, maxLeverageUsed, pricePrecision } = position;
     addLog(`Đang đặt TP/SL cho vị thế ${side}...`);
     try {
-        await cancelOpenOrdersForSymbol(symbol, null, side);
+        await cancelOpenOrdersForSymbol(symbol, side);
 
         let TAKE_PROFIT_MULTIPLIER, STOP_LOSS_MULTIPLIER, partialCloseLossSteps = [];
         if (maxLeverageUsed >= 75) { TAKE_PROFIT_MULTIPLIER = 10; STOP_LOSS_MULTIPLIER = 6.66; for (let i = 1; i <= 8; i++) partialCloseLossSteps.push(i * 100); } 
@@ -434,14 +461,21 @@ async function runTradingLogic() {
         await sleep(3000);
 
         const isLongTPSLSet = await setInitialTPAndSL(currentLongPosition);
+        if (!isLongTPSLSet) {
+             addLog("Đặt TP/SL cho LONG thất bại. Đóng cả hai vị thế.");
+             await closePosition(currentLongPosition.symbol, 0, 'Lỗi đặt TP/SL', 'LONG');
+             await closePosition(currentShortPosition.symbol, 0, 'Lỗi đặt TP/SL', 'SHORT');
+             await cleanupAndResetCycle(TARGET_COIN_SYMBOL);
+             return;
+        }
+        
         const isShortTPSLSet = await setInitialTPAndSL(currentShortPosition);
-
-        if (!isLongTPSLSet || !isShortTPSLSet) {
-            addLog("Một hoặc cả hai vị thế đặt TP/SL thất bại. Đóng cả hai để bắt đầu lại.");
-            if (currentLongPosition) await closePosition(currentLongPosition.symbol, 0, 'Lỗi đặt TP/SL', 'LONG');
-            if (currentShortPosition) await closePosition(currentShortPosition.symbol, 0, 'Lỗi đặt TP/SL', 'SHORT');
-            await cleanupAndResetCycle(TARGET_COIN_SYMBOL);
-            return;
+         if (!isShortTPSLSet) {
+             addLog("Đặt TP/SL cho SHORT thất bại. Đóng cả hai vị thế.");
+             await closePosition(currentLongPosition.symbol, 0, 'Lỗi đặt TP/SL', 'LONG');
+             await closePosition(currentShortPosition.symbol, 0, 'Lỗi đặt TP/SL', 'SHORT');
+             await cleanupAndResetCycle(TARGET_COIN_SYMBOL);
+             return;
         }
         
         addLog("Đã đặt TP/SL cho cả hai vị thế. Bắt đầu theo dõi.");
