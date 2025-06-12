@@ -1426,16 +1426,16 @@ async function manageOpenPosition() {
             if (currentShortPosition && currentShortPosition.unrealizedPnl < 0 && (!losingPos || currentShortPosition.unrealizedPnl < losingPos.unrealizedPnl)) losingPos = currentShortPosition;
         }
 
-        if (currentLongPosition) {
-            const currentWinningProfitPercentage = (currentLongPosition.unrealizedPnl / currentLongPosition.initialMargin) * 100;
-            const nextCloseLevel = currentLongPosition.partialCloseLevels[currentLongPosition.nextPartialCloseIndex];
+        // 1. Logic đóng từng phần lệnh lãi
+        if (winningPos) {
+            const currentWinningProfitPercentage = (winningPos.unrealizedPnl / winningPos.initialMargin) * 100;
+            const nextCloseLevel = winningPos.partialCloseLevels[winningPos.nextPartialCloseIndex];
             if (nextCloseLevel && currentWinningProfitPercentage >= nextCloseLevel) {
-                // Chỉ đóng toàn bộ lệnh lãi
-                addLog(`Lệnh LONG đạt mốc lãi ${nextCloseLevel}%. Đang đóng toàn bộ.`);
-                await closePosition(currentLongPosition.symbol, currentLongPosition.quantity, `Đóng toàn bộ lệnh lãi vì đạt ${nextCloseLevel}%`, currentLongPosition.side);
-                currentLongPosition.nextPartialCloseIndex++;
+                addLog(`Lệnh ${winningPos.side} đạt mốc lãi ${nextCloseLevel}%. Đang đóng 10% khối lượng ban đầu.`);
+                await closePartialPosition(winningPos, 10, 'PROFIT'); // Đóng 10% khối lượng ban đầu
+                winningPos.nextPartialCloseIndex++; // Chuyển sang mốc tiếp theo
             }
-        }
+
             // 2. Logic điều chỉnh SL cho CẢ HAI LỆNH
             const symbolDetails = await getSymbolDetails(winningPos.symbol);
             const tickSize = symbolDetails ? symbolDetails.tickSize : 0.001;
