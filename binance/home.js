@@ -75,9 +75,9 @@ let listenKeyRefreshInterval = null;
 let currentMarketPrice = null; // Cache giá từ WebSocket
 
 // --- CẤU HÌNH WEB SERVER VÀ LOG PM2 ---
-const WEB_SERVER_PORT = 1111;
-const BOT_LOG_FILE = `/home/tacke300/.pm2/logs/${process.env.name || 'test'}-out.log`;
-const THIS_BOT_PM2_NAME = process.env.name || 'test';
+const WEB_SERVER_PORT = 1230;
+const BOT_LOG_FILE = `/home/tacke300/.pm2/logs/${process.env.name || 'home'}-out.log`;
+const THIS_BOT_PM2_NAME = process.env.name || 'home';
 
 // --- LOGGING TO FILE ---
 const CUSTOM_LOG_FILE = path.join(__dirname, 'pm2.log');
