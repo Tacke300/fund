@@ -1,7 +1,7 @@
 import https from 'https';
 import crypto from 'crypto';
 import express from 'express';
-import { exec } from 'child_process';
+import { exec } => {}, from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -263,7 +263,8 @@ async function cleanupAndResetCycle(symbol) {
         positionCheckInterval = null;
     }
 
-    await cancelOpenOrdersForSymbol(symbol);
+    // KHÔNG NÊN XÓA ĐOẠN NÀY: Giúp dọn dẹp lệnh chờ cũ sau khi chu kỳ kết thúc.
+    await cancelOpenOrdersForSymbol(symbol); 
     await checkAndHandleRemainingPosition(symbol);
 
     if (botRunning) {
@@ -285,9 +286,6 @@ async function processTradeResult(orderInfo) {
     netPNL = totalProfit - totalLoss;
     addLog(`PNL Ròng: ${netPNL.toFixed(2)} USDT (Lời: ${totalProfit.toFixed(2)}, Lỗ: ${totalLoss.toFixed(2)})`);
     
-    // Logic này không đáng tin cậy vì currentTPId/currentSLId là ID của lệnh chờ. Khi lệnh khớp, ID này không còn ý nghĩa.
-    // Cách đúng là dựa vào sự thay đổi của vị thế thực tế (được handle trong manageOpenPosition và checkAndHandleRemainingPosition)
-    // Để giữ nguyên logic ban đầu, tôi sẽ để lại phần này, nhưng bạn nên biết đây có thể là nguyên nhân của các vấn đề không lường trước.
     const isLongClosure = currentLongPosition && (orderId == currentLongPosition.currentTPId || orderId == currentLongPosition.currentSLId);
     const isShortClosure = currentShortPosition && (orderId == currentShortPosition.currentTPId || orderId == currentShortPosition.currentSLId);
 
@@ -383,7 +381,8 @@ async function setInitialTPAndSL(position) {
     const { symbol, side, quantity, entryPrice, initialMargin, maxLeverageUsed, pricePrecision } = position;
     addLog(`Đang đặt TP/SL cho vị thế ${side}...`);
     try {
-        await cancelOpenOrdersForSymbol(symbol, side);
+        // KHÔNG NÊN XÓA ĐOẠN NÀY: Đảm bảo hủy lệnh TP/SL cũ trước khi đặt lệnh mới.
+        await cancelOpenOrdersForSymbol(symbol, side); 
 
         let TAKE_PROFIT_MULTIPLIER, STOP_LOSS_MULTIPLIER, partialCloseLossSteps = [];
         if (maxLeverageUsed >= 75) { TAKE_PROFIT_MULTIPLIER = 10; STOP_LOSS_MULTIPLIER = 6.66; for (let i = 1; i <= 8; i++) partialCloseLossSteps.push(i * 100); } 
@@ -398,7 +397,8 @@ async function setInitialTPAndSL(position) {
         
         const orderSide = (side === 'LONG') ? 'SELL' : 'BUY';
         
-        // SỬA LỖI 2: Xóa 'reduceOnly: 'true''
+        // Đã xóa 'reduceOnly: 'true'' ở bản sửa trước.
+        // Sửa lỗi gán orderId:
         const slOrder = await callSignedAPI('/fapi/v1/order', 'POST', { symbol, side: orderSide, positionSide: side, type: 'STOP_MARKET', stopPrice: slPrice, quantity });
         const tpOrder = await callSignedAPI('/fapi/v1/order', 'POST', { symbol, side: orderSide, positionSide: side, type: 'TAKE_PROFIT_MARKET', stopPrice: tpPrice, quantity });
         
@@ -406,8 +406,8 @@ async function setInitialTPAndSL(position) {
         
         position.initialTPPrice = tpPrice;
         position.initialSLPrice = slPrice;
-        position.currentTPId = slOrder.orderId; // TP và SL ID nên khớp với lệnh gửi, đảm bảo không nhầm lẫn giữa TP và SL
-        position.currentSLId = tpOrder.orderId; // TP và SL ID nên khớp với lệnh gửi, đảm bảo không nhầm lẫn giữa TP và SL
+        position.currentTPId = tpOrder.orderId; // SỬA LỖI GÁN ID TP
+        position.currentSLId = slOrder.orderId; // SỬA LỖI GÁN ID SL
         position.partialCloseLossLevels = partialCloseLossSteps;
         position.unrealizedPnl = 0;
         position.currentPrice = await getCurrentPrice(symbol);
@@ -500,7 +500,7 @@ async function runTradingLogic() {
     }
 }
 
-// SỬA LỖI 1: Thay đổi khai báo hàm
+// Đã sửa lỗi "SyntaxError: Identifier 'manageOpenPosition' has already been declared" ở bản sửa trước
 const manageOpenPosition = async () => {
     if (!currentLongPosition && !currentShortPosition) {
         if (positionCheckInterval) clearInterval(positionCheckInterval);
@@ -536,20 +536,20 @@ const manageOpenPosition = async () => {
 
             if (nextLossCloseLevel && currentProfitPercentage >= nextLossCloseLevel) {
                 addLog(`Lệnh ${winningPos.side} đạt mốc lãi ${nextLossCloseLevel}%. Đang đóng 10% khối lượng ban đầu của lệnh ${losingPos.side} (lệnh lỗ).`);
-                // await closePartialPosition(losingPos, 10); // Hàm này chưa được định nghĩa trong code bạn cung cấp, sẽ bị lỗi nếu bỏ comment
+                // await closePartialPosition(losingPos, 10); // Hàm này chưa được định nghĩa trong code bạn cung cấp.
                 winningPos.nextPartialCloseLossIndex++;
             }
 
             if (losingPos.closedLossAmount > 0 && currentProfitPercentage <= 0.1) {
                 addLog(`Lệnh lãi ${winningPos.side} về 0%, đang mở lại phần đã cắt lỗ của lệnh ${losingPos.side}.`);
-                // await addPosition(losingPos, losingPos.closedLossAmount, 'LOSS'); // Hàm này chưa được định nghĩa trong code bạn cung cấp, sẽ bị lỗi nếu bỏ comment
+                // await addPosition(losingPos, losingPos.closedLossAmount, 'LOSS'); // Hàm này chưa được định nghĩa trong code bạn cung cấp.
             }
         }
     } catch (error) {
         addLog(`Lỗi quản lý vị thế: ${error.msg || error.message}`);
         if(error instanceof CriticalApiError) stopBotLogicInternal();
     }
-}; // Kết thúc SỬA LỖI 1: thêm dấu chấm phẩy
+};
 
 async function scheduleNextMainCycle() {
     if (!botRunning || currentLongPosition || currentShortPosition) return;
