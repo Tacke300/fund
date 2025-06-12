@@ -1432,7 +1432,7 @@ async function manageOpenPosition() {
             const nextCloseLevel = winningPos.partialCloseLevels[winningPos.nextPartialCloseIndex];
             if (nextCloseLevel && currentWinningProfitPercentage >= nextCloseLevel) {
                 addLog(`Lệnh ${winningPos.side} đạt mốc lãi ${nextCloseLevel}%. Đang đóng 10% khối lượng ban đầu.`);
-                await closePartialPosition(winningPos, 10, 'PROFIT'); // Đóng 10% khối lượng ban đầu
+                await closePartialPosition(winningPos, 0, 'PROFIT'); // Đóng 10% khối lượng ban đầu
                 winningPos.nextPartialCloseIndex++; // Chuyển sang mốc tiếp theo
             }
 
