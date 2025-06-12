@@ -31,7 +31,7 @@ jobs:
     - name: Deploy to VPS 2
       run: |
         ssh -i ~/.ssh/id_ed25519 tacke300@34.127.36.162 '
-          cd /home/tacke300/fundingbotpromax && 
+          cd /home/tacke300/tung01 && 
           git pull && 
           ./autopull.sh
         '
