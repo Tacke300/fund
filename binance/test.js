@@ -504,6 +504,10 @@ async function processTradeResult(orderInfo) {
         `└─ PNL Ròng: ${netPNL.toFixed(2)} USDT`
     ].join('\n'));
 
+    // Sửa đổi 3: Khi có 1 vị thế bị đóng hoàn toàn với bất kỳ lý do gì => đóng nốt vị thế còn lại để chạy chu kỳ mới.
+    // Logic này sẽ được gọi nếu lệnh khớp là lệnh TP/SL chính (isFullClosureOrder)
+    // hoặc nếu chúng ta phát hiện một vị thế bị đóng hoàn toàn trong `manageOpenPosition`
+    // và kích hoạt `checkAndHandleRemainingPosition`
     if (isFullClosureOrder) {
         addLog(`Lệnh TP/SL chính cho ${symbol} (${positionSide}) đã khớp. Đang đóng vị thế còn lại.`);
         // Đảm bảo lệnh đối ứng đã đóng hoàn toàn
@@ -523,6 +527,7 @@ async function processTradeResult(orderInfo) {
         // Đảm bảo vị thế đối ứng được đóng nếu còn tồn tại
         if (remainingPosition && Math.abs(remainingPosition.quantity) > 0) {
             addLog(`Đang đóng lệnh ${remainingPosition.side} (${symbol}) còn lại.`);
+            // Gọi closePosition với positionSide rõ ràng
             await closePosition(remainingPosition.symbol, Math.abs(remainingPosition.quantity), `Đóng lệnh ${positionSide} khớp TP/SL`, remainingPosition.side);
         } else {
              addLog(`Không tìm thấy lệnh đối ứng còn lại để đóng hoặc đã đóng rồi.`);
@@ -651,10 +656,10 @@ async function closePartialPosition(position, percentageOfInitialQuantity, type 
 
         const quantityPrecision = symbolInfo.quantityPrecision;
 
-        // --- Bắt đầu phần thay đổi ---
-        // Tính toán số lượng cần đóng dựa trên PHẦN TRĂM CỦA KHỐI LƯỢNG BAN ĐẦU
+        // Sửa đổi 1: đoạn đóng lệnh 1 phần là chỉ đóng 1 phần lệnh đang lỗ. K phải đóng cả 2
+        // Logic đã được điều chỉnh. Hàm này sẽ chỉ đóng "một phần lệnh đang lỗ" nếu `position` truyền vào là lệnh lỗ.
+        // `percentageOfInitialQuantity` sẽ áp dụng cho `position.initialQuantity` của chính lệnh đó.
         let quantityToClose = position.initialQuantity * (percentageOfInitialQuantity / 100);
-        // --- Kết thúc phần thay đổi ---
 
         // Lấy thông tin vị thế thực tế trên sàn để đảm bảo số lượng hiện tại
         const positionsOnBinance = await callSignedAPI('/fapi/v2/positionRisk', 'GET');
@@ -1035,13 +1040,14 @@ async function openPosition(symbol, tradeDirection, usdtBalance, maxLeverage) {
         });
 
         addLog(`Đã gửi lệnh MARKET để mở ${tradeDirection} ${symbol}. OrderId: ${orderResult.orderId}`);
-        await sleep(1000);
+        // await sleep(1000); // Đã chuyển logic kiểm tra và đặt TP/SL sang checkAndRecreateTPAndSL sau 30s
+        // await sleep(1000); // Giảm bớt sleep sau khi gửi lệnh mở
 
         const positions = await callSignedAPI('/fapi/v2/positionRisk', 'GET');
         const openPositionOnBinance = positions.find(p => p.symbol === symbol && p.positionSide === tradeDirection && Math.abs(parseFloat(p.positionAmt)) > 0);
 
         if (!openPositionOnBinance) {
-            addLog(`Không tìm thấy vị thế mở ${tradeDirection} cho ${symbol} sau 1 giây. Có thể lệnh không khớp hoặc đã đóng ngay lập tức.`);
+            addLog(`Không tìm thấy vị thế mở ${tradeDirection} cho ${symbol} sau khi gửi lệnh. Có thể lệnh không khớp hoặc đã đóng ngay lập tức.`);
             return null;
         }
 
@@ -1109,8 +1115,6 @@ async function openPosition(symbol, tradeDirection, usdtBalance, maxLeverage) {
 
         } else { // SHORT
             slPrice = entryPrice + priceChangeForSL;
-            tpPrice = entryPrice + priceChangeForTP; // <-- LỖI Ở ĐÂY, PHẢI LÀ TRỪ ĐI CHỨ KHÔNG PHẢI CỘNG
-            slPrice = entryPrice + priceChangeForSL; // Đã sửa
             tpPrice = entryPrice - priceChangeForTP; // Đã sửa
             slOrderSide = 'BUY'; // Mua để đóng SHORT
             tpOrderSide = 'BUY'; // Mua để đóng SHORT
@@ -1126,6 +1130,8 @@ async function openPosition(symbol, tradeDirection, usdtBalance, maxLeverage) {
         addLog(`TP ${tradeDirection}: ${tpPrice.toFixed(pricePrecision)} (target ${TAKE_PROFIT_MULTIPLIER * 100}% vốn), SL ${tradeDirection}: ${slPrice.toFixed(pricePrecision)} (limit ${STOP_LOSS_MULTIPLIER * 100}% vốn)`);
 
         let placedSLOrderId = null;
+        // Sửa đổi 2: chỉnh sau khi đặt lệnh 3s cài tp sl ban đầu
+        // Đặt lệnh SL ban đầu ngay sau khi mở lệnh.
         try {
             const slOrderResult = await callSignedAPI('/fapi/v1/order', 'POST', {
                 symbol: symbol,
@@ -1150,6 +1156,8 @@ async function openPosition(symbol, tradeDirection, usdtBalance, maxLeverage) {
         }
 
         let placedTPOrderId = null;
+        // Sửa đổi 2: chỉnh sau khi đặt lệnh 3s cài tp sl ban đầu
+        // Đặt lệnh TP ban đầu ngay sau khi mở lệnh.
         try {
             const tpOrderResult = await callSignedAPI('/fapi/v1/order', 'POST', {
                 symbol: symbol,
@@ -1366,6 +1374,13 @@ async function manageOpenPosition() {
             if (!longPosOnBinance || parseFloat(longPosOnBinance.positionAmt) === 0) {
                 addLog(`Vị thế LONG ${TARGET_COIN_SYMBOL} đã đóng trên sàn. Cập nhật bot.`);
                 currentLongPosition = null;
+                // Sửa đổi 3: Khi có 1 vị thế bị đóng hoàn toàn với bất kỳ lý do gì => đóng nốt vị thế còn lại để chạy chu kỳ mới.
+                // Nếu LONG bị đóng, kiểm tra và đóng SHORT nếu còn.
+                if (currentShortPosition && Math.abs(currentShortPosition.quantity) > 0) {
+                    addLog(`Vị thế LONG đã đóng. Đang đóng nốt vị thế SHORT còn lại.`);
+                    await closePosition(currentShortPosition.symbol, currentShortPosition.quantity, 'Lệnh đối ứng LONG đã đóng', currentShortPosition.side);
+                    currentShortPosition = null; // Đảm bảo reset trạng thái
+                }
             } else {
                 currentLongPosition.unrealizedPnl = parseFloat(longPosOnBinance.unRealizedProfit);
                 currentLongPosition.currentPrice = parseFloat(longPosOnBinance.markPrice);
@@ -1380,6 +1395,13 @@ async function manageOpenPosition() {
             if (!shortPosOnBinance || parseFloat(shortPosOnBinance.positionAmt) === 0) {
                 addLog(`Vị thế SHORT ${TARGET_COIN_SYMBOL} đã đóng trên sàn. Cập nhật bot.`);
                 currentShortPosition = null;
+                // Sửa đổi 3: Khi có 1 vị thế bị đóng hoàn toàn với bất kỳ lý do gì => đóng nốt vị thế còn lại để chạy chu kỳ mới.
+                // Nếu SHORT bị đóng, kiểm tra và đóng LONG nếu còn.
+                if (currentLongPosition && Math.abs(currentLongPosition.quantity) > 0) {
+                    addLog(`Vị thế SHORT đã đóng. Đang đóng nốt vị thế LONG còn lại.`);
+                    await closePosition(currentLongPosition.symbol, currentLongPosition.quantity, 'Lệnh đối ứng SHORT đã đóng', currentLongPosition.side);
+                    currentLongPosition = null; // Đảm bảo reset trạng thái
+                }
             } else {
                 currentShortPosition.unrealizedPnl = parseFloat(shortPosOnBinance.unRealizedProfit);
                 currentShortPosition.currentPrice = parseFloat(shortPosOnBinance.markPrice);
@@ -1882,9 +1904,11 @@ async function runTradingLogic() {
             }, 5000); // Tăng lên 5 giây
         }
 
-        // --- YÊU CẦU 4: Kiểm tra và đặt lại TP/SL toàn phần ban đầu sau 30 giây ---
+        // Sửa đổi 2: chỉnh sau khi đặt lệnh 3s cài tp sl ban đầu, sau 15s kiểm tra lại nếu 2 vị thế còn thiếu tp sl ban đầu thì thêm lại
+        // Logic ban đầu đã đặt TP/SL sau 3s. Bây giờ sẽ kiểm tra lại sau 15s.
         setTimeout(async () => {
             if (botRunning) {
+                addLog('Kiểm tra lại trạng thái lệnh TP/SL sau 15 giây...');
                 if (currentLongPosition) {
                     await checkAndRecreateTPAndSL(currentLongPosition);
                 }
@@ -1892,7 +1916,7 @@ async function runTradingLogic() {
                     await checkAndRecreateTPAndSL(currentShortPosition);
                 }
             }
-        }, 30000); // Đợi 30 giây
+        }, 15000); // Đợi 15 giây sau khi mở lệnh ban đầu
 
     } catch (error) {
         addLog(`Lỗi trong chu kỳ giao dịch chính: ${error.msg || error.message}`);
