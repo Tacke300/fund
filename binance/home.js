@@ -19,30 +19,21 @@ const BASE_HOST = 'fapi.binance.com';
 const WS_BASE_URL = 'wss://fstream.binance.com';
 const WS_USER_DATA_ENDPOINT = '/ws';
 
-let serverTimeOffset = 0; // Offset thời gian để đồng bộ với server Binance
-
-// Biến cache cho exchangeInfo để tránh gọi API lặp lại
+let serverTimeOffset = 0;
 let exchangeInfoCache = null;
-
-// Biến cờ để tránh gửi nhiều lệnh đóng cùng lúc
 let isClosingPosition = false;
-
-// Biến cờ điều khiển trạng thái bot (chạy/dừng)
 let botRunning = false;
-let botStartTime = null; // Thời điểm bot được khởi động
+let botStartTime = null;
 
-// --- START: BIẾN TRẠNG THÁI VỊ THẾ MỚI (HEDGING) ---
+// --- BIẾN TRẠNG THÁI VỊ THẾ ---
 let currentLongPosition = null; 
-let currentShortPosition = null;
+let currentShortPosition = null; 
 
-// Biến để lưu trữ setInterval cho việc kiểm tra vị thế đang mở
 let positionCheckInterval = null;
-// Biến để lưu trữ setTimeout cho lần chạy tiếp theo của chu kỳ chính (runTradingLogic)
 let nextScheduledCycleTimeout = null;
-// Biến để lưu trữ setTimeout cho việc tự động khởi động lại bot sau lỗi nghiêm trọng
 let retryBotTimeout = null;
 
-// === START - BIẾN QUẢN LÝ LỖI VÀ TẦN SUẤT LOG ===
+// === BIẾN QUẢN LÝ LỖI ===
 let consecutiveApiErrors = 0;
 const MAX_CONSECUTIVE_API_ERRORS = 3;
 const ERROR_RETRY_DELAY_MS = 10000;
@@ -56,13 +47,11 @@ class CriticalApiError extends Error {
         this.name = 'CriticalApiError';
     }
 }
-// === END - BIẾN QUẢN LÝ LỖI VÀ TẦN SUẤT LOG ===
 
-// --- CẤU HÌNH BOT CÁC THAM SỐ GIAO DUC (GIÁ TRỊ MẶC ĐỊNH) ---
-let INITIAL_INVESTMENT_AMOUNT = 1;
+// --- CẤU HÌNH BOT ---
+let INITIAL_INVESTMENT_AMOUNT = 1; 
 let TARGET_COIN_SYMBOL = 'ETHUSDT';
 
-// Biến để lưu trữ tổng lời/lỗ
 let totalProfit = 0;
 let totalLoss = 0;
 let netPNL = 0;
@@ -188,6 +177,7 @@ async function callSignedAPI(fullEndpointPath, method = 'GET', params = {}) {
     }
 }
 
+
 async function callPublicAPI(fullEndpointPath, params = {}) {
     const queryString = new URLSearchParams(params).toString();
     const fullPathWithQuery = `${fullEndpointPath}?${queryString}`;
@@ -206,6 +196,7 @@ async function setLeverage(symbol, leverage) { try { await callSignedAPI('/fapi/
 async function getExchangeInfo() { if (exchangeInfoCache) return exchangeInfoCache; try { const d = await callPublicAPI('/fapi/v1/exchangeInfo'); exchangeInfoCache = {}; d.symbols.forEach(s => { const p = s.filters.find(f => f.filterType === 'PRICE_FILTER'); const l = s.filters.find(f => f.filterType === 'LOT_SIZE'); const m = s.filters.find(f => f.filterType === 'MIN_NOTIONAL'); exchangeInfoCache[s.symbol] = { pricePrecision: s.pricePrecision, quantityPrecision: s.quantityPrecision, tickSize: parseFloat(p?.tickSize || 0.001), stepSize: parseFloat(l?.stepSize || 0.001), minNotional: parseFloat(m?.notional || 0) }; }); addLog('Đã tải thông tin sàn.'); return exchangeInfoCache; } catch (e) { throw e; } }
 async function getSymbolDetails(symbol) { const f = await getExchangeInfo(); return f?.[symbol] || null; }
 async function getCurrentPrice(symbol) { try { const d = await callPublicAPI('/fapi/v1/ticker/price', { symbol }); return parseFloat(d.price); } catch (e) { addLog(`Lỗi lấy giá: ${e.message}`); return null; } }
+
 
 // --- LOGIC GIAO DỊCH ---
 
@@ -389,10 +380,10 @@ async function setInitialTPAndSL(position) {
         position.hasAdjustedSLTo200PercentProfit = false;
         position.hasAdjustedSLTo500PercentProfit = false;
 
-        return true; // Báo hiệu thành công
+        return true;
     } catch (error) {
         addLog(`Lỗi nghiêm trọng khi đặt TP/SL cho ${side}: ${error.msg || error.message}.`);
-        return false; // Báo hiệu thất bại
+        return false;
     }
 }
 
@@ -463,19 +454,6 @@ async function runTradingLogic() {
     }
 }
 
-// --- CÁC HÀM CÒN LẠI (GIỮ NGUYÊN) ---
-async function manageOpenPosition() { /* Giữ nguyên logic cũ */ }
-async function scheduleNextMainCycle() { /* Giữ nguyên logic cũ */ }
-async function getListenKey() { /* Giữ nguyên logic cũ */ }
-async function keepAliveListenKey() { /* Giữ nguyên logic cũ */ }
-function setupMarketDataStream(symbol) { /* Giữ nguyên logic cũ */ }
-function setupUserDataStream(key) { /* Giữ nguyên logic cũ */ }
-async function startBotLogicInternal() { /* Giữ nguyên logic cũ */ }
-function stopBotLogicInternal() { /* Giữ nguyên logic cũ */ }
-async function checkAndHandleRemainingPosition(symbol) { /* Giữ nguyên logic cũ */ }
-// Các endpoint của Express App
-// ...
-
 async function manageOpenPosition() {
     if (!currentLongPosition && !currentShortPosition) {
         if (positionCheckInterval) clearInterval(positionCheckInterval);
@@ -511,13 +489,13 @@ async function manageOpenPosition() {
 
             if (nextLossCloseLevel && currentProfitPercentage >= nextLossCloseLevel) {
                 addLog(`Lệnh ${winningPos.side} đạt mốc lãi ${nextLossCloseLevel}%. Đang đóng 10% khối lượng ban đầu của lệnh ${losingPos.side} (lệnh lỗ).`);
-                await closePartialPosition(losingPos, 10);
+                // await closePartialPosition(losingPos, 10);
                 winningPos.nextPartialCloseLossIndex++;
             }
 
             if (losingPos.closedLossAmount > 0 && currentProfitPercentage <= 0.1) {
                 addLog(`Lệnh lãi ${winningPos.side} về 0%, đang mở lại phần đã cắt lỗ của lệnh ${losingPos.side}.`);
-                await addPosition(losingPos, losingPos.closedLossAmount, 'LOSS');
+                // await addPosition(losingPos, losingPos.closedLossAmount, 'LOSS');
             }
         }
     } catch (error) {
