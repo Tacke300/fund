@@ -1,6 +1,4 @@
-Okay, here is the complete code with the typo `scheduleNextCycle()` corrected to `scheduleNextMainCycle()` in the `startBotLogicInternal` function, and including the previously cut-off portion.
 
-```javascript
 import https from 'https';
 import crypto from 'crypto';
 import express from 'express';
