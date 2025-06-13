@@ -591,7 +591,7 @@ async function addPosition(position, quantityToReopen, reason) {
 
     } catch (error) {
         addLog(`Lỗi thêm lượng vào vị thế ${position.side} ${position.symbol}: ${error.msg || error.message}`, true);
-        if (error instanceof CriticalApiError) stopBotLogicInternal();
+        if (error instanceof CriticalApiError) throw error;
     }
 }
 
@@ -960,6 +960,125 @@ async function scheduleNextMainCycle() {
              nextScheduledCycleTimeout = setTimeout(scheduleNextMainCycle, 5000);
         }
     }
+}
+
+async function getListenKey() {
+    try {
+        const response = await callSignedAPI('/fapi/v1/listenKey', 'POST');
+        addLog(`Listen Key nhận được: ${response.listenKey}`);
+        return response.listenKey;
+    } catch (error) {
+        addLog(`Lỗi lấy Listen Key: ${error.msg || error.message}`, true);
+        return null;
+    }
+}
+
+async function keepAliveListenKey(key) {
+    try {
+        await callSignedAPI('/fapi/v1/listenKey', 'PUT', { listenKey: key });
+        addLog(`Listen Key ${key} đã được làm mới.`);
+    } catch (error) {
+        addLog(`Lỗi làm mới Listen Key ${key}: ${error.msg || error.message}`, true);
+        if (error.code === -1125) { // ListenKey does not exist
+            addLog("Listen Key không còn hợp lệ, cố gắng lấy cái mới.", true);
+            if (userDataWs) { userDataWs.close(); userDataWs = null; }
+            if (listenKeyRefreshInterval) { clearInterval(listenKeyRefreshInterval); listenKeyRefreshInterval = null; }
+            const newListenKey = await getListenKey();
+            if (newListenKey) {
+                setupUserDataStream(newListenKey);
+                listenKey = newListenKey;
+            } else {
+                addLog("Không thể lấy Listen Key mới, User Data Stream sẽ không hoạt động.", true);
+            }
+        }
+        if (error instanceof CriticalApiError) throw error;
+    }
+}
+
+function setupUserDataStream(key) {
+    if (userDataWs) {
+        addLog('Đã có User Data Stream. Đóng kết nối cũ.');
+        userDataWs.close();
+    }
+
+    const wsUrl = `${WS_BASE_URL}${WS_USER_DATA_ENDPOINT}?listenKey=${key}`;
+    userDataWs = new WebSocket(wsUrl);
+
+    userDataWs.onopen = () => {
+        addLog('Kết nối User Data Stream đã mở.');
+        if (listenKeyRefreshInterval) clearInterval(listenKeyRefreshInterval);
+        listenKeyRefreshInterval = setInterval(() => keepAliveListenKey(key), 1000 * 60 * 30); // Refresh every 30 minutes
+    };
+
+    userDataWs.onmessage = (event) => {
+        const message = JSON.parse(event.data);
+        if (message.e === 'ORDER_TRADE_UPDATE') {
+            processTradeResult(message.o);
+        }
+    };
+
+    userDataWs.onerror = (error) => {
+        addLog(`Lỗi User Data Stream: ${error.message || error}`, true);
+        if (listenKeyRefreshInterval) { clearInterval(listenKeyRefreshInterval); listenKeyRefreshInterval = null; }
+    };
+
+    userDataWs.onclose = (event) => {
+        addLog(`User Data Stream đã đóng. Mã: ${event.code}, Lý do: ${event.reason || 'Không rõ'}`, true);
+        if (listenKeyRefreshInterval) { clearInterval(listenKeyRefreshInterval); listenKeyRefreshInterval = null; }
+        userDataWs = null;
+        if (botRunning) {
+            addLog("Đang thử kết nối lại User Data Stream sau 5 giây...", true);
+            setTimeout(async () => {
+                if (!botRunning) return;
+                const newKey = await getListenKey();
+                if (newKey) {
+                    setupUserDataStream(newKey);
+                    listenKey = newKey;
+                } else {
+                    addLog("Không thể khôi phục User Data Stream. Có thể mất cập nhật.", true);
+                }
+            }, 5000);
+        }
+    };
+}
+
+function setupMarketDataStream(symbol) {
+    if (marketWs) {
+        addLog('Đã có Market Data Stream. Đóng kết nối cũ.');
+        marketWs.close();
+    }
+
+    const wsUrl = `${WS_BASE_URL}/ws/${symbol.toLowerCase()}@markPrice`;
+    marketWs = new WebSocket(wsUrl);
+
+    marketWs.onopen = () => {
+        addLog('Kết nối Market Data Stream đã mở.');
+    };
+
+    marketWs.onmessage = (event) => {
+        const message = JSON.parse(event.data);
+        if (message.e === 'markPriceUpdate') {
+            currentMarketPrice = parseFloat(message.p);
+             if (currentLongPosition) currentLongPosition.currentPrice = currentMarketPrice;
+             if (currentShortPosition) currentShortPosition.currentPrice = currentMarketPrice;
+        }
+    };
+
+    marketWs.onerror = (error) => {
+        addLog(`Lỗi Market Data Stream: ${error.message || error}`, true);
+    };
+
+    marketWs.onclose = (event) => {
+        addLog(`Market Data Stream đã đóng. Mã: ${event.code}, Lý do: ${event.reason || 'Không rõ'}`, true);
+        marketWs = null;
+        if (botRunning) {
+            addLog("Đang thử kết nối lại Market Data Stream sau 5 giây...", true);
+            setTimeout(() => {
+                if (!botRunning) return;
+                setupMarketDataStream(symbol);
+            }, 5000);
+        }
+    };
 }
 
 
