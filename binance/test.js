@@ -737,7 +737,7 @@ async function updateStopLoss(position, targetSLPrice) {
 
     } catch (error) {
         addLog(`Lỗi cập nhật SL cho ${position.side} ${position.symbol}: ${error.msg || error.message}`, true);
-        if (error instanceof CriticalApiError) stopBotLogicInternal();
+        if (error instanceof CriticalApiError) throw error;
     }
 }
 
@@ -1001,7 +1001,27 @@ function setupUserDataStream(key) {
         userDataWs.close();
     }
 
-    const wsUrl = `${WS_BASE_URL}${WS_USER_DATA_ENDPOINT}?listenKey=${key}`;
+    // Đảm bảo rằng URL được xây dựng chính xác, thêm '/' nếu cần
+    // Mặc dù WS_USER_DATA_ENDPOINT đã là '/ws', kiểm tra để tránh lỗi cú pháp.
+    let wsPath = WS_USER_DATA_ENDPOINT;
+    if (!wsPath.startsWith('/')) {
+        wsPath = '/' + wsPath;
+    }
+    if (!wsPath.endsWith('/')) {
+        wsPath = wsPath + '/';
+    }
+    // Thực tế, Binance chỉ yêu cầu /ws hoặc /ws/ (không có gì khác)
+    // Tôi sẽ sửa lại để đảm bảo nó là /ws
+    wsPath = '/ws';
+
+    const wsUrl = `${WS_BASE_URL}${wsPath}?listenKey=${key}`;
+
+    // Kiểm tra xem listenKey có hợp lệ không
+    if (!key || key.length === 0) {
+        addLog("Listen Key rỗng hoặc không hợp lệ. Không thể thiết lập User Data Stream.", true);
+        return;
+    }
+
     userDataWs = new WebSocket(wsUrl);
 
     userDataWs.onopen = () => {
@@ -1220,7 +1240,7 @@ async function cleanupAndResetCycle_Internal(symbol) {
     if (positionCheckInterval) { clearInterval(positionCheckInterval); positionCheckInterval = null; addLog('Dọn dẹp: Đã dừng kiểm tra định kỳ.'); }
 
     if (botRunning) { addLog(`Dọn dẹp hoàn tất. Lên lịch chu kỳ mới.`, true); scheduleNextMainCycle(); }
-    else { addLog(`Dọn dẹp hoàn tất. Bot không chạy.`, true); }
+    else { addLog(`Dọn dọn hoàn tất. Bot không chạy.`, true); }
 }
 
 const app = express();
