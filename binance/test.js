@@ -109,7 +109,7 @@ let listenKeyRefreshInterval = null; // setInterval để làm mới listenKey
 let currentMarketPrice = null; // Cache giá từ WebSocket
 
 // --- CẤU HÌNH WEB SERVER VÀ LOG PM2 ---
-const WEB_SERVER_PORT = 1230; // Cổng cho Web Server
+const WEB_SERVER_PORT = 1111; // Cổng cho Web Server
 // Lấy tên process từ PM2 environment variable, nếu không có thì dùng 'test'
 const THIS_BOT_PM2_NAME = process.env.PM2_NAME || 'test'; 
 const BOT_LOG_FILE = `/home/tacke300/.pm2/logs/${THIS_BOT_PM2_NAME}-out.log`;
