@@ -65,7 +65,7 @@ let currentMarketPrice = null;
 
 // --- CẤU HÌNH WEB SERVER VÀ LOG PM2 ---
 const WEB_SERVER_PORT = 1230;
-const THIS_BOT_PM2_NAME = 'home';
+const THIS_BOT_PM2_NAME = 'test';
 const BOT_LOG_FILE = `/home/tacke300/.pm2/logs/${THIS_BOT_PM2_NAME}-out.log`;
 
 // --- LOGGING TO FILE ---
