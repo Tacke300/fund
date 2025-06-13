@@ -84,7 +84,7 @@ function addLog(message, isImportant = false) {
     console.log(logEntry);
     if (LOG_TO_CUSTOM_FILE) {
         fs.appendFile(CUSTOM_LOG_FILE, logEntry + '\n', (err) => {
-            if (err) console.error('Lỗi khi ghi log vào file tùy chỉnh:', err);
+            if (err) console.error('Lỗi ghi log vào file tùy chỉnh:', err);
         });
     }
 }
@@ -391,15 +391,16 @@ async function openPosition(symbol, tradeDirection, usdtBalance, maxLeverage) {
         const priceChangeForSL = actualQuantity > 0 ? lossLimitUSDT / actualQuantity : 0;
 
         let initialCalculatedSLPrice, initialCalculatedTPPrice;
-        // Use tickSize directly
-         const tickSize = symbolDetails.tickSize;
+         // Re-get tickSize within this scope
+        const symbolInfoCurrent = await getSymbolDetails(symbol); // Use a new const name
+        const tickSize_current = symbolInfoCurrent ? symbolInfoCurrent.tickSize : 0.001; // Use a new const name
 
         if (tradeDirection === 'LONG') {
-             initialCalculatedSLPrice = Math.floor((entryPrice - priceChangeForSL) / tickSize) * tickSize;
-             initialCalculatedTPPrice = Math.floor((entryPrice + priceChangeForTP) / tickSize) * tickSize;
+             initialCalculatedSLPrice = Math.floor((entryPrice - priceChangeForSL) / tickSize_current) * tickSize_current;
+             initialCalculatedTPPrice = Math.floor((entryPrice + priceChangeForTP) / tickSize_current) * tickSize_current;
         } else {
-             initialCalculatedSLPrice = Math.ceil((entryPrice + priceChangeForSL) / tickSize) * tickSize;
-             initialCalculatedTPPrice = Math.ceil((entryPrice - priceChangeForTP) / tickSize) * tickSize;
+             initialCalculatedSLPrice = Math.ceil((entryPrice + priceChangeForSL) / tickSize_current) * tickSize_current;
+             initialCalculatedTPPrice = Math.ceil((entryPrice - priceChangeForTP) / tickSize_current) * tickSize_current;
         }
          initialCalculatedSLPrice = parseFloat(initialCalculatedSLPrice.toFixed(pricePrecision));
          initialCalculatedTPPrice = parseFloat(initialCalculatedTPPrice.toFixed(pricePrecision));
@@ -503,21 +504,47 @@ async function checkAndRecreateMissingTPAndSL(position) {
 
         if (!hasActiveTP) {
             addLog(`Lệnh TP bị thiếu cho ${position.side} ${position.symbol}. Tạo lại...`);
-             await placeInitialTPAndSL(position); // Dùng lại hàm đặt lệnh
+             await placeInitialTPAndSL(position);
         }
 
         if (!hasActiveSL && shouldHaveSL) {
             addLog(`Lệnh SL bị thiếu cho ${position.side} ${position.symbol}. Tạo lại...`);
-            await placeInitialTPAndSL(position); // Dùng lại hàm đặt lệnh
+            await placeInitialTPAndSL(position);
         } else if (hasActiveSL && !shouldHaveSL) {
             addLog(`Lệnh SL tồn tại cho ${position.side} ${position.symbol}, nhưng lẽ ra không nên có (đòn bẩy cao). Hủy lệnh SL.`);
-            await updateStopLoss(position, null); // Hủy lệnh SL này
+            await updateStopLoss(position, null);
         }
 
     } catch (error) {
         addLog(`Lỗi kiểm tra/tạo lại TP/SL cho ${position.side} ${position.symbol}: ${error.message}`, true);
         if (error instanceof CriticalApiError) stopBotLogicInternal();
     }
+}
+
+async function scheduleInitialTPAndSLPlacement() {
+    if (!botRunning || !currentLongPosition || !currentShortPosition) return;
+    addLog(`Lên lịch đặt lệnh TP/SL ban đầu sau 5 giây.`);
+    setTimeout(async () => {
+        if (!botRunning) return;
+        try {
+             addLog(`Bắt đầu đặt lệnh TP/SL ban đầu (đã lên lịch).`);
+            if (currentLongPosition) await placeInitialTPAndSL(currentLongPosition);
+            if (currentShortPosition) await placeInitialTPAndSL(currentShortPosition);
+
+            if (botRunning && (currentLongPosition || currentShortPosition)) {
+                addLog(`Lên lịch kiểm tra lệnh TP/SL thiếu sau 20 giây.`);
+                setTimeout(async () => {
+                    if (!botRunning) return;
+                     addLog(`Bắt đầu kiểm tra và tạo lại TP/SL ban đầu thiếu (đã lên lịch).`);
+                    if (currentLongPosition) await checkAndRecreateMissingTPAndSL(currentLongPosition);
+                    if (currentShortPosition) await checkAndRecreateMissingTPAndSL(currentShortPosition);
+                }, 20000);
+            }
+        } catch (error) {
+            addLog(`Lỗi trong lịch trình đặt TP/SL ban đầu: ${error.message}`, true);
+             if (error instanceof CriticalApiError) stopBotLogicInternal();
+        }
+    }, 5000);
 }
 
 async function addPosition(position, quantityToReopen, reason) {
@@ -527,7 +554,7 @@ async function addPosition(position, quantityToReopen, reason) {
     const currentPositionOnBinance = positionsOnBinance.find(p => p.symbol === position.symbol && p.positionSide === position.side && Math.abs(parseFloat(p.positionAmt)) > 0);
     if (!currentPositionOnBinance) {
         addLog(`Không tìm thấy vị thế ${position.side} trên sàn. Không thể thêm lượng.`, true);
-        if(position.side === 'LONG' && currentLongPosition) currentLongPosition = null;
+        if(position.side === 'LONG') currentLongPosition = null;
         else currentShortPosition = null;
         return;
     }
@@ -613,9 +640,8 @@ async function recalculateAndPlaceTPAndSL(position) {
 
         const orderSideToClose = position.side === 'LONG' ? 'SELL' : 'BUY';
 
-         let finalSLPriceForOrder = newSLPrice; // Mặc định giá SL tính toán mới nhất
+         let finalSLPriceForOrder = newSLPrice; // Default to recalculated price
 
-         // Áp dụng ghi đè giá SL từ các mốc điều chỉnh (nếu có)
          let winningPosLocal = (currentLongPosition && currentShortPosition && currentLongPosition.unrealizedPnl > 0) ? currentLongPosition : (currentLongPosition && currentShortPosition && currentShortPosition.unrealizedPnl > 0) ? currentShortPosition : null;
          let losingPosLocal = (currentLongPosition && currentShortPosition && currentLongPosition.unrealizedPnl < 0) ? currentLongPosition : (currentLongPosition && currentShortPosition && currentShortPosition.unrealizedPnl < 0) ? currentShortPosition : null;
 
@@ -753,9 +779,8 @@ const manageOpenPosition = async () => {
             else if (currentShortPosition.unrealizedPnl > 0 && currentLongPosition.unrealizedPnl < 0) { winningPos = currentShortPosition; losingPos = currentLongPosition; }
             else return;
 
-            const winningSymbolDetails = await getSymbolDetails(winningPos.symbol);
             const losingSymbolDetails = await getSymbolDetails(losingPos.symbol);
-            if (!winningSymbolDetails || !losingSymbolDetails) { addLog(`Không tìm thông tin symbol để quản lý vị thế.`, true); return; }
+            if (!losingSymbolDetails) { addLog(`Không tìm thông tin symbol cho lệnh lỗ.`, true); return; }
 
             const currentProfitPercentage = winningPos.initialMargin > 0 ? (winningPos.unrealizedPnl / winningPos.initialMargin) * 100 : 0;
 
@@ -810,14 +835,16 @@ const manageOpenPosition = async () => {
                          addLog(`Mốc 8 đạt. Lệnh lỗ đã đóng. Điều chỉnh SL lệnh lãi ${winningPos.side} về giá entry lệnh lỗ lúc đóng lần 5 (${slTargetPrice}).`, true);
                          await updateStopLoss(winningPos, slTargetPrice);
                          winningPos.hasAdjustedSL8thClose = true;
-                    } else { addLog(`Mốc 8 đạt, nhưng lệnh lỗ còn lượng đáng kể (${remainingLosingQty}).`); }
+                    } else {
+                        addLog(`Mốc 8 đạt, nhưng lệnh lỗ còn lượng đáng kể (${remainingLosingQty}).`);
+                    }
                  }
             }
 
              if (winningPos.nextPartialCloseLossIndex > 0 && winningPos.nextPartialCloseLossIndex <= 7) {
                  const currentWinningProfitPercentage = winningPos.initialMargin > 0 ? (winningPos.unrealizedPnl / winningPos.initialMargin) * 100 : 0;
                  if (currentWinningProfitPercentage <= 0.1 && losingPos.closedQuantity > 0) {
-                     const losingSymbolDetailsLocal = winningSymbolDetails.symbol === losingPos.symbol ? winningSymbolDetails : await getSymbolDetails(losingPos.symbol);
+                     const losingSymbolDetailsLocal = losingSymbolDetails; // Already fetched losingSymbolDetails above
                      if (losingSymbolDetailsLocal) {
                          addLog(`Lệnh lãi trở về 0%. Thêm lượng (${losingPos.closedQuantity.toFixed(losingSymbolDetailsLocal.quantityPrecision)}) vào lệnh lỗ ${losingPos.symbol}.`, true);
                          await addPosition(losingPos, losingPos.closedQuantity, 'Lệnh lãi trở về 0%');
@@ -826,6 +853,10 @@ const manageOpenPosition = async () => {
                      }
                  }
              }
+        } else if (currentLongPosition || currentShortPosition) {
+             const remainingPos = currentLongPosition || currentShortPosition;
+             // Recheck and recreate missing TP/SL on the remaining leg if necessary.
+             // Let the scheduled checkAndRecreateMissingTPAndSL after initial open handle this primarily.
         }
     } catch (error) {
         addLog(`Lỗi quản lý vị thế mở: ${error.msg || error.message}`, true);
@@ -894,7 +925,7 @@ async function runTradingLogic() {
     }
 }
 
-
+// Move scheduleNextMainCycle definition ABOVE its usage
 async function scheduleNextMainCycle() {
     if (!botRunning) return;
     clearTimeout(nextScheduledCycleTimeout);
@@ -908,7 +939,10 @@ async function scheduleNextMainCycle() {
                  positionCheckInterval = setInterval(async () => {
                     if (botRunning && (currentLongPosition || currentShortPosition)) {
                         try { await manageOpenPosition(); }
-                        catch (error) { addLog(`Lỗi kiểm tra định kỳ: ${error.message}`, true); if (error instanceof CriticalApiError) stopBotLogicInternal(); }
+                        catch (error) {
+                             addLog(`Lỗi kiểm tra định kỳ: ${error.message}`, true);
+                             if (error instanceof CriticalApiError) stopBotLogicInternal();
+                        }
                     } else if (!botRunning && positionCheckInterval) { clearInterval(positionCheckInterval); positionCheckInterval = null; addLog('Ngừng kiểm tra định kỳ do bot dừng.'); }
                     else if ((!currentLongPosition && !currentShortPosition) && positionCheckInterval) { clearInterval(positionCheckInterval); positionCheckInterval = null; addLog('Ngừng kiểm tra định kỳ do không còn vị thế nội bộ.'); if(botRunning) scheduleNextMainCycle(); }
                 }, 5000);
