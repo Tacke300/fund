@@ -1,31 +1,30 @@
-name: Deploy tacke300 to VPS
+name: Deploy to VPS
 
 on:
   push:
-    branches: [main]
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v3
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-    - name: Setup SSH with tacke300 key
-      run: |
-        mkdir -p ~/.ssh
-        echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_ed25519
-        chmod 600 ~/.ssh/id_ed25519
-        ssh-keyscan -H 34.142.248.96 >> ~/.ssh/known_hosts
-        ssh-keyscan -H 34.127.36.162 >> ~/.ssh/known_hosts
+      - name: Setup SSH key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H 34.145.69.100 >> ~/.ssh/known_hosts
 
-    - name: Deploy to VPS 1
-      run: |
-        ssh -i ~/.ssh/id_ed25519 tacke300@34.142.248.96 '
-          cd /home/tacke300/fundingbotpromax && 
-          git pull && 
-          ./autopull.sh
-        '
-
-    
+      - name: Deploy to VPS
+        run: |
+          scp -i ~/.ssh/id_ed25519 -o StrictHostKeyChecking=no ./auto_pull.sh tacke300@34.145.69.100:/home/tacke300/tz800/auto_pull.sh
+          ssh -i ~/.ssh/id_ed25519 -o StrictHostKeyChecking=no tacke300@34.145.69.100 'chmod +x /home/tacke300/tz800/auto_pull.sh && bash /home/tacke300/tz800/auto_pull.sh'
+     
