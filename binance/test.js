@@ -1278,8 +1278,8 @@ app.post('/api/configure', (req, res) => {
 
         if (oldSymbol !== TARGET_COIN_SYMBOL) {
             addLog(`Coin đã thay đổi ${oldSymbol} -> ${TARGET_COIN_SYMBOL}. Đang reset trạng thái.`);
-            stopBotLogicInternal();
-            setTimeout(() => startBotLogicInternal(), 2000);
+           // stopBotLogicInternal();
+           // setTimeout(() => startBotLogicInternal(), 2000);
         }
         res.json({ success: true, message: 'Cấu hình đã cập nhật.' });
     } else {
