@@ -14,6 +14,7 @@ const __dirname = path.dirname(__filename);
 
 const BASE_HOST = 'fapi.binance.com';
 const WS_BASE_URL = 'wss://fstream.binance.com';
+const WS_USER_DATA_ENDPOINT = '/ws';
 
 let serverTimeOffset = 0;
 let exchangeInfoCache = null;
@@ -29,6 +30,8 @@ let nextScheduledCycleTimeout = null;
 
 let consecutiveApiErrors = 0;
 const MAX_CONSECUTIVE_API_ERRORS = 3;
+const ERROR_RETRY_DELAY_MS = 10000;
+let retryBotTimeout = null;
 
 const logCounts = {};
 const LOG_COOLDOWN_MS = 2000;
@@ -64,23 +67,31 @@ function addLog(message) {
     let logEntry = `[${time}] ${message}`;
     const messageHash = crypto.createHash('md5').update(message).digest('hex');
 
-    if (logCounts[messageHash] && (now.getTime() - logCounts[messageHash].lastLoggedTime.getTime()) >= LOG_COOLDOWN_MS) {
-        logCounts[messageHash] = { count: 0, lastLoggedTime: now };
-    }
-
     if (logCounts[messageHash]) {
         logCounts[messageHash].count++;
-        if (logCounts[messageHash].count > 1) {
-            console.log(`[${time}] (x${logCounts[messageHash].count}) ${message}`);
-            if (LOG_TO_CUSTOM_FILE) fs.appendFile(CUSTOM_LOG_FILE, `[${time}] (x${logCounts[messageHash].count}) ${message}\n`, () => {});
+        const lastLoggedTime = logCounts[messageHash].lastLoggedTime;
+
+        if ((now.getTime() - lastLoggedTime.getTime()) < LOG_COOLDOWN_MS) {
+            return;
         } else {
-            console.log(logEntry);
-            if (LOG_TO_CUSTOM_FILE) fs.appendFile(CUSTOM_LOG_FILE, logEntry + '\n', () => {});
+            if (logCounts[messageHash].count > 1) {
+                console.log(`[${time}] (Lặp lại x${logCounts[messageHash].count}) ${message}`);
+                 if (LOG_TO_CUSTOM_FILE) {
+                    fs.appendFile(CUSTOM_LOG_FILE, `[${time}] (Lặp lại x${logCounts[messageHash].count}) ${message}\n`, (err) => {});
+                }
+            } else {
+                console.log(logEntry);
+                if (LOG_TO_CUSTOM_FILE) {
+                    fs.appendFile(CUSTOM_LOG_FILE, logEntry + '\n', (err) => {});
+                }
+            }
+            logCounts[messageHash] = { count: 1, lastLoggedTime: now };
         }
-        logCounts[messageHash].lastLoggedTime = now;
     } else {
         console.log(logEntry);
-        if (LOG_TO_CUSTOM_FILE) fs.appendFile(CUSTOM_LOG_FILE, logEntry + '\n', () => {});
+        if (LOG_TO_CUSTOM_FILE) {
+            fs.appendFile(CUSTOM_LOG_FILE, logEntry + '\n', (err) => {});
+        }
         logCounts[messageHash] = { count: 1, lastLoggedTime: now };
     }
 }
@@ -110,9 +121,13 @@ async function makeHttpRequest(method, hostname, path, headers, postData = '') {
                 } else {
                     const errorMsg = `HTTP Lỗi: ${res.statusCode} ${res.statusMessage}`;
                     let errorDetails = { code: res.statusCode, msg: errorMsg };
-                    try { errorDetails = { ...errorDetails, ...JSON.parse(data) }; }
-                    catch (e) { errorDetails.msg += ` - Raw: ${data.substring(0, 200)}`; }
-                    addLog(errorDetails.msg);
+                    try {
+                        const parsedData = JSON.parse(data);
+                        errorDetails = { ...errorDetails, ...parsedData };
+                    } catch (e) {
+                        errorDetails.msg += ` - Raw: ${data.substring(0, Math.min(data.length, 200))}`;
+                    }
+                    addLog(`HTTP Request lỗi: ${errorDetails.msg}`);
                     reject(errorDetails);
                 }
             });
@@ -156,8 +171,22 @@ async function callSignedAPI(fullEndpointPath, method = 'GET', params = {}) {
         return JSON.parse(rawData);
     } catch (error) {
         consecutiveApiErrors++;
-        addLog(`Lỗi API Binance (${method} ${fullEndpointPath}): ${error.code || 'UNK'} - ${error.msg || error.message}`);
+        addLog(`Lỗi API Binance (${method} ${fullEndpointPath}): ${error.code || 'UNKNOWN'} - ${error.msg || error.message}`);
+        if (error.code === -2015) {
+             addLog("  -> Kiểm tra API Key/Secret và quyền Futures.");
+        } else if (error.code === -1021) {
+             addLog("  -> Lỗi lệch thời gian. Đồng bộ đồng hồ máy tính.");
+        } else if (error.code === -1022) {
+            addLog("  -> Lỗi chữ ký. Kiểm tra API Key/Secret hoặc chuỗi tham số.");
+        } else if (error.code === -1003) {
+            addLog("  -> BỊ CẤM IP TẠM THỜI (RATE LIMIT). CẦN GIẢM TẦN SUẤT GỌI API!");
+        } else if (error.code === 404) {
+            addLog("  -> Lỗi 404. Đường dẫn API sai.");
+        } else if (error.code === 'NETWORK_ERROR') {
+            addLog("  -> Lỗi mạng.");
+        }
         if (consecutiveApiErrors >= MAX_CONSECUTIVE_API_ERRORS) {
+            addLog(`Lỗi API liên tiếp (${consecutiveApiErrors}/${MAX_CONSECUTIVE_API_ERRORS}). Dừng bot.`);
             throw new CriticalApiError("Quá nhiều lỗi API liên tiếp, bot dừng.");
         }
         throw error;
@@ -169,19 +198,32 @@ async function callPublicAPI(fullEndpointPath, params = {}) {
     const fullPathWithQuery = `${fullEndpointPath}?${queryString}`;
     try {
         const rawData = await makeHttpRequest('GET', BASE_HOST, fullPathWithQuery, {});
+        consecutiveApiErrors = 0;
         return JSON.parse(rawData);
     } catch (error) {
-        addLog(`Lỗi API công khai: ${error.msg || error.message}`);
+        consecutiveApiErrors++;
+        addLog(`Lỗi API công khai: ${error.code || 'UNKNOWN'} - ${error.msg || error.message}`);
+        if (error.code === -1003) {
+            addLog("  -> BỊ CẤM IP TẠM THỜI (RATE LIMIT). CẦN GIẢM TẦN SUẤT GỌI API!");
+        } else if (error.code === 404) {
+            addLog("  -> Lỗi 404. Đường dẫn API sai.");
+        } else if (error.code === 'NETWORK_ERROR') {
+            addLog("  -> Lỗi mạng.");
+        }
+        if (consecutiveApiErrors >= MAX_CONSECUTIVE_API_ERRORS) {
+            addLog(`Lỗi API liên tiếp (${consecutiveApiErrors}/${MAX_CONSECUTIVE_API_ERRORS}). Dừng bot.`);
+            throw new CriticalApiError("Quá nhiều lỗi API liên tiếp, bot dừng.");
+        }
         throw error;
     }
 }
 
-async function syncServerTime() { try { const d = await callPublicAPI('/fapi/v1/time'); serverTimeOffset = d.serverTime - Date.now(); addLog(`Đồng bộ thời gian. Lệch: ${serverTimeOffset} ms.`); } catch (e) { addLog(`Lỗi đồng bộ thời gian: ${e.message}`); throw e; } }
-async function getLeverageBracketForSymbol(symbol) { try { const r = await callSignedAPI('/fapi/v1/leverageBracket', 'GET', { symbol }); const bracket = r.find(i => i.symbol === symbol)?.brackets[0]; return bracket ? parseInt(bracket.initialLeverage) : null; } catch (e) { addLog(`Lỗi lấy đòn bẩy: ${e.msg}`); return null; } }
-async function setLeverage(symbol, leverage) { try { await callSignedAPI('/fapi/v1/leverage', 'POST', { symbol, leverage }); return true; } catch (e) { addLog(`Lỗi đặt đòn bẩy: ${e.msg}`); return false; } }
-async function getExchangeInfo() { if (exchangeInfoCache) return exchangeInfoCache; try { const d = await callPublicAPI('/fapi/v1/exchangeInfo'); exchangeInfoCache = {}; d.symbols.forEach(s => { const p = s.filters.find(f => f.filterType === 'PRICE_FILTER'); const l = s.filters.find(f => f.filterType === 'LOT_SIZE'); const m = s.filters.find(f => f.filterType === 'MIN_NOTIONAL'); exchangeInfoCache[s.symbol] = { pricePrecision: s.pricePrecision, quantityPrecision: s.quantityPrecision, tickSize: parseFloat(p?.tickSize || 0.001), stepSize: parseFloat(l?.stepSize || 0.001), minNotional: parseFloat(m?.notional || 0) }; }); addLog('Đã tải thông tin sàn.'); return exchangeInfoCache; } catch (e) { throw e; } }
+async function syncServerTime() { try { const d = await callPublicAPI('/fapi/v1/time'); serverTimeOffset = d.serverTime - Date.now(); addLog(`Đồng bộ thời gian. Lệch: ${serverTimeOffset} ms.`); } catch (e) { addLog(`Lỗi đồng bộ thời gian: ${e.message}`); if (e instanceof CriticalApiError) stopBotLogicInternal(); throw e; } }
+async function getLeverageBracketForSymbol(symbol) { try { const r = await callSignedAPI('/fapi/v1/leverageBracket', 'GET', { symbol }); const bracket = r.find(i => i.symbol === symbol)?.brackets[0]; return bracket ? parseInt(bracket.initialLeverage) : null; } catch (e) { addLog(`Lỗi lấy đòn bẩy: ${e.msg}`); if (e instanceof CriticalApiError) stopBotLogicInternal(); return null; } }
+async function setLeverage(symbol, leverage) { try { await callSignedAPI('/fapi/v1/leverage', 'POST', { symbol, leverage }); return true; } catch (e) { addLog(`Lỗi đặt đòn bẩy: ${e.msg}`); if (e instanceof CriticalApiError) stopBotLogicInternal(); return false; } }
+async function getExchangeInfo() { if (exchangeInfoCache) return exchangeInfoCache; addLog('Đang tải thông tin sàn...'); try { const d = await callPublicAPI('/fapi/v1/exchangeInfo'); exchangeInfoCache = {}; d.symbols.forEach(s => { const p = s.filters.find(f => f.filterType === 'PRICE_FILTER'); const l = s.filters.find(f => f.filterType === 'LOT_SIZE'); const m = s.filters.find(f => f.filterType === 'MIN_NOTIONAL'); exchangeInfoCache[s.symbol] = { pricePrecision: s.pricePrecision, quantityPrecision: s.quantityPrecision, tickSize: parseFloat(p?.tickSize || 0.001), stepSize: parseFloat(l?.stepSize || 0.001), minNotional: parseFloat(m?.notional || 0) }; }); addLog('Đã tải thông tin sàn.'); return exchangeInfoCache; } catch (e) { addLog('Lỗi tải thông tin sàn.'); if (e instanceof CriticalApiError) stopBotLogicInternal(); throw e; } }
 async function getSymbolDetails(symbol) { const f = await getExchangeInfo(); return f?.[symbol] || null; }
-async function getCurrentPrice(symbol) { try { const d = await callPublicAPI('/fapi/v1/ticker/price', { symbol }); return parseFloat(d.price); } catch (e) { addLog(`Lỗi lấy giá: ${e.message}`); return null; } }
+async function getCurrentPrice(symbol) { try { const d = await callPublicAPI('/fapi/v1/ticker/price', { symbol }); return parseFloat(d.price); } catch (e) { addLog(`Lỗi lấy giá: ${e.message}`); if (e instanceof CriticalApiError) stopBotLogicInternal(); return null; } }
 
 async function cancelOpenOrdersForSymbol(symbol, positionSide = null) {
     try {
@@ -207,6 +249,7 @@ async function cancelOpenOrdersForSymbol(symbol, positionSide = null) {
                 await callSignedAPI('/fapi/v1/order', 'DELETE', { symbol: symbol, orderId: order.orderId });
             } catch (innerError) {
                  if (innerError.code !== -2011) addLog(`Lỗi hủy lệnh ${order.orderId}: ${innerError.msg || innerError.message}`);
+                 if (innerError instanceof CriticalApiError) stopBotLogicInternal();
             }
             await sleep(50);
         }
@@ -268,13 +311,18 @@ async function processTradeResult(orderInfo) {
         if (realizedPnl >= 0) {
              addLog(`Vị thế LÃI (${closedPositionSide}) đã đóng. Kiểm tra vị thế LỖ.`);
              if (remainingPosition) {
-                 const positionsOnExchange = await callSignedAPI('/fapi/v2/positionRisk', 'GET', { symbol: remainingPosition.symbol });
-                 const currentLosingQtyOnExchange = Math.abs(parseFloat(positionsOnExchange.find(p => p.symbol === remainingPosition.symbol && p.positionSide === remainingPosition.side)?.positionAmt || 0));
-                 if (currentLosingQtyOnExchange > 0) {
-                      addLog(`Vị thế LỖ ${remainingPosition.side} tìm thấy (${currentLosingQtyOnExchange}). Đang đóng hoàn toàn.`);
-                      await closePosition(remainingPosition.symbol, 0, `Lệnh LÃI đối ứng đã chốt`, remainingPosition.side);
-                 } else {
-                      addLog(`Vị thế LỖ ${remainingPosition.side} không tìm thấy trên sàn.`);
+                 try {
+                     const positionsOnExchange = await callSignedAPI('/fapi/v2/positionRisk', 'GET', { symbol: remainingPosition.symbol });
+                     const currentLosingQtyOnExchange = Math.abs(parseFloat(positionsOnExchange.find(p => p.symbol === remainingPosition.symbol && p.positionSide === remainingPosition.side)?.positionAmt || 0));
+                     if (currentLosingQtyOnExchange > 0) {
+                          addLog(`Vị thế LỖ ${remainingPosition.side} tìm thấy (${currentLosingQtyOnExchange}). Đang đóng hoàn toàn.`);
+                          await closePosition(remainingPosition.symbol, 0, `Lệnh LÃI đối ứng đã chốt`, remainingPosition.side);
+                     } else {
+                          addLog(`Vị thế LỖ ${remainingPosition.side} không tìm thấy trên sàn.`);
+                     }
+                 } catch(e) {
+                     addLog(`Lỗi kiểm tra vị thế lỗ sau khi chốt lãi: ${e.msg || e.message}`);
+                     if (e instanceof CriticalApiError) stopBotLogicInternal();
                  }
              } else {
                   addLog(`Không tìm thấy vị thế LỖ còn lại.`);
@@ -307,6 +355,7 @@ async function closePosition(symbol, quantity, reason, positionSide) {
             const qtyToClose = Math.abs(parseFloat(posOnBinance.positionAmt));
             if (qtyToClose === 0) {
                  addLog(`Vị thế ${positionSide} đã đóng hết trên sàn.`);
+                 isProcessingTrade = false;
                  return false;
             }
             const closeSide = (positionSide === 'LONG') ? 'SELL' : 'BUY';
@@ -316,13 +365,14 @@ async function closePosition(symbol, quantity, reason, positionSide) {
             return true;
         } else {
             addLog(`Vị thế ${positionSide} đã đóng hoặc không tồn tại.`);
+            isProcessingTrade = false;
             return false;
         }
     } catch (error) {
         addLog(`Lỗi đóng vị thế ${positionSide}: ${error.msg || error.message}`);
-        return false;
-    } finally {
+         if (error instanceof CriticalApiError) stopBotLogicInternal();
         isProcessingTrade = false;
+        return false;
     }
 }
 
@@ -388,6 +438,7 @@ async function openMarketPosition(symbol, tradeDirection, usdtBalance, maxLevera
         };
     } catch (error) {
         addLog(`Lỗi mở ${tradeDirection}: ${error.msg || error.message}`);
+        if (error instanceof CriticalApiError) stopBotLogicInternal();
         return null;
     }
 }
@@ -445,6 +496,7 @@ async function setInitialTPAndSL(position) {
         return true;
     } catch (error) {
         addLog(`Lỗi nghiêm trọng đặt TP/SL ban đầu cho ${side}: ${error.msg || error.message}.`);
+        if (error instanceof CriticalApiError) stopBotLogicInternal();
         return false;
     }
 }
@@ -465,6 +517,7 @@ async function updateStopLimitOrder(position, newPrice, type) {
                 addLog(`Đã hủy lệnh ${type} cũ ${orderIdToCancel} cho ${side}.`);
             } catch (innerError) {
                 if (innerError.code !== -2011) addLog(`Lỗi hủy lệnh ${type} cũ ${orderIdToCancel}: ${innerError.msg || innerError.message}`);
+                if (innerError instanceof CriticalApiError) stopBotLogicInternal();
             }
         }
 
@@ -504,6 +557,7 @@ async function updateStopLimitOrder(position, newPrice, type) {
         return newOrder.orderId;
     } catch (error) {
         addLog(`Lỗi cập nhật lệnh ${type} cho ${side}: ${error.msg || error.message}`);
+        if (error instanceof CriticalApiError) stopBotLogicInternal();
         if (type === 'STOP') position.currentSLId = null;
         return null;
     }
@@ -525,6 +579,7 @@ async function closePartialPosition(position, quantityToClose) {
             addLog(`Vị thế ${position.side} đã đóng hết, không cần đóng từng phần.`);
             position.closedLossAmount = position.initialQuantity;
             position.hasClosedAllLossPositionAtLastLevel = true;
+            isProcessingTrade = false;
             return false;
         }
 
@@ -534,6 +589,7 @@ async function closePartialPosition(position, quantityToClose) {
 
         if (quantityToClose <= 0) {
             addLog(`Khối lượng đóng từng phần quá nhỏ/không hợp lệ: ${quantityToClose}.`);
+            isProcessingTrade = false;
             return false;
         }
 
@@ -544,7 +600,7 @@ async function closePartialPosition(position, quantityToClose) {
         await cancelOpenOrdersForSymbol(position.symbol, position.side);
         position.currentSLId = null;
         position.currentTPId = null;
-        await sleep(500);
+         await sleep(500);
 
         await callSignedAPI('/fapi/v1/order', 'POST', {
             symbol: position.symbol,
@@ -561,6 +617,7 @@ async function closePartialPosition(position, quantityToClose) {
         return true;
     } catch (error) {
         addLog(`Lỗi đóng từng phần vị thế ${position.side}: ${error.msg || error.message}`);
+        if (error instanceof CriticalApiError) stopBotLogicInternal();
         return false;
     } finally {
         isProcessingTrade = false;
@@ -585,6 +642,7 @@ async function addPosition(position, quantityToAdd) {
 
         if (effectiveQuantityToAdd <= 0) {
             addLog(`Khối lượng mở lại quá nhỏ (${effectiveQuantityToAdd}) hoặc KL hiện tại >= KL ban đầu.`);
+            isProcessingTrade = false;
             return false;
         }
 
@@ -592,6 +650,7 @@ async function addPosition(position, quantityToAdd) {
 
          if (effectiveQuantityToAdd <= 0) {
              addLog(`Khối lượng mở lại sau làm tròn quá nhỏ (${effectiveQuantityToAdd}).`);
+             isProcessingTrade = false;
              return false;
          }
 
@@ -629,17 +688,24 @@ async function addPosition(position, quantityToAdd) {
              position.hasClosedAllLossPositionAtLastLevel = false;
 
              await sleep(1000);
-             await setInitialTPAndSL(winningPos);
+             const isWinningTPSet = await setInitialTPAndSL(winningPos);
              await sleep(500);
-             await setInitialTPAndSL(position);
-             addLog("Đã hoàn tất reset trạng thái & đặt lại TP/SL ban đầu.");
+             const isLosingTPSet = await setInitialTPAndSL(position);
+             if (isWinningTPSet && isLosingTPSet) {
+                addLog("Đã hoàn tất reset trạng thái & đặt lại TP/SL ban đầu.");
+             } else {
+                addLog("Lỗi đặt lại TP/SL sau khi mở lại lệnh lỗ.");
+                if (botRunning) cleanupAndResetCycle(position.symbol);
+             }
         } else {
              addLog("Đã mở lại lệnh lỗ, nhưng không tìm thấy lệnh đối ứng để reset trạng thái.");
+             if (botRunning) cleanupAndResetCycle(position.symbol);
         }
 
         return true;
     } catch (error) {
         addLog(`Lỗi mở lại lệnh ${position.side}: ${error.msg || error.message}`);
+        if (error instanceof CriticalApiError) stopBotLogicInternal();
         return false;
     } finally {
         isProcessingTrade = false;
@@ -717,10 +783,35 @@ async function runTradingLogic() {
 
         addLog("Đã đặt TP/SL cho cả hai vị thế. Bắt đầu theo dõi.");
         if (!positionCheckInterval) {
-            positionCheckInterval = setInterval(manageOpenPosition, 15000);
+             positionCheckInterval = setInterval(async () => {
+                 if (botRunning && (currentLongPosition || currentShortPosition)) {
+                     try {
+                         await manageOpenPosition();
+                     }
+                     catch (error) {
+                         addLog(`Lỗi kiểm tra vị thế định kỳ: ${error.msg || error.message}.`);
+                         if(error instanceof CriticalApiError) {
+                             addLog(`Bot dừng do lỗi API trong kiểm tra vị thế.`);
+                             stopBotLogicInternal();
+                             if (!retryBotTimeout) {
+                                 addLog(`Lên lịch tự động khởi động lại sau ${ERROR_RETRY_DELAY_MS / 1000}s.`);
+                                 retryBotTimeout = setTimeout(async () => {
+                                     addLog('Thử khởi động lại bot...');
+                                     await startBotLogicInternal();
+                                     retryBotTimeout = null;
+                                 }, ERROR_RETRY_DELAY_MS);
+                             }
+                         }
+                     }
+                 } else if (!botRunning && positionCheckInterval) {
+                     clearInterval(positionCheckInterval);
+                     positionCheckInterval = null;
+                 }
+             }, 15000);
         }
     } catch (error) {
         addLog(`Lỗi trong chu kỳ chính: ${error.msg || error.message}`);
+        if(error instanceof CriticalApiError) stopBotLogicInternal();
         if(botRunning) scheduleNextMainCycle();
     }
 }
@@ -895,12 +986,13 @@ async function scheduleNextMainCycle() {
     nextScheduledCycleTimeout = setTimeout(runTradingLogic, 2000);
 }
 
-async function getListenKey() { if (!API_KEY || !SECRET_KEY) { addLog("API Key chưa cấu hình."); return null; } try { const data = await callSignedAPI('/fapi/v1/listenKey', 'POST'); addLog(`Đã lấy listenKey mới.`); return data.listenKey; } catch (e) { addLog(`Lỗi lấy listenKey: ${e.message}`); return null; } }
-async function keepAliveListenKey() { if (listenKey) { try { await callSignedAPI('/fapi/v1/listenKey', 'PUT', { listenKey }); } catch (e) { addLog(`Lỗi làm mới listenKey. Đang lấy key mới...`); listenKey = await getListenKey(); if (listenKey) setupUserDataStream(listenKey); } } }
+async function getListenKey() { if (!API_KEY || !SECRET_KEY) { addLog("API Key chưa cấu hình."); return null; } try { const data = await callSignedAPI('/fapi/v1/listenKey', 'POST'); addLog(`Đã lấy listenKey mới.`); return data.listenKey; } catch (e) { addLog(`Lỗi lấy listenKey: ${e.message}`); if (e instanceof CriticalApiError) stopBotLogicInternal(); return null; } }
+async function keepAliveListenKey() { if (listenKey) { try { await callSignedAPI('/fapi/v1/listenKey', 'PUT', { listenKey }); } catch (e) { addLog(`Lỗi làm mới listenKey. Đang lấy key mới...`); if (e instanceof CriticalApiError) stopBotLogicInternal(); if (botRunning) { setTimeout(async () => { listenKey = await getListenKey(); if (listenKey) setupUserDataStream(listenKey); else addLog("Không lấy được listenKey mới để kết nối lại User Data WS."); }, 1000); } } } }
 
 function setupMarketDataStream(symbol) {
     if (marketWs) marketWs.close();
-    const streamUrl = `${WS_BASE_URL}/ws/${symbol.toLowerCase()}@markPrice`;
+    const streamUrl = `${WS_BASE_URL}${WS_USER_DATA_ENDPOINT}/${symbol.toLowerCase()}@markPrice@1s`;
+    addLog(`Kết nối Market WS cho ${symbol} : ${streamUrl}`);
     marketWs = new WebSocket(streamUrl);
 
     marketWs.onopen = () => addLog(`Market WS cho ${symbol} đã kết nối.`);
@@ -912,19 +1004,22 @@ function setupMarketDataStream(symbol) {
             }
         } catch (e) {}
     };
-    marketWs.onclose = () => {
+    marketWs.onclose = (event) => {
         addLog(`Market WS cho ${symbol} đã đóng. Kết nối lại sau 5s...`);
+        marketWs = null;
         if (botRunning) setTimeout(() => setupMarketDataStream(symbol), 5000);
     };
     marketWs.onerror = (error) => {
         addLog(`Lỗi Market WS cho ${symbol}: ${error.message}`);
+        marketWs = null;
          if (botRunning) setTimeout(() => setupMarketDataStream(symbol), 5000);
     };
 }
 
 function setupUserDataStream(key) {
     if (userDataWs) userDataWs.close();
-    const streamUrl = `${WS_BASE_URL}/ws/${key}`;
+    const streamUrl = `${WS_BASE_URL}${WS_USER_DATA_ENDPOINT}/${key}`;
+    addLog(`Kết nối User Data WS: ${streamUrl}`);
     userDataWs = new WebSocket(streamUrl);
 
     userDataWs.onopen = () => {
@@ -941,8 +1036,10 @@ function setupUserDataStream(key) {
             }
         } catch (e) {}
     };
-    userDataWs.onclose = async () => {
+    userDataWs.onclose = async (event) => {
         addLog('User Data WS đã đóng. Kết nối lại sau 5s...');
+        userDataWs = null;
+        if (listenKeyRefreshInterval) clearInterval(listenKeyRefreshInterval);
         if (botRunning) {
             setTimeout(async () => {
                 listenKey = await getListenKey();
@@ -953,6 +1050,8 @@ function setupUserDataStream(key) {
     };
     userDataWs.onerror = (error) => {
         addLog(`Lỗi User Data WS: ${error.message}`);
+        userDataWs = null;
+        if (listenKeyRefreshInterval) clearInterval(listenKeyRefreshInterval);
         if (botRunning) {
             setTimeout(async () => {
                 listenKey = await getListenKey();
@@ -967,6 +1066,12 @@ async function startBotLogicInternal() {
     if (botRunning) return 'Bot đã chạy.';
     if (!API_KEY || !SECRET_KEY) return 'Lỗi: Thiếu API/SECRET key.';
 
+    if (retryBotTimeout) {
+        clearTimeout(retryBotTimeout);
+        retryBotTimeout = null;
+        addLog('Hủy lịch tự động khởi động lại bot.');
+    }
+
     addLog('--- Khởi động Bot ---');
     try {
         await syncServerTime();
@@ -976,7 +1081,7 @@ async function startBotLogicInternal() {
 
         listenKey = await getListenKey();
         if (listenKey) setupUserDataStream(listenKey);
-         else throw new Error("Không thể thiết lập User Data Stream.");
+         else addLog("Không thể thiết lập User Data Stream.");
 
         setupMarketDataStream(TARGET_COIN_SYMBOL);
 
@@ -987,13 +1092,45 @@ async function startBotLogicInternal() {
 
         scheduleNextMainCycle();
         if (!positionCheckInterval) {
-            positionCheckInterval = setInterval(manageOpenPosition, 15000);
+             positionCheckInterval = setInterval(async () => {
+                 if (botRunning && (currentLongPosition || currentShortPosition)) {
+                     try {
+                         await manageOpenPosition();
+                     }
+                     catch (error) {
+                         addLog(`Lỗi kiểm tra vị thế định kỳ: ${error.msg || error.message}.`);
+                         if(error instanceof CriticalApiError) {
+                             addLog(`Bot dừng do lỗi API trong kiểm tra vị thế.`);
+                             stopBotLogicInternal();
+                             if (!retryBotTimeout) {
+                                 addLog(`Lên lịch tự động khởi động lại sau ${ERROR_RETRY_DELAY_MS / 1000}s.`);
+                                 retryBotTimeout = setTimeout(async () => {
+                                     addLog('Thử khởi động lại bot...');
+                                     await startBotLogicInternal();
+                                     retryBotTimeout = null;
+                                 }, ERROR_RETRY_DELAY_MS);
+                             }
+                         }
+                     }
+                 } else if (!botRunning && positionCheckInterval) {
+                     clearInterval(positionCheckInterval);
+                     positionCheckInterval = null;
+                 }
+             }, 15000);
         }
         return 'Bot khởi động thành công.';
     } catch (error) {
         const errorMsg = error.msg || error.message;
         addLog(`[Lỗi khởi động bot] ${errorMsg}`);
         stopBotLogicInternal();
+        if (error instanceof CriticalApiError && !retryBotTimeout) {
+            addLog(`Lên lịch tự động khởi động lại sau ${ERROR_RETRY_DELAY_MS / 1000}s.`);
+            retryBotTimeout = setTimeout(async () => {
+                addLog('Thử khởi động lại bot...');
+                await startBotLogicInternal();
+                retryBotTimeout = null;
+            }, ERROR_RETRY_DELAY_MS);
+        }
         return `Lỗi khởi động bot: ${errorMsg}`;
     }
 }
@@ -1017,6 +1154,12 @@ function stopBotLogicInternal() {
     totalLoss = 0;
     netPNL = 0;
     isProcessingTrade = false;
+    consecutiveApiErrors = 0;
+    if (retryBotTimeout) {
+        clearTimeout(retryBotTimeout);
+        retryBotTimeout = null;
+        addLog('Hủy lịch tự động khởi động lại bot.');
+    }
     addLog('--- Bot đã dừng ---');
     return 'Bot đã dừng.';
 }
@@ -1039,6 +1182,7 @@ async function checkAndHandleRemainingPosition(symbol) {
         }
     } catch (error) {
         addLog(`Lỗi kiểm tra vị thế sót: ${error.msg || error.message}`);
+        if (error instanceof CriticalApiError) stopBotLogicInternal();
     }
 }
 
@@ -1055,22 +1199,23 @@ app.get('/api/logs', (req, res) => {
 app.get('/api/status', async (req, res) => {
     try {
         const pm2List = await new Promise((resolve, reject) => {
-            exec('pm2 jlist', (error, stdout) => {
-                if (error) reject(error);
+            exec('pm2 jlist', (error, stdout, stderr) => {
+                 if (error) reject(stderr || error.message);
                 resolve(stdout);
             });
         });
-        const botProcess = JSON.parse(pm2List).find(p => p.name === THIS_BOT_PM2_NAME);
+        const processes = JSON.parse(pm2List);
+        const botProcess = processes.find(p => p.name === THIS_BOT_PM2_NAME);
         let statusMessage = 'MÁY CHỦ: TẮT (PM2)';
         if (botProcess) {
-            statusMessage = `MÁY CHỦ: ${botProcess.pm2_env.status.toUpperCase()}`;
+            statusMessage = `MÁY CHỦ: ${botProcess.pm2_env.status.toUpperCase()} (Restarts: ${botProcess.pm2_env.restart_time})`;
             if (botProcess.pm2_env.status === 'online') {
                 statusMessage += ` | BOT: ${botRunning ? 'ĐANG CHẠY' : 'ĐÃ DỪNG'}`;
                 if (botStartTime) {
                     const uptimeMinutes = Math.floor((Date.now() - botStartTime.getTime()) / 60000);
                     statusMessage += ` | Thời gian chạy: ${uptimeMinutes} phút`;
                 }
-                statusMessage += ` | Coin: ${TARGET_COIN_SYMBOL} | Vốn lệnh: ${INITIAL_INVESTMENT_AMOUNT} USDT`;
+                statusMessage += ` | Coin: ${TARGET_COIN_SYMBOL} | Vốn: ${INITIAL_INVESTMENT_AMOUNT} USDT`;
                  let openPositionsText = " | Vị thế: KHÔNG CÓ";
                  if(currentLongPosition || currentShortPosition) {
                     openPositionsText = " | Vị thế: ";
@@ -1079,10 +1224,13 @@ app.get('/api/status', async (req, res) => {
                  }
                  statusMessage += openPositionsText;
             }
+        } else {
+             statusMessage = `Bot: Không tìm thấy trong PM2 (Tên: ${THIS_BOT_PM2_NAME}). Đảm bảo đã chạy PM2!`;
         }
         res.send(statusMessage);
     } catch (error) {
-        res.status(500).send(`Lỗi lấy trạng thái PM2.`);
+        console.error('Lỗi lấy trạng thái PM2:', error);
+        res.status(500).send(`Bot: Lỗi lấy trạng thái. (${error})`);
     }
 });
 app.get('/api/bot_stats', (req, res) => {
@@ -1116,8 +1264,12 @@ app.get('/api/bot_stats', (req, res) => {
     res.json({ success: true, data: { totalProfit: totalProfit.toFixed(2), totalLoss: totalLoss.toFixed(2), netPNL: netPNL.toFixed(2), currentOpenPositions: openPositionsData, currentInvestmentAmount: INITIAL_INVESTMENT_AMOUNT } });
 });
 app.post('/api/configure', (req, res) => {
-    const config = req.body.coinConfigs?.[0];
-    if (config) {
+    const { apiKey, secretKey, coinConfigs } = req.body;
+    if (apiKey) API_KEY = apiKey.trim();
+    if (secretKey) SECRET_KEY = secretKey.trim();
+
+    if (coinConfigs && coinConfigs.length > 0) {
+        const config = coinConfigs[0];
         const oldSymbol = TARGET_COIN_SYMBOL;
         TARGET_COIN_SYMBOL = config.symbol.trim().toUpperCase();
         INITIAL_INVESTMENT_AMOUNT = parseFloat(config.initialAmount);
