@@ -60,8 +60,8 @@ let botMode = 'stopped';
 let volatileStatus = 'unknown';
 
 const VOLATILITY_CHECK_INTERVAL_MS = 3 * 60 * 1000;
-const VOLATILITY_DURATION_MS = 60 * 60 * 1000; // 1 hour
-const VOLATILITY_THRESHOLD = 0.05; // 5%
+const VOLATILITY_DURATION_MS = 60 * 60 * 1000;
+const VOLATILITY_THRESHOLD = 0.05;
 
 let priceBuffer = [];
 let volatilityCheckInterval = null;
@@ -275,7 +275,7 @@ async function cleanupAndResetCycle(symbol) {
 
     if (botRunning) {
          const nextMode = volatileStatus === 'calm' ? 'mode1_trading' : 'mode2_trading';
-         addLog(`[BOT] Chu kỳ kết thúc. Biến động 30p: ${volatileStatus.toUpperCase()}. Bắt đầu chu kỳ mới trong ${nextMode.toUpperCase()} sau 2 giây...`);
+         addLog(`[BOT] Chu kỳ kết thúc. Biến động 1h: ${volatileStatus.toUpperCase()}. Bắt đầu chu kỳ mới trong ${nextMode.toUpperCase()} sau 2 giây...`);
          scheduleNextMainCycle(nextMode);
     } else {
          addLog("[BOT] Bot đã dừng, không lên lịch chu kỳ mới.");
@@ -857,29 +857,29 @@ const manageOpenPosition = async () => {
         const MOC_5_PROFIT_PERCENTAGE = winningPos.partialCloseLossLevels[MODE_RESET_PROFIT_LEVEL_INDEX];
         const MOC_8_PROFIT_PERCENTAGE = winningPos.partialCloseLossLevels[MOC_8_INDEX];
 
+        const currentProfitPercentage = (winningPos.unrealizedPnl / winningPos.initialMargin) * 100;
 
+        // Find the actual profit index based on current profit percentage
         let actualProfitIndex = winningPos.partialCloseLossLevels.findIndex(level => currentProfitPercentage < level);
         if (actualProfitIndex === -1) actualProfitIndex = winningPos.partialCloseLossLevels.length;
 
         const currentWinningIndex = winningPos.nextPartialCloseLossIndex;
-        const currentProfitPercentage = (winningPos.unrealizedPnl / winningPos.initialMargin) * 100;
+        const previousWinningIndex = winningPos.previousPartialCloseLossIndex !== undefined ? winningPos.previousPartialCloseLossIndex : -1;
 
 
         // --- Trigger 1 (Mode 1 @ Mốc 5 Profit) ---
+        // Trigger if profit is >= Mốc 5 profit AND bot is in Mode 1 AND not already pending
         if (botMode === 'mode1_trading' && currentProfitPercentage >= MOC_5_PROFIT_PERCENTAGE && !isResetReopenPending)
         {
              addLog(`[MODE1] Đạt Mốc ${MODE_RESET_PROFIT_LEVEL_INDEX + 1} (${MOC_5_PROFIT_PERCENTAGE.toFixed(2)}%). Kích hoạt Reset.`);
              isResetReopenPending = true;
              pendingResetReason = `Mode 1 đạt Mốc ${MODE_RESET_PROFIT_LEVEL_INDEX + 1} Profit`;
-             return;
-        } else if (botMode === 'mode1_trading' && currentProfitPercentage >= MOC_5_PROFIT_PERCENTAGE && isResetReopenPending) {
-             return;
+             return; // Exit manageOpenPosition
         }
 
 
         // --- Trigger 2 (Mode 2 -> Calm Above Mốc 5 + Price Action) ---
         if (botMode === 'mode2_trading' && volatileStatus === 'calm' && actualProfitIndex > MODE_RESET_PROFIT_LEVEL_INDEX) {
-             const previousWinningIndex = winningPos.previousPartialCloseLossIndex !== undefined ? winningPos.previousPartialCloseLossIndex : -1;
 
              const reachedNextStep = actualProfitIndex > previousWinningIndex && previousWinningIndex > MODE_RESET_PROFIT_LEVEL_INDEX;
              const returnedToMoc5 = (previousWinningIndex > MODE_RESET_PROFIT_LEVEL_INDEX) && (currentProfitPercentage <= MOC_5_PROFIT_PERCENTAGE);
@@ -959,7 +959,7 @@ const manageOpenPosition = async () => {
                             }
                        } else {
                              addLog(`  -> KL đóng từng phần Mốc ${levelIndexToProcess + 1} quá nhỏ. Bỏ qua.`);
-                             actionPerformed = true; // Consider it acted upon if qty is too small
+                             actionPerformed = true;
                        }
 
 
@@ -972,7 +972,7 @@ const manageOpenPosition = async () => {
 
                                  addLog(`  -> Điều chỉnh SL lỗ ${losingPos.side} về ${slPriceLosing.toFixed(losingPos.pricePrecision)}.`);
                                   try {
-                                       isProcessingTrade = true; // Lock for SL adjust
+                                       isProcessingTrade = true;
                                        losingPos.currentSLId = await updateStopLimitOrder(losingPos, slPriceLosing, 'STOP');
                                        if (losingPos.currentSLId) {
                                            addLog(`  -> Đã đặt SL mới.`);
@@ -986,15 +986,14 @@ const manageOpenPosition = async () => {
                                         if (e instanceof CriticalApiError) throw e;
                                        winningPos.hasAdjustedSLToSpecificLevel[levelPercentageToProcess] = true;
                                   } finally {
-                                      isProcessingTrade = false; // Release lock
+                                      isProcessingTrade = false;
                                   }
                              } else {
                                   addLog(`  -> Không xác định được SL target (Mốc 8).`);
                                    winningPos.hasAdjustedSLToSpecificLevel[levelPercentageToProcess] = true;
                              }
-                              actionPerformed = true; // Mark as acted upon (SL adjust is an action)
+                              actionPerformed = true;
                         } else if (botMode === 'mode2_trading' && levelIndexToProcess === MODE_RESET_PROFIT_LEVEL_INDEX && winningPos.hasAdjustedSLToSpecificLevel[levelPercentageToProcess]) {
-                           // SL for Mốc 5 already adjusted.
                         }
 
 
@@ -1005,24 +1004,15 @@ const manageOpenPosition = async () => {
                   }
 
                  if (actionPerformed) {
-                     winningPos.nextPartialCloseLossIndex++; // Move to the next level for the *next* check
-                     winningPos.previousPartialCloseLossIndex = levelIndexToProcess; // Store the index just processed
+                     winningPos.nextPartialCloseLossIndex++;
+                     winningPos.previousPartialCloseLossIndex = levelIndexToProcess;
                  }
 
             } else {
-                // Profit level not reached yet, or currently processing another level.
-                 // Don't increment index, stop loop for now.
                  break;
             }
         }
-        // After the loop, winningPos.nextPartialCloseLossIndex is updated to the next level to check.
-        // winningPos.previousPartialCloseLossIndex holds the last index where action was taken or attempted in this loop.
-
-        // Update previous index to actualProfitIndex if no actions were taken in the loop,
-        // to correctly track jumps for Trigger 2.
-         if (winningPos.previousPartialCloseLossIndex === currentWinningIndex && currentWinningIndex !== actualProfitIndex) {
-              winningPos.previousPartialCloseLossIndex = actualProfitIndex;
-         }
+         winningPos.previousPartialCloseLossIndex = actualProfitIndex;
 
 
     } catch (error) {
