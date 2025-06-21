@@ -755,7 +755,7 @@ async function performResetReopenAndModeChange(targetMode, triggerReason) {
          addLog(`[RESET] Lỗi trong quy trình: ${error.msg || error.message}`);
          if (error instanceof CriticalApiError) throw error;
          if (botRunning) await cleanupAndResetCycle(TARGET_COIN_SYMBOL);
-         throw new Error("[RESET] Lỗi không nghiêm trọng dẫn đến dọn dẹp.");
+         throw new Error("[RESET] Lỗi không nghiêm trọng dẫn đến dọn dọn dẹp.");
      }
      // isProcessingTrade lock released by caller
 }
@@ -833,7 +833,7 @@ const manageOpenPosition = async () => {
                  addLog(`[MANAGE] Vị thế SHORT không trên sàn.`);
                  currentShortPosition = null;
              }
-         }
+        }
 
         if (!currentLongPosition && !currentShortPosition) {
             addLog("[MANAGE] Cả hai vị thế đã đóng. Dọn dẹp.");
@@ -865,7 +865,6 @@ const manageOpenPosition = async () => {
 
         const currentWinningIndex = winningPos.nextPartialCloseLossIndex;
         const previousWinningIndex = winningPos.previousPartialCloseLossIndex !== undefined ? winningPos.previousPartialCloseLossIndex : -1;
-
 
         // --- Trigger 1 (Mode 1 @ Mốc 5 Profit) ---
         // Trigger if profit is >= Mốc 5 profit AND bot is in Mode 1 AND not already pending
@@ -918,7 +917,7 @@ const manageOpenPosition = async () => {
 
              if (botMode === 'mode1_trading') {
                   if (levelIndexToProcess >= MODE_RESET_PROFIT_LEVEL_INDEX) {
-                       processLevelIndex++; // Skip Mốc 5 and above in Mode 1 standard processing
+                       processLevelIndex++;
                        continue;
                   }
              }
@@ -1005,7 +1004,6 @@ const manageOpenPosition = async () => {
 
                  if (actionPerformed) {
                      winningPos.nextPartialCloseLossIndex++;
-                     winningPos.previousPartialCloseLossIndex = levelIndexToProcess;
                  }
 
             } else {
@@ -1277,52 +1275,107 @@ function setupMarketDataStream(symbol) {
     };
 }
 
+// Fetches a new listen key from Binance
+async function getListenKey() {
+    if (!API_KEY || !SECRET_KEY) {
+        addLog("[API] Lỗi: Thiếu API/SECRET key.");
+        return null;
+    }
+    try {
+        const data = await callSignedAPI('/fapi/v1/listenKey', 'POST');
+        addLog(`[API] Đã lấy listenKey mới.`);
+        return data.listenKey;
+    } catch (e) {
+        addLog(`[API] Lỗi lấy listenKey: ${e.message}`);
+        if (e instanceof CriticalApiError) stopBotLogicInternal(); // Critical error stops bot
+        return null; // Return null on non-critical error
+    }
+}
+
+// Keeps the current listen key alive by sending a PUT request
+async function keepAliveListenKey() {
+    if (listenKey) {
+        try {
+            await callSignedAPI('/fapi/v1/listenKey', 'PUT', { listenKey });
+            // addLog("[API] ListenKey đã được làm mới."); // Too chatty
+        } catch (e) {
+            addLog(`[API] Lỗi làm mới listenKey. Đang lấy key mới...`);
+            if (e instanceof CriticalApiError) stopBotLogicInternal(); // Critical error stops bot
+            // If non-critical error, attempt to get a new key and reconnect WS
+            if (botRunning) {
+                setTimeout(async () => {
+                    listenKey = await getListenKey(); // Attempt to get new key
+                    if (listenKey) setupUserDataStream(listenKey); // If successful, setup stream
+                    else addLog("[WS] Không lấy được listenKey mới để kết nối lại User Data WS sau lỗi làm mới.");
+                }, 1000); // Small delay before retrying
+            }
+        }
+    }
+}
+
+// Sets up the User Data WebSocket stream
 function setupUserDataStream(key) {
-    if (userDataWs) userDataWs.close();
+    // Close any existing connection first
+    if (userDataWs) {
+        try { userDataWs.close(); } catch(e){} // Ignore errors on closing
+    }
     const streamUrl = `${WS_BASE_URL}${WS_USER_DATA_ENDPOINT}/${key}`;
-    addLog(`[WS] Kết nối User Data: ${streamUrl}`);
+    addLog(`[WS] Kết nối User Data WS: ${streamUrl}`);
     userDataWs = new WebSocket(streamUrl);
 
     userDataWs.onopen = () => {
-        addLog('[WS] User Data đã kết nối.');
+        addLog('[WS] User Data WS đã kết nối.');
+        // Clear previous refresh interval if any
         if (listenKeyRefreshInterval) clearInterval(listenKeyRefreshInterval);
+        // Start interval to refresh key every 30 minutes (less than 60 min expiry)
         listenKeyRefreshInterval = setInterval(keepAliveListenKey, 30 * 60 * 1000);
     };
+
     userDataWs.onmessage = async (event) => {
         try {
             const data = JSON.parse(event.data);
+            // addLog(`[WS] User Data message: ${JSON.stringify(data).substring(0, 200)}...`); // Debug incoming messages
             if (data.e === 'ORDER_TRADE_UPDATE' && data.o.s === TARGET_COIN_SYMBOL) {
+                // Process order fills for the target symbol asynchronously
                 processTradeResult(data.o).catch(e => addLog(`[WS] Lỗi xử lý trade result: ${e.message}`));
             } else if (data.e === 'ACCOUNT_UPDATE') {
+                 // Handle account balance/position updates if needed later.
+                 // addLog(`[WS] ACCOUNT_UPDATE received.`); // Debugging
             }
         } catch (e) {
-            addLog(`[WS] Lỗi xử lý User Data message: ${e.message}`);
+            addLog(`[WS] Lỗi xử lý User Data WS message: ${e.message}`);
         }
     };
+
     userDataWs.onclose = async (event) => {
-        addLog(`[WS] User Data đóng (Code ${event.code}). Kết nối lại 5s...`);
-        userDataWs = null;
+        addLog(`[WS] User Data WS đã đóng (Code: ${event.code}, Reason: ${event.reason}). Kết nối lại sau 5s...`);
+        userDataWs = null; // Clear the websocket object
+        // Clear refresh interval as key is likely invalid now
         if (listenKeyRefreshInterval) clearInterval(listenKeyRefreshInterval);
         listenKeyRefreshInterval = null;
+        // Attempt to reconnect only if bot is still running
         if (botRunning) {
             setTimeout(async () => {
-                listenKey = await getListenKey();
-                if (listenKey) setupUserDataStream(listenKey);
-                 else addLog("[WS] Không lấy listenKey mới để kết nối lại User Data WS.");
-            }, 5000);
+                listenKey = await getListenKey(); // Attempt to get new key
+                if (listenKey) setupUserDataStream(listenKey); // If successful, setup stream
+                 else addLog("[WS] Không lấy được listenKey mới để kết nối lại User Data WS sau đóng.");
+            }, 5000); // Retry after 5 seconds
         }
     };
+
     userDataWs.onerror = (error) => {
         addLog(`[WS] Lỗi User Data WS: ${error.message}`);
-        userDataWs = null;
+        userDataWs = null; // Clear the websocket object
+        // Clear refresh interval
         if (listenKeyRefreshInterval) clearInterval(listenKeyRefreshInterval);
         listenKeyRefreshInterval = null;
+         // Attempt to reconnect only if bot is still running
          if (botRunning) {
              setTimeout(async () => {
-                listenKey = await getListenKey();
-                if (listenKey) setupUserDataStream(listenKey);
-                 else addLog("[WS] Không lấy listenKey mới để kết nối lại User Data WS sau lỗi.");
-            }, 5000);
+                listenKey = await getListenKey(); // Attempt to get new key
+                if (listenKey) setupUserDataStream(listenKey); // If successful, setup stream
+                 else addLog("[WS] Không lấy được listenKey mới để kết nối lại User Data WS sau lỗi.");
+            }, 5000); // Retry after 5 seconds
          }
     };
 }
