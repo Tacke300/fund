@@ -274,8 +274,8 @@ async function cleanupAndResetCycle(symbol) {
     await checkAndHandleRemainingPosition(symbol);
 
     if (botRunning) {
-         const nextMode = volatileStatus === 'calm' ? 'mode1_trading' : 'mode2_trading';
-         addLog(`[BOT] Chu kỳ kết thúc. Biến động 1h: ${volatileStatus.toUpperCase()}. Bắt đầu chu kỳ mới trong ${nextMode.toUpperCase()} sau 2 giây...`);
+         const nextMode = (volatileStatus === 'calm' || volatileStatus === 'unknown') ? 'mode1_trading' : 'mode2_trading';
+         addLog(`[BOT] Chu kỳ kết thúc. Biến động 1h lúc kết thúc: ${volatileStatus.toUpperCase()}. Bắt đầu chu kỳ mới trong ${nextMode.toUpperCase()} sau 2 giây...`); // Log volatileStatus here
          scheduleNextMainCycle(nextMode);
     } else {
          addLog("[BOT] Bot đã dừng, không lên lịch chu kỳ mới.");
@@ -546,6 +546,10 @@ async function runTradingLogic() {
             longPositionData = await openMarketPosition(TARGET_COIN_SYMBOL, 'LONG', usdtAsset, maxLeverage);
         } catch (e) {
             addLog(`[BOT] Mở LONG thất bại: ${e.message}.`);
+            if (currentLongPosition) { // Check if it was partially opened before error
+                 try { await closePosition(currentLongPosition.symbol, 0, 'Lỗi mở LONG', 'LONG'); } catch(closeErr) { addLog(`[BOT] Lỗi đóng LONG sau lỗi mở: ${closeErr.message}`); }
+                 currentLongPosition = null;
+            }
             if (botRunning) await cleanupAndResetCycle(TARGET_COIN_SYMBOL);
             return;
         }
@@ -641,7 +645,6 @@ async function checkVolatilityAndModeChange() {
         newVolatileStatus = priceChange >= VOLATILITY_THRESHOLD ? 'volatile' : 'calm';
 
         if (newVolatileStatus !== volatileStatus) {
-             // Only log the volatility status change when it actually changes
             addLog(`[VOL] Biến động 1h đổi: ${volatileStatus.toUpperCase()} -> ${newVolatileStatus.toUpperCase()} (${(priceChange * 100).toFixed(2)}% vs ${VOLATILITY_THRESHOLD * 100}%).`);
             volatileStatus = newVolatileStatus;
         }
@@ -878,6 +881,9 @@ const manageOpenPosition = async () => {
 
 
         // --- Trigger 2 (Mode 2 -> Calm Above Mốc 5 + Price Action) ---
+        // Note: This trigger only applies if volatileStatus becomes 'calm' when bot is already IN mode2_trading AND above Moc 5
+        // checkVolatilityAndModeChange sets the isResetReopenPending flag when volatileStatus becomes 'calm' while in mode2_trading.
+        // This block then checks if the position is Above Moc 5 and if the price action (reaching next step / returning to Moc 5) occurred.
         if (botMode === 'mode2_trading' && volatileStatus === 'calm' && actualProfitIndex > MODE_RESET_PROFIT_LEVEL_INDEX) {
 
              const reachedNextStep = actualProfitIndex > previousWinningIndex && previousWinningIndex > MODE_RESET_PROFIT_LEVEL_INDEX;
@@ -891,6 +897,7 @@ const manageOpenPosition = async () => {
                  reachedTPPrice = (winningPos.side === 'LONG' && winningPos.currentPrice >= winningPos.initialTPPrice * 0.99) || (winningPos.side === 'SHORT' && winningPos.currentPrice <= winningPos.initialTPPrice * 1.01);
              }
 
+             // Trigger 2 conditions met AND price action met AND not already pending
              if (((reachedNextStep || returnedToMoc5) && !lossSideFullyClosed) || (lossSideFullyClosed && (reachedTPPrice || returnedToMoc5))) {
                   if (!isResetReopenPending) {
                        addLog(`[MODE2] Trigger 2 met (${volatileStatus}, trên Mốc ${MODE_RESET_PROFIT_LEVEL_INDEX + 1}, price action). Kích hoạt Reset.`);
