@@ -56,8 +56,8 @@ let listenKey = null;
 let listenKeyRefreshInterval = null;
 let currentMarketPrice = null;
 
-const WEB_SERVER_PORT = 6789;
-const THIS_BOT_PM2_NAME = 'khoa';
+const WEB_SERVER_PORT = 1111;
+const THIS_BOT_PM2_NAME = 'test';
 const CUSTOM_LOG_FILE = path.join(__dirname, 'pm2.log');
 const LOG_TO_CUSTOM_FILE = true;
 
