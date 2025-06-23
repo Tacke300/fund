@@ -56,7 +56,7 @@ npm install
 
 npm install express ws
 
-
+EOF
 )
 
   gcloud compute instances create "$instance_name" \
