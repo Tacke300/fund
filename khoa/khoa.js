@@ -1489,49 +1489,26 @@ app.get('/api/bot_stats', (req, res) => {
 });
 app.post('/api/configure', (req, res) => {
     const { apiKey, secretKey, coinConfigs } = req.body;
-    let configChanged = false;
-
-    if (apiKey && apiKey.trim() !== API_KEY) {
-        API_KEY = apiKey.trim();
-        configChanged = true;
-        addLog('[BOT] API Key đã cập nhật.');
-    }
-    if (secretKey && secretKey.trim() !== SECRET_KEY) {
-        SECRET_KEY = secretKey.trim();
-        configChanged = true;
-        addLog('[BOT] SECRET Key đã cập nhật.');
-    }
+    if (apiKey) API_KEY = apiKey.trim();
+    if (secretKey) SECRET_KEY = secretKey.trim();
 
     if (coinConfigs && coinConfigs.length > 0) {
         const config = coinConfigs[0];
         const oldSymbol = TARGET_COIN_SYMBOL;
-        const oldAmount = INITIAL_INVESTMENT_AMOUNT;
-        let coinConfigChanged = false;
+        TARGET_COIN_SYMBOL = config.symbol.trim().toUpperCase();
+        INITIAL_INVESTMENT_AMOUNT = parseFloat(config.initialAmount);
 
-        if (config.symbol && config.symbol.trim().toUpperCase() !== TARGET_COIN_SYMBOL) {
-            TARGET_COIN_SYMBOL = config.symbol.trim().toUpperCase();
-            coinConfigChanged = true;
-        }
-        if (config.initialAmount && parseFloat(config.initialAmount) !== INITIAL_INVESTMENT_AMOUNT) {
-             INITIAL_INVESTMENT_AMOUNT = parseFloat(config.initialAmount);
-             coinConfigChanged = true;
-        }
+        addLog(`Cấu hình đã cập nhật: Coin: ${TARGET_COIN_SYMBOL}, Vốn: ${INITIAL_INVESTMENT_AMOUNT} USDT`);
 
-        if (coinConfigChanged) {
-            configChanged = true;
-             addLog(`[BOT] Cấu hình coin đã cập nhật: Coin: ${TARGET_COIN_SYMBOL} (trước: ${oldSymbol}), Vốn: ${INITIAL_INVESTMENT_AMOUNT} USDT (trước: ${oldAmount})`);
-            if (botRunning) {
-                addLog("[BOT] Bot đang chạy. Dừng bot và khởi động lại để áp dụng cấu hình coin mới.");
+        if (oldSymbol !== TARGET_COIN_SYMBOL) {
+            addLog(`Coin đã thay đổi ${oldSymbol} -> ${TARGET_COIN_SYMBOL}.`);
+             if (botRunning) {
+                addLog("Bot đang chạy. Vui lòng dừng bot và khởi động lại để áp dụng cấu hình coin mới.");
             }
         }
+        res.json({ success: true, message: 'Cấu hình đã cập nhật.' });
     } else {
-         addLog('[BOT] Dữ liệu cấu hình coin không hợp lệ.');
-    }
-
-    if (configChanged) {
-        res.json({ success: true, message: 'Cấu hình đã cập nhật. Khởi động lại bot để áp dụng.' });
-    } else {
-         res.json({ success: false, message: 'Không có thay đổi cấu hình nào được phát hiện.' });
+        res.status(400).send('Dữ liệu cấu hình không hợp lệ.');
     }
 });
 
