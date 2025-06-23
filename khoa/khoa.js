@@ -1120,15 +1120,10 @@ async function startBotLogicInternal() {
     if (retryBotTimeout) {
         clearTimeout(retryBotTimeout);
         retryBotTimeout = null;
-        addLog('[BOT] Hủy lịch tự động khởi động lại.');
+        addLog('Hủy lịch tự động khởi động lại bot.');
     }
 
-    addLog('[BOT] --- Khởi động Bot ---');
-    botRunning = true;
-    botStartTime = new Date();
-    addLog(`[BOT] --- Bot đã chạy lúc ${formatTimeUTC7(botStartTime)} ---`);
-    addLog(`[BOT] Coin: ${TARGET_COIN_SYMBOL} | Vốn: ${INITIAL_INVESTMENT_AMOUNT} USDT`);
-
+    addLog('--- Khởi động Bot ---');
     try {
         await syncServerTime();
         await getExchangeInfo();
@@ -1137,31 +1132,52 @@ async function startBotLogicInternal() {
 
         listenKey = await getListenKey();
         if (listenKey) setupUserDataStream(listenKey);
-         else addLog("[WS] Không thiết lập User Data Stream.");
+         else addLog("Không thể thiết lập User Data Stream.");
 
         setupMarketDataStream(TARGET_COIN_SYMBOL);
 
-        priceBuffer = [];
-        volatileStatus = 'unknown';
-        if (volatilityCheckInterval) clearInterval(volatilityCheckInterval);
-        volatilityCheckInterval = setInterval(checkVolatilityAndModeChange, VOLATILITY_CHECK_INTERVAL_MS);
-        addLog(`[VOL] Bắt đầu kiểm tra biến động 1h mỗi ${VOLATILITY_CHECK_INTERVAL_MS / 1000}s.`);
+        botRunning = true;
+        botStartTime = new Date();
+        addLog(`--- Bot đã chạy lúc ${formatTimeUTC7(botStartTime)} ---`);
+        addLog(`Coin: ${TARGET_COIN_SYMBOL} | Vốn: ${INITIAL_INVESTMENT_AMOUNT} USDT`);
 
-
-        botMode = 'mode1_trading';
-        addLog("[BOT] Bắt đầu chu kỳ đầu tiên trong MODE 1...");
-        await runTradingLogic();
-
+        scheduleNextMainCycle();
+        if (!positionCheckInterval) {
+             positionCheckInterval = setInterval(async () => {
+                 if (botRunning && (currentLongPosition || currentShortPosition)) {
+                     try {
+                         await manageOpenPosition();
+                     }
+                     catch (error) {
+                         addLog(`Lỗi kiểm tra vị thế định kỳ: ${error.msg || error.message}.`);
+                         if(error instanceof CriticalApiError) {
+                             addLog(`Bot dừng do lỗi API trong kiểm tra vị thế.`);
+                             stopBotLogicInternal();
+                             if (!retryBotTimeout) {
+                                 addLog(`Lên lịch tự động khởi động lại sau ${ERROR_RETRY_DELAY_MS / 1000}s.`);
+                                 retryBotTimeout = setTimeout(async () => {
+                                     addLog('Thử khởi động lại bot...');
+                                     await startBotLogicInternal();
+                                     retryBotTimeout = null;
+                                 }, ERROR_RETRY_DELAY_MS);
+                             }
+                         }
+                     }
+                 } else if (!botRunning && positionCheckInterval) {
+                     clearInterval(positionCheckInterval);
+                     positionCheckInterval = null;
+                 }
+             }, 15000);
+        }
         return 'Bot khởi động thành công.';
     } catch (error) {
         const errorMsg = error.msg || error.message;
-        addLog(`[BOT] Lỗi khởi động bot: ${errorMsg}`);
+        addLog(`[Lỗi khởi động bot] ${errorMsg}`);
         stopBotLogicInternal();
-
         if (error instanceof CriticalApiError && !retryBotTimeout) {
-            addLog(`[BOT] Lên lịch tự động khởi động lại sau ${ERROR_RETRY_DELAY_MS / 1000}s.`);
+            addLog(`Lên lịch tự động khởi động lại sau ${ERROR_RETRY_DELAY_MS / 1000}s.`);
             retryBotTimeout = setTimeout(async () => {
-                addLog('[BOT] Thử khởi động lại...');
+                addLog('Thử khởi động lại bot...');
                 await startBotLogicInternal();
                 retryBotTimeout = null;
             }, ERROR_RETRY_DELAY_MS);
@@ -1172,221 +1188,55 @@ async function startBotLogicInternal() {
 
 function stopBotLogicInternal() {
     if (!botRunning) return 'Bot không chạy.';
-    addLog('[BOT] --- Dừng Bot ---');
     botRunning = false;
-    botMode = 'stopped';
-
     clearTimeout(nextScheduledCycleTimeout);
     if (positionCheckInterval) clearInterval(positionCheckInterval);
     if (listenKeyRefreshInterval) clearInterval(listenKeyRefreshInterval);
-    if (volatilityCheckInterval) clearInterval(volatilityCheckInterval);
-
-    if (marketWs) { try { marketWs.close(); } catch(e){}}
-    if (userDataWs) { try { userDataWs.close(); } catch(e){}}
-
+    if (marketWs) marketWs.close();
+    if (userDataWs) userDataWs.close();
     positionCheckInterval = null;
     listenKeyRefreshInterval = null;
-    volatilityCheckInterval = null;
     marketWs = null;
     userDataWs = null;
     listenKey = null;
-
-    priceBuffer = [];
-    volatileStatus = 'unknown';
-
     currentLongPosition = null;
     currentShortPosition = null;
-
-    isResetReopenPending = false;
-    pendingResetReason = '';
-    pendingResetTargetMode = 'mode1_trading';
-
+    totalProfit = 0;
+    totalLoss = 0;
+    netPNL = 0;
     isProcessingTrade = false;
     consecutiveApiErrors = 0;
-
      if (retryBotTimeout) {
         clearTimeout(retryBotTimeout);
         retryBotTimeout = null;
-        addLog('[BOT] Hủy lịch tự động khởi động lại.');
+        addLog('Hủy lịch tự động khởi động lại bot.');
     }
-    addLog('[BOT] --- Bot đã dừng ---');
+    addLog('--- Bot đã dừng ---');
     return 'Bot đã dừng.';
 }
 
 
 async function checkAndHandleRemainingPosition(symbol) {
-    addLog(`[BOT] Kiểm tra vị thế sót ${symbol}.`);
+    addLog(`Đang kiểm tra vị thế còn sót lại cho ${symbol}.`);
     try {
         const positions = await callSignedAPI('/fapi/v2/positionRisk', 'GET', { symbol });
         const remainingPositions = positions.filter(p => p.symbol === symbol && parseFloat(p.positionAmt) !== 0);
 
         if (remainingPositions.length > 0) {
-            addLog(`[BOT] Tìm thấy ${remainingPositions.length} vị thế sót. Đang đóng...`);
-            await cancelOpenOrdersForSymbol(symbol);
-            await sleep(500);
-
+            addLog(`Tìm thấy ${remainingPositions.length} vị thế sót. Đang đóng...`);
             for (const pos of remainingPositions) {
                 const sideToClose = parseFloat(pos.positionAmt) > 0 ? 'LONG' : 'SHORT';
-                 const qty = Math.abs(parseFloat(pos.positionAmt));
-                 try {
-                     const success = await closePosition(pos.symbol, qty, `Vị thế sót`, sideToClose);
-                     if(success) await sleep(1000);
-                 } catch(e) {
-                     addLog(`[BOT] Lỗi đóng vị thế sót ${sideToClose}: ${e.message}`);
-                 }
+                const success = await closePosition(pos.symbol, 0, `Vị thế sót khi khởi động/reset`, sideToClose);
+                if(success) await sleep(1000);
             }
-             await sleep(2000);
-             const positionsAfterCleanup = await callSignedAPI('/fapi/v2/positionRisk', 'GET', { symbol });
-             const remainingAfterCleanup = positionsAfterCleanup.filter(p => p.symbol === symbol && parseFloat(p.positionAmt) !== 0);
-             if (remainingAfterCleanup.length > 0) {
-                 addLog(`[BOT] Cảnh báo: ${remainingAfterCleanup.length} vị thế sót vẫn còn. Kiểm tra thủ công.`);
-             } else {
-                 addLog(`[BOT] Đã đóng thành công vị thế sót.`);
-             }
-
         } else {
-            addLog(`[BOT] Không có vị thế sót.`);
+            addLog(`Không có vị thế sót cho ${symbol}.`);
         }
     } catch (error) {
-        addLog(`[BOT] Lỗi kiểm tra vị thế sót: ${error.msg || error.message}`);
+        addLog(`Lỗi kiểm tra vị thế sót: ${error.msg || error.message}`);
         if (error instanceof CriticalApiError) stopBotLogicInternal();
     }
 }
-
-
-function setupMarketDataStream(symbol) {
-    if (marketWs) marketWs.close();
-    const streamUrl = `${WS_BASE_URL}${WS_USER_DATA_ENDPOINT}/${symbol.toLowerCase()}@markPrice@1s`;
-    addLog(`[WS] Kết nối Market ${symbol}: ${streamUrl}`);
-    marketWs = new WebSocket(streamUrl);
-
-    marketWs.onopen = () => addLog(`[WS] Market ${symbol} đã kết nối.`);
-    marketWs.onmessage = (event) => {
-        try {
-            const data = JSON.parse(event.data);
-             if (data.e === 'markPriceUpdate' && data.s === symbol) {
-                currentMarketPrice = parseFloat(data.p);
-            }
-        } catch (e) {
-        }
-    };
-    marketWs.onclose = (event) => {
-        addLog(`[WS] Market ${symbol} đóng (Code ${event.code}). Kết nối lại 5s...`);
-        marketWs = null;
-        if (botRunning) setTimeout(() => setupMarketDataStream(symbol), 5000);
-    };
-    marketWs.onerror = (error) => {
-        addLog(`[WS] Lỗi Market ${symbol}: ${error.message}`);
-        marketWs = null;
-         if (botRunning) setTimeout(() => setupMarketDataStream(symbol), 5000);
-    };
-}
-
-// Fetches a new listen key from Binance
-async function getListenKey() {
-    if (!API_KEY || !SECRET_KEY) {
-        addLog("[API] Lỗi: Thiếu API/SECRET key.");
-        return null;
-    }
-    try {
-        const data = await callSignedAPI('/fapi/v1/listenKey', 'POST');
-        addLog(`[API] Đã lấy listenKey mới.`);
-        return data.listenKey;
-    } catch (e) {
-        addLog(`[API] Lỗi lấy listenKey: ${e.message}`);
-        if (e instanceof CriticalApiError) stopBotLogicInternal(); // Critical error stops bot
-        return null; // Return null on non-critical error
-    }
-}
-
-// Keeps the current listen key alive by sending a PUT request
-async function keepAliveListenKey() {
-    if (listenKey) {
-        try {
-            await callSignedAPI('/fapi/v1/listenKey', 'PUT', { listenKey });
-            // addLog("[API] ListenKey đã được làm mới."); // Too chatty
-        } catch (e) {
-            addLog(`[API] Lỗi làm mới listenKey. Đang lấy key mới...`);
-            if (e instanceof CriticalApiError) stopBotLogicInternal(); // Critical error stops bot
-            // If non-critical error, attempt to get a new key and reconnect WS
-            if (botRunning) {
-                setTimeout(async () => {
-                    listenKey = await getListenKey(); // Attempt to get new key
-                    if (listenKey) setupUserDataStream(listenKey); // If successful, setup stream
-                    else addLog("[WS] Không lấy được listenKey mới để kết nối lại User Data WS sau lỗi làm mới.");
-                }, 1000); // Small delay before retrying
-            }
-        }
-    }
-}
-
-// Sets up the User Data WebSocket stream
-function setupUserDataStream(key) {
-    // Close any existing connection first
-    if (userDataWs) {
-        try { userDataWs.close(); } catch(e){} // Ignore errors on closing
-    }
-    const streamUrl = `${WS_BASE_URL}${WS_USER_DATA_ENDPOINT}/${key}`;
-    addLog(`[WS] Kết nối User Data WS: ${streamUrl}`);
-    userDataWs = new WebSocket(streamUrl);
-
-    userDataWs.onopen = () => {
-        addLog('[WS] User Data WS đã kết nối.');
-        // Clear previous refresh interval if any
-        if (listenKeyRefreshInterval) clearInterval(listenKeyRefreshInterval);
-        // Start interval to refresh key every 30 minutes (less than 60 min expiry)
-        listenKeyRefreshInterval = setInterval(keepAliveListenKey, 30 * 60 * 1000);
-    };
-
-    userDataWs.onmessage = async (event) => {
-        try {
-            const data = JSON.parse(event.data);
-            // addLog(`[WS] User Data message: ${JSON.stringify(data).substring(0, 200)}...`); // Debug incoming messages
-            if (data.e === 'ORDER_TRADE_UPDATE' && data.o.s === TARGET_COIN_SYMBOL) {
-                // Process order fills for the target symbol asynchronously
-                processTradeResult(data.o).catch(e => addLog(`[WS] Lỗi xử lý trade result: ${e.message}`));
-            } else if (data.e === 'ACCOUNT_UPDATE') {
-                 // Handle account balance/position updates if needed later.
-                 // addLog(`[WS] ACCOUNT_UPDATE received.`); // Debugging
-            }
-        } catch (e) {
-            addLog(`[WS] Lỗi xử lý User Data WS message: ${e.message}`);
-        }
-    };
-
-    userDataWs.onclose = async (event) => {
-        addLog(`[WS] User Data WS đã đóng (Code: ${event.code}, Reason: ${event.reason}). Kết nối lại sau 5s...`);
-        userDataWs = null; // Clear the websocket object
-        // Clear refresh interval as key is likely invalid now
-        if (listenKeyRefreshInterval) clearInterval(listenKeyRefreshInterval);
-        listenKeyRefreshInterval = null;
-        // Attempt to reconnect only if bot is still running
-        if (botRunning) {
-            setTimeout(async () => {
-                listenKey = await getListenKey(); // Attempt to get new key
-                if (listenKey) setupUserDataStream(listenKey); // If successful, setup stream
-                 else addLog("[WS] Không lấy được listenKey mới để kết nối lại User Data WS sau đóng.");
-            }, 5000); // Retry after 5 seconds
-        }
-    };
-
-    userDataWs.onerror = (error) => {
-        addLog(`[WS] Lỗi User Data WS: ${error.message}`);
-        userDataWs = null; // Clear the websocket object
-        // Clear refresh interval
-        if (listenKeyRefreshInterval) clearInterval(listenKeyRefreshInterval);
-        listenKeyRefreshInterval = null;
-         // Attempt to reconnect only if bot is still running
-         if (botRunning) {
-             setTimeout(async () => {
-                listenKey = await getListenKey(); // Attempt to get new key
-                if (listenKey) setupUserDataStream(listenKey); // If successful, setup stream
-                 else addLog("[WS] Không lấy được listenKey mới để kết nối lại User Data WS sau lỗi.");
-            }, 5000); // Retry after 5 seconds
-         }
-    };
-}
-
 
 const app = express();
 app.use(express.json());
@@ -1413,7 +1263,6 @@ app.get('/api/status', async (req, res) => {
             statusMessage = `MÁY CHỦ: ${botProcess.pm2_env.status.toUpperCase()} (Restarts: ${botProcess.pm2_env.restart_time})`;
             if (botProcess.pm2_env.status === 'online') {
                 statusMessage += ` | BOT: ${botRunning ? 'ĐANG CHẠY' : 'ĐÃ DỪNG'}`;
-                 statusMessage += ` | CHẾ ĐỘ: ${botMode.toUpperCase()}`;
                 if (botStartTime) {
                     const uptimeMinutes = Math.floor((Date.now() - botStartTime.getTime()) / 60000);
                     statusMessage += ` | Thời gian chạy: ${uptimeMinutes} phút`;
@@ -1426,10 +1275,6 @@ app.get('/api/status', async (req, res) => {
                     if(currentShortPosition) openPositionsText += `SHORT (${currentShortPosition.unrealizedPnl?.toFixed(2) || 'N/A'} PNL)`;
                  }
                  statusMessage += openPositionsText;
-
-                 statusMessage += ` | Biến động 1h: ${volatileStatus.toUpperCase()}`;
-                 if (isResetReopenPending) statusMessage += ` | Chờ Reset: ${pendingResetReason}`;
-
             }
         } else {
              statusMessage = `Bot: Không tìm thấy trong PM2 (Tên: ${THIS_BOT_PM2_NAME}). Đảm bảo đã chạy PM2!`;
@@ -1447,21 +1292,12 @@ app.get('/api/bot_stats', (req, res) => {
         openPositionsData.push({
             side: pos.side,
             entryPrice: pos.entryPrice?.toFixed(pos.pricePrecision) || 'N/A',
-            quantity: pos.quantity?.toFixed(pos.quantityPrecision) || 'N/A',
+            quantity: Math.abs(parseFloat(pos.quantity || 0)).toFixed(pos.pricePrecision) || 'N/A',
             unrealizedPnl: pos.unrealizedPnl?.toFixed(2) || 'N/A',
             currentPrice: pos.currentPrice?.toFixed(pos.pricePrecision) || 'N/A',
-            initialQuantity: pos.initialQuantity?.toFixed(pos.quantityPrecision) || 'N/A',
-            closedLossAmount: pos.closedLossAmount?.toFixed(pos.quantityPrecision) || 'N/A',
+            initialQuantity: pos.initialQuantity?.toFixed(pos.pricePrecision) || 'N/A',
+            closedLossAmount: pos.closedLossAmount?.toFixed(pos.pricePrecision) || 'N/A',
             pairEntryPrice: pos.pairEntryPrice?.toFixed(pos.pricePrecision) || 'N/A',
-             botMode: botMode,
-             volatileStatus: volatileStatus,
-             nextPartialCloseIndex: pos.nextPartialCloseLossIndex,
-             reopenProcessedAtLevel5: pos.reopenProcessedAtLevel5,
-             previousPartialCloseLossIndex: pos.previousPartialCloseLossIndex,
-             isResetReopenPending: isResetReopenPending,
-             pendingResetReason: pendingResetReason,
-             pendingResetTargetMode: pendingResetTargetMode,
-
         });
     }
     if (currentShortPosition) {
@@ -1469,23 +1305,15 @@ app.get('/api/bot_stats', (req, res) => {
         openPositionsData.push({
             side: pos.side,
             entryPrice: pos.entryPrice?.toFixed(pos.pricePrecision) || 'N/A',
-            quantity: pos.quantity?.toFixed(pos.quantityPrecision) || 'N/A',
+            quantity: Math.abs(parseFloat(pos.quantity || 0)).toFixed(pos.pricePrecision) || 'N/A',
             unrealizedPnl: pos.unrealizedPnl?.toFixed(2) || 'N/A',
             currentPrice: pos.currentPrice?.toFixed(pos.pricePrecision) || 'N/A',
-            initialQuantity: pos.initialQuantity?.toFixed(pos.quantityPrecision) || 'N/A',
-            closedLossAmount: pos.closedLossAmount?.toFixed(pos.quantityPrecision) || 'N/A',
+            initialQuantity: pos.initialQuantity?.toFixed(pos.pricePrecision) || 'N/A',
+            closedLossAmount: pos.closedLossAmount?.toFixed(pos.pricePrecision) || 'N/A',
             pairEntryPrice: pos.pairEntryPrice?.toFixed(pos.pricePrecision) || 'N/A',
-            botMode: botMode,
-            volatileStatus: volatileStatus,
-             nextPartialCloseIndex: pos.nextPartialCloseLossIndex,
-             reopenProcessedAtLevel5: pos.reopenProcessedAtLevel5,
-             previousPartialCloseLossIndex: pos.previousPartialCloseLossIndex,
-             isResetReopenPending: isResetReopenPending,
-             pendingResetReason: pendingResetReason,
-             pendingResetTargetMode: pendingResetTargetMode,
         });
     }
-    res.json({ success: true, data: { botStatus: botRunning ? 'ĐANG CHẠY' : 'ĐÃ DỪNG', botMode: botMode, volatileStatus: volatileStatus, totalProfit: totalProfit.toFixed(2), totalLoss: totalLoss.toFixed(2), netPNL: netPNL.toFixed(2), currentOpenPositions: openPositionsData, currentInvestmentAmount: INITIAL_INVESTMENT_AMOUNT, targetCoin: TARGET_COIN_SYMBOL, isResetReopenPending: isResetReopenPending, pendingResetReason: pendingResetReason, pendingResetTargetMode: pendingResetTargetMode } });
+    res.json({ success: true, data: { totalProfit: totalProfit.toFixed(2), totalLoss: totalLoss.toFixed(2), netPNL: netPNL.toFixed(2), currentOpenPositions: openPositionsData, currentInvestmentAmount: INITIAL_INVESTMENT_AMOUNT } });
 });
 app.post('/api/configure', (req, res) => {
     const { apiKey, secretKey, coinConfigs } = req.body;
@@ -1516,8 +1344,6 @@ app.get('/start_bot_logic', async (req, res) => res.send(await startBotLogicInte
 app.get('/stop_bot_logic', (req, res) => res.send(stopBotLogicInternal()));
 
 app.listen(WEB_SERVER_PORT, () => {
-    addLog(`[BOT] Web server trên cổng ${WEB_SERVER_PORT}`);
-    addLog(`[BOT] Quản lý tại: http://localhost:${WEB_SERVER_PORT}`);
+    addLog(`Web server trên cổng ${WEB_SERVER_PORT}`);
+    addLog(`Quản lý tại: http://localhost:${WEB_SERVER_PORT}`);
 });
-
-// startBotLogicInternal();
