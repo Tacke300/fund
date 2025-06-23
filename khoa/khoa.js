@@ -73,7 +73,7 @@ let isResetReopenPending = false;
 let pendingResetReason = '';
 let pendingResetTargetMode = 'mode1_trading';
 
-const WEB_SERVER_PORT = 2004;
+const WEB_SERVER_PORT = 6789;
 const THIS_BOT_PM2_NAME = 'khoa';
 const CUSTOM_LOG_FILE = path.join(__dirname, 'pm2.log');
 const LOG_TO_CUSTOM_FILE = true;
