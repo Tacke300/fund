@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Binance Futures Hedging Bot</title>
+    <title>Binance Bot</title>
     <style>
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
@@ -167,16 +167,16 @@
 </head>
 <body>
     <div class="container">
-        <h1>BINANCE FUTURES HEDGING BOT</h1>
+        <h1>BINANCE BOT</h1>
 
         <div class="section">
             <h2>Cấu hình Bot</h2>
             <div class="input-group">
-                <label for="targetCoinSymbol">Đồng Coin Giao Dịch (Ví dụ: ETHUSDT):</label>
+                <label for="targetCoinSymbol">Đồng Coin (Ví dụ: ETHUSDT):</label>
                 <input type="text" id="targetCoinSymbol" value="ETHUSDT">
             </div>
             <div class="input-group">
-                <label for="initialInvestmentAmount">Số Vốn Ban Đầu Mỗi Lệnh (USDT):</label>
+                <label for="initialInvestmentAmount">Vốn Ban Đầu (USDT):</label>
                 <input type="number" id="initialInvestmentAmount" value="10" step="1">
             </div>
             <div class="button-group">
@@ -190,25 +190,7 @@
                 <button class="start" onclick="startBot()">Khởi Động Bot</button>
                 <button class="stop" onclick="stopBot()">Dừng Bot</button>
             </div>
-            <div class="status-message" id="botStatus">Đang tải trạng thái...</div>
-        </div>
-
-        <div class="section">
-            <h2>Thống Kê & Vị Thế</h2>
-            <div class="stats-output" id="botStats">
-                <div>Tổng Lời: <strong id="totalProfit">0.00</strong> USDT</div>
-                <div>Tổng Lỗ: <strong id="totalLoss">0.00</strong> USDT</div>
-                <div>PNL Ròng: <strong id="netPNL">0.00</strong> USDT</div>
-                <div>Vốn ban đầu mỗi lệnh: <strong id="currentInvestmentAmount">0.00</strong> USDT</div>
-                <h3>Vị Thế Đang Mở:</h3>
-                <div id="openPositions">Không có vị thế nào đang mở.</div>
-            </div>
-        </div>
-
-        <div class="section">
-            <h2>Nhật Ký Hoạt Động (Logs)</h2>
-            <pre class="log-output" id="logOutput">Đang tải nhật ký...</pre>
-        </div>
+            
     </div>
 
     <script>
