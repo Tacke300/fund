@@ -167,16 +167,16 @@
 </head>
 <body>
     <div class="container">
-        <h1>BINANCE FUTURES HEDGING BOT</h1>
+        <h1>BINANCE BOT</h1>
 
         <div class="section">
             <h2>Cấu hình Bot</h2>
             <div class="input-group">
-                <label for="targetCoinSymbol">Đồng Coin Giao Dịch (Ví dụ: ETHUSDT):</label>
+                <label for="targetCoinSymbol">Đồng Coin (Ví dụ: ETHUSDT):</label>
                 <input type="text" id="targetCoinSymbol" value="ETHUSDT">
             </div>
             <div class="input-group">
-                <label for="initialInvestmentAmount">Số Vốn Ban Đầu Mỗi Lệnh (USDT):</label>
+                <label for="initialInvestmentAmount">Vốn Ban Đầu(USDT):</label>
                 <input type="number" id="initialInvestmentAmount" value="10" step="1">
             </div>
             <div class="button-group">
@@ -276,9 +276,7 @@
                                     <p>Vốn ban đầu (lệnh): ${initialMarginForPos} USDT</p>
                                     <p>Tổng số lượng đã đóng: ${pos.closedLoss} ${coinUnit}</p> 
                                     <p>Mốc đóng từng phần tiếp theo: ${nextPartialCloseDisplay} </p>
-                                    <p>SL điều chỉnh 200% lãi: <strong>Chưa (Không có dữ liệu)</strong></p>
-                                    <p>SL điều chỉnh 500% lãi: <strong>Chưa (Không có dữ liệu)</strong></p>
-                                </div>
+                                    </div>
                             `;
                             // Chú thích: pos.qty, pos.entry, pos.curPrice, pos.closedLoss đã là chuỗi được toFixed từ backend
                         });
