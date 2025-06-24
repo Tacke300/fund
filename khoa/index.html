@@ -1,7 +1,6 @@
 <!DOCTYPE html>
 <html lang="vi">
 <head>
-   
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Binance Futures Hedging Bot</title>
@@ -168,16 +167,16 @@
 </head>
 <body>
     <div class="container">
-        <h1>BINANCE FUTURES HEDGING BOT</h1>
+        <h1>BINANCE BOT</h1>
 
         <div class="section">
             <h2>Cấu hình Bot</h2>
             <div class="input-group">
-                <label for="targetCoinSymbol">Đồng Coin Giao Dịch (Ví dụ: ETHUSDT):</label>
+                <label for="targetCoinSymbol">Đồng Coin (Ví dụ: ETHUSDT):</label>
                 <input type="text" id="targetCoinSymbol" value="ETHUSDT">
             </div>
             <div class="input-group">
-                <label for="initialInvestmentAmount">Số Vốn Ban Đầu Mỗi Lệnh (USDT):</label>
+                <label for="initialInvestmentAmount">Vốn Ban Đầu(USDT):</label>
                 <input type="number" id="initialInvestmentAmount" value="10" step="1">
             </div>
             <div class="button-group">
@@ -212,7 +211,7 @@
         </div>
     </div>
 
-    <script>
+        <script>
         const BOT_ENDPOINT = window.location.origin; // Dynamically get origin
 
         async function fetchBotStatus() {
@@ -229,47 +228,75 @@
             try {
                 const response = await fetch(`${BOT_ENDPOINT}/api/bot_stats`);
                 const data = await response.json();
-                if (data.success) {
-                    document.getElementById('totalProfit').innerText = parseFloat(data.data.totalProfit).toFixed(2);
-                    document.getElementById('totalProfit').className = data.data.totalProfit > 0 ? 'profit' : 'neutral';
 
-                    document.getElementById('totalLoss').innerText = parseFloat(data.data.totalLoss).toFixed(2);
-                    document.getElementById('totalLoss').className = data.data.totalLoss < 0 ? 'loss' : 'neutral'; // Chú ý: totalLoss thường là số dương, nếu là tổng lỗ thì class loss chỉ áp dụng khi giá trị > 0, nếu muốn hiển thị màu đỏ khi có lỗ thì phải check data.data.totalLoss > 0. Tôi sẽ để lại như cũ, nếu giá trị âm sẽ là neutral, nếu là dương mới là loss.
+                if (data.success && data.data) {
+                    const totalProfitValue = parseFloat(data.data.profit);
+                    const totalLossValue = parseFloat(data.data.loss);
+                    const netPNLValue = parseFloat(data.data.net);
 
-                    document.getElementById('netPNL').innerText = parseFloat(data.data.netPNL).toFixed(2);
-                    document.getElementById('netPNL').className = data.data.netPNL > 0 ? 'profit' : (data.data.netPNL < 0 ? 'loss' : 'neutral');
+                    document.getElementById('totalProfit').innerText = totalProfitValue.toFixed(2);
+                    document.getElementById('totalProfit').className = totalProfitValue > 0 ? 'profit' : 'neutral';
 
-                    document.getElementById('currentInvestmentAmount').innerText = parseFloat(data.data.currentInvestmentAmount).toFixed(2);
+                    document.getElementById('totalLoss').innerText = totalLossValue.toFixed(2);
+                    document.getElementById('totalLoss').className = totalLossValue > 0 ? 'loss' : 'neutral'; // Nếu totalLoss là số dương thể hiện lỗ
+
+                    document.getElementById('netPNL').innerText = netPNLValue.toFixed(2);
+                    document.getElementById('netPNL').className = netPNLValue > 0 ? 'profit' : (netPNLValue < 0 ? 'loss' : 'neutral');
+
+                    document.getElementById('currentInvestmentAmount').innerText = parseFloat(data.data.invest).toFixed(2);
 
                     const openPositionsDiv = document.getElementById('openPositions');
                     openPositionsDiv.innerHTML = ''; // Clear previous content
 
-                    if (data.data.currentOpenPositions && data.data.currentOpenPositions.length > 0) {
-                        data.data.currentOpenPositions.forEach(pos => {
-                            const pnlClass = pos.unrealizedPnl > 0 ? 'profit' : (pos.unrealizedPnl < 0 ? 'loss' : 'neutral');
+                    if (data.data.positions && data.data.positions.length > 0) {
+                        const globalCoinSymbol = data.data.coin || "COINUSDT"; // Lấy symbol chung từ data.data.coin
+                        const coinUnit = globalCoinSymbol.replace('USDT', '');
+
+                        data.data.positions.forEach(pos => {
+                            const unrealizedPnlValue = parseFloat(pos.pnl);
+                            const pnlClass = unrealizedPnlValue > 0 ? 'profit' : (unrealizedPnlValue < 0 ? 'loss' : 'neutral');
+
+                            // Vì backend không gửi initialMargin, ta có thể dùng global 'invest' hoặc để trống
+                            // Ở đây, ta sẽ dùng global 'invest' làm vốn ban đầu cho vị thế này
+                            const initialMarginForPos = parseFloat(data.data.invest).toFixed(2);
+
+                            // Backend không gửi partialCloseLevels, chỉ có mocIdx
+                            let nextPartialCloseDisplay = `Mốc ${pos.mocIdx + 1}`;
+                            // Nếu bạn có một logic cố định cho partialCloseLevels ở frontend, bạn có thể thử ánh xạ mocIdx
+                            // ví dụ: const levels = [35, 70, 105, ...]; if (levels[pos.mocIdx]) nextPartialCloseDisplay = levels[pos.mocIdx] + '%';
+                            // Nhưng an toàn nhất là chỉ hiển thị chỉ số mốc.
+
                             openPositionsDiv.innerHTML += `
                                 <div class="position-details">
-                                    <h4>Vị thế ${pos.side} ${pos.symbol}</h4>
-                                    <p>Số lượng: ${pos.quantity.toFixed(pos.pricePrecision)}</p>
-                                    <p>Giá vào: ${pos.entryPrice.toFixed(pos.pricePrecision)}</p>
-                                    <p>Giá hiện tại: ${pos.currentPrice.toFixed(pos.pricePrecision)}</p>
-                                    <p>PNL chưa thực tế: <strong class="${pnlClass}">${pos.unrealizedPnl.toFixed(2)} USDT</strong></p>
-                                    <p>Vốn ban đầu: ${pos.initialMargin.toFixed(2)} USDT</p>
-                                    <p>Tổng vốn đã đóng từng phần: ${pos.closedAmount.toFixed(2)} USDT</p>
-                                    <p>Mốc đóng từng phần tiếp theo: ${pos.nextPartialCloseIndex < pos.partialCloseLevels.length ? pos.partialCloseLevels[pos.nextPartialCloseIndex] + '%' : 'Đã đạt tất cả'} </p>
-                                    <p>SL điều chỉnh 200% lãi: <strong>${pos.hasAdjustedSLTo200PercentProfit ? 'Đã kích hoạt' : 'Chưa'}</strong></p>
-                                    <p>SL điều chỉnh 500% lãi: <strong>${pos.hasAdjustedSLTo500PercentProfit ? 'Đã kích hoạt' : 'Chưa'}</strong></p>
-                                </div>
+                                    <h4>Vị thế ${pos.side} ${globalCoinSymbol}</h4>
+                                    <p>Số lượng: ${pos.qty} ${coinUnit}</p> 
+                                    <p>Giá vào: ${pos.entry}</p>
+                                    <p>Giá hiện tại: ${pos.curPrice}</p>
+                                    <p>PNL chưa thực tế: <strong class="${pnlClass}">${unrealizedPnlValue.toFixed(2)} USDT</strong></p>
+                                    <p>Vốn ban đầu (lệnh): ${initialMarginForPos} USDT</p>
+                                    <p>Tổng số lượng đã đóng: ${pos.closedLoss} ${coinUnit}</p> 
+                                    <p>Mốc đóng từng phần tiếp theo: ${nextPartialCloseDisplay} </p>
+                                    </div>
                             `;
+                            // Chú thích: pos.qty, pos.entry, pos.curPrice, pos.closedLoss đã là chuỗi được toFixed từ backend
                         });
                     } else {
                         openPositionsDiv.innerText = 'Không có vị thế nào đang mở.';
                     }
                 } else {
-                    openPositionsDiv.innerText = `Lỗi tải thống kê: ${data.message}`;
+                    const openPositionsDiv = document.getElementById('openPositions');
+                    openPositionsDiv.innerText = `Lỗi tải thống kê: ${data.message || 'Không có dữ liệu'}`;
+                    document.getElementById('totalProfit').innerText = '0.00';
+                    document.getElementById('totalLoss').innerText = '0.00';
+                    document.getElementById('netPNL').innerText = '0.00';
+                    document.getElementById('currentInvestmentAmount').innerText = '0.00';
                 }
             } catch (error) {
                 document.getElementById('botStats').innerHTML = `Lỗi lấy thống kê bot: ${error.message}`;
+                const openPositionsDiv = document.getElementById('openPositions');
+                if (openPositionsDiv) {
+                    openPositionsDiv.innerText = `Lỗi tải thống kê: ${error.message}`;
+                }
             }
         }
 
@@ -294,7 +321,6 @@
             } catch (error) {
                 document.getElementById('botStatus').innerText = `Lỗi khi gửi lệnh khởi động: ${error.message}`;
             } finally {
-                // Fetch status and logs again after a short delay
                 setTimeout(() => {
                     fetchBotStatus();
                     fetchBotStats();
@@ -312,7 +338,6 @@
             } catch (error) {
                 document.getElementById('botStatus').innerText = `Lỗi khi gửi lệnh dừng: ${error.message}`;
             } finally {
-                // Fetch status and logs again after a short delay
                 setTimeout(() => {
                     fetchBotStatus();
                     fetchBotStats();
@@ -331,24 +356,28 @@
             }
 
             try {
+                // Giả sử API /api/configure của bạn mong đợi cấu trúc này từ file JS gốc
+                const payload = {
+                    coinConfigs: [{
+                        symbol: targetCoinSymbol,
+                        initialAmount: initialInvestmentAmount
+                    }]
+                };
+                // Nếu API configure của bạn mong đợi apiKey, secretKey trực tiếp, bạn cần điều chỉnh
+                // const payload = { apiKey: ..., secretKey: ..., coinConfigs: ... };
+
                 const response = await fetch(`${BOT_ENDPOINT}/api/configure`, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
                     },
-                    body: JSON.stringify({
-                        coinConfigs: [{
-                            symbol: targetCoinSymbol,
-                            initialAmount: initialInvestmentAmount
-                        }]
-                    })
+                    body: JSON.stringify(payload)
                 });
                 const data = await response.json();
                 alert(data.message);
             } catch (error) {
                 alert(`Lỗi cấu hình bot: ${error.message}`);
             } finally {
-                // Fetch status and stats to reflect new configuration
                 setTimeout(() => {
                     fetchBotStatus();
                     fetchBotStats();
@@ -357,12 +386,10 @@
             }
         }
 
-        // Fetch initial status, stats, and logs when the page loads
         document.addEventListener('DOMContentLoaded', () => {
             fetchBotStatus();
             fetchBotStats();
             fetchLogs();
-            // Refresh status, stats, and logs every 5 seconds
             setInterval(() => {
                 fetchBotStatus();
                 fetchBotStats();
