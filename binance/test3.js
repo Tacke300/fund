@@ -27,7 +27,7 @@ const WS_BASE_URL = 'wss://fstream.binance.com';
 const WS_USER_DATA_ENDPOINT = '/ws';
 
 const WEB_SERVER_PORT = parseInt(process.env.WEB_PORT) || 1277;
-const THIS_BOT_PM2_NAME = process.env.PM2_APP_NAME || 'goat_client_bot';
+const THIS_BOT_PM2_NAME = process.env.PM2_APP_NAME || 'test3';
 const CUSTOM_LOG_FILE = path.join(__dirname, `pm2_client_${WEB_SERVER_PORT}.log`);
 const LOG_TO_CUSTOM_FILE = true;
 
