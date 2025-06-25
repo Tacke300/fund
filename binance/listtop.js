@@ -1,20 +1,19 @@
-const WebSocket = require('ws');
-const axios = require('axios');
-const express = require('express');
+import WebSocket from 'ws'; // Thay đổi require thành import
+import axios from 'axios';   // Thay đổi require thành import
+import express from 'express'; // Thay đổi require thành import
 
 const app = express();
-const port = 9000;
+const port = 9000; // Đảm bảo cổng là 9000
 
 const BINANCE_FAPI_URL = 'https://fapi.binance.com';
 const BINANCE_WS_URL = 'wss://fstream.binance.com/stream?streams=';
 
-const WINDOW_MINUTES = 30; // Số phút để tính biến động
-let coinData = {}; // { SYMBOL: { symbol: 'BTCUSDT', prices: [price1, price2,...], changePercent: 0, currentPrice: 0, price30MinAgo: 0, lastUpdate: timestamp }}
+const WINDOW_MINUTES = 30;
+let coinData = {};
 let top10CoinsHtml = "<h1>Đang khởi tạo và tải dữ liệu...</h1>";
 let allSymbols = [];
 let wsClient = null;
 
-// 1. Lấy danh sách các đồng coin USDT-M Futures
 async function getAllFuturesSymbols() {
     try {
         const response = await axios.get(`${BINANCE_FAPI_URL}/fapi/v1/exchangeInfo`);
@@ -29,26 +28,24 @@ async function getAllFuturesSymbols() {
     }
 }
 
-// 2. Lấy dữ liệu lịch sử ban đầu cho mỗi coin
 async function fetchInitialHistoricalData(symbols) {
     console.log("Đang tải dữ liệu lịch sử ban đầu...");
     const now = Date.now();
 
     for (const symbol of symbols) {
-        if (!coinData[symbol]) { // Khởi tạo nếu chưa có
+        if (!coinData[symbol]) {
             coinData[symbol] = {
                 symbol: symbol,
-                prices: [], // Mảng lưu trữ giá đóng cửa của WINDOW_MINUTES nến 1m gần nhất
+                prices: [],
                 changePercent: null,
                 currentPrice: null,
                 priceXMinAgo: null,
                 lastUpdate: 0,
-                klineOpenTime: 0 // Thời gian mở của nến 1m gần nhất từ WS
+                klineOpenTime: 0
             };
         }
 
         try {
-            // Lấy tối đa WINDOW_MINUTES nến 1 phút gần nhất
             const response = await axios.get(`${BINANCE_FAPI_URL}/fapi/v1/klines`, {
                 params: {
                     symbol: symbol,
@@ -57,43 +54,33 @@ async function fetchInitialHistoricalData(symbols) {
                     limit: WINDOW_MINUTES
                 }
             });
-            const klines = response.data; // [[openTime, open, high, low, close, ...], ...]
+            const klines = response.data;
             if (klines && klines.length > 0) {
-                // Sắp xếp lại klines theo thời gian tăng dần (API trả về giảm dần theo endTime)
-                // và chỉ lấy giá đóng cửa
                 coinData[symbol].prices = klines.map(k => parseFloat(k[4])).reverse();
                 if (coinData[symbol].prices.length > 0) {
                     coinData[symbol].currentPrice = coinData[symbol].prices[coinData[symbol].prices.length - 1];
-                    coinData[symbol].priceXMinAgo = coinData[symbol].prices[0]; // Nến cũ nhất trong cửa sổ
+                    coinData[symbol].priceXMinAgo = coinData[symbol].prices[0];
                 }
             }
-            // console.log(`Tải xong lịch sử cho ${symbol}, có ${coinData[symbol].prices.length} nến.`);
         } catch (error) {
-            // Bỏ qua lỗi cho các coin mới chưa có đủ dữ liệu, hoặc lỗi mạng tạm thời
-            // console.warn(`Lỗi khi lấy dữ liệu lịch sử cho ${symbol}: ${error.message}. Có thể là coin mới.`);
             if (error.response && error.response.status === 400 && error.response.data && error.response.data.msg === "ReduceOnly Order is not supported for this symbol.") {
-                // console.log(`Bỏ qua symbol ${symbol} do không hỗ trợ (ReduceOnly).`);
-                delete coinData[symbol]; // Xóa symbol không hợp lệ
+                delete coinData[symbol];
                 allSymbols = allSymbols.filter(s => s !== symbol);
             } else if (error.response && error.response.status === 429) {
                 console.warn(`Bị rate limit khi lấy lịch sử cho ${symbol}. Sẽ thử lại sau.`);
-                await new Promise(resolve => setTimeout(resolve, 5000)); // Chờ 5s
-                 // Thử lại cho symbol này
+                await new Promise(resolve => setTimeout(resolve, 5000));
                 const index = symbols.indexOf(symbol);
                 if (index > -1) await fetchInitialHistoricalData([symbol]);
-
             } else {
                 console.warn(`Lỗi khi lấy dữ liệu lịch sử cho ${symbol}: ${error.message}.`);
             }
         }
-        await new Promise(resolve => setTimeout(resolve, 150)); // Delay nhỏ để tránh rate limit
+        await new Promise(resolve => setTimeout(resolve, 150));
     }
     console.log("Tải dữ liệu lịch sử ban đầu hoàn tất.");
-    calculateAndRank(); // Tính toán lần đầu sau khi có dữ liệu lịch sử
+    calculateAndRank();
 }
 
-
-// 3. Kết nối WebSocket
 function connectToBinanceWebSocket(symbols) {
     if (wsClient && (wsClient.readyState === WebSocket.OPEN || wsClient.readyState === WebSocket.CONNECTING)) {
         console.log("WebSocket đã kết nối hoặc đang kết nối. Đóng kết nối cũ.");
@@ -122,21 +109,19 @@ function connectToBinanceWebSocket(symbols) {
                 const klineData = message.data.k;
                 const symbol = klineData.s;
 
-                if (coinData[symbol] && klineData.x) { // klineData.x === true nghĩa là nến đã đóng
+                if (coinData[symbol] && klineData.x) {
                     const closePrice = parseFloat(klineData.c);
                     const openTime = parseInt(klineData.t);
 
-                    // Chỉ cập nhật nếu là nến mới (khác với nến cuối cùng đã lưu)
                     if (openTime > (coinData[symbol].klineOpenTime || 0)) {
                         coinData[symbol].prices.push(closePrice);
                         if (coinData[symbol].prices.length > WINDOW_MINUTES) {
-                            coinData[symbol].prices.shift(); // Giữ cửa sổ 30 nến
+                            coinData[symbol].prices.shift();
                         }
                         coinData[symbol].currentPrice = closePrice;
-                        coinData[symbol].priceXMinAgo = coinData[symbol].prices[0]; // Nến cũ nhất trong cửa sổ
+                        coinData[symbol].priceXMinAgo = coinData[symbol].prices[0];
                         coinData[symbol].lastUpdate = Date.now();
                         coinData[symbol].klineOpenTime = openTime;
-                        // console.log(`Cập nhật ${symbol}: ${closePrice}, Nến cũ nhất: ${coinData[symbol].priceXMinAgo}, Số nến: ${coinData[symbol].prices.length}`);
                     }
                 }
             }
@@ -152,38 +137,34 @@ function connectToBinanceWebSocket(symbols) {
     wsClient.on('close', (code, reason) => {
         console.log(`WebSocket đã đóng. Code: ${code}, Reason: ${reason ? reason.toString() : 'N/A'}`);
         console.log('Đang thử kết nối lại WebSocket sau 5 giây...');
-        setTimeout(() => connectToBinanceWebSocket(allSymbols), 5000); // Thử kết nối lại
+        setTimeout(() => connectToBinanceWebSocket(allSymbols), 5000);
     });
 }
 
-// 5. Tính toán biến động và sắp xếp
 function calculateAndRank() {
     console.log("Đang tính toán và xếp hạng...");
     const rankedCoins = [];
     for (const symbol in coinData) {
         const data = coinData[symbol];
-        // Cần ít nhất 2 nến để tính biến động, và giá phải hợp lệ
         if (data.prices.length >= 2 && data.priceXMinAgo && data.currentPrice && data.priceXMinAgo > 0) {
             const change = ((data.currentPrice - data.priceXMinAgo) / data.priceXMinAgo) * 100;
-            data.changePercent = parseFloat(change.toFixed(2)); // Làm tròn 2 chữ số thập phân
+            data.changePercent = parseFloat(change.toFixed(2));
             rankedCoins.push(data);
         } else {
-            data.changePercent = null; // Không đủ dữ liệu
+            data.changePercent = null;
         }
     }
 
     rankedCoins.sort((a, b) => {
-        if (b.changePercent === null) return -1; // Đẩy null xuống cuối
+        if (b.changePercent === null) return -1;
         if (a.changePercent === null) return 1;
-        return b.changePercent - a.changePercent; // Sắp xếp giảm dần
+        return b.changePercent - a.changePercent;
     });
 
     const top10 = rankedCoins.slice(0, 10);
     generateHtml(top10);
-    // console.log("Top 10:", top10.map(c => `${c.symbol}: ${c.changePercent}%`));
 }
 
-// 6. Tạo HTML
 function generateHtml(coins) {
     let html = `
         <html>
@@ -244,18 +225,17 @@ function generateHtml(coins) {
     top10CoinsHtml = html;
 }
 
-// Hàm cập nhật định kỳ danh sách symbol (ví dụ: mỗi 6 giờ)
 async function periodicallyUpdateSymbolList() {
     console.log("Đang kiểm tra và cập nhật danh sách symbol...");
     const newSymbols = await getAllFuturesSymbols();
     const addedSymbols = newSymbols.filter(s => !allSymbols.includes(s));
-    const removedSymbols = allSymbols.filter(s => !newSymbols.includes(s)); // Hiếm khi xảy ra với perpetual
+    const removedSymbols = allSymbols.filter(s => !newSymbols.includes(s));
 
     if (addedSymbols.length > 0) {
         console.log(`Phát hiện ${addedSymbols.length} symbol mới: ${addedSymbols.join(', ')}`);
-        allSymbols = newSymbols; // Cập nhật danh sách tổng
-        await fetchInitialHistoricalData(addedSymbols); // Tải dữ liệu lịch sử cho symbol mới
-        connectToBinanceWebSocket(allSymbols); // Kết nối lại WS với danh sách symbol mới
+        allSymbols = newSymbols;
+        await fetchInitialHistoricalData(addedSymbols);
+        connectToBinanceWebSocket(allSymbols);
     }
     if (removedSymbols.length > 0) {
          console.log(`Phát hiện ${removedSymbols.length} symbol bị loại bỏ (hiếm): ${removedSymbols.join(', ')}`);
@@ -265,7 +245,6 @@ async function periodicallyUpdateSymbolList() {
     }
     console.log("Kiểm tra danh sách symbol hoàn tất.");
 }
-
 
 async function main() {
     allSymbols = await getAllFuturesSymbols();
@@ -278,15 +257,11 @@ async function main() {
         return;
     }
 
-    await fetchInitialHistoricalData(allSymbols); // Tải dữ liệu ban đầu
-    connectToBinanceWebSocket(allSymbols);       // Kết nối WebSocket
+    await fetchInitialHistoricalData(allSymbols);
+    connectToBinanceWebSocket(allSymbols);
 
-    // Tính toán và cập nhật HTML mỗi phút
     setInterval(calculateAndRank, 60 * 1000);
-
-    // Cập nhật danh sách symbol mỗi 6 tiếng để bắt coin mới list
     setInterval(periodicallyUpdateSymbolList, 6 * 60 * 60 * 1000);
-
 
     app.get('/', (req, res) => {
         res.send(top10CoinsHtml);
