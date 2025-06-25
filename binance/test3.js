@@ -14,7 +14,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // --- Cấu hình quan trọng ---
-const VPS1_DATA_URL = 'http://34.142.248.96:9000/api/top-coins'; // !!! THAY <IP_CUA_VPS1> BẰNG IP THẬT CỦA VPS1 !!!
+const VPS1_DATA_URL = 'http://34.142.248.96:9000'; // !!! THAY <IP_CUA_VPS1> BẰNG IP THẬT CỦA VPS1 !!!
 const VPS_SPECIFIC_DELAY_MS = parseInt(process.env.VPS_DELAY) || Math.floor(Math.random() * 8000) + 2000;
 const MIN_CANDLES_FOR_SELECTION = 55;
 const VOLATILITY_SWITCH_THRESHOLD_PERCENT = 5.0;
