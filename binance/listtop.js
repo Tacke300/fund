@@ -1,11 +1,12 @@
-import WebSocket from 'ws'; // Thay đổi require thành import
-import axios from 'axios';   // Thay đổi require thành import
-import express from 'express'; // Thay đổi require thành import
+import WebSocket from 'ws'; // Vẫn cần 'ws' cho WebSocket client
+import https from 'https';   // Module 'https' tích hợp sẵn của Node.js
+import express from 'express';
+import { URL } from 'url'; // Để parse URL dễ dàng hơn
 
 const app = express();
-const port = 9000; // Đảm bảo cổng là 9000
+const port = 9000;
 
-const BINANCE_FAPI_URL = 'https://fapi.binance.com';
+const BINANCE_FAPI_BASE_URL = 'https://fapi.binance.com';
 const BINANCE_WS_URL = 'wss://fstream.binance.com/stream?streams=';
 
 const WINDOW_MINUTES = 30;
@@ -14,10 +15,54 @@ let top10CoinsHtml = "<h1>Đang khởi tạo và tải dữ liệu...</h1>";
 let allSymbols = [];
 let wsClient = null;
 
+// Hàm helper để thực hiện GET request bằng module 'https'
+function httpsGetJson(urlString) {
+    return new Promise((resolve, reject) => {
+        const parsedUrl = new URL(urlString);
+        const options = {
+            hostname: parsedUrl.hostname,
+            path: parsedUrl.pathname + parsedUrl.search,
+            method: 'GET',
+            headers: {
+                'Content-Type': 'application/json',
+            }
+        };
+
+        const req = https.request(options, (res) => {
+            let data = '';
+            if (res.statusCode < 200 || res.statusCode >= 300) {
+                // Thêm log để biết response trả về
+                // console.error(`HTTPS GET request to ${urlString} failed with status: ${res.statusCode}`);
+                // res.on('data', chunk => data += chunk);
+                // res.on('end', () => console.error('Response body on error:', data));
+                return reject(new Error(`Request Failed. Status Code: ${res.statusCode} for ${urlString}`));
+            }
+
+            res.on('data', (chunk) => {
+                data += chunk;
+            });
+
+            res.on('end', () => {
+                try {
+                    resolve(JSON.parse(data));
+                } catch (e) {
+                    reject(e);
+                }
+            });
+        });
+
+        req.on('error', (error) => {
+            reject(error);
+        });
+
+        req.end();
+    });
+}
+
 async function getAllFuturesSymbols() {
     try {
-        const response = await axios.get(`${BINANCE_FAPI_URL}/fapi/v1/exchangeInfo`);
-        const symbols = response.data.symbols
+        const data = await httpsGetJson(`${BINANCE_FAPI_BASE_URL}/fapi/v1/exchangeInfo`);
+        const symbols = data.symbols
             .filter(s => s.contractType === 'PERPETUAL' && s.quoteAsset === 'USDT' && s.status === 'TRADING')
             .map(s => s.symbol);
         console.log(`Lấy được ${symbols.length} đồng coin USDT-M Futures.`);
@@ -46,40 +91,39 @@ async function fetchInitialHistoricalData(symbols) {
         }
 
         try {
-            const response = await axios.get(`${BINANCE_FAPI_URL}/fapi/v1/klines`, {
-                params: {
-                    symbol: symbol,
-                    interval: '1m',
-                    endTime: now,
-                    limit: WINDOW_MINUTES
-                }
-            });
-            const klines = response.data;
-            if (klines && klines.length > 0) {
-                coinData[symbol].prices = klines.map(k => parseFloat(k[4])).reverse();
+            const klinesData = await httpsGetJson(`${BINANCE_FAPI_BASE_URL}/fapi/v1/klines?symbol=${symbol}&interval=1m&endTime=${now}&limit=${WINDOW_MINUTES}`);
+            if (klinesData && klinesData.length > 0) {
+                coinData[symbol].prices = klinesData.map(k => parseFloat(k[4])).reverse();
                 if (coinData[symbol].prices.length > 0) {
                     coinData[symbol].currentPrice = coinData[symbol].prices[coinData[symbol].prices.length - 1];
                     coinData[symbol].priceXMinAgo = coinData[symbol].prices[0];
                 }
             }
         } catch (error) {
-            if (error.response && error.response.status === 400 && error.response.data && error.response.data.msg === "ReduceOnly Order is not supported for this symbol.") {
+            // Xử lý lỗi tương tự như trước
+            const errorData = error.message.includes('Request Failed. Status Code:') ? error.message : null;
+            if (errorData && errorData.includes('400')) { // Giả định lỗi 400 là do ReduceOnly hoặc symbol không hợp lệ
+                // console.warn(`Lỗi 400 khi lấy lịch sử cho ${symbol}: ${error.message}. Có thể là coin mới hoặc không hỗ trợ.`);
                 delete coinData[symbol];
                 allSymbols = allSymbols.filter(s => s !== symbol);
-            } else if (error.response && error.response.status === 429) {
+            } else if (errorData && errorData.includes('429')) {
                 console.warn(`Bị rate limit khi lấy lịch sử cho ${symbol}. Sẽ thử lại sau.`);
                 await new Promise(resolve => setTimeout(resolve, 5000));
                 const index = symbols.indexOf(symbol);
-                if (index > -1) await fetchInitialHistoricalData([symbol]);
+                if (index > -1) await fetchInitialHistoricalData([symbol]); // Thử lại
             } else {
                 console.warn(`Lỗi khi lấy dữ liệu lịch sử cho ${symbol}: ${error.message}.`);
             }
         }
-        await new Promise(resolve => setTimeout(resolve, 150));
+        await new Promise(resolve => setTimeout(resolve, 200)); // Tăng delay một chút vì 'https' có thể không tối ưu bằng axios
     }
     console.log("Tải dữ liệu lịch sử ban đầu hoàn tất.");
     calculateAndRank();
 }
+
+// Các hàm connectToBinanceWebSocket, calculateAndRank, generateHtml, periodicallyUpdateSymbolList, main giữ nguyên như phiên bản ES Module trước
+// vì chúng không trực tiếp dùng axios.
+// Chỉ cần đảm bảo các hàm gọi API (getAllFuturesSymbols, fetchInitialHistoricalData) đã được sửa.
 
 function connectToBinanceWebSocket(symbols) {
     if (wsClient && (wsClient.readyState === WebSocket.OPEN || wsClient.readyState === WebSocket.CONNECTING)) {
