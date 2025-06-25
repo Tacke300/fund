@@ -1,3 +1,4 @@
+import http from 'http'; // THÊM IMPORT NÀY
 import https from 'https';
 import crypto from 'crypto';
 import express from 'express';
@@ -5,16 +6,16 @@ import { exec } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import WebSocket from 'ws'; // Vẫn cần 'ws' cho WebSocket client
-import { URL } from 'url'; // Để parse URL
+import WebSocket from 'ws';
+import { URL } from 'url';
 
-import { API_KEY, SECRET_KEY } from './config.js'; // Đảm bảo file config.js tồn tại
+import { API_KEY, SECRET_KEY } from './config.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // --- Cấu hình quan trọng ---
-const VPS1_DATA_URL = 'http://34.142.248.96:9000'; // !!! THAY <IP_CUA_VPS1> BẰNG IP THẬT CỦA VPS1 !!!
+const VPS1_DATA_URL = 'http://34.142.248.96:9000/'; // !!! THAY <IP_CUA_VPS1> VÀ ĐẢM BẢO LÀ ROOT PATH !!!
 const VPS_SPECIFIC_DELAY_MS = parseInt(process.env.VPS_DELAY) || Math.floor(Math.random() * 8000) + 2000;
 const MIN_CANDLES_FOR_SELECTION = 55;
 const VOLATILITY_SWITCH_THRESHOLD_PERCENT = 5.0;
@@ -26,7 +27,7 @@ const WS_BASE_URL = 'wss://fstream.binance.com';
 const WS_USER_DATA_ENDPOINT = '/ws';
 
 const WEB_SERVER_PORT = parseInt(process.env.WEB_PORT) || 1277;
-const THIS_BOT_PM2_NAME = process.env.PM2_APP_NAME || 'test3';
+const THIS_BOT_PM2_NAME = process.env.PM2_APP_NAME || 'goat_client_bot';
 const CUSTOM_LOG_FILE = path.join(__dirname, `pm2_client_${WEB_SERVER_PORT}.log`);
 const LOG_TO_CUSTOM_FILE = true;
 
@@ -121,30 +122,46 @@ function formatTimeUTC7(dateObject) { const formatter = new Intl.DateTimeFormat(
 function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
 function createSignature(queryString, apiSecret) { return crypto.createHmac('sha256', apiSecret).update(queryString).digest('hex'); }
 
-async function makeHttpRequest(method, hostname, path, headers, postData = '') {
+// Sửa makeHttpRequest để dùng http/https linh hoạt
+async function makeHttpRequest(method, urlString, headers = {}, postData = '') {
     return new Promise((resolve, reject) => {
-        const options = { hostname, path, method, headers, timeout: 10000 };
-        const req = https.request(options, (res) => {
+        const parsedUrl = new URL(urlString);
+        const options = {
+            hostname: parsedUrl.hostname,
+            port: parsedUrl.port || (parsedUrl.protocol === 'https:' ? 443 : 80),
+            path: parsedUrl.pathname + parsedUrl.search,
+            method: method,
+            headers: {...headers}, // Sao chép headers để tránh thay đổi object gốc
+            timeout: 10000
+        };
+
+        const protocol = parsedUrl.protocol === 'https:' ? https : http;
+
+        const req = protocol.request(options, (res) => {
             let data = '';
             res.on('data', (chunk) => data += chunk);
             res.on('end', () => {
                 if (res.statusCode >= 200 && res.statusCode < 300) {
                     resolve(data);
                 } else {
-                    const errorMsg = `HTTP Lỗi: ${res.statusCode} ${res.statusMessage}`;
-                    let errorDetails = { code: res.statusCode, msg: errorMsg };
+                    const errorMsg = `HTTP Lỗi: ${res.statusCode} ${res.statusMessage} khi gọi ${urlString}`;
+                    let errorDetails = { code: res.statusCode, msg: errorMsg, url: urlString };
                     try { const parsedData = JSON.parse(data); errorDetails = { ...errorDetails, ...parsedData }; }
                     catch (e) { errorDetails.msg += ` - Raw: ${data.substring(0, 200)}`; }
                     reject(errorDetails);
                 }
             });
         });
-        req.on('error', (e) => reject({ code: 'NETWORK_ERROR', msg: e.message }));
-        req.on('timeout', () => { req.destroy(); reject({ code: 'TIMEOUT_ERROR', msg: 'Request timed out' }); });
+        req.on('error', (e) => reject({ code: 'NETWORK_ERROR', msg: `${e.message} (khi gọi ${urlString})`, url: urlString }));
+        req.on('timeout', () => {
+            req.destroy();
+            reject({ code: 'TIMEOUT_ERROR', msg: `Request timed out (khi gọi ${urlString})`, url: urlString });
+        });
         if (postData) req.write(postData);
         req.end();
     });
 }
+
 
 async function callSignedAPI(fullEndpointPath, method = 'GET', params = {}) {
     if (!API_KEY || !SECRET_KEY) throw new CriticalApiError("Lỗi: Thiếu API/SECRET key.");
@@ -162,31 +179,16 @@ async function callSignedAPI(fullEndpointPath, method = 'GET', params = {}) {
         requestBody = `${queryString}&signature=${signature}`;
         headers['Content-Type'] = 'application/x-www-form-urlencoded';
     } else { throw new Error(`Phương thức không hỗ trợ: ${method}`); }
+
+    const fullUrlToCall = `https://${BASE_HOST}${requestPath}`; // API Binance luôn là HTTPS
+
     try {
-        const rawData = await makeHttpRequest(method, BASE_HOST, requestPath, headers, requestBody);
+        const rawData = await makeHttpRequest(method, fullUrlToCall, headers, requestBody);
         consecutiveApiErrors = 0;
         return JSON.parse(rawData);
     } catch (error) {
         consecutiveApiErrors++;
-        addLog(`Lỗi API Binance (${method} ${fullEndpointPath}): ${error.code || 'UNKNOWN'} - ${error.msg || error.message}`);
-        if (error.code === -1003 || (error.msg && error.msg.includes("limit"))) { addLog("  -> BỊ CẤM IP TẠM THỜI (RATE LIMIT)."); }
-        if (consecutiveApiErrors >= MAX_CONSECUTIVE_API_ERRORS) {
-            addLog(`Lỗi API liên tiếp (${consecutiveApiErrors}/${MAX_CONSECUTIVE_API_ERRORS}). Dừng bot.`);
-            throw new CriticalApiError("Quá nhiều lỗi API liên tiếp, bot dừng.");
-        }
-        throw error;
-    }
-}
-async function callPublicAPI(fullEndpointPath, params = {}) {
-    const queryString = new URLSearchParams(params).toString();
-    const fullPathWithQuery = `${fullEndpointPath}?${queryString}`;
-    try {
-        const rawData = await makeHttpRequest('GET', BASE_HOST, fullPathWithQuery, {});
-        consecutiveApiErrors = 0;
-        return JSON.parse(rawData);
-    } catch (error) {
-        consecutiveApiErrors++;
-        addLog(`Lỗi API công khai (${fullEndpointPath}): ${error.code || 'UNKNOWN'} - ${error.msg || error.message}`);
+        addLog(`Lỗi API Binance (${method} ${fullUrlToCall}): ${error.code || 'UNKNOWN'} - ${error.msg || error.message}`);
         if (error.code === -1003 || (error.msg && error.msg.includes("limit"))) { addLog("  -> BỊ CẤM IP TẠM THỜI (RATE LIMIT)."); }
         if (consecutiveApiErrors >= MAX_CONSECUTIVE_API_ERRORS) {
             addLog(`Lỗi API liên tiếp (${consecutiveApiErrors}/${MAX_CONSECUTIVE_API_ERRORS}). Dừng bot.`);
@@ -196,11 +198,33 @@ async function callPublicAPI(fullEndpointPath, params = {}) {
     }
 }
 
-async function fetchTopCoinsFromVPS1() {
-    addLog(`Đang lấy dữ liệu top coin từ VPS1: ${VPS1_DATA_URL}`);
+async function callPublicAPI(fullEndpointPath, params = {}) {
+    const queryString = new URLSearchParams(params).toString();
+    const fullPathWithQuery = `${fullEndpointPath}${queryString ? '?' + queryString : ''}`;
+    const fullUrlToCall = `https://${BASE_HOST}${fullPathWithQuery}`; // API Binance luôn là HTTPS
+
     try {
-        const parsedVps1Url = new URL(VPS1_DATA_URL);
-        const rawData = await makeHttpRequest('GET', parsedVps1Url.hostname, parsedVps1Url.pathname + parsedVps1Url.search, {});
+        const rawData = await makeHttpRequest('GET', fullUrlToCall, {});
+        consecutiveApiErrors = 0;
+        return JSON.parse(rawData);
+    } catch (error) {
+        consecutiveApiErrors++;
+        addLog(`Lỗi API công khai (${fullUrlToCall}): ${error.code || 'UNKNOWN'} - ${error.msg || error.message}`);
+        if (error.code === -1003 || (error.msg && error.msg.includes("limit"))) { addLog("  -> BỊ CẤM IP TẠM THỜI (RATE LIMIT)."); }
+        if (consecutiveApiErrors >= MAX_CONSECUTIVE_API_ERRORS) {
+            addLog(`Lỗi API liên tiếp (${consecutiveApiErrors}/${MAX_CONSECUTIVE_API_ERRORS}). Dừng bot.`);
+            throw new CriticalApiError("Quá nhiều lỗi API liên tiếp, bot dừng.");
+        }
+        throw error;
+    }
+}
+
+// fetchTopCoinsFromVPS1 gọi đến root path của VPS1_DATA_URL
+async function fetchTopCoinsFromVPS1() {
+    const fullUrl = VPS1_DATA_URL; // VPS1_DATA_URL giờ đã là root path
+    addLog(`Đang lấy dữ liệu top coin từ VPS1: ${fullUrl}`);
+    try {
+        const rawData = await makeHttpRequest('GET', fullUrl, {}); // Dùng HTTP
         const coins = JSON.parse(rawData);
         if (Array.isArray(coins)) {
             return coins.filter(c => c.symbol && typeof c.changePercent === 'number' && c.candles >= MIN_CANDLES_FOR_SELECTION);
@@ -208,10 +232,21 @@ async function fetchTopCoinsFromVPS1() {
         addLog("Lỗi: Dữ liệu từ VPS1 không phải là một mảng hoặc rỗng.");
         return [];
     } catch (error) {
-        addLog(`Lỗi khi lấy dữ liệu từ VPS1: ${error.code || 'UNKNOWN'} - ${error.msg || error.message}`);
+        addLog(`Lỗi khi lấy dữ liệu từ VPS1 (${fullUrl}): ${error.code || 'UNKNOWN'} - ${error.msg || error.message}`);
         return [];
     }
 }
+
+// ... (Các hàm còn lại: checkExistingPosition, selectTargetCoin, calculateVolatilityLastHour, syncServerTime, ... cho đến hết file, GIỮ NGUYÊN như phiên bản đã hoàn chỉnh ở các phản hồi trước)
+// Quan trọng: Đảm bảo các hàm này không bị thay đổi logic cốt lõi, chỉ có hàm makeHttpRequest và cách gọi nó trong fetchTopCoinsFromVPS1 là thay đổi chính.
+
+// Các hàm còn lại (từ checkExistingPosition đến hết file) được giữ nguyên như phiên bản bot_client.js hoàn chỉnh mà tôi đã cung cấp ở phản hồi trước đó,
+// nơi đã có logic chọn coin, chuyển coin, các mode kill/sideways, xử lý lỗi, express server, v.v.
+// Bạn chỉ cần thay thế phần đầu file (import, hằng số, addLog, formatTimeUTC7, sleep, createSignature, makeHttpRequest, callSignedAPI, callPublicAPI, fetchTopCoinsFromVPS1)
+// bằng những gì tôi cung cấp ở trên.
+
+// --- ĐOẠN CODE DƯỚI ĐÂY LÀ PHẦN CÒN LẠI CỦA bot_client.js, NỐI TIẾP TỪ TRÊN ---
+// --- BẮT ĐẦU PHẦN NỐI TIẾP ---
 
 async function checkExistingPosition(symbol) {
     if (!symbol) return false;
@@ -1006,8 +1041,8 @@ function setupMarketDataStream(symbol) {
     if (!symbol) { addLog("Không có symbol để stream market data."); return; }
     if (marketWs && (marketWs.readyState === WebSocket.OPEN || marketWs.readyState === WebSocket.CONNECTING)) {
         addLog(`Đóng Market Data Stream cũ cho ${marketWs.url.split('/')[marketWs.url.split('/').length-1].split('@')[0].toUpperCase()}...`);
-        marketWs.removeAllListeners(); // Xóa hết listener cũ
-        marketWs.terminate(); // Đóng ngay lập tức
+        marketWs.removeAllListeners();
+        marketWs.terminate();
         marketWs = null;
     }
     const streamName = `${symbol.toLowerCase()}@markPrice@1s`;
@@ -1018,7 +1053,7 @@ function setupMarketDataStream(symbol) {
     marketWs.on('message', (data) => {
         try {
             const message = JSON.parse(data.toString());
-            if (message.e === 'markPriceUpdate' && message.s === TARGET_COIN_SYMBOL) { // Chỉ xử lý nếu symbol khớp
+            if (message.e === 'markPriceUpdate' && message.s === TARGET_COIN_SYMBOL) {
                 currentMarketPrice = parseFloat(message.p);
             }
         } catch (error) { addLog(`Lỗi xử lý Market Data Stream message (${symbol}): ` + error.message); }
@@ -1026,7 +1061,7 @@ function setupMarketDataStream(symbol) {
     marketWs.on('error', (err) => addLog(`Lỗi Market Data Stream (${symbol}): ` + err.message));
     marketWs.on('close', (code, reason) => {
         addLog(`Market Data Stream (${symbol}) đã đóng. Code: ${code}, Reason: ${reason ? reason.toString() : 'N/A'}.`);
-        if (botRunning && symbol === TARGET_COIN_SYMBOL) { // Chỉ kết nối lại nếu bot đang chạy và symbol này vẫn là target
+        if (botRunning && symbol === TARGET_COIN_SYMBOL) {
             addLog(`Thử kết nối lại Market Data Stream cho ${TARGET_COIN_SYMBOL} sau 5 giây...`);
             setTimeout(() => setupMarketDataStream(TARGET_COIN_SYMBOL), 5000);
         } else {
@@ -1036,14 +1071,19 @@ function setupMarketDataStream(symbol) {
 }
 
 // --- Express Web Server ---
-const app = express(); app.use(express.json());
-app.get('/', (req, res) => {
+const app = express();
+app.use(express.json());
+app.use(express.static(__dirname)); // PHỤC VỤ FILE TĨNH (index.html, script.js)
+
+app.get('/', (req, res) => { // Vẫn giữ route này để phục vụ index.html nếu express.static không tìm thấy vì lý do nào đó
     const htmlPath = path.join(__dirname, 'index.html');
-    if (!fs.existsSync(htmlPath)) {
-        fs.writeFileSync(htmlPath, fallbackHtmlContent, 'utf8');
+    if (fs.existsSync(htmlPath)) {
+        res.sendFile(htmlPath);
+    } else {
+        res.status(404).send(fallbackHtmlContent);
     }
-    res.sendFile(htmlPath);
 });
+
 app.get('/api/logs', (req, res) => { fs.readFile(CUSTOM_LOG_FILE, 'utf8', (err, data) => { if (err) return res.status(500).send('Lỗi đọc log'); const clean = data.replace(/[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g, ''); res.send(clean.split('\n').slice(-500).join('\n')); }); });
 app.get('/api/status', async (req, res) => {
     try {
@@ -1129,14 +1169,17 @@ const fallbackHtmlContent = `
     try {
         await syncServerTime();
         await getExchangeInfo();
-        app.listen(WEB_SERVER_PORT, '0.0.0.0', () => {
-            addLog(`Web server của Bot Client đang chạy tại http://<YOUR_VPS_IP>:${WEB_SERVER_PORT}`);
+        // Server Express sẽ được tạo bằng http.createServer để đảm bảo là HTTP
+        http.createServer(app).listen(WEB_SERVER_PORT, '0.0.0.0', () => {
+            addLog(`Web server của Bot Client (HTTP) đang chạy tại http://<YOUR_VPS_IP>:${WEB_SERVER_PORT}`);
             addLog(`Log file: ${CUSTOM_LOG_FILE}`);
         });
     } catch (e) {
         addLog(`LỖI NGHIÊM TRỌNG KHI KHỞI TẠO SERVER: ${e.message}. Bot có thể không hoạt động đúng.`);
-         app.listen(WEB_SERVER_PORT, '0.0.0.0', () => {
-            addLog(`Web server của Bot Client (CHẾ ĐỘ LỖI) đang chạy tại http://<YOUR_VPS_IP>:${WEB_SERVER_PORT}`);
+         http.createServer(app).listen(WEB_SERVER_PORT, '0.0.0.0', () => { // Vẫn cố gắng chạy server
+            addLog(`Web server của Bot Client (CHẾ ĐỘ LỖI - HTTP) đang chạy tại http://<YOUR_VPS_IP>:${WEB_SERVER_PORT}`);
         });
     }
 })();
+
+// --- KẾT THÚC PHẦN NỐI TIẾP ---
