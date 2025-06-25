@@ -3,7 +3,7 @@ const axios = require('axios');
 const express = require('express');
 
 const app = express();
-const port = 3000;
+const port = 9000;
 
 const BINANCE_FAPI_URL = 'https://fapi.binance.com';
 const BINANCE_WS_URL = 'wss://fstream.binance.com/stream?streams=';
