@@ -14,7 +14,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // --- Cấu hình quan trọng ---
-const VPS1_DATA_URL = 'http://<IP_CUA_VPS1>:9000/api/top-coins'; // !!! THAY <IP_CUA_VPS1> BẰNG IP THẬT CỦA VPS1 !!!
+const VPS1_DATA_URL = 'http://34.142.248.96:9000/api/top-coins'; // !!! THAY <IP_CUA_VPS1> BẰNG IP THẬT CỦA VPS1 !!!
 const VPS_SPECIFIC_DELAY_MS = parseInt(process.env.VPS_DELAY) || Math.floor(Math.random() * 8000) + 2000;
 const MIN_CANDLES_FOR_SELECTION = 55;
 const VOLATILITY_SWITCH_THRESHOLD_PERCENT = 5.0;
@@ -26,7 +26,7 @@ const WS_BASE_URL = 'wss://fstream.binance.com';
 const WS_USER_DATA_ENDPOINT = '/ws';
 
 const WEB_SERVER_PORT = parseInt(process.env.WEB_PORT) || 1277;
-const THIS_BOT_PM2_NAME = process.env.PM2_APP_NAME || 'goat_client_bot';
+const THIS_BOT_PM2_NAME = process.env.PM2_APP_NAME || 'test3';
 const CUSTOM_LOG_FILE = path.join(__dirname, `pm2_client_${WEB_SERVER_PORT}.log`);
 const LOG_TO_CUSTOM_FILE = true;
 
