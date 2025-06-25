@@ -207,7 +207,7 @@ async function main() {
         topRankedCoinsHtml = "<h1>Lỗi: Không thể lấy danh sách symbol từ Binance.</h1>";
         topRankedCoinsJson = [{ error: "Không thể lấy danh sách symbol từ Binance." }];
         app.get('/', (req, res) => res.send(topRankedCoinsHtml));
-        app.get('/api/top-coins', (req, res) => res.status(500).json(topRankedCoinsJson));
+        app.get('/', (req, res) => res.status(500).json(topRankedCoinsJson));
         app.listen(port, '0.0.0.0', () => console.log(`Server VPS1 đang chạy tại http://<IP_CUA_VPS1>:${port} với lỗi.`));
         return;
     }
@@ -219,7 +219,7 @@ async function main() {
     setInterval(periodicallyUpdateSymbolList, 6 * 60 * 60 * 1000); // 6 tiếng 1 lần
 
     app.get('/', (req, res) => res.send(topRankedCoinsHtml));
-    app.get('/api/top-coins', (req, res) => {
+    app.get('/', (req, res) => {
         if (topRankedCoinsJson.length > 0 && !topRankedCoinsJson[0].error) {
             res.json(topRankedCoinsJson);
         } else if (topRankedCoinsJson.length > 0 && topRankedCoinsJson[0].error) {
@@ -231,7 +231,7 @@ async function main() {
     });
     app.listen(port, '0.0.0.0', () => {
         console.log(`Server VPS1 (Data Provider) đang chạy tại http://<IP_CUA_VPS1>:${port}`);
-        console.log(`API Top Coins: http://<IP_CUA_VPS1>:${port}/api/top-coins`);
+        console.log(`API Top Coins: http://<IP_CUA_VPS1>:${port}`);
     });
 }
 
