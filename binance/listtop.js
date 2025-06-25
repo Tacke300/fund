@@ -205,7 +205,7 @@ function calculateAndRank() {
         return b.changePercent - a.changePercent;
     });
 
-    const top10 = rankedCoins.slice(0, 10);
+    const top10 = rankedCoins.slice(0, 20);
     generateHtml(top10);
 }
 
@@ -228,7 +228,7 @@ function generateHtml(coins) {
                 </style>
             </head>
             <body>
-                <h1>Top 10 Coin Biến Động Mạnh Nhất (${WINDOW_MINUTES} phút gần nhất)</h1>
+                <h1>Top 20 Coin Biến Động Mạnh Nhất (${WINDOW_MINUTES} phút gần nhất)</h1>
                 <table>
                     <thead>
                         <tr>
