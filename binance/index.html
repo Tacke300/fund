@@ -3,33 +3,168 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Binance Bot Dashboard</title>
+    <title>Binance Bot Dashboard (Enhanced for Sideways)</title>
     <style>
-        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; padding: 15px; background: linear-gradient(135deg, #f0e6fa 0%, #e0f2f7 100%); color: #333; line-height: 1.5; font-size: 0.9em; }
-        .container { max-width: 1000px; margin: 15px auto; background-color: #ffffff; padding: 25px; border-radius: 12px; box-shadow: 0 6px 20px rgba(0, 0, 0, 0.1); }
-        h1, h2, h3 { color: #6a5acd; }
-        h1 { border-bottom: 1px solid #dcdcdc; padding-bottom: 8px; margin-bottom: 18px; font-size: 1.8em; }
-        h2 { font-size: 1.4em; }
-        h3 { margin-top: 20px; border-top: 1px solid #eee; padding-top: 15px; }
-        .section { margin-bottom: 25px; padding: 18px; background-color: #f9f9f9; border-radius: 10px; box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05); }
-        .input-group { margin-bottom: 12px; display: flex; align-items: center; }
-        .input-group label { flex: 1; margin-right: 12px; font-weight: 600; color: #483d8b; font-size: 0.9em; }
-        .input-group input { flex: 2; padding: 8px 10px; border-radius: 6px; border: 1px solid #c0c0c0; font-size: 0.9em; }
-        .button-group { display: flex; gap: 12px; margin-top: 18px; justify-content: center; }
-        .button-group button { padding: 10px 20px; border: none; border-radius: 6px; font-size: 0.95em; cursor: pointer; transition: all 0.2s ease; color: white; font-weight: 600; }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 15px;
+            background: linear-gradient(135deg, #f0e6fa 0%, #e0f2f7 100%);
+            color: #333;
+            line-height: 1.5;
+            font-size: 0.9em;
+        }
+        .container {
+            max-width: 1000px;
+            margin: 15px auto;
+            background-color: #ffffff;
+            padding: 25px;
+            border-radius: 12px;
+            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.1);
+        }
+        h1, h2, h3 { /* Thêm h3 vào đây */
+            color: #6a5acd;
+            border-bottom: 1px solid #dcdcdc;
+            padding-bottom: 8px;
+            margin-bottom: 18px;
+            font-size: 1.8em;
+        }
+        h2 {
+            font-size: 1.4em;
+        }
+        h3 { /* Style cho h3 của phần lưới */
+            font-size: 1.2em;
+            border-top: 1px solid #eee; /* Thêm đường kẻ trên cho h3 */
+            padding-top: 15px; /* Thêm padding trên */
+            margin-top: 20px; /* Thêm margin trên */
+            border-bottom: none; /* Bỏ border dưới của h3 nếu không muốn trùng với h2 */
+        }
+        .section {
+            margin-bottom: 25px;
+            padding: 18px;
+            background-color: #f9f9f9;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
+        }
+        .input-group {
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+        }
+        .input-group label {
+            flex: 1;
+            margin-right: 12px;
+            font-weight: 600;
+            color: #483d8b;
+            font-size: 0.9em;
+        }
+        .input-group input[type="text"],
+        .input-group input[type="number"] {
+            flex: 2;
+            padding: 8px 10px;
+            border-radius: 6px;
+            border: 1px solid #c0c0c0;
+            background-color: #ffffff;
+            color: #333;
+            font-size: 0.9em;
+            box-shadow: inset 0 1px 3px rgba(0,0,0,0.08);
+        }
+        .input-group input[type="text"]:focus,
+        .input-group input[type="number"]:focus {
+            outline: none;
+            border-color: #9370db;
+            box-shadow: 0 0 0 3px rgba(147, 112, 219, 0.2);
+        }
+        .button-group {
+            display: flex;
+            gap: 12px;
+            margin-top: 18px;
+            justify-content: center;
+        }
+        .button-group button {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 6px;
+            font-size: 0.95em;
+            cursor: pointer;
+            transition: background-color 0.3s ease, transform 0.2s ease, box-shadow 0.2s ease;
+            color: white;
+            font-weight: 600;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+        }
+        .button-group button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+        }
         .button-group button.start { background-color: #8bc34a; }
+        .button-group button.start:hover { background-color: #7cb342; }
         .button-group button.stop { background-color: #ef5350; }
+        .button-group button.stop:hover { background-color: #e53935; }
         .button-group button.configure { background-color: #64b5f6; }
-        .status-message { margin-top: 20px; padding: 12px; background-color: #e3f2fd; border-left: 4px solid #90caf9; border-radius: 6px; font-size: 0.95em; color: #2196f3; word-wrap: break-word; white-space: pre-wrap; }
-        .log-output { background-color: #263238; color: #e0f2f7; padding: 15px; border-radius: 8px; max-height: 400px; overflow-y: auto; font-family: 'Consolas', 'Monaco', monospace; font-size: 0.85em; white-space: pre-wrap; word-wrap: break-word; /* Thêm word-wrap */ }
-        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; }
-        .stats-output div, .stats-output span { margin-bottom: 6px; padding: 8px; background-color: #f0f4f8; border-left: 3px solid #b39ddb; border-radius: 4px; font-size: 0.9em; }
-        .stats-output strong { color: #8e24aa; }
-        .position-details { margin-top: 10px; padding: 12px; border-radius: 8px; border: 1px solid #c8e6c9; background: #e8f5e9; }
-        .position-details h4 { color: #388e3c; margin-top: 0; margin-bottom: 8px; }
-        .position-details p { margin: 4px 0; font-size: 0.9em; }
-        .profit { color: #2e7d32; font-weight: bold; }
-        .loss { color: #d32f2f; font-weight: bold; }
+        .button-group button.configure:hover { background-color: #42a5f5; }
+        .status-message {
+            margin-top: 20px;
+            padding: 12px;
+            background-color: #e3f2fd;
+            border-left: 4px solid #90caf9;
+            border-radius: 6px;
+            font-size: 0.95em;
+            color: #2196f3;
+            word-wrap: break-word;
+            white-space: pre-wrap;
+        }
+        .log-output {
+            background-color: #263238;
+            color: #e0f2f7;
+            padding: 15px;
+            border-radius: 8px;
+            min-height: 200px;
+            max-height: 400px;
+            overflow-y: auto;
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 0.85em;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            border: 1px solid #37474f;
+        }
+        .stats-output div, .stats-output span { /* Thêm .stats-output span cho các grid item mới */
+            margin-bottom: 6px;
+            padding: 8px;
+            background-color: #f0f4f8;
+            border-left: 3px solid #b39ddb;
+            border-radius: 4px;
+            font-size: 0.9em;
+        }
+        .stats-output strong {
+            color: #8e24aa;
+        }
+        /* Style cho grid layout của thống kê lưới */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 10px;
+            margin-top: 10px; /* Thêm margin top cho grid */
+        }
+        .position-details {
+            margin-top: 10px;
+            padding: 12px;
+            background-color: #e8f5e9;
+            border-radius: 8px;
+            border: 1px solid #c8e6c9;
+        }
+        .position-details h4 {
+            color: #388e3c;
+            margin-top: 0;
+            margin-bottom: 8px;
+            font-size: 1.1em;
+            border-bottom: none; /* Đảm bảo h4 không có border bottom */
+        }
+        .position-details p {
+            margin: 4px 0;
+            font-size: 0.85em;
+        }
+        .profit { color: #2e7d32; font-weight: 600; }
+        .loss { color: #d32f2f; font-weight: 600; }
         .neutral { color: #757575; }
     </style>
 </head>
@@ -38,55 +173,62 @@
         <h1>BINANCE BOT</h1>
 
         <div class="section">
-            <h2>Cấu hình & Điều Khiển</h2>
+            <h2>Cấu hình Bot</h2>
             <div class="input-group">
-                <label for="targetCoinSymbol">Coin (VD: ETHUSDT):</label>
+                <label for="targetCoinSymbol">Đồng Coin (Ví dụ: ETHUSDT):</label>
                 <input type="text" id="targetCoinSymbol" value="ETHUSDT">
             </div>
             <div class="input-group">
-                <label for="initialInvestmentAmount">Vốn Ban Đầu (USDT):</label>
+                <label for="initialInvestmentAmount">Vốn Ban Đầu(USDT):</label>
                 <input type="number" id="initialInvestmentAmount" value="10" step="1">
             </div>
             <div class="button-group">
                 <button class="configure" onclick="configureBot()">Lưu Cấu Hình</button>
-                <button class="start" onclick="startBot()">Khởi Động</button>
-                <button class="stop" onclick="stopBot()">Dừng</button>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>Điều Khiển Bot</h2>
+            <div class="button-group">
+                <button class="start" onclick="startBot()">Khởi Động Bot</button>
+                <button class="stop" onclick="stopBot()">Dừng Bot</button>
             </div>
             <div class="status-message" id="botStatus">Đang tải trạng thái...</div>
         </div>
 
         <div class="section">
             <h2>Thống Kê & Vị Thế</h2>
-            <div class="stats-output">
-                <div class="stats-grid">
-                    <span>PNL Đã Khớp (Ròng): <strong id="netPNL">0.00</strong></span>
-                    <span>Vốn ban đầu: <strong id="currentInvestmentAmount">0.00</strong></span>
-                </div>
+            <div class="stats-output" id="botStats">
+                <!-- Giữ lại các thống kê chung này, chúng sẽ được điền từ data.net, data.invest của backend JS -->
+                <div>PNL Ròng (Tổng): <strong id="overallNetPNL">0.00</strong> USDT</div>
+                <div>Vốn ban đầu (Cấu hình): <strong id="configuredInvestmentAmount">0.00</strong> USDT</div>
 
-                <div id="gridStatsSection" style="display: none;">
-                    <h3>Thống Kê Lưới</h3>
-                    <div class="stats-grid">
+                <!-- PHẦN MỚI: THỐNG KÊ CHO SIDEWAYS MODE -->
+                <div id="gridStatsSection" style="display: none;"> <!-- Ban đầu ẩn -->
+                    <h3>Thống Kê Lưới (Sideways Mode)</h3>
+                    <div class="stats-grid"> <!-- Sử dụng class stats-grid cho layout -->
                         <span>Tổng Lưới Khớp: <strong id="totalGridsMatched">0</strong></span>
                         <span>Lưới Chạm TP: <strong id="totalTpHit">0</strong></span>
                         <span>Lưới Chạm SL: <strong id="totalSlHit">0</strong></span>
-                        <span>Tổng Lỗ từ SL: <strong id="gridTotalSlLoss" class="loss">0.00</strong></span>
-                        <span>PNL Lưới Chưa Ghi Nhận: <strong id="gridUnrealizedPnl">0.00</strong></span>
+                        <span>Tổng Lỗ từ SL Lưới: <strong id="gridTotalSlLoss" class="loss">0.00</strong> USDT</span>
+                        <span>PNL Lưới Chưa Ghi Nhận: <strong id="gridUnrealizedPnl">0.00</strong> USDT</span>
                     </div>
                 </div>
+                <!-- KẾT THÚC PHẦN MỚI -->
 
-                <h3>Vị Thế Đang Mở</h3>
+                <h3>Vị Thế Đang Mở:</h3>
                 <div id="killModePositionsContainer">
-                    <!-- NƠI HIỂN THỊ VỊ THẾ CỦA KILL MODE -->
+                    <!-- Nơi hiển thị vị thế KILL mode -->
                 </div>
                 <div id="sidewaysPositionsContainer">
-                    <!-- NƠI HIỂN THỊ VỊ THẾ CỦA SIDEWAYS MODE -->
+                    <!-- Nơi hiển thị vị thế SIDEWAYS mode -->
                 </div>
                 <div id="noPositionsMessage" style="display: block;">Không có vị thế nào đang mở.</div>
             </div>
         </div>
 
         <div class="section">
-            <h2>Nhật Ký Hoạt Động</h2>
+            <h2>Nhật Ký Hoạt Động (Logs)</h2>
             <pre class="log-output" id="logOutput">Đang tải nhật ký...</pre>
         </div>
     </div>
@@ -94,138 +236,10 @@
     <script>
         const BOT_ENDPOINT = window.location.origin;
 
-        async function fetchBotStats() {
-            try {
-                const response = await fetch(`${BOT_ENDPOINT}/api/bot_stats`);
-                if (!response.ok) {
-                    console.error("Lỗi HTTP khi tải thống kê:", response.status, response.statusText);
-                    document.getElementById('netPNL').innerText = 'Lỗi tải';
-                    return;
-                }
-                const resData = await response.json();
-
-                if (!resData.success || !resData.data) {
-                    console.error("Lỗi tải thống kê từ API:", resData.message || "Không có dữ liệu.");
-                    document.getElementById('netPNL').innerText = resData.message || 'Lỗi dữ liệu';
-                    return;
-                }
-
-                const data = resData.data;
-
-                // Cập nhật thống kê chung
-                const netPNLValue = parseFloat(data.net) || 0; // Thêm || 0 để tránh NaN
-                document.getElementById('netPNL').innerText = netPNLValue.toFixed(4) + ' USDT';
-                document.getElementById('netPNL').className = netPNLValue > 0 ? 'profit' : (netPNLValue < 0 ? 'loss' : 'neutral');
-
-                const investmentAmount = parseFloat(data.invest) || 0; // Thêm || 0
-                document.getElementById('currentInvestmentAmount').innerText = investmentAmount.toFixed(2) + ' USDT';
-
-                // Lấy các element DOM
-                const gridStatsSection = document.getElementById('gridStatsSection');
-                const killPositionsDiv = document.getElementById('killModePositionsContainer'); // Đổi tên để rõ ràng hơn
-                const sidewaysPositionsDiv = document.getElementById('sidewaysPositionsContainer'); // Đổi tên
-                const noPositionsMsg = document.getElementById('noPositionsMessage');
-
-                // Reset hiển thị
-                gridStatsSection.style.display = 'none';
-                killPositionsDiv.innerHTML = ''; // Xóa nội dung cũ
-                sidewaysPositionsDiv.innerHTML = ''; // Xóa nội dung cũ
-                noPositionsMsg.style.display = 'block'; // Mặc định là không có vị thế
-
-                let hasOpenPositions = false;
-
-                // Hiển thị dựa trên chế độ bot
-                if (data.mode === 'KILL' && data.killModePositions && data.killModePositions.length > 0) {
-                    let killHtml = '';
-                    data.killModePositions.forEach(pos => {
-                        const pnlValue = parseFloat(pos.unrealizedPnl) || 0;
-                        const pnlClass = pnlValue > 0 ? 'profit' : (pnlValue < 0 ? 'loss' : 'neutral');
-                        // Backend trả về `entryPrice` là số, `quantity` là số
-                        const entryPriceStr = pos.entryPrice !== undefined && pos.entryPrice !== null ? pos.entryPrice.toFixed(4) : 'N/A';
-                        const quantityStr = pos.quantity !== undefined && pos.quantity !== null ? pos.quantity.toFixed(4) : 'N/A';
-
-                        killHtml += `
-                            <div class="position-details">
-                                <h4>[KILL] Vị thế ${pos.side || 'N/A'}</h4>
-                                <p>Giá vào: ${entryPriceStr} | KL: ${quantityStr}</p>
-                                <p>PNL chưa thực tế: <strong class="${pnlClass}">${pnlValue.toFixed(4)} USDT</strong></p>
-                            </div>`;
-                    });
-                    killPositionsDiv.innerHTML = killHtml;
-                    hasOpenPositions = true;
-                }
-
-                if (data.mode === 'SIDEWAYS') { // Luôn hiển thị thống kê lưới nếu mode là SIDEWAYS, kể cả khi không có vị thế
-                    gridStatsSection.style.display = 'block';
-
-                    // Cập nhật thống kê lưới từ data.gridStats (đã có sẵn từ backend JS)
-                    document.getElementById('totalGridsMatched').innerText = data.gridStats?.totalGridsMatched || 0;
-                    document.getElementById('totalTpHit').innerText = data.gridStats?.totalTpHit || 0;
-                    document.getElementById('totalSlHit').innerText = data.gridStats?.totalSlHit || 0;
-
-                    const totalSlLoss = parseFloat(data.gridStats?.totalSlLoss) || 0;
-                    document.getElementById('gridTotalSlLoss').innerText = totalSlLoss.toFixed(4) + ' USDT';
-                    document.getElementById('gridTotalSlLoss').className = totalSlLoss < 0 ? 'loss' : (totalSlLoss > 0 ? 'profit' : 'neutral'); // Chú ý: totalSlLoss từ backend là PNL, nên < 0 là lỗ
-
-                    // PNL Lưới Chưa Ghi Nhận từ data.unrealizedGridPnl (đã có sẵn từ backend JS)
-                    const unrealizedGridPnlValue = parseFloat(data.unrealizedGridPnl) || 0;
-                    const unrealizedPnlEl = document.getElementById('gridUnrealizedPnl');
-                    unrealizedPnlEl.innerText = unrealizedGridPnlValue.toFixed(4) + ' USDT';
-                    unrealizedPnlEl.className = unrealizedGridPnlValue > 0 ? 'profit' : (unrealizedGridPnlValue < 0 ? 'loss' : 'neutral');
-
-                    // Hiển thị vị thế lưới
-                    if (data.sidewaysModePositions && data.sidewaysModePositions.length > 0) {
-                        let sidewaysHtml = '';
-                        data.sidewaysModePositions.forEach(pos => {
-                            // Backend trả về pos.pnl là string đã toFixed(4)
-                            const pnlValue = parseFloat(pos.pnl) || 0;
-                            const pnlClass = pnlValue > 0 ? 'profit' : (pnlValue < 0 ? 'loss' : 'neutral');
-                            sidewaysHtml += `
-                                <div class="position-details">
-                                    <h4>[LƯỚI] Vị thế ${pos.side || 'N/A'}</h4>
-                                    <p>Giá vào: ${pos.entry || 'N/A'} | KL: ${pos.qty || 'N/A'}</p>
-                                    <p>Giá hiện tại: ${pos.curPrice || 'N/A'}</p>
-                                    <p>PNL chưa thực tế: <strong class="${pnlClass}">${pnlValue.toFixed(4)} USDT</strong></p>
-                                </div>`;
-                        });
-                        sidewaysPositionsDiv.innerHTML = sidewaysHtml;
-                        hasOpenPositions = true;
-                    }
-                }
-
-                if (hasOpenPositions) {
-                    noPositionsMsg.style.display = 'none';
-                } else {
-                    noPositionsMsg.style.display = 'block';
-                    // Nếu không có vị thế nào, đảm bảo các container vị thế trống
-                    if (data.mode !== 'KILL' || !data.killModePositions || data.killModePositions.length === 0) {
-                         killPositionsDiv.innerHTML = '';
-                    }
-                    if (data.mode !== 'SIDEWAYS' || !data.sidewaysModePositions || data.sidewaysModePositions.length === 0) {
-                         sidewaysPositionsDiv.innerHTML = '';
-                    }
-                }
-
-            } catch (error) {
-                console.error("Lỗi trong fetchBotStats:", error);
-                document.getElementById('netPNL').innerText = 'Lỗi xử lý';
-                // Đảm bảo các phần khác cũng được reset nếu có lỗi
-                document.getElementById('gridStatsSection').style.display = 'none';
-                document.getElementById('killModePositionsContainer').innerHTML = '';
-                document.getElementById('sidewaysPositionsContainer').innerHTML = '';
-                document.getElementById('noPositionsMessage').style.display = 'block';
-                document.getElementById('noPositionsMessage').innerText = 'Lỗi tải dữ liệu vị thế.';
-
-            }
-        }
-
         async function fetchBotStatus() {
             try {
                 const response = await fetch(`${BOT_ENDPOINT}/api/status`);
-                if (!response.ok) {
-                    document.getElementById('botStatus').innerText = `Lỗi HTTP lấy trạng thái: ${response.status}`;
-                    return;
-                }
+                if (!response.ok) throw new Error(`Status HTTP error! ${response.status}`);
                 const text = await response.text();
                 document.getElementById('botStatus').innerText = text;
             } catch (error) {
@@ -233,13 +247,135 @@
             }
         }
 
+        async function fetchBotStats() {
+            try {
+                const response = await fetch(`${BOT_ENDPOINT}/api/bot_stats`);
+                if (!response.ok) throw new Error(`Stats HTTP error! ${response.status}`);
+                const resData = await response.json(); // Backend JS của bạn trả về resData.data là object thống kê
+
+                if (!resData.success || !resData.data) {
+                    console.error("Lỗi tải thống kê từ API:", resData.message || "Dữ liệu không hợp lệ.");
+                    // Reset các trường về lỗi
+                    document.getElementById('overallNetPNL').innerText = 'Lỗi';
+                    document.getElementById('configuredInvestmentAmount').innerText = 'Lỗi';
+                    document.getElementById('gridStatsSection').style.display = 'none';
+                    document.getElementById('killModePositionsContainer').innerHTML = '';
+                    document.getElementById('sidewaysPositionsContainer').innerHTML = '';
+                    document.getElementById('noPositionsMessage').innerText = 'Lỗi tải dữ liệu vị thế.';
+                    document.getElementById('noPositionsMessage').style.display = 'block';
+                    return;
+                }
+
+                const statsData = resData.data; // Đây là object chứa mode, net, invest, killModePositions, etc.
+
+                // Cập nhật thống kê chung từ backend JS
+                const overallNetPNLValue = parseFloat(statsData.net) || 0;
+                document.getElementById('overallNetPNL').innerText = overallNetPNLValue.toFixed(4) + ' USDT';
+                document.getElementById('overallNetPNL').className = overallNetPNLValue > 0 ? 'profit' : (overallNetPNLValue < 0 ? 'loss' : 'neutral');
+
+                const configuredInvestment = parseFloat(statsData.invest) || 0;
+                document.getElementById('configuredInvestmentAmount').innerText = configuredInvestment.toFixed(2) + ' USDT';
+
+
+                // Lấy các container DOM
+                const gridStatsSection = document.getElementById('gridStatsSection');
+                const killPositionsDiv = document.getElementById('killModePositionsContainer');
+                const sidewaysPositionsDiv = document.getElementById('sidewaysPositionsContainer');
+                const noPositionsMsg = document.getElementById('noPositionsMessage');
+
+                // Reset hiển thị
+                gridStatsSection.style.display = 'none'; // Sẽ được bật lại nếu mode là SIDEWAYS
+                killPositionsDiv.innerHTML = '';
+                sidewaysPositionsDiv.innerHTML = '';
+                noPositionsMsg.style.display = 'block'; // Mặc định là không có vị thế
+
+                let hasOpenPositions = false;
+
+                // Xử lý dựa trên 'mode' từ backend JS
+                if (statsData.mode === 'KILL') {
+                    if (statsData.killModePositions && statsData.killModePositions.length > 0) {
+                        hasOpenPositions = true;
+                        let killHtml = '';
+                        statsData.killModePositions.forEach(pos => {
+                            const pnlValue = parseFloat(pos.unrealizedPnl) || 0;
+                            const pnlClass = pnlValue > 0 ? 'profit' : (pnlValue < 0 ? 'loss' : 'neutral');
+                            const entryPriceStr = pos.entryPrice !== undefined ? parseFloat(pos.entryPrice).toFixed(4) : 'N/A';
+                            const quantityStr = pos.quantity !== undefined ? parseFloat(pos.quantity).toFixed(4) : 'N/A';
+
+                            killHtml += `
+                                <div class="position-details">
+                                    <h4>[KILL] Vị thế ${pos.side || 'N/A'} (${statsData.coin || 'COIN'})</h4>
+                                    <p>Giá vào: ${entryPriceStr} | KL: ${quantityStr}</p>
+                                    <p>PNL chưa thực tế: <strong class="${pnlClass}">${pnlValue.toFixed(4)} USDT</strong></p>
+                                    <!-- Thêm thông tin khác của killModePosition nếu có và cần thiết -->
+                                </div>`;
+                        });
+                        killPositionsDiv.innerHTML = killHtml;
+                    }
+                } else if (statsData.mode === 'SIDEWAYS') {
+                    gridStatsSection.style.display = 'block'; // Hiển thị phần thống kê lưới
+
+                    // Cập nhật thống kê lưới từ statsData.gridStats
+                    document.getElementById('totalGridsMatched').innerText = statsData.gridStats?.totalGridsMatched || 0;
+                    document.getElementById('totalTpHit').innerText = statsData.gridStats?.totalTpHit || 0;
+                    document.getElementById('totalSlHit').innerText = statsData.gridStats?.totalSlHit || 0;
+
+                    const gridSlLossValue = parseFloat(statsData.gridStats?.totalSlLoss) || 0;
+                    const gridSlLossEl = document.getElementById('gridTotalSlLoss');
+                    gridSlLossEl.innerText = gridSlLossValue.toFixed(4) + ' USDT';
+                    gridSlLossEl.className = gridSlLossValue < 0 ? 'loss' : (gridSlLossValue > 0 ? 'profit' : 'neutral'); // PNL nên <0 là loss
+
+                    const gridUnrealizedPnlValue = parseFloat(statsData.unrealizedGridPnl) || 0;
+                    const gridUnrealizedPnlEl = document.getElementById('gridUnrealizedPnl');
+                    gridUnrealizedPnlEl.innerText = gridUnrealizedPnlValue.toFixed(4) + ' USDT';
+                    gridUnrealizedPnlEl.className = gridUnrealizedPnlValue > 0 ? 'profit' : (gridUnrealizedPnlValue < 0 ? 'loss' : 'neutral');
+
+                    // Hiển thị vị thế lưới từ statsData.sidewaysModePositions
+                    if (statsData.sidewaysModePositions && statsData.sidewaysModePositions.length > 0) {
+                        hasOpenPositions = true;
+                        let sidewaysHtml = '';
+                        statsData.sidewaysModePositions.forEach(pos => {
+                            // pos.pnl từ backend là string đã toFixed(4)
+                            const pnlValue = parseFloat(pos.pnl) || 0;
+                            const pnlClass = pnlValue > 0 ? 'profit' : (pnlValue < 0 ? 'loss' : 'neutral');
+                            sidewaysHtml += `
+                                <div class="position-details">
+                                    <h4>[LƯỚI] Vị thế ${pos.side || 'N/A'} (${statsData.coin || 'COIN'})</h4>
+                                    <p>Giá vào: ${pos.entry || 'N/A'} | KL: ${pos.qty || 'N/A'}</p>
+                                    <p>Giá hiện tại: ${pos.curPrice || 'N/A'}</p>
+                                    <p>PNL chưa thực tế: <strong class="${pnlClass}">${pnlValue.toFixed(4)} USDT</strong></p>
+                                </div>`;
+                        });
+                        sidewaysPositionsDiv.innerHTML = sidewaysHtml;
+                    }
+                }
+                // Nếu không phải KILL và không phải SIDEWAYS, hoặc không có vị thế nào trong mode đó
+                // thì killPositionsDiv và sidewaysPositionsDiv sẽ trống
+
+                if (hasOpenPositions) {
+                    noPositionsMsg.style.display = 'none';
+                } else {
+                    noPositionsMsg.style.display = 'block';
+                    noPositionsMsg.innerText = 'Không có vị thế nào đang mở.';
+                }
+
+            } catch (error) {
+                console.error("Lỗi xử lý fetchBotStats:", error);
+                // Đảm bảo UI được reset nếu có lỗi nghiêm trọng
+                document.getElementById('overallNetPNL').innerText = 'Lỗi';
+                document.getElementById('configuredInvestmentAmount').innerText = 'Lỗi';
+                document.getElementById('gridStatsSection').style.display = 'none';
+                document.getElementById('killModePositionsContainer').innerHTML = '';
+                document.getElementById('sidewaysPositionsContainer').innerHTML = '';
+                document.getElementById('noPositionsMessage').innerText = 'Lỗi nghiêm trọng khi tải dữ liệu.';
+                document.getElementById('noPositionsMessage').style.display = 'block';
+            }
+        }
+
         async function fetchLogs() {
             try {
                 const response = await fetch(`${BOT_ENDPOINT}/api/logs`);
-                if (!response.ok) {
-                    document.getElementById('logOutput').innerText = `Lỗi HTTP lấy log: ${response.status}`;
-                    return;
-                }
+                if (!response.ok) throw new Error(`Logs HTTP error! ${response.status}`);
                 const text = await response.text();
                 const logOutput = document.getElementById('logOutput');
                 logOutput.innerText = text;
@@ -253,13 +389,17 @@
             try {
                 document.getElementById('botStatus').innerText = 'Đang khởi động bot...';
                 const response = await fetch(`${BOT_ENDPOINT}/start_bot_logic`);
+                if (!response.ok) throw new Error(`Start bot HTTP error! ${response.status}`);
                 const text = await response.text();
                 document.getElementById('botStatus').innerText = text;
             } catch (error) {
                 document.getElementById('botStatus').innerText = `Lỗi khi gửi lệnh khởi động: ${error.message}`;
             } finally {
-                // Đợi một chút để backend có thời gian xử lý trước khi fetch lại
-                setTimeout(() => { fetchBotStatus(); fetchBotStats(); fetchLogs(); }, 1500);
+                setTimeout(() => {
+                    fetchBotStatus();
+                    fetchBotStats();
+                    fetchLogs();
+                }, 1500); // Tăng delay để backend có thời gian cập nhật
             }
         }
 
@@ -267,45 +407,58 @@
             try {
                 document.getElementById('botStatus').innerText = 'Đang dừng bot...';
                 const response = await fetch(`${BOT_ENDPOINT}/stop_bot_logic`);
+                if (!response.ok) throw new Error(`Stop bot HTTP error! ${response.status}`);
                 const text = await response.text();
                 document.getElementById('botStatus').innerText = text;
             } catch (error) {
                 document.getElementById('botStatus').innerText = `Lỗi khi gửi lệnh dừng: ${error.message}`;
             } finally {
-                setTimeout(() => { fetchBotStatus(); fetchBotStats(); fetchLogs(); }, 1500);
+                setTimeout(() => {
+                    fetchBotStatus();
+                    fetchBotStats();
+                    fetchLogs();
+                }, 1500); // Tăng delay
             }
         }
 
         async function configureBot() {
             const targetCoinSymbol = document.getElementById('targetCoinSymbol').value;
             const initialInvestmentAmount = document.getElementById('initialInvestmentAmount').value;
+
             if (!targetCoinSymbol || !initialInvestmentAmount || parseFloat(initialInvestmentAmount) <= 0) {
                 alert('Vui lòng nhập đầy đủ và chính xác thông tin cấu hình.');
                 return;
             }
+
             try {
-                // *** THAY ĐỔI QUAN TRỌNG: Gửi payload khớp với backend JS ***
+                // Sửa payload để khớp với backend JS bạn cung cấp (mong đợi symbol, initialAmount trực tiếp)
                 const payload = {
                     symbol: targetCoinSymbol,
                     initialAmount: initialInvestmentAmount
                 };
-                // const payload = { coinConfigs: [{ symbol: targetCoinSymbol, initialAmount: initialInvestmentAmount }] }; // DÒNG CŨ
+                // const payload = { // Cấu trúc cũ của HTML "gốc" này
+                //     coinConfigs: [{
+                //         symbol: targetCoinSymbol,
+                //         initialAmount: initialInvestmentAmount
+                //     }]
+                // };
 
                 const response = await fetch(`${BOT_ENDPOINT}/api/configure`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(payload)
                 });
+                if (!response.ok) throw new Error(`Configure HTTP error! ${response.status}`);
                 const data = await response.json();
-                alert(data.message || "Phản hồi không có message."); // Thêm fallback
-                if (data.success) { // Nếu cấu hình thành công, cập nhật lại trạng thái và thống kê
+                alert(data.message || "Phản hồi không rõ ràng.");
+                if (data.success) { // Nếu cấu hình thành công, fetch lại stats
                     fetchBotStatus();
-                    fetchBotStats(); // Lấy lại thống kê để có thể thấy vốn mới nếu bot đang dừng
+                    fetchBotStats();
                 }
             } catch (error) {
                 alert(`Lỗi cấu hình bot: ${error.message}`);
             }
-            // Không cần fetch lại ở finally nữa vì đã fetch nếu success ở trên
+            // Không cần finally setTimeout ở đây nữa, vì đã fetch nếu success.
         }
 
         document.addEventListener('DOMContentLoaded', () => {
@@ -313,8 +466,7 @@
             fetchBotStats();
             fetchLogs();
             setInterval(() => {
-                // Chỉ fetch nếu tab đang active để tiết kiệm tài nguyên
-                if (document.visibilityState === 'visible') {
+                if (document.visibilityState === 'visible') { // Chỉ fetch khi tab active
                     fetchBotStatus();
                     fetchBotStats();
                     fetchLogs();
