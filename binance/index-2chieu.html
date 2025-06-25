@@ -8,163 +8,175 @@
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             margin: 0;
-            padding: 20px;
-            background-color: #1a1a2e;
-            color: #e0e0e0;
-            line-height: 1.6;
+            padding: 15px; /* Giảm padding */
+            background: linear-gradient(135deg, #f0e6fa 0%, #e0f2f7 100%); /* Màu nền mộng mơ */
+            color: #333; /* Màu chữ tối hơn */
+            line-height: 1.5; /* Giảm line-height một chút */
+            font-size: 0.9em; /* Font nhỏ bé */
         }
         .container {
-            max-width: 1200px;
-            margin: 20px auto;
-            background-color: #16213e;
-            padding: 30px;
-            border-radius: 10px;
-            box-shadow: 0 0 15px rgba(0, 0, 0, 0.5);
+            max-width: 1000px; /* Giảm chiều rộng tối đa */
+            margin: 15px auto; /* Giảm margin */
+            background-color: #ffffff;
+            padding: 25px; /* Giảm padding */
+            border-radius: 12px; /* Bo tròn hơn */
+            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.1); /* Bóng đổ nhẹ nhàng hơn */
         }
         h1, h2 {
-            color: #0f3460;
-            border-bottom: 2px solid #0f3460;
-            padding-bottom: 10px;
-            margin-bottom: 20px;
+            color: #6a5acd; /* Màu tím lavender */
+            border-bottom: 1px solid #dcdcdc; /* Đường kẻ mỏng hơn */
+            padding-bottom: 8px;
+            margin-bottom: 18px;
+            font-size: 1.8em; /* Font tiêu đề nhỏ hơn */
+        }
+        h2 {
+            font-size: 1.4em; /* Font tiêu đề phụ nhỏ hơn */
         }
         .section {
-            margin-bottom: 30px;
-            padding: 20px;
-            background-color: #0f3460;
-            border-radius: 8px;
-            box-shadow: inset 0 0 8px rgba(0, 0, 0, 0.3);
+            margin-bottom: 25px; /* Giảm margin */
+            padding: 18px; /* Giảm padding */
+            background-color: #f9f9f9; /* Nền nhẹ nhàng hơn */
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05); /* Bóng đổ rất nhẹ */
         }
         .input-group {
-            margin-bottom: 15px;
+            margin-bottom: 12px; /* Giảm margin */
             display: flex;
             align-items: center;
         }
         .input-group label {
             flex: 1;
-            margin-right: 15px;
-            font-weight: bold;
-            color: #e94560;
+            margin-right: 12px;
+            font-weight: 600; /* Đậm vừa phải */
+            color: #483d8b; /* Màu xanh tím than */
+            font-size: 0.9em; /* Font nhỏ */
         }
         .input-group input[type="text"],
         .input-group input[type="number"] {
             flex: 2;
-            padding: 10px;
-            border-radius: 5px;
-            border: 1px solid #e94560;
-            background-color: #3b3b54;
-            color: #e0e0e0;
-            font-size: 1em;
+            padding: 8px 10px; /* Giảm padding */
+            border-radius: 6px;
+            border: 1px solid #c0c0c0; /* Màu viền nhẹ nhàng */
+            background-color: #ffffff;
+            color: #333;
+            font-size: 0.9em; /* Font nhỏ */
+            box-shadow: inset 0 1px 3px rgba(0,0,0,0.08); /* Bóng đổ bên trong */
         }
         .input-group input[type="text"]:focus,
         .input-group input[type="number"]:focus {
             outline: none;
-            border-color: #533483;
-            box-shadow: 0 0 5px rgba(83, 52, 131, 0.7);
+            border-color: #9370db; /* Màu tím trung bình */
+            box-shadow: 0 0 0 3px rgba(147, 112, 219, 0.2); /* Hiệu ứng focus nhẹ */
         }
         .button-group {
             display: flex;
-            gap: 15px;
-            margin-top: 20px;
+            gap: 12px; /* Giảm khoảng cách giữa các nút */
+            margin-top: 18px;
             justify-content: center;
         }
         .button-group button {
-            padding: 12px 25px;
+            padding: 10px 20px; /* Giảm padding */
             border: none;
-            border-radius: 5px;
-            font-size: 1.1em;
+            border-radius: 6px;
+            font-size: 0.95em; /* Font nhỏ */
             cursor: pointer;
-            transition: background-color 0.3s ease, transform 0.2s ease;
+            transition: background-color 0.3s ease, transform 0.2s ease, box-shadow 0.2s ease;
             color: white;
-            font-weight: bold;
+            font-weight: 600;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+        }
+        .button-group button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
         }
         .button-group button.start {
-            background-color: #388e3c; /* Green */
+            background-color: #8bc34a; /* Xanh lá nhạt */
         }
         .button-group button.start:hover {
-            background-color: #2e7d32;
-            transform: translateY(-2px);
+            background-color: #7cb342;
         }
         .button-group button.stop {
-            background-color: #d32f2f; /* Red */
+            background-color: #ef5350; /* Đỏ san hô */
         }
         .button-group button.stop:hover {
-            background-color: #c62828;
-            transform: translateY(-2px);
+            background-color: #e53935;
         }
         .button-group button.configure {
-            background-color: #1976d2; /* Blue */
+            background-color: #64b5f6; /* Xanh dương nhạt */
         }
         .button-group button.configure:hover {
-            background-color: #1565c0;
-            transform: translateY(-2px);
+            background-color: #42a5f5;
         }
         .status-message {
-            margin-top: 25px;
-            padding: 15px;
-            background-color: #2c3e50;
-            border-left: 5px solid #0f3460;
-            border-radius: 5px;
-            font-size: 1.1em;
-            color: #e0e0e0;
+            margin-top: 20px;
+            padding: 12px;
+            background-color: #e3f2fd; /* Nền xanh nhạt */
+            border-left: 4px solid #90caf9; /* Viền xanh */
+            border-radius: 6px;
+            font-size: 0.95em;
+            color: #2196f3; /* Màu chữ xanh */
             word-wrap: break-word;
-            white-space: pre-wrap; /* For line breaks */
+            white-space: pre-wrap;
         }
         .log-output {
-            background-color: #0a0a1a;
-            color: #00ff41; /* Green text for logs */
+            background-color: #263238; /* Nền tối cho log */
+            color: #e0f2f7; /* Màu chữ sáng cho log */
             padding: 15px;
             border-radius: 8px;
-            min-height: 300px;
-            max-height: 600px;
-            overflow-y: scroll;
+            min-height: 200px; /* Giảm chiều cao tối thiểu */
+            max-height: 400px; /* Giảm chiều cao tối đa */
+            overflow-y: auto; /* Dùng 'auto' để chỉ cuộn khi cần */
             font-family: 'Consolas', 'Monaco', monospace;
-            font-size: 0.9em;
+            font-size: 0.85em; /* Font nhỏ hơn cho log */
             white-space: pre-wrap;
             word-wrap: break-word;
-            border: 1px solid #0f3460;
+            border: 1px solid #37474f; /* Viền tối */
         }
         .stats-output div {
-            margin-bottom: 8px;
+            margin-bottom: 6px;
             padding: 8px;
-            background-color: #1a2a4a;
-            border-left: 3px solid #e94560;
+            background-color: #f0f4f8; /* Nền sáng cho thống kê */
+            border-left: 3px solid #b39ddb; /* Viền tím nhạt */
             border-radius: 4px;
+            font-size: 0.9em; /* Font nhỏ */
         }
         .stats-output strong {
-            color: #ffb74d; /* Orange for emphasis */
+            color: #8e24aa; /* Màu tím đậm cho số liệu */
         }
         .position-details {
             margin-top: 10px;
-            padding: 10px;
-            background-color: #2c3e50;
-            border-radius: 5px;
+            padding: 12px;
+            background-color: #e8f5e9; /* Nền xanh lá nhạt */
+            border-radius: 8px;
+            border: 1px solid #c8e6c9; /* Viền xanh lá nhạt hơn */
         }
         .position-details h4 {
-            color: #e94560;
+            color: #388e3c; /* Màu xanh lá cây đậm */
             margin-top: 0;
-            margin-bottom: 10px;
+            margin-bottom: 8px;
+            font-size: 1.1em; /* Font nhỏ */
         }
         .position-details p {
-            margin: 5px 0;
-            font-size: 0.95em;
+            margin: 4px 0;
+            font-size: 0.85em; /* Font rất nhỏ */
         }
-        .profit { color: #4CAF50; } /* Green for profit */
-        .loss { color: #F44336; } /* Red for loss */
-        .neutral { color: #e0e0e0; } /* Grey for neutral */
+        .profit { color: #2e7d32; font-weight: 600; } /* Xanh đậm cho lời */
+        .loss { color: #d32f2f; font-weight: 600; } /* Đỏ đậm cho lỗ */
+        .neutral { color: #757575; } /* Xám cho trung tính */
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>BINANCE FUTURES HEDGING BOT</h1>
+        <h1>BINANCE BOT</h1>
 
         <div class="section">
             <h2>Cấu hình Bot</h2>
             <div class="input-group">
-                <label for="targetCoinSymbol">Đồng Coin Giao Dịch (Ví dụ: ETHUSDT):</label>
+                <label for="targetCoinSymbol">Đồng Coin (Ví dụ: ETHUSDT):</label>
                 <input type="text" id="targetCoinSymbol" value="ETHUSDT">
             </div>
             <div class="input-group">
-                <label for="initialInvestmentAmount">Số Vốn Ban Đầu Mỗi Lệnh (USDT):</label>
+                <label for="initialInvestmentAmount">Vốn Ban Đầu(USDT):</label>
                 <input type="number" id="initialInvestmentAmount" value="10" step="1">
             </div>
             <div class="button-group">
@@ -193,10 +205,13 @@
             </div>
         </div>
 
-        
+        <div class="section">
+            <h2>Nhật Ký Hoạt Động (Logs)</h2>
+            <pre class="log-output" id="logOutput">Đang tải nhật ký...</pre>
+        </div>
     </div>
 
-    <script>
+        <script>
         const BOT_ENDPOINT = window.location.origin; // Dynamically get origin
 
         async function fetchBotStatus() {
@@ -213,47 +228,75 @@
             try {
                 const response = await fetch(`${BOT_ENDPOINT}/api/bot_stats`);
                 const data = await response.json();
-                if (data.success) {
-                    document.getElementById('totalProfit').innerText = parseFloat(data.data.totalProfit).toFixed(2);
-                    document.getElementById('totalProfit').className = data.data.totalProfit > 0 ? 'profit' : 'neutral';
 
-                    document.getElementById('totalLoss').innerText = parseFloat(data.data.totalLoss).toFixed(2);
-                    document.getElementById('totalLoss').className = data.data.totalLoss > 0 ? 'loss' : 'neutral';
+                if (data.success && data.data) {
+                    const totalProfitValue = parseFloat(data.data.profit);
+                    const totalLossValue = parseFloat(data.data.loss);
+                    const netPNLValue = parseFloat(data.data.net);
 
-                    document.getElementById('netPNL').innerText = parseFloat(data.data.netPNL).toFixed(2);
-                    document.getElementById('netPNL').className = data.data.netPNL > 0 ? 'profit' : (data.data.netPNL < 0 ? 'loss' : 'neutral');
+                    document.getElementById('totalProfit').innerText = totalProfitValue.toFixed(2);
+                    document.getElementById('totalProfit').className = totalProfitValue > 0 ? 'profit' : 'neutral';
 
-                    document.getElementById('currentInvestmentAmount').innerText = parseFloat(data.data.currentInvestmentAmount).toFixed(2);
+                    document.getElementById('totalLoss').innerText = totalLossValue.toFixed(2);
+                    document.getElementById('totalLoss').className = totalLossValue > 0 ? 'loss' : 'neutral'; // Nếu totalLoss là số dương thể hiện lỗ
+
+                    document.getElementById('netPNL').innerText = netPNLValue.toFixed(2);
+                    document.getElementById('netPNL').className = netPNLValue > 0 ? 'profit' : (netPNLValue < 0 ? 'loss' : 'neutral');
+
+                    document.getElementById('currentInvestmentAmount').innerText = parseFloat(data.data.invest).toFixed(2);
 
                     const openPositionsDiv = document.getElementById('openPositions');
                     openPositionsDiv.innerHTML = ''; // Clear previous content
 
-                    if (data.data.currentOpenPositions && data.data.currentOpenPositions.length > 0) {
-                        data.data.currentOpenPositions.forEach(pos => {
-                            const pnlClass = pos.unrealizedPnl > 0 ? 'profit' : (pos.unrealizedPnl < 0 ? 'loss' : 'neutral');
+                    if (data.data.positions && data.data.positions.length > 0) {
+                        const globalCoinSymbol = data.data.coin || "COINUSDT"; // Lấy symbol chung từ data.data.coin
+                        const coinUnit = globalCoinSymbol.replace('USDT', '');
+
+                        data.data.positions.forEach(pos => {
+                            const unrealizedPnlValue = parseFloat(pos.pnl);
+                            const pnlClass = unrealizedPnlValue > 0 ? 'profit' : (unrealizedPnlValue < 0 ? 'loss' : 'neutral');
+
+                            // Vì backend không gửi initialMargin, ta có thể dùng global 'invest' hoặc để trống
+                            // Ở đây, ta sẽ dùng global 'invest' làm vốn ban đầu cho vị thế này
+                            const initialMarginForPos = parseFloat(data.data.invest).toFixed(2);
+
+                            // Backend không gửi partialCloseLevels, chỉ có mocIdx
+                            let nextPartialCloseDisplay = `Mốc ${pos.mocIdx + 1}`;
+                            // Nếu bạn có một logic cố định cho partialCloseLevels ở frontend, bạn có thể thử ánh xạ mocIdx
+                            // ví dụ: const levels = [35, 70, 105, ...]; if (levels[pos.mocIdx]) nextPartialCloseDisplay = levels[pos.mocIdx] + '%';
+                            // Nhưng an toàn nhất là chỉ hiển thị chỉ số mốc.
+
                             openPositionsDiv.innerHTML += `
                                 <div class="position-details">
-                                    <h4>Vị thế ${pos.side} ${pos.symbol}</h4>
-                                    <p>Số lượng: ${pos.quantity.toFixed(pos.pricePrecision)}</p>
-                                    <p>Giá vào: ${pos.entryPrice.toFixed(pos.pricePrecision)}</p>
-                                    <p>Giá hiện tại: ${pos.currentPrice.toFixed(pos.pricePrecision)}</p>
-                                    <p>PNL chưa thực tế: <strong class="${pnlClass}">${pos.unrealizedPnl.toFixed(2)} USDT</strong></p>
-                                    <p>Vốn ban đầu: ${pos.initialMargin.toFixed(2)} USDT</p>
-                                    <p>Tổng vốn đã đóng từng phần: ${pos.closedAmount.toFixed(2)} USDT</p>
-                                    <p>Mốc đóng từng phần tiếp theo: ${pos.nextPartialCloseIndex < pos.partialCloseLevels.length ? pos.partialCloseLevels[pos.nextPartialCloseIndex] + '%' : 'Đã đạt tất cả'} </p>
-                                    <p>SL điều chỉnh 200% lãi: <strong>${pos.hasAdjustedSLTo200PercentProfit ? 'Đã kích hoạt' : 'Chưa'}</strong></p>
-                                    <p>SL điều chỉnh 500% lãi: <strong>${pos.hasAdjustedSLTo500PercentProfit ? 'Đã kích hoạt' : 'Chưa'}</strong></p>
-                                </div>
+                                    <h4>Vị thế ${pos.side} ${globalCoinSymbol}</h4>
+                                    <p>Số lượng: ${pos.qty} ${coinUnit}</p> 
+                                    <p>Giá vào: ${pos.entry}</p>
+                                    <p>Giá hiện tại: ${pos.curPrice}</p>
+                                    <p>PNL chưa thực tế: <strong class="${pnlClass}">${unrealizedPnlValue.toFixed(2)} USDT</strong></p>
+                                    <p>Vốn ban đầu (lệnh): ${initialMarginForPos} USDT</p>
+                                    <p>Tổng số lượng đã đóng: ${pos.closedLoss} ${coinUnit}</p> 
+                                    <p>Mốc đóng từng phần tiếp theo: ${nextPartialCloseDisplay} </p>
+                                    </div>
                             `;
+                            // Chú thích: pos.qty, pos.entry, pos.curPrice, pos.closedLoss đã là chuỗi được toFixed từ backend
                         });
                     } else {
                         openPositionsDiv.innerText = 'Không có vị thế nào đang mở.';
                     }
                 } else {
-                    openPositionsDiv.innerText = `Lỗi tải thống kê: ${data.message}`;
+                    const openPositionsDiv = document.getElementById('openPositions');
+                    openPositionsDiv.innerText = `Lỗi tải thống kê: ${data.message || 'Không có dữ liệu'}`;
+                    document.getElementById('totalProfit').innerText = '0.00';
+                    document.getElementById('totalLoss').innerText = '0.00';
+                    document.getElementById('netPNL').innerText = '0.00';
+                    document.getElementById('currentInvestmentAmount').innerText = '0.00';
                 }
             } catch (error) {
                 document.getElementById('botStats').innerHTML = `Lỗi lấy thống kê bot: ${error.message}`;
+                const openPositionsDiv = document.getElementById('openPositions');
+                if (openPositionsDiv) {
+                    openPositionsDiv.innerText = `Lỗi tải thống kê: ${error.message}`;
+                }
             }
         }
 
@@ -278,7 +321,6 @@
             } catch (error) {
                 document.getElementById('botStatus').innerText = `Lỗi khi gửi lệnh khởi động: ${error.message}`;
             } finally {
-                // Fetch status and logs again after a short delay
                 setTimeout(() => {
                     fetchBotStatus();
                     fetchBotStats();
@@ -296,7 +338,6 @@
             } catch (error) {
                 document.getElementById('botStatus').innerText = `Lỗi khi gửi lệnh dừng: ${error.message}`;
             } finally {
-                // Fetch status and logs again after a short delay
                 setTimeout(() => {
                     fetchBotStatus();
                     fetchBotStats();
@@ -315,24 +356,28 @@
             }
 
             try {
+                // Giả sử API /api/configure của bạn mong đợi cấu trúc này từ file JS gốc
+                const payload = {
+                    coinConfigs: [{
+                        symbol: targetCoinSymbol,
+                        initialAmount: initialInvestmentAmount
+                    }]
+                };
+                // Nếu API configure của bạn mong đợi apiKey, secretKey trực tiếp, bạn cần điều chỉnh
+                // const payload = { apiKey: ..., secretKey: ..., coinConfigs: ... };
+
                 const response = await fetch(`${BOT_ENDPOINT}/api/configure`, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
                     },
-                    body: JSON.stringify({
-                        coinConfigs: [{
-                            symbol: targetCoinSymbol,
-                            initialAmount: initialInvestmentAmount
-                        }]
-                    })
+                    body: JSON.stringify(payload)
                 });
                 const data = await response.json();
                 alert(data.message);
             } catch (error) {
                 alert(`Lỗi cấu hình bot: ${error.message}`);
             } finally {
-                // Fetch status and stats to reflect new configuration
                 setTimeout(() => {
                     fetchBotStatus();
                     fetchBotStats();
@@ -341,12 +386,10 @@
             }
         }
 
-        // Fetch initial status, stats, and logs when the page loads
         document.addEventListener('DOMContentLoaded', () => {
             fetchBotStatus();
             fetchBotStats();
             fetchLogs();
-            // Refresh status, stats, and logs every 5 seconds
             setInterval(() => {
                 fetchBotStatus();
                 fetchBotStats();
