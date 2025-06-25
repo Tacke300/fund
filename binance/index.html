@@ -3,169 +3,105 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Binance Bot Dashboard (Enhanced for Sideways)</title>
+    <title>Binance Bot Dashboard - Neon Dark</title>
     <style>
+        :root {
+            --dark-bg: #1a1a2e;
+            --dark-surface: #16213e;
+            --dark-card: #0f3460;
+            --primary-text: #e94560; /* Hồng neon */
+            --secondary-text: #c0c0c0;
+            --accent-neon: #f9748f; /* Hồng nhạt hơn */
+            --purple-neon: #a259ff; /* Tím neon */
+            --green-profit: #32ff7e;
+            --red-loss: #ff4d4d;
+            --border-color: #5372F0; /* Tím xanh cho border */
+        }
         body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            margin: 0;
-            padding: 15px;
-            background: linear-gradient(135deg, #f0e6fa 0%, #e0f2f7 100%);
-            color: #333;
-            line-height: 1.5;
-            font-size: 0.9em;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; padding: 20px;
+            background-color: var(--dark-bg); color: var(--secondary-text);
+            line-height: 1.6; font-size: 0.95em;
         }
         .container {
-            max-width: 1000px;
-            margin: 15px auto;
-            background-color: #ffffff;
-            padding: 25px;
-            border-radius: 12px;
-            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.1);
+            max-width: 1100px; margin: 20px auto; background-color: var(--dark-surface);
+            padding: 30px; border-radius: 15px;
+            box-shadow: 0 0 25px rgba(var(--purple-neon-rgb, 162, 89, 255), 0.3); /* Bóng đổ neon */
+            border: 1px solid var(--border-color);
         }
-        h1, h2, h3 { /* Thêm h3 vào đây */
-            color: #6a5acd;
-            border-bottom: 1px solid #dcdcdc;
-            padding-bottom: 8px;
-            margin-bottom: 18px;
-            font-size: 1.8em;
+        h1, h2, h3 {
+            color: var(--primary-text);
+            text-shadow: 0 0 8px var(--accent-neon); /* Hiệu ứng text neon */
+            border-bottom: 1px solid var(--border-color);
+            padding-bottom: 10px; margin-bottom: 20px;
         }
-        h2 {
-            font-size: 1.4em;
-        }
-        h3 { /* Style cho h3 của phần lưới */
-            font-size: 1.2em;
-            border-top: 1px solid #eee; /* Thêm đường kẻ trên cho h3 */
-            padding-top: 15px; /* Thêm padding trên */
-            margin-top: 20px; /* Thêm margin trên */
-            border-bottom: none; /* Bỏ border dưới của h3 nếu không muốn trùng với h2 */
-        }
+        h1 { font-size: 2em; text-align: center; }
+        h2 { font-size: 1.6em; }
+        h3 { font-size: 1.3em; margin-top: 25px; padding-top: 15px; border-top: 1px dashed var(--border-color); border-bottom: none; }
+
         .section {
-            margin-bottom: 25px;
-            padding: 18px;
-            background-color: #f9f9f9;
-            border-radius: 10px;
-            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
+            margin-bottom: 30px; padding: 20px; background-color: var(--dark-card);
+            border-radius: 10px; border: 1px solid rgba(var(--border-color-rgb, 83, 114, 240), 0.5);
+            box-shadow: inset 0 0 10px rgba(0,0,0,0.3);
         }
-        .input-group {
-            margin-bottom: 12px;
-            display: flex;
-            align-items: center;
-        }
+        .input-group { margin-bottom: 15px; display: flex; align-items: center; }
         .input-group label {
-            flex: 1;
-            margin-right: 12px;
-            font-weight: 600;
-            color: #483d8b;
+            flex: 1; margin-right: 15px; font-weight: 600; color: var(--purple-neon);
             font-size: 0.9em;
         }
-        .input-group input[type="text"],
-        .input-group input[type="number"] {
-            flex: 2;
-            padding: 8px 10px;
-            border-radius: 6px;
-            border: 1px solid #c0c0c0;
-            background-color: #ffffff;
-            color: #333;
-            font-size: 0.9em;
-            box-shadow: inset 0 1px 3px rgba(0,0,0,0.08);
+        .input-group input[type="text"], .input-group input[type="number"] {
+            flex: 2; padding: 10px 12px; border-radius: 6px;
+            border: 1px solid var(--border-color);
+            background-color: var(--dark-surface); color: var(--secondary-text);
+            font-size: 0.9em; box-shadow: 0 0 5px rgba(var(--purple-neon-rgb, 162, 89, 255), 0.2);
         }
-        .input-group input[type="text"]:focus,
-        .input-group input[type="number"]:focus {
-            outline: none;
-            border-color: #9370db;
-            box-shadow: 0 0 0 3px rgba(147, 112, 219, 0.2);
+        .input-group input[type="text"]:focus, .input-group input[type="number"]:focus {
+            outline: none; border-color: var(--accent-neon);
+            box-shadow: 0 0 8px var(--accent-neon);
         }
-        .button-group {
-            display: flex;
-            gap: 12px;
-            margin-top: 18px;
-            justify-content: center;
-        }
+        .button-group { display: flex; gap: 15px; margin-top: 20px; justify-content: center; }
         .button-group button {
-            padding: 10px 20px;
-            border: none;
-            border-radius: 6px;
-            font-size: 0.95em;
-            cursor: pointer;
-            transition: background-color 0.3s ease, transform 0.2s ease, box-shadow 0.2s ease;
-            color: white;
-            font-weight: 600;
-            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+            padding: 12px 25px; border: none; border-radius: 8px; font-size: 1em;
+            cursor: pointer; transition: all 0.3s ease; color: white; font-weight: 700;
+            text-transform: uppercase; letter-spacing: 1px;
         }
-        .button-group button:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-        }
-        .button-group button.start { background-color: #8bc34a; }
-        .button-group button.start:hover { background-color: #7cb342; }
-        .button-group button.stop { background-color: #ef5350; }
-        .button-group button.stop:hover { background-color: #e53935; }
-        .button-group button.configure { background-color: #64b5f6; }
-        .button-group button.configure:hover { background-color: #42a5f5; }
+        .button-group button.start { background-color: var(--green-profit); box-shadow: 0 0 10px var(--green-profit); }
+        .button-group button.start:hover { background-color: #45e08f; box-shadow: 0 0 15px var(--green-profit); transform: translateY(-2px); }
+        .button-group button.stop { background-color: var(--red-loss); box-shadow: 0 0 10px var(--red-loss); }
+        .button-group button.stop:hover { background-color: #ff6b6b; box-shadow: 0 0 15px var(--red-loss); transform: translateY(-2px); }
+        .button-group button.configure { background-color: var(--purple-neon); box-shadow: 0 0 10px var(--purple-neon); }
+        .button-group button.configure:hover { background-color: #b87eff; box-shadow: 0 0 15px var(--purple-neon); transform: translateY(-2px); }
+
         .status-message {
-            margin-top: 20px;
-            padding: 12px;
-            background-color: #e3f2fd;
-            border-left: 4px solid #90caf9;
-            border-radius: 6px;
-            font-size: 0.95em;
-            color: #2196f3;
-            word-wrap: break-word;
-            white-space: pre-wrap;
+            margin-top: 20px; padding: 15px; background-color: var(--dark-card);
+            border-left: 5px solid var(--primary-text); border-radius: 8px;
+            font-size: 1em; color: var(--secondary-text); word-wrap: break-word; white-space: pre-wrap;
         }
         .log-output {
-            background-color: #263238;
-            color: #e0f2f7;
-            padding: 15px;
-            border-radius: 8px;
-            min-height: 200px;
-            max-height: 400px;
-            overflow-y: auto;
-            font-family: 'Consolas', 'Monaco', monospace;
-            font-size: 0.85em;
-            white-space: pre-wrap;
-            word-wrap: break-word;
-            border: 1px solid #37474f;
+            background-color: #0d1b2a; color: #e0e0e0; padding: 15px; border-radius: 8px;
+            min-height: 250px; max-height: 450px; overflow-y: auto;
+            font-family: 'SF Mono', 'Consolas', 'Monaco', monospace; font-size: 0.88em;
+            white-space: pre-wrap; word-wrap: break-word; border: 1px solid var(--border-color);
         }
-        .stats-output div, .stats-output span { /* Thêm .stats-output span cho các grid item mới */
-            margin-bottom: 6px;
-            padding: 8px;
-            background-color: #f0f4f8;
-            border-left: 3px solid #b39ddb;
-            border-radius: 4px;
-            font-size: 0.9em;
+        .stats-output div, .stats-output span {
+            margin-bottom: 8px; padding: 10px; background-color: var(--dark-card);
+            border-left: 4px solid var(--purple-neon); border-radius: 6px; font-size: 0.95em;
         }
-        .stats-output strong {
-            color: #8e24aa;
-        }
-        /* Style cho grid layout của thống kê lưới */
-        .stats-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-            gap: 10px;
-            margin-top: 10px; /* Thêm margin top cho grid */
-        }
+        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin-top: 12px; }
+        .stats-output strong { color: var(--primary-text); font-weight: 700;}
+
         .position-details {
-            margin-top: 10px;
-            padding: 12px;
-            background-color: #e8f5e9;
-            border-radius: 8px;
-            border: 1px solid #c8e6c9;
+            margin-top: 12px; padding: 15px; background-color: rgba(var(--dark-card-rgb, 15, 52, 96), 0.7);
+            border-radius: 8px; border: 1px solid var(--accent-neon);
+            box-shadow: 0 2px 8px rgba(0,0,0,0.2);
         }
         .position-details h4 {
-            color: #388e3c;
-            margin-top: 0;
-            margin-bottom: 8px;
-            font-size: 1.1em;
-            border-bottom: none; /* Đảm bảo h4 không có border bottom */
+            color: var(--accent-neon); margin-top: 0; margin-bottom: 10px; font-size: 1.15em;
+            border-bottom: 1px dotted rgba(var(--accent-neon-rgb, 249, 116, 143), 0.5); padding-bottom: 5px;
         }
-        .position-details p {
-            margin: 4px 0;
-            font-size: 0.85em;
-        }
-        .profit { color: #2e7d32; font-weight: 600; }
-        .loss { color: #d32f2f; font-weight: 600; }
-        .neutral { color: #757575; }
+        .position-details p { margin: 5px 0; font-size: 0.9em; }
+        .profit { color: var(--green-profit) !important; font-weight: bold; }
+        .loss { color: var(--red-loss) !important; font-weight: bold; }
+        .neutral { color: var(--secondary-text); }
     </style>
 </head>
 <body>
@@ -175,11 +111,11 @@
         <div class="section">
             <h2>Cấu hình Bot</h2>
             <div class="input-group">
-                <label for="targetCoinSymbol">Đồng Coin (Ví dụ: ETHUSDT):</label>
+                <label for="targetCoinSymbol">Đồng Coin:</label>
                 <input type="text" id="targetCoinSymbol" value="ETHUSDT">
             </div>
             <div class="input-group">
-                <label for="initialInvestmentAmount">Vốn Ban Đầu(USDT):</label>
+                <label for="initialInvestmentAmount">Vốn Ban Đầu (USDT):</label>
                 <input type="number" id="initialInvestmentAmount" value="10" step="1">
             </div>
             <div class="button-group">
@@ -190,45 +126,43 @@
         <div class="section">
             <h2>Điều Khiển Bot</h2>
             <div class="button-group">
-                <button class="start" onclick="startBot()">Khởi Động Bot</button>
-                <button class="stop" onclick="stopBot()">Dừng Bot</button>
+                <button class="start" onclick="startBot()">Khởi Động</button>
+                <button class="stop" onclick="stopBot()">Dừng</button>
             </div>
             <div class="status-message" id="botStatus">Đang tải trạng thái...</div>
         </div>
 
         <div class="section">
             <h2>Thống Kê & Vị Thế</h2>
-            <div class="stats-output" id="botStats">
-                <!-- Giữ lại các thống kê chung này, chúng sẽ được điền từ data.net, data.invest của backend JS -->
-                <div>PNL Ròng (Tổng): <strong id="overallNetPNL">0.00</strong> USDT</div>
-                <div>Vốn ban đầu (Cấu hình): <strong id="configuredInvestmentAmount">0.00</strong> USDT</div>
+            <div class="stats-output" id="botStatsGlobal">
+                <div>Tổng Lời: <strong id="totalProfit">0.00</strong> USDT</div>
+                <div>Tổng Lỗ: <strong id="totalLoss">0.00</strong> USDT</div>
+                <div>PNL Ròng (Tổng): <strong id="netPNL">0.00</strong> USDT</div>
+                <div>Vốn cấu hình: <strong id="currentInvestmentAmount">0.00</strong> USDT</div>
+            </div>
 
-                <!-- PHẦN MỚI: THỐNG KÊ CHO SIDEWAYS MODE -->
-                <div id="gridStatsSection" style="display: none;"> <!-- Ban đầu ẩn -->
-                    <h3>Thống Kê Lưới (Sideways Mode)</h3>
-                    <div class="stats-grid"> <!-- Sử dụng class stats-grid cho layout -->
-                        <span>Tổng Lưới Khớp: <strong id="totalGridsMatched">0</strong></span>
-                        <span>Lưới Chạm TP: <strong id="totalTpHit">0</strong></span>
-                        <span>Lưới Chạm SL: <strong id="totalSlHit">0</strong></span>
-                        <span>Tổng Lỗ từ SL Lưới: <strong id="gridTotalSlLoss" class="loss">0.00</strong> USDT</span>
-                        <span>PNL Lưới Chưa Ghi Nhận: <strong id="gridUnrealizedPnl">0.00</strong> USDT</span>
-                    </div>
+            <div id="sidewaysModeInfo" style="display:none; margin-top: 20px;">
+                <h3>Thông Tin Lưới (Sideways)</h3>
+                <div class="stats-grid">
+                    <span>Trạng thái lưới: <strong id="gridIsActive">Không hoạt động</strong></span>
+                    <span>Giá Anchor: <strong id="gridAnchorPrice">N/A</strong></span>
+                    <span>Biên trên: <strong id="gridUpperLimit">N/A</strong></span>
+                    <span>Biên dưới: <strong id="gridLowerLimit">N/A</strong></span>
+                    <span>Lưới khớp TP: <strong id="gridTpHits">0</strong></span>
+                    <span>Lưới khớp SL: <strong id="gridSlHits">0</strong></span>
                 </div>
-                <!-- KẾT THÚC PHẦN MỚI -->
+                <div id="sidewaysOpenPositionsTitle" style="display:none; margin-top:15px;"><h4>Vị thế lưới đang mở:</h4></div>
+                <div id="sidewaysOpenPositionsContainer"></div>
+            </div>
 
-                <h3>Vị Thế Đang Mở:</h3>
-                <div id="killModePositionsContainer">
-                    <!-- Nơi hiển thị vị thế KILL mode -->
-                </div>
-                <div id="sidewaysPositionsContainer">
-                    <!-- Nơi hiển thị vị thế SIDEWAYS mode -->
-                </div>
-                <div id="noPositionsMessage" style="display: block;">Không có vị thế nào đang mở.</div>
+            <div id="killModeInfo" style="display:none; margin-top: 20px;">
+                <h3 id="killPositionsTitle">Vị Thế Đang Mở (Kill Mode):</h3>
+                <div id="openPositionsKillContainer">Không có vị thế Kill Mode nào đang mở.</div>
             </div>
         </div>
 
         <div class="section">
-            <h2>Nhật Ký Hoạt Động (Logs)</h2>
+            <h2>Nhật Ký Hoạt Động</h2>
             <pre class="log-output" id="logOutput">Đang tải nhật ký...</pre>
         </div>
     </div>
@@ -239,7 +173,7 @@
         async function fetchBotStatus() {
             try {
                 const response = await fetch(`${BOT_ENDPOINT}/api/status`);
-                if (!response.ok) throw new Error(`Status HTTP error! ${response.status}`);
+                if (!response.ok) throw new Error(`Status HTTP ${response.status}`);
                 const text = await response.text();
                 document.getElementById('botStatus').innerText = text;
             } catch (error) {
@@ -250,228 +184,136 @@
         async function fetchBotStats() {
             try {
                 const response = await fetch(`${BOT_ENDPOINT}/api/bot_stats`);
-                if (!response.ok) throw new Error(`Stats HTTP error! ${response.status}`);
-                const resData = await response.json(); // Backend JS của bạn trả về resData.data là object thống kê
+                if (!response.ok) throw new Error(`Stats HTTP ${response.status}`);
+                const resData = await response.json();
 
-                if (!resData.success || !resData.data) {
-                    console.error("Lỗi tải thống kê từ API:", resData.message || "Dữ liệu không hợp lệ.");
-                    // Reset các trường về lỗi
-                    document.getElementById('overallNetPNL').innerText = 'Lỗi';
-                    document.getElementById('configuredInvestmentAmount').innerText = 'Lỗi';
-                    document.getElementById('gridStatsSection').style.display = 'none';
-                    document.getElementById('killModePositionsContainer').innerHTML = '';
-                    document.getElementById('sidewaysPositionsContainer').innerHTML = '';
-                    document.getElementById('noPositionsMessage').innerText = 'Lỗi tải dữ liệu vị thế.';
-                    document.getElementById('noPositionsMessage').style.display = 'block';
-                    return;
-                }
+                if (resData.success && resData.data) {
+                    const backendData = resData.data;
 
-                const statsData = resData.data; // Đây là object chứa mode, net, invest, killModePositions, etc.
+                    document.getElementById('totalProfit').innerText = (parseFloat(backendData.profit) || 0).toFixed(2);
+                    document.getElementById('totalProfit').className = (parseFloat(backendData.profit) || 0) > 0 ? 'profit' : 'neutral';
+                    document.getElementById('totalLoss').innerText = (parseFloat(backendData.loss) || 0).toFixed(2);
+                    document.getElementById('totalLoss').className = (parseFloat(backendData.loss) || 0) > 0 ? 'loss' : 'neutral';
+                    document.getElementById('netPNL').innerText = (parseFloat(backendData.net) || 0).toFixed(2);
+                    document.getElementById('netPNL').className = (parseFloat(backendData.net) || 0) > 0 ? 'profit' : ((parseFloat(backendData.net) || 0) < 0 ? 'loss' : 'neutral');
+                    document.getElementById('currentInvestmentAmount').innerText = (parseFloat(backendData.invest) || 0).toFixed(2);
 
-                // Cập nhật thống kê chung từ backend JS
-                const overallNetPNLValue = parseFloat(statsData.net) || 0;
-                document.getElementById('overallNetPNL').innerText = overallNetPNLValue.toFixed(4) + ' USDT';
-                document.getElementById('overallNetPNL').className = overallNetPNLValue > 0 ? 'profit' : (overallNetPNLValue < 0 ? 'loss' : 'neutral');
+                    const killPositionsDiv = document.getElementById('openPositionsKillContainer');
+                    const killModeInfoDiv = document.getElementById('killModeInfo');
+                    const sidewaysInfoDiv = document.getElementById('sidewaysModeInfo');
+                    const sidewaysPositionsContainer = document.getElementById('sidewaysOpenPositionsContainer');
+                    const sidewaysPositionsTitle = document.getElementById('sidewaysOpenPositionsTitle');
 
-                const configuredInvestment = parseFloat(statsData.invest) || 0;
-                document.getElementById('configuredInvestmentAmount').innerText = configuredInvestment.toFixed(2) + ' USDT';
+                    killModeInfoDiv.style.display = 'none';
+                    killPositionsDiv.innerHTML = 'Không có vị thế Kill Mode nào đang mở.';
+                    sidewaysInfoDiv.style.display = 'none';
+                    sidewaysPositionsContainer.innerHTML = '';
+                    sidewaysPositionsTitle.style.display = 'none';
 
+                    if (backendData.mode === 'KILL') {
+                        killModeInfoDiv.style.display = 'block';
+                        if (backendData.positions && backendData.positions.length > 0) { // 'positions' là của Kill mode
+                            const globalCoin = backendData.coin || "COIN";
+                            let html = '';
+                            backendData.positions.forEach(pos => {
+                                const pnl = parseFloat(pos.pnl) || 0;
+                                html += `
+                                    <div class="position-details">
+                                        <h4>[KILL] ${pos.side} ${globalCoin}</h4>
+                                        <p>KL: ${pos.qty} | Giá vào: ${pos.entry} | Giá hiện tại: ${pos.curPrice}</p>
+                                        <p>PNL: <strong class="${pnl > 0 ? 'profit' : (pnl < 0 ? 'loss' : 'neutral')}">${pnl.toFixed(2)} USDT</strong></p>
+                                        <p>Vốn lệnh: ${(parseFloat(backendData.invest) || 0).toFixed(2)} | Đã đóng (lỗ): ${pos.closedLoss || '0'}</p>
+                                        <p>Mốc: ${pos.mocIdx !== undefined ? (pos.mocIdx + 1) : 'N/A'} | PNL Base Mốc: ${pos.pnlBase || '0.00'}%</p>
+                                    </div>`;
+                            });
+                            killPositionsDiv.innerHTML = html;
+                        }
+                    } else if (backendData.mode === 'SIDEWAYS' && backendData.sidewaysGridInfo) {
+                        sidewaysInfoDiv.style.display = 'block';
+                        const grid = backendData.sidewaysGridInfo;
+                        document.getElementById('gridIsActive').innerText = grid.isActive ? (grid.isClearing ? 'ĐANG DỌN DẸP' : 'Hoạt động') : 'Không hoạt động';
+                        document.getElementById('gridAnchorPrice').innerText = grid.anchorPrice || 'N/A';
+                        document.getElementById('gridUpperLimit').innerText = grid.upperLimit || 'N/A';
+                        document.getElementById('gridLowerLimit').innerText = grid.lowerLimit || 'N/A';
+                        document.getElementById('gridTpHits').innerText = grid.stats?.tpMatchedCount || 0;
+                        document.getElementById('gridSlHits').innerText = grid.stats?.slMatchedCount || 0;
 
-                // Lấy các container DOM
-                const gridStatsSection = document.getElementById('gridStatsSection');
-                const killPositionsDiv = document.getElementById('killModePositionsContainer');
-                const sidewaysPositionsDiv = document.getElementById('sidewaysPositionsContainer');
-                const noPositionsMsg = document.getElementById('noPositionsMessage');
-
-                // Reset hiển thị
-                gridStatsSection.style.display = 'none'; // Sẽ được bật lại nếu mode là SIDEWAYS
-                killPositionsDiv.innerHTML = '';
-                sidewaysPositionsDiv.innerHTML = '';
-                noPositionsMsg.style.display = 'block'; // Mặc định là không có vị thế
-
-                let hasOpenPositions = false;
-
-                // Xử lý dựa trên 'mode' từ backend JS
-                if (statsData.mode === 'KILL') {
-                    if (statsData.killModePositions && statsData.killModePositions.length > 0) {
-                        hasOpenPositions = true;
-                        let killHtml = '';
-                        statsData.killModePositions.forEach(pos => {
-                            const pnlValue = parseFloat(pos.unrealizedPnl) || 0;
-                            const pnlClass = pnlValue > 0 ? 'profit' : (pnlValue < 0 ? 'loss' : 'neutral');
-                            const entryPriceStr = pos.entryPrice !== undefined ? parseFloat(pos.entryPrice).toFixed(4) : 'N/A';
-                            const quantityStr = pos.quantity !== undefined ? parseFloat(pos.quantity).toFixed(4) : 'N/A';
-
-                            killHtml += `
-                                <div class="position-details">
-                                    <h4>[KILL] Vị thế ${pos.side || 'N/A'} (${statsData.coin || 'COIN'})</h4>
-                                    <p>Giá vào: ${entryPriceStr} | KL: ${quantityStr}</p>
-                                    <p>PNL chưa thực tế: <strong class="${pnlClass}">${pnlValue.toFixed(4)} USDT</strong></p>
-                                    <!-- Thêm thông tin khác của killModePosition nếu có và cần thiết -->
-                                </div>`;
-                        });
-                        killPositionsDiv.innerHTML = killHtml;
+                        if (grid.activePositions && grid.activePositions.length > 0) {
+                            sidewaysPositionsTitle.style.display = 'block';
+                            const globalCoin = backendData.coin || "COIN";
+                            let html = '';
+                            grid.activePositions.forEach(pos => {
+                                const pnl = parseFloat(pos.pnl) || 0;
+                                html += `
+                                    <div class="position-details">
+                                        <h4>[LƯỚI] ${pos.side} ${globalCoin}</h4>
+                                        <p>Giá vào: ${pos.entry} | KL: ${pos.qty} | Bước: ${pos.step}</p>
+                                        <p>Anchor Gốc: ${pos.originalAnchor} | Giá hiện tại: ${pos.curPrice}</p>
+                                        <p>PNL: <strong class="${pnl > 0 ? 'profit' : (pnl < 0 ? 'loss' : 'neutral')}">${pnl.toFixed(2)} USDT</strong></p>
+                                    </div>`;
+                            });
+                            sidewaysPositionsContainer.innerHTML = html;
+                        } else {
+                            sidewaysPositionsContainer.innerText = 'Không có vị thế Lưới nào đang mở.';
+                        }
                     }
-                } else if (statsData.mode === 'SIDEWAYS') {
-                    gridStatsSection.style.display = 'block'; // Hiển thị phần thống kê lưới
-
-                    // Cập nhật thống kê lưới từ statsData.gridStats
-                    document.getElementById('totalGridsMatched').innerText = statsData.gridStats?.totalGridsMatched || 0;
-                    document.getElementById('totalTpHit').innerText = statsData.gridStats?.totalTpHit || 0;
-                    document.getElementById('totalSlHit').innerText = statsData.gridStats?.totalSlHit || 0;
-
-                    const gridSlLossValue = parseFloat(statsData.gridStats?.totalSlLoss) || 0;
-                    const gridSlLossEl = document.getElementById('gridTotalSlLoss');
-                    gridSlLossEl.innerText = gridSlLossValue.toFixed(4) + ' USDT';
-                    gridSlLossEl.className = gridSlLossValue < 0 ? 'loss' : (gridSlLossValue > 0 ? 'profit' : 'neutral'); // PNL nên <0 là loss
-
-                    const gridUnrealizedPnlValue = parseFloat(statsData.unrealizedGridPnl) || 0;
-                    const gridUnrealizedPnlEl = document.getElementById('gridUnrealizedPnl');
-                    gridUnrealizedPnlEl.innerText = gridUnrealizedPnlValue.toFixed(4) + ' USDT';
-                    gridUnrealizedPnlEl.className = gridUnrealizedPnlValue > 0 ? 'profit' : (gridUnrealizedPnlValue < 0 ? 'loss' : 'neutral');
-
-                    // Hiển thị vị thế lưới từ statsData.sidewaysModePositions
-                    if (statsData.sidewaysModePositions && statsData.sidewaysModePositions.length > 0) {
-                        hasOpenPositions = true;
-                        let sidewaysHtml = '';
-                        statsData.sidewaysModePositions.forEach(pos => {
-                            // pos.pnl từ backend là string đã toFixed(4)
-                            const pnlValue = parseFloat(pos.pnl) || 0;
-                            const pnlClass = pnlValue > 0 ? 'profit' : (pnlValue < 0 ? 'loss' : 'neutral');
-                            sidewaysHtml += `
-                                <div class="position-details">
-                                    <h4>[LƯỚI] Vị thế ${pos.side || 'N/A'} (${statsData.coin || 'COIN'})</h4>
-                                    <p>Giá vào: ${pos.entry || 'N/A'} | KL: ${pos.qty || 'N/A'}</p>
-                                    <p>Giá hiện tại: ${pos.curPrice || 'N/A'}</p>
-                                    <p>PNL chưa thực tế: <strong class="${pnlClass}">${pnlValue.toFixed(4)} USDT</strong></p>
-                                </div>`;
-                        });
-                        sidewaysPositionsDiv.innerHTML = sidewaysHtml;
-                    }
-                }
-                // Nếu không phải KILL và không phải SIDEWAYS, hoặc không có vị thế nào trong mode đó
-                // thì killPositionsDiv và sidewaysPositionsDiv sẽ trống
-
-                if (hasOpenPositions) {
-                    noPositionsMsg.style.display = 'none';
                 } else {
-                    noPositionsMsg.style.display = 'block';
-                    noPositionsMsg.innerText = 'Không có vị thế nào đang mở.';
+                    document.getElementById('openPositionsKillContainer').innerText = `Lỗi: ${resData.message || 'Không có dữ liệu'}`;
+                    ['totalProfit', 'totalLoss', 'netPNL', 'currentInvestmentAmount'].forEach(id => document.getElementById(id).innerText = '0.00');
+                    document.getElementById('sidewaysModeInfo').style.display = 'none';
+                    document.getElementById('killModeInfo').style.display = 'none';
                 }
-
             } catch (error) {
-                console.error("Lỗi xử lý fetchBotStats:", error);
-                // Đảm bảo UI được reset nếu có lỗi nghiêm trọng
-                document.getElementById('overallNetPNL').innerText = 'Lỗi';
-                document.getElementById('configuredInvestmentAmount').innerText = 'Lỗi';
-                document.getElementById('gridStatsSection').style.display = 'none';
-                document.getElementById('killModePositionsContainer').innerHTML = '';
-                document.getElementById('sidewaysPositionsContainer').innerHTML = '';
-                document.getElementById('noPositionsMessage').innerText = 'Lỗi nghiêm trọng khi tải dữ liệu.';
-                document.getElementById('noPositionsMessage').style.display = 'block';
+                console.error("Lỗi fetchBotStats:", error);
+                document.getElementById('openPositionsKillContainer').innerText = `Lỗi nghiêm trọng: ${error.message}`;
+                 document.getElementById('sidewaysModeInfo').style.display = 'none';
+                 document.getElementById('killModeInfo').style.display = 'none';
             }
         }
 
         async function fetchLogs() {
             try {
                 const response = await fetch(`${BOT_ENDPOINT}/api/logs`);
-                if (!response.ok) throw new Error(`Logs HTTP error! ${response.status}`);
+                if (!response.ok) throw new Error(`Logs HTTP ${response.status}`);
                 const text = await response.text();
-                const logOutput = document.getElementById('logOutput');
-                logOutput.innerText = text;
-                logOutput.scrollTop = logOutput.scrollHeight;
-            } catch (error) {
-                document.getElementById('logOutput').innerText = `Lỗi lấy log: ${error.message}`;
-            }
+                const logOutput = document.getElementById('logOutput'); logOutput.innerText = text; logOutput.scrollTop = logOutput.scrollHeight;
+            } catch (error) { document.getElementById('logOutput').innerText = `Lỗi lấy log: ${error.message}`; }
         }
-
         async function startBot() {
             try {
                 document.getElementById('botStatus').innerText = 'Đang khởi động bot...';
                 const response = await fetch(`${BOT_ENDPOINT}/start_bot_logic`);
-                if (!response.ok) throw new Error(`Start bot HTTP error! ${response.status}`);
-                const text = await response.text();
-                document.getElementById('botStatus').innerText = text;
-            } catch (error) {
-                document.getElementById('botStatus').innerText = `Lỗi khi gửi lệnh khởi động: ${error.message}`;
-            } finally {
-                setTimeout(() => {
-                    fetchBotStatus();
-                    fetchBotStats();
-                    fetchLogs();
-                }, 1500); // Tăng delay để backend có thời gian cập nhật
-            }
+                if (!response.ok) throw new Error(`Start HTTP ${response.status}`);
+                document.getElementById('botStatus').innerText = await response.text();
+            } catch (error) { document.getElementById('botStatus').innerText = `Lỗi khởi động: ${error.message}`; }
+            finally { setTimeout(() => { fetchBotStatus(); fetchBotStats(); fetchLogs(); }, 1500); }
         }
-
         async function stopBot() {
             try {
                 document.getElementById('botStatus').innerText = 'Đang dừng bot...';
                 const response = await fetch(`${BOT_ENDPOINT}/stop_bot_logic`);
-                if (!response.ok) throw new Error(`Stop bot HTTP error! ${response.status}`);
-                const text = await response.text();
-                document.getElementById('botStatus').innerText = text;
-            } catch (error) {
-                document.getElementById('botStatus').innerText = `Lỗi khi gửi lệnh dừng: ${error.message}`;
-            } finally {
-                setTimeout(() => {
-                    fetchBotStatus();
-                    fetchBotStats();
-                    fetchLogs();
-                }, 1500); // Tăng delay
-            }
+                if (!response.ok) throw new Error(`Stop HTTP ${response.status}`);
+                document.getElementById('botStatus').innerText = await response.text();
+            } catch (error) { document.getElementById('botStatus').innerText = `Lỗi dừng: ${error.message}`; }
+            finally { setTimeout(() => { fetchBotStatus(); fetchBotStats(); fetchLogs(); }, 1500); }
         }
-
         async function configureBot() {
-            const targetCoinSymbol = document.getElementById('targetCoinSymbol').value;
-            const initialInvestmentAmount = document.getElementById('initialInvestmentAmount').value;
-
-            if (!targetCoinSymbol || !initialInvestmentAmount || parseFloat(initialInvestmentAmount) <= 0) {
-                alert('Vui lòng nhập đầy đủ và chính xác thông tin cấu hình.');
-                return;
-            }
-
+            const symbol = document.getElementById('targetCoinSymbol').value;
+            const amount = document.getElementById('initialInvestmentAmount').value;
+            if (!symbol || !amount || parseFloat(amount) <= 0) { alert('Vui lòng nhập đủ thông tin cấu hình.'); return; }
             try {
-                // Sửa payload để khớp với backend JS bạn cung cấp (mong đợi symbol, initialAmount trực tiếp)
-                const payload = {
-                    symbol: targetCoinSymbol,
-                    initialAmount: initialInvestmentAmount
-                };
-                // const payload = { // Cấu trúc cũ của HTML "gốc" này
-                //     coinConfigs: [{
-                //         symbol: targetCoinSymbol,
-                //         initialAmount: initialInvestmentAmount
-                //     }]
-                // };
-
+                const payload = { coinConfigs: [{ symbol: symbol, initialAmount: amount }] };
                 const response = await fetch(`${BOT_ENDPOINT}/api/configure`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(payload)
+                    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
                 });
-                if (!response.ok) throw new Error(`Configure HTTP error! ${response.status}`);
-                const data = await response.json();
-                alert(data.message || "Phản hồi không rõ ràng.");
-                if (data.success) { // Nếu cấu hình thành công, fetch lại stats
-                    fetchBotStatus();
-                    fetchBotStats();
-                }
-            } catch (error) {
-                alert(`Lỗi cấu hình bot: ${error.message}`);
-            }
-            // Không cần finally setTimeout ở đây nữa, vì đã fetch nếu success.
+                if (!response.ok) throw new Error(`Config HTTP ${response.status}`);
+                const data = await response.json(); alert(data.message);
+                if(data.success) { fetchBotStatus(); fetchBotStats(); }
+            } catch (error) { alert(`Lỗi cấu hình: ${error.message}`); }
         }
-
         document.addEventListener('DOMContentLoaded', () => {
-            fetchBotStatus();
-            fetchBotStats();
-            fetchLogs();
-            setInterval(() => {
-                if (document.visibilityState === 'visible') { // Chỉ fetch khi tab active
-                    fetchBotStatus();
-                    fetchBotStats();
-                    fetchLogs();
-                }
-            }, 5000);
+            fetchBotStatus(); fetchBotStats(); fetchLogs();
+            setInterval(() => { if(document.visibilityState === 'visible') { fetchBotStatus(); fetchBotStats(); fetchLogs(); } }, 5000);
         });
     </script>
 </body>
