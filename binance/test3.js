@@ -717,8 +717,6 @@ function setupMarketDataStream(symbol) {
     marketWs.on('close', (code, reason) => { const closedS = marketWs && marketWs.url ? marketWs.url.split('/').pop().split('@')[0].toUpperCase() : symbol; addLog(`Market Stream (${closedS}) đóng. Code: ${code}, Reason: ${reason ? reason.toString().substring(0,100) : 'N/A'}.`); if (botRunning && closedS === TARGET_COIN_SYMBOL) { addLog(`Thử kết nối lại Market Stream ${TARGET_COIN_SYMBOL} sau 5s...`); setTimeout(() => setupMarketDataStream(TARGET_COIN_SYMBOL), 5000); } else if (botRunning && closedS !== TARGET_COIN_SYMBOL) addLog(`Market stream coin cũ ${closedS} đóng.`); });
 }
 
-const app = express(); app.use(express.json());
-
 // ... (toàn bộ code logic của bot ở trên)
 
 const app = express(); app.use(express.json());
