@@ -260,6 +260,14 @@
                 <label for="initialInvestmentAmount">Vốn Ban Đầu (USDT):</label>
                 <input type="number" id="initialInvestmentAmount" value="0.12" step="0.01">
             </div>
+            <div class="input-group">
+                <label for="overallTakeProfit">Chốt lời tổng (USDT, 0 = không đặt):</label>
+                <input type="number" id="overallTakeProfit" value="0" step="1">
+            </div>
+            <div class="input-group">
+                <label for="overallStopLoss">Cắt lỗ tổng (USDT, nhập số âm, 0 = không đặt):</label>
+                <input type="number" id="overallStopLoss" value="0" step="-1">
+            </div>
             <div class="button-group">
                 <button class="configure" id="configureButton">Lưu Cấu Hình</button>
             </div>
@@ -285,6 +293,8 @@
                 <div>Tổng Lỗ (coin hiện tại): <strong id="totalLoss" class="neutral">0.00</strong> USDT</div>
                 <div>PNL Ròng (coin hiện tại): <strong id="netPNL" class="neutral">0.00</strong> USDT</div>
                 <div>Vốn cấu hình: <strong id="currentInvestmentAmount">0.00</strong> USDT</div>
+                <div>Mục tiêu TP Tổng (cấu hình): <strong id="configOverallTP" class="neutral">N/A</strong> USDT</div>
+                <div>Mục tiêu SL Tổng (cấu hình): <strong id="configOverallSL" class="neutral">N/A</strong> USDT</div>
                 <div>Giá thị trường: <strong id="marketPrice">N/A</strong></div>
             </div>
 
@@ -330,9 +340,13 @@
             const totalLossEl = document.getElementById('totalLoss');
             const netPNLEl = document.getElementById('netPNL');
             const currentInvestmentAmountEl = document.getElementById('currentInvestmentAmount');
+            const configOverallTPEl = document.getElementById('configOverallTP');
+            const configOverallSLEl = document.getElementById('configOverallSL');
             const marketPriceEl = document.getElementById('marketPrice');
 
             const initialInvestmentAmountInput = document.getElementById('initialInvestmentAmount');
+            const overallTakeProfitInput = document.getElementById('overallTakeProfit');
+            const overallStopLossInput = document.getElementById('overallStopLoss');
 
             const killModeInfoEl = document.getElementById('killModeInfo');
             const killCoinDisplayEl = document.getElementById('killCoinDisplay');
@@ -358,13 +372,10 @@
 
             function parseAndCreateDate(dateTimeString) {
                 if (!dateTimeString || dateTimeString === "N/A") return null;
-                // Expected format: "DD/MM/YYYY HH:MM:SS.mmm"
                 const parts = dateTimeString.match(/(\d{2})\/(\d{2})\/(\d{4})\s(\d{2}):(\d{2}):(\d{2})\.(\d{3})/);
                 if (parts) {
-                    // parts[1]=Day, parts[2]=Month, parts[3]=Year, parts[4]=Hour, parts[5]=Minute, parts[6]=Second, parts[7]=Millisecond
                     return new Date(parts[3], parseInt(parts[2], 10) - 1, parts[1], parts[4], parts[5], parts[6], parts[7]);
                 }
-                // Fallback for ISO or other parsable formats if needed, though not expected from formatTimeUTC7
                 const date = new Date(dateTimeString);
                 return isNaN(date.getTime()) ? null : date;
             }
@@ -393,7 +404,6 @@
                 uptimeString += `${seconds} giây`;
                 return uptimeString.trim() || "0 giây";
             }
-
 
             async function fetchBotStatus() {
                 try {
@@ -424,7 +434,6 @@
                         
                         botUptimeEl.innerText = backendData.botRunning ? formatUptime(backendData.botStartTime) : "N/A";
 
-
                         currentCoinEl.innerText = currentCoinName;
                         currentModeEl.innerText = backendData.currentMode || 'N/A';
                         currentVps1VolEl.innerText = backendData.vps1Volatility || 'N/A';
@@ -443,9 +452,25 @@
                         const currentInvest = parseFloat(backendData.initialInvestment) || 0;
                         currentInvestmentAmountEl.innerText = currentInvest.toFixed(2);
                         
+                        // Cập nhật input cấu hình
                         if (!backendData.botRunning || initialInvestmentAmountInput.value === "" || document.activeElement !== initialInvestmentAmountInput) {
                              initialInvestmentAmountInput.value = currentInvest.toFixed(2);
                         }
+                        const backendOverallTP = parseFloat(backendData.overallTakeProfit) || 0;
+                        const backendOverallSL = parseFloat(backendData.overallStopLoss) || 0;
+
+                        configOverallTPEl.innerText = backendOverallTP > 0 ? backendOverallTP.toFixed(2) : "Không đặt";
+                        configOverallTPEl.className = backendOverallTP > 0 ? 'profit' : 'neutral';
+                        configOverallSLEl.innerText = backendOverallSL < 0 ? backendOverallSL.toFixed(2) : "Không đặt";
+                        configOverallSLEl.className = backendOverallSL < 0 ? 'loss' : 'neutral';
+                        
+                        if (!backendData.botRunning || overallTakeProfitInput.value === "" || document.activeElement !== overallTakeProfitInput) {
+                             overallTakeProfitInput.value = backendOverallTP;
+                        }
+                        if (!backendData.botRunning || overallStopLossInput.value === "" || document.activeElement !== overallStopLossInput) {
+                             overallStopLossInput.value = backendOverallSL;
+                        }
+
                         marketPriceEl.innerText = backendData.currentMarketPrice || 'N/A';
 
                         killModeInfoEl.style.display = 'none';
@@ -512,7 +537,7 @@
                     } else {
                         activeCoinDisplayEl.innerText = "LỖI";
                         openPositionsKillContainerEl.innerText = `Lỗi: ${resData.message || 'Không có dữ liệu'}`;
-                        [botRunningStatusEl, botUptimeEl, currentCoinEl, currentModeEl, currentVps1VolEl, totalProfitEl, totalLossEl, netPNLEl, currentInvestmentAmountEl, marketPriceEl].forEach(el => el.innerText = 'N/A');
+                        [botRunningStatusEl, botUptimeEl, currentCoinEl, currentModeEl, currentVps1VolEl, totalProfitEl, totalLossEl, netPNLEl, currentInvestmentAmountEl, marketPriceEl, configOverallTPEl, configOverallSLEl].forEach(el => el.innerText = 'N/A');
                         sidewaysModeInfoEl.style.display = 'none';
                         killModeInfoEl.style.display = 'none';
                     }
@@ -567,14 +592,24 @@
             
             async function configureBot() {
                 const initialAmount = initialInvestmentAmountInput.value;
+                const overallTP = overallTakeProfitInput.value;
+                const overallSL = overallStopLossInput.value;
                 
                 if (!initialAmount || parseFloat(initialAmount) <= 0) {
                     alert('Vui lòng nhập Vốn Ban Đầu hợp lệ.'); return;
+                }
+                 if (parseFloat(overallSL) > 0) {
+                    alert('Cắt lỗ tổng phải là số âm (ví dụ: -50) hoặc 0 để không đặt.'); return;
+                }
+                if (parseFloat(overallTP) < 0) {
+                    alert('Chốt lời tổng phải là số dương hoặc 0 để không đặt.'); return;
                 }
                 
                 try {
                     const payload = {
                         initialAmount: initialAmount,
+                        overallTakeProfit: parseFloat(overallTP), 
+                        overallStopLoss: parseFloat(overallSL) 
                     };
                     const response = await fetch(`${BOT_ENDPOINT}/api/configure`, {
                         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
@@ -603,7 +638,7 @@
                     fetchBotStats(); 
                     fetchLogs(); 
                 }
-            }, 10000); // Tăng khoảng thời gian cập nhật nếu cần, ví dụ 7-10 giây
+            }, 7000); // Tăng khoảng thời gian lên 7 giây
         });
     </script>
 </body>
