@@ -1,573 +1,97 @@
-<!DOCTYPE html>
-<html lang="vi">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Binance Bot Dashboard - Neon Dark</title>
-    <style>
-        :root {
-            --dark-bg: #0a0f18;
-            --dark-surface: #131a26;
-            --dark-card: #1c2536;
-            --text-primary: #e0e0e0;
-            --text-secondary: #9090a0;
-            --neon-purple: #8A2BE2;
-            --neon-pink: #FF1493;
-            --neon-purple-border-glow: rgba(138, 43, 226, 0.5);
-            --neon-pink-border-glow: rgba(255, 20, 147, 0.5);
-            --green-profit: #28a745;
-            --red-loss: #dc3545;
-            --border-radius-main: 8px;
-            --border-radius-small: 5px;
-        }
-
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            margin: 0;
-            padding: 15px;
-            background-color: var(--dark-bg);
-            color: var(--text-secondary);
-            line-height: 1.5;
-            font-size: 0.9em;
-        }
-
-        .container {
-            max-width: 1000px;
-            margin: 15px auto;
-            background-color: var(--dark-surface);
-            padding: 25px;
-            border-radius: var(--border-radius-main);
-            border: 2px solid var(--neon-purple);
-            box-shadow: 0 0 10px var(--neon-purple-border-glow);
-        }
-
-        h1, h2 {
-            color: var(--text-primary);
-            border-bottom: 1px solid var(--neon-pink);
-            padding-bottom: 8px;
-            margin-bottom: 18px;
-            font-size: 1.8em;
-        }
-
-        h1 {
-            text-align: center;
-        }
-
-        h2 {
-            font-size: 1.4em;
-        }
-
-        h3 {
-            color: var(--text-primary);
-            font-size: 1.2em;
-            margin-top: 20px;
-            padding-top: 10px;
-            border-top: 1px dashed var(--neon-pink);
-        }
-
-        .section {
-            margin-bottom: 25px;
-            padding: 18px;
-            background-color: var(--dark-card);
-            border-radius: var(--border-radius-main);
-            border: 1px solid var(--neon-pink);
-            box-shadow: 0 0 7px var(--neon-pink-border-glow);
-        }
-
-        .input-group {
-            margin-bottom: 12px;
-            display: flex;
-            align-items: center;
-        }
-
-        .input-group label {
-            flex: 1;
-            margin-right: 12px;
-            font-weight: 600;
-            color: var(--text-secondary);
-            font-size: 0.9em;
-        }
-
-        .input-group input[type="text"],
-        .input-group input[type="number"] {
-            flex: 2;
-            padding: 8px 10px;
-            border-radius: var(--border-radius-small);
-            border: 1px solid var(--neon-purple);
-            background-color: var(--dark-surface);
-            color: var(--text-primary);
-            font-size: 0.9em;
-        }
-
-        .input-group input[type="text"]:focus,
-        .input-group input[type="number"]:focus {
-            outline: none;
-            border-color: var(--neon-pink);
-            box-shadow: 0 0 5px var(--neon-pink-border-glow);
-        }
-
-        .button-group {
-            display: flex;
-            gap: 12px;
-            margin-top: 18px;
-            justify-content: center;
-        }
-
-        .button-group button {
-            padding: 10px 20px;
-            border: none;
-            border-radius: var(--border-radius-small);
-            font-size: 0.95em;
-            cursor: pointer;
-            transition: background-color 0.2s ease, transform 0.1s ease;
-            color: #ffffff;
-            font-weight: 600;
-        }
-
-        .button-group button.start {
-            background-color: var(--green-profit);
-        }
-        .button-group button.start:hover {
-            filter: brightness(1.15);
-        }
-
-        .button-group button.stop {
-            background-color: var(--red-loss);
-        }
-        .button-group button.stop:hover {
-            filter: brightness(1.15);
-        }
-
-        .button-group button.configure {
-            background-color: var(--neon-purple);
-        }
-        .button-group button.configure:hover {
-            background-color: var(--neon-pink);
-        }
-
-        .status-message {
-            margin-top: 20px;
-            padding: 12px;
-            background-color: var(--dark-card);
-            border-left: 4px solid var(--neon-purple);
-            border-radius: var(--border-radius-small);
-            font-size: 0.95em;
-            color: var(--text-secondary);
-            word-wrap: break-word;
-            white-space: pre-wrap;
-        }
-
-        .log-output {
-            background-color: #000000;
-            color: #c0c0c0;
-            padding: 15px;
-            border-radius: var(--border-radius-small);
-            min-height: 200px;
-            max-height: 400px;
-            overflow-y: auto;
-            font-family: 'Consolas', 'Monaco', monospace;
-            font-size: 0.85em;
-            white-space: pre-wrap;
-            word-wrap: break-word;
-            border: 1px solid var(--neon-pink);
-        }
-
-        .stats-output div,
-        .stats-output span {
-            margin-bottom: 6px;
-            padding: 8px;
-            background-color: var(--dark-card);
-            border-left: 3px solid var(--neon-purple);
-            border-radius: var(--border-radius-small);
-            font-size: 0.9em;
-        }
-
-        .stats-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
-            gap: 10px;
-            margin-top: 10px;
-        }
-
-        .stats-output strong {
-            color: var(--text-primary);
-            font-weight: 600;
-        }
-
-        .position-details {
-            margin-top: 10px;
-            padding: 12px;
-            background-color: rgba(28, 37, 54, 0.8);
-            border-radius: var(--border-radius-small);
-            border: 1px solid var(--neon-pink);
-        }
-
-        .position-details h4 {
-            color: var(--text-primary);
-            margin-top: 0;
-            margin-bottom: 8px;
-            font-size: 1.1em;
-            border-bottom: none;
-        }
-
-        .position-details p {
-            margin: 4px 0;
-            font-size: 0.85em;
-        }
-
-        .profit {
-            color: var(--green-profit) !important;
-            font-weight: bold;
-        }
-
-        .loss {
-            color: var(--red-loss) !important;
-            font-weight: bold;
-        }
-
-        .neutral {
-            color: var(--text-secondary);
-        }
-
-        .mode-info { /* Class chung cho #sidewaysModeInfo, #killModeInfo */
-            border: 1px solid var(--neon-purple);
-            box-shadow: 0 0 8px var(--neon-purple-border-glow);
-            margin-top:20px;
-            padding:15px;
-            border-radius: var(--border-radius-main);
-            background-color: var(--dark-card);
-        }
-
-        .mode-info h3 { /* Style chung cho h3 bên trong .mode-info */
-            color: var(--text-primary);
-            border-top: none;
-        }
-
-        .coin-highlight { /* Style cho span hiển thị coin */
-            color: var(--neon-pink);
-            font-weight: bold;
-        }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <h1>BINANCE BOT CLIENT</h1>
-
-        <div class="section">
-            <h2>Cấu hình Bot (Coin sẽ được chọn tự động)</h2>
-            <div class="input-group">
-                <label for="initialInvestmentAmount">Vốn Ban Đầu (USDT):</label>
-                <input type="number" id="initialInvestmentAmount" value="0.12" step="0.01">
-            </div>
-            <div class="input-group">
-                <label for="overallTakeProfit">Chốt lời tổng (USDT, 0 = không đặt):</label>
-                <input type="number" id="overallTakeProfit" value="0" step="1">
-            </div>
-            <div class="input-group">
-                <label for="overallStopLoss">Cắt lỗ tổng (USDT, nhập số âm, 0 = không đặt):</label>
-                <input type="number" id="overallStopLoss" value="0" step="-1">
-            </div>
-            <div class="button-group">
-                <button class="configure" id="configureButton">Lưu Cấu Hình</button>
-            </div>
-        </div>
-
-        <div class="section">
-            <h2>Điều Khiển Bot</h2>
-            <div class="button-group">
-                <button class="start" id="startButton">Khởi Động Bot</button>
-                <button class="stop" id="stopButton">Dừng Bot</button>
-            </div>
-            <div class="status-message" id="botStatus">Đang tải trạng thái...</div>
-        </div>
-
-        <div class="section">
-            <h2>Thống Kê & Vị Thế (<span id="activeCoinDisplay" class="coin-highlight">COIN</span>)</h2>
-            <div class="stats-output" id="botStatsGlobal">
-                <div>Tổng Lời (coin hiện tại): <strong id="totalProfit">0.00</strong> USDT</div>
-                <div>Tổng Lỗ (coin hiện tại): <strong id="totalLoss">0.00</strong> USDT</div>
-                <div>PNL Ròng (coin hiện tại): <strong id="netPNL">0.00</strong> USDT</div>
-                <div>Vốn cấu hình: <strong id="currentInvestmentAmount">0.00</strong> USDT</div>
-                <div>Mục tiêu TP Tổng: <strong id="configOverallTP">N/A</strong> USDT</div>
-                <div>Mục tiêu SL Tổng: <strong id="configOverallSL">N/A</strong> USDT</div>
-            </div>
-
-            <div id="sidewaysModeInfo" class="mode-info" style="display:none;">
-                <h3>Thông Tin Lưới (Sideways) - <span id="sidewaysCoinDisplay" class="coin-highlight"></span></h3>
-                <div class="stats-grid">
-                    <span>Trạng thái lưới: <strong id="gridIsActive">Không hoạt động</strong></span>
-                    <span>Giá Anchor: <strong id="gridAnchorPrice">N/A</strong></span>
-                    <span>Biên trên: <strong id="gridUpperLimit">N/A</strong></span>
-                    <span>Biên dưới: <strong id="gridLowerLimit">N/A</strong></span>
-                    <span>Lưới khớp TP: <strong id="gridTpHits">0</strong></span>
-                    <span>Lưới khớp SL: <strong id="gridSlHits">0</strong></span>
-                </div>
-                <div id="sidewaysOpenPositionsTitle" style="display:none; margin-top:15px;"><h4>Vị thế lưới đang mở:</h4></div>
-                <div id="sidewaysOpenPositionsContainer"></div>
-            </div>
-
-            <div id="killModeInfo" class="mode-info" style="display:none;">
-                <h3 id="killPositionsTitle">Vị Thế Đang Mở (Kill Mode) - <span id="killCoinDisplay" class="coin-highlight"></span></h3>
-                <div id="openPositionsKillContainer">Không có vị thế Kill Mode nào đang mở.</div>
-            </div>
-        </div>
-
-        <div class="section">
-            <h2>Nhật Ký Hoạt Động</h2>
-            <pre class="log-output" id="logOutput">Đang tải nhật ký...</pre>
-        </div>
-    </div>
-
-    <script>
-        document.addEventListener('DOMContentLoaded', () => {
-            const BOT_ENDPOINT = window.location.origin;
-
-            // Lấy các element một lần để dùng lại
-            const botStatusEl = document.getElementById('botStatus');
-            const activeCoinDisplayEl = document.getElementById('activeCoinDisplay');
-            const totalProfitEl = document.getElementById('totalProfit');
-            const totalLossEl = document.getElementById('totalLoss');
-            const netPNLEl = document.getElementById('netPNL');
-            const currentInvestmentAmountEl = document.getElementById('currentInvestmentAmount');
-            const initialInvestmentAmountInput = document.getElementById('initialInvestmentAmount');
-            const configOverallTPEl = document.getElementById('configOverallTP');
-            const overallTakeProfitInput = document.getElementById('overallTakeProfit');
-            const configOverallSLEl = document.getElementById('configOverallSL');
-            const overallStopLossInput = document.getElementById('overallStopLoss');
-
-            const killModeInfoEl = document.getElementById('killModeInfo');
-            const killCoinDisplayEl = document.getElementById('killCoinDisplay');
-            const openPositionsKillContainerEl = document.getElementById('openPositionsKillContainer');
-
-            const sidewaysModeInfoEl = document.getElementById('sidewaysModeInfo');
-            const sidewaysCoinDisplayEl = document.getElementById('sidewaysCoinDisplay');
-            const gridIsActiveEl = document.getElementById('gridIsActive');
-            const gridAnchorPriceEl = document.getElementById('gridAnchorPrice');
-            const gridUpperLimitEl = document.getElementById('gridUpperLimit');
-            const gridLowerLimitEl = document.getElementById('gridLowerLimit');
-            const gridTpHitsEl = document.getElementById('gridTpHits');
-            const gridSlHitsEl = document.getElementById('gridSlHits');
-            const sidewaysOpenPositionsTitleEl = document.getElementById('sidewaysOpenPositionsTitle');
-            const sidewaysOpenPositionsContainerEl = document.getElementById('sidewaysOpenPositionsContainer');
-
-            const logOutputEl = document.getElementById('logOutput');
-            const startButton = document.getElementById('startButton');
-            const stopButton = document.getElementById('stopButton');
-            const configureButton = document.getElementById('configureButton');
-
-
-            async function fetchBotStatus() {
-                try {
-                    const response = await fetch(`${BOT_ENDPOINT}/api/status`);
-                    if (!response.ok) throw new Error(`Status HTTP ${response.status}`);
-                    const text = await response.text();
-                    botStatusEl.innerText = text;
-                } catch (error) {
-                    botStatusEl.innerText = `Lỗi lấy trạng thái: ${error.message}`;
-                }
+// ... trong file bot .js của bạn
+app.get('/api/bot_stats', async (req, res) => {
+    let killPositionsData = [];
+    if(currentBotMode === 'kill'){
+        for(const p of [currentLongPosition, currentShortPosition]){
+            if(p){
+                const d = TARGET_COIN_SYMBOL ? await getSymbolDetails(p.symbol) : null;
+                const pp = d ? d.pricePrecision : 2;
+                const qp = d ? d.quantityPrecision : 3;
+                const pnl = p.unrealizedPnl || 0;
+                killPositionsData.push({
+                    type: 'kill',
+                    side: p.side,
+                    entry: p.entryPrice?.toFixed(pp),
+                    qty: p.quantity?.toFixed(qp),
+                    pnl: pnl.toFixed(2),
+                    curPrice: p.currentPrice?.toFixed(pp),
+                    initQty: p.initialQuantity?.toFixed(qp),
+                    closedLossQty: p.closedLossAmount?.toFixed(qp), // Đảm bảo trường này có tên đúng
+                    pairEntry: p.pairEntryPrice?.toFixed(pp),
+                    mocIdx: (p.nextPartialCloseLossIndex !== undefined ? p.nextPartialCloseLossIndex : -1), // Sửa để trả về index, client sẽ +1
+                    pnlBasePercent: (p.pnlBaseForNextMoc || 0).toFixed(2),
+                    tpId: p.currentTPId,
+                    slId: p.currentSLId
+                });
             }
+        }
+    }
 
-            async function fetchBotStats() {
-                try {
-                    const response = await fetch(`${BOT_ENDPOINT}/api/bot_stats`);
-                    if (!response.ok) throw new Error(`Stats HTTP ${response.status}`);
-                    const resData = await response.json();
-
-                    if (resData.success && resData.data) {
-                        const backendData = resData.data;
-                        const currentCoin = backendData.coin || "CHƯA CHỌN";
-                        activeCoinDisplayEl.innerText = currentCoin;
-
-                        totalProfitEl.innerText = (parseFloat(backendData.profit) || 0).toFixed(2);
-                        totalProfitEl.className = (parseFloat(backendData.profit) || 0) > 0 ? 'profit' : 'neutral';
-                        totalLossEl.innerText = (parseFloat(backendData.loss) || 0).toFixed(2);
-                        totalLossEl.className = (parseFloat(backendData.loss) || 0) > 0 ? 'loss' : 'neutral';
-                        netPNLEl.innerText = (parseFloat(backendData.net) || 0).toFixed(2);
-                        netPNLEl.className = (parseFloat(backendData.net) || 0) > 0 ? 'profit' : ((parseFloat(backendData.net) || 0) < 0 ? 'loss' : 'neutral');
-                        
-                        const currentInvest = parseFloat(backendData.invest) || 0;
-                        currentInvestmentAmountEl.innerText = currentInvest.toFixed(2);
-                        
-                        // Chỉ cập nhật input nếu bot dừng hoặc giá trị input hiện tại trống, để không ghi đè giá trị người dùng đang nhập
-                        if (!backendData.status || backendData.status === 'DỪNG' || initialInvestmentAmountInput.value === "") {
-                             initialInvestmentAmountInput.value = currentInvest.toFixed(2);
-                        }
-
-                        configOverallTPEl.innerText = backendData.targetOverallTakeProfit > 0 ? backendData.targetOverallTakeProfit.toFixed(2) : "Không đặt";
-                        configOverallSLEl.innerText = backendData.targetOverallStopLoss < 0 ? backendData.targetOverallStopLoss.toFixed(2) : "Không đặt";
-                         if (!backendData.status || backendData.status === 'DỪNG' || overallTakeProfitInput.value === "") {
-                            overallTakeProfitInput.value = backendData.targetOverallTakeProfit || 0;
-                        }
-                         if (!backendData.status || backendData.status === 'DỪNG' || overallStopLossInput.value === "") {
-                            overallStopLossInput.value = backendData.targetOverallStopLoss || 0;
-                        }
-
-                        killModeInfoEl.style.display = 'none';
-                        openPositionsKillContainerEl.innerHTML = 'Không có vị thế Kill Mode nào đang mở.';
-                        sidewaysModeInfoEl.style.display = 'none';
-                        sidewaysOpenPositionsContainerEl.innerHTML = '';
-                        sidewaysOpenPositionsTitleEl.style.display = 'none';
-                        killCoinDisplayEl.innerText = '';
-                        sidewaysCoinDisplayEl.innerText = '';
-
-                        if (backendData.mode === 'KILL') {
-                            killModeInfoEl.style.display = 'block';
-                            killCoinDisplayEl.innerText = currentCoin;
-                            if (backendData.positions && backendData.positions.length > 0) {
-                                let html = '';
-                                backendData.positions.forEach(pos => {
-                                    const pnl = parseFloat(pos.pnl) || 0;
-                                    html += `
-                                        <div class="position-details">
-                                            <h4>[KILL] ${pos.side} ${currentCoin}</h4>
-                                            <p>KL: ${pos.qty || 'N/A'} | Giá vào: ${pos.entry || 'N/A'} | Giá hiện tại: ${pos.curPrice || 'N/A'}</p>
-                                            <p>PNL: <strong class="${pnl > 0 ? 'profit' : (pnl < 0 ? 'loss' : 'neutral')}">${pnl.toFixed(2)} USDT</strong></p>
-                                            <p>Vốn lệnh: ${(parseFloat(backendData.invest) || 0).toFixed(2)} | Đã đóng (lỗ): ${pos.closedLoss || '0'}</p>
-                                            <p>Mốc: ${pos.mocIdx !== undefined ? (pos.mocIdx + 1) : 'N/A'} | PNL Base Mốc: ${pos.pnlBase || '0.00'}%</p>
-                                        </div>`;
-                                });
-                                openPositionsKillContainerEl.innerHTML = html;
-                            }
-                        } else if (backendData.mode === 'SIDEWAYS' && backendData.sidewaysGridInfo) {
-                            sidewaysModeInfoEl.style.display = 'block';
-                            sidewaysCoinDisplayEl.innerText = currentCoin;
-                            const grid = backendData.sidewaysGridInfo;
-                            gridIsActiveEl.innerText = grid.isActive ? (grid.isClearing ? 'ĐANG DỌN DẸP' : 'Hoạt động') : 'Không hoạt động';
-                            gridAnchorPriceEl.innerText = grid.anchorPrice || 'N/A';
-                            gridUpperLimitEl.innerText = grid.upperLimit || 'N/A';
-                            gridLowerLimitEl.innerText = grid.lowerLimit || 'N/A';
-                            gridTpHitsEl.innerText = grid.stats?.tpMatchedCount || 0;
-                            gridSlHitsEl.innerText = grid.stats?.slMatchedCount || 0;
-
-                            if (grid.activePositions && grid.activePositions.length > 0) {
-                                sidewaysOpenPositionsTitleEl.style.display = 'block';
-                                let html = '';
-                                grid.activePositions.forEach(pos => {
-                                    const pnl = parseFloat(pos.pnl) || 0;
-                                    html += `
-                                        <div class="position-details">
-                                            <h4>[LƯỚI] ${pos.side} ${currentCoin}</h4>
-                                            <p>Giá vào: ${pos.entry || 'N/A'} | KL: ${pos.qty || 'N/A'} | Bước: ${pos.step !== undefined ? pos.step : 'N/A'}</p>
-                                            <p>Anchor Gốc: ${pos.originalAnchor || 'N/A'} | Giá hiện tại: ${pos.curPrice || 'N/A'}</p>
-                                            <p>PNL: <strong class="${pnl > 0 ? 'profit' : (pnl < 0 ? 'loss' : 'neutral')}">${pnl.toFixed(2)} USDT</strong></p>
-                                        </div>`;
-                                });
-                                sidewaysOpenPositionsContainerEl.innerHTML = html;
-                            } else {
-                                sidewaysOpenPositionsContainerEl.innerText = 'Không có vị thế Lưới nào đang mở.';
-                            }
-                        } else {
-                             killModeInfoEl.style.display = 'block';
-                             killCoinDisplayEl.innerText = currentCoin;
-                             openPositionsKillContainerEl.innerText = 'Chưa có thông tin vị thế hoặc chế độ không xác định.';
-                        }
-                    } else {
-                        activeCoinDisplayEl.innerText = "LỖI";
-                        openPositionsKillContainerEl.innerText = `Lỗi: ${resData.message || 'Không có dữ liệu'}`;
-                        [totalProfitEl, totalLossEl, netPNLEl, currentInvestmentAmountEl, configOverallTPEl, configOverallSLEl].forEach(el => el.innerText = 'N/A');
-                        sidewaysModeInfoEl.style.display = 'none';
-                        killModeInfoEl.style.display = 'none';
-                    }
-                } catch (error) {
-                    console.error("Lỗi fetchBotStats:", error);
-                    activeCoinDisplayEl.innerText = "LỖI";
-                    openPositionsKillContainerEl.innerText = `Lỗi nghiêm trọng: ${error.message}`;
-                    sidewaysModeInfoEl.style.display = 'none';
-                    killModeInfoEl.style.display = 'none';
-                }
+    let gridPositionsData = [];
+    if(sidewaysGrid.isActive && sidewaysGrid.activeGridPositions.length > 0){
+        for(const p of sidewaysGrid.activeGridPositions){
+            const d = TARGET_COIN_SYMBOL ? await getSymbolDetails(p.symbol) : null;
+            const ppG = d ? d.pricePrecision : 4;
+            const qpG = d ? d.quantityPrecision : 4;
+            let pnlU = 0;
+            if(currentMarketPrice && p.entryPrice && p.quantity) {
+                pnlU = (currentMarketPrice - p.entryPrice) * p.quantity * (p.side === 'LONG' ? 1 : -1);
             }
-
-            async function fetchLogs() {
-                try {
-                    const response = await fetch(`${BOT_ENDPOINT}/api/logs`);
-                    if (!response.ok) throw new Error(`Logs HTTP ${response.status}`);
-                    const text = await response.text();
-                    logOutputEl.innerText = text;
-                    logOutputEl.scrollTop = logOutputEl.scrollHeight;
-                } catch (error) {
-                    logOutputEl.innerText = `Lỗi lấy log: ${error.message}`;
-                }
-            }
-
-            async function startBot() {
-                try {
-                    botStatusEl.innerText = 'Đang khởi động bot...';
-                    const response = await fetch(`${BOT_ENDPOINT}/start_bot_logic`);
-                    if (!response.ok) throw new Error(`Start HTTP ${response.status}`);
-                    botStatusEl.innerText = await response.text();
-                } catch (error) {
-                    botStatusEl.innerText = `Lỗi khởi động: ${error.message}`;
-                } finally {
-                    setTimeout(() => { fetchBotStatus(); fetchBotStats(); fetchLogs(); }, 1500);
-                }
-            }
-
-            async function stopBot() {
-                try {
-                    botStatusEl.innerText = 'Đang dừng bot...';
-                    const response = await fetch(`${BOT_ENDPOINT}/stop_bot_logic`);
-                    if (!response.ok) throw new Error(`Stop HTTP ${response.status}`);
-                    botStatusEl.innerText = await response.text();
-                } catch (error) {
-                    botStatusEl.innerText = `Lỗi dừng: ${error.message}`;
-                } finally {
-                    setTimeout(() => { fetchBotStatus(); fetchBotStats(); fetchLogs(); }, 1500);
-                }
-            }
-            
-            async function configureBot() {
-                const initialAmount = initialInvestmentAmountInput.value;
-                const overallTP = overallTakeProfitInput.value;
-                const overallSL = overallStopLossInput.value;
-
-                if (!initialAmount || parseFloat(initialAmount) <= 0) {
-                    alert('Vui lòng nhập Vốn Ban Đầu hợp lệ.'); return;
-                }
-                if (parseFloat(overallSL) > 0) {
-                    alert('Cắt lỗ tổng phải là số âm (ví dụ: -50) hoặc 0 để không đặt.'); return;
-                }
-                if (parseFloat(overallTP) < 0) {
-                    alert('Chốt lời tổng phải là số dương hoặc 0 để không đặt.'); return;
-                }
-
-                try {
-                    const payload = {
-                        initialAmount: initialAmount,
-                        overallTakeProfit: parseFloat(overallTP),
-                        overallStopLoss: parseFloat(overallSL)
-                    };
-                    const response = await fetch(`${BOT_ENDPOINT}/api/configure`, {
-                        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
-                    });
-                    if (!response.ok) throw new Error(`Config HTTP ${response.status}`);
-                    const data = await response.json();
-                    alert(data.message);
-                    if(data.success) { fetchBotStatus(); fetchBotStats(); }
-                } catch (error) {
-                    alert(`Lỗi cấu hình: ${error.message}`);
-                }
-            }
-
-            // Gán sự kiện cho các nút
-            startButton.addEventListener('click', startBot);
-            stopButton.addEventListener('click', stopBot);
-            configureButton.addEventListener('click', configureBot);
-
-            // Tải dữ liệu lần đầu và điền form
-            fetchBotStats().then(() => { // Đảm bảo stats được fetch trước khi các hàm khác chạy
-                fetchBotStatus();
-                fetchLogs();
+            gridPositionsData.push({
+                type: 'grid',
+                id: p.id,
+                side: p.side,
+                entry: p.entryPrice?.toFixed(ppG),
+                qty: p.quantity?.toFixed(qpG),
+                curPrice: currentMarketPrice?.toFixed(ppG),
+                pnl: pnlU.toFixed(2),
+                originalAnchor: p.originalAnchorPrice?.toFixed(ppG),
+                step: p.stepIndex,
+                tpId: p.tpOrderId,
+                slId: p.slOrderId
             });
-            
-            // Cập nhật định kỳ
-            setInterval(() => {
-                if(document.visibilityState === 'visible') { // Chỉ fetch khi tab đang hiển thị
-                    fetchBotStatus();
-                    fetchBotStats();
-                    fetchLogs();
-                }
-            }, 5000); // 5 giây một lần
-        });
-    </script>
-</body>
-</html>
+        }
+    }
+    const cDet = TARGET_COIN_SYMBOL ? await getSymbolDetails(TARGET_COIN_SYMBOL) : null;
+    const cPP = cDet ? cDet.pricePrecision : 4;
+    const currentCoinV1 = getCurrentCoinVPS1Data(TARGET_COIN_SYMBOL);
+    const vps1VolDisp = currentCoinV1 ? Math.abs(currentCoinV1.changePercent).toFixed(2) + '%' : 'N/A';
+
+    // Tính toán thời gian chạy bot
+    let uptimeString = "N/A";
+    if (botRunning && botStartTime) {
+        // uptimeString sẽ được tính ở client side từ botStartTime dạng ISO
+    }
+
+
+    res.json({
+        success: true,
+        data: {
+            botRunning: botRunning, // Thêm trạng thái bot đang chạy
+            botStartTime: botStartTime ? formatTimeUTC7(botStartTime) : "N/A", // Gửi thời gian bắt đầu dạng string
+            currentMode: currentBotMode.toUpperCase(),
+            vps1Volatility: vps1VolDisp,
+            totalProfit: totalProfit.toFixed(2), // Đổi tên cho nhất quán
+            totalLoss: totalLoss.toFixed(2),   // Đổi tên cho nhất quán
+            netPNL: netPNL.toFixed(2),       // Đổi tên cho nhất quán
+            currentCoin: TARGET_COIN_SYMBOL || "N/A",
+            initialInvestment: INITIAL_INVESTMENT_AMOUNT, // Đổi tên cho nhất quán
+            killPositions: killPositionsData, // Đổi tên cho nhất quán
+            sidewaysGridInfo: {
+                isActive: sidewaysGrid.isActive,
+                isClearingForKillSwitch: sidewaysGrid.isClearingForKillSwitch,
+                anchorPrice: sidewaysGrid.anchorPrice?.toFixed(cPP),
+                upperLimit: sidewaysGrid.gridUpperLimit?.toFixed(cPP),
+                lowerLimit: sidewaysGrid.gridLowerLimit?.toFixed(cPP),
+                stats: {
+                    tpMatchedCount: sidewaysGrid.sidewaysStats.tpMatchedCount, // Đổi tên cho nhất quán
+                    slMatchedCount: sidewaysGrid.sidewaysStats.slMatchedCount  // Đổi tên cho nhất quán
+                },
+                activePositions: gridPositionsData
+            },
+            vps1DataUrl: VPS1_DATA_URL,
+            currentMarketPrice: currentMarketPrice?.toFixed(cPP)
+            // Bỏ targetOverallTakeProfit và targetOverallStopLoss nếu không dùng nữa
+        }
+    });
+});
