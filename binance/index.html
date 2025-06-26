@@ -248,6 +248,13 @@
             color: var(--neon-pink);
             font-weight: bold;
         }
+         .overall-pnl-display {
+            font-size: 1.1em !important;
+            font-weight: bold;
+            margin-top: 10px !important;
+            border-top: 1px dashed var(--neon-pink);
+            padding-top: 10px !important;
+        }
     </style>
 </head>
 <body>
@@ -289,13 +296,15 @@
                 <div>Thời gian chạy: <strong id="botUptime">N/A</strong></div>
                 <div>Coin Hiện Tại: <strong id="currentCoin">N/A</strong></div>
                 <div>Chế độ: <strong id="currentMode">N/A</strong> (Vol VPS1: <strong id="currentVps1Vol">N/A</strong>)</div>
-                <div>Tổng Lời (coin hiện tại): <strong id="totalProfit" class="neutral">0.00</strong> USDT</div>
-                <div>Tổng Lỗ (coin hiện tại): <strong id="totalLoss" class="neutral">0.00</strong> USDT</div>
-                <div>PNL Ròng (coin hiện tại): <strong id="netPNL" class="neutral">0.00</strong> USDT</div>
+                <div>Tổng Lời (đã chốt - coin hiện tại): <strong id="totalRealizedProfit" class="neutral">0.00</strong> USDT</div>
+                <div>Tổng Lỗ (đã chốt - coin hiện tại): <strong id="totalRealizedLoss" class="neutral">0.00</strong> USDT</div>
+                <div>PNL Ròng (đã chốt - coin hiện tại): <strong id="netRealizedPNL" class="neutral">0.00</strong> USDT</div>
                 <div>Vốn cấu hình: <strong id="currentInvestmentAmount">0.00</strong> USDT</div>
+                <div>Giá thị trường: <strong id="marketPrice">N/A</strong></div>
+                <hr style="border-color: var(--neon-pink); margin: 10px 0;">
                 <div>Mục tiêu TP Tổng (cấu hình): <strong id="configOverallTP" class="neutral">N/A</strong> USDT</div>
                 <div>Mục tiêu SL Tổng (cấu hình): <strong id="configOverallSL" class="neutral">N/A</strong> USDT</div>
-                <div>Giá thị trường: <strong id="marketPrice">N/A</strong></div>
+                <div class="overall-pnl-display">PNL Tổng Hiện Tại (bao gồm cả chưa chốt): <strong id="currentOverallPNL" class="neutral">0.00</strong> USDT</div>
             </div>
 
             <div id="killModeInfo" class="mode-info" style="display:none;">
@@ -336,12 +345,13 @@
             const currentCoinEl = document.getElementById('currentCoin');
             const currentModeEl = document.getElementById('currentMode');
             const currentVps1VolEl = document.getElementById('currentVps1Vol');
-            const totalProfitEl = document.getElementById('totalProfit');
-            const totalLossEl = document.getElementById('totalLoss');
-            const netPNLEl = document.getElementById('netPNL');
+            const totalRealizedProfitEl = document.getElementById('totalRealizedProfit');
+            const totalRealizedLossEl = document.getElementById('totalRealizedLoss');
+            const netRealizedPNLEl = document.getElementById('netRealizedPNL');
             const currentInvestmentAmountEl = document.getElementById('currentInvestmentAmount');
             const configOverallTPEl = document.getElementById('configOverallTP');
             const configOverallSLEl = document.getElementById('configOverallSL');
+            const currentOverallPNLEl = document.getElementById('currentOverallPNL');
             const marketPriceEl = document.getElementById('marketPrice');
 
             const initialInvestmentAmountInput = document.getElementById('initialInvestmentAmount');
@@ -441,18 +451,17 @@
                             currentModeEl.innerText += ' (ĐANG DỌN LƯỚI)';
                         }
 
-                        totalProfitEl.innerText = (parseFloat(backendData.totalProfit) || 0).toFixed(2);
-                        totalProfitEl.className = (parseFloat(backendData.totalProfit) || 0) > 0 ? 'profit' : 'neutral';
-                        totalLossEl.innerText = (parseFloat(backendData.totalLoss) || 0).toFixed(2);
-                        totalLossEl.className = (parseFloat(backendData.totalLoss) || 0) > 0 ? 'loss' : 'neutral';
-                        const netPnlValue = parseFloat(backendData.netPNL) || 0;
-                        netPNLEl.innerText = netPnlValue.toFixed(2);
-                        netPNLEl.className = netPnlValue > 0 ? 'profit' : (netPnlValue < 0 ? 'loss' : 'neutral');
+                        totalRealizedProfitEl.innerText = (parseFloat(backendData.totalProfit) || 0).toFixed(2);
+                        totalRealizedProfitEl.className = (parseFloat(backendData.totalProfit) || 0) > 0 ? 'profit' : 'neutral';
+                        totalRealizedLossEl.innerText = (parseFloat(backendData.totalLoss) || 0).toFixed(2);
+                        totalRealizedLossEl.className = (parseFloat(backendData.totalLoss) || 0) > 0 ? 'loss' : 'neutral';
+                        const netRealizedPnlValue = parseFloat(backendData.netPNL) || 0;
+                        netRealizedPNLEl.innerText = netRealizedPnlValue.toFixed(2);
+                        netRealizedPNLEl.className = netRealizedPnlValue > 0 ? 'profit' : (netRealizedPnlValue < 0 ? 'loss' : 'neutral');
                         
                         const currentInvest = parseFloat(backendData.initialInvestment) || 0;
                         currentInvestmentAmountEl.innerText = currentInvest.toFixed(2);
                         
-                        // Cập nhật input cấu hình
                         if (!backendData.botRunning || initialInvestmentAmountInput.value === "" || document.activeElement !== initialInvestmentAmountInput) {
                              initialInvestmentAmountInput.value = currentInvest.toFixed(2);
                         }
@@ -473,6 +482,10 @@
 
                         marketPriceEl.innerText = backendData.currentMarketPrice || 'N/A';
 
+                        const currentOverallPnlValue = parseFloat(backendData.currentOverallPNL) || 0;
+                        currentOverallPNLEl.innerText = currentOverallPnlValue.toFixed(2);
+                        currentOverallPNLEl.className = currentOverallPnlValue > 0 ? 'profit' : (currentOverallPnlValue < 0 ? 'loss' : 'neutral');
+
                         killModeInfoEl.style.display = 'none';
                         openPositionsKillContainerEl.innerHTML = 'Không có vị thế Kill Mode nào đang mở.';
                         sidewaysModeInfoEl.style.display = 'none';
@@ -492,7 +505,7 @@
                                         <div class="position-details">
                                             <h4>[KILL] ${pos.side} ${currentCoinName}</h4>
                                             <p>KL: ${pos.qty || 'N/A'} (Ban đầu: ${pos.initQty || 'N/A'}) | Giá vào: ${pos.entry || 'N/A'} | Giá hiện tại: ${pos.curPrice || 'N/A'}</p>
-                                            <p>PNL: <strong class="${pnl > 0 ? 'profit' : (pnl < 0 ? 'loss' : 'neutral')}">${pnl.toFixed(2)} USDT</strong></p>
+                                            <p>PNL (chưa chốt): <strong class="${pnl > 0 ? 'profit' : (pnl < 0 ? 'loss' : 'neutral')}">${pnl.toFixed(2)} USDT</strong></p>
                                             <p>Giá vào cặp: ${pos.pairEntry || 'N/A'} | Đã đóng (lỗ): ${pos.closedLossQty || '0'}</p>
                                             <p>Mốc hiện tại: ${pos.mocIdx !== undefined && pos.mocIdx >= 0 ? (pos.mocIdx + 1) : 'N/A'} | PNL Base Mốc: ${pos.pnlBasePercent || '0.00'}%</p>
                                             <p style="font-size:0.75em;">TP ID: ${pos.tpId || 'N/A'} | SL ID: ${pos.slId || 'N/A'}</p>
@@ -521,7 +534,7 @@
                                             <h4>[LƯỚI] ${pos.side} ${currentCoinName} (ID: ${pos.id ? pos.id.toString().slice(-6) : 'N/A'})</h4>
                                             <p>Giá vào: ${pos.entry || 'N/A'} | KL: ${pos.qty || 'N/A'} | Bước: ${pos.step !== undefined ? pos.step : 'N/A'}</p>
                                             <p>Anchor Gốc: ${pos.originalAnchor || 'N/A'} | Giá hiện tại: ${pos.curPrice || 'N/A'}</p>
-                                            <p>PNL: <strong class="${pnl > 0 ? 'profit' : (pnl < 0 ? 'loss' : 'neutral')}">${pnl.toFixed(2)} USDT</strong></p>
+                                            <p>PNL (chưa chốt): <strong class="${pnl > 0 ? 'profit' : (pnl < 0 ? 'loss' : 'neutral')}">${pnl.toFixed(2)} USDT</strong></p>
                                             <p style="font-size:0.75em;">TP ID: ${pos.tpId || 'N/A'} | SL ID: ${pos.slId || 'N/A'}</p>
                                         </div>`;
                                 });
@@ -537,7 +550,7 @@
                     } else {
                         activeCoinDisplayEl.innerText = "LỖI";
                         openPositionsKillContainerEl.innerText = `Lỗi: ${resData.message || 'Không có dữ liệu'}`;
-                        [botRunningStatusEl, botUptimeEl, currentCoinEl, currentModeEl, currentVps1VolEl, totalProfitEl, totalLossEl, netPNLEl, currentInvestmentAmountEl, marketPriceEl, configOverallTPEl, configOverallSLEl].forEach(el => el.innerText = 'N/A');
+                        [botRunningStatusEl, botUptimeEl, currentCoinEl, currentModeEl, currentVps1VolEl, totalRealizedProfitEl, totalRealizedLossEl, netRealizedPNLEl, currentInvestmentAmountEl, marketPriceEl, configOverallTPEl, configOverallSLEl, currentOverallPNLEl].forEach(el => el.innerText = 'N/A');
                         sidewaysModeInfoEl.style.display = 'none';
                         killModeInfoEl.style.display = 'none';
                     }
@@ -638,7 +651,7 @@
                     fetchBotStats(); 
                     fetchLogs(); 
                 }
-            }, 7000); // Tăng khoảng thời gian lên 7 giây
+            }, 7000);
         });
     </script>
 </body>
