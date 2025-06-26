@@ -1,5 +1,7 @@
+Dựa trên log mới nhất bạn cung cấp, chúng ta có thể thấy rõ hai vấn đề:
+
 import https from 'https';
-import http from 'http';
+import http from 'http'; // ĐÃ THÊM
 import crypto from 'crypto';
 import express from 'express';
 import { exec } from 'child_process';
@@ -28,7 +30,7 @@ const WS_BASE_URL = 'wss://fstream.binance.com';
 const WS_USER_DATA_ENDPOINT = '/ws';
 
 const WEB_SERVER_PORT = 9001;
-const THIS_BOT_PM2_NAME = 'test3'; // Thay đổi tên để pm2 nhận diện là bản mới
+const THIS_BOT_PM2_NAME = 'test3';
 const CUSTOM_LOG_FILE = path.join(__dirname, `pm2_${THIS_BOT_PM2_NAME}.log`);
 const LOG_TO_CUSTOM_FILE = true;
 
@@ -94,7 +96,7 @@ async function makeHttpRequest(method, urlString, headers = {}, postData = '') {
     return new Promise((resolve, reject) => {
         const parsedUrl = new URL(urlString);
         const options = { hostname: parsedUrl.hostname, port: parsedUrl.port || (parsedUrl.protocol === 'https:' ? 443 : 80), path: parsedUrl.pathname + parsedUrl.search, method: method, headers: {...headers, 'User-Agent': 'NodeJS-Client/1.0-VPS2-Bot-Fuller-v3'}, timeout: 20000 };
-        const protocol = parsedUrl.protocol === 'https:' ? https : http;
+        const protocol = parsedUrl.protocol === 'https:' ? https : http; // SỬ DỤNG BIẾN http ĐÃ IMPORT
         const req = protocol.request(options, (res) => { let data = ''; res.on('data', (chunk) => data += chunk); res.on('end', () => { if (res.statusCode >= 200 && res.statusCode < 300) resolve(data); else { const errorMsg = `HTTP Lỗi: ${res.statusCode} ${res.statusMessage} khi gọi ${urlString}`; let errorDetails = { code: res.statusCode, msg: errorMsg, url: urlString, responseBody: data.substring(0, 500) }; try { const parsedData = JSON.parse(data); errorDetails = { ...errorDetails, ...parsedData }; } catch (e) {  } reject(errorDetails); }}); });
         req.on('error', (e) => reject({ code: 'NETWORK_ERROR', msg: `${e.message} (khi gọi ${urlString})`, url: urlString }));
         req.on('timeout', () => { req.destroy(); reject({ code: 'TIMEOUT_ERROR', msg: `Request timed out sau ${options.timeout/1000}s (khi gọi ${urlString})`, url: urlString }); });
@@ -164,7 +166,7 @@ async function closePosition(symbol, reason, positionSideToClose) {
     isProcessingTrade = true; addLog(`Đóng ${positionSideToClose} ${symbol} (Lý do: ${reason})...`);
     let errOccurred = null; let success = false;
     try { const positions = await callSignedAPI('/fapi/v2/positionRisk', 'GET', { symbol }); const posOnEx = positions.find(p => p.symbol === symbol && p.positionSide === positionSideToClose && parseFloat(p.positionAmt) !== 0);
-        if (posOnEx) { const qty = Math.abs(parseFloat(posOnEx.positionAmt)); if (qty === 0) success = false; else { const sideOrder = (positionSideToClose === 'LONG')?'SELL':'BUY'; await callSignedAPI('/fapi/v1/order', 'POST', { symbol, side:sideOrder, positionSide:positionSideToClose, type:'MARKET', quantity:qty, newClientOrderId:`CLOSE-${positionSideToClose[0]}-${Date.now()}` }); addLog(`Đã gửi MARKET đóng ${qty} ${positionSideToClose} ${symbol}.`); if (positionSideToClose==='LONG'&¤tLongPosition)currentLongPosition.quantity=0; else if(positionSideToClose==='SHORT'&¤tShortPosition)currentShortPosition.quantity=0; success=true; }}
+        if (posOnEx) { const qty = Math.abs(parseFloat(posOnEx.positionAmt)); if (qty === 0) success = false; else { const sideOrder = (positionSideToClose === 'LONG')?'SELL':'BUY'; await callSignedAPI('/fapi/v1/order', 'POST', { symbol, side:sideOrder, positionSide:positionSideToClose, type:'MARKET', quantity:qty, newClientOrderId:`CLOSE-${positionSideToClose[0]}-${Date.now()}` }); addLog(`Đã gửi MARKET đóng ${qty} ${positionSideToClose} ${symbol}.`); if (positionSideToClose==='LONG'&&currentLongPosition)currentLongPosition.quantity=0; else if(positionSideToClose==='SHORT'&&currentShortPosition)currentShortPosition.quantity=0; success=true; }}
         else { addLog(`Không tìm thấy vị thế ${positionSideToClose} ${symbol}.`); success = false;}
     } catch (err) { errOccurred = err; addLog(`Lỗi đóng ${positionSideToClose} ${symbol}: ${err.msg||err.message}`); if (err instanceof CriticalApiError) await stopBotLogicInternal(); success = false;
     } finally { isProcessingTrade = false; return success; }
@@ -403,7 +405,7 @@ const manageOpenPosition = async () => {
                 if (currentLongPosition) await closePosition(TARGET_COIN_SYMBOL, `Chuyển Sideways (Vol VPS1 giảm)`, "LONG");
                 if (currentShortPosition) await closePosition(TARGET_COIN_SYMBOL, `Chuyển Sideways (Vol VPS1 giảm)`, "SHORT");
                 currentLongPosition = null; currentShortPosition = null; await cancelAllOpenOrdersForSymbol(TARGET_COIN_SYMBOL);
-                sidewaysGrid.isActive = true; // Kích hoạt lưới
+                sidewaysGrid.isActive = true;
                 if (positionCheckInterval) { clearInterval(positionCheckInterval); positionCheckInterval = null; }
                 scheduleNextMainCycle(1000); return;
             }
