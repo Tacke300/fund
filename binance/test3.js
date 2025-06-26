@@ -1,4 +1,3 @@
-Dựa trên log mới nhất bạn cung cấp, chúng ta có thể thấy rõ hai vấn đề:
 
 import https from 'https';
 import http from 'http'; // ĐÃ THÊM
