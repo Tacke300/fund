@@ -1,3 +1,4 @@
+
 import https from 'https';
 import http from 'http';
 import crypto from 'crypto';
@@ -164,7 +165,7 @@ async function closePosition(symbol, reason, positionSideToClose) {
     isProcessingTrade = true; addLog(`Đóng ${positionSideToClose} ${symbol} (Lý do: ${reason})...`);
     let errOccurred = null; let success = false;
     try { const positions = await callSignedAPI('/fapi/v2/positionRisk', 'GET', { symbol }); const posOnEx = positions.find(p => p.symbol === symbol && p.positionSide === positionSideToClose && parseFloat(p.positionAmt) !== 0);
-        if (posOnEx) { const qty = Math.abs(parseFloat(posOnEx.positionAmt)); if (qty === 0) success = false; else { const sideOrder = (positionSideToClose === 'LONG')?'SELL':'BUY'; await callSignedAPI('/fapi/v1/order', 'POST', { symbol, side:sideOrder, positionSide:positionSideToClose, type:'MARKET', quantity:qty, newClientOrderId:`CLOSE-${positionSideToClose[0]}-${Date.now()}` }); addLog(`Đã gửi MARKET đóng ${qty} ${positionSideToClose} ${symbol}.`); if (positionSideToClose==='LONG'&¤tLongPosition)currentLongPosition.quantity=0; else if(positionSideToClose==='SHORT'&¤tShortPosition)currentShortPosition.quantity=0; success=true; }}
+        if (posOnEx) { const qty = Math.abs(parseFloat(posOnEx.positionAmt)); if (qty === 0) success = false; else { const sideOrder = (positionSideToClose === 'LONG')?'SELL':'BUY'; await callSignedAPI('/fapi/v1/order', 'POST', { symbol, side:sideOrder, positionSide:positionSideToClose, type:'MARKET', quantity:qty, newClientOrderId:`CLOSE-${positionSideToClose[0]}-${Date.now()}` }); addLog(`Đã gửi MARKET đóng ${qty} ${positionSideToClose} ${symbol}.`); if (positionSideToClose==='LONG'&&currentLongPosition)currentLongPosition.quantity=0; else if(positionSideToClose==='SHORT'&&currentShortPosition)currentShortPosition.quantity=0; success=true; }}
         else { addLog(`Không tìm thấy vị thế ${positionSideToClose} ${symbol}.`); success = false;}
     } catch (err) { errOccurred = err; addLog(`Lỗi đóng ${positionSideToClose} ${symbol}: ${err.msg||err.message}`); if (err instanceof CriticalApiError) await stopBotLogicInternal(); success = false;
     } finally { isProcessingTrade = false; return success; }
@@ -719,6 +720,7 @@ function setupMarketDataStream(symbol) {
 const app = express(); app.use(express.json());
 app.get('/', (req, res) => { const indexPath = path.join(__dirname, 'index.html'); if (fs.existsSync(indexPath)) res.sendFile(indexPath); else res.status(404).send("<h1>Bot Control Panel</h1><p>File index.html không tìm thấy trong thư mục gốc của bot.</p>"); });
 app.get('/api/logs', (req, res) => { fs.readFile(CUSTOM_LOG_FILE, 'utf8', (err, data) => { if (err) {addLog(`Lỗi đọc log: ${err.message}`); return res.status(500).send('Lỗi đọc log.');} const cleanData = data.replace(/[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g, ''); res.type('text/plain').send(cleanData.split('\n').slice(-500).join('\n')); }); });
+
 app.get('/api/status', async (req, res) => {
     let pm2Status = "PM2 không lấy được.";
     try {
@@ -741,18 +743,42 @@ app.get('/api/status', async (req, res) => {
         posText=" | Kill: ";
         if(currentLongPosition){const pnlL=currentLongPosition.unrealizedPnl||0;posText+=`L(KL:${currentLongPosition.quantity.toFixed(currentLongPosition.quantityPrecision||2)} PNL:${pnlL.toFixed(1)} PNLb:${(currentLongPosition.pnlBaseForNextMoc||0).toFixed(0)}% M${(currentLongPosition.nextPartialCloseLossIndex||0)+1}) `;}
         if(currentShortPosition){const pnlS=currentShortPosition.unrealizedPnl||0;posText+=`S(KL:${currentShortPosition.quantity.toFixed(currentShortPosition.quantityPrecision||2)} PNL:${pnlS.toFixed(1)} PNLb:${(currentShortPosition.pnlBaseForNextMoc||0).toFixed(0)}% M${(currentShortPosition.nextPartialCloseLossIndex||0)+1})`;}
-    } else if(currentBotMode==='sideways'&&sidewaysGrid.isActive){
-        const det=TARGET_COIN_SYMBOL?await getSymbolDetails(TARGET_COIN_SYMBOL):null;
-        const pp=det?det.pricePrecision:4;
-        posText=` | Lưới: ${sidewaysGrid.activeGridPositions.length} lệnh. Anchor: ${sidewaysGrid.anchorPrice?.toFixed(pp)}. SLs: ${sidewaysGrid.sidewaysStats.slMatchedCount}, TPs: ${sidewaysGrid.sidewaysStats.tpMatchedCount}`;
-    } else posText=" | Vị thế: --";
+    } else if (currentBotMode === 'sideways' && sidewaysGrid.isActive) { // SỬA LỖI: Thêm {} cho khối else if này
+        const det = TARGET_COIN_SYMBOL ? await getSymbolDetails(TARGET_COIN_SYMBOL) : null;
+        const pp = det ? det.pricePrecision : 4;
+        posText = ` | Lưới: ${sidewaysGrid.activeGridPositions.length} lệnh. Anchor: ${sidewaysGrid.anchorPrice?.toFixed(pp)}. SLs: ${sidewaysGrid.sidewaysStats.slMatchedCount}, TPs: ${sidewaysGrid.sidewaysStats.tpMatchedCount}`;
+    } else { // SỬA LỖI: Đảm bảo 'else' này đi liền với 'if' hoặc 'else if' có khối lệnh đúng
+        posText = " | Vị thế: --";
+    }
     statusMsg+=posText;
     statusMsg+=` | PNL Ròng (${TARGET_COIN_SYMBOL||'N/A'}): ${netPNL.toFixed(2)} (L:${totalProfit.toFixed(2)}, T:${totalLoss.toFixed(2)})`;
     res.type('text/plain').send(statusMsg);
 });
+
 app.get('/api/bot_stats', async (req, res) => {
-    let killPosD = []; if(currentBotMode==='kill'){for(const p of [currentLongPosition,currentShortPosition]){if(p){const d=await getSymbolDetails(p.symbol);const pp=d?d.pricePrecision:2;const qp=d?d.quantityPrecision:3;const pnl=p.unrealizedPnl||0;killPosD.push({type:'kill',side:p.side,entry:p.entryPrice?.toFixed(pp),qty:p.quantity?.toFixed(qp),pnl:pnl.toFixed(2),curPrice:p.currentPrice?.toFixed(pp),initQty:p.initialQuantity?.toFixed(qp),closedLossQty:p.closedLossAmount?.toFixed(qp),pairEntry:p.pairEntryPrice?.toFixed(pp),mocIdx:(p.nextPartialCloseLossIndex||0)+1,pnlBasePercent:(p.pnlBaseForNextMoc||0).toFixed(2),tpId:p.currentTPId,slId:p.currentSLId});}}}
-    let gridPosD = []; if(sidewaysGrid.isActive&&sidewaysGrid.activeGridPositions.length>0){for(const p of sidewaysGrid.activeGridPositions){const d=await getSymbolDetails(p.symbol);const ppG=d?d.pricePrecision:4;const qpG=d?d.quantityPrecision:4;let pnlU=0;if(currentMarketPrice&&p.entryPrice&&p.quantity)pnlU=(currentMarketPrice-p.entryPrice)*p.quantity*(p.side==='LONG'?1:-1);gridPosD.push({type:'grid',id:p.id,side:p.side,entry:p.entryPrice?.toFixed(ppG),qty:p.quantity?.toFixed(qpG),curPrice:currentMarketPrice?.toFixed(ppG),pnl:pnlU.toFixed(2),originalAnchor:p.originalAnchorPrice?.toFixed(ppG),step:p.stepIndex,tpId:p.tpOrderId,slId:p.slOrderId});}}
+    let killPosD = [];
+    if (currentBotMode === 'kill') {
+        for (const p of [currentLongPosition, currentShortPosition]) {
+            if (p) {
+                const d = await getSymbolDetails(p.symbol);
+                const pp = d ? d.pricePrecision : 2;
+                const qp = d ? d.quantityPrecision : 3;
+                const pnl = p.unrealizedPnl || 0;
+                killPosD.push({ type: 'kill', side: p.side, entry: p.entryPrice?.toFixed(pp), qty: p.quantity?.toFixed(qp), pnl: pnl.toFixed(2), curPrice: p.currentPrice?.toFixed(pp), initQty: p.initialQuantity?.toFixed(qp), closedLossQty: p.closedLossAmount?.toFixed(qp), pairEntry: p.pairEntryPrice?.toFixed(pp), mocIdx: (p.nextPartialCloseLossIndex || 0) + 1, pnlBasePercent: (p.pnlBaseForNextMoc || 0).toFixed(2), tpId: p.currentTPId, slId: p.currentSLId });
+            }
+        }
+    }
+    let gridPosD = [];
+    if (sidewaysGrid.isActive && sidewaysGrid.activeGridPositions.length > 0) {
+        for (const p of sidewaysGrid.activeGridPositions) {
+            const d = await getSymbolDetails(p.symbol);
+            const ppG = d ? d.pricePrecision : 4;
+            const qpG = d ? d.quantityPrecision : 4;
+            let pnlU = 0;
+            if (currentMarketPrice && p.entryPrice && p.quantity) pnlU = (currentMarketPrice - p.entryPrice) * p.quantity * (p.side === 'LONG' ? 1 : -1);
+            gridPosD.push({ type: 'grid', id: p.id, side: p.side, entry: p.entryPrice?.toFixed(ppG), qty: p.quantity?.toFixed(qpG), curPrice: currentMarketPrice?.toFixed(ppG), pnl: pnlU.toFixed(2), originalAnchor: p.originalAnchorPrice?.toFixed(ppG), step: p.stepIndex, tpId: p.tpOrderId, slId: p.slOrderId });
+        }
+    }
     const cDet=TARGET_COIN_SYMBOL?await getSymbolDetails(TARGET_COIN_SYMBOL):null;const cPP=cDet?cDet.pricePrecision:4;
     const currentCoinV1 = getCurrentCoinVPS1Data(TARGET_COIN_SYMBOL); const vps1VolDisp = currentCoinV1 ? Math.abs(currentCoinV1.changePercent).toFixed(2) + '%' : 'N/A';
     res.json({success:true,data:{botRunning,currentMode:currentBotMode.toUpperCase(),vps1Volatility:vps1VolDisp,totalProfit:totalProfit.toFixed(2),totalLoss:totalLoss.toFixed(2),netPNL:netPNL.toFixed(2),currentCoin:TARGET_COIN_SYMBOL||"N/A",initialInvestment:INITIAL_INVESTMENT_AMOUNT,killPositions:killPosD,sidewaysGridInfo:{isActive:sidewaysGrid.isActive,isClearingForKillSwitch:sidewaysGrid.isClearingForKillSwitch,anchorPrice:sidewaysGrid.anchorPrice?.toFixed(cPP),upperLimit:sidewaysGrid.gridUpperLimit?.toFixed(cPP),lowerLimit:sidewaysGrid.gridLowerLimit?.toFixed(cPP),stats:{tpCount:sidewaysGrid.sidewaysStats.tpMatchedCount,slCount:sidewaysGrid.sidewaysStats.slMatchedCount},activePositions:gridPosD},vps1DataUrl:VPS1_DATA_URL,botStartTime:botStartTime?formatTimeUTC7(botStartTime):"N/A",currentMarketPrice:currentMarketPrice?.toFixed(cPP)}});
