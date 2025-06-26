@@ -268,11 +268,11 @@
                 <input type="number" id="initialInvestmentAmount" value="0.12" step="0.01">
             </div>
             <div class="input-group">
-                <label for="overallTakeProfit">Chốt lời tổng (USDT, 0 = không đặt):</label>
+                <label for="overallTakeProfit">Chốt lời tổng BOT (USDT, 0 = không đặt):</label>
                 <input type="number" id="overallTakeProfit" value="0" step="1">
             </div>
             <div class="input-group">
-                <label for="overallStopLoss">Cắt lỗ tổng (USDT, nhập số âm, 0 = không đặt):</label>
+                <label for="overallStopLoss">Cắt lỗ tổng BOT (USDT, nhập số âm, 0 = không đặt):</label>
                 <input type="number" id="overallStopLoss" value="0" step="-1">
             </div>
             <div class="button-group">
@@ -302,9 +302,10 @@
                 <div>Vốn cấu hình: <strong id="currentInvestmentAmount">0.00</strong> USDT</div>
                 <div>Giá thị trường: <strong id="marketPrice">N/A</strong></div>
                 <hr style="border-color: var(--neon-pink); margin: 10px 0;">
-                <div>Mục tiêu TP Tổng (cấu hình): <strong id="configOverallTP" class="neutral">N/A</strong> USDT</div>
-                <div>Mục tiêu SL Tổng (cấu hình): <strong id="configOverallSL" class="neutral">N/A</strong> USDT</div>
-                <div class="overall-pnl-display">PNL Tổng Hiện Tại (bao gồm cả chưa chốt): <strong id="currentOverallPNL" class="neutral">0.00</strong> USDT</div>
+                <div>Mục tiêu TP Tổng BOT (cấu hình): <strong id="configOverallTP" class="neutral">N/A</strong> USDT</div>
+                <div>Mục tiêu SL Tổng BOT (cấu hình): <strong id="configOverallSL" class="neutral">N/A</strong> USDT</div>
+                <div class="overall-pnl-display">PNL Tổng Chu Kỳ Hiện Tại (bao gồm cả chưa chốt): <strong id="currentOverallPNL" class="neutral">0.00</strong> USDT</div>
+                <div class="overall-pnl-display" style="border-top: 1px dotted var(--neon-purple); padding-top: 10px !important; margin-top: 10px !important;">PNL Tổng Cộng Dồn (từ khi bot chạy): <strong id="trueOverallPnlSinceStartDisplay" class="neutral">0.00</strong> USDT</div>
             </div>
 
             <div id="killModeInfo" class="mode-info" style="display:none;">
@@ -352,6 +353,7 @@
             const configOverallTPEl = document.getElementById('configOverallTP');
             const configOverallSLEl = document.getElementById('configOverallSL');
             const currentOverallPNLEl = document.getElementById('currentOverallPNL');
+            const trueOverallPnlSinceStartDisplayEl = document.getElementById('trueOverallPnlSinceStartDisplay');
             const marketPriceEl = document.getElementById('marketPrice');
 
             const initialInvestmentAmountInput = document.getElementById('initialInvestmentAmount');
@@ -378,7 +380,7 @@
             const stopButton = document.getElementById('stopButton');
             const configureButton = document.getElementById('configureButton');
 
-            let lastBotStatsData = null; 
+            let lastBotStatsData = null;
 
             function parseAndCreateDate(dateTimeString) {
                 if (!dateTimeString || dateTimeString === "N/A") return null;
@@ -394,7 +396,7 @@
                 if (!startTimeStr || startTimeStr === "N/A") return "N/A";
                 const startDate = parseAndCreateDate(startTimeStr);
                 if (!startDate) return "N/A";
-                
+
                 const now = new Date();
                 let diffMs = now.getTime() - startDate.getTime();
                 if (diffMs < 0) diffMs = 0;
@@ -434,20 +436,20 @@
 
                     if (resData.success && resData.data) {
                         const backendData = resData.data;
-                        lastBotStatsData = backendData; 
+                        lastBotStatsData = backendData;
 
                         const currentCoinName = backendData.currentCoin || "CHƯA CHỌN";
-                        activeCoinDisplayEl.innerText = currentCoinName; 
+                        activeCoinDisplayEl.innerText = currentCoinName;
 
                         botRunningStatusEl.innerText = backendData.botRunning ? 'ĐANG CHẠY' : 'ĐÃ DỪNG';
                         botRunningStatusEl.className = backendData.botRunning ? 'profit' : 'loss';
-                        
+
                         botUptimeEl.innerText = backendData.botRunning ? formatUptime(backendData.botStartTime) : "N/A";
 
                         currentCoinEl.innerText = currentCoinName;
                         currentModeEl.innerText = backendData.currentMode || 'N/A';
                         currentVps1VolEl.innerText = backendData.vps1Volatility || 'N/A';
-                        if (backendData.sidewaysGridInfo && backendData.sidewaysGridInfo.isClearingForKillSwitch) {
+                        if (backendData.sidewaysGridInfo && backendData.sidewaysGridInfo.isClearingForSwitch) {
                             currentModeEl.innerText += ' (ĐANG DỌN LƯỚI)';
                         }
 
@@ -458,10 +460,10 @@
                         const netRealizedPnlValue = parseFloat(backendData.netPNL) || 0;
                         netRealizedPNLEl.innerText = netRealizedPnlValue.toFixed(2);
                         netRealizedPNLEl.className = netRealizedPnlValue > 0 ? 'profit' : (netRealizedPnlValue < 0 ? 'loss' : 'neutral');
-                        
+
                         const currentInvest = parseFloat(backendData.initialInvestment) || 0;
                         currentInvestmentAmountEl.innerText = currentInvest.toFixed(2);
-                        
+
                         if (!backendData.botRunning || initialInvestmentAmountInput.value === "" || document.activeElement !== initialInvestmentAmountInput) {
                              initialInvestmentAmountInput.value = currentInvest.toFixed(2);
                         }
@@ -472,7 +474,7 @@
                         configOverallTPEl.className = backendOverallTP > 0 ? 'profit' : 'neutral';
                         configOverallSLEl.innerText = backendOverallSL < 0 ? backendOverallSL.toFixed(2) : "Không đặt";
                         configOverallSLEl.className = backendOverallSL < 0 ? 'loss' : 'neutral';
-                        
+
                         if (!backendData.botRunning || overallTakeProfitInput.value === "" || document.activeElement !== overallTakeProfitInput) {
                              overallTakeProfitInput.value = backendOverallTP;
                         }
@@ -482,9 +484,14 @@
 
                         marketPriceEl.innerText = backendData.currentMarketPrice || 'N/A';
 
-                        const currentOverallPnlValue = parseFloat(backendData.currentOverallPNL) || 0;
-                        currentOverallPNLEl.innerText = currentOverallPnlValue.toFixed(2);
-                        currentOverallPNLEl.className = currentOverallPnlValue > 0 ? 'profit' : (currentOverallPnlValue < 0 ? 'loss' : 'neutral');
+                        const currentCycleOverallPnlValue = parseFloat(backendData.currentCycleOverallPNL) || 0;
+                        currentOverallPNLEl.innerText = currentCycleOverallPnlValue.toFixed(2);
+                        currentOverallPNLEl.className = currentCycleOverallPnlValue > 0 ? 'profit' : (currentCycleOverallPnlValue < 0 ? 'loss' : 'neutral');
+
+                        const trueOverallPnlSinceStartValue = parseFloat(backendData.trueOverallPnlSinceStart) || 0;
+                        trueOverallPnlSinceStartDisplayEl.innerText = trueOverallPnlSinceStartValue.toFixed(2);
+                        trueOverallPnlSinceStartDisplayEl.className = trueOverallPnlSinceStartValue > 0 ? 'profit' : (trueOverallPnlSinceStartValue < 0 ? 'loss' : 'neutral');
+
 
                         killModeInfoEl.style.display = 'none';
                         openPositionsKillContainerEl.innerHTML = 'Không có vị thế Kill Mode nào đang mở.';
@@ -550,7 +557,7 @@
                     } else {
                         activeCoinDisplayEl.innerText = "LỖI";
                         openPositionsKillContainerEl.innerText = `Lỗi: ${resData.message || 'Không có dữ liệu'}`;
-                        [botRunningStatusEl, botUptimeEl, currentCoinEl, currentModeEl, currentVps1VolEl, totalRealizedProfitEl, totalRealizedLossEl, netRealizedPNLEl, currentInvestmentAmountEl, marketPriceEl, configOverallTPEl, configOverallSLEl, currentOverallPNLEl].forEach(el => el.innerText = 'N/A');
+                        [botRunningStatusEl, botUptimeEl, currentCoinEl, currentModeEl, currentVps1VolEl, totalRealizedProfitEl, totalRealizedLossEl, netRealizedPNLEl, currentInvestmentAmountEl, marketPriceEl, configOverallTPEl, configOverallSLEl, currentOverallPNLEl, trueOverallPnlSinceStartDisplayEl].forEach(el => el.innerText = 'N/A');
                         sidewaysModeInfoEl.style.display = 'none';
                         killModeInfoEl.style.display = 'none';
                     }
@@ -568,7 +575,7 @@
                     const response = await fetch(`${BOT_ENDPOINT}/api/logs`);
                     if (!response.ok) throw new Error(`Logs HTTP ${response.status}`);
                     const text = await response.text();
-                    if (logOutputEl.innerText !== text) { 
+                    if (logOutputEl.innerText !== text) {
                         logOutputEl.innerText = text;
                         logOutputEl.scrollTop = logOutputEl.scrollHeight;
                     }
@@ -602,12 +609,12 @@
                     setTimeout(() => { fetchBotStatus(); fetchBotStats(); fetchLogs(); }, 1500);
                 }
             }
-            
+
             async function configureBot() {
                 const initialAmount = initialInvestmentAmountInput.value;
                 const overallTP = overallTakeProfitInput.value;
                 const overallSL = overallStopLossInput.value;
-                
+
                 if (!initialAmount || parseFloat(initialAmount) <= 0) {
                     alert('Vui lòng nhập Vốn Ban Đầu hợp lệ.'); return;
                 }
@@ -617,12 +624,12 @@
                 if (parseFloat(overallTP) < 0) {
                     alert('Chốt lời tổng phải là số dương hoặc 0 để không đặt.'); return;
                 }
-                
+
                 try {
                     const payload = {
                         initialAmount: initialAmount,
-                        overallTakeProfit: parseFloat(overallTP), 
-                        overallStopLoss: parseFloat(overallSL) 
+                        overallTakeProfit: parseFloat(overallTP),
+                        overallStopLoss: parseFloat(overallSL)
                     };
                     const response = await fetch(`${BOT_ENDPOINT}/api/configure`, {
                         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
@@ -640,16 +647,16 @@
             stopButton.addEventListener('click', stopBot);
             configureButton.addEventListener('click', configureBot);
 
-            fetchBotStats().then(() => { 
+            fetchBotStats().then(() => {
                 fetchBotStatus();
                 fetchLogs();
             });
-            
+
             setInterval(() => {
-                if(document.visibilityState === 'visible') { 
-                    fetchBotStatus(); 
-                    fetchBotStats(); 
-                    fetchLogs(); 
+                if(document.visibilityState === 'visible') {
+                    fetchBotStatus();
+                    fetchBotStats();
+                    fetchLogs();
                 }
             }, 7000);
         });
