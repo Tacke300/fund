@@ -223,7 +223,7 @@ function calculateAndRank() {
         // Cần ít nhất WINDOW_MINUTES - 5 nến để có thể tính toán đáng tin cậy
         if (data.prices && data.prices.length >= (WINDOW_MINUTES - 5) && data.priceXMinAgo && data.currentPrice && data.priceXMinAgo > 0) {
             const change = ((data.currentPrice - data.priceXMinAgo) / data.priceXMinAgo) * 100;
-            
+
             const coinEntryForApi = {
                 symbol: data.symbol,
                 changePercent: parseFloat(change.toFixed(2)),
@@ -338,7 +338,7 @@ async function main() {
         }
         res.status(200).json(responsePayload);
     });
-    
+
     http.createServer(app).listen(port, '0.0.0.0', () => {
         logVps1(`Server (HTTP) is running on port ${port}`);
         logVps1(`JSON data served at: http://<YOUR_VPS1_IP>:${port}/`);
