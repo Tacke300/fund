@@ -1,6 +1,5 @@
-// File: bot_client.js (VPS2)
-
 import https from 'https';
+import http from 'http';
 import crypto from 'crypto';
 import express from 'express';
 import { exec } from 'child_process';
