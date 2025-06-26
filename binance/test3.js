@@ -15,7 +15,7 @@ import { API_KEY, SECRET_KEY } from './config.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const VPS1_DATA_URL = 'http://YOUR_VPS1_IP:PORT/'; // <<<<----- CẬP NHẬT ĐỊA CHỈ VPS1 CHO ĐÚNG!
+const VPS1_DATA_URL = 'http://YOUR_VPS1_IP:PORT/'; // <<<<----- CẬP NHẬT ĐỊA CHỈ VPS1!
 const MIN_CANDLES_FOR_SELECTION = 55;
 const VOLATILITY_SWITCH_THRESHOLD_PERCENT = 5.0;
 const MIN_VOLATILITY_DIFFERENCE_TO_SWITCH = 3.0;
@@ -28,8 +28,8 @@ const BASE_HOST = 'fapi.binance.com';
 const WS_BASE_URL = 'wss://fstream.binance.com';
 const WS_USER_DATA_ENDPOINT = '/ws';
 
-const WEB_SERVER_PORT = 1111;
-const THIS_BOT_PM2_NAME = 'test_vps2_bot_final_v3';
+const WEB_SERVER_PORT = 9001;
+const THIS_BOT_PM2_NAME = 'test3'; // Thay đổi tên để pm2 nhận diện là bản mới
 const CUSTOM_LOG_FILE = path.join(__dirname, `pm2_${THIS_BOT_PM2_NAME}.log`);
 const LOG_TO_CUSTOM_FILE = true;
 
@@ -94,7 +94,7 @@ function createSignature(queryString, apiSecret) { return crypto.createHmac('sha
 async function makeHttpRequest(method, urlString, headers = {}, postData = '') {
     return new Promise((resolve, reject) => {
         const parsedUrl = new URL(urlString);
-        const options = { hostname: parsedUrl.hostname, port: parsedUrl.port || (parsedUrl.protocol === 'https:' ? 443 : 80), path: parsedUrl.pathname + parsedUrl.search, method: method, headers: {...headers, 'User-Agent': 'NodeJS-Client/1.0-VPS2-Bot-Fuller-v2'}, timeout: 20000 };
+        const options = { hostname: parsedUrl.hostname, port: parsedUrl.port || (parsedUrl.protocol === 'https:' ? 443 : 80), path: parsedUrl.pathname + parsedUrl.search, method: method, headers: {...headers, 'User-Agent': 'NodeJS-Client/1.0-VPS2-Bot-Fuller-v3'}, timeout: 20000 };
         const protocol = parsedUrl.protocol === 'https:' ? https : http;
         const req = protocol.request(options, (res) => { let data = ''; res.on('data', (chunk) => data += chunk); res.on('end', () => { if (res.statusCode >= 200 && res.statusCode < 300) resolve(data); else { const errorMsg = `HTTP Lỗi: ${res.statusCode} ${res.statusMessage} khi gọi ${urlString}`; let errorDetails = { code: res.statusCode, msg: errorMsg, url: urlString, responseBody: data.substring(0, 500) }; try { const parsedData = JSON.parse(data); errorDetails = { ...errorDetails, ...parsedData }; } catch (e) {  } reject(errorDetails); }}); });
         req.on('error', (e) => reject({ code: 'NETWORK_ERROR', msg: `${e.message} (khi gọi ${urlString})`, url: urlString }));
@@ -404,7 +404,7 @@ const manageOpenPosition = async () => {
                 if (currentLongPosition) await closePosition(TARGET_COIN_SYMBOL, `Chuyển Sideways (Vol VPS1 giảm)`, "LONG");
                 if (currentShortPosition) await closePosition(TARGET_COIN_SYMBOL, `Chuyển Sideways (Vol VPS1 giảm)`, "SHORT");
                 currentLongPosition = null; currentShortPosition = null; await cancelAllOpenOrdersForSymbol(TARGET_COIN_SYMBOL);
-                sidewaysGrid.isActive = false;
+                sidewaysGrid.isActive = true; // Kích hoạt lưới
                 if (positionCheckInterval) { clearInterval(positionCheckInterval); positionCheckInterval = null; }
                 scheduleNextMainCycle(1000); return;
             }
