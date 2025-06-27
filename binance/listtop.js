@@ -9,7 +9,7 @@ import { API_KEY, SECRET_KEY } from './config.js';
 const app = express();
 const port = 9000;
 
-const BINANCE_FAPI_BASE_URL = 'https://fapi.binance.com';
+const BINANCE_FAPI_BASE_URL = 'fapi.binance.com';
 const BINANCE_WS_URL = 'wss://fstream.binance.com/stream?streams=';
 
 const WINDOW_MINUTES = 60;
@@ -87,7 +87,6 @@ async function callSignedAPI(fullEndpointPath, method = 'GET', params = {}) {
     const signature = createSignature(queryString, SECRET_KEY);
     const fullUrlToCall = `https://${BINANCE_FAPI_BASE_URL}${fullEndpointPath}?${queryString}&signature=${signature}`;
     const headers = { 'X-MBX-APIKEY': API_KEY };
-
     return makeHttpRequest(method, fullUrlToCall, headers);
 }
 
@@ -349,7 +348,7 @@ async function main() {
     try {
         await syncServerTime();
     } catch(e) {
-        logVps1("CRITICAL: Could not sync time with Binance. Exiting.");
+        logVps1(`CRITICAL: Could not sync time with Binance. Exiting. Error: ${e.message}`);
         process.exit(1);
     }
     
