@@ -70,31 +70,58 @@ function httpsGetJson(urlString) {
     });
 }
 
+// <<< THAY ĐỔI: Hàm này được sửa lại hoàn toàn để lọc symbol theo đòn bẩy
 async function getAllFuturesSymbols(retryCount = 0) {
     const maxRetries = 5;
     const retryDelay = 7000; // 7 giây
     try {
-        logVps1(`Attempting to get symbols from Binance (attempt ${retryCount + 1}/${maxRetries + 1})...`);
-        const data = await httpsGetJson(`${BINANCE_FAPI_BASE_URL}/fapi/v1/exchangeInfo`);
-        if (!data || !data.symbols || !Array.isArray(data.symbols)) {
+        logVps1(`Attempting to get symbols and leverage data from Binance (attempt ${retryCount + 1}/${maxRetries + 1})...`);
+
+        // <<< THAY ĐỔI: Gọi đồng thời 2 API để lấy thông tin symbol và thông tin đòn bẩy
+        const [exchangeInfo, leverageBrackets] = await Promise.all([
+            httpsGetJson(`${BINANCE_FAPI_BASE_URL}/fapi/v1/exchangeInfo`),
+            httpsGetJson(`${BINANCE_FAPI_BASE_URL}/fapi/v1/leverageBracket`)
+        ]);
+
+        if (!exchangeInfo || !exchangeInfo.symbols || !Array.isArray(exchangeInfo.symbols)) {
             throw new Error("Invalid exchangeInfo data or missing/invalid symbols array.");
         }
-        const symbols = data.symbols
-            .filter(s => s.contractType === 'PERPETUAL' && s.quoteAsset === 'USDT' && s.status === 'TRADING')
+        if (!leverageBrackets || !Array.isArray(leverageBrackets)) {
+            throw new Error("Invalid leverageBracket data from Binance.");
+        }
+
+        // <<< THAY ĐỔI: Tạo một map để tra cứu đòn bẩy tối đa một cách hiệu quả
+        const leverageMap = {};
+        leverageBrackets.forEach(item => {
+            // Đòn bẩy tối đa (initialLeverage) nằm trong bracket đầu tiên
+            if (item.brackets && item.brackets.length > 0) {
+                leverageMap[item.symbol] = item.brackets[0].initialLeverage;
+            }
+        });
+
+        // <<< THAY ĐỔI: Lọc symbol với điều kiện mới: đòn bẩy > 50
+        const symbols = exchangeInfo.symbols
+            .filter(s =>
+                s.contractType === 'PERPETUAL' &&
+                s.quoteAsset === 'USDT' &&
+                s.status === 'TRADING' &&
+                (leverageMap[s.symbol] > 50) // Điều kiện lọc mới
+            )
             .map(s => s.symbol);
-        logVps1(`Successfully fetched ${symbols.length} USDT-M Futures symbols.`);
+
+        logVps1(`Successfully fetched and filtered. Found ${symbols.length} USDT-M Futures symbols with max leverage > 50x.`);
         vps1DataStatus = "running_symbols_fetched";
         return symbols;
     } catch (error) {
-        logVps1(`Error fetching symbols (attempt ${retryCount + 1}): ${error.message}`);
+        logVps1(`Error fetching symbols/leverage (attempt ${retryCount + 1}): ${error.message}`);
         if (retryCount < maxRetries) {
-            logVps1(`Retrying to fetch symbols in ${retryDelay / 1000} seconds...`);
+            logVps1(`Retrying to fetch symbols/leverage in ${retryDelay / 1000} seconds...`);
             await new Promise(resolve => setTimeout(resolve, retryDelay));
             return getAllFuturesSymbols(retryCount + 1);
         } else {
-            logVps1(`Failed to fetch symbols after ${maxRetries + 1} attempts. API will serve error state.`);
+            logVps1(`Failed to fetch symbols/leverage after ${maxRetries + 1} attempts. API will serve error state.`);
             vps1DataStatus = "error_binance_symbols";
-            topRankedCoinsForApi = [{ error_message: "VPS1: Could not fetch symbols from Binance after multiple retries." }];
+            topRankedCoinsForApi = [{ error_message: "VPS1: Could not fetch symbols/leverage from Binance after multiple retries." }];
             return [];
         }
     }
@@ -251,7 +278,7 @@ function calculateAndRank() {
 
 async function periodicallyUpdateSymbolList() {
     logVps1("Periodically checking and updating symbol list...");
-    const newSymbols = await getAllFuturesSymbols();
+    const newSymbols = await getAllFuturesSymbols(); // Hàm này đã được sửa để lọc theo đòn bẩy
 
     if (vps1DataStatus === "error_binance_symbols") {
         logVps1("Failed to fetch new symbols in periodic update, API remains in error state for symbols.");
@@ -267,13 +294,13 @@ async function periodicallyUpdateSymbolList() {
 
     let listChanged = false;
     if (addedSymbols.length > 0) {
-        logVps1(`Detected ${addedSymbols.length} new symbols: ${addedSymbols.join(', ')}. Fetching their initial data.`);
+        logVps1(`Detected ${addedSymbols.length} new symbols (leverage > 50x): ${addedSymbols.join(', ')}. Fetching their initial data.`);
         allSymbols.push(...addedSymbols); // Thêm vào danh sách tổng trước
         await fetchInitialHistoricalData(addedSymbols); // Fetch dữ liệu cho coin mới
         listChanged = true;
     }
     if (removedSymbols.length > 0) {
-         logVps1(`Detected ${removedSymbols.length} removed symbols: ${removedSymbols.join(', ')}. Removing their data.`);
+         logVps1(`Detected ${removedSymbols.length} removed symbols (no longer trading or leverage changed): ${removedSymbols.join(', ')}. Removing their data.`);
          removedSymbols.forEach(s => {
              delete coinData[s];
              allSymbols = allSymbols.filter(sym => sym !== s);
@@ -296,7 +323,7 @@ async function main() {
     allSymbols = await getAllFuturesSymbols();
 
     if (vps1DataStatus === "error_binance_symbols" || allSymbols.length === 0) {
-        logVps1("CRITICAL: Could not fetch initial symbols or no symbols available. API will serve error/empty status until symbols are fetched.");
+        logVps1("CRITICAL: Could not fetch initial symbols or no symbols available with leverage > 50x. API will serve error/empty status until symbols are fetched.");
         // vps1DataStatus đã được đặt trong getAllFuturesSymbols
     } else {
         await fetchInitialHistoricalData([...allSymbols]); // Fetch dữ liệu ban đầu cho tất cả symbols
@@ -313,7 +340,7 @@ async function main() {
         switch (vps1DataStatus) {
             case "running_data_available":
                 if (topRankedCoinsForApi.length > 0) {
-                    responsePayload.message = `Top ${topRankedCoinsForApi.length} coins data. Last rank update interval: 15s.`;
+                    responsePayload.message = `Top ${topRankedCoinsForApi.length} coins data (from symbols with leverage > 50x). Last rank update interval: 15s.`;
                     responsePayload.data = topRankedCoinsForApi;
                 } else {
                     responsePayload.status = "initializing"; // Hoặc một status mới như "running_data_momentarily_unavailable"
@@ -321,7 +348,7 @@ async function main() {
                 }
                 break;
             case "error_binance_symbols":
-                responsePayload.message = topRankedCoinsForApi[0]?.error_message || "VPS1: Failed to initialize symbols from Binance after multiple retries.";
+                responsePayload.message = topRankedCoinsForApi[0]?.error_message || "VPS1: Failed to initialize symbols/leverage from Binance after multiple retries.";
                 // data đã được đặt là [{error_message: ...}] trong getAllFuturesSymbols
                 responsePayload.data = topRankedCoinsForApi;
                 break;
