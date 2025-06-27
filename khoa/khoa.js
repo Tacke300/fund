@@ -962,14 +962,24 @@ async function processTradeResult(orderInfo) {
         const matchedGridPos = sidewaysGrid.activeGridPositions.find(p => p.tpOrderId === orderId || p.slOrderId === orderId);
         if (matchedGridPos) {
             if (orderStatus === 'FILLED') {
-                const isTp = matchedGridPos.tpOrderId === orderId; const isSl = matchedGridPos.slOrderId === orderId;
-                if (isTp) { addLog(`  [LƯỚI TP] Lệnh TP lưới ${matchedGridPos.side} ${symbol} (ID gốc: ${matchedGridPos.id}) khớp.`); await closeSpecificGridPosition(matchedGridPos, `TP lưới khớp`, false, true); }
-                else if (isSl) { addLog(`  [LƯỚI SL] Lệnh SL lưới ${matchedGridPos.side} ${symbol} (ID gốc: ${matchedGridPos.id}) khớp.`); await closeSpecificGridPosition(matchedGridPos, `SL lưới khớp`, true, false); }
+                const isTp = matchedGridPos.tpOrderId === orderId;
+                const isSl = matchedGridPos.slOrderId === orderId;
+                if (isTp) {
+                    addLog(`  [LƯỚI TP] Lệnh TP lưới ${matchedGridPos.side} ${symbol} (ID gốc: ${matchedGridPos.id}) khớp.`);
+                    await closeSpecificGridPosition(matchedGridPos, `TP lưới khớp`, false, true);
+                } else if (isSl) {
+                    addLog(`  [LƯỚI SL] Lệnh SL lưới ${matchedGridPos.side} ${symbol} (ID gốc: ${matchedGridPos.id}) khớp.`);
+                    await closeSpecificGridPosition(matchedGridPos, `SL lưới khớp`, true, false);
+                }
+                
+                if (sidewaysGrid.activeGridPositions.length === 0) {
+                    addLog('[LƯỚI] Vị thế lưới cuối cùng đã đóng. Reset hướng, chờ trigger mới.');
+                    sidewaysGrid.direction = null;
+                }
             } else if (orderStatus === 'CANCELED' || orderStatus === 'EXPIRED' || orderStatus === 'REJECTED') {
                  if(matchedGridPos.tpOrderId === orderId) { matchedGridPos.tpOrderId = null; addLog(`  [LƯỚI] TP ${orderId} của lệnh lưới ${matchedGridPos.id} ${orderStatus}.`);}
                  if(matchedGridPos.slOrderId === orderId) { matchedGridPos.slOrderId = null; addLog(`  [LƯỚI] SL ${orderId} của lệnh lưới ${matchedGridPos.id} ${orderStatus}.`);}
             }
-            if(!wasProcessing && orderStatus !== 'NEW' && orderStatus !== 'PARTIALLY_FILLED') isProcessingTrade = false; return;
         }
     }
 
