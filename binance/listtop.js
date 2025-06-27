@@ -1,59 +1,64 @@
-// File: listtop.js (VPS1 Data Provider)
-
 import WebSocket from 'ws';
-import http from 'http'; // SỬ DỤNG HTTP cho server của VPS1
-import https from 'https'; // SỬ DỤNG HTTPS để gọi ra Binance API
+import http from 'http';
+import https from 'https';
 import express from 'express';
 import { URL } from 'url';
+import crypto from 'crypto';
+import { API_KEY, SECRET_KEY } from './config.js';
 
 const app = express();
-const port = 9000; // Port VPS1 sẽ lắng nghe
+const port = 9000;
 
 const BINANCE_FAPI_BASE_URL = 'https://fapi.binance.com';
 const BINANCE_WS_URL = 'wss://fstream.binance.com/stream?streams=';
 
-const WINDOW_MINUTES = 60; // Số phút dữ liệu nến được lưu trữ và tính toán
+const WINDOW_MINUTES = 60;
 let coinData = {};
-let topRankedCoinsForApi = []; // Dữ liệu được tối ưu cho API trả về
+let topRankedCoinsForApi = [];
 let allSymbols = [];
 let wsClient = null;
-let vps1DataStatus = "initializing"; // 'initializing', 'running_symbols_fetched', 'running_data_available', 'error_binance_symbols', 'error_binance_data', 'running_no_data_to_fetch_initially', 'running_no_initial_data_ranked'
+let vps1DataStatus = "initializing";
+let serverTimeOffset = 0;
 
 function logVps1(message) {
     const now = new Date();
-    const offset = 7 * 60 * 60 * 1000; // Offset cho GMT+7
+    const offset = 7 * 60 * 60 * 1000;
     const localTime = new Date(now.getTime() + offset);
     const timestamp = localTime.toISOString().replace('T', ' ').substring(0, 23);
     console.log(`[VPS1_DP] ${timestamp} - ${message}`);
 }
 
-function httpsGetJson(urlString) {
+function createSignature(queryString, apiSecret) {
+    return crypto.createHmac('sha256', apiSecret).update(queryString).digest('hex');
+}
+
+async function makeHttpRequest(method, urlString, headers = {}, postData = '') {
     return new Promise((resolve, reject) => {
         const parsedUrl = new URL(urlString);
         const options = {
             hostname: parsedUrl.hostname,
+            port: parsedUrl.port || (parsedUrl.protocol === 'https:' ? 443 : 80),
             path: parsedUrl.pathname + parsedUrl.search,
-            method: 'GET',
-            headers: { 'Content-Type': 'application/json', 'User-Agent': 'NodeJS-Client/1.0-VPS1' },
-            timeout: 20000 // Tăng timeout lên 20 giây
+            method: method,
+            headers: { ...headers, 'User-Agent': 'NodeJS-Client/1.0-VPS1-DataProvider' },
+            timeout: 20000
         };
-        const req = https.request(options, (res) => {
+        const protocol = parsedUrl.protocol === 'https:' ? https : http;
+        const req = protocol.request(options, (res) => {
             let data = '';
-            if (res.statusCode < 200 || res.statusCode >= 300) {
-                res.on('data', chunk => data += chunk);
-                res.on('end', () => {
-                    logVps1(`HTTPS Error Body from ${urlString} (status ${res.statusCode}): ${data.substring(0, 300)}`);
-                    reject(new Error(`Request Failed. Status Code: ${res.statusCode} for ${urlString}. Body: ${data.substring(0,200)}`));
-                });
-                return;
-            }
-            res.on('data', (chunk) => { data += chunk; });
+            res.on('data', (chunk) => data += chunk);
             res.on('end', () => {
-                try {
-                    resolve(JSON.parse(data));
-                } catch (e) {
-                    logVps1(`HTTPS JSON Parse Error from ${urlString}: ${e.message}. Data: ${data.substring(0,300)}`);
-                    reject(e);
+                if (res.statusCode >= 200 && res.statusCode < 300) {
+                    try {
+                        resolve(JSON.parse(data));
+                    } catch (e) {
+                        logVps1(`HTTPS JSON Parse Error from ${urlString}: ${e.message}. Data: ${data.substring(0, 300)}`);
+                        reject(e);
+                    }
+                } else {
+                    const errorMsg = `Request Failed. Status: ${res.statusCode} for ${urlString}. Body: ${data.substring(0, 200)}`;
+                    logVps1(`HTTPS Error: ${errorMsg}`);
+                    reject(new Error(errorMsg));
                 }
             });
         });
@@ -64,48 +69,77 @@ function httpsGetJson(urlString) {
         req.on('timeout', () => {
             req.destroy();
             logVps1(`HTTPS Timeout for ${urlString}`);
-            reject(new Error(`Request to ${urlString} timed out after ${options.timeout/1000}s`));
+            reject(new Error(`Request to ${urlString} timed out`));
         });
+        if (postData) {
+            req.write(postData);
+        }
         req.end();
     });
 }
 
-// <<< THAY ĐỔI: Hàm này được sửa lại hoàn toàn để lọc symbol theo đòn bẩy
+async function callSignedAPI(fullEndpointPath, method = 'GET', params = {}) {
+    if (!API_KEY || !SECRET_KEY) throw new Error("API_KEY/SECRET_KEY is missing in config.js");
+    const timestamp = Date.now() + serverTimeOffset;
+    const recvWindow = 5000;
+    let queryString = Object.keys(params).map(key => `${key}=${encodeURIComponent(params[key])}`).join('&');
+    queryString += (queryString ? '&' : '') + `timestamp=${timestamp}&recvWindow=${recvWindow}`;
+    const signature = createSignature(queryString, SECRET_KEY);
+    const fullUrlToCall = `https://${BINANCE_FAPI_BASE_URL}${fullEndpointPath}?${queryString}&signature=${signature}`;
+    const headers = { 'X-MBX-APIKEY': API_KEY };
+
+    return makeHttpRequest(method, fullUrlToCall, headers);
+}
+
+async function callPublicAPI(fullEndpointPath, params = {}) {
+    const queryString = new URLSearchParams(params).toString();
+    const fullPathWithQuery = `${fullEndpointPath}${queryString ? '?' + queryString : ''}`;
+    const fullUrlToCall = `https://${BINANCE_FAPI_BASE_URL}${fullPathWithQuery}`;
+    return makeHttpRequest('GET', fullUrlToCall);
+}
+
+async function syncServerTime() {
+    try {
+        const data = await callPublicAPI('/fapi/v1/time');
+        serverTimeOffset = data.serverTime - Date.now();
+        logVps1(`Server time synced. Offset: ${serverTimeOffset}ms.`);
+    } catch (error) {
+        logVps1(`Failed to sync server time: ${error.message}`);
+        throw error;
+    }
+}
+
 async function getAllFuturesSymbols(retryCount = 0) {
     const maxRetries = 5;
-    const retryDelay = 7000; // 7 giây
+    const retryDelay = 7000;
     try {
-        logVps1(`Attempting to get symbols and leverage data from Binance (attempt ${retryCount + 1}/${maxRetries + 1})...`);
+        logVps1(`Attempting to get symbols and leverage data (attempt ${retryCount + 1}/${maxRetries + 1})...`);
 
-        // <<< THAY ĐỔI: Gọi đồng thời 2 API để lấy thông tin symbol và thông tin đòn bẩy
         const [exchangeInfo, leverageBrackets] = await Promise.all([
-            httpsGetJson(`${BINANCE_FAPI_BASE_URL}/fapi/v1/exchangeInfo`),
-            httpsGetJson(`${BINANCE_FAPI_BASE_URL}/fapi/v1/leverageBracket`)
+            callPublicAPI('/fapi/v1/exchangeInfo'),
+            callSignedAPI('/fapi/v1/leverageBracket', 'GET')
         ]);
 
         if (!exchangeInfo || !exchangeInfo.symbols || !Array.isArray(exchangeInfo.symbols)) {
-            throw new Error("Invalid exchangeInfo data or missing/invalid symbols array.");
+            throw new Error("Invalid exchangeInfo data or missing symbols array.");
         }
         if (!leverageBrackets || !Array.isArray(leverageBrackets)) {
             throw new Error("Invalid leverageBracket data from Binance.");
         }
 
-        // <<< THAY ĐỔI: Tạo một map để tra cứu đòn bẩy tối đa một cách hiệu quả
-        const leverageMap = {};
+        const leverageMap = new Map();
         leverageBrackets.forEach(item => {
-            // Đòn bẩy tối đa (initialLeverage) nằm trong bracket đầu tiên
             if (item.brackets && item.brackets.length > 0) {
-                leverageMap[item.symbol] = item.brackets[0].initialLeverage;
+                leverageMap.set(item.symbol, item.brackets[0].initialLeverage);
             }
         });
 
-        // <<< THAY ĐỔI: Lọc symbol với điều kiện mới: đòn bẩy > 50
         const symbols = exchangeInfo.symbols
             .filter(s =>
                 s.contractType === 'PERPETUAL' &&
                 s.quoteAsset === 'USDT' &&
                 s.status === 'TRADING' &&
-                (leverageMap[s.symbol] > 50) // Điều kiện lọc mới
+                (leverageMap.get(s.symbol) > 50)
             )
             .map(s => s.symbol);
 
@@ -115,11 +149,11 @@ async function getAllFuturesSymbols(retryCount = 0) {
     } catch (error) {
         logVps1(`Error fetching symbols/leverage (attempt ${retryCount + 1}): ${error.message}`);
         if (retryCount < maxRetries) {
-            logVps1(`Retrying to fetch symbols/leverage in ${retryDelay / 1000} seconds...`);
+            logVps1(`Retrying in ${retryDelay / 1000} seconds...`);
             await new Promise(resolve => setTimeout(resolve, retryDelay));
             return getAllFuturesSymbols(retryCount + 1);
         } else {
-            logVps1(`Failed to fetch symbols/leverage after ${maxRetries + 1} attempts. API will serve error state.`);
+            logVps1(`Failed to fetch symbols/leverage after ${maxRetries + 1} attempts.`);
             vps1DataStatus = "error_binance_symbols";
             topRankedCoinsForApi = [{ error_message: "VPS1: Could not fetch symbols/leverage from Binance after multiple retries." }];
             return [];
@@ -129,7 +163,7 @@ async function getAllFuturesSymbols(retryCount = 0) {
 
 async function fetchInitialHistoricalData(symbolsToFetch) {
     if (!symbolsToFetch || symbolsToFetch.length === 0) {
-        logVps1("No symbols provided to fetch historical data. Skipping.");
+        logVps1("No symbols to fetch historical data for. Skipping.");
         if (allSymbols.length > 0 && vps1DataStatus === "running_symbols_fetched") {
              vps1DataStatus = "running_no_data_to_fetch_initially";
         }
@@ -143,17 +177,16 @@ async function fetchInitialHistoricalData(symbolsToFetch) {
         if (!coinData[symbol]) {
             coinData[symbol] = {
                 symbol: symbol, prices: [], changePercent: null, currentPrice: null,
-                priceXMinAgo: null, lastUpdate: 0, klineOpenTime: 0
+                priceXMinAgo: null, lastUpdate: 0, klineOpenTime: 0, maxLeverage: 0
             };
         }
         try {
-            const klinesData = await httpsGetJson(`${BINANCE_FAPI_BASE_URL}/fapi/v1/klines?symbol=${symbol}&interval=1m&endTime=${now}&limit=${WINDOW_MINUTES}`);
+            const klinesData = await callPublicAPI('/fapi/v1/klines', { symbol, interval: '1m', endTime: now, limit: WINDOW_MINUTES });
             if (klinesData && klinesData.length > 0) {
-                // Sắp xếp nến: nến cũ nhất ở đầu (index 0), nến mới nhất ở cuối
-                coinData[symbol].prices = klinesData.map(k => parseFloat(k[4])); // Chỉ lấy giá đóng cửa
+                coinData[symbol].prices = klinesData.map(k => parseFloat(k[4]));
                 if (coinData[symbol].prices.length > 0) {
-                    coinData[symbol].currentPrice = coinData[symbol].prices[coinData[symbol].prices.length - 1]; // Giá hiện tại là giá đóng của nến cuối cùng
-                    coinData[symbol].priceXMinAgo = coinData[symbol].prices[0]; // Giá X phút trước là giá đóng của nến đầu tiên
+                    coinData[symbol].currentPrice = coinData[symbol].prices[coinData[symbol].prices.length - 1];
+                    coinData[symbol].priceXMinAgo = coinData[symbol].prices[0];
                     fetchedAnyData = true;
                 }
             } else {
@@ -162,26 +195,26 @@ async function fetchInitialHistoricalData(symbolsToFetch) {
         } catch (error) {
             const errorMsg = error.message || "Unknown error";
             if (errorMsg.includes('400') || errorMsg.includes('404') || errorMsg.toLowerCase().includes("invalid symbol")) {
-                logVps1(`Symbol ${symbol} invalid or no data (400/404/Invalid). Removing.`);
+                logVps1(`Symbol ${symbol} invalid or no data. Removing.`);
                 delete coinData[symbol];
                 allSymbols = allSymbols.filter(s => s !== symbol);
             } else if (errorMsg.includes('429')) {
-                logVps1(`Rate limited for ${symbol}. Will retry this symbol later.`);
+                logVps1(`Rate limited for ${symbol}. Retrying this symbol later.`);
                 await new Promise(resolve => setTimeout(resolve, 10000));
-                await fetchInitialHistoricalData([symbol]); // Retry for this specific symbol
+                await fetchInitialHistoricalData([symbol]);
             } else {
                 logVps1(`Error fetching historical data for ${symbol}: ${errorMsg}.`);
             }
         }
-        await new Promise(resolve => setTimeout(resolve, 350)); // Delay giữa các request
+        await new Promise(resolve => setTimeout(resolve, 350));
     }
-    logVps1("Initial historical data fetching process complete.");
+    logVps1("Initial historical data fetching complete.");
     if (fetchedAnyData) {
-        calculateAndRank(); // Tính toán và xếp hạng ngay sau khi có dữ liệu
+        calculateAndRank();
         if (vps1DataStatus !== "error_binance_symbols") vps1DataStatus = "running_data_available";
     } else if (vps1DataStatus === "running_symbols_fetched" && allSymbols.length > 0) {
         vps1DataStatus = "running_no_initial_data_ranked";
-        logVps1("No historical data could be ranked after fetching, though symbols are available.");
+        logVps1("No historical data could be ranked, though symbols are available.");
     }
 }
 
@@ -193,15 +226,15 @@ function connectToBinanceWebSocket(symbolsToStream) {
         wsClient = null;
     }
     if (!symbolsToStream || symbolsToStream.length === 0) {
-        logVps1("No symbols to stream via WebSocket. WebSocket not started.");
+        logVps1("No symbols to stream. WebSocket not started.");
         return;
     }
     const streams = symbolsToStream.map(s => `${s.toLowerCase()}@kline_1m`).join('/');
     const url = `${BINANCE_WS_URL}${streams}`;
-    logVps1(`Connecting to WebSocket for ${symbolsToStream.length} streams (e.g., ${streams.substring(0,100)}...).`);
+    logVps1(`Connecting to WebSocket for ${symbolsToStream.length} streams...`);
     wsClient = new WebSocket(url);
 
-    wsClient.on('open', () => logVps1('WebSocket connection successful!'));
+    wsClient.on('open', () => logVps1('WebSocket connection successful.'));
 
     wsClient.on('message', (data) => {
         try {
@@ -210,26 +243,24 @@ function connectToBinanceWebSocket(symbolsToStream) {
                 const klineData = message.data.k;
                 const symbol = klineData.s;
 
-                if (coinData[symbol] && klineData.x) { // Chỉ cập nhật khi nến đã đóng (klineData.x === true)
+                if (coinData[symbol] && klineData.x) {
                     const closePrice = parseFloat(klineData.c);
-                    const openTime = parseInt(klineData.t); // Thời gian mở nến
+                    const openTime = parseInt(klineData.t);
 
-                    // Đảm bảo không xử lý lại cùng một nến
                     if (openTime > (coinData[symbol].klineOpenTime || 0)) {
                         coinData[symbol].prices.push(closePrice);
                         if (coinData[symbol].prices.length > WINDOW_MINUTES) {
-                            coinData[symbol].prices.shift(); // Bỏ nến cũ nhất
+                            coinData[symbol].prices.shift();
                         }
-                        coinData[symbol].currentPrice = closePrice; // Giá hiện tại là giá đóng của nến vừa đóng
-                        coinData[symbol].priceXMinAgo = coinData[symbol].prices[0]; // Giá X phút trước là nến đầu tiên trong mảng
+                        coinData[symbol].currentPrice = closePrice;
+                        coinData[symbol].priceXMinAgo = coinData[symbol].prices[0];
                         coinData[symbol].lastUpdate = Date.now();
-                        coinData[symbol].klineOpenTime = openTime; // Lưu thời gian mở của nến mới nhất
-                        // Không gọi calculateAndRank() ở đây, để interval xử lý
+                        coinData[symbol].klineOpenTime = openTime;
                     }
                 }
             }
         } catch (error) {
-            logVps1(`Error processing WebSocket message: ${error.message}. Data: ${data.toString().substring(0,100)}`);
+            logVps1(`Error processing WebSocket message: ${error.message}.`);
         }
     });
 
@@ -247,7 +278,6 @@ function calculateAndRank() {
 
     for (const symbol in coinData) {
         const data = coinData[symbol];
-        // Cần ít nhất WINDOW_MINUTES - 5 nến để có thể tính toán đáng tin cậy
         if (data.prices && data.prices.length >= (WINDOW_MINUTES - 5) && data.priceXMinAgo && data.currentPrice && data.priceXMinAgo > 0) {
             const change = ((data.currentPrice - data.priceXMinAgo) / data.priceXMinAgo) * 100;
 
@@ -256,7 +286,7 @@ function calculateAndRank() {
                 changePercent: parseFloat(change.toFixed(2)),
                 currentPrice: data.currentPrice,
                 priceXMinAgo: data.priceXMinAgo,
-                candles: data.prices.length, // Số lượng nến hiện có
+                candles: data.prices.length,
                 lastUpdate: data.lastUpdate ? new Date(data.lastUpdate).toISOString() : null
             };
             rankedForApiOutput.push(coinEntryForApi);
@@ -264,28 +294,24 @@ function calculateAndRank() {
         }
     }
 
-    rankedForApiOutput.sort((a, b) => (b.changePercent || -Infinity) - (a.changePercent || -Infinity));
-    topRankedCoinsForApi = rankedForApiOutput.slice(0, 20); // Giữ top 20 cho API
+    rankedForApiOutput.sort((a, b) => Math.abs(b.changePercent) - Math.abs(a.changePercent));
+    topRankedCoinsForApi = rankedForApiOutput.slice(0, 20);
 
     if (hasValidDataForRanking) {
-        // logVps1(`Ranked ${topRankedCoinsForApi.length} coins. Top: ${topRankedCoinsForApi[0]?.symbol} (${topRankedCoinsForApi[0]?.changePercent}%)`);
         if (vps1DataStatus !== "error_binance_symbols") vps1DataStatus = "running_data_available";
-    } else if (vps1DataStatus === "running_symbols_fetched" || vps1DataStatus === "running_no_initial_data_ranked") {
-        // Giữ nguyên status nếu đã fetch symbols nhưng chưa rank được gì, hoặc chưa có đủ nến
-        // logVps1("No coins met ranking criteria in this cycle or not enough candles yet.");
     }
 }
 
 async function periodicallyUpdateSymbolList() {
     logVps1("Periodically checking and updating symbol list...");
-    const newSymbols = await getAllFuturesSymbols(); // Hàm này đã được sửa để lọc theo đòn bẩy
+    const newSymbols = await getAllFuturesSymbols();
 
     if (vps1DataStatus === "error_binance_symbols") {
-        logVps1("Failed to fetch new symbols in periodic update, API remains in error state for symbols.");
+        logVps1("Failed to fetch new symbols in periodic update.");
         return;
     }
-     if (newSymbols.length === 0 && allSymbols.length > 0) { // Chỉ cảnh báo nếu trước đó đã có symbols
-        logVps1("Periodic update fetched 0 symbols. This might be an issue. Keeping old list for safety.");
+     if (newSymbols.length === 0 && allSymbols.length > 0) {
+        logVps1("Periodic update fetched 0 symbols. Keeping old list for safety.");
         return;
     }
 
@@ -294,13 +320,13 @@ async function periodicallyUpdateSymbolList() {
 
     let listChanged = false;
     if (addedSymbols.length > 0) {
-        logVps1(`Detected ${addedSymbols.length} new symbols (leverage > 50x): ${addedSymbols.join(', ')}. Fetching their initial data.`);
-        allSymbols.push(...addedSymbols); // Thêm vào danh sách tổng trước
-        await fetchInitialHistoricalData(addedSymbols); // Fetch dữ liệu cho coin mới
+        logVps1(`Detected ${addedSymbols.length} new symbols: ${addedSymbols.join(', ')}.`);
+        allSymbols.push(...addedSymbols);
+        await fetchInitialHistoricalData(addedSymbols);
         listChanged = true;
     }
     if (removedSymbols.length > 0) {
-         logVps1(`Detected ${removedSymbols.length} removed symbols (no longer trading or leverage changed): ${removedSymbols.join(', ')}. Removing their data.`);
+         logVps1(`Detected ${removedSymbols.length} removed symbols: ${removedSymbols.join(', ')}.`);
          removedSymbols.forEach(s => {
              delete coinData[s];
              allSymbols = allSymbols.filter(sym => sym !== s);
@@ -309,9 +335,9 @@ async function periodicallyUpdateSymbolList() {
     }
 
     if (listChanged) {
-        logVps1(`Symbol list updated. Total symbols: ${allSymbols.length}. Reconnecting WebSocket and re-ranking.`);
-        connectToBinanceWebSocket(allSymbols); // Kết nối lại WebSocket với danh sách mới
-        calculateAndRank(); // Tính toán lại xếp hạng
+        logVps1(`Symbol list updated. Total: ${allSymbols.length}. Reconnecting WebSocket and re-ranking.`);
+        connectToBinanceWebSocket(allSymbols);
+        calculateAndRank();
     } else {
         logVps1("No changes in symbol list.");
     }
@@ -320,19 +346,25 @@ async function periodicallyUpdateSymbolList() {
 
 async function main() {
     logVps1("VPS1 Data Provider is starting...");
+    try {
+        await syncServerTime();
+    } catch(e) {
+        logVps1("CRITICAL: Could not sync time with Binance. Exiting.");
+        process.exit(1);
+    }
+    
     allSymbols = await getAllFuturesSymbols();
 
     if (vps1DataStatus === "error_binance_symbols" || allSymbols.length === 0) {
-        logVps1("CRITICAL: Could not fetch initial symbols or no symbols available with leverage > 50x. API will serve error/empty status until symbols are fetched.");
-        // vps1DataStatus đã được đặt trong getAllFuturesSymbols
+        logVps1("CRITICAL: Could not fetch initial symbols or no symbols available with leverage > 50x.");
     } else {
-        await fetchInitialHistoricalData([...allSymbols]); // Fetch dữ liệu ban đầu cho tất cả symbols
-        connectToBinanceWebSocket([...allSymbols]); // Kết nối WebSocket
-        calculateAndRank(); // Gọi 1 lần sau khi có dữ liệu ban đầu
+        await fetchInitialHistoricalData([...allSymbols]);
+        connectToBinanceWebSocket([...allSymbols]);
+        calculateAndRank();
     }
 
-    setInterval(calculateAndRank, 15 * 1000); // Cập nhật xếp hạng mỗi 15 giây
-    setInterval(periodicallyUpdateSymbolList, 1 * 60 * 60 * 1000); // Cập nhật danh sách symbols mỗi 1 giờ
+    setInterval(calculateAndRank, 15 * 1000);
+    setInterval(periodicallyUpdateSymbolList, 1 * 60 * 60 * 1000);
 
     app.get('/', (req, res) => {
         let responsePayload = { status: vps1DataStatus, message: "", data: [] };
@@ -340,27 +372,26 @@ async function main() {
         switch (vps1DataStatus) {
             case "running_data_available":
                 if (topRankedCoinsForApi.length > 0) {
-                    responsePayload.message = `Top ${topRankedCoinsForApi.length} coins data (from symbols with leverage > 50x). Last rank update interval: 15s.`;
+                    responsePayload.message = `Top ${topRankedCoinsForApi.length} coins data (from symbols with leverage > 50x), sorted by absolute volatility. Update interval: 15s.`;
                     responsePayload.data = topRankedCoinsForApi;
                 } else {
-                    responsePayload.status = "initializing"; // Hoặc một status mới như "running_data_momentarily_unavailable"
-                    responsePayload.message = "VPS1: Data is available but no coins met ranking criteria in the last cycle. Waiting for next calculation.";
+                    responsePayload.status = "running_no_data_to_rank";
+                    responsePayload.message = "VPS1: Data is available but no coins met ranking criteria in the last cycle.";
                 }
                 break;
             case "error_binance_symbols":
-                responsePayload.message = topRankedCoinsForApi[0]?.error_message || "VPS1: Failed to initialize symbols/leverage from Binance after multiple retries.";
-                // data đã được đặt là [{error_message: ...}] trong getAllFuturesSymbols
+                responsePayload.message = topRankedCoinsForApi[0]?.error_message || "VPS1: Failed to initialize symbols/leverage from Binance.";
                 responsePayload.data = topRankedCoinsForApi;
                 break;
             case "initializing":
             case "running_symbols_fetched":
             case "running_no_initial_data_ranked":
             case "running_no_data_to_fetch_initially":
-                responsePayload.message = "VPS1: Data is being prepared or no coins have met ranking criteria yet (e.g., waiting for enough candles). Please try again shortly.";
+                responsePayload.message = "VPS1: Data is being prepared or no coins have met ranking criteria yet.";
                 break;
-            default: // Các trường hợp lỗi chung khác hoặc status không xác định
+            default:
                 responsePayload.status = "error";
-                responsePayload.message = "VPS1: An unspecified error occurred or system state is unknown.";
+                responsePayload.message = "VPS1: An unspecified error occurred.";
                 break;
         }
         res.status(200).json(responsePayload);
@@ -374,5 +405,5 @@ async function main() {
 
 main().catch(error => {
     logVps1(`CRITICAL UNHANDLED ERROR IN MAIN: ${error.message} ${error.stack}`);
-    process.exit(1); // Thoát nếu có lỗi nghiêm trọng không xử lý được trong main
+    process.exit(1);
 });
