@@ -39,10 +39,10 @@ const ERROR_RETRY_DELAY_MS = 15000;
 const LOG_COOLDOWN_MS = 2000;
 
 const SIDEWAYS_INITIAL_TRIGGER_PERCENT = 0.005;
-const SIDEWAYS_ORDER_SIZE_RATIO = 0.10;
+const SIDEWAYS_ORDER_SIZE_RATIO = 0.20;
 const SIDEWAYS_GRID_RANGE_PERCENT = 0.05;
 const SIDEWAYS_GRID_STEP_PERCENT = 0.005;
-const SIDEWAYS_TP_PERCENT_FROM_ENTRY = 0.01;
+const SIDEWAYS_TP_PERCENT_FROM_ENTRY = 0.015;
 const SIDEWAYS_SL_PERCENT_FROM_ENTRY = 0.05;
 const VOLATILITY_CHECK_INTERVAL_MS = 1 * 60 * 1000;
 const MODE_SWITCH_DELAY_MS = 10000;
@@ -60,7 +60,7 @@ let nextScheduledCycleTimeout = null;
 let retryBotTimeout = null;
 const logCounts = {};
 let currentBotMode = 'kill';
-let INITIAL_INVESTMENT_AMOUNT = 1.20;
+let INITIAL_INVESTMENT_AMOUNT = 1.50;
 let TARGET_COIN_SYMBOL = null;
 let totalProfit = 0;
 let totalLoss = 0;
@@ -77,7 +77,7 @@ let sidewaysGrid = { isActive: false, anchorPrice: null, direction: null, lastGr
 let lastCoinSwitchCheckTime = 0;
 let isOpeningInitialPair = false;
 let overallTakeProfit = 0;
-let overallStopLoss = -4;
+let overallStopLoss = 0;
 let lastHourVolatility = 0;
 
 class CriticalApiError extends Error { constructor(message) { super(message); this.name = 'CriticalApiError'; } }
@@ -378,7 +378,7 @@ async function addPosition(positionToModify, quantityToAdd, reasonForAdd = "gene
                 const newPairEntry=await getCurrentPrice(TARGET_COIN_SYMBOL); if(newPairEntry){if(currentLongPosition)currentLongPosition.pairEntryPrice=newPairEntry;if(currentShortPosition)currentShortPosition.pairEntryPrice=newPairEntry;addLog(`  Cập nhật giá vào cặp mới: ${newPairEntry.toFixed(details.pricePrecision)}`);}
                 await sleep(2000); const updatedPos=await callSignedAPI('/fapi/v2/positionRisk','GET',{symbol:TARGET_COIN_SYMBOL});
                 if(currentLongPosition){const lpEx=updatedPos.find(p=>p.symbol===TARGET_COIN_SYMBOL&&p.positionSide==='LONG');if(lpEx&&parseFloat(lpEx.positionAmt)!==0){currentLongPosition.quantity=Math.abs(parseFloat(lpEx.positionAmt));currentLongPosition.entryPrice=parseFloat(lpEx.entryPrice);}else{currentLongPosition=null;addLog("  Warn: Long pos không còn sau khi thêm.");}}
-                if(currentShortPosition){const spEx=updatedPos.find(p=>p.symbol===TARGET_COIN_SYMBOL&&p.positionSide==='SHORT');if(spEx&&parseFloat(spEx.positionAmt)!==0){currentShortPosition.quantity=Math.abs(parseFloat(spEx.positionAmt));currentShortPosition.entryPrice=parseFloat(spEx.entryPrice);}else{currentShortPosition=null;addLog("  Warn: Short pos không còn sau khi thêm.");}}
+                if(currentShortPosition){const spEx=updatedPos.find(p=>p.symbol===TARGET_COIN_SYMBOL&&p.positionSide==='SHORT');if(spEx&&parseFloat(spEx.positionAmt)!==0){currentShortPosition.quantity=Math.abs(parseFloat(spEx.positionAmt));currentShortPosition.entryPrice=parseFloat(lpEx.entryPrice);}else{currentShortPosition=null;addLog("  Warn: Short pos không còn sau khi thêm.");}}
                 let tpslOk=true; if(currentLongPosition?.quantity>0){if(!await setTPAndSLForPosition(currentLongPosition,true))tpslOk=false;await sleep(300);} if(currentShortPosition?.quantity>0){if(!await setTPAndSLForPosition(currentShortPosition,true))tpslOk=false;} if(!tpslOk)addLog(`[${currentBotMode.toUpperCase()} ADD] Lỗi đặt lại TP/SL.`); success=true;
             }
         }
@@ -997,8 +997,15 @@ async function processTradeResult(orderInfo) {
                     sidewaysGrid.direction = null;
                 }
             } else if (orderStatus === 'CANCELED' || orderStatus === 'EXPIRED' || orderStatus === 'REJECTED') {
-                 if(matchedGridPos.tpOrderId === orderId) { matchedGridPos.tpOrderId = null; addLog(`  [LƯỚI] TP ${orderId} của lệnh lưới ${matchedGridPos.id} ${orderStatus}.`);}
-                 if(matchedGridPos.slOrderId === orderId) { matchedGridPos.slOrderId = null; addLog(`  [LƯỚI] SL ${orderId} của lệnh lưới ${matchedGridPos.id} ${orderStatus}.`);}
+                 const gridPosCheck = sidewaysGrid.activeGridPositions.find(p => p.tpOrderId === orderId || p.slOrderId === orderId);
+                 if (gridPosCheck) {
+                     if(gridPosCheck.tpOrderId === orderId) { 
+                         addLog(`  [LƯỚI] TP ${orderId} của lệnh lưới ${gridPosCheck.id} nhận trạng thái ${orderStatus}. Chờ xác nhận FILLED.`);
+                     }
+                     if(gridPosCheck.slOrderId === orderId) { 
+                         addLog(`  [LƯỚI] SL ${orderId} của lệnh lưới ${gridPosCheck.id} nhận trạng thái ${orderStatus}. Chờ xác nhận FILLED.`);
+                     }
+                 }
             }
         }
     }
