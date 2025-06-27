@@ -940,12 +940,6 @@ async function processTradeResult(orderInfo) {
         const remainingPos = (closedKillPosSide === 'LONG') ? currentShortPosition : currentLongPosition;
         const closedPos = (closedKillPosSide === 'LONG') ? currentLongPosition : currentShortPosition;
 
-        if (closedPos) {
-             if(closedKillPosSide === 'LONG') currentLongPosition = null;
-             else currentShortPosition = null;
-        }
-
-
         if (remainingPos?.quantity > 0 && remainingPos.initialMargin > 0) {
             try {
                 const pData = await callSignedAPI('/fapi/v2/positionRisk', 'GET', { symbol: remainingPos.symbol });
@@ -991,6 +985,11 @@ async function processTradeResult(orderInfo) {
                     await closePosition(remainingPos.symbol, "Lỗi đặt lại TP/SL", remainingPos.side);
                 }
             }
+        }
+
+        if (closedPos) {
+            if (closedKillPosSide === 'LONG') currentLongPosition = null;
+            else if (closedKillPosSide === 'SHORT') currentShortPosition = null;
         }
 
         if (!currentLongPosition && !currentShortPosition && botRunning) await cleanupAndResetCycle(symbol);
