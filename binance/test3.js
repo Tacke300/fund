@@ -17,9 +17,8 @@ const __dirname = path.dirname(__filename);
 
 const VPS1_DATA_URL = 'http://34.142.248.96:9000/';
 const MIN_CANDLES_FOR_SELECTION = 55;
-const VOLATILITY_SWITCH_THRESHOLD_PERCENT = 5.0;
-const MIN_VOLATILITY_DIFFERENCE_TO_SWITCH = 3.0;
 const OVERALL_VOLATILITY_THRESHOLD_VPS1 = 5.0;
+const MIN_VOLATILITY_DIFFERENCE_TO_SWITCH = 3.0;
 const MIN_LEVERAGE_TO_TRADE = 50;
 const PARTIAL_CLOSE_INDEX_5 = 4;
 const PARTIAL_CLOSE_INDEX_8 = 7;
@@ -60,7 +59,7 @@ let nextScheduledCycleTimeout = null;
 let retryBotTimeout = null;
 const logCounts = {};
 let currentBotMode = 'kill';
-let INITIAL_INVESTMENT_AMOUNT = 1.50;
+let INITIAL_INVESTMENT_AMOUNT = 1.20;
 let TARGET_COIN_SYMBOL = null;
 let totalProfit = 0;
 let totalLoss = 0;
@@ -77,7 +76,7 @@ let sidewaysGrid = { isActive: false, anchorPrice: null, direction: null, lastGr
 let lastCoinSwitchCheckTime = 0;
 let isOpeningInitialPair = false;
 let overallTakeProfit = 0;
-let overallStopLoss = 0;
+let overallStopLoss = -4;
 let lastHourVolatility = 0;
 
 class CriticalApiError extends Error { constructor(message) { super(message); this.name = 'CriticalApiError'; } }
@@ -760,15 +759,7 @@ async function manageOpenPosition() {
     if (isProcessingTrade || !botRunning || sidewaysGrid.isClearingForSwitch || !TARGET_COIN_SYMBOL || isOpeningInitialPair) return;
     if (await checkOverallTPSL()) return;
 
-    await fetchAndCacheTopCoinsFromVPS1(true);
-    const currentCoinDataFromVPS1 = getCurrentCoinVPS1Data(TARGET_COIN_SYMBOL);
-    const vps1VolForCurrentCoin = currentCoinDataFromVPS1 ? Math.abs(currentCoinDataFromVPS1.changePercent) : null;
-
     if (currentBotMode === 'kill') {
-        if (!currentLongPosition && !currentShortPosition && botRunning) {
-            await cleanupAndResetCycle(TARGET_COIN_SYMBOL);
-            return;
-        }
         if (!currentLongPosition || !currentShortPosition) {
              return;
         }
@@ -829,55 +820,65 @@ async function manageOpenPosition() {
                     return;
                 }
             }
+            
+            const isPriceNearEntry = pairEntry > 0 && currentMarketPrice && Math.abs(currentMarketPrice - pairEntry) <= (pairEntry * 0.0005);
+            const hasHitMilestone = currentMocIndex > 0;
 
+            if (hasHitMilestone && isPriceNearEntry && !sidewaysGrid.isClearingForSwitch) {
+                addLog(`[KILL CHECK] Giá về entry sau khi đã chạm Mốc ${currentMocIndex}. Đánh giá lại...`);
+                await fetchAndCacheTopCoinsFromVPS1(true);
+                const currentCoinData = getCurrentCoinVPS1Data(TARGET_COIN_SYMBOL);
+                const currentCoinVol = currentCoinData ? Math.abs(currentCoinData.changePercent) : 0;
+                
+                const bestAlternativeCoin = vps1DataCache.find(c => c.symbol !== TARGET_COIN_SYMBOL);
 
-            if (pairEntry > 0 && currentMarketPrice && currentMocIndex < PARTIAL_CLOSE_INDEX_5 && Math.abs(currentMarketPrice - pairEntry) <= (pairEntry * 0.0005) && !sidewaysGrid.isClearingForSwitch) {
-                addLog(`[KILL CHECK] Giá về entry, mốc < 5. Tìm cơ hội chuyển đổi...`);
-                const allVps1Coins = await fetchAndCacheTopCoinsFromVPS1(true);
-                const bestAlternativeCoin = allVps1Coins.find(c => c.symbol !== TARGET_COIN_SYMBOL && Math.abs(c.changePercent) >= OVERALL_VOLATILITY_THRESHOLD_VPS1);
+                if (bestAlternativeCoin) {
+                    const altCoinVol = Math.abs(bestAlternativeCoin.changePercent);
+                    const isAltVolSufficient = altCoinVol >= OVERALL_VOLATILITY_THRESHOLD_VPS1;
+                    const isVolDifferenceSufficient = altCoinVol > (currentCoinVol + MIN_VOLATILITY_DIFFERENCE_TO_SWITCH);
 
-                if (bestAlternativeCoin && Math.abs(bestAlternativeCoin.changePercent) > (vps1VolForCurrentCoin || 0)) {
-                    addLog(`[KILL->KILL & ĐỔI COIN] Giá về entry. Tìm thấy coin tốt hơn: ${bestAlternativeCoin.symbol} (Vol: ${bestAlternativeCoin.changePercent.toFixed(2)}%).`);
+                    if (isAltVolSufficient && isVolDifferenceSufficient) {
+                        addLog(`[KILL->KILL & ĐỔI COIN] Tìm thấy coin tốt hơn: ${bestAlternativeCoin.symbol} (Vol: ${altCoinVol.toFixed(2)}%) so với ${TARGET_COIN_SYMBOL} (Vol: ${currentCoinVol.toFixed(2)}%).`);
+                        sidewaysGrid.isClearingForSwitch = true;
+                        if (currentLongPosition) await closePosition(TARGET_COIN_SYMBOL, `Chuyển sang coin tốt hơn ${bestAlternativeCoin.symbol}`, 'LONG');
+                        if (currentShortPosition) await closePosition(TARGET_COIN_SYMBOL, `Chuyển sang coin tốt hơn ${bestAlternativeCoin.symbol}`, 'SHORT');
+                        await cancelAllOpenOrdersForSymbol(TARGET_COIN_SYMBOL);
+                        if (sidewaysGrid.switchDelayTimeout) clearTimeout(sidewaysGrid.switchDelayTimeout);
+                        sidewaysGrid.switchDelayTimeout = setTimeout(async () => {
+                            sidewaysGrid.isClearingForSwitch = false;
+                            const oldCoin = TARGET_COIN_SYMBOL;
+                            TARGET_COIN_SYMBOL = bestAlternativeCoin.symbol;
+                            totalProfit = 0; totalLoss = 0; netPNL = 0; currentLongPosition = null; currentShortPosition = null;
+                            if (marketWs) { marketWs.removeAllListeners(); marketWs.terminate(); marketWs = null; }
+                            setupMarketDataStream(TARGET_COIN_SYMBOL);
+                            await cleanupAndResetCycle(oldCoin, false);
+                            if(botRunning) scheduleNextMainCycle(1000);
+                        }, COIN_SWITCH_DELAY_MS);
+                        return;
+                    }
+                }
+
+                addLog(`Không có coin nào tốt hơn đáng kể. Đánh giá lại mode trên ${TARGET_COIN_SYMBOL}...`);
+                if (currentCoinVol < OVERALL_VOLATILITY_THRESHOLD_VPS1) {
+                    addLog(`[KILL->SIDEWAYS] Vol của ${TARGET_COIN_SYMBOL} (${currentCoinVol.toFixed(2)}%) đã giảm. Chuyển sang Sideways.`);
                     sidewaysGrid.isClearingForSwitch = true;
-                    if (currentLongPosition) await closePosition(TARGET_COIN_SYMBOL, `Chuyển sang coin tốt hơn ${bestAlternativeCoin.symbol}`, 'LONG');
-                    if (currentShortPosition) await closePosition(TARGET_COIN_SYMBOL, `Chuyển sang coin tốt hơn ${bestAlternativeCoin.symbol}`, 'SHORT');
+                    if (currentLongPosition) await closePosition(TARGET_COIN_SYMBOL, `Chuyển sang Sideways do Vol giảm`, 'LONG');
+                    if (currentShortPosition) await closePosition(TARGET_COIN_SYMBOL, `Chuyển sang Sideways do Vol giảm`, 'SHORT');
                     await cancelAllOpenOrdersForSymbol(TARGET_COIN_SYMBOL);
                     if (sidewaysGrid.switchDelayTimeout) clearTimeout(sidewaysGrid.switchDelayTimeout);
                     sidewaysGrid.switchDelayTimeout = setTimeout(async () => {
+                        addLog("Hết chờ dọn lệnh. Kích hoạt Sideways.");
+                        currentBotMode = 'sideways';
                         sidewaysGrid.isClearingForSwitch = false;
-                        const oldCoin = TARGET_COIN_SYMBOL;
-                        TARGET_COIN_SYMBOL = bestAlternativeCoin.symbol;
-                        totalProfit = 0; totalLoss = 0; netPNL = 0; currentLongPosition = null; currentShortPosition = null;
-                        if (marketWs) { marketWs.removeAllListeners(); marketWs.terminate(); marketWs = null; }
-                        setupMarketDataStream(TARGET_COIN_SYMBOL);
-                        await cleanupAndResetCycle(oldCoin, false);
+                        currentLongPosition = null; currentShortPosition = null;
                         if(botRunning) scheduleNextMainCycle(1000);
-                    }, COIN_SWITCH_DELAY_MS);
-                    return;
-                } else {
-                    addLog(`[KILL->SIDEWAYS] Giá về entry. Không có coin tốt hơn. Chuyển sang Sideways.`);
-                    sidewaysGrid.isClearingForSwitch = true;
-                    if (currentLongPosition) await closePosition(TARGET_COIN_SYMBOL, `Chuyển sang Sideways`, 'LONG');
-                    if (currentShortPosition) await closePosition(TARGET_COIN_SYMBOL, `Chuyển sang Sideways`, 'SHORT');
-                    await cancelAllOpenOrdersForSymbol(TARGET_COIN_SYMBOL);
-                    if (sidewaysGrid.switchDelayTimeout) clearTimeout(sidewaysGrid.switchDelayTimeout);
-                    sidewaysGrid.switchDelayTimeout = setTimeout(async () => {
-                         addLog("Hết chờ dọn lệnh. Kích hoạt Sideways.");
-                         currentBotMode = 'sideways';
-                         sidewaysGrid.isClearingForSwitch = false;
-                         currentLongPosition = null; currentShortPosition = null;
-                         if(botRunning) scheduleNextMainCycle(1000);
                     }, MODE_SWITCH_DELAY_MS);
                     return;
+                } else {
+                    addLog(`Vol của ${TARGET_COIN_SYMBOL} (${currentCoinVol.toFixed(2)}%) vẫn cao. Giữ nguyên chế độ Kill.`);
                 }
             }
 
-            if (pA.closedLossAmount > 0 && Math.abs(currentMarketPrice - pairEntry) <= (pairEntry * 0.0005) && !isProcessingTrade) {
-                 addLog(`[KILL REOPEN MỐC 0] Giá ${TARGET_COIN_SYMBOL} về gần entry cặp. Mở lại toàn bộ phần đã đóng.`);
-                 await addPosition(pA, pA.closedLossAmount, "mốc 0 quay đầu mở lại lỗ cả hai");
-                 return;
-            }
-            
             if (winningPos && losingPos && winningPos.partialCloseLossLevels && winningPos.quantity > 0 && winningPos.initialMargin > 0) {
                 const pnlPctWin = (winningPos.unrealizedPnl / winningPos.initialMargin) * 100;
 
@@ -887,10 +888,7 @@ async function manageOpenPosition() {
                 }
 
                 const targetMocRelPnl = winningPos.partialCloseLossLevels[currentMocIndex];
-                const moc5RelPnlVal = winningPos.partialCloseLossLevels[PARTIAL_CLOSE_INDEX_5];
-                const moc8RelPnlVal = winningPos.partialCloseLossLevels[PARTIAL_CLOSE_INDEX_8];
-                if (moc5RelPnlVal === undefined || moc8RelPnlVal === undefined) { addLog(`Lỗi: partialCloseLossLevels không đúng.`); return; }
-
+                
                 if (pnlPctWin >= targetMocRelPnl && losingPos.quantity > 0) {
                     addLog(`[KILL MÓC] ${winningPos.side} ${TARGET_COIN_SYMBOL} đạt Mốc ${currentMocIndex + 1} (PNL ${pnlPctWin.toFixed(1)}% >= ngưỡng ${targetMocRelPnl.toFixed(1)}%).`);
 
@@ -902,9 +900,7 @@ async function manageOpenPosition() {
                     if(await closePartialPosition(losingPos, qtyToCloseLosing)) {
                         winningPos.nextPartialCloseLossIndex++;
                         addLog(`  Đã tăng mốc lệnh thắng ${winningPos.side} lên Mốc ${winningPos.nextPartialCloseLossIndex +1}.`);
-                        
                         addLog(`  [INFO] PNL chưa chốt của lệnh lãi (${winningPos.side}): ${winningPos.unrealizedPnl.toFixed(4)} USDT`);
-
                     } else {
                         addLog(`  Không thể đóng một phần lệnh lỗ ${losingPos.side}. Mốc lệnh thắng không tăng.`);
                     }
@@ -917,24 +913,6 @@ async function manageOpenPosition() {
         } catch (err) { addLog(`Lỗi manageOpenPosition (Kill): ${err.msg || err.message}`); if(err instanceof CriticalApiError && botRunning) await stopBotLogicInternal(`Lỗi manageOpenPosition (Kill) ${TARGET_COIN_SYMBOL}`); }
     } else if (currentBotMode === 'sideways' && sidewaysGrid.isActive) {
         await manageSidewaysGridLogic();
-    } else if (currentBotMode === 'sideways' && !sidewaysGrid.isActive) {
-        if (vps1VolForCurrentCoin !== null && vps1VolForCurrentCoin >= OVERALL_VOLATILITY_THRESHOLD_VPS1) {
-             if (!currentLongPosition && !currentShortPosition) {
-                addLog(`[SIDEWAYS->KILL] Vol VPS1 ${TARGET_COIN_SYMBOL} (${vps1VolForCurrentCoin.toFixed(2)}%) >= ${OVERALL_VOLATILITY_THRESHOLD_VPS1}%. Chuyển sang KILL (từ manageOpenPosition).`);
-                sidewaysGrid.isClearingForSwitch = true;
-                await closeAllSidewaysPositionsAndOrders("Chuyển sang Kill do Vol VPS1 tăng (từ manageOpenPosition)");
-                if(sidewaysGrid.switchDelayTimeout) clearTimeout(sidewaysGrid.switchDelayTimeout);
-                sidewaysGrid.switchDelayTimeout = setTimeout(async () => {
-                    addLog(`Hết chờ đóng lưới (Vol VPS1 tăng). Kích hoạt Kill.`);
-                    currentBotMode = 'kill'; sidewaysGrid.isClearingForSwitch = false;
-                    if (botRunning) scheduleNextMainCycle(1000);
-                }, MODE_SWITCH_DELAY_MS);
-                return;
-            }
-        } else {
-             scheduleNextMainCycle(1000);
-             return;
-        }
     }
 }
 
