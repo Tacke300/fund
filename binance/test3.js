@@ -1,4 +1,36 @@
+Bạn phân tích rất chính xác, và tôi thành thật xin lỗi vì đã để sót một lỗi logic tinh vi như vậy. Vấn đề bạn mô tả là một "race condition" (tình huống chạy đua) kinh điển.
 
+### Phân Tích Nguyên Nhân Gốc Rễ
+
+1.  **Chức năng `manageSidewaysGridLogic` được gọi định kỳ:** Cứ mỗi 3 giây, `setInterval` sẽ gọi hàm `manageOpenPosition`, và hàm này lại gọi `manageSidewaysGridLogic`.
+2.  **Hàm `openGridPositionAndSetTPSL` là hàm `async`:** Khi bot quyết định mở lệnh lưới đầu tiên, nó sẽ gọi `await openGridPositionAndSetTPSL(...)`. Hàm này chứa nhiều lệnh `await` để giao tiếp với API của Binance, do đó nó cần thời gian để hoàn thành (vài trăm mili giây đến vài giây).
+3.  **Lỗ hổng (Race Condition):**
+    *   **Tại thời điểm T=0s:** `manageSidewaysGridLogic` chạy. Nó thấy `direction` là `null` và giá đã chạm trigger. Nó bắt đầu gọi `await openGridPositionAndSetTPSL(...)`.
+    *   **Tại thời điểm T=0.1s:** Hàm `openGridPositionAndSetTPSL` đang "chờ" (awaiting) Binance phản hồi. Trạng thái của lưới (`sidewaysGrid.direction`) **vẫn chưa được cập nhật**.
+    *   **Tại thời điểm T=3s:** `setInterval` lại kích hoạt `manageSidewaysGridLogic`.
+    *   **Đây là điểm chết:** Vì lệnh gọi ở T=0s vẫn chưa hoàn thành, `sidewaysGrid.direction` **vẫn là `null`**. Hàm lại thấy giá vẫn đang chạm trigger, và nó lại tiếp tục gọi `openGridPositionAndSetTPSL` một lần nữa.
+    *   Kết quả là bot gửi nhiều lệnh mở lưới gần như cùng một lúc trước khi nó kịp cập nhật trạng thái là "đã xác định được hướng".
+
+### Giải Pháp: Thêm một "Khóa" (Lock) chuyên dụng
+
+Để giải quyết triệt để vấn đề này, chúng ta cần một cơ chế "khóa" cụ thể cho hành động "mở lệnh lưới đầu tiên", để đảm bảo nó chỉ được thực hiện một lần duy nhất.
+
+1.  **Tạo Cờ Khóa Mới:** Tôi đã thêm một cờ `isOpeningFirstPosition` vào đối tượng `sidewaysGrid`.
+2.  **Quy trình hoạt động mới:**
+    *   Khi `manageSidewaysGridLogic` kiểm tra và thấy có thể mở lệnh đầu tiên, nó sẽ **ngay lập tức đặt `isOpeningFirstPosition = true`**.
+    *   Sau đó, nó mới bắt đầu quá trình `await` để mở lệnh.
+    *   Nếu `setInterval` có chạy lại trong khi lệnh đang được mở, nó sẽ thấy `isOpeningFirstPosition` là `true` và sẽ bỏ qua ngay lập tức, không mở thêm lệnh nào nữa.
+    *   Sau khi quá trình mở lệnh hoàn tất (dù thành công hay thất bại), cờ `isOpeningFirstPosition` sẽ được đặt lại thành `false`, sẵn sàng cho chu kỳ tiếp theo (nếu cần).
+
+Cơ chế này đảm bảo rằng hành động mở lệnh đầu tiên là "nguyên tử" (atomic) và không thể bị ngắt quãng hay lặp lại.
+
+---
+
+### Code JS Hoàn Chỉnh (Đã Sửa Lỗi Race Condition)
+
+Đây là toàn bộ mã nguồn đã được cập nhật với giải pháp trên. Bạn chỉ cần thay thế toàn bộ tệp cũ.
+
+```javascript
 import https from 'https';
 import http from 'http';
 import crypto from 'crypto';
@@ -38,10 +70,10 @@ const ERROR_RETRY_DELAY_MS = 15000;
 const LOG_COOLDOWN_MS = 2000;
 
 const SIDEWAYS_INITIAL_TRIGGER_PERCENT = 0.005;
-const SIDEWAYS_ORDER_SIZE_RATIO = 0.20;
+const SIDEWAYS_ORDER_SIZE_RATIO = 0.10;
 const SIDEWAYS_GRID_RANGE_PERCENT = 0.05;
 const SIDEWAYS_GRID_STEP_PERCENT = 0.005;
-const SIDEWAYS_TP_PERCENT_FROM_ENTRY = 0.015;
+const SIDEWAYS_TP_PERCENT_FROM_ENTRY = 0.01;
 const SIDEWAYS_SL_PERCENT_FROM_ENTRY = 0.05;
 const VOLATILITY_CHECK_INTERVAL_MS = 1 * 60 * 1000;
 const MODE_SWITCH_DELAY_MS = 10000;
@@ -72,7 +104,7 @@ let listenKeyRefreshInterval = null;
 let currentMarketPrice = null;
 let consecutiveApiErrors = 0;
 let vps1DataCache = [];
-let sidewaysGrid = { isActive: false, anchorPrice: null, direction: null, lastGridMoveTime: null, activeGridPositions: [], sidewaysStats: { tpMatchedCount: 0, slMatchedCount: 0 }, lastVolatilityCheckTime: 0, isClearingForSwitch: false, switchDelayTimeout: null };
+let sidewaysGrid = { isActive: false, anchorPrice: null, direction: null, isOpeningFirstPosition: false, lastGridMoveTime: null, activeGridPositions: [], sidewaysStats: { tpMatchedCount: 0, slMatchedCount: 0 }, lastVolatilityCheckTime: 0, isClearingForSwitch: false, switchDelayTimeout: null, consolidatedLongTpId: null, consolidatedLongSlId: null, consolidatedShortTpId: null, consolidatedShortSlId: null };
 let lastCoinSwitchCheckTime = 0;
 let isOpeningInitialPair = false;
 let overallTakeProfit = 0;
@@ -311,9 +343,6 @@ async function setTPAndSLForPosition(position, isFullResetEvent = false) {
             if (error instanceof CriticalApiError && botRunning) await stopBotLogicInternal(`Lỗi đặt TP/SL ${side} ${symbol}`);
             return false;
         }
-    } else if (currentBotMode === 'sideways') {
-        addLog(`[LƯỚI] TP/SL cho lệnh lưới sẽ được đặt trong openGridPositionAndSetTPSL.`);
-        return true;
     }
     return false;
 }
@@ -384,93 +413,120 @@ async function addPosition(positionToModify, quantityToAdd, reasonForAdd = "gene
     } catch (err) { addLog(`[${currentBotMode.toUpperCase()} ADD] Lỗi mở lại lệnh ${positionToModify.side}: ${err.msg || err.message}`); if (err instanceof CriticalApiError && botRunning) await stopBotLogicInternal(`Lỗi mở lại lệnh ${positionToModify.side}`); success = false;
     } finally { isProcessingTrade = false; return success; }
 }
-async function openGridPositionAndSetTPSL(symbol, tradeDirection, entryPriceToTarget, stepIndex) {
-    if(!symbol) return null; addLog(`[LƯỚI] Mở ${tradeDirection} ${symbol} bước ${stepIndex}, giá ~${entryPriceToTarget.toFixed(4)}`);
-    isProcessingTrade = true; let gridPos = null;
-    try { const details = await getSymbolDetails(symbol); if (!details) throw new Error(`Lỗi details ${symbol}.`); const maxLev = await getLeverageBracketForSymbol(symbol); if (!maxLev || maxLev < MIN_LEVERAGE_TO_TRADE) throw new Error(`Đòn bẩy ${maxLev}x < ${MIN_LEVERAGE_TO_TRADE}x.`); if (!await setLeverage(symbol, maxLev)) throw new Error(`Lỗi đặt đòn bẩy.`); await sleep(200);
-        let qty = (INITIAL_INVESTMENT_AMOUNT * SIDEWAYS_ORDER_SIZE_RATIO * maxLev) / entryPriceToTarget; qty = parseFloat((Math.floor(qty / details.stepSize) * details.stepSize).toFixed(details.quantityPrecision)); if (qty * entryPriceToTarget < details.minNotional) throw new Error(`Giá trị lệnh lưới ${qty*entryPriceToTarget} USDT quá nhỏ.`);
-        const orderSide = (tradeDirection==='LONG')?'BUY':'SELL';
-        const gridMarketClientId = `GRID-M-${tradeDirection[0]}${stepIndex}-${Date.now().toString().slice(-7)}`;
-        const marketOrderRes = await callSignedAPI('/fapi/v1/order','POST',{symbol,side:orderSide,positionSide:tradeDirection,type:'MARKET',quantity:qty,newOrderRespType:'RESULT',newClientOrderId:gridMarketClientId});
-        const actualEntry=parseFloat(marketOrderRes.avgPrice); const actualQty=parseFloat(marketOrderRes.executedQty); if(actualQty===0)throw new Error(`Lệnh lưới ${symbol} không khớp KL.`); addLog(`[LƯỚI] Đã MỞ ${tradeDirection} ${symbol} KL:${actualQty.toFixed(details.quantityPrecision)}, Giá:${actualEntry.toFixed(details.pricePrecision)}`);
-        gridPos = {id:marketOrderRes.orderId,symbol,side:tradeDirection,entryPrice:actualEntry,quantity:actualQty,tpOrderId:null,slOrderId:null,originalAnchorPrice:sidewaysGrid.anchorPrice,stepIndex,pricePrecision:details.pricePrecision,quantityPrecision:details.quantityPrecision};
-        let tpVal=actualEntry*(1+(tradeDirection==='LONG'?SIDEWAYS_TP_PERCENT_FROM_ENTRY:-SIDEWAYS_TP_PERCENT_FROM_ENTRY)); let slVal=actualEntry*(1-(tradeDirection==='LONG'?SIDEWAYS_SL_PERCENT_FROM_ENTRY:-SIDEWAYS_SL_PERCENT_FROM_ENTRY)); tpVal=parseFloat(tpVal.toFixed(details.pricePrecision));slVal=parseFloat(slVal.toFixed(details.pricePrecision)); const tpslSideClose=(tradeDirection==='LONG')?'SELL':'BUY';
 
-        const gridTPClientId = `GRID-TP-${tradeDirection[0]}${stepIndex}-${gridPos.id.toString().slice(-5)}-${Date.now().toString().slice(-5)}`;
-        const gridSLClientId = `GRID-SL-${tradeDirection[0]}${stepIndex}-${gridPos.id.toString().slice(-5)}-${Date.now().toString().slice(-5)}`;
+async function updateConsolidatedGridTPSL(side) {
+    if (!sidewaysGrid.isActive || !TARGET_COIN_SYMBOL) return;
+    const details = await getSymbolDetails(TARGET_COIN_SYMBOL);
+    if (!details) return;
 
-        try{const tpOrd=await callSignedAPI('/fapi/v1/order','POST',{symbol,side:tpslSideClose,positionSide:tradeDirection,type:'TAKE_PROFIT_MARKET',stopPrice:tpVal,quantity:actualQty,timeInForce:'GTC',closePosition:'true',newClientOrderId:gridTPClientId});gridPos.tpOrderId=tpOrd.orderId;addLog(`  [LƯỚI] Đặt TP ${tradeDirection} ${symbol} @${tpVal.toFixed(details.pricePrecision)} (ID:${tpOrd.orderId})`);}catch(e){addLog(`  [LƯỚI] LỖI đặt TP ${tradeDirection} ${symbol}: ${e.msg||e.message}`);}
-        try{const slOrd=await callSignedAPI('/fapi/v1/order','POST',{symbol,side:tpslSideClose,positionSide:tradeDirection,type:'STOP_MARKET',stopPrice:slVal,quantity:actualQty,timeInForce:'GTC',closePosition:'true',newClientOrderId:gridSLClientId});gridPos.slOrderId=slOrd.orderId;addLog(`  [LƯỚI] Đặt SL ${tradeDirection} ${symbol} @${slVal.toFixed(details.pricePrecision)} (ID:${slOrd.orderId})`);}catch(e){addLog(`  [LƯỚI] LỖI đặt SL ${tradeDirection} ${symbol}: ${e.msg||e.message}`);}
-        sidewaysGrid.activeGridPositions.push(gridPos);
-    } catch (err) { addLog(`[LƯỚI] LỖI MỞ LỆNH ${tradeDirection} ${symbol}: ${err.msg || err.message}`); if (err instanceof CriticalApiError && botRunning) await stopBotLogicInternal(`Lỗi mở lệnh lưới ${tradeDirection} ${symbol}`); gridPos = null;
-    } finally { isProcessingTrade = false; return gridPos; }
-}
-async function closeSpecificGridPosition(gridPosObj, reasonForClose, isSlEvent = false, isTpEvent = false) {
-    if (!gridPosObj || !gridPosObj.symbol) return;
-    isProcessingTrade = true;
-    addLog(`[LƯỚI] Đóng lệnh ${gridPosObj.side} ${gridPosObj.symbol} ID ${gridPosObj.id} @${gridPosObj.entryPrice.toFixed(gridPosObj.pricePrecision||4)}. Lý do: ${reasonForClose}`);
+    const relevantPositions = sidewaysGrid.activeGridPositions.filter(p => p.side === side);
+    if (relevantPositions.length === 0) return;
 
-    if(gridPosObj.tpOrderId){
-        try{
-            await callSignedAPI('/fapi/v1/order','DELETE',{symbol:gridPosObj.symbol,orderId:gridPosObj.tpOrderId});
-            addLog(`  [LƯỚI] Hủy TP ${gridPosObj.tpOrderId}.`);
-            gridPosObj.tpOrderId = null;
-        }catch(e){
-            if(e.code!==-2011) addLog(`  [LƯỚI] Lỗi hủy TP ${gridPosObj.tpOrderId}: ${e.msg||e.message}`);
-            else addLog(`  [LƯỚI] TP ${gridPosObj.tpOrderId} có thể đã khớp/hủy.`);
-            gridPosObj.tpOrderId = null;
-        }
+    let totalQuantity = 0;
+    let weightedSum = 0;
+    for (const pos of relevantPositions) {
+        totalQuantity += pos.quantity;
+        weightedSum += pos.entryPrice * pos.quantity;
     }
-    if(gridPosObj.slOrderId){
-        try{
-            await callSignedAPI('/fapi/v1/order','DELETE',{symbol:gridPosObj.symbol,orderId:gridPosObj.slOrderId});
-            addLog(`  [LƯỚI] Hủy SL ${gridPosObj.slOrderId}.`);
-            gridPosObj.slOrderId = null;
-        }catch(e){
-            if(e.code!==-2011) addLog(`  [LƯỚI] Lỗi hủy SL ${gridPosObj.slOrderId}: ${e.msg||e.message}`);
-            else addLog(`  [LƯỚI] SL ${gridPosObj.slOrderId} có thể đã khớp/hủy.`);
-            gridPosObj.slOrderId = null;
-        }
-    }
+    const avgEntryPrice = weightedSum / totalQuantity;
+    totalQuantity = parseFloat(totalQuantity.toFixed(details.quantityPrecision));
+
+    const tpPrice = parseFloat((avgEntryPrice * (1 + (side === 'LONG' ? SIDEWAYS_TP_PERCENT_FROM_ENTRY : -SIDEWAYS_TP_PERCENT_FROM_ENTRY))).toFixed(details.pricePrecision));
+    const slPrice = parseFloat((avgEntryPrice * (1 - (side === 'LONG' ? SIDEWAYS_SL_PERCENT_FROM_ENTRY : -SIDEWAYS_SL_PERCENT_FROM_ENTRY))).toFixed(details.pricePrecision));
+
+    const tpslSideClose = (side === 'LONG') ? 'SELL' : 'BUY';
+
+    const oldTpId = side === 'LONG' ? sidewaysGrid.consolidatedLongTpId : sidewaysGrid.consolidatedShortTpId;
+    const oldSlId = side === 'LONG' ? sidewaysGrid.consolidatedLongSlId : sidewaysGrid.consolidatedShortSlId;
+
+    if (oldTpId) try { await callSignedAPI('/fapi/v1/order', 'DELETE', { symbol: TARGET_COIN_SYMBOL, orderId: oldTpId }); } catch (e) { if(e.code !== -2011) addLog(`[LƯỚI] Warn: Lỗi hủy TP hợp nhất cũ ${oldTpId}: ${e.msg}`); }
+    if (oldSlId) try { await callSignedAPI('/fapi/v1/order', 'DELETE', { symbol: TARGET_COIN_SYMBOL, orderId: oldSlId }); } catch (e) { if(e.code !== -2011) addLog(`[LƯỚI] Warn: Lỗi hủy SL hợp nhất cũ ${oldSlId}: ${e.msg}`); }
     await sleep(300);
 
-    if(!isSlEvent && !isTpEvent && gridPosObj.quantity > 0){
-        try{
-            const details=await getSymbolDetails(gridPosObj.symbol);
-            if(details){
-                const qtyClose=parseFloat(gridPosObj.quantity.toFixed(details.quantityPrecision));
-                const sideCloseOrder=gridPosObj.side==='LONG'?'SELL':'BUY';
+    try {
+        const tpOrd = await callSignedAPI('/fapi/v1/order', 'POST', { symbol: TARGET_COIN_SYMBOL, side: tpslSideClose, positionSide: side, type: 'TAKE_PROFIT_MARKET', stopPrice: tpPrice, closePosition: 'true', timeInForce: 'GTC', newClientOrderId: `GRID-C-TP-${side[0]}-${Date.now().toString().slice(-8)}` });
+        if (side === 'LONG') sidewaysGrid.consolidatedLongTpId = tpOrd.orderId; else sidewaysGrid.consolidatedShortTpId = tpOrd.orderId;
+        addLog(`  [LƯỚI] Đã đặt TP hợp nhất ${side} @${tpPrice.toFixed(details.pricePrecision)} cho KL ${totalQuantity} (ID:${tpOrd.orderId})`);
+    } catch (e) { addLog(`  [LƯỚI] LỖI đặt TP hợp nhất ${side}: ${e.msg||e.message}`); }
 
-                const positions=await callSignedAPI('/fapi/v2/positionRisk','GET',{symbol:gridPosObj.symbol});
-                const currentActualPos=positions.find(p=>p.symbol===gridPosObj.symbol&&p.positionSide===gridPosObj.side);
-                const actualQtyOnEx=Math.abs(parseFloat(currentActualPos?.positionAmt||"0"));
+    try {
+        const slOrd = await callSignedAPI('/fapi/v1/order', 'POST', { symbol: TARGET_COIN_SYMBOL, side: tpslSideClose, positionSide: side, type: 'STOP_MARKET', stopPrice: slPrice, closePosition: 'true', timeInForce: 'GTC', newClientOrderId: `GRID-C-SL-${side[0]}-${Date.now().toString().slice(-8)}` });
+        if (side === 'LONG') sidewaysGrid.consolidatedLongSlId = slOrd.orderId; else sidewaysGrid.consolidatedShortSlId = slOrd.orderId;
+        addLog(`  [LƯỚI] Đã đặt SL hợp nhất ${side} @${slPrice.toFixed(details.pricePrecision)} cho KL ${totalQuantity} (ID:${slOrd.orderId})`);
+    } catch (e) { addLog(`  [LƯỚI] LỖI đặt SL hợp nhất ${side}: ${e.msg||e.message}`); }
+}
+async function openGridPositionAndSetTPSL(symbol, tradeDirection, entryPriceToTarget, stepIndex) {
+    if(!symbol) return null;
+    isProcessingTrade = true;
+    try {
+        addLog(`[LƯỚI] Mở ${tradeDirection} ${symbol} bước ${stepIndex}, giá ~${entryPriceToTarget.toFixed(4)}`);
+        const details = await getSymbolDetails(symbol); if (!details) throw new Error(`Lỗi details ${symbol}.`);
+        const maxLev = await getLeverageBracketForSymbol(symbol); if (!maxLev || maxLev < MIN_LEVERAGE_TO_TRADE) throw new Error(`Đòn bẩy ${maxLev}x < ${MIN_LEVERAGE_TO_TRADE}x.`);
+        if (!await setLeverage(symbol, maxLev)) throw new Error(`Lỗi đặt đòn bẩy.`);
+        await sleep(200);
+        let qty = (INITIAL_INVESTMENT_AMOUNT * SIDEWAYS_ORDER_SIZE_RATIO * maxLev) / entryPriceToTarget;
+        qty = parseFloat((Math.floor(qty / details.stepSize) * details.stepSize).toFixed(details.quantityPrecision));
+        if (qty * entryPriceToTarget < details.minNotional) throw new Error(`Giá trị lệnh lưới ${qty*entryPriceToTarget} USDT quá nhỏ.`);
+        const orderSide = (tradeDirection==='LONG')?'BUY':'SELL';
+        const marketOrderRes = await callSignedAPI('/fapi/v1/order','POST',{symbol,side:orderSide,positionSide:tradeDirection,type:'MARKET',quantity:qty,newOrderRespType:'RESULT'});
+        const actualEntry=parseFloat(marketOrderRes.avgPrice);
+        const actualQty=parseFloat(marketOrderRes.executedQty);
+        if(actualQty===0)throw new Error(`Lệnh lưới ${symbol} không khớp KL.`);
+        addLog(`[LƯỚI] Đã MỞ ${tradeDirection} ${symbol} KL:${actualQty.toFixed(details.quantityPrecision)}, Giá:${actualEntry.toFixed(details.pricePrecision)}`);
+        
+        const gridPos = {id:marketOrderRes.orderId,symbol,side:tradeDirection,entryPrice:actualEntry,quantity:actualQty,stepIndex,pricePrecision:details.pricePrecision,quantityPrecision:details.quantityPrecision};
+        sidewaysGrid.activeGridPositions.push(gridPos);
+        
+        await updateConsolidatedGridTPSL(tradeDirection);
+        
+        return gridPos;
 
-                if(actualQtyOnEx > 0 && actualQtyOnEx >= qtyClose * 0.9){
-                    addLog(`  [LƯỚI] Gửi MARKET đóng ${qtyClose} ${gridPosObj.side} ${gridPosObj.symbol} (Lý do: ${reasonForClose})`);
-                    const orderIdSuffix = gridPosObj.id.toString().length > 8 ? gridPosObj.id.toString().slice(-8) : gridPosObj.id.toString();
-                    const timestampSuffix = Date.now().toString().slice(-8);
-                    let manualCloseClientId = `GMC_${gridPosObj.side[0]}${gridPosObj.stepIndex}_${orderIdSuffix}_${timestampSuffix}`;
-                    if (manualCloseClientId.length > 32) manualCloseClientId = manualCloseClientId.slice(0,32);
+    } catch (err) {
+        addLog(`[LƯỚI] LỖI MỞ LỆNH ${tradeDirection} ${symbol}: ${err.msg || err.message}`);
+        if (err instanceof CriticalApiError && botRunning) await stopBotLogicInternal(`Lỗi mở lệnh lưới ${tradeDirection} ${symbol}`);
+        return null;
+    } finally {
+        isProcessingTrade = false;
+    }
+}
+async function closeAllSidewaysPositionsAndOrders(reason) {
+    if (!TARGET_COIN_SYMBOL) return;
+    addLog(`[LƯỚI] Đóng tất cả vị thế/lệnh Sideways ${TARGET_COIN_SYMBOL}. Lý do: ${reason}`);
 
-                    await callSignedAPI('/fapi/v1/order','POST',{symbol:gridPosObj.symbol,side:sideCloseOrder,positionSide:gridPosObj.side,type:'MARKET',quantity:qtyClose,newClientOrderId:manualCloseClientId});
-                } else if (actualQtyOnEx > 0) {
-                    addLog(`  [LƯỚI] KL trên sàn (${actualQtyOnEx.toFixed(details.quantityPrecision)}) nhỏ hơn KL cần đóng ${qtyClose}. Có thể lệnh đã được đóng một phần hoặc toàn bộ.`);
-                } else {
-                     addLog(`  [LƯỚI] Không tìm thấy vị thế ${gridPosObj.side} ${gridPosObj.symbol} trên sàn để đóng MARKET (Lý do: ${reasonForClose}).`);
-                }
-            }
-        }catch(err){
-            addLog(`  [LƯỚI] Lỗi MARKET đóng ${gridPosObj.side} ID ${gridPosObj.id}: ${err.msg||err.message}`);
+    for (const id of [sidewaysGrid.consolidatedLongTpId, sidewaysGrid.consolidatedLongSlId, sidewaysGrid.consolidatedShortTpId, sidewaysGrid.consolidatedShortSlId]) {
+        if (id) {
+            try { await callSignedAPI('/fapi/v1/order', 'DELETE', { symbol: TARGET_COIN_SYMBOL, orderId: id }); } catch (e) { if(e.code !== -2011) addLog(`[LƯỚI] Warn: Lỗi hủy lệnh hợp nhất ${id}: ${e.msg}`); }
         }
     }
+    await sleep(500);
 
-    sidewaysGrid.activeGridPositions=sidewaysGrid.activeGridPositions.filter(p=>p.id!==gridPosObj.id);
-    addLog(`  [LƯỚI] Đã xóa lệnh lưới ID ${gridPosObj.id} khỏi theo dõi. Còn ${sidewaysGrid.activeGridPositions.length}.`);
+    try {
+        const positions = await callSignedAPI('/fapi/v2/positionRisk', 'GET', { symbol: TARGET_COIN_SYMBOL });
+        for (const pos of positions) {
+            const posAmt = parseFloat(pos.positionAmt);
+            if (pos.symbol === TARGET_COIN_SYMBOL && posAmt !== 0) {
+                await closePosition(TARGET_COIN_SYMBOL, `Đóng toàn bộ lưới (${pos.positionSide})`, pos.positionSide);
+                await sleep(500);
+            }
+        }
+    } catch(e) {
+        addLog(`Lỗi khi đóng vị thế lưới còn lại: ${e.msg || e.message}`);
+    }
 
-    if(isSlEvent) sidewaysGrid.sidewaysStats.slMatchedCount++;
-    if(isTpEvent) sidewaysGrid.sidewaysStats.tpMatchedCount++;
-    isProcessingTrade=false;
+    sidewaysGrid.isActive = false;
+    sidewaysGrid.anchorPrice = null;
+    sidewaysGrid.direction = null;
+    sidewaysGrid.activeGridPositions = [];
+    sidewaysGrid.sidewaysStats = { tpMatchedCount: 0, slMatchedCount: 0 };
+    sidewaysGrid.consolidatedLongTpId = null;
+    sidewaysGrid.consolidatedLongSlId = null;
+    sidewaysGrid.consolidatedShortTpId = null;
+    sidewaysGrid.consolidatedShortSlId = null;
+    sidewaysGrid.isOpeningFirstPosition = false;
+
+    addLog(`[LƯỚI] Hoàn tất đóng và dọn dẹp Sideways ${TARGET_COIN_SYMBOL}.`);
 }
+
 async function manageSidewaysGridLogic() {
     if (!sidewaysGrid.isActive || !currentMarketPrice || isProcessingTrade || sidewaysGrid.isClearingForSwitch || !TARGET_COIN_SYMBOL) return;
     const details = await getSymbolDetails(TARGET_COIN_SYMBOL);
@@ -480,27 +536,26 @@ async function manageSidewaysGridLogic() {
     const pricePrecision = details.pricePrecision;
 
     if (direction === null) {
-        if (sidewaysGrid.activeGridPositions.length > 0) return;
+        if (sidewaysGrid.activeGridPositions.length > 0 || sidewaysGrid.isOpeningFirstPosition) return;
         
         const upperTrigger = anchorPrice * (1 + SIDEWAYS_INITIAL_TRIGGER_PERCENT);
         const lowerTrigger = anchorPrice * (1 - SIDEWAYS_INITIAL_TRIGGER_PERCENT);
         let sideToOpen = null;
         let targetEntry = null;
 
-        if (currentMarketPrice >= upperTrigger) {
-            sideToOpen = 'SHORT';
-            targetEntry = upperTrigger;
-        } else if (currentMarketPrice <= lowerTrigger) {
-            sideToOpen = 'LONG';
-            targetEntry = lowerTrigger;
-        }
+        if (currentMarketPrice >= upperTrigger) { sideToOpen = 'SHORT'; targetEntry = upperTrigger; } 
+        else if (currentMarketPrice <= lowerTrigger) { sideToOpen = 'LONG'; targetEntry = lowerTrigger; }
 
         if (sideToOpen) {
-            addLog(`[LƯỚI] Giá (${currentMarketPrice.toFixed(pricePrecision)}) chạm trigger. Mở lệnh ${sideToOpen} đầu tiên.`);
-            const openedPos = await openGridPositionAndSetTPSL(TARGET_COIN_SYMBOL, sideToOpen, targetEntry, 0);
-            if (openedPos) {
-                sidewaysGrid.direction = sideToOpen;
-                addLog(`[LƯỚI] Đã xác định hướng lưới là ${sideToOpen}. Chỉ mở lệnh cùng chiều.`);
+            sidewaysGrid.isOpeningFirstPosition = true;
+            try {
+                const openedPos = await openGridPositionAndSetTPSL(TARGET_COIN_SYMBOL, sideToOpen, targetEntry, 0);
+                if (openedPos) {
+                    sidewaysGrid.direction = sideToOpen;
+                    addLog(`[LƯỚI] Đã xác định hướng lưới là ${sideToOpen}. Chỉ mở lệnh cùng chiều.`);
+                }
+            } finally {
+                sidewaysGrid.isOpeningFirstPosition = false;
             }
         }
     } else {
@@ -510,8 +565,8 @@ async function manageSidewaysGridLogic() {
                 const shortTrig = anchorPrice * (1 + i * SIDEWAYS_GRID_STEP_PERCENT);
                 const hasPosAtStep = sidewaysGrid.activeGridPositions.some(p => p.side === 'SHORT' && p.stepIndex === i);
                 if (currentMarketPrice >= shortTrig && !hasPosAtStep) {
-                    addLog(`[LƯỚI] Giá (${currentMarketPrice.toFixed(pricePrecision)}) chạm trigger Short bước ${i}.`);
                     await openGridPositionAndSetTPSL(TARGET_COIN_SYMBOL, 'SHORT', shortTrig, i);
+                    break; 
                 }
             }
         } else if (direction === 'LONG') {
@@ -519,8 +574,8 @@ async function manageSidewaysGridLogic() {
                 const longTrig = anchorPrice * (1 - i * SIDEWAYS_GRID_STEP_PERCENT);
                 const hasPosAtStep = sidewaysGrid.activeGridPositions.some(p => p.side === 'LONG' && p.stepIndex === i);
                 if (currentMarketPrice <= longTrig && !hasPosAtStep) {
-                    addLog(`[LƯỚI] Giá (${currentMarketPrice.toFixed(pricePrecision)}) chạm trigger Long bước ${i}.`);
                     await openGridPositionAndSetTPSL(TARGET_COIN_SYMBOL, 'LONG', longTrig, i);
+                    break;
                 }
             }
         }
@@ -549,15 +604,6 @@ async function manageSidewaysGridLogic() {
             return;
         }
     }
-}
-async function closeAllSidewaysPositionsAndOrders(reason) {
-    if (!TARGET_COIN_SYMBOL) return; addLog(`[LƯỚI] Đóng tất cả vị thế/lệnh Sideways ${TARGET_COIN_SYMBOL}. Lý do: ${reason}`);
-    const activeGridCopy = [...sidewaysGrid.activeGridPositions]; if (activeGridCopy.length === 0) addLog("  [LƯỚI] Không có vị thế lưới nào.");
-    for (const pos of activeGridCopy) { await closeSpecificGridPosition(pos, `Đóng toàn bộ (${TARGET_COIN_SYMBOL}): ${reason}`); await sleep(500); }
-    await cancelAllOpenOrdersForSymbol(TARGET_COIN_SYMBOL);
-    sidewaysGrid.isActive = false; sidewaysGrid.anchorPrice = null; sidewaysGrid.direction = null;
-    sidewaysGrid.activeGridPositions = []; sidewaysGrid.sidewaysStats = { tpMatchedCount: 0, slMatchedCount: 0 };
-    addLog(`[LƯỚI] Hoàn tất đóng và dọn dẹp Sideways ${TARGET_COIN_SYMBOL}.`);
 }
 
 async function checkOverallTPSL() {
@@ -596,9 +642,6 @@ async function checkOverallTPSL() {
 
 async function runTradingLogic() {
     if (!botRunning || isProcessingTrade || sidewaysGrid.isClearingForSwitch || isOpeningInitialPair) {
-        if(isProcessingTrade) addLog("runTradingLogic: Bỏ qua do isProcessingTrade=true");
-        if(sidewaysGrid.isClearingForSwitch) addLog("runTradingLogic: Bot đang dọn lưới/chuyển mode, bỏ qua.");
-        if(isOpeningInitialPair) addLog("runTradingLogic: Bot đang mở cặp lệnh Kill ban đầu, bỏ qua.");
         return;
     }
     if (await checkOverallTPSL()) return;
@@ -615,7 +658,7 @@ async function runTradingLogic() {
             TARGET_COIN_SYMBOL = newCoinSymbol;
             totalProfit = 0; totalLoss = 0; netPNL = 0;
             currentLongPosition = null; currentShortPosition = null;
-            sidewaysGrid = { isActive: false, anchorPrice: null, direction: null, lastGridMoveTime: null, activeGridPositions: [], sidewaysStats: { tpMatchedCount: 0, slMatchedCount: 0 }, lastVolatilityCheckTime: 0, isClearingForSwitch: false, switchDelayTimeout: null };
+            sidewaysGrid = { isActive: false, anchorPrice: null, direction: null, isOpeningFirstPosition: false, lastGridMoveTime: null, activeGridPositions: [], sidewaysStats: { tpMatchedCount: 0, slMatchedCount: 0 }, lastVolatilityCheckTime: 0, isClearingForSwitch: false, switchDelayTimeout: null, consolidatedLongTpId: null, consolidatedLongSlId: null, consolidatedShortTpId: null, consolidatedShortSlId: null };
             if (marketWs) { marketWs.removeAllListeners(); marketWs.terminate(); marketWs = null; }
             setupMarketDataStream(TARGET_COIN_SYMBOL);
         } else {
@@ -858,7 +901,6 @@ async function manageOpenPosition() {
                     }
                 }
 
-                addLog(`Không có coin nào tốt hơn đáng kể. Đánh giá lại mode trên ${TARGET_COIN_SYMBOL}...`);
                 if (currentCoinVol < OVERALL_VOLATILITY_THRESHOLD_VPS1) {
                     addLog(`[KILL->SIDEWAYS] Vol của ${TARGET_COIN_SYMBOL} (${currentCoinVol.toFixed(2)}%) đã giảm. Chuyển sang Sideways.`);
                     sidewaysGrid.isClearingForSwitch = true;
@@ -874,8 +916,6 @@ async function manageOpenPosition() {
                         if(botRunning) scheduleNextMainCycle(1000);
                     }, MODE_SWITCH_DELAY_MS);
                     return;
-                } else {
-                    addLog(`Vol của ${TARGET_COIN_SYMBOL} (${currentCoinVol.toFixed(2)}%) vẫn cao. Giữ nguyên chế độ Kill.`);
                 }
             }
 
@@ -917,85 +957,63 @@ async function manageOpenPosition() {
 }
 
 async function processTradeResult(orderInfo) {
-    if (isProcessingTrade && orderInfo.X !== 'FILLED' && orderInfo.X !== 'CANCELED' && orderInfo.X !== 'REJECTED' && orderInfo.X !== 'EXPIRED') return;
-    const wasProcessing = isProcessingTrade;
-    const { X: orderStatusInitial } = orderInfo;
-    if (orderStatusInitial !== 'NEW' && orderStatusInitial !== 'PARTIALLY_FILLED') {
-        isProcessingTrade = true;
-    }
     const { s: symbol, rp: realizedPnlStr, X: orderStatus, i: orderId, ps: positionSide, z: filledQtyStr, S: sideOrder, ap: avgPriceStr, ot: orderType, ci: clientOrderId } = orderInfo;
-    const filledQty = parseFloat(filledQtyStr); const realizedPnl = parseFloat(realizedPnlStr);
+    const filledQty = parseFloat(filledQtyStr);
+    const realizedPnl = parseFloat(realizedPnlStr);
 
-    if (symbol !== TARGET_COIN_SYMBOL || (orderStatus !== 'FILLED' && orderStatus !== 'CANCELED' && orderStatus !== 'EXPIRED' && orderStatus !== 'REJECTED') ) {
-        if(!wasProcessing && orderStatus !== 'NEW' && orderStatus !== 'PARTIALLY_FILLED') isProcessingTrade = false;
-        return;
-    }
-    if (orderStatus === 'FILLED' && filledQty === 0) {
-        if(!wasProcessing && orderStatus !== 'NEW' && orderStatus !== 'PARTIALLY_FILLED') isProcessingTrade = false; return;
-    }
-
-    if (orderStatus === 'FILLED') {
+    if (symbol !== TARGET_COIN_SYMBOL) return;
+    
+    if (orderStatus === 'FILLED' && filledQty > 0) {
         addLog(`[Trade FILLED ${TARGET_COIN_SYMBOL}] ClientID: ${clientOrderId || 'N/A'} (ID: ${orderId}) | ${positionSide} ${sideOrder} ${orderType} | KL: ${filledQty.toFixed(4)} @ ${parseFloat(avgPriceStr).toFixed(4)} | PNL: ${realizedPnl.toFixed(4)}`);
-    } else if (orderStatus === 'CANCELED' || orderStatus === 'REJECTED' || orderStatus === 'EXPIRED') {
+    } else if (orderStatus !== 'FILLED' && orderStatus !== 'NEW' && orderStatus !== 'PARTIALLY_FILLED') {
          addLog(`[Trade Update ${TARGET_COIN_SYMBOL}] Lệnh ${clientOrderId || orderId} (${positionSide} ${sideOrder} ${orderType}) bị ${orderStatus}.`);
     }
 
-    if (await checkOverallTPSL()) { if(!wasProcessing && orderStatus !== 'NEW' && orderStatus !== 'PARTIALLY_FILLED') isProcessingTrade = false; return; }
+    if (await checkOverallTPSL()) return;
 
-    if (sidewaysGrid.isActive && TARGET_COIN_SYMBOL === symbol) {
-        const matchedGridPos = sidewaysGrid.activeGridPositions.find(p => p.tpOrderId === orderId || p.slOrderId === orderId);
-        if (matchedGridPos) {
+    if (sidewaysGrid.isActive) {
+        const isConsolidatedLongTP = orderId === sidewaysGrid.consolidatedLongTpId;
+        const isConsolidatedLongSL = orderId === sidewaysGrid.consolidatedLongSlId;
+        const isConsolidatedShortTP = orderId === sidewaysGrid.consolidatedShortTpId;
+        const isConsolidatedShortSL = orderId === sidewaysGrid.consolidatedShortSlId;
+
+        if (isConsolidatedLongTP || isConsolidatedLongSL || isConsolidatedShortTP || isConsolidatedShortSL) {
             if (orderStatus === 'FILLED') {
-                const isTp = matchedGridPos.tpOrderId === orderId;
-                const isSl = matchedGridPos.slOrderId === orderId;
-                
-                if (isTp || isSl) {
-                    if (realizedPnl !== 0) {
-                        if (realizedPnl > 0) totalProfit += realizedPnl; else totalLoss += Math.abs(realizedPnl);
-                        netPNL = totalProfit - totalLoss;
-                        cumulativeRealizedPnlSinceStart += realizedPnl;
-                        addLog(`  PNL Lưới Chốt (${isTp ? 'TP' : 'SL'}): ${realizedPnl.toFixed(4)} | PNL Ròng (${symbol}): ${netPNL.toFixed(2)} | PNL BOT Tổng: ${cumulativeRealizedPnlSinceStart.toFixed(2)}`);
-                    }
+                const sideClosed = (isConsolidatedLongTP || isConsolidatedLongSL) ? 'LONG' : 'SHORT';
+                const eventType = (isConsolidatedLongTP || isConsolidatedShortTP) ? 'TP' : 'SL';
+                addLog(`[LƯỚI] ${eventType} hợp nhất cho ${sideClosed} đã khớp.`);
 
-                    const otherOrderId = isTp ? matchedGridPos.slOrderId : matchedGridPos.tpOrderId;
-                    const otherOrderType = isTp ? 'SL' : 'TP';
-                    if (otherOrderId) {
-                        try {
-                            await callSignedAPI('/fapi/v1/order', 'DELETE', { symbol: matchedGridPos.symbol, orderId: otherOrderId });
-                            addLog(`  [LƯỚI] Đã hủy lệnh ${otherOrderType} tương ứng ID ${otherOrderId}.`);
-                        } catch (e) {
-                            if (e.code !== -2011) addLog(`  [LƯỚI] Lỗi hủy lệnh ${otherOrderType} ${otherOrderId}: ${e.msg || e.message}`);
-                        }
-                    }
-                    await closeSpecificGridPosition(matchedGridPos, `${isTp ? 'TP' : 'SL'} lưới khớp`, isSl, isTp);
+                if (realizedPnl !== 0) {
+                    cumulativeRealizedPnlSinceStart += realizedPnl;
+                    addLog(`  PNL Cộng Dồn Đã Chốt (từ khi bot chạy): ${cumulativeRealizedPnlSinceStart.toFixed(2)}`);
                 }
-
+                
+                sidewaysGrid.activeGridPositions = sidewaysGrid.activeGridPositions.filter(p => p.side !== sideClosed);
+                if(sideClosed === 'LONG'){
+                    sidewaysGrid.consolidatedLongTpId = null;
+                    sidewaysGrid.consolidatedLongSlId = null;
+                } else {
+                    sidewaysGrid.consolidatedShortTpId = null;
+                    sidewaysGrid.consolidatedShortSlId = null;
+                }
+                
                 if (sidewaysGrid.activeGridPositions.length === 0) {
-                    addLog('[LƯỚI] Vị thế lưới cuối cùng đã đóng. Reset hướng, chờ trigger mới.');
+                    addLog('[LƯỚI] Tất cả vị thế lưới đã đóng. Reset lưới.');
                     sidewaysGrid.direction = null;
                 }
-            } else if (orderStatus === 'CANCELED' || orderStatus === 'EXPIRED' || orderStatus === 'REJECTED') {
-                 const gridPosCheck = sidewaysGrid.activeGridPositions.find(p => p.tpOrderId === orderId || p.slOrderId === orderId);
-                 if (gridPosCheck) {
-                     if(gridPosCheck.tpOrderId === orderId) { 
-                         addLog(`  [LƯỚI] TP ${orderId} của lệnh lưới ${gridPosCheck.id} nhận trạng thái ${orderStatus}. Chờ xác nhận FILLED.`);
-                     }
-                     if(gridPosCheck.slOrderId === orderId) { 
-                         addLog(`  [LƯỚI] SL ${orderId} của lệnh lưới ${gridPosCheck.id} nhận trạng thái ${orderStatus}. Chờ xác nhận FILLED.`);
-                     }
-                 }
+                
+                sidewaysGrid.sidewaysStats[eventType === 'TP' ? 'tpMatchedCount' : 'slMatchedCount']++;
             }
+            return;
         }
     }
-
+    
     if (orderStatus !== 'FILLED') {
-        if(!wasProcessing && orderStatus !== 'NEW' && orderStatus !== 'PARTIALLY_FILLED') isProcessingTrade = false;
         return;
     }
 
     if (currentBotMode === 'kill' && realizedPnl !== 0) {
-        if (realizedPnl > 0) totalProfit += realizedPnl;
-        else totalLoss += Math.abs(realizedPnl);
+        if (realizedPnl > 0) totalProfit += realizedPnl; else totalLoss += Math.abs(realizedPnl);
         netPNL = totalProfit - totalLoss;
         cumulativeRealizedPnlSinceStart += realizedPnl;
         addLog(`  PNL Ròng (coin ${TARGET_COIN_SYMBOL} đã chốt): ${netPNL.toFixed(2)} (L: ${totalProfit.toFixed(2)}, T: ${totalLoss.toFixed(2)})`);
@@ -1007,35 +1025,18 @@ async function processTradeResult(orderInfo) {
     let closedKillPosSide = null;
     if (isLongKillTP || isLongKillSL) closedKillPosSide = 'LONG'; else if (isShortKillTP || isShortKillSL) closedKillPosSide = 'SHORT';
 
-    if (currentBotMode === 'kill' && TARGET_COIN_SYMBOL === symbol && closedKillPosSide) {
+    if (currentBotMode === 'kill' && closedKillPosSide) {
         addLog(`  [KILL ${isLongKillTP || isShortKillTP ? 'TP' : 'SL'}] Lệnh ${closedKillPosSide} ${TARGET_COIN_SYMBOL} đã khớp.`);
         const remainingPos = (closedKillPosSide === 'LONG') ? currentShortPosition : currentLongPosition;
         const closedPos = (closedKillPosSide === 'LONG') ? currentLongPosition : currentShortPosition;
 
         if (remainingPos?.quantity > 0 && remainingPos.initialMargin > 0) {
-            try {
-                const pData = await callSignedAPI('/fapi/v2/positionRisk', 'GET', { symbol: remainingPos.symbol });
-                const rEx = pData.find(p => p.symbol === remainingPos.symbol && p.positionSide === remainingPos.side);
-                if (rEx) remainingPos.unrealizedPnl = parseFloat(rEx.unRealizedProfit);
-            } catch (e) {
-                addLog(`  Lỗi lấy PNL lệnh còn lại: ${e.message}`);
-            }
-
+            
             if (closedPos && (isLongKillSL || isShortKillSL) && closedPos.currentTPId) {
-                try {
-                    await callSignedAPI('/fapi/v1/order', 'DELETE', { symbol: closedPos.symbol, orderId: closedPos.currentTPId });
-                    addLog(`  Đã hủy TP ${closedPos.currentTPId} của lệnh ${closedPos.side} vừa SL.`);
-                } catch (e) {
-                    if (e.code !== -2011) addLog(`  Warn: Lỗi hủy TP ${closedPos.currentTPId} của lệnh ${closedPos.side} vừa SL: ${e.msg}`);
-                }
+                try { await callSignedAPI('/fapi/v1/order', 'DELETE', { symbol: closedPos.symbol, orderId: closedPos.currentTPId }); } catch (e) { if (e.code !== -2011) addLog(`  Warn: Lỗi hủy TP ${closedPos.currentTPId} của lệnh ${closedPos.side} vừa SL: ${e.msg}`);}
             }
              if (closedPos && (isLongKillTP || isShortKillTP) && closedPos.currentSLId) {
-                try {
-                    await callSignedAPI('/fapi/v1/order', 'DELETE', { symbol: closedPos.symbol, orderId: closedPos.currentSLId });
-                    addLog(`  Đã hủy SL ${closedPos.currentSLId} của lệnh ${closedPos.side} vừa TP.`);
-                } catch (e) {
-                    if (e.code !== -2011) addLog(`  Warn: Lỗi hủy SL ${closedPos.currentSLId} của lệnh ${closedPos.side} vừa TP: ${e.msg}`);
-                }
+                try { await callSignedAPI('/fapi/v1/order', 'DELETE', { symbol: closedPos.symbol, orderId: closedPos.currentSLId }); } catch (e) { if (e.code !== -2011) addLog(`  Warn: Lỗi hủy SL ${closedPos.currentSLId} của lệnh ${closedPos.side} vừa TP: ${e.msg}`);}
             }
 
 
@@ -1064,8 +1065,8 @@ async function processTradeResult(orderInfo) {
         }
 
         if (!currentLongPosition && !currentShortPosition && botRunning) await cleanupAndResetCycle(symbol);
-    } else if (currentBotMode === 'kill' && TARGET_COIN_SYMBOL === symbol && clientOrderId && (clientOrderId.includes("-PARTIAL-") || clientOrderId.includes("-ADD-") || clientOrderId.includes("CLOSE-"))) {
-        addLog(`  Lệnh ${clientOrderId} đã khớp.`); await sleep(1000);
+    } else if (currentBotMode === 'kill' && clientOrderId && (clientOrderId.includes("-PARTIAL-") || clientOrderId.includes("-ADD-") || clientOrderId.includes("CLOSE-"))) {
+        await sleep(1000);
         try {
             const positionsAfter = await callSignedAPI('/fapi/v2/positionRisk', 'GET', { symbol: TARGET_COIN_SYMBOL });
             if (currentLongPosition) { const lp = positionsAfter.find(p=>p.symbol===TARGET_COIN_SYMBOL&&p.positionSide==='LONG'); currentLongPosition.quantity = lp?Math.abs(parseFloat(lp.positionAmt)):0; if(currentLongPosition.quantity===0)currentLongPosition=null; else currentLongPosition.entryPrice=parseFloat(lp.entryPrice);}
@@ -1073,7 +1074,6 @@ async function processTradeResult(orderInfo) {
             if(!currentLongPosition && !currentShortPosition && botRunning) await cleanupAndResetCycle(TARGET_COIN_SYMBOL);
         } catch (e) { addLog(`  Lỗi cập nhật KL sau lệnh ${clientOrderId}: ${e.msg || e.message}`); }
     }
-    if(!wasProcessing && orderStatus !== 'NEW' && orderStatus !== 'PARTIALLY_FILLED') isProcessingTrade = false;
 }
 
 async function cleanupAndResetCycle(symbolToCleanup, isSwitchingCoin = false) {
@@ -1110,7 +1110,7 @@ async function startBotLogicInternal() {
         totalProfit = 0; totalLoss = 0; netPNL = 0; cumulativeRealizedPnlSinceStart = 0;
         currentLongPosition = null; currentShortPosition = null;
         isProcessingTrade = false; consecutiveApiErrors = 0; isOpeningInitialPair = false;
-        sidewaysGrid = { isActive: false, anchorPrice: null, direction: null, lastGridMoveTime: null, activeGridPositions: [], sidewaysStats: { tpMatchedCount: 0, slMatchedCount: 0 }, lastVolatilityCheckTime: 0, isClearingForSwitch: false, switchDelayTimeout: null };
+        sidewaysGrid = { isActive: false, anchorPrice: null, direction: null, isOpeningFirstPosition: false, lastGridMoveTime: null, activeGridPositions: [], sidewaysStats: { tpMatchedCount: 0, slMatchedCount: 0 }, lastVolatilityCheckTime: 0, isClearingForSwitch: false, switchDelayTimeout: null, consolidatedLongTpId: null, consolidatedLongSlId: null, consolidatedShortTpId: null, consolidatedShortSlId: null };
         await checkAndHandleRemainingPosition(TARGET_COIN_SYMBOL);
         listenKey = await getListenKey();
         if (listenKey) setupUserDataStream(listenKey); else {
@@ -1475,3 +1475,4 @@ process.on('uncaughtException', async (error) => {
     }
     process.exit(1);
 });
+```
