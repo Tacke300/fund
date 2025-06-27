@@ -41,7 +41,7 @@ const SIDEWAYS_INITIAL_TRIGGER_PERCENT = 0.005;
 const SIDEWAYS_ORDER_SIZE_RATIO = 0.10;
 const SIDEWAYS_GRID_RANGE_PERCENT = 0.05;
 const SIDEWAYS_GRID_STEP_PERCENT = 0.005;
-const SIDEWAYS_TP_PERCENT_FROM_ENTRY = 0.015;
+const SIDEWAYS_TP_PERCENT_FROM_ENTRY = 0.01;
 const SIDEWAYS_SL_PERCENT_FROM_ENTRY = 0.05;
 const VOLATILITY_CHECK_INTERVAL_MS = 1 * 60 * 1000;
 const MODE_SWITCH_DELAY_MS = 10000;
@@ -59,7 +59,7 @@ let nextScheduledCycleTimeout = null;
 let retryBotTimeout = null;
 const logCounts = {};
 let currentBotMode = 'kill';
-let INITIAL_INVESTMENT_AMOUNT = 1.20;
+let INITIAL_INVESTMENT_AMOUNT = 1.50;
 let TARGET_COIN_SYMBOL = null;
 let totalProfit = 0;
 let totalLoss = 0;
@@ -76,7 +76,7 @@ let sidewaysGrid = { isActive: false, anchorPrice: null, direction: null, isOpen
 let lastCoinSwitchCheckTime = 0;
 let isOpeningInitialPair = false;
 let overallTakeProfit = 0;
-let overallStopLoss = -4;
+let overallStopLoss = 0;
 let lastHourVolatility = 0;
 
 class CriticalApiError extends Error { constructor(message) { super(message); this.name = 'CriticalApiError'; } }
@@ -565,7 +565,7 @@ async function manageSidewaysGridLogic() {
                     currentBotMode = 'kill';
                     sidewaysGrid.isClearingForSwitch = false;
                     sidewaysGrid.isActive = false;
-                    await cleanupAndResetCycle(TARGET_COIN_SYMBOL);
+                    await cleanupAndResetCycle(TARGET_COIN_SYMBOL, false, true);
                     if (botRunning) scheduleNextMainCycle(1000);
                 }, MODE_SWITCH_DELAY_MS);
             }
@@ -614,24 +614,38 @@ async function runTradingLogic() {
     }
     if (await checkOverallTPSL()) return;
 
-    if (!TARGET_COIN_SYMBOL || (!currentLongPosition && !currentShortPosition && !sidewaysGrid.isActive && !isOpeningInitialPair)) {
-        addLog(`TARGET_COIN_SYMBOL (${TARGET_COIN_SYMBOL || 'N/A'}) chưa có hoặc không có lệnh/lưới. Chọn coin mới...`);
+    const needsNewCoin = !TARGET_COIN_SYMBOL || (!currentLongPosition && !currentShortPosition && !sidewaysGrid.isActive);
+    
+    if (needsNewCoin) {
         const newCoinSymbol = await selectTargetCoin(!TARGET_COIN_SYMBOL);
         if (newCoinSymbol) {
-            if (TARGET_COIN_SYMBOL && TARGET_COIN_SYMBOL !== newCoinSymbol) {
-                addLog(`TARGET_COIN_SYMBOL đổi từ ${TARGET_COIN_SYMBOL} sang ${newCoinSymbol}. Dọn dẹp coin cũ và chờ.`);
-                await cleanupAndResetCycle(TARGET_COIN_SYMBOL, true);
-                return;
+            if (TARGET_COIN_SYMBOL !== newCoinSymbol) {
+                const oldCoin = TARGET_COIN_SYMBOL;
+                addLog(`TARGET_COIN_SYMBOL đổi từ ${oldCoin || 'N/A'} sang ${newCoinSymbol}.`);
+
+                TARGET_COIN_SYMBOL = newCoinSymbol;
+                totalProfit = 0;
+                totalLoss = 0;
+                netPNL = 0;
+                currentLongPosition = null;
+                currentShortPosition = null;
+                sidewaysGrid = { isActive: false, anchorPrice: null, direction: null, isOpeningFirstPosition: false, lastGridMoveTime: null, activeGridPositions: [], sidewaysStats: { tpMatchedCount: 0, slMatchedCount: 0 }, lastVolatilityCheckTime: 0, isClearingForSwitch: false, switchDelayTimeout: null, consolidatedLongTpId: null, consolidatedLongSlId: null, consolidatedShortTpId: null, consolidatedShortSlId: null };
+
+                if (marketWs) {
+                    marketWs.removeAllListeners();
+                    marketWs.terminate();
+                    marketWs = null;
+                }
+                setupMarketDataStream(TARGET_COIN_SYMBOL);
+
+                if (oldCoin) {
+                    await cleanupAndResetCycle(oldCoin, true, true);
+                }
             }
-            TARGET_COIN_SYMBOL = newCoinSymbol;
-            totalProfit = 0; totalLoss = 0; netPNL = 0;
-            currentLongPosition = null; currentShortPosition = null;
-            sidewaysGrid = { isActive: false, anchorPrice: null, direction: null, isOpeningFirstPosition: false, lastGridMoveTime: null, activeGridPositions: [], sidewaysStats: { tpMatchedCount: 0, slMatchedCount: 0 }, lastVolatilityCheckTime: 0, isClearingForSwitch: false, switchDelayTimeout: null, consolidatedLongTpId: null, consolidatedLongSlId: null, consolidatedShortTpId: null, consolidatedShortSlId: null };
-            if (marketWs) { marketWs.removeAllListeners(); marketWs.terminate(); marketWs = null; }
-            setupMarketDataStream(TARGET_COIN_SYMBOL);
         } else {
             addLog("Không chọn được coin mục tiêu mới. Thử lại sau 1 phút.");
-            if (botRunning) scheduleNextMainCycle(60000); return;
+            if (botRunning) scheduleNextMainCycle(60000);
+            return;
         }
     }
 
@@ -643,7 +657,7 @@ async function runTradingLogic() {
     const prevMode = currentBotMode;
 
     if (vps1Volatility !== null) {
-        if (vps1Volatility < OVERALL_VOLATILITY_THRESHOLD_VPS1 && currentBotMode === 'kill' && !currentLongPosition && !currentShortPosition && !isOpeningInitialPair) {
+        if (vps1Volatility < OVERALL_VOLATILITY_THRESHOLD_VPS1 && currentBotMode === 'kill' && !currentLongPosition && !currentShortPosition) {
             currentBotMode = 'sideways';
         } else if (vps1Volatility >= OVERALL_VOLATILITY_THRESHOLD_VPS1 && currentBotMode === 'sideways' && !sidewaysGrid.isClearingForSwitch) {
             if (!currentLongPosition && !currentShortPosition) {
@@ -857,13 +871,7 @@ async function manageOpenPosition() {
                         if (sidewaysGrid.switchDelayTimeout) clearTimeout(sidewaysGrid.switchDelayTimeout);
                         sidewaysGrid.switchDelayTimeout = setTimeout(async () => {
                             sidewaysGrid.isClearingForSwitch = false;
-                            const oldCoin = TARGET_COIN_SYMBOL;
-                            TARGET_COIN_SYMBOL = bestAlternativeCoin.symbol;
-                            totalProfit = 0; totalLoss = 0; netPNL = 0; currentLongPosition = null; currentShortPosition = null;
-                            if (marketWs) { marketWs.removeAllListeners(); marketWs.terminate(); marketWs = null; }
-                            setupMarketDataStream(TARGET_COIN_SYMBOL);
-                            await cleanupAndResetCycle(oldCoin, false);
-                            if(botRunning) scheduleNextMainCycle(1000);
+                            scheduleNextMainCycle(1000);
                         }, COIN_SWITCH_DELAY_MS);
                         return;
                     }
@@ -952,7 +960,10 @@ async function processTradeResult(orderInfo) {
                 addLog(`[LƯỚI] ${eventType} hợp nhất cho ${sideClosed} đã khớp.`);
 
                 if (realizedPnl !== 0) {
+                    if (realizedPnl > 0) totalProfit += realizedPnl; else totalLoss += Math.abs(realizedPnl);
+                    netPNL = totalProfit - totalLoss;
                     cumulativeRealizedPnlSinceStart += realizedPnl;
+                    addLog(`  PNL Ròng (coin ${TARGET_COIN_SYMBOL} đã chốt): ${netPNL.toFixed(2)} (L: ${totalProfit.toFixed(2)}, T: ${totalLoss.toFixed(2)})`);
                     addLog(`  PNL Cộng Dồn Đã Chốt (từ khi bot chạy): ${cumulativeRealizedPnlSinceStart.toFixed(2)}`);
                 }
                 
@@ -1044,20 +1055,24 @@ async function processTradeResult(orderInfo) {
     }
 }
 
-async function cleanupAndResetCycle(symbolToCleanup, isSwitchingCoin = false) {
+async function cleanupAndResetCycle(symbolToCleanup, isSwitchingCoin = false, noReschedule = false) {
     if (!symbolToCleanup && TARGET_COIN_SYMBOL) symbolToCleanup = TARGET_COIN_SYMBOL;
-    if (!symbolToCleanup) { addLog("Không có symbol để cleanup."); return; }
+    if (!symbolToCleanup) { return; }
     addLog(`Chu kỳ cho ${symbolToCleanup} kết thúc. Dọn dẹp...`);
+    
+    if (positionCheckInterval) { clearInterval(positionCheckInterval); positionCheckInterval = null; }
+    await cancelAllOpenOrdersForSymbol(symbolToCleanup);
+    await checkAndHandleRemainingPosition(symbolToCleanup);
+    
     if (symbolToCleanup === TARGET_COIN_SYMBOL || !TARGET_COIN_SYMBOL) {
-        currentLongPosition = null; currentShortPosition = null;
+        currentLongPosition = null;
+        currentShortPosition = null;
         sidewaysGrid.isActive = false;
         if (sidewaysGrid.isClearingForSwitch) { addLog("  Đang dọn lưới/chuyển mode, không schedule lại từ cleanup."); return; }
     }
-    if (positionCheckInterval) { clearInterval(positionCheckInterval); positionCheckInterval = null; addLog("  Đã xóa interval kiểm tra vị thế."); }
-    await cancelAllOpenOrdersForSymbol(symbolToCleanup);
-    await checkAndHandleRemainingPosition(symbolToCleanup);
+    
     isOpeningInitialPair = false;
-    if (botRunning && !sidewaysGrid.isClearingForSwitch) {
+    if (botRunning && !sidewaysGrid.isClearingForSwitch && !noReschedule) {
         const delay = isSwitchingCoin ? COIN_SWITCH_DELAY_MS : 1000;
         addLog(`  Lên lịch cho chu kỳ tiếp theo sau ${delay/1000} giây (sau cleanup${isSwitchingCoin ? ' đổi coin':''}).`);
         scheduleNextMainCycle(delay);
@@ -1071,24 +1086,23 @@ async function startBotLogicInternal() {
     addLog('--- Khởi động Bot ---');
     try {
         await syncServerTime(); await getExchangeInfo(); await fetchAndCacheTopCoinsFromVPS1();
-        TARGET_COIN_SYMBOL = await selectTargetCoin(true);
-        if (!TARGET_COIN_SYMBOL) throw new Error("Không thể chọn coin mục tiêu ban đầu từ VPS1.");
-        addLog(`Coin mục tiêu ban đầu: ${TARGET_COIN_SYMBOL}`);
+        
+        cumulativeRealizedPnlSinceStart = 0;
+        isProcessingTrade = false; 
+        consecutiveApiErrors = 0; 
+        isOpeningInitialPair = false;
 
-        totalProfit = 0; totalLoss = 0; netPNL = 0; cumulativeRealizedPnlSinceStart = 0;
-        currentLongPosition = null; currentShortPosition = null;
-        isProcessingTrade = false; consecutiveApiErrors = 0; isOpeningInitialPair = false;
-        sidewaysGrid = { isActive: false, anchorPrice: null, direction: null, isOpeningFirstPosition: false, lastGridMoveTime: null, activeGridPositions: [], sidewaysStats: { tpMatchedCount: 0, slMatchedCount: 0 }, lastVolatilityCheckTime: 0, isClearingForSwitch: false, switchDelayTimeout: null, consolidatedLongTpId: null, consolidatedLongSlId: null, consolidatedShortTpId: null, consolidatedShortSlId: null };
-        await checkAndHandleRemainingPosition(TARGET_COIN_SYMBOL);
         listenKey = await getListenKey();
         if (listenKey) setupUserDataStream(listenKey); else {
             addLog("Không lấy được listenKey ban đầu. Bot không thể bắt đầu User Stream.");
             throw new Error("Không thể lấy listenKey ban đầu.");
         }
-        setupMarketDataStream(TARGET_COIN_SYMBOL);
-        botRunning = true; botStartTime = new Date();
-        addLog(`--- Bot đã chạy: ${formatTimeUTC7(botStartTime)} | Coin: ${TARGET_COIN_SYMBOL} | Vốn: ${INITIAL_INVESTMENT_AMOUNT} USDT ---`);
-        scheduleNextMainCycle(1000); return 'Bot khởi động thành công.';
+        
+        botRunning = true; 
+        botStartTime = new Date();
+        addLog(`--- Bot đã khởi động: ${formatTimeUTC7(botStartTime)} ---`);
+        scheduleNextMainCycle(1000); 
+        return 'Bot khởi động thành công.';
     } catch (err) {
         const errorMsg = err.msg || err.message || 'Lỗi không xác định khi khởi động'; addLog(`Lỗi nghiêm trọng khi khởi động: ${errorMsg}`);
         botRunning = false;
@@ -1113,12 +1127,13 @@ async function stopBotLogicInternal(reason = "Lệnh dừng thủ công") {
     isProcessingTrade = false;
 
     if (sidewaysGrid.isActive) await closeAllSidewaysPositionsAndOrders(`Bot dừng: ${reason}`).catch(e => addLog(`Lỗi đóng lệnh lưới: ${e.message}`));
-    sidewaysGrid.isActive = false; sidewaysGrid.activeGridPositions = [];
+    
     if (listenKeyRefreshInterval) clearInterval(listenKeyRefreshInterval); listenKeyRefreshInterval = null;
     if (marketWs) { marketWs.removeAllListeners(); marketWs.terminate(); marketWs = null; addLog("Market Stream đã đóng."); }
     if (userDataWs) { userDataWs.removeAllListeners(); userDataWs.terminate(); userDataWs = null; addLog("User Stream đã đóng."); }
     if (listenKey) await callSignedAPI('/fapi/v1/listenKey', 'DELETE', { listenKey }).then(()=>addLog("ListenKey đã xóa.")).catch(e=>addLog(`Lỗi xóa listenKey: ${e.msg||e.message}`));
     listenKey = null;
+    
     if (currentLongPosition && TARGET_COIN_SYMBOL) await closePosition(TARGET_COIN_SYMBOL, `Bot dừng: ${reason}`, "LONG").catch(e => addLog(`Lỗi đóng Long: ${e.message}`));
     if (currentShortPosition && TARGET_COIN_SYMBOL) await closePosition(TARGET_COIN_SYMBOL, `Bot dừng: ${reason}`, "SHORT").catch(e => addLog(`Lỗi đóng Short: ${e.message}`));
 
@@ -1126,7 +1141,11 @@ async function stopBotLogicInternal(reason = "Lệnh dừng thủ công") {
     if (!wasBotRunningState) isProcessingTrade = false;
 
     if (TARGET_COIN_SYMBOL) await cancelAllOpenOrdersForSymbol(TARGET_COIN_SYMBOL);
-    currentLongPosition = null; currentShortPosition = null;
+    
+    currentLongPosition = null; 
+    currentShortPosition = null;
+    TARGET_COIN_SYMBOL = null;
+    
     if (retryBotTimeout) { clearTimeout(retryBotTimeout); retryBotTimeout = null; addLog("Đã hủy retry khởi động (nếu có)."); }
     addLog('--- Bot đã dừng ---'); return 'Bot đã dừng.';
 }
@@ -1317,9 +1336,7 @@ app.get('/api/bot_stats', async (req, res) => {
                 curPrice: currentMarketPrice?.toFixed(ppG),
                 pnl: pnlU.toFixed(2),
                 originalAnchor: p.originalAnchorPrice?.toFixed(ppG),
-                step: p.stepIndex,
-                tpId: p.tpOrderId,
-                slId: p.slOrderId
+                step: p.stepIndex
             });
         }
     }
