@@ -1,36 +1,4 @@
-Bạn phân tích rất chính xác, và tôi thành thật xin lỗi vì đã để sót một lỗi logic tinh vi như vậy. Vấn đề bạn mô tả là một "race condition" (tình huống chạy đua) kinh điển.
 
-### Phân Tích Nguyên Nhân Gốc Rễ
-
-1.  **Chức năng `manageSidewaysGridLogic` được gọi định kỳ:** Cứ mỗi 3 giây, `setInterval` sẽ gọi hàm `manageOpenPosition`, và hàm này lại gọi `manageSidewaysGridLogic`.
-2.  **Hàm `openGridPositionAndSetTPSL` là hàm `async`:** Khi bot quyết định mở lệnh lưới đầu tiên, nó sẽ gọi `await openGridPositionAndSetTPSL(...)`. Hàm này chứa nhiều lệnh `await` để giao tiếp với API của Binance, do đó nó cần thời gian để hoàn thành (vài trăm mili giây đến vài giây).
-3.  **Lỗ hổng (Race Condition):**
-    *   **Tại thời điểm T=0s:** `manageSidewaysGridLogic` chạy. Nó thấy `direction` là `null` và giá đã chạm trigger. Nó bắt đầu gọi `await openGridPositionAndSetTPSL(...)`.
-    *   **Tại thời điểm T=0.1s:** Hàm `openGridPositionAndSetTPSL` đang "chờ" (awaiting) Binance phản hồi. Trạng thái của lưới (`sidewaysGrid.direction`) **vẫn chưa được cập nhật**.
-    *   **Tại thời điểm T=3s:** `setInterval` lại kích hoạt `manageSidewaysGridLogic`.
-    *   **Đây là điểm chết:** Vì lệnh gọi ở T=0s vẫn chưa hoàn thành, `sidewaysGrid.direction` **vẫn là `null`**. Hàm lại thấy giá vẫn đang chạm trigger, và nó lại tiếp tục gọi `openGridPositionAndSetTPSL` một lần nữa.
-    *   Kết quả là bot gửi nhiều lệnh mở lưới gần như cùng một lúc trước khi nó kịp cập nhật trạng thái là "đã xác định được hướng".
-
-### Giải Pháp: Thêm một "Khóa" (Lock) chuyên dụng
-
-Để giải quyết triệt để vấn đề này, chúng ta cần một cơ chế "khóa" cụ thể cho hành động "mở lệnh lưới đầu tiên", để đảm bảo nó chỉ được thực hiện một lần duy nhất.
-
-1.  **Tạo Cờ Khóa Mới:** Tôi đã thêm một cờ `isOpeningFirstPosition` vào đối tượng `sidewaysGrid`.
-2.  **Quy trình hoạt động mới:**
-    *   Khi `manageSidewaysGridLogic` kiểm tra và thấy có thể mở lệnh đầu tiên, nó sẽ **ngay lập tức đặt `isOpeningFirstPosition = true`**.
-    *   Sau đó, nó mới bắt đầu quá trình `await` để mở lệnh.
-    *   Nếu `setInterval` có chạy lại trong khi lệnh đang được mở, nó sẽ thấy `isOpeningFirstPosition` là `true` và sẽ bỏ qua ngay lập tức, không mở thêm lệnh nào nữa.
-    *   Sau khi quá trình mở lệnh hoàn tất (dù thành công hay thất bại), cờ `isOpeningFirstPosition` sẽ được đặt lại thành `false`, sẵn sàng cho chu kỳ tiếp theo (nếu cần).
-
-Cơ chế này đảm bảo rằng hành động mở lệnh đầu tiên là "nguyên tử" (atomic) và không thể bị ngắt quãng hay lặp lại.
-
----
-
-### Code JS Hoàn Chỉnh (Đã Sửa Lỗi Race Condition)
-
-Đây là toàn bộ mã nguồn đã được cập nhật với giải pháp trên. Bạn chỉ cần thay thế toàn bộ tệp cũ.
-
-```javascript
 import https from 'https';
 import http from 'http';
 import crypto from 'crypto';
@@ -1475,4 +1443,3 @@ process.on('uncaughtException', async (error) => {
     }
     process.exit(1);
 });
-```
