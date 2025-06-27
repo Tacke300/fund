@@ -60,7 +60,7 @@ let nextScheduledCycleTimeout = null;
 let retryBotTimeout = null;
 const logCounts = {};
 let currentBotMode = 'kill';
-let INITIAL_INVESTMENT_AMOUNT = 1.20;
+let INITIAL_INVESTMENT_AMOUNT = 1.50;
 let TARGET_COIN_SYMBOL = null;
 let totalProfit = 0;
 let totalLoss = 0;
@@ -77,7 +77,7 @@ let sidewaysGrid = { isActive: false, anchorPrice: null, gridUpperLimit: null, g
 let lastCoinSwitchCheckTime = 0;
 let isOpeningInitialPair = false;
 let overallTakeProfit = 0;
-let overallStopLoss = -4;
+let overallStopLoss = 0;
 let lastHourVolatility = 0;
 
 class CriticalApiError extends Error { constructor(message) { super(message); this.name = 'CriticalApiError'; } }
