@@ -1183,6 +1183,8 @@ app.get('/api/status', async (req, res) => {
     statusMsg += ` | PNL BOT Tổng: ${trueOverallPnlTemp.toFixed(2)}`;
     res.type('text/plain').send(statusMsg);
 });
+// Thay thế toàn bộ hàm app.get('/api/bot_stats', ...) cũ bằng hàm này
+
 app.get('/api/bot_stats', async (req, res) => {
     let killPositionsData = [];
     if(currentBotMode === 'kill'){
@@ -1228,12 +1230,13 @@ app.get('/api/bot_stats', async (req, res) => {
                 qty: p.quantity?.toFixed(qpG),
                 curPrice: currentMarketPrice?.toFixed(ppG),
                 pnl: pnlU.toFixed(2),
-                tpPrice: p.tpPrice?.toFixed(ppG),
-                slPrice: p.slPrice?.toFixed(ppG),
+                tpPrice: p.tpPrice?.toFixed(ppG), // Đã thêm TP ảo
+                slPrice: p.slPrice?.toFixed(ppG), // Đã thêm SL ảo
                 step: p.stepIndex
             });
         }
     }
+
     const cDet = TARGET_COIN_SYMBOL ? await getSymbolDetails(TARGET_COIN_SYMBOL) : null;
     const cPP = cDet ? cDet.pricePrecision : 4;
     const currentCoinV1 = getCurrentCoinVPS1Data(TARGET_COIN_SYMBOL);
@@ -1246,6 +1249,13 @@ app.get('/api/bot_stats', async (req, res) => {
     let trueOverallPnlSinceStartCalculated = cumulativeRealizedPnlSinceStart;
     killPositionsData.forEach(p => { trueOverallPnlSinceStartCalculated += parseFloat(p.pnl) || 0; });
     gridPositionsData.forEach(p => { trueOverallPnlSinceStartCalculated += parseFloat(p.pnl) || 0; });
+    
+    // Tính toán lại biên trên/dưới để hiển thị
+    let upperBoundary = "N/A", lowerBoundary = "N/A";
+    if (sidewaysGrid.isActive && sidewaysGrid.anchorPrice) {
+        upperBoundary = (sidewaysGrid.anchorPrice * (1 + SIDEWAYS_SL_PRICE_PERCENT)).toFixed(cPP);
+        lowerBoundary = (sidewaysGrid.anchorPrice * (1 - SIDEWAYS_SL_PRICE_PERCENT)).toFixed(cPP);
+    }
 
     res.json({
         success: true,
@@ -1268,7 +1278,8 @@ app.get('/api/bot_stats', async (req, res) => {
                 isActive: sidewaysGrid.isActive,
                 isClearingForSwitch: sidewaysGrid.isClearingForSwitch,
                 anchorPrice: sidewaysGrid.anchorPrice?.toFixed(cPP),
-                direction: "BIDIRECTIONAL",
+                upperBoundary: upperBoundary, // Đã thêm
+                lowerBoundary: lowerBoundary, // Đã thêm
                 stats: {
                     tpMatchedCount: sidewaysGrid.sidewaysStats.tpMatchedCount,
                     slMatchedCount: sidewaysGrid.sidewaysStats.slMatchedCount
