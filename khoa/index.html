@@ -188,6 +188,11 @@
             gap: 10px;
             margin-top: 10px;
         }
+        
+        .stats-grid span {
+            background-color: var(--dark-surface);
+            border-color: var(--neon-pink);
+        }
 
         .stats-output strong {
             color: var(--text-primary);
@@ -213,6 +218,12 @@
         .position-details p {
             margin: 4px 0;
             font-size: 0.85em;
+        }
+        
+        .tp-sl-info {
+            font-size: 0.8em !important;
+            color: var(--text-secondary);
+            font-style: italic;
         }
 
         .profit {
@@ -295,10 +306,10 @@
                 <div>Trạng thái Bot: <strong id="botRunningStatus">ĐANG TẢI...</strong></div>
                 <div>Thời gian chạy: <strong id="botUptime">N/A</strong></div>
                 <div>Coin Hiện Tại: <strong id="currentCoin">N/A</strong></div>
-                <div>Chế độ: <strong id="currentMode">N/A</strong> (Vol VPS1: <strong id="currentVps1Vol">N/A</strong>)</div>
-                <div>Tổng Lời (đã chốt - coin hiện tại): <strong id="totalRealizedProfit" class="neutral">0.00</strong> USDT</div>
-                <div>Tổng Lỗ (đã chốt - coin hiện tại): <strong id="totalRealizedLoss" class="neutral">0.00</strong> USDT</div>
-                <div>PNL Ròng (đã chốt - coin hiện tại): <strong id="netRealizedPNL" class="neutral">0.00</strong> USDT</div>
+                <div>Chế độ: <strong id="currentMode">N/A</strong> (Vol: <strong id="currentVps1Vol">N/A</strong>)</div>
+                <div>Tổng Lời (đã chốt): <strong id="totalRealizedProfit" class="neutral">0.00</strong> USDT</div>
+                <div>Tổng Lỗ (đã chốt): <strong id="totalRealizedLoss" class="neutral">0.00</strong> USDT</div>
+                <div>PNL Ròng (đã chốt): <strong id="netRealizedPNL" class="neutral">0.00</strong> USDT</div>
                 <div>Vốn cấu hình: <strong id="currentInvestmentAmount">0.00</strong> USDT</div>
                 <div>Giá thị trường: <strong id="marketPrice">N/A</strong></div>
                 <hr style="border-color: var(--neon-pink); margin: 10px 0;">
@@ -318,8 +329,8 @@
                 <div class="stats-grid">
                     <span>Trạng thái lưới: <strong id="gridIsActive">Không hoạt động</strong></span>
                     <span>Giá Anchor: <strong id="gridAnchorPrice">N/A</strong></span>
-                    <span>Biên trên: <strong id="gridUpperLimit">N/A</strong></span>
-                    <span>Biên dưới: <strong id="gridLowerLimit">N/A</strong></span>
+                    <span>Biên trên: <strong id="gridUpperBoundary">N/A</strong></span>
+                    <span>Biên dưới: <strong id="gridLowerBoundary">N/A</strong></span>
                     <span>Lưới khớp TP: <strong id="gridTpHits">0</strong></span>
                     <span>Lưới khớp SL: <strong id="gridSlHits">0</strong></span>
                 </div>
@@ -368,8 +379,8 @@
             const sidewaysCoinDisplayEl = document.getElementById('sidewaysCoinDisplay');
             const gridIsActiveEl = document.getElementById('gridIsActive');
             const gridAnchorPriceEl = document.getElementById('gridAnchorPrice');
-            const gridUpperLimitEl = document.getElementById('gridUpperLimit');
-            const gridLowerLimitEl = document.getElementById('gridLowerLimit');
+            const gridUpperBoundaryEl = document.getElementById('gridUpperBoundary');
+            const gridLowerBoundaryEl = document.getElementById('gridLowerBoundary');
             const gridTpHitsEl = document.getElementById('gridTpHits');
             const gridSlHitsEl = document.getElementById('gridSlHits');
             const sidewaysOpenPositionsTitleEl = document.getElementById('sidewaysOpenPositionsTitle');
@@ -380,11 +391,9 @@
             const stopButton = document.getElementById('stopButton');
             const configureButton = document.getElementById('configureButton');
 
-            let lastBotStatsData = null;
-
             function parseAndCreateDate(dateTimeString) {
                 if (!dateTimeString || dateTimeString === "N/A") return null;
-                const parts = dateTimeString.match(/(\d{2})\/(\d{2})\/(\d{4})\s(\d{2}):(\d{2}):(\d{2})\.(\d{3})/);
+                const parts = dateTimeString.match(/(\d{2})\/(\d{2})\/(\d{4}),?\s(\d{2}):(\d{2}):(\d{2})\.(\d{3})/);
                 if (parts) {
                     return new Date(parts[3], parseInt(parts[2], 10) - 1, parts[1], parts[4], parts[5], parts[6], parts[7]);
                 }
@@ -410,11 +419,11 @@
                 const seconds = Math.floor(diffMs / 1000);
 
                 let uptimeString = "";
-                if (days > 0) uptimeString += `${days} ngày `;
-                if (hours > 0) uptimeString += `${hours} giờ `;
-                if (minutes > 0) uptimeString += `${minutes} phút `;
-                uptimeString += `${seconds} giây`;
-                return uptimeString.trim() || "0 giây";
+                if (days > 0) uptimeString += `${days}d `;
+                if (hours > 0) uptimeString += `${hours}h `;
+                if (minutes > 0) uptimeString += `${minutes}m `;
+                uptimeString += `${seconds}s`;
+                return uptimeString.trim() || "0s";
             }
 
             async function fetchBotStatus() {
@@ -435,138 +444,129 @@
                     const resData = await response.json();
 
                     if (resData.success && resData.data) {
-                        const backendData = resData.data;
-                        lastBotStatsData = backendData;
-
-                        const currentCoinName = backendData.currentCoin || "CHƯA CHỌN";
+                        const stats = resData.data;
+                        const currentCoinName = stats.currentCoin || "CHƯA CHỌN";
+                        
                         activeCoinDisplayEl.innerText = currentCoinName;
-
-                        botRunningStatusEl.innerText = backendData.botRunning ? 'ĐANG CHẠY' : 'ĐÃ DỪNG';
-                        botRunningStatusEl.className = backendData.botRunning ? 'profit' : 'loss';
-
-                        botUptimeEl.innerText = backendData.botRunning ? formatUptime(backendData.botStartTime) : "N/A";
+                        botRunningStatusEl.innerText = stats.botRunning ? 'ĐANG CHẠY' : 'ĐÃ DỪNG';
+                        botRunningStatusEl.className = stats.botRunning ? 'profit' : 'loss';
+                        botUptimeEl.innerText = stats.botRunning ? formatUptime(stats.botStartTime) : "N/A";
 
                         currentCoinEl.innerText = currentCoinName;
-                        currentModeEl.innerText = backendData.currentMode || 'N/A';
-                        currentVps1VolEl.innerText = backendData.vps1Volatility || 'N/A';
-                        if (backendData.sidewaysGridInfo && backendData.sidewaysGridInfo.isClearingForSwitch) {
+                        currentModeEl.innerText = stats.currentMode || 'N/A';
+                        currentVps1VolEl.innerText = stats.vps1Volatility || 'N/A';
+                        if (stats.sidewaysGridInfo && stats.sidewaysGridInfo.isClearingForSwitch) {
                             currentModeEl.innerText += ' (ĐANG DỌN LƯỚI)';
                         }
 
-                        totalRealizedProfitEl.innerText = (parseFloat(backendData.totalProfit) || 0).toFixed(2);
-                        totalRealizedProfitEl.className = (parseFloat(backendData.totalProfit) || 0) > 0 ? 'profit' : 'neutral';
-                        totalRealizedLossEl.innerText = (parseFloat(backendData.totalLoss) || 0).toFixed(2);
-                        totalRealizedLossEl.className = (parseFloat(backendData.totalLoss) || 0) > 0 ? 'loss' : 'neutral';
-                        const netRealizedPnlValue = parseFloat(backendData.netPNL) || 0;
+                        totalRealizedProfitEl.innerText = (parseFloat(stats.totalProfit) || 0).toFixed(2);
+                        totalRealizedProfitEl.className = (parseFloat(stats.totalProfit) || 0) > 0 ? 'profit' : 'neutral';
+                        totalRealizedLossEl.innerText = (parseFloat(stats.totalLoss) || 0).toFixed(2);
+                        totalRealizedLossEl.className = (parseFloat(stats.totalLoss) || 0) > 0 ? 'loss' : 'neutral';
+                        
+                        const netRealizedPnlValue = parseFloat(stats.netPNL) || 0;
                         netRealizedPNLEl.innerText = netRealizedPnlValue.toFixed(2);
                         netRealizedPNLEl.className = netRealizedPnlValue > 0 ? 'profit' : (netRealizedPnlValue < 0 ? 'loss' : 'neutral');
-
-                        const currentInvest = parseFloat(backendData.initialInvestment) || 0;
+                        
+                        const currentInvest = parseFloat(stats.initialInvestment) || 0;
                         currentInvestmentAmountEl.innerText = currentInvest.toFixed(2);
 
-                        if (!backendData.botRunning || initialInvestmentAmountInput.value === "" || document.activeElement !== initialInvestmentAmountInput) {
+                        if (!stats.botRunning || document.activeElement !== initialInvestmentAmountInput) {
                              initialInvestmentAmountInput.value = currentInvest.toFixed(2);
                         }
-                        const backendOverallTP = parseFloat(backendData.overallTakeProfit) || 0;
-                        const backendOverallSL = parseFloat(backendData.overallStopLoss) || 0;
+                        const backendOverallTP = parseFloat(stats.overallTakeProfit) || 0;
+                        const backendOverallSL = parseFloat(stats.overallStopLoss) || 0;
 
                         configOverallTPEl.innerText = backendOverallTP > 0 ? backendOverallTP.toFixed(2) : "Không đặt";
                         configOverallTPEl.className = backendOverallTP > 0 ? 'profit' : 'neutral';
                         configOverallSLEl.innerText = backendOverallSL < 0 ? backendOverallSL.toFixed(2) : "Không đặt";
                         configOverallSLEl.className = backendOverallSL < 0 ? 'loss' : 'neutral';
 
-                        if (!backendData.botRunning || overallTakeProfitInput.value === "" || document.activeElement !== overallTakeProfitInput) {
+                        if (!stats.botRunning || document.activeElement !== overallTakeProfitInput) {
                              overallTakeProfitInput.value = backendOverallTP;
                         }
-                        if (!backendData.botRunning || overallStopLossInput.value === "" || document.activeElement !== overallStopLossInput) {
+                        if (!stats.botRunning || document.activeElement !== overallStopLossInput) {
                              overallStopLossInput.value = backendOverallSL;
                         }
 
-                        marketPriceEl.innerText = backendData.currentMarketPrice || 'N/A';
+                        marketPriceEl.innerText = stats.currentMarketPrice || 'N/A';
 
-                        const currentCycleOverallPnlValue = parseFloat(backendData.currentCycleOverallPNL) || 0;
+                        const currentCycleOverallPnlValue = parseFloat(stats.currentCycleOverallPNL) || 0;
                         currentOverallPNLEl.innerText = currentCycleOverallPnlValue.toFixed(2);
                         currentOverallPNLEl.className = currentCycleOverallPnlValue > 0 ? 'profit' : (currentCycleOverallPnlValue < 0 ? 'loss' : 'neutral');
 
-                        const trueOverallPnlSinceStartValue = parseFloat(backendData.trueOverallPnlSinceStart) || 0;
+                        const trueOverallPnlSinceStartValue = parseFloat(stats.trueOverallPnlSinceStart) || 0;
                         trueOverallPnlSinceStartDisplayEl.innerText = trueOverallPnlSinceStartValue.toFixed(2);
                         trueOverallPnlSinceStartDisplayEl.className = trueOverallPnlSinceStartValue > 0 ? 'profit' : (trueOverallPnlSinceStartValue < 0 ? 'loss' : 'neutral');
 
 
+                        // Reset display
                         killModeInfoEl.style.display = 'none';
-                        openPositionsKillContainerEl.innerHTML = 'Không có vị thế Kill Mode nào đang mở.';
                         sidewaysModeInfoEl.style.display = 'none';
-                        sidewaysOpenPositionsContainerEl.innerHTML = '';
-                        sidewaysOpenPositionsTitleEl.style.display = 'none';
-                        killCoinDisplayEl.innerText = '';
-                        sidewaysCoinDisplayEl.innerText = '';
 
-                        if (backendData.currentMode === 'KILL') {
+                        // Display Kill Mode info
+                        if (stats.currentMode === 'KILL') {
                             killModeInfoEl.style.display = 'block';
                             killCoinDisplayEl.innerText = currentCoinName;
-                            if (backendData.killPositions && backendData.killPositions.length > 0) {
-                                let html = '';
-                                backendData.killPositions.forEach(pos => {
+                            let killHtml = 'Không có vị thế Kill Mode nào đang mở.';
+                            if (stats.killPositions && stats.killPositions.length > 0) {
+                                killHtml = '';
+                                stats.killPositions.forEach(pos => {
                                     const pnl = parseFloat(pos.pnl) || 0;
-                                    html += `
+                                    killHtml += `
                                         <div class="position-details">
                                             <h4>[KILL] ${pos.side} ${currentCoinName}</h4>
                                             <p>KL: ${pos.qty || 'N/A'} (Ban đầu: ${pos.initQty || 'N/A'}) | Giá vào: ${pos.entry || 'N/A'} | Giá hiện tại: ${pos.curPrice || 'N/A'}</p>
                                             <p>PNL (chưa chốt): <strong class="${pnl > 0 ? 'profit' : (pnl < 0 ? 'loss' : 'neutral')}">${pnl.toFixed(2)} USDT</strong></p>
                                             <p>Giá vào cặp: ${pos.pairEntry || 'N/A'} | Đã đóng (lỗ): ${pos.closedLossQty || '0'}</p>
-                                            <p>Mốc hiện tại: ${pos.mocIdx !== undefined && pos.mocIdx >= 0 ? (pos.mocIdx + 1) : 'N/A'} | PNL Base Mốc: ${pos.pnlBasePercent || '0.00'}%</p>
-                                            <p style="font-size:0.75em;">TP ID: ${pos.tpId || 'N/A'} | SL ID: ${pos.slId || 'N/A'}</p>
+                                            <p>Mốc hiện tại: ${pos.mocIdx || 'N/A'}</p>
+                                            <p class="tp-sl-info">TP ID: ${pos.tpId || 'N/A'} | SL ID: ${pos.slId || 'N/A'}</p>
                                         </div>`;
                                 });
-                                openPositionsKillContainerEl.innerHTML = html;
                             }
-                        } else if (backendData.currentMode === 'SIDEWAYS' && backendData.sidewaysGridInfo) {
+                            openPositionsKillContainerEl.innerHTML = killHtml;
+                        } 
+                        // Display Sideways Mode info
+                        else if (stats.currentMode === 'SIDEWAYS' && stats.sidewaysGridInfo) {
                             sidewaysModeInfoEl.style.display = 'block';
                             sidewaysCoinDisplayEl.innerText = currentCoinName;
-                            const grid = backendData.sidewaysGridInfo;
-                            gridIsActiveEl.innerText = grid.isActive ? (grid.isClearingForKillSwitch ? 'ĐANG DỌN DẸP' : 'Hoạt động') : 'Không hoạt động';
+                            const grid = stats.sidewaysGridInfo;
+                            gridIsActiveEl.innerText = grid.isActive ? (grid.isClearingForSwitch ? 'ĐANG DỌN DẸP' : 'Hoạt động') : 'Không hoạt động';
                             gridAnchorPriceEl.innerText = grid.anchorPrice || 'N/A';
-                            gridUpperLimitEl.innerText = grid.upperLimit || 'N/A';
-                            gridLowerLimitEl.innerText = grid.lowerLimit || 'N/A';
+                            gridUpperBoundaryEl.innerText = grid.upperBoundary || 'N/A';
+                            gridLowerBoundaryEl.innerText = grid.lowerBoundary || 'N/A';
                             gridTpHitsEl.innerText = grid.stats?.tpMatchedCount || 0;
                             gridSlHitsEl.innerText = grid.stats?.slMatchedCount || 0;
 
+                            let gridHtml = 'Không có vị thế Lưới nào đang mở.';
                             if (grid.activePositions && grid.activePositions.length > 0) {
                                 sidewaysOpenPositionsTitleEl.style.display = 'block';
-                                let html = '';
+                                gridHtml = '';
                                 grid.activePositions.forEach(pos => {
                                     const pnl = parseFloat(pos.pnl) || 0;
-                                    html += `
+                                    gridHtml += `
                                         <div class="position-details">
-                                            <h4>[LƯỚI] ${pos.side} ${currentCoinName} (ID: ${pos.id ? pos.id.toString().slice(-6) : 'N/A'})</h4>
-                                            <p>Giá vào: ${pos.entry || 'N/A'} | KL: ${pos.qty || 'N/A'} | Bước: ${pos.step !== undefined ? pos.step : 'N/A'}</p>
-                                            <p>Anchor Gốc: ${pos.originalAnchor || 'N/A'} | Giá hiện tại: ${pos.curPrice || 'N/A'}</p>
+                                            <h4>[LƯỚI] ${pos.side} ${currentCoinName} (ID: ${pos.id ? pos.id.toString().slice(-8) : 'N/A'})</h4>
+                                            <p>Giá vào: ${pos.entry || 'N/A'} | KL: ${pos.qty || 'N/A'} | Bậc: ${pos.step !== undefined ? pos.step : 'N/A'}</p>
+                                            <p>Giá hiện tại: ${pos.curPrice || 'N/A'}</p>
                                             <p>PNL (chưa chốt): <strong class="${pnl > 0 ? 'profit' : (pnl < 0 ? 'loss' : 'neutral')}">${pnl.toFixed(2)} USDT</strong></p>
-                                            <p style="font-size:0.75em;">TP ID: ${pos.tpId || 'N/A'} | SL ID: ${pos.slId || 'N/A'}</p>
+                                            <p class="tp-sl-info">TP: ${pos.tpPrice || 'N/A'} | SL: ${pos.slPrice || 'N/A'}</p>
                                         </div>`;
                                 });
-                                sidewaysOpenPositionsContainerEl.innerHTML = html;
                             } else {
-                                sidewaysOpenPositionsContainerEl.innerText = 'Không có vị thế Lưới nào đang mở.';
+                                sidewaysOpenPositionsTitleEl.style.display = 'none';
                             }
-                        } else {
-                             killModeInfoEl.style.display = 'block';
-                             killCoinDisplayEl.innerText = currentCoinName;
-                             openPositionsKillContainerEl.innerText = 'Chưa có thông tin vị thế hoặc chế độ không xác định.';
+                            sidewaysOpenPositionsContainerEl.innerHTML = gridHtml;
                         }
                     } else {
-                        activeCoinDisplayEl.innerText = "LỖI";
-                        openPositionsKillContainerEl.innerText = `Lỗi: ${resData.message || 'Không có dữ liệu'}`;
-                        [botRunningStatusEl, botUptimeEl, currentCoinEl, currentModeEl, currentVps1VolEl, totalRealizedProfitEl, totalRealizedLossEl, netRealizedPNLEl, currentInvestmentAmountEl, marketPriceEl, configOverallTPEl, configOverallSLEl, currentOverallPNLEl, trueOverallPnlSinceStartDisplayEl].forEach(el => el.innerText = 'N/A');
-                        sidewaysModeInfoEl.style.display = 'none';
-                        killModeInfoEl.style.display = 'none';
+                        throw new Error(resData.message || "Dữ liệu không hợp lệ từ server");
                     }
                 } catch (error) {
                     console.error("Lỗi fetchBotStats:", error);
                     activeCoinDisplayEl.innerText = "LỖI";
-                    openPositionsKillContainerEl.innerText = `Lỗi nghiêm trọng: ${error.message}`;
+                    killModeInfoEl.style.display = 'block';
+                    openPositionsKillContainerEl.innerText = `Lỗi nghiêm trọng khi lấy thống kê: ${error.message}`;
                     sidewaysModeInfoEl.style.display = 'none';
-                    killModeInfoEl.style.display = 'none';
                 }
             }
 
@@ -584,27 +584,14 @@
                 }
             }
 
-            async function startBot() {
+            async function sendCommand(command) {
                 try {
-                    botStatusEl.innerText = 'Đang khởi động bot...';
-                    const response = await fetch(`${BOT_ENDPOINT}/start_bot_logic`);
-                    if (!response.ok) throw new Error(`Start HTTP ${response.status}`);
+                    botStatusEl.innerText = `Đang gửi lệnh ${command}...`;
+                    const response = await fetch(`${BOT_ENDPOINT}/${command}_bot_logic`);
+                    if (!response.ok) throw new Error(`Lệnh ${command} thất bại: HTTP ${response.status}`);
                     botStatusEl.innerText = await response.text();
                 } catch (error) {
-                    botStatusEl.innerText = `Lỗi khởi động: ${error.message}`;
-                } finally {
-                    setTimeout(() => { fetchBotStatus(); fetchBotStats(); fetchLogs(); }, 1500);
-                }
-            }
-
-            async function stopBot() {
-                try {
-                    botStatusEl.innerText = 'Đang dừng bot...';
-                    const response = await fetch(`${BOT_ENDPOINT}/stop_bot_logic`);
-                    if (!response.ok) throw new Error(`Stop HTTP ${response.status}`);
-                    botStatusEl.innerText = await response.text();
-                } catch (error) {
-                    botStatusEl.innerText = `Lỗi dừng: ${error.message}`;
+                    botStatusEl.innerText = `Lỗi gửi lệnh ${command}: ${error.message}`;
                 } finally {
                     setTimeout(() => { fetchBotStatus(); fetchBotStats(); fetchLogs(); }, 1500);
                 }
@@ -627,7 +614,7 @@
 
                 try {
                     const payload = {
-                        initialAmount: initialAmount,
+                        initialAmount: parseFloat(initialAmount),
                         overallTakeProfit: parseFloat(overallTP),
                         overallStopLoss: parseFloat(overallSL)
                     };
@@ -643,14 +630,13 @@
                 }
             }
 
-            startButton.addEventListener('click', startBot);
-            stopButton.addEventListener('click', stopBot);
+            startButton.addEventListener('click', () => sendCommand('start'));
+            stopButton.addEventListener('click', () => sendCommand('stop'));
             configureButton.addEventListener('click', configureBot);
 
-            fetchBotStats().then(() => {
-                fetchBotStatus();
-                fetchLogs();
-            });
+            fetchBotStatus();
+            fetchBotStats();
+            fetchLogs();
 
             setInterval(() => {
                 if(document.visibilityState === 'visible') {
@@ -658,7 +644,7 @@
                     fetchBotStats();
                     fetchLogs();
                 }
-            }, 7000);
+            }, 10000); // Tăng tần suất cập nhật lên 10 giây
         });
     </script>
 </body>
