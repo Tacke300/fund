@@ -550,7 +550,7 @@
                                             <p>Giá vào: ${pos.entry || 'N/A'} | KL: ${pos.qty || 'N/A'} | Bậc: ${pos.step !== undefined ? pos.step : 'N/A'}</p>
                                             <p>Giá hiện tại: ${pos.curPrice || 'N/A'}</p>
                                             <p>PNL (chưa chốt): <strong class="${pnl > 0 ? 'profit' : (pnl < 0 ? 'loss' : 'neutral')}">${pnl.toFixed(2)} USDT</strong></p>
-                                            <p class="tp-sl-info">TP Ảo: ${pos.tpPrice || 'N/A'} | SL Ảo: ${pos.slPrice || 'N/A'}</p>
+                                            <p class="tp-sl-info">TP: ${pos.tpPrice || 'N/A'} | SL: ${pos.slPrice || 'N/A'}</p>
                                         </div>`;
                                 });
                             } else {
