@@ -247,7 +247,7 @@ async function openMarketPosition(symbol, tradeDirection, maxLeverage, entryPric
         
         addLog(`  [KILL] Các mốc TP/SL ảo được tính cho ${tradeDirection}: TP tại ${takeProfitPrice.toFixed(details.pricePrecision)}, SL tại ${stopLossPrice.toFixed(details.pricePrecision)}.`);
 
-        return {symbol,quantity:actualQuantity,initialQuantity:actualQuantity,entryPrice:actualEntryPrice,initialMargin:INITIAL_INVESTMENT_AMOUNT,side:tradeDirection,maxLeverageUsed:maxLeverage,pricePrecision:details.pricePrecision,quantityPrecision:details.quantityPrecision,closedLossAmount:0,nextPartialCloseLossIndex:0,hasAdjustedSLToSpecificLevel:{},hasClosedAllLossPositionAtLastLevel:false,pairEntryPrice:priceToUseForCalc,unrealizedPnl:0,currentPrice:actualEntryPrice, lastPnlBaseResetTime: Date.now(), takeProfitPrice, stopLossPrice, partialCloseLossLevels};
+        return {symbol,quantity:actualQuantity,initialQuantity:actualQuantity,entryPrice:actualEntryPrice,initialMargin:INITIAL_INVESTMENT_AMOUNT,side:tradeDirection,maxLeverageUsed:maxLeverage,pricePrecision:details.pricePrecision,quantityPrecision:details.quantityPrecision,closedLossAmount:0,nextPartialCloseLossIndex:0,hasAdjustedSLToSpecificLevel:{},hasClosedAllLossPositionAtLastLevel:false,pairEntryPrice:priceToUseForCalc,unrealizedPnl:0,currentPrice:actualEntryPrice, lastPnlBaseResetTime: Date.now(), takeProfitPrice, stopLossPrice, partialCloseLossLevels: partialCloseLossSteps};
     } catch (err) { addLog(`[${currentBotMode.toUpperCase()}] Lỗi mở ${tradeDirection} ${symbol}: ${err.msg||err.message}`); if(err instanceof CriticalApiError && botRunning)await stopBotLogicInternal(`Lỗi mở ${tradeDirection} ${symbol}`); return null; }
 }
 
