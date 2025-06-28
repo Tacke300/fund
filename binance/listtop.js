@@ -294,7 +294,7 @@ function calculateAndRank() {
     }
 
     rankedForApiOutput.sort((a, b) => Math.abs(b.changePercent) - Math.abs(a.changePercent));
-    topRankedCoinsForApi = rankedForApiOutput.slice(0, 20);
+    topRankedCoinsForApi = rankedForApiOutput.slice(0, 200);
 
     if (hasValidDataForRanking) {
         if (vps1DataStatus !== "error_binance_symbols") vps1DataStatus = "running_data_available";
