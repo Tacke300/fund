@@ -436,15 +436,21 @@ async function manageSidewaysGridLogic() {
     const MAX_STEPS = 10;
 
     for (let i = 1; i <= MAX_STEPS; i++) {
+        if(isProcessingTrade) continue; // Nếu đang xử lý, bỏ qua vòng lặp để tránh lỗi
         const shortTrig = anchorPrice * (1 + i * SIDEWAYS_GRID_STEP_PERCENT);
         const hasPosAtStep = sidewaysGrid.activeGridPositions.some(p => p.side === 'SHORT' && p.stepIndex === i);
-        if (currentMarketPrice >= shortTrig && !hasPosAtStep) { await openSidewaysGridPosition(TARGET_COIN_SYMBOL, 'SHORT', shortTrig, i); break; }
+        if (currentMarketPrice >= shortTrig && !hasPosAtStep) { 
+            await openSidewaysGridPosition(TARGET_COIN_SYMBOL, 'SHORT', shortTrig, i); 
+        }
     }
 
     for (let i = 1; i <= MAX_STEPS; i++) {
+        if(isProcessingTrade) continue; // Nếu đang xử lý, bỏ qua vòng lặp để tránh lỗi
         const longTrig = anchorPrice * (1 - i * SIDEWAYS_GRID_STEP_PERCENT);
         const hasPosAtStep = sidewaysGrid.activeGridPositions.some(p => p.side === 'LONG' && p.stepIndex === i);
-        if (currentMarketPrice <= longTrig && !hasPosAtStep) { await openSidewaysGridPosition(TARGET_COIN_SYMBOL, 'LONG', longTrig, i); break; }
+        if (currentMarketPrice <= longTrig && !hasPosAtStep) { 
+            await openSidewaysGridPosition(TARGET_COIN_SYMBOL, 'LONG', longTrig, i); 
+        }
     }
     
     if (Date.now() - (sidewaysGrid.lastCheckTime || 0) > SIDEWAYS_CHECK_INTERVAL_MS) {
@@ -955,7 +961,6 @@ async function keepAliveListenKey(key) {
     if (!key) return;
     try {
         await callSignedAPI('/fapi/v1/listenKey', 'PUT', { listenKey: key });
-        // No log needed for successful keep-alive to reduce spam
     } catch (e) {
         addLog(`Lỗi gia hạn listenKey (${key}): ${e.msg || e.message}.`);
         if (botRunning && userDataWs) {
@@ -1001,7 +1006,7 @@ function setupMarketDataStream(symbol) {
 }
 
 const app = express(); app.use(express.json());
-app.get('/', (req, res) => { const indexPath = path.join(__dirname, 'index.html'); if (fs.existsSync(indexPath)) res.sendFile(indexPath); else res.status(404).send("<h1>Bot Control Panel</h1><p>File index.html không tìm thấy trong thư mục gốc của bot.</p>"); });
+app.get('/', (req, res) => { const indexPath = path.join(__dirname, 'index.html'); if (fs.existsSync(indexPath)) res.sendFile(indexPath); else res.status(404).send("<h1>Bot Control Panel</h1><p>File index.html không tìm thấy.</p>"); });
 app.get('/api/logs', (req, res) => { fs.readFile(CUSTOM_LOG_FILE, 'utf8', (err, data) => { if (err) {addLog(`Lỗi đọc log: ${err.message}`); return res.status(500).send('Lỗi đọc log.');} const cleanData = data.replace(/[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g, ''); res.type('text/plain').send(cleanData.split('\n').slice(-500).join('\n')); }); });
 app.get('/api/status', async (req, res) => {
     let pm2Status = "PM2 không lấy được."; try { const pm2List = await new Promise((resolve, reject) => exec('pm2 jlist', {timeout:3000}, (e,o,s)=>e?reject(s||e.message):resolve(o))); const procs = JSON.parse(pm2List); const botP = procs.find(p=>p.name===THIS_BOT_PM2_NAME||(p.pm2_env?.PORT&&parseInt(p.pm2_env.PORT)===WEB_SERVER_PORT)); if(botP)pm2Status=`PM2 ${botP.name}: ${botP.pm2_env.status.toUpperCase()} (R:${botP.pm2_env.restart_time},U:${Math.floor(botP.pm2_env.pm_uptime/(1000*60))}p)`; else pm2Status=`PM2 '${THIS_BOT_PM2_NAME}'(Port ${WEB_SERVER_PORT}) not found.`;}catch(err){pm2Status=`Lỗi PM2: ${err.message.substring(0,100)}.`}
@@ -1029,8 +1034,7 @@ app.get('/api/bot_stats', async (req, res) => {
         for(const p of [currentLongPosition, currentShortPosition]){
             if(p){
                 const d = TARGET_COIN_SYMBOL ? await getSymbolDetails(p.symbol) : null;
-                const pp = d ? d.pricePrecision : 2;
-                const qp = d ? d.quantityPrecision : 3;
+                const pp = d ? d.pricePrecision : 2; const qp = d ? d.quantityPrecision : 3;
                 const pnl = p.unrealizedPnl || 0;
                 killPositionsData.push({ type: 'kill', side: p.side, entry: p.entryPrice?.toFixed(pp), qty: p.quantity?.toFixed(qp), pnl: pnl.toFixed(2), curPrice: p.currentPrice?.toFixed(pp), initQty: p.initialQuantity?.toFixed(qp), closedLossQty: p.closedLossAmount?.toFixed(qp), pairEntry: p.pairEntryPrice?.toFixed(pp), mocIdx: (p.nextPartialCloseLossIndex || 0) + 1, tpId: p.currentTPId, slId: p.currentSLId });
             }
@@ -1072,17 +1076,17 @@ app.get('/api/bot_stats', async (req, res) => {
     res.json({
         success: true,
         data: {
-            botRunning: botRunning, botStartTime: botStartTime ? formatTimeUTC7(botStartTime) : "N/A",
+            botRunning, botStartTime: botStartTime ? formatTimeUTC7(botStartTime) : "N/A",
             currentMode: currentBotMode.toUpperCase(), vps1Volatility: vps1VolDisp,
             totalProfit: totalProfit.toFixed(2), totalLoss: totalLoss.toFixed(2), netPNL: netPNL.toFixed(2),
             currentCycleOverallPNL: currentCycleOverallPNLCalculated.toFixed(2),
             trueOverallPnlSinceStart: trueOverallPnlSinceStartCalculated.toFixed(2),
             currentCoin: TARGET_COIN_SYMBOL || "N/A", initialInvestment: INITIAL_INVESTMENT_AMOUNT,
-            overallTakeProfit: overallTakeProfit, overallStopLoss: overallStopLoss,
+            overallTakeProfit, overallStopLoss,
             killPositions: killPositionsData,
             sidewaysGridInfo: {
                 isActive: sidewaysGrid.isActive, isClearingForSwitch: sidewaysGrid.isClearingForSwitch,
-                anchorPrice: sidewaysGrid.anchorPrice?.toFixed(cPP), upperBoundary: upperBoundary, lowerBoundary: lowerBoundary,
+                anchorPrice: sidewaysGrid.anchorPrice?.toFixed(cPP), upperBoundary, lowerBoundary,
                 stats: { tpMatchedCount: sidewaysGrid.sidewaysStats.tpMatchedCount, slMatchedCount: sidewaysGrid.sidewaysStats.slMatchedCount },
                 activePositions: gridPositionsData
             },
