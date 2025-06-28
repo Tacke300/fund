@@ -17,7 +17,8 @@ const __dirname = path.dirname(__filename);
 const VPS1_DATA_URL = 'http://34.142.248.96:9000/';
 const MIN_CANDLES_FOR_SELECTION = 55;
 const OVERALL_VOLATILITY_THRESHOLD_VPS1 = 5.0;
-const VOLATILITY_HYSTERESIS_BAND = 1.0;
+const SIDEWAYS_TO_KILL_THRESHOLD = 6.0;
+const KILL_TO_SIDEWAYS_THRESHOLD = 4.0;
 const MIN_VOLATILITY_DIFFERENCE_TO_SWITCH = 3.0;
 const MIN_LEVERAGE_TO_TRADE = 50;
 const PARTIAL_CLOSE_INDEX_5 = 4;
@@ -31,7 +32,7 @@ const BASE_HOST = 'fapi.binance.com';
 const WS_BASE_URL = 'wss://fstream.binance.com';
 const WS_USER_DATA_ENDPOINT = '/ws';
 const WEB_SERVER_PORT = 9001;
-const THIS_BOT_PM2_NAME = 'test3';
+const THIS_BOT_PM2_NAME = 'test';
 const CUSTOM_LOG_FILE = path.join(__dirname, `pm2_${THIS_BOT_PM2_NAME}.log`);
 const LOG_TO_CUSTOM_FILE = true;
 const MAX_CONSECUTIVE_API_ERRORS = 5;
@@ -450,8 +451,6 @@ async function closeSidewaysGridPosition(gridPosition, reason) {
         
         if (reason.startsWith("TP")) { sidewaysGrid.sidewaysStats.tpMatchedCount++; }
         else if (reason.startsWith("SL")) { sidewaysGrid.sidewaysStats.slMatchedCount++; }
-
-        sidewaysGrid.activeGridPositions = sidewaysGrid.activeGridPositions.filter(p => p.id !== id);
     } catch (err) {
         addLog(`[LƯỚI] LỖI ĐÓNG MỐC ${id}: ${err.msg || err.message}`);
     } finally {
@@ -524,8 +523,8 @@ async function manageSidewaysGridLogic() {
         const currentCoinData = getCurrentCoinVPS1Data(TARGET_COIN_SYMBOL);
         const currentCoinVol = currentCoinData ? Math.abs(currentCoinData.changePercent) : 0;
         
-        if (currentCoinVol >= (OVERALL_VOLATILITY_THRESHOLD_VPS1 + (VOLATILITY_HYSTERESIS_BAND / 2))) {
-            addLog(`[LƯỚI->KILL] Vol của ${TARGET_COIN_SYMBOL} (${currentCoinVol.toFixed(2)}%) đã tăng vượt ngưỡng trên (${(OVERALL_VOLATILITY_THRESHOLD_VPS1 + (VOLATILITY_HYSTERESIS_BAND / 2)).toFixed(2)}%). Chuyển sang Kill.`);
+        if (currentCoinVol >= SIDEWAYS_TO_KILL_THRESHOLD) {
+            addLog(`[LƯỚI->KILL] Vol của ${TARGET_COIN_SYMBOL} (${currentCoinVol.toFixed(2)}%) đã tăng vượt ngưỡng trên (${SIDEWAYS_TO_KILL_THRESHOLD.toFixed(2)}%). Chuyển sang Kill.`);
             sidewaysGrid.isClearingForSwitch = true;
             await closeAllSidewaysPositionsAndOrders("Chuyển sang Kill do Vol tăng");
             if (sidewaysGrid.switchDelayTimeout) clearTimeout(sidewaysGrid.switchDelayTimeout);
@@ -614,13 +613,11 @@ async function runTradingLogic() {
     const vps1Volatility = currentCoinDataVPS1 ? Math.abs(currentCoinDataVPS1.changePercent) : 0;
     const prevMode = currentBotMode;
 
-    if (vps1Volatility !== null) {
-        if (currentBotMode === 'kill' && vps1Volatility < (OVERALL_VOLATILITY_THRESHOLD_VPS1 - (VOLATILITY_HYSTERESIS_BAND / 2)) && !currentLongPosition && !currentShortPosition) {
+    if (vps1Volatility !== null && !currentLongPosition && !currentShortPosition && !sidewaysGrid.isActive) {
+        if (vps1Volatility >= OVERALL_VOLATILITY_THRESHOLD_VPS1) {
+            currentBotMode = 'kill';
+        } else {
             currentBotMode = 'sideways';
-        } else if (currentBotMode === 'sideways' && vps1Volatility >= (OVERALL_VOLATILITY_THRESHOLD_VPS1 + (VOLATILITY_HYSTERESIS_BAND / 2)) && !sidewaysGrid.isClearingForSwitch) {
-            if (!currentLongPosition && !currentShortPosition && sidewaysGrid.activeGridPositions.length === 0) {
-                currentBotMode = 'kill';
-            }
         }
     }
 
@@ -772,8 +769,8 @@ async function manageOpenPosition() {
                 const currentCoinData = getCurrentCoinVPS1Data(TARGET_COIN_SYMBOL);
                 const currentCoinVol = currentCoinData ? Math.abs(currentCoinData.changePercent) : 0;
                 
-                if (currentCoinVol < (OVERALL_VOLATILITY_THRESHOLD_VPS1 - (VOLATILITY_HYSTERESIS_BAND / 2))) {
-                    addLog(`[KILL->SIDEWAYS] Vol của ${TARGET_COIN_SYMBOL} (${currentCoinVol.toFixed(2)}%) đã giảm dưới ngưỡng dưới (${(OVERALL_VOLATILITY_THRESHOLD_VPS1 - (VOLATILITY_HYSTERESIS_BAND / 2)).toFixed(2)}%). Chuyển sang Sideways.`);
+                if (currentCoinVol < KILL_TO_SIDEWAYS_THRESHOLD) {
+                    addLog(`[KILL->SIDEWAYS] Vol của ${TARGET_COIN_SYMBOL} (${currentCoinVol.toFixed(2)}%) đã giảm dưới ngưỡng dưới (${KILL_TO_SIDEWAYS_THRESHOLD.toFixed(2)}%). Chuyển sang Sideways.`);
                     sidewaysGrid.isClearingForSwitch = true;
                     if (currentLongPosition) await closePosition(TARGET_COIN_SYMBOL, `Chuyển sang Sideways do Vol giảm`, 'LONG');
                     if (currentShortPosition) await closePosition(TARGET_COIN_SYMBOL, `Chuyển sang Sideways do Vol giảm`, 'SHORT');
