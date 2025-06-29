@@ -14,7 +14,6 @@ import { API_KEY, SECRET_KEY } from './config.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// --- Constants ---
 const VPS1_DATA_URL = 'http://34.142.248.96:9000/';
 const MIN_CANDLES_FOR_SELECTION = 55;
 const OVERALL_VOLATILITY_THRESHOLD_VPS1 = 5.0;
@@ -42,7 +41,6 @@ const LOG_COOLDOWN_MS = 2000;
 const MODE_SWITCH_DELAY_MS = 10000;
 const COIN_SWITCH_DELAY_MS = 10000;
 
-// --- Global State Variables ---
 let serverTimeOffset = 0;
 let exchangeInfoCache = null;
 let isProcessingTrade = false;
@@ -416,8 +414,8 @@ async function closeSidewaysGridPosition(gridPosition, reason) {
 
     } catch (err) {
         addLog(`[LƯỚI] LỖI ĐÓNG MỐC ${id}: ${err.msg || err.message}`);
-        if(err.code === -2022) {
-             addLog(`  Lệnh đóng mốc ${id} bị từ chối (ReduceOnly), có thể đã được đóng trước đó. Sẽ dọn dẹp.`);
+        if(err.code === -2022 || err.code === -1106) {
+             addLog(`  Lệnh đóng mốc ${id} bị từ chối (Lý do: ${err.code}), có thể đã được đóng trước đó. Sẽ dọn dẹp.`);
              sidewaysGrid.activeGridPositions = sidewaysGrid.activeGridPositions.filter(p => p.id !== id);
              success = true;
         } else {
@@ -1084,7 +1082,6 @@ function setupMarketDataStream(symbol) {
     marketWs.on('close', (code, reason) => { const closedS = marketWs && marketWs.url ? marketWs.url.split('/').pop().split('@')[0].toUpperCase() : symbol; addLog(`Market Stream (${closedS}) đóng. Code: ${code}, Reason: ${reason ? reason.toString().substring(0,100) : 'N/A'}.`); if (botRunning && closedS === TARGET_COIN_SYMBOL) { addLog(`Thử kết nối lại Market Stream ${TARGET_COIN_SYMBOL} sau 5s...`); setTimeout(() => setupMarketDataStream(TARGET_COIN_SYMBOL), 5000); } });
 }
 
-// --- Express API and Server ---
 const app = express(); app.use(express.json());
 app.get('/', (req, res) => { const indexPath = path.join(__dirname, 'index.html'); if (fs.existsSync(indexPath)) res.sendFile(indexPath); else res.status(404).send("<h1>Bot Control Panel</h1><p>File index.html không tìm thấy.</p>"); });
 app.get('/api/logs', (req, res) => { fs.readFile(CUSTOM_LOG_FILE, 'utf8', (err, data) => { if (err) {addLog(`Lỗi đọc log: ${err.message}`); return res.status(500).send('Lỗi đọc log.');} const cleanData = data.replace(/[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g, ''); res.type('text/plain').send(cleanData.split('\n').slice(-500).join('\n')); }); });
@@ -1197,7 +1194,6 @@ app.post('/api/configure', (req, res) => {
 app.get('/start_bot_logic', async (req, res) => res.send(await startBotLogicInternal()));
 app.get('/stop_bot_logic', async (req, res) => res.send(await stopBotLogicInternal("Lệnh dừng từ API /stop_bot_logic")));
 
-// --- Main Execution ---
 (async () => {
     try {
         if (!API_KEY || !SECRET_KEY || API_KEY === 'YOUR_BINANCE_API_KEY') addLog("LỖI NGHIÊM TRỌNG: API_KEY/SECRET_KEY chưa cấu hình!");
