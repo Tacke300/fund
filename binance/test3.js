@@ -697,7 +697,7 @@ async function manageOpenPosition() {
 
             const pA = currentLongPosition; const pB = currentShortPosition; const pairEntry = pA.pairEntryPrice;
             const winningPos = (pA.unrealizedPnl >= pB.unrealizedPnl) ? pA : pB;
-            const losingPos = (winningPos === pA) ? pB : a;
+            const losingPos = (winningPos === pA) ? pB : pA;
             const currentMocIndex = winningPos.nextPartialCloseLossIndex || 0;
 
             if (losingPos.quantity === 0 && winningPos.quantity > 0 && !winningPos.hasAdjustedSLToSpecificLevel['LosingPosClosed']) {
