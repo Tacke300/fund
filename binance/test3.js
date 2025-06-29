@@ -382,7 +382,14 @@ async function openSidewaysGridPosition(symbol, tradeDirection, entryPriceToTarg
 }
 
 async function closeSidewaysGridPosition(gridPosition, reason) {
+    if (pendingClosures.has(gridPosition.id)) {
+        return false;
+    }
+    
     if (!gridPosition || isProcessingTrade) return false;
+
+    pendingClosures.add(gridPosition.id);
+    
     isProcessingTrade = true;
     
     const { symbol, side, quantity, id } = gridPosition;
@@ -423,6 +430,9 @@ async function closeSidewaysGridPosition(gridPosition, reason) {
         }
     } finally {
         isProcessingTrade = false;
+        setTimeout(() => {
+            pendingClosures.delete(gridPosition.id);
+        }, 10000); 
         return success;
     }
 }
@@ -791,10 +801,16 @@ async function manageOpenPosition() {
 }
 
 async function handleFinalClosure(orderId, clientOrderId, symbol, lastKnownPnl) {
+    let gridIdToClear = null;
+    if (clientOrderId && clientOrderId.startsWith('CLOSE-GRID-')) {
+        const potentialId = clientOrderId.replace('CLOSE-', '');
+        if (pendingClosures.has(potentialId)) {
+            pendingClosures.delete(potentialId);
+            gridIdToClear = potentialId;
+        }
+    }
     if (pendingClosures.has(orderId)) {
         pendingClosures.delete(orderId);
-    } else {
-        return;
     }
     
     addLog(`[PNL CHECK] Bắt đầu lấy PNL cuối cùng cho OrderID: ${orderId}...`);
@@ -848,8 +864,8 @@ async function handleFinalClosure(orderId, clientOrderId, symbol, lastKnownPnl) 
             }
         }
 
-        if (sidewaysGrid.isActive && clientOrderId && clientOrderId.startsWith('CLOSE-GRID-')) {
-            const closedPosition = sidewaysGrid.activeGridPositions.find(p => `CLOSE-${p.id}` === clientOrderId);
+        if (sidewaysGrid.isActive && gridIdToClear) {
+            const closedPosition = sidewaysGrid.activeGridPositions.find(p => p.id === gridIdToClear);
             if (closedPosition) {
                 addLog(`  -> Xác định lệnh đóng cho mốc lưới ${closedPosition.id}.`);
                 if (totalRealizedPnlFromFills >= 0) {
@@ -903,10 +919,16 @@ async function processTradeResult(orderInfo) {
     addLog(`[Trade FILLED ${symbol}] OrderID: ${orderId} | PNL tin nhắn: ${realizedPnl.toFixed(4)}`);
     
     if (realizedPnl !== 0) {
-        pendingClosures.add(orderId);
-        addLog(`  -> Lệnh đóng ${orderId} đã khớp. Lên lịch kiểm tra PNL cuối cùng.`);
+        let isClosure = false;
+        if(clientOrderId && (clientOrderId.startsWith('CLOSE-') || clientOrderId.startsWith('KILL-PARTIAL-'))) {
+            isClosure = true;
+        }
         
-        setTimeout(() => handleFinalClosure(orderId, clientOrderId, symbol, realizedPnl), 5000);
+        if (isClosure) {
+            pendingClosures.add(orderId);
+            addLog(`  -> Lệnh đóng ${orderId} đã khớp. Lên lịch kiểm tra PNL cuối cùng.`);
+            setTimeout(() => handleFinalClosure(orderId, clientOrderId, symbol, realizedPnl), 5000);
+        }
     }
 }
 
