@@ -382,23 +382,47 @@ async function openSidewaysGridPosition(symbol, tradeDirection, entryPriceToTarg
 }
 
 async function closeSidewaysGridPosition(gridPosition, reason) {
-    if (!gridPosition || isProcessingTrade) return;
+    if (!gridPosition || isProcessingTrade) return false;
     isProcessingTrade = true;
+    
     const { symbol, side, quantity, id } = gridPosition;
-    addLog(`[LƯỚI] Đóng mốc ${id} (${side}) bằng MARKET. Lý do: ${reason}`);
+    addLog(`[LƯỚI] Gửi yêu cầu đóng mốc ${id} (${side}) bằng MARKET. Lý do: ${reason}`);
+    let success = false;
+
     try {
-        const sideOrder = (side === 'LONG') ? 'SELL' : 'BUY';
-        await callSignedAPI('/fapi/v1/order', 'POST', {
-            symbol: symbol, side: sideOrder, positionSide: side, type: 'MARKET',
-            quantity: quantity, newClientOrderId: `CLOSE-${id}`
-        });
-        
-        if (reason.startsWith("TP")) { sidewaysGrid.sidewaysStats.tpMatchedCount++; }
-        else if (reason.startsWith("SL")) { sidewaysGrid.sidewaysStats.slMatchedCount++; }
+        const positions = await callSignedAPI('/fapi/v2/positionRisk', 'GET', { symbol });
+        const posOnEx = positions.find(p => p.symbol === symbol && p.positionSide === side && parseFloat(p.positionAmt) !== 0);
+
+        if (!posOnEx || Math.abs(parseFloat(posOnEx.positionAmt)) < quantity) {
+            addLog(`  -> Vị thế ${side} ${symbol} không tồn tại hoặc nhỏ hơn dự kiến. Hủy đóng.`);
+            sidewaysGrid.activeGridPositions = sidewaysGrid.activeGridPositions.filter(p => p.id !== id);
+            success = true;
+        } else {
+            const sideOrder = (side === 'LONG') ? 'SELL' : 'BUY';
+            await callSignedAPI('/fapi/v1/order', 'POST', {
+                symbol: symbol,
+                side: sideOrder,
+                positionSide: side,
+                type: 'MARKET',
+                quantity: quantity,
+                reduceOnly: 'true',
+                newClientOrderId: `CLOSE-${id}`
+            });
+            success = true; 
+        }
+
     } catch (err) {
-        addLog(`[LƯỚI] LỖI ĐÓNG MỐC ${id}: ${err.msg || err.message}`);
+        if (err.code === -2022) {
+             addLog(`  [LƯỚI] Lệnh đóng mốc ${id} bị từ chối (ReduceOnly), có thể đã được đóng trước đó. Sẽ dọn dẹp.`);
+             sidewaysGrid.activeGridPositions = sidewaysGrid.activeGridPositions.filter(p => p.id !== id);
+             success = true;
+        } else {
+            addLog(`[LƯỚI] LỖI GỬI LỆNH ĐÓNG MỐC ${id}: ${err.msg || err.message}`);
+            success = false;
+        }
     } finally {
         isProcessingTrade = false;
+        return success;
     }
 }
 
@@ -762,7 +786,7 @@ async function manageOpenPosition() {
     }
 }
 
-async function handleFinalClosure(orderId, symbol, lastKnownPnl) {
+async function handleFinalClosure(orderId, clientOrderId, symbol, lastKnownPnl) {
     if (pendingClosures.has(orderId)) {
         pendingClosures.delete(orderId);
     } else {
@@ -820,10 +844,19 @@ async function handleFinalClosure(orderId, symbol, lastKnownPnl) {
             }
         }
 
-        if (sidewaysGrid.isActive) {
-            sidewaysGrid.activeGridPositions = sidewaysGrid.activeGridPositions.filter(p => p.symbol !== symbol || (p.side === 'LONG' && currentLongPosition) || (p.side === 'SHORT' && currentShortPosition) );
-             if (sidewaysGrid.activeGridPositions.length === 0) {
-                addLog('[LƯỚI] Tất cả các mốc đã đóng. Lưới sẽ chờ giá vượt anchor để mở mốc mới.');
+        if (sidewaysGrid.isActive && clientOrderId && clientOrderId.startsWith('CLOSE-GRID-')) {
+            const closedPosition = sidewaysGrid.activeGridPositions.find(p => `CLOSE-${p.id}` === clientOrderId);
+            if (closedPosition) {
+                addLog(`  -> Xác định lệnh đóng cho mốc lưới ${closedPosition.id}.`);
+                if (totalRealizedPnlFromFills >= 0) {
+                    sidewaysGrid.sidewaysStats.tpMatchedCount++;
+                } else {
+                    sidewaysGrid.sidewaysStats.slMatchedCount++;
+                }
+                sidewaysGrid.activeGridPositions = sidewaysGrid.activeGridPositions.filter(p => p.id !== closedPosition.id);
+            }
+            if (sidewaysGrid.activeGridPositions.length === 0) {
+                 addLog('[LƯỚI] Tất cả các mốc lưới đã đóng.');
             }
         }
         
@@ -858,7 +891,7 @@ async function handleFinalClosure(orderId, symbol, lastKnownPnl) {
 }
 
 async function processTradeResult(orderInfo) {
-    const { s: symbol, rp: realizedPnlStr, X: orderStatus, i: orderId } = orderInfo;
+    const { s: symbol, rp: realizedPnlStr, X: orderStatus, i: orderId, c: clientOrderId } = orderInfo;
     
     if (symbol !== TARGET_COIN_SYMBOL || orderStatus !== 'FILLED') return;
 
@@ -874,7 +907,7 @@ async function processTradeResult(orderInfo) {
         pendingClosures.add(orderId);
         addLog(`  -> Đã ghi nhận lệnh đóng (OrderID: ${orderId}). Chờ 5 giây để xác minh PNL cuối cùng.`);
         
-        setTimeout(() => handleFinalClosure(orderId, symbol, realizedPnl), 5000);
+        setTimeout(() => handleFinalClosure(orderId, clientOrderId, symbol, realizedPnl), 5000);
     }
 }
 
