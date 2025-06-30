@@ -53,6 +53,9 @@ let nextScheduledCycleTimeout = null;
 let retryBotTimeout = null;
 const logCounts = {};
 let currentBotMode = 'kill';
+// ### GIẢI THÍCH LỖI -2027: Nếu bạn gặp lỗi "Exceeded the maximum allowable position...",
+// nguyên nhân là do tổng giá trị của cả 2 vị thế Long và Short vượt quá giới hạn của sàn cho phép ở đòn bẩy cao.
+// Cách xử lý đơn giản và hiệu quả nhất là GIẢM giá trị của INITIAL_INVESTMENT_AMOUNT xuống.
 let INITIAL_INVESTMENT_AMOUNT = 1.50;
 let TARGET_COIN_SYMBOL = null;
 let totalProfit = 0;
@@ -70,6 +73,8 @@ let sidewaysGrid = { isActive: false, anchorPrice: null, activeGridPositions: []
 let isOpeningInitialPair = false;
 let overallTakeProfit = 0;
 let overallStopLoss = 0;
+// ### THAY ĐỔI: Sử dụng Set này làm cơ chế chính để theo dõi các lệnh đang chờ xử lý PNL.
+// Điều này cho phép luồng tính PNL chạy độc lập mà không khóa toàn bộ bot.
 const pendingClosures = new Set();
 
 class CriticalApiError extends Error { constructor(message) { super(message); this.name = 'CriticalApiError'; } }
@@ -538,6 +543,8 @@ async function manageSidewaysGridLogic() {
 }
 
 async function checkOverallTPSL() {
+    // ### THAY ĐỔI: Sử dụng pendingClosures.size thay vì isProcessingTrade để kiểm tra.
+    // Điều này cho phép bot tiếp tục kiểm tra TP/SL ngay cả khi PNL của một lệnh khác đang được tính toán trong nền.
     if (!botRunning || isProcessingTrade || pendingClosures.size > 0) return false;
     let currentTrueOverallPnl = cumulativeRealizedPnlSinceStart;
     if (currentLongPosition?.unrealizedPnl) currentTrueOverallPnl += currentLongPosition.unrealizedPnl;
@@ -561,6 +568,7 @@ async function checkOverallTPSL() {
 }
 
 async function runTradingLogic() {
+    // ### THAY ĐỔI: Kiểm tra pendingClosures.size > 0 để tạm dừng logic MỚI, nhưng không khóa toàn bộ bot.
     if (!botRunning || isProcessingTrade || sidewaysGrid.isClearingForSwitch || isOpeningInitialPair || pendingClosures.size > 0) {
         if (pendingClosures.size > 0) addLog("Đang chờ xử lý PNL cuối cùng, tạm dừng chu kỳ logic mới.");
         return;
@@ -664,6 +672,8 @@ async function runTradingLogic() {
 }
 
 async function manageOpenPosition() {
+    // ### THAY ĐỔI: Kiểm tra pendingClosures.size > 0. Luồng này sẽ không chạy nếu có PNL đang chờ xử lý,
+    // để tránh đưa ra các quyết định mâu thuẫn.
     if (isProcessingTrade || !botRunning || sidewaysGrid.isClearingForSwitch || !TARGET_COIN_SYMBOL || isOpeningInitialPair || pendingClosures.size > 0) return;
     if (await checkOverallTPSL()) return;
 
@@ -805,17 +815,15 @@ async function handleFinalClosure(orderId, clientOrderId, symbol, lastKnownPnl) 
     if (clientOrderId && clientOrderId.startsWith('CLOSE-GRID-')) {
         const potentialId = clientOrderId.replace('CLOSE-', '');
         if (pendingClosures.has(potentialId)) {
-            pendingClosures.delete(potentialId);
+            // No need to delete here, it will be deleted at the end of the function
             gridIdToClear = potentialId;
         }
     }
-    if (pendingClosures.has(orderId)) {
-        pendingClosures.delete(orderId);
-    }
     
     addLog(`[PNL CHECK] Bắt đầu lấy PNL cuối cùng cho OrderID: ${orderId}...`);
-    isProcessingTrade = true;
-
+    // ### THAY ĐỔI 1: Xóa dòng isProcessingTrade = true;
+    // Hàm này bây giờ chạy độc lập và không khóa các hoạt động khác của bot.
+    
     try {
         const trades = await callSignedAPI('/fapi/v1/userTrades', 'GET', { symbol: symbol, orderId: orderId });
 
@@ -901,7 +909,10 @@ async function handleFinalClosure(orderId, clientOrderId, symbol, lastKnownPnl) 
         if (err instanceof CriticalApiError) await stopBotLogicInternal("Lỗi API khi kiểm tra PNL cuối cùng");
         await cleanupAndResetCycle(symbol);
     } finally {
-        isProcessingTrade = false;
+        // ### THAY ĐỔI 2: Xóa ID khỏi Set để báo hiệu rằng việc xử lý PNL đã xong.
+        // Xóa cả orderId và gridId (nếu có) để đảm bảo sạch sẽ.
+        if (orderId) pendingClosures.delete(orderId);
+        if (gridIdToClear) pendingClosures.delete(gridIdToClear);
     }
 }
 
@@ -910,6 +921,7 @@ async function processTradeResult(orderInfo) {
     
     if (symbol !== TARGET_COIN_SYMBOL || orderStatus !== 'FILLED') return;
 
+    // Nếu lệnh này đã nằm trong hàng đợi xử lý thì bỏ qua để tránh xử lý trùng lặp
     if (pendingClosures.has(orderId)) {
         return;
     }
@@ -920,14 +932,17 @@ async function processTradeResult(orderInfo) {
     
     if (realizedPnl !== 0) {
         let isClosure = false;
+        // Kiểm tra xem đây có phải lệnh đóng do bot tạo ra hay không
         if(clientOrderId && (clientOrderId.startsWith('CLOSE-') || clientOrderId.startsWith('KILL-PARTIAL-'))) {
             isClosure = true;
         }
         
         if (isClosure) {
+            // ### THAY ĐỔI 3: Thêm orderId vào Set để theo dõi và giảm thời gian chờ
             pendingClosures.add(orderId);
-            addLog(`  -> Lệnh đóng ${orderId} đã khớp. Lên lịch kiểm tra PNL cuối cùng.`);
-            setTimeout(() => handleFinalClosure(orderId, clientOrderId, symbol, realizedPnl), 5000);
+            addLog(`  -> Lệnh đóng ${orderId} đã khớp. Lên lịch kiểm tra PNL cuối cùng (chạy nền).`);
+            // Giảm thời gian chờ xuống 1.5s và để nó chạy độc lập
+            setTimeout(() => handleFinalClosure(orderId, clientOrderId, symbol, realizedPnl), 2500);
         }
     }
 }
@@ -1042,7 +1057,8 @@ async function checkAndHandleRemainingPosition(symbol) {
 function scheduleNextMainCycle(delayMs = 7000) {
     if (!botRunning) return; if(nextScheduledCycleTimeout) clearTimeout(nextScheduledCycleTimeout);
     nextScheduledCycleTimeout = setTimeout(async () => {
-        if (botRunning && !isProcessingTrade && !sidewaysGrid.isClearingForSwitch && !isOpeningInitialPair) {
+        // ### THAY ĐỔI: Kiểm tra pendingClosures.size > 0
+        if (botRunning && !isProcessingTrade && !sidewaysGrid.isClearingForSwitch && !isOpeningInitialPair && pendingClosures.size === 0) {
             try { await runTradingLogic(); }
             catch (e) {
                 addLog(`Lỗi chu kỳ chính runTradingLogic (${TARGET_COIN_SYMBOL||'N/A'}): ${e.msg||e.message} ${e.stack?.substring(0,300)||''}`);
@@ -1052,7 +1068,10 @@ function scheduleNextMainCycle(delayMs = 7000) {
                     scheduleNextMainCycle(15000);
                 }
             }
-        } else if (botRunning) { scheduleNextMainCycle(delayMs); }
+        } else if (botRunning) { 
+            // Nếu bot vẫn đang chạy nhưng bị chặn, lên lịch kiểm tra lại sau
+            scheduleNextMainCycle(delayMs); 
+        }
     }, delayMs);
 }
 async function getListenKey() { if (!API_KEY || !SECRET_KEY) {addLog("Thiếu API key/secret."); return null;} try { const r = await callSignedAPI('/fapi/v1/listenKey', 'POST'); addLog("Lấy ListenKey thành công."); return r.listenKey; } catch (e) { addLog(`Lỗi lấy listenKey: ${e.msg || e.message}`); return null; } }
@@ -1121,6 +1140,7 @@ app.get('/api/status', async (req, res) => {
         sidewaysGrid.activeGridPositions.forEach(p => { trueOverallPnlTemp += (currentMarketPrice - p.entryPrice) * p.quantity * (p.side === 'LONG' ? 1 : -1); });
     }
     statusMsg += ` | PNL BOT Tổng: ${trueOverallPnlTemp.toFixed(2)}`;
+    if (pendingClosures.size > 0) statusMsg += ` | Chờ PNL: ${pendingClosures.size}`;
     res.type('text/plain').send(statusMsg);
 });
 app.get('/api/bot_stats', async (req, res) => {
@@ -1185,7 +1205,8 @@ app.get('/api/bot_stats', async (req, res) => {
                 stats: { tpMatchedCount: sidewaysGrid.sidewaysStats.tpMatchedCount, slMatchedCount: sidewaysGrid.sidewaysStats.slMatchedCount },
                 activePositions: gridPositionsData
             },
-            vps1DataUrl: VPS1_DATA_URL, currentMarketPrice: currentMarketPrice?.toFixed(cPP)
+            vps1DataUrl: VPS1_DATA_URL, currentMarketPrice: currentMarketPrice?.toFixed(cPP),
+            pendingPnlChecks: pendingClosures.size
         }
     });
 });
