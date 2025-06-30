@@ -1,6 +1,6 @@
 import WebSocket from 'ws';
 import http from 'http';
-import https from 'https';
+import https from 'https'
 import express from 'express';
 import { URL } from 'url';
 import crypto from 'crypto';
@@ -22,7 +22,7 @@ let serverTimeOffset = 0;
 
 function logVps1(message) {
     const now = new Date();
-    const offset = 7 * 60 * 60 * 1000;
+    const offset = 7 * 60 * 60 * 1000; // Múi giờ +7
     const localTime = new Date(now.getTime() + offset);
     const timestamp = localTime.toISOString().replace('T', ' ').substring(0, 23);
     console.log(`[VPS1_DP] ${timestamp} - ${message}`);
@@ -32,6 +32,7 @@ function createSignature(queryString, apiSecret) {
     return crypto.createHmac('sha256', apiSecret).update(queryString).digest('hex');
 }
 
+// [CẢI TIẾN] - Hàm makeHttpRequest được nâng cấp để ghi log lỗi chi tiết từ Binance
 async function makeHttpRequest(method, urlString, headers = {}, postData = '') {
     return new Promise((resolve, reject) => {
         const parsedUrl = new URL(urlString);
@@ -52,13 +53,22 @@ async function makeHttpRequest(method, urlString, headers = {}, postData = '') {
                     try {
                         resolve(JSON.parse(data));
                     } catch (e) {
-                        logVps1(`HTTPS JSON Parse Error from ${urlString}: ${e.message}. Data: ${data.substring(0, 300)}`);
-                        reject(e);
+                        const parseError = new Error(`HTTPS JSON Parse Error from ${urlString}: ${e.message}`);
+                        parseError.data = data.substring(0, 300);
+                        logVps1(parseError.message + `. Data: ${parseError.data}`);
+                        reject(parseError);
                     }
                 } else {
-                    const errorMsg = `Request Failed. Status: ${res.statusCode} for ${urlString}. Body: ${data.substring(0, 200)}`;
-                    logVps1(`HTTPS Error: ${errorMsg}`);
-                    reject(new Error(errorMsg));
+                    // Cải tiến phần lỗi để chứa nhiều thông tin hơn
+                    const error = new Error(`Request Failed. Status: ${res.statusCode} for ${urlString}.`);
+                    error.statusCode = res.statusCode;
+                    try {
+                        error.body = JSON.parse(data); // Cố gắng parse body lỗi từ Binance
+                    } catch {
+                        error.body = data.substring(0, 300);
+                    }
+                    logVps1(`HTTPS Error: ${error.message} Body: ${JSON.stringify(error.body)}`);
+                    reject(error);
                 }
             });
         });
@@ -68,8 +78,9 @@ async function makeHttpRequest(method, urlString, headers = {}, postData = '') {
         });
         req.on('timeout', () => {
             req.destroy();
+            const timeoutError = new Error(`Request to ${urlString} timed out`);
             logVps1(`HTTPS Timeout for ${urlString}`);
-            reject(new Error(`Request to ${urlString} timed out`));
+            reject(timeoutError);
         });
         if (postData) {
             req.write(postData);
@@ -78,6 +89,7 @@ async function makeHttpRequest(method, urlString, headers = {}, postData = '') {
     });
 }
 
+// [CẢI TIẾN] - Hàm callSignedAPI được nâng cấp để bắt và ghi log lỗi chi tiết
 async function callSignedAPI(fullEndpointPath, method = 'GET', params = {}) {
     if (!API_KEY || !SECRET_KEY) throw new Error("API_KEY/SECRET_KEY is missing in config.js");
     const timestamp = Date.now() + serverTimeOffset;
@@ -87,7 +99,17 @@ async function callSignedAPI(fullEndpointPath, method = 'GET', params = {}) {
     const signature = createSignature(queryString, SECRET_KEY);
     const fullUrlToCall = `https://${BINANCE_FAPI_BASE_URL}${fullEndpointPath}?${queryString}&signature=${signature}`;
     const headers = { 'X-MBX-APIKEY': API_KEY };
-    return makeHttpRequest(method, fullUrlToCall, headers);
+
+    try {
+        return await makeHttpRequest(method, fullUrlToCall, headers);
+    } catch (error) {
+        // Log lỗi chi tiết từ Binance API
+        logVps1(`[CRITICAL SIGNED API CALL FAILED] Endpoint: ${fullEndpointPath}`);
+        logVps1(`  - Status Code: ${error.statusCode || 'N/A'}`);
+        logVps1(`  - Binance Error Body: ${JSON.stringify(error.body) || 'N/A'}`);
+        // Ném lỗi ra ngoài để các hàm khác xử lý (như retry)
+        throw error;
+    }
 }
 
 async function callPublicAPI(fullEndpointPath, params = {}) {
@@ -108,6 +130,7 @@ async function syncServerTime() {
     }
 }
 
+// [GỠ LỖI] - Thêm logging chi tiết vào hàm này
 async function getAllFuturesSymbols(retryCount = 0) {
     const maxRetries = 5;
     const retryDelay = 7000;
@@ -119,11 +142,21 @@ async function getAllFuturesSymbols(retryCount = 0) {
             callSignedAPI('/fapi/v1/leverageBracket', 'GET')
         ]);
 
+        // --- GỠ LỖI: LOGGING CHI TIẾT ---
+        const totalPublicSymbols = exchangeInfo?.symbols?.length || 0;
+        const totalLeverageSymbols = leverageBrackets?.length || 0;
+        logVps1(`[DEBUG] exchangeInfo (public) returned ${totalPublicSymbols} symbols.`);
+        logVps1(`[DEBUG] leverageBracket (signed) returned ${totalLeverageSymbols} symbols.`);
+        if (totalLeverageSymbols < 250 && totalPublicSymbols > 300) {
+            logVps1(`[WARNING] The number of symbols from leverageBracket is very low (${totalLeverageSymbols}) compared to public symbols. This strongly indicates a problem with API Key permissions (Enable Futures) or IP Whitelisting.`);
+        }
+        // --- KẾT THÚC LOGGING GỠ LỖI ---
+
         if (!exchangeInfo || !exchangeInfo.symbols || !Array.isArray(exchangeInfo.symbols)) {
             throw new Error("Invalid exchangeInfo data or missing symbols array.");
         }
         if (!leverageBrackets || !Array.isArray(leverageBrackets)) {
-            throw new Error("Invalid leverageBracket data from Binance.");
+            throw new Error("Invalid leverageBracket data from Binance. This is often an API Key permission issue or IP restriction.");
         }
 
         const leverageMap = new Map();
@@ -154,7 +187,7 @@ async function getAllFuturesSymbols(retryCount = 0) {
         } else {
             logVps1(`Failed to fetch symbols/leverage after ${maxRetries + 1} attempts.`);
             vps1DataStatus = "error_binance_symbols";
-            topRankedCoinsForApi = [{ error_message: "VPS1: Could not fetch symbols/leverage from Binance after multiple retries." }];
+            topRankedCoinsForApi = [{ error_message: "VPS1: Could not fetch symbols/leverage from Binance after multiple retries. Check logs for details." }];
             return [];
         }
     }
