@@ -1,5 +1,4 @@
-
-import https from 'httpss';
+import https from 'https';
 import http from 'http';
 import crypto from 'crypto';
 import express from 'express';
@@ -841,36 +840,33 @@ async function manageSidewaysGridLogic() {
     if (isProcessingTrade) return;
 
     const MAX_STEPS = 10;
-    let hasOpenedNewGrid = false;
 
     for (let i = 1; i <= MAX_STEPS; i++) {
         if (isProcessingTrade) break;
         const shortTrig = anchorPrice * (1 + i * SIDEWAYS_GRID_STEP_PERCENT);
-        const hasPosAtStep = sidewaysGrid.activeGridPositions.some(p => p.stepIndex === i && p.side === 'SHORT');
-        if (currentMarketPrice >= shortTrig && !hasPosAtStep) {
+        const hasPosAtStepS = sidewaysGrid.activeGridPositions.some(p => p.stepIndex === i && p.side === 'SHORT');
+        if (currentMarketPrice >= shortTrig && !hasPosAtStepS) {
             await openSidewaysGridPosition(TARGET_COIN_SYMBOL, 'SHORT', shortTrig, i);
-            hasOpenedNewGrid = true;
         }
-    }
-    for (let i = 1; i <= MAX_STEPS; i++) {
-        if (isProcessingTrade) break;
+
         const longTrig = anchorPrice * (1 - i * SIDEWAYS_GRID_STEP_PERCENT);
-        const hasPosAtStep = sidewaysGrid.activeGridPositions.some(p => p.stepIndex === i && p.side === 'LONG');
-        if (currentMarketPrice <= longTrig && !hasPosAtStep) {
+        const hasPosAtStepL = sidewaysGrid.activeGridPositions.some(p => p.stepIndex === i && p.side === 'LONG');
+        if (currentMarketPrice <= longTrig && !hasPosAtStepL) {
             await openSidewaysGridPosition(TARGET_COIN_SYMBOL, 'LONG', longTrig, i);
-            hasOpenedNewGrid = true;
         }
     }
 
-    const upperBoundary = anchorPrice * (1 + (MAX_STEPS + 1) * SIDEWAYS_GRID_STEP_PERCENT);
-    const lowerBoundary = anchorPrice * (1 - (MAX_STEPS + 1) * SIDEWAYS_GRID_STEP_PERCENT);
+    const upperBoundaryTrigger = anchorPrice * (1 + (MAX_STEPS + 0.5) * SIDEWAYS_GRID_STEP_PERCENT);
+    const lowerBoundaryTrigger = anchorPrice * (1 - (MAX_STEPS + 0.5) * SIDEWAYS_GRID_STEP_PERCENT);
 
-    if (currentMarketPrice > upperBoundary || currentMarketPrice < lowerBoundary) {
-        addLog(`[LƯỚI] Giá vượt biên. Kích hoạt trượt khung lưới.`);
+    if (currentMarketPrice > upperBoundaryTrigger || currentMarketPrice < lowerBoundaryTrigger) {
         const newAnchorStep = Math.round((currentMarketPrice / anchorPrice - 1) / SIDEWAYS_GRID_STEP_PERCENT);
-        const newAnchorPrice = anchorPrice * (1 + newAnchorStep * SIDEWAYS_GRID_STEP_PERCENT);
-        addLog(`  -> Anchor Price mới: ${newAnchorPrice.toFixed(4)} (trượt từ ${anchorPrice.toFixed(4)})`);
-        sidewaysGrid.anchorPrice = newAnchorPrice;
+        if (newAnchorStep !== 0) {
+            const newAnchorPrice = anchorPrice * (1 + newAnchorStep * SIDEWAYS_GRID_STEP_PERCENT);
+            addLog(`[LƯỚI] Giá vượt biên. Kích hoạt trượt khung lưới.`);
+            addLog(`  -> Anchor Price mới: ${newAnchorPrice.toFixed(4)} (trượt từ ${anchorPrice.toFixed(4)})`);
+            sidewaysGrid.anchorPrice = newAnchorPrice;
+        }
     }
 
     if (Date.now() - (sidewaysGrid.lastCheckTime || 0) > SIDEWAYS_CHECK_INTERVAL_MS) {
@@ -1359,17 +1355,10 @@ async function handleFinalClosure(orderId, clientOrderId, symbol, lastKnownPnl) 
         }
 
         if (sidewaysGrid.isActive && gridIdToClear) {
-            const closedPosition = sidewaysGrid.activeGridPositions.find(p => p.id === gridIdToClear);
-            if (closedPosition) {
-                addLog(`  -> Xác định lệnh đóng cho mốc lưới ${closedPosition.id}.`);
-                if (totalRealizedPnlFromFills >= 0) {
-                    sidewaysGrid.sidewaysStats.tpMatchedCount++;
-                } else {
-                    sidewaysGrid.sidewaysStats.slMatchedCount++;
-                }
-            }
-            if (sidewaysGrid.activeGridPositions.length === 0) {
-                addLog('[LƯỚI] Tất cả các mốc lưới đã đóng.');
+            if (totalRealizedPnlFromFills >= 0) {
+                sidewaysGrid.sidewaysStats.tpMatchedCount++;
+            } else {
+                sidewaysGrid.sidewaysStats.slMatchedCount++;
             }
         }
 
