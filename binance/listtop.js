@@ -171,7 +171,7 @@ async function getAllFuturesSymbols(retryCount = 0) {
                 s.contractType === 'PERPETUAL' &&
                 s.quoteAsset === 'USDT' &&
                 s.status === 'TRADING' &&
-                (leverageMap.get(s.symbol) > 50)
+                (leverageMap.get(s.symbol) >= 50)
             )
             .map(s => s.symbol);
 
