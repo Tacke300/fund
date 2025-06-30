@@ -942,7 +942,7 @@ async function processTradeResult(orderInfo) {
             pendingClosures.add(orderId);
             addLog(`  -> Lệnh đóng ${orderId} đã khớp. Lên lịch kiểm tra PNL cuối cùng (chạy nền).`);
             // Giảm thời gian chờ xuống 1.5s và để nó chạy độc lập
-            setTimeout(() => handleFinalClosure(orderId, clientOrderId, symbol, realizedPnl), 2500);
+            setTimeout(() => handleFinalClosure(orderId, clientOrderId, symbol, realizedPnl), 1500);
         }
     }
 }
