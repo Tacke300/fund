@@ -1,3 +1,4 @@
+
 import https from 'https';
 import http from 'http';
 import crypto from 'crypto';
@@ -576,7 +577,6 @@ async function closePartialPosition(position, quantityToClose) {
         if (err instanceof CriticalApiError && botRunning) await stopBotLogicInternal(`Lỗi đóng từng phần ${position.side}`);
         success = false;
     } finally {
-        isProcessingTrade = false;
         return success;
     }
 }
@@ -1378,6 +1378,9 @@ async function handleFinalClosure(orderId, clientOrderId, symbol, lastKnownPnl) 
         addLog(`[PNL CHECK] Lỗi nghiêm trọng khi xử lý PNL cuối cùng: ${err.msg || err.message}`);
         if (err instanceof CriticalApiError) await stopBotLogicInternal("Lỗi API khi kiểm tra PNL cuối cùng");
         await cleanupAndResetCycle(symbol);
+    } finally {
+        isProcessingTrade = false;
+        addLog(`[STATE] isProcessingTrade được set về false sau khi xử lý PNL.`);
     }
 }
 
