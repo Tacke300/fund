@@ -1,19 +1,4 @@
-Đã hiểu rõ yêu cầu. Chúng ta sẽ thực hiện 3 thay đổi:
-1.  **Sửa ngưỡng Sideways -> Kill** lên 7.9%.
-2.  **Thêm logic chủ động đổi coin/chế độ trong Kill:**
-    *   Nếu tìm thấy coin tốt hơn đáng kể, đổi coin.
-    *   Nếu không, và nếu biến động của coin hiện tại giảm xuống dưới 5%, thì đóng cặp Kill hiện tại để chuyển sang chế độ Sideways.
-3.  **Tinh gọn Log:** Loại bỏ các log không cần thiết và rút ngắn các log còn lại cho dễ đọc.
 
-Tôi hoàn toàn đồng ý với các thay đổi này, chúng giúp bot trở nên thông minh và linh hoạt hơn.
-
-Dưới đây là phiên bản code hoàn chỉnh đã áp dụng tất cả các thay đổi trên. Bạn chỉ cần sao chép và thay thế toàn bộ nội dung file `js` của mình.
-
----
-
-### **Bản JS Hoàn Chỉnh**
-
-```javascript
 import https from 'https';
 import http from 'http';
 import crypto from 'crypto';
@@ -2057,4 +2042,3 @@ process.on('uncaughtException', async (error) => {
     }
     process.exit(1);
 });
-```
