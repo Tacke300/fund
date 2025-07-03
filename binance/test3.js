@@ -1,4 +1,3 @@
-
 import https from 'https';
 import http from 'http';
 import crypto from 'crypto';
@@ -18,12 +17,10 @@ const __dirname = path.dirname(__filename);
 const VPS1_DATA_URL = 'http://34.142.248.96:9000/';
 const MIN_CANDLES_FOR_SELECTION = 55;
 const OVERALL_VOLATILITY_THRESHOLD_VPS1 = 7.9;
-const SIDEWAYS_TO_KILL_THRESHOLD = 7.9;
-const KILL_TO_SIDEWAYS_THRESHOLD = 4.0;
 const MIN_VOLATILITY_DIFFERENCE_TO_SWITCH = 3.0;
 const MIN_LEVERAGE_TO_TRADE = 50;
-const PARTIAL_CLOSE_INDEX_5 = 4;
-const PARTIAL_CLOSE_INDEX_8 = 7;
+const PARTIAL_CLOSE_INDEX_5 = 4; // Mốc 5 (index 4 trong mảng)
+const PARTIAL_CLOSE_INDEX_8 = 7; // Mốc 8 (index 7 trong mảng)
 const SIDEWAYS_ORDER_SIZE_RATIO = 0.10;
 const SIDEWAYS_GRID_STEP_PERCENT = 0.0079;
 const SIDEWAYS_TP_PRICE_PERCENT = 0.02;
@@ -82,7 +79,7 @@ function addLog(message) {
     const now = new Date();
     const offset = 7 * 60 * 60 * 1000;
     const localTime = new Date(now.getTime() + offset);
-    const time = `${localTime.toLocaleDateString('en-GB')} ${localTime.toLocaleTimeString('en-US', { hour12: false })}.${String(localTime.getMilliseconds()).padStart(3, '0')}`;
+    const time = localTime.toLocaleTimeString('en-GB');
     let logEntry = `[${time}] ${message}`;
     const messageHash = crypto.createHash('md5').update(message).digest('hex');
     if (logCounts[messageHash]) {
@@ -113,7 +110,6 @@ function formatTimeUTC7(dateObject) {
         hour: '2-digit',
         minute: '2-digit',
         second: '2-digit',
-        fractionalSecondDigits: 3,
         hour12: false,
         timeZone: 'Asia/Ho_Chi_Minh'
     });
@@ -559,6 +555,7 @@ async function closePartialPosition(position, quantityToClose) {
         let qtyEff = Math.min(quantityToClose, position.quantity);
         qtyEff = parseFloat((Math.floor(qtyEff / details.stepSize) * details.stepSize).toFixed(details.quantityPrecision));
         if (qtyEff <= 0 || qtyEff * (position.currentPrice || position.entryPrice) < details.minNotional * 0.9) {
+            addLog(`Lỗi đóng từng phần: Lượng đóng không hợp lệ hoặc quá nhỏ.`);
             success = false;
         } else {
             const sideOrder = (position.side === 'LONG') ? 'SELL' : 'BUY';
@@ -577,87 +574,6 @@ async function closePartialPosition(position, quantityToClose) {
     } catch (err) {
         addLog(`[${currentBotMode.toUpperCase()}] Lỗi đóng từng phần ${position.side}: ${err.msg || err.message}`);
         if (err instanceof CriticalApiError && botRunning) await stopBotLogicInternal(`Lỗi đóng từng phần ${position.side}`);
-        success = false;
-    } finally {
-        return success;
-    }
-}
-
-async function addPosition(reasonForAdd = "generic_add") {
-    if (isProcessingTrade || !currentLongPosition || !currentShortPosition) return false;
-    isProcessingTrade = true;
-    let success = false;
-    try {
-        const details = await getSymbolDetails(TARGET_COIN_SYMBOL);
-        if (!details) throw new Error(`Lỗi lấy chi tiết symbol.`);
-
-        const longQtyToAdd = currentLongPosition.closedLossAmount;
-        const shortQtyToAdd = currentShortPosition.closedLossAmount;
-
-        if (longQtyToAdd > 0) {
-            let qtyEff = parseFloat((Math.floor(longQtyToAdd / details.stepSize) * details.stepSize).toFixed(details.quantityPrecision));
-            if (qtyEff > 0) {
-                addLog(`[KILL ADD] Mở lại ${qtyEff.toFixed(details.quantityPrecision)} LONG (Lý do: ${reasonForAdd}).`);
-                await callSignedAPI('/fapi/v1/order', 'POST', {
-                    symbol: TARGET_COIN_SYMBOL,
-                    side: 'BUY',
-                    positionSide: 'LONG',
-                    type: 'MARKET',
-                    quantity: qtyEff,
-                    newClientOrderId: `${currentBotMode.toUpperCase()}-ADD-L${Date.now().toString().slice(-10)}`
-                });
-            }
-        }
-
-        if (shortQtyToAdd > 0) {
-            let qtyEff = parseFloat((Math.floor(shortQtyToAdd / details.stepSize) * details.stepSize).toFixed(details.quantityPrecision));
-            if (qtyEff > 0) {
-                addLog(`[KILL ADD] Mở lại ${qtyEff.toFixed(details.quantityPrecision)} SHORT (Lý do: ${reasonForAdd}).`);
-                await callSignedAPI('/fapi/v1/order', 'POST', {
-                    symbol: TARGET_COIN_SYMBOL,
-                    side: 'SELL',
-                    positionSide: 'SHORT',
-                    type: 'MARKET',
-                    quantity: qtyEff,
-                    newClientOrderId: `${currentBotMode.toUpperCase()}-ADD-S${Date.now().toString().slice(-9)}`
-                });
-            }
-        }
-
-        addLog(`Đã gửi lệnh hồi phục. Chờ cập nhật trạng thái...`);
-        await sleep(3000);
-
-        const updatedPos = await callSignedAPI('/fapi/v2/positionRisk', 'GET', { symbol: TARGET_COIN_SYMBOL });
-        const newPairEntry = await getCurrentPrice(TARGET_COIN_SYMBOL);
-
-        const lpEx = updatedPos.find(p => p.positionSide === 'LONG');
-        if (currentLongPosition && lpEx && parseFloat(lpEx.positionAmt) !== 0) {
-            currentLongPosition.quantity = Math.abs(parseFloat(lpEx.positionAmt));
-            currentLongPosition.entryPrice = parseFloat(lpEx.entryPrice);
-            currentLongPosition.closedLossAmount = 0;
-            currentLongPosition.nextPartialCloseLossIndex = 0;
-            currentLongPosition.hasAdjustedSLToSpecificLevel = {};
-            currentLongPosition.lastPnlBaseResetTime = Date.now();
-            if (newPairEntry) currentLongPosition.pairEntryPrice = newPairEntry;
-        }
-
-        const spEx = updatedPos.find(p => p.positionSide === 'SHORT');
-        if (currentShortPosition && spEx && parseFloat(spEx.positionAmt) !== 0) {
-            currentShortPosition.quantity = Math.abs(parseFloat(spEx.positionAmt));
-            currentShortPosition.entryPrice = parseFloat(spEx.entryPrice);
-            currentShortPosition.closedLossAmount = 0;
-            currentShortPosition.nextPartialCloseLossIndex = 0;
-            currentShortPosition.hasAdjustedSLToSpecificLevel = {};
-            currentShortPosition.lastPnlBaseResetTime = Date.now();
-            if (newPairEntry) currentShortPosition.pairEntryPrice = newPairEntry;
-        }
-
-        if (newPairEntry) addLog(`  Cập nhật giá vào cặp mới: ${newPairEntry.toFixed(details.pricePrecision)}`);
-        success = true;
-
-    } catch (err) {
-        addLog(`[KILL ADD] Lỗi khi hồi phục vị thế: ${err.msg || err.message}`);
-        if (err instanceof CriticalApiError && botRunning) await stopBotLogicInternal(`Lỗi khi hồi phục vị thế`);
         success = false;
     } finally {
         isProcessingTrade = false;
@@ -738,8 +654,17 @@ async function closeSidewaysGridPosition(gridPosition, reason) {
     pendingClosures.add(gridPosition.id);
     isProcessingTrade = true;
 
-    const { symbol, side, quantity, id } = gridPosition;
-    addLog(`LƯỚI: Đóng mốc ${id} (${side}) bằng MARKET. Lý do: ${reason}`);
+    const { symbol, side, quantity, id, tpPrice, slPrice, pricePrecision } = gridPosition;
+    
+    const shortId = id.split('-').slice(0, 2).join('-');
+    let shortReason = reason;
+    if (reason.includes("TP ảo")) {
+        shortReason = `Do TP ảo @${tpPrice.toFixed(pricePrecision)}`;
+    } else if (reason.includes("SL ảo")) {
+        shortReason = `Do SL ảo @${slPrice.toFixed(pricePrecision)}`;
+    }
+    addLog(`LƯỚI: Đóng ${shortId} (${side}). ${shortReason}`);
+
     let success = false;
 
     try {
@@ -751,10 +676,10 @@ async function closeSidewaysGridPosition(gridPosition, reason) {
             const currentPositionSize = Math.abs(parseFloat(posOnEx.positionAmt));
 
             if (qtyToClose === 0) {
-                addLog(`  -> Lượng đóng mốc ${id} là 0.`);
+                addLog(`  -> Lượng đóng mốc ${shortId} là 0.`);
                 success = true;
             } else if (qtyToClose > currentPositionSize * 1.05) {
-                addLog(`  -> Lượng đóng ${qtyToClose} lớn hơn vị thế ${currentPositionSize}. Mốc có thể đã đóng.`);
+                addLog(`  -> Lượng đóng ${qtyToClose} lớn hơn vị thế ${currentPositionSize}. Mốc ${shortId} có thể đã đóng.`);
                 success = true;
             } else {
                 const sideOrder = (side === 'LONG') ? 'SELL' : 'BUY';
@@ -775,9 +700,9 @@ async function closeSidewaysGridPosition(gridPosition, reason) {
         }
 
     } catch (err) {
-        addLog(`LƯỚI: LỖI ĐÓNG MỐC ${id}: ${err.msg || err.message}`);
+        addLog(`LƯỚI: LỖI ĐÓNG MỐC ${shortId}: ${err.msg || err.message}`);
         if (err.code === -2011 || err.code === -2022) {
-            addLog(`  -> Lệnh đóng ${id} bị từ chối (${err.code}), có thể đã đóng trước đó.`);
+            addLog(`  -> Lệnh đóng ${shortId} bị từ chối (${err.code}), có thể đã đóng trước đó.`);
             success = true;
         } else {
             success = false;
@@ -896,9 +821,9 @@ async function manageSidewaysGridLogic() {
                 return;
             }
         }
-
-        if (currentCoinVol >= SIDEWAYS_TO_KILL_THRESHOLD) {
-            addLog(`LƯỚI->KILL: Vol ${TARGET_COIN_SYMBOL} (${currentCoinVol.toFixed(2)}%) tăng vượt ngưỡng ${SIDEWAYS_TO_KILL_THRESHOLD.toFixed(2)}%. Chuyển sang Kill.`);
+        
+        if (currentCoinVol >= OVERALL_VOLATILITY_THRESHOLD_VPS1) {
+            addLog(`LƯỚI->KILL: Vol ${TARGET_COIN_SYMBOL} (${currentCoinVol.toFixed(2)}%) tăng vượt ngưỡng ${OVERALL_VOLATILITY_THRESHOLD_VPS1.toFixed(2)}%. Chuyển sang Kill.`);
             sidewaysGrid.isClearingForSwitch = true;
             await closeAllSidewaysPositionsAndOrders("Chuyển sang Kill do Vol tăng");
             if (sidewaysGrid.switchDelayTimeout) clearTimeout(sidewaysGrid.switchDelayTimeout);
@@ -1170,14 +1095,6 @@ async function manageOpenPosition() {
                     return;
                 }
             }
-            
-            if (currentCoinVol < 5.0) {
-                addLog(`[KILL->SIDEWAYS] Vol của ${TARGET_COIN_SYMBOL} (${currentCoinVol.toFixed(2)}%) giảm dưới 5.0%. Đóng cặp Kill để chuyển chế độ.`);
-                await closePosition(TARGET_COIN_SYMBOL, 'Chuyển sang Sideways do Vol thấp', 'LONG');
-                await sleep(500);
-                await closePosition(TARGET_COIN_SYMBOL, 'Chuyển sang Sideways do Vol thấp', 'SHORT');
-                return;
-            }
         }
 
         if (currentLongPosition || currentShortPosition) {
@@ -1193,9 +1110,9 @@ async function manageOpenPosition() {
 
             const pnlPctWin = (winningPos.unrealizedPnl / winningPos.initialMargin) * 100;
 
-            if (!isReversalInProgress && winningPos.partialCloseLossLevels && pnlPctWin >= winningPos.partialCloseLossLevels[0] && winningPos.closedLossAmount > 0) {
+            if (!isReversalInProgress && winningPos.partialCloseLossLevels && pnlPctWin >= 0 && winningPos.closedLossAmount > 0) {
                 isReversalInProgress = true;
-                addLog(`KILL REVERSAL: Lệnh ${winningPos.side} đã LẬT KÈO và đạt Mốc 1.`);
+                addLog(`KILL REVERSAL: Lệnh ${winningPos.side} đã LẬT KÈO về hòa vốn (Mốc 0).`);
                 addLog(`  -> Mở lại ${winningPos.closedLossAmount.toFixed(winningPos.quantityPrecision)} ${winningPos.side} và reset lệnh ${losingPos ? losingPos.side : 'đã đóng'}.`);
                 (async () => {
                     try {
@@ -1242,7 +1159,7 @@ async function manageOpenPosition() {
             if (winningPos.partialCloseLossLevels && currentMocIndex < winningPos.partialCloseLossLevels.length) {
                 const targetMocRelPnl = winningPos.partialCloseLossLevels[currentMocIndex];
                 if (pnlPctWin >= targetMocRelPnl) {
-                    addLog(`KILL Mốc ${currentMocIndex + 1}: ${winningPos.side} ${TARGET_COIN_SYMBOL} đạt PNL ${pnlPctWin.toFixed(1)}% >= ${targetMocRelPnl.toFixed(1)}%`);
+                    addLog(`KILL M${currentMocIndex + 1}: ${winningPos.side} win (PNL ${pnlPctWin.toFixed(1)}%). Đóng lệnh thua.`);
                     if (losingPos && losingPos.quantity > 0) {
                         let qtyFractionToClose = 0.10;
                         if (currentMocIndex === PARTIAL_CLOSE_INDEX_5) qtyFractionToClose = 0.20;
@@ -1257,25 +1174,10 @@ async function manageOpenPosition() {
                         winningPos.nextPartialCloseLossIndex++;
                         addLog(`  -> Tăng mốc lệnh thắng ${winningPos.side} lên Mốc ${winningPos.nextPartialCloseLossIndex + 1}.`);
                     }
-
-                    if (winningPos.nextPartialCloseLossIndex - 1 === PARTIAL_CLOSE_INDEX_5 && !winningPos.hasAdjustedSLToSpecificLevel['moc5']) {
-                        addLog(`KILL SL-ADJUST: Lệnh ${winningPos.side} đạt Mốc 5. Dời SL về hòa vốn.`);
-                        winningPos.stopLossPrice = winningPos.entryPrice;
-                        winningPos.hasAdjustedSLToSpecificLevel['moc5'] = true;
-                        addLog(`  -> SL ảo mới của ${winningPos.side}: ${winningPos.stopLossPrice.toFixed(winningPos.pricePrecision)}`);
-                        if (losingPos) {
-                            addLog(`KILL TP-ADJUST: Dời TP lệnh lỗ ${losingPos.side} về hòa vốn.`);
-                            losingPos.takeProfitPrice = losingPos.entryPrice;
-                            addLog(`  -> TP ảo mới của ${losingPos.side}: ${losingPos.takeProfitPrice.toFixed(losingPos.pricePrecision)}`);
-                        }
-                    }
+                    
                     if (winningPos.nextPartialCloseLossIndex - 1 >= PARTIAL_CLOSE_INDEX_8 && !winningPos.hasAdjustedSLToSpecificLevel['moc8']) {
-                        const moc5PnlForWinning = winningPos.partialCloseLossLevels[PARTIAL_CLOSE_INDEX_5];
-                        const targetPnlAtSLWinning_USD = (winningPos.initialMargin * (moc5PnlForWinning / 100));
-                        const priceChangeForSL = targetPnlAtSLWinning_USD / winningPos.quantity;
-                        let slPriceForWinning = parseFloat((winningPos.side === 'LONG' ? winningPos.entryPrice + priceChangeForSL : winningPos.entryPrice - priceChangeForSL).toFixed(winningPos.pricePrecision));
-                        addLog(`KILL SL-ADJUST: Lệnh ${winningPos.side} đạt Mốc 8. Dời SL về mức lãi Mốc 5.`);
-                        winningPos.stopLossPrice = slPriceForWinning;
+                        addLog(`KILL SL-ADJUST: Lệnh ${winningPos.side} đạt Mốc 8. Dời SL về hòa vốn (giá mở lệnh).`);
+                        winningPos.stopLossPrice = winningPos.entryPrice;
                         winningPos.hasAdjustedSLToSpecificLevel['moc8'] = true;
                         addLog(`  -> SL ảo mới của ${winningPos.side}: ${winningPos.stopLossPrice.toFixed(winningPos.pricePrecision)}`);
                     }
@@ -1283,16 +1185,16 @@ async function manageOpenPosition() {
             }
 
             if (winningPos.side === 'LONG' && currentMarketPrice >= winningPos.takeProfitPrice) {
-                addLog(`KILL TP: LONG chạm TP ảo ${winningPos.takeProfitPrice}. Đóng vị thế...`);
+                addLog(`KILL TP: LONG chạm TP ảo. Đóng.`);
                 await closePosition(TARGET_COIN_SYMBOL, 'TP ảo LONG', 'LONG');
             } else if (winningPos.side === 'LONG' && currentMarketPrice <= winningPos.stopLossPrice) {
-                addLog(`KILL SL: LONG chạm SL ảo ${winningPos.stopLossPrice}. Đóng vị thế...`);
+                addLog(`KILL SL: LONG chạm SL ảo. Đóng.`);
                 await closePosition(TARGET_COIN_SYMBOL, 'SL ảo LONG', 'LONG');
             } else if (winningPos.side === 'SHORT' && currentMarketPrice <= winningPos.takeProfitPrice) {
-                addLog(`KILL TP: SHORT chạm TP ảo ${winningPos.takeProfitPrice}. Đóng vị thế...`);
+                addLog(`KILL TP: SHORT chạm TP ảo. Đóng.`);
                 await closePosition(TARGET_COIN_SYMBOL, 'TP ảo SHORT', 'SHORT');
             } else if (winningPos.side === 'SHORT' && currentMarketPrice >= winningPos.stopLossPrice) {
-                addLog(`KILL SL: SHORT chạm SL ảo ${winningPos.stopLossPrice}. Đóng vị thế...`);
+                addLog(`KILL SL: SHORT chạm SL ảo. Đóng.`);
                 await closePosition(TARGET_COIN_SYMBOL, 'SL ảo SHORT', 'SHORT');
             }
         } else {
