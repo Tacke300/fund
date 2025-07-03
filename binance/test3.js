@@ -461,7 +461,7 @@ async function closePosition(symbol, reason, positionSideToClose) {
     }
 }
 async function openMarketPosition(symbol, tradeDirection, maxLeverage, entryPriceOverride = null) {
-    addLog(`[${currentBotMode.toUpperCase()}] Mở ${tradeDirection} ${symbol} với notional ${INITIAL_INVESTMENT_AMOUNT} USDT.`);
+    addLog(`[${currentBotMode.toUpperCase()}] Mở ${tradeDirection} ${symbol} với ký quỹ ${INITIAL_INVESTMENT_AMOUNT} USDT.`);
     try {
         const details = await getSymbolDetails(symbol);
         if (!details) throw new Error(`Lỗi lấy chi tiết symbol.`);
@@ -470,10 +470,9 @@ async function openMarketPosition(symbol, tradeDirection, maxLeverage, entryPric
         const priceToUseForCalc = entryPriceOverride || await getCurrentPrice(symbol);
         if (!priceToUseForCalc) throw new Error(`Lỗi lấy giá hiện tại/giá ghi đè.`);
         
-        // ############ CORE FIX ############
-        // The quantity is based on the TOTAL notional value, NOT margin * leverage.
-        let quantity = INITIAL_INVESTMENT_AMOUNT / priceToUseForCalc;
-        // #################################
+        // ############ LOGIC GỐC ĐÃ ĐƯỢỢC HOÀN TRẢ ############
+        let quantity = (INITIAL_INVESTMENT_AMOUNT * maxLeverage) / priceToUseForCalc;
+        // #######################################################
 
         quantity = parseFloat((Math.floor(quantity / details.stepSize) * details.stepSize).toFixed(details.quantityPrecision));
         
@@ -497,16 +496,12 @@ async function openMarketPosition(symbol, tradeDirection, maxLeverage, entryPric
         const actualEntryPrice = parseFloat(openPos.entryPrice);
         const actualQuantity = Math.abs(parseFloat(openPos.positionAmt));
         const actualNotional = actualQuantity * actualEntryPrice;
-        const actualMargin = actualNotional / maxLeverage;
 
         addLog(`[${currentBotMode.toUpperCase()}] Mở ${tradeDirection} | KL: ${actualQuantity.toFixed(details.quantityPrecision)} | Giá vào: ${actualEntryPrice.toFixed(details.pricePrecision)}`);
-        addLog(`  -> Notional: ${actualNotional.toFixed(2)} USDT, Ký quỹ: ~${actualMargin.toFixed(4)} USDT`);
+        addLog(`  -> Notional: ${actualNotional.toFixed(2)} USDT, Ký quỹ: ~${INITIAL_INVESTMENT_AMOUNT.toFixed(4)} USDT`);
 
         let takeProfitPrice, stopLossPrice, partialCloseLossSteps = [];
         let TAKE_PROFIT_MULTIPLIER, STOP_LOSS_MULTIPLIER;
-
-        // PNL targets are now relative to the NOTIONAL value, not a fixed margin.
-        const pnlBaseAmount = INITIAL_INVESTMENT_AMOUNT;
 
         if (maxLeverage >= 75) {
             TAKE_PROFIT_MULTIPLIER = 10;
@@ -522,8 +517,8 @@ async function openMarketPosition(symbol, tradeDirection, maxLeverage, entryPric
             for (let i = 1; i <= 8; i++) partialCloseLossSteps.push(i * 35);
         }
 
-        const targetPnlForTP_USDT = (pnlBaseAmount / maxLeverage) * TAKE_PROFIT_MULTIPLIER;
-        const targetPnlForSL_USDT = -((pnlBaseAmount / maxLeverage) * STOP_LOSS_MULTIPLIER);
+        const targetPnlForTP_USDT = INITIAL_INVESTMENT_AMOUNT * TAKE_PROFIT_MULTIPLIER;
+        const targetPnlForSL_USDT = -(INITIAL_INVESTMENT_AMOUNT * STOP_LOSS_MULTIPLIER);
         
         const priceChangeUnitForTP = targetPnlForTP_USDT / actualQuantity;
         const priceChangeUnitForSL = Math.abs(targetPnlForSL_USDT) / actualQuantity;
@@ -538,7 +533,7 @@ async function openMarketPosition(symbol, tradeDirection, maxLeverage, entryPric
             quantity: actualQuantity,
             initialQuantity: actualQuantity,
             entryPrice: actualEntryPrice,
-            initialMargin: actualMargin, // Use actual margin for PNL calculations
+            initialMargin: INITIAL_INVESTMENT_AMOUNT,
             side: tradeDirection,
             maxLeverageUsed: maxLeverage,
             pricePrecision: details.pricePrecision,
@@ -553,7 +548,7 @@ async function openMarketPosition(symbol, tradeDirection, maxLeverage, entryPric
             lastPnlBaseResetTime: Date.now(),
             takeProfitPrice,
             stopLossPrice,
-            partialCloseLossLevels: partialCloseLossSteps
+            partialCloseLossSteps: partialCloseLossSteps
         };
     } catch (err) {
         addLog(`[${currentBotMode.toUpperCase()}] Lỗi mở ${tradeDirection} ${symbol}: ${err.msg || err.message}`);
@@ -613,9 +608,8 @@ async function openSidewaysGridPosition(symbol, tradeDirection, entryPriceToTarg
         if (!await setLeverage(symbol, maxLev)) throw new Error(`Lỗi đặt đòn bẩy.`);
         await sleep(200);
         
-        // Correctly calculate quantity for sideways grid based on a fraction of the main notional
-        let notionalForGrid = INITIAL_INVESTMENT_AMOUNT * SIDEWAYS_ORDER_SIZE_RATIO;
-        let qty = notionalForGrid / entryPriceToTarget;
+        let marginForGrid = INITIAL_INVESTMENT_AMOUNT * SIDEWAYS_ORDER_SIZE_RATIO;
+        let qty = (marginForGrid * maxLev) / entryPriceToTarget;
         
         qty = parseFloat((Math.floor(qty / details.stepSize) * details.stepSize).toFixed(details.quantityPrecision));
         if (qty * entryPriceToTarget < details.minNotional) throw new Error(`Giá trị lệnh lưới ${qty * entryPriceToTarget} USDT quá nhỏ.`);
@@ -1877,7 +1871,7 @@ app.post('/api/configure', (req, res) => {
         if (!isNaN(newIA) && newIA > 0) {
             if (newIA !== INITIAL_INVESTMENT_AMOUNT) {
                 INITIAL_INVESTMENT_AMOUNT = newIA;
-                changesMade.push(`Vốn (notional) đổi thành ${INITIAL_INVESTMENT_AMOUNT}.`);
+                changesMade.push(`Ký quỹ đổi thành ${INITIAL_INVESTMENT_AMOUNT}.`);
             }
         } else {
             errors.push("Vốn không hợp lệ.");
