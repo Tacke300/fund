@@ -23,7 +23,7 @@ const PARTIAL_CLOSE_INDEX_5 = 4;
 const PARTIAL_CLOSE_INDEX_8 = 7;
 const SIDEWAYS_ORDER_SIZE_RATIO = 0.10;
 const SIDEWAYS_GRID_STEP_PERCENT = 0.0079;
-const SIDEWAYS_TP_PRICE_PERCENT = 0.015;
+const SIDEWAYS_TP_PRICE_PERCENT = 0.02;
 const SIDEWAYS_SL_PRICE_PERCENT = 0.079;
 const SIDEWAYS_CHECK_INTERVAL_MS = 2 * 60 * 1000;
 const BASE_HOST = 'fapi.binance.com';
@@ -381,51 +381,11 @@ async function getCurrentPrice(symbol) {
     }
 }
 
-async function placeOcoOrderForSideways(position) {
-    const { symbol, side, quantity, takeProfitPrice, stopLossPrice, pricePrecision } = position;
-    
-    addLog(`LƯỚI: Đặt lệnh OCO trên sàn cho ${side} ${symbol}...`);
-    
-    const orderSide = (side === 'LONG') ? 'SELL' : 'BUY';
-    const isValidOco = (orderSide === 'SELL' && takeProfitPrice > stopLossPrice) || (orderSide === 'BUY' && takeProfitPrice < stopLossPrice);
-    
-    if (!isValidOco) {
-        addLog(`LƯỚI: LỖI Logic OCO - Giá TP và SL không hợp lệ cho lệnh ${orderSide}. Đang đóng khẩn cấp.`);
-        await closePosition(symbol, "Lỗi logic giá OCO", side);
-        return false;
-    }
-
-    addLog(`  -> TP @${takeProfitPrice.toFixed(pricePrecision)}, SL @${stopLossPrice.toFixed(pricePrecision)}`);
-
-    try {
-        await callSignedAPI('/fapi/v1/order', 'POST', {
-            symbol: symbol,
-            side: orderSide,
-            positionSide: side,
-            type: 'OCO',
-            quantity: quantity,
-            price: takeProfitPrice.toFixed(pricePrecision),
-            stopPrice: stopLossPrice.toFixed(pricePrecision),
-            stopLimitPrice: (stopLossPrice * (orderSide === 'SELL' ? 0.999 : 1.001)).toFixed(pricePrecision),
-            stopLimitTimeInForce: 'GTC'
-        });
-        
-        addLog(`  -> Đã đặt thành công lệnh OCO cho ${side} ${symbol}.`);
-        return true;
-    } catch (err) {
-        addLog(`LƯỚI: LỖI ĐẶT LỆNH OCO: ${err.msg || err.message}`);
-        addLog(`  -> Đang đóng khẩn cấp vị thế ${side} ${symbol} vừa mở do không đặt được OCO.`);
-        await closePosition(symbol, "Lỗi đặt OCO trên sàn", side);
-        if (err instanceof CriticalApiError && botRunning) await stopBotLogicInternal(`Lỗi đặt OCO ${symbol}`);
-        return false;
-    }
-}
-
-async function placeKillTpslOrders(position) {
+async function placeTpslOrders(position, positionType = 'KILL') {
     if (!position) return false;
-    const { symbol, side, quantity, takeProfitPrice, stopLossPrice, pricePrecision } = position;
+    const { symbol, side, takeProfitPrice, stopLossPrice, pricePrecision } = position;
     
-    addLog(`KILL: Đặt TP/SL trên sàn cho ${side} ${symbol}...`);
+    addLog(`[${positionType}] Đặt TP/SL trên sàn cho ${side} ${symbol}...`);
     addLog(`  -> TP @${takeProfitPrice.toFixed(pricePrecision)}, SL @${stopLossPrice.toFixed(pricePrecision)}`);
 
     try {
@@ -459,7 +419,7 @@ async function placeKillTpslOrders(position) {
         addLog(`  -> Đã đặt thành công TP/SL trên sàn cho ${side} ${symbol}`);
         return true;
     } catch (err) {
-        addLog(`KILL: LỖI ĐẶT TP/SL TRÊN SÀN: ${err.msg || err.message}`);
+        addLog(`[${positionType}] LỖI ĐẶT TP/SL TRÊN SÀN: ${err.msg || err.message}`);
         addLog(`  -> Đang đóng khẩn cấp vị thế ${side} ${symbol} vừa mở do không đặt được TP/SL.`);
         await closePosition(symbol, `Lỗi đặt TP/SL trên sàn`, side);
         if (err instanceof CriticalApiError && botRunning) await stopBotLogicInternal(`Lỗi đặt TP/SL trên sàn ${symbol}`);
@@ -483,7 +443,7 @@ async function moveStopLossToEntry(position) {
             stopLossPrice: position.entryPrice,
         };
 
-        const placed = await placeKillTpslOrders(updatedPositionForOrder);
+        const placed = await placeTpslOrders(updatedPositionForOrder, 'KILL');
         
         if (placed) {
             addLog(`  -> Đã dời SL của ${position.side} về ${position.entryPrice.toFixed(position.pricePrecision)} thành công.`);
@@ -611,10 +571,10 @@ async function openMarketPosition(symbol, tradeDirection, maxLeverage, entryPric
 
         if (maxLeverage >= 75) {
             TAKE_PROFIT_MULTIPLIER = 10;
-            STOP_LOSS_MULTIPLIER = 5;
+            STOP_LOSS_MULTIPLIER = 6;
         } else if (maxLeverage >= MIN_LEVERAGE_TO_TRADE) {
             TAKE_PROFIT_MULTIPLIER = 5;
-            STOP_LOSS_MULTIPLIER = 2.5;
+            STOP_LOSS_MULTIPLIER = 3;
         } else {
             TAKE_PROFIT_MULTIPLIER = 3.5;
             STOP_LOSS_MULTIPLIER = 2;
@@ -740,8 +700,8 @@ async function openSidewaysGridPosition(symbol, tradeDirection, entryPriceToTarg
             quantityPrecision: details.quantityPrecision
         };
         
-        const ocoPlaced = await placeOcoOrderForSideways(gridPos);
-        if (!ocoPlaced) {
+        const tpslPlaced = await placeTpslOrders(gridPos, 'SIDEWAYS');
+        if (!tpslPlaced) {
             return null;
         }
 
@@ -938,7 +898,6 @@ async function manageSidewaysGridLogic() {
     }
 }
 
-
 async function checkOverallTPSL() {
     if (!botRunning || isProcessingTrade || pendingClosures.size > 0) return false;
     let currentTrueOverallPnl = cumulativeRealizedPnlSinceStart;
@@ -1085,7 +1044,7 @@ async function runTradingLogic() {
                 await sleep(3000);
 
                 if (currentLongPosition) {
-                    if (!await placeKillTpslOrders(currentLongPosition)) {
+                    if (!await placeTpslOrders(currentLongPosition, 'KILL')) {
                         if (currentShortPosition) await closePosition(currentShortPosition.symbol, "Lỗi đặt TP/SL cho LONG", "SHORT");
                         currentLongPosition = null;
                         currentShortPosition = null;
@@ -1096,7 +1055,7 @@ async function runTradingLogic() {
                 }
                 await sleep(500);
                  if (currentShortPosition) {
-                    if (!await placeKillTpslOrders(currentShortPosition)) {
+                    if (!await placeTpslOrders(currentShortPosition, 'KILL')) {
                         if (currentLongPosition) await closePosition(currentLongPosition.symbol, "Lỗi đặt TP/SL cho SHORT", "LONG");
                         currentLongPosition = null;
                         currentShortPosition = null;
@@ -1121,7 +1080,7 @@ async function runTradingLogic() {
         } else if (currentBotMode === 'sideways') {
             const currentCoinDataVPS1 = getCurrentCoinVPS1Data(TARGET_COIN_SYMBOL);
             const vps1Volatility = currentCoinDataVPS1 ? Math.abs(currentCoinDataVPS1.changePercent) : 0;
-            addLog(`LƯỚI: Kích hoạt Sideways cho ${TARGET_COIN_SYMBOL} (Vol: ${vps1Volatility.toFixed(2)}%).`);
+            addLog(`LƯỚI: Kích hoạt Sideways cho ${TARGET_COIN_SYMBOL} (Vol: ${vps1Volatility.toFixed(2)}%)...`);
             await cancelAllOpenOrdersForSymbol(TARGET_COIN_SYMBOL);
             await sleep(500);
             const priceAnchor = await getCurrentPrice(TARGET_COIN_SYMBOL);
