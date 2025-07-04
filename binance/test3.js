@@ -570,10 +570,10 @@ async function openMarketPosition(symbol, tradeDirection, maxLeverage, entryPric
         let TAKE_PROFIT_MULTIPLIER, STOP_LOSS_MULTIPLIER;
 
         if (maxLeverage >= 75) {
-            TAKE_PROFIT_MULTIPLIER = 10;
+            TAKE_PROFIT_MULTIPLIER = 11;
             STOP_LOSS_MULTIPLIER = 6;
         } else if (maxLeverage >= MIN_LEVERAGE_TO_TRADE) {
-            TAKE_PROFIT_MULTIPLIER = 5;
+            TAKE_PROFIT_MULTIPLIER = 5.5;
             STOP_LOSS_MULTIPLIER = 3;
         } else {
             TAKE_PROFIT_MULTIPLIER = 3.5;
@@ -599,7 +599,10 @@ async function openMarketPosition(symbol, tradeDirection, maxLeverage, entryPric
             takeProfitPrice,
             stopLossPrice,
             unrealizedPnl: 0,
-            hasMovedSLToEntry: false
+            hasMovedSLToEntry: false,
+            leverage: maxLeverage,
+            milestoneCounter: 0,
+            closedLossAmount: 0
         };
         
         return positionObject;
@@ -621,10 +624,12 @@ async function closePartialPosition(position, quantityToClose) {
     try {
         const details = await getSymbolDetails(position.symbol);
         if (!details) throw new Error(`Lỗi lấy chi tiết symbol.`);
+        
         let qtyEff = Math.min(quantityToClose, position.quantity);
         qtyEff = parseFloat((Math.floor(qtyEff / details.stepSize) * details.stepSize).toFixed(details.quantityPrecision));
+        
         if (qtyEff <= 0 || qtyEff * (position.currentPrice || position.entryPrice) < details.minNotional * 0.9) {
-            addLog(`Lỗi đóng từng phần: Lượng đóng không hợp lệ hoặc quá nhỏ.`);
+            addLog(`Lỗi đóng từng phần: Lượng đóng không hợp lệ hoặc quá nhỏ. KL tính toán: ${qtyEff}`);
             success = false;
         } else {
             const sideOrder = (position.side === 'LONG') ? 'SELL' : 'BUY';
@@ -637,7 +642,9 @@ async function closePartialPosition(position, quantityToClose) {
                 quantity: qtyEff,
                 newClientOrderId: `${currentBotMode.toUpperCase()}-PARTIAL-${position.side[0]}${Date.now().toString().slice(-8)}`
             });
+            position.quantity -= qtyEff;
             position.closedLossAmount += qtyEff;
+            addLog(`  -> KL còn lại của ${position.side} ${position.symbol}: ${position.quantity.toFixed(position.quantityPrecision)}`);
             success = true;
         }
     } catch (err) {
@@ -1154,6 +1161,47 @@ async function manageOpenPosition() {
             addLog(`Lỗi cập nhật PNL ảo (Kill): ${err.msg || err.message}`);
             if (err instanceof CriticalApiError) await stopBotLogicInternal(`Lỗi cập nhật vị thế (Kill) ${TARGET_COIN_SYMBOL}`);
             return;
+        }
+        
+        const positionsToCheck = [currentLongPosition, currentShortPosition];
+        for (const pos of positionsToCheck) {
+            if (!pos || pos.unrealizedPnl <= 0 || pos.quantity <= 0) {
+                continue;
+            }
+
+            let pnlThresholdPerMilestone;
+            if (pos.leverage >= 75) {
+                pnlThresholdPerMilestone = INITIAL_INVESTMENT_AMOUNT * 1.00;
+            } else if (pos.leverage >= 50) {
+                pnlThresholdPerMilestone = INITIAL_INVESTMENT_AMOUNT * 0.50;
+            } else {
+                continue;
+            }
+
+            const targetPnlForNextMilestone = pnlThresholdPerMilestone * (pos.milestoneCounter + 1);
+
+            if (pos.unrealizedPnl >= targetPnlForNextMilestone) {
+                addLog(`[KILL MILESTONE] Vị thế ${pos.side} đạt mốc ${pos.milestoneCounter + 1}. PNL: ${pos.unrealizedPnl.toFixed(2)} >= ${targetPnlForNextMilestone.toFixed(2)}.`);
+
+                const details = await getSymbolDetails(pos.symbol);
+                if (!details) continue;
+                const quantityToClose = (0.10 * INITIAL_INVESTMENT_AMOUNT) / pos.entryPrice;
+                
+                const closed = await closePartialPosition(pos, quantityToClose);
+
+                if (closed) {
+                    pos.milestoneCounter++;
+                    addLog(`  -> Mốc của ${pos.side} tăng lên: ${pos.milestoneCounter}.`);
+
+                    if (pos.milestoneCounter === 7) {
+                        addLog(`[KILL MỐC 7] Vị thế ${pos.side} đã đạt mốc 7. Đóng vị thế đối lập.`);
+                        const oppositePos = pos.side === 'LONG' ? currentShortPosition : currentLongPosition;
+                        if (oppositePos) {
+                            await closePosition(oppositePos.symbol, `Đối ứng mốc 7 của ${pos.side}`, oppositePos.side);
+                        }
+                    }
+                }
+            }
         }
         
         if (currentLongPosition && !currentShortPosition) {
