@@ -592,6 +592,7 @@ async function openMarketPosition(symbol, tradeDirection, maxLeverage, entryPric
         positionObject = {
             symbol,
             quantity: actualQuantity,
+            initialQuantity: actualQuantity,
             entryPrice: actualEntryPrice,
             side: tradeDirection,
             pricePrecision: details.pricePrecision,
@@ -1146,6 +1147,7 @@ async function manageOpenPosition() {
             if (currentLongPosition) {
                 if (longPosEx && Math.abs(parseFloat(longPosEx.positionAmt)) > 0) {
                     currentLongPosition.unrealizedPnl = parseFloat(longPosEx.unRealizedProfit);
+                    currentLongPosition.quantity = Math.abs(parseFloat(longPosEx.positionAmt));
                 } else {
                     currentLongPosition = null; 
                 }
@@ -1153,6 +1155,7 @@ async function manageOpenPosition() {
             if (currentShortPosition) {
                 if (shortPosEx && Math.abs(parseFloat(shortPosEx.positionAmt)) > 0) {
                     currentShortPosition.unrealizedPnl = parseFloat(shortPosEx.unRealizedProfit);
+                    currentShortPosition.quantity = Math.abs(parseFloat(shortPosEx.positionAmt));
                 } else {
                     currentShortPosition = null;
                 }
@@ -1182,10 +1185,29 @@ async function manageOpenPosition() {
 
             if (pos.unrealizedPnl >= targetPnlForNextMilestone) {
                 addLog(`[KILL MILESTONE] Vị thế ${pos.side} đạt mốc ${pos.milestoneCounter + 1}. PNL: ${pos.unrealizedPnl.toFixed(2)} >= ${targetPnlForNextMilestone.toFixed(2)}.`);
+                
+                const initialQuantity = pos.initialQuantity; 
+                if (!initialQuantity || initialQuantity <= 0) {
+                    addLog(`  -> Lỗi: Không tìm thấy khối lượng ban đầu của vị thế ${pos.side}.`);
+                    continue;
+                }
+
+                const quantityToClose = initialQuantity * 0.10;
+
+                if (quantityToClose >= pos.quantity) {
+                     addLog(`  -> Lượng đóng (${quantityToClose.toFixed(4)}) lớn hơn hoặc bằng lượng còn lại (${pos.quantity.toFixed(4)}). Bỏ qua đóng từng phần.`);
+                     continue;
+                }
 
                 const details = await getSymbolDetails(pos.symbol);
                 if (!details) continue;
-                const quantityToClose = (0.10 * INITIAL_INVESTMENT_AMOUNT) / pos.entryPrice;
+
+                const currentPrice = pos.currentPrice || pos.entryPrice;
+                if (quantityToClose * currentPrice < details.minNotional) {
+                    addLog(`  -> BỎ QUA: Giá trị lệnh đóng (${(quantityToClose * currentPrice).toFixed(4)} USDT) vẫn nhỏ hơn yêu cầu của sàn (${details.minNotional} USDT).`);
+                    pos.milestoneCounter++;
+                    continue;
+                }
                 
                 const closed = await closePartialPosition(pos, quantityToClose);
 
