@@ -206,7 +206,7 @@ async function callPublicAPI(fullEndpointPath, params = {}) {
         consecutiveApiErrors++;
         addLog(`Lỗi API Public Binance (${fullUrlToCall}): ${error.code || 'UNK'} - ${error.msg || error.message}. Body: ${error.responseBody || 'N/A'}`);
         if (error.code === -1003 || (error.msg && error.msg.includes("limit"))) addLog("  -> RATE LIMIT.");
-        if (consecutiveApiErrors >= MAX_CONsecutive_API_ERRORS) throw new CriticalApiError("Quá nhiều lỗi API Public Binance.");
+        if (consecutiveApiErrors >= MAX_CONSECUTIVE_API_ERRORS) throw new CriticalApiError("Quá nhiều lỗi API Public Binance.");
         throw error;
     }
 }
@@ -467,6 +467,37 @@ async function placeKillTpslOrders(position) {
     }
 }
 
+async function moveStopLossToEntry(position) {
+    if (!position || position.hasMovedSLToEntry) {
+        return;
+    }
+
+    addLog(`[KILL] Vị thế đối lập đã đóng. Dời SL của lệnh ${position.side} về hòa vốn...`);
+
+    try {
+        await cancelAllOpenOrdersForSymbol(position.symbol);
+        await sleep(500);
+
+        const updatedPositionForOrder = {
+            ...position,
+            stopLossPrice: position.entryPrice,
+        };
+
+        const placed = await placeKillTpslOrders(updatedPositionForOrder);
+        
+        if (placed) {
+            addLog(`  -> Đã dời SL của ${position.side} về ${position.entryPrice.toFixed(position.pricePrecision)} thành công.`);
+            position.stopLossPrice = position.entryPrice;
+            position.hasMovedSLToEntry = true;
+        } else {
+            addLog(`  -> LỖI khi đặt lại TP/SL sau khi dời. Đóng khẩn cấp vị thế ${position.side}.`);
+            await closePosition(position.symbol, "Lỗi dời SL về hòa vốn", position.side);
+        }
+
+    } catch (err) {
+        addLog(`  -> Lỗi nghiêm trọng trong quá trình dời SL về hòa vốn: ${err.msg || err.message}`);
+    }
+}
 
 async function cancelAllOpenOrdersForSymbol(symbol) {
     if (!symbol) return true;
@@ -579,11 +610,11 @@ async function openMarketPosition(symbol, tradeDirection, maxLeverage, entryPric
         let TAKE_PROFIT_MULTIPLIER, STOP_LOSS_MULTIPLIER;
 
         if (maxLeverage >= 75) {
-            TAKE_PROFIT_MULTIPLIER = 11;
-            STOP_LOSS_MULTIPLIER = 6;
+            TAKE_PROFIT_MULTIPLIER = 10;
+            STOP_LOSS_MULTIPLIER = 5;
         } else if (maxLeverage >= MIN_LEVERAGE_TO_TRADE) {
-            TAKE_PROFIT_MULTIPLIER = 5.5;
-            STOP_LOSS_MULTIPLIER = 3;
+            TAKE_PROFIT_MULTIPLIER = 5;
+            STOP_LOSS_MULTIPLIER = 2.5;
         } else {
             TAKE_PROFIT_MULTIPLIER = 3.5;
             STOP_LOSS_MULTIPLIER = 2;
@@ -607,7 +638,8 @@ async function openMarketPosition(symbol, tradeDirection, maxLeverage, entryPric
             quantityPrecision: details.quantityPrecision,
             takeProfitPrice,
             stopLossPrice,
-            unrealizedPnl: 0
+            unrealizedPnl: 0,
+            hasMovedSLToEntry: false
         };
         
         return positionObject;
@@ -1165,6 +1197,13 @@ async function manageOpenPosition() {
             return;
         }
         
+        if (currentLongPosition && !currentShortPosition) {
+            await moveStopLossToEntry(currentLongPosition);
+        } 
+        else if (!currentLongPosition && currentShortPosition) {
+            await moveStopLossToEntry(currentShortPosition);
+        }
+        
         if (!currentLongPosition && !currentShortPosition) {
             addLog("KILL: Cả 2 vị thế đã đóng. Reset chu kỳ...");
             if (botRunning) await cleanupAndResetCycle(TARGET_COIN_SYMBOL);
@@ -1192,16 +1231,15 @@ async function handleFinalClosure(orderId, clientOrderId, symbol, lastKnownPnl, 
     }
     
     if (sidewaysGrid.isActive && !gridIdToClear) {
-        const positionsAfter = await callSignedAPI('/fapi/v2/positionRisk', 'GET', { symbol: symbol });
+        const positionsAfterCheck = await callSignedAPI('/fapi/v2/positionRisk', 'GET', { symbol: symbol });
         for (const pos of sidewaysGrid.activeGridPositions) {
-            const correspondingPosOnExchange = positionsAfter.find(p => p.positionSide === pos.side);
+            const correspondingPosOnExchange = positionsAfterCheck.find(p => p.positionSide === pos.side);
             if (!correspondingPosOnExchange || parseFloat(correspondingPosOnExchange.positionAmt) === 0) {
                 gridIdToClear = pos.id;
                 break;
             }
         }
     }
-
 
     try {
         const trades = await callSignedAPI('/fapi/v1/userTrades', 'GET', { symbol: symbol, orderId: orderId });
@@ -1231,15 +1269,11 @@ async function handleFinalClosure(orderId, clientOrderId, symbol, lastKnownPnl, 
 
         const wasLongClosed = currentLongPosition && (!longPosAfter || parseFloat(longPosAfter.positionAmt) === 0);
         const wasShortClosed = currentShortPosition && (!shortPosAfter || parseFloat(shortPosAfter.positionAmt) === 0);
+        
+        let sideThatWasClosed = null;
+        if (wasLongClosed) sideThatWasClosed = 'LONG';
+        if (wasShortClosed) sideThatWasClosed = 'SHORT';
 
-        if (wasLongClosed) {
-            addLog(`  -> Vị thế LONG ${symbol} đã đóng.`);
-            currentLongPosition = null; 
-        }
-        if (wasShortClosed) {
-            addLog(`  -> Vị thế SHORT ${symbol} đã đóng.`);
-            currentShortPosition = null;
-        }
 
         if (sidewaysGrid.isActive && gridIdToClear) {
             sidewaysGrid.activeGridPositions = sidewaysGrid.activeGridPositions.filter(p => p.id !== gridIdToClear);
@@ -1248,15 +1282,21 @@ async function handleFinalClosure(orderId, clientOrderId, symbol, lastKnownPnl, 
              addLog(`  -> Đã xóa mốc lưới ${gridIdToClear} khỏi bộ nhớ.`);
         }
 
-        if (currentBotMode === 'kill' && (wasLongClosed || wasShortClosed)) {
+        if (currentBotMode === 'kill' && sideThatWasClosed) {
+            if (sideThatWasClosed === 'LONG') currentLongPosition = null;
+            if (sideThatWasClosed === 'SHORT') currentShortPosition = null;
+
             const remainingPos = currentLongPosition || currentShortPosition;
             const isTpEvent = orderType.includes('TAKE_PROFIT');
 
-            if (remainingPos && isTpEvent && totalRealizedPnlFromFills > 0) {
-                addLog(`KILL: Lệnh ${wasLongClosed ? 'LONG' : 'SHORT'} đã TP. Đóng nốt lệnh ${remainingPos.side} còn lại.`);
-                await closePosition(remainingPos.symbol, `Đóng theo lệnh TP`, remainingPos.side);
-            } else if (remainingPos && !isTpEvent) {
-                 addLog(`KILL: Lệnh ${wasLongClosed ? 'LONG' : 'SHORT'} đã SL. Lệnh ${remainingPos.side} còn lại tiếp tục chạy.`);
+            if (remainingPos) {
+                if (isTpEvent && totalRealizedPnlFromFills > 0) {
+                    addLog(`KILL: Lệnh ${sideThatWasClosed} đã TP. Đóng nốt lệnh ${remainingPos.side} còn lại.`);
+                    await closePosition(remainingPos.symbol, `Đóng theo lệnh TP`, remainingPos.side);
+                } else {
+                    addLog(`KILL: Lệnh ${sideThatWasClosed} đã đóng (SL/Liquid). Dời SL của lệnh ${remainingPos.side} về hòa vốn.`);
+                    await moveStopLossToEntry(remainingPos);
+                }
             }
         }
         
