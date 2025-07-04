@@ -1729,13 +1729,48 @@ function setupMarketDataStream(symbol) {
     marketWs = new WebSocket(url);
     addLog(`Đang kết nối Market Data Stream cho ${symbol}...`);
     marketWs.on('open', () => addLog(`Market Data Stream ${symbol} đã kết nối.`));
-    marketWs.on('message', (data) => {
+    marketWs.on('message', async (data) => {
         try {
             const msg = JSON.parse(data.toString());
             if (msg.e === 'markPriceUpdate' && msg.s === TARGET_COIN_SYMBOL) {
                 currentMarketPrice = parseFloat(msg.p);
                 if (currentLongPosition) currentLongPosition.currentPrice = currentMarketPrice;
                 if (currentShortPosition) currentShortPosition.currentPrice = currentMarketPrice;
+
+                if (currentBotMode === 'kill' && !isProcessingTrade && !isOpeningInitialPair) {
+                    const positionsToCheck = [currentLongPosition, currentShortPosition];
+                    for (const pos of positionsToCheck) {
+                        if (!pos || pos.unrealizedPnl > 0 || pos.quantity <= 0) continue;
+
+                        const estimatedPnl = (currentMarketPrice - pos.entryPrice) * pos.quantity * (pos.side === 'LONG' ? 1 : -1);
+                        
+                        if (pos.closedLossAmount > 0 && estimatedPnl >= 0) {
+                            await recoverPartialPosition(pos);
+                            continue;
+                        }
+
+                        let pnlThresholdPerMilestone;
+                        if (pos.leverage >= 75) {
+                            pnlThresholdPerMilestone = INITIAL_INVESTMENT_AMOUNT * 1.00;
+                        } else if (pos.leverage >= 50) {
+                            pnlThresholdPerMilestone = INITIAL_INVESTMENT_AMOUNT * 0.50;
+                        } else {
+                            pnlThresholdPerMilestone = null;
+                        }
+
+                        if (pnlThresholdPerMilestone !== null) {
+                            const targetPnlForNextLossMilestone = - (pnlThresholdPerMilestone * (pos.milestoneCounter + 1));
+                            
+                            if (estimatedPnl <= targetPnlForNextLossMilestone) {
+                                const tempMilestone = pos.milestoneCounter;
+                                const closed = await closePartialPosition(pos, pos.initialQuantity * 0.10);
+                                if (closed && pos) {
+                                    pos.milestoneCounter = tempMilestone + 1;
+                                }
+                            }
+                        }
+                    }
+                }
             }
         } catch (e) { }
     });
