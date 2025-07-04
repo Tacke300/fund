@@ -658,6 +658,44 @@ async function closePartialPosition(position, quantityToClose) {
     }
 }
 
+async function recoverPartialPosition(position) {
+    if (!position || position.closedLossAmount <= 0 || isProcessingTrade) return false;
+    isProcessingTrade = true;
+    let success = false;
+    try {
+        addLog(`[PHỤC HỒI VỊ THẾ] Lệnh ${position.side} ${position.symbol} hồi vốn. Mở lại ${position.closedLossAmount} đã cắt.`);
+        const details = await getSymbolDetails(position.symbol);
+        if (!details) throw new Error('Không có details symbol');
+
+        const quantityToRecover = parseFloat((Math.floor(position.closedLossAmount / details.stepSize) * details.stepSize).toFixed(details.quantityPrecision));
+        
+        if (quantityToRecover <= 0) {
+            throw new Error('Lượng phục hồi tính toán ra 0.');
+        }
+
+        const orderSide = (position.side === 'LONG') ? 'BUY' : 'SELL';
+        await callSignedAPI('/fapi/v1/order', 'POST', {
+            symbol: position.symbol,
+            side: orderSide,
+            positionSide: position.side,
+            type: 'MARKET',
+            quantity: quantityToRecover
+        });
+        
+        position.quantity += quantityToRecover;
+        position.closedLossAmount = 0;
+        addLog(`  -> Đã mở lại. KL mới của ${position.side}: ${position.quantity.toFixed(position.quantityPrecision)}`);
+        success = true;
+
+    } catch(err) {
+        addLog(`[PHỤC HỒI VỊ THẾ] Lỗi: ${err.msg || err.message}`);
+        success = false;
+    } finally {
+        isProcessingTrade = false;
+        return success;
+    }
+}
+
 async function openSidewaysGridPosition(symbol, tradeDirection, entryPriceToTarget, stepIndex) {
     if (!symbol || isProcessingTrade) return null;
     isProcessingTrade = true;
@@ -1168,58 +1206,38 @@ async function manageOpenPosition() {
         
         const positionsToCheck = [currentLongPosition, currentShortPosition];
         for (const pos of positionsToCheck) {
-            if (!pos || pos.unrealizedPnl <= 0 || pos.quantity <= 0) {
-                continue;
+            if (!pos) continue;
+
+            if (pos.unrealizedPnl > 0) {
+                 continue;
             }
 
-            let pnlThresholdPerMilestone;
-            if (pos.leverage >= 75) {
-                pnlThresholdPerMilestone = INITIAL_INVESTMENT_AMOUNT * 1.00;
-            } else if (pos.leverage >= 50) {
-                pnlThresholdPerMilestone = INITIAL_INVESTMENT_AMOUNT * 0.50;
-            } else {
-                continue;
-            }
-
-            const targetPnlForNextMilestone = pnlThresholdPerMilestone * (pos.milestoneCounter + 1);
-
-            if (pos.unrealizedPnl >= targetPnlForNextMilestone) {
-                addLog(`[KILL MILESTONE] Vị thế ${pos.side} đạt mốc ${pos.milestoneCounter + 1}. PNL: ${pos.unrealizedPnl.toFixed(2)} >= ${targetPnlForNextMilestone.toFixed(2)}.`);
-                
-                const initialQuantity = pos.initialQuantity; 
-                if (!initialQuantity || initialQuantity <= 0) {
-                    addLog(`  -> Lỗi: Không tìm thấy khối lượng ban đầu của vị thế ${pos.side}.`);
+            if (pos.unrealizedPnl <= 0 && pos.quantity > 0) {
+                if (pos.closedLossAmount > 0 && pos.unrealizedPnl >= 0) {
+                    await recoverPartialPosition(pos);
                     continue;
                 }
 
-                const quantityToClose = initialQuantity * 0.10;
-
-                if (quantityToClose >= pos.quantity) {
-                     addLog(`  -> Lượng đóng (${quantityToClose.toFixed(4)}) lớn hơn hoặc bằng lượng còn lại (${pos.quantity.toFixed(4)}). Bỏ qua đóng từng phần.`);
-                     continue;
+                let pnlThresholdPerMilestone;
+                if (pos.leverage >= 75) {
+                    pnlThresholdPerMilestone = INITIAL_INVESTMENT_AMOUNT * 1.00;
+                } else if (pos.leverage >= 50) {
+                    pnlThresholdPerMilestone = INITIAL_INVESTMENT_AMOUNT * 0.50;
+                } else {
+                    pnlThresholdPerMilestone = null;
                 }
 
-                const details = await getSymbolDetails(pos.symbol);
-                if (!details) continue;
-
-                const currentPrice = pos.currentPrice || pos.entryPrice;
-                if (quantityToClose * currentPrice < details.minNotional) {
-                    addLog(`  -> BỎ QUA: Giá trị lệnh đóng (${(quantityToClose * currentPrice).toFixed(4)} USDT) vẫn nhỏ hơn yêu cầu của sàn (${details.minNotional} USDT).`);
-                    pos.milestoneCounter++;
-                    continue;
-                }
-                
-                const closed = await closePartialPosition(pos, quantityToClose);
-
-                if (closed) {
-                    pos.milestoneCounter++;
-                    addLog(`  -> Mốc của ${pos.side} tăng lên: ${pos.milestoneCounter}.`);
-
-                    if (pos.milestoneCounter === 7) {
-                        addLog(`[KILL MỐC 7] Vị thế ${pos.side} đã đạt mốc 7. Đóng vị thế đối lập.`);
-                        const oppositePos = pos.side === 'LONG' ? currentShortPosition : currentLongPosition;
-                        if (oppositePos) {
-                            await closePosition(oppositePos.symbol, `Đối ứng mốc 7 của ${pos.side}`, oppositePos.side);
+                if (pnlThresholdPerMilestone !== null) {
+                    const targetPnlForNextLossMilestone = - (pnlThresholdPerMilestone * (pos.milestoneCounter + 1));
+                    
+                    if (pos.unrealizedPnl <= targetPnlForNextLossMilestone) {
+                        addLog(`[CẮT LỖ MILESTONE] Vị thế ${pos.side} (L${pos.leverage}x) đạt mốc lỗ ${pos.milestoneCounter + 1}. PNL: ${pos.unrealizedPnl.toFixed(2)} <= ${targetPnlForNextLossMilestone.toFixed(2)}.`);
+                        
+                        const quantityToClose = pos.initialQuantity * 0.10;
+                        const closed = await closePartialPosition(pos, quantityToClose);
+                        
+                        if (closed) {
+                            pos.milestoneCounter++;
                         }
                     }
                 }
@@ -1277,7 +1295,6 @@ async function handleFinalClosure(orderId, clientOrderId, symbol, lastKnownPnl, 
             for (const trade of trades) {
                 totalRealizedPnlFromFills += parseFloat(trade.realizedPnl);
             }
-            addLog(`PNL chốt từ API (OrderID ${orderId}): ${totalRealizedPnlFromFills.toFixed(4)} USDT.`);
         } else {
             addLog(`PNL WARN: Không tìm thấy giao dịch cho OrderID ${orderId}. Dùng PNL từ tin nhắn: ${lastKnownPnl.toFixed(4)}`);
             totalRealizedPnlFromFills = lastKnownPnl;
@@ -1288,7 +1305,9 @@ async function handleFinalClosure(orderId, clientOrderId, symbol, lastKnownPnl, 
             else totalLoss += Math.abs(totalRealizedPnlFromFills);
             netPNL = totalProfit - totalLoss;
             cumulativeRealizedPnlSinceStart += totalRealizedPnlFromFills;
-            addLog(`  PNL Ròng (${symbol}): ${netPNL.toFixed(2)} (L:${totalProfit.toFixed(2)}, T:${totalLoss.toFixed(2)}) | PNL BOT Tổng: ${cumulativeRealizedPnlSinceStart.toFixed(2)}`);
+            
+            const finalLog = `PNL CHỐT: ${totalRealizedPnlFromFills.toFixed(2)} USDT. PNL Ròng(${symbol}): ${netPNL.toFixed(2)}. PNL Tổng: ${cumulativeRealizedPnlSinceStart.toFixed(2)}`;
+            addLog(finalLog);
         }
 
         await sleep(500);
@@ -1357,7 +1376,7 @@ async function processTradeResult(orderInfo) {
         const realizedPnl = parseFloat(realizedPnlStr);
         addLog(`FILLED: Lệnh đóng (${orderType}) ${orderId} khớp, PNL tin nhắn: ${realizedPnl.toFixed(4)}. Xử lý PNL cuối cùng.`);
         pendingClosures.add(orderId);
-        setTimeout(() => handleFinalClosure(orderId, clientOrderId, symbol, realizedPnl, orderType), 1500);
+        setTimeout(() => handleFinalClosure(orderId, clientOrderId, symbol, realizedPnl, orderType), 2000);
     }
 }
 
