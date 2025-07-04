@@ -38,6 +38,7 @@ const ERROR_RETRY_DELAY_MS = 15000;
 const LOG_COOLDOWN_MS = 2000;
 const MODE_SWITCH_DELAY_MS = 10000;
 const COIN_SWITCH_DELAY_MS = 10000;
+const KILL_MODE_SWITCH_CHECK_INTERVAL_MS = 1 * 60 * 1000;
 
 let serverTimeOffset = 0;
 let exchangeInfoCache = null;
@@ -1174,6 +1175,33 @@ async function runTradingLogic() {
 
 async function manageOpenPosition() {
     if (isProcessingTrade || !botRunning || sidewaysGrid.isClearingForSwitch || !TARGET_COIN_SYMBOL || isOpeningInitialPair || pendingClosures.size > 0) return;
+
+    if (currentBotMode === 'kill' && Date.now() - lastKillModeCheckTime > KILL_MODE_SWITCH_CHECK_INTERVAL_MS) {
+        lastKillModeCheckTime = Date.now();
+        await fetchAndCacheTopCoinsFromVPS1(true);
+        const currentCoinData = getCurrentCoinVPS1Data(TARGET_COIN_SYMBOL);
+        const currentCoinVol = currentCoinData ? Math.abs(currentCoinData.changePercent) : 0;
+        
+        const bestAlternativeCoin = vps1DataCache
+            .filter(c => c.symbol !== TARGET_COIN_SYMBOL && !blacklistedCoinsThisSession.has(c.symbol))
+            .sort((a, b) => Math.abs(b.changePercent) - Math.abs(a.changePercent))[0];
+
+        if (bestAlternativeCoin) {
+            const altCoinVol = Math.abs(bestAlternativeCoin.changePercent);
+            const isAltVolSufficientlyHigh = altCoinVol > 15.0;
+            const isVolDifferenceSufficient = altCoinVol > (currentCoinVol + 5.0);
+
+            if (isAltVolSufficientlyHigh && isVolDifferenceSufficient) {
+                const hasExistingPos = await checkExistingPosition(bestAlternativeCoin.symbol);
+                if (!hasExistingPos) {
+                    const reason = `Chuyển sang cơ hội tốt hơn ${bestAlternativeCoin.symbol} (Vol: ${altCoinVol.toFixed(2)}% > 15% và hơn ${currentCoinVol.toFixed(2)}% ít nhất 5%)`;
+                    await handleCoinSwitch(reason);
+                    return; 
+                }
+            }
+        }
+    }
+
     if (await checkOverallTPSL()) return;
 
     if (currentBotMode === 'kill') {
