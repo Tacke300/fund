@@ -83,25 +83,35 @@ function addLog(message) {
     const time = localTime.toLocaleTimeString('en-GB');
     const messageHash = crypto.createHash('md5').update(message).digest('hex');
 
-    if (!logCounts[messageHash]) {
-        logCounts[messageHash] = { count: 0, lastLoggedTime: localTime, lastMessage: `[${time}] ${message}` };
-    }
-
-    logCounts[messageHash].count++;
-
-    if ((localTime.getTime() - logCounts[messageHash].lastLoggedTime.getTime()) >= LOG_COOLDOWN_MS) {
-        if (logCounts[messageHash].count > 1) {
-            const repeatedMessage = `[${time}] (Lặp lại x${logCounts[messageHash].count - 1} lần) ${message}`;
-            console.log(repeatedMessage);
-            if (LOG_TO_CUSTOM_FILE) fs.appendFile(CUSTOM_LOG_FILE, repeatedMessage + '\n', (err) => { if (err) console.error("Lỗi ghi log:", err); });
-        } else {
-            const singleMessage = logCounts[messageHash].lastMessage;
-            console.log(singleMessage);
-            if (LOG_TO_CUSTOM_FILE) fs.appendFile(CUSTOM_LOG_FILE, singleMessage + '\n', (err) => { if (err) console.error("Lỗi ghi log:", err); });
+    if (logCounts[messageHash]) {
+        logCounts[messageHash].count++;
+        const lastLoggedTime = logCounts[messageHash].lastLoggedTime;
+        if ((localTime.getTime() - lastLoggedTime.getTime()) < LOG_COOLDOWN_MS) {
+            return;
         }
-        logCounts[messageHash] = { count: 0, lastLoggedTime: localTime, lastMessage: `[${time}] ${message}` };
+
+        if (logCounts[messageHash].count > 1) {
+            const repeatCount = logCounts[messageHash].count - 1;
+            if (repeatCount > 0) { // Only show if there's an actual repeat
+                const repeatedMessage = `[${time}] (Lặp lại x${repeatCount} lần) ${message}`;
+                console.log(repeatedMessage);
+                if (LOG_TO_CUSTOM_FILE) fs.appendFile(CUSTOM_LOG_FILE, repeatedMessage + '\n', (err) => { if (err) console.error("Lỗi ghi log:", err); });
+            }
+        } else {
+            let logEntry = `[${time}] ${message}`;
+            console.log(logEntry);
+            if (LOG_TO_CUSTOM_FILE) fs.appendFile(CUSTOM_LOG_FILE, logEntry + '\n', (err) => { if (err) console.error("Lỗi ghi log:", err); });
+        }
+        logCounts[messageHash].count = 0; // Reset count after logging
+        logCounts[messageHash].lastLoggedTime = localTime;
+    } else {
+        let logEntry = `[${time}] ${message}`;
+        console.log(logEntry);
+        if (LOG_TO_CUSTOM_FILE) fs.appendFile(CUSTOM_LOG_FILE, logEntry + '\n', (err) => { if (err) console.error("Lỗi ghi log:", err); });
+        logCounts[messageHash] = { count: 1, lastLoggedTime: localTime };
     }
 }
+
 function formatTimeUTC7(dateObject) {
     if (!dateObject) return 'N/A';
     const formatter = new Intl.DateTimeFormat('en-GB', {
@@ -1494,6 +1504,7 @@ async function stopBotLogicInternal(reason = "Lệnh dừng thủ công") {
     if (!botRunning && !retryBotTimeout) return 'Bot không chạy hoặc không đang retry.';
     addLog(`--- Dừng Bot (Lý do: ${reason}) ---`);
     botRunning = false;
+    botStartTime = null; // Reset bot start time on stop
     isOpeningInitialPair = false;
     if (nextScheduledCycleTimeout) clearTimeout(nextScheduledCycleTimeout);
     nextScheduledCycleTimeout = null;
@@ -1900,8 +1911,8 @@ app.get('/api/bot_stats', async (req, res) => {
                 qty: p.quantity?.toFixed(qpG),
                 curPrice: currentMarketPrice?.toFixed(ppG),
                 pnl: pnlU.toFixed(2),
-                tpPrice: p.tpPrice?.toFixed(ppG),
-                slPrice: p.slPrice?.toFixed(ppG),
+                tpPrice: p.takeProfitPrice?.toFixed(ppG),
+                slPrice: p.stopLossPrice?.toFixed(ppG),
                 step: p.stepIndex
             });
         }
