@@ -410,7 +410,8 @@
                 let diffMs = now.getTime() - startDate.getTime();
                 if (diffMs < 0) diffMs = 0;
 
-                
+                const days = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+                diffMs -= days * (1000 * 60 * 60 * 24);
                 const hours = Math.floor(diffMs / (1000 * 60 * 60));
                 diffMs -= hours * (1000 * 60 * 60);
                 const minutes = Math.floor(diffMs / (1000 * 60));
@@ -418,7 +419,7 @@
                 const seconds = Math.floor(diffMs / 1000);
 
                 let uptimeString = "";
-                
+                if (days > 0) uptimeString += `${days}d `;
                 if (hours > 0) uptimeString += `${hours}h `;
                 if (minutes > 0) uptimeString += `${minutes}m `;
                 uptimeString += `${seconds}s`;
