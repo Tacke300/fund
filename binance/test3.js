@@ -1,3 +1,5 @@
+
+
 import https from 'https';
 import http from 'http';
 import crypto from 'crypto';
@@ -81,25 +83,25 @@ function addLog(message) {
     const offset = 7 * 60 * 60 * 1000;
     const localTime = new Date(now.getTime() + offset);
     const time = localTime.toLocaleTimeString('en-GB');
-    let logEntry = `[${time}] ${message}`;
     const messageHash = crypto.createHash('md5').update(message).digest('hex');
-    if (logCounts[messageHash]) {
-        logCounts[messageHash].count++;
-        const lastLoggedTime = logCounts[messageHash].lastLoggedTime;
-        if ((localTime.getTime() - lastLoggedTime.getTime()) < LOG_COOLDOWN_MS) return;
+
+    if (!logCounts[messageHash]) {
+        logCounts[messageHash] = { count: 0, lastLoggedTime: localTime, lastMessage: `[${time}] ${message}` };
+    }
+
+    logCounts[messageHash].count++;
+
+    if ((localTime.getTime() - logCounts[messageHash].lastLoggedTime.getTime()) >= LOG_COOLDOWN_MS) {
         if (logCounts[messageHash].count > 1) {
             const repeatedMessage = `[${time}] (Lặp lại x${logCounts[messageHash].count - 1} lần) ${message}`;
             console.log(repeatedMessage);
             if (LOG_TO_CUSTOM_FILE) fs.appendFile(CUSTOM_LOG_FILE, repeatedMessage + '\n', (err) => { if (err) console.error("Lỗi ghi log:", err); });
         } else {
-            console.log(logEntry);
-            if (LOG_TO_CUSTOM_FILE) fs.appendFile(CUSTOM_LOG_FILE, logEntry + '\n', (err) => { if (err) console.error("Lỗi ghi log:", err); });
+            const singleMessage = logCounts[messageHash].lastMessage;
+            console.log(singleMessage);
+            if (LOG_TO_CUSTOM_FILE) fs.appendFile(CUSTOM_LOG_FILE, singleMessage + '\n', (err) => { if (err) console.error("Lỗi ghi log:", err); });
         }
-        logCounts[messageHash] = { count: 1, lastLoggedTime: localTime };
-    } else {
-        console.log(logEntry);
-        if (LOG_TO_CUSTOM_FILE) fs.appendFile(CUSTOM_LOG_FILE, logEntry + '\n', (err) => { if (err) console.error("Lỗi ghi log:", err); });
-        logCounts[messageHash] = { count: 1, lastLoggedTime: localTime };
+        logCounts[messageHash] = { count: 0, lastLoggedTime: localTime, lastMessage: `[${time}] ${message}` };
     }
 }
 function formatTimeUTC7(dateObject) {
@@ -619,7 +621,7 @@ async function openMarketPosition(symbol, tradeDirection, maxLeverage, entryPric
     }
 }
 
-async function closePartialPosition(position, quantityToClose) {
+async function closePartialPosition(position, quantityToClose, milestone = null) {
     if (!position || position.quantity <= 0 || isProcessingTrade || quantityToClose <= 0 || !position.symbol) return false;
     isProcessingTrade = true;
     let success = false;
@@ -635,7 +637,8 @@ async function closePartialPosition(position, quantityToClose) {
             success = false;
         } else {
             const sideOrder = (position.side === 'LONG') ? 'SELL' : 'BUY';
-            addLog(`[${currentBotMode.toUpperCase()}] Đóng 1 phần ${qtyEff.toFixed(details.quantityPrecision)} ${position.side} ${position.symbol}.`);
+            const reasonLog = milestone ? `(Mốc ${milestone})` : '';
+            addLog(`[${currentBotMode.toUpperCase()}] Đóng 1 phần ${qtyEff.toFixed(details.quantityPrecision)} ${position.side} ${position.symbol} ${reasonLog}.`);
             await callSignedAPI('/fapi/v1/order', 'POST', {
                 symbol: position.symbol,
                 side: sideOrder,
@@ -968,10 +971,11 @@ async function checkOverallTPSL() {
     return false;
 }
 
-async function handleCoinSwitch(reason) {
+async function handleCoinSwitch(reason, shouldBlacklist = false) {
     addLog(`[CHUYỂN COIN] Lý do: ${reason}`);
     const currentCoin = TARGET_COIN_SYMBOL;
-    if (currentCoin) {
+
+    if (currentCoin && shouldBlacklist) {
         blacklistedCoinsThisSession.add(currentCoin);
         addLog(`[BLACKLIST] Đã thêm ${currentCoin} vào danh sách loại trừ.`);
     }
@@ -1060,7 +1064,7 @@ async function runTradingLogic() {
 
                 const maxLev = await getLeverageBracketForSymbol(TARGET_COIN_SYMBOL);
                 if (!maxLev || maxLev < MIN_LEVERAGE_TO_TRADE) {
-                    await handleCoinSwitch(`Đòn bẩy không đủ (${maxLev}x)`);
+                    await handleCoinSwitch(`Đòn bẩy không đủ (${maxLev}x)`, true);
                     isOpeningInitialPair = false;
                     return;
                 }
@@ -1087,7 +1091,6 @@ async function runTradingLogic() {
                     return;
                 }
                 
-                addLog("Chờ 3s để ổn định giá trước khi đặt TP/SL trên sàn...");
                 await sleep(3000);
 
                 if (currentLongPosition) {
@@ -1116,7 +1119,7 @@ async function runTradingLogic() {
                 isOpeningInitialPair = false;
             } catch (err) {
                 if (err.code === -2027) {
-                    await handleCoinSwitch(`Lỗi vượt khối lượng khi mở cặp KILL`);
+                    await handleCoinSwitch(`Lỗi vượt khối lượng khi mở cặp KILL`, true);
                 } else {
                     addLog(`Lỗi mở cặp Kill: ${err.msg || err.message}`);
                     if (err instanceof CriticalApiError && botRunning) await stopBotLogicInternal(`Lỗi mở cặp Kill ${TARGET_COIN_SYMBOL}`);
@@ -1153,7 +1156,7 @@ async function runTradingLogic() {
     if (botRunning && !positionCheckInterval && (currentLongPosition || currentShortPosition || sidewaysGrid.isActive)) {
         if (positionCheckInterval) clearInterval(positionCheckInterval);
         const checkIntervalMs = currentBotMode === 'kill' ? 5000 : (sidewaysGrid.isActive ? 3000 : 7000);
-        addLog(`Thiết lập interval kiểm tra vị thế (${currentBotMode}) mỗi ${checkIntervalMs / 1000}s.`);
+        
         positionCheckInterval = setInterval(async () => {
             if (botRunning && !isProcessingTrade && !sidewaysGrid.isClearingForSwitch && !isOpeningInitialPair) {
                 try {
@@ -1259,10 +1262,11 @@ async function manageOpenPosition() {
                     const targetPnlForNextLossMilestone = - (pnlThresholdPerMilestone * (pos.milestoneCounter + 1));
                     
                     if (pos.unrealizedPnl <= targetPnlForNextLossMilestone) {
-                        addLog(`[CẮT LỖ MILESTONE] Vị thế ${pos.side} (L${pos.leverage}x) đạt mốc lỗ ${pos.milestoneCounter + 1}. PNL: ${pos.unrealizedPnl.toFixed(2)} <= ${targetPnlForNextLossMilestone.toFixed(2)}.`);
+                        const nextMilestone = pos.milestoneCounter + 1;
+                        addLog(`[CẮT LỖ MILESTONE] Vị thế ${pos.side} (L${pos.leverage}x) đạt mốc lỗ ${nextMilestone}. PNL: ${pos.unrealizedPnl.toFixed(2)} <= ${targetPnlForNextLossMilestone.toFixed(2)}.`);
                         
                         const quantityToClose = pos.initialQuantity * 0.10;
-                        const closed = await closePartialPosition(pos, quantityToClose);
+                        const closed = await closePartialPosition(pos, quantityToClose, nextMilestone);
                         
                         if (closed) {
                             pos.milestoneCounter++;
@@ -1290,7 +1294,7 @@ async function manageOpenPosition() {
             await manageSidewaysGridLogic();
         } catch (err) {
             if (err.code === -2027) {
-                await handleCoinSwitch(`Lỗi vượt khối lượng khi mở mốc lưới`);
+                await handleCoinSwitch(`Lỗi vượt khối lượng khi mở mốc lưới`, true);
             } else {
                 addLog(`Lỗi manageSidewaysGridLogic: ${err.msg || err.message}`);
             }
@@ -1402,9 +1406,9 @@ async function processTradeResult(orderInfo) {
 
     if (isClosureEvent) {
         const realizedPnl = parseFloat(realizedPnlStr);
-        addLog(`FILLED: Lệnh đóng (${orderType}) ${orderId} khớp, PNL tin nhắn: ${realizedPnl.toFixed(4)}. Xử lý PNL cuối cùng.`);
+        addLog(`FILLED: Lệnh đóng (${orderType}) ${orderId} khớp, PNL tin nhắn: ${realizedPnl.toFixed(4)}. Xử lý PNL cuối cùng sau 5s...`);
         pendingClosures.add(orderId);
-        setTimeout(() => handleFinalClosure(orderId, clientOrderId, symbol, realizedPnl, orderType), 2000);
+        setTimeout(() => handleFinalClosure(orderId, clientOrderId, symbol, realizedPnl, orderType), 5000);
     }
 }
 
@@ -1763,7 +1767,7 @@ function setupMarketDataStream(symbol) {
                             
                             if (estimatedPnl <= targetPnlForNextLossMilestone) {
                                 const tempMilestone = pos.milestoneCounter;
-                                const closed = await closePartialPosition(pos, pos.initialQuantity * 0.10);
+                                const closed = await closePartialPosition(pos, pos.initialQuantity * 0.10, tempMilestone + 1);
                                 if (closed && pos) {
                                     pos.milestoneCounter = tempMilestone + 1;
                                 }
@@ -1867,6 +1871,9 @@ app.get('/api/bot_stats', async (req, res) => {
                     side: p.side,
                     entry: p.entryPrice?.toFixed(pp),
                     qty: p.quantity?.toFixed(qp),
+                    initialQty: p.initialQuantity?.toFixed(qp),
+                    milestone: p.milestoneCounter,
+                    closedLossQty: p.closedLossAmount?.toFixed(qp),
                     pnl: pnl.toFixed(2),
                     curPrice: p.currentPrice?.toFixed(pp),
                     tpPrice: p.takeProfitPrice?.toFixed(pp),
