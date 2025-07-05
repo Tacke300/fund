@@ -516,10 +516,10 @@
                                     killHtml += `
                                         <div class="position-details">
                                             <h4>[KILL] ${pos.side} ${currentCoinName}</h4>
-                                            <p>KL: ${pos.qty || 'N/A'} (Ban đầu: ${pos.initQty || 'N/A'}) | Giá vào: ${pos.entry || 'N/A'} | Giá hiện tại: ${pos.curPrice || 'N/A'}</p>
+                                            <p>KL: ${pos.qty || 'N/A'} (Ban đầu: ${pos.initialQty || 'N/A'}) | Giá vào: ${pos.entry || 'N/A'} | Giá hiện tại: ${pos.curPrice || 'N/A'}</p>
                                             <p>PNL (chưa chốt): <strong class="${pnl > 0 ? 'profit' : (pnl < 0 ? 'loss' : 'neutral')}">${pnl.toFixed(2)} USDT</strong></p>
-                                            <p>Giá vào cặp: ${pos.pairEntry || 'N/A'} | Đã đóng (lỗ): ${pos.closedLossQty || '0'}</p>
-                                            <p>Mốc hiện tại: ${pos.mocIdx || 'N/A'}</p>
+                                            <p>Giá vào cặp: N/A | Đã đóng (lỗ): ${pos.closedLossQty || '0'}</p>
+                                            <p>Mốc hiện tại: ${pos.milestone || 'N/A'}</p>
                                             <p class="tp-sl-info">TP ID: ${pos.tpId || 'N/A'} | SL ID: ${pos.slId || 'N/A'}</p>
                                         </div>`;
                                 });
