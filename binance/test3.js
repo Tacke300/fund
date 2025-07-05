@@ -1,5 +1,3 @@
-
-
 import https from 'https';
 import http from 'http';
 import crypto from 'crypto';
@@ -1091,6 +1089,7 @@ async function runTradingLogic() {
                     return;
                 }
                 
+                addLog("Chờ 3s để ổn định giá trước khi đặt TP/SL trên sàn...");
                 await sleep(3000);
 
                 if (currentLongPosition) {
