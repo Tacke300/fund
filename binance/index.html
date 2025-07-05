@@ -393,12 +393,14 @@
 
             function parseAndCreateDate(dateTimeString) {
                 if (!dateTimeString || dateTimeString === "N/A") return null;
-                const parts = dateTimeString.match(/(\d{2})\/(\d{2})\/(\d{4}),?\s(\d{2}):(\d{2}):(\d{2})\.(\d{3})/);
-                if (parts) {
-                    return new Date(parts[3], parseInt(parts[2], 10) - 1, parts[1], parts[4], parts[5], parts[6], parts[7]);
+                 let startDate;
+                if (dateTimeString.includes('/')) { // Format 'dd/MM/yyyy, HH:mm:ss'
+                    const parts = dateTimeString.match(/(\d+)\/(\d+)\/(\d+), (\d+):(\d+):(\d+)/);
+                    if(parts) startDate = new Date(parts[3], parts[2] - 1, parts[1], parts[4], parts[5], parts[6]);
+                } else { // ISO Format
+                    startDate = new Date(dateTimeString);
                 }
-                const date = new Date(dateTimeString);
-                return isNaN(date.getTime()) ? null : date;
+                return (!startDate || isNaN(startDate.getTime())) ? null : startDate;
             }
 
             function formatUptime(startTimeStr) {
@@ -420,8 +422,8 @@
 
                 let uptimeString = "";
                 if (days > 0) uptimeString += `${days}d `;
-                if (hours > 0) uptimeString += `${hours}h `;
-                if (minutes > 0) uptimeString += `${minutes}m `;
+                if (hours > 0 || days > 0) uptimeString += `${hours}h `;
+                if (minutes > 0 || hours > 0 || days > 0) uptimeString += `${minutes}m `;
                 uptimeString += `${seconds}s`;
                 return uptimeString.trim() || "0s";
             }
@@ -520,7 +522,7 @@
                                             <p>PNL (chưa chốt): <strong class="${pnl > 0 ? 'profit' : (pnl < 0 ? 'loss' : 'neutral')}">${pnl.toFixed(2)} USDT</strong></p>
                                             <p>Giá vào cặp: N/A | Đã đóng (lỗ): ${pos.closedLossQty || '0'}</p>
                                             <p>Mốc hiện tại: ${pos.milestone || 'N/A'}</p>
-                                            <p class="tp-sl-info">TP ID: ${pos.tpId || 'N/A'} | SL ID: ${pos.slId || 'N/A'}</p>
+                                            <p class="tp-sl-info">TP: ${pos.tpPrice || 'N/A'} | SL: ${pos.slPrice || 'N/A'}</p>
                                         </div>`;
                                 });
                             }
@@ -644,7 +646,7 @@
                     fetchBotStats();
                     fetchLogs();
                 }
-            }, 10000); // Tăng tần suất cập nhật lên 10 giây
+            }, 5000); 
         });
     </script>
 </body>
