@@ -7,7 +7,7 @@ import crypto from 'crypto';
 import { API_KEY, SECRET_KEY } from './config.js';
 
 const app = express();
-const port = 9000;
+const port = 9797;
 
 app.use(express.json());
 
