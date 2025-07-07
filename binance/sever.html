@@ -3,62 +3,80 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Server Status Dashboard</title>
+    <title>Bot System Dashboard</title>
     <style>
+        @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap');
+
+        :root {
+            --bg-color: #121212;
+            --surface-color: #1e1e1e;
+            --primary-color: #bb86fc;
+            --secondary-color: #03dac6;
+            --text-color: #e0e0e0;
+            --text-secondary-color: #a0a0a0;
+            --border-color: #373737;
+            --success-color: #4CAF50;
+            --error-color: #f44336;
+        }
+
         body {
-            background-color: #121212;
-            color: #e0e0e0;
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            font-family: 'Roboto', -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
             margin: 0;
-            padding: 20px;
-            font-size: 16px;
+            padding: 25px;
+            font-size: 15px;
         }
         .container {
-            max-width: 1200px;
+            max-width: 1400px;
             margin: auto;
         }
-        h1, h2 {
-            color: #bb86fc;
-            border-bottom: 2px solid #373737;
-            padding-bottom: 10px;
-            margin-top: 40px;
+        h1 {
+            color: var(--primary-color);
+            border-bottom: 2px solid var(--border-color);
+            padding-bottom: 15px;
+            margin-bottom: 5px;
+            display: flex;
+            align-items: center;
+            gap: 15px;
         }
         .last-update-container {
             text-align: right;
-            color: #888;
+            color: var(--text-secondary-color);
             font-size: 0.9em;
-            margin-top: -30px;
-            margin-bottom: 20px;
+            margin-bottom: 30px;
         }
         
         /* Table Styles */
         .status-table {
             width: 100%;
             border-collapse: collapse;
-            margin-top: 20px;
-            box-shadow: 0 4px 8px rgba(0,0,0,0.3);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.4);
             border-radius: 8px;
             overflow: hidden;
         }
         .status-table th, .status-table td {
-            padding: 12px 15px;
+            padding: 14px 18px;
             text-align: left;
+            white-space: nowrap;
         }
         .status-table thead tr {
-            background-color: #bb86fc;
-            color: #121212;
-            font-weight: bold;
+            background-color: var(--primary-color);
+            color: var(--bg-color);
+            font-weight: 700;
+            font-size: 1.05em;
+            text-transform: uppercase;
         }
         .status-table tbody tr {
-            background-color: #1e1e1e;
-            border-bottom: 1px solid #373737;
+            background-color: var(--surface-color);
+            border-bottom: 1px solid var(--border-color);
             transition: background-color 0.2s ease;
         }
         .status-table tbody tr:last-child {
             border-bottom: none;
         }
         .status-table tbody tr:hover {
-            background-color: #2a2a2a;
+            background-color: #2c2c2c;
         }
         .status-table .stale {
             opacity: 0.6;
@@ -68,55 +86,55 @@
             opacity: 1;
         }
 
-        /* Grid Styles for Available Coins */
-        .grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-            gap: 20px;
+        /* Available Coins Section (Less prominent) */
+        .available-section {
+            margin-top: 50px;
+            opacity: 0.8;
         }
-        .coin-item {
-            background-color: #1e1e1e;
-            padding: 20px;
-            border-radius: 8px;
-            border: 1px solid #333;
-            transition: transform 0.2s ease, box-shadow 0.2s ease;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        .available-section h2 {
+            color: var(--secondary-color);
         }
-        .coin-item:hover {
-            transform: translateY(-5px);
-            border-color: #bb86fc;
-            box-shadow: 0 6px 12px rgba(0,0,0,0.3);
+        .available-section .status-table thead tr {
+             background-color: var(--secondary-color);
         }
-        .coin-item .header {
-            font-size: 1.4em;
-            font-weight: bold;
-            margin-bottom: 15px;
+        .available-section .status-table tbody tr {
+            background-color: #1a1a1a;
         }
-        .coin-item .info {
-            font-size: 0.9em;
-            line-height: 1.7;
-            color: #b0b0b0;
+         .available-section .status-table tbody tr:hover {
+            background-color: #252525;
         }
         
-        /* General Styles */
+        /* Text & Number Styles */
         .positive {
-            color: #4caf50;
-            font-weight: bold;
+            color: var(--success-color);
+            font-weight: 500;
         }
         .negative {
-            color: #f44336;
-            font-weight: bold;
+            color: var(--error-color);
+            font-weight: 500;
         }
+        .bot-id {
+            background-color: var(--secondary-color);
+            color: var(--bg-color);
+            padding: 3px 10px;
+            border-radius: 15px;
+            font-size: 0.9em;
+            font-weight: 700;
+        }
+        .coin-symbol {
+            font-weight: 700;
+            font-size: 1.1em;
+        }
+        
+        /* Loader Animation */
         .loader {
             display: inline-block;
-            width: 1em;
-            height: 1em;
-            border: 2px solid currentColor;
+            width: 1.2em;
+            height: 1.2em;
+            border: 3px solid currentColor;
             border-right-color: transparent;
             border-radius: 50%;
             animation: rotation 1s linear infinite;
-            margin-left: 10px;
-            vertical-align: middle;
         }
         @keyframes rotation {
             0% { transform: rotate(0deg); }
@@ -126,44 +144,51 @@
 </head>
 <body>
     <div class="container">
-        <h1>Dashboard Trạng Thái Server</h1>
+        <h1><div id="loader-icon" class="loader"></div> Bot System Dashboard</h1>
         <div class="last-update-container">
-            Lần cập nhật cuối: <span id="last-update">N/A</span>
+            Last Update: <span id="last-update">N/A</span>
         </div>
 
-        <h2><span id="running-count">0</span> Bot(s) Đang Hoạt Động</h2>
         <table class="status-table">
             <thead>
                 <tr>
                     <th>VPS (Bot ID)</th>
-                    <th>Coin</th>
-                    <th>Biến Động</th>
-                    <th>PNL Ròng</th>
-                    <th>PNL Tổng</th>
+                    <th>Coin (Mode)</th>
+                    <th>Volatility</th>
+                    <th>Net PNL</th>
+                    <th>Total PNL</th>
                 </tr>
             </thead>
             <tbody id="running-coins-list">
-                <!-- Dữ liệu bot đang chạy sẽ được chèn vào đây -->
             </tbody>
         </table>
 
-        <h2><span id="available-count">0</span> Coin(s) Khả Dụng</h2>
-        <div class="grid" id="available-coins-list">
-            <!-- Dữ liệu coin khả dụng sẽ được chèn vào đây -->
+        <div class="available-section">
+            <h2>Available Coins</h2>
+            <table class="status-table">
+                <thead>
+                    <tr>
+                        <th>#</th>
+                        <th>Coin</th>
+                        <th>Volatility</th>
+                        <th>Current Price</th>
+                    </tr>
+                </thead>
+                <tbody id="available-coins-list">
+                </tbody>
+            </table>
         </div>
     </div>
 
     <script>
+        const loaderIconEl = document.getElementById('loader-icon');
         const lastUpdateEl = document.getElementById('last-update');
         const runningTableBodyEl = document.getElementById('running-coins-list');
-        const availableListEl = document.getElementById('available-coins-list');
-        const runningCountEl = document.getElementById('running-count');
-        const availableCountEl = document.getElementById('available-count');
-        const mainTitle = document.querySelector('h1');
+        const availableTableBodyEl = document.getElementById('available-coins-list');
 
         function createRunningCoinRow(coin) {
             const row = document.createElement('tr');
-
+            
             const volClass = coin.changePercent >= 0 ? 'positive' : 'negative';
             const netPnlClass = (coin.net_pnl ?? 0) >= 0 ? 'positive' : 'negative';
             const cumulativePnlClass = (coin.cumulative_pnl ?? 0) >= 0 ? 'positive' : 'negative';
@@ -172,12 +197,12 @@
             const stale_threshold = 3 * 60 * 1000;
             if (coin.last_update && (now - coin.last_update > stale_threshold)) {
                 row.classList.add('stale');
-                row.title = `Lần cập nhật cuối từ bot này là hơn ${Math.round((now - coin.last_update)/60000)} phút trước. Có thể đã mất kết nối.`;
+                row.title = `Last update from this bot was over ${Math.round((now - coin.last_update)/60000)} minutes ago. Connection may be lost.`;
             }
 
             row.innerHTML = `
-                <td>${coin.bot_id}</td>
-                <td><strong>${coin.symbol}</strong> (${coin.bot_mode?.toUpperCase() || 'N/A'})</td>
+                <td><span class="bot-id">${coin.bot_id}</span></td>
+                <td><span class="coin-symbol">${coin.symbol}</span> <small>(${coin.bot_mode?.toUpperCase() || 'N/A'})</small></td>
                 <td class="${volClass}">${coin.changePercent}%</td>
                 <td class="${netPnlClass}">${typeof coin.net_pnl === 'number' ? coin.net_pnl.toFixed(2) : '...'}</td>
                 <td class="${cumulativePnlClass}">${typeof coin.cumulative_pnl === 'number' ? coin.cumulative_pnl.toFixed(2) : '...'}</td>
@@ -185,58 +210,58 @@
             return row;
         }
 
-        function createAvailableCoinCard(coin) {
-            const pnlClass = coin.changePercent >= 0 ? 'positive' : 'negative';
-            const card = document.createElement('div');
-            card.className = 'coin-item';
-
-            card.innerHTML = `
-                <div class="header">${coin.symbol}</div>
-                <div class="info">Biến động: <span class="${pnlClass}">${coin.changePercent}%</span></div>
-                <div class="info">Giá hiện tại: ${coin.currentPrice}</div>
+        function createAvailableCoinRow(coin, index) {
+            const row = document.createElement('tr');
+            const volClass = coin.changePercent >= 0 ? 'positive' : 'negative';
+            
+            row.innerHTML = `
+                <td>${index + 1}</td>
+                <td><span class="coin-symbol">${coin.symbol}</span></td>
+                <td class="${volClass}">${coin.changePercent}%</td>
+                <td>${coin.currentPrice}</td>
             `;
-            return card;
+            return row;
         }
 
         async function fetchData() {
-            mainTitle.innerHTML = 'Dashboard Trạng Thái Server <div class="loader"></div>';
+            loaderIconEl.style.display = 'inline-block';
             try {
                 const response = await fetch('/');
                 if (!response.ok) {
-                    throw new Error(`Lỗi mạng: ${response.status} ${response.statusText}`);
+                    throw new Error(`Network Error: ${response.status} ${response.statusText}`);
                 }
                 const data = await response.json();
 
                 runningTableBodyEl.innerHTML = '';
-                availableListEl.innerHTML = '';
+                availableTableBodyEl.innerHTML = '';
 
                 const runningCoins = data.running_coins || [];
                 const availableCoins = data.data || [];
 
-                runningCountEl.textContent = runningCoins.length;
                 if (runningCoins.length > 0) {
                     runningCoins.forEach(coin => {
                         runningTableBodyEl.appendChild(createRunningCoinRow(coin));
                     });
                 } else {
-                    runningTableBodyEl.innerHTML = '<tr><td colspan="5" style="text-align: center; padding: 20px;">Không có bot nào đang chạy coin.</td></tr>';
+                    runningTableBodyEl.innerHTML = '<tr><td colspan="5" style="text-align: center; padding: 20px; color: var(--text-secondary-color);">No bots are currently running.</td></tr>';
                 }
                 
-                availableCountEl.textContent = availableCoins.length;
                 if (availableCoins.length > 0) {
-                    availableCoins.forEach(coin => {
-                        availableListEl.appendChild(createAvailableCoinCard(coin));
+                    availableCoins.forEach((coin, index) => {
+                        availableTableBodyEl.appendChild(createAvailableCoinRow(coin, index));
                     });
                 } else {
-                    availableListEl.innerHTML = '<p>Không có coin nào khả dụng.</p>';
+                    availableTableBodyEl.innerHTML = '<tr><td colspan="4" style="text-align: center; padding: 20px; color: var(--text-secondary-color);">No available coins to trade.</td></tr>';
                 }
 
                 lastUpdateEl.textContent = new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit', second: '2-digit'});
 
             } catch (error) {
-                console.error('Lỗi khi lấy dữ liệu:', error);
+                console.error('Fetch data error:', error);
+                runningTableBodyEl.innerHTML = `<tr><td colspan="5" style="text-align: center; padding: 20px; color: var(--error-color);">Error loading data: ${error.message}</td></tr>`;
+                availableTableBodyEl.innerHTML = `<tr><td colspan="4" style="text-align: center; padding: 20px; color: var(--error-color);">Error loading data.</td></tr>`;
             } finally {
-                mainTitle.innerHTML = 'Dashboard Trạng Thái Server';
+                loaderIconEl.style.display = 'none';
             }
         }
 
