@@ -30,6 +30,7 @@ let serverTimeOffset = 0;
 
 let claimedCoins = {};
 
+
 function logVps1(message) {
     const now = new Date();
     const offset = 7 * 60 * 60 * 1000;
@@ -447,37 +448,41 @@ async function main() {
         }
     });
 
+    // [SỬA LỖI] Logic phục vụ HTML và JSON an toàn hơn
     app.get('/', (req, res) => {
         const indexPath = path.join(__dirname, 'sever.html');
-        const acceptsHtml = req.headers.accept && req.headers.accept.includes('text/html');
+        const isBrowserRequest = req.headers.accept && req.headers.accept.includes('text/html');
 
-        if (fs.existsSync(indexPath) && acceptsHtml && req.query.format !== 'json') {
+        // Ưu tiên: Nếu là trình duyệt và có file HTML, gửi dashboard
+        if (isBrowserRequest && fs.existsSync(indexPath)) {
             res.sendFile(indexPath);
-        } else {
-            const availableCoins = topRankedCoinsForApi.filter(coin => !claimedCoins[coin.symbol]);
-            
-            const runningCoins = [];
-            for (const symbol in claimedCoins) {
-                const bot_id = claimedCoins[symbol];
-                const coinInfo = topRankedCoinsForApi.find(c => c.symbol === symbol);
-                
-                runningCoins.push({
-                    bot_id: bot_id,
-                    symbol: symbol,
-                    changePercent: coinInfo ? coinInfo.changePercent : 'N/A'
-                });
-            }
-            runningCoins.sort((a, b) => a.bot_id.localeCompare(b.bot_id));
-            
-            let responsePayload = {
-                status: vps1DataStatus,
-                message: `Trạng thái server: ${runningCoins.length} coin(s) đang chạy, ${availableCoins.length} coin(s) khả dụng.`,
-                running_coins: runningCoins,
-                data: availableCoins // Đây là 'available_coins' để bot client sử dụng
-            };
-            
-            res.status(200).json(responsePayload);
+            return;
         }
+
+        // Mặc định: Gửi dữ liệu JSON cho tất cả các request khác (bao gồm cả bot)
+        const availableCoins = topRankedCoinsForApi.filter(coin => !claimedCoins[coin.symbol]);
+        
+        const runningCoins = [];
+        for (const symbol in claimedCoins) {
+            const bot_id = claimedCoins[symbol];
+            const coinInfo = topRankedCoinsForApi.find(c => c.symbol === symbol);
+            
+            runningCoins.push({
+                bot_id: bot_id,
+                symbol: symbol,
+                changePercent: coinInfo ? coinInfo.changePercent : 'N/A'
+            });
+        }
+        runningCoins.sort((a, b) => a.bot_id.localeCompare(b.bot_id));
+        
+        const responsePayload = {
+            status: vps1DataStatus,
+            message: `Trạng thái server: ${runningCoins.length} coin(s) đang chạy, ${availableCoins.length} coin(s) khả dụng.`,
+            running_coins: runningCoins,
+            data: availableCoins // Key 'data' này là để cho bot client sử dụng
+        };
+        
+        res.status(200).json(responsePayload);
     });
 
     http.createServer(app).listen(port, '0.0.0.0', () => {
