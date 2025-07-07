@@ -4,7 +4,13 @@ import https from 'https';
 import express from 'express';
 import { URL } from 'url';
 import crypto from 'crypto';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import { API_KEY, SECRET_KEY } from './config.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const app = express();
 const port = 9797;
@@ -23,7 +29,6 @@ let vps1DataStatus = "initializing";
 let serverTimeOffset = 0;
 
 let claimedCoins = {};
-
 
 function logVps1(message) {
     const now = new Date();
@@ -442,58 +447,42 @@ async function main() {
         }
     });
 
-    // [SỬA ĐỔI] Endpoint chính để hiển thị cả coin đang chạy và coin khả dụng
     app.get('/', (req, res) => {
-        let responsePayload = {};
-        
-        const availableCoins = topRankedCoinsForApi.filter(coin => !claimedCoins[coin.symbol]);
-        
-        const runningCoins = [];
-        for (const symbol in claimedCoins) {
-            const bot_id = claimedCoins[symbol];
-            const coinInfo = topRankedCoinsForApi.find(c => c.symbol === symbol);
+        const indexPath = path.join(__dirname, 'sever.html');
+        const acceptsHtml = req.headers.accept && req.headers.accept.includes('text/html');
+
+        if (fs.existsSync(indexPath) && acceptsHtml && req.query.format !== 'json') {
+            res.sendFile(indexPath);
+        } else {
+            const availableCoins = topRankedCoinsForApi.filter(coin => !claimedCoins[coin.symbol]);
             
-            runningCoins.push({
-                bot_id: bot_id,
-                symbol: symbol,
-                changePercent: coinInfo ? coinInfo.changePercent : 'N/A'
-            });
+            const runningCoins = [];
+            for (const symbol in claimedCoins) {
+                const bot_id = claimedCoins[symbol];
+                const coinInfo = topRankedCoinsForApi.find(c => c.symbol === symbol);
+                
+                runningCoins.push({
+                    bot_id: bot_id,
+                    symbol: symbol,
+                    changePercent: coinInfo ? coinInfo.changePercent : 'N/A'
+                });
+            }
+            runningCoins.sort((a, b) => a.bot_id.localeCompare(b.bot_id));
+            
+            let responsePayload = {
+                status: vps1DataStatus,
+                message: `Trạng thái server: ${runningCoins.length} coin(s) đang chạy, ${availableCoins.length} coin(s) khả dụng.`,
+                running_coins: runningCoins,
+                data: availableCoins // Đây là 'available_coins' để bot client sử dụng
+            };
+            
+            res.status(200).json(responsePayload);
         }
-        // Sắp xếp coin đang chạy theo tên bot cho dễ nhìn
-        runningCoins.sort((a, b) => a.bot_id.localeCompare(b.bot_id));
-        
-        switch (vps1DataStatus) {
-            case "running_data_available":
-                responsePayload = {
-                    status: "running_data_available",
-                    message: `Trạng thái server: ${runningCoins.length} coin(s) đang chạy, ${availableCoins.length} coin(s) khả dụng.`,
-                    running_coins: runningCoins,
-                    available_coins: availableCoins
-                };
-                break;
-            case "error_binance_symbols":
-                 responsePayload = {
-                    status: "error_binance_symbols",
-                    message: topRankedCoinsForApi[0]?.error_message || "VPS1: Failed to initialize symbols/leverage from Binance.",
-                    running_coins: runningCoins,
-                    available_coins: []
-                };
-                break;
-            default:
-                 responsePayload = {
-                    status: vps1DataStatus,
-                    message: "VPS1: Data is being prepared or no coins have met ranking criteria yet.",
-                    running_coins: runningCoins,
-                    available_coins: []
-                };
-                break;
-        }
-        res.status(200).json(responsePayload);
     });
 
     http.createServer(app).listen(port, '0.0.0.0', () => {
         logVps1(`Server (HTTP) is running on port ${port}`);
-        logVps1(`JSON data served at: http://<YOUR_VPS1_IP>:${port}/`);
+        logVps1(`Dashboard served at: http://<YOUR_VPS1_IP>:${port}/`);
         logVps1(`Claimed coins status at: http://<YOUR_VPS1_IP>:${port}/claimed_coins`);
     });
 }
