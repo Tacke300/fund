@@ -15,13 +15,12 @@ import { API_KEY, SECRET_KEY } from './config.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// [MỚI] Các hằng số cho việc giao tiếp với server
-const BOT_ID = process.env.name || 'vps2';
+const BOT_ID = process.env.name || 'sever2';
 const VPS1_SERVER_URL = 'http://34.142.248.96:9797';
 const VPS1_DATA_URL = `${VPS1_SERVER_URL}/`;
 const VPS1_CLAIM_URL = `${VPS1_SERVER_URL}/claim_coin`;
 const VPS1_RELEASE_URL = `${VPS1_SERVER_URL}/release_coin`;
-
+const VPS1_STATUS_UPDATE_URL = `${VPS1_SERVER_URL}/update_status`;
 
 const MIN_CANDLES_FOR_SELECTION = 55;
 const OVERALL_VOLATILITY_THRESHOLD_VPS1 = 7.9;
@@ -33,7 +32,7 @@ const SIDEWAYS_ORDER_SIZE_RATIO = 0.10;
 const SIDEWAYS_GRID_STEP_PERCENT = 0.0079;
 const SIDEWAYS_TP_PRICE_PERCENT = 0.02;
 const SIDEWAYS_SL_PRICE_PERCENT = 0.079;
-const SIDEWAYS_CHECK_INTERVAL_MS = 1.25 * 60 * 1000;
+const SIDEWAYS_CHECK_INTERVAL_MS = 0.2 * 60 * 1000;
 const BASE_HOST = 'fapi.binance.com';
 const WS_BASE_URL = 'wss://fstream.binance.com';
 const WS_USER_DATA_ENDPOINT = '/ws';
@@ -44,9 +43,9 @@ const LOG_TO_CUSTOM_FILE = true;
 const MAX_CONSECUTIVE_API_ERRORS = 5;
 const ERROR_RETRY_DELAY_MS = 15000;
 const LOG_COOLDOWN_MS = 2000;
-const MODE_SWITCH_DELAY_MS = 15000;
-const COIN_SWITCH_DELAY_MS = 15000;
-const KILL_MODE_SWITCH_CHECK_INTERVAL_MS = 1.25 * 60 * 1000;
+const MODE_SWITCH_DELAY_MS = 10000;
+const COIN_SWITCH_DELAY_MS = 10000;
+const KILL_MODE_SWITCH_CHECK_INTERVAL_MS = 0.2 * 60 * 1000;
 
 let serverTimeOffset = 0;
 let exchangeInfoCache = null;
@@ -73,6 +72,8 @@ let listenKeyRefreshInterval = null;
 let currentMarketPrice = null;
 let consecutiveApiErrors = 0;
 let vps1DataCache = [];
+let activeCoinVps1Data = null;
+let statusUpdateInterval = null;
 let sidewaysGrid = { isActive: false, anchorPrice: null, activeGridPositions: [], sidewaysStats: { tpMatchedCount: 0, slMatchedCount: 0 }, lastCheckTime: 0, isClearingForSwitch: false, switchDelayTimeout: null };
 let isOpeningInitialPair = false;
 let overallTakeProfit = 0;
@@ -137,7 +138,6 @@ function formatTimeUTC7(dateObject) {
 function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
 function createSignature(queryString, apiSecret) { return crypto.createHmac('sha256', apiSecret).update(queryString).digest('hex'); }
 
-// [SỬA LỖI] Trả hàm makeHttpRequest về nguyên bản để không làm hỏng các lệnh gọi API Binance
 async function makeHttpRequest(method, urlString, headers = {}, postData = '') {
     return new Promise((resolve, reject) => {
         const parsedUrl = new URL(urlString);
@@ -182,7 +182,6 @@ async function makeHttpRequest(method, urlString, headers = {}, postData = '') {
     });
 }
 
-// [MỚI] Hàm request riêng biệt và an toàn để giao tiếp với Server trung tâm
 async function makeRequestToServer(method, urlString, body = null) {
     return new Promise((resolve, reject) => {
         const postData = body ? JSON.stringify(body) : '';
@@ -236,6 +235,24 @@ async function makeRequestToServer(method, urlString, body = null) {
     });
 }
 
+async function sendStatusUpdateToServer() {
+    if (!botRunning) return;
+    
+    const payload = {
+        bot_id: BOT_ID,
+        current_coin: TARGET_COIN_SYMBOL || 'N/A',
+        bot_mode: currentBotMode,
+        net_pnl: netPNL,
+        cumulative_pnl: cumulativeRealizedPnlSinceStart,
+        uptime_minutes: botStartTime ? Math.floor((Date.now() - botStartTime.getTime()) / 60000) : 0
+    };
+    
+    try {
+        await makeRequestToServer('POST', VPS1_STATUS_UPDATE_URL, payload);
+    } catch (error) {
+        addLog(`[SERVER] Lỗi gửi cập nhật trạng thái: ${error.msg || error.message}`);
+    }
+}
 
 async function callSignedAPI(fullEndpointPath, method = 'GET', params = {}) {
     if (!API_KEY || !SECRET_KEY) throw new CriticalApiError("Lỗi: Thiếu API_KEY/SECRET_KEY.");
@@ -287,7 +304,6 @@ async function callPublicAPI(fullEndpointPath, params = {}) {
     }
 }
 
-// [MỚI] Các hàm giao tiếp với server trung tâm
 async function claimCoinOnServer(symbol) {
     if (!symbol) return false;
     addLog(`[SERVER] Đang thử "chiếm" coin ${symbol} từ server trung tâm...`);
@@ -328,18 +344,13 @@ async function fetchAndCacheTopCoinsFromVPS1(silent = false) {
     if (!silent) addLog(`Lấy dữ liệu coin KHẢ DỤNG từ VPS1...`);
     try {
         const response = await makeRequestToServer('GET', VPS1_DATA_URL);
-        if (response && response.status && Array.isArray(response.data)) {
-             if (response.status === "running_data_available" || response.status === "running_no_available_data") {
-                const filtered = response.data.filter(c => c.symbol && typeof c.changePercent === 'number' && c.candles >= MIN_CANDLES_FOR_SELECTION);
-                vps1DataCache = [...filtered];
-                if (!silent) addLog(`VPS1 data cached: ${filtered.length} coins khả dụng.`);
-                return [...filtered];
-            } else {
-                if (!silent) addLog(`Trạng thái VPS1: ${response.status}: ${response.message || 'N/A'}. Dùng cache (${vps1DataCache.length}).`);
-                return vps1DataCache.length > 0 ? [...vps1DataCache] : [];
-            }
+        if (response && Array.isArray(response.data)) {
+            const filtered = response.data.filter(c => c.symbol && typeof c.changePercent === 'number' && c.candles >= MIN_CANDLES_FOR_SELECTION);
+            vps1DataCache = [...filtered];
+            if (!silent) addLog(`VPS1 data cached: ${filtered.length} coins khả dụng.`);
+            return [...filtered];
         } else {
-            if (!silent) addLog(`Lỗi định dạng VPS1. Dùng cache (${vps1DataCache.length}).`);
+            if (!silent) addLog(`Lỗi định dạng VPS1 hoặc không có coin khả dụng. Dùng cache (${vps1DataCache.length}).`);
             return vps1DataCache.length > 0 ? [...vps1DataCache] : [];
         }
     } catch (error) {
@@ -348,10 +359,15 @@ async function fetchAndCacheTopCoinsFromVPS1(silent = false) {
         return vps1DataCache.length > 0 ? [...vps1DataCache] : [];
     }
 }
+
 function getCurrentCoinVPS1Data(symbol) {
-    if (!symbol || !vps1DataCache || vps1DataCache.length === 0) return null;
+    if (!symbol) return null;
+    if (activeCoinVps1Data && activeCoinVps1Data.symbol === symbol) {
+        return activeCoinVps1Data;
+    }
     return vps1DataCache.find(c => c.symbol === symbol);
 }
+
 async function getLeverageBracketForSymbol(symbol) {
     if (!symbol) return 20;
     try {
@@ -376,7 +392,6 @@ async function checkExistingPosition(symbol) {
     }
 }
 
-// [SỬA ĐỔI] Hàm chọn coin sử dụng logic claim
 async function selectTargetCoin(isInitialSelection = false) {
     addLog("Bắt đầu quy trình chọn và chiếm coin mới...");
     const vps1Coins = await fetchAndCacheTopCoinsFromVPS1(true);
@@ -401,6 +416,7 @@ async function selectTargetCoin(isInitialSelection = false) {
             const claimed = await claimCoinOnServer(coin.symbol);
             if (claimed) {
                 addLog(`ĐÃ CHỌN & CHIẾM: ${coin.symbol} (Vol: ${coin.changePercent.toFixed(2)}%)`);
+                activeCoinVps1Data = { ...coin }; 
                 return coin.symbol;
             } else {
                 addLog(`Thử chiếm ${coin.symbol} thất bại, chuyển sang coin tiếp theo.`);
@@ -495,7 +511,6 @@ async function getCurrentPrice(symbol) {
     }
 }
 
-// ... (Các hàm logic trade từ placeTpslOrders đến manageSidewaysGridLogic giữ nguyên như bản gốc của bạn) ...
 async function placeTpslOrders(position, positionType = 'KILL') {
     if (!position) return false;
     const { symbol, side, takeProfitPrice, stopLossPrice, pricePrecision } = position;
@@ -1083,7 +1098,6 @@ async function checkOverallTPSL() {
     return false;
 }
 
-// [SỬA ĐỔI] Hàm chuyển coin sử dụng logic release
 async function handleCoinSwitch(reason, shouldBlacklist = false) {
     addLog(`[CHUYỂN COIN] Lý do: ${reason}`);
     const currentCoin = TARGET_COIN_SYMBOL;
@@ -1110,6 +1124,7 @@ async function handleCoinSwitch(reason, shouldBlacklist = false) {
     currentLongPosition = null;
     currentShortPosition = null;
     sidewaysGrid.isActive = false;
+    activeCoinVps1Data = null;
 
     if (botRunning) {
         scheduleNextMainCycle(1000);
@@ -1293,7 +1308,6 @@ async function runTradingLogic() {
         positionCheckInterval = null;
     }
 }
-
 async function manageOpenPosition() {
     if (isProcessingTrade || !botRunning || sidewaysGrid.isClearingForSwitch || !TARGET_COIN_SYMBOL || isOpeningInitialPair || pendingClosures.size > 0) return;
 
@@ -1419,7 +1433,6 @@ async function manageOpenPosition() {
         }
     }
 }
-
 async function handleFinalClosure(orderId, clientOrderId, symbol, lastKnownPnl, orderType) {
     let gridIdToClear = null;
     if (clientOrderId) {
@@ -1513,7 +1526,6 @@ async function handleFinalClosure(orderId, clientOrderId, symbol, lastKnownPnl, 
         isProcessingTrade = false;
     }
 }
-
 async function processTradeResult(orderInfo) {
     const { s: symbol, rp: realizedPnlStr, X: orderStatus, i: orderId, c: clientOrderId, ot: orderType } = orderInfo;
 
@@ -1529,8 +1541,6 @@ async function processTradeResult(orderInfo) {
         setTimeout(() => handleFinalClosure(orderId, clientOrderId, symbol, realizedPnl, orderType), 5000);
     }
 }
-
-// [SỬA ĐỔI] Hàm dọn dẹp chu kỳ sử dụng logic release
 async function cleanupAndResetCycle(symbolToCleanup, isSwitchingCoin = false, noReschedule = false) {
     if (!symbolToCleanup && TARGET_COIN_SYMBOL) symbolToCleanup = TARGET_COIN_SYMBOL;
     if (!symbolToCleanup) {
@@ -1553,6 +1563,7 @@ async function cleanupAndResetCycle(symbolToCleanup, isSwitchingCoin = false, no
         currentLongPosition = null;
         currentShortPosition = null;
         sidewaysGrid.isActive = false;
+        activeCoinVps1Data = null;
         if (sidewaysGrid.isClearingForSwitch) {
             addLog("  Đang dọn lưới/chuyển mode, không schedule lại từ cleanup.");
             return;
@@ -1597,6 +1608,10 @@ async function startBotLogicInternal() {
 
         botRunning = true;
         botStartTime = new Date();
+        
+        if (statusUpdateInterval) clearInterval(statusUpdateInterval);
+        statusUpdateInterval = setInterval(sendStatusUpdateToServer, 30000);
+
         addLog(`--- Bot đã khởi động: ${formatTimeUTC7(botStartTime)} ---`);
         scheduleNextMainCycle(1000);
         return 'Bot khởi động thành công.';
@@ -1614,10 +1629,14 @@ async function startBotLogicInternal() {
         return `Lỗi khởi động: ${errorMsg}.`;
     }
 }
-
-// [SỬA ĐỔI] Hàm dừng bot chỉ đóng vị thế của coin đang chạy
 async function stopBotLogicInternal(reason = "Lệnh dừng thủ công") {
     if (!botRunning && !retryBotTimeout) return 'Bot không chạy hoặc không đang retry.';
+
+    if (statusUpdateInterval) {
+        clearInterval(statusUpdateInterval);
+        statusUpdateInterval = null;
+    }
+
     addLog(`--- Dừng Bot (Lý do: ${reason}) ---`);
     const coinToCleanUp = TARGET_COIN_SYMBOL;
     
@@ -1685,6 +1704,7 @@ async function stopBotLogicInternal(reason = "Lệnh dừng thủ công") {
     TARGET_COIN_SYMBOL = null;
     pendingClosures.clear();
     blacklistedCoinsThisSession.clear();
+    activeCoinVps1Data = null;
 
     if (retryBotTimeout) {
         clearTimeout(retryBotTimeout);
@@ -1694,7 +1714,6 @@ async function stopBotLogicInternal(reason = "Lệnh dừng thủ công") {
     addLog('--- Bot đã dừng ---');
     return 'Bot đã dừng thành công và chỉ dọn dẹp coin nó quản lý.';
 }
-
 async function checkAndHandleRemainingPosition(symbol) {
     if (!symbol) return;
     addLog(`Kiểm tra vị thế sót cho ${symbol}...`);
@@ -1880,6 +1899,7 @@ function setupMarketDataStream(symbol) {
                 currentMarketPrice = parseFloat(msg.p);
                 if (currentLongPosition) currentLongPosition.currentPrice = currentMarketPrice;
                 if (currentShortPosition) currentShortPosition.currentPrice = currentMarketPrice;
+                if (activeCoinVps1Data) activeCoinVps1Data.currentPrice = currentMarketPrice;
 
                 if (currentBotMode === 'kill' && !isProcessingTrade && !isOpeningInitialPair) {
                     const positionsToCheck = [currentLongPosition, currentShortPosition];
