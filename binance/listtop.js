@@ -442,35 +442,50 @@ async function main() {
         }
     });
 
-
+    // [SỬA ĐỔI] Endpoint chính để hiển thị cả coin đang chạy và coin khả dụng
     app.get('/', (req, res) => {
-        let responsePayload = { status: vps1DataStatus, message: "", data: [] };
-
+        let responsePayload = {};
+        
         const availableCoins = topRankedCoinsForApi.filter(coin => !claimedCoins[coin.symbol]);
-
+        
+        const runningCoins = [];
+        for (const symbol in claimedCoins) {
+            const bot_id = claimedCoins[symbol];
+            const coinInfo = topRankedCoinsForApi.find(c => c.symbol === symbol);
+            
+            runningCoins.push({
+                bot_id: bot_id,
+                symbol: symbol,
+                changePercent: coinInfo ? coinInfo.changePercent : 'N/A'
+            });
+        }
+        // Sắp xếp coin đang chạy theo tên bot cho dễ nhìn
+        runningCoins.sort((a, b) => a.bot_id.localeCompare(b.bot_id));
+        
         switch (vps1DataStatus) {
             case "running_data_available":
-                if (availableCoins.length > 0) {
-                    responsePayload.message = `Cung cấp ${availableCoins.length} coin khả dụng (đã lọc các coin đang chạy), sắp xếp theo biến động.`;
-                    responsePayload.data = availableCoins;
-                } else {
-                    responsePayload.status = "running_no_available_data";
-                    responsePayload.message = "VPS1: Tất cả các coin biến động cao đều đang được các bot khác chạy, hoặc không có coin nào đạt tiêu chí.";
-                }
+                responsePayload = {
+                    status: "running_data_available",
+                    message: `Trạng thái server: ${runningCoins.length} coin(s) đang chạy, ${availableCoins.length} coin(s) khả dụng.`,
+                    running_coins: runningCoins,
+                    available_coins: availableCoins
+                };
                 break;
             case "error_binance_symbols":
-                responsePayload.message = topRankedCoinsForApi[0]?.error_message || "VPS1: Failed to initialize symbols/leverage from Binance.";
-                responsePayload.data = topRankedCoinsForApi;
-                break;
-            case "initializing":
-            case "running_symbols_fetched":
-            case "running_no_initial_data_ranked":
-            case "running_no_data_to_fetch_initially":
-                responsePayload.message = "VPS1: Data is being prepared or no coins have met ranking criteria yet.";
+                 responsePayload = {
+                    status: "error_binance_symbols",
+                    message: topRankedCoinsForApi[0]?.error_message || "VPS1: Failed to initialize symbols/leverage from Binance.",
+                    running_coins: runningCoins,
+                    available_coins: []
+                };
                 break;
             default:
-                responsePayload.status = "error";
-                responsePayload.message = "VPS1: An unspecified error occurred.";
+                 responsePayload = {
+                    status: vps1DataStatus,
+                    message: "VPS1: Data is being prepared or no coins have met ranking criteria yet.",
+                    running_coins: runningCoins,
+                    available_coins: []
+                };
                 break;
         }
         res.status(200).json(responsePayload);
