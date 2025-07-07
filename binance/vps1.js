@@ -17,7 +17,7 @@ const __dirname = path.dirname(__filename);
 
 // [MỚI] Các hằng số cho việc giao tiếp với server
 const BOT_ID = process.env.name || 'vps1';
-const VPS1_SERVER_URL = 'http://34.142.248.96:9000';
+const VPS1_SERVER_URL = 'http://34.142.248.96:9797';
 const VPS1_DATA_URL = `${VPS1_SERVER_URL}/`;
 const VPS1_CLAIM_URL = `${VPS1_SERVER_URL}/claim_coin`;
 const VPS1_RELEASE_URL = `${VPS1_SERVER_URL}/release_coin`;
