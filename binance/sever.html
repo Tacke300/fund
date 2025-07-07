@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Server Status Dashboard</title>
+    <style>
+        body {
+            background-color: #121212;
+            color: #e0e0e0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            font-size: 16px;
+        }
+        .container {
+            max-width: 1200px;
+            margin: auto;
+        }
+        h1, h2 {
+            color: #bb86fc;
+            border-bottom: 2px solid #373737;
+            padding-bottom: 10px;
+            margin-top: 40px;
+        }
+        #status-container {
+            background-color: #1e1e1e;
+            padding: 15px 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            border-left: 5px solid #03dac6;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+        }
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            gap: 20px;
+        }
+        .coin-item {
+            background-color: #1e1e1e;
+            padding: 20px;
+            border-radius: 8px;
+            border: 1px solid #333;
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        }
+        .coin-item:hover {
+            transform: translateY(-5px);
+            border-color: #bb86fc;
+            box-shadow: 0 6px 12px rgba(0,0,0,0.3);
+        }
+        .coin-item .header {
+            font-size: 1.4em;
+            font-weight: bold;
+            margin-bottom: 15px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .coin-item .bot-id {
+            background-color: #03dac6;
+            color: #121212;
+            padding: 4px 10px;
+            border-radius: 15px;
+            font-size: 0.8em;
+            font-weight: 600;
+        }
+        .coin-item .info {
+            line-height: 1.6;
+        }
+        .positive {
+            color: #4caf50;
+            font-weight: bold;
+        }
+        .negative {
+            color: #f44336;
+            font-weight: bold;
+        }
+        .loader {
+            display: inline-block;
+            width: 1em;
+            height: 1em;
+            border: 2px solid currentColor;
+            border-right-color: transparent;
+            border-radius: 50%;
+            animation: rotation 1s linear infinite;
+            margin-left: 10px;
+            vertical-align: middle;
+        }
+        @keyframes rotation {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Dashboard Trạng Thái Server</h1>
+        <div id="status-container">
+            <p><strong>Trạng thái:</strong> <span id="status-message">Đang tải dữ liệu...</span></p>
+            <p><strong>Lần cập nhật cuối:</strong> <span id="last-update">N/A</span></p>
+        </div>
+
+        <h2><span id="running-count">0</span> Coin(s) Đang Chạy</h2>
+        <div class="grid" id="running-coins-list">
+            <!-- Dữ liệu coin đang chạy sẽ được chèn vào đây -->
+        </div>
+
+        <h2><span id="available-count">0</span> Coin(s) Khả Dụng (Sắp xếp theo biến động)</h2>
+        <div class="grid" id="available-coins-list">
+            <!-- Dữ liệu coin khả dụng sẽ được chèn vào đây -->
+        </div>
+    </div>
+
+    <script>
+        const statusMessageEl = document.getElementById('status-message');
+        const lastUpdateEl = document.getElementById('last-update');
+        const runningListEl = document.getElementById('running-coins-list');
+        const availableListEl = document.getElementById('available-coins-list');
+        const runningCountEl = document.getElementById('running-count');
+        const availableCountEl = document.getElementById('available-count');
+
+        function createCoinCard(coin, isRunning) {
+            const pnlClass = coin.changePercent >= 0 ? 'positive' : 'negative';
+            const card = document.createElement('div');
+            card.className = 'coin-item';
+
+            let headerHtml = `<span class="symbol">${coin.symbol}</span>`;
+            if (isRunning) {
+                headerHtml += `<span class="bot-id">${coin.bot_id}</span>`;
+            }
+
+            let infoHtml = `<div class="info">Biến động: <span class="${pnlClass}">${coin.changePercent}%</span></div>`;
+            if (!isRunning) {
+                infoHtml += `<div class="info">Số nến: ${coin.candles}</div>`;
+                infoHtml += `<div class="info">Giá hiện tại: ${coin.currentPrice}</div>`;
+            }
+
+            card.innerHTML = `
+                <div class="header">${headerHtml}</div>
+                ${infoHtml}
+            `;
+            return card;
+        }
+
+        async function fetchData() {
+            statusMessageEl.innerHTML = 'Đang cập nhật... <div class="loader"></div>';
+            try {
+                // Sử dụng đường dẫn tương đối '/', vì file HTML này được phục vụ từ cùng server
+                const response = await fetch('/?format=json'); // Thêm param để chắc chắn nhận JSON
+                if (!response.ok) {
+                    throw new Error(`Lỗi mạng: ${response.status} ${response.statusText}`);
+                }
+                const data = await response.json();
+
+                statusMessageEl.textContent = data.message || 'Dữ liệu đã được cập nhật.';
+
+                runningListEl.innerHTML = '';
+                availableListEl.innerHTML = '';
+
+                const runningCoins = data.running_coins || [];
+                const availableCoins = data.data || []; // Bot dùng `data`, nên dashboard cũng dùng `data`
+
+                runningCountEl.textContent = runningCoins.length;
+                if (runningCoins.length > 0) {
+                    runningCoins.forEach(coin => {
+                        runningListEl.appendChild(createCoinCard(coin, true));
+                    });
+                } else {
+                    runningListEl.innerHTML = '<p>Không có bot nào đang chạy coin.</p>';
+                }
+                
+                availableCountEl.textContent = availableCoins.length;
+                if (availableCoins.length > 0) {
+                    availableCoins.forEach(coin => {
+                        availableListEl.appendChild(createCoinCard(coin, false));
+                    });
+                } else {
+                    availableListEl.innerHTML = '<p>Không có coin nào khả dụng.</p>';
+                }
+
+                lastUpdateEl.textContent = new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit', second: '2-digit'});
+
+            } catch (error) {
+                statusMessageEl.textContent = `Lỗi: ${error.message}`;
+                console.error('Lỗi khi lấy dữ liệu:', error);
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            fetchData();
+            setInterval(fetchData, 10000); // Tự động làm mới mỗi 10 giây
+        });
+    </script>
+</body>
+</html>
