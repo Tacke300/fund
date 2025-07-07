@@ -1,3 +1,4 @@
+
 import https from 'https';
 import http from 'http';
 import crypto from 'crypto';
@@ -14,7 +15,14 @@ import { API_KEY, SECRET_KEY } from './config.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const VPS1_DATA_URL = 'http://34.142.248.96:9000/';
+// [MỚI] Các hằng số cho việc giao tiếp với server
+const BOT_ID = process.env.name || 'vps2';
+const VPS1_SERVER_URL = 'http://34.142.248.96:9797';
+const VPS1_DATA_URL = `${VPS1_SERVER_URL}/`;
+const VPS1_CLAIM_URL = `${VPS1_SERVER_URL}/claim_coin`;
+const VPS1_RELEASE_URL = `${VPS1_SERVER_URL}/release_coin`;
+
+
 const MIN_CANDLES_FOR_SELECTION = 55;
 const OVERALL_VOLATILITY_THRESHOLD_VPS1 = 7.9;
 const MIN_VOLATILITY_DIFFERENCE_TO_SWITCH = 3.0;
@@ -25,12 +33,12 @@ const SIDEWAYS_ORDER_SIZE_RATIO = 0.10;
 const SIDEWAYS_GRID_STEP_PERCENT = 0.0079;
 const SIDEWAYS_TP_PRICE_PERCENT = 0.02;
 const SIDEWAYS_SL_PRICE_PERCENT = 0.079;
-const SIDEWAYS_CHECK_INTERVAL_MS = 2.5 * 60 * 1000;
+const SIDEWAYS_CHECK_INTERVAL_MS = 1.25 * 60 * 1000;
 const BASE_HOST = 'fapi.binance.com';
 const WS_BASE_URL = 'wss://fstream.binance.com';
 const WS_USER_DATA_ENDPOINT = '/ws';
-const WEB_SERVER_PORT = 9001;
-const THIS_BOT_PM2_NAME = 'vps2';
+const WEB_SERVER_PORT = 2404;
+const THIS_BOT_PM2_NAME = BOT_ID;
 const CUSTOM_LOG_FILE = path.join(__dirname, `pm2_${THIS_BOT_PM2_NAME}.log`);
 const LOG_TO_CUSTOM_FILE = true;
 const MAX_CONSECUTIVE_API_ERRORS = 5;
@@ -38,7 +46,7 @@ const ERROR_RETRY_DELAY_MS = 15000;
 const LOG_COOLDOWN_MS = 2000;
 const MODE_SWITCH_DELAY_MS = 15000;
 const COIN_SWITCH_DELAY_MS = 15000;
-const KILL_MODE_SWITCH_CHECK_INTERVAL_MS = 1.5 * 60 * 1000;
+const KILL_MODE_SWITCH_CHECK_INTERVAL_MS = 1.25 * 60 * 1000;
 
 let serverTimeOffset = 0;
 let exchangeInfoCache = null;
@@ -92,7 +100,7 @@ function addLog(message) {
 
         if (logCounts[messageHash].count > 1) {
             const repeatCount = logCounts[messageHash].count - 1;
-            if (repeatCount > 0) { // Only show if there's an actual repeat
+            if (repeatCount > 0) {
                 const repeatedMessage = `[${time}] (Lặp lại x${repeatCount} lần) ${message}`;
                 console.log(repeatedMessage);
                 if (LOG_TO_CUSTOM_FILE) fs.appendFile(CUSTOM_LOG_FILE, repeatedMessage + '\n', (err) => { if (err) console.error("Lỗi ghi log:", err); });
@@ -102,7 +110,7 @@ function addLog(message) {
             console.log(logEntry);
             if (LOG_TO_CUSTOM_FILE) fs.appendFile(CUSTOM_LOG_FILE, logEntry + '\n', (err) => { if (err) console.error("Lỗi ghi log:", err); });
         }
-        logCounts[messageHash].count = 0; // Reset count after logging
+        logCounts[messageHash].count = 0;
         logCounts[messageHash].lastLoggedTime = localTime;
     } else {
         let logEntry = `[${time}] ${message}`;
@@ -129,6 +137,7 @@ function formatTimeUTC7(dateObject) {
 function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
 function createSignature(queryString, apiSecret) { return crypto.createHmac('sha256', apiSecret).update(queryString).digest('hex'); }
 
+// [SỬA LỖI] Trả hàm makeHttpRequest về nguyên bản để không làm hỏng các lệnh gọi API Binance
 async function makeHttpRequest(method, urlString, headers = {}, postData = '') {
     return new Promise((resolve, reject) => {
         const parsedUrl = new URL(urlString);
@@ -172,6 +181,62 @@ async function makeHttpRequest(method, urlString, headers = {}, postData = '') {
         req.end();
     });
 }
+
+// [MỚI] Hàm request riêng biệt và an toàn để giao tiếp với Server trung tâm
+async function makeRequestToServer(method, urlString, body = null) {
+    return new Promise((resolve, reject) => {
+        const postData = body ? JSON.stringify(body) : '';
+        const parsedUrl = new URL(urlString);
+        const options = {
+            hostname: parsedUrl.hostname,
+            port: parsedUrl.port,
+            path: parsedUrl.pathname,
+            method: method,
+            headers: {
+                'Content-Type': 'application/json',
+                'Content-Length': Buffer.byteLength(postData),
+                'User-Agent': `NodeJS-Client/1.0-Bot-${BOT_ID}`
+            },
+            timeout: 15000
+        };
+
+        const req = http.request(options, (res) => {
+            let data = '';
+            res.on('data', (chunk) => data += chunk);
+            res.on('end', () => {
+                let responseBody;
+                try {
+                    responseBody = JSON.parse(data);
+                } catch (e) {
+                    responseBody = data;
+                }
+
+                if (res.statusCode >= 200 && res.statusCode < 300) {
+                    resolve(responseBody);
+                } else {
+                    reject({
+                        code: res.statusCode,
+                        msg: `Lỗi Server trung tâm: ${res.statusCode}`,
+                        responseBody: responseBody
+                    });
+                }
+            });
+        });
+
+        req.on('error', (e) => reject({ code: 'NETWORK_ERROR', msg: e.message }));
+        req.on('timeout', () => {
+            req.destroy();
+            reject({ code: 'TIMEOUT_ERROR', msg: 'Request to server timed out' });
+        });
+
+        if (postData) {
+            req.write(postData);
+        }
+        req.end();
+    });
+}
+
+
 async function callSignedAPI(fullEndpointPath, method = 'GET', params = {}) {
     if (!API_KEY || !SECRET_KEY) throw new CriticalApiError("Lỗi: Thiếu API_KEY/SECRET_KEY.");
     const timestamp = Date.now() + serverTimeOffset;
@@ -221,35 +286,64 @@ async function callPublicAPI(fullEndpointPath, params = {}) {
         throw error;
     }
 }
-async function fetchAndCacheTopCoinsFromVPS1(silent = false) {
-    const fullUrl = VPS1_DATA_URL;
-    if (!silent) addLog(`Lấy dữ liệu VPS1 & cache: ${fullUrl}`);
-    let rawDataForDebug = '';
+
+// [MỚI] Các hàm giao tiếp với server trung tâm
+async function claimCoinOnServer(symbol) {
+    if (!symbol) return false;
+    addLog(`[SERVER] Đang thử "chiếm" coin ${symbol} từ server trung tâm...`);
     try {
-        const rawData = await makeHttpRequest('GET', fullUrl);
-        rawDataForDebug = rawData;
-        const response = JSON.parse(rawData);
+        const response = await makeRequestToServer('POST', VPS1_CLAIM_URL, { coin: symbol, bot_id: BOT_ID });
+        if (response.success) {
+            addLog(`[SERVER] ĐÃ CHIẾM THÀNH CÔNG ${symbol}.`);
+            return true;
+        }
+        return false;
+    } catch (error) {
+        if (error.code === 409) {
+            addLog(`[SERVER] Không thể chiếm ${symbol}. Lý do: ${error.responseBody?.message || 'Coin đã bị bot khác chiếm'}.`);
+        } else {
+            addLog(`[SERVER] Lỗi khi chiếm coin ${symbol}: ${error.msg || error.message}`);
+        }
+        return false;
+    }
+}
+
+async function releaseCoinOnServer(symbol) {
+    if (!symbol) return false;
+    addLog(`[SERVER] Đang "giải phóng" coin ${symbol} trên server trung tâm...`);
+    try {
+        const response = await makeRequestToServer('POST', VPS1_RELEASE_URL, { coin: symbol, bot_id: BOT_ID });
+        if (response.success) {
+            addLog(`[SERVER] Đã giải phóng ${symbol} thành công.`);
+            return true;
+        }
+        return false;
+    } catch (error) {
+        addLog(`[SERVER] Lỗi khi giải phóng coin ${symbol}: ${error.msg || error.message}`);
+        return false;
+    }
+}
+
+async function fetchAndCacheTopCoinsFromVPS1(silent = false) {
+    if (!silent) addLog(`Lấy dữ liệu coin KHẢ DỤNG từ VPS1...`);
+    try {
+        const response = await makeRequestToServer('GET', VPS1_DATA_URL);
         if (response && response.status && Array.isArray(response.data)) {
-            if (response.status === "running_data_available") {
+             if (response.status === "running_data_available" || response.status === "running_no_available_data") {
                 const filtered = response.data.filter(c => c.symbol && typeof c.changePercent === 'number' && c.candles >= MIN_CANDLES_FOR_SELECTION);
                 vps1DataCache = [...filtered];
-                if (!silent) addLog(`VPS1 data cached: ${filtered.length} coins (status: ${response.status}).`);
+                if (!silent) addLog(`VPS1 data cached: ${filtered.length} coins khả dụng.`);
                 return [...filtered];
-            } else if (response.status === "error_binance_symbols" || response.status.startsWith("error")) {
-                if (!silent) addLog(`VPS1 error (status: ${response.status}): ${response.message || 'Lỗi VPS1'}. Dùng cache (${vps1DataCache.length}).`);
-                return vps1DataCache.length > 0 ? [...vps1DataCache] : [];
             } else {
-                if (!silent) addLog(`VPS1 preparing (status: ${response.status}): ${response.message || 'Chưa có message'}. Dùng cache (${vps1DataCache.length}).`);
+                if (!silent) addLog(`Trạng thái VPS1: ${response.status}: ${response.message || 'N/A'}. Dùng cache (${vps1DataCache.length}).`);
                 return vps1DataCache.length > 0 ? [...vps1DataCache] : [];
             }
         } else {
-            if (!silent) addLog(`Lỗi định dạng VPS1. Status: ${response?.status}. Dùng cache (${vps1DataCache.length}). Raw: ${rawData.substring(0, 200)}`);
+            if (!silent) addLog(`Lỗi định dạng VPS1. Dùng cache (${vps1DataCache.length}).`);
             return vps1DataCache.length > 0 ? [...vps1DataCache] : [];
         }
     } catch (error) {
-        let errMsg = `Lỗi lấy/phân tích VPS1 (${fullUrl}): ${error.code || 'ERR'} - ${error.msg || error.message}.`;
-        if (error.responseBody) errMsg += ` Body: ${error.responseBody.substring(0, 100)}`;
-        else if (error instanceof SyntaxError && error.message.includes("JSON")) errMsg += ` Lỗi parse JSON. Raw: ${rawDataForDebug.substring(0, 100)}`;
+        let errMsg = `Lỗi lấy dữ liệu VPS1: ${error.code || 'ERR'} - ${error.msg || error.message}.`;
         if (!silent) addLog(errMsg + `. Dùng cache cũ (${vps1DataCache.length} coins).`);
         return vps1DataCache.length > 0 ? [...vps1DataCache] : [];
     }
@@ -282,29 +376,38 @@ async function checkExistingPosition(symbol) {
     }
 }
 
+// [SỬA ĐỔI] Hàm chọn coin sử dụng logic claim
 async function selectTargetCoin(isInitialSelection = false) {
-    addLog("Bắt đầu quy trình chọn coin mới...");
+    addLog("Bắt đầu quy trình chọn và chiếm coin mới...");
     const vps1Coins = await fetchAndCacheTopCoinsFromVPS1(true);
     if (!vps1Coins || vps1Coins.length === 0) {
-        addLog("Không có dữ liệu coin từ VPS1/cache.");
+        addLog("Không có coin nào khả dụng từ VPS1/cache (có thể tất cả đã bị chiếm).");
         return null;
     }
+
     try {
-        const allPositions = await callSignedAPI('/fapi/v2/positionRisk', 'GET');
-        const existingPositionsSet = new Set(allPositions.filter(p => parseFloat(p.positionAmt) !== 0).map(p => p.symbol));
+        const myPositions = await callSignedAPI('/fapi/v2/positionRisk', 'GET');
+        const existingPositionsSet = new Set(myPositions.filter(p => parseFloat(p.positionAmt) !== 0).map(p => p.symbol));
 
         if (TARGET_COIN_SYMBOL && (currentLongPosition || currentShortPosition || sidewaysGrid.isActive)) {
             existingPositionsSet.add(TARGET_COIN_SYMBOL);
         }
 
         for (const coin of vps1Coins) {
-            if (!existingPositionsSet.has(coin.symbol) && !blacklistedCoinsThisSession.has(coin.symbol)) {
-                addLog(`ĐÃ CHỌN: ${coin.symbol} (Vol: ${coin.changePercent.toFixed(2)}%) vì biến động cao & chưa có vị thế.`);
+            if (existingPositionsSet.has(coin.symbol) || blacklistedCoinsThisSession.has(coin.symbol)) {
+                continue;
+            }
+
+            const claimed = await claimCoinOnServer(coin.symbol);
+            if (claimed) {
+                addLog(`ĐÃ CHỌN & CHIẾM: ${coin.symbol} (Vol: ${coin.changePercent.toFixed(2)}%)`);
                 return coin.symbol;
+            } else {
+                addLog(`Thử chiếm ${coin.symbol} thất bại, chuyển sang coin tiếp theo.`);
             }
         }
 
-        addLog("Tất cả coin biến động cao từ VPS1 đều đã có vị thế/blacklist.");
+        addLog("Đã thử tất cả các coin khả dụng từ VPS1 nhưng không chiếm được coin nào.");
         return null;
 
     } catch (error) {
@@ -392,6 +495,7 @@ async function getCurrentPrice(symbol) {
     }
 }
 
+// ... (Các hàm logic trade từ placeTpslOrders đến manageSidewaysGridLogic giữ nguyên như bản gốc của bạn) ...
 async function placeTpslOrders(position, positionType = 'KILL') {
     if (!position) return false;
     const { symbol, side, takeProfitPrice, stopLossPrice, pricePrecision } = position;
@@ -979,9 +1083,14 @@ async function checkOverallTPSL() {
     return false;
 }
 
+// [SỬA ĐỔI] Hàm chuyển coin sử dụng logic release
 async function handleCoinSwitch(reason, shouldBlacklist = false) {
     addLog(`[CHUYỂN COIN] Lý do: ${reason}`);
     const currentCoin = TARGET_COIN_SYMBOL;
+
+    if (currentCoin) {
+        await releaseCoinOnServer(currentCoin);
+    }
 
     if (currentCoin && shouldBlacklist) {
         blacklistedCoinsThisSession.add(currentCoin);
@@ -1421,12 +1530,17 @@ async function processTradeResult(orderInfo) {
     }
 }
 
+// [SỬA ĐỔI] Hàm dọn dẹp chu kỳ sử dụng logic release
 async function cleanupAndResetCycle(symbolToCleanup, isSwitchingCoin = false, noReschedule = false) {
     if (!symbolToCleanup && TARGET_COIN_SYMBOL) symbolToCleanup = TARGET_COIN_SYMBOL;
     if (!symbolToCleanup) {
         return;
     }
     addLog(`Chu kỳ cho ${symbolToCleanup} kết thúc. Dọn dẹp...`);
+
+    if(symbolToCleanup === TARGET_COIN_SYMBOL) {
+        await releaseCoinOnServer(symbolToCleanup);
+    }
 
     if (positionCheckInterval) {
         clearInterval(positionCheckInterval);
@@ -1500,11 +1614,15 @@ async function startBotLogicInternal() {
         return `Lỗi khởi động: ${errorMsg}.`;
     }
 }
+
+// [SỬA ĐỔI] Hàm dừng bot chỉ đóng vị thế của coin đang chạy
 async function stopBotLogicInternal(reason = "Lệnh dừng thủ công") {
     if (!botRunning && !retryBotTimeout) return 'Bot không chạy hoặc không đang retry.';
     addLog(`--- Dừng Bot (Lý do: ${reason}) ---`);
+    const coinToCleanUp = TARGET_COIN_SYMBOL;
+    
     botRunning = false;
-    botStartTime = null; // Reset bot start time on stop
+    botStartTime = null;
     isOpeningInitialPair = false;
     if (nextScheduledCycleTimeout) clearTimeout(nextScheduledCycleTimeout);
     nextScheduledCycleTimeout = null;
@@ -1531,24 +1649,35 @@ async function stopBotLogicInternal(reason = "Lệnh dừng thủ công") {
     if (listenKey) await callSignedAPI('/fapi/v1/listenKey', 'DELETE', { listenKey }).then(() => addLog("ListenKey đã xóa.")).catch(e => addLog(`Lỗi xóa listenKey: ${e.msg || e.message}`));
     listenKey = null;
 
+    if (coinToCleanUp) {
+        await releaseCoinOnServer(coinToCleanUp);
+    }
+
     try {
-        addLog("Kiểm tra và đóng tất cả vị thế còn lại...");
-        const allPositions = await callSignedAPI('/fapi/v2/positionRisk', 'GET');
-        const openPositions = allPositions.filter(p => parseFloat(p.positionAmt) !== 0);
-        if (openPositions.length > 0) {
-            addLog(`Tìm thấy ${openPositions.length} vị thế đang mở. Đóng tất cả...`);
-            for (const pos of openPositions) {
-                await cancelAllOpenOrdersForSymbol(pos.symbol).catch(e => addLog(`Lỗi hủy lệnh chờ ${pos.symbol}: ${e.message}`));
+        if (coinToCleanUp) {
+            addLog(`Kiểm tra và đóng vị thế của coin đang chạy: ${coinToCleanUp}...`);
+            const allPositions = await callSignedAPI('/fapi/v2/positionRisk', 'GET');
+            
+            const openPositionsForThisBot = allPositions.filter(p => p.symbol === coinToCleanUp && parseFloat(p.positionAmt) !== 0);
+
+            if (openPositionsForThisBot.length > 0) {
+                addLog(`Tìm thấy ${openPositionsForThisBot.length} vị thế của ${coinToCleanUp}. Đóng tất cả...`);
+                await cancelAllOpenOrdersForSymbol(coinToCleanUp).catch(e => addLog(`Lỗi hủy lệnh chờ ${coinToCleanUp}: ${e.message}`));
                 await sleep(200);
-                await closePosition(pos.symbol, `Bot dừng: ${reason}`, pos.positionSide).catch(e => addLog(`Lỗi đóng ${pos.positionSide} ${pos.symbol}: ${e.message}`));
-                await sleep(500);
+
+                for (const pos of openPositionsForThisBot) {
+                    await closePosition(pos.symbol, `Bot dừng: ${reason}`, pos.positionSide).catch(e => addLog(`Lỗi đóng ${pos.positionSide} ${pos.symbol}: ${e.message}`));
+                    await sleep(500);
+                }
+                addLog(`Đã gửi yêu cầu đóng các vị thế của ${coinToCleanUp}.`);
+            } else {
+                addLog(`Không có vị thế nào đang mở cho ${coinToCleanUp}.`);
             }
-            addLog("Đã gửi yêu cầu đóng tất cả vị thế.");
         } else {
-            addLog("Không có vị thế nào đang mở.");
+            addLog("Bot đang không chạy coin nào, không cần đóng vị thế.");
         }
     } catch (e) {
-        addLog(`Lỗi nghiêm trọng khi dọn dẹp vị thế: ${e.msg || e.message}`);
+        addLog(`Lỗi nghiêm trọng khi dọn dẹp vị thế lúc dừng bot: ${e.msg || e.message}`);
     }
 
     currentLongPosition = null;
@@ -1563,8 +1692,9 @@ async function stopBotLogicInternal(reason = "Lệnh dừng thủ công") {
         addLog("Đã hủy retry khởi động.");
     }
     addLog('--- Bot đã dừng ---');
-    return 'Bot đã dừng.';
+    return 'Bot đã dừng thành công và chỉ dọn dẹp coin nó quản lý.';
 }
+
 async function checkAndHandleRemainingPosition(symbol) {
     if (!symbol) return;
     addLog(`Kiểm tra vị thế sót cho ${symbol}...`);
