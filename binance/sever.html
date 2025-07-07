@@ -66,7 +66,12 @@
             font-weight: 600;
         }
         .coin-item .info {
-            line-height: 1.6;
+            font-size: 0.9em;
+            line-height: 1.7;
+            color: #b0b0b0;
+        }
+        .coin-item .pnl-value {
+            font-weight: bold;
         }
         .positive {
             color: #4caf50;
@@ -87,6 +92,10 @@
             margin-left: 10px;
             vertical-align: middle;
         }
+        .stale {
+            opacity: 0.6;
+            border-left: 5px solid #f44336;
+        }
         @keyframes rotation {
             0% { transform: rotate(0deg); }
             100% { transform: rotate(360deg); }
@@ -103,12 +112,10 @@
 
         <h2><span id="running-count">0</span> Coin(s) Đang Chạy</h2>
         <div class="grid" id="running-coins-list">
-            <!-- Dữ liệu coin đang chạy sẽ được chèn vào đây -->
         </div>
 
         <h2><span id="available-count">0</span> Coin(s) Khả Dụng (Sắp xếp theo biến động)</h2>
         <div class="grid" id="available-coins-list">
-            <!-- Dữ liệu coin khả dụng sẽ được chèn vào đây -->
         </div>
     </div>
 
@@ -122,8 +129,18 @@
 
         function createCoinCard(coin, isRunning) {
             const pnlClass = coin.changePercent >= 0 ? 'positive' : 'negative';
+            const netPnlClass = (coin.net_pnl ?? 0) >= 0 ? 'positive' : 'negative';
+            const cumulativePnlClass = (coin.cumulative_pnl ?? 0) >= 0 ? 'positive' : 'negative';
+            
             const card = document.createElement('div');
             card.className = 'coin-item';
+            
+            const now = Date.now();
+            const stale_threshold = 3 * 60 * 1000;
+            if (isRunning && coin.last_update && (now - coin.last_update > stale_threshold)) {
+                card.classList.add('stale');
+                card.title = `Lần cập nhật cuối từ bot này là hơn ${Math.round((now - coin.last_update)/60000)} phút trước.`;
+            }
 
             let headerHtml = `<span class="symbol">${coin.symbol}</span>`;
             if (isRunning) {
@@ -131,7 +148,12 @@
             }
 
             let infoHtml = `<div class="info">Biến động: <span class="${pnlClass}">${coin.changePercent}%</span></div>`;
-            if (!isRunning) {
+
+            if (isRunning) {
+                infoHtml += `<div class="info">Mode: <strong>${coin.bot_mode?.toUpperCase() || 'N/A'}</strong></div>`;
+                infoHtml += `<div class="info">PNL Ròng: <span class="pnl-value ${netPnlClass}">${typeof coin.net_pnl === 'number' ? coin.net_pnl.toFixed(2) : '...'}</span></div>`;
+                infoHtml += `<div class="info">PNL Tổng: <span class="pnl-value ${cumulativePnlClass}">${typeof coin.cumulative_pnl === 'number' ? coin.cumulative_pnl.toFixed(2) : '...'}</span></div>`;
+            } else {
                 infoHtml += `<div class="info">Số nến: ${coin.candles}</div>`;
                 infoHtml += `<div class="info">Giá hiện tại: ${coin.currentPrice}</div>`;
             }
@@ -146,8 +168,7 @@
         async function fetchData() {
             statusMessageEl.innerHTML = 'Đang cập nhật... <div class="loader"></div>';
             try {
-                // Sử dụng đường dẫn tương đối '/', vì file HTML này được phục vụ từ cùng server
-                const response = await fetch('/?format=json'); // Thêm param để chắc chắn nhận JSON
+                const response = await fetch('/');
                 if (!response.ok) {
                     throw new Error(`Lỗi mạng: ${response.status} ${response.statusText}`);
                 }
@@ -159,7 +180,7 @@
                 availableListEl.innerHTML = '';
 
                 const runningCoins = data.running_coins || [];
-                const availableCoins = data.data || []; // Bot dùng `data`, nên dashboard cũng dùng `data`
+                const availableCoins = data.data || [];
 
                 runningCountEl.textContent = runningCoins.length;
                 if (runningCoins.length > 0) {
@@ -189,7 +210,7 @@
 
         document.addEventListener('DOMContentLoaded', () => {
             fetchData();
-            setInterval(fetchData, 10000); // Tự động làm mới mỗi 10 giây
+            setInterval(fetchData, 10000);
         });
     </script>
 </body>
