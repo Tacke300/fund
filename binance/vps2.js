@@ -15,7 +15,7 @@ import { API_KEY, SECRET_KEY } from './config.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const BOT_ID = process.env.name || 'sever2';
+const BOT_ID = process.env.name || 'vps2';
 const VPS1_SERVER_URL = 'http://34.142.248.96:9797';
 const VPS1_DATA_URL = `${VPS1_SERVER_URL}/`;
 const VPS1_CLAIM_URL = `${VPS1_SERVER_URL}/claim_coin`;
@@ -1047,16 +1047,41 @@ async function manageSidewaysGridLogic() {
             const isVolDifferenceSufficient = altCoinVol > (currentCoinVol + MIN_VOLATILITY_DIFFERENCE_TO_SWITCH);
 
             if (isAltVolSufficient && isVolDifferenceSufficient) {
-                addLog(`LƯỚI->KILL: Đổi sang coin tốt hơn ${bestAlternativeCoin.symbol} (Vol: ${altCoinVol.toFixed(2)}%) so với ${TARGET_COIN_SYMBOL} (Vol: ${currentCoinVol.toFixed(2)}%).`);
-                sidewaysGrid.isClearingForSwitch = true;
-                await closeAllSidewaysPositionsAndOrders(`Chuyển sang coin tốt hơn ${bestAlternativeCoin.symbol}`);
-                if (sidewaysGrid.switchDelayTimeout) clearTimeout(sidewaysGrid.switchDelayTimeout);
-                sidewaysGrid.switchDelayTimeout = setTimeout(async () => {
-                    sidewaysGrid.isClearingForSwitch = false;
+                addLog(`[CHUYỂN COIN] Tìm thấy cơ hội tốt hơn: ${bestAlternativeCoin.symbol} (Vol: ${altCoinVol.toFixed(2)}%). Thử chiếm...`);
+                const canClaim = await claimCoinOnServer(bestAlternativeCoin.symbol);
+
+                if (canClaim) {
+                    addLog(`[CHUYỂN COIN] Chiếm ${bestAlternativeCoin.symbol} THÀNH CÔNG. Bắt đầu đóng coin cũ ${TARGET_COIN_SYMBOL}...`);
+                    sidewaysGrid.isClearingForSwitch = true;
+                    
+                    const oldCoinToClean = TARGET_COIN_SYMBOL;
+                    await closeAllSidewaysPositionsAndOrders(`Chuyển sang coin tốt hơn ${bestAlternativeCoin.symbol}`);
+
+                    addLog(`[CHUYỂN COIN] Đã đóng xong ${oldCoinToClean}. Bắt đầu chu kỳ mới với ${bestAlternativeCoin.symbol}.`);
+                    
+                    TARGET_COIN_SYMBOL = bestAlternativeCoin.symbol;
+                    activeCoinVps1Data = vps1DataCache.find(c => c.symbol === TARGET_COIN_SYMBOL);
+                    totalProfit = 0;
+                    totalLoss = 0;
+                    netPNL = 0;
                     currentBotMode = 'kill';
-                    if (botRunning) scheduleNextMainCycle(1000);
-                }, COIN_SWITCH_DELAY_MS);
-                return;
+                    sidewaysGrid.isClearingForSwitch = false;
+
+                    if (marketWs) {
+                        marketWs.removeAllListeners();
+                        marketWs.terminate();
+                        marketWs = null;
+                    }
+                    setupMarketDataStream(TARGET_COIN_SYMBOL);
+                    
+                    if (sidewaysGrid.switchDelayTimeout) clearTimeout(sidewaysGrid.switchDelayTimeout);
+                    sidewaysGrid.switchDelayTimeout = setTimeout(() => {
+                        if (botRunning) scheduleNextMainCycle(1000);
+                    }, COIN_SWITCH_DELAY_MS);
+                    return;
+                } else {
+                    addLog(`[CHUYỂN COIN] Không thể chiếm ${bestAlternativeCoin.symbol} (đã bị bot khác chiếm). Tiếp tục với coin hiện tại.`);
+                }
             }
         }
         
@@ -1102,9 +1127,10 @@ async function handleCoinSwitch(reason, shouldBlacklist = false) {
     addLog(`[CHUYỂN COIN] Lý do: ${reason}`);
     const currentCoin = TARGET_COIN_SYMBOL;
 
-    if (currentCoin) {
-        await releaseCoinOnServer(currentCoin);
-    }
+    // Release is now handled by the logic that initiates the switch
+    // if (currentCoin) {
+    //     await releaseCoinOnServer(currentCoin);
+    // }
 
     if (currentCoin && shouldBlacklist) {
         blacklistedCoinsThisSession.add(currentCoin);
@@ -1329,9 +1355,39 @@ async function manageOpenPosition() {
             if (isAltVolSufficientlyHigh && isVolDifferenceSufficient) {
                 const hasExistingPos = await checkExistingPosition(bestAlternativeCoin.symbol);
                 if (!hasExistingPos) {
-                    const reason = `Chuyển sang cơ hội tốt hơn ${bestAlternativeCoin.symbol} (Vol: ${altCoinVol.toFixed(2)}% > 15% và hơn ${currentCoinVol.toFixed(2)}% ít nhất 5%)`;
-                    await handleCoinSwitch(reason);
-                    return; 
+                    addLog(`[KILL][CHUYỂN COIN] Tìm thấy cơ hội tốt hơn: ${bestAlternativeCoin.symbol} (Vol: ${altCoinVol.toFixed(2)}%). Thử chiếm...`);
+                    const canClaim = await claimCoinOnServer(bestAlternativeCoin.symbol);
+
+                    if (canClaim) {
+                        addLog(`[KILL][CHUYỂN COIN] Chiếm ${bestAlternativeCoin.symbol} THÀNH CÔNG. Bắt đầu đóng coin cũ ${TARGET_COIN_SYMBOL}...`);
+                        const reason = `Chuyển sang cơ hội tốt hơn ${bestAlternativeCoin.symbol} (Vol: ${altCoinVol.toFixed(2)}% > 15% và hơn ${currentCoinVol.toFixed(2)}% ít nhất 5%)`;
+                        
+                        const oldCoinToClean = TARGET_COIN_SYMBOL;
+                        if (currentLongPosition) await closePosition(oldCoinToClean, reason, 'LONG');
+                        if (currentShortPosition) await closePosition(oldCoinToClean, reason, 'SHORT');
+                        
+                        addLog(`[KILL][CHUYỂN COIN] Đã đóng xong ${oldCoinToClean}. Bắt đầu chu kỳ mới với ${bestAlternativeCoin.symbol}.`);
+                        
+                        TARGET_COIN_SYMBOL = bestAlternativeCoin.symbol;
+                        activeCoinVps1Data = vps1DataCache.find(c => c.symbol === TARGET_COIN_SYMBOL);
+                        totalProfit = 0;
+                        totalLoss = 0;
+                        netPNL = 0;
+                        currentLongPosition = null;
+                        currentShortPosition = null;
+
+                        if (marketWs) {
+                            marketWs.removeAllListeners();
+                            marketWs.terminate();
+                            marketWs = null;
+                        }
+                        setupMarketDataStream(TARGET_COIN_SYMBOL);
+                        
+                        scheduleNextMainCycle(1000);
+                        return;
+                    } else {
+                        addLog(`[KILL][CHUYỂN COIN] Không thể chiếm ${bestAlternativeCoin.symbol} (đã bị bot khác chiếm). Tiếp tục với coin hiện tại.`);
+                    }
                 }
             }
         }
@@ -1548,9 +1604,13 @@ async function cleanupAndResetCycle(symbolToCleanup, isSwitchingCoin = false, no
     }
     addLog(`Chu kỳ cho ${symbolToCleanup} kết thúc. Dọn dẹp...`);
 
-    if(symbolToCleanup === TARGET_COIN_SYMBOL) {
+    if (isSwitchingCoin) {
+        // In the new logic, the claim is already on the new coin, so we release the old one.
+        await releaseCoinOnServer(symbolToCleanup);
+    } else if (symbolToCleanup === TARGET_COIN_SYMBOL) {
         await releaseCoinOnServer(symbolToCleanup);
     }
+
 
     if (positionCheckInterval) {
         clearInterval(positionCheckInterval);
