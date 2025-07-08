@@ -1,21 +1,13 @@
 import WebSocket from 'ws';
 import http from 'http';
-import https from 'https';
+import https from 'https'
 import express from 'express';
 import { URL } from 'url';
 import crypto from 'crypto';
-import fs from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
 import { API_KEY, SECRET_KEY } from './config.js';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
 const app = express();
-const port = 9797;
-
-app.use(express.json());
+const port = 9000;
 
 const BINANCE_FAPI_BASE_URL = 'fapi.binance.com';
 const BINANCE_WS_URL = 'wss://fstream.binance.com/stream?streams=';
@@ -28,12 +20,9 @@ let wsClient = null;
 let vps1DataStatus = "initializing";
 let serverTimeOffset = 0;
 
-let claimedCoins = {};
-
-
 function logVps1(message) {
     const now = new Date();
-    const offset = 7 * 60 * 60 * 1000;
+    const offset = 7 * 60 * 60 * 1000; // Múi giờ +7
     const localTime = new Date(now.getTime() + offset);
     const timestamp = localTime.toISOString().replace('T', ' ').substring(0, 23);
     console.log(`[VPS1_DP] ${timestamp} - ${message}`);
@@ -43,6 +32,7 @@ function createSignature(queryString, apiSecret) {
     return crypto.createHmac('sha256', apiSecret).update(queryString).digest('hex');
 }
 
+// [CẢI TIẾN] - Hàm makeHttpRequest được nâng cấp để ghi log lỗi chi tiết từ Binance
 async function makeHttpRequest(method, urlString, headers = {}, postData = '') {
     return new Promise((resolve, reject) => {
         const parsedUrl = new URL(urlString);
@@ -61,11 +51,7 @@ async function makeHttpRequest(method, urlString, headers = {}, postData = '') {
             res.on('end', () => {
                 if (res.statusCode >= 200 && res.statusCode < 300) {
                     try {
-                         if (res.headers['content-type'] && res.headers['content-type'].includes('application/json')) {
-                           resolve(JSON.parse(data));
-                        } else {
-                           resolve(data);
-                        }
+                        resolve(JSON.parse(data));
                     } catch (e) {
                         const parseError = new Error(`HTTPS JSON Parse Error from ${urlString}: ${e.message}`);
                         parseError.data = data.substring(0, 300);
@@ -73,10 +59,11 @@ async function makeHttpRequest(method, urlString, headers = {}, postData = '') {
                         reject(parseError);
                     }
                 } else {
+                    // Cải tiến phần lỗi để chứa nhiều thông tin hơn
                     const error = new Error(`Request Failed. Status: ${res.statusCode} for ${urlString}.`);
                     error.statusCode = res.statusCode;
                     try {
-                        error.body = JSON.parse(data);
+                        error.body = JSON.parse(data); // Cố gắng parse body lỗi từ Binance
                     } catch {
                         error.body = data.substring(0, 300);
                     }
@@ -102,6 +89,7 @@ async function makeHttpRequest(method, urlString, headers = {}, postData = '') {
     });
 }
 
+// [CẢI TIẾN] - Hàm callSignedAPI được nâng cấp để bắt và ghi log lỗi chi tiết
 async function callSignedAPI(fullEndpointPath, method = 'GET', params = {}) {
     if (!API_KEY || !SECRET_KEY) throw new Error("API_KEY/SECRET_KEY is missing in config.js");
     const timestamp = Date.now() + serverTimeOffset;
@@ -115,9 +103,11 @@ async function callSignedAPI(fullEndpointPath, method = 'GET', params = {}) {
     try {
         return await makeHttpRequest(method, fullUrlToCall, headers);
     } catch (error) {
+        // Log lỗi chi tiết từ Binance API
         logVps1(`[CRITICAL SIGNED API CALL FAILED] Endpoint: ${fullEndpointPath}`);
         logVps1(`  - Status Code: ${error.statusCode || 'N/A'}`);
         logVps1(`  - Binance Error Body: ${JSON.stringify(error.body) || 'N/A'}`);
+        // Ném lỗi ra ngoài để các hàm khác xử lý (như retry)
         throw error;
     }
 }
@@ -140,6 +130,7 @@ async function syncServerTime() {
     }
 }
 
+// [GỠ LỖI] - Thêm logging chi tiết vào hàm này
 async function getAllFuturesSymbols(retryCount = 0) {
     const maxRetries = 5;
     const retryDelay = 7000;
@@ -151,6 +142,7 @@ async function getAllFuturesSymbols(retryCount = 0) {
             callSignedAPI('/fapi/v1/leverageBracket', 'GET')
         ]);
 
+        // --- GỠ LỖI: LOGGING CHI TIẾT ---
         const totalPublicSymbols = exchangeInfo?.symbols?.length || 0;
         const totalLeverageSymbols = leverageBrackets?.length || 0;
         logVps1(`[DEBUG] exchangeInfo (public) returned ${totalPublicSymbols} symbols.`);
@@ -158,6 +150,7 @@ async function getAllFuturesSymbols(retryCount = 0) {
         if (totalLeverageSymbols < 250 && totalPublicSymbols > 300) {
             logVps1(`[WARNING] The number of symbols from leverageBracket is very low (${totalLeverageSymbols}) compared to public symbols. This strongly indicates a problem with API Key permissions (Enable Futures) or IP Whitelisting.`);
         }
+        // --- KẾT THÚC LOGGING GỠ LỖI ---
 
         if (!exchangeInfo || !exchangeInfo.symbols || !Array.isArray(exchangeInfo.symbols)) {
             throw new Error("Invalid exchangeInfo data or missing symbols array.");
@@ -368,7 +361,6 @@ async function periodicallyUpdateSymbolList() {
          logVps1(`Detected ${removedSymbols.length} removed symbols: ${removedSymbols.join(', ')}.`);
          removedSymbols.forEach(s => {
              delete coinData[s];
-             delete claimedCoins[s];
              allSymbols = allSymbols.filter(sym => sym !== s);
          });
          listChanged = true;
@@ -406,89 +398,40 @@ async function main() {
     setInterval(calculateAndRank, 15 * 1000);
     setInterval(periodicallyUpdateSymbolList, 1 * 60 * 60 * 1000);
 
-    app.get('/claimed_coins', (req, res) => {
-        logVps1(`[INFO] Request to /claimed_coins. Returning ${Object.keys(claimedCoins).length} coins.`);
-        res.status(200).json({
-             status: "success",
-             count: Object.keys(claimedCoins).length,
-             claimed_by_bot: claimedCoins
-        });
-    });
-
-    app.post('/claim_coin', (req, res) => {
-        const { coin, bot_id } = req.body;
-        if (!coin || !bot_id) {
-            return res.status(400).json({ success: false, message: "Thiếu 'coin' hoặc 'bot_id'." });
-        }
-        if (claimedCoins[coin]) {
-            logVps1(`[REJECTED] Bot '${bot_id}' cố gắng chiếm coin ${coin} đã bị '${claimedCoins[coin]}' chiếm.`);
-            return res.status(409).json({ success: false, message: `Coin ${coin} đã bị chiếm bởi ${claimedCoins[coin]}.` });
-        }
-        claimedCoins[coin] = bot_id;
-        logVps1(`[CLAIMED] Bot '${bot_id}' đã chiếm thành công coin ${coin}.`);
-        res.status(200).json({ success: true, message: `Bot ${bot_id} đã chiếm thành công ${coin}.` });
-    });
-
-    app.post('/release_coin', (req, res) => {
-        const { coin, bot_id } = req.body;
-        if (!coin || !bot_id) {
-            return res.status(400).json({ success: false, message: "Thiếu 'coin' hoặc 'bot_id'." });
-        }
-        if (claimedCoins[coin] && claimedCoins[coin] !== bot_id) {
-             logVps1(`[INVALID RELEASE] Bot '${bot_id}' cố gắng giải phóng coin ${coin} đang do '${claimedCoins[coin]}' quản lý.`);
-            return res.status(403).json({ success: false, message: `Bot ${bot_id} không có quyền giải phóng coin do ${claimedCoins[coin]} quản lý.` });
-        }
-        if (claimedCoins[coin]) {
-            delete claimedCoins[coin];
-            logVps1(`[RELEASED] Bot '${bot_id}' đã giải phóng coin ${coin}.`);
-            res.status(200).json({ success: true, message: `Coin ${coin} đã được giải phóng.` });
-        } else {
-            logVps1(`[INFO] Bot '${bot_id}' gửi yêu cầu giải phóng cho coin ${coin} không có trong danh sách.`);
-            res.status(200).json({ success: true, message: `Coin ${coin} không có trong danh sách, không cần giải phóng.` });
-        }
-    });
-
-    // [SỬA LỖI] Logic phục vụ HTML và JSON an toàn hơn
     app.get('/', (req, res) => {
-        const indexPath = path.join(__dirname, 'sever.html');
-        const isBrowserRequest = req.headers.accept && req.headers.accept.includes('text/html');
+        let responsePayload = { status: vps1DataStatus, message: "", data: [] };
 
-        // Ưu tiên: Nếu là trình duyệt và có file HTML, gửi dashboard
-        if (isBrowserRequest && fs.existsSync(indexPath)) {
-            res.sendFile(indexPath);
-            return;
+        switch (vps1DataStatus) {
+            case "running_data_available":
+                if (topRankedCoinsForApi.length > 0) {
+                    responsePayload.message = `Top ${topRankedCoinsForApi.length} coins data (from symbols with leverage > 50x), sorted by absolute volatility. Update interval: 15s.`;
+                    responsePayload.data = topRankedCoinsForApi;
+                } else {
+                    responsePayload.status = "running_no_data_to_rank";
+                    responsePayload.message = "VPS1: Data is available but no coins met ranking criteria in the last cycle.";
+                }
+                break;
+            case "error_binance_symbols":
+                responsePayload.message = topRankedCoinsForApi[0]?.error_message || "VPS1: Failed to initialize symbols/leverage from Binance.";
+                responsePayload.data = topRankedCoinsForApi;
+                break;
+            case "initializing":
+            case "running_symbols_fetched":
+            case "running_no_initial_data_ranked":
+            case "running_no_data_to_fetch_initially":
+                responsePayload.message = "VPS1: Data is being prepared or no coins have met ranking criteria yet.";
+                break;
+            default:
+                responsePayload.status = "error";
+                responsePayload.message = "VPS1: An unspecified error occurred.";
+                break;
         }
-
-        // Mặc định: Gửi dữ liệu JSON cho tất cả các request khác (bao gồm cả bot)
-        const availableCoins = topRankedCoinsForApi.filter(coin => !claimedCoins[coin.symbol]);
-        
-        const runningCoins = [];
-        for (const symbol in claimedCoins) {
-            const bot_id = claimedCoins[symbol];
-            const coinInfo = topRankedCoinsForApi.find(c => c.symbol === symbol);
-            
-            runningCoins.push({
-                bot_id: bot_id,
-                symbol: symbol,
-                changePercent: coinInfo ? coinInfo.changePercent : 'N/A'
-            });
-        }
-        runningCoins.sort((a, b) => a.bot_id.localeCompare(b.bot_id));
-        
-        const responsePayload = {
-            status: vps1DataStatus,
-            message: `Trạng thái server: ${runningCoins.length} coin(s) đang chạy, ${availableCoins.length} coin(s) khả dụng.`,
-            running_coins: runningCoins,
-            data: availableCoins // Key 'data' này là để cho bot client sử dụng
-        };
-        
         res.status(200).json(responsePayload);
     });
 
     http.createServer(app).listen(port, '0.0.0.0', () => {
         logVps1(`Server (HTTP) is running on port ${port}`);
-        logVps1(`Dashboard served at: http://<YOUR_VPS1_IP>:${port}/`);
-        logVps1(`Claimed coins status at: http://<YOUR_VPS1_IP>:${port}/claimed_coins`);
+        logVps1(`JSON data served at: http://<YOUR_VPS1_IP>:${port}/`);
     });
 }
 
