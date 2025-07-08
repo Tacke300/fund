@@ -92,7 +92,7 @@ function addLog(message) {
 
         if (logCounts[messageHash].count > 1) {
             const repeatCount = logCounts[messageHash].count - 1
-            if (repeatCount > 0) { // Only show if there's an actual repeat
+            if (repeatCount > 0) {
                 const repeatedMessage = `[${time}] (Lặp lại x${repeatCount} lần) ${message}`
                 console.log(repeatedMessage)
                 if (LOG_TO_CUSTOM_FILE) fs.appendFile(CUSTOM_LOG_FILE, repeatedMessage + '\n', (err) => { if (err) console.error("Lỗi ghi log:", err) })
@@ -102,7 +102,7 @@ function addLog(message) {
             console.log(logEntry)
             if (LOG_TO_CUSTOM_FILE) fs.appendFile(CUSTOM_LOG_FILE, logEntry + '\n', (err) => { if (err) console.error("Lỗi ghi log:", err) })
         }
-        logCounts[messageHash].count = 0 // Reset count after logging
+        logCounts[messageHash].count = 0
         logCounts[messageHash].lastLoggedTime = localTime
     } else {
         let logEntry = `[${time}] ${message}`
@@ -1504,7 +1504,7 @@ async function stopBotLogicInternal(reason = "Lệnh dừng thủ công") {
     if (!botRunning && !retryBotTimeout) return 'Bot không chạy hoặc không đang retry.'
     addLog(`--- Dừng Bot (Lý do: ${reason}) ---`)
     botRunning = false
-    botStartTime = null // Reset bot start time on stop
+    botStartTime = null
     isOpeningInitialPair = false
     if (nextScheduledCycleTimeout) clearTimeout(nextScheduledCycleTimeout)
     nextScheduledCycleTimeout = null
@@ -1532,8 +1532,6 @@ async function stopBotLogicInternal(reason = "Lệnh dừng thủ công") {
     listenKey = null
 
     try {
-        // *** LOGIC DỌN DẸP ĐÃ SỬA ***
-        // Chỉ dọn dẹp vị thế cho coin mà bot đang chạy, thay vì tất cả.
         if (TARGET_COIN_SYMBOL) {
             addLog(`Dọn dẹp vị thế cho coin đang chạy: ${TARGET_COIN_SYMBOL}...`)
             await checkAndHandleRemainingPosition(TARGET_COIN_SYMBOL);
@@ -1748,8 +1746,6 @@ function setupMarketDataStream(symbol) {
                 if (currentBotMode === 'kill' && !isProcessingTrade && !isOpeningInitialPair) {
                     const positionsToCheck = [currentLongPosition, currentShortPosition]
                     for (const pos of positionsToCheck) {
-                        // *** SỬA LỖI TẠI ĐÂY ***
-                        // Bỏ điều kiện `pos.unrealizedPnl > 0` để tránh bị chặn bởi dữ liệu PNL cũ.
                         if (!pos || pos.quantity <= 0) continue
 
                         const estimatedPnl = (currentMarketPrice - pos.entryPrice) * pos.quantity * (pos.side === 'LONG' ? 1 : -1)
