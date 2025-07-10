@@ -26,6 +26,7 @@ const SIDEWAYS_GRID_STEP_PERCENT = 0.0079
 const SIDEWAYS_TP_PRICE_PERCENT = 0.02
 const SIDEWAYS_SL_PRICE_PERCENT = 0.079
 const SIDEWAYS_CHECK_INTERVAL_MS = 2 * 60 * 1000
+const SIDEWAYS_INACTIVITY_TIMEOUT_MS = 15 * 60 * 1000
 const BASE_HOST = 'fapi.binance.com'
 const WS_BASE_URL = 'wss://fstream.binance.com'
 const WS_USER_DATA_ENDPOINT = '/ws'
@@ -65,7 +66,7 @@ let listenKeyRefreshInterval = null
 let currentMarketPrice = null
 let consecutiveApiErrors = 0
 let vps1DataCache = []
-let sidewaysGrid = { isActive: false, anchorPrice: null, activeGridPositions: [], sidewaysStats: { tpMatchedCount: 0, slMatchedCount: 0 }, lastCheckTime: 0, isClearingForSwitch: false, switchDelayTimeout: null }
+let sidewaysGrid = { isActive: false, anchorPrice: null, activeGridPositions: [], sidewaysStats: { tpMatchedCount: 0, slMatchedCount: 0 }, lastCheckTime: 0, isClearingForSwitch: false, switchDelayTimeout: null, sidewaysEntryTimestamp: null, hasOpenedGridPositionThisSession: false }
 let isOpeningInitialPair = false
 let overallTakeProfit = 0
 let overallStopLoss = 0
@@ -696,6 +697,7 @@ async function recoverPartialPosition(position) {
         
         position.quantity += quantityToRecover
         position.closedLossAmount = 0
+        position.milestoneCounter = 0
         addLog(`  -> Đã mở lại. KL mới của ${position.side}: ${position.quantity.toFixed(position.quantityPrecision)}`)
         success = true
 
@@ -764,6 +766,7 @@ async function openSidewaysGridPosition(symbol, tradeDirection, entryPriceToTarg
         }
 
         sidewaysGrid.activeGridPositions.push(gridPos)
+        sidewaysGrid.hasOpenedGridPositionThisSession = true
         return gridPos
 
     } catch (err) {
@@ -875,6 +878,16 @@ async function closeAllSidewaysPositionsAndOrders(reason) {
 
 async function manageSidewaysGridLogic() {
     if (!sidewaysGrid.isActive || !currentMarketPrice || sidewaysGrid.isClearingForSwitch || !TARGET_COIN_SYMBOL || isProcessingTrade) return
+
+    if (
+        sidewaysGrid.sidewaysEntryTimestamp &&
+        !sidewaysGrid.hasOpenedGridPositionThisSession &&
+        (Date.now() - sidewaysGrid.sidewaysEntryTimestamp > SIDEWAYS_INACTIVITY_TIMEOUT_MS)
+    ) {
+        addLog(`LƯỚI: Không có lệnh nào được mở sau 15 phút. Coin ${TARGET_COIN_SYMBOL} có thể không hoạt động.`);
+        await handleCoinSwitch(`Không hoạt động sau 15 phút`, true);
+        return;
+    }
     
     const { anchorPrice } = sidewaysGrid
     if (!anchorPrice) return
@@ -1027,7 +1040,7 @@ async function runTradingLogic() {
                 netPNL = 0
                 currentLongPosition = null
                 currentShortPosition = null
-                sidewaysGrid = { isActive: false, anchorPrice: null, activeGridPositions: [], sidewaysStats: { tpMatchedCount: 0, slMatchedCount: 0 }, lastCheckTime: 0, isClearingForSwitch: false, switchDelayTimeout: null }
+                sidewaysGrid = { isActive: false, anchorPrice: null, activeGridPositions: [], sidewaysStats: { tpMatchedCount: 0, slMatchedCount: 0 }, lastCheckTime: 0, isClearingForSwitch: false, switchDelayTimeout: null, sidewaysEntryTimestamp: null, hasOpenedGridPositionThisSession: false }
                 if (marketWs) {
                     marketWs.removeAllListeners()
                     marketWs.terminate()
@@ -1157,7 +1170,9 @@ async function runTradingLogic() {
             sidewaysGrid.lastCheckTime = Date.now()
             sidewaysGrid.activeGridPositions = []
             sidewaysGrid.sidewaysStats = { tpMatchedCount: 0, slMatchedCount: 0 }
-            addLog(`LƯỚI: Đã thiết lập Anchor Price tại ${priceAnchor.toFixed(details.pricePrecision)}.`)
+            sidewaysGrid.sidewaysEntryTimestamp = Date.now()
+            sidewaysGrid.hasOpenedGridPositionThisSession = false
+            addLog(`LƯỚI: Đã thiết lập Anchor Price tại ${priceAnchor.toFixed(details.pricePrecision)}. Bắt đầu theo dõi 15 phút không hoạt động.`)
         }
     }
 
