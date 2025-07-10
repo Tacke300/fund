@@ -40,6 +40,7 @@ const LOG_COOLDOWN_MS = 2000
 const MODE_SWITCH_DELAY_MS = 10000
 const COIN_SWITCH_DELAY_MS = 10000
 const KILL_MODE_SWITCH_CHECK_INTERVAL_MS = 1 * 60 * 1000
+const STATUS_UPDATE_INTERVAL_MS = 10000
 
 let serverTimeOffset = 0
 let exchangeInfoCache = null
@@ -74,6 +75,13 @@ const pendingClosures = new Set()
 let blacklistedCoinsThisSession = new Set()
 let isReversalInProgress = false
 let lastKillModeCheckTime = 0
+
+let statusCache = {
+    pm2Status: "Chưa cập nhật",
+    fullStatusString: "Bot đang khởi tạo...",
+    botStats: { success: false, data: { botRunning: false } }
+};
+let statusUpdateInterval = null;
 
 class CriticalApiError extends Error { constructor(message) { super(message); this.name = 'CriticalApiError' } }
 
@@ -698,7 +706,7 @@ async function recoverPartialPosition(position) {
         position.quantity += quantityToRecover
         position.closedLossAmount = 0
         position.milestoneCounter = 0
-        addLog(`  -> Đã mở lại. KL mới của ${position.side}: ${position.quantity.toFixed(position.quantityPrecision)}`)
+        addLog(`  -> Đã mở lại. KL mới của ${position.side}: ${position.quantity.toFixed(position.quantityPrecision)}. Reset mốc cắt lỗ.`)
         success = true
 
     } catch(err) {
@@ -1262,6 +1270,7 @@ async function manageOpenPosition() {
         const positionsToCheck = [currentLongPosition, currentShortPosition]
         for (const pos of positionsToCheck) {
             if (!pos) continue
+            if (pendingClosures.size > 0) continue;
 
             if (pos.unrealizedPnl > 0) {
                  continue
@@ -1498,6 +1507,10 @@ async function startBotLogicInternal() {
 
         botRunning = true
         botStartTime = new Date()
+        
+        if (statusUpdateInterval) clearInterval(statusUpdateInterval);
+        statusUpdateInterval = setInterval(updateStatusCache, STATUS_UPDATE_INTERVAL_MS);
+
         addLog(`--- Bot đã khởi động: ${formatTimeUTC7(botStartTime)} ---`)
         scheduleNextMainCycle(1000)
         return 'Bot khởi động thành công.'
@@ -1520,6 +1533,13 @@ async function stopBotLogicInternal(reason = "Lệnh dừng thủ công") {
     addLog(`--- Dừng Bot (Lý do: ${reason}) ---`)
     botRunning = false
     botStartTime = null
+
+    if (statusUpdateInterval) {
+        clearInterval(statusUpdateInterval);
+        statusUpdateInterval = null;
+    }
+    updateStatusCache(); 
+
     isOpeningInitialPair = false
     if (nextScheduledCycleTimeout) clearTimeout(nextScheduledCycleTimeout)
     nextScheduledCycleTimeout = null
@@ -1653,6 +1673,122 @@ async function keepAliveListenKey(key) {
     }
 }
 
+async function updateStatusCache() {
+    if (!botRunning) {
+        statusCache.fullStatusString = `BOT: DỪNG`;
+        statusCache.botStats = {
+            success: true,
+            data: {
+                botRunning: false,
+                botStartTime: "N/A",
+                currentMode: "N/A",
+                vps1Volatility: "N/A",
+                totalProfit: totalProfit.toFixed(2),
+                totalLoss: totalLoss.toFixed(2),
+                netPNL: netPNL.toFixed(2),
+                currentCycleOverallPNL: "0.00",
+                trueOverallPnlSinceStart: cumulativeRealizedPnlSinceStart.toFixed(2),
+                currentCoin: TARGET_COIN_SYMBOL || "N/A",
+                initialInvestment: INITIAL_INVESTMENT_AMOUNT,
+                overallTakeProfit,
+                overallStopLoss,
+                killPositions: [],
+                sidewaysGridInfo: { isActive: false },
+                currentMarketPrice: "N/A",
+                pendingPnlChecks: pendingClosures.size
+            }
+        };
+        return;
+    }
+    
+    try {
+        const currentCoinV1 = getCurrentCoinVPS1Data(TARGET_COIN_SYMBOL);
+        const vps1VolDisplay = currentCoinV1 ? Math.abs(currentCoinV1.changePercent).toFixed(2) + '%' : 'N/A';
+        let statusMsg = `BOT: ${botRunning ? 'CHẠY' : 'DỪNG'}`;
+        if (botStartTime && botRunning) statusMsg += ` | Up Bot: ${Math.floor((Date.now() - botStartTime.getTime()) / 60000)}p`;
+        statusMsg += ` | Coin: ${TARGET_COIN_SYMBOL || "N/A"} | Vốn: ${INITIAL_INVESTMENT_AMOUNT} | Mode: ${currentBotMode.toUpperCase()} (VPS1_Vol:${vps1VolDisplay})`;
+        if (sidewaysGrid.isClearingForSwitch) statusMsg += " (DỌN LƯỚI/CHUYỂN MODE)";
+        
+        const cDet = TARGET_COIN_SYMBOL ? await getSymbolDetails(TARGET_COIN_SYMBOL) : null;
+        const cPP = cDet ? cDet.pricePrecision : 4;
+        
+        let posText = "";
+        let killPositionsData = [];
+        let gridPositionsData = [];
+        
+        if (currentBotMode === 'kill' && (currentLongPosition || currentShortPosition)) {
+            posText = " | Kill: ";
+            for (const p of [currentLongPosition, currentShortPosition]) {
+                if (p) {
+                    const pnl = p.unrealizedPnl || 0;
+                    posText += `${p.side[0]}(PNL:${pnl.toFixed(1)}) `;
+                    const pp = cDet ? cDet.pricePrecision : 2;
+                    const qp = cDet ? cDet.quantityPrecision : 3;
+                    killPositionsData.push({
+                        type: 'kill', side: p.side, entry: p.entryPrice?.toFixed(pp), qty: p.quantity?.toFixed(qp),
+                        initialQty: p.initialQuantity?.toFixed(qp), milestone: p.milestoneCounter, closedLossQty: p.closedLossAmount?.toFixed(qp),
+                        pnl: pnl.toFixed(2), curPrice: p.currentPrice?.toFixed(pp), tpPrice: p.takeProfitPrice?.toFixed(pp), slPrice: p.stopLossPrice?.toFixed(pp)
+                    });
+                }
+            }
+        } else if (currentBotMode === 'sideways' && sidewaysGrid.isActive) {
+            posText = ` | Lưới: ${sidewaysGrid.activeGridPositions.length} lệnh. Anchor: ${sidewaysGrid.anchorPrice?.toFixed(cPP)}. SLs: ${sidewaysGrid.sidewaysStats.slMatchedCount}, TPs: ${sidewaysGrid.sidewaysStats.tpMatchedCount}`;
+            const qpG = cDet ? cDet.quantityPrecision : 4;
+            for (const p of sidewaysGrid.activeGridPositions) {
+                let pnlU = (currentMarketPrice && p.entryPrice) ? (currentMarketPrice - p.entryPrice) * p.quantity * (p.side === 'LONG' ? 1 : -1) : 0;
+                gridPositionsData.push({
+                    type: 'grid', id: p.id, side: p.side, entry: p.entryPrice?.toFixed(cPP), qty: p.quantity?.toFixed(qpG),
+                    curPrice: currentMarketPrice?.toFixed(cPP), pnl: pnlU.toFixed(2), tpPrice: p.takeProfitPrice?.toFixed(cPP),
+                    slPrice: p.stopLossPrice?.toFixed(cPP), step: p.stepIndex
+                });
+            }
+        } else {
+            posText = " | Vị thế: --";
+        }
+        
+        statusMsg += posText;
+        statusMsg += ` | PNL Ròng (${TARGET_COIN_SYMBOL || 'N/A'}): ${netPNL.toFixed(2)} (L:${totalProfit.toFixed(2)}, T:${totalLoss.toFixed(2)})`;
+        
+        let trueOverallPnlTemp = cumulativeRealizedPnlSinceStart;
+        if (currentLongPosition?.unrealizedPnl) trueOverallPnlTemp += currentLongPosition.unrealizedPnl;
+        if (currentShortPosition?.unrealizedPnl) trueOverallPnlTemp += currentShortPosition.unrealizedPnl;
+        if (sidewaysGrid.isActive && TARGET_COIN_SYMBOL && currentMarketPrice) {
+            sidewaysGrid.activeGridPositions.forEach(p => {
+                trueOverallPnlTemp += (currentMarketPrice - p.entryPrice) * p.quantity * (p.side === 'LONG' ? 1 : -1);
+            });
+        }
+        
+        statusMsg += ` | PNL BOT Tổng: ${trueOverallPnlTemp.toFixed(2)}`;
+        if (pendingClosures.size > 0) statusMsg += ` | Chờ PNL: ${pendingClosures.size}`;
+        
+        statusCache.fullStatusString = statusMsg;
+        
+        let currentCycleOverallPNLCalculated = netPNL;
+        killPositionsData.forEach(p => { currentCycleOverallPNLCalculated += parseFloat(p.pnl) || 0; });
+        gridPositionsData.forEach(p => { currentCycleOverallPNLCalculated += parseFloat(p.pnl) || 0; });
+
+        statusCache.botStats = {
+            success: true,
+            data: {
+                botRunning, botStartTime: botStartTime ? formatTimeUTC7(botStartTime) : "N/A", currentMode: currentBotMode.toUpperCase(),
+                vps1Volatility: vps1VolDisplay, totalProfit: totalProfit.toFixed(2), totalLoss: totalLoss.toFixed(2),
+                netPNL: netPNL.toFixed(2), currentCycleOverallPNL: currentCycleOverallPNLCalculated.toFixed(2),
+                trueOverallPnlSinceStart: trueOverallPnlTemp.toFixed(2), currentCoin: TARGET_COIN_SYMBOL || "N/A",
+                initialInvestment: INITIAL_INVESTMENT_AMOUNT, overallTakeProfit, overallStopLoss, killPositions: killPositionsData,
+                sidewaysGridInfo: {
+                    isActive: sidewaysGrid.isActive, isClearingForSwitch: sidewaysGrid.isClearingForSwitch,
+                    anchorPrice: sidewaysGrid.anchorPrice?.toFixed(cPP),
+                    stats: sidewaysGrid.sidewaysStats, activePositions: gridPositionsData
+                },
+                currentMarketPrice: currentMarketPrice?.toFixed(cPP), pendingPnlChecks: pendingClosures.size
+            }
+        };
+
+    } catch (e) {
+        addLog(`Lỗi khi cập nhật status cache: ${e.message}`);
+    }
+}
+
 function setupUserDataStream(key) {
     if (!key) {
         addLog("Không có listenKey cho User Stream.")
@@ -1759,6 +1895,8 @@ function setupMarketDataStream(symbol) {
                 if (currentShortPosition) currentShortPosition.currentPrice = currentMarketPrice
 
                 if (currentBotMode === 'kill' && !isProcessingTrade && !isOpeningInitialPair) {
+                    if (pendingClosures.size > 0) return;
+                    
                     const positionsToCheck = [currentLongPosition, currentShortPosition]
                     for (const pos of positionsToCheck) {
                         if (!pos || pos.quantity <= 0) continue
@@ -1826,167 +1964,10 @@ app.get('/api/logs', (req, res) => {
     })
 })
 app.get('/api/status', async (req, res) => {
-    let pm2Status = "PM2 không lấy được."
-    try {
-        const pm2List = await new Promise((resolve, reject) => exec('pm2 jlist', { timeout: 3000 }, (e, o, s) => e ? reject(s || e.message) : resolve(o)))
-        const procs = JSON.parse(pm2List)
-        const botP = procs.find(p => p.name === THIS_BOT_PM2_NAME || (p.pm2_env?.PORT && parseInt(p.pm2_env.PORT) === WEB_SERVER_PORT))
-        if (botP) pm2Status = `PM2 ${botP.name}: ${botP.pm2_env.status.toUpperCase()} (R:${botP.pm2_env.restart_time},U:${Math.floor(botP.pm2_env.pm_uptime / (1000 * 60))}p)`
-        else pm2Status = `PM2 '${THIS_BOT_PM2_NAME}'(Port ${WEB_SERVER_PORT}) not found.`
-    } catch (err) {
-        pm2Status = `Lỗi PM2: ${err.message.substring(0, 100)}.`
-    }
-    const currentCoinV1 = getCurrentCoinVPS1Data(TARGET_COIN_SYMBOL)
-    const vps1VolDisplay = currentCoinV1 ? Math.abs(currentCoinV1.changePercent).toFixed(2) + '%' : 'N/A'
-    let statusMsg = `${pm2Status} | BOT: ${botRunning ? 'CHẠY' : 'DỪNG'}`
-    if (botStartTime && botRunning) statusMsg += ` | Up Bot: ${Math.floor((Date.now() - botStartTime.getTime()) / 60000)}p`
-    statusMsg += ` | Coin: ${TARGET_COIN_SYMBOL || "N/A"} | Vốn: ${INITIAL_INVESTMENT_AMOUNT} | Mode: ${currentBotMode.toUpperCase()} (VPS1_Vol:${vps1VolDisplay})`
-    if (sidewaysGrid.isClearingForSwitch) statusMsg += " (DỌN LƯỚI/CHUYỂN MODE)"
-    let posText = ""
-    if (currentBotMode === 'kill' && (currentLongPosition || currentShortPosition)) {
-        posText = " | Kill: "
-        if (currentLongPosition) {
-            const pnlL = currentLongPosition.unrealizedPnl || 0
-            posText += `L(PNL:${pnlL.toFixed(1)}) `
-        }
-        if (currentShortPosition) {
-            const pnlS = currentShortPosition.unrealizedPnl || 0
-            posText += `S(PNL:${pnlS.toFixed(1)})`
-        }
-    } else if (currentBotMode === 'sideways' && sidewaysGrid.isActive) {
-        const det = TARGET_COIN_SYMBOL ? await getSymbolDetails(TARGET_COIN_SYMBOL) : null
-        const pp = det ? det.pricePrecision : 4
-        posText = ` | Lưới: ${sidewaysGrid.activeGridPositions.length} lệnh. Anchor: ${sidewaysGrid.anchorPrice?.toFixed(pp)}. SLs: ${sidewaysGrid.sidewaysStats.slMatchedCount}, TPs: ${sidewaysGrid.sidewaysStats.tpMatchedCount}`
-    } else {
-        posText = " | Vị thế: --"
-    }
-    statusMsg += posText
-    statusMsg += ` | PNL Ròng (${TARGET_COIN_SYMBOL || 'N/A'}): ${netPNL.toFixed(2)} (L:${totalProfit.toFixed(2)}, T:${totalLoss.toFixed(2)})`
-    let trueOverallPnlTemp = cumulativeRealizedPnlSinceStart
-    if (currentLongPosition?.unrealizedPnl) trueOverallPnlTemp += currentLongPosition.unrealizedPnl
-    if (currentShortPosition?.unrealizedPnl) trueOverallPnlTemp += currentShortPosition.unrealizedPnl
-    if (sidewaysGrid.isActive && TARGET_COIN_SYMBOL && currentMarketPrice) {
-        sidewaysGrid.activeGridPositions.forEach(p => {
-            trueOverallPnlTemp += (currentMarketPrice - p.entryPrice) * p.quantity * (p.side === 'LONG' ? 1 : -1)
-        })
-    }
-    statusMsg += ` | PNL BOT Tổng: ${trueOverallPnlTemp.toFixed(2)}`
-    if (pendingClosures.size > 0) statusMsg += ` | Chờ PNL: ${pendingClosures.size}`
-    res.type('text/plain').send(statusMsg)
+    res.type('text/plain').send(statusCache.fullStatusString);
 })
 app.get('/api/bot_stats', async (req, res) => {
-    let killPositionsData = []
-    if (currentBotMode === 'kill') {
-        for (const p of [currentLongPosition, currentShortPosition]) {
-            if (p) {
-                const d = TARGET_COIN_SYMBOL ? await getSymbolDetails(p.symbol) : null
-                const pp = d ? d.pricePrecision : 2
-                const qp = d ? d.quantityPrecision : 3
-                const pnl = p.unrealizedPnl || 0
-                killPositionsData.push({
-                    type: 'kill',
-                    side: p.side,
-                    entry: p.entryPrice?.toFixed(pp),
-                    qty: p.quantity?.toFixed(qp),
-                    initialQty: p.initialQuantity?.toFixed(qp),
-                    milestone: p.milestoneCounter,
-                    closedLossQty: p.closedLossAmount?.toFixed(qp),
-                    pnl: pnl.toFixed(2),
-                    curPrice: p.currentPrice?.toFixed(pp),
-                    tpPrice: p.takeProfitPrice?.toFixed(pp),
-                    slPrice: p.stopLossPrice?.toFixed(pp)
-                })
-            }
-        }
-    }
-
-    let gridPositionsData = []
-    if (sidewaysGrid.activeGridPositions.length > 0) {
-        const d = TARGET_COIN_SYMBOL ? await getSymbolDetails(TARGET_COIN_SYMBOL) : null
-        const ppG = d ? d.pricePrecision : 4
-        const qpG = d ? d.quantityPrecision : 4
-        for (const p of sidewaysGrid.activeGridPositions) {
-            let pnlU = 0
-            if (currentMarketPrice && p.entryPrice && p.quantity && p.symbol === TARGET_COIN_SYMBOL) {
-                pnlU = (currentMarketPrice - p.entryPrice) * p.quantity * (p.side === 'LONG' ? 1 : -1)
-            }
-            gridPositionsData.push({
-                type: 'grid',
-                id: p.id,
-                side: p.side,
-                entry: p.entryPrice?.toFixed(ppG),
-                qty: p.quantity?.toFixed(qpG),
-                curPrice: currentMarketPrice?.toFixed(ppG),
-                pnl: pnlU.toFixed(2),
-                tpPrice: p.takeProfitPrice?.toFixed(ppG),
-                slPrice: p.stopLossPrice?.toFixed(ppG),
-                step: p.stepIndex
-            })
-        }
-    }
-
-    const cDet = TARGET_COIN_SYMBOL ? await getSymbolDetails(TARGET_COIN_SYMBOL) : null
-    const cPP = cDet ? cDet.pricePrecision : 4
-    const currentCoinV1 = getCurrentCoinVPS1Data(TARGET_COIN_SYMBOL)
-    const vps1VolDisp = currentCoinV1 ? Math.abs(currentCoinV1.changePercent).toFixed(2) + '%' : 'N/A'
-
-    let currentCycleOverallPNLCalculated = parseFloat(totalProfit) - parseFloat(totalLoss)
-    killPositionsData.forEach(p => {
-        currentCycleOverallPNLCalculated += parseFloat(p.pnl) || 0
-    })
-    gridPositionsData.forEach(p => {
-        currentCycleOverallPNLCalculated += parseFloat(p.pnl) || 0
-    })
-
-    let trueOverallPnlSinceStartCalculated = cumulativeRealizedPnlSinceStart
-    killPositionsData.forEach(p => {
-        trueOverallPnlSinceStartCalculated += parseFloat(p.pnl) || 0
-    })
-    gridPositionsData.forEach(p => {
-        trueOverallPnlSinceStartCalculated += parseFloat(p.pnl) || 0
-    })
-
-    let upperBoundary = "N/A",
-        lowerBoundary = "N/A"
-    if (sidewaysGrid.isActive && sidewaysGrid.anchorPrice) {
-        upperBoundary = (sidewaysGrid.anchorPrice * (1 + SIDEWAYS_SL_PRICE_PERCENT)).toFixed(cPP)
-        lowerBoundary = (sidewaysGrid.anchorPrice * (1 - SIDEWAYS_SL_PRICE_PERCENT)).toFixed(cPP)
-    }
-
-    res.json({
-        success: true,
-        data: {
-            botRunning,
-            botStartTime: botStartTime ? formatTimeUTC7(botStartTime) : "N/A",
-            currentMode: currentBotMode.toUpperCase(),
-            vps1Volatility: vps1VolDisp,
-            totalProfit: totalProfit.toFixed(2),
-            totalLoss: totalLoss.toFixed(2),
-            netPNL: netPNL.toFixed(2),
-            currentCycleOverallPNL: currentCycleOverallPNLCalculated.toFixed(2),
-            trueOverallPnlSinceStart: trueOverallPnlSinceStartCalculated.toFixed(2),
-            currentCoin: TARGET_COIN_SYMBOL || "N/A",
-            initialInvestment: INITIAL_INVESTMENT_AMOUNT,
-            overallTakeProfit,
-            overallStopLoss,
-            killPositions: killPositionsData,
-            sidewaysGridInfo: {
-                isActive: sidewaysGrid.isActive,
-                isClearingForSwitch: sidewaysGrid.isClearingForSwitch,
-                anchorPrice: sidewaysGrid.anchorPrice?.toFixed(cPP),
-                upperBoundary,
-                lowerBoundary,
-                stats: {
-                    tpMatchedCount: sidewaysGrid.sidewaysStats.tpMatchedCount,
-                    slMatchedCount: sidewaysGrid.sidewaysStats.slMatchedCount
-                },
-                activePositions: gridPositionsData
-            },
-            vps1DataUrl: VPS1_DATA_URL,
-            currentMarketPrice: currentMarketPrice?.toFixed(cPP),
-            pendingPnlChecks: pendingClosures.size
-        }
-    })
+    res.json(statusCache.botStats);
 })
 app.post('/api/configure', (req, res) => {
     const { initialAmount, overallTakeProfit: newOverallTP, overallStopLoss: newOverallSL } = req.body
