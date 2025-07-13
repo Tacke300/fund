@@ -14,6 +14,7 @@ import { API_KEY, SECRET_KEY } from './config.js'
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 
+// --- KHÔNG THAY ĐỔI ---
 const VPS1_DATA_URL = 'http://34.142.248.96:9000/'
 const MIN_CANDLES_FOR_SELECTION = 55
 const OVERALL_VOLATILITY_THRESHOLD_VPS1 = 7.9
@@ -620,7 +621,8 @@ async function openMarketPosition(symbol, tradeDirection, maxLeverage, entryPric
             takeProfitPrice,
             stopLossPrice,
             unrealizedPnl: 0,
-            realizedPnlFromPartials: 0, // SỬA ĐỔI: Thêm thuộc tính để lưu PNL đã chốt từ các lần cắt lỗ
+            // THAY ĐỔI 1: Thêm thuộc tính này để lưu PNL đã chốt từ các lần cắt lỗ
+            realizedPnlFromPartials: 0, 
             hasMovedSLToEntry: false,
             leverage: maxLeverage,
             milestoneCounter: 0,
@@ -639,7 +641,7 @@ async function openMarketPosition(symbol, tradeDirection, maxLeverage, entryPric
     }
 }
 
-// SỬA ĐỔI: Sửa hàm closePartialPosition để ghi nhận PNL
+// THAY ĐỔI 2: Sửa hàm closePartialPosition để ghi nhận PNL của lần cắt
 async function closePartialPosition(position, quantityToClose, milestone = null) {
     if (!position || position.quantity <= 0 || isProcessingTrade || quantityToClose <= 0 || !position.symbol) return false
     isProcessingTrade = true
@@ -658,13 +660,13 @@ async function closePartialPosition(position, quantityToClose, milestone = null)
             const sideOrder = (position.side === 'LONG') ? 'SELL' : 'BUY'
             const reasonLog = milestone ? `(Mốc ${milestone})` : ''
             addLog(`[${currentBotMode.toUpperCase()}] Đóng 1 phần ${qtyEff.toFixed(details.quantityPrecision)} ${position.side} ${position.symbol} ${reasonLog}.`)
-            
-            // Ước tính PNL của lần cắt lỗ này
+
+            // Ước tính và cộng dồn PNL của lần cắt lỗ này
             const closePrice = position.currentPrice || (await getCurrentPrice(position.symbol)) || position.entryPrice;
             const pnlFromThisClose = (closePrice - position.entryPrice) * qtyEff * (position.side === 'LONG' ? 1 : -1);
-            position.realizedPnlFromPartials += pnlFromThisClose;
+            position.realizedPnlFromPartials = (position.realizedPnlFromPartials || 0) + pnlFromThisClose;
             addLog(`  -> PNL ước tính từ lần cắt này: ${pnlFromThisClose.toFixed(2)} USDT. Tổng PNL đã cắt: ${position.realizedPnlFromPartials.toFixed(2)} USDT.`);
-
+            
             await callSignedAPI('/fapi/v1/order', 'POST', {
                 symbol: position.symbol,
                 side: sideOrder,
@@ -715,7 +717,8 @@ async function recoverPartialPosition(position) {
         position.quantity += quantityToRecover
         position.closedLossAmount = 0
         position.milestoneCounter = 0
-        position.realizedPnlFromPartials = 0; // SỬA ĐỔI: Reset PNL đã cắt khi phục hồi
+        // THAY ĐỔI: Reset PNL đã cắt khi phục hồi
+        position.realizedPnlFromPartials = 0; 
         addLog(`  -> Đã mở lại. KL mới của ${position.side}: ${position.quantity.toFixed(position.quantityPrecision)}. Reset mốc cắt lỗ.`)
         success = true
 
@@ -990,8 +993,8 @@ async function manageSidewaysGridLogic() {
 async function checkOverallTPSL() {
     if (!botRunning || isProcessingTrade || pendingClosures.size > 0) return false
     
-    // SỬA ĐỔI: Tính toán PNL tổng bao gồm cả PNL đã cắt từng phần
-    let currentTrueOverallPnl = cumulativeRealizedPnlSinceStart;
+    // TÍNH TOÁN PNL TỔNG, BAO GỒM CẢ PNL ĐÃ CẮT
+    let currentTrueOverallPnl = cumulativeRealizedPnlSinceStart
     if (currentLongPosition) {
         currentTrueOverallPnl += (currentLongPosition.unrealizedPnl || 0) + (currentLongPosition.realizedPnlFromPartials || 0);
     }
@@ -1004,7 +1007,6 @@ async function checkOverallTPSL() {
             currentTrueOverallPnl += (currentMarketPrice - pos.entryPrice) * pos.quantity * (pos.side === 'LONG' ? 1 : -1)
         }
     }
-
     if (overallTakeProfit > 0 && currentTrueOverallPnl >= overallTakeProfit) {
         addLog(`[OVERALL TP] PNL Tổng (${currentTrueOverallPnl.toFixed(2)}) đạt mục tiêu TP (${overallTakeProfit.toFixed(2)}). Dừng bot.`)
         await stopBotLogicInternal(`Overall TP Reached: ${currentTrueOverallPnl.toFixed(2)} >= ${overallTakeProfit.toFixed(2)}`)
@@ -1229,213 +1231,210 @@ async function runTradingLogic() {
     }
 }
 
-// SỬA ĐỔI: HỢP NHẤT TOÀN BỘ LOGIC VÀO ĐÂY
 async function manageOpenPosition() {
-    if (isProcessingTrade || !botRunning || sidewaysGrid.isClearingForSwitch || !TARGET_COIN_SYMBOL || isOpeningInitialPair || pendingClosures.size > 0) return;
+    if (isProcessingTrade || !botRunning || sidewaysGrid.isClearingForSwitch || !TARGET_COIN_SYMBOL || isOpeningInitialPair || pendingClosures.size > 0) return
 
     if (currentBotMode === 'kill' && Date.now() - lastKillModeCheckTime > KILL_MODE_SWITCH_CHECK_INTERVAL_MS) {
-        lastKillModeCheckTime = Date.now();
-        await fetchAndCacheTopCoinsFromVPS1(true);
-        const currentCoinData = getCurrentCoinVPS1Data(TARGET_COIN_SYMBOL);
-        const currentCoinVol = currentCoinData ? Math.abs(currentCoinData.changePercent) : 0;
+        lastKillModeCheckTime = Date.now()
+        await fetchAndCacheTopCoinsFromVPS1(true)
+        const currentCoinData = getCurrentCoinVPS1Data(TARGET_COIN_SYMBOL)
+        const currentCoinVol = currentCoinData ? Math.abs(currentCoinData.changePercent) : 0
         
         const bestAlternativeCoin = vps1DataCache
             .filter(c => c.symbol !== TARGET_COIN_SYMBOL && !blacklistedCoinsThisSession.has(c.symbol))
-            .sort((a, b) => Math.abs(b.changePercent) - Math.abs(a.changePercent))[0];
+            .sort((a, b) => Math.abs(b.changePercent) - Math.abs(a.changePercent))[0]
 
         if (bestAlternativeCoin) {
-            const altCoinVol = Math.abs(bestAlternativeCoin.changePercent);
-            const isAltVolSufficientlyHigh = altCoinVol > 10.0;
-            const isVolDifferenceSufficient = altCoinVol > (currentCoinVol + 5.0);
+            const altCoinVol = Math.abs(bestAlternativeCoin.changePercent)
+            const isAltVolSufficientlyHigh = altCoinVol > 10.0
+            const isVolDifferenceSufficient = altCoinVol > (currentCoinVol + 5.0)
 
             if (isAltVolSufficientlyHigh && isVolDifferenceSufficient) {
-                const hasExistingPos = await checkExistingPosition(bestAlternativeCoin.symbol);
+                const hasExistingPos = await checkExistingPosition(bestAlternativeCoin.symbol)
                 if (!hasExistingPos) {
-                    const reason = `Chuyển sang cơ hội tốt hơn ${bestAlternativeCoin.symbol} (Vol: ${altCoinVol.toFixed(2)}% > 15% và hơn ${currentCoinVol.toFixed(2)}% ít nhất 5%)`;
-                    await handleCoinSwitch(reason);
-                    return;
+                    const reason = `Chuyển sang cơ hội tốt hơn ${bestAlternativeCoin.symbol} (Vol: ${altCoinVol.toFixed(2)}% > 15% và hơn ${currentCoinVol.toFixed(2)}% ít nhất 5%)`
+                    await handleCoinSwitch(reason)
+                    return 
                 }
             }
         }
     }
 
-    if (await checkOverallTPSL()) return;
+    if (await checkOverallTPSL()) return
 
     if (currentBotMode === 'kill') {
         try {
-            const positionsData = await callSignedAPI('/fapi/v2/positionRisk', 'GET', { symbol: TARGET_COIN_SYMBOL });
-            let longPosEx = positionsData.find(p => p.positionSide === 'LONG' && p.symbol === TARGET_COIN_SYMBOL);
-            let shortPosEx = positionsData.find(p => p.positionSide === 'SHORT' && p.symbol === TARGET_COIN_SYMBOL);
+            const positionsData = await callSignedAPI('/fapi/v2/positionRisk', 'GET', { symbol: TARGET_COIN_SYMBOL })
+            let longPosEx = positionsData.find(p => p.positionSide === 'LONG' && p.symbol === TARGET_COIN_SYMBOL)
+            let shortPosEx = positionsData.find(p => p.positionSide === 'SHORT' && p.symbol === TARGET_COIN_SYMBOL)
             
             if (currentLongPosition) {
                 if (longPosEx && Math.abs(parseFloat(longPosEx.positionAmt)) > 0) {
-                    currentLongPosition.unrealizedPnl = parseFloat(longPosEx.unRealizedProfit);
-                    currentLongPosition.quantity = Math.abs(parseFloat(longPosEx.positionAmt));
+                    currentLongPosition.unrealizedPnl = parseFloat(longPosEx.unRealizedProfit)
+                    currentLongPosition.quantity = Math.abs(parseFloat(longPosEx.positionAmt))
                 } else {
-                    currentLongPosition = null;
+                    currentLongPosition = null 
                 }
             }
             if (currentShortPosition) {
                 if (shortPosEx && Math.abs(parseFloat(shortPosEx.positionAmt)) > 0) {
-                    currentShortPosition.unrealizedPnl = parseFloat(shortPosEx.unRealizedProfit);
-                    currentShortPosition.quantity = Math.abs(parseFloat(shortPosEx.positionAmt));
+                    currentShortPosition.unrealizedPnl = parseFloat(shortPosEx.unRealizedProfit)
+                    currentShortPosition.quantity = Math.abs(parseFloat(shortPosEx.positionAmt))
                 } else {
-                    currentShortPosition = null;
+                    currentShortPosition = null
                 }
             }
         } catch (err) {
-            addLog(`Lỗi cập nhật PNL ảo (Kill): ${err.msg || err.message}`);
-            if (err instanceof CriticalApiError) await stopBotLogicInternal(`Lỗi cập nhật vị thế (Kill) ${TARGET_COIN_SYMBOL}`);
-            return;
+            addLog(`Lỗi cập nhật PNL ảo (Kill): ${err.msg || err.message}`)
+            if (err instanceof CriticalApiError) await stopBotLogicInternal(`Lỗi cập nhật vị thế (Kill) ${TARGET_COIN_SYMBOL}`)
+            return
         }
 
-        // --- BỘ NÃO TRUNG TÂM XỬ LÝ KILL MODE ---
-        
-        // 1. Kiểm tra điều kiện kết thúc chu kỳ (cả 2 lệnh đã đóng)
-        if (!currentLongPosition && !currentShortPosition) {
-            addLog("KILL: Cả 2 vị thế đã đóng. Reset chu kỳ...");
-            if (botRunning) await cleanupAndResetCycle(TARGET_COIN_SYMBOL);
-            return;
-        }
+        if (currentLongPosition && currentShortPosition && !isReversalInProgress) {
+            let winner = null;
+            let loser = null;
 
-        // 2. Kiểm tra khi chỉ còn 1 lệnh (dời SL về entry)
-        if (currentLongPosition && !currentShortPosition) {
-            await moveStopLossToEntry(currentLongPosition);
-            return; // Dời SL xong, chờ lệnh tự đóng, không làm gì thêm
-        } 
-        if (!currentLongPosition && currentShortPosition) {
-            await moveStopLossToEntry(currentShortPosition);
-            return; // Dời SL xong, chờ lệnh tự đóng, không làm gì thêm
-        }
+            let pnlThresholdPerMilestone;
+            if (currentLongPosition.leverage >= 75) {
+                pnlThresholdPerMilestone = INITIAL_INVESTMENT_AMOUNT * 1.00;
+            } else if (currentLongPosition.leverage >= 50) {
+                pnlThresholdPerMilestone = INITIAL_INVESTMENT_AMOUNT * 0.50;
+            } else {
+                 pnlThresholdPerMilestone = null;
+            }
 
-        // 3. Logic khi có đủ cả 2 lệnh (Reversal hoặc Cắt lỗ/Phục hồi)
-        if (currentLongPosition && currentShortPosition) {
-            // 3.1. Logic Reversal (Chỉ chạy khi chưa vào chế độ Reversal)
-            if (!isReversalInProgress) {
-                let winner = null;
-                let loser = null;
-                let pnlThresholdPerMilestone;
+            if (pnlThresholdPerMilestone) {
+                const profitMilestone2Pnl = pnlThresholdPerMilestone * 2;
 
-                if (currentLongPosition.leverage >= 75) {
-                    pnlThresholdPerMilestone = INITIAL_INVESTMENT_AMOUNT * 1.00;
-                } else if (currentLongPosition.leverage >= 50) {
-                    pnlThresholdPerMilestone = INITIAL_INVESTMENT_AMOUNT * 0.50;
-                } else {
-                     pnlThresholdPerMilestone = null;
+                if (currentLongPosition.unrealizedPnl >= profitMilestone2Pnl) {
+                    winner = currentLongPosition;
+                    loser = currentShortPosition;
+                } else if (currentShortPosition.unrealizedPnl >= profitMilestone2Pnl) {
+                    winner = currentShortPosition;
+                    loser = currentLongPosition;
                 }
 
-                if (pnlThresholdPerMilestone) {
-                    const profitMilestone2Pnl = pnlThresholdPerMilestone * 2;
-                    if (currentLongPosition.unrealizedPnl >= profitMilestone2Pnl) {
-                        winner = currentLongPosition;
-                        loser = currentShortPosition;
-                    } else if (currentShortPosition.unrealizedPnl >= profitMilestone2Pnl) {
-                        winner = currentShortPosition;
-                        loser = currentLongPosition;
-                    }
+                if (winner) {
+                    isReversalInProgress = true;
+                    isProcessingTrade = true;
+                    addLog(`[REVERSAL] Vị thế ${winner.side} đạt mốc lợi nhuận 2. Thay đổi TP/SL...`);
+                    
+                    try {
+                        await cancelAllOpenOrdersForSymbol(TARGET_COIN_SYMBOL);
+                        await sleep(500);
 
-                    if (winner) {
-                        isReversalInProgress = true;
-                        isProcessingTrade = true;
-                        addLog(`[REVERSAL] Vị thế ${winner.side} đạt mốc lợi nhuận 2. Thay đổi TP/SL...`);
+                        const newWinnerPos = { ...winner, stopLossPrice: winner.entryPrice, takeProfitPrice: winner.takeProfitPrice };
+                        await placeTpslOrders(newWinnerPos, 'REVERSAL-WIN');
+                        winner.stopLossPrice = newWinnerPos.stopLossPrice;
+                        addLog(`  -> [Lệnh Lãi ${winner.side}] Dời SL về hòa vốn: ${winner.entryPrice.toFixed(winner.pricePrecision)}`);
+
+                        await sleep(500);
+
+                        const details = await getSymbolDetails(TARGET_COIN_SYMBOL);
+                        const lossMilestone4Pnl = -(pnlThresholdPerMilestone * 4);
+                        const priceChangeForNewSL = Math.abs(lossMilestone4Pnl) / loser.quantity;
+                        const newLoserSL = (loser.side === 'LONG') 
+                            ? loser.entryPrice - priceChangeForNewSL 
+                            : loser.entryPrice + priceChangeForNewSL;
                         
-                        try {
-                            await cancelAllOpenOrdersForSymbol(TARGET_COIN_SYMBOL);
-                            await sleep(500);
-
-                            const newWinnerPos = { ...winner, stopLossPrice: winner.entryPrice, takeProfitPrice: winner.takeProfitPrice };
-                            await placeTpslOrders(newWinnerPos, 'REVERSAL-WIN');
-                            winner.stopLossPrice = newWinnerPos.stopLossPrice;
-                            addLog(`  -> [Lệnh Lãi ${winner.side}] Dời SL về hòa vốn: ${winner.entryPrice.toFixed(winner.pricePrecision)}`);
-
-                            await sleep(500);
-
-                            const details = await getSymbolDetails(TARGET_COIN_SYMBOL);
-                            const lossMilestone4Pnl = -(pnlThresholdPerMilestone * 4);
-                            const priceChangeForNewSL = Math.abs(lossMilestone4Pnl) / loser.quantity;
-                            const newLoserSL = (loser.side === 'LONG') 
-                                ? loser.entryPrice - priceChangeForNewSL 
-                                : loser.entryPrice + priceChangeForNewSL;
-                            
-                            const newLoserPos = { 
-                                ...loser, 
-                                takeProfitPrice: loser.entryPrice,
-                                stopLossPrice: parseFloat(newLoserSL.toFixed(details.pricePrecision)) 
-                            };
-                            await placeTpslOrders(newLoserPos, 'REVERSAL-LOSE');
-                            loser.takeProfitPrice = newLoserPos.takeProfitPrice;
-                            loser.stopLossPrice = newLoserPos.stopLossPrice;
-                            addLog(`  -> [Lệnh Lỗ ${loser.side}] Dời TP về hòa vốn và SL về mốc 4 (${newLoserPos.stopLossPrice.toFixed(loser.pricePrecision)})`);
-                        
-                        } catch (e) {
-                             addLog(`  -> Lỗi trong quá trình Reversal: ${e.msg || e.message}. Đóng khẩn cấp cả 2 vị thế.`);
-                             await closePosition(winner.symbol, "Lỗi Reversal", winner.side);
-                             await closePosition(loser.symbol, "Lỗi Reversal", loser.side);
-                        } finally {
-                            isProcessingTrade = false;
-                        }
-                        return; // Kết thúc vòng kiểm tra này sau khi thực hiện Reversal
+                        const newLoserPos = { 
+                            ...loser, 
+                            takeProfitPrice: loser.entryPrice,
+                            stopLossPrice: parseFloat(newLoserSL.toFixed(details.pricePrecision)) 
+                        };
+                        await placeTpslOrders(newLoserPos, 'REVERSAL-LOSE');
+                        loser.takeProfitPrice = newLoserPos.takeProfitPrice;
+                        loser.stopLossPrice = newLoserPos.stopLossPrice;
+                        addLog(`  -> [Lệnh Lỗ ${loser.side}] Dời TP về hòa vốn và SL về mốc 4 (${newLoserPos.stopLossPrice.toFixed(loser.pricePrecision)})`);
+                    
+                    } catch (e) {
+                         addLog(`  -> Lỗi trong quá trình Reversal: ${e.msg || e.message}. Đóng khẩn cấp cả 2 vị thế.`);
+                         await closePosition(winner.symbol, "Lỗi Reversal", winner.side);
+                         await closePosition(loser.symbol, "Lỗi Reversal", loser.side);
+                    } finally {
+                        isProcessingTrade = false;
                     }
                 }
             }
+        }
+        
+        const positionsToCheck = [currentLongPosition, currentShortPosition]
+        for (const pos of positionsToCheck) {
+            if (!pos) continue
+            if (pendingClosures.size > 0) continue;
 
-            // 3.2. Logic Cắt lỗ / Phục hồi (Chỉ chạy khi CHƯA Reversal)
-            const positionsToCheck = [currentLongPosition, currentShortPosition];
-            for (const pos of positionsToCheck) {
-                if (!pos) continue;
+            // Dòng này được giữ lại từ code của bạn
+            if (pos.unrealizedPnl > 0 && !isReversalInProgress) {
+                 continue
+            }
 
-                // Phục hồi vị thế nếu đã cắt mà giá hồi vốn
+            if (pos.unrealizedPnl <= 0 && pos.quantity > 0) {
                 if (pos.closedLossAmount > 0 && pos.unrealizedPnl >= 0) {
-                    await recoverPartialPosition(pos);
-                    continue; // Phục hồi xong, xét vị thế tiếp theo
+                    await recoverPartialPosition(pos)
+                    continue
+                }
+                
+                // Dòng này được giữ lại từ code của bạn
+                if (isReversalInProgress && pos.side === (currentLongPosition?.unrealizedPnl > currentShortPosition?.unrealizedPnl ? currentShortPosition.side : currentLongPosition.side)) {
+                    continue;
                 }
 
-                // Cắt lỗ tăng dần khi vị thế đang âm
-                if (pos.unrealizedPnl < 0) {
-                    let pnlThresholdPerMilestone;
-                    if (pos.leverage >= 75) {
-                        pnlThresholdPerMilestone = INITIAL_INVESTMENT_AMOUNT * 1.00;
-                    } else if (pos.leverage >= 50) {
-                        pnlThresholdPerMilestone = INITIAL_INVESTMENT_AMOUNT * 0.50;
-                    } else {
-                        pnlThresholdPerMilestone = null;
-                    }
+                let pnlThresholdPerMilestone
+                if (pos.leverage >= 75) {
+                    pnlThresholdPerMilestone = INITIAL_INVESTMENT_AMOUNT * 1.00
+                } else if (pos.leverage >= 50) {
+                    pnlThresholdPerMilestone = INITIAL_INVESTMENT_AMOUNT * 0.50
+                } else {
+                    pnlThresholdPerMilestone = null
+                }
 
-                    if (pnlThresholdPerMilestone !== null) {
-                        const nextMilestone = pos.milestoneCounter + 1;
-                        const targetPnlForNextLossMilestone = -(pnlThresholdPerMilestone * nextMilestone);
-                        
-                        if (pos.unrealizedPnl <= targetPnlForNextLossMilestone) {
-                            const partialClosePercentages = [0.10, 0.20, 0.30, 0.40]; 
+                if (pnlThresholdPerMilestone !== null) {
+                    const targetPnlForNextLossMilestone = - (pnlThresholdPerMilestone * (pos.milestoneCounter + 1))
+                    
+                    if (pos.unrealizedPnl <= targetPnlForNextLossMilestone) {
+                        const nextMilestone = pos.milestoneCounter + 1
+                        const partialClosePercentages = [0.10, 0.20, 0.30, 0.40]; 
 
-                            if (pos.milestoneCounter < partialClosePercentages.length) {
-                                addLog(`[CẮT LỖ MILESTONE] Vị thế ${pos.side} (L${pos.leverage}x) đạt mốc lỗ ${nextMilestone}. PNL: ${pos.unrealizedPnl.toFixed(2)} <= ${targetPnlForNextLossMilestone.toFixed(2)}.`);
-                                
-                                const quantityToClose = pos.initialQuantity * partialClosePercentages[pos.milestoneCounter];
-                                const closed = await closePartialPosition(pos, quantityToClose, nextMilestone);
-                                
-                                if (closed) {
-                                    pos.milestoneCounter++;
-                                }
+                        if (pos.milestoneCounter < partialClosePercentages.length) {
+                            addLog(`[CẮT LỖ MILESTONE] Vị thế ${pos.side} (L${pos.leverage}x) đạt mốc lỗ ${nextMilestone}. PNL: ${pos.unrealizedPnl.toFixed(2)} <= ${targetPnlForNextLossMilestone.toFixed(2)}.`)
+                            
+                            const quantityToClose = pos.initialQuantity * partialClosePercentages[pos.milestoneCounter];
+                            const closed = await closePartialPosition(pos, quantityToClose, nextMilestone)
+                            
+                            if (closed) {
+                                pos.milestoneCounter++
                             }
                         }
                     }
                 }
             }
         }
+        
+        if (currentLongPosition && !currentShortPosition) {
+            await moveStopLossToEntry(currentLongPosition)
+        } 
+        else if (!currentLongPosition && currentShortPosition) {
+            await moveStopLossToEntry(currentShortPosition)
+        }
+        
+        if (!currentLongPosition && !currentShortPosition) {
+            addLog("KILL: Cả 2 vị thế đã đóng. Reset chu kỳ...")
+            if (botRunning) await cleanupAndResetCycle(TARGET_COIN_SYMBOL)
+            return
+        }
+
     } else if (currentBotMode === 'sideways' && sidewaysGrid.isActive) {
         try {
-            await manageSidewaysGridLogic();
+            await manageSidewaysGridLogic()
         } catch (err) {
             if (err.code === -2027) {
-                await handleCoinSwitch(`Lỗi vượt khối lượng khi mở mốc lưới`, true);
+                await handleCoinSwitch(`Lỗi vượt khối lượng khi mở mốc lưới`, true)
             } else {
-                addLog(`Lỗi manageSidewaysGridLogic: ${err.msg || err.message}`);
+                addLog(`Lỗi manageSidewaysGridLogic: ${err.msg || err.message}`)
             }
         }
     }
 }
-
 
 async function handleFinalClosure(orderId, clientOrderId, symbol, lastKnownPnl, orderType) {
     let gridIdToClear = null
@@ -1778,7 +1777,7 @@ async function keepAliveListenKey(key) {
     }
 }
 
-// SỬA ĐỔI: Sửa cách tính PNL tổng để hiển thị chính xác trên HTML
+// THAY ĐỔI 4: Sửa hàm updateStatusCache để tính đúng PNL tổng
 async function updateStatusCache() {
     if (!botRunning) {
         statusCache.fullStatusString = `BOT: DỪNG`;
@@ -1828,8 +1827,8 @@ async function updateStatusCache() {
             for (const p of [currentLongPosition, currentShortPosition]) {
                 if (p) {
                     const pnl = p.unrealizedPnl || 0;
-                    const totalPnlForPos = pnl + (p.realizedPnlFromPartials || 0);
-                    posText += `${p.side[0]}(PNL:${totalPnlForPos.toFixed(1)}) `; // Hiển thị tổng PNL của vị thế
+                    const totalPnlForPos = pnl + (p.realizedPnlFromPartials || 0); // Tính tổng PNL của vị thế
+                    posText += `${p.side[0]}(PNL:${totalPnlForPos.toFixed(1)}) `; // Hiển thị tổng PNL
                     const pp = cDet ? cDet.pricePrecision : 2;
                     const qp = cDet ? cDet.quantityPrecision : 3;
                     killPositionsData.push({
@@ -1837,7 +1836,7 @@ async function updateStatusCache() {
                         initialQty: p.initialQuantity?.toFixed(qp), milestone: p.milestoneCounter, closedLossQty: p.closedLossAmount?.toFixed(qp),
                         pnl: pnl.toFixed(2),
                         realizedPnlFromPartials: (p.realizedPnlFromPartials || 0).toFixed(2), // Thêm PNL đã cắt
-                        totalPnl: totalPnlForPos.toFixed(2), // Thêm tổng PNL
+                        totalPnl: totalPnlForPos.toFixed(2), // Thêm tổng PNL vị thế
                         curPrice: p.currentPrice?.toFixed(pp), tpPrice: p.takeProfitPrice?.toFixed(pp), slPrice: p.stopLossPrice?.toFixed(pp)
                     });
                 }
@@ -1905,7 +1904,7 @@ async function updateStatusCache() {
     }
 }
 
-// SỬA ĐỔI: Loại bỏ logic quản lý vị thế, chỉ để lại nhiệm vụ cập nhật giá
+// THAY ĐỔI 3: VÔ HIỆU HÓA logic xung đột trong setupMarketDataStream
 function setupMarketDataStream(symbol) {
     if (!symbol) {
         addLog("Không có symbol cho Market Stream.")
@@ -1933,9 +1932,13 @@ function setupMarketDataStream(symbol) {
                 currentMarketPrice = parseFloat(msg.p)
                 if (currentLongPosition) currentLongPosition.currentPrice = currentMarketPrice
                 if (currentShortPosition) currentShortPosition.currentPrice = currentMarketPrice
+
+                /*
                 
-                // TOÀN BỘ LOGIC CẮT LỖ ĐÃ ĐƯỢC CHUYỂN SANG manageOpenPosition()
-                // NƠI NÀY GIỜ CHỈ CẬP NHẬT GIÁ
+                TOÀN BỘ KHỐI CODE CẮT LỖ TỪNG PHẦN Ở ĐÂY ĐÃ BỊ XÓA ĐỂ TRÁNH XUNG ĐỘT
+                LOGIC NÀY GIỜ ĐƯỢC XỬ LÝ TRUNG TÂM TRONG HÀM manageOpenPosition()
+                
+                */
             }
         } catch (e) { }
     })
