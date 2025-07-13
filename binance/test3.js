@@ -14,7 +14,6 @@ import { API_KEY, SECRET_KEY } from './config.js'
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 
-// --- KHÔNG THAY ĐỔI ---
 const VPS1_DATA_URL = 'http://34.142.248.96:9000/'
 const MIN_CANDLES_FOR_SELECTION = 55
 const OVERALL_VOLATILITY_THRESHOLD_VPS1 = 7.9
@@ -621,7 +620,6 @@ async function openMarketPosition(symbol, tradeDirection, maxLeverage, entryPric
             takeProfitPrice,
             stopLossPrice,
             unrealizedPnl: 0,
-            // THAY ĐỔI 1: Thêm thuộc tính này để lưu PNL đã chốt từ các lần cắt lỗ
             realizedPnlFromPartials: 0, 
             hasMovedSLToEntry: false,
             leverage: maxLeverage,
@@ -641,7 +639,6 @@ async function openMarketPosition(symbol, tradeDirection, maxLeverage, entryPric
     }
 }
 
-// THAY ĐỔI 2: Sửa hàm closePartialPosition để ghi nhận PNL của lần cắt
 async function closePartialPosition(position, quantityToClose, milestone = null) {
     if (!position || position.quantity <= 0 || isProcessingTrade || quantityToClose <= 0 || !position.symbol) return false
     isProcessingTrade = true
@@ -661,7 +658,6 @@ async function closePartialPosition(position, quantityToClose, milestone = null)
             const reasonLog = milestone ? `(Mốc ${milestone})` : ''
             addLog(`[${currentBotMode.toUpperCase()}] Đóng 1 phần ${qtyEff.toFixed(details.quantityPrecision)} ${position.side} ${position.symbol} ${reasonLog}.`)
 
-            // Ước tính và cộng dồn PNL của lần cắt lỗ này
             const closePrice = position.currentPrice || (await getCurrentPrice(position.symbol)) || position.entryPrice;
             const pnlFromThisClose = (closePrice - position.entryPrice) * qtyEff * (position.side === 'LONG' ? 1 : -1);
             position.realizedPnlFromPartials = (position.realizedPnlFromPartials || 0) + pnlFromThisClose;
@@ -717,7 +713,6 @@ async function recoverPartialPosition(position) {
         position.quantity += quantityToRecover
         position.closedLossAmount = 0
         position.milestoneCounter = 0
-        // THAY ĐỔI: Reset PNL đã cắt khi phục hồi
         position.realizedPnlFromPartials = 0; 
         addLog(`  -> Đã mở lại. KL mới của ${position.side}: ${position.quantity.toFixed(position.quantityPrecision)}. Reset mốc cắt lỗ.`)
         success = true
@@ -993,7 +988,6 @@ async function manageSidewaysGridLogic() {
 async function checkOverallTPSL() {
     if (!botRunning || isProcessingTrade || pendingClosures.size > 0) return false
     
-    // TÍNH TOÁN PNL TỔNG, BAO GỒM CẢ PNL ĐÃ CẮT
     let currentTrueOverallPnl = cumulativeRealizedPnlSinceStart
     if (currentLongPosition) {
         currentTrueOverallPnl += (currentLongPosition.unrealizedPnl || 0) + (currentLongPosition.realizedPnlFromPartials || 0);
@@ -1363,7 +1357,6 @@ async function manageOpenPosition() {
             if (!pos) continue
             if (pendingClosures.size > 0) continue;
 
-            // Dòng này được giữ lại từ code của bạn
             if (pos.unrealizedPnl > 0 && !isReversalInProgress) {
                  continue
             }
@@ -1374,7 +1367,6 @@ async function manageOpenPosition() {
                     continue
                 }
                 
-                // Dòng này được giữ lại từ code của bạn
                 if (isReversalInProgress && pos.side === (currentLongPosition?.unrealizedPnl > currentShortPosition?.unrealizedPnl ? currentShortPosition.side : currentLongPosition.side)) {
                     continue;
                 }
@@ -1777,7 +1769,6 @@ async function keepAliveListenKey(key) {
     }
 }
 
-// THAY ĐỔI 4: Sửa hàm updateStatusCache để tính đúng PNL tổng
 async function updateStatusCache() {
     if (!botRunning) {
         statusCache.fullStatusString = `BOT: DỪNG`;
@@ -1827,16 +1818,16 @@ async function updateStatusCache() {
             for (const p of [currentLongPosition, currentShortPosition]) {
                 if (p) {
                     const pnl = p.unrealizedPnl || 0;
-                    const totalPnlForPos = pnl + (p.realizedPnlFromPartials || 0); // Tính tổng PNL của vị thế
-                    posText += `${p.side[0]}(PNL:${totalPnlForPos.toFixed(1)}) `; // Hiển thị tổng PNL
+                    const totalPnlForPos = pnl + (p.realizedPnlFromPartials || 0);
+                    posText += `${p.side[0]}(PNL:${totalPnlForPos.toFixed(1)}) `;
                     const pp = cDet ? cDet.pricePrecision : 2;
                     const qp = cDet ? cDet.quantityPrecision : 3;
                     killPositionsData.push({
                         type: 'kill', side: p.side, entry: p.entryPrice?.toFixed(pp), qty: p.quantity?.toFixed(qp),
                         initialQty: p.initialQuantity?.toFixed(qp), milestone: p.milestoneCounter, closedLossQty: p.closedLossAmount?.toFixed(qp),
                         pnl: pnl.toFixed(2),
-                        realizedPnlFromPartials: (p.realizedPnlFromPartials || 0).toFixed(2), // Thêm PNL đã cắt
-                        totalPnl: totalPnlForPos.toFixed(2), // Thêm tổng PNL vị thế
+                        realizedPnlFromPartials: (p.realizedPnlFromPartials || 0).toFixed(2),
+                        totalPnl: totalPnlForPos.toFixed(2),
                         curPrice: p.currentPrice?.toFixed(pp), tpPrice: p.takeProfitPrice?.toFixed(pp), slPrice: p.stopLossPrice?.toFixed(pp)
                     });
                 }
@@ -1904,7 +1895,6 @@ async function updateStatusCache() {
     }
 }
 
-// THAY ĐỔI 3: VÔ HIỆU HÓA logic xung đột trong setupMarketDataStream
 function setupMarketDataStream(symbol) {
     if (!symbol) {
         addLog("Không có symbol cho Market Stream.")
@@ -1933,12 +1923,6 @@ function setupMarketDataStream(symbol) {
                 if (currentLongPosition) currentLongPosition.currentPrice = currentMarketPrice
                 if (currentShortPosition) currentShortPosition.currentPrice = currentMarketPrice
 
-                /*
-                
-                TOÀN BỘ KHỐI CODE CẮT LỖ TỪNG PHẦN Ở ĐÂY ĐÃ BỊ XÓA ĐỂ TRÁNH XUNG ĐỘT
-                LOGIC NÀY GIỜ ĐƯỢC XỬ LÝ TRUNG TÂM TRONG HÀM manageOpenPosition()
-                
-                */
             }
         } catch (e) { }
     })
@@ -1953,6 +1937,71 @@ function setupMarketDataStream(symbol) {
             setTimeout(() => setupMarketDataStream(TARGET_COIN_SYMBOL), 5000)
         }
     })
+}
+
+function setupUserDataStream(key) {
+    if (!key) {
+        addLog("Không có ListenKey để kết nối User Stream.");
+        return;
+    }
+    if (userDataWs && (userDataWs.readyState === WebSocket.OPEN || userDataWs.readyState === WebSocket.CONNECTING)) {
+        addLog("User Stream đã được kết nối.");
+        return;
+    }
+
+    const url = `${WS_BASE_URL}${WS_USER_DATA_ENDPOINT}/${key}`;
+    userDataWs = new WebSocket(url);
+    addLog("Đang kết nối User Data Stream...");
+
+    userDataWs.on('open', () => {
+        addLog("User Data Stream đã kết nối.");
+        if (listenKeyRefreshInterval) clearInterval(listenKeyRefreshInterval);
+        listenKeyRefreshInterval = setInterval(() => keepAliveListenKey(listenKey), 30 * 60 * 1000);
+    });
+
+    userDataWs.on('message', (data) => {
+        try {
+            const msg = JSON.parse(data.toString());
+            if (msg.e === 'ORDER_TRADE_UPDATE') {
+                processTradeResult(msg.o);
+            } else if (msg.e === 'listenKeyExpired') {
+                addLog("User Stream: ListenKey đã hết hạn. Đang lấy lại...");
+                if (botRunning) {
+                    if (listenKeyRefreshInterval) clearInterval(listenKeyRefreshInterval);
+                    userDataWs.terminate();
+                    (async () => {
+                        listenKey = await getListenKey();
+                        if (listenKey) {
+                            setupUserDataStream(listenKey);
+                        } else {
+                            addLog("Không thể lấy lại ListenKey. Dừng bot.");
+                            stopBotLogicInternal("Lỗi ListenKey");
+                        }
+                    })();
+                }
+            }
+        } catch (e) {
+            addLog(`Lỗi xử lý tin nhắn User Stream: ${e.message}`);
+        }
+    });
+
+    userDataWs.on('error', (err) => {
+        addLog(`Lỗi User Data Stream: ${err.message}`);
+    });
+
+    userDataWs.on('close', (code, reason) => {
+        addLog(`User Stream đã đóng. Code: ${code}, Reason: ${reason ? reason.toString().substring(0,100) : 'N/A'}`);
+        if (listenKeyRefreshInterval) clearInterval(listenKeyRefreshInterval);
+        listenKeyRefreshInterval = null;
+        if (botRunning) {
+             addLog("User Stream bị đóng. Thử kết nối lại sau 10s...");
+             setTimeout(async () => {
+                 if (botRunning && listenKey) {
+                    setupUserDataStream(listenKey);
+                 }
+             }, 10000);
+        }
+    });
 }
 
 const app = express()
