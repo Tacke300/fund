@@ -1309,42 +1309,34 @@ async function manageOpenPosition() {
                 }
 
                 if (winner) {
-                    isReversalInProgress = true;
+                    isReversalInProgress = true; 
                     isProcessingTrade = true;
-                    addLog(`[REVERSAL] Vị thế ${winner.side} đạt mốc lợi nhuận 2. Thay đổi TP/SL...`);
+                    addLog(`[BẢO VỆ LỆNH THẮNG] Vị thế ${winner.side} đạt mốc lợi nhuận 2. Dời SL về hòa vốn...`);
                     
                     try {
                         await cancelAllOpenOrdersForSymbol(TARGET_COIN_SYMBOL);
                         await sleep(500);
 
                         const newWinnerPos = { ...winner, stopLossPrice: winner.entryPrice, takeProfitPrice: winner.takeProfitPrice };
-                        await placeTpslOrders(newWinnerPos, 'REVERSAL-WIN');
-                        winner.stopLossPrice = newWinnerPos.stopLossPrice;
-                        addLog(`  -> [Lệnh Lãi ${winner.side}] Dời SL về hòa vốn: ${winner.entryPrice.toFixed(winner.pricePrecision)}`);
+                        const placedWinner = await placeTpslOrders(newWinnerPos, 'SECURE-WINNER');
+                        if(placedWinner){
+                            winner.stopLossPrice = newWinnerPos.stopLossPrice;
+                            addLog(`  -> [Lệnh Lãi ${winner.side}] Đã dời SL về hòa vốn: ${winner.entryPrice.toFixed(winner.pricePrecision)}`);
+                        } else {
+                             throw new Error("Không đặt được TP/SL mới cho lệnh thắng.");
+                        }
 
-                        await sleep(500);
-
-                        const details = await getSymbolDetails(TARGET_COIN_SYMBOL);
-                        const lossMilestone4Pnl = -(pnlThresholdPerMilestone * 4);
-                        const priceChangeForNewSL = Math.abs(lossMilestone4Pnl) / loser.quantity;
-                        const newLoserSL = (loser.side === 'LONG') 
-                            ? loser.entryPrice - priceChangeForNewSL 
-                            : loser.entryPrice + priceChangeForNewSL;
-                        
-                        const newLoserPos = { 
-                            ...loser, 
-                            takeProfitPrice: loser.entryPrice,
-                            stopLossPrice: parseFloat(newLoserSL.toFixed(details.pricePrecision)) 
-                        };
-                        await placeTpslOrders(newLoserPos, 'REVERSAL-LOSE');
-                        loser.takeProfitPrice = newLoserPos.takeProfitPrice;
-                        loser.stopLossPrice = newLoserPos.stopLossPrice;
-                        addLog(`  -> [Lệnh Lỗ ${loser.side}] Dời TP về hòa vốn và SL về mốc 4 (${newLoserPos.stopLossPrice.toFixed(loser.pricePrecision)})`);
+                        const placedLoser = await placeTpslOrders(loser, 'RE-APPLY-LOSER');
+                        if(placedLoser) {
+                            addLog(`  -> [Lệnh Lỗ ${loser.side}] Đã áp dụng lại TP/SL ban đầu.`);
+                        } else {
+                            throw new Error("Không đặt lại được TP/SL cho lệnh thua.");
+                        }
                     
                     } catch (e) {
-                         addLog(`  -> Lỗi trong quá trình Reversal: ${e.msg || e.message}. Đóng khẩn cấp cả 2 vị thế.`);
-                         await closePosition(winner.symbol, "Lỗi Reversal", winner.side);
-                         await closePosition(loser.symbol, "Lỗi Reversal", loser.side);
+                         addLog(`  -> Lỗi trong quá trình bảo vệ lệnh thắng: ${e.msg || e.message}. Đóng khẩn cấp cả 2 vị thế.`);
+                         await closePosition(winner.symbol, "Lỗi bảo vệ lệnh thắng", winner.side);
+                         await closePosition(loser.symbol, "Lỗi bảo vệ lệnh thắng", loser.side);
                     } finally {
                         isProcessingTrade = false;
                     }
@@ -1365,10 +1357,6 @@ async function manageOpenPosition() {
                 if (pos.closedLossAmount > 0 && pos.unrealizedPnl >= 0) {
                     await recoverPartialPosition(pos)
                     continue
-                }
-                
-                if (isReversalInProgress && pos.side === (currentLongPosition?.unrealizedPnl > currentShortPosition?.unrealizedPnl ? currentShortPosition.side : currentLongPosition.side)) {
-                    continue;
                 }
 
                 let pnlThresholdPerMilestone
@@ -1922,7 +1910,6 @@ function setupMarketDataStream(symbol) {
                 currentMarketPrice = parseFloat(msg.p)
                 if (currentLongPosition) currentLongPosition.currentPrice = currentMarketPrice
                 if (currentShortPosition) currentShortPosition.currentPrice = currentMarketPrice
-
             }
         } catch (e) { }
     })
@@ -1941,67 +1928,59 @@ function setupMarketDataStream(symbol) {
 
 function setupUserDataStream(key) {
     if (!key) {
-        addLog("Không có ListenKey để kết nối User Stream.");
-        return;
+        addLog("Thiếu listenKey cho User Stream.")
+        return
     }
     if (userDataWs && (userDataWs.readyState === WebSocket.OPEN || userDataWs.readyState === WebSocket.CONNECTING)) {
-        addLog("User Stream đã được kết nối.");
-        return;
+        addLog("User Stream đã chạy, đóng kết nối cũ...")
+        userDataWs.removeAllListeners()
+        userDataWs.terminate()
+        userDataWs = null
     }
+    if (listenKeyRefreshInterval) clearInterval(listenKeyRefreshInterval)
 
-    const url = `${WS_BASE_URL}${WS_USER_DATA_ENDPOINT}/${key}`;
-    userDataWs = new WebSocket(url);
-    addLog("Đang kết nối User Data Stream...");
-
+    const url = `${WS_BASE_URL}${WS_USER_DATA_ENDPOINT}?listenKey=${key}`
+    userDataWs = new WebSocket(url)
+    addLog("Đang kết nối User Data Stream...")
     userDataWs.on('open', () => {
-        addLog("User Data Stream đã kết nối.");
-        if (listenKeyRefreshInterval) clearInterval(listenKeyRefreshInterval);
-        listenKeyRefreshInterval = setInterval(() => keepAliveListenKey(listenKey), 30 * 60 * 1000);
-    });
-
-    userDataWs.on('message', (data) => {
+        addLog("User Data Stream đã kết nối.")
+        listenKeyRefreshInterval = setInterval(() => keepAliveListenKey(listenKey), 30 * 60 * 1000)
+    })
+    userDataWs.on('message', async (data) => {
         try {
-            const msg = JSON.parse(data.toString());
-            if (msg.e === 'ORDER_TRADE_UPDATE') {
-                processTradeResult(msg.o);
-            } else if (msg.e === 'listenKeyExpired') {
-                addLog("User Stream: ListenKey đã hết hạn. Đang lấy lại...");
-                if (botRunning) {
-                    if (listenKeyRefreshInterval) clearInterval(listenKeyRefreshInterval);
-                    userDataWs.terminate();
-                    (async () => {
-                        listenKey = await getListenKey();
-                        if (listenKey) {
-                            setupUserDataStream(listenKey);
-                        } else {
-                            addLog("Không thể lấy lại ListenKey. Dừng bot.");
-                            stopBotLogicInternal("Lỗi ListenKey");
-                        }
-                    })();
-                }
+            const event = JSON.parse(data.toString())
+            if (event.e === 'ACCOUNT_UPDATE' && botRunning && TARGET_COIN_SYMBOL) {
+                if (!event.a || !event.a.P) return
+                const updatedPositions = event.a.P
+                const relevantPos = updatedPositions.filter(p => p.s === TARGET_COIN_SYMBOL)
+                if (relevantPos.length === 0) return
+            } else if (event.e === 'ORDER_TRADE_UPDATE' && botRunning && TARGET_COIN_SYMBOL) {
+                await processTradeResult(event.o)
             }
-        } catch (e) {
-            addLog(`Lỗi xử lý tin nhắn User Stream: ${e.message}`);
-        }
-    });
-
+        } catch (e) { }
+    })
     userDataWs.on('error', (err) => {
-        addLog(`Lỗi User Data Stream: ${err.message}`);
-    });
-
+        addLog("Lỗi User Data Stream: " + err.message)
+    })
     userDataWs.on('close', (code, reason) => {
-        addLog(`User Stream đã đóng. Code: ${code}, Reason: ${reason ? reason.toString().substring(0,100) : 'N/A'}`);
-        if (listenKeyRefreshInterval) clearInterval(listenKeyRefreshInterval);
-        listenKeyRefreshInterval = null;
+        addLog(`User Stream đã đóng. Code: ${code}, Reason: ${reason ? reason.toString().substring(0, 100) : 'N/A'}.`)
+        if (listenKeyRefreshInterval) clearInterval(listenKeyRefreshInterval)
+        listenKeyRefreshInterval = null
         if (botRunning) {
-             addLog("User Stream bị đóng. Thử kết nối lại sau 10s...");
-             setTimeout(async () => {
-                 if (botRunning && listenKey) {
-                    setupUserDataStream(listenKey);
-                 }
-             }, 10000);
+            addLog("Thử kết nối lại User Stream sau 10s...")
+            setTimeout(async () => {
+                if (botRunning) {
+                    const newKey = await getListenKey()
+                    if (newKey) {
+                        listenKey = newKey
+                        setupUserDataStream(newKey)
+                    } else {
+                        await stopBotLogicInternal("Không thể lấy listenKey mới sau khi User Stream đóng.")
+                    }
+                }
+            }, 10000)
         }
-    });
+    })
 }
 
 const app = express()
