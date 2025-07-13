@@ -1227,7 +1227,7 @@ async function manageOpenPosition() {
 
         if (bestAlternativeCoin) {
             const altCoinVol = Math.abs(bestAlternativeCoin.changePercent)
-            const isAltVolSufficientlyHigh = altCoinVol > 15.0
+            const isAltVolSufficientlyHigh = altCoinVol > 10.0
             const isVolDifferenceSufficient = altCoinVol > (currentCoinVol + 5.0)
 
             if (isAltVolSufficientlyHigh && isVolDifferenceSufficient) {
