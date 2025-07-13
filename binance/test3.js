@@ -590,11 +590,11 @@ async function openMarketPosition(symbol, tradeDirection, maxLeverage, entryPric
         let TAKE_PROFIT_MULTIPLIER, STOP_LOSS_MULTIPLIER
 
         if (maxLeverage >= 75) {
-            TAKE_PROFIT_MULTIPLIER = 11
-            STOP_LOSS_MULTIPLIER = 6
-        } else if (maxLeverage >= MIN_LEVERAGE_TO_TRADE) {
-            TAKE_PROFIT_MULTIPLIER = 5.5
+            TAKE_PROFIT_MULTIPLIER = 5
             STOP_LOSS_MULTIPLIER = 3
+        } else if (maxLeverage >= MIN_LEVERAGE_TO_TRADE) {
+            TAKE_PROFIT_MULTIPLIER = 2.5
+            STOP_LOSS_MULTIPLIER = 1.5
         } else {
             TAKE_PROFIT_MULTIPLIER = 3.5
             STOP_LOSS_MULTIPLIER = 2
@@ -1296,13 +1296,17 @@ async function manageOpenPosition() {
                     
                     if (pos.unrealizedPnl <= targetPnlForNextLossMilestone) {
                         const nextMilestone = pos.milestoneCounter + 1
-                        addLog(`[CẮT LỖ MILESTONE] Vị thế ${pos.side} (L${pos.leverage}x) đạt mốc lỗ ${nextMilestone}. PNL: ${pos.unrealizedPnl.toFixed(2)} <= ${targetPnlForNextLossMilestone.toFixed(2)}.`)
-                        
-                        const quantityToClose = pos.initialQuantity * 0.10
-                        const closed = await closePartialPosition(pos, quantityToClose, nextMilestone)
-                        
-                        if (closed) {
-                            pos.milestoneCounter++
+                        const partialClosePercentages = [0.10, 0.20, 0.30, 0.40]; 
+
+                        if (pos.milestoneCounter < partialClosePercentages.length) {
+                            addLog(`[CẮT LỖ MILESTONE] Vị thế ${pos.side} (L${pos.leverage}x) đạt mốc lỗ ${nextMilestone}. PNL: ${pos.unrealizedPnl.toFixed(2)} <= ${targetPnlForNextLossMilestone.toFixed(2)}.`)
+                            
+                            const quantityToClose = pos.initialQuantity * partialClosePercentages[pos.milestoneCounter];
+                            const closed = await closePartialPosition(pos, quantityToClose, nextMilestone)
+                            
+                            if (closed) {
+                                pos.milestoneCounter++
+                            }
                         }
                     }
                 }
@@ -1922,9 +1926,14 @@ function setupMarketDataStream(symbol) {
                             
                             if (estimatedPnl <= targetPnlForNextLossMilestone) {
                                 const tempMilestone = pos.milestoneCounter
-                                const closed = await closePartialPosition(pos, pos.initialQuantity * 0.10, tempMilestone + 1)
-                                if (closed && pos) {
-                                    pos.milestoneCounter = tempMilestone + 1
+                                const partialClosePercentages = [0.10, 0.20, 0.30, 0.40];
+
+                                if (tempMilestone < partialClosePercentages.length) {
+                                    const quantityToClose = pos.initialQuantity * partialClosePercentages[tempMilestone];
+                                    const closed = await closePartialPosition(pos, quantityToClose, tempMilestone + 1)
+                                    if (closed && pos) {
+                                        pos.milestoneCounter = tempMilestone + 1
+                                    }
                                 }
                             }
                         }
