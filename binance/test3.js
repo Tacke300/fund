@@ -1424,7 +1424,7 @@ async function handleFinalClosure(orderId, clientOrderId, symbol, lastKnownPnl, 
     }
     
     if (sidewaysGrid.isActive && !gridIdToClear) {
-        const positionsAfterCheck = await callSignedAPI('/fapi/v2/positionRisk', 'GET', { symbol: symbol })
+        const positionsAfterCheck = await callSignedAPI('/fapi/v1/positionRisk', 'GET', { symbol: symbol })
         for (const pos of sidewaysGrid.activeGridPositions) {
             const correspondingPosOnExchange = positionsAfterCheck.find(p => p.positionSide === pos.side)
             if (!correspondingPosOnExchange || parseFloat(correspondingPosOnExchange.positionAmt) === 0) {
@@ -1939,7 +1939,7 @@ function setupUserDataStream(key) {
     }
     if (listenKeyRefreshInterval) clearInterval(listenKeyRefreshInterval)
 
-    const url = `${WS_BASE_URL}${WS_USER_DATA_ENDPOINT}?listenKey=${key}`
+    const url = `${WS_BASE_URL}${WS_USER_DATA_ENDPOINT}/${key}`
     userDataWs = new WebSocket(url)
     addLog("Đang kết nối User Data Stream...")
     userDataWs.on('open', () => {
