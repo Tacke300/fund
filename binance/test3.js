@@ -75,7 +75,6 @@ const pendingClosures = new Set()
 let blacklistedCoinsThisSession = new Set()
 let isReversalInProgress = false
 let lastKillModeCheckTime = 0
-let userDataStreamConnectFailures = 0;
 
 let statusCache = {
     pm2Status: "Chưa cập nhật",
@@ -635,6 +634,9 @@ async function openMarketPosition(symbol, tradeDirection, maxLeverage, entryPric
     } catch (err) {
         addLog(`[${currentBotMode.toUpperCase()}] Lỗi mở ${tradeDirection} ${symbol}: ${err.msg || err.message}`)
         if (err.code === -2019 || err.code === 'INSUFFICIENT_NOTIONAL') {
+            err.isMarginError = true;
+        }
+        if (err.code === -2027) {
             err.shouldBlacklist = true;
         }
         if (err instanceof CriticalApiError && botRunning) await stopBotLogicInternal(`Lỗi mở ${tradeDirection} ${symbol}`)
@@ -1168,9 +1170,12 @@ async function runTradingLogic() {
                 lastKillModeCheckTime = Date.now()
                 isOpeningInitialPair = false
             } catch (err) {
-                if (err.shouldBlacklist || err.code === -2027) {
-                    const reason = err.shouldBlacklist ? `Không đủ tiền ký quỹ/notional` : `Lỗi vượt khối lượng khi mở cặp KILL`;
-                    await handleCoinSwitch(reason, true);
+                if (err.isMarginError) {
+                    await stopBotLogicInternal("Lỗi Margin Insufficient. Dừng bot theo yêu cầu.");
+                    return; 
+                }
+                if (err.shouldBlacklist) {
+                    await handleCoinSwitch(`Lỗi không xác định khi mở cặp Kill`, true);
                 } else {
                     addLog(`Lỗi mở cặp Kill: ${err.msg || err.message}`)
                     if (err instanceof CriticalApiError && botRunning) await stopBotLogicInternal(`Lỗi mở cặp Kill ${TARGET_COIN_SYMBOL}`)
@@ -1609,7 +1614,6 @@ async function startBotLogicInternal() {
         isReversalInProgress = false
         pendingClosures.clear()
         blacklistedCoinsThisSession.clear()
-        userDataStreamConnectFailures = 0;
 
         listenKey = await getListenKey()
         if (listenKey) {
@@ -1975,7 +1979,6 @@ function setupUserDataStream(key) {
     addLog("Đang kết nối User Data Stream...")
     userDataWs.on('open', () => {
         addLog("User Data Stream đã kết nối.")
-        userDataStreamConnectFailures = 0;
         listenKeyRefreshInterval = setInterval(() => keepAliveListenKey(listenKey), 30 * 60 * 1000)
     })
     userDataWs.on('message', async (data) => {
@@ -1994,20 +1997,11 @@ function setupUserDataStream(key) {
     userDataWs.on('error', (err) => {
         addLog("Lỗi User Data Stream: " + err.message)
     })
-    userDataWs.on('close', async (code, reason) => {
+    userDataWs.on('close', (code, reason) => {
         addLog(`User Stream đã đóng. Code: ${code}, Reason: ${reason ? reason.toString().substring(0, 100) : 'N/A'}.`)
         if (listenKeyRefreshInterval) clearInterval(listenKeyRefreshInterval)
         listenKeyRefreshInterval = null
-
         if (botRunning) {
-            userDataStreamConnectFailures++;
-            addLog(`User Stream kết nối thất bại lần thứ ${userDataStreamConnectFailures}.`)
-
-            if (userDataStreamConnectFailures > 5) {
-                await stopBotLogicInternal("Không thể kết nối User Stream sau nhiều lần thử. Dừng bot.");
-                return;
-            }
-
             addLog("Thử kết nối lại User Stream sau 10s...")
             setTimeout(async () => {
                 if (botRunning) {
