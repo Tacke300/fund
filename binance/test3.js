@@ -1,3 +1,4 @@
+
 import https from 'https'
 import http from 'http'
 import crypto from 'crypto'
@@ -1311,24 +1312,45 @@ async function manageOpenPosition() {
                 if (winner) {
                     isReversalInProgress = true; 
                     isProcessingTrade = true;
-                    addLog(`[BẢO VỆ LỆNH THẮNG] Vị thế ${winner.side} đạt mốc lợi nhuận 2. Dời SL về hòa vốn...`);
+                    addLog(`[BẢO VỆ LỆNH THẮNG] Vị thế ${winner.side} đạt mốc lợi nhuận 2. Bắt đầu điều chỉnh TP/SL.`);
                     
                     try {
                         await cancelAllOpenOrdersForSymbol(TARGET_COIN_SYMBOL);
                         await sleep(500);
 
+                        // 1. Xử lý lệnh thắng: Dời SL về hòa vốn
                         const newWinnerPos = { ...winner, stopLossPrice: winner.entryPrice, takeProfitPrice: winner.takeProfitPrice };
                         const placedWinner = await placeTpslOrders(newWinnerPos, 'SECURE-WINNER');
-                        if(placedWinner){
+                        if (placedWinner) {
                             winner.stopLossPrice = newWinnerPos.stopLossPrice;
-                            addLog(`  -> [Lệnh Lãi ${winner.side}] Đã dời SL về hòa vốn: ${winner.entryPrice.toFixed(winner.pricePrecision)}`);
+                            addLog(`  -> [Lệnh Thắng ${winner.side}] Đã dời SL về hòa vốn: ${winner.entryPrice.toFixed(winner.pricePrecision)}`);
                         } else {
                              throw new Error("Không đặt được TP/SL mới cho lệnh thắng.");
                         }
 
-                        const placedLoser = await placeTpslOrders(loser, 'RE-APPLY-LOSER');
-                        if(placedLoser) {
-                            addLog(`  -> [Lệnh Lỗ ${loser.side}] Đã áp dụng lại TP/SL ban đầu.`);
+                        // 2. Xử lý lệnh thua: Dời TP về hòa vốn (mốc 0), SL về mốc 4
+                        const details = await getSymbolDetails(loser.symbol);
+                        if (!details) throw new Error("Không lấy được details để tính SL mốc 4 cho lệnh thua.");
+
+                        const pnlForSlMilestone4 = pnlThresholdPerMilestone * 4;
+                        const priceChangeForSl4 = pnlForSlMilestone4 / loser.initialQuantity;
+                        
+                        const newLoserStopLossPrice = parseFloat(
+                            (loser.side === 'LONG' ? loser.entryPrice - priceChangeForSl4 : loser.entryPrice + priceChangeForSl4).toFixed(loser.pricePrecision)
+                        );
+                        const newLoserTakeProfitPrice = loser.entryPrice;
+
+                        const newLoserPos = { 
+                            ...loser, 
+                            takeProfitPrice: newLoserTakeProfitPrice, 
+                            stopLossPrice: newLoserStopLossPrice 
+                        };
+
+                        const placedLoser = await placeTpslOrders(newLoserPos, 'ADJUST-LOSER');
+                        if (placedLoser) {
+                            loser.takeProfitPrice = newLoserTakeProfitPrice;
+                            loser.stopLossPrice = newLoserStopLossPrice;
+                            addLog(`  -> [Lệnh Lỗ ${loser.side}] Đã dời TP về hòa vốn (${newLoserTakeProfitPrice.toFixed(loser.pricePrecision)}) và SL về mốc 4 (${newLoserStopLossPrice.toFixed(loser.pricePrecision)}).`);
                         } else {
                             throw new Error("Không đặt lại được TP/SL cho lệnh thua.");
                         }
@@ -1369,13 +1391,20 @@ async function manageOpenPosition() {
                 }
 
                 if (pnlThresholdPerMilestone !== null) {
-                    const targetPnlForNextLossMilestone = - (pnlThresholdPerMilestone * (pos.milestoneCounter + 1))
+                    const targetPnlForNextLossMilestone = - (pnlThresholdPerMilestone * (pos.milestoneCounter + 1));
                     
                     if (pos.unrealizedPnl <= targetPnlForNextLossMilestone) {
-                        const nextMilestone = pos.milestoneCounter + 1
-                        const partialClosePercentages = [0.10, 0.20, 0.30, 0.40]; 
+                        const nextMilestone = pos.milestoneCounter + 1;
+                        // *** YÊU CẦU 3: Sửa mốc 1=20%, mốc 2=30%, mốc 3=40% ***
+                        const partialClosePercentages = [0.20, 0.30, 0.40]; 
+                        const finalMilestoneToCloseAll = 4;
 
-                        if (pos.milestoneCounter < partialClosePercentages.length) {
+                        if (nextMilestone === finalMilestoneToCloseAll) {
+                            // *** YÊU CẦU 3: Mốc 4 đóng nốt toàn bộ còn lại ***
+                            addLog(`[CẮT LỖ CUỐI CÙNG] Vị thế ${pos.side} (L${pos.leverage}x) đạt mốc lỗ ${nextMilestone}. PNL: ${pos.unrealizedPnl.toFixed(2)} <= ${targetPnlForNextLossMilestone.toFixed(2)}. Đóng toàn bộ.`);
+                            await closePosition(pos.symbol, `Đạt mốc lỗ cuối cùng (${nextMilestone})`, pos.side);
+
+                        } else if (pos.milestoneCounter < partialClosePercentages.length) {
                             addLog(`[CẮT LỖ MILESTONE] Vị thế ${pos.side} (L${pos.leverage}x) đạt mốc lỗ ${nextMilestone}. PNL: ${pos.unrealizedPnl.toFixed(2)} <= ${targetPnlForNextLossMilestone.toFixed(2)}.`)
                             
                             const quantityToClose = pos.initialQuantity * partialClosePercentages[pos.milestoneCounter];
@@ -1424,7 +1453,7 @@ async function handleFinalClosure(orderId, clientOrderId, symbol, lastKnownPnl, 
     }
     
     if (sidewaysGrid.isActive && !gridIdToClear) {
-        const positionsAfterCheck = await callSignedAPI('/fapi/v1/positionRisk', 'GET', { symbol: symbol })
+        const positionsAfterCheck = await callSignedAPI('/fapi/v2/positionRisk', 'GET', { symbol: symbol })
         for (const pos of sidewaysGrid.activeGridPositions) {
             const correspondingPosOnExchange = positionsAfterCheck.find(p => p.positionSide === pos.side)
             if (!correspondingPosOnExchange || parseFloat(correspondingPosOnExchange.positionAmt) === 0) {
@@ -1939,7 +1968,7 @@ function setupUserDataStream(key) {
     }
     if (listenKeyRefreshInterval) clearInterval(listenKeyRefreshInterval)
 
-    const url = `${WS_BASE_URL}${WS_USER_DATA_ENDPOINT}/${key}`
+    const url = `${WS_BASE_URL}${WS_USER_DATA_ENDPOINT}?listenKey=${key}`
     userDataWs = new WebSocket(url)
     addLog("Đang kết nối User Data Stream...")
     userDataWs.on('open', () => {
