@@ -1,3 +1,4 @@
+
 import https from 'https'
 import http from 'http'
 import crypto from 'crypto'
@@ -22,7 +23,7 @@ const MIN_LEVERAGE_TO_TRADE = 50
 const PARTIAL_CLOSE_INDEX_5 = 4
 const PARTIAL_CLOSE_INDEX_8 = 7
 const SIDEWAYS_ORDER_SIZE_RATIO = 0.10
-const SIDEWAYS_GRID_STEP_PERCENT = 0.015
+const SIDEWAYS_GRID_STEP_PERCENT = 0.0079
 const SIDEWAYS_TP_PRICE_PERCENT = 0.02
 const SIDEWAYS_SL_PRICE_PERCENT = 0.079
 const SIDEWAYS_CHECK_INTERVAL_MS = 2 * 60 * 1000
@@ -30,8 +31,8 @@ const SIDEWAYS_INACTIVITY_TIMEOUT_MS = 15 * 60 * 1000
 const BASE_HOST = 'fapi.binance.com'
 const WS_BASE_URL = 'wss://fstream.binance.com'
 const WS_USER_DATA_ENDPOINT = '/ws'
-const WEB_SERVER_PORT = 9001
-const THIS_BOT_PM2_NAME = 'test3'
+const WEB_SERVER_PORT = 6789; // Port từ file KHOA
+const THIS_BOT_PM2_NAME = 'khoa'; // Tên PM2 từ file KHOA
 const CUSTOM_LOG_FILE = path.join(__dirname, `pm2_${THIS_BOT_PM2_NAME}.log`)
 const LOG_TO_CUSTOM_FILE = true
 const MAX_CONSECUTIVE_API_ERRORS = 5
@@ -592,11 +593,11 @@ async function openMarketPosition(symbol, tradeDirection, maxLeverage, entryPric
         let TAKE_PROFIT_MULTIPLIER, STOP_LOSS_MULTIPLIER
 
         if (maxLeverage >= 75) {
-            TAKE_PROFIT_MULTIPLIER = 6
-            STOP_LOSS_MULTIPLIER = 3
+            TAKE_PROFIT_MULTIPLIER = 11
+            STOP_LOSS_MULTIPLIER = 6
         } else if (maxLeverage >= MIN_LEVERAGE_TO_TRADE) {
-            TAKE_PROFIT_MULTIPLIER = 3
-            STOP_LOSS_MULTIPLIER = 1.5
+            TAKE_PROFIT_MULTIPLIER = 5.5
+            STOP_LOSS_MULTIPLIER = 3
         } else {
             TAKE_PROFIT_MULTIPLIER = 3.5
             STOP_LOSS_MULTIPLIER = 2
@@ -1175,7 +1176,7 @@ async function runTradingLogic() {
                     return; 
                 }
                 if (err.shouldBlacklist) {
-                    await handleCoinSwitch(`Lỗi không xác định khi mở cặp Kill`, true);
+                    await handleCoinSwitch(`Lỗi vượt khối lượng khi mở cặp KILL`, true);
                 } else {
                     addLog(`Lỗi mở cặp Kill: ${err.msg || err.message}`)
                     if (err instanceof CriticalApiError && botRunning) await stopBotLogicInternal(`Lỗi mở cặp Kill ${TARGET_COIN_SYMBOL}`)
@@ -1647,43 +1648,36 @@ async function startBotLogicInternal() {
     }
 }
 async function stopBotLogicInternal(reason = "Lệnh dừng thủ công") {
-    if (!botRunning && !retryBotTimeout) return 'Bot không chạy hoặc không đang retry.'
-    addLog(`--- Dừng Bot (Lý do: ${reason}) ---`)
-    botRunning = false
-    botStartTime = null
+    if (!botRunning && !retryBotTimeout) return 'Bot không chạy hoặc không đang retry.';
+    addLog(`--- Dừng Bot (Lý do: ${reason}) ---`);
+    botRunning = false;
+    botStartTime = null; 
+    isOpeningInitialPair = false;
+    isReversalInProgress = false;
+    if (nextScheduledCycleTimeout) clearTimeout(nextScheduledCycleTimeout);
+    nextScheduledCycleTimeout = null;
+    if (positionCheckInterval) clearInterval(positionCheckInterval);
+    positionCheckInterval = null;
+    if (sidewaysGrid.switchDelayTimeout) clearTimeout(sidewaysGrid.switchDelayTimeout);
+    sidewaysGrid.switchDelayTimeout = null;
+    sidewaysGrid.isClearingForSwitch = false;
 
-    if (statusUpdateInterval) {
-        clearInterval(statusUpdateInterval);
-        statusUpdateInterval = null;
-    }
-    updateStatusCache(); 
-
-    isOpeningInitialPair = false
-    isReversalInProgress = false
-    if (nextScheduledCycleTimeout) clearTimeout(nextScheduledCycleTimeout)
-    nextScheduledCycleTimeout = null
-    if (positionCheckInterval) clearInterval(positionCheckInterval)
-    positionCheckInterval = null
-    if (sidewaysGrid.switchDelayTimeout) clearTimeout(sidewaysGrid.switchDelayTimeout)
-    sidewaysGrid.switchDelayTimeout = null
-    sidewaysGrid.isClearingForSwitch = false
-
-    if (listenKeyRefreshInterval) clearInterval(listenKeyRefreshInterval)
-    listenKeyRefreshInterval = null
+    if (listenKeyRefreshInterval) clearInterval(listenKeyRefreshInterval);
+    listenKeyRefreshInterval = null;
     if (marketWs) {
-        marketWs.removeAllListeners()
-        marketWs.terminate()
-        marketWs = null
-        addLog("Market Stream đã đóng.")
+        marketWs.removeAllListeners();
+        marketWs.terminate();
+        marketWs = null;
+        addLog("Market Stream đã đóng.");
     }
     if (userDataWs) {
-        userDataWs.removeAllListeners()
-        userDataWs.terminate()
-        userDataWs = null
-        addLog("User Stream đã đóng.")
+        userDataWs.removeAllListeners();
+        userDataWs.terminate();
+        userDataWs = null;
+        addLog("User Stream đã đóng.");
     }
-    if (listenKey) await callSignedAPI('/fapi/v1/listenKey', 'DELETE', { listenKey }).then(() => addLog("ListenKey đã xóa.")).catch(e => addLog(`Lỗi xóa listenKey: ${e.msg || e.message}`))
-    listenKey = null
+    if (listenKey) await callSignedAPI('/fapi/v1/listenKey', 'DELETE', { listenKey }).then(() => addLog("ListenKey đã xóa.")).catch(e => addLog(`Lỗi xóa listenKey: ${e.msg || e.message}`));
+    listenKey = null;
 
     try {
         if (TARGET_COIN_SYMBOL) {
@@ -1696,101 +1690,183 @@ async function stopBotLogicInternal(reason = "Lệnh dừng thủ công") {
     } catch (e) {
         addLog(`Lỗi nghiêm trọng khi dọn dẹp vị thế của bot: ${e.msg || e.message}`)
     }
-
+    
     currentLongPosition = null
     currentShortPosition = null
     TARGET_COIN_SYMBOL = null
-    pendingClosures.clear()
-    blacklistedCoinsThisSession.clear()
+    pendingClosures.clear();
+    blacklistedCoinsThisSession.clear();
 
     if (retryBotTimeout) {
-        clearTimeout(retryBotTimeout)
-        retryBotTimeout = null
-        addLog("Đã hủy retry khởi động.")
+        clearTimeout(retryBotTimeout);
+        retryBotTimeout = null;
+        addLog("Đã hủy retry khởi động.");
     }
-    addLog('--- Bot đã dừng ---')
-    return 'Bot đã dừng.'
+    addLog('--- Bot đã dừng ---');
+    return 'Bot đã dừng.';
 }
 async function checkAndHandleRemainingPosition(symbol) {
-    if (!symbol) return
-    addLog(`Kiểm tra vị thế sót cho ${symbol}...`)
+    if (!symbol) return;
+    addLog(`Kiểm tra vị thế sót cho ${symbol}...`);
     try {
-        const positions = await callSignedAPI('/fapi/v2/positionRisk', 'GET', { symbol })
-        const remaining = positions.filter(p => p.symbol === symbol && parseFloat(p.positionAmt) !== 0)
+        const positions = await callSignedAPI('/fapi/v2/positionRisk', 'GET', { symbol });
+        const remaining = positions.filter(p => p.symbol === symbol && parseFloat(p.positionAmt) !== 0);
         if (remaining.length > 0) {
-            addLog(`Tìm thấy ${remaining.length} vị thế sót cho ${symbol}. Đang đóng...`)
-            await cancelAllOpenOrdersForSymbol(symbol)
-            await sleep(500)
+            addLog(`Tìm thấy ${remaining.length} vị thế sót cho ${symbol}. Đang đóng...`);
+            await cancelAllOpenOrdersForSymbol(symbol);
+            await sleep(500);
             for (const pos of remaining) {
-                await closePosition(pos.symbol, `Dọn dẹp vị thế sót`, pos.positionSide)
-                await sleep(1000)
+                await closePosition(pos.symbol, `Dọn dẹp vị thế sót`, pos.positionSide);
+                await sleep(1000);
             }
-            addLog(`Hoàn tất đóng vị thế sót cho ${symbol}.`)
+            addLog(`Hoàn tất đóng vị thế sót cho ${symbol}.`);
         } else {
-            addLog(`Không có vị thế sót nào cho ${symbol}.`)
+            addLog(`Không có vị thế sót nào cho ${symbol}.`);
         }
     } catch (error) {
-        addLog(`Lỗi dọn vị thế sót ${symbol}: ${error.msg || error.message}`)
-        if (error instanceof CriticalApiError && botRunning) await stopBotLogicInternal(`Lỗi dọn vị thế sót ${symbol}`)
+        addLog(`Lỗi dọn vị thế sót ${symbol}: ${error.msg || error.message}`);
+        if (error instanceof CriticalApiError && botRunning) await stopBotLogicInternal(`Lỗi dọn vị thế sót ${symbol}`);
     }
 }
 function scheduleNextMainCycle(delayMs = 7000) {
-    if (!botRunning) return
-    if (nextScheduledCycleTimeout) clearTimeout(nextScheduledCycleTimeout)
+    if (!botRunning) return;
+    if (nextScheduledCycleTimeout) clearTimeout(nextScheduledCycleTimeout);
     nextScheduledCycleTimeout = setTimeout(async () => {
         if (botRunning && !isProcessingTrade && !sidewaysGrid.isClearingForSwitch && !isOpeningInitialPair && pendingClosures.size === 0) {
             try {
-                await runTradingLogic()
+                await runTradingLogic();
             } catch (e) {
-                addLog(`Lỗi chu kỳ chính runTradingLogic: ${e.msg || e.message} ${e.stack?.substring(0, 300) || ''}`)
+                addLog(`Lỗi chu kỳ chính runTradingLogic: ${e.msg || e.message} ${e.stack?.substring(0, 300) || ''}`);
                 if (e instanceof CriticalApiError) {
-                    await stopBotLogicInternal(`CriticalApiError trong chu kỳ chính: ${e.message}`)
+                    await stopBotLogicInternal(`CriticalApiError trong chu kỳ chính: ${e.message}`);
                 } else if (botRunning) {
-                    scheduleNextMainCycle(15000)
+                    scheduleNextMainCycle(15000);
                 }
             }
         } else if (botRunning) {
-            scheduleNextMainCycle(delayMs)
+            scheduleNextMainCycle(delayMs);
         }
-    }, delayMs)
+    }, delayMs);
 }
+
+// ------ LOGIC WEBSOCKET TỪ FILE KHOA ------
 async function getListenKey() {
     if (!API_KEY || !SECRET_KEY) {
-        addLog("Thiếu API key/secret.")
-        return null
+        addLog("Thiếu API key/secret.");
+        return null;
     }
     try {
-        const r = await callSignedAPI('/fapi/v1/listenKey', 'POST')
-        addLog("Lấy ListenKey thành công.")
-        return r.listenKey
+        const r = await callSignedAPI('/fapi/v1/listenKey', 'POST');
+        addLog("Lấy ListenKey thành công.");
+        return r.listenKey;
     } catch (e) {
-        addLog(`Lỗi lấy listenKey: ${e.msg || e.message}`)
-        return null
+        addLog(`Lỗi lấy listenKey: ${e.msg || e.message}`);
+        return null;
     }
 }
+
 async function keepAliveListenKey(key) {
-    if (!key) return
+    if (!key) return;
     try {
-        await callSignedAPI('/fapi/v1/listenKey', 'PUT', { listenKey: key })
+        await callSignedAPI('/fapi/v1/listenKey', 'PUT', { listenKey: key });
     } catch (e) {
-        addLog(`Lỗi gia hạn listenKey (${key}): ${e.msg || e.message}.`)
+        addLog(`Lỗi gia hạn listenKey (${key}): ${e.msg || e.message}.`);
         if (botRunning && userDataWs) {
-            userDataWs.terminate()
-            userDataWs = null
-            const oldListenKey = listenKey
-            listenKey = null
-            addLog("User Stream đóng do lỗi gia hạn key. Thử lấy key mới và kết nối lại.")
-            const newKey = await getListenKey()
+            userDataWs.terminate();
+            userDataWs = null;
+            const oldListenKey = listenKey;
+            listenKey = null;
+            addLog("User Stream đóng do lỗi gia hạn key. Thử lấy key mới và kết nối lại.");
+            const newKey = await getListenKey();
             if (newKey) {
-                listenKey = newKey
-                setupUserDataStream(newKey)
+                listenKey = newKey;
+                setupUserDataStream(newKey);
             } else {
-                addLog("Không lấy được listenKey mới. User Stream sẽ không hoạt động.")
-                if (botRunning) await stopBotLogicInternal("Không thể gia hạn hoặc lấy listenKey mới.")
+                addLog("Không lấy được listenKey mới. User Stream sẽ không hoạt động.");
+                if (botRunning) await stopBotLogicInternal("Không thể gia hạn hoặc lấy listenKey mới.");
             }
         }
     }
 }
+
+function setupUserDataStream(key) {
+    if (!key) {
+        addLog("Không có listenKey cho User Stream.");
+        return;
+    }
+    if (userDataWs && (userDataWs.readyState === WebSocket.OPEN || userDataWs.readyState === WebSocket.CONNECTING)) {
+        userDataWs.removeAllListeners();
+        userDataWs.terminate();
+        userDataWs = null;
+    }
+    const url = `${WS_BASE_URL}${WS_USER_DATA_ENDPOINT}/${key}`;
+    userDataWs = new WebSocket(url);
+    addLog("Đang kết nối User Data Stream...");
+    userDataWs.on('open', () => {
+        addLog('User Data Stream đã kết nối.');
+        if (listenKeyRefreshInterval) clearInterval(listenKeyRefreshInterval);
+        listenKeyRefreshInterval = setInterval(() => keepAliveListenKey(listenKey), 30 * 60 * 1000);
+    });
+    userDataWs.on('message', async (data) => {
+        try {
+            const msg = JSON.parse(data.toString());
+            if (msg.e === 'ORDER_TRADE_UPDATE') {
+                await processTradeResult(msg.o);
+            } else if (msg.e === 'ACCOUNT_UPDATE') {
+                for (const pos of msg.a.P) {
+                     if (pos.s === TARGET_COIN_SYMBOL && parseFloat(pos.pa) === 0) {
+                        if (sidewaysGrid.isActive) {
+                             const closedGridPos = sidewaysGrid.activeGridPositions.find(p => p.side === pos.ps);
+                             if (closedGridPos) {
+                                 addLog(`LƯỚI: Vị thế ${pos.ps} đóng (phát hiện qua ACCOUNT_UPDATE). Xóa khỏi bộ nhớ.`);
+                                 sidewaysGrid.activeGridPositions = sidewaysGrid.activeGridPositions.filter(p => p.id !== closedGridPos.id);
+                             }
+                        }
+                    }
+                }
+            } else if (msg.e === 'listenKeyExpired') {
+                addLog("User Stream: ListenKey hết hạn.");
+                if (listenKeyRefreshInterval) clearInterval(listenKeyRefreshInterval);
+                listenKeyRefreshInterval = null;
+                const newKey = await getListenKey();
+                if (newKey) {
+                    listenKey = newKey;
+                    setupUserDataStream(newKey);
+                } else {
+                    addLog("Không lấy được key mới sau khi hết hạn.");
+                    if (botRunning) await stopBotLogicInternal("ListenKey hết hạn và không thể lấy key mới.");
+                }
+            }
+        } catch (e) {
+            addLog('Lỗi xử lý User Data Stream: ' + e.message + `. Data: ${data.toString().substring(0, 100)}`);
+        }
+    });
+    userDataWs.on('error', (err) => {
+        addLog('Lỗi User Data Stream: ' + err.message);
+    });
+    userDataWs.on('close', async (code, reason) => {
+        addLog(`User Data Stream đóng. Code: ${code}, Reason: ${reason ? reason.toString().substring(0, 100) : 'N/A'}.`);
+        if (listenKeyRefreshInterval) clearInterval(listenKeyRefreshInterval);
+        listenKeyRefreshInterval = null;
+        if (botRunning && listenKey) {
+            addLog("  Thử kết nối lại User Stream sau 5s...");
+            await sleep(5000);
+            if (listenKey) {
+                setupUserDataStream(listenKey);
+            } else {
+                const newKey = await getListenKey();
+                if (newKey) {
+                    listenKey = newKey;
+                    setupUserDataStream(newKey);
+                } else {
+                    addLog("  Không lấy được listenKey mới.");
+                    if (botRunning) await stopBotLogicInternal("User Stream đóng và không thể lấy listenKey mới.");
+                }
+            }
+        }
+    });
+}
+// ----------------------------------------
 
 async function updateStatusCache() {
     if (!botRunning) {
@@ -1957,63 +2033,6 @@ function setupMarketDataStream(symbol) {
         if (botRunning && closedS === TARGET_COIN_SYMBOL) {
             addLog(`Thử kết nối lại Market Stream ${TARGET_COIN_SYMBOL} sau 5s...`)
             setTimeout(() => setupMarketDataStream(TARGET_COIN_SYMBOL), 5000)
-        }
-    })
-}
-
-function setupUserDataStream(key) {
-    if (!key) {
-        addLog("Thiếu listenKey cho User Stream.")
-        return
-    }
-    if (userDataWs && (userDataWs.readyState === WebSocket.OPEN || userDataWs.readyState === WebSocket.CONNECTING)) {
-        addLog("User Stream đã chạy, đóng kết nối cũ...")
-        userDataWs.removeAllListeners()
-        userDataWs.terminate()
-        userDataWs = null
-    }
-    if (listenKeyRefreshInterval) clearInterval(listenKeyRefreshInterval)
-
-    const url = `${WS_BASE_URL}${WS_USER_DATA_ENDPOINT}?listenKey=${key}`
-    userDataWs = new WebSocket(url)
-    addLog("Đang kết nối User Data Stream...")
-    userDataWs.on('open', () => {
-        addLog("User Data Stream đã kết nối.")
-        listenKeyRefreshInterval = setInterval(() => keepAliveListenKey(listenKey), 30 * 60 * 1000)
-    })
-    userDataWs.on('message', async (data) => {
-        try {
-            const event = JSON.parse(data.toString())
-            if (event.e === 'ACCOUNT_UPDATE' && botRunning && TARGET_COIN_SYMBOL) {
-                if (!event.a || !event.a.P) return
-                const updatedPositions = event.a.P
-                const relevantPos = updatedPositions.filter(p => p.s === TARGET_COIN_SYMBOL)
-                if (relevantPos.length === 0) return
-            } else if (event.e === 'ORDER_TRADE_UPDATE' && botRunning && TARGET_COIN_SYMBOL) {
-                await processTradeResult(event.o)
-            }
-        } catch (e) { }
-    })
-    userDataWs.on('error', (err) => {
-        addLog("Lỗi User Data Stream: " + err.message)
-    })
-    userDataWs.on('close', (code, reason) => {
-        addLog(`User Stream đã đóng. Code: ${code}, Reason: ${reason ? reason.toString().substring(0, 100) : 'N/A'}.`)
-        if (listenKeyRefreshInterval) clearInterval(listenKeyRefreshInterval)
-        listenKeyRefreshInterval = null
-        if (botRunning) {
-            addLog("Thử kết nối lại User Stream sau 10s...")
-            setTimeout(async () => {
-                if (botRunning) {
-                    const newKey = await getListenKey()
-                    if (newKey) {
-                        listenKey = newKey
-                        setupUserDataStream(newKey)
-                    } else {
-                        await stopBotLogicInternal("Không thể lấy listenKey mới sau khi User Stream đóng.")
-                    }
-                }
-            }, 10000)
         }
     })
 }
