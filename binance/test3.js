@@ -23,7 +23,7 @@ const MIN_LEVERAGE_TO_TRADE = 50
 const PARTIAL_CLOSE_INDEX_5 = 4
 const PARTIAL_CLOSE_INDEX_8 = 7
 const SIDEWAYS_ORDER_SIZE_RATIO = 0.10
-const SIDEWAYS_GRID_STEP_PERCENT = 0.0079
+const SIDEWAYS_GRID_STEP_PERCENT = 0.015
 const SIDEWAYS_TP_PRICE_PERCENT = 0.02
 const SIDEWAYS_SL_PRICE_PERCENT = 0.079
 const SIDEWAYS_CHECK_INTERVAL_MS = 2 * 60 * 1000
@@ -31,8 +31,8 @@ const SIDEWAYS_INACTIVITY_TIMEOUT_MS = 15 * 60 * 1000
 const BASE_HOST = 'fapi.binance.com'
 const WS_BASE_URL = 'wss://fstream.binance.com'
 const WS_USER_DATA_ENDPOINT = '/ws'
-const WEB_SERVER_PORT = 6789; // Port từ file KHOA
-const THIS_BOT_PM2_NAME = 'khoa'; // Tên PM2 từ file KHOA
+const WEB_SERVER_PORT = 9001
+const THIS_BOT_PM2_NAME = 'test3'
 const CUSTOM_LOG_FILE = path.join(__dirname, `pm2_${THIS_BOT_PM2_NAME}.log`)
 const LOG_TO_CUSTOM_FILE = true
 const MAX_CONSECUTIVE_API_ERRORS = 5
@@ -593,11 +593,11 @@ async function openMarketPosition(symbol, tradeDirection, maxLeverage, entryPric
         let TAKE_PROFIT_MULTIPLIER, STOP_LOSS_MULTIPLIER
 
         if (maxLeverage >= 75) {
-            TAKE_PROFIT_MULTIPLIER = 11
-            STOP_LOSS_MULTIPLIER = 6
-        } else if (maxLeverage >= MIN_LEVERAGE_TO_TRADE) {
-            TAKE_PROFIT_MULTIPLIER = 5.5
+            TAKE_PROFIT_MULTIPLIER = 6
             STOP_LOSS_MULTIPLIER = 3
+        } else if (maxLeverage >= MIN_LEVERAGE_TO_TRADE) {
+            TAKE_PROFIT_MULTIPLIER = 3
+            STOP_LOSS_MULTIPLIER = 1.5
         } else {
             TAKE_PROFIT_MULTIPLIER = 3.5
             STOP_LOSS_MULTIPLIER = 2
@@ -1648,36 +1648,43 @@ async function startBotLogicInternal() {
     }
 }
 async function stopBotLogicInternal(reason = "Lệnh dừng thủ công") {
-    if (!botRunning && !retryBotTimeout) return 'Bot không chạy hoặc không đang retry.';
-    addLog(`--- Dừng Bot (Lý do: ${reason}) ---`);
-    botRunning = false;
-    botStartTime = null; 
-    isOpeningInitialPair = false;
-    isReversalInProgress = false;
-    if (nextScheduledCycleTimeout) clearTimeout(nextScheduledCycleTimeout);
-    nextScheduledCycleTimeout = null;
-    if (positionCheckInterval) clearInterval(positionCheckInterval);
-    positionCheckInterval = null;
-    if (sidewaysGrid.switchDelayTimeout) clearTimeout(sidewaysGrid.switchDelayTimeout);
-    sidewaysGrid.switchDelayTimeout = null;
-    sidewaysGrid.isClearingForSwitch = false;
+    if (!botRunning && !retryBotTimeout) return 'Bot không chạy hoặc không đang retry.'
+    addLog(`--- Dừng Bot (Lý do: ${reason}) ---`)
+    botRunning = false
+    botStartTime = null
 
-    if (listenKeyRefreshInterval) clearInterval(listenKeyRefreshInterval);
-    listenKeyRefreshInterval = null;
+    if (statusUpdateInterval) {
+        clearInterval(statusUpdateInterval);
+        statusUpdateInterval = null;
+    }
+    updateStatusCache(); 
+
+    isOpeningInitialPair = false
+    isReversalInProgress = false
+    if (nextScheduledCycleTimeout) clearTimeout(nextScheduledCycleTimeout)
+    nextScheduledCycleTimeout = null
+    if (positionCheckInterval) clearInterval(positionCheckInterval)
+    positionCheckInterval = null
+    if (sidewaysGrid.switchDelayTimeout) clearTimeout(sidewaysGrid.switchDelayTimeout)
+    sidewaysGrid.switchDelayTimeout = null
+    sidewaysGrid.isClearingForSwitch = false
+
+    if (listenKeyRefreshInterval) clearInterval(listenKeyRefreshInterval)
+    listenKeyRefreshInterval = null
     if (marketWs) {
-        marketWs.removeAllListeners();
-        marketWs.terminate();
-        marketWs = null;
-        addLog("Market Stream đã đóng.");
+        marketWs.removeAllListeners()
+        marketWs.terminate()
+        marketWs = null
+        addLog("Market Stream đã đóng.")
     }
     if (userDataWs) {
-        userDataWs.removeAllListeners();
-        userDataWs.terminate();
-        userDataWs = null;
-        addLog("User Stream đã đóng.");
+        userDataWs.removeAllListeners()
+        userDataWs.terminate()
+        userDataWs = null
+        addLog("User Stream đã đóng.")
     }
-    if (listenKey) await callSignedAPI('/fapi/v1/listenKey', 'DELETE', { listenKey }).then(() => addLog("ListenKey đã xóa.")).catch(e => addLog(`Lỗi xóa listenKey: ${e.msg || e.message}`));
-    listenKey = null;
+    if (listenKey) await callSignedAPI('/fapi/v1/listenKey', 'DELETE', { listenKey }).then(() => addLog("ListenKey đã xóa.")).catch(e => addLog(`Lỗi xóa listenKey: ${e.msg || e.message}`))
+    listenKey = null
 
     try {
         if (TARGET_COIN_SYMBOL) {
@@ -1694,59 +1701,59 @@ async function stopBotLogicInternal(reason = "Lệnh dừng thủ công") {
     currentLongPosition = null
     currentShortPosition = null
     TARGET_COIN_SYMBOL = null
-    pendingClosures.clear();
-    blacklistedCoinsThisSession.clear();
+    pendingClosures.clear()
+    blacklistedCoinsThisSession.clear()
 
     if (retryBotTimeout) {
-        clearTimeout(retryBotTimeout);
-        retryBotTimeout = null;
-        addLog("Đã hủy retry khởi động.");
+        clearTimeout(retryBotTimeout)
+        retryBotTimeout = null
+        addLog("Đã hủy retry khởi động.")
     }
-    addLog('--- Bot đã dừng ---');
-    return 'Bot đã dừng.';
+    addLog('--- Bot đã dừng ---')
+    return 'Bot đã dừng.'
 }
 async function checkAndHandleRemainingPosition(symbol) {
-    if (!symbol) return;
-    addLog(`Kiểm tra vị thế sót cho ${symbol}...`);
+    if (!symbol) return
+    addLog(`Kiểm tra vị thế sót cho ${symbol}...`)
     try {
-        const positions = await callSignedAPI('/fapi/v2/positionRisk', 'GET', { symbol });
-        const remaining = positions.filter(p => p.symbol === symbol && parseFloat(p.positionAmt) !== 0);
+        const positions = await callSignedAPI('/fapi/v2/positionRisk', 'GET', { symbol })
+        const remaining = positions.filter(p => p.symbol === symbol && parseFloat(p.positionAmt) !== 0)
         if (remaining.length > 0) {
-            addLog(`Tìm thấy ${remaining.length} vị thế sót cho ${symbol}. Đang đóng...`);
-            await cancelAllOpenOrdersForSymbol(symbol);
-            await sleep(500);
+            addLog(`Tìm thấy ${remaining.length} vị thế sót cho ${symbol}. Đang đóng...`)
+            await cancelAllOpenOrdersForSymbol(symbol)
+            await sleep(500)
             for (const pos of remaining) {
-                await closePosition(pos.symbol, `Dọn dẹp vị thế sót`, pos.positionSide);
-                await sleep(1000);
+                await closePosition(pos.symbol, `Dọn dẹp vị thế sót`, pos.positionSide)
+                await sleep(1000)
             }
-            addLog(`Hoàn tất đóng vị thế sót cho ${symbol}.`);
+            addLog(`Hoàn tất đóng vị thế sót cho ${symbol}.`)
         } else {
-            addLog(`Không có vị thế sót nào cho ${symbol}.`);
+            addLog(`Không có vị thế sót nào cho ${symbol}.`)
         }
     } catch (error) {
-        addLog(`Lỗi dọn vị thế sót ${symbol}: ${error.msg || error.message}`);
-        if (error instanceof CriticalApiError && botRunning) await stopBotLogicInternal(`Lỗi dọn vị thế sót ${symbol}`);
+        addLog(`Lỗi dọn vị thế sót ${symbol}: ${error.msg || error.message}`)
+        if (error instanceof CriticalApiError && botRunning) await stopBotLogicInternal(`Lỗi dọn vị thế sót ${symbol}`)
     }
 }
 function scheduleNextMainCycle(delayMs = 7000) {
-    if (!botRunning) return;
-    if (nextScheduledCycleTimeout) clearTimeout(nextScheduledCycleTimeout);
+    if (!botRunning) return
+    if (nextScheduledCycleTimeout) clearTimeout(nextScheduledCycleTimeout)
     nextScheduledCycleTimeout = setTimeout(async () => {
         if (botRunning && !isProcessingTrade && !sidewaysGrid.isClearingForSwitch && !isOpeningInitialPair && pendingClosures.size === 0) {
             try {
-                await runTradingLogic();
+                await runTradingLogic()
             } catch (e) {
-                addLog(`Lỗi chu kỳ chính runTradingLogic: ${e.msg || e.message} ${e.stack?.substring(0, 300) || ''}`);
+                addLog(`Lỗi chu kỳ chính runTradingLogic: ${e.msg || e.message} ${e.stack?.substring(0, 300) || ''}`)
                 if (e instanceof CriticalApiError) {
-                    await stopBotLogicInternal(`CriticalApiError trong chu kỳ chính: ${e.message}`);
+                    await stopBotLogicInternal(`CriticalApiError trong chu kỳ chính: ${e.message}`)
                 } else if (botRunning) {
-                    scheduleNextMainCycle(15000);
+                    scheduleNextMainCycle(15000)
                 }
             }
         } else if (botRunning) {
-            scheduleNextMainCycle(delayMs);
+            scheduleNextMainCycle(delayMs)
         }
-    }, delayMs);
+    }, delayMs)
 }
 
 // ------ LOGIC WEBSOCKET TỪ FILE KHOA ------
@@ -1764,7 +1771,6 @@ async function getListenKey() {
         return null;
     }
 }
-
 async function keepAliveListenKey(key) {
     if (!key) return;
     try {
@@ -1788,7 +1794,6 @@ async function keepAliveListenKey(key) {
         }
     }
 }
-
 function setupUserDataStream(key) {
     if (!key) {
         addLog("Không có listenKey cho User Stream.");
