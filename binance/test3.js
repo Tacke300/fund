@@ -1,4 +1,3 @@
-
 import https from 'https'
 import http from 'http'
 import crypto from 'crypto'
@@ -76,6 +75,7 @@ const pendingClosures = new Set()
 let blacklistedCoinsThisSession = new Set()
 let isReversalInProgress = false
 let lastKillModeCheckTime = 0
+let userDataStreamConnectFailures = 0;
 
 let statusCache = {
     pm2Status: "Chưa cập nhật",
@@ -565,7 +565,9 @@ async function openMarketPosition(symbol, tradeDirection, maxLeverage, entryPric
         
         if (quantity * priceToUseForCalc < details.minNotional) {
             addLog(`Giá trị lệnh ${quantity * priceToUseForCalc} quá nhỏ so với sàn (${details.minNotional}). Tăng vốn hoặc chọn coin khác.`)
-            throw new Error("Giá trị lệnh quá nhỏ so với sàn.")
+            const error = new Error("Giá trị lệnh quá nhỏ so với sàn.");
+            error.code = 'INSUFFICIENT_NOTIONAL';
+            throw error;
         }
 
         const orderSide = (tradeDirection === 'LONG') ? 'BUY' : 'SELL'
@@ -632,11 +634,11 @@ async function openMarketPosition(symbol, tradeDirection, maxLeverage, entryPric
 
     } catch (err) {
         addLog(`[${currentBotMode.toUpperCase()}] Lỗi mở ${tradeDirection} ${symbol}: ${err.msg || err.message}`)
-        if (err.code === -2027) {
-            throw err
+        if (err.code === -2019 || err.code === 'INSUFFICIENT_NOTIONAL') {
+            err.shouldBlacklist = true;
         }
         if (err instanceof CriticalApiError && botRunning) await stopBotLogicInternal(`Lỗi mở ${tradeDirection} ${symbol}`)
-        return null
+        throw err;
     }
 }
 
@@ -1166,14 +1168,17 @@ async function runTradingLogic() {
                 lastKillModeCheckTime = Date.now()
                 isOpeningInitialPair = false
             } catch (err) {
-                if (err.code === -2027) {
-                    await handleCoinSwitch(`Lỗi vượt khối lượng khi mở cặp KILL`, true)
+                if (err.shouldBlacklist || err.code === -2027) {
+                    const reason = err.shouldBlacklist ? `Không đủ tiền ký quỹ/notional` : `Lỗi vượt khối lượng khi mở cặp KILL`;
+                    await handleCoinSwitch(reason, true);
                 } else {
                     addLog(`Lỗi mở cặp Kill: ${err.msg || err.message}`)
                     if (err instanceof CriticalApiError && botRunning) await stopBotLogicInternal(`Lỗi mở cặp Kill ${TARGET_COIN_SYMBOL}`)
-                    if (botRunning) scheduleNextMainCycle()
                 }
-                isOpeningInitialPair = false
+                currentLongPosition = null;
+                currentShortPosition = null;
+                isOpeningInitialPair = false;
+                if(botRunning) scheduleNextMainCycle();
             }
         } else if (currentBotMode === 'sideways') {
             const currentCoinDataVPS1 = getCurrentCoinVPS1Data(TARGET_COIN_SYMBOL)
@@ -1318,7 +1323,6 @@ async function manageOpenPosition() {
                         await cancelAllOpenOrdersForSymbol(TARGET_COIN_SYMBOL);
                         await sleep(500);
 
-                        // 1. Xử lý lệnh thắng: Dời SL về hòa vốn
                         const newWinnerPos = { ...winner, stopLossPrice: winner.entryPrice, takeProfitPrice: winner.takeProfitPrice };
                         const placedWinner = await placeTpslOrders(newWinnerPos, 'SECURE-WINNER');
                         if (placedWinner) {
@@ -1328,7 +1332,6 @@ async function manageOpenPosition() {
                              throw new Error("Không đặt được TP/SL mới cho lệnh thắng.");
                         }
 
-                        // 2. Xử lý lệnh thua: Dời TP về hòa vốn (mốc 0), SL về mốc 4
                         const details = await getSymbolDetails(loser.symbol);
                         if (!details) throw new Error("Không lấy được details để tính SL mốc 4 cho lệnh thua.");
 
@@ -1395,12 +1398,10 @@ async function manageOpenPosition() {
                     
                     if (pos.unrealizedPnl <= targetPnlForNextLossMilestone) {
                         const nextMilestone = pos.milestoneCounter + 1;
-                        // *** YÊU CẦU 3: Sửa mốc 1=20%, mốc 2=30%, mốc 3=40% ***
                         const partialClosePercentages = [0.20, 0.30, 0.40]; 
                         const finalMilestoneToCloseAll = 4;
 
                         if (nextMilestone === finalMilestoneToCloseAll) {
-                            // *** YÊU CẦU 3: Mốc 4 đóng nốt toàn bộ còn lại ***
                             addLog(`[CẮT LỖ CUỐI CÙNG] Vị thế ${pos.side} (L${pos.leverage}x) đạt mốc lỗ ${nextMilestone}. PNL: ${pos.unrealizedPnl.toFixed(2)} <= ${targetPnlForNextLossMilestone.toFixed(2)}. Đóng toàn bộ.`);
                             await closePosition(pos.symbol, `Đạt mốc lỗ cuối cùng (${nextMilestone})`, pos.side);
 
@@ -1608,6 +1609,7 @@ async function startBotLogicInternal() {
         isReversalInProgress = false
         pendingClosures.clear()
         blacklistedCoinsThisSession.clear()
+        userDataStreamConnectFailures = 0;
 
         listenKey = await getListenKey()
         if (listenKey) {
@@ -1973,6 +1975,7 @@ function setupUserDataStream(key) {
     addLog("Đang kết nối User Data Stream...")
     userDataWs.on('open', () => {
         addLog("User Data Stream đã kết nối.")
+        userDataStreamConnectFailures = 0;
         listenKeyRefreshInterval = setInterval(() => keepAliveListenKey(listenKey), 30 * 60 * 1000)
     })
     userDataWs.on('message', async (data) => {
@@ -1991,11 +1994,20 @@ function setupUserDataStream(key) {
     userDataWs.on('error', (err) => {
         addLog("Lỗi User Data Stream: " + err.message)
     })
-    userDataWs.on('close', (code, reason) => {
+    userDataWs.on('close', async (code, reason) => {
         addLog(`User Stream đã đóng. Code: ${code}, Reason: ${reason ? reason.toString().substring(0, 100) : 'N/A'}.`)
         if (listenKeyRefreshInterval) clearInterval(listenKeyRefreshInterval)
         listenKeyRefreshInterval = null
+
         if (botRunning) {
+            userDataStreamConnectFailures++;
+            addLog(`User Stream kết nối thất bại lần thứ ${userDataStreamConnectFailures}.`)
+
+            if (userDataStreamConnectFailures > 5) {
+                await stopBotLogicInternal("Không thể kết nối User Stream sau nhiều lần thử. Dừng bot.");
+                return;
+            }
+
             addLog("Thử kết nối lại User Stream sau 10s...")
             setTimeout(async () => {
                 if (botRunning) {
