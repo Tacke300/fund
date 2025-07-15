@@ -591,10 +591,10 @@ async function openMarketPosition(symbol, tradeDirection, maxLeverage, entryPric
         let TAKE_PROFIT_MULTIPLIER, STOP_LOSS_MULTIPLIER
 
         if (maxLeverage >= 75) {
-            TAKE_PROFIT_MULTIPLIER = 5
+            TAKE_PROFIT_MULTIPLIER = 6
             STOP_LOSS_MULTIPLIER = 3
         } else if (maxLeverage >= MIN_LEVERAGE_TO_TRADE) {
-            TAKE_PROFIT_MULTIPLIER = 2.5
+            TAKE_PROFIT_MULTIPLIER = 3
             STOP_LOSS_MULTIPLIER = 1.5
         } else {
             TAKE_PROFIT_MULTIPLIER = 3.5
