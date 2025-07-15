@@ -402,50 +402,76 @@ async function getCurrentPrice(symbol) {
     }
 }
 
-async function placeTpslOrders(position, positionType = 'KILL') {
-    if (!position) return false
-    const { symbol, side, takeProfitPrice, stopLossPrice, pricePrecision } = position
-    
-    addLog(`[${positionType}] Đặt TP/SL trên sàn cho ${side} ${symbol}...`)
-    addLog(`  -> TP @${takeProfitPrice.toFixed(pricePrecision)}, SL @${stopLossPrice.toFixed(pricePrecision)}`)
+async function placeTpslOrders(position, positionType = 'KILL', retries = 3, retryDelay = 3000) {
+    if (!position) return false;
+    const { symbol, side, takeProfitPrice, stopLossPrice, pricePrecision } = position;
+    const details = await getSymbolDetails(symbol);
 
-    try {
-        const orderSide = (side === 'LONG') ? 'SELL' : 'BUY'
-
-        const batchOrders = [
-            {
-                symbol: symbol,
-                side: orderSide,
-                positionSide: side,
-                type: 'TAKE_PROFIT_MARKET',
-                stopPrice: takeProfitPrice.toFixed(pricePrecision),
-                closePosition: 'true' 
-            },
-            {
-                symbol: symbol,
-                side: orderSide,
-                positionSide: side,
-                type: 'STOP_MARKET',
-                stopPrice: stopLossPrice.toFixed(pricePrecision),
-                closePosition: 'true'
-            }
-        ]
-
-        const batchOrdersString = JSON.stringify(batchOrders)
-        
-        await callSignedAPI('/fapi/v1/batchOrders', 'POST', {
-            batchOrders: batchOrdersString
-        })
-
-        addLog(`  -> Đã đặt thành công TP/SL trên sàn cho ${side} ${symbol}`)
-        return true
-    } catch (err) {
-        addLog(`[${positionType}] LỖI ĐẶT TP/SL TRÊN SÀN: ${err.msg || err.message}`)
-        addLog(`  -> Đang đóng khẩn cấp vị thế ${side} ${symbol} vừa mở do không đặt được TP/SL.`)
-        await closePosition(symbol, `Lỗi đặt TP/SL trên sàn`, side)
-        if (err instanceof CriticalApiError && botRunning) await stopBotLogicInternal(`Lỗi đặt TP/SL trên sàn ${symbol}`)
-        return false
+    if (!details) {
+        addLog(`[${positionType}] LỖI: Không lấy được symbol details cho ${symbol} để xác thực giá.`)
+        await closePosition(symbol, `Lỗi lấy details khi đặt TP/SL`, side);
+        return false;
     }
+
+    for (let attempt = 1; attempt <= retries; attempt++) {
+        addLog(`[${positionType}] Đặt TP/SL cho ${side} ${symbol} (Lần ${attempt}/${retries})...`);
+        addLog(`  -> TP @${takeProfitPrice.toFixed(pricePrecision)}, SL @${stopLossPrice.toFixed(pricePrecision)}`);
+
+        try {
+            await cancelAllOpenOrdersForSymbol(symbol);
+            await sleep(500);
+
+            const batchOrders = [
+                { symbol, side: (side === 'LONG' ? 'SELL' : 'BUY'), positionSide: side, type: 'TAKE_PROFIT_MARKET', stopPrice: takeProfitPrice.toFixed(pricePrecision), closePosition: 'true' },
+                { symbol, side: (side === 'LONG' ? 'SELL' : 'BUY'), positionSide: side, type: 'STOP_MARKET', stopPrice: stopLossPrice.toFixed(pricePrecision), closePosition: 'true' }
+            ];
+            const batchOrdersString = JSON.stringify(batchOrders);
+            
+            await callSignedAPI('/fapi/v1/batchOrders', 'POST', { batchOrders: batchOrdersString });
+
+            addLog(`  -> Yêu cầu đã gửi. Chờ ${retryDelay / 1000}s để xác thực trên sàn...`);
+            await sleep(retryDelay);
+
+            const openOrders = await callSignedAPI('/fapi/v1/openOrders', 'GET', { symbol });
+            
+            const tpOrderFound = openOrders.find(o => 
+                o.type === 'TAKE_PROFIT_MARKET' && 
+                o.positionSide === side &&
+                Math.abs(parseFloat(o.stopPrice) - takeProfitPrice) < details.tickSize
+            );
+            const slOrderFound = openOrders.find(o => 
+                o.type === 'STOP_MARKET' && 
+                o.positionSide === side &&
+                Math.abs(parseFloat(o.stopPrice) - stopLossPrice) < details.tickSize
+            );
+
+            if (tpOrderFound && slOrderFound) {
+                addLog(`  -> XÁC THỰC THÀNH CÔNG: TP/SL cho ${side} ${symbol} đã có trên sàn.`);
+                return true;
+            } else {
+                addLog(`  -> XÁC THỰC THẤT BẠI (Lần ${attempt}): Không tìm thấy đủ TP/SL hoặc giá không khớp.`);
+                if (attempt < retries) {
+                    addLog("  -> Sẽ thử lại...");
+                }
+            }
+
+        } catch (err) {
+            addLog(`[${positionType}] LỖI TRONG QUÁ TRÌNH ĐẶT TP/SL (Lần ${attempt}): ${err.msg || err.message}`);
+            if (err instanceof CriticalApiError && botRunning) {
+                await stopBotLogicInternal(`Lỗi nghiêm trọng khi đặt TP/SL trên sàn ${symbol}`);
+                return false;
+            }
+            if (attempt < retries) {
+                addLog("  -> Sẽ thử lại sau lỗi...");
+                await sleep(1500);
+            }
+        }
+    }
+
+    addLog(`[${positionType}] LỖI NGHIÊM TRỌNG: Không thể đặt và xác thực TP/SL cho ${side} ${symbol} sau ${retries} lần thử.`);
+    addLog(`  -> Đóng khẩn cấp vị thế ${side} ${symbol} để đảm bảo an toàn.`);
+    await closePosition(symbol, `Lỗi đặt/xác thực TP/SL`, side);
+    return false;
 }
 
 async function moveStopLossToEntry(position) {
@@ -593,13 +619,13 @@ async function openMarketPosition(symbol, tradeDirection, maxLeverage, entryPric
         let TAKE_PROFIT_MULTIPLIER, STOP_LOSS_MULTIPLIER
 
         if (maxLeverage >= 75) {
-            TAKE_PROFIT_MULTIPLIER = 6
+            TAKE_PROFIT_MULTIPLIER = 7.5
             STOP_LOSS_MULTIPLIER = 3
         } else if (maxLeverage >= MIN_LEVERAGE_TO_TRADE) {
-            TAKE_PROFIT_MULTIPLIER = 3
+            TAKE_PROFIT_MULTIPLIER = 5
             STOP_LOSS_MULTIPLIER = 1.5
         } else {
-            TAKE_PROFIT_MULTIPLIER = 3.5
+            TAKE_PROFIT_MULTIPLIER = 6
             STOP_LOSS_MULTIPLIER = 2
         }
 
@@ -1756,7 +1782,6 @@ function scheduleNextMainCycle(delayMs = 7000) {
     }, delayMs)
 }
 
-// ------ LOGIC WEBSOCKET TỪ FILE KHOA ------
 async function getListenKey() {
     if (!API_KEY || !SECRET_KEY) {
         addLog("Thiếu API key/secret.");
@@ -1871,7 +1896,6 @@ function setupUserDataStream(key) {
         }
     });
 }
-// ----------------------------------------
 
 async function updateStatusCache() {
     if (!botRunning) {
