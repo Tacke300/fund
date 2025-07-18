@@ -20,8 +20,6 @@ const MIN_CANDLES_FOR_SELECTION = 55
 const OVERALL_VOLATILITY_THRESHOLD_VPS1 = 7.9
 const MIN_VOLATILITY_DIFFERENCE_TO_SWITCH = 3.0
 const MIN_LEVERAGE_TO_TRADE = 50
-const PARTIAL_CLOSE_INDEX_5 = 4 // Giữ lại để tương thích, logic mới sẽ ghi đè
-const PARTIAL_CLOSE_INDEX_8 = 7 // Giữ lại để tương thích, logic mới sẽ ghi đè
 const SIDEWAYS_ORDER_SIZE_RATIO = 0.10
 const SIDEWAYS_GRID_STEP_PERCENT = 0.015
 const SIDEWAYS_TP_PRICE_PERCENT = 0.02
@@ -55,7 +53,7 @@ let nextScheduledCycleTimeout = null
 let retryBotTimeout = null
 const logCounts = {}
 let currentBotMode = 'kill'
-let INITIAL_INVESTMENT_AMOUNT = 1.50
+let INITIAL_INVESTMENT_AMOUNT = 1.22
 let TARGET_COIN_SYMBOL = null
 let totalProfit = 0
 let totalLoss = 0
@@ -74,7 +72,6 @@ let overallTakeProfit = 0
 let overallStopLoss = 0
 const pendingClosures = new Set()
 let blacklistedCoinsThisSession = new Set()
-// *** THAY ĐỔI: isReversalInProgress được đổi tên thành isAdjustmentInProgress để phản ánh logic mới
 let isAdjustmentInProgress = false
 let lastKillModeCheckTime = 0
 
@@ -403,7 +400,75 @@ async function getCurrentPrice(symbol) {
     }
 }
 
-// *** THAY ĐỔI: Hàm placeTpslOrders được làm lại hoàn toàn để tăng độ tin cậy.
+// *** SỬA ĐỔI: Hàm mới chuyên đặt TP/SL cho cặp lệnh ban đầu, không tự hủy lệnh.
+async function placeInitialPairTpslOrders(longPos, shortPos, retries = 3) {
+    if (!longPos || !shortPos) {
+        addLog("[KILL-PAIR] Lỗi: Thiếu thông tin vị thế LONG hoặc SHORT để đặt TP/SL.");
+        return false;
+    }
+    const symbol = longPos.symbol;
+    const details = await getSymbolDetails(symbol);
+    if (!details) {
+        addLog(`[KILL-PAIR] LỖI: Không lấy được symbol details cho ${symbol}.`);
+        return false;
+    }
+
+    for (let attempt = 1; attempt <= retries; attempt++) {
+        addLog(`[KILL-PAIR] Đặt TP/SL cho cặp ${symbol} (Lần ${attempt}/${retries})...`);
+        try {
+            const batchOrders = [
+                // LONG Orders
+                { symbol, side: 'SELL', positionSide: 'LONG', type: 'TAKE_PROFIT_MARKET', stopPrice: longPos.takeProfitPrice.toFixed(longPos.pricePrecision), closePosition: 'true' },
+                { symbol, side: 'SELL', positionSide: 'LONG', type: 'STOP_MARKET', stopPrice: longPos.stopLossPrice.toFixed(longPos.pricePrecision), closePosition: 'true' },
+                // SHORT Orders
+                { symbol, side: 'BUY', positionSide: 'SHORT', type: 'TAKE_PROFIT_MARKET', stopPrice: shortPos.takeProfitPrice.toFixed(shortPos.pricePrecision), closePosition: 'true' },
+                { symbol, side: 'BUY', positionSide: 'SHORT', type: 'STOP_MARKET', stopPrice: shortPos.stopLossPrice.toFixed(shortPos.pricePrecision), closePosition: 'true' }
+            ];
+            const batchOrdersString = JSON.stringify(batchOrders);
+            
+            await callSignedAPI('/fapi/v1/batchOrders', 'POST', { batchOrders: batchOrdersString });
+
+            const verificationDelay = 3000;
+            addLog(`  -> Yêu cầu đã gửi. Chờ ${verificationDelay / 1000}s để xác thực trên sàn...`);
+            await sleep(verificationDelay);
+
+            const openOrders = await callSignedAPI('/fapi/v1/openOrders', 'GET', { symbol });
+
+            const longTpFound = openOrders.some(o => o.type === 'TAKE_PROFIT_MARKET' && o.positionSide === 'LONG');
+            const longSlFound = openOrders.some(o => o.type === 'STOP_MARKET' && o.positionSide === 'LONG');
+            const shortTpFound = openOrders.some(o => o.type === 'TAKE_PROFIT_MARKET' && o.positionSide === 'SHORT');
+            const shortSlFound = openOrders.some(o => o.type === 'STOP_MARKET' && o.positionSide === 'SHORT');
+
+            if (longTpFound && longSlFound && shortTpFound && shortSlFound) {
+                addLog(`  -> XÁC THỰC THÀNH CÔNG: Cả 4 lệnh TP/SL cho cặp ${symbol} đã có trên sàn.`);
+                return true;
+            } else {
+                addLog(`  -> XÁC THỰC THẤT BẠI (Lần ${attempt}): Thiếu lệnh TP/SL.`);
+                if (!longTpFound) addLog("    - Thiếu TP cho LONG.");
+                if (!longSlFound) addLog("    - Thiếu SL cho LONG.");
+                if (!shortTpFound) addLog("    - Thiếu TP cho SHORT.");
+                if (!shortSlFound) addLog("    - Thiếu SL cho SHORT.");
+
+                if (attempt < retries) {
+                    addLog("  -> Sẽ thử lại sau khi dọn dẹp các lệnh đã đặt một phần...");
+                    await cancelAllOpenOrdersForSymbol(symbol); // Hủy các lệnh đặt lỗi trước khi thử lại
+                    await sleep(1000);
+                }
+            }
+        } catch (err) {
+            addLog(`[KILL-PAIR] LỖI trong quá trình đặt TP/SL cặp lệnh (Lần ${attempt}): ${err.msg || err.message}`);
+            if (attempt < retries) {
+                addLog("  -> Sẽ thử lại sau lỗi...");
+                await sleep(1500);
+            }
+        }
+    }
+
+    addLog(`[KILL-PAIR] LỖI NGHIÊM TRỌNG: Không thể đặt và xác thực TP/SL cho cặp ${symbol} sau ${retries} lần thử.`);
+    return false;
+}
+
+// Hàm này vẫn giữ nguyên để điều chỉnh các lệnh đơn lẻ
 async function placeTpslOrders(position, positionType = 'KILL', retries = 3) {
     if (!position) return false;
     const { symbol, side, takeProfitPrice, stopLossPrice, pricePrecision } = position;
@@ -415,12 +480,12 @@ async function placeTpslOrders(position, positionType = 'KILL', retries = 3) {
         return false;
     }
 
-    // Luôn hủy các lệnh cũ trước khi đặt lệnh mới
+    // Luôn hủy các lệnh cũ trước khi đặt lệnh mới cho một vị thế đơn lẻ
     try {
         await cancelAllOpenOrdersForSymbol(symbol);
-        await sleep(500); // Chờ một chút để sàn xử lý việc hủy lệnh
+        await sleep(500); 
     } catch (cancelErr) {
-        addLog(`[${positionType}] LƯU Ý: Lỗi khi hủy lệnh cũ cho ${symbol} trước khi đặt mới (có thể bỏ qua): ${cancelErr.msg || cancelErr.message}`);
+        addLog(`[${positionType}] LƯU Ý: Lỗi khi hủy lệnh cũ cho ${symbol} (có thể bỏ qua): ${cancelErr.msg || cancelErr.message}`);
     }
 
 
@@ -430,8 +495,8 @@ async function placeTpslOrders(position, positionType = 'KILL', retries = 3) {
 
         try {
             const batchOrders = [
-                { symbol, side: (side === 'LONG' ? 'SELL' : 'BUY'), positionSide: side, type: 'TAKE_PROFIT_MARKET', stopPrice: takeProfitPrice.toFixed(pricePrecision), closePosition: 'true', timeInForce: 'GTC' },
-                { symbol, side: (side === 'LONG' ? 'SELL' : 'BUY'), positionSide: side, type: 'STOP_MARKET', stopPrice: stopLossPrice.toFixed(pricePrecision), closePosition: 'true', timeInForce: 'GTC' }
+                { symbol, side: (side === 'LONG' ? 'SELL' : 'BUY'), positionSide: side, type: 'TAKE_PROFIT_MARKET', stopPrice: takeProfitPrice.toFixed(pricePrecision), closePosition: 'true' },
+                { symbol, side: (side === 'LONG' ? 'SELL' : 'BUY'), positionSide: side, type: 'STOP_MARKET', stopPrice: stopLossPrice.toFixed(pricePrecision), closePosition: 'true' }
             ];
             const batchOrdersString = JSON.stringify(batchOrders);
             
@@ -459,12 +524,8 @@ async function placeTpslOrders(position, positionType = 'KILL', retries = 3) {
                 return true;
             } else {
                 addLog(`  -> XÁC THỰC THẤT BẠI (Lần ${attempt}): Không tìm thấy đủ TP/SL hoặc giá không khớp.`);
-                if (!tpOrderFound) addLog(`    - Lệnh TP không tìm thấy.`);
-                if (!slOrderFound) addLog(`    - Lệnh SL không tìm thấy.`);
-
                 if (attempt < retries) {
                     addLog("  -> Sẽ thử lại...");
-                    // Hủy lại các lệnh có thể đã được đặt một phần trước khi thử lại
                     await cancelAllOpenOrdersForSymbol(symbol);
                     await sleep(1000);
                 }
@@ -497,7 +558,6 @@ async function moveStopLossToEntry(position) {
     addLog(`[KILL] Vị thế đối lập đã đóng. Dời SL của lệnh ${position.side} về hòa vốn...`)
 
     try {
-        // Hàm placeTpslOrders đã bao gồm việc hủy lệnh cũ nên không cần gọi cancelAllOpenOrdersForSymbol ở đây nữa.
         const updatedPositionForOrder = {
             ...position,
             stopLossPrice: position.entryPrice,
@@ -630,12 +690,11 @@ async function openMarketPosition(symbol, tradeDirection, maxLeverage, entryPric
 
         let takeProfitPrice, stopLossPrice;
 
-        // *** THAY ĐỔI: Logic đặt TP/SL ban đầu theo yêu cầu mới
         let TAKE_PROFIT_MULTIPLIER;
         if (maxLeverage >= 75) {
-            TAKE_PROFIT_MULTIPLIER = 12; // Tăng TP cho bẩy 75
-        } else { // Áp dụng cho bẩy 50 trở lên nhưng dưới 75
-            TAKE_PROFIT_MULTIPLIER = 6; // Tăng TP cho bẩy 50
+            TAKE_PROFIT_MULTIPLIER = 12;
+        } else {
+            TAKE_PROFIT_MULTIPLIER = 6;
         }
 
         let pnlThresholdPerMilestone;
@@ -646,7 +705,6 @@ async function openMarketPosition(symbol, tradeDirection, maxLeverage, entryPric
         }
         
         const targetPnlForTP_USDT = INITIAL_INVESTMENT_AMOUNT * TAKE_PROFIT_MULTIPLIER;
-        // Đặt SL ban đầu tại mốc 6
         const targetPnlForSL_USDT = -(pnlThresholdPerMilestone * 6);
         
         const priceChangeUnitForTP = targetPnlForTP_USDT / actualQuantity;
@@ -671,7 +729,6 @@ async function openMarketPosition(symbol, tradeDirection, maxLeverage, entryPric
             leverage: maxLeverage,
             milestoneCounter: 0,
             closedLossAmount: 0,
-            // Thêm trường pnlThresholdPerMilestone để dễ sử dụng sau này
             pnlThresholdPerMilestone: pnlThresholdPerMilestone
         }
         
@@ -749,25 +806,25 @@ async function recoverPartialPosition(position) {
         const quantityToRecover = parseFloat((Math.floor(position.closedLossAmount / details.stepSize) * details.stepSize).toFixed(details.quantityPrecision))
         
         if (quantityToRecover <= 0) {
-            throw new Error('Lượng phục hồi tính toán ra 0.')
+            addLog(`[PHỤC HỒI VỊ THẾ] Lượng phục hồi tính toán ra 0 hoặc âm. Bỏ qua.`);
+            success = true; // Coi như thành công để không bị kẹt
+        } else {
+            const orderSide = (position.side === 'LONG') ? 'BUY' : 'SELL'
+            await callSignedAPI('/fapi/v1/order', 'POST', {
+                symbol: position.symbol,
+                side: orderSide,
+                positionSide: position.side,
+                type: 'MARKET',
+                quantity: quantityToRecover
+            })
+            
+            position.quantity += quantityToRecover
+            position.closedLossAmount = 0
+            position.milestoneCounter = 0
+            position.realizedPnlFromPartials = 0; 
+            addLog(`  -> Đã mở lại. KL mới của ${position.side}: ${position.quantity.toFixed(position.quantityPrecision)}. Reset mốc cắt lỗ.`)
+            success = true
         }
-
-        const orderSide = (position.side === 'LONG') ? 'BUY' : 'SELL'
-        await callSignedAPI('/fapi/v1/order', 'POST', {
-            symbol: position.symbol,
-            side: orderSide,
-            positionSide: position.side,
-            type: 'MARKET',
-            quantity: quantityToRecover
-        })
-        
-        position.quantity += quantityToRecover
-        position.closedLossAmount = 0
-        position.milestoneCounter = 0
-        position.realizedPnlFromPartials = 0; 
-        addLog(`  -> Đã mở lại. KL mới của ${position.side}: ${position.quantity.toFixed(position.quantityPrecision)}. Reset mốc cắt lỗ.`)
-        success = true
-
     } catch(err) {
         addLog(`[PHỤC HỒI VỊ THẾ] Lỗi: ${err.msg || err.message}`)
         success = false
@@ -829,6 +886,8 @@ async function openSidewaysGridPosition(symbol, tradeDirection, entryPriceToTarg
         
         const tpslPlaced = await placeTpslOrders(gridPos, 'SIDEWAYS')
         if (!tpslPlaced) {
+            // Nếu không đặt được TP/SL, đóng ngay lệnh vừa mở
+            await closePosition(symbol, "Lỗi đặt TP/SL cho lệnh lưới", tradeDirection);
             return null
         }
 
@@ -1156,6 +1215,7 @@ async function runTradingLogic() {
             isOpeningInitialPair = true
             isAdjustmentInProgress = false
             try {
+                // *** SỬA ĐỔI: Hủy lệnh chỉ một lần ở đây
                 await cancelAllOpenOrdersForSymbol(TARGET_COIN_SYMBOL)
                 await sleep(500)
 
@@ -1191,26 +1251,18 @@ async function runTradingLogic() {
                 addLog("Chờ 3s để ổn định giá trước khi đặt TP/SL trên sàn...")
                 await sleep(3000)
 
-                if (currentLongPosition) {
-                    if (!await placeTpslOrders(currentLongPosition, 'KILL')) {
-                        if (currentShortPosition) await closePosition(currentShortPosition.symbol, "Lỗi đặt TP/SL cho LONG", "SHORT")
-                        currentLongPosition = null
-                        currentShortPosition = null
-                        isOpeningInitialPair = false
-                        if (botRunning) scheduleNextMainCycle()
-                        return
-                    }
-                }
-                await sleep(500)
-                 if (currentShortPosition) {
-                    if (!await placeTpslOrders(currentShortPosition, 'KILL')) {
-                        if (currentLongPosition) await closePosition(currentLongPosition.symbol, "Lỗi đặt TP/SL cho SHORT", "LONG")
-                        currentLongPosition = null
-                        currentShortPosition = null
-                        isOpeningInitialPair = false
-                        if (botRunning) scheduleNextMainCycle()
-                        return
-                    }
+                // *** SỬA ĐỔI: Gọi hàm mới để đặt TP/SL cho cả cặp
+                const placedSuccessfully = await placeInitialPairTpslOrders(currentLongPosition, currentShortPosition);
+                
+                if (!placedSuccessfully) {
+                    addLog("LỖI: Không thể đặt TP/SL ban đầu cho cặp lệnh. Đóng cả hai vị thế để đảm bảo an toàn.");
+                    if (currentLongPosition) await closePosition(currentLongPosition.symbol, "Lỗi đặt TP/SL ban đầu", "LONG");
+                    if (currentShortPosition) await closePosition(currentShortPosition.symbol, "Lỗi đặt TP/SL ban đầu", "SHORT");
+                    currentLongPosition = null;
+                    currentShortPosition = null;
+                    isOpeningInitialPair = false;
+                    if (botRunning) scheduleNextMainCycle();
+                    return;
                 }
 
                 lastKillModeCheckTime = Date.now()
@@ -1341,7 +1393,6 @@ async function manageOpenPosition() {
             return
         }
 
-        // *** THAY ĐỔI: Logic điều chỉnh lệnh mới, thay thế cho logic "bảo vệ lệnh thắng" cũ.
         if (currentLongPosition && currentShortPosition && !isAdjustmentInProgress) {
             let winner, loser;
             if (currentLongPosition.unrealizedPnl >= currentShortPosition.unrealizedPnl) {
@@ -1362,31 +1413,30 @@ async function manageOpenPosition() {
                     addLog(`[ĐIỀU CHỈNH] Lệnh lỗ ${loser.side} đạt mốc 5. PNL: ${loser.unrealizedPnl.toFixed(2)} <= ${pnlForMilestone5.toFixed(2)}. Bắt đầu điều chỉnh cả 2 lệnh.`);
 
                     try {
-                        // 1. Điều chỉnh lệnh LỖ
                         const pnlForSlMilestone8 = -(pnlThreshold * 8);
                         const priceChangeForSl8 = pnlForSlMilestone8 / loser.initialQuantity;
                         const newLoserSlPrice = parseFloat((loser.side === 'LONG' ? loser.entryPrice + priceChangeForSl8 : loser.entryPrice - priceChangeForSl8).toFixed(loser.pricePrecision));
-                        const newLoserTpPrice = loser.entryPrice; // TP về hòa vốn
+                        const newLoserTpPrice = loser.entryPrice; 
 
                         const loserAdjustedPos = { ...loser, takeProfitPrice: newLoserTpPrice, stopLossPrice: newLoserSlPrice };
-                        addLog(`  -> [Lệnh Lỗ ${loser.side}] Dời TP về hòa vốn (${newLoserTpPrice.toFixed(loser.pricePrecision)}) và SL về mốc 8 (${newLoserSlPrice.toFixed(loser.pricePrecision)}).`);
-                        const placedLoser = await placeTpslOrders(loserAdjustedPos, 'ADJUST-LOSER');
+                        
+                        const newWinnerSlPrice = winner.entryPrice;
+                        const winnerAdjustedPos = { ...winner, stopLossPrice: newWinnerSlPrice };
 
+                        addLog(`  -> [Lệnh Lỗ ${loser.side}] Dời TP về hòa vốn (${newLoserTpPrice.toFixed(loser.pricePrecision)}) và SL về mốc 8 (${newLoserSlPrice.toFixed(loser.pricePrecision)}).`);
+                        addLog(`  -> [Lệnh Lãi ${winner.side}] Dời SL về hòa vốn: ${newWinnerSlPrice.toFixed(winner.pricePrecision)}`);
+
+                        const placedLoser = await placeTpslOrders(loserAdjustedPos, 'ADJUST-LOSER');
                         if (!placedLoser) throw new Error(`Không thể đặt TP/SL mới cho lệnh lỗ ${loser.side}.`);
                         loser.takeProfitPrice = newLoserTpPrice;
                         loser.stopLossPrice = newLoserSlPrice;
+                        
+                        await sleep(500);
 
-
-                        // 2. Điều chỉnh lệnh LÃI
-                        const newWinnerSlPrice = winner.entryPrice; // SL về hòa vốn
-
-                        const winnerAdjustedPos = { ...winner, stopLossPrice: newWinnerSlPrice };
-                        addLog(`  -> [Lệnh Lãi ${winner.side}] Dời SL về hòa vốn: ${newWinnerSlPrice.toFixed(winner.pricePrecision)}`);
                         const placedWinner = await placeTpslOrders(winnerAdjustedPos, 'ADJUST-WINNER');
-
                         if (!placedWinner) throw new Error(`Không thể đặt TP/SL mới cho lệnh lãi ${winner.side}.`);
                         winner.stopLossPrice = newWinnerSlPrice;
-                        winner.hasMovedSLToEntry = true; // Đánh dấu đã dời SL để không bị dời lại
+                        winner.hasMovedSLToEntry = true;
 
                     } catch (e) {
                         addLog(`  -> LỖI trong quá trình điều chỉnh lệnh: ${e.msg || e.message}. Đóng khẩn cấp cả 2 vị thế.`);
@@ -1399,36 +1449,38 @@ async function manageOpenPosition() {
             }
         }
         
-        // *** THAY ĐỔI: Logic cắt lỗ từng phần mới.
         const positionsToCheck = [currentLongPosition, currentShortPosition]
         for (const pos of positionsToCheck) {
-            if (!pos || pos.unrealizedPnl >= 0 || pendingClosures.size > 0 || isAdjustmentInProgress) continue;
+            if (!pos || pendingClosures.size > 0 || isAdjustmentInProgress) continue;
 
-            if (pos.closedLossAmount > 0 && pos.unrealizedPnl >= -(pos.pnlThresholdPerMilestone * 0.1)) { // Hồi vốn nếu PNL gần bằng 0
+            // *** SỬA ĐỔI: Logic kiểm tra phục hồi được ưu tiên
+            if (pos.closedLossAmount > 0 && pos.unrealizedPnl >= 0) {
                 await recoverPartialPosition(pos);
-                continue;
+                continue; // Sau khi phục hồi, bỏ qua các kiểm tra khác trong chu kỳ này
             }
-
-            const pnlThreshold = pos.pnlThresholdPerMilestone;
-            if (!pnlThreshold) continue;
-
-            const targetPnlForNextLossMilestone = -(pnlThreshold * (pos.milestoneCounter + 1));
             
-            if (pos.unrealizedPnl <= targetPnlForNextLossMilestone) {
-                const nextMilestone = pos.milestoneCounter + 1;
+            // Nếu không phục hồi, kiểm tra cắt lỗ
+            if (pos.unrealizedPnl < 0) {
+                const pnlThreshold = pos.pnlThresholdPerMilestone;
+                if (!pnlThreshold) continue;
 
-                if (nextMilestone === 8) {
-                    addLog(`[CẮT LỖ CUỐI CÙNG] Vị thế ${pos.side} (L${pos.leverage}x) đạt mốc lỗ ${nextMilestone}. PNL: ${pos.unrealizedPnl.toFixed(2)} <= ${targetPnlForNextLossMilestone.toFixed(2)}. Đóng toàn bộ.`);
-                    await closePosition(pos.symbol, `Đạt mốc lỗ cuối cùng (${nextMilestone})`, pos.side);
+                const targetPnlForNextLossMilestone = -(pnlThreshold * (pos.milestoneCounter + 1));
+                
+                if (pos.unrealizedPnl <= targetPnlForNextLossMilestone) {
+                    const nextMilestone = pos.milestoneCounter + 1;
 
-                } else if (nextMilestone < 8) {
-                    addLog(`[CẮT LỖ MILESTONE] Vị thế ${pos.side} (L${pos.leverage}x) đạt mốc lỗ ${nextMilestone}. PNL: ${pos.unrealizedPnl.toFixed(2)} <= ${targetPnlForNextLossMilestone.toFixed(2)}.`);
-                    
-                    const quantityToClose = pos.initialQuantity * 0.10; // Cắt 10% khối lượng ban đầu
-                    const closed = await closePartialPosition(pos, quantityToClose, nextMilestone);
-                    
-                    if (closed) {
-                        pos.milestoneCounter++;
+                    if (nextMilestone === 8) {
+                        addLog(`[CẮT LỖ CUỐI CÙNG] Vị thế ${pos.side} (L${pos.leverage}x) đạt mốc lỗ ${nextMilestone}. PNL: ${pos.unrealizedPnl.toFixed(2)} <= ${targetPnlForNextLossMilestone.toFixed(2)}. Đóng toàn bộ.`);
+                        await closePosition(pos.symbol, `Đạt mốc lỗ cuối cùng (${nextMilestone})`, pos.side);
+                    } else if (nextMilestone < 8) {
+                        addLog(`[CẮT LỖ MILESTONE] Vị thế ${pos.side} (L${pos.leverage}x) đạt mốc lỗ ${nextMilestone}. PNL: ${pos.unrealizedPnl.toFixed(2)} <= ${targetPnlForNextLossMilestone.toFixed(2)}.`);
+                        
+                        const quantityToClose = pos.initialQuantity * 0.10;
+                        const closed = await closePartialPosition(pos, quantityToClose, nextMilestone);
+                        
+                        if (closed) {
+                            pos.milestoneCounter++;
+                        }
                     }
                 }
             }
