@@ -1430,7 +1430,7 @@ async function manageOpenPosition() {
                     
                     if (pos.unrealizedPnl <= targetPnlForNextLossMilestone) {
                         const nextMilestone = pos.milestoneCounter + 1;
-                        const partialClosePercentages = [0.20, 0.30, 0.40]; 
+                        const partialClosePercentages = [0.1, 0.2, 0.3]; 
                         const finalMilestoneToCloseAll = 4;
 
                         if (nextMilestone === finalMilestoneToCloseAll) {
