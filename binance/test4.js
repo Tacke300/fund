@@ -17,14 +17,14 @@ const __dirname = path.dirname(__filename);
 const VPS1_DATA_URL = 'http://34.142.248.96:8888/';
 const MIN_CANDLES_FOR_SELECTION = 10;
 const OVERALL_VOLATILITY_THRESHOLD_VPS1 = 6;
-const MIN_VOLATILITY_DIFFERENCE_TO_SWITCH = 3.0;
+const MIN_VOLATILITY_DIFFERENCE_TO_SWITCH = 4.0;
 const MIN_LEVERAGE_TO_TRADE = 50;
 const SIDEWAYS_ORDER_SIZE_RATIO = 0.10;
-const SIDEWAYS_GRID_STEP_PERCENT = 0.015;
+const SIDEWAYS_GRID_STEP_PERCENT = 0.01;
 const SIDEWAYS_TP_PRICE_PERCENT = 0.02;
-const SIDEWAYS_SL_PRICE_PERCENT = 0.079;
+const SIDEWAYS_SL_PRICE_PERCENT = 0.06;
 const SIDEWAYS_CHECK_INTERVAL_MS = 1 * 60 * 1000;
-const SIDEWAYS_INACTIVITY_TIMEOUT_MS = 15 * 60 * 1000;
+const SIDEWAYS_INACTIVITY_TIMEOUT_MS = 10 * 60 * 1000;
 const BASE_HOST = 'fapi.binance.com';
 const WS_BASE_URL = 'wss://fstream.binance.com';
 const WS_USER_DATA_ENDPOINT = '/ws';
@@ -226,8 +226,12 @@ async function callPublicAPI(fullEndpointPath, params = {}) {
         throw error;
     }
 }
+const BOT_ID = THIS_BOT_PM2_NAME || `bot-${Date.now().toString().slice(-6)}`;
 async function fetchAndCacheTopCoinsFromVPS1(silent = false) {
-    const fullUrl = VPS1_DATA_URL;
+    const url = new URL(VPS1_DATA_URL);
+    url.searchParams.append('bot_id', BOT_ID);
+    const fullUrl = url.toString();
+
     if (!silent) addLog(`Lấy dữ liệu VPS1 & cache: ${fullUrl}`);
     let rawDataForDebug = '';
     try {
@@ -263,7 +267,6 @@ function getCurrentCoinVPS1Data(symbol) {
     if (!symbol || !vps1DataCache || vps1DataCache.length === 0) return null;
     return vps1DataCache.find(c => c.symbol === symbol);
 }
-const BOT_ID = THIS_BOT_PM2_NAME || `bot-${Date.now().toString().slice(-6)}`;
 async function claimCoinOnServer(coinSymbol) {
     if (!coinSymbol) return false;
     addLog(`[SERVER-COMMS] Báo cáo chiếm coin ${coinSymbol} lên server...`);
@@ -1099,26 +1102,6 @@ async function manageSidewaysGridLogic() {
         const currentCoinData = getCurrentCoinVPS1Data(TARGET_COIN_SYMBOL);
         const currentCoinVol = currentCoinData ? Math.abs(currentCoinData.changePercent) : 0;
 
-        const bestAlternativeCoin = vps1DataCache.find(c => c.symbol !== TARGET_COIN_SYMBOL && !blacklistedCoinsThisSession.has(c.symbol));
-        if (bestAlternativeCoin) {
-            const altCoinVol = Math.abs(bestAlternativeCoin.changePercent);
-            const isAltVolSufficient = altCoinVol >= OVERALL_VOLATILITY_THRESHOLD_VPS1;
-            const isVolDifferenceSufficient = altCoinVol > (currentCoinVol + MIN_VOLATILITY_DIFFERENCE_TO_SWITCH);
-
-            if (isAltVolSufficient && isVolDifferenceSufficient) {
-                addLog(`LƯỚI->KILL: Đổi sang coin tốt hơn ${bestAlternativeCoin.symbol} (Vol: ${altCoinVol.toFixed(2)}%) so với ${TARGET_COIN_SYMBOL} (Vol: ${currentCoinVol.toFixed(2)}%).`);
-                sidewaysGrid.isClearingForSwitch = true;
-                await closeAllSidewaysPositionsAndOrders(`Chuyển sang coin tốt hơn ${bestAlternativeCoin.symbol}`);
-                if (sidewaysGrid.switchDelayTimeout) clearTimeout(sidewaysGrid.switchDelayTimeout);
-                sidewaysGrid.switchDelayTimeout = setTimeout(async () => {
-                    sidewaysGrid.isClearingForSwitch = false;
-                    currentBotMode = 'kill';
-                    if (botRunning) scheduleNextMainCycle(1000);
-                }, COIN_SWITCH_DELAY_MS);
-                return;
-            }
-        }
-        
         if (currentCoinVol >= OVERALL_VOLATILITY_THRESHOLD_VPS1) {
             addLog(`LƯỚI->KILL: Vol ${TARGET_COIN_SYMBOL} (${currentCoinVol.toFixed(2)}%) tăng vượt ngưỡng ${OVERALL_VOLATILITY_THRESHOLD_VPS1.toFixed(2)}%. Chuyển sang Kill.`);
             sidewaysGrid.isClearingForSwitch = true;
@@ -1130,6 +1113,25 @@ async function manageSidewaysGridLogic() {
                 if (botRunning) scheduleNextMainCycle(1000);
             }, MODE_SWITCH_DELAY_MS);
             return;
+        }
+        
+        const bestAlternativeCoin = vps1DataCache.find(c => c.symbol !== TARGET_COIN_SYMBOL && !blacklistedCoinsThisSession.has(c.symbol));
+        if (bestAlternativeCoin) {
+            const altCoinVol = Math.abs(bestAlternativeCoin.changePercent);
+            const isVolDifferenceSufficient = altCoinVol > (currentCoinVol + MIN_VOLATILITY_DIFFERENCE_TO_SWITCH);
+
+            if (isVolDifferenceSufficient) {
+                addLog(`LƯỚI->KILL: Đổi sang coin tốt hơn ${bestAlternativeCoin.symbol} (Vol: ${altCoinVol.toFixed(2)}%) so với ${TARGET_COIN_SYMBOL} (Vol: ${currentCoinVol.toFixed(2)}%).`);
+                sidewaysGrid.isClearingForSwitch = true;
+                await closeAllSidewaysPositionsAndOrders(`Chuyển sang coin tốt hơn ${bestAlternativeCoin.symbol}`);
+                if (sidewaysGrid.switchDelayTimeout) clearTimeout(sidewaysGrid.switchDelayTimeout);
+                sidewaysGrid.switchDelayTimeout = setTimeout(async () => {
+                    sidewaysGrid.isClearingForSwitch = false;
+                    currentBotMode = 'kill';
+                    if (botRunning) scheduleNextMainCycle(1000);
+                }, COIN_SWITCH_DELAY_MS);
+                return;
+            }
         }
     }
 }
@@ -2097,6 +2099,10 @@ async function updateStatusCache() {
         killPositionsData.forEach(p => { currentCycleOverallPNLCalculated += parseFloat(p.totalPnl) || 0; });
         gridPositionsData.forEach(p => { currentCycleOverallPNLCalculated += parseFloat(p.pnl) || 0; });
 
+        const gridAnchorPrice = sidewaysGrid.anchorPrice || 0;
+        const upperBoundary = gridAnchorPrice > 0 ? (gridAnchorPrice * (1 + 10 * 0.015)).toFixed(cPP) : 'N/A';
+        const lowerBoundary = gridAnchorPrice > 0 ? (gridAnchorPrice * (1 - 10 * 0.015)).toFixed(cPP) : 'N/A';
+
         statusCache.botStats = {
             success: true,
             data: {
@@ -2109,6 +2115,8 @@ async function updateStatusCache() {
                 sidewaysGridInfo: {
                     isActive: sidewaysGrid.isActive, isClearingForSwitch: sidewaysGrid.isClearingForSwitch,
                     anchorPrice: sidewaysGrid.anchorPrice?.toFixed(cPP),
+                    upperBoundary: upperBoundary,
+                    lowerBoundary: lowerBoundary,
                     stats: sidewaysGrid.sidewaysStats, activePositions: gridPositionsData
                 },
                 currentMarketPrice: currentMarketPrice?.toFixed(cPP), pendingPnlChecks: pendingClosures.size
