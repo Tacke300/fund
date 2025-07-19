@@ -7,25 +7,20 @@ import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-// Quan trọng: Đảm bảo bạn có file config.js trong cùng thư mục với sever.js
-// và nó chứa API_KEY và SECRET_KEY của bạn.
-// Nếu không có, bạn có thể thay thế dòng import bằng:
-// const API_KEY = "YOUR_API_KEY";
-// const SECRET_KEY = "YOUR_SECRET_KEY";
 import { API_KEY, SECRET_KEY } from './config.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
-const port = 9797;
+const port = 9999;
 
 app.use(express.json());
 
 const BINANCE_FAPI_BASE_URL = 'fapi.binance.com';
 const BINANCE_WS_URL = 'wss://fstream.binance.com/stream?streams=';
 
-const WINDOW_MINUTES = 60;
+const WINDOW_MINUTES = 10;
 let coinData = {};
 let topRankedCoinsForApi = [];
 let allSymbols = [];
@@ -33,8 +28,8 @@ let wsClient = null;
 let vps1DataStatus = "initializing";
 let serverTimeOffset = 0;
 
-let claimedCoins = {}; // { "BTCUSDT": "vps1", "ETHUSDT": "vps2" }
-let botStatus = {};    // { "vps1": { status_data... }, "vps2": { status_data... } }
+let claimedCoins = {};
+let botStatus = {};
 
 function logVps1(message) {
     const now = new Date();
@@ -429,35 +424,30 @@ async function main() {
         });
     });
 
-    // === PHẦN SỬA LỖI QUAN TRỌNG BẮT ĐẦU ===
     app.post('/claim_coin', (req, res) => {
         const { coin, bot_id } = req.body;
         if (!coin || !bot_id) {
             return res.status(400).json({ success: false, message: "Thiếu 'coin' hoặc 'bot_id'." });
         }
     
-        // TÌM VÀ GIẢI PHÓNG COIN CŨ CỦA BOT NÀY (NẾU CÓ)
-        // Đây là logic chính để sửa lỗi "một bot chiếm nhiều coin"
         for (const existingCoin in claimedCoins) {
             if (claimedCoins[existingCoin] === bot_id) {
-                // Nếu bot_id này đã chiếm một coin khác (existingCoin), hãy xóa nó đi.
-                delete claimedCoins[existingCoin];
-                logVps1(`[AUTO-RELEASE] Tự động giải phóng ${existingCoin} cho bot '${bot_id}' trước khi chiếm coin mới.`);
+                if (existingCoin !== coin) {
+                    delete claimedCoins[existingCoin];
+                    logVps1(`[AUTO-RELEASE] Tự động giải phóng ${existingCoin} cho bot '${bot_id}' trước khi chiếm coin mới.`);
+                }
             }
         }
     
-        // Bây giờ, tiếp tục logic kiểm tra xem coin mới có bị ai khác chiếm không
-        if (claimedCoins[coin]) {
+        if (claimedCoins[coin] && claimedCoins[coin] !== bot_id) {
             logVps1(`[REJECTED] Bot '${bot_id}' cố gắng chiếm coin ${coin} đã bị '${claimedCoins[coin]}' chiếm.`);
             return res.status(409).json({ success: false, message: `Coin ${coin} đã bị chiếm bởi ${claimedCoins[coin]}.` });
         }
     
-        // Gán coin mới một cách an toàn
         claimedCoins[coin] = bot_id;
         logVps1(`[CLAIMED] Bot '${bot_id}' đã chiếm thành công coin ${coin}.`);
         res.status(200).json({ success: true, message: `Bot ${bot_id} đã chiếm thành công ${coin}.` });
     });
-    // === PHẦN SỬA LỖI QUAN TRỌNG KẾT THÚC ===
 
     app.post('/release_coin', (req, res) => {
         const { coin, bot_id } = req.body;
