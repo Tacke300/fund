@@ -29,7 +29,7 @@ const BASE_HOST = 'fapi.binance.com';
 const WS_BASE_URL = 'wss://fstream.binance.com';
 const WS_USER_DATA_ENDPOINT = '/ws';
 const WEB_SERVER_PORT = 9002;
-const THIS_BOT_PM2_NAME = 'beta4';
+const THIS_BOT_PM2_NAME = 'TuMaY';
 const CUSTOM_LOG_FILE = path.join(__dirname, `pm2_${THIS_BOT_PM2_NAME}.log`);
 const LOG_TO_CUSTOM_FILE = true;
 const MAX_CONSECUTIVE_API_ERRORS = 5;
@@ -1576,7 +1576,7 @@ async function handleFinalClosure(orderId, clientOrderId, symbol, lastKnownPnl, 
     }
     
     if (sidewaysGrid.isActive && !gridIdToClear) {
-        const positionsAfterCheck = await callSignedAPI('/fapi/v1/positionRisk', 'GET', { symbol: symbol });
+        const positionsAfterCheck = await callSignedAPI('/fapi/v2/positionRisk', 'GET', { symbol: symbol });
         for (const pos of sidewaysGrid.activeGridPositions) {
             const correspondingPosOnExchange = positionsAfterCheck.find(p => p.positionSide === pos.side);
             if (!correspondingPosOnExchange || parseFloat(correspondingPosOnExchange.positionAmt) === 0) {
