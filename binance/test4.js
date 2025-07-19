@@ -16,7 +16,7 @@ const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 
 const VPS1_DATA_URL = 'http://34.142.248.96:9000/'
-const MIN_CANDLES_FOR_SELECTION = 55
+const MIN_CANDLES_FOR_SELECTION = 10
 const OVERALL_VOLATILITY_THRESHOLD_VPS1 = 7.9
 const MIN_VOLATILITY_DIFFERENCE_TO_SWITCH = 3.0
 const MIN_LEVERAGE_TO_TRADE = 50
