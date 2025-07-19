@@ -477,7 +477,12 @@ async function main() {
             return;
         }
 
-        const availableCoins = topRankedCoinsForApi.filter(coin => !claimedCoins[coin.symbol]);
+        const requestingBotId = req.query.bot_id;
+
+        const availableCoins = topRankedCoinsForApi.filter(coin => {
+            const claimedBy = claimedCoins[coin.symbol];
+            return !claimedBy || claimedBy === requestingBotId;
+        });
         
         const runningCoins = [];
         for (const symbol in claimedCoins) {
@@ -499,7 +504,7 @@ async function main() {
         
         const responsePayload = {
             status: vps1DataStatus,
-            message: `Trạng thái server: ${runningCoins.length} coin(s) đang chạy, ${availableCoins.length} coin(s) khả dụng.`,
+            message: `Trạng thái server: ${runningCoins.length} coin(s) đang chạy, ${availableCoins.length} coin(s) khả dụng cho bot '${requestingBotId || 'UNKNOWN'}'.`,
             running_coins: runningCoins,
             data: availableCoins
         };
@@ -509,7 +514,7 @@ async function main() {
 
     setInterval(() => {
         const now = Date.now();
-        const STALE_TIMEOUT = 3 * 60 * 1000;
+        const STALE_TIMEOUT = 1 * 60 * 1000;
         
         logVps1("Đang kiểm tra các bot mất kết nối...");
         for (const bot_id in botStatus) {
