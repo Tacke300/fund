@@ -15,7 +15,7 @@ import { API_KEY, SECRET_KEY } from './config.js'
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 
-const VPS1_DATA_URL = 'http://34.142.248.96:9000/'
+const VPS1_DATA_URL = 'http://34.142.248.96:8888/'
 const MIN_CANDLES_FOR_SELECTION = 10
 const OVERALL_VOLATILITY_THRESHOLD_VPS1 = 6
 const MIN_VOLATILITY_DIFFERENCE_TO_SWITCH = 3.0
