@@ -1639,10 +1639,14 @@ async function handleFinalClosure(orderId, clientOrderId, symbol, lastKnownPnl, 
         }
 
         if (orderId) pendingClosures.delete(orderId);
+        if (clientOrderId) pendingClosures.delete(clientOrderId);
         if (gridIdToClear) pendingClosures.delete(gridIdToClear);
 
     } catch (err) {
         addLog(`PNL CHECK Lỗi: ${err.msg || err.message}`);
+        if (orderId) pendingClosures.delete(orderId);
+        if (clientOrderId) pendingClosures.delete(clientOrderId);
+        if (gridIdToClear) pendingClosures.delete(gridIdToClear);
         if (err instanceof CriticalApiError) await stopBotLogicInternal("Lỗi API khi kiểm tra PNL cuối cùng");
         await cleanupAndResetCycle(symbol);
     } finally {
