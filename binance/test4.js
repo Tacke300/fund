@@ -15,7 +15,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const VPS1_DATA_URL = 'http://34.142.248.96:8888/';
-const MIN_CANDLES_FOR_SELECTION = 10;
+const MIN_CANDLES_FOR_SELECTION = 1;
 const OVERALL_VOLATILITY_THRESHOLD_VPS1 = 6;
 const MIN_VOLATILITY_DIFFERENCE_TO_SWITCH = 4.0;
 const MIN_LEVERAGE_TO_TRADE = 50;
@@ -29,14 +29,14 @@ const BASE_HOST = 'fapi.binance.com';
 const WS_BASE_URL = 'wss://fstream.binance.com';
 const WS_USER_DATA_ENDPOINT = '/ws';
 const WEB_SERVER_PORT = 9002;
-const THIS_BOT_PM2_NAME = 'TuMaY';
+const THIS_BOT_PM2_NAME = 'GiaCatLuong';
 const CUSTOM_LOG_FILE = path.join(__dirname, `pm2_${THIS_BOT_PM2_NAME}.log`);
 const LOG_TO_CUSTOM_FILE = true;
 const MAX_CONSECUTIVE_API_ERRORS = 5;
-const ERROR_RETRY_DELAY_MS = 15000;
+const ERROR_RETRY_DELAY_MS = 10000;
 const LOG_COOLDOWN_MS = 2000;
-const MODE_SWITCH_DELAY_MS = 10000;
-const COIN_SWITCH_DELAY_MS = 10000;
+const MODE_SWITCH_DELAY_MS = 5000;
+const COIN_SWITCH_DELAY_MS = 5000;
 const KILL_MODE_SWITCH_CHECK_INTERVAL_MS = 1 * 60 * 1000;
 const STATUS_UPDATE_INTERVAL_MS = 10000;
 
