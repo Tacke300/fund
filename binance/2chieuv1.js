@@ -1454,53 +1454,6 @@ async function manageOpenPosition() {
             }
         }
         
-        if (winner && loser && !isAdjustmentInProgress) {
-            const pnlThreshold = loser.pnlThresholdPerMilestone;
-            if (pnlThreshold) {
-                const pnlForMilestone5 = -(pnlThreshold * 5);
-
-                if (loser.unrealizedPnl <= pnlForMilestone5) {
-                    isAdjustmentInProgress = true;
-                    isProcessingTrade = true;
-                    addLog(`[ĐIỀU CHỈNH] Lệnh lỗ ${loser.side} đạt mốc 5. PNL: ${loser.unrealizedPnl.toFixed(2)} <= ${pnlForMilestone5.toFixed(2)}. Bắt đầu điều chỉnh cả 2 lệnh.`);
-
-                    try {
-                        const pnlForSlMilestone8 = -(pnlThreshold * 8);
-                        const priceChangeForSl8 = pnlForSlMilestone8 / loser.initialQuantity;
-                        const newLoserSlPrice = parseFloat((loser.side === 'LONG' ? loser.entryPrice + priceChangeForSl8 : loser.entryPrice - priceChangeForSl8).toFixed(loser.pricePrecision));
-                        const newLoserTpPrice = loser.entryPrice; 
-
-                        const loserAdjustedPos = { ...loser, takeProfitPrice: newLoserTpPrice, stopLossPrice: newLoserSlPrice };
-                        
-                        const newWinnerSlPrice = winner.entryPrice;
-                        const winnerAdjustedPos = { ...winner, stopLossPrice: newWinnerSlPrice };
-
-                        addLog(`  -> [Lệnh Lỗ ${loser.side}] Dời TP về hòa vốn (${newLoserTpPrice.toFixed(loser.pricePrecision)}) và SL về mốc 8 (${newLoserSlPrice.toFixed(loser.pricePrecision)}).`);
-                        addLog(`  -> [Lệnh Lãi ${winner.side}] Dời SL về hòa vốn: ${newWinnerSlPrice.toFixed(winner.pricePrecision)}`);
-
-                        const placedLoser = await placeTpslOrders(loserAdjustedPos, 'ADJUST-LOSER');
-                        if (!placedLoser) throw new Error(`Không thể đặt TP/SL mới cho lệnh lỗ ${loser.side}.`);
-                        loser.takeProfitPrice = newLoserTpPrice;
-                        loser.stopLossPrice = newLoserSlPrice;
-                        
-                        await sleep(500);
-
-                        const placedWinner = await placeTpslOrders(winnerAdjustedPos, 'ADJUST-WINNER');
-                        if (!placedWinner) throw new Error(`Không thể đặt TP/SL mới cho lệnh lãi ${winner.side}.`);
-                        winner.stopLossPrice = newWinnerSlPrice;
-                        winner.hasMovedSLToEntry = true;
-
-                    } catch (e) {
-                        addLog(`  -> LỖI trong quá trình điều chỉnh lệnh: ${e.msg || e.message}. Đóng khẩn cấp cả 2 vị thế.`);
-                        await closePosition(winner.symbol, "Lỗi điều chỉnh lệnh", winner.side);
-                        await closePosition(loser.symbol, "Lỗi điều chỉnh lệnh", loser.side);
-                    } finally {
-                        isProcessingTrade = false;
-                    }
-                }
-            }
-        }
-        
         if (winner && loser && winner.unrealizedPnl > 0 && !isAdjustmentInProgress) {
             const pnlThreshold = winner.pnlThresholdPerMilestone;
             if (pnlThreshold) {
@@ -1508,13 +1461,55 @@ async function manageOpenPosition() {
 
                 if (winner.unrealizedPnl >= targetPnlForNextProfitMilestone) {
                     const nextMilestone = winner.tpMilestoneCounter + 1;
-                    addLog(`[DÙNG LÃI CẮT LỖ] Lệnh thắng ${winner.side} đạt mốc lãi ${nextMilestone}. PNL: ${winner.unrealizedPnl.toFixed(2)}. Cắt lệnh lỗ ${loser.side}.`);
                     
-                    const quantityToClose = loser.initialQuantity * 0.10;
-                    const closed = await closePartialPosition(loser, quantityToClose, nextMilestone);
-                    
-                    if (closed) {
-                        winner.tpMilestoneCounter++;
+                    if (nextMilestone === 5) {
+                        isAdjustmentInProgress = true;
+                        isProcessingTrade = true;
+                        addLog(`[ĐIỀU CHỈNH] Lệnh thắng ${winner.side} đạt mốc lãi 5. Bắt đầu điều chỉnh cả 2 lệnh.`);
+
+                        try {
+                            const pnlForSlMilestone8 = -(pnlThreshold * 8);
+                            const priceChangeForSl8 = pnlForSlMilestone8 / loser.initialQuantity;
+                            const newLoserSlPrice = parseFloat((loser.side === 'LONG' ? loser.entryPrice + priceChangeForSl8 : loser.entryPrice - priceChangeForSl8).toFixed(loser.pricePrecision));
+                            const newLoserTpPrice = loser.entryPrice; 
+
+                            const loserAdjustedPos = { ...loser, takeProfitPrice: newLoserTpPrice, stopLossPrice: newLoserSlPrice };
+                            
+                            const newWinnerSlPrice = winner.entryPrice;
+                            const winnerAdjustedPos = { ...winner, stopLossPrice: newWinnerSlPrice };
+
+                            addLog(`  -> [Lệnh Lỗ ${loser.side}] Dời TP về hòa vốn (${newLoserTpPrice.toFixed(loser.pricePrecision)}) và SL về mốc 8 (${newLoserSlPrice.toFixed(loser.pricePrecision)}).`);
+                            addLog(`  -> [Lệnh Lãi ${winner.side}] Dời SL về hòa vốn: ${newWinnerSlPrice.toFixed(winner.pricePrecision)}`);
+
+                            const placedLoser = await placeTpslOrders(loserAdjustedPos, 'ADJUST-LOSER');
+                            if (!placedLoser) throw new Error(`Không thể đặt TP/SL mới cho lệnh lỗ ${loser.side}.`);
+                            loser.takeProfitPrice = newLoserTpPrice;
+                            loser.stopLossPrice = newLoserSlPrice;
+                            
+                            await sleep(500);
+
+                            const placedWinner = await placeTpslOrders(winnerAdjustedPos, 'ADJUST-WINNER');
+                            if (!placedWinner) throw new Error(`Không thể đặt TP/SL mới cho lệnh lãi ${winner.side}.`);
+                            winner.stopLossPrice = newWinnerSlPrice;
+                            winner.hasMovedSLToEntry = true;
+
+                        } catch (e) {
+                            addLog(`  -> LỖI trong quá trình điều chỉnh lệnh: ${e.msg || e.message}. Đóng khẩn cấp cả 2 vị thế.`);
+                            await closePosition(winner.symbol, "Lỗi điều chỉnh lệnh", winner.side);
+                            await closePosition(loser.symbol, "Lỗi điều chỉnh lệnh", loser.side);
+                        } finally {
+                            isProcessingTrade = false;
+                        }
+
+                    } else {
+                        addLog(`[DÙNG LÃI CẮT LỖ] Lệnh thắng ${winner.side} đạt mốc lãi ${nextMilestone}. PNL: ${winner.unrealizedPnl.toFixed(2)}. Cắt lệnh lỗ ${loser.side}.`);
+                        
+                        const quantityToClose = loser.initialQuantity * 0.10;
+                        const closed = await closePartialPosition(loser, quantityToClose, nextMilestone);
+                        
+                        if (closed) {
+                            winner.tpMilestoneCounter++;
+                        }
                     }
                 }
             }
