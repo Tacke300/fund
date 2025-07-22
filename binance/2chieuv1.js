@@ -772,10 +772,11 @@ async function openMarketPosition(symbol, tradeDirection, maxLeverage, entryPric
             takeProfitPrice,
             stopLossPrice,
             unrealizedPnl: 0,
-            realizedPnlFromPartials: 0, 
+            realizedPnlFromPartials: 0,
             hasMovedSLToEntry: false,
             leverage: maxLeverage,
             milestoneCounter: 0,
+            tpMilestoneCounter: 0,
             closedLossAmount: 0,
             pnlThresholdPerMilestone: pnlThresholdPerMilestone
         };
@@ -1440,8 +1441,10 @@ async function manageOpenPosition() {
             return;
         }
 
-        if (currentLongPosition && currentShortPosition && !isAdjustmentInProgress) {
-            let winner, loser;
+        let winner = null;
+        let loser = null;
+
+        if (currentLongPosition && currentShortPosition) {
             if (currentLongPosition.unrealizedPnl >= currentShortPosition.unrealizedPnl) {
                 winner = currentLongPosition;
                 loser = currentShortPosition;
@@ -1449,7 +1452,9 @@ async function manageOpenPosition() {
                 winner = currentShortPosition;
                 loser = currentLongPosition;
             }
-
+        }
+        
+        if (winner && loser && !isAdjustmentInProgress) {
             const pnlThreshold = loser.pnlThresholdPerMilestone;
             if (pnlThreshold) {
                 const pnlForMilestone5 = -(pnlThreshold * 5);
@@ -1496,39 +1501,27 @@ async function manageOpenPosition() {
             }
         }
         
-        const positionsToCheck = [currentLongPosition, currentShortPosition];
-        for (const pos of positionsToCheck) {
-            if (!pos || pendingClosures.size > 0 || isAdjustmentInProgress) continue;
-            
-            if (pos.closedLossAmount > 0 && pos.unrealizedPnl >= 0) {
-                await recoverPartialPosition(pos);
-                continue;
-            }
-            
-            if (pos.unrealizedPnl < 0) {
-                const pnlThreshold = pos.pnlThresholdPerMilestone;
-                if (!pnlThreshold) continue;
+        if (winner && loser && winner.unrealizedPnl > 0 && !isAdjustmentInProgress) {
+            const pnlThreshold = winner.pnlThresholdPerMilestone;
+            if (pnlThreshold) {
+                const targetPnlForNextProfitMilestone = pnlThreshold * (winner.tpMilestoneCounter + 1);
 
-                const targetPnlForNextLossMilestone = -(pnlThreshold * (pos.milestoneCounter + 1));
-                
-                if (pos.unrealizedPnl <= targetPnlForNextLossMilestone) {
-                    const nextMilestone = pos.milestoneCounter + 1;
-
-                    if (nextMilestone === 8) {
-                        addLog(`[CẮT LỖ CUỐI CÙNG] Vị thế ${pos.side} (L${pos.leverage}x) đạt mốc lỗ ${nextMilestone}. PNL: ${pos.unrealizedPnl.toFixed(2)} <= ${targetPnlForNextLossMilestone.toFixed(2)}. Đóng toàn bộ.`);
-                        await closePosition(pos.symbol, `Đạt mốc lỗ cuối cùng (${nextMilestone})`, pos.side);
-                    } else if (nextMilestone < 8) {
-                        addLog(`[CẮT LỖ MILESTONE] Vị thế ${pos.side} (L${pos.leverage}x) đạt mốc lỗ ${nextMilestone}. PNL: ${pos.unrealizedPnl.toFixed(2)} <= ${targetPnlForNextLossMilestone.toFixed(2)}.`);
-                        
-                        const quantityToClose = pos.initialQuantity * 0.10;
-                        const closed = await closePartialPosition(pos, quantityToClose, nextMilestone);
-                        
-                        if (closed) {
-                            pos.milestoneCounter++;
-                        }
+                if (winner.unrealizedPnl >= targetPnlForNextProfitMilestone) {
+                    const nextMilestone = winner.tpMilestoneCounter + 1;
+                    addLog(`[DÙNG LÃI CẮT LỖ] Lệnh thắng ${winner.side} đạt mốc lãi ${nextMilestone}. PNL: ${winner.unrealizedPnl.toFixed(2)}. Cắt lệnh lỗ ${loser.side}.`);
+                    
+                    const quantityToClose = loser.initialQuantity * 0.10;
+                    const closed = await closePartialPosition(loser, quantityToClose, nextMilestone);
+                    
+                    if (closed) {
+                        winner.tpMilestoneCounter++;
                     }
                 }
             }
+        }
+
+        if (loser && loser.closedLossAmount > 0 && loser.unrealizedPnl >= 0) {
+           await recoverPartialPosition(loser);
         }
         
         if (currentLongPosition && !currentShortPosition) {
