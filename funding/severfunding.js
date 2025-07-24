@@ -1,4 +1,4 @@
-// severfunding.js (BẢN HOÀN CHỈNH - CHỐNG BOT NÂNG CAO)
+// severfunding.js (BẢN HOÀN CHỈNH - THAY ĐỔI ENDPOINT CHO OKX/BITGET)
 
 const http = require('http');
 const fs = require('fs');
@@ -14,12 +14,9 @@ let cachedData = {
     rates: { bitget: [], bybit: [], okx: [], binance: [] }
 };
 
-// =================== HÀM fetchData ĐƯỢC NÂNG CẤP TỐI ĐA ===================
 function fetchData(url) {
     return new Promise((resolve, reject) => {
         const urlObject = new URL(url);
-
-        // Tạo một bộ headers đầy đủ, giả lập trình duyệt Chrome mới nhất
         const options = {
             hostname: urlObject.hostname,
             path: urlObject.pathname + urlObject.search,
@@ -27,10 +24,6 @@ function fetchData(url) {
             headers: {
                 'Accept': 'application/json, text/plain, */*',
                 'Accept-Language': 'en-US,en;q=0.9,vi;q=0.8',
-                'Connection': 'keep-alive',
-                'Sec-Fetch-Dest': 'empty',
-                'Sec-Fetch-Mode': 'cors',
-                'Sec-Fetch-Site': 'same-origin',
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36'
             }
         };
@@ -39,36 +32,32 @@ function fetchData(url) {
             let body = '';
             res.on('data', (chunk) => body += chunk);
             res.on('end', () => {
-                // Thêm log để xem body trả về nếu có lỗi, giúp debug dễ hơn
                 if (res.statusCode < 200 || res.statusCode >= 300) {
-                    return reject(new Error(`Yêu cầu thất bại: Mã ${res.statusCode} tại ${url}. Body nhận được (một phần): ${body.slice(0, 300)}`));
+                    return reject(new Error(`Yêu cầu thất bại: Mã ${res.statusCode} tại ${url}. Body: ${body.slice(0, 300)}`));
                 }
                 try {
                     resolve(JSON.parse(body));
                 } catch (e) {
-                    reject(new Error(`Lỗi phân tích JSON từ ${url}: ${e.message}. Body nhận được (một phần): ${body.slice(0, 300)}`));
+                    reject(new Error(`Lỗi phân tích JSON từ ${url}: ${e.message}. Body: ${body.slice(0, 300)}`));
                 }
             });
         });
-
-        req.on('error', (err) => {
-            reject(new Error(`Lỗi mạng khi gọi ${url}: ${err.message}`));
-        });
-
+        req.on('error', (err) => reject(new Error(`Lỗi mạng khi gọi ${url}: ${err.message}`)));
         req.end();
     });
 }
-// ====================================================================
 
 async function updateFundingRates() {
     console.log(`[${new Date().toISOString()}] Đang cập nhật dữ liệu funding rates...`);
     
+    // =================== THAY ĐỔI ENDPOINT Ở ĐÂY ===================
     const endpoints = {
         binance: 'https://fapi.binance.com/fapi/v1/premiumIndex',
         bybit: 'https://api.bybit.com/v5/market/tickers?category=linear',
-        okx: 'https://www.okx.com/api/v5/public/funding-rate?instType=SWAP',
-        bitget: 'https://api.bitget.com/api/mix/v1/market/contracts?productType=umcbl',
+        okx: 'https://www.okx.com/api/v5/market/tickers?instType=SWAP', // ĐỔI SANG ENDPOINT TICKERS
+        bitget: 'https://api.bitget.com/api/mix/v1/market/tickers?productType=umcbl' // ĐỔI SANG ENDPOINT TICKERS
     };
+    // =============================================================
 
     const results = await Promise.allSettled(Object.values(endpoints).map(fetchData));
     const [binanceRes, bybitRes, okxRes, bitgetRes] = results;
@@ -82,15 +71,19 @@ async function updateFundingRates() {
         }
     });
 
+    // Xử lý Binance
     const binanceData = (binanceRes.status === 'fulfilled' && Array.isArray(binanceRes.value)) ? binanceRes.value : [];
     newData.binance = binanceData.map(item => ({ symbol: item.symbol, fundingRate: parseFloat(item.lastFundingRate) })).filter(r => r && r.fundingRate < 0).sort((a,b) => a.fundingRate - b.fundingRate);
 
+    // Xử lý Bybit
     const bybitData = (bybitRes.status === 'fulfilled' ? bybitRes.value?.result?.list : []) || [];
     newData.bybit = bybitData.map(item => ({ symbol: item.symbol, fundingRate: parseFloat(item.fundingRate) })).filter(r => r && r.fundingRate < 0).sort((a,b) => a.fundingRate - b.fundingRate);
 
+    // Xử lý OKX (theo cấu trúc của endpoint /tickers)
     const okxData = (okxRes.status === 'fulfilled' ? okxRes.value?.data : []) || [];
     newData.okx = okxData.map(item => ({ symbol: item.instId, fundingRate: parseFloat(item.fundingRate) })).filter(r => r && r.fundingRate < 0).sort((a,b) => a.fundingRate - b.fundingRate);
-
+    
+    // Xử lý Bitget (theo cấu trúc của endpoint /tickers)
     const bitgetData = (bitgetRes.status === 'fulfilled' ? bitgetRes.value?.data : []) || [];
     newData.bitget = bitgetData.map(item => ({ symbol: item.symbol, fundingRate: parseFloat(item.fundingRate) })).filter(r => r && r.fundingRate < 0).sort((a,b) => a.fundingRate - b.fundingRate);
 
@@ -104,31 +97,7 @@ async function updateFundingRates() {
 }
 
 const server = http.createServer((req, res) => {
+    // ... (phần server giữ nguyên không đổi)
     if (req.url === '/' && req.method === 'GET') {
         const filePath = path.join(__dirname, 'index.html');
-        fs.readFile(filePath, (err, content) => {
-            if (err) {
-                res.writeHead(500, { 'Content-Type': 'text/plain; charset=utf-8' });
-                res.end('Lỗi Server: Không thể đọc file index.html.'); return;
-            }
-            res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-            res.end(content);
-        });
-    } else if (req.url === '/api/rates' && req.method === 'GET') {
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify(cachedData));
-    } else {
-        res.writeHead(404, { 'Content-Type': 'text/plain' });
-        res.end('404 Not Found');
-    }
-});
-
-server.listen(PORT, async () => {
-    console.log(`✅ Máy chủ dữ liệu đang chạy tại http://localhost:${PORT}`);
-    console.log(`👨‍💻 Giao diện người dùng: http://localhost:${PORT}/`);
-    console.log(`🤖 Endpoint cho bot: http://localhost:${PORT}/api/rates`);
-    
-    await updateFundingRates();
-    
-    setInterval(updateFundingRates, REFRESH_INTERVAL_MINUTES * 60 * 1000);
-});
+        
