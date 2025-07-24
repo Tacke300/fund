@@ -1,4 +1,4 @@
-// sv1.js (BẢN ỔN ĐỊNH CUỐI CÙNG - LOGIC ĐÚNG)
+// sv1.js (BẢN THỰC TẾ - ỔN ĐỊNH)
 
 const http = require('http');
 const fs = require('fs');
@@ -57,44 +57,36 @@ async function fetchExchangeData(exchangeId) {
             const symbol = cleanSymbol(rate.symbol);
             const marketInfo = exchange.markets[rate.symbol];
 
-            // Lấy TẤT CẢ các coin, không lọc funding âm
+            // Lấy TẤT CẢ các coin, không lọc
             if (rate && typeof rate.fundingRate === 'number' && marketInfo) {
                 
                 let timestamp = null;
                 let maxLeverage = null;
+                let leverageValue;
 
-                // LOGIC RIÊNG BIỆT CHO TỪNG SÀN - SỬA LỖI TRIỆT ĐỂ
+                // LOGIC RIÊNG BIỆT VÀ CHÍNH XÁC CHO TỪNG SÀN
                 switch (exchangeId) {
                     case 'binanceusdm':
                     case 'okx':
                         timestamp = rate.nextFundingTime || rate.fundingTimestamp || null;
-                        // Binance/OKX lưu ở đây
-                        const binanceLev = marketInfo.limits?.leverage?.max;
-                        if (binanceLev) {
-                            maxLeverage = parseFloat(binanceLev);
-                        }
+                        leverageValue = marketInfo.limits?.leverage?.max;
+                        if (leverageValue) maxLeverage = parseFloat(leverageValue);
                         break;
 
                     case 'bingx':
                         timestamp = calculateNextStandardFundingTime();
-                        // BingX lưu ở đây
-                        const bingxLev = marketInfo.info?.leverage_ratio;
-                        if (bingxLev) {
-                            maxLeverage = parseFloat(bingxLev);
-                        }
+                        leverageValue = marketInfo.info?.leverage_ratio;
+                        if (leverageValue) maxLeverage = parseFloat(leverageValue);
                         break;
                         
                     case 'bitget':
                         timestamp = calculateNextStandardFundingTime();
-                        // Bitget lưu ở đây
-                        const bitgetLev = marketInfo.info?.maxLeverage;
-                        if (bitgetLev) {
-                            maxLeverage = parseFloat(bitgetLev);
-                        }
+                        leverageValue = marketInfo.info?.maxLeverage;
+                        if (leverageValue) maxLeverage = parseFloat(leverageValue);
                         break;
                 }
 
-                // Chỉ thêm vào danh sách nếu lấy được đòn bẩy hợp lệ
+                // BỘ LỌC CUỐI CÙNG: Chỉ giữ lại những coin có đầy đủ dữ liệu thực tế
                 if (maxLeverage && maxLeverage > 0) {
                     processedRates[symbol] = {
                         symbol: symbol,
@@ -138,7 +130,6 @@ function calculateArbitrageOpportunities() {
                 const exchange1Id = EXCHANGE_IDS[i], exchange2Id = EXCHANGE_IDS[j];
                 const rate1 = exchangeData[exchange1Id]?.rates[symbol], rate2 = exchangeData[exchange2Id]?.rates[symbol];
 
-                // Đã lọc ở bước fetch nên không cần kiểm tra null ở đây nữa
                 if (!rate1 || !rate2) {
                     continue;
                 }
@@ -212,7 +203,7 @@ const server = http.createServer((req, res) => {
 });
 
 server.listen(PORT, async () => {
-    console.log(`✅ Máy chủ (Bản Ổn Định Cuối Cùng) đang chạy tại http://localhost:${PORT}`);
+    console.log(`✅ Máy chủ (Bản Thực Tế - Ổn Định) đang chạy tại http://localhost:${PORT}`);
     await updateAllData();
     calculateArbitrageOpportunities();
     masterLoop();
