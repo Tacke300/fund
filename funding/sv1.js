@@ -1,4 +1,4 @@
-// sv1.js (BẢN CUỐI CÙNG - SỬA LỖI TÍNH TOÁN & GIỮ NGUYÊN TÍNH NĂNG)
+// sv1.js (BẢN HOÀN CHỈNH - HIỂN THỊ TẤT CẢ CƠ HỘI & SỬA LỖI LOGIC)
 
 const http = require('http');
 const fs = require('fs');
@@ -27,7 +27,6 @@ EXCHANGE_IDS.forEach(id => {
 
 const cleanSymbol = (symbol) => symbol.replace('/USDT', '').replace(':USDT', '');
 
-// Hàm tính toán thời gian chuẩn (dùng làm phương án dự phòng)
 function calculateNextStandardFundingTime() {
     const now = new Date();
     const fundingHoursUTC = [0, 8, 16];
@@ -73,8 +72,7 @@ async function fetchAndProcessDataForExchange(exchangeId) {
         }
         return { id: exchangeId, status: 'success', rates: processedRates };
     } catch (e) {
-        // Bỏ qua lỗi timeout của BingX để không spam console
-        if (!(exchangeId === 'bingx' && e instanceof ccxt.RequestTimeout)) {
+        if (!(e instanceof ccxt.RequestTimeout || e instanceof ccxt.NetworkError)) {
             console.warn(`- Lỗi khi lấy dữ liệu từ ${exchangeId.toUpperCase()}: ${e.constructor.name} - ${e.message}`);
         }
         return { id: exchangeId, status: 'error', rates: {} };
@@ -94,38 +92,47 @@ async function updateAllData() {
     console.log("✅ Cập nhật dữ liệu thành công!");
 }
 
-// YÊU CẦU 2: HÀM LOGIC LẤY THỜI GIAN FUNDING ƯU TIÊN (ĐÃ SỬA LẠI CHO CHÍNH XÁC)
-function getAuthoritativeFundingTime(symbol) {
-    const binanceTime = exchangeData.binanceusdm?.rates[symbol]?.fundingTimestamp;
-    const okxTime = exchangeData.okx?.rates[symbol]?.fundingTimestamp;
+// YÊU CẦU 2: HÀM LOGIC LẤY THỜI GIAN FUNDING ƯU TIÊN
+function getAuthoritativeFundingTime(symbol, allExchangeData) {
+    const binanceTime = allExchangeData.binanceusdm?.rates[symbol]?.fundingTimestamp;
+    const okxTime = allExchangeData.okx?.rates[symbol]?.fundingTimestamp;
 
-    // Ưu tiên 1: Nếu có cả Binance và OKX, lấy thời gian xa hơn (an toàn hơn)
     if (binanceTime && okxTime) return Math.max(binanceTime, okxTime);
-    // Ưu tiên 2: Nếu chỉ có 1 trong 2, lấy cái đó
     if (binanceTime) return binanceTime;
     if (okxTime) return okxTime;
-    // Ưu tiên 3: Nếu không có cả 2, tính thời gian chuẩn
     return calculateNextStandardFundingTime();
 }
 
-// === PHẦN QUAN TRỌNG NHẤT: LOGIC TÍNH TOÁN ĐÃ ĐƯỢC KHÔI PHỤC VÀ NÂNG CẤP ĐÚNG CÁCH ===
+// === LOGIC TÍNH TOÁN ĐÚNG: HIỂN THỊ TẤT CẢ CÁC CẶP THỎA MÃN ĐIỀU KIỆN ===
 function calculateArbitrageOpportunities() {
-    const opportunities = [];
+    // KHỞI TẠO MỘT MẢNG RỖNG ĐỂ CHỨA TẤT CẢ CÁC CƠ HỘI TÌM ĐƯỢC
+    const allFoundOpportunities = []; 
     const allSymbols = new Set();
-    EXCHANGE_IDS.forEach(id => {
-        if (exchangeData[id]) Object.keys(exchangeData[id].rates).forEach(symbol => allSymbols.add(symbol));
+    
+    // Tạo bản sao của exchangeData để đảm bảo dữ liệu nhất quán trong một lần chạy
+    const currentExchangeData = JSON.parse(JSON.stringify(exchangeData));
+
+    Object.values(currentExchangeData).forEach(data => {
+        if(data.rates) Object.keys(data.rates).forEach(symbol => allSymbols.add(symbol));
     });
 
-    allSymbols.forEach(symbol => {
-        let bestOpportunityForSymbol = null;
-        for (let i = 0; i < EXCHANGE_IDS.length; i++) {
-            for (let j = i + 1; j < EXCHANGE_IDS.length; j++) {
-                const exchange1Id = EXCHANGE_IDS[i], exchange2Id = EXCHANGE_IDS[j];
-                const rate1Data = exchangeData[exchange1Id]?.rates[symbol], rate2Data = exchangeData[exchange2Id]?.rates[symbol];
+    for (let i = 0; i < EXCHANGE_IDS.length; i++) {
+        for (let j = i + 1; j < EXCHANGE_IDS.length; j++) {
+            const exchange1Id = EXCHANGE_IDS[i];
+            const exchange2Id = EXCHANGE_IDS[j];
+            
+            const exchange1Rates = currentExchangeData[exchange1Id]?.rates;
+            const exchange2Rates = currentExchangeData[exchange2Id]?.rates;
 
-                if (!rate1Data || !rate2Data) continue;
+            if (!exchange1Rates || !exchange2Rates) continue;
 
-                // --- BƯỚC 1: TÍNH TOÁN CƠ BẢN (LOGIC ỔN ĐỊNH GỐC) ---
+            // Tìm các coin chung giữa 2 sàn
+            const commonSymbols = Object.keys(exchange1Rates).filter(symbol => exchange2Rates[symbol]);
+
+            for (const symbol of commonSymbols) {
+                const rate1Data = exchange1Rates[symbol];
+                const rate2Data = exchange2Rates[symbol];
+
                 let longExchange, shortExchange, longRate, shortRate;
                 if (rate1Data.fundingRate > rate2Data.fundingRate) {
                     shortExchange = exchange1Id; shortRate = rate1Data;
@@ -136,46 +143,36 @@ function calculateArbitrageOpportunities() {
                 }
 
                 const fundingDiff = shortRate.fundingRate - longRate.fundingRate;
-                if (fundingDiff < FUNDING_DIFFERENCE_THRESHOLD) continue;
-
                 const commonLeverage = Math.min(longRate.maxLeverage, shortRate.maxLeverage);
                 const estimatedPnl = fundingDiff * commonLeverage * 100;
 
-                // --- BƯỚC 2: LỌC THEO NGƯỠNG PNL (YÊU CẦU 1) ---
-                if (estimatedPnl <= MINIMUM_PNL_THRESHOLD) continue;
-                
-                // --- BƯỚC 3: SAU KHI ĐÃ CÓ CƠ HỘI HỢP LỆ, ÁP DỤNG CÁC LOGIC NÂNG CAO ---
-                
-                // Áp dụng logic thời gian ưu tiên (Yêu cầu 2)
-                const finalFundingTime = getAuthoritativeFundingTime(symbol);
+                // NẾU THỎA MÃN ĐIỀU KIỆN PNL >= 15, THÊM NGAY VÀO DANH SÁCH
+                if (estimatedPnl >= MINIMUM_PNL_THRESHOLD) {
+                    // Áp dụng logic thời gian ưu tiên cho coin này
+                    const finalFundingTime = getAuthoritativeFundingTime(symbol, currentExchangeData);
 
-                // Đánh dấu cơ hội sắp tới (Để làm hiệu ứng nhấp nháy)
-                const minutesUntilFunding = (finalFundingTime - Date.now()) / (1000 * 60);
-                const isImminent = minutesUntilFunding > 0 && minutesUntilFunding <= IMMINENT_THRESHOLD_MINUTES;
+                    const minutesUntilFunding = (finalFundingTime - Date.now()) / (1000 * 60);
+                    const isImminent = minutesUntilFunding > 0 && minutesUntilFunding <= IMMINENT_THRESHOLD_MINUTES;
 
-                const currentOpportunity = {
-                    coin: symbol,
-                    exchanges: `${shortExchange.replace('usdm', '')} / ${longExchange.replace('usdm', '')}`,
-                    fundingDiff: parseFloat(fundingDiff.toFixed(6)),
-                    nextFundingTime: finalFundingTime,
-                    commonLeverage: commonLeverage,
-                    estimatedPnl: parseFloat(estimatedPnl.toFixed(2)),
-                    isImminent: isImminent,
-                };
-
-                // Tìm cơ hội tốt nhất cho symbol này
-                if (!bestOpportunityForSymbol || currentOpportunity.estimatedPnl > bestOpportunityForSymbol.estimatedPnl) {
-                    bestOpportunityForSymbol = currentOpportunity;
+                    const opportunity = {
+                        coin: symbol,
+                        exchanges: `${shortExchange.replace('usdm', '')} / ${longExchange.replace('usdm', '')}`,
+                        fundingDiff: parseFloat(fundingDiff.toFixed(6)),
+                        nextFundingTime: finalFundingTime,
+                        commonLeverage: commonLeverage,
+                        estimatedPnl: parseFloat(estimatedPnl.toFixed(2)),
+                        isImminent: isImminent,
+                    };
+                    
+                    // Thêm trực tiếp vào mảng, không cần so sánh "tốt nhất"
+                    allFoundOpportunities.push(opportunity);
                 }
             }
         }
-        if (bestOpportunityForSymbol) {
-            opportunities.push(bestOpportunityForSymbol);
-        }
-    });
+    }
     
-    // YÊU CẦU 3: SẮP XẾP 2 CẤP ĐỘ
-    arbitrageOpportunities = opportunities.sort((a, b) => {
+    // YÊU CẦU 3: SẮP XẾP TẤT CẢ CÁC CƠ HỘI TÌM ĐƯỢC THEO 2 CẤP ĐỘ
+    arbitrageOpportunities = allFoundOpportunities.sort((a, b) => {
         if (a.nextFundingTime < b.nextFundingTime) return -1;
         if (a.nextFundingTime > b.nextFundingTime) return 1;
         return b.estimatedPnl - a.estimatedPnl;
@@ -219,7 +216,7 @@ const server = http.createServer((req, res) => {
 });
 
 server.listen(PORT, async () => {
-    console.log(`✅ Máy chủ dữ liệu (Bản sửa lỗi) đang chạy tại http://localhost:${PORT}`);
+    console.log(`✅ Máy chủ dữ liệu (Bản Hoàn Chỉnh) đang chạy tại http://localhost:${PORT}`);
     await updateAllData();
     calculateArbitrageOpportunities();
     masterLoop();
