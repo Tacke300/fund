@@ -62,8 +62,8 @@ async function fetchExchangeData(exchangeId) {
                 switch (exchangeId) {
                     case 'binanceusdm':
                     case 'okx':
-                        timestamp = rate.nextFundingTime || rate.fundingTimestamp;
-                        maxLeverage = marketInfo.limits?.leverage?.max || marketInfo.info?.maxLeverage || 75;
+                        timestamp = rate.nextFundingTime || rate.fundingTimestamp || null;
+                        maxLeverage = parseFloat(marketInfo.limits?.leverage?.max) || null;
                         break;
                     case 'bingx':
                         timestamp = calculateNextStandardFundingTime();
@@ -71,11 +71,11 @@ async function fetchExchangeData(exchangeId) {
                         break;
                     case 'bitget':
                         timestamp = calculateNextStandardFundingTime();
-                        maxLeverage = marketInfo.limits?.leverage?.max || parseFloat(marketInfo.info?.maxLeverage) || 75;
+                        maxLeverage = parseFloat(marketInfo.info?.maxLeverage) || parseFloat(marketInfo.limits?.leverage?.max) || null;
                         break;
                     default:
-                        timestamp = rate.nextFundingTime || null;
-                        maxLeverage = 75;
+                        timestamp = null;
+                        maxLeverage = null;
                         break;
                 }
 
@@ -119,31 +119,38 @@ function calculateArbitrageOpportunities() {
         let bestOpportunityForSymbol = null;
         for (let i = 0; i < EXCHANGE_IDS.length; i++) {
             for (let j = i + 1; j < EXCHANGE_IDS.length; j++) {
-                const exchange1Id = EXCHANGE_IDS[i], exchange2Id = EXCHANGE_IDS[j];
-                const rate1 = exchangeData[exchange1Id]?.rates[symbol], rate2 = exchangeData[exchange2Id]?.rates[symbol];
-                
-                if (!rate1 || !rate2 || rate1.maxLeverage === null || rate2.maxLeverage === null) {
+                const exchange1Id = EXCHANGE_IDS[i],
+                    exchange2Id = EXCHANGE_IDS[j];
+                const rate1 = exchangeData[exchange1Id]?.rates[symbol];
+                const rate2 = exchangeData[exchange2Id]?.rates[symbol];
+
+                if (!rate1 || !rate2 || !rate1.maxLeverage || !rate2.maxLeverage) {
                     continue;
                 }
-                
+
                 const fundingDiff = Math.abs(rate1.fundingRate - rate2.fundingRate);
                 if (fundingDiff < FUNDING_DIFFERENCE_THRESHOLD) continue;
-                
+
                 const commonLeverage = Math.min(rate1.maxLeverage, rate2.maxLeverage);
                 let fee = 0;
-                if (commonLeverage <= 25) fee = 5; else if (commonLeverage <= 50) fee = 10; else if (commonLeverage <= 75) fee = 15; else if (commonLeverage <= 100) fee = 20; else if (commonLeverage <= 125) fee = 25; else fee = 30;
-                
+                if (commonLeverage <= 25) fee = 5;
+                else if (commonLeverage <= 50) fee = 10;
+                else if (commonLeverage <= 75) fee = 15;
+                else if (commonLeverage <= 100) fee = 20;
+                else if (commonLeverage <= 125) fee = 25;
+                else fee = 30;
+
                 const estimatedPnl = 100 * commonLeverage * fundingDiff - fee;
                 if (estimatedPnl <= MINIMUM_PNL_THRESHOLD) continue;
-                
+
                 const currentOpportunity = {
                     coin: symbol,
-                    exchanges: `${exchangeId.replace('usdm', '')} / ${exchange2Id.replace('usdm', '')}`,
+                    exchanges: `${exchange1Id.replace('usdm', '')} / ${exchange2Id.replace('usdm', '')}`,
                     nextFundingTime: rate1.fundingTimestamp || rate2.fundingTimestamp,
                     commonLeverage: commonLeverage,
                     estimatedPnl: parseFloat(estimatedPnl.toFixed(2)),
                 };
-                
+
                 if (!bestOpportunityForSymbol || currentOpportunity.estimatedPnl > bestOpportunityForSymbol.estimatedPnl) {
                     bestOpportunityForSymbol = currentOpportunity;
                 }
@@ -172,8 +179,14 @@ function masterLoop() {
 const server = http.createServer((req, res) => {
     if (req.url === '/' && req.method === 'GET') {
         fs.readFile(path.join(__dirname, 'index.html'), (err, content) => {
-            if (err) { res.writeHead(500); res.end('Lỗi index.html'); return; }
-            res.writeHead(200, {'Content-Type': 'text/html; charset=utf-8'});
+            if (err) {
+                res.writeHead(500);
+                res.end('Lỗi index.html');
+                return;
+            }
+            res.writeHead(200, {
+                'Content-Type': 'text/html; charset=utf-8'
+            });
             res.end(content);
         });
     } else if (req.url === '/api/data' && req.method === 'GET') {
@@ -187,15 +200,18 @@ const server = http.createServer((req, res) => {
                 bitget: Object.values(exchangeData.bitget?.rates || {}),
             }
         };
-        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.writeHead(200, {
+            'Content-Type': 'application/json'
+        });
         res.end(JSON.stringify(responseData));
     } else {
-        res.writeHead(404); res.end('Not Found');
+        res.writeHead(404);
+        res.end('Not Found');
     }
 });
 
 server.listen(PORT, async () => {
-    console.log(`✅ Máy chủ dữ liệu BẢN CUỐI CÙNG đang chạy tại http://localhost:${PORT}`);
+    console.log(`✅ Máy chủ dữ liệu (Bản Ổn Định) đang chạy tại http://localhost:${PORT}`);
     await updateAllData();
     calculateArbitrageOpportunities();
     masterLoop();
