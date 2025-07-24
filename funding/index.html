@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Funding Rates Monitor & Arbitrage</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background-color: #f4f7f9; color: #333; margin: 0; padding: 20px; }
+        .container { max-width: 1400px; margin: 0 auto; }
+        h1, h2 { text-align: center; color: #2c3e50; }
+        h1 { margin-bottom: 5px;}
+        .timestamp { text-align: center; color: #7f8c8d; margin-bottom: 30px; font-size: 0.9em; }
+        .grid-container { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; }
+        .exchange-column { background-color: #fff; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); padding: 15px 20px; }
+        .exchange-column h3 { border-bottom: 2px solid #e0e0e0; padding-bottom: 10px; margin-top: 0; color: #3498db; }
+        .rate-item { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid #f0f0f0; }
+        .rate-item:last-child { border-bottom: none; }
+        .symbol { font-weight: bold; color: #2c3e50; }
+        .funding-rate { font-weight: bold; color: #e74c3c; }
+        .funding-details { display: flex; flex-direction: column; align-items: flex-end; }
+        .funding-time { font-size: 0.8em; color: #888; /* Chữ đen mờ */ margin-top: 2px; }
+        .leverage { font-size: 0.8em; color: #3498db; }
+        table { width: 100%; border-collapse: collapse; margin-bottom: 30px; background-color: #fff; box-shadow: 0 4px 6px rgba(0,0,0,0.1); border-radius: 8px; overflow: hidden; }
+        th, td { padding: 12px 15px; text-align: left; border-bottom: 1px solid #ddd; }
+        thead { background-color: #34495e; color: #ffffff; }
+        th { font-weight: bold; }
+        tbody tr:nth-child(even) { background-color: #f2f2f2; }
+        tbody tr:hover { background-color: #e8f4fd; }
+        .pnl-positive { font-weight: bold; color: #27ae60; }
+        /* Lớp CSS cho việc tô màu xanh lá */
+        .highlight-green td { color: #27ae60 !important; font-weight: bold; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>Bảng Tính Toán Arbitrage</h1>
+    <p class="timestamp" id="arbitrage-timestamp">Đang tải dữ liệu...</p>
+
+    <table id="arbitrage-table">
+        <thead>
+            <tr>
+                <th>Coin</th>
+                <th>Sàn Giao Dịch</th>
+                <th>Thời Gian Funding Sắp Tới</th>
+                <th>% PnL Ước Tính</th>
+            </tr>
+        </thead>
+        <tbody>
+            <!-- Dữ liệu sẽ được chèn vào đây bởi JavaScript -->
+        </tbody>
+    </table>
+
+    <h2>Theo Dõi Funding Rates Âm</h2>
+    <p class="timestamp" id="rates-timestamp"></p>
+
+    <div class="grid-container" id="rates-grid">
+        <!-- Các cột sàn sẽ được chèn vào đây -->
+    </div>
+</div>
+
+<script>
+    const API_ENDPOINT = '/api/data';
+
+    // Hàm định dạng thời gian từ timestamp
+    function formatTime(timestamp) {
+        if (!timestamp) return 'N/A';
+        const date = new Date(timestamp);
+        return date.toLocaleString('vi-VN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    }
+
+    // Hàm render bảng arbitrage
+    function renderArbitrageTable(opportunities) {
+        const tbody = document.querySelector('#arbitrage-table tbody');
+        tbody.innerHTML = ''; // Xóa dữ liệu cũ
+
+        if (!opportunities || opportunities.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;">Không tìm thấy cơ hội nào hoặc đang ngoài giờ tính toán.</td></tr>';
+            return;
+        }
+
+        opportunities.forEach(op => {
+            const tr = document.createElement('tr');
+            
+            // Tính thời gian còn lại
+            const now = Date.now();
+            const timeRemainingMinutes = (op.nextFundingTime - now) / (1000 * 60);
+
+            // Thêm class nếu thời gian còn lại <= 55 phút
+            if (timeRemainingMinutes <= 55 && timeRemainingMinutes > 0) {
+                tr.classList.add('highlight-green');
+            }
+
+            tr.innerHTML = `
+                <td>${op.coin}</td>
+                <td>${op.exchanges.toUpperCase()}</td>
+                <td>${formatTime(op.nextFundingTime)}</td>
+                <td class="pnl-positive">+${op.estimatedPnl}%</td>
+            `;
+            tbody.appendChild(tr);
+        });
+    }
+
+    // Hàm render các cột funding rate thô
+    function renderRawRates(rates) {
+        const grid = document.getElementById('rates-grid');
+        grid.innerHTML = '';
+        const exchangeNames = { binance: 'Binance', bingx: 'BingX', okx: 'OKX', bitget: 'Bitget' };
+
+        Object.keys(exchangeNames).forEach(key => {
+            const column = document.createElement('div');
+            column.className = 'exchange-column';
+
+            let itemsHtml = '';
+            const exchangeRates = rates[key] || [];
+
+            exchangeRates.slice(0, 30).forEach(rate => { // Hiển thị 30 cặp đầu tiên
+                itemsHtml += `
+                    <div class="rate-item">
+                        <div>
+                            <div class="symbol">${rate.symbol}</div>
+                            <div class="leverage">Max Lev: x${rate.maxLeverage}</div>
+                        </div>
+                        <div class="funding-details">
+                            <div class="funding-rate">${(rate.fundingRate * 100).toFixed(4)}%</div>
+                            <div class="funding-time">${formatTime(rate.fundingTimestamp)}</div>
+                        </div>
+                    </div>
+                `;
+            });
+
+            column.innerHTML = `<h3>${exchangeNames[key]}</h3><div class="rate-list">${itemsHtml}</div>`;
+            grid.appendChild(column);
+        });
+    }
+
+    // Hàm chính để lấy và hiển thị dữ liệu
+    async function fetchData() {
+        try {
+            const response = await fetch(API_ENDPOINT);
+            if (!response.ok) throw new Error('Network response was not ok');
+            const data = await response.json();
+            
+            // Cập nhật timestamp
+            const updateTime = data.lastUpdated ? new Date(data.lastUpdated).toLocaleString('vi-VN') : 'Chưa cập nhật';
+            document.getElementById('arbitrage-timestamp').innerText = `Dữ liệu tính toán lúc: ${updateTime}`;
+            document.getElementById('rates-timestamp').innerText = `Dữ liệu gốc cập nhật lúc: ${updateTime}`;
+
+            // Render cả hai phần
+            renderArbitrageTable(data.arbitrageData);
+            renderRawRates(data.rawRates);
+
+        } catch (error) {
+            console.error('Lỗi khi lấy dữ liệu:', error);
+            document.getElementById('arbitrage-timestamp').innerText = 'Lỗi khi tải dữ liệu.';
+        }
+    }
+
+    // Tải dữ liệu khi trang được mở và tự động cập nhật mỗi 60 giây
+    document.addEventListener('DOMContentLoaded', () => {
+        fetchData();
+        setInterval(fetchData, 60000); // 1 phút
+    });
+</script>
+
+</body>
+</html>
