@@ -1,9 +1,9 @@
-// severfunding.js (BẢN 6 - KHÔNG DÙNG THƯ VIỆN NGOÀI, SỬA LỖI LOGIC)
+// severfunding.js (BẢN 7)
 
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
-const https = require('https'); // Chỉ dùng https, không dùng ccxt
+const https = require('https');
 const { URL } = require('url');
 
 const PORT = 5000;
@@ -11,12 +11,9 @@ const REFRESH_INTERVAL_MINUTES = 5;
 
 let cachedData = {
     lastUpdated: null,
-    rates: { binance: [], bingx: [], okx: [], bitget: [] } 
+    rates: { binance: [], bingx: [], okx: [], bitget: [] }
 };
 
-// =========================================================================
-// HÀM fetchData, TUYỆT ĐỐI KHÔNG SỬA
-// =========================================================================
 function fetchData(url) {
     return new Promise((resolve, reject) => {
         const urlObject = new URL(url);
@@ -42,17 +39,13 @@ function fetchData(url) {
     });
 }
 
-// =====================================================
-// HÀM CẬP NHẬT TỔNG HỢP - SỬA LẠI LOGIC XỬ LÝ
-// =====================================================
 async function updateFundingRates() {
     console.log(`[${new Date().toISOString()}] Đang cập nhật dữ liệu funding rates...`);
-    
-    // Các endpoint đã được kiểm tra lại kỹ lưỡng
+
     const endpoints = {
         binance: 'https://fapi.binance.com/fapi/v1/premiumIndex',
         bingx: 'https://open-api.bingx.com/openApi/swap/v2/ticker/fundingRate',
-        okx: 'https://www.okx.com/api/v5/public/instruments?instType=SWAP', 
+        okx: 'https://www.okx.com/api/v5/public/instruments?instType=SWAP',
         bitget: 'https://api.bitget.com/api/mix/v1/market/tickers?productType=umcbl'
     };
 
@@ -67,19 +60,19 @@ async function updateFundingRates() {
         }
     });
 
-    // Xử lý Binance (đã chạy tốt)
+    // Binance (Đã chạy tốt)
     const binanceData = (binanceRes.status === 'fulfilled' && Array.isArray(binanceRes.value)) ? binanceRes.value : [];
     newData.binance = binanceData.map(item => ({ symbol: item.symbol, fundingRate: parseFloat(item.lastFundingRate) })).filter(r => r && r.fundingRate < 0).sort((a,b) => a.fundingRate - b.fundingRate);
 
-    // Xử lý BingX (sửa lại đường dẫn dữ liệu cho đúng)
+    // BingX (Sửa lỗi logic)
     const bingxData = (bingxRes.status === 'fulfilled' ? bingxRes.value?.data : []) || [];
     newData.bingx = bingxData.map(item => ({ symbol: item.symbol.replace('-', ''), fundingRate: parseFloat(item.fundingRate) })).filter(r => r && r.fundingRate < 0).sort((a,b) => a.fundingRate - b.fundingRate);
 
-    // Xử lý OKX (sửa lại để xử lý đúng cấu trúc của endpoint /public/instruments)
+    // OKX (Sửa lỗi logic)
     const okxData = (okxRes.status === 'fulfilled' ? okxRes.value?.data : []) || [];
-    newData.okx = okxData.map(item => ({ symbol: item.instId.replace('-SWAP', ''), fundingRate: parseFloat(item.fundingRate) })).filter(r => r && r.fundingRate < 0 && r.fundingRate !== 0).sort((a,b) => a.fundingRate - b.fundingRate);
-    
-    // Xử lý Bitget (đã chạy tốt + chuẩn hóa tên)
+    newData.okx = okxData.map(item => ({ symbol: item.instId.replace('-SWAP', ''), fundingRate: parseFloat(item.fundingRate) })).filter(r => r && !isNaN(r.fundingRate) && r.fundingRate < 0).sort((a,b) => a.fundingRate - b.fundingRate);
+
+    // Bitget (Đã chạy tốt + Chuẩn hóa tên)
     const bitgetData = (bitgetRes.status === 'fulfilled' ? bitgetRes.value?.data : []) || [];
     newData.bitget = bitgetData.map(item => ({ symbol: item.symbol.replace('_UMCBL', ''), fundingRate: parseFloat(item.fundingRate) })).filter(r => r && r.fundingRate < 0).sort((a,b) => a.fundingRate - b.fundingRate);
 
@@ -87,14 +80,11 @@ async function updateFundingRates() {
         lastUpdated: new Date().toISOString(),
         rates: newData
     };
-    
+
     console.log("✅ Cập nhật dữ liệu thành công!");
     console.log(`   - Binance: ${newData.binance.length} cặp, BingX: ${newData.bingx.length} cặp, OKX: ${newData.okx.length} cặp, Bitget: ${newData.bitget.length} cặp.`);
 }
 
-// =========================================
-// PHẦN SERVER (TUYỆT ĐỐI KHÔNG SỬA)
-// =========================================
 const server = http.createServer((req, res) => {
     if (req.url === '/' && req.method === 'GET') {
         const filePath = path.join(__dirname, 'index.html');
@@ -116,7 +106,7 @@ server.listen(PORT, async () => {
     console.log(`✅ Máy chủ dữ liệu đang chạy tại http://localhost:${PORT}`);
     console.log(`👨‍💻 Giao diện người dùng: http://localhost:${PORT}/`);
     console.log(`🤖 Endpoint cho bot: http://localhost:${PORT}/api/rates`);
-    
+
     await updateFundingRates();
     setInterval(updateFundingRates, REFRESH_INTERVAL_MINUTES * 60 * 1000);
 });
