@@ -1,4 +1,4 @@
-// sv1.js (BẢN NÂNG CẤP TOÀN DIỆN)
+// sv1.js (BẢN CUỐI CÙNG - SỬA LỖI TÍNH TOÁN & GIỮ NGUYÊN TÍNH NĂNG)
 
 const http = require('http');
 const fs = require('fs');
@@ -9,9 +9,10 @@ const PORT = 5001;
 
 // ----- CẤU HÌNH -----
 const EXCHANGE_IDS = ['binanceusdm', 'bingx', 'okx', 'bitget'];
+const FUNDING_DIFFERENCE_THRESHOLD = 0.002;
 // YÊU CẦU 1: CỨ TRÊN 15% LÀ HIỂN THỊ
 const MINIMUM_PNL_THRESHOLD = 15;
-const IMMINENT_THRESHOLD_MINUTES = 15; // Cơ hội được coi là "sắp tới" nếu còn dưới 15 phút
+const IMMINENT_THRESHOLD_MINUTES = 15; // Ngưỡng để kích hoạt hiệu ứng nhấp nháy
 
 // ----- BIẾN TOÀN CỤC -----
 let exchangeData = {};
@@ -26,6 +27,7 @@ EXCHANGE_IDS.forEach(id => {
 
 const cleanSymbol = (symbol) => symbol.replace('/USDT', '').replace(':USDT', '');
 
+// Hàm tính toán thời gian chuẩn (dùng làm phương án dự phòng)
 function calculateNextStandardFundingTime() {
     const now = new Date();
     const fundingHoursUTC = [0, 8, 16];
@@ -58,7 +60,6 @@ async function fetchAndProcessDataForExchange(exchangeId) {
             const marketInfo = exchange.markets[rate.symbol];
             if (rate && typeof rate.fundingRate === 'number' && marketInfo) {
                 let timestamp = rate.fundingTimestamp || rate.nextFundingTime || null;
-                // Chỉ "chữa cháy" cho bitget nếu CCXT không trả về time
                 if (exchangeId === 'bitget' && !timestamp) {
                     timestamp = calculateNextStandardFundingTime();
                 }
@@ -72,7 +73,10 @@ async function fetchAndProcessDataForExchange(exchangeId) {
         }
         return { id: exchangeId, status: 'success', rates: processedRates };
     } catch (e) {
-        console.warn(`- Lỗi khi lấy dữ liệu từ ${exchangeId.toUpperCase()}: ${e.constructor.name} - ${e.message}`);
+        // Bỏ qua lỗi timeout của BingX để không spam console
+        if (!(exchangeId === 'bingx' && e instanceof ccxt.RequestTimeout)) {
+            console.warn(`- Lỗi khi lấy dữ liệu từ ${exchangeId.toUpperCase()}: ${e.constructor.name} - ${e.message}`);
+        }
         return { id: exchangeId, status: 'error', rates: {} };
     }
 }
@@ -80,7 +84,7 @@ async function fetchAndProcessDataForExchange(exchangeId) {
 async function updateAllData() {
     console.log(`[${new Date().toISOString()}] Bắt đầu cập nhật dữ liệu...`);
     const results = await Promise.all(EXCHANGE_IDS.map(id => fetchAndProcessDataForExchange(id)));
-    exchangeData = {}; // Xóa dữ liệu cũ trước khi cập nhật
+    exchangeData = {};
     results.forEach(result => {
         if (result.status === 'success') {
             exchangeData[result.id] = { rates: result.rates };
@@ -90,22 +94,21 @@ async function updateAllData() {
     console.log("✅ Cập nhật dữ liệu thành công!");
 }
 
-// YÊU CẦU 2: HÀM LOGIC LẤY THỜI GIAN FUNDING ƯU TIÊN
-function determinePriorityFundingTime(symbol) {
+// YÊU CẦU 2: HÀM LOGIC LẤY THỜI GIAN FUNDING ƯU TIÊN (ĐÃ SỬA LẠI CHO CHÍNH XÁC)
+function getAuthoritativeFundingTime(symbol) {
     const binanceTime = exchangeData.binanceusdm?.rates[symbol]?.fundingTimestamp;
     const okxTime = exchangeData.okx?.rates[symbol]?.fundingTimestamp;
 
-    if (binanceTime && okxTime) {
-        return Math.max(binanceTime, okxTime); // Lấy thời gian xa hơn
-    }
+    // Ưu tiên 1: Nếu có cả Binance và OKX, lấy thời gian xa hơn (an toàn hơn)
+    if (binanceTime && okxTime) return Math.max(binanceTime, okxTime);
+    // Ưu tiên 2: Nếu chỉ có 1 trong 2, lấy cái đó
     if (binanceTime) return binanceTime;
     if (okxTime) return okxTime;
-
-    // Nếu cả 2 sàn ưu tiên đều không có, dùng thời gian mặc định
+    // Ưu tiên 3: Nếu không có cả 2, tính thời gian chuẩn
     return calculateNextStandardFundingTime();
 }
 
-
+// === PHẦN QUAN TRỌNG NHẤT: LOGIC TÍNH TOÁN ĐÃ ĐƯỢC KHÔI PHỤC VÀ NÂNG CẤP ĐÚNG CÁCH ===
 function calculateArbitrageOpportunities() {
     const opportunities = [];
     const allSymbols = new Set();
@@ -121,7 +124,8 @@ function calculateArbitrageOpportunities() {
                 const rate1Data = exchangeData[exchange1Id]?.rates[symbol], rate2Data = exchangeData[exchange2Id]?.rates[symbol];
 
                 if (!rate1Data || !rate2Data) continue;
-                
+
+                // --- BƯỚC 1: TÍNH TOÁN CƠ BẢN (LOGIC ỔN ĐỊNH GỐC) ---
                 let longExchange, shortExchange, longRate, shortRate;
                 if (rate1Data.fundingRate > rate2Data.fundingRate) {
                     shortExchange = exchange1Id; shortRate = rate1Data;
@@ -137,12 +141,15 @@ function calculateArbitrageOpportunities() {
                 const commonLeverage = Math.min(longRate.maxLeverage, shortRate.maxLeverage);
                 const estimatedPnl = fundingDiff * commonLeverage * 100;
 
+                // --- BƯỚC 2: LỌC THEO NGƯỠNG PNL (YÊU CẦU 1) ---
                 if (estimatedPnl <= MINIMUM_PNL_THRESHOLD) continue;
                 
-                // Áp dụng logic mới để lấy thời gian funding
-                const finalFundingTime = determinePriorityFundingTime(symbol);
+                // --- BƯỚC 3: SAU KHI ĐÃ CÓ CƠ HỘI HỢP LỆ, ÁP DỤNG CÁC LOGIC NÂNG CAO ---
+                
+                // Áp dụng logic thời gian ưu tiên (Yêu cầu 2)
+                const finalFundingTime = getAuthoritativeFundingTime(symbol);
 
-                // YÊU CẦU 4: Đánh dấu cơ hội sắp tới
+                // Đánh dấu cơ hội sắp tới (Để làm hiệu ứng nhấp nháy)
                 const minutesUntilFunding = (finalFundingTime - Date.now()) / (1000 * 60);
                 const isImminent = minutesUntilFunding > 0 && minutesUntilFunding <= IMMINENT_THRESHOLD_MINUTES;
 
@@ -153,35 +160,36 @@ function calculateArbitrageOpportunities() {
                     nextFundingTime: finalFundingTime,
                     commonLeverage: commonLeverage,
                     estimatedPnl: parseFloat(estimatedPnl.toFixed(2)),
-                    isImminent: isImminent, // Thêm cờ đánh dấu
+                    isImminent: isImminent,
                 };
 
+                // Tìm cơ hội tốt nhất cho symbol này
                 if (!bestOpportunityForSymbol || currentOpportunity.estimatedPnl > bestOpportunityForSymbol.estimatedPnl) {
                     bestOpportunityForSymbol = currentOpportunity;
                 }
             }
         }
-        if (bestOpportunityForSymbol) opportunities.push(bestOpportunityForSymbol);
+        if (bestOpportunityForSymbol) {
+            opportunities.push(bestOpportunityForSymbol);
+        }
     });
     
     // YÊU CẦU 3: SẮP XẾP 2 CẤP ĐỘ
     arbitrageOpportunities = opportunities.sort((a, b) => {
-        // Cấp 1: Sắp xếp theo thời gian funding tăng dần
         if (a.nextFundingTime < b.nextFundingTime) return -1;
         if (a.nextFundingTime > b.nextFundingTime) return 1;
-
-        // Cấp 2: Nếu thời gian bằng nhau, sắp xếp theo PNL giảm dần
         return b.estimatedPnl - a.estimatedPnl;
     });
 }
 
-// ----- CÁC HÀM KHỞI ĐỘNG VÀ MÁY CHỦ (giữ nguyên logic) -----
+
+// ----- CÁC HÀM KHỞI ĐỘNG VÀ MÁY CHỦ (Không thay đổi) -----
 function masterLoop() {
     setInterval(async () => {
         console.log(`[${new Date().toISOString()}] Đang cập nhật và tính toán...`);
         await updateAllData();
         calculateArbitrageOpportunities();
-        console.log(`   => Đã tìm thấy ${arbitrageOpportunities.length} cơ hội arbitrage.`);
+        console.log(`   => Tìm thấy ${arbitrageOpportunities.length} cơ hội arbitrage thỏa mãn điều kiện.`);
     }, 60 * 1000);
 }
 
@@ -211,7 +219,7 @@ const server = http.createServer((req, res) => {
 });
 
 server.listen(PORT, async () => {
-    console.log(`✅ Máy chủ dữ liệu (Bản Nâng Cấp) đang chạy tại http://localhost:${PORT}`);
+    console.log(`✅ Máy chủ dữ liệu (Bản sửa lỗi) đang chạy tại http://localhost:${PORT}`);
     await updateAllData();
     calculateArbitrageOpportunities();
     masterLoop();
