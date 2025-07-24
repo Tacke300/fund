@@ -1,4 +1,4 @@
-// severfunding.js (BẢN 7 - CHẾ ĐỘ GỠ LỖI)
+// severfunding.js (BẢN 8 - CHẾ ĐỘ GỠ LỖI NÂNG CAO)
 
 const http = require('http');
 const fs = require('fs');
@@ -14,7 +14,7 @@ let cachedData = {
     rates: { binance: [], bingx: [], okx: [], bitget: [] } 
 };
 
-// Hàm fetchData cũ, đã chạy tốt -> Giữ nguyên
+// Hàm fetchData được sửa lại để trả về cả body thô và json đã parse
 function fetchData(url) {
     return new Promise((resolve, reject) => {
         const urlObject = new URL(url);
@@ -32,7 +32,11 @@ function fetchData(url) {
             res.on('data', (chunk) => body += chunk);
             res.on('end', () => {
                 if (res.statusCode < 200 || res.statusCode >= 300) return reject(new Error(`Yêu cầu thất bại: Mã ${res.statusCode} tại ${url}.`));
-                try { resolve({ body: body, json: JSON.parse(body) }); } catch (e) { reject(new Error(`Lỗi phân tích JSON từ ${url}. Body thô: ${body}`)); }
+                try { 
+                    resolve({ body: body, json: JSON.parse(body) }); 
+                } catch (e) { 
+                    reject(new Error(`Lỗi phân tích JSON từ ${url}. Body thô: ${body}`)); 
+                }
             });
         });
         req.on('error', (err) => reject(new Error(`Lỗi mạng khi gọi ${url}: ${err.message}`)));
@@ -137,4 +141,17 @@ server.listen(PORT, async () => {
     
     await updateFundingRates();
     setInterval(updateFundingRates, REFRESH_INTERVAL_MINUTES * 60 * 1000);
-});
+});```
+
+### **Khởi động và gửi lại log**
+
+1.  **Chạy lại server:**
+    ```bash
+    pm2 restart severfunding
+    ```
+2.  **Xem và gửi lại log:**
+    Chờ khoảng 20 giây, sau đó chạy lệnh:
+    ```bash
+    pm2 logs severfunding
+    ```
+    Lần này, log sẽ chứa các dòng `[BINGX RAW BODY]` và `[OKX RAW BODY]`. Hãy sao chép và gửi lại **toàn bộ** phần log đó. Dữ liệu này sẽ cho chúng ta biết chính xác vấn đề.
