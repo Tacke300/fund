@@ -20,6 +20,7 @@
         
         /* Bảng Arbitrage */
         .pnl-positive { font-weight: bold; color: #27ae60; }
+        .funding-diff { color: #e67e22; font-weight: bold;} /* Thêm style cho cột chênh lệch */
         .highlight-green td { color: #27ae60 !important; font-weight: bold; }
         
         /* Bảng Matrix Funding */
@@ -38,8 +39,10 @@
         <thead>
             <tr>
                 <th>Coin</th>
-                <th>Cặp Sàn</th>
+                <th>Cặp Sàn (Short / Long)</th>
                 <th>Max Lev Chung</th>
+                <!-- THAY ĐỔI 1: THÊM TIÊU ĐỀ CỘT MỚI -->
+                <th>Chênh lệch Funding</th>
                 <th>Thời Gian Funding</th>
                 <th>% PnL Ước Tính</th>
             </tr>
@@ -76,7 +79,8 @@
     function renderArbitrageTable(opportunities) {
         const tbody = document.querySelector('#arbitrage-table tbody');
         if (!opportunities || opportunities.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;">Không tìm thấy cơ hội nào.</td></tr>';
+            // THAY ĐỔI 2: CẬP NHẬT COLSPAN TỪ 5 LÊN 6
+            tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;">Không tìm thấy cơ hội nào.</td></tr>';
             return;
         }
         tbody.innerHTML = opportunities.map(op => {
@@ -87,6 +91,8 @@
                         <td>${op.coin}</td>
                         <td>${op.exchanges.toUpperCase()}</td>
                         <td>x${op.commonLeverage}</td>
+                        <!-- THAY ĐỔI 3: THÊM Ô DỮ LIỆU CHO CỘT MỚI -->
+                        <td class="funding-diff">${(op.fundingDiff * 100).toFixed(4)}%</td>
                         <td>${formatTime(op.nextFundingTime)}</td>
                         <td class="pnl-positive">+${op.estimatedPnl}%</td>
                     </tr>`;
@@ -97,7 +103,6 @@
     function renderFundingMatrixTable(ratesData) {
         const tbody = document.querySelector('#funding-matrix-table tbody');
         
-        // Chuyển đổi dữ liệu để dễ tra cứu: { 'BTC': { binance: {...}, okx: {...} }, ... }
         const ratesByCoin = {};
         for (const exchange of EXCHANGES) {
             if (ratesData[exchange]) {
@@ -110,7 +115,6 @@
             }
         }
         
-        // Sắp xếp coin theo funding rate âm nhất trên bất kỳ sàn nào
         const sortedCoins = Object.keys(ratesByCoin).sort((a, b) => {
             const minRateA = Math.min(...EXCHANGES.map(ex => ratesByCoin[a][ex]?.fundingRate || 0));
             const minRateB = Math.min(...EXCHANGES.map(ex => ratesByCoin[b][ex]?.fundingRate || 0));
@@ -129,7 +133,7 @@
                                     <div class="sub-info">${subText}</div>
                                 </td>`;
                 } else {
-                    rowHtml += `<td>-</td>`; // Hiển thị gạch ngang nếu không có dữ liệu
+                    rowHtml += `<td>-</td>`;
                 }
             }
             return `<tr>${rowHtml}</tr>`;
