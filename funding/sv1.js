@@ -18,7 +18,7 @@ const LEVERAGE_CACHE_REFRESH_INTERVAL_MINUTES = 30;
 const binanceApiKey = '2rgsf5oYto2HaBS05DS7u4QVtDHf5uxQjEpZiP6eSMUlQRYb194XdE82zZy0Yujw';
 const binanceApiSecret = 'jnCGekaD5XWm8i48LIAfQZpq5pFtBmZ3ZyYR4sK3UW4PoZlgPVCMrljk8DCFa9Xk';
 const bingxApiKey = 'vvmD6sdV12c382zUvGMWUnD1yWi1ti8TCFsGaiEIlH6kFTHzkmPdeJQCuUQivXKAPrsEcfOvgwge9aAQ';
-const bingxApiSecret = '1o30hXOVTsZ6o40JixrGPfTCvHaqFTutSEpGAyjbmyGt7p9RsVqGUKXHHItsOz174ncfQ9YWStvGIs3Oeb3Pg';
+const bingxApiSecret = '1o30hXOVTsZ6o40JixrGPfTCvHaqFTutSEpGAyjqbmGt7p9RsVqGUKXHHItsOz174ncfQ9YWStvGIs3Oeb3Pg';
 const okxApiKey = 'c2f77f8b-a71a-41a3-8caf-3459dbdbaa0b';
 const okxApiSecret = '6337107745922F1D457C472297513220';
 const okxPassword = 'Altf4enter$';
@@ -39,10 +39,8 @@ const privateExchanges = {}; // Dùng để lấy đòn bẩy, cần key
 
 EXCHANGE_IDS.forEach(id => {
     const exchangeClass = ccxt[id];
-    // Luôn tạo một bản public
     publicExchanges[id] = new exchangeClass({ 'options': { 'defaultType': 'swap' } });
 
-    // Chỉ tạo bản private nếu có key
     const config = { 'options': { 'defaultType': 'swap' } };
     let hasKey = false;
     if (id === 'binanceusdm' && binanceApiKey) { config.apiKey = binanceApiKey; config.secret = binanceApiSecret; hasKey = true; }
@@ -54,7 +52,6 @@ EXCHANGE_IDS.forEach(id => {
         privateExchanges[id] = new exchangeClass(config);
         console.log(`[AUTH] Đã cấu hình HMAC cho ${id.toUpperCase()}.`);
     } else {
-        // Nếu không có key, bản private chính là bản public (sẽ không thể lấy thông tin đòn bẩy chi tiết)
         privateExchanges[id] = publicExchanges[id];
     }
 });
@@ -92,15 +89,30 @@ async function getGenericLeverage(exchange) {
     try {
         await exchange.loadMarkets(true);
         const leverages = {};
+
+        // === BẮT ĐẦU LOG DEBUG CHO BINGX ===
+        if (exchange.id === 'bingx') {
+            console.log(`[DEBUG] BINGX - Tổng số thị trường được tải: ${Object.keys(exchange.markets).length}`);
+            // Log khả năng của sàn (để xem có hỗ trợ leverage_tiers hay không)
+            // console.log(`[DEBUG] BINGX - Khả năng của sàn (exchange.has):`, exchange.has);
+
+            // Nếu bạn muốn xem toàn bộ đối tượng market cho BingX (có thể rất dài):
+            // console.log(`[DEBUG] BINGX - Tất cả các thị trường:`, Object.values(exchange.markets));
+        }
+        // === KẾT THÚC LOG DEBUG CHO BINGX ===
+
         for (const market of Object.values(exchange.markets)) {
             if (market.swap && market.quote === 'USDT') {
                 const symbol = cleanSymbol(market.symbol);
-                // DÒNG LOG DEBUG ĐẶC BIỆT CHO BINGX
+
+                // === LOG DEBUG CHI TIẾT HƠN CHO TỪNG MARKET CỦA BINGX ===
                 if (exchange.id === 'bingx') {
+                    console.log(`[DEBUG] BINGX - Đang xử lý thị trường: ${symbol}`);
                     console.log(`[DEBUG] BINGX - ${symbol} Market Limits:`, market.limits);
                     console.log(`[DEBUG] BINGX - ${symbol} Market Limits Leverage:`, market.limits?.leverage);
                     console.log(`[DEBUG] BINGX - ${symbol} Market Limits Leverage Max:`, market.limits?.leverage?.max);
                 }
+                // === KẾT THÚC LOG DEBUG CHI TIẾT HƠN CHO TỪNG MARKET CỦA BINGX ===
 
                 if (typeof market?.limits?.leverage?.max === 'number') {
                     leverages[symbol] = market.limits.leverage.max;
@@ -108,6 +120,9 @@ async function getGenericLeverage(exchange) {
                     console.warn(`[CACHE] ⚠️ ${exchange.id.toUpperCase()}: Không tìm thấy market.limits.leverage.max là số cho ${symbol}.`);
                     leverages[symbol] = null;
                 }
+            } else if (exchange.id === 'bingx') {
+                // Log này giúp xác định lý do một thị trường bị bỏ qua (không phải swap hoặc không phải USDT quote)
+                // console.log(`[DEBUG] BINGX - Bỏ qua thị trường ${market.symbol}: swap=${market.swap}, quote=${market.quote}`);
             }
         }
         return leverages;
@@ -121,16 +136,14 @@ async function initializeLeverageCache() {
     console.log('[CACHE] Bắt đầu làm mới bộ nhớ đệm đòn bẩy...');
     const newCache = {};
     await Promise.all(EXCHANGE_IDS.map(async (id) => {
-        const exchange = privateExchanges[id]; // Luôn dùng bản private để có quyền cao nhất
+        const exchange = privateExchanges[id];
         try {
             let leverages = {};
-            // Phân luồng logic lấy đòn bẩy cho từng sàn
             if (id === 'binanceusdm') {
                 leverages = await getBinanceLeverage(exchange);
                 const count = Object.values(leverages).filter(v => v !== null).length;
                 console.log(`[CACHE] ✅ ${id.toUpperCase()}: Lấy thành công ${count} đòn bẩy bằng 'fetchLeverageTiers'.`);
             } else {
-                // Các sàn còn lại dùng phương pháp chung
                 leverages = await getGenericLeverage(exchange);
                 const count = Object.values(leverages).filter(v => v !== null).length;
                 console.log(`[CACHE] ✅ ${id.toUpperCase()}: Lấy thành công ${count} đòn bẩy bằng 'loadMarkets' (dự phòng).`);
@@ -138,7 +151,7 @@ async function initializeLeverageCache() {
             newCache[id] = leverages;
         } catch (e) {
             console.error(`[CACHE] ❌ Lỗi nghiêm trọng khi lấy đòn bẩy cho ${id.toUpperCase()}: ${e.message}`);
-            newCache[id] = {}; // Gán cache rỗng nếu lỗi
+            newCache[id] = {};
         }
     }));
     leverageCache = newCache;
@@ -161,7 +174,6 @@ async function fetchFundingRatesForAllExchanges() {
     const freshData = {};
     const results = await Promise.all(EXCHANGE_IDS.map(async (id) => {
         try {
-            // Luôn dùng bản public để không bị ảnh hưởng bởi lỗi API key
             const exchange = publicExchanges[id];
             const fundingRatesRaw = await exchange.fetchFundingRates();
             const processedRates = {};
@@ -205,9 +217,19 @@ function calculateArbitrageOpportunities() {
 
                 let longExchange, shortExchange, longRate, shortRate;
                 if (rate1Data.fundingRate > rate2Data.fundingRate) {
-                    shortExchange = exchange1Id; shortRate = rate1Data; longExchange = exchange2Id; longRate = rate2Data;
+                    shortExchange = exchange1Id; shortRate = rate1Data; longExchange = exchange2Id; longRate = rate1Data; // Lỗi: longRate phải là rate2Data, không phải rate1Data
                 } else {
                     shortExchange = exchange2Id; shortRate = rate2Data; longExchange = exchange1Id; longRate = rate1Data;
+                }
+                
+                // Sửa lỗi ở đây: longRate phải lấy từ rate2Data khi longExchange là exchange2Id
+                // Và longRate phải lấy từ rate1Data khi longExchange là exchange1Id
+                if (rate1Data.fundingRate > rate2Data.fundingRate) {
+                    shortExchange = exchange1Id; shortRate = rate1Data;
+                    longExchange = exchange2Id; longRate = rate2Data;
+                } else {
+                    shortExchange = exchange2Id; shortRate = rate2Data;
+                    longExchange = exchange1Id; longRate = rate1Data;
                 }
 
                 const fundingDiff = shortRate.fundingRate - longRate.fundingRate;
@@ -287,6 +309,11 @@ const server = http.createServer((req, res) => {
                 bitget: Object.values(exchangeData.bitget?.rates || {}),
             }
         };
+        // === LOG DEBUG DỮ LIỆU GỬI ĐẾN FRONTEND ===
+        // Uncomment dòng dưới đây để xem toàn bộ dữ liệu rawRates được gửi đi
+        // console.log("[DEBUG] Dữ liệu API gửi đến frontend (rawRates):", JSON.stringify(responseData.rawRates, null, 2));
+        // === KẾT THÚC LOG DEBUG ===
+
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify(responseData));
     } else {
