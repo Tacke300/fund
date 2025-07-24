@@ -1,83 +1,99 @@
-// severfunding.js (BẢN 9 - CHẾ ĐỘ "BẮT DỮ LIỆU THÔ")
+// severfunding.js (BẢN 10 - GIẢI PHÁP DỨT ĐIỂM BẰNG CCXT)
 
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
-const https = require('https'); 
-const { URL } = require('url');
+const ccxt = require('ccxt'); // BẮT BUỘC DÙNG THƯ VIỆN CHUYÊN DỤNG
 
 const PORT = 5000;
 const REFRESH_INTERVAL_MINUTES = 5;
 
-// Hàm fetchData được sửa lại để luôn trả về body dạng text
-function fetchDataRaw(url) {
-    return new Promise((resolve, reject) => {
-        const urlObject = new URL(url);
-        const options = {
-            hostname: urlObject.hostname,
-            path: urlObject.pathname + urlObject.search,
-            method: 'GET',
-            headers: {
-                'Accept': 'application/json, text/plain, */*',
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36'
-            }
-        };
-        const req = https.get(options, (res) => {
-            let body = '';
-            res.on('data', (chunk) => body += chunk);
-            res.on('end', () => {
-                if (res.statusCode < 200 || res.statusCode >= 300) {
-                    return reject(new Error(`Yêu cầu thất bại: Mã ${res.statusCode} tại ${url}. Body nhận được: ${body}`));
-                }
-                // Luôn trả về body dạng text
-                resolve(body); 
-            });
-        });
-        req.on('error', (err) => reject(new Error(`Lỗi mạng khi gọi ${url}: ${err.message}`)));
-        req.end();
-    });
+let cachedData = {
+    lastUpdated: null,
+    rates: { binance: [], bingx: [], okx: [], bitget: [] } 
+};
+
+// Khởi tạo các sàn giao dịch qua CCXT
+const exchanges = {
+    binance: new ccxt.binanceusdm(),
+    bingx: new ccxt.bingx(), 
+    okx: new ccxt.okx(),
+    bitget: new ccxt.bitget()
+};
+
+/**
+ * Hàm lấy funding rates từ một sàn cụ thể bằng CCXT.
+ * @param {string} exchangeName - Tên của sàn
+ * @returns {Promise<Array>} - Mảng dữ liệu funding rate
+ */
+async function fetchRatesForExchange(exchangeName) {
+    try {
+        const exchange = exchanges[exchangeName];
+        const fundingRates = await exchange.fetchFundingRates();
+        
+        return Object.values(fundingRates)
+            .filter(rate => rate && typeof rate.fundingRate === 'number' && rate.fundingRate < 0)
+            .map(rate => ({
+                symbol: rate.symbol.replace('/', ''), 
+                fundingRate: rate.fundingRate
+            }));
+    } catch (e) {
+        if (e instanceof ccxt.NetworkError) {
+            console.error(`- Lỗi MẠNG CCXT khi lấy dữ liệu từ ${exchangeName.toUpperCase()}: ${e.message}`);
+        } else if (e instanceof ccxt.ExchangeError) {
+            console.error(`- Lỗi từ SÀN CCXT ${exchangeName.toUpperCase()}: ${e.message}`);
+        } else {
+            console.error(`- Lỗi KHÔNG XÁC ĐỊNH CCXT từ ${exchangeName.toUpperCase()}: ${e.message}`);
+        }
+        return [];
+    }
 }
 
-// Hàm cập nhật chỉ để in log, không xử lý dữ liệu phức tạp
 async function updateFundingRates() {
-    console.log(`\n\n[BẮT ĐẦU CHU KỲ BẮT DỮ LIỆU THÔ...]`);
+    console.log(`[${new Date().toISOString()}] Đang cập nhật dữ liệu bằng giải pháp CCXT...`);
+
+    const exchangeKeys = Object.keys(exchanges);
+
+    const results = await Promise.all(
+        exchangeKeys.map(key => fetchRatesForExchange(key))
+    );
+
+    const newRates = {};
+    exchangeKeys.forEach((key, index) => {
+        newRates[key] = results[index].sort((a,b) => a.fundingRate - b.fundingRate);
+    });
     
-    const endpoints = {
-        bingx: 'https://open-api.bingx.com/openApi/swap/v2/ticker/fundingRate',
-        okx: 'https://www.okx.com/api/v5/public/instruments?instType=SWAP'
+    cachedData = {
+        lastUpdated: new Date().toISOString(),
+        rates: newRates
     };
-
-    const results = await Promise.allSettled(Object.values(endpoints).map(fetchDataRaw));
-    const [bingxRes, okxRes] = results;
-
-    // --- BINGX ---
-    console.log(`\n--- DỮ LIỆU THÔ TỪ BINGX ---`);
-    if (bingxRes.status === 'rejected') {
-        console.error(`[BINGX LỖI] ${bingxRes.reason.message}`);
-    } else {
-        console.log(`[BINGX BODY]: ${bingxRes.value}`);
-    }
-
-    // --- OKX ---
-    console.log(`\n--- DỮ LIỆU THÔ TỪ OKX ---`);
-    if (okxRes.status === 'rejected') {
-        console.error(`[OKX LỖI] ${okxRes.reason.message}`);
-    } else {
-        console.log(`[OKX BODY]: ${okxRes.value}`);
-    }
-
-    console.log(`\n--- KẾT THÚC CHU KỲ BẮT DỮ LIỆU THÔ ---\n`);
+    
+    console.log("✅ Cập nhật dữ liệu thành công!");
+    console.log(`   - Binance: ${cachedData.rates.binance.length} cặp, BingX: ${cachedData.rates.bingx.length} cặp, OKX: ${cachedData.rates.okx.length} cặp, Bitget: ${cachedData.rates.bitget.length} cặp.`);
 }
 
-// Server đơn giản chỉ để chạy hàm update
+// Phần server giữ nguyên
 const server = http.createServer((req, res) => {
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ status: "Debug mode is running. Check PM2 logs." }));
+    if (req.url === '/' && req.method === 'GET') {
+        const filePath = path.join(__dirname, 'index.html');
+        fs.readFile(filePath, (err, content) => {
+            if (err) { res.writeHead(500, {'Content-Type': 'text/plain; charset=utf-8'}); res.end('Lỗi: Không tìm thấy file index.html'); return; }
+            res.writeHead(200, {'Content-Type': 'text/html; charset=utf-8'});
+            res.end(content);
+        });
+    } else if (req.url === '/api/rates' && req.method === 'GET') {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(cachedData));
+    } else {
+        res.writeHead(404, { 'Content-Type': 'text/plain' });
+        res.end('404 Not Found');
+    }
 });
 
 server.listen(PORT, async () => {
-    console.log(`✅ Server đang chạy ở chế độ "Bắt dữ liệu thô" trên port ${PORT}.`);
-    console.log(`   Hãy kiểm tra log của PM2 để xem kết quả.`);
+    console.log(`✅ Máy chủ dữ liệu đang chạy tại http://localhost:${PORT}`);
+    console.log(`👨‍💻 Giao diện người dùng: http://localhost:${PORT}/`);
+    console.log(`🤖 Endpoint cho bot: http://localhost:${PORT}/api/rates`);
     
     await updateFundingRates();
     setInterval(updateFundingRates, REFRESH_INTERVAL_MINUTES * 60 * 1000);
