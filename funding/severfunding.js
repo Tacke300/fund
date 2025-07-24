@@ -1,50 +1,52 @@
-// severfunding.js (BẢN HOÀN CHỈNH - SỬA LỖI 400 CHO OKX/BITGET)
+// severfunding.js (BẢN HOÀN CHỈNH - CHỐNG BOT NÂNG CAO)
 
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const https = require('https'); 
-const { URL } = require('url'); // Module để phân tích URL
+const { URL } = require('url'); 
 
 const PORT = 5000;
 const REFRESH_INTERVAL_MINUTES = 5;
 
 let cachedData = {
     lastUpdated: null,
-    rates: {
-        bitget: [],
-        bybit: [],
-        okx: [],
-        binance: []
-    }
+    rates: { bitget: [], bybit: [], okx: [], binance: [] }
 };
 
-// =================== HÀM fetchData ĐƯỢC NÂNG CẤP ===================
+// =================== HÀM fetchData ĐƯỢC NÂNG CẤP TỐI ĐA ===================
 function fetchData(url) {
     return new Promise((resolve, reject) => {
         const urlObject = new URL(url);
 
-        // Tạo options với User-Agent giả lập trình duyệt Chrome
+        // Tạo một bộ headers đầy đủ, giả lập trình duyệt Chrome mới nhất
         const options = {
             hostname: urlObject.hostname,
             path: urlObject.pathname + urlObject.search,
             method: 'GET',
             headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+                'Accept': 'application/json, text/plain, */*',
+                'Accept-Language': 'en-US,en;q=0.9,vi;q=0.8',
+                'Connection': 'keep-alive',
+                'Sec-Fetch-Dest': 'empty',
+                'Sec-Fetch-Mode': 'cors',
+                'Sec-Fetch-Site': 'same-origin',
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36'
             }
         };
-
+        
         const req = https.get(options, (res) => {
-            if (res.statusCode < 200 || res.statusCode >= 300) {
-                return reject(new Error(`Yêu cầu thất bại: Mã ${res.statusCode} tại ${url}`));
-            }
             let body = '';
             res.on('data', (chunk) => body += chunk);
             res.on('end', () => {
+                // Thêm log để xem body trả về nếu có lỗi, giúp debug dễ hơn
+                if (res.statusCode < 200 || res.statusCode >= 300) {
+                    return reject(new Error(`Yêu cầu thất bại: Mã ${res.statusCode} tại ${url}. Body nhận được (một phần): ${body.slice(0, 300)}`));
+                }
                 try {
                     resolve(JSON.parse(body));
                 } catch (e) {
-                    reject(new Error(`Lỗi phân tích JSON từ ${url}: ${e.message}`));
+                    reject(new Error(`Lỗi phân tích JSON từ ${url}: ${e.message}. Body nhận được (một phần): ${body.slice(0, 300)}`));
                 }
             });
         });
@@ -107,7 +109,7 @@ const server = http.createServer((req, res) => {
         fs.readFile(filePath, (err, content) => {
             if (err) {
                 res.writeHead(500, { 'Content-Type': 'text/plain; charset=utf-8' });
-                res.end('Lỗi Server: Không thể đọc file index.html. Hãy đảm bảo file này tồn tại cùng thư mục với server.'); return;
+                res.end('Lỗi Server: Không thể đọc file index.html.'); return;
             }
             res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
             res.end(content);
