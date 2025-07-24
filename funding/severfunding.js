@@ -1,9 +1,9 @@
-// severfunding.js (BẢN 7)
+// severfunding.js (BẢN 7 - CHẾ ĐỘ GỠ LỖI)
 
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
-const https = require('https');
+const https = require('https'); 
 const { URL } = require('url');
 
 const PORT = 5000;
@@ -11,9 +11,10 @@ const REFRESH_INTERVAL_MINUTES = 5;
 
 let cachedData = {
     lastUpdated: null,
-    rates: { binance: [], bingx: [], okx: [], bitget: [] }
+    rates: { binance: [], bingx: [], okx: [], bitget: [] } 
 };
 
+// Hàm fetchData cũ, đã chạy tốt -> Giữ nguyên
 function fetchData(url) {
     return new Promise((resolve, reject) => {
         const urlObject = new URL(url);
@@ -31,7 +32,7 @@ function fetchData(url) {
             res.on('data', (chunk) => body += chunk);
             res.on('end', () => {
                 if (res.statusCode < 200 || res.statusCode >= 300) return reject(new Error(`Yêu cầu thất bại: Mã ${res.statusCode} tại ${url}.`));
-                try { resolve(JSON.parse(body)); } catch (e) { reject(new Error(`Lỗi phân tích JSON từ ${url}.`)); }
+                try { resolve({ body: body, json: JSON.parse(body) }); } catch (e) { reject(new Error(`Lỗi phân tích JSON từ ${url}. Body thô: ${body}`)); }
             });
         });
         req.on('error', (err) => reject(new Error(`Lỗi mạng khi gọi ${url}: ${err.message}`)));
@@ -39,13 +40,16 @@ function fetchData(url) {
     });
 }
 
+// =====================================================
+// HÀM CẬP NHẬT TỔNG HỢP VỚI LOG CHI TIẾT
+// =====================================================
 async function updateFundingRates() {
-    console.log(`[${new Date().toISOString()}] Đang cập nhật dữ liệu funding rates...`);
-
+    console.log(`\n\n[BƯỚC 1] BẮT ĐẦU CHU KỲ CẬP NHẬT DỮ LIỆU...`);
+    
     const endpoints = {
         binance: 'https://fapi.binance.com/fapi/v1/premiumIndex',
         bingx: 'https://open-api.bingx.com/openApi/swap/v2/ticker/fundingRate',
-        okx: 'https://www.okx.com/api/v5/public/instruments?instType=SWAP',
+        okx: 'https://www.okx.com/api/v5/public/instruments?instType=SWAP', 
         bitget: 'https://api.bitget.com/api/mix/v1/market/tickers?productType=umcbl'
     };
 
@@ -53,38 +57,62 @@ async function updateFundingRates() {
     const [binanceRes, bingxRes, okxRes, bitgetRes] = results;
     const newData = {};
 
-    results.forEach((result, index) => {
-        if (result.status === 'rejected') {
-            const exchangeName = Object.keys(endpoints)[index];
-            console.error(`- Lỗi khi lấy dữ liệu từ ${exchangeName}: ${result.reason.message}`);
+    console.log(`[BƯỚC 2] ĐÃ GỌI XONG API. BẮT ĐẦU PHÂN TÍCH...`);
+
+    // --- PHÂN TÍCH BINGX ---
+    console.log(`\n--- DEBUG BINGX ---`);
+    if (bingxRes.status === 'rejected') {
+        console.error(`[BINGX LỖI] API call thất bại: ${bingxRes.reason.message}`);
+    } else {
+        console.log(`[BINGX OK] API call thành công. Phân tích dữ liệu trả về...`);
+        console.log(`[BINGX RAW BODY]: ${bingxRes.value.body}`); // IN RA TOÀN BỘ DỮ LIỆU THÔ
+        const bingxJson = bingxRes.value.json;
+        if (bingxJson && bingxJson.data && Array.isArray(bingxJson.data)) { // Sửa lại đường dẫn
+             const bingxData = bingxJson.data;
+             newData.bingx = bingxData.map(item => ({ symbol: item.symbol.replace('-', ''), fundingRate: parseFloat(item.fundingRate) })).filter(r => r && r.fundingRate < 0).sort((a,b) => a.fundingRate - b.fundingRate);
+             console.log(`[BINGX OK] Đã xử lý thành công ${newData.bingx.length} cặp.`);
+        } else {
+            console.error(`[BINGX LỖI] Cấu trúc dữ liệu không đúng.`);
+            newData.bingx = [];
         }
-    });
+    }
 
-    // Binance (Đã chạy tốt)
-    const binanceData = (binanceRes.status === 'fulfilled' && Array.isArray(binanceRes.value)) ? binanceRes.value : [];
+    // --- PHÂN TÍCH OKX ---
+    console.log(`\n--- DEBUG OKX ---`);
+    if (okxRes.status === 'rejected') {
+        console.error(`[OKX LỖI] API call thất bại: ${okxRes.reason.message}`);
+    } else {
+        console.log(`[OKX OK] API call thành công. Phân tích dữ liệu trả về...`);
+        console.log(`[OKX RAW BODY]: ${okxRes.value.body}`); // IN RA TOÀN BỘ DỮ LIỆU THÔ
+        const okxJson = okxRes.value.json;
+        if (okxJson && Array.isArray(okxJson.data)) {
+            const okxData = okxJson.data;
+            newData.okx = okxData.map(item => ({ symbol: item.instId.replace('-SWAP', ''), fundingRate: parseFloat(item.fundingRate) })).filter(r => r && r.fundingRate < 0 && r.fundingRate !== 0).sort((a,b) => a.fundingRate - b.fundingRate);
+            console.log(`[OKX OK] Đã xử lý thành công ${newData.okx.length} cặp.`);
+        } else {
+            console.error(`[OKX LỖI] Cấu trúc dữ liệu không đúng.`);
+            newData.okx = [];
+        }
+    }
+    console.log(`\n--- KẾT THÚC DEBUG ---\n`);
+
+    // Xử lý Binance và Bitget (đã chạy tốt)
+    const binanceData = (binanceRes.status === 'fulfilled' && Array.isArray(binanceRes.value.json)) ? binanceRes.value.json : [];
     newData.binance = binanceData.map(item => ({ symbol: item.symbol, fundingRate: parseFloat(item.lastFundingRate) })).filter(r => r && r.fundingRate < 0).sort((a,b) => a.fundingRate - b.fundingRate);
-
-    // BingX (Sửa lỗi logic)
-    const bingxData = (bingxRes.status === 'fulfilled' ? bingxRes.value?.data : []) || [];
-    newData.bingx = bingxData.map(item => ({ symbol: item.symbol.replace('-', ''), fundingRate: parseFloat(item.fundingRate) })).filter(r => r && r.fundingRate < 0).sort((a,b) => a.fundingRate - b.fundingRate);
-
-    // OKX (Sửa lỗi logic)
-    const okxData = (okxRes.status === 'fulfilled' ? okxRes.value?.data : []) || [];
-    newData.okx = okxData.map(item => ({ symbol: item.instId.replace('-SWAP', ''), fundingRate: parseFloat(item.fundingRate) })).filter(r => r && !isNaN(r.fundingRate) && r.fundingRate < 0).sort((a,b) => a.fundingRate - b.fundingRate);
-
-    // Bitget (Đã chạy tốt + Chuẩn hóa tên)
-    const bitgetData = (bitgetRes.status === 'fulfilled' ? bitgetRes.value?.data : []) || [];
+    
+    const bitgetData = (bitgetRes.status === 'fulfilled' ? bitgetRes.value.json?.data : []) || [];
     newData.bitget = bitgetData.map(item => ({ symbol: item.symbol.replace('_UMCBL', ''), fundingRate: parseFloat(item.fundingRate) })).filter(r => r && r.fundingRate < 0).sort((a,b) => a.fundingRate - b.fundingRate);
 
     cachedData = {
         lastUpdated: new Date().toISOString(),
         rates: newData
     };
-
+    
     console.log("✅ Cập nhật dữ liệu thành công!");
     console.log(`   - Binance: ${newData.binance.length} cặp, BingX: ${newData.bingx.length} cặp, OKX: ${newData.okx.length} cặp, Bitget: ${newData.bitget.length} cặp.`);
 }
 
+// Phần server giữ nguyên
 const server = http.createServer((req, res) => {
     if (req.url === '/' && req.method === 'GET') {
         const filePath = path.join(__dirname, 'index.html');
@@ -106,7 +134,7 @@ server.listen(PORT, async () => {
     console.log(`✅ Máy chủ dữ liệu đang chạy tại http://localhost:${PORT}`);
     console.log(`👨‍💻 Giao diện người dùng: http://localhost:${PORT}/`);
     console.log(`🤖 Endpoint cho bot: http://localhost:${PORT}/api/rates`);
-
+    
     await updateFundingRates();
     setInterval(updateFundingRates, REFRESH_INTERVAL_MINUTES * 60 * 1000);
 });
