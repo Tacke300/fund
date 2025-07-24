@@ -1,11 +1,12 @@
-// severfunding.js (BẢN HOÀN CHỈNH - ĐÃ SỬA TẤT CẢ LỖI)
+// severfunding.js (BẢN HOÀN CHỈNH - SỬA LỖI 400 CHO OKX/BITGET)
 
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
-const https = require('https'); // Đã sửa lỗi 'httpss'
+const https = require('https'); 
+const { URL } = require('url'); // Module để phân tích URL
 
-const PORT = 5000; // Giữ nguyên port 5000 như bạn đang dùng
+const PORT = 5000;
 const REFRESH_INTERVAL_MINUTES = 5;
 
 let cachedData = {
@@ -18,9 +19,22 @@ let cachedData = {
     }
 };
 
+// =================== HÀM fetchData ĐƯỢC NÂNG CẤP ===================
 function fetchData(url) {
     return new Promise((resolve, reject) => {
-        https.get(url, (res) => {
+        const urlObject = new URL(url);
+
+        // Tạo options với User-Agent giả lập trình duyệt Chrome
+        const options = {
+            hostname: urlObject.hostname,
+            path: urlObject.pathname + urlObject.search,
+            method: 'GET',
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+            }
+        };
+
+        const req = https.get(options, (res) => {
             if (res.statusCode < 200 || res.statusCode >= 300) {
                 return reject(new Error(`Yêu cầu thất bại: Mã ${res.statusCode} tại ${url}`));
             }
@@ -33,9 +47,16 @@ function fetchData(url) {
                     reject(new Error(`Lỗi phân tích JSON từ ${url}: ${e.message}`));
                 }
             });
-        }).on('error', (err) => reject(new Error(`Lỗi mạng khi gọi ${url}: ${err.message}`)));
+        });
+
+        req.on('error', (err) => {
+            reject(new Error(`Lỗi mạng khi gọi ${url}: ${err.message}`));
+        });
+
+        req.end();
     });
 }
+// ====================================================================
 
 async function updateFundingRates() {
     console.log(`[${new Date().toISOString()}] Đang cập nhật dữ liệu funding rates...`);
@@ -59,28 +80,17 @@ async function updateFundingRates() {
         }
     });
 
-    // === SỬA LỖI TypeError CỐT LÕI NẰM Ở ĐÂY ===
-    // Luôn kiểm tra kết quả trả về có phải là mảng không trước khi dùng .map
     const binanceData = (binanceRes.status === 'fulfilled' && Array.isArray(binanceRes.value)) ? binanceRes.value : [];
-    newData.binance = binanceData
-        .map(item => ({ symbol: item.symbol, fundingRate: parseFloat(item.lastFundingRate) }))
-        .filter(r => r && r.fundingRate < 0).sort((a,b) => a.fundingRate - b.fundingRate);
+    newData.binance = binanceData.map(item => ({ symbol: item.symbol, fundingRate: parseFloat(item.lastFundingRate) })).filter(r => r && r.fundingRate < 0).sort((a,b) => a.fundingRate - b.fundingRate);
 
     const bybitData = (bybitRes.status === 'fulfilled' ? bybitRes.value?.result?.list : []) || [];
-    newData.bybit = bybitData
-        .map(item => ({ symbol: item.symbol, fundingRate: parseFloat(item.fundingRate) }))
-        .filter(r => r && r.fundingRate < 0).sort((a,b) => a.fundingRate - b.fundingRate);
+    newData.bybit = bybitData.map(item => ({ symbol: item.symbol, fundingRate: parseFloat(item.fundingRate) })).filter(r => r && r.fundingRate < 0).sort((a,b) => a.fundingRate - b.fundingRate);
 
     const okxData = (okxRes.status === 'fulfilled' ? okxRes.value?.data : []) || [];
-    newData.okx = okxData
-        .map(item => ({ symbol: item.instId, fundingRate: parseFloat(item.fundingRate) }))
-        .filter(r => r && r.fundingRate < 0).sort((a,b) => a.fundingRate - b.fundingRate);
+    newData.okx = okxData.map(item => ({ symbol: item.instId, fundingRate: parseFloat(item.fundingRate) })).filter(r => r && r.fundingRate < 0).sort((a,b) => a.fundingRate - b.fundingRate);
 
     const bitgetData = (bitgetRes.status === 'fulfilled' ? bitgetRes.value?.data : []) || [];
-    newData.bitget = bitgetData
-        .map(item => ({ symbol: item.symbol, fundingRate: parseFloat(item.fundingRate) }))
-        .filter(r => r && r.fundingRate < 0).sort((a,b) => a.fundingRate - b.fundingRate);
-    // === KẾT THÚC PHẦN SỬA LỖI ===
+    newData.bitget = bitgetData.map(item => ({ symbol: item.symbol, fundingRate: parseFloat(item.fundingRate) })).filter(r => r && r.fundingRate < 0).sort((a,b) => a.fundingRate - b.fundingRate);
 
     cachedData = {
         lastUpdated: new Date().toISOString(),
