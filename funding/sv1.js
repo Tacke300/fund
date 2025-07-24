@@ -1,4 +1,4 @@
-// sv1.js (BẢN THỰC TẾ - ỔN ĐỊNH)
+// sv1.js (BẢN CẤU TRÚC TÁCH BIỆT - ỔN ĐỊNH)
 
 const http = require('http');
 const fs = require('fs');
@@ -7,10 +7,12 @@ const ccxt = require('ccxt');
 
 const PORT = 5001;
 
+// ----- CẤU HÌNH -----
 const EXCHANGE_IDS = ['binanceusdm', 'bingx', 'okx', 'bitget'];
 const FUNDING_DIFFERENCE_THRESHOLD = 0.003;
 const MINIMUM_PNL_THRESHOLD = 15;
 
+// ----- BIẾN TOÀN CỤC -----
 let exchangeData = {};
 let arbitrageOpportunities = [];
 let lastFullUpdateTimestamp = null;
@@ -46,6 +48,44 @@ function calculateNextStandardFundingTime() {
     return nextFundingDate.getTime();
 }
 
+// ===================================================================
+// === CÁC HÀM XỬ LÝ DỮ LIỆU RIÊNG BIỆT CHO TỪNG NHÓM SÀN ===
+// ===================================================================
+
+function processBinanceOkxData(rate, marketInfo) {
+    const timestamp = rate.nextFundingTime || rate.fundingTimestamp || null;
+    const leverageValue = marketInfo.limits?.leverage?.max;
+    const maxLeverage = leverageValue ? parseFloat(leverageValue) : null;
+    if (maxLeverage > 0) {
+        return { timestamp, maxLeverage };
+    }
+    return null;
+}
+
+function processBingxData(rate, marketInfo) {
+    const timestamp = calculateNextStandardFundingTime();
+    const leverageValue = marketInfo.info?.leverage_ratio;
+    const maxLeverage = leverageValue ? parseFloat(leverageValue) : null;
+    if (maxLeverage > 0) {
+        return { timestamp, maxLeverage };
+    }
+    return null;
+}
+
+function processBitgetData(rate, marketInfo) {
+    const timestamp = calculateNextStandardFundingTime();
+    const leverageValue = marketInfo.info?.maxLeverage;
+    const maxLeverage = leverageValue ? parseFloat(leverageValue) : null;
+    if (maxLeverage > 0) {
+        return { timestamp, maxLeverage };
+    }
+    return null;
+}
+
+// ===================================================================
+// === HÀM LẤY DỮ LIỆU CHÍNH (ĐÃ ĐƯỢC CẤU TRÚC LẠI) ===
+// ===================================================================
+
 async function fetchExchangeData(exchangeId) {
     const exchange = exchanges[exchangeId];
     try {
@@ -57,42 +97,30 @@ async function fetchExchangeData(exchangeId) {
             const symbol = cleanSymbol(rate.symbol);
             const marketInfo = exchange.markets[rate.symbol];
 
-            // Lấy TẤT CẢ các coin, không lọc
             if (rate && typeof rate.fundingRate === 'number' && marketInfo) {
-                
-                let timestamp = null;
-                let maxLeverage = null;
-                let leverageValue;
+                let exchangeSpecificData = null;
 
-                // LOGIC RIÊNG BIỆT VÀ CHÍNH XÁC CHO TỪNG SÀN
+                // Gọi hàm xử lý riêng biệt tương ứng với mỗi sàn
                 switch (exchangeId) {
                     case 'binanceusdm':
                     case 'okx':
-                        timestamp = rate.nextFundingTime || rate.fundingTimestamp || null;
-                        leverageValue = marketInfo.limits?.leverage?.max;
-                        if (leverageValue) maxLeverage = parseFloat(leverageValue);
+                        exchangeSpecificData = processBinanceOkxData(rate, marketInfo);
                         break;
-
                     case 'bingx':
-                        timestamp = calculateNextStandardFundingTime();
-                        leverageValue = marketInfo.info?.leverage_ratio;
-                        if (leverageValue) maxLeverage = parseFloat(leverageValue);
+                        exchangeSpecificData = processBingxData(rate, marketInfo);
                         break;
-                        
                     case 'bitget':
-                        timestamp = calculateNextStandardFundingTime();
-                        leverageValue = marketInfo.info?.maxLeverage;
-                        if (leverageValue) maxLeverage = parseFloat(leverageValue);
+                        exchangeSpecificData = processBitgetData(rate, marketInfo);
                         break;
                 }
 
-                // BỘ LỌC CUỐI CÙNG: Chỉ giữ lại những coin có đầy đủ dữ liệu thực tế
-                if (maxLeverage && maxLeverage > 0) {
+                // Nếu hàm xử lý trả về dữ liệu hợp lệ, thì thêm vào danh sách
+                if (exchangeSpecificData) {
                     processedRates[symbol] = {
                         symbol: symbol,
                         fundingRate: rate.fundingRate,
-                        fundingTimestamp: timestamp,
-                        maxLeverage: maxLeverage
+                        fundingTimestamp: exchangeSpecificData.timestamp,
+                        maxLeverage: exchangeSpecificData.maxLeverage
                     };
                 }
             }
@@ -103,6 +131,7 @@ async function fetchExchangeData(exchangeId) {
         return { id: exchangeId, status: 'error', rates: {} };
     }
 }
+
 
 // ----- CÁC HÀM CÒN LẠI GIỮ NGUYÊN -----
 
@@ -203,7 +232,7 @@ const server = http.createServer((req, res) => {
 });
 
 server.listen(PORT, async () => {
-    console.log(`✅ Máy chủ (Bản Thực Tế - Ổn Định) đang chạy tại http://localhost:${PORT}`);
+    console.log(`✅ Máy chủ (Cấu Trúc Tách Biệt) đang chạy tại http://localhost:${PORT}`);
     await updateAllData();
     calculateArbitrageOpportunities();
     masterLoop();
