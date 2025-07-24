@@ -1,11 +1,11 @@
-// sv1.js (BẢN 11.1 - SỬA LỖI HIỂN THỊ THỜI GIAN FUNDING)
+// sv1.js (BẢN 3 - SỬA LỖI & TỐI ƯU HÓA)
 
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const ccxt = require('ccxt');
 
-const PORT = 5001; // Đổi port để không bị trùng
+const PORT = 5001; // Sử dụng port 5001 theo yêu cầu
 
 // ----- CẤU HÌNH -----
 const EXCHANGE_IDS = ['binanceusdm', 'bingx', 'okx', 'bitget'];
@@ -43,16 +43,20 @@ async function fetchExchangeData(exchangeId) {
                 processedRates[symbol] = {
                     symbol: symbol,
                     fundingRate: rate.fundingRate,
-                    // ===== DÒNG SỬA LỖI NẰM Ở ĐÂY =====
-                    fundingTimestamp: rate.fundingTimestamp || rate.nextFundingTime, 
-                    // ===================================
+                    // Giữ nguyên logic sửa lỗi thời gian funding
+                    fundingTimestamp: rate.fundingTimestamp || rate.nextFundingTime,
                     maxLeverage: marketInfo.limits?.leverage?.max || marketInfo.info?.maxLeverage || 75
                 };
             }
         }
         return { id: exchangeId, status: 'success', rates: processedRates };
     } catch (e) {
-        console.error(`- Lỗi khi lấy dữ liệu từ ${exchangeId.toUpperCase()}: ${e.message}`);
+        // Giảm log lỗi không cần thiết, chỉ báo lỗi khi thực sự có vấn đề
+        if (e.message.includes('fetchFundingRates')) {
+           console.warn(`- Cảnh báo từ ${exchangeId.toUpperCase()}: Không thể lấy funding rates. ${e.message}`);
+        } else {
+           console.error(`- Lỗi nghiêm trọng từ ${exchangeId.toUpperCase()}: ${e.message}`);
+        }
         return { id: exchangeId, status: 'error', rates: {} };
     }
 }
@@ -92,9 +96,10 @@ function calculateArbitrageOpportunities() {
                 const rate2 = exchangeData[exchange2Id]?.rates[symbol];
 
                 if (!rate1 || !rate2) continue;
-                
-                // Đảm bảo cả hai đều có dữ liệu thời gian funding để so sánh
-                if (!rate1.fundingTimestamp || !rate2.fundingTimestamp) continue;
+
+                // ===== SỬA LỖI #1: Bỏ dòng kiểm tra thời gian funding quá chặt chẽ =====
+                // Dòng 'if (!rate1.fundingTimestamp || !rate2.fundingTimestamp) continue;' đã được XÓA BỎ.
+                // Việc này đảm bảo các cặp vẫn được tính toán dù một trong hai sàn không có dữ liệu thời gian.
 
                 const fundingDiff = Math.abs(rate1.fundingRate - rate2.fundingRate);
                 if (fundingDiff < FUNDING_DIFFERENCE_THRESHOLD) continue;
@@ -116,7 +121,9 @@ function calculateArbitrageOpportunities() {
                 const currentOpportunity = {
                     coin: symbol,
                     exchanges: `${exchange1Id.replace('usdm', '')} / ${exchange2Id.replace('usdm', '')}`,
-                    nextFundingTime: rate1.fundingTimestamp,
+                    // ===== SỬA LỖI #2: Ưu tiên lấy thời gian funding có sẵn =====
+                    // Sẽ lấy thời gian của rate1, nếu không có sẽ lấy của rate2.
+                    nextFundingTime: rate1.fundingTimestamp || rate2.fundingTimestamp || null,
                     estimatedPnl: parseFloat(estimatedPnl.toFixed(2)),
                 };
 
@@ -145,11 +152,12 @@ function masterLoop() {
             calculateArbitrageOpportunities();
             console.log(`   => Đã tìm thấy ${arbitrageOpportunities.length} cơ hội arbitrage.`);
         } else {
-            console.log(`[${now.toISOString()}] Phút ${currentMinute}, ngoài khung giờ hoạt động. Đang chờ...`);
+            console.log(`[${now.toISOString()}] Phút ${currentMinute}, ngoài khung giờ hoạt động. Giữ nguyên kết quả cũ.`);
         }
     }, 60 * 1000);
 }
 
+// Giữ nguyên phần server và API endpoint
 const server = http.createServer((req, res) => {
     if (req.url === '/' && req.method === 'GET') {
         const filePath = path.join(__dirname, 'index.html');
@@ -178,7 +186,7 @@ const server = http.createServer((req, res) => {
 });
 
 server.listen(PORT, async () => {
-    console.log(`✅ Máy chủ dữ liệu đang chạy tại http://localhost:${PORT}`);
+    console.log(`✅ Máy chủ dữ liệu BẢN 3 đang chạy tại http://localhost:${PORT}`);
     console.log(`👨‍💻 Giao diện người dùng: http://localhost:${PORT}/`);
     console.log(`🤖 Endpoint dữ liệu: http://localhost:${PORT}/api/data`);
     
