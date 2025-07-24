@@ -269,4 +269,4 @@ server.listen(PORT, async () => {
     await initializeLeverageCache();
     await masterLoop();
     setInterval(initializeLeverageCache, LEVERAGE_CACHE_REFRESH_INTERVAL_MINUTES * 60 * 1000);
-});```
+});
