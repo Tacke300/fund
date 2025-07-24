@@ -1,5 +1,3 @@
-// sv1.js (BẢN CUỐI CÙNG - XỬ LÝ LỖI CHÍNH XÁC & GIAO DIỆN TỐI ƯU)
-
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
@@ -7,12 +5,10 @@ const ccxt = require('ccxt');
 
 const PORT = 5001;
 
-// ----- CẤU HÌNH -----
 const EXCHANGE_IDS = ['binanceusdm', 'bingx', 'okx', 'bitget'];
 const FUNDING_DIFFERENCE_THRESHOLD = 0.003;
 const MINIMUM_PNL_THRESHOLD = 15;
 
-// ----- BIẾN TOÀN CỤC -----
 let exchangeData = {};
 let arbitrageOpportunities = [];
 let lastFullUpdateTimestamp = null;
@@ -27,7 +23,6 @@ const cleanSymbol = (symbol) => {
     return symbol.replace('/USDT', '').replace(':USDT', '');
 };
 
-// Hàm chỉ dùng để "chữa cháy" cho Bitget
 function calculateNextStandardFundingTime() {
     const now = new Date();
     const fundingHoursUTC = [0, 8, 16];
@@ -61,11 +56,9 @@ async function fetchExchangeData(exchangeId) {
             const marketInfo = exchange.markets[rate.symbol];
 
             if (rate && typeof rate.fundingRate === 'number' && rate.fundingRate < 0 && marketInfo) {
-                // Logic lấy timestamp mặc định
                 let timestamp = rate.fundingTimestamp || rate.nextFundingTime || null;
                 
-                // CHỈ ÁP DỤNG "CHỮA CHÁY" CHO BITGET KHI KHÔNG CÓ DỮ LIỆU
-                if (exchangeId === 'bitget' && !timestamp) {
+                if ((exchangeId === 'bitget' || exchangeId === 'bingx') && !timestamp) {
                     timestamp = calculateNextStandardFundingTime();
                 }
                 
@@ -73,19 +66,16 @@ async function fetchExchangeData(exchangeId) {
                     symbol: symbol,
                     fundingRate: rate.fundingRate,
                     fundingTimestamp: timestamp,
-                    maxLeverage: marketInfo.limits?.leverage?.max || marketInfo.info?.maxLeverage || 75
+                    maxLeverage: marketInfo.limits?.leverage?.max || marketInfo.info?.maxLeverage || null
                 };
             }
         }
         return { id: exchangeId, status: 'success', rates: processedRates };
     } catch (e) {
-        // Log lỗi cụ thể cho từng sàn để dễ chẩn đoán
         console.warn(`- Lỗi khi lấy dữ liệu từ ${exchangeId.toUpperCase()}: ${e.constructor.name} - ${e.message}`);
         return { id: exchangeId, status: 'error', rates: {} };
     }
 }
-
-// ----- CÁC HÀM CÒN LẠI GIỮ NGUYÊN -----
 
 async function updateAllData() {
     console.log(`[${new Date().toISOString()}] Bắt đầu cập nhật dữ liệu...`);
@@ -110,14 +100,19 @@ function calculateArbitrageOpportunities() {
             for (let j = i + 1; j < EXCHANGE_IDS.length; j++) {
                 const exchange1Id = EXCHANGE_IDS[i], exchange2Id = EXCHANGE_IDS[j];
                 const rate1 = exchangeData[exchange1Id]?.rates[symbol], rate2 = exchangeData[exchange2Id]?.rates[symbol];
-                if (!rate1 || !rate2) continue;
+                
+                if (!rate1 || !rate2 || rate1.maxLeverage === null || rate2.maxLeverage === null) continue;
+                
                 const fundingDiff = Math.abs(rate1.fundingRate - rate2.fundingRate);
                 if (fundingDiff < FUNDING_DIFFERENCE_THRESHOLD) continue;
+                
                 const commonLeverage = Math.min(rate1.maxLeverage, rate2.maxLeverage);
                 let fee = 0;
                 if (commonLeverage <= 25) fee = 5; else if (commonLeverage <= 50) fee = 10; else if (commonLeverage <= 75) fee = 15; else if (commonLeverage <= 100) fee = 20; else if (commonLeverage <= 125) fee = 25; else fee = 30;
+                
                 const estimatedPnl = 100 * commonLeverage * fundingDiff - fee;
                 if (estimatedPnl <= MINIMUM_PNL_THRESHOLD) continue;
+                
                 const currentOpportunity = {
                     coin: symbol,
                     exchanges: `${exchange1Id.replace('usdm', '')} / ${exchange2Id.replace('usdm', '')}`,
@@ -125,6 +120,7 @@ function calculateArbitrageOpportunities() {
                     commonLeverage: commonLeverage,
                     estimatedPnl: parseFloat(estimatedPnl.toFixed(2)),
                 };
+                
                 if (!bestOpportunityForSymbol || currentOpportunity.estimatedPnl > bestOpportunityForSymbol.estimatedPnl) {
                     bestOpportunityForSymbol = currentOpportunity;
                 }
