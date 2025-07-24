@@ -1,4 +1,4 @@
-// sv1.js (BẢN CẤU TRÚC TÁCH BIỆT - ỔN ĐỊNH)
+// sv1.js (BẢN GỐC ĐƯỢC SỬA LỖI CHÍNH XÁC)
 
 const http = require('http');
 const fs = require('fs');
@@ -48,44 +48,6 @@ function calculateNextStandardFundingTime() {
     return nextFundingDate.getTime();
 }
 
-// ===================================================================
-// === CÁC HÀM XỬ LÝ DỮ LIỆU RIÊNG BIỆT CHO TỪNG NHÓM SÀN ===
-// ===================================================================
-
-function processBinanceOkxData(rate, marketInfo) {
-    const timestamp = rate.nextFundingTime || rate.fundingTimestamp || null;
-    const leverageValue = marketInfo.limits?.leverage?.max;
-    const maxLeverage = leverageValue ? parseFloat(leverageValue) : null;
-    if (maxLeverage > 0) {
-        return { timestamp, maxLeverage };
-    }
-    return null;
-}
-
-function processBingxData(rate, marketInfo) {
-    const timestamp = calculateNextStandardFundingTime();
-    const leverageValue = marketInfo.info?.leverage_ratio;
-    const maxLeverage = leverageValue ? parseFloat(leverageValue) : null;
-    if (maxLeverage > 0) {
-        return { timestamp, maxLeverage };
-    }
-    return null;
-}
-
-function processBitgetData(rate, marketInfo) {
-    const timestamp = calculateNextStandardFundingTime();
-    const leverageValue = marketInfo.info?.maxLeverage;
-    const maxLeverage = leverageValue ? parseFloat(leverageValue) : null;
-    if (maxLeverage > 0) {
-        return { timestamp, maxLeverage };
-    }
-    return null;
-}
-
-// ===================================================================
-// === HÀM LẤY DỮ LIỆU CHÍNH (ĐÃ ĐƯỢC CẤU TRÚC LẠI) ===
-// ===================================================================
-
 async function fetchExchangeData(exchangeId) {
     const exchange = exchanges[exchangeId];
     try {
@@ -97,30 +59,32 @@ async function fetchExchangeData(exchangeId) {
             const symbol = cleanSymbol(rate.symbol);
             const marketInfo = exchange.markets[rate.symbol];
 
+            // SỬA LỖI 1: Bỏ điều kiện "fundingRate < 0" để lấy tất cả các coin
             if (rate && typeof rate.fundingRate === 'number' && marketInfo) {
-                let exchangeSpecificData = null;
-
-                // Gọi hàm xử lý riêng biệt tương ứng với mỗi sàn
-                switch (exchangeId) {
-                    case 'binanceusdm':
-                    case 'okx':
-                        exchangeSpecificData = processBinanceOkxData(rate, marketInfo);
-                        break;
-                    case 'bingx':
-                        exchangeSpecificData = processBingxData(rate, marketInfo);
-                        break;
-                    case 'bitget':
-                        exchangeSpecificData = processBitgetData(rate, marketInfo);
-                        break;
+                
+                // Logic lấy timestamp mặc định
+                let timestamp = rate.fundingTimestamp || rate.nextFundingTime || null;
+                
+                // SỬA LỖI 2: Mở rộng "chữa cháy" cho cả BingX
+                if ((exchangeId === 'bitget' || exchangeId === 'bingx') && !timestamp) {
+                    timestamp = calculateNextStandardFundingTime();
                 }
+                
+                // SỬA LỖI 3: Mở rộng hệ thống tìm đòn bẩy và loại bỏ số 75 "ảo"
+                const leverageValue = 
+                    marketInfo.limits?.leverage?.max ||  // Dùng cho Binance/OKX
+                    marketInfo.info?.leverage_ratio ||   // Dùng cho BingX
+                    marketInfo.info?.maxLeverage;        // Dùng cho Bitget
+                
+                const maxLeverage = (leverageValue && parseFloat(leverageValue) > 0) ? parseFloat(leverageValue) : null;
 
-                // Nếu hàm xử lý trả về dữ liệu hợp lệ, thì thêm vào danh sách
-                if (exchangeSpecificData) {
+                // Chỉ xử lý những coin có dữ liệu đòn bẩy thực tế
+                if (maxLeverage) {
                     processedRates[symbol] = {
                         symbol: symbol,
                         fundingRate: rate.fundingRate,
-                        fundingTimestamp: exchangeSpecificData.timestamp,
-                        maxLeverage: exchangeSpecificData.maxLeverage
+                        fundingTimestamp: timestamp,
+                        maxLeverage: maxLeverage
                     };
                 }
             }
@@ -131,7 +95,6 @@ async function fetchExchangeData(exchangeId) {
         return { id: exchangeId, status: 'error', rates: {} };
     }
 }
-
 
 // ----- CÁC HÀM CÒN LẠI GIỮ NGUYÊN -----
 
@@ -158,21 +121,14 @@ function calculateArbitrageOpportunities() {
             for (let j = i + 1; j < EXCHANGE_IDS.length; j++) {
                 const exchange1Id = EXCHANGE_IDS[i], exchange2Id = EXCHANGE_IDS[j];
                 const rate1 = exchangeData[exchange1Id]?.rates[symbol], rate2 = exchangeData[exchange2Id]?.rates[symbol];
-
-                if (!rate1 || !rate2) {
-                    continue;
-                }
-                
+                if (!rate1 || !rate2) continue;
                 const fundingDiff = Math.abs(rate1.fundingRate - rate2.fundingRate);
                 if (fundingDiff < FUNDING_DIFFERENCE_THRESHOLD) continue;
-                
                 const commonLeverage = Math.min(rate1.maxLeverage, rate2.maxLeverage);
                 let fee = 0;
                 if (commonLeverage <= 25) fee = 5; else if (commonLeverage <= 50) fee = 10; else if (commonLeverage <= 75) fee = 15; else if (commonLeverage <= 100) fee = 20; else if (commonLeverage <= 125) fee = 25; else fee = 30;
-                
                 const estimatedPnl = 100 * commonLeverage * fundingDiff - fee;
                 if (estimatedPnl <= MINIMUM_PNL_THRESHOLD) continue;
-                
                 const currentOpportunity = {
                     coin: symbol,
                     exchanges: `${exchange1Id.replace('usdm', '')} / ${exchange2Id.replace('usdm', '')}`,
@@ -180,7 +136,6 @@ function calculateArbitrageOpportunities() {
                     commonLeverage: commonLeverage,
                     estimatedPnl: parseFloat(estimatedPnl.toFixed(2)),
                 };
-                
                 if (!bestOpportunityForSymbol || currentOpportunity.estimatedPnl > bestOpportunityForSymbol.estimatedPnl) {
                     bestOpportunityForSymbol = currentOpportunity;
                 }
@@ -232,7 +187,7 @@ const server = http.createServer((req, res) => {
 });
 
 server.listen(PORT, async () => {
-    console.log(`✅ Máy chủ (Cấu Trúc Tách Biệt) đang chạy tại http://localhost:${PORT}`);
+    console.log(`✅ Máy chủ (Bản Gốc Sửa Lỗi) đang chạy tại http://localhost:${PORT}`);
     await updateAllData();
     calculateArbitrageOpportunities();
     masterLoop();
