@@ -81,9 +81,6 @@
     const API_ENDPOINT = '/api/data';
     const EXCHANGES = ['binance', 'okx', 'bingx', 'bitget'];
     
-    // ================================================================
-    // SỬA LỖI Ở ĐÂY: TRẢ HÀM NÀY VỀ TRẠNG THÁI GỐC (CHỈ HIỂN THỊ GIỜ)
-    // ================================================================
     function formatTime(timestamp) {
         if (!timestamp) return 'N/A';
         const date = new Date(timestamp);
@@ -106,7 +103,7 @@
             return `<tr class="${rowClass}">
                         <td>${op.coin}</td>
                         <td>${op.exchanges.toUpperCase()}</td>
-                        <td>x${op.commonLeverage}</td>
+                        <td>x${op.commonLeverage !== null ? op.commonLeverage : 'N/A'}</td>
                         <td class="funding-diff">${(op.fundingDiff * 100).toFixed(4)}%</td>
                         <td>${formatTime(op.nextFundingTime)}</td>
                         <td class="pnl-positive">+${op.estimatedPnl}%</td>
@@ -139,7 +136,9 @@
                 if (rate) {
                     const rateText = (rate.fundingRate * 100).toFixed(4) + '%';
                     const colorClass = rate.fundingRate >= 0 ? 'rate-positive' : 'rate-negative';
-                    const subText = `x${rate.maxLeverage} • ${formatTime(rate.fundingTimestamp)}`;
+                    // Sửa đổi để hiển thị "N/A" nếu maxLeverage là null
+                    const maxLeverageDisplay = rate.maxLeverage !== null ? `x${rate.maxLeverage}` : 'N/A';
+                    const subText = `${maxLeverageDisplay} • ${formatTime(rate.fundingTimestamp)}`;
                     rowHtml += `<td>
                                     <div class="main-rate ${colorClass}">${rateText}</div>
                                     <div class="sub-info">${subText}</div>
