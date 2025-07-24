@@ -1,4 +1,4 @@
-// sv1.js (BẢN HOÀN CHỈNH CUỐI CÙNG - 24/07/2025)
+// sv1.js (BẢN SỬA LỖI HỒI QUY & CHUẨN HÓA - 24/07/2025)
 
 const http = require('http');
 const fs = require('fs');
@@ -20,12 +20,7 @@ let lastFullUpdateTimestamp = null;
 const exchanges = {};
 EXCHANGE_IDS.forEach(id => {
     const exchangeClass = ccxt[id];
-    exchanges[id] = new exchangeClass({
-        // Thêm tùy chọn để ccxt cố gắng chuẩn hóa dữ liệu tốt hơn nếu cần
-        'options': {
-            'createMarketBuyOrderRequiresPrice': false
-        }
-    });
+    exchanges[id] = new exchangeClass();
 });
 
 const cleanSymbol = (symbol) => {
@@ -69,21 +64,39 @@ async function fetchExchangeData(exchangeId) {
             const symbol = cleanSymbol(rate.symbol);
             const marketInfo = exchange.markets[rate.symbol];
 
-            // Chỉ xử lý các cặp có funding âm và có thông tin market
             if (rate && typeof rate.fundingRate === 'number' && rate.fundingRate < 0 && marketInfo) {
-                
-                let timestamp = rate.nextFundingTime || null;
+                let timestamp;
+                let maxLeverage;
 
-                // SỬA LỖI 1: Tự tính toán Funding Time cho BingX & Bitget khi API không cung cấp
-                if ((exchangeId === 'bingx' || exchangeId === 'bitget') && !timestamp) {
-                    timestamp = calculateNextStandardFundingTime();
+                // ===================================================================
+                // === ÁP DỤNG LOGIC RIÊNG BIỆT CHO TỪNG SÀN ĐỂ TRÁNH LỖI HỒI QUY ===
+                // ===================================================================
+                switch (exchangeId) {
+                    case 'binanceusdm':
+                    case 'okx':
+                        // LOGIC GỐC - ĐANG CHẠY TỐT CHO BINANCE & OKX
+                        timestamp = rate.nextFundingTime || rate.fundingTimestamp;
+                        maxLeverage = marketInfo.limits?.leverage?.max || 25; // Dùng logic cũ, an toàn
+                        break;
+
+                    case 'bingx':
+                        // LOGIC ĐÚNG DÀNH RIÊNG CHO BINGX
+                        timestamp = calculateNextStandardFundingTime(); // BingX không trả về next funding time
+                        maxLeverage = parseFloat(marketInfo.info?.leverage_ratio) || 20; // BingX dùng 'leverage_ratio'
+                        break;
+
+                    case 'bitget':
+                        // LOGIC RIÊNG CHO BITGET
+                        timestamp = calculateNextStandardFundingTime(); // Bitget cũng không trả về next funding time
+                        maxLeverage = marketInfo.limits?.leverage?.max || parseFloat(marketInfo.info?.maxLeverage) || 20;
+                        break;
+                        
+                    default:
+                        // Fallback an toàn cho sàn mới nếu có
+                        timestamp = rate.nextFundingTime || calculateNextStandardFundingTime();
+                        maxLeverage = marketInfo.limits?.leverage?.max || 20;
+                        break;
                 }
-
-                // SỬA LỖI 2: Lấy Max Leverage chính xác từ các thuộc tính khác nhau của mỗi sàn
-                const maxLeverage = parseFloat(marketInfo.info?.leverage_ratio) || // Dành cho BingX
-                                    marketInfo.limits?.leverage?.max ||         // Dành cho Binance và các sàn chuẩn
-                                    parseFloat(marketInfo.info?.maxLeverage) ||     // Fallback nếu có
-                                    20; // Giá trị mặc định an toàn
 
                 processedRates[symbol] = {
                     symbol: symbol,
@@ -99,6 +112,9 @@ async function fetchExchangeData(exchangeId) {
         return { id: exchangeId, status: 'error', rates: {} };
     }
 }
+
+
+// ----- CÁC HÀM CÒN LẠI GIỮ NGUYÊN -----
 
 async function updateAllData() {
     console.log(`[${new Date().toLocaleTimeString()}] Bắt đầu cập nhật dữ liệu...`);
@@ -124,7 +140,6 @@ function calculateArbitrageOpportunities() {
 
     allSymbols.forEach(symbol => {
         let bestOpportunityForSymbol = null;
-        // Tìm cặp sàn có PNL cao nhất cho cùng 1 coin
         for (let i = 0; i < EXCHANGE_IDS.length; i++) {
             for (let j = i + 1; j < EXCHANGE_IDS.length; j++) {
                 const exchange1Id = EXCHANGE_IDS[i];
@@ -139,8 +154,7 @@ function calculateArbitrageOpportunities() {
                 
                 const commonLeverage = Math.min(rate1.maxLeverage, rate2.maxLeverage);
                 
-                // Tính phí dựa trên đòn bẩy chung
-                let fee = 5; // Mặc định
+                let fee = 5;
                 if (commonLeverage <= 25) fee = 5;
                 else if (commonLeverage <= 50) fee = 10;
                 else if (commonLeverage <= 75) fee = 15;
@@ -155,7 +169,7 @@ function calculateArbitrageOpportunities() {
                 const currentOpportunity = {
                     coin: symbol,
                     exchanges: `${exchange1Id.replace('usdm', '')} / ${exchange2Id.replace('usdm', '')}`,
-                    nextFundingTime: rate1.fundingTimestamp || rate2.fundingTimestamp, // Lấy thời gian của 1 trong 2
+                    nextFundingTime: rate1.fundingTimestamp || rate2.fundingTimestamp,
                     commonLeverage: commonLeverage,
                     estimatedPnl: parseFloat(estimatedPnl.toFixed(2)),
                 };
@@ -174,12 +188,10 @@ function calculateArbitrageOpportunities() {
 }
 
 function masterLoop() {
-    // Chạy cập nhật 1 phút 1 lần
     setInterval(async () => {
         const now = new Date();
         const currentMinute = now.getMinutes();
 
-        // Chỉ chạy trong khoảng thời gian nhất định của mỗi giờ để tránh API rate limit không cần thiết
         if (currentMinute >= 10 && currentMinute <= 59) {
             console.log(`[${now.toLocaleTimeString()}] Trong khung giờ hoạt động. Đang cập nhật và tính toán...`);
             await updateAllData();
@@ -206,7 +218,7 @@ const server = http.createServer((req, res) => {
         const responseData = {
             lastUpdated: lastFullUpdateTimestamp,
             arbitrageData: arbitrageOpportunities,
-            rawRates: { // Cung cấp dữ liệu thô để hiển thị trên các tab riêng nếu cần
+            rawRates: {
                 binance: Object.values(exchangeData.binanceusdm?.rates || {}),
                 bingx: Object.values(exchangeData.bingx?.rates || {}),
                 okx: Object.values(exchangeData.okx?.rates || {}),
@@ -222,10 +234,8 @@ const server = http.createServer((req, res) => {
 });
 
 server.listen(PORT, async () => {
-    console.log(`✅ Máy chủ phiên bản HOÀN CHỈNH đang chạy tại http://localhost:${PORT}`);
-    // Chạy lần đầu tiên ngay khi khởi động
+    console.log(`✅ Máy chủ (Bản Sửa Lỗi Hồi Quy) đang chạy tại http://localhost:${PORT}`);
     await updateAllData();
     calculateArbitrageOpportunities();
-    // Bắt đầu vòng lặp chính
     masterLoop();
 });
