@@ -22,16 +22,13 @@ let lastFullUpdateTimestamp = null;
 let loopTimeoutId = null;
 
 const exchanges = {};
-
-// Tạo instance cho từng sàn, bạn nhập API Key, Secret cho BingX nếu cần
 EXCHANGE_IDS.forEach(id => {
     if (id === 'bingx') {
         exchanges[id] = new ccxt.bingx({
             apiKey: 'WhRrdudEgBMTiFnTiqrZe2LlNGeK68lcMAZhOyn0AY00amysW5ep2LJ45smFxONwoIE0l72b4zc5muDGw',        // <-- Nhập API Key BingX của bạn tại đây
-            secret: 'IDNVPQkBYo2WaxdgzbJlkGQvmvJmPXET5JTyqcZxThb16a2kZNU7M5LKLJicA2hLtckejMtyFzPA ',        // <-- Nhập Secret BingX của bạn tại đây
+            secret: 'IDNVPQkBYo2WaxdgzbJlkGQvmvJmPXET5JTyqcZxThb16a2kZNU7M5LKLJicA2hLtckejMtyFzPA',        // <-- Nhập Secret BingX của bạn tại đây
             options: { defaultType: 'swap' },
         });
-        // Nếu cần custom thêm HMAC hoặc headers, có thể bổ sung ở đây (ccxt bingx chuẩn hỗ trợ HMAC)
     } else {
         const exchangeClass = ccxt[id];
         exchanges[id] = new exchangeClass({ options: { defaultType: 'swap' } });
@@ -52,23 +49,20 @@ function getMaxLeverageFromMarket(market, exchangeId) {
         }
     }
 
-    // Tầng 1.5: Logic riêng cho BingX (do ccxt bingx chưa chuẩn hoặc thiếu)
+    // Bổ sung logic riêng cho BingX (để fix null leverage)
     if (exchangeId === 'bingx') {
-        // BingX thường có maxLeverage trong market.info.maxLeverage hoặc tương tự
-        if (typeof market?.info?.maxLeverage === 'string' || typeof market?.info?.maxLeverage === 'number') {
-            const leverage = parseInt(market.info.maxLeverage, 10);
-            if (!isNaN(leverage) && leverage > 0) {
-                return leverage;
+        if (market?.info) {
+            if (market.info.maxLeverage) {
+                const lev = parseInt(market.info.maxLeverage, 10);
+                if (!isNaN(lev) && lev > 0) {
+                    return lev;
+                }
             }
-        }
-        // Thử thêm tìm các key chứa "leverage" nếu trên không có
-        if (typeof market?.info === 'object' && market.info !== null) {
             for (const key in market.info) {
                 if (key.toLowerCase().includes('leverage')) {
-                    const value = market.info[key];
-                    const leverage = parseInt(value, 10);
-                    if (!isNaN(leverage) && leverage > 0) {
-                        return leverage;
+                    const val = parseInt(market.info[key], 10);
+                    if (!isNaN(val) && val > 0) {
+                        return val;
                     }
                 }
             }
@@ -80,7 +74,7 @@ function getMaxLeverageFromMarket(market, exchangeId) {
         return market.limits.leverage.max;
     }
 
-    // Tầng 3: "Săn lùng" thông minh trong object 'info' (dành cho sàn khác)
+    // Tầng 3: "Săn lùng" trong object 'info' cho các sàn khác
     if (typeof market?.info === 'object' && market.info !== null) {
         for (const key in market.info) {
             if (key.toLowerCase().includes('leverage')) {
@@ -93,7 +87,6 @@ function getMaxLeverageFromMarket(market, exchangeId) {
         }
     }
 
-    // Nếu tất cả đều thất bại, trả về null
     return null;
 }
 
@@ -203,27 +196,4 @@ function calculateArbitrageOpportunities() {
                 const rate1Data = exchange1Rates[symbol], rate2Data = exchange2Rates[symbol];
                 if (!rate1Data.maxLeverage || !rate2Data.maxLeverage) continue;
                 let longExchange, shortExchange, longRate, shortRate;
-                if (rate1Data.fundingRate > rate2Data.fundingRate) {
-                    shortExchange = exchange1Id; shortRate = rate1Data; longExchange = exchange2Id; longRate = rate2Data;
-                } else {
-                    shortExchange = exchange2Id; shortRate = rate2Data; longExchange = exchange1Id; longRate = rate1Data;
-                }
-                const fundingDiff = shortRate.fundingRate - longRate.fundingRate;
-                const commonLeverage = Math.min(longRate.maxLeverage, shortRate.maxLeverage);
-                const estimatedPnl = fundingDiff * commonLeverage * 100;
-                if (estimatedPnl >= MINIMUM_PNL_THRESHOLD) {
-                    const finalFundingTime = rate1Data.fundingTimestamp;
-                    const minutesUntilFunding = (finalFundingTime - Date.now()) / (1000 * 60);
-                    const isImminent = minutesUntilFunding > 0 && minutesUntilFunding <= IMMINENT_THRESHOLD_MINUTES;
-                    allFoundOpportunities.push({
-                        coin: symbol, exchanges: `${shortExchange.replace('usdm', '')} / ${longExchange.replace('usdm', '')}`,
-                        fundingDiff: parseFloat(fundingDiff.toFixed(6)), nextFundingTime: finalFundingTime,
-                        commonLeverage: commonLeverage, estimatedPnl: parseFloat(estimatedPnl.toFixed(2)),
-                        isImminent: isImminent,
-                    });
-                }
-            }
-        }
-    }
-    arbitrageOpportunities = allFoundOpportunities.sort((a, b) => {
-        if (a.nextFundingTime < b.nextFunding
+                if (rate1Data.fundingRate
