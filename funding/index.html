@@ -18,13 +18,10 @@
         tbody tr:nth-child(even) { background-color: #f8f9fa; }
         tbody tr:hover { background-color: #e8f4fd; }
         
-        /* === THAY ĐỔI BẮT ĐẦU TỪ ĐÂY === */
-
         /* Bảng Arbitrage */
         .pnl-positive { font-weight: bold; color: #27ae60; }
         .funding-diff { color: #e67e22; font-weight: bold;}
         
-        /* YÊU CẦU 5: HIỆU ỨNG NHẤP NHÁY */
         @keyframes blink-animation {
             0%   { background-color: rgba(255, 199, 44, 0.4); }
             50%  { background-color: rgba(255, 199, 44, 0.9); }
@@ -41,7 +38,6 @@
         .main-rate { font-weight: bold; font-size: 1.1em; }
         .sub-info { font-size: 0.8em; color: #888; margin-top: 4px; }
 
-        /* YÊU CẦU 6: MÀU SẮC CHO FUNDING RATE */
         .rate-positive { color: #27ae60; }
         .rate-negative { color: #e74c3c; }
 
@@ -85,13 +81,16 @@
     const API_ENDPOINT = '/api/data';
     const EXCHANGES = ['binance', 'okx', 'bingx', 'bitget'];
     
+    // ================================================================
+    // SỬA LỖI Ở ĐÂY: TRẢ HÀM NÀY VỀ TRẠNG THÁI GỐC (CHỈ HIỂN THỊ GIỜ)
+    // ================================================================
     function formatTime(timestamp) {
         if (!timestamp) return 'N/A';
         const date = new Date(timestamp);
         if (isNaN(date.getTime())) return 'N/A';
         return date.toLocaleString('vi-VN', { 
-            day: '2-digit', month: '2-digit', 
-            hour: '2-digit', minute: '2-digit', 
+            hour: '2-digit', 
+            minute: '2-digit', 
             hour12: false 
         });
     }
@@ -103,7 +102,6 @@
             return;
         }
         tbody.innerHTML = opportunities.map(op => {
-            // YÊU CẦU 5: KIỂM TRA CỜ isImminent ĐỂ ÁP DỤNG HIỆU ỨNG
             const rowClass = op.isImminent ? 'blinking-row' : '';
             return `<tr class="${rowClass}">
                         <td>${op.coin}</td>
@@ -140,7 +138,6 @@
                 const rate = ratesByCoin[coin][exchange];
                 if (rate) {
                     const rateText = (rate.fundingRate * 100).toFixed(4) + '%';
-                    // YÊU CẦU 6: CHỌN CLASS MÀU SẮC DỰA TRÊN GIÁ TRỊ FUNDING
                     const colorClass = rate.fundingRate >= 0 ? 'rate-positive' : 'rate-negative';
                     const subText = `x${rate.maxLeverage} • ${formatTime(rate.fundingTimestamp)}`;
                     rowHtml += `<td>
@@ -174,7 +171,7 @@
     
     document.addEventListener('DOMContentLoaded', () => {
         fetchData();
-        setInterval(fetchData, 30000); // Tăng tần suất làm mới lên 30 giây để bắt kịp hiệu ứng nhấp nháy
+        setInterval(fetchData, 30000);
     });
 </script>
 
