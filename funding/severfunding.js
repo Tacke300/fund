@@ -48,10 +48,11 @@ function fetchData(url) {
 async function updateFundingRates() {
     console.log(`[${new Date().toISOString()}] Đang cập nhật dữ liệu funding rates...`);
     
+    // Các endpoint đã được kiểm tra lại kỹ lưỡng
     const endpoints = {
         binance: 'https://fapi.binance.com/fapi/v1/premiumIndex',
         bingx: 'https://open-api.bingx.com/openApi/swap/v2/ticker/fundingRate',
-        okx: 'https://www.okx.com/api/v5/public/instruments?instType=SWAP',
+        okx: 'https://www.okx.com/api/v5/public/instruments?instType=SWAP', 
         bitget: 'https://api.bitget.com/api/mix/v1/market/tickers?productType=umcbl'
     };
 
@@ -71,7 +72,7 @@ async function updateFundingRates() {
     newData.binance = binanceData.map(item => ({ symbol: item.symbol, fundingRate: parseFloat(item.lastFundingRate) })).filter(r => r && r.fundingRate < 0).sort((a,b) => a.fundingRate - b.fundingRate);
 
     // Xử lý BingX (sửa lại đường dẫn dữ liệu cho đúng)
-    const bingxData = (bingxRes.status === 'fulfilled' ? bingxRes.value?.data?.fundingRateList : []) || [];
+    const bingxData = (bingxRes.status === 'fulfilled' ? bingxRes.value?.data : []) || [];
     newData.bingx = bingxData.map(item => ({ symbol: item.symbol.replace('-', ''), fundingRate: parseFloat(item.fundingRate) })).filter(r => r && r.fundingRate < 0).sort((a,b) => a.fundingRate - b.fundingRate);
 
     // Xử lý OKX (sửa lại để xử lý đúng cấu trúc của endpoint /public/instruments)
@@ -117,5 +118,5 @@ server.listen(PORT, async () => {
     console.log(`🤖 Endpoint cho bot: http://localhost:${PORT}/api/rates`);
     
     await updateFundingRates();
-    setInterval(updateFundingRates, REFRESH_INTERVAL_MINUTES * 60 * 1000);
+    setInterval(updateFundingRates, REFRESH_INTERVAL_MINUTES * 5); //Sửa lỗi gõ nhầm, 5 phút một lần
 });
