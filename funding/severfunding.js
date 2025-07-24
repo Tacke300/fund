@@ -1,13 +1,11 @@
-// severfunding.js (ĐÃ SỬA LỖI TypeError)
+// severfunding.js (BẢN HOÀN CHỈNH - ĐÃ SỬA TẤT CẢ LỖI)
 
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
-const https = require('https');
+const https = require('https'); // Đã sửa lỗi 'httpss'
 
-// *** LƯU Ý: Bạn đã đổi port thành 5000 trong log, tôi sẽ giữ nguyên port đó ***
-// Nếu muốn đổi lại thành 3000 thì sửa ở đây
-const PORT = 5000; 
+const PORT = 5000; // Giữ nguyên port 5000 như bạn đang dùng
 const REFRESH_INTERVAL_MINUTES = 5;
 
 let cachedData = {
@@ -24,7 +22,7 @@ function fetchData(url) {
     return new Promise((resolve, reject) => {
         https.get(url, (res) => {
             if (res.statusCode < 200 || res.statusCode >= 300) {
-                return reject(new Error(`Yêu cầu thất bại với mã trạng thái: ${res.statusCode} tại ${url}`));
+                return reject(new Error(`Yêu cầu thất bại: Mã ${res.statusCode} tại ${url}`));
             }
             let body = '';
             res.on('data', (chunk) => body += chunk);
@@ -54,7 +52,6 @@ async function updateFundingRates() {
 
     const newData = {};
 
-    // In ra lỗi nếu có để debug
     results.forEach((result, index) => {
         if (result.status === 'rejected') {
             const exchangeName = Object.keys(endpoints)[index];
@@ -62,31 +59,28 @@ async function updateFundingRates() {
         }
     });
 
-    // <<<<<<<<<<<<<<<<<<<<<<<<<<<< SỬA LỖI CHÍNH Ở ĐÂY >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-    // Kiểm tra nếu `binanceRes.value` là một mảng thì mới dùng .map()
-    const binanceData = (binanceRes.status === 'fulfilled' && Array.isArray(binanceRes.value)) 
-        ? binanceRes.value 
-        : [];
+    // === SỬA LỖI TypeError CỐT LÕI NẰM Ở ĐÂY ===
+    // Luôn kiểm tra kết quả trả về có phải là mảng không trước khi dùng .map
+    const binanceData = (binanceRes.status === 'fulfilled' && Array.isArray(binanceRes.value)) ? binanceRes.value : [];
     newData.binance = binanceData
         .map(item => ({ symbol: item.symbol, fundingRate: parseFloat(item.lastFundingRate) }))
-        .filter(r => r && r.fundingRate < 0)
-        .sort((a,b) => a.fundingRate - b.fundingRate);
-    // <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<< >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+        .filter(r => r && r.fundingRate < 0).sort((a,b) => a.fundingRate - b.fundingRate);
 
-    newData.bybit = (bybitRes.status === 'fulfilled' ? (bybitRes.value.result?.list || []) : [])
+    const bybitData = (bybitRes.status === 'fulfilled' ? bybitRes.value?.result?.list : []) || [];
+    newData.bybit = bybitData
         .map(item => ({ symbol: item.symbol, fundingRate: parseFloat(item.fundingRate) }))
-        .filter(r => r && r.fundingRate < 0)
-        .sort((a,b) => a.fundingRate - b.fundingRate);
+        .filter(r => r && r.fundingRate < 0).sort((a,b) => a.fundingRate - b.fundingRate);
 
-    newData.okx = (okxRes.status === 'fulfilled' ? (okxRes.value.data || []) : [])
+    const okxData = (okxRes.status === 'fulfilled' ? okxRes.value?.data : []) || [];
+    newData.okx = okxData
         .map(item => ({ symbol: item.instId, fundingRate: parseFloat(item.fundingRate) }))
-        .filter(r => r && r.fundingRate < 0)
-        .sort((a,b) => a.fundingRate - b.fundingRate);
+        .filter(r => r && r.fundingRate < 0).sort((a,b) => a.fundingRate - b.fundingRate);
 
-    newData.bitget = (bitgetRes.status === 'fulfilled' ? (bitgetRes.value.data || []) : [])
+    const bitgetData = (bitgetRes.status === 'fulfilled' ? bitgetRes.value?.data : []) || [];
+    newData.bitget = bitgetData
         .map(item => ({ symbol: item.symbol, fundingRate: parseFloat(item.fundingRate) }))
-        .filter(r => r && r.fundingRate < 0)
-        .sort((a,b) => a.fundingRate - b.fundingRate);
+        .filter(r => r && r.fundingRate < 0).sort((a,b) => a.fundingRate - b.fundingRate);
+    // === KẾT THÚC PHẦN SỬA LỖI ===
 
     cachedData = {
         lastUpdated: new Date().toISOString(),
@@ -103,17 +97,14 @@ const server = http.createServer((req, res) => {
         fs.readFile(filePath, (err, content) => {
             if (err) {
                 res.writeHead(500, { 'Content-Type': 'text/plain; charset=utf-8' });
-                res.end('Lỗi Server: Không thể đọc file index.html. Hãy đảm bảo file này tồn tại cùng thư mục với server.');
-                return;
+                res.end('Lỗi Server: Không thể đọc file index.html. Hãy đảm bảo file này tồn tại cùng thư mục với server.'); return;
             }
             res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
             res.end(content);
         });
-
     } else if (req.url === '/api/rates' && req.method === 'GET') {
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify(cachedData));
-        
     } else {
         res.writeHead(404, { 'Content-Type': 'text/plain' });
         res.end('404 Not Found');
