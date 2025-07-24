@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bảng Funding Rate Âm</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: #f4f7f9;
+            color: #333;
+            margin: 0;
+            padding: 20px;
+        }
+        h1 {
+            text-align: center;
+            color: #2c3e50;
+        }
+        .container {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            max-width: 1400px;
+            margin: 20px auto;
+        }
+        .exchange-card {
+            background-color: #ffffff;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            overflow: hidden; /* Giữ table bên trong card */
+        }
+        .exchange-card h2 {
+            margin: 0;
+            padding: 15px 20px;
+            background-color: #3498db;
+            color: white;
+            font-size: 1.2em;
+        }
+        .table-container {
+             max-height: 400px;
+             overflow-y: auto;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        th, td {
+            padding: 12px 20px;
+            text-align: left;
+            border-bottom: 1px solid #e0e0e0;
+        }
+        th {
+            background-color: #ecf0f1;
+            font-weight: 600;
+        }
+        tr:last-child td {
+            border-bottom: none;
+        }
+        td.rate {
+            font-weight: bold;
+            color: #e74c3c; /* Màu đỏ cho funding âm */
+        }
+        .no-data {
+            padding: 20px;
+            color: #7f8c8d;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>Funding Rate Âm Từ Các Sàn Giao Dịch</h1>
+
+    <div class="container" id="data-container">
+        <!-- Dữ liệu sẽ được chèn vào đây bằng JavaScript -->
+    </div>
+
+    <script>
+        /**
+         * Tạo và hiển thị một bảng dữ liệu cho một sàn giao dịch.
+         * @param {string} exchangeName - Tên sàn (ví dụ: 'Binance').
+         * @param {string} exchangeKey - Khóa trong file JSON (ví dụ: 'binance').
+         * @param {Array} rates - Mảng dữ liệu funding rates.
+         */
+        function createExchangeTable(container, exchangeName, rates) {
+            const card = document.createElement('div');
+            card.className = 'exchange-card';
+
+            let content = `<h2>${exchangeName} (${rates.length})</h2>`;
+
+            if (rates.length === 0) {
+                content += '<p class="no-data">Không có dữ liệu funding âm.</p>';
+            } else {
+                content += '<div class="table-container"><table>';
+                content += '<thead><tr><th>Symbol</th><th>Funding Rate</th></tr></thead>';
+                content += '<tbody>';
+                
+                rates.forEach(rate => {
+                    const fundingRatePercent = (rate.fundingRate * 100).toFixed(4);
+                    content += `
+                        <tr>
+                            <td>${rate.symbol}</td>
+                            <td class="rate">${fundingRatePercent}%</td>
+                        </tr>
+                    `;
+                });
+
+                content += '</tbody></table></div>';
+            }
+            
+            card.innerHTML = content;
+            container.appendChild(card);
+        }
+
+        // Hàm chính để tải và hiển thị dữ liệu
+        async function displayData() {
+            const container = document.getElementById('data-container');
+            try {
+                // Sử dụng fetch API của trình duyệt để đọc file JSON cục bộ
+                const response = await fetch('funding_data.json');
+                if (!response.ok) {
+                    throw new Error('Không thể tải file funding_data.json. Hãy chắc chắn bạn đã chạy file node fetch_rates.js trước.');
+                }
+                const data = await response.json();
+
+                // Tạo bảng cho từng sàn
+                createExchangeTable(container, 'Binance', data.binance || []);
+                createExchangeTable(container, 'Bybit', data.bybit || []);
+                createExchangeTable(container, 'OKX', data.okx || []);
+                createExchangeTable(container, 'Bitget', data.bitget || []);
+
+            } catch (error) {
+                container.innerHTML = `<p style="color: red; text-align: center;">Lỗi: ${error.message}</p>`;
+            }
+        }
+
+        // Chạy hàm khi trang được tải
+        document.addEventListener('DOMContentLoaded', displayData);
+    </script>
+
+</body>
+</html>
