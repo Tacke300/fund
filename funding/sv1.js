@@ -1,4 +1,4 @@
-// sv1.js (BẢN GỐC ĐƯỢC SỬA LỖI CHÍNH XÁC)
+// sv1.js (BẢN GỐC TỐI ƯU - ỔN ĐỊNH)
 
 const http = require('http');
 const fs = require('fs');
@@ -59,18 +59,17 @@ async function fetchExchangeData(exchangeId) {
             const symbol = cleanSymbol(rate.symbol);
             const marketInfo = exchange.markets[rate.symbol];
 
-            // SỬA LỖI 1: Bỏ điều kiện "fundingRate < 0" để lấy tất cả các coin
+            // 1. SỬA LỖI: Gỡ bỏ bộ lọc `fundingRate < 0` để lấy TẤT CẢ các coin
             if (rate && typeof rate.fundingRate === 'number' && marketInfo) {
                 
-                // Logic lấy timestamp mặc định
                 let timestamp = rate.fundingTimestamp || rate.nextFundingTime || null;
                 
-                // SỬA LỖI 2: Mở rộng "chữa cháy" cho cả BingX
+                // 2. SỬA LỖI: Mở rộng "chữa cháy" thời gian cho cả BingX (đây là cách làm thực tế duy nhất)
                 if ((exchangeId === 'bitget' || exchangeId === 'bingx') && !timestamp) {
                     timestamp = calculateNextStandardFundingTime();
                 }
                 
-                // SỬA LỖI 3: Mở rộng hệ thống tìm đòn bẩy và loại bỏ số 75 "ảo"
+                // 3. SỬA LỖI: Mở rộng hệ thống tìm đòn bẩy và loại bỏ số 75 "ảo"
                 const leverageValue = 
                     marketInfo.limits?.leverage?.max ||  // Dùng cho Binance/OKX
                     marketInfo.info?.leverage_ratio ||   // Dùng cho BingX
@@ -78,7 +77,7 @@ async function fetchExchangeData(exchangeId) {
                 
                 const maxLeverage = (leverageValue && parseFloat(leverageValue) > 0) ? parseFloat(leverageValue) : null;
 
-                // Chỉ xử lý những coin có dữ liệu đòn bẩy thực tế
+                // Chỉ thêm vào danh sách nếu lấy được đòn bẩy thực tế
                 if (maxLeverage) {
                     processedRates[symbol] = {
                         symbol: symbol,
@@ -96,7 +95,8 @@ async function fetchExchangeData(exchangeId) {
     }
 }
 
-// ----- CÁC HÀM CÒN LẠI GIỮ NGUYÊN -----
+
+// ----- CÁC HÀM CÒN LẠI GIỮ NGUYÊN TỪ BẢN GỐC -----
 
 async function updateAllData() {
     console.log(`[${new Date().toISOString()}] Bắt đầu cập nhật dữ liệu...`);
@@ -187,7 +187,7 @@ const server = http.createServer((req, res) => {
 });
 
 server.listen(PORT, async () => {
-    console.log(`✅ Máy chủ (Bản Gốc Sửa Lỗi) đang chạy tại http://localhost:${PORT}`);
+    console.log(`✅ Máy chủ (Bản Gốc Sửa Lỗi Chính Xác) đang chạy tại http://localhost:${PORT}`);
     await updateAllData();
     calculateArbitrageOpportunities();
     masterLoop();
