@@ -1,18 +1,17 @@
-// severfunding.js (PHIÊN BẢN VÁ LỖI CUỐI CÙNG - GIỮ NGUYÊN CODE TỐT, THAY BYBIT -> BINGX, SỬA OKX)
+// severfunding.js (PHIÊN BẢN PHỤC HỒI + VÁ LỖI - GIỮ CODE TỐT, THAY BYBIT -> BINGX, SỬA OKX)
 
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const https = require('https'); 
 const { URL } = require('url');
-const ccxt = require('ccxt'); // Nhập ccxt, chỉ dùng cho OKX
+const ccxt = require('ccxt'); // Chỉ dùng cho OKX
 
 const PORT = 5000;
 const REFRESH_INTERVAL_MINUTES = 5;
 
 let cachedData = {
     lastUpdated: null,
-    // Cập nhật danh sách sàn
     rates: { binance: [], bingx: [], okx: [], bitget: [] } 
 };
 
@@ -60,17 +59,17 @@ async function fetchOkxRates() {
     }
 }
 
-
 // =====================================================
 // PHẦN 3: HÀM CẬP NHẬT TỔNG HỢP (KẾT HỢP CẢ HAI CÁCH)
 // =====================================================
 async function updateFundingRates() {
     console.log(`[${new Date().toISOString()}] Đang cập nhật dữ liệu funding rates...`);
     
-    // Các endpoint cho các sàn dùng cách cũ
+    // Các endpoint cho các sàn dùng cách cũ, đã chạy tốt
     const endpoints = {
         binance: 'https://fapi.binance.com/fapi/v1/premiumIndex',
-        bingx: 'https://open-api.bingx.com/openApi/swap/v2/ticker/price', // THAY BYBIT -> BINGX
+        // Thay Bybit bằng BingX
+        bingx: 'https://open-api.bingx.com/openApi/swap/v2/ticker/fundingRate',
         bitget: 'https://api.bitget.com/api/mix/v1/market/tickers?productType=umcbl'
     };
 
@@ -89,7 +88,7 @@ async function updateFundingRates() {
     const binanceData = (binanceRes.status === 'fulfilled' && Array.isArray(binanceRes.value)) ? binanceRes.value : [];
     newData.binance = binanceData.map(item => ({ symbol: item.symbol, fundingRate: parseFloat(item.lastFundingRate) })).filter(r => r && r.fundingRate < 0).sort((a,b) => a.fundingRate - b.fundingRate);
 
-    // Xử lý BingX (thêm mới)
+    // Xử lý BingX (thêm mới, xử lý theo cấu trúc API của BingX)
     const bingxData = (bingxRes.status === 'fulfilled' ? bingxRes.value?.data : []) || [];
     newData.bingx = bingxData.map(item => ({ symbol: item.symbol, fundingRate: parseFloat(item.fundingRate) })).filter(r => r && r.fundingRate < 0).sort((a,b) => a.fundingRate - b.fundingRate);
 
