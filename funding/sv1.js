@@ -56,17 +56,34 @@ async function fetchExchangeData(exchangeId) {
             const marketInfo = exchange.markets[rate.symbol];
 
             if (rate && typeof rate.fundingRate === 'number' && rate.fundingRate < 0 && marketInfo) {
-                let timestamp = rate.fundingTimestamp || rate.nextFundingTime || null;
-                
-                if ((exchangeId === 'bitget' || exchangeId === 'bingx') && !timestamp) {
-                    timestamp = calculateNextStandardFundingTime();
+                let timestamp;
+                let maxLeverage;
+
+                switch (exchangeId) {
+                    case 'binanceusdm':
+                    case 'okx':
+                        timestamp = rate.nextFundingTime || rate.fundingTimestamp;
+                        maxLeverage = marketInfo.limits?.leverage?.max || marketInfo.info?.maxLeverage || 75;
+                        break;
+                    case 'bingx':
+                        timestamp = calculateNextStandardFundingTime();
+                        maxLeverage = parseFloat(marketInfo.info?.leverage_ratio) || null;
+                        break;
+                    case 'bitget':
+                        timestamp = calculateNextStandardFundingTime();
+                        maxLeverage = marketInfo.limits?.leverage?.max || parseFloat(marketInfo.info?.maxLeverage) || 75;
+                        break;
+                    default:
+                        timestamp = rate.nextFundingTime || null;
+                        maxLeverage = 75;
+                        break;
                 }
-                
+
                 processedRates[symbol] = {
                     symbol: symbol,
                     fundingRate: rate.fundingRate,
                     fundingTimestamp: timestamp,
-                    maxLeverage: marketInfo.limits?.leverage?.max || marketInfo.info?.maxLeverage || null
+                    maxLeverage: maxLeverage,
                 };
             }
         }
@@ -81,7 +98,9 @@ async function updateAllData() {
     console.log(`[${new Date().toISOString()}] Bắt đầu cập nhật dữ liệu...`);
     const results = await Promise.all(EXCHANGE_IDS.map(id => fetchExchangeData(id)));
     results.forEach(result => {
-        if (result.status === 'success') exchangeData[result.id] = { rates: result.rates };
+        if (result.status === 'success') {
+            exchangeData[result.id] = { rates: result.rates };
+        }
     });
     lastFullUpdateTimestamp = new Date().toISOString();
     console.log("✅ Cập nhật dữ liệu thành công!");
@@ -91,7 +110,9 @@ function calculateArbitrageOpportunities() {
     const opportunities = [];
     const allSymbols = new Set();
     EXCHANGE_IDS.forEach(id => {
-        if (exchangeData[id]) Object.keys(exchangeData[id].rates).forEach(symbol => allSymbols.add(symbol));
+        if (exchangeData[id]) {
+            Object.keys(exchangeData[id].rates).forEach(symbol => allSymbols.add(symbol));
+        }
     });
 
     allSymbols.forEach(symbol => {
@@ -101,7 +122,9 @@ function calculateArbitrageOpportunities() {
                 const exchange1Id = EXCHANGE_IDS[i], exchange2Id = EXCHANGE_IDS[j];
                 const rate1 = exchangeData[exchange1Id]?.rates[symbol], rate2 = exchangeData[exchange2Id]?.rates[symbol];
                 
-                if (!rate1 || !rate2 || rate1.maxLeverage === null || rate2.maxLeverage === null) continue;
+                if (!rate1 || !rate2 || rate1.maxLeverage === null || rate2.maxLeverage === null) {
+                    continue;
+                }
                 
                 const fundingDiff = Math.abs(rate1.fundingRate - rate2.fundingRate);
                 if (fundingDiff < FUNDING_DIFFERENCE_THRESHOLD) continue;
@@ -115,7 +138,7 @@ function calculateArbitrageOpportunities() {
                 
                 const currentOpportunity = {
                     coin: symbol,
-                    exchanges: `${exchange1Id.replace('usdm', '')} / ${exchange2Id.replace('usdm', '')}`,
+                    exchanges: `${exchangeId.replace('usdm', '')} / ${exchange2Id.replace('usdm', '')}`,
                     nextFundingTime: rate1.fundingTimestamp || rate2.fundingTimestamp,
                     commonLeverage: commonLeverage,
                     estimatedPnl: parseFloat(estimatedPnl.toFixed(2)),
