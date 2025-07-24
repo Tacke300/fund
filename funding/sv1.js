@@ -5,7 +5,7 @@ const fs = require('fs');
 const path = require('path');
 const ccxt = require('ccxt');
 
-const PORT = 5000;
+const PORT = 5001;
 
 // ----- CẤU HÌNH -----
 // Các sàn sẽ được sử dụng
