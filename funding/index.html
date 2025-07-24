@@ -51,13 +51,13 @@
                 statusEl.textContent = `Dữ liệu được cập nhật lần cuối lúc: ${new Date(rawData.lastUpdated).toLocaleString('vi-VN')}`;
 
                 const consolidatedData = {};
-                // CẬP NHẬT DANH SÁCH SÀN Ở ĐÂY
+                // CẬP NHẬT DANH SÁCH SÀN CHÍNH XÁC
                 const exchanges = ['binance', 'bingx', 'okx', 'bitget'];
 
                 for (const exchange of exchanges) {
                     const coinList = rawData.rates[exchange] || [];
                     for (const coin of coinList) {
-                        const symbol = coin.symbol;
+                        const symbol = coin.symbol.replace('-', ''); // Chuẩn hóa tên coin từ BingX
                         if (!consolidatedData[symbol]) {
                             consolidatedData[symbol] = { symbol: symbol, minRate: coin.fundingRate };
                         }
