@@ -3,119 +3,160 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Bảng điều khiển Arbitrage Funding Rate</title>
+    <title>Funding Monitor & Arbitrage</title>
     <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background-color: #121212; color: #e0e0e0; line-height: 1.6; }
-        .container { max-width: 1400px; margin: 20px auto; padding: 20px; background-color: #1e1e1e; border-radius: 8px; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4); }
-        h1, h2 { color: #ffffff; border-bottom: 2px solid #333; padding-bottom: 10px; }
-        h1 { text-align: center; }
-        #lastUpdated { text-align: center; margin-top: -15px; margin-bottom: 20px; font-size: 0.9em; color: #888; }
-        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-        th, td { padding: 12px 15px; border: 1px solid #333; text-align: left; }
-        th { background-color: #333; font-weight: bold; color: #fff; text-transform: uppercase; }
-        tr:nth-child(even) { background-color: #2c2c2c; }
-        tr:hover { background-color: #444; }
-        .positive { color: #4caf50; font-weight: bold; }
-        .negative { color: #f44336; font-weight: bold; }
-        .highlight-pnl { font-size: 1.2em; font-weight: bold; color: #2196F3; }
-        .label { font-weight: bold; color: #bbb; }
-        .exchange-long { background-color: rgba(76, 175, 80, 0.2); text-transform: capitalize; }
-        .exchange-short { background-color: rgba(244, 67, 54, 0.2); text-transform: capitalize; }
-        .coin-symbol { font-weight: bold; color: #f0b90b; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background-color: #f4f7f9; color: #333; margin: 0; padding: 20px; }
+        .container { max-width: 1200px; margin: 0 auto; }
+        h1, h2 { text-align: center; color: #2c3e50; }
+        h1 { margin-bottom: 5px;}
+        h2 { margin-top: 40px; }
+        .timestamp { text-align: center; color: #7f8c8d; margin-bottom: 30px; font-size: 0.9em; height: 1em; }
+        table { width: 100%; border-collapse: collapse; margin-bottom: 30px; background-color: #fff; box-shadow: 0 4px 8px rgba(0,0,0,0.1); border-radius: 8px; overflow: hidden; }
+        th, td { padding: 10px 15px; text-align: left; border-bottom: 1px solid #e0e0e0; }
+        thead { background-color: #34495e; color: #ffffff; }
+        th { font-weight: bold; }
+        tbody tr:nth-child(even) { background-color: #f8f9fa; }
+        tbody tr:hover { background-color: #e8f4fd; }
+        
+        /* Bảng Arbitrage */
+        .pnl-positive { font-weight: bold; color: #27ae60; }
+        .highlight-green td { color: #27ae60 !important; font-weight: bold; }
+        
+        /* Bảng Matrix Funding */
+        .funding-matrix-table td { text-align: center; vertical-align: middle; }
+        .funding-matrix-table td:first-child { text-align: left; font-weight: bold; }
+        .main-rate { font-weight: bold; color: #e74c3c; font-size: 1.1em; }
+        .sub-info { font-size: 0.8em; color: #888; margin-top: 4px; }
     </style>
 </head>
 <body>
 
 <div class="container">
-    <h1>Bảng điều khiển Arbitrage Funding Rate</h1>
-    <p id="lastUpdated">Đang tải dữ liệu...</p>
-
-    <h2>Cơ Hội Arbitrage Tốt Nhất (PNL > 15$)</h2>
-    <table id="arbitrageTable">
+    <h1>Bảng Tính Toán Arbitrage</h1>
+    <p class="timestamp" id="main-timestamp">Đang tải dữ liệu...</p>
+    <table id="arbitrage-table">
         <thead>
             <tr>
                 <th>Coin</th>
-                <th>Long On (FR thấp)</th>
-                <th>Short On (FR cao)</th>
-                <th>Đòn bẩy chung</th>
-                <th>Chênh lệch Funding</th>
-                <th>Thời gian Funding kế tiếp</th>
-                <th>Lợi nhuận ước tính ($/10k)</th>
+                <th>Cặp Sàn</th>
+                <th>Max Lev Chung</th>
+                <th>Thời Gian Funding</th>
+                <th>% PnL Ước Tính</th>
             </tr>
         </thead>
-        <tbody>
-            <!-- Dữ liệu sẽ được chèn vào đây bởi JavaScript -->
-        </tbody>
+        <tbody></tbody>
     </table>
 
-    <!-- Có thể thêm bảng hiển thị Raw Data nếu cần -->
-
+    <h2>Tổng Hợp Funding Rates (Dạng Ma Trận)</h2>
+    <table id="funding-matrix-table" class="funding-matrix-table">
+        <thead>
+            <tr>
+                <th>Coin</th>
+                <th>Binance</th>
+                <th>OKX</th>
+                <th>BingX</th>
+                <th>Bitget</th>
+            </tr>
+        </thead>
+        <tbody></tbody>
+    </table>
 </div>
 
 <script>
-    function formatTimestamp(ts) {
-        if (!ts) return 'Không có dữ liệu';
-        const date = new Date(ts);
-        return date.toLocaleString('vi-VN', {
-            year: 'numeric', month: '2-digit', day: '2-digit',
-            hour: '2-digit', minute: '2-digit', second: '2-digit',
-            timeZone: 'Asia/Ho_Chi_Minh'
+    const API_ENDPOINT = '/api/data';
+    const EXCHANGES = ['binance', 'okx', 'bingx', 'bitget'];
+    
+    function formatTime(timestamp) {
+        if (!timestamp) return 'N/A';
+        const date = new Date(timestamp);
+        if (isNaN(date.getTime())) return 'N/A';
+        return date.toLocaleString('vi-VN', { hour: '2-digit', minute: '2-digit', hour12: false });
+    }
+
+    function renderArbitrageTable(opportunities) {
+        const tbody = document.querySelector('#arbitrage-table tbody');
+        if (!opportunities || opportunities.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;">Không tìm thấy cơ hội nào.</td></tr>';
+            return;
+        }
+        tbody.innerHTML = opportunities.map(op => {
+            const now = Date.now();
+            const timeRemainingMinutes = (op.nextFundingTime - now) / (1000 * 60);
+            const highlightClass = (timeRemainingMinutes <= 55 && timeRemainingMinutes > 0) ? 'highlight-green' : '';
+            return `<tr class="${highlightClass}">
+                        <td>${op.coin}</td>
+                        <td>${op.exchanges.toUpperCase()}</td>
+                        <td>x${op.commonLeverage}</td>
+                        <td>${formatTime(op.nextFundingTime)}</td>
+                        <td class="pnl-positive">+${op.estimatedPnl}%</td>
+                    </tr>`;
+        }).join('');
+    }
+
+    // HÀM MỚI ĐỂ RENDER BẢNG MA TRẬN
+    function renderFundingMatrixTable(ratesData) {
+        const tbody = document.querySelector('#funding-matrix-table tbody');
+        
+        // Chuyển đổi dữ liệu để dễ tra cứu: { 'BTC': { binance: {...}, okx: {...} }, ... }
+        const ratesByCoin = {};
+        for (const exchange of EXCHANGES) {
+            if (ratesData[exchange]) {
+                for (const rate of ratesData[exchange]) {
+                    if (!ratesByCoin[rate.symbol]) {
+                        ratesByCoin[rate.symbol] = {};
+                    }
+                    ratesByCoin[rate.symbol][exchange] = rate;
+                }
+            }
+        }
+        
+        // Sắp xếp coin theo funding rate âm nhất trên bất kỳ sàn nào
+        const sortedCoins = Object.keys(ratesByCoin).sort((a, b) => {
+            const minRateA = Math.min(...EXCHANGES.map(ex => ratesByCoin[a][ex]?.fundingRate || 0));
+            const minRateB = Math.min(...EXCHANGES.map(ex => ratesByCoin[b][ex]?.fundingRate || 0));
+            return minRateA - minRateB;
         });
+
+        tbody.innerHTML = sortedCoins.slice(0, 100).map(coin => {
+            let rowHtml = `<td>${coin}</td>`;
+            for (const exchange of EXCHANGES) {
+                const rate = ratesByCoin[coin][exchange];
+                if (rate) {
+                    const rateText = (rate.fundingRate * 100).toFixed(4) + '%';
+                    const subText = `x${rate.maxLeverage} • ${formatTime(rate.fundingTimestamp)}`;
+                    rowHtml += `<td>
+                                    <div class="main-rate">${rateText}</div>
+                                    <div class="sub-info">${subText}</div>
+                                </td>`;
+                } else {
+                    rowHtml += `<td>-</td>`; // Hiển thị gạch ngang nếu không có dữ liệu
+                }
+            }
+            return `<tr>${rowHtml}</tr>`;
+        }).join('');
     }
 
     async function fetchData() {
         try {
-            const response = await fetch('/api/data');
-            if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
-            }
+            const response = await fetch(API_ENDPOINT);
+            if (!response.ok) throw new Error(`Lỗi mạng: ${response.status}`);
             const data = await response.json();
-
-            // Cập nhật thời gian
-            const lastUpdatedElement = document.getElementById('lastUpdated');
-            if (data.lastUpdated) {
-                const updateDate = new Date(data.lastUpdated);
-                 lastUpdatedElement.textContent = `Cập nhật lần cuối: ${formatTimestamp(updateDate.getTime())}`;
-            } else {
-                 lastUpdatedElement.textContent = 'Chưa có dữ liệu cập nhật.';
-            }
-
-
-            // Cập nhật bảng Arbitrage
-            const arbitrageTableBody = document.querySelector('#arbitrageTable tbody');
-            arbitrageTableBody.innerHTML = ''; // Xóa dữ liệu cũ
-
-            if (data.arbitrageData && data.arbitrageData.length > 0) {
-                data.arbitrageData.forEach(opp => {
-                    const row = document.createElement('tr');
-                    
-                    // SỬA Ở ĐÂY: Sử dụng các key mới longOn, shortOn, fundingDiff
-                    row.innerHTML = `
-                        <td class="coin-symbol">${opp.coin}</td>
-                        <td class="exchange-long">${opp.longOn}</td>
-                        <td class="exchange-short">${opp.shortOn}</td>
-                        <td>x${opp.commonLeverage}</td>
-                        <td class="positive">${opp.fundingDiff.toFixed(4)}%</td>
-                        <td>${formatTimestamp(opp.nextFundingTime)}</td>
-                        <td class="highlight-pnl">$${opp.estimatedPnl}</td>
-                    `;
-                    arbitrageTableBody.appendChild(row);
-                });
-            } else {
-                arbitrageTableBody.innerHTML = '<tr><td colspan="7" style="text-align:center;">Không tìm thấy cơ hội arbitrage nào phù hợp.</td></tr>';
-            }
+            
+            document.getElementById('main-timestamp').innerText = `Dữ liệu cập nhật lúc: ${new Date(data.lastUpdated).toLocaleString('vi-VN', {hour12: false}) || 'N/A'}`;
+            
+            renderArbitrageTable(data.arbitrageData);
+            renderFundingMatrixTable(data.rawRates);
 
         } catch (error) {
-            console.error("Lỗi khi lấy dữ liệu:", error);
-            document.getElementById('lastUpdated').textContent = 'Lỗi kết nối tới server. Vui lòng kiểm tra console (F12).';
-            const arbitrageTableBody = document.querySelector('#arbitrageTable tbody');
-            arbitrageTableBody.innerHTML = '<tr><td colspan="7" style="text-align:center;">Có lỗi xảy ra khi tải dữ liệu.</td></tr>';
+            console.error('Lỗi khi lấy dữ liệu:', error);
+            document.getElementById('main-timestamp').innerText = 'Lỗi tải dữ liệu. Kiểm tra console (F12).';
         }
     }
-
-    // Tải dữ liệu lần đầu và cập nhật mỗi 30 giây
-    fetchData();
-    setInterval(fetchData, 30000);
+    
+    document.addEventListener('DOMContentLoaded', () => {
+        fetchData();
+        setInterval(fetchData, 60000);
+    });
 </script>
 
 </body>
