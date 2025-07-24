@@ -1,4 +1,4 @@
-// sv1.js (BẢN SỬA LỖI LOGIC THỜI GIAN TRIỆT ĐỂ)
+// sv1.js (BẢN TỐI ƯU - CACHE ĐÒN BẨY & DỮ LIỆU CHÍNH XÁC)
 
 const http = require('http');
 const fs = require('fs');
@@ -12,8 +12,10 @@ const EXCHANGE_IDS = ['binanceusdm', 'bingx', 'okx', 'bitget'];
 const FUNDING_DIFFERENCE_THRESHOLD = 0.002;
 const MINIMUM_PNL_THRESHOLD = 15;
 const IMMINENT_THRESHOLD_MINUTES = 15;
+const LEVERAGE_CACHE_REFRESH_INTERVAL_HOURS = 6;
 
 // ----- BIẾN TOÀN CỤC -----
+let leverageCache = {}; // BỘ NHỚ ĐỆM CHO ĐÒN BẨY
 let exchangeData = {};
 let arbitrageOpportunities = [];
 let lastFullUpdateTimestamp = null;
@@ -26,60 +28,66 @@ EXCHANGE_IDS.forEach(id => {
 
 const cleanSymbol = (symbol) => symbol.replace('/USDT', '').replace(':USDT', '');
 
-function calculateNextStandardFundingTime() {
-    const now = new Date();
-    const fundingHoursUTC = [0, 8, 16];
-    let nextHourUTC = -1;
-    for (const hour of fundingHoursUTC) {
-        if (now.getUTCHours() < hour) {
-            nextHourUTC = hour;
-            break;
+// === LOGIC MỚI: QUẢN LÝ BỘ NHỚ ĐỆM ĐÒN BẨY ===
+async function initializeLeverageCache() {
+    console.log(`[CACHE] Bắt đầu làm mới bộ nhớ đệm đòn bẩy...`);
+    const newCache = {};
+    await Promise.all(EXCHANGE_IDS.map(async (id) => {
+        try {
+            const exchange = exchanges[id];
+            await exchange.loadMarkets(true); // Tải lại market để có dữ liệu mới nhất
+            newCache[id] = {};
+            for (const market of Object.values(exchange.markets)) {
+                if (market.swap && market.quote === 'USDT') {
+                    const symbol = cleanSymbol(market.symbol);
+                    // YÊU CẦU 1: Nếu không thấy maxLev, để là NULL
+                    const maxLeverage = market.limits?.leverage?.max || market.info?.maxLeverage || null;
+                    newCache[id][symbol] = maxLeverage;
+                }
+            }
+            console.log(`[CACHE] ✅ Đã cache thành công đòn bẩy cho ${id.toUpperCase()}`);
+        } catch (e) {
+            console.warn(`[CACHE] ❌ Lỗi khi cache đòn bẩy cho ${id.toUpperCase()}: ${e.message}`);
         }
-    }
-    const nextFundingDate = new Date(now.getTime());
-    nextFundingDate.setUTCHours(nextFundingDate.getUTCHours(), 0, 0, 0);
-    if (nextHourUTC !== -1) {
-        nextFundingDate.setUTCHours(nextHourUTC);
-    } else {
-        nextFundingDate.setUTCDate(now.getUTCDate() + 1);
-        nextFundingDate.setUTCHours(0);
-    }
-    return nextFundingDate.getTime();
+    }));
+    leverageCache = newCache;
+    console.log(`[CACHE] 🎉 Hoàn tất làm mới bộ nhớ đệm đòn bẩy.`);
 }
 
-async function fetchAllExchangeData() {
+
+// === VÒNG LẶP CHÍNH SIÊU NHẸ ===
+async function fetchFundingRatesForAllExchanges() {
+    const freshData = {};
     const results = await Promise.all(EXCHANGE_IDS.map(async (id) => {
         try {
             const exchange = exchanges[id];
-            await exchange.loadMarkets();
-            const fundingRatesRaw = await exchange.fetchFundingRates();
+            // Chỉ lấy funding rate, không load market ở đây nữa
+            const fundingRatesRaw = await exchange.fetchFundingRates(); 
             const processedRates = {};
             for (const rate of Object.values(fundingRatesRaw)) {
                 const symbol = cleanSymbol(rate.symbol);
-                const marketInfo = exchange.markets[rate.symbol];
-                if (rate && typeof rate.fundingRate === 'number' && marketInfo) {
-                    let timestamp = rate.fundingTimestamp || rate.nextFundingTime || null;
-                    if (id === 'bitget' && !timestamp) {
-                        timestamp = calculateNextStandardFundingTime();
-                    }
-                    processedRates[symbol] = {
+                // Tra cứu đòn bẩy từ cache
+                const maxLeverage = leverageCache[id]?.[symbol];
+
+                // YÊU CẦU 2: Chỉ xử lý nếu coin có dữ liệu đòn bẩy
+                if (maxLeverage !== undefined) { 
+                     processedRates[symbol] = {
                         symbol: symbol,
                         fundingRate: rate.fundingRate,
-                        fundingTimestamp: timestamp,
-                        maxLeverage: marketInfo.limits?.leverage?.max || marketInfo.info?.maxLeverage || 75
+                        fundingTimestamp: rate.fundingTimestamp || rate.nextFundingTime,
+                        maxLeverage: maxLeverage // Lấy từ cache
                     };
                 }
             }
             return { id, status: 'success', rates: processedRates };
         } catch (e) {
             if (!(e instanceof ccxt.RequestTimeout || e instanceof ccxt.NetworkError)) {
-                console.warn(`- Lỗi khi lấy dữ liệu từ ${id.toUpperCase()}: ${e.constructor.name} - ${e.message}`);
+                console.warn(`- Lỗi khi lấy funding từ ${id.toUpperCase()}: ${e.message}`);
             }
             return { id, status: 'error', rates: {} };
         }
     }));
-
-    const freshData = {};
+    
     results.forEach(result => {
         if (result.status === 'success') {
             freshData[result.id] = { rates: result.rates };
@@ -88,8 +96,7 @@ async function fetchAllExchangeData() {
     return freshData;
 }
 
-
-// === HÀM CHUẨN HÓA THỜI GIAN (LOGIC SỬA LỖI CỐT LÕI) ===
+// Hàm chuẩn hóa thời gian (đã tối ưu)
 function standardizeFundingTimes(data) {
     const allSymbols = new Set();
     Object.values(data).forEach(ex => {
@@ -97,7 +104,9 @@ function standardizeFundingTimes(data) {
     });
 
     const authoritativeTimes = {};
-    // Bước 1: Tạo bản đồ thời gian chuẩn cho từng coin
+    const now = new Date();
+    const fundingHoursUTC = [0, 8, 16];
+    
     allSymbols.forEach(symbol => {
         const binanceTime = data.binanceusdm?.rates[symbol]?.fundingTimestamp;
         const okxTime = data.okx?.rates[symbol]?.fundingTimestamp;
@@ -105,28 +114,31 @@ function standardizeFundingTimes(data) {
         if (binanceTime && okxTime) authoritativeTimes[symbol] = Math.max(binanceTime, okxTime);
         else if (binanceTime) authoritativeTimes[symbol] = binanceTime;
         else if (okxTime) authoritativeTimes[symbol] = okxTime;
-        else authoritativeTimes[symbol] = calculateNextStandardFundingTime(); // Phương án cuối
+        else { // Tính toán mặc định
+             let nextHourUTC = fundingHoursUTC.find(h => now.getUTCHours() < h) ?? fundingHoursUTC[0];
+             const nextFundingDate = new Date(now);
+             nextFundingDate.setUTCHours(nextHourUTC, 0, 0, 0);
+             if(now.getUTCHours() >= fundingHoursUTC[fundingHoursUTC.length - 1]) {
+                nextFundingDate.setUTCDate(now.getUTCDate() + 1);
+             }
+             authoritativeTimes[symbol] = nextFundingDate.getTime();
+        }
     });
 
-    // Bước 2: Ghi đè thời gian trên tất cả các sàn bằng thời gian chuẩn
     Object.values(data).forEach(ex => {
         if (ex.rates) {
-            Object.keys(ex.rates).forEach(symbol => {
-                if (authoritativeTimes[symbol]) {
-                    ex.rates[symbol].fundingTimestamp = authoritativeTimes[symbol];
+            Object.values(ex.rates).forEach(rate => {
+                if (authoritativeTimes[rate.symbol]) {
+                    rate.fundingTimestamp = authoritativeTimes[rate.symbol];
                 }
             });
         }
     });
-
     return data;
 }
 
-
 function calculateArbitrageOpportunities() {
     const allFoundOpportunities = [];
-    
-    // Tạo bản sao dữ liệu đã được chuẩn hóa để tính toán
     const currentExchangeData = JSON.parse(JSON.stringify(exchangeData));
 
     for (let i = 0; i < EXCHANGE_IDS.length; i++) {
@@ -138,6 +150,11 @@ function calculateArbitrageOpportunities() {
             const commonSymbols = Object.keys(exchange1Rates).filter(symbol => exchange2Rates[symbol]);
             for (const symbol of commonSymbols) {
                 const rate1Data = exchange1Rates[symbol], rate2Data = exchange2Rates[symbol];
+
+                // Bỏ qua nếu bất kỳ coin nào không có dữ liệu đòn bẩy (bị null)
+                if (!rate1Data.maxLeverage || !rate2Data.maxLeverage) {
+                    continue;
+                }
 
                 let longExchange, shortExchange, longRate, shortRate;
                 if (rate1Data.fundingRate > rate2Data.fundingRate) {
@@ -153,9 +170,7 @@ function calculateArbitrageOpportunities() {
                 const estimatedPnl = fundingDiff * commonLeverage * 100;
 
                 if (estimatedPnl >= MINIMUM_PNL_THRESHOLD) {
-                    // Thời gian bây giờ đã được chuẩn hóa, chỉ cần lấy từ bất kỳ sàn nào
-                    const finalFundingTime = rate1Data.fundingTimestamp; 
-
+                    const finalFundingTime = rate1Data.fundingTimestamp;
                     const minutesUntilFunding = (finalFundingTime - Date.now()) / (1000 * 60);
                     const isImminent = minutesUntilFunding > 0 && minutesUntilFunding <= IMMINENT_THRESHOLD_MINUTES;
 
@@ -180,25 +195,18 @@ function calculateArbitrageOpportunities() {
     });
 }
 
-// ----- Vòng lặp chính đã được cập nhật -----
 async function masterLoop() {
-    console.log(`[${new Date().toISOString()}] Vòng lặp chính bắt đầu...`);
-    
-    // 1. Lấy dữ liệu mới
-    const freshData = await fetchAllExchangeData();
-    
-    // 2. Chuẩn hóa thời gian TRƯỚC KHI LÀM BẤT CỨ ĐIỀU GÌ KHÁC
-    exchangeData = standardizeFundingTimes(freshData);
-    
-    // 3. Tính toán arbitrage với dữ liệu đã được chuẩn hóa
+    console.log(`[LOOP] Bắt đầu vòng lặp cập nhật...`);
+    const freshFundingData = await fetchFundingRatesForAllExchanges();
+    exchangeData = standardizeFundingTimes(freshFundingData);
     calculateArbitrageOpportunities();
-    
     lastFullUpdateTimestamp = new Date().toISOString();
-    console.log(`   => Tìm thấy ${arbitrageOpportunities.length} cơ hội. Vòng lặp hoàn tất.`);
+    console.log(`[LOOP]   => Tìm thấy ${arbitrageOpportunities.length} cơ hội. Vòng lặp hoàn tất.`);
 }
 
-// ----- CÁC HÀM KHỞI ĐỘNG VÀ MÁY CHỦ -----
+// ----- KHỞI ĐỘNG SERVER -----
 const server = http.createServer((req, res) => {
+    // ... (phần này không đổi)
     if (req.url === '/' && req.method === 'GET') {
         fs.readFile(path.join(__dirname, 'index.html'), (err, content) => {
             if (err) { res.writeHead(500); res.end('Lỗi index.html'); return; }
@@ -209,7 +217,6 @@ const server = http.createServer((req, res) => {
         const responseData = {
             lastUpdated: lastFullUpdateTimestamp,
             arbitrageData: arbitrageOpportunities,
-            // Gửi đi dữ liệu đã được chuẩn hóa
             rawRates: {
                 binance: Object.values(exchangeData.binanceusdm?.rates || {}),
                 bingx: Object.values(exchangeData.bingx?.rates || {}),
@@ -225,7 +232,15 @@ const server = http.createServer((req, res) => {
 });
 
 server.listen(PORT, async () => {
-    console.log(`✅ Máy chủ dữ liệu (Bản sửa lỗi triệt để) đang chạy tại http://localhost:${PORT}`);
-    await masterLoop(); // Chạy lần đầu
-    setInterval(masterLoop, 60 * 1000); // Lặp lại mỗi phút
+    console.log(`✅ Máy chủ dữ liệu (Bản Tối Ưu) đang chạy tại http://localhost:${PORT}`);
+    
+    // 1. Khởi tạo cache đòn bẩy lần đầu tiên (quan trọng)
+    await initializeLeverageCache();
+    
+    // 2. Chạy vòng lặp chính lần đầu tiên
+    await masterLoop(); 
+    
+    // 3. Đặt lịch chạy lặp lại
+    setInterval(masterLoop, 60 * 1000); // Cập nhật funding mỗi phút
+    setInterval(initializeLeverageCache, LEVERAGE_CACHE_REFRESH_INTERVAL_HOURS * 60 * 60 * 1000); // Làm mới cache đòn bẩy mỗi 6 giờ
 });
