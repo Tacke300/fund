@@ -1,10 +1,11 @@
-// severfunding.js (PHIÊN BẢN AN TOÀN TUYỆT ĐỐI - KHÔNG DÙNG THƯ VIỆN NGOÀI)
+// severfunding.js (PHIÊN BẢN 2 - GIỮ NGUYÊN CODE TỐT, THAY BYBIT -> BINGX, DÙNG CCXT RIÊNG CHO OKX)
 
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const https = require('https'); 
 const { URL } = require('url');
+const ccxt = require('ccxt'); // Chỉ dùng cho OKX
 
 const PORT = 5000;
 const REFRESH_INTERVAL_MINUTES = 5;
@@ -16,7 +17,7 @@ let cachedData = {
 };
 
 // =========================================================================
-// HÀM fetchData CŨ, ĐÃ CHẠY TỐT -> GIỮ NGUYÊN 100%
+// PHẦN 1: HÀM fetchData CŨ, ĐÃ CHẠY TỐT -> TUYỆT ĐỐI KHÔNG SỬA
 // =========================================================================
 function fetchData(url) {
     return new Promise((resolve, reject) => {
@@ -43,27 +44,50 @@ function fetchData(url) {
     });
 }
 
+// =============================================================
+// PHẦN 2: HÀM CHUYÊN DỤNG DÙNG CCXT CHỈ ĐỂ "BẮN TỈA" OKX
+// =============================================================
+const okx_exchange = new ccxt.okx();
+async function fetchOkxRates() {
+    try {
+        const fundingRates = await okx_exchange.fetchFundingRates();
+        return Object.values(fundingRates)
+            .filter(rate => rate && typeof rate.fundingRate === 'number' && rate.fundingRate < 0)
+            .map(rate => ({ symbol: rate.symbol.replace('/', ''), fundingRate: rate.fundingRate }));
+    } catch (e) {
+        console.error(`- Lỗi CCXT khi lấy dữ liệu từ OKX: ${e.message}`);
+        return [];
+    }
+}
+
 // =====================================================
-// HÀM CẬP NHẬT TỔNG HỢP
+// PHẦN 3: HÀM CẬP NHẬT TỔNG HỢP (KẾT HỢP CẢ HAI CÁCH)
 // =====================================================
 async function updateFundingRates() {
     console.log(`[${new Date().toISOString()}] Đang cập nhật dữ liệu funding rates...`);
     
-    // Các endpoint đã được kiểm tra lại
+    // Các endpoint cho các sàn dùng cách cũ
     const endpoints = {
-        binance: 'https://fapi.binance.com/fapi/v1/premiumIndex', // Đã chạy tốt
-        bingx: 'https://open-api.bingx.com/openApi/swap/v2/ticker/fundingRate', // Endpoint mới cho BingX
-        okx: 'https://www.okx.com/api/v5/public/instruments?instType=SWAP', // Endpoint mới, đáng tin cậy cho OKX
-        bitget: 'https://api.bitget.com/api/mix/v1/market/tickers?productType=umcbl' // Đã chạy tốt
+        binance: 'https://fapi.binance.com/fapi/v1/premiumIndex',
+        // Thay Bybit bằng BingX
+        bingx: 'https://open-api.bingx.com/openApi/swap/v2/ticker/fundingRate',
+        bitget: 'https://api.bitget.com/api/mix/v1/market/tickers?productType=umcbl'
     };
 
-    const results = await Promise.allSettled(Object.values(endpoints).map(fetchData));
+    // Gọi đồng thời: 3 sàn dùng cách cũ, riêng OKX dùng cách mới
+    const results = await Promise.allSettled([
+        fetchData(endpoints.binance),
+        fetchData(endpoints.bingx),
+        fetchOkxRates(), // <-- Gọi hàm CCXT đặc trị cho OKX
+        fetchData(endpoints.bitget)
+    ]);
+
     const [binanceRes, bingxRes, okxRes, bitgetRes] = results;
     const newData = {};
 
     results.forEach((result, index) => {
         if (result.status === 'rejected') {
-            const exchangeName = Object.keys(endpoints)[index];
+            const exchangeName = ['Binance', 'BingX', 'OKX', 'Bitget'][index];
             console.error(`- Lỗi khi lấy dữ liệu từ ${exchangeName}: ${result.reason.message}`);
         }
     });
@@ -72,13 +96,12 @@ async function updateFundingRates() {
     const binanceData = (binanceRes.status === 'fulfilled' && Array.isArray(binanceRes.value)) ? binanceRes.value : [];
     newData.binance = binanceData.map(item => ({ symbol: item.symbol, fundingRate: parseFloat(item.lastFundingRate) })).filter(r => r && r.fundingRate < 0).sort((a,b) => a.fundingRate - b.fundingRate);
 
-    // Xử lý BingX (thêm mới)
+    // Xử lý BingX (thêm mới, xử lý theo cấu trúc API của BingX)
     const bingxData = (bingxRes.status === 'fulfilled' ? bingxRes.value?.data?.fundingRateList : []) || [];
     newData.bingx = bingxData.map(item => ({ symbol: item.symbol, fundingRate: parseFloat(item.fundingRate) })).filter(r => r && r.fundingRate < 0).sort((a,b) => a.fundingRate - b.fundingRate);
 
-    // Xử lý OKX (theo cấu trúc của endpoint /public/instruments)
-    const okxData = (okxRes.status === 'fulfilled' ? okxRes.value?.data : []) || [];
-    newData.okx = okxData.map(item => ({ symbol: item.instId.replace('-SWAP', ''), fundingRate: parseFloat(item.fundingRate) })).filter(r => r && r.fundingRate < 0).sort((a,b) => a.fundingRate - b.fundingRate);
+    // Xử lý OKX (đã được xử lý bởi hàm CCXT)
+    newData.okx = (okxRes.status === 'fulfilled' ? okxRes.value : []).sort((a,b) => a.fundingRate - b.fundingRate);
     
     // Xử lý Bitget (code cũ đã chạy tốt + chuẩn hóa tên)
     const bitgetData = (bitgetRes.status === 'fulfilled' ? bitgetRes.value?.data : []) || [];
@@ -94,7 +117,7 @@ async function updateFundingRates() {
 }
 
 // =========================================
-// PHẦN SERVER (GIỮ NGUYÊN 100%)
+// PHẦN 4: SERVER (GIỮ NGUYÊN 100%)
 // =========================================
 const server = http.createServer((req, res) => {
     if (req.url === '/' && req.method === 'GET') {
