@@ -1,4 +1,4 @@
-// sv1.js (BẢN TỐI ƯU - CACHE ĐÒN BẨY & DỮ LIỆU CHÍNH XÁC)
+// sv1.js (BẢN SỬA LỖI TRÍCH XUẤT ĐÒN BẨY)
 
 const http = require('http');
 const fs = require('fs');
@@ -15,7 +15,7 @@ const IMMINENT_THRESHOLD_MINUTES = 15;
 const LEVERAGE_CACHE_REFRESH_INTERVAL_HOURS = 6;
 
 // ----- BIẾN TOÀN CỤC -----
-let leverageCache = {}; // BỘ NHỚ ĐỆM CHO ĐÒN BẨY
+let leverageCache = {};
 let exchangeData = {};
 let arbitrageOpportunities = [];
 let lastFullUpdateTimestamp = null;
@@ -28,20 +28,49 @@ EXCHANGE_IDS.forEach(id => {
 
 const cleanSymbol = (symbol) => symbol.replace('/USDT', '').replace(':USDT', '');
 
-// === LOGIC MỚI: QUẢN LÝ BỘ NHỚ ĐỆM ĐÒN BẨY ===
+// === HÀM MỚI: TRÍCH XUẤT ĐÒN BẨY MỘT CÁCH BỀN BỈ ===
+function getMaxLeverageFromMarket(market) {
+    // 1. Thử đường chuẩn của ccxt trước
+    if (typeof market?.limits?.leverage?.max === 'number') {
+        return market.limits.leverage.max;
+    }
+
+    // 2. Nếu không được, "săn lùng" trong object 'info' thô từ sàn
+    const potentialValues = [
+        market?.info?.maxLeverage,     // Phổ biến ở OKX
+        market?.info?.leverage,        // Phổ biến ở Binance
+        market?.info?.leverage_ratio,  // Phổ biến ở BingX
+        market?.info?.max_leverage     // Một biến thể khác
+    ];
+
+    for (const value of potentialValues) {
+        if (value !== undefined && value !== null) {
+            // Dùng parseInt để xử lý cả số (125) và chuỗi ("125x")
+            const leverage = parseInt(value, 10);
+            if (!isNaN(leverage) && leverage > 0) {
+                return leverage;
+            }
+        }
+    }
+
+    // 3. Nếu mọi cách đều thất bại, trả về null
+    return null;
+}
+
+
 async function initializeLeverageCache() {
     console.log(`[CACHE] Bắt đầu làm mới bộ nhớ đệm đòn bẩy...`);
     const newCache = {};
     await Promise.all(EXCHANGE_IDS.map(async (id) => {
         try {
             const exchange = exchanges[id];
-            await exchange.loadMarkets(true); // Tải lại market để có dữ liệu mới nhất
+            await exchange.loadMarkets(true);
             newCache[id] = {};
             for (const market of Object.values(exchange.markets)) {
                 if (market.swap && market.quote === 'USDT') {
                     const symbol = cleanSymbol(market.symbol);
-                    // YÊU CẦU 1: Nếu không thấy maxLev, để là NULL
-                    const maxLeverage = market.limits?.leverage?.max || market.info?.maxLeverage || null;
+                    // SỬ DỤNG HÀM MỚI BỀN BỈ HƠN
+                    const maxLeverage = getMaxLeverageFromMarket(market);
                     newCache[id][symbol] = maxLeverage;
                 }
             }
@@ -54,28 +83,23 @@ async function initializeLeverageCache() {
     console.log(`[CACHE] 🎉 Hoàn tất làm mới bộ nhớ đệm đòn bẩy.`);
 }
 
-
-// === VÒNG LẶP CHÍNH SIÊU NHẸ ===
 async function fetchFundingRatesForAllExchanges() {
     const freshData = {};
     const results = await Promise.all(EXCHANGE_IDS.map(async (id) => {
         try {
             const exchange = exchanges[id];
-            // Chỉ lấy funding rate, không load market ở đây nữa
-            const fundingRatesRaw = await exchange.fetchFundingRates(); 
+            const fundingRatesRaw = await exchange.fetchFundingRates();
             const processedRates = {};
             for (const rate of Object.values(fundingRatesRaw)) {
                 const symbol = cleanSymbol(rate.symbol);
-                // Tra cứu đòn bẩy từ cache
                 const maxLeverage = leverageCache[id]?.[symbol];
 
-                // YÊU CẦU 2: Chỉ xử lý nếu coin có dữ liệu đòn bẩy
-                if (maxLeverage !== undefined) { 
+                if (maxLeverage !== undefined) {
                      processedRates[symbol] = {
                         symbol: symbol,
                         fundingRate: rate.fundingRate,
                         fundingTimestamp: rate.fundingTimestamp || rate.nextFundingTime,
-                        maxLeverage: maxLeverage // Lấy từ cache
+                        maxLeverage: maxLeverage
                     };
                 }
             }
@@ -96,7 +120,6 @@ async function fetchFundingRatesForAllExchanges() {
     return freshData;
 }
 
-// Hàm chuẩn hóa thời gian (đã tối ưu)
 function standardizeFundingTimes(data) {
     const allSymbols = new Set();
     Object.values(data).forEach(ex => {
@@ -114,7 +137,7 @@ function standardizeFundingTimes(data) {
         if (binanceTime && okxTime) authoritativeTimes[symbol] = Math.max(binanceTime, okxTime);
         else if (binanceTime) authoritativeTimes[symbol] = binanceTime;
         else if (okxTime) authoritativeTimes[symbol] = okxTime;
-        else { // Tính toán mặc định
+        else {
              let nextHourUTC = fundingHoursUTC.find(h => now.getUTCHours() < h) ?? fundingHoursUTC[0];
              const nextFundingDate = new Date(now);
              nextFundingDate.setUTCHours(nextHourUTC, 0, 0, 0);
@@ -151,7 +174,6 @@ function calculateArbitrageOpportunities() {
             for (const symbol of commonSymbols) {
                 const rate1Data = exchange1Rates[symbol], rate2Data = exchange2Rates[symbol];
 
-                // Bỏ qua nếu bất kỳ coin nào không có dữ liệu đòn bẩy (bị null)
                 if (!rate1Data.maxLeverage || !rate2Data.maxLeverage) {
                     continue;
                 }
@@ -204,9 +226,7 @@ async function masterLoop() {
     console.log(`[LOOP]   => Tìm thấy ${arbitrageOpportunities.length} cơ hội. Vòng lặp hoàn tất.`);
 }
 
-// ----- KHỞI ĐỘNG SERVER -----
 const server = http.createServer((req, res) => {
-    // ... (phần này không đổi)
     if (req.url === '/' && req.method === 'GET') {
         fs.readFile(path.join(__dirname, 'index.html'), (err, content) => {
             if (err) { res.writeHead(500); res.end('Lỗi index.html'); return; }
@@ -232,15 +252,11 @@ const server = http.createServer((req, res) => {
 });
 
 server.listen(PORT, async () => {
-    console.log(`✅ Máy chủ dữ liệu (Bản Tối Ưu) đang chạy tại http://localhost:${PORT}`);
+    console.log(`✅ Máy chủ dữ liệu (Bản sửa lỗi đòn bẩy) đang chạy tại http://localhost:${PORT}`);
     
-    // 1. Khởi tạo cache đòn bẩy lần đầu tiên (quan trọng)
     await initializeLeverageCache();
-    
-    // 2. Chạy vòng lặp chính lần đầu tiên
     await masterLoop(); 
     
-    // 3. Đặt lịch chạy lặp lại
-    setInterval(masterLoop, 60 * 1000); // Cập nhật funding mỗi phút
-    setInterval(initializeLeverageCache, LEVERAGE_CACHE_REFRESH_INTERVAL_HOURS * 60 * 60 * 1000); // Làm mới cache đòn bẩy mỗi 6 giờ
+    setInterval(masterLoop, 60 * 1000);
+    setInterval(initializeLeverageCache, LEVERAGE_CACHE_REFRESH_INTERVAL_HOURS * 60 * 60 * 1000);
 });
