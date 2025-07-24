@@ -1,4 +1,4 @@
-// severfunding.js (BẢN 8 - CHẾ ĐỘ GỠ LỖI NÂNG CAO)
+// severfunding.js (BẢN 9 - CHẾ ĐỘ "BẮT DỮ LIỆU THÔ")
 
 const http = require('http');
 const fs = require('fs');
@@ -9,13 +9,8 @@ const { URL } = require('url');
 const PORT = 5000;
 const REFRESH_INTERVAL_MINUTES = 5;
 
-let cachedData = {
-    lastUpdated: null,
-    rates: { binance: [], bingx: [], okx: [], bitget: [] } 
-};
-
-// Hàm fetchData được sửa lại để trả về cả body thô và json đã parse
-function fetchData(url) {
+// Hàm fetchData được sửa lại để luôn trả về body dạng text
+function fetchDataRaw(url) {
     return new Promise((resolve, reject) => {
         const urlObject = new URL(url);
         const options = {
@@ -31,12 +26,11 @@ function fetchData(url) {
             let body = '';
             res.on('data', (chunk) => body += chunk);
             res.on('end', () => {
-                if (res.statusCode < 200 || res.statusCode >= 300) return reject(new Error(`Yêu cầu thất bại: Mã ${res.statusCode} tại ${url}.`));
-                try { 
-                    resolve({ body: body, json: JSON.parse(body) }); 
-                } catch (e) { 
-                    reject(new Error(`Lỗi phân tích JSON từ ${url}. Body thô: ${body}`)); 
+                if (res.statusCode < 200 || res.statusCode >= 300) {
+                    return reject(new Error(`Yêu cầu thất bại: Mã ${res.statusCode} tại ${url}. Body nhận được: ${body}`));
                 }
+                // Luôn trả về body dạng text
+                resolve(body); 
             });
         });
         req.on('error', (err) => reject(new Error(`Lỗi mạng khi gọi ${url}: ${err.message}`)));
@@ -44,114 +38,47 @@ function fetchData(url) {
     });
 }
 
-// =====================================================
-// HÀM CẬP NHẬT TỔNG HỢP VỚI LOG CHI TIẾT
-// =====================================================
+// Hàm cập nhật chỉ để in log, không xử lý dữ liệu phức tạp
 async function updateFundingRates() {
-    console.log(`\n\n[BƯỚC 1] BẮT ĐẦU CHU KỲ CẬP NHẬT DỮ LIỆU...`);
+    console.log(`\n\n[BẮT ĐẦU CHU KỲ BẮT DỮ LIỆU THÔ...]`);
     
     const endpoints = {
-        binance: 'https://fapi.binance.com/fapi/v1/premiumIndex',
         bingx: 'https://open-api.bingx.com/openApi/swap/v2/ticker/fundingRate',
-        okx: 'https://www.okx.com/api/v5/public/instruments?instType=SWAP', 
-        bitget: 'https://api.bitget.com/api/mix/v1/market/tickers?productType=umcbl'
+        okx: 'https://www.okx.com/api/v5/public/instruments?instType=SWAP'
     };
 
-    const results = await Promise.allSettled(Object.values(endpoints).map(fetchData));
-    const [binanceRes, bingxRes, okxRes, bitgetRes] = results;
-    const newData = {};
+    const results = await Promise.allSettled(Object.values(endpoints).map(fetchDataRaw));
+    const [bingxRes, okxRes] = results;
 
-    console.log(`[BƯỚC 2] ĐÃ GỌI XONG API. BẮT ĐẦU PHÂN TÍCH...`);
-
-    // --- PHÂN TÍCH BINGX ---
-    console.log(`\n--- DEBUG BINGX ---`);
+    // --- BINGX ---
+    console.log(`\n--- DỮ LIỆU THÔ TỪ BINGX ---`);
     if (bingxRes.status === 'rejected') {
-        console.error(`[BINGX LỖI] API call thất bại: ${bingxRes.reason.message}`);
+        console.error(`[BINGX LỖI] ${bingxRes.reason.message}`);
     } else {
-        console.log(`[BINGX OK] API call thành công. Phân tích dữ liệu trả về...`);
-        console.log(`[BINGX RAW BODY]: ${bingxRes.value.body}`); // IN RA TOÀN BỘ DỮ LIỆU THÔ
-        const bingxJson = bingxRes.value.json;
-        if (bingxJson && bingxJson.data && Array.isArray(bingxJson.data)) { // Sửa lại đường dẫn
-             const bingxData = bingxJson.data;
-             newData.bingx = bingxData.map(item => ({ symbol: item.symbol.replace('-', ''), fundingRate: parseFloat(item.fundingRate) })).filter(r => r && r.fundingRate < 0).sort((a,b) => a.fundingRate - b.fundingRate);
-             console.log(`[BINGX OK] Đã xử lý thành công ${newData.bingx.length} cặp.`);
-        } else {
-            console.error(`[BINGX LỖI] Cấu trúc dữ liệu không đúng.`);
-            newData.bingx = [];
-        }
+        console.log(`[BINGX BODY]: ${bingxRes.value}`);
     }
 
-    // --- PHÂN TÍCH OKX ---
-    console.log(`\n--- DEBUG OKX ---`);
+    // --- OKX ---
+    console.log(`\n--- DỮ LIỆU THÔ TỪ OKX ---`);
     if (okxRes.status === 'rejected') {
-        console.error(`[OKX LỖI] API call thất bại: ${okxRes.reason.message}`);
+        console.error(`[OKX LỖI] ${okxRes.reason.message}`);
     } else {
-        console.log(`[OKX OK] API call thành công. Phân tích dữ liệu trả về...`);
-        console.log(`[OKX RAW BODY]: ${okxRes.value.body}`); // IN RA TOÀN BỘ DỮ LIỆU THÔ
-        const okxJson = okxRes.value.json;
-        if (okxJson && Array.isArray(okxJson.data)) {
-            const okxData = okxJson.data;
-            newData.okx = okxData.map(item => ({ symbol: item.instId.replace('-SWAP', ''), fundingRate: parseFloat(item.fundingRate) })).filter(r => r && r.fundingRate < 0 && r.fundingRate !== 0).sort((a,b) => a.fundingRate - b.fundingRate);
-            console.log(`[OKX OK] Đã xử lý thành công ${newData.okx.length} cặp.`);
-        } else {
-            console.error(`[OKX LỖI] Cấu trúc dữ liệu không đúng.`);
-            newData.okx = [];
-        }
+        console.log(`[OKX BODY]: ${okxRes.value}`);
     }
-    console.log(`\n--- KẾT THÚC DEBUG ---\n`);
 
-    // Xử lý Binance và Bitget (đã chạy tốt)
-    const binanceData = (binanceRes.status === 'fulfilled' && Array.isArray(binanceRes.value.json)) ? binanceRes.value.json : [];
-    newData.binance = binanceData.map(item => ({ symbol: item.symbol, fundingRate: parseFloat(item.lastFundingRate) })).filter(r => r && r.fundingRate < 0).sort((a,b) => a.fundingRate - b.fundingRate);
-    
-    const bitgetData = (bitgetRes.status === 'fulfilled' ? bitgetRes.value.json?.data : []) || [];
-    newData.bitget = bitgetData.map(item => ({ symbol: item.symbol.replace('_UMCBL', ''), fundingRate: parseFloat(item.fundingRate) })).filter(r => r && r.fundingRate < 0).sort((a,b) => a.fundingRate - b.fundingRate);
-
-    cachedData = {
-        lastUpdated: new Date().toISOString(),
-        rates: newData
-    };
-    
-    console.log("✅ Cập nhật dữ liệu thành công!");
-    console.log(`   - Binance: ${newData.binance.length} cặp, BingX: ${newData.bingx.length} cặp, OKX: ${newData.okx.length} cặp, Bitget: ${newData.bitget.length} cặp.`);
+    console.log(`\n--- KẾT THÚC CHU KỲ BẮT DỮ LIỆU THÔ ---\n`);
 }
 
-// Phần server giữ nguyên
+// Server đơn giản chỉ để chạy hàm update
 const server = http.createServer((req, res) => {
-    if (req.url === '/' && req.method === 'GET') {
-        const filePath = path.join(__dirname, 'index.html');
-        fs.readFile(filePath, (err, content) => {
-            if (err) { res.writeHead(500, {'Content-Type': 'text/plain; charset=utf-8'}); res.end('Lỗi: Không tìm thấy file index.html'); return; }
-            res.writeHead(200, {'Content-Type': 'text/html; charset=utf-8'});
-            res.end(content);
-        });
-    } else if (req.url === '/api/rates' && req.method === 'GET') {
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify(cachedData));
-    } else {
-        res.writeHead(404, { 'Content-Type': 'text/plain' });
-        res.end('404 Not Found');
-    }
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ status: "Debug mode is running. Check PM2 logs." }));
 });
 
 server.listen(PORT, async () => {
-    console.log(`✅ Máy chủ dữ liệu đang chạy tại http://localhost:${PORT}`);
-    console.log(`👨‍💻 Giao diện người dùng: http://localhost:${PORT}/`);
-    console.log(`🤖 Endpoint cho bot: http://localhost:${PORT}/api/rates`);
+    console.log(`✅ Server đang chạy ở chế độ "Bắt dữ liệu thô" trên port ${PORT}.`);
+    console.log(`   Hãy kiểm tra log của PM2 để xem kết quả.`);
     
     await updateFundingRates();
     setInterval(updateFundingRates, REFRESH_INTERVAL_MINUTES * 60 * 1000);
-});```
-
-### **Khởi động và gửi lại log**
-
-1.  **Chạy lại server:**
-    ```bash
-    pm2 restart severfunding
-    ```
-2.  **Xem và gửi lại log:**
-    Chờ khoảng 20 giây, sau đó chạy lệnh:
-    ```bash
-    pm2 logs severfunding
-    ```
-    Lần này, log sẽ chứa các dòng `[BINGX RAW BODY]` và `[OKX RAW BODY]`. Hãy sao chép và gửi lại **toàn bộ** phần log đó. Dữ liệu này sẽ cho chúng ta biết chính xác vấn đề.
+});
