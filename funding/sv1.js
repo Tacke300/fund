@@ -1,4 +1,4 @@
-// sv1.js (BẢN SỬA LỖI SỐ 18 - XỬ LÝ ĐÒN BẨY BINGX & DEBUG BINANCE HTML)
+// sv1.js (BẢN SỬA LỖI SỐ 19 - XỬ LÝ ĐÒN BẨY BINGX CỤ THỂ & DEBUG BINANCE HTML)
 
 const http = require('http');
 const fs = require('fs');
@@ -70,11 +70,11 @@ async function getBinanceLeverage(exchange) {
                 if (validLeverages.length > 0) {
                     leverages[cleanSymbol(symbol)] = Math.max(...validLeverages);
                 } else {
-                    console.warn(`[CACHE] ⚠️ Binance: Không tìm thấy đòn bẩy hợp lệ cho ${symbol}.`);
+                    console.warn(`[CACHE] ⚠️ Binance: Không tìm thấy đòn bẩy hợp lệ cho ${cleanSymbol(symbol)}. Dữ liệu tiers:`, symbolTiers);
                     leverages[cleanSymbol(symbol)] = null;
                 }
             } else {
-                console.warn(`[CACHE] ⚠️ Binance: Dữ liệu tiers không hợp lệ hoặc trống cho ${symbol}.`);
+                console.warn(`[CACHE] ⚠️ Binance: Dữ liệu tiers không hợp lệ hoặc trống cho ${cleanSymbol(symbol)}. Dữ liệu tiers:`, symbolTiers);
                 leverages[cleanSymbol(symbol)] = null;
             }
         }
@@ -84,29 +84,6 @@ async function getBinanceLeverage(exchange) {
         return {};
     }
 }
-
-// Hàm mới để cố gắng lấy đòn bẩy cho BingX bằng fetchLeverageTiers
-async function getBingXLeverage(exchange) {
-    try {
-        // Cố gắng sử dụng fetchLeverageTiers nếu được hỗ trợ
-        const tiers = await exchange.fetchLeverageTiers();
-        const leverages = {};
-        for (const symbol in tiers) {
-            const symbolTiers = tiers[symbol];
-            if (Array.isArray(symbolTiers) && symbolTiers.length > 0) {
-                const validLeverages = symbolTiers.map(t => t.leverage).filter(l => typeof l === 'number' && !isNaN(l));
-                if (validLeverages.length > 0) {
-                    leverages[cleanSymbol(symbol)] = Math.max(...validLeverages);
-                }
-            }
-        }
-        return leverages;
-    } catch (e) {
-        // Nếu fetchLeverageTiers không được triển khai hoặc lỗi, ném lỗi để fallback
-        throw new Error(`BingX fetchLeverageTiers failed: ${e.message}`);
-    }
-}
-
 
 async function getGenericLeverage(exchange) {
     try {
@@ -120,22 +97,33 @@ async function getGenericLeverage(exchange) {
         for (const market of Object.values(exchange.markets)) {
             if (market.swap && market.quote === 'USDT') {
                 const symbol = cleanSymbol(market.symbol);
+                let maxLeverageFound = null;
 
                 if (exchange.id === 'bingx') {
                     console.log(`[DEBUG] BINGX - Đang xử lý thị trường: ${symbol}`);
-                    console.log(`[DEBUG] BINGX - ${symbol} Market Limits:`, market.limits);
-                    console.log(`[DEBUG] BINGX - ${symbol} Market Limits Leverage:`, market.limits?.leverage);
-                    console.log(`[DEBUG] BINGX - ${symbol} Market Limits Leverage Max:`, market.limits?.leverage?.max);
+                    console.log(`[DEBUG] BINGX - ${symbol} Market Info:`, market.info); // Log toàn bộ info
+                    console.log(`[DEBUG] BINGX - ${symbol} Market Limits:`, market.limits); // Log toàn bộ limits
+
+                    // === THỬ market.info.maxLeverage TRƯỚC CHO BINGX ===
+                    if (typeof market?.info?.maxLeverage === 'number') {
+                        maxLeverageFound = market.info.maxLeverage;
+                        console.log(`[DEBUG] BINGX - ${symbol} Đòn bẩy tìm thấy trong market.info.maxLeverage: ${maxLeverageFound}`);
+                    } else {
+                        console.warn(`[DEBUG] BINGX - ${symbol} market.info.maxLeverage không phải số hoặc undefined:`, market.info?.maxLeverage);
+                    }
                 }
 
-                if (typeof market?.limits?.leverage?.max === 'number') {
-                    leverages[symbol] = market.limits.leverage.max;
-                } else {
-                    console.warn(`[CACHE] ⚠️ ${exchange.id.toUpperCase()}: Không tìm thấy market.limits.leverage.max là số cho ${symbol}.`);
-                    leverages[symbol] = null;
+                // Nếu chưa tìm thấy từ market.info.maxLeverage, thử market.limits.leverage.max
+                if (maxLeverageFound === null) {
+                    if (typeof market?.limits?.leverage?.max === 'number') {
+                        maxLeverageFound = market.limits.leverage.max;
+                    } else {
+                        console.warn(`[CACHE] ⚠️ ${exchange.id.toUpperCase()}: Không tìm thấy market.limits.leverage.max là số cho ${symbol}.`);
+                    }
                 }
+                
+                leverages[symbol] = maxLeverageFound;
             } else if (exchange.id === 'bingx') {
-                // Log này giúp xác định lý do một thị trường bị bỏ qua (không phải swap hoặc không phải USDT quote)
                 // console.log(`[DEBUG] BINGX - Bỏ qua thị trường ${market.symbol}: swap=${market.swap}, quote=${market.quote}`);
             }
         }
@@ -157,19 +145,7 @@ async function initializeLeverageCache() {
                 leverages = await getBinanceLeverage(exchange);
                 const count = Object.values(leverages).filter(v => v !== null).length;
                 console.log(`[CACHE] ✅ ${id.toUpperCase()}: Lấy thành công ${count} đòn bẩy bằng 'fetchLeverageTiers'.`);
-            } else if (id === 'bingx') {
-                try {
-                    leverages = await getBingXLeverage(exchange);
-                    const count = Object.values(leverages).filter(v => v !== null).length;
-                    console.log(`[CACHE] ✅ ${id.toUpperCase()}: Lấy thành công ${count} đòn bẩy bằng 'fetchLeverageTiers' (BingX specific).`);
-                } catch (bingxErr) {
-                    console.warn(`[CACHE] ⚠️ Lỗi khi lấy đòn bẩy cho BINGX bằng 'fetchLeverageTiers': ${bingxErr.message}. Thử phương pháp chung.`);
-                    leverages = await getGenericLeverage(exchange); // Fallback to generic
-                    const count = Object.values(leverages).filter(v => v !== null).length;
-                    console.log(`[CACHE] ✅ ${id.toUpperCase()}: Lấy thành công ${count} đòn bẩy bằng 'loadMarkets' (dự phòng).`);
-                }
-            }
-            else {
+            } else {
                 leverages = await getGenericLeverage(exchange);
                 const count = Object.values(leverages).filter(v => v !== null).length;
                 console.log(`[CACHE] ✅ ${id.toUpperCase()}: Lấy thành công ${count} đòn bẩy bằng 'loadMarkets' (dự phòng).`);
@@ -207,14 +183,14 @@ async function fetchFundingRatesForAllExchanges() {
                 const symbol = cleanSymbol(rate.symbol);
                 const maxLeverage = leverageCache[id]?.[symbol] || null;
 
-                // DEBUG for funding timestamps (BingX and Bitget)
-                if (id === 'bingx' || id === 'bitget') {
-                    // console.log(`[DEBUG] ${id.toUpperCase()} - ${symbol} Funding Rate Data:`);
-                    // console.log(`[DEBUG]   - fundingRate: ${rate.fundingRate}`);
-                    // console.log(`[DEBUG]   - fundingTimestamp (raw): ${rate.fundingTimestamp}`);
-                    // console.log(`[DEBUG]   - nextFundingTime (raw): ${rate.nextFundingTime}`);
-                    // console.log(`[DEBUG]   - timestamp (raw): ${rate.timestamp}`);
-                }
+                // DEBUG for funding timestamps (BingX and Bitget) - BỎ COMMENT ĐỂ DEBUG
+                // if (id === 'bingx' || id === 'bitget') {
+                //     console.log(`[DEBUG] ${id.toUpperCase()} - ${symbol} Funding Rate Data:`);
+                //     console.log(`[DEBUG]   - fundingRate: ${rate.fundingRate}`);
+                //     console.log(`[DEBUG]   - fundingTimestamp (raw): ${rate.fundingTimestamp}`);
+                //     console.log(`[DEBUG]   - nextFundingTime (raw): ${rate.nextFundingTime}`);
+                //     console.log(`[DEBUG]   - timestamp (raw): ${rate.timestamp}`);
+                // }
 
                 const fundingTimestamp = rate.fundingTimestamp || rate.nextFundingTime || calculateNextStandardFundingTime();
 
@@ -248,7 +224,7 @@ function calculateArbitrageOpportunities() {
             const commonSymbols = Object.keys(exchange1Rates).filter(symbol => exchange2Rates[symbol]);
             for (const symbol of commonSymbols) {
                 const rate1Data = exchange1Rates[symbol], rate2Data = exchange2Rates[symbol];
-                if (!rate1Data.maxLeverage || !rate2Data.maxLeverage) continue;
+                if (!rate1Data.maxLeverage || !rate2Data.maxLeverage) continue; // Bỏ qua nếu maxLeverage là null/0
                 if (!rate1Data.fundingTimestamp || !rate2Data.fundingTimestamp) continue;
 
                 let longExchange, shortExchange, longRate, shortRate;
@@ -350,7 +326,7 @@ const server = http.createServer((req, res) => {
 });
 
 server.listen(PORT, async () => {
-    console.log(`✅ Máy chủ dữ liệu (Bản sửa lỗi số 18) đang chạy tại http://localhost:${PORT}`);
+    console.log(`✅ Máy chủ dữ liệu (Bản sửa lỗi số 19) đang chạy tại http://localhost:${PORT}`);
     await initializeLeverageCache();
     await masterLoop();
     setInterval(initializeLeverageCache, LEVERAGE_CACHE_REFRESH_INTERVAL_MINUTES * 60 * 1000);
