@@ -1,4 +1,4 @@
-// severfunding.js (PHIÊN BẢN PHỤC HỒI + VÁ LỖI - GIỮ CODE TỐT, THAY BYBIT -> BINGX, SỬA OKX)
+// severfunding.js (PHIÊN BẢN AN TOÀN - GIỮ CODE CŨ, THAY BYBIT -> BINGX, DÙNG CCXT RIÊNG CHO OKX)
 
 const http = require('http');
 const fs = require('fs');
@@ -65,10 +65,9 @@ async function fetchOkxRates() {
 async function updateFundingRates() {
     console.log(`[${new Date().toISOString()}] Đang cập nhật dữ liệu funding rates...`);
     
-    // Các endpoint cho các sàn dùng cách cũ, đã chạy tốt
+    // Các endpoint cho các sàn dùng cách cũ
     const endpoints = {
         binance: 'https://fapi.binance.com/fapi/v1/premiumIndex',
-        // Thay Bybit bằng BingX
         bingx: 'https://open-api.bingx.com/openApi/swap/v2/ticker/fundingRate',
         bitget: 'https://api.bitget.com/api/mix/v1/market/tickers?productType=umcbl'
     };
