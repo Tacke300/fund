@@ -1,4 +1,4 @@
-// sv1.js (BẢN SỬA LỖI SỐ 13 - LOGIC THỜI GIAN THẬT)
+// sv1.js (BẢN SỬA LỖI SỐ 16 - LOGIC THỜI GIAN THẬT & ĐÒN BẨY TỐI ĐA)
 
 const http = require('http');
 const fs = require('fs');
@@ -15,7 +15,6 @@ const IMMINENT_THRESHOLD_MINUTES = 15;
 const LEVERAGE_CACHE_REFRESH_INTERVAL_MINUTES = 30;
 
 // === QUAN TRỌNG: ĐIỀN API KEY VÀ SECRET VÀO ĐÂY ===
-// Hãy đảm bảo API Key của BINGX là chính xác.
 const binanceApiKey = '2rgsf5oYto2HaBS05DS7u4QVtDHf5uxQjEpZiP6eSMUlQRYb194XdE82zZy0Yujw';
 const binanceApiSecret = 'jnCGekaD5XWm8i48LIAfQZpq5pFtBmZ3ZyYR4sK3UW4PoZlgPVCMrljk8DCFa9Xk';
 const bingxApiKey = 'vvmD6sdV12c382zUvGMWUnD1yWi1ti8TCFsGaiEIlH6kFTHzkmPdeJQCuUQivXKAPrsEcfOvgwge9aAQ';
@@ -45,7 +44,6 @@ EXCHANGE_IDS.forEach(id => {
     else if (id === 'bitget' && bitgetApiKey) { config.apiKey = bitgetApiKey; config.secret = bitgetApiSecret; if(bitgetApiPassword) config.password = bitgetApiPassword; console.log(`[AUTH] Đã cấu hình HMAC cho Bitget.`); }
     exchanges[id] = new exchangeClass(config);
 });
-
 
 const cleanSymbol = (symbol) => symbol.replace('/USDT', '').replace(':USDT', '');
 
@@ -100,7 +98,30 @@ async function initializeLeverageCache() {
     console.log(`[CACHE] 🎉 Hoàn tất làm mới bộ nhớ đệm đòn bẩy.`);
 }
 
-// Hàm tính toán thời gian chuẩn chỉ dùng làm dự phòng cuối cùng
+// === LOGIC MỚI: LẤY THỜI GIAN FUNDING DỰA TRÊN LỊCH SỬ ===
+async function getRealFundingInterval(exchange, symbol) {
+    // Chỉ áp dụng cho các sàn không cung cấp nextFundingTime đáng tin cậy
+    if (!exchange.has['fetchFundingHistory']) {
+        return null;
+    }
+    try {
+        const history = await exchange.fetchFundingHistory(symbol, undefined, 2); // Chỉ cần 2 lần gần nhất
+        if (history.length >= 2) {
+            // Sắp xếp để đảm bảo lần gần nhất ở đầu
+            history.sort((a, b) => b.timestamp - a.timestamp);
+            const lastEvent = history[0];
+            const previousEvent = history[1];
+            const interval = lastEvent.timestamp - previousEvent.timestamp;
+            // Dự đoán lần tiếp theo
+            const nextFundingTime = lastEvent.timestamp + interval;
+            return nextFundingTime;
+        }
+    } catch(e) {
+        // Bỏ qua lỗi, sẽ dùng phương pháp mặc định
+    }
+    return null; // Trả về null nếu không có đủ lịch sử hoặc có lỗi
+}
+
 function calculateNextStandardFundingTime() {
     const now = new Date();
     const fundingHoursUTC = [0, 8, 16];
@@ -113,7 +134,6 @@ function calculateNextStandardFundingTime() {
     return nextFundingDate.getTime();
 }
 
-// === HÀM LẤY FUNDING VỚI LOGIC THỜI GIAN THẬT ===
 async function fetchFundingRatesForAllExchanges() {
     const freshData = {};
     const results = await Promise.all(EXCHANGE_IDS.map(async (id) => {
@@ -125,13 +145,20 @@ async function fetchFundingRatesForAllExchanges() {
                 const symbol = cleanSymbol(rate.symbol);
                 const maxLeverage = leverageCache[id]?.[symbol] || null;
                 
-                // Lấy thời gian thật từ sàn, nếu không có thì mới tính toán mặc định
-                const fundingTimestamp = rate.fundingTimestamp || rate.nextFundingTime || calculateNextStandardFundingTime();
+                let fundingTimestamp = rate.fundingTimestamp || rate.nextFundingTime;
+                // Nếu là BingX hoặc Bitget và không có thời gian, thử lấy từ lịch sử
+                if (!fundingTimestamp && (id === 'bingx' || id === 'bitget')) {
+                    fundingTimestamp = await getRealFundingInterval(exchange, rate.symbol);
+                }
+                // Nếu vẫn không có, dùng phương pháp cuối cùng
+                if (!fundingTimestamp) {
+                    fundingTimestamp = calculateNextStandardFundingTime();
+                }
 
                 processedRates[symbol] = {
                     symbol: symbol,
                     fundingRate: rate.fundingRate,
-                    fundingTimestamp: fundingTimestamp, // Dùng thời gian thật
+                    fundingTimestamp: fundingTimestamp,
                     maxLeverage: maxLeverage
                 };
             }
@@ -147,9 +174,8 @@ async function fetchFundingRatesForAllExchanges() {
     return freshData;
 }
 
-// === HÀM standardizeFundingTimes ĐÃ BỊ XÓA BỎ ===
-
 function calculateArbitrageOpportunities() {
+    // ... (Hàm này không thay đổi)
     const allFoundOpportunities = [];
     const currentExchangeData = JSON.parse(JSON.stringify(exchangeData));
     for (let i = 0; i < EXCHANGE_IDS.length; i++) {
@@ -161,10 +187,7 @@ function calculateArbitrageOpportunities() {
             for (const symbol of commonSymbols) {
                 const rate1Data = exchange1Rates[symbol], rate2Data = exchange2Rates[symbol];
                 if (!rate1Data.maxLeverage || !rate2Data.maxLeverage) continue;
-                
-                // Đảm bảo cả hai đều có timestamp hợp lệ
                 if (!rate1Data.fundingTimestamp || !rate2Data.fundingTimestamp) continue;
-
                 let longExchange, shortExchange, longRate, shortRate;
                 if (rate1Data.fundingRate > rate2Data.fundingRate) {
                     shortExchange = exchange1Id; shortRate = rate1Data; longExchange = exchange2Id; longRate = rate2Data;
@@ -175,9 +198,7 @@ function calculateArbitrageOpportunities() {
                 const commonLeverage = Math.min(longRate.maxLeverage, shortRate.maxLeverage);
                 const estimatedPnl = fundingDiff * commonLeverage * 100;
                 if (estimatedPnl >= MINIMUM_PNL_THRESHOLD) {
-                    // Lấy thời gian xa hơn của cặp sàn đang xét
                     const finalFundingTime = Math.max(rate1Data.fundingTimestamp, rate2Data.fundingTimestamp);
-
                     const minutesUntilFunding = (finalFundingTime - Date.now()) / (1000 * 60);
                     const isImminent = minutesUntilFunding > 0 && minutesUntilFunding <= IMMINENT_THRESHOLD_MINUTES;
                     allFoundOpportunities.push({
@@ -199,17 +220,13 @@ function calculateArbitrageOpportunities() {
 
 async function masterLoop() {
     console.log(`[LOOP] Bắt đầu vòng lặp cập nhật lúc ${new Date().toLocaleTimeString()}...`);
-    // Lấy dữ liệu funding với thời gian thật
     const freshFundingData = await fetchFundingRatesForAllExchanges();
-    // Gán trực tiếp, không cần chuẩn hóa nữa
-    exchangeData = freshFundingData; 
-    
+    exchangeData = freshFundingData;
     calculateArbitrageOpportunities();
     lastFullUpdateTimestamp = new Date().toISOString();
     console.log(`[LOOP]   => Tìm thấy ${arbitrageOpportunities.length} cơ hội. Vòng lặp hoàn tất.`);
     scheduleNextLoop();
 }
-
 
 function scheduleNextLoop() {
     // ... (Hàm này không thay đổi)
@@ -258,7 +275,7 @@ const server = http.createServer((req, res) => {
 });
 
 server.listen(PORT, async () => {
-    console.log(`✅ Máy chủ dữ liệu (Bản sửa lỗi số 13) đang chạy tại http://localhost:${PORT}`);
+    console.log(`✅ Máy chủ dữ liệu (Bản sửa lỗi số 16) đang chạy tại http://localhost:${PORT}`);
     await initializeLeverageCache();
     await masterLoop();
     setInterval(initializeLeverageCache, LEVERAGE_CACHE_REFRESH_INTERVAL_MINUTES * 60 * 1000);
