@@ -1,4 +1,4 @@
-// severfunding.js (BẢN SỬA LỖI CUỐI CÙNG - GIỮ NGUYÊN BINANCE/BYBIT, SỬA OKX/BITGET)
+// severfunding.js (BẢN HOÀN THIỆN - FIX NỐT OKX)
 
 const http = require('http');
 const fs = require('fs');
@@ -49,13 +49,14 @@ function fetchData(url) {
 async function updateFundingRates() {
     console.log(`[${new Date().toISOString()}] Đang cập nhật dữ liệu funding rates...`);
     
-    // Sử dụng endpoint tickers cho OKX và Bitget, giữ nguyên endpoint cũ cho Binance/Bybit
+    // =================== THAY ĐỔI CUỐI CÙNG CHO OKX ===================
     const endpoints = {
         binance: 'https://fapi.binance.com/fapi/v1/premiumIndex',
         bybit: 'https://api.bybit.com/v5/market/tickers?category=linear',
-        okx: 'https://www.okx.com/api/v5/market/tickers?instType=SWAP', 
+        okx: 'https://www.okx.com/api/v5/public/instruments?instType=SWAP', // ĐỔI SANG ENDPOINT /instruments
         bitget: 'https://api.bitget.com/api/mix/v1/market/tickers?productType=umcbl'
     };
+    // =============================================================
 
     const results = await Promise.allSettled(Object.values(endpoints).map(fetchData));
     const [binanceRes, bybitRes, okxRes, bitgetRes] = results;
@@ -69,19 +70,19 @@ async function updateFundingRates() {
         }
     });
 
-    // Xử lý Binance
+    // Xử lý Binance (giữ nguyên)
     const binanceData = (binanceRes.status === 'fulfilled' && Array.isArray(binanceRes.value)) ? binanceRes.value : [];
     newData.binance = binanceData.map(item => ({ symbol: item.symbol, fundingRate: parseFloat(item.lastFundingRate) })).filter(r => r && r.fundingRate < 0).sort((a,b) => a.fundingRate - b.fundingRate);
 
-    // Xử lý Bybit
+    // Xử lý Bybit (giữ nguyên)
     const bybitData = (bybitRes.status === 'fulfilled' ? bybitRes.value?.result?.list : []) || [];
     newData.bybit = bybitData.map(item => ({ symbol: item.symbol, fundingRate: parseFloat(item.fundingRate) })).filter(r => r && r.fundingRate < 0).sort((a,b) => a.fundingRate - b.fundingRate);
 
-    // Xử lý OKX (theo cấu trúc của endpoint /tickers)
+    // Xử lý OKX (theo cấu trúc của endpoint /instruments)
     const okxData = (okxRes.status === 'fulfilled' ? okxRes.value?.data : []) || [];
     newData.okx = okxData.map(item => ({ symbol: item.instId, fundingRate: parseFloat(item.fundingRate) })).filter(r => r && r.fundingRate < 0).sort((a,b) => a.fundingRate - b.fundingRate);
     
-    // Xử lý Bitget (theo cấu trúc của endpoint /tickers)
+    // Xử lý Bitget (giữ nguyên)
     const bitgetData = (bitgetRes.status === 'fulfilled' ? bitgetRes.value?.data : []) || [];
     newData.bitget = bitgetData.map(item => ({ symbol: item.symbol, fundingRate: parseFloat(item.fundingRate) })).filter(r => r && r.fundingRate < 0).sort((a,b) => a.fundingRate - b.fundingRate);
 
@@ -95,6 +96,7 @@ async function updateFundingRates() {
 }
 
 const server = http.createServer((req, res) => {
+    // Phần server giữ nguyên, không thay đổi
     if (req.url === '/' && req.method === 'GET') {
         const filePath = path.join(__dirname, 'index.html');
         fs.readFile(filePath, (err, content) => {
