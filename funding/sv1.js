@@ -1,4 +1,4 @@
-// sv1.js (BẢN SỬA LỖI TRIỆT ĐỂ - LOGIC ỔN ĐỊNH)
+// sv1.js (BẢN ỔN ĐỊNH & CHIẾN LƯỢC MỚI)
 
 const http = require('http');
 const fs = require('fs');
@@ -7,12 +7,10 @@ const ccxt = require('ccxt');
 
 const PORT = 5001;
 
-// ----- CẤU HÌNH -----
 const EXCHANGE_IDS = ['binanceusdm', 'bingx', 'okx', 'bitget'];
 const FUNDING_DIFFERENCE_THRESHOLD = 0.003;
 const MINIMUM_PNL_THRESHOLD = 15;
 
-// ----- BIẾN TOÀN CỤC -----
 let exchangeData = {};
 let arbitrageOpportunities = [];
 let lastFullUpdateTimestamp = null;
@@ -27,7 +25,6 @@ const cleanSymbol = (symbol) => {
     return symbol.replace('/USDT', '').replace(':USDT', '');
 };
 
-// Hàm chỉ dùng để "chữa cháy" cho Bitget và BingX
 function calculateNextStandardFundingTime() {
     const now = new Date();
     const fundingHoursUTC = [0, 8, 16];
@@ -60,40 +57,35 @@ async function fetchExchangeData(exchangeId) {
             const symbol = cleanSymbol(rate.symbol);
             const marketInfo = exchange.markets[rate.symbol];
 
-            // BỘ LỌC GỐC: Chỉ xử lý các coin có funding rate ÂM
-            if (rate && typeof rate.fundingRate === 'number' && rate.fundingRate < 0 && marketInfo) {
+            if (rate && typeof rate.fundingRate === 'number' && marketInfo) {
                 
                 let timestamp = null;
                 let maxLeverage = null;
 
-                // LOGIC XỬ LÝ RIÊNG BIỆT VÀ AN TOÀN CHO TỪNG SÀN
                 switch (exchangeId) {
                     case 'binanceusdm':
                     case 'okx':
-                        // Lấy funding time trực tiếp từ API
                         timestamp = rate.nextFundingTime || rate.fundingTimestamp || null;
-                        
-                        // Tìm max lev ở thuộc tính chuẩn, nếu không có thì là null
                         const binanceLev = marketInfo.limits?.leverage?.max;
-                        maxLeverage = binanceLev ? parseFloat(binanceLev) : null;
+                        if (binanceLev !== undefined && binanceLev !== null) {
+                            maxLeverage = parseFloat(binanceLev);
+                        }
                         break;
 
                     case 'bingx':
-                        // Tự tính funding time vì API không cung cấp
                         timestamp = calculateNextStandardFundingTime();
-                        
-                        // Tìm max lev ở thuộc tính 'leverage_ratio' của BingX
                         const bingxLev = marketInfo.info?.leverage_ratio;
-                        maxLeverage = bingxLev ? parseFloat(bingxLev) : null;
+                        if (bingxLev !== undefined && bingxLev !== null) {
+                            maxLeverage = parseFloat(bingxLev);
+                        }
                         break;
                         
                     case 'bitget':
-                        // Tự tính funding time
                         timestamp = calculateNextStandardFundingTime();
-                        
-                        // Tìm max lev ở thuộc tính của Bitget
                         const bitgetLev = marketInfo.info?.maxLeverage;
-                        maxLeverage = bitgetLev ? parseFloat(bitgetLev) : null;
+                        if (bitgetLev !== undefined && bitgetLev !== null) {
+                            maxLeverage = parseFloat(bitgetLev);
+                        }
                         break;
                 }
 
@@ -111,8 +103,6 @@ async function fetchExchangeData(exchangeId) {
         return { id: exchangeId, status: 'error', rates: {} };
     }
 }
-
-// ----- CÁC HÀM CÒN LẠI GIỮ NGUYÊN -----
 
 async function updateAllData() {
     console.log(`[${new Date().toISOString()}] Bắt đầu cập nhật dữ liệu...`);
@@ -138,8 +128,7 @@ function calculateArbitrageOpportunities() {
                 const exchange1Id = EXCHANGE_IDS[i], exchange2Id = EXCHANGE_IDS[j];
                 const rate1 = exchangeData[exchange1Id]?.rates[symbol], rate2 = exchangeData[exchange2Id]?.rates[symbol];
 
-                // BỎ QUA NẾU 1 TRONG 2 COIN KHÔNG CÓ DỮ LIỆU HOẶC MAX LEVERAGE LÀ NULL
-                if (!rate1 || !rate2 || !rate1.maxLeverage || !rate2.maxLeverage) {
+                if (!rate1 || !rate2 || rate1.maxLeverage === null || rate2.maxLeverage === null) {
                     continue;
                 }
                 
@@ -212,7 +201,7 @@ const server = http.createServer((req, res) => {
 });
 
 server.listen(PORT, async () => {
-    console.log(`✅ Máy chủ (Bản Ổn Định) đang chạy tại http://localhost:${PORT}`);
+    console.log(`✅ Máy chủ (Bản Ổn Định & Chiến Lược Mới) đang chạy tại http://localhost:${PORT}`);
     await updateAllData();
     calculateArbitrageOpportunities();
     masterLoop();
