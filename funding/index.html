@@ -18,16 +18,33 @@
         tbody tr:nth-child(even) { background-color: #f8f9fa; }
         tbody tr:hover { background-color: #e8f4fd; }
         
+        /* === THAY ĐỔI BẮT ĐẦU TỪ ĐÂY === */
+
         /* Bảng Arbitrage */
         .pnl-positive { font-weight: bold; color: #27ae60; }
-        .funding-diff { color: #e67e22; font-weight: bold;} /* Thêm style cho cột chênh lệch */
-        .highlight-green td { color: #27ae60 !important; font-weight: bold; }
+        .funding-diff { color: #e67e22; font-weight: bold;}
         
+        /* YÊU CẦU 5: HIỆU ỨNG NHẤP NHÁY */
+        @keyframes blink-animation {
+            0%   { background-color: rgba(255, 199, 44, 0.4); }
+            50%  { background-color: rgba(255, 199, 44, 0.9); }
+            100% { background-color: rgba(255, 199, 44, 0.4); }
+        }
+        .blinking-row {
+            animation: blink-animation 1.5s infinite;
+            font-weight: bold;
+        }
+
         /* Bảng Matrix Funding */
         .funding-matrix-table td { text-align: center; vertical-align: middle; }
         .funding-matrix-table td:first-child { text-align: left; font-weight: bold; }
-        .main-rate { font-weight: bold; color: #e74c3c; font-size: 1.1em; }
+        .main-rate { font-weight: bold; font-size: 1.1em; }
         .sub-info { font-size: 0.8em; color: #888; margin-top: 4px; }
+
+        /* YÊU CẦU 6: MÀU SẮC CHO FUNDING RATE */
+        .rate-positive { color: #27ae60; }
+        .rate-negative { color: #e74c3c; }
+
     </style>
 </head>
 <body>
@@ -41,7 +58,6 @@
                 <th>Coin</th>
                 <th>Cặp Sàn (Short / Long)</th>
                 <th>Max Lev Chung</th>
-                <!-- THAY ĐỔI 1: THÊM TIÊU ĐỀ CỘT MỚI -->
                 <th>Chênh lệch Funding</th>
                 <th>Thời Gian Funding</th>
                 <th>% PnL Ước Tính</th>
@@ -73,25 +89,26 @@
         if (!timestamp) return 'N/A';
         const date = new Date(timestamp);
         if (isNaN(date.getTime())) return 'N/A';
-        return date.toLocaleString('vi-VN', { hour: '2-digit', minute: '2-digit', hour12: false });
+        return date.toLocaleString('vi-VN', { 
+            day: '2-digit', month: '2-digit', 
+            hour: '2-digit', minute: '2-digit', 
+            hour12: false 
+        });
     }
 
     function renderArbitrageTable(opportunities) {
         const tbody = document.querySelector('#arbitrage-table tbody');
         if (!opportunities || opportunities.length === 0) {
-            // THAY ĐỔI 2: CẬP NHẬT COLSPAN TỪ 5 LÊN 6
             tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;">Không tìm thấy cơ hội nào.</td></tr>';
             return;
         }
         tbody.innerHTML = opportunities.map(op => {
-            const now = Date.now();
-            const timeRemainingMinutes = (op.nextFundingTime - now) / (1000 * 60);
-            const highlightClass = (timeRemainingMinutes <= 55 && timeRemainingMinutes > 0) ? 'highlight-green' : '';
-            return `<tr class="${highlightClass}">
+            // YÊU CẦU 5: KIỂM TRA CỜ isImminent ĐỂ ÁP DỤNG HIỆU ỨNG
+            const rowClass = op.isImminent ? 'blinking-row' : '';
+            return `<tr class="${rowClass}">
                         <td>${op.coin}</td>
                         <td>${op.exchanges.toUpperCase()}</td>
                         <td>x${op.commonLeverage}</td>
-                        <!-- THAY ĐỔI 3: THÊM Ô DỮ LIỆU CHO CỘT MỚI -->
                         <td class="funding-diff">${(op.fundingDiff * 100).toFixed(4)}%</td>
                         <td>${formatTime(op.nextFundingTime)}</td>
                         <td class="pnl-positive">+${op.estimatedPnl}%</td>
@@ -99,17 +116,13 @@
         }).join('');
     }
 
-    // HÀM MỚI ĐỂ RENDER BẢNG MA TRẬN
     function renderFundingMatrixTable(ratesData) {
         const tbody = document.querySelector('#funding-matrix-table tbody');
-        
         const ratesByCoin = {};
         for (const exchange of EXCHANGES) {
             if (ratesData[exchange]) {
                 for (const rate of ratesData[exchange]) {
-                    if (!ratesByCoin[rate.symbol]) {
-                        ratesByCoin[rate.symbol] = {};
-                    }
+                    if (!ratesByCoin[rate.symbol]) ratesByCoin[rate.symbol] = {};
                     ratesByCoin[rate.symbol][exchange] = rate;
                 }
             }
@@ -127,9 +140,11 @@
                 const rate = ratesByCoin[coin][exchange];
                 if (rate) {
                     const rateText = (rate.fundingRate * 100).toFixed(4) + '%';
+                    // YÊU CẦU 6: CHỌN CLASS MÀU SẮC DỰA TRÊN GIÁ TRỊ FUNDING
+                    const colorClass = rate.fundingRate >= 0 ? 'rate-positive' : 'rate-negative';
                     const subText = `x${rate.maxLeverage} • ${formatTime(rate.fundingTimestamp)}`;
                     rowHtml += `<td>
-                                    <div class="main-rate">${rateText}</div>
+                                    <div class="main-rate ${colorClass}">${rateText}</div>
                                     <div class="sub-info">${subText}</div>
                                 </td>`;
                 } else {
@@ -159,7 +174,7 @@
     
     document.addEventListener('DOMContentLoaded', () => {
         fetchData();
-        setInterval(fetchData, 60000);
+        setInterval(fetchData, 30000); // Tăng tần suất làm mới lên 30 giây để bắt kịp hiệu ứng nhấp nháy
     });
 </script>
 
