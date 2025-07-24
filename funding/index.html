@@ -12,14 +12,21 @@
         h2 { margin-top: 40px; }
         .timestamp { text-align: center; color: #7f8c8d; margin-bottom: 30px; font-size: 0.9em; height: 1em; }
         table { width: 100%; border-collapse: collapse; margin-bottom: 30px; background-color: #fff; box-shadow: 0 4px 8px rgba(0,0,0,0.1); border-radius: 8px; overflow: hidden; }
-        th, td { padding: 12px 15px; text-align: left; border-bottom: 1px solid #e0e0e0; white-space: nowrap; }
+        th, td { padding: 10px 15px; text-align: left; border-bottom: 1px solid #e0e0e0; }
         thead { background-color: #34495e; color: #ffffff; }
         th { font-weight: bold; }
         tbody tr:nth-child(even) { background-color: #f8f9fa; }
         tbody tr:hover { background-color: #e8f4fd; }
+        
+        /* Bảng Arbitrage */
         .pnl-positive { font-weight: bold; color: #27ae60; }
         .highlight-green td { color: #27ae60 !important; font-weight: bold; }
-        .funding-rate-negative { font-weight: bold; color: #e74c3c; }
+        
+        /* Bảng Matrix Funding */
+        .funding-matrix-table td { text-align: center; vertical-align: middle; }
+        .funding-matrix-table td:first-child { text-align: left; font-weight: bold; }
+        .main-rate { font-weight: bold; color: #e74c3c; font-size: 1.1em; }
+        .sub-info { font-size: 0.8em; color: #888; margin-top: 4px; }
     </style>
 </head>
 <body>
@@ -27,13 +34,12 @@
 <div class="container">
     <h1>Bảng Tính Toán Arbitrage</h1>
     <p class="timestamp" id="main-timestamp">Đang tải dữ liệu...</p>
-
     <table id="arbitrage-table">
         <thead>
             <tr>
                 <th>Coin</th>
                 <th>Cặp Sàn</th>
-                <th>Max Lev Chung</th> <!-- CỘT MỚI -->
+                <th>Max Lev Chung</th>
                 <th>Thời Gian Funding</th>
                 <th>% PnL Ước Tính</th>
             </tr>
@@ -41,15 +47,15 @@
         <tbody></tbody>
     </table>
 
-    <h2>Tổng Hợp Funding Rates Âm</h2>
-    <table id="all-rates-table">
+    <h2>Tổng Hợp Funding Rates (Dạng Ma Trận)</h2>
+    <table id="funding-matrix-table" class="funding-matrix-table">
         <thead>
             <tr>
-                <th>Sàn</th>
                 <th>Coin</th>
-                <th>Max Lev</th>
-                <th>Funding Rate (%)</th>
-                <th>Thời Gian Funding</th>
+                <th>Binance</th>
+                <th>OKX</th>
+                <th>BingX</th>
+                <th>Bitget</th>
             </tr>
         </thead>
         <tbody></tbody>
@@ -58,55 +64,76 @@
 
 <script>
     const API_ENDPOINT = '/api/data';
+    const EXCHANGES = ['binance', 'okx', 'bingx', 'bitget'];
     
     function formatTime(timestamp) {
         if (!timestamp) return 'N/A';
         const date = new Date(timestamp);
         if (isNaN(date.getTime())) return 'N/A';
-        return date.toLocaleString('vi-VN', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+        return date.toLocaleString('vi-VN', { hour: '2-digit', minute: '2-digit', hour12: false });
     }
 
     function renderArbitrageTable(opportunities) {
         const tbody = document.querySelector('#arbitrage-table tbody');
         if (!opportunities || opportunities.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;">Không tìm thấy cơ hội nào hoặc đang ngoài giờ tính toán.</td></tr>'; // Cập nhật colspan="5"
+            tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;">Không tìm thấy cơ hội nào.</td></tr>';
             return;
         }
         tbody.innerHTML = opportunities.map(op => {
             const now = Date.now();
             const timeRemainingMinutes = (op.nextFundingTime - now) / (1000 * 60);
             const highlightClass = (timeRemainingMinutes <= 55 && timeRemainingMinutes > 0) ? 'highlight-green' : '';
-            return `
-                <tr class="${highlightClass}">
-                    <td>${op.coin}</td>
-                    <td>${op.exchanges.toUpperCase()}</td>
-                    <td>x${op.commonLeverage}</td> <!-- HIỂN THỊ DỮ LIỆU MỚI -->
-                    <td>${formatTime(op.nextFundingTime)}</td>
-                    <td class="pnl-positive">+${op.estimatedPnl}%</td>
-                </tr>
-            `;
+            return `<tr class="${highlightClass}">
+                        <td>${op.coin}</td>
+                        <td>${op.exchanges.toUpperCase()}</td>
+                        <td>x${op.commonLeverage}</td>
+                        <td>${formatTime(op.nextFundingTime)}</td>
+                        <td class="pnl-positive">+${op.estimatedPnl}%</td>
+                    </tr>`;
         }).join('');
     }
 
-    function renderAllRatesTable(rates) {
-        const tbody = document.querySelector('#all-rates-table tbody');
-        let combinedRates = [];
-        const exchangeNames = { binance: 'Binance', bingx: 'BingX', okx: 'OKX', bitget: 'Bitget' };
-        for (const key in rates) {
-            if (rates[key]) {
-                rates[key].forEach(rate => combinedRates.push({ ...rate, exchangeName: exchangeNames[key] }));
+    // HÀM MỚI ĐỂ RENDER BẢNG MA TRẬN
+    function renderFundingMatrixTable(ratesData) {
+        const tbody = document.querySelector('#funding-matrix-table tbody');
+        
+        // Chuyển đổi dữ liệu để dễ tra cứu: { 'BTC': { binance: {...}, okx: {...} }, ... }
+        const ratesByCoin = {};
+        for (const exchange of EXCHANGES) {
+            if (ratesData[exchange]) {
+                for (const rate of ratesData[exchange]) {
+                    if (!ratesByCoin[rate.symbol]) {
+                        ratesByCoin[rate.symbol] = {};
+                    }
+                    ratesByCoin[rate.symbol][exchange] = rate;
+                }
             }
         }
-        combinedRates.sort((a, b) => a.fundingRate - b.fundingRate);
-        tbody.innerHTML = combinedRates.slice(0, 100).map(rate => `
-            <tr>
-                <td>${rate.exchangeName}</td>
-                <td>${rate.symbol}</td>
-                <td>x${rate.maxLeverage}</td>
-                <td class="funding-rate-negative">${(rate.fundingRate * 100).toFixed(4)}%</td>
-                <td>${formatTime(rate.fundingTimestamp)}</td>
-            </tr>
-        `).join('');
+        
+        // Sắp xếp coin theo funding rate âm nhất trên bất kỳ sàn nào
+        const sortedCoins = Object.keys(ratesByCoin).sort((a, b) => {
+            const minRateA = Math.min(...EXCHANGES.map(ex => ratesByCoin[a][ex]?.fundingRate || 0));
+            const minRateB = Math.min(...EXCHANGES.map(ex => ratesByCoin[b][ex]?.fundingRate || 0));
+            return minRateA - minRateB;
+        });
+
+        tbody.innerHTML = sortedCoins.slice(0, 100).map(coin => {
+            let rowHtml = `<td>${coin}</td>`;
+            for (const exchange of EXCHANGES) {
+                const rate = ratesByCoin[coin][exchange];
+                if (rate) {
+                    const rateText = (rate.fundingRate * 100).toFixed(4) + '%';
+                    const subText = `x${rate.maxLeverage} • ${formatTime(rate.fundingTimestamp)}`;
+                    rowHtml += `<td>
+                                    <div class="main-rate">${rateText}</div>
+                                    <div class="sub-info">${subText}</div>
+                                </td>`;
+                } else {
+                    rowHtml += `<td>-</td>`; // Hiển thị gạch ngang nếu không có dữ liệu
+                }
+            }
+            return `<tr>${rowHtml}</tr>`;
+        }).join('');
     }
 
     async function fetchData() {
@@ -114,9 +141,12 @@
             const response = await fetch(API_ENDPOINT);
             if (!response.ok) throw new Error(`Lỗi mạng: ${response.status}`);
             const data = await response.json();
+            
             document.getElementById('main-timestamp').innerText = `Dữ liệu cập nhật lúc: ${new Date(data.lastUpdated).toLocaleString('vi-VN', {hour12: false}) || 'N/A'}`;
+            
             renderArbitrageTable(data.arbitrageData);
-            renderAllRatesTable(data.rawRates);
+            renderFundingMatrixTable(data.rawRates);
+
         } catch (error) {
             console.error('Lỗi khi lấy dữ liệu:', error);
             document.getElementById('main-timestamp').innerText = 'Lỗi tải dữ liệu. Kiểm tra console (F12).';
