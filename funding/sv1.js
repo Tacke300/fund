@@ -1,4 +1,4 @@
-// sv1.js (BẢN SỬA LỖI HỒI QUY & CHUẨN HÓA - 24/07/2025)
+// sv1.js (BẢN CUỐI CÙNG - XỬ LÝ LỖI CHÍNH XÁC & GIAO DIỆN TỐI ƯU)
 
 const http = require('http');
 const fs = require('fs');
@@ -27,28 +27,24 @@ const cleanSymbol = (symbol) => {
     return symbol.replace('/USDT', '').replace(':USDT', '');
 };
 
-// Hàm tính toán giờ funding chuẩn cho các sàn không cung cấp nextFundingTime qua API
+// Hàm chỉ dùng để "chữa cháy" cho Bitget
 function calculateNextStandardFundingTime() {
     const now = new Date();
-    const fundingHoursUTC = [0, 8, 16]; // Các mốc giờ funding phổ biến
+    const fundingHoursUTC = [0, 8, 16];
     let nextHourUTC = -1;
-
     for (const hour of fundingHoursUTC) {
         if (now.getUTCHours() < hour) {
             nextHourUTC = hour;
             break;
         }
     }
-
     const nextFundingDate = new Date(now.getTime());
-    nextFundingDate.setUTCMinutes(0, 0, 0); // Reset phút, giây, ms về 0
-
+    nextFundingDate.setUTCHours(nextFundingDate.getUTCHours(), 0, 0, 0);
     if (nextHourUTC !== -1) {
         nextFundingDate.setUTCHours(nextHourUTC);
     } else {
-        // Nếu đã qua tất cả các mốc trong ngày, lấy mốc đầu tiên của ngày hôm sau
         nextFundingDate.setUTCDate(now.getUTCDate() + 1);
-        nextFundingDate.setUTCHours(fundingHoursUTC[0]);
+        nextFundingDate.setUTCHours(0);
     }
     return nextFundingDate.getTime();
 }
@@ -65,75 +61,45 @@ async function fetchExchangeData(exchangeId) {
             const marketInfo = exchange.markets[rate.symbol];
 
             if (rate && typeof rate.fundingRate === 'number' && rate.fundingRate < 0 && marketInfo) {
-                let timestamp;
-                let maxLeverage;
-
-                // ===================================================================
-                // === ÁP DỤNG LOGIC RIÊNG BIỆT CHO TỪNG SÀN ĐỂ TRÁNH LỖI HỒI QUY ===
-                // ===================================================================
-                switch (exchangeId) {
-                    case 'binanceusdm':
-                    case 'okx':
-                        // LOGIC GỐC - ĐANG CHẠY TỐT CHO BINANCE & OKX
-                        timestamp = rate.nextFundingTime || rate.fundingTimestamp;
-                        maxLeverage = marketInfo.limits?.leverage?.max || 25; // Dùng logic cũ, an toàn
-                        break;
-
-                    case 'bingx':
-                        // LOGIC ĐÚNG DÀNH RIÊNG CHO BINGX
-                        timestamp = calculateNextStandardFundingTime(); // BingX không trả về next funding time
-                        maxLeverage = parseFloat(marketInfo.info?.leverage_ratio) || 20; // BingX dùng 'leverage_ratio'
-                        break;
-
-                    case 'bitget':
-                        // LOGIC RIÊNG CHO BITGET
-                        timestamp = calculateNextStandardFundingTime(); // Bitget cũng không trả về next funding time
-                        maxLeverage = marketInfo.limits?.leverage?.max || parseFloat(marketInfo.info?.maxLeverage) || 20;
-                        break;
-                        
-                    default:
-                        // Fallback an toàn cho sàn mới nếu có
-                        timestamp = rate.nextFundingTime || calculateNextStandardFundingTime();
-                        maxLeverage = marketInfo.limits?.leverage?.max || 20;
-                        break;
+                // Logic lấy timestamp mặc định
+                let timestamp = rate.fundingTimestamp || rate.nextFundingTime || null;
+                
+                // CHỈ ÁP DỤNG "CHỮA CHÁY" CHO BITGET KHI KHÔNG CÓ DỮ LIỆU
+                if (exchangeId === 'bitget' && !timestamp) {
+                    timestamp = calculateNextStandardFundingTime();
                 }
-
+                
                 processedRates[symbol] = {
                     symbol: symbol,
                     fundingRate: rate.fundingRate,
                     fundingTimestamp: timestamp,
-                    maxLeverage: maxLeverage
+                    maxLeverage: marketInfo.limits?.leverage?.max || marketInfo.info?.maxLeverage || 75
                 };
             }
         }
         return { id: exchangeId, status: 'success', rates: processedRates };
     } catch (e) {
+        // Log lỗi cụ thể cho từng sàn để dễ chẩn đoán
         console.warn(`- Lỗi khi lấy dữ liệu từ ${exchangeId.toUpperCase()}: ${e.constructor.name} - ${e.message}`);
         return { id: exchangeId, status: 'error', rates: {} };
     }
 }
 
-
 // ----- CÁC HÀM CÒN LẠI GIỮ NGUYÊN -----
 
 async function updateAllData() {
-    console.log(`[${new Date().toLocaleTimeString()}] Bắt đầu cập nhật dữ liệu...`);
+    console.log(`[${new Date().toISOString()}] Bắt đầu cập nhật dữ liệu...`);
     const results = await Promise.all(EXCHANGE_IDS.map(id => fetchExchangeData(id)));
-    
     results.forEach(result => {
-        if (result.status === 'success') {
-            exchangeData[result.id] = { rates: result.rates };
-        }
+        if (result.status === 'success') exchangeData[result.id] = { rates: result.rates };
     });
-
     lastFullUpdateTimestamp = new Date().toISOString();
-    console.log(`✅ Cập nhật dữ liệu thành công!`);
+    console.log("✅ Cập nhật dữ liệu thành công!");
 }
 
 function calculateArbitrageOpportunities() {
     const opportunities = [];
     const allSymbols = new Set();
-    
     EXCHANGE_IDS.forEach(id => {
         if (exchangeData[id]) Object.keys(exchangeData[id].rates).forEach(symbol => allSymbols.add(symbol));
     });
@@ -142,30 +108,16 @@ function calculateArbitrageOpportunities() {
         let bestOpportunityForSymbol = null;
         for (let i = 0; i < EXCHANGE_IDS.length; i++) {
             for (let j = i + 1; j < EXCHANGE_IDS.length; j++) {
-                const exchange1Id = EXCHANGE_IDS[i];
-                const exchange2Id = EXCHANGE_IDS[j];
-                const rate1 = exchangeData[exchange1Id]?.rates[symbol];
-                const rate2 = exchangeData[exchange2Id]?.rates[symbol];
-
+                const exchange1Id = EXCHANGE_IDS[i], exchange2Id = EXCHANGE_IDS[j];
+                const rate1 = exchangeData[exchange1Id]?.rates[symbol], rate2 = exchangeData[exchange2Id]?.rates[symbol];
                 if (!rate1 || !rate2) continue;
-
                 const fundingDiff = Math.abs(rate1.fundingRate - rate2.fundingRate);
                 if (fundingDiff < FUNDING_DIFFERENCE_THRESHOLD) continue;
-                
                 const commonLeverage = Math.min(rate1.maxLeverage, rate2.maxLeverage);
-                
-                let fee = 5;
-                if (commonLeverage <= 25) fee = 5;
-                else if (commonLeverage <= 50) fee = 10;
-                else if (commonLeverage <= 75) fee = 15;
-                else if (commonLeverage <= 100) fee = 20;
-                else if (commonLeverage <= 125) fee = 25;
-                else fee = 30;
-
-                const estimatedPnl = (100 * commonLeverage * fundingDiff) - fee;
-
+                let fee = 0;
+                if (commonLeverage <= 25) fee = 5; else if (commonLeverage <= 50) fee = 10; else if (commonLeverage <= 75) fee = 15; else if (commonLeverage <= 100) fee = 20; else if (commonLeverage <= 125) fee = 25; else fee = 30;
+                const estimatedPnl = 100 * commonLeverage * fundingDiff - fee;
                 if (estimatedPnl <= MINIMUM_PNL_THRESHOLD) continue;
-
                 const currentOpportunity = {
                     coin: symbol,
                     exchanges: `${exchange1Id.replace('usdm', '')} / ${exchange2Id.replace('usdm', '')}`,
@@ -173,17 +125,13 @@ function calculateArbitrageOpportunities() {
                     commonLeverage: commonLeverage,
                     estimatedPnl: parseFloat(estimatedPnl.toFixed(2)),
                 };
-                
                 if (!bestOpportunityForSymbol || currentOpportunity.estimatedPnl > bestOpportunityForSymbol.estimatedPnl) {
                     bestOpportunityForSymbol = currentOpportunity;
                 }
             }
         }
-        if (bestOpportunityForSymbol) {
-            opportunities.push(bestOpportunityForSymbol);
-        }
+        if (bestOpportunityForSymbol) opportunities.push(bestOpportunityForSymbol);
     });
-
     arbitrageOpportunities = opportunities.sort((a, b) => b.estimatedPnl - a.estimatedPnl);
 }
 
@@ -191,14 +139,13 @@ function masterLoop() {
     setInterval(async () => {
         const now = new Date();
         const currentMinute = now.getMinutes();
-
         if (currentMinute >= 10 && currentMinute <= 59) {
-            console.log(`[${now.toLocaleTimeString()}] Trong khung giờ hoạt động. Đang cập nhật và tính toán...`);
+            console.log(`[${now.toISOString()}] Phút ${currentMinute}, trong khung giờ hoạt động. Đang cập nhật và tính toán...`);
             await updateAllData();
             calculateArbitrageOpportunities();
             console.log(`   => Đã tìm thấy ${arbitrageOpportunities.length} cơ hội arbitrage.`);
         } else {
-            console.log(`[${now.toLocaleTimeString()}] Ngoài khung giờ hoạt động, chờ...`);
+            console.log(`[${now.toISOString()}] Phút ${currentMinute}, ngoài khung giờ hoạt động.`);
         }
     }, 60 * 1000);
 }
@@ -206,11 +153,7 @@ function masterLoop() {
 const server = http.createServer((req, res) => {
     if (req.url === '/' && req.method === 'GET') {
         fs.readFile(path.join(__dirname, 'index.html'), (err, content) => {
-            if (err) {
-                res.writeHead(500, {'Content-Type': 'text/plain'});
-                res.end('Lỗi Server: Không thể đọc file index.html');
-                return;
-            }
+            if (err) { res.writeHead(500); res.end('Lỗi index.html'); return; }
             res.writeHead(200, {'Content-Type': 'text/html; charset=utf-8'});
             res.end(content);
         });
@@ -228,13 +171,12 @@ const server = http.createServer((req, res) => {
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify(responseData));
     } else {
-        res.writeHead(404, {'Content-Type': 'text/plain'});
-        res.end('404 Not Found');
+        res.writeHead(404); res.end('Not Found');
     }
 });
 
 server.listen(PORT, async () => {
-    console.log(`✅ Máy chủ (Bản Sửa Lỗi Hồi Quy) đang chạy tại http://localhost:${PORT}`);
+    console.log(`✅ Máy chủ dữ liệu BẢN CUỐI CÙNG đang chạy tại http://localhost:${PORT}`);
     await updateAllData();
     calculateArbitrageOpportunities();
     masterLoop();
