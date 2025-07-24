@@ -2,7 +2,7 @@
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
-const https = require('httpss'); // Sử dụng module https gốc
+const https = require('https'); // Sử dụng module https gốc
 
 const PORT = 5000;
 const REFRESH_INTERVAL_MINUTES = 1; // Tự động cập nhật dữ liệu sau mỗi 5 phút
