@@ -1,4 +1,4 @@
-// sv1.js (BẢN SỬA LỖI SỐ 103 - Nhấn mạnh quyền hạn API và cấu hình IP)
+// sv1.js (BẢN SỬA LỖI SỐ 103 - Sửa lại BingX Funding API, Nhấn mạnh quyền hạn API và cấu hình IP)
 
 const http = require('http'); 
 const https = require('https'); 
@@ -303,8 +303,8 @@ function getBingXFundingRatesDirectAPI() {
 
         try {
             const timestamp = Date.now().toString();
-            // Đã sửa endpoint theo tài liệu BingX chính thức: /openApi/swap/v2/market/getTickers
-            const url = `https://open-api.bingx.com/openApi/swap/v2/market/getTickers?timestamp=${timestamp}`; 
+            // Đã sửa endpoint BingX: /openApi/swap/v2/market/tickers
+            const url = `https://open-api.bingx.com/openApi/swap/v2/market/tickers?timestamp=${timestamp}`; 
             
             const res = await fetch(url, { method: "GET", headers: { "X-BX-APIKEY": bingxApiKey } });
             const json = await res.json();
