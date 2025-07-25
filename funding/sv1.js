@@ -24,8 +24,8 @@ const FUNDING_HISTORY_CACHE_TTL_MINUTES = 60;
 const binanceApiKey = 'cZ1Y2O0kggVEggEaPvhFcYQHS5b1EsT2OWZb8zdY9C0jGqNROvXRZHTJjnQ7OG4Q';
 const binanceApiSecret = 'oU6pZFHgEvbpD9NmFXp5ZVnYFMQ7EIkBiz88aTzvmC3SpT9nEf4fcDf0pEnFzoTc';
 // API Key/Secret của BingX (vui lòng kiểm tra lại thật kỹ trên sàn)
-const bingxApiKey = 'vvmD6sdV12c382zUvGMWUnD1yWi1ti8TCFsGaiEIlH6kGTHzkmPdeJQCuUQivXKAPrsEcfOvgwge9aAQ';
-const bingxApiSecret = '1o30hXOVTsZ6o40JixrGPfTCvHaqFTutSEpGAyjqbmGt7p9RsVqGUKXHHItsOz174ncfQ9YWStvGIs3Oeb3Pg';
+const bingxApiKey = 'hIt2pwTdbgfEk9rL54igHBBKLnkpsbMV4EJLVFxwx0Pm86VKbmQuT6JBR6W20ha7jKD4RkswCooFgmMF1ag';
+const bingxApiSecret = 'YcrFgTWcCaRLJ40TMv6J4sUQl1cUPbOTZPAlXBosDWWLri103E8XC1LasXa2YDKz1VqYhw11xWCibTRHkXiA';
 // API Key/Secret/Passphrase của OKX (vui lòng kiểm tra lại thật kỹ trên sàn)
 const okxApiKey = 'c2f77f8b-a71a-41a3-8caf-3459dbdbaa0b';
 const okxApiSecret = '6337107745922F1D457C472297513220';
