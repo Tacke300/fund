@@ -1,4 +1,4 @@
-// sv1.js (BẢN SỬA LỖI SỐ 103 - Sửa lại BingX Funding API, Nhấn mạnh quyền hạn API và cấu hình IP)
+// sv1.js (BẢN SỬA LỖI SỐ 104 - Sửa BingX Funding bằng endpoint mới, Nhấn mạnh quyền hạn API và cấu hình IP)
 
 const http = require('http'); 
 const https = require('https'); 
@@ -302,32 +302,55 @@ function getBingXFundingRatesDirectAPI() {
         }
 
         try {
-            const timestamp = Date.now().toString();
-            // Đã sửa endpoint BingX: /openApi/swap/v2/market/tickers
-            const url = `https://open-api.bingx.com/openApi/swap/v2/market/tickers?timestamp=${timestamp}`; 
-            
-            const res = await fetch(url, { method: "GET", headers: { "X-BX-APIKEY": bingxApiKey } });
-            const json = await res.json();
+            const bingxCCXT = exchanges['bingx']; 
+            await bingxCCXT.loadMarkets(true); // Cần load markets để có danh sách symbol
+            const markets = Object.values(bingxCCXT.markets).filter(m => m.swap && m.quote === 'USDT');
 
-            console.log(`[DEBUG] BINGX Funding API Call URL: ${url}`); 
-            console.log(`[DEBUG] BINGX Raw response for Funding Rate:`, JSON.stringify(json, null, 2)); 
-
-            if (json && json.code === 0 && json.data && Array.isArray(json.data.tickers)) {
-                const processedData = json.data.tickers.map(item => ({
-                    symbol: cleanSymbol(item.symbol),
-                    fundingRate: parseFloat(item.fundingRate),
-                    fundingTimestamp: parseInt(item.nextFundingTime, 10) 
-                })).filter(item => 
-                    !isNaN(item.fundingRate) && 
-                    !isNaN(item.fundingTimestamp) && 
-                    item.fundingTimestamp > 0
-                );
-                resolve(processedData);
-            } else {
-                reject(new Error(`BingX Funding API trả về lỗi hoặc dữ liệu không hợp lệ. Code: ${json.code}, Msg: ${json.msg || 'Không có thông báo lỗi.'}. VUI LÒNG KIỂM TRA QUYỀN HẠN "PERPETUAL FUTURES" CỦA API KEY TRÊN BINGX.`));
+            if (markets.length === 0) {
+                console.warn(`[CACHE] ⚠️ BINGX: loadMarkets trả về 0 thị trường USDT Swap. Không thể lấy funding rate.`);
+                return resolve([]); // Trả về mảng rỗng nếu không có market
             }
+
+            const BINGX_REQUEST_DELAY_MS = 100;
+            const processedData = [];
+
+            for (const market of markets) {
+                const originalSymbol = market.symbol;
+                const cleanS = cleanSymbol(originalSymbol);
+
+                const url = `https://open-api.bingx.com/openApi/swap/v2/quote/fundingRate?symbol=${originalSymbol}`;
+                
+                try {
+                    const res = await fetch(url, { method: "GET", headers: { "X-BX-APIKEY": bingxApiKey } });
+                    const json = await res.json();
+
+                    // console.log(`[DEBUG] BINGX Funding API Call URL: ${url}`); 
+                    // console.log(`[DEBUG] BINGX Raw response for Funding Rate ${originalSymbol}:`, JSON.stringify(json, null, 2)); 
+
+                    if (json && json.code === 0 && json.data) {
+                        const fundingRate = parseFloat(json.data.fundingRate);
+                        const fundingTimestamp = parseInt(json.data.nextFundingTime, 10);
+                        if (!isNaN(fundingRate) && !isNaN(fundingTimestamp) && fundingTimestamp > 0) {
+                            processedData.push({
+                                symbol: cleanS,
+                                fundingRate: fundingRate,
+                                fundingTimestamp: fundingTimestamp
+                            });
+                        } else {
+                            console.warn(`[CACHE] ⚠️ BINGX: Funding rate hoặc timestamp không hợp lệ cho ${originalSymbol}. Data: ${JSON.stringify(json.data)}`);
+                        }
+                    } else {
+                        console.warn(`[CACHE] ⚠️ BINGX: Lỗi hoặc dữ liệu không hợp lệ từ /quote/fundingRate cho ${originalSymbol}. Code: ${json.code}, Msg: ${json.msg || 'Không có thông báo lỗi.'}`);
+                    }
+                } catch (e) {
+                    console.error(`[CACHE] ❌ BINGX: Lỗi khi lấy funding rate cho ${originalSymbol} từ /quote/fundingRate: ${e.message}`);
+                }
+                await new Promise(resolve => setTimeout(resolve, BINGX_REQUEST_DELAY_MS)); // Delay giữa các request
+            }
+            resolve(processedData);
+
         } catch (e) {
-            reject(new Error(`Lỗi khi gọi API BingX Funding Rate: ${e.message}. VUI LÒNG KIỂM TRA API KEY BINGX.`));
+            reject(new Error(`Lỗi tổng quát khi lấy API BingX Funding Rate: ${e.message}. VUI LÒNG KIỂM TRA API KEY BINGX.`));
         }
     });
 }
@@ -509,7 +532,7 @@ const server = http.createServer((req, res) => {
 });
 
 server.listen(PORT, async () => {
-    console.log(`✅ Máy chủ dữ liệu (Bản sửa lỗi số 103) đang chạy tại http://localhost:${PORT}`);
+    console.log(`✅ Máy chủ dữ liệu (Bản sửa lỗi số 104) đang chạy tại http://localhost:${PORT}`);
     await initializeLeverageCache();
     await masterLoop();
     setInterval(initializeLeverageCache, LEVERAGE_CACHE_REFRESH_INTERVAL_MINUTES * 60 * 1000);
