@@ -16,10 +16,10 @@ const LEVERAGE_CACHE_REFRESH_INTERVAL_MINUTES = 30;
 
 // === QUAN TRỌNG: ĐIỀN API KEY VÀ SECRET VÀO ĐÂY ===
 // Hãy đảm bảo API Key của BINGX là chính xác.
-const binanceApiKey = '2rgsf5oYto2HaBS05DS7u4QVtDHf5uxQjEpZiP6eSMUlQRYb194XdE82zZy0Yujw';
-const binanceApiSecret = 'jnCGekaD5XWm8i48LIAfQZpq5pFtBmZ3ZyYR4sK3UW4PoZlgPVCMrljk8DCFa9Xk';
-const bingxApiKey = 'vvmD6sdV12c382zUvGMWUnD1yWi1ti8TCFsGaiEIlH6kFTHzkmPdeJQCuUQivXKAPrsEcfOvgwge9aAQ';
-const bingxApiSecret = '1o30hXOVTsZ6o40JixrGPfTCvHaqFTutSEpGAyjqbmGt7p9RsVqGUKXHHItsOz174ncfQ9YWStvGIs3Oeb3Pg';
+const binanceApiKey = '4TmnbM7us8Pud6uawfDDylfOpEDeeNhHZv8r2cEYUfIk46wlt7ykJwvwWj63nAXy';
+const binanceApiSecret = 'LnDDEjrfoXJKJiTdZTSKIgfV5ZGpSQ92YuAXS9430Zv6OfVwtMMiqrnWYGTl2LCR';
+const bingxApiKey = '4ratWsE3JMDxziXnw1BifwXHFBuT6s5OL2dxpiDoSR6IvhgaBNexEdy9YSCS97ft21DCaCGkYYIxMxIvvxg';
+const bingxApiSecret = 'hFCh9TIr3mJoAqDqQJyNzgWksiBYEu0qnzONG2kUFg0jezDCcII7W0fecCaIKQTc3UKd9CtuRlDzzHZPPTkA';
 const okxApiKey = 'c2f77f8b-a71a-41a3-8caf-3459dbdbaa0b';
 const okxApiSecret = '6337107745922F1D457C472297513220';
 const okxPassword = 'Altf4enter$';
