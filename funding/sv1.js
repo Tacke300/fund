@@ -21,11 +21,11 @@ const FUNDING_HISTORY_CACHE_TTL_MINUTES = 60;
 
 // === QUAN TRỌNG: ĐIỀN API KEY VÀ SECRET VÀO ĐÂY ===
 // API Key/Secret của Binance (đã cập nhật theo yêu cầu của bạn)
-const binanceApiKey = 'cZ1Y2O0kggVEggEaPvhFcYQHS5b1EsT20WZb8zdY9C0jGqNROvXRZHTJjnQ7OG4Q';
+const binanceApiKey = 'cZ1Y2O0kggVEggEaPvhFcYQHS5b1EsT2OWZb8zdY9C0jGqNROvXRZHTJjnQ7OG4Q';
 const binanceApiSecret = 'oU6pZFHgEvbpD9NmFXp5ZVnYFMQ7EIkBiz88aTzvmC3SpT9nEf4fcDf0pEnFzoTc';
-// API Key/Secret của BingX (vui lòng kiểm tra lại thật kỹ trên sàn)
-const bingxApiKey = 'hlt2pwTdbgfEk9rL54igHBBKLnkpsbMV4EJLVFxwx0Pm86VKbmQuT6JBR6W20ha7jKD4RkswCooFgmMF1ag';
-const bingxApiSecret = 'YcrFgTWcCaRLJ40TMv6J4sUQl1cUPbOTZPAlXBosDWWLri103E8XC1LasXa2YDKz1VqYhw11xWCibTRHkXiA';
+// API Key/Secret của BingX (ĐÃ CẬP NHẬT TỪ HÌNH ẢNH BẠN GỬI)
+const bingxApiKey = 'hlt2pwTdbgfEk9rL54igHBBKLnkpsbMV4EJLVFxwx0Pm86VKbmQuT6JBR6W20ha7jKD4RkswCooFgmMFlag';
+const bingxApiSecret = 'YcrFgTWcCaRLJ40TMv6J4sUQl1cUpBOTZPAIXBosDWWLri103E8XC1LasXa2YDKz1VqYhw11xWCibTRHKXlA';
 // API Key/Secret/Passphrase của OKX (vui lòng kiểm tra lại thật kỹ trên sàn)
 const okxApiKey = 'c2f77f8b-a71a-41a3-8caf-3459dbdbaa0b';
 const okxApiSecret = '6337107745922F1D457C472297513220';
@@ -162,8 +162,8 @@ async function getBingXLeverageDirectAPI() {
                 const res = await fetch(url, { method: "GET", headers: { "X-BX-APIKEY": bingxApiKey } });
                 const json = await res.json();
 
-                console.log(`[DEBUG] BINGX API Call URL: ${url}`); // Bỏ comment để debug chi tiết từng symbol
-                console.log(`[DEBUG] BINGX Raw response for ${originalSymbol} from /trade/leverage:`, JSON.stringify(json, null, 2)); // Bỏ comment để debug chi tiết từng symbol
+                console.log(`[DEBUG] BINGX API Call URL: ${url}`); 
+                console.log(`[DEBUG] BINGX Raw response for ${originalSymbol} from /trade/leverage:`, JSON.stringify(json, null, 2)); 
 
                 let maxLeverageFound = null;
                 if (json && json.code === 0 && json.data) {
@@ -318,8 +318,8 @@ function getBingXFundingRatesDirectAPI() {
             const res = await fetch(url, { method: "GET", headers: { "X-BX-APIKEY": bingxApiKey } });
             const json = await res.json();
 
-            // console.log(`[DEBUG] BINGX Funding API Call URL: ${url}`); 
-            // console.log(`[DEBUG] BINGX Raw response for Funding Rate:`, JSON.stringify(json, null, 2)); 
+            console.log(`[DEBUG] BINGX Funding API Call URL: ${url}`); 
+            console.log(`[DEBUG] BINGX Raw response for Funding Rate:`, JSON.stringify(json, null, 2)); 
 
             if (json && json.code === 0 && Array.isArray(json.data)) {
                 const processedData = json.data.map(item => ({
