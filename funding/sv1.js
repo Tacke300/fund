@@ -166,7 +166,10 @@ async function getBingXLeverageDirectAPI() {
             return {};
         }
 
-        const BINGX_REQUEST_DELAY_MS = 100; 
+        // TĂNG ĐỘ TRỄ ĐỂ TRÁNH GIỚI HẠN TẦN SUẤT API CỦA BINGX
+        // Bạn có thể cần điều chỉnh giá trị này nếu vẫn bị rate limit
+        const BINGX_REQUEST_DELAY_MS_LEVERAGE = 1000; // Tăng từ 100ms lên 1000ms (1 giây)
+
         for (const market of markets) {
             const ccxtSymbol = market.symbol; // Ký hiệu từ CCXT (ví dụ: BTC/USDT)
             const cleanS = cleanSymbol(ccxtSymbol); // Ký hiệu đã làm sạch để lưu cache (ví dụ: BTC)
@@ -176,7 +179,7 @@ async function getBingXLeverageDirectAPI() {
                 const timestamp = Date.now().toString(); // Đảm bảo timestamp là string
                 const recvWindow = "5000"; // Có thể thử "10000" hoặc "20000" nếu cần cho đồng bộ thời gian
                 
-                // === CÁCH MỚI VÀ MẠNH MẼ HƠN ĐỂ TẠO CHUỖI TRUY VẤN ĐƯỢC KÝ ===
+                // CÁCH MỚI VÀ MẠNH MẼ HƠN ĐỂ TẠO CHUỖI TRUY VẤN ĐƯỢC KÝ
                 const params = {
                     recvWindow: recvWindow,
                     symbol: bingxApiSymbol,
@@ -184,7 +187,6 @@ async function getBingXLeverageDirectAPI() {
                 };
                 // Sắp xếp các tham số theo thứ tự bảng chữ cái và tạo chuỗi
                 const queryString = Object.keys(params).sort().map(key => `${key}=${params[key]}`).join('&');
-                // === KẾT THÚC CÁCH TẠO CHUỖI TRUY VẤN MỚI ===
 
                 const signature = signBingX(queryString, bingxApiSecret);
 
@@ -206,7 +208,11 @@ async function getBingXLeverageDirectAPI() {
                     } else {
                         console.warn(`[CACHE] ⚠️ BINGX: Dữ liệu đòn bẩy (longLeverage: '${json.data.longLeverage}', shortLeverage: '${json.data.shortLeverage}') cho ${bingxApiSymbol} không phải số hoặc bằng 0.`);
                     }
-                } else {
+                } else if (json.code === 100410) { // Xử lý lỗi rate limit riêng
+                    console.warn(`[CACHE] ⚠️ BINGX: Bị giới hạn tần suất (Rate Limited) khi lấy đòn bẩy cho ${bingxApiSymbol}. Msg: ${json.msg || 'Không có thông báo lỗi.'}.`);
+                    // Không gán null ngay, có thể retry sau hoặc bỏ qua nếu cần
+                } 
+                else {
                     console.warn(`[CACHE] ⚠️ BINGX: Phản hồi API không thành công hoặc không có trường 'data' cho ${bingxApiSymbol}. Code: ${json.code}, Msg: ${json.msg || 'Không có thông báo lỗi.'}`);
                 }
                 leverages[cleanS] = maxLeverageFound;
@@ -215,7 +221,7 @@ async function getBingXLeverageDirectAPI() {
                 console.error(`[CACHE] ❌ BINGX: Lỗi khi lấy đòn bẩy cho ${bingxApiSymbol} từ /trade/leverage: ${e.message}. VUI LÒNG KIỂM TRA API KEY VÀ SECRET CÓ ĐÚNG KHÔNG VÀ ĐÃ CẤP QUYỀN "PERPETUAL FUTURES" CHƯA.`);
                 leverages[cleanS] = null;
             }
-            await new Promise(resolve => setTimeout(resolve, BINGX_REQUEST_DELAY_MS));
+            await new Promise(resolve => setTimeout(resolve, BINGX_REQUEST_DELAY_MS_LEVERAGE)); // Áp dụng độ trễ mới
         }
         console.log(`[DEBUG] BINGX: Đã lấy thành công ${Object.values(leverages).filter(v => v !== null && v > 0).length} đòn bẩy qua REST API /trade/leverage.`);
         return leverages;
@@ -284,6 +290,10 @@ async function initializeLeverageCache() {
                         newCache[id][symbol] = maxLeverage;
                         if (maxLeverage !== null && maxLeverage > 0) count++;
                     }
+                    else {
+                        // Thêm log để bắt các trường hợp symbol không phải USDT hoặc không phải swap
+                        // console.log(`[DEBUG] Bỏ qua thị trường ${market.symbol} trên ${id}: Không phải SWAP hoặc không phải USDT.`);
+                    }
                 }
                 console.log(`[CACHE] ✅ ${id.toUpperCase()}: Lấy thành công ${count} đòn bẩy bằng 'loadMarkets' (dự phòng).`);
             }
@@ -342,7 +352,9 @@ function getBingXFundingRatesDirectAPI() {
                 return resolve([]); // Trả về mảng rỗng nếu không có market
             }
 
-            const BINGX_REQUEST_DELAY_MS = 100;
+            // TĂNG ĐỘ TRỄ CHO FUNDING RATES CỦA BINGX NẾU CẦN
+            const BINGX_REQUEST_DELAY_MS_FUNDING = 500; // Tăng từ 100ms lên 500ms
+
             const processedData = [];
 
             for (const market of markets) {
@@ -372,13 +384,16 @@ function getBingXFundingRatesDirectAPI() {
                         } else {
                             console.warn(`[CACHE] ⚠️ BINGX: Funding rate hoặc timestamp không hợp lệ cho ${bingxApiSymbol}. Data: ${JSON.stringify(json.data)}`);
                         }
-                    } else {
+                    } else if (json.code === 100410) { // Xử lý lỗi rate limit riêng
+                        console.warn(`[CACHE] ⚠️ BINGX: Bị giới hạn tần suất (Rate Limited) khi lấy funding rate cho ${bingxApiSymbol}. Msg: ${json.msg || 'Không có thông báo lỗi.'}.`);
+                    }
+                    else {
                         console.warn(`[CACHE] ⚠️ BINGX: Lỗi hoặc dữ liệu không hợp lệ từ /quote/fundingRate cho ${bingxApiSymbol}. Code: ${json.code}, Msg: ${json.msg || 'Không có thông báo lỗi.'}`);
                     }
                 } catch (e) {
                     console.error(`[CACHE] ❌ BINGX: Lỗi khi lấy funding rate cho ${bingxApiSymbol} từ /quote/fundingRate: ${e.message}`);
                 }
-                await new Promise(resolve => setTimeout(resolve, BINGX_REQUEST_DELAY_MS)); // Delay giữa các request
+                await new Promise(resolve => setTimeout(resolve, BINGX_REQUEST_DELAY_MS_FUNDING)); // Áp dụng độ trễ mới
             }
             resolve(processedData);
 
@@ -568,5 +583,5 @@ server.listen(PORT, async () => {
     console.log(`✅ Máy chủ dữ liệu (Bản sửa lỗi số 104) đang chạy tại http://localhost:${PORT}`);
     await initializeLeverageCache();
     await masterLoop();
-    setInterval(initializeLeverizeCache, LEVERAGE_CACHE_REFRESH_INTERVAL_MINUTES * 60 * 1000);
+    setInterval(initializeLeverageCache, LEVERAGE_CACHE_REFRESH_INTERVAL_MINUTES * 60 * 1000);
 });
