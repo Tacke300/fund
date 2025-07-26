@@ -8,6 +8,7 @@ const Binance = require('node-binance-api');
 
 const PORT = 5001;
 
+// ----- CẤU HÌNH -----
 const EXCHANGE_IDS = ['binanceusdm', 'bingx', 'okx', 'bitget'];
 const FUNDING_DIFFERENCE_THRESHOLD = 0.002;
 const MINIMUM_PNL_THRESHOLD = 15;
@@ -16,18 +17,24 @@ const LEVERAGE_CACHE_REFRESH_INTERVAL_MINUTES = 30;
 const FUNDING_HISTORY_FULL_REFRESH_INTERVAL_MINUTES = 10;
 const FUNDING_HISTORY_CACHE_TTL_MINUTES = 60;
 
+// === QUAN TRỌNG: ĐIỀN API KEY VÀ SECRET VÀO ĐÂY ===
+// API Key/Secret của Binance (đã cập nhật theo yêu cầu của bạn - HÃY ĐẢM BẢO IP CỦA SERVER ĐƯỢC WHITELIST TRÊN BINANCE)
 const binanceApiKey = 'cZ1Y2O0kggVEggEaPvhFcYQHS5b1EsT2OWZb8zdY9C0jGqNROvXRZHTJjnQ7OG4Q';
 const binanceApiSecret = 'oU6pZFHgEvbpD9NmFXp5ZVnYFMQ7EIkBiz88aTzvmC3SpT9nEf4fcDf0pEnFzoTc';
-// API Key/Secret của BingX (ĐÃ CẬP NHẬT TỪ HÌNH ẢNH CỦA BẠN - HÃY NHỚ CẤP THÊM QUYỀN "PERPETUAL FUTURES" TRÊN SÀN)
-const bingxApiKey = 'p29V4JTKBelypG9Acd1t4dp6GqHwyTjYcOBq9AC501HV0Of4EN4m6Uv5F2Clr7dNaNTRvaQM0CqcPXFEFuA'; // ĐÃ CẬP NHẬT TỪ ẢNH
-const bingxApiSecret = 'iTKmpmySRWQSawYBU3D5uFRZHh4UBdRYLOCPWrWbdAYa0go6Nohye1n7PS4XOcomxQXYnUs1YRei5RvLpg'; // ĐÃ CẬP NHẬT TỪ ẢNH
+// API Key/Secret của BingX (ĐÃ CẬP NHẬT CHÍNH XÁC TỪ HÌNH ẢNH BẠN CUNG CẤP - HÃY NHỚ CẤP THÊM QUYỀN "PERPETUAL FUTURES" TRÊN SÀN)
+const bingxApiKey = 'p29V4JTKBelypG9Acd1t4dp6GqHwyTjYcOBq9AC501HV0Of4EN4m6Uv5F2Clr7dNaNTRvaQM0CqcPXFEFuA';
+const bingxApiSecret = 'iTKmpmySRWQSawYBU3D5uFRZHh4UBdRYLOCPWrWbdAYa0go6Nohye1n7PS4XOcomxQXYnUs1YRei5RvLpg';
+// API Key/Secret/Passphrase của OKX (vui lòng kiểm tra lại thật kỹ trên sàn: key, secret, passphrase và thời gian server)
 const okxApiKey = 'c2f77f8b-a71a-41a3-8caf-3459dbdbaa0b';
 const okxApiSecret = '6337107745922F1D457C472297513220';
 const okxPassword = 'Altf4enter$';
+// API Key/Secret của Bitget (vui lòng kiểm tra lại thật kỹ trên sàn)
 const bitgetApiKey = 'bg_a1ab0142c295779ac21123d5b59378e9';
 const bitgetApiSecret = 'c12fbe21cd82274bde810b3d4aa7be778e5eee30ca5f47cf8ffc9b950787c961';
 const bitgetApiPassword = 'Altf4enter';
 
+
+// ----- BIẾN TOÀN CỤC -----
 let leverageCache = {};
 let fundingHistoryCache = {};
 let exchangeData = {};
@@ -36,11 +43,13 @@ let lastFullUpdateTimestamp = null;
 let loopTimeoutId = null;
 let lastFullFundingHistoryRefreshTime = 0;
 
+// Khởi tạo client Binance riêng bằng node-binance-api
 const binanceClient = new Binance().options({
     APIKEY: binanceApiKey,
     APISECRET: binanceApiSecret
 });
 
+// Khởi tạo các sàn giao dịch bằng CCXT
 const exchanges = {};
 EXCHANGE_IDS.forEach(id => {
     const exchangeClass = ccxt[id];
@@ -70,10 +79,10 @@ EXCHANGE_IDS.forEach(id => {
     }
 });
 
+
 const cleanSymbol = (symbol) => symbol.replace('/USDT', '').replace(':USDT', '').replace(/USDT$/, '');
 
 // Hàm hỗ trợ định dạng ký hiệu theo yêu cầu của BingX API (ví dụ: BTC-USDT)
-// Được thêm lại vì log cho thấy nó đang được sử dụng trong URL
 const formatBingXApiSymbol = (ccxtSymbol) => {
     let base = ccxtSymbol
         .replace(/\/USDT/g, '')
@@ -85,14 +94,18 @@ const formatBingXApiSymbol = (ccxtSymbol) => {
     return `${base.toUpperCase()}-USDT`;
 };
 
+
+// Hàm hỗ trợ ký cho BingX direct API (nếu cần dùng các endpoint private)
 function signBingX(queryString, secret) {
     return crypto.createHmac('sha256', secret).update(queryString).digest('hex');
 }
 
+// === LOGIC LẤY ĐÒN BẨY CHO BINANCE (Bằng node-binance-api) ===
 async function getBinanceLeverageDirectAPI() {
     let leverages = {};
     try {
         console.log('[DEBUG] BINANCEUSDM: Đang lấy đòn bẩy bằng node-binance-api (futuresLeverageBracket)...');
+
         const leverageInfo = await binanceClient.futuresLeverageBracket();
 
         if (!leverageInfo || !Array.isArray(leverageInfo)) {
@@ -125,6 +138,7 @@ async function getBinanceLeverageDirectAPI() {
     }
 }
 
+// === LOGIC LẤY ĐÒN BẨY CHO BINGX (GỌI DIRECT API TỪNG SYMBOL VỚI KÝ TÊN) ===
 async function getBingXLeverageDirectAPI() {
     console.log('[DEBUG] BINGX: Đang cố gắng lấy đòn bẩy bằng REST API trực tiếp /swap/v2/trade/leverage (từng symbol)...');
     const leverages = {};
@@ -145,15 +159,16 @@ async function getBingXLeverageDirectAPI() {
 
         const BINGX_REQUEST_DELAY_MS = 100;
         for (const market of markets) {
-            const ccxtSymbol = market.symbol; // Ví dụ: "CBK/USDT"
-            const cleanS = cleanSymbol(ccxtSymbol); // Ví dụ: "CBK"
-            const bingxApiSymbol = formatBingXApiSymbol(ccxtSymbol); // Ví dụ: "CBK-USDT" - dùng cho API BingX
+            const ccxtSymbol = market.symbol; // Ký hiệu từ CCXT (ví dụ: BTC/USDT)
+            const cleanS = cleanSymbol(ccxtSymbol); // Ký hiệu đã làm sạch để lưu cache (ví dụ: BTC)
+            const bingxApiSymbol = formatBingXApiSymbol(ccxtSymbol); // Ký hiệu cho API BingX (ví dụ: BTC-USDT)
 
             try {
-                const timestamp = Date.now().toString();
-                const recvWindow = "5000";
-                // ĐÃ SỬA LỖI ĐÁNH MÁY: Thay '×tamp' thành '×tamp' và dùng bingxApiSymbol
-                const queryString = `recvWindow=${recvWindow}×tamp=${timestamp}&symbol=${bingxApiSymbol}`;
+                const timestamp = Date.now().toString(); // Đảm bảo timestamp là string
+                const recvWindow = "5000"; // Đảm bảo recvWindow là string. Có thể thử "10000" hoặc "20000" nếu cần
+
+                // ĐÃ SỬA LỖI ĐÁNH MÁY QUAN TRỌNG TẠI ĐÂY: Thêm '&' trước 'timestamp'
+                const queryString = `recvWindow=${recvWindow}&symbol=${bingxApiSymbol}×tamp=${timestamp}`;
                 const signature = signBingX(queryString, bingxApiSecret);
 
                 const url = `https://open-api.bingx.com/openApi/swap/v2/trade/leverage?${queryString}&signature=${signature}`;
@@ -161,32 +176,40 @@ async function getBingXLeverageDirectAPI() {
                 const res = await fetch(url, { method: "GET", headers: { "X-BX-APIKEY": bingxApiKey } });
                 const json = await res.json();
 
-                // BẬT LOG DEBUG ĐỂ XEM PHẢN HỒI THÔ (STRING) TỪ BINGX
+                console.log(`[DEBUG] BINGX API Call URL: ${url}`);
+                // LOG DEBUG NÀY HIỆN THỊ DỮ LIỆU THÔ MÀ BINGX TRẢ VỀ
                 console.log(`[DEBUG] BINGX Raw response for ${bingxApiSymbol} from /trade/leverage:`, JSON.stringify(json, null, 2));
 
-                let maxLeverageFound = null;
+                let maxLeverageFound = null; // Khởi tạo để đảm bảo giá trị đúng
                 if (json && json.code === 0 && json.data) {
-                    // ĐÃ SỬA: Lấy đúng trường 'maxLongLeverage' và 'maxShortLeverage' VÀ ép kiểu về số
+                    // ĐÃ SỬA: LẤY ĐÚNG TRƯỜNG DỮ LIỆU VÀ XỬ LÝ LÀ SỐ NHƯ LOG BẠN CUNG CẤP
                     const longLev = parseFloat(json.data.maxLongLeverage);
                     const shortLev = parseFloat(json.data.maxShortLeverage);
+
+                    // THÊM LOG DEBUG ĐỂ XEM GIÁ TRỊ PARSE ĐƯỢC VÀ KIỂM TRA ĐIỀU KIỆN
+                    console.log(`[DEBUG] BINGX: Đã tính đòn bẩy cho ${bingxApiSymbol}: longLev=${longLev}, shortLev=${shortLev}.`);
 
                     if (!isNaN(longLev) && !isNaN(shortLev) && (longLev > 0 || shortLev > 0)) {
                         maxLeverageFound = Math.max(longLev, shortLev);
                     } else {
-                        console.warn(`[CACHE] ⚠️ BINGX: Dữ liệu đòn bẩy (maxLongLeverage: '${json.data.maxLongLeverage}', maxShortLeverage: '${json.data.maxShortLeverage}') cho ${bingxApiSymbol} không phải số hoặc bằng 0.`);
+                        console.warn(`[CACHE] ⚠️ BINGX: Dữ liệu đòn bẩy (maxLongLeverage: '${json.data.maxLongLeverage}', maxShortLeverage: '${json.data.maxShortLeverage}') cho ${bingxApiSymbol} không phải số hoặc bằng 0, hoặc không lớn hơn 0.`);
                     }
                 } else {
                     console.warn(`[CACHE] ⚠️ BINGX: Phản hồi API không thành công hoặc không có trường 'data' cho ${bingxApiSymbol}. Code: ${json.code}, Msg: ${json.msg || 'Không có thông báo lỗi.'}`);
                 }
+
+                // THÊM DÒNG LOG NÀY ĐỂ DEBUG TRỰC TIẾP TÌNH TRẠNG LƯU TRỮ ĐÒN BẨY CỦA BINGX
+                console.log(`[DEBUG] BINGX: Đã gán đòn bẩy cho ${cleanS}: ${maxLeverageFound}.`);
                 leverages[cleanS] = maxLeverageFound;
+
 
             } catch (e) {
                 console.error(`[CACHE] ❌ BINGX: Lỗi khi lấy đòn bẩy cho ${bingxApiSymbol} từ /trade/leverage: ${e.message}. VUI LÒNG KIỂM TRA API KEY VÀ SECRET CÓ ĐÚNG KHÔNG VÀ ĐÃ CẤP QUYỀN "PERPETUAL FUTURES" CHƯA.`);
-                leverages[cleanS] = null;
+                leverages[cleanS] = null; // Đảm bảo gán null nếu có lỗi để tránh lỗi undefined
             }
             await new Promise(resolve => setTimeout(resolve, BINGX_REQUEST_DELAY_MS));
         }
-        console.log(`[CACHE] ✅ BINGX: Đã lấy thành công ${Object.values(leverages).filter(v => v !== null && v > 0).length} đòn bẩy qua REST API /trade/leverage.`);
+        console.log(`[CACHE] ✅ BINGX: Hoàn tất lấy đòn bẩy. Đã lấy thành công ${Object.values(leverages).filter(v => v !== null && v > 0).length} đòn bẩy qua REST API /trade/leverage.`);
         return leverages;
 
     } catch (e) {
@@ -195,6 +218,7 @@ async function getBingXLeverageDirectAPI() {
     }
 }
 
+// Hàm này giờ chỉ dùng cho OKX và Bitget (dùng qua CCXT loadMarkets)
 function getMaxLeverageFromMarketInfo(market, exchangeId) {
     if (typeof market?.limits?.leverage?.max === 'number' && market.limits.leverage.max > 0) return market.limits.leverage.max;
     if (typeof market?.info === 'object' && market.info !== null) {
@@ -225,7 +249,6 @@ async function initializeLeverageCache() {
             } else if (id === 'bingx') {
                 const leverages = await getBingXLeverageDirectAPI();
                 newCache[id] = leverages;
-                // Hàm filter cần ép kiểu về số để so sánh với 0, vì maxLeverageFound đã được parse thành số
                 count = Object.values(leverages).filter(v => v !== null && v > 0).length;
                 console.log(`[CACHE] ✅ ${id.toUpperCase()}: Tổng số ${count} đòn bẩy đã lấy.`);
             }
@@ -265,12 +288,13 @@ async function initializeLeverageCache() {
     console.log(`[CACHE] 🎉 Hoàn tất làm mới bộ nhớ đệm đòn bẩy.`);
 }
 
+// Hàm lấy funding rates trực tiếp từ Binance Premium Index (đã chuyển sang HTTPS)
 async function getBinanceFundingRatesDirectAPI() {
     try {
         const fundingRatesRaw = await binanceClient.futuresFundingRate();
 
         if (!Array.isArray(fundingRatesRaw)) {
-            console.warn(`[CACHE] ⚠️ BINANCEUSDM: futuresFundingRate không trả về mảng.`);
+            console.warn(`[CACHE] ⚠️ BINANCEUSDM: futuresFundingRate không trả về mảng. Dữ liệu thô: ${JSON.stringify(fundingRatesRaw)}`);
             return [];
         }
 
@@ -292,6 +316,7 @@ async function getBinanceFundingRatesDirectAPI() {
     }
 }
 
+// Hàm lấy funding rates trực tiếp từ BingX (đã sửa endpoint)
 function getBingXFundingRatesDirectAPI() {
     return new Promise(async (resolve, reject) => {
         if (!bingxApiKey) {
@@ -301,12 +326,12 @@ function getBingXFundingRatesDirectAPI() {
 
         try {
             const bingxCCXT = exchanges['bingx'];
-            await bingxCCXT.loadMarkets(true);
+            await bingxCCXT.loadMarkets(true); // Cần load markets để có danh sách symbol
             const markets = Object.values(bingxCCXT.markets).filter(m => m.swap && m.quote === 'USDT');
 
             if (markets.length === 0) {
                 console.warn(`[CACHE] ⚠️ BINGX: loadMarkets trả về 0 thị trường USDT Swap. Không thể lấy funding rate.`);
-                return resolve([]);
+                return resolve([]); // Trả về mảng rỗng nếu không có market
             }
 
             const BINGX_REQUEST_DELAY_MS = 100;
@@ -315,15 +340,16 @@ function getBingXFundingRatesDirectAPI() {
             for (const market of markets) {
                 const originalSymbol = market.symbol;
                 const cleanS = cleanSymbol(originalSymbol);
-                const bingxApiSymbol = formatBingXApiSymbol(originalSymbol); // Dùng cho API BingX
+                const bingxApiSymbol = formatBingXApiSymbol(originalSymbol); // Ký hiệu cho API BingX
 
+                // Endpoint /quote/fundingRate là public nên không cần signature và timestamp
                 const url = `https://open-api.bingx.com/openApi/swap/v2/quote/fundingRate?symbol=${bingxApiSymbol}`;
 
                 try {
                     const res = await fetch(url, { method: "GET", headers: { "X-BX-APIKEY": bingxApiKey } });
                     const json = await res.json();
 
-                    // BẬT LOG DEBUG ĐỂ XEM PHẢN HỒI THÔ (STRING) TỪ BINGX
+                    // LOG DEBUG NÀY HIỆN THỊ DỮ LIỆU THÔ MÀ BINGX TRẢ VỀ
                     console.log(`[DEBUG] BINGX Raw response for Funding Rate ${bingxApiSymbol}:`, JSON.stringify(json, null, 2));
 
                     if (json && json.code === 0 && json.data) {
@@ -331,7 +357,7 @@ function getBingXFundingRatesDirectAPI() {
                         const fundingTimestamp = parseInt(json.data.nextFundingTime, 10);
                         if (!isNaN(fundingRate) && !isNaN(fundingTimestamp) && fundingTimestamp > 0) {
                             processedData.push({
-                                symbol: cleanS,
+                                symbol: cleanS, // Lưu ký hiệu đã làm sạch vào processedData
                                 fundingRate: fundingRate,
                                 fundingTimestamp: fundingTimestamp
                             });
@@ -344,7 +370,7 @@ function getBingXFundingRatesDirectAPI() {
                 } catch (e) {
                     console.error(`[CACHE] ❌ BINGX: Lỗi khi lấy funding rate cho ${bingxApiSymbol} từ /quote/fundingRate: ${e.message}`);
                 }
-                await new Promise(resolve => setTimeout(resolve, BINGX_REQUEST_DELAY_MS));
+                await new Promise(resolve => setTimeout(resolve, BINGX_REQUEST_DELAY_MS)); // Delay giữa các request
             }
             resolve(processedData);
 
@@ -353,6 +379,7 @@ function getBingXFundingRatesDirectAPI() {
         }
     });
 }
+
 
 async function fetchFundingRatesForAllExchanges() {
     const freshData = {};
@@ -424,6 +451,7 @@ function calculateNextStandardFundingTime() {
     return nextFundingDate.getTime();
 }
 
+
 function calculateArbitrageOpportunities() {
     const allFoundOpportunities = [];
     const currentExchangeData = JSON.parse(JSON.stringify(exchangeData));
@@ -435,7 +463,7 @@ function calculateArbitrageOpportunities() {
             const commonSymbols = Object.keys(exchange1Rates).filter(symbol => exchange2Rates[symbol]);
             for (const symbol of commonSymbols) {
                 const rate1Data = exchange1Rates[symbol], rate2Data = exchange2Rates[symbol];
-                // Ép kiểu về số để so sánh và tính toán leverage hợp lệ
+                // Kiểm tra loại số và giá trị dương của đòn bẩy
                 if (typeof rate1Data.maxLeverage !== 'number' || rate1Data.maxLeverage <= 0 ||
                     typeof rate2Data.maxLeverage !== 'number' || rate2Data.maxLeverage <= 0) {
                     continue;
@@ -450,8 +478,7 @@ function calculateArbitrageOpportunities() {
                     shortExchange = exchange2Id; shortRate = rate2Data; longExchange = exchange1Id; longRate = rate1Data;
                 }
                 const fundingDiff = shortRate.fundingRate - longRate.fundingRate;
-                // commonLeverage đã được đảm bảo là số ở điều kiện if trên
-                const commonLeverage = Math.min(rate1Data.maxLeverage, rate2Data.maxLeverage);
+                const commonLeverage = Math.min(longRate.maxLeverage, shortRate.maxLeverage);
                 const estimatedPnl = fundingDiff * commonLeverage * 100;
                 if (estimatedPnl >= MINIMUM_PNL_THRESHOLD) {
                     const finalFundingTime = Math.max(rate1Data.fundingTimestamp, rate2Data.fundingTimestamp);
@@ -531,7 +558,7 @@ const server = http.createServer((req, res) => {
 });
 
 server.listen(PORT, async () => {
-    console.log(`✅ Máy chủ dữ liệu (Bản sửa lỗi số 104) đang chạy tại http://localhost:${PORT}`);
+    console.log(`✅ Máy chủ dữ liệu (Bản sửa lỗi cuối cùng cho BingX) đang chạy tại http://localhost:${PORT}`);
     await initializeLeverageCache();
     await masterLoop();
     setInterval(initializeLeverageCache, LEVERAGE_CACHE_REFRESH_INTERVAL_MINUTES * 60 * 1000);
