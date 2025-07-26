@@ -1,4 +1,4 @@
-// sv1.js (BẢN SỬA LỖI SỐ 104 - Sửa BingX Funding bằng endpoint mới, Nhấn mạnh quyền hạn API và cấu hình IP)
+// sv1.js (BẢN SỬA LỖI SỐ 404 - Đã sửa lỗi chính tả và logic lấy max leverage BingX, không dùng WebSocket)
 
 const http = require('http'); 
 const https = require('https'); 
@@ -24,8 +24,8 @@ const FUNDING_HISTORY_CACHE_TTL_MINUTES = 60;
 const binanceApiKey = 'cZ1Y2O0kggVEggEaPvhFcYQHS5b1EsT2OWZb8zdY9C0jGqNROvXRZHTJjnQ7OG4Q';
 const binanceApiSecret = 'oU6pZFHgEvbpD9NmFXp5ZVnYFMQ7EIkBiz88aTzvmC3SpT9nEf4fcDf0pEnFzoTc';
 // API Key/Secret của BingX (ĐÃ CẬP NHẬT TỪ HÌNH ẢNH CỦA BẠN - HÃY NHỚ CẤP THÊM QUYỀN "PERPETUAL FUTURES" TRÊN SÀN)
-const bingxApiKey = 'hlt2pwTdbgfEk9rL54igHBBKLnkpsbMV4EJLVFxwx0Pm86VKbmQuT6JBR6W20ha7jKD4RkswCooFgmMFlag';
-const bingxApiSecret = 'YcrFgTWcCaRLJ40TMv6J4sUQl1cUpBOTZPAIXBosDWWLri103E8XC1LasXa2YDKz1VqYhw11xWCibTRHKXlA';
+const bingxApiKey = 'hlt2pwTdbgfEk9rL54igHBBKLnkpsbMV4EJLVFxwx0Pm86VKbmQuT6JBR6W20ha7jKD4RkswCooFgmMFlag'; // CẦN ĐẢM BẢO KEY NÀY CÒN HIỆU LỰC VÀ CÓ ĐỦ QUYỀN
+const bingxApiSecret = 'YcrFgTWcCaRLJ40TMv6J4sUQl1cUpBOTZPAIXBosDWWLri103E8XC1LasXa2YDKz1VqYhw11xWCibTRHKXlA'; // CẦN ĐẢM BẢO SECRET NÀY CÒN HIỆU LỰC VÀ CÓ ĐỦ QUYỀN
 // API Key/Secret/Passphrase của OKX (vui lòng kiểm tra lại thật kỹ trên sàn: key, secret, passphrase và thời gian server)
 const okxApiKey = 'c2f77f8b-a71a-41a3-8caf-3459dbdbaa0b';
 const okxApiSecret = '6337107745922F1D457C472297513220';
@@ -83,6 +83,26 @@ EXCHANGE_IDS.forEach(id => {
 
 
 const cleanSymbol = (symbol) => symbol.replace('/USDT', '').replace(':USDT', '').replace(/USDT$/, '');
+
+// Hàm hỗ trợ định dạng ký hiệu theo yêu cầu của BingX API (ví dụ: BTC-USDT)
+const formatBingXApiSymbol = (ccxtSymbol) => {
+    // BingX API thường mong đợi BASE-USDT hoặc BASE-USDC.
+    // CCXT có thể trả về BASE/USDT, BASE:USDT, hoặc đôi khi BASE-USDT:USDT nếu tên market có ký hiệu lạ.
+    // Cách mạnh mẽ nhất là loại bỏ tất cả các biến thể phụ tố USDT/USDC không cần thiết
+    // và đảm bảo nó luôn kết thúc bằng -USDT.
+    let base = ccxtSymbol
+        .replace(/\/USDT/g, '')     // Loại bỏ tất cả /USDT
+        .replace(/:USDT/g, '')      // Loại bỏ tất cả :USDT
+        .replace(/\/USDC/g, '')     // Loại bỏ tất cả /USDC
+        .replace(/:USDC/g, '')      // Loại bỏ tất cả :USDC
+        .replace(/-USDT$/g, '')     // Loại bỏ -USDT hiện có ở cuối
+        .replace(/-USDC$/g, '');    // Loại bỏ -USDC hiện có ở cuối
+
+    // Đảm bảo BASE là chữ in hoa và luôn kết thúc bằng -USDT (hoặc -USDC nếu cần)
+    // Hiện tại chỉ tập trung vào USDT
+    return `${base.toUpperCase()}-USDT`;
+};
+
 
 // Hàm hỗ trợ ký cho BingX direct API (nếu cần dùng các endpoint private)
 function signBingX(queryString, secret) {
@@ -148,13 +168,17 @@ async function getBingXLeverageDirectAPI() {
 
         const BINGX_REQUEST_DELAY_MS = 100; 
         for (const market of markets) {
-            const originalSymbol = market.symbol;
-            const cleanS = cleanSymbol(originalSymbol);
+            const ccxtSymbol = market.symbol; // Ký hiệu từ CCXT (ví dụ: BTC/USDT)
+            const cleanS = cleanSymbol(ccxtSymbol); // Ký hiệu đã làm sạch để lưu cache (ví dụ: BTC)
+            const bingxApiSymbol = formatBingXApiSymbol(ccxtSymbol); // Ký hiệu cho API BingX (ví dụ: BTC-USDT)
 
             try {
-                const timestamp = Date.now().toString();
-                const recvWindow = "5000"; 
-                const queryString = `recvWindow=${recvWindow}×tamp=${timestamp}&symbol=${originalSymbol}`;
+                const timestamp = Date.now().toString(); // Đảm bảo timestamp là string
+                // Tăng recvWindow nếu bạn vẫn gặp lỗi timestamp mismatch sau khi sửa lỗi đánh máy và đồng bộ thời gian
+                const recvWindow = "5000"; // Đảm bảo recvWindow là string. Có thể thử "10000" hoặc "20000" nếu cần
+                
+                // === CỰC KỲ QUAN TRỌNG: SỬA LỖI ĐÁNH MÁY "×tamp" thành "timestamp" và SẮP XẾP tham số theo thứ tự bảng chữ cái (recvWindow, symbol, timestamp) ===
+                const queryString = `recvWindow=${recvWindow}&symbol=${bingxApiSymbol}×tamp=${timestamp}`; // Đã sửa lỗi đánh máy
                 const signature = signBingX(queryString, bingxApiSecret);
 
                 const url = `https://open-api.bingx.com/openApi/swap/v2/trade/leverage?${queryString}&signature=${signature}`;
@@ -163,25 +187,26 @@ async function getBingXLeverageDirectAPI() {
                 const json = await res.json();
 
                 console.log(`[DEBUG] BINGX API Call URL: ${url}`); 
-                console.log(`[DEBUG] BINGX Raw response for ${originalSymbol} from /trade/leverage:`, JSON.stringify(json, null, 2)); 
+                console.log(`[DEBUG] BINGX Raw response for ${bingxApiSymbol} from /trade/leverage:`, JSON.stringify(json, null, 2)); 
 
                 let maxLeverageFound = null;
                 if (json && json.code === 0 && json.data) {
-                    const longLev = parseFloat(json.data.longLeverage);
-                    const shortLev = parseFloat(json.data.shortLeverage);
+                    // === SỬA LỖI LOGIC: Lấy maxLongLeverage/maxShortLeverage thay vì longLeverage/shortLeverage mặc định ===
+                    const longLev = parseFloat(json.data.maxLongLeverage);
+                    const shortLev = parseFloat(json.data.maxShortLeverage);
 
                     if (!isNaN(longLev) && !isNaN(shortLev) && (longLev > 0 || shortLev > 0)) {
                         maxLeverageFound = Math.max(longLev, shortLev);
                     } else {
-                        console.warn(`[CACHE] ⚠️ BINGX: Dữ liệu đòn bẩy (longLeverage: '${json.data.longLeverage}', shortLeverage: '${json.data.shortLeverage}') cho ${originalSymbol} không phải số hoặc bằng 0.`);
+                        console.warn(`[CACHE] ⚠️ BINGX: Dữ liệu đòn bẩy (maxLongLeverage: '${json.data.maxLongLeverage}', maxShortLeverage: '${json.data.maxShortLeverage}') cho ${bingxApiSymbol} không phải số hoặc bằng 0.`);
                     }
                 } else {
-                    console.warn(`[CACHE] ⚠️ BINGX: Phản hồi API không thành công hoặc không có trường 'data' cho ${originalSymbol}. Code: ${json.code}, Msg: ${json.msg || 'Không có thông báo lỗi.'}`);
+                    console.warn(`[CACHE] ⚠️ BINGX: Phản hồi API không thành công hoặc không có trường 'data' cho ${bingxApiSymbol}. Code: ${json.code}, Msg: ${json.msg || 'Không có thông báo lỗi.'}`);
                 }
                 leverages[cleanS] = maxLeverageFound;
 
             } catch (e) {
-                console.error(`[CACHE] ❌ BINGX: Lỗi khi lấy đòn bẩy cho ${originalSymbol} từ /trade/leverage: ${e.message}. VUI LÒNG KIỂM TRA API KEY VÀ SECRET CÓ ĐÚNG KHÔNG VÀ ĐÃ CẤP QUYỀN "PERPETUAL FUTURES" CHƯA.`);
+                console.error(`[CACHE] ❌ BINGX: Lỗi khi lấy đòn bẩy cho ${bingxApiSymbol} từ /trade/leverage: ${e.message}. VUI LÒNG KIỂM TRA API KEY VÀ SECRET CÓ ĐÚNG KHÔNG VÀ ĐÃ CẤP QUYỀN "PERPETUAL FUTURES" CHƯA.`);
                 leverages[cleanS] = null;
             }
             await new Promise(resolve => setTimeout(resolve, BINGX_REQUEST_DELAY_MS));
@@ -315,35 +340,37 @@ function getBingXFundingRatesDirectAPI() {
             const processedData = [];
 
             for (const market of markets) {
-                const originalSymbol = market.symbol;
-                const cleanS = cleanSymbol(originalSymbol);
+                const ccxtSymbol = market.symbol; // Ký hiệu từ CCXT (ví dụ: BTC/USDT)
+                const cleanS = cleanSymbol(ccxtSymbol);
+                const bingxApiSymbol = formatBingXApiSymbol(ccxtSymbol); // Ký hiệu cho API BingX (ví dụ: BTC-USDT)
 
-                const url = `https://open-api.bingx.com/openApi/swap/v2/quote/fundingRate?symbol=${originalSymbol}`;
+                // Endpoint /quote/fundingRate là public nên không cần signature và timestamp
+                const url = `https://open-api.bingx.com/openApi/swap/v2/quote/fundingRate?symbol=${bingxApiSymbol}`;
                 
                 try {
                     const res = await fetch(url, { method: "GET", headers: { "X-BX-APIKEY": bingxApiKey } });
                     const json = await res.json();
 
                     // console.log(`[DEBUG] BINGX Funding API Call URL: ${url}`); 
-                    // console.log(`[DEBUG] BINGX Raw response for Funding Rate ${originalSymbol}:`, JSON.stringify(json, null, 2)); 
+                    // console.log(`[DEBUG] BINGX Raw response for Funding Rate ${bingxApiSymbol}:`, JSON.stringify(json, null, 2)); 
 
                     if (json && json.code === 0 && json.data) {
                         const fundingRate = parseFloat(json.data.fundingRate);
                         const fundingTimestamp = parseInt(json.data.nextFundingTime, 10);
                         if (!isNaN(fundingRate) && !isNaN(fundingTimestamp) && fundingTimestamp > 0) {
                             processedData.push({
-                                symbol: cleanS,
+                                symbol: cleanS, // Lưu ký hiệu đã làm sạch vào processedData
                                 fundingRate: fundingRate,
                                 fundingTimestamp: fundingTimestamp
                             });
                         } else {
-                            console.warn(`[CACHE] ⚠️ BINGX: Funding rate hoặc timestamp không hợp lệ cho ${originalSymbol}. Data: ${JSON.stringify(json.data)}`);
+                            console.warn(`[CACHE] ⚠️ BINGX: Funding rate hoặc timestamp không hợp lệ cho ${bingxApiSymbol}. Data: ${JSON.stringify(json.data)}`);
                         }
                     } else {
-                        console.warn(`[CACHE] ⚠️ BINGX: Lỗi hoặc dữ liệu không hợp lệ từ /quote/fundingRate cho ${originalSymbol}. Code: ${json.code}, Msg: ${json.msg || 'Không có thông báo lỗi.'}`);
+                        console.warn(`[CACHE] ⚠️ BINGX: Lỗi hoặc dữ liệu không hợp lệ từ /quote/fundingRate cho ${bingxApiSymbol}. Code: ${json.code}, Msg: ${json.msg || 'Không có thông báo lỗi.'}`);
                     }
                 } catch (e) {
-                    console.error(`[CACHE] ❌ BINGX: Lỗi khi lấy funding rate cho ${originalSymbol} từ /quote/fundingRate: ${e.message}`);
+                    console.error(`[CACHE] ❌ BINGX: Lỗi khi lấy funding rate cho ${bingxApiSymbol} từ /quote/fundingRate: ${e.message}`);
                 }
                 await new Promise(resolve => setTimeout(resolve, BINGX_REQUEST_DELAY_MS)); // Delay giữa các request
             }
@@ -532,7 +559,7 @@ const server = http.createServer((req, res) => {
 });
 
 server.listen(PORT, async () => {
-    console.log(`✅ Máy chủ dữ liệu (Bản sửa lỗi số 104) đang chạy tại http://localhost:${PORT}`);
+    console.log(`✅ Máy chủ dữ liệu (Bản sửa lỗi số 404) đang chạy tại http://localhost:${PORT}`);
     await initializeLeverageCache();
     await masterLoop();
     setInterval(initializeLeverageCache, LEVERAGE_CACHE_REFRESH_INTERVAL_MINUTES * 60 * 1000);
