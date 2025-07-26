@@ -1,4 +1,4 @@
-// sv1.js (BẢN SỬA LỖI SỐ 401)
+// sv1.js (BẢN SỬA LỖI SỐ 402)
 
 const http = require('http'); 
 const fs = require('fs');
@@ -147,6 +147,11 @@ async function getBingXLeverageDirectAPI() {
                 
                 const res = await fetch(url, { method: "GET", headers: { "X-BX-APIKEY": bingxApiKey } });
                 const json = await res.json();
+
+                // === DEBUGGING LOGS FOR BINGX LEVERAGE ===
+                // console.log(`[DEBUG] BINGX API Call URL (Leverage): ${url}`); 
+                // console.log(`[DEBUG] BINGX Raw response for ${bingxApiSymbol} from /trade/leverage:`, JSON.stringify(json, null, 2)); 
+                // ===========================================
 
                 let maxLeverageFound = null;
                 if (json && json.code === 0 && json.data) {
@@ -462,11 +467,19 @@ function calculateArbitrageOpportunities() {
 }
 
 async function masterLoop() {
+    console.log(`[LOOP] Bắt đầu vòng lặp cập nhật lúc ${new Date().toLocaleTimeString()}...`);
     const freshFundingData = await fetchFundingRatesForAllExchanges();
     exchangeData = freshFundingData; 
     
+    // Console log the collected data for debugging
+    console.log(`[DEBUG] Dữ liệu Binance (funding, leverage): ${Object.values(exchangeData.binanceusdm?.rates || {}).length} cặp.`);
+    console.log(`[DEBUG] Dữ liệu BingX (funding, leverage): ${Object.values(exchangeData.bingx?.rates || {}).length} cặp.`);
+    console.log(`[DEBUG] Dữ liệu OKX (funding, leverage): ${Object.values(exchangeData.okx?.rates || {}).length} cặp.`);
+    console.log(`[DEBUG] Dữ liệu Bitget (funding, leverage): ${Object.values(exchangeData.bitget?.rates || {}).length} cặp.`);
+
     calculateArbitrageOpportunities();
     lastFullUpdateTimestamp = new Date().toISOString();
+    console.log(`[LOOP]   => Tìm thấy ${arbitrageOpportunities.length} cơ hội. Vòng lặp hoàn tất.`);
     scheduleNextLoop();
 }
 
@@ -505,7 +518,7 @@ const server = http.createServer((req, res) => {
 });
 
 server.listen(PORT, () => {
-    console.log(`✅ Máy chủ dữ liệu (Bản sửa lỗi số 401) đang chạy tại http://localhost:${PORT}`);
+    console.log(`✅ Máy chủ dữ liệu (Bản sửa lỗi số 402) đang chạy tại http://localhost:${PORT}`);
     
     (async () => {
         await startWebSocketStreams(); 
