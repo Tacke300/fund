@@ -178,7 +178,7 @@ async function getBingXLeverageDirectAPI() {
                 const recvWindow = "5000"; // Đảm bảo recvWindow là string. Có thể thử "10000" hoặc "20000" nếu cần
                 
                 // === CỰC KỲ QUAN TRỌNG: SỬA LỖI ĐÁNH MÁY "×tamp" thành "timestamp" và SẮP XẾP tham số theo thứ tự bảng chữ cái (recvWindow, symbol, timestamp) ===
-                const queryString = `recvWindow=${recvWindow}&symbol=${bingxApiSymbol}×tamp=${timestamp}`;
+                const queryString = `recvWindow=${recvWindow}&symbol=${bingxApiSymbol}xtamp=${timestamp}`;
                 const signature = signBingX(queryString, bingxApiSecret);
 
                 const url = `https://open-api.bingx.com/openApi/swap/v2/trade/leverage?${queryString}&signature=${signature}`;
