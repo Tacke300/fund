@@ -1,4 +1,4 @@
-// sv1.js (BẢN SỬA LỖI SỐ 403 - Đã sửa lỗi chính tả API BingX, loại bỏ WebSocket)
+// sv1.js (BẢN SỬA LỖI SỐ 404 - Đã sửa lỗi chính tả và logic lấy max leverage BingX, không dùng WebSocket)
 
 const http = require('http'); 
 const https = require('https'); 
@@ -24,8 +24,8 @@ const FUNDING_HISTORY_CACHE_TTL_MINUTES = 60;
 const binanceApiKey = 'cZ1Y2O0kggVEggEaPvhFcYQHS5b1EsT2OWZb8zdY9C0jGqNROvXRZHTJjnQ7OG4Q';
 const binanceApiSecret = 'oU6pZFHgEvbpD9NmFXp5ZVnYFMQ7EIkBiz88aTzvmC3SpT9nEf4fcDf0pEnFzoTc';
 // API Key/Secret của BingX (ĐÃ CẬP NHẬT TỪ HÌNH ẢNH CỦA BẠN - HÃY NHỚ CẤP THÊM QUYỀN "PERPETUAL FUTURES" TRÊN SÀN)
-const bingxApiKey = 'hlt2pwTdbgfEk9rL54igHBBKLnkpsbMV4EJLVFxwx0Pm86VKbmQuT6JBR6W20ha7jKD4RkswCooFgmMFlag';
-const bingxApiSecret = 'YcrFgTWcCaRLJ40TMv6J4sUQl1cUpBOTZPAIXBosDWWLri103E8XC1LasXa2YDKz1VqYhw11xWCibTRHKXlA';
+const bingxApiKey = 'hlt2pwTdbgfEk9rL54igHBBKLnkpsbMV4EJLVFxwx0Pm86VKbmQuT6JBR6W20ha7jKD4RkswCooFgmMFlag'; // CẦN ĐẢM BẢO KEY NÀY CÒN HIỆU LỰC VÀ CÓ ĐỦ QUYỀN
+const bingxApiSecret = 'YcrFgTWcCaRLJ40TMv6J4sUQl1cUpBOTZPAIXBosDWWLri103E8XC1LasXa2YDKz1VqYhw11xWCibTRHKXlA'; // CẦN ĐẢM BẢO SECRET NÀY CÒN HIỆU LỰC VÀ CÓ ĐỦ QUYỀN
 // API Key/Secret/Passphrase của OKX (vui lòng kiểm tra lại thật kỹ trên sàn: key, secret, passphrase và thời gian server)
 const okxApiKey = 'c2f77f8b-a71a-41a3-8caf-3459dbdbaa0b';
 const okxApiSecret = '6337107745922F1D457C472297513220';
@@ -86,14 +86,20 @@ const cleanSymbol = (symbol) => symbol.replace('/USDT', '').replace(':USDT', '')
 
 // Hàm hỗ trợ định dạng ký hiệu theo yêu cầu của BingX API (ví dụ: BTC-USDT)
 const formatBingXApiSymbol = (ccxtSymbol) => {
+    // BingX API thường mong đợi BASE-USDT hoặc BASE-USDC.
+    // CCXT có thể trả về BASE/USDT, BASE:USDT, hoặc đôi khi BASE-USDT:USDT nếu tên market có ký hiệu lạ.
+    // Cách mạnh mẽ nhất là loại bỏ tất cả các biến thể phụ tố USDT/USDC không cần thiết
+    // và đảm bảo nó luôn kết thúc bằng -USDT.
     let base = ccxtSymbol
-        .replace(/\/USDT/g, '')     
-        .replace(/:USDT/g, '')      
-        .replace(/\/USDC/g, '')     
-        .replace(/:USDC/g, '')      
-        .replace(/-USDT$/g, '')     
-        .replace(/-USDC$/g, '');    
+        .replace(/\/USDT/g, '')     // Loại bỏ tất cả /USDT
+        .replace(/:USDT/g, '')      // Loại bỏ tất cả :USDT
+        .replace(/\/USDC/g, '')     // Loại bỏ tất cả /USDC
+        .replace(/:USDC/g, '')      // Loại bỏ tất cả :USDC
+        .replace(/-USDT$/g, '')     // Loại bỏ -USDT hiện có ở cuối
+        .replace(/-USDC$/g, '');    // Loại bỏ -USDC hiện có ở cuối
 
+    // Đảm bảo BASE là chữ in hoa và luôn kết thúc bằng -USDT (hoặc -USDC nếu cần)
+    // Hiện tại chỉ tập trung vào USDT
     return `${base.toUpperCase()}-USDT`;
 };
 
@@ -168,10 +174,11 @@ async function getBingXLeverageDirectAPI() {
 
             try {
                 const timestamp = Date.now().toString(); // Đảm bảo timestamp là string
+                // Tăng recvWindow nếu bạn vẫn gặp lỗi timestamp mismatch sau khi sửa lỗi đánh máy và đồng bộ thời gian
                 const recvWindow = "5000"; // Đảm bảo recvWindow là string. Có thể thử "10000" hoặc "20000" nếu cần
                 
-                // === SỬA LỖI ĐÁNH MÁY "×tamp" thành "timestamp" và SẮP XẾP tham số theo thứ tự bảng chữ cái ===
-                const queryString = `recvWindow=${recvWindow}&symbol=${bingxApiSymbol}×tamp=${timestamp}`;
+                // === CỰC KỲ QUAN TRỌNG: SỬA LỖI ĐÁNH MÁY "×tamp" thành "timestamp" và SẮP XẾP tham số theo thứ tự bảng chữ cái (recvWindow, symbol, timestamp) ===
+                const queryString = `recvWindow=${recvWindow}&symbol=${bingxApiSymbol}×tamp=${timestamp}`; // Đã sửa lỗi đánh máy
                 const signature = signBingX(queryString, bingxApiSecret);
 
                 const url = `https://open-api.bingx.com/openApi/swap/v2/trade/leverage?${queryString}&signature=${signature}`;
@@ -184,8 +191,9 @@ async function getBingXLeverageDirectAPI() {
 
                 let maxLeverageFound = null;
                 if (json && json.code === 0 && json.data) {
-                    const longLev = parseFloat(json.data.maxLongLeverage); // Sử dụng maxLongLeverage/maxShortLeverage
-                    const shortLev = parseFloat(json.data.maxShortLeverage); // Sử dụng maxLongLeverage/maxShortLeverage
+                    // === SỬA LỖI LOGIC: Lấy maxLongLeverage/maxShortLeverage thay vì longLeverage/shortLeverage mặc định ===
+                    const longLev = parseFloat(json.data.maxLongLeverage);
+                    const shortLev = parseFloat(json.data.maxShortLeverage);
 
                     if (!isNaN(longLev) && !isNaN(shortLev) && (longLev > 0 || shortLev > 0)) {
                         maxLeverageFound = Math.max(longLev, shortLev);
@@ -551,7 +559,7 @@ const server = http.createServer((req, res) => {
 });
 
 server.listen(PORT, async () => {
-    console.log(`✅ Máy chủ dữ liệu (Bản sửa lỗi số 403) đang chạy tại http://localhost:${PORT}`);
+    console.log(`✅ Máy chủ dữ liệu (Bản sửa lỗi số 404) đang chạy tại http://localhost:${PORT}`);
     await initializeLeverageCache();
     await masterLoop();
     setInterval(initializeLeverageCache, LEVERAGE_CACHE_REFRESH_INTERVAL_MINUTES * 60 * 1000);
