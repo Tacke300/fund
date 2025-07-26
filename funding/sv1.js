@@ -22,8 +22,8 @@ const FUNDING_HISTORY_CACHE_TTL_MINUTES = 60;
 const binanceApiKey = 'cZ1Y2O0kggVEggEaPvhFcYQHS5b1EsT2OWZb8zdY9C0jGqNROvXRZHTJjnQ7OG4Q';
 const binanceApiSecret = 'oU6pZFHgEvbpD9NmFXp5ZVnYFMQ7EIkBiz88aTzvmC3SpT9nEf4fcDf0pEnFzoTc';
 // API Key/Secret của BingX (ĐÃ CẬP NHẬT CHÍNH XÁC TỪ HÌNH ẢNH BẠN CUNG CẤP - HÃY NHỚ CẤP THÊM QUYỀN "PERPETUAL FUTURES" TRÊN SÀN)
-const bingxApiKey = 'p29V4JTKBelypG9Acd1t4dp6GqHwyTjYcOBq9AC501HV0Of4EN4m6Uv5F2Clr7dNaNTRvaQM0CqcPXFEFuA';
-const bingxApiSecret = 'iTKmpmySRWQSawYBU3D5uFRZHh4UBdRYLOCPWrWbdAYa0go6Nohye1n7PS4XOcomxQXYnUs1YRei5RvLpg';
+const bingxApiKey = 'p29V4JTKBelypG9Acd1t4dp6GqHwyTjYcOBq9AC501HV0Of4EN4m6Uv5F2Clr7dNaNTRvaQM0CqcPXFEFuA'; // ĐÃ CẬP NHẬT TỪ ẢNH CỦA BẠN
+const bingxApiSecret = 'iTKmpmySRWQSawYBU3D5uFRZHh4UBdRYLOCPWrWbdAYa0go6Nohye1n7PS4XOcomxQXYnUs1YRei5RvLpg'; // ĐÃ CẬP NHẬT TỪ ẢNH CỦA BẠN
 // API Key/Secret/Passphrase của OKX (vui lòng kiểm tra lại thật kỹ trên sàn: key, secret, passphrase và thời gian server)
 const okxApiKey = 'c2f77f8b-a71a-41a3-8caf-3459dbdbaa0b';
 const okxApiSecret = '6337107745922F1D457C472297513220';
@@ -174,6 +174,16 @@ async function getBingXLeverageDirectAPI() {
                 const url = `https://open-api.bingx.com/openApi/swap/v2/trade/leverage?${queryString}&signature=${signature}`;
 
                 const res = await fetch(url, { method: "GET", headers: { "X-BX-APIKEY": bingxApiKey } });
+
+                // Thêm log chi tiết nếu res không OK
+                if (!res.ok) {
+                    const errorText = await res.text();
+                    console.error(`[CACHE] ❌ BINGX: Phản hồi API không OK cho ${bingxApiSymbol} (Leverage). Status: ${res.status}, Status Text: ${res.statusText}. Phản hồi thô: ${errorText}`);
+                    leverages[cleanS] = null;
+                    await new Promise(resolve => setTimeout(resolve, BINGX_REQUEST_DELAY_MS));
+                    continue; // Bỏ qua symbol này và tiếp tục vòng lặp
+                }
+
                 const json = await res.json();
 
                 console.log(`[DEBUG] BINGX API Call URL: ${url}`);
@@ -182,7 +192,7 @@ async function getBingXLeverageDirectAPI() {
 
                 let maxLeverageFound = null; // Khởi tạo để đảm bảo giá trị đúng
                 if (json && json.code === 0 && json.data) {
-                    // ĐÃ SỬA: LẤY ĐÚNG TRƯỜNG DỮ LIỆU VÀ XỬ LÝ LÀ SỐ NHƯ LOG BẠN CUNG CẤP
+                    // ĐÃ SỬA: LẤY ĐÚNG TRƯỜNG DỮ LIỆU VÀ XỬ LÝ LÀ SỐ (NUMBER) NHƯ LOG BẠN CUNG CẤP
                     const longLev = parseFloat(json.data.maxLongLeverage);
                     const shortLev = parseFloat(json.data.maxShortLeverage);
 
@@ -204,7 +214,7 @@ async function getBingXLeverageDirectAPI() {
 
 
             } catch (e) {
-                console.error(`[CACHE] ❌ BINGX: Lỗi khi lấy đòn bẩy cho ${bingxApiSymbol} từ /trade/leverage: ${e.message}. VUI LÒNG KIỂM TRA API KEY VÀ SECRET CÓ ĐÚNG KHÔNG VÀ ĐÃ CẤP QUYỀN "PERPETUAL FUTURES" CHƯA.`);
+                console.error(`[CACHE] ❌ BINGX: Lỗi khi lấy đòn bẩy cho ${bingxApiSymbol} từ /trade/leverage: ${e.message}. Stack: ${e.stack}. VUI LÒNG KIỂM TRA API KEY VÀ SECRET CÓ ĐÚNG KHÔNG VÀ ĐÃ CẤP QUYỀN "PERPETUAL FUTURES" CHƯA.`);
                 leverages[cleanS] = null; // Đảm bảo gán null nếu có lỗi để tránh lỗi undefined
             }
             await new Promise(resolve => setTimeout(resolve, BINGX_REQUEST_DELAY_MS));
@@ -213,7 +223,7 @@ async function getBingXLeverageDirectAPI() {
         return leverages;
 
     } catch (e) {
-        console.error(`[CACHE] ❌ Lỗi tổng quát khi lấy đòn bẩy cho BINGX: ${e.message}. VUI LÒNG KIỂM TRA API KEY BINGX.`);
+        console.error(`[CACHE] ❌ Lỗi tổng quát khi lấy đòn bẩy cho BINGX: ${e.message}. Stack: ${e.stack}. VUI LÒNG KIỂM TRA API KEY BINGX.`);
         return {};
     }
 }
@@ -249,7 +259,7 @@ async function initializeLeverageCache() {
             } else if (id === 'bingx') {
                 const leverages = await getBingXLeverageDirectAPI();
                 newCache[id] = leverages;
-                count = Object.values(leverages).filter(v => v !== null && v > 0).length;
+                count = Object.values(leverages).filter(v => v !== null && v > 0).length; // Bây giờ v đã là số
                 console.log(`[CACHE] ✅ ${id.toUpperCase()}: Tổng số ${count} đòn bẩy đã lấy.`);
             }
             else if (exchange.has['fetchLeverageTiers']) {
@@ -280,7 +290,7 @@ async function initializeLeverageCache() {
                 console.log(`[CACHE] ✅ ${id.toUpperCase()}: Lấy thành công ${count} đòn bẩy bằng 'loadMarkets' (dự phòng).`);
             }
         } catch (e) {
-            console.error(`[CACHE] ❌ Lỗi nghiêm trọng khi lấy đòn bẩy cho ${id.toUpperCase()}: ${e.message}. VUI LÒNG KIỂM TRA API KEY, SECRET VÀ PASSPHRASE CỦA OKX/BITGET, VÀ ĐỒNG BỘ THỜI GIAN SERVER.`);
+            console.error(`[CACHE] ❌ Lỗi nghiêm trọng khi lấy đòn bẩy cho ${id.toUpperCase()}: ${e.message}. Stack: ${e.stack}. VUI LÒNG KIỂM TRA API KEY, SECRET VÀ PASSPHRASE CỦA OKX/BITGET, VÀ ĐỒNG BỘ THỜI GIAN SERVER.`);
             newCache[id] = {};
         }
     }));
@@ -311,7 +321,7 @@ async function getBinanceFundingRatesDirectAPI() {
         return filteredData;
 
     } catch (e) {
-        console.error(`[CACHE] ❌ BINANCEUSDM: Lỗi khi lấy funding rates bằng node-binance-api: ${e.message}. VUI LÒNG KIỂM TRA IP WHITELIST CỦA BẠN TRÊN BINANCE.`);
+        console.error(`[CACHE] ❌ BINANCEUSDM: Lỗi khi lấy funding rates bằng node-binance-api: ${e.message}. Stack: ${e.stack}. VUI LÒNG KIỂM TRA IP WHITELIST CỦA BẠN TRÊN BINANCE.`);
         return [];
     }
 }
@@ -347,6 +357,15 @@ function getBingXFundingRatesDirectAPI() {
 
                 try {
                     const res = await fetch(url, { method: "GET", headers: { "X-BX-APIKEY": bingxApiKey } });
+
+                    // Thêm log chi tiết nếu res không OK
+                    if (!res.ok) {
+                        const errorText = await res.text();
+                        console.error(`[CACHE] ❌ BINGX: Phản hồi API không OK cho ${bingxApiSymbol} (Funding Rate). Status: ${res.status}, Status Text: ${res.statusText}. Phản hồi thô: ${errorText}`);
+                        await new Promise(resolve => setTimeout(resolve, BINGX_REQUEST_DELAY_MS));
+                        continue; // Bỏ qua symbol này và tiếp tục vòng lặp
+                    }
+
                     const json = await res.json();
 
                     // LOG DEBUG NÀY HIỆN THỊ DỮ LIỆU THÔ MÀ BINGX TRẢ VỀ
@@ -368,14 +387,14 @@ function getBingXFundingRatesDirectAPI() {
                         console.warn(`[CACHE] ⚠️ BINGX: Lỗi hoặc dữ liệu không hợp lệ từ /quote/fundingRate cho ${bingxApiSymbol}. Code: ${json.code}, Msg: ${json.msg || 'Không có thông báo lỗi.'}`);
                     }
                 } catch (e) {
-                    console.error(`[CACHE] ❌ BINGX: Lỗi khi lấy funding rate cho ${bingxApiSymbol} từ /quote/fundingRate: ${e.message}`);
+                    console.error(`[CACHE] ❌ BINGX: Lỗi khi lấy funding rate cho ${bingxApiSymbol} từ /quote/fundingRate: ${e.message}. Stack: ${e.stack}`);
                 }
                 await new Promise(resolve => setTimeout(resolve, BINGX_REQUEST_DELAY_MS)); // Delay giữa các request
             }
             resolve(processedData);
 
         } catch (e) {
-            reject(new Error(`Lỗi tổng quát khi lấy API BingX Funding Rate: ${e.message}. VUI LÒNG KIỂM TRA API KEY BINGX.`));
+            reject(new Error(`Lỗi tổng quát khi lấy API BingX Funding Rate: ${e.message}. Stack: ${e.stack}. VUI LÒNG KIỂM TRA API KEY BINGX.`));
         }
     });
 }
@@ -429,7 +448,7 @@ async function fetchFundingRatesForAllExchanges() {
             return { id, status: 'success', rates: processedRates };
         } catch (e) {
             if (!(e instanceof ccxt.RequestTimeout || e instanceof ccxt.NetworkError)) {
-                console.error(`- Lỗi nghiêm trọng khi lấy funding từ ${id.toUpperCase()}: ${e.message}`);
+                console.error(`- Lỗi nghiêm trọng khi lấy funding từ ${id.toUpperCase()}: ${e.message}. Stack: ${e.stack}`);
             }
             return { id, status: 'error', rates: {} };
         }
