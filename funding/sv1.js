@@ -174,11 +174,18 @@ async function getBingXLeverageDirectAPI() {
 
             try {
                 const timestamp = Date.now().toString(); // Đảm bảo timestamp là string
-                // Tăng recvWindow nếu bạn vẫn gặp lỗi timestamp mismatch sau khi sửa lỗi đánh máy và đồng bộ thời gian
-                const recvWindow = "5000"; // Đảm bảo recvWindow là string. Có thể thử "10000" hoặc "20000" nếu cần
+                const recvWindow = "5000"; // Có thể thử "10000" hoặc "20000" nếu cần cho đồng bộ thời gian
                 
-                // === CỰC KỲ QUAN TRỌNG: SỬA LỖI ĐÁNH MÁY "×tamp" thành "timestamp" và SẮP XẾP tham số theo thứ tự bảng chữ cái (recvWindow, symbol, timestamp) ===
-                const queryString = `recvWindow=${recvWindow}&symbol=${bingxApiSymbol}xtamp=${timestamp}`;
+                // === CÁCH MỚI VÀ MẠNH MẼ HƠN ĐỂ TẠO CHUỖI TRUY VẤN ĐƯỢC KÝ ===
+                const params = {
+                    recvWindow: recvWindow,
+                    symbol: bingxApiSymbol,
+                    timestamp: timestamp
+                };
+                // Sắp xếp các tham số theo thứ tự bảng chữ cái và tạo chuỗi
+                const queryString = Object.keys(params).sort().map(key => `${key}=${params[key]}`).join('&');
+                // === KẾT THÚC CÁCH TẠO CHUỖI TRUY VẤN MỚI ===
+
                 const signature = signBingX(queryString, bingxApiSecret);
 
                 const url = `https://open-api.bingx.com/openApi/swap/v2/trade/leverage?${queryString}&signature=${signature}`;
@@ -186,7 +193,7 @@ async function getBingXLeverageDirectAPI() {
                 const res = await fetch(url, { method: "GET", headers: { "X-BX-APIKEY": bingxApiKey } });
                 const json = await res.json();
 
-                console.log(`[DEBUG] BINGX API Call URL: ${url}`); 
+                console.log(`[DEBUG] BINGX API Call URL (Leverage): ${url}`); // In URL để kiểm tra
                 console.log(`[DEBUG] BINGX Raw response for ${bingxApiSymbol} from /trade/leverage:`, JSON.stringify(json, null, 2)); 
 
                 let maxLeverageFound = null;
@@ -561,5 +568,5 @@ server.listen(PORT, async () => {
     console.log(`✅ Máy chủ dữ liệu (Bản sửa lỗi số 104) đang chạy tại http://localhost:${PORT}`);
     await initializeLeverageCache();
     await masterLoop();
-    setInterval(initializeLeverageCache, LEVERAGE_CACHE_REFRESH_INTERVAL_MINUTES * 60 * 1000);
+    setInterval(initializeLeverizeCache, LEVERAGE_CACHE_REFRESH_INTERVAL_MINUTES * 60 * 1000);
 });
