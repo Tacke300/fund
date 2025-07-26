@@ -170,7 +170,7 @@ async function getBingXLeverageDirectAPI() {
                 const recvWindow = "5000"; // Đảm bảo recvWindow là string. Có thể thử "10000" hoặc "20000" nếu cần
                 
                 // === ĐÃ SỬA LỖI ĐÁNH MÁY QUAN TRỌNG TẠI ĐÂY: Thêm '&' trước 'timestamp' ===
-                const queryString = `recvWindow=${recvWindow}&symbol=${bingxApiSymbol}xtamp=${timestamp}`; 
+                const queryString = `recvWindow=${recvWindow}&symbol=${bingxApiSymbol}×tamp=${timestamp}`; 
                 const signature = signBingX(queryString, bingxApiSecret);
 
                 const url = `https://open-api.bingx.com/openApi/swap/v2/trade/leverage?${queryString}&signature=${signature}`;
@@ -186,10 +186,13 @@ async function getBingXLeverageDirectAPI() {
                     const longLev = parseFloat(json.data.maxLongLeverage);
                     const shortLev = parseFloat(json.data.maxShortLeverage);
 
+                    // THÊM LOG DEBUG ĐỂ XEM GIÁ TRỊ PARSE ĐƯỢC VÀ KIỂM TRA ĐIỀU KIỆN
+                    console.log(`[DEBUG] BINGX: Đã tính đòn bẩy cho ${bingxApiSymbol}: longLev=${longLev}, shortLev=${shortLev}.`);
+
                     if (!isNaN(longLev) && !isNaN(shortLev) && (longLev > 0 || shortLev > 0)) {
                         maxLeverageFound = Math.max(longLev, shortLev);
                     } else {
-                        console.warn(`[CACHE] ⚠️ BINGX: Dữ liệu đòn bẩy (maxLongLeverage: '${json.data.maxLongLeverage}', maxShortLeverage: '${json.data.maxShortLeverage}') cho ${bingxApiSymbol} không phải số hoặc bằng 0.`);
+                        console.warn(`[CACHE] ⚠️ BINGX: Dữ liệu đòn bẩy (maxLongLeverage: '${json.data.maxLongLeverage}', maxShortLeverage: '${json.data.maxShortLeverage}') cho ${bingxApiSymbol} không phải số hoặc bằng 0, hoặc không lớn hơn 0.`);
                     }
                 } else {
                     console.warn(`[CACHE] ⚠️ BINGX: Phản hồi API không thành công hoặc không có trường 'data' cho ${bingxApiSymbol}. Code: ${json.code}, Msg: ${json.msg || 'Không có thông báo lỗi.'}`);
