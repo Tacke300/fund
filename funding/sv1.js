@@ -86,20 +86,21 @@ const cleanSymbol = (symbol) => symbol.replace('/USDT', '').replace(':USDT', '')
 
 // Hàm hỗ trợ định dạng ký hiệu theo yêu cầu của BingX API (ví dụ: BTC-USDT)
 const formatBingXApiSymbol = (ccxtSymbol) => {
-    // ccxtSymbol thường là "BTC/USDT" hoặc "BTC:USDT". BingX API cần "BTC-USDT".
-    // Đảm bảo chỉ xử lý nếu có "/USDT" hoặc ":USDT" để không làm hỏng các ký hiệu khác
-    if (ccxtSymbol.includes('/USDT')) {
-        return ccxtSymbol.replace('/USDT', '-USDT');
-    }
-    if (ccxtSymbol.includes(':USDT')) {
-        return ccxtSymbol.replace(':USDT', '-USDT');
-    }
-    // Đối với các trường hợp như "ENJ/USDT:USDT" (như bạn thấy trong log), cần phức tạp hơn
-    // Tuy nhiên, logic cleanSymbol đã cố gắng làm sạch. Với trường hợp này,
-    // BingX mong muốn cuối cùng là ENJ-USDT.
-    // Cách an toàn hơn là luôn thêm -USDT nếu không có và đảm bảo chỉ có một -USDT
-    let base = ccxtSymbol.replace('/USDT', '').replace(':USDT', '').replace(/USDT$/, '');
-    return `${base}-USDT`;
+    // BingX API thường mong đợi BASE-USDT hoặc BASE-USDC.
+    // CCXT có thể trả về BASE/USDT, BASE:USDT, hoặc đôi khi BASE-USDT:USDT nếu tên market có ký hiệu lạ.
+    // Cách mạnh mẽ nhất là loại bỏ tất cả các biến thể phụ tố USDT/USDC không cần thiết
+    // và đảm bảo nó luôn kết thúc bằng -USDT.
+    let base = ccxtSymbol
+        .replace(/\/USDT/g, '')     // Loại bỏ tất cả /USDT
+        .replace(/:USDT/g, '')      // Loại bỏ tất cả :USDT
+        .replace(/\/USDC/g, '')     // Loại bỏ tất cả /USDC
+        .replace(/:USDC/g, '')      // Loại bỏ tất cả :USDC
+        .replace(/-USDT$/g, '')     // Loại bỏ -USDT hiện có ở cuối
+        .replace(/-USDC$/g, '');    // Loại bỏ -USDC hiện có ở cuối
+
+    // Đảm bảo BASE là chữ in hoa và luôn kết thúc bằng -USDT (hoặc -USDC nếu cần)
+    // Hiện tại chỉ tập trung vào USDT
+    return `${base.toUpperCase()}-USDT`;
 };
 
 
@@ -172,14 +173,15 @@ async function getBingXLeverageDirectAPI() {
             const bingxApiSymbol = formatBingXApiSymbol(ccxtSymbol); // Ký hiệu cho API BingX (ví dụ: BTC-USDT)
 
             try {
-                const timestamp = Date.now().toString();
+                const timestamp = Date.now().toString(); // Đảm bảo timestamp là string
                 // Tăng recvWindow nếu bạn vẫn gặp lỗi timestamp mismatch sau khi sửa lỗi đánh máy và đồng bộ thời gian
-                const recvWindow = "5000"; // Có thể thử "10000" hoặc "20000" nếu cần
-                // ĐÃ SỬA LỖI: Thay '×tamp' bằng 'timestamp' ở đây!
-                const queryString = `recvWindow=${recvWindow}×tamp=${timestamp}&symbol=${bingxApiSymbol}`;
+                const recvWindow = "5000"; // Đảm bảo recvWindow là string. Có thể thử "10000" hoặc "20000" nếu cần
+                
+                // === LỖI ĐÃ SỬA: Sắp xếp các tham số theo thứ tự bảng chữ cái cho chuỗi ký ===
+                // Thứ tự: recvWindow, symbol, timestamp
+                const queryString = `recvWindow=${recvWindow}&symbol=${bingxApiSymbol}×tamp=${timestamp}`;
                 const signature = signBingX(queryString, bingxApiSecret);
 
-                // SỬA: Dùng bingxApiSymbol cho URL
                 const url = `https://open-api.bingx.com/openApi/swap/v2/trade/leverage?${queryString}&signature=${signature}`;
                 
                 const res = await fetch(url, { method: "GET", headers: { "X-BX-APIKEY": bingxApiKey } });
@@ -472,7 +474,7 @@ function calculateArbitrageOpportunities() {
 
                 let longExchange, shortExchange, longRate, shortRate;
                 if (rate1Data.fundingRate > rate2Data.fundingRate) {
-                    shortExchange = exchange1Id; shortRate = rate1Data; longExchange = exchange2Id; longRate = rate2Data;
+                    shortExchange = exchange1Id; shortRate = rate1Data; longExchange = exchange2Id; longRate = rate1Data;
                 } else {
                     shortExchange = exchange2Id; shortRate = rate2Data; longExchange = exchange1Id; longRate = rate1Data;
                 }
