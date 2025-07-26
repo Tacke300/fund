@@ -174,7 +174,7 @@ async function getBingXLeverageDirectAPI() {
             try {
                 const timestamp = Date.now().toString();
                 const recvWindow = "5000"; 
-                // SỬA: Dùng bingxApiSymbol cho yêu cầu API BingX
+                // SỬA LỖI: Thay '×tamp' bằng 'timestamp'
                 const queryString = `recvWindow=${recvWindow}×tamp=${timestamp}&symbol=${bingxApiSymbol}`;
                 const signature = signBingX(queryString, bingxApiSecret);
 
@@ -341,7 +341,8 @@ function getBingXFundingRatesDirectAPI() {
                 const cleanS = cleanSymbol(ccxtSymbol); // Ký hiệu đã làm sạch để lưu cache (ví dụ: BTC)
                 const bingxApiSymbol = formatBingXApiSymbol(ccxtSymbol); // Ký hiệu cho API BingX (ví dụ: BTC-USDT)
 
-                // SỬA: Dùng bingxApiSymbol cho URL
+                // SỬA: Dùng bingxApiSymbol cho URL.
+                // Endpoint /quote/fundingRate là public nên không cần signature và timestamp
                 const url = `https://open-api.bingx.com/openApi/swap/v2/quote/fundingRate?symbol=${bingxApiSymbol}`;
                 
                 try {
