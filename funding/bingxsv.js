@@ -9,8 +9,8 @@ function hmacSha256(secret, message) {
   return crypto.createHmac('sha256', secret).update(message).digest('hex');
 }
 
-// Hàm gọi API GET không auth
 function apiGet(path) {
+  console.log(`Calling public GET ${path}`);
   const options = {
     hostname: 'open-api.bingx.com',
     port: 443,
@@ -27,26 +27,28 @@ function apiGet(path) {
       let data = '';
       res.on('data', (chunk) => data += chunk);
       res.on('end', () => {
+        console.log(`Response from ${path}:`, data);
         try {
           resolve(JSON.parse(data));
         } catch (e) {
-          reject(new Error(`JSON parse error: ${e.message}\nData: ${data}`));
+          reject(new Error(`JSON parse error at ${path}: ${e.message}\nData: ${data}`));
         }
       });
     });
 
-    req.on('error', reject);
+    req.on('error', (err) => {
+      console.error(`Request error at ${path}:`, err);
+      reject(err);
+    });
     req.end();
   });
 }
 
-// Hàm gọi API GET có auth (cần timestamp + sign)
 function apiGetSigned(path, params = {}) {
   return new Promise((resolve, reject) => {
     const timestamp = Date.now();
     params.timestamp = timestamp;
 
-    // Tạo query string
     const query = Object.keys(params)
       .sort()
       .map(k => `${k}=${params[k]}`)
@@ -55,6 +57,8 @@ function apiGetSigned(path, params = {}) {
     const sign = hmacSha256(API_SECRET, query);
 
     const fullPath = `${path}?${query}&sign=${sign}`;
+
+    console.log(`Calling signed GET ${fullPath}`);
 
     const options = {
       hostname: 'open-api.bingx.com',
@@ -71,62 +75,69 @@ function apiGetSigned(path, params = {}) {
       let data = '';
       res.on('data', chunk => data += chunk);
       res.on('end', () => {
+        console.log(`Response from ${fullPath}:`, data);
         try {
           resolve(JSON.parse(data));
         } catch (e) {
-          reject(new Error(`JSON parse error: ${e.message}\nData: ${data}`));
+          reject(new Error(`JSON parse error at ${fullPath}: ${e.message}\nData: ${data}`));
         }
       });
     });
 
-    req.on('error', reject);
+    req.on('error', (err) => {
+      console.error(`Request error at ${fullPath}:`, err);
+      reject(err);
+    });
     req.end();
   });
 }
 
 async function fetchData() {
-  // Bước 1: Lấy danh sách contract (symbol + funding + nextFundingTime)
-  const contractsData = await apiGet('/openApi/swap/v2/quote/contracts');
+  try {
+    console.log('Start fetching contracts list...');
+    const contractsData = await apiGet('/openApi/swap/v2/quote/contracts');
 
-  if (!contractsData?.data?.contracts) {
-    throw new Error('Không lấy được danh sách contracts');
-  }
+    if (!contractsData?.data?.contracts) {
+      throw new Error('No contracts data found');
+    }
+    const contracts = contractsData.data.contracts;
+    console.log(`Got ${contracts.length} contracts`);
 
-  const contracts = contractsData.data.contracts;
+    const results = [];
 
-  // Bước 2: Với từng symbol gọi lấy max leverage
-  // BingX yêu cầu format symbol dạng: BTC-USDT:USDT
-  // Nên cần tạo symbol có đuôi ":USDT"
-  // Lưu ý: Có thể ko phải tất cả symbol đều có max lev trả về, handle null
+    for (const contract of contracts) {
+      const symbol = contract.symbol;
+      const bingxSymbol = symbol.includes(':') ? symbol : symbol + ':USDT';
 
-  const results = [];
-
-  for (const contract of contracts) {
-    const symbol = contract.symbol; // VD: BTC-USDT
-
-    const bingxSymbol = symbol.includes(':') ? symbol : symbol + ':USDT';
-
-    let maxLev = null;
-    try {
-      const levData = await apiGetSigned('/openApi/swap/v2/trade/leverage', { symbol: bingxSymbol });
-      if (levData?.data?.maxLeverage) {
-        maxLev = levData.data.maxLeverage;
+      let maxLev = null;
+      try {
+        const levData = await apiGetSigned('/openApi/swap/v2/trade/leverage', { symbol: bingxSymbol });
+        if (levData?.data?.maxLeverage) {
+          maxLev = levData.data.maxLeverage;
+        } else {
+          console.warn(`No maxLeverage in response for ${bingxSymbol}`, levData);
+        }
+      } catch (e) {
+        console.error(`Error fetching max leverage for ${bingxSymbol}:`, e.message);
       }
-    } catch (e) {
-      // nếu lỗi API hoặc không có dữ liệu maxLeverage thì để null
-      maxLev = null;
+
+      results.push({
+        symbol: symbol,
+        nextFundingTime: contract.nextFundingTime,
+        fundingRate: contract.fundingRate,
+        maxLeverage: maxLev,
+      });
     }
 
-    results.push({
-      symbol: symbol,
-      nextFundingTime: contract.nextFundingTime,
-      fundingRate: contract.fundingRate,
-      maxLeverage: maxLev,
-    });
-  }
+    return results;
 
-  return results;
+  } catch (e) {
+    console.error('Error in fetchData:', e.message);
+    throw e;
+  }
 }
+
+const http = require('http');
 
 const server = http.createServer(async (req, res) => {
   if (req.method === 'GET' && req.url === '/funding') {
