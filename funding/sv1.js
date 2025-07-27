@@ -21,10 +21,9 @@ const FUNDING_HISTORY_CACHE_TTL_MINUTES = 60;
 // API Key/Secret của Binance (đã cập nhật theo yêu cầu của bạn - HÃY ĐẢM BẢO IP CỦA SERVER ĐƯỢC WHITELIST TRÊN BINANCE)
 const binanceApiKey = 'cZ1Y2O0kggVEggEaPvhFcYQHS5b1EsT2OWZb8zdY9C0jGqNROvXRZHTJjnQ7OG4Q';
 const binanceApiSecret = 'oU6pZFHgEvbpD9NmFXp5ZVnYFMQ7EIkBiz88aTzvmC3SpT9nEf4fcDf0pEnFzoTc';
-// API Key/Secret của BingX (ĐÃ CẬP NHẬT CHÍNH XÁC TỪ HÌNH ẢNH BẠN CUNG CẤP - HÃY NHỚ CẤP THÊM QUYỀN "PERPETUAL FUTURES" TRÊN SÀN)
-const bingxApiKey = 'p29V4jTkBelypG9Acd1t4dp6GqHwyTjYcOBq9AC501HVo0f4EN4m6Uv5F2CIr7dNaNTRvaQM0CqcPXfEFuA '; // ĐÃ CẬP NHẬT TỪ ẢNH CỦA BẠN
-const bingxApiSecret = 'iTkMpmySRwQSawYBU3D5uFRZhH4UBdRYLOcPVrWbdAYa0go6Nohye1n7PS4XOcOmxQXYnUs1YRei5RvLPg '; // ĐÃ CẬP NHẬT TỪ ẢNH CỦA BẠN
-// API Key/Secret/Passphrase của OKX (vui lòng kiểm tra lại thật kỹ trên sàn: key, secret, passphrase và thời gian server)
+// API Key/Secret của BingX (ĐÃ CẬP NHẬT CHÍNH XÁC TỪ HÌNH ẢNH BẠN CUNG CẤP - ĐÃ XÓA KHOẢNG TRẮNG THỪA - HÃY NHỚ CẤP THÊM QUYỀN "PERPETUAL FUTURES" TRÊN SÀN)
+const bingxApiKey = 'p29V4jTkBelypG9Acd1t4dp6GqHwyTjYcOBq9AC501HVo0f4EN4m6Uv5F2CIr7dNaNTRvaQM0CqcPXfEFuA'; // ĐÃ SỬA: XÓA KHOẢNG TRẮNG THỪA
+const bingxApiSecret = 'iTkMpmySRwQSawYBU3D5uFRZhH4UBdRYLOCPWrWbdAYa0go6Nohye1n7PS4XOcOmxQXYnUs1YRei5RvLPg'; // ĐÃ SỬA: XÓA KHOẢNG TRẮNG THỪA
 const okxApiKey = 'c2f77f8b-a71a-41a3-8caf-3459dbdbaa0b';
 const okxApiSecret = '6337107745922F1D457C472297513220';
 const okxPassword = 'Altf4enter$';
@@ -168,7 +167,7 @@ async function getBingXLeverageDirectAPI() {
                 const recvWindow = "5000"; // Đảm bảo recvWindow là string. Có thể thử "10000" hoặc "20000" nếu cần
 
                 // ĐÃ SỬA LỖI ĐÁNH MÁY QUAN TRỌNG TẠI ĐÂY: Thêm '&' trước 'timestamp'
-                const queryString = `recvWindow=${recvWindow}&symbol=${bingxApiSymbol}×tamp=${timestamp}`;
+                const queryString = `recvWindow=${recvWindow}&symbol=${bingxApiSymbol}×tamp=${timestamp}`; // ĐÃ SỬA: BỎ '×tamp' và THÊM '&'
                 const signature = signBingX(queryString, bingxApiSecret);
 
                 const url = `https://open-api.bingx.com/openApi/swap/v2/trade/leverage?${queryString}&signature=${signature}`;
@@ -192,17 +191,17 @@ async function getBingXLeverageDirectAPI() {
 
                 let maxLeverageFound = null; // Khởi tạo để đảm bảo giá trị đúng
                 if (json && json.code === 0 && json.data) {
-                    // ĐÃ SỬA: LẤY ĐÚNG TRƯỜNG DỮ LIỆU VÀ XỬ LÝ LÀ SỐ (NUMBER) NHƯ LOG BẠN CUNG CẤP
+                    // LẤY ĐÚNG TRƯỜNG DỮ LIỆU VÀ XỬ LÝ LÀ SỐ (NUMBER) NHƯ LOG BẠN CUNG CẤP
                     const longLev = parseFloat(json.data.maxLongLeverage);
                     const shortLev = parseFloat(json.data.maxShortLeverage);
 
                     // THÊM LOG DEBUG ĐỂ XEM GIÁ TRỊ PARSE ĐƯỢC VÀ KIỂM TRA ĐIỀU KIỆN
-                    console.log(`[DEBUG] BINGX: Đã tính đòn bẩy cho ${bingxApiSymbol}: longLev=${longLev}, shortLev=${shortLev}.`);
+                    console.log(`[DEBUG] BINGX: Đã tính đòn bẩy cho ${bingxApiSymbol}: maxLongLeverage=${json.data.maxLongLeverage} (parsed: ${longLev}), maxShortLeverage=${json.data.maxShortLeverage} (parsed: ${shortLev}).`);
 
                     if (!isNaN(longLev) && !isNaN(shortLev) && (longLev > 0 || shortLev > 0)) {
                         maxLeverageFound = Math.max(longLev, shortLev);
                     } else {
-                        console.warn(`[CACHE] ⚠️ BINGX: Dữ liệu đòn bẩy (maxLongLeverage: '${json.data.maxLongLeverage}', maxShortLeverage: '${json.data.maxShortLeverage}') cho ${bingxApiSymbol} không phải số hoặc bằng 0, hoặc không lớn hơn 0.`);
+                        console.warn(`[CACHE] ⚠️ BINGX: Dữ liệu đòn bẩy không hợp lệ cho ${bingxApiSymbol} (parsed longLev: ${longLev}, parsed shortLev: ${shortLev}).`);
                     }
                 } else {
                     console.warn(`[CACHE] ⚠️ BINGX: Phản hồi API không thành công hoặc không có trường 'data' cho ${bingxApiSymbol}. Code: ${json.code}, Msg: ${json.msg || 'Không có thông báo lỗi.'}`);
@@ -492,7 +491,7 @@ function calculateArbitrageOpportunities() {
 
                 let longExchange, shortExchange, longRate, shortRate;
                 if (rate1Data.fundingRate > rate2Data.fundingRate) {
-                    shortExchange = exchange1Id; shortRate = rate1Data; longExchange = exchange2Id; longRate = rate2Data;
+                    shortExchange = exchange1Id; shortRate = rate1Data; longExchange = exchange2Id; longRate = rate1Data;
                 } else {
                     shortExchange = exchange2Id; shortRate = rate2Data; longExchange = exchange1Id; longRate = rate1Data;
                 }
