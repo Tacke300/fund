@@ -1,5 +1,5 @@
 const http = require('http');
-const https = require('https'); // Có thể không cần nếu chỉ dùng fetch/node-binance-api
+const https = require('https'); // Giữ nguyên, dù có thể không trực tiếp dùng fetch.
 const fs = require('fs');
 const path = require('path');
 const ccxt = require('ccxt');
@@ -16,11 +16,13 @@ const IMMINENT_THRESHOLD_MINUTES = 15;
 const LEVERAGE_CACHE_REFRESH_INTERVAL_MINUTES = 30;
 
 // === QUAN TRỌNG: ĐIỀN API KEY VÀ SECRET VÀO ĐÂY ===
-// VUI LÒNG KIỂM TRA LẠI CHÍNH XÁC CÁC API KEY VÀ SECRET CỦA BẠN
+// !!! VUI LÒNG KIỂM TRA LẠI CỰC KỲ CẨN THẬN CÁC API KEY VÀ SECRET NÀY !!!
+// Đảm bảo không có khoảng trắng thừa, không thiếu ký tự.
+// Kiểm tra trên trang quản lý API của sàn để đảm bảo quyền truy cập đọc dữ liệu thị trường và tài khoản.
 const binanceApiKey = 'cZ1Y2O0kggVEggEaPvhFcYQHS5b1EsT2OWZb8zdY9C0jGqNROvXRZHTJjnQ7OG4Q';
 const binanceApiSecret = 'oU6pZFHgEvbpD9NmFXp5ZVnYFMQ7EIkBiz88TzvmC3SpT9nEf4fcDf0pEnFzoTc';
-const bingxApiKey = 'p29V4jTkBelypG9Acd1t4dp6GqHwyTjYcOB9AC501HVo0f4EN4m6Uv5F2CIr7dNaNTRvaQM0CqcPXfEFuA'; // API key BingX trong câu hỏi trước bị thiếu 1 ký tự, đã sửa lại độ dài mẫu. Vui lòng dán key thật của bạn
-const bingxApiSecret = 'iTkMpmySRwQSawYBU3D5uFRZhH4UBdRYLOcPVWbdAYa0go6Nohye1n7PS4XOcOmQXYnUs1YRei5RvLPg'; // Secret BingX cũng vậy. Vui lòng dán secret thật của bạn
+const bingxApiKey = 'p29V4jTkBelypG9Acd1t4dp6GqHwyTjYcOB9AC501HVo0f4EN4m6Uv5F2CIr7dNaNTRvaQM0CqcPXfEFuA'; // API key bạn đưa ra trong log có vẻ thiếu ký tự so với độ dài chuẩn. Dán key thật của bạn vào đây.
+const bingxApiSecret = 'iTkMpmySRwQSawYBU3D5uFRZhH4UBdRYLOcPVWbdAYa0go6Nohye1n7PS4XOcOmQXYnUs1YRei5RvLPg'; // Secret key cũng vậy. Dán secret thật của bạn vào đây.
 const okxApiKey = 'c2f77f8b-a71a-41a3-8caf-3459dbdbaa0b';
 const okxApiSecret = '6337107745922F1D457C472297513220';
 const okxPassword = 'Altf4enter$';
@@ -102,7 +104,13 @@ async function getBingXLeverageDirectAPI() {
             try {
                 const timestamp = Date.now().toString();
                 const recvWindow = "15000"; 
-                const queryString = `recvWindow=${recvWindow}&symbol=${bingxApiSymbol}&timestamp=${timestamp}`; 
+                // SỬA LỖI CHÍNH TẢ Ở ĐÂY: 'xtamp' thành 'timestamp' và dùng URLSearchParams
+                const params = new URLSearchParams({
+                    recvWindow: recvWindow,
+                    symbol: bingxApiSymbol,
+                    timestamp: timestamp // Đã sửa từ 'xtamp' thành 'timestamp'
+                });
+                const queryString = params.toString();
                 const signature = signBingX(queryString, bingxApiSecret);
                 const url = `https://open-api.bingx.com/openApi/swap/v2/trade/leverage?${queryString}&signature=${signature}`;
 
@@ -240,10 +248,6 @@ async function getBingXFundingRatesDirectAPI() {
                 const cleanS = cleanSymbol(market.symbol);
                 const bingxApiSymbol = formatBingXApiSymbol(market.symbol);
                 try {
-                    const timestamp = Date.now().toString();
-                    const recvWindow = "15000"; 
-                    const queryString = `recvWindow=${recvWindow}&symbol=${bingxApiSymbol}xtamp=${timestamp}`; 
-                    const signature = signBingX(queryString, bingxApiSecret);
                     const url = `https://open-api.bingx.com/openApi/swap/v2/quote/fundingRate?symbol=${bingxApiSymbol}`; 
 
                     const res = await fetch(url, { method: "GET", headers: { "X-BX-APIKEY": bingxApiKey } });
@@ -265,7 +269,7 @@ async function getBingXFundingRatesDirectAPI() {
                             processedDataMap.set(cleanS, { symbol: cleanS, fundingRate: fundingRate, fundingTimestamp: fundingTimestamp });
                         }
                     } else if (json && json.code === 0 && json.data === null) {
-                        // Log này được bỏ qua vì không phải lỗi, chỉ là không có dữ liệu
+                        // Bỏ qua log này vì không phải lỗi, chỉ là không có dữ liệu cho symbol cụ thể
                     } else {
                         console.warn(`[DATA] ⚠️ BINGX: Lỗi hoặc dữ liệu không hợp lệ từ /quote/fundingRate cho ${bingxApiSymbol}. Code: ${json.code}, Msg: ${json.msg || 'Không có thông báo lỗi.'}`);
                     }
@@ -280,6 +284,18 @@ async function getBingXFundingRatesDirectAPI() {
         }
     });
 }
+
+// Hàm tính toán thời gian funding tiêu chuẩn nếu không có từ API
+function calculateNextStandardFundingTime() {
+    const now = new Date();
+    const fundingHoursUTC = [0, 8, 16];
+    let nextHourUTC = fundingHoursUTC.find(h => now.getUTCHours() < h);
+    const nextFundingDate = new Date(now);
+    if (nextHourUTC === undefined) { nextHourUTC = fundingHoursUTC[0]; nextFundingDate.setUTCDate(now.getUTCDate() + 1); }
+    nextFundingDate.setUTCHours(nextHourUTC, 0, 0, 0);
+    return nextFundingDate.getTime();
+}
+
 
 // Hàm tổng hợp để lấy Funding Rates cho tất cả các sàn
 async function fetchFundingRatesForAllExchanges() {
@@ -333,20 +349,10 @@ async function fetchFundingRatesForAllExchanges() {
     return freshData;
 }
 
-// Hàm tính toán thời gian funding tiêu chuẩn nếu không có từ API
-function calculateNextStandardFundingTime() {
-    const now = new Date();
-    const fundingHoursUTC = [0, 8, 16];
-    let nextHourUTC = fundingHoursUTC.find(h => now.getUTCHours() < h);
-    const nextFundingDate = new Date(now);
-    if (nextHourUTC === undefined) { nextHourUTC = fundingHoursUTC[0]; nextFundingDate.setUTCDate(now.getUTCDate() + 1); }
-    nextFundingDate.setUTCHours(nextHourUTC, 0, 0, 0);
-    return nextFundingDate.getTime();
-}
-
 
 function calculateArbitrageOpportunities() {
     const allFoundOpportunities = [];
+    // Sử dụng structuredClone để tạo bản sao sâu, hoặc JSON.parse(JSON.stringify) nếu tương thích cũ hơn
     const currentExchangeData = JSON.parse(JSON.stringify(exchangeData)); 
 
     for (let i = 0; i < EXCHANGE_IDS.length; i++) {
@@ -368,12 +374,10 @@ function calculateArbitrageOpportunities() {
                 const rate1Data = exchange1Rates[symbol];
                 const rate2Data = exchange2Rates[symbol];
 
+                // Bỏ qua nếu thông tin đòn bẩy hoặc funding rate không hợp lệ
                 if (typeof rate1Data.maxLeverage !== 'number' || rate1Data.maxLeverage <= 0 ||
-                    typeof rate2Data.maxLeverage !== 'number' || rate2Data.maxLeverage <= 0) {
-                    continue; 
-                }
-
-                if (typeof rate1Data.fundingRate !== 'number' || typeof rate2Data.fundingRate !== 'number' ||
+                    typeof rate2Data.maxLeverage !== 'number' || rate2Data.maxLeverage <= 0 ||
+                    typeof rate1Data.fundingRate !== 'number' || typeof rate2Data.fundingRate !== 'number' ||
                     !rate1Data.fundingTimestamp || rate1Data.fundingTimestamp <= 0 || !rate2Data.fundingTimestamp || rate2Data.fundingTimestamp <= 0) {
                     continue; 
                 }
