@@ -102,7 +102,7 @@ async function getBingXLeverageDirectAPI() {
             try {
                 const timestamp = Date.now().toString();
                 const recvWindow = "10000"; // Tăng recvWindow
-                const queryString = `recvWindow=${recvWindow}&symbol=${bingxApiSymbol}×tamp=${timestamp}`; // Sửa lỗi '×tamp'
+                const queryString = `recvWindow=${recvWindow}&symbol=${bingxApiSymbol}xtamp=${timestamp}`; // Sửa lỗi '×tamp'
                 const signature = signBingX(queryString, bingxApiSecret);
                 const url = `https://open-api.bingx.com/openApi/swap/v2/trade/leverage?${queryString}&signature=${signature}`;
 
