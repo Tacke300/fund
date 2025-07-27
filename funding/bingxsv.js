@@ -25,9 +25,9 @@ function apiGet(path) {
   return new Promise((resolve, reject) => {
     const req = https.request(options, (res) => {
       let data = '';
-      res.on('data', (chunk) => data += chunk);
+      res.on('data', chunk => data += chunk);
       res.on('end', () => {
-        console.log(`Response from ${path}:`, data);
+        console.log(`Response from ${path}: ${data}`);
         try {
           resolve(JSON.parse(data));
         } catch (e) {
@@ -75,7 +75,7 @@ function apiGetSigned(path, params = {}) {
       let data = '';
       res.on('data', chunk => data += chunk);
       res.on('end', () => {
-        console.log(`Response from ${fullPath}:`, data);
+        console.log(`Response from ${fullPath}: ${data}`);
         try {
           resolve(JSON.parse(data));
         } catch (e) {
@@ -97,15 +97,15 @@ async function fetchData() {
     console.log('Start fetching contracts list...');
     const contractsData = await apiGet('/openApi/swap/v2/quote/contracts');
 
-    if (!contractsData?.data?.contracts) {
-      throw new Error('No contracts data found');
+    if (!contractsData?.data?.contracts || !Array.isArray(contractsData.data.contracts)) {
+      throw new Error('No contracts data found or invalid format');
     }
+
     const contracts = contractsData.data.contracts;
     console.log(`Got ${contracts.length} contracts`);
 
-    const results = [];
-
-    for (const contract of contracts) {
+    // Lấy max leverage song song cho nhanh
+    const leveragePromises = contracts.map(async (contract) => {
       const symbol = contract.symbol;
       const bingxSymbol = symbol.includes(':') ? symbol : symbol + ':USDT';
 
@@ -115,20 +115,21 @@ async function fetchData() {
         if (levData?.data?.maxLeverage) {
           maxLev = levData.data.maxLeverage;
         } else {
-          console.warn(`No maxLeverage in response for ${bingxSymbol}`, levData);
+          console.warn(`No maxLeverage for ${bingxSymbol}`, levData);
         }
       } catch (e) {
         console.error(`Error fetching max leverage for ${bingxSymbol}:`, e.message);
       }
 
-      results.push({
+      return {
         symbol: symbol,
         nextFundingTime: contract.nextFundingTime,
         fundingRate: contract.fundingRate,
         maxLeverage: maxLev,
-      });
-    }
+      };
+    });
 
+    const results = await Promise.all(leveragePromises);
     return results;
 
   } catch (e) {
@@ -136,8 +137,6 @@ async function fetchData() {
     throw e;
   }
 }
-
-
 
 const server = http.createServer(async (req, res) => {
   if (req.method === 'GET' && req.url === '/funding') {
