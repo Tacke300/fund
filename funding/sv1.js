@@ -6,6 +6,14 @@ const ccxt = require('ccxt');
 const crypto = require('crypto');
 const { URLSearchParams } = require('url'); // Sử dụng URLSearchParams để xây dựng query string
 
+// Import các API Key và Secret từ file config.js
+const {
+    binanceApiKey, binanceApiSecret,
+    bingxApiKey, bingxApiSecret,
+    okxApiKey, okxApiSecret, okxPassword,
+    bitgetApiKey, bitgetApiSecret, bitgetApiPassword
+} = require('./config.js');
+
 const PORT = 5001;
 
 // ----- CẤU HÌNH -----
@@ -14,21 +22,6 @@ const FUNDING_DIFFERENCE_THRESHOLD = 0.00001;
 const MINIMUM_PNL_THRESHOLD = 15;
 const IMMINENT_THRESHOLD_MINUTES = 15;
 const LEVERAGE_CACHE_REFRESH_INTERVAL_MINUTES = 30;
-
-// === QUAN TRỌNG: ĐIỀN API KEY VÀ SECRET VÀO ĐÂY ===
-// Các API Key và Secret DƯỚI ĐÂY phải chính xác
-// và có đủ quyền 'chỉ đọc' trên Binance và BingX.
-const binanceApiKey = 'cZ1Y2O0kggVEggEaPvhFcYQHS5b1EsT2OWZb8zdY9C0jGqNROvXRZHTJjnQ7OG4Q';
-const binanceApiSecret = 'oU6pZFHgEvbpD9NmFXp5ZVnYFMQ7EIkBiz88aTzvmC3SpT9nEf4fcDf0pEnFzoTc';
-const bingxApiKey = 'p29V4jTkBelypG9Acd1t4dp6GqHwyTjYcOBq9AC501HVo0f4EN4m6Uv5F2CIr7dNaNTRvaQM0CqcPXfEFuA';
-const bingxApiSecret = 'iTkMpmySRwQSawYBU3D5uFRZhH4UBdRYLOcPVrWbdAYa0go6Nohye1n7PS4XOcOmxQXYnUs1YRei5RvLPg';
-const okxApiKey = 'c2f77f8b-a71a-41a3-8caf-3459dbdbaa0b';
-const okxApiSecret = '6337107745922F1D457C472297513220'; // ĐÃ SỬA LẠI ĐÚNG VỚI BẢN CŨ CỦA BẠN
-const okxPassword = 'Altf4enter$';
-const bitgetApiKey = 'bg_a1ab0142c295779ac21123d5b59378e9';
-const bitgetApiSecret = 'c12fbe21cd82274bde810b3d4aa7be778e5eee30ca5f47cf8ffc9b950787c961';
-const bitgetApiPassword = 'Altf4enter';
-
 
 // ----- BIẾN TOÀN CỤC -----
 let leverageCache = {};
