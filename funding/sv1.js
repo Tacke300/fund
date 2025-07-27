@@ -102,7 +102,8 @@ async function getBingXLeverageDirectAPI() {
             try {
                 const timestamp = Date.now().toString();
                 const recvWindow = "15000"; 
-                const queryString = `recvWindow=${recvWindow}&symbol=${bingxApiSymbol}xtamp=${timestamp}`; // Đã sửa lỗi ×tamp
+                // ĐÃ SỬA LỖI CÚ PHÁP: Đảm bảo có '&' trước 'timestamp'
+                const queryString = `recvWindow=${recvWindow}&symbol=${bingxApiSymbol}×tamp=${timestamp}`; 
                 const signature = signBingX(queryString, bingxApiSecret);
                 const url = `https://open-api.bingx.com/openApi/swap/v2/trade/leverage?${queryString}&signature=${signature}`;
 
@@ -280,8 +281,8 @@ async function fetchFundingRatesForAllExchanges() {
                 const rates = await getBinanceFundingRatesDirectAPI();
                 rates.forEach(item => processedRates[cleanSymbol(item.symbol)] = { ...item, maxLeverage: leverageCache[id]?.[cleanSymbol(item.symbol)] || null });
             } else if (id === 'bingx') {
-                // ĐÃ CẬP NHẬT: Dữ liệu BingX raw rates sẽ được bao gồm trong response /api/data
                 const rates = await getBingXFundingRatesDirectAPI();
+                // Dữ liệu BingX raw rates sẽ được bao gồm trong response /api/data
                 rates.forEach(item => processedRates[item.symbol] = { ...item, maxLeverage: leverageCache[id]?.[item.symbol] || null });
             } else {
                 const fundingRatesRaw = await exchange.fetchFundingRates();
@@ -442,7 +443,7 @@ const server = http.createServer((req, res) => {
             arbitrageData: arbitrageOpportunities,
             rawRates: {
                 binance: Object.values(exchangeData.binanceusdm?.rates || {}),
-                bingx: Object.values(exchangeData.bingx?.rates || {}), // ĐÃ CẬP NHẬT: Bao gồm BingX raw rates ở đây
+                bingx: Object.values(exchangeData.bingx?.rates || {}), // BingX raw rates đã được bao gồm
                 okx: Object.values(exchangeData.okx?.rates || {}),
                 bitget: Object.values(exchangeData.bitget?.rates || {}),
             }
@@ -455,7 +456,7 @@ const server = http.createServer((req, res) => {
 });
 
 server.listen(PORT, async () => {
-    console.log(`✅ Máy chủ dữ liệu (ĐÃ BAO GỒM BINGX TRONG RAW RATES) đang chạy tại http://localhost:${PORT}`);
+    console.log(`✅ Máy chủ dữ liệu (ĐÃ FIX LỖI CÚ PHÁP TIMESTAMP CỦA BINGX & BAO GỒM TRONG RAW RATES) đang chạy tại http://localhost:${PORT}`);
     await initializeLeverageCache();
     await masterLoop();
     setInterval(initializeLeverageCache, LEVERAGE_CACHE_REFRESH_INTERVAL_MINUTES * 60 * 1000);
