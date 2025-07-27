@@ -3,7 +3,6 @@ const https = require('https');
 const fs = require('fs');
 const path = require('path');
 const ccxt = require('ccxt');
-const axios = require('axios'); // Thêm thư viện axios
 const crypto = require('crypto');
 
 const PORT = 5001;
@@ -81,36 +80,71 @@ function signBinanceRequest(params, secret) {
     return `${queryString}&signature=${signature}`;
 }
 
-// Hàm để lấy leverage từ Binance qua REST API trực tiếp
+// Hàm để lấy leverage từ Binance qua REST API trực tiếp (dùng Node.js's native https module)
 async function fetchBinanceLeverageDirectly(apiKey, apiSecret) {
-    const endpoint = 'https://fapi.binance.com/fapi/v1/leverageBracket';
+    const hostname = 'fapi.binance.com';
+    const path = '/fapi/v1/leverageBracket';
     const timestamp = Date.now();
     const params = { timestamp: timestamp };
-    const signedQuery = signBinanceRequest(params, apiSecret);
 
-    try {
-        const response = await axios.get(`${endpoint}?${signedQuery}`, {
-            headers: { 'X-MBX-APIKEY': apiKey }
-        });
-        const leverageData = {};
-        for (const item of response.data) {
-            const symbolCleaned = cleanSymbol(item.symbol);
-            if (item.brackets && Array.isArray(item.brackets) && item.brackets.length > 0) {
-                const maxLeverage = Math.max(...item.brackets.map(b => b.leverage));
-                if (maxLeverage > 0) {
-                    leverageData[symbolCleaned] = maxLeverage;
-                }
-            }
+    const queryString = signBinanceRequest(params, apiSecret);
+
+    const options = {
+        hostname: hostname,
+        path: `${path}?${queryString}`,
+        method: 'GET',
+        headers: {
+            'X-MBX-APIKEY': apiKey,
+            'Content-Type': 'application/json'
         }
-        return leverageData;
-    } catch (error) {
-        console.error(`[LEVERAGE] ❌ Lỗi khi lấy đòn bẩy Binance qua REST API: ${error.message}. Chi tiết:`, error.response?.data?.msg || error.message);
-        return {};
-    }
+    };
+
+    return new Promise((resolve) => {
+        const req = https.request(options, (res) => {
+            let data = '';
+            res.on('data', (chunk) => {
+                data += chunk;
+            });
+            res.on('end', () => {
+                try {
+                    const responseJson = JSON.parse(data);
+                    if (res.statusCode && res.statusCode >= 400) {
+                        console.error(`[LEVERAGE] ❌ Lỗi HTTP ${res.statusCode} khi lấy đòn bẩy Binance qua REST API: ${responseJson.msg || 'Không rõ lỗi'}`);
+                        return resolve({}); // Trả về đối tượng rỗng nếu có lỗi HTTP
+                    }
+
+                    const leverageData = {};
+                    if (Array.isArray(responseJson)) {
+                        for (const item of responseJson) {
+                            const symbolCleaned = cleanSymbol(item.symbol);
+                            if (item.brackets && Array.isArray(item.brackets) && item.brackets.length > 0) {
+                                const maxLeverage = Math.max(...item.brackets.map(b => b.leverage));
+                                if (maxLeverage > 0) {
+                                    leverageData[symbolCleaned] = maxLeverage;
+                                }
+                            }
+                        }
+                    }
+                    console.log(`[LEVERAGE] ✅ BINANCEUSDM: Đã lấy thành công ${Object.keys(leverageData).length} đòn bẩy qua REST API.`);
+                    resolve(leverageData);
+                } catch (e) {
+                    console.error(`[LEVERAGE] ❌ Lỗi phân tích JSON hoặc xử lý dữ liệu Binance REST API: ${e.message}. Dữ liệu thô (có thể bị cắt ngắn): ${data.substring(0, 200)}...`);
+                    resolve({});
+                }
+            });
+        });
+
+        req.on('error', (e) => {
+            console.error(`[LEVERAGE] ❌ Lỗi mạng khi kết nối Binance REST API: ${e.message}`);
+            resolve({}); // Trả về đối tượng rỗng nếu có lỗi mạng
+        });
+
+        req.end();
+    });
 }
 
 
-// Hàm khởi tạo bộ nhớ đệm đòn bẩy cho tất cả các sàn (SỬ DỤNG CCXT và fallback REST API)
+// Hàm khởi tạo bộ nhớ đệm đòn bẩy cho tất cả các sàn (SỬ DỤNG CCXT và fallback REST API cho Binance)
 async function initializeLeverageCache() {
     console.log(`[CACHE] Bắt đầu làm mới bộ nhớ đệm đòn bẩy...`);
     const newCache = {};
@@ -139,25 +173,25 @@ async function initializeLeverageCache() {
                     }
                 } catch (e) {
                     console.warn(`[CACHE] ⚠️ ${id.toUpperCase()}: Lỗi khi gọi fetchLeverageTiers: ${e.message}.`);
-                    leverageSource = "CCXT loadMarkets fallback (hoặc REST API)";
+                    leverageSource = "CCXT fetchLeverageTiers (lỗi)";
                 }
             }
 
-            // Nếu fetchedLeverageData vẫn trống sau khi thử fetchLeverageTiers
-            if (Object.keys(fetchedLeverageData).length === 0) {
+            // Xử lý logic fallback cho từng sàn
+            if (Object.keys(fetchedLeverageData).length === 0) { // Nếu fetchLeverageTiers không lấy được gì
                 if (id === 'binanceusdm') {
                     console.log(`[CACHE] ${id.toUpperCase()}: fetchLeverageTiers không lấy được đòn bẩy. Thử dùng REST API trực tiếp...`);
                     fetchedLeverageData = await fetchBinanceLeverageDirectly(binanceApiKey, binanceApiSecret);
                     leverageSource = "Binance REST API";
                 }
                 else if (id === 'bingx') {
-                    // Đối với BingX, nếu fetchLeverageTiers không có kết quả,
-                    // việc dùng REST API trực tiếp cho tất cả cặp phức tạp hơn nhiều.
-                    // Tạm thời, chúng ta chấp nhận không có đòn bẩy cache được cho BingX qua CCXT nếu endpoint này không hoạt động.
-                    console.warn(`[CACHE] ⚠️ ${id.toUpperCase()}: fetchLeverageTiers không lấy được đòn bẩy nào. Vui lòng kiểm tra quyền API hoặc hạn chế của sàn.`);
-                    leverageSource = "CCXT fetchLeverageTiers (Không thành công)";
+                    // BingX's loadMarkets không chứa đòn bẩy. Nếu fetchLeverageTiers không hoạt động,
+                    // việc lấy đòn bẩy qua REST API trực tiếp cho tất cả các cặp rất phức tạp
+                    // và nằm ngoài phạm vi giải pháp "code thuần" mà không có thông tin chi tiết.
+                    console.warn(`[CACHE] ⚠️ ${id.toUpperCase()}: Không lấy được đòn bẩy nào qua CCXT. Vui lòng kiểm tra quyền API hoặc hạn chế của sàn BingX. (Không có fallback REST API chung cho BingX).`);
+                    leverageSource = "Không có đòn bẩy";
                 }
-                else { // OKX và Bitget (dùng loadMarkets nếu fetchLeverageTiers không có)
+                else { // OKX và Bitget (dùng loadMarkets nếu fetchLeverageTiers không có hoặc lỗi)
                     console.log(`[CACHE] ${id.toUpperCase()}: fetchLeverageTiers không lấy được đòn bẩy. Thử dùng loadMarkets...`);
                     await exchange.loadMarkets(true);
                     for (const market of Object.values(exchange.markets)) {
@@ -171,7 +205,7 @@ async function initializeLeverageCache() {
                             }
                         }
                     }
-                    leverageSource = "CCXT loadMarkets";
+                    leverageSource = "CCXT loadMarkets fallback";
                 }
             }
 
@@ -180,7 +214,7 @@ async function initializeLeverageCache() {
             if (count > 0) {
                 console.log(`[CACHE] ✅ ${id.toUpperCase()}: Lấy thành công ${count} đòn bẩy (${leverageSource}).`);
             } else {
-                console.warn(`[CACHE] ⚠️ ${id.toUpperCase()}: Không lấy được đòn bẩy nào.`);
+                console.warn(`[CACHE] ⚠️ ${id.toUpperCase()}: Không lấy được đòn bẩy nào (${leverageSource}).`);
             }
             return { id, status: 'fulfilled' };
         } catch (e) {
@@ -412,14 +446,6 @@ const server = http.createServer((req, res) => {
 
 server.listen(PORT, async () => {
     console.log(`✅ Máy chủ dữ liệu đang chạy tại http://localhost:${PORT}`);
-    // Kiểm tra xem axios đã được cài đặt chưa
-    try {
-        require('axios');
-    } catch (e) {
-        console.error("Lỗi: Thư viện 'axios' chưa được cài đặt. Vui lòng chạy 'npm install axios' trong thư mục dự án của bạn.");
-        process.exit(1); // Thoát nếu axios không có
-    }
-
     await masterLoop();
     setInterval(initializeLeverageCache, LEVERAGE_CACHE_REFRESH_INTERVAL_MINUTES * 60 * 1000);
 });
