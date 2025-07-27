@@ -32,6 +32,8 @@ let loopTimeoutId = null;
 let serverTimeOffset = 0; // Để đồng bộ thời gian với Binance API
 
 const BINANCE_BASE_HOST = 'fapi.binance.com'; // Hằng số cho Binance Host
+const BINGX_BASE_HOST = 'open-api.bingx.com'; // Hằng số cho BingX Host
+
 const exchanges = {};
 EXCHANGE_IDS.forEach(id => {
     const exchangeClass = ccxt[id];
@@ -69,7 +71,7 @@ function getMaxLeverageFromMarketInfo(market) {
     return null;
 }
 
-// === CÁC HÀM SAO CHÉP TỪ BẢN MÃ BOT GIAO DỊCH CỦA BẠN ===
+// === CÁC HÀM SAO CHÉP TỪ BẢN MÃ BOT GIAO DỊCH CỦA BẠN VÀ CHỈNH SỬA ===
 
 function createSignature(queryString, apiSecret) { return crypto.createHmac('sha256', apiSecret).update(queryString).digest('hex'); }
 
@@ -88,20 +90,29 @@ async function makeHttpRequest(method, hostname, path, headers = {}, postData = 
             let data = '';
             res.on('data', (chunk) => data += chunk);
             res.on('end', () => {
-                if (res.statusCode >= 200 && res.statusCode < 300) {
-                    resolve(data);
-                } else {
-                    let errorDetails = {
-                        code: res.statusCode,
-                        msg: `HTTP Lỗi: ${res.statusCode} ${res.statusMessage}`,
-                        url: `${hostname}${path}`,
-                        responseBody: data.substring(0, 500)
-                    };
-                    try {
-                        const parsedData = JSON.parse(data);
-                        errorDetails = { ...errorDetails, ...parsedData };
-                    } catch (e) { /* ignore */ }
-                    reject(errorDetails);
+                try {
+                    const responseJson = JSON.parse(data);
+                    
+                    // --- ĐÂY LÀ DÒNG DEBUG QUAN TRỌNG CHO BINANCE (Nếu cần) ---
+                    // if (hostname === BINANCE_BASE_HOST && path.includes('/fapi/v1/leverageBracket')) {
+                    //     console.log(`[DEBUG_BINANCE_LEVERAGE] Phản hồi JSON thô từ Binance API (status: ${res.statusCode}):`);
+                    //     console.log(JSON.stringify(responseJson, null, 2));
+                    // }
+                    // -----------------------------------------------------------
+
+                    if (res.statusCode >= 200 && res.statusCode < 300) {
+                        resolve(JSON.stringify(responseJson)); // Trả về JSON string để hàm gọi parse lại
+                    } else {
+                        let errorDetails = {
+                            code: res.statusCode,
+                            msg: `HTTP Lỗi: ${res.statusCode} ${res.statusMessage}`,
+                            url: `${hostname}${path}`,
+                            responseBody: data.substring(0, 500)
+                        };
+                        reject(errorDetails);
+                    }
+                } catch (e) {
+                    reject({ code: 'JSON_PARSE_ERROR', msg: `${e.message} (khi parse response từ ${hostname}${path}). Raw data: ${data.substring(0, 200)}` });
                 }
             });
         });
@@ -175,7 +186,36 @@ async function syncServerTime() {
     }
 }
 
-// === KẾT THÚC CÁC HÀM SAO CHÉP ===
+// Hàm fetch BingX max leverage cho một symbol cụ thể (theo đề xuất của bạn)
+async function fetchBingxMaxLeverage(symbol) {
+    if (!bingxApiKey || !bingxApiSecret) {
+        console.warn(`[BINGX] ⚠️ Thiếu API Key/Secret cho BingX.`);
+        return null;
+    }
+
+    const params = `symbol=${symbol}`;
+    const timestamp = Date.now(); // BingX không yêu cầu timestamp đồng bộ
+    const query = `${params}×tamp=${timestamp}`; // BingX yêu cầu timestamp trong query ký
+    const signature = createSignature(query, bingxApiSecret);
+    const urlPath = `/openApi/swap/v2/trade/leverage?${params}×tamp=${timestamp}&signature=${signature}`;
+    const headers = { 'X-BX-APIKEY': bingxApiKey };
+
+    try {
+        const res = await makeHttpRequest('GET', BINGX_BASE_HOST, urlPath, headers);
+        const data = JSON.parse(res);
+        if (data.code === 0 && data.data?.leverage) {
+            return parseInt(data.data.leverage, 10);
+        } else {
+            console.warn(`[BINGX] Phản hồi leverage cho ${symbol} không hợp lệ: code ${data.code}, msg: ${data.msg || 'N/A'}`);
+        }
+    } catch (e) {
+        console.warn(`[BINGX] Lỗi lấy leverage cho ${symbol}: ${e.msg || e.message}`);
+    }
+    return null;
+}
+
+
+// === KẾT THÚC CÁC HÀM SAO CHÉP VÀ CHỈNH SỬA ===
 
 
 // Hàm khởi tạo bộ nhớ đệm đòn bẩy cho tất cả các sàn
@@ -215,7 +255,28 @@ async function initializeLeverageCache() {
                     leverageSource = "Binance REST API (lỗi)";
                 }
             }
-            else { // Đối với BingX, OKX, Bitget - giữ nguyên logic CCXT
+            else if (id === 'bingx') {
+                // Đối với BingX, áp dụng giải pháp của bạn: loadMarkets rồi gọi API riêng
+                leverageSource = "BingX REST API /trade/leverage";
+                try {
+                    await exchange.loadMarkets(true); // Cần loadMarkets để lấy danh sách symbol
+                    for (const market of Object.values(exchange.markets)) {
+                        if (market.swap && market.quote === 'USDT') {
+                            const formattedSymbol = market.symbol.replace('/', '-').replace(':USDT', ''); // Định dạng symbol theo yêu cầu của BingX API
+                            const maxLev = await fetchBingxMaxLeverage(formattedSymbol);
+                            if (maxLev && maxLev > 1) {
+                                fetchedLeverageData[cleanSymbol(market.symbol)] = maxLev;
+                            } else {
+                                console.warn(`[CACHE] ⚠️ ${id.toUpperCase()}: Không lấy được đòn bẩy cho ${market.symbol} qua REST API. (Phản hồi không hợp lệ/Null)`);
+                            }
+                        }
+                    }
+                } catch (e) {
+                    console.error(`[CACHE] ❌ ${id.toUpperCase()}: Lỗi chung khi lấy đòn bẩy BingX: ${e.message}.`);
+                    leverageSource = "BingX REST API (lỗi chung)";
+                }
+            }
+            else { // Đối với OKX và Bitget - giữ nguyên logic CCXT (có fallback loadMarkets)
                 if (exchange.has['fetchLeverageTiers']) {
                     try {
                         const leverageTiers = await exchange.fetchLeverageTiers();
@@ -308,7 +369,7 @@ async function fetchFundingRatesForAllExchanges() {
             const exchange = exchanges[id];
             let processedRates = {};
 
-            // Sử dụng fetchFundingRates của CCXT cho tất cả các sàn (Không có logic này trong bản bot giao dịch)
+            // Sử dụng fetchFundingRates của CCXT cho tất cả các sàn
             const fundingRatesRaw = await exchange.fetchFundingRates();
             for (const rate of Object.values(fundingRatesRaw)) {
                 const symbolCleaned = cleanSymbol(rate.symbol);
