@@ -107,7 +107,7 @@ async function getBingXLeverageDirectAPI() {
                 // !!! LƯU Ý QUAN TRỌNG: DÒNG NÀY ĐÃ ĐƯỢC SỬA ĐÚNG CÚ PHÁP '×tamp=' TRONG CÁC BẢN TRƯỚC !!!
                 // Nếu bạn vẫn thấy 'xtamp' trong log URL, vui lòng kiểm tra lại file code trên server của bạn.
                 // Đảm bảo bạn đã dán/thay thế hoàn toàn bản code mới nhất.
-                const queryString = `recvWindow=${recvWindow}&symbol=${bingxApiSymbol}×tamp=${timestamp}`; 
+                const queryString = `recvWindow=${recvWindow}&symbol=${bingxApiSymbol}xtamp=${timestamp}`; 
                 const signature = signBingX(queryString, bingxApiSecret);
                 const url = `https://open-api.bingx.com/openApi/swap/v2/trade/leverage?${queryString}&signature=${signature}`;
 
