@@ -74,8 +74,8 @@ async function getBinanceLeverageDirectAPI() {
             if (info.brackets && info.brackets.length > 0) {
                 const parsedLeverage = parseFloat(info.brackets[0].initialLeverage);
                 if (!isNaN(parsedLeverage) && parsedLeverage > 0) leverages[cleanS] = parsedLeverage;
-                else console.warn(`[CACHE] ⚠️ BINANCEUSDM: Đòn bẩy không hợp lệ cho ${info.symbol}.`);
-            } else console.warn(`[CACHE] ⚠️ BINANCEUSDM: Không có thông tin bracket cho ${info.symbol}.`);
+                // else console.warn(`[CACHE] ⚠️ BINANCEUSDM: Đòn bẩy không hợp lệ cho ${info.symbol}.`); // Giảm log
+            } // else console.warn(`[CACHE] ⚠️ BINANCEUSDM: Không có thông tin bracket cho ${info.symbol}.`); // Giảm log
         });
         return leverages;
     } catch (e) {
@@ -106,6 +106,7 @@ async function getBingXLeverageDirectAPI() {
                 const signature = signBingX(queryString, bingxApiSecret);
                 const url = `https://open-api.bingx.com/openApi/swap/v2/trade/leverage?${queryString}&signature=${signature}`;
 
+                // console.log(`[DEBUG] BINGX API Call URL (Leverage): ${url}`); // Giảm log
                 const res = await fetch(url, { method: "GET", headers: { "X-BX-APIKEY": bingxApiKey } });
 
                 if (!res.ok) {
@@ -114,6 +115,7 @@ async function getBingXLeverageDirectAPI() {
                     leverages[cleanS] = null; continue;
                 }
                 const json = await res.json();
+                // console.log(`[DEBUG] BINGX Raw response for ${bingxApiSymbol} from /trade/leverage:`, JSON.stringify(json, null, 2)); // Giảm log
 
                 let maxLeverageFound = null;
                 if (json && json.code === 0 && json.data) {
@@ -124,6 +126,7 @@ async function getBingXLeverageDirectAPI() {
                     } else console.warn(`[CACHE] ⚠️ BINGX: Dữ liệu đòn bẩy không hợp lệ cho ${bingxApiSymbol}.`);
                 } else console.warn(`[CACHE] ⚠️ BINGX: Lỗi hoặc không có 'data' cho ${bingxApiSymbol}. Code: ${json.code}, Msg: ${json.msg || 'Không có thông báo lỗi.'}`);
                 
+                // console.log(`[DEBUG] BINGX: Đã gán đòn bẩy cho ${cleanS}: Type: ${typeof maxLeverageFound}, Value: ${maxLeverageFound}.`); // Giảm log
                 leverages[cleanS] = maxLeverageFound;
             } catch (e) {
                 console.error(`[CACHE] ❌ BINGX: Lỗi khi lấy đòn bẩy cho ${bingxApiSymbol}: ${e.message}.`);
@@ -174,7 +177,7 @@ async function initializeLeverageCache() {
                         if (!isNaN(parsedMaxLeverage) && parsedMaxLeverage > 0) {
                             newCache[id][cleanSymbol(symbol)] = parsedMaxLeverage;
                         } else console.warn(`[CACHE] ⚠️ ${id.toUpperCase()}: Đòn bẩy không hợp lệ cho ${symbol} từ fetchLeverageTiers.`);
-                    } else console.warn(`[CACHE] ⚠️ ${id.toUpperCase()}: 'fetchLeverageTiers' không có thông tin bậc đòn bẩy hợp lệ cho ${symbol}.`);
+                    } // else console.warn(`[CACHE] ⚠️ ${id.toUpperCase()}: 'fetchLeverageTiers' không có thông tin bậc đòn bẩy hợp lệ cho ${symbol}.`); // Giảm log
                 }
             } else { // Fallback to loadMarkets
                 await exchange.loadMarkets(true);
@@ -229,7 +232,7 @@ async function getBingXFundingRatesDirectAPI() {
             if (markets.length === 0) { console.warn(`[DATA] ⚠️ BINGX: loadMarkets trả về 0 thị trường USDT Swap.`); return resolve([]); }
 
             const BINGX_REQUEST_DELAY_MS = 100;
-            const processedDataMap = new Map();
+            const processedDataMap = new Map(); 
 
             for (const market of markets) {
                 const cleanS = cleanSymbol(market.symbol);
