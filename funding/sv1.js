@@ -3,6 +3,7 @@ const https = require('https');
 const fs = require('fs');
 const path = require('path');
 const ccxt = require('ccxt');
+const axios = require('axios'); // Thêm thư viện axios
 const crypto = require('crypto');
 
 const PORT = 5001;
@@ -15,8 +16,7 @@ const IMMINENT_THRESHOLD_MINUTES = 15;
 const LEVERAGE_CACHE_REFRESH_INTERVAL_MINUTES = 30;
 
 // === QUAN TRỌNG: ĐIỀN API KEY VÀ SECRET VÀO ĐÂY ===
-// Sử dụng các khóa bạn đã cung cấp gần đây nhất.
-// Để nhận được kết quả như mong đợi trên HTML, các API Key và Secret DƯỚI ĐÂY phải chính xác
+// Các API Key và Secret DƯỚI ĐÂY phải chính xác
 // và có đủ quyền 'chỉ đọc' trên Binance và BingX.
 const binanceApiKey = 'cZ1Y2O0kggVEggEaPvhFcYQHS5b1EsT2OWZb8zdY9C0jGqNROvXRZHTJjnQ7OG4Q';
 const binanceApiSecret = 'oU6pZFHgEvbpD9NmFXp5ZVnYFMQ7EIkBiz88aTzvmC3SpT9nEf4fcDf0pEnFzoTc';
@@ -56,10 +56,12 @@ EXCHANGE_IDS.forEach(id => {
 const cleanSymbol = (symbol) => symbol.replace('/USDT', '').replace(':USDT', '').replace(/USDT$/, '');
 
 // Hàm này giúp trích xuất maxLeverage từ market info nếu fetchLeverageTiers không có
+// Hàm này sẽ chỉ còn là fallback cho các sàn không có fetchLeverageTiers (ví dụ: OKX, Bitget nếu cần)
 function getMaxLeverageFromMarketInfo(market) {
-    if (typeof market?.limits?.leverage?.max === 'number' && market.limits.leverage.max > 0) return market.limits.leverage.max;
+    if (typeof market?.limits?.leverage?.max === 'number' && market.limits.leverage.max > 0) {
+        return market.limits.leverage.max;
+    }
     if (typeof market?.info === 'object' && market.info !== null) {
-        // Thêm các khóa có thể chứa leverage tùy theo sàn
         const possibleLeverageKeys = ['maxLeverage', 'leverage', 'initialLeverage', 'max_leverage'];
         for (const key of possibleLeverageKeys) {
             if (market.info.hasOwnProperty(key)) {
@@ -68,111 +70,121 @@ function getMaxLeverageFromMarketInfo(market) {
                 if (!isNaN(leverage) && leverage > 1) return leverage;
             }
         }
-        // Đặc biệt cho BingX (nếu CCXT không parse được trực tiếp)
-        // Đây chỉ là ví dụ, cần kiểm tra log DEBUG_LEVERAGE để biết cấu trúc thật
-        if (market.id === 'bingx' && market.info.hasOwnProperty('leverage')) { // Giả định BingX có thể có trường 'leverage' trực tiếp
-             const leverage = parseInt(market.info.leverage, 10);
-             if (!isNaN(leverage) && leverage > 1) return leverage;
-        }
     }
     return null;
 }
 
-// Hàm khởi tạo bộ nhớ đệm đòn bẩy cho tất cả các sàn (SỬ DỤNG CCXT cho tất cả)
+// Hàm để ký request Binance (dùng cho REST API trực tiếp)
+function signBinanceRequest(params, secret) {
+    const queryString = Object.keys(params).sort().map(key => `${key}=${params[key]}`).join('&'); // Sắp xếp các khóa để ký nhất quán
+    const signature = crypto.createHmac('sha256', secret).update(queryString).digest('hex');
+    return `${queryString}&signature=${signature}`;
+}
+
+// Hàm để lấy leverage từ Binance qua REST API trực tiếp
+async function fetchBinanceLeverageDirectly(apiKey, apiSecret) {
+    const endpoint = 'https://fapi.binance.com/fapi/v1/leverageBracket';
+    const timestamp = Date.now();
+    const params = { timestamp: timestamp };
+    const signedQuery = signBinanceRequest(params, apiSecret);
+
+    try {
+        const response = await axios.get(`${endpoint}?${signedQuery}`, {
+            headers: { 'X-MBX-APIKEY': apiKey }
+        });
+        const leverageData = {};
+        for (const item of response.data) {
+            const symbolCleaned = cleanSymbol(item.symbol);
+            if (item.brackets && Array.isArray(item.brackets) && item.brackets.length > 0) {
+                const maxLeverage = Math.max(...item.brackets.map(b => b.leverage));
+                if (maxLeverage > 0) {
+                    leverageData[symbolCleaned] = maxLeverage;
+                }
+            }
+        }
+        return leverageData;
+    } catch (error) {
+        console.error(`[LEVERAGE] ❌ Lỗi khi lấy đòn bẩy Binance qua REST API: ${error.message}. Chi tiết:`, error.response?.data?.msg || error.message);
+        return {};
+    }
+}
+
+
+// Hàm khởi tạo bộ nhớ đệm đòn bẩy cho tất cả các sàn (SỬ DỤNG CCXT và fallback REST API)
 async function initializeLeverageCache() {
     console.log(`[CACHE] Bắt đầu làm mới bộ nhớ đệm đòn bẩy...`);
     const newCache = {};
     const promises = EXCHANGE_IDS.map(async (id) => {
         const exchange = exchanges[id];
-        newCache[id] = {};
+        newCache[id] = {}; // Đảm bảo luôn khởi tạo cache cho sàn này
+
         try {
-            // Ưu tiên fetchLeverageTiers vì nó cung cấp thông tin đòn bẩy chi tiết nhất
+            let leverageSource = "CCXT fetchLeverageTiers";
+            let fetchedLeverageData = {};
+
+            // Luôn thử fetchLeverageTiers trước nếu sàn hỗ trợ
             if (exchange.has['fetchLeverageTiers']) {
-                console.log(`[DEBUG_LEVERAGE] Đang thử fetchLeverageTiers cho ${id.toUpperCase()}`);
-                const leverageTiers = await exchange.fetchLeverageTiers();
+                try {
+                    const leverageTiers = await exchange.fetchLeverageTiers();
+                    for (const symbol in leverageTiers) {
+                        const tiers = leverageTiers[symbol];
+                        if (Array.isArray(tiers) && tiers.length > 0) {
+                            const numericLeverages = tiers.map(t => typeof t.leverage === 'number' ? t.leverage : parseFloat(t.leverage)).filter(l => !isNaN(l) && l > 0);
+                            const parsedMaxLeverage = numericLeverages.length > 0 ? parseInt(Math.max(...numericLeverages), 10) : 0;
 
-                // === DÒNG CẦN THÊM ĐỂ DEBUG DỮ LIỆU THÔ TỪ fetchLeverageTiers ===
-                if (id === 'binanceusdm' || id === 'bingx') {
-                     console.log(`[DEBUG_LEVERAGE] Dữ liệu thô từ fetchLeverageTiers cho ${id.toUpperCase()}:`);
-                     let debugCount = 0;
-                     for (const symbol in leverageTiers) {
-                         if (leverageTiers.hasOwnProperty(symbol)) {
-                             if (debugCount < 5) { // In 5 cặp đầu tiên để tránh log quá dài
-                                 console.log(`  - ${symbol}:`, JSON.stringify(leverageTiers[symbol], null, 2));
-                                 debugCount++;
-                             } else {
-                                 break;
-                             }
-                         }
-                     }
-                     if (Object.keys(leverageTiers).length === 0) {
-                         console.log(`  (Không có dữ liệu leverageTiers nào được trả về cho ${id.toUpperCase()})`);
-                     }
-                }
-                // ===============================================================
-
-                for (const symbol in leverageTiers) {
-                    const tiers = leverageTiers[symbol];
-                    if (Array.isArray(tiers) && tiers.length > 0) {
-                        // Tìm đòn bẩy tối đa trong các bậc
-                        // Đảm bảo t.leverage là số, nếu không thì dùng 0 hoặc bỏ qua
-                        const numericLeverages = tiers.map(t => typeof t.leverage === 'number' ? t.leverage : 0).filter(l => l > 0);
-                        const parsedMaxLeverage = numericLeverages.length > 0 ? parseInt(Math.max(...numericLeverages), 10) : 0;
-
-                        if (!isNaN(parsedMaxLeverage) && parsedMaxLeverage > 0) {
-                            newCache[id][cleanSymbol(symbol)] = parsedMaxLeverage;
-                        }
-                    }
-                }
-            } else { // Fallback to loadMarkets nếu fetchLeverageTiers không có hoặc không hoạt động
-                console.log(`[DEBUG_LEVERAGE] Đang thử loadMarkets cho ${id.toUpperCase()} (fetchLeverageTiers không có).`);
-                await exchange.loadMarkets(true);
-
-                // === DÒNG CẦN THÊM ĐỂ DEBUG DỮ LIỆU THÔ TỪ loadMarkets (market info) ===
-                if (id === 'binanceusdm' || id === 'bingx') {
-                    console.log(`[DEBUG_LEVERAGE] Dữ liệu thô từ loadMarkets (market info) cho ${id.toUpperCase()}:`);
-                    let marketCount = 0;
-                    for (const market of Object.values(exchange.markets)) {
-                        // Chỉ lấy các cặp swap USDT để debug
-                        if (market.swap && market.quote === 'USDT') {
-                            if (marketCount < 5) { // In 5 cặp đầu tiên để tránh log quá dài
-                                console.log(`  - ${market.symbol}:`, JSON.stringify(market, null, 2));
-                                marketCount++;
-                            } else {
-                                break;
+                            if (!isNaN(parsedMaxLeverage) && parsedMaxLeverage > 0) {
+                                fetchedLeverageData[cleanSymbol(symbol)] = parsedMaxLeverage;
                             }
                         }
                     }
-                    if (marketCount === 0) {
-                        console.log(`  (Không có thị trường swap USDT nào được tìm thấy cho ${id.toUpperCase()})`);
-                    }
-                }
-                // =======================================================================
-
-                for (const market of Object.values(exchange.markets)) {
-                    // Chỉ lấy các cặp swap USDT
-                    if (market.swap && market.quote === 'USDT') {
-                        const symbolCleaned = cleanSymbol(market.symbol);
-                        const maxLeverage = getMaxLeverageFromMarketInfo(market); // Sử dụng hàm trợ giúp
-                        if (maxLeverage !== null && maxLeverage > 0) {
-                            newCache[id][symbolCleaned] = maxLeverage;
-                        } else {
-                            // Log cảnh báo nếu không tìm thấy đòn bẩy hợp lệ
-                            console.warn(`[CACHE] ⚠️ ${id.toUpperCase()}: Đòn bẩy không hợp lệ hoặc không tìm thấy cho ${market.symbol} qua loadMarkets.`);
-                        }
-                    }
+                } catch (e) {
+                    console.warn(`[CACHE] ⚠️ ${id.toUpperCase()}: Lỗi khi gọi fetchLeverageTiers: ${e.message}.`);
+                    leverageSource = "CCXT loadMarkets fallback (hoặc REST API)";
                 }
             }
-            const count = Object.values(newCache[id]).filter(v => typeof v === 'number' && v > 0).length;
+
+            // Nếu fetchedLeverageData vẫn trống sau khi thử fetchLeverageTiers
+            if (Object.keys(fetchedLeverageData).length === 0) {
+                if (id === 'binanceusdm') {
+                    console.log(`[CACHE] ${id.toUpperCase()}: fetchLeverageTiers không lấy được đòn bẩy. Thử dùng REST API trực tiếp...`);
+                    fetchedLeverageData = await fetchBinanceLeverageDirectly(binanceApiKey, binanceApiSecret);
+                    leverageSource = "Binance REST API";
+                }
+                else if (id === 'bingx') {
+                    // Đối với BingX, nếu fetchLeverageTiers không có kết quả,
+                    // việc dùng REST API trực tiếp cho tất cả cặp phức tạp hơn nhiều.
+                    // Tạm thời, chúng ta chấp nhận không có đòn bẩy cache được cho BingX qua CCXT nếu endpoint này không hoạt động.
+                    console.warn(`[CACHE] ⚠️ ${id.toUpperCase()}: fetchLeverageTiers không lấy được đòn bẩy nào. Vui lòng kiểm tra quyền API hoặc hạn chế của sàn.`);
+                    leverageSource = "CCXT fetchLeverageTiers (Không thành công)";
+                }
+                else { // OKX và Bitget (dùng loadMarkets nếu fetchLeverageTiers không có)
+                    console.log(`[CACHE] ${id.toUpperCase()}: fetchLeverageTiers không lấy được đòn bẩy. Thử dùng loadMarkets...`);
+                    await exchange.loadMarkets(true);
+                    for (const market of Object.values(exchange.markets)) {
+                        if (market.swap && market.quote === 'USDT') {
+                            const symbolCleaned = cleanSymbol(market.symbol);
+                            const maxLeverage = getMaxLeverageFromMarketInfo(market); // Hàm này dùng cho fallback
+                            if (maxLeverage !== null && maxLeverage > 0) {
+                                fetchedLeverageData[symbolCleaned] = maxLeverage;
+                            } else {
+                                console.warn(`[CACHE] ⚠️ ${id.toUpperCase()}: Đòn bẩy không hợp lệ hoặc không tìm thấy cho ${market.symbol} qua loadMarkets.`);
+                            }
+                        }
+                    }
+                    leverageSource = "CCXT loadMarkets";
+                }
+            }
+
+            newCache[id] = fetchedLeverageData;
+            const count = Object.keys(newCache[id]).length;
             if (count > 0) {
-                console.log(`[CACHE] ✅ ${id.toUpperCase()}: Lấy thành công ${count} đòn bẩy.`);
+                console.log(`[CACHE] ✅ ${id.toUpperCase()}: Lấy thành công ${count} đòn bẩy (${leverageSource}).`);
             } else {
                 console.warn(`[CACHE] ⚠️ ${id.toUpperCase()}: Không lấy được đòn bẩy nào.`);
             }
             return { id, status: 'fulfilled' };
         } catch (e) {
             let errorMessage = `Lỗi nghiêm trọng khi lấy đòn bẩy cho ${id.toUpperCase()}: ${e.message}.`;
-            // Cải thiện thông báo lỗi nếu là lỗi xác thực CCXT
             if (e instanceof ccxt.AuthenticationError) {
                 errorMessage = `LỖI XÁC THỰC! Vui lòng kiểm tra lại API Key/Secret của ${id.toUpperCase()}. Chi tiết: ${e.message}.`;
             } else if (e instanceof ccxt.NetworkError) {
@@ -285,13 +297,11 @@ function calculateArbitrageOpportunities() {
                 // Kiểm tra lại maxLeverage trước khi dùng
                 if (typeof rate1Data.maxLeverage !== 'number' || rate1Data.maxLeverage <= 0 ||
                     typeof rate2Data.maxLeverage !== 'number' || rate2Data.maxLeverage <= 0) {
-                    // console.warn(`[ARBITRAGE] ⚠️ Bỏ qua ${symbol} do thiếu maxLeverage cho ${exchange1Id} hoặc ${exchange2Id}.`);
                     continue;
                 }
 
                 if (typeof rate1Data.fundingRate !== 'number' || typeof rate2Data.fundingRate !== 'number' ||
                     !rate1Data.fundingTimestamp || rate1Data.fundingTimestamp <= 0 || !rate2Data.fundingTimestamp || rate2Data.fundingTimestamp <= 0) {
-                    // console.warn(`[ARBITRAGE] ⚠️ Bỏ qua ${symbol} do fundingRate hoặc timestamp không hợp lệ.`);
                     continue;
                 }
 
@@ -364,7 +374,6 @@ async function masterLoop() {
 function scheduleNextLoop() {
     clearTimeout(loopTimeoutId);
     const now = new Date();
-    // Chạy lại sau mỗi phút, cộng thêm 5 giây để tránh lệch múi giờ hoặc ngay đầu phút
     const delaySeconds = (60 - now.getSeconds() + 5) % 60;
     const delayMs = (delaySeconds === 0 ? 60 : delaySeconds) * 1000;
     console.log(`[SCHEDULER] Vòng lặp kế tiếp sau ${delaySeconds.toFixed(0)} giây.`);
@@ -403,6 +412,14 @@ const server = http.createServer((req, res) => {
 
 server.listen(PORT, async () => {
     console.log(`✅ Máy chủ dữ liệu đang chạy tại http://localhost:${PORT}`);
+    // Kiểm tra xem axios đã được cài đặt chưa
+    try {
+        require('axios');
+    } catch (e) {
+        console.error("Lỗi: Thư viện 'axios' chưa được cài đặt. Vui lòng chạy 'npm install axios' trong thư mục dự án của bạn.");
+        process.exit(1); // Thoát nếu axios không có
+    }
+
     await masterLoop();
     setInterval(initializeLeverageCache, LEVERAGE_CACHE_REFRESH_INTERVAL_MINUTES * 60 * 1000);
 });
