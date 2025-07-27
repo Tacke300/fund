@@ -197,13 +197,13 @@ async function fetchBingxMaxLeverage(symbol, retries = 3) {
 
     let lastRawData = 'N/A'; // Để lưu dữ liệu thô từ lần thử cuối cùng
     let lastError = null;    // Để lưu lỗi từ lần thử cuối cùng
-    let parsedLeverage = null; // Biến tạm để lưu leverage nếu có thể parse được
+    let currentRawResponseForDebug = 'N/A'; // Dữ liệu thô cuối cùng cho debugRawLeverageResponses.bingx.data
 
     for (let i = 0; i < retries; i++) {
         const params = `symbol=${symbol}`;
         const timestamp = Date.now();
         const query = `${params}×tamp=${timestamp}`;
-        const signature = createSignature(query, bingxApiSecret); // Sử dụng createSignature đã có
+        const signature = createSignature(query, bingxApiSecret);
         const urlPath = `/openApi/swap/v2/trade/leverage?${params}×tamp=${timestamp}&signature=${signature}`;
         const headers = { 'X-BX-APIKEY': bingxApiKey };
 
@@ -211,14 +211,7 @@ async function fetchBingxMaxLeverage(symbol, retries = 3) {
             const rawRes = await makeHttpRequest('GET', BINGX_BASE_HOST, urlPath, headers);
             lastRawData = rawRes; // Luôn cập nhật dữ liệu thô
             lastError = null; // Reset lỗi nếu request thành công
-            
-            // Cập nhật debugRawLeverageResponses cho BingX (tổng kết từ lần thử cuối cùng)
-            debugRawLeverageResponses.bingx = { // Cập nhật cho BingX tổng quan (lưu cái raw cuối cùng)
-                status: 'đang xử lý', // Trạng thái này sẽ được cập nhật sau khi loop kết thúc
-                timestamp: new Date(),
-                data: rawRes, // Lưu dữ liệu thô của LẦN NÀY VÀO DEBUG
-                error: null
-            };
+            currentRawResponseForDebug = rawRes; // Cập nhật dữ liệu thô để gán vào debugRawLeverageResponses
 
             // Trả về dữ liệu thô ngay lập tức nếu request thành công
             return rawRes; 
@@ -226,6 +219,7 @@ async function fetchBingxMaxLeverage(symbol, retries = 3) {
         } catch (e) {
             lastError = { code: e.code, msg: e.msg || e.message, statusCode: e.statusCode || 'N/A', type: 'HTTP_ERROR' };
             lastRawData = e.rawResponse || lastRawData; // Lưu rawResponse từ lỗi nếu có
+            currentRawResponseForDebug = e.rawResponse || currentRawResponseForDebug; // Cập nhật dữ liệu thô cho debugRawLeverageResponses
 
             let logMsg = `[BINGX] Lỗi lấy leverage cho ${symbol} (Lần ${i+1}/${retries}): ${e.msg || e.message}`;
             if (e.rawResponse) {
@@ -248,11 +242,11 @@ async function fetchBingxMaxLeverage(symbol, retries = 3) {
             break; // Đối với các lỗi khác, không thử lại
         }
     }
-    // Cập nhật debugRawLeverageResponses cho BingX nếu tất cả các lần thử đều thất bại
+    // Cập nhật debugRawLeverageResponses cho BingX nếu tất cả các lần thử đều thất bại (hoặc thành công nhưng trả về null)
     debugRawLeverageResponses.bingx = {
-        status: `thất bại (${lastError ? lastError.code : 'không rõ lý do'})`,
+        status: lastError ? `thất bại (${lastError.code})` : 'thành công (nhưng không thể lấy được leverage)',
         timestamp: new Date(),
-        data: lastRawData, // Luôn lưu dữ liệu thô cuối cùng
+        data: currentRawResponseForDebug, // Luôn lưu dữ liệu thô cuối cùng của symbol
         error: lastError
     };
     return null; // Trả về null nếu tất cả các lần thử lại đều thất bại
@@ -303,7 +297,7 @@ async function initializeLeverageCache() {
                 try {
                     await exchange.loadMarkets(true);
                     const bingxMarkets = Object.values(exchange.markets).filter(m => m.swap && m.quote === 'USDT');
-                    console.log(`[CACHE] ${id.toUpperCase()}: Tìm thấy ${bingxMarkets.length} cặp swap USDT. Đang lấy đòn bẩy từng cặp...`);
+                    console.log(`[CACHE] ${id.toUpperCase()}: Tìm thấy ${bingxMarkets.length} cặp swap USDT. Đang lấy dữ liệu đòn bẩy thô từng cặp...`);
 
                     for (const market of bingxMarkets) {
                         const formattedSymbol = market.symbol.replace('/', '-').replace(':USDT', '');
@@ -422,14 +416,14 @@ async function fetchFundingRatesForAllExchanges() {
                 const symbolCleaned = cleanSymbol(rate.symbol);
                 // Lấy maxLeverage từ cache đã được tạo bởi initializeLeverageCache()
                 // Bây giờ maxLeverage sẽ là CHUỖI DỮ LIỆU THÔ (hoặc số đã parse cho OKX/Bitget)
-                const maxLeverage = leverageCache[id]?.[symbolCleaned] || null; 
+                const maxLeverageRaw = leverageCache[id]?.[symbolCleaned] || null; 
                 
                 const fundingTimestamp = rate.fundingTimestamp || rate.nextFundingTime || calculateNextStandardFundingTime();
 
                 // Chỉ thêm vào nếu fundingRate và fundingTimestamp hợp lệ
                 if (typeof rate.fundingRate === 'number' && !isNaN(rate.fundingRate) && typeof fundingTimestamp === 'number' && fundingTimestamp > 0) {
                     // processedRates[symbolCleaned].maxLeverage sẽ lưu chuỗi dữ liệu thô
-                    processedRates[symbolCleaned] = { symbol: symbolCleaned, fundingRate: rate.fundingRate, fundingTimestamp: fundingTimestamp, maxLeverage: maxLeverage };
+                    processedRates[symbolCleaned] = { symbol: symbolCleaned, fundingRate: rate.fundingRate, fundingTimestamp: fundingTimestamp, maxLeverage: maxLeverageRaw };
                 } else {
                     console.warn(`[DATA] ⚠️ ${id.toUpperCase()}: Funding rate hoặc timestamp không hợp lệ cho ${rate.symbol}.`);
                 }
@@ -467,7 +461,7 @@ async function fetchFundingRatesForAllExchanges() {
     return freshData;
 }
 
-// Hàm trợ giúp để parse leverage từ raw string. Đây là nơi duy nhất JSON.parse diễn ra cho leverage.
+// Hàm trợ giúp để parse leverage từ raw string. Đây là nơi DUY NHẤT JSON.parse diễn ra cho leverage
 function parseLeverageFromRawData(exchangeId, symbol, rawData) {
     if (typeof rawData === 'number') { // Đối với OKX/Bitget, nó có thể đã là số từ CCXT
         return rawData;
@@ -479,13 +473,15 @@ function parseLeverageFromRawData(exchangeId, symbol, rawData) {
     try {
         const parsedJson = JSON.parse(rawData);
         if (exchangeId === 'binanceusdm') {
-            // Cấu trúc phản hồi Binance: array of objects like {"symbol":"BTCUSDT","brackets":[{"leverage":125,"minNotional":0,...}]}
-            // initializeLeverageCache đã lưu string của MỘT item ({"symbol":"BTCUSDT", ...})
+            // Trường hợp 1: rawData là JSON string của một item từ /fapi/v1/leverageBracket
+            // Ví dụ: {"symbol":"BTCUSDT","brackets":[{"leverage":125,"minNotional":0,...}]}
             if (parsedJson.brackets && Array.isArray(parsedJson.brackets) && parsedJson.brackets.length > 0) {
                 const maxLeverage = Math.max(...parsedJson.brackets.map(b => b.leverage));
                 return !isNaN(maxLeverage) && maxLeverage > 0 ? maxLeverage : null;
-            } else if (parsedJson.FULL_RAW_RESPONSE) { // Nếu rawData là toàn bộ response và không được phân tách
-                const fullResponse = JSON.parse(parsedJson.FULL_RAW_RESPONSE);
+            } 
+            // Trường hợp 2: rawData là toàn bộ phản hồi của /fapi/v1/leverageBracket nếu không được phân tách
+            else if (parsedJson.FULL_RAW_RESPONSE) { // Điều này chỉ xảy ra nếu initializeLeverageCache không thể phân tách
+                const fullResponse = JSON.parse(parsedJson.FULL_RAW_RESPONSE); // Parse JSON của toàn bộ raw response
                 if (Array.isArray(fullResponse)) {
                     const targetItem = fullResponse.find(item => cleanSymbol(item.symbol) === cleanSymbol(symbol));
                     if (targetItem && targetItem.brackets && Array.isArray(targetItem.brackets)) {
@@ -503,10 +499,10 @@ function parseLeverageFromRawData(exchangeId, symbol, rawData) {
         }
         // Thêm logic cho các sàn khác nếu cần parsing phức tạp từ raw data
     } catch (e) {
-        // Lỗi parse JSON ở đây là bình thường nếu rawData không phải JSON hợp lệ
+        // Lỗi parse JSON ở đây là bình thường nếu rawData không phải JSON hợp lệ (vd: HTML)
         // console.warn(`[PARSE] Lỗi parse leverage từ raw data (${exchangeId}, ${symbol}): ${e.message}. Data: ${rawData.substring(0, 100)}`);
     }
-    return null; // Không thể parse ra số
+    return null; // Không thể parse ra số hoặc không tìm thấy leverage
 }
 
 function calculateArbitrageOpportunities() {
