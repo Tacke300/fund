@@ -1,130 +1,90 @@
+const https = require('https');
 const http = require('http');
 const crypto = require('crypto');
-const https = require('https');
+const url = require('url');
 
-// Điền API key + secret ở đây
-const API_KEY = 'p29V4jTkBelypG9Acd1t4dp6GqHwyTjYcOBq9AC501HVo0f4EN4m6Uv5F2CIr7dNaNTRvaQM0CqcPXfEFuA';
-const API_SECRET = 'iTkMpmySRwQSawYBU3D5uFRZhH4UBdRYLOcPVrWbdAYa0go6Nohye1n7PS4XOcOmxQXYnUs1YRei5RvLPg';
+const apiKey = 'p29V4jTkBelypG9Acd1t4dp6GqHwyTjYcOBq9AC501HVo0f4EN4m6Uv5F2CIr7dNaNTRvaQM0CqcPXfEFuA';
+const secretKey = 'iTkMpmySRwQSawYBU3D5uFRZhH4UBdRYLOcPVrWbdAYa0go6Nohye1n7PS4XOcOmxQXYnUs1YRei5RvLPg';
 
-const HOST = 'open-api.bingx.com';
+function get(endpoint, params = {}) {
+  return new Promise((resolve, reject) => {
+    const baseUrl = 'https://open-api.bingx.com' + endpoint;
+    const query = new url.URLSearchParams(params).toString();
+    const fullUrl = query ? `${baseUrl}?${query}` : baseUrl;
 
-function signParams(params, secret) {
-  const ordered = Object.keys(params).sort().map(key => `${key}=${params[key]}`).join('&');
-  return crypto.createHmac('sha256', secret).update(ordered).digest('hex');
-}
-
-function fetchBingXFundingRate(callback) {
-  const timestamp = Date.now();
-  const params = {
-    timestamp,
-    recvWindow: 5000
-  };
-  const queryString = Object.entries(params).map(([k, v]) => `${k}=${v}`).join('&');
-  const signature = signParams(params, API_SECRET);
-  const fullPath = `/openApi/swap/v2/quote/premiumIndex?${queryString}&signature=${signature}`;
-
-  const options = {
-    hostname: HOST,
-    path: fullPath,
-    method: 'GET',
-    headers: {
-      'X-BX-APIKEY': API_KEY
-    }
-  };
-
-  const req = https.request(options, res => {
-    let data = '';
-    res.on('data', chunk => data += chunk);
-    res.on('end', () => {
-      try {
-        const json = JSON.parse(data);
-        if (!json.data) return callback(new Error('No data'), null);
-        callback(null, json.data);
-      } catch (err) {
-        callback(err, null);
-      }
-    });
+    https.get(fullUrl, res => {
+      let data = '';
+      res.on('data', chunk => data += chunk);
+      res.on('end', () => {
+        try {
+          const json = JSON.parse(data);
+          resolve(json);
+        } catch (e) {
+          reject(`JSON parse error: ${e.message}`);
+        }
+      });
+    }).on('error', reject);
   });
-
-  req.on('error', err => callback(err, null));
-  req.end();
 }
 
-function fetchBingXLeverage(symbol, callback) {
+function getLeverage(symbol) {
   const timestamp = Date.now();
-  const params = {
+  const params = `symbol=${symbol}&timestamp=${timestamp}`;
+  const signature = crypto
+    .createHmac('sha256', secretKey)
+    .update(params)
+    .digest('hex');
+
+  const fullParams = {
     symbol,
     timestamp,
-    recvWindow: 5000
-  };
-  const queryString = Object.entries(params).map(([k, v]) => `${k}=${v}`).join('&');
-  const signature = signParams(params, API_SECRET);
-  const fullPath = `/openApi/swap/v2/trade/leverage?${queryString}&signature=${signature}`;
-
-  const options = {
-    hostname: HOST,
-    path: fullPath,
-    method: 'GET',
-    headers: {
-      'X-BX-APIKEY': API_KEY
-    }
+    signature
   };
 
-  const req = https.request(options, res => {
-    let data = '';
-    res.on('data', chunk => data += chunk);
-    res.on('end', () => {
-      try {
-        const json = JSON.parse(data);
-        if (!json.data) return callback(null, null);
-        callback(null, {
-          symbol,
-          leverage: json.data.longLeverage
-        });
-      } catch (err) {
-        callback(err, null);
-      }
-    });
-  });
-
-  req.on('error', err => callback(err, null));
-  req.end();
+  return get('/openApi/swap/v2/trade/leverage', fullParams);
 }
 
-http.createServer((req, res) => {
-  if (req.url === '/funding' && req.method === 'GET') {
-    fetchBingXFundingRate(async (err, fundingData) => {
-      if (err) {
-        res.writeHead(500, { 'Content-Type': 'application/json' });
-        return res.end(JSON.stringify({ error: true, message: err.message }));
+async function fetchAllFundingAndLeverage() {
+  try {
+    const result = await get('/openApi/swap/v2/quote/premiumIndex');
+    const data = result.data || [];
+
+    const promises = data.map(async item => {
+      const symbol = item.symbol;
+      let lev = null;
+      try {
+        const levRes = await getLeverage(symbol);
+        lev = levRes?.data?.longMaxLeverage || null;
+      } catch (e) {
+        lev = null;
       }
 
-      // Lấy max leverage cho từng symbol
-      const result = [];
-      let count = 0;
-
-      for (const item of fundingData) {
-        await new Promise(resolve => {
-          fetchBingXLeverage(item.symbol, (levErr, levData) => {
-            result.push({
-              symbol: item.symbol,
-              fundingRate: item.fundingRate,
-              nextFundingTime: item.nextFundingTime,
-              leverage: levData ? levData.leverage : null
-            });
-            count++;
-            resolve();
-          });
-        });
-      }
-
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify(result, null, 2));
+      return {
+        symbol,
+        fundingRate: item.fundingRate,
+        nextFundingTime: item.nextFundingTime,
+        leverage: lev
+      };
     });
+
+    const finalData = await Promise.all(promises);
+    return finalData;
+  } catch (e) {
+    return { error: true, message: e.toString() };
+  }
+}
+
+const server = http.createServer(async (req, res) => {
+  if (req.url === '/funding' && req.method === 'GET') {
+    const data = await fetchAllFundingAndLeverage();
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(data));
   } else {
     res.writeHead(404, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ error: true, message: 'Not found' }));
+    res.end(JSON.stringify({ error: true, message: 'Not Found' }));
   }
-}).listen(5005, () => {
-  console.log('Server is running on http://localhost:5005');
+});
+
+server.listen(5005, () => {
+  console.log('Server is running on port 5005');
 });
