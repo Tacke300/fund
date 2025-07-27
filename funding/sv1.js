@@ -201,12 +201,15 @@ async function fetchBingxMaxLeverage(symbol, retries = 3) {
     for (let i = 0; i < retries; i++) {
         const params = `symbol=${symbol}`;
         const timestamp = Date.now();
-        const recvWindow = 5000; // BingX có thể cũng cần recvWindow
+        const recvWindow = 5000; 
         
         // SỬA LỖI: Đảm bảo nối các tham số bằng '&' CHÍNH XÁC
         const query = `${params}×tamp=${timestamp}&recvWindow=${recvWindow}`; 
         const signature = createSignature(query, bingxApiSecret);
         const urlPath = `/openApi/swap/v2/trade/leverage?${query}&signature=${signature}`; // Đã sửa query string
+
+        // Định nghĩa headers ngay trong scope này
+        const headers = { 'X-BX-APIKEY': bingxApiKey }; // Đã sửa lỗi headers is not defined
 
         try {
             const rawRes = await makeHttpRequest('GET', BINGX_BASE_HOST, urlPath, headers);
@@ -279,16 +282,14 @@ async function initializeLeverageCache() {
                     leverageSource = "Binance REST API";
                     // Sau khi nhận được rawResponse, lưu nó vào cache map dưới dạng 'FULL_RAW_RESPONSE'
                     fetchedRawLeverageDataMap['FULL_RAW_RESPONSE'] = rawResponse; 
-                    // debugRawLeverageResponses đã được cập nhật bởi callSignedBinanceAPI
 
-                    // Thử parse JSON để phân tách từng symbol (chỉ cho mục đích tổ chức dữ liệu trong cache nếu có thể)
+                    // Thử parse JSON để phân tách thành từng item (không bắt buộc, nhưng giúp tổ chức dữ liệu)
                     try {
                         const parsedJson = JSON.parse(rawResponse);
                         if (Array.isArray(parsedJson)) {
                             for (const item of parsedJson) {
                                 const symbolCleaned = cleanSymbol(item.symbol);
-                                // Lưu raw JSON string của từng item (nếu là JSON hợp lệ)
-                                fetchedRawLeverageDataMap[symbolCleaned] = JSON.stringify(item); 
+                                fetchedRawLeverageDataMap[symbolCleaned] = JSON.stringify(item); // Lưu raw JSON string của từng item
                             }
                         } else {
                             console.warn(`[CACHE] ⚠️ ${id.toUpperCase()}: Phản hồi Binance API không phải mảng JSON. Dữ liệu thô vẫn được lưu.`);
@@ -296,7 +297,6 @@ async function initializeLeverageCache() {
                     } catch (e) {
                         console.warn(`[CACHE] ⚠️ ${id.toUpperCase()}: Lỗi parse JSON phản hồi Binance API. Dữ liệu thô vẫn được lưu. ${e.message}`);
                     }
-
                 } catch (e) {
                     console.error(`[CACHE] ❌ ${id.toUpperCase()}: Lỗi khi gọi Binance REST API: ${e.msg || e.message}.`);
                     leverageSource = "Binance REST API (lỗi)";
@@ -316,8 +316,6 @@ async function initializeLeverageCache() {
                         if (rawLevData) {
                             fetchedRawLeverageDataMap[cleanSymbol(market.symbol)] = rawLevData; // Lưu raw data cho symbol này
                         }
-                        // debugRawLeverageResponses.bingx đã được cập nhật bởi fetchBingxMaxLeverage (lần gọi cuối cùng của vòng lặp)
-
                         await sleep(250); // Thêm độ trễ giữa các yêu cầu để tránh rate limit
                     }
                     console.log(`[CACHE] ✅ ${id.toUpperCase()}: Hoàn tất lấy dữ liệu đòn bẩy thô cho ${Object.keys(fetchedRawLeverageDataMap).length} cặp.`);
@@ -496,7 +494,7 @@ function parseLeverageFromRawData(exchangeId, symbol, rawData) {
                 if (Array.isArray(fullResponse)) {
                     const targetItem = fullResponse.find(item => cleanSymbol(item.symbol) === cleanSymbol(symbol));
                     if (targetItem && targetItem.brackets && Array.isArray(targetItem.brackets)) {
-                        const maxLeverage = Math.max(...targetItem.brackets.map(b => b.leverage));
+                        const maxLeverage = Math.Max(...targetItem.brackets.map(b => b.leverage));
                         return !isNaN(maxLeverage) && maxLeverage > 0 ? maxLeverage : null;
                     }
                 }
