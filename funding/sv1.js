@@ -22,8 +22,8 @@ const FUNDING_HISTORY_CACHE_TTL_MINUTES = 60;
 const binanceApiKey = 'cZ1Y2O0kggVEggEaPvhFcYQHS5b1EsT2OWZb8zdY9C0jGqNROvXRZHTJjnQ7OG4Q';
 const binanceApiSecret = 'oU6pZFHgEvbpD9NmFXp5ZVnYFMQ7EIkBiz88aTzvmC3SpT9nEf4fcDf0pEnFzoTc';
 // API Key/Secret của BingX (ĐÃ CẬP NHẬT CHÍNH XÁC TỪ HÌNH ẢNH BẠN CUNG CẤP - HÃY NHỚ CẤP THÊM QUYỀN "PERPETUAL FUTURES" TRÊN SÀN)
-const bingxApiKey = 'p29V4JTKBelypG9Acd1t4dp6GqHwyTjYcOBq9AC501HV0Of4EN4m6Uv5F2Clr7dNaNTRvaQM0CqcPXFEFuA'; // ĐÃ CẬP NHẬT TỪ ẢNH CỦA BẠN
-const bingxApiSecret = 'iTKmpmySRWQSawYBU3D5uFRZHh4UBdRYLOCPWrWbdAYa0go6Nohye1n7PS4XOcomxQXYnUs1YRei5RvLpg'; // ĐÃ CẬP NHẬT TỪ ẢNH CỦA BẠN
+const bingxApiKey = 'p29V4jTkBelypG9Acd1t4dp6GqHwyTjYcOBq9AC501HVo0f4EN4m6Uv5F2CIr7dNaNTRvaQM0CqcPXfEFuA '; // ĐÃ CẬP NHẬT TỪ ẢNH CỦA BẠN
+const bingxApiSecret = 'iTkMpmySRwQSawYBU3D5uFRZhH4UBdRYLOcPVrWbdAYa0go6Nohye1n7PS4XOcOmxQXYnUs1YRei5RvLPg '; // ĐÃ CẬP NHẬT TỪ ẢNH CỦA BẠN
 // API Key/Secret/Passphrase của OKX (vui lòng kiểm tra lại thật kỹ trên sàn: key, secret, passphrase và thời gian server)
 const okxApiKey = 'c2f77f8b-a71a-41a3-8caf-3459dbdbaa0b';
 const okxApiSecret = '6337107745922F1D457C472297513220';
