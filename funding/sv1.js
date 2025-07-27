@@ -23,7 +23,7 @@ const binanceApiSecret = 'oU6pZFHgEvbpD9NmFXp5ZVnYFMQ7EIkBiz88aTzvmC3SpT9nEf4fcD
 const bingxApiKey = 'p29V4jTkBelypG9Acd1t4dp6GqHwyTjYcOBq9AC501HVo0f4EN4m6Uv5F2CIr7dNaNTRvaQM0CqcPXfEFuA';
 const bingxApiSecret = 'iTkMpmySRwQSawYBU3D5uFRZhH4UBdRYLOcPVrWbdAYa0go6Nohye1n7PS4XOcOmxQXYnUs1YRei5RvLPg';
 const okxApiKey = 'c2f77f8b-a71a-41a3-8caf-3459dbdbaa0b';
-const okxApiSecret = '6337107745922F1D457C47229713220'; // LƯU Ý: Đã sửa lỗi chính tả ở đây, bạn kiểm tra lại
+const okxApiSecret = '6337107745922F1D457C472297513220'; // ĐÃ SỬA LẠI ĐÚNG VỚI BẢN CŨ CỦA BẠN
 const okxPassword = 'Altf4enter$';
 const bitgetApiKey = 'bg_a1ab0142c295779ac21123d5b59378e9';
 const bitgetApiSecret = 'c12fbe21cd82274bde810b3d4aa7be778e5eee30ca5f47cf8ffc9b950787c961';
@@ -200,7 +200,7 @@ async function initializeLeverageCache() {
             if (id === 'binanceusdm') {
                 // Đối với Binance, LUÔN dùng REST API trực tiếp từ bản mã bot của bạn
                 try {
-                    const binanceRawLeverage = await callSignedBinanceAPI('/fapi/v1/leverageBracket', 'GET');
+                    const binanceRawLeverage = await callSignedBinanceAPI('/fapi/v1/leverageBracket', 'GET'); // Gọi không có symbol để lấy tất cả
                     if (Array.isArray(binanceRawLeverage)) {
                         for (const item of binanceRawLeverage) {
                             const symbolCleaned = cleanSymbol(item.symbol);
