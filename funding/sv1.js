@@ -189,6 +189,10 @@ async function syncServerTime() {
 }
 
 // Hàm fetch BingX max leverage cho một symbol cụ thể (sẽ trả về raw data)
+// Giới hạn log lỗi để không bị spam quá nhiều
+const bingxErrorLogCache = {};
+const BINGX_ERROR_LOG_COOLDOWN_MS = 5 * 60 * 1000; // 5 phút cooldown cho mỗi loại lỗi
+
 async function fetchBingxMaxLeverage(symbol, retries = 3) {
     if (!bingxApiKey || !bingxApiSecret) {
         console.warn(`[BINGX] ⚠️ Thiếu API Key/Secret cho BingX.`);
@@ -231,11 +235,19 @@ async function fetchBingxMaxLeverage(symbol, retries = 3) {
             lastError = { code: e.code, msg: e.msg || e.message, statusCode: e.statusCode || 'N/A', type: 'HTTP_ERROR' };
             lastRawData = e.rawResponse || lastRawData; // Lưu rawResponse từ lỗi nếu có
 
-            let logMsg = `[BINGX] Lỗi lấy leverage cho ${symbol} (Lần ${i+1}/${retries}): ${e.msg || e.message}`;
-            if (e.rawResponse) {
-                logMsg += ` Raw: ${e.rawResponse.substring(0, 500)}...`;
+            // Giới hạn log lỗi để không bị spam
+            const errorSignature = `${e.code}-${e.statusCode}-${e.msg?.substring(0, 50)}`;
+            const now = Date.now();
+            if (!bingxErrorLogCache[errorSignature] || (now - bingxErrorLogCache[errorSignature] > BINGX_ERROR_LOG_COOLDOWN_MS)) {
+                let logMsg = `[BINGX] Lỗi lấy leverage cho ${symbol} (Lần ${i+1}/${retries}): ${e.msg || e.message}`;
+                if (e.rawResponse) {
+                    logMsg += ` Raw: ${e.rawResponse.substring(0, 500)}...`;
+                }
+                console.warn(logMsg);
+                bingxErrorLogCache[errorSignature] = now; // Cập nhật thời gian log cuối cùng
+            } else {
+                // console.warn(`[BINGX] (Bỏ qua log trùng) Lỗi lấy leverage cho ${symbol}: ${e.msg || e.message}`);
             }
-            console.warn(logMsg);
 
             if (e.code === 'NETWORK_ERROR' || e.code === 'TIMEOUT_ERROR' || (e.statusCode >= 500 && e.statusCode < 600)) {
                 const delay = 2 ** i * 1000;
@@ -316,7 +328,9 @@ async function initializeLeverageCache() {
                         if (rawLevData) {
                             fetchedRawLeverageDataMap[cleanSymbol(market.symbol)] = rawLevData; // Lưu raw data cho symbol này
                         }
-                        await sleep(250); // Thêm độ trễ giữa các yêu cầu để tránh rate limit
+                        // debugRawLeverageResponses.bingx đã được cập nhật bởi fetchBingxMaxLeverage (lần gọi cuối cùng của vòng lặp)
+
+                        await sleep(1000); // Thêm độ trễ LỚN HƠN giữa các yêu cầu để tránh rate limit
                     }
                     console.log(`[CACHE] ✅ ${id.toUpperCase()}: Hoàn tất lấy dữ liệu đòn bẩy thô cho ${Object.keys(fetchedRawLeverageDataMap).length} cặp.`);
 
