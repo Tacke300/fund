@@ -1,9 +1,10 @@
 const http = require('http');
-const https = require('https');
+const https = require('https'); // Dùng module https native của Node.js
 const fs = require('fs');
 const path = require('path');
 const ccxt = require('ccxt');
 const crypto = require('crypto');
+const { URLSearchParams } = require('url'); // Sử dụng URLSearchParams để xây dựng query string
 
 const PORT = 5001;
 
@@ -35,6 +36,9 @@ let exchangeData = {};
 let arbitrageOpportunities = [];
 let lastFullUpdateTimestamp = null;
 let loopTimeoutId = null;
+let serverTimeOffset = 0; // Để đồng bộ thời gian với Binance API
+const BINANCE_BASE_HOST = 'fapi.binance.com';
+
 
 const exchanges = {};
 EXCHANGE_IDS.forEach(id => {
@@ -55,7 +59,6 @@ EXCHANGE_IDS.forEach(id => {
 const cleanSymbol = (symbol) => symbol.replace('/USDT', '').replace(':USDT', '').replace(/USDT$/, '');
 
 // Hàm này giúp trích xuất maxLeverage từ market info nếu fetchLeverageTiers không có
-// Hàm này sẽ chỉ còn là fallback cho các sàn không có fetchLeverageTiers (ví dụ: OKX, Bitget nếu cần)
 function getMaxLeverageFromMarketInfo(market) {
     if (typeof market?.limits?.leverage?.max === 'number' && market.limits.leverage.max > 0) {
         return market.limits.leverage.max;
@@ -73,78 +76,117 @@ function getMaxLeverageFromMarketInfo(market) {
     return null;
 }
 
-// Hàm để ký request Binance (dùng cho REST API trực tiếp)
-function signBinanceRequest(params, secret) {
-    const queryString = Object.keys(params).sort().map(key => `${key}=${params[key]}`).join('&'); // Sắp xếp các khóa để ký nhất quán
-    const signature = crypto.createHmac('sha256', secret).update(queryString).digest('hex');
-    return `${queryString}&signature=${signature}`;
-}
+// Hàm để ký request Binance (sao chép từ bản mã bot giao dịch của bạn)
+function createSignature(queryString, apiSecret) { return crypto.createHmac('sha256', apiSecret).update(queryString).digest('hex'); }
 
-// Hàm để lấy leverage từ Binance qua REST API trực tiếp (dùng Node.js's native https module)
-async function fetchBinanceLeverageDirectly(apiKey, apiSecret) {
-    const hostname = 'fapi.binance.com';
-    const path = '/fapi/v1/leverageBracket';
-    const timestamp = Date.now();
-    const params = { timestamp: timestamp };
+// Hàm HTTP Request chung (sao chép và chỉnh sửa từ bản mã bot giao dịch của bạn)
+async function makeHttpRequest(method, hostname, path, headers = {}, postData = '') {
+    return new Promise((resolve, reject) => {
+        const options = {
+            hostname: hostname,
+            port: 443, // Luôn dùng HTTPS cho Binance
+            path: path,
+            method: method,
+            headers: { ...headers, 'User-Agent': 'NodeJS-Arbitrage-Client' },
+            timeout: 20000 // 20 giây timeout
+        };
 
-    const queryString = signBinanceRequest(params, apiSecret);
-
-    const options = {
-        hostname: hostname,
-        path: `${path}?${queryString}`,
-        method: 'GET',
-        headers: {
-            'X-MBX-APIKEY': apiKey,
-            'Content-Type': 'application/json'
-        }
-    };
-
-    return new Promise((resolve) => {
         const req = https.request(options, (res) => {
             let data = '';
-            res.on('data', (chunk) => {
-                data += chunk;
-            });
+            res.on('data', (chunk) => data += chunk);
             res.on('end', () => {
-                try {
-                    const responseJson = JSON.parse(data);
-                    if (res.statusCode && res.statusCode >= 400) {
-                        console.error(`[LEVERAGE] ❌ Lỗi HTTP ${res.statusCode} khi lấy đòn bẩy Binance qua REST API: ${responseJson.msg || 'Không rõ lỗi'}`);
-                        return resolve({}); // Trả về đối tượng rỗng nếu có lỗi HTTP
-                    }
-
-                    const leverageData = {};
-                    if (Array.isArray(responseJson)) {
-                        for (const item of responseJson) {
-                            const symbolCleaned = cleanSymbol(item.symbol);
-                            if (item.brackets && Array.isArray(item.brackets) && item.brackets.length > 0) {
-                                const maxLeverage = Math.max(...item.brackets.map(b => b.leverage));
-                                if (maxLeverage > 0) {
-                                    leverageData[symbolCleaned] = maxLeverage;
-                                }
-                            }
-                        }
-                    }
-                    console.log(`[LEVERAGE] ✅ BINANCEUSDM: Đã lấy thành công ${Object.keys(leverageData).length} đòn bẩy qua REST API.`);
-                    resolve(leverageData);
-                } catch (e) {
-                    console.error(`[LEVERAGE] ❌ Lỗi phân tích JSON hoặc xử lý dữ liệu Binance REST API: ${e.message}. Dữ liệu thô (có thể bị cắt ngắn): ${data.substring(0, 200)}...`);
-                    resolve({});
+                if (res.statusCode >= 200 && res.statusCode < 300) {
+                    resolve(data);
+                } else {
+                    let errorDetails = {
+                        code: res.statusCode,
+                        msg: `HTTP Lỗi: ${res.statusCode} ${res.statusMessage}`,
+                        url: `${hostname}${path}`,
+                        responseBody: data.substring(0, 500)
+                    };
+                    try {
+                        const parsedData = JSON.parse(data);
+                        errorDetails = { ...errorDetails, ...parsedData };
+                    } catch (e) { /* ignore */ }
+                    reject(errorDetails);
                 }
             });
         });
 
-        req.on('error', (e) => {
-            console.error(`[LEVERAGE] ❌ Lỗi mạng khi kết nối Binance REST API: ${e.message}`);
-            resolve({}); // Trả về đối tượng rỗng nếu có lỗi mạng
+        req.on('error', (e) => reject({ code: 'NETWORK_ERROR', msg: `${e.message} (khi gọi ${hostname}${path})` }));
+        req.on('timeout', () => {
+            req.destroy();
+            reject({ code: 'TIMEOUT_ERROR', msg: `Request timed out sau ${options.timeout / 1000}s (khi gọi ${hostname}${path})` });
         });
 
+        if (postData && (method === 'POST' || method === 'PUT')) req.write(postData);
         req.end();
     });
 }
 
+// Hàm gọi API có chữ ký (sao chép và chỉnh sửa từ bản mã bot giao dịch của bạn)
+async function callSignedBinanceAPI(fullEndpointPath, method = 'GET', params = {}) {
+    if (!binanceApiKey || !binanceApiSecret) {
+        throw new Error("Lỗi: Thiếu Binance API Key/Secret.");
+    }
+    const timestamp = Date.now() + serverTimeOffset;
+    const recvWindow = 5000;
+    let queryString = new URLSearchParams(params).toString();
+    queryString += (queryString ? '&' : '') + `timestamp=${timestamp}&recvWindow=${recvWindow}`;
+    const signature = createSignature(queryString, binanceApiSecret);
 
-// Hàm khởi tạo bộ nhớ đệm đòn bẩy cho tất cả các sàn (SỬ DỤNG CCXT và fallback REST API cho Binance)
+    let requestPath;
+    let requestBody = '';
+    const headers = { 'X-MBX-APIKEY': binanceApiKey };
+
+    if (method === 'GET' || method === 'DELETE') {
+        requestPath = `${fullEndpointPath}?${queryString}&signature=${signature}`;
+    } else if (method === 'POST' || method === 'PUT') {
+        requestPath = fullEndpointPath;
+        requestBody = `${queryString}&signature=${signature}`;
+        headers['Content-Type'] = 'application/x-www-form-urlencoded';
+    } else {
+        throw new Error(`Phương thức API không hỗ trợ: ${method}`);
+    }
+
+    try {
+        const rawData = await makeHttpRequest(method, BINANCE_BASE_HOST, requestPath, headers, requestBody);
+        return JSON.parse(rawData);
+    } catch (error) {
+        // Có thể thêm logic xử lý lỗi cụ thể như đồng bộ thời gian ở đây
+        if (error.code === -1021 && error.msg && error.msg.toLowerCase().includes("timestamp")) {
+            console.warn(`[API] ⚠️ Binance: Lỗi timestamp. Thử đồng bộ thời gian.`);
+            await syncServerTime(); // Thử đồng bộ lại thời gian
+        }
+        throw error; // Ném lỗi để được xử lý bởi initializeLeverageCache
+    }
+}
+
+// Hàm gọi API Public (sao chép và chỉnh sửa từ bản mã bot giao dịch của bạn)
+async function callPublicBinanceAPI(fullEndpointPath, params = {}) {
+    const queryString = new URLSearchParams(params).toString();
+    const fullPathWithQuery = `${fullEndpointPath}${queryString ? '?' + queryString : ''}`;
+    try {
+        const rawData = await makeHttpRequest('GET', BINANCE_BASE_HOST, fullPathWithQuery, {});
+        return JSON.parse(rawData);
+    } catch (error) {
+        throw error;
+    }
+}
+
+// Hàm đồng bộ thời gian server (sao chép từ bản mã bot giao dịch của bạn)
+async function syncServerTime() {
+    try {
+        const d = await callPublicBinanceAPI('/fapi/v1/time');
+        serverTimeOffset = d.serverTime - Date.now();
+        console.log(`[TIME] Đồng bộ thời gian Binance server: Offset ${serverTimeOffset}ms.`);
+    } catch (e) {
+        console.error(`[TIME] ❌ Lỗi đồng bộ thời gian Binance: ${e.msg || e.message}.`);
+        throw new Error(`Lỗi đồng bộ thời gian Binance: ${e.msg || e.message}`);
+    }
+}
+
+// Hàm khởi tạo bộ nhớ đệm đòn bẩy cho tất cả các sàn
 async function initializeLeverageCache() {
     console.log(`[CACHE] Bắt đầu làm mới bộ nhớ đệm đòn bẩy...`);
     const newCache = {};
@@ -153,51 +195,91 @@ async function initializeLeverageCache() {
         newCache[id] = {}; // Đảm bảo luôn khởi tạo cache cho sàn này
 
         try {
-            let leverageSource = "CCXT fetchLeverageTiers";
             let fetchedLeverageData = {};
+            let leverageSource = "CCXT fetchLeverageTiers";
 
-            // Luôn thử fetchLeverageTiers trước nếu sàn hỗ trợ
-            if (exchange.has['fetchLeverageTiers']) {
-                try {
-                    const leverageTiers = await exchange.fetchLeverageTiers();
-                    for (const symbol in leverageTiers) {
-                        const tiers = leverageTiers[symbol];
-                        if (Array.isArray(tiers) && tiers.length > 0) {
-                            const numericLeverages = tiers.map(t => typeof t.leverage === 'number' ? t.leverage : parseFloat(t.leverage)).filter(l => !isNaN(l) && l > 0);
-                            const parsedMaxLeverage = numericLeverages.length > 0 ? parseInt(Math.max(...numericLeverages), 10) : 0;
+            if (id === 'binanceusdm') {
+                // Ưu tiên dùng CCXT fetchLeverageTiers trước
+                if (exchange.has['fetchLeverageTiers']) {
+                    try {
+                        const leverageTiers = await exchange.fetchLeverageTiers();
+                        for (const symbol in leverageTiers) {
+                            const tiers = leverageTiers[symbol];
+                            if (Array.isArray(tiers) && tiers.length > 0) {
+                                const numericLeverages = tiers.map(t => typeof t.leverage === 'number' ? t.leverage : parseFloat(t.leverage)).filter(l => !isNaN(l) && l > 0);
+                                const parsedMaxLeverage = numericLeverages.length > 0 ? parseInt(Math.max(...numericLeverages), 10) : 0;
+                                if (parsedMaxLeverage > 0) {
+                                    fetchedLeverageData[cleanSymbol(symbol)] = parsedMaxLeverage;
+                                }
+                            }
+                        }
+                    } catch (e) {
+                        console.warn(`[CACHE] ⚠️ ${id.toUpperCase()}: Lỗi khi gọi fetchLeverageTiers (${e.message}). Thử dùng Binance REST API trực tiếp...`);
+                        leverageSource = "Binance REST API (fallback)";
+                    }
+                } else {
+                    console.log(`[CACHE] ${id.toUpperCase()}: fetchLeverageTiers không khả dụng. Dùng Binance REST API trực tiếp...`);
+                    leverageSource = "Binance REST API (direct)";
+                }
 
-                            if (!isNaN(parsedMaxLeverage) && parsedMaxLeverage > 0) {
-                                fetchedLeverageData[cleanSymbol(symbol)] = parsedMaxLeverage;
+                // Nếu CCXT không lấy được dữ liệu, fallback sang Binance REST API trực tiếp
+                if (Object.keys(fetchedLeverageData).length === 0) {
+                    try {
+                        const binanceRawLeverage = await callSignedBinanceAPI('/fapi/v1/leverageBracket', 'GET');
+                        if (Array.isArray(binanceRawLeverage)) {
+                            for (const item of binanceRawLeverage) {
+                                const symbolCleaned = cleanSymbol(item.symbol);
+                                if (item.brackets && Array.isArray(item.brackets) && item.brackets.length > 0) {
+                                    const maxLeverage = Math.max(...item.brackets.map(b => b.leverage));
+                                    if (maxLeverage > 0) {
+                                        fetchedLeverageData[symbolCleaned] = maxLeverage;
+                                    }
+                                }
+                            }
+                        }
+                    } catch (e) {
+                        console.error(`[CACHE] ❌ ${id.toUpperCase()}: Lỗi khi lấy đòn bẩy qua Binance REST API: ${e.message}.`);
+                        fetchedLeverageData = {}; // Đảm bảo rỗng nếu có lỗi API
+                    }
+                }
+            }
+            else { // Đối với BingX, OKX, Bitget - giữ nguyên logic CCXT
+                if (exchange.has['fetchLeverageTiers']) {
+                    try {
+                        const leverageTiers = await exchange.fetchLeverageTiers();
+                        for (const symbol in leverageTiers) {
+                            const tiers = leverageTiers[symbol];
+                            if (Array.isArray(tiers) && tiers.length > 0) {
+                                const numericLeverages = tiers.map(t => typeof t.leverage === 'number' ? t.leverage : parseFloat(t.leverage)).filter(l => !isNaN(l) && l > 0);
+                                const parsedMaxLeverage = numericLeverages.length > 0 ? parseInt(Math.max(...numericLeverages), 10) : 0;
+                                if (parsedMaxLeverage > 0) {
+                                    fetchedLeverageData[cleanSymbol(symbol)] = parsedMaxLeverage;
+                                }
+                            }
+                        }
+                    } catch(e) {
+                        console.warn(`[CACHE] ⚠️ ${id.toUpperCase()}: Lỗi khi gọi fetchLeverageTiers: ${e.message}. Fallback sang loadMarkets.`);
+                        leverageSource = "CCXT loadMarkets fallback (từ fetchLeverageTiers lỗi)";
+                        await exchange.loadMarkets(true); // Tải lại markets để đảm bảo dữ liệu mới nhất
+                        for (const market of Object.values(exchange.markets)) {
+                            if (market.swap && market.quote === 'USDT') {
+                                const symbolCleaned = cleanSymbol(market.symbol);
+                                const maxLeverage = getMaxLeverageFromMarketInfo(market);
+                                if (maxLeverage !== null && maxLeverage > 0) {
+                                    fetchedLeverageData[symbolCleaned] = maxLeverage;
+                                } else {
+                                    console.warn(`[CACHE] ⚠️ ${id.toUpperCase()}: Đòn bẩy không hợp lệ hoặc không tìm thấy cho ${market.symbol} qua loadMarkets.`);
+                                }
                             }
                         }
                     }
-                } catch (e) {
-                    console.warn(`[CACHE] ⚠️ ${id.toUpperCase()}: Lỗi khi gọi fetchLeverageTiers: ${e.message}.`);
-                    leverageSource = "CCXT fetchLeverageTiers (lỗi)";
-                }
-            }
-
-            // Xử lý logic fallback cho từng sàn
-            if (Object.keys(fetchedLeverageData).length === 0) { // Nếu fetchLeverageTiers không lấy được gì
-                if (id === 'binanceusdm') {
-                    console.log(`[CACHE] ${id.toUpperCase()}: fetchLeverageTiers không lấy được đòn bẩy. Thử dùng REST API trực tiếp...`);
-                    fetchedLeverageData = await fetchBinanceLeverageDirectly(binanceApiKey, binanceApiSecret);
-                    leverageSource = "Binance REST API";
-                }
-                else if (id === 'bingx') {
-                    // BingX's loadMarkets không chứa đòn bẩy. Nếu fetchLeverageTiers không hoạt động,
-                    // việc lấy đòn bẩy qua REST API trực tiếp cho tất cả các cặp rất phức tạp
-                    // và nằm ngoài phạm vi giải pháp "code thuần" mà không có thông tin chi tiết.
-                    console.warn(`[CACHE] ⚠️ ${id.toUpperCase()}: Không lấy được đòn bẩy nào qua CCXT. Vui lòng kiểm tra quyền API hoặc hạn chế của sàn BingX. (Không có fallback REST API chung cho BingX).`);
-                    leverageSource = "Không có đòn bẩy";
-                }
-                else { // OKX và Bitget (dùng loadMarkets nếu fetchLeverageTiers không có hoặc lỗi)
-                    console.log(`[CACHE] ${id.toUpperCase()}: fetchLeverageTiers không lấy được đòn bẩy. Thử dùng loadMarkets...`);
+                } else { // Fallback to loadMarkets nếu sàn không có fetchLeverageTiers
+                    console.log(`[CACHE] ${id.toUpperCase()}: fetchLeverageTiers không khả dụng. Dùng loadMarkets...`);
                     await exchange.loadMarkets(true);
                     for (const market of Object.values(exchange.markets)) {
                         if (market.swap && market.quote === 'USDT') {
                             const symbolCleaned = cleanSymbol(market.symbol);
-                            const maxLeverage = getMaxLeverageFromMarketInfo(market); // Hàm này dùng cho fallback
+                            const maxLeverage = getMaxLeverageFromMarketInfo(market);
                             if (maxLeverage !== null && maxLeverage > 0) {
                                 fetchedLeverageData[symbolCleaned] = maxLeverage;
                             } else {
@@ -205,7 +287,7 @@ async function initializeLeverageCache() {
                             }
                         }
                     }
-                    leverageSource = "CCXT loadMarkets fallback";
+                    leverageSource = "CCXT loadMarkets";
                 }
             }
 
@@ -253,7 +335,7 @@ async function fetchFundingRatesForAllExchanges() {
             const exchange = exchanges[id];
             let processedRates = {};
 
-            // Sử dụng fetchFundingRates của CCXT cho tất cả các sàn
+            // Sử dụng fetchFundingRates của CCXT cho tất cả các sàn (Không có logic này trong bản bot giao dịch)
             const fundingRatesRaw = await exchange.fetchFundingRates();
             for (const rate of Object.values(fundingRatesRaw)) {
                 const symbolCleaned = cleanSymbol(rate.symbol);
@@ -394,6 +476,14 @@ function calculateArbitrageOpportunities() {
 
 async function masterLoop() {
     console.log(`\n[LOOP] Bắt đầu vòng lặp cập nhật lúc ${new Date().toLocaleTimeString()} (UTC: ${new Date().toUTCString()})...`);
+
+    // Đồng bộ thời gian trước khi gọi các API cần ký
+    try {
+        await syncServerTime();
+    } catch (e) {
+        console.error(`[LOOP] ❌ Không thể đồng bộ thời gian, có thể ảnh hưởng đến các yêu cầu API được ký. ${e.message}`);
+        // Tiếp tục chạy nhưng các yêu cầu ký có thể thất bại
+    }
 
     await initializeLeverageCache();
     const freshFundingData = await fetchFundingRatesForAllExchanges();
