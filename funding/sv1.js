@@ -27,7 +27,6 @@ const bingxApiSecret = 'iTkMpmySRwQSawYBU3D5uFRZhH4UBdRYLOCPWrWbdAYa0go6Nohye1n7
 const okxApiKey = 'c2f77f8b-a71a-41a3-8caf-3459dbdbaa0b';
 const okxApiSecret = '6337107745922F1D457C472297513220';
 const okxPassword = 'Altf4enter$';
-// API Key/Secret của Bitget (vui lòng kiểm tra lại thật kỹ trên sàn)
 const bitgetApiKey = 'bg_a1ab0142c295779ac21123d5b59378e9';
 const bitgetApiSecret = 'c12fbe21cd82274bde810b3d4aa7be778e5eee30ca5f47cf8ffc9b950787c961';
 const bitgetApiPassword = 'Altf4enter';
@@ -140,7 +139,7 @@ async function getBinanceLeverageDirectAPI() {
 // === LOGIC LẤY ĐÒN BẨY CHO BINGX (GỌI DIRECT API TỪNG SYMBOL VỚI KÝ TÊN) ===
 async function getBingXLeverageDirectAPI() {
     console.log('[DEBUG] BINGX: Đang cố gắng lấy đòn bẩy bằng REST API trực tiếp /swap/v2/trade/leverage (từng symbol)...');
-    const leverages = {};
+    const leverages = {}; // Khởi tạo object leverages
     if (!bingxApiKey || !bingxApiSecret) {
         console.error('[CACHE] ❌ BINGX: Thiếu API Key hoặc Secret để lấy đòn bẩy qua API /trade/leverage.');
         return {};
@@ -148,7 +147,10 @@ async function getBingXLeverageDirectAPI() {
 
     try {
         const bingxCCXT = exchanges['bingx'];
+        // LOG NÀY SẼ CHỈ RA NẾU loadMarkets CỦA CCXT GẶP LỖI XÁC THỰC (SIGNATURE)
+        console.log(`[DEBUG] BINGX: Bắt đầu loadMarkets(true) qua CCXT.`);
         await bingxCCXT.loadMarkets(true);
+        console.log(`[DEBUG] BINGX: Đã hoàn tất loadMarkets(true) qua CCXT.`);
         const markets = Object.values(bingxCCXT.markets).filter(m => m.swap && m.quote === 'USDT');
 
         if (markets.length === 0) {
@@ -167,7 +169,7 @@ async function getBingXLeverageDirectAPI() {
                 const recvWindow = "5000"; // Đảm bảo recvWindow là string. Có thể thử "10000" hoặc "20000" nếu cần
 
                 // ĐÃ SỬA LỖI ĐÁNH MÁY QUAN TRỌNG TẠI ĐÂY: Thêm '&' trước 'timestamp'
-                const queryString = `recvWindow=${recvWindow}&symbol=${bingxApiSymbol}×tamp=${timestamp}`; // ĐÃ SỬA: BỎ '×tamp' và THÊM '&'
+                const queryString = `recvWindow=${recvWindow}&symbol=${bingxApiSymbol}×tamp=${timestamp}`;
                 const signature = signBingX(queryString, bingxApiSecret);
 
                 const url = `https://open-api.bingx.com/openApi/swap/v2/trade/leverage?${queryString}&signature=${signature}`;
@@ -178,7 +180,7 @@ async function getBingXLeverageDirectAPI() {
                 if (!res.ok) {
                     const errorText = await res.text();
                     console.error(`[CACHE] ❌ BINGX: Phản hồi API không OK cho ${bingxApiSymbol} (Leverage). Status: ${res.status}, Status Text: ${res.statusText}. Phản hồi thô: ${errorText}`);
-                    leverages[cleanS] = null;
+                    leverages[cleanS] = null; // Gán null nếu lỗi
                     await new Promise(resolve => setTimeout(resolve, BINGX_REQUEST_DELAY_MS));
                     continue; // Bỏ qua symbol này và tiếp tục vòng lặp
                 }
@@ -207,8 +209,8 @@ async function getBingXLeverageDirectAPI() {
                     console.warn(`[CACHE] ⚠️ BINGX: Phản hồi API không thành công hoặc không có trường 'data' cho ${bingxApiSymbol}. Code: ${json.code}, Msg: ${json.msg || 'Không có thông báo lỗi.'}`);
                 }
 
-                // THÊM DÒNG LOG NÀY ĐỂ DEBUG TRỰC TIẾP TÌNH TRẠNG LƯU TRỮ ĐÒN BẨY CỦA BINGX
-                console.log(`[DEBUG] BINGX: Đã gán đòn bẩy cho ${cleanS}: ${maxLeverageFound}.`);
+                // THÊM DÒNG LOG NÀY ĐỂ DEBUG TRỰC TIẾP TÌNH TRẠNG LƯU TRỮ ĐÒN BẨY CỦA BINGX VÀO OBJECT LEVERAGES
+                console.log(`[DEBUG] BINGX: Gán đòn bẩy cho ${cleanS}: ${maxLeverageFound}. (Hiện tại leverages['${cleanS}']: ${leverages[cleanS]})`);
                 leverages[cleanS] = maxLeverageFound;
 
 
@@ -218,8 +220,13 @@ async function getBingXLeverageDirectAPI() {
             }
             await new Promise(resolve => setTimeout(resolve, BINGX_REQUEST_DELAY_MS));
         }
+
+        // THÊM DÒNG LOG NÀY ĐỂ XEM TOÀN BỘ OBJECT LEVERAGES TRƯỚC KHI TRẢ VỀ
+        console.log(`[DEBUG] BINGX: Object 'leverages' đã thu thập được sau vòng lặp:`, JSON.stringify(leverages, null, 2));
+
         console.log(`[CACHE] ✅ BINGX: Hoàn tất lấy đòn bẩy. Đã lấy thành công ${Object.values(leverages).filter(v => v !== null && v > 0).length} đòn bẩy qua REST API /trade/leverage.`);
-        return leverages;
+        return leverages; // Trả về object leverages đã thu thập
+
 
     } catch (e) {
         console.error(`[CACHE] ❌ Lỗi tổng quát khi lấy đòn bẩy cho BINGX: ${e.message}. Stack: ${e.stack}. VUI LÒNG KIỂM TRA API KEY BINGX.`);
@@ -257,7 +264,13 @@ async function initializeLeverageCache() {
                 console.log(`[CACHE] ✅ ${id.toUpperCase()}: Tổng số ${count} đòn bẩy đã lấy.`);
             } else if (id === 'bingx') {
                 const leverages = await getBingXLeverageDirectAPI();
-                newCache[id] = leverages;
+                // THÊM LOG NÀY ĐỂ XEM DỮ LIỆU ĐÒN BẨY SAU KHI ĐƯỢC initializeLeverageCache NHẬN
+                console.log(`[DEBUG] initializeLeverageCache nhận BingX leverages:`, JSON.stringify(leverages, null, 2));
+
+                newCache[id] = leverages; // Gán leverages vào newCache[id]
+                // THÊM LOG NÀY ĐỂ XEM TRẠNG THÁI CỦA newCache[id] SAU KHI GÁN
+                console.log(`[DEBUG] initializeLeverageCache: newCache['bingx'] sau khi gán:`, JSON.stringify(newCache[id], null, 2));
+
                 count = Object.values(leverages).filter(v => v !== null && v > 0).length; // Bây giờ v đã là số
                 console.log(`[CACHE] ✅ ${id.toUpperCase()}: Tổng số ${count} đòn bẩy đã lấy.`);
             }
@@ -293,7 +306,8 @@ async function initializeLeverageCache() {
             newCache[id] = {};
         }
     }));
-    leverageCache = newCache;
+    leverageCache = newCache; // Gán newCache vào leverageCache
+    console.log(`[DEBUG] 'leverageCache' sau khi cập nhật cuối cùng:`, JSON.stringify(leverageCache, null, 2)); // LOG TRẠNG THÁI CUỐI CÙNG CỦA CACHE
     console.log(`[CACHE] 🎉 Hoàn tất làm mới bộ nhớ đệm đòn bẩy.`);
 }
 
@@ -335,7 +349,9 @@ function getBingXFundingRatesDirectAPI() {
 
         try {
             const bingxCCXT = exchanges['bingx'];
-            await bingxCCXT.loadMarkets(true); // Cần load markets để có danh sách symbol
+            console.log(`[DEBUG] BINGX: Bắt đầu loadMarkets(true) qua CCXT cho Funding.`); // Log cho Funding
+            await bingxCCXT.loadMarkets(true);
+            console.log(`[DEBUG] BINGX: Đã hoàn tất loadMarkets(true) qua CCXT cho Funding.`); // Log cho Funding
             const markets = Object.values(bingxCCXT.markets).filter(m => m.swap && m.quote === 'USDT');
 
             if (markets.length === 0) {
@@ -344,7 +360,7 @@ function getBingXFundingRatesDirectAPI() {
             }
 
             const BINGX_REQUEST_DELAY_MS = 100;
-            const processedData = [];
+            const processedData = []; // Khởi tạo mảng processedData
 
             for (const market of markets) {
                 const originalSymbol = market.symbol;
@@ -373,6 +389,9 @@ function getBingXFundingRatesDirectAPI() {
                     if (json && json.code === 0 && json.data) {
                         const fundingRate = parseFloat(json.data.fundingRate);
                         const fundingTimestamp = parseInt(json.data.nextFundingTime, 10);
+
+                        console.log(`[DEBUG] BINGX: Parsing funding for ${bingxApiSymbol} -> fundingRate: ${json.data.fundingRate} (parsed: ${fundingRate}), nextFundingTime: ${json.data.nextFundingTime} (parsed: ${fundingTimestamp}).`); // THÊM DÒNG NÀY
+
                         if (!isNaN(fundingRate) && !isNaN(fundingTimestamp) && fundingTimestamp > 0) {
                             processedData.push({
                                 symbol: cleanS, // Lưu ký hiệu đã làm sạch vào processedData
@@ -390,6 +409,8 @@ function getBingXFundingRatesDirectAPI() {
                 }
                 await new Promise(resolve => setTimeout(resolve, BINGX_REQUEST_DELAY_MS)); // Delay giữa các request
             }
+            // THÊM DÒNG LOG NÀY ĐỂ XEM TOÀN BỘ MẢNG processedData TRƯỚC KHI TRẢ VỀ
+            console.log(`[DEBUG] BINGX: Mảng 'processedData' đã thu thập được sau vòng lặp:`, JSON.stringify(processedData, null, 2));
             resolve(processedData);
 
         } catch (e) {
@@ -419,6 +440,9 @@ async function fetchFundingRatesForAllExchanges() {
                 }
             } else if (id === 'bingx') {
                 fundingRatesRaw = await getBingXFundingRatesDirectAPI();
+                // THÊM LOG NÀY ĐỂ XEM DỮ LIỆU FUNDING SAU KHI ĐƯỢC fetchFundingRatesForAllExchanges NHẬN
+                console.log(`[DEBUG] fetchFundingRatesForAllExchanges nhận BingX funding rates:`, JSON.stringify(fundingRatesRaw, null, 2));
+
                 for (const item of fundingRatesRaw) {
                     processedRates[item.symbol] = {
                         symbol: item.symbol,
@@ -427,6 +451,9 @@ async function fetchFundingRatesForAllExchanges() {
                         maxLeverage: leverageCache[id]?.[item.symbol] || null
                     };
                 }
+                // THÊM LOG NÀY ĐỂ XEM TRẠNG THÁI CỦA processedRates CHO BINGX SAU KHI XỬ LÝ
+                console.log(`[DEBUG] fetchFundingRatesForAllExchanges: processedRates['bingx'] sau khi xử lý:`, JSON.stringify(processedRates, null, 2));
+
             }
             else {
                 fundingRatesRaw = await exchange.fetchFundingRates();
@@ -454,6 +481,8 @@ async function fetchFundingRatesForAllExchanges() {
     })).then(results => {
         results.forEach(result => { if (result.status === 'success') { freshData[result.id] = { rates: result.rates }; }});
     });
+    // LOG CUỐI CÙNG TRƯỚC KHI TRẢ VỀ freshData
+    console.log(`[DEBUG] 'freshData' sau khi thu thập từ tất cả các sàn:`, JSON.stringify(freshData, null, 2));
     return freshData;
 }
 
@@ -472,6 +501,9 @@ function calculateNextStandardFundingTime() {
 
 function calculateArbitrageOpportunities() {
     const allFoundOpportunities = [];
+    // LOG NÀY SẼ CHO THẤY 'exchangeData' NGAY TRƯỚC KHI TÍNH TOÁN CƠ HỘI ARBITRAGE
+    console.log(`[DEBUG] 'exchangeData' trước khi tính toán cơ hội arbitrage:`, JSON.stringify(exchangeData, null, 2));
+
     const currentExchangeData = JSON.parse(JSON.stringify(exchangeData));
     for (let i = 0; i < EXCHANGE_IDS.length; i++) {
         for (let j = i + 1; j < EXCHANGE_IDS.length; j++) {
@@ -484,14 +516,20 @@ function calculateArbitrageOpportunities() {
                 // Kiểm tra loại số và giá trị dương của đòn bẩy
                 if (typeof rate1Data.maxLeverage !== 'number' || rate1Data.maxLeverage <= 0 ||
                     typeof rate2Data.maxLeverage !== 'number' || rate2Data.maxLeverage <= 0) {
+                    // LOG NÀY SẼ CHỈ RA TẠI SAO MỘT CẶP ĐƯỢC BỎ QUA VÌ ĐÒN BẨY KHÔNG HỢP LỆ
+                    console.log(`[DEBUG] Arbitrage: Bỏ qua ${symbol} vì đòn bẩy không hợp lệ. ${exchange1Id}:${rate1Data.maxLeverage}, ${exchange2Id}:${rate2Data.maxLeverage}`);
                     continue;
                 }
 
-                if (!rate1Data.fundingTimestamp || !rate2Data.fundingTimestamp) continue;
+                if (!rate1Data.fundingTimestamp || !rate2Data.fundingTimestamp) {
+                    // LOG NÀY SẼ CHỈ RA TẠI SAO MỘT CẶP ĐƯỢC BỎ QUA VÌ THIẾU TIMESTAMP
+                    console.log(`[DEBUG] Arbitrage: Bỏ qua ${symbol} vì thiếu fundingTimestamp. ${exchange1Id}:${rate1Data.fundingTimestamp}, ${exchange2Id}:${rate2Data.fundingTimestamp}`);
+                    continue;
+                }
 
                 let longExchange, shortExchange, longRate, shortRate;
                 if (rate1Data.fundingRate > rate2Data.fundingRate) {
-                    shortExchange = exchange1Id; shortRate = rate1Data; longExchange = exchange2Id; longRate = rate1Data;
+                    shortExchange = exchange1Id; shortRate = rate1Data; longExchange = exchange2Id; longRate = rate2Data;
                 } else {
                     shortExchange = exchange2Id; shortRate = rate2Data; longExchange = exchange1Id; longRate = rate1Data;
                 }
