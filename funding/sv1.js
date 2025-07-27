@@ -10,7 +10,7 @@ const PORT = 5001;
 
 // ----- CẤU HÌNH -----
 const EXCHANGE_IDS = ['binanceusdm', 'bingx', 'okx', 'bitget'];
-const FUNDING_DIFFERENCE_THRESHOLD = 0.00001; // Giảm ngưỡng để bắt cả các funding nhỏ hơn
+const FUNDING_DIFFERENCE_THRESHOLD = 0.00001;
 const MINIMUM_PNL_THRESHOLD = 15;
 const IMMINENT_THRESHOLD_MINUTES = 15;
 const LEVERAGE_CACHE_REFRESH_INTERVAL_MINUTES = 30;
@@ -18,7 +18,7 @@ const LEVERAGE_CACHE_REFRESH_INTERVAL_MINUTES = 30;
 // === QUAN TRỌNG: ĐIỀN API KEY VÀ SECRET VÀO ĐÂY ===
 const binanceApiKey = 'cZ1Y2O0kggVEggEaPvhFcYQHS5b1EsT2OWZb8zdY9C0jGqNROvXRZHTJjnQ7OG4Q';
 const binanceApiSecret = 'oU6pZFHgEvbpD9NmFXp5ZVnYFMQ7EIkBiz88TzvmC3SpT9nEf4fcDf0pEnFzoTc';
-const bingxApiKey = 'p29V4jTkBelypG9Acd1t4dp6GqHwyTjYcOBq9AC501HVo0f4EN4m6Uv5F2CIr7dNaNTRvaQM0CqcPXfEFuA';
+const bingxApiKey = 'p29V4jTkBelypG9Acd1t4dp6GqHwyTjYcOBr9AC501HVo0f4EN4m6Uv5F2CIr7dNaNTRvaQM0CqcPXfEFuA';
 const bingxApiSecret = 'iTkMpmySRwQSawYBU3D5uFRZhH4UBdRYLOcPVrWbdAYa0go6Nohye1n7PS4XOcOmxQXYnUs1YRei5RvLPg';
 const okxApiKey = 'c2f77f8b-a71a-41a3-8caf-3459dbdbaa0b';
 const okxApiSecret = '6337107745922F1D457C472297513220';
@@ -101,10 +101,8 @@ async function getBingXLeverageDirectAPI() {
             const bingxApiSymbol = formatBingXApiSymbol(market.symbol);
             try {
                 const timestamp = Date.now().toString();
-                // ĐÃ CẬP NHẬT: Tăng recvWindow lên 15000 để tăng dung sai thời gian
                 const recvWindow = "15000"; 
-                // ĐÃ SỬA LỖI QUAN TRỌNG: Thay '×tamp' bằng '×tamp'
-                const queryString = `recvWindow=${recvWindow}&symbol=${bingxApiSymbol}xtamp=${timestamp}`;
+                const queryString = `recvWindow=${recvWindow}&symbol=${bingxApiSymbol}×tamp=${timestamp}`; // Đã sửa lỗi ×tamp
                 const signature = signBingX(queryString, bingxApiSecret);
                 const url = `https://open-api.bingx.com/openApi/swap/v2/trade/leverage?${queryString}&signature=${signature}`;
 
@@ -197,7 +195,6 @@ async function initializeLeverageCache() {
                     }
                 }
             }
-            // Recalculate count for the current ID after processing
             count = Object.values(newCache[id]).filter(v => typeof v === 'number' && v > 0).length;
             console.log(`[CACHE] ✅ ${id.toUpperCase()}: Tổng số ${count} đòn bẩy đã lấy.`);
 
@@ -283,6 +280,7 @@ async function fetchFundingRatesForAllExchanges() {
                 const rates = await getBinanceFundingRatesDirectAPI();
                 rates.forEach(item => processedRates[cleanSymbol(item.symbol)] = { ...item, maxLeverage: leverageCache[id]?.[cleanSymbol(item.symbol)] || null });
             } else if (id === 'bingx') {
+                // ĐÃ CẬP NHẬT: Dữ liệu BingX raw rates sẽ được bao gồm trong response /api/data
                 const rates = await getBingXFundingRatesDirectAPI();
                 rates.forEach(item => processedRates[item.symbol] = { ...item, maxLeverage: leverageCache[id]?.[item.symbol] || null });
             } else {
@@ -307,7 +305,7 @@ async function fetchFundingRatesForAllExchanges() {
     })).then(results => {
         results.forEach(result => {
             if (result.status === 'success') freshData[result.id] = { rates: result.rates };
-            else if (!exchangeData[result.id]) exchangeData[result.id] = { rates: {} }; // Init if not exist
+            else if (!exchangeData[result.id]) exchangeData[result.id] = { rates: {} };
         });
     });
     return freshData;
@@ -326,7 +324,7 @@ function calculateNextStandardFundingTime() {
 
 function calculateArbitrageOpportunities() {
     const allFoundOpportunities = [];
-    const currentExchangeData = JSON.parse(JSON.stringify(exchangeData)); // Deep copy
+    const currentExchangeData = JSON.parse(JSON.stringify(exchangeData));
 
     for (let i = 0; i < EXCHANGE_IDS.length; i++) {
         for (let j = i + 1; j < EXCHANGE_IDS.length; j++) {
@@ -354,7 +352,7 @@ function calculateArbitrageOpportunities() {
                 }
 
                 if (typeof rate1Data.fundingRate !== 'number' || typeof rate2Data.fundingRate !== 'number' ||
-                    !rate1Data.fundingTimestamp || !rate2Data.fundingTimestamp || rate1Data.fundingTimestamp <= 0 || rate2Data.fundingTimestamp <= 0) {
+                    !rate1Data.fundingTimestamp || rate1Data.fundingTimestamp <= 0 || !rate2Data.fundingTimestamp || rate2Data.fundingTimestamp <= 0) {
                     console.log(`[CALC] Bỏ qua ${symbol} trên ${exchange1Id}/${exchange2Id} do thiếu hoặc không hợp lệ Funding Rate/Timestamp. Rate1: ${rate1Data.fundingRate}, Time1: ${rate1Data.fundingTimestamp}, Rate2: ${rate2Data.fundingRate}, Time2: ${rate2Data.fundingTimestamp}`);
                     continue;
                 }
@@ -444,7 +442,7 @@ const server = http.createServer((req, res) => {
             arbitrageData: arbitrageOpportunities,
             rawRates: {
                 binance: Object.values(exchangeData.binanceusdm?.rates || {}),
-                bingx: Object.values(exchangeData.bingx?.rates || {}),
+                bingx: Object.values(exchangeData.bingx?.rates || {}), // ĐÃ CẬP NHẬT: Bao gồm BingX raw rates ở đây
                 okx: Object.values(exchangeData.okx?.rates || {}),
                 bitget: Object.values(exchangeData.bitget?.rates || {}),
             }
@@ -457,7 +455,7 @@ const server = http.createServer((req, res) => {
 });
 
 server.listen(PORT, async () => {
-    console.log(`✅ Máy chủ dữ liệu (ĐÃ FIX LỖI CÚ PHÁP TIMESTAMP CỦA BINGX & CẬP NHẬT RECVWINDOW) đang chạy tại http://localhost:${PORT}`);
+    console.log(`✅ Máy chủ dữ liệu (ĐÃ BAO GỒM BINGX TRONG RAW RATES) đang chạy tại http://localhost:${PORT}`);
     await initializeLeverageCache();
     await masterLoop();
     setInterval(initializeLeverageCache, LEVERAGE_CACHE_REFRESH_INTERVAL_MINUTES * 60 * 1000);
