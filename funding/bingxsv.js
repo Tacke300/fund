@@ -2,6 +2,7 @@ const https = require('https');
 const crypto = require('crypto');
 const http = require('http');
 
+// ✅ Sẵn API key và secret
 const API_KEY = 'p29V4jTkBelypG9Acd1t4dp6GqHwyTjYcOBq9AC501HVo0f4EN4m6Uv5F2CIr7dNaNTRvaQM0CqcPXfEFuA';
 const API_SECRET = 'iTkMpmySRwQSawYBU3D5uFRZhH4UBdRYLOcPVrWbdAYa0go6Nohye1n7PS4XOcOmxQXYnUs1YRei5RvLPg';
 
@@ -10,131 +11,103 @@ function hmacSha256(secret, message) {
 }
 
 function apiGet(path) {
-  console.log(`Calling public GET ${path}`);
   const options = {
     hostname: 'open-api.bingx.com',
     port: 443,
     path,
     method: 'GET',
     headers: {
-      'Content-Type': 'application/json',
       'X-API-KEY': API_KEY,
     },
   };
 
   return new Promise((resolve, reject) => {
-    const req = https.request(options, (res) => {
+    const req = https.request(options, res => {
       let data = '';
       res.on('data', chunk => data += chunk);
       res.on('end', () => {
-        console.log(`Response from ${path}: ${data}`);
         try {
-          resolve(JSON.parse(data));
+          const json = JSON.parse(data);
+          resolve(json);
         } catch (e) {
-          reject(new Error(`JSON parse error at ${path}: ${e.message}\nData: ${data}`));
+          reject(new Error(`JSON parse error for ${path}: ${e.message}`));
         }
       });
     });
 
-    req.on('error', (err) => {
-      console.error(`Request error at ${path}:`, err);
-      reject(err);
-    });
+    req.on('error', err => reject(err));
     req.end();
   });
 }
 
 function apiGetSigned(path, params = {}) {
+  const timestamp = Date.now();
+  params.timestamp = timestamp;
+
+  const query = Object.keys(params).sort().map(k => `${k}=${params[k]}`).join('&');
+  const sign = hmacSha256(API_SECRET, query);
+  const fullPath = `${path}?${query}&sign=${sign}`;
+
+  const options = {
+    hostname: 'open-api.bingx.com',
+    port: 443,
+    path: fullPath,
+    method: 'GET',
+    headers: {
+      'X-API-KEY': API_KEY,
+    },
+  };
+
   return new Promise((resolve, reject) => {
-    const timestamp = Date.now();
-    params.timestamp = timestamp;
-
-    const query = Object.keys(params)
-      .sort()
-      .map(k => `${k}=${params[k]}`)
-      .join('&');
-
-    const sign = hmacSha256(API_SECRET, query);
-
-    const fullPath = `${path}?${query}&sign=${sign}`;
-
-    console.log(`Calling signed GET ${fullPath}`);
-
-    const options = {
-      hostname: 'open-api.bingx.com',
-      port: 443,
-      path: fullPath,
-      method: 'GET',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-API-KEY': API_KEY,
-      },
-    };
-
-    const req = https.request(options, (res) => {
+    const req = https.request(options, res => {
       let data = '';
       res.on('data', chunk => data += chunk);
       res.on('end', () => {
-        console.log(`Response from ${fullPath}: ${data}`);
         try {
-          resolve(JSON.parse(data));
+          const json = JSON.parse(data);
+          resolve(json);
         } catch (e) {
-          reject(new Error(`JSON parse error at ${fullPath}: ${e.message}\nData: ${data}`));
+          reject(new Error(`Signed JSON parse error: ${e.message}`));
         }
       });
     });
 
-    req.on('error', (err) => {
-      console.error(`Request error at ${fullPath}:`, err);
-      reject(err);
-    });
+    req.on('error', err => reject(err));
     req.end();
   });
 }
 
 async function fetchData() {
   try {
-    console.log('Start fetching contracts list...');
-    const contractsData = await apiGet('/openApi/swap/v2/quote/contracts');
+    console.log('📥 Fetching contracts list...');
+    const contractRes = await apiGet('/openApi/swap/v2/quote/contracts');
+    const contracts = contractRes.data;
 
-    if (!contractsData?.data?.contracts || !Array.isArray(contractsData.data.contracts)) {
-      throw new Error('No contracts data found or invalid format');
-    }
+    if (!Array.isArray(contracts)) throw new Error('Contracts format invalid');
 
-    const contracts = contractsData.data.contracts;
-    console.log(`Got ${contracts.length} contracts`);
-
-    // Lấy max leverage song song cho nhanh
-    const leveragePromises = contracts.map(async (contract) => {
+    const results = await Promise.all(contracts.map(async (contract) => {
       const symbol = contract.symbol;
-      const bingxSymbol = symbol.includes(':') ? symbol : symbol + ':USDT';
 
       let maxLev = null;
       try {
-        const levData = await apiGetSigned('/openApi/swap/v2/trade/leverage', { symbol: bingxSymbol });
-        if (levData?.data?.maxLeverage) {
-          maxLev = levData.data.maxLeverage;
-        } else {
-          console.warn(`No maxLeverage for ${bingxSymbol}`, levData);
-        }
+        const levRes = await apiGetSigned('/openApi/swap/v2/trade/leverage', { symbol });
+        maxLev = levRes?.data?.maxLeverage ?? null;
       } catch (e) {
-        console.error(`Error fetching max leverage for ${bingxSymbol}:`, e.message);
+        console.warn(`⚠️ Leverage error for ${symbol}: ${e.message}`);
       }
 
       return {
-        symbol: symbol,
-        nextFundingTime: contract.nextFundingTime,
+        symbol,
         fundingRate: contract.fundingRate,
+        nextFundingTime: contract.nextFundingTime,
         maxLeverage: maxLev,
       };
-    });
+    }));
 
-    const results = await Promise.all(leveragePromises);
     return results;
-
-  } catch (e) {
-    console.error('Error in fetchData:', e.message);
-    throw e;
+  } catch (err) {
+    console.error('🔥 fetchData error:', err.message);
+    throw err;
   }
 }
 
@@ -155,5 +128,5 @@ const server = http.createServer(async (req, res) => {
 });
 
 server.listen(5005, () => {
-  console.log('Server listening on http://localhost:5005');
+  console.log('🚀 Server running at http://localhost:5005/funding');
 });
