@@ -137,7 +137,7 @@ async function fetchData() {
   }
 }
 
-const http = require('http');
+
 
 const server = http.createServer(async (req, res) => {
   if (req.method === 'GET' && req.url === '/funding') {
