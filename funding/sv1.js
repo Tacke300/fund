@@ -27,6 +27,7 @@ const bingxApiSecret = 'iTkMpmySRwQSawYBU3D5uFRZhH4UBdRYLOCPWrWbdAYa0go6Nohye1n7
 const okxApiKey = 'c2f77f8b-a71a-41a3-8caf-3459dbdbaa0b';
 const okxApiSecret = '6337107745922F1D457C472297513220';
 const okxPassword = 'Altf4enter$';
+// API Key/Secret của Bitget (vui lòng kiểm tra lại thật kỹ trên sàn)
 const bitgetApiKey = 'bg_a1ab0142c295779ac21123d5b59378e9';
 const bitgetApiSecret = 'c12fbe21cd82274bde810b3d4aa7be778e5eee30ca5f47cf8ffc9b950787c961';
 const bitgetApiPassword = 'Altf4enter';
@@ -78,32 +79,51 @@ EXCHANGE_IDS.forEach(id => {
 });
 
 
-// ĐÃ SỬA: Cải thiện hàm cleanSymbol để xử lý các trường hợp phức tạp hơn (ví dụ: BTC/USD:BTC -> BTC)
+// ĐÃ SỬA: Cải thiện hàm cleanSymbol để chuẩn hóa mạnh mẽ hơn, chỉ giữ lại phần base symbol
 const cleanSymbol = (symbol) => {
-    // Xóa "/USDT", ":USDT", "USDT" ở cuối
-    let cleaned = symbol.replace(/\/USDT$/, '').replace(/:USDT$/, '').replace(/USDT$/, '');
-    // Xóa "/USD:BASE_CURRENCY" hoặc "/USDC:BASE_CURRENCY"
-    cleaned = cleaned.replace(/\/USD:.+$/, '').replace(/\/USDC:.+$/, '');
-    // Xóa bất kỳ cặp base/quote nào nếu còn sót
-    cleaned = cleaned.replace(/\/.+$/, '');
-    return cleaned.toUpperCase(); // Đảm bảo chữ hoa để nhất quán
+    // Chuyển về chữ hoa trước để xử lý thống nhất
+    let cleaned = symbol.toUpperCase();
+
+    // Xử lý các định dạng phổ biến: BTC/USDT, BTC:USDT, BTCUSDT
+    cleaned = cleaned.replace(/[\/\-:]?USDT$/, '');
+    cleaned = cleaned.replace(/[\/\-:]?USDC$/, '');
+
+    // Xử lý các định dạng như BTC/USD:BTC, BTC-USD-PERP
+    cleaned = cleaned.replace(/\/USD:.+$/, ''); // /USD:BTC -> rỗng
+    cleaned = cleaned.replace(/-USD-.+$/, ''); // -USD-PERP -> rỗng
+    cleaned = cleaned.replace(/\/PERP$/, ''); // /PERP -> rỗng
+
+    // Nếu vẫn còn dấu '/', lấy phần đầu tiên (BTC/ETH -> BTC)
+    if (cleaned.includes('/')) {
+        cleaned = cleaned.split('/')[0];
+    }
+    // Nếu vẫn còn dấu '-', lấy phần đầu tiên (BTC-PERP -> BTC)
+    if (cleaned.includes('-')) {
+        cleaned = cleaned.split('-')[0];
+    }
+    // Nếu vẫn còn dấu ':', lấy phần đầu tiên (BTC:XXX -> BTC)
+    if (cleaned.includes(':')) {
+        cleaned = cleaned.split(':')[0];
+    }
+
+    return cleaned;
 };
 
 // Hàm hỗ trợ định dạng ký hiệu theo yêu cầu của BingX API (ví dụ: BTC-USDT)
 const formatBingXApiSymbol = (ccxtSymbol) => {
-    // Vẫn cần dùng originalSymbol cho API call của BingX
-    // Ví dụ: BTC/USDT -> BTC-USDT
-    // CBK/USDT -> CBK-USDT
-    // BTC/USD:BTC -> BTC-USDT (API BingX thường chỉ dùng USDT pairs for futures)
+    // CCXT symbol có thể là BTC/USDT, BTC/USD:BTC
+    // BingX API thường cần BTC-USDT
     let base = ccxtSymbol;
+    // Lấy phần base
     if (base.includes('/')) {
         base = base.split('/')[0];
     }
     if (base.includes(':')) {
         base = base.split(':')[0];
     }
-    // Remove "USDT" if already present to avoid "BTCUSDT-USDT"
-    base = base.replace(/USDT$/i, ''); // case-insensitive remove USDT at end
+    // Xóa "USDT" nếu đã có để tránh "BTCUSDT-USDT"
+    base = base.replace(/USDT$/i, '');
+    // Chuyển thành chữ hoa và thêm -USDT
     return `${base.toUpperCase()}-USDT`;
 };
 
@@ -257,10 +277,26 @@ async function getBingXLeverageDirectAPI() {
     }
 }
 
-// Hàm này giờ chỉ dùng cho OKX và Bitget (dùng qua CCXT loadMarkets)
-function getMaxLeverageFromMarketInfo(market, exchangeId) {
-    if (typeof market?.limits?.leverage?.max === 'number' && market.limits.leverage.max > 0) return market.limits.leverage.max;
-    if (typeof market?.info === 'object' && market.info !== null) {
+// ĐÃ SỬA: Cải thiện hàm getMaxLeverageFromMarketInfo để xử lý nhiều trường hợp của CCXT
+function getMaxLeverageFromMarketInfo(market) {
+    if (!market) return null;
+
+    // Ưu tiên: limits.leverage.max (chuẩn CCXT)
+    if (typeof market.limits?.leverage?.max === 'number' && market.limits.leverage.max > 0) {
+        return market.limits.leverage.max;
+    }
+
+    // Thứ hai: market.info.maxLeverage (Bitget thường có)
+    if (typeof market.info?.maxLeverage === 'number' && market.info.maxLeverage > 0) {
+        return market.info.maxLeverage;
+    }
+    // Thứ ba: market.info.leverage (một số sàn cũ hoặc các trường hợp đặc biệt)
+    if (typeof market.info?.leverage === 'number' && market.info.leverage > 0) {
+        return market.info.leverage;
+    }
+
+    // Duyệt qua market.info để tìm các key có chứa 'leverage' và có giá trị số hợp lệ
+    if (typeof market.info === 'object' && market.info !== null) {
         for (const key in market.info) {
             if (key.toLowerCase().includes('leverage')) {
                 const value = market.info[key];
@@ -269,6 +305,7 @@ function getMaxLeverageFromMarketInfo(market, exchangeId) {
             }
         }
     }
+    console.warn(`[DEBUG] Không tìm thấy maxLeverage hợp lệ cho market: ${market.symbol} (${market.id}). Info: ${JSON.stringify(market.info)}`);
     return null;
 }
 
@@ -312,14 +349,20 @@ async function initializeLeverageCache() {
                 }
                 if (count > 0) { console.log(`[CACHE] ✅ ${id.toUpperCase()}: Lấy thành công ${count} đòn bẩy bằng 'fetchLeverageTiers'.`); }
                 else { console.log(`[CACHE] ⚠️ ${id.toUpperCase()}: 'fetchLeverageTiers' không trả về dữ liệu hợp lệ.`); }
-            } else {
+            } else { // Xử lý cho các sàn không có fetchLeverageTiers, như Bitget, OKX
                 await exchange.loadMarkets(true);
                 for (const market of Object.values(exchange.markets)) {
+                    // Chỉ xem xét các cặp USDT swap
                     if (market.swap && market.quote === 'USDT') {
-                        const symbol = cleanSymbol(market.symbol);
-                        const maxLeverage = getMaxLeverageFromMarketInfo(market, id);
+                        const symbol = cleanSymbol(market.symbol); // Sử dụng cleanSymbol mới
+                        const maxLeverage = getMaxLeverageFromMarketInfo(market); // Đã sửa: không cần truyền id nữa
                         newCache[id][symbol] = maxLeverage;
-                        if (maxLeverage !== null && maxLeverage > 0) count++;
+                        if (maxLeverage !== null && maxLeverage > 0) {
+                            count++;
+                        } else {
+                            // Log cảnh báo nếu không lấy được đòn bẩy cho một cặp hợp lệ
+                            console.warn(`[CACHE] ⚠️ ${id.toUpperCase()}: Đòn bẩy không hợp lệ hoặc không tìm thấy cho ${market.symbol} (Cleaned: ${symbol}). Value: ${maxLeverage}`);
+                        }
                     }
                 }
                 console.log(`[CACHE] ✅ ${id.toUpperCase()}: Lấy thành công ${count} đòn bẩy bằng 'loadMarkets' (dự phòng).`);
@@ -349,7 +392,7 @@ async function getBinanceFundingRatesDirectAPI() {
             fundingRate: parseFloat(item.fundingRate),
             fundingTimestamp: item.fundingTime
         })).filter(item =>
-            !isNaN(item.fundingRate) && // Không cần item.symbol.endsWith('USDT') vì cleanSymbol đã xử lý
+            !isNaN(item.fundingRate) &&
             typeof item.fundingTimestamp === 'number' &&
             item.fundingTimestamp > 0
         );
@@ -444,7 +487,7 @@ function getBingXFundingRatesDirectAPI() {
             }
             // THÊM DÒNG LOG NÀY ĐỂ XEM TOÀN BỘ OBJECT processedData TRƯỚC KHI TRẢ VỀ
             console.log(`[DEBUG] BINGX: Object 'processedData' (funding rates) đã thu thập được sau vòng lặp:`, JSON.stringify(processedData, null, 2));
-            resolve(Object.values(processedData)); // Trả về mảng các values từ object processedData
+            return Object.values(processedData); // Trả về mảng các values từ object processedData
 
         } catch (e) {
             reject(new Error(`Lỗi tổng quát khi lấy API BingX Funding Rate: ${e.message}. Stack: ${e.stack}. VUI LÒNG KIỂM TRA API KEY BINGX.`));
