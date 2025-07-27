@@ -4,7 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const ccxt = require('ccxt');
 
-const PORT = 5001; // Port mà server sẽ lắng nghe
+const PORT = 5097; // Port mà server sẽ lắng nghe
 
 // ----- CẤU HÌNH -----
 const EXCHANGE_IDS = ['binanceusdm', 'bingx', 'okx', 'bitget'];
