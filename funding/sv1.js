@@ -101,8 +101,10 @@ async function getBingXLeverageDirectAPI() {
             const bingxApiSymbol = formatBingXApiSymbol(market.symbol);
             try {
                 const timestamp = Date.now().toString();
-                const recvWindow = "10000"; // Tăng recvWindow
-                const queryString = `recvWindow=${recvWindow}&symbol=${bingxApiSymbol}xtamp=${timestamp}`; // Sửa lỗi '×tamp'
+                // ĐÃ CẬP NHẬT: Tăng recvWindow lên 15000 để tăng dung sai thời gian
+                const recvWindow = "15000"; 
+                // ĐÃ SỬA LỖI QUAN TRỌNG: Thay '×tamp' bằng '×tamp'
+                const queryString = `recvWindow=${recvWindow}&symbol=${bingxApiSymbol}×tamp=${timestamp}`;
                 const signature = signBingX(queryString, bingxApiSecret);
                 const url = `https://open-api.bingx.com/openApi/swap/v2/trade/leverage?${queryString}&signature=${signature}`;
 
@@ -251,7 +253,6 @@ async function getBingXFundingRatesDirectAPI() {
 
                     if (json && json.code === 0 && json.data) {
                         const fundingRate = parseFloat(json.data.fundingRate);
-                        // Ưu tiên 'fundingTime' nếu có, nếu không thì dùng 'nextFundingTime'
                         const fundingTimestamp = parseInt(json.data.fundingTime || json.data.nextFundingTime, 10);
 
                         console.log(`[DEBUG] BINGX: Đã parse Funding Rate cho ${bingxApiSymbol}: Rate Type: ${typeof fundingRate}, Value: ${fundingRate}. Timestamp Type: ${typeof fundingTimestamp}, Value: ${fundingTimestamp}.`);
@@ -333,15 +334,12 @@ function calculateArbitrageOpportunities() {
             const exchange1Rates = currentExchangeData[exchange1Id]?.rates, exchange2Rates = currentExchangeData[exchange2Id]?.rates;
 
             if (!exchange1Rates || !exchange2Rates || Object.keys(exchange1Rates).length === 0 || Object.keys(exchange2Rates).length === 0) {
-                // Console log này chỉ hiển thị nếu một trong hai sàn không có dữ liệu rates nào cả
-                // console.log(`[CALC] Bỏ qua cặp ${exchange1Id}/${exchange2Id} do thiếu dữ liệu rates.`);
                 continue;
             }
 
             const commonSymbols = Object.keys(exchange1Rates).filter(symbol => exchange2Rates[symbol]);
 
             if (commonSymbols.length === 0) {
-                // console.log(`[CALC] Không tìm thấy symbol chung giữa ${exchange1Id} và ${exchange2Id}.`);
                 continue;
             }
 
@@ -349,19 +347,14 @@ function calculateArbitrageOpportunities() {
                 const rate1Data = exchange1Rates[symbol];
                 const rate2Data = exchange2Rates[symbol];
 
-                // Kiểm tra Đòn bẩy hợp lệ: phải là số và > 0
                 if (typeof rate1Data.maxLeverage !== 'number' || rate1Data.maxLeverage <= 0 ||
                     typeof rate2Data.maxLeverage !== 'number' || rate2Data.maxLeverage <= 0) {
-                    // Cảnh báo chi tiết hơn nếu đòn bẩy không hợp lệ
                     console.log(`[CALC] Bỏ qua ${symbol} trên ${exchange1Id}/${exchange2Id} do đòn bẩy không hợp lệ: ${rate1Data.maxLeverage} (Ex1) / ${rate2Data.maxLeverage} (Ex2)`);
                     continue;
                 }
 
-                // Kiểm tra Funding Rate và Timestamp có tồn tại và hợp lệ không
-                // fundingRate có thể là 0 hoặc âm, nên không dùng !fundingRate
                 if (typeof rate1Data.fundingRate !== 'number' || typeof rate2Data.fundingRate !== 'number' ||
                     !rate1Data.fundingTimestamp || !rate2Data.fundingTimestamp || rate1Data.fundingTimestamp <= 0 || rate2Data.fundingTimestamp <= 0) {
-                    // Cảnh báo chi tiết hơn
                     console.log(`[CALC] Bỏ qua ${symbol} trên ${exchange1Id}/${exchange2Id} do thiếu hoặc không hợp lệ Funding Rate/Timestamp. Rate1: ${rate1Data.fundingRate}, Time1: ${rate1Data.fundingTimestamp}, Rate2: ${rate2Data.fundingRate}, Time2: ${rate2Data.fundingTimestamp}`);
                     continue;
                 }
@@ -377,12 +370,12 @@ function calculateArbitrageOpportunities() {
 
                 const fundingDiff = shortRate.fundingRate - longRate.fundingRate;
 
-                if (fundingDiff <= FUNDING_DIFFERENCE_THRESHOLD) { // Ngưỡng để xem xét cơ hội
+                if (fundingDiff <= FUNDING_DIFFERENCE_THRESHOLD) {
                     continue;
                 }
 
                 const commonLeverage = Math.min(longRate.maxLeverage, shortRate.maxLeverage);
-                const estimatedPnl = fundingDiff * commonLeverage * 100; // Ước tính cho $100 vốn
+                const estimatedPnl = fundingDiff * commonLeverage * 100;
 
                 if (estimatedPnl >= MINIMUM_PNL_THRESHOLD) {
                     const finalFundingTime = Math.max(rate1Data.fundingTimestamp, rate2Data.fundingTimestamp);
@@ -432,7 +425,7 @@ async function masterLoop() {
 function scheduleNextLoop() {
     clearTimeout(loopTimeoutId);
     const now = new Date();
-    const delaySeconds = (60 - now.getSeconds() + 5) % 60; // Run 5 seconds into the next minute
+    const delaySeconds = (60 - now.getSeconds() + 5) % 60;
     const delayMs = (delaySeconds === 0 ? 60 : delaySeconds) * 1000;
     console.log(`[SCHEDULER] Vòng lặp kế tiếp sau ${delaySeconds.toFixed(1)} giây (chạy vào giây thứ ${(now.getSeconds() + delaySeconds) % 60} của phút tiếp theo).`);
     loopTimeoutId = setTimeout(masterLoop, delayMs);
@@ -464,7 +457,7 @@ const server = http.createServer((req, res) => {
 });
 
 server.listen(PORT, async () => {
-    console.log(`✅ Máy chủ dữ liệu (Đã Fix lỗi BingX fundingTime & cải thiện log) đang chạy tại http://localhost:${PORT}`);
+    console.log(`✅ Máy chủ dữ liệu (ĐÃ FIX LỖI CÚ PHÁP TIMESTAMP CỦA BINGX & CẬP NHẬT RECVWINDOW) đang chạy tại http://localhost:${PORT}`);
     await initializeLeverageCache();
     await masterLoop();
     setInterval(initializeLeverageCache, LEVERAGE_CACHE_REFRESH_INTERVAL_MINUTES * 60 * 1000);
