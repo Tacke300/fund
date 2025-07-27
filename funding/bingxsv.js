@@ -1,90 +1,149 @@
 const https = require('https');
-const http = require('http');
 const crypto = require('crypto');
-const url = require('url');
+const http = require('http');
 
-const apiKey = 'p29V4jTkBelypG9Acd1t4dp6GqHwyTjYcOBq9AC501HVo0f4EN4m6Uv5F2CIr7dNaNTRvaQM0CqcPXfEFuA';
-const secretKey = 'iTkMpmySRwQSawYBU3D5uFRZhH4UBdRYLOcPVrWbdAYa0go6Nohye1n7PS4XOcOmxQXYnUs1YRei5RvLPg';
+const API_KEY = 'p29V4jTkBelypG9Acd1t4dp6GqHwyTjYcOBq9AC501HVo0f4EN4m6Uv5F2CIr7dNaNTRvaQM0CqcPXfEFuA';
+const API_SECRET = 'iTkMpmySRwQSawYBU3D5uFRZhH4UBdRYLOcPVrWbdAYa0go6Nohye1n7PS4XOcOmxQXYnUs1YRei5RvLPg';
 
-function get(endpoint, params = {}) {
+function hmacSha256(secret, message) {
+  return crypto.createHmac('sha256', secret).update(message).digest('hex');
+}
+
+// Hàm gọi API GET không auth
+function apiGet(path) {
+  const options = {
+    hostname: 'open-api.bingx.com',
+    port: 443,
+    path,
+    method: 'GET',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-API-KEY': API_KEY,
+    },
+  };
+
   return new Promise((resolve, reject) => {
-    const baseUrl = 'https://open-api.bingx.com' + endpoint;
-    const query = new url.URLSearchParams(params).toString();
-    const fullUrl = query ? `${baseUrl}?${query}` : baseUrl;
+    const req = https.request(options, (res) => {
+      let data = '';
+      res.on('data', (chunk) => data += chunk);
+      res.on('end', () => {
+        try {
+          resolve(JSON.parse(data));
+        } catch (e) {
+          reject(new Error(`JSON parse error: ${e.message}\nData: ${data}`));
+        }
+      });
+    });
 
-    https.get(fullUrl, res => {
+    req.on('error', reject);
+    req.end();
+  });
+}
+
+// Hàm gọi API GET có auth (cần timestamp + sign)
+function apiGetSigned(path, params = {}) {
+  return new Promise((resolve, reject) => {
+    const timestamp = Date.now();
+    params.timestamp = timestamp;
+
+    // Tạo query string
+    const query = Object.keys(params)
+      .sort()
+      .map(k => `${k}=${params[k]}`)
+      .join('&');
+
+    const sign = hmacSha256(API_SECRET, query);
+
+    const fullPath = `${path}?${query}&sign=${sign}`;
+
+    const options = {
+      hostname: 'open-api.bingx.com',
+      port: 443,
+      path: fullPath,
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-API-KEY': API_KEY,
+      },
+    };
+
+    const req = https.request(options, (res) => {
       let data = '';
       res.on('data', chunk => data += chunk);
       res.on('end', () => {
         try {
-          const json = JSON.parse(data);
-          resolve(json);
+          resolve(JSON.parse(data));
         } catch (e) {
-          reject(`JSON parse error: ${e.message}`);
+          reject(new Error(`JSON parse error: ${e.message}\nData: ${data}`));
         }
       });
-    }).on('error', reject);
+    });
+
+    req.on('error', reject);
+    req.end();
   });
 }
 
-function getLeverage(symbol) {
-  const timestamp = Date.now();
-  const params = `symbol=${symbol}&timestamp=${timestamp}`;
-  const signature = crypto
-    .createHmac('sha256', secretKey)
-    .update(params)
-    .digest('hex');
+async function fetchData() {
+  // Bước 1: Lấy danh sách contract (symbol + funding + nextFundingTime)
+  const contractsData = await apiGet('/openApi/swap/v2/quote/contracts');
 
-  const fullParams = {
-    symbol,
-    timestamp,
-    signature
-  };
-
-  return get('/openApi/swap/v2/trade/leverage', fullParams);
-}
-
-async function fetchAllFundingAndLeverage() {
-  try {
-    const result = await get('/openApi/swap/v2/quote/premiumIndex');
-    const data = result.data || [];
-
-    const promises = data.map(async item => {
-      const symbol = item.symbol;
-      let lev = null;
-      try {
-        const levRes = await getLeverage(symbol);
-        lev = levRes?.data?.longMaxLeverage || null;
-      } catch (e) {
-        lev = null;
-      }
-
-      return {
-        symbol,
-        fundingRate: item.fundingRate,
-        nextFundingTime: item.nextFundingTime,
-        leverage: lev
-      };
-    });
-
-    const finalData = await Promise.all(promises);
-    return finalData;
-  } catch (e) {
-    return { error: true, message: e.toString() };
+  if (!contractsData?.data?.contracts) {
+    throw new Error('Không lấy được danh sách contracts');
   }
+
+  const contracts = contractsData.data.contracts;
+
+  // Bước 2: Với từng symbol gọi lấy max leverage
+  // BingX yêu cầu format symbol dạng: BTC-USDT:USDT
+  // Nên cần tạo symbol có đuôi ":USDT"
+  // Lưu ý: Có thể ko phải tất cả symbol đều có max lev trả về, handle null
+
+  const results = [];
+
+  for (const contract of contracts) {
+    const symbol = contract.symbol; // VD: BTC-USDT
+
+    const bingxSymbol = symbol.includes(':') ? symbol : symbol + ':USDT';
+
+    let maxLev = null;
+    try {
+      const levData = await apiGetSigned('/openApi/swap/v2/trade/leverage', { symbol: bingxSymbol });
+      if (levData?.data?.maxLeverage) {
+        maxLev = levData.data.maxLeverage;
+      }
+    } catch (e) {
+      // nếu lỗi API hoặc không có dữ liệu maxLeverage thì để null
+      maxLev = null;
+    }
+
+    results.push({
+      symbol: symbol,
+      nextFundingTime: contract.nextFundingTime,
+      fundingRate: contract.fundingRate,
+      maxLeverage: maxLev,
+    });
+  }
+
+  return results;
 }
 
 const server = http.createServer(async (req, res) => {
-  if (req.url === '/funding' && req.method === 'GET') {
-    const data = await fetchAllFundingAndLeverage();
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify(data));
+  if (req.method === 'GET' && req.url === '/funding') {
+    try {
+      const data = await fetchData();
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(data, null, 2));
+    } catch (err) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: err.message }));
+    }
   } else {
-    res.writeHead(404, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ error: true, message: 'Not Found' }));
+    res.writeHead(404);
+    res.end('Not found');
   }
 });
 
 server.listen(5005, () => {
-  console.log('Server is running on port 5005');
+  console.log('Server listening on http://localhost:5005');
 });
