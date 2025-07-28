@@ -238,7 +238,7 @@ async function fetchBingxMaxLeverage(symbol, retries = 3) {
             lastRawData = rawRes; 
             lastError = null; 
             
-            // ĐÃ SỬA LỖI CÚ PHÁP: Khối try/catch này bao trùm việc parse JSON và xử lý logic
+            // ĐÃ SỬA LỖI CÚ PHÁP: Đảm bảo luồng thoát rõ ràng hoặc xử lý lỗi
             try { 
                 const parsedJson = JSON.parse(rawRes);
                 if (parsedJson.code === 0 && parsedJson.data) {
@@ -247,26 +247,27 @@ async function fetchBingxMaxLeverage(symbol, retries = 3) {
 
                     if (!isNaN(maxLongLev) && maxLongLev > 0 && !isNaN(maxShortLev) && maxShortLev > 0) {
                         parsedLeverage = Math.max(maxLongLev, maxShortLev);
-                        return parsedLeverage;
+                        return parsedLeverage; // Trả về và thoát hàm
                     } else {
-                        console.warn(`[CACHE] ⚠️ BingX: Phản hồi API hợp lệ nhưng không tìm thấy đòn bẩy tối đa hợp lệ (maxLongLeverage/maxShortLeverage) cho ${symbol}. Raw: ${rawRes.substring(0, Math.min(rawRes.length, 200))}`);
+                        // Nếu dữ liệu không hợp lệ, set lastError và không return
                         lastError = { code: parsedJson.code, msg: 'No valid maxLongLeverage/maxShortLeverage found in data', type: 'API_RESPONSE_PARSE_ERROR' };
                     }
                 } else {
-                    console.warn(`[CACHE] ⚠️ BingX: Phản hồi API không thành công (Code: ${parsedJson.code} != 0) hoặc không có 'data' cho ${symbol}. Msg: ${parsedJson.msg || 'N/A'}. Raw: ${rawRes.substring(0, Math.min(rawRes.length, 200))}`);
+                    // Nếu code API không phải 0 hoặc không có data, set lastError và không return
                     lastError = { code: parsedJson.code, msg: parsedJson.msg || 'Invalid API Response Structure', type: 'API_RESPONSE_ERROR' };
                 }
             } catch (jsonParseError) {
-                console.warn(`[CACHE] ⚠️ BingX: Lỗi parse JSON phản hồi cho ${symbol}. Raw: ${rawRes.substring(0, Math.min(rawRes.length, 200))}. Lỗi: ${jsonParseError.message}`);
+                // Lỗi parse JSON, set lastError và không return
                 lastError = { code: 'JSON_PARSE_ERROR', msg: jsonParseError.message, type: 'JSON_PARSE_ERROR' };
             }
 
+            // Nếu không có lỗi nào được return từ khối try/catch trên, kiểm tra retry
             if (i < retries - 1) {
                 await sleep(500); // Small delay before retry
-                continue;
+                continue; // Thử lại vòng lặp
             }
-            break; 
-        } catch (e) {
+            break; // Thoát vòng lặp nếu hết lượt retry hoặc đã thành công/xử lý
+        } catch (e) { // Catch cho lỗi makeHttpRequest (NETWORK_ERROR, TIMEOUT_ERROR, HTTP status codes)
             lastError = { code: e.code, msg: e.msg || e.message, statusCode: e.statusCode || 'N/A', type: 'HTTP_ERROR' };
             lastRawData = e.rawResponse || lastRawData;
 
@@ -296,6 +297,7 @@ async function fetchBingxMaxLeverage(symbol, retries = 3) {
             break;
         }
     }
+    // Trả về parsedLeverage cuối cùng (có thể là null nếu tất cả các lần thử đều thất bại)
     return parsedLeverage;
 }
 
