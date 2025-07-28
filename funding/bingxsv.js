@@ -50,7 +50,7 @@ let debugRawLeverageResponses = {
     binanceusdm: { status: 'Đang tải đòn bẩy...', timestamp: null, data: 'N/A', error: null },
     bingx: { status: 'Đang tải đòn bẩy...', timestamp: null, data: 'N/A', error: null },
     okx: { status: 'Đang tải đòn bẩy...', timestamp: null, data: 'N/A', error: null },
-    bitget: { status: 'Đang tải đòn bẩy...', timestamp: null, data: 'N/A', error: null }
+    bitget: { status: 'Đang tải đòn bòn bẩy...', timestamp: null, data: 'N/A', error: null }
 };
 
 const BINGX_BASE_HOST = 'open-api.bingx.com';
@@ -119,8 +119,6 @@ async function makeHttpRequest(method, hostname, path, headers = {}, postData = 
             let data = '';
             res.on('data', (chunk) => data += chunk);
             res.on('end', () => {
-                // ĐÃ SỬA LỖI CÚ PHÁP: Loại bỏ khối try không cần thiết bên trong res.on('end')
-                // Logic xử lý status code và reject đã nằm ngoài try/catch của callback này
                 if (res.statusCode >= 200 && res.statusCode < 300) {
                     resolve(data);
                 } else {
@@ -238,7 +236,6 @@ async function fetchBingxMaxLeverage(symbol, retries = 3) {
             lastRawData = rawRes; 
             lastError = null; 
             
-            // ĐÃ SỬA LỖI CÚ PHÁP: Đảm bảo luồng thoát rõ ràng hoặc xử lý lỗi
             try { 
                 const parsedJson = JSON.parse(rawRes);
                 if (parsedJson.code === 0 && parsedJson.data) {
@@ -247,27 +244,23 @@ async function fetchBingxMaxLeverage(symbol, retries = 3) {
 
                     if (!isNaN(maxLongLev) && maxLongLev > 0 && !isNaN(maxShortLev) && maxShortLev > 0) {
                         parsedLeverage = Math.max(maxLongLev, maxShortLev);
-                        return parsedLeverage; // Trả về và thoát hàm
+                        return parsedLeverage; 
                     } else {
-                        // Nếu dữ liệu không hợp lệ, set lastError và không return
                         lastError = { code: parsedJson.code, msg: 'No valid maxLongLeverage/maxShortLeverage found in data', type: 'API_RESPONSE_PARSE_ERROR' };
                     }
                 } else {
-                    // Nếu code API không phải 0 hoặc không có data, set lastError và không return
                     lastError = { code: parsedJson.code, msg: parsedJson.msg || 'Invalid API Response Structure', type: 'API_RESPONSE_ERROR' };
                 }
             } catch (jsonParseError) {
-                // Lỗi parse JSON, set lastError và không return
                 lastError = { code: 'JSON_PARSE_ERROR', msg: jsonParseError.message, type: 'JSON_PARSE_ERROR' };
             }
 
-            // Nếu không có lỗi nào được return từ khối try/catch trên, kiểm tra retry
             if (i < retries - 1) {
-                await sleep(500); // Small delay before retry
-                continue; // Thử lại vòng lặp
+                await sleep(500); 
+                continue; 
             }
-            break; // Thoát vòng lặp nếu hết lượt retry hoặc đã thành công/xử lý
-        } catch (e) { // Catch cho lỗi makeHttpRequest (NETWORK_ERROR, TIMEOUT_ERROR, HTTP status codes)
+            break; 
+        } catch (e) { 
             lastError = { code: e.code, msg: e.msg || e.message, statusCode: e.statusCode || 'N/A', type: 'HTTP_ERROR' };
             lastRawData = e.rawResponse || lastRawData;
 
@@ -297,7 +290,6 @@ async function fetchBingxMaxLeverage(symbol, retries = 3) {
             break;
         }
     }
-    // Trả về parsedLeverage cuối cùng (có thể là null nếu tất cả các lần thử đều thất bại)
     return parsedLeverage;
 }
 
@@ -465,7 +457,7 @@ async function updateLeverageForExchange(id, symbolsToUpdate = null) {
         else { // OKX và Bitget: Dùng CCXT (fetchLeverageTiers + loadMarkets fallback)
             debugRawLeverageResponses[id].timestamp = new Date(); 
 
-            try {
+            try { // ĐÃ SỬA: Thêm khối try...catch bên trong này
                 let currentFetchedMap = {};
                 // Đối với các sàn này, fetchLeverageTiers hoặc loadMarkets thường đủ nhanh và trả về nhiều dữ liệu
                 // nên chúng ta có thể gọi nó dù là cập nhật toàn bộ hay mục tiêu.
@@ -529,6 +521,10 @@ async function updateLeverageForExchange(id, symbolsToUpdate = null) {
                     fetchedLeverageDataMap = currentFetchedMap;
                     console.log(`[CACHE] ✅ ${id.toUpperCase()}: Đã lấy ${Object.keys(fetchedLeverageDataMap).length} cặp đòn bẩy toàn bộ.`);
                 }
+            } catch(e) { // ĐÃ SỬA: Khối catch cho try bên trong nhánh else (OKX/Bitget)
+                console.warn(`[CACHE] ⚠️ ${id.toUpperCase()}: Lỗi khi gọi CCXT phương thức leverage: ${e.message}.`);
+                debugRawLeverageResponses[id].status = `Đòn bẩy thất bại (lỗi CCXT: ${e.code || 'UNKNOWN'})`;
+                debugRawLeverageResponses[id].error = { code: e.code, msg: e.message };
             }
             
             // Cập nhật leverageCache và tính toán cơ hội ngay lập tức
@@ -539,7 +535,7 @@ async function updateLeverageForExchange(id, symbolsToUpdate = null) {
             debugRawLeverageResponses[id].error = null;
             calculateArbitrageOpportunities(); // Tính toán lại cơ hội sau mỗi lần cập nhật đòn bẩy của một sàn
 
-        } catch (e) {
+        } catch (e) { // Đây là catch cho try lớn nhất của hàm updateLeverageForExchange
             let errorMessage = `Lỗi nghiêm trọng khi lấy đòn bẩy cho ${id.toUpperCase()}: ${e.message}.`;
             console.error(`[CACHE] ❌ ${id.toUpperCase()}: ${errorMessage}`);
             debugRawLeverageResponses[id].status = `Đòn bẩy thất bại (lỗi chung: ${e.code || 'UNKNOWN'})`;
