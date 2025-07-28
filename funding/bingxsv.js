@@ -14,7 +14,7 @@ const {
     bitgetApiKey, bitgetApiSecret, bitgetApiPassword
 } = require('./config.js');
 
-const PORT = 5005; 
+const PORT = 5005; // Đảm bảo cổng này khớp với cổng bạn chạy
 
 // ----- CẤU HÌNH -----
 const EXCHANGE_IDS = ['binanceusdm', 'bingx', 'okx', 'bitget'];
@@ -27,19 +27,23 @@ const LEVERAGE_CACHE_REFRESH_INTERVAL_MINUTES = 30;
 const BINGX_CONCURRENT_FETCH_LIMIT = 2; // Giảm số lượng yêu cầu BingX được chạy song song tại một thời điểm
 const BINGX_DELAY_BETWEEN_CONCURRENT_BATCHES_MS = 5000; // Độ trễ giữa các lô yêu cầu song song (5 giây)
 
+// Cấu hình cho BingX Funding Rate API trực tiếp
+const BINGX_FUNDING_RATE_DELAY_MS = 1000; // Độ trễ giữa mỗi yêu cầu Funding Rate cho BingX (1 giây)
+
 // ----- BIẾN TOÀN CỤC -----
 // Khởi tạo các biến với giá trị rỗng hoặc null để server có thể trả về ngay lập tức
 let leverageCache = {}; 
 let exchangeData = {};
 let arbitrageOpportunities = [];
-let lastFullUpdateTimestamp = null; // Sẽ là null ban đầu, sau đó cập nhật khi dữ liệu sẵn sàng
+let lastFullUpdateTimestamp = null; 
 let loopTimeoutId = null;
 
+// Khởi tạo trạng thái debug với 'Đang tải...'
 let debugRawLeverageResponses = {
-    binanceusdm: { status: 'Đang tải...', timestamp: null, data: 'N/A', error: null },
-    bingx: { status: 'Đang tải...', timestamp: null, data: 'N/A', error: null },
-    okx: { status: 'Đang tải...', timestamp: null, data: 'N/A', error: null },
-    bitget: { status: 'Đang tải...', timestamp: null, data: 'N/A', error: null }
+    binanceusdm: { status: 'Đang tải đòn bẩy...', timestamp: null, data: 'N/A', error: null },
+    bingx: { status: 'Đang tải đòn bẩy...', timestamp: null, data: 'N/A', error: null },
+    okx: { status: 'Đang tải đòn bẩy...', timestamp: null, data: 'N/A', error: null },
+    bitget: { status: 'Đang tải đòn bẩy...', timestamp: null, data: 'N/A', error: null }
 };
 
 const BINGX_BASE_HOST = 'open-api.bingx.com';
@@ -231,12 +235,12 @@ async function fetchBingxMaxLeverage(symbol, retries = 3) {
                     const maxLongLev = parseInt(parsedJson.data.maxLongLeverage, 10);
                     const maxShortLev = parseInt(parsedJson.data.maxShortLeverage, 10);
 
-                    console.log(`[DEBUG_BINGX_LEV] Sym: ${symbol}, Raw (partial): ${rawRes.substring(0, Math.min(rawRes.length, 300))}`);
-                    console.log(`[DEBUG_BINGX_LEV] Sym: ${symbol}, maxLongLeverage: ${parsedJson.data.maxLongLeverage}, maxShortLeverage: ${parsedJson.data.maxShortLeverage}`);
+                    // ĐÃ BỎ: console.log(`[DEBUG_BINGX_LEV] Sym: ${symbol}, Raw (partial): ${rawRes.substring(0, Math.min(rawRes.length, 300))}`);
+                    // ĐÃ BỎ: console.log(`[DEBUG_BINGX_LEV] Sym: ${symbol}, maxLongLeverage: ${parsedJson.data.maxLongLeverage}, maxShortLeverage: ${parsedJson.data.maxShortLeverage}`);
 
                     if (!isNaN(maxLongLev) && maxLongLev > 0 && !isNaN(maxShortLev) && maxShortLev > 0) {
                         parsedLeverage = Math.max(maxLongLev, maxShortLev);
-                        console.log(`[CACHE] ✅ BingX: Max leverage của ${symbol} là ${parsedLeverage} (REST API - maxLong/Short).`);
+                        // ĐÃ BỎ: console.log(`[CACHE] ✅ BingX: Max leverage của ${symbol} là ${parsedLeverage} (REST API - maxLong/Short).`);
                         return parsedLeverage;
                     } else {
                         console.warn(`[CACHE] ⚠️ BingX: Phản hồi API hợp lệ nhưng không tìm thấy đòn bẩy tối đa hợp lệ (maxLongLeverage/maxShortLeverage) cho ${symbol}. Raw: ${rawRes.substring(0, Math.min(rawRes.length, 200))}`);
@@ -273,7 +277,7 @@ async function fetchBingxMaxLeverage(symbol, retries = 3) {
 
             if (e.code === 'NETWORK_ERROR' || e.code === 'TIMEOUT_ERROR' || (e.statusCode >= 500 && e.statusCode < 600) || e.code === 100410) { 
                 const delay = 2 ** i * 1000;
-                console.warn(`[BINGX] Lỗi tạm thời (có thể do rate limit). Thử lại sau ${delay / 1000}ms.`);
+                console.warn(`[BINGX] Lỗi tạm thời (có thể do rate limit). Thử lại sau ${delay / 1000}s.`);
                 await sleep(delay);
                 continue;
             } else if (e.statusCode === 400 || e.statusCode === 401 || e.statusCode === 403 || e.code === 1015 || e.code === 429) {
@@ -289,6 +293,48 @@ async function fetchBingxMaxLeverage(symbol, retries = 3) {
     return parsedLeverage;
 }
 
+// ✅ Lấy toàn bộ symbol future từ BingX API trực tiếp (được dùng cho Funding Rates)
+async function getBingxSymbolsDirect() {
+    const urlPath = '/openApi/swap/v2/quote/contracts';
+    try {
+        const data = await makeHttpRequest('GET', BINGX_BASE_HOST, urlPath);
+        const json = JSON.parse(data);
+        if (json.code === 0 && Array.isArray(json.data)) {
+            const symbols = json.data.map(item => item.symbol);
+            return symbols;
+        } else {
+            console.error(`[BINGX_SYMBOLS] Lỗi khi lấy danh sách symbol BingX: Code ${json.code}, Msg: ${json.msg}`);
+            return [];
+        }
+    } catch (e) {
+        console.error(`[BINGX_SYMBOLS] Lỗi request khi lấy danh sách symbol BingX: ${e.msg || e.message}`);
+        return [];
+    }
+}
+
+// ✅ Lấy funding rate + time cho 1 symbol từ BingX API trực tiếp
+async function getBingxFundingRateDirect(symbol) {
+    const urlPath = `/openApi/swap/v2/quote/fundingRate?symbol=${encodeURIComponent(symbol)}`;
+    try {
+        const data = await makeHttpRequest('GET', BINGX_BASE_HOST, urlPath);
+        const json = JSON.parse(data);
+        if (json.code === 0 && json.data) {
+            return {
+                symbol: json.data.symbol, 
+                fundingRate: json.data.fundingRate,
+                fundingTime: json.data.fundingTime // Đây chính là nextFundingTime
+            };
+        } else {
+            // Log chi tiết hơn khi không có dữ liệu funding
+            console.warn(`[BINGX_FUNDING] Không có dữ liệu funding hoặc lỗi API cho ${symbol}. Code: ${json.code}, Msg: ${json.msg || 'N/A'}`);
+            return null;
+        }
+    } catch (e) {
+        console.warn(`[BINGX_FUNDING] Lỗi request khi lấy funding rate cho ${symbol}: ${e.msg || e.message}`);
+        return null;
+    }
+}
+
 async function initializeLeverageCache() {
     console.log(`[CACHE] Bắt đầu làm mới bộ nhớ đệm đòn bẩy...`);
     const newCache = {};
@@ -296,7 +342,7 @@ async function initializeLeverageCache() {
         const exchange = exchanges[id];
         let fetchedLeverageDataMap = {};
         let leverageSource = "Unknown";
-        let currentRawDebug = { status: 'Đang tải...', timestamp: new Date(), data: 'N/A', error: null }; // Cập nhật trạng thái
+        let currentRawDebug = { status: 'Đang tải đòn bẩy...', timestamp: new Date(), data: 'N/A', error: null };
 
         try {
             if (id === 'binanceusdm') {
@@ -318,14 +364,14 @@ async function initializeLeverageCache() {
                             }
                         }
                     }
-                    currentRawDebug = { status: `thành công (${successCount} cặp API)`, timestamp: new Date(), data: `Đã lấy ${successCount} cặp từ API.`, error: null };
+                    currentRawDebug = { status: `Thành công (${successCount} cặp)`, timestamp: new Date(), data: `Đã lấy ${successCount} cặp từ API.`, error: null };
                     console.log(`[CACHE] ✅ Binance: Đã lấy ${successCount} cặp đòn bẩy từ API trực tiếp.`);
 
                 } catch (e) {
                     let errorMessage = `Lỗi nghiêm trọng khi lấy đòn bẩy Binance qua API trực tiếp: ${e.message}.`;
                     console.error(`[CACHE] ❌ Binance: ${errorMessage}`);
                     leverageSource = "Binance REST API (lỗi nghiêm trọng)";
-                    currentRawDebug = { status: `thất bại (Binance API lỗi: ${e.code || 'UNKNOWN'})`, timestamp: new Date(), data: e.rawResponse || e.message, error: { code: e.code, msg: e.message } };
+                    currentRawDebug = { status: `Thất bại (lỗi API: ${e.code || 'UNKNOWN'})`, timestamp: new Date(), data: e.rawResponse || e.message, error: { code: e.code, msg: e.message } };
                 }
             }
             else if (id === 'bingx') {
@@ -335,10 +381,12 @@ async function initializeLeverageCache() {
                     await exchange.loadMarkets(true);
                     const bingxMarkets = Object.values(exchange.markets)
                         .filter(m => m.swap && m.quote === 'USDT');
+                    const totalSymbols = bingxMarkets.length;
 
-                    console.log(`[CACHE] ${id.toUpperCase()}: Tìm thấy ${bingxMarkets.length} tổng số cặp swap USDT. Đang lấy dữ liệu đòn bẩy cho tất cả các cặp...`);
+                    console.log(`[CACHE] ${id.toUpperCase()}: Tìm thấy ${totalSymbols} tổng số cặp swap USDT. Bắt đầu lấy dữ liệu đòn bẩy...`);
 
-                    let successCount = 0;
+                    let fetchedCount = 0; // Để đếm số lượng đã fetch (không nhất thiết thành công)
+                    let successCount = 0; // Để đếm số lượng thành công parse
                     const marketChunks = [];
                     for (let i = 0; i < bingxMarkets.length; i += BINGX_CONCURRENT_FETCH_LIMIT) {
                         marketChunks.push(bingxMarkets.slice(i, i + BINGX_CONCURRENT_FETCH_LIMIT));
@@ -347,35 +395,35 @@ async function initializeLeverageCache() {
                     for (const chunk of marketChunks) {
                         const chunkPromises = chunk.map(async market => {
                             const formattedSymbol = market.symbol.replace('/', '-').replace(':USDT', '');
-                            const parsedMaxLeverage = await fetchBingxMaxLeverage(formattedSymbol);
+                            const parsedMaxLeverage = await fetchBingxMaxLeverage(formattedSymbol); // Hàm này đã bỏ log chi tiết
+                            fetchedCount++; // Tăng sau mỗi lần cố gắng fetch
                             if (parsedMaxLeverage !== null && parsedMaxLeverage > 0) {
                                 fetchedLeverageDataMap[cleanSymbol(market.symbol)] = parsedMaxLeverage;
-                                return true;
-                            } else {
-                                console.warn(`[CACHE] ⚠️ ${id.toUpperCase()}: Không thể lấy đòn bẩy hợp lệ cho ${cleanSymbol(market.symbol)}. (Kiểm tra log chi tiết từ API BingX)`);
-                                return false;
+                                successCount++;
                             }
+                            // CẬP NHẬT TRẠNG THÁI NGAY LẬP TỨC CHO HTML
+                            debugRawLeverageResponses[id].status = `Đang tải đòn bẩy... (${fetchedCount}/${totalSymbols} | ${successCount} thành công)`;
+                            debugRawLeverageResponses[id].timestamp = new Date(); // Cập nhật timestamp cho mỗi lần cập nhật tiến độ
+                            return true; // Trả về true để Promise.allSettled không bị rejected sớm
                         });
-                        const results = await Promise.allSettled(chunkPromises);
-                        successCount += results.filter(r => r.status === 'fulfilled' && r.value === true).length;
+                        await Promise.allSettled(chunkPromises); // Chờ các request trong lô hiện tại hoàn tất
 
                         if (marketChunks.indexOf(chunk) < marketChunks.length - 1) {
                             await sleep(BINGX_DELAY_BETWEEN_CONCURRENT_BATCHES_MS);
                         }
                     }
                     console.log(`[CACHE] ✅ ${id.toUpperCase()}: Hoàn tất lấy dữ liệu đòn bẩy cho ${Object.keys(fetchedLeverageDataMap).length} cặp. (${successCount} cặp được parse thành công)`);
-                    currentRawDebug.status = `thành công (BingX API)`;
-                    currentRawDebug.data = `Đã lấy ${Object.keys(fetchedLeverageDataMap).length} cặp. (${successCount} cặp parse thành công).`;
+                    currentRawDebug = { status: `Thành công (${successCount} cặp)`, timestamp: new Date(), data: `Đã lấy ${Object.keys(fetchedLeverageDataMap).length} cặp. (${successCount} cặp parse thành công).`, error: null };
 
                 } catch (e) {
                     console.error(`[CACHE] ❌ ${id.toUpperCase()}: Lỗi chung khi lấy dữ liệu BingX: ${e.msg || e.message}.`);
                     leverageSource = "BingX REST API (lỗi chung)";
-                    currentRawDebug = { status: `thất bại (BingX API lỗi chung: ${e.code || 'UNKNOWN'})`, timestamp: new Date(), data: e.rawResponse || e.message, error: { code: e.code, msg: e.message } };
+                    currentRawDebug = { status: `Thất bại (lỗi API: ${e.code || 'UNKNOWN'})`, timestamp: new Date(), data: e.rawResponse || e.message, error: { code: e.code, msg: e.message } };
                 }
             }
             else { // OKX và Bitget: Dùng CCXT (fetchLeverageTiers + loadMarkets fallback)
                 leverageSource = "CCXT fetchLeverageTiers";
-                debugRawLeverageResponses[id].timestamp = new Date(); 
+                currentRawDebug.timestamp = new Date(); 
 
                 try {
                     if (exchange.has['fetchLeverageTiers']) {
@@ -392,7 +440,7 @@ async function initializeLeverageCache() {
                                 }
                             }
                         }
-                        currentRawDebug.status = `thành công (${successCount} cặp CCXT)`;
+                        currentRawDebug.status = `Thành công (${successCount} cặp)`;
                         currentRawDebug.data = `Đã lấy ${successCount} cặp.`;
                     } else {
                         console.log(`[CACHE] ${id.toUpperCase()}: fetchLeverageTiers không khả dụng. Dùng loadMarkets...`);
@@ -411,13 +459,13 @@ async function initializeLeverageCache() {
                             }
                         }
                         leverageSource = "CCXT loadMarkets";
-                        currentRawDebug.status = `thành công (loadMarkets, ${loadMarketsSuccessCount} cặp)`;
+                        currentRawDebug.status = `Thành công (loadMarkets, ${loadMarketsSuccessCount} cặp)`;
                         currentRawDebug.data = `Đã lấy ${loadMarketsSuccessCount} cặp.`;
                     }
                 } catch(e) {
                     console.warn(`[CACHE] ⚠️ ${id.toUpperCase()}: Lỗi khi gọi CCXT phương thức leverage: ${e.message}.`);
                     leverageSource = "CCXT (lỗi)";
-                    currentRawDebug.status = `thất bại (${e.code || 'UNKNOWN'})`;
+                    currentRawDebug.status = `Thất bại (lỗi CCXT: ${e.code || 'UNKNOWN'})`;
                     currentRawDebug.error = { code: e.code, msg: e.message };
                 }
             }
@@ -428,7 +476,7 @@ async function initializeLeverageCache() {
                 console.log(`[CACHE] ✅ ${id.toUpperCase()}: Tổng số mục đòn bẩy đã lấy: ${count} (${leverageSource}).`);
             } else {
                 console.warn(`[CACHE] ⚠️ ${id.toUpperCase()}: Không lấy được mục đòn bẩy nào (${leverageSource}).`);
-                currentRawDebug.status = 'thất bại (không có đòn bẩy)';
+                currentRawDebug.status = 'Thất bại (không có đòn bẩy)';
             }
             debugRawLeverageResponses[id] = currentRawDebug; 
             return { id, status: 'fulfilled' };
@@ -441,11 +489,11 @@ async function initializeLeverageCache() {
             }
             console.error(`[CACHE] ❌ ${id.toUpperCase()}: ${errorMessage}`);
             newCache[id] = {};
-            debugRawLeverageResponses[id] = { status: `thất bại (${e.code || 'UNKNOWN'})`, timestamp: new Date(), data: e.rawResponse ? e.rawResponse.toString() : 'N/A', error: { code: e.code, msg: e.message } };
+            debugRawLeverageResponses[id] = { status: `Thất bại (lỗi chung: ${e.code || 'UNKNOWN'})`, timestamp: new Date(), data: e.rawResponse ? e.rawResponse.toString() : 'N/A', error: { code: e.code, msg: e.message } };
             return { id, status: 'rejected', reason: e.message };
         }
     });
-    await Promise.allSettled(promises);
+    await Promise.allSettled(promises); // Chờ tất cả các sàn hoàn tất cập nhật đòn bẩy
     leverageCache = newCache;
     console.log(`[CACHE] 🎉 Hoàn tất làm mới bộ nhớ đệm đòn bẩy.`);
 }
@@ -461,62 +509,102 @@ function calculateNextStandardFundingTime() {
 }
 
 async function fetchFundingRatesForAllExchanges() {
-    const freshData = {};
+    console.log(`[DATA] Bắt đầu làm mới funding rates cho tất cả các sàn...`);
     const promises = EXCHANGE_IDS.map(async (id) => {
-        try {
-            const exchange = exchanges[id];
-            let processedRates = {};
-            
-            // Sử dụng ccxt.fetchFundingRates() cho tất cả các sàn
-            const fundingRatesRaw = await exchange.fetchFundingRates();
-            
-            for (const rate of Object.values(fundingRatesRaw)) {
-                const symbolCleaned = cleanSymbol(rate.symbol);
-                const maxLeverageParsed = leverageCache[id]?.[symbolCleaned] || null; 
-                
-                const fundingTimestamp = rate.fundingTimestamp || rate.nextFundingTime || calculateNextStandardFundingTime();
+        let processedRates = {};
+        let currentStatus = 'Đang tải funding...';
+        let currentTimestamp = new Date();
+        let currentError = null;
 
-                if (typeof rate.fundingRate === 'number' && !isNaN(rate.fundingRate) && typeof fundingTimestamp === 'number' && fundingTimestamp > 0) {
-                    processedRates[symbolCleaned] = { symbol: symbolCleaned, fundingRate: rate.fundingRate, fundingTimestamp: fundingTimestamp, maxLeverage: maxLeverageParsed };
+        try {
+            if (id === 'bingx') {
+                console.log(`[DEBUG_FUNDING] Gọi BingX API trực tiếp để lấy danh sách symbol và funding rates...`);
+                const symbols = await getBingxSymbolsDirect();
+                console.log(`[DEBUG_FUNDING] BingX: Có tổng ${symbols.length} symbols. Bắt đầu lấy funding rates...`);
+
+                let successCount = 0;
+                for (let i = 0; i < symbols.length; i++) {
+                    const result = await getBingxFundingRateDirect(symbols[i]);
+                    if (result && result.fundingRate && result.fundingTime) {
+                        const symbolCleaned = cleanSymbol(result.symbol);
+                        const maxLeverageParsed = leverageCache[id]?.[symbolCleaned] || null;
+                        
+                        processedRates[symbolCleaned] = {
+                            symbol: symbolCleaned,
+                            fundingRate: parseFloat(result.fundingRate), 
+                            fundingTimestamp: parseInt(result.fundingTime, 10), // Sử dụng fundingTime làm fundingTimestamp
+                            maxLeverage: maxLeverageParsed
+                        };
+                        successCount++;
+                        // ĐÃ BỎ: console.log(`[DEBUG_BINGX_FR] Sym: ${result.symbol}, FR: ${result.fundingRate}, Time: ${new Date(result.fundingTime).toISOString()}`);
+                    } else if (result && result.error) {
+                        console.warn(`[DATA] ⚠️ BingX: Lỗi khi lấy funding rate cho ${symbols[i]}: ${result.error}`);
+                    }
+                    await sleep(BINGX_FUNDING_RATE_DELAY_MS); 
+                }
+                currentStatus = `Thành công (${successCount} cặp)`;
+                console.log(`[DATA] ✅ BingX: Đã lấy thành công ${successCount} funding rates từ API trực tiếp.`);
+
+            } else { // Cho Binance, OKX, Bitget, dùng CCXT's fetchFundingRates
+                const exchange = exchanges[id];
+                const fundingRatesRaw = await exchange.fetchFundingRates();
+                let successCount = 0;
+                for (const rate of Object.values(fundingRatesRaw)) {
+                    const symbolCleaned = cleanSymbol(rate.symbol);
+                    const maxLeverageParsed = leverageCache[id]?.[symbolCleaned] || null; 
+                    
+                    let fundingTimestamp;
+                    if (id === 'bitget' && rate.nextUpdate) { // ĐÃ SỬA: Xử lý nextUpdate của Bitget
+                        fundingTimestamp = parseInt(rate.nextUpdate, 10);
+                        // console.log(`[DEBUG_BITGET_FR] Using nextUpdate for ${rate.symbol}: ${rate.nextUpdate}`);
+                    } else {
+                        fundingTimestamp = rate.fundingTimestamp || rate.nextFundingTime || calculateNextStandardFundingTime();
+                    }
+
+                    if (typeof rate.fundingRate === 'number' && !isNaN(rate.fundingRate) && typeof fundingTimestamp === 'number' && fundingTimestamp > 0) {
+                        processedRates[symbolCleaned] = { symbol: symbolCleaned, fundingRate: rate.fundingRate, fundingTimestamp: fundingTimestamp, maxLeverage: maxLeverageParsed };
+                        successCount++;
+                    } else {
+                        console.warn(`[DATA] ⚠️ ${id.toUpperCase()}: Funding rate hoặc timestamp không hợp lệ cho ${rate.symbol}.`);
+                    }
+                }
+                currentStatus = `Thành công (${successCount} cặp)`;
+                if (Object.keys(processedRates).length > 0) {
+                    console.log(`[DATA] ✅ ${id.toUpperCase()}: Đã lấy thành công ${successCount} funding rates.`);
                 } else {
-                    console.warn(`[DATA] ⚠️ ${id.toUpperCase()}: Funding rate hoặc timestamp không hợp lệ cho ${rate.symbol}.`);
+                    console.warn(`[DATA] ⚠️ ${id.toUpperCase()}: Không lấy được funding rates nào.`);
                 }
             }
+            // Cập nhật trạng thái funding của sàn đó ngay lập tức vào biến toàn cục
+            exchangeData[id] = { rates: processedRates };
+            debugRawLeverageResponses[id].status = currentStatus; // Cập nhật trạng thái debug
+            debugRawLeverageResponses[id].timestamp = new Date(); // Cập nhật timestamp
 
-            if (Object.keys(processedRates).length > 0) {
-                console.log(`[DATA] ✅ ${id.toUpperCase()}: Đã lấy thành công ${Object.keys(processedRates).length} funding rates.`);
-            } else {
-                console.warn(`[DATA] ⚠️ ${id.toUpperCase()}: Không lấy được funding rates nào.`);
-            }
-            return { id, status: 'fulfilled', rates: processedRates };
+            calculateArbitrageOpportunities(); // Tính toán lại cơ hội ngay sau khi funding của một sàn được cập nhật
+            return { id, status: 'fulfilled' };
+
         } catch (e) {
             let errorMessage = `Lỗi khi lấy funding từ ${id.toUpperCase()}: ${e.message}.`;
-            if (e instanceof ccxt.AuthenticationError) {
-                errorMessage = `LỖI XÁC THỰC! Vui lòng kiểm tra lại API Key/Secret của ${id.toUpperCase()}. Chi tiết: ${e.message}.`;
-            } else if (e instanceof ccxt.NetworkError) {
-                errorMessage = `Lỗi mạng khi lấy funding từ ${id.toUpperCase()}: ${e.message}.`;
-            }
             console.error(`[DATA] ❌ ${id.toUpperCase()}: ${errorMessage}`);
+            currentStatus = `Thất bại (lỗi funding: ${e.code || 'UNKNOWN'})`;
+            currentError = { code: e.code, msg: e.message };
+            
+            // Đảm bảo exchangeData[id] được set về rỗng nếu lỗi
+            exchangeData[id] = { rates: {} };
+            debugRawLeverageResponses[id].status = currentStatus;
+            debugRawLeverageResponses[id].timestamp = new Date();
+            debugRawLeverageResponses[id].error = currentError;
+            calculateArbitrageOpportunities(); // Tính lại cơ hội ngay cả khi có lỗi funding
             return { id, status: 'rejected', reason: e.message };
         }
     });
-    const results = await Promise.allSettled(promises);
-
-    results.forEach(result => {
-        if (result.status === 'fulfilled') {
-            freshData[result.value.id] = { rates: result.value.rates };
-        } else {
-            console.warn(`[DATA] ⚠️ ${result.value?.id?.toUpperCase() || 'UNKNOWN'}: Không thể cập nhật funding rates. Nguyên nhân: ${result.reason}.`);
-            if (!freshData[result.value?.id]) {
-                freshData[result.value.id] = { rates: {} };
-            }
-        }
-    });
-    return freshData;
+    await Promise.allSettled(promises); // Chờ tất cả các sàn hoàn tất cập nhật funding
+    console.log(`[DATA] 🎉 Hoàn tất làm mới funding rates.`);
 }
 
 function calculateArbitrageOpportunities() {
     const allFoundOpportunities = [];
+    // Tạo bản sao sâu của exchangeData để tránh side effect khi các promise vẫn đang chạy
     const currentExchangeData = JSON.parse(JSON.stringify(exchangeData));
 
     for (let i = 0; i < EXCHANGE_IDS.length; i++) {
@@ -576,7 +664,6 @@ function calculateArbitrageOpportunities() {
 
                     allFoundOpportunities.push({
                         coin: symbol,
-                        // Điều chỉnh tên sàn hiển thị cho phù hợp với frontend (loại bỏ 'usdm')
                         exchanges: `${shortExchange.replace('usdm', '')} / ${longExchange.replace('usdm', '')}`,
                         fundingDiff: parseFloat(fundingDiff.toFixed(6)),
                         nextFundingTime: finalFundingTime,
@@ -615,14 +702,15 @@ async function masterLoop() {
     }
 
     // Bước 1: Cập nhật bộ nhớ đệm đòn bẩy cho TẤT CẢ các sàn
-    // initializeLeverageCache đã được thiết kế để cập nhật debugRawLeverageResponses
     await initializeLeverageCache();
 
     // Bước 2: Lấy dữ liệu funding rates cho TẤT CẢ các sàn
-    const freshFundingData = await fetchFundingRatesForAllExchanges();
-    exchangeData = freshFundingData; // Cập nhật dữ liệu funding toàn cục
+    // fetchFundingRatesForAllExchanges đã tự cập nhật exchangeData và debugRawLeverageResponses
+    await fetchFundingRatesForAllExchanges();
 
     // Bước 3: Tính toán cơ hội arbitrage với dữ liệu mới nhất
+    // calculateArbitrageOpportunities đã được gọi sau mỗi lần cập nhật funding của từng sàn
+    // nhưng gọi lại một lần cuối để đảm bảo cập nhật đầy đủ sau khi tất cả đã xong.
     calculateArbitrageOpportunities();
     lastFullUpdateTimestamp = new Date().toISOString();
     console.log(`[LOOP] ✅ Tìm thấy ${arbitrageOpportunities.length} cơ hội. Vòng lặp hoàn tất.`);
@@ -661,7 +749,6 @@ const server = http.createServer((req, res) => {
                 okx: Object.values(exchangeData.okx?.rates || {}),
                 bitget: Object.values(exchangeData.bitget?.rates || {}),
             },
-            // Trả về debugRawLeverageResponses để frontend có thể hiển thị trạng thái tải
             debugRawLeverageResponses: debugRawLeverageResponses 
         };
         res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -671,13 +758,12 @@ const server = http.createServer((req, res) => {
     }
 });
 
-server.listen(PORT, () => { // ĐÃ SỬA: Bỏ 'async' và 'await' ở đây
+server.listen(PORT, () => { 
     console.log(`✅ Máy chủ dữ liệu đang chạy tại http://localhost:${PORT}`);
-    // KHÔNG SỬ DỤNG 'await' masterLoop() ở đây nữa.
-    // Gọi masterLoop() để nó chạy ở chế độ nền.
+    // Chạy masterLoop ở chế độ nền. Server sẽ không chờ nó hoàn thành mà sẽ phản hồi HTTP ngay.
     masterLoop(); 
     
     // Đặt lịch làm mới bộ nhớ đệm đòn bẩy định kỳ
-    // setInterval này vẫn cần thiết để refresh leverage cache định kỳ ngoài chu kỳ masterLoop chính
+    // initializeLeverageCache đã được gọi trong masterLoop, nên setInterval này chỉ để làm mới riêng lẻ nếu cần.
     setInterval(initializeLeverageCache, LEVERAGE_CACHE_REFRESH_INTERVAL_MINUTES * 60 * 1000);
 });
