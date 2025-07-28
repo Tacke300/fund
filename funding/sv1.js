@@ -100,7 +100,7 @@ async function makeHttpRequest(method, hostname, path, headers = {}, postData = 
             port: 443,
             path: path,
             method: method,
-            headers: { ...headers, 'User-Agent': 'NodeJS-Arbitrage-Client' }, // Custom User-Agent
+            headers: { ...headers, 'User-Agent': 'Mozilla/5.0' }, // ĐÃ THAY ĐỔI USER-AGENT
             timeout: 20000
         };
 
@@ -242,8 +242,6 @@ async function fetchBingxMaxLeverage(symbol, retries = 3) {
     return null;
 }
 
-// === KẾT THÚC CÁC HÀM GỌI API TRỰC TIẾP ===
-
 
 // Hàm khởi tạo bộ nhớ đệm đòn bẩy cho tất cả các sàn
 async function initializeLeverageCache() {
@@ -253,7 +251,7 @@ async function initializeLeverageCache() {
         const exchange = exchanges[id];
         newCache[id] = {}; // Đảm bảo luôn khởi tạo cache cho sàn này
 
-        let fetchedLeverageDataMap = {}; // Lưu trữ dữ liệu (số hoặc raw string) cho từng symbol
+        let fetchedLeverageDataMap = {}; // Lưu trữ dữ liệu thô (string) cho từng symbol
         let leverageSource = "Unknown";
         let currentRawDebug = { status: 'chưa chạy', timestamp: new Date(), data: 'N/A', error: null };
 
@@ -327,7 +325,7 @@ async function initializeLeverageCache() {
                     }
                     console.log(`[CACHE] ✅ ${id.toUpperCase()}: Hoàn tất lấy dữ liệu đòn bẩy thô cho ${Object.keys(fetchedLeverageDataMap).length} cặp.`);
                     currentRawDebug.status = 'thành công (BingX API)';
-                    currentRawDebug.data = `Lấy ${Object.keys(fetchedLeverageDataMap).length} cặp.`;
+                    currentRawDebug.data = `Lấy ${Object.keys(fetchedRawLeverageDataMap).length} cặp.`;
 
                 } catch (e) {
                     console.error(`[CACHE] ❌ ${id.toUpperCase()}: Lỗi chung khi lấy dữ liệu BingX: ${e.msg || e.message}.`);
@@ -338,6 +336,8 @@ async function initializeLeverageCache() {
             }
             else { // OKX và Bitget: Dùng CCXT (fetchLeverageTiers + loadMarkets fallback)
                 leverageSource = "CCXT fetchLeverageTiers";
+                debugRawLeverageResponses[id].timestamp = new Date(); // Cập nhật timestamp cho debug
+
                 try {
                     if (exchange.has['fetchLeverageTiers']) {
                         const leverageTiers = await exchange.fetchLeverageTiers();
@@ -371,7 +371,7 @@ async function initializeLeverageCache() {
                         currentRawDebug.status = 'thành công (loadMarkets)';
                         currentRawDebug.data = `Lấy ${Object.keys(fetchedLeverageDataMap).length} cặp.`;
                     }
-                } catch(e) { // Lỗi từ CCXT OKX/Bitget
+                } catch(e) {
                     console.warn(`[CACHE] ⚠️ ${id.toUpperCase()}: Lỗi khi gọi CCXT phương thức leverage: ${e.message}.`);
                     leverageSource = "CCXT (lỗi)";
                     currentRawDebug.status = `thất bại (${e.code || 'UNKNOWN'})`;
@@ -430,12 +430,12 @@ async function fetchFundingRatesForAllExchanges() {
             for (const rate of Object.values(fundingRatesRaw)) {
                 const symbolCleaned = cleanSymbol(rate.symbol);
                 // Lấy maxLeverage từ cache (đã là số từ CCXT hoặc raw string)
-                const maxLeverageRawData = leverageCache[id]?.[symbolCleaned] || null; 
+                const maxLeverageRaw = leverageCache[id]?.[symbolCleaned] || null; 
                 
                 const fundingTimestamp = rate.fundingTimestamp || rate.nextFundingTime || calculateNextStandardFundingTime();
 
                 if (typeof rate.fundingRate === 'number' && !isNaN(rate.fundingRate) && typeof fundingTimestamp === 'number' && fundingTimestamp > 0) {
-                    processedRates[symbolCleaned] = { symbol: symbolCleaned, fundingRate: rate.fundingRate, fundingTimestamp: fundingTimestamp, maxLeverage: maxLeverageRawData };
+                    processedRates[symbolCleaned] = { symbol: symbolCleaned, fundingRate: rate.fundingRate, fundingTimestamp: fundingTimestamp, maxLeverage: maxLeverageRaw };
                 } else {
                     console.warn(`[DATA] ⚠️ ${id.toUpperCase()}: Funding rate hoặc timestamp không hợp lệ cho ${rate.symbol}.`);
                 }
@@ -475,7 +475,7 @@ async function fetchFundingRatesForAllExchanges() {
 
 // Hàm trợ giúp để parse leverage từ raw string. Đây là nơi DUY NHẤT JSON.parse diễn ra cho leverage.
 function parseLeverageFromRawData(exchangeId, symbol, rawData) {
-    if (typeof rawData === 'number') { // Đối với OKX/Bitget hoặc Binance/BingX nếu CCXT đã trả về số
+    if (typeof rawData === 'number') { // Đối với OKX/Bitget, nó có thể đã là số từ CCXT
         return rawData;
     }
     if (typeof rawData !== 'string' || rawData.trim() === '') { // Không phải string hoặc rỗng
@@ -485,13 +485,13 @@ function parseLeverageFromRawData(exchangeId, symbol, rawData) {
     try {
         const parsedJson = JSON.parse(rawData);
         if (exchangeId === 'binanceusdm') {
-            // Cấu trúc phản hồi Binance: array of objects like {"symbol":"BTCUSDT","brackets":[{"leverage":125,"minNotional":0,...}]}
-            // initializeLeverageCache đã lưu string của MỘT item ({"symbol":"BTCUSDT", ...})
+            // Trường hợp 1: rawData là JSON string của một item từ /fapi/v1/leverageBracket
+            // Ví dụ: {"symbol":"BTCUSDT","brackets":[{"leverage":125,"minNotional":0,...}]}
             if (parsedJson.brackets && Array.isArray(parsedJson.brackets) && parsedJson.brackets.length > 0) {
                 const maxLeverage = Math.Max(...parsedJson.brackets.map(b => b.leverage));
                 return !isNaN(maxLeverage) && maxLeverage > 0 ? maxLeverage : null;
             } 
-            // Nếu rawData là toàn bộ phản hồi của /fapi/v1/leverageBracket (khi initializeLeverageCache lưu nó)
+            // Trường hợp 2: rawData là toàn bộ phản hồi của /fapi/v1/leverageBracket nếu không được phân tách
             else if (Array.isArray(parsedJson)) { // CCXT fetchLeverageTiers có thể trả về array này
                 const targetItem = parsedJson.find(item => cleanSymbol(item.symbol) === cleanSymbol(symbol));
                 if (targetItem && targetItem.brackets && Array.isArray(targetItem.brackets)) {
