@@ -19,7 +19,7 @@ const PORT = 5005; // Đảm bảo cổng này khớp với cổng bạn chạy
 // ----- CẤU HÌNH -----
 const EXCHANGE_IDS = ['binanceusdm', 'bingx', 'okx', 'bitget'];
 const FUNDING_DIFFERENCE_THRESHOLD = 0.00001;
-const MINIMUM_PNL_THRESHOLD = 15;
+const MINIMUM_PNL_THRESHOLD = 1;
 const IMMINENT_THRESHOLD_MINUTES = 15;
 
 // Các khoảng thời gian cập nhật leverage
