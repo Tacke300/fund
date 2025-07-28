@@ -563,7 +563,13 @@ async function performTargetedLeverageUpdate() {
     console.log(`[LEVERAGE_SCHEDULER] 🎯 Bắt đầu cập nhật đòn bẩy MỤC TIÊU cho ${activeSymbols.size} symbol.`);
     
     // Cập nhật leverage cho TẤT CẢ các sàn, chỉ truyền vào các symbol đang có cơ hội
-    for (const id of EXCHANGE_IDS) {
+    // Sắp xếp lại thứ tự ưu tiên các sàn không phải BingX trước
+    const orderedExchangeIds = EXCHANGE_IDS.filter(id => id !== 'bingx');
+    if (EXCHANGE_IDS.includes('bingx')) {
+        orderedExchangeIds.push('bingx');
+    }
+
+    for (const id of orderedExchangeIds) { 
         await updateLeverageForExchange(id, Array.from(activeSymbols)); // Cập nhật leverage cho các symbol này
     }
     console.log(`[LEVERAGE_SCHEDULER] ✅ Hoàn tất cập nhật đòn bẩy MỤC TIÊU.`);
