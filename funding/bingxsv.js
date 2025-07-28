@@ -835,6 +835,10 @@ const server = http.createServer((req, res) => {
             },
             debugRawLeverageResponses: debugRawLeverageResponses // Luôn chứa trạng thái debug chi tiết
         };
+        // Log dữ liệu gửi đi để debug
+        console.log(`[API_DATA] Gửi dữ liệu đến frontend. Total arbitrage ops: ${responseData.arbitrageData.length}. ` +
+                    `BingX Leverage Status: ${responseData.debugRawLeverageResponses.bingx.status}. ` +
+                    `BingX Funding Rates Count: ${Object.keys(responseData.rawRates.bingx).length}.`);
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify(responseData));
     } else {
