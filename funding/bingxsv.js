@@ -232,19 +232,32 @@ async function fetchBingxMaxLeverage(symbol, retries = 3) {
             
             try {
                 const parsedJson = JSON.parse(rawRes);
-                if (parsedJson.code === 0 && parsedJson.data?.leverage) {
-                    parsedLeverage = parseInt(parsedJson.data.leverage, 10);
-                    if (!isNaN(parsedLeverage) && parsedLeverage > 0) {
-                        return parsedLeverage; // Trả về số leverage đã parse
+                if (parsedJson.code === 0 && parsedJson.data) { // Code 0 là thành công trên BingX
+                    const longLev = parseInt(parsedJson.data.longLeverage, 10);
+                    const shortLev = parseInt(parsedJson.data.shortLeverage, 10);
+                    const specificLev = parseInt(parsedJson.data.leverage, 10); // Trường hợp BingX trả về 'leverage' trực tiếp
+
+                    // Ưu tiên longLeverage/shortLeverage nếu có, sau đó là leverage
+                    if (!isNaN(longLev) && longLev > 0 && !isNaN(shortLev) && shortLev > 0) {
+                        parsedLeverage = Math.max(longLev, shortLev);
+                        console.log(`[CACHE] ✅ BingX: Max leverage của ${symbol} là ${parsedLeverage} (REST API - long/short).`);
+                        return parsedLeverage;
+                    } else if (!isNaN(specificLev) && specificLev > 0) {
+                        parsedLeverage = specificLev;
+                        console.log(`[CACHE] ✅ BingX: Max leverage của ${symbol} là ${parsedLeverage} (REST API - direct 'leverage').`);
+                        return parsedLeverage;
                     } else {
-                        console.warn(`[CACHE] ⚠️ BingX: Phản hồi API hợp lệ nhưng leverage không hợp lệ cho ${symbol}. Raw: ${rawRes.substring(0, Math.min(rawRes.length, 100))}`);
+                        // Log cảnh báo nếu không tìm thấy đòn bẩy hợp lệ dù API code là 0
+                        console.warn(`[CACHE] ⚠️ BingX: Phản hồi API thành công (Code 0) nhưng không tìm thấy leverage hợp lệ (longLeverage/shortLeverage/leverage) cho ${symbol}. Raw: ${rawRes.substring(0, Math.min(rawRes.length, 200))}`);
+                        lastError = { code: parsedJson.code, msg: 'No valid leverage property found in data', type: 'API_RESPONSE_PARSE_ERROR' };
                     }
                 } else {
-                    console.warn(`[CACHE] ⚠️ BingX: Phản hồi API không thành công hoặc không có 'data' cho ${symbol}. Code: ${parsedJson.code}, Msg: ${parsedJson.msg || 'N/A'}. Raw: ${rawRes.substring(0, Math.min(rawRes.length, 100))}`);
-                    lastError = { code: parsedJson.code, msg: parsedJson.msg || 'Invalid API Response', type: 'API_RESPONSE_ERROR' };
+                    // Log cảnh báo nếu API code khác 0 hoặc không có trường 'data'
+                    console.warn(`[CACHE] ⚠️ BingX: Phản hồi API không thành công (Code: ${parsedJson.code} != 0) hoặc không có 'data' cho ${symbol}. Msg: ${parsedJson.msg || 'N/A'}. Raw: ${rawRes.substring(0, Math.min(rawRes.length, 200))}`);
+                    lastError = { code: parsedJson.code, msg: parsedJson.msg || 'Invalid API Response Structure', type: 'API_RESPONSE_ERROR' };
                 }
             } catch (jsonParseError) {
-                console.warn(`[CACHE] ⚠️ BingX: Lỗi parse JSON phản hồi cho ${symbol}. Raw: ${rawRes.substring(0, Math.min(rawRes.length, 100))}. Lỗi: ${jsonParseError.message}`);
+                console.warn(`[CACHE] ⚠️ BingX: Lỗi parse JSON phản hồi cho ${symbol}. Raw: ${rawRes.substring(0, Math.min(rawRes.length, 200))}. Lỗi: ${jsonParseError.message}`);
                 lastError = { code: 'JSON_PARSE_ERROR', msg: jsonParseError.message, type: 'JSON_PARSE_ERROR' };
             }
 
@@ -307,7 +320,7 @@ async function initializeLeverageCache() {
 
         try {
             if (id === 'binanceusdm') {
-                // Binance: SỬ DỤNG TRỰC TIẾP BINANCE API /fapi/v1/leverageBracket
+                // Binance: SỬ DỤNG TRỰC TIẾP BINANCE API /fapi/v1/leverageBracket (KHÔNG THAY ĐỔI)
                 leverageSource = "Binance REST API /fapi/v1/leverageBracket";
                 try {
                     console.log(`[DEBUG] Gọi Binance API /fapi/v1/leverageBracket...`); // DEBUG LOG
@@ -341,12 +354,12 @@ async function initializeLeverageCache() {
                 }
             }
             else if (id === 'bingx') {
-                // BingX: Dùng API trực tiếp (đã sửa)
+                // BingX: Dùng API trực tiếp (ĐÃ SỬA VÀ ĐẢM BẢO KHÔNG CÓ SLICE 0,20)
                 leverageSource = "BingX REST API /trade/leverage";
                 try {
                     console.log(`[DEBUG] Gọi CCXT loadMarkets cho ${id.toUpperCase()} để lấy danh sách cặp...`); // DEBUG LOG
                     await exchange.loadMarkets(true);
-                    // Lọc các cặp USDT-M Futures (ĐÃ LOẠI BỎ SLICE 0,20)
+                    // Lọc các cặp USDT-M Futures (ĐÃ LOẠI BỎ SLICE)
                     const bingxMarkets = Object.values(exchange.markets)
                         .filter(m => m.swap && m.quote === 'USDT');
 
@@ -354,7 +367,7 @@ async function initializeLeverageCache() {
 
                     let successCount = 0;
                     for (const market of bingxMarkets) {
-                        const formattedSymbol = market.symbol.replace('/', '-').replace(':USDT', '');
+                        const formattedSymbol = market.symbol.replace('/', '-').replace(':USDT', ''); // Ví dụ: BTC/USDT -> BTC-USDT
                         const parsedMaxLeverage = await fetchBingxMaxLeverage(formattedSymbol); // Hàm này trả về số hoặc null
                         if (parsedMaxLeverage !== null && parsedMaxLeverage > 0) {
                             fetchedLeverageDataMap[cleanSymbol(market.symbol)] = parsedMaxLeverage; // Lưu số đã parse
@@ -470,7 +483,7 @@ async function fetchFundingRatesForAllExchanges() {
             const exchange = exchanges[id];
             let processedRates = {};
 
-            // KHÔNG THAY ĐỔI LOGIC LẤY FUNDING RATES, VÌ YÊU CẦU CHỈ LÀ MAX LEV
+            // KHÔNG THAY ĐỔI LOGIC LẤY FUNDING RATES CHO CÁC SÀN KHÁC
             const fundingRatesRaw = await exchange.fetchFundingRates();
             for (const rate of Object.values(fundingRatesRaw)) {
                 const symbolCleaned = cleanSymbol(rate.symbol);
@@ -480,7 +493,7 @@ async function fetchFundingRatesForAllExchanges() {
                 const fundingTimestamp = rate.fundingTimestamp || rate.nextFundingTime || calculateNextStandardFundingTime();
 
                 if (typeof rate.fundingRate === 'number' && !isNaN(rate.fundingRate) && typeof fundingTimestamp === 'number' && fundingTimestamp > 0) {
-                    processedRates[symbolCleaned] = { symbol: symbolCleaned, fundingRate: fundingRate, fundingTimestamp: fundingTimestamp, maxLeverage: maxLeverageParsed };
+                    processedRates[symbolCleaned] = { symbol: symbolCleaned, fundingRate: rate.fundingRate, fundingTimestamp: fundingTimestamp, maxLeverage: maxLeverageParsed };
                 } else {
                     console.warn(`[DATA] ⚠️ ${id.toUpperCase()}: Funding rate hoặc timestamp không hợp lệ cho ${rate.symbol}.`);
                 }
@@ -560,7 +573,7 @@ function calculateArbitrageOpportunities() {
                 let longExchange, shortExchange, longRate, shortRate;
                 if (rate1Data.fundingRate > rate2Data.fundingRate) {
                     shortExchange = exchange1Id; shortRate = rate1Data;
-                    longExchange = exchange2Id; longRate = rate2Data;
+                    longExchange = exchange2Id; longRate = rate2Data; // ĐÃ SỬA LỖI TYPO NÀY
                 } else {
                     shortExchange = exchange2Id; shortRate = rate2Data;
                     longExchange = exchange1Id; longRate = rate1Data;
