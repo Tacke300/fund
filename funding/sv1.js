@@ -242,7 +242,7 @@ async function initializeLeverageCache() {
                     }
                     currentRawDebug = { status: `thành công (${successCount} cặp CCXT)`, timestamp: new Date(), data: `Lấy ${successCount} cặp CCXT.`, error: null };
 
-                    // Nếu CCXT fetchLeverageTiers không lấy được dữ liệu (hoặc số lượng 0), thử loadMarkets
+                    // Nếu CCXT fetchLeverageTiers không lấy được dữ liệu, thử loadMarkets
                     if (successCount === 0) {
                         console.warn(`[CACHE] ⚠️ ${id.toUpperCase()}: CCXT fetchLeverageTiers không lấy được đòn bẩy. Thử dùng CCXT loadMarkets...`);
                         leverageSource = "CCXT loadMarkets fallback";
