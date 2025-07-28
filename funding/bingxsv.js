@@ -11,7 +11,8 @@ const {
     binanceApiKey, binanceApiSecret,
     bingxApiKey, bingxApiSecret,
     okxApiKey, okxApiSecret, okxPassword,
-    bitgetApiKey, bitgetApiSecret, bitgetApiSecret
+    // ĐÃ SỬA LỖI TẠI ĐÂY: bitgetApiSecret KHÔNG BỊ LẶP LẠI
+    bitgetApiKey, bitgetApiSecret, bitgetApiPassword
 } = require('./config.js');
 
 const PORT = 5005; // Đảm bảo cổng này khớp với cổng bạn chạy
@@ -70,7 +71,8 @@ EXCHANGE_IDS.forEach(id => {
     if (id === 'binanceusdm') { config.apiKey = binanceApiKey; config.secret = binanceApiSecret; }
     else if (id === 'bingx') { config.apiKey = bingxApiKey; config.secret = bingxApiSecret; }
     else if (id === 'okx') { config.apiKey = okxApiKey; config.secret = okxApiSecret; if(okxPassword) config.password = okxPassword; }
-    else if (id === 'bitget') { config.apiKey = bitgetApiKey; config.secret = bitgetApiSecret; if(bitgetApiSecret) config.password = bitgetApiSecret; } // Changed to bitgetApiSecret for password here.
+    // ĐÃ SỬA LỖI TẠI ĐÂY: Sử dụng bitgetApiPassword thay vì lặp lại bitgetApiSecret
+    else if (id === 'bitget') { config.apiKey = bitgetApiKey; config.secret = bitgetApiSecret; if(bitgetApiPassword) config.password = bitgetApiPassword; }
     else { console.warn(`[AUTH] ⚠️ Thiếu API Key/Secret hoặc cấu hình cho ${id.toUpperCase()}.`); }
 
     exchanges[id] = new exchangeClass(config);
@@ -470,7 +472,7 @@ async function updateLeverageForExchange(id, symbolsToUpdate = null) {
                     if (symbolsToUpdate && !symbolsToUpdate.includes(cleanedSym)) {
                         continue;
                     }
-                    // Kiểm tra quote là USDT nếu có thông tin market
+                    // Kiểm tra quote là USDT nếu có thông tin market (CCXT có thể trả về nhiều loại)
                     const market = exchange.markets[symbol];
                     if (market && market.quote !== 'USDT') {
                         continue;
@@ -689,7 +691,7 @@ function calculateArbitrageOpportunities() {
     const currentExchangeData = JSON.parse(JSON.stringify(exchangeData));
 
     for (let i = 0; i < EXCHANGE_IDS.length; i++) {
-        for (let j = i + 1; j < EXCHANGE_IDS.length; j++) {
+        for (let j = i + 1; j; j < EXCHANGE_IDS.length; j++) {
             const exchange1Id = EXCHANGE_IDS[i], exchange2Id = EXCHANGE_IDS[j];
             const exchange1Rates = currentExchangeData[exchange1Id]?.rates, exchange2Rates = currentExchangeData[exchange2Id]?.rates;
 
@@ -815,15 +817,11 @@ function scheduleLeverageUpdates() {
     }
 
     // THÊM: Cập nhật Funding Rate và Leverage vào phút 59 giây 30
-    // Cần kiểm tra kỹ thời gian để đảm bảo chỉ chạy một lần
     if (currentMinute === 59 && currentSecond >= 30 && currentSecond < 35) {
-        // Sử dụng một cờ để đảm bảo chỉ kích hoạt một lần duy nhất trong khoảng 5 giây này
-        // (Hoặc có thể kiểm tra một biến global `lastSpecialUpdateTimestamp` để tránh chạy lại quá gần)
         const nowMs = Date.now();
-        if (!scheduleLeverageUpdates.lastSpecialTrigger || (nowMs - scheduleLeverageUpdates.lastSpecialTrigger > 30 * 1000)) { // Chỉ kích hoạt nếu lần cuối cách đây hơn 30 giây
+        if (!scheduleLeverageUpdates.lastSpecialTrigger || (nowMs - scheduleLeverageUpdates.lastSpecialTrigger > 30 * 1000)) {
             console.log('[SPECIAL_UPDATE] ⏰ Kích hoạt cập nhật ĐẶC BIỆT (phút 59 giây 30).');
             performFullLeverageUpdate(); // Cập nhật toàn bộ đòn bẩy
-            // fetchFundingRatesForAllExchanges() sẽ được gọi bởi masterLoop chạy mỗi phút
             scheduleLeverageUpdates.lastSpecialTrigger = nowMs;
         }
     }
@@ -868,9 +866,7 @@ server.listen(PORT, () => {
     performFullLeverageUpdate();
     masterLoop();
     
-    // Đặt lịch cho hàm điều phối cập nhật leverage và special update
-    // Chạy vào đầu mỗi giây để kiểm tra chính xác thời gian
     setInterval(() => {
         scheduleLeverageUpdates();
-    }, 1000); // Chạy mỗi 1 giây
+    }, 1000);
 });
