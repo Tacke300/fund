@@ -50,7 +50,7 @@ let debugRawLeverageResponses = {
     binanceusdm: { status: 'Đang tải đòn bẩy...', timestamp: null, data: 'N/A', error: null },
     bingx: { status: 'Đang tải đòn bẩy...', timestamp: null, data: 'N/A', error: null },
     okx: { status: 'Đang tải đòn bẩy...', timestamp: null, data: 'N/A', error: null },
-    bitget: { status: 'Đang tải đòn bòn bẩy...', timestamp: null, data: 'N/A', error: null }
+    bitget: { status: 'Đang tải đòn bẩy...', timestamp: null, data: 'N/A', error: null }
 };
 
 const BINGX_BASE_HOST = 'open-api.bingx.com';
@@ -351,7 +351,7 @@ async function updateLeverageForExchange(id, symbolsToUpdate = null) {
     debugRawLeverageResponses[id].timestamp = new Date();
     debugRawLeverageResponses[id].error = null;
 
-    try {
+    try { // MỘT KHỐI TRY LỚN DUY NHẤT BAO TRÙM TOÀN BỘ LOGIC HÀM
         // Luôn sử dụng dữ liệu leverage hiện có trong cache làm khởi điểm
         // để không bị mất dữ liệu của các symbol không được cập nhật trong lần chạy này
         if (leverageCache[id]) {
@@ -359,191 +359,169 @@ async function updateLeverageForExchange(id, symbolsToUpdate = null) {
         }
 
         if (id === 'binanceusdm') {
-            try {
-                await syncBinanceServerTime(); 
-                const leverageBracketsResponse = await callSignedBinanceAPI('/fapi/v1/leverageBracket', 'GET');
+            await syncBinanceServerTime(); 
+            const leverageBracketsResponse = await callSignedBinanceAPI('/fapi/v1/leverageBracket', 'GET');
 
-                let successCount = 0;
-                if (Array.isArray(leverageBracketsResponse)) {
-                    for (const item of leverageBracketsResponse) {
-                        const cleanedSym = cleanSymbol(item.symbol);
-                        // Nếu là cập nhật mục tiêu, chỉ cập nhật các symbol trong danh sách
-                        if (symbolsToUpdate && !symbolsToUpdate.includes(cleanedSym)) {
-                            continue; 
-                        }
-                        if (item.symbol && Array.isArray(item.brackets) && item.brackets.length > 0) {
-                            const firstBracket = item.brackets.find(b => b.bracket === 1) || item.brackets[0];
-                            const maxLeverage = parseInt(firstBracket.initialLeverage, 10);
-                            if (!isNaN(maxLeverage) && maxLeverage > 0) {
-                                fetchedLeverageDataMap[cleanedSym] = maxLeverage;
-                                successCount++;
-                            }
+            let successCount = 0;
+            if (Array.isArray(leverageBracketsResponse)) {
+                for (const item of leverageBracketsResponse) {
+                    const cleanedSym = cleanSymbol(item.symbol);
+                    if (symbolsToUpdate && !symbolsToUpdate.includes(cleanedSym)) {
+                        continue; 
+                    }
+                    if (item.symbol && Array.isArray(item.brackets) && item.brackets.length > 0) {
+                        const firstBracket = item.brackets.find(b => b.bracket === 1) || item.brackets[0];
+                        const maxLeverage = parseInt(firstBracket.initialLeverage, 10);
+                        if (!isNaN(maxLeverage) && maxLeverage > 0) {
+                            fetchedLeverageDataMap[cleanedSym] = maxLeverage;
+                            successCount++;
                         }
                     }
                 }
                 debugRawLeverageResponses[id].status = `Đòn bẩy hoàn tất (${successCount} cặp)`;
                 console.log(`[CACHE] ✅ Binance: Đã lấy ${successCount} cặp đòn bẩy từ API trực tiếp.`);
 
-            } catch (e) {
-                console.error(`[CACHE] ❌ Binance: Lỗi nghiêm trọng khi lấy đòn bẩy: ${e.message}.`);
-                debugRawLeverageResponses[id].status = `Đòn bẩy thất bại (lỗi API: ${e.code || 'UNKNOWN'})`;
-                debugRawLeverageResponses[id].error = { code: e.code, msg: e.message };
             }
         }
         else if (id === 'bingx') {
-            try {
-                await exchange.loadMarkets(true);
-                const bingxMarkets = Object.values(exchange.markets)
-                    .filter(m => m.swap && m.quote === 'USDT');
-                
-                const marketsToFetch = symbolsToUpdate && symbolsToUpdate.length > 0
-                    ? bingxMarkets.filter(market => symbolsToUpdate.includes(cleanSymbol(market.symbol)))
-                    : bingxMarkets;
-                
-                const totalSymbols = marketsToFetch.length;
+            await exchange.loadMarkets(true);
+            const bingxMarkets = Object.values(exchange.markets)
+                .filter(m => m.swap && m.quote === 'USDT');
+            
+            const marketsToFetch = symbolsToUpdate && symbolsToUpdate.length > 0
+                ? bingxMarkets.filter(market => symbolsToUpdate.includes(cleanSymbol(market.symbol)))
+                : bingxMarkets;
+            
+            const totalSymbols = marketsToFetch.length;
 
-                console.log(`[CACHE] ${id.toUpperCase()}: Bắt đầu lấy dữ liệu đòn bẩy cho ${totalSymbols} cặp (loại: ${updateType})...`);
+            console.log(`[CACHE] ${id.toUpperCase()}: Bắt đầu lấy dữ liệu đòn bẩy cho ${totalSymbols} cặp (loại: ${updateType})...`);
 
-                let fetchedCount = 0; 
-                let successCount = 0; 
+            let fetchedCount = 0; 
+            let successCount = 0; 
 
-                if (!symbolsToUpdate) { // Nếu là cập nhật toàn bộ, chạy theo lô
-                    const marketChunks = [];
-                    for (let i = 0; i < marketsToFetch.length; i += BINGX_FULL_LEVERAGE_CONCURRENT_FETCH_LIMIT) {
-                        marketChunks.push(marketsToFetch.slice(i, i + BINGX_FULL_LEVERAGE_CONCURRENT_FETCH_LIMIT));
-                    }
-                    for (const chunk of marketChunks) {
-                        const chunkPromises = chunk.map(async market => {
-                            const formattedSymbol = market.symbol.replace('/', '-').replace(':USDT', '');
-                            const parsedMaxLeverage = await fetchBingxMaxLeverage(formattedSymbol); 
-                            fetchedCount++; 
-                            if (parsedMaxLeverage !== null && parsedMaxLeverage > 0) {
-                                fetchedLeverageDataMap[cleanSymbol(market.symbol)] = parsedMaxLeverage;
-                                successCount++;
-                            }
-                            debugRawLeverageResponses[id].status = `Đòn bẩy đang tải (${fetchedCount}/${totalSymbols} | ${successCount} thành công)`;
-                            debugRawLeverageResponses[id].timestamp = new Date(); 
-                            return true;
-                        });
-                        await Promise.allSettled(chunkPromises); 
-                        if (marketChunks.indexOf(chunk) < marketChunks.length - 1) {
-                            await sleep(BINGX_FULL_LEVERAGE_DELAY_BETWEEN_BATCHES_MS);
-                        }
-                    }
-                } else { // Nếu là cập nhật mục tiêu, chạy từng symbol
-                    for (const market of marketsToFetch) {
+            if (!symbolsToUpdate) { // Nếu là cập nhật toàn bộ, chạy theo lô
+                const marketChunks = [];
+                for (let i = 0; i < marketsToFetch.length; i += BINGX_FULL_LEVERAGE_CONCURRENT_FETCH_LIMIT) {
+                    marketChunks.push(marketsToFetch.slice(i, i + BINGX_FULL_LEVERAGE_CONCURRENT_FETCH_LIMIT));
+                }
+                for (const chunk of marketChunks) {
+                    const chunkPromises = chunk.map(async market => {
                         const formattedSymbol = market.symbol.replace('/', '-').replace(':USDT', '');
-                        const parsedMaxLeverage = await fetchBingxMaxLeverage(formattedSymbol);
-                        fetchedCount++;
+                        const parsedMaxLeverage = await fetchBingxMaxLeverage(formattedSymbol); 
+                        fetchedCount++; 
                         if (parsedMaxLeverage !== null && parsedMaxLeverage > 0) {
                             fetchedLeverageDataMap[cleanSymbol(market.symbol)] = parsedMaxLeverage;
                             successCount++;
                         }
-                        debugRawLeverageResponses[id].status = `Đòn bẩy đang tải (mục tiêu ${fetchedCount}/${totalSymbols} | ${successCount} thành công)`;
-                        debugRawLeverageResponses[id].timestamp = new Date();
-                        await sleep(BINGX_TARGETED_LEVERAGE_DELAY_MS); 
+                        debugRawLeverageResponses[id].status = `Đòn bẩy đang tải (${fetchedCount}/${totalSymbols} | ${successCount} thành công)`;
+                        debugRawLeverageResponses[id].timestamp = new Date(); 
+                        return true;
+                    });
+                    await Promise.allSettled(chunkPromises); 
+                    if (marketChunks.indexOf(chunk) < marketChunks.length - 1) {
+                        await sleep(BINGX_FULL_LEVERAGE_DELAY_BETWEEN_BATCHES_MS);
                     }
                 }
-
-                debugRawLeverageResponses[id].status = `Đòn bẩy hoàn tất (${successCount} cặp)`;
-                console.log(`[CACHE] ✅ ${id.toUpperCase()}: Hoàn tất lấy dữ liệu đòn bẩy cho ${Object.keys(fetchedLeverageDataMap).length} cặp. (${successCount} cặp được parse thành công)`);
-
-            } catch (e) {
-                console.error(`[CACHE] ❌ ${id.toUpperCase()}: Lỗi chung khi lấy dữ liệu BingX: ${e.msg || e.message}.`);
-                debugRawLeverageResponses[id].status = `Đòn bẩy thất bại (lỗi API: ${e.code || 'UNKNOWN'})`;
-                debugRawLeverageResponses[id].error = { code: e.code, msg: e.message };
+            } else { // Nếu là cập nhật mục tiêu, chạy từng symbol
+                for (const market of marketsToFetch) {
+                    const formattedSymbol = market.symbol.replace('/', '-').replace(':USDT', '');
+                    const parsedMaxLeverage = await fetchBingxMaxLeverage(formattedSymbol);
+                    fetchedCount++;
+                    if (parsedMaxLeverage !== null && parsedMaxLeverage > 0) {
+                        fetchedLeverageDataMap[cleanSymbol(market.symbol)] = parsedMaxLeverage;
+                        successCount++;
+                    }
+                    debugRawLeverageResponses[id].status = `Đòn bẩy đang tải (mục tiêu ${fetchedCount}/${totalSymbols} | ${successCount} thành công)`;
+                    debugRawLeverageResponses[id].timestamp = new Date();
+                    await sleep(BINGX_TARGETED_LEVERAGE_DELAY_MS); 
+                }
             }
+
+            debugRawLeverageResponses[id].status = `Đòn bẩy hoàn tất (${successCount} cặp)`;
+            console.log(`[CACHE] ✅ ${id.toUpperCase()}: Hoàn tất lấy dữ liệu đòn bẩy cho ${Object.keys(fetchedLeverageDataMap).length} cặp. (${successCount} cặp được parse thành công)`);
+
         }
         else { // OKX và Bitget: Dùng CCXT (fetchLeverageTiers + loadMarkets fallback)
             debugRawLeverageResponses[id].timestamp = new Date(); 
 
-            try { // ĐÃ SỬA: Thêm khối try...catch bên trong này
-                let currentFetchedMap = {};
-                // Đối với các sàn này, fetchLeverageTiers hoặc loadMarkets thường đủ nhanh và trả về nhiều dữ liệu
-                // nên chúng ta có thể gọi nó dù là cập nhật toàn bộ hay mục tiêu.
-                if (exchange.has['fetchLeverageTiers']) {
-                    const leverageTiers = await exchange.fetchLeverageTiers();
-                    let successCount = 0;
-                    for (const symbol in leverageTiers) {
-                        const cleanedSym = cleanSymbol(symbol);
-                        if (symbolsToUpdate && !symbolsToUpdate.includes(cleanedSym)) {
-                            continue; 
-                        }
-                        const tiers = leverageTiers[symbol];
-                        if (Array.isArray(tiers) && tiers.length > 0) {
-                            const numericLeverages = tiers.map(t => typeof t.leverage === 'number' ? t.leverage : parseFloat(t.leverage)).filter(l => !isNaN(l) && l > 0);
-                            const parsedMaxLeverage = numericLeverages.length > 0 ? parseInt(Math.max(...numericLeverages), 10) : 0;
-                            if (parsedMaxLeverage > 0) {
-                                currentFetchedMap[cleanedSym] = parsedMaxLeverage; 
-                                successCount++; 
-                            }
+            let currentFetchedMap = {};
+            if (exchange.has['fetchLeverageTiers']) {
+                const leverageTiers = await exchange.fetchLeverageTiers();
+                let successCount = 0;
+                for (const symbol in leverageTiers) {
+                    const cleanedSym = cleanSymbol(symbol);
+                    if (symbolsToUpdate && !symbolsToUpdate.includes(cleanedSym)) {
+                        continue; 
+                    }
+                    const tiers = leverageTiers[symbol];
+                    if (Array.isArray(tiers) && tiers.length > 0) {
+                        const numericLeverages = tiers.map(t => typeof t.leverage === 'number' ? t.leverage : parseFloat(t.leverage)).filter(l => !isNaN(l) && l > 0);
+                        const parsedMaxLeverage = numericLeverages.length > 0 ? parseInt(Math.max(...numericLeverages), 10) : 0;
+                        if (parsedMaxLeverage > 0) {
+                            currentFetchedMap[cleanedSym] = parsedMaxLeverage; 
+                            successCount++; 
                         }
                     }
-                    debugRawLeverageResponses[id].status = `Đòn bẩy hoàn tất (${successCount} cặp)`;
-                    debugRawLeverageResponses[id].data = `Đã lấy ${successCount} cặp.`;
-                } else {
-                    console.log(`[CACHE] ${id.toUpperCase()}: fetchLeverageTiers không khả dụng. Dùng loadMarkets...`);
-                    await exchange.loadMarkets(true);
-                    let loadMarketsSuccessCount = 0;
-                    for (const market of Object.values(exchange.markets)) {
-                        const cleanedSym = cleanSymbol(market.symbol);
-                        if (symbolsToUpdate && !symbolsToUpdate.includes(cleanedSym)) {
-                            continue; 
-                        }
-                        if (market.swap && market.quote === 'USDT') {
-                            const maxLeverage = getMaxLeverageFromMarketInfo(market);
-                            if (maxLeverage !== null && maxLeverage > 0) {
-                                currentFetchedMap[cleanedSym] = maxLeverage; 
-                                loadMarketsSuccessCount++; 
-                            } else {
-                                console.warn(`[CACHE] ⚠️ ${id.toUpperCase()}: Đòn bẩy không hợp lệ hoặc không tìm thấy cho ${market.symbol} qua loadMarkets.`);
-                            }
+                }
+                debugRawLeverageResponses[id].status = `Đòn bẩy hoàn tất (${successCount} cặp)`;
+                debugRawLeverageResponses[id].data = `Đã lấy ${successCount} cặp.`;
+            } else {
+                console.log(`[CACHE] ${id.toUpperCase()}: fetchLeverageTiers không khả dụng. Dùng loadMarkets...`);
+                await exchange.loadMarkets(true);
+                let loadMarketsSuccessCount = 0;
+                for (const market of Object.values(exchange.markets)) {
+                    const cleanedSym = cleanSymbol(market.symbol);
+                    if (symbolsToUpdate && !symbolsToUpdate.includes(cleanedSym)) {
+                        continue; 
+                    }
+                    if (market.swap && market.quote === 'USDT') {
+                        const maxLeverage = getMaxLeverageFromMarketInfo(market);
+                        if (maxLeverage !== null && maxLeverage > 0) {
+                            currentFetchedMap[cleanedSym] = maxLeverage; 
+                            loadMarketsSuccessCount++; 
+                        } else {
+                            console.warn(`[CACHE] ⚠️ ${id.toUpperCase()}: Đòn bẩy không hợp lệ hoặc không tìm thấy cho ${market.symbol} qua loadMarkets.`);
                         }
                     }
-                    debugRawLeverageResponses[id].status = `Đòn bẩy hoàn tất (loadMarkets, ${loadMarketsSuccessCount} cặp)`;
-                    debugRawLeverageResponses[id].data = `Đã lấy ${loadMarketsSuccessCount} cặp.`;
                 }
-                
-                // Nếu là cập nhật mục tiêu, hãy kết hợp với dữ liệu cũ
-                if (symbolsToUpdate) {
-                    // Chỉ cập nhật các symbol có trong symbolsToUpdate nếu tìm thấy trong lần fetch này
-                    symbolsToUpdate.forEach(sym => {
-                        if (currentFetchedMap[sym]) {
-                            fetchedLeverageDataMap[sym] = currentFetchedMap[sym];
-                        } else if (leverageCache[id] && leverageCache[id][sym]) {
-                            // Nếu không tìm thấy trong lần fetch này nhưng có trong cache, giữ giá trị cũ
-                            fetchedLeverageDataMap[sym] = leverageCache[id][sym];
-                        }
-                    });
-                    console.log(`[CACHE] ✅ ${id.toUpperCase()}: Đã cập nhật ${Object.keys(fetchedLeverageDataMap).length} cặp đòn bẩy mục tiêu.`);
-                } else {
-                    // Nếu là cập nhật toàn bộ, thay thế hoàn toàn
-                    fetchedLeverageDataMap = currentFetchedMap;
-                    console.log(`[CACHE] ✅ ${id.toUpperCase()}: Đã lấy ${Object.keys(fetchedLeverageDataMap).length} cặp đòn bẩy toàn bộ.`);
-                }
-            } catch(e) { // ĐÃ SỬA: Khối catch cho try bên trong nhánh else (OKX/Bitget)
-                console.warn(`[CACHE] ⚠️ ${id.toUpperCase()}: Lỗi khi gọi CCXT phương thức leverage: ${e.message}.`);
-                debugRawLeverageResponses[id].status = `Đòn bẩy thất bại (lỗi CCXT: ${e.code || 'UNKNOWN'})`;
-                debugRawLeverageResponses[id].error = { code: e.code, msg: e.message };
+                debugRawLeverageResponses[id].status = `Đòn bẩy hoàn tất (loadMarkets, ${loadMarketsSuccessCount} cặp)`;
+                debugRawLeverageResponses[id].data = `Đã lấy ${loadMarketsSuccessCount} cặp.`;
             }
             
-            // Cập nhật leverageCache và tính toán cơ hội ngay lập tức
-            leverageCache[id] = fetchedLeverageDataMap; // Cập nhật cho sàn hiện tại
-            const count = Object.keys(leverageCache[id]).length;
-            console.log(`[CACHE] ✅ ${id.toUpperCase()}: Tổng số mục đòn bẩy hiện tại: ${count}.`);
-            debugRawLeverageResponses[id].timestamp = new Date();
-            debugRawLeverageResponses[id].error = null;
-            calculateArbitrageOpportunities(); // Tính toán lại cơ hội sau mỗi lần cập nhật đòn bẩy của một sàn
-
-        } catch (e) { // Đây là catch cho try lớn nhất của hàm updateLeverageForExchange
-            let errorMessage = `Lỗi nghiêm trọng khi lấy đòn bẩy cho ${id.toUpperCase()}: ${e.message}.`;
-            console.error(`[CACHE] ❌ ${id.toUpperCase()}: ${errorMessage}`);
-            debugRawLeverageResponses[id].status = `Đòn bẩy thất bại (lỗi chung: ${e.code || 'UNKNOWN'})`;
-            debugRawLeverageResponses[id].timestamp = new Date();
-            debugRawLeverageResponses[id].error = { code: e.code, msg: e.message };
-            leverageCache[id] = {}; // Đảm bảo là rỗng nếu có lỗi
-            calculateArbitrageOpportunities(); // Tính lại cơ hội ngay cả khi lỗi
+            // Nếu là cập nhật mục tiêu, hãy kết hợp với dữ liệu cũ
+            if (symbolsToUpdate) {
+                symbolsToUpdate.forEach(sym => {
+                    if (currentFetchedMap[sym]) {
+                        fetchedLeverageDataMap[sym] = currentFetchedMap[sym];
+                    } else if (leverageCache[id] && leverageCache[id][sym]) {
+                        // Nếu không tìm thấy trong lần fetch này nhưng có trong cache, giữ giá trị cũ
+                        fetchedLeverageDataMap[sym] = leverageCache[id][sym];
+                    }
+                });
+                console.log(`[CACHE] ✅ ${id.toUpperCase()}: Đã cập nhật ${Object.keys(fetchedLeverageDataMap).length} cặp đòn bẩy mục tiêu.`);
+            } else {
+                // Nếu là cập nhật toàn bộ, thay thế hoàn toàn
+                fetchedLeverageDataMap = currentFetchedMap;
+                console.log(`[CACHE] ✅ ${id.toUpperCase()}: Đã lấy ${Object.keys(fetchedLeverageDataMap).length} cặp đòn bẩy toàn bộ.`);
+            }
         }
+        
+        // Cập nhật leverageCache và tính toán cơ hội ngay lập tức
+        leverageCache[id] = fetchedLeverageDataMap; // Cập nhật cho sàn hiện tại
+        const count = Object.keys(leverageCache[id]).length;
+        console.log(`[CACHE] ✅ ${id.toUpperCase()}: Tổng số mục đòn bẩy hiện tại: ${count}.`);
+        debugRawLeverageResponses[id].timestamp = new Date();
+        debugRawLeverageResponses[id].error = null;
+        calculateArbitrageOpportunities(); // Tính toán lại cơ hội sau mỗi lần cập nhật đòn bẩy của một sàn
+
+    } catch (e) { // Đây là catch cho try lớn nhất của hàm updateLeverageForExchange
+        let errorMessage = `Lỗi nghiêm trọng khi lấy đòn bẩy cho ${id.toUpperCase()}: ${e.message}.`;
+        console.error(`[CACHE] ❌ ${id.toUpperCase()}: ${errorMessage}`);
+        debugRawLeverageResponses[id].status = `Đòn bẩy thất bại (lỗi chung: ${e.code || 'UNKNOWN'})`;
+        debugRawLeverageResponses[id].timestamp = new Date();
+        debugRawLeverageResponses[id].error = { code: e.code, msg: e.message };
+        leverageCache[id] = {}; // Đảm bảo là rỗng nếu có lỗi
+        calculateArbitrageOpportunities(); // Tính lại cơ hội ngay cả khi lỗi
     }
 }
 
