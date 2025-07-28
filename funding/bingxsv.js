@@ -25,7 +25,8 @@ const LEVERAGE_CACHE_REFRESH_INTERVAL_MINUTES = 30;
 
 // Cấu hình mới cho việc lấy dữ liệu BingX song song
 const BINGX_CONCURRENT_FETCH_LIMIT = 5; // Số lượng yêu cầu BingX được chạy song song tại một thời điểm
-const BINGX_DELAY_BETWEEN_CONCURRENT_BATCHES_MS = 1000; // Độ trễ giữa các lô yêu cầu song song (1 giây)
+// ĐÃ THAY ĐỔI: Tăng độ trễ để tránh bị rate limit từ BingX
+const BINGX_DELAY_BETWEEN_CONCURRENT_BATCHES_MS = 3000; // Độ trễ giữa các lô yêu cầu song song (3 giây)
 
 // ----- BIẾN TOÀN CỤC -----
 let leverageCache = {}; // Sẽ lưu trữ số đã parse (hoặc null nếu lỗi)
@@ -281,9 +282,9 @@ async function fetchBingxMaxLeverage(symbol, retries = 3) {
                 bingxErrorLogCache[errorSignature] = now;  
             }  
 
-            if (e.code === 'NETWORK_ERROR' || e.code === 'TIMEOUT_ERROR' || (e.statusCode >= 500 && e.statusCode < 600)) {  
+            if (e.code === 'NETWORK_ERROR' || e.code === 'TIMEOUT_ERROR' || (e.statusCode >= 500 && e.statusCode < 600) || e.code === 100410) { // Thêm mã lỗi 100410 vào đây để retry
                 const delay = 2 ** i * 1000;  
-                console.warn(`[BINGX] Lỗi tạm thời. Thử lại sau ${delay / 1000}s.`);  
+                console.warn(`[BINGX] Lỗi tạm thời (có thể do rate limit). Thử lại sau ${delay / 1000}s.`);  
                 await sleep(delay);  
                 continue;  
             } else if (e.statusCode === 400 || e.statusCode === 401 || e.statusCode === 403 || e.code === 1015 || e.code === 429) {  
