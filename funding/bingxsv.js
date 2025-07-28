@@ -347,7 +347,6 @@ async function getBingxFundingRateDirect(symbol) {
 async function updateLeverageForExchange(id, symbolsToUpdate = null) {
     const exchange = exchanges[id];
     let fetchedLeverageDataMap = {};
-    let leverageSource = "Unknown";
     const updateType = symbolsToUpdate ? 'mục tiêu' : 'toàn bộ';
     
     // Ghi trạng thái ban đầu lên debugRawLeverageResponses
@@ -356,8 +355,13 @@ async function updateLeverageForExchange(id, symbolsToUpdate = null) {
     debugRawLeverageResponses[id].error = null;
 
     try {
+        // Luôn sử dụng dữ liệu leverage hiện có trong cache làm khởi điểm
+        // để không bị mất dữ liệu của các symbol không được cập nhật trong lần chạy này
+        if (leverageCache[id]) {
+            fetchedLeverageDataMap = { ...leverageCache[id] };
+        }
+
         if (id === 'binanceusdm') {
-            leverageSource = "Binance REST API /fapi/v1/leverageBracket";
             try {
                 await syncBinanceServerTime(); 
                 const leverageBracketsResponse = await callSignedBinanceAPI('/fapi/v1/leverageBracket', 'GET');
@@ -365,11 +369,16 @@ async function updateLeverageForExchange(id, symbolsToUpdate = null) {
                 let successCount = 0;
                 if (Array.isArray(leverageBracketsResponse)) {
                     for (const item of leverageBracketsResponse) {
+                        const cleanedSym = cleanSymbol(item.symbol);
+                        // Nếu là cập nhật mục tiêu, chỉ cập nhật các symbol trong danh sách
+                        if (symbolsToUpdate && !symbolsToUpdate.includes(cleanedSym)) {
+                            continue; 
+                        }
                         if (item.symbol && Array.isArray(item.brackets) && item.brackets.length > 0) {
                             const firstBracket = item.brackets.find(b => b.bracket === 1) || item.brackets[0];
                             const maxLeverage = parseInt(firstBracket.initialLeverage, 10);
                             if (!isNaN(maxLeverage) && maxLeverage > 0) {
-                                fetchedLeverageDataMap[cleanSymbol(item.symbol)] = maxLeverage;
+                                fetchedLeverageDataMap[cleanedSym] = maxLeverage;
                                 successCount++;
                             }
                         }
@@ -385,7 +394,6 @@ async function updateLeverageForExchange(id, symbolsToUpdate = null) {
             }
         }
         else if (id === 'bingx') {
-            leverageSource = "BingX REST API /trade/leverage";
             try {
                 await exchange.loadMarkets(true);
                 const bingxMarkets = Object.values(exchange.markets)
@@ -450,21 +458,26 @@ async function updateLeverageForExchange(id, symbolsToUpdate = null) {
             }
         }
         else { // OKX và Bitget: Dùng CCXT (fetchLeverageTiers + loadMarkets fallback)
-            leverageSource = "CCXT fetchLeverageTiers";
             debugRawLeverageResponses[id].timestamp = new Date(); 
 
             try {
                 let currentFetchedMap = {};
+                // Đối với các sàn này, fetchLeverageTiers hoặc loadMarkets thường đủ nhanh và trả về nhiều dữ liệu
+                // nên chúng ta có thể gọi nó dù là cập nhật toàn bộ hay mục tiêu.
                 if (exchange.has['fetchLeverageTiers']) {
                     const leverageTiers = await exchange.fetchLeverageTiers();
                     let successCount = 0;
                     for (const symbol in leverageTiers) {
+                        const cleanedSym = cleanSymbol(symbol);
+                        if (symbolsToUpdate && !symbolsToUpdate.includes(cleanedSym)) {
+                            continue; 
+                        }
                         const tiers = leverageTiers[symbol];
                         if (Array.isArray(tiers) && tiers.length > 0) {
                             const numericLeverages = tiers.map(t => typeof t.leverage === 'number' ? t.leverage : parseFloat(t.leverage)).filter(l => !isNaN(l) && l > 0);
                             const parsedMaxLeverage = numericLeverages.length > 0 ? parseInt(Math.max(...numericLeverages), 10) : 0;
                             if (parsedMaxLeverage > 0) {
-                                currentFetchedMap[cleanSymbol(symbol)] = parsedMaxLeverage; 
+                                currentFetchedMap[cleanedSym] = parsedMaxLeverage; 
                                 successCount++; 
                             }
                         }
@@ -476,34 +489,38 @@ async function updateLeverageForExchange(id, symbolsToUpdate = null) {
                     await exchange.loadMarkets(true);
                     let loadMarketsSuccessCount = 0;
                     for (const market of Object.values(exchange.markets)) {
+                        const cleanedSym = cleanSymbol(market.symbol);
+                        if (symbolsToUpdate && !symbolsToUpdate.includes(cleanedSym)) {
+                            continue; 
+                        }
                         if (market.swap && market.quote === 'USDT') {
-                            const symbolCleaned = cleanSymbol(market.symbol);
                             const maxLeverage = getMaxLeverageFromMarketInfo(market);
                             if (maxLeverage !== null && maxLeverage > 0) {
-                                currentFetchedMap[symbolCleaned] = maxLeverage; 
+                                currentFetchedMap[cleanedSym] = maxLeverage; 
                                 loadMarketsSuccessCount++; 
                             } else {
                                 console.warn(`[CACHE] ⚠️ ${id.toUpperCase()}: Đòn bẩy không hợp lệ hoặc không tìm thấy cho ${market.symbol} qua loadMarkets.`);
                             }
                         }
                     }
-                    leverageSource = "CCXT loadMarkets";
                     debugRawLeverageResponses[id].status = `Đòn bẩy hoàn tất (loadMarkets, ${loadMarketsSuccessCount} cặp)`;
                     debugRawLeverageResponses[id].data = `Đã lấy ${loadMarketsSuccessCount} cặp.`;
                 }
                 
-                // Nếu là cập nhật mục tiêu, chỉ giữ lại các symbol cần thiết
+                // Nếu là cập nhật mục tiêu, hãy kết hợp với dữ liệu cũ
                 if (symbolsToUpdate) {
+                    // Chỉ cập nhật các symbol có trong symbolsToUpdate nếu tìm thấy trong lần fetch này
                     symbolsToUpdate.forEach(sym => {
                         if (currentFetchedMap[sym]) {
                             fetchedLeverageDataMap[sym] = currentFetchedMap[sym];
                         } else if (leverageCache[id] && leverageCache[id][sym]) {
-                            // Giữ lại giá trị cũ nếu không tìm thấy trong lần fetch này
+                            // Nếu không tìm thấy trong lần fetch này nhưng có trong cache, giữ giá trị cũ
                             fetchedLeverageDataMap[sym] = leverageCache[id][sym];
                         }
                     });
                     console.log(`[CACHE] ✅ ${id.toUpperCase()}: Đã cập nhật ${Object.keys(fetchedLeverageDataMap).length} cặp đòn bẩy mục tiêu.`);
                 } else {
+                    // Nếu là cập nhật toàn bộ, thay thế hoàn toàn
                     fetchedLeverageDataMap = currentFetchedMap;
                     console.log(`[CACHE] ✅ ${id.toUpperCase()}: Đã lấy ${Object.keys(fetchedLeverageDataMap).length} cặp đòn bẩy toàn bộ.`);
                 }
