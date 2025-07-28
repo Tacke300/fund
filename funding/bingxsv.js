@@ -24,8 +24,10 @@ const IMMINENT_THRESHOLD_MINUTES = 15;
 const LEVERAGE_CACHE_REFRESH_INTERVAL_MINUTES = 30;
 
 // Cấu hình mới cho việc lấy dữ liệu BingX song song
-const BINGX_CONCURRENT_FETCH_LIMIT = 5; // Số lượng yêu cầu BingX được chạy song song tại một thời điểm
-const BINGX_DELAY_BETWEEN_CONCURRENT_BATCHES_MS = 3000; // Độ trễ giữa các lô yêu cầu song song (3 giây), đã tăng để tránh rate limit
+// ĐÃ THAY ĐỔI: Giảm số lượng yêu cầu đồng thời
+const BINGX_CONCURRENT_FETCH_LIMIT = 2; // Số lượng yêu cầu BingX được chạy song song tại một thời điểm (giảm từ 5 xuống 2)
+// ĐÃ THAY ĐỔI: Tăng độ trễ giữa các lô yêu cầu
+const BINGX_DELAY_BETWEEN_CONCURRENT_BATCHES_MS = 5000; // Độ trễ giữa các lô yêu cầu song song (5 giây)
 
 // ----- BIẾN TOÀN CỤC -----
 let leverageCache = {}; // Sẽ lưu trữ số đã parse (hoặc null nếu lỗi)
@@ -37,7 +39,7 @@ let loopTimeoutId = null;
 // Biến mới để lưu trữ phản hồi thô hoặc lỗi từ API/CCXT cho mục đích gỡ lỗi trên dashboard
 let debugRawLeverageResponses = {
     binanceusdm: { status: 'chưa chạy', timestamp: null, data: 'N/A', error: null },
-    bingx: { status: 'chạy', timestamp: null, data: 'N/A', error: null }, // Đã đổi trạng thái mặc định
+    bingx: { status: 'chưa chạy', timestamp: null, data: 'N/A', error: null }, 
     okx: { status: 'chưa chạy', timestamp: null, data: 'N/A', error: null },
     bitget: { status: 'chưa chạy', timestamp: null, data: 'N/A', error: null }
 };
@@ -167,7 +169,7 @@ async function callSignedBinanceAPI(fullEndpointPath, method = 'GET', params = {
         .map(key => `${key}=${params[key]}`)
         .join('&');
 
-    queryString += (queryString ? '&' : '') + `timestamp=${timestamp}&recvWindow=${recvWindow};`;
+    queryString += (queryString ? '&' : '') + `timestamp=${timestamp}&recvWindow=${recvWindow}`;
 
     const signature = createSignature(queryString, binanceApiSecret);
 
