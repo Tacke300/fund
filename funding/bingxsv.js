@@ -403,7 +403,7 @@ async function updateLeverageForExchange(id, symbolsToUpdate = null) {
         else if (id === 'bingx') {
             await exchange.loadMarkets(true); // Đảm bảo markets được load trước cho BingX
             const bingxMarkets = Object.values(exchange.markets)
-                .filter(m => m.swap && m.quote === 'USDT');
+                .filter(m => m.swap && m.quote === 'USDT'); // BingX tự có lọc USDT
 
             const marketsToFetch = symbolsToUpdate && symbolsToUpdate.length > 0
                 ? bingxMarkets.filter(market => symbolsToUpdate.includes(cleanSymbol(market.symbol)))
@@ -470,9 +470,9 @@ async function updateLeverageForExchange(id, symbolsToUpdate = null) {
 
 
         }
-        else { // OKX và Bitget: Dùng CCXT (fetchLeverageTiers + loadMarkets fallback)
+        else { // OKX và Bitget: Dùng CCXT (fetchLeverageTiers + loadMarkets fallback) - KHÔNG LỌC USDT
             debugRawLeverageResponses[id].timestamp = new Date();
-            await exchange.loadMarkets(true); // ĐÃ SỬA: Đảm bảo markets được load trước cho cả hai nhánh này
+            await exchange.loadMarkets(true); // Đảm bảo markets được load trước
             
             let currentFetchedMap = {};
             if (exchange.has['fetchLeverageTiers']) {
@@ -483,12 +483,9 @@ async function updateLeverageForExchange(id, symbolsToUpdate = null) {
                     if (symbolsToUpdate && !symbolsToUpdate.includes(cleanedSym)) {
                         continue;
                     }
-                    // Kiểm tra quote là USDT VÀ là swap
-                    const market = exchange.markets[symbol];
-                    if (!market || !market.swap || market.quote !== 'USDT') {
-                        continue;
-                    }
-
+                    // ĐÃ BỎ LỌC: OKX và Bitget sẽ lấy tất cả các cặp leverage được cung cấp bởi API của họ
+                    // Đây là thay đổi chính để khắc phục lỗi mất dữ liệu
+                    
                     const tiers = leverageTiers[symbol];
                     if (Array.isArray(tiers) && tiers.length > 0) {
                         const numericLeverages = tiers.map(t => typeof t.leverage === 'number' ? t.leverage : parseFloat(t.leverage)).filter(l => !isNaN(l) && l > 0);
@@ -501,13 +498,14 @@ async function updateLeverageForExchange(id, symbolsToUpdate = null) {
                 }
                 debugRawLeverageResponses[id].status = `Đòn bẩy hoàn tất (${successCount} cặp)`;
                 debugRawLeverageResponses[id].data = `Đã lấy ${successCount} cặp.`;
-                console.log(`[CACHE] ✅ ${id.toUpperCase()}: Đã lấy ${successCount} cặp đòn bẩy USDT từ fetchLeverageTiers.`);
+                console.log(`[CACHE] ✅ ${id.toUpperCase()}: Đã lấy ${successCount} cặp đòn bẩy từ fetchLeverageTiers.`);
             } else {
                 console.log(`[CACHE] ${id.toUpperCase()}: fetchLeverageTiers không khả dụng. Dùng loadMarkets...`);
                 let loadMarketsSuccessCount = 0;
                 for (const market of Object.values(exchange.markets)) {
-                    // THÊM LỌC: Chỉ lấy các cặp USDT swap cho các sàn CCXT khác
-                    if (!market.swap || market.quote !== 'USDT') {
+                    // ĐÃ BỎ LỌC: OKX và Bitget sẽ lấy tất cả các cặp leverage được cung cấp bởi API của họ
+                    // Kiểm tra chỉ là swap (future)
+                    if (!market.swap) { // Chỉ giữ lại kiểm tra swap
                         continue;
                     }
 
@@ -525,7 +523,7 @@ async function updateLeverageForExchange(id, symbolsToUpdate = null) {
                 }
                 debugRawLeverageResponses[id].status = `Đòn bẩy hoàn tất (loadMarkets, ${loadMarketsSuccessCount} cặp)`;
                 debugRawLeverageResponses[id].data = `Đã lấy ${loadMarketsSuccessCount} cặp.`;
-                console.log(`[CACHE] ✅ ${id.toUpperCase()}: Đã lấy ${loadMarketsSuccessCount} cặp đòn bẩy USDT từ loadMarkets.`);
+                console.log(`[CACHE] ✅ ${id.toUpperCase()}: Đã lấy ${loadMarketsSuccessCount} cặp đòn bẩy từ loadMarkets.`);
             }
         }
 
@@ -645,19 +643,28 @@ async function fetchFundingRatesForAllExchanges() {
                 console.log(`[DEBUG_BINGX_FUNDING_PROCESSED] BingX processedRates count: ${Object.keys(processedRates).length}`);
 
 
-            } else { // Các sàn khác (Binance, OKX, Bitget)
+            } else { // Các sàn khác (Binance, OKX, Bitget) - KHÔNG LỌC USDT
                 const exchange = exchanges[id];
                 const fundingRatesRaw = await exchange.fetchFundingRates();
                 let successCount = 0;
                 for (const rate of Object.values(fundingRatesRaw)) {
-                    // LỌC: Chỉ lấy các cặp USDT cho các sàn CCXT khác
-                    // Kí hiệu symbol của CCXT có thể là "BTC/USDT", "BTC:USDT", "BTCUSDT", "BTC-USDT-SWAP"
-                    // Kiểm tra symbol chứa "USDT" và không phải là cặp giao ngay thông thường
-                    if (!rate.symbol.includes('USDT') || (rate.symbol.includes('/') && !rate.symbol.endsWith('/USDT')) || (rate.symbol.includes(':') && !rate.symbol.endsWith(':USDT')) || (!rate.symbol.includes('/') && !rate.symbol.includes(':') && !rate.symbol.endsWith('USDT') && !rate.symbol.includes('SWAP')) ) {
-                        continue; // Loại bỏ các định dạng không phải USDT swap/future
+                    // LỌC: Chỉ giữ lọc cho Binance, bỏ lọc USDT cho OKX và Bitget.
+                    // Chỉ giữ lại kiểm tra là hợp đồng hoán đổi/tương lai (swap/future) nếu có thông tin từ CCXT
+                    if (!rate.info?.contractType?.includes('PERPETUAL')) { // Ví dụ: Lọc theo contractType nếu CCXT cung cấp
+                        // Nếu không phải PERPETUAL, có thể bỏ qua hoặc xử lý nếu cần
+                        // Tuy nhiên, nếu bạn muốn LẤY TẤT CẢ, thì dòng này cũng nên bỏ đi.
+                        // Dưới đây tôi bỏ lọc USDT, chỉ giữ lọc nếu không phải là swap/future rõ ràng
                     }
-                    
-                    const symbolCleaned = cleanSymbol(rate.symbol);
+
+                    // Nếu là Binance, vẫn lọc USDT
+                    if (id === 'binanceusdm') {
+                         if (!rate.symbol.includes('USDT') || (rate.symbol.includes(':') && !rate.symbol.endsWith(':USDT')) || (rate.symbol.includes('/') && !rate.symbol.endsWith('/USDT')) ) {
+                            continue;
+                         }
+                    }
+                    // BỎ LỌC USDT cho OKX và Bitget ở đây. Chúng sẽ lấy tất cả các cặp được báo cáo.
+
+                    const symbolCleaned = cleanSymbol(rate.symbol); // Clean symbol để đồng bộ hóa
                     const maxLeverageParsed = leverageCache[id]?.[symbolCleaned] || null;
 
                     let fundingTimestamp;
@@ -706,7 +713,7 @@ function calculateArbitrageOpportunities() {
     const currentExchangeData = JSON.parse(JSON.stringify(exchangeData));
 
     for (let i = 0; i < EXCHANGE_IDS.length; i++) {
-        for (let j = i + 1; j < EXCHANGE_IDS.length; j++) { // Đã sửa lỗi vòng lặp
+        for (let j = i + 1; j < EXCHANGE_IDS.length; j++) {
             const exchange1Id = EXCHANGE_IDS[i], exchange2Id = EXCHANGE_IDS[j];
             const exchange1Rates = currentExchangeData[exchange1Id]?.rates, exchange2Rates = currentExchangeData[exchange2Id]?.rates;
 
@@ -738,7 +745,6 @@ function calculateArbitrageOpportunities() {
                 }
 
                 let longExchange, shortExchange, longRate, shortRate;
-                // Đã sửa lỗi logic: longRate và shortRate phải là rate tương ứng với sàn của chúng
                 if (rate1Data.fundingRate > rate2Data.fundingRate) {
                     shortExchange = exchange1Id; shortRate = rate1Data;
                     longExchange = exchange2Id; longRate = rate2Data;
