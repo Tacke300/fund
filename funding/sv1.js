@@ -46,7 +46,6 @@ EXCHANGE_IDS.forEach(id => {
     const config = {
         'options': { 'defaultType': 'swap' },
         'enableRateLimit': true,
-        // Thêm User-Agent cho CCXT (áp dụng cho tất cả các sàn CCXT)
         'headers': {
             'User-Agent': 'Mozilla/5.0 (compatible; ccxt/1.0;)', // CCXT User-Agent
         }
@@ -297,7 +296,7 @@ async function initializeLeverageCache() {
                         const formattedSymbol = market.symbol.replace('/', '-').replace(':USDT', '');
                         const rawLevData = await fetchBingxMaxLeverage(formattedSymbol); // Lấy raw data (string)
                         if (rawLevData) {
-                            fetchedLeverageDataMap[cleanSymbol(market.market.symbol)] = rawLevData; // Sửa lỗi: dùng market.symbol để lưu vào map
+                            fetchedLeverageDataMap[cleanSymbol(market.symbol)] = rawLevData;
                             // Thử parse để log
                             try {
                                 const parsedJson = JSON.parse(rawLevData);
@@ -444,7 +443,7 @@ async function fetchFundingRatesForAllExchanges() {
         } catch (e) {
             let errorMessage = `Lỗi khi lấy funding từ ${id.toUpperCase()}: ${e.message}.`;
             if (e instanceof ccxt.AuthenticationError) {
-                errorMessage = `LỖI XÁC THỰC! Vui lòng kiểm tra lại API Key/Secret của ${id.toUpperCase()}. Chi tiết: ${e.message}.`;
+                errorMessage = `LỖI XÁC THỨC! Vui lòng kiểm tra lại API Key/Secret của ${id.toUpperCase()}. Chi tiết: ${e.message}.`;
             } else if (e instanceof ccxt.NetworkError) {
                 errorMessage = `Lỗi mạng khi lấy funding từ ${id.toUpperCase()}: ${e.message}.`;
             }
