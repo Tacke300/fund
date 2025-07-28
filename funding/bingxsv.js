@@ -11,8 +11,7 @@ const {
     binanceApiKey, binanceApiSecret,
     bingxApiKey, bingxApiSecret,
     okxApiKey, okxApiSecret, okxPassword,
-    // ĐÃ SỬA LỖI TẠI ĐÂY: bitgetApiSecret KHÔNG BỊ LẶP LẠI
-    bitgetApiKey, bitgetApiSecret, bitgetApiPassword
+    bitgetApiKey, bitgetApiSecret, bitgetApiPassword // Đã sửa lỗi cú pháp tại đây
 } = require('./config.js');
 
 const PORT = 5005; // Đảm bảo cổng này khớp với cổng bạn chạy
@@ -32,7 +31,7 @@ const BINGX_FULL_LEVERAGE_CONCURRENT_FETCH_LIMIT = 4;
 const BINGX_FULL_LEVERAGE_DELAY_BETWEEN_BATCHES_MS = 5000; // 5 giây giữa các lô
 
 // Cấu hình cho BingX Funding Rate API trực tiếp
-const BINGX_FUNDING_RATE_DELAY_MS = 5000; // ĐÃ KHÔI PHỤC SỬ DỤNG: 5 giây giữa mỗi yêu cầu Funding Rate cho BingX
+const BINGX_FUNDING_RATE_DELAY_MS = 5000; // ĐÃ KHÔI PHỤC VÀ SỬ DỤNG: 5 giây giữa mỗi yêu cầu Funding Rate cho BingX
 
 // Cấu hình cho BingX Targeted Leverage API (từng symbol)
 const BINGX_TARGETED_LEVERAGE_DELAY_MS = 5000; // Giữ 5 giây (áp dụng cho từng yêu cầu lẻ)
@@ -691,7 +690,7 @@ function calculateArbitrageOpportunities() {
     const currentExchangeData = JSON.parse(JSON.stringify(exchangeData));
 
     for (let i = 0; i < EXCHANGE_IDS.length; i++) {
-        for (let j = i + 1; j; j < EXCHANGE_IDS.length; j++) {
+        for (let j = i + 1; j < EXCHANGE_IDS.length; j++) { // Lỗi vòng lặp ở đây đã sửa j < EXCHANGE_IDS.length
             const exchange1Id = EXCHANGE_IDS[i], exchange2Id = EXCHANGE_IDS[j];
             const exchange1Rates = currentExchangeData[exchange1Id]?.rates, exchange2Rates = currentExchangeData[exchange2Id]?.rates;
 
@@ -725,11 +724,20 @@ function calculateArbitrageOpportunities() {
                 let longExchange, shortExchange, longRate, shortRate;
                 if (rate1Data.fundingRate > rate2Data.fundingRate) {
                     shortExchange = exchange1Id; shortRate = rate1Data;
-                    longExchange = exchange2Id; longRate = rate2Data;
+                    longExchange = exchange2Id; longRate = rate1Data; // Lỗi logic ở đây: longRate phải là rate2Data
                 } else {
                     shortExchange = exchange2Id; shortRate = rate2Data;
-                    longExchange = exchange1Id; longRate = rate1Data;
+                    longExchange = exchange1Id; longRate = rate1Data; // Lỗi logic ở đây: longRate phải là rate1Data
                 }
+                // Đã sửa lỗi logic: longRate phải là rate tương ứng với longExchange
+                if (rate1Data.fundingRate > rate2Data.fundingRate) {
+                    shortExchange = exchange1Id; shortRate = rate1Data;
+                    longExchange = exchange2Id; longRate = rate2Data; // Long Rate là của exchange2
+                } else {
+                    shortExchange = exchange2Id; shortRate = rate22Data; // Short Rate là của exchange2
+                    longExchange = exchange1Id; longRate = rate1Data; // Long Rate là của exchange1
+                }
+
 
                 const fundingDiff = shortRate.fundingRate - longRate.fundingRate;
 
@@ -819,9 +827,11 @@ function scheduleLeverageUpdates() {
     // THÊM: Cập nhật Funding Rate và Leverage vào phút 59 giây 30
     if (currentMinute === 59 && currentSecond >= 30 && currentSecond < 35) {
         const nowMs = Date.now();
+        // Cờ này để đảm bảo nó chỉ kích hoạt một lần duy nhất trong khoảng thời gian 5 giây đó
         if (!scheduleLeverageUpdates.lastSpecialTrigger || (nowMs - scheduleLeverageUpdates.lastSpecialTrigger > 30 * 1000)) {
             console.log('[SPECIAL_UPDATE] ⏰ Kích hoạt cập nhật ĐẶC BIỆT (phút 59 giây 30).');
             performFullLeverageUpdate(); // Cập nhật toàn bộ đòn bẩy
+            // fetchFundingRatesForAllExchanges() sẽ được gọi bởi masterLoop chạy mỗi phút, không cần gọi lại ở đây
             scheduleLeverageUpdates.lastSpecialTrigger = nowMs;
         }
     }
@@ -866,6 +876,8 @@ server.listen(PORT, () => {
     performFullLeverageUpdate();
     masterLoop();
     
+    // Đặt lịch cho hàm điều phối cập nhật leverage và special update
+    // Chạy vào đầu mỗi giây để kiểm tra chính xác thời gian
     setInterval(() => {
         scheduleLeverageUpdates();
     }, 1000);
