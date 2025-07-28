@@ -17,7 +17,7 @@ const {
 const PORT = 5005; 
 
 // ----- CẤU HÌNH -----
-const EXCHANGE_IDS = ['binanceusdm', 'bingx', 'okx', 'bitget'];
+const EXCHANGE_IDS = ['binanceusdm', 'bingx', 'okx', 'bitget']; // Giữ nguyên 'binanceusdm' ở backend
 const FUNDING_DIFFERENCE_THRESHOLD = 0.00001;
 const MINIMUM_PNL_THRESHOLD = 15;
 const IMMINENT_THRESHOLD_MINUTES = 15;
@@ -25,8 +25,7 @@ const LEVERAGE_CACHE_REFRESH_INTERVAL_MINUTES = 30;
 
 // Cấu hình mới cho việc lấy dữ liệu BingX song song
 const BINGX_CONCURRENT_FETCH_LIMIT = 5; // Số lượng yêu cầu BingX được chạy song song tại một thời điểm
-// ĐÃ THAY ĐỔI: Tăng độ trễ để tránh bị rate limit từ BingX
-const BINGX_DELAY_BETWEEN_CONCURRENT_BATCHES_MS = 3000; // Độ trễ giữa các lô yêu cầu song song (3 giây)
+const BINGX_DELAY_BETWEEN_CONCURRENT_BATCHES_MS = 3000; // Độ trễ giữa các lô yêu cầu song song (3 giây), đã tăng để tránh rate limit
 
 // ----- BIẾN TOÀN CỤC -----
 let leverageCache = {}; // Sẽ lưu trữ số đã parse (hoặc null nếu lỗi)
@@ -38,7 +37,7 @@ let loopTimeoutId = null;
 // Biến mới để lưu trữ phản hồi thô hoặc lỗi từ API/CCXT cho mục đích gỡ lỗi trên dashboard
 let debugRawLeverageResponses = {
     binanceusdm: { status: 'chưa chạy', timestamp: null, data: 'N/A', error: null },
-    bingx: { status: 'chưa chạy', timestamp: null, data: 'N/A', error: null },
+    bingx: { status: 'chạy', timestamp: null, data: 'N/A', error: null }, // Đã đổi trạng thái mặc định
     okx: { status: 'chưa chạy', timestamp: null, data: 'N/A', error: null },
     bitget: { status: 'chưa chạy', timestamp: null, data: 'N/A', error: null }
 };
@@ -168,7 +167,7 @@ async function callSignedBinanceAPI(fullEndpointPath, method = 'GET', params = {
         .map(key => `${key}=${params[key]}`)
         .join('&');
 
-    queryString += (queryString ? '&' : '') + `timestamp=${timestamp}&recvWindow=${recvWindow}`;
+    queryString += (queryString ? '&' : '') + `timestamp=${timestamp}&recvWindow=${recvWindow};`;
 
     const signature = createSignature(queryString, binanceApiSecret);
 
@@ -282,7 +281,8 @@ async function fetchBingxMaxLeverage(symbol, retries = 3) {
                 bingxErrorLogCache[errorSignature] = now;  
             }  
 
-            if (e.code === 'NETWORK_ERROR' || e.code === 'TIMEOUT_ERROR' || (e.statusCode >= 500 && e.statusCode < 600) || e.code === 100410) { // Thêm mã lỗi 100410 vào đây để retry
+            // Thêm mã lỗi 100410 vào điều kiện retry các lỗi tạm thời
+            if (e.code === 'NETWORK_ERROR' || e.code === 'TIMEOUT_ERROR' || (e.statusCode >= 500 && e.statusCode < 600) || e.code === 100410) { 
                 const delay = 2 ** i * 1000;  
                 console.warn(`[BINGX] Lỗi tạm thời (có thể do rate limit). Thử lại sau ${delay / 1000}s.`);  
                 await sleep(delay);  
@@ -605,6 +605,7 @@ function calculateArbitrageOpportunities() {
 
                     allFoundOpportunities.push({  
                         coin: symbol,  
+                        // Điều chỉnh tên sàn hiển thị cho phù hợp với frontend (loại bỏ 'usdm')
                         exchanges: `${shortExchange.replace('usdm', '')} / ${longExchange.replace('usdm', '')}`,  
                         fundingDiff: parseFloat(fundingDiff.toFixed(6)),  
                         nextFundingTime: finalFundingTime,  
@@ -686,12 +687,14 @@ const server = http.createServer((req, res) => {
             lastUpdated: lastFullUpdateTimestamp,
             arbitrageData: arbitrageOpportunities,
             rawRates: {
-                binanceusdm: Object.values(exchangeData.binanceusdm?.rates || {}), // Đảm bảo khớp tên sàn
+                // ĐÃ SỬA: Thay đổi khóa từ 'binanceusdm' thành 'binance' để khớp với frontend HTML
+                binance: Object.values(exchangeData.binanceusdm?.rates || {}), 
                 bingx: Object.values(exchangeData.bingx?.rates || {}),
                 okx: Object.values(exchangeData.okx?.rates || {}),
                 bitget: Object.values(exchangeData.bitget?.rates || {}),
             },
-            debugRawLeverageResponses: debugRawLeverageResponses
+            // Giữ lại debugRawLeverageResponses dù frontend hiện tại không hiển thị trực tiếp
+            debugRawLeverageResponses: debugRawLeverageResponses 
         };
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify(responseData));
