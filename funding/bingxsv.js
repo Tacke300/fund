@@ -119,7 +119,8 @@ async function makeHttpRequest(method, hostname, path, headers = {}, postData = 
             let data = '';
             res.on('data', (chunk) => data += chunk);
             res.on('end', () => {
-                // ĐÃ SỬA: Loại bỏ khối try không cần thiết bên trong res.on('end')
+                // ĐÃ SỬA LỖI CÚ PHÁP: Loại bỏ khối try không cần thiết bên trong res.on('end')
+                // Logic xử lý status code và reject đã nằm ngoài try/catch của callback này
                 if (res.statusCode >= 200 && res.statusCode < 300) {
                     resolve(data);
                 } else {
@@ -237,7 +238,8 @@ async function fetchBingxMaxLeverage(symbol, retries = 3) {
             lastRawData = rawRes; 
             lastError = null; 
             
-            try {
+            // ĐÃ SỬA LỖI CÚ PHÁP: Khối try/catch này bao trùm việc parse JSON và xử lý logic
+            try { 
                 const parsedJson = JSON.parse(rawRes);
                 if (parsedJson.code === 0 && parsedJson.data) {
                     const maxLongLev = parseInt(parsedJson.data.maxLongLeverage, 10);
