@@ -27,14 +27,14 @@ const FULL_LEVERAGE_REFRESH_AT_HOUR = 0;
 const TARGETED_LEVERAGE_REFRESH_MINUTES = [15, 30, 45, 55, 59];
 
 // Cấu hình cho việc lấy dữ liệu BingX song song (cho Full Leverage API)
-const BINGX_FULL_LEVERAGE_CONCURRENT_FETCH_LIMIT = 4; // ĐÃ SỬA: Từ 5 xuống 4
+const BINGX_FULL_LEVERAGE_CONCURRENT_FETCH_LIMIT = 4; // ĐÃ SỬA: Giữ 4
 const BINGX_FULL_LEVERAGE_DELAY_BETWEEN_BATCHES_MS = 15000;
 
 // Cấu hình cho BingX Funding Rate API trực tiếp
 const BINGX_FUNDING_RATE_DELAY_MS = 5000; // Giữ 5 giây
 
 // Cấu hình cho BingX Targeted Leverage API (từng symbol)
-const BINGX_TARGETED_LEVERAGE_DELAY_MS = 5000; // ĐÃ SỬA: Đồng bộ với BINGX_FUNDING_RATE_DELAY_MS
+const BINGX_TARGETED_LEVERAGE_DELAY_MS = 5000; // Giữ 5 giây
 
 // ----- BIẾN TOÀN CỤC -----
 let leverageCache = {};
@@ -317,13 +317,18 @@ async function getBingxFundingRateDirect(symbol) {
     try {
         const data = await makeHttpRequest('GET', BINGX_BASE_HOST, urlPath);
         const json = JSON.parse(data);
-        if (json.code === 0 && json.data && typeof json.data.fundingRate === 'string' && !isNaN(parseFloat(json.data.fundingRate)) && json.data.fundingTime) {
-            return {
-                symbol: json.data.symbol,
-                fundingRate: parseFloat(json.data.fundingRate),
-                fundingTime: parseInt(json.data.fundingTime, 10)
-            };
+        // ĐÃ SỬA: Kiểm tra json.data là mảng và lấy phần tử đầu tiên
+        if (json.code === 0 && Array.isArray(json.data) && json.data.length > 0) {
+            const firstData = json.data[0]; // Lấy đối tượng đầu tiên từ mảng data
+            if (typeof firstData.fundingRate === 'string' && !isNaN(parseFloat(firstData.fundingRate)) && firstData.fundingTime) {
+                return {
+                    symbol: firstData.symbol,
+                    fundingRate: parseFloat(firstData.fundingRate),
+                    fundingTime: parseInt(firstData.fundingTime, 10)
+                };
+            }
         } else {
+            // Log chi tiết hơn khi không có dữ liệu funding hoặc lỗi API
             console.warn(`[BINGX_FUNDING] Không có dữ liệu funding hoặc lỗi API cho ${symbol}. Code: ${json.code}, Msg: ${json.msg || 'N/A'}. Raw: ${data.substring(0, Math.min(data.length, 200))}`);
             return null;
         }
@@ -438,7 +443,7 @@ async function updateLeverageForExchange(id, symbolsToUpdate = null) {
             debugRawLeverageResponses[id].status = `Đòn bẩy hoàn tất (${successCount} cặp)`;
             console.log(`[CACHE] ✅ ${id.toUpperCase()}: Hoàn tất lấy dữ liệu đòn bẩy cho ${Object.keys(fetchedLeverageDataMap).length} cặp. (${successCount} cặp được parse thành công)`);
             if (successCount > 0) {
-                const sampleSymbols = Object.keys(fetchedLeverageDataMap).slice(0, 3); // Lấy 3 symbol đầu tiên
+                const sampleSymbols = Object.keys(fetchedLeverageDataMap).slice(0, 3);
                 console.log(`[DEBUG_BINGX_LEVERAGE] Mẫu dữ liệu đòn bẩy BingX:`);
                 sampleSymbols.forEach(sym => {
                     console.log(`  - ${sym}: ${fetchedLeverageDataMap[sym]}x`);
@@ -597,6 +602,7 @@ async function fetchFundingRatesForAllExchanges() {
                 let successCount = 0;
                 for (let i = 0; i < symbols.length; i++) {
                     const result = await getBingxFundingRateDirect(symbols[i]);
+                    // Kiểm tra result có hợp lệ không
                     if (result && typeof result.fundingRate === 'number' && result.fundingTime) {
                         const symbolCleaned = cleanSymbol(result.symbol);
                         // Lấy maxLeverage từ leverageCache, vì funding rates không trả về max leverage
@@ -610,12 +616,12 @@ async function fetchFundingRatesForAllExchanges() {
                         };
                         successCount++;
                     }
-                    await sleep(BINGX_FUNDING_RATE_DELAY_MS);
+                    await sleep(BINGX_FUNDING_RATE_DELAY_MS); // Áp dụng độ trễ sau mỗi lần gọi API BingX
                 }
                 currentStatus = `Funding hoàn tất (${successCount} cặp)`;
                 console.log(`[DATA] ✅ BingX: Đã lấy thành công ${successCount} funding rates từ API trực tiếp.`);
                 if (successCount > 0) {
-                    const sampleSymbols = Object.keys(processedRates).slice(0, 3); // Lấy 3 symbol đầu tiên
+                    const sampleSymbols = Object.keys(processedRates).slice(0, 3);
                     console.log(`[DEBUG_BINGX_FUNDING] Mẫu dữ liệu funding BingX:`);
                     sampleSymbols.forEach(sym => {
                         const data = processedRates[sym];
@@ -661,23 +667,25 @@ async function fetchFundingRatesForAllExchanges() {
             currentStatus = `Funding thất bại (lỗi: ${e.code || 'UNKNOWN'})`;
             currentError = { code: e.code, msg: e.message };
         } finally {
+            // CẬP NHẬT BIẾN TOÀN CỤC exchangeData VÀ debugRawLeverageResponses NGAY LẬP TỨC CHO SÀN HIỆN TẠI
+            // Đảm bảo cập nhật từng phần cho frontend
             tempExchangeData[id] = { rates: processedRates };
-            exchangeData = { ...tempExchangeData };
+            exchangeData = { ...tempExchangeData }; // Gán lại toàn bộ để frontend thấy update từng sàn
             debugRawLeverageResponses[id].status = currentStatus;
             debugRawLeverageResponses[id].timestamp = new Date();
             debugRawLeverageResponses[id].error = currentError;
-            calculateArbitrageOpportunities();
+            calculateArbitrageOpportunities(); // Tính toán lại cơ hội ngay sau khi funding của một sàn được cập nhật
         }
     });
 
-    await Promise.all(fundingPromises);
+    await Promise.all(fundingPromises); // Chờ tất cả các sàn hoàn thành
     console.log('[DATA] 🎉 Hoàn tất làm mới funding rates.');
 }
 
 
 function calculateArbitrageOpportunities() {
     const allFoundOpportunities = [];
-    const currentExchangeData = JSON.parse(JSON.stringify(exchangeData));
+    const currentExchangeData = JSON.parse(JSON.stringify(exchangeData)); // Tạo bản sao sâu
 
     for (let i = 0; i < EXCHANGE_IDS.length; i++) {
         for (let j = i + 1; j < EXCHANGE_IDS.length; j++) {
@@ -820,7 +828,7 @@ const server = http.createServer((req, res) => {
             arbitrageData: arbitrageOpportunities,
             rawRates: {
                 binance: Object.values(exchangeData.binanceusdm?.rates || {}),
-                bingx: Object.values(exchangeData.bingx?.rates || {}),
+                bingx: Object.values(exchangeData.bingx?.rates || {}), // Đây là nơi bạn cần dữ liệu BingX được parse đúng
                 okx: Object.values(exchangeData.okx?.rates || {}),
                 bitget: Object.values(exchangeData.bitget?.rates || {}),
             },
