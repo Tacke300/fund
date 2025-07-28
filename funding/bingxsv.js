@@ -36,7 +36,7 @@ const BINGX_FUNDING_RATE_DELAY_MS = 5000; // ĐÃ KHÔI PHỤC VÀ SỬ DỤNG: 
 // Cấu hình cho BingX Targeted Leverage API (từng symbol)
 const BINGX_TARGETED_LEVERAGE_DELAY_MS = 5000; // Giữ 5 giây (áp dụng cho từng yêu cầu lẻ)
 
-// ----- BIẾN TOÀN CỤC -----
+// ----- BIẾN TOÀN CỦA -----
 let leverageCache = {};
 let exchangeData = {};
 let arbitrageOpportunities = [];
@@ -403,7 +403,7 @@ async function updateLeverageForExchange(id, symbolsToUpdate = null) {
         else if (id === 'bingx') {
             await exchange.loadMarkets(true); // Đảm bảo markets được load trước cho BingX
             const bingxMarkets = Object.values(exchange.markets)
-                .filter(m => m.swap && m.quote === 'USDT'); // BingX tự có lọc USDT
+                .filter(m => m.swap && m.quote === 'USDT'); // BingX tự có lọc USDT trong phần này
 
             const marketsToFetch = symbolsToUpdate && symbolsToUpdate.length > 0
                 ? bingxMarkets.filter(market => symbolsToUpdate.includes(cleanSymbol(market.symbol)))
@@ -472,7 +472,7 @@ async function updateLeverageForExchange(id, symbolsToUpdate = null) {
         }
         else { // OKX và Bitget: Dùng CCXT (fetchLeverageTiers + loadMarkets fallback) - KHÔNG LỌC USDT
             debugRawLeverageResponses[id].timestamp = new Date();
-            await exchange.loadMarkets(true); // Đảm bảo markets được load trước
+            await exchange.loadMarkets(true); // Đảm bảo markets được load trước cho cả hai nhánh này
             
             let currentFetchedMap = {};
             if (exchange.has['fetchLeverageTiers']) {
@@ -483,9 +483,13 @@ async function updateLeverageForExchange(id, symbolsToUpdate = null) {
                     if (symbolsToUpdate && !symbolsToUpdate.includes(cleanedSym)) {
                         continue;
                     }
-                    // ĐÃ BỎ LỌC: OKX và Bitget sẽ lấy tất cả các cặp leverage được cung cấp bởi API của họ
-                    // Đây là thay đổi chính để khắc phục lỗi mất dữ liệu
-                    
+                    // KHÔI PHỤC LỌC GỐC: Chỉ lấy các cặp SWAP (perpetual futures), bỏ qua các loại khác nếu CCXT báo cáo.
+                    // Không lọc theo 'USDT' ở đây.
+                    const market = exchange.markets[symbol];
+                    if (!market || !market.swap) { // Chỉ kiểm tra nếu là hợp đồng hoán đổi
+                        continue;
+                    }
+
                     const tiers = leverageTiers[symbol];
                     if (Array.isArray(tiers) && tiers.length > 0) {
                         const numericLeverages = tiers.map(t => typeof t.leverage === 'number' ? t.leverage : parseFloat(t.leverage)).filter(l => !isNaN(l) && l > 0);
@@ -503,9 +507,9 @@ async function updateLeverageForExchange(id, symbolsToUpdate = null) {
                 console.log(`[CACHE] ${id.toUpperCase()}: fetchLeverageTiers không khả dụng. Dùng loadMarkets...`);
                 let loadMarketsSuccessCount = 0;
                 for (const market of Object.values(exchange.markets)) {
-                    // ĐÃ BỎ LỌC: OKX và Bitget sẽ lấy tất cả các cặp leverage được cung cấp bởi API của họ
-                    // Kiểm tra chỉ là swap (future)
-                    if (!market.swap) { // Chỉ giữ lại kiểm tra swap
+                    // KHÔI PHỤC LỌC GỐC: Chỉ lấy các cặp SWAP (perpetual futures)
+                    // Không lọc theo 'USDT' ở đây.
+                    if (!market.swap) {
                         continue;
                     }
 
@@ -525,11 +529,30 @@ async function updateLeverageForExchange(id, symbolsToUpdate = null) {
                 debugRawLeverageResponses[id].data = `Đã lấy ${loadMarketsSuccessCount} cặp.`;
                 console.log(`[CACHE] ✅ ${id.toUpperCase()}: Đã lấy ${loadMarketsSuccessCount} cặp đòn bẩy từ loadMarkets.`);
             }
+            
+            // ĐÃ SỬA: Đảm bảo leverageCache[id] được cập nhật đúng vị trí
+            // và log tổng số mục leverageCache[id] SAU KHI currentFetchedMap đã được xử lý hoàn tất
+            if (symbolsToUpdate) {
+                // Đối với cập nhật mục tiêu, chúng ta cần hợp nhất với dữ liệu cũ
+                symbolsToUpdate.forEach(sym => {
+                    if (currentFetchedMap[sym]) {
+                        // Nếu có dữ liệu mới cho symbol này, cập nhật nó
+                        leverageCache[id][sym] = currentFetchedMap[sym];
+                    } else if (!leverageCache[id][sym]) {
+                        // Nếu không có dữ liệu mới và cũng không có trong cache, để null hoặc mặc định
+                        // Tùy thuộc vào hành vi mong muốn. Hiện tại, chúng ta giữ nguyên giá trị cũ nếu có
+                        // hoặc bỏ qua nếu không có cả cũ lẫn mới.
+                    }
+                });
+                console.log(`[CACHE] ✅ ${id.toUpperCase()}: Đã cập nhật ${Object.keys(leverageCache[id]).length} cặp đòn bẩy mục tiêu.`);
+            } else {
+                // Đối với cập nhật toàn bộ, thay thế hoàn toàn cache bằng dữ liệu mới
+                leverageCache[id] = currentFetchedMap;
+                console.log(`[CACHE] ✅ ${id.toUpperCase()}: Tổng số mục đòn bẩy hiện tại: ${Object.keys(leverageCache[id]).length}.`);
+            }
         }
 
-        leverageCache[id] = fetchedLeverageDataMap;
-        const count = Object.keys(leverageCache[id]).length;
-        console.log(`[CACHE] ✅ ${id.toUpperCase()}: Tổng số mục đòn bẩy hiện tại: ${count}.`);
+        // Cập nhật trạng thái debug và tính toán cơ hội
         debugRawLeverageResponses[id].timestamp = new Date();
         debugRawLeverageResponses[id].error = null;
         calculateArbitrageOpportunities();
@@ -643,28 +666,22 @@ async function fetchFundingRatesForAllExchanges() {
                 console.log(`[DEBUG_BINGX_FUNDING_PROCESSED] BingX processedRates count: ${Object.keys(processedRates).length}`);
 
 
-            } else { // Các sàn khác (Binance, OKX, Bitget) - KHÔNG LỌC USDT
+            } else { // Các sàn khác (Binance, OKX, Bitget)
                 const exchange = exchanges[id];
                 const fundingRatesRaw = await exchange.fetchFundingRates();
                 let successCount = 0;
                 for (const rate of Object.values(fundingRatesRaw)) {
                     // LỌC: Chỉ giữ lọc cho Binance, bỏ lọc USDT cho OKX và Bitget.
-                    // Chỉ giữ lại kiểm tra là hợp đồng hoán đổi/tương lai (swap/future) nếu có thông tin từ CCXT
-                    if (!rate.info?.contractType?.includes('PERPETUAL')) { // Ví dụ: Lọc theo contractType nếu CCXT cung cấp
-                        // Nếu không phải PERPETUAL, có thể bỏ qua hoặc xử lý nếu cần
-                        // Tuy nhiên, nếu bạn muốn LẤY TẤT CẢ, thì dòng này cũng nên bỏ đi.
-                        // Dưới đây tôi bỏ lọc USDT, chỉ giữ lọc nếu không phải là swap/future rõ ràng
-                    }
-
-                    // Nếu là Binance, vẫn lọc USDT
                     if (id === 'binanceusdm') {
                          if (!rate.symbol.includes('USDT') || (rate.symbol.includes(':') && !rate.symbol.endsWith(':USDT')) || (rate.symbol.includes('/') && !rate.symbol.endsWith('/USDT')) ) {
                             continue;
                          }
                     }
-                    // BỎ LỌC USDT cho OKX và Bitget ở đây. Chúng sẽ lấy tất cả các cặp được báo cáo.
-
-                    const symbolCleaned = cleanSymbol(rate.symbol); // Clean symbol để đồng bộ hóa
+                    // BỎ LỌC USDT cho OKX và Bitget. Lấy tất cả các funding rates mà CCXT trả về.
+                    // Tuy nhiên, vẫn nên đảm bảo là hợp đồng vĩnh cửu/tương lai nếu CCXT cung cấp thông tin đó
+                    // (Mặc định fetchFundingRates() của CCXT thường chỉ lấy các cặp perpetual/futures)
+                    
+                    const symbolCleaned = cleanSymbol(rate.symbol);
                     const maxLeverageParsed = leverageCache[id]?.[symbolCleaned] || null;
 
                     let fundingTimestamp;
