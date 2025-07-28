@@ -46,6 +46,7 @@ EXCHANGE_IDS.forEach(id => {
     const config = {
         'options': { 'defaultType': 'swap' },
         'enableRateLimit': true,
+        // Thêm User-Agent cho CCXT (áp dụng cho tất cả các sàn CCXT)
         'headers': {
             'User-Agent': 'Mozilla/5.0 (compatible; ccxt/1.0;)', // CCXT User-Agent
         }
@@ -296,7 +297,7 @@ async function initializeLeverageCache() {
                         const formattedSymbol = market.symbol.replace('/', '-').replace(':USDT', '');
                         const rawLevData = await fetchBingxMaxLeverage(formattedSymbol); // Lấy raw data (string)
                         if (rawLevData) {
-                            fetchedLeverageDataMap[cleanSymbol(market.symbol)] = rawLevData;
+                            fetchedLeverageDataMap[cleanSymbol(market.market.symbol)] = rawLevData; // Sửa lỗi: dùng market.symbol để lưu vào map
                             // Thử parse để log
                             try {
                                 const parsedJson = JSON.parse(rawLevData);
