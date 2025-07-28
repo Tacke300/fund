@@ -119,6 +119,7 @@ async function makeHttpRequest(method, hostname, path, headers = {}, postData = 
             let data = '';
             res.on('data', (chunk) => data += chunk);
             res.on('end', () => {
+                // ĐÃ SỬA: Loại bỏ khối try không cần thiết bên trong res.on('end')
                 if (res.statusCode >= 200 && res.statusCode < 300) {
                     resolve(data);
                 } else {
@@ -787,12 +788,9 @@ async function masterLoop() {
         console.error("[LOOP] Lỗi đồng bộ thời gian Binance, có thể ảnh hưởng đến các lệnh ký. Thử lại ở vòng lặp sau.");
     }
 
-    // fetchFundingRatesForAllExchanges đã tự cập nhật exchangeData và debugRawLeverageResponses
-    // và gọi calculateArbitrageOpportunities sau mỗi sàn.
     await fetchFundingRatesForAllExchanges();
 
     // lastFullUpdateTimestamp chỉ cập nhật sau khi tất cả các vòng lặp đã xong.
-    // Frontend có thể dùng debugRawLeverageResponses để theo dõi tiến độ chi tiết hơn.
     lastFullUpdateTimestamp = new Date().toISOString(); 
     console.log(`[LOOP] ✅ Tìm thấy ${arbitrageOpportunities.length} cơ hội. Vòng lặp hoàn tất.`);
     scheduleNextLoop(); // Đặt lịch vòng lặp funding rate tiếp theo
@@ -862,8 +860,10 @@ server.listen(PORT, () => {
     console.log(`✅ Máy chủ dữ liệu đang chạy tại http://localhost:${PORT}`);
     
     // GỌI CÁC CHỨC NĂNG KHỞI TẠO BAN ĐẦU (chạy nền)
-    performFullLeverageUpdate(); // Lần cập nhật toàn bộ leverage đầu tiên
-    masterLoop(); // Bắt đầu vòng lặp cập nhật funding rates (hàng phút)
+    // Sẽ chạy performFullLeverageUpdate ngay lập tức khi khởi động
+    performFullLeverageUpdate(); 
+    // masterLoop sẽ bắt đầu vòng lặp cập nhật funding rates hàng phút
+    masterLoop(); 
     
     // Đặt lịch cho hàm điều phối cập nhật leverage (chạy mỗi phút để kiểm tra thời gian)
     // Sẽ chạy vào giây thứ 0 của mỗi phút
