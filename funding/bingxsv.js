@@ -19,7 +19,7 @@ const PORT = 5005; // Đảm bảo cổng này khớp với cổng bạn chạy
 // ----- CẤU HÌNH -----
 const EXCHANGE_IDS = ['binanceusdm', 'bingx', 'okx', 'bitget'];
 const FUNDING_DIFFERENCE_THRESHOLD = 0.00001;
-const MINIMUM_PNL_THRESHOLD = 1;
+const MINIMUM_PNL_THRESHOLD = 15;
 const IMMINENT_THRESHOLD_MINUTES = 15;
 
 // Các khoảng thời gian cập nhật leverage
@@ -366,6 +366,7 @@ async function updateLeverageForExchange(id, symbolsToUpdate = null) {
             if (Array.isArray(leverageBracketsResponse)) {
                 for (const item of leverageBracketsResponse) {
                     const cleanedSym = cleanSymbol(item.symbol);
+                    // Nếu là cập nhật mục tiêu, chỉ cập nhật các symbol trong danh sách
                     if (symbolsToUpdate && !symbolsToUpdate.includes(cleanedSym)) {
                         continue; 
                     }
@@ -529,7 +530,14 @@ async function updateLeverageForExchange(id, symbolsToUpdate = null) {
 // Hàm này sẽ chạy một lần lúc 00:00 UTC và lần đầu khởi động
 async function performFullLeverageUpdate() {
     console.log(`[LEVERAGE_SCHEDULER] 🔄 Bắt đầu cập nhật TOÀN BỘ đòn bẩy cho tất cả các sàn...`);
-    for (const id of EXCHANGE_IDS) {
+    
+    // Tạo một danh sách các sàn, đưa BingX ra cuối cùng
+    const orderedExchangeIds = EXCHANGE_IDS.filter(id => id !== 'bingx');
+    if (EXCHANGE_IDS.includes('bingx')) {
+        orderedExchangeIds.push('bingx');
+    }
+
+    for (const id of orderedExchangeIds) { // Lặp qua danh sách đã sắp xếp
         await updateLeverageForExchange(id, null); // Cập nhật toàn bộ (symbolsToUpdate = null)
     }
     console.log(`[LEVERAGE_SCHEDULER] ✅ Hoàn tất cập nhật TOÀN BỘ đòn bẩy.`);
