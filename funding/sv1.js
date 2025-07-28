@@ -288,8 +288,12 @@ async function initializeLeverageCache() {
                 try {
                     console.log(`[DEBUG] Gọi CCXT loadMarkets cho ${id.toUpperCase()} để lấy danh sách cặp...`); // DEBUG LOG
                     await exchange.loadMarkets(true);
-                    const bingxMarkets = Object.values(exchange.markets).filter(m => m.swap && m.quote === 'USDT');
-                    console.log(`[CACHE] ${id.toUpperCase()}: Tìm thấy ${bingxMarkets.length} cặp swap USDT. Đang lấy dữ liệu đòn bẩy thô từng cặp...`);
+                    // Lọc chỉ 20 cặp hàng đầu để giảm thiểu lỗi Cloudflare và 400 Bad Request
+                    const bingxMarkets = Object.values(exchange.markets)
+                        .filter(m => m.swap && m.quote === 'USDT')
+                        .slice(0, 20); // Chỉ lấy 20 cặp đầu tiên
+                    
+                    console.log(`[CACHE] ${id.toUpperCase()}: Tìm thấy ${Object.values(exchange.markets).filter(m => m.swap && m.quote === 'USDT').length} tổng số cặp swap USDT. Đang lấy dữ liệu đòn bẩy thô cho ${bingxMarkets.length} cặp hàng đầu...`);
 
                     let successCount = 0;
                     for (const market of bingxMarkets) {
