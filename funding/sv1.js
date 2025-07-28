@@ -326,13 +326,12 @@ async function initializeLeverageCache() {
                     currentRawDebug.error = { code: e.code, msg: e.message };
                 }
             }
-            else { // OKX và Bitget: Dùng CCXT (fetchLeverageTiers + loadMarkets fallback)
+            else { // OKX và Bitget: Dùng CCXT (fetchLeverageTiers + loadMarkets fallback) - KHÔNG LOG CHI TIẾT TỪNG CẶP
                 leverageSource = "CCXT fetchLeverageTiers";
                 debugRawLeverageResponses[id].timestamp = new Date(); 
 
                 try {
                     if (exchange.has['fetchLeverageTiers']) {
-                        console.log(`[DEBUG] Gọi CCXT fetchLeverageTiers cho ${id.toUpperCase()}...`); // DEBUG LOG
                         const leverageTiers = await exchange.fetchLeverageTiers();
                         let successCount = 0;
                         for (const symbol in leverageTiers) {
@@ -342,8 +341,7 @@ async function initializeLeverageCache() {
                                 const parsedMaxLeverage = numericLeverages.length > 0 ? parseInt(Math.max(...numericLeverages), 10) : 0;
                                 if (parsedMaxLeverage > 0) {
                                     fetchedLeverageDataMap[cleanSymbol(symbol)] = parsedMaxLeverage; 
-                                    console.log(`[CACHE] ✅ ${id.toUpperCase()}: Max leverage của ${cleanSymbol(symbol)} là ${parsedMaxLeverage} (CCXT).`); // LOG THÀNH CÔNG TỪ CCXT
-                                    successCount++;
+                                    successCount++; // Tăng successCount nhưng không log từng cặp
                                 }
                             }
                         }
@@ -359,8 +357,7 @@ async function initializeLeverageCache() {
                                 const maxLeverage = getMaxLeverageFromMarketInfo(market);
                                 if (maxLeverage !== null && maxLeverage > 0) {
                                     fetchedLeverageDataMap[symbolCleaned] = maxLeverage; 
-                                    console.log(`[CACHE] ✅ ${id.toUpperCase()}: Max leverage của ${symbolCleaned} là ${maxLeverage} (loadMarkets).`); // LOG THÀNH CÔNG TỪ loadMarkets
-                                    loadMarketsSuccessCount++;
+                                    loadMarketsSuccessCount++; // Tăng successCount nhưng không log từng cặp
                                 } else {
                                     console.warn(`[CACHE] ⚠️ ${id.toUpperCase()}: Đòn bẩy không hợp lệ hoặc không tìm thấy cho ${market.symbol} qua loadMarkets.`);
                                 }
