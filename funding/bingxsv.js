@@ -353,7 +353,7 @@ async function updateLeverageForExchange(id) {
 
                 console.log(`[CACHE] ${id.toUpperCase()}: Tìm thấy ${bingxMarkets.length} tổng số cặp swap USDT. Đang lấy dữ liệu đòn bẩy cho tất cả các cặp...`);
 
-                let successCount = 0;
+                let successCount = 0; // ĐÃ SỬA: Khai báo biến successCount ở đây
                 for (const market of bingxMarkets) {
                     const formattedSymbol = market.symbol.replace('/', '-').replace(':USDT', '');
                     const parsedMaxLeverage = await fetchBingxMaxLeverage(formattedSymbol); 
@@ -373,12 +373,12 @@ async function updateLeverageForExchange(id) {
                 currentRawDebug = { status: `thất bại (BingX API lỗi chung: ${e.code || 'UNKNOWN'})`, timestamp: new Date(), data: e.rawResponse || e.message, error: { code: e.code, msg: e.message } };
             }
         }
-        else { // OKX và Bitget: Dùng CCXT (fetchLeverageTiers + loadMarkets fallback) - KHÔNG THAY ĐỔI
+        else { // OKX và Bitget: Dùng CCXT (fetchLeverageTiers + loadMarkets fallback) - ĐÃ SỬA LỖI successCount
             leverageSource = "CCXT fetchLeverageTiers";
             try {
+                let successCount = 0; // ĐÃ SỬA: Khai báo biến successCount ở đây
                 if (exchange.has['fetchLeverageTiers']) {
                     const leverageTiers = await exchange.fetchLeverageTiers();
-                    let successCount = 0;
                     for (const symbol in leverageTiers) {
                         const tiers = leverageTiers[symbol];
                         if (Array.isArray(tiers) && tiers.length > 0) {
@@ -395,25 +395,25 @@ async function updateLeverageForExchange(id) {
                 } else { 
                     console.log(`[CACHE] ${id.toUpperCase()}: fetchLeverageTiers không khả dụng. Dùng loadMarkets...`);
                     await exchange.loadMarkets(true);
-                    let loadMarketsSuccessCount = 0;
                     for (const market of Object.values(exchange.markets)) {
                         if (market.swap && market.quote === 'USDT') {
                             const symbolCleaned = cleanSymbol(market.symbol);
                             const maxLeverage = getMaxLeverageFromMarketInfo(market);
                             if (maxLeverage !== null && maxLeverage > 0) {
                                 fetchedLeverageDataMap[symbolCleaned] = maxLeverage; 
-                                loadMarketsSuccessCount++; 
+                                successCount++; // ĐÃ SỬA: Dùng biến successCount đã khai báo
                             } else {
                                 console.warn(`[CACHE] ⚠️ ${id.toUpperCase()}: Đòn bẩy không hợp lệ hoặc không tìm thấy cho ${market.symbol} qua loadMarkets.`);
                             }
                         }
                     }
-                    currentRawDebug.status = `thành công (loadMarkets, ${loadMarketsSuccessCount} cặp)`;
-                    currentRawDebug.data = `Đã lấy ${loadMarketsSuccessCount} cặp.`;
+                    currentRawDebug.status = `thành công (loadMarkets, ${successCount} cặp)`; // ĐÃ SỬA: Dùng biến successCount
+                    currentRawDebug.data = `Đã lấy ${successCount} cặp.`; // ĐÃ SỬA: Dùng biến successCount
                 }
                 console.log(`[CACHE] ✅ ${id.toUpperCase()}: Đã lấy ${successCount} cặp đòn bẩy.`);
             } catch(e) {
                 console.warn(`[CACHE] ⚠️ ${id.toUpperCase()}: Lỗi khi gọi CCXT phương thức leverage: ${e.message}.`);
+                leverageSource = "CCXT (lỗi)";
                 currentRawDebug.status = `thất bại (${e.code || 'UNKNOWN'})`;
                 currentRawDebug.error = { code: e.code, msg: e.message };
             }
@@ -470,6 +470,11 @@ async function updateFundingRatesForExchange(id) {
             console.log(`[DEBUG_FUNDING] Gọi BingX API /openApi/swap/v2/market/fundingRate (public) cho funding rates...`);
             const bingxFundingRatesRaw = await makeHttpRequest('GET', BINGX_BASE_HOST, '/openApi/swap/v2/market/fundingRate');
             const parsedBingxRates = JSON.parse(bingxFundingRatesRaw);
+            // THÊM LOG ĐỂ XEM DỮ LIỆU BINGX FUNDING RATE RAW NẾU KHÔNG CÓ DỮ LIỆU
+            if (!Array.isArray(parsedBingxRates.data) || parsedBingxRates.data.length === 0) {
+                 console.warn(`[DATA] ⚠️ BingX Funding (Raw Data Issue): Code: ${parsedBingxRates.code}, Msg: ${parsedBingxRates.msg || 'N/A'}, Data array empty or not array. Raw: ${bingxFundingRatesRaw.substring(0, Math.min(bingxFundingRatesRaw.length, 500))}`);
+            }
+
             if (parsedBingxRates.code === 0 && Array.isArray(parsedBingxRates.data)) {
                 for (const item of parsedBingxRates.data) {
                     const symbolCleaned = cleanSymbol(item.symbol);
