@@ -11,7 +11,7 @@ const {
     binanceApiKey, binanceApiSecret,
     bingxApiKey, bingxApiSecret,
     okxApiKey, okxApiSecret, okxPassword,
-    bitgetApiKey, bitgetApiSecret, bitgetApiPassword // Đã sửa lỗi cú pháp tại đây
+    bitgetApiKey, bitgetApiSecret, bitgetApiPassword
 } = require('./config.js');
 
 const PORT = 5005; // Đảm bảo cổng này khớp với cổng bạn chạy
@@ -70,7 +70,6 @@ EXCHANGE_IDS.forEach(id => {
     if (id === 'binanceusdm') { config.apiKey = binanceApiKey; config.secret = binanceApiSecret; }
     else if (id === 'bingx') { config.apiKey = bingxApiKey; config.secret = bingxApiSecret; }
     else if (id === 'okx') { config.apiKey = okxApiKey; config.secret = okxApiSecret; if(okxPassword) config.password = okxPassword; }
-    // ĐÃ SỬA LỖI TẠI ĐÂY: Sử dụng bitgetApiPassword thay vì lặp lại bitgetApiSecret
     else if (id === 'bitget') { config.apiKey = bitgetApiKey; config.secret = bitgetApiSecret; if(bitgetApiPassword) config.password = bitgetApiPassword; }
     else { console.warn(`[AUTH] ⚠️ Thiếu API Key/Secret hoặc cấu hình cho ${id.toUpperCase()}.`); }
 
@@ -320,13 +319,25 @@ async function getBingxFundingRateDirect(symbol) {
         const json = JSON.parse(data);
         if (json.code === 0 && Array.isArray(json.data) && json.data.length > 0) {
             const firstData = json.data[0];
-            if (typeof firstData.fundingRate === 'string' && !isNaN(parseFloat(firstData.fundingRate)) && firstData.fundingTime) {
-                return {
-                    symbol: firstData.symbol,
-                    fundingRate: parseFloat(firstData.fundingRate),
-                    fundingTime: parseInt(firstData.fundingTime, 10)
-                };
+            // Log chi tiết nếu các trường không hợp lệ để debug
+            if (typeof firstData.fundingRate !== 'string') {
+                console.warn(`[BINGX_FUNDING_WARN] ${symbol}: fundingRate không phải string. Type: ${typeof firstData.fundingRate}. Value: ${firstData.fundingRate}`);
+                return null;
             }
+            if (isNaN(parseFloat(firstData.fundingRate))) {
+                console.warn(`[BINGX_FUNDING_WARN] ${symbol}: fundingRate không parse được số. Value: ${firstData.fundingRate}`);
+                return null;
+            }
+            if (!firstData.fundingTime) {
+                console.warn(`[BINGX_FUNDING_WARN] ${symbol}: fundingTime bị thiếu hoặc null. Value: ${firstData.fundingTime}`);
+                return null;
+            }
+            
+            return {
+                symbol: firstData.symbol,
+                fundingRate: parseFloat(firstData.fundingRate),
+                fundingTime: parseInt(firstData.fundingTime, 10)
+            };
         } else {
             console.warn(`[BINGX_FUNDING] Không có dữ liệu funding hoặc lỗi API cho ${symbol}. Code: ${json.code}, Msg: ${json.msg || 'N/A'}. Raw: ${data.substring(0, Math.min(data.length, 200))}`);
             return null;
@@ -367,7 +378,7 @@ async function updateLeverageForExchange(id, symbolsToUpdate = null) {
             let successCount = 0;
             if (Array.isArray(leverageBracketsResponse)) {
                 for (const item of leverageBracketsResponse) {
-                    // THÊM LỌC: Chỉ lấy các cặp USDT cho Binance
+                    // LỌC: Chỉ lấy các cặp USDT cho Binance
                     if (!item.symbol.endsWith('USDT')) {
                         continue;
                     }
@@ -390,7 +401,7 @@ async function updateLeverageForExchange(id, symbolsToUpdate = null) {
             }
         }
         else if (id === 'bingx') {
-            await exchange.loadMarkets(true);
+            await exchange.loadMarkets(true); // Đảm bảo markets được load trước cho BingX
             const bingxMarkets = Object.values(exchange.markets)
                 .filter(m => m.swap && m.quote === 'USDT');
 
@@ -461,7 +472,8 @@ async function updateLeverageForExchange(id, symbolsToUpdate = null) {
         }
         else { // OKX và Bitget: Dùng CCXT (fetchLeverageTiers + loadMarkets fallback)
             debugRawLeverageResponses[id].timestamp = new Date();
-
+            await exchange.loadMarkets(true); // ĐÃ SỬA: Đảm bảo markets được load trước cho cả hai nhánh này
+            
             let currentFetchedMap = {};
             if (exchange.has['fetchLeverageTiers']) {
                 const leverageTiers = await exchange.fetchLeverageTiers();
@@ -471,9 +483,9 @@ async function updateLeverageForExchange(id, symbolsToUpdate = null) {
                     if (symbolsToUpdate && !symbolsToUpdate.includes(cleanedSym)) {
                         continue;
                     }
-                    // Kiểm tra quote là USDT nếu có thông tin market (CCXT có thể trả về nhiều loại)
+                    // Kiểm tra quote là USDT VÀ là swap
                     const market = exchange.markets[symbol];
-                    if (market && market.quote !== 'USDT') {
+                    if (!market || !market.swap || market.quote !== 'USDT') {
                         continue;
                     }
 
@@ -489,12 +501,12 @@ async function updateLeverageForExchange(id, symbolsToUpdate = null) {
                 }
                 debugRawLeverageResponses[id].status = `Đòn bẩy hoàn tất (${successCount} cặp)`;
                 debugRawLeverageResponses[id].data = `Đã lấy ${successCount} cặp.`;
+                console.log(`[CACHE] ✅ ${id.toUpperCase()}: Đã lấy ${successCount} cặp đòn bẩy USDT từ fetchLeverageTiers.`);
             } else {
                 console.log(`[CACHE] ${id.toUpperCase()}: fetchLeverageTiers không khả dụng. Dùng loadMarkets...`);
-                await exchange.loadMarkets(true);
                 let loadMarketsSuccessCount = 0;
                 for (const market of Object.values(exchange.markets)) {
-                    // THÊM LỌC: Chỉ lấy các cặp USDT cho các sàn CCXT khác
+                    // THÊM LỌC: Chỉ lấy các cặp USDT swap cho các sàn CCXT khác
                     if (!market.swap || market.quote !== 'USDT') {
                         continue;
                     }
@@ -513,6 +525,7 @@ async function updateLeverageForExchange(id, symbolsToUpdate = null) {
                 }
                 debugRawLeverageResponses[id].status = `Đòn bẩy hoàn tất (loadMarkets, ${loadMarketsSuccessCount} cặp)`;
                 debugRawLeverageResponses[id].data = `Đã lấy ${loadMarketsSuccessCount} cặp.`;
+                console.log(`[CACHE] ✅ ${id.toUpperCase()}: Đã lấy ${loadMarketsSuccessCount} cặp đòn bẩy USDT từ loadMarkets.`);
             }
         }
 
@@ -529,7 +542,7 @@ async function updateLeverageForExchange(id, symbolsToUpdate = null) {
         debugRawLeverageResponses[id].status = `Đòn bẩy thất bại (lỗi chung: ${e.code || 'UNKNOWN'})`;
         debugRawLeverageResponses[id].timestamp = new Date();
         debugRawLeverageResponses[id].error = { code: e.code, msg: e.message };
-        leverageCache[id] = {};
+        leverageCache[id] = {}; // Đặt rỗng nếu lỗi để tránh lỗi lan truyền
         calculateArbitrageOpportunities();
     }
 }
@@ -600,7 +613,6 @@ async function fetchFundingRatesForAllExchanges() {
                 console.log(`[DEBUG_FUNDING] BingX: Có tổng ${symbols.length} symbols. Bắt đầu lấy funding rates (tuần tự với độ trễ)...`);
 
                 let successCount = 0;
-                // KHÔI PHỤC VÒNG LẶP TUẦN TỰ VÀ SLEEP CHO BINGX FUNDING RATES
                 for (let i = 0; i < symbols.length; i++) {
                     const result = await getBingxFundingRateDirect(symbols[i]);
                     if (result && typeof result.fundingRate === 'number' && result.fundingTime) {
@@ -630,6 +642,8 @@ async function fetchFundingRatesForAllExchanges() {
                         console.log(`  ... và ${Object.keys(processedRates).length - 3} cặp khác.`);
                     }
                 }
+                console.log(`[DEBUG_BINGX_FUNDING_PROCESSED] BingX processedRates count: ${Object.keys(processedRates).length}`);
+
 
             } else { // Các sàn khác (Binance, OKX, Bitget)
                 const exchange = exchanges[id];
@@ -637,10 +651,12 @@ async function fetchFundingRatesForAllExchanges() {
                 let successCount = 0;
                 for (const rate of Object.values(fundingRatesRaw)) {
                     // LỌC: Chỉ lấy các cặp USDT cho các sàn CCXT khác
-                    // Kí hiệu symbol của CCXT có thể là "BTC/USDT" hoặc "BTC:USDT" hoặc "BTCUSDT"
-                    if (!rate.symbol.includes('USDT') || (rate.symbol.includes(':') && !rate.symbol.endsWith(':USDT'))) {
-                        continue;
+                    // Kí hiệu symbol của CCXT có thể là "BTC/USDT", "BTC:USDT", "BTCUSDT", "BTC-USDT-SWAP"
+                    // Kiểm tra symbol chứa "USDT" và không phải là cặp giao ngay thông thường
+                    if (!rate.symbol.includes('USDT') || (rate.symbol.includes('/') && !rate.symbol.endsWith('/USDT')) || (rate.symbol.includes(':') && !rate.symbol.endsWith(':USDT')) || (!rate.symbol.includes('/') && !rate.symbol.includes(':') && !rate.symbol.endsWith('USDT') && !rate.symbol.includes('SWAP')) ) {
+                        continue; // Loại bỏ các định dạng không phải USDT swap/future
                     }
+                    
                     const symbolCleaned = cleanSymbol(rate.symbol);
                     const maxLeverageParsed = leverageCache[id]?.[symbolCleaned] || null;
 
@@ -690,7 +706,7 @@ function calculateArbitrageOpportunities() {
     const currentExchangeData = JSON.parse(JSON.stringify(exchangeData));
 
     for (let i = 0; i < EXCHANGE_IDS.length; i++) {
-        for (let j = i + 1; j < EXCHANGE_IDS.length; j++) { // Lỗi vòng lặp ở đây đã sửa j < EXCHANGE_IDS.length
+        for (let j = i + 1; j < EXCHANGE_IDS.length; j++) { // Đã sửa lỗi vòng lặp
             const exchange1Id = EXCHANGE_IDS[i], exchange2Id = EXCHANGE_IDS[j];
             const exchange1Rates = currentExchangeData[exchange1Id]?.rates, exchange2Rates = currentExchangeData[exchange2Id]?.rates;
 
@@ -722,22 +738,14 @@ function calculateArbitrageOpportunities() {
                 }
 
                 let longExchange, shortExchange, longRate, shortRate;
+                // Đã sửa lỗi logic: longRate và shortRate phải là rate tương ứng với sàn của chúng
                 if (rate1Data.fundingRate > rate2Data.fundingRate) {
                     shortExchange = exchange1Id; shortRate = rate1Data;
-                    longExchange = exchange2Id; longRate = rate1Data; // Lỗi logic ở đây: longRate phải là rate2Data
+                    longExchange = exchange2Id; longRate = rate2Data;
                 } else {
                     shortExchange = exchange2Id; shortRate = rate2Data;
-                    longExchange = exchange1Id; longRate = rate1Data; // Lỗi logic ở đây: longRate phải là rate1Data
+                    longExchange = exchange1Id; longRate = rate1Data;
                 }
-                // Đã sửa lỗi logic: longRate phải là rate tương ứng với longExchange
-                if (rate1Data.fundingRate > rate2Data.fundingRate) {
-                    shortExchange = exchange1Id; shortRate = rate1Data;
-                    longExchange = exchange2Id; longRate = rate2Data; // Long Rate là của exchange2
-                } else {
-                    shortExchange = exchange2Id; shortRate = rate22Data; // Short Rate là của exchange2
-                    longExchange = exchange1Id; longRate = rate1Data; // Long Rate là của exchange1
-                }
-
 
                 const fundingDiff = shortRate.fundingRate - longRate.fundingRate;
 
@@ -827,11 +835,9 @@ function scheduleLeverageUpdates() {
     // THÊM: Cập nhật Funding Rate và Leverage vào phút 59 giây 30
     if (currentMinute === 59 && currentSecond >= 30 && currentSecond < 35) {
         const nowMs = Date.now();
-        // Cờ này để đảm bảo nó chỉ kích hoạt một lần duy nhất trong khoảng thời gian 5 giây đó
         if (!scheduleLeverageUpdates.lastSpecialTrigger || (nowMs - scheduleLeverageUpdates.lastSpecialTrigger > 30 * 1000)) {
             console.log('[SPECIAL_UPDATE] ⏰ Kích hoạt cập nhật ĐẶC BIỆT (phút 59 giây 30).');
             performFullLeverageUpdate(); // Cập nhật toàn bộ đòn bẩy
-            // fetchFundingRatesForAllExchanges() sẽ được gọi bởi masterLoop chạy mỗi phút, không cần gọi lại ở đây
             scheduleLeverageUpdates.lastSpecialTrigger = nowMs;
         }
     }
@@ -861,9 +867,13 @@ const server = http.createServer((req, res) => {
             },
             debugRawLeverageResponses: debugRawLeverageResponses
         };
-        console.log(`[API_DATA] Gửi dữ liệu đến frontend. Total arbitrage ops: ${responseData.arbitrageData.length}.  ` +
-            `BingX Leverage Status: ${responseData.debugRawLeverageResponses.bingx.status}.  ` +
-            `BingX Funding Rates Count: ${Object.keys(responseData.rawRates.bingx).length}.`);
+        // Log chi tiết hơn về số lượng data trước khi gửi đi
+        console.log(`[API_DATA] Gửi dữ liệu đến frontend. Total arbitrage ops: ${responseData.arbitrageData.length}. ` +
+            `Binance Funds: ${Object.keys(responseData.rawRates.binance).length}. ` +
+            `OKX Funds: ${Object.keys(responseData.rawRates.okx).length}. ` +
+            `BingX Funds: ${Object.keys(responseData.rawRates.bingx).length}. ` +
+            `Bitget Funds: ${Object.keys(responseData.rawRates.bitget).length}. ` +
+            `BingX Leverage Status: ${responseData.debugRawLeverageResponses.bingx.status}.`);
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify(responseData));
     } else {
@@ -876,8 +886,6 @@ server.listen(PORT, () => {
     performFullLeverageUpdate();
     masterLoop();
     
-    // Đặt lịch cho hàm điều phối cập nhật leverage và special update
-    // Chạy vào đầu mỗi giây để kiểm tra chính xác thời gian
     setInterval(() => {
         scheduleLeverageUpdates();
     }, 1000);
