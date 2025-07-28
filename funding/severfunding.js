@@ -35,6 +35,7 @@ let exchangeData = {};
 let arbitrageOpportunities = [];
 let lastFullUpdateTimestamp = null;
 let loopTimeoutId = null;
+let isFirstMasterLoopRun = true; // Flag để chạy full update lần đầu tiên
 
 let debugRawLeverageResponses = {
     binanceusdm: { status: 'Đang tải đòn bẩy...', timestamp: null, data: 'N/A', error: null },
@@ -67,7 +68,8 @@ EXCHANGE_IDS.forEach(id => {
     exchanges[id] = new exchangeClass(config);
 });
 
-const cleanSymbol = (symbol) => symbol.replace('/USDT', '').replace(':USDT', '').replace(/USDT$/, '');
+// Sửa lỗi tên coin: Xử lý các định dạng /USDT, :USDT, -USDT, hoặc USDT ở cuối
+const cleanSymbol = (symbol) => symbol.replace(/(\/|:|-)?USDT$/, '');
 
 function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
 
@@ -302,7 +304,7 @@ async function getBingxSymbolsDirect() {
 }
 
 // Lấy funding rate + time cho 1 symbol từ BingX API trực tiếp
-async function getBingxFundingRateDirect(symbol, retries = 3) { // Thêm retry cho hàm này
+async function getBingxFundingRateDirect(symbol, retries = 3) {
     let lastRawData = 'N/A';
     let lastError = null;
 
@@ -322,7 +324,6 @@ async function getBingxFundingRateDirect(symbol, retries = 3) { // Thêm retry c
                     console.warn(`[BINGX_FUNDING_WARN] ${symbol}: fundingRate không parse được số. Value: ${firstData.fundingRate}`);
                     lastError = { code: 'PARSE_ERROR', msg: 'FundingRate not parsable number', rawResponse: data };
                 } else if (!firstData.fundingTime || parseInt(firstData.fundingTime, 10) <= 0) { 
-                    // Quan trọng: Chỉ chấp nhận nếu có fundingTime thực tế và hợp lệ (số dương)
                     console.warn(`[BINGX_FUNDING_WARN] ${symbol}: fundingTime bị thiếu hoặc không hợp lệ. Value: ${firstData.fundingTime}. Bỏ qua.`);
                     lastError = { code: 'PARSE_ERROR', msg: 'FundingTime missing or invalid', rawResponse: data };
                 } else {
@@ -335,12 +336,11 @@ async function getBingxFundingRateDirect(symbol, retries = 3) { // Thêm retry c
             } else {
                 lastError = { code: json.code, msg: json.msg || 'Invalid API Response Structure', type: 'API_RESPONSE_ERROR', rawResponse: data };
             }
-            // If we are here, it means parsing failed or API response was not good, but no HTTP error
             if (lastError && i < retries - 1) {
-                await sleep(BINGX_SINGLE_REQUEST_DELAY_MS); // Small delay before retrying parse errors
+                await sleep(BINGX_SINGLE_REQUEST_DELAY_MS);
                 continue;
             }
-            break; // If no more retries or it's an unrecoverable parse error
+            break;
         } catch (e) {
             lastError = { code: e.code, msg: e.msg || e.message, statusCode: e.statusCode || 'N/A', type: 'HTTP_ERROR', rawResponse: e.rawResponse || lastRawData };
 
@@ -355,23 +355,22 @@ async function getBingxFundingRateDirect(symbol, retries = 3) { // Thêm retry c
                 bingxErrorLogCache[errorSignature] = now;
             }
 
-            // Exponential backoff for transient/rate limit errors
-            if (e.code === 'NETWORK_ERROR' || e.code === 'TIMEOUT_ERROR' || (e.statusCode >= 500 && e.statusCode < 600) || e.statusCode === 429 || e.code === 100410) { // Thêm 429 và 100410 (BingX rate limit)
+            if (e.code === 'NETWORK_ERROR' || e.code === 'TIMEOUT_ERROR' || (e.statusCode >= 500 && e.statusCode < 600) || e.statusCode === 429 || e.code === 100410) {
                 const delay = 2 ** i * BINGX_SINGLE_REQUEST_DELAY_MS;
                 console.warn(`[BINGX_FUNDING] Lỗi tạm thời (có thể do rate limit/mạng). Thử lại sau ${delay / 1000}s.`);
                 await sleep(delay);
-                continue; // Retry
-            } else if (e.statusCode === 400 || e.statusCode === 401 || e.statusCode === 403 || e.code === 1015) { // Lỗi xác thực, định dạng phản hồi
-                 if (i < retries - 1) { // Vẫn retry một vài lần nhỏ cho các lỗi này
+                continue;
+            } else if (e.statusCode === 400 || e.statusCode === 401 || e.statusCode === 403 || e.code === 1015) {
+                 if (i < retries - 1) {
                     console.warn(`[BINGX_FUNDING] Lỗi định dạng phản hồi/xác thực. Thử lại sau ${BINGX_SINGLE_REQUEST_DELAY_MS / 1000}s.`);
                     await sleep(BINGX_SINGLE_REQUEST_DELAY_MS);
                     continue;
                  }
             }
-            break; // Stop retrying for non-transient errors
+            break;
         }
     }
-    return null; // Return null if all retries failed or unrecoverable error
+    return null;
 }
 
 
@@ -379,8 +378,8 @@ async function getBingxFundingRateDirect(symbol, retries = 3) { // Thêm retry c
  * Cập nhật Max Leverage cho một sàn cụ thể.
  * @param {string} id ID của sàn giao dịch (e.g., 'binanceusdm', 'bingx').
  * @returns {Promise<{ id: string, processedData: Object, status: string, error: object | null }>}
- */
-async function updateLeverageForExchange(id) { // Bỏ symbolsToUpdate vì luôn là toàn bộ trong masterLoop
+*/
+async function updateLeverageForExchange(id) { 
     const exchange = exchanges[id];
     let currentFetchedLeverageDataMap = {};
     let status = `Đang tải đòn bẩy...`;
@@ -437,13 +436,13 @@ async function updateLeverageForExchange(id) { // Bỏ symbolsToUpdate vì luôn
             }
             for (const chunk of marketChunks) {
                 const chunkPromises = chunk.map(async market => {
-                    const formattedSymbol = market.symbol.replace('/', '-').replace(':USDT', '');
-                    const parsedMaxLeverage = await fetchBingxMaxLeverage(formattedSymbol);
+                    const formattedSymbol = cleanSymbol(market.symbol); // Sử dụng cleanSymbol ở đây
+                    const parsedMaxLeverage = await fetchBingxMaxLeverage(market.symbol.replace('/', '-').replace(':USDT', '')); // Truyền symbol gốc cho API, sau đó clean
                     fetchedCount++;
                     debugRawLeverageResponses[id].status = `Đòn bẩy đang tải (${fetchedCount}/${totalSymbols} | ${successCount} thành công)`;
                     debugRawLeverageResponses[id].timestamp = new Date();
                     if (parsedMaxLeverage !== null && parsedMaxLeverage > 0) {
-                        currentFetchedLeverageDataMap[cleanSymbol(market.symbol)] = parsedMaxLeverage;
+                        currentFetchedLeverageDataMap[cleanSymbol(market.symbol)] = parsedMaxLeverage; // Lưu trữ với tên đã clean
                         successCount++;
                     }
                     return true;
@@ -601,16 +600,20 @@ async function fetchFundingRatesForExchange(id) {
                 const maxLeverageParsed = leverageCache[id]?.[symbolCleaned] || null;
 
                 let fundingTimestamp;
-                // --- Phần sửa lỗi Bitget Timestamp: undefined ---
+                let debugSource = 'none'; 
+
+                // --- Bắt đầu phần sửa lỗi Bitget Timestamp: undefined ---
                 if (id === 'bitget') {
+                    const originalSymbol = rate.symbol; // Giữ lại symbol gốc để debug
+
                     // 1. Ưu tiên rate.info.nextUpdate từ fetchFundingRates raw info (nếu có)
                     if (rate.info?.nextUpdate) {
                         const parsedNextUpdate = parseInt(rate.info.nextUpdate, 10);
                         if (!isNaN(parsedNextUpdate) && parsedNextUpdate > 0) {
                             fundingTimestamp = parsedNextUpdate;
+                            debugSource = 'rate.info.nextUpdate';
                         } else {
-                            // Debug log nếu nextUpdate không phải số hợp lệ
-                            console.debug(`[FUNDING_DEBUG] ${id.toUpperCase()}: rate.info.nextUpdate '${rate.info.nextUpdate}' cho ${rate.symbol} không hợp lệ.`);
+                            console.debug(`[FUNDING_DEBUG] ${id.toUpperCase()} - ${originalSymbol}: raw rate.info.nextUpdate: '${rate.info.nextUpdate}' (parsed: ${parsedNextUpdate}) is not a valid timestamp.`);
                         }
                     }
                     // 2. Fallback to CCXT's standard fields (fundingTimestamp or nextFundingTime)
@@ -618,35 +621,41 @@ async function fetchFundingRatesForExchange(id) {
                         const ccxtTimestamp = rate.fundingTimestamp || rate.nextFundingTime;
                         if (typeof ccxtTimestamp === 'number' && ccxtTimestamp > 0) {
                             fundingTimestamp = ccxtTimestamp;
-                             console.debug(`[FUNDING_DEBUG] ${id.toUpperCase()}: Lấy nextFundingTime từ CCXT standard fields cho ${rate.symbol}: ${fundingTimestamp}`);
-                        } else {
-                            // Debug log nếu CCXT standard fields không hợp lệ
-                            console.debug(`[FUNDING_DEBUG] ${id.toUpperCase()}: CCXT standard fields fundingTimestamp '${rate.fundingTimestamp}' hoặc nextFundingTime '${rate.nextFundingTime}' cho ${rate.symbol} không hợp lệ.`);
+                            debugSource = 'ccxt_standard_number';
+                        } else if (typeof ccxtTimestamp === 'string') { // Try parsing string timestamps from CCXT fields
+                             const parsedCcxtTimestamp = parseInt(ccxtTimestamp, 10);
+                             if (!isNaN(parsedCcxtTimestamp) && parsedCcxtTimestamp > 0) {
+                                 fundingTimestamp = parsedCcxtTimestamp;
+                                 debugSource = 'ccxt_standard_parsed_string';
+                             }
+                        }
+                        if (!fundingTimestamp || fundingTimestamp <= 0) { 
+                            console.debug(`[FUNDING_DEBUG] ${id.toUpperCase()} - ${originalSymbol}: raw CCXT standard fields (fundingTimestamp: '${rate.fundingTimestamp}', nextFundingTime: '${rate.nextFundingTime}') are not valid timestamps.`);
                         }
                     }
-                    // 3. Last resort: check the market info directly for nextFundingTime (if it's there)
-                    // Lưu ý: market info thường chỉ được load 1 lần khi exchange khởi tạo hoặc loadMarkets.
-                    // Thông tin này có thể cũ hơn so với thông tin từ fetchFundingRates.
+                    // 3. Last resort: check the market info directly for nextFundingTime 
                     if (!fundingTimestamp || fundingTimestamp <= 0) {
-                        const marketInfoNextFundingTime = exchanges[id].markets[rate.symbol]?.info?.nextFundingTime;
+                        const marketInfoNextFundingTime = exchanges[id].markets[originalSymbol]?.info?.nextFundingTime;
                         if (marketInfoNextFundingTime) {
                             const parsedMarketInfoTime = parseInt(marketInfoNextFundingTime, 10);
                             if (!isNaN(parsedMarketInfoTime) && parsedMarketInfoTime > 0) {
                                 fundingTimestamp = parsedMarketInfoTime;
-                                console.debug(`[FUNDING_DEBUG] ${id.toUpperCase()}: Lấy nextFundingTime từ market info fallback cho ${rate.symbol}: ${fundingTimestamp}`);
+                                debugSource = 'market_info_fallback';
+                                console.debug(`[FUNDING_DEBUG] ${id.toUpperCase()} - ${originalSymbol}: Lấy nextFundingTime từ market info fallback: ${fundingTimestamp}`);
                             } else {
-                                console.debug(`[FUNDING_DEBUG] ${id.toUpperCase()}: market info nextFundingTime '${marketInfoNextFundingTime}' cho ${rate.symbol} không hợp lệ.`);
+                                console.debug(`[FUNDING_DEBUG] ${id.toUpperCase()} - ${originalSymbol}: market info nextFundingTime: '${marketInfoNextFundingTime}' is not valid.`);
                             }
                         }
                     }
                 } else { // For Binance, OKX (chủ yếu dựa vào các trường chuẩn của CCXT)
                     fundingTimestamp = rate.fundingTimestamp || rate.nextFundingTime;
+                    debugSource = 'ccxt_standard';
                 }
                 // --- Kết thúc phần sửa lỗi Bitget Timestamp: undefined ---
 
                 // Validate both funding rate and timestamp
                 if (typeof rate.fundingRate !== 'number' || isNaN(rate.fundingRate) || typeof fundingTimestamp !== 'number' || isNaN(fundingTimestamp) || fundingTimestamp <= 0) {
-                    console.warn(`[FUNDING] ⚠️ ${id.toUpperCase()}: Funding rate (${rate.fundingRate}) hoặc timestamp (${fundingTimestamp}) không hợp lệ hoặc không thực tế cho ${rate.symbol}. Bỏ qua.`);
+                    console.warn(`[FUNDING] ⚠️ ${id.toUpperCase()}: Funding rate (${rate.fundingRate}) hoặc timestamp (${fundingTimestamp}, nguồn: ${debugSource}) không hợp lệ hoặc không thực tế cho ${rate.symbol}. Bỏ qua.`);
                     continue;
                 }
 
@@ -769,47 +778,60 @@ async function masterLoop() {
         console.error("[MASTER_LOOP] Lỗi đồng bộ thời gian Binance, có thể ảnh hưởng đến các lệnh ký. Thử lại ở vòng lặp sau.");
     }
 
-    const nonBingxExchangeIds = EXCHANGE_IDS.filter(id => id !== 'bingx');
-    const bingxExchangeId = 'bingx';
+    const now = new Date();
+    const currentHourUTC = now.getUTCHours();
+    const currentMinuteUTC = now.getUTCMinutes();
+    const isScheduledFullUpdate = (currentHourUTC === 0 && currentMinuteUTC === 0);
 
-    // Phase 1: Fetch Funding Rates and Max Leverage for Binance, OKX, Bitget concurrently
-    console.log("[MASTER_LOOP] 🚀 Bước 1: Bắt đầu lấy dữ liệu Funding & Leverage cho Binance, OKX, Bitget...");
-    const nonBingxCombinedFetchPromises = nonBingxExchangeIds.map(async (id) => {
-        console.log(`[MASTER_LOOP]   -> Bắt đầu xử lý ${id.toUpperCase()} (Funding & Leverage)...`);
-        await fetchFundingRatesForExchange(id); // Lấy Funding trước
-        await updateLeverageForExchange(id);    // Sau đó lấy Leverage
-        console.log(`[MASTER_LOOP]   -> Hoàn tất xử lý ${id.toUpperCase()}.`);
-    });
-    await Promise.all(nonBingxCombinedFetchPromises); // Wait for ALL non-BingX exchanges to complete both funding and leverage
-    console.log("[MASTER_LOOP] ✅ Bước 1: Hoàn tất lấy dữ liệu Funding & Leverage cho Binance, OKX, Bitget.");
+    if (isFirstMasterLoopRun || isScheduledFullUpdate) {
+        console.log(`[MASTER_LOOP] 🔥 Thực hiện cập nhật DỮ LIỆU ĐẦY ĐỦ (lần đầu hoặc 00:00 UTC)...`);
+        isFirstMasterLoopRun = false; // Reset flag sau lần chạy đầu tiên
 
-    // Update HTML data after Phase 1 (Binance, OKX, Bitget are fully updated)
-    calculateArbitrageOpportunities();
-    console.log("[MASTER_LOOP] Dữ liệu HTML (Funding & Leverage Binance, OKX, Bitget) đã sẵn sàng.");
+        const nonBingxExchangeIds = EXCHANGE_IDS.filter(id => id !== 'bingx');
+        const bingxExchangeId = 'bingx';
 
-    // Phase 2: Handle BingX Funding Rates
-    if (bingxExchangeId) {
-        console.log(`[MASTER_LOOP] 🚀 Bước 2: Bắt đầu lấy dữ liệu Funding cho ${bingxExchangeId.toUpperCase()}...`);
-        await fetchFundingRatesForExchange(bingxExchangeId);
-        console.log(`[MASTER_LOOP] ✅ Bước 2: Hoàn tất lấy dữ liệu Funding cho ${bingxExchangeId.toUpperCase()}.`);
-        
-        // Update HTML data after BingX Funding (now HTML contains funding for all 4, but leverage only for 3)
+        // Phase 1: Fetch Funding Rates and Max Leverage for Binance, OKX, Bitget concurrently
+        console.log("[MASTER_LOOP] 🚀 Bước 1: Bắt đầu lấy dữ liệu Funding & Leverage cho Binance, OKX, Bitget...");
+        const nonBingxCombinedFetchPromises = nonBingxExchangeIds.map(async (id) => {
+            console.log(`[MASTER_LOOP]   -> Bắt đầu xử lý ${id.toUpperCase()} (Funding & Leverage)...`);
+            await fetchFundingRatesForExchange(id); // Lấy Funding trước
+            await updateLeverageForExchange(id);    // Sau đó lấy Leverage
+            console.log(`[MASTER_LOOP]   -> Hoàn tất xử lý ${id.toUpperCase()}.`);
+        });
+        await Promise.all(nonBingxCombinedFetchPromises); // Wait for ALL non-BingX exchanges to complete both funding and leverage
+        console.log("[MASTER_LOOP] ✅ Bước 1: Hoàn tất lấy dữ liệu Funding & Leverage cho Binance, OKX, Bitget.");
+
+        // Update HTML data after Phase 1 (Binance, OKX, Bitget are fully updated)
         calculateArbitrageOpportunities();
-        console.log(`[MASTER_LOOP] Dữ liệu HTML (bao gồm Funding của ${bingxExchangeId.toUpperCase()}) đã được cập nhật.`);
+        console.log("[MASTER_LOOP] Dữ liệu HTML (Funding & Leverage Binance, OKX, Bitget) đã sẵn sàng.");
 
-        // Phase 3: Delay 30 seconds (specifically for BingX leverage)
-        console.log(`[MASTER_LOOP] ⏳ Bước 3: Đã lấy funding rates cho ${bingxExchangeId.toUpperCase()}. Đợi 30 giây trước khi lấy đòn bẩy...`);
-        await sleep(30 * 1000); 
+        // Phase 2: Handle BingX Funding Rates
+        if (bingxExchangeId) {
+            console.log(`[MASTER_LOOP] 🚀 Bước 2: Bắt đầu lấy dữ liệu Funding cho ${bingxExchangeId.toUpperCase()}...`);
+            await fetchFundingRatesForExchange(bingxExchangeId);
+            console.log(`[MASTER_LOOP] ✅ Bước 2: Hoàn tất lấy dữ liệu Funding cho ${bingxExchangeId.toUpperCase()}.`);
+            
+            // Update HTML data after BingX Funding (now HTML contains funding for all 4, but leverage only for 3)
+            calculateArbitrageOpportunities();
+            console.log(`[MASTER_LOOP] Dữ liệu HTML (bao gồm Funding của ${bingxExchangeId.toUpperCase()}) đã được cập nhật.`);
 
-        // Phase 4: Fetch BingX Max Leverage
-        console.log(`[MASTER_LOOP] 🚀 Bước 4: Bắt đầu lấy dữ liệu Leverage cho ${bingxExchangeId.toUpperCase()}...`);
-        // updateLeverageForExchange('bingx') đã tự có độ trễ 60s và độ trễ giữa các lô bên trong
-        await updateLeverageForExchange(bingxExchangeId); 
-        console.log(`[MASTER_LOOP] ✅ Bước 4: Hoàn tất lấy dữ liệu Leverage cho ${bingxExchangeId.toUpperCase()}.`);
-        
-        // Final update for HTML data (all 4 exchanges are fully updated)
+            // Phase 3: Delay 30 seconds (specifically for BingX leverage)
+            console.log(`[MASTER_LOOP] ⏳ Bước 3: Đã lấy funding rates cho ${bingxExchangeId.toUpperCase()}. Đợi 30 giây trước khi lấy đòn bẩy...`);
+            await sleep(30 * 1000); 
+
+            // Phase 4: Fetch BingX Max Leverage
+            console.log(`[MASTER_LOOP] 🚀 Bước 4: Bắt đầu lấy dữ liệu Leverage cho ${bingxExchangeId.toUpperCase()}...`);
+            // updateLeverageForExchange('bingx') đã tự có độ trễ 60s và độ trễ giữa các lô bên trong
+            await updateLeverageForExchange(bingxExchangeId); 
+            console.log(`[MASTER_LOOP] ✅ Bước 4: Hoàn tất lấy dữ liệu Leverage cho ${bingxExchangeId.toUpperCase()}.`);
+            
+            // Final update for HTML data (all 4 exchanges are fully updated)
+            calculateArbitrageOpportunities();
+            console.log(`[MASTER_LOOP] Dữ liệu HTML (bao gồm Leverage của ${bingxExchangeId.toUpperCase()}) đã được cập nhật hoàn chỉnh.`);
+        }
+    } else {
+        console.log("[MASTER_LOOP] 💡 Chỉ cập nhật cơ hội arbitrage từ dữ liệu hiện có (Không phải 00:00 UTC).");
         calculateArbitrageOpportunities();
-        console.log(`[MASTER_LOOP] Dữ liệu HTML (bao gồm Leverage của ${bingxExchangeId.toUpperCase()}) đã được cập nhật hoàn chỉnh.`);
     }
 
     lastFullUpdateTimestamp = new Date().toISOString();
@@ -825,10 +847,6 @@ function scheduleNextLoop() {
     console.log(`[SCHEDULER] Vòng lặp kế tiếp sau ${delaySeconds.toFixed(0)} giây.`);
     loopTimeoutId = setTimeout(masterLoop, delayMs);
 }
-
-// XÓA CÁC HÀM NÀY: Không còn dùng bộ lập lịch riêng hoặc next funding ảo
-// function calculateNextStandardFundingTime() { }
-// function scheduleLeverageUpdates() { }
 
 const server = http.createServer((req, res) => {
     if (req.url === '/' && req.method === 'GET') {
