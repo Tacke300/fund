@@ -242,7 +242,7 @@ async function initializeLeverageCache() {
                     }
                     currentRawDebug = { status: `thành công (${successCount} cặp CCXT)`, timestamp: new Date(), data: `Lấy ${successCount} cặp CCXT.`, error: null };
 
-                    // Nếu CCXT fetchLeverageTiers không lấy được dữ liệu, thử loadMarkets
+                    // Nếu CCXT fetchLeverageTiers không lấy được dữ liệu (hoặc số lượng 0), thử loadMarkets
                     if (successCount === 0) {
                         console.warn(`[CACHE] ⚠️ ${id.toUpperCase()}: CCXT fetchLeverageTiers không lấy được đòn bẩy. Thử dùng CCXT loadMarkets...`);
                         leverageSource = "CCXT loadMarkets fallback";
@@ -443,7 +443,7 @@ async function fetchFundingRatesForAllExchanges() {
         } catch (e) {
             let errorMessage = `Lỗi khi lấy funding từ ${id.toUpperCase()}: ${e.message}.`;
             if (e instanceof ccxt.AuthenticationError) {
-                errorMessage = `LỖI XÁC THỨC! Vui lòng kiểm tra lại API Key/Secret của ${id.toUpperCase()}. Chi tiết: ${e.message}.`;
+                errorMessage = `LỖI XÁC THỰC! Vui lòng kiểm tra lại API Key/Secret của ${id.toUpperCase()}. Chi tiết: ${e.message}.`;
             } else if (e instanceof ccxt.NetworkError) {
                 errorMessage = `Lỗi mạng khi lấy funding từ ${id.toUpperCase()}: ${e.message}.`;
             }
