@@ -29,8 +29,6 @@ let exchangeData = {};
 let arbitrageOpportunities = [];
 let lastFullUpdateTimestamp = null;
 let loopTimeoutId = null;
-// serverTimeOffset không còn cần thiết cho việc gọi API Binance trực tiếp
-// const serverTimeOffset = 0; 
 
 // Biến mới để lưu trữ phản hồi thô hoặc lỗi từ API/CCXT cho mục đích gỡ lỗi trên dashboard
 let debugRawLeverageResponses = {
@@ -40,8 +38,6 @@ let debugRawLeverageResponses = {
     bitget: { status: 'chưa chạy', timestamp: null, data: 'N/A', error: null }
 };
 
-// Loại bỏ hằng số host không còn cần thiết cho Binance vì không gọi trực tiếp nữa
-// const BINANCE_BASE_HOST = 'fapi.binance.com';
 const BINGX_BASE_HOST = 'open-api.bingx.com'; // Hằng số cho BingX Host (khi gọi trực tiếp)
 
 const exchanges = {};
@@ -50,7 +46,6 @@ EXCHANGE_IDS.forEach(id => {
     const config = {
         'options': { 'defaultType': 'swap' },
         'enableRateLimit': true,
-        // Thêm User-Agent cho CCXT (áp dụng cho tất cả các sàn CCXT)
         'headers': {
             'User-Agent': 'Mozilla/5.0 (compatible; ccxt/1.0;)', // CCXT User-Agent
         }
@@ -213,6 +208,7 @@ async function fetchBingxMaxLeverage(symbol, retries = 3) {
 
 
 // Hàm khởi tạo bộ nhớ đệm đòn bẩy cho tất cả các sàn
+// LƯU Ý QUAN TRỌNG: leverageCache[id][symbol] bây giờ sẽ lưu CHUỖI DỮ LIỆU THÔ từ API (cho BingX) hoặc số đã parse (cho Binance/OKX/Bitget)
 async function initializeLeverageCache() {
     console.log(`[CACHE] Bắt đầu làm mới bộ nhớ đệm đòn bẩy...`);
     const newCache = {};
@@ -532,14 +528,8 @@ function calculateArbitrageOpportunities() {
                 const parsedMaxLeverage1 = parseLeverageFromRawData(exchange1Id, symbol, rate1Data.maxLeverage);
                 const parsedMaxLeverage2 = parseLeverageFromRawData(exchange2Id, symbol, rate2Data.maxLeverage);
 
-                // DEBUG LOGS HERE
-                // console.log(`[DEBUG_ARBITRAGE] ${symbol} - ${exchange1Id}: Parsed Leverage = ${parsedMaxLeverage1} (Raw: ${rate1Data.maxLeverage ? rate1Data.maxLeverage.substring(0, 50) : 'N/A'})`);
-                // console.log(`[DEBUG_ARBITRAGE] ${symbol} - ${exchange2Id}: Parsed Leverage = ${parsedMaxLeverage2} (Raw: ${rate2Data.maxLeverage ? rate2Data.maxLeverage.substring(0, 50) : 'N/A'})`);
-
-
                 if (typeof parsedMaxLeverage1 !== 'number' || parsedMaxLeverage1 <= 0 ||
                     typeof parsedMaxLeverage2 !== 'number' || parsedMaxLeverage2 <= 0) {
-                    // console.warn(`[ARBITRAGE] ⚠️ Bỏ qua ${symbol} do đòn bẩy không hợp lệ cho ${exchange1Id} (${parsedMaxLeverage1}) hoặc ${exchange2Id} (${parsedMaxLeverage2}).`);
                     continue;
                 }
 
