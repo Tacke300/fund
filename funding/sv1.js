@@ -157,6 +157,7 @@ async function fetchBingxMaxLeverage(symbol, retries = 3) {
         const headers = { 'X-BX-APIKEY': bingxApiKey };
 
         try {
+            console.log(`[DEBUG] Gọi BingX API cho ${symbol} (Lần ${i+1}/${retries})...`); // DEBUG LOG
             const rawRes = await makeHttpRequest('GET', BINGX_BASE_HOST, urlPath, headers);
             lastRawData = rawRes; 
             lastError = null; 
@@ -212,7 +213,6 @@ async function fetchBingxMaxLeverage(symbol, retries = 3) {
 
 
 // Hàm khởi tạo bộ nhớ đệm đòn bẩy cho tất cả các sàn
-// LƯU Ý QUAN TRỌNG: leverageCache[id][symbol] bây giờ sẽ lưu CHUỖI DỮ LIỆU THÔ từ API (cho BingX) hoặc số đã parse (cho Binance/OKX/Bitget)
 async function initializeLeverageCache() {
     console.log(`[CACHE] Bắt đầu làm mới bộ nhớ đệm đòn bẩy...`);
     const newCache = {};
@@ -229,6 +229,7 @@ async function initializeLeverageCache() {
                 // Binance: SỬ DỤNG CCXT cho cả fetchLeverageTiers và loadMarkets fallback
                 leverageSource = "CCXT fetchLeverageTiers";
                 try {
+                    console.log(`[DEBUG] Gọi CCXT fetchLeverageTiers cho ${id.toUpperCase()}...`); // DEBUG LOG
                     const leverageTiers = await exchange.fetchLeverageTiers();
                     let successCount = 0;
                     for (const symbol in leverageTiers) {
@@ -249,23 +250,32 @@ async function initializeLeverageCache() {
                     if (successCount === 0) {
                         console.warn(`[CACHE] ⚠️ ${id.toUpperCase()}: CCXT fetchLeverageTiers không lấy được đòn bẩy. Thử dùng CCXT loadMarkets...`);
                         leverageSource = "CCXT loadMarkets fallback";
-                        await exchange.loadMarkets(true);
-                        let loadMarketsSuccessCount = 0;
-                        for (const market of Object.values(exchange.markets)) {
-                            if (market.swap && market.quote === 'USDT') {
-                                const symbolCleaned = cleanSymbol(market.symbol);
-                                const maxLeverage = getMaxLeverageFromMarketInfo(market);
-                                if (maxLeverage !== null && maxLeverage > 0) {
-                                    fetchedLeverageDataMap[symbolCleaned] = maxLeverage;
-                                    console.log(`[CACHE] ✅ ${id.toUpperCase()}: Max leverage của ${symbolCleaned} là ${maxLeverage} (loadMarkets).`); // LOG THÀNH CÔNG TỪ loadMarkets
-                                    loadMarketsSuccessCount++;
-                                } else {
-                                    console.warn(`[CACHE] ⚠️ ${id.toUpperCase()}: Đòn bẩy không hợp lệ hoặc không tìm thấy cho ${market.symbol} qua loadMarkets.`);
+                        try {
+                            console.log(`[DEBUG] Gọi CCXT loadMarkets cho ${id.toUpperCase()}...`); // DEBUG LOG
+                            await exchange.loadMarkets(true);
+                            let loadMarketsSuccessCount = 0;
+                            for (const market of Object.values(exchange.markets)) {
+                                if (market.swap && market.quote === 'USDT') {
+                                    const symbolCleaned = cleanSymbol(market.symbol);
+                                    const maxLeverage = getMaxLeverageFromMarketInfo(market);
+                                    if (maxLeverage !== null && maxLeverage > 0) {
+                                        fetchedLeverageDataMap[symbolCleaned] = maxLeverage;
+                                        console.log(`[CACHE] ✅ ${id.toUpperCase()}: Max leverage của ${symbolCleaned} là ${maxLeverage} (loadMarkets).`); // LOG THÀNH CÔNG TỪ loadMarkets
+                                        loadMarketsSuccessCount++;
+                                    } else {
+                                        console.warn(`[CACHE] ⚠️ ${id.toUpperCase()}: Đòn bẩy không hợp lệ hoặc không tìm thấy cho ${market.symbol} qua loadMarkets.`);
+                                    }
                                 }
                             }
+                            currentRawDebug.status = `thành công (loadMarkets fallback, ${loadMarketsSuccessCount} cặp)`;
+                            currentRawDebug.data = `Lấy ${loadMarketsSuccessCount} cặp (fallback loadMarkets).`;
+                        } catch (e) {
+                            let errorMessage = `Lỗi nghiêm trọng khi gọi CCXT loadMarkets (fallback): ${e.message}.`;
+                            if (e.response) errorMessage += ` Raw: ${e.response.toString().substring(0, 500)}...`;
+                            console.error(`[CACHE] ❌ ${id.toUpperCase()}: ${errorMessage}`);
+                            leverageSource = "CCXT loadMarkets (fallback lỗi)";
+                            currentRawDebug = { status: `thất bại (loadMarkets lỗi: ${e.code || 'UNKNOWN'})`, timestamp: new Date(), data: e.response ? e.response.toString() : e.message, error: { code: e.code, msg: e.message } };
                         }
-                        currentRawDebug.status = `thành công (loadMarkets fallback, ${loadMarketsSuccessCount} cặp)`;
-                        currentRawDebug.data = `Lấy ${loadMarketsSuccessCount} cặp (fallback loadMarkets).`;
                     }
 
                 } catch (e) {
@@ -280,6 +290,7 @@ async function initializeLeverageCache() {
                 // BingX: Dùng API trực tiếp (theo yêu cầu "viết thủ công API call")
                 leverageSource = "BingX REST API /trade/leverage";
                 try {
+                    console.log(`[DEBUG] Gọi CCXT loadMarkets cho ${id.toUpperCase()} để lấy danh sách cặp...`); // DEBUG LOG
                     await exchange.loadMarkets(true);
                     const bingxMarkets = Object.values(exchange.markets).filter(m => m.swap && m.quote === 'USDT');
                     console.log(`[CACHE] ${id.toUpperCase()}: Tìm thấy ${bingxMarkets.length} cặp swap USDT. Đang lấy dữ liệu đòn bẩy thô từng cặp...`);
@@ -325,6 +336,7 @@ async function initializeLeverageCache() {
 
                 try {
                     if (exchange.has['fetchLeverageTiers']) {
+                        console.log(`[DEBUG] Gọi CCXT fetchLeverageTiers cho ${id.toUpperCase()}...`); // DEBUG LOG
                         const leverageTiers = await exchange.fetchLeverageTiers();
                         let successCount = 0;
                         for (const symbol in leverageTiers) {
