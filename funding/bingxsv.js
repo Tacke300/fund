@@ -27,7 +27,7 @@ const FULL_LEVERAGE_REFRESH_AT_HOUR = 0; // Cập nhật toàn bộ leverage và
 const TARGETED_LEVERAGE_REFRESH_MINUTES = [15, 30, 45, 55, 59]; // Cập nhật leverage cho các symbol đang có cơ hội
 
 // Cấu hình cho việc lấy dữ liệu BingX song song (cho Full Leverage API)
-const BINGX_FULL_LEVERAGE_CONCURRENT_FETCH_LIMIT = 40; // ĐÃ SỬA: Từ 2 lên 40
+const BINGX_FULL_LEVERAGE_CONCURRENT_FETCH_LIMIT = 10; // ĐÃ SỬA: Từ 2 lên 40
 const BINGX_FULL_LEVERAGE_DELAY_BETWEEN_BATCHES_MS = 5000;
 
 // Cấu hình cho BingX Funding Rate API trực tiếp
