@@ -1,6 +1,6 @@
 const http = require('http');
 const https = require('https');
-const fs = require('fs');
+const fs = require =('fs');
 const path = require('path');
 const ccxt = require('ccxt');
 const crypto = require('crypto');
@@ -722,10 +722,8 @@ function initializeBitgetWebSocket(exchangeInstance) {
                 console.warn(`[BITGET_WS] Subscribe thất bại cho args: ${JSON.stringify(data.arg)}, code: ${data.code}, msg: ${data.msg}`);
             }
         } else if (data.action === 'update' && data.data && data.data.length > 0) {
+            console.log(`[BITGET_WS_RAW_DATA] Nhận được dữ liệu update thô: ${JSON.stringify(data)}`); // <-- THÊM LOG NÀY
             data.data.forEach(item => {
-                // Log toàn bộ item để kiểm tra cấu trúc dữ liệu thô
-                console.log(`[BITGET_WS_RAW_ITEM] Nhận được: ${JSON.stringify(item)}`);
-
                 // cacheKey sẽ là symbol đã được dọn dẹp (ví dụ: BTCUSDT)
                 const cacheKey = cleanSymbol(item.symbol || cleanSymbolFromBitgetWS(item.instId));
 
@@ -740,10 +738,14 @@ function initializeBitgetWebSocket(exchangeInstance) {
                         };
                         console.log(`[BITGET_WS_CACHE] ✅ Cập nhật cache cho ${cacheKey}: Rate=${parsedFundingRate.toFixed(6)}, Next Settle=${new Date(parsedNextSettleTime).toISOString()}`);
                     } else {
-                        console.warn(`[BITGET_WS_PARSE_WARN] ⚠️ Không thể parse fundingRate/nextSettleTime cho ${cacheKey}. Dữ liệu thô: ${JSON.stringify(item)}`);
+                        console.warn(`[BITGET_WS_PARSE_WARN] ⚠️ Không thể parse fundingRate/nextSettleTime cho ${cacheKey}. ` +
+                                     `fundingRate: '${item.fundingRate}' (type: ${typeof item.fundingRate}), ` +
+                                     `nextSettleTime: '${item.nextSettleTime}' (type: ${typeof item.nextSettleTime}). ` +
+                                     `Dữ liệu thô: ${JSON.stringify(item)}`); // <-- LOG CHI TIẾT HƠN
                     }
                 } else {
-                    console.warn(`[BITGET_WS_DATA_WARN] ⚠️ Dữ liệu funding rate thiếu các trường cần thiết (symbol, fundingRate, nextSettleTime) cho ${cacheKey}. Dữ liệu thô: ${JSON.stringify(item)}`);
+                    console.warn(`[BITGET_WS_DATA_WARN] ⚠️ Dữ liệu funding rate thiếu các trường cần thiết (symbol, fundingRate, nextSettleTime) cho ${cacheKey}. ` +
+                                 `Item: ${JSON.stringify(item)}`); // <-- LOG CHI TIẾT HƠN
                 }
             });
         }
