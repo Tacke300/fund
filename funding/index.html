@@ -1,29 +1,190 @@
-<table id="funding-matrix-table" class="funding-matrix-table">
-    <thead>
-        <tr>
-            <th>STT</th>
-            <th>Coin</th>
-            <th>Binance</th>
-            <th>OKX</th>
-            <th>BingX</th>
-            <th>Bitget</th>
-            <th>Kucoin</th> <!-- THÊM CỘT NÀY -->
-        </tr>
-    </thead>
-    <tbody></tbody>
-</table>
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Funding Monitor & Arbitrage</title>
+    <style>
+        /* Color Palette - Sang Chảnh & Huyền Bí */
+        :root {
+            --bg-dark: #1A1A2E; /* Deep navy-purple background */
+            --text-light: #E0E0E0; /* Off-white for primary text */
+            --text-secondary: #A0A0B0; /* Softer grey for secondary text */
+            
+            --accent-primary: #5C2A9D; /* Deep purple for headers/accents */
+            --accent-secondary: #3B2D6C; /* Slightly lighter purple for table parts */
+            
+            --table-header-bg: #4B2E83; /* Richer purple for table headers */
+            --table-border-color: #6A4DBA; /* Lighter purple for borders */
+            --table-row-even-bg: #2C2C4B; /* Darker shade for even rows */
+            --table-row-hover-bg: #453B75; /* Hover effect */
+
+            --rate-positive-strong: #39FF14; /* NEON GREEN - Very vibrant */
+            --rate-negative-strong: #FF3366; /* VIBRANT PINK-RED - Very vibrant */
+            --warning-imminent: #FFC107; /* Bright Amber for imminent warning */
+            --imminent-blink-bg: rgba(255, 193, 7, 0.15); /* Subtle background for imminent blink */
+            
+            --shadow-color: rgba(0,0,0,0.6); /* Darker shadow */
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; /* Slightly more professional font stack */
+            background-color: var(--bg-dark);
+            color: var(--text-light);
+            margin: 0;
+            padding: 30px; /* Increased padding */
+            line-height: 1.6;
+        }
+        .container {
+            max-width: 1400px; /* Tăng chiều rộng để phù hợp với cột mới */
+            margin: 0 auto;
+            background-color: var(--bg-dark); /* Ensure container matches body bg */
+            border-radius: 12px; /* More rounded corners */
+            overflow: hidden;
+        }
+        h1, h2 {
+            text-align: center;
+            color: var(--text-light);
+            text-shadow: 0 0 8px rgba(255, 255, 255, 0.1); /* Subtle glow for headings */
+            margin-bottom: 10px;
+        }
+        h1 { font-size: 2.5em; margin-top: 20px;}
+        h2 { font-size: 1.8em; margin-top: 50px; margin-bottom: 20px;}
+        .timestamp {
+            text-align: center;
+            color: var(--text-secondary);
+            margin-bottom: 40px; /* More space */
+            font-size: 1em;
+            height: 1.2em;
+            letter-spacing: 0.05em; /* Slightly spaced out text */
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 40px; /* More space below tables */
+            background-color: var(--accent-secondary); /* Darker table background */
+            box-shadow: 0 8px 25px var(--shadow-color); /* More pronounced shadow */
+            border-radius: 10px; /* Rounded corners for tables */
+            overflow: hidden; /* Ensures rounded corners are visible */
+        }
+        th, td {
+            padding: 15px 10px; /* Điều chỉnh padding để phù hợp với nhiều cột hơn */
+            text-align: left;
+            border-bottom: 1px solid var(--table-border-color); /* Subtle border color */
+        }
+        thead {
+            background-color: var(--table-header-bg);
+            color: var(--text-light);
+            font-size: 1.1em;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+        }
+        th { font-weight: bold; }
+        tbody tr:nth-child(even) { background-color: var(--table-row-even-bg); }
+        tbody tr:hover { background-color: var(--table-row-hover-bg); }
+        
+        /* Bảng Arbitrage */
+        .pnl-positive { font-weight: bold; color: var(--rate-positive-strong); font-size: 1.15em; }
+        .funding-diff { font-weight: bold; color: var(--warning-imminent); font-size: 1.1em; }
+
+        /* Blinking effect for the time cell */
+        @keyframes blink-cell-animation {
+            0%, 100% { color: var(--text-light); background-color: transparent; }
+            50% { color: var(--warning-imminent); background-color: var(--imminent-blink-bg); }
+        }
+        .imminent-time-cell {
+            animation: blink-cell-animation 1.5s infinite;
+            font-weight: bold;
+        }
+
+        /* Bảng Matrix Funding */
+        .funding-matrix-table td { text-align: center; vertical-align: middle; }
+        .funding-matrix-table td:first-child { text-align: left; font-weight: bold; color: var(--text-light); } /* Coin name column */
+        .main-rate { font-weight: bold; font-size: 1.1em; }
+        .sub-info { font-size: 0.75em; color: var(--text-secondary); margin-top: 4px; }
+
+        .rate-positive { color: var(--rate-positive-strong); }
+        .rate-negative { color: var(--rate-negative-strong); }
+
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>Bảng Tính Toán Arbitrage</h1>
+    <p class="timestamp" id="main-timestamp">Đang tải dữ liệu...</p>
+    <table id="arbitrage-table">
+        <thead>
+            <tr>
+                <th>STT</th>
+                <th>Coin</th>
+                <th>Cặp Sàn</th>
+                <th>Max Lev Chung</th>
+                <th>Chênh lệch Funding</th>
+                <th>Thời Gian Funding</th>
+                <th>% PnL Ước Tính</th>
+            </tr>
+        </thead>
+        <tbody></tbody>
+    </table>
+
+    <h2>Tổng Hợp Funding Rates</h2>
+    <table id="funding-matrix-table" class="funding-matrix-table">
+        <thead>
+            <tr>
+                <th>STT</th>
+                <th>Coin</th>
+                <th>Binance</th>
+                <th>OKX</th>
+                <th>BingX</th>
+                <th>Bitget</th>
+                <th>Kucoin</th> <!-- ĐÃ THÊM CỘT NÀY -->
+            </tr>
+        </thead>
+        <tbody></tbody>
+    </table>
+</div>
 
 <script>
     const API_ENDPOINT = '/api/data';
-    const EXCHANGES = ['binance', 'okx', 'bingx', 'bitget', 'kucoin']; // THÊM 'kucoin' VÀO ĐÂY
+    const EXCHANGES = ['binance', 'okx', 'bingx', 'bitget', 'kucoin']; // ĐÃ THÊM 'kucoin' VÀO MẢNG NÀY
     
-    // ... các hàm formatTime, renderArbitrageTable, renderFundingMatrixTable và fetchData như cũ
-    // renderFundingMatrixTable sẽ tự động thêm cột Kucoin nếu có dữ liệu
+    function formatTime(timestamp) {
+        if (!timestamp) return 'N/A';
+        const date = new Date(timestamp);
+        if (isNaN(date.getTime())) return 'N/A';
+        return date.toLocaleString('vi-VN', { 
+            hour: '2-digit', 
+            minute: '2-digit', 
+            hour12: false 
+        });
+    }
+
+    function renderArbitrageTable(opportunities) {
+        const tbody = document.querySelector('#arbitrage-table tbody');
+        if (!opportunities || opportunities.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;">Không tìm thấy cơ hội nào.</td></tr>';
+            return;
+        }
+        tbody.innerHTML = opportunities.map((op, index) => {
+            const timeCellClass = op.isImminent ? 'imminent-time-cell' : '';
+            return `<tr>
+                        <td>${index + 1}</td>
+                        <td>${op.coin}</td>
+                        <td>${op.exchanges.toUpperCase()}</td>
+                        <td>x${op.commonLeverage !== null ? op.commonLeverage : 'N/A'}</td>
+                        <td class="funding-diff">${(op.fundingDiff * 100).toFixed(4)}%</td>
+                        <td class="${timeCellClass}">${formatTime(op.nextFundingTime)}</td>
+                        <td class="pnl-positive">+${op.estimatedPnl}%</td>
+                    </tr>`;
+        }).join('');
+    }
 
     function renderFundingMatrixTable(ratesData) {
         const tbody = document.querySelector('#funding-matrix-table tbody');
         const ratesByCoin = {};
-        for (const exchange of EXCHANGES) {
+        for (const exchange of EXCHANGES) { // Lặp qua mảng EXCHANGES mới
             if (ratesData[exchange]) {
                 for (const rate of ratesData[exchange]) {
                     if (!ratesByCoin[rate.symbol]) ratesByCoin[rate.symbol] = {};
@@ -38,6 +199,7 @@
             return minRateA - minRateB;
         });
 
+        // Giới hạn 100 cặp cho bảng để tránh quá tải
         tbody.innerHTML = sortedCoins.slice(0, 100).map((coin, index) => {
             let rowHtml = `<td>${index + 1}</td><td>${coin}</td>`;
             for (const exchange of EXCHANGES) { // Lặp qua EXCHANGES để tạo cột
@@ -52,12 +214,35 @@
                                     <div class="sub-info">${subText}</div>
                                 </td>`;
                 } else {
-                    rowHtml += `<td>-</td>`;
+                    rowHtml += `<td>-</td>`; // Hiển thị '-' nếu không có dữ liệu cho cặp/sàn đó
                 }
             }
             return `<tr>${rowHtml}</tr>`;
         }).join('');
     }
 
-    // ... các hàm fetchData và DOMContentLoaded như cũ
+    async function fetchData() {
+        try {
+            const response = await fetch(API_ENDPOINT);
+            if (!response.ok) throw new Error(`Lỗi mạng: ${response.status}`);
+            const data = await response.json();
+            
+            document.getElementById('main-timestamp').innerText = `Dữ liệu cập nhật lúc: ${new Date(data.lastUpdated).toLocaleString('vi-VN', {hour12: false}) || 'N/A'}`;
+            
+            renderArbitrageTable(data.arbitrageData);
+            renderFundingMatrixTable(data.rawRates);
+
+        } catch (error) {
+            console.error('Lỗi khi lấy dữ liệu:', error);
+            document.getElementById('main-timestamp').innerText = 'Lỗi tải dữ liệu. Kiểm tra console (F12).';
+        }
+    }
+    
+    document.addEventListener('DOMContentLoaded', () => {
+        fetchData();
+        setInterval(fetchData, 5000); // Fetch data every 5 seconds
+    });
 </script>
+
+</body>
+</html>
