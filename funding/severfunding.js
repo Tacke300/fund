@@ -1,5 +1,5 @@
 const http = require('http');
-const https = require('https'); // SỬA LỖI CÚ PHÁP Ở ĐÂY
+const https = require('https');
 const fs = require('fs');
 const path = require('path');
 const ccxt = require('ccxt');
@@ -1294,7 +1294,7 @@ function scheduleLeverageUpdates() {
     }
 
     if (currentMinute === 59 && currentSecond >= 30 && currentSecond < 35) {
-        const nowMs = Date.Now();
+        const nowMs = Date.now(); // Sử dụng Date.now() thay vì Date.Now()
         if (!scheduleLeverageUpdates.lastSpecialTrigger || (nowMs - scheduleLeverageUpdates.lastSpecialTrigger > 30 * 1000)) {
             console.log('[SPECIAL_UPDATE] ⏰ Kích hoạt cập nhật ĐẶC BIỆT (phút 59 giây 30).');
             performFullLeverageUpdate();
@@ -1319,12 +1319,12 @@ const server = http.createServer((req, res) => {
         const responseData = {
             lastUpdated: lastFullUpdateTimestamp,
             arbitrageData: arbitrageOpportunities,
-            // THAY ĐỔI: Sử dụng direct object, không cần Object.values ở đây nữa vì đã structured
+            // ĐÃ SỬA: Chuyển đổi đối tượng rates thành mảng các giá trị
             rawRates: {
-                binance: exchangeData.binanceusdm?.rates || {}, 
-                bingx: exchangeData.bingx?.rates || {},
-                okx: exchangeData.okx?.rates || {},
-                bitget: exchangeData.bitget?.rates || {},
+                binance: Object.values(exchangeData.binanceusdm?.rates || {}), 
+                bingx: Object.values(exchangeData.bingx?.rates || {}),
+                okx: Object.values(exchangeData.okx?.rates || {}),
+                bitget: Object.values(exchangeData.bitget?.rates || {}),
             },
             debugRawLeverageResponses: debugRawLeverageResponses
         };
