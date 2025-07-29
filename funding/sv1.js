@@ -80,7 +80,7 @@ EXCHANGE_IDS.forEach(id => {
 // ----- HÀM HỖ TRỢ CHUNG (DEFINED BEFORE USE) -----
 // Đã chỉnh sửa hàm cleanSymbol mạnh mẽ hơn để xử lý các định dạng của BingX
 const cleanSymbol = (symbol) => {
-    console.log(`[CLEAN_SYMBOL_DEBUG] Input: '${symbol}'`); // LOG DEBUG QUAN TRỌNG
+    // console.log(`[CLEAN_SYMBOL_DEBUG] Input: '${symbol}'`); // LOG DEBUG QUAN TRỌNG, có thể bỏ comment nếu cần
     let cleaned = symbol.toUpperCase();
     
     // Loại bỏ hậu tố Bitget WS trước để tránh ảnh hưởng đến các regex khác
@@ -93,17 +93,14 @@ const cleanSymbol = (symbol) => {
     cleaned = cleaned.replace(/-USDT$/, 'USDT'); 
 
     // Chuẩn hóa để chỉ có một 'USDT' ở cuối, ngay cả khi có 'USDTUSDT'
-    // Ví dụ: BTCUSDTUSDT -> BTCUSDT
     cleaned = cleaned.replace(/(USDT)+$/, 'USDT'); 
 
     // Đảm bảo kết thúc bằng USDT nếu symbol gốc có USDT nhưng symbol đã clean không kết thúc bằng USDT
-    // Ví dụ: nếu "BTC/USDT" -> "BTC", thì thêm "USDT" vào thành "BTCUSDT"
-    // Hoặc nếu "ETHUSDTPERP" -> "ETHUSDTPERP", thì thêm "USDT" vào thành "ETHUSDT" (hoặc xử lý thêm nếu cần)
+    // Ví dụ: symbol gốc "BTC/USDT" sau khi loại bỏ "/" có thể thành "BTCUSDT". Nếu cleaned là "BTC" và original có "USDT", thêm lại "USDT".
     if (!cleaned.endsWith('USDT') && symbol.toUpperCase().includes('USDT')) {
         cleaned = cleaned + 'USDT';
     }
-    
-    console.log(`[CLEAN_SYMBOL_DEBUG] Output: '${cleaned}'`); // LOG DEBUG QUAN TRỌNG
+    // console.log(`[CLEAN_SYMBOL_DEBUG] Output: '${cleaned}'`); // LOG DEBUG QUAN TRỌNG, có thể bỏ comment nếu cần
     return cleaned;
 };
 
@@ -500,6 +497,7 @@ async function updateLeverageForExchange(id, symbolsToUpdate = null) {
                 debugRawLeverageResponses[id].data = 'Không có dữ liệu đòn bẩy hợp lệ nào được tìm thấy.';
             }
 
+
         }
         else { // OKX, Bitget, Kucoin: Dùng CCXT (fetchLeverageTiers + loadMarkets fallback)
             await exchange.loadMarkets(true);
@@ -869,7 +867,7 @@ function initializeBitgetWebSocket(exchangeInstance) {
 }
 
 function getBitgetFundingRateFromWsCache(symbol) {
-    const cleanedSymbol = cleanSymbol(symbol);
+    const cleanedSym = cleanSymbol(symbol);
     return bitgetFundingRatesWsCache[cleanedSym] || null; // Dùng cleanedSym làm key
 }
 
@@ -957,7 +955,7 @@ async function fetchFundingRatesForAllExchanges() {
                         fundingTimestampValue = wsCacheData.nextFundingTime; // Ưu tiên WS cache cho time
                         console.log(`[DATA] Bitget (CCXT): Dùng WS cache time cho ${symbolCleaned}. Time: ${new Date(fundingTimestampValue).toISOString()}`);
                     } else {
-                        // Log chi tiết CCXT DATA KHI WS CACHE THIẾU
+                        // LOG CHI TIẾT CCXT DATA KHI WS CACHE THIẾU
                         console.warn(`[DATA] ⚠️ Bitget (CCXT): WS cache không có funding time cho ${rate.symbol}. CCXT fundingTimestamp: ${rate.fundingTimestamp}, CCXT nextFundingTime: ${rate.nextFundingTime}. Dùng fallback tính toán.`);
                         if (!fundingTimestampValue || fundingTimestampValue <= 0) {
                            fundingTimestampValue = calculateNextStandardFundingTime();
