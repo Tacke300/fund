@@ -844,19 +844,19 @@ async function fetchFundingRatesForAllExchanges() {
 
             for (const rate of Object.values(fundingRatesRaw)) {
                 // LỌC CHUNG: Chỉ lấy các cặp SWAP/PERPETUAL FUTURES VÀ CHỨA 'USDT'
+                // Thêm điều kiện kiểm tra format cho Binance/OKX để loại các hợp đồng Delivery Futures
+                if (rate.symbol.includes(':')) { // Loại bỏ các symbol có dấu hai chấm (thường là Delivery Futures)
+                    // console.warn(`[DATA] ⚠️ ${id.toUpperCase()}: Bỏ qua ${rate.symbol} - Phát hiện là hợp đồng giao ngay (có dấu ':').`);
+                    continue; // Bỏ qua
+                }
+                
                 if (rate.type && rate.type !== 'swap' && rate.type !== 'future') {
                      continue;
                 }
-                if (rate.info?.contractType && rate.info.contractType !== 'PERPETUAL') {
-                    // THAY ĐỔI: Thêm log để biết nếu bỏ qua do không phải perpetual (để debug Binance/OKX delivery futures)
-                    // if (id === 'binanceusdm' || id === 'okx') { // Chỉ log cho Binance/OKX để tránh ồn
-                    //    console.warn(`[DATA] ⚠️ ${id.toUpperCase()}: Bỏ qua ${rate.symbol} - Không phải hợp đồng perpetual.`);
-                    // }
-                    continue;
-                }
-                // THAY ĐỔI: Lọc các hợp đồng Delivery Futures có dấu hai chấm trong symbol
-                if (rate.symbol.includes(':')) {
-                    // console.warn(`[DATA] ⚠️ ${id.toUpperCase()}: Bỏ qua ${rate.symbol} - Phát hiện là hợp đồng giao ngay (có dấu ':').`);
+                // Dùng .isPerpetual hoặc kiểm tra info.contractType nếu có
+                const isPerpetual = rate.info?.contractType === 'PERPETUAL' || rate.isPerpetual === true;
+                if (!isPerpetual) {
+                    // console.warn(`[DATA] ⚠️ ${id.toUpperCase()}: Bỏ qua ${rate.symbol} - Không phải hợp đồng perpetual.`);
                     continue;
                 }
                 if (!rate.symbol.includes('USDT')) { 
