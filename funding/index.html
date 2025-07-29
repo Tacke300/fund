@@ -186,7 +186,8 @@
         const ratesByCoin = {};
         for (const exchange of EXCHANGES) { // Lặp qua mảng EXCHANGES mới
             if (ratesData[exchange]) {
-                for (const rate of ratesData[exchange]) {
+                // SỬA LỖI: ratesData[exchange] là một object (map), cần Object.values để lặp qua các giá trị.
+                for (const rate of Object.values(ratesData[exchange])) { 
                     if (!ratesByCoin[rate.symbol]) ratesByCoin[rate.symbol] = {};
                     ratesByCoin[rate.symbol][exchange] = rate;
                 }
