@@ -74,7 +74,7 @@ EXCHANGE_IDS.forEach(id => {
     exchanges[id] = new exchangeClass(config);
 });
 
-// ----- HÀM HỖ TRỢ CHUNG -----
+// ----- HÀM HỖ TRỢ CHUNG (DEFINED BEFORE USE) -----
 const cleanSymbol = (symbol) => {
     let cleaned = symbol.toUpperCase();
     cleaned = cleaned.replace(/[\/:_]/g, '');
@@ -625,7 +625,7 @@ async function performTargetedLeverageUpdate() {
 }
 
 
-// ----- BITGET WEBSOCKET CLIENT LOGIC -----
+// ----- BITGET WEBSOCKET CLIENT LOGIC (DEFINED BEFORE USE) -----
 let bitgetFundingRatesWsCache = {};
 let wsBitget = null;
 let subscribedSymbols = new Set();
@@ -732,7 +732,8 @@ function initializeBitgetWebSocket(exchangeInstance) {
                     };
                     if (batch.length > 0) {
                         wsBitget.send(JSON.stringify(subscribeMessage));
-                        // ĐÃ BỎ LOG CHI TIẾT THEO LÔ ĐỂ GIẢM ĐỘ ỒN: console.log(`[BITGET_WS] Đã gửi yêu cầu subscribe cho lô ${i/BATCH_SIZE + 1} (${batch.length} cặp).`);
+                        // Đã bỏ log chi tiết theo lô để giảm độ ồn
+                        // console.log(`[BITGET_WS] Đã gửi yêu cầu subscribe cho lô ${i/BATCH_SIZE + 1} (${batch.length} cặp).`);
                         await new Promise(resolve => setTimeout(resolve, 100));
                     }
                 }
@@ -833,7 +834,7 @@ function getBitgetWsState() {
     }
 }
 
-// ----- CÁC HÀM XỬ LÝ DỮ LIỆU CHÍNH -----
+// ----- CÁC HÀM XỬ LÝ DỮ LIỆU CHÍNH (DEFINED BEFORE USE) -----
 
 function calculateNextStandardFundingTime() {
     const now = new Date();
@@ -867,6 +868,7 @@ async function fetchFundingRatesForAllExchanges() {
             await exchanges[id].loadMarkets(true);
             const exchange = exchanges[id];
             const fundingRatesRaw = await exchange.fetchFundingRates();
+            console.log(`[DATA] ${id.toUpperCase()}: CCXT trả về ${Object.keys(fundingRatesRaw).length} raw funding rates.`); // Log raw count
             
             if (id === 'bitget' && bitgetValidFuturesSymbolSet.size === 0) {
                 console.log('[DATA] Bitget (CCXT): Valid Futures symbols not loaded. Attempting to fetch...');
@@ -921,7 +923,7 @@ async function fetchFundingRatesForAllExchanges() {
                 }
             }
             currentStatus = `Funding hoàn tất (${successCount} cặp)`;
-            console.log(`[DATA] ✅ ${id.toUpperCase()}: Đã lấy thành công ${successCount} funding rates.`);
+            console.log(`[DATA] ✅ ${id.toUpperCase()}: Đã xử lý thành công ${successCount} cặp funding rates.`); // Log processed count
         } catch (e) {
             let errorMessage = `Lỗi khi lấy funding từ ${id.toUpperCase()}: ${e.message}.`;
             console.error(`[DATA] ❌ ${id.toUpperCase()}: ${errorMessage}`);
@@ -1216,10 +1218,10 @@ const server = http.createServer((req, res) => {
         const now = Date.now();
         if (now - lastApiDataLogTime > API_DATA_LOG_INTERVAL_MS) {
             console.log(`[API_DATA] Gửi dữ liệu đến frontend. Total arbitrage ops: ${responseData.arbitrageData.length}. ` +
-                `Binance Funds: ${Object.keys(responseData.rawRates.binance).length}. ` +
-                `OKX Funds: ${Object.keys(responseData.rawRates.okx).length}. ` +
-                `BingX Funds: ${Object.keys(responseData.rawRates.bingx).length}. ` +
-                `Bitget Funds: ${Object.keys(responseData.rawRates.bitget).length}. ` +
+                `Binance Funds: ${responseData.rawRates.binance.length}. ` + // Using .length for arrays
+                `OKX Funds: ${responseData.rawRates.okx.length}. ` + // Using .length for arrays
+                `BingX Funds: ${responseData.rawRates.bingx.length}. ` + // Using .length for arrays
+                `Bitget Funds: ${responseData.rawRates.bitget.length}. ` + // Using .length for arrays
                 `Bitget WS Status: ${responseData.debugRawLeverageResponses.bitget.wsStatus}.`);
             lastApiDataLogTime = now;
         }
