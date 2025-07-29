@@ -623,11 +623,13 @@ let reconnectTimeoutId = null;
 
 // Helper để chuyển đổi symbol từ CCXT (BTC/USDT) sang định dạng của Bitget WS (BTCUSDT_UMCBL)
 function formatSymbolForBitgetWS(symbol) {
+    // CCXT symbol: BTC/USDT -> Bitget WS instId: BTCUSDT_UMCBL
     return symbol.replace('/USDT', '') + '_UMCBL';
 }
 
 // Helper để chuyển đổi symbol từ Bitget WS (BTCUSDT_UMCBL) sang định dạng cache (BTCUSDT)
 function cleanSymbolFromBitgetWS(wsInstId) {
+    // Bitget WS instId: BTCUSDT_UMCBL -> Cache Key: BTCUSDT
     return wsInstId.replace('_UMCBL', '');
 }
 
@@ -721,9 +723,11 @@ function initializeBitgetWebSocket(exchangeInstance) {
             }
         } else if (data.action === 'update' && data.data && data.data.length > 0) {
             data.data.forEach(item => {
-                // item.symbol trong payload data thường là 'BTCUSDT' (đã bỏ suffix)
-                // nhưng để an toàn, vẫn dùng cleanSymbolFromBitgetWS
-                const cacheKey = item.instId ? cleanSymbolFromBitgetWS(item.instId) : item.symbol;
+                // Log toàn bộ item để kiểm tra cấu trúc dữ liệu thô
+                console.log(`[BITGET_WS_RAW_ITEM] Nhận được: ${JSON.stringify(item)}`);
+
+                // cacheKey sẽ là symbol đã được dọn dẹp (ví dụ: BTCUSDT)
+                const cacheKey = cleanSymbol(item.symbol || cleanSymbolFromBitgetWS(item.instId));
 
                 if (item.symbol && typeof item.fundingRate === 'string' && item.nextSettleTime) {
                     const parsedFundingRate = parseFloat(item.fundingRate);
@@ -734,13 +738,12 @@ function initializeBitgetWebSocket(exchangeInstance) {
                             fundingRate: parsedFundingRate,
                             nextFundingTime: parsedNextSettleTime
                         };
-                        // Log chỉ khi debug cần thiết, vì có thể rất nhiều dòng
-                        // console.log(`[BITGET_WS_CACHE] Cập nhật ${cacheKey}: Rate=${parsedFundingRate.toFixed(6)}, Next Settle=${new Date(parsedNextSettleTime).toISOString()}`);
+                        console.log(`[BITGET_WS_CACHE] ✅ Cập nhật cache cho ${cacheKey}: Rate=${parsedFundingRate.toFixed(6)}, Next Settle=${new Date(parsedNextSettleTime).toISOString()}`);
                     } else {
-                        console.warn(`[BITGET_WS_PARSE_WARN] Không thể parse fundingRate/nextSettleTime cho ${cacheKey}. Dữ liệu thô: ${JSON.stringify(item)}`);
+                        console.warn(`[BITGET_WS_PARSE_WARN] ⚠️ Không thể parse fundingRate/nextSettleTime cho ${cacheKey}. Dữ liệu thô: ${JSON.stringify(item)}`);
                     }
                 } else {
-                    console.warn(`[BITGET_WS_DATA_WARN] Dữ liệu funding rate thiếu hoặc không hợp lệ cho ${cacheKey}. Dữ liệu thô: ${JSON.stringify(item)}`);
+                    console.warn(`[BITGET_WS_DATA_WARN] ⚠️ Dữ liệu funding rate thiếu các trường cần thiết (symbol, fundingRate, nextSettleTime) cho ${cacheKey}. Dữ liệu thô: ${JSON.stringify(item)}`);
                 }
             });
         }
@@ -771,7 +774,9 @@ function initializeBitgetWebSocket(exchangeInstance) {
 }
 
 function getBitgetFundingRateFromWsCache(symbol) {
-    return bitgetFundingRatesWsCache[symbol] || null;
+    // Dọn dẹp symbol trước khi truy cập cache để đảm bảo khớp định dạng (ví dụ: BTC/USDT -> BTCUSDT)
+    const cleanedSymbol = cleanSymbol(symbol);
+    return bitgetFundingRatesWsCache[cleanedSymbol] || null;
 }
 
 // Hàm để lấy trạng thái kết nối WebSocket hiện tại cho mục đích debug
