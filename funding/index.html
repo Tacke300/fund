@@ -1,0 +1,63 @@
+<table id="funding-matrix-table" class="funding-matrix-table">
+    <thead>
+        <tr>
+            <th>STT</th>
+            <th>Coin</th>
+            <th>Binance</th>
+            <th>OKX</th>
+            <th>BingX</th>
+            <th>Bitget</th>
+            <th>Kucoin</th> <!-- THÊM CỘT NÀY -->
+        </tr>
+    </thead>
+    <tbody></tbody>
+</table>
+
+<script>
+    const API_ENDPOINT = '/api/data';
+    const EXCHANGES = ['binance', 'okx', 'bingx', 'bitget', 'kucoin']; // THÊM 'kucoin' VÀO ĐÂY
+    
+    // ... các hàm formatTime, renderArbitrageTable, renderFundingMatrixTable và fetchData như cũ
+    // renderFundingMatrixTable sẽ tự động thêm cột Kucoin nếu có dữ liệu
+
+    function renderFundingMatrixTable(ratesData) {
+        const tbody = document.querySelector('#funding-matrix-table tbody');
+        const ratesByCoin = {};
+        for (const exchange of EXCHANGES) {
+            if (ratesData[exchange]) {
+                for (const rate of ratesData[exchange]) {
+                    if (!ratesByCoin[rate.symbol]) ratesByCoin[rate.symbol] = {};
+                    ratesByCoin[rate.symbol][exchange] = rate;
+                }
+            }
+        }
+        
+        const sortedCoins = Object.keys(ratesByCoin).sort((a, b) => {
+            const minRateA = Math.min(...EXCHANGES.map(ex => ratesByCoin[a][ex]?.fundingRate || 0));
+            const minRateB = Math.min(...EXCHANGES.map(ex => ratesByCoin[b][ex]?.fundingRate || 0));
+            return minRateA - minRateB;
+        });
+
+        tbody.innerHTML = sortedCoins.slice(0, 100).map((coin, index) => {
+            let rowHtml = `<td>${index + 1}</td><td>${coin}</td>`;
+            for (const exchange of EXCHANGES) { // Lặp qua EXCHANGES để tạo cột
+                const rate = ratesByCoin[coin][exchange];
+                if (rate) {
+                    const rateText = (rate.fundingRate * 100).toFixed(4) + '%';
+                    const colorClass = rate.fundingRate >= 0 ? 'rate-positive' : 'rate-negative';
+                    const maxLeverageDisplay = rate.maxLeverage !== null ? `x${rate.maxLeverage}` : 'N/A';
+                    const subText = `${maxLeverageDisplay} • ${formatTime(rate.fundingTimestamp)}`;
+                    rowHtml += `<td>
+                                    <div class="main-rate ${colorClass}">${rateText}</div>
+                                    <div class="sub-info">${subText}</div>
+                                </td>`;
+                } else {
+                    rowHtml += `<td>-</td>`;
+                }
+            }
+            return `<tr>${rowHtml}</tr>`;
+        }).join('');
+    }
+
+    // ... các hàm fetchData và DOMContentLoaded như cũ
+</script>
