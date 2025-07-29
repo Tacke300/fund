@@ -420,7 +420,7 @@ async function updateLeverageForExchange(id, symbolsToUpdate = null) {
                     }
                 }
                 status = `Đòn bẩy hoàn tất (${successCount} cặp)`;
-                // THAY ĐỔI: Chỉ cho BingX format data chi tiết
+                // Chỉ cho BingX format data chi tiết
                 debugRawLeverageResponses[id].data = `Đã lấy ${successCount} cặp.`; 
                 console.log(`[CACHE] ✅ Binance: Đã lấy ${successCount} cặp đòn bẩy USDT từ API trực tiếp.`);
 
@@ -874,32 +874,30 @@ function getBitgetWsState() {
 // ==========================================================
 
 // Hàm mới để lấy funding rates của Bitget từ API native của họ
-// SỬA ĐỔI QUAN TRỌNG: Điều chỉnh cách gọi API native của Bitget để khắc phục 400 Bad Request
-async function fetchBitgetFundingRatesNativeApi(exchangeInstance, leverageCache) {
-    let processedRates = {};
+// LƯU Ý: Hàm này HIỆN KHÔNG CẦN THIẾT nữa cho việc lấy fundingRate nếu dùng WS Cache
+// Nhưng tôi sẽ điều chỉnh nó để chỉ lấy `fundingTime` như bạn yêu cầu nếu nó được gọi.
+// Tuy nhiên, trong `fetchFundingRatesForAllExchanges`, Bitget sẽ lấy từ WS Cache.
+async function fetchBitgetFundingTimeNativeApi(exchangeInstance) { // Đổi tên hàm để phản ánh mục đích mới
+    let processedTimes = {}; // Sẽ chỉ lưu times
     let successCount = 0;
     let currentError = null;
     
     // Đảm bảo danh sách symbol hợp lệ được tải trước khi gọi API funding
     if (bitgetValidFuturesSymbolSet.size === 0) {
-        console.log('[BITGET_FUNDING] Valid Bitget Futures symbols not loaded for REST API. Attempting to fetch...');
+        console.log('[BITGET_FUNDING_TIME] Valid Bitget Futures symbols not loaded for REST API. Attempting to fetch...');
         await fetchBitgetValidFuturesSymbols(); // Chờ để lấy danh sách symbol hợp lệ
         if (bitgetValidFuturesSymbolSet.size === 0) {
-            console.error('[BITGET_FUNDING] ❌ Không thể tải danh sách symbol Bitget hợp lệ. Bỏ qua lấy funding rates.');
-            return { processedRates: {}, status: 'Funding thất bại (không có symbol hợp lệ)', error: { code: 'NO_VALID_SYMBOLS', msg: 'Could not fetch valid Bitget symbols.' } };
+            console.error('[BITGET_FUNDING_TIME] ❌ Không thể tải danh sách symbol Bitget hợp lệ. Bỏ qua lấy funding times.');
+            return { processedTimes: {}, status: 'Funding time thất bại (không có symbol hợp lệ)', error: { code: 'NO_VALID_SYMBOLS', msg: 'Could not fetch valid Bitget symbols.' } };
         }
     }
 
     try {
-        // THAY ĐỔI: Lặp trực tiếp qua danh sách symbol hợp lệ đã tải từ Bitget API
-        console.log(`[DATA] 🎯 Bitget (Native API): Bắt đầu lấy funding rates cho ${bitgetValidFuturesSymbolSet.size} cặp từ danh sách hợp lệ.`);
+        console.log(`[DATA] 🎯 Bitget (Native API): Bắt đầu lấy funding times cho ${bitgetValidFuturesSymbolSet.size} cặp từ danh sách hợp lệ.`);
 
         for (const apiRequestSymbol of bitgetValidFuturesSymbolSet) {
-            // apiRequestSymbol đã có dạng BASEUSDT_UMCBL
-            const cacheKey = cleanSymbol(apiRequestSymbol); // Chuyển đổi về BASEUSDT để khớp với cache và logic khác
-
-            const maxLeverageParsed = leverageCache['bitget']?.[cacheKey] || null;
-
+            const cacheKey = cleanSymbol(apiRequestSymbol); 
+            
             try {
                 // Sử dụng endpoint và tham số chính xác
                 const apiPath = `/api/mix/v1/market/funding-time?symbol=${apiRequestSymbol}`;
@@ -907,30 +905,24 @@ async function fetchBitgetFundingRatesNativeApi(exchangeInstance, leverageCache)
                 const json = JSON.parse(rawData);
 
                 if (json.code === '00000' && json.data) {
-                    // Dữ liệu có thể là một mảng, lấy phần tử đầu tiên
                     const fundingData = Array.isArray(json.data) ? json.data[0] : json.data;
                     
-                    if (!fundingData) {
-                        console.warn(`[DATA] ❌ Bitget (Native API): Không nhận được dữ liệu funding cho ${apiRequestSymbol}. Raw: ${rawData.substring(0, Math.min(rawData.length, 200))}`);
+                    if (!fundingData || !fundingData.fundingTime) {
+                        console.warn(`[DATA] ❌ Bitget (Native API): Không nhận được fundingTime hợp lệ cho ${apiRequestSymbol}. Raw: ${rawData.substring(0, Math.min(rawData.length, 200))}`);
                         continue;
                     }
 
-                    const { fundingRate, nextFundingTime } = fundingData;
-                    const parsedFundingRate = parseFloat(fundingRate);
-                    const parsedNextFundingTime = parseInt(nextFundingTime, 10);
+                    const parsedFundingTime = parseInt(fundingData.fundingTime, 10);
 
-                    if (!isNaN(parsedFundingRate) && typeof parsedNextFundingTime === 'number' && parsedNextFundingTime > 0) {
-                        processedRates[cacheKey] = { // Lưu vào cache bằng khóa đã clean
+                    if (typeof parsedFundingTime === 'number' && parsedFundingTime > 0) {
+                        processedTimes[cacheKey] = { // Chỉ lưu thời gian
                             symbol: cacheKey, 
-                            fundingRate: parsedFundingRate,
-                            fundingTimestamp: parsedNextFundingTime,
-                            maxLeverage: maxLeverageParsed
+                            fundingTimestamp: parsedFundingTime
                         };
                         successCount++;
                     } else {
-                        console.warn(`[DATA] ❌ Bitget (Native API): Dữ liệu funding rate/timestamp không hợp lệ cho ${apiRequestSymbol}. ` +
-                                     `Rate: '${fundingRate}' (type: ${typeof fundingRate}), ` +
-                                     `NextFundingTime: '${nextFundingTime}' (type: ${typeof nextFundingTime}). ` +
+                        console.warn(`[DATA] ❌ Bitget (Native API): Dữ liệu fundingTime không hợp lệ cho ${apiRequestSymbol}. ` +
+                                     `FundingTime: '${fundingData.fundingTime}' (type: ${typeof fundingData.fundingTime}). ` +
                                      `Raw Data: ${JSON.stringify(fundingData)}`);
                     }
                 } else {
@@ -938,19 +930,17 @@ async function fetchBitgetFundingRatesNativeApi(exchangeInstance, leverageCache)
                                  `Raw: ${rawData.substring(0, Math.min(rawData.length, 200))}`);
                 }
             } catch (e) {
-                // Các lỗi 404 Not Found từ đây cho các symbol_UMCBL là hợp lý nếu API Bitget có sự không đồng bộ
-                // hoặc symbol đó không có funding rate tại thời điểm đó.
                 console.error(`[DATA] ❌ Bitget (Native API): Lỗi khi gọi API cho ${apiRequestSymbol}: ${e.msg || e.message}.`);
                 currentError = { code: e.code, msg: e.message };
             }
             await sleep(50); // 50ms delay giữa mỗi lần fetch symbol
         }
-        console.log(`[DATA] 🎉 Bitget (Native API): Hoàn tất lấy dữ liệu funding. Thành công ${successCount} cặp.`);
-        return { processedRates, status: `Funding hoàn tất (${successCount} cặp)`, error: null };
+        console.log(`[DATA] 🎉 Bitget (Native API): Hoàn tất lấy dữ liệu funding time. Thành công ${successCount} cặp.`);
+        return { processedTimes, status: `Funding time hoàn tất (${successCount} cặp)`, error: null };
     } catch (e) {
-        let errorMessage = `Lỗi nghiêm trọng khi lấy funding từ Bitget Native API: ${e.message}.`;
+        let errorMessage = `Lỗi nghiêm trọng khi lấy funding time từ Bitget Native API: ${e.message}.`;
         console.error(`[DATA] ❌ ${errorMessage}`);
-        return { processedRates: {}, status: `Funding thất bại (lỗi: ${e.code || 'UNKNOWN'})`, error: { code: e.code, msg: e.message } };
+        return { processedTimes: {}, status: `Funding time thất bại (lỗi: ${e.code || 'UNKNOWN'})`, error: { code: e.code, msg: e.message } };
     }
 }
 
@@ -984,12 +974,31 @@ async function fetchFundingRatesForAllExchanges() {
         let currentError = null;
 
         try {
-            // Đối với Bitget, chúng ta sẽ gọi API Native của họ để lấy funding rates
+            // THAY ĐỔI LỚN: Đối với Bitget, lấy dữ liệu từ WebSocket Cache
             if (id === 'bitget') {
-                const bitgetFundingResult = await fetchBitgetFundingRatesNativeApi(exchanges[id], leverageCache);
-                processedRates = bitgetFundingResult.processedRates;
-                currentStatus = bitgetFundingResult.status;
-                currentError = bitgetFundingResult.error;
+                if (Object.keys(bitgetFundingRatesWsCache).length === 0) {
+                    console.warn('[DATA] ⚠️ Bitget (WS Cache): Cache funding rates trống. Có thể WS chưa hoạt động.');
+                }
+                let successCount = 0;
+                for (const cleanedSymbol in bitgetFundingRatesWsCache) {
+                    const wsData = bitgetFundingRatesWsCache[cleanedSymbol];
+                    const maxLeverageParsed = leverageCache[id]?.[cleanedSymbol] || null;
+
+                    if (typeof wsData.fundingRate === 'number' && typeof wsData.nextFundingTime === 'number' && wsData.nextFundingTime > 0) {
+                        processedRates[cleanedSymbol] = {
+                            symbol: cleanedSymbol,
+                            fundingRate: wsData.fundingRate,
+                            fundingTimestamp: wsData.nextFundingTime,
+                            maxLeverage: maxLeverageParsed
+                        };
+                        successCount++;
+                    } else {
+                        console.warn(`[DATA] ⚠️ ${id.toUpperCase()} (WS Cache): Bỏ qua ${cleanedSymbol} - Dữ liệu WS không hợp lệ. Rate: ${wsData.fundingRate}, Time: ${wsData.nextFundingTime}.`);
+                    }
+                }
+                currentStatus = `Funding hoàn tất (${successCount} cặp từ WS Cache)`;
+                console.log(`[DATA] ✅ ${id.toUpperCase()}: Đã lấy thành công ${successCount} funding rates từ WS Cache.`);
+
             } else { // Các sàn khác (Binance, OKX) sử dụng CCXT fetchFundingRates
                 await exchanges[id].loadMarkets(true);
                 const exchange = exchanges[id];
@@ -1041,8 +1050,8 @@ async function fetchFundingRatesForAllExchanges() {
             exchangeData = { ...exchangeData, [id]: { rates: processedRates } };
             debugRawLeverageResponses[id].status = currentStatus;
             debugRawLeverageResponses[id].timestamp = new Date();
-            // THAY ĐỔI: Chỉ cho BingX format data chi tiết
-            if (id !== 'bingx') { // Chỉ BingX mới có format chi tiết, các sàn khác là chuỗi
+            // THAY ĐỔI: CHỈ BingX mới có format data chi tiết. Các sàn khác là chuỗi.
+            if (id !== 'bingx') { // Áp dụng cho Binance, OKX, Bitget (sau khi sửa đổi)
                 debugRawLeverageResponses[id].data = `Đã lấy ${Object.keys(processedRates).length} cặp.`;
             }
             debugRawLeverageResponses[id].error = currentError;
@@ -1318,10 +1327,10 @@ const server = http.createServer((req, res) => {
             lastUpdated: lastFullUpdateTimestamp,
             arbitrageData: arbitrageOpportunities,
             rawRates: {
-                binance: Object.values(exchangeData.binanceusdm?.rates || {}),
-                bingx: Object.values(exchangeData.bingx?.rates || {}),
-                okx: Object.values(exchangeData.okx?.rates || {}),
-                bitget: Object.values(exchangeData.bitget?.rates || {}),
+                binance: exchangeData.binanceusdm?.rates || {}, // No need for Object.values here, already structured
+                bingx: exchangeData.bingx?.rates || {},
+                okx: exchangeData.okx?.rates || {},
+                bitget: exchangeData.bitget?.rates || {},
             },
             debugRawLeverageResponses: debugRawLeverageResponses
         };
