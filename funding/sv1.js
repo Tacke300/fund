@@ -1074,7 +1074,7 @@ async function fetchFundingRatesForAllExchanges() {
                                 maxLeverage: maxLeverageParsed
                             };
                             successCount++;
-                            // Bỏ LOG CHI TIẾT TỪNG CẶP: console.log(`[DATA] ✅ BingX: Đã lưu funding rate ${result.fundingRate} cho ${symbolCleaned} (Next: ${new Date(result.fundingTime).toISOString()}). (Tổng: ${successCount})`);
+                            // Bỏ LOG CHI TIẾT TỪNG CẶP
                             return true;
                         } else {
                             console.warn(`[DEBUG_FUNDING] ⚠️ BingX: Không lấy được funding rate hợp lệ cho ${symbol}.`);
