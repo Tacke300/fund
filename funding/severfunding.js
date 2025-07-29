@@ -1,5 +1,5 @@
 const http = require('http');
-const https = require = require('https');
+const https = require('https'); // SỬA LỖI CÚ PHÁP Ở ĐÂY
 const fs = require('fs');
 const path = require('path');
 const ccxt = require('ccxt');
@@ -420,22 +420,9 @@ async function updateLeverageForExchange(id, symbolsToUpdate = null) {
                     }
                 }
                 status = `Đòn bẩy hoàn tất (${successCount} cặp)`;
-                // THAY ĐỔI: Lưu mẫu dữ liệu đòn bẩy vào debugRawLeverageResponses.data
-                if (successCount > 0) {
-                    const sampleSymbols = Object.keys(currentFetchedLeverageDataMap).slice(0, 40); // Lấy tối đa 40 cặp
-                    const sampleData = {};
-                    sampleSymbols.forEach(sym => {
-                        sampleData[sym] = currentFetchedLeverageDataMap[sym];
-                    });
-                    debugRawLeverageResponses[id].data = {
-                        count: successCount,
-                        sample: sampleData
-                    };
-                    console.log(`[CACHE] ✅ ${id.toUpperCase()}: Đã lấy ${successCount} cặp đòn bẩy USDT. Mẫu (${Object.keys(sampleData).length} cặp) được lưu.`);
-                } else {
-                    debugRawLeverageResponses[id].data = 'Không có dữ liệu đòn bẩy hợp lệ nào được tìm thấy.';
-                    console.log(`[CACHE] ✅ ${id.toUpperCase()}: Không có dữ liệu đòn bẩy hợp lệ nào được tìm thấy.`);
-                }
+                // THAY ĐỔI: Chỉ cho BingX format data chi tiết
+                debugRawLeverageResponses[id].data = `Đã lấy ${successCount} cặp.`; 
+                console.log(`[CACHE] ✅ Binance: Đã lấy ${successCount} cặp đòn bẩy USDT từ API trực tiếp.`);
 
             }
         }
@@ -481,6 +468,7 @@ async function updateLeverageForExchange(id, symbolsToUpdate = null) {
             console.log(`[CACHE] ✅ ${id.toUpperCase()}: Hoàn tất lấy dữ liệu đòn bẩy cho ${Object.keys(currentFetchedLeverageDataMap).length} cặp. (${successCount} cặp được parse thành công)`);
             
             // THAY ĐỔI: Lưu mẫu dữ liệu đòn bẩy BingX vào debugRawLeverageResponses.data
+            // Logic này CHỈ áp dụng cho BingX
             if (successCount > 0) {
                 const sampleSymbols = Object.keys(currentFetchedLeverageDataMap).slice(0, 40); // Lấy tối đa 40 cặp
                 const sampleData = {};
@@ -532,22 +520,9 @@ async function updateLeverageForExchange(id, symbolsToUpdate = null) {
                     }
                 }
                 status = `Đòn bẩy hoàn tất (${successCount} cặp)`;
-                // THAY ĐỔI: Lưu mẫu dữ liệu đòn bẩy vào debugRawLeverageResponses.data
-                if (successCount > 0) {
-                    const sampleSymbols = Object.keys(currentFetchedLeverageDataMap).slice(0, 40);
-                    const sampleData = {};
-                    sampleSymbols.forEach(sym => {
-                        sampleData[sym] = currentFetchedLeverageDataMap[sym];
-                    });
-                    debugRawLeverageResponses[id].data = {
-                        count: successCount,
-                        sample: sampleData
-                    };
-                    console.log(`[CACHE] ✅ ${id.toUpperCase()}: Đã lấy ${successCount} cặp đòn bẩy USDT. Mẫu (${Object.keys(sampleData).length} cặp) được lưu.`);
-                } else {
-                    debugRawLeverageResponses[id].data = 'Không có dữ liệu đòn bẩy hợp lệ nào được tìm thấy.';
-                    console.log(`[CACHE] ✅ ${id.toUpperCase()}: Không có dữ liệu đòn bẩy hợp lệ nào được tìm thấy.`);
-                }
+                // THAY ĐỔI: Chỉ cho BingX format data chi tiết
+                debugRawLeverageResponses[id].data = `Đã lấy ${successCount} cặp.`;
+                console.log(`[CACHE] ✅ ${id.toUpperCase()}: Đã lấy ${successCount} cặp đòn bẩy USDT từ fetchLeverageTiers.`);
             } else {
                 console.log(`[CACHE] ${id.toUpperCase()}: fetchLeverageTiers không khả dụng. Dùng loadMarkets...`);
                 let loadMarketsSuccessCount = 0;
@@ -570,22 +545,9 @@ async function updateLeverageForExchange(id, symbolsToUpdate = null) {
                     }
                 }
                 status = `Đòn bẩy hoàn tất (loadMarkets, ${loadMarketsSuccessCount} cặp)`;
-                // THAY ĐỔI: Lưu mẫu dữ liệu đòn bẩy vào debugRawLeverageResponses.data
-                if (loadMarketsSuccessCount > 0) {
-                    const sampleSymbols = Object.keys(currentFetchedLeverageDataMap).slice(0, 40);
-                    const sampleData = {};
-                    sampleSymbols.forEach(sym => {
-                        sampleData[sym] = currentFetchedLeverageDataMap[sym];
-                    });
-                    debugRawLeverageResponses[id].data = {
-                        count: loadMarketsSuccessCount,
-                        sample: sampleData
-                    };
-                    console.log(`[CACHE] ✅ ${id.toUpperCase()}: Đã lấy ${loadMarketsSuccessCount} cặp đòn bẩy USDT. Mẫu (${Object.keys(sampleData).length} cặp) được lưu.`);
-                } else {
-                    debugRawLeverageResponses[id].data = 'Không có dữ liệu đòn bẩy hợp lệ nào được tìm thấy.';
-                    console.log(`[CACHE] ✅ ${id.toUpperCase()}: Không có dữ liệu đòn bẩy hợp lệ nào được tìm thấy.`);
-                }
+                // THAY ĐỔI: Chỉ cho BingX format data chi tiết
+                debugRawLeverageResponses[id].data = `Đã lấy ${loadMarketsSuccessCount} cặp.`;
+                console.log(`[CACHE] ✅ ${id.toUpperCase()}: Đã lấy ${loadMarketsSuccessCount} cặp đòn bẩy USDT từ loadMarkets.`);
             }
         }
         
@@ -929,33 +891,12 @@ async function fetchBitgetFundingRatesNativeApi(exchangeInstance, leverageCache)
     }
 
     try {
-        await exchangeInstance.loadMarkets(true);
-        const bitgetMarkets = Object.values(exchangeInstance.markets)
-            .filter(m => m.swap && m.symbol.includes('USDT'));
+        // THAY ĐỔI: Lặp trực tiếp qua danh sách symbol hợp lệ đã tải từ Bitget API
+        console.log(`[DATA] 🎯 Bitget (Native API): Bắt đầu lấy funding rates cho ${bitgetValidFuturesSymbolSet.size} cặp từ danh sách hợp lệ.`);
 
-        console.log(`[DATA] 🎯 Bitget (Native API): Bắt đầu lấy funding rates cho ${bitgetMarkets.length} cặp (trước lọc).`);
-
-        // Lọc các symbol chỉ bao gồm những cặp hợp lệ trên Bitget Futures
-        const marketsToFetch = bitgetMarkets.filter(market => {
-            const apiRequestSymbol = formatSymbolForBitgetWS(market.symbol);
-            if (bitgetValidFuturesSymbolSet.has(apiRequestSymbol)) {
-                return true;
-            } else {
-                console.warn(`[DATA] ⚠️ Bitget (Native API): Bỏ qua ${market.symbol} (${apiRequestSymbol}) - Không tồn tại trong danh sách symbol hợp lệ của Bitget.`);
-                return false;
-            }
-        });
-
-        console.log(`[DATA] 🎯 Bitget (Native API): Sẽ lấy funding rates cho ${marketsToFetch.length} cặp (sau lọc).`);
-
-        // Thực hiện tuần tự để tránh bị rate limit cho API native
-        for (const market of marketsToFetch) {
-            const ccxtSymbol = market.symbol; // Ví dụ: BTC/USDT
-            // Bitget Native REST API yêu cầu tham số 'symbol' trong URL có hậu tố '_UMCBL'
-            const apiRequestSymbol = formatSymbolForBitgetWS(ccxtSymbol); 
-            
-            // Khóa cache sẽ luôn là định dạng BASEUSDT
-            const cacheKey = cleanSymbol(ccxtSymbol);
+        for (const apiRequestSymbol of bitgetValidFuturesSymbolSet) {
+            // apiRequestSymbol đã có dạng BASEUSDT_UMCBL
+            const cacheKey = cleanSymbol(apiRequestSymbol); // Chuyển đổi về BASEUSDT để khớp với cache và logic khác
 
             const maxLeverageParsed = leverageCache['bitget']?.[cacheKey] || null;
 
@@ -997,6 +938,8 @@ async function fetchBitgetFundingRatesNativeApi(exchangeInstance, leverageCache)
                                  `Raw: ${rawData.substring(0, Math.min(rawData.length, 200))}`);
                 }
             } catch (e) {
+                // Các lỗi 404 Not Found từ đây cho các symbol_UMCBL là hợp lý nếu API Bitget có sự không đồng bộ
+                // hoặc symbol đó không có funding rate tại thời điểm đó.
                 console.error(`[DATA] ❌ Bitget (Native API): Lỗi khi gọi API cho ${apiRequestSymbol}: ${e.msg || e.message}.`);
                 currentError = { code: e.code, msg: e.message };
             }
@@ -1098,26 +1041,9 @@ async function fetchFundingRatesForAllExchanges() {
             exchangeData = { ...exchangeData, [id]: { rates: processedRates } };
             debugRawLeverageResponses[id].status = currentStatus;
             debugRawLeverageResponses[id].timestamp = new Date();
-            // THAY ĐỔI: Lưu mẫu dữ liệu funding vào debugRawLeverageResponses.data
-            if (Object.keys(processedRates).length > 0) {
-                const sampleSymbols = Object.keys(processedRates).slice(0, 40);
-                const sampleData = {};
-                sampleSymbols.forEach(sym => {
-                    const data = processedRates[sym];
-                    sampleData[sym] = { 
-                        fundingRate: data.fundingRate, 
-                        fundingTimestamp: data.fundingTimestamp, 
-                        nextFundingTimeUTC: new Date(data.fundingTimestamp).toISOString() 
-                    };
-                });
-                debugRawLeverageResponses[id].data = {
-                    count: Object.keys(processedRates).length,
-                    sample: sampleData
-                };
-                console.log(`[DATA] ✅ ${id.toUpperCase()}: Đã lấy thành công ${Object.keys(processedRates).length} funding rates. Mẫu (${Object.keys(sampleData).length} cặp) được lưu.`);
-            } else {
-                debugRawLeverageResponses[id].data = 'Không có dữ liệu funding hợp lệ nào được tìm thấy.';
-                console.log(`[DATA] ✅ ${id.toUpperCase()}: Không có dữ liệu funding hợp lệ nào được tìm thấy.`);
+            // THAY ĐỔI: Chỉ cho BingX format data chi tiết
+            if (id !== 'bingx') { // Chỉ BingX mới có format chi tiết, các sàn khác là chuỗi
+                debugRawLeverageResponses[id].data = `Đã lấy ${Object.keys(processedRates).length} cặp.`;
             }
             debugRawLeverageResponses[id].error = currentError;
             if (id === 'bitget') {
@@ -1184,6 +1110,7 @@ async function fetchFundingRatesForAllExchanges() {
             console.log(`[DATA] ✅ BingX: Đã lấy thành công ${successCount} funding rates từ API trực tiếp.`);
             
             // THAY ĐỔI: Lưu mẫu dữ liệu funding BingX vào debugRawLeverageResponses.bingx.data
+            // Logic này CHỈ áp dụng cho BingX
             if (successCount > 0) {
                 const sampleSymbols = Object.keys(processedRates).slice(0, 40); // Lấy tối đa 40 cặp
                 const sampleData = {};
