@@ -551,7 +551,7 @@ async function updateLeverageForExchange(id, symbolsToUpdate = null) {
                     if (parsedMaxLeverage !== null && parsedMaxLeverage > 0) {
                         currentFetchedLeverageDataMap[cleanSymbol(market.symbol)] = parsedMaxLeverage;
                         successCount++;
-                        // Bỏ log chi tiết từng cặp: console.log(`[CACHE] ✅ ${id.toUpperCase()}: Đã lưu leverage ${parsedMaxLeverage} cho ${market.symbol}. (Tổng: ${successCount})`); 
+                        // Bỏ log chi tiết từng cặp
                     } else {
                         console.warn(`[CACHE] ⚠️ ${id.toUpperCase()}: Không lấy được leverage hợp lệ cho ${market.symbol}.`);
                     }
@@ -567,7 +567,7 @@ async function updateLeverageForExchange(id, symbolsToUpdate = null) {
             console.log(`[CACHE] ✅ ${id.toUpperCase()}: Hoàn tất lấy dữ liệu đòn bẩy cho ${Object.keys(currentFetchedLeverageDataMap).length} cặp. (${successCount} cặp được parse thành công)`);
             
             if (successCount > 0) {
-                // Bỏ giới hạn 40 symbol, gửi toàn bộ data
+                // THAY ĐỔI: Gửi TOÀN BỘ dữ liệu, không giới hạn 40 symbol.
                 debugRawLeverageResponses[id].data = {
                     count: successCount,
                     fullData: currentFetchedLeverageDataMap // Gửi toàn bộ map
@@ -611,7 +611,7 @@ async function updateLeverageForExchange(id, symbolsToUpdate = null) {
                     if (Array.isArray(tiers) && tiers.length > 0) {
                         const numericLeverages = tiers.map(t => typeof t.leverage === 'number' ? t.leverage : parseFloat(t.leverage)).filter(l => !isNaN(l) && l > 0);
                         const parsedMaxLeverage = numericLeverages.length > 0 ? parseInt(Math.max(...numericLeverages), 10) : 0;
-                        if (parsedMaxLeverage > 0) {
+                        if (!isNaN(parsedMaxLeverage) && parsedMaxLeverage > 0) { // Thêm kiểm tra isNaN cho parsedMaxLeverage
                             currentFetchedLeverageDataMap[cleanedSym] = parsedMaxLeverage;
                             successCount++;
                         }
@@ -848,6 +848,15 @@ async function fetchFundingRatesForAllExchanges() {
                      continue;
                 }
                 if (rate.info?.contractType && rate.info.contractType !== 'PERPETUAL') {
+                    // THAY ĐỔI: Thêm log để biết nếu bỏ qua do không phải perpetual (để debug Binance/OKX delivery futures)
+                    // if (id === 'binanceusdm' || id === 'okx') { // Chỉ log cho Binance/OKX để tránh ồn
+                    //    console.warn(`[DATA] ⚠️ ${id.toUpperCase()}: Bỏ qua ${rate.symbol} - Không phải hợp đồng perpetual.`);
+                    // }
+                    continue;
+                }
+                // THAY ĐỔI: Lọc các hợp đồng Delivery Futures có dấu hai chấm trong symbol
+                if (rate.symbol.includes(':')) {
+                    // console.warn(`[DATA] ⚠️ ${id.toUpperCase()}: Bỏ qua ${rate.symbol} - Phát hiện là hợp đồng giao ngay (có dấu ':').`);
                     continue;
                 }
                 if (!rate.symbol.includes('USDT')) { 
@@ -1081,7 +1090,7 @@ async function fetchFundingRatesForAllExchanges() {
                 currentStatus = `Funding hoàn tất (${successCount} cặp)`;
                 console.log(`[DATA] ✅ BingX: Đã lấy thành công ${successCount} funding rates từ API trực tiếp.`);
                 
-                // Bỏ giới hạn 40 symbol, gửi toàn bộ data
+                // THAY ĐỔI: Gửi TOÀN BỘ dữ liệu, không giới hạn 40 symbol.
                 debugRawLeverageResponses[bingxExchangeId].data = {
                     count: successCount,
                     fullData: processedRates // Gửi toàn bộ map
@@ -1130,7 +1139,7 @@ function calculateArbitrageOpportunities() {
                 const rate2Data = exchange2Rates[symbol];
 
                 const parsedMaxLeverage1 = rate1Data.maxLeverage;
-                const parsedMaxLeverage2 = rate2Data.maxLeverage;
+                const parsedMaxLeverage2 = rate2Data.maxLeverage; // Sửa lỗi: Đây là biến đã định nghĩa và cần dùng
 
                 if (typeof parsedMaxLeverage1 !== 'number' || parsedMaxLeverage1 <= 0 ||
                     typeof parsedMaxLeverage2 !== 'number' || parsedMaxLeverage2 <= 0) {
@@ -1180,7 +1189,7 @@ function calculateArbitrageOpportunities() {
                             shortLeverage: parsedMaxLeverage1,
                             longExchange: longExchange,
                             longRate: longRate.fundingRate,
-                            longLeverage: parsedLeverage2,
+                            longLeverage: parsedMaxLeverage2, // Sửa lỗi: Đảm bảo dùng biến đúng
                             minutesUntilFunding: parseFloat(minutesUntilFunding.toFixed(1))
                         }
                     });
