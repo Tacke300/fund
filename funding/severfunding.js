@@ -41,11 +41,15 @@ let lastFullUpdateTimestamp = null;
 let loopTimeoutId = null;
 let leverageSchedulerId = null;
 
+// Thêm biến toàn cục để lưu trữ danh sách symbol hợp lệ của Bitget Futures
+let bitgetValidFuturesSymbolSet = new Set(); 
+
 let debugRawLeverageResponses = {
     binanceusdm: { status: 'Đang tải đòn bẩy...', timestamp: null, data: 'N/A', error: null },
     bingx: { status: 'Đang tải đòn bẩy...', timestamp: null, data: 'N/A', error: null },
     okx: { status: 'Đang tải đòn bẩy...', timestamp: null, data: 'N/A', error: null },
-    bitget: { status: 'Đang tải đòn bẩy...', timestamp: null, data: 'N/A', error: null, wsStatus: 'DISCONNECTED' } // wsStatus cho Bitget
+    // Thêm wsStatus cho Bitget
+    bitget: { status: 'Đang tải đòn bẩy...', timestamp: null, data: 'N/A', error: null, wsStatus: 'DISCONNECTED' }
 };
 
 const BINGX_BASE_HOST = 'open-api.bingx.com';
@@ -73,7 +77,7 @@ EXCHANGE_IDS.forEach(id => {
     exchanges[id] = new exchangeClass(config);
 });
 
-// SỬA ĐỔI QUAN TRỌNG: Hàm cleanSymbol được làm cho mạnh mẽ hơn để xử lý USDT lặp lại
+// Hàm cleanSymbol được làm cho mạnh mẽ hơn để xử lý USDT lặp lại
 // Mục đích chính: chuyển đổi bất kỳ định dạng nào sang BASEUSDT (ví dụ: BTCUSDT)
 // để dùng làm khóa cache nội bộ và cho các sàn khác.
 const cleanSymbol = (symbol) => {
@@ -97,7 +101,7 @@ const cleanSymbol = (symbol) => {
 };
 
 
-// SỬA ĐỔI QUAN TRỌNG: Sửa lỗi cú pháp missing ')'
+// Sửa lỗi cú pháp missing ')'
 function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
 
 function getMaxLeverageFromMarketInfo(market) {
@@ -415,8 +419,22 @@ async function updateLeverageForExchange(id, symbolsToUpdate = null) {
                     }
                 }
                 status = `Đòn bẩy hoàn tất (${successCount} cặp)`;
-                debugRawLeverageResponses[id].data = `Đã lấy ${successCount} cặp.`; 
-                console.log(`[CACHE] ✅ Binance: Đã lấy ${successCount} cặp đòn bẩy USDT từ API trực tiếp.`);
+                // THAY ĐỔI: Lưu mẫu dữ liệu đòn bẩy vào debugRawLeverageResponses.data
+                if (successCount > 0) {
+                    const sampleSymbols = Object.keys(currentFetchedLeverageDataMap).slice(0, 40); // Lấy tối đa 40 cặp
+                    const sampleData = {};
+                    sampleSymbols.forEach(sym => {
+                        sampleData[sym] = currentFetchedLeverageDataMap[sym];
+                    });
+                    debugRawLeverageResponses[id].data = {
+                        count: successCount,
+                        sample: sampleData
+                    };
+                    console.log(`[CACHE] ✅ ${id.toUpperCase()}: Đã lấy ${successCount} cặp đòn bẩy USDT. Mẫu (${Object.keys(sampleData).length} cặp) được lưu.`);
+                } else {
+                    debugRawLeverageResponses[id].data = 'Không có dữ liệu đòn bẩy hợp lệ nào được tìm thấy.';
+                    console.log(`[CACHE] ✅ ${id.toUpperCase()}: Không có dữ liệu đòn bẩy hợp lệ nào được tìm thấy.`);
+                }
 
             }
         }
@@ -468,7 +486,10 @@ async function updateLeverageForExchange(id, symbolsToUpdate = null) {
                 sampleSymbols.forEach(sym => {
                     sampleData[sym] = currentFetchedLeverageDataMap[sym];
                 });
-                debugRawLeverageResponses[id].data = sampleData; // Lưu đối tượng mẫu
+                debugRawLeverageResponses[id].data = {
+                    count: successCount,
+                    sample: sampleData
+                }; // Lưu đối tượng mẫu
                 console.log(`[DEBUG_BINGX_LEVERAGE] Mẫu dữ liệu đòn bẩy BingX (${Object.keys(sampleData).length} cặp):`);
                 Object.keys(sampleData).forEach(sym => { 
                     console.log(`  - ${sym}: ${sampleData[sym]}x`);
@@ -510,8 +531,22 @@ async function updateLeverageForExchange(id, symbolsToUpdate = null) {
                     }
                 }
                 status = `Đòn bẩy hoàn tất (${successCount} cặp)`;
-                debugRawLeverageResponses[id].data = `Đã lấy ${successCount} cặp.`;
-                console.log(`[CACHE] ✅ ${id.toUpperCase()}: Đã lấy ${successCount} cặp đòn bẩy USDT từ fetchLeverageTiers.`);
+                // THAY ĐỔI: Lưu mẫu dữ liệu đòn bẩy vào debugRawLeverageResponses.data
+                if (successCount > 0) {
+                    const sampleSymbols = Object.keys(currentFetchedLeverageDataMap).slice(0, 40);
+                    const sampleData = {};
+                    sampleSymbols.forEach(sym => {
+                        sampleData[sym] = currentFetchedLeverageDataMap[sym];
+                    });
+                    debugRawLeverageResponses[id].data = {
+                        count: successCount,
+                        sample: sampleData
+                    };
+                    console.log(`[CACHE] ✅ ${id.toUpperCase()}: Đã lấy ${successCount} cặp đòn bẩy USDT. Mẫu (${Object.keys(sampleData).length} cặp) được lưu.`);
+                } else {
+                    debugRawLeverageResponses[id].data = 'Không có dữ liệu đòn bẩy hợp lệ nào được tìm thấy.';
+                    console.log(`[CACHE] ✅ ${id.toUpperCase()}: Không có dữ liệu đòn bẩy hợp lệ nào được tìm thấy.`);
+                }
             } else {
                 console.log(`[CACHE] ${id.toUpperCase()}: fetchLeverageTiers không khả dụng. Dùng loadMarkets...`);
                 let loadMarketsSuccessCount = 0;
@@ -534,8 +569,22 @@ async function updateLeverageForExchange(id, symbolsToUpdate = null) {
                     }
                 }
                 status = `Đòn bẩy hoàn tất (loadMarkets, ${loadMarketsSuccessCount} cặp)`;
-                debugRawLeverageResponses[id].data = `Đã lấy ${loadMarketsSuccessCount} cặp.`;
-                console.log(`[CACHE] ✅ ${id.toUpperCase()}: Đã lấy ${loadMarketsSuccessCount} cặp đòn bẩy USDT từ loadMarkets.`);
+                // THAY ĐỔI: Lưu mẫu dữ liệu đòn bẩy vào debugRawLeverageResponses.data
+                if (loadMarketsSuccessCount > 0) {
+                    const sampleSymbols = Object.keys(currentFetchedLeverageDataMap).slice(0, 40);
+                    const sampleData = {};
+                    sampleSymbols.forEach(sym => {
+                        sampleData[sym] = currentFetchedLeverageDataMap[sym];
+                    });
+                    debugRawLeverageResponses[id].data = {
+                        count: loadMarketsSuccessCount,
+                        sample: sampleData
+                    };
+                    console.log(`[CACHE] ✅ ${id.toUpperCase()}: Đã lấy ${loadMarketsSuccessCount} cặp đòn bẩy USDT. Mẫu (${Object.keys(sampleData).length} cặp) được lưu.`);
+                } else {
+                    debugRawLeverageResponses[id].data = 'Không có dữ liệu đòn bẩy hợp lệ nào được tìm thấy.';
+                    console.log(`[CACHE] ✅ ${id.toUpperCase()}: Không có dữ liệu đòn bẩy hợp lệ nào được tìm thấy.`);
+                }
             }
         }
         
@@ -666,6 +715,34 @@ function cleanSymbolFromBitgetWS(wsInstId) {
     return wsInstId.replace('_UMCBL', '');
 }
 
+// Hàm mới để lấy danh sách các symbol Futures hợp lệ từ Bitget API
+async function fetchBitgetValidFuturesSymbols() {
+    console.log('[BITGET_SYMBOLS] 🔄 Đang tải danh sách symbol Futures hợp lệ từ Bitget...');
+    try {
+        const apiPath = '/api/mix/v1/market/contracts?productType=umcbl';
+        const rawData = await makeHttpRequest('GET', BITGET_NATIVE_REST_HOST, apiPath);
+        const json = JSON.parse(rawData);
+
+        if (json.code === '00000' && Array.isArray(json.data)) {
+            bitgetValidFuturesSymbolSet.clear(); // Xóa danh sách cũ
+            json.data.forEach(contract => {
+                if (contract.symbol) {
+                    bitgetValidFuturesSymbolSet.add(contract.symbol); // Thêm symbol đầy đủ (_UMCBL)
+                }
+            });
+            console.log(`[BITGET_SYMBOLS] ✅ Đã tải ${bitgetValidFuturesSymbolSet.size} symbol Futures hợp lệ từ Bitget.`);
+            return bitgetValidFuturesSymbolSet;
+        } else {
+            console.error(`[BITGET_SYMBOLS] ❌ Lỗi khi tải danh sách symbol Futures Bitget: Code ${json.code}, Msg: ${json.msg || 'N/A'}. Raw: ${rawData.substring(0, Math.min(rawData.length, 200))}`);
+            return new Set(); // Trả về tập hợp rỗng nếu lỗi
+        }
+    } catch (e) {
+        console.error(`[BITGET_SYMBOLS] ❌ Lỗi request khi tải danh sách symbol Futures Bitget: ${e.msg || e.message}`);
+        return new Set();
+    }
+}
+
+
 function initializeBitgetWebSocket(exchangeInstance) {
     if (!exchangeInstance) {
         console.error('[BITGET_WS_INIT] Lỗi: Cần truyền instance CCXT của Bitget để khởi tạo WebSocket.');
@@ -692,21 +769,36 @@ function initializeBitgetWebSocket(exchangeInstance) {
 
         try {
             await exchangeInstance.loadMarkets(true);
+            
+            // Đảm bảo danh sách symbol hợp lệ được tải cho WebSocket subscription
+            if (bitgetValidFuturesSymbolSet.size === 0) {
+                console.log('[BITGET_WS_INIT] Valid Bitget Futures symbols not loaded for WS. Attempting to fetch...');
+                await fetchBitgetValidFuturesSymbols(); // Chờ để lấy danh sách symbol hợp lệ
+                if (bitgetValidFuturesSymbolSet.size === 0) {
+                    console.error('[BITGET_WS_INIT] ❌ Không thể tải danh sách symbol Bitget hợp lệ cho WS. Không thể subscribe.');
+                    wsBitget.close(); // Đóng để thử kết nối lại
+                    return;
+                }
+            }
+
             const allUsdtPerpetuals = Object.values(exchangeInstance.markets)
-                .filter(m => m.swap && m.symbol.includes('USDT'))
-                .map(m => m.symbol);
+                .filter(m => m.swap && m.symbol.includes('USDT'));
 
             if (allUsdtPerpetuals.length > 0) {
-                const subscribeArgs = allUsdtPerpetuals.map(symbol => {
-                    const instId = formatSymbolForBitgetWS(symbol);
-                    subscribedSymbols.add(instId);
-                    return {
-                        instType: 'mc', // U-based perpetual
-                        channel: 'funding_rate',
-                        instId: instId
-                    };
-                });
-
+                const subscribeArgs = allUsdtPerpetuals
+                    // Chỉ subscribe các symbol đã được xác nhận là hợp lệ trên Bitget Futures
+                    .filter(m => bitgetValidFuturesSymbolSet.has(formatSymbolForBitgetWS(m.symbol))) 
+                    .map(m => {
+                        const instId = formatSymbolForBitgetWS(m.symbol);
+                        subscribedSymbols.add(instId);
+                        return {
+                            instType: 'mc', // U-based perpetual
+                            channel: 'funding_rate',
+                            instId: instId
+                        };
+                    });
+                
+                // Gửi subscribe theo lô
                 const BATCH_SIZE = 50;
                 for (let i = 0; i < subscribeArgs.length; i += BATCH_SIZE) {
                     const batch = subscribeArgs.slice(i, i + BATCH_SIZE);
@@ -714,11 +806,13 @@ function initializeBitgetWebSocket(exchangeInstance) {
                         op: 'subscribe',
                         args: batch
                     };
-                    wsBitget.send(JSON.stringify(subscribeMessage));
-                    console.log(`[BITGET_WS] Đã gửi yêu cầu subscribe cho lô ${i/BATCH_SIZE + 1} (${batch.length} cặp).`);
-                    await new Promise(resolve => setTimeout(resolve, 100));
+                    if (batch.length > 0) { // Chỉ gửi nếu có cặp để subscribe
+                        wsBitget.send(JSON.stringify(subscribeMessage));
+                        console.log(`[BITGET_WS] Đã gửi yêu cầu subscribe cho lô ${i/BATCH_SIZE + 1} (${batch.length} cặp).`);
+                        await new Promise(resolve => setTimeout(resolve, 100));
+                    }
                 }
-                console.log(`[BITGET_WS] Đã gửi yêu cầu subscribe funding_rate cho tổng cộng ${allUsdtPerpetuals.length} cặp.`);
+                console.log(`[BITGET_WS] Đã gửi yêu cầu subscribe funding_rate cho tổng cộng ${allUsdtPerpetuals.filter(m => bitgetValidFuturesSymbolSet.has(formatSymbolForBitgetWS(m.symbol))).length} cặp.`);
             } else {
                 console.warn('[BITGET_WS] Không tìm thấy cặp USDT perpetual nào để subscribe trên Bitget.');
             }
@@ -823,16 +917,40 @@ async function fetchBitgetFundingRatesNativeApi(exchangeInstance, leverageCache)
     let successCount = 0;
     let currentError = null;
     
+    // Đảm bảo danh sách symbol hợp lệ được tải trước khi gọi API funding
+    if (bitgetValidFuturesSymbolSet.size === 0) {
+        console.log('[BITGET_FUNDING] Valid Bitget Futures symbols not loaded for REST API. Attempting to fetch...');
+        await fetchBitgetValidFuturesSymbols(); // Chờ để lấy danh sách symbol hợp lệ
+        if (bitgetValidFuturesSymbolSet.size === 0) {
+            console.error('[BITGET_FUNDING] ❌ Không thể tải danh sách symbol Bitget hợp lệ. Bỏ qua lấy funding rates.');
+            return { processedRates: {}, status: 'Funding thất bại (không có symbol hợp lệ)', error: { code: 'NO_VALID_SYMBOLS', msg: 'Could not fetch valid Bitget symbols.' } };
+        }
+    }
+
     try {
         await exchangeInstance.loadMarkets(true);
         const bitgetMarkets = Object.values(exchangeInstance.markets)
             .filter(m => m.swap && m.symbol.includes('USDT'));
 
-        console.log(`[DATA] 🎯 Bitget (Native API): Bắt đầu lấy funding rates cho ${bitgetMarkets.length} cặp.`);
+        console.log(`[DATA] 🎯 Bitget (Native API): Bắt đầu lấy funding rates cho ${bitgetMarkets.length} cặp (trước lọc).`);
 
-        for (const market of bitgetMarkets) {
+        // Lọc các symbol chỉ bao gồm những cặp hợp lệ trên Bitget Futures
+        const marketsToFetch = bitgetMarkets.filter(market => {
+            const apiRequestSymbol = formatSymbolForBitgetWS(market.symbol);
+            if (bitgetValidFuturesSymbolSet.has(apiRequestSymbol)) {
+                return true;
+            } else {
+                console.warn(`[DATA] ⚠️ Bitget (Native API): Bỏ qua ${market.symbol} (${apiRequestSymbol}) - Không tồn tại trong danh sách symbol hợp lệ của Bitget.`);
+                return false;
+            }
+        });
+
+        console.log(`[DATA] 🎯 Bitget (Native API): Sẽ lấy funding rates cho ${marketsToFetch.length} cặp (sau lọc).`);
+
+        // Thực hiện tuần tự để tránh bị rate limit cho API native
+        for (const market of marketsToFetch) {
             const ccxtSymbol = market.symbol; // Ví dụ: BTC/USDT
-            // THAY ĐỔI LỚN: Bitget Native REST API yêu cầu 'symbol' (trong URL) có hậu tố '_UMCBL'
+            // Bitget Native REST API yêu cầu tham số 'symbol' trong URL có hậu tố '_UMCBL'
             const apiRequestSymbol = formatSymbolForBitgetWS(ccxtSymbol); 
             
             // Khóa cache sẽ luôn là định dạng BASEUSDT
@@ -841,7 +959,7 @@ async function fetchBitgetFundingRatesNativeApi(exchangeInstance, leverageCache)
             const maxLeverageParsed = leverageCache['bitget']?.[cacheKey] || null;
 
             try {
-                // THAY ĐỔI: Sử dụng endpoint chính xác và tham số 'symbol' với giá trị 'apiRequestSymbol'
+                // Sử dụng endpoint và tham số chính xác
                 const apiPath = `/api/mix/v1/market/current-funding-rate?symbol=${apiRequestSymbol}`;
                 const rawData = await makeHttpRequest('GET', BITGET_NATIVE_REST_HOST, apiPath);
                 const json = JSON.parse(rawData);
@@ -878,7 +996,6 @@ async function fetchBitgetFundingRatesNativeApi(exchangeInstance, leverageCache)
                                  `Raw: ${rawData.substring(0, Math.min(rawData.length, 200))}`);
                 }
             } catch (e) {
-                // Log lỗi chi tiết hơn bao gồm symbol gây lỗi
                 console.error(`[DATA] ❌ Bitget (Native API): Lỗi khi gọi API cho ${apiRequestSymbol}: ${e.msg || e.message}.`);
                 currentError = { code: e.code, msg: e.message };
             }
@@ -980,6 +1097,27 @@ async function fetchFundingRatesForAllExchanges() {
             exchangeData = { ...exchangeData, [id]: { rates: processedRates } };
             debugRawLeverageResponses[id].status = currentStatus;
             debugRawLeverageResponses[id].timestamp = new Date();
+            // THAY ĐỔI: Lưu mẫu dữ liệu funding vào debugRawLeverageResponses.data
+            if (Object.keys(processedRates).length > 0) {
+                const sampleSymbols = Object.keys(processedRates).slice(0, 40);
+                const sampleData = {};
+                sampleSymbols.forEach(sym => {
+                    const data = processedRates[sym];
+                    sampleData[sym] = { 
+                        fundingRate: data.fundingRate, 
+                        fundingTimestamp: data.fundingTimestamp, 
+                        nextFundingTimeUTC: new Date(data.fundingTimestamp).toISOString() 
+                    };
+                });
+                debugRawLeverageResponses[id].data = {
+                    count: Object.keys(processedRates).length,
+                    sample: sampleData
+                };
+                console.log(`[DATA] ✅ ${id.toUpperCase()}: Đã lấy thành công ${Object.keys(processedRates).length} funding rates. Mẫu (${Object.keys(sampleData).length} cặp) được lưu.`);
+            } else {
+                debugRawLeverageResponses[id].data = 'Không có dữ liệu funding hợp lệ nào được tìm thấy.';
+                console.log(`[DATA] ✅ ${id.toUpperCase()}: Không có dữ liệu funding hợp lệ nào được tìm thấy.`);
+            }
             debugRawLeverageResponses[id].error = currentError;
             if (id === 'bitget') {
                 debugRawLeverageResponses[id].wsStatus = getBitgetWsState();
@@ -1272,11 +1410,16 @@ const server = http.createServer((req, res) => {
     }
 });
 
-server.listen(PORT, () => {
+server.listen(PORT, async () => { // Đảm bảo server.listen là async để có thể dùng await
     console.log(`✅ Máy chủ dữ liệu đang chạy tại http://localhost:${PORT}`);
+    
+    // Tải danh sách symbol Futures hợp lệ của Bitget một lần khi khởi động
+    // Điều này sẽ được sử dụng bởi cả WebSocket và Native API calls
+    await fetchBitgetValidFuturesSymbols();
+
     performFullLeverageUpdate();
     masterLoop();
-    initializeBitgetWebSocket(exchanges['bitget']); // <-- Khởi tạo WS Bitget, truyền instance CCXT Bitget
+    initializeBitgetWebSocket(exchanges['bitget']); // Khởi tạo WS Bitget
 
     setInterval(() => {
         scheduleLeverageUpdates();
