@@ -201,7 +201,7 @@
         });
 
         // Giới hạn 100 cặp cho bảng để tránh quá tải
-        tbody.innerHTML = sortedCoins.slice(0, 100).map((coin, index) => {
+        tbody.innerHTML = sortedCoins.slice(0, 1000).map((coin, index) => {
             let rowHtml = `<td>${index + 1}</td><td>${coin}</td>`;
             for (const exchange of EXCHANGES) { // Lặp qua EXCHANGES để tạo cột
                 const rate = ratesByCoin[coin][exchange];
