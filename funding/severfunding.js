@@ -75,16 +75,33 @@ EXCHANGE_IDS.forEach(id => {
 });
 
 // ----- HÀM HỖ TRỢ CHUNG (DEFINED BEFORE USE) -----
+// Đã chỉnh sửa hàm cleanSymbol mạnh mẽ hơn để xử lý các định dạng của BingX
 const cleanSymbol = (symbol) => {
     let cleaned = symbol.toUpperCase();
-    cleaned = cleaned.replace(/[\/:_]/g, '');
-    cleaned = cleaned.replace('_UMCBL', '');
+    
+    // Loại bỏ hậu tố Bitget WS trước
+    cleaned = cleaned.replace('_UMCBL', ''); 
+
+    // Xử lý các ký tự phân tách phổ biến (/, :, _)
+    cleaned = cleaned.replace(/[\/:_]/g, ''); 
+    
+    // Xử lý định dạng BTC-USDT của BingX
+    cleaned = cleaned.replace(/-USDT$/, 'USDT'); 
+
+    // Chuẩn hóa để chỉ có một 'USDT' ở cuối, ngay cả khi có 'USDTUSDT'
     cleaned = cleaned.replace(/(USDT)+$/, 'USDT'); 
-    if (!cleaned.endsWith('USDT')) {
+
+    // Đảm bảo kết thúc bằng USDT nếu nó không phải là coin thuần
+    if (!cleaned.endsWith('USDT') && cleaned.includes('USDT')) { // ví dụ: BTCUSDT
+        // Do đã remove các ký tự, nếu nó có USDT mà không kết thúc thì thêm vào cuối
+        cleaned = cleaned.split('USDT')[0] + 'USDT';
+    } else if (!cleaned.endsWith('USDT') && !cleaned.includes('USDT') && symbol.includes('USDT')) {
+        // Trường hợp symbol gốc có USDT nhưng bị loại bỏ hết (ví dụ, BTC/USDT thành BTC)
         cleaned = cleaned + 'USDT';
     }
     return cleaned;
 };
+
 
 function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
 
@@ -328,6 +345,8 @@ async function getBingxFundingRateDirect(symbol) {
         if (json.code === 0 && Array.isArray(json.data) && json.data.length > 0) {
             const firstData = json.data[0];
 
+            console.log(`[DEBUG_BINGX_FUNDING_RAW_SYMBOL] Gốc: '${firstData.symbol}', Đã Clean: '${cleanSymbol(firstData.symbol)}'`); // LOG DEBUG QUAN TRỌNG
+
             if (typeof firstData.fundingRate !== 'string') {
                 console.warn(`[BINGX_FUNDING_WARN] ${symbol}: fundingRate không phải string. Type: ${typeof firstData.fundingRate}. Value: ${firstData.fundingRate}`);
                 return null;
@@ -342,7 +361,7 @@ async function getBingxFundingRateDirect(symbol) {
             }
             
             return {
-                symbol: cleanSymbol(firstData.symbol), // <--- ĐÃ SỬA LỖI Ở ĐÂY: Chuẩn hóa symbol
+                symbol: cleanSymbol(firstData.symbol), // <-- ĐÃ SỬA LỖI: Chuẩn hóa symbol ngay tại đây
                 fundingRate: parseFloat(firstData.fundingRate),
                 fundingTime: parseInt(firstData.fundingTime, 10)
             };
@@ -395,7 +414,7 @@ async function updateLeverageForExchange(id, symbolsToUpdate = null) {
                         const firstBracket = item.brackets.find(b => b.bracket === 1) || item.brackets[0];
                         const maxLeverage = parseInt(firstBracket.initialLeverage, 10);
                         if (!isNaN(maxLeverage) && maxLeverage > 0) {
-                            currentFetchedLeverageDataMap[cleanedSym] = maxLeverage;
+                            currentFetchedLeverageDataMap[cleanedSym] = maxLeverage; // Key đã clean
                             successCount++;
                         }
                     }
@@ -429,15 +448,17 @@ async function updateLeverageForExchange(id, symbolsToUpdate = null) {
             console.log(`[CACHE] ${id.toUpperCase()}: Sẽ xử lý ${marketChunks.length} lô leverage.`);
             for (const chunk of marketChunks) {
                 const chunkPromises = chunk.map(async market => {
-                    const formattedSymbol = market.symbol.replace('/', '-').replace(':USDT', '');
-                    const parsedMaxLeverage = await fetchBingxMaxLeverage(formattedSymbol);
+                    const formattedSymbolForAPI = market.symbol.replace('/', '-').replace(':USDT', ''); // Format API request
+                    const parsedMaxLeverage = await fetchBingxMaxLeverage(formattedSymbolForAPI);
                     fetchedCount++;
                     debugRawLeverageResponses[id].status = `Đòn bẩy đang tải (${fetchedCount}/${totalSymbols} | ${successCount} thành công)`;
                     debugRawLeverageResponses[id].timestamp = new Date();
                     if (parsedMaxLeverage !== null && parsedMaxLeverage > 0) {
-                        currentFetchedLeverageDataMap[cleanSymbol(market.symbol)] = parsedMaxLeverage;
+                        const cleanedSymForCache = cleanSymbol(market.symbol); // Clean symbol for cache key
+                        currentFetchedLeverageDataMap[cleanedSymForCache] = parsedMaxLeverage; 
                         successCount++;
-                        console.log(`[CACHE] ✅ ${id.toUpperCase()}: Đã lưu leverage ${parsedMaxLeverage} cho ${market.symbol}. (Tổng: ${successCount})`); 
+                        // Log symbol đã được clean để xác nhận
+                        console.log(`[CACHE] ✅ ${id.toUpperCase()}: Đã lưu leverage ${parsedMaxLeverage} cho ${cleanedSymForCache}. (Gốc: ${market.symbol}, Tổng: ${successCount})`); 
                     } else {
                         console.warn(`[CACHE] ⚠️ ${id.toUpperCase()}: Không lấy được leverage hợp lệ cho ${market.symbol}.`);
                     }
@@ -981,23 +1002,23 @@ async function fetchFundingRatesForAllExchanges() {
 
                 for (const chunk of marketChunks) {
                     const chunkPromises = chunk.map(async (symbol) => {
-                        const result = await getBingxFundingRateDirect(symbol);
+                        const result = await getBingxFundingRateDirect(symbol); // result.symbol đã được cleanSymbol tại đây
                         fetchedCount++;
                         debugRawLeverageResponses[bingxExchangeId].status = `Funding đang tải (${fetchedCount}/${symbols.length} | ${successCount} thành công)`;
                         debugRawLeverageResponses[bingxExchangeId].timestamp = new Date();
                         
                         if (result && typeof result.fundingRate === 'number' && result.fundingTime) {
-                            const symbolCleaned = cleanSymbol(result.symbol); // Đảm bảo dùng cleanSymbol cho key
-                            const maxLeverageParsed = leverageCache[bingxExchangeId]?.[symbolCleaned] || null;
+                            const symbolCleanedForStore = cleanSymbol(result.symbol); // Đảm bảo key cũng được clean
+                            const maxLeverageParsed = leverageCache[bingxExchangeId]?.[symbolCleanedForStore] || null;
 
-                            processedRates[symbolCleaned] = { // Key đã là cleanSymbol
-                                symbol: result.symbol, // <-- result.symbol bây giờ đã là cleanSymbol
+                            processedRates[symbolCleanedForStore] = { 
+                                symbol: result.symbol, // Giá trị symbol trong object đã được clean từ getBingxFundingRateDirect
                                 fundingRate: result.fundingRate,
                                 fundingTimestamp: result.fundingTime,
                                 maxLeverage: maxLeverageParsed
                             };
                             successCount++;
-                            // THÊM LOG CHI TIẾT TỪNG CẶP FUNDING BINGX
+                            // LOG CHI TIẾT TỪNG CẶP FUNDING BINGX VỚI SYMBOL ĐÃ CLEAN
                             console.log(`[DATA] ✅ BingX: Đã lưu funding rate ${result.fundingRate} cho ${result.symbol} (Next: ${new Date(result.fundingTime).toISOString()}). (Tổng: ${successCount})`);
                             return true;
                         } else {
