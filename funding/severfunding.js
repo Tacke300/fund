@@ -640,21 +640,48 @@ async function fetchFundingRatesForAllExchanges() {
                 const symbolCleaned = cleanSymbol(rate.symbol);
                 const maxLeverageParsed = leverageCache[id]?.[symbolCleaned] || null;
 
-                // --- Bắt đầu phần sửa đổi về fundingTimestamp ---
                 let fundingTimestamp = null;
-                // Ưu tiên các trường tiêu chuẩn của CCXT
-                if (typeof rate.nextFundingTime === 'number' && rate.nextFundingTime > 0) {
-                    fundingTimestamp = rate.nextFundingTime;
-                } else if (typeof rate.fundingTimestamp === 'number' && rate.fundingTimestamp > 0) {
-                    fundingTimestamp = rate.fundingTimestamp;
+
+                if (id === 'bitget') {
+                    // Bitget often returns timestamps as strings in 'info' or 'nextUpdate'
+                    if (rate.info?.nextUpdate) {
+                        const parsedTime = parseInt(rate.info.nextUpdate, 10);
+                        if (!isNaN(parsedTime) && parsedTime > 0) {
+                            fundingTimestamp = parsedTime;
+                            // console.log(`[DEBUG_BITGET_FUNDING] ${symbolCleaned}: Info.nextUpdate raw: ${rate.info.nextUpdate}, parsed: ${fundingTimestamp}`);
+                        } else {
+                            // console.warn(`[DEBUG_BITGET_FUNDING] ${symbolCleaned}: Info.nextUpdate (${rate.info.nextUpdate}) không parse được.`);
+                        }
+                    }
+                    if (!fundingTimestamp && exchanges[id].markets[rate.symbol]?.info?.nextFundingTime) {
+                        const parsedTime = parseInt(exchanges[id].markets[rate.symbol].info.nextFundingTime, 10);
+                        if (!isNaN(parsedTime) && parsedTime > 0) {
+                            fundingTimestamp = parsedTime;
+                            // console.log(`[DEBUG_BITGET_FUNDING] ${symbolCleaned}: Market.info.nextFundingTime raw: ${exchanges[id].markets[rate.symbol].info.nextFundingTime}, parsed: ${fundingTimestamp}`);
+                        } else {
+                            // console.warn(`[DEBUG_BITGET_FUNDING] ${symbolCleaned}: Market.info.nextFundingTime (${exchanges[id].markets[rate.symbol].info.nextFundingTime}) không parse được.`);
+                        }
+                    }
+                    // Fallback to standard CCXT fields if Bitget-specific parsing fails
+                    if (!fundingTimestamp && typeof rate.nextFundingTime === 'number' && rate.nextFundingTime > 0) {
+                        fundingTimestamp = rate.nextFundingTime;
+                        // console.log(`[DEBUG_BITGET_FUNDING] ${symbolCleaned}: Fallback to CCXT rate.nextFundingTime: ${fundingTimestamp}`);
+                    } else if (!fundingTimestamp && typeof rate.fundingTimestamp === 'number' && rate.fundingTimestamp > 0) {
+                        fundingTimestamp = rate.fundingTimestamp;
+                        // console.log(`[DEBUG_BITGET_FUNDING] ${symbolCleaned}: Fallback to CCXT rate.fundingTimestamp: ${fundingTimestamp}`);
+                    }
+                } else {
+                    // For other exchanges, stick to standard CCXT fields first
+                    if (typeof rate.nextFundingTime === 'number' && rate.nextFundingTime > 0) {
+                        fundingTimestamp = rate.nextFundingTime;
+                    } else if (typeof rate.fundingTimestamp === 'number' && rate.fundingTimestamp > 0) {
+                        fundingTimestamp = rate.fundingTimestamp;
+                    }
+                    // Generic fallback to market info (though less common for funding time)
+                    if (!fundingTimestamp && exchanges[id].markets[rate.symbol]?.info?.nextFundingTime && typeof exchanges[id].markets[rate.symbol].info.nextFundingTime === 'number' && exchanges[id].markets[rate.symbol].info.nextFundingTime > 0) {
+                         fundingTimestamp = exchanges[id].markets[rate.symbol].info.nextFundingTime;
+                    }
                 }
-                // Kiểm tra các trường thông tin cụ thể của sàn nếu các trường tiêu chuẩn không có
-                else if (id === 'bitget' && rate.info?.nextUpdate && typeof rate.info.nextUpdate === 'number' && rate.info.nextUpdate > 0) {
-                    fundingTimestamp = rate.info.nextUpdate;
-                } else if (exchanges[id].markets[rate.symbol]?.info?.nextFundingTime && typeof exchanges[id].markets[rate.symbol].info.nextFundingTime === 'number' && exchanges[id].markets[rate.symbol].info.nextFundingTime > 0) {
-                    fundingTimestamp = exchanges[id].markets[rate.symbol].info.nextFundingTime;
-                }
-                // --- Kết thúc phần sửa đổi về fundingTimestamp ---
 
                 if (typeof rate.fundingRate === 'number' && !isNaN(rate.fundingRate) && typeof fundingTimestamp === 'number' && fundingTimestamp > 0) {
                     processedRates[symbolCleaned] = { symbol: symbolCleaned, fundingRate: rate.fundingRate, fundingTimestamp: fundingTimestamp, maxLeverage: maxLeverageParsed };
