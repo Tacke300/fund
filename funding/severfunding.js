@@ -40,7 +40,6 @@ let exchangeData = {}; // Lưu trữ funding rates và các thông tin liên qua
 let arbitrageOpportunities = []; // Lưu trữ các cơ hội arbitrage được tìm thấy
 let lastFullUpdateTimestamp = null; // Timestamp của lần cập nhật dữ liệu đầy đủ gần nhất
 let loopTimeoutId = null; // ID của timer cho vòng lặp chính
-// let leverageSchedulerId = null; // Không còn dùng biến này khi tích hợp vào masterLoop
 
 // Thêm biến toàn cục để lưu trữ danh sách symbol hợp lệ của Bitget Futures
 let bitgetValidFuturesSymbolSet = new Set(); 
@@ -79,28 +78,16 @@ EXCHANGE_IDS.forEach(id => {
 });
 
 // Hàm cleanSymbol được làm cho mạnh mẽ hơn để xử lý USDT lặp lại
-// Mục đích chính: chuyển đổi bất kỳ định dạng nào sang BASEUSDT (ví dụ: BTCUSDT)
-// để dùng làm khóa cache nội bộ và cho các sàn khác.
 const cleanSymbol = (symbol) => {
     let cleaned = symbol.toUpperCase();
-    
-    // Loại bỏ các ký tự phân tách phổ biến (/, :, _)
     cleaned = cleaned.replace(/[\/:_]/g, '');
-    
-    // Loại bỏ hậu tố WebSocket của Bitget nếu có (e.g., "_UMCBL")
     cleaned = cleaned.replace('_UMCBL', '');
-
-    // Chuẩn hóa để chỉ có một 'USDT' ở cuối, ngay cả khi có 'USDTUSDT'
-    // Regex này sẽ tìm một hoặc nhiều lần lặp của 'USDT' ở cuối và thay thế bằng một 'USDT' duy nhất.
     cleaned = cleaned.replace(/(USDT)+$/, 'USDT'); 
-
-    // Nếu sau các bước trên mà symbol không kết thúc bằng USDT, thêm USDT
     if (!cleaned.endsWith('USDT')) {
         cleaned = cleaned + 'USDT';
     }
     return cleaned;
 };
-
 
 // Hàm sleep bất đồng bộ
 function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
@@ -413,7 +400,6 @@ async function updateLeverageForExchange(id, symbolsToUpdate = null) {
             let successCount = 0;
             if (Array.isArray(leverageBracketsResponse)) {
                 for (const item of leverageBracketsResponse) {
-                    // LỌC BINANCE: Chỉ lấy các cặp có 'USDT'
                     if (!item.symbol.includes('USDT')) {
                         continue;
                     }
@@ -439,7 +425,7 @@ async function updateLeverageForExchange(id, symbolsToUpdate = null) {
         else if (id === 'bingx') {
             await exchange.loadMarkets(true);
             const bingxMarkets = Object.values(exchange.markets)
-                .filter(m => m.swap && m.symbol.includes('USDT')); // LỌC BINGX: Đảm bảo là swap và có 'USDT' trong symbol
+                .filter(m => m.swap && m.symbol.includes('USDT')); 
 
             const marketsToFetch = symbolsToUpdate && symbolsToUpdate.length > 0
                 ? bingxMarkets.filter(market => symbolsToUpdate.includes(cleanSymbol(market.symbol)))
@@ -505,7 +491,6 @@ async function updateLeverageForExchange(id, symbolsToUpdate = null) {
                 debugRawLeverageResponses[id].data = 'Không có dữ liệu đòn bẩy hợp lệ nào được tìm thấy.';
             }
 
-
         }
         else { // OKX và Bitget: Dùng CCXT (fetchLeverageTiers + loadMarkets fallback)
             await exchange.loadMarkets(true);
@@ -519,7 +504,6 @@ async function updateLeverageForExchange(id, symbolsToUpdate = null) {
                         continue;
                     }
                     const market = exchange.markets[symbol];
-                    // LỌC OKX/BITGET: Chỉ lấy các cặp SWAP VÀ CÓ 'USDT'
                     if (!market || !market.swap || !market.symbol.includes('USDT')) {
                         continue;
                     }
@@ -541,7 +525,6 @@ async function updateLeverageForExchange(id, symbolsToUpdate = null) {
                 console.log(`[CACHE] ${id.toUpperCase()}: fetchLeverageTiers không khả dụng. Dùng loadMarkets...`);
                 let loadMarketsSuccessCount = 0;
                 for (const market of Object.values(exchange.markets)) {
-                    // LỌC OKX/BITGET: Chỉ lấy các cặp SWAP VÀ CÓ 'USDT'
                     if (!market.swap || !market.symbol.includes('USDT')) {
                         continue;
                     }
@@ -582,18 +565,92 @@ async function updateLeverageForExchange(id, symbolsToUpdate = null) {
         console.error(`[CACHE] ❌ ${id.toUpperCase()}: ${errorMessage}`);
         status = `Đòn bẩy thất bại (lỗi chung: ${e.code || 'UNKNOWN'})`;
         error = { code: e.code, msg: e.message };
-        // Đặt rỗng nếu lỗi để tránh lỗi lan truyền hoặc dùng dữ liệu cũ không đáng tin cậy
-        leverageCache[id] = {}; 
+        leverageCache[id] = {}; // Đặt rỗng nếu lỗi để tránh lỗi lan truyền
     } finally {
         return { id, processedData: currentFetchedLeverageDataMap, status, error };
     }
 }
 
-// Hàm này không còn dùng riêng, logic đã được tích hợp vào masterLoop
-// async function performFullLeverageUpdate() { /* ... */ }
+// ** Đảm bảo hàm performFullLeverageUpdate được định nghĩa ở đây **
+async function performFullLeverageUpdate() {
+    console.log('\n[LEVERAGE_SCHEDULER] 🔄 Bắt đầu cập nhật TOÀN BỘ đòn bẩy cho tất cả các sàn... (được kích hoạt)');
+    const nonBingxExchangeIds = EXCHANGE_IDS.filter(id => id !== 'bingx');
+    const bingxExchangeId = EXCHANGE_IDS.find(id => id === 'bingx');
 
-// Hàm này không còn dùng riêng, logic đã được tích hợp vào masterLoop
-// async function performTargetedLeverageUpdate() { /* ... */ }
+    // Giai đoạn 1: Lấy dữ liệu đòn bẩy cho các sàn non-BingX song song
+    const nonBingxLeveragePromises = nonBingxExchangeIds.map(id => updateLeverageForExchange(id, null));
+    const nonBingxResults = await Promise.all(nonBingxLeveragePromises);
+    
+    // Cập nhật trạng thái và cache cho các sàn non-BingX ngay
+    nonBingxResults.forEach(res => {
+        if (res) {
+            debugRawLeverageResponses[res.id].status = res.status;
+            debugRawLeverageResponses[res.id].timestamp = new Date();
+            debugRawLeverageResponses[res.id].error = res.error;
+        }
+    });
+
+    // Giai đoạn 2: Nếu có BingX, đợi 60s rồi mới lấy dữ liệu BingX
+    if (bingxExchangeId) {
+        console.log(`[LEVERAGE_SCHEDULER] ⏳ Đã cập nhật đòn bẩy cho các sàn khác. Đợi ${DELAY_BEFORE_BINGX_MS / 1000} giây trước khi cập nhật BingX...`);
+        await sleep(DELAY_BEFORE_BINGX_MS);
+        const bingxResult = await updateLeverageForExchange(bingxExchangeId, null);
+        if (bingxResult) {
+            debugRawLeverageResponses[bingxResult.id].status = bingxResult.status;
+            debugRawLeverageResponses[bingxResult.id].timestamp = new Date();
+            debugRawLeverageResponses[bingxResult.id].error = bingxResult.error;
+        }
+    }
+    console.log('[LEVERAGE_SCHEDULER] ✅ Hoàn tất cập nhật TOÀN BỘ đòn bẩy.');
+}
+
+// ** Đảm bảo hàm performTargetedLeverageUpdate được định nghĩa ở đây **
+async function performTargetedLeverageUpdate() {
+    console.log('\n[LEVERAGE_SCHEDULER] 🎯 Bắt đầu cập nhật đòn bẩy MỤC TIÊU...');
+    const activeSymbols = new Set();
+    arbitrageOpportunities.forEach(op => activeSymbols.add(op.coin));
+
+    if (activeSymbols.size === 0) {
+        console.log('[LEVERAGE_SCHEDULER] Không có cơ hội arbitrage nào. Bỏ qua cập nhật đòn bẩy mục tiêu.');
+        EXCHANGE_IDS.forEach(id => {
+            debugRawLeverageResponses[id].status = 'Đòn bẩy bỏ qua (không có cơ hội)';
+            debugRawLeverageResponses[id].timestamp = new Date();
+            debugRawLeverageResponses[id].error = null;
+        });
+        return;
+    }
+
+    console.log(`[LEVERAGE_SCHEDULER] 🎯 Bắt đầu cập nhật đòn bẩy MỤC TIÊU cho ${activeSymbols.size} symbol.`);
+    const symbolsArray = Array.from(activeSymbols);
+    const nonBingxExchangeIds = EXCHANGE_IDS.filter(id => id !== 'bingx');
+    const bingxExchangeId = EXCHANGE_IDS.find(id => id === 'bingx');
+
+    // Giai đoạn 1: Lấy dữ liệu đòn bẩy mục tiêu cho các sàn non-BingX song song
+    const nonBingxLeveragePromises = nonBingxExchangeIds.map(id => updateLeverageForExchange(id, symbolsArray));
+    const nonBingxResults = await Promise.all(nonBingxLeveragePromises);
+
+    nonBingxResults.forEach(res => {
+        if (res) {
+            debugRawLeverageResponses[res.id].status = res.status;
+            debugRawLeverageResponses[res.id].timestamp = new Date();
+            debugRawLeverageResponses[res.id].error = res.error;
+        }
+    });
+    
+    // Giai đoạn 2: Nếu có BingX, đợi 60s rồi mới lấy dữ liệu BingX
+    if (bingxExchangeId) {
+        console.log(`[LEVERAGE_SCHEDULER] ⏳ Đã cập nhật đòn bẩy mục tiêu cho các sàn khác. Đợi ${DELAY_BEFORE_BINGX_MS / 1000} giây trước khi cập nhật BingX...`);
+        await sleep(DELAY_BEFORE_BINGX_MS);
+        const bingxResult = await updateLeverageForExchange(bingxExchangeId, symbolsArray);
+        if (bingxResult) {
+            debugRawLeverageResponses[bingxResult.id].status = bingxResult.status;
+            debugRawLeverageResponses[bingxResult.id].timestamp = new Date();
+            debugRawLeverageResponses[bingxResult.id].error = bingxResult.error;
+        }
+    }
+    console.log('[LEVERAGE_SCHEDULER] ✅ Hoàn tất cập nhật đòn bẩy MỤC TIÊU.');
+}
+
 
 // ==========================================================
 // BẮT ĐẦU LOGIC BITGET WEBSOCKET CLIENT
@@ -610,7 +667,6 @@ let pingIntervalId = null;
 let reconnectTimeoutId = null;
 
 // Helper để chuyển đổi symbol từ CCXT (BTC/USDT) sang định dạng của Bitget WS (BTCUSDT_UMCBL)
-// LƯU Ý: Hàm này tạo ra symbol có _UMCBL, được dùng cho cả WS và Native REST API của Bitget
 function formatSymbolForBitgetWS(symbol) {
     return cleanSymbol(symbol) + '_UMCBL';
 }
@@ -1220,10 +1276,11 @@ async function masterLoop() {
     const currentSecond = now.getUTCSeconds();
 
     // 2. Cập nhật TẤT CẢ Funding Rates (đây là bước ĐẦU TIÊN của chu kỳ chính)
+    // Funding rates sẽ lấy leverage từ leverageCache hiện có (có thể từ lần cập nhật leverage trước)
     await fetchFundingRatesForAllExchanges(); 
     lastFullUpdateTimestamp = new Date().toISOString(); 
 
-    // 3. Tính toán cơ hội Arbitrage dựa trên dữ liệu funding và leverage hiện có (có thể cũ)
+    // 3. Tính toán cơ hội Arbitrage dựa trên dữ liệu funding và leverage hiện có
     calculateArbitrageOpportunities();
 
     // 4. Cập nhật Leverage (TOÀN BỘ hoặc MỤC TIÊU) - Đây là bước CUỐI CÙNG của chu kỳ
@@ -1239,7 +1296,7 @@ async function masterLoop() {
     }
     // Logic cập nhật đặc biệt vào phút 59
     if (currentMinute === 59 && currentSecond >= 30 && currentSecond < 35) {
-        const nowMs = Date.now(); // ĐÃ SỬA: Date.Now() -> Date.now()
+        const nowMs = Date.now(); 
         // Chỉ kích hoạt một lần trong khoảng thời gian này
         if (!masterLoop.lastSpecialTrigger || (nowMs - masterLoop.lastSpecialTrigger > 30 * 1000)) {
             console.log('[SPECIAL_UPDATE] ⏰ Kích hoạt cập nhật ĐẶC BIỆT (phút 59 giây 30).');
@@ -1262,7 +1319,7 @@ function scheduleNextLoop() {
     loopTimeoutId = setTimeout(masterLoop, delayMs);
 }
 
-// Biến để kiểm soát tần suất log API data
+// Biến để kiểm soát tần suất log API
 let lastApiDataLogTime = 0;
 const API_DATA_LOG_INTERVAL_MS = 30 * 1000; // Log mỗi 30 giây
 
