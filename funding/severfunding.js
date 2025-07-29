@@ -22,6 +22,10 @@ const FUNDING_DIFFERENCE_THRESHOLD = 0.00001;
 const MINIMUM_PNL_THRESHOLD = 1;
 const IMMINENT_THRESHOLD_MINUTES = 15;
 
+// Cấu hình cho setInterval để cập nhật leverage định kỳ
+const FULL_LEVERAGE_REFRESH_AT_HOUR = 0; // Giờ UTC để refresh toàn bộ leverage
+const TARGETED_LEVERAGE_REFRESH_MINUTES = [15, 30, 45, 55, 59]; // Các phút để refresh leverage mục tiêu
+
 // Cấu hình BingX: Lấy theo lô, độ trễ giữa các lô
 const BINGX_CONCURRENT_FETCH_LIMIT = 4; // Số symbol lấy đồng thời trong 1 lô (áp dụng cho cả lev và funding)
 const BINGX_DELAY_BETWEEN_BATCHES_MS = 5000; // Độ trễ giữa các lô (áp dụng cho cả lev và funding)
@@ -377,12 +381,14 @@ async function getBingxFundingRateDirect(symbol, retries = 3) {
 /**
  * Cập nhật Max Leverage cho một sàn cụ thể.
  * @param {string} id ID của sàn giao dịch (e.g., 'binanceusdm', 'bingx').
+ * @param {string[]} [symbolsToUpdate] Mảng các symbol cần cập nhật. Nếu null, cập nhật tất cả.
  * @returns {Promise<{ id: string, processedData: Object, status: string, error: object | null }>}
 */
-async function updateLeverageForExchange(id) { 
+async function updateLeverageForExchange(id, symbolsToUpdate = null) { 
     const exchange = exchanges[id];
     let currentFetchedLeverageDataMap = {};
-    let status = `Đang tải đòn bẩy...`;
+    const updateType = symbolsToUpdate ? 'mục tiêu' : 'toàn bộ';
+    let status = `Đang tải đòn bẩy (${updateType})...`;
     let error = null;
 
     debugRawLeverageResponses[id].status = status;
@@ -401,6 +407,9 @@ async function updateLeverageForExchange(id) {
                         continue;
                     }
                     const cleanedSym = cleanSymbol(item.symbol);
+                     if (symbolsToUpdate && !symbolsToUpdate.includes(cleanedSym)) {
+                         continue;
+                     }
                     if (item.symbol && Array.isArray(item.brackets) && item.brackets.length > 0) {
                         const firstBracket = item.brackets.find(b => b.bracket === 1) || item.brackets[0];
                         const maxLeverage = parseInt(firstBracket.initialLeverage, 10);
@@ -424,25 +433,29 @@ async function updateLeverageForExchange(id) {
             const bingxMarkets = Object.values(exchange.markets)
                 .filter(m => m.swap && m.symbol.includes('USDT'));
 
-            const totalSymbols = bingxMarkets.length;
+            const marketsToFetch = symbolsToUpdate && symbolsToUpdate.length > 0
+                ? bingxMarkets.filter(market => symbolsToUpdate.includes(cleanSymbol(market.symbol)))
+                : bingxMarkets;
 
-            console.log(`[LEVERAGE] ${id.toUpperCase()}: Bắt đầu lấy dữ liệu đòn bẩy cho ${totalSymbols} cặp...`);
+            const totalSymbols = marketsToFetch.length;
+
+            console.log(`[LEVERAGE] ${id.toUpperCase()}: Bắt đầu lấy dữ liệu đòn bẩy cho ${totalSymbols} cặp (loại: ${updateType})...`);
 
             let fetchedCount = 0;
             let successCount = 0;
             const marketChunks = [];
-            for (let i = 0; i < bingxMarkets.length; i += BINGX_CONCURRENT_FETCH_LIMIT) {
-                marketChunks.push(bingxMarkets.slice(i, i + BINGX_CONCURRENT_FETCH_LIMIT));
+            for (let i = 0; i < marketsToFetch.length; i += BINGX_CONCURRENT_FETCH_LIMIT) {
+                marketChunks.push(marketsToFetch.slice(i, i + BINGX_CONCURRENT_FETCH_LIMIT));
             }
             for (const chunk of marketChunks) {
                 const chunkPromises = chunk.map(async market => {
-                    const formattedSymbol = cleanSymbol(market.symbol); // Sử dụng cleanSymbol ở đây
-                    const parsedMaxLeverage = await fetchBingxMaxLeverage(market.symbol.replace('/', '-').replace(':USDT', '')); // Truyền symbol gốc cho API, sau đó clean
+                    const formattedSymbol = cleanSymbol(market.symbol); 
+                    const parsedMaxLeverage = await fetchBingxMaxLeverage(market.symbol.replace('/', '-').replace(':USDT', '')); 
                     fetchedCount++;
                     debugRawLeverageResponses[id].status = `Đòn bẩy đang tải (${fetchedCount}/${totalSymbols} | ${successCount} thành công)`;
                     debugRawLeverageResponses[id].timestamp = new Date();
                     if (parsedMaxLeverage !== null && parsedMaxLeverage > 0) {
-                        currentFetchedLeverageDataMap[cleanSymbol(market.symbol)] = parsedMaxLeverage; // Lưu trữ với tên đã clean
+                        currentFetchedLeverageDataMap[cleanSymbol(market.symbol)] = parsedMaxLeverage; 
                         successCount++;
                     }
                     return true;
@@ -476,6 +489,9 @@ async function updateLeverageForExchange(id) {
                 const leverageTiers = await exchange.fetchLeverageTiers();
                 for (const symbol in leverageTiers) {
                     const cleanedSym = cleanSymbol(symbol);
+                    if (symbolsToUpdate && !symbolsToUpdate.includes(cleanedSym)) {
+                         continue;
+                     }
                     const market = exchange.markets[symbol];
                     if (!market || !market.swap || !market.symbol.includes('USDT')) {
                         continue;
@@ -503,6 +519,9 @@ async function updateLeverageForExchange(id) {
                     }
 
                     const cleanedSym = cleanSymbol(market.symbol);
+                    if (symbolsToUpdate && !symbolsToUpdate.includes(cleanedSym)) {
+                         continue;
+                     }
                     const maxLeverage = getMaxLeverageFromMarketInfo(market);
                     if (maxLeverage !== null && maxLeverage > 0) {
                         currentFetchedLeverageDataMap[cleanedSym] = maxLeverage;
@@ -518,8 +537,17 @@ async function updateLeverageForExchange(id) {
         }
 
         // CẬP NHẬT leverageCache[id]
-        leverageCache[id] = currentFetchedLeverageDataMap;
-        console.log(`[LEVERAGE] ✅ ${id.toUpperCase()}: Tổng số mục đòn bẩy hiện tại: ${Object.keys(leverageCache[id]).length}.`);
+        if (symbolsToUpdate) {
+            symbolsToUpdate.forEach(sym => {
+                if (currentFetchedLeverageDataMap[sym]) {
+                    leverageCache[id][sym] = currentFetchedLeverageDataMap[sym];
+                }
+            });
+            console.log(`[LEVERAGE] ✅ ${id.toUpperCase()}: Đã cập nhật ${Object.keys(leverageCache[id]).length} cặp đòn bẩy mục tiêu.`);
+        } else {
+            leverageCache[id] = currentFetchedLeverageDataMap;
+            console.log(`[LEVERAGE] ✅ ${id.toUpperCase()}: Tổng số mục đòn bẩy hiện tại: ${Object.keys(leverageCache[id]).length}.`);
+        }
 
     } catch (e) {
         let errorMessage = `Lỗi nghiêm trọng khi lấy đòn bẩy cho ${id.toUpperCase()}: ${e.message}.`;
@@ -604,7 +632,7 @@ async function fetchFundingRatesForExchange(id) {
 
                 // --- Bắt đầu phần sửa lỗi Bitget Timestamp: undefined ---
                 if (id === 'bitget') {
-                    const originalSymbol = rate.symbol; // Giữ lại symbol gốc để debug
+                    const originalSymbol = rate.symbol; 
 
                     // 1. Ưu tiên rate.info.nextUpdate từ fetchFundingRates raw info (nếu có)
                     if (rate.info?.nextUpdate) {
@@ -622,7 +650,7 @@ async function fetchFundingRatesForExchange(id) {
                         if (typeof ccxtTimestamp === 'number' && ccxtTimestamp > 0) {
                             fundingTimestamp = ccxtTimestamp;
                             debugSource = 'ccxt_standard_number';
-                        } else if (typeof ccxtTimestamp === 'string') { // Try parsing string timestamps from CCXT fields
+                        } else if (typeof ccxtTimestamp === 'string') { 
                              const parsedCcxtTimestamp = parseInt(ccxtTimestamp, 10);
                              if (!isNaN(parsedCcxtTimestamp) && parsedCcxtTimestamp > 0) {
                                  fundingTimestamp = parsedCcxtTimestamp;
@@ -647,7 +675,7 @@ async function fetchFundingRatesForExchange(id) {
                             }
                         }
                     }
-                } else { // For Binance, OKX (chủ yếu dựa vào các trường chuẩn của CCXT)
+                } else { // For Binance, OKX
                     fundingTimestamp = rate.fundingTimestamp || rate.nextFundingTime;
                     debugSource = 'ccxt_standard';
                 }
@@ -770,6 +798,52 @@ function calculateArbitrageOpportunities() {
     });
 }
 
+// Hàm điều phối các cập nhật leverage (Full hoặc Targeted) - Chỉ cập nhật leverage, không động đến funding
+function scheduleLeverageUpdates() {
+    const now = new Date();
+    const currentMinute = now.getUTCMinutes();
+    const currentHour = now.getUTCHours();
+    const currentSecond = now.getUTCSeconds();
+
+    // Cập nhật TOÀN BỘ đòn bẩy vào 00:00 UTC hàng ngày
+    // Chú ý: masterLoop cũng sẽ kích hoạt cập nhật full data tại 0h, có thể dẫn đến trùng lặp nhỏ
+    if (currentHour === FULL_LEVERAGE_REFRESH_AT_HOUR && currentMinute === 0 && currentSecond < 5) {
+        // Chỉ chạy nếu masterLoop không phải là người đã kích hoạt gần đây
+        const nowMs = Date.now();
+        if (!scheduleLeverageUpdates.lastFullLeverageTrigger || (nowMs - scheduleLeverageUpdates.lastFullLeverageTrigger > 30 * 1000)) {
+            console.log('[LEVERAGE_SCHEDULER] 🔥 Kích hoạt cập nhật TOÀN BỘ đòn bẩy (00:00 UTC, từ setInterval).');
+            // Gửi một Promise.all để đảm bảo tất cả các sàn được cập nhật song song và đợi
+            Promise.all(EXCHANGE_IDS.map(id => updateLeverageForExchange(id, null)))
+                .then(() => {
+                    console.log('[LEVERAGE_SCHEDULER] ✅ Hoàn tất cập nhật TOÀN BỘ đòn bẩy từ setInterval.');
+                    calculateArbitrageOpportunities(); // Recalculate after leverage update
+                })
+                .catch(err => console.error('[LEVERAGE_SCHEDULER] ❌ Lỗi cập nhật TOÀN BỘ đòn bẩy từ setInterval:', err.message));
+            scheduleLeverageUpdates.lastFullLeverageTrigger = nowMs;
+        }
+    }
+    // Cập nhật đòn bẩy MỤC TIÊU vào các phút đã định (15, 30, 45, 55, 59)
+    else if (TARGETED_LEVERAGE_REFRESH_MINUTES.includes(currentMinute) && currentSecond < 5) {
+        const nowMs = Date.now();
+        if (!scheduleLeverageUpdates.lastTargetedLeverageTrigger || (nowMs - scheduleLeverageUpdates.lastTargetedLeverageTrigger > 30 * 1000)) {
+            console.log(`[LEVERAGE_SCHEDULER] 🎯 Kích hoạt cập nhật đòn bẩy MỤC TIÊU (${currentMinute} phút, từ setInterval).`);
+            const activeSymbols = Array.from(new Set(arbitrageOpportunities.map(op => op.coin)));
+            if (activeSymbols.length > 0) {
+                Promise.all(EXCHANGE_IDS.map(id => updateLeverageForExchange(id, activeSymbols)))
+                    .then(() => {
+                        console.log('[LEVERAGE_SCHEDULER] ✅ Hoàn tất cập nhật đòn bẩy MỤC TIÊU từ setInterval.');
+                        calculateArbitrageOpportunities(); // Recalculate after leverage update
+                    })
+                    .catch(err => console.error('[LEVERAGE_SCHEDULER] ❌ Lỗi cập nhật đòn bẩy MỤC TIÊU từ setInterval:', err.message));
+            } else {
+                console.log('[LEVERAGE_SCHEDULER] Không có cơ hội arbitrage nào. Bỏ qua cập nhật đòn bẩy mục tiêu.');
+            }
+            scheduleLeverageUpdates.lastTargetedLeverageTrigger = nowMs;
+        }
+    }
+}
+
+
 async function masterLoop() {
     console.log(`\n[MASTER_LOOP] Bắt đầu vòng lặp cập nhật lúc ${new Date().toLocaleTimeString()} (UTC: ${new Date().toUTCString()})...`);
     try {
@@ -781,9 +855,9 @@ async function masterLoop() {
     const now = new Date();
     const currentHourUTC = now.getUTCHours();
     const currentMinuteUTC = now.getUTCMinutes();
-    const isScheduledFullUpdate = (currentHourUTC === 0 && currentMinuteUTC === 0);
+    const isScheduledFullDataRefresh = (currentHourUTC === 0 && currentMinuteUTC === 0);
 
-    if (isFirstMasterLoopRun || isScheduledFullUpdate) {
+    if (isFirstMasterLoopRun || isScheduledFullDataRefresh) {
         console.log(`[MASTER_LOOP] 🔥 Thực hiện cập nhật DỮ LIỆU ĐẦY ĐỦ (lần đầu hoặc 00:00 UTC)...`);
         isFirstMasterLoopRun = false; // Reset flag sau lần chạy đầu tiên
 
@@ -888,6 +962,11 @@ const server = http.createServer((req, res) => {
 server.listen(PORT, () => {
     console.log(`✅ Máy chủ dữ liệu đang chạy tại http://localhost:${PORT}`);
     
-    // Bắt đầu vòng lặp chính để khởi tạo toàn bộ quá trình lấy dữ liệu
+    // Bắt đầu vòng lặp chính để khởi tạo toàn bộ quá trình lấy dữ liệu và điều phối
     masterLoop(); 
+
+    // Khôi phục setInterval để kích hoạt các cập nhật đòn bẩy định kỳ
+    setInterval(() => {
+        scheduleLeverageUpdates(); 
+    }, 1000); 
 });
