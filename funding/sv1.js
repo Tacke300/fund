@@ -179,7 +179,8 @@ async function syncBinanceServerTime() {
         const localTime = Date.now();
         binanceServerTimeOffset = binanceServerTime - localTime;
         console.log(`[TIME SYNC] ✅ Đồng bộ thời gian Binance. Lệch: ${binanceServerTimeOffset} ms.`);
-    } catch (error) {
+    }
+    catch (error) {
         console.error(`[TIME SYNC] ❌ Lỗi đồng bộ thời gian Binance: ${error.msg || error.message}.`);
         binanceServerTimeOffset = 0;
         throw error;
@@ -221,7 +222,8 @@ async function callSignedBinanceAPI(fullEndpointPath, method = 'GET', params = {
     try {
         const rawData = await makeHttpRequest(method, BINANCE_BASE_HOST, requestPath, headers, requestBody);
         return JSON.parse(rawData);
-    } catch (error) {
+    }
+    catch (error) {
         console.error(`[BINANCE API] Lỗi ký API Binance: ${error.code || 'UNKNOWN'} - ${error.msg || error.message}. Path: ${requestPath}`);
         if (error.code === 400 && error.rawResponse && error.rawResponse.includes('-2015')) {
             console.error("  -> LỖI XÁC THỰC! Kiểm tra API Key/Secret và quyền Futures Binance.");
@@ -382,7 +384,7 @@ async function getBingxFundingRateDirect(symbol) {
     }
 }
 
-// Hàm mới để lấy funding time từ Bitget Native REST API
+// Hàm mới để lấy funding time từ Bitget Native REST API (thay thế WS)
 async function fetchBitgetFundingTimeNativeApi(apiSymbol) {
     try {
         const apiPath = `/api/mix/v1/market/funding-time?symbol=${apiSymbol}`;
@@ -398,6 +400,7 @@ async function fetchBitgetFundingTimeNativeApi(apiSymbol) {
                 }
             }
         }
+        // Thêm log để biết khi nào native API không trả về thời gian hợp lệ
         console.warn(`[BITGET_FUNDING_TIME_NATIVE] ⚠️ Không lấy được fundingTime hợp lệ cho ${apiSymbol}. Raw: ${rawData.substring(0, Math.min(rawData.length, 200))}`);
         return null;
     } catch (e) {
@@ -408,21 +411,8 @@ async function fetchBitgetFundingTimeNativeApi(apiSymbol) {
 
 
 // ----- KUCOIN NATIVE API FUNCTIONS -----
-async function fetchKucoinFundingRateNative(symbol) {
+async function fetchKucoinFundingRateNative(kucoinNativeApiSymbol) { // Input là symbol dạng native
     try {
-        let kucoinNativeApiSymbol;
-        // Logic to convert cleaned symbol to Kucoin's native Futures format
-        if (symbol === 'BTCUSDT') { 
-            kucoinNativeApiSymbol = 'BTCUSDTM'; // Hoặc 'XBTUSDM' nếu bạn muốn hợp đồng đó
-        } else if (symbol.endsWith('USDT')) { 
-            kucoinNativeApiSymbol = symbol + 'M';
-        } else if (symbol.endsWith('USD')) { 
-             kucoinNativeApiSymbol = symbol + 'M'; 
-        } else {
-            console.warn(`[KUCOIN_NATIVE_FR] ⚠️ Symbol không rõ định dạng cho Kucoin native API: ${symbol}. Bỏ qua.`);
-            return null;
-        }
-
         const data = await makeHttpRequest('GET', KUCOIN_FUTURES_HOST, `/api/v1/funding-rate/${kucoinNativeApiSymbol}/current`);
         const json = JSON.parse(data);
         if (json.code === '200000' && json.data) {
@@ -430,26 +420,27 @@ async function fetchKucoinFundingRateNative(symbol) {
             const fundingTime = parseInt(json.data.fundingTime, 10); 
             if (!isNaN(fundingRate) && !isNaN(fundingTime) && fundingTime > 0) {
                 return {
-                    symbol: cleanSymbol(json.data.symbol), 
+                    symbol: cleanSymbol(json.data.symbol), // Clean symbol trả về từ API
                     fundingRate: fundingRate,
                     fundingTimestamp: fundingTime
                 };
             } else {
-                console.warn(`[KUCOIN_NATIVE_FR] ⚠️ Dữ liệu funding rate/time không hợp lệ cho ${symbol} (API symbol: ${kucoinNativeApiSymbol}). Raw data: ${data.substring(0, Math.min(data.length, 200))}`);
+                console.warn(`[KUCOIN_NATIVE_FR] ⚠️ Dữ liệu funding rate/time không hợp lệ cho ${kucoinNativeApiSymbol}. Raw data: ${data.substring(0, Math.min(data.length, 200))}`);
             }
         } else {
-            console.warn(`[KUCOIN_NATIVE_FR] ⚠️ Lỗi API hoặc không có dữ liệu funding rate cho ${symbol} (API symbol: ${kucoinNativeApiSymbol}). Code: ${json.code}, Msg: ${json.msg || 'N/A'}. Raw: ${data.substring(0, Math.min(data.length, 200))}`);
+            console.warn(`[KUCOIN_NATIVE_FR] ⚠️ Lỗi API hoặc không có dữ liệu funding rate cho ${kucoinNativeApiSymbol}. Code: ${json.code}, Msg: ${json.msg || 'N/A'}. Raw: ${data.substring(0, Math.min(data.length, 200))}`);
         }
         return null;
     } catch (e) {
-        console.error(`[KUCOIN_NATIVE_FR] ❌ Lỗi khi lấy funding rate cho ${symbol} từ native API: ${e.msg || e.message}`);
+        console.error(`[KUCOIN_NATIVE_FR] ❌ Lỗi khi lấy funding rate cho ${kucoinNativeApiSymbol} từ native API: ${e.msg || e.message}`);
         return null;
     }
 }
 
 async function fetchKucoinMaxLeverageNative() {
-    let leverageMap = {};
+    let leverageMap = {}; // Key là symbol đã clean, value là max leverage
     try {
+        console.log('[KUCOIN_NATIVE_LEVERAGE] 🔄 Bắt đầu lấy max leverage từ native API...');
         const data = await makeHttpRequest('GET', KUCOIN_FUTURES_HOST, '/api/v1/contracts/active');
         const json = JSON.parse(data);
         if (json.code === '200000' && Array.isArray(json.data)) {
@@ -458,8 +449,9 @@ async function fetchKucoinMaxLeverageNative() {
                 return {};
             }
             json.data.forEach(contract => {
+                // contract.symbol là dạng native (e.g., 'BTCUSDTM', 'XBTUSDM')
                 if (contract.leverageMax && (contract.quoteCurrency === 'USDT' || contract.baseCurrency === 'XBT')) { 
-                    const cleanedSym = cleanSymbol(contract.symbol); 
+                    const cleanedSym = cleanSymbol(contract.symbol); // Clean symbol như BTCUSDTM -> BTCUSDT, XBTUSDM -> BTCUSDT
                     leverageMap[cleanedSym] = parseInt(contract.leverageMax, 10);
                 }
             });
@@ -771,7 +763,6 @@ async function performTargetedLeverageUpdate() {
 }
 
 
-// Hàm mới để lấy danh sách các symbol Futures hợp lệ từ Bitget API
 async function fetchBitgetValidFuturesSymbols() {
     console.log('[BITGET_SYMBOLS] 🔄 Đang tải danh sách symbol Futures hợp lệ từ Bitget...');
     try {
@@ -820,12 +811,12 @@ async function fetchFundingRatesForAllExchanges() {
     console.log('[DATA] Bắt đầu làm mới funding rates cho tất cả các sàn...');
     // debugRawLeverageResponses['bitget'].wsStatus đã bị loại bỏ
 
-    const nonBingxAndNonKucoinExchangeIds = EXCHANGE_IDS.filter(id => id !== 'bingx' && id !== 'kucoin'); // Các sàn còn lại (Binance, OKX, Bitget)
+    const otherExchangeIds = EXCHANGE_IDS.filter(id => id !== 'bingx' && id !== 'kucoin'); // Các sàn còn lại (Binance, OKX, Bitget)
     const bingxExchangeId = EXCHANGE_IDS.find(id => id === 'bingx');
     const kucoinExchangeId = EXCHANGE_IDS.find(id => id === 'kucoin');
 
     // Giai đoạn 1: Lấy dữ liệu funding rates cho các sàn non-BingX, non-Kucoin (Binance, OKX, Bitget) song song
-    const initialFundingPromises = nonBingxAndNonKucoinExchangeIds.map(async (id) => {
+    const initialFundingPromises = otherExchangeIds.map(async (id) => {
         let processedRates = {};
         let currentStatus = 'Đang tải funding...';
         let currentTimestamp = new Date();
@@ -872,7 +863,7 @@ async function fetchFundingRatesForAllExchanges() {
                 // Logic Bitget: Lấy funding time từ Native REST API, Rate từ CCXT
                 if (id === 'bitget') {
                     const bitgetApiSymbol = cleanSymbol(rate.symbol) + '_UMCBL'; // Định dạng symbol cho Bitget Native API
-                    // Lọc symbol dựa trên danh sách hợp lệ từ API gốc. KHÔNG CÓ LOG CẢNH BÁO Ở ĐÂY.
+                    // Lọc symbol dựa trên danh sách hợp lệ từ API gốc.
                     if (!bitgetValidFuturesSymbolSet.has(bitgetApiSymbol)) {
                         continue; // Bỏ qua symbol này nếu nó không có trong danh sách hợp lệ
                     }
@@ -885,12 +876,11 @@ async function fetchFundingRatesForAllExchanges() {
                         if (!fundingTimestampValue || fundingTimestampValue <= 0) {
                             fundingTimestampValue = calculateNextStandardFundingTime(); // Fallback cuối cùng
                         }
-                        // Không có log cảnh báo "WS cache không có funding time" nữa
+                        // Thêm log cảnh báo chi tiết
                         console.warn(`[DATA] ⚠️ Bitget (Native API): Không lấy được funding time cho ${rate.symbol}. Sử dụng time từ CCXT hoặc fallback.`);
                     }
                 } else if (id === 'binanceusdm' || id === 'okx') {
-                    // Logic để đảm bảo lấy funding time của Binance và OKX
-                    // Đã có fundingTimestampValue = rate.fundingTimestamp || rate.nextFundingTime; ở trên
+                    // Logic để đảm bảo lấy funding time của Binance và OKX là real hoặc cảnh báo rõ
                     if (!fundingTimestampValue || fundingTimestampValue <= 0) {
                         console.warn(`[DATA] ⚠️ ${id.toUpperCase()}: Funding time từ CCXT bị thiếu hoặc không hợp lệ cho ${rate.symbol}. Dùng fallback tính toán.`);
                         fundingTimestampValue = calculateNextStandardFundingTime(); // Fallback nếu CCXT không cung cấp
@@ -925,7 +915,6 @@ async function fetchFundingRatesForAllExchanges() {
             exchangeData = { ...exchangeData, [id]: { rates: processedRates } };
             debugRawLeverageResponses[id].status = currentStatus;
             debugRawLeverageResponses[id].timestamp = new Date();
-            // Bitget WS Status đã bị loại bỏ khỏi debugRawLeverageResponses
             debugRawLeverageResponses[id].data = `Đã lấy ${Object.keys(processedRates).length} cặp.`;
             debugRawLeverageResponses[id].error = currentError;
             
@@ -943,38 +932,79 @@ async function fetchFundingRatesForAllExchanges() {
         let currentStatus = 'Đang tải funding...';
         let currentError = null;
         let successCount = 0;
-        let totalMarkets = 0;
-        try {
-            // Cần load markets của Kucoin bằng CCXT để có danh sách symbol
-            await exchanges[kucoinExchangeId].loadMarkets(true);
-            const kucoinContracts = Object.values(exchanges[kucoinExchangeId].markets)
-                .filter(m => m.swap && (m.symbol.includes('USDT') || m.symbol.includes('USD'))); // Bao gồm cả XBTUSDM
-            totalMarkets = kucoinContracts.length;
-            if (totalMarkets === 0) {
-                console.warn(`[DATA] ⚠️ ${kucoinExchangeId.toUpperCase()}: CCXT loadMarkets không tìm thấy cặp USDT/USD perpetual nào.`);
-                currentError = { code: 'NO_CCXT_MARKETS', msg: 'CCXT loadMarkets found no USDT/USD perpetuals.' };
-                throw new Error('No relevant Kucoin markets found via CCXT.');
-            }
-            console.log(`[DATA] ${kucoinExchangeId.toUpperCase()}: Tìm thấy ${totalMarkets} cặp tiềm năng từ CCXT. Bắt đầu lấy funding rates từ native API...`);
+        let totalMarketsFound = 0; // Tổng số symbol từ native leverage map
 
-            for (const market of kucoinContracts) {
-                const nativeData = await fetchKucoinFundingRateNative(cleanSymbol(market.symbol)); 
-                if (nativeData) {
-                    processedRates[nativeData.symbol] = {
-                        symbol: nativeData.symbol,
-                        fundingRate: nativeData.fundingRate,
-                        fundingTimestamp: nativeData.fundingTimestamp,
-                        maxLeverage: leverageCache[kucoinExchangeId]?.[nativeData.symbol] || null // Lấy leverage từ cache đã có
-                    };
-                    successCount++;
+        try {
+            // Bước 1: Lấy danh sách symbol từ native leverage map (nguồn đáng tin cậy)
+            const kucoinLeverageMap = leverageCache[kucoinExchangeId]; // Lấy map leverage đã có
+            if (!kucoinLeverageMap || Object.keys(kucoinLeverageMap).length === 0) {
+                console.warn(`[DATA] ⚠️ ${kucoinExchangeId.toUpperCase()}: Không có dữ liệu leverage từ native API để lấy funding rates. Bỏ qua.`);
+                currentError = { code: 'NO_LEVERAGE_DATA', msg: 'No leverage data from native API to fetch funding rates.' };
+                throw new Error('No Kucoin leverage data.');
+            }
+            const kucoinCleanedSymbols = Object.keys(kucoinLeverageMap);
+            totalMarketsFound = kucoinCleanedSymbols.length;
+            
+            console.log(`[DATA] ${kucoinExchangeId.toUpperCase()}: Tìm thấy ${totalMarketsFound} cặp tiềm năng từ Native Leverage API. Bắt đầu lấy funding rates từ native API...`);
+
+            for (const cleanedSymbol of kucoinCleanedSymbols) {
+                let kucoinNativeApiSymbol;
+                // Ánh xạ ngược từ cleanedSymbol sang native API symbol cho funding rate
+                // Đây là chỗ cần chính xác để khớp với API Kucoin
+                if (cleanedSymbol === 'BTCUSDT') {
+                    // Thử cả hai định dạng phổ biến cho BTCUSDT trên Kucoin
+                    const nativeDataBTCUSDTM = await fetchKucoinFundingRateNative('BTCUSDTM');
+                    if (nativeDataBTCUSDTM) {
+                        processedRates[nativeDataBTCUSDTM.symbol] = {
+                            symbol: nativeDataBTCUSDTM.symbol,
+                            fundingRate: nativeDataBTCUSDTM.fundingRate,
+                            fundingTimestamp: nativeDataBTCUSDTM.fundingTimestamp,
+                            maxLeverage: kucoinLeverageMap[nativeDataBTCUSDTM.symbol] || null
+                        };
+                        successCount++;
+                        continue; // Đã xử lý BTCUSDT
+                    }
+                    const nativeDataXBTUSDM = await fetchKucoinFundingRateNative('XBTUSDM');
+                    if (nativeDataXBTUSDM) {
+                         processedRates[nativeDataXBTUSDM.symbol] = {
+                            symbol: nativeDataXBTUSDM.symbol,
+                            fundingRate: nativeDataXBTUSDM.fundingRate,
+                            fundingTimestamp: nativeDataXBTUSDM.fundingTimestamp,
+                            maxLeverage: kucoinLeverageMap[nativeDataXBTUSDM.symbol] || null
+                        };
+                        successCount++;
+                        continue; // Đã xử lý BTCUSDT (thông qua XBTUSDM)
+                    }
+                } else if (cleanedSymbol.endsWith('USDT')) { // ETHUSDT -> ETHUSDTM
+                    kucoinNativeApiSymbol = cleanedSymbol + 'M';
+                } else if (cleanedSymbol.endsWith('USD')) { // Giả định định dạng khác nếu có
+                    kucoinNativeApiSymbol = cleanedSymbol + 'M';
                 } else {
-                    console.warn(`[DATA] ⚠️ ${kucoinExchangeId.toUpperCase()}: Bỏ qua ${market.symbol} - Không lấy được funding rate từ native API.`);
+                    console.warn(`[DATA] ⚠️ ${kucoinExchangeId.toUpperCase()}: Bỏ qua ${cleanedSymbol} - Không rõ định dạng native API symbol.`);
+                    continue;
                 }
+
+                if (kucoinNativeApiSymbol) {
+                    const nativeData = await fetchKucoinFundingRateNative(kucoinNativeApiSymbol); 
+                    if (nativeData) {
+                        processedRates[nativeData.symbol] = {
+                            symbol: nativeData.symbol,
+                            fundingRate: nativeData.fundingRate,
+                            fundingTimestamp: nativeData.fundingTimestamp,
+                            maxLeverage: kucoinLeverageMap[nativeData.symbol] || null
+                        };
+                        successCount++;
+                    } else {
+                        console.warn(`[DATA] ⚠️ ${kucoinExchangeId.toUpperCase()}: Bỏ qua ${cleanedSymbol} (native API symbol: ${kucoinNativeApiSymbol}) - Không lấy được funding rate từ native API.`);
+                    }
+                }
+                
+                await sleep(50); // Delay nhỏ giữa các request Kucoin native API
             }
             currentStatus = `Funding hoàn tất (${successCount} cặp)`;
             console.log(`[DATA] ✅ ${kucoinExchangeId.toUpperCase()}: Đã xử lý thành công ${successCount} cặp funding rates từ native API.`);
-            if (successCount === 0 && totalMarkets > 0) {
-                console.warn(`[DATA] ⚠️ ${kucoinExchangeId.toUpperCase()}: CCXT tìm thấy ${totalMarkets} cặp nhưng không có cặp nào được xử lý thành công từ native API.`);
+            if (successCount === 0 && totalMarketsFound > 0) {
+                console.warn(`[DATA] ⚠️ ${kucoinExchangeId.toUpperCase()}: Native Leverage API tìm thấy ${totalMarketsFound} cặp nhưng không có cặp nào được xử lý thành công từ native Funding Rate API.`);
             } else if (successCount === 0) {
                  console.warn(`[DATA] ⚠️ ${kucoinExchangeId.toUpperCase()}: Không lấy được dữ liệu funding rate nào từ native API.`);
             }
@@ -988,9 +1018,9 @@ async function fetchFundingRatesForAllExchanges() {
             debugRawLeverageResponses[kucoinExchangeId].status = currentStatus;
             debugRawLeverageResponses[kucoinExchangeId].timestamp = new Date();
             debugRawLeverageResponses[kucoinExchangeId].error = currentError;
-            debugRawLeverageResponses[kucoinExchangeId].data = `Đã lấy ${Object.keys(processedRates).length} cặp.`; // Kucoin cũng có data format chuỗi
-            console.log('[DATA] ✅ Cập nhật funding rates Kucoin trong nền hoàn tất. Tính toán lại cơ hội.');
-            calculateArbitrageOpportunities(); // Recalculate once Kucoin data is in
+            debugRawLeverageResponses[kucoinExchangeId].data = `Đã lấy ${Object.keys(processedRates).length} cặp.`; 
+            console.log('[DATA] ✅ Cập nhật funding rates Kucoin hoàn tất. Tính toán lại cơ hội.');
+            calculateArbitrageOpportunities(); 
         }
     }
 
@@ -1150,7 +1180,7 @@ function calculateArbitrageOpportunities() {
                             shortLeverage: parsedMaxLeverage1,
                             longExchange: longExchange,
                             longRate: longRate.fundingRate,
-                            longLeverage: parsedMaxLeverage2,
+                            longLeverage: parsedLeverage2,
                             minutesUntilFunding: parseFloat(minutesUntilFunding.toFixed(1))
                         }
                     });
