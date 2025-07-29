@@ -418,7 +418,7 @@ async function updateLeverageForExchange(id, symbolsToUpdate = null) {
                     }
                 }
                 status = `Đòn bẩy hoàn tất (${successCount} cặp)`;
-                // THAY ĐỔI: Chỉ cho BingX format data chi tiết
+                // THAY ĐỔI: Chỉ cho BingX format data chi tiết. Các sàn khác là chuỗi.
                 debugRawLeverageResponses[id].data = `Đã lấy ${successCount} cặp.`; 
                 console.log(`[CACHE] ✅ Binance: Đã lấy ${successCount} cặp đòn bẩy USDT từ API trực tiếp.`);
 
@@ -518,7 +518,7 @@ async function updateLeverageForExchange(id, symbolsToUpdate = null) {
                     }
                 }
                 status = `Đòn bẩy hoàn tất (${successCount} cặp)`;
-                // THAY ĐỔI: Chỉ cho BingX format data chi tiết
+                // THAY ĐỔI: Chỉ cho BingX format data chi tiết. Các sàn khác là chuỗi.
                 debugRawLeverageResponses[id].data = `Đã lấy ${successCount} cặp.`;
                 console.log(`[CACHE] ✅ ${id.toUpperCase()}: Đã lấy ${successCount} cặp đòn bẩy USDT từ fetchLeverageTiers.`);
             } else {
@@ -543,7 +543,7 @@ async function updateLeverageForExchange(id, symbolsToUpdate = null) {
                     }
                 }
                 status = `Đòn bẩy hoàn tất (loadMarkets, ${loadMarketsSuccessCount} cặp)`;
-                // THAY ĐỔI: Chỉ cho BingX format data chi tiết
+                // THAY ĐỔI: Chỉ cho BingX format data chi tiết. Các sàn khác là chuỗi.
                 debugRawLeverageResponses[id].data = `Đã lấy ${loadMarketsSuccessCount} cặp.`;
                 console.log(`[CACHE] ✅ ${id.toUpperCase()}: Đã lấy ${loadMarketsSuccessCount} cặp đòn bẩy USDT từ loadMarkets.`);
             }
@@ -805,7 +805,7 @@ function initializeBitgetWebSocket(exchangeInstance) {
             data.data.forEach(item => {
                 const cacheKey = cleanSymbol(item.symbol || cleanSymbolFromBitgetWS(item.instId));
 
-                // THAY ĐỔI: WebSocket cache vẫn lưu đầy đủ fundingRate và nextSettleTime
+                // THAY ĐỔI LỚN: WebSocket cache vẫn lưu đầy đủ fundingRate và nextSettleTime
                 // vì WS client vẫn nhận được cả hai.
                 if (item.symbol && typeof item.fundingRate === 'string' && item.nextSettleTime) {
                     const parsedFundingRate = parseFloat(item.fundingRate);
@@ -813,8 +813,8 @@ function initializeBitgetWebSocket(exchangeInstance) {
 
                     if (!isNaN(parsedFundingRate) && !isNaN(parsedNextSettleTime) && parsedNextSettleTime > 0) {
                         bitgetFundingRatesWsCache[cacheKey] = {
-                            fundingRate: parsedFundingRate,
-                            nextFundingTime: parsedNextSettleTime
+                            fundingRate: parsedFundingRate, // Cache vẫn lưu rate
+                            nextFundingTime: parsedNextSettleTime // Cache vẫn lưu time
                         };
                     } else {
                         console.warn(`[BITGET_WS_PARSE_WARN] ⚠️ Không thể parse fundingRate/nextSettleTime cho ${cacheKey}. ` +
@@ -874,7 +874,8 @@ function getBitgetWsState() {
 // ==========================================================
 
 // Hàm này không còn được sử dụng để lấy funding rates trong fetchFundingRatesForAllExchanges
-// Nhưng vẫn có thể dùng để lấy FundingTime riêng nếu cần (như bạn đã đề cập trong yêu cầu trước)
+// Mục đích duy nhất của nó sẽ là lấy fundingTime nếu cần riêng biệt,
+// nhưng trong luồng chính, Bitget fundingTime được lấy từ WS cache.
 async function fetchBitgetFundingTimeNativeApi(exchangeInstance) {
     let processedTimes = {};
     let successCount = 0;
@@ -929,7 +930,7 @@ async function fetchBitgetFundingTimeNativeApi(exchangeInstance) {
                 console.error(`[DATA] ❌ Bitget (Native API): Lỗi khi gọi API cho ${apiRequestSymbol}: ${e.msg || e.message}.`);
                 currentError = { code: e.code, msg: e.message };
             }
-            await sleep(50);
+            await sleep(50); 
         }
         console.log(`[DATA] 🎉 Bitget (Native API): Hoàn tất lấy dữ liệu funding time. Thành công ${successCount} cặp.`);
         return { processedTimes, status: `Funding time hoàn tất (${successCount} cặp)`, error: null };
@@ -968,13 +969,12 @@ async function fetchFundingRatesForAllExchanges() {
         let currentStatus = 'Đang tải funding...';
         let currentTimestamp = new Date();
         let currentError = null;
-        let successCount = 0; // Khởi tạo successCount ở đây
+        let successCount = 0; 
 
         try {
-            // Đảm bảo markets được load cho các sàn CCXT
             await exchanges[id].loadMarkets(true);
             const exchange = exchanges[id];
-            const fundingRatesRaw = await exchange.fetchFundingRates();
+            const fundingRatesRaw = await exchange.fetchFundingRates(); // Lấy tất cả raw funding rates từ CCXT
             
             // Lấy danh sách symbol hợp lệ để lọc cho Bitget
             if (id === 'bitget' && bitgetValidFuturesSymbolSet.size === 0) {
@@ -994,24 +994,25 @@ async function fetchFundingRatesForAllExchanges() {
                 if (rate.info?.contractType && rate.info.contractType !== 'PERPETUAL') {
                     continue;
                 }
-                if (!rate.symbol.includes('USDT')) { // LỌC USDT cho tất cả CCXT
+                if (!rate.symbol.includes('USDT')) { 
                     continue;
                 }
                 
                 const symbolCleaned = cleanSymbol(rate.symbol);
                 const maxLeverageParsed = leverageCache[id]?.[symbolCleaned] || null;
 
-                let fundingRateValue = rate.fundingRate;
-                let fundingTimestampValue = rate.fundingTimestamp || rate.nextFundingTime;
+                let fundingRateValue = rate.fundingRate; // Lấy rate từ CCXT (bản gốc)
+                let fundingTimestampValue = rate.fundingTimestamp || rate.nextFundingTime; // Ưu tiên time từ CCXT (bản gốc)
 
-                // THAY ĐỔI: Logic Bitget - Lấy funding time từ WS cache, rate từ CCXT
+                // THAY ĐỔI: Logic Bitget - Ưu tiên funding time từ WS cache, Rate từ CCXT
                 if (id === 'bitget') {
-                    const wsCacheData = getBitgetFundingRateFromWsCache(symbolCleaned);
+                    // Kiểm tra xem symbol có hợp lệ trên Bitget Futures không
                     if (!bitgetValidFuturesSymbolSet.has(formatSymbolForBitgetWS(rate.symbol))) {
-                         // Bỏ qua nếu symbol không hợp lệ theo danh sách Bitget Native Contracts
                         console.warn(`[DATA] ⚠️ Bitget (CCXT): Bỏ qua ${rate.symbol} - Không tồn tại trong danh sách symbol hợp lệ của Bitget Futures.`);
                         continue;
                     }
+                    // Cố gắng lấy funding time từ WS cache
+                    const wsCacheData = getBitgetFundingRateFromWsCache(symbolCleaned);
                     if (wsCacheData && typeof wsCacheData.nextFundingTime === 'number' && wsCacheData.nextFundingTime > 0) {
                         fundingTimestampValue = wsCacheData.nextFundingTime; // Ưu tiên WS cache cho time
                     } else {
@@ -1101,7 +1102,7 @@ async function fetchFundingRatesForAllExchanges() {
                     }
                     return false;
                 });
-                await Promise.allSettled(chunkPromises); // Execute chunk promises in parallel
+                await Promise.allSettled(chunkPromises);
                 
                 if (marketChunks.indexOf(chunk) < marketChunks.length - 1) {
                     await sleep(BINGX_DELAY_BETWEEN_BATCHES_MS);
@@ -1293,7 +1294,7 @@ function scheduleLeverageUpdates() {
     }
 
     if (currentMinute === 59 && currentSecond >= 30 && currentSecond < 35) {
-        const nowMs = Date.now();
+        const nowMs = Date.Now();
         if (!scheduleLeverageUpdates.lastSpecialTrigger || (nowMs - scheduleLeverageUpdates.lastSpecialTrigger > 30 * 1000)) {
             console.log('[SPECIAL_UPDATE] ⏰ Kích hoạt cập nhật ĐẶC BIỆT (phút 59 giây 30).');
             performFullLeverageUpdate();
