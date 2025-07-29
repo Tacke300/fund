@@ -455,7 +455,7 @@ async function updateLeverageForExchange(id, symbolsToUpdate = null) {
                     debugRawLeverageResponses[id].status = `Đòn bẩy đang tải (${fetchedCount}/${totalSymbols} | ${successCount} thành công)`;
                     debugRawLeverageResponses[id].timestamp = new Date();
                     if (parsedMaxLeverage !== null && parsedMaxLeverage > 0) {
-                        currentFetchedLeverageDataMap[cleanSymbol(market.symbol)] = parsedMaxLeverage; 
+                        currentFetchedLeverageDataMap[formattedSymbol] = parsedMaxLeverage; // Lưu trữ với tên đã clean
                         successCount++;
                     }
                     return true;
@@ -627,7 +627,7 @@ async function fetchFundingRatesForExchange(id) {
                 const symbolCleaned = cleanSymbol(rate.symbol);
                 const maxLeverageParsed = leverageCache[id]?.[symbolCleaned] || null;
 
-                let fundingTimestamp;
+                let fundingTimestamp = 0; // Initialize to 0 for strict check
                 let debugSource = 'none'; 
 
                 // --- Bắt đầu phần sửa lỗi Bitget Timestamp: undefined ---
@@ -641,11 +641,11 @@ async function fetchFundingRatesForExchange(id) {
                             fundingTimestamp = parsedNextUpdate;
                             debugSource = 'rate.info.nextUpdate';
                         } else {
-                            console.debug(`[FUNDING_DEBUG] ${id.toUpperCase()} - ${originalSymbol}: raw rate.info.nextUpdate: '${rate.info.nextUpdate}' (parsed: ${parsedNextUpdate}) is not a valid timestamp.`);
+                            console.debug(`[FUNDING_DEBUG] ${id.toUpperCase()} - ${originalSymbol}: (Attempt 1) raw rate.info.nextUpdate: '${rate.info.nextUpdate}' (parsed: ${parsedNextUpdate}) is not a valid timestamp.`);
                         }
                     }
                     // 2. Fallback to CCXT's standard fields (fundingTimestamp or nextFundingTime)
-                    if (!fundingTimestamp || fundingTimestamp <= 0) {
+                    if (fundingTimestamp <= 0) { 
                         const ccxtTimestamp = rate.fundingTimestamp || rate.nextFundingTime;
                         if (typeof ccxtTimestamp === 'number' && ccxtTimestamp > 0) {
                             fundingTimestamp = ccxtTimestamp;
@@ -657,21 +657,21 @@ async function fetchFundingRatesForExchange(id) {
                                  debugSource = 'ccxt_standard_parsed_string';
                              }
                         }
-                        if (!fundingTimestamp || fundingTimestamp <= 0) { 
-                            console.debug(`[FUNDING_DEBUG] ${id.toUpperCase()} - ${originalSymbol}: raw CCXT standard fields (fundingTimestamp: '${rate.fundingTimestamp}', nextFundingTime: '${rate.nextFundingTime}') are not valid timestamps.`);
+                        if (fundingTimestamp <= 0) { 
+                            console.debug(`[FUNDING_DEBUG] ${id.toUpperCase()} - ${originalSymbol}: (Attempt 2) raw CCXT standard fields (fundingTimestamp: '${rate.fundingTimestamp}', nextFundingTime: '${rate.nextFundingTime}') are not valid timestamps.`);
                         }
                     }
                     // 3. Last resort: check the market info directly for nextFundingTime 
-                    if (!fundingTimestamp || fundingTimestamp <= 0) {
+                    if (fundingTimestamp <= 0) {
                         const marketInfoNextFundingTime = exchanges[id].markets[originalSymbol]?.info?.nextFundingTime;
                         if (marketInfoNextFundingTime) {
                             const parsedMarketInfoTime = parseInt(marketInfoNextFundingTime, 10);
                             if (!isNaN(parsedMarketInfoTime) && parsedMarketInfoTime > 0) {
                                 fundingTimestamp = parsedMarketInfoTime;
                                 debugSource = 'market_info_fallback';
-                                console.debug(`[FUNDING_DEBUG] ${id.toUpperCase()} - ${originalSymbol}: Lấy nextFundingTime từ market info fallback: ${fundingTimestamp}`);
+                                console.debug(`[FUNDING_DEBUG] ${id.toUpperCase()} - ${originalSymbol}: (Attempt 3) Lấy nextFundingTime từ market info fallback: ${fundingTimestamp}`);
                             } else {
-                                console.debug(`[FUNDING_DEBUG] ${id.toUpperCase()} - ${originalSymbol}: market info nextFundingTime: '${marketInfoNextFundingTime}' is not valid.`);
+                                console.debug(`[FUNDING_DEBUG] ${id.toUpperCase()} - ${originalSymbol}: (Attempt 3) market info nextFundingTime: '${marketInfoNextFundingTime}' is not valid.`);
                             }
                         }
                     }
@@ -682,8 +682,8 @@ async function fetchFundingRatesForExchange(id) {
                 // --- Kết thúc phần sửa lỗi Bitget Timestamp: undefined ---
 
                 // Validate both funding rate and timestamp
-                if (typeof rate.fundingRate !== 'number' || isNaN(rate.fundingRate) || typeof fundingTimestamp !== 'number' || isNaN(fundingTimestamp) || fundingTimestamp <= 0) {
-                    console.warn(`[FUNDING] ⚠️ ${id.toUpperCase()}: Funding rate (${rate.fundingRate}) hoặc timestamp (${fundingTimestamp}, nguồn: ${debugSource}) không hợp lệ hoặc không thực tế cho ${rate.symbol}. Bỏ qua.`);
+                if (typeof rate.fundingRate !== 'number' || isNaN(rate.fundingRate) || fundingTimestamp <= 0 || isNaN(fundingTimestamp)) {
+                    console.error(`[FUNDING] ❌ ${id.toUpperCase()}: Funding rate (${rate.fundingRate}) hoặc timestamp (${fundingTimestamp}, nguồn: ${debugSource}) không hợp lệ hoặc không thực tế cho ${rate.symbol}. Bỏ qua.`);
                     continue;
                 }
 
@@ -798,7 +798,39 @@ function calculateArbitrageOpportunities() {
     });
 }
 
-// Hàm điều phối các cập nhật leverage (Full hoặc Targeted) - Chỉ cập nhật leverage, không động đến funding
+// Hàm nội bộ để thực hiện cập nhật đòn bẩy đầy đủ (cho setInterval)
+async function performFullLeverageUpdateInternal() {
+    console.log('[LEVERAGE_SCHEDULER] 🔥 Kích hoạt cập nhật TOÀN BỘ đòn bẩy (từ setInterval).');
+    const promises = EXCHANGE_IDS.map(id => updateLeverageForExchange(id, null));
+    try {
+        await Promise.all(promises);
+        console.log('[LEVERAGE_SCHEDULER] ✅ Hoàn tất cập nhật TOÀN BỘ đòn bẩy từ setInterval.');
+        calculateArbitrageOpportunities(); // Recalculate after leverage update
+    } catch (err) {
+        console.error('[LEVERAGE_SCHEDULER] ❌ Lỗi cập nhật TOÀN BỘ đòn bẩy từ setInterval:', err.message);
+    }
+}
+
+// Hàm nội bộ để thực hiện cập nhật đòn bẩy mục tiêu (cho setInterval)
+async function performTargetedLeverageUpdateInternal() {
+    console.log(`[LEVERAGE_SCHEDULER] 🎯 Kích hoạt cập nhật đòn bẩy MỤC TIÊU (từ setInterval).`);
+    const activeSymbols = Array.from(new Set(arbitrageOpportunities.map(op => op.coin)));
+    if (activeSymbols.length > 0) {
+        const promises = EXCHANGE_IDS.map(id => updateLeverageForExchange(id, activeSymbols));
+        try {
+            await Promise.all(promises);
+            console.log('[LEVERAGE_SCHEDULER] ✅ Hoàn tất cập nhật đòn bẩy MỤC TIÊU từ setInterval.');
+            calculateArbitrageOpportunities(); // Recalculate after leverage update
+        } catch (err) {
+            console.error('[LEVERAGE_SCHEDULER] ❌ Lỗi cập nhật đòn bẩy MỤC TIÊU từ setInterval:', err.message);
+        }
+    } else {
+        console.log('[LEVERAGE_SCHEDULER] Không có cơ hội arbitrage nào. Bỏ qua cập nhật đòn bẩy mục tiêu.');
+    }
+}
+
+
+// Hàm điều phối các cập nhật leverage (Full hoặc Targeted) - Chức năng chạy bởi setInterval
 function scheduleLeverageUpdates() {
     const now = new Date();
     const currentMinute = now.getUTCMinutes();
@@ -806,39 +838,21 @@ function scheduleLeverageUpdates() {
     const currentSecond = now.getUTCSeconds();
 
     // Cập nhật TOÀN BỘ đòn bẩy vào 00:00 UTC hàng ngày
-    // Chú ý: masterLoop cũng sẽ kích hoạt cập nhật full data tại 0h, có thể dẫn đến trùng lặp nhỏ
     if (currentHour === FULL_LEVERAGE_REFRESH_AT_HOUR && currentMinute === 0 && currentSecond < 5) {
-        // Chỉ chạy nếu masterLoop không phải là người đã kích hoạt gần đây
+        // Thêm cooldown để tránh kích hoạt nhiều lần trong cùng một giây nếu setInterval jitter
         const nowMs = Date.now();
-        if (!scheduleLeverageUpdates.lastFullLeverageTrigger || (nowMs - scheduleLeverageUpdates.lastFullLeverageTrigger > 30 * 1000)) {
-            console.log('[LEVERAGE_SCHEDULER] 🔥 Kích hoạt cập nhật TOÀN BỘ đòn bẩy (00:00 UTC, từ setInterval).');
-            // Gửi một Promise.all để đảm bảo tất cả các sàn được cập nhật song song và đợi
-            Promise.all(EXCHANGE_IDS.map(id => updateLeverageForExchange(id, null)))
-                .then(() => {
-                    console.log('[LEVERAGE_SCHEDULER] ✅ Hoàn tất cập nhật TOÀN BỘ đòn bẩy từ setInterval.');
-                    calculateArbitrageOpportunities(); // Recalculate after leverage update
-                })
-                .catch(err => console.error('[LEVERAGE_SCHEDULER] ❌ Lỗi cập nhật TOÀN BỘ đòn bẩy từ setInterval:', err.message));
-            scheduleLeverageUpdates.lastFullLeverageTrigger = nowMs;
+        if (!scheduleLeverageUpdates.lastFullTrigger || (nowMs - scheduleLeverageUpdates.lastFullTrigger > 30 * 1000)) {
+            performFullLeverageUpdateInternal(); 
+            scheduleLeverageUpdates.lastFullTrigger = nowMs;
         }
     }
     // Cập nhật đòn bẩy MỤC TIÊU vào các phút đã định (15, 30, 45, 55, 59)
     else if (TARGETED_LEVERAGE_REFRESH_MINUTES.includes(currentMinute) && currentSecond < 5) {
+        // Thêm cooldown để tránh kích hoạt nhiều lần trong cùng một giây nếu setInterval jitter
         const nowMs = Date.now();
-        if (!scheduleLeverageUpdates.lastTargetedLeverageTrigger || (nowMs - scheduleLeverageUpdates.lastTargetedLeverageTrigger > 30 * 1000)) {
-            console.log(`[LEVERAGE_SCHEDULER] 🎯 Kích hoạt cập nhật đòn bẩy MỤC TIÊU (${currentMinute} phút, từ setInterval).`);
-            const activeSymbols = Array.from(new Set(arbitrageOpportunities.map(op => op.coin)));
-            if (activeSymbols.length > 0) {
-                Promise.all(EXCHANGE_IDS.map(id => updateLeverageForExchange(id, activeSymbols)))
-                    .then(() => {
-                        console.log('[LEVERAGE_SCHEDULER] ✅ Hoàn tất cập nhật đòn bẩy MỤC TIÊU từ setInterval.');
-                        calculateArbitrageOpportunities(); // Recalculate after leverage update
-                    })
-                    .catch(err => console.error('[LEVERAGE_SCHEDULER] ❌ Lỗi cập nhật đòn bẩy MỤC TIÊU từ setInterval:', err.message));
-            } else {
-                console.log('[LEVERAGE_SCHEDULER] Không có cơ hội arbitrage nào. Bỏ qua cập nhật đòn bẩy mục tiêu.');
-            }
-            scheduleLeverageUpdates.lastTargetedLeverageTrigger = nowMs;
+        if (!scheduleLeverageUpdates.lastTargetedTrigger || (nowMs - scheduleLeverageUpdates.lastTargetedTrigger > 30 * 1000)) {
+            performTargetedLeverageUpdateInternal();
+            scheduleLeverageUpdates.lastTargetedTrigger = nowMs;
         }
     }
 }
@@ -875,33 +889,44 @@ async function masterLoop() {
         await Promise.all(nonBingxCombinedFetchPromises); // Wait for ALL non-BingX exchanges to complete both funding and leverage
         console.log("[MASTER_LOOP] ✅ Bước 1: Hoàn tất lấy dữ liệu Funding & Leverage cho Binance, OKX, Bitget.");
 
-        // Update HTML data after Phase 1 (Binance, OKX, Bitget are fully updated)
-        calculateArbitrageOpportunities();
-        console.log("[MASTER_LOOP] Dữ liệu HTML (Funding & Leverage Binance, OKX, Bitget) đã sẵn sàng.");
+        // --- KIỂM TRA ĐIỀU KIỆN NGHIÊM NGẶT CHO BITGET TRƯỚC KHI CHẠY BINGX ---
+        const bitgetFundsCount = Object.keys(exchangeData.bitget?.rates || {}).length;
+        const bitgetLeverageCount = Object.keys(leverageCache.bitget || {}).length;
 
-        // Phase 2: Handle BingX Funding Rates
-        if (bingxExchangeId) {
-            console.log(`[MASTER_LOOP] 🚀 Bước 2: Bắt đầu lấy dữ liệu Funding cho ${bingxExchangeId.toUpperCase()}...`);
-            await fetchFundingRatesForExchange(bingxExchangeId);
-            console.log(`[MASTER_LOOP] ✅ Bước 2: Hoàn tất lấy dữ liệu Funding cho ${bingxExchangeId.toUpperCase()}.`);
-            
-            // Update HTML data after BingX Funding (now HTML contains funding for all 4, but leverage only for 3)
+        if (bitgetFundsCount === 0 || bitgetLeverageCount === 0) {
+            console.error(`[MASTER_LOOP] ❌ LỖI NGHIÊM TRỌNG: Bitget không lấy được đủ dữ liệu! Funds: ${bitgetFundsCount} cặp, Leverage: ${bitgetLeverageCount} cặp. Dừng xử lý BingX trong vòng lặp này.`);
+            // Continue to calculate arbitrage with available data, then schedule next loop.
+            // Do NOT proceed to BingX steps.
+        } else {
+            console.log(`[MASTER_LOOP] ✅ Kiểm tra Bitget OK. Funds: ${bitgetFundsCount} cặp, Leverage: ${bitgetLeverageCount} cặp.`);
+            // Update HTML data after Phase 1 (Binance, OKX, Bitget are fully updated)
             calculateArbitrageOpportunities();
-            console.log(`[MASTER_LOOP] Dữ liệu HTML (bao gồm Funding của ${bingxExchangeId.toUpperCase()}) đã được cập nhật.`);
+            console.log("[MASTER_LOOP] Dữ liệu HTML (Funding & Leverage Binance, OKX, Bitget) đã sẵn sàng.");
 
-            // Phase 3: Delay 30 seconds (specifically for BingX leverage)
-            console.log(`[MASTER_LOOP] ⏳ Bước 3: Đã lấy funding rates cho ${bingxExchangeId.toUpperCase()}. Đợi 30 giây trước khi lấy đòn bẩy...`);
-            await sleep(30 * 1000); 
+            // Phase 2: Handle BingX Funding Rates
+            if (bingxExchangeId) {
+                console.log(`[MASTER_LOOP] 🚀 Bước 2: Bắt đầu lấy dữ liệu Funding cho ${bingxExchangeId.toUpperCase()}...`);
+                await fetchFundingRatesForExchange(bingxExchangeId);
+                console.log(`[MASTER_LOOP] ✅ Bước 2: Hoàn tất lấy dữ liệu Funding cho ${bingxExchangeId.toUpperCase()}.`);
+                
+                // Update HTML data after BingX Funding (now HTML contains funding for all 4, but leverage only for 3)
+                calculateArbitrageOpportunities();
+                console.log(`[MASTER_LOOP] Dữ liệu HTML (bao gồm Funding của ${bingxExchangeId.toUpperCase()}) đã được cập nhật.`);
 
-            // Phase 4: Fetch BingX Max Leverage
-            console.log(`[MASTER_LOOP] 🚀 Bước 4: Bắt đầu lấy dữ liệu Leverage cho ${bingxExchangeId.toUpperCase()}...`);
-            // updateLeverageForExchange('bingx') đã tự có độ trễ 60s và độ trễ giữa các lô bên trong
-            await updateLeverageForExchange(bingxExchangeId); 
-            console.log(`[MASTER_LOOP] ✅ Bước 4: Hoàn tất lấy dữ liệu Leverage cho ${bingxExchangeId.toUpperCase()}.`);
-            
-            // Final update for HTML data (all 4 exchanges are fully updated)
-            calculateArbitrageOpportunities();
-            console.log(`[MASTER_LOOP] Dữ liệu HTML (bao gồm Leverage của ${bingxExchangeId.toUpperCase()}) đã được cập nhật hoàn chỉnh.`);
+                // Phase 3: Delay 30 seconds (specifically for BingX leverage)
+                console.log(`[MASTER_LOOP] ⏳ Bước 3: Đã lấy funding rates cho ${bingxExchangeId.toUpperCase()}. Đợi 30 giây trước khi lấy đòn bẩy...`);
+                await sleep(30 * 1000); 
+
+                // Phase 4: Fetch BingX Max Leverage
+                console.log(`[MASTER_LOOP] 🚀 Bước 4: Bắt đầu lấy dữ liệu Leverage cho ${bingxExchangeId.toUpperCase()}...`);
+                // updateLeverageForExchange('bingx') đã tự có độ trễ 60s và độ trễ giữa các lô bên trong
+                await updateLeverageForExchange(bingxExchangeId); 
+                console.log(`[MASTER_LOOP] ✅ Bước 4: Hoàn tất lấy dữ liệu Leverage cho ${bingxExchangeId.toUpperCase()}.`);
+                
+                // Final update for HTML data (all 4 exchanges are fully updated)
+                calculateArbitrageOpportunities();
+                console.log(`[MASTER_LOOP] Dữ liệu HTML (bao gồm Leverage của ${bingxExchangeId.toUpperCase()}) đã được cập nhật hoàn chỉnh.`);
+            }
         }
     } else {
         console.log("[MASTER_LOOP] 💡 Chỉ cập nhật cơ hội arbitrage từ dữ liệu hiện có (Không phải 00:00 UTC).");
@@ -962,7 +987,7 @@ const server = http.createServer((req, res) => {
 server.listen(PORT, () => {
     console.log(`✅ Máy chủ dữ liệu đang chạy tại http://localhost:${PORT}`);
     
-    // Bắt đầu vòng lặp chính để khởi tạo toàn bộ quá trình lấy dữ liệu và điều phối
+    // Bắt đầu vòng lặp chính để khởi tạo toàn bộ quá trình lấy dữ liệu
     masterLoop(); 
 
     // Khôi phục setInterval để kích hoạt các cập nhật đòn bẩy định kỳ
