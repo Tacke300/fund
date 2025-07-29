@@ -12,13 +12,14 @@ const {
     binanceApiKey, binanceApiSecret,
     bingxApiKey, bingxApiSecret,
     okxApiKey, okxApiSecret, okxPassword,
-    bitgetApiKey, bitgetApiSecret, bitgetApiPassword
+    bitgetApiKey, bitgetApiSecret, bitgetApiPassword,
+    kucoinApiKey, kucoinApiSecret, kucoinPassword // THÊM KUCOIN
 } = require('./config.js');
 
 const PORT = 5005;
 
 // ----- CẤU HÌNH -----
-const EXCHANGE_IDS = ['binanceusdm', 'bingx', 'okx', 'bitget'];
+const EXCHANGE_IDS = ['binanceusdm', 'bingx', 'okx', 'bitget', 'kucoin']; // THÊM KUCOIN
 const FUNDING_DIFFERENCE_THRESHOLD = 0.00001;
 const MINIMUM_PNL_THRESHOLD = 1;
 const IMMINENT_THRESHOLD_MINUTES = 15;
@@ -46,7 +47,8 @@ let debugRawLeverageResponses = {
     binanceusdm: { status: 'Đang tải đòn bẩy...', timestamp: null, data: 'N/A', error: null },
     bingx: { status: 'Đang tải đòn bẩy...', timestamp: null, data: 'N/A', error: null },
     okx: { status: 'Đang tải đòn bẩy...', timestamp: null, data: 'N/A', error: null },
-    bitget: { status: 'Đang tải đòn bẩy...', timestamp: null, data: 'N/A', error: null, wsStatus: 'DISCONNECTED' }
+    bitget: { status: 'Đang tải đòn bẩy...', timestamp: null, data: 'N/A', error: null, wsStatus: 'DISCONNECTED' },
+    kucoin: { status: 'Đang tải đòn bẩy...', timestamp: null, data: 'N/A', error: null } // THÊM KUCOIN
 };
 
 const BINGX_BASE_HOST = 'open-api.bingx.com';
@@ -69,6 +71,7 @@ EXCHANGE_IDS.forEach(id => {
     else if (id === 'bingx') { config.apiKey = bingxApiKey; config.secret = bingxApiSecret; }
     else if (id === 'okx') { config.apiKey = okxApiKey; config.secret = okxApiSecret; if(okxPassword) config.password = okxPassword; }
     else if (id === 'bitget') { config.apiKey = bitgetApiKey; config.secret = bitgetApiSecret; if(bitgetApiPassword) config.password = bitgetApiPassword; }
+    else if (id === 'kucoin') { config.apiKey = kucoinApiKey; config.secret = kucoinApiSecret; if(kucoinPassword) config.password = kucoinPassword; } // THÊM KUCOIN
     else { console.warn(`[AUTH] ⚠️ Thiếu API Key/Secret hoặc cấu hình cho ${id.toUpperCase()}.`); }
 
     exchanges[id] = new exchangeClass(config);
@@ -92,16 +95,10 @@ const cleanSymbol = (symbol) => {
     // Chuẩn hóa để chỉ có một 'USDT' ở cuối, ngay cả khi có 'USDTUSDT'
     cleaned = cleaned.replace(/(USDT)+$/, 'USDT'); 
 
-    // Đảm bảo kết thúc bằng USDT nếu nó chứa USDT nhưng chưa kết thúc bằng USDT
-    // Ví dụ: symbol là 'BTCUSDTabc' (rất hiếm nhưng để an toàn)
-    if (!cleaned.endsWith('USDT') && symbol.toUpperCase().includes('USDT') && !cleaned.includes('USDT')) {
-        // Trường hợp symbol gốc có USDT nhưng bị loại bỏ hết (ví dụ, BTC/USDT thành BTC), sau đó cần thêm lại USDT
-        cleaned = cleaned + 'USDT';
-    } else if (!cleaned.endsWith('USDT') && symbol.toUpperCase().includes('USDT')) {
-        // Trường hợp symbol đã được clean nhưng vì lý do nào đó không kết thúc bằng USDT
+    // Đảm bảo kết thúc bằng USDT nếu symbol gốc có USDT nhưng symbol đã clean không kết thúc bằng USDT
+    if (!cleaned.endsWith('USDT') && symbol.toUpperCase().includes('USDT')) {
         cleaned = cleaned + 'USDT';
     }
-    // Một số trường hợp hiếm khác có thể cần được xử lý thêm tùy thuộc vào dữ liệu thực tế
 
     return cleaned;
 };
@@ -323,7 +320,6 @@ async function fetchBingxMaxLeverage(symbol, retries = 3) {
     return parsedLeverage;
 }
 
-// Lấy toàn bộ symbol future từ BingX API trực tiếp (được dùng cho Funding Rates)
 async function getBingxSymbolsDirect() {
     const urlPath = '/openApi/swap/v2/quote/contracts';
     try {
@@ -342,7 +338,6 @@ async function getBingxSymbolsDirect() {
     }
 }
 
-// Lấy funding rate + time cho 1 symbol từ BingX API trực tiếp
 async function getBingxFundingRateDirect(symbol) {
     const urlPath = `/openApi/swap/v2/quote/fundingRate?symbol=${encodeURIComponent(symbol)}`;
     try {
@@ -351,7 +346,7 @@ async function getBingxFundingRateDirect(symbol) {
         if (json.code === 0 && Array.isArray(json.data) && json.data.length > 0) {
             const firstData = json.data[0];
 
-            console.log(`[DEBUG_BINGX_FUNDING_RAW_SYMBOL] Gốc: '${firstData.symbol}', Đã Clean: '${cleanSymbol(firstData.symbol)}'`); // LOG DEBUG QUAN TRỌNG
+            console.log(`[DEBUG_BINGX_FUNDING_RAW_SYMBOL] Gốc: '${firstData.symbol}', Đã Clean: '${cleanSymbol(firstData.symbol)}'`); 
 
             if (typeof firstData.fundingRate !== 'string') {
                 console.warn(`[BINGX_FUNDING_WARN] ${symbol}: fundingRate không phải string. Type: ${typeof firstData.fundingRate}. Value: ${firstData.fundingRate}`);
@@ -367,7 +362,7 @@ async function getBingxFundingRateDirect(symbol) {
             }
             
             return {
-                symbol: cleanSymbol(firstData.symbol), // <-- ĐÃ SỬA LỖI: Chuẩn hóa symbol ngay tại đây
+                symbol: cleanSymbol(firstData.symbol), // <-- CHUẨN HÓA SYMBOL BINGX FUNDING TRỰC TIẾP TẠI ĐÂY
                 fundingRate: parseFloat(firstData.fundingRate),
                 fundingTime: parseInt(firstData.fundingTime, 10)
             };
@@ -500,7 +495,7 @@ async function updateLeverageForExchange(id, symbolsToUpdate = null) {
             }
 
         }
-        else { // OKX và Bitget: Dùng CCXT (fetchLeverageTiers + loadMarkets fallback)
+        else { // OKX, Bitget, Kucoin: Dùng CCXT (fetchLeverageTiers + loadMarkets fallback)
             await exchange.loadMarkets(true);
             
             let successCount = 0;
@@ -767,7 +762,7 @@ function initializeBitgetWebSocket(exchangeInstance) {
                     };
                     if (batch.length > 0) {
                         wsBitget.send(JSON.stringify(subscribeMessage));
-                        // Đã bỏ log chi tiết theo lô để giảm độ ồn
+                        // Đã bỏ log chi tiết theo lô subscribe để giảm độ ồn
                         // console.log(`[BITGET_WS] Đã gửi yêu cầu subscribe cho lô ${i/BATCH_SIZE + 1} (${batch.length} cặp).`);
                         await new Promise(resolve => setTimeout(resolve, 100));
                     }
@@ -946,7 +941,7 @@ async function fetchFundingRatesForAllExchanges() {
                         fundingTimestampValue = wsCacheData.nextFundingTime;
                     } else {
                         // LOG CHI TIẾT CCXT DATA KHI WS CACHE THIẾU
-                        console.warn(`[DATA] ⚠️ Bitget (CCXT): WS cache không có funding time VÀ CCXT cũng thiếu cho ${rate.symbol}. Dùng fallback tính toán. CCXT fundingTimestamp: ${rate.fundingTimestamp}, CCXT nextFundingTime: ${rate.nextFundingTime}`);
+                        console.warn(`[DATA] ⚠️ Bitget (CCXT): WS cache không có funding time cho ${rate.symbol}. CCXT fundingTimestamp: ${rate.fundingTimestamp}, CCXT nextFundingTime: ${rate.nextFundingTime}. Dùng fallback tính toán.`);
                         if (!fundingTimestampValue || fundingTimestampValue <= 0) {
                            // Fallback to calculated time if both WS and CCXT raw data are missing/invalid
                            fundingTimestampValue = calculateNextStandardFundingTime();
@@ -976,7 +971,7 @@ async function fetchFundingRatesForAllExchanges() {
             exchangeData = { ...exchangeData, [id]: { rates: processedRates } };
             debugRawLeverageResponses[id].status = currentStatus;
             debugRawLeverageResponses[id].timestamp = new Date();
-            if (id !== 'bingx') {
+            if (id !== 'bingx') { // Áp dụng cho Binance, OKX, Bitget, Kucoin
                 debugRawLeverageResponses[id].data = `Đã lấy ${Object.keys(processedRates).length} cặp.`;
             }
             debugRawLeverageResponses[id].error = currentError;
@@ -1031,8 +1026,8 @@ async function fetchFundingRatesForAllExchanges() {
                                 maxLeverage: maxLeverageParsed
                             };
                             successCount++;
-                            // LOG CHI TIẾT TỪNG CẶP FUNDING BINGX VỚI SYMBOL ĐÃ CLEAN
-                            console.log(`[DATA] ✅ BingX: Đã lưu funding rate ${result.fundingRate} cho ${result.symbol} (Next: ${new Date(result.fundingTime).toISOString()}). (Tổng: ${successCount})`);
+                            // BỎ LOG CHI TIẾT TỪNG CẶP FUNDING BINGX
+                            // console.log(`[DATA] ✅ BingX: Đã lưu funding rate ${result.fundingRate} cho ${result.symbol} (Next: ${new Date(result.fundingTime).toISOString()}). (Tổng: ${successCount})`);
                             return true;
                         } else {
                             console.warn(`[DEBUG_FUNDING] ⚠️ BingX: Không lấy được funding rate hợp lệ cho ${symbol}.`);
@@ -1266,6 +1261,7 @@ const server = http.createServer((req, res) => {
                 bingx: Object.values(exchangeData.bingx?.rates || {}),
                 okx: Object.values(exchangeData.okx?.rates || {}),
                 bitget: Object.values(exchangeData.bitget?.rates || {}),
+                kucoin: Object.values(exchangeData.kucoin?.rates || {}), // THÊM KUCOIN
             },
             debugRawLeverageResponses: debugRawLeverageResponses
         };
@@ -1277,6 +1273,7 @@ const server = http.createServer((req, res) => {
                 `OKX Funds: ${responseData.rawRates.okx.length}. ` +
                 `BingX Funds: ${responseData.rawRates.bingx.length}. ` +
                 `Bitget Funds: ${responseData.rawRates.bitget.length}. ` +
+                `Kucoin Funds: ${responseData.rawRates.kucoin.length}. ` + // THÊM KUCOIN
                 `Bitget WS Status: ${responseData.debugRawLeverageResponses.bitget?.wsStatus || 'N/A'}.`);
             lastApiDataLogTime = now;
         }
