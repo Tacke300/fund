@@ -1,6 +1,6 @@
 const http = require('http');
 const https = require('https');
-const fs = require =('fs');
+const fs = require('fs');
 const path = require('path');
 const ccxt = require('ccxt');
 const crypto = require('crypto');
