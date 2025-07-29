@@ -1,5 +1,5 @@
 const http = require('http');
-const https = require('https');
+const https = require = require('https');
 const fs = require('fs');
 const path = require('path');
 const ccxt = require('ccxt');
@@ -329,7 +329,8 @@ async function getBingxSymbolsDirect() {
             console.error(`[BINGX_SYMBOLS] Lỗi khi lấy danh sách symbol BingX: Code ${json.code}, Msg: ${json.msg}. Raw: ${data.substring(0, Math.min(data.length, 200))}`);
             return [];
         }
-    } catch (e) {
+    }
+    catch (e) {
         console.error(`[BINGX_SYMBOLS] Lỗi request khi lấy danh sách symbol BingX: ${e.msg || e.message}`);
         return [];
     }
@@ -960,7 +961,7 @@ async function fetchBitgetFundingRatesNativeApi(exchangeInstance, leverageCache)
 
             try {
                 // Sử dụng endpoint và tham số chính xác
-                const apiPath = `/api/mix/v1/market/current-funding-rate?symbol=${apiRequestSymbol}`;
+                const apiPath = `/api/mix/v1/market/funding-time?symbol=${apiRequestSymbol}`;
                 const rawData = await makeHttpRequest('GET', BITGET_NATIVE_REST_HOST, apiPath);
                 const json = JSON.parse(rawData);
 
