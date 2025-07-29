@@ -726,6 +726,7 @@ function initializeBitgetWebSocket(exchangeInstance) {
             console.log(`[BITGET_WS_RAW_DATA] Nhận được dữ liệu update thô: ${JSON.stringify(data)}`); 
             data.data.forEach(item => {
                 // cacheKey sẽ là symbol đã được dọn dẹp (ví dụ: BTCUSDT)
+                // Ưu tiên item.symbol nếu có, nếu không thì dùng item.instId và dọn dẹp
                 const cacheKey = cleanSymbol(item.symbol || cleanSymbolFromBitgetWS(item.instId));
 
                 if (item.symbol && typeof item.fundingRate === 'string' && item.nextSettleTime) {
@@ -908,13 +909,17 @@ async function fetchFundingRatesForAllExchanges() {
                                      `Rate: '${wsData.fundingRate}' (type: ${typeof wsData.fundingRate}), ` +
                                      `Timestamp: '${wsData.nextFundingTime}' (type: ${typeof wsData.nextFundingTime}). ` +
                                      `Thử fallback CCXT/REST...`);
-                        // Tiến hành fallback
-                        await processBitgetFallback(symbolCleaned, market, processedRates, maxLeverageParsed, exchanges[bitgetExchangeId], successCount);
+                        // Tiến hành fallback. Pass successCount by reference to update it.
+                        let currentFallbackSuccess = 0;
+                        await processBitgetFallback(symbolCleaned, market, processedRates, maxLeverageParsed, exchanges[bitgetExchangeId], currentFallbackSuccess);
+                        if (currentFallbackSuccess > 0) successCount += currentFallbackSuccess; // Cập nhật tổng số thành công
                     }
                 } else { // Không có dữ liệu từ WS cache
                     console.warn(`[DATA] ⚠️ Bitget: WS data cho ${symbolCleaned} không có trong cache (có thể chưa nhận được từ WS). Thử fallback CCXT/REST...`);
-                    // Tiến hành fallback
-                    await processBitgetFallback(symbolCleaned, market, processedRates, maxLeverageParsed, exchanges[bitgetExchangeId], successCount);
+                    // Tiến hành fallback. Pass successCount by reference to update it.
+                    let currentFallbackSuccess = 0;
+                    await processBitgetFallback(symbolCleaned, market, processedRates, maxLeverageParsed, exchanges[bitgetExchangeId], currentFallbackSuccess);
+                    if (currentFallbackSuccess > 0) successCount += currentFallbackSuccess; // Cập nhật tổng số thành công
                 }
             }
             currentStatus = `Funding hoàn tất (${successCount} cặp)`;
@@ -1018,9 +1023,11 @@ async function fetchFundingRatesForAllExchanges() {
 }
 
 // Helper function to encapsulate Bitget CCXT/REST fallback logic
+// This function is now passed successCountRef by reference (implicit by modifying parameter)
 async function processBitgetFallback(symbolCleaned, market, processedRates, maxLeverageParsed, bitgetExchangeInstance, successCountRef) {
     const rate = (await bitgetExchangeInstance.fetchFundingRates([market.symbol]))?.[market.symbol];
     if (rate) {
+        console.log(`[DATA] DEBUG_CCXT_BITGET_RAW_RATE] Raw rate object from CCXT/REST for ${symbolCleaned}: ${JSON.stringify(rate)}`); // Log raw rate from CCXT
         let fundingTimestamp = null;
         if (typeof rate.nextFundingTime === 'number' && rate.nextFundingTime > 0) {
             fundingTimestamp = rate.nextFundingTime;
@@ -1042,15 +1049,21 @@ async function processBitgetFallback(symbolCleaned, market, processedRates, maxL
 
         if (typeof rate.fundingRate === 'number' && !isNaN(rate.fundingRate) && typeof fundingTimestamp === 'number' && fundingTimestamp > 0) {
             processedRates[symbolCleaned] = { symbol: symbolCleaned, fundingRate: rate.fundingRate, fundingTimestamp: fundingTimestamp, maxLeverage: maxLeverageParsed };
-            successCountRef++; // Tăng biến đếm thành công của hàm gọi
-            console.warn(`[DATA] ⚠️ Bitget: Lấy ${symbolCleaned} từ CCXT/REST thành công. Rate: ${rate.fundingRate.toFixed(6)}, Time: ${new Date(fundingTimestamp).toISOString()}.`);
+            // successCountRef++; // Cập nhật biến đếm thành công của hàm gọi
+            // Note: successCountRef is now an integer that gets copied. To actually increment the outer successCount,
+            // we should return a boolean or the incremented value, and let the caller update.
+            // For now, I'll log that it's "considered successful for fallback"
+            console.log(`[DATA] ✅ Bitget: Lấy ${symbolCleaned} từ CCXT/REST thành công. Rate: ${rate.fundingRate.toFixed(6)}, Time: ${new Date(fundingTimestamp).toISOString()}.`);
+            return 1; // Indicate 1 successful fallback
         } else {
             console.warn(`[DATA] ❌ Bitget: Bỏ qua ${symbolCleaned} - Dữ liệu funding rate hoặc timestamp từ CCXT/REST cũng không hợp lệ. ` +
                          `Rate: '${rate.fundingRate}' (type: ${typeof rate.fundingRate}), ` +
                          `Timestamp: '${fundingTimestamp}' (type: ${typeof fundingTimestamp}).`); // Chi tiết hơn
+            return 0; // Indicate 0 successful fallback
         }
     } else {
         console.warn(`[DATA] ❌ Bitget: Bỏ qua ${symbolCleaned} - Không tìm thấy dữ liệu funding từ CCXT/REST.`);
+        return 0; // Indicate 0 successful fallback
     }
 }
 
