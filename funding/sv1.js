@@ -80,6 +80,7 @@ EXCHANGE_IDS.forEach(id => {
 // ----- HÀM HỖ TRỢ CHUNG (DEFINED BEFORE USE) -----
 // Đã chỉnh sửa hàm cleanSymbol mạnh mẽ hơn để xử lý các định dạng của BingX
 const cleanSymbol = (symbol) => {
+    console.log(`[CLEAN_SYMBOL_DEBUG] Input: '${symbol}'`); // LOG DEBUG QUAN TRỌNG
     let cleaned = symbol.toUpperCase();
     
     // Loại bỏ hậu tố Bitget WS trước để tránh ảnh hưởng đến các regex khác
@@ -88,18 +89,21 @@ const cleanSymbol = (symbol) => {
     // Loại bỏ các ký tự phân tách phổ biến (/, :, _)
     cleaned = cleaned.replace(/[\/:_]/g, ''); 
     
-    // Xử lý định dạng BTC-USDT của BingX
-    // Chạy lại regex này sau khi đã loại bỏ các ký tự phân tách khác
+    // Xử lý định dạng BTC-USDT của BingX (ví dụ: chuyển BTC-USDT thành BTCUSDT)
     cleaned = cleaned.replace(/-USDT$/, 'USDT'); 
 
     // Chuẩn hóa để chỉ có một 'USDT' ở cuối, ngay cả khi có 'USDTUSDT'
+    // Ví dụ: BTCUSDTUSDT -> BTCUSDT
     cleaned = cleaned.replace(/(USDT)+$/, 'USDT'); 
 
     // Đảm bảo kết thúc bằng USDT nếu symbol gốc có USDT nhưng symbol đã clean không kết thúc bằng USDT
+    // Ví dụ: nếu "BTC/USDT" -> "BTC", thì thêm "USDT" vào thành "BTCUSDT"
+    // Hoặc nếu "ETHUSDTPERP" -> "ETHUSDTPERP", thì thêm "USDT" vào thành "ETHUSDT" (hoặc xử lý thêm nếu cần)
     if (!cleaned.endsWith('USDT') && symbol.toUpperCase().includes('USDT')) {
         cleaned = cleaned + 'USDT';
     }
-
+    
+    console.log(`[CLEAN_SYMBOL_DEBUG] Output: '${cleaned}'`); // LOG DEBUG QUAN TRỌNG
     return cleaned;
 };
 
@@ -346,7 +350,8 @@ async function getBingxFundingRateDirect(symbol) {
         if (json.code === 0 && Array.isArray(json.data) && json.data.length > 0) {
             const firstData = json.data[0];
 
-            console.log(`[DEBUG_BINGX_FUNDING_RAW_SYMBOL] Gốc: '${firstData.symbol}', Đã Clean: '${cleanSymbol(firstData.symbol)}'`); 
+            // BỎ LOG NÀY (debug ép đổi tên)
+            // console.log(`[DEBUG_BINGX_FUNDING_RAW_SYMBOL] Gốc: '${firstData.symbol}', Đã Clean: '${cleanSymbol(firstData.symbol)}'`); 
 
             if (typeof firstData.fundingRate !== 'string') {
                 console.warn(`[BINGX_FUNDING_WARN] ${symbol}: fundingRate không phải string. Type: ${typeof firstData.fundingRate}. Value: ${firstData.fundingRate}`);
@@ -458,7 +463,8 @@ async function updateLeverageForExchange(id, symbolsToUpdate = null) {
                         const cleanedSymForCache = cleanSymbol(market.symbol); // Clean symbol for cache key
                         currentFetchedLeverageDataMap[cleanedSymForCache] = parsedMaxLeverage; 
                         successCount++;
-                        console.log(`[CACHE] ✅ ${id.toUpperCase()}: Đã lưu leverage ${parsedMaxLeverage} cho ${cleanedSymForCache}. (Gốc: ${market.symbol}, Tổng: ${successCount})`); 
+                        // BỎ LOG NÀY (debug ép đổi tên)
+                        // console.log(`[CACHE] ✅ ${id.toUpperCase()}: Đã lưu leverage ${parsedMaxLeverage} cho ${cleanedSymForCache}. (Gốc: ${market.symbol}, Tổng: ${successCount})`); 
                     } else {
                         console.warn(`[CACHE] ⚠️ ${id.toUpperCase()}: Không lấy được leverage hợp lệ cho ${market.symbol}.`);
                     }
@@ -654,26 +660,32 @@ async function performTargetedLeverageUpdate() {
 }
 
 
-// ----- BITGET WEBSOCKET CLIENT LOGIC (DEFINED BEFORE USE) -----
-let bitgetFundingRatesWsCache = {};
-let wsBitget = null;
-let subscribedSymbols = new Set();
+// ==========================================================
+// BẮT ĐẦU LOGIC BITGET WEBSOCKET CLIENT (Tích hợp lại từ phiên bản của bạn)
+// ==========================================================
+
+let bitgetFundingRatesWsCache = {}; // Cache để lưu trữ dữ liệu từ WebSocket
+let wsBitget = null; // Biến giữ kết nối WebSocket
+let subscribedSymbols = new Set(); // Theo dõi các symbol đã subscribe
 
 const BITGET_WS_URL = 'wss://ws.bitget.com/mix/v1/stream';
-const RECONNECT_INTERVAL_MS = 10000;
-const PING_INTERVAL_MS = 30 * 1000;
+const RECONNECT_INTERVAL_MS = 10000; // Thử kết nối lại sau 10 giây
+const PING_INTERVAL_MS = 30 * 1000; // Ping mỗi 30 giây để giữ kết nối sống
 let pingIntervalId = null;
 let reconnectTimeoutId = null;
 
+// Helper để chuyển đổi symbol từ CCXT (BTC/USDT) sang định dạng của Bitget WS (BTCUSDT_UMCBL)
+// LƯU Ý: Hàm này tạo ra symbol có _UMCBL, được dùng cho cả WS và Native REST API của Bitget
 function formatSymbolForBitgetWS(symbol) {
     return cleanSymbol(symbol) + '_UMCBL';
 }
 
+// Helper để chuyển đổi symbol từ Bitget WS (BTCUSDT_UMCBL) sang định dạng cache (BTCUSDT)
 function cleanSymbolFromBitgetWS(wsInstId) {
-    return wsInstId.replace('_UMCBL', ''); 
+    return wsInstId.replace('_UMCBL', '');
 }
 
-
+// Hàm mới để lấy danh sách các symbol Futures hợp lệ từ Bitget API
 async function fetchBitgetValidFuturesSymbols() {
     console.log('[BITGET_SYMBOLS] 🔄 Đang tải danh sách symbol Futures hợp lệ từ Bitget...');
     try {
@@ -682,23 +694,24 @@ async function fetchBitgetValidFuturesSymbols() {
         const json = JSON.parse(rawData);
 
         if (json.code === '00000' && Array.isArray(json.data)) {
-            bitgetValidFuturesSymbolSet.clear();
+            bitgetValidFuturesSymbolSet.clear(); // Xóa danh sách cũ
             json.data.forEach(contract => {
                 if (contract.symbol) {
-                    bitgetValidFuturesSymbolSet.add(contract.symbol);
+                    bitgetValidFuturesSymbolSet.add(contract.symbol); // Thêm symbol đầy đủ (_UMCBL)
                 }
             });
             console.log(`[BITGET_SYMBOLS] ✅ Đã tải ${bitgetValidFuturesSymbolSet.size} symbol Futures hợp lệ từ Bitget.`);
             return bitgetValidFuturesSymbolSet;
         } else {
             console.error(`[BITGET_SYMBOLS] ❌ Lỗi khi tải danh sách symbol Futures Bitget: Code ${json.code}, Msg: ${json.msg || 'N/A'}. Raw: ${rawData.substring(0, Math.min(rawData.length, 200))}`);
-            return new Set();
+            return new Set(); // Trả về tập hợp rỗng nếu lỗi
         }
     } catch (e) {
         console.error(`[BITGET_SYMBOLS] ❌ Lỗi request khi tải danh sách symbol Futures Bitget: ${e.msg || e.message}`);
         return new Set();
     }
 }
+
 
 function initializeBitgetWebSocket(exchangeInstance) {
     if (!exchangeInstance) {
@@ -727,12 +740,13 @@ function initializeBitgetWebSocket(exchangeInstance) {
         try {
             await exchangeInstance.loadMarkets(true);
             
+            // Đảm bảo danh sách symbol hợp lệ được tải cho WebSocket subscription
             if (bitgetValidFuturesSymbolSet.size === 0) {
                 console.log('[BITGET_WS_INIT] Valid Bitget Futures symbols not loaded for WS. Attempting to fetch...');
-                await fetchBitgetValidFuturesSymbols();
+                await fetchBitgetValidFuturesSymbols(); // Chờ để lấy danh sách symbol hợp lệ
                 if (bitgetValidFuturesSymbolSet.size === 0) {
                     console.error('[BITGET_WS_INIT] ❌ Không thể tải danh sách symbol Bitget hợp lệ cho WS. Không thể subscribe.');
-                    wsBitget.close();
+                    wsBitget.close(); // Đóng để thử kết nối lại
                     return;
                 }
             }
@@ -742,17 +756,19 @@ function initializeBitgetWebSocket(exchangeInstance) {
 
             if (allUsdtPerpetuals.length > 0) {
                 const subscribeArgs = allUsdtPerpetuals
+                    // Chỉ subscribe các symbol đã được xác nhận là hợp lệ trên Bitget Futures
                     .filter(m => bitgetValidFuturesSymbolSet.has(formatSymbolForBitgetWS(m.symbol))) 
                     .map(m => {
                         const instId = formatSymbolForBitgetWS(m.symbol);
                         subscribedSymbols.add(instId);
                         return {
-                            instType: 'mc',
+                            instType: 'mc', // U-based perpetual
                             channel: 'funding_rate',
                             instId: instId
                         };
                     });
                 
+                // Gửi subscribe theo lô
                 const BATCH_SIZE = 50;
                 for (let i = 0; i < subscribeArgs.length; i += BATCH_SIZE) {
                     const batch = subscribeArgs.slice(i, i + BATCH_SIZE);
@@ -760,9 +776,9 @@ function initializeBitgetWebSocket(exchangeInstance) {
                         op: 'subscribe',
                         args: batch
                     };
-                    if (batch.length > 0) {
+                    if (batch.length > 0) { // Chỉ gửi nếu có cặp để subscribe
                         wsBitget.send(JSON.stringify(subscribeMessage));
-                        // Đã bỏ log chi tiết theo lô subscribe để giảm độ ồn
+                        // BỎ LOG CHI TIẾT THEO LÔ ĐỂ GIẢM ĐỘ ỒN
                         // console.log(`[BITGET_WS] Đã gửi yêu cầu subscribe cho lô ${i/BATCH_SIZE + 1} (${batch.length} cặp).`);
                         await new Promise(resolve => setTimeout(resolve, 100));
                     }
@@ -854,7 +870,7 @@ function initializeBitgetWebSocket(exchangeInstance) {
 
 function getBitgetFundingRateFromWsCache(symbol) {
     const cleanedSymbol = cleanSymbol(symbol);
-    return bitgetFundingRatesWsCache[cleanedSymbol] || null;
+    return bitgetFundingRatesWsCache[cleanedSym] || null; // Dùng cleanedSym làm key
 }
 
 function getBitgetWsState() {
@@ -938,13 +954,14 @@ async function fetchFundingRatesForAllExchanges() {
                     }
                     const wsCacheData = getBitgetFundingRateFromWsCache(symbolCleaned);
                     if (wsCacheData && typeof wsCacheData.nextFundingTime === 'number' && wsCacheData.nextFundingTime > 0) {
-                        fundingTimestampValue = wsCacheData.nextFundingTime;
+                        fundingTimestampValue = wsCacheData.nextFundingTime; // Ưu tiên WS cache cho time
+                        console.log(`[DATA] Bitget (CCXT): Dùng WS cache time cho ${symbolCleaned}. Time: ${new Date(fundingTimestampValue).toISOString()}`);
                     } else {
-                        // LOG CHI TIẾT CCXT DATA KHI WS CACHE THIẾU
+                        // Log chi tiết CCXT DATA KHI WS CACHE THIẾU
                         console.warn(`[DATA] ⚠️ Bitget (CCXT): WS cache không có funding time cho ${rate.symbol}. CCXT fundingTimestamp: ${rate.fundingTimestamp}, CCXT nextFundingTime: ${rate.nextFundingTime}. Dùng fallback tính toán.`);
                         if (!fundingTimestampValue || fundingTimestampValue <= 0) {
-                           // Fallback to calculated time if both WS and CCXT raw data are missing/invalid
                            fundingTimestampValue = calculateNextStandardFundingTime();
+                           console.warn(`[DATA] ⚠️ Bitget (CCXT): Đã fallback funding time cho ${rate.symbol} về ${new Date(fundingTimestampValue).toISOString()}.`);
                         }
                     }
                 }
