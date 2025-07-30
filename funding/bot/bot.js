@@ -5,18 +5,18 @@ const path = require('path');
 const ccxt = require('ccxt');
 const { URLSearchParams } = require('url');
 
-// Import các API Key và Secret từ file config.js (ĐÃ CẬP NHẬT ĐƯỜNG DẪN)
+// Import các API Key và Secret từ file config.js (ĐÃ CẬP NHẬT ĐƯỜNG DẪN CHÍNH XÁC)
 // Đường dẫn: từ funding/bot/bot.js đi lên 2 cấp (funding/) rồi đến config.js
 const {
     binanceApiKey, binanceApiSecret,
     bingxApiKey, bingxApiSecret,
     okxApiKey, okxApiSecret, okxPassword,
     bitgetApiKey, bitgetApiSecret, bitgetApiPassword
-} = require('../../config.js'); // <-- THAY ĐỔI ĐƯỜNG DẪN TẠI ĐÂY
+} = require('../../config.js'); // <-- ĐƯỜNG DẪN CHÍNH XÁC CHO CẤU TRÚC CỦA BẠN
 
-// Import địa chỉ ví nạp tiền từ file balance.js (ĐÃ CẬP NHẬT ĐƯỜNG DẪN)
+// Import địa chỉ ví nạp tiền từ file balance.js (ĐÃ CẬP NHẬT ĐƯỜNG DẪN CHÍNH XÁC)
 // Đường dẫn: từ funding/bot/bot.js đến balance.js trong cùng thư mục
-const { usdtBep20DepositAddresses } = require('./balance.js'); // <-- THAY ĐỔI ĐƯỜNG DẪN TẠI ĐÂY
+const { usdtBep20DepositAddresses } = require('./balance.js'); // <-- ĐƯỜNG DẪN CHÍNH XÁC CHO CẤU TRÚC CỦA BẠN
 
 const BOT_PORT = 5006; // Cổng cho Bot UI (khác với cổng của Server chính)
 const SERVER_DATA_URL = 'http://localhost:5005/api/data'; // Địa chỉ Server chính
