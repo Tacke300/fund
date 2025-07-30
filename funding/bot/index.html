@@ -228,17 +228,17 @@
                     <p>Tổng PnL từ khi chạy: <strong id="cumulativePnlDisplay" class="text-yellow">Đang tải...</strong></p>
                 </div>
 
-                <!-- Current Selected Opportunity Card -->
+                <!-- Current Selected Opportunity Card (for display) -->
                 <div class="card">
-                    <h3>Cơ hội Arbitrage Đang chọn</h3>
-                    <div id="currentOpportunityDisplay">
-                        <p>Không có cơ hội nào đang được chọn.</p>
+                    <h3>Cơ hội Arbitrage Tốt nhất (Dự kiến)</h3>
+                    <div id="bestPotentialOpportunityDisplay">
+                        <p>Không có cơ hội nào khả dụng.</p>
                     </div>
                 </div>
 
-                <!-- Current Trade Details Card -->
+                <!-- Current Trade Details Card (for execution) -->
                 <div class="card">
-                    <h3>Chi tiết Giao dịch Hiện tại</h3>
+                    <h3>Giao dịch Đang mở</h3>
                     <div id="currentTradeDetailsDisplay">
                         <p>Không có giao dịch nào đang mở.</p>
                     </div>
@@ -277,14 +277,12 @@
                     throw new Error(`HTTP error! status: ${response.status}`);
                 }
                 const data = await response.json();
-                console.log('Bot status data received:', data);
+                // console.log('Bot status data received:', data); // Giữ lại để debug nếu cần
 
                 // Cập nhật trạng thái Bot
                 const botStateDisplay = document.getElementById('botStateDisplay');
                 botStateDisplay.textContent = data.botState;
-                const botStateCard = document.getElementById('botStateCard');
-                // Reset classes and add specific color class based on state
-                botStateCard.classList.remove('text-green', 'text-red', 'text-yellow');
+                botStateDisplay.className = ''; // Reset classes
                 if (data.botState === 'RUNNING') {
                     botStateDisplay.classList.add('text-green');
                 } else if (data.botState === 'STOPPED') {
@@ -297,11 +295,13 @@
                 let balancesHtml = '';
                 if (data.balances) {
                     for (const exchangeId in data.balances) {
-                        if (exchangeId === 'totalOverall') continue; // Skip totalOverall for individual display
+                        if (exchangeId === 'totalOverall') continue; 
                         const bal = data.balances[exchangeId];
-                        balancesHtml += `<p><strong>${exchangeId.toUpperCase()}:</strong> Tổng ${bal.total.toFixed(2)} USDT, Khả dụng ${bal.available.toFixed(2)} USDT</p>`;
+                        const balanceColorClass = bal.total < 0 ? 'text-red' : ''; // Màu đỏ nếu tổng âm
+                        balancesHtml += `<p><strong>${exchangeId.toUpperCase()}:</strong> Tổng <span class="${balanceColorClass}">${bal.total.toFixed(2)} USDT</span>, Khả dụng ${bal.available.toFixed(2)} USDT</p>`;
                     }
-                    balancesHtml += `<p><strong>Tổng số dư khả dụng (Tất cả sàn):</strong> ${data.balances.totalOverall.toFixed(2)} USDT</p>`;
+                    const totalOverallColorClass = data.balances.totalOverall < 0 ? 'text-red' : '';
+                    balancesHtml += `<p><strong>Tổng số dư khả dụng (Tất cả sàn):</strong> <span class="${totalOverallColorClass}">${data.balances.totalOverall.toFixed(2)} USDT</span></p>`;
                 } else {
                     balancesHtml += '<p>Không có dữ liệu số dư.</p>';
                 }
@@ -311,36 +311,48 @@
                 // Cập nhật PnL tổng hợp
                 const cumulativePnlElement = document.getElementById('cumulativePnlDisplay');
                 cumulativePnlElement.textContent = data.cumulativePnl.toFixed(2) + ' USDT';
-                cumulativePnlElement.classList.remove('text-green', 'text-red', 'text-yellow'); // Reset classes
+                cumulativePnlElement.className = ''; // Reset classes
                 if (data.cumulativePnl >= 0) {
                     cumulativePnlElement.classList.add('text-green');
                 } else {
                     cumulativePnlElement.classList.add('text-red');
                 }
 
-                // Cập nhật cơ hội arbitrage đang chọn
-                const opportunityDisplay = document.getElementById('currentOpportunityDisplay');
-                if (data.currentSelectedOpportunity) {
-                    opportunityDisplay.innerHTML = `<pre>${JSON.stringify(data.currentSelectedOpportunity, null, 2)}</pre>`;
+                // Cập nhật cơ hội arbitrage tốt nhất (dự kiến)
+                const bestPotentialOpportunityDisplay = document.getElementById('bestPotentialOpportunityDisplay');
+                if (data.currentSelectedOpportunity) { // Đây là bestPotentialOpportunityForDisplay từ bot.js
+                    bestPotentialOpportunityDisplay.innerHTML = `
+                        <p><strong>Coin:</strong> ${data.currentSelectedOpportunity.coin}</p>
+                        <p><strong>Sàn:</strong> ${data.currentSelectedOpportunity.exchanges}</p>
+                        <p><strong>PnL ước tính:</strong> ${data.currentSelectedOpportunity.estimatedPnl?.toFixed(2) || 'N/A'}%</p>
+                        <p><strong>Funding trong:</strong> ${data.currentSelectedOpportunity.details.minutesUntilFunding?.toFixed(1) || 'N/A'} phút</p>
+                        <pre>${JSON.stringify(data.currentSelectedOpportunity, null, 2)}</pre>
+                    `;
                 } else {
-                    opportunityDisplay.textContent = 'Không có cơ hội nào đang được chọn.';
+                    bestPotentialOpportunityDisplay.textContent = 'Không có cơ hội nào khả dụng.';
                 }
 
-                // Cập nhật chi tiết giao dịch hiện tại
-                const tradeDetailsDisplay = document.getElementById('currentTradeDetailsDisplay');
+                // Cập nhật chi tiết giao dịch đang mở
+                const currentTradeDetailsDisplay = document.getElementById('currentTradeDetailsDisplay');
                 if (data.currentTradeDetails) {
-                    tradeDetailsDisplay.innerHTML = `<pre>${JSON.stringify(data.currentTradeDetails, null, 2)}</pre>`;
+                    currentTradeDetailsDisplay.innerHTML = `
+                        <p><strong>Coin:</strong> ${data.currentTradeDetails.coin}</p>
+                        <p><strong>Short Sàn:</strong> ${data.currentTradeDetails.shortExchange}</p>
+                        <p><strong>Long Sàn:</strong> ${data.currentTradeDetails.longExchange}</p>
+                        <p><strong>Trạng thái:</strong> ${data.currentTradeDetails.status}</p>
+                        <pre>${JSON.stringify(data.currentTradeDetails, null, 2)}</pre>
+                    `;
                 } else {
-                    tradeDetailsDisplay.textContent = 'Không có giao dịch nào đang mở.';
+                    currentTradeDetailsDisplay.textContent = 'Không có giao dịch nào đang mở.';
                 }
 
                 // Cập nhật lịch sử giao dịch
                 const tradeHistoryBody = document.getElementById('tradeHistoryBody');
-                tradeHistoryBody.innerHTML = ''; // Xóa các hàng cũ
+                tradeHistoryBody.innerHTML = ''; 
                 if (data.tradeHistory && data.tradeHistory.length > 0) {
                     data.tradeHistory.forEach(trade => {
                         const row = tradeHistoryBody.insertRow();
-                        row.insertCell().textContent = new Date(trade.timestamp).toLocaleString('vi-VN'); // Định dạng ngày giờ Việt Nam
+                        row.insertCell().textContent = new Date(trade.timestamp).toLocaleString('vi-VN'); 
                         row.insertCell().textContent = trade.coin;
                         row.insertCell().textContent = trade.exchanges;
                         row.insertCell().textContent = trade.fundingDiff ? trade.fundingDiff.toFixed(2) + '%' : 'N/A';
@@ -365,8 +377,6 @@
                 console.error('Lỗi khi lấy trạng thái bot:', error);
                 document.getElementById('botStateDisplay').textContent = 'LỖI KẾT NỐI';
                 document.getElementById('botStateDisplay').classList.add('text-red');
-                // Hiển thị một thông báo lỗi tổng quát nếu cần
-                // alert('Không thể kết nối tới bot server. Vui lòng kiểm tra bot đang chạy.');
             }
         }
 
@@ -376,13 +386,13 @@
                 const response = await fetch('/bot-api/start', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({}) // Gửi body rỗng nếu không cần dữ liệu cụ thể
+                    body: JSON.stringify({}) 
                 });
                 const data = await response.json();
                 console.log('Phản hồi Start Bot:', data);
                 alert(data.message);
                 if (data.success) {
-                    updateBotStatus(); // Cập nhật trạng thái ngay lập tức
+                    updateBotStatus(); 
                 }
             } catch (error) {
                 console.error('Lỗi khi khởi động bot:', error);
@@ -395,13 +405,13 @@
                 const response = await fetch('/bot-api/stop', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({}) // Gửi body rỗng
+                    body: JSON.stringify({}) 
                 });
                 const data = await response.json();
                 console.log('Phản hồi Stop Bot:', data);
                 alert(data.message);
                 if (data.success) {
-                    updateBotStatus(); // Cập nhật trạng thái ngay lập tức
+                    updateBotStatus(); 
                 }
             } catch (error) {
                 console.error('Lỗi khi dừng bot:', error);
