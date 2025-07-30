@@ -128,6 +128,24 @@
             white-space: pre-wrap; /* Ensure preformatted text wraps */
         }
 
+        /* Styling for the new "Best Potential Opportunity" display */
+        .opportunity-details p {
+            margin: 5px 0;
+            font-size: 0.95em;
+            display: flex; /* For horizontal layout */
+            align-items: center;
+        }
+        .opportunity-details strong {
+            flex: 0 0 160px; /* Fixed width for labels */
+            margin-right: 10px;
+            color: #e0e0e0;
+        }
+        .opportunity-details span {
+            flex: 1; /* Take remaining space */
+            color: #abb2bf;
+        }
+
+
         /* Trade History Table */
         .trade-history h2 {
             margin-bottom: 20px;
@@ -231,18 +249,12 @@
                 <!-- Current Selected Opportunity Card (for display) -->
                 <div class="card">
                     <h3>Cơ hội Arbitrage Tốt nhất (Dự kiến)</h3>
-                    <div id="bestPotentialOpportunityDisplay">
+                    <div id="bestPotentialOpportunityDisplay" class="opportunity-details">
                         <p>Không có cơ hội nào khả dụng.</p>
                     </div>
                 </div>
 
-                <!-- Current Trade Details Card (for execution) -->
-                <div class="card">
-                    <h3>Giao dịch Đang mở</h3>
-                    <div id="currentTradeDetailsDisplay">
-                        <p>Không có giao dịch nào đang mở.</p>
-                    </div>
-                </div>
+                <!-- NOTE: "Giao dịch Đang mở" đã được gỡ bỏ theo yêu cầu của bạn -->
             </section>
 
             <section class="trade-history">
@@ -297,11 +309,15 @@
                     for (const exchangeId in data.balances) {
                         if (exchangeId === 'totalOverall') continue; 
                         const bal = data.balances[exchangeId];
-                        const balanceColorClass = bal.total < 0 ? 'text-red' : ''; // Màu đỏ nếu tổng âm
-                        balancesHtml += `<p><strong>${exchangeId.toUpperCase()}:</strong> Tổng <span class="${balanceColorClass}">${bal.total.toFixed(2)} USDT</span>, Khả dụng ${bal.available.toFixed(2)} USDT</p>`;
+                        // Màu đỏ nếu tổng balance âm
+                        const totalBalanceColorClass = bal.total < 0 ? 'text-red' : ''; 
+                        // available cũng có thể âm nếu PnL chưa thực hiện bị lỗ
+                        const availableBalanceColorClass = bal.available < 0 ? 'text-red' : ''; 
+
+                        balancesHtml += `<p><strong>${exchangeId.toUpperCase()}:</strong> Tổng <span class="${totalBalanceColorClass}">${bal.total.toFixed(2)} USDT</span>, Khả dụng <span class="${availableBalanceColorClass}">${bal.available.toFixed(2)} USDT</span></p>`;
                     }
                     const totalOverallColorClass = data.balances.totalOverall < 0 ? 'text-red' : '';
-                    balancesHtml += `<p><strong>Tổng số dư khả dụng (Tất cả sàn):</strong> <span class="${totalOverallColorClass}">${data.balances.totalOverall.toFixed(2)} USDT</span></p>`;
+                    balancesHtml += `<p><strong>Tổng số dư khả dụng (Tất cả sàn, bao gồm cả âm):</strong> <span class="${totalOverallColorClass}">${data.balances.totalOverall.toFixed(2)} USDT</span></p>`;
                 } else {
                     balancesHtml += '<p>Không có dữ liệu số dư.</p>';
                 }
@@ -319,32 +335,29 @@
                 }
 
                 // Cập nhật cơ hội arbitrage tốt nhất (dự kiến)
-                const bestPotentialOpportunityDisplay = document.getElementById('bestPotentialOpportunityDisplay');
+                const bestPotentialOpportunityDisplayDiv = document.getElementById('bestPotentialOpportunityDisplay');
                 if (data.currentSelectedOpportunity) { // Đây là bestPotentialOpportunityForDisplay từ bot.js
-                    bestPotentialOpportunityDisplay.innerHTML = `
-                        <p><strong>Coin:</strong> ${data.currentSelectedOpportunity.coin}</p>
-                        <p><strong>Sàn:</strong> ${data.currentSelectedOpportunity.exchanges}</p>
-                        <p><strong>PnL ước tính:</strong> ${data.currentSelectedOpportunity.estimatedPnl?.toFixed(2) || 'N/A'}%</p>
-                        <p><strong>Funding trong:</strong> ${data.currentSelectedOpportunity.details.minutesUntilFunding?.toFixed(1) || 'N/A'} phút</p>
-                        <pre>${JSON.stringify(data.currentSelectedOpportunity, null, 2)}</pre>
+                    // Chuyển đổi timestamp sang giờ địa phương
+                    const nextFundingDate = new Date(data.currentSelectedOpportunity.nextFundingTime);
+                    const fundingTimeFormatted = nextFundingDate.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit', hour12: false });
+                    const fundingDateFormatted = nextFundingDate.toLocaleDateString('vi-VN');
+
+                    bestPotentialOpportunityDisplayDiv.innerHTML = `
+                        <p><strong>Coin:</strong> <span>${data.currentSelectedOpportunity.coin}</span></p>
+                        <p><strong>Sàn:</strong> <span>${data.currentSelectedOpportunity.exchanges}</span></p>
+                        <p><strong>PnL ước tính:</strong> <span>${data.currentSelectedOpportunity.estimatedPnl?.toFixed(2) || 'N/A'}%</span></p>
+                        <p><strong>Tới giờ funding:</strong> <span>${fundingTimeFormatted} ngày ${fundingDateFormatted}</span></p>
+                        <p><strong>Volume ước tính:</strong> <span>${data.currentSelectedOpportunity.details.volume?.toFixed(2) || 'N/A'} USDT</span></p>
+                        <p><strong>Max Lev sẽ mở:</strong> <span>${data.currentSelectedOpportunity.commonLeverage || 'N/A'}x</span></p>
+                        <p><strong>Short Funding Rate:</strong> <span>${data.currentSelectedOpportunity.details.shortFundingRate?.toFixed(4) || 'N/A'}%</span></p>
+                        <p><strong>Long Funding Rate:</strong> <span>${data.currentSelectedOpportunity.details.longFundingRate?.toFixed(4) || 'N/A'}%</span></p>
+                        <p><strong>Chênh lệch Funding:</strong> <span>${data.currentSelectedOpportunity.fundingDiff?.toFixed(4) || 'N/A'}%</span></p>
                     `;
                 } else {
-                    bestPotentialOpportunityDisplay.textContent = 'Không có cơ hội nào khả dụng.';
+                    bestPotentialOpportunityDisplayDiv.textContent = 'Không có cơ hội nào khả dụng.';
                 }
 
-                // Cập nhật chi tiết giao dịch đang mở
-                const currentTradeDetailsDisplay = document.getElementById('currentTradeDetailsDisplay');
-                if (data.currentTradeDetails) {
-                    currentTradeDetailsDisplay.innerHTML = `
-                        <p><strong>Coin:</strong> ${data.currentTradeDetails.coin}</p>
-                        <p><strong>Short Sàn:</strong> ${data.currentTradeDetails.shortExchange}</p>
-                        <p><strong>Long Sàn:</strong> ${data.currentTradeDetails.longExchange}</p>
-                        <p><strong>Trạng thái:</strong> ${data.currentTradeDetails.status}</p>
-                        <pre>${JSON.stringify(data.currentTradeDetails, null, 2)}</pre>
-                    `;
-                } else {
-                    currentTradeDetailsDisplay.textContent = 'Không có giao dịch nào đang mở.';
-                }
+                // NOTE: "Giao dịch Đang mở" đã được gỡ bỏ khỏi HTML theo yêu cầu của bạn
 
                 // Cập nhật lịch sử giao dịch
                 const tradeHistoryBody = document.getElementById('tradeHistoryBody');
