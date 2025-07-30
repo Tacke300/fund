@@ -1,17 +1,420 @@
-} else if (req.url === '/bot-api/start' && req.method === 'POST') {
-    let body = '';
-    req.on('data', chunk => { body += chunk.toString(); });
-    req.on('end', () => {
-        try {
-            // Đảm bảo body là JSON hợp lệ, nếu không thì mặc định là rỗng
-            const data = body ? JSON.parse(body) : {}; 
-            const started = startBot();
-            res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ success: started, message: started ? 'Bot đã khởi động.' : 'Bot đã chạy.' }));
-        } catch (error) {
-            console.error('[BOT_SERVER] ❌ Lỗi xử lý POST /bot-api/start:', error.message);
-            res.writeHead(400, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ success: false, message: 'Dữ liệu yêu cầu không hợp lệ hoặc lỗi server.' }));
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bot Arbitrage UI - Dark Theme</title>
+    <style>
+        /* Global Styles */
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #1a1a2e; /* Very dark blue-purple for background */
+            color: #e0e0e0; /* Light grey for main text */
+            margin: 0;
+            padding: 20px;
+            line-height: 1.6;
+            display: flex;
+            justify-content: center;
+            align-items: flex-start;
+            min-height: 100vh;
         }
-    });
-}
+
+        .container {
+            max-width: 1200px;
+            width: 100%;
+            margin: 20px auto;
+            background-color: #2e304b; /* Slightly lighter dark blue-purple for main container */
+            border-radius: 12px;
+            box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5);
+            padding: 30px 40px;
+            box-sizing: border-box;
+        }
+
+        h1, h2 {
+            color: #9a67ea; /* Primary purple for headings */
+            text-align: center;
+            margin-bottom: 30px;
+            font-weight: 600;
+        }
+
+        /* Control Buttons */
+        .controls {
+            text-align: center;
+            margin-bottom: 40px;
+        }
+
+        .controls button {
+            padding: 14px 30px;
+            font-size: 1.2em;
+            font-weight: bold;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: background-color 0.3s ease, transform 0.2s ease, box-shadow 0.3s ease;
+            margin: 0 15px;
+            color: #fff;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        #startBotBtn {
+            background-color: #9a67ea; /* Purple for Start */
+            box-shadow: 0 4px 10px rgba(154, 103, 234, 0.4);
+        }
+        #startBotBtn:hover {
+            background-color: #7d4fd9;
+            transform: translateY(-3px);
+            box-shadow: 0 6px 15px rgba(154, 103, 234, 0.6);
+        }
+
+        #stopBotBtn {
+            background-color: #ef5350; /* Red for Stop */
+            box-shadow: 0 4px 10px rgba(239, 83, 80, 0.4);
+        }
+        #stopBotBtn:hover {
+            background-color: #d32f2f;
+            transform: translateY(-3px);
+            box-shadow: 0 6px 15px rgba(239, 83, 80, 0.6);
+        }
+
+        /* Status Cards Grid */
+        .status-cards {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 25px;
+            margin-bottom: 40px;
+        }
+
+        .card {
+            background-color: #3e405e; /* Lighter dark blue-purple for cards */
+            border-radius: 10px;
+            padding: 25px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(154, 103, 234, 0.3); /* Purple tinted border */
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 6px 18px rgba(0, 0, 0, 0.4);
+        }
+
+        .card h3 {
+            color: #9a67ea; /* Purple for card titles */
+            margin-top: 0;
+            border-bottom: 1px solid rgba(154, 103, 234, 0.2);
+            padding-bottom: 12px;
+            margin-bottom: 20px;
+            font-size: 1.4em;
+            font-weight: 500;
+        }
+
+        .card p {
+            margin: 10px 0;
+            color: #abb2bf; /* Grey text for card content */
+        }
+
+        .card strong {
+            color: #e0e0e0; /* Brighter grey for strong text */
+        }
+
+        .card pre {
+            background-color: #282c34; /* Darker background for code/JSON blocks */
+            padding: 15px;
+            border-radius: 8px;
+            overflow-x: auto;
+            font-size: 0.9em;
+            color: #c0c5d2;
+            word-wrap: break-word; /* Ensure long lines wrap */
+            white-space: pre-wrap; /* Ensure preformatted text wraps */
+        }
+
+        /* Trade History Table */
+        .trade-history h2 {
+            margin-bottom: 20px;
+        }
+
+        .trade-history table {
+            width: 100%;
+            border-collapse: separate; /* Use separate for rounded corners on rows */
+            border-spacing: 0;
+            margin-top: 20px;
+            background-color: #3e405e; /* Same as card background */
+            border-radius: 10px;
+            overflow: hidden; /* Ensures rounded corners are visible */
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+        }
+
+        .trade-history th, .trade-history td {
+            padding: 15px 20px;
+            text-align: left;
+            border-bottom: 1px solid rgba(154, 103, 234, 0.2);
+            color: #abb2bf;
+        }
+
+        .trade-history th {
+            background-color: #4a4c6a; /* Darker grey-purple for table headers */
+            color: #e0e0e0;
+            font-weight: bold;
+            text-transform: uppercase;
+            font-size: 0.95em;
+            letter-spacing: 0.5px;
+        }
+
+        .trade-history tbody tr:last-child td {
+            border-bottom: none; /* No border for the last row */
+        }
+
+        .trade-history tbody tr:hover {
+            background-color: #4a4c6a; /* Hover effect for table rows */
+            cursor: pointer;
+        }
+
+        /* Utility Classes for Text Colors */
+        .text-green { color: #50fa7b; } /* Bright green for positive values/running status */
+        .text-red { color: #ff5555; } /* Red for negative values/stopped status */
+        .text-yellow { color: #f1fa8c; } /* Yellow for warnings/pending status */
+        .text-purple { color: #bd93f9; } /* Lighter purple for specific highlights */
+
+        /* Responsive adjustments */
+        @media (max-width: 768px) {
+            .container {
+                padding: 20px;
+            }
+            .controls button {
+                margin: 10px 5px;
+                font-size: 1.1em;
+                padding: 12px 20px;
+            }
+            .status-cards {
+                grid-template-columns: 1fr; /* Single column on small screens */
+            }
+            .trade-history th, .trade-history td {
+                padding: 10px 15px;
+                font-size: 0.9em;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>📈 Bot Arbitrage Trading</h1>
+        </header>
+
+        <main>
+            <section class="controls">
+                <button id="startBotBtn">▶️ Start Bot</button>
+                <button id="stopBotBtn">⏸️ Stop Bot</button>
+            </section>
+
+            <section class="status-cards">
+                <!-- Bot State Card -->
+                <div class="card" id="botStateCard">
+                    <h3>Trạng thái Bot</h3>
+                    <p>Hiện tại: <strong id="botStateDisplay">Đang tải...</strong></p>
+                </div>
+
+                <!-- Balances Card -->
+                <div class="card">
+                    <h3>Số dư Tài khoản</h3>
+                    <div id="balancesDisplay">
+                        <p>Đang tải số dư...</p>
+                    </div>
+                </div>
+
+                <!-- Cumulative PnL Card -->
+                <div class="card">
+                    <h3>PnL Tổng hợp</h3>
+                    <p>Tổng PnL từ khi chạy: <strong id="cumulativePnlDisplay" class="text-yellow">Đang tải...</strong></p>
+                </div>
+
+                <!-- Current Selected Opportunity Card -->
+                <div class="card">
+                    <h3>Cơ hội Arbitrage Đang chọn</h3>
+                    <div id="currentOpportunityDisplay">
+                        <p>Không có cơ hội nào đang được chọn.</p>
+                    </div>
+                </div>
+
+                <!-- Current Trade Details Card -->
+                <div class="card">
+                    <h3>Chi tiết Giao dịch Hiện tại</h3>
+                    <div id="currentTradeDetailsDisplay">
+                        <p>Không có giao dịch nào đang mở.</p>
+                    </div>
+                </div>
+            </section>
+
+            <section class="trade-history">
+                <h2>Lịch sử Giao dịch</h2>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Thời gian</th>
+                            <th>Coin</th>
+                            <th>Sàn giao dịch</th>
+                            <th>Funding Diff</th>
+                            <th>PnL ước tính</th>
+                            <th>PnL thực tế</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tradeHistoryBody">
+                        <tr>
+                            <td colspan="6" style="text-align: center; font-style: italic;">Đang tải lịch sử giao dịch...</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </section>
+        </main>
+    </div>
+
+    <script>
+        // Hàm để lấy và cập nhật trạng thái bot từ server
+        async function updateBotStatus() {
+            try {
+                const response = await fetch('/bot-api/status');
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                const data = await response.json();
+                console.log('Bot status data received:', data);
+
+                // Cập nhật trạng thái Bot
+                const botStateDisplay = document.getElementById('botStateDisplay');
+                botStateDisplay.textContent = data.botState;
+                const botStateCard = document.getElementById('botStateCard');
+                // Reset classes and add specific color class based on state
+                botStateCard.classList.remove('text-green', 'text-red', 'text-yellow');
+                if (data.botState === 'RUNNING') {
+                    botStateDisplay.classList.add('text-green');
+                } else if (data.botState === 'STOPPED') {
+                    botStateDisplay.classList.add('text-red');
+                } else {
+                    botStateDisplay.classList.add('text-yellow');
+                }
+
+                // Cập nhật số dư tài khoản
+                let balancesHtml = '';
+                if (data.balances) {
+                    for (const exchangeId in data.balances) {
+                        if (exchangeId === 'totalOverall') continue; // Skip totalOverall for individual display
+                        const bal = data.balances[exchangeId];
+                        balancesHtml += `<p><strong>${exchangeId.toUpperCase()}:</strong> Tổng ${bal.total.toFixed(2)} USDT, Khả dụng ${bal.available.toFixed(2)} USDT</p>`;
+                    }
+                    balancesHtml += `<p><strong>Tổng số dư khả dụng (Tất cả sàn):</strong> ${data.balances.totalOverall.toFixed(2)} USDT</p>`;
+                } else {
+                    balancesHtml += '<p>Không có dữ liệu số dư.</p>';
+                }
+                balancesHtml += `<p><strong>Số dư ban đầu của phiên:</strong> ${data.initialTotalBalance.toFixed(2)} USDT</p>`;
+                document.getElementById('balancesDisplay').innerHTML = balancesHtml;
+
+                // Cập nhật PnL tổng hợp
+                const cumulativePnlElement = document.getElementById('cumulativePnlDisplay');
+                cumulativePnlElement.textContent = data.cumulativePnl.toFixed(2) + ' USDT';
+                cumulativePnlElement.classList.remove('text-green', 'text-red', 'text-yellow'); // Reset classes
+                if (data.cumulativePnl >= 0) {
+                    cumulativePnlElement.classList.add('text-green');
+                } else {
+                    cumulativePnlElement.classList.add('text-red');
+                }
+
+                // Cập nhật cơ hội arbitrage đang chọn
+                const opportunityDisplay = document.getElementById('currentOpportunityDisplay');
+                if (data.currentSelectedOpportunity) {
+                    opportunityDisplay.innerHTML = `<pre>${JSON.stringify(data.currentSelectedOpportunity, null, 2)}</pre>`;
+                } else {
+                    opportunityDisplay.textContent = 'Không có cơ hội nào đang được chọn.';
+                }
+
+                // Cập nhật chi tiết giao dịch hiện tại
+                const tradeDetailsDisplay = document.getElementById('currentTradeDetailsDisplay');
+                if (data.currentTradeDetails) {
+                    tradeDetailsDisplay.innerHTML = `<pre>${JSON.stringify(data.currentTradeDetails, null, 2)}</pre>`;
+                } else {
+                    tradeDetailsDisplay.textContent = 'Không có giao dịch nào đang mở.';
+                }
+
+                // Cập nhật lịch sử giao dịch
+                const tradeHistoryBody = document.getElementById('tradeHistoryBody');
+                tradeHistoryBody.innerHTML = ''; // Xóa các hàng cũ
+                if (data.tradeHistory && data.tradeHistory.length > 0) {
+                    data.tradeHistory.forEach(trade => {
+                        const row = tradeHistoryBody.insertRow();
+                        row.insertCell().textContent = new Date(trade.timestamp).toLocaleString('vi-VN'); // Định dạng ngày giờ Việt Nam
+                        row.insertCell().textContent = trade.coin;
+                        row.insertCell().textContent = trade.exchanges;
+                        row.insertCell().textContent = trade.fundingDiff ? trade.fundingDiff.toFixed(2) + '%' : 'N/A';
+                        row.insertCell().textContent = trade.estimatedPnl ? trade.estimatedPnl.toFixed(2) + '%' : 'N/A';
+                        const actualPnlCell = row.insertCell();
+                        actualPnlCell.textContent = trade.actualPnl ? trade.actualPnl.toFixed(2) + ' USDT' : 'N/A';
+                        if (trade.actualPnl !== undefined && trade.actualPnl !== null) {
+                            actualPnlCell.classList.add(trade.actualPnl >= 0 ? 'text-green' : 'text-red');
+                        }
+                    });
+                } else {
+                    const row = tradeHistoryBody.insertRow();
+                    const cell = row.insertCell();
+                    cell.colSpan = 6;
+                    cell.textContent = 'Chưa có lịch sử giao dịch nào.';
+                    cell.style.textAlign = 'center';
+                    cell.style.fontStyle = 'italic';
+                    cell.style.padding = '20px';
+                }
+
+            } catch (error) {
+                console.error('Lỗi khi lấy trạng thái bot:', error);
+                document.getElementById('botStateDisplay').textContent = 'LỖI KẾT NỐI';
+                document.getElementById('botStateDisplay').classList.add('text-red');
+                // Hiển thị một thông báo lỗi tổng quát nếu cần
+                // alert('Không thể kết nối tới bot server. Vui lòng kiểm tra bot đang chạy.');
+            }
+        }
+
+        // Event Listeners cho nút Start và Stop
+        document.getElementById('startBotBtn').addEventListener('click', async () => {
+            try {
+                const response = await fetch('/bot-api/start', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({}) // Gửi body rỗng nếu không cần dữ liệu cụ thể
+                });
+                const data = await response.json();
+                console.log('Phản hồi Start Bot:', data);
+                alert(data.message);
+                if (data.success) {
+                    updateBotStatus(); // Cập nhật trạng thái ngay lập tức
+                }
+            } catch (error) {
+                console.error('Lỗi khi khởi động bot:', error);
+                alert('Lỗi khi khởi động bot: ' + error.message);
+            }
+        });
+
+        document.getElementById('stopBotBtn').addEventListener('click', async () => {
+            try {
+                const response = await fetch('/bot-api/stop', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({}) // Gửi body rỗng
+                });
+                const data = await response.json();
+                console.log('Phản hồi Stop Bot:', data);
+                alert(data.message);
+                if (data.success) {
+                    updateBotStatus(); // Cập nhật trạng thái ngay lập tức
+                }
+            } catch (error) {
+                console.error('Lỗi khi dừng bot:', error);
+                alert('Lỗi khi dừng bot: ' + error.message);
+            }
+        });
+
+        // Tải trạng thái ban đầu khi trang được load
+        document.addEventListener('DOMContentLoaded', () => {
+            updateBotStatus();
+            // Thiết lập interval để tự động cập nhật trạng thái mỗi 5 giây
+            setInterval(updateBotStatus, 5000); 
+        });
+    </script>
+</body>
+</html>
