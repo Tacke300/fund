@@ -74,10 +74,10 @@ let allCurrentOpportunities = []; // Danh sách tất cả cơ hội từ server
 
 // Biến cờ để đảm bảo các hành động theo thời gian chỉ chạy 1 lần mỗi phút/giây
 const LAST_ACTION_TIMESTAMP = {
-    dataFetch: 0,
-    selectionTime: 0,
-    tradeExecution: 0,
-    closeTrade: 0,
+    dataFetch: 0, // Lưu giây cuối cùng của fetch dữ liệu
+    selectionTime: 0, // Lưu phút cuối cùng của việc chọn cơ hội thực thi
+    tradeExecution: 0, // Lưu phút cuối cùng của việc mở lệnh
+    closeTrade: 0, // Lưu phút cuối cùng của việc đóng lệnh
 };
 
 // CCXT Exchange instances
@@ -131,6 +131,8 @@ async function updateBalances() {
             await exchange.loadMarkets(true);
             
             const accountBalance = await exchange.fetchBalance({ 'type': 'future' }); 
+            // CCXT thường trả về balance âm dưới dạng số dư có thể do PnL chưa thực hiện bị lỗ hoặc tài sản vay
+            // Để tính khả dụng cho giao dịch mới, ta chỉ lấy phần free và đảm bảo nó không âm
             const usdtFreeBalance = accountBalance.free?.USDT || 0; 
             const usdtTotalBalance = accountBalance.total?.USDT || 0; 
 
@@ -179,7 +181,7 @@ async function processServerData(serverData) {
 
             safeLog('log', `  - Coin: ${op.coin}, Sàn: ${op.exchanges}, PnL ước tính: ${op.estimatedPnl?.toFixed(2) || 'N/A'}%, Funding trong: ${minutesUntilFunding.toFixed(1)} phút.`);
             safeLog('log', `    Dự kiến: Short: ${op.details.shortExchange}, Long: ${op.details.longExchange}, Volume ước tính: ${op.details.volume?.toFixed(2) || 'N/A'} USDT`);
-            safeLog('log', `    SL/TP: (Cần cài đặt logic TP/SL của bạn)`);
+            safeLog('log', `    TP/SL: (Cần cài đặt logic TP/SL của bạn)`);
 
             // Logic cho bestForDisplay: funding gần nhất, nếu bằng thì PnL cao nhất
             if (!bestForDisplay ||
@@ -191,7 +193,7 @@ async function processServerData(serverData) {
         }
     });
 
-    allCurrentOpportunities = tempAllOpportunities; // Cập nhật danh sách cơ hội toàn cục
+    allCurrentOpportunities = tempAllOpportunities; // Cập nhật danh sách cơ hội toàn cục cho logic thực thi
 
     if (bestForDisplay) {
         bestPotentialOpportunityForDisplay = bestForDisplay;
@@ -473,16 +475,15 @@ async function mainBotLoop() {
         return;
     }
 
-    const now = Date.now();
+    const now = new Date();
     const currentMinute = now.getUTCMinutes();
     const currentSecond = now.getUTCSeconds();
+    
+    const minuteAligned = Math.floor(now.getTime() / (60 * 1000)); // Key theo phút để kiểm soát các hành động 1 lần/phút
 
     // Logic cập nhật dữ liệu từ server chính
-    const shouldFetchDataNow = (currentSecond % DATA_FETCH_INTERVAL_SECONDS === 0);
-    const minuteAlignedForFetch = Math.floor(now.getTime() / (60 * 1000)); // Key theo phút
-
-    // Chỉ fetch nếu đã đến thời điểm và chưa fetch trong giây hiện tại
-    if (shouldFetchDataNow && LAST_ACTION_TIMESTAMP.dataFetch !== currentSecond) {
+    // Fetch dữ liệu mỗi DATA_FETCH_INTERVAL_SECONDS (5 giây) một lần.
+    if (currentSecond % DATA_FETCH_INTERVAL_SECONDS === 0 && LAST_ACTION_TIMESTAMP.dataFetch !== currentSecond) {
         LAST_ACTION_TIMESTAMP.dataFetch = currentSecond; // Cập nhật thời gian fetch
 
         // Log rõ ràng hơn việc fetch dữ liệu
@@ -499,19 +500,18 @@ async function mainBotLoop() {
         }
     }
 
-    // Logic LỰA CHỌN CƠ HỘI ĐỂ THỰC THI (chỉ vào phút 50)
+    // Logic LỰA CHỌN CƠ HỘI ĐỂ THỰC THI (chỉ vào phút 50:00-50:04)
     // Đảm bảo chỉ chọn nếu bot đang chạy, chưa có giao dịch mở và chưa có cơ hội nào được chọn để thực thi
     if (currentMinute === 50 && currentSecond >= 0 && currentSecond < 5 && botState === 'RUNNING' && !currentTradeDetails && !currentSelectedOpportunityForExecution) {
         // Biến cờ để đảm bảo logic chọn và kích hoạt chỉ chạy 1 lần duy nhất tại giây 0-4 của phút 50
-        if (LAST_ACTION_TIMESTAMP.selectionTime !== minuteAlignedForFetch) {
-            LAST_ACTION_TIMESTAMP.selectionTime = minuteAlignedForFetch;
+        if (LAST_ACTION_TIMESTAMP.selectionTime !== minuteAligned) {
+            LAST_ACTION_TIMESTAMP.selectionTime = minuteAligned;
 
             safeLog('log', `[BOT_LOOP] 🌟 Kích hoạt lựa chọn cơ hội để THỰC HIỆN tại phút ${currentMinute}:${currentSecond} giây.`);
             
             let bestOpportunityFoundForExecution = null;
             // Duyệt qua tất cả các cơ hội đã fetch để tìm cái tốt nhất đủ điều kiện thực thi
             for (const op of allCurrentOpportunities) {
-                // minutesUntilFunding đã được tính và gắn vào op.details trong processServerData
                 const minutesUntilFunding = op.details.minutesUntilFunding; 
 
                 // Kiểm tra TẤT CẢ các điều kiện thực thi
@@ -554,8 +554,8 @@ async function mainBotLoop() {
     // Đảm bảo chỉ mở lệnh nếu đã có currentSelectedOpportunityForExecution VÀ chưa có trade nào đang mở
     if (currentMinute === 59 && currentSecond >= 55 && currentSecond < 59 && botState === 'RUNNING' && currentSelectedOpportunityForExecution && !currentTradeDetails) {
         // Biến cờ để đảm bảo logic mở lệnh chỉ chạy 1 lần duy nhất
-        if (LAST_ACTION_TIMESTAMP.tradeExecution !== minuteAlignedForFetch) {
-            LAST_ACTION_TIMESTAMP.tradeExecution = minuteAlignedForFetch;
+        if (LAST_ACTION_TIMESTAMP.tradeExecution !== minuteAligned) {
+            LAST_ACTION_TIMESTAMP.tradeExecution = minuteAligned;
 
             safeLog('log', `[BOT_LOOP] ⚡ Kích hoạt mở lệnh cho cơ hội ${currentSelectedOpportunityForExecution.coin} vào phút 59:55.`);
             botState = 'EXECUTING_TRADES';
@@ -575,8 +575,8 @@ async function mainBotLoop() {
     // Đóng lệnh và tính PnL sau giờ funding (phút 00:05 của giờ tiếp theo)
     if (currentMinute === 0 && currentSecond >= 5 && currentSecond < 10 && botState === 'RUNNING' && currentTradeDetails?.status === 'OPEN') {
         // Biến cờ để đảm bảo logic đóng lệnh chỉ chạy 1 lần duy nhất
-        if (LAST_ACTION_TIMESTAMP.closeTrade !== minuteAlignedForFetch) {
-            LAST_ACTION_TIMESTAMP.closeTrade = minuteAlignedForFetch;
+        if (LAST_ACTION_TIMESTAMP.closeTrade !== minuteAligned) {
+            LAST_ACTION_TIMESTAMP.closeTrade = minuteAligned;
 
             safeLog('log', '[BOT_LOOP] 🛑 Kích hoạt đóng lệnh và tính PnL vào phút 00:05.');
             botState = 'CLOSING_TRADES';
