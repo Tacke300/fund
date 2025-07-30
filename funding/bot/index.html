@@ -37,10 +37,38 @@
             font-weight: 600;
         }
 
-        /* Control Buttons */
+        /* Control Buttons and Input */
         .controls {
             text-align: center;
             margin-bottom: 40px;
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            align-items: center;
+            gap: 20px; /* Space between items */
+        }
+
+        .controls label {
+            font-size: 1.1em;
+            color: #e0e0e0;
+            margin-right: 10px;
+        }
+
+        .controls input[type="number"] {
+            padding: 10px 15px;
+            font-size: 1em;
+            border: 1px solid #5a5d7e;
+            border-radius: 8px;
+            background-color: #3e405e;
+            color: #e0e0e0;
+            width: 80px;
+            text-align: center;
+            -moz-appearance: textfield; /* Hide arrows for Firefox */
+        }
+        .controls input[type="number"]::-webkit-outer-spin-button,
+        .controls input[type="number"]::-webkit-inner-spin-button {
+            -webkit-appearance: none;
+            margin: 0;
         }
 
         .controls button {
@@ -51,7 +79,7 @@
             border-radius: 8px;
             cursor: pointer;
             transition: background-color 0.3s ease, transform 0.2s ease, box-shadow 0.3s ease;
-            margin: 0 15px;
+            margin: 0 5px; /* Adjust margin for buttons */
             color: #fff;
             text-transform: uppercase;
             letter-spacing: 0.5px;
@@ -133,18 +161,27 @@
             margin: 5px 0;
             font-size: 0.95em;
             display: flex; /* For horizontal layout */
+            justify-content: space-between; /* Space out label and value */
             align-items: center;
+            border-bottom: 1px dashed rgba(154, 103, 234, 0.1); /* Subtle separator */
+            padding-bottom: 5px;
         }
+        .opportunity-details p:last-child {
+            border-bottom: none;
+            padding-bottom: 0;
+        }
+
         .opportunity-details strong {
             flex: 0 0 160px; /* Fixed width for labels */
             margin-right: 10px;
             color: #e0e0e0;
+            text-align: left;
         }
         .opportunity-details span {
             flex: 1; /* Take remaining space */
             color: #abb2bf;
+            text-align: right;
         }
-
 
         /* Trade History Table */
         .trade-history h2 {
@@ -198,13 +235,22 @@
             .container {
                 padding: 20px;
             }
+            .controls {
+                flex-direction: column;
+                gap: 15px;
+            }
             .controls button {
-                margin: 10px 5px;
-                font-size: 1.1em;
-                padding: 12px 20px;
+                margin: 0; /* Remove horizontal margin */
+                width: 100%; /* Full width buttons */
+            }
+            .controls input[type="number"] {
+                width: 100%;
             }
             .status-cards {
                 grid-template-columns: 1fr; /* Single column on small screens */
+            }
+            .opportunity-details strong {
+                flex: 0 0 120px;
             }
             .trade-history th, .trade-history td {
                 padding: 10px 15px;
@@ -221,6 +267,10 @@
 
         <main>
             <section class="controls">
+                <div>
+                    <label for="percentageToUse">Phần trăm vốn mở lệnh (%):</label>
+                    <input type="number" id="percentageToUse" value="50" min="1" max="100">
+                </div>
                 <button id="startBotBtn">▶️ Start Bot</button>
                 <button id="stopBotBtn">⏸️ Stop Bot</button>
             </section>
@@ -357,8 +407,6 @@
                     bestPotentialOpportunityDisplayDiv.textContent = 'Không có cơ hội nào khả dụng.';
                 }
 
-                // NOTE: "Giao dịch Đang mở" đã được gỡ bỏ khỏi HTML theo yêu cầu của bạn
-
                 // Cập nhật lịch sử giao dịch
                 const tradeHistoryBody = document.getElementById('tradeHistoryBody');
                 tradeHistoryBody.innerHTML = ''; 
@@ -395,11 +443,16 @@
 
         // Event Listeners cho nút Start và Stop
         document.getElementById('startBotBtn').addEventListener('click', async () => {
+            const percentageToUse = document.getElementById('percentageToUse').value;
+            if (percentageToUse < 1 || percentageToUse > 100) {
+                alert('Phần trăm vốn mở lệnh phải từ 1 đến 100.');
+                return;
+            }
             try {
                 const response = await fetch('/bot-api/start', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({}) 
+                    body: JSON.stringify({ percentageToUse: parseFloat(percentageToUse) }) 
                 });
                 const data = await response.json();
                 console.log('Phản hồi Start Bot:', data);
