@@ -12,7 +12,7 @@ const {
     bingxApiKey, bingxApiSecret,
     okxApiKey, okxApiSecret, okxPassword,
     bitgetApiKey, bitgetApiSecret, bitgetApiPassword
-} = require('./config.js');
+} = require('../config.js');
 
 const BOT_PORT = 5006; // Cổng cho Bot UI (khác với cổng của Server chính)
 const SERVER_DATA_URL = 'http://localhost:5005/api/data'; // Địa chỉ Server chính
