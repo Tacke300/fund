@@ -49,10 +49,8 @@ const MIN_MINUTES_FOR_EXECUTION = 15; // Phải còn ít nhất 15 phút tới f
 const FUND_TRANSFER_MIN_AMOUNT = 10; // Số tiền tối thiểu cho mỗi lần chuyển tiền qua BEP20
 const BEP20_NETWORK_ID = 'BEP20'; // ID mạng cho BEP20 (Binance Smart Chain)
 
-const DATA_FETCH_INTERVAL_SECONDS = 5; // Cập nhật dữ liệu mỗi 5 giây (nhanh hơn để phát hiện cơ hội)
-const HOURLY_FETCH_TIME_MINUTE = 45; // Mỗi giờ vào phút thứ 45, bot lấy dữ liệu chính (lý do ban đầu bạn muốn)
-// Dòng này đã được di chuyển để khắc phục lỗi "is not defined"
-const LAST_FETCH_TIME = {}; // Dùng để theo dõi thời điểm fetch cuối cùng cho mỗi loại fetch
+const DATA_FETCH_INTERVAL_SECONDS = 5; // Cập nhật dữ liệu mỗi 5 giây
+const HOURLY_FETCH_TIME_MINUTE = 45; // Mỗi giờ vào phút thứ 45, bot lấy dữ liệu chính
 
 // ----- BIẾN TOÀN CỤC CHO BOT -----
 let botState = 'STOPPED'; // 'STOPPED', 'RUNNING', 'FETCHING_DATA', 'PROCESSING_DATA', 'TRANSFERRING_FUNDS', 'EXECUTING_TRADES', 'CLOSING_TRADES'
@@ -68,8 +66,19 @@ let balances = {
 let initialTotalBalance = 0;
 let cumulativePnl = 0; // PnL từ lúc bot chạy (chỉ tính từ các giao dịch đã đóng)
 let tradeHistory = []; // Lịch sử các chu kỳ giao dịch (tối đa 50)
-let currentSelectedOpportunity = null; // Cơ hội arbitrage đang được chọn
-let currentTradeDetails = null; // Chi tiết giao dịch đang mở
+
+// Biến cho logic lựa chọn cơ hội
+let currentSelectedOpportunityForExecution = null; // Cơ hội được chọn ĐỂ THỰC THI (chỉ được set vào phút 50)
+let bestPotentialOpportunityForDisplay = null; // Cơ hội tốt nhất CHỈ ĐỂ HIỂN THỊ trên UI/log
+let allCurrentOpportunities = []; // Danh sách tất cả cơ hội từ server, đã lọc cơ bản
+
+// Biến cờ để đảm bảo các hành động theo thời gian chỉ chạy 1 lần mỗi phút/giây
+const LAST_ACTION_TIMESTAMP = {
+    dataFetch: 0,
+    selectionTime: 0,
+    tradeExecution: 0,
+    closeTrade: 0,
+};
 
 // CCXT Exchange instances
 const exchanges = {};
@@ -115,27 +124,25 @@ async function fetchDataFromServer() {
 // Hàm cập nhật số dư từ các sàn
 async function updateBalances() {
     safeLog('log', '[BOT] 🔄 Cập nhật số dư từ các sàn...');
-    let currentTotalOverall = 0; // Sử dụng biến tạm để tính toán tổng
+    let currentTotalOverall = 0; 
     for (const id of Object.keys(exchanges)) {
         try {
             const exchange = exchanges[id];
             await exchange.loadMarkets(true);
             
-            // Lấy số dư tổng quát
             const accountBalance = await exchange.fetchBalance({ 'type': 'future' }); 
-            // CCXT thường trả về balance âm dưới dạng số dư có thể do PnL chưa thực hiện bị lỗ hoặc tài sản vay
-            // Để tính khả dụng cho giao dịch mới, ta chỉ lấy phần free và đảm bảo nó không âm
-            const usdtBalance = Math.max(0, accountBalance.free?.USDT || 0); 
-            const usdtTotalBalance = accountBalance.total?.USDT || 0; // Tổng balance có thể bao gồm PnL
+            const usdtFreeBalance = accountBalance.free?.USDT || 0; 
+            const usdtTotalBalance = accountBalance.total?.USDT || 0; 
 
-            balances[id].total = usdtTotalBalance;
-            balances[id].available = usdtBalance; // Chỉ tính phần khả dụng dương
-            
+            // Cập nhật số dư khả dụng (available) chỉ là phần dương để tránh số âm ảnh hưởng đến tổng khả dụng
+            balances[id].available = Math.max(0, usdtFreeBalance); 
+            balances[id].total = usdtTotalBalance; // Total vẫn có thể âm nếu PnL lỗ nặng
+
             balances[id].originalSymbol = {}; 
 
-            currentTotalOverall += usdtBalance; // Cộng dồn số dư khả dụng dương
+            currentTotalOverall += balances[id].available; // Cộng dồn số dư khả dụng dương
 
-            safeLog('log', `[BOT] ✅ ${id.toUpperCase()} Balance: Total ${usdtTotalBalance.toFixed(2)} USDT, Available ${usdtBalance.toFixed(2)} USDT.`);
+            safeLog('log', `[BOT] ✅ ${id.toUpperCase()} Balance: Total ${usdtTotalBalance.toFixed(2)} USDT, Available ${balances[id].available.toFixed(2)} USDT.`);
         } catch (e) {
             safeLog('error', `[BOT] ❌ Lỗi khi lấy số dư ${id.toUpperCase()}: ${e.message}`);
         }
@@ -152,40 +159,49 @@ async function updateBalances() {
 async function processServerData(serverData) {
     if (!serverData || !serverData.arbitrageData) {
         safeLog('warn', '[BOT] Dữ liệu từ server không hợp lệ hoặc thiếu arbitrageData.');
-        currentSelectedOpportunity = null;
+        bestPotentialOpportunityForDisplay = null;
+        allCurrentOpportunities = [];
         return;
     }
 
     const now = Date.now();
-    let bestOpportunityInList = null; // Cơ hội tốt nhất TRONG DANH SÁCH ĐƯỢC LỌC
+    let bestForDisplay = null;
+    const tempAllOpportunities = []; // Dùng để lưu tất cả các cơ hội hợp lệ cơ bản
 
-    safeLog('log', '[BOT] Các cơ hội arbitrage hiện có (chưa lọc theo điều kiện bot):');
+    safeLog('log', '[BOT] --- Các cơ hội arbitrage hiện có (từ server) ---');
     serverData.arbitrageData.forEach(op => {
         const minutesUntilFunding = (op.nextFundingTime - now) / (1000 * 60);
-        safeLog('log', `  - Coin: ${op.coin}, Sàn: ${op.exchanges}, PnL ước tính: ${op.estimatedPnl?.toFixed(2) || 'N/A'}%, Funding trong: ${minutesUntilFunding.toFixed(1)} phút.`);
-        safeLog('log', `    Dự kiến: Short: ${op.details.shortExchange}, Long: ${op.details.longExchange}, Volume ước tính: ${op.details.volume?.toFixed(2) || 'N/A'} USDT`);
-        safeLog('log', `    TP/SL: (Cần cài đặt logic TP/SL của bạn)`);
-    });
 
-    // Lọc và tìm cơ hội tốt nhất thỏa mãn điều kiện bot
-    for (const op of serverData.arbitrageData) {
-        const minutesUntilFunding = (op.nextFundingTime - now) / (1000 * 60);
+        // Lọc cơ bản: PnL phải dương và funding time trong phạm vi quan tâm (0-30 phút)
+        if (op.estimatedPnl > 0 && minutesUntilFunding > 0 && minutesUntilFunding <= MAX_MINUTES_UNTIL_FUNDING) {
+            op.details.minutesUntilFunding = minutesUntilFunding; // Gắn thêm minutesUntilFunding vào op.details
+            tempAllOpportunities.push(op); // Thêm vào danh sách tạm thời
 
-        if (op.estimatedPnl >= MIN_PNL_PERCENTAGE && minutesUntilFunding > MIN_MINUTES_FOR_EXECUTION && minutesUntilFunding <= MAX_MINUTES_UNTIL_FUNDING) {
-            if (!bestOpportunityInList || op.estimatedPnl > bestOpportunityInList.estimatedPnl) {
-                bestOpportunityInList = op;
+            safeLog('log', `  - Coin: ${op.coin}, Sàn: ${op.exchanges}, PnL ước tính: ${op.estimatedPnl?.toFixed(2) || 'N/A'}%, Funding trong: ${minutesUntilFunding.toFixed(1)} phút.`);
+            safeLog('log', `    Dự kiến: Short: ${op.details.shortExchange}, Long: ${op.details.longExchange}, Volume ước tính: ${op.details.volume?.toFixed(2) || 'N/A'} USDT`);
+            safeLog('log', `    SL/TP: (Cần cài đặt logic TP/SL của bạn)`);
+
+            // Logic cho bestForDisplay: funding gần nhất, nếu bằng thì PnL cao nhất
+            if (!bestForDisplay ||
+                minutesUntilFunding < bestForDisplay.details.minutesUntilFunding || // Closer funding takes precedence
+                (minutesUntilFunding === bestForDisplay.details.minutesUntilFunding && op.estimatedPnl > bestForDisplay.estimatedPnl) // If same funding, higher PnL
+            ) {
+                bestForDisplay = op;
             }
         }
+    });
+
+    allCurrentOpportunities = tempAllOpportunities; // Cập nhật danh sách cơ hội toàn cục
+
+    if (bestForDisplay) {
+        bestPotentialOpportunityForDisplay = bestForDisplay;
+        safeLog('log', `[BOT] ✨ Cơ hội tốt nhất ĐỂ HIỂN THỊ (Gần funding nhất & PnL cao nhất): ${bestForDisplay.coin} trên ${bestForDisplay.exchanges}, PnL ước tính: ${bestForDisplay.estimatedPnl.toFixed(2)}%, Funding trong ${bestForDisplay.details.minutesUntilFunding.toFixed(1)} phút.`);
+    } else {
+        bestPotentialOpportunityForDisplay = null;
+        safeLog('log', '[BOT] 🔍 Không có cơ hội nào khả dụng để hiển thị (PnL dương, Funding trong 0-30 phút).');
     }
 
-    if (bestOpportunityInList) {
-        safeLog('log', `[BOT] 🎯 Cơ hội tốt nhất ĐỦ ĐIỀU KIỆN được tìm thấy: ${bestOpportunityInList.coin} trên ${bestOpportunityInList.exchanges}, PnL ước tính: ${bestOpportunityInList.estimatedPnl.toFixed(2)}%, Funding trong ${bestOpportunityInList.details.minutesUntilFunding.toFixed(1)} phút.`);
-        // Cập nhật currentSelectedOpportunity để nó được bot xử lý vào đúng phút 50/59
-        currentSelectedOpportunity = bestOpportunityInList;
-    } else {
-        safeLog('log', `[BOT] 🔎 Không tìm thấy cơ hội arbitrage nào đủ điều kiện (PnL >= ${MIN_PNL_PERCENTAGE}%, Funding giữa ${MIN_MINUTES_FOR_EXECUTION}-${MAX_MINUTES_UNTIL_FUNDING} phút tới).`);
-        currentSelectedOpportunity = null;
-    }
+    // currentSelectedOpportunityForExecution KHÔNG được set ở đây. Nó sẽ được set vào phút 50.
 }
 
 // Hàm quản lý và chuyển tiền giữa các sàn
@@ -197,13 +213,13 @@ async function manageFundsAndTransfer(opportunity, percentageToUse) {
     }
 
     const [shortExchangeId, longExchangeId] = opportunity.exchanges.split(' / ').map(id => {
-        // Map 'binance' từ server data sang 'binanceusdm' internal ID
-        return id.toLowerCase() === 'binance' ? 'binanceusdm' : id; 
+        // Map 'binance' từ server data sang 'binanceusdm' internal ID của CCXT
+        return id.toLowerCase() === 'binance' ? 'binanceusdm' : id.toLowerCase(); 
     });
 
     safeLog('log', `[BOT_TRANSFER] Bắt đầu quản lý và chuyển tiền cho ${opportunity.coin} giữa ${shortExchangeId} và ${longExchangeId}.`);
     
-    await updateBalances(); 
+    await updateBalances(); // Cập nhật số dư mới nhất
 
     // Chia đôi tổng số dư khả dụng dương để chuyển sang 2 sàn chính
     const targetBalancePerExchange = balances.totalOverall / 2; 
@@ -236,7 +252,7 @@ async function manageFundsAndTransfer(opportunity, percentageToUse) {
                     if (!depositAddress || depositAddress.startsWith('0xYOUR_')) { 
                         safeLog('error', `[BOT_TRANSFER] ❌ Thiếu hoặc chưa điền địa chỉ nạp tiền BEP20 THẬT SỰ cho ${targetExchangeToFund}. Vui lòng cập nhật balance.js`); 
                         fundsTransferredSuccessfully = false;
-                        break; // Dừng vòng lặp for nếu có lỗi cấu hình địa chỉ ví
+                        break; 
                     }
 
                     safeLog('log', `[BOT_TRANSFER] Đang cố gắng chuyển ${amountToTransfer.toFixed(2)} USDT từ ${sourceExchangeId} sang ${targetExchangeToFund} (${depositAddress}) qua BEP20...`);
@@ -250,14 +266,11 @@ async function manageFundsAndTransfer(opportunity, percentageToUse) {
                         );
                         safeLog('log', `[BOT_TRANSFER] ✅ Yêu cầu rút tiền hoàn tất từ ${sourceExchangeId} sang ${targetExchangeToFund}. ID giao dịch: ${withdrawResult.id}`);
                         
-                        // Đợi một khoảng thời gian nhất định để giao dịch blockchain có thể được xác nhận
-                        // KHUYẾN CÁO: Trong thực tế, bạn cần một cơ chế kiểm tra trạng thái nạp tiền (deposit status) từ sàn nhận
-                        // thay vì chỉ đợi cứng một khoảng thời gian. CCXT không hỗ trợ kiểm tra nạp tiền dễ dàng.
-                        await sleep(60000); // Đợi 60 giây (1 phút)
+                        await sleep(60000); // Đợi 60 giây (1 phút) để giao dịch blockchain có thể được xác nhận
                     } catch (transferError) {
                         safeLog('error', `[BOT_TRANSFER] ❌ Lỗi khi chuyển tiền từ ${sourceExchangeId} sang ${targetExchangeToFund}: ${transferError.message}`);
                         fundsTransferredSuccessfully = false;
-                        break; // Dừng vòng lặp for nếu có lỗi chuyển tiền
+                        break; 
                     }
                     await updateBalances(); // Cập nhật lại số dư sau khi chuyển (hy vọng tiền đã đến)
                 }
@@ -426,8 +439,8 @@ async function closeTradesAndCalculatePnL() {
             id: Date.now(),
             coin: coin,
             exchanges: `${shortExchange}/${longExchange}`,
-            fundingDiff: currentSelectedOpportunity?.fundingDiff,
-            estimatedPnl: currentSelectedOpportunity?.estimatedPnl,
+            fundingDiff: currentSelectedOpportunityForExecution?.fundingDiff, // Dùng currentSelectedOpportunityForExecution
+            estimatedPnl: currentSelectedOpportunityForExecution?.estimatedPnl,
             actualPnl: parseFloat(cyclePnl.toFixed(2)), 
             timestamp: new Date().toISOString()
         });
@@ -441,8 +454,8 @@ async function closeTradesAndCalculatePnL() {
     } catch (e) {
         safeLog('error', `[BOT_PNL] ❌ Lỗi khi đóng vị thế hoặc tính toán PnL: ${e.message}`);
     } finally {
-        currentSelectedOpportunity = null; 
-        currentTradeDetails = null; 
+        currentSelectedOpportunityForExecution = null; // Reset cơ hội thực thi
+        currentTradeDetails = null; // Reset chi tiết giao dịch
         safeLog('log', '[BOT_PNL] Dọn dẹp lệnh chờ và vị thế đã đóng (nếu có).');
     }
 }
@@ -460,83 +473,116 @@ async function mainBotLoop() {
         return;
     }
 
-    const now = new Date();
+    const now = Date.now();
     const currentMinute = now.getUTCMinutes();
     const currentSecond = now.getUTCSeconds();
 
     // Logic cập nhật dữ liệu từ server chính
-    // Fetch dữ liệu mỗi DATA_FETCH_INTERVAL_SECONDS (5 giây) một lần,
-    // HOẶC vào phút HOURLY_FETCH_TIME_MINUTE (phút 45) để đảm bảo cập nhật chính
-    const shouldFetchData = (currentSecond % DATA_FETCH_INTERVAL_SECONDS === 0);
+    const shouldFetchDataNow = (currentSecond % DATA_FETCH_INTERVAL_SECONDS === 0);
+    const minuteAlignedForFetch = Math.floor(now.getTime() / (60 * 1000)); // Key theo phút
 
-    if (shouldFetchData) {
-        // Biến cờ để đảm bảo mỗi "khoảng thời gian fetch" (ví dụ: mỗi 5 giây) chỉ fetch một lần
-        // nếu không sẽ fetch liên tục trong suốt 1 giây đó
-        const currentFetchIntervalKey = Math.floor(now.getTime() / (DATA_FETCH_INTERVAL_SECONDS * 1000));
-        if (LAST_FETCH_TIME.dataFetch !== currentFetchIntervalKey) {
-            LAST_FETCH_TIME.dataFetch = currentFetchIntervalKey;
+    // Chỉ fetch nếu đã đến thời điểm và chưa fetch trong giây hiện tại
+    if (shouldFetchDataNow && LAST_ACTION_TIMESTAMP.dataFetch !== currentSecond) {
+        LAST_ACTION_TIMESTAMP.dataFetch = currentSecond; // Cập nhật thời gian fetch
 
-            // Kiểm tra xem có phải là thời gian fetch dữ liệu chính hàng giờ không
-            if (currentMinute === HOURLY_FETCH_TIME_MINUTE && currentSecond < 5) {
-                safeLog('log', `[BOT_LOOP] Kích hoạt cập nhật dữ liệu chính từ server (giờ funding).`);
-            } else {
-                safeLog('log', `[BOT_LOOP] Cập nhật dữ liệu từ server (mỗi ${DATA_FETCH_INTERVAL_SECONDS} giây).`);
-            }
+        // Log rõ ràng hơn việc fetch dữ liệu
+        if (currentMinute === HOURLY_FETCH_TIME_MINUTE && currentSecond < 5) {
+            safeLog('log', `[BOT_LOOP] Kích hoạt cập nhật dữ liệu chính từ server (giờ funding HOURLY_FETCH_TIME_MINUTE).`);
+        } else {
+            safeLog('log', `[BOT_LOOP] Cập nhật dữ liệu từ server (mỗi ${DATA_FETCH_INTERVAL_SECONDS} giây).`);
+        }
+        
+        const fetchedData = await fetchDataFromServer();
+        if (fetchedData) {
+            serverDataGlobal = fetchedData; 
+            await processServerData(serverDataGlobal); // Populates bestPotentialOpportunityForDisplay và allCurrentOpportunities
+        }
+    }
+
+    // Logic LỰA CHỌN CƠ HỘI ĐỂ THỰC THI (chỉ vào phút 50)
+    // Đảm bảo chỉ chọn nếu bot đang chạy, chưa có giao dịch mở và chưa có cơ hội nào được chọn để thực thi
+    if (currentMinute === 50 && currentSecond >= 0 && currentSecond < 5 && botState === 'RUNNING' && !currentTradeDetails && !currentSelectedOpportunityForExecution) {
+        // Biến cờ để đảm bảo logic chọn và kích hoạt chỉ chạy 1 lần duy nhất tại giây 0-4 của phút 50
+        if (LAST_ACTION_TIMESTAMP.selectionTime !== minuteAlignedForFetch) {
+            LAST_ACTION_TIMESTAMP.selectionTime = minuteAlignedForFetch;
+
+            safeLog('log', `[BOT_LOOP] 🌟 Kích hoạt lựa chọn cơ hội để THỰC HIỆN tại phút ${currentMinute}:${currentSecond} giây.`);
             
-            const fetchedData = await fetchDataFromServer();
-            if (fetchedData) {
-                serverDataGlobal = fetchedData; 
-                await processServerData(serverDataGlobal);
+            let bestOpportunityFoundForExecution = null;
+            // Duyệt qua tất cả các cơ hội đã fetch để tìm cái tốt nhất đủ điều kiện thực thi
+            for (const op of allCurrentOpportunities) {
+                // minutesUntilFunding đã được tính và gắn vào op.details trong processServerData
+                const minutesUntilFunding = op.details.minutesUntilFunding; 
+
+                // Kiểm tra TẤT CẢ các điều kiện thực thi
+                if (op.estimatedPnl >= MIN_PNL_PERCENTAGE && 
+                    minutesUntilFunding >= MIN_MINUTES_FOR_EXECUTION && 
+                    minutesUntilFunding <= MAX_MINUTES_UNTIL_FUNDING) {
+                    
+                    if (!bestOpportunityFoundForExecution || op.estimatedPnl > bestOpportunityFoundForExecution.estimatedPnl) {
+                        bestOpportunityFoundForExecution = op;
+                    }
+                }
+            }
+
+            if (bestOpportunityFoundForExecution) {
+                currentSelectedOpportunityForExecution = bestOpportunityFoundForExecution; // Set biến toàn cục cho thực thi
+                safeLog('log', `[BOT_LOOP] ✅ Bot đã chọn cơ hội: ${currentSelectedOpportunityForExecution.coin} trên ${currentSelectedOpportunityForExecution.exchanges} để THỰC HIỆN.`);
+                safeLog('log', `  Thông tin chi tiết: PnL ước tính: ${currentSelectedOpportunityForExecution.estimatedPnl.toFixed(2)}%, Funding trong: ${currentSelectedOpportunityForExecution.details.minutesUntilFunding.toFixed(1)} phút.`);
+                safeLog('log', `  Sàn Short: ${currentSelectedOpportunityForExecution.details.shortExchange}, Sàn Long: ${currentSelectedOpportunityForExecution.details.longExchange}`);
+                safeLog('log', `  Volume ước tính: ${currentSelectedOpportunityForExecution.details.volume?.toFixed(2) || 'N/A'} USDT`);
+
+                // Sau khi chọn, tiến hành chuyển tiền ngay lập tức
+                botState = 'TRANSFERRING_FUNDS'; // Cập nhật trạng thái bot
+                const transferSuccess = await manageFundsAndTransfer(currentSelectedOpportunityForExecution, 50); 
+                if (transferSuccess) {
+                    safeLog('log', '[BOT_LOOP] ✅ Chuyển tiền hoàn tất cho cơ hội đã chọn. Chờ mở lệnh.');
+                } else {
+                    safeLog('error', '[BOT_LOOP] ❌ Lỗi chuyển tiền hoặc không đủ số dư cho cơ hội đã chọn. Hủy chu kỳ này.');
+                    currentSelectedOpportunityForExecution = null; // Hủy cơ hội nếu chuyển tiền thất bại
+                }
+                botState = 'RUNNING'; // Trở lại trạng thái chạy
+            } else {
+                safeLog('log', `[BOT_LOOP] 🔍 Không tìm thấy cơ hội nào đủ điều kiện để THỰC HIỆN tại phút ${currentMinute}.`);
+                currentSelectedOpportunityForExecution = null; // Đảm bảo reset nếu không tìm thấy
             }
         }
     }
 
 
-    // Logic giao dịch (chỉ thực hiện vào các phút cụ thể)
-    // Sẽ chọn và thực hiện giao dịch tại phút 50 (chuẩn bị) và 59 (mở lệnh)
-    if (currentSelectedOpportunity) {
-        // Check if it's already trading (currentTradeDetails is not null)
-        if (currentTradeDetails) {
-            safeLog('log', `[BOT_LOOP] Đang trong giao dịch cho ${currentSelectedOpportunity.coin}. Bỏ qua tìm kiếm cơ hội mới.`);
-        } else {
-            const minutesUntilFunding = (currentSelectedOpportunity.nextFundingTime - now.getTime()) / (1000 * 60);
+    // Thực hiện mở lệnh vào phút 59:55 (sử dụng currentSelectedOpportunityForExecution đã chọn từ phút 50)
+    // Đảm bảo chỉ mở lệnh nếu đã có currentSelectedOpportunityForExecution VÀ chưa có trade nào đang mở
+    if (currentMinute === 59 && currentSecond >= 55 && currentSecond < 59 && botState === 'RUNNING' && currentSelectedOpportunityForExecution && !currentTradeDetails) {
+        // Biến cờ để đảm bảo logic mở lệnh chỉ chạy 1 lần duy nhất
+        if (LAST_ACTION_TIMESTAMP.tradeExecution !== minuteAlignedForFetch) {
+            LAST_ACTION_TIMESTAMP.tradeExecution = minuteAlignedForFetch;
 
-            // Chuẩn bị chuyển tiền vào phút 50 (của giờ đó)
-            if (currentMinute === 50 && currentSecond >= 5 && currentSecond < 10 && botState === 'RUNNING') {
-                safeLog('log', `[BOT_LOOP] 🚀 Kích hoạt chuyển tiền cho cơ hội ${currentSelectedOpportunity.coin} vào phút 50.`);
-                botState = 'TRANSFERRING_FUNDS';
-                const transferSuccess = await manageFundsAndTransfer(currentSelectedOpportunity, 50); 
-                if (transferSuccess) {
-                    safeLog('log', '[BOT_LOOP] ✅ Chuyển tiền hoàn tất. Chờ mở lệnh.');
-                } else {
-                    safeLog('error', '[BOT_LOOP] ❌ Lỗi chuyển tiền hoặc không đủ số dư. Hủy chu kỳ này.');
-                    currentSelectedOpportunity = null; // Reset cơ hội nếu chuyển tiền thất bại
-                }
-                botState = 'RUNNING'; 
+            safeLog('log', `[BOT_LOOP] ⚡ Kích hoạt mở lệnh cho cơ hội ${currentSelectedOpportunityForExecution.coin} vào phút 59:55.`);
+            botState = 'EXECUTING_TRADES';
+            const tradeSuccess = await executeTrades(currentSelectedOpportunityForExecution, 50); 
+            if (tradeSuccess) {
+                safeLog('log', '[BOT_LOOP] ✅ Mở lệnh hoàn tất.');
+            } else {
+                safeLog('error', '[BOT_LOOP] ❌ Lỗi mở lệnh. Hủy chu kỳ này.');
+                // Hủy cơ hội và reset trade details nếu mở lệnh thất bại
+                currentSelectedOpportunityForExecution = null; 
+                currentTradeDetails = null; 
             }
-
-            // Thực hiện mở lệnh vào phút 59:55
-            if (currentMinute === 59 && currentSecond >= 55 && currentSecond < 59 && botState === 'RUNNING') {
-                safeLog('log', `[BOT_LOOP] ⚡ Kích hoạt mở lệnh cho cơ hội ${currentSelectedOpportunity.coin} vào phút 59:55.`);
-                botState = 'EXECUTING_TRADES';
-                const tradeSuccess = await executeTrades(currentSelectedOpportunity, 50); 
-                if (tradeSuccess) {
-                    safeLog('log', '[BOT_LOOP] ✅ Mở lệnh hoàn tất.');
-                } else {
-                    safeLog('error', '[BOT_LOOP] ❌ Lỗi mở lệnh. Hủy chu kỳ này.');
-                    currentSelectedOpportunity = null; // Reset cơ hội nếu mở lệnh thất bại
-                }
-                botState = 'RUNNING'; 
-            }
+            botState = 'RUNNING'; 
         }
     }
     
     // Đóng lệnh và tính PnL sau giờ funding (phút 00:05 của giờ tiếp theo)
     if (currentMinute === 0 && currentSecond >= 5 && currentSecond < 10 && botState === 'RUNNING' && currentTradeDetails?.status === 'OPEN') {
-        safeLog('log', '[BOT_LOOP] 🛑 Kích hoạt đóng lệnh và tính PnL vào phút 00:05.');
-        botState = 'CLOSING_TRADES';
-        await closeTradesAndCalculatePnL();
-        botState = 'RUNNING'; 
+        // Biến cờ để đảm bảo logic đóng lệnh chỉ chạy 1 lần duy nhất
+        if (LAST_ACTION_TIMESTAMP.closeTrade !== minuteAlignedForFetch) {
+            LAST_ACTION_TIMESTAMP.closeTrade = minuteAlignedForFetch;
+
+            safeLog('log', '[BOT_LOOP] 🛑 Kích hoạt đóng lệnh và tính PnL vào phút 00:05.');
+            botState = 'CLOSING_TRADES';
+            await closeTradesAndCalculatePnL();
+            botState = 'RUNNING'; 
+        }
     }
 
     // Lặp lại sau 1 giây để kiểm tra thời gian chính xác
@@ -548,12 +594,13 @@ function startBot() {
     if (botState === 'STOPPED') {
         safeLog('log', '[BOT] ▶️ Khởi động Bot...');
         botState = 'RUNNING';
-        // Gọi updateBalances và mainBotLoop ban đầu, không cần await
+        // Khởi tạo số dư ban đầu và sau đó bắt đầu vòng lặp chính
         updateBalances().then(() => {
+            safeLog('log', '[BOT] Đã cập nhật số dư ban đầu. Bắt đầu vòng lặp bot.');
             mainBotLoop(); 
         }).catch(err => {
             safeLog('error', `[BOT] Lỗi khi khởi tạo số dư ban đầu: ${err.message}`);
-            botState = 'STOPPED'; // Dừng nếu lỗi khởi tạo
+            botState = 'STOPPED'; // Dừng bot nếu lỗi khởi tạo
         });
         return true;
     }
@@ -590,14 +637,16 @@ const botServer = http.createServer((req, res) => {
             res.end(content);
         });
     } else if (req.url === '/bot-api/status' && req.method === 'GET') {
+        // Gửi thông tin về cơ hội để hiển thị trên UI
         const statusData = {
             botState: botState,
             balances: balances,
             initialTotalBalance: initialTotalBalance,
             cumulativePnl: cumulativePnl,
             tradeHistory: tradeHistory,
-            currentSelectedOpportunity: currentSelectedOpportunity,
-            currentTradeDetails: currentTradeDetails
+            // currentSelectedOpportunity đã được đổi tên để phân biệt rõ ràng
+            currentSelectedOpportunity: bestPotentialOpportunityForDisplay, // Dành cho UI hiển thị
+            currentTradeDetails: currentTradeDetails // Trade đang mở
         };
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify(statusData));
