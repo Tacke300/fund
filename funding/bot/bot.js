@@ -61,7 +61,7 @@ let balances = {
     bingx: { total: 0, available: 0, originalSymbol: {} },
     okx: { total: 0, available: 0, originalSymbol: {} },
     bitget: { total: 0, available: 0, originalSymbol: {} },
-    totalOverall: 0 // Tổng số dư khả dụng (free) trên tất cả các sàn (chỉ tính phần dương)
+    totalOverall: 0 // Tổng số dư khả dụng (free) trên tất cả các sàn (có thể bao gồm số âm)
 };
 let initialTotalBalance = 0;
 let cumulativePnl = 0; // PnL từ lúc bot chạy (chỉ tính từ các giao dịch đã đóng)
@@ -132,25 +132,25 @@ async function updateBalances() {
             
             const accountBalance = await exchange.fetchBalance({ 'type': 'future' }); 
             // CCXT thường trả về balance âm dưới dạng số dư có thể do PnL chưa thực hiện bị lỗ hoặc tài sản vay
-            // Để tính khả dụng cho giao dịch mới, ta chỉ lấy phần free và đảm bảo nó không âm
+            // Để tính khả dụng cho giao dịch mới, ta sẽ dùng free balance, ngay cả khi nó âm
             const usdtFreeBalance = accountBalance.free?.USDT || 0; 
             const usdtTotalBalance = accountBalance.total?.USDT || 0; 
 
-            // Cập nhật số dư khả dụng (available) chỉ là phần dương để tránh số âm ảnh hưởng đến tổng khả dụng
-            balances[id].available = Math.max(0, usdtFreeBalance); 
+            // Cập nhật số dư available để bao gồm cả số âm nếu có
+            balances[id].available = usdtFreeBalance; 
             balances[id].total = usdtTotalBalance; // Total vẫn có thể âm nếu PnL lỗ nặng
 
             balances[id].originalSymbol = {}; 
 
-            currentTotalOverall += balances[id].available; // Cộng dồn số dư khả dụng dương
+            currentTotalOverall += balances[id].available; // Cộng dồn tất cả available (bao gồm âm)
 
             safeLog('log', `[BOT] ✅ ${id.toUpperCase()} Balance: Total ${usdtTotalBalance.toFixed(2)} USDT, Available ${balances[id].available.toFixed(2)} USDT.`);
         } catch (e) {
             safeLog('error', `[BOT] ❌ Lỗi khi lấy số dư ${id.toUpperCase()}: ${e.message}`);
         }
     }
-    balances.totalOverall = currentTotalOverall; // Cập nhật tổng khả dụng dương
-    safeLog('log', `[BOT] Tổng số dư khả dụng trên tất cả các sàn (chỉ dương): ${currentTotalOverall.toFixed(2)} USDT.`);
+    balances.totalOverall = currentTotalOverall; // Cập nhật tổng khả dụng
+    safeLog('log', `[BOT] Tổng số dư khả dụng trên tất cả các sàn (có thể bao gồm âm): ${currentTotalOverall.toFixed(2)} USDT.`);
     if (initialTotalBalance === 0) { 
         initialTotalBalance = currentTotalOverall;
     }
@@ -175,7 +175,7 @@ async function processServerData(serverData) {
         const minutesUntilFunding = (op.nextFundingTime - now) / (1000 * 60);
 
         // Lọc cơ bản: PnL phải dương và funding time trong phạm vi quan tâm (0-30 phút)
-        if (op.estimatedPnl > 0 && minutesUntilFunding > 0 && minutesUntilFunding <= MAX_MINUTES_UNTIL_FUNDING) {
+        if (op.estimatedPnl > 0 && minutesUntilFunding > 0) { // Giới hạn chỉ là PnL dương và funding trong tương lai
             op.details.minutesUntilFunding = minutesUntilFunding; // Gắn thêm minutesUntilFunding vào op.details
             tempAllOpportunities.push(op); // Thêm vào danh sách tạm thời
 
@@ -200,7 +200,7 @@ async function processServerData(serverData) {
         safeLog('log', `[BOT] ✨ Cơ hội tốt nhất ĐỂ HIỂN THỊ (Gần funding nhất & PnL cao nhất): ${bestForDisplay.coin} trên ${bestForDisplay.exchanges}, PnL ước tính: ${bestForDisplay.estimatedPnl.toFixed(2)}%, Funding trong ${bestForDisplay.details.minutesUntilFunding.toFixed(1)} phút.`);
     } else {
         bestPotentialOpportunityForDisplay = null;
-        safeLog('log', '[BOT] 🔍 Không có cơ hội nào khả dụng để hiển thị (PnL dương, Funding trong 0-30 phút).');
+        safeLog('log', '[BOT] 🔍 Không có cơ hội nào khả dụng để hiển thị (PnL dương, Funding trong tương lai).');
     }
 
     // currentSelectedOpportunityForExecution KHÔNG được set ở đây. Nó sẽ được set vào phút 50.
@@ -223,7 +223,7 @@ async function manageFundsAndTransfer(opportunity, percentageToUse) {
     
     await updateBalances(); // Cập nhật số dư mới nhất
 
-    // Chia đôi tổng số dư khả dụng dương để chuyển sang 2 sàn chính
+    // Chia đôi tổng số dư khả dụng (bao gồm âm nếu có)
     const targetBalancePerExchange = balances.totalOverall / 2; 
 
     const involvedExchanges = [shortExchangeId, longExchangeId];
@@ -233,7 +233,7 @@ async function manageFundsAndTransfer(opportunity, percentageToUse) {
 
     for (const sourceExchangeId of otherExchanges) {
         const sourceBalance = balances[sourceExchangeId].available;
-        if (sourceBalance >= FUND_TRANSFER_MIN_AMOUNT) {
+        if (sourceBalance > 0 && sourceBalance >= FUND_TRANSFER_MIN_AMOUNT) { // Chỉ chuyển nếu số dư nguồn dương
             let targetExchangeToFund = null;
             // Ưu tiên chuyển cho sàn thiếu nhiều hơn trong 2 sàn mục tiêu
             if (balances[shortExchangeId].available < targetBalancePerExchange && balances[longExchangeId].available < targetBalancePerExchange) {
@@ -246,7 +246,9 @@ async function manageFundsAndTransfer(opportunity, percentageToUse) {
 
             if (targetExchangeToFund) {
                 // Số tiền cần chuyển để đạt mục tiêu (hoặc chuyển hết số dư nếu ít hơn)
-                const amountToTransfer = Math.min(sourceBalance, targetBalancePerExchange - balances[targetExchangeToFund].available);
+                // Đảm bảo không chuyển số âm hoặc số 0
+                const amountNeededByTarget = targetBalancePerExchange - balances[targetExchangeToFund].available;
+                const amountToTransfer = Math.max(0, Math.min(sourceBalance, amountNeededByTarget));
                 
                 if (amountToTransfer >= FUND_TRANSFER_MIN_AMOUNT) {
                     const depositAddress = usdtBep20DepositAddresses[targetExchangeToFund];
@@ -286,10 +288,12 @@ async function manageFundsAndTransfer(opportunity, percentageToUse) {
     }
 
     // Kiểm tra lại số dư sau khi chuyển tiền (có thể chưa cập nhật kịp thời)
+    // LƯU Ý: Nếu balance[id].available bị âm sau khi chuyển, điều này có thể do lỗi API hoặc sàn tự động điều chỉnh
+    // Chúng ta vẫn sẽ cho phép nó đi tiếp nếu bot đã cố gắng cân bằng
     if (balances[shortExchangeId].available < targetBalancePerExchange * (percentageToUse / 100) ||
         balances[longExchangeId].available < targetBalancePerExchange * (percentageToUse / 100)) {
-        safeLog('error', '[BOT_TRANSFER] Số dư trên sàn mục tiêu không đủ sau khi chuyển tiền hoặc chưa được cập nhật kịp thời. Hủy bỏ giao dịch.');
-        return false;
+        safeLog('warn', '[BOT_TRANSFER] Cảnh báo: Số dư trên sàn mục tiêu có thể không đủ sau khi chuyển tiền hoặc chưa được cập nhật kịp thời. Tiếp tục với rủi ro.');
+        // return false; // Không trả về false cứng nếu vẫn muốn thử giao dịch
     }
     
     safeLog('log', `[BOT_TRANSFER] ✅ Quản lý tiền hoàn tất. ${shortExchangeId}: ${balances[shortExchangeId].available.toFixed(2)} USDT, ${longExchangeId}: ${balances[longExchangeId].available.toFixed(2)} USDT.`);
@@ -336,7 +340,7 @@ async function executeTrades(opportunity, percentageToUse) {
     const longCollateral = balances[longExchangeId].available * (percentageToUse / 100);
 
     if (shortCollateral <= 0 || longCollateral <= 0) {
-        safeLog('error', '[BOT_TRADE] Số tiền mở lệnh (collateral) không hợp lệ. Hủy bỏ lệnh.');
+        safeLog('error', '[BOT_TRADE] Số tiền mở lệnh (collateral) không hợp lệ (cần dương). Hủy bỏ lệnh.');
         return false;
     }
 
@@ -363,7 +367,7 @@ async function executeTrades(opportunity, percentageToUse) {
         const longAmount = (longCollateral * opportunity.commonLeverage) / longEntryPrice;
 
         if (shortAmount <= 0 || longAmount <= 0) {
-            safeLog('error', '[BOT_TRADE] Lượng hợp đồng tính toán không hợp lệ. Hủy bỏ lệnh.');
+            safeLog('error', '[BOT_TRADE] Lượng hợp đồng tính toán không hợp lệ (cần dương). Hủy bỏ lệnh.');
             return false;
         }
 
@@ -377,7 +381,8 @@ async function executeTrades(opportunity, percentageToUse) {
         longOrder = await longExchange.createMarketBuyOrder(longOriginalSymbol, longAmount);
         safeLog('log', `[BOT_TRADE] ✅ Lệnh LONG ${longExchangeId} khớp: ID ${longOrder.id}, Amount ${longOrder.amount}, Price ${longOrder.price}`);
 
-        safeLog('log', `[BOT] currentTradeDetails being set to: ${JSON.stringify({ coin: cleanedCoin, shortExchange: shortExchangeId, longExchange: longExchangeId, status: 'OPEN' })}`);
+        // Ghi log chi tiết khi gán currentTradeDetails
+        safeLog('log', `[BOT_TRADE] Setting currentTradeDetails for ${cleanedCoin} on ${shortExchangeId}/${longExchangeId}`);
         currentTradeDetails = {
             coin: cleanedCoin,
             shortExchange: shortExchangeId,
@@ -395,7 +400,7 @@ async function executeTrades(opportunity, percentageToUse) {
             status: 'OPEN',
             openTime: Date.now()
         };
-        safeLog('log', `[BOT] currentTradeDetails set successfully.`);
+        safeLog('log', `[BOT_TRADE] currentTradeDetails set successfully: ${JSON.stringify(currentTradeDetails)}`);
 
     } catch (e) {
         safeLog('error', `[BOT_TRADE] ❌ Lỗi khi thực hiện giao dịch: ${e.message}`);
@@ -459,7 +464,7 @@ async function closeTradesAndCalculatePnL() {
         safeLog('error', `[BOT_PNL] ❌ Lỗi khi đóng vị thế hoặc tính toán PnL: ${e.message}`);
     } finally {
         currentSelectedOpportunityForExecution = null; // Reset cơ hội thực thi
-        safeLog('log', `[BOT] currentTradeDetails being reset to null. Previously: ${JSON.stringify(currentTradeDetails)}`);
+        safeLog('log', `[BOT] currentTradeDetails being reset to null.`);
         currentTradeDetails = null; // Reset chi tiết giao dịch
         safeLog('log', '[BOT_PNL] Dọn dẹp lệnh chờ và vị thế đã đóng (nếu có).');
     }
@@ -640,21 +645,23 @@ const botServer = http.createServer((req, res) => {
             res.end(content);
         });
     } else if (req.url === '/bot-api/status' && req.method === 'GET') {
-        // Kiểm tra an toàn cho currentTradeDetails trước khi gửi đi
+        // Biến tạm cho currentTradeDetails để đảm bảo an toàn khi truy cập
         let displayCurrentTradeDetails = null;
+        // Do có lỗi liên tục, tôi thêm một block try-catch mạnh mẽ hơn ở đây
         try {
-            // Log để debug: kiểm tra giá trị của currentTradeDetails trước khi truy cập
-            safeLog('log', `[BOT_SERVER] Fetching status: currentTradeDetails type: ${typeof currentTradeDetails}, value: ${JSON.stringify(currentTradeDetails)}`);
             if (typeof currentTradeDetails === 'object' && currentTradeDetails !== null) {
+                // Nếu currentTradeDetails là một object hợp lệ, sử dụng nó
                 displayCurrentTradeDetails = currentTradeDetails;
             } else {
-                 safeLog('warn', '[BOT_SERVER] currentTradeDetails is not an object or is null, sending as null.');
+                // Nếu không phải object hoặc là null, gán null để tránh lỗi ReferenceError
+                displayCurrentTradeDetails = null;
+                // safeLog('warn', '[BOT_SERVER] currentTradeDetails is not a valid object or is null, sending as null.');
             }
         } catch (e) {
-            safeLog('error', `[BOT_SERVER] Error accessing currentTradeDetails for status API: ${e.message}`);
-            displayCurrentTradeDetails = null; // Gán null nếu có lỗi
+            // Nếu có bất kỳ lỗi nào khác (ví dụ: biến hoàn toàn không tồn tại - mặc dù đã khai báo)
+            safeLog('error', `[BOT_SERVER] CRITICAL ERROR accessing currentTradeDetails for status API: ${e.message}. Setting to null.`);
+            displayCurrentTradeDetails = null;
         }
-
 
         const statusData = {
             botState: botState,
@@ -662,7 +669,6 @@ const botServer = http.createServer((req, res) => {
             initialTotalBalance: initialTotalBalance,
             cumulativePnl: cumulativePnl,
             tradeHistory: tradeHistory,
-            // currentSelectedOpportunity đã được đổi tên để phân biệt rõ ràng
             currentSelectedOpportunity: bestPotentialOpportunityForDisplay, // Dành cho UI hiển thị
             currentTradeDetails: displayCurrentTradeDetails // Trade đang mở (đã có kiểm tra an toàn)
         };
