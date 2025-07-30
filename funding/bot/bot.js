@@ -12,7 +12,7 @@ const {
     bingxApiKey, bingxApiSecret,
     okxApiKey, okxApiSecret, okxPassword,
     bitgetApiKey, bitgetApiSecret, bitgetApiPassword
-} = require('../../config.js'); // <-- ĐƯỜNG DẪN CHÍNH XÁC CHO CẤU TRÚC CỦA BẠN
+} = require('../config.js'); // <-- ĐƯỜNG DẪN CHÍNH XÁC CHO CẤU TRÚC CỦA BẠN
 
 // Import địa chỉ ví nạp tiền từ file balance.js (ĐÃ CẬP NHẬT ĐƯỜNG DẪN CHÍNH XÁC)
 // Đường dẫn: từ funding/bot/bot.js đến balance.js trong cùng thư mục
