@@ -1,4 +1,4 @@
-// Version 3 (Khắc phục ReferenceError: currentTradeDetails, tính số dư âm, HTML display, Log tinh gọn)
+// Version 4 (Tính TP/SL, HTML input %, Log tinh gọn, Sửa lỗi currentTradeDetails dai dẳng)
 const http = require('http');
 const https = require('https');
 const fs = require('fs');
@@ -49,7 +49,7 @@ const DATA_FETCH_INTERVAL_SECONDS = 5; // Cập nhật dữ liệu mỗi 5 giây
 const HOURLY_FETCH_TIME_MINUTE = 45; // Mỗi giờ vào phút thứ 45, bot lấy dữ liệu chính
 
 // ----- BIẾN TOÀN CỤC CHO BOT -----
-let botState = 'STOPPED'; // 'STOPPED', 'RUNNING', 'FETCHING_DATA', 'PROCESSING_DATA', 'TRANSFERRING_FUNDS', 'EXECUTING_TRADES', 'CLOSING_TRADES'
+let botState = 'STOPPED'; 
 let botLoopIntervalId = null;
 
 // Khai báo biến toàn cục rất sớm để tránh ReferenceError
@@ -65,24 +65,27 @@ let cumulativePnl = 0;
 let tradeHistory = []; 
 
 // Biến cho logic lựa chọn cơ hội
-let currentSelectedOpportunityForExecution = null; // Cơ hội được chọn ĐỂ THỰC THI (chỉ được set vào phút 50)
-let bestPotentialOpportunityForDisplay = null; // Cơ hội tốt nhất CHỈ ĐỂ HIỂN THỊ trên UI/log
-let allCurrentOpportunities = []; // Danh sách tất cả cơ hội từ server, đã lọc cơ bản (PnL dương, Funding >0)
+let currentSelectedOpportunityForExecution = null; 
+let bestPotentialOpportunityForDisplay = null; 
+let allCurrentOpportunities = []; 
 
 // Biến cờ để đảm bảo các hành động theo thời gian chỉ chạy 1 lần mỗi phút/giây
 const LAST_ACTION_TIMESTAMP = {
-    dataFetch: 0, // Lưu giây cuối cùng của fetch dữ liệu
-    selectionTime: 0, // Lưu phút cuối cùng của việc chọn cơ hội thực thi
-    tradeExecution: 0, // Lưu phút cuối cùng của việc mở lệnh
-    closeTrade: 0, // Lưu phút cuối cùng của việc đóng lệnh
+    dataFetch: 0, 
+    selectionTime: 0, 
+    tradeExecution: 0, 
+    closeTrade: 0, 
 };
 
-// Vấn đề ReferenceError: currentTradeDetails is not defined
-// Nó phải được khai báo ở phạm vi toàn cục và trước khi được truy cập ở bất kỳ đâu.
-// Lỗi này xảy ra khi trình duyệt yêu cầu /bot-api/status trước khi biến được gán giá trị
-// HOẶC nếu nó bị reset về undefined do một lỗi khác.
-// Khai báo ở đây sẽ đảm bảo nó luôn tồn tại với giá trị ban đầu là null.
-let currentTradeDetails = null; 
+// Biến này được khai báo ở phạm vi toàn cục.
+let currentTradeDetails = null; // Khắc phục ReferenceError
+
+// LƯU TRỮ % VỐN MỞ LỆNH TỪ UI
+let currentPercentageToUse = 50; // Mặc định 50% nếu UI không gửi
+
+// CẤU HÌNH TP/SL
+const SL_PERCENT_OF_COLLATERAL = 800; // 800% mất vốn ban đầu (collateral)
+const TP_PERCENT_OF_COLLATERAL = 8386; // 8386% lợi nhuận trên vốn ban đầu (collateral)
 
 // CCXT Exchange instances
 const exchanges = {};
@@ -135,16 +138,10 @@ async function updateBalances() {
             await exchange.loadMarkets(true);
             
             const accountBalance = await exchange.fetchBalance({ 'type': 'future' }); 
-            // CCXT thường trả về balance âm dưới dạng số dư có thể do PnL chưa thực hiện bị lỗ hoặc tài sản vay
-            // Để tính tổng tài sản hiện có (bao gồm cả số âm/lỗ), chúng ta sẽ dùng 'total' balance nếu có,
-            // hoặc 'free' balance nếu 'total' không phản ánh đúng PnL.
-            // Dựa trên yêu cầu, chúng ta sẽ sử dụng 'free' balance để tính tổng khả dụng
-            // vì 'total' có thể bao gồm các khoản bị khóa hoặc PnL chưa thực hiện rất lớn.
-            // Chúng ta muốn tổng khả dụng có thể âm để tính bù trừ.
             const usdtFreeBalance = accountBalance.free?.USDT || 0; 
             const usdtTotalBalance = accountBalance.total?.USDT || 0; 
 
-            // Sử dụng usdtFreeBalance để tính available, cho phép nó âm
+            // Cập nhật số dư available để bao gồm cả số âm nếu có
             balances[id].available = usdtFreeBalance; 
             balances[id].total = usdtTotalBalance; // Total vẫn có thể âm nếu PnL lỗ nặng
 
@@ -178,21 +175,19 @@ async function processServerData(serverData) {
     let bestForDisplay = null;
     const tempAllOpportunities = []; 
 
-    safeLog('log', '[BOT] --- Các cơ hội arbitrage hiện có (từ server) ---');
-    // Log chỉ cơ hội hiển thị, không log hết tất cả các cơ hội ở đây để tránh spam log
-    // Thay vào đó, chúng ta sẽ lưu tất cả vào `tempAllOpportunities` và sau đó hiển thị `bestForDisplay`
+    safeLog('log', '[BOT] --- Bắt đầu tìm kiếm cơ hội arbitrage ---');
     
     serverData.arbitrageData.forEach(op => {
         const minutesUntilFunding = (op.nextFundingTime - now) / (1000 * 60);
 
-        // Lọc cơ bản cho tất cả các cơ hội: PnL phải dương và funding time trong tương lai (không giới hạn 0-30 phút ở đây)
+        // Lọc cơ bản cho tất cả các cơ hội: PnL phải dương và funding time trong tương lai
         if (op.estimatedPnl > 0 && minutesUntilFunding > 0) { 
             op.details.minutesUntilFunding = minutesUntilFunding; // Gắn thêm minutesUntilFunding vào op.details
 
             // Gán giá trị mặc định 'N/A' nếu các trường không tồn tại từ server
             op.details.shortFundingRate = op.details.shortFundingRate !== undefined ? op.details.shortFundingRate : 'N/A';
             op.details.longFundingRate = op.details.longFundingRate !== undefined ? op.details.longFundingRate : 'N/A';
-            op.fundingDiff = op.fundingDiff !== undefined ? op.fundingDiff : 'N/A'; // fundingDiff có thể từ server
+            op.fundingDiff = op.fundingDiff !== undefined ? op.fundingDiff : 'N/A'; 
             op.commonLeverage = op.commonLeverage !== undefined ? op.commonLeverage : 'N/A';
             op.details.volume = op.details.volume !== undefined ? op.details.volume : 'N/A';
             
@@ -201,7 +196,7 @@ async function processServerData(serverData) {
             // Logic cho bestForDisplay: funding gần nhất, nếu bằng thì PnL cao nhất
             // Điều kiện này áp dụng cho BẢNG DỰ KIẾN (DISPLAY ONLY)
             if (!bestForDisplay ||
-                minutesUntilFunding < bestForDisplay.details.minutesUntilFunding || // Closer funding takes precedence
+                minutesUntilFunding < bestForDisplay.details.minutesUntilFunding || 
                 (minutesUntilFunding === bestForDisplay.details.minutesUntilFunding && op.estimatedPnl > bestForDisplay.estimatedPnl) 
             ) {
                 bestForDisplay = op;
@@ -312,8 +307,8 @@ async function manageFundsAndTransfer(opportunity, percentageToUse) {
     // Kiểm tra lại số dư sau khi chuyển tiền (có thể chưa cập nhật kịp thời)
     // Nếu balance[id].available bị âm sau khi chuyển, điều này có thể do lỗi API hoặc sàn tự động điều chỉnh
     // Chúng ta vẫn sẽ cho phép nó đi tiếp nếu bot đã cố gắng cân bằng
-    if (balances[shortExchangeId].available < targetBalancePerExchange * (percentageToUse / 100) ||
-        balances[longExchangeId].available < targetBalancePerExchange * (percentageToUse / 100)) {
+    if (balances[shortExchangeId].available < targetBalancePerExchange * (currentPercentageToUse / 100) || // Dùng currentPercentageToUse
+        balances[longExchangeId].available < targetBalancePerExchange * (currentPercentageToUse / 100)) {
         safeLog('warn', '[BOT_TRANSFER] Cảnh báo: Số dư trên sàn mục tiêu có thể không đủ sau khi chuyển tiền hoặc chưa được cập nhật kịp thời. Tiếp tục với rủi ro.');
     }
     
@@ -357,8 +352,9 @@ async function executeTrades(opportunity, percentageToUse) {
     const shortExchange = exchanges[shortExchangeId];
     const longExchange = exchanges[longExchangeId];
 
-    const shortCollateral = balances[shortExchangeId].available * (percentageToUse / 100);
-    const longCollateral = balances[longExchangeId].available * (percentageToUse / 100);
+    // Lấy số tiền vốn (collateral) từ số dư khả dụng và phần trăm sử dụng từ UI
+    const shortCollateral = balances[shortExchangeId].available * (currentPercentageToUse / 100);
+    const longCollateral = balances[longExchangeId].available * (currentPercentageToUse / 100);
 
     // Kiểm tra số tiền mở lệnh phải dương
     if (shortCollateral <= 0 || longCollateral <= 0) {
@@ -385,14 +381,47 @@ async function executeTrades(opportunity, percentageToUse) {
             return false;
         }
 
-        const shortAmount = (shortCollateral * opportunity.commonLeverage) / shortEntryPrice;
-        const longAmount = (longCollateral * opportunity.commonLeverage) / longEntryPrice;
+        // Tính toán lượng hợp đồng (amount) dựa trên collateral, leverage và entry price
+        const commonLeverage = opportunity.commonLeverage || 1; // Mặc định leverage là 1 nếu server không trả về
+        const shortAmount = (shortCollateral * commonLeverage) / shortEntryPrice;
+        const longAmount = (longCollateral * commonLeverage) / longEntryPrice;
 
         // Kiểm tra khối lượng hợp đồng phải dương
         if (shortAmount <= 0 || longAmount <= 0) {
             safeLog('error', '[BOT_TRADE] Lượng hợp đồng tính toán không hợp lệ (cần dương). Hủy bỏ lệnh.');
             return false;
         }
+
+        // Tính toán TP/SL dựa trên vốn mở lệnh (collateral) và tỷ lệ phần trăm
+        // Ví dụ: Stop Loss 800% vốn => Mất 8 lần vốn
+        // Lợi nhuận/Lỗ tính bằng USDT = collateral * (tỷ lệ % / 100)
+        // Thay đổi giá = (Lợi nhuận/Lỗ) / (amount * leverage)
+        // Giá SL = Entry Price +/- Thay đổi giá
+        
+        // Short: SL khi giá TĂNG, TP khi giá GIẢM
+        const shortStopLossUSD = shortCollateral * (SL_PERCENT_OF_COLLATERAL / 100);
+        const shortTakeProfitUSD = shortCollateral * (TP_PERCENT_OF_COLLATERAL / 100);
+        
+        const shortPriceChangeForSL = shortStopLossUSD / (shortAmount * commonLeverage);
+        const shortPriceChangeForTP = shortTakeProfitUSD / (shortAmount * commonLeverage);
+        
+        const shortSlPrice = shortEntryPrice + shortPriceChangeForSL;
+        const shortTpPrice = shortEntryPrice - shortPriceChangeForTP;
+
+        // Long: SL khi giá GIẢM, TP khi giá TĂNG
+        const longStopLossUSD = longCollateral * (SL_PERCENT_OF_COLLATERAL / 100);
+        const longTakeProfitUSD = longCollateral * (TP_PERCENT_OF_COLLATERAL / 100);
+
+        const longPriceChangeForSL = longStopLossUSD / (longAmount * commonLeverage);
+        const longPriceChangeForTP = longTakeProfitUSD / (longAmount * commonLeverage);
+
+        const longSlPrice = longEntryPrice - longPriceChangeForSL;
+        const longTpPrice = longEntryPrice + longPriceChangeForTP;
+
+        safeLog('log', `[BOT_TRADE] Tính toán TP/SL cho ${cleanedCoin}:`);
+        safeLog('log', `  Short Entry: ${shortEntryPrice.toFixed(4)}, SL: ${shortSlPrice.toFixed(4)}, TP: ${shortTpPrice.toFixed(4)}`);
+        safeLog('log', `  Long Entry: ${longEntryPrice.toFixed(4)}, SL: ${longSlPrice.toFixed(4)}, TP: ${longTpPrice.toFixed(4)}`);
+
 
         // --- Mở lệnh Short ---
         safeLog('log', `[BOT_TRADE] Mở SHORT ${shortAmount.toFixed(opportunity.details.shortExchange === 'okx' ? 0 : 3)} ${cleanedCoin} trên ${shortExchangeId} với giá ${shortEntryPrice.toFixed(4)}...`);
@@ -403,8 +432,25 @@ async function executeTrades(opportunity, percentageToUse) {
         safeLog('log', `[BOT_TRADE] Mở LONG ${longAmount.toFixed(opportunity.details.longExchange === 'okx' ? 0 : 3)} ${cleanedCoin} trên ${longExchangeId} với giá ${longEntryPrice.toFixed(4)}...`);
         longOrder = await longExchange.createMarketBuyOrder(longOriginalSymbol, longAmount);
         safeLog('log', `[BOT_TRADE] ✅ Lệnh LONG ${longExchangeId} khớp: ID ${longOrder.id}, Amount ${longOrder.amount}, Price ${longOrder.price}`);
+        
+        // --- Đặt Stop Loss và Take Profit (Cần kích hoạt và kiểm tra từng sàn) ---
+        // Các lệnh này có thể khác nhau tùy sàn (ví dụ: 'stop', 'take_profit', 'stop_loss_limit')
+        // Cần kiểm tra kỹ tài liệu CCXT và sàn cụ thể
+        /*
+        safeLog('log', `[BOT_TRADE] Đặt SL/TP cho ${shortExchangeId} SHORT: SL at ${shortSlPrice.toFixed(4)}, TP at ${shortTpPrice.toFixed(4)}`);
+        // Ví dụ cho Stop Market Buy (đóng short)
+        await shortExchange.createOrder(shortOriginalSymbol, 'stop_market', 'buy', shortAmount, undefined, { stopPrice: shortSlPrice, reduceOnly: true });
+        // Ví dụ cho Take Profit Market Buy (đóng short)
+        await shortExchange.createOrder(shortOriginalSymbol, 'take_profit_market', 'buy', shortAmount, undefined, { stopPrice: shortTpPrice, reduceOnly: true });
 
-        // Ghi log chi tiết khi gán currentTradeDetails
+        safeLog('log', `[BOT_TRADE] Đặt SL/TP cho ${longExchangeId} LONG: SL at ${longSlPrice.toFixed(4)}, TP at ${longTpPrice.toFixed(4)}`);
+        // Ví dụ cho Stop Market Sell (đóng long)
+        await longExchange.createOrder(longOriginalSymbol, 'stop_market', 'sell', longAmount, undefined, { stopPrice: longSlPrice, reduceOnly: true });
+        // Ví dụ cho Take Profit Market Sell (đóng long)
+        await longExchange.createOrder(longOriginalSymbol, 'take_profit_market', 'sell', longAmount, undefined, { stopPrice: longTpPrice, reduceOnly: true });
+        */
+
+
         safeLog('log', `[BOT_TRADE] Setting currentTradeDetails for ${cleanedCoin} on ${shortExchangeId}/${longExchangeId}`);
         currentTradeDetails = {
             coin: cleanedCoin,
@@ -420,6 +466,10 @@ async function executeTrades(opportunity, percentageToUse) {
             longEntryPrice: longEntryPrice,
             shortCollateral: shortCollateral, 
             longCollateral: longCollateral,   
+            shortSlPrice: shortSlPrice, // Lưu TP/SL đã tính toán
+            shortTpPrice: shortTpPrice,
+            longSlPrice: longSlPrice,
+            longTpPrice: longTpPrice,
             status: 'OPEN',
             openTime: Date.now()
         };
@@ -428,6 +478,7 @@ async function executeTrades(opportunity, percentageToUse) {
     } catch (e) {
         safeLog('error', `[BOT_TRADE] ❌ Lỗi khi thực hiện giao dịch: ${e.message}`);
         tradeSuccess = false;
+        // Cố gắng hủy lệnh đã khớp một phần nếu có lỗi
         if (shortOrder?.id) {
             try { await exchanges[shortExchangeId].cancelOrder(shortOrder.id, shortOriginalSymbol); } catch (ce) { safeLog('error', `[BOT_TRADE] Lỗi hủy lệnh SHORT: ${ce.message}`); }
         }
@@ -565,7 +616,7 @@ async function mainBotLoop() {
 
                 // Sau khi chọn, tiến hành chuyển tiền ngay lập tức
                 botState = 'TRANSFERRING_FUNDS'; // Cập nhật trạng thái bot
-                const transferSuccess = await manageFundsAndTransfer(currentSelectedOpportunityForExecution, 50); 
+                const transferSuccess = await manageFundsAndTransfer(currentSelectedOpportunityForExecution, currentPercentageToUse); // Sử dụng percentageToUse từ UI
                 if (transferSuccess) {
                     safeLog('log', '[BOT_LOOP] ✅ Chuyển tiền hoàn tất cho cơ hội đã chọn. Chờ mở lệnh.');
                 } else {
@@ -590,7 +641,7 @@ async function mainBotLoop() {
 
             safeLog('log', `[BOT_LOOP] ⚡ Kích hoạt mở lệnh cho cơ hội ${currentSelectedOpportunityForExecution.coin} vào phút 59:55.`);
             botState = 'EXECUTING_TRADES';
-            const tradeSuccess = await executeTrades(currentSelectedOpportunityForExecution, 50); 
+            const tradeSuccess = await executeTrades(currentSelectedOpportunityForExecution, currentPercentageToUse); // Sử dụng percentageToUse từ UI
             if (tradeSuccess) {
                 safeLog('log', '[BOT_LOOP] ✅ Mở lệnh hoàn tất.');
             } else {
@@ -625,6 +676,16 @@ function startBot() {
     if (botState === 'STOPPED') {
         safeLog('log', '[BOT] ▶️ Khởi động Bot...');
         botState = 'RUNNING';
+        // Lấy percentageToUse từ UI khi bot bắt đầu
+        const percentageInput = document.getElementById('percentageToUse');
+        if (percentageInput) {
+            currentPercentageToUse = parseFloat(percentageInput.value);
+            if (isNaN(currentPercentageToUse) || currentPercentageToUse < 1 || currentPercentageToUse > 100) {
+                currentPercentageToUse = 50; // Mặc định nếu input không hợp lệ
+                safeLog('warn', `Giá trị phần trăm vốn không hợp lệ từ UI, sử dụng mặc định: ${currentPercentageToUse}%`);
+            }
+        }
+        
         // Khởi tạo số dư ban đầu và sau đó bắt đầu vòng lặp chính
         updateBalances().then(() => {
             safeLog('log', '[BOT] Đã cập nhật số dư ban đầu. Bắt đầu vòng lặp bot.');
@@ -672,16 +733,13 @@ const botServer = http.createServer((req, res) => {
         // Tôi đã thêm một kiểm tra cực kỳ mạnh mẽ để đảm bảo currentTradeDetails được truy cập an toàn.
         let displayCurrentTradeDetails = null;
         try {
-            // Kiểm tra typeof trước để tránh lỗi khi biến không được định nghĩa (mặc dù nó phải được)
-            if (typeof currentTradeDetails !== 'undefined' && currentTradeDetails !== null && typeof currentTradeDetails === 'object') {
+            // Chỉ gửi currentTradeDetails nếu nó đang ở trạng thái OPEN
+            if (currentTradeDetails && currentTradeDetails.status === 'OPEN') {
                 displayCurrentTradeDetails = currentTradeDetails;
             } else {
-                // Log cảnh báo nếu biến không ở trạng thái mong muốn, nhưng vẫn cho phép hoạt động
-                safeLog('warn', `[BOT_SERVER] currentTradeDetails is not a valid object or is null (${typeof currentTradeDetails}). Sending as null.`);
-                displayCurrentTradeDetails = null;
+                displayCurrentTradeDetails = null; // Luôn gán null nếu không OPEN
             }
         } catch (e) {
-            // Trường hợp cực đoan nếu truy cập biến gây lỗi (rất hiếm khi xảy ra với 'let')
             safeLog('error', `[BOT_SERVER] CRITICAL EXCEPTION accessing currentTradeDetails for status API: ${e.message}. Setting to null.`);
             displayCurrentTradeDetails = null;
         }
@@ -702,7 +760,14 @@ const botServer = http.createServer((req, res) => {
         req.on('data', chunk => { body += chunk.toString(); });
         req.on('end', () => {
             try {
+                // Lấy percentageToUse từ body của request
                 const data = body ? JSON.parse(body) : {}; 
+                currentPercentageToUse = parseFloat(data.percentageToUse); // Cập nhật biến toàn cục
+                if (isNaN(currentPercentageToUse) || currentPercentageToUse < 1 || currentPercentageToUse > 100) {
+                    currentPercentageToUse = 50; // Mặc định nếu UI gửi không hợp lệ
+                    safeLog('warn', `Giá trị phần trăm vốn không hợp lệ từ UI, sử dụng mặc định: ${currentPercentageToUse}%`);
+                }
+
                 const started = startBot();
                 res.writeHead(200, { 'Content-Type': 'application/json' });
                 res.end(JSON.stringify({ success: started, message: started ? 'Bot đã khởi động.' : 'Bot đã chạy.' }));
