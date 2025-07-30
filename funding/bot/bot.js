@@ -1,4 +1,4 @@
-// Version 5 (Khắc phục ReferenceError: currentTradeDetails CỰC KỲ CHI TIẾT, tính TP/SL, HTML input %, Log tinh gọn)
+// Version 6 (Logic Long/Short theo Funding Rate, fix currentTradeDetails dai dẳng, Volume/FR/Lev N/A, bỏ TP/SL code)
 const http = require('http');
 const https = require('https');
 const fs = require('fs');
@@ -84,9 +84,9 @@ let currentTradeDetails = null;
 // LƯU TRỮ % VỐN MỞ LỆNH TỪ UI
 let currentPercentageToUse = 50; // Mặc định 50% nếu UI không gửi
 
-// CẤU HÌNH TP/SL (Tính theo % vốn bỏ ra - collateral)
-const SL_PERCENT_OF_COLLATERAL = 800; // 800% mất vốn ban đầu (collateral)
-const TP_PERCENT_OF_COLLATERAL = 8386; // 8386% lợi nhuận trên vốn ban đầu (collateral)
+// CẤU HÌNH TP/SL (Tính theo % vốn bỏ ra - collateral) - TẠM THỜI BỎ
+// const SL_PERCENT_OF_COLLATERAL = 800; // 800% mất vốn ban đầu (collateral)
+// const TP_PERCENT_OF_COLLATERAL = 8386; // 8386% lợi nhuận trên vốn ban đầu (collateral)
 
 // CCXT Exchange instances
 const exchanges = {};
@@ -142,7 +142,7 @@ async function updateBalances() {
             const usdtFreeBalance = accountBalance.free?.USDT || 0; 
             const usdtTotalBalance = accountBalance.total?.USDT || 0; 
 
-            // Cập nhật số dư available để bao gồm cả số âm nếu có (theo yêu cầu)
+            // Sử dụng usdtFreeBalance để tính available, cho phép nó âm
             balances[id].available = usdtFreeBalance; 
             balances[id].total = usdtTotalBalance; 
 
@@ -185,17 +185,31 @@ async function processServerData(serverData) {
         if (op.estimatedPnl > 0 && minutesUntilFunding > 0) { 
             op.details.minutesUntilFunding = minutesUntilFunding; // Gắn thêm minutesUntilFunding vào op.details
 
-            // Gán giá trị mặc định 'N/A' nếu các trường không tồn tại từ server (để hiển thị trên UI/log)
+            // Gán giá trị mặc định 'N/A' nếu các trường không tồn tại từ server
             op.details.shortFundingRate = op.details.shortFundingRate !== undefined ? op.details.shortFundingRate : 'N/A';
             op.details.longFundingRate = op.details.longFundingRate !== undefined ? op.details.longFundingRate : 'N/A';
             op.fundingDiff = op.fundingDiff !== undefined ? op.fundingDiff : 'N/A'; 
             op.commonLeverage = op.commonLeverage !== undefined ? op.commonLeverage : 'N/A';
             op.details.volume = op.details.volume !== undefined ? op.details.volume : 'N/A';
             
+            // XÁC ĐỊNH LONG/SHORT EXCHANGE DỰA TRÊN FUNDING RATES (CAO = SHORT, THẤP = LONG)
+            let shortExId = op.details.shortExchange; // Tên sàn Short mặc định từ server
+            let longExId = op.details.longExchange;   // Tên sàn Long mặc định từ server
+
+            // Chỉ thực hiện logic đảo nếu cả hai funding rate đều là số hợp lệ
+            if (typeof op.details.shortFundingRate === 'number' && typeof op.details.longFundingRate === 'number') {
+                if (op.details.shortFundingRate < op.details.longFundingRate) { // Nếu Short FR < Long FR, đảo vai trò
+                    safeLog('log', `[BOT] Đảo sàn Long/Short cho ${op.coin}: Short FR (${op.details.shortFundingRate}) < Long FR (${op.details.longFundingRate}).`);
+                    shortExId = op.details.longExchange; // Sàn có FR cao hơn (là Long ban đầu) giờ thành Short
+                    longExId = op.details.shortExchange; // Sàn có FR thấp hơn (là Short ban đầu) giờ thành Long
+                }
+            }
+            op.details.shortExchange = shortExId;
+            op.details.longExchange = longExId;
+
             tempAllOpportunities.push(op); 
 
-            // Logic cho bestForDisplay (cho UI): funding gần nhất, nếu bằng thì PnL cao nhất
-            // Điều kiện này áp dụng cho BẢNG DỰ KIẾN (DISPLAY ONLY)
+            // Logic cho bestForDisplay: funding gần nhất, nếu bằng thì PnL cao nhất
             if (!bestForDisplay ||
                 minutesUntilFunding < bestForDisplay.details.minutesUntilFunding || 
                 (minutesUntilFunding === bestForDisplay.details.minutesUntilFunding && op.estimatedPnl > bestForDisplay.estimatedPnl) 
@@ -242,7 +256,7 @@ async function manageFundsAndTransfer(opportunity, percentageToUse) {
     
     await updateBalances(); 
 
-    // Chia đôi tổng số dư khả dụng (có thể bao gồm âm)
+    // Chia đôi tổng số dư khả dụng (bao gồm âm)
     const targetBalancePerExchange = balances.totalOverall / 2; 
 
     const involvedExchanges = [shortExchangeId, longExchangeId];
@@ -307,8 +321,6 @@ async function manageFundsAndTransfer(opportunity, percentageToUse) {
     }
 
     // Kiểm tra lại số dư sau khi chuyển tiền (có thể chưa cập nhật kịp thời)
-    // Nếu balance[id].available bị âm sau khi chuyển, điều này có thể do lỗi API hoặc sàn tự động điều chỉnh
-    // Chúng ta vẫn sẽ cho phép nó đi tiếp nếu bot đã cố gắng cân bằng
     if (balances[shortExchangeId].available < targetBalancePerExchange * (percentageToUse / 100) || 
         balances[longExchangeId].available < targetBalancePerExchange * (percentageToUse / 100)) {
         safeLog('warn', '[BOT_TRANSFER] Cảnh báo: Số dư trên sàn mục tiêu có thể không đủ sau khi chuyển tiền hoặc chưa được cập nhật kịp thời. Tiếp tục với rủi ro.');
@@ -394,43 +406,6 @@ async function executeTrades(opportunity, percentageToUse) {
             return false;
         }
 
-        // Tính toán TP/SL dựa trên vốn mở lệnh (collateral) và tỷ lệ phần trăm
-        // Ví dụ: Stop Loss 800% vốn => Mất 8 lần vốn
-        // Lợi nhuận/Lỗ tính bằng USDT = collateral * (tỷ lệ % / 100)
-        // Thay đổi giá = (Lợi nhuận/Lỗ) / (amount * leverage)
-        // Giá SL = Entry Price +/- Thay đổi giá
-        
-        // Short: SL khi giá TĂNG, TP khi giá GIẢM
-        const shortStopLossUSD = shortCollateral * (SL_PERCENT_OF_COLLATERAL / 100);
-        const shortTakeProfitUSD = shortCollateral * (TP_PERCENT_OF_COLLATERAL / 100);
-        
-        // shortAmount có thể rất nhỏ, tránh chia cho 0
-        const shortPriceChangeFactor = (shortAmount * commonLeverage) > 0 ? (shortAmount * commonLeverage) : 1; 
-
-        const shortPriceChangeForSL = shortStopLossUSD / shortPriceChangeFactor;
-        const shortPriceChangeForTP = shortTakeProfitUSD / shortPriceChangeFactor;
-        
-        const shortSlPrice = shortEntryPrice + shortPriceChangeForSL;
-        const shortTpPrice = shortEntryPrice - shortPriceChangeForTP;
-
-        // Long: SL khi giá GIẢM, TP khi giá TĂNG
-        const longStopLossUSD = longCollateral * (SL_PERCENT_OF_COLLATERAL / 100);
-        const longTakeProfitUSD = longCollateral * (TP_PERCENT_OF_COLLATERAL / 100);
-
-        // longAmount có thể rất nhỏ, tránh chia cho 0
-        const longPriceChangeFactor = (longAmount * commonLeverage) > 0 ? (longAmount * commonLeverage) : 1;
-
-        const longPriceChangeForSL = longStopLossUSD / longPriceChangeFactor;
-        const longPriceChangeForTP = longTakeProfitUSD / longPriceChangeFactor;
-
-        const longSlPrice = longEntryPrice - longPriceChangeForSL;
-        const longTpPrice = longEntryPrice + longPriceChangeForTP;
-
-        safeLog('log', `[BOT_TRADE] Tính toán TP/SL cho ${cleanedCoin}:`);
-        safeLog('log', `  Short Entry: ${shortEntryPrice.toFixed(4)}, SL: ${shortSlPrice.toFixed(4)}, TP: ${shortTpPrice.toFixed(4)}`);
-        safeLog('log', `  Long Entry: ${longEntryPrice.toFixed(4)}, SL: ${longSlPrice.toFixed(4)}, TP: ${longTpPrice.toFixed(4)}`);
-
-
         // --- Mở lệnh Short ---
         safeLog('log', `[BOT_TRADE] Mở SHORT ${shortAmount.toFixed(opportunity.details.shortExchange === 'okx' ? 0 : 3)} ${cleanedCoin} trên ${shortExchangeId} với giá ${shortEntryPrice.toFixed(4)}...`);
         shortOrder = await shortExchange.createMarketSellOrder(shortOriginalSymbol, shortAmount);
@@ -441,23 +416,18 @@ async function executeTrades(opportunity, percentageToUse) {
         longOrder = await longExchange.createMarketBuyOrder(longOriginalSymbol, longAmount);
         safeLog('log', `[BOT_TRADE] ✅ Lệnh LONG ${longExchangeId} khớp: ID ${longOrder.id}, Amount ${longOrder.amount}, Price ${longOrder.price}`);
         
-        // --- Đặt Stop Loss và Take Profit (Cần kích hoạt và kiểm tra từng sàn) ---
-        // Các lệnh này có thể khác nhau tùy sàn (ví dụ: 'stop', 'take_profit', 'stop_loss_limit')
-        // Cần kiểm tra kỹ tài liệu CCXT và sàn cụ thể
-        /*
-        safeLog('log', `[BOT_TRADE] Đặt SL/TP cho ${shortExchangeId} SHORT: SL at ${shortSlPrice.toFixed(4)}, TP at ${shortTpPrice.toFixed(4)}`);
-        // Ví dụ cho Stop Market Buy (đóng short)
-        await shortExchange.createOrder(shortOriginalSymbol, 'stop_market', 'buy', shortAmount, undefined, { stopPrice: shortSlPrice, reduceOnly: true });
-        // Ví dụ cho Take Profit Market Buy (đóng short)
-        await shortExchange.createOrder(shortOriginalSymbol, 'take_profit_market', 'buy', shortAmount, undefined, { stopPrice: shortTpPrice, reduceOnly: true });
+        // --- Đặt Stop Loss và Take Profit (Tạm thời bỏ code thực tế, chỉ tính toán và lưu) ---
+        // TP/SL được tính toán dựa trên % vốn mở lệnh (collateral) và đòn bẩy.
+        // Đây là những con số SL/TP không khả thi cho giao dịch thực tế
+        const shortSlPrice = shortEntryPrice * (1 + (SL_PERCENT_OF_COLLATERAL / 100)); // Short SL khi giá tăng
+        const shortTpPrice = shortEntryPrice * (1 - (TP_PERCENT_OF_COLLATERAL / 100)); // Short TP khi giá giảm
+        const longSlPrice = longEntryPrice * (1 - (SL_PERCENT_OF_COLLATERAL / 100));   // Long SL khi giá giảm
+        const longTpPrice = longEntryPrice * (1 + (TP_PERCENT_OF_COLLATERAL / 100));   // Long TP khi giá tăng
 
-        safeLog('log', `[BOT_TRADE] Đặt SL/TP cho ${longExchangeId} LONG: SL at ${longSlPrice.toFixed(4)}, TP at ${longTpPrice.toFixed(4)}`);
-        // Ví dụ cho Stop Market Sell (đóng long)
-        await longExchange.createOrder(longOriginalSymbol, 'stop_market', 'sell', longAmount, undefined, { stopPrice: longSlPrice, reduceOnly: true });
-        // Ví dụ cho Take Profit Market Sell (đóng long)
-        await longExchange.createOrder(longOriginalSymbol, 'take_profit_market', 'sell', longAmount, undefined, { stopPrice: longTpPrice, reduceOnly: true });
-        */
-
+        safeLog('log', `[BOT_TRADE] Tính toán TP/SL cho ${cleanedCoin}:`);
+        safeLog('log', `  Short Entry: ${shortEntryPrice.toFixed(4)}, SL: ${shortSlPrice.toFixed(4)}, TP: ${shortTpPrice.toFixed(4)}`);
+        safeLog('log', `  Long Entry: ${longEntryPrice.toFixed(4)}, SL: ${longSlPrice.toFixed(4)}, TP: ${longTpPrice.toFixed(4)}`);
+        
         safeLog('log', `[BOT_TRADE] Setting currentTradeDetails for ${cleanedCoin} on ${shortExchangeId}/${longExchangeId}`);
         currentTradeDetails = {
             coin: cleanedCoin,
@@ -734,12 +704,10 @@ const botServer = http.createServer((req, res) => {
         // Tôi đã thêm một kiểm tra cực kỳ mạnh mẽ để đảm bảo currentTradeDetails được truy cập an toàn.
         let displayCurrentTradeDetails = null;
         try {
-            // Chỉ gửi currentTradeDetails nếu nó đang ở trạng thái OPEN và là một object hợp lệ
+            // Chỉ gửi currentTradeDetails nếu nó đang ở trạng thái OPEN
             if (currentTradeDetails && typeof currentTradeDetails === 'object' && currentTradeDetails.status === 'OPEN') {
                 displayCurrentTradeDetails = currentTradeDetails;
             } else {
-                // Log cảnh báo nếu biến không ở trạng thái mong muốn, nhưng vẫn cho phép hoạt động
-                // safeLog('warn', `[BOT_SERVER] currentTradeDetails is not a valid object or is null (${typeof currentTradeDetails}). Sending as null.`);
                 displayCurrentTradeDetails = null;
             }
         } catch (e) {
