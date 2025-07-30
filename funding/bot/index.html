@@ -393,6 +393,32 @@
                     const fundingTimeFormatted = nextFundingDate.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit', hour12: false });
                     const fundingDateFormatted = nextFundingDate.toLocaleDateString('vi-VN');
 
+                    // Lấy Short/Long Exchange dựa trên funding rates
+                    let longExchangeName = data.currentSelectedOpportunity.details.longExchange || 'N/A';
+                    let shortExchangeName = data.currentSelectedOpportunity.details.shortExchange || 'N/A';
+
+                    // Cần kiểm tra nếu các trường này có tồn tại và hợp lệ
+                    const shortFr = data.currentSelectedOpportunity.details.shortFundingRate;
+                    const longFr = data.currentSelectedOpportunity.details.longFundingRate;
+                    const fundingDiff = data.currentSelectedOpportunity.fundingDiff;
+
+                    // Logic xác định Short/Long từ funding rates (nếu có dữ liệu)
+                    // Dùng logic đã sửa: Long FR thấp, Short FR cao
+                    if (typeof shortFr === 'number' && typeof longFr === 'number' && fundingDiff !== 'N/A') {
+                        if (shortFr > longFr) { // Short FR cao hơn Long FR
+                            shortExchangeName = data.currentSelectedOpportunity.details.shortExchange;
+                            longExchangeName = data.currentSelectedOpportunity.details.longExchange;
+                        } else if (longFr > shortFr) { // Long FR cao hơn Short FR (trường hợp hiếm trong arbitrage funding)
+                            // Đảo vai trò nếu logic arbitrage ngược lại
+                            shortExchangeName = data.currentSelectedOpportunity.details.longExchange;
+                            longExchangeName = data.currentSelectedOpportunity.details.shortExchange;
+                        } else { // Funding rates bằng nhau
+                            shortExchangeName = data.currentSelectedOpportunity.details.shortExchange; // Vẫn giữ mặc định từ server
+                            longExchangeName = data.currentSelectedOpportunity.details.longExchange;
+                        }
+                    }
+
+
                     bestPotentialOpportunityDisplayDiv.innerHTML = `
                         <p><strong>Coin:</strong> <span>${data.currentSelectedOpportunity.coin}</span></p>
                         <p><strong>Sàn:</strong> <span>${data.currentSelectedOpportunity.exchanges}</span></p>
@@ -400,9 +426,9 @@
                         <p><strong>Tới giờ funding:</strong> <span>${fundingTimeFormatted} ngày ${fundingDateFormatted}</span></p>
                         <p><strong>Volume ước tính:</strong> <span>${data.currentSelectedOpportunity.details.volume?.toFixed(2) || 'N/A'} USDT</span></p>
                         <p><strong>Max Lev sẽ mở:</strong> <span>${data.currentSelectedOpportunity.commonLeverage || 'N/A'}x</span></p>
-                        <p><strong>Short Funding Rate:</strong> <span>${data.currentSelectedOpportunity.details.shortFundingRate?.toFixed(4) || 'N/A'}%</span></p>
-                        <p><strong>Long Funding Rate:</strong> <span>${data.currentSelectedOpportunity.details.longFundingRate?.toFixed(4) || 'N/A'}%</span></p>
-                        <p><strong>Chênh lệch Funding:</strong> <span>${data.currentSelectedOpportunity.fundingDiff?.toFixed(4) || 'N/A'}%</span></p>
+                        <p><strong>Long Sàn:</strong> <span>${longExchangeName} (${typeof longFr === 'number' ? longFr.toFixed(4) : 'N/A'}%)</span></p>
+                        <p><strong>Short Sàn:</strong> <span>${shortExchangeName} (${typeof shortFr === 'number' ? shortFr.toFixed(4) : 'N/A'}%)</span></p>
+                        <p><strong>Chênh lệch Funding:</strong> <span>${typeof fundingDiff === 'number' ? fundingDiff.toFixed(4) : 'N/A'}%</span></p>
                     `;
                 } else {
                     bestPotentialOpportunityDisplayDiv.textContent = 'Không có cơ hội nào khả dụng.';
