@@ -377,6 +377,7 @@ async function executeTrades(opportunity, percentageToUse) {
         longOrder = await longExchange.createMarketBuyOrder(longOriginalSymbol, longAmount);
         safeLog('log', `[BOT_TRADE] ✅ Lệnh LONG ${longExchangeId} khớp: ID ${longOrder.id}, Amount ${longOrder.amount}, Price ${longOrder.price}`);
 
+        safeLog('log', `[BOT] currentTradeDetails being set to: ${JSON.stringify({ coin: cleanedCoin, shortExchange: shortExchangeId, longExchange: longExchangeId, status: 'OPEN' })}`);
         currentTradeDetails = {
             coin: cleanedCoin,
             shortExchange: shortExchangeId,
@@ -394,6 +395,7 @@ async function executeTrades(opportunity, percentageToUse) {
             status: 'OPEN',
             openTime: Date.now()
         };
+        safeLog('log', `[BOT] currentTradeDetails set successfully.`);
 
     } catch (e) {
         safeLog('error', `[BOT_TRADE] ❌ Lỗi khi thực hiện giao dịch: ${e.message}`);
@@ -457,6 +459,7 @@ async function closeTradesAndCalculatePnL() {
         safeLog('error', `[BOT_PNL] ❌ Lỗi khi đóng vị thế hoặc tính toán PnL: ${e.message}`);
     } finally {
         currentSelectedOpportunityForExecution = null; // Reset cơ hội thực thi
+        safeLog('log', `[BOT] currentTradeDetails being reset to null. Previously: ${JSON.stringify(currentTradeDetails)}`);
         currentTradeDetails = null; // Reset chi tiết giao dịch
         safeLog('log', '[BOT_PNL] Dọn dẹp lệnh chờ và vị thế đã đóng (nếu có).');
     }
@@ -637,7 +640,22 @@ const botServer = http.createServer((req, res) => {
             res.end(content);
         });
     } else if (req.url === '/bot-api/status' && req.method === 'GET') {
-        // Gửi thông tin về cơ hội để hiển thị trên UI
+        // Kiểm tra an toàn cho currentTradeDetails trước khi gửi đi
+        let displayCurrentTradeDetails = null;
+        try {
+            // Log để debug: kiểm tra giá trị của currentTradeDetails trước khi truy cập
+            safeLog('log', `[BOT_SERVER] Fetching status: currentTradeDetails type: ${typeof currentTradeDetails}, value: ${JSON.stringify(currentTradeDetails)}`);
+            if (typeof currentTradeDetails === 'object' && currentTradeDetails !== null) {
+                displayCurrentTradeDetails = currentTradeDetails;
+            } else {
+                 safeLog('warn', '[BOT_SERVER] currentTradeDetails is not an object or is null, sending as null.');
+            }
+        } catch (e) {
+            safeLog('error', `[BOT_SERVER] Error accessing currentTradeDetails for status API: ${e.message}`);
+            displayCurrentTradeDetails = null; // Gán null nếu có lỗi
+        }
+
+
         const statusData = {
             botState: botState,
             balances: balances,
@@ -646,7 +664,7 @@ const botServer = http.createServer((req, res) => {
             tradeHistory: tradeHistory,
             // currentSelectedOpportunity đã được đổi tên để phân biệt rõ ràng
             currentSelectedOpportunity: bestPotentialOpportunityForDisplay, // Dành cho UI hiển thị
-            currentTradeDetails: currentTradeDetails // Trade đang mở
+            currentTradeDetails: displayCurrentTradeDetails // Trade đang mở (đã có kiểm tra an toàn)
         };
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify(statusData));
