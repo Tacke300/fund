@@ -78,30 +78,34 @@ EXCHANGE_IDS.forEach(id => {
 const cleanSymbol = (symbol) => {
     let cleaned = symbol.toUpperCase();
     
-    // Loại bỏ hậu tố Bitget WS (dù không còn dùng WS để lấy funding, symbol có thể vẫn có dạng này)
+    // 1. Loại bỏ hậu tố Bitget WS (dù không còn dùng WS để lấy funding, symbol có thể vẫn có dạng này)
     cleaned = cleaned.replace('_UMCBL', ''); 
 
-    // Xử lý các ký tự phân tách phổ biến (/, :, _)
+    // 2. Xử lý các ký tự phân tách phổ biến (/, :, _)
     cleaned = cleaned.replace(/[\/:_]/g, ''); 
     
-    // Xử lý định dạng COIN-USDT của BingX (ví dụ: chuyển BTC-USDT thành BTCUSDT)
+    // 3. Xử lý định dạng COIN-USDT của BingX (ví dụ: chuyển BTC-USDT thành BTCUSDT)
     cleaned = cleaned.replace(/-USDT$/, 'USDT'); 
 
-    // Loại bỏ các chữ số ở đầu symbol (ví dụ: 1000PEPEUSDT -> PEPEUSDT)
+    // 4. Loại bỏ các chữ số ở đầu symbol (ví dụ: 1000PEPEUSDT -> PEPEUSDT)
     cleaned = cleaned.replace(/^\d+/, ''); 
 
-    // Loại bỏ các chữ số ngay trước "USDT" (ví dụ: OMNI1USDT -> OMNIUSDT)
-    // Regex này sẽ thay thế "N" (chữ số) + "USDT" bằng chỉ "USDT"
-    cleaned = cleaned.replace(/(\d+)USDT$/, 'USDT'); 
+    // 5. Loại bỏ các chữ số nằm trong phần tên coin ngay trước 'USDT' (ví dụ: OMNI1USDT -> OMNIUSDT, BTC2USDT -> BTCUSDT)
+    // Regex này tìm kiếm phần không phải chữ số (coin name), sau đó là các chữ số, rồi đến USDT.
+    // Nó sẽ thay thế (chữ số + USDT) bằng chỉ USDT, giữ lại phần tên coin.
+    cleaned = cleaned.replace(/(\D+)\d+USDT$/, '$1USDT'); 
 
-    // Đảm bảo symbol kết thúc bằng một 'USDT' duy nhất và loại bỏ mọi thứ sau nó
-    // Ví dụ: FOOUSDTUSDT -> FOOUSDT, PEPEUSDT_PERP -> PEPEUSDT
-    if (cleaned.includes('USDT')) { 
-        cleaned = cleaned.replace(/(USDT).*$/, 'USDT'); 
+    // 6. Đảm bảo symbol kết thúc bằng một 'USDT' duy nhất và loại bỏ mọi thứ sau nó
+    // Ví dụ: FOOUSDTUSDT -> FOOUSDT, PEPEUSDT_PERP -> PEPEUSDT, OMNIUSDT1 -> OMNIUSDT
+    const usdtIndex = cleaned.indexOf('USDT');
+    if (usdtIndex !== -1) {
+        // Lấy phần trước 'USDT' và nối với 'USDT'
+        cleaned = cleaned.substring(0, usdtIndex) + 'USDT';
     } else if (symbol.toUpperCase().includes('USDT') && !cleaned.endsWith('USDT')) { 
-        // Fallback: Nếu symbol gốc có USDT nhưng bị mất trong quá trình clean, hãy thêm lại
+        // Fallback: Nếu symbol gốc có USDT nhưng bị mất trong quá trình clean (ví dụ: ETHUSD.P), hãy thêm lại
         cleaned = cleaned + 'USDT';
     }
+
     return cleaned;
 };
 
@@ -500,7 +504,6 @@ async function updateLeverageForExchange(id, symbolsToUpdate = null) {
             console.log(`[CACHE] ✅ ${id.toUpperCase()}: Hoàn tất lấy dữ liệu đòn bẩy cho ${Object.keys(currentFetchedLeverageDataMap).length} cặp. (${successCount} cặp được parse thành công)`);
             
             if (successCount > 0) {
-                // Đã loại bỏ phần in dữ liệu mẫu 40 symbol ở đây
                 debugRawLeverageResponses[id].data = `Đã lấy ${successCount} cặp đòn bẩy.`; 
             } else {
                 debugRawLeverageResponses[id].data = 'Không có dữ liệu đòn bẩy hợp lệ nào được tìm thấy.';
@@ -868,7 +871,6 @@ async function fetchFundingRatesForAllExchanges() {
                 console.log(`[DATA] ✅ BingX: Đã lấy thành công ${bingxSuccessCount} funding rates từ API trực tiếp.`);
                 
                 if (bingxSuccessCount > 0) {
-                    // Đã loại bỏ phần in dữ liệu mẫu 40 symbol ở đây
                     debugRawLeverageResponses[bingxExchangeId].data = `Đã lấy ${bingxSuccessCount} cặp funding.`;
                 } else {
                     debugRawLeverageResponses[bingxExchangeId].data = 'Không có dữ liệu funding hợp lệ nào được tìm thấy.';
