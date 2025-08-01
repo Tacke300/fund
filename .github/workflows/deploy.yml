@@ -15,12 +15,20 @@ jobs:
     - name: Setup SSH keys for multiple VPS
       run: |
         mkdir -p ~/.ssh
+        
+        # Lưu SSH key cho VPS 1 (giữ nguyên định dạng, không giải mã base64)
         echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_ed25519_vps1
         chmod 600 ~/.ssh/id_ed25519_vps1
-        echo "${{ secrets.SSH_PRIVATE_KEY_VPS2 }}" > ~/.ssh/id_ed25519_vps2
+        
+        # Giải mã và lưu SSH key cho VPS 2
+        echo "${{ secrets.SSH_PRIVATE_KEY_VPS2 }}" | base64 -d > ~/.ssh/id_ed25519_vps2
         chmod 600 ~/.ssh/id_ed25519_vps2
+        
+        # Thêm khóa công khai của các VPS vào known_hosts
         ssh-keyscan -H 34.142.248.96 >> ~/.ssh/known_hosts
         ssh-keyscan -H 34.142.224.90 >> ~/.ssh/known_hosts
+        
+        # Thêm các khóa riêng tư vào ssh-agent
         eval "$(ssh-agent -s)"
         ssh-add ~/.ssh/id_ed25519_vps1
         ssh-add ~/.ssh/id_ed25519_vps2
