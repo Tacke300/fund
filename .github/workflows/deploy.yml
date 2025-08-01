@@ -16,9 +16,11 @@ jobs:
       run: |
         mkdir -p ~/.ssh
         
-        echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_ed25519_vps1
-        chmod 600 ~/.ssh/id_ed25519_vps1
+        # Lưu SSH key cho VPS 1 vào file tên là id_ed25519
+        echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_ed25519
+        chmod 600 ~/.ssh/id_ed25519
         
+        # Lưu SSH key cho VPS 2 vào file tên là id_ed25519_vps2 (để tránh ghi đè)
         echo "${{ secrets.SSH_PRIVATE_KEY_VPS2 }}" > ~/.ssh/id_ed25519_vps2
         chmod 600 ~/.ssh/id_ed25519_vps2
         
@@ -27,10 +29,11 @@ jobs:
         
         eval "$(ssh-agent -s)"
         ssh-add ~/.ssh/id_ed25519
-        ssh-add ~/.ssh/id_ed25519
+        ssh-add ~/.ssh/id_ed25519_vps2
        
     - name: Deploy to VPS 1 (34.142.248.96)
       run: |
+        # Sử dụng khóa id_ed25519 cho VPS 1
         ssh -i ~/.ssh/id_ed25519 tacke300@34.142.248.96 '
           cd /home/tacke300/fundingbotpromax && 
           git pull && 
@@ -39,7 +42,8 @@ jobs:
     
     - name: Deploy to VPS 2 (34.142.224.90)
       run: |
-        ssh -i ~/.ssh/id_ed25519 tacke300@34.142.224.90 '
+        # Sử dụng khóa id_ed25519_vps2 cho VPS 2
+        ssh -i ~/.ssh/id_ed25519_vps2 tacke300@34.142.224.90 '
           cd /home/tacke300/fundingbotpromax && 
           git pull && 
           ./autopull.sh
