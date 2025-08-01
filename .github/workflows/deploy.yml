@@ -1,0 +1,52 @@
+name: Deploy tacke300 to VPS
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    - name: Setup SSH keys for multiple VPS
+      run: |
+        mkdir -p ~/.ssh
+        
+        # Lưu SSH key cho VPS 1 vào file riêng
+        echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_ed25519_vps1 # Hoặc secrets.SSH_PRIVATE_KEY_VPS1 nếu bạn đổi tên
+        chmod 600 ~/.ssh/id_ed25519_vps1
+        
+        # Lưu SSH key cho VPS 2 vào file riêng
+        echo "${{ secrets.SSH_PRIVATE_KEY_VPS2 }}" > ~/.ssh/id_ed25519_vps2 
+        chmod 600 ~/.ssh/id_ed25519_vps2
+        
+        # Thêm khóa công khai của các VPS vào known_hosts
+        ssh-keyscan -H 34.142.248.96 >> ~/.ssh/known_hosts
+        ssh-keyscan -H 34.142.224.90 >> ~/.ssh/known_hosts
+        
+        # Giúp SSH client sử dụng các khóa mới này
+        eval "$(ssh-agent -s)"
+        ssh-add ~/.ssh/id_ed25519_vps1
+        ssh-add ~/.ssh/id_ed25519_vps2
+       
+    - name: Deploy to VPS 1 (34.142.248.96)
+      run: |
+        # Sử dụng SSH key riêng cho VPS 1
+        ssh -i ~/.ssh/id_ed25519_vps1 tacke300@34.142.248.96 '
+          cd /home/tacke300/fundingbotpromax && 
+          git pull && 
+          ./autopull.sh
+        '
+    
+    - name: Deploy to VPS 2 (34.142.224.90)
+      run: |
+        # Sử dụng SSH key riêng cho VPS 2
+        ssh -i ~/.ssh/id_ed25519_vps2 tacke300@34.142.224.90 '
+          cd /home/tacke300/fundingbotpromax && 
+          git pull && 
+          ./autopull.sh
+        '
