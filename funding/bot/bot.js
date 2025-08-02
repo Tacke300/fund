@@ -33,7 +33,7 @@ const {
     bitgetApiKey, bitgetApiSecret, bitgetApiPassword
 } = require('../config.js'); 
 
-// Import địa chỉ ví nạp tiền từ file balance.js
+// IMPORT MỚI: Import địa chỉ ví nạp tiền từ file balance.js
 const { usdtBep20DepositAddresses } = require('./balance.js'); 
 
 const BOT_PORT = 5006; // Cổng cho Bot UI (khác với cổng của Server chính)
@@ -571,26 +571,28 @@ async function closeTradesAndCalculatePnL() {
 
     try {
         // Hủy bỏ các lệnh TP/SL còn treo nếu có (ví dụ: nếu bạn muốn đóng thủ công hoặc không muốn chờ TP/SL tự khớp)
-        // CCXT không có hàm chung để hủy tất cả lệnh chờ của một symbol. Cần fetchOrders và hủy từng cái.
-        // safeLog('log', '[BOT_PNL] Hủy các lệnh TP/SL còn chờ...');
-        // try {
-        //     const shortOpenOrders = await exchanges[shortExchange].fetchOpenOrders(shortOriginalSymbol);
-        //     for (const order of shortOpenOrders) {
-        //         if (order.type === 'stop' || order.type === 'take_profit') { // Kiểm tra loại lệnh
-        //             await exchanges[shortExchange].cancelOrder(order.id, shortOriginalSymbol);
-        //             safeLog('log', `[BOT_PNL] Đã hủy lệnh chờ ${order.id} trên ${shortExchange}.`);
-        //         }
-        //     }
-        // } catch (e) { safeLog('warn', `[BOT_PNL] Lỗi khi hủy lệnh chờ trên ${shortExchange}: ${e.message}`); }
-        // try {
-        //     const longOpenOrders = await exchanges[longExchange].fetchOpenOrders(longOriginalSymbol);
-        //     for (const order of longOpenOrders) {
-        //         if (order.type === 'stop' || order.type === 'take_profit') {
-        //             await exchanges[longExchange].cancelOrder(order.id, longOriginalSymbol);
-        //             safeLog('log', `[BOT_PNL] Đã hủy lệnh chờ ${order.id} trên ${longExchange}.`);
-        //         }
-        //     }
-        // } catch (e) { safeLog('warn', `[BOT_PNL] Lỗi khi hủy lệnh chờ trên ${longExchange}: ${e.message}`); }
+        // CCXT không có hàm chung để hủy tất cả lệnh chờ của một symbol. Cần fetchOpenOrders và hủy từng cái.
+        safeLog('log', '[BOT_PNL] Hủy các lệnh TP/SL còn chờ (nếu có)...');
+        // Đối với Binance, OKX, Bitget, hủy lệnh chờ:
+        try {
+            const shortOpenOrders = await exchanges[shortExchange].fetchOpenOrders(shortOriginalSymbol);
+            for (const order of shortOpenOrders) {
+                // Chỉ hủy lệnh STOP_MARKET hoặc TAKE_PROFIT_MARKET
+                if (order.type === 'stop' || order.type === 'take_profit' || order.type === 'stop_market' || order.type === 'take_profit_market') { 
+                    await exchanges[shortExchange].cancelOrder(order.id, shortOriginalSymbol);
+                    safeLog('log', `[BOT_PNL] Đã hủy lệnh chờ ${order.type} ${order.id} trên ${shortExchange}.`);
+                }
+            }
+        } catch (e) { safeLog('warn', `[BOT_PNL] Lỗi khi hủy lệnh chờ trên ${shortExchange}: ${e.message}`); }
+        try {
+            const longOpenOrders = await exchanges[longExchange].fetchOpenOrders(longOriginalSymbol);
+            for (const order of longOpenOrders) {
+                if (order.type === 'stop' || order.type === 'take_profit' || order.type === 'stop_market' || order.type === 'take_profit_market') {
+                    await exchanges[longExchange].cancelOrder(order.id, longOriginalSymbol);
+                    safeLog('log', `[BOT_PNL] Đã hủy lệnh chờ ${order.type} ${order.id} trên ${longExchange}.`);
+                }
+            }
+        } catch (e) { safeLog('warn', `[BOT_PNL] Lỗi khi hủy lệnh chờ trên ${longExchange}: ${e.message}`); }
 
 
         safeLog('log', `[BOT_PNL] Đóng vị thế SHORT ${coin} trên ${shortExchange} (amount: ${shortOrderAmount})...`);
@@ -605,11 +607,26 @@ async function closeTradesAndCalculatePnL() {
 
         await updateBalances(); // Cập nhật số dư cuối cùng
 
-        const shortBalanceAfter = balances[shortExchange].available;
-        const longBalanceAfter = balances[longExchange].available;
+        // Cần lấy lại vị thế hiện tại để đảm bảo đã đóng (để tránh lỗi nếu lệnh đóng không khớp hoàn toàn)
+        // Tuy nhiên, cách đơn giản hơn là giả định rằng chúng ta muốn tính PnL từ vốn ban đầu
+        // và sự thay đổi của 'available' balance là cách tốt nhất để đo PnL thực tế của một chu kỳ.
+        // PnL của một chu kỳ giao dịch là (Số dư cuối - Số dư đầu) của CẶP SÀN tham gia.
+        // Để tính PnL toàn bộ từ đầu, bạn chỉ cần lấy balances.totalOverall - initialTotalBalance
 
-        // Tính PnL dựa trên sự thay đổi của số dư khả dụng
-        const cyclePnl = (shortBalanceAfter - shortCollateral) + (longBalanceAfter - longCollateral); 
+        // Cách tính PnL cho chu kỳ giao dịch hiện tại:
+        // PnL = (tổng số dư mới trên 2 sàn liên quan) - (tổng số vốn ban đầu đã bỏ ra trên 2 sàn đó)
+        const currentShortAvailable = balances[shortExchange].available;
+        const currentLongAvailable = balances[longExchange].available;
+
+        // PnL thực tế của chu kỳ được tính bằng cách so sánh số dư khả dụng sau khi đóng lệnh
+        // với số vốn ban đầu (collateral) đã sử dụng cho chu kỳ đó.
+        // Đây là cách đơn giản nhất để ghi nhận PnL của từng chu kỳ vào lịch sử.
+        // Nó giả định rằng balance.available phản ánh chính xác PnL đã hiện thực.
+        const actualPnLShortSide = currentShortAvailable - currentTradeDetails.shortCollateral;
+        const actualPnLLongSide = currentLongAvailable - currentTradeDetails.longCollateral;
+        const cyclePnl = actualPnLShortSide + actualPnLLongSide;
+
+
         cumulativePnl += cyclePnl;
 
         tradeHistory.unshift({ 
@@ -626,7 +643,7 @@ async function closeTradesAndCalculatePnL() {
             tradeHistory.pop(); 
         }
 
-        safeLog('log', `[BOT_PNL] ✅ Chu kỳ giao dịch cho ${coin} hoàn tất. PnL chu kỳ: ${cyclePnl.toFixed(2)} USD. Tổng PnL: ${cumulativePnl.toFixed(2)} USD.`);
+        safeLog('log', `[BOT_PNL] ✅ Chu kỳ giao dịch cho ${coin} hoàn tất. PnL chu kỳ: ${cyclePnl.toFixed(2)} USDT. Tổng PnL: ${cumulativePnl.toFixed(2)} USDT.`);
 
     } catch (e) {
         safeLog('error', `[BOT_PNL] ❌ Lỗi khi đóng vị thế hoặc tính toán PnL: ${e.message}`);
@@ -899,7 +916,7 @@ const botServer = http.createServer((req, res) => {
                 if (!depositAddress || depositAddress.startsWith('0xYOUR_')) {
                     safeLog('error', `[BOT_SERVER_TRANSFER] ❌ Thiếu hoặc chưa điền địa chỉ nạp tiền BEP20 THẬT SỰ cho ${toExchangeId}. Vui lòng cập nhật balance.js`);
                     res.writeHead(400, { 'Content-Type': 'application/json' });
-                    res.end(JSON.stringify({ success: false, message: `Địa chỉ nạp tiền BEP20 cho ${toExchangeId.toUpperCase()} chưa được cấu hình. Vui lòng kiểm tra balance.js.` }));
+                    res.end(JSON.stringify({ success: false, message: `Địa chỉ nạp tiền BEP20 cho ${toExchangeId.toUpperCase()} chưa được cấu hình trong balance.js. Vui lòng kiểm tra lại.` }));
                     return;
                 }
 
@@ -924,19 +941,20 @@ const botServer = http.createServer((req, res) => {
                     safeLog('log', `[BOT_SERVER_TRANSFER] ✅ Yêu cầu chuyển thủ công hoàn tất từ ${fromExchangeId.toUpperCase()} sang ${toExchangeId.toUpperCase()}. ID giao dịch: ${withdrawResult.id}`);
                     
                     // Trigger a balance update shortly after for UI reflection
-                    setTimeout(updateBalances, 5000); 
+                    // Cần đợi một thời gian ngắn để giao dịch on-chain được xử lý một phần
+                    setTimeout(updateBalances, 15000); // 15 giây là ước tính để lệnh được gửi đi
 
                     res.writeHead(200, { 'Content-Type': 'application/json' });
-                    res.end(JSON.stringify({ success: true, message: `Yêu cầu chuyển ${amount} USDT từ ${fromExchangeId.toUpperCase()} sang ${toExchangeId.toUpperCase()} đã được gửi. ID giao dịch: ${withdrawResult.id}. Vui lòng kiểm tra trạng thái trên sàn.` }));
+                    res.end(JSON.stringify({ success: true, message: `Yêu cầu chuyển ${amount} USDT từ ${fromExchangeId.toUpperCase()} sang ${toExchangeId.toUpperCase()} đã được gửi. ID giao dịch: ${withdrawResult.id}.` }));
                 } catch (transferError) {
                     safeLog('error', `[BOT_SERVER_TRANSFER] ❌ Lỗi khi thực hiện chuyển tiền thủ công: ${transferError.message}`);
                     let userMessage = `Lỗi khi chuyển tiền: ${transferError.message}`;
                     if (transferError.message.includes('Insufficient funds')) {
-                        userMessage = `Số dư khả dụng trên ${fromExchangeId.toUpperCase()} không đủ.`;
+                        userMessage = `Số dư khả dụng trên ${fromExchangeId.toUpperCase()} không đủ. Vui lòng kiểm tra lại số dư tài khoản futures.`;
                     } else if (transferError.message.includes('API key permission')) {
-                        userMessage = `Lỗi quyền API: Kiểm tra quyền rút tiền của API Key trên ${fromExchangeId.toUpperCase()}.`;
-                    } else if (transferError.message.includes('Invalid network')) {
-                        userMessage = `Lỗi mạng (network): Đảm bảo sàn hỗ trợ BEP20 (Binance Smart Chain) và địa chỉ hợp lệ.`;
+                        userMessage = `Lỗi quyền API: Kiểm tra quyền RÚT TIỀN (Withdrawal permission) của API Key trên ${fromExchangeId.toUpperCase()}.`;
+                    } else if (transferError.message.includes('Invalid network') || transferError.message.includes('Invalid address')) {
+                        userMessage = `Lỗi mạng hoặc địa chỉ: Đảm bảo sàn hỗ trợ BEP20 (Binance Smart Chain) và địa chỉ nạp tiền trong balance.js là HỢP LỆ.`;
                     }
                     res.writeHead(500, { 'Content-Type': 'application/json' });
                     res.end(JSON.stringify({ success: false, message: userMessage }));
