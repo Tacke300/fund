@@ -131,8 +131,7 @@
         <tbody></tbody>
     </table>
 
-    <!-- Đã loại bỏ hoàn toàn phần Điều khiển Bot -->
-    <!-- Đã loại bỏ hoàn toàn phần Chuyển Tiền Thủ Công -->
+    <!-- Đã loại bỏ hoàn toàn phần Điều khiển Bot và Chuyển Tiền Thủ Công -->
 
     <h2>Tổng Hợp Funding Rates</h2>
     <table id="funding-matrix-table" class="funding-matrix-table">
@@ -150,18 +149,19 @@
 <script>
     const API_ENDPOINT = '/api/data';
 
-    // THAY ĐỔI LỚN: Định nghĩa các sàn đang hoạt động theo server.js
-    // Server của bạn đã định nghĩa:
-    // const ACTIVE_EXCHANGE_IDS = ALL_POSSIBLE_EXCHANGE_IDS.filter(id => !DISABLED_EXCHANGES.includes(id));
-    // Nếu DISABLED_EXCHANGES = ['bitget'], thì ACTIVE_EXCHANGE_IDS = ['binanceusdm', 'bingx', 'okx']
-    const ACTIVE_EXCHANGE_IDS_FROM_SERVER = ['binanceusdm', 'bingx', 'okx']; 
-    
+    // THAY ĐỔI LỚN: Sử dụng danh sách sàn có thể có trong server.js gốc của bạn
+    // Server của bạn đã khai báo: const EXCHANGE_IDS = ['binanceusdm', 'bingx', 'okx', 'bitget'];
+    // Nếu bạn có Kucoin, bạn cũng có thể thêm vào đây:
+    const EXCHANGES_CONFIGURED_IN_SERVER = ['binanceusdm', 'bingx', 'okx', 'bitget']; 
+    // const EXCHANGES_CONFIGURED_IN_SERVER = ['binanceusdm', 'bingx', 'okx', 'bitget', 'kucoin']; // Ví dụ nếu có Kucoin
+
     // Map CCXT IDs to user-friendly names for display in dropdowns and table headers
     const EXCHANGE_DISPLAY_NAMES = {
         'binanceusdm': 'Binance',
         'bingx': 'BingX',
         'okx': 'OKX',
-        'bitget': 'Bitget' // Vẫn giữ Bitget trong display names nếu cần hiển thị tên nhưng không hoạt động
+        'bitget': 'Bitget',
+        'kucoin': 'Kucoin' // Thêm Kucoin nếu bạn cấu hình trong server.js
     };
 
     function formatTime(timestamp) {
@@ -204,15 +204,15 @@
             theadRow.removeChild(theadRow.lastChild);
         }
 
-        // Thêm các header sàn động dựa trên ACTIVE_EXCHANGE_IDS_FROM_SERVER
-        ACTIVE_EXCHANGE_IDS_FROM_SERVER.forEach(exchangeId => {
+        // THAY ĐỔI LỚN: Thêm các header sàn động dựa trên EXCHANGES_CONFIGURED_IN_SERVER
+        EXCHANGES_CONFIGURED_IN_SERVER.forEach(exchangeId => {
             const th = document.createElement('th');
-            th.textContent = EXCHANGE_DISPLAY_NAMES[exchangeId];
+            th.textContent = EXCHANGE_DISPLAY_NAMES[exchangeId] || exchangeId.toUpperCase(); // Fallback nếu không có tên hiển thị
             theadRow.appendChild(th);
         });
 
         const ratesByCoin = {};
-        for (const exchangeId of ACTIVE_EXCHANGE_IDS_FROM_SERVER) { // Lặp qua các sàn active
+        for (const exchangeId of EXCHANGES_CONFIGURED_IN_SERVER) { // Lặp qua TẤT CẢ các sàn đã cấu hình
             if (ratesData[exchangeId] && ratesData[exchangeId].rates) { // Truy cập thuộc tính 'rates'
                 for (const cleanedSym in ratesData[exchangeId].rates) {
                     const rate = ratesData[exchangeId].rates[cleanedSym];
@@ -223,15 +223,15 @@
         }
         
         const sortedCoins = Object.keys(ratesByCoin).sort((a, b) => {
-            // Sắp xếp theo funding rate nhỏ nhất trên tất cả các sàn được cấu hình
-            const minRateA = Math.min(...ACTIVE_EXCHANGE_IDS_FROM_SERVER.map(ex => ratesByCoin[a][ex]?.fundingRate || 0));
-            const minRateB = Math.min(...ACTIVE_EXCHANGE_IDS_FROM_SERVER.map(ex => ratesByCoin[b][ex]?.fundingRate || 0));
+            // Sắp xếp theo min funding rate across all configured exchanges
+            const minRateA = Math.min(...EXCHANGES_CONFIGURED_IN_SERVER.map(ex => ratesByCoin[a][ex]?.fundingRate || 0));
+            const minRateB = Math.min(...EXCHANGES_CONFIGURED_IN_SERVER.map(ex => ratesByCoin[b][ex]?.fundingRate || 0));
             return minRateA - minRateB;
         });
 
         tbody.innerHTML = sortedCoins.slice(0, 1000).map((coin, index) => {
             let rowHtml = `<td>${index + 1}</td><td>${coin}</td>`;
-            for (const exchangeId of ACTIVE_EXCHANGE_IDS_FROM_SERVER) { // Lặp qua các sàn active
+            for (const exchangeId of EXCHANGES_CONFIGURED_IN_SERVER) { // Lặp qua TẤT CẢ các sàn đã cấu hình
                 const rate = ratesByCoin[coin][exchangeId];
                 if (rate && typeof rate.fundingRate === 'number') {
                     const rateText = (rate.fundingRate * 100).toFixed(4) + '%';
