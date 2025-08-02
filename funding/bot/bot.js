@@ -33,8 +33,8 @@ const {
     bitgetApiKey, bitgetApiSecret, bitgetApiPassword
 } = require('../config.js'); 
 
-// IMPORT MỚI: Import địa chỉ ví nạp tiền từ file balance.js
-const { usdtBep20DepositAddresses } = require('./balance.js'); 
+// THAY ĐỔI: Import cấu hình địa chỉ nạp tiền và mạng rút tiền ưu tiên
+const { usdtDepositAddressesByNetwork, preferredWithdrawalNetworks } = require('./balance.js'); 
 
 const BOT_PORT = 5006; // Cổng cho Bot UI (khác với cổng của Server chính)
 const SERVER_DATA_URL = 'http://localhost:5005/api/data'; // Địa chỉ Server chính
@@ -43,8 +43,7 @@ const SERVER_DATA_URL = 'http://localhost:5005/api/data'; // Địa chỉ Server
 const MIN_PNL_PERCENTAGE = 7; // %PnL tối thiểu để bot xem xét
 const MAX_MINUTES_UNTIL_FUNDING = 30; // Trong vòng 30 phút tới sẽ tới giờ funding (để bot tìm cơ hội)
 const MIN_MINUTES_FOR_EXECUTION = 15; // Phải còn ít nhất 15 phút tới funding để bot xem xét thực hiện
-const FUND_TRANSFER_MIN_AMOUNT = 10; // Số tiền tối thiểu cho mỗi lần chuyển tiền qua BEP20
-const BEP20_NETWORK_ID = 'BEP20'; // ID mạng cho BEP20 (Binance Smart Chain)
+const FUND_TRANSFER_MIN_AMOUNT = 10; // Số tiền tối thiểu cho mỗi lần chuyển tiền qua BEP20 (Giá trị này giờ mang tính tổng quát)
 
 const DATA_FETCH_INTERVAL_SECONDS = 5; // Cập nhật dữ liệu mỗi 5 giây
 const HOURLY_FETCH_TIME_MINUTE = 45; // Mỗi giờ vào phút thứ 45, bot lấy dữ liệu chính
@@ -111,6 +110,28 @@ const exchanges = {};
 
 // Hàm hỗ trợ
 function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
+
+// SỬA ĐỔI: Hàm hỗ trợ để lấy địa chỉ nạp tiền và mạng lưới phù hợp
+// Hàm này giờ nhận vào `fromExchangeId` (để xác định mạng rút) và `toExchangeId` (để lấy địa chỉ nạp)
+function getTargetDepositInfo(fromExchangeId, toExchangeId) {
+    // Lấy mạng rút tiền mà sàn GỬI ưu tiên sử dụng
+    const withdrawalNetwork = preferredWithdrawalNetworks[fromExchangeId];
+    if (!withdrawalNetwork) {
+        safeLog('error', `[HELPER] Không tìm thấy mạng rút tiền ưu tiên cho sàn gửi ${fromExchangeId.toUpperCase()}. Vui lòng kiểm tra preferredWithdrawalNetworks trong balance.js`);
+        return null;
+    }
+
+    // Dựa trên mạng rút tiền của sàn gửi, tìm địa chỉ nạp tương ứng trên sàn nhận
+    const depositAddress = usdtDepositAddressesByNetwork[toExchangeId]?.[withdrawalNetwork];
+    
+    // THAY ĐỔI: Kiểm tra chặt chẽ hơn nếu địa chỉ nạp không tồn tại cho mạng đó
+    if (!depositAddress || depositAddress.startsWith('0xYOUR_')) {
+        safeLog('error', `[HELPER] Thiếu hoặc chưa điền địa chỉ nạp tiền USDT cho mạng "${withdrawalNetwork}" của sàn nhận ${toExchangeId.toUpperCase()} trong balance.js. HOẶC sàn nhận không hỗ trợ mạng mà sàn gửi ưu tiên.`);
+        return null;
+    }
+    return { network: withdrawalNetwork, address: depositAddress };
+}
+
 
 // Hàm để lấy dữ liệu từ server chính
 async function fetchDataFromServer() {
@@ -290,28 +311,55 @@ async function manageFundsAndTransfer(opportunity, percentageToUse) {
                 const amountToTransfer = Math.max(0, Math.min(sourceBalance, amountNeededByTarget)); 
                 
                 if (amountToTransfer >= FUND_TRANSFER_MIN_AMOUNT) {
-                    const depositAddress = usdtBep20DepositAddresses[targetExchangeToFund];
-
-                    if (!depositAddress || depositAddress.startsWith('0xYOUR_')) { 
-                        safeLog('error', `[BOT_TRANSFER] ❌ Thiếu hoặc chưa điền địa chỉ nạp tiền BEP20 THẬT SỰ cho ${targetExchangeToFund}. Vui lòng cập nhật balance.js`); 
+                    // THAY ĐỔI: Sử dụng hàm getTargetDepositInfo để lấy địa chỉ và mạng
+                    const targetDepositInfo = getTargetDepositInfo(sourceExchangeId, targetExchangeToFund);
+                    if (!targetDepositInfo) {
+                        // getTargetDepositInfo đã log lỗi, chỉ cần dừng quá trình chuyển
                         fundsTransferredSuccessfully = false;
                         break; 
                     }
+                    const { network: withdrawalNetwork, address: depositAddress } = targetDepositInfo;
 
-                    safeLog('log', `[BOT_TRANSFER] Đang cố gắng chuyển ${amountToTransfer.toFixed(2)} USDT từ ${sourceExchangeId} sang ${targetExchangeToFund} (${depositAddress}) qua BEP20...`);
+                    safeLog('log', `[BOT_TRANSFER] Đang cố gắng chuyển ${amountToTransfer.toFixed(2)} USDT từ ${sourceExchangeId} sang ${targetExchangeToFund} (${depositAddress}) qua mạng ${withdrawalNetwork}...`);
                     try {
                         const withdrawResult = await exchanges[sourceExchangeId].withdraw(
-                            'USDT', amountToTransfer, depositAddress, undefined, { network: BEP20_NETWORK_ID } 
+                            'USDT', amountToTransfer, depositAddress, undefined, { network: withdrawalNetwork } 
                         );
                         safeLog('log', `[BOT_TRANSFER] ✅ Yêu cầu rút tiền hoàn tất từ ${sourceExchangeId} sang ${targetExchangeToFund}. ID giao dịch: ${withdrawResult.id}`);
                         
-                        await sleep(60000); // Đợi 60 giây (1 phút) để giao dịch blockchain có thể được xác nhận
+                        // THÊM MỚI: Đợi tiền về ví Spot và chuyển vào Futures
+                        safeLog('log', `[BOT_TRANSFER] Đợi 90 giây để tiền về ví Spot trên ${targetExchangeToFund} trước khi chuyển vào Futures...`);
+                        await sleep(90000); // Đợi 90 giây (1.5 phút) để giao dịch blockchain có thể được xác nhận và về ví Spot
+
+                        // THÊM MỚI: Thực hiện chuyển từ Spot sang Futures
+                        try {
+                            // Cần kiểm tra lại số dư Spot trên sàn nhận trước khi chuyển
+                            const targetExchangeBalance = await exchanges[targetExchangeToFund].fetchBalance();
+                            const usdtSpotBalance = targetExchangeBalance.spot?.free?.USDT || 0;
+
+                            if (usdtSpotBalance >= amountToTransfer) { // Chỉ chuyển nếu tiền đã về đủ Spot
+                                safeLog('log', `[BOT_TRANSFER] Đang chuyển ${amountToTransfer.toFixed(2)} USDT từ ví Spot sang ví Futures trên ${targetExchangeToFund}...`);
+                                await exchanges[targetExchangeToFund].transfer(
+                                    'USDT', amountToTransfer, 'spot', 'future'
+                                );
+                                safeLog('log', `[BOT_TRANSFER] ✅ Đã chuyển ${amountToTransfer.toFixed(2)} USDT từ Spot sang Futures trên ${targetExchangeToFund}.`);
+                            } else {
+                                safeLog('warn', `[BOT_TRANSFER] Cảnh báo: Số dư Spot trên ${targetExchangeToFund} (${usdtSpotBalance.toFixed(2)} USDT) chưa đủ để chuyển ${amountToTransfer.toFixed(2)} USDT vào Futures. Tiền có thể chưa về kịp. Đánh dấu chuyển tiền thành công một phần.`);
+                                // fundsTransferredSuccessfully vẫn là true nếu rút tiền thành công,
+                                // nhưng sẽ cảnh báo rằng internal transfer có thể chưa hoàn tất.
+                            }
+                        } catch (internalTransferError) {
+                            safeLog('error', `[BOT_TRANSFER] ❌ Lỗi khi chuyển tiền từ Spot sang Futures trên ${targetExchangeToFund}: ${internalTransferError.message}. Tiền có thể vẫn nằm ở ví Spot.`);
+                            fundsTransferredSuccessfully = false; // Đánh dấu thất bại nếu internal transfer thất bại
+                            break; 
+                        }
+
                     } catch (transferError) {
-                        safeLog('error', `[BOT_TRANSFER] ❌ Lỗi khi chuyển tiền từ ${sourceExchangeId} sang ${targetExchangeToFund}: ${transferError.message}`);
+                        safeLog('error', `[BOT_TRANSFER] ❌ Lỗi khi rút tiền từ ${sourceExchangeId} sang ${targetExchangeToFund}: ${transferError.message}`);
                         fundsTransferredSuccessfully = false;
                         break; 
                     }
-                    await updateBalances(); // Cập nhật số dư sau mỗi lần chuyển
+                    await updateBalances(); // Cập nhật số dư sau mỗi lần chuyển (bao gồm internal transfer)
                 }
             }
         }
@@ -610,8 +658,7 @@ async function closeTradesAndCalculatePnL() {
         // Cần lấy lại vị thế hiện tại để đảm bảo đã đóng (để tránh lỗi nếu lệnh đóng không khớp hoàn toàn)
         // Tuy nhiên, cách đơn giản hơn là giả định rằng chúng ta muốn tính PnL từ vốn ban đầu
         // và sự thay đổi của 'available' balance là cách tốt nhất để đo PnL thực tế của một chu kỳ.
-        // PnL của một chu kỳ giao dịch là (Số dư cuối - Số dư đầu) của CẶP SÀN tham gia.
-        // Để tính PnL toàn bộ từ đầu, bạn chỉ cần lấy balances.totalOverall - initialTotalBalance
+        // PnL của một chu kỳ giao dịch là (tổng số dư mới trên 2 sàn liên quan) - (tổng số vốn ban đầu đã bỏ ra trên 2 sàn đó)
 
         // Cách tính PnL cho chu kỳ giao dịch hiện tại:
         // PnL = (tổng số dư mới trên 2 sàn liên quan) - (tổng số vốn ban đầu đã bỏ ra trên 2 sàn đó)
@@ -912,15 +959,18 @@ const botServer = http.createServer((req, res) => {
                     return;
                 }
 
-                const depositAddress = usdtBep20DepositAddresses[toExchangeId];
-                if (!depositAddress || depositAddress.startsWith('0xYOUR_')) {
-                    safeLog('error', `[BOT_SERVER_TRANSFER] ❌ Thiếu hoặc chưa điền địa chỉ nạp tiền BEP20 THẬT SỰ cho ${toExchangeId}. Vui lòng cập nhật balance.js`);
+                // THAY ĐỔI: Sử dụng hàm getTargetDepositInfo mới
+                const targetDepositInfo = getTargetDepositInfo(fromExchangeId, toExchangeId);
+                if (!targetDepositInfo) {
+                    // getTargetDepositInfo đã log lỗi chi tiết, chỉ cần trả về lỗi chung cho người dùng
                     res.writeHead(400, { 'Content-Type': 'application/json' });
-                    res.end(JSON.stringify({ success: false, message: `Địa chỉ nạp tiền BEP20 cho ${toExchangeId.toUpperCase()} chưa được cấu hình trong balance.js. Vui lòng kiểm tra lại.` }));
+                    res.end(JSON.stringify({ success: false, message: `Không thể thực hiện chuyển tiền do cấu hình địa chỉ/mạng không hợp lệ. Vui lòng kiểm tra console log và balance.js.` }));
                     return;
                 }
+                const { network: withdrawalNetwork, address: depositAddress } = targetDepositInfo;
 
-                safeLog('log', `[BOT_SERVER_TRANSFER] Yêu cầu chuyển thủ công: ${amount} USDT từ ${fromExchangeId.toUpperCase()} sang ${toExchangeId.toUpperCase()} (${depositAddress})...`);
+
+                safeLog('log', `[BOT_SERVER_TRANSFER] Yêu cầu chuyển thủ công: ${amount} USDT từ ${fromExchangeId.toUpperCase()} sang ${toExchangeId.toUpperCase()} (${depositAddress}) qua mạng ${withdrawalNetwork}...`);
 
                 try {
                     // Update balances before attempting transfer to check source balance
@@ -936,25 +986,55 @@ const botServer = http.createServer((req, res) => {
                         amount,
                         depositAddress,
                         undefined,
-                        { network: BEP20_NETWORK_ID }
+                        { network: withdrawalNetwork }
                     );
-                    safeLog('log', `[BOT_SERVER_TRANSFER] ✅ Yêu cầu chuyển thủ công hoàn tất từ ${fromExchangeId.toUpperCase()} sang ${toExchangeId.toUpperCase()}. ID giao dịch: ${withdrawResult.id}`);
+                    safeLog('log', `[BOT_SERVER_TRANSFER] ✅ Yêu cầu rút tiền hoàn tất từ ${fromExchangeId.toUpperCase()} sang ${toExchangeId.toUpperCase()}. ID giao dịch: ${withdrawResult.id}`);
                     
-                    // Trigger a balance update shortly after for UI reflection
-                    // Cần đợi một thời gian ngắn để giao dịch on-chain được xử lý một phần
-                    setTimeout(updateBalances, 15000); // 15 giây là ước tính để lệnh được gửi đi
+                    // THÊM MỚI: Đợi tiền về ví Spot và chuyển vào Futures (cho chuyển thủ công)
+                    // Thời gian chờ có thể cần điều chỉnh cho mạng APTOS (thường nhanh hơn BEP20)
+                    const waitTimeMs = (withdrawalNetwork === 'APTOS') ? 30000 : 90000; // 30s cho Aptos, 90s cho BEP20
+                    safeLog('log', `[BOT_SERVER_TRANSFER] Đợi ${waitTimeMs / 1000} giây để tiền về ví Spot trên ${toExchangeId.toUpperCase()} trước khi chuyển vào Futures...`);
+                    await sleep(waitTimeMs); 
 
-                    res.writeHead(200, { 'Content-Type': 'application/json' });
-                    res.end(JSON.stringify({ success: true, message: `Yêu cầu chuyển ${amount} USDT từ ${fromExchangeId.toUpperCase()} sang ${toExchangeId.toUpperCase()} đã được gửi. ID giao dịch: ${withdrawResult.id}.` }));
+                    // THÊM MỚI: Thực hiện chuyển từ Spot sang Futures
+                    try {
+                        const targetExchange = exchanges[toExchangeId];
+                        // Cập nhật lại số dư để lấy số dư Spot mới nhất sau khi tiền về
+                        await targetExchange.loadMarkets(); // Đảm bảo đã load markets
+                        const targetBalanceAfterDeposit = await targetExchange.fetchBalance();
+                        const usdtSpotBalance = targetBalanceAfterDeposit.spot?.free?.USDT || 0;
+
+                        if (usdtSpotBalance >= amount) { // Chỉ chuyển nếu tiền đã về đủ Spot
+                            safeLog('log', `[BOT_SERVER_TRANSFER] Đang chuyển ${amount} USDT từ ví Spot sang ví Futures trên ${toExchangeId.toUpperCase()}...`);
+                            await targetExchange.transfer(
+                                'USDT', amount, 'spot', 'future'
+                            );
+                            safeLog('log', `[BOT_SERVER_TRANSFER] ✅ Đã chuyển ${amount} USDT từ Spot sang Futures trên ${toExchangeId.toUpperCase()}.`);
+                            res.writeHead(200, { 'Content-Type': 'application/json' });
+                            res.end(JSON.stringify({ success: true, message: `Yêu cầu chuyển ${amount} USDT từ ${fromExchangeId.toUpperCase()} sang ${toExchangeId.toUpperCase()} đã được gửi và chuyển vào ví Futures. ID: ${withdrawResult.id}.` }));
+                        } else {
+                            safeLog('warn', `[BOT_SERVER_TRANSFER] Cảnh báo: Số dư Spot trên ${toExchangeId.toUpperCase()} (${usdtSpotBalance.toFixed(2)} USDT) chưa đủ để chuyển ${amount} USDT vào Futures sau ${waitTimeMs / 1000}s. Tiền có thể chưa về kịp. Vui lòng kiểm tra lại thủ công hoặc đợi thêm.`);
+                            res.writeHead(200, { 'Content-Type': 'application/json' }); // Vẫn trả về thành công vì lệnh rút đã được gửi
+                            res.end(JSON.stringify({ success: true, message: `Yêu cầu chuyển ${amount} USDT từ ${fromExchangeId.toUpperCase()} sang ${toExchangeId.toUpperCase()} đã được gửi. ID: ${withdrawResult.id}. Cảnh báo: Tiền chưa về đủ Spot để tự động chuyển vào Futures. Vui lòng kiểm tra và chuyển thủ công.` }));
+                        }
+                    } catch (internalTransferError) {
+                        safeLog('error', `[BOT_SERVER_TRANSFER] ❌ Lỗi khi chuyển tiền từ Spot sang Futures trên ${toExchangeId.toUpperCase()}: ${internalTransferError.message}. Tiền có thể vẫn nằm ở ví Spot.`);
+                        res.writeHead(500, { 'Content-Type': 'application/json' });
+                        res.end(JSON.stringify({ success: false, message: `Lỗi khi chuyển tiền từ Spot sang Futures trên ${toExchangeId.toUpperCase()}: ${internalTransferError.message}. Tiền có thể vẫn nằm ở ví Spot.` }));
+                    }
+
+                    // Trigger a balance update shortly after for UI reflection
+                    setTimeout(updateBalances, 15000); // Cập nhật lại UI sau 15 giây
+
                 } catch (transferError) {
-                    safeLog('error', `[BOT_SERVER_TRANSFER] ❌ Lỗi khi thực hiện chuyển tiền thủ công: ${transferError.message}`);
+                    safeLog('error', `[BOT_SERVER_TRANSFER] ❌ Lỗi khi thực hiện rút tiền thủ công từ ${fromExchangeId.toUpperCase()}: ${transferError.message}`);
                     let userMessage = `Lỗi khi chuyển tiền: ${transferError.message}`;
                     if (transferError.message.includes('Insufficient funds')) {
                         userMessage = `Số dư khả dụng trên ${fromExchangeId.toUpperCase()} không đủ. Vui lòng kiểm tra lại số dư tài khoản futures.`;
                     } else if (transferError.message.includes('API key permission')) {
                         userMessage = `Lỗi quyền API: Kiểm tra quyền RÚT TIỀN (Withdrawal permission) của API Key trên ${fromExchangeId.toUpperCase()}.`;
                     } else if (transferError.message.includes('Invalid network') || transferError.message.includes('Invalid address')) {
-                        userMessage = `Lỗi mạng hoặc địa chỉ: Đảm bảo sàn hỗ trợ BEP20 (Binance Smart Chain) và địa chỉ nạp tiền trong balance.js là HỢP LỆ.`;
+                        userMessage = `Lỗi mạng hoặc địa chỉ: Đảm bảo sàn ${toExchangeId.toUpperCase()} hỗ trợ mạng ${withdrawalNetwork} và địa chỉ nạp tiền trong balance.js là HỢP LỆ.`;
                     }
                     res.writeHead(500, { 'Content-Type': 'application/json' });
                     res.end(JSON.stringify({ success: false, message: userMessage }));
