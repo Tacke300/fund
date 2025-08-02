@@ -108,93 +108,7 @@
         .rate-positive { color: var(--rate-positive-strong); }
         .rate-negative { color: var(--rate-negative-strong); }
 
-        /* Styles for the bot controls section */
-        .bot-controls, .transfer-form {
-            background-color: var(--accent-secondary);
-            padding: 30px;
-            border-radius: 10px;
-            box-shadow: 0 5px 15px var(--shadow-color);
-            margin: 20px auto;
-            max-width: 600px;
-            margin-left: auto;
-            margin-right: auto;
-        }
-        .form-group {
-            margin-bottom: 15px;
-        }
-        .form-group label {
-            display: block;
-            margin-bottom: 8px;
-            color: var(--text-secondary);
-            font-weight: bold;
-        }
-        .form-group select,
-        .form-group input[type="number"] {
-            width: calc(100% - 24px); /* Account for padding and border */
-            padding: 12px;
-            border: 1px solid var(--table-border-color);
-            border-radius: 6px;
-            background-color: var(--bg-dark);
-            color: var(--text-light);
-            font-size: 1em;
-            appearance: none; /* Remove default arrow on selects */
-            box-sizing: border-box; /* Include padding and border in the element's total width and height */
-        }
-        .form-group select:focus,
-        .form-group input[type="number"]:focus {
-            outline: none;
-            border-color: var(--accent-primary);
-            box-shadow: 0 0 0 2px rgba(92, 42, 157, 0.5);
-        }
-        button {
-            background-color: var(--accent-primary);
-            color: var(--text-light);
-            border: none;
-            padding: 14px 25px;
-            border-radius: 8px;
-            cursor: pointer;
-            font-size: 1.1em;
-            font-weight: bold;
-            transition: background-color 0.3s ease, transform 0.2s ease;
-            width: 100%; /* Default to full width for single buttons */
-        }
-        button.half-width { /* For buttons sharing a row */
-            width: 48%; 
-            display: inline-block;
-        }
-        button.half-width + button.half-width {
-            margin-left: 4%; 
-        }
-        button:hover {
-            background-color: #6A4DBA; /* Slightly lighter purple on hover */
-            transform: translateY(-2px);
-        }
-        button:active {
-            transform: translateY(0);
-        }
-        .message {
-            margin-top: 20px;
-            text-align: center;
-            font-weight: bold;
-            color: var(--text-light); /* Default color, will be overridden by classes */
-        }
-        .message.success {
-            color: var(--rate-positive-strong);
-        }
-        .message.error {
-            color: var(--rate-negative-strong);
-        }
-
-        /* Responsive adjustments */
-        @media (max-width: 768px) {
-            body { padding: 15px; }
-            .container { padding: 10px; }
-            h1 { font-size: 2em; }
-            h2 { font-size: 1.5em; }
-            th, td { padding: 10px 5px; font-size: 0.9em; }
-            button.half-width { width: 100%; margin-left: 0; margin-bottom: 10px; }
-            button.half-width + button.half-width { margin-left: 0; }
-        }
+        /* Đã loại bỏ styles liên quan đến bot-controls và transfer-form */
     </style>
 </head>
 <body>
@@ -217,42 +131,8 @@
         <tbody></tbody>
     </table>
 
-    <div class="bot-controls">
-        <h2>Điều khiển Bot</h2>
-        <div class="form-group">
-            <label for="percentageToUse">Phần trăm vốn sử dụng cho mỗi lệnh (1-100%):</label>
-            <input type="number" id="percentageToUse" value="50" min="1" max="100" step="1">
-        </div>
-        <button id="startButton" class="half-width">▶️ Khởi động Bot</button>
-        <button id="stopButton" class="half-width">⏸️ Dừng Bot</button>
-        <p id="botStatusMessage" class="message"></p>
-        <p id="botCurrentState" style="text-align: center; margin-top: 15px; font-weight: bold;">Trạng thái: Đang dừng</p>
-        <p style="text-align: center; font-size: 0.9em; color: var(--text-secondary);">
-            Tổng số dư khả dụng: <span id="totalOverallBalance">0.00</span> USDT <br>
-            Tổng PnL tích lũy: <span id="cumulativePnl">0.00</span> USD
-        </p>
-    </div>
-
-    <div class="transfer-form">
-        <h2>Chuyển Tiền Thủ Công (BEP20 USDT)</h2>
-        <p style="font-size: 0.9em; color: var(--text-secondary); text-align: center;">
-            <strong style="color: var(--rate-negative-strong);">CẢNH BÁO:</strong> Chức năng này yêu cầu địa chỉ nạp tiền BEP20 USDT của các sàn phải được cấu hình chính xác trong file <code style="background-color: #000; padding: 2px 4px; border-radius: 3px;">balance.js</code>. Nếu không có, lệnh chuyển sẽ thất bại. Số tiền tối thiểu là 10 USDT.
-        </p>
-        <div class="form-group">
-            <label for="fromExchange">Chuyển tiền từ sàn:</label>
-            <select id="fromExchange"></select>
-        </div>
-        <div class="form-group">
-            <label for="toExchange">Chuyển tiền đến sàn:</label>
-            <select id="toExchange"></select>
-        </div>
-        <div class="form-group">
-            <label for="transferAmount">Số tiền USDT:</label>
-            <input type="number" id="transferAmount" min="10" step="0.01" placeholder="Số tiền >= 10 USDT">
-        </div>
-        <button id="transferButton">Thực hiện Chuyển tiền</button>
-        <p id="transferMessage" class="message"></p>
-    </div>
+    <!-- Đã loại bỏ hoàn toàn phần Điều khiển Bot -->
+    <!-- Đã loại bỏ hoàn toàn phần Chuyển Tiền Thủ Công -->
 
     <h2>Tổng Hợp Funding Rates</h2>
     <table id="funding-matrix-table" class="funding-matrix-table">
@@ -260,11 +140,7 @@
             <tr>
                 <th>STT</th>
                 <th>Coin</th>
-                <th>Binance</th>
-                <th>OKX</th>
-                <th>BingX</th>
-                <th>Bitget</th>
-                <!-- Kucoin hiện chưa được cấu hình trong bot.js, nên tạm bỏ -->
+                <!-- Các header sàn sẽ được thêm bằng JavaScript -->
             </tr>
         </thead>
         <tbody></tbody>
@@ -273,37 +149,21 @@
 
 <script>
     const API_ENDPOINT = '/api/data';
-    const BOT_STATUS_ENDPOINT = '/bot-api/status';
-    const BOT_START_ENDPOINT = '/bot-api/start';
-    const BOT_STOP_ENDPOINT = '/bot-api/stop';
-    const BOT_TRANSFER_ENDPOINT = '/bot-api/transfer-funds';
 
+    // THAY ĐỔI LỚN: Định nghĩa các sàn đang hoạt động theo server.js
+    // Server của bạn đã định nghĩa:
+    // const ACTIVE_EXCHANGE_IDS = ALL_POSSIBLE_EXCHANGE_IDS.filter(id => !DISABLED_EXCHANGES.includes(id));
+    // Nếu DISABLED_EXCHANGES = ['bitget'], thì ACTIVE_EXCHANGE_IDS = ['binanceusdm', 'bingx', 'okx']
+    const ACTIVE_EXCHANGE_IDS_FROM_SERVER = ['binanceusdm', 'bingx', 'okx']; 
+    
     // Map CCXT IDs to user-friendly names for display in dropdowns and table headers
     const EXCHANGE_DISPLAY_NAMES = {
         'binanceusdm': 'Binance',
         'bingx': 'BingX',
         'okx': 'OKX',
-        'bitget': 'Bitget'
-        // 'kucoin': 'Kucoin' // Thêm nếu bạn cấu hình Kucoin trong bot.js
+        'bitget': 'Bitget' // Vẫn giữ Bitget trong display names nếu cần hiển thị tên nhưng không hoạt động
     };
-    const EXCHANGES_CONFIGURED_IN_BOT = Object.keys(EXCHANGE_DISPLAY_NAMES); // Use these IDs for select values
 
-    // HTML elements for bot controls
-    const startButton = document.getElementById('startButton');
-    const stopButton = document.getElementById('stopButton');
-    const percentageToUseInput = document.getElementById('percentageToUse');
-    const botStatusMessage = document.getElementById('botStatusMessage');
-    const botCurrentState = document.getElementById('botCurrentState');
-    const totalOverallBalanceSpan = document.getElementById('totalOverallBalance');
-    const cumulativePnlSpan = document.getElementById('cumulativePnl');
-
-    // HTML elements for manual transfer
-    const fromExchangeSelect = document.getElementById('fromExchange');
-    const toExchangeSelect = document.getElementById('toExchange');
-    const transferAmountInput = document.getElementById('transferAmount');
-    const transferButton = document.getElementById('transferButton');
-    const transferMessage = document.getElementById('transferMessage');
-    
     function formatTime(timestamp) {
         if (!timestamp) return 'N/A';
         const date = new Date(timestamp);
@@ -339,21 +199,21 @@
         const tbody = document.querySelector('#funding-matrix-table tbody');
         const theadRow = document.querySelector('#funding-matrix-table thead tr');
         
-        // Clear existing exchange columns in header, keep first two (STT, Coin)
+        // Xóa các cột sàn cũ, giữ lại hai cột đầu tiên (STT, Coin)
         while (theadRow.children.length > 2) {
             theadRow.removeChild(theadRow.lastChild);
         }
 
-        // Add dynamic exchange headers
-        EXCHANGES_CONFIGURED_IN_BOT.forEach(exchangeId => {
+        // Thêm các header sàn động dựa trên ACTIVE_EXCHANGE_IDS_FROM_SERVER
+        ACTIVE_EXCHANGE_IDS_FROM_SERVER.forEach(exchangeId => {
             const th = document.createElement('th');
             th.textContent = EXCHANGE_DISPLAY_NAMES[exchangeId];
             theadRow.appendChild(th);
         });
 
         const ratesByCoin = {};
-        for (const exchangeId of EXCHANGES_CONFIGURED_IN_BOT) {
-            if (ratesData[exchangeId] && ratesData[exchangeId].rates) { // Access the 'rates' property
+        for (const exchangeId of ACTIVE_EXCHANGE_IDS_FROM_SERVER) { // Lặp qua các sàn active
+            if (ratesData[exchangeId] && ratesData[exchangeId].rates) { // Truy cập thuộc tính 'rates'
                 for (const cleanedSym in ratesData[exchangeId].rates) {
                     const rate = ratesData[exchangeId].rates[cleanedSym];
                     if (!ratesByCoin[cleanedSym]) ratesByCoin[cleanedSym] = {};
@@ -363,15 +223,15 @@
         }
         
         const sortedCoins = Object.keys(ratesByCoin).sort((a, b) => {
-            // Sort by min funding rate across all configured exchanges
-            const minRateA = Math.min(...EXCHANGES_CONFIGURED_IN_BOT.map(ex => ratesByCoin[a][ex]?.fundingRate || 0));
-            const minRateB = Math.min(...EXCHANGES_CONFIGURED_IN_BOT.map(ex => ratesByCoin[b][ex]?.fundingRate || 0));
+            // Sắp xếp theo funding rate nhỏ nhất trên tất cả các sàn được cấu hình
+            const minRateA = Math.min(...ACTIVE_EXCHANGE_IDS_FROM_SERVER.map(ex => ratesByCoin[a][ex]?.fundingRate || 0));
+            const minRateB = Math.min(...ACTIVE_EXCHANGE_IDS_FROM_SERVER.map(ex => ratesByCoin[b][ex]?.fundingRate || 0));
             return minRateA - minRateB;
         });
 
         tbody.innerHTML = sortedCoins.slice(0, 1000).map((coin, index) => {
             let rowHtml = `<td>${index + 1}</td><td>${coin}</td>`;
-            for (const exchangeId of EXCHANGES_CONFIGURED_IN_BOT) { // Use configured exchanges for iteration
+            for (const exchangeId of ACTIVE_EXCHANGE_IDS_FROM_SERVER) { // Lặp qua các sàn active
                 const rate = ratesByCoin[coin][exchangeId];
                 if (rate && typeof rate.fundingRate === 'number') {
                     const rateText = (rate.fundingRate * 100).toFixed(4) + '%';
@@ -407,150 +267,12 @@
         }
     }
 
-    async function fetchBotStatus() {
-        try {
-            const response = await fetch(BOT_STATUS_ENDPOINT);
-            if (!response.ok) throw new Error(`Lỗi mạng khi lấy trạng thái bot: ${response.status}`);
-            const data = await response.json();
-
-            botCurrentState.innerText = `Trạng thái: ${data.botState.replace(/_/g, ' ')}`; // Hiển thị trạng thái bot
-            totalOverallBalanceSpan.innerText = parseFloat(data.balances.totalOverall).toFixed(2);
-            cumulativePnlSpan.innerText = parseFloat(data.cumulativePnl).toFixed(2);
-
-            // Cập nhật trạng thái nút Start/Stop
-            if (data.botState === 'RUNNING' || data.botState === 'EXECUTING_TRADES' || data.botState === 'TRANSFERRING_FUNDS' || data.botState === 'CLOSING_TRADES') {
-                startButton.disabled = true;
-                stopButton.disabled = false;
-            } else {
-                startButton.disabled = false;
-                stopButton.disabled = true;
-            }
-
-        } catch (error) {
-            console.error('Lỗi khi lấy trạng thái bot:', error);
-            botStatusMessage.innerText = 'Lỗi khi lấy trạng thái bot.';
-            botStatusMessage.className = 'message error';
-            startButton.disabled = false;
-            stopButton.disabled = true;
-        }
-    }
-
-    async function sendBotCommand(endpoint, data = {}) {
-        try {
-            const response = await fetch(endpoint, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(data)
-            });
-            const result = await response.json();
-            if (result.success) {
-                botStatusMessage.innerText = result.message;
-                botStatusMessage.className = 'message success';
-            } else {
-                botStatusMessage.innerText = result.message;
-                botStatusMessage.className = 'message error';
-            }
-            fetchBotStatus(); // Cập nhật trạng thái bot ngay lập tức sau lệnh
-        } catch (error) {
-            console.error('Lỗi khi gửi lệnh bot:', error);
-            botStatusMessage.innerText = `Lỗi kết nối server: ${error.message}`;
-            botStatusMessage.className = 'message error';
-        }
-    }
-
-    async function executeManualTransfer() {
-        const fromExchangeId = fromExchangeSelect.value;
-        const toExchangeId = toExchangeSelect.value;
-        const amount = parseFloat(transferAmountInput.value);
-
-        transferMessage.innerText = ''; // Clear previous messages
-        transferMessage.className = 'message';
-
-        if (!fromExchangeId || !toExchangeId || !amount || isNaN(amount) || amount < 10) {
-            transferMessage.innerText = 'Vui lòng chọn sàn và nhập số tiền hợp lệ (tối thiểu 10 USDT).';
-            transferMessage.className = 'message error';
-            return;
-        }
-        if (fromExchangeId === toExchangeId) {
-            transferMessage.innerText = 'Không thể chuyển tiền đến cùng một sàn.';
-            transferMessage.className = 'message error';
-            return;
-        }
-
-        transferButton.disabled = true;
-        transferMessage.innerText = 'Đang gửi yêu cầu chuyển tiền...';
-        transferMessage.className = 'message';
-
-        try {
-            const response = await fetch(BOT_TRANSFER_ENDPOINT, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ fromExchangeId, toExchangeId, amount })
-            });
-            const result = await response.json();
-            if (result.success) {
-                transferMessage.innerText = result.message;
-                transferMessage.className = 'message success';
-                transferAmountInput.value = ''; // Clear amount after successful request
-                await fetchBotStatus(); // Refresh balances in UI
-            } else {
-                transferMessage.innerText = result.message;
-                transferMessage.className = 'message error';
-            }
-        } catch (error) {
-            console.error('Lỗi khi gửi yêu cầu chuyển tiền thủ công:', error);
-            transferMessage.innerText = `Lỗi kết nối hoặc server: ${error.message}`;
-            transferMessage.className = 'message error';
-        } finally {
-            transferButton.disabled = false;
-        }
-    }
-
-    function populateExchangeDropdowns() {
-        fromExchangeSelect.innerHTML = '';
-        toExchangeSelect.innerHTML = '';
-
-        for (const exchangeId of EXCHANGES_CONFIGURED_IN_BOT) {
-            const optionFrom = document.createElement('option');
-            optionFrom.value = exchangeId;
-            optionFrom.textContent = EXCHANGE_DISPLAY_NAMES[exchangeId];
-            fromExchangeSelect.appendChild(optionFrom);
-
-            const optionTo = document.createElement('option');
-            optionTo.value = exchangeId;
-            optionTo.textContent = EXCHANGE_DISPLAY_NAMES[exchangeId];
-            toExchangeSelect.appendChild(optionTo);
-        }
-    }
-
     document.addEventListener('DOMContentLoaded', () => {
-        populateExchangeDropdowns(); // Populate dropdowns on load
-
-        // Initial data fetch and status update
+        // Lấy dữ liệu ban đầu
         fetchData();
-        fetchBotStatus();
 
-        // Set intervals for periodic updates
-        setInterval(fetchData, 5000); // Fetch main data every 5 seconds
-        setInterval(fetchBotStatus, 3000); // Fetch bot status more frequently
-
-        // Event listeners for bot controls
-        startButton.addEventListener('click', () => {
-            const percentage = parseFloat(percentageToUseInput.value);
-            if (isNaN(percentage) || percentage < 1 || percentage > 100) {
-                botStatusMessage.innerText = 'Phần trăm vốn không hợp lệ (1-100%).';
-                botStatusMessage.className = 'message error';
-                return;
-            }
-            sendBotCommand(BOT_START_ENDPOINT, { percentageToUse: percentage });
-        });
-
-        stopButton.addEventListener('click', () => {
-            sendBotCommand(BOT_STOP_ENDPOINT);
-        });
-
-        // Event listener for manual transfer
-        transferButton.addEventListener('click', executeManualTransfer);
+        // Đặt interval để tự động cập nhật dữ liệu mỗi 5 giây
+        setInterval(fetchData, 5000); 
     });
 </script>
 
