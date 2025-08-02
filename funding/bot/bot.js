@@ -138,6 +138,35 @@ function getTargetDepositInfo(fromExchangeId, toExchangeId) {
     return { network: commonNetwork, address: depositAddress };
 }
 
+// THÊM MỚI: Hàm để kiểm tra số dư và chờ đến khi tiền xuất hiện (polling)
+async function pollForBalance(exchangeId, targetAmount, maxPollAttempts = 12, pollIntervalMs = 10000) { // Max 12 attempts = 2 phút
+    safeLog('log', `[POLL] Bắt đầu kiểm tra số dư trên ${exchangeId.toUpperCase()}. Cần: ${targetAmount.toFixed(2)} USDT.`);
+    const exchange = exchanges[exchangeId];
+
+    for (let i = 0; i < maxPollAttempts; i++) {
+        try {
+            await exchange.loadMarkets(); // Đảm bảo markets loaded
+            const fullBalance = await exchange.fetchBalance();
+            const usdtFundingFreeBalance = fullBalance.funding?.free?.USDT || 0;
+            const usdtSpotFreeBalance = fullBalance.spot?.free?.USDT || 0;
+
+            safeLog('log', `[POLL] Lần ${i + 1}/${maxPollAttempts}: ${exchangeId.toUpperCase()} - Funding: ${usdtFundingFreeBalance.toFixed(2)}, Spot: ${usdtSpotFreeBalance.toFixed(2)}.`);
+
+            if (usdtFundingFreeBalance >= targetAmount) {
+                return { found: true, type: 'funding', balance: usdtFundingFreeBalance };
+            }
+            if (usdtSpotFreeBalance >= targetAmount) {
+                return { found: true, type: 'spot', balance: usdtSpotFreeBalance };
+            }
+        } catch (e) {
+            safeLog('error', `[POLL] Lỗi khi lấy số dư ${exchangeId.toUpperCase()}: ${e.message}`);
+        }
+        await sleep(pollIntervalMs); // Đợi giữa các lần kiểm tra
+    }
+    safeLog('warn', `[POLL] Tiền (${targetAmount.toFixed(2)} USDT) không được tìm thấy trên ${exchangeId.toUpperCase()} sau ${maxPollAttempts * pollIntervalMs / 1000} giây.`);
+    return { found: false, type: null, balance: 0 };
+}
+
 
 // Hàm để lấy dữ liệu từ server chính
 async function fetchDataFromServer() {
@@ -351,43 +380,27 @@ async function manageFundsAndTransfer(opportunity, percentageToUse) {
                         // THAY ĐỔI LỚN: Đợi tiền về ví Funding HOẶC Spot và chuyển vào Futures
                         const waitTimeMs = (withdrawalNetwork === 'APTOS') ? 30000 : 90000; // 30s cho Aptos, 90s cho BEP20
                         safeLog('log', `[BOT_TRANSFER][EXTERNAL] Đợi ${waitTimeMs / 1000} giây để tiền về sàn nhận ${targetExchangeToFund.toUpperCase()} trước khi chuyển vào Futures...`);
-                        await sleep(waitTimeMs); 
-
-                        // THAY ĐỔI: Thực hiện chuyển từ Funding HOẶC Spot sang Futures
-                        try {
-                            const targetExchange = exchanges[targetExchangeToFund];
-                            // Cập nhật lại số dư TẤT CẢ CÁC VÍ để tìm tiền
-                            await targetExchange.loadMarkets(); 
-                            const targetFullBalance = await targetExchange.fetchBalance(); // Fetch all account types
-
-                            const usdtFundingFreeBalance = targetFullBalance.funding?.free?.USDT || 0;
-                            const usdtSpotFreeBalance = targetFullBalance.spot?.free?.USDT || 0;
-
-                            let fromAccountType = null;
-                            let actualAmountInWallet = 0;
-
-                            if (usdtFundingFreeBalance >= amountToTransfer) {
-                                fromAccountType = 'funding';
-                                actualAmountInWallet = usdtFundingFreeBalance;
-                            } else if (usdtSpotFreeBalance >= amountToTransfer) {
-                                fromAccountType = 'spot';
-                                actualAmountInWallet = usdtSpotFreeBalance;
-                            }
-
-                            if (fromAccountType) { 
-                                safeLog('log', `[BOT_TRANSFER][INTERNAL] Đang chuyển ${amountToTransfer.toFixed(2)} USDT từ ví ${fromAccountType.toUpperCase()} sang ví Futures trên ${targetExchangeToFund}... (Hiện có ${actualAmountInWallet.toFixed(2)} USDT trong ${fromAccountType.toUpperCase()})`);
+                        
+                        // THAY MỚI: Sử dụng polling để chờ tiền về
+                        const pollResult = await pollForBalance(targetExchangeToFund, amountToTransfer, 12, 10000); // 12 lần * 10s = 120s (2 phút)
+                        
+                        if (!pollResult.found) {
+                            safeLog('warn', `[BOT_TRANSFER][INTERNAL] Cảnh báo: Tiền (${amountToTransfer.toFixed(2)} USDT) chưa về đủ ví Funding hoặc Spot trên ${targetExchangeToFund.toUpperCase()} sau khi chờ. Tiền có thể chưa về kịp hoặc nằm ở ví khác. Vui lòng kiểm tra thủ công.`);
+                            // fundsTransferredSuccessfully vẫn là true nếu rút tiền thành công, nhưng internal transfer thất bại.
+                        } else {
+                            // THAY ĐỔI: Thực hiện chuyển từ Funding HOẶC Spot sang Futures
+                            try {
+                                const targetExchange = exchanges[targetExchangeToFund];
+                                safeLog('log', `[BOT_TRANSFER][INTERNAL] Đang chuyển ${amountToTransfer.toFixed(2)} USDT từ ví ${pollResult.type.toUpperCase()} sang ví Futures trên ${targetExchangeToFund}... (Hiện có ${pollResult.balance.toFixed(2)} USDT trong ${pollResult.type.toUpperCase()})`);
                                 await targetExchange.transfer(
-                                    'USDT', amountToTransfer, fromAccountType, 'future'
+                                    'USDT', amountToTransfer, pollResult.type, 'future'
                                 );
-                                safeLog('log', `[BOT_TRANSFER][INTERNAL] ✅ Đã chuyển ${amountToTransfer.toFixed(2)} USDT từ ${fromAccountType.toUpperCase()} sang Futures trên ${targetExchangeToFund}.`);
-                            } else {
-                                safeLog('warn', `[BOT_TRANSFER][INTERNAL] Cảnh báo: Tiền (${amountToTransfer.toFixed(2)} USDT) chưa về đủ ví Funding (${usdtFundingFreeBalance.toFixed(2)}) hoặc Spot (${usdtSpotFreeBalance.toFixed(2)}) trên ${targetExchangeToFund} sau ${waitTimeMs / 1000}s. Tiền có thể chưa về kịp hoặc nằm ở ví khác. Vui lòng kiểm tra thủ công.`);
-                                // fundsTransferredSuccessfully vẫn là true nếu rút tiền thành công, nhưng internal transfer thất bại.
+                                safeLog('log', `[BOT_TRANSFER][INTERNAL] ✅ Đã chuyển ${amountToTransfer.toFixed(2)} USDT từ ${pollResult.type.toUpperCase()} sang Futures trên ${targetExchangeToFund}.`);
+                            } catch (internalTransferError) {
+                                safeLog('error', `[BOT_TRANSFER][INTERNAL] ❌ Lỗi khi chuyển tiền từ ${pollResult.type.toUpperCase()} sang Futures trên ${targetExchangeToFund}: ${internalTransferError.message}. Tiền có thể vẫn nằm ở ví Funding/Spot.`);
+                                fundsTransferredSuccessfully = false; 
+                                break; 
                             }
-                        } catch (internalTransferError) {
-                            safeLog('error', `[BOT_TRANSFER][INTERNAL] ❌ Lỗi khi chuyển tiền từ Funding/Spot sang Futures trên ${targetExchangeToFund}: ${internalTransferError.message}. Tiền có thể vẫn nằm ở ví Funding/Spot.`);
-                            fundsTransferredSuccessfully = false; 
-                            break; 
                         }
 
                     } catch (transferError) {
@@ -1044,52 +1057,30 @@ const botServer = http.createServer((req, res) => {
                     );
                     safeLog('log', `[BOT_SERVER_TRANSFER][EXTERNAL] ✅ Yêu cầu rút tiền hoàn tất từ ${fromExchangeId.toUpperCase()} sang ${toExchangeId.toUpperCase()}. ID giao dịch: ${withdrawResult.id}`);
                     
-                    // THAY ĐỔI LỚN: Đợi tiền về ví Funding HOẶC Spot và chuyển vào Futures
-                    const waitTimeMs = (withdrawalNetwork === 'APTOS') ? 30000 : 90000; // 30s cho Aptos, 90s cho BEP20
-                    safeLog('log', `[BOT_SERVER_TRANSFER][EXTERNAL] Đợi ${waitTimeMs / 1000} giây để tiền về sàn nhận ${toExchangeId.toUpperCase()} trước khi chuyển vào Futures...`);
-                    await sleep(waitTimeMs); 
-
-                    // THAY ĐỔI: Thực hiện chuyển từ Funding HOẶC Spot sang Futures
-                    try {
-                        const targetExchange = exchanges[toExchangeId];
-                        // Cập nhật lại số dư TẤT CẢ CÁC VÍ để tìm tiền
-                        await targetExchange.loadMarkets(); // Đảm bảo đã load markets
-                        const targetFullBalance = await targetExchange.fetchBalance(); // Fetch all account types (spot, funding, future, etc.)
-
-                        const usdtFundingFreeBalance = targetFullBalance.funding?.free?.USDT || 0;
-                        const usdtSpotFreeBalance = targetFullBalance.spot?.free?.USDT || 0;
-
-                        let fromAccountType = null;
-                        let actualAmountInWallet = 0;
-
-                        // ƯU TIÊN KIỂM TRA VÍ FUNDING TRƯỚC
-                        if (usdtFundingFreeBalance >= amount) { // Nên kiểm tra amount thay vì amountToTransfer
-                            fromAccountType = 'funding';
-                            actualAmountInWallet = usdtFundingFreeBalance;
-                            safeLog('log', `[BOT_SERVER_TRANSFER][INTERNAL] Tiền được tìm thấy trong ví FUNDING của ${toExchangeId.toUpperCase()}.`);
-                        } else if (usdtSpotFreeBalance >= amount) { // Sau đó kiểm tra ví Spot
-                            fromAccountType = 'spot';
-                            actualAmountInWallet = usdtSpotFreeBalance;
-                            safeLog('log', `[BOT_SERVER_TRANSFER][INTERNAL] Tiền được tìm thấy trong ví SPOT của ${toExchangeId.toUpperCase()}.`);
-                        }
-
-                        if (fromAccountType) { 
-                            safeLog('log', `[BOT_SERVER_TRANSFER][INTERNAL] Đang chuyển ${amount.toFixed(2)} USDT từ ví ${fromAccountType.toUpperCase()} sang ví Futures trên ${toExchangeId.toUpperCase()}... (Hiện có ${actualAmountInWallet.toFixed(2)} USDT trong ${fromAccountType.toUpperCase()})`);
+                    // THAY ĐỔI LỚN: Sử dụng polling để chờ tiền về ví Funding HOẶC Spot và sau đó chuyển vào Futures
+                    safeLog('log', `[BOT_SERVER_TRANSFER][EXTERNAL] Bắt đầu chờ tiền về ví Funding/Spot trên ${toExchangeId.toUpperCase()}...`);
+                    const pollResult = await pollForBalance(toExchangeId, amount, 18, 10000); // Max 18 attempts = 3 phút (thay vì 2 phút)
+                    
+                    if (!pollResult.found) {
+                        safeLog('warn', `[BOT_SERVER_TRANSFER][INTERNAL] Cảnh báo: Tiền (${amount.toFixed(2)} USDT) chưa về đủ ví Funding hoặc Spot trên ${toExchangeId.toUpperCase()} sau khi chờ. Tiền có thể chưa về kịp hoặc nằm ở ví khác. Vui lòng kiểm tra thủ công.`);
+                        res.writeHead(200, { 'Content-Type': 'application/json' }); // Vẫn trả về thành công vì lệnh rút đã được gửi
+                        res.end(JSON.stringify({ success: true, message: `Yêu cầu chuyển ${amount} USDT từ ${fromExchangeId.toUpperCase()} sang ${toExchangeId.toUpperCase()} đã được gửi. ID: ${withdrawResult.id}. Cảnh báo: Tiền chưa về đủ ví Funding/Spot để tự động chuyển vào Futures. Vui lòng kiểm tra và chuyển thủ công.` }));
+                    } else {
+                        // THAY ĐỔI: Thực hiện chuyển từ Funding HOẶC Spot sang Futures
+                        try {
+                            const targetExchange = exchanges[toExchangeId];
+                            safeLog('log', `[BOT_SERVER_TRANSFER][INTERNAL] Đang chuyển ${amount.toFixed(2)} USDT từ ví ${pollResult.type.toUpperCase()} sang ví Futures trên ${toExchangeId.toUpperCase()}... (Hiện có ${pollResult.balance.toFixed(2)} USDT trong ${pollResult.type.toUpperCase()})`);
                             await targetExchange.transfer(
-                                'USDT', amount, fromAccountType, 'future'
+                                'USDT', amount, pollResult.type, 'future'
                             );
-                            safeLog('log', `[BOT_SERVER_TRANSFER][INTERNAL] ✅ Đã chuyển ${amount.toFixed(2)} USDT từ ${fromAccountType.toUpperCase()} sang Futures trên ${toExchangeId.toUpperCase()}.`);
+                            safeLog('log', `[BOT_SERVER_TRANSFER][INTERNAL] ✅ Đã chuyển ${amount.toFixed(2)} USDT từ ${pollResult.type.toUpperCase()} sang Futures trên ${toExchangeId.toUpperCase()}.`);
                             res.writeHead(200, { 'Content-Type': 'application/json' });
                             res.end(JSON.stringify({ success: true, message: `Yêu cầu chuyển ${amount} USDT từ ${fromExchangeId.toUpperCase()} sang ${toExchangeId.toUpperCase()} đã được gửi và chuyển vào ví Futures. ID: ${withdrawResult.id}.` }));
-                        } else {
-                            safeLog('warn', `[BOT_SERVER_TRANSFER][INTERNAL] Cảnh báo: Tiền (${amount.toFixed(2)} USDT) chưa về đủ ví Funding (${usdtFundingFreeBalance.toFixed(2)}) hoặc Spot (${usdtSpotFreeBalance.toFixed(2)}) trên ${toExchangeId.toUpperCase()} sau ${waitTimeMs / 1000}s. Tiền có thể chưa về kịp hoặc nằm ở ví khác. Vui lòng kiểm tra thủ công.`);
-                            res.writeHead(200, { 'Content-Type': 'application/json' }); // Vẫn trả về thành công vì lệnh rút đã được gửi
-                            res.end(JSON.stringify({ success: true, message: `Yêu cầu chuyển ${amount} USDT từ ${fromExchangeId.toUpperCase()} sang ${toExchangeId.toUpperCase()} đã được gửi. ID: ${withdrawResult.id}. Cảnh báo: Tiền chưa về đủ ví Funding/Spot để tự động chuyển vào Futures. Vui lòng kiểm tra và chuyển thủ công.` }));
+                        } catch (internalTransferError) {
+                            safeLog('error', `[BOT_SERVER_TRANSFER][INTERNAL] ❌ Lỗi khi chuyển tiền từ Funding/Spot sang Futures trên ${toExchangeId.toUpperCase()}: ${internalTransferError.message}. Tiền có thể vẫn nằm ở ví Funding/Spot.`);
+                            res.writeHead(500, { 'Content-Type': 'application/json' });
+                            res.end(JSON.stringify({ success: false, message: `Lỗi khi chuyển tiền từ Funding/Spot sang Futures trên ${toExchangeId.toUpperCase()}: ${internalTransferError.message}. Tiền có thể vẫn nằm ở ví Funding/Spot.` }));
                         }
-                    } catch (internalTransferError) {
-                        safeLog('error', `[BOT_SERVER_TRANSFER][INTERNAL] ❌ Lỗi khi chuyển tiền từ Funding/Spot sang Futures trên ${toExchangeId.toUpperCase()}: ${internalTransferError.message}. Tiền có thể vẫn nằm ở ví Funding/Spot.`);
-                        res.writeHead(500, { 'Content-Type': 'application/json' });
-                        res.end(JSON.stringify({ success: false, message: `Lỗi khi chuyển tiền từ Funding/Spot sang Futures trên ${toExchangeId.toUpperCase()}: ${internalTransferError.message}. Tiền có thể vẫn nằm ở ví Funding/Spot.` }));
                     }
 
                     // Trigger a balance update shortly after for UI reflection
