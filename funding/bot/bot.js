@@ -141,14 +141,14 @@ function getTargetDepositInfo(fromExchangeId, toExchangeId) {
 
 // Hàm để lấy dữ liệu từ server chính
 async function fetchDataFromServer() {
-    safeLog('log', `[BOT] 🔄 Đang lấy dữ liệu từ server chính: ${SERVER_DATA_URL}`);
+    // TẮT LOG: safeLog('log', `[BOT] 🔄 Đang lấy dữ liệu từ server chính: ${SERVER_DATA_URL}`);
     try {
         const response = await fetch(SERVER_DATA_URL);
         if (!response.ok) {
             throw new Error(`HTTP error! status: ${response.status}`);
         }
         const data = await response.json();
-        safeLog('log', `[BOT] ✅ Đã nhận dữ liệu từ server. Tổng số cơ hội arbitrage: ${data.arbitrageData.length}`);
+        // TẮT LOG: safeLog('log', `[BOT] ✅ Đã nhận dữ liệu từ server. Tổng số cơ hội arbitrage: ${data.arbitrageData.length}`);
         return data;
     } catch (error) {
         safeLog('error', `[BOT] ❌ Lỗi khi lấy dữ liệu từ server: ${error.message}`);
@@ -204,7 +204,7 @@ async function processServerData(serverData) {
     let bestForDisplay = null;
     const tempAllOpportunities = []; 
 
-    safeLog('log', '[BOT] --- Bắt đầu tìm kiếm cơ hội arbitrage ---');
+    // TẮT LOG: safeLog('log', '[BOT] --- Bắt đầu tìm kiếm cơ hội arbitrage ---');
     
     serverData.arbitrageData.forEach(op => {
         const minutesUntilFunding = (op.nextFundingTime - now) / (1000 * 60);
@@ -228,7 +228,7 @@ async function processServerData(serverData) {
             // Chỉ thực hiện logic đảo nếu cả hai funding rate đều là số hợp lệ
             if (typeof op.details.shortFundingRate === 'number' && typeof op.details.longFundingRate === 'number') {
                 if (op.details.shortFundingRate < op.details.longFundingRate) { // Nếu Short FR < Long FR, đảo vai trò
-                    safeLog('log', `[BOT] Đảo sàn Long/Short cho ${op.coin}: Short FR (${op.details.shortFundingRate}) < Long FR (${op.details.longFundingRate}).`);
+                    // safeLog('log', `[BOT] Đảo sàn Long/Short cho ${op.coin}: Short FR (${op.details.shortFundingRate}) < Long FR (${op.details.longFundingRate}).`); // CÓ THỂ TẮT LOG NÀY NẾU KHÔNG CẦN
                     shortExId = op.details.longExchange; // Sàn có FR cao hơn (là Long ban đầu) giờ thành Short
                     longExId = op.details.shortExchange; // Sàn có FR thấp hơn (là Short ban đầu) giờ thành Long
                 }
@@ -258,10 +258,10 @@ async function processServerData(serverData) {
         bestPotentialOpportunityForDisplay.estimatedTradeCollateral = (balances.totalOverall * (currentPercentageToUse / 100)).toFixed(2);
 
         // THAY ĐỔI: Chỉ log duy nhất một dòng tóm tắt. Loại bỏ log chi tiết để tránh spam.
-        safeLog('log', `[BOT] ✨ Cơ hội tốt nhất ĐỂ HIỂN THỊ: Coin: ${bestForDisplay.coin}, Sàn: ${bestForDisplay.exchanges}, PnL ước tính: ${bestForDisplay.estimatedPnl.toFixed(2)}%, Funding trong: ${bestForDisplay.details.minutesUntilFunding.toFixed(1)} phút.`);
+        // TẮT LOG: safeLog('log', `[BOT] ✨ Cơ hội tốt nhất ĐỂ HIỂN THỊ: Coin: ${bestForDisplay.coin}, Sàn: ${bestForDisplay.exchanges}, PnL ước tính: ${bestForDisplay.estimatedPnl.toFixed(2)}%, Funding trong: ${bestForDisplay.details.minutesUntilFunding.toFixed(1)} phút.`);
     } else {
         bestPotentialOpportunityForDisplay = null;
-        safeLog('log', '[BOT] 🔍 Không có cơ hội nào khả dụng để hiển thị (PnL dương, Funding trong tương lai).');
+        // TẮT LOG: safeLog('log', '[BOT] 🔍 Không có cơ hội nào khả dụng để hiển thị (PnL dương, Funding trong tương lai).');
     }
 
     // currentSelectedOpportunityForExecution KHÔNG được set ở đây. Nó sẽ được set vào phút 50.
@@ -730,12 +730,12 @@ async function mainBotLoop() {
     if (currentSecond % DATA_FETCH_INTERVAL_SECONDS === 0 && LAST_ACTION_TIMESTAMP.dataFetch !== currentSecond) {
         LAST_ACTION_TIMESTAMP.dataFetch = currentSecond; // Cập nhật thời gian fetch
 
-        // Log rõ ràng hơn việc fetch dữ liệu
-        if (currentMinute === HOURLY_FETCH_TIME_MINUTE && currentSecond < 5) {
-            safeLog('log', `[BOT_LOOP] Kích hoạt cập nhật dữ liệu chính từ server (giờ funding HOURLY_FETCH_TIME_MINUTE).`);
-        } else {
-            safeLog('log', `[BOT_LOOP] Cập nhật dữ liệu từ server (mỗi ${DATA_FETCH_INTERVAL_SECONDS} giây).`);
-        }
+        // TẮT LOG:
+        // if (currentMinute === HOURLY_FETCH_TIME_MINUTE && currentSecond < 5) {
+        //     safeLog('log', `[BOT_LOOP] Kích hoạt cập nhật dữ liệu chính từ server (giờ funding HOURLY_FETCH_TIME_MINUTE).`);
+        // } else {
+        //     safeLog('log', `[BOT_LOOP] Cập nhật dữ liệu từ server (mỗi ${DATA_FETCH_INTERVAL_SECONDS} giây).`);
+        // }
         
         const fetchedData = await fetchDataFromServer();
         if (fetchedData) {
