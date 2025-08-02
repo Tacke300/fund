@@ -295,7 +295,13 @@ async function manageFundsAndTransfer(opportunity, percentageToUse) {
     // Logic chuyển tiền từ các sàn khác sang sàn mục tiêu nếu thiếu
     for (const sourceExchangeId of otherExchanges) {
         const sourceExchange = exchanges[sourceExchangeId]; // Lấy instance sàn nguồn
-        const sourceBalance = balances[sourceExchangeId].available; // Lấy balance từ Futures (đã cập nhật)
+        // Lấy số dư khả dụng từ ví Futures của sàn gửi MỚI NHẤT
+        await sourceExchange.loadMarkets(true); 
+        const sourceAccountBalance = await sourceExchange.fetchBalance({'type': 'future'}); // Fetch balance specific for future
+        const usdtFutureFreeBalance = sourceAccountBalance.free?.USDT || 0;
+
+        // THAY ĐỔI: Sử dụng usdtFutureFreeBalance đã fetch trực tiếp để kiểm tra.
+        const sourceBalance = usdtFutureFreeBalance; 
 
         if (sourceBalance > 0 && sourceBalance >= FUND_TRANSFER_MIN_AMOUNT) { 
             let targetExchangeToFund = null;
@@ -313,13 +319,14 @@ async function manageFundsAndTransfer(opportunity, percentageToUse) {
                 const amountToTransfer = Math.max(0, Math.min(sourceBalance, amountNeededByTarget)); 
                 
                 if (amountToTransfer >= FUND_TRANSFER_MIN_AMOUNT) {
-                    // THAY ĐỔI: Chuyển tiền từ Futures sang Spot trước khi rút
+                    // BƯỚC MỚI: Chuyển tiền từ Futures sang Spot trước khi rút
                     try {
                         safeLog('log', `[BOT_TRANSFER][INTERNAL] Đang chuyển ${amountToTransfer.toFixed(2)} USDT từ ví Futures sang ví Spot trên ${sourceExchangeId.toUpperCase()}...`);
                         await sourceExchange.transfer('USDT', amountToTransfer, 'future', 'spot');
                         safeLog('log', `[BOT_TRANSFER][INTERNAL] ✅ Đã chuyển ${amountToTransfer.toFixed(2)} USDT từ Futures sang Spot trên ${sourceExchangeId.toUpperCase()}.`);
                         await sleep(5000); // Đợi một chút để chuyển khoản nội bộ ổn định
-                        await updateBalances(); // Cập nhật lại balances sau internal transfer
+                        // Cập nhật lại balances GLOBALLY sau internal transfer
+                        await updateBalances(); 
                     } catch (internalTransferError) {
                         safeLog('error', `[BOT_TRANSFER][INTERNAL] ❌ Lỗi khi chuyển tiền từ Futures sang Spot trên ${sourceExchangeId.toUpperCase()}: ${internalTransferError.message}. Tiền có thể không sẵn sàng để rút.`);
                         fundsTransferredSuccessfully = false;
@@ -342,6 +349,7 @@ async function manageFundsAndTransfer(opportunity, percentageToUse) {
                         safeLog('log', `[BOT_TRANSFER][EXTERNAL] ✅ Yêu cầu rút tiền hoàn tất từ ${sourceExchangeId} sang ${targetExchangeToFund}. ID giao dịch: ${withdrawResult.id}`);
                         
                         // THÊM MỚI: Đợi tiền về ví Spot và chuyển vào Futures
+                        // Thời gian chờ linh hoạt theo mạng
                         const waitTimeMs = (withdrawalNetwork === 'APTOS') ? 30000 : 90000; // 30s cho Aptos, 90s cho BEP20
                         safeLog('log', `[BOT_TRANSFER][EXTERNAL] Đợi ${waitTimeMs / 1000} giây để tiền về ví Spot trên ${targetExchangeToFund} trước khi chuyển vào Futures...`);
                         await sleep(waitTimeMs); 
@@ -351,17 +359,17 @@ async function manageFundsAndTransfer(opportunity, percentageToUse) {
                             const targetExchange = exchanges[targetExchangeToFund];
                             // Cập nhật lại số dư để lấy số dư Spot mới nhất sau khi tiền về
                             await targetExchange.loadMarkets(); 
-                            const targetBalanceAfterDeposit = await targetExchange.fetchBalance();
-                            const usdtSpotBalance = targetBalanceAfterDeposit.spot?.free?.USDT || 0;
+                            const targetBalanceAfterDeposit = await targetExchange.fetchBalance({'type': 'spot'}); // Lấy balance specific for spot
+                            const usdtSpotFreeBalance = targetBalanceAfterDeposit.free?.USDT || 0;
 
-                            if (usdtSpotBalance >= amountToTransfer) { 
+                            if (usdtSpotFreeBalance >= amountToTransfer) { 
                                 safeLog('log', `[BOT_TRANSFER][INTERNAL] Đang chuyển ${amountToTransfer.toFixed(2)} USDT từ ví Spot sang ví Futures trên ${targetExchangeToFund}...`);
                                 await targetExchange.transfer(
                                     'USDT', amountToTransfer, 'spot', 'future'
                                 );
                                 safeLog('log', `[BOT_TRANSFER][INTERNAL] ✅ Đã chuyển ${amountToTransfer.toFixed(2)} USDT từ Spot sang Futures trên ${targetExchangeToFund}.`);
                             } else {
-                                safeLog('warn', `[BOT_TRANSFER][INTERNAL] Cảnh báo: Số dư Spot trên ${targetExchangeToFund} (${usdtSpotBalance.toFixed(2)} USDT) chưa đủ để chuyển ${amountToTransfer.toFixed(2)} USDT vào Futures sau ${waitTimeMs / 1000}s. Tiền có thể chưa về kịp. Đánh dấu chuyển tiền thành công một phần.`);
+                                safeLog('warn', `[BOT_TRANSFER][INTERNAL] Cảnh báo: Số dư Spot trên ${targetExchangeToFund} (${usdtSpotFreeBalance.toFixed(2)} USDT) chưa đủ để chuyển ${amountToTransfer.toFixed(2)} USDT vào Futures sau ${waitTimeMs / 1000}s. Tiền có thể chưa về kịp. Đánh dấu chuyển tiền thành công một phần.`);
                             }
                         } catch (internalTransferError) {
                             safeLog('error', `[BOT_TRANSFER][INTERNAL] ❌ Lỗi khi chuyển tiền từ Spot sang Futures trên ${targetExchangeToFund}: ${internalTransferError.message}. Tiền có thể vẫn nằm ở ví Spot.`);
@@ -990,10 +998,10 @@ const botServer = http.createServer((req, res) => {
 
                     // BƯỚC MỚI: Chuyển tiền từ Futures sang Spot trên sàn nguồn trước khi rút
                     try {
-                        // Lấy số dư khả dụng từ ví Futures của sàn gửi
+                        // Lấy số dư khả dụng từ ví Futures của sàn gửi (đảm bảo type: 'future')
                         await sourceExchange.loadMarkets(true); // Đảm bảo markets loaded
-                        const sourceAccountBalance = await sourceExchange.fetchBalance();
-                        const usdtFutureFreeBalance = sourceAccountBalance.future?.free?.USDT || 0;
+                        const sourceFuturesBalance = await sourceExchange.fetchBalance({'type': 'future'});
+                        const usdtFutureFreeBalance = sourceFuturesBalance.free?.USDT || 0;
 
                         if (usdtFutureFreeBalance < amount) {
                              res.writeHead(400, { 'Content-Type': 'application/json' });
@@ -1005,6 +1013,7 @@ const botServer = http.createServer((req, res) => {
                         await sourceExchange.transfer('USDT', amount, 'future', 'spot');
                         safeLog('log', `[BOT_SERVER_TRANSFER][INTERNAL] ✅ Đã chuyển ${amount} USDT từ Futures sang Spot trên ${fromExchangeId.toUpperCase()}.`);
                         await sleep(5000); // Đợi một chút để chuyển khoản nội bộ ổn định
+                        // KHÔNG CẦN updateBalances() TẠI ĐÂY NỮA, vì chúng ta đang fetchBalance trực tiếp sau đó.
                     } catch (internalTransferError) {
                         safeLog('error', `[BOT_SERVER_TRANSFER][INTERNAL] ❌ Lỗi khi chuyển tiền từ Futures sang Spot trên ${fromExchangeId.toUpperCase()}: ${internalTransferError.message}. Vui lòng kiểm tra quyền API hoặc thử lại.`);
                         res.writeHead(500, { 'Content-Type': 'application/json' });
@@ -1033,10 +1042,10 @@ const botServer = http.createServer((req, res) => {
                         const targetExchange = exchanges[toExchangeId];
                         // Cập nhật lại số dư để lấy số dư Spot mới nhất sau khi tiền về
                         await targetExchange.loadMarkets(); // Đảm bảo đã load markets
-                        const targetBalanceAfterDeposit = await targetExchange.fetchBalance();
-                        const usdtSpotBalance = targetBalanceAfterDeposit.spot?.free?.USDT || 0;
+                        const targetSpotBalance = await targetExchange.fetchBalance({'type': 'spot'}); // Lấy balance specific for spot
+                        const usdtSpotFreeBalance = targetSpotBalance.free?.USDT || 0;
 
-                        if (usdtSpotBalance >= amount) { // Chỉ chuyển nếu tiền đã về đủ Spot
+                        if (usdtSpotFreeBalance >= amount) { // Chỉ chuyển nếu tiền đã về đủ Spot
                             safeLog('log', `[BOT_SERVER_TRANSFER][INTERNAL] Đang chuyển ${amount} USDT từ ví Spot sang ví Futures trên ${toExchangeId.toUpperCase()}...`);
                             await targetExchange.transfer(
                                 'USDT', amount, 'spot', 'future'
@@ -1045,7 +1054,7 @@ const botServer = http.createServer((req, res) => {
                             res.writeHead(200, { 'Content-Type': 'application/json' });
                             res.end(JSON.stringify({ success: true, message: `Yêu cầu chuyển ${amount} USDT từ ${fromExchangeId.toUpperCase()} sang ${toExchangeId.toUpperCase()} đã được gửi và chuyển vào ví Futures. ID: ${withdrawResult.id}.` }));
                         } else {
-                            safeLog('warn', `[BOT_SERVER_TRANSFER][INTERNAL] Cảnh báo: Số dư Spot trên ${toExchangeId.toUpperCase()} (${usdtSpotBalance.toFixed(2)} USDT) chưa đủ để chuyển ${amount} USDT vào Futures sau ${waitTimeMs / 1000}s. Tiền có thể chưa về kịp. Vui lòng kiểm tra lại thủ công hoặc đợi thêm.`);
+                            safeLog('warn', `[BOT_SERVER_TRANSFER][INTERNAL] Cảnh báo: Số dư Spot trên ${toExchangeId.toUpperCase()} (${usdtSpotFreeBalance.toFixed(2)} USDT) chưa đủ để chuyển ${amount} USDT vào Futures sau ${waitTimeMs / 1000}s. Tiền có thể chưa về kịp. Vui lòng kiểm tra lại thủ công hoặc đợi thêm.`);
                             res.writeHead(200, { 'Content-Type': 'application/json' }); // Vẫn trả về thành công vì lệnh rút đã được gửi
                             res.end(JSON.stringify({ success: true, message: `Yêu cầu chuyển ${amount} USDT từ ${fromExchangeId.toUpperCase()} sang ${toExchangeId.toUpperCase()} đã được gửi. ID: ${withdrawResult.id}. Cảnh báo: Tiền chưa về đủ Spot để tự động chuyển vào Futures. Vui lòng kiểm tra và chuyển thủ công.` }));
                         }
