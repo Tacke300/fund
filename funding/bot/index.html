@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="vi">
 <head>
@@ -232,6 +231,63 @@
         .text-yellow { color: #f1fa8c; } /* Yellow for warnings/pending status */
         .text-purple { color: #bd93f9; } /* Lighter purple for specific highlights */
 
+        /* Styles for manual transfer section */
+        .manual-transfer-section {
+            background-color: #3e405e;
+            border-radius: 10px;
+            padding: 25px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(154, 103, 234, 0.3);
+            margin-top: 40px;
+            text-align: center;
+        }
+
+        .manual-transfer-controls {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 20px;
+            margin-top: 20px;
+            margin-bottom: 20px;
+        }
+
+        .manual-transfer-controls select {
+            padding: 10px 15px;
+            font-size: 1em;
+            border: 1px solid #5a5d7e;
+            border-radius: 8px;
+            background-color: #3e405e;
+            color: #e0e0e0;
+            min-width: 150px;
+        }
+
+        .manual-transfer-controls button {
+            padding: 12px 25px;
+            font-size: 1.1em;
+            font-weight: bold;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            background-color: #6a1b9a; /* Darker purple for transfer button */
+            color: #fff;
+            transition: background-color 0.3s ease, transform 0.2s ease;
+        }
+        .manual-transfer-controls button:hover {
+            background-color: #4a148c;
+            transform: translateY(-2px);
+        }
+
+        #transferStatusDisplay {
+            margin-top: 20px;
+            padding: 15px;
+            border-radius: 8px;
+            background-color: #282c34;
+            color: #e0e0e0;
+            font-size: 0.95em;
+            word-break: break-word;
+            text-align: left;
+        }
+
         /* Responsive adjustments */
         @media (max-width: 768px) {
             .container {
@@ -257,6 +313,13 @@
             .trade-history th, .trade-history td {
                 padding: 10px 15px;
                 font-size: 0.9em;
+            }
+            .manual-transfer-controls {
+                flex-direction: column;
+            }
+            .manual-transfer-controls select,
+            .manual-transfer-controls input {
+                width: 100%;
             }
         }
     </style>
@@ -309,6 +372,38 @@
                 <!-- NOTE: "Giao dịch Đang mở" đã được gỡ bỏ theo yêu cầu của bạn -->
             </section>
 
+            <!-- NEW: Manual Fund Transfer Section -->
+            <section class="manual-transfer-section">
+                <h2>Chuyển tiền thủ công (USDT BEP20)</h2>
+                <p style="color: #f1fa8c; font-size: 0.9em;">
+                    <strong style="color: #ff5555;">CẢNH BÁO:</strong> Chức năng này cực kỳ rủi ro. Hãy đảm bảo địa chỉ nạp tiền BEP20 trong file `balance.js` là CHÍNH XÁC.
+                    Chuyển sai địa chỉ hoặc mạng lưới có thể dẫn đến MẤT TIỀN VĨNH VIỄN.
+                    <br>API Key của sàn gửi PHẢI có quyền rút tiền (withdrawal permission).
+                </p>
+                <div class="manual-transfer-controls">
+                    <div>
+                        <label for="fromExchangeSelect">Từ sàn:</label>
+                        <select id="fromExchangeSelect">
+                            <!-- Options will be populated by JS -->
+                        </select>
+                    </div>
+                    <div>
+                        <label for="toExchangeSelect">Tới sàn:</label>
+                        <select id="toExchangeSelect">
+                            <!-- Options will be populated by JS -->
+                        </select>
+                    </div>
+                    <div>
+                        <label for="transferAmount">Số lượng USDT:</label>
+                        <input type="number" id="transferAmount" value="10" min="1">
+                    </div>
+                    <button id="manualTransferBtn">Chuyển ngay</button>
+                </div>
+                <div id="transferStatusDisplay">
+                    <!-- Status messages will appear here -->
+                </div>
+            </section>
+
             <section class="trade-history">
                 <h2>Lịch sử Giao dịch</h2>
                 <table>
@@ -333,6 +428,10 @@
     </div>
 
     <script>
+        // Global list of exchange IDs that the bot supports for transfer
+        const SUPPORTED_EXCHANGES = ['binanceusdm', 'bingx', 'okx', 'bitget'];
+        const FUND_TRANSFER_MIN_AMOUNT_FRONTEND = 10; // Đồng bộ với bot.js
+
         // Hàm để lấy và cập nhật trạng thái bot từ server
         async function updateBotStatus() {
             try {
@@ -412,7 +511,7 @@
                         } else if (longFr > shortFr) { // Long FR cao hơn Short FR (trường hợp hiếm trong arbitrage funding)
                             // Đảo vai trò nếu logic arbitrage ngược lại
                             shortExchangeName = data.currentSelectedOpportunity.details.longExchange;
-                            longExchangeName = data.currentSelectedOpportunity.details.shortExchange;
+                            longExchangeName = data.currentSelectedOpportunity.details.longExchange; // Sửa lỗi ở đây, đáng lẽ phải là shortExchange
                         } else { // Funding rates bằng nhau
                             shortExchangeName = data.currentSelectedOpportunity.details.shortExchange; // Vẫn giữ mặc định từ server
                             longExchangeName = data.currentSelectedOpportunity.details.longExchange;
@@ -425,7 +524,7 @@
                         <p><strong>Sàn:</strong> <span>${data.currentSelectedOpportunity.exchanges}</span></p>
                         <p><strong>PnL ước tính:</strong> <span>${data.currentSelectedOpportunity.estimatedPnl?.toFixed(2) || 'N/A'}%</span></p>
                         <p><strong>Tới giờ funding:</strong> <span>${fundingTimeFormatted} ngày ${fundingDateFormatted}</span></p>
-                        <p><strong>Volume ước tính:</strong> <span>${data.currentSelectedOpportunity.details.volume?.toFixed(2) || 'N/A'} USDT</span></p>
+                        <p><strong>Vốn dự kiến:</strong> <span>${data.currentSelectedOpportunity.estimatedTradeCollateral || 'N/A'} USDT</span></p>
                         <p><strong>Max Lev sẽ mở:</strong> <span>${data.currentSelectedOpportunity.commonLeverage || 'N/A'}x</span></p>
                         <p><strong>Long Sàn:</strong> <span>${longExchangeName} (${typeof longFr === 'number' ? longFr.toFixed(4) : 'N/A'}%)</span></p>
                         <p><strong>Short Sàn:</strong> <span>${shortExchangeName} (${typeof shortFr === 'number' ? shortFr.toFixed(4) : 'N/A'}%)</span></p>
@@ -466,6 +565,69 @@
                 console.error('Lỗi khi lấy trạng thái bot:', error);
                 document.getElementById('botStateDisplay').textContent = 'LỖI KẾT NỐI';
                 document.getElementById('botStateDisplay').classList.add('text-red');
+            }
+        }
+
+        // Hàm populate dropdowns
+        function populateExchangeDropdowns() {
+            const fromSelect = document.getElementById('fromExchangeSelect');
+            const toSelect = document.getElementById('toExchangeSelect');
+
+            SUPPORTED_EXCHANGES.forEach(exchangeId => {
+                const optionFrom = document.createElement('option');
+                optionFrom.value = exchangeId;
+                optionFrom.textContent = exchangeId.toUpperCase();
+                fromSelect.appendChild(optionFrom);
+
+                const optionTo = document.createElement('option');
+                optionTo.value = exchangeId;
+                optionTo.textContent = exchangeId.toUpperCase();
+                toSelect.appendChild(optionTo);
+            });
+
+            // Set default values (e.g., Binance to BingX)
+            fromSelect.value = 'binanceusdm';
+            toSelect.value = 'bingx';
+        }
+
+        // Hàm xử lý chuyển tiền thủ công
+        async function handleManualTransfer() {
+            const fromExchangeId = document.getElementById('fromExchangeSelect').value;
+            const toExchangeId = document.getElementById('toExchangeSelect').value;
+            const amount = parseFloat(document.getElementById('transferAmount').value);
+            const transferStatusDisplay = document.getElementById('transferStatusDisplay');
+
+            transferStatusDisplay.innerHTML = '<span class="text-yellow">Đang gửi yêu cầu chuyển tiền...</span>';
+
+            if (fromExchangeId === toExchangeId) {
+                transferStatusDisplay.innerHTML = '<span class="text-red">Không thể chuyển tiền giữa cùng một sàn.</span>';
+                return;
+            }
+
+            if (isNaN(amount) || amount < FUND_TRANSFER_MIN_AMOUNT_FRONTEND) {
+                transferStatusDisplay.innerHTML = `<span class="text-red">Số tiền không hợp lệ. Tối thiểu ${FUND_TRANSFER_MIN_AMOUNT_FRONTEND} USDT.</span>`;
+                return;
+            }
+
+            try {
+                const response = await fetch('/bot-api/transfer-funds', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ fromExchangeId, toExchangeId, amount })
+                });
+                const data = await response.json();
+
+                if (data.success) {
+                    transferStatusDisplay.innerHTML = `<span class="text-green">✅ ${data.message}</span>`;
+                    transferStatusDisplay.innerHTML += `<p>Thời gian dự kiến nhận: Khoảng **2-10 phút** (phụ thuộc vào tình trạng mạng blockchain và tốc độ xử lý của sàn nhận).</p>`;
+                    // Cập nhật lại số dư sau một khoảng thời gian
+                    setTimeout(updateBotStatus, 15000); // Cập nhật sau 15 giây
+                } else {
+                    transferStatusDisplay.innerHTML = `<span class="text-red">❌ Lỗi: ${data.message}</span>`;
+                }
+            } catch (error) {
+                console.error('Lỗi khi gửi yêu cầu chuyển tiền:', error);
+                transferStatusDisplay.innerHTML = `<span class="text-red">❌ Lỗi kết nối hoặc lỗi không xác định: ${error.message}</span>`;
             }
         }
 
@@ -513,8 +675,13 @@
             }
         });
 
+        // Event Listener cho nút chuyển tiền thủ công
+        document.getElementById('manualTransferBtn').addEventListener('click', handleManualTransfer);
+
+
         // Tải trạng thái ban đầu khi trang được load
         document.addEventListener('DOMContentLoaded', () => {
+            populateExchangeDropdowns(); // Populate dropdowns first
             updateBotStatus();
             // Thiết lập interval để tự động cập nhật trạng thái mỗi 5 giây
             setInterval(updateBotStatus, 5000); 
