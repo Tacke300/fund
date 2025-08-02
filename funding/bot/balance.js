@@ -8,10 +8,10 @@ module.exports = {
     // 3. SAI ĐỊA CHỈ VÍ CÓ THỂ KHIẾN BẠN MẤT TIỀN VĨNH VIỄN!
     // 4. Luôn kiểm tra kỹ trên ứng dụng/website của sàn để lấy đúng địa chỉ nạp tiền.
     usdtBep20DepositAddresses: {
-        binanceusdm: "0xYOUR_BINANCE_USDT_BEP20_DEPOSIT_ADDRESS", 
-        bingx: "0xYOUR_BINGX_USDT_BEP20_DEPOSIT_ADDRESS",       
-        okx: "0xYOUR_OKX_USDT_BEP20_DEPOSIT_ADDRESS",           
-        bitget: "0xYOUR_BITGET_USDT_BEP20_DEPOSIT_ADDRESS",     
+        binanceusdm: "0x47551181fcc95f8620a58a2f88b700a04f2fe13a", 
+        bingx: "0xfcafafeaa3a6836efb8fe102a1174ea548096fed",       
+        okx: "0xbe786adf3d91b03ffe074873e2a3612f002fc69fcbd91764f21418d556bb1aa4",           
+        bitget: "0xb8d6e57971ea23c02956c6ea2e342df6cc13e2d9",     
     }
     // Bạn có thể thêm các thông tin khác về số dư hoặc cấu hình liên quan đến balance ở đây nếu muốn.
 };
