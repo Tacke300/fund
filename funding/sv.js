@@ -394,7 +394,7 @@ async function fetchBitgetFundingTimeNativeApi(apiSymbol) {
         const rawData = await makeHttpRequest('GET', BITGET_NATIVE_REST_HOST, apiPath);
         const json = JSON.parse(rawData);
 
-        if (json.code === '00000' && json.data) {
+        if (json.code === '00000' && Array.isArray(json.data)) {
             const fundingData = Array.isArray(json.data) ? json.data[0] : json.data;
             if (fundingData && fundingData.fundingTime) {
                 const parsedFundingTime = parseInt(fundingData.fundingTime, 10);
@@ -579,7 +579,107 @@ async function updateLeverageForExchange(id, symbolsToUpdate = null) {
             console.log(`[CACHE] ✅ ${id.toUpperCase()}: Tổng số mục đòn bẩy hiện tại: ${Object.keys(leverageCache[id]).length}.`);
         }
 
-    } === '00000' && Array.isArray(json.data)) {
+    } catch (e) {
+        let errorMessage = `Lỗi nghiêm trọng khi lấy đòn bẩy cho ${id.toUpperCase()}: ${e.message}.`;
+        console.error(`[CACHE] ❌ ${id.toUpperCase()}: ${errorMessage}`);
+        status = `Đòn bẩy thất bại (lỗi chung: ${e.code || 'UNKNOWN'})`;
+        error = { code: e.code, msg: e.message };
+        leverageCache[id] = {}; 
+    } finally {
+        return { id, processedData: currentFetchedLeverageDataMap, status, error };
+    }
+}
+
+async function performFullLeverageUpdate() {
+    console.log('\n[LEVERAGE_SCHEDULER] 🔄 Bắt đầu cập nhật TOÀN BỘ đòn bẩy cho tất cả các sàn... (được kích hoạt)');
+    const nonBingxExchangeIds = EXCHANGE_IDS.filter(id => id !== 'bingx');
+    const bingxExchangeId = EXCHANGE_IDS.find(id => id === 'bingx');
+
+    // Giai đoạn 1: Lấy dữ liệu đòn bẩy cho các sàn non-BingX song song - CHỜ HOÀN TẤT
+    const nonBingxLeveragePromises = nonBingxExchangeIds.map(id => updateLeverageForExchange(id, null));
+    const nonBingxResults = await Promise.all(nonBingxLeveragePromises);
+    
+    // Cập nhật trạng thái và cache cho các sàn non-BingX ngay sau khi chúng hoàn tất
+    nonBingxResults.forEach(res => {
+        if (res) {
+            debugRawLeverageResponses[res.id].status = res.status;
+            debugRawLeverageResponses[res.id].timestamp = new Date();
+            debugRawLeverageResponses[res.id].error = res.error;
+        }
+    });
+
+    // Giai đoạn 2: Bắt đầu lấy dữ liệu BingX trong nền (KHÔNG DÙNG AWAIT TRỰC TIẾP)
+    if (bingxExchangeId) {
+        console.log(`[LEVERAGE_SCHEDULER] ⏳ Bắt đầu cập nhật đòn bẩy BingX trong nền sau ${DELAY_BEFORE_BINGX_MS / 1000} giây.`);
+        setTimeout(async () => {
+            const bingxResult = await updateLeverageForExchange(bingxExchangeId, null);
+            if (bingxResult) {
+                debugRawLeverageResponses[bingxResult.id].status = bingxResult.status;
+                debugRawLeverageResponses[bingxResult.id].timestamp = new Date();
+                debugRawLeverageResponses[bingxResult.id].error = bingxResult.error;
+                console.log('[LEVERAGE_SCHEDULER] ✅ Cập nhật đòn bẩy BingX trong nền hoàn tất.');
+            }
+        }, DELAY_BEFORE_BINGX_MS);
+    }
+    console.log('[LEVERAGE_SCHEDULER] ✅ Hoàn tất kích hoạt cập nhật đòn bẩy TOÀN BỘ (trừ BingX đang chạy nền).');
+}
+
+async function performTargetedLeverageUpdate() {
+    console.log('\n[LEVERAGE_SCHEDULER] 🎯 Bắt đầu cập nhật đòn bẩy MỤC TIÊU...');
+    const activeSymbols = new Set();
+    arbitrageOpportunities.forEach(op => activeSymbols.add(op.coin));
+
+    if (activeSymbols.size === 0) {
+        console.log('[LEVERAGE_SCHEDULER] Không có cơ hội arbitrage nào. Bỏ qua cập nhật đòn bẩy mục tiêu.');
+        EXCHANGE_IDS.forEach(id => {
+            debugRawLeverageResponses[id].status = 'Đòn bẩy bỏ qua (không có cơ hội)';
+            debugRawLeverageResponses[id].timestamp = new Date();
+            debugRawLeverageResponses[id].error = null;
+        });
+        return;
+    }
+
+    console.log(`[LEVERAGE_SCHEDULER] 🎯 Bắt đầu cập nhật đòn bẩy MỤC TIÊU cho ${activeSymbols.size} symbol.`);
+    const symbolsArray = Array.from(activeSymbols);
+    const nonBingxExchangeIds = EXCHANGE_IDS.filter(id => id !== 'bingx');
+    const bingxExchangeId = EXCHANGE_IDS.find(id => id === 'bingx');
+
+    const nonBingxLeveragePromises = nonBingxExchangeIds.map(id => updateLeverageForExchange(id, symbolsArray));
+    const nonBingxResults = await Promise.all(nonBingxLeveragePromises);
+
+    nonBingxResults.forEach(res => {
+        if (res) {
+            debugRawLeverageResponses[res.id].status = res.status;
+            debugRawLeverageResponses[res.id].timestamp = new Date();
+            debugRawLeverageResponses[res.id].error = res.error;
+        }
+    });
+    
+    if (bingxExchangeId) {
+        console.log(`[LEVERAGE_SCHEDULER] ⏳ Đã cập nhật đòn bẩy mục tiêu cho các sàn khác. Bắt đầu cập nhật BingX trong nền sau ${DELAY_BEFORE_BINGX_MS / 1000} giây.`);
+        setTimeout(async () => {
+            const bingxResult = await updateLeverageForExchange(bingxExchangeId, symbolsArray);
+            if (bingxResult) {
+                debugRawLeverageResponses[bingxResult.id].status = bingxResult.status;
+                debugRawLeverageResponses[bingxResult.id].timestamp = new Date();
+                debugRawLeverageResponses[bingxResult.id].error = bingxResult.error;
+                console.log('[LEVERAGE_SCHEDULER] ✅ Cập nhật đòn bẩy BingX mục tiêu trong nền hoàn tất.');
+            }
+        }, DELAY_BEFORE_BINGX_MS);
+    }
+    console.log('[LEVERAGE_SCHEDULER] ✅ Hoàn tất kích hoạt cập nhật đòn bẩy MỤC TIÊU (trừ BingX đang chạy nền).');
+}
+
+
+// Hàm mới để lấy danh sách các symbol Futures hợp lệ từ Bitget API
+async function fetchBitgetValidFuturesSymbols() {
+    console.log('[BITGET_SYMBOLS] 🔄 Đang tải danh sách symbol Futures hợp lệ từ Bitget...');
+    try {
+        const apiPath = '/api/mix/v1/market/contracts?productType=umcbl';
+        const rawData = await makeHttpRequest('GET', BITGET_NATIVE_REST_HOST, apiPath);
+        const json = JSON.parse(rawData);
+
+        if (json.code === '00000' && Array.isArray(json.data)) {
             bitgetValidFuturesSymbolSet.clear(); 
             json.data.forEach(contract => {
                 if (contract.symbol) {
