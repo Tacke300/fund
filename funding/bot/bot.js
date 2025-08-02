@@ -62,14 +62,15 @@ const DISABLED_EXCHANGES = ['bitget']; // Thêm 'bitget' vào đây
 // Danh sách tất cả các sàn mà bot có thể hỗ trợ (cho mục đích khởi tạo cấu hình) - Đặt ở global scope
 const ALL_POSSIBLE_EXCHANGE_IDS = ['binanceusdm', 'bingx', 'okx', 'bitget'];
 
+// THAY ĐỔI: Khai báo activeExchangeIds ở global scope
+const activeExchangeIds = ALL_POSSIBLE_EXCHANGE_IDS.filter(id => !DISABLED_EXCHANGES.includes(id));
+
 
 // ----- BIẾN TOÀN CỤC CHO BOT -----
 let botState = 'STOPPED'; 
 let botLoopIntervalId = null;
 
-// THAY ĐỔI: Khởi tạo exchanges và balances dựa trên danh sách sàn được kích hoạt
-const activeExchangeIds = ALL_POSSIBLE_EXCHANGE_IDS.filter(id => !DISABLED_EXCHANGES.includes(id));
-
+// Khởi tạo exchanges và balances dựa trên danh sách sàn được kích hoạt
 const exchanges = {};
 activeExchangeIds.forEach(id => {
     const exchangeClass = ccxt[id];
@@ -84,11 +85,9 @@ activeExchangeIds.forEach(id => {
     if (id === 'binanceusdm') { config.apiKey = binanceApiKey; config.secret = binanceApiSecret; }
     else if (id === 'bingx') { config.apiKey = bingxApiKey; config.secret = bingxApiSecret; } 
     else if (id === 'okx') { config.apiKey = okxApiKey; config.secret = okxApiSecret; if(okxPassword) config.password = okxPassword; }
-    else if (id === 'bitget') { config.apiKey = bitgetApiKey; config.secret = bitgetApiSecret; if(bitgetApiPassword) config.password = bitgetApiPassword; }
-    // else { safeLog('warn', `Thiếu API Key/Secret hoặc cấu hình cho ${id.toUpperCase()}.`); } // Đã bị loại khỏi activeExchangeIds
+    // else if (id === 'bitget') { config.apiKey = bitgetApiKey; config.secret = bitgetApiSecret; if(bitgetApiPassword) config.password = bitgetApiPassword; } // Bitget bị bỏ qua
     
     // Chỉ khởi tạo nếu API Key/Secret tồn tại (không để lỗi nếu người dùng không điền cho sàn không dùng)
-    // Hoặc nếu các sàn này không yêu cầu API Key/Secret (như Public API)
     if ((config.apiKey && config.secret) || (id === 'okx' && config.password)) { // OKX cần password
         exchanges[id] = new exchangeClass(config);
     } else {
@@ -131,30 +130,47 @@ let currentPercentageToUse = 50; // Mặc định 50% nếu UI không gửi
 // Hàm hỗ trợ
 function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
 
-// THAY ĐỔI: Hàm hỗ trợ để lấy địa chỉ nạp tiền và mạng lưới phù hợp
-// Logic mới: OKX luôn dùng APTOS, các sàn khác dùng BEP20.
+// THAY ĐỔI LỚN: Hàm để xác định mạng lưới chuyển tiền và địa chỉ nạp
 function getTargetDepositInfo(fromExchangeId, toExchangeId) {
-    let commonNetwork;
+    let withdrawalNetwork = null;
+    let depositNetwork = null;
 
-    // Xác định mạng lưới dựa trên sự tham gia của OKX
-    if (fromExchangeId === 'okx' || toExchangeId === 'okx') {
-        commonNetwork = 'APTOS';
+    // Logic: Nếu có OKX, dùng APTOS. Nếu không, dùng BEP20.
+    const isOKXInvolved = (fromExchangeId === 'okx' || toExchangeId === 'okx');
+
+    if (isOKXInvolved) {
+        withdrawalNetwork = 'APTOS';
+        depositNetwork = 'APTOS';
     } else {
-        commonNetwork = 'BEP20';
+        withdrawalNetwork = 'BEP20';
+        depositNetwork = 'BEP20';
     }
 
-    const depositAddress = usdtDepositAddressesByNetwork[toExchangeId]?.[commonNetwork];
+    // Kiểm tra xem sàn gửi có hỗ trợ rút tiền qua mạng đã chọn không
+    // (Đây là kiểm tra giả định, CCXT sẽ báo lỗi thực tế nếu không hỗ trợ)
+    // Ví dụ: BingX có thể không hỗ trợ rút APTOS.
+    // Nếu bạn biết chắc chắn sàn nào không hỗ trợ rút mạng nào, bạn có thể thêm logic ở đây.
+    // Hoặc dựa vào lỗi 100400 network/coin not exists để biết.
+
+    // Lấy địa chỉ nạp trên sàn nhận cho mạng đã xác định
+    const depositAddress = usdtDepositAddressesByNetwork[toExchangeId]?.[depositNetwork];
     
-    // Kiểm tra nếu địa chỉ không tồn tại cho mạng lưới đã chọn
     if (!depositAddress || depositAddress.startsWith('0xYOUR_')) {
-        safeLog('error', `[HELPER] Thiếu hoặc chưa điền địa chỉ nạp tiền USDT cho mạng "${commonNetwork}" của sàn nhận ${toExchangeId.toUpperCase()} trong balance.js. ` +
-                         `Đảm bảo ${toExchangeId.toUpperCase()} có địa chỉ nạp trên mạng ${commonNetwork} và đã được điền chính xác.`);
+        safeLog('error', `[HELPER] Không tìm thấy địa chỉ nạp USDT trên mạng "${depositNetwork}" cho sàn ${toExchangeId.toUpperCase()} trong balance.js. ` +
+                         `Hoặc địa chỉ chưa được điền chính xác.`);
         return null;
     }
-    return { network: commonNetwork, address: depositAddress };
+    
+    // Kiểm tra xem sàn gửi có địa chỉ để rút qua mạng đã chọn không (để tránh lỗi)
+    // (Không cần usdtDepositAddressesByNetwork ở đây, mà cần kiểm tra capabilities của sàn)
+    // Tuy nhiên, việc kiểm tra này thường được CCXT xử lý qua lỗi API khi gọi withdraw.
+    // Để cho đơn giản và dựa vào lỗi trả về từ sàn, chúng ta sẽ bỏ qua kiểm tra này ở đây.
+
+    return { network: withdrawalNetwork, address: depositAddress };
 }
 
-// THAY ĐỔI LỚN: Hàm để kiểm tra số dư và chờ đến khi tiền xuất hiện (polling)
+
+// THÊM MỚI: Hàm để kiểm tra số dư và chờ đến khi tiền xuất hiện (polling)
 // Sẽ chờ cho đến khi tìm thấy BẤT KỲ số dư nào lớn hơn dust amount.
 async function pollForBalance(exchangeId, targetAmount, maxPollAttempts = 60, pollIntervalMs = 5000) { // Max 60 attempts = 5 phút
     safeLog('log', `[POLL] Bắt đầu kiểm tra số dư trên ${exchangeId.toUpperCase()}. Mục tiêu: ~${targetAmount.toFixed(2)} USDT (có tính phí).`);
@@ -173,15 +189,12 @@ async function pollForBalance(exchangeId, targetAmount, maxPollAttempts = 60, po
 
             safeLog('log', `[POLL] Lần ${i + 1}/${maxPollAttempts}: ${exchangeId.toUpperCase()} - Funding: ${usdtFundingFreeBalance.toFixed(8)}, Spot: ${usdtSpotFreeBalance.toFixed(8)}. Tổng: ${lastKnownBalance.toFixed(8)}`);
 
-            // Nếu tìm thấy số dư lớn hơn dust amount VÀ số dư này ĐỦ GẦN với số tiền mong muốn (hoặc lớn hơn), thì coi là thành công.
-            // Sử dụng một ngưỡng chấp nhận được cho sai số phí (ví dụ 1.5 USDT cho phí chuyển đổi, hoặc 10% nếu bạn muốn linh hoạt hơn)
-            // Hoặc đơn giản là chỉ cần tiền về > 0, sau đó chuyển tất cả những gì có.
-            if (lastKnownBalance > DUST_AMOUNT) {
-                 // Nếu số tiền nhận được >= (số tiền gửi - 1.0 USDT phí)
-                 // Hoặc chỉ đơn giản là tìm thấy bất kỳ số tiền nào lớn hơn DUST_AMOUNT để chuyển nội bộ.
-                 // Quyết định: Chỉ cần tiền về, và chuyển tất cả những gì có.
+            // Nếu tìm thấy số dư lớn hơn dust amount
+            if (lastKnownBalance >= DUST_AMOUNT) { // Dùng >= DUST_AMOUNT để tiền phí cũng được nhận
                 safeLog('log', `[POLL] ✅ Tiền (~${lastKnownBalance.toFixed(2)} USDT) đã được tìm thấy trên ${exchangeId.toUpperCase()}.`);
-                return { found: true, type: usdtFundingFreeBalance >= targetAmount - 1.0 ? 'funding' : 'spot', balance: lastKnownBalance };
+                // Quyết định loại ví để chuyển: Ưu tiên Funding, nếu không thì Spot
+                const type = usdtFundingFreeBalance >= DUST_AMOUNT ? 'funding' : 'spot';
+                return { found: true, type: type, balance: lastKnownBalance };
             }
             
         } catch (e) {
@@ -216,8 +229,8 @@ async function updateBalances() {
     safeLog('log', '[BOT] 🔄 Cập nhật số dư từ các sàn...');
     let currentTotalOverall = 0; 
     // Duyệt qua các sàn ĐANG HOẠT ĐỘNG
-    for (const id of activeExchangeIds) { // THAY ĐỔI: Lặp qua activeExchangeIds
-        // THÊM MỚI: Chỉ khởi tạo instance sàn nếu nó chưa có (tránh lỗi nếu một số không được khởi tạo ở đầu)
+    for (const id of activeExchangeIds) { // Lặp qua activeExchangeIds
+        // Chỉ khởi tạo instance sàn nếu nó chưa có (tránh lỗi nếu người dùng không điền API cho sàn đó)
         if (!exchanges[id]) { 
             safeLog('warn', `[BOT] ${id.toUpperCase()} không được khởi tạo (có thể do thiếu API Key/Secret). Bỏ qua cập nhật số dư.`);
             continue;
@@ -1149,7 +1162,7 @@ const botServer = http.createServer((req, res) => {
                         // THAY ĐỔI: Thực hiện chuyển từ Funding HOẶC Spot sang Futures
                         try {
                             const targetExchange = exchanges[toExchangeId];
-                            safeLog('log', `[BOT_SERVER_TRANSFER][INTERNAL] Đang chuyển ${pollResult.balance.toFixed(2)} USDT từ ví ${pollResult.type.toUpperCase()} sang ví Futures trên ${toExchangeId.toUpperCase()}... (Hiện có ${pollResult.balance.toFixed(2)} USDT trong ${pollResult.type.toUpperCase()})`);
+                            safeLog('log', `[BOT_SERVER_TRANSFER][INTERNAL] Đang chuyển ${pollResult.balance.toFixed(2)} USDT từ ví ${pollResult.type.toUpperCase()} sang ví Futures trên ${toExchangeId.toUpperCase()}... (Đã nhận ~${pollResult.balance.toFixed(2)} USDT)`);
                             await targetExchange.transfer(
                                 'USDT', pollResult.balance, pollResult.type, 'future' // CHUYỂN CHÍNH XÁC SỐ TIỀN ĐÃ NHẬN
                             );
