@@ -7,13 +7,17 @@ const path = require('path');
 const ccxt = require('ccxt');
 const { URLSearchParams } = require('url');
 
-// Tạo một hàm log an toàn để tránh TypeError: console is not a function
+// THAY ĐỔI: Thêm timestamp HH:MM vào tất cả các log
 const safeLog = (type, ...args) => {
     try {
+        const now = new Date();
+        const hours = now.getHours().toString().padStart(2, '0');
+        const minutes = now.getMinutes().toString().padStart(2, '0');
+        const timestamp = `${hours}:${minutes}`;
         if (typeof console === 'object' && typeof console[type] === 'function') {
-            console[type](`[${type.toUpperCase()}]`, ...args);
+            console[type](`[${timestamp} ${type.toUpperCase()}]`, ...args);
         } else {
-            const message = `[${type.toUpperCase()}] ${args.map(arg => typeof arg === 'object' ? JSON.stringify(arg) : arg).join(' ')}\n`;
+            const message = `[${timestamp} ${type.toUpperCase()}] ${args.map(arg => typeof arg === 'object' ? JSON.stringify(arg) : arg).join(' ')}\n`;
             if (type === 'error' || type === 'warn') {
                 process.stderr.write(message);
             } else {
@@ -33,8 +37,8 @@ const {
     bitgetApiKey, bitgetApiSecret, bitgetApiPassword
 } = require('../config.js'); 
 
-// THAY ĐỔI: Import cấu hình địa chỉ nạp tiền và mạng rút tiền ưu tiên
-const { usdtDepositAddressesByNetwork, preferredWithdrawalNetworks } = require('./balance.js'); 
+// THAY ĐỔI: Chỉ import usdtDepositAddressesByNetwork
+const { usdtDepositAddressesByNetwork } = require('./balance.js'); 
 
 const BOT_PORT = 5006; // Cổng cho Bot UI (khác với cổng của Server chính)
 const SERVER_DATA_URL = 'http://localhost:5005/api/data'; // Địa chỉ Server chính
@@ -111,25 +115,27 @@ const exchanges = {};
 // Hàm hỗ trợ
 function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
 
-// SỬA ĐỔI: Hàm hỗ trợ để lấy địa chỉ nạp tiền và mạng lưới phù hợp
-// Hàm này giờ nhận vào `fromExchangeId` (để xác định mạng rút) và `toExchangeId` (để lấy địa chỉ nạp)
+// THAY ĐỔI: Hàm hỗ trợ để lấy địa chỉ nạp tiền và mạng lưới phù hợp
+// Logic mới: OKX luôn dùng APTOS, các sàn khác dùng BEP20.
 function getTargetDepositInfo(fromExchangeId, toExchangeId) {
-    // Lấy mạng rút tiền mà sàn GỬI ưu tiên sử dụng
-    const withdrawalNetwork = preferredWithdrawalNetworks[fromExchangeId];
-    if (!withdrawalNetwork) {
-        safeLog('error', `[HELPER] Không tìm thấy mạng rút tiền ưu tiên cho sàn gửi ${fromExchangeId.toUpperCase()}. Vui lòng kiểm tra preferredWithdrawalNetworks trong balance.js`);
-        return null;
+    let commonNetwork;
+
+    // Xác định mạng lưới dựa trên sự tham gia của OKX
+    if (fromExchangeId === 'okx' || toExchangeId === 'okx') {
+        commonNetwork = 'APTOS';
+    } else {
+        commonNetwork = 'BEP20';
     }
 
-    // Dựa trên mạng rút tiền của sàn gửi, tìm địa chỉ nạp tương ứng trên sàn nhận
-    const depositAddress = usdtDepositAddressesByNetwork[toExchangeId]?.[withdrawalNetwork];
+    const depositAddress = usdtDepositAddressesByNetwork[toExchangeId]?.[commonNetwork];
     
-    // THAY ĐỔI: Kiểm tra chặt chẽ hơn nếu địa chỉ nạp không tồn tại cho mạng đó
+    // Kiểm tra nếu địa chỉ không tồn tại cho mạng lưới đã chọn
     if (!depositAddress || depositAddress.startsWith('0xYOUR_')) {
-        safeLog('error', `[HELPER] Thiếu hoặc chưa điền địa chỉ nạp tiền USDT cho mạng "${withdrawalNetwork}" của sàn nhận ${toExchangeId.toUpperCase()} trong balance.js. HOẶC sàn nhận không hỗ trợ mạng mà sàn gửi ưu tiên.`);
+        safeLog('error', `[HELPER] Thiếu hoặc chưa điền địa chỉ nạp tiền USDT cho mạng "${commonNetwork}" của sàn nhận ${toExchangeId.toUpperCase()} trong balance.js. ` +
+                         `Đảm bảo ${toExchangeId.toUpperCase()} có địa chỉ nạp trên mạng ${commonNetwork} và đã được điền chính xác.`);
         return null;
     }
-    return { network: withdrawalNetwork, address: depositAddress };
+    return { network: commonNetwork, address: depositAddress };
 }
 
 
@@ -251,14 +257,8 @@ async function processServerData(serverData) {
         // Cần đảm bảo balances.totalOverall đã được cập nhật trước đó
         bestPotentialOpportunityForDisplay.estimatedTradeCollateral = (balances.totalOverall * (currentPercentageToUse / 100)).toFixed(2);
 
-        // Chỉ log duy nhất cơ hội tốt nhất để hiển thị (tinh gọn log)
-        safeLog('log', `[BOT] ✨ Cơ hội tốt nhất ĐỂ HIỂN THỊ (Gần funding nhất & PnL cao nhất):`);
-        safeLog('log', `  Coin: ${bestForDisplay.coin}, Sàn: ${bestForDisplay.exchanges}, PnL ước tính: ${bestForDisplay.estimatedPnl.toFixed(2)}%, Funding trong: ${bestForDisplay.details.minutesUntilFunding.toFixed(1)} phút.`);
-        safeLog('log', `  Dự kiến: Short: ${bestForDisplay.details.shortExchange}, Long: ${bestForDisplay.details.longExchange}, Vốn dự kiến: ${bestPotentialOpportunityForDisplay.estimatedTradeCollateral} USDT`); // Đổi từ Volume ước tính sang Vốn dự kiến
-        safeLog('log', `  Max Lev: ${bestForDisplay.commonLeverage}x, Short FR: ${bestForDisplay.details.shortFundingRate}, Long FR: ${bestForDisplay.details.longFundingRate}, Chênh lệch Funding: ${bestForDisplay.fundingDiff}`);
-        safeLog('log', `  Tới giờ Funding: ${new Date(bestForDisplay.nextFundingTime).toLocaleTimeString('vi-VN')} ngày ${new Date(bestForDisplay.nextFundingTime).toLocaleDateString('vi-VN')}`);
-        safeLog('log', `  TP/SL: (Sẽ được đặt sau 2s khi mở lệnh với % vốn: TP ${TP_PERCENT_OF_COLLATERAL}%, SL ${SL_PERCENT_OF_COLLATERAL}%)`); // Cập nhật thông báo
-
+        // THAY ĐỔI: Chỉ log duy nhất một dòng tóm tắt. Loại bỏ log chi tiết để tránh spam.
+        safeLog('log', `[BOT] ✨ Cơ hội tốt nhất ĐỂ HIỂN THỊ: Coin: ${bestForDisplay.coin}, Sàn: ${bestForDisplay.exchanges}, PnL ước tính: ${bestForDisplay.estimatedPnl.toFixed(2)}%, Funding trong: ${bestForDisplay.details.minutesUntilFunding.toFixed(1)} phút.`);
     } else {
         bestPotentialOpportunityForDisplay = null;
         safeLog('log', '[BOT] 🔍 Không có cơ hội nào khả dụng để hiển thị (PnL dương, Funding trong tương lai).');
@@ -328,8 +328,10 @@ async function manageFundsAndTransfer(opportunity, percentageToUse) {
                         safeLog('log', `[BOT_TRANSFER] ✅ Yêu cầu rút tiền hoàn tất từ ${sourceExchangeId} sang ${targetExchangeToFund}. ID giao dịch: ${withdrawResult.id}`);
                         
                         // THÊM MỚI: Đợi tiền về ví Spot và chuyển vào Futures
-                        safeLog('log', `[BOT_TRANSFER] Đợi 90 giây để tiền về ví Spot trên ${targetExchangeToFund} trước khi chuyển vào Futures...`);
-                        await sleep(90000); // Đợi 90 giây (1.5 phút) để giao dịch blockchain có thể được xác nhận và về ví Spot
+                        // Thời gian chờ linh hoạt theo mạng
+                        const waitTimeMs = (withdrawalNetwork === 'APTOS') ? 30000 : 90000; // 30s cho Aptos, 90s cho BEP20
+                        safeLog('log', `[BOT_TRANSFER] Đợi ${waitTimeMs / 1000} giây để tiền về ví Spot trên ${targetExchangeToFund} trước khi chuyển vào Futures...`);
+                        await sleep(waitTimeMs); 
 
                         // THÊM MỚI: Thực hiện chuyển từ Spot sang Futures
                         try {
@@ -344,7 +346,7 @@ async function manageFundsAndTransfer(opportunity, percentageToUse) {
                                 );
                                 safeLog('log', `[BOT_TRANSFER] ✅ Đã chuyển ${amountToTransfer.toFixed(2)} USDT từ Spot sang Futures trên ${targetExchangeToFund}.`);
                             } else {
-                                safeLog('warn', `[BOT_TRANSFER] Cảnh báo: Số dư Spot trên ${targetExchangeToFund} (${usdtSpotBalance.toFixed(2)} USDT) chưa đủ để chuyển ${amountToTransfer.toFixed(2)} USDT vào Futures. Tiền có thể chưa về kịp. Đánh dấu chuyển tiền thành công một phần.`);
+                                safeLog('warn', `[BOT_TRANSFER] Cảnh báo: Số dư Spot trên ${targetExchangeToFund} (${usdtSpotBalance.toFixed(2)} USDT) chưa đủ để chuyển ${amountToTransfer.toFixed(2)} USDT vào Futures sau ${waitTimeMs / 1000}s. Tiền có thể chưa về kịp. Đánh dấu chuyển tiền thành công một phần.`);
                                 // fundsTransferredSuccessfully vẫn là true nếu rút tiền thành công,
                                 // nhưng sẽ cảnh báo rằng internal transfer có thể chưa hoàn tất.
                             }
@@ -418,7 +420,7 @@ async function executeTrades(opportunity, percentageToUse) {
     const longExchange = exchanges[longExchangeId];
 
     // TÍNH TOÁN VỐN MỞ LỆNH (COLLATERAL) THEO YÊU CẦU MỚI: TỔNG BALANCE / 2 * %
-    // Đảm bảo balances.totalOverall đã được cập nhật trước khi gọi hàm này
+    // Đảm bảo balances.totalOverall đã được cập nhật trước đó
     const baseCollateralPerSide = (balances.totalOverall / 2) * (currentPercentageToUse / 100);
 
     const shortCollateral = baseCollateralPerSide;
@@ -991,7 +993,7 @@ const botServer = http.createServer((req, res) => {
                     safeLog('log', `[BOT_SERVER_TRANSFER] ✅ Yêu cầu rút tiền hoàn tất từ ${fromExchangeId.toUpperCase()} sang ${toExchangeId.toUpperCase()}. ID giao dịch: ${withdrawResult.id}`);
                     
                     // THÊM MỚI: Đợi tiền về ví Spot và chuyển vào Futures (cho chuyển thủ công)
-                    // Thời gian chờ có thể cần điều chỉnh cho mạng APTOS (thường nhanh hơn BEP20)
+                    // Thời gian chờ linh hoạt theo mạng
                     const waitTimeMs = (withdrawalNetwork === 'APTOS') ? 30000 : 90000; // 30s cho Aptos, 90s cho BEP20
                     safeLog('log', `[BOT_SERVER_TRANSFER] Đợi ${waitTimeMs / 1000} giây để tiền về ví Spot trên ${toExchangeId.toUpperCase()} trước khi chuyển vào Futures...`);
                     await sleep(waitTimeMs); 
