@@ -124,7 +124,7 @@ const LAST_ACTION_TIMESTAMP = {
 let currentTradeDetails = null; 
 
 // LƯU TRỮ % VỐN MỞ LỆNH TỪ UI
-let currentPercentageToUse = 50; // Mặc định 50% nếu UI không gửi
+let currentPercentageToUse = 10; // Mặc định 50% nếu UI không gửi
 
 
 // Hàm hỗ trợ
@@ -323,6 +323,7 @@ async function processServerData(serverData) {
             tempAllOpportunities.push(op); 
 
             // Logic cho bestForDisplay: funding gần nhất, nếu bằng thì PnL cao nhất
+            // THAY ĐỔI TẠI ĐÂY: Ưu tiên funding gần nhất, sau đó mới PnL cao nhất
             if (!bestForDisplay ||
                 minutesUntilFunding < bestForDisplay.details.minutesUntilFunding || 
                 (minutesUntilFunding === bestForDisplay.details.minutesUntilFunding && op.estimatedPnl > bestForDisplay.estimatedPnl) 
@@ -893,7 +894,11 @@ async function mainBotLoop() {
                     minutesUntilFunding >= MIN_MINUTES_FOR_EXECUTION && 
                     minutesUntilFunding <= MAX_MINUTES_UNTIL_FUNDING) {
                     
-                    if (!bestOpportunityFoundForExecution || op.estimatedPnl > bestOpportunityFoundForExecution.estimatedPnl) {
+                    // THAY ĐỔI TẠI ĐÂY: Ưu tiên funding gần nhất, sau đó mới PnL cao nhất
+                    if (!bestOpportunityFoundForExecution ||
+                        minutesUntilFunding < bestOpportunityFoundForExecution.details.minutesUntilFunding || 
+                        (minutesUntilFunding === bestOpportunityFoundForExecution.details.minutesUntilFunding && op.estimatedPnl > bestOpportunityFoundForExecution.estimatedPnl) 
+                    ) {
                         bestOpportunityFoundForExecution = op;
                     }
                 }
