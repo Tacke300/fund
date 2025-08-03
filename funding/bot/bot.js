@@ -387,8 +387,9 @@ async function manageFundsAndTransfer(opportunity, percentageToUse) {
                         }
                         const { network: withdrawalNetwork, address: depositAddress } = targetDepositInfo;
 
-                        // Loại bỏ tham số 'fee' đặc biệt cho OKX khi rút ra ngoài để CCXT tự tính phí mạng
-                        const withdrawParams = {}; // Không thêm phí = '0' nữa
+                        const withdrawParams = {}; 
+                        // OKX: Không thêm phí = '0' nữa khi network là APTOS, để CCXT tự xử lý phí hoặc lỗi rõ ràng hơn
+                        // nếu đó là chuyển nội bộ OKX, network sẽ khác hoặc trống
 
                         safeLog('log', `[BOT_TRANSFER][EXTERNAL] Đang cố gắng rút ${amountToTransfer.toFixed(2)} USDT từ ${sourceExchangeId} sang ${targetExchangeToFund} (${depositAddress}) qua mạng ${withdrawalNetwork} với params: ${JSON.stringify(withdrawParams)}...`);
                         try {
@@ -976,6 +977,7 @@ const botServer = http.createServer((req, res) => {
                 try {
                     const sourceExchange = exchanges[fromExchangeId];
 
+                    // Xử lý riêng cho OKX (thủ công): Bỏ qua bước chuyển Futures -> Spot
                     if (fromExchangeId === 'okx') {
                         safeLog('log', `[BOT_SERVER_TRANSFER][INTERNAL] Bỏ qua chuyển từ Futures sang Spot trên OKX theo yêu cầu (cố gắng rút trực tiếp từ Futures).`);
                     } else {
@@ -1002,9 +1004,8 @@ const botServer = http.createServer((req, res) => {
                         }
                     }
                     
-                    // Loại bỏ tham số 'fee' đặc biệt cho OKX khi rút ra ngoài để CCXT tự tính phí mạng (hoặc nếu là fee-free, CCXT sẽ biết)
+                    // Bỏ qua tham số 'fee' đặc biệt khi network có phí (như APTOS)
                     const withdrawParams = {}; 
-                    // Bỏ qua: if (fromExchangeId === 'okx') { withdrawParams.fee = '0'; } // KHÔNG CẦN NỮA, APTOS CÓ PHÍ
 
                     const withdrawResult = await exchanges[fromExchangeId].withdraw(
                         'USDT',
@@ -1048,9 +1049,9 @@ const botServer = http.createServer((req, res) => {
                         userMessage = `Số dư khả dụng trong ví Futures của ${fromExchangeId.toUpperCase()} không đủ (sau khi chuyển sang Spot). Vui lòng kiểm tra lại số dư hoặc quyền API.`;
                     } else if (transferError.message.includes('API key permission')) {
                         userMessage = `Lỗi quyền API: Kiểm tra quyền RÚT TIỀN (Withdrawal permission) của API Key trên ${fromExchangeId.toUpperCase()}.`;
-                    } else if (transferError.message.includes('Invalid network') || transferError.message.includes('Invalid address') || transferError.message.includes('chainName')) { // Thêm kiểm tra lỗi chainName/network
+                    } else if (transferError.message.includes('Invalid network') || transferError.message.includes('Invalid address') || transferError.message.includes('chainName')) {
                         userMessage = `Lỗi mạng hoặc địa chỉ: Đảm bảo sàn ${toExchangeId.toUpperCase()} hỗ trợ mạng ${withdrawalNetwork} và địa chỉ nạp tiền trong balance.js là HỢP LỆ. Vui lòng kiểm tra lại.`;
-                    } else if (transferError.message.includes('fee')) { // Bắt lỗi liên quan đến phí rút tiền
+                    } else if (transferError.message.includes('fee')) {
                          userMessage = `Lỗi phí rút tiền: Sàn ${fromExchangeId.toUpperCase()} yêu cầu tham số phí rút tiền hoặc phí không hợp lệ cho mạng ${withdrawalNetwork}. Vui lòng kiểm tra lại.`;
                     }
                     res.writeHead(500, { 'Content-Type': 'application/json' });
