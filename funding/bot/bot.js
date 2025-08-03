@@ -44,10 +44,13 @@ const BOT_PORT = 5006; // Cổng cho Bot UI (khác với cổng của Server ch�
 const SERVER_DATA_URL = 'http://localhost:5005/api/data'; // Địa chỉ Server chính
 
 // ----- CẤU HÌNH BOT -----
-const MIN_PNL_PERCENTAGE = 1; // %PnL tối thiểu để bot xem xét
+const MIN_PNL_PERCENTAGE = 7; // %PnL tối thiểu để bot xem xét
 const MAX_MINUTES_UNTIL_FUNDING = 30; // Trong vòng 30 phút tới sẽ tới giờ funding (để bot tìm cơ hội)
 const MIN_MINUTES_FOR_EXECUTION = 15; // Phải còn ít nhất 15 phút tới funding để bot xem xét thực hiện
-const FUND_TRANSFER_MIN_AMOUNT = 10; // Số tiền tối thiểu cho mỗi lần chuyển tiền qua BEP20 (Giá trị này giờ mang tính tổng quát)
+
+// THAY ĐỔI MỚI: Số tiền tối thiểu cho mỗi lần chuyển tiền theo sàn
+const FUND_TRANSFER_MIN_AMOUNT_BINANCE = 10; // $ tối thiểu khi chuyển từ Binance
+const FUND_TRANSFER_MIN_AMOUNT_OTHERS = 5;   // $ tối thiểu khi chuyển từ các sàn khác
 
 const DATA_FETCH_INTERVAL_SECONDS = 5; // Cập nhật dữ liệu mỗi 5 giây
 const HOURLY_FETCH_TIME_MINUTE = 45; // Mỗi giờ vào phút thứ 45, bot lấy dữ liệu chính
@@ -124,11 +127,20 @@ const LAST_ACTION_TIMESTAMP = {
 let currentTradeDetails = null; 
 
 // LƯU TRỮ % VỐN MỞ LỆNH TỪ UI
-let currentPercentageToUse = 10; // Mặc định 50% nếu UI không gửi
+let currentPercentageToUse = 50; // Mặc định 50% nếu UI không gửi
 
 
 // Hàm hỗ trợ
 function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
+
+// THÊM MỚI: Hàm lấy số tiền chuyển tối thiểu dựa trên sàn gửi
+function getMinTransferAmount(fromExchangeId) {
+    if (fromExchangeId === 'binanceusdm') {
+        return FUND_TRANSFER_MIN_AMOUNT_BINANCE;
+    }
+    return FUND_TRANSFER_MIN_AMOUNT_OTHERS;
+}
+
 
 // THAY ĐỔI LỚN: Hàm để xác định mạng lưới chuyển tiền và địa chỉ nạp
 function getTargetDepositInfo(fromExchangeId, toExchangeId) {
@@ -394,8 +406,11 @@ async function manageFundsAndTransfer(opportunity, percentageToUse) {
         const usdtFutureFreeBalance = sourceAccountBalance.free?.USDT || 0;
 
         const sourceBalance = usdtFutureFreeBalance; 
+        
+        // THAY ĐỔI: Lấy min transfer amount theo sàn
+        const minTransferAmountForSource = getMinTransferAmount(sourceExchangeId);
 
-        if (sourceBalance > 0 && sourceBalance >= FUND_TRANSFER_MIN_AMOUNT) { 
+        if (sourceBalance > 0 && sourceBalance >= minTransferAmountForSource) { 
             let targetExchangeToFund = null;
             // Ưu tiên chuyển cho sàn thiếu nhiều hơn trong 2 sàn mục tiêu (để đạt được baseCollateralPerSide)
             // THAY ĐỔI: Chỉ xem xét các sàn ĐANG HOẠT ĐỘNG làm sàn mục tiêu
@@ -436,7 +451,8 @@ async function manageFundsAndTransfer(opportunity, percentageToUse) {
                 const amountNeededByTarget = baseCollateralPerSide - balances[targetExchangeToFund].available;
                 const amountToTransfer = Math.max(0, Math.min(sourceBalance, amountNeededByTarget)); 
                 
-                if (amountToTransfer >= FUND_TRANSFER_MIN_AMOUNT) {
+                // THAY ĐỔI: Dùng minTransferAmountForSource
+                if (amountToTransfer >= minTransferAmountForSource) {
                     // BƯỚC MỚI: Chuyển tiền từ Futures sang Spot trước khi rút
                     try {
                         safeLog('log', `[BOT_TRANSFER][INTERNAL] Đang chuyển ${amountToTransfer.toFixed(2)} USDT từ ví Futures sang ví Spot trên ${sourceExchangeId.toUpperCase()}...`);
@@ -1079,6 +1095,9 @@ const botServer = http.createServer((req, res) => {
                 const data = JSON.parse(body);
                 const { fromExchangeId, toExchangeId, amount } = data;
 
+                // THÊM MỚI: Lấy min transfer amount theo sàn gửi
+                const minTransferAmount = getMinTransferAmount(fromExchangeId);
+
                 // THÊM MỚI: Kiểm tra nếu sàn gửi hoặc sàn nhận bị tắt
                 if (DISABLED_EXCHANGES.includes(fromExchangeId) || DISABLED_EXCHANGES.includes(toExchangeId)) {
                     res.writeHead(400, { 'Content-Type': 'application/json' });
@@ -1086,9 +1105,9 @@ const botServer = http.createServer((req, res) => {
                     return;
                 }
 
-                if (!fromExchangeId || !toExchangeId || !amount || isNaN(amount) || amount < FUND_TRANSFER_MIN_AMOUNT) {
+                if (!fromExchangeId || !toExchangeId || !amount || isNaN(amount) || amount < minTransferAmount) { // Dùng minTransferAmount
                     res.writeHead(400, { 'Content-Type': 'application/json' });
-                    res.end(JSON.stringify({ success: false, message: `Dữ liệu chuyển tiền không hợp lệ. Số tiền tối thiểu là ${FUND_TRANSFER_MIN_AMOUNT} USDT.` }));
+                    res.end(JSON.stringify({ success: false, message: `Dữ liệu chuyển tiền không hợp lệ. Số tiền tối thiểu từ ${fromExchangeId.toUpperCase()} là ${minTransferAmount} USDT.` }));
                     return;
                 }
                 if (fromExchangeId === toExchangeId) {
