@@ -1,4 +1,4 @@
-// bot.js - Phiên bản hoàn chỉnh (Đã sửa lỗi cú pháp import, lỗi op.details.rate, thêm debug cho originalSymbol, và cập nhật logic chuyển tiền OKX cho cả tự động và thủ công)
+// bot.js - Phiên bản hoàn chỉnh và đã sửa lỗi (final attempt!)
 
 const http = require('http');
 const https = require('https');
@@ -34,7 +34,7 @@ const {
     binanceApiKey, binanceApiSecret,
     bingxApiKey, bingxApiSecret,
     okxApiKey, okxApiSecret, okxPassword,
-    bitgetApiKey, bitgetApiSecret, bitgetApiPassword // <<< ĐÃ SỬA LỖI CÚ PHÁP Ở ĐÂY LẠI MỘT LẦN NỮA ĐỂ ĐẢM BẢO
+    bitgetApiKey, bitgetApiSecret, bitgetApiPassword // <<< ĐÃ SỬA LỖI CÚ PHÁP: bitgetApiPassword thay vì bitgetApiSecret trùng lặp
 } = require('../config.js'); 
 
 // THAY ĐỔI: Chỉ import usdtDepositAddressesByNetwork
@@ -44,7 +44,7 @@ const BOT_PORT = 5006; // Cổng cho Bot UI (khác với cổng của Server ch�
 const SERVER_DATA_URL = 'http://localhost:5005/api/data'; // Địa chỉ Server chính
 
 // ----- CẤU HÌNH BOT -----
-const MIN_PNL_PERCENTAGE = 7; // %PnL tối thiểu để bot xem xét
+const MIN_PNL_PERCENTAGE = 1; // %PnL tối thiểu để bot xem xét (Thay đổi từ 7 thành 1)
 const MAX_MINUTES_UNTIL_FUNDING = 30; // Trong vòng 30 phút tới sẽ tới giờ funding (để bot tìm cơ hội)
 const MIN_MINUTES_FOR_EXECUTION = 15; // Phải còn ÍT HƠN 15 phút tới funding để bot xem xét thực hiện (theo yêu cầu mới)
 
@@ -310,7 +310,7 @@ async function processServerData(serverData) {
             op.details.minutesUntilFunding = minutesUntilFunding; // Gắn thêm minutesUntilFunding vào op.details
 
             // SỬA LỖI TÊN BIẾN FUNDING RATE TỪ SERVER: shortRate -> shortFundingRate, longRate -> longFundingRate
-            op.details.shortFundingRate = op.details.shortRate !== undefined ? op.details.shortRate : 'N/A'; // Sửa từ op.details.rate
+            op.details.shortFundingRate = op.details.shortRate !== undefined ? op.details.shortRate : 'N/A';
             op.details.longFundingRate = op.details.longRate !== undefined ? op.details.longRate : 'N/A';
             op.fundingDiff = op.fundingDiff !== undefined ? op.fundingDiff : 'N/A'; 
             op.commonLeverage = op.commonLeverage !== undefined ? op.commonLeverage : 'N/A';
@@ -455,10 +455,9 @@ async function manageFundsAndTransfer(opportunity, percentageToUse) {
                     // THAY ĐỔI: Dùng minTransferAmountForSource
                     if (amountToTransfer >= minTransferAmountForSource) {
                         // BƯỚC MỚI: Chuyển tiền từ Futures sang Spot trên sàn nguồn trước khi rút
-                        // THAY ĐỔI LỚN: Xử lý riêng cho OKX (tự động)
+                        // Xử lý riêng cho OKX (tự động): Bỏ qua bước chuyển Futures -> Spot
                         if (sourceExchangeId === 'okx') {
                             safeLog('log', `[BOT_TRANSFER][INTERNAL] Bỏ qua chuyển từ Futures sang Spot trên OKX theo yêu cầu (cố gắng rút trực tiếp từ Futures).`);
-                            // Không làm gì, tiếp tục đến bước rút tiền ngoại sàn
                         } else {
                             try {
                                 safeLog('log', `[BOT_TRANSFER][INTERNAL] Đang chuyển ${amountToTransfer.toFixed(2)} USDT từ ví Futures sang ví Spot trên ${sourceExchangeId.toUpperCase()}...`);
@@ -481,10 +480,16 @@ async function manageFundsAndTransfer(opportunity, percentageToUse) {
                         }
                         const { network: withdrawalNetwork, address: depositAddress } = targetDepositInfo;
 
-                        safeLog('log', `[BOT_TRANSFER][EXTERNAL] Đang cố gắng rút ${amountToTransfer.toFixed(2)} USDT từ ${sourceExchangeId} sang ${targetExchangeToFund} (${depositAddress}) qua mạng ${withdrawalNetwork}...`);
+                        // Thêm params cho phí rút tiền nếu là OKX
+                        const withdrawParams = {};
+                        if (sourceExchangeId === 'okx') {
+                            withdrawParams.fee = '0'; // OKX yêu cầu 'fee': '0' cho các giao dịch miễn phí
+                        }
+
+                        safeLog('log', `[BOT_TRANSFER][EXTERNAL] Đang cố gắng rút ${amountToTransfer.toFixed(2)} USDT từ ${sourceExchangeId} sang ${targetExchangeToFund} (${depositAddress}) qua mạng ${withdrawalNetwork} với params: ${JSON.stringify(withdrawParams)}...`);
                         try {
                             const withdrawResult = await exchanges[sourceExchangeId].withdraw(
-                                'USDT', amountToTransfer, depositAddress, undefined, { network: withdrawalNetwork } 
+                                'USDT', amountToTransfer, depositAddress, undefined, { network: withdrawalNetwork, ...withdrawParams } // Gộp params
                             );
                             safeLog('log', `[BOT_TRANSFER][EXTERNAL] ✅ Yêu cầu rút tiền hoàn tất từ ${sourceExchangeId} sang ${targetExchangeToFund}. ID giao dịch: ${withdrawResult.id}`);
                             
@@ -1115,12 +1120,12 @@ const botServer = http.createServer((req, res) => {
         req.on('end', async () => {
             try {
                 const data = JSON.parse(body);
-                const { fromExchangeId, toExchangeId, amount } = data;
+                const { fromExchangeId, toExchangeId, amount } = data; // fromExchangeId, toExchangeId đã được định nghĩa ở đây
 
-                // THÊM MỚI: Lấy min transfer amount theo sàn gửi
+                // Lấy min transfer amount theo sàn gửi
                 const minTransferAmount = getMinTransferAmount(fromExchangeId);
 
-                // THÊM MỚI: Kiểm tra nếu sàn gửi hoặc sàn nhận bị tắt
+                // Kiểm tra nếu sàn gửi hoặc sàn nhận bị tắt
                 if (DISABLED_EXCHANGES.includes(fromExchangeId) || DISABLED_EXCHANGES.includes(toExchangeId)) {
                     res.writeHead(400, { 'Content-Type': 'application/json' });
                     res.end(JSON.stringify({ success: false, message: `Không thể chuyển tiền. Sàn ${fromExchangeId.toUpperCase()} hoặc ${toExchangeId.toUpperCase()} đã bị tắt hoặc gặp vấn đề API.` }));
@@ -1145,7 +1150,7 @@ const botServer = http.createServer((req, res) => {
                     return;
                 }
 
-                // THAY ĐỔI: Sử dụng hàm getTargetDepositInfo mới
+                // Sử dụng hàm getTargetDepositInfo mới
                 const targetDepositInfo = getTargetDepositInfo(fromExchangeId, toExchangeId);
                 if (!targetDepositInfo) {
                     // getTargetDepositInfo đã log lỗi chi tiết, chỉ cần trả về lỗi chung cho người dùng
@@ -1162,7 +1167,7 @@ const botServer = http.createServer((req, res) => {
                     const sourceExchange = exchanges[fromExchangeId];
 
                     // BƯỚC MỚI: Chuyển tiền từ Futures sang Spot trên sàn nguồn trước khi rút
-                    // THAY ĐỔI LỚN: Xử lý riêng cho OKX (thủ công)
+                    // Xử lý riêng cho OKX (thủ công): Bỏ qua bước chuyển Futures -> Spot
                     if (fromExchangeId === 'okx') { // Dùng fromExchangeId cho API thủ công
                         safeLog('log', `[BOT_SERVER_TRANSFER][INTERNAL] Bỏ qua chuyển từ Futures sang Spot trên OKX theo yêu cầu (cố gắng rút trực tiếp từ Futures).`);
                         // Không làm gì, tiếp tục đến bước rút tiền ngoại sàn
@@ -1193,12 +1198,18 @@ const botServer = http.createServer((req, res) => {
                     }
 
                     // Tiếp tục với việc rút tiền ra ngoài
-                    const withdrawResult = await exchanges[fromExchangeId].withdraw(
+                    // Thêm params cho phí rút tiền nếu là OKX
+                    const withdrawParams = {};
+                    if (fromExchangeId === 'okx') { // Dùng fromExchangeId cho API thủ công
+                        withdrawParams.fee = '0'; // OKX yêu cầu 'fee': '0' cho các giao dịch miễn phí
+                    }
+
+                    const withdrawResult = await exchanges[fromExchangeId].withdraw( // Dùng fromExchangeId
                         'USDT',
                         amount,
                         depositAddress,
                         undefined,
-                        { network: withdrawalNetwork }
+                        { network: withdrawalNetwork, ...withdrawParams } // Gộp params
                     );
                     safeLog('log', `[BOT_SERVER_TRANSFER][EXTERNAL] ✅ Yêu cầu rút tiền hoàn tất từ ${fromExchangeId.toUpperCase()} sang ${toExchangeId.toUpperCase()}. ID giao dịch: ${withdrawResult.id}`);
                     
@@ -1232,7 +1243,7 @@ const botServer = http.createServer((req, res) => {
                     setTimeout(updateBalances, 15000); // Cập nhật lại UI sau 15 giây
 
                 } catch (transferError) {
-                    safeLog('error', `[BOT_SERVER_TRANSFER] ❌ Lỗi khi thực hiện rút tiền thủ công từ ${fromExchangeId.toUpperCase()}: ${transferError.message}`);
+                    safeLog('error', `[BOT_SERVER_TRANSFER] ❌ Lỗi khi thực hiện rút tiền thủ công từ ${fromExchangeId.toUpperCase()}: ${transferError.message}`); // Dùng fromExchangeId
                     let userMessage = `Lỗi khi chuyển tiền: ${transferError.message}`;
                     if (transferError.message.includes('Insufficient funds')) {
                         userMessage = `Số dư khả dụng trong ví Futures của ${fromExchangeId.toUpperCase()} không đủ (sau khi chuyển sang Spot). Vui lòng kiểm tra lại số dư hoặc quyền API.`;
