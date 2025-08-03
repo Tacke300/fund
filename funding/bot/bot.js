@@ -34,7 +34,7 @@ const {
     binanceApiKey, binanceApiSecret,
     bingxApiKey, bingxApiSecret,
     okxApiKey, okxApiSecret, okxPassword,
-    bitgetApiKey, bitgetApiSecret, bitgetApiSecret
+    bitgetApiKey, bitgetApiSecret, bitgetApiPassword // <<< ĐÃ SỬA LỖI CÚ PHÁP Ở ĐÂY
 } = require('../config.js'); 
 
 // THAY ĐỔI: Chỉ import usdtDepositAddressesByNetwork
@@ -44,7 +44,7 @@ const BOT_PORT = 5006; // Cổng cho Bot UI (khác với cổng của Server ch�
 const SERVER_DATA_URL = 'http://localhost:5005/api/data'; // Địa chỉ Server chính
 
 // ----- CẤU HÌNH BOT -----
-const MIN_PNL_PERCENTAGE = 7; // %PnL tối thiểu để bot xem xét
+const MIN_PNL_PERCENTAGE = 1; // %PnL tối thiểu để bot xem xét
 const MAX_MINUTES_UNTIL_FUNDING = 30; // Trong vòng 30 phút tới sẽ tới giờ funding (để bot tìm cơ hội)
 const MIN_MINUTES_FOR_EXECUTION = 15; // Phải còn ÍT HƠN 15 phút tới funding để bot xem xét thực hiện (theo yêu cầu mới)
 
@@ -88,7 +88,7 @@ activeExchangeIds.forEach(id => {
     if (id === 'binanceusdm') { config.apiKey = binanceApiKey; config.secret = binanceApiSecret; }
     else if (id === 'bingx') { config.apiKey = bingxApiKey; config.secret = bingxApiSecret; } 
     else if (id === 'okx') { config.apiKey = okxApiKey; config.secret = okxApiSecret; if(okxPassword) config.password = okxPassword; }
-    // else if (id === 'bitget') { config.apiKey = bitgetApiKey; config.secret = bitgetApiSecret; if(bitgetApiSecret) config.password = bitgetApiSecret; } // Bitget bị bỏ qua
+    // else if (id === 'bitget') { config.apiKey = bitgetApiKey; config.secret = bitgetApiSecret; if(bitgetApiPassword) config.password = bitgetApiPassword; } // Bitget bị bỏ qua
     
     // Chỉ khởi tạo nếu API Key/Secret tồn tại (không để lỗi nếu người dùng không điền cho sàn không dùng)
     if ((config.apiKey && config.secret) || (id === 'okx' && config.password)) { // OKX cần password
@@ -310,7 +310,7 @@ async function processServerData(serverData) {
             op.details.minutesUntilFunding = minutesUntilFunding; // Gắn thêm minutesUntilFunding vào op.details
 
             // SỬA LỖI TÊN BIẾN FUNDING RATE TỪ SERVER: shortRate -> shortFundingRate, longRate -> longFundingRate
-            op.details.shortFundingRate = op.details.shortRate !== undefined ? op.details.rate : 'N/A'; // Sửa từ op.details.rate
+            op.details.shortFundingRate = op.details.shortRate !== undefined ? op.details.shortRate : 'N/A'; // <<< ĐÃ SỬA LỖI NÀY
             op.details.longFundingRate = op.details.longRate !== undefined ? op.details.longRate : 'N/A';
             op.fundingDiff = op.fundingDiff !== undefined ? op.fundingDiff : 'N/A'; 
             op.commonLeverage = op.commonLeverage !== undefined ? op.commonLeverage : 'N/A';
@@ -922,7 +922,7 @@ async function mainBotLoop() {
                     minutesUntilFunding < MIN_MINUTES_FOR_EXECUTION && // THAY ĐỔI TẠI ĐÂY: Phải ÍT HƠN ngưỡng MIN_MINUTES_FOR_EXECUTION
                     minutesUntilFunding <= MAX_MINUTES_UNTIL_FUNDING) { // Vẫn trong giới hạn chung của MAX_MINUTES_UNTIL_FUNDING
                     
-                    // THAY ĐỔI TẠI ĐÂY: Ưu tiên funding gần nhất, sau đó mới PnL cao nhất
+                    // THAY ĐỔI TẠI ĐÂY: Ưu tiên funding gần nhất, nếu bằng thì PnL cao nhất
                     if (!bestOpportunityFoundForExecution ||
                         minutesUntilFunding < bestOpportunityFoundForExecution.details.minutesUntilFunding || 
                         (minutesUntilFunding === bestOpportunityFoundForExecution.details.minutesUntilFunding && op.estimatedPnl > bestOpportunityFoundForExecution.estimatedPnl) 
