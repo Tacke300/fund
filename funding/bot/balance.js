@@ -10,11 +10,11 @@ module.exports = {
     usdtDepositAddressesByNetwork: {
         binanceusdm: {
             'BEP20': "0x47551181fcc95f8620a58a2f88b700a04f2fe13a", // Địa chỉ USDT BEP20 (BSC) của bạn trên Binance
-            'APTOS': "0xYOUR_BINANCE_USDM_APTOS_DEPOSIT_ADDRESS", // ĐIỀN ĐỊA CHỈ USDT APTOS CỦA BẠN TRÊN BINANCE
+            'APTOS': "0xbc75b1678ae7a99412e0f231a22925c6736fd524ae7364bfe447c7c7d931c424", // ĐIỀN ĐỊA CHỈ USDT APTOS CỦA BẠN TRÊN BINANCE
         },
         bingx: {
             'BEP20': "0xfcafafeaa3a6836efb8fe102a1174ea548096fed",       // Địa chỉ USDT BEP20 (BSC) của bạn trên BingX
-            'APTOS': "0xYOUR_BINGX_APTOS_DEPOSIT_ADDRESS",              // ĐIỀN ĐỊA CHỈ USDT APTOS CỦA BẠN TRÊN BINGX
+            'APTOS': "0x5920a1ade69a57af775210d4f0a50451b7b54cee1f0eb2a62238ffb52a2cf7ea",              // ĐIỀN ĐỊA CHỈ USDT APTOS CỦA BẠN TRÊN BINGX
         },
         okx: {
             'APTOS': "0xbe786adf3d91b03ffe074873e2a3612f002fc69fcbd91764f21418d556bb1aa4", // Địa chỉ USDT APTOS của bạn trên OKX
