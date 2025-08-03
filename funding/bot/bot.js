@@ -1,4 +1,4 @@
-// bot.js - Phiên bản hoàn chỉnh (Đã sửa lỗi cú pháp import, lỗi op.details.rate, thêm debug cho originalSymbol, và cập nhật logic chuyển tiền OKX)
+// bot.js - Phiên bản hoàn chỉnh (Đã sửa lỗi cú pháp import, lỗi op.details.rate, thêm debug cho originalSymbol, và cập nhật logic chuyển tiền OKX cho cả tự động và thủ công)
 
 const http = require('http');
 const https = require('https');
@@ -34,7 +34,7 @@ const {
     binanceApiKey, binanceApiSecret,
     bingxApiKey, bingxApiSecret,
     okxApiKey, okxApiSecret, okxPassword,
-    bitgetApiKey, bitgetApiSecret, bitgetApiPassword // <<< ĐÃ SỬA LỖI CÚ PHÁP Ở ĐÂY
+    bitgetApiKey, bitgetApiSecret, bitgetApiPassword // <<< ĐÃ SỬA LỖI CÚ PHÁP Ở ĐÂY LẠI MỘT LẦN NỮA ĐỂ ĐẢM BẢO
 } = require('../config.js'); 
 
 // THAY ĐỔI: Chỉ import usdtDepositAddressesByNetwork
@@ -44,7 +44,7 @@ const BOT_PORT = 5006; // Cổng cho Bot UI (khác với cổng của Server ch�
 const SERVER_DATA_URL = 'http://localhost:5005/api/data'; // Địa chỉ Server chính
 
 // ----- CẤU HÌNH BOT -----
-const MIN_PNL_PERCENTAGE = 1; // %PnL tối thiểu để bot xem xét
+const MIN_PNL_PERCENTAGE = 7; // %PnL tối thiểu để bot xem xét
 const MAX_MINUTES_UNTIL_FUNDING = 30; // Trong vòng 30 phút tới sẽ tới giờ funding (để bot tìm cơ hội)
 const MIN_MINUTES_FOR_EXECUTION = 15; // Phải còn ÍT HƠN 15 phút tới funding để bot xem xét thực hiện (theo yêu cầu mới)
 
@@ -455,7 +455,7 @@ async function manageFundsAndTransfer(opportunity, percentageToUse) {
                     // THAY ĐỔI: Dùng minTransferAmountForSource
                     if (amountToTransfer >= minTransferAmountForSource) {
                         // BƯỚC MỚI: Chuyển tiền từ Futures sang Spot trên sàn nguồn trước khi rút
-                        // THAY ĐỔI LỚN: Xử lý riêng cho OKX
+                        // THAY ĐỔI LỚN: Xử lý riêng cho OKX (tự động)
                         if (sourceExchangeId === 'okx') {
                             safeLog('log', `[BOT_TRANSFER][INTERNAL] Bỏ qua chuyển từ Futures sang Spot trên OKX theo yêu cầu (cố gắng rút trực tiếp từ Futures).`);
                             // Không làm gì, tiếp tục đến bước rút tiền ngoại sàn
@@ -1089,7 +1089,7 @@ const botServer = http.createServer((req, res) => {
                 const data = body ? JSON.parse(body) : {}; 
                 // Cập nhật biến toàn cục currentPercentageToUse
                 currentPercentageToUse = parseFloat(data.percentageToUse); 
-                if (isNaN(currentPercentageTo100) || currentPercentageToUse < 1 || currentPercentageToUse > 100) {
+                if (isNaN(currentPercentageToUse) || currentPercentageToUse < 1 || currentPercentageToUse > 100) {
                     currentPercentageToUse = 50; // Mặc định nếu UI gửi không hợp lệ
                     safeLog('warn', `Giá trị phần trăm vốn không hợp lệ từ UI, sử dụng mặc định: ${currentPercentageToUse}%`);
                 }
@@ -1162,8 +1162,8 @@ const botServer = http.createServer((req, res) => {
                     const sourceExchange = exchanges[fromExchangeId];
 
                     // BƯỚC MỚI: Chuyển tiền từ Futures sang Spot trên sàn nguồn trước khi rút
-                    // THAY ĐỔI LỚN: Xử lý riêng cho OKX
-                    if (sourceExchangeId === 'okx') {
+                    // THAY ĐỔI LỚN: Xử lý riêng cho OKX (thủ công)
+                    if (fromExchangeId === 'okx') { // Dùng fromExchangeId cho API thủ công
                         safeLog('log', `[BOT_SERVER_TRANSFER][INTERNAL] Bỏ qua chuyển từ Futures sang Spot trên OKX theo yêu cầu (cố gắng rút trực tiếp từ Futures).`);
                         // Không làm gì, tiếp tục đến bước rút tiền ngoại sàn
                     } else {
