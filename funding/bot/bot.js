@@ -46,9 +46,7 @@ const SERVER_DATA_URL = 'http://localhost:5005/api/data'; // Địa chỉ Server
 // ----- CẤU HÌNH BOT -----
 const MIN_PNL_PERCENTAGE = 1; // %PnL tối thiểu để bot xem xét
 const MAX_MINUTES_UNTIL_FUNDING = 30; // Trong vòng 30 phút tới sẽ tới giờ funding (để bot tìm cơ hội)
-const MIN_MINUTES_FOR_EXECUTION = 15; // Phải còn ít nhất 15 phút tới funding để bot xem xét thực hiện
-
-// THAY ĐỔI MỚI: Số tiền tối thiểu cho mỗi lần chuyển tiền theo sàn
+const MIN_MINUTES_FOR_EXECUTION = 15; // Phải còn ÍT HƠN 15 phút tới funding để bot xem xét thực hiện (theo yêu cầu mới)
 const FUND_TRANSFER_MIN_AMOUNT_BINANCE = 10; // $ tối thiểu khi chuyển từ Binance
 const FUND_TRANSFER_MIN_AMOUNT_OTHERS = 5;   // $ tối thiểu khi chuyển từ các sàn khác
 
@@ -483,7 +481,6 @@ async function manageFundsAndTransfer(opportunity, percentageToUse) {
                         
                         // THAY ĐỔI LỚN: Sử dụng polling để chờ tiền về ví Funding HOẶC Spot và sau đó chuyển vào Futures
                         safeLog('log', `[BOT_TRANSFER][EXTERNAL] Bắt đầu chờ tiền về ví Funding/Spot trên ${targetExchangeToFund.toUpperCase()}...`);
-                        // Polling: 60 lần * 5 giây = 300 giây (5 phút). Tăng maxPollAttempts và giảm pollIntervalMs một chút để kiểm tra nhanh hơn nếu cần.
                         const pollResult = await pollForBalance(targetExchangeToFund, amountToTransfer, 60, 5000); 
                         
                         if (!pollResult.found) {
@@ -907,8 +904,9 @@ async function mainBotLoop() {
 
                 // Kiểm tra TẤT CẢ các điều kiện thực thi
                 if (op.estimatedPnl >= MIN_PNL_PERCENTAGE && 
-                    minutesUntilFunding >= MIN_MINUTES_FOR_EXECUTION && 
-                    minutesUntilFunding <= MAX_MINUTES_UNTIL_FUNDING) {
+                    minutesUntilFunding > 0 && // Phải còn trong tương lai
+                    minutesUntilFunding < MIN_MINUTES_FOR_EXECUTION && // THAY ĐỔI TẠI ĐÂY: Phải ÍT HƠN ngưỡng MIN_MINUTES_FOR_EXECUTION
+                    minutesUntilFunding <= MAX_MINUTES_UNTIL_FUNDING) { // Vẫn trong giới hạn chung của MAX_MINUTES_UNTIL_FUNDING
                     
                     // THAY ĐỔI TẠI ĐÂY: Ưu tiên funding gần nhất, sau đó mới PnL cao nhất
                     if (!bestOpportunityFoundForExecution ||
@@ -1176,7 +1174,7 @@ const botServer = http.createServer((req, res) => {
                     
                     // THAY ĐỔI LỚN: Sử dụng polling để chờ tiền về ví Funding HOẶC Spot và sau đó chuyển vào Futures
                     safeLog('log', `[BOT_SERVER_TRANSFER][EXTERNAL] Bắt đầu chờ tiền về ví Funding/Spot trên ${toExchangeId.toUpperCase()}...`);
-                    const pollResult = await pollForBalance(toExchangeId, amount, 60, 5000); // TĂNG CƯỜNG POLLING: 60 lần * 5s = 300s (5 phút)
+                    const pollResult = await pollForBalance(toExchangeId, amount, 60, 5000); 
                     
                     if (!pollResult.found) {
                         safeLog('warn', `[BOT_SERVER_TRANSFER][INTERNAL] Cảnh báo: Tiền (${amount.toFixed(2)} USDT) chưa về đủ ví Funding hoặc Spot trên ${toExchangeId.toUpperCase()} sau khi chờ. Tiền có thể chưa về kịp hoặc nằm ở ví khác. Vui lòng kiểm tra thủ công.`);
