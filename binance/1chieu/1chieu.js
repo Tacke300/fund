@@ -1,3 +1,7 @@
+
+
+
+
 import https from 'https';
 import crypto from 'crypto';
 import express from 'express';
@@ -12,8 +16,8 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // --- CẤU HÌNH API KEY VÀ SECRET KEY (BAN ĐẦU RỖNG) ---
-let API_KEY = '';
-let SECRET_KEY = '';
+let API_KEY = 'cZ1Y2O0kggVEggEaPvhFcYQHS5b1EsT2OWZb8zdY9C0jGqNROvXRZHTJjnQ7OG4Q';
+let SECRET_KEY = 'oU6pZFHgEvbpD9NmFXp5ZVnYFMQ7EIkBiz88aTzvmC3SpT9nEf4fcDf0pEnFzoTc';
 
 // --- BASE URL CỦA BINANCE FUTURES API ---
 const BASE_HOST = 'fapi.binance.com';
@@ -60,8 +64,8 @@ class CriticalApiError extends Error {
 // === END - BIẾN QUẢN LÝ LỖI VÀ TẦN SUẤT LOG ===
 
 // --- CẤU HÌNH BOT CÁC THAM SỐ GIAO DỊC (GIÁ TRỊ MẶC ĐỊNH) ---
-let INITIAL_INVESTMENT_AMOUNT = 1; // Mặc định 1 USDT (sẽ được cập nhật từ UI)
-let TARGET_COIN_SYMBOL = 'ETHUSDT'; // Mặc định ETHUSDT (sẽ được cập nhật từ UI)
+let INITIAL_INVESTMENT_AMOUNT = 0.12; // Mặc định 1 USDT (sẽ được cập nhật từ UI)
+let TARGET_COIN_SYMBOL = 'MYXUSDT'; // Mặc định ETHUSDT (sẽ được cập nhật từ UI)
 let APPLY_DOUBLE_STRATEGY = false; // Mặc định false (sẽ được cập nhật từ UI)
 
 // Cấu hình Take Profit & Stop Loss - Sẽ được tính toán động dựa vào đòn bẩy
