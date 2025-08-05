@@ -150,26 +150,39 @@ function getTargetDepositInfo(fromExchangeId, toExchangeId) {
     return { network: withdrawalNetwork, address: depositAddress };
 }
 
+// START CHANGE: Cập nhật hàm pollForBalance
 async function pollForBalance(exchangeId, targetAmount, maxPollAttempts = 60, pollIntervalMs = 5000) {
     safeLog('log', `[POLL] Bắt đầu kiểm tra số dư trên ${exchangeId.toUpperCase()}. Mục tiêu: ~${targetAmount.toFixed(2)} USDT (có tính phí).`);
     const exchange = exchanges[exchangeId];
-    const DUST_AMOUNT = 0.001;
+    const DUST_AMOUNT = 0.001; // Số tiền tối thiểu để được coi là đã tìm thấy
     let lastKnownBalance = 0;
 
     for (let i = 0; i < maxPollAttempts; i++) {
         try {
-            await exchange.loadMarkets();
+            await exchange.loadMarkets(); // Đảm bảo thị trường được tải
             const fullBalance = await exchange.fetchBalance();
+
             const usdtFundingFreeBalance = fullBalance.funding?.free?.USDT || 0;
             const usdtSpotFreeBalance = fullBalance.spot?.free?.USDT || 0;
+            // Thêm kiểm tra cho balance 'free' tổng quát (nếu có ở cấp cao nhất)
+            const usdtGeneralFreeBalance = fullBalance.free?.USDT || 0; // Kiểm tra thuộc tính 'free' cấp cao nhất như một giải pháp dự phòng
 
-            lastKnownBalance = Math.max(usdtFundingFreeBalance, usdtSpotFreeBalance);
+            // Lấy số dư lớn nhất từ các ví có thể có
+            lastKnownBalance = Math.max(usdtFundingFreeBalance, usdtSpotFreeBalance, usdtGeneralFreeBalance);
 
-            safeLog('log', `[POLL] Lần ${i + 1}/${maxPollAttempts}: ${exchangeId.toUpperCase()} - Funding: ${usdtFundingFreeBalance.toFixed(8)}, Spot: ${usdtSpotFreeBalance.toFixed(8)}. Tổng: ${lastKnownBalance.toFixed(8)}`);
+            safeLog('log', `[POLL] Lần ${i + 1}/${maxPollAttempts}: ${exchangeId.toUpperCase()} - Funding: ${usdtFundingFreeBalance.toFixed(8)}, Spot: ${usdtSpotFreeBalance.toFixed(8)}, General Free: ${usdtGeneralFreeBalance.toFixed(8)}. Tổng: ${lastKnownBalance.toFixed(8)}`);
 
             if (lastKnownBalance >= DUST_AMOUNT) {
                 safeLog('log', `[POLL] ✅ Tiền (~${lastKnownBalance.toFixed(2)} USDT) đã được tìm thấy trên ${exchangeId.toUpperCase()}.`);
-                const type = usdtFundingFreeBalance >= DUST_AMOUNT ? 'funding' : 'spot';
+                let type = 'spot'; // Mặc định là 'spot'
+                if (usdtFundingFreeBalance >= DUST_AMOUNT) {
+                    type = 'funding';
+                } else if (usdtGeneralFreeBalance >= DUST_AMOUNT && exchangeId === 'bingx') {
+                    // Đối với BingX, nếu tìm thấy số dư ở ví tổng hợp, giả định nó là ví 'spot' cho mục đích chuyển nội bộ.
+                    // Điều này có thể cần tinh chỉnh dựa trên hành vi API chính xác của BingX.
+                    type = 'spot';
+                    safeLog('log', `[POLL] BingX: Phát hiện tiền trong ví tổng hợp. Sử dụng type 'spot' cho chuyển nội bộ.`);
+                }
                 return { found: true, type: type, balance: lastKnownBalance };
             }
 
@@ -181,6 +194,7 @@ async function pollForBalance(exchangeId, targetAmount, maxPollAttempts = 60, po
     safeLog('warn', `[POLL] Tiền (~${targetAmount.toFixed(2)} USDT) không được tìm thấy trên ${exchangeId.toUpperCase()} sau ${maxPollAttempts * pollIntervalMs / 1000} giây.`);
     return { found: false, type: null, balance: 0 };
 }
+// END CHANGE
 
 async function fetchDataFromServer() {
     try {
