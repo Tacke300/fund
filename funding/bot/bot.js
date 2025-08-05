@@ -213,7 +213,8 @@ async function pollForBalance(exchangeId, targetAmount, maxPollAttempts = 60, po
                     safeLog('log', `[POLL] BingX: Tiền đã được tìm thấy TRỰC TIẾP trong ví linear_swap (Futures).`);
                 } else if (usdtGeneralFreeBalance >= DUST_AMOUNT) {
                     // Fallback cho 'free' cấp cao nhất, thường là funding hoặc spot
-                    type = (exchangeId === 'bingx') ? 'spot' : 'funding'; // BingX cần chuyển qua funding
+                    // Đối với BingX, nếu tiền ở ví tổng hợp và cần rút, 'spot' là lựa chọn tốt.
+                    type = (exchangeId === 'bingx') ? 'spot' : 'funding'; 
                     safeLog('log', `[POLL] Phát hiện tiền trong ví tổng hợp. Sử dụng type '${type}' cho chuyển nội bộ.`);
                 }
                 
@@ -465,7 +466,7 @@ async function manageFundsAndTransfer(opportunity, percentageToUse) {
 
                         if (sourceExchangeId === 'bingx') {
                             sourceInternalAccount = 'linear_swap'; // Dùng 'linear_swap' cho ví Futures của BingX
-                            targetInternalAccount = 'funding';      // FIX: Chuyển từ 'spot' sang 'funding' cho BingX
+                            targetInternalAccount = 'spot';      // FIX: Chuyển từ 'linear_swap' sang 'spot' cho BingX
                         } else if (sourceExchangeId === 'okx') {
                             // Giữ OKX như trước (rút trực tiếp từ Futures)
                             internalTransferNeeded = false;
@@ -513,9 +514,8 @@ async function manageFundsAndTransfer(opportunity, percentageToUse) {
                         const { network: withdrawalNetwork, address: depositAddress } = targetDepositInfo;
 
                         let withdrawParams = {};
-                        // Polygon (Matic) thường có phí thấp và CCXT thường xử lý tự động.
-                        // Nếu có lỗi "fee" từ sàn, bạn có thể cần thêm withdrawParams.fee ở đây
-                        // Ví dụ: if (withdrawalNetwork === 'POLYGON') { withdrawParams.fee = '0.001'; }
+                        // Xóa các tham số phí cứng. CCXT thường xử lý phí tự động.
+                        // Nếu có lỗi "fee" cụ thể từ sàn, có thể cần thêm lại một cách có điều kiện.
 
                         safeLog('log', `[BOT_TRANSFER][EXTERNAL] Đang cố gắng rút ${amountToTransfer.toFixed(2)} USDT từ ${sourceExchangeId} sang ${targetExchangeToFund} (${depositAddress}) qua mạng ${withdrawalNetwork} với params: ${JSON.stringify(withdrawParams)}...`);
                         try {
@@ -1116,7 +1116,7 @@ const botServer = http.createServer((req, res) => {
 
                     if (fromExchangeId === 'bingx') {
                         sourceInternalAccount = 'linear_swap'; // Dùng 'linear_swap' cho ví Futures của BingX
-                        targetInternalAccount = 'funding';      // FIX: Chuyển từ 'spot' sang 'funding' cho BingX
+                        targetInternalAccount = 'spot';      // FIX: Chuyển từ 'linear_swap' sang 'spot' cho BingX
                     } else if (fromExchangeId === 'okx') {
                         internalTransferNeeded = false; // OKX được thiết kế để rút trực tiếp từ Futures
                         safeLog('log', `[BOT_SERVER_TRANSFER][INTERNAL] OKX: Cố gắng rút trực tiếp từ Futures (không chuyển nội bộ trước).`);
@@ -1156,11 +1156,8 @@ const botServer = http.createServer((req, res) => {
                     }
 
                     let withdrawParams = {};
-                    // CCXT thường xử lý phí cho POLYGON/TON tự động, nhưng nếu có lỗi 'fee' từ API, có thể cần thêm:
-                    // Ví dụ:
-                    // if (withdrawalNetwork === 'POLYGON' || withdrawalNetwork === 'TON') {
-                    //     withdrawParams.fee = '0.001'; // Ước tính phí
-                    // }
+                    // Loại bỏ tham số phí cứng. Để CCXT tự động xác định phí.
+                    // Nếu sau này có lỗi phí, có thể cần thêm lại một cách có điều kiện.
 
                     const withdrawResult = await exchanges[fromExchangeId].withdraw(
                         'USDT',
@@ -1216,8 +1213,8 @@ const botServer = http.createServer((req, res) => {
                     let userMessage = `Lỗi khi chuyển tiền: ${transferError.message}`;
                     if (transferError.message.includes('Insufficient funds')) {
                         userMessage = `Số dư khả dụng trên ${fromExchangeId.toUpperCase()} không đủ. Vui lòng kiểm tra lại số dư hoặc quyền API.`;
-                    } else if (transferError.message.includes('API key permission') || transferError.message.includes('permission denied')) {
-                        userMessage = `Lỗi quyền API: Kiểm tra quyền RÚT TIỀN (Withdrawal permission) của API Key trên ${fromExchangeId.toUpperCase()}.`;
+                    } else if (transferError.message.includes('API key permission') || transferError.message.includes('permission denied') || transferError.message.includes('-4019')) {
+                        userMessage = `Lỗi quyền API hoặc mạng rút tiền không khả dụng: Kiểm tra quyền RÚT TIỀN (Withdrawal permission) của API Key trên ${fromExchangeId.toUpperCase()} cho mạng ${withdrawalNetwork}. Đảm bảo mạng đang hoạt động bình thường trên sàn.`;
                     } else if (transferError.message.includes('Invalid network') || transferError.message.includes('Invalid address') || transferError.message.includes('chainName error')) {
                         userMessage = `Lỗi mạng hoặc địa chỉ: Đảm bảo sàn ${toExchangeId.toUpperCase()} hỗ trợ mạng ${withdrawalNetwork} và địa chỉ nạp tiền trong balance.js là HỢP LỆ. Vui lòng kiểm tra lại.`;
                     } else if (transferError.message.includes('fee')) {
