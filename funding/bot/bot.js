@@ -208,6 +208,7 @@ async function updateBalances() {
             const exchange = exchanges[id];
             await exchange.loadMarkets(true);
 
+            // Fetch futures balance for trading
             const accountBalance = await exchange.fetchBalance({ 'type': 'future' });
             const usdtFreeBalance = accountBalance.free?.USDT || 0;
             const usdtTotalBalance = accountBalance.total?.USDT || 0;
@@ -295,6 +296,7 @@ async function processServerData(serverData) {
     }
 }
 
+// Hàm giúp tìm symbol đầy đủ của sàn từ tên coin "gọn"
 function findExchangeSymbol(exchangeId, baseCoin, quoteCoin, rawRates) {
     const exchangeRates = rawRates[exchangeId]?.rates;
     if (!exchangeRates) {
@@ -303,10 +305,10 @@ function findExchangeSymbol(exchangeId, baseCoin, quoteCoin, rawRates) {
     }
 
     const commonFormats = [
-        `${baseCoin}/${quoteCoin}`,
-        `${baseCoin}-${quoteCoin}-SWAP`,
-        `${baseCoin}${quoteCoin}`,
-        `${baseCoin}_${quoteCoin}`,
+        `${baseCoin}/${quoteCoin}`,         // Ví dụ: BTC/USDT (Binance, BingX)
+        `${baseCoin}-${quoteCoin}-SWAP`,    // Ví dụ: BTC-USDT-SWAP (OKX)
+        `${baseCoin}${quoteCoin}`,          // Ví dụ: BTCUSDT (một số định dạng khác)
+        `${baseCoin}_${quoteCoin}`,         // Ví dụ: BTC_USDT (một số sàn khác)
     ];
 
     for (const format of commonFormats) {
@@ -407,9 +409,10 @@ async function manageFundsAndTransfer(opportunity, percentageToUse) {
 
                     if (amountToTransfer >= minTransferAmountForSource) {
                         // Cập nhật logic: OKX và BingX rút thẳng từ Futures
-                        if (sourceExchangeId === 'okx' || sourceExchangeId === 'bingx') { // Thêm BingX vào đây
+                        if (sourceExchangeId === 'okx' || sourceExchangeId === 'bingx') {
                             safeLog('log', `[BOT_TRANSFER][INTERNAL] Bỏ qua chuyển từ Futures sang Funding/Spot trên ${sourceExchangeId.toUpperCase()} theo yêu cầu (cố gắng rút trực tiếp từ Futures).`);
                             // Lưu ý: Lỗi "Adjust your position structure..." (58123) có thể xảy ra cho OKX nếu có vị thế mở.
+                            // CCXT thường tự kiểm tra số dư khi rút tiền, nếu không đủ sẽ báo lỗi.
                         } else {
                             // Logic hiện tại cho Binance (Futures -> Spot)
                             try {
@@ -438,8 +441,11 @@ async function manageFundsAndTransfer(opportunity, percentageToUse) {
                             withdrawParams.fee = '0';
                             safeLog('log', `[BOT_TRANSFER][EXTERNAL] Mạng ${withdrawalNetwork} (BEP20) không mất phí, đặt phí = 0.`);
                         } else if (withdrawalNetwork === 'APTOS') {
-                            safeLog('log', `[BOT_TRANSFER][EXTERNAL] Mạng ${withdrawalNetwork} (APTOS) có phí, để CCXT tự động xử lý phí.`);
-                            // Không thêm tham số fee, để CCXT/sàn tự động tính phí
+                            // Lỗi OKX: "requires a fee string parameter". Dù APTOS có phí, OKX cần tham số 'fee'.
+                            // Giá trị phải là số dương cho chuyển ngoại, hoặc '0' cho chuyển nội.
+                            // Đặt một phí nhỏ mặc định.
+                            withdrawParams.fee = '0.001'; // <-- THAY ĐỔI QUAN TRỌNG ĐỂ KHẮC PHỤC LỖI PHÍ OKX APTOS
+                            safeLog('log', `[BOT_TRANSFER][EXTERNAL] Mạng ${withdrawalNetwork} (APTOS) có phí. Đặt phí ước tính = ${withdrawParams.fee}.`);
                         }
 
                         safeLog('log', `[BOT_TRANSFER][EXTERNAL] Đang cố gắng rút ${amountToTransfer.toFixed(2)} USDT từ ${sourceExchangeId} sang ${targetExchangeToFund} (${depositAddress}) qua mạng ${withdrawalNetwork} với params: ${JSON.stringify(withdrawParams)}...`);
@@ -462,11 +468,11 @@ async function manageFundsAndTransfer(opportunity, percentageToUse) {
                                     let toAccountType = 'future'; // Mặc định cho hầu hết các sàn
 
                                     // Cập nhật logic: Chuyển tiền vào ví Futures (linear_swap) của BingX
-                                    if (targetExchangeToFund === 'bingx') {
+                                    if (toExchangeId === 'bingx') {
                                         toAccountType = 'linear_swap'; // Tên ví Futures của BingX trong CCXT
-                                        safeLog('log', `[BOT_TRANSFER][INTERNAL] BingX được nhận tiền. Đang chuyển ${pollResult.balance.toFixed(2)} USDT từ ví ${pollResult.type.toUpperCase()} sang ví linear_swap (Futures) trên ${targetExchangeToFund.toUpperCase()}...`);
+                                        safeLog('log', `[BOT_TRANSFER][INTERNAL] BingX được nhận tiền. Đang chuyển ${pollResult.balance.toFixed(2)} USDT từ ví ${pollResult.type.toUpperCase()} sang ví linear_swap (Futures) trên ${toExchangeId.toUpperCase()}...`);
                                     } else {
-                                        safeLog('log', `[BOT_TRANSFER][INTERNAL] Đang chuyển ${pollResult.balance.toFixed(2)} USDT từ ví ${pollResult.type.toUpperCase()} sang ví Futures trên ${targetExchangeToFund.toUpperCase()}... (Đã nhận ~${pollResult.balance.toFixed(2)} USDT)`);
+                                        safeLog('log', `[BOT_TRANSFER][INTERNAL] Đang chuyển ${pollResult.balance.toFixed(2)} USDT từ ví ${pollResult.type.toUpperCase()} sang ví Futures trên ${toExchangeId.toUpperCase()}... (Đã nhận ~${pollResult.balance.toFixed(2)} USDT)`);
                                     }
 
                                     await targetExchange.transfer(
@@ -1004,7 +1010,7 @@ const botServer = http.createServer((req, res) => {
 
                 if (!fromExchangeId || !toExchangeId || !amount || isNaN(amount) || amount < minTransferAmount) {
                     res.writeHead(400, { 'Content-Type': 'application/json' });
-                    res.end(JSON.stringify({ success: false, message: `Dữ liệu chuyển tiền không hợp lệ. Số tiền tối thiểu từ ${fromExchangeId.toUpperCase()} là ${minTransferAmount} USDT.` }));
+                    res.end(JSON.stringify({ success: false, message: `Dữ liệu chuyển tiền không hợp lệ. Số tiền tối thiểu từ ${fromExchangeId?.toUpperCase() || ''} là ${minTransferAmount} USDT.` }));
                     return;
                 }
                 if (fromExchangeId === toExchangeId) {
@@ -1032,14 +1038,31 @@ const botServer = http.createServer((req, res) => {
                 try {
                     const sourceExchange = exchanges[fromExchangeId];
 
-                    // Cập nhật logic: OKX và BingX rút thẳng từ Futures (Trading account)
-                    if (fromExchangeId === 'okx' || fromExchangeId === 'bingx') { // THÊM BINGX VÀO ĐIỀU KIỆN NÀY
+                    // Cập nhật logic: OKX và BingX rút thẳng từ Futures
+                    if (fromExchangeId === 'okx' || fromExchangeId === 'bingx') {
                         safeLog('log', `[BOT_SERVER_TRANSFER][INTERNAL] Bỏ qua chuyển từ Futures sang Funding/Spot trên ${fromExchangeId.toUpperCase()} theo yêu cầu (cố gắng rút trực tiếp từ Futures).`);
+                        // Kiểm tra số dư trước khi rút nếu không có bước chuyển nội bộ riêng
+                        const sourceFuturesBalance = await sourceExchange.fetchBalance({'type': 'future'});
+                        const usdtFutureFreeBalance = sourceFuturesBalance.free?.USDT || 0;
+                        if (usdtFutureFreeBalance < amount) {
+                            res.writeHead(400, { 'Content-Type': 'application/json' });
+                            res.end(JSON.stringify({ success: false, message: `Số dư khả dụng trong ví Futures của ${fromExchangeId.toUpperCase()} (${usdtFutureFreeBalance.toFixed(2)} USDT) không đủ để rút ${amount} USDT.` }));
+                            return;
+                        }
                     } else {
                         // Logic hiện tại cho Binance (Futures -> Spot)
                         try {
+                            // Cần kiểm tra số dư trước khi chuyển internal transfer
                             await sourceExchange.loadMarkets(true);
-                            const sourceFuturesBalance = await sourceExchange.transfer('USDT', amount, 'future', 'spot'); // Thay đổi ở đây, sử dụng transfer để kiểm tra số dư và chuyển
+                            const sourceFuturesBalance = await sourceExchange.fetchBalance({'type': 'future'});
+                            const usdtFutureFreeBalance = sourceFuturesBalance.free?.USDT || 0;
+                            if (usdtFutureFreeBalance < amount) {
+                                res.writeHead(400, { 'Content-Type': 'application/json' });
+                                res.end(JSON.stringify({ success: false, message: `Số dư khả dụng trong ví Futures của ${fromExchangeId.toUpperCase()} (${usdtFutureFreeBalance.toFixed(2)} USDT) không đủ để chuyển ${amount} USDT.` }));
+                                return;
+                            }
+                            safeLog('log', `[BOT_SERVER_TRANSFER][INTERNAL] Đang chuyển ${amount} USDT từ ví Futures sang ví Spot trên ${fromExchangeId.toUpperCase()}...`);
+                            await sourceExchange.transfer('USDT', amount, 'future', 'spot');
                             safeLog('log', `[BOT_SERVER_TRANSFER][INTERNAL] ✅ Đã chuyển ${amount} USDT từ Futures sang Spot trên ${fromExchangeId.toUpperCase()}.`);
                             await sleep(5000);
                         } catch (internalTransferError) {
@@ -1055,7 +1078,8 @@ const botServer = http.createServer((req, res) => {
                         withdrawParams.fee = '0';
                         safeLog('log', `[BOT_SERVER_TRANSFER][EXTERNAL] Mạng ${withdrawalNetwork} (BEP20) không mất phí, đặt phí = 0.`);
                     } else if (withdrawalNetwork === 'APTOS') {
-                        safeLog('log', `[BOT_SERVER_TRANSFER][EXTERNAL] Mạng ${withdrawalNetwork} (APTOS) có phí, để CCXT tự động xử lý phí.`);
+                        withdrawParams.fee = '0.001'; // Đặt phí mặc định cho APTOS (vì OKX yêu cầu và bạn nói có phí)
+                        safeLog('log', `[BOT_SERVER_TRANSFER][EXTERNAL] Mạng ${withdrawalNetwork} (APTOS) có phí. Đặt phí ước tính = ${withdrawParams.fee}.`);
                     }
 
                     const withdrawResult = await exchanges[fromExchangeId].withdraw(
@@ -1079,9 +1103,9 @@ const botServer = http.createServer((req, res) => {
                             const targetExchange = exchanges[toExchangeId];
                             let toAccountType = 'future';
 
-                            // Cập nhật logic: Chuyển tiền vào ví Futures (linear_swap) của BingX nếu là BingX
-                            if (toExchangeId === 'bingx') { // LƯU Ý: TOÀN BỘ LOGIC NÀY LÀ MỚI THÊM VÀO
-                                toAccountType = 'linear_swap'; // Tên ví Futures của BingX trong CCXT
+                            // Chuyển tiền vào ví Futures (linear_swap) của BingX nếu là BingX
+                            if (toExchangeId === 'bingx') {
+                                toAccountType = 'linear_swap';
                                 safeLog('log', `[BOT_SERVER_TRANSFER][INTERNAL] BingX được nhận tiền. Đang chuyển ${pollResult.balance.toFixed(2)} USDT từ ví ${pollResult.type.toUpperCase()} sang ví linear_swap (Futures) trên ${toExchangeId.toUpperCase()}...`);
                             } else {
                                 safeLog('log', `[BOT_SERVER_TRANSFER][INTERNAL] Đang chuyển ${pollResult.balance.toFixed(2)} USDT từ ví ${pollResult.type.toUpperCase()} sang ví Futures trên ${toExchangeId.toUpperCase()}... (Đã nhận ~${pollResult.balance.toFixed(2)} USDT)`);
