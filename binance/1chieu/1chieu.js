@@ -800,19 +800,19 @@ async function openPosition(symbol, tradeDirection, usdtBalance, maxLeverage) {
         let STOP_LOSS_PERCENTAGE;
 
         if (maxLeverage <= 25) {
-            TAKE_PROFIT_PERCENTAGE = 1.60; // 160%
-            STOP_LOSS_PERCENTAGE = 0.80;   // 80%
+            TAKE_PROFIT_PERCENTAGE = 3.5; // 160%
+            STOP_LOSS_PERCENTAGE = 1.6;   // 80%
         } else if (maxLeverage === 50) {
-            TAKE_PROFIT_PERCENTAGE = 3.50; // 350%
-            STOP_LOSS_PERCENTAGE = 1.60;   // 160%
+            TAKE_PROFIT_PERCENTAGE = 5.5; // 350%
+            STOP_LOSS_PERCENTAGE = 2.5;   // 160%
         } else if (maxLeverage >= 75) {
-            TAKE_PROFIT_PERCENTAGE = 5.15; // 515%
-            STOP_LOSS_PERCENTAGE = 2.40;   // 240%
+            TAKE_PROFIT_PERCENTAGE = 10.1; // 515%
+            STOP_LOSS_PERCENTAGE = 5;   // 240%
         } else {
             // Giá trị mặc định hoặc xử lý lỗi nếu đòn bẩy không khớp
             addLog(`Cảnh báo: maxLeverage ${maxLeverage} không khớp với các quy tắc TP/SL. Sử dụng mặc định (TP 160%, SL 80%).`);
-            TAKE_PROFIT_PERCENTAGE = 1.60;
-            STOP_LOSS_PERCENTAGE = 0.80;
+            TAKE_PROFIT_PERCENTAGE = 5.5;
+            STOP_LOSS_PERCENTAGE = 2.5;
         }
         
         const profitTargetUSDT = capitalToUse * TAKE_PROFIT_PERCENTAGE;
