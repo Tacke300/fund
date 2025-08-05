@@ -4,28 +4,25 @@ module.exports = {
     // LƯU Ý QUAN TRỌNG:
     // 1. Bạn PHẢI THAY THẾ bằng địa chỉ VÍ USDT THẬT SỰ CỦA CHÍNH BẠN trên từng sàn và từng mạng.
     //    Nếu bạn không thay thế, bot sẽ báo lỗi và không thể chuyển tiền.
-    // 2. Đảm bảo mạng lưới bạn chọn khớp với địa chỉ bạn cung cấp (ví dụ: BEP20 cho BSC, APTOS cho Aptos).
+    // 2. Đảm bảo mạng lưới bạn chọn khớp với địa chỉ bạn cung cấp.
     // 3. SAI ĐỊA CHỈ VÍ HOẶC MẠNG LƯỚI CÓ THỂ KHIẾN BẠN MẤT TIỀN VĨNH VIỄN!
     // 4. Luôn kiểm tra kỹ trên ứng dụng/website của sàn để lấy đúng địa chỉ nạp tiền.
     usdtDepositAddressesByNetwork: {
         binanceusdm: {
             'BEP20': "0x47551181fcc95f8620a58a2f88b700a04f2fe13a", // Địa chỉ USDT BEP20 (BSC) của bạn trên Binance
-            'APTOS': "0xbc75b1678ae7a99412e0f231a22925c6736fd524ae7364bfe447c7c7d931c424", // ĐIỀN ĐỊA CHỈ USDT APTOS CỦA BẠN TRÊN BINANCE
+            'ARBITRUM': "0xYOUR_BINANCE_ARBITRUM_DEPOSIT_ADDRESS", // ĐIỀN ĐỊA CHỈ USDT ARBITRUM CỦA BẠN TRÊN BINANCE
+            // Mạng APTOS đã được loại bỏ cho Binance theo yêu cầu mới.
         },
         bingx: {
             'BEP20': "0xfcafafeaa3a6836efb8fe102a1174ea548096fed",       // Địa chỉ USDT BEP20 (BSC) của bạn trên BingX
-            'APTOS': "0x5920a1ade69a57af775210d4f0a50451b7b54cee1f0eb2a62238ffb52a2cf7ea",              // ĐIỀN ĐỊA CHỈ USDT APTOS CỦA BẠN TRÊN BINGX
+            'TON': "0xYOUR_BINGX_TON_DEPOSIT_ADDRESS",              // ĐIỀN ĐỊA CHỈ USDT TON CỦA BẠN TRÊN BINGX
+            // Mạng APTOS đã được loại bỏ cho BingX theo yêu cầu mới.
         },
         okx: {
-            'APTOS': "0xbe786adf3d91b03ffe074873e2a3612f002fc69fcbd91764f21418d556bb1aa4", // Địa chỉ USDT APTOS của bạn trên OKX
-            // OKX sẽ chỉ sử dụng Aptos. Nếu bạn muốn nó nhận BEP20, bạn cần thêm địa chỉ BEP20 tại đây.
-            // Để tuân thủ yêu cầu "OKX chỉ dùng mạng aptos để gửi và nhận", chúng ta không thêm BEP20 ở đây.
+            // "OKX k có bep20. => bỏ aptos" - OKX sẽ không sử dụng BEP20 hoặc APTOS.
+            'TON': "0xYOUR_OKX_TON_DEPOSIT_ADDRESS", // ĐIỀN ĐỊA CHỈ USDT TON CỦA BẠN TRÊN OKX
+            'ARBITRUM': "0xYOUR_OKX_ARBITRUM_DEPOSIT_ADDRESS", // ĐIỀN ĐỊA CHỈ USDT ARBITRUM CỦA BẠN TRÊN OKX
         },
-        bitget: {
-            'BEP20': "0xb8d6e57971ea23c02956c6ea2e342df6cc13e2d9",     // Địa chỉ USDT BEP20 (BSC) của bạn trên Bitget
-            'APTOS': "0xYOUR_BITGET_APTOS_DEPOSIT_ADDRESS",            // ĐIỀN ĐỊA CHỈ USDT APTOS CỦA BẠN TRÊN BITGET
-        }
+        
     },
-    // Chúng ta không cần 'preferredWithdrawalNetworks' nữa vì logic chọn mạng sẽ được xử lý động trong bot.js
-    // dựa trên cặp sàn gửi/nhận.
 };
