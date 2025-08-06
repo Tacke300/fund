@@ -568,9 +568,9 @@ async function closeTradesAndCalculatePnL() {
 
 let serverDataGlobal = null;
 
-// HÀM QUAN TRỌNG: ĐẢM BẢO HÀM NÀY ĐƯỢC KHAI BÁO LÀ 'async'
+// ĐÂY LÀ HÀM CẦN ĐƯỢC KHAI BÁO LÀ 'async'
 async function mainBotLoop() { 
-    safeLog('debug', '[MAIN_BOT_LOOP] Entering async mainBotLoop (version 2024-07-31).'); // Log để xác nhận phiên bản này đang chạy
+    safeLog('debug', '[MAIN_BOT_LOOP] Entering async mainBotLoop (version 2024-07-31 confirmed).'); // Log để xác nhận phiên bản này đang chạy
     
     if (botLoopIntervalId) clearTimeout(botLoopIntervalId);
 
@@ -662,6 +662,8 @@ async function mainBotLoop() {
         }
     }
 
+    // Dòng này là dòng gây lỗi nếu hàm mainBotLoop không phải là async
+    // VÌ HÀM NÀY ĐÃ LÀ ASYNC, DÒNG NÀY SẼ HỢP LỆ.
     if (currentMinute === 0 && currentSecond >= 5 && currentSecond < 10 && botState === 'RUNNING' && currentTradeDetails?.status === 'OPEN') {
         if (LAST_ACTION_TIMESTAMP.closeTrade !== minuteAligned) {
             LAST_ACTION_TIMESTAMP.closeTrade = minuteAligned;
