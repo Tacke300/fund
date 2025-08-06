@@ -568,7 +568,7 @@ async function closeTradesAndCalculatePnL() {
 
 let serverDataGlobal = null;
 
-async function mainBotLoop() { // MARKED AS ASYNC
+async function mainBotLoop() { // ĐÃ ĐÁNH DẤU LÀ ASYNC
     if (botLoopIntervalId) clearTimeout(botLoopIntervalId);
 
     // Đã loại bỏ các trạng thái TRANSFERRING_FUNDS khỏi điều kiện dừng chung
@@ -665,7 +665,7 @@ async function mainBotLoop() { // MARKED AS ASYNC
 
             safeLog('log', '[BOT_LOOP] 🛑 Kích hoạt đóng lệnh và tính PnL vào phút 00:05.');
             botState = 'CLOSING_TRADES'; // Vẫn giữ trạng thái này để UI cập nhật và theo dõi
-            await closeTradesAndCalculatePnL(); // NOW AWAIT IS VALID
+            await closeTradesAndCalculatePnL(); 
             botState = 'RUNNING'; // Trả về RUNNING sau khi thực hiện xong
         }
     }
