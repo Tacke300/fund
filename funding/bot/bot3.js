@@ -297,21 +297,26 @@ async function executeTrades(opportunity, percentageToUse) {
 
         // Set leverage first for the symbols
         try {
-            // Check if setLeverage requires 'side' argument (e.g., BingX)
+            // BingX requires 'side' in params for setLeverage in Hedge Mode
             if (shortExchange.has['setLeverage'] && shortExchangeId === 'bingx') {
-                await shortExchange.setLeverage(shortOriginalSymbol, commonLeverage, { 'side': 'SHORT' }); // Đã sửa
-            } else if (shortExchange.has['setLeverage']) {
-                await shortExchange.setLeverage(shortOriginalSymbol, commonLeverage); // Đã sửa
+                await shortExchange.setLeverage(shortOriginalSymbol, commonLeverage, { 'side': 'SHORT' });
+            } 
+            // BinanceUSDM fix: correct argument order
+            else if (shortExchange.has['setLeverage']) {
+                await shortExchange.setLeverage(shortOriginalSymbol, commonLeverage);
             }
             safeLog('log', `[BOT_TRADE] ✅ Đặt đòn bẩy x${commonLeverage} cho SHORT ${shortOriginalSymbol} trên ${shortExchangeId}.`);
         } catch (levErr) {
             safeLog('warn', `[BOT_TRADE] ⚠️ Lỗi đặt đòn bẩy cho SHORT ${shortOriginalSymbol} trên ${shortExchangeId}: ${levErr.message}. Tiếp tục mà không đảm bảo đòn bẩy.`, levErr);
         }
         try {
+            // BingX requires 'side' in params for setLeverage in Hedge Mode
             if (longExchange.has['setLeverage'] && longExchangeId === 'bingx') {
-                await longExchange.setLeverage(longOriginalSymbol, commonLeverage, { 'side': 'LONG' }); // Đã sửa
-            } else if (longExchange.has['setLeverage']) {
-                await longExchange.setLeverage(longOriginalSymbol, commonLeverage); // Đã sửa
+                await longExchange.setLeverage(longOriginalSymbol, commonLeverage, { 'side': 'LONG' });
+            } 
+            // BinanceUSDM fix: correct argument order
+            else if (longExchange.has['setLeverage']) {
+                await longExchange.setLeverage(longOriginalSymbol, commonLeverage);
             }
             safeLog('log', `[BOT_TRADE] ✅ Đặt đòn bẩy x${commonLeverage} cho LONG ${longOriginalSymbol} trên ${longExchangeId}.`);
         } catch (levErr) {
@@ -338,16 +343,27 @@ async function executeTrades(opportunity, percentageToUse) {
         const shortAmountToOrder = shortExchange.amountToPrecision(shortOriginalSymbol, shortAmount);
         const longAmountToOrder = longExchange.amountToPrecision(longOriginalSymbol, longAmount);
 
-        // Define common parameters for orders, including positionSide for BingX
-        const shortParams = shortExchangeId === 'bingx' ? { 'positionSide': 'SHORT' } : {};
-        const longParams = longExchangeId === 'bingx' ? { 'positionSide': 'LONG' } : {};
+        // Define common parameters for orders, including positionSide for BingX and BinanceUSDM
+        const shortParams = {};
+        if (shortExchangeId === 'bingx') {
+            shortParams.positionSide = 'SHORT';
+        } else if (shortExchangeId === 'binanceusdm') { // FIX: Add positionSide for BinanceUSDM Hedge Mode
+            shortParams.positionSide = 'SHORT';
+        }
+        
+        const longParams = {};
+        if (longExchangeId === 'bingx') {
+            longParams.positionSide = 'LONG';
+        } else if (longExchangeId === 'binanceusdm') { // FIX: Add positionSide for BinanceUSDM Hedge Mode
+            longParams.positionSide = 'LONG';
+        }
 
         safeLog('log', `[BOT_TRADE] Mở SHORT ${shortAmountToOrder} ${shortOriginalSymbol} trên ${shortExchangeId} với giá ${shortEntryPrice.toFixed(4)}...`);
-        shortOrder = await shortExchange.createMarketSellOrder(shortOriginalSymbol, parseFloat(shortAmountToOrder), shortParams); // Add params
+        shortOrder = await shortExchange.createMarketSellOrder(shortOriginalSymbol, parseFloat(shortAmountToOrder), shortParams);
         safeLog('log', `[BOT_TRADE] ✅ Lệnh SHORT ${shortExchangeId} khớp: ID ${shortOrder.id}, Amount ${shortOrder.amount}, Price ${shortOrder.price}`);
 
         safeLog('log', `[BOT_TRADE] Mở LONG ${longAmountToOrder} ${longOriginalSymbol} trên ${longExchangeId} với giá ${longEntryPrice.toFixed(4)}...`);
-        longOrder = await longExchange.createMarketBuyOrder(longOriginalSymbol, parseFloat(longAmountToOrder), longParams); // Add params
+        longOrder = await longExchange.createMarketBuyOrder(longOriginalSymbol, parseFloat(longAmountToOrder), longParams);
         safeLog('log', `[BOT_TRADE] ✅ Lệnh LONG ${longExchangeId} khớp: ID ${longOrder.id}, Amount ${longOrder.amount}, Price ${longOrder.price}`);
 
         safeLog('log', `[BOT_TRADE] Setting currentTradeDetails for ${cleanedCoin} on ${shortExchangeId}/${longExchangeId}`);
@@ -399,7 +415,8 @@ async function executeTrades(opportunity, percentageToUse) {
         // Đặt TP/SL cho vị thế SHORT
         try {
             const shortTpSlParams = { 'reduceOnly': true };
-            if (shortExchangeId === 'bingx') shortTpSlParams.positionSide = 'SHORT'; // Add positionSide for BingX
+            if (shortExchangeId === 'bingx') shortTpSlParams.positionSide = 'SHORT';
+            else if (shortExchangeId === 'binanceusdm') shortTpSlParams.positionSide = 'SHORT'; // FIX: Add positionSide for BinanceUSDM TP/SL
             
             await shortExchange.createOrder(
                 shortOriginalSymbol,
@@ -416,7 +433,8 @@ async function executeTrades(opportunity, percentageToUse) {
 
         try {
             const shortTpSlParams = { 'reduceOnly': true };
-            if (shortExchangeId === 'bingx') shortTpSlParams.positionSide = 'SHORT'; // Add positionSide for BingX
+            if (shortExchangeId === 'bingx') shortTpSlParams.positionSide = 'SHORT';
+            else if (shortExchangeId === 'binanceusdm') shortTpSlParams.positionSide = 'SHORT'; // FIX: Add positionSide for BinanceUSDM TP/SL
 
             await shortExchange.createOrder(
                 shortOriginalSymbol,
@@ -434,7 +452,8 @@ async function executeTrades(opportunity, percentageToUse) {
         // Đặt TP/SL cho vị thế LONG
         try {
             const longTpSlParams = { 'reduceOnly': true };
-            if (longExchangeId === 'bingx') longTpSlParams.positionSide = 'LONG'; // Add positionSide for BingX
+            if (longExchangeId === 'bingx') longTpSlParams.positionSide = 'LONG';
+            else if (longExchangeId === 'binanceusdm') longTpSlParams.positionSide = 'LONG'; // FIX: Add positionSide for BinanceUSDM TP/SL
 
             await longExchange.createOrder(
                 longOriginalSymbol,
@@ -451,7 +470,8 @@ async function executeTrades(opportunity, percentageToUse) {
 
         try {
             const longTpSlParams = { 'reduceOnly': true };
-            if (longExchangeId === 'bingx') longTpSlParams.positionSide = 'LONG'; // Add positionSide for BingX
+            if (longExchangeId === 'bingx') longTpSlParams.positionSide = 'LONG';
+            else if (longExchangeId === 'binanceusdm') longTpSlParams.positionSide = 'LONG'; // FIX: Add positionSide for BinanceUSDM TP/SL
 
             await longExchange.createOrder(
                 longOriginalSymbol,
@@ -517,16 +537,27 @@ async function closeTradesAndCalculatePnL() {
             }
         } catch (e) { safeLog('warn', `[BOT_PNL] Lỗi khi hủy lệnh chờ cho ${longOriginalSymbol} trên ${longExchange}: ${e.message}`, e); }
 
-        // Parameters for closing orders on BingX (Hedge Mode)
-        const closeShortParams = shortExchange === 'bingx' ? { 'positionSide': 'SHORT' } : {};
-        const closeLongParams = longExchange === 'bingx' ? { 'positionSide': 'LONG' } : {};
+        // Parameters for closing orders on BingX (Hedge Mode) and BinanceUSDM
+        const closeShortParams = {};
+        if (shortExchange === 'bingx') {
+            closeShortParams.positionSide = 'SHORT';
+        } else if (shortExchange === 'binanceusdm') { // FIX: Add positionSide for BinanceUSDM closing order
+            closeShortParams.positionSide = 'SHORT';
+        }
+
+        const closeLongParams = {};
+        if (longExchange === 'bingx') {
+            closeLongParams.positionSide = 'LONG';
+        } else if (longExchange === 'binanceusdm') { // FIX: Add positionSide for BinanceUSDM closing order
+            closeLongParams.positionSide = 'LONG';
+        }
 
         safeLog('log', `[BOT_PNL] Đóng vị thế SHORT ${coin} trên ${shortExchange} (amount: ${shortOrderAmount})...`);
-        const closeShortOrder = await exchanges[shortExchange].createMarketBuyOrder(shortOriginalSymbol, shortOrderAmount, closeShortParams); // Add params
+        const closeShortOrder = await exchanges[shortExchange].createMarketBuyOrder(shortOriginalSymbol, shortOrderAmount, closeShortParams);
         safeLog('log', `[BOT_PNL] ✅ Vị thế SHORT trên ${shortExchange} đã đóng. Order ID: ${closeShortOrder.id}`);
 
         safeLog('log', `[BOT_PNL] Đóng vị thế LONG ${coin} trên ${longExchange} (amount: ${longOrderAmount})...`);
-        const closeLongOrder = await exchanges[longExchange].createMarketSellOrder(longOriginalSymbol, longOrderAmount, closeLongParams); // Add params
+        const closeLongOrder = await exchanges[longExchange].createMarketSellOrder(longOriginalSymbol, longOrderAmount, closeLongParams);
         safeLog('log', `[BOT_PNL] ✅ Vị thế LONG trên ${longExchange} đã đóng. Order ID: ${closeLongOrder.id}`);
 
         await sleep(15000); // Wait a bit for balances to settle on exchanges
