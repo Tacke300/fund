@@ -570,7 +570,7 @@ let serverDataGlobal = null;
 
 // ĐÂY LÀ HÀM CẦN ĐƯỢC KHAI BÁO LÀ 'async'
 async function mainBotLoop() {
-    safeLog('debug', '[MAIN_BOT_LOOP] Entering async mainBotLoop (version 2024-07-31 confirmed and debugged).'); // Log để xác nhận phiên bản này đang chạy
+    safeLog('debug', '[MAIN_BOT_LOOP] Running FINAL DEBUGGED VERSION (2024-07-31 V3).'); // Log để xác nhận phiên bản này đang chạy
     
     if (botLoopIntervalId) clearTimeout(botLoopIntervalId);
 
@@ -670,7 +670,17 @@ async function mainBotLoop() {
 
             safeLog('log', '[BOT_LOOP] 🛑 Kích hoạt đóng lệnh và tính PnL vào phút 00:05.');
             botState = 'CLOSING_TRADES'; // Vẫn giữ trạng thái này để UI cập nhật và theo dõi
-            await closeTradesAndCalculatePnL(); 
+            
+            // Bọc lời gọi await trong một hàm async tự gọi (IIFE) để đảm bảo ngữ cảnh async rõ ràng
+            try {
+                await (async () => {
+                    await closeTradesAndCalculatePnL(); 
+                })();
+                safeLog('log', '[BOT_LOOP] ✅ Đóng lệnh và tính PnL hoàn tất qua IIFE.');
+            } catch (errorInClose) {
+                safeLog('error', `[BOT_LOOP] ❌ Lỗi khi đóng lệnh và tính PnL qua IIFE: ${errorInClose.message}`, errorInClose);
+            }
+            
             botState = 'RUNNING'; // Trả về RUNNING sau khi thực hiện xong
         }
     }
