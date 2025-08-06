@@ -32,19 +32,12 @@ const {
     bitgetApiKey, bitgetApiSecret, bitgetApiPassword
 } = require('../config.js');
 
-// const { usdtDepositAddressesByNetwork } = require('./balance.js'); // <<-- ĐÃ LOẠI BỎ
-
 const BOT_PORT = 5008;
 const SERVER_DATA_URL = 'http://localhost:5005/api/data';
 
 const MIN_PNL_PERCENTAGE = 1;
 const MAX_MINUTES_UNTIL_FUNDING = 30;
 const MIN_MINUTES_FOR_EXECUTION = 15;
-
-// Cập nhật số tiền chuyển tối thiểu theo yêu cầu (KHÔNG CÒN ĐƯỢC DÙNG)
-// const FUND_TRANSFER_MIN_AMOUNT_BINANCE = 10; // <<-- ĐÃ LOẠI BỎ
-// const FUND_TRANSFER_MIN_AMOUNT_BINGX = 5; // <<-- ĐÃ LOẠI BỎ
-// const FUND_TRANSFER_MIN_AMOUNT_OKX = 1; // <<-- ĐÃ LOẠI BỎ
 
 const DATA_FETCH_INTERVAL_SECONDS = 5;
 const HOURLY_FETCH_TIME_MINUTE = 45;
@@ -268,7 +261,7 @@ async function executeTrades(opportunity, percentageToUse) {
     const baseCollateralPerSide = minAvailableBalanceInPair * (percentageToUse / 100);
 
     const shortCollateral = baseCollateralPerSide;
-    const longCollateral = baseCollateralPerSide;
+    const longCollateral = longExchange.id === 'okx' ? baseCollateralPerSide : baseCollateralPerSide; // OKX often handles margin differently
 
     if (shortCollateral <= 0 || longCollateral <= 0) {
         safeLog('error', '[BOT_TRADE] Số tiền mở lệnh (collateral) không hợp lệ (cần dương). Hủy bỏ lệnh.');
@@ -304,14 +297,23 @@ async function executeTrades(opportunity, percentageToUse) {
         const commonLeverage = opportunity.commonLeverage || 1;
 
         // Set leverage first for the symbols
+        // IMPORTANT: Handle BingX setLeverage with 'side' argument
         try {
-            await shortExchange.setLeverage(commonLeverage, shortOriginalSymbol);
+            if (shortExchangeId === 'bingx') {
+                await shortExchange.setLeverage(commonLeverage, shortOriginalSymbol, { 'side': 'SHORT' }); // Specify side
+            } else {
+                await shortExchange.setLeverage(commonLeverage, shortOriginalSymbol);
+            }
             safeLog('log', `[BOT_TRADE] ✅ Đặt đòn bẩy x${commonLeverage} cho SHORT ${shortOriginalSymbol} trên ${shortExchangeId}.`);
         } catch (levErr) {
             safeLog('warn', `[BOT_TRADE] ⚠️ Lỗi đặt đòn bẩy cho SHORT ${shortOriginalSymbol} trên ${shortExchangeId}: ${levErr.message}. Tiếp tục mà không đảm bảo đòn bẩy.`, levErr);
         }
         try {
-            await longExchange.setLeverage(commonLeverage, longOriginalSymbol);
+            if (longExchangeId === 'bingx') {
+                await longExchange.setLeverage(commonLeverage, longOriginalSymbol, { 'side': 'LONG' }); // Specify side
+            } else {
+                await longExchange.setLeverage(commonLeverage, longOriginalSymbol);
+            }
             safeLog('log', `[BOT_TRADE] ✅ Đặt đòn bẩy x${commonLeverage} cho LONG ${longOriginalSymbol} trên ${longExchangeId}.`);
         } catch (levErr) {
             safeLog('warn', `[BOT_TRADE] ⚠️ Lỗi đặt đòn bẩy cho LONG ${longOriginalSymbol} trên ${longExchangeId}: ${levErr.message}. Tiếp tục mà không đảm bảo đòn bẩy.`, levErr);
@@ -325,17 +327,33 @@ async function executeTrades(opportunity, percentageToUse) {
             return false;
         }
         
-        // Use amountToLots to get precise amount for market order based on exchange's rules
-        const shortAmountToOrder = shortExchange.amountToLots(shortOriginalSymbol, shortAmount);
-        const longAmountToOrder = longExchange.amountToLots(longOriginalSymbol, longAmount);
+        // Use `exchange.amountToPrecision` instead of `amountToLots` for general precision handling.
+        // `amountToLots` is for lot size (min quantity step), `amountToPrecision` is for decimal places.
+        // Or if you want to use amountToLots, you need to access it via the market object:
+        // const marketShort = shortExchange.market(shortOriginalSymbol);
+        // const shortAmountToOrder = shortExchange.amountToLots(shortOriginalSymbol, shortAmount);
+        // const longAmountToOrder = longExchange.amountToLots(longOriginalSymbol, longAmount);
+        // BUT amountToLots is NOT always available and can be tricky.
+        // A more robust approach for general CCXT is to use amountToPrecision with market.precision.amount.
+
+        const marketShort = shortExchange.market(shortOriginalSymbol);
+        const marketLong = longExchange.market(longOriginalSymbol);
+
+        if (!marketShort || !marketLong) {
+            safeLog('error', `[BOT_TRADE] Không tìm thấy thông tin thị trường cho ${shortOriginalSymbol} hoặc ${longOriginalSymbol}.`);
+            return false;
+        }
+
+        const shortAmountToOrder = shortExchange.amountToPrecision(shortOriginalSymbol, shortAmount);
+        const longAmountToOrder = longExchange.amountToPrecision(longOriginalSymbol, longAmount);
 
 
         safeLog('log', `[BOT_TRADE] Mở SHORT ${shortAmountToOrder} ${shortOriginalSymbol} trên ${shortExchangeId} với giá ${shortEntryPrice.toFixed(4)}...`);
-        shortOrder = await shortExchange.createMarketSellOrder(shortOriginalSymbol, shortAmountToOrder);
+        shortOrder = await shortExchange.createMarketSellOrder(shortOriginalSymbol, parseFloat(shortAmountToOrder)); // Use parseFloat for amount
         safeLog('log', `[BOT_TRADE] ✅ Lệnh SHORT ${shortExchangeId} khớp: ID ${shortOrder.id}, Amount ${shortOrder.amount}, Price ${shortOrder.price}`);
 
         safeLog('log', `[BOT_TRADE] Mở LONG ${longAmountToOrder} ${longOriginalSymbol} trên ${longExchangeId} với giá ${longEntryPrice.toFixed(4)}...`);
-        longOrder = await longExchange.createMarketBuyOrder(longOriginalSymbol, longAmountToOrder);
+        longOrder = await longExchange.createMarketBuyOrder(longOriginalSymbol, parseFloat(longAmountToOrder)); // Use parseFloat for amount
         safeLog('log', `[BOT_TRADE] ✅ Lệnh LONG ${longExchangeId} khớp: ID ${longOrder.id}, Amount ${longOrder.amount}, Price ${longOrder.price}`);
 
         safeLog('log', `[BOT_TRADE] Setting currentTradeDetails for ${cleanedCoin} on ${shortExchangeId}/${longExchangeId}`);
@@ -367,15 +385,22 @@ async function executeTrades(opportunity, percentageToUse) {
 
         const longTpPrice = longEntryPrice * (1 + (TP_PERCENT_OF_COLLATERAL / (commonLeverage * 100)));
         const longSlPrice = longEntryPrice * (1 - (SL_PERCENT_OF_COLLATERAL / (commonLeverage * 100)));
+        
+        // Use priceToPrecision for TP/SL prices
+        const shortTpPriceToOrder = shortExchange.priceToPrecision(shortOriginalSymbol, shortTpPrice);
+        const shortSlPriceToOrder = shortExchange.priceToPrecision(shortOriginalSymbol, shortSlPrice);
+        const longTpPriceToOrder = longExchange.priceToPrecision(longOriginalSymbol, longTpPrice);
+        const longSlPriceToOrder = longExchange.priceToPrecision(longOriginalSymbol, longSlPrice);
+
 
         safeLog('log', `[BOT_TRADE] Tính toán TP/SL cho ${cleanedCoin}:`);
-        safeLog('log', `  Short Entry: ${shortEntryPrice.toFixed(4)}, SL: ${shortSlPrice.toFixed(4)}, TP: ${shortTpPrice.toFixed(4)}`);
-        safeLog('log', `  Long Entry: ${longEntryPrice.toFixed(4)}, SL: ${longSlPrice.toFixed(4)}, TP: ${longTpPrice.toFixed(4)}`);
+        safeLog('log', `  Short Entry: ${shortEntryPrice.toFixed(4)}, SL: ${shortSlPriceToOrder}, TP: ${shortTpPriceToOrder}`);
+        safeLog('log', `  Long Entry: ${longEntryPrice.toFixed(4)}, SL: ${longSlPriceToOrder}, TP: ${longTpPriceToOrder}`);
 
-        currentTradeDetails.shortSlPrice = shortSlPrice;
-        currentTradeDetails.shortTpPrice = shortTpPrice;
-        currentTradeDetails.longSlPrice = longSlPrice;
-        currentTradeDetails.longTpPrice = longTpPrice;
+        currentTradeDetails.shortSlPrice = parseFloat(shortSlPriceToOrder);
+        currentTradeDetails.shortTpPrice = parseFloat(shortTpPriceToOrder);
+        currentTradeDetails.longSlPrice = parseFloat(longSlPriceToOrder);
+        currentTradeDetails.longTpPrice = parseFloat(longTpPriceToOrder);
 
         // Đặt TP/SL cho vị thế SHORT
         try {
@@ -383,9 +408,9 @@ async function executeTrades(opportunity, percentageToUse) {
                 shortOriginalSymbol,
                 'STOP_MARKET',
                 'buy',
-                shortOrder.amount,
+                shortOrder.amount, // amount should be the actual filled amount
                 undefined,
-                { 'stopPrice': shortSlPrice, 'reduceOnly': true } // reduceOnly để đảm bảo đây là lệnh đóng vị thế
+                { 'stopPrice': parseFloat(shortSlPriceToOrder), 'reduceOnly': true }
             );
             safeLog('log', `[BOT_TRADE] ✅ Đặt SL cho SHORT ${shortExchangeId} thành công.`);
         } catch (slShortError) {
@@ -397,9 +422,9 @@ async function executeTrades(opportunity, percentageToUse) {
                 shortOriginalSymbol,
                 'TAKE_PROFIT_MARKET',
                 'buy',
-                shortOrder.amount,
+                shortOrder.amount, // amount should be the actual filled amount
                 undefined,
-                { 'stopPrice': shortTpPrice, 'reduceOnly': true } // reduceOnly để đảm bảo đây là lệnh đóng vị thế
+                { 'stopPrice': parseFloat(shortTpPriceToOrder), 'reduceOnly': true }
             );
             safeLog('log', `[BOT_TRADE] ✅ Đặt TP cho SHORT ${shortExchangeId} thành công.`);
         } catch (tpShortError) {
@@ -412,9 +437,9 @@ async function executeTrades(opportunity, percentageToUse) {
                 longOriginalSymbol,
                 'STOP_MARKET',
                 'sell',
-                longOrder.amount,
+                longOrder.amount, // amount should be the actual filled amount
                 undefined,
-                { 'stopPrice': longSlPrice, 'reduceOnly': true } // reduceOnly để đảm bảo đây là lệnh đóng vị thế
+                { 'stopPrice': parseFloat(longSlPriceToOrder), 'reduceOnly': true }
             );
             safeLog('log', `[BOT_TRADE] ✅ Đặt SL cho LONG ${longExchangeId} thành công.`);
         } catch (slLongError) {
@@ -426,9 +451,9 @@ async function executeTrades(opportunity, percentageToUse) {
                 longOriginalSymbol,
                 'TAKE_PROFIT_MARKET',
                 'sell',
-                longOrder.amount,
+                longOrder.amount, // amount should be the actual filled amount
                 undefined,
-                { 'stopPrice': longTpPrice, 'reduceOnly': true } // reduceOnly để đảm bảo đây là lệnh đóng vị thế
+                { 'stopPrice': parseFloat(longTpPriceToOrder), 'reduceOnly': true }
             );
             safeLog('log', `[BOT_TRADE] ✅ Đặt TP cho LONG ${longExchangeId} thành công.`);
         } catch (tpLongError) {
