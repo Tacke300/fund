@@ -119,6 +119,18 @@
             box-shadow: 0 6px 15px rgba(239, 83, 80, 0.6);
         }
 
+        /* NEW: Style for Test Order Button */
+        #testOrderBtn {
+            background-color: #50bfa4; /* A teal/green color */
+            box-shadow: 0 4px 10px rgba(80, 191, 164, 0.4);
+        }
+        #testOrderBtn:hover {
+            background-color: #3aa08a;
+            transform: translateY(-3px);
+            box-shadow: 0 6px 15px rgba(80, 191, 164, 0.6);
+        }
+
+
         /* Status Cards Layout (stacked vertically) */
         .status-cards {
             display: flex; /* Thay đổi từ grid sang flex */
@@ -289,6 +301,7 @@
                 </div>
                 <button id="startBotBtn">▶️ Start Bot</button>
                 <button id="stopBotBtn">⏸️ Stop Bot</button>
+                <button id="testOrderBtn">⚡ Test Mở Lệnh</button> <!-- NEW BUTTON ADDED HERE -->
             </section>
 
             <section class="status-cards">
@@ -532,6 +545,37 @@
             } catch (error) {
                 console.error('Lỗi khi dừng bot:', error);
                 alert('Lỗi khi dừng bot: ' + error.message);
+            }
+        });
+
+        // NEW: Event Listener for Test Order Button
+        document.getElementById('testOrderBtn').addEventListener('click', async () => {
+            const percentageToUse = document.getElementById('percentageToUse').value;
+            if (percentageToUse < 1 || percentageToUse > 100) {
+                alert('Phần trăm vốn mở lệnh phải từ 1 đến 100.');
+                return;
+            }
+
+            // IMPORTANT WARNING FOR USER
+            if (!confirm('Bạn có chắc chắn muốn mở lệnh TEST ngay lập tức với thông tin dự kiến không? Việc này sẽ tốn phí giao dịch thật!')) {
+                return;
+            }
+
+            try {
+                const response = await fetch('/bot-api/test-trade', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ percentageToUse: parseFloat(percentageToUse) })
+                });
+                const data = await response.json();
+                console.log('Phản hồi Test Lệnh:', data);
+                alert(data.message);
+                if (data.success) {
+                    updateBotStatus(); // Refresh UI after test
+                }
+            } catch (error) {
+                console.error('Lỗi khi thực hiện lệnh test:', error);
+                alert('Lỗi khi thực hiện lệnh test: ' + error.message);
             }
         });
 
