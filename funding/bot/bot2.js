@@ -238,39 +238,8 @@ async function processServerData(serverData) {
     }
 }
 
-// Hàm giúp tìm symbol đầy đủ của sàn từ tên coin "gọn"
-function findExchangeSymbol(exchangeId, baseCoin, quoteCoin, rawRates) {
-    const exchangeRates = rawRates[exchangeId]?.rates;
-    if (!exchangeRates) {
-        safeLog('warn', `[HELPER] Không tìm thấy dữ liệu rates cho sàn ${exchangeId.toUpperCase()}.`);
-        return null;
-    }
-
-    const commonFormats = [
-        `${baseCoin}/${quoteCoin}`,         // Ví dụ: BTC/USDT (Binance, BingX)
-        `${baseCoin}-${quoteCoin}-SWAP`,    // Ví dụ: BTC-USDT-SWAP (OKX)
-        `${baseCoin}${quoteCoin}`,          // Ví dụ: BTCUSDT (một số định dạng khác)
-        `${baseCoin}_${quoteCoin}`,         // Ví dụ: BTC_USDT (một số sàn khác)
-    ];
-
-    for (const format of commonFormats) {
-        if (exchangeRates[format] && exchangeRates[format].originalSymbol) {
-            safeLog('log', `[HELPER] Tìm thấy symbol khớp (${format}) cho ${baseCoin}/${quoteCoin} trên ${exchangeId.toUpperCase()}.`);
-            return exchangeRates[format].originalSymbol;
-        }
-    }
-
-    for (const symbolKey in exchangeRates) {
-        const symbolData = exchangeRates[symbolKey];
-        if (symbolData.originalSymbol && symbolData.base === baseCoin && symbolData.quote === quoteCoin) {
-            safeLog('log', `[HELPER] Tìm thấy symbol khớp (${symbolKey}) qua thuộc tính base/quote cho ${baseCoin}/${quoteCoin} trên ${exchangeId.toUpperCase()}.`);
-            return symbolData.originalSymbol;
-        }
-    }
-
-    safeLog('warn', `[HELPER] Không tìm thấy symbol hợp lệ cho cặp ${baseCoin}/${quoteCoin} trên sàn ${exchangeId.toUpperCase()}.`);
-    return null;
-}
+// <<-- LOẠI BỎ HÀM findExchangeSymbol Ở ĐÂY -->>
+// (Hàm này đã được loại bỏ hoàn toàn)
 
 // <<-- LOẠI BỎ TOÀN BỘ PHẦN BINGX CUSTOM TRANSFER LOGIC Ở ĐÂY (TRƯỚC ĐÂY TÔI ĐÃ ĐẶT Ở ĐÂY) -->>
 
@@ -282,11 +251,12 @@ async function executeTrades(opportunity, percentageToUse) {
         return false;
     }
 
-    const rawRatesData = serverDataGlobal?.rawRates;
-    if (!rawRatesData) {
-        safeLog('error', '[BOT_TRADE] Dữ liệu giá thô từ server không có sẵn. Không thể mở lệnh.');
-        return false;
-    }
+    // `rawRatesData` không còn cần thiết để lấy symbol gốc ở đây
+    // const rawRatesData = serverDataGlobal?.rawRates;
+    // if (!rawRatesData) {
+    //     safeLog('error', '[BOT_TRADE] Dữ liệu giá thô từ server không có sẵn. Không thể mở lệnh.');
+    //     return false;
+    // }
 
     // Ensure opportunity.details exists and contains shortExchange/longExchange
     if (!opportunity.details || !opportunity.details.shortExchange || !opportunity.details.longExchange) {
@@ -303,17 +273,18 @@ async function executeTrades(opportunity, percentageToUse) {
         return false;
     }
 
-    const quoteAsset = 'USDT';
-    const cleanedCoin = opportunity.coin;
-    const shortOriginalSymbol = findExchangeSymbol(shortExchangeId, cleanedCoin, quoteAsset, rawRatesData);
-    const longOriginalSymbol = findExchangeSymbol(longExchangeId, cleanedCoin, quoteAsset, rawRatesData);
+    const cleanedCoin = opportunity.coin; // Đây là symbol đã được làm sạch, ví dụ: BTCUSDT
+
+    // THAY ĐỔI LỚN: Lấy originalSymbol trực tiếp từ opportunity.details
+    const shortOriginalSymbol = opportunity.details.shortOriginalSymbol;
+    const longOriginalSymbol = opportunity.details.longOriginalSymbol;
 
     if (!shortOriginalSymbol) {
-        safeLog('error', `[BOT_TRADE] ❌ Không thể xác định symbol đầy đủ cho ${cleanedCoin} trên sàn SHORT ${shortExchangeId}. Vui lòng kiểm tra dữ liệu từ server và cấu trúc rawRates.`);
+        safeLog('error', `[BOT_TRADE] ❌ Không thể xác định original symbol đầy đủ cho ${cleanedCoin} trên sàn SHORT ${shortExchangeId}. Vui lòng kiểm tra dữ liệu từ server và cấu trúc cơ hội.`);
         return false;
     }
     if (!longOriginalSymbol) {
-        safeLog('error', `[BOT_TRADE] ❌ Không thể xác định symbol đầy đủ cho ${cleanedCoin} trên sàn LONG ${longExchangeId}. Vui lòng kiểm tra dữ liệu từ server và cấu trúc rawRates.`);
+        safeLog('error', `[BOT_TRADE] ❌ Không thể xác định original symbol đầy đủ cho ${cleanedCoin} trên sàn LONG ${longExchangeId}. Vui lòng kiểm tra dữ liệu từ server và cấu trúc cơ hội.`);
         return false;
     }
 
@@ -366,14 +337,27 @@ async function executeTrades(opportunity, percentageToUse) {
             return false;
         }
 
-        const shortAmountFormatted = shortExchangeId === 'okx' ? shortAmount.toFixed(0) : shortAmount.toFixed(3);
-        safeLog('log', `[BOT_TRADE] Mở SHORT ${shortAmountFormatted} ${cleanedCoin} trên ${shortExchangeId} với giá ${shortEntryPrice.toFixed(4)}...`);
-        shortOrder = await shortExchange.createMarketSellOrder(shortOriginalSymbol, parseFloat(shortAmountFormatted));
+        // Định dạng amount tùy theo sàn (OKX có thể cần số nguyên)
+        // Lưu ý: Giá trị `amount` trong CCXT thường là base currency, không phải USD.
+        // Cần đảm bảo `shortOriginalSymbol` và `longOriginalSymbol` khớp với `market.id` hoặc `market.symbol` của sàn
+        // để CCXT tự động xử lý.
+        const marketShort = await shortExchange.market(shortOriginalSymbol);
+        const marketLong = await longExchange.market(longOriginalSymbol);
+
+        // Sử dụng amountToLots hoặc roundDown nếu có để đảm bảo số lượng hợp lệ
+        const shortAmountLots = shortExchange.amountToLots(shortOriginalSymbol, shortAmount);
+        const longAmountLots = longExchange.amountToLots(longOriginalSymbol, longAmount);
+        
+        // Hoặc đơn giản hơn là làm tròn để đảm bảo độ chính xác theo yêu cầu của sàn
+        const shortAmountFormatted = shortAmountLots; // CCXT sẽ tự lo nếu amountToLots được dùng
+        const longAmountFormatted = longAmountLots;
+
+        safeLog('log', `[BOT_TRADE] Mở SHORT ${shortAmountFormatted} ${shortOriginalSymbol} trên ${shortExchangeId} với giá ${shortEntryPrice.toFixed(4)}...`);
+        shortOrder = await shortExchange.createMarketSellOrder(shortOriginalSymbol, shortAmountFormatted);
         safeLog('log', `[BOT_TRADE] ✅ Lệnh SHORT ${shortExchangeId} khớp: ID ${shortOrder.id}, Amount ${shortOrder.amount}, Price ${shortOrder.price}`);
 
-        const longAmountFormatted = longExchangeId === 'okx' ? longAmount.toFixed(0) : longAmount.toFixed(3);
-        safeLog('log', `[BOT_TRADE] Mở LONG ${longAmountFormatted} ${cleanedCoin} trên ${longExchangeId} với giá ${longEntryPrice.toFixed(4)}...`);
-        longOrder = await longExchange.createMarketBuyOrder(longOriginalSymbol, parseFloat(longAmountFormatted));
+        safeLog('log', `[BOT_TRADE] Mở LONG ${longAmountFormatted} ${longOriginalSymbol} trên ${longExchangeId} với giá ${longEntryPrice.toFixed(4)}...`);
+        longOrder = await longExchange.createMarketBuyOrder(longOriginalSymbol, longAmountFormatted);
         safeLog('log', `[BOT_TRADE] ✅ Lệnh LONG ${longExchangeId} khớp: ID ${longOrder.id}, Amount ${longOrder.amount}, Price ${longOrder.price}`);
 
         safeLog('log', `[BOT_TRADE] Setting currentTradeDetails for ${cleanedCoin} on ${shortExchangeId}/${longExchangeId}`);
@@ -400,6 +384,7 @@ async function executeTrades(opportunity, percentageToUse) {
         safeLog('log', '[BOT_TRADE] Đợi 2 giây để gửi lệnh TP/SL...');
         await sleep(2000);
 
+        // Ensure TP/SL are placed using the correct originalSymbol
         const shortTpPrice = shortEntryPrice * (1 - (TP_PERCENT_OF_COLLATERAL / (commonLeverage * 100)));
         const shortSlPrice = shortEntryPrice * (1 + (SL_PERCENT_OF_COLLATERAL / (commonLeverage * 100)));
 
@@ -624,7 +609,7 @@ async function mainBotLoop() {
                 currentSelectedOpportunityForExecution = bestOpportunityFoundForExecution;
                 safeLog('log', `[BOT_LOOP] ✅ Bot đã chọn cơ hội: ${currentSelectedOpportunityForExecution.coin} trên ${currentSelectedOpportunityForExecution.exchanges} để THỰC HIỆN.`);
                 safeLog('log', `  Thông tin chi tiết: PnL ước tính: ${currentSelectedOpportunityForExecution.estimatedPnl.toFixed(2)}%, Funding trong: ${currentSelectedOpportunityForExecution.details.minutesUntilFunding.toFixed(1)} phút.`);
-                safeLog('log', `  Sàn Short: ${currentSelectedOpportunityForExecution.details.shortExchange}, Sàn Long: ${currentSelectedOpportunityForExecution.details.longExchange}`);
+                safeLog('log', `  Sàn Short: ${currentSelectedOpportunityForExecution.details.shortExchange} (${currentSelectedOpportunityForExecution.details.shortOriginalSymbol}), Sàn Long: ${currentSelectedOpportunityForExecution.details.longExchange} (${currentSelectedOpportunityForExecution.details.longOriginalSymbol})`);
                 
                 // Cập nhật hiển thị vốn dự kiến theo cách tính mới
                 const shortExId = currentSelectedOpportunityForExecution.exchanges.split(' / ')[0].toLowerCase() === 'binance' ? 'binanceusdm' : currentSelectedOpportunityForExecution.exchanges.split(' / ')[0].toLowerCase();
