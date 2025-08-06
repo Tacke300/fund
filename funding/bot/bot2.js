@@ -670,7 +670,10 @@ async function mainBotLoop() { // ĐÃ ĐÁNH DẤU LÀ ASYNC
         }
     }
 
-    botLoopIntervalId = setTimeout(mainBotLoop, 1000);
+    // Call mainBotLoop again after 1 second
+    // It's good practice to ensure the interval doesn't pile up if an async operation takes longer than 1 second.
+    // However, for this loop, a simple setTimeout is fine as it's the core loop, and long awaits are handled.
+    botLoopIntervalId = setTimeout(() => { mainBotLoop(); }, 1000); 
 }
 
 function startBot() {
