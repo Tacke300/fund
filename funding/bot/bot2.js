@@ -499,23 +499,25 @@ async function closeTradesAndCalculatePnL() {
     try {
         safeLog('log', '[BOT_PNL] Hủy các lệnh TP/SL còn chờ (nếu có)...');
         try {
+            // Fetch and cancel specific symbol orders
             const shortOpenOrders = await exchanges[shortExchange].fetchOpenOrders(shortOriginalSymbol);
             for (const order of shortOpenOrders) {
-                if (order.type === 'stop' || order.type === 'take_profit' || order.type === 'stop_market' || order.type === 'take_profit_market' || order.status === 'open') {
+                if ((order.type === 'stop' || order.type === 'take_profit' || order.type === 'stop_market' || order.type === 'take_profit_market') && order.status === 'open') {
                     await exchanges[shortExchange].cancelOrder(order.id, shortOriginalSymbol);
-                    safeLog('log', `[BOT_PNL] Đã hủy lệnh chờ ${order.type} ${order.id} trên ${shortExchange}.`);
+                    safeLog('log', `[BOT_PNL] Đã hủy lệnh chờ ${order.type} ${order.id} cho ${shortOriginalSymbol} trên ${shortExchange}.`);
                 }
             }
-        } catch (e) { safeLog('warn', `[BOT_PNL] Lỗi khi hủy lệnh chờ trên ${shortExchange}: ${e.message}`, e); }
+        } catch (e) { safeLog('warn', `[BOT_PNL] Lỗi khi hủy lệnh chờ cho ${shortOriginalSymbol} trên ${shortExchange}: ${e.message}`, e); }
         try {
+            // Fetch and cancel specific symbol orders
             const longOpenOrders = await exchanges[longExchange].fetchOpenOrders(longOriginalSymbol);
             for (const order of longOpenOrders) {
-                if (order.type === 'stop' || order.type === 'take_profit' || order.type === 'stop_market' || order.type === 'take_profit_market' || order.status === 'open') {
+                if ((order.type === 'stop' || order.type === 'take_profit' || order.type === 'stop_market' || order.type === 'take_profit_market') && order.status === 'open') {
                     await exchanges[longExchange].cancelOrder(order.id, longOriginalSymbol);
-                    safeLog('log', `[BOT_PNL] Đã hủy lệnh chờ ${order.type} ${order.id} trên ${longExchange}.`);
+                    safeLog('log', `[BOT_PNL] Đã hủy lệnh chờ ${order.type} ${order.id} cho ${longOriginalSymbol} trên ${longExchange}.`);
                 }
             }
-        } catch (e) { safeLog('warn', `[BOT_PNL] Lỗi khi hủy lệnh chờ trên ${longExchange}: ${e.message}`, e); }
+        } catch (e) { safeLog('warn', `[BOT_PNL] Lỗi khi hủy lệnh chờ cho ${longOriginalSymbol} trên ${longExchange}: ${e.message}`, e); }
 
         safeLog('log', `[BOT_PNL] Đóng vị thế SHORT ${coin} trên ${shortExchange} (amount: ${shortOrderAmount})...`);
         const closeShortOrder = await exchanges[shortExchange].createMarketBuyOrder(shortOriginalSymbol, shortOrderAmount);
@@ -566,7 +568,7 @@ async function closeTradesAndCalculatePnL() {
 
 let serverDataGlobal = null;
 
-async function mainBotLoop() {
+async function mainBotLoop() { // MARKED AS ASYNC
     if (botLoopIntervalId) clearTimeout(botLoopIntervalId);
 
     // Đã loại bỏ các trạng thái TRANSFERRING_FUNDS khỏi điều kiện dừng chung
@@ -663,7 +665,7 @@ async function mainBotLoop() {
 
             safeLog('log', '[BOT_LOOP] 🛑 Kích hoạt đóng lệnh và tính PnL vào phút 00:05.');
             botState = 'CLOSING_TRADES'; // Vẫn giữ trạng thái này để UI cập nhật và theo dõi
-            await closeTradesAndCalculatePnL();
+            await closeTradesAndCalculatePnL(); // NOW AWAIT IS VALID
             botState = 'RUNNING'; // Trả về RUNNING sau khi thực hiện xong
         }
     }
