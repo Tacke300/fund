@@ -566,11 +566,31 @@ async function closeTradesAndCalculatePnL() {
     }
 }
 
+// NEW: Helper function to encapsulate the closing logic
+async function executeClosingProcess(minuteAligned) {
+    if (LAST_ACTION_TIMESTAMP.closeTrade !== minuteAligned) {
+        LAST_ACTION_TIMESTAMP.closeTrade = minuteAligned;
+
+        safeLog('log', '[BOT_LOOP] 🛑 Kích hoạt đóng lệnh và tính PnL vào phút 00:05.');
+        botState = 'CLOSING_TRADES'; // Vẫn giữ trạng thái này để UI cập nhật và theo dõi
+        
+        try {
+            await closeTradesAndCalculatePnL(); // This await is now inside an async function (executeClosingProcess)
+            safeLog('log', '[BOT_LOOP] ✅ Đóng lệnh và tính PnL hoàn tất.');
+        } catch (errorInClose) {
+            safeLog('error', `[BOT_LOOP] ❌ Lỗi khi đóng lệnh và tính PnL: ${errorInClose.message}`, errorInClose);
+        }
+        
+        botState = 'RUNNING'; // Trả về RUNNING sau khi thực hiện xong
+    }
+}
+
+
 let serverDataGlobal = null;
 
-// ĐÂY LÀ HÀM CẦN ĐƯỢC KHAI BÁO LÀ 'async'
+// HÀM CHÍNH CỦA VÒNG LẶP BOT
 async function mainBotLoop() {
-    safeLog('debug', '[MAIN_BOT_LOOP] Running FINAL DEBUGGED VERSION (2024-07-31 V3).'); // Log để xác nhận phiên bản này đang chạy
+    safeLog('debug', '[MAIN_BOT_LOOP] Running FINAL DEBUGGED VERSION (2024-07-31 V4 Refactored).'); // Log để xác nhận phiên bản này đang chạy
     
     if (botLoopIntervalId) clearTimeout(botLoopIntervalId);
 
@@ -662,27 +682,9 @@ async function mainBotLoop() {
         }
     }
 
-    // Dòng này là dòng gây lỗi nếu hàm mainBotLoop không phải là async
-    // VÌ HÀM NÀY ĐÃ LÀ ASYNC, DÒNG NÀY SẼ HỢP LỆ.
+    // THIS IS THE MODIFIED BLOCK: Now calls the new async helper function
     if (currentMinute === 0 && currentSecond >= 5 && currentSecond < 10 && botState === 'RUNNING' && currentTradeDetails?.status === 'OPEN') {
-        if (LAST_ACTION_TIMESTAMP.closeTrade !== minuteAligned) {
-            LAST_ACTION_TIMESTAMP.closeTrade = minuteAligned;
-
-            safeLog('log', '[BOT_LOOP] 🛑 Kích hoạt đóng lệnh và tính PnL vào phút 00:05.');
-            botState = 'CLOSING_TRADES'; // Vẫn giữ trạng thái này để UI cập nhật và theo dõi
-            
-            // Bọc lời gọi await trong một hàm async tự gọi (IIFE) để đảm bảo ngữ cảnh async rõ ràng
-            try {
-                await (async () => {
-                    await closeTradesAndCalculatePnL(); 
-                })();
-                safeLog('log', '[BOT_LOOP] ✅ Đóng lệnh và tính PnL hoàn tất qua IIFE.');
-            } catch (errorInClose) {
-                safeLog('error', `[BOT_LOOP] ❌ Lỗi khi đóng lệnh và tính PnL qua IIFE: ${errorInClose.message}`, errorInClose);
-            }
-            
-            botState = 'RUNNING'; // Trả về RUNNING sau khi thực hiện xong
-        }
+        await executeClosingProcess(minuteAligned); // Call the new async helper
     }
 
     // Lặp lại vòng lặp sau 1 giây
