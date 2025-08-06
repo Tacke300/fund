@@ -569,8 +569,8 @@ async function closeTradesAndCalculatePnL() {
 let serverDataGlobal = null;
 
 // ĐÂY LÀ HÀM CẦN ĐƯỢC KHAI BÁO LÀ 'async'
-async function mainBotLoop() { 
-    safeLog('debug', '[MAIN_BOT_LOOP] Entering async mainBotLoop (version 2024-07-31 confirmed).'); // Log để xác nhận phiên bản này đang chạy
+async function mainBotLoop() {
+    safeLog('debug', '[MAIN_BOT_LOOP] Entering async mainBotLoop (version 2024-07-31 confirmed and debugged).'); // Log để xác nhận phiên bản này đang chạy
     
     if (botLoopIntervalId) clearTimeout(botLoopIntervalId);
 
