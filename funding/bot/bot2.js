@@ -566,31 +566,11 @@ async function closeTradesAndCalculatePnL() {
     }
 }
 
-// NEW: Helper function to encapsulate the closing logic
-async function executeClosingProcess(minuteAligned) {
-    if (LAST_ACTION_TIMESTAMP.closeTrade !== minuteAligned) {
-        LAST_ACTION_TIMESTAMP.closeTrade = minuteAligned;
-
-        safeLog('log', '[BOT_LOOP] 🛑 Kích hoạt đóng lệnh và tính PnL vào phút 00:05.');
-        botState = 'CLOSING_TRADES'; // Vẫn giữ trạng thái này để UI cập nhật và theo dõi
-        
-        try {
-            await closeTradesAndCalculatePnL(); // This await is now inside an async function (executeClosingProcess)
-            safeLog('log', '[BOT_LOOP] ✅ Đóng lệnh và tính PnL hoàn tất.');
-        } catch (errorInClose) {
-            safeLog('error', `[BOT_LOOP] ❌ Lỗi khi đóng lệnh và tính PnL: ${errorInClose.message}`, errorInClose);
-        }
-        
-        botState = 'RUNNING'; // Trả về RUNNING sau khi thực hiện xong
-    }
-}
-
-
 let serverDataGlobal = null;
 
-// HÀM CHÍNH CỦA VÒNG LẶP BOT
+// HÀM CHÍNH CỦA VÒNG LẶP BOT - Vẫn là async vì có các await khác
 async function mainBotLoop() {
-    safeLog('debug', '[MAIN_BOT_LOOP] Running FINAL DEBUGGED VERSION (2024-07-31 V4 Refactored).'); // Log để xác nhận phiên bản này đang chạy
+    safeLog('debug', '[MAIN_BOT_LOOP] Running LAST RESORT DEBUGGED VERSION (2024-07-31 V5 - Promise Chain).'); // Log để xác nhận phiên bản này đang chạy
     
     if (botLoopIntervalId) clearTimeout(botLoopIntervalId);
 
@@ -682,9 +662,26 @@ async function mainBotLoop() {
         }
     }
 
-    // THIS IS THE MODIFIED BLOCK: Now calls the new async helper function
+    // THIS IS THE MODIFIED BLOCK: Now uses Promise chain directly.
     if (currentMinute === 0 && currentSecond >= 5 && currentSecond < 10 && botState === 'RUNNING' && currentTradeDetails?.status === 'OPEN') {
-        await executeClosingProcess(minuteAligned); // Call the new async helper
+        if (LAST_ACTION_TIMESTAMP.closeTrade !== minuteAligned) {
+            LAST_ACTION_TIMESTAMP.closeTrade = minuteAligned;
+
+            safeLog('log', '[BOT_LOOP] 🛑 Kích hoạt đóng lệnh và tính PnL vào phút 00:05.');
+            botState = 'CLOSING_TRADES'; // Vẫn giữ trạng thái này để UI cập nhật và theo dõi
+            
+            // Calling closeTradesAndCalculatePnL and handling its Promise directly
+            closeTradesAndCalculatePnL()
+                .then(() => {
+                    safeLog('log', '[BOT_LOOP] ✅ Đóng lệnh và tính PnL hoàn tất (qua Promise.then).');
+                })
+                .catch(errorInClose => {
+                    safeLog('error', `[BOT_LOOP] ❌ Lỗi khi đóng lệnh và tính PnL (qua Promise.catch): ${errorInClose.message}`, errorInClose);
+                })
+                .finally(() => {
+                    botState = 'RUNNING'; // Trả về RUNNING sau khi thực hiện xong, bất kể thành công hay thất bại
+                });
+        }
     }
 
     // Lặp lại vòng lặp sau 1 giây
@@ -890,9 +887,18 @@ const botServer = http.createServer((req, res) => {
             }
 
             safeLog('log', '[BOT_SERVER] 🛑 Yêu cầu DỪNG LỆNH ĐANG MỞ (có thể là lệnh test hoặc lệnh tự động).');
-            await closeTradesAndCalculatePnL();
-            res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ success: true, message: 'Đã gửi lệnh đóng vị thế thành công.' }));
+            // Calling closeTradesAndCalculatePnL and handling its Promise directly
+            closeTradesAndCalculatePnL()
+                .then(() => {
+                    safeLog('log', '[BOT_SERVER] ✅ Đóng lệnh và tính PnL hoàn tất (qua Promise.then trong API stop-test-trade).');
+                    res.writeHead(200, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ success: true, message: 'Đã gửi lệnh đóng vị thế thành công.' }));
+                })
+                .catch(errorInClose => {
+                    safeLog('error', `[BOT_SERVER] ❌ Lỗi khi đóng lệnh và tính PnL (qua Promise.catch trong API stop-test-trade): ${errorInClose.message}`, errorInClose);
+                    res.writeHead(500, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ success: false, message: 'Lỗi server khi dừng lệnh.' }));
+                });
 
         } catch (error) {
             safeLog('error', '[BOT_SERVER] ❌ Lỗi xử lý POST /bot-api/stop-test-trade:', error.message, error);
