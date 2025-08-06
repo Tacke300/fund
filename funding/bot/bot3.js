@@ -297,12 +297,18 @@ async function executeTrades(opportunity, percentageToUse) {
 
         // Set leverage first for the symbols
         try {
-            // BingX requires 'side' in params for setLeverage in Hedge Mode
+            // BingX requires 'side' in params for setLeverage in Hedge Mode, and symbol must be string.
             if (shortExchange.has['setLeverage'] && shortExchangeId === 'bingx') {
-                await shortExchange.setLeverage(shortOriginalSymbol, commonLeverage, { 'side': 'SHORT' });
+                if (typeof shortOriginalSymbol === 'string') { // Defensive check
+                    await shortExchange.setLeverage(shortOriginalSymbol, commonLeverage, { 'side': 'SHORT' });
+                } else {
+                    safeLog('error', `[BOT_TRADE] Lỗi: shortOriginalSymbol không phải string cho BingX setLeverage: ${shortOriginalSymbol}`);
+                }
             } 
-            // BinanceUSDM fix: correct argument order
-            else if (shortExchange.has['setLeverage']) {
+            // BinanceUSDM fix: correct argument order, no 'side' needed directly in params here
+            else if (shortExchange.has['setLeverage'] && shortExchangeId === 'binanceusdm') {
+                await shortExchange.setLeverage(shortOriginalSymbol, commonLeverage);
+            } else if (shortExchange.has['setLeverage']) { // Generic case for other exchanges
                 await shortExchange.setLeverage(shortOriginalSymbol, commonLeverage);
             }
             safeLog('log', `[BOT_TRADE] ✅ Đặt đòn bẩy x${commonLeverage} cho SHORT ${shortOriginalSymbol} trên ${shortExchangeId}.`);
@@ -310,12 +316,18 @@ async function executeTrades(opportunity, percentageToUse) {
             safeLog('warn', `[BOT_TRADE] ⚠️ Lỗi đặt đòn bẩy cho SHORT ${shortOriginalSymbol} trên ${shortExchangeId}: ${levErr.message}. Tiếp tục mà không đảm bảo đòn bẩy.`, levErr);
         }
         try {
-            // BingX requires 'side' in params for setLeverage in Hedge Mode
+            // BingX requires 'side' in params for setLeverage in Hedge Mode, and symbol must be string.
             if (longExchange.has['setLeverage'] && longExchangeId === 'bingx') {
-                await longExchange.setLeverage(longOriginalSymbol, commonLeverage, { 'side': 'LONG' });
+                if (typeof longOriginalSymbol === 'string') { // Defensive check
+                    await longExchange.setLeverage(longOriginalSymbol, commonLeverage, { 'side': 'LONG' });
+                } else {
+                    safeLog('error', `[BOT_TRADE] Lỗi: longOriginalSymbol không phải string cho BingX setLeverage: ${longOriginalSymbol}`);
+                }
             } 
-            // BinanceUSDM fix: correct argument order
-            else if (longExchange.has['setLeverage']) {
+            // BinanceUSDM fix: correct argument order, no 'side' needed directly in params here
+            else if (longExchange.has['setLeverage'] && longExchangeId === 'binanceusdm') {
+                await longExchange.setLeverage(longOriginalSymbol, commonLeverage);
+            } else if (longExchange.has['setLeverage']) { // Generic case for other exchanges
                 await longExchange.setLeverage(longOriginalSymbol, commonLeverage);
             }
             safeLog('log', `[BOT_TRADE] ✅ Đặt đòn bẩy x${commonLeverage} cho LONG ${longOriginalSymbol} trên ${longExchangeId}.`);
@@ -343,19 +355,19 @@ async function executeTrades(opportunity, percentageToUse) {
         const shortAmountToOrder = shortExchange.amountToPrecision(shortOriginalSymbol, shortAmount);
         const longAmountToOrder = longExchange.amountToPrecision(longOriginalSymbol, longAmount);
 
-        // Define common parameters for orders, including positionSide for BingX and BinanceUSDM
+        // Define common parameters for orders, including positionSide for BingX and BinanceUSDM (Hedge Mode)
         const shortParams = {};
         if (shortExchangeId === 'bingx') {
             shortParams.positionSide = 'SHORT';
-        } else if (shortExchangeId === 'binanceusdm') { // FIX: Add positionSide for BinanceUSDM Hedge Mode
-            shortParams.positionSide = 'SHORT';
+        } else if (shortExchangeId === 'binanceusdm') {
+            shortParams.positionSide = 'SHORT'; // FIX: Add positionSide for BinanceUSDM Hedge Mode
         }
         
         const longParams = {};
         if (longExchangeId === 'bingx') {
             longParams.positionSide = 'LONG';
-        } else if (longExchangeId === 'binanceusdm') { // FIX: Add positionSide for BinanceUSDM Hedge Mode
-            longParams.positionSide = 'LONG';
+        } else if (longExchangeId === 'binanceusdm') {
+            longParams.positionSide = 'LONG'; // FIX: Add positionSide for BinanceUSDM Hedge Mode
         }
 
         safeLog('log', `[BOT_TRADE] Mở SHORT ${shortAmountToOrder} ${shortOriginalSymbol} trên ${shortExchangeId} với giá ${shortEntryPrice.toFixed(4)}...`);
@@ -414,74 +426,110 @@ async function executeTrades(opportunity, percentageToUse) {
 
         // Đặt TP/SL cho vị thế SHORT
         try {
-            const shortTpSlParams = { 'reduceOnly': true };
-            if (shortExchangeId === 'bingx') shortTpSlParams.positionSide = 'SHORT';
-            else if (shortExchangeId === 'binanceusdm') shortTpSlParams.positionSide = 'SHORT'; // FIX: Add positionSide for BinanceUSDM TP/SL
+            const shortTpSlParams = {};
+            // FIX: Remove 'reduceOnly' for TP/SL in Hedge Mode for BingX and BinanceUSDM
+            if (shortExchangeId === 'bingx') {
+                shortTpSlParams.positionSide = 'SHORT';
+            } else if (shortExchangeId === 'binanceusdm') {
+                shortTpSlParams.positionSide = 'SHORT';
+            }
             
-            await shortExchange.createOrder(
-                shortOriginalSymbol,
-                'STOP_MARKET',
-                'buy',
-                shortOrder.amount, // amount should be the actual filled amount
-                undefined,
-                { 'stopPrice': parseFloat(shortSlPriceToOrder), ...shortTpSlParams }
-            );
-            safeLog('log', `[BOT_TRADE] ✅ Đặt SL cho SHORT ${shortExchangeId} thành công.`);
+            // FIX: Check if stopPrice > 0
+            if (parseFloat(shortSlPriceToOrder) > 0) {
+                await shortExchange.createOrder(
+                    shortOriginalSymbol,
+                    'STOP_MARKET',
+                    'buy',
+                    shortOrder.amount, // amount should be the actual filled amount
+                    undefined,
+                    { 'stopPrice': parseFloat(shortSlPriceToOrder), ...shortTpSlParams }
+                );
+                safeLog('log', `[BOT_TRADE] ✅ Đặt SL cho SHORT ${shortExchangeId} thành công.`);
+            } else {
+                safeLog('warn', `[BOT_TRADE] ⚠️ Không đặt SL cho SHORT ${shortExchangeId} vì stopPrice <= 0 (${shortSlPriceToOrder}).`);
+            }
         } catch (slShortError) {
             safeLog('error', `[BOT_TRADE] ❌ Lỗi đặt SL cho SHORT ${shortExchangeId}: ${slShortError.message}`, slShortError);
         }
 
         try {
-            const shortTpSlParams = { 'reduceOnly': true };
-            if (shortExchangeId === 'bingx') shortTpSlParams.positionSide = 'SHORT';
-            else if (shortExchangeId === 'binanceusdm') shortTpSlParams.positionSide = 'SHORT'; // FIX: Add positionSide for BinanceUSDM TP/SL
+            const shortTpSlParams = {};
+            // FIX: Remove 'reduceOnly' for TP/SL in Hedge Mode for BingX and BinanceUSDM
+            if (shortExchangeId === 'bingx') {
+                shortTpSlParams.positionSide = 'SHORT';
+            } else if (shortExchangeId === 'binanceusdm') {
+                shortTpSlParams.positionSide = 'SHORT';
+            }
 
-            await shortExchange.createOrder(
-                shortOriginalSymbol,
-                'TAKE_PROFIT_MARKET',
-                'buy',
-                shortOrder.amount, // amount should be the actual filled amount
-                undefined,
-                { 'stopPrice': parseFloat(shortTpPriceToOrder), ...shortTpSlParams }
-            );
-            safeLog('log', `[BOT_TRADE] ✅ Đặt TP cho SHORT ${shortExchangeId} thành công.`);
+            // FIX: Check if stopPrice > 0
+            if (parseFloat(shortTpPriceToOrder) > 0) {
+                await shortExchange.createOrder(
+                    shortOriginalSymbol,
+                    'TAKE_PROFIT_MARKET',
+                    'buy',
+                    shortOrder.amount, // amount should be the actual filled amount
+                    undefined,
+                    { 'stopPrice': parseFloat(shortTpPriceToOrder), ...shortTpSlParams }
+                );
+                safeLog('log', `[BOT_TRADE] ✅ Đặt TP cho SHORT ${shortExchangeId} thành công.`);
+            } else {
+                safeLog('warn', `[BOT_TRADE] ⚠️ Không đặt TP cho SHORT ${shortExchangeId} vì stopPrice <= 0 (${shortTpPriceToOrder}).`);
+            }
         } catch (tpShortError) {
             safeLog('error', `[BOT_TRADE] ❌ Lỗi đặt TP cho SHORT ${shortExchangeId}: ${tpShortError.message}`, tpShortError);
         }
 
         // Đặt TP/SL cho vị thế LONG
         try {
-            const longTpSlParams = { 'reduceOnly': true };
-            if (longExchangeId === 'bingx') longTpSlParams.positionSide = 'LONG';
-            else if (longExchangeId === 'binanceusdm') longTpSlParams.positionSide = 'LONG'; // FIX: Add positionSide for BinanceUSDM TP/SL
+            const longTpSlParams = {};
+            // FIX: Remove 'reduceOnly' for TP/SL in Hedge Mode for BingX and BinanceUSDM
+            if (longExchangeId === 'bingx') {
+                longTpSlParams.positionSide = 'LONG';
+            } else if (longExchangeId === 'binanceusdm') {
+                longTpSlParams.positionSide = 'LONG';
+            }
 
-            await longExchange.createOrder(
-                longOriginalSymbol,
-                'STOP_MARKET',
-                'sell',
-                longOrder.amount, // amount should be the actual filled amount
-                undefined,
-                { 'stopPrice': parseFloat(longSlPriceToOrder), ...longTpSlParams }
-            );
-            safeLog('log', `[BOT_TRADE] ✅ Đặt SL cho LONG ${longExchangeId} thành công.`);
+            // FIX: Check if stopPrice > 0
+            if (parseFloat(longSlPriceToOrder) > 0) {
+                await longExchange.createOrder(
+                    longOriginalSymbol,
+                    'STOP_MARKET',
+                    'sell',
+                    longOrder.amount, // amount should be the actual filled amount
+                    undefined,
+                    { 'stopPrice': parseFloat(longSlPriceToOrder), ...longTpSlParams }
+                );
+                safeLog('log', `[BOT_TRADE] ✅ Đặt SL cho LONG ${longExchangeId} thành công.`);
+            } else {
+                safeLog('warn', `[BOT_TRADE] ⚠️ Không đặt SL cho LONG ${longExchangeId} vì stopPrice <= 0 (${longSlPriceToOrder}).`);
+            }
         } catch (slLongError) {
             safeLog('error', `[BOT_TRADE] ❌ Lỗi đặt SL cho LONG ${longExchangeId}: ${slLongError.message}`, slLongError);
         }
 
         try {
-            const longTpSlParams = { 'reduceOnly': true };
-            if (longExchangeId === 'bingx') longTpSlParams.positionSide = 'LONG';
-            else if (longExchangeId === 'binanceusdm') longTpSlParams.positionSide = 'LONG'; // FIX: Add positionSide for BinanceUSDM TP/SL
+            const longTpSlParams = {};
+            // FIX: Remove 'reduceOnly' for TP/SL in Hedge Mode for BingX and BinanceUSDM
+            if (longExchangeId === 'bingx') {
+                longTpSlParams.positionSide = 'LONG';
+            } else if (longExchangeId === 'binanceusdm') {
+                longTpSlParams.positionSide = 'LONG';
+            }
 
-            await longExchange.createOrder(
-                longOriginalSymbol,
-                'TAKE_PROFIT_MARKET',
-                'sell',
-                longOrder.amount, // amount should be the actual filled amount
-                undefined,
-                { 'stopPrice': parseFloat(longTpPriceToOrder), ...longTpSlParams }
-            );
-            safeLog('log', `[BOT_TRADE] ✅ Đặt TP cho LONG ${longExchangeId} thành công.`);
+            // FIX: Check if stopPrice > 0
+            if (parseFloat(longTpPriceToOrder) > 0) {
+                await longExchange.createOrder(
+                    longOriginalSymbol,
+                    'TAKE_PROFIT_MARKET',
+                    'sell',
+                    longOrder.amount, // amount should be the actual filled amount
+                    undefined,
+                    { 'stopPrice': parseFloat(longTpPriceToOrder), ...longTpSlParams }
+                );
+                safeLog('log', `[BOT_TRADE] ✅ Đặt TP cho LONG ${longExchangeId} thành công.`);
+            } else {
+                safeLog('warn', `[BOT_TRADE] ⚠️ Không đặt TP cho LONG ${longExchangeId} vì stopPrice <= 0 (${longTpPriceToOrder}).`);
+            }
         } catch (tpLongError) {
             safeLog('error', `[BOT_TRADE] ❌ Lỗi đặt TP cho LONG ${longExchangeId}: ${tpLongError.message}`, tpLongError);
         }
@@ -537,19 +585,19 @@ async function closeTradesAndCalculatePnL() {
             }
         } catch (e) { safeLog('warn', `[BOT_PNL] Lỗi khi hủy lệnh chờ cho ${longOriginalSymbol} trên ${longExchange}: ${e.message}`, e); }
 
-        // Parameters for closing orders on BingX (Hedge Mode) and BinanceUSDM
+        // Parameters for closing orders on BingX (Hedge Mode) and BinanceUSDM (Hedge Mode)
         const closeShortParams = {};
         if (shortExchange === 'bingx') {
             closeShortParams.positionSide = 'SHORT';
-        } else if (shortExchange === 'binanceusdm') { // FIX: Add positionSide for BinanceUSDM closing order
-            closeShortParams.positionSide = 'SHORT';
+        } else if (shortExchange === 'binanceusdm') {
+            closeShortParams.positionSide = 'SHORT'; // FIX: Add positionSide for BinanceUSDM closing order
         }
 
         const closeLongParams = {};
         if (longExchange === 'bingx') {
             closeLongParams.positionSide = 'LONG';
-        } else if (longExchange === 'binanceusdm') { // FIX: Add positionSide for BinanceUSDM closing order
-            closeLongParams.positionSide = 'LONG';
+        } else if (longExchange === 'binanceusdm') {
+            closeLongParams.positionSide = 'LONG'; // FIX: Add positionSide for BinanceUSDM closing order
         }
 
         safeLog('log', `[BOT_PNL] Đóng vị thế SHORT ${coin} trên ${shortExchange} (amount: ${shortOrderAmount})...`);
