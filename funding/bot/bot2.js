@@ -568,7 +568,10 @@ async function closeTradesAndCalculatePnL() {
 
 let serverDataGlobal = null;
 
-async function mainBotLoop() { // ĐÃ ĐÁNH DẤU LÀ ASYNC
+// HÀM QUAN TRỌNG CẦN LÀ ASYNC
+async function mainBotLoop() { 
+    safeLog('debug', '[MAIN_BOT_LOOP] Entering async mainBotLoop.'); // Log để xác nhận phiên bản này đang chạy
+    
     if (botLoopIntervalId) clearTimeout(botLoopIntervalId);
 
     // Đã loại bỏ các trạng thái TRANSFERRING_FUNDS khỏi điều kiện dừng chung
@@ -670,9 +673,7 @@ async function mainBotLoop() { // ĐÃ ĐÁNH DẤU LÀ ASYNC
         }
     }
 
-    // Call mainBotLoop again after 1 second
-    // It's good practice to ensure the interval doesn't pile up if an async operation takes longer than 1 second.
-    // However, for this loop, a simple setTimeout is fine as it's the core loop, and long awaits are handled.
+    // Lặp lại vòng lặp sau 1 giây
     botLoopIntervalId = setTimeout(() => { mainBotLoop(); }, 1000); 
 }
 
