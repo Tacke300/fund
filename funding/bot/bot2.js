@@ -118,7 +118,7 @@ async function fetchDataFromServer() {
             throw new Error(`HTTP error! status: ${response.status}`);
         }
         const data = await response.json();
-        safeLog('debug', '[SERVER_DATA_FETCHED]', data); // Log data returned from server
+        // safeLog('debug', '[SERVER_DATA_FETCHED]', data); // Dòng này đã được comment/xóa
         return data;
     } catch (error) {
         safeLog('error', `[BOT] ❌ Lỗi khi lấy dữ liệu từ server: ${error.message}`, error);
@@ -211,7 +211,7 @@ async function processServerData(serverData) {
 
             tempAllOpportunities.push(op);
 
-            // Select the best opportunity for display (e.g., highest PnL, closest funding time)
+            // Select the best opportunity for display (e.g., highest PnL, closer funding time)
             if (!bestForDisplay ||
                 op.estimatedPnl > bestForDisplay.estimatedPnl || // Prefer higher PnL
                 (op.estimatedPnl === bestForDisplay.estimatedPnl && minutesUntilFunding < bestForDisplay.details.minutesUntilFunding) // Then closer funding
