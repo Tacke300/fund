@@ -279,7 +279,8 @@ async function executeTrades(opportunity, percentageToUse) {
     let shortOrder = null, longOrder = null;
 
     try {
-        await shortExchange.loadMarkets(true); // Load markets to ensure proper symbol handling
+        // Load markets for accurate symbol information and pre-checks
+        await shortExchange.loadMarkets(true);
         await longExchange.loadMarkets(true);
 
         const tickerShort = await shortExchange.fetchTicker(shortOriginalSymbol);
@@ -295,45 +296,46 @@ async function executeTrades(opportunity, percentageToUse) {
 
         const commonLeverage = opportunity.commonLeverage || 1;
 
-        // Set leverage first for the symbols
+        // --- SỬA LỖI CÀI ĐẶT ĐÒN BẨY CHO SHORT SIDE ---
         try {
-            // Đảm bảo symbol là string
             const symbolToUseShort = typeof shortOriginalSymbol === 'string' ? shortOriginalSymbol : String(shortOriginalSymbol);
             safeLog('debug', `[DEBUG LEV] Đặt đòn bẩy SHORT cho ${shortExchangeId}: Symbol="${symbolToUseShort}", Leverage=${commonLeverage}`);
             if (shortExchange.has['setLeverage']) {
-                if (shortExchangeId === 'bingx') {
-                    // SỬA LỖI: BingX yêu cầu tham số 'side' cho setLeverage
-                    await shortExchange.setLeverage(symbolToUseShort, commonLeverage, { 'side': 'BOTH' });
-                } else if (shortExchangeId === 'binanceusdm') {
-                    // SỬA LỖI: Chuẩn hóa symbol cho Binance. CCXT thường xử lý symbol thống nhất
-                    // Nếu lỗi vẫn xảy ra, có thể cần kiểm tra market id cụ thể: shortExchange.market(symbolToUseShort).id
-                    await shortExchange.setLeverage(symbolToUseShort, commonLeverage);
+                // Kiểm tra xem symbol có tồn tại trong markets không
+                if (!shortExchange.markets[symbolToUseShort]) {
+                    safeLog('warn', `⚠️ Symbol ${symbolToUseShort} không tồn tại trên ${shortExchangeId} khi đặt đòn bẩy. Bỏ qua đặt đòn bẩy cho bên SHORT.`);
                 } else {
-                    await shortExchange.setLeverage(symbolToUseShort, commonLeverage);
+                    const leverageParams = (shortExchangeId === 'bingx') ? { 'side': 'BOTH' } : {};
+                    // CCXT setLeverage order: leverage, symbol, params
+                    await shortExchange.setLeverage(commonLeverage, symbolToUseShort, leverageParams);
+                    safeLog('log', `[BOT_TRADE] ✅ Đặt đòn bẩy x${commonLeverage} cho SHORT ${shortOriginalSymbol} trên ${shortExchangeId}.`);
                 }
+            } else {
+                safeLog('warn', `[BOT_TRADE] ⚠️ Sàn ${shortExchangeId} không hỗ trợ chức năng setLeverage.`);
             }
-            safeLog('log', `[BOT_TRADE] ✅ Đặt đòn bẩy x${commonLeverage} cho SHORT ${shortOriginalSymbol} trên ${shortExchangeId}.`);
         } catch (levErr) {
-            safeLog('warn', `[BOT_TRADE] ⚠️ Lỗi đặt đòn bẩy cho SHORT ${shortOriginalSymbol} trên ${shortExchangeId}: ${levErr.message}. Tiếp tục mà không đảm bảo đòn bẩy.`, levErr);
+            safeLog('error', `[BOT_TRADE] ❌ Lỗi đặt đòn bẩy cho SHORT ${shortOriginalSymbol} trên ${shortExchangeId}: ${levErr.message}. Tiếp tục mà không đảm bảo đòn bẩy.`, levErr);
         }
+
+        // --- SỬA LỖI CÀI ĐẶT ĐÒN BẨY CHO LONG SIDE ---
         try {
-            // Đảm bảo symbol là string
             const symbolToUseLong = typeof longOriginalSymbol === 'string' ? longOriginalSymbol : String(longOriginalSymbol);
             safeLog('debug', `[DEBUG LEV] Đặt đòn bẩy LONG cho ${longExchangeId}: Symbol="${symbolToUseLong}", Leverage=${commonLeverage}`);
             if (longExchange.has['setLeverage']) {
-                if (longExchangeId === 'bingx') {
-                    // SỬA LỖI: BingX yêu cầu tham số 'side' cho setLeverage
-                    await longExchange.setLeverage(symbolToUseLong, commonLeverage, { 'side': 'BOTH' });
-                } else if (longExchangeId === 'binanceusdm') {
-                     // SỬA LỖI: Chuẩn hóa symbol cho Binance
-                    await longExchange.setLeverage(symbolToUseLong, commonLeverage);
+                // Kiểm tra xem symbol có tồn tại trong markets không
+                if (!longExchange.markets[symbolToUseLong]) {
+                    safeLog('warn', `⚠️ Symbol ${symbolToUseLong} không tồn tại trên ${longExchangeId} khi đặt đòn bẩy. Bỏ qua đặt đòn bẩy cho bên LONG.`);
                 } else {
-                    await longExchange.setLeverage(symbolToUseLong, commonLeverage);
+                    const leverageParams = (longExchangeId === 'bingx') ? { 'side': 'BOTH' } : {};
+                    // CCXT setLeverage order: leverage, symbol, params
+                    await longExchange.setLeverage(commonLeverage, symbolToUseLong, leverageParams);
+                    safeLog('log', `[BOT_TRADE] ✅ Đặt đòn bẩy x${commonLeverage} cho LONG ${longOriginalSymbol} trên ${longExchangeId}.`);
                 }
+            } else {
+                safeLog('warn', `[BOT_TRADE] ⚠️ Sàn ${longExchangeId} không hỗ trợ chức năng setLeverage.`);
             }
-            safeLog('log', `[BOT_TRADE] ✅ Đặt đòn bẩy x${commonLeverage} cho LONG ${longOriginalSymbol} trên ${longExchangeId}.`);
         } catch (levErr) {
-            safeLog('warn', `[BOT_TRADE] ⚠️ Lỗi đặt đòn bẩy cho LONG ${longOriginalSymbol} trên ${longExchangeId}: ${levErr.message}. Tiếp tục mà không đảm bảo đòn bẩy.`, levErr);
+            safeLog('error', `[BOT_TRADE] ❌ Lỗi đặt đòn bẩy cho LONG ${longOriginalSymbol} trên ${longExchangeId}: ${levErr.message}. Tiếp tục mà không đảm bảo đòn bẩy.`, levErr);
         }
 
         const shortAmount = (shortCollateral * commonLeverage) / shortEntryPrice;
