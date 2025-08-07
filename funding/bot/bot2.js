@@ -638,11 +638,22 @@ async function closeTradesAndCalculatePnL() {
             safeLog('log', `[BOT_PNL] PnL SHORT tính từ số dư (do lỗi): ${shortSidePnl.toFixed(2)} USDT.`);
         }
 
-        // Lấy PnL thực tế cho bên LONG
+        // Lấy PnL thực tế cho bên LONG (đoạn code dành cho BingX trong trường hợp này)
         try {
             let pnlFound = false;
-            const longTrades = await exchanges[longExchange].fetchMyTrades(longOriginalSymbol, undefined, undefined, { orderId: closeLongOrder.id, limit: 10 }); // Lấy thêm trade để đảm bảo tìm thấy
+            // CẬP NHẬT: Tăng thời gian chờ cho BingX để API kịp cập nhật PnL
+            if (longExchange === 'bingx') {
+                safeLog('log', `[BOT_PNL] Đợi thêm 5s vì BingX có thể delay trả về realizedPnl...`);
+                await sleep(5000); // thêm 5 giây chờ riêng cho BingX
+            }
+
+            // Cố gắng lấy realizedPnl từ lịch sử trade của lệnh đóng
+            const longTrades = await exchanges[longExchange].fetchMyTrades(longOriginalSymbol, undefined, undefined, { orderId: closeLongOrder.id, limit: 10 });
             for (const trade of longTrades) {
+                // CẬP NHẬT: Thêm debug log để kiểm tra cấu trúc trade.info
+                safeLog('debug', `[BOT_PNL] DEBUG trade.info for ${longExchange} (order ${trade.order}): ${JSON.stringify(trade.info)}`);
+
+                // Kiểm tra nếu trade thuộc lệnh đóng và có trường realizedPnl
                 if (trade.order === closeLongOrder.id && trade.info?.realizedPnl !== undefined) {
                     longSidePnl = parseFloat(trade.info.realizedPnl);
                     safeLog('log', `[BOT_PNL] PnL LONG từ trade ${trade.id} (order ${closeLongOrder.id}): ${longSidePnl.toFixed(2)} USDT.`);
@@ -650,17 +661,18 @@ async function closeTradesAndCalculatePnL() {
                     break;
                 }
             }
-            // Xác nhận: BingX PnL thường không trả về từ fetchMyTrades ngay lập tức với realizedPnl.
-            // Phương pháp fallback tính từ số dư là đáng tin cậy.
+            // Nếu không tìm thấy PnL từ trade history (thường xảy ra với BingX vì realizedPnl có thể không có sẵn ngay lập tức)
             if (!pnlFound) {
                 safeLog('warn', `[BOT_PNL] Không tìm thấy PnL thực tế cho lệnh LONG ${closeLongOrder.id} trên ${longExchange} từ trade history. Cập nhật số dư và tính từ đó. (Phương pháp fallback này đáng tin cậy)`);
                 await updateBalances(); // Cập nhật balance để có số dư mới nhất
+                // Tính PnL bằng cách so sánh số dư khả dụng hiện tại với số collateral ban đầu
                 longSidePnl = (balances[longExchange]?.available || 0) - currentTradeDetails.longCollateral;
                 safeLog('log', `[BOT_PNL] PnL LONG tính từ số dư ${longExchange}: ${longSidePnl.toFixed(2)} USDT.`);
             }
         } catch (e) {
             safeLog('error', `[BOT_PNL] ❌ Lỗi khi lấy PnL thực tế cho LONG ${longExchange}: ${e.message}`, e);
-            await updateBalances(); // Cập nhật balance để có số dư mới nhất
+            // Nếu có lỗi khi truy xuất, vẫn fallback về cách tính từ số dư
+            await updateBalances();
             longSidePnl = (balances[longExchange]?.available || 0) - currentTradeDetails.longCollateral;
             safeLog('log', `[BOT_PNL] PnL LONG tính từ số dư (do lỗi): ${longSidePnl.toFixed(2)} USDT.`);
         }
