@@ -278,10 +278,18 @@ async function executeTrades(opportunity, percentageToUse) {
     let tradeSuccess = true;
     let shortOrder = null, longOrder = null;
 
+    // Khai báo market object ở đây để chúng khả dụng ngoài khối try-catch
+    let shortMarket = null;
+    let longMarket = null;
+
     try {
         // Load markets for accurate symbol information and pre-checks
         await shortExchange.loadMarkets(true);
         await longExchange.loadMarkets(true);
+
+        // Lấy market object sau khi loadMarkets
+        shortMarket = shortExchange.market(shortOriginalSymbol);
+        longMarket = longExchange.market(longOriginalSymbol);
 
         const tickerShort = await shortExchange.fetchTicker(shortOriginalSymbol);
         const tickerLong = await longExchange.fetchTicker(longOriginalSymbol);
@@ -298,14 +306,12 @@ async function executeTrades(opportunity, percentageToUse) {
 
         // --- SỬA LỖI CÀI ĐẶT ĐÒN BẨY CHO SHORT SIDE ---
         try {
-            // Lấy market object để có unified symbol (market.symbol)
-            const shortMarket = shortExchange.market(shortOriginalSymbol);
             safeLog('debug', `[DEBUG LEV] Đặt đòn bẩy SHORT cho ${shortExchangeId}: Original Symbol="${shortOriginalSymbol}", Unified Symbol="${shortMarket ? shortMarket.symbol : 'N/A'}", Leverage=${commonLeverage}`);
 
             if (!shortMarket) { // If market object is not found (meaning symbol is unrecognized by CCXT)
                 safeLog('warn', `⚠️ Market cho symbol ${shortOriginalSymbol} không tìm thấy trên ${shortExchangeId}. Bỏ qua đặt đòn bẩy cho bên SHORT.`);
             } else if (shortExchange.has['setLeverage']) {
-                const leverageParams = (shortExchangeId === 'bingx') ? { 'side': 'BOTH' } : {};
+                const leverageParams = (shortExchangeId === 'bingx') ? { 'side': 'SHORT' } : {}; // SỬA LỖI: BingX Hedge Mode yêu cầu 'SHORT'
                 // CCXT setLeverage order (v4.x): leverage, symbol, params
                 await shortExchange.setLeverage(commonLeverage, shortMarket.symbol, leverageParams);
                 safeLog('log', `[BOT_TRADE] ✅ Đặt đòn bẩy x${commonLeverage} cho SHORT ${shortOriginalSymbol} trên ${shortExchangeId}.`);
@@ -318,14 +324,12 @@ async function executeTrades(opportunity, percentageToUse) {
 
         // --- SỬA LỖI CÀI ĐẶT ĐÒN BẨY CHO LONG SIDE ---
         try {
-            // Lấy market object để có unified symbol (market.symbol)
-            const longMarket = longExchange.market(longOriginalSymbol);
             safeLog('debug', `[DEBUG LEV] Đặt đòn bẩy LONG cho ${longExchangeId}: Original Symbol="${longOriginalSymbol}", Unified Symbol="${longMarket ? longMarket.symbol : 'N/A'}", Leverage=${commonLeverage}`);
 
             if (!longMarket) { // If market object is not found
                 safeLog('warn', `⚠️ Market cho symbol ${longOriginalSymbol} không tìm thấy trên ${longExchangeId}. Bỏ qua đặt đòn bẩy cho bên LONG.`);
             } else if (longExchange.has['setLeverage']) {
-                const leverageParams = (longExchangeId === 'bingx') ? { 'side': 'BOTH' } : {};
+                const leverageParams = (longExchangeId === 'bingx') ? { 'side': 'LONG' } : {}; // SỬA LỖI: BingX Hedge Mode yêu cầu 'LONG'
                 // CCXT setLeverage order (v4.x): leverage, symbol, params
                 await longExchange.setLeverage(commonLeverage, longMarket.symbol, leverageParams);
                 safeLog('log', `[BOT_TRADE] ✅ Đặt đòn bẩy x${commonLeverage} cho LONG ${longOriginalSymbol} trên ${longExchangeId}.`);
@@ -729,6 +733,7 @@ async function mainBotLoop() {
 
     const minuteAligned = Math.floor(now.getTime() / (60 * 1000));
 
+    // Cập nhật dữ liệu từ server mỗi DATA_FETCH_INTERVAL_SECONDS
     if (currentSecond % DATA_FETCH_INTERVAL_SECONDS === 0 && LAST_ACTION_TIMESTAMP.dataFetch !== currentSecond) {
         LAST_ACTION_TIMESTAMP.dataFetch = currentSecond;
 
@@ -740,6 +745,7 @@ async function mainBotLoop() {
     }
 
     // Cập nhật: Chọn cơ hội vào phút 58
+    // Bot sẽ CHỌN cơ hội tốt nhất (gần funding nhất, PnL cao nhất) để "đặt chỗ"
     if (currentMinute === 58 && currentSecond >= 0 && currentSecond < 5 && botState === 'RUNNING' && !currentTradeDetails) {
         if (LAST_ACTION_TIMESTAMP.selectionTime !== minuteAligned) {
             LAST_ACTION_TIMESTAMP.selectionTime = minuteAligned;
@@ -747,12 +753,20 @@ async function mainBotLoop() {
             safeLog('log', `[BOT_LOOP] 🌟 Kích hoạt lựa chọn cơ hội để THỰC HIỆN tại phút ${currentMinute}:${currentSecond} giây.`);
 
             let bestOpportunityFoundForExecution = null;
-            // Cập nhật: Duyệt qua tất cả cơ hội và chọn cơ hội gần funding nhất với PnL đủ điều kiện.
-            // Loại bỏ điều kiện MAX_MINUTES_UNTIL_FUNDING ở bước CHỌN, chỉ giữ nó ở bước THỰC THI.
+            let debugOpportunityCandidates = []; // Để debug các cơ hội được xem xét
+
             for (const op of allCurrentOpportunities) {
                 const minutesUntilFunding = (op.nextFundingTime - now.getTime()) / (1000 * 60);
+                op.details.minutesUntilFunding = minutesUntilFunding; // Gán lại vào op.details để sử dụng sau này
 
                 if (op.estimatedPnl >= MIN_PNL_PERCENTAGE && minutesUntilFunding > 0) {
+                    debugOpportunityCandidates.push({
+                        coin: op.coin,
+                        exchanges: op.exchanges,
+                        estimatedPnl: op.estimatedPnl.toFixed(2),
+                        minutesUntilFunding: minutesUntilFunding.toFixed(1)
+                    });
+
                     // Ưu tiên funding gần hơn, nếu funding như nhau thì ưu tiên PnL cao hơn
                     if (!bestOpportunityFoundForExecution ||
                         minutesUntilFunding < bestOpportunityFoundForExecution.details.minutesUntilFunding ||
@@ -762,6 +776,11 @@ async function mainBotLoop() {
                     }
                 }
             }
+
+            if (debugOpportunityCandidates.length > 0) {
+                safeLog('debug', `[BOT_LOOP] Các cơ hội đủ điều kiện (PnL >= ${MIN_PNL_PERCENTAGE}%, Funding > 0):`, JSON.stringify(debugOpportunityCandidates, null, 2));
+            }
+
 
             if (bestOpportunityFoundForExecution) {
                 currentSelectedOpportunityForExecution = bestOpportunityFoundForExecution;
@@ -776,7 +795,7 @@ async function mainBotLoop() {
 
                 // Cập nhật hiển thị vốn dự kiến theo cách tính mới
                 const shortExId = currentSelectedOpportunityForExecution.details.shortExchange.toLowerCase() === 'binance' ? 'binanceusdm' : currentSelectedOpportunityForExecution.details.shortExchange.toLowerCase();
-                const longExId = currentSelectedOpportunityForExecution.details.longExchange.toLowerCase() === 'binance' ? 'binanceusdm' : currentSelectedOpportunityForExecution.details.longExchange.toLowerCase();
+                const longExId = currentSelectedOpportunityForExecution.details.longExchange.toLowerCase() === 'binance' ? 'binanceusdm' : currentSelectedOpportunityForExecution.toLowerCase();
                 const minAvailableBalance = Math.min(balances[shortExId]?.available || 0, balances[longExId]?.available || 0);
                 bestPotentialOpportunityForDisplay.estimatedTradeCollateral = (minAvailableBalance * (currentPercentageToUse / 100)).toFixed(2);
                 safeLog('log', `  Vốn dự kiến: ${bestPotentialOpportunityForDisplay.estimatedTradeCollateral} USDT`);
@@ -790,7 +809,7 @@ async function mainBotLoop() {
         }
     }
 
-    // Cập nhật: Kiểm tra lại điều kiện funding ngay trước khi mở lệnh
+    // Cập nhật: Kiểm tra lại điều kiện funding ngay trước khi mở lệnh (phút 59, giây 55-59)
     if (currentMinute === 59 && currentSecond >= 55 && currentSecond < 59 && botState === 'RUNNING' && currentSelectedOpportunityForExecution && !currentTradeDetails) {
         if (LAST_ACTION_TIMESTAMP.tradeExecution !== minuteAligned) {
             LAST_ACTION_TIMESTAMP.tradeExecution = minuteAligned;
@@ -817,6 +836,7 @@ async function mainBotLoop() {
         }
     }
 
+    // Đóng lệnh và tính PnL vào phút 00:05
     if (currentMinute === 0 && currentSecond >= 5 && currentSecond < 10 && botState === 'RUNNING' && currentTradeDetails?.status === 'OPEN') {
         if (LAST_ACTION_TIMESTAMP.closeTrade !== minuteAligned) {
             LAST_ACTION_TIMESTAMP.closeTrade = minuteAligned;
