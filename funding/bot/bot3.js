@@ -43,7 +43,7 @@ const DATA_FETCH_INTERVAL_SECONDS = 5;
 const HOURLY_FETCH_TIME_MINUTE = 45;
 
 const SL_PERCENT_OF_COLLATERAL = 700;
-const TP_PERCENT_OF_COLLATERAL = 700; // ĐÃ SỬA: Thay đổi từ 8386 thành 700
+const TP_PERCENT_OF_COLLATERAL = 700; 
 
 const DISABLED_EXCHANGES = ['bitget'];
 
@@ -298,13 +298,16 @@ async function executeTrades(opportunity, percentageToUse) {
         // Set leverage first for the symbols
         try {
             const symbolToUseShort = typeof shortOriginalSymbol === 'string' ? shortOriginalSymbol : String(shortOriginalSymbol);
+            safeLog('debug', `[DEBUG LEV] Đặt đòn bẩy SHORT cho ${shortExchangeId}: Symbol="${symbolToUseShort}", Leverage=${commonLeverage}`);
             if (shortExchange.has['setLeverage']) {
                 if (shortExchangeId === 'bingx') {
-                    // ĐÃ SỬA: BingX yêu cầu tham số 'side' cho setLeverage trong Hedge Mode
+                    // SỬA LỖI: BingX yêu cầu tham số 'side' cho setLeverage
                     await shortExchange.setLeverage(symbolToUseShort, commonLeverage, { 'side': 'BOTH' }); 
                 } else if (shortExchangeId === 'binanceusdm') {
-                    // ĐÃ SỬA: Thêm marginMode cho BinanceUSDM để cung cấp ngữ cảnh rõ ràng
-                    await shortExchange.setLeverage(symbolToUseShort, commonLeverage, { 'marginMode': 'cross' }); 
+                    // SỬA LỖI: Chuẩn hóa symbol cho Binance và thử không có marginMode trước
+                    const binanceSymbolId = shortExchange.market(symbolToUseShort).id; // Chuyển đổi TOWNS/USDT:USDT -> TOWNSUSDT
+                    safeLog('debug', `[DEBUG LEV] Binance Normalized Symbol ID: ${binanceSymbolId}`);
+                    await shortExchange.setLeverage(binanceSymbolId, commonLeverage); 
                 } else {
                     await shortExchange.setLeverage(symbolToUseShort, commonLeverage);
                 }
@@ -315,13 +318,16 @@ async function executeTrades(opportunity, percentageToUse) {
         }
         try {
             const symbolToUseLong = typeof longOriginalSymbol === 'string' ? longOriginalSymbol : String(longOriginalSymbol);
+            safeLog('debug', `[DEBUG LEV] Đặt đòn bẩy LONG cho ${longExchangeId}: Symbol="${symbolToUseLong}", Leverage=${commonLeverage}`);
             if (longExchange.has['setLeverage']) {
                 if (longExchangeId === 'bingx') {
-                    // ĐÃ SỬA: BingX yêu cầu tham số 'side' cho setLeverage trong Hedge Mode
+                    // SỬA LỖI: BingX yêu cầu tham số 'side' cho setLeverage
                     await longExchange.setLeverage(symbolToUseLong, commonLeverage, { 'side': 'BOTH' });
                 } else if (longExchangeId === 'binanceusdm') {
-                    // ĐÃ SỬA: Thêm marginMode cho BinanceUSDM để cung cấp ngữ cảnh rõ ràng
-                    await longExchange.setLeverage(symbolToUseLong, commonLeverage, { 'marginMode': 'cross' });
+                     // SỬA LỖI: Chuẩn hóa symbol cho Binance và thử không có marginMode trước
+                    const binanceSymbolId = longExchange.market(symbolToUseLong).id; // Chuyển đổi TOWNS/USDT:USDT -> TOWNSUSDT
+                    safeLog('debug', `[DEBUG LEV] Binance Normalized Symbol ID: ${binanceSymbolId}`);
+                    await longExchange.setLeverage(binanceSymbolId, commonLeverage);
                 } else {
                     await longExchange.setLeverage(symbolToUseLong, commonLeverage);
                 }
@@ -356,14 +362,14 @@ async function executeTrades(opportunity, percentageToUse) {
         if (shortExchangeId === 'bingx') {
             shortParams.positionSide = 'SHORT';
         } else if (shortExchangeId === 'binanceusdm') {
-            shortParams.positionSide = 'SHORT'; // FIX: Add positionSide for BinanceUSDM Hedge Mode
+            shortParams.positionSide = 'SHORT'; 
         }
         
         const longParams = {};
         if (longExchangeId === 'bingx') {
             longParams.positionSide = 'LONG';
         } else if (longExchangeId === 'binanceusdm') {
-            longParams.positionSide = 'LONG'; // FIX: Add positionSide for BinanceUSDM Hedge Mode
+            longParams.positionSide = 'LONG';
         }
 
         safeLog('log', `[BOT_TRADE] Mở SHORT ${shortAmountToOrder} ${shortOriginalSymbol} trên ${shortExchangeId} với giá ${shortEntryPrice.toFixed(4)}...`);
@@ -423,20 +429,18 @@ async function executeTrades(opportunity, percentageToUse) {
         // Đặt TP/SL cho vị thế SHORT
         try {
             const shortTpSlParams = {};
-            // FIX: Remove 'reduceOnly' for TP/SL in Hedge Mode for BingX and BinanceUSDM
             if (shortExchangeId === 'bingx') {
                 shortTpSlParams.positionSide = 'SHORT';
             } else if (shortExchangeId === 'binanceusdm') {
                 shortTpSlParams.positionSide = 'SHORT';
             }
             
-            // FIX: Check if stopPrice > 0
             if (parseFloat(shortSlPriceToOrder) > 0) {
                 await shortExchange.createOrder(
                     shortOriginalSymbol,
                     'STOP_MARKET',
                     'buy',
-                    shortOrder.amount, // amount should be the actual filled amount
+                    shortOrder.amount, 
                     undefined,
                     { 'stopPrice': parseFloat(shortSlPriceToOrder), ...shortTpSlParams }
                 );
@@ -450,20 +454,18 @@ async function executeTrades(opportunity, percentageToUse) {
 
         try {
             const shortTpSlParams = {};
-            // FIX: Remove 'reduceOnly' for TP/SL in Hedge Mode for BingX and BinanceUSDM
             if (shortExchangeId === 'bingx') {
                 shortTpSlParams.positionSide = 'SHORT';
             } else if (shortExchangeId === 'binanceusdm') {
                 shortTpSlParams.positionSide = 'SHORT';
             }
 
-            // FIX: Check if stopPrice > 0
             if (parseFloat(shortTpPriceToOrder) > 0) {
                 await shortExchange.createOrder(
                     shortOriginalSymbol,
                     'TAKE_PROFIT_MARKET',
                     'buy',
-                    shortOrder.amount, // amount should be the actual filled amount
+                    shortOrder.amount, 
                     undefined,
                     { 'stopPrice': parseFloat(shortTpPriceToOrder), ...shortTpSlParams }
                 );
@@ -478,20 +480,18 @@ async function executeTrades(opportunity, percentageToUse) {
         // Đặt TP/SL cho vị thế LONG
         try {
             const longTpSlParams = {};
-            // FIX: Remove 'reduceOnly' for TP/SL in Hedge Mode for BingX and BinanceUSDM
             if (longExchangeId === 'bingx') {
                 longTpSlParams.positionSide = 'LONG';
             } else if (longExchangeId === 'binanceusdm') {
                 longTpSlParams.positionSide = 'LONG';
             }
 
-            // FIX: Check if stopPrice > 0
             if (parseFloat(longSlPriceToOrder) > 0) {
                 await longExchange.createOrder(
                     longOriginalSymbol,
                     'STOP_MARKET',
                     'sell',
-                    longOrder.amount, // amount should be the actual filled amount
+                    longOrder.amount, 
                     undefined,
                     { 'stopPrice': parseFloat(longSlPriceToOrder), ...longTpSlParams }
                 );
@@ -505,20 +505,18 @@ async function executeTrades(opportunity, percentageToUse) {
 
         try {
             const longTpSlParams = {};
-            // FIX: Remove 'reduceOnly' for TP/SL in Hedge Mode for BingX and BinanceUSDM
             if (longExchangeId === 'bingx') {
                 longTpSlParams.positionSide = 'LONG';
             } else if (longExchangeId === 'binanceusdm') {
                 longTpSlParams.positionSide = 'LONG';
             }
 
-            // FIX: Check if stopPrice > 0
             if (parseFloat(longTpPriceToOrder) > 0) {
                 await longExchange.createOrder(
                     longOriginalSymbol,
                     'TAKE_PROFIT_MARKET',
                     'sell',
-                    longOrder.amount, // amount should be the actual filled amount
+                    longOrder.amount, 
                     undefined,
                     { 'stopPrice': parseFloat(longTpPriceToOrder), ...longTpSlParams }
                 );
@@ -586,14 +584,14 @@ async function closeTradesAndCalculatePnL() {
         if (shortExchange === 'bingx') {
             closeShortParams.positionSide = 'SHORT';
         } else if (shortExchange === 'binanceusdm') {
-            closeShortParams.positionSide = 'SHORT'; // FIX: Add positionSide for BinanceUSDM closing order
+            closeShortParams.positionSide = 'SHORT';
         }
 
         const closeLongParams = {};
         if (longExchange === 'bingx') {
             closeLongParams.positionSide = 'LONG';
         } else if (longExchange === 'binanceusdm') {
-            closeLongParams.positionSide = 'LONG'; // FIX: Add positionSide for BinanceUSDM closing order
+            closeLongParams.positionSide = 'LONG';
         }
 
         safeLog('log', `[BOT_PNL] Đóng vị thế SHORT ${coin} trên ${shortExchange} (amount: ${shortOrderAmount})...`);
@@ -604,75 +602,62 @@ async function closeTradesAndCalculatePnL() {
         const closeLongOrder = await exchanges[longExchange].createMarketSellOrder(longOriginalSymbol, longOrderAmount, closeLongParams);
         safeLog('log', `[BOT_PNL] ✅ Vị thế LONG trên ${longExchange} đã đóng. Order ID: ${closeLongOrder.id}`);
 
-        // ĐÃ SỬA: Đợi 5 giây để sàn xử lý dữ liệu PnL, sau đó lấy PnL thực tế
-        safeLog('log', '[BOT_PNL] Đợi 5 giây để sàn xử lý dữ liệu PnL...');
-        await sleep(5000); 
+        // SỬA ĐỔI: Đợi 30 giây để sàn xử lý dữ liệu PnL, sau đó lấy PnL thực tế
+        safeLog('log', '[BOT_PNL] Đợi 30 giây để sàn xử lý dữ liệu PnL...');
+        await sleep(30000); 
 
         let shortSidePnl = 0;
         let longSidePnl = 0;
 
         // Lấy PnL thực tế cho bên SHORT
         try {
-            // Kiểm tra xem lệnh đóng có trả về PnL trực tiếp không (một số sàn có)
-            if (closeShortOrder.info?.realizedPnl !== undefined) {
-                shortSidePnl = parseFloat(closeShortOrder.info.realizedPnl);
-                safeLog('log', `[BOT_PNL] PnL SHORT từ lệnh đóng ${closeShortOrder.id}: ${shortSidePnl.toFixed(2)} USDT.`);
-            } else {
-                // Nếu không, tìm kiếm trong lịch sử giao dịch (fetchMyTrades)
-                const shortTrades = await exchanges[shortExchange].fetchMyTrades(shortOriginalSymbol, undefined, undefined, { orderId: closeShortOrder.id });
-                let pnlFound = false;
-                for (const trade of shortTrades) {
-                    // PnL thực tế có thể nằm trong info hoặc là một thuộc tính riêng biệt
-                    if (trade.info?.realizedPnl !== undefined) {
-                        shortSidePnl = parseFloat(trade.info.realizedPnl);
-                        safeLog('log', `[BOT_PNL] PnL SHORT từ trade ${trade.id} (order ${closeShortOrder.id}): ${shortSidePnl.toFixed(2)} USDT.`);
-                        pnlFound = true;
-                        break;
-                    }
+            let pnlFound = false;
+            // Cố gắng tìm PnL từ giao dịch (trade) cuối cùng liên quan đến lệnh đóng
+            const shortTrades = await exchanges[shortExchange].fetchMyTrades(shortOriginalSymbol, undefined, undefined, { orderId: closeShortOrder.id, limit: 10 }); // Lấy thêm trade để đảm bảo tìm thấy
+            for (const trade of shortTrades) {
+                if (trade.order === closeShortOrder.id && trade.info?.realizedPnl !== undefined) {
+                    shortSidePnl = parseFloat(trade.info.realizedPnl);
+                    safeLog('log', `[BOT_PNL] PnL SHORT từ trade ${trade.id} (order ${closeShortOrder.id}): ${shortSidePnl.toFixed(2)} USDT.`);
+                    pnlFound = true;
+                    break;
                 }
-                if (!pnlFound) {
-                    safeLog('warn', `[BOT_PNL] Không tìm thấy PnL thực tế cho lệnh SHORT ${closeShortOrder.id} trên ${shortExchange} từ trade history. Sẽ cập nhật số dư chung.`);
-                    // Phương án dự phòng: Cập nhật số dư và tính toán từ đó
-                    await exchanges[shortExchange].fetchBalance({ 'type': 'future' });
-                    // Tính PnL dựa trên chênh lệch số dư khả dụng sau khi đóng lệnh so với vốn ban đầu
-                    shortSidePnl = (balances[shortExchange]?.available || 0) - currentTradeDetails.shortCollateral;
-                    safeLog('log', `[BOT_PNL] PnL SHORT tính từ số dư ${shortExchange}: ${shortSidePnl.toFixed(2)} USDT.`);
-                }
+            }
+            // Nếu không tìm thấy PnL từ trade, hoặc sàn không cung cấp, dùng phương án dự phòng
+            if (!pnlFound) {
+                safeLog('warn', `[BOT_PNL] Không tìm thấy PnL thực tế cho lệnh SHORT ${closeShortOrder.id} trên ${shortExchange} từ trade history. Cập nhật số dư và tính từ đó.`);
+                await updateBalances(); // Cập nhật balance để có số dư mới nhất
+                shortSidePnl = (balances[shortExchange]?.available || 0) - currentTradeDetails.shortCollateral;
+                safeLog('log', `[BOT_PNL] PnL SHORT tính từ số dư ${shortExchange}: ${shortSidePnl.toFixed(2)} USDT.`);
             }
         } catch (e) {
             safeLog('error', `[BOT_PNL] ❌ Lỗi khi lấy PnL thực tế cho SHORT ${shortExchange}: ${e.message}`, e);
             // Vẫn tính PnL từ số dư làm dự phòng nếu có lỗi truy xuất
-            await exchanges[shortExchange].fetchBalance({ 'type': 'future' });
+            await updateBalances(); // Cập nhật balance để có số dư mới nhất
             shortSidePnl = (balances[shortExchange]?.available || 0) - currentTradeDetails.shortCollateral;
             safeLog('log', `[BOT_PNL] PnL SHORT tính từ số dư (do lỗi): ${shortSidePnl.toFixed(2)} USDT.`);
         }
 
         // Lấy PnL thực tế cho bên LONG
         try {
-            if (closeLongOrder.info?.realizedPnl !== undefined) {
-                longSidePnl = parseFloat(closeLongOrder.info.realizedPnl);
-                safeLog('log', `[BOT_PNL] PnL LONG từ lệnh đóng ${closeLongOrder.id}: ${longSidePnl.toFixed(2)} USDT.`);
-            } else {
-                const longTrades = await exchanges[longExchange].fetchMyTrades(longOriginalSymbol, undefined, undefined, { orderId: closeLongOrder.id });
-                let pnlFound = false;
-                for (const trade of longTrades) {
-                    if (trade.info?.realizedPnl !== undefined) {
-                        longSidePnl = parseFloat(trade.info.realizedPnl);
-                        safeLog('log', `[BOT_PNL] PnL LONG từ trade ${trade.id} (order ${closeLongOrder.id}): ${longSidePnl.toFixed(2)} USDT.`);
-                        pnlFound = true;
-                        break;
-                    }
+            let pnlFound = false;
+            const longTrades = await exchanges[longExchange].fetchMyTrades(longOriginalSymbol, undefined, undefined, { orderId: closeLongOrder.id, limit: 10 }); // Lấy thêm trade để đảm bảo tìm thấy
+            for (const trade of longTrades) {
+                if (trade.order === closeLongOrder.id && trade.info?.realizedPnl !== undefined) {
+                    longSidePnl = parseFloat(trade.info.realizedPnl);
+                    safeLog('log', `[BOT_PNL] PnL LONG từ trade ${trade.id} (order ${closeLongOrder.id}): ${longSidePnl.toFixed(2)} USDT.`);
+                    pnlFound = true;
+                    break;
                 }
-                if (!pnlFound) {
-                    safeLog('warn', `[BOT_PNL] Không tìm thấy PnL thực tế cho lệnh LONG ${closeLongOrder.id} trên ${longExchange} từ trade history. Sẽ cập nhật số dư chung.`);
-                    await exchanges[longExchange].fetchBalance({ 'type': 'future' });
-                    longSidePnl = (balances[longExchange]?.available || 0) - currentTradeDetails.longCollateral;
-                    safeLog('log', `[BOT_PNL] PnL LONG tính từ số dư ${longExchange}: ${longSidePnl.toFixed(2)} USDT.`);
-                }
+            }
+            if (!pnlFound) {
+                safeLog('warn', `[BOT_PNL] Không tìm thấy PnL thực tế cho lệnh LONG ${closeLongOrder.id} trên ${longExchange} từ trade history. Cập nhật số dư và tính từ đó.`);
+                await updateBalances(); // Cập nhật balance để có số dư mới nhất
+                longSidePnl = (balances[longExchange]?.available || 0) - currentTradeDetails.longCollateral;
+                safeLog('log', `[BOT_PNL] PnL LONG tính từ số dư ${longExchange}: ${longSidePnl.toFixed(2)} USDT.`);
             }
         } catch (e) {
             safeLog('error', `[BOT_PNL] ❌ Lỗi khi lấy PnL thực tế cho LONG ${longExchange}: ${e.message}`, e);
-            await exchanges[longExchange].fetchBalance({ 'type': 'future' });
+            await updateBalances(); // Cập nhật balance để có số dư mới nhất
             longSidePnl = (balances[longExchange]?.available || 0) - currentTradeDetails.longCollateral;
             safeLog('log', `[BOT_PNL] PnL LONG tính từ số dư (do lỗi): ${longSidePnl.toFixed(2)} USDT.`);
         }
@@ -745,11 +730,12 @@ async function mainBotLoop() {
 
             let bestOpportunityFoundForExecution = null;
             for (const op of allCurrentOpportunities) {
-                const minutesUntilFunding = op.details.minutesUntilFunding;
+                const minutesUntilFunding = (op.nextFundingTime - now.getTime()) / (1000 * 60); // Cập nhật lại minutesUntilFunding để đảm bảo tính toán thời gian chính xác nhất
+                op.details.minutesUntilFunding = minutesUntilFunding; // Gán lại vào op.details để sử dụng sau này
 
                 if (op.estimatedPnl >= MIN_PNL_PERCENTAGE &&
                     minutesUntilFunding > 0 &&
-                    minutesUntilFunding < MIN_MINUTES_FOR_EXECUTION &&
+                    minutesUntilFunding < MIN_MINUTES_FOR_EXECUTION && // Lọc các cơ hội quá gần hoặc quá xa (ví dụ: chỉ còn 1-14 phút)
                     minutesUntilFunding <= MAX_MINUTES_UNTIL_FUNDING) {
 
                     if (!bestOpportunityFoundForExecution ||
@@ -774,9 +760,7 @@ async function mainBotLoop() {
                 bestPotentialOpportunityForDisplay.estimatedTradeCollateral = (minAvailableBalanceForDisplay * (currentPercentageToUse / 100)).toFixed(2);
                 safeLog('log', `  Vốn dự kiến: ${bestPotentialOpportunityForDisplay.estimatedTradeCollateral} USDT`);
 
-                // <<-- ĐÃ LOẠI BỎ LOGIC VÀ TRẠNG THÁI CHUYỂN TIỀN Ở ĐÂY -->>
                 safeLog('log', '[BOT_LOOP] Bỏ qua bước chuyển tiền. Tiền phải có sẵn trên các sàn.');
-                // Kế tiếp là sẽ chờ đến thời điểm mở lệnh (phút 59)
 
             } else {
                 safeLog('log', `[BOT_LOOP] 🔍 Không tìm thấy cơ hội nào đủ điều kiện để THỰC HIỆN tại phút ${currentMinute}.`);
@@ -790,7 +774,7 @@ async function mainBotLoop() {
             LAST_ACTION_TIMESTAMP.tradeExecution = minuteAligned;
 
             safeLog('log', `[BOT_LOOP] ⚡ Kích hoạt mở lệnh cho cơ hội ${currentSelectedOpportunityForExecution.coin} vào phút 59:55.`);
-            botState = 'EXECUTING_TRADES'; // Vẫn giữ trạng thái này để UI cập nhật và theo dõi
+            botState = 'EXECUTING_TRADES';
             const tradeSuccess = await executeTrades(currentSelectedOpportunityForExecution, currentPercentageToUse);
             if (tradeSuccess) {
                 safeLog('log', '[BOT_LOOP] ✅ Mở lệnh hoàn tất.');
@@ -799,19 +783,17 @@ async function mainBotLoop() {
                 currentSelectedOpportunityForExecution = null;
                 currentTradeDetails = null;
             }
-            botState = 'RUNNING'; // Trả về RUNNING sau khi thực hiện xong
+            botState = 'RUNNING';
         }
     }
 
-    // THIS IS THE MODIFIED BLOCK: Now uses Promise chain directly.
     if (currentMinute === 0 && currentSecond >= 5 && currentSecond < 10 && botState === 'RUNNING' && currentTradeDetails?.status === 'OPEN') {
         if (LAST_ACTION_TIMESTAMP.closeTrade !== minuteAligned) {
             LAST_ACTION_TIMESTAMP.closeTrade = minuteAligned;
 
             safeLog('log', '[BOT_LOOP] 🛑 Kích hoạt đóng lệnh và tính PnL vào phút 00:05.');
-            botState = 'CLOSING_TRADES'; // Vẫn giữ trạng thái này để UI cập nhật và theo dõi
+            botState = 'CLOSING_TRADES';
             
-            // Calling closeTradesAndCalculatePnL and handling its Promise directly
             closeTradesAndCalculatePnL()
                 .then(() => {
                     safeLog('log', '[BOT_LOOP] ✅ Đóng lệnh và tính PnL hoàn tất (qua Promise.then).');
@@ -820,12 +802,11 @@ async function mainBotLoop() {
                     safeLog('error', `[BOT_LOOP] ❌ Lỗi khi đóng lệnh và tính PnL (qua Promise.catch): ${errorInClose.message}`, errorInClose);
                 })
                 .finally(() => {
-                    botState = 'RUNNING'; // Trả về RUNNING sau khi thực hiện xong, bất kể thành công hay thất bại
+                    botState = 'RUNNING';
                 });
         }
     }
 
-    // Lặp lại vòng lặp sau 1 giây
     botLoopIntervalId = setTimeout(() => { mainBotLoop(); }, 1000); 
 }
 
@@ -848,7 +829,6 @@ function startBot() {
 }
 
 function stopBot() {
-    // Điều chỉnh trạng thái có thể dừng để phù hợp với việc loại bỏ các bước chuyển tiền
     if (botState === 'RUNNING' || botState === 'FETCHING_DATA' || botState === 'PROCESSING_DATA' || botState === 'EXECUTING_TRADES' || botState === 'CLOSING_TRADES') {
         safeLog('log', '[BOT] ⏸️ Dừng Bot...');
         if (botLoopIntervalId) {
