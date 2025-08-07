@@ -52,7 +52,6 @@ EXCHANGE_IDS.forEach(id => {
     lastExchangeUpdateTimestamps[id] = { funding: 0, leverage: 0 };
 });
 
-
 const BINGX_BASE_HOST = 'open-api.bingx.com';
 const BINANCE_BASE_HOST = 'fapi.binance.com';
 const BITGET_NATIVE_REST_HOST = 'api.bitget.com'; 
@@ -387,6 +386,36 @@ async function getBingxFundingRateDirect(symbol) {
     }
 }
 
+// Hàm để lấy danh sách các symbol Futures hợp lệ từ Bitget API (TOÀN CỤC)
+async function fetchBitgetValidFuturesSymbols() {
+    console.log('[BITGET_SYMBOLS] 🔄 Đang tải danh sách symbol Futures hợp lệ từ Bitget...');
+    try {
+        const apiPath = '/api/mix/v1/market/contracts?productType=umcbl';
+        const rawData = await makeHttpRequest('GET', BITGET_NATIVE_REST_HOST, apiPath);
+        const json = JSON.parse(rawData);
+
+        if (json.code === '00000' && Array.isArray(json.data)) {
+            bitgetValidFuturesSymbolSet.clear(); 
+            json.data.forEach(contract => {
+                if (contract.symbol) {
+                    bitgetValidFuturesSymbolSet.add(contract.symbol); 
+                }
+            });
+            console.log(`[BITGET_SYMBOLS] ✅ Đã tải ${bitgetValidFuturesSymbolSet.size} symbol Futures hợp lệ từ Bitget.`);
+            if (bitgetValidFuturesSymbolSet.size === 0) {
+                 console.warn('[BITGET_SYMBOLS] ⚠️ Bitget Native API trả về 0 symbol hợp lệ. Có thể ảnh hưởng đến việc lấy data.');
+            }
+            return bitgetValidFuturesSymbolSet;
+        } else {
+            console.error(`[BITGET_SYMBOLS] ❌ Lỗi khi tải danh sách symbol Futures Bitget: Code ${json.code}, Msg: ${json.msg || 'N/A'}. Raw: ${rawData.substring(0, Math.min(rawData.length, 200))}`);
+            return new Set(); 
+        }
+    } catch (e) {
+        console.error(`[BITGET_SYMBOLS] ❌ Lỗi request khi tải danh sách symbol Futures Bitget: ${e.msg || e.message}`);
+        return new Set();
+    }
+}
+
 // Hàm mới để lấy funding time từ Bitget Native REST API (đã khôi phục)
 async function fetchBitgetFundingTimeNativeApi(apiSymbol) {
     try {
@@ -592,46 +621,6 @@ async function updateLeverageForExchange(id, symbolsToUpdate = null) {
         debugRawLeverageResponses[id].error = error;
     }
 }
-
-async function performFullLeverageUpdate() {
-    console.log('\n[LEVERAGE_SCHEDULER] 🔄 Bắt đầu cập nhật TOÀN BỘ đòn bẩy cho tất cả các sàn... (được kích hoạt)');
-    const allLeveragePromises = [];
-    for (const id of EXCHANGE_IDS) {
-        // This is called by masterLoop, which already controls the 5-min BingX interval.
-        // So here we just call updateLeverageForExchange directly.
-        allLeveragePromises.push(updateLeverageForExchange(id, null));
-    }
-    await Promise.all(allLeveragePromises);
-    console.log('[LEVERAGE_SCHEDULER] ✅ Hoàn tất cập nhật đòn bẩy TOÀN BỘ.');
-}
-
-async function performTargetedLeverageUpdate() {
-    console.log('\n[LEVERAGE_SCHEDULER] 🎯 Bắt đầu cập nhật đòn bẩy MỤC TIÊU...');
-    const activeSymbols = new Set();
-    arbitrageOpportunities.forEach(op => activeSymbols.add(op.coin));
-
-    if (activeSymbols.size === 0) {
-        console.log('[LEVERAGE_SCHEDULER] Không có cơ hội arbitrage nào. Bỏ qua cập nhật đòn bẩy mục tiêu.');
-        EXCHANGE_IDS.forEach(id => {
-            debugRawLeverageResponses[id].status = 'Đòn bẩy bỏ qua (không có cơ hội)';
-            debugRawLeverageResponses[id].timestamp = new Date();
-            debugRawLeverageResponses[id].error = null;
-        });
-        return;
-    }
-
-    console.log(`[LEVERAGE_SCHEDULER] 🎯 Bắt đầu cập nhật đòn bẩy MỤC TIÊU cho ${activeSymbols.size} symbol.`);
-    const symbolsArray = Array.from(activeSymbols);
-    const allLeveragePromises = [];
-    for (const id of EXCHANGE_IDS) {
-        // This is called by masterLoop, which already controls the 5-min BingX interval.
-        // So here we just call updateLeverageForExchange directly.
-        allLeveragePromises.push(updateLeverageForExchange(id, symbolsArray));
-    }
-    await Promise.all(allLeveragePromises);
-    console.log('[LEVERAGE_SCHEDULER] ✅ Hoàn tất cập nhật đòn bẩy MỤC TIÊU.');
-}
-
 
 // Refactored to fetch funding rates for a single exchange
 async function fetchFundingRatesForExchange(id) {
@@ -899,28 +888,22 @@ async function masterLoop() {
     const currentSecond = now.getUTCSeconds();
     const nowMs = now.getTime();
 
-    // Promises to collect for concurrent execution
-    const fundingUpdatePromises = [];
-    const leverageUpdatePromises = [];
-
     // --- Funding Rate Updates ---
-    // Iterate through all exchanges to determine if it's time to update their funding rates
+    const fundingUpdatePromises = [];
     for (const id of EXCHANGE_IDS) {
         let shouldUpdateFunding = false;
-        if (id === 'bingx') {
-            // BingX: Check if 5 minutes have passed since last funding update
-            if (nowMs - lastExchangeUpdateTimestamps[id].funding >= 5 * 60 * 1000) {
-                shouldUpdateFunding = true;
-                lastExchangeUpdateTimestamps[id].funding = nowMs; // Update timestamp immediately
-                console.log(`[LOOP] Triggering BingX funding update (5-minute interval).`);
-            } else {
-                console.log(`[LOOP] BingX funding update skipped. Next funding update in ~${((5 * 60 * 1000 - (nowMs - lastExchangeUpdateTimestamps[id].funding)) / 1000).toFixed(0)}s.`);
-            }
-        } else {
-            // Other exchanges: Update every minute (or whenever masterLoop runs)
+        // Interval for BingX: 5 minutes. For others: 1 minute (or slightly less to ensure refresh within a minute)
+        const requiredInterval = (id === 'bingx') ? (5 * 60 * 1000) : (1 * 60 * 1000 - 1000); 
+
+        if (nowMs - lastExchangeUpdateTimestamps[id].funding >= requiredInterval) {
             shouldUpdateFunding = true;
-            lastExchangeUpdateTimestamps[id].funding = nowMs; // Update timestamp immediately
-            console.log(`[LOOP] Triggering ${id.toUpperCase()} funding update (1-minute interval).`);
+            lastExchangeUpdateTimestamps[id].funding = nowMs; // Cập nhật timestamp ngay khi quyết định trigger
+            console.log(`[LOOP] Triggering ${id.toUpperCase()} funding update (interval: ${requiredInterval / 1000}s).`);
+        } else {
+            // Log this info only if it's BingX or if it's not very close to the 1-min mark for other exchanges
+            if (id === 'bingx' || (nowMs - lastExchangeUpdateTimestamps[id].funding < 50 * 1000 && nowMs - lastExchangeUpdateTimestamps[id].funding > 5 * 1000)) {
+                console.log(`[LOOP] ${id.toUpperCase()} funding update skipped. Next funding update in ~${((requiredInterval - (nowMs - lastExchangeUpdateTimestamps[id].funding)) / 1000).toFixed(0)}s.`);
+            }
         }
 
         if (shouldUpdateFunding) {
@@ -928,16 +911,16 @@ async function masterLoop() {
         }
     }
 
-    // Await all triggered funding rate fetches concurrently
+    // Chờ tất cả các yêu cầu lấy funding rate đã được trigger hoàn tất (hoặc thất bại)
     await Promise.allSettled(fundingUpdatePromises);
     lastFullUpdateTimestamp = new Date().toISOString(); 
 
-    // --- Arbitrage Calculation ---
-    // Calculate opportunities after all relevant funding rates have been attempted to fetch
+    // --- Tính toán cơ hội Arbitrage ---
+    // Tính toán cơ hội sau khi tất cả dữ liệu funding rate liên quan đã được cố gắng lấy về
     calculateArbitrageOpportunities();
     
     // --- Leverage Updates ---
-    // Leverage update logic remains based on hourly/minute schedule, but still apply per-exchange frequency
+    // Logic cập nhật đòn bẩy vẫn dựa trên lịch trình giờ/phút, nhưng áp dụng tần suất riêng cho từng sàn
     let shouldPerformFullLeverageUpdate = (currentHour === FULL_LEVERAGE_REFRESH_AT_HOUR && currentMinute === 0 && currentSecond < 5);
     let shouldPerformTargetedLeverageUpdate = (TARGETED_LEVERAGE_REFRESH_MINUTES.includes(currentMinute) && currentSecond < 5);
     let shouldPerformSpecial5930Update = (currentMinute === 59 && currentSecond >= 30 && currentSecond < 35 && (!masterLoop.lastSpecialTrigger || (nowMs - masterLoop.lastSpecialTrigger > 30 * 1000)));
@@ -946,29 +929,27 @@ async function masterLoop() {
         const activeSymbols = Array.from(arbitrageOpportunities.map(op => op.coin));
         console.log(`[LEVERAGE_SCHEDULER] Kích hoạt cập nhật đòn bẩy: Full=${shouldPerformFullLeverageUpdate}, Targeted=${shouldPerformTargetedLeverageUpdate}, Special=${shouldPerformSpecial5930Update}.`);
 
+        const leverageUpdatePromises = [];
         for (const id of EXCHANGE_IDS) {
             let shouldUpdateLeverage = false;
-            if (id === 'bingx') {
-                // BingX leverage update also subject to 5-minute rule
-                if (nowMs - lastExchangeUpdateTimestamps[id].leverage >= 5 * 60 * 1000) {
-                    shouldUpdateLeverage = true;
-                    lastExchangeUpdateTimestamps[id].leverage = nowMs;
-                    console.log(`[LEVERAGE_SCHEDULER] Triggering BingX leverage update (5-minute interval).`);
-                } else {
-                     console.log(`[LEVERAGE_SCHEDULER] BingX leverage update skipped. Next leverage update in ~${((5 * 60 * 1000 - (nowMs - lastExchangeUpdateTimestamps[id].leverage)) / 1000).toFixed(0)}s.`);
-                }
-            } else {
-                // Other exchanges update leverage whenever scheduled
+            const requiredInterval = (id === 'bingx') ? (5 * 60 * 1000) : (1 * 60 * 1000 - 1000); 
+
+            if (nowMs - lastExchangeUpdateTimestamps[id].leverage >= requiredInterval) {
                 shouldUpdateLeverage = true;
-                lastExchangeUpdateTimestamps[id].leverage = nowMs;
-                console.log(`[LEVERAGE_SCHEDULER] Triggering ${id.toUpperCase()} leverage update.`);
+                lastExchangeUpdateTimestamps[id].leverage = nowMs; // Cập nhật timestamp ngay khi quyết định trigger
+                console.log(`[LEVERAGE_SCHEDULER] Triggering ${id.toUpperCase()} leverage update (interval: ${requiredInterval / 1000}s).`);
+            } else {
+                if (id === 'bingx' || (nowMs - lastExchangeUpdateTimestamps[id].leverage < 50 * 1000 && nowMs - lastExchangeUpdateTimestamps[id].leverage > 5 * 1000)) {
+                    console.log(`[LEVERAGE_SCHEDULER] ${id.toUpperCase()} leverage update skipped. Next leverage update in ~${((requiredInterval - (nowMs - lastExchangeUpdateTimestamps[id].leverage)) / 1000).toFixed(0)}s.`);
+                }
             }
 
             if (shouldUpdateLeverage) {
                 if (shouldPerformFullLeverageUpdate) {
-                    leverageUpdatePromises.push(updateLeverageForExchange(id, null)); // Full update
+                    leverageUpdatePromises.push(updateLeverageForExchange(id, null)); // Cập nhật đầy đủ cho sàn này
                 } else {
-                    leverageUpdatePromises.push(updateLeverageForExchange(id, activeSymbols.length > 0 ? activeSymbols : null)); // Targeted
+                    // Cập nhật mục tiêu cho sàn này, chỉ khi có các symbol đang hoạt động
+                    leverageUpdatePromises.push(updateLeverageForExchange(id, activeSymbols.length > 0 ? activeSymbols : null)); 
                 }
             }
         }
@@ -987,7 +968,8 @@ function scheduleNextLoop() {
     clearTimeout(loopTimeoutId);
     const now = new Date();
     const delaySeconds = (60 - now.getSeconds() + 5) % 60;
-    const delayMs = (delaySeconds === 0 ? 60 : delaySeconds) * 1000;
+    // Đảm bảo độ trễ tối thiểu là 1 giây để tránh vòng lặp vô hạn nếu getSeconds() == 59
+    const delayMs = (delaySeconds === 0 ? 60 : delaySeconds) * 1000; 
     console.log(`[SCHEDULER] Vòng lặp kế tiếp sau ${delaySeconds.toFixed(0)} giây.`);
     loopTimeoutId = setTimeout(masterLoop, delayMs);
 }
