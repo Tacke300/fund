@@ -43,7 +43,7 @@ const DATA_FETCH_INTERVAL_SECONDS = 5;
 const HOURLY_FETCH_TIME_MINUTE = 45;
 
 const SL_PERCENT_OF_COLLATERAL = 700;
-const TP_PERCENT_OF_COLLATERAL = 8386;
+const TP_PERCENT_OF_COLLATERAL = 700; // ĐÃ SỬA: Thay đổi từ 8386 thành 700
 
 const DISABLED_EXCHANGES = ['bitget'];
 
@@ -296,39 +296,20 @@ async function executeTrades(opportunity, percentageToUse) {
         const commonLeverage = opportunity.commonLeverage || 1;
 
         // Set leverage first for the symbols
+        // ĐÃ SỬA: Loại bỏ tham số 'side' hoặc 'positionSide' khỏi hàm setLeverage
         try {
-            // BingX requires 'side' in params for setLeverage in Hedge Mode, and symbol must be string.
-            if (shortExchange.has['setLeverage'] && shortExchangeId === 'bingx') {
-                if (typeof shortOriginalSymbol === 'string') { // Defensive check
-                    await shortExchange.setLeverage(shortOriginalSymbol, commonLeverage, { 'side': 'SHORT' });
-                } else {
-                    safeLog('error', `[BOT_TRADE] Lỗi: shortOriginalSymbol không phải string cho BingX setLeverage: ${shortOriginalSymbol}`);
-                }
-            } 
-            // BinanceUSDM fix: correct argument order, no 'side' needed directly in params here
-            else if (shortExchange.has['setLeverage'] && shortExchangeId === 'binanceusdm') {
-                await shortExchange.setLeverage(shortOriginalSymbol, commonLeverage);
-            } else if (shortExchange.has['setLeverage']) { // Generic case for other exchanges
-                await shortExchange.setLeverage(shortOriginalSymbol, commonLeverage);
+            if (shortExchange.has['setLeverage']) {
+                const symbolToUse = typeof shortOriginalSymbol === 'string' ? shortOriginalSymbol : String(shortOriginalSymbol);
+                await shortExchange.setLeverage(symbolToUse, commonLeverage);
             }
             safeLog('log', `[BOT_TRADE] ✅ Đặt đòn bẩy x${commonLeverage} cho SHORT ${shortOriginalSymbol} trên ${shortExchangeId}.`);
         } catch (levErr) {
             safeLog('warn', `[BOT_TRADE] ⚠️ Lỗi đặt đòn bẩy cho SHORT ${shortOriginalSymbol} trên ${shortExchangeId}: ${levErr.message}. Tiếp tục mà không đảm bảo đòn bẩy.`, levErr);
         }
         try {
-            // BingX requires 'side' in params for setLeverage in Hedge Mode, and symbol must be string.
-            if (longExchange.has['setLeverage'] && longExchangeId === 'bingx') {
-                if (typeof longOriginalSymbol === 'string') { // Defensive check
-                    await longExchange.setLeverage(longOriginalSymbol, commonLeverage, { 'side': 'LONG' });
-                } else {
-                    safeLog('error', `[BOT_TRADE] Lỗi: longOriginalSymbol không phải string cho BingX setLeverage: ${longOriginalSymbol}`);
-                }
-            } 
-            // BinanceUSDM fix: correct argument order, no 'side' needed directly in params here
-            else if (longExchange.has['setLeverage'] && longExchangeId === 'binanceusdm') {
-                await longExchange.setLeverage(longOriginalSymbol, commonLeverage);
-            } else if (longExchange.has['setLeverage']) { // Generic case for other exchanges
-                await longExchange.setLeverage(longOriginalSymbol, commonLeverage);
+            if (longExchange.has['setLeverage']) {
+                const symbolToUse = typeof longOriginalSymbol === 'string' ? longOriginalSymbol : String(longOriginalSymbol);
+                await longExchange.setLeverage(symbolToUse, commonLeverage);
             }
             safeLog('log', `[BOT_TRADE] ✅ Đặt đòn bẩy x${commonLeverage} cho LONG ${longOriginalSymbol} trên ${longExchangeId}.`);
         } catch (levErr) {
