@@ -171,7 +171,7 @@ async function processServerData(serverData) {
 
         // Normalize exchange IDs to match ccxt and local names ('binance' -> 'binanceusdm')
         const shortExIdNormalized = op.details.shortExchange.toLowerCase() === 'binance' ? 'binanceusdm' : op.details.shortExchange.toLowerCase();
-        const longExIdNormalized = op.details.longExchange.toLowerCase() === 'binance' ? 'binanceusdm' : op.details.longExchange.toLowerCase();
+        const longExIdNormalized = op.details.longExchange.toLowerCase() === 'binance' ? 'binanceusdm' : op.details.longExchange.toLowerCase(); // SỬA LỖI Ở ĐÂY
 
         if (DISABLED_EXCHANGES.includes(shortExIdNormalized) || DISABLED_EXCHANGES.includes(longExIdNormalized) ||
             !exchanges[shortExIdNormalized] || !exchanges[longExIdNormalized]) {
@@ -219,7 +219,7 @@ async function processServerData(serverData) {
         bestPotentialOpportunityForDisplay = bestForDisplay;
         // Update estimated trade collateral for display
         const shortExId = bestForDisplay.details.shortExchange.toLowerCase() === 'binance' ? 'binanceusdm' : bestForDisplay.details.shortExchange.toLowerCase();
-        const longExId = bestForDisplay.details.longExchange.toLowerCase() === 'binance' ? 'binanceusdm' : bestForDisplay.details.toLowerCase();
+        const longExId = bestForDisplay.details.longExchange.toLowerCase() === 'binance' ? 'binanceusdm' : bestForDisplay.details.longExchange.toLowerCase(); // SỬA LỖI Ở ĐÂY
         const minAvailableBalance = Math.min(balances[shortExId]?.available || 0, balances[longExId]?.available || 0);
         bestPotentialOpportunityForDisplay.estimatedTradeCollateral = (minAvailableBalance * (currentPercentageToUse / 100)).toFixed(2);
     } else {
@@ -758,6 +758,13 @@ async function mainBotLoop() {
 
     // Bot sẽ CHỌN cơ hội tốt nhất (gần funding nhất, PnL cao nhất) để "đặt chỗ"
     if (currentMinute === 58 && currentSecond >= 0 && currentSecond < 5 && botState === 'RUNNING') {
+        // Đảm bảo bot không đang quản lý một lệnh tự động nào khác
+        if (currentTradeDetails && currentTradeDetails.status === 'OPEN') {
+             safeLog('log', '[BOT_LOOP_AUTO] ⚠️ Đang có lệnh tự động mở. Bỏ qua việc chọn cơ hội mới.');
+             currentSelectedOpportunityForExecution = null; // Clear any pre-selected opportunity
+             return; // Skip selection if an auto trade is active
+        }
+
         if (LAST_ACTION_TIMESTAMP.selectionTime !== minuteAligned) {
             LAST_ACTION_TIMESTAMP.selectionTime = minuteAligned;
 
@@ -802,7 +809,7 @@ async function mainBotLoop() {
                 safeLog('log', `  Sàn Short: ${currentSelectedOpportunityForExecution.details.shortExchange} (${currentSelectedOpportunityForExecution.details.shortOriginalSymbol}), Sàn Long: ${currentSelectedOpportunityForExecution.details.longExchange} (${currentSelectedOpportunityForExecution.details.longOriginalSymbol})`);
 
                 const shortExId = currentSelectedOpportunityForExecution.details.shortExchange.toLowerCase() === 'binance' ? 'binanceusdm' : currentSelectedOpportunityForExecution.details.shortExchange.toLowerCase();
-                const longExId = currentSelectedOpportunityForExecution.details.longExchange.toLowerCase() === 'binance' ? 'binanceusdm' : currentSelectedOpportunityForExecution.details.longExchange.toLowerCase();
+                const longExId = currentSelectedOpportunityForExecution.details.longExchange.toLowerCase() === 'binance' ? 'binanceusdm' : currentSelectedOpportunityForExecution.details.longExchange.toLowerCase(); // SỬA LỖI Ở ĐÂY
                 const minAvailableBalance = Math.min(balances[shortExId]?.available || 0, balances[longExId]?.available || 0);
                 // Ensure bestPotentialOpportunityForDisplay is not null before updating
                 if (bestPotentialOpportunityForDisplay) {
