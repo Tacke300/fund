@@ -36,11 +36,11 @@ const BOT_PORT = 5008;
 const SERVER_DATA_URL = 'http://localhost:5005/api/data';
 
 const MIN_PNL_PERCENTAGE = 1;
-const MAX_MINUTES_UNTIL_FUNDING = 59;
-// const MIN_MINUTES_FOR_EXECUTION = 15; // Removed as per request
+const MAX_MINUTES_UNTIL_FUNDING = 30;
+// const MIN_MINUTES_FOR_EXECUTION = 15; // Đã loại bỏ điều kiện này theo yêu cầu
 
 const DATA_FETCH_INTERVAL_SECONDS = 5;
-const HOURLY_FETCH_TIME_MINUTE = 45; // This constant is not used, the specific minute checks are hardcoded.
+const HOURLY_FETCH_TIME_MINUTE = 45; // Hằng số này không được sử dụng trực tiếp trong logic vòng lặp chính.
 
 const SL_PERCENT_OF_COLLATERAL = 700;
 const TP_PERCENT_OF_COLLATERAL = 700;
@@ -203,10 +203,10 @@ async function processServerData(serverData) {
 
             tempAllOpportunities.push(op);
 
-            // Select the best opportunity for display (prefer closer funding time, then higher PnL)
+            // Cập nhật: Chọn cơ hội tốt nhất để hiển thị (ưu tiên thời gian funding gần nhất, sau đó PnL cao nhất)
             if (!bestForDisplay ||
-                op.details.minutesUntilFunding < bestForDisplay.details.minutesUntilFunding || // Prefer closer funding
-                (op.details.minutesUntilFunding === bestForDisplay.details.minutesUntilFunding && op.estimatedPnl > bestForDisplay.estimatedPnl) // Then higher PnL
+                op.details.minutesUntilFunding < bestForDisplay.details.minutesUntilFunding || // Ưu tiên funding gần hơn
+                (op.details.minutesUntilFunding === bestForDisplay.details.minutesUntilFunding && op.estimatedPnl > bestForDisplay.estimatedPnl) // Nếu funding như nhau, ưu tiên PnL cao hơn
             ) {
                 bestForDisplay = op;
             }
@@ -297,16 +297,18 @@ async function executeTrades(opportunity, percentageToUse) {
 
         // Set leverage first for the symbols
         try {
+            // Đảm bảo symbol là string
             const symbolToUseShort = typeof shortOriginalSymbol === 'string' ? shortOriginalSymbol : String(shortOriginalSymbol);
-            safeLog('debug', `[DEBUG LEV] Type of symbolToUseShort for ${shortExchangeId}: ${typeof symbolToUseShort}, Value: "${symbolToUseShort}"`);
+            safeLog('debug', `[DEBUG LEV] Đặt đòn bẩy SHORT cho ${shortExchangeId}: Symbol="${symbolToUseShort}", Leverage=${commonLeverage}`);
             if (shortExchange.has['setLeverage']) {
                 if (shortExchangeId === 'bingx') {
-                    // BingX yêu cầu tham số 'side' cho setLeverage
+                    // SỬA LỖI: BingX yêu cầu tham số 'side' cho setLeverage
                     await shortExchange.setLeverage(symbolToUseShort, commonLeverage, { 'side': 'BOTH' });
+                } else if (shortExchangeId === 'binanceusdm') {
+                    // SỬA LỖI: Chuẩn hóa symbol cho Binance. CCXT thường xử lý symbol thống nhất
+                    // Nếu lỗi vẫn xảy ra, có thể cần kiểm tra market id cụ thể: shortExchange.market(symbolToUseShort).id
+                    await shortExchange.setLeverage(symbolToUseShort, commonLeverage);
                 } else {
-                    // For BinanceUSDM and other exchanges, pass the unified symbol directly.
-                    // The previous errors suggested an internal CCXT issue when processing symbol/leverage.
-                    // Using the unified symbol is the standard CCXT way.
                     await shortExchange.setLeverage(symbolToUseShort, commonLeverage);
                 }
             }
@@ -315,14 +317,17 @@ async function executeTrades(opportunity, percentageToUse) {
             safeLog('warn', `[BOT_TRADE] ⚠️ Lỗi đặt đòn bẩy cho SHORT ${shortOriginalSymbol} trên ${shortExchangeId}: ${levErr.message}. Tiếp tục mà không đảm bảo đòn bẩy.`, levErr);
         }
         try {
+            // Đảm bảo symbol là string
             const symbolToUseLong = typeof longOriginalSymbol === 'string' ? longOriginalSymbol : String(longOriginalSymbol);
-            safeLog('debug', `[DEBUG LEV] Type of symbolToUseLong for ${longExchangeId}: ${typeof symbolToUseLong}, Value: "${symbolToUseLong}"`);
+            safeLog('debug', `[DEBUG LEV] Đặt đòn bẩy LONG cho ${longExchangeId}: Symbol="${symbolToUseLong}", Leverage=${commonLeverage}`);
             if (longExchange.has['setLeverage']) {
                 if (longExchangeId === 'bingx') {
-                    // BingX yêu cầu tham số 'side' cho setLeverage
+                    // SỬA LỖI: BingX yêu cầu tham số 'side' cho setLeverage
                     await longExchange.setLeverage(symbolToUseLong, commonLeverage, { 'side': 'BOTH' });
+                } else if (longExchangeId === 'binanceusdm') {
+                     // SỬA LỖI: Chuẩn hóa symbol cho Binance
+                    await longExchange.setLeverage(symbolToUseLong, commonLeverage);
                 } else {
-                    // For BinanceUSDM and other exchanges, pass the unified symbol directly.
                     await longExchange.setLeverage(symbolToUseLong, commonLeverage);
                 }
             }
@@ -643,9 +648,8 @@ async function closeTradesAndCalculatePnL() {
                     break;
                 }
             }
-            // Confirmation for BingX PnL: The bot attempts to get realizedPnl from trade history.
-            // If the specific field is not available or immediately updated, it reliably falls back
-            // to calculating PnL based on the change in available balance.
+            // Xác nhận: BingX PnL thường không trả về từ fetchMyTrades ngay lập tức với realizedPnl.
+            // Phương pháp fallback tính từ số dư là đáng tin cậy.
             if (!pnlFound) {
                 safeLog('warn', `[BOT_PNL] Không tìm thấy PnL thực tế cho lệnh LONG ${closeLongOrder.id} trên ${longExchange} từ trade history. Cập nhật số dư và tính từ đó. (Phương pháp fallback này đáng tin cậy)`);
                 await updateBalances(); // Cập nhật balance để có số dư mới nhất
@@ -693,11 +697,8 @@ let serverDataGlobal = null;
 
 // HÀM CHÍNH CỦA VÒNG LẶP BOT - Vẫn là async vì có các await khác
 async function mainBotLoop() {
-    // Dòng debug đã được xóa
-
     if (botLoopIntervalId) clearTimeout(botLoopIntervalId);
 
-    // Đã loại bỏ các trạng thái TRANSFERRING_FUNDS khỏi điều kiện dừng chung
     if (botState !== 'RUNNING') {
         safeLog('log', '[BOT_LOOP] Bot không ở trạng thái RUNNING. Dừng vòng lặp.');
         return;
@@ -719,7 +720,7 @@ async function mainBotLoop() {
         }
     }
 
-    // Changed opportunity selection time to minute 58
+    // Cập nhật: Chọn cơ hội vào phút 58
     if (currentMinute === 58 && currentSecond >= 0 && currentSecond < 5 && botState === 'RUNNING' && !currentTradeDetails && !currentSelectedOpportunityForExecution) {
         if (LAST_ACTION_TIMESTAMP.selectionTime !== minuteAligned) {
             LAST_ACTION_TIMESTAMP.selectionTime = minuteAligned;
@@ -731,12 +732,12 @@ async function mainBotLoop() {
                 const minutesUntilFunding = (op.nextFundingTime - now.getTime()) / (1000 * 60); // Cập nhật lại minutesUntilFunding để đảm bảo tính toán thời gian chính xác nhất
                 op.details.minutesUntilFunding = minutesUntilFunding; // Gán lại vào op.details để sử dụng sau này
 
-                // Modified trade execution condition: PnL >= MIN_PNL_PERCENTAGE AND (0 < minutesUntilFunding <= MAX_MINUTES_UNTIL_FUNDING)
+                // Cập nhật: Điều kiện mở vị thế chỉ cần PnL >= MIN_PNL_PERCENTAGE và thời gian funding trong giới hạn.
                 if (op.estimatedPnl >= MIN_PNL_PERCENTAGE &&
                     minutesUntilFunding > 0 &&
                     minutesUntilFunding <= MAX_MINUTES_UNTIL_FUNDING) {
 
-                    // Prioritize closer funding time, then higher PnL
+                    // Ưu tiên thời gian funding gần nhất, sau đó PnL cao nhất
                     if (!bestOpportunityFoundForExecution ||
                         minutesUntilFunding < bestOpportunityFoundForExecution.details.minutesUntilFunding ||
                         (minutesUntilFunding === bestOpportunityFoundForExecution.details.minutesUntilFunding && op.estimatedPnl > bestOpportunityFoundForExecution.estimatedPnl)
