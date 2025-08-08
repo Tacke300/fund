@@ -343,10 +343,14 @@ async function executeTrades(opportunity, percentageToUse) {
                     // SỬA LỖI: BingX yêu cầu tham số 'side' cho setLeverage
                     await shortExchange.setLeverage(symbolToUseShort, commonLeverage, { 'side': 'BOTH' }); 
                 } else if (shortExchangeId === 'binanceusdm') {
-                    // SỬA LỖI: Chuẩn hóa symbol cho Binance và thử không có marginMode trước
-                    const binanceSymbolId = shortExchange.market(symbolToUseShort).id; // Chuyển đổi TOWNS/USDT:USDT -> TOWNSUSDT
-                    safeLog('debug', `[DEBUG LEV] Binance Normalized Symbol ID: ${binanceSymbolId}`);
-                    await shortExchange.setLeverage(binanceSymbolId, commonLeverage); 
+                    // SỬA LỖI: Chuẩn hóa symbol cho Binance và thêm kiểm tra market object
+                    const binanceMarketShort = shortExchange.market(symbolToUseShort);
+                    if (binanceMarketShort && binanceMarketShort.id) {
+                        safeLog('debug', `[DEBUG LEV] Binance Normalized Symbol ID: ${binanceMarketShort.id}`);
+                        await shortExchange.setLeverage(binanceMarketShort.id, commonLeverage); 
+                    } else {
+                        safeLog('warn', `[BOT_TRADE] ⚠️ Không tìm thấy thông tin thị trường để đặt đòn bẩy cho SHORT ${symbolToUseShort} trên ${shortExchangeId}.`);
+                    }
                 } else {
                     await shortExchange.setLeverage(symbolToUseShort, commonLeverage);
                 }
@@ -363,10 +367,14 @@ async function executeTrades(opportunity, percentageToUse) {
                     // SỬA LỖI: BingX yêu cầu tham số 'side' cho setLeverage
                     await longExchange.setLeverage(symbolToUseLong, commonLeverage, { 'side': 'BOTH' });
                 } else if (longExchangeId === 'binanceusdm') {
-                     // SỬA LỖI: Chuẩn hóa symbol cho Binance và thử không có marginMode trước
-                    const binanceSymbolId = longExchange.market(longOriginalSymbol).id; // Chuyển đổi TOWNS/USDT:USDT -> TOWNSUSDT
-                    safeLog('debug', `[DEBUG LEV] Binance Normalized Symbol ID: ${binanceSymbolId}`);
-                    await longExchange.setLeverage(binanceSymbolId, commonLeverage);
+                     // SỬA LỖI: Chuẩn hóa symbol cho Binance và thêm kiểm tra market object
+                    const binanceMarketLong = longExchange.market(longOriginalSymbol);
+                    if (binanceMarketLong && binanceMarketLong.id) {
+                        safeLog('debug', `[DEBUG LEV] Binance Normalized Symbol ID: ${binanceMarketLong.id}`);
+                        await longExchange.setLeverage(binanceMarketLong.id, commonLeverage);
+                    } else {
+                        safeLog('warn', `[BOT_TRADE] ⚠️ Không tìm thấy thông tin thị trường để đặt đòn bẩy cho LONG ${longOriginalSymbol} trên ${longExchangeId}.`);
+                    }
                 } else {
                     await longExchange.setLeverage(symbolToUseLong, commonLeverage);
                 }
@@ -391,6 +399,23 @@ async function executeTrades(opportunity, percentageToUse) {
             safeLog('error', `[BOT_TRADE] Không tìm thấy thông tin thị trường cho ${shortOriginalSymbol} hoặc ${longOriginalSymbol}.`);
             return false;
         }
+
+        // --- BỔ SUNG: Kiểm tra giá trị danh nghĩa tối thiểu ---
+        const shortNotional = shortAmount * shortEntryPrice;
+        const longNotional = longAmount * longEntryPrice;
+
+        const minNotionalShort = marketShort.limits?.cost?.min || 0; 
+        const minNotionalLong = marketLong.limits?.cost?.min || 0;
+
+        if (minNotionalShort > 0 && shortNotional < minNotionalShort) {
+            safeLog('error', `[BOT_TRADE] ❌ Giá trị danh nghĩa SHORT (${shortNotional.toFixed(2)} USDT) trên ${shortExchangeId} quá nhỏ (tối thiểu ${minNotionalShort} USDT). Hủy bỏ lệnh.`);
+            return false; // Hủy giao dịch nếu không đạt mức tối thiểu
+        }
+        if (minNotionalLong > 0 && longNotional < minNotionalLong) {
+            safeLog('error', `[BOT_TRADE] ❌ Giá trị danh nghĩa LONG (${longNotional.toFixed(2)} USDT) trên ${longExchangeId} quá nhỏ (tối thiểu ${minNotionalLong} USDT). Hủy bỏ lệnh.`);
+            return false; // Hủy giao dịch nếu không đạt mức tối thiểu
+        }
+        // --- KẾT THÚC BỔ SUNG ---
 
         // Use amountToPrecision for quantity and priceToPrecision for prices
         const shortAmountToOrder = shortExchange.amountToPrecision(shortOriginalSymbol, shortAmount);
