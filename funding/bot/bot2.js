@@ -340,29 +340,30 @@ async function executeTrades(opportunity, percentageToUse) {
             return false;
         }
 
-        // Lấy đòn bẩy tối đa thực sự từ market info. Nếu không có hoặc 0, dùng mặc định 1.
-        const shortMaxLeverage = (shortMarket.limits?.leverage?.max && shortMarket.limits.leverage.max > 0) ? shortMarket.limits.leverage.max : 1;
-        const longMaxLeverage = (longMarket.limits?.leverage?.max && longMarket.limits.leverage.max > 0) ? longMarket.limits.leverage.max : 1;
+        // Lấy đòn bẩy tối đa thực sự từ market info. Nếu không có, 0, hoặc <= 1 (khi cần >1), dùng mặc định 1.
+        // Log the raw value from market info first for debugging.
+        const rawShortMaxLeverage = shortMarket.limits?.leverage?.max;
+        const rawLongMaxLeverage = longMarket.limits?.leverage?.max;
+        const shortMaxLeverage = (rawShortMaxLeverage && typeof rawShortMaxLeverage === 'number' && rawShortMaxLeverage > 1) ? rawShortMaxLeverage : 1;
+        const longMaxLeverage = (rawLongMaxLeverage && typeof rawLongMaxLeverage === 'number' && rawLongMaxLeverage > 1) ? rawLongMaxLeverage : 1;
 
-        safeLog('log', `[BOT_TRADE] Đòn bẩy tối đa THỰC TẾ cho SHORT ${shortExchangeId}: x${shortMaxLeverage}`);
-        safeLog('log', `[BOT_TRADE] Đòn bẩy tối đa THỰC TẾ cho LONG ${longExchangeId}: x${longMaxLeverage}`);
+        safeLog('log', `[BOT_TRADE] Đòn bẩy tối đa THỰC TẾ (RAW) cho SHORT ${shortExchangeId}: x${rawShortMaxLeverage}`);
+        safeLog('log', `[BOT_TRADE] Đòn bẩy tối đa THỰC TẾ (SỬ DỤNG) cho SHORT ${shortExchangeId}: x${shortMaxLeverage}`);
+        safeLog('log', `[BOT_TRADE] Đòn bẩy tối đa THỰC TẾ (RAW) cho LONG ${longExchangeId}: x${rawLongMaxLeverage}`);
+        safeLog('log', `[BOT_TRADE] Đòn bẩy tối đa THỰC TẾ (SỬ DỤNG) cho LONG ${longExchangeId}: x${longMaxLeverage}`);
 
 
         // --- BẮT ĐẦU: ĐẶT ĐÒN BẨY TỐI ĐA TRÊN MỖI SÀN ---
         try {
-            // Chuyển shortOriginalSymbol thành String để đảm bảo type
-            const shortSymbolForLeverage = String(shortOriginalSymbol);
+            // Sử dụng market.symbol cho BingX (unified symbol)
+            const shortSymbolForLeverage = shortExchangeId === 'bingx' ? shortMarket.symbol : shortMarket.id || shortOriginalSymbol; // Fallback for Binance, BingX should use market.symbol
+            
             safeLog('debug', `[DEBUG LEV] Đặt đòn bẩy SHORT cho ${shortExchangeId}: Symbol="${shortSymbolForLeverage}", Leverage=${shortMaxLeverage}`);
             if (shortExchange.has['setLeverage']) {
                 if (shortExchangeId === 'bingx') {
-                    // BingX yêu cầu symbol là string và params.side là 'BOTH'
-                    await shortExchange.setLeverage(shortSymbolForLeverage, shortMaxLeverage, { 'side': 'BOTH' }); 
+                    await shortExchange.setLeverage(shortSymbolForLeverage, shortMaxLeverage, { 'side': 'BOTH', 'marginMode': 'cross' }); 
                 } else if (shortExchangeId === 'binanceusdm') {
-                    // BinanceUSDM có thể yêu cầu symbol native (market.id) hoặc original symbol
-                    // Thử với market.id trước, nếu vẫn lỗi BadSymbol, thử với shortOriginalSymbol
-                    const binanceSetLeverageSymbol = shortMarket.id || shortSymbolForLeverage; // Fallback
-                    safeLog('debug', `[DEBUG LEV] BinanceUSDM setLeverage symbol to use: "${binanceSetLeverageSymbol}"`);
-                    await shortExchange.setLeverage(binanceSetLeverageSymbol, shortMaxLeverage); 
+                    await shortExchange.setLeverage(shortSymbolForLeverage, shortMaxLeverage, { 'marginMode': 'cross' }); 
                 } else {
                     await shortExchange.setLeverage(shortSymbolForLeverage, shortMaxLeverage);
                 }
@@ -373,18 +374,15 @@ async function executeTrades(opportunity, percentageToUse) {
         }
 
         try {
-            // Chuyển longOriginalSymbol thành String để đảm bảo type
-            const longSymbolForLeverage = String(longOriginalSymbol);
+            // Sử dụng market.symbol cho BingX (unified symbol)
+            const longSymbolForLeverage = longExchangeId === 'bingx' ? longMarket.symbol : longMarket.id || longOriginalSymbol; // Fallback for Binance, BingX should use market.symbol
+
             safeLog('debug', `[DEBUG LEV] Đặt đòn bẩy LONG cho ${longExchangeId}: Symbol="${longSymbolForLeverage}", Leverage=${longMaxLeverage}`);
             if (longExchange.has['setLeverage']) {
                 if (longExchangeId === 'bingx') {
-                    // BingX yêu cầu symbol là string và params.side là 'BOTH'
-                    await longExchange.setLeverage(longSymbolForLeverage, longMaxLeverage, { 'side': 'BOTH' });
+                    await longExchange.setLeverage(longSymbolForLeverage, longMaxLeverage, { 'side': 'BOTH', 'marginMode': 'cross' });
                 } else if (longExchangeId === 'binanceusdm') {
-                     // BinanceUSDM có thể yêu cầu symbol native (market.id) hoặc original symbol
-                    const binanceSetLeverageSymbol = longMarket.id || longSymbolForLeverage; // Fallback
-                    safeLog('debug', `[DEBUG LEV] BinanceUSDM setLeverage symbol to use: "${binanceSetLeverageSymbol}"`);
-                    await longExchange.setLeverage(binanceSetLeverageSymbol, longMaxLeverage);
+                    await longExchange.setLeverage(longSymbolForLeverage, longMaxLeverage, { 'marginMode': 'cross' });
                 } else {
                     await longExchange.setLeverage(longSymbolForLeverage, longMaxLeverage);
                 }
@@ -408,10 +406,10 @@ async function executeTrades(opportunity, percentageToUse) {
         const shortNotional = shortAmount * shortEntryPrice;
         const longNotional = longAmount * longEntryPrice;
 
-        // Ưu tiên market.limits.cost.min của sàn. Nếu không có, bằng 0, hoặc giá trị quá nhỏ không hợp lý (nhỏ hơn 0.06), dùng 0.06.
-        const defaultMinNotional = 0.06; // Giá trị mặc định an toàn
-        const effectiveMinNotionalShort = (shortMarket.limits?.cost?.min && shortMarket.limits.cost.min > 0 && shortMarket.limits.cost.min > defaultMinNotional) ? shortMarket.limits.cost.min : defaultMinNotional; 
-        const effectiveMinNotionalLong = (longMarket.limits?.cost?.min && longMarket.limits.cost.min > 0 && longMarket.limits.cost.min > defaultMinNotional) ? longMarket.limits.cost.min : defaultMinNotional;
+        // Ưu tiên market.limits.cost.min của sàn. Nếu không có, 0, hoặc quá nhỏ không hợp lý (ví dụ: nhỏ hơn 0.06), dùng 0.06.
+        const defaultMinNotional = 0.06; // Giá trị mặc định an toàn nếu sàn không báo cáo hoặc báo cáo giá trị không hợp lý
+        const effectiveMinNotionalShort = (shortMarket.limits?.cost?.min && shortMarket.limits.cost.min > 0) ? Math.max(shortMarket.limits.cost.min, defaultMinNotional) : defaultMinNotional; 
+        const effectiveMinNotionalLong = (longMarket.limits?.cost?.min && longMarket.limits.cost.min > 0) ? Math.max(longMarket.limits.cost.min, defaultMinNotional) : defaultMinNotional;
 
         if (shortNotional < effectiveMinNotionalShort) {
             safeLog('error', `[BOT_TRADE] ❌ Giá trị danh nghĩa SHORT (${shortNotional.toFixed(2)} USDT) trên ${shortExchangeId} quá nhỏ (tối thiểu ${effectiveMinNotionalShort} USDT). Hủy bỏ lệnh.`);
