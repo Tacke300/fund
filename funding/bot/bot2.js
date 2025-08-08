@@ -306,7 +306,7 @@ async function executeTrades(opportunity, percentageToUse) {
         return false;
     }
     if (balances[shortExchangeId]?.available < shortCollateral || balances[longExchangeId]?.available < longCollateral) {
-        safeLog('error', `[BOT_TRADE] Số dư khả dụng không đủ để mở lệnh với vốn ${baseCollateralPerSide.toFixed(2)} USDT mỗi bên. ${shortExchangeId}: ${balances[shortExchangeId]?.available.toFixed(2)}, ${longExchangeId}: ${balances[longExchangeId]?.available.toFixed(2)}. Hủy bỏ lệnh.`);
+        safeLog('error', `[BOT_TRADE] Số dư khả dụng không đủ để mở lệnh với vốn ${baseCollateralPerSide.toFixed(2)} USDT mỗi bên. ${shortExchangeId}: ${balances[shortExchangeId]?.available.toFixed(2)}, ${longExchangeId}: ${longExchange[longExchangeId]?.available.toFixed(2)}. Hủy bỏ lệnh.`);
         return false;
     }
 
@@ -340,6 +340,7 @@ async function executeTrades(opportunity, percentageToUse) {
             return false;
         }
 
+        // Lấy đòn bẩy tối đa thực sự từ market info
         const shortMaxLeverage = shortMarket.limits?.leverage?.max || 1;
         const longMaxLeverage = longMarket.limits?.leverage?.max || 1;
 
@@ -348,17 +349,14 @@ async function executeTrades(opportunity, percentageToUse) {
 
 
         // --- BẮT ĐẦU: ĐẶT ĐÒN BẨY TỐI ĐA TRÊN MỖI SÀN ---
-        // Cố gắng đặt đòn bẩy tối đa cho mỗi bên
         try {
-            // Truyền trực tiếp originalSymbol (string)
             safeLog('debug', `[DEBUG LEV] Đặt đòn bẩy SHORT cho ${shortExchangeId}: Symbol="${shortOriginalSymbol}", Leverage=${shortMaxLeverage}`);
             if (shortExchange.has['setLeverage']) {
                 if (shortExchangeId === 'bingx') {
-                    // BingX yêu cầu tham số 'side' cho setLeverage
                     await shortExchange.setLeverage(shortOriginalSymbol, shortMaxLeverage, { 'side': 'BOTH' }); 
                 } else if (shortExchangeId === 'binanceusdm') {
-                    // Truyền trực tiếp originalSymbol (string)
-                    await shortExchange.setLeverage(shortOriginalSymbol, shortMaxLeverage); 
+                    // Truyền symbol native (market.id) cho BinanceUSDM
+                    await shortExchange.setLeverage(shortMarket.id, shortMaxLeverage); 
                 } else {
                     await shortExchange.setLeverage(shortOriginalSymbol, shortMaxLeverage);
                 }
@@ -369,15 +367,13 @@ async function executeTrades(opportunity, percentageToUse) {
         }
 
         try {
-            // Truyền trực tiếp originalSymbol (string)
             safeLog('debug', `[DEBUG LEV] Đặt đòn bẩy LONG cho ${longExchangeId}: Symbol="${longOriginalSymbol}", Leverage=${longMaxLeverage}`);
             if (longExchange.has['setLeverage']) {
                 if (longExchangeId === 'bingx') {
-                    // BingX yêu cầu tham số 'side' cho setLeverage
                     await longExchange.setLeverage(longOriginalSymbol, longMaxLeverage, { 'side': 'BOTH' });
                 } else if (longExchangeId === 'binanceusdm') {
-                     // Truyền trực tiếp originalSymbol (string)
-                    await longExchange.setLeverage(longOriginalSymbol, longMaxLeverage);
+                     // Truyền symbol native (market.id) cho BinanceUSDM
+                    await longExchange.setLeverage(longMarket.id, longMaxLeverage);
                 } else {
                     await longExchange.setLeverage(longOriginalSymbol, longMaxLeverage);
                 }
@@ -397,18 +393,20 @@ async function executeTrades(opportunity, percentageToUse) {
             return false;
         }
         
-        // --- BẮT ĐẦU: Kiểm tra giá trị danh nghĩa tối thiểu - CỐ ĐỊNH 0.06 ---
+        // --- BẮT ĐẦU: Kiểm tra giá trị danh nghĩa tối thiểu ---
         const shortNotional = shortAmount * shortEntryPrice;
         const longNotional = longAmount * longEntryPrice;
 
-        const fixedMinNotional = 0.06; // Đặt mức tối thiểu cố định
+        // Ưu tiên market.limits.cost.min của sàn, nếu không có hoặc là 0, dùng 0.06
+        const effectiveMinNotionalShort = (shortMarket.limits?.cost?.min && shortMarket.limits.cost.min > 0) ? shortMarket.limits.cost.min : 0.06; 
+        const effectiveMinNotionalLong = (longMarket.limits?.cost?.min && longMarket.limits.cost.min > 0) ? longMarket.limits.cost.min : 0.06;
 
-        if (shortNotional < fixedMinNotional) {
-            safeLog('error', `[BOT_TRADE] ❌ Giá trị danh nghĩa SHORT (${shortNotional.toFixed(2)} USDT) trên ${shortExchangeId} quá nhỏ (tối thiểu ${fixedMinNotional} USDT). Hủy bỏ lệnh.`);
+        if (shortNotional < effectiveMinNotionalShort) {
+            safeLog('error', `[BOT_TRADE] ❌ Giá trị danh nghĩa SHORT (${shortNotional.toFixed(2)} USDT) trên ${shortExchangeId} quá nhỏ (tối thiểu ${effectiveMinNotionalShort} USDT). Hủy bỏ lệnh.`);
             return false; // Hủy giao dịch nếu không đạt mức tối thiểu
         }
-        if (longNotional < fixedMinNotional) {
-            safeLog('error', `[BOT_TRADE] ❌ Giá trị danh nghĩa LONG (${longNotional.toFixed(2)} USDT) trên ${longExchangeId} quá nhỏ (tối thiểu ${fixedMinNotional} USDT). Hủy bỏ lệnh.`);
+        if (longNotional < effectiveMinNotionalLong) {
+            safeLog('error', `[BOT_TRADE] ❌ Giá trị danh nghĩa LONG (${longNotional.toFixed(2)} USDT) trên ${longExchangeId} quá nhỏ (tối thiểu ${effectiveMinNotionalLong} USDT). Hủy bỏ lệnh.`);
             return false; // Hủy giao dịch nếu không đạt mức tối thiểu
         }
         // --- KẾT THÚC: Kiểm tra giá trị danh nghĩa tối thiểu ---
@@ -816,7 +814,7 @@ async function mainBotLoop() {
                 if (op.estimatedPnl >= MIN_PNL_PERCENTAGE && minutesUntilFunding > 0) {
                     if (!bestOpportunityFoundForExecution ||
                         minutesUntilFunding < bestOpportunityFoundForExecution.details.minutesUntilFunding ||
-                        (minutesUntilFunding === bestOpportunityFoundForExecution.details.minutesUntilFunding && op.estimatedPnl > bestOpportunityFoundForExecution.estimatedPnl)
+                        (minutesUntilFunding === bestOpportunityForExecution.details.minutesUntilFunding && op.estimatedPnl > bestOpportunityFoundForExecution.estimatedPnl)
                     ) {
                         bestOpportunityFoundForExecution = op;
                     }
@@ -1074,4 +1072,4 @@ const botServer = http.createServer((req, res) => {
 botServer.listen(BOT_PORT, () => {
     safeLog('log', `✅ Máy chủ UI của Bot đang chạy tại http://localhost:${BOT_PORT}`);
     safeLog('log', 'Bot đang chờ lệnh "Start" từ giao diện HTML.');
-});
+});```
