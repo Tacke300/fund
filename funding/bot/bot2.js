@@ -306,7 +306,7 @@ async function executeTrades(opportunity, percentageToUse) {
         return false;
     }
     if (balances[shortExchangeId]?.available < shortCollateral || balances[longExchangeId]?.available < longCollateral) {
-        safeLog('error', `[BOT_TRADE] Số dư khả dụng không đủ để mở lệnh với vốn ${baseCollateralPerSide.toFixed(2)} USDT mỗi bên. ${shortExchangeId}: ${balances[shortExchangeId]?.available.toFixed(2)}, ${longExchangeId}: ${longExchange[longExchangeId]?.available.toFixed(2)}. Hủy bỏ lệnh.`);
+        safeLog('error', `[BOT_TRADE] Số dư khả dụng không đủ để mở lệnh với vốn ${baseCollateralPerSide.toFixed(2)} USDT mỗi bên. ${shortExchangeId}: ${balances[shortExchangeId]?.available.toFixed(2)}, ${longExchangeId}: ${balances[longExchangeId]?.available.toFixed(2)}. Hủy bỏ lệnh.`);
         return false;
     }
 
@@ -340,25 +340,31 @@ async function executeTrades(opportunity, percentageToUse) {
             return false;
         }
 
-        // Lấy đòn bẩy tối đa thực sự từ market info
-        const shortMaxLeverage = shortMarket.limits?.leverage?.max || 1;
-        const longMaxLeverage = longMarket.limits?.leverage?.max || 1;
+        // Lấy đòn bẩy tối đa thực sự từ market info. Nếu không có hoặc 0, dùng mặc định 1.
+        const shortMaxLeverage = (shortMarket.limits?.leverage?.max && shortMarket.limits.leverage.max > 0) ? shortMarket.limits.leverage.max : 1;
+        const longMaxLeverage = (longMarket.limits?.leverage?.max && longMarket.limits.leverage.max > 0) ? longMarket.limits.leverage.max : 1;
 
-        safeLog('log', `[BOT_TRADE] Đòn bẩy tối đa cho SHORT ${shortExchangeId}: x${shortMaxLeverage}`);
-        safeLog('log', `[BOT_TRADE] Đòn bẩy tối đa cho LONG ${longExchangeId}: x${longMaxLeverage}`);
+        safeLog('log', `[BOT_TRADE] Đòn bẩy tối đa THỰC TẾ cho SHORT ${shortExchangeId}: x${shortMaxLeverage}`);
+        safeLog('log', `[BOT_TRADE] Đòn bẩy tối đa THỰC TẾ cho LONG ${longExchangeId}: x${longMaxLeverage}`);
 
 
         // --- BẮT ĐẦU: ĐẶT ĐÒN BẨY TỐI ĐA TRÊN MỖI SÀN ---
         try {
-            safeLog('debug', `[DEBUG LEV] Đặt đòn bẩy SHORT cho ${shortExchangeId}: Symbol="${shortOriginalSymbol}", Leverage=${shortMaxLeverage}`);
+            // Chuyển shortOriginalSymbol thành String để đảm bảo type
+            const shortSymbolForLeverage = String(shortOriginalSymbol);
+            safeLog('debug', `[DEBUG LEV] Đặt đòn bẩy SHORT cho ${shortExchangeId}: Symbol="${shortSymbolForLeverage}", Leverage=${shortMaxLeverage}`);
             if (shortExchange.has['setLeverage']) {
                 if (shortExchangeId === 'bingx') {
-                    await shortExchange.setLeverage(shortOriginalSymbol, shortMaxLeverage, { 'side': 'BOTH' }); 
+                    // BingX yêu cầu symbol là string và params.side là 'BOTH'
+                    await shortExchange.setLeverage(shortSymbolForLeverage, shortMaxLeverage, { 'side': 'BOTH' }); 
                 } else if (shortExchangeId === 'binanceusdm') {
-                    // Truyền symbol native (market.id) cho BinanceUSDM
-                    await shortExchange.setLeverage(shortMarket.id, shortMaxLeverage); 
+                    // BinanceUSDM có thể yêu cầu symbol native (market.id) hoặc original symbol
+                    // Thử với market.id trước, nếu vẫn lỗi BadSymbol, thử với shortOriginalSymbol
+                    const binanceSetLeverageSymbol = shortMarket.id || shortSymbolForLeverage; // Fallback
+                    safeLog('debug', `[DEBUG LEV] BinanceUSDM setLeverage symbol to use: "${binanceSetLeverageSymbol}"`);
+                    await shortExchange.setLeverage(binanceSetLeverageSymbol, shortMaxLeverage); 
                 } else {
-                    await shortExchange.setLeverage(shortOriginalSymbol, shortMaxLeverage);
+                    await shortExchange.setLeverage(shortSymbolForLeverage, shortMaxLeverage);
                 }
             }
             safeLog('log', `[BOT_TRADE] ✅ Đặt đòn bẩy x${shortMaxLeverage} cho SHORT ${shortOriginalSymbol} trên ${shortExchangeId}.`);
@@ -367,15 +373,20 @@ async function executeTrades(opportunity, percentageToUse) {
         }
 
         try {
-            safeLog('debug', `[DEBUG LEV] Đặt đòn bẩy LONG cho ${longExchangeId}: Symbol="${longOriginalSymbol}", Leverage=${longMaxLeverage}`);
+            // Chuyển longOriginalSymbol thành String để đảm bảo type
+            const longSymbolForLeverage = String(longOriginalSymbol);
+            safeLog('debug', `[DEBUG LEV] Đặt đòn bẩy LONG cho ${longExchangeId}: Symbol="${longSymbolForLeverage}", Leverage=${longMaxLeverage}`);
             if (longExchange.has['setLeverage']) {
                 if (longExchangeId === 'bingx') {
-                    await longExchange.setLeverage(longOriginalSymbol, longMaxLeverage, { 'side': 'BOTH' });
+                    // BingX yêu cầu symbol là string và params.side là 'BOTH'
+                    await longExchange.setLeverage(longSymbolForLeverage, longMaxLeverage, { 'side': 'BOTH' });
                 } else if (longExchangeId === 'binanceusdm') {
-                     // Truyền symbol native (market.id) cho BinanceUSDM
-                    await longExchange.setLeverage(longMarket.id, longMaxLeverage);
+                     // BinanceUSDM có thể yêu cầu symbol native (market.id) hoặc original symbol
+                    const binanceSetLeverageSymbol = longMarket.id || longSymbolForLeverage; // Fallback
+                    safeLog('debug', `[DEBUG LEV] BinanceUSDM setLeverage symbol to use: "${binanceSetLeverageSymbol}"`);
+                    await longExchange.setLeverage(binanceSetLeverageSymbol, longMaxLeverage);
                 } else {
-                    await longExchange.setLeverage(longOriginalSymbol, longMaxLeverage);
+                    await longExchange.setLeverage(longSymbolForLeverage, longMaxLeverage);
                 }
             }
             safeLog('log', `[BOT_TRADE] ✅ Đặt đòn bẩy x${longMaxLeverage} cho LONG ${longOriginalSymbol} trên ${longExchangeId}.`);
@@ -397,9 +408,10 @@ async function executeTrades(opportunity, percentageToUse) {
         const shortNotional = shortAmount * shortEntryPrice;
         const longNotional = longAmount * longEntryPrice;
 
-        // Ưu tiên market.limits.cost.min của sàn, nếu không có hoặc là 0, dùng 0.06
-        const effectiveMinNotionalShort = (shortMarket.limits?.cost?.min && shortMarket.limits.cost.min > 0) ? shortMarket.limits.cost.min : 0.06; 
-        const effectiveMinNotionalLong = (longMarket.limits?.cost?.min && longMarket.limits.cost.min > 0) ? longMarket.limits.cost.min : 0.06;
+        // Ưu tiên market.limits.cost.min của sàn. Nếu không có, bằng 0, hoặc giá trị quá nhỏ không hợp lý (nhỏ hơn 0.06), dùng 0.06.
+        const defaultMinNotional = 0.06; // Giá trị mặc định an toàn
+        const effectiveMinNotionalShort = (shortMarket.limits?.cost?.min && shortMarket.limits.cost.min > 0 && shortMarket.limits.cost.min > defaultMinNotional) ? shortMarket.limits.cost.min : defaultMinNotional; 
+        const effectiveMinNotionalLong = (longMarket.limits?.cost?.min && longMarket.limits.cost.min > 0 && longMarket.limits.cost.min > defaultMinNotional) ? longMarket.limits.cost.min : defaultMinNotional;
 
         if (shortNotional < effectiveMinNotionalShort) {
             safeLog('error', `[BOT_TRADE] ❌ Giá trị danh nghĩa SHORT (${shortNotional.toFixed(2)} USDT) trên ${shortExchangeId} quá nhỏ (tối thiểu ${effectiveMinNotionalShort} USDT). Hủy bỏ lệnh.`);
@@ -814,7 +826,7 @@ async function mainBotLoop() {
                 if (op.estimatedPnl >= MIN_PNL_PERCENTAGE && minutesUntilFunding > 0) {
                     if (!bestOpportunityFoundForExecution ||
                         minutesUntilFunding < bestOpportunityFoundForExecution.details.minutesUntilFunding ||
-                        (minutesUntilFunding === bestOpportunityForExecution.details.minutesUntilFunding && op.estimatedPnl > bestOpportunityFoundForExecution.estimatedPnl)
+                        (minutesUntilFunding === bestOpportunityFoundForExecution.details.minutesUntilFunding && op.estimatedPnl > bestOpportunityFoundForExecution.estimatedPnl)
                     ) {
                         bestOpportunityFoundForExecution = op;
                     }
