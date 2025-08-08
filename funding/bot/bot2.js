@@ -341,9 +341,9 @@ async function executeTrades(opportunity, percentageToUse) {
         }
 
         // Lấy đòn bẩy tối đa thực sự từ market info. Nếu không có, 0, hoặc <= 1 (khi cần >1), dùng mặc định 1.
-        // Log the raw value from market info first for debugging.
         const rawShortMaxLeverage = shortMarket.limits?.leverage?.max;
         const rawLongMaxLeverage = longMarket.limits?.leverage?.max;
+        // Ensure max leverage is a valid number and greater than 1, otherwise default to 1.
         const shortMaxLeverage = (rawShortMaxLeverage && typeof rawShortMaxLeverage === 'number' && rawShortMaxLeverage > 1) ? rawShortMaxLeverage : 1;
         const longMaxLeverage = (rawLongMaxLeverage && typeof rawLongMaxLeverage === 'number' && rawLongMaxLeverage > 1) ? rawLongMaxLeverage : 1;
 
@@ -353,77 +353,129 @@ async function executeTrades(opportunity, percentageToUse) {
         safeLog('log', `[BOT_TRADE] Đòn bẩy tối đa THỰC TẾ (SỬ DỤNG) cho LONG ${longExchangeId}: x${longMaxLeverage}`);
 
 
-        // --- BẮT ĐẦU: ĐẶT ĐÒN BẨY TỐI ĐA TRÊN MỖI SÀN ---
+        // --- BẮT ĐẦU: ĐẶT ĐÒN BẨY TỐI ĐA TRÊN MỖI SÀN (REVISED) ---
         try {
-            // Sử dụng market.symbol cho BingX (unified symbol)
-            const shortSymbolForLeverage = shortExchangeId === 'bingx' ? shortMarket.symbol : shortMarket.id || shortOriginalSymbol; // Fallback for Binance, BingX should use market.symbol
-            
-            safeLog('debug', `[DEBUG LEV] Đặt đòn bẩy SHORT cho ${shortExchangeId}: Symbol="${shortSymbolForLeverage}", Leverage=${shortMaxLeverage}`);
-            if (shortExchange.has['setLeverage']) {
-                if (shortExchangeId === 'bingx') {
-                    await shortExchange.setLeverage(shortSymbolForLeverage, shortMaxLeverage, { 'side': 'BOTH', 'marginMode': 'cross' }); 
-                } else if (shortExchangeId === 'binanceusdm') {
-                    await shortExchange.setLeverage(shortSymbolForLeverage, shortMaxLeverage, { 'marginMode': 'cross' }); 
-                } else {
-                    await shortExchange.setLeverage(shortSymbolForLeverage, shortMaxLeverage);
-                }
+            let shortSymbolForLeverage;
+            if (shortExchangeId === 'bingx') {
+                // For BingX, use market.symbol (unified symbol like 'TREE/USDT') for setLeverage
+                shortSymbolForLeverage = shortMarket.symbol; 
+            } else if (shortExchangeId === 'binanceusdm') {
+                // For BinanceUSDM, use market.id (native symbol like 'TREEUSDT') for setLeverage
+                shortSymbolForLeverage = shortMarket.id; 
+            } else {
+                // Default to unified symbol for other exchanges
+                shortSymbolForLeverage = shortMarket.symbol;
             }
-            safeLog('log', `[BOT_TRADE] ✅ Đặt đòn bẩy x${shortMaxLeverage} cho SHORT ${shortOriginalSymbol} trên ${shortExchangeId}.`);
+
+            if (!shortSymbolForLeverage) {
+                 safeLog('warn', `[BOT_TRADE] ⚠️ Không thể xác định symbol chuẩn để đặt đòn bẩy cho SHORT ${shortOriginalSymbol} trên ${shortExchangeId}. Bỏ qua đặt đòn bẩy.`);
+            } else {
+                safeLog('debug', `[DEBUG LEV] Đặt đòn bẩy SHORT cho ${shortExchangeId}: Symbol="${shortSymbolForLeverage}", Leverage=${shortMaxLeverage}`);
+                if (shortExchange.has['setLeverage']) {
+                    if (shortExchangeId === 'bingx') {
+                        await shortExchange.setLeverage(shortSymbolForLeverage, shortMaxLeverage, { 'side': 'BOTH', 'marginMode': 'cross' }); 
+                    } else if (shortExchangeId === 'okx') {
+                        // OKX might need different parameters for leverage setting
+                        await shortExchange.setLeverage(shortSymbolForLeverage, shortMaxLeverage, { 'marginMode': 'cross' });
+                    } else if (shortExchangeId === 'binanceusdm') {
+                        await shortExchange.setLeverage(shortSymbolForLeverage, shortMaxLeverage, { 'marginMode': 'cross' }); 
+                    } else {
+                        // General case with cross margin mode
+                        await shortExchange.setLeverage(shortSymbolForLeverage, shortMaxLeverage, { 'marginMode': 'cross' });
+                    }
+                }
+                safeLog('log', `[BOT_TRADE] ✅ Đặt đòn bẩy x${shortMaxLeverage} cho SHORT ${shortOriginalSymbol} trên ${shortExchangeId}.`);
+            }
         } catch (levErr) {
             safeLog('warn', `[BOT_TRADE] ⚠️ Lỗi đặt đòn bẩy cho SHORT ${shortOriginalSymbol} trên ${shortExchangeId}: ${levErr.message}. Tiếp tục mà không đảm bảo đòn bẩy.`, levErr);
         }
 
         try {
-            // Sử dụng market.symbol cho BingX (unified symbol)
-            const longSymbolForLeverage = longExchangeId === 'bingx' ? longMarket.symbol : longMarket.id || longOriginalSymbol; // Fallback for Binance, BingX should use market.symbol
-
-            safeLog('debug', `[DEBUG LEV] Đặt đòn bẩy LONG cho ${longExchangeId}: Symbol="${longSymbolForLeverage}", Leverage=${longMaxLeverage}`);
-            if (longExchange.has['setLeverage']) {
-                if (longExchangeId === 'bingx') {
-                    await longExchange.setLeverage(longSymbolForLeverage, longMaxLeverage, { 'side': 'BOTH', 'marginMode': 'cross' });
-                } else if (longExchangeId === 'binanceusdm') {
-                    await longExchange.setLeverage(longSymbolForLeverage, longMaxLeverage, { 'marginMode': 'cross' });
-                } else {
-                    await longExchange.setLeverage(longSymbolForLeverage, longMaxLeverage);
-                }
+            let longSymbolForLeverage;
+            if (longExchangeId === 'bingx') {
+                longSymbolForLeverage = longMarket.symbol;
+            } else if (longExchangeId === 'binanceusdm') {
+                longSymbolForLeverage = longMarket.id;
+            } else {
+                longSymbolForLeverage = longMarket.symbol;
             }
-            safeLog('log', `[BOT_TRADE] ✅ Đặt đòn bẩy x${longMaxLeverage} cho LONG ${longOriginalSymbol} trên ${longExchangeId}.`);
+
+            if (!longSymbolForLeverage) {
+                 safeLog('warn', `[BOT_TRADE] ⚠️ Không thể xác định symbol chuẩn để đặt đòn bẩy cho LONG ${longOriginalSymbol} trên ${longExchangeId}. Bỏ qua đặt đòn bẩy.`);
+            } else {
+                safeLog('debug', `[DEBUG LEV] Đặt đòn bẩy LONG cho ${longExchangeId}: Symbol="${longSymbolForLeverage}", Leverage=${longMaxLeverage}`);
+                if (longExchange.has['setLeverage']) {
+                    if (longExchangeId === 'bingx') {
+                        await longExchange.setLeverage(longSymbolForLeverage, longMaxLeverage, { 'side': 'BOTH', 'marginMode': 'cross' });
+                    } else if (longExchangeId === 'okx') {
+                        await longExchange.setLeverage(longSymbolForLeverage, longMaxLeverage, { 'marginMode': 'cross' });
+                    } else if (longExchangeId === 'binanceusdm') {
+                        await longExchange.setLeverage(longSymbolForLeverage, longMaxLeverage, { 'marginMode': 'cross' });
+                    } else {
+                        await longExchange.setLeverage(longSymbolForLeverage, longMaxLeverage, { 'marginMode': 'cross' });
+                    }
+                }
+                safeLog('log', `[BOT_TRADE] ✅ Đặt đòn bẩy x${longMaxLeverage} cho LONG ${longOriginalSymbol} trên ${longExchangeId}.`);
+            }
         } catch (levErr) {
             safeLog('warn', `[BOT_TRADE] ⚠️ Lỗi đặt đòn bẩy cho LONG ${longOriginalSymbol} trên ${longExchangeId}: ${levErr.message}. Tiếp tục mà không đảm bảo đòn bẩy.`, levErr);
         }
         // --- KẾT THÚC: ĐẶT ĐÒN BẨY TỐI ĐA TRÊN MỖI SÀN ---
 
-        // Tính toán lượng hợp đồng (amount) sử dụng đòn bẩy tối đa của từng sàn
-        const shortAmount = (shortCollateral * shortMaxLeverage) / shortEntryPrice;
-        const longAmount = (longCollateral * longMaxLeverage) / longEntryPrice;
 
-        if (shortAmount <= 0 || longAmount <= 0) {
+        // Tính toán lượng hợp đồng (amount) sử dụng đòn bẩy tối đa của từng sàn
+        // Lượng này sẽ được điều chỉnh để khớp với precision và min amount của sàn sau đó
+        const shortCalculatedAmount = (shortCollateral * shortMaxLeverage) / shortEntryPrice;
+        const longCalculatedAmount = (longCollateral * longMaxLeverage) / longEntryPrice;
+
+        if (shortCalculatedAmount <= 0 || longCalculatedAmount <= 0) {
             safeLog('error', '[BOT_TRADE] Lượng hợp đồng tính toán không hợp lệ (cần dương). Hủy bỏ lệnh.');
             return false;
         }
         
-        // --- BẮT ĐẦU: Kiểm tra giá trị danh nghĩa tối thiểu ---
-        const shortNotional = shortAmount * shortEntryPrice;
-        const longNotional = longAmount * longEntryPrice;
-
-        // Ưu tiên market.limits.cost.min của sàn. Nếu không có, 0, hoặc quá nhỏ không hợp lý (ví dụ: nhỏ hơn 0.06), dùng 0.06.
-        const defaultMinNotional = 0.06; // Giá trị mặc định an toàn nếu sàn không báo cáo hoặc báo cáo giá trị không hợp lý
+        // --- BẮT ĐẦU: Kiểm tra giá trị danh nghĩa & lượng tối thiểu/chính xác (REVISED) ---
+        const defaultMinNotional = 0.06; 
         const effectiveMinNotionalShort = (shortMarket.limits?.cost?.min && shortMarket.limits.cost.min > 0) ? Math.max(shortMarket.limits.cost.min, defaultMinNotional) : defaultMinNotional; 
         const effectiveMinNotionalLong = (longMarket.limits?.cost?.min && longMarket.limits.cost.min > 0) ? Math.max(longMarket.limits.cost.min, defaultMinNotional) : defaultMinNotional;
 
-        if (shortNotional < effectiveMinNotionalShort) {
-            safeLog('error', `[BOT_TRADE] ❌ Giá trị danh nghĩa SHORT (${shortNotional.toFixed(2)} USDT) trên ${shortExchangeId} quá nhỏ (tối thiểu ${effectiveMinNotionalShort} USDT). Hủy bỏ lệnh.`);
-            return false; // Hủy giao dịch nếu không đạt mức tối thiểu
-        }
-        if (longNotional < effectiveMinNotionalLong) {
-            safeLog('error', `[BOT_TRADE] ❌ Giá trị danh nghĩa LONG (${longNotional.toFixed(2)} USDT) trên ${longExchangeId} quá nhỏ (tối thiểu ${effectiveMinNotionalLong} USDT). Hủy bỏ lệnh.`);
-            return false; // Hủy giao dịch nếu không đạt mức tối thiểu
-        }
-        // --- KẾT THÚC: Kiểm tra giá trị danh nghĩa tối thiểu ---
+        // Lấy lượng tối thiểu từ market info
+        const minAmountShort = shortMarket.limits?.amount?.min || 0;
+        const minAmountLong = longMarket.limits?.amount?.min || 0;
+        
+        // Use amountToPrecision to format quantity first
+        let shortAmountToOrder = shortExchange.amountToPrecision(shortOriginalSymbol, shortCalculatedAmount);
+        let longAmountToOrder = longExchange.amountToPrecision(longOriginalSymbol, longCalculatedAmount);
 
-        // Use amountToPrecision for quantity and priceToPrecision for prices
-        const shortAmountToOrder = shortExchange.amountToPrecision(shortOriginalSymbol, shortAmount);
-        const longAmountToOrder = longExchange.amountToPrecision(longOriginalSymbol, longAmount);
+        // Convert to float for comparison
+        let floatShortAmountToOrder = parseFloat(shortAmountToOrder);
+        let floatLongAmountToOrder = parseFloat(longAmountToOrder);
+
+        // Check if the amount after precision adjustment is less than the minimum allowed amount
+        if (minAmountShort > 0 && floatShortAmountToOrder < minAmountShort) {
+             safeLog('warn', `[BOT_TRADE] Lượng SHORT (${floatShortAmountToOrder}) sau làm tròn nhỏ hơn tối thiểu (${minAmountShort}) trên ${shortExchangeId}. Cố gắng làm tròn lên minAmount.`);
+             // If smaller, round up to minAmount (and apply precision again)
+             shortAmountToOrder = shortExchange.amountToPrecision(shortOriginalSymbol, minAmountShort);
+             floatShortAmountToOrder = parseFloat(shortAmountToOrder); // Update float value
+        }
+        if (minAmountLong > 0 && floatLongAmountToOrder < minAmountLong) {
+            safeLog('warn', `[BOT_TRADE] Lượng LONG (${floatLongAmountToOrder}) sau làm tròn nhỏ hơn tối thiểu (${minAmountLong}) trên ${longExchangeId}. Cố gắng làm tròn lên minAmount.`);
+            longAmountToOrder = longExchange.amountToPrecision(longOriginalSymbol, minAmountLong);
+            floatLongAmountToOrder = parseFloat(longAmountToOrder); // Update float value
+        }
+
+        // Kiểm tra lại giá trị danh nghĩa sau khi điều chỉnh lượng
+        const finalShortNotional = floatShortAmountToOrder * shortEntryPrice;
+        const finalLongNotional = floatLongAmountToOrder * longEntryPrice;
+
+        if (finalShortNotional < effectiveMinNotionalShort) {
+            safeLog('error', `[BOT_TRADE] ❌ Giá trị danh nghĩa SHORT (${finalShortNotional.toFixed(2)} USDT) trên ${shortExchangeId} quá nhỏ (tối thiểu ${effectiveMinNotionalShort} USDT). Hủy bỏ lệnh.`);
+            return false;
+        }
+        if (finalLongNotional < effectiveMinNotionalLong) {
+            safeLog('error', `[BOT_TRADE] ❌ Giá trị danh nghĩa LONG (${finalLongNotional.toFixed(2)} USDT) trên ${longExchangeId} quá nhỏ (tối thiểu ${effectiveMinNotionalLong} USDT). Hủy bỏ lệnh.`);
+            return false;
+        }
+        // --- KẾT THÚC: Kiểm tra giá trị danh nghĩa & lượng tối thiểu/chính xác ---
 
         // Lấy symbol đã chuẩn hóa cho việc đặt lệnh
         const shortOrderSymbol = getExchangeOrderSymbol(shortExchangeId, shortOriginalSymbol, shortExchange);
@@ -446,12 +498,10 @@ async function executeTrades(opportunity, percentageToUse) {
         }
 
         safeLog('log', `[BOT_TRADE] Mở SHORT ${shortAmountToOrder} ${shortOrderSymbol} trên ${shortExchangeId} với giá ${shortEntryPrice.toFixed(4)}...`);
-        // SỬA LỖI: Sử dụng shortOrderSymbol đã được chuẩn hóa
         shortOrder = await shortExchange.createMarketSellOrder(shortOrderSymbol, parseFloat(shortAmountToOrder), shortParams);
         safeLog('log', `[BOT_TRADE] ✅ Lệnh SHORT ${shortExchangeId} khớp: ID ${shortOrder.id}, Amount ${shortOrder.amount}, Price ${shortOrder.price}`);
 
         safeLog('log', `[BOT_TRADE] Mở LONG ${longAmountToOrder} ${longOrderSymbol} trên ${longExchangeId} với giá ${longEntryPrice.toFixed(4)}...`);
-        // SỬA LỖI: Sử dụng longOrderSymbol đã được chuẩn hóa
         longOrder = await longExchange.createMarketBuyOrder(longOrderSymbol, parseFloat(longAmountToOrder), longParams);
         safeLog('log', `[BOT_TRADE] ✅ Lệnh LONG ${longExchangeId} khớp: ID ${longOrder.id}, Amount ${longOrder.amount}, Price ${longOrder.price}`);
 
@@ -460,8 +510,8 @@ async function executeTrades(opportunity, percentageToUse) {
             coin: cleanedCoin,
             shortExchange: shortExchangeId,
             longExchange: longExchangeId,
-            shortOriginalSymbol: shortOriginalSymbol, // Giữ symbol gốc cho mục đích theo dõi
-            longOriginalSymbol: longOriginalSymbol,   // Giữ symbol gốc cho mục đích theo dõi
+            shortOriginalSymbol: shortOriginalSymbol, 
+            longOriginalSymbol: longOriginalSymbol,   
             shortOrderId: shortOrder.id,
             longOrderId: longOrder.id,
             shortOrderAmount: shortOrder.amount,
@@ -470,24 +520,23 @@ async function executeTrades(opportunity, percentageToUse) {
             longEntryPrice: longEntryPrice,
             shortCollateral: shortCollateral,
             longCollateral: longCollateral,
-            shortLeverageUsed: shortMaxLeverage, // Lưu đòn bẩy thực tế được sử dụng
-            longLeverageUsed: longMaxLeverage,   // Lưu đòn bẩy thực tế được sử dụng
+            shortLeverageUsed: shortMaxLeverage, 
+            longLeverageUsed: longMaxLeverage,   
             status: 'OPEN',
             openTime: Date.now()
         };
         safeLog('log', `[BOT_TRADE] currentTradeDetails set successfully.`);
 
-        safeLog('log', '[BOT_TRADE] Đợi 2 giây để gửi lệnh TP/SL...');
+        safeLog('log', '[BOT_TRADE] Đợi 2 giây để gửi lệnh TP/SL... (được tính với đòn bẩy tối đa THỰC TẾ đã sử dụng)');
         await sleep(2000);
 
-        // Tính toán TP/SL sử dụng đòn bẩy tối đa của từng sàn
+        // Tính toán TP/SL sử dụng đòn bẩy tối đa của từng sàn (shortMaxLeverage, longMaxLeverage)
         const shortTpPrice = shortEntryPrice * (1 - (TP_PERCENT_OF_COLLATERAL / (shortMaxLeverage * 100)));
         const shortSlPrice = shortEntryPrice * (1 + (SL_PERCENT_OF_COLLATERAL / (shortMaxLeverage * 100)));
 
         const longTpPrice = longEntryPrice * (1 + (TP_PERCENT_OF_COLLATERAL / (longMaxLeverage * 100)));
         const longSlPrice = longEntryPrice * (1 - (SL_PERCENT_OF_COLLATERAL / (longMaxLeverage * 100)));
         
-        // Use priceToPrecision for TP/SL prices
         const shortTpPriceToOrder = shortExchange.priceToPrecision(shortOriginalSymbol, shortTpPrice);
         const shortSlPriceToOrder = shortExchange.priceToPrecision(shortOriginalSymbol, shortSlPrice);
         const longTpPriceToOrder = longExchange.priceToPrecision(longOriginalSymbol, longTpPrice);
@@ -513,7 +562,6 @@ async function executeTrades(opportunity, percentageToUse) {
             }
             
             if (parseFloat(shortSlPriceToOrder) > 0) {
-                // SỬA LỖI: Sử dụng shortOrderSymbol đã được chuẩn hóa
                 await shortExchange.createOrder(
                     shortOrderSymbol, 
                     'STOP_MARKET',
@@ -539,7 +587,6 @@ async function executeTrades(opportunity, percentageToUse) {
             }
 
             if (parseFloat(shortTpPriceToOrder) > 0) {
-                // SỬA LỖI: Sử dụng shortOrderSymbol đã được chuẩn hóa
                 await shortExchange.createOrder(
                     shortOrderSymbol, 
                     'TAKE_PROFIT_MARKET',
@@ -566,7 +613,6 @@ async function executeTrades(opportunity, percentageToUse) {
             }
 
             if (parseFloat(longSlPriceToOrder) > 0) {
-                // SỬA LỖI: Sử dụng longOrderSymbol đã được chuẩn hóa
                 await longExchange.createOrder(
                     longOrderSymbol, 
                     'STOP_MARKET',
@@ -592,7 +638,6 @@ async function executeTrades(opportunity, percentageToUse) {
             }
 
             if (parseFloat(longTpPriceToOrder) > 0) {
-                // SỬA LỖI: Sử dụng longOrderSymbol đã được chuẩn hóa
                 await longExchange.createOrder(
                     longOrderSymbol, 
                     'TAKE_PROFIT_MARKET',
@@ -810,7 +855,8 @@ async function mainBotLoop() {
         }
     }
 
-    if (currentMinute === 50 && currentSecond >= 0 && currentSecond < 5 && botState === 'RUNNING' && !currentTradeDetails && !currentSelectedOpportunityForExecution) {
+    // Đã thay đổi từ phút 50 sang phút 58
+    if (currentMinute === 58 && currentSecond >= 0 && currentSecond < 5 && botState === 'RUNNING' && !currentTradeDetails && !currentSelectedOpportunityForExecution) {
         if (LAST_ACTION_TIMESTAMP.selectionTime !== minuteAligned) {
             LAST_ACTION_TIMESTAMP.selectionTime = minuteAligned;
 
