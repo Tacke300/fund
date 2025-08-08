@@ -367,8 +367,9 @@ async function executeTrades(opportunity, percentageToUse) {
                 shortSymbolForLeverage = shortMarket.symbol;
             }
 
-            if (!shortSymbolForLeverage) {
-                 safeLog('warn', `[BOT_TRADE] ⚠️ Không thể xác định symbol chuẩn để đặt đòn bẩy cho SHORT ${shortOriginalSymbol} trên ${shortExchangeId}. Bỏ qua đặt đòn bẩy.`);
+            // Fix for symbol.endsWith is not a function
+            if (!shortSymbolForLeverage || typeof shortSymbolForLeverage !== 'string') {
+                 safeLog('warn', `[BOT_TRADE] ⚠️ Không thể xác định symbol chuẩn để đặt đòn bẩy cho SHORT ${shortOriginalSymbol} trên ${shortExchangeId}. Typeof symbol: ${typeof shortSymbolForLeverage}. Bỏ qua đặt đòn bẩy.`);
             } else {
                 safeLog('debug', `[DEBUG LEV] Đặt đòn bẩy SHORT cho ${shortExchangeId}: Symbol="${shortSymbolForLeverage}", Leverage=${shortMaxLeverage}`);
                 if (shortExchange.has['setLeverage']) {
@@ -400,8 +401,9 @@ async function executeTrades(opportunity, percentageToUse) {
                 longSymbolForLeverage = longMarket.symbol;
             }
 
-            if (!longSymbolForLeverage) {
-                 safeLog('warn', `[BOT_TRADE] ⚠️ Không thể xác định symbol chuẩn để đặt đòn bẩy cho LONG ${longOriginalSymbol} trên ${longExchangeId}. Bỏ qua đặt đòn bẩy.`);
+            // Fix for symbol.endsWith is not a function
+            if (!longSymbolForLeverage || typeof longSymbolForLeverage !== 'string') {
+                 safeLog('warn', `[BOT_TRADE] ⚠️ Không thể xác định symbol chuẩn để đặt đòn bẩy cho LONG ${longOriginalSymbol} trên ${longExchangeId}. Typeof symbol: ${typeof longSymbolForLeverage}. Bỏ qua đặt đòn bẩy.`);
             } else {
                 safeLog('debug', `[DEBUG LEV] Đặt đòn bẩy LONG cho ${longExchangeId}: Symbol="${longSymbolForLeverage}", Leverage=${longMaxLeverage}`);
                 if (longExchange.has['setLeverage']) {
@@ -434,7 +436,7 @@ async function executeTrades(opportunity, percentageToUse) {
         }
         
         // --- BẮT ĐẦU: Kiểm tra giá trị danh nghĩa & lượng tối thiểu/chính xác (REVISED) ---
-        const defaultMinNotional = 0.06; 
+        const defaultMinNotional = 0.06; // Giá trị mặc định thấp nhất có thể nếu sàn không cung cấp hoặc quá nhỏ
         const effectiveMinNotionalShort = (shortMarket.limits?.cost?.min && shortMarket.limits.cost.min > 0) ? Math.max(shortMarket.limits.cost.min, defaultMinNotional) : defaultMinNotional; 
         const effectiveMinNotionalLong = (longMarket.limits?.cost?.min && longMarket.limits.cost.min > 0) ? Math.max(longMarket.limits.cost.min, defaultMinNotional) : defaultMinNotional;
 
@@ -468,11 +470,11 @@ async function executeTrades(opportunity, percentageToUse) {
         const finalLongNotional = floatLongAmountToOrder * longEntryPrice;
 
         if (finalShortNotional < effectiveMinNotionalShort) {
-            safeLog('error', `[BOT_TRADE] ❌ Giá trị danh nghĩa SHORT (${finalShortNotional.toFixed(2)} USDT) trên ${shortExchangeId} quá nhỏ (tối thiểu ${effectiveMinNotionalShort} USDT). Hủy bỏ lệnh.`);
+            safeLog('error', `[BOT_TRADE] ❌ Giá trị danh nghĩa SHORT (${finalShortNotional.toFixed(2)} USDT) trên ${shortExchangeId} quá nhỏ (tối thiểu ${effectiveMinNotionalShort.toFixed(2)} USDT). Hủy bỏ lệnh.`);
             return false;
         }
         if (finalLongNotional < effectiveMinNotionalLong) {
-            safeLog('error', `[BOT_TRADE] ❌ Giá trị danh nghĩa LONG (${finalLongNotional.toFixed(2)} USDT) trên ${longExchangeId} quá nhỏ (tối thiểu ${effectiveMinNotionalLong} USDT). Hủy bỏ lệnh.`);
+            safeLog('error', `[BOT_TRADE] ❌ Giá trị danh nghĩa LONG (${finalLongNotional.toFixed(2)} USDT) trên ${longExchangeId} quá nhỏ (tối thiểu ${effectiveMinNotionalLong.toFixed(2)} USDT). Hủy bỏ lệnh.`);
             return false;
         }
         // --- KẾT THÚC: Kiểm tra giá trị danh nghĩa & lượng tối thiểu/chính xác ---
@@ -761,15 +763,18 @@ async function closeTradesAndCalculatePnL() {
             if (!pnlFound) {
                 safeLog('warn', `[BOT_PNL] Không tìm thấy PnL thực tế cho lệnh SHORT ${closeShortOrder.id} trên ${shortExchange} từ trade history. Cập nhật số dư và tính từ đó.`);
                 await updateBalances(); // Cập nhật balance để có số dư mới nhất
-                shortSidePnl = (balances[shortExchange]?.available || 0) - currentTradeDetails.shortCollateral;
-                safeLog('log', `[BOT_PNL] PnL SHORT tính từ số dư ${shortExchange}: ${shortSidePnl.toFixed(2)} USDT.`);
+                // Cách tính PnL dự phòng này chỉ mang tính ước lượng, không phản ánh chính xác các phí giao dịch
+                // PnL = (số dư cuối - số dư ban đầu) của collateral đã dùng cho lệnh này
+                shortSidePnl = (balances[shortExchange]?.available || 0) - (currentTradeDetails.shortCollateral + (balances[shortExchange]?.total || 0) - (balances[shortExchange]?.available || 0)); // Cố gắng tính PnL dựa trên sự thay đổi tổng số dư khả dụng
+                // Cần một cách tính chính xác hơn nếu PnL không có sẵn từ trade info
+                safeLog('log', `[BOT_PNL] PnL SHORT tính từ số dư ${shortExchange} (dự phòng): ${shortSidePnl.toFixed(2)} USDT.`);
             }
         } catch (e) {
             safeLog('error', `[BOT_PNL] ❌ Lỗi khi lấy PnL thực tế cho SHORT ${shortExchange}: ${e.message}`, e);
             // Vẫn tính PnL từ số dư làm dự phòng nếu có lỗi truy xuất
             await updateBalances(); // Cập nhật balance để có số dư mới nhất
-            shortSidePnl = (balances[shortExchange]?.available || 0) - currentTradeDetails.shortCollateral;
-            safeLog('log', `[BOT_PNL] PnL SHORT tính từ số dư (do lỗi): ${shortSidePnl.toFixed(2)} USDT.`);
+            shortSidePnl = (balances[shortExchange]?.available || 0) - (currentTradeDetails.shortCollateral + (balances[shortExchange]?.total || 0) - (balances[shortExchange]?.available || 0));
+            safeLog('log', `[BOT_PNL] PnL SHORT tính từ số dư (do lỗi, dự phòng): ${shortSidePnl.toFixed(2)} USDT.`);
         }
 
         // Lấy PnL thực tế cho bên LONG
@@ -788,14 +793,14 @@ async function closeTradesAndCalculatePnL() {
             if (!pnlFound) {
                 safeLog('warn', `[BOT_PNL] Không tìm thấy PnL thực tế cho lệnh LONG ${closeLongOrder.id} trên ${longExchange} từ trade history. Cập nhật số dư và tính từ đó.`);
                 await updateBalances(); // Cập nhật balance để có số dư mới nhất
-                longSidePnl = (balances[longExchange]?.available || 0) - currentTradeDetails.longCollateral;
-                safeLog('log', `[BOT_PNL] PnL LONG tính từ số dư ${longExchange}: ${longSidePnl.toFixed(2)} USDT.`);
+                longSidePnl = (balances[longExchange]?.available || 0) - (currentTradeDetails.longCollateral + (balances[longExchange]?.total || 0) - (balances[longExchange]?.available || 0));
+                safeLog('log', `[BOT_PNL] PnL LONG tính từ số dư (dự phòng): ${longSidePnl.toFixed(2)} USDT.`);
             }
         } catch (e) {
             safeLog('error', `[BOT_PNL] ❌ Lỗi khi lấy PnL thực tế cho LONG ${longExchange}: ${e.message}`, e);
             await updateBalances(); // Cập nhật balance để có số dư mới nhất
-            longSidePnl = (balances[longExchange]?.available || 0) - currentTradeDetails.longCollateral;
-            safeLog('log', `[BOT_PNL] PnL LONG tính từ số dư (do lỗi): ${longSidePnl.toFixed(2)} USDT.`);
+            longSidePnl = (balances[longExchange]?.available || 0) - (currentTradeDetails.longCollateral + (balances[longExchange]?.total || 0) - (balances[longExchange]?.available || 0));
+            safeLog('log', `[BOT_PNL] PnL LONG tính từ số dư (do lỗi, dự phòng): ${longSidePnl.toFixed(2)} USDT.`);
         }
 
         // Tính PnL của chu kỳ là tổng PnL của hai bên
