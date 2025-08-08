@@ -104,6 +104,34 @@ let currentPercentageToUse = 50;
 
 function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
 
+/**
+ * Hàm trợ giúp để chuẩn hóa symbol cho các lệnh trên sàn giao dịch.
+ * Đặc biệt quan trọng đối với BinanceUSDM nơi symbol native thường khác với symbol CCXT.
+ * @param {string} exchangeId ID của sàn giao dịch (vd: 'binanceusdm').
+ * @param {string} originalSymbol Symbol gốc từ cơ hội arbitrage (vd: 'A2Z/USDT:USDT').
+ * @param {object} exchangeInstance Đối tượng CCXT của sàn.
+ * @returns {string} Symbol đã được chuẩn hóa phù hợp với yêu cầu của sàn.
+ */
+function getExchangeOrderSymbol(exchangeId, originalSymbol, exchangeInstance) {
+    // Đối với BinanceUSDM, CCXT thường trả về symbol dạng 'COIN/USDT:USDT'
+    // nhưng khi đặt lệnh, nó thường yêu cầu 'COINUSDT'.
+    if (exchangeId === 'binanceusdm') {
+        try {
+            const market = exchangeInstance.market(originalSymbol);
+            if (market && market.id) {
+                return market.id; // Trả về symbol native của sàn (vd: A2ZUSDT)
+            }
+        } catch (e) {
+            safeLog('warn', `[SYM_NORM] Không thể lấy symbol gốc cho ${originalSymbol} trên ${exchangeId} từ CCXT market data: ${e.message}. Thử phương án thay thế.`);
+        }
+        // Phương án dự phòng nếu market lookup thất bại
+        return originalSymbol.replace('/USDT:USDT', 'USDT').replace('-', ''); // Xử lý các trường hợp khác nếu có
+    }
+    // Đối với các sàn khác, hoặc nếu không phải Binance, sử dụng symbol gốc
+    return originalSymbol;
+}
+
+
 async function fetchDataFromServer() {
     try {
         const response = await fetch(SERVER_DATA_URL);
@@ -368,6 +396,11 @@ async function executeTrades(opportunity, percentageToUse) {
         const shortAmountToOrder = shortExchange.amountToPrecision(shortOriginalSymbol, shortAmount);
         const longAmountToOrder = longExchange.amountToPrecision(longOriginalSymbol, longAmount);
 
+        // Lấy symbol đã chuẩn hóa cho việc đặt lệnh
+        const shortOrderSymbol = getExchangeOrderSymbol(shortExchangeId, shortOriginalSymbol, shortExchange);
+        const longOrderSymbol = getExchangeOrderSymbol(longExchangeId, longOriginalSymbol, longExchange);
+
+
         // Define common parameters for orders, including positionSide for BingX and BinanceUSDM (Hedge Mode)
         const shortParams = {};
         if (shortExchangeId === 'bingx') {
@@ -383,12 +416,14 @@ async function executeTrades(opportunity, percentageToUse) {
             longParams.positionSide = 'LONG';
         }
 
-        safeLog('log', `[BOT_TRADE] Mở SHORT ${shortAmountToOrder} ${shortOriginalSymbol} trên ${shortExchangeId} với giá ${shortEntryPrice.toFixed(4)}...`);
-        shortOrder = await shortExchange.createMarketSellOrder(shortOriginalSymbol, parseFloat(shortAmountToOrder), shortParams);
+        safeLog('log', `[BOT_TRADE] Mở SHORT ${shortAmountToOrder} ${shortOrderSymbol} trên ${shortExchangeId} với giá ${shortEntryPrice.toFixed(4)}...`);
+        // SỬA LỖI: Sử dụng shortOrderSymbol đã được chuẩn hóa
+        shortOrder = await shortExchange.createMarketSellOrder(shortOrderSymbol, parseFloat(shortAmountToOrder), shortParams);
         safeLog('log', `[BOT_TRADE] ✅ Lệnh SHORT ${shortExchangeId} khớp: ID ${shortOrder.id}, Amount ${shortOrder.amount}, Price ${shortOrder.price}`);
 
-        safeLog('log', `[BOT_TRADE] Mở LONG ${longAmountToOrder} ${longOriginalSymbol} trên ${longExchangeId} với giá ${longEntryPrice.toFixed(4)}...`);
-        longOrder = await longExchange.createMarketBuyOrder(longOriginalSymbol, parseFloat(longAmountToOrder), longParams);
+        safeLog('log', `[BOT_TRADE] Mở LONG ${longAmountToOrder} ${longOrderSymbol} trên ${longExchangeId} với giá ${longEntryPrice.toFixed(4)}...`);
+        // SỬA LỖI: Sử dụng longOrderSymbol đã được chuẩn hóa
+        longOrder = await longExchange.createMarketBuyOrder(longOrderSymbol, parseFloat(longAmountToOrder), longParams);
         safeLog('log', `[BOT_TRADE] ✅ Lệnh LONG ${longExchangeId} khớp: ID ${longOrder.id}, Amount ${longOrder.amount}, Price ${longOrder.price}`);
 
         safeLog('log', `[BOT_TRADE] Setting currentTradeDetails for ${cleanedCoin} on ${shortExchangeId}/${longExchangeId}`);
@@ -396,8 +431,8 @@ async function executeTrades(opportunity, percentageToUse) {
             coin: cleanedCoin,
             shortExchange: shortExchangeId,
             longExchange: longExchangeId,
-            shortOriginalSymbol: shortOriginalSymbol,
-            longOriginalSymbol: longOriginalSymbol,
+            shortOriginalSymbol: shortOriginalSymbol, // Giữ symbol gốc cho mục đích theo dõi
+            longOriginalSymbol: longOriginalSymbol,   // Giữ symbol gốc cho mục đích theo dõi
             shortOrderId: shortOrder.id,
             longOrderId: longOrder.id,
             shortOrderAmount: shortOrder.amount,
@@ -447,8 +482,9 @@ async function executeTrades(opportunity, percentageToUse) {
             }
             
             if (parseFloat(shortSlPriceToOrder) > 0) {
+                // SỬA LỖI: Sử dụng shortOrderSymbol đã được chuẩn hóa
                 await shortExchange.createOrder(
-                    shortOriginalSymbol,
+                    shortOrderSymbol, 
                     'STOP_MARKET',
                     'buy',
                     shortOrder.amount, 
@@ -472,8 +508,9 @@ async function executeTrades(opportunity, percentageToUse) {
             }
 
             if (parseFloat(shortTpPriceToOrder) > 0) {
+                // SỬA LỖI: Sử dụng shortOrderSymbol đã được chuẩn hóa
                 await shortExchange.createOrder(
-                    shortOriginalSymbol,
+                    shortOrderSymbol, 
                     'TAKE_PROFIT_MARKET',
                     'buy',
                     shortOrder.amount, 
@@ -498,8 +535,9 @@ async function executeTrades(opportunity, percentageToUse) {
             }
 
             if (parseFloat(longSlPriceToOrder) > 0) {
+                // SỬA LỖI: Sử dụng longOrderSymbol đã được chuẩn hóa
                 await longExchange.createOrder(
-                    longOriginalSymbol,
+                    longOrderSymbol, 
                     'STOP_MARKET',
                     'sell',
                     longOrder.amount, 
@@ -523,8 +561,9 @@ async function executeTrades(opportunity, percentageToUse) {
             }
 
             if (parseFloat(longTpPriceToOrder) > 0) {
+                // SỬA LỖI: Sử dụng longOrderSymbol đã được chuẩn hóa
                 await longExchange.createOrder(
-                    longOriginalSymbol,
+                    longOrderSymbol, 
                     'TAKE_PROFIT_MARKET',
                     'sell',
                     longOrder.amount, 
@@ -564,31 +603,37 @@ async function closeTradesAndCalculatePnL() {
     safeLog('log', '[BOT_PNL] 🔄 Đang đóng các vị thế và tính toán PnL...');
     const { coin, shortExchange, longExchange, shortOriginalSymbol, longOriginalSymbol, shortOrderAmount, longOrderAmount, shortCollateral, longCollateral } = currentTradeDetails;
 
+    // Lấy symbol đã chuẩn hóa cho việc đóng lệnh
+    const shortCloseSymbol = getExchangeOrderSymbol(shortExchange, shortOriginalSymbol, exchanges[shortExchange]);
+    const longCloseSymbol = getExchangeOrderSymbol(longExchange, longOriginalSymbol, exchanges[longExchange]);
+
     try {
         safeLog('log', '[BOT_PNL] Hủy các lệnh TP/SL còn chờ (nếu có)...');
         // Fetch and cancel specific symbol orders for SHORT side
         try {
-            const shortOpenOrders = await exchanges[shortExchange].fetchOpenOrders(shortOriginalSymbol);
+            // SỬA LỖI: Sử dụng shortCloseSymbol đã được chuẩn hóa khi hủy lệnh
+            const shortOpenOrders = await exchanges[shortExchange].fetchOpenOrders(shortCloseSymbol);
             for (const order of shortOpenOrders) {
                 // Ensure we only cancel TP/SL orders that are still open
                 if ((order.type === 'stop' || order.type === 'take_profit' || order.type === 'stop_market' || order.type === 'take_profit_market') && order.status === 'open') {
-                    await exchanges[shortExchange].cancelOrder(order.id, shortOriginalSymbol);
-                    safeLog('log', `[BOT_PNL] Đã hủy lệnh chờ ${order.type} ${order.id} cho ${shortOriginalSymbol} trên ${shortExchange}.`);
+                    await exchanges[shortExchange].cancelOrder(order.id, shortCloseSymbol); // SỬA LỖI: Dùng shortCloseSymbol
+                    safeLog('log', `[BOT_PNL] Đã hủy lệnh chờ ${order.type} ${order.id} cho ${shortCloseSymbol} trên ${shortExchange}.`);
                 }
             }
-        } catch (e) { safeLog('warn', `[BOT_PNL] Lỗi khi hủy lệnh chờ cho ${shortOriginalSymbol} trên ${shortExchange}: ${e.message}`, e); }
+        } catch (e) { safeLog('warn', `[BOT_PNL] Lỗi khi hủy lệnh chờ cho ${shortCloseSymbol} trên ${shortExchange}: ${e.message}`, e); } // SỬA LỖI: Dùng shortCloseSymbol
         
         // Fetch and cancel specific symbol orders for LONG side
         try {
-            const longOpenOrders = await exchanges[longExchange].fetchOpenOrders(longOriginalSymbol);
+            // SỬA LỖI: Sử dụng longCloseSymbol đã được chuẩn hóa khi hủy lệnh
+            const longOpenOrders = await exchanges[longExchange].fetchOpenOrders(longCloseSymbol);
             for (const order of longOpenOrders) {
                 // Ensure we only cancel TP/SL orders that are still open
                 if ((order.type === 'stop' || order.type === 'take_profit' || order.type === 'stop_market' || order.type === 'take_profit_market') && order.status === 'open') {
-                    await exchanges[longExchange].cancelOrder(order.id, longOriginalSymbol);
-                    safeLog('log', `[BOT_PNL] Đã hủy lệnh chờ ${order.type} ${order.id} cho ${longOriginalSymbol} trên ${longExchange}.`);
+                    await exchanges[longExchange].cancelOrder(order.id, longCloseSymbol); // SỬA LỖI: Dùng longCloseSymbol
+                    safeLog('log', `[BOT_PNL] Đã hủy lệnh chờ ${order.type} ${order.id} cho ${longCloseSymbol} trên ${longExchange}.`);
                 }
             }
-        } catch (e) { safeLog('warn', `[BOT_PNL] Lỗi khi hủy lệnh chờ cho ${longOriginalSymbol} trên ${longExchange}: ${e.message}`, e); }
+        } catch (e) { safeLog('warn', `[BOT_PNL] Lỗi khi hủy lệnh chờ cho ${longCloseSymbol} trên ${longExchange}: ${e.message}`, e); } // SỬA LỖI: Dùng longCloseSymbol
 
         // Parameters for closing orders on BingX (Hedge Mode) and BinanceUSDM (Hedge Mode)
         const closeShortParams = {};
@@ -606,11 +651,13 @@ async function closeTradesAndCalculatePnL() {
         }
 
         safeLog('log', `[BOT_PNL] Đóng vị thế SHORT ${coin} trên ${shortExchange} (amount: ${shortOrderAmount})...`);
-        const closeShortOrder = await exchanges[shortExchange].createMarketBuyOrder(shortOriginalSymbol, shortOrderAmount, closeShortParams);
+        // SỬA LỖI: Sử dụng shortCloseSymbol đã được chuẩn hóa
+        const closeShortOrder = await exchanges[shortExchange].createMarketBuyOrder(shortCloseSymbol, shortOrderAmount, closeShortParams);
         safeLog('log', `[BOT_PNL] ✅ Vị thế SHORT trên ${shortExchange} đã đóng. Order ID: ${closeShortOrder.id}`);
 
         safeLog('log', `[BOT_PNL] Đóng vị thế LONG ${coin} trên ${longExchange} (amount: ${longOrderAmount})...`);
-        const closeLongOrder = await exchanges[longExchange].createMarketSellOrder(longOriginalSymbol, longOrderAmount, closeLongParams);
+        // SỬA LỖI: Sử dụng longCloseSymbol đã được chuẩn hóa
+        const closeLongOrder = await exchanges[longExchange].createMarketSellOrder(longCloseSymbol, longOrderAmount, closeLongParams);
         safeLog('log', `[BOT_PNL] ✅ Vị thế LONG trên ${longExchange} đã đóng. Order ID: ${closeLongOrder.id}`);
 
         // SỬA ĐỔI: Đợi 30 giây để sàn xử lý dữ liệu PnL, sau đó lấy PnL thực tế
@@ -624,7 +671,8 @@ async function closeTradesAndCalculatePnL() {
         try {
             let pnlFound = false;
             // Cố gắng tìm PnL từ giao dịch (trade) cuối cùng liên quan đến lệnh đóng
-            const shortTrades = await exchanges[shortExchange].fetchMyTrades(shortOriginalSymbol, undefined, undefined, { orderId: closeShortOrder.id, limit: 10 }); // Lấy thêm trade để đảm bảo tìm thấy
+            // SỬA LỖI: Sử dụng shortCloseSymbol đã được chuẩn hóa khi fetchMyTrades
+            const shortTrades = await exchanges[shortExchange].fetchMyTrades(shortCloseSymbol, undefined, undefined, { orderId: closeShortOrder.id, limit: 10 }); // Lấy thêm trade để đảm bảo tìm thấy
             for (const trade of shortTrades) {
                 if (trade.order === closeShortOrder.id && trade.info?.realizedPnl !== undefined) {
                     shortSidePnl = parseFloat(trade.info.realizedPnl);
@@ -651,7 +699,8 @@ async function closeTradesAndCalculatePnL() {
         // Lấy PnL thực tế cho bên LONG
         try {
             let pnlFound = false;
-            const longTrades = await exchanges[longExchange].fetchMyTrades(longOriginalSymbol, undefined, undefined, { orderId: closeLongOrder.id, limit: 10 }); // Lấy thêm trade để đảm bảo tìm thấy
+            // SỬA LỖI: Sử dụng longCloseSymbol đã được chuẩn hóa khi fetchMyTrades
+            const longTrades = await exchanges[longExchange].fetchMyTrades(longCloseSymbol, undefined, undefined, { orderId: closeLongOrder.id, limit: 10 }); // Lấy thêm trade để đảm bảo tìm thấy
             for (const trade of longTrades) {
                 if (trade.order === closeLongOrder.id && trade.info?.realizedPnl !== undefined) {
                     longSidePnl = parseFloat(trade.info.realizedPnl);
