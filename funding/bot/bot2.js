@@ -211,7 +211,7 @@ async function processServerData(serverData) {
         
         if (DISABLED_EXCHANGES.includes(shortExIdNormalized) || DISABLED_EXCHANGES.includes(longExIdNormalized) ||
             !exchanges[shortExIdNormalized] || !exchanges[longExIdNormalized]) {
-            safeLog('warn', `[BOT] Bỏ qua cơ hội cho ${op.coin} vì sàn ${shortExIdNormalized} hoặc ${longExIdNormalized} bị tắt hoặc chưa được khởi tạo.`);
+            // safeLog('warn', `[BOT] Bỏ qua cơ hội cho ${op.coin} vì sàn ${shortExIdNormalized} hoặc ${longExIdNormalized} bị tắt hoặc chưa được khởi tạo.`);
             return; // Skip if exchange is disabled or not initialized
         }
 
