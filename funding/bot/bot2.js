@@ -341,97 +341,106 @@ async function executeTrades(opportunity, percentageToUse) {
         }
 
         // --- Debugging market objects ---
-        safeLog('debug', 'shortMarket object for leverage:', shortMarket);
-        safeLog('debug', 'longMarket object for leverage:', longMarket);
+        safeLog('debug', 'shortMarket object for leverage:', JSON.stringify(shortMarket));
+        safeLog('debug', 'longMarket object for leverage:', JSON.stringify(longMarket));
         // --- End Debugging ---
 
         // Lấy đòn bẩy tối đa thực sự từ fetchLeverageTiers, với fallback an toàn hơn
-        let shortMaxLeverage = 20; // Default safe fallback
+        let shortMaxLeverage = 20; // Sensible default
         try {
             if (shortExchange.has['fetchLeverageTiers']) {
-                const shortLeverageTiers = await shortExchange.fetchLeverageTiers(shortOriginalSymbol);
-                if (shortLeverageTiers && shortLeverageTiers[shortOriginalSymbol] && shortLeverageTiers[shortOriginalSymbol].length > 0) {
-                    const tier = shortLeverageTiers[shortOriginalSymbol][0]; // Lấy tier đầu tiên
-                    shortMaxLeverage = parseInt(tier.maxLeverage || 0);
-                    if (shortMaxLeverage === 0) shortMaxLeverage = 20; // Đảm bảo không zero
-                    safeLog('log', `[BOT_TRADE] Đòn bẩy tối đa thực tế từ fetchLeverageTiers cho SHORT ${shortExchangeId}: x${shortMaxLeverage}`);
+                const tiers = await shortExchange.fetchLeverageTiers(shortOriginalSymbol);
+                if (tiers && tiers[shortOriginalSymbol] && tiers[shortOriginalSymbol].length > 0) {
+                    shortMaxLeverage = parseInt(tiers[shortOriginalSymbol][0].maxLeverage || 0);
+                    if (shortMaxLeverage < 1) shortMaxLeverage = 20; // Ensure it's at least 1
+                    safeLog('log', `[BOT_TRADE] Max Leverage from fetchLeverageTiers for SHORT ${shortExchangeId}: x${shortMaxLeverage}`);
                 } else {
-                    safeLog('warn', `[BOT_TRADE] Không tìm thấy thông tin đòn bẩy từ fetchLeverageTiers cho SHORT ${shortOriginalSymbol} trên ${shortExchangeId}. Sử dụng mặc định x20.`);
+                    safeLog('warn', `[BOT_TRADE] Could not fetch leverage tiers for SHORT ${shortOriginalSymbol} on ${shortExchangeId}. Using fallback x${shortMaxLeverage}.`);
                 }
             } else {
-                safeLog('warn', `[BOT_TRADE] Sàn ${shortExchangeId} không hỗ trợ fetchLeverageTiers. Sử dụng mặc định x20.`);
+                safeLog('warn', `[BOT_TRADE] Exchange ${shortExchangeId} does not support fetchLeverageTiers. Using fallback x${shortMaxLeverage}.`);
             }
         } catch (levFetchErr) {
-            safeLog('error', `[BOT_TRADE] Lỗi khi fetchLeverageTiers cho SHORT ${shortOriginalSymbol} trên ${shortExchangeId}: ${levFetchErr.message}. Sử dụng mặc định x20.`, levFetchErr);
+            safeLog('error', `[BOT_TRADE] Error fetching leverage tiers for SHORT ${shortOriginalSymbol} on ${shortExchangeId}: ${levFetchErr.message}. Using fallback x${shortMaxLeverage}.`, levFetchErr);
         }
 
-        let longMaxLeverage = 20; // Default safe fallback
+        let longMaxLeverage = 20; // Sensible default
         try {
             if (longExchange.has['fetchLeverageTiers']) {
-                const longLeverageTiers = await longExchange.fetchLeverageTiers(longOriginalSymbol);
-                if (longLeverageTiers && longLeverageTiers[longOriginalSymbol] && longLeverageTiers[longOriginalSymbol].length > 0) {
-                    const tier = longLeverageTiers[longOriginalSymbol][0]; // Lấy tier đầu tiên
-                    longMaxLeverage = parseInt(tier.maxLeverage || 0);
-                    if (longMaxLeverage === 0) longMaxLeverage = 20; // Đảm bảo không zero
-                    safeLog('log', `[BOT_TRADE] Đòn bẩy tối đa thực tế từ fetchLeverageTiers cho LONG ${longExchangeId}: x${longMaxLeverage}`);
+                const tiers = await longExchange.fetchLeverageTiers(longOriginalSymbol);
+                if (tiers && tiers[longOriginalSymbol] && tiers[longOriginalSymbol].length > 0) {
+                    longMaxLeverage = parseInt(tiers[longOriginalSymbol][0].maxLeverage || 0);
+                    if (longMaxLeverage < 1) longMaxLeverage = 20; // Ensure it's at least 1
+                    safeLog('log', `[BOT_TRADE] Max Leverage from fetchLeverageTiers for LONG ${longExchangeId}: x${longMaxLeverage}`);
                 } else {
-                    safeLog('warn', `[BOT_TRADE] Không tìm thấy thông tin đòn bẩy từ fetchLeverageTiers cho LONG ${longOriginalSymbol} trên ${longExchangeId}. Sử dụng mặc định x20.`);
+                    safeLog('warn', `[BOT_TRADE] Could not fetch leverage tiers for LONG ${longOriginalSymbol} on ${longExchangeId}. Using fallback x${longMaxLeverage}.`);
                 }
             } else {
-                safeLog('warn', `[BOT_TRADE] Sàn ${longExchangeId} không hỗ trợ fetchLeverageTiers. Sử dụng mặc định x20.`);
+                safeLog('warn', `[BOT_TRADE] Exchange ${longExchangeId} does not support fetchLeverageTiers. Using fallback x${longMaxLeverage}.`);
             }
         } catch (levFetchErr) {
-            safeLog('error', `[BOT_TRADE] Lỗi khi fetchLeverageTiers cho LONG ${longOriginalSymbol} trên ${longExchangeId}: ${levFetchErr.message}. Sử dụng mặc định x20.`, levFetchErr);
+            safeLog('error', `[BOT_TRADE] Error fetching leverage tiers for LONG ${longOriginalSymbol} on ${longExchangeId}: ${levFetchErr.message}. Using fallback x${longMaxLeverage}.`, levFetchErr);
         }
 
-        safeLog('log', `[BOT_TRADE] Đòn bẩy TÍNH TOÁN cho SHORT ${shortExchangeId}: x${shortMaxLeverage}`);
-        safeLog('log', `[BOT_TRADE] Đòn bẩy TÍNH TOÁN cho LONG ${longExchangeId}: x${longMaxLeverage}`);
-
+        safeLog('log', `[BOT_TRADE] Calculated Leverage for SHORT ${shortExchangeId}: x${shortMaxLeverage}`);
+        safeLog('log', `[BOT_TRADE] Calculated Leverage for LONG ${longExchangeId}: x${longMaxLeverage}`);
 
         // --- BẮT ĐẦU: ĐẶT ĐÒN BẨY TỐI ĐA TRÊN MỖI SÀN (REVISED) ---
-        // Sử dụng market.symbol (unified) cho hầu hết các sàn và market.id (native) cho BinanceUSDM
+        // Determine the correct symbol format for setLeverage based on exchange
         const shortSymbolForLeverage = shortExchangeId === 'binanceusdm' ? shortMarket?.id : shortMarket?.symbol;
         const longSymbolForLeverage = longExchangeId === 'binanceusdm' ? longMarket?.id : longMarket?.symbol;
 
-        // Apply Optional Chaining robustly and validate symbol type
-        if (!shortSymbolForLeverage || typeof shortSymbolForLeverage !== 'string') {
-            safeLog('warn', `[BOT_TRADE] ⚠️ Không thể xác định symbol chuẩn hoặc symbol không hợp lệ để đặt đòn bẩy cho SHORT ${shortOriginalSymbol} trên ${shortExchangeId}. Symbol: "${shortSymbolForLeverage}", Typeof: ${typeof shortSymbolForLeverage}. Bỏ qua đặt đòn bẩy.`);
-        } else {
-            try {
-                safeLog('debug', `[DEBUG LEV] Đặt đòn bẩy SHORT cho ${shortExchangeId}: Symbol="${shortSymbolForLeverage}", Leverage=${shortMaxLeverage}`);
-                if (shortExchange.has['setLeverage']) {
-                    // Thêm marginMode: 'cross' nếu sàn yêu cầu rõ ràng
-                    await shortExchange.setLeverage(shortSymbolForLeverage, shortMaxLeverage, { 'marginMode': 'cross' }); 
-                    safeLog('log', `[BOT_TRADE] ✅ Đặt đòn bẩy x${shortMaxLeverage} cho SHORT ${shortOriginalSymbol} trên ${shortExchangeId}.`);
+        // SHORT side set leverage
+        if (shortExchange.has['setLeverage']) {
+            if (!shortSymbolForLeverage || typeof shortSymbolForLeverage !== 'string') {
+                safeLog('warn', `[BOT_TRADE] ⚠️ Invalid symbol for SHORT leverage setting on ${shortExchangeId}. Symbol: "${shortSymbolForLeverage}". Skipping leverage setting.`);
+            } else {
+                try {
+                    safeLog('debug', `[DEBUG LEV] Setting SHORT leverage for ${shortExchangeId}: Symbol="${shortSymbolForLeverage}", Leverage=${shortMaxLeverage}`);
+                    if (shortExchangeId === 'bingx') {
+                        // BingX specifically requires 'side' in params
+                        await shortExchange.setLeverage(shortSymbolForLeverage, shortMaxLeverage, { 'side': 'BOTH', 'marginMode': 'cross' });
+                    } else {
+                        await shortExchange.setLeverage(shortSymbolForLeverage, shortMaxLeverage, { 'marginMode': 'cross' });
+                    }
+                    safeLog('log', `[BOT_TRADE] ✅ Set leverage x${shortMaxLeverage} for SHORT ${shortOriginalSymbol} on ${shortExchangeId}.`);
+                } catch (levErr) {
+                    safeLog('warn', `[BOT_TRADE] ⚠️ Error setting leverage for SHORT ${shortOriginalSymbol} on ${shortExchangeId}: ${levErr.message}. Continuing without guaranteed leverage.`, levErr);
                 }
-            } catch (levErr) {
-                safeLog('warn', `[BOT_TRADE] ⚠️ Lỗi đặt đòn bẩy cho SHORT ${shortOriginalSymbol} trên ${shortExchangeId}: ${levErr.message}. Tiếp tục mà không đảm bảo đòn bẩy.`, levErr);
             }
+        } else {
+            safeLog('warn', `[BOT_TRADE] Exchange ${shortExchangeId} does not support setting leverage via CCXT.`);
         }
 
-        if (!longSymbolForLeverage || typeof longSymbolForLeverage !== 'string') {
-            safeLog('warn', `[BOT_TRADE] ⚠️ Không thể xác định symbol chuẩn hoặc symbol không hợp lệ để đặt đòn bẩy cho LONG ${longOriginalSymbol} trên ${longExchangeId}. Symbol: "${longSymbolForLeverage}", Typeof: ${typeof longSymbolForLeverage}. Bỏ qua đặt đòn bẩy.`);
-        } else {
-            try {
-                safeLog('debug', `[DEBUG LEV] Đặt đòn bẩy LONG cho ${longExchangeId}: Symbol="${longSymbolForLeverage}", Leverage=${longMaxLeverage}`);
-                if (longExchange.has['setLeverage']) {
-                    // Thêm marginMode: 'cross' nếu sàn yêu cầu rõ ràng
-                    await longExchange.setLeverage(longSymbolForLeverage, longMaxLeverage, { 'marginMode': 'cross' });
-                    safeLog('log', `[BOT_TRADE] ✅ Đặt đòn bẩy x${longMaxLeverage} cho LONG ${longOriginalSymbol} trên ${longExchangeId}.`);
+        // LONG side set leverage
+        if (longExchange.has['setLeverage']) {
+            if (!longSymbolForLeverage || typeof longSymbolForLeverage !== 'string') {
+                 safeLog('warn', `[BOT_TRADE] ⚠️ Invalid symbol for LONG leverage setting on ${longExchangeId}. Symbol: "${longSymbolForLeverage}". Skipping leverage setting.`);
+            } else {
+                try {
+                    safeLog('debug', `[DEBUG LEV] Setting LONG leverage for ${longExchangeId}: Symbol="${longSymbolForLeverage}", Leverage=${longMaxLeverage}`);
+                    if (longExchangeId === 'bingx') {
+                         await longExchange.setLeverage(longSymbolForLeverage, longMaxLeverage, { 'side': 'BOTH', 'marginMode': 'cross' });
+                    } else {
+                        await longExchange.setLeverage(longSymbolForLeverage, longMaxLeverage, { 'marginMode': 'cross' });
+                    }
+                    safeLog('log', `[BOT_TRADE] ✅ Set leverage x${longMaxLeverage} for LONG ${longOriginalSymbol} on ${longExchangeId}.`);
+                } catch (levErr) {
+                    safeLog('warn', `[BOT_TRADE] ⚠️ Error setting leverage for LONG ${longOriginalSymbol} on ${longExchangeId}: ${levErr.message}. Continuing without guaranteed leverage.`, levErr);
                 }
-            } catch (levErr) {
-                safeLog('warn', `[BOT_TRADE] ⚠️ Lỗi đặt đòn bẩy cho LONG ${longOriginalSymbol} trên ${longExchangeId}: ${levErr.message}. Tiếp tục mà không đảm bảo đòn bẩy.`, levErr);
             }
+        } else {
+            safeLog('warn', `[BOT_TRADE] Exchange ${longExchangeId} does not support setting leverage via CCXT.`);
         }
         // --- KẾT THÚC: ĐẶT ĐÒN BẨY TỐI ĐA TRÊN MỖI SÀN ---
 
 
         // Tính toán lượng hợp đồng (amount) sử dụng đòn bẩy tối đa của từng sàn
-        const shortCalculatedAmount = (shortCollateral * shortMaxLeverage) / shortEntryPrice;
-        const longCalculatedAmount = (longCollateral * longMaxLeverage) / longEntryPrice;
+        const shortRawAmount = (shortCollateral * shortMaxLeverage) / shortEntryPrice;
+        const longRawAmount = (longCollateral * longMaxLeverage) / longEntryPrice;
 
-        if (shortCalculatedAmount <= 0 || longCalculatedAmount <= 0) {
-            safeLog('error', '[BOT_TRADE] Lượng hợp đồng tính toán không hợp lệ (cần dương). Hủy bỏ lệnh.');
+        if (shortRawAmount <= 0 || longRawAmount <= 0) {
+            safeLog('error', '[BOT_TRADE] Raw calculated amount invalid (must be positive). Cancelling order.');
             return false;
         }
         
@@ -439,14 +448,14 @@ async function executeTrades(opportunity, percentageToUse) {
         let effectiveMinNotionalShort = shortMarket.limits?.cost?.min || 0;
         let effectiveMinNotionalLong = longMarket.limits?.cost?.min || 0;
 
-        // Specific minNotional overrides if exchange's limits are too low or missing
+        // Override with known minimums if exchange data is missing or too low
         if (shortExchangeId === 'bingx') {
             effectiveMinNotionalShort = Math.max(effectiveMinNotionalShort, 2.0); // BingX min notional is 2 USDT
         }
         if (shortExchangeId === 'binanceusdm') {
             effectiveMinNotionalShort = Math.max(effectiveMinNotionalShort, 5.0); // Binance min notional typically 5 USDT
         }
-        effectiveMinNotionalShort = Math.max(effectiveMinNotionalShort, 0.06); // General fallback (very low)
+        effectiveMinNotionalShort = Math.max(effectiveMinNotionalShort, 0.06); // General fallback (very low, for other exchanges if needed)
         
         if (longExchangeId === 'bingx') {
             effectiveMinNotionalLong = Math.max(effectiveMinNotionalLong, 2.0);
@@ -456,31 +465,31 @@ async function executeTrades(opportunity, percentageToUse) {
         }
         effectiveMinNotionalLong = Math.max(effectiveMinNotionalLong, 0.06); // General fallback
 
-
-        // Lấy lượng tối thiểu từ market info
         const minAmountShort = shortMarket.limits?.amount?.min || 0;
         const minAmountLong = longMarket.limits?.amount?.min || 0;
 
-        // --- NEW: Early Min Amount Check - Check if calculated amount is even enough for minQty
-        if (minAmountShort > 0 && shortCalculatedAmount < minAmountShort) {
-            safeLog('error', `[BOT_TRADE] ❌ Lượng SHORT tính toán (${shortCalculatedAmount.toFixed(8)}) nhỏ hơn tối thiểu (${minAmountShort}) trên ${shortExchangeId}. Vốn ${shortCollateral.toFixed(2)} USDT không đủ để mở lệnh với đòn bẩy x${shortMaxLeverage}. Hủy bỏ lệnh.`);
+        // --- CRITICAL EARLY CHECK: Is the calculated amount and notional even possible? ---
+        const shortPotentialNotional = shortRawAmount * shortEntryPrice;
+        if (shortRawAmount < minAmountShort || shortPotentialNotional < effectiveMinNotionalShort) {
+            safeLog('error', `[BOT_TRADE] ❌ SHORT ${shortExchangeId} (${shortOriginalSymbol}): Calculated amount (${shortRawAmount.toFixed(8)}) < minQty (${minAmountShort}) OR Notional (${shortPotentialNotional.toFixed(2)} USDT) < minNotional (${effectiveMinNotionalShort.toFixed(2)} USDT). Collateral: ${shortCollateral.toFixed(2)} USDT with x${shortMaxLeverage} leverage. Cancelling order.`);
             return false;
         }
-        if (minAmountLong > 0 && longCalculatedAmount < minAmountLong) {
-            safeLog('error', `[BOT_TRADE] ❌ Lượng LONG tính toán (${longCalculatedAmount.toFixed(8)}) nhỏ hơn tối thiểu (${minAmountLong}) trên ${longExchangeId}. Vốn ${longCollateral.toFixed(2)} USDT không đủ để mở lệnh với đòn bẩy x${longMaxLeverage}. Hủy bỏ lệnh.`);
+        const longPotentialNotional = longRawAmount * longEntryPrice;
+        if (longRawAmount < minAmountLong || longPotentialNotional < effectiveMinNotionalLong) {
+            safeLog('error', `[BOT_TRADE] ❌ LONG ${longExchangeId} (${longOriginalSymbol}): Calculated amount (${longRawAmount.toFixed(8)}) < minQty (${minAmountLong}) OR Notional (${longPotentialNotional.toFixed(2)} USDT) < minNotional (${effectiveMinNotionalLong.toFixed(2)} USDT). Collateral: ${longCollateral.toFixed(2)} USDT with x${longMaxLeverage} leverage. Cancelling order.`);
             return false;
         }
-        // --- END: Early Min Amount Check ---
+        // --- END CRITICAL EARLY CHECK ---
         
-        // Now apply precision to the calculated amounts. CCXT's amountToPrecision should handle its own minQty internally.
-        const shortAmountToOrder = shortExchange.amountToPrecision(shortOriginalSymbol, shortCalculatedAmount);
-        const longAmountToOrder = longExchange.amountToPrecision(longOriginalSymbol, longCalculatedAmount);
+        // Now apply precision to the calculated amounts. At this point, they should be above minimums.
+        const shortAmountToOrder = shortExchange.amountToPrecision(shortOriginalSymbol, shortRawAmount);
+        const longAmountToOrder = longExchange.amountToPrecision(longOriginalSymbol, longRawAmount);
 
-        // Convert to float for notional value calculation
+        // Convert to float for notional value calculation (already done for early check, but re-confirming for clarity)
         const floatShortAmountToOrder = parseFloat(shortAmountToOrder);
         const floatLongAmountToOrder = parseFloat(longAmountToOrder);
 
-        // Kiểm tra lại giá trị danh nghĩa sau khi điều chỉnh lượng
+        // This re-check should ideally pass if the early check was thorough, but doesn't hurt.
         const finalShortNotional = floatShortAmountToOrder * shortEntryPrice;
         const finalLongNotional = floatLongAmountToOrder * longEntryPrice;
 
