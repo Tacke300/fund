@@ -173,7 +173,7 @@ async function processServerData(serverData) {
         const shortExIdNormalized = op.details.shortExchange.toLowerCase() === 'binance' ? 'binanceusdm' : op.details.shortExchange.toLowerCase();
         const longExIdNormalized = op.details.longExchange.toLowerCase() === 'binance' ? 'binanceusdm' : op.details.longExchange.toLowerCase();
 
-        // BẮT ĐẦU SỬA LỖI: Thêm kiểm tra các trường originalSymbol và exchange ID
+        // BẮT ĐẦU SỬA LỖI ĐỂ TRÁNH LỖI THIẾU TRƯỜNG: Thêm kiểm tra các trường originalSymbol và exchange ID
         if (!op.details || !op.details.shortOriginalSymbol || !op.details.longOriginalSymbol ||
             !op.details.shortExchange || !op.details.longExchange) {
             safeLog('warn', `[BOT] Bỏ qua cơ hội cho ${op.coin} vì thiếu thông tin chi tiết (original symbol hoặc exchange ID).`);
@@ -244,6 +244,7 @@ async function executeTrades(opportunity, percentageToUse) {
         return false;
     }
 
+    // Kiểm tra này vẫn cần thiết vì nó là lớp bảo vệ cuối cùng trước khi cố gắng mở lệnh
     if (!opportunity.details || !opportunity.details.shortExchange || !opportunity.details.longExchange ||
         !opportunity.details.shortOriginalSymbol || !opportunity.details.longOriginalSymbol) {
         safeLog('error', '[BOT_TRADE] Thông tin chi tiết cơ hội thiếu trường cần thiết (exchange ID hoặc original symbol). Hủy bỏ lệnh.');
