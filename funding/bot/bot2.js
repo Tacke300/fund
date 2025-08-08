@@ -350,19 +350,17 @@ async function executeTrades(opportunity, percentageToUse) {
         // --- BẮT ĐẦU: ĐẶT ĐÒN BẨY TỐI ĐA TRÊN MỖI SÀN ---
         // Cố gắng đặt đòn bẩy tối đa cho mỗi bên
         try {
-            const symbolToUseShort = typeof shortOriginalSymbol === 'string' ? shortOriginalSymbol : String(shortOriginalSymbol);
-            safeLog('debug', `[DEBUG LEV] Đặt đòn bẩy SHORT cho ${shortExchangeId}: Symbol="${symbolToUseShort}", Leverage=${shortMaxLeverage}`);
+            // Truyền trực tiếp originalSymbol (string)
+            safeLog('debug', `[DEBUG LEV] Đặt đòn bẩy SHORT cho ${shortExchangeId}: Symbol="${shortOriginalSymbol}", Leverage=${shortMaxLeverage}`);
             if (shortExchange.has['setLeverage']) {
                 if (shortExchangeId === 'bingx') {
                     // BingX yêu cầu tham số 'side' cho setLeverage
-                    await shortExchange.setLeverage(symbolToUseShort, shortMaxLeverage, { 'side': 'BOTH' }); 
+                    await shortExchange.setLeverage(shortOriginalSymbol, shortMaxLeverage, { 'side': 'BOTH' }); 
                 } else if (shortExchangeId === 'binanceusdm') {
-                    // Chuẩn hóa symbol cho Binance và đảm bảo market object hợp lệ
-                    const binanceSymbolIdShort = shortMarket.id; // Đã có market object hợp lệ
-                    safeLog('debug', `[DEBUG LEV] Binance Normalized Symbol ID: ${binanceSymbolIdShort}`);
-                    await shortExchange.setLeverage(binanceSymbolIdShort, shortMaxLeverage); 
+                    // Truyền trực tiếp originalSymbol (string)
+                    await shortExchange.setLeverage(shortOriginalSymbol, shortMaxLeverage); 
                 } else {
-                    await shortExchange.setLeverage(symbolToUseShort, shortMaxLeverage);
+                    await shortExchange.setLeverage(shortOriginalSymbol, shortMaxLeverage);
                 }
             }
             safeLog('log', `[BOT_TRADE] ✅ Đặt đòn bẩy x${shortMaxLeverage} cho SHORT ${shortOriginalSymbol} trên ${shortExchangeId}.`);
@@ -371,19 +369,17 @@ async function executeTrades(opportunity, percentageToUse) {
         }
 
         try {
-            const symbolToUseLong = typeof longOriginalSymbol === 'string' ? longOriginalSymbol : String(longOriginalSymbol);
-            safeLog('debug', `[DEBUG LEV] Đặt đòn bẩy LONG cho ${longExchangeId}: Symbol="${symbolToUseLong}", Leverage=${longMaxLeverage}`);
+            // Truyền trực tiếp originalSymbol (string)
+            safeLog('debug', `[DEBUG LEV] Đặt đòn bẩy LONG cho ${longExchangeId}: Symbol="${longOriginalSymbol}", Leverage=${longMaxLeverage}`);
             if (longExchange.has['setLeverage']) {
                 if (longExchangeId === 'bingx') {
                     // BingX yêu cầu tham số 'side' cho setLeverage
-                    await longExchange.setLeverage(symbolToUseLong, longMaxLeverage, { 'side': 'BOTH' });
+                    await longExchange.setLeverage(longOriginalSymbol, longMaxLeverage, { 'side': 'BOTH' });
                 } else if (longExchangeId === 'binanceusdm') {
-                     // Chuẩn hóa symbol cho Binance và đảm bảo market object hợp lệ
-                    const binanceSymbolIdLong = longMarket.id; // Đã có market object hợp lệ
-                    safeLog('debug', `[DEBUG LEV] Binance Normalized Symbol ID: ${binanceSymbolIdLong}`);
-                    await longExchange.setLeverage(binanceSymbolIdLong, longMaxLeverage);
+                     // Truyền trực tiếp originalSymbol (string)
+                    await longExchange.setLeverage(longOriginalSymbol, longMaxLeverage);
                 } else {
-                    await longExchange.setLeverage(symbolToUseLong, longMaxLeverage);
+                    await longExchange.setLeverage(longOriginalSymbol, longMaxLeverage);
                 }
             }
             safeLog('log', `[BOT_TRADE] ✅ Đặt đòn bẩy x${longMaxLeverage} cho LONG ${longOriginalSymbol} trên ${longExchangeId}.`);
@@ -401,23 +397,21 @@ async function executeTrades(opportunity, percentageToUse) {
             return false;
         }
         
-        // --- Kiểm tra giá trị danh nghĩa tối thiểu ---
+        // --- BẮT ĐẦU: Kiểm tra giá trị danh nghĩa tối thiểu - CỐ ĐỊNH 0.06 ---
         const shortNotional = shortAmount * shortEntryPrice;
         const longNotional = longAmount * longEntryPrice;
 
-        // Lấy giá trị danh nghĩa tối thiểu từ dữ liệu thị trường của CCXT
-        const minNotionalShort = shortMarket.limits?.cost?.min || 0; 
-        const minNotionalLong = longMarket.limits?.cost?.min || 0;
+        const fixedMinNotional = 0.06; // Đặt mức tối thiểu cố định
 
-        if (minNotionalShort > 0 && shortNotional < minNotionalShort) {
-            safeLog('error', `[BOT_TRADE] ❌ Giá trị danh nghĩa SHORT (${shortNotional.toFixed(2)} USDT) trên ${shortExchangeId} quá nhỏ (tối thiểu ${minNotionalShort} USDT). Hủy bỏ lệnh.`);
+        if (shortNotional < fixedMinNotional) {
+            safeLog('error', `[BOT_TRADE] ❌ Giá trị danh nghĩa SHORT (${shortNotional.toFixed(2)} USDT) trên ${shortExchangeId} quá nhỏ (tối thiểu ${fixedMinNotional} USDT). Hủy bỏ lệnh.`);
             return false; // Hủy giao dịch nếu không đạt mức tối thiểu
         }
-        if (minNotionalLong > 0 && longNotional < minNotionalLong) {
-            safeLog('error', `[BOT_TRADE] ❌ Giá trị danh nghĩa LONG (${longNotional.toFixed(2)} USDT) trên ${longExchangeId} quá nhỏ (tối thiểu ${minNotionalLong} USDT). Hủy bỏ lệnh.`);
+        if (longNotional < fixedMinNotional) {
+            safeLog('error', `[BOT_TRADE] ❌ Giá trị danh nghĩa LONG (${longNotional.toFixed(2)} USDT) trên ${longExchangeId} quá nhỏ (tối thiểu ${fixedMinNotional} USDT). Hủy bỏ lệnh.`);
             return false; // Hủy giao dịch nếu không đạt mức tối thiểu
         }
-        // --- KẾT THÚC kiểm tra giá trị danh nghĩa tối thiểu ---
+        // --- KẾT THÚC: Kiểm tra giá trị danh nghĩa tối thiểu ---
 
         // Use amountToPrecision for quantity and priceToPrecision for prices
         const shortAmountToOrder = shortExchange.amountToPrecision(shortOriginalSymbol, shortAmount);
