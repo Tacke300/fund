@@ -1,0 +1,30 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Bot Tài Xỉu</title>
+<style>
+body{text-align:center;font-family:sans-serif;margin-top:50px}
+.die{display:inline-block;width:60px;height:60px;line-height:60px;background:#eee;margin:4px;border-radius:8px;font-size:24px}
+</style>
+</head>
+<body>
+<h1>Game Tài Xỉu</h1>
+<div id="dice"></div>
+<div id="sum"></div>
+<button onclick="play()">Chơi</button>
+
+<script>
+async function play(){
+    const res = await fetch('/play');
+    const data = await res.json();
+    document.getElementById('dice').innerHTML = `
+        <div class="die">${data.d1}</div>
+        <div class="die">${data.d2}</div>
+        <div class="die">${data.d3}</div>
+    `;
+    document.getElementById('sum').textContent = `Tổng: ${data.sum} (${data.result.toUpperCase()})`;
+}
+</script>
+</body>
+</html>
