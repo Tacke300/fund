@@ -6,7 +6,6 @@ const port = 4000;
 let forcedResult = null; // null = random, 't' = tài, 'x' = xỉu
 
 app.use(express.urlencoded({ extended: true }));
-app.use(express.static(path.join(__dirname, 'public')));
 
 // API cho bot lấy kết quả
 app.get('/get-result', (req, res) => {
@@ -18,7 +17,7 @@ app.get('/get-result', (req, res) => {
     }
 });
 
-// API để lưu kết quả từ form
+// API để set kết quả từ HTML
 app.post('/set-result', (req, res) => {
     const val = req.body.result;
     if (val === 't' || val === 'x') {
@@ -29,6 +28,11 @@ app.post('/set-result', (req, res) => {
     res.redirect('/');
 });
 
+// Gửi HTML cho client
+app.get('/', (req, res) => {
+    res.sendFile(path.join(__dirname, 'index.html'));
+});
+
 app.listen(port, () => {
-    console.log(`Server HTML chạy tại http://localhost:${port}`);
+    console.log(`Server chạy tại http://localhost:${port}`);
 });
