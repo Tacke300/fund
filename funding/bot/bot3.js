@@ -105,36 +105,68 @@ let currentPercentageToUse = 50;
 function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
 
 /**
- * Hàm giúp chuyển đổi symbol từ định dạng BASEQUOTE (ví dụ: BTCUSDT)
- * sang định dạng thống nhất BASE/QUOTE (ví dụ: BTC/USDT) mà CCXT mong đợi.
- * Nếu đã ở định dạng thống nhất hoặc không khớp, trả về nguyên trạng.
- * @param {string} baseQuoteSymbol Symbol cần chuyển đổi.
- * @returns {string} Symbol ở định dạng thống nhất hoặc nguyên trạng.
+ * Tạo danh sách các định dạng symbol khả thi cho một sàn cụ thể.
+ * Hàm này cố gắng bao quát các trường hợp đặc biệt và định dạng phổ biến.
+ * @param {string} exchangeId ID của sàn giao dịch (ví dụ: 'binanceusdm').
+ * @param {string} rawCoinSymbol Symbol gốc từ server (ví dụ: 'SHIBUSDT').
+ * @returns {Array<string>} Danh sách các symbol có thể thử.
  */
-function convertToUnifiedSymbol(baseQuoteSymbol) {
-    if (typeof baseQuoteSymbol === 'string') {
-        const match = baseQuoteSymbol.match(/^(.+)(USDT|USD)$/i);
-        if (match && match[1] && match[2]) {
-            const base = match[1].toUpperCase();
-            const quote = match[2].toUpperCase();
-            return `${base}/${quote}`;
-        }
+function generateExchangeSpecificSymbols(exchangeId, rawCoinSymbol) {
+    if (typeof rawCoinSymbol !== 'string' || !rawCoinSymbol.toUpperCase().endsWith('USDT')) {
+        return [rawCoinSymbol]; // Trả về nguyên trạng nếu không phải cặp USDT hoặc không hợp lệ
     }
-    return baseQuoteSymbol;
+
+    const base = rawCoinSymbol.substring(0, rawCoinSymbol.length - 4).toUpperCase(); // Ví dụ: SHIB
+    const quote = 'USDT';
+
+    const potentialSymbols = new Set();
+
+    // Thêm định dạng gốc từ server
+    potentialSymbols.add(rawCoinSymbol); // VD: SHIBUSDT
+
+    // Thêm định dạng BASE/QUOTE
+    potentialSymbols.add(`${base}/${quote}`); // VD: SHIB/USDT
+
+    switch (exchangeId) {
+        case 'binanceusdm':
+            // Binance USDM thường dùng format BASEQUOTE cho market.id, nhưng cũng chấp nhận BASE/QUOTE
+            // Một số cặp có thể có ":USDT" trong market.id, nhưng thường không cần khi input cho market()
+            // Chỉ cần đảm bảo BASE/QUOTE cũng được thử.
+            potentialSymbols.add(`${base}/${quote}:${quote}`); // VD: SHIB/USDT:USDT (ít dùng khi input)
+            break;
+        case 'bingx':
+            // BingX đôi khi có các cặp 1000x hoặc định dạng đặc biệt
+            if (base === 'SHIB') potentialSymbols.add(`1000SHIB/${quote}`); // VD: 1000SHIB/USDT
+            if (base === 'PEPE') potentialSymbols.add(`1000PEPE/${quote}`); // VD: 1000PEPE/USDT
+            if (base === 'BONK') potentialSymbols.add(`1000BONK/${quote}`); // VD: 1000BONK/USDT
+            if (base === 'INCH') potentialSymbols.add(`1INCH/${quote}`); // VD: 1INCH/USDT
+            potentialSymbols.add(`${base}-${quote}`); // VD: SHIB-USDT (định dạng market.id của BingX)
+            break;
+        case 'okx':
+            // OKX thường dùng BASE-QUOTE-SWAP hoặc BASE-QUOTE
+            potentialSymbols.add(`${base}-${quote}-SWAP`); // VD: SHIB-USDT-SWAP (định dạng market.id của OKX)
+            potentialSymbols.add(`${base}-${quote}`);     // VD: SHIB-USDT
+            potentialSymbols.add(`${base}/${quote}:USDT`); // Đôi khi OKX cũng có định dạng này
+            break;
+        default:
+            // Các sàn khác, giữ nguyên BASEQUOTE và BASE/QUOTE
+            break;
+    }
+
+    // Chuyển đổi về mảng và trả về
+    return Array.from(potentialSymbols).filter(s => typeof s === 'string' && s.length > 0);
 }
+
 
 /**
  * Tìm mã hiệu gốc của sàn giao dịch (market.id) cho một cặp coin nhất định,
- * thử cả định dạng gốc và định dạng thống nhất.
+ * thử các định dạng khác nhau.
  * @param {object} exchange Đối tượng sàn giao dịch CCXT.
- * @param {string} coin Symbol thống nhất từ server (ví dụ: ONTUSDT).
+ * @param {string} rawCoinSymbol Symbol gốc từ server (ví dụ: ONTUSDT).
  * @returns {string|null} market.id của sàn hoặc null nếu không tìm thấy.
  */
-async function getExchangeSpecificSymbol(exchange, coin) {
-    let market = null;
-    const potentialSymbols = [coin, convertToUnifiedSymbol(coin)]; // Thử cả 2 định dạng
-
-    // Đảm bảo markets đã được tải (hoặc tải ở đây nếu cần)
+async function getExchangeSpecificSymbol(exchange, rawCoinSymbol) {
+    // Đảm bảo markets đã được tải
     try {
         await exchange.loadMarkets(); 
     } catch (e) {
@@ -142,11 +174,12 @@ async function getExchangeSpecificSymbol(exchange, coin) {
         return null;
     }
 
-    for (const symbolAttempt of potentialSymbols) {
-        if (typeof symbolAttempt !== 'string') continue; // Bỏ qua nếu không phải string
+    // Tạo danh sách các symbol để thử
+    const symbolsToAttempt = generateExchangeSpecificSymbols(exchange.id, rawCoinSymbol);
 
+    for (const symbolAttempt of symbolsToAttempt) {
         try {
-            market = exchange.market(symbolAttempt);
+            const market = exchange.market(symbolAttempt);
             if (market && market.id) {
                 return market.id; // Trả về market.id nếu tìm thấy
             }
@@ -154,8 +187,9 @@ async function getExchangeSpecificSymbol(exchange, coin) {
             // Bỏ qua lỗi, sẽ thử định dạng khác
         }
     }
-    return null; // Không tìm thấy market nào
+    return null; // Không tìm thấy market nào với bất kỳ định dạng nào
 }
+
 
 async function fetchDataFromServer() {
     try {
@@ -216,7 +250,6 @@ async function processServerData(serverData) {
     const tempAllOpportunities = [];
 
     for (const op of serverData.arbitrageData) {
-        // --- SỬA LỖI: Kiểm tra op và op.details để tránh TypeError: Cannot read properties of undefined ---
         if (!op || !op.details) {
             safeLog('warn', `[PROCESS_DATA] Bỏ qua cơ hội không hợp lệ (op hoặc op.details undefined).`);
             continue; 
@@ -226,7 +259,7 @@ async function processServerData(serverData) {
         const shortExIdNormalized = op.details.shortExchange.toLowerCase() === 'binance' ? 'binanceusdm' : op.details.shortExchange.toLowerCase();
         const longExIdNormalized = op.details.longExchange.toLowerCase() === 'binance' ? 'binanceusdm' : op.details.longExchange.toLowerCase();
 
-        // --- Đã loại bỏ log cảnh báo cho các sàn bị tắt tại đây ---
+        // Chỉ bỏ qua nếu sàn bị tắt hoặc chưa được khởi tạo.
         if (!activeExchangeIds.includes(shortExIdNormalized) || !activeExchangeIds.includes(longExIdNormalized) ||
             !exchanges[shortExIdNormalized] || !exchanges[longExIdNormalized]) {
             continue;
@@ -369,33 +402,31 @@ async function getMaxLeverageForSymbol(exchange, symbol) {
  * @param {object} exchange Đối tượng sàn giao dịch CCXT.
  * @param {string} symbol Mã hiệu gốc của cặp giao dịch.
  * @param {number} desiredLeverage Đòn bẩy mong muốn (từ cơ hội).
+ * @param {string} positionSide 'LONG' hoặc 'SHORT' (dùng cho BingX).
  * @returns {number|null} Đòn bẩy thực tế đã đặt hoặc null nếu thất bại hoàn toàn.
  */
-async function setLeverageSafely(exchange, symbol, desiredLeverage) {
+async function setLeverageSafely(exchange, symbol, desiredLeverage, positionSide) {
     const exchangeId = exchange.id;
     const symbolToUse = String(symbol); // Đảm bảo là string
     let actualLeverage = null;
 
     if (!exchange.has['setLeverage']) {
         safeLog('warn', `[BOT_TRADE] Sàn ${exchangeId} không hỗ trợ chức năng setLeverage. Giả định đòn bẩy x1.`);
-        // Nếu sàn không hỗ trợ, giả định đòn bẩy x1 để tiếp tục (hoặc desiredLeverage nếu hợp lệ)
         return (desiredLeverage && desiredLeverage >= 1) ? desiredLeverage : 1;
     }
 
     const trySetLeverage = async (lev, attemptType) => {
         try {
             if (exchangeId === 'bingx') {
-                // SỬA LỖI BINGX: leverage là tham số đầu tiên, sau đó là symbol
-                await exchange.setLeverage(lev, symbolToUse, { 'side': 'BOTH' });
+                // SỬA LỖI BINGX: Thêm tham số 'side' khi ở Hedge mode
+                await exchange.setLeverage(lev, symbolToUse, { 'side': positionSide.toUpperCase() });
             } else if (exchangeId === 'binanceusdm') {
                 const binanceMarket = exchange.market(symbolToUse);
                 if (!binanceMarket) throw new Error(`Không tìm thấy market object cho ${symbolToUse} trên BinanceUSDM.`);
-                // SỬA LỖI BINANCE: leverage là tham số đầu tiên, sau đó là market.id
+                // SỬA LỖI BINANCE: leverage trước, sau đó là market.id
                 await exchange.setLeverage(lev, binanceMarket.id); 
             } else {
-                // Đối với các sàn khác, giả định format (symbol, leverage) hoặc (leverage, symbol)
-                // Cần kiểm tra cụ thể nếu có lỗi với các sàn khác
-                // Hiện tại giữ (symbol, leverage) như một số sàn ccxt có
+                // Đối với các sàn khác, giữ nguyên format (symbol, leverage) hoặc (leverage, symbol)
                 await exchange.setLeverage(symbolToUse, lev); 
             }
             safeLog('log', `[BOT_TRADE] ✅ Đặt đòn bẩy x${lev} (${attemptType}) cho ${symbolToUse} trên ${exchangeId} thành công.`);
@@ -524,16 +555,14 @@ async function executeTrades(opportunity, percentageToUse) {
         }
 
         // --- Đặt đòn bẩy cho bên SHORT bằng hàm helper ---
-        // Không cần truyền positionSide nữa, hàm setLeverageSafely tự xử lý
-        actualShortLeverage = await setLeverageSafely(shortExchange, shortOriginalSymbol, opportunity.commonLeverage);
+        actualShortLeverage = await setLeverageSafely(shortExchange, shortOriginalSymbol, opportunity.commonLeverage, 'SHORT');
         if (actualShortLeverage === null) {
             safeLog('error', '[BOT_TRADE] ❌ Lỗi khi đặt đòn bẩy cho bên SHORT. HỦY BỎ LỆNH.');
             return false;
         }
 
         // --- Đặt đòn bẩy cho bên LONG bằng hàm helper ---
-        // Không cần truyền positionSide nữa, hàm setLeverageSafely tự xử lý
-        actualLongLeverage = await setLeverageSafely(longExchange, longOriginalSymbol, opportunity.commonLeverage);
+        actualLongLeverage = await setLeverageSafely(longExchange, longOriginalSymbol, opportunity.commonLeverage, 'LONG');
         if (actualLongLeverage === null) {
             safeLog('error', '[BOT_TRADE] ❌ Lỗi khi đặt đòn bẩy cho bên LONG. HỦY BỎ LỆNH.');
             return false;
