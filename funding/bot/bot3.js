@@ -42,8 +42,8 @@ const MIN_MINUTES_FOR_EXECUTION = 15;
 const DATA_FETCH_INTERVAL_SECONDS = 5;
 const HOURLY_FETCH_TIME_MINUTE = 45;
 
-const SL_PERCENT_OF_COLLATERAL = 700;
-const TP_PERCENT_OF_COLLATERAL = 700; 
+const SL_PERCENT_OF_COLLATERAL = 200; // Đã sửa từ 700 thành 200
+const TP_PERCENT_OF_COLLATERAL = 200; // Đã sửa từ 700 thành 200
 
 const DISABLED_EXCHANGES = ['bitget']; // Bạn đã tắt bitget
 
@@ -129,9 +129,6 @@ function generateExchangeSpecificSymbols(exchangeId, rawCoinSymbol) {
 
     switch (exchangeId) {
         case 'binanceusdm':
-            // Binance USDM thường dùng format BASEQUOTE cho market.id, nhưng cũng chấp nhận BASE/QUOTE
-            // Một số cặp có thể có ":USDT" trong market.id, nhưng thường không cần khi input cho market()
-            // Chỉ cần đảm bảo BASE/QUOTE cũng được thử.
             potentialSymbols.add(`${base}/${quote}:${quote}`); // VD: SHIB/USDT:USDT (ít dùng khi input)
             break;
         case 'bingx':
@@ -268,16 +265,16 @@ async function processServerData(serverData) {
         let shortOriginalSymbol = null;
         let longOriginalSymbol = null;
 
-        // --- SỬA LỖI: Sử dụng getExchangeSpecificSymbol để lấy market.id chính xác ---
+        // Sử dụng getExchangeSpecificSymbol để lấy market.id chính xác
         shortOriginalSymbol = await getExchangeSpecificSymbol(exchanges[shortExIdNormalized], op.coin);
         if (!shortOriginalSymbol) {
-            safeLog('error', `[PROCESS_DATA] Lỗi: Không tìm thấy market hợp lệ cho "${op.coin}" trên sàn ${shortExIdNormalized}. Bỏ qua cơ hội này.`);
+            // safeLog('error', `[PROCESS_DATA] Lỗi: Không tìm thấy market hợp lệ cho "${op.coin}" trên sàn ${shortExIdNormalized}. Bỏ qua cơ hội này.`); // Bỏ log này
             continue;
         }
 
         longOriginalSymbol = await getExchangeSpecificSymbol(exchanges[longExIdNormalized], op.coin);
         if (!longOriginalSymbol) {
-            safeLog('error', `[PROCESS_DATA] Lỗi: Không tìm thấy market hợp lệ cho "${op.coin}" trên sàn ${longExIdNormalized}. Bỏ qua cơ hội này.`);
+            // safeLog('error', `[PROCESS_DATA] Lỗi: Không tìm thấy market hợp lệ cho "${op.coin}" trên sàn ${longExIdNormalized}. Bỏ qua cơ hội này.`); // Bỏ log này
             continue;
         }
 
@@ -426,7 +423,8 @@ async function setLeverageSafely(exchange, symbol, desiredLeverage, positionSide
                 // SỬA LỖI BINANCE: leverage trước, sau đó là market.id
                 await exchange.setLeverage(lev, binanceMarket.id); 
             } else {
-                // Đối với các sàn khác, giữ nguyên format (symbol, leverage) hoặc (leverage, symbol)
+                // Đối với các sàn khác, giả định format (symbol, leverage) hoặc (leverage, symbol)
+                // Cần kiểm tra cụ thể nếu có lỗi với các sàn khác
                 await exchange.setLeverage(symbolToUse, lev); 
             }
             safeLog('log', `[BOT_TRADE] ✅ Đặt đòn bẩy x${lev} (${attemptType}) cho ${symbolToUse} trên ${exchangeId} thành công.`);
@@ -816,9 +814,12 @@ async function mainBotLoop() {
                     minutesUntilFunding < MIN_MINUTES_FOR_EXECUTION && 
                     minutesUntilFunding <= MAX_MINUTES_UNTIL_FUNDING) {
 
+                    // --- SỬA LOGIC CHỌN CƠ HỘI ---
                     if (!bestOpportunityFoundForExecution ||
-                        op.estimatedPnl > bestOpportunityFoundForExecution.estimatedPnl ||
-                        (op.estimatedPnl === bestOpportunityFoundForExecution.estimatedPnl && minutesUntilFunding < bestOpportunityFoundForExecution.details.minutesUntilFunding)
+                        // Ưu tiên thời gian funding gần nhất (minutesUntilFunding nhỏ hơn)
+                        minutesUntilFunding < bestOpportunityFoundForExecution.details.minutesUntilFunding ||
+                        // Nếu thời gian funding như nhau, ưu tiên lợi nhuận ước tính cao hơn
+                        (minutesUntilFunding === bestOpportunityFoundForExecution.details.minutesUntilFunding && op.estimatedPnl > bestOpportunityFoundForExecution.estimatedPnl)
                     ) {
                         bestOpportunityFoundForExecution = op;
                     }
