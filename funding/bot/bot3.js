@@ -151,6 +151,7 @@ async function updateBalances() {
     }
 }
 
+// Bắt đầu hàm processServerData đã sửa đổi
 async function processServerData(serverData) {
     if (!serverData || !serverData.arbitrageData) {
         safeLog('warn', '[BOT] Dữ liệu từ server không hợp lệ hoặc thiếu arbitrageData.');
@@ -163,16 +164,55 @@ async function processServerData(serverData) {
     let bestForDisplay = null;
     const tempAllOpportunities = [];
 
-    serverData.arbitrageData.forEach(op => {
+    for (const op of serverData.arbitrageData) {
         const minutesUntilFunding = (op.nextFundingTime - now) / (1000 * 60);
         const shortExIdNormalized = op.details.shortExchange.toLowerCase() === 'binance' ? 'binanceusdm' : op.details.shortExchange.toLowerCase();
         const longExIdNormalized = op.details.longExchange.toLowerCase() === 'binance' ? 'binanceusdm' : op.details.longExchange.toLowerCase();
 
         if (DISABLED_EXCHANGES.includes(shortExIdNormalized) || DISABLED_EXCHANGES.includes(longExIdNormalized) ||
             !exchanges[shortExIdNormalized] || !exchanges[longExIdNormalized]) {
-            return;
+            safeLog('warn', `[PROCESS_DATA] Bỏ qua cơ hội ${op.coin} vì sàn ${shortExIdNormalized} hoặc ${longExIdNormalized} bị tắt hoặc chưa được khởi tạo.`);
+            continue;
         }
 
+        let shortOriginalSymbol = null;
+        let longOriginalSymbol = null;
+
+        // Lấy mã hiệu gốc của sàn bằng cách sử dụng markets đã tải
+        try {
+            // Đảm bảo markets đã được tải trước đó (ví dụ: trong updateBalances)
+            // hoặc tải markets ở đây nếu cần thiết (lưu ý hiệu suất).
+            // Nếu updateBalances được gọi thường xuyên, markets sẽ có sẵn.
+            const shortMarket = exchanges[shortExIdNormalized].market(op.coin);
+            if (shortMarket && shortMarket.id) {
+                shortOriginalSymbol = shortMarket.id;
+            } else {
+                safeLog('warn', `[PROCESS_DATA] Không tìm thấy market CCXT cho symbol thống nhất "${op.coin}" trên sàn ${shortExIdNormalized}. Bỏ qua cơ hội này.`);
+                continue;
+            }
+        } catch (e) {
+            safeLog('error', `[PROCESS_DATA] Lỗi khi lấy market cho ${op.coin} trên sàn ${shortExIdNormalized}: ${e.message}. Bỏ qua cơ hội này.`);
+            continue;
+        }
+
+        try {
+            const longMarket = exchanges[longExIdNormalized].market(op.coin);
+            if (longMarket && longMarket.id) {
+                longOriginalSymbol = longMarket.id;
+            } else {
+                safeLog('warn', `[PROCESS_DATA] Không tìm thấy market CCXT cho symbol thống nhất "${op.coin}" trên sàn ${longExIdNormalized}. Bỏ qua cơ hội này.`);
+                continue;
+            }
+        } catch (e) {
+            safeLog('error', `[PROCESS_DATA] Lỗi khi lấy market cho ${op.coin} trên sàn ${longExIdNormalized}: ${e.message}. Bỏ qua cơ hội này.`);
+            continue;
+        }
+
+        // Gán các mã hiệu gốc đã lấy được vào đối tượng details
+        op.details.shortOriginalSymbol = shortOriginalSymbol;
+        op.details.longOriginalSymbol = longOriginalSymbol;
+
+        // Tiếp tục xử lý cơ hội như hiện có nếu các symbol đã được lấy thành công
         if (op.estimatedPnl > 0 && minutesUntilFunding > 0) {
             op.details.minutesUntilFunding = minutesUntilFunding;
             op.details.shortFundingRate = op.details.shortRate !== undefined ? op.details.shortRate : 'N/A';
@@ -182,10 +222,15 @@ async function processServerData(serverData) {
 
             let shortExId = op.details.shortExchange;
             let longExId = op.details.longExchange;
+            // Logic đảo chiều sàn nếu shortRate < longRate
             if (typeof op.details.shortFundingRate === 'number' && typeof op.details.longFundingRate === 'number') {
                 if (op.details.shortFundingRate < op.details.longFundingRate) {
                     shortExId = op.details.longExchange;
                     longExId = op.details.shortExchange;
+                    // Đảo luôn cả original symbol nếu logic này áp dụng
+                    const tempSymbol = op.details.shortOriginalSymbol;
+                    op.details.shortOriginalSymbol = op.details.longOriginalSymbol;
+                    op.details.longOriginalSymbol = tempSymbol;
                 }
             }
             op.details.shortExchange = shortExId;
@@ -200,7 +245,7 @@ async function processServerData(serverData) {
                 bestForDisplay = op;
             }
         }
-    });
+    }
 
     allCurrentOpportunities = tempAllOpportunities;
 
@@ -214,6 +259,8 @@ async function processServerData(serverData) {
         bestPotentialOpportunityForDisplay = null;
     }
 }
+// Kết thúc hàm processServerData đã sửa đổi
+
 
 async function getMaxLeverageForSymbol(exchange, symbol) {
     try {
@@ -250,7 +297,10 @@ async function getMaxLeverageForSymbol(exchange, symbol) {
                     try {
                         const leverageTiers = await exchange.fetchLeverageTiers([symbol]);
                         if (leverageTiers && leverageTiers[symbol] && leverageTiers[symbol].length > 0) {
-                            maxLeverage = parseInt(leverageTiers[symbol].maxLeverage, 10); // Assume first tier for max
+                            // Cố gắng lấy maxLeverage từ tier đầu tiên, nếu có
+                            if (leverageTiers[symbol][0] && leverageTiers[symbol][0].maxLeverage) {
+                                maxLeverage = parseInt(leverageTiers[symbol][0].maxLeverage, 10);
+                            }
                         }
                     } catch (tierErr) {
                         safeLog('warn', `[HELPER] Lỗi khi lấy leverage tiers cho ${symbol} trên OKX: ${tierErr.message}`);
@@ -270,17 +320,35 @@ async function getMaxLeverageForSymbol(exchange, symbol) {
     }
 }
 
+// Bắt đầu hàm executeTrades đã sửa đổi với kiểm tra chi tiết
 async function executeTrades(opportunity, percentageToUse) {
     if (!opportunity || percentageToUse <= 0) {
         safeLog('warn', '[BOT_TRADE] Không có cơ hội hoặc phần trăm sử dụng không hợp lệ.');
         return false;
     }
 
-    if (!opportunity.details || !opportunity.details.shortExchange || !opportunity.details.longExchange ||
-        !opportunity.details.shortOriginalSymbol || !opportunity.details.longOriginalSymbol) {
-        safeLog('error', '[BOT_TRADE] Thông tin chi tiết cơ hội thiếu trường cần thiết (exchange ID hoặc original symbol). Hủy bỏ lệnh.');
+    // --- Bổ sung kiểm tra chi tiết các trường bị thiếu theo yêu cầu của bạn ---
+    if (!opportunity.details) {
+        safeLog('error', '[BOT_TRADE] Thông tin chi tiết cơ hội thiếu trường "details". Hủy bỏ lệnh.');
         return false;
     }
+    if (!opportunity.details.shortExchange) {
+        safeLog('error', '[BOT_TRADE] Thông tin chi tiết cơ hội thiếu trường "shortExchange" (ID sàn short). Hủy bỏ lệnh.');
+        return false;
+    }
+    if (!opportunity.details.longExchange) {
+        safeLog('error', '[BOT_TRADE] Thông tin chi tiết cơ hội thiếu trường "longExchange" (ID sàn long). Hủy bỏ lệnh.');
+        return false;
+    }
+    if (!opportunity.details.shortOriginalSymbol) {
+        safeLog('error', '[BOT_TRADE] Thông tin chi tiết cơ hội thiếu trường "shortOriginalSymbol" (mã coin gốc cho sàn short). Hủy bỏ lệnh.');
+        return false;
+    }
+    if (!opportunity.details.longOriginalSymbol) {
+        safeLog('error', '[BOT_TRADE] Thông tin chi tiết cơ hội thiếu trường "longOriginalSymbol" (mã coin gốc cho sàn long). Hủy bỏ lệnh.');
+        return false;
+    }
+    // --- Kết thúc phần bổ sung kiểm tra chi tiết ---
 
     const shortExchangeId = opportunity.details.shortExchange.toLowerCase() === 'binance' ? 'binanceusdm' : opportunity.details.shortExchange.toLowerCase();
     const longExchangeId = opportunity.details.longExchange.toLowerCase() === 'binance' ? 'binanceusdm' : opportunity.details.longExchange.toLowerCase();
@@ -292,8 +360,8 @@ async function executeTrades(opportunity, percentageToUse) {
     }
 
     const cleanedCoin = opportunity.coin;
-    const shortOriginalSymbol = opportunity.details.shortOriginalSymbol;
-    const longOriginalSymbol = opportunity.details.longOriginalSymbol;
+    const shortOriginalSymbol = opportunity.details.shortOriginalSymbol; // Đã được xử lý trong processServerData
+    const longOriginalSymbol = opportunity.details.longOriginalSymbol;   // Đã được xử lý trong processServerData
 
     const shortExchange = exchanges[shortExchangeId];
     const longExchange = exchanges[longExchangeId];
@@ -318,8 +386,8 @@ async function executeTrades(opportunity, percentageToUse) {
     safeLog('log', `  LONG ${longExchangeId} (${longOriginalSymbol}): ${longCollateral.toFixed(2)} USDT collateral`);
 
     let shortOrder = null, longOrder = null;
-    let actualShortLeverage = null; // Will store the leverage actually set for short side
-    let actualLongLeverage = null;  // Will store the leverage actually set for long side
+    let actualShortLeverage = null;
+    let actualLongLeverage = null;
 
     try {
         await shortExchange.loadMarkets(true);
@@ -346,7 +414,7 @@ async function executeTrades(opportunity, percentageToUse) {
                 return false;
             }
         }
-        actualShortLeverage = desiredLeverageShort; // Assume this will be successfully set
+        actualShortLeverage = desiredLeverageShort;
 
         try {
             const symbolToUseShort = typeof shortOriginalSymbol === 'string' ? shortOriginalSymbol : String(shortOriginalSymbol);
@@ -367,7 +435,7 @@ async function executeTrades(opportunity, percentageToUse) {
         }
 
         // --- Set Leverage for LONG side ---
-        let desiredLeverageLong = opportunity.commonLeverage; // Use same commonLeverage logic
+        let desiredLeverageLong = opportunity.commonLeverage;
         if (!desiredLeverageLong || desiredLeverageLong < 1) {
             safeLog('warn', `[BOT_TRADE] Đòn bẩy từ server cho LONG ${longOriginalSymbol} không hợp lệ (${desiredLeverageLong}). Thử đặt đòn bẩy TỐI ĐA.`);
             desiredLeverageLong = await getMaxLeverageForSymbol(longExchange, longOriginalSymbol);
@@ -376,7 +444,7 @@ async function executeTrades(opportunity, percentageToUse) {
                 return false;
             }
         }
-        actualLongLeverage = desiredLeverageLong; // Assume this will be successfully set
+        actualLongLeverage = desiredLeverageLong;
 
         try {
             const symbolToUseLong = typeof longOriginalSymbol === 'string' ? longOriginalSymbol : String(longOriginalSymbol);
@@ -396,7 +464,6 @@ async function executeTrades(opportunity, percentageToUse) {
             return false;
         }
         
-        // Use the actual set leverages for amount calculation
         const shortAmount = (shortCollateral * actualShortLeverage) / shortEntryPrice;
         const longAmount = (longCollateral * actualLongLeverage) / longEntryPrice;
 
@@ -426,7 +493,7 @@ async function executeTrades(opportunity, percentageToUse) {
             shortOrderAmount: shortOrder.amount, longOrderAmount: longOrder.amount,
             shortEntryPrice, longEntryPrice,
             shortCollateral, longCollateral,
-            commonLeverage: actualShortLeverage, // Use actual set leverage here
+            commonLeverage: actualShortLeverage,
             status: 'OPEN', openTime: Date.now()
         };
 
@@ -461,6 +528,7 @@ async function executeTrades(opportunity, percentageToUse) {
         return false;
     }
 }
+// Kết thúc hàm executeTrades đã sửa đổi
 
 async function closeTradesAndCalculatePnL() {
     if (!currentTradeDetails || currentTradeDetails.status !== 'OPEN') {
@@ -539,6 +607,9 @@ async function closeTradesAndCalculatePnL() {
             if (!pnlFound) {
                 safeLog('warn', `[BOT_PNL] Không tìm thấy PnL thực tế cho lệnh SHORT ${closeShortOrder.id} trên ${shortExchange} từ trade history. Cập nhật số dư và tính từ đó.`);
                 await updateBalances(); 
+                // Tính toán PnL dựa trên sự thay đổi số dư sau khi đóng lệnh
+                // Đây là một cách ước tính và có thể không hoàn toàn chính xác do phí giao dịch, v.v.
+                // Một cách tốt hơn là fetch position và kiểm tra realized PnL của position đó.
                 shortSidePnl = (balances[shortExchange]?.available || 0) - currentTradeDetails.shortCollateral;
                 safeLog('log', `[BOT_PNL] PnL SHORT tính từ số dư ${shortExchange}: ${shortSidePnl.toFixed(2)} USDT.`);
             }
@@ -597,7 +668,7 @@ async function closeTradesAndCalculatePnL() {
         safeLog('error', `[BOT_PNL] ❌ Lỗi khi đóng vị thế hoặc tính toán PnL: ${e.message}`, e);
     } finally {
         currentSelectedOpportunityForExecution = null; 
-        safeLog('log', `[BOT] currentTradeDetails being reset to null.`);
+        safeLog('log', `[BOT] currentTradeDetails đang được đặt lại về null.`);
         currentTradeDetails = null; 
         safeLog('log', '[BOT_PNL] Dọn dẹp lệnh chờ và vị thế đã đóng (nếu có).');
     }
@@ -625,7 +696,7 @@ async function mainBotLoop() {
         const fetchedData = await fetchDataFromServer();
         if (fetchedData) {
             serverDataGlobal = fetchedData;
-            await processServerData(serverDataGlobal);
+            await processServerData(serverDataGlobal); // Đã sửa đổi
         }
     }
 
@@ -681,7 +752,7 @@ async function mainBotLoop() {
 
             safeLog('log', `[BOT_LOOP] ⚡ Kích hoạt mở lệnh cho cơ hội ${currentSelectedOpportunityForExecution.coin} vào phút 59:55.`);
             botState = 'EXECUTING_TRADES';
-            const tradeSuccess = await executeTrades(currentSelectedOpportunityForExecution, currentPercentageToUse);
+            const tradeSuccess = await executeTrades(currentSelectedOpportunityForExecution, currentPercentageToUse); // Đã sửa đổi
             if (tradeSuccess) {
                 safeLog('log', '[BOT_LOOP] ✅ Mở lệnh hoàn tất.');
             } else {
@@ -845,7 +916,7 @@ const botServer = http.createServer((req, res) => {
                 const originalCurrentSelectedOpportunityForExecution = currentSelectedOpportunityForExecution;
                 currentSelectedOpportunityForExecution = testOpportunity; 
 
-                const tradeSuccess = await executeTrades(testOpportunity, testPercentageToUse);
+                const tradeSuccess = await executeTrades(testOpportunity, testPercentageToUse); // Đã sửa đổi
 
                 currentSelectedOpportunityForExecution = originalCurrentSelectedOpportunityForExecution;
 
