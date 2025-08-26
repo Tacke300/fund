@@ -123,6 +123,39 @@ function convertToUnifiedSymbol(baseQuoteSymbol) {
     return baseQuoteSymbol;
 }
 
+/**
+ * Tìm mã hiệu gốc của sàn giao dịch (market.id) cho một cặp coin nhất định,
+ * thử cả định dạng gốc và định dạng thống nhất.
+ * @param {object} exchange Đối tượng sàn giao dịch CCXT.
+ * @param {string} coin Symbol thống nhất từ server (ví dụ: ONTUSDT).
+ * @returns {string|null} market.id của sàn hoặc null nếu không tìm thấy.
+ */
+async function getExchangeSpecificSymbol(exchange, coin) {
+    let market = null;
+    const potentialSymbols = [coin, convertToUnifiedSymbol(coin)]; // Thử cả 2 định dạng
+
+    // Đảm bảo markets đã được tải (hoặc tải ở đây nếu cần)
+    try {
+        await exchange.loadMarkets(); 
+    } catch (e) {
+        safeLog('error', `[HELPER] Lỗi khi tải markets cho sàn ${exchange.id}: ${e.message}`);
+        return null;
+    }
+
+    for (const symbolAttempt of potentialSymbols) {
+        if (typeof symbolAttempt !== 'string') continue; // Bỏ qua nếu không phải string
+
+        try {
+            market = exchange.market(symbolAttempt);
+            if (market && market.id) {
+                return market.id; // Trả về market.id nếu tìm thấy
+            }
+        } catch (e) {
+            // Bỏ qua lỗi, sẽ thử định dạng khác
+        }
+    }
+    return null; // Không tìm thấy market nào
+}
 
 async function fetchDataFromServer() {
     try {
@@ -194,7 +227,6 @@ async function processServerData(serverData) {
         const longExIdNormalized = op.details.longExchange.toLowerCase() === 'binance' ? 'binanceusdm' : op.details.longExchange.toLowerCase();
 
         // --- Đã loại bỏ log cảnh báo cho các sàn bị tắt tại đây ---
-        // Chỉ bỏ qua nếu sàn bị tắt hoặc chưa được khởi tạo.
         if (!activeExchangeIds.includes(shortExIdNormalized) || !activeExchangeIds.includes(longExIdNormalized) ||
             !exchanges[shortExIdNormalized] || !exchanges[longExIdNormalized]) {
             continue;
@@ -203,46 +235,16 @@ async function processServerData(serverData) {
         let shortOriginalSymbol = null;
         let longOriginalSymbol = null;
 
-        // Thử cả hai định dạng symbol: gốc từ server và đã chuyển đổi sang unified
-        const potentialSymbols = [op.coin, convertToUnifiedSymbol(op.coin)];
-
-        // --- Tìm market cho sàn Short ---
-        let foundShortMarket = false;
-        for (const symbolAttempt of potentialSymbols) {
-            try {
-                const shortMarket = exchanges[shortExIdNormalized].market(symbolAttempt);
-                if (shortMarket && shortMarket.id) {
-                    shortOriginalSymbol = shortMarket.id; // Lấy mã hiệu gốc của sàn
-                    foundShortMarket = true;
-                    break;
-                }
-            } catch (e) {
-                // Không log lỗi nếu chỉ là thử định dạng symbol khác
-            }
-        }
-
-        if (!foundShortMarket) {
-            safeLog('error', `[PROCESS_DATA] Lỗi: Không tìm thấy market cho "${op.coin}" trên sàn ${shortExIdNormalized}. Bỏ qua cơ hội này.`);
+        // --- SỬA LỖI: Sử dụng getExchangeSpecificSymbol để lấy market.id chính xác ---
+        shortOriginalSymbol = await getExchangeSpecificSymbol(exchanges[shortExIdNormalized], op.coin);
+        if (!shortOriginalSymbol) {
+            safeLog('error', `[PROCESS_DATA] Lỗi: Không tìm thấy market hợp lệ cho "${op.coin}" trên sàn ${shortExIdNormalized}. Bỏ qua cơ hội này.`);
             continue;
         }
 
-        // --- Tìm market cho sàn Long ---
-        let foundLongMarket = false;
-        for (const symbolAttempt of potentialSymbols) {
-            try {
-                const longMarket = exchanges[longExIdNormalized].market(symbolAttempt);
-                if (longMarket && longMarket.id) {
-                    longOriginalSymbol = longMarket.id; // Lấy mã hiệu gốc của sàn
-                    foundLongMarket = true;
-                    break;
-                }
-            } catch (e) {
-                // Không log lỗi nếu chỉ là thử định dạng symbol khác
-            }
-        }
-        
-        if (!foundLongMarket) {
-            safeLog('error', `[PROCESS_DATA] Lỗi: Không tìm thấy market cho "${op.coin}" trên sàn ${longExIdNormalized}. Bỏ qua cơ hội này.`);
+        longOriginalSymbol = await getExchangeSpecificSymbol(exchanges[longExIdNormalized], op.coin);
+        if (!longOriginalSymbol) {
+            safeLog('error', `[PROCESS_DATA] Lỗi: Không tìm thấy market hợp lệ cho "${op.coin}" trên sàn ${longExIdNormalized}. Bỏ qua cơ hội này.`);
             continue;
         }
 
@@ -367,10 +369,9 @@ async function getMaxLeverageForSymbol(exchange, symbol) {
  * @param {object} exchange Đối tượng sàn giao dịch CCXT.
  * @param {string} symbol Mã hiệu gốc của cặp giao dịch.
  * @param {number} desiredLeverage Đòn bẩy mong muốn (từ cơ hội).
- * @param {string} positionSide 'LONG' hoặc 'SHORT' (không dùng trực tiếp cho setLeverage Binance).
  * @returns {number|null} Đòn bẩy thực tế đã đặt hoặc null nếu thất bại hoàn toàn.
  */
-async function setLeverageSafely(exchange, symbol, desiredLeverage, positionSide) {
+async function setLeverageSafely(exchange, symbol, desiredLeverage) {
     const exchangeId = exchange.id;
     const symbolToUse = String(symbol); // Đảm bảo là string
     let actualLeverage = null;
@@ -384,14 +385,18 @@ async function setLeverageSafely(exchange, symbol, desiredLeverage, positionSide
     const trySetLeverage = async (lev, attemptType) => {
         try {
             if (exchangeId === 'bingx') {
-                await exchange.setLeverage(symbolToUse, lev, { 'side': 'BOTH' });
+                // SỬA LỖI BINGX: leverage là tham số đầu tiên, sau đó là symbol
+                await exchange.setLeverage(lev, symbolToUse, { 'side': 'BOTH' });
             } else if (exchangeId === 'binanceusdm') {
                 const binanceMarket = exchange.market(symbolToUse);
                 if (!binanceMarket) throw new Error(`Không tìm thấy market object cho ${symbolToUse} trên BinanceUSDM.`);
-                // --- SỬA LỖI QUAN TRỌNG: Đổi thứ tự tham số cho Binance và bỏ positionSide ---
-                await exchange.setLeverage(lev, binanceMarket.id); // leverage trước, sau đó là market.id
+                // SỬA LỖI BINANCE: leverage là tham số đầu tiên, sau đó là market.id
+                await exchange.setLeverage(lev, binanceMarket.id); 
             } else {
-                await exchange.setLeverage(symbolToUse, lev);
+                // Đối với các sàn khác, giả định format (symbol, leverage) hoặc (leverage, symbol)
+                // Cần kiểm tra cụ thể nếu có lỗi với các sàn khác
+                // Hiện tại giữ (symbol, leverage) như một số sàn ccxt có
+                await exchange.setLeverage(symbolToUse, lev); 
             }
             safeLog('log', `[BOT_TRADE] ✅ Đặt đòn bẩy x${lev} (${attemptType}) cho ${symbolToUse} trên ${exchangeId} thành công.`);
             return lev;
@@ -519,14 +524,16 @@ async function executeTrades(opportunity, percentageToUse) {
         }
 
         // --- Đặt đòn bẩy cho bên SHORT bằng hàm helper ---
-        actualShortLeverage = await setLeverageSafely(shortExchange, shortOriginalSymbol, opportunity.commonLeverage, 'SHORT');
+        // Không cần truyền positionSide nữa, hàm setLeverageSafely tự xử lý
+        actualShortLeverage = await setLeverageSafely(shortExchange, shortOriginalSymbol, opportunity.commonLeverage);
         if (actualShortLeverage === null) {
             safeLog('error', '[BOT_TRADE] ❌ Lỗi khi đặt đòn bẩy cho bên SHORT. HỦY BỎ LỆNH.');
             return false;
         }
 
         // --- Đặt đòn bẩy cho bên LONG bằng hàm helper ---
-        actualLongLeverage = await setLeverageSafely(longExchange, longOriginalSymbol, opportunity.commonLeverage, 'LONG');
+        // Không cần truyền positionSide nữa, hàm setLeverageSafely tự xử lý
+        actualLongLeverage = await setLeverageSafely(longExchange, longOriginalSymbol, opportunity.commonLeverage);
         if (actualLongLeverage === null) {
             safeLog('error', '[BOT_TRADE] ❌ Lỗi khi đặt đòn bẩy cho bên LONG. HỦY BỎ LỆNH.');
             return false;
