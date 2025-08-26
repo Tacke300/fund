@@ -20,7 +20,8 @@ const PORT = 5005;
 // ----- CẤU HÌNH -----
 const EXCHANGE_IDS = ['binanceusdm', 'bingx', 'okx', 'bitget'];
 const FUNDING_DIFFERENCE_THRESHOLD = 0.00001;
-const MINIMUM_PNL_THRESHOLD = 1;
+// THAY ĐỔI 1: Sửa điều kiện lên bảng 1 thành 5
+const MINIMUM_PNL_THRESHOLD = 5; 
 const IMMINENT_THRESHOLD_MINUTES = 15;
 
 const FULL_LEVERAGE_REFRESH_AT_HOUR = 0;
@@ -46,7 +47,7 @@ let debugRawLeverageResponses = {
     binanceusdm: { status: 'Đang tải đòn bẩy...', timestamp: null, data: 'N/A', error: null },
     bingx: { status: 'Đang tải đòn bẩy...', timestamp: null, data: 'N/A', error: null },
     okx: { status: 'Đang tải đòn bẩy...', timestamp: null, data: 'N/A', error: null },
-    bitget: { status: 'Đang tải đòn bẩy...', timestamp: null, data: 'N/A', error: null } 
+    bitget: { status: 'Đang tải đòn bòn bẩy...', timestamp: null, data: 'N/A', error: null } 
 };
 
 const BINGX_BASE_HOST = 'open-api.bingx.com';
@@ -940,7 +941,14 @@ function calculateArbitrageOpportunities() {
                     longExchange = exchange1Id; longRate = rate1Data;
                 }
 
-                const fundingDiff = shortRate.fundingRate - longRate.fundingRate;
+                let fundingDiff = shortRate.fundingRate - longRate.fundingRate;
+
+                // THAY ĐỔI 2: Sửa logic tính fundingDiff nếu cả 2 sàn cùng âm hoặc cùng dương
+                if (Math.sign(shortRate.fundingRate) === Math.sign(longRate.fundingRate)) {
+                    const lowerAbsoluteFundingRate = Math.min(Math.abs(shortRate.fundingRate), Math.abs(longRate.fundingRate));
+                    // Áp dụng điều kiện: "số chênh lệch đã tính - funding của sàn thấp hơn"
+                    fundingDiff = fundingDiff - lowerAbsoluteFundingRate;
+                }
 
                 if (fundingDiff <= FUNDING_DIFFERENCE_THRESHOLD) {
                     continue;
@@ -1061,22 +1069,18 @@ const server = http.createServer((req, res) => {
         const responseData = {
             lastUpdated: lastFullUpdateTimestamp,
             arbitrageData: arbitrageOpportunities,
-            rawRates: {
-                binance: Object.values(exchangeData.binanceusdm?.rates || {}), 
-                bingx: Object.values(exchangeData.bingx?.rates || {}),
-                okx: Object.values(exchangeData.okx?.rates || {}),
-                bitget: Object.values(exchangeData.bitget?.rates || {}),
-            },
+            // THAY ĐỔI 3: Sửa để gửi toàn bộ đối tượng exchangeData cho frontend
+            rawRates: exchangeData, 
             debugRawLeverageResponses: debugRawLeverageResponses
         };
 
         const now = Date.now();
         if (now - lastApiDataLogTime > API_DATA_LOG_INTERVAL_MS) {
             console.log(`[API_DATA] Gửi dữ liệu đến frontend. Total arbitrage ops: ${responseData.arbitrageData.length}. ` +
-                `Binance Funds: ${responseData.rawRates.binance.length}. ` +
-                `OKX Funds: ${responseData.rawRates.okx.length}. ` +
-                `BingX Funds: ${responseData.rawRates.bingx.length}. ` +
-                `Bitget Funds: ${responseData.rawRates.bitget.length}.`);
+                `Binance Funds: ${Object.keys(responseData.rawRates.binanceusdm?.rates || {}).length}. ` +
+                `OKX Funds: ${Object.keys(responseData.rawRates.okx?.rates || {}).length}. ` +
+                `BingX Funds: ${Object.keys(responseData.rawRates.bingx?.rates || {}).length}. ` +
+                `Bitget Funds: ${Object.keys(responseData.rawRates.bitget?.rates || {}).length}.`);
             lastApiDataLogTime = now;
         }
 
