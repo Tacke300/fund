@@ -9,7 +9,6 @@ const safeLog = (type, ...args) => {
         const now = new Date();
         const hours = now.getHours().toString().padStart(2, '0');
         const minutes = now.getMinutes().toString().padStart(2, '0');
-        // FIX: Changed to backticks for template literal
         const timestamp = `${hours}:${minutes}`;
         if (typeof console === 'object' && typeof console[type] === 'function') {
             console[type](`[${timestamp} ${type.toUpperCase()}]`, ...args);
@@ -104,6 +103,28 @@ let currentPercentageToUse = 50;
 
 function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
 
+/**
+ * Hàm giúp chuyển đổi symbol từ định dạng BASEQUOTE (ví dụ: BTCUSDT)
+ * sang định dạng thống nhất BASE/QUOTE (ví dụ: BTC/USDT) mà CCXT mong đợi.
+ * @param {string} baseQuoteSymbol Symbol cần chuyển đổi.
+ * @returns {string} Symbol ở định dạng thống nhất.
+ */
+function convertToUnifiedSymbol(baseQuoteSymbol) {
+    if (typeof baseQuoteSymbol === 'string') {
+        // Một số sàn có thể sử dụng token khác ngoài USDT, nhưng phổ biến nhất là USDT
+        // Cần điều chỉnh regex nếu có nhiều stablecoin khác
+        const match = baseQuoteSymbol.match(/^(.+)(USDT|USD)$/i); // Bắt cả USDT và USD
+        if (match && match[1] && match[2]) {
+            const base = match[1].toUpperCase();
+            const quote = match[2].toUpperCase();
+            return `${base}/${quote}`;
+        }
+    }
+    // Nếu không khớp hoặc đã ở định dạng thống nhất (ví dụ: BTC/USDT), trả về nguyên trạng
+    return baseQuoteSymbol;
+}
+
+
 async function fetchDataFromServer() {
     try {
         const response = await fetch(SERVER_DATA_URL);
@@ -128,7 +149,7 @@ async function updateBalances() {
         }
         try {
             const exchange = exchanges[id];
-            await exchange.loadMarkets(true);
+            await exchange.loadMarkets(true); // Tải markets cho sàn
 
             const accountBalance = await exchange.fetchBalance({ 'type': 'future' });
             const usdtFreeBalance = accountBalance.free?.USDT || 0;
@@ -136,7 +157,7 @@ async function updateBalances() {
 
             balances[id].available = usdtFreeBalance;
             balances[id].total = usdtTotalBalance;
-            balances[id].originalSymbol = {};
+            // balances[id].originalSymbol = {}; // Dòng này không còn cần thiết ở đây nữa
             currentTotalOverall += balances[id].available;
 
             safeLog('log', `[BOT] ✅ ${id.toUpperCase()} Balance: Total ${usdtTotalBalance.toFixed(2)} USDT, Available ${balances[id].available.toFixed(2)} USDT.`);
@@ -151,7 +172,6 @@ async function updateBalances() {
     }
 }
 
-// Bắt đầu hàm processServerData đã sửa đổi
 async function processServerData(serverData) {
     if (!serverData || !serverData.arbitrageData) {
         safeLog('warn', '[BOT] Dữ liệu từ server không hợp lệ hoặc thiếu arbitrageData.');
@@ -178,33 +198,33 @@ async function processServerData(serverData) {
         let shortOriginalSymbol = null;
         let longOriginalSymbol = null;
 
+        // --- SỬA ĐỔI TẠI ĐÂY: Chuyển đổi op.coin sang định dạng thống nhất ---
+        const unifiedCoinSymbol = convertToUnifiedSymbol(op.coin);
+
         // Lấy mã hiệu gốc của sàn bằng cách sử dụng markets đã tải
         try {
-            // Đảm bảo markets đã được tải trước đó (ví dụ: trong updateBalances)
-            // hoặc tải markets ở đây nếu cần thiết (lưu ý hiệu suất).
-            // Nếu updateBalances được gọi thường xuyên, markets sẽ có sẵn.
-            const shortMarket = exchanges[shortExIdNormalized].market(op.coin);
+            const shortMarket = exchanges[shortExIdNormalized].market(unifiedCoinSymbol);
             if (shortMarket && shortMarket.id) {
                 shortOriginalSymbol = shortMarket.id;
             } else {
-                safeLog('warn', `[PROCESS_DATA] Không tìm thấy market CCXT cho symbol thống nhất "${op.coin}" trên sàn ${shortExIdNormalized}. Bỏ qua cơ hội này.`);
+                safeLog('warn', `[PROCESS_DATA] Không tìm thấy market CCXT cho symbol thống nhất "${unifiedCoinSymbol}" trên sàn ${shortExIdNormalized}. Bỏ qua cơ hội này.`);
                 continue;
             }
         } catch (e) {
-            safeLog('error', `[PROCESS_DATA] Lỗi khi lấy market cho ${op.coin} trên sàn ${shortExIdNormalized}: ${e.message}. Bỏ qua cơ hội này.`);
+            safeLog('error', `[PROCESS_DATA] Lỗi khi lấy market cho ${unifiedCoinSymbol} trên sàn ${shortExIdNormalized}: ${e.message}. Bỏ qua cơ hội này.`);
             continue;
         }
 
         try {
-            const longMarket = exchanges[longExIdNormalized].market(op.coin);
+            const longMarket = exchanges[longExIdNormalized].market(unifiedCoinSymbol);
             if (longMarket && longMarket.id) {
                 longOriginalSymbol = longMarket.id;
             } else {
-                safeLog('warn', `[PROCESS_DATA] Không tìm thấy market CCXT cho symbol thống nhất "${op.coin}" trên sàn ${longExIdNormalized}. Bỏ qua cơ hội này.`);
+                safeLog('warn', `[PROCESS_DATA] Không tìm thấy market CCXT cho symbol thống nhất "${unifiedCoinSymbol}" trên sàn ${longExIdNormalized}. Bỏ qua cơ hội này.`);
                 continue;
             }
         } catch (e) {
-            safeLog('error', `[PROCESS_DATA] Lỗi khi lấy market cho ${op.coin} trên sàn ${longExIdNormalized}: ${e.message}. Bỏ qua cơ hội này.`);
+            safeLog('error', `[PROCESS_DATA] Lỗi khi lấy market cho ${unifiedCoinSymbol} trên sàn ${longExIdNormalized}: ${e.message}. Bỏ qua cơ hội này.`);
             continue;
         }
 
@@ -220,21 +240,28 @@ async function processServerData(serverData) {
             op.fundingDiff = op.fundingDiff !== undefined ? op.fundingDiff : 'N/A';
             op.commonLeverage = op.commonLeverage !== undefined ? op.commonLeverage : 'N/A';
 
-            let shortExId = op.details.shortExchange;
-            let longExId = op.details.longExchange;
+            let currentShortExId = shortExIdNormalized;
+            let currentLongExId = longExIdNormalized;
+            let currentShortOriginalSymbol = op.details.shortOriginalSymbol;
+            let currentLongOriginalSymbol = op.details.longOriginalSymbol;
+
             // Logic đảo chiều sàn nếu shortRate < longRate
             if (typeof op.details.shortFundingRate === 'number' && typeof op.details.longFundingRate === 'number') {
                 if (op.details.shortFundingRate < op.details.longFundingRate) {
-                    shortExId = op.details.longExchange;
-                    longExId = op.details.shortExchange;
-                    // Đảo luôn cả original symbol nếu logic này áp dụng
-                    const tempSymbol = op.details.shortOriginalSymbol;
-                    op.details.shortOriginalSymbol = op.details.longOriginalSymbol;
-                    op.details.longOriginalSymbol = tempSymbol;
+                    // Đảo luôn cả exchange ID và original symbol
+                    const tempExId = currentShortExId;
+                    currentShortExId = currentLongExId;
+                    currentLongExId = tempExId;
+
+                    const tempSymbol = currentShortOriginalSymbol;
+                    currentShortOriginalSymbol = currentLongOriginalSymbol;
+                    currentLongOriginalSymbol = tempSymbol;
                 }
             }
-            op.details.shortExchange = shortExId;
-            op.details.longExchange = longExId;
+            op.details.shortExchange = currentShortExId;
+            op.details.longExchange = currentLongExId;
+            op.details.shortOriginalSymbol = currentShortOriginalSymbol;
+            op.details.longOriginalSymbol = currentLongOriginalSymbol;
 
             tempAllOpportunities.push(op);
 
@@ -259,7 +286,6 @@ async function processServerData(serverData) {
         bestPotentialOpportunityForDisplay = null;
     }
 }
-// Kết thúc hàm processServerData đã sửa đổi
 
 
 async function getMaxLeverageForSymbol(exchange, symbol) {
@@ -286,18 +312,15 @@ async function getMaxLeverageForSymbol(exchange, symbol) {
                 }
                 break;
             case 'okx':
-                // OKX can have maxLever directly on the market object or in info
-                if (market.maxLever) { // Preferred way
+                if (market.maxLever) {
                     maxLeverage = parseInt(market.maxLever, 10);
                 } else if (market.info && market.info.maxLever) {
                     maxLeverage = parseInt(market.info.maxLever, 10);
                 } else {
                     safeLog('warn', `[HELPER] Không tìm thấy maxLever trực tiếp cho ${symbol} trên OKX. Thử lấy từ leverage tiers (nếu có).`);
-                    // Fallback: try fetching leverage tiers
                     try {
                         const leverageTiers = await exchange.fetchLeverageTiers([symbol]);
                         if (leverageTiers && leverageTiers[symbol] && leverageTiers[symbol].length > 0) {
-                            // Cố gắng lấy maxLeverage từ tier đầu tiên, nếu có
                             if (leverageTiers[symbol][0] && leverageTiers[symbol][0].maxLeverage) {
                                 maxLeverage = parseInt(leverageTiers[symbol][0].maxLeverage, 10);
                             }
@@ -320,7 +343,6 @@ async function getMaxLeverageForSymbol(exchange, symbol) {
     }
 }
 
-// Bắt đầu hàm executeTrades đã sửa đổi với kiểm tra chi tiết
 async function executeTrades(opportunity, percentageToUse) {
     if (!opportunity || percentageToUse <= 0) {
         safeLog('warn', '[BOT_TRADE] Không có cơ hội hoặc phần trăm sử dụng không hợp lệ.');
@@ -360,8 +382,8 @@ async function executeTrades(opportunity, percentageToUse) {
     }
 
     const cleanedCoin = opportunity.coin;
-    const shortOriginalSymbol = opportunity.details.shortOriginalSymbol; // Đã được xử lý trong processServerData
-    const longOriginalSymbol = opportunity.details.longOriginalSymbol;   // Đã được xử lý trong processServerData
+    const shortOriginalSymbol = opportunity.details.shortOriginalSymbol;
+    const longOriginalSymbol = opportunity.details.longOriginalSymbol;
 
     const shortExchange = exchanges[shortExchangeId];
     const longExchange = exchanges[longExchangeId];
@@ -528,7 +550,6 @@ async function executeTrades(opportunity, percentageToUse) {
         return false;
     }
 }
-// Kết thúc hàm executeTrades đã sửa đổi
 
 async function closeTradesAndCalculatePnL() {
     if (!currentTradeDetails || currentTradeDetails.status !== 'OPEN') {
@@ -607,9 +628,6 @@ async function closeTradesAndCalculatePnL() {
             if (!pnlFound) {
                 safeLog('warn', `[BOT_PNL] Không tìm thấy PnL thực tế cho lệnh SHORT ${closeShortOrder.id} trên ${shortExchange} từ trade history. Cập nhật số dư và tính từ đó.`);
                 await updateBalances(); 
-                // Tính toán PnL dựa trên sự thay đổi số dư sau khi đóng lệnh
-                // Đây là một cách ước tính và có thể không hoàn toàn chính xác do phí giao dịch, v.v.
-                // Một cách tốt hơn là fetch position và kiểm tra realized PnL của position đó.
                 shortSidePnl = (balances[shortExchange]?.available || 0) - currentTradeDetails.shortCollateral;
                 safeLog('log', `[BOT_PNL] PnL SHORT tính từ số dư ${shortExchange}: ${shortSidePnl.toFixed(2)} USDT.`);
             }
@@ -696,7 +714,7 @@ async function mainBotLoop() {
         const fetchedData = await fetchDataFromServer();
         if (fetchedData) {
             serverDataGlobal = fetchedData;
-            await processServerData(serverDataGlobal); // Đã sửa đổi
+            await processServerData(serverDataGlobal);
         }
     }
 
@@ -752,7 +770,7 @@ async function mainBotLoop() {
 
             safeLog('log', `[BOT_LOOP] ⚡ Kích hoạt mở lệnh cho cơ hội ${currentSelectedOpportunityForExecution.coin} vào phút 59:55.`);
             botState = 'EXECUTING_TRADES';
-            const tradeSuccess = await executeTrades(currentSelectedOpportunityForExecution, currentPercentageToUse); // Đã sửa đổi
+            const tradeSuccess = await executeTrades(currentSelectedOpportunityForExecution, currentPercentageToUse);
             if (tradeSuccess) {
                 safeLog('log', '[BOT_LOOP] ✅ Mở lệnh hoàn tất.');
             } else {
@@ -916,7 +934,7 @@ const botServer = http.createServer((req, res) => {
                 const originalCurrentSelectedOpportunityForExecution = currentSelectedOpportunityForExecution;
                 currentSelectedOpportunityForExecution = testOpportunity; 
 
-                const tradeSuccess = await executeTrades(testOpportunity, testPercentageToUse); // Đã sửa đổi
+                const tradeSuccess = await executeTrades(testOpportunity, testPercentageToUse);
 
                 currentSelectedOpportunityForExecution = originalCurrentSelectedOpportunityForExecution;
 
