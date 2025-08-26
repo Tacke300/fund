@@ -112,7 +112,6 @@ function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
  */
 function convertToUnifiedSymbol(baseQuoteSymbol) {
     if (typeof baseQuoteSymbol === 'string') {
-        // Tìm kiếm các cặp có hậu tố USDT hoặc USD (không phân biệt chữ hoa/thường)
         const match = baseQuoteSymbol.match(/^(.+)(USDT|USD)$/i);
         if (match && match[1] && match[2]) {
             const base = match[1].toUpperCase();
@@ -120,7 +119,6 @@ function convertToUnifiedSymbol(baseQuoteSymbol) {
             return `${base}/${quote}`;
         }
     }
-    // Trả về nguyên trạng nếu không thể chuyển đổi hoặc đã ở định dạng khác
     return baseQuoteSymbol;
 }
 
@@ -188,10 +186,11 @@ async function processServerData(serverData) {
         const shortExIdNormalized = op.details.shortExchange.toLowerCase() === 'binance' ? 'binanceusdm' : op.details.shortExchange.toLowerCase();
         const longExIdNormalized = op.details.longExchange.toLowerCase() === 'binance' ? 'binanceusdm' : op.details.longExchange.toLowerCase();
 
+        // --- BỎ LOG CẢNH BÁO CHO CÁC SÀN BỊ TẮT TẠI ĐÂY ---
         if (DISABLED_EXCHANGES.includes(shortExIdNormalized) || DISABLED_EXCHANGES.includes(longExIdNormalized) ||
             !exchanges[shortExIdNormalized] || !exchanges[longExIdNormalized]) {
-            safeLog('warn', `[PROCESS_DATA] Bỏ qua cơ hội ${op.coin} vì sàn ${shortExIdNormalized} hoặc ${longExIdNormalized} bị tắt hoặc chưa được khởi tạo.`);
-            continue;
+            // safeLog('warn', `[PROCESS_DATA] Bỏ qua cơ hội ${op.coin} vì sàn ${shortExIdNormalized} hoặc ${longExIdNormalized} bị tắt hoặc chưa được khởi tạo.`);
+            continue; // Chỉ bỏ qua, không cần log cảnh báo nếu đã chủ động tắt
         }
 
         let shortOriginalSymbol = null;
@@ -208,17 +207,16 @@ async function processServerData(serverData) {
                 if (shortMarket && shortMarket.id) {
                     shortOriginalSymbol = shortMarket.id; // Lấy mã hiệu gốc của sàn
                     foundShortMarket = true;
-                    break; // Tìm thấy, dừng thử các định dạng khác
+                    break;
                 }
             } catch (e) {
-                // Log dưới dạng debug/verbose, không phải lỗi, vì chúng ta sẽ thử định dạng khác
                 // safeLog('debug', `[PROCESS_DATA] DEBUG: Thử "${symbolAttempt}" trên ${shortExIdNormalized} không tìm thấy.`);
             }
         }
 
         if (!foundShortMarket) {
             safeLog('error', `[PROCESS_DATA] Lỗi: Không tìm thấy market cho "${op.coin}" trên sàn ${shortExIdNormalized}. Bỏ qua cơ hội này.`);
-            continue; // Bỏ qua cơ hội nếu không tìm thấy market trên sàn short
+            continue;
         }
 
         // --- Tìm market cho sàn Long ---
@@ -229,17 +227,16 @@ async function processServerData(serverData) {
                 if (longMarket && longMarket.id) {
                     longOriginalSymbol = longMarket.id; // Lấy mã hiệu gốc của sàn
                     foundLongMarket = true;
-                    break; // Tìm thấy, dừng thử các định dạng khác
+                    break;
                 }
             } catch (e) {
-                // Log dưới dạng debug/verbose
                 // safeLog('debug', `[PROCESS_DATA] DEBUG: Thử "${symbolAttempt}" trên ${longExIdNormalized} không tìm thấy.`);
             }
         }
         
         if (!foundLongMarket) {
             safeLog('error', `[PROCESS_DATA] Lỗi: Không tìm thấy market cho "${op.coin}" trên sàn ${longExIdNormalized}. Bỏ qua cơ hội này.`);
-            continue; // Bỏ qua cơ hội nếu không tìm thấy market trên sàn long
+            continue;
         }
 
         // Gán các mã hiệu gốc đã lấy được vào đối tượng details
@@ -389,7 +386,7 @@ async function executeTrades(opportunity, percentageToUse) {
 
     if (DISABLED_EXCHANGES.includes(shortExchangeId) || DISABLED_EXCHANGES.includes(longExchangeId) ||
         !exchanges[shortExchangeId] || !exchanges[longExchangeId]) {
-        safeLog('error', `[BOT_TRADE] Bỏ qua thực hiện lệnh vì sàn ${shortExchangeId} hoặc ${longExchangeId} bị tắt hoặc chưa được khởi tạo.`);
+        safeLog('error', `[BOT_TRADE] Bỏ qua thực hiện lệnh vì sàn ${shortExchangeId} hoặc ${longExIdNormalized} bị tắt hoặc chưa được khởi tạo.`);
         return false;
     }
 
@@ -440,24 +437,25 @@ async function executeTrades(opportunity, percentageToUse) {
 
         // --- Set Leverage for SHORT side ---
         let desiredLeverageShort = opportunity.commonLeverage;
-        if (!desiredLeverageShort || desiredLeverageShort < 1) {
-            safeLog('warn', `[BOT_TRADE] Đòn bẩy từ server cho SHORT ${shortOriginalSymbol} không hợp lệ (${desiredLeverageShort}). Thử đặt đòn bẩy TỐI ĐA.`);
-            desiredLeverageShort = await getMaxLeverageForSymbol(shortExchange, shortOriginalSymbol);
-            if (!desiredLeverageShort) {
-                safeLog('error', `[BOT_TRADE] ❌ Không thể xác định đòn bẩy tối đa cho SHORT ${shortOriginalSymbol} trên ${shortExchangeId}. HỦY BỎ LỆNH.`);
-                return false;
-            }
-        }
-        actualShortLeverage = desiredLeverageShort;
-
+        const symbolToUseShort = typeof shortOriginalSymbol === 'string' ? shortOriginalSymbol : String(shortOriginalSymbol);
+        
+        // Thử đặt đòn bẩy
         try {
-            const symbolToUseShort = typeof shortOriginalSymbol === 'string' ? shortOriginalSymbol : String(shortOriginalSymbol);
+            if (!desiredLeverageShort || desiredLeverageShort < 1) {
+                safeLog('warn', `[BOT_TRADE] Đòn bẩy từ server cho SHORT ${shortOriginalSymbol} không hợp lệ (${desiredLeverageShort}). Thử đặt đòn bẩy TỐI ĐA.`);
+                desiredLeverageShort = await getMaxLeverageForSymbol(shortExchange, shortOriginalSymbol);
+                if (!desiredLeverageShort) {
+                    throw new Error(`Không thể xác định đòn bẩy tối đa cho SHORT ${shortOriginalSymbol} trên ${shortExchangeId}.`);
+                }
+            }
+            actualShortLeverage = desiredLeverageShort;
+
             if (shortExchange.has['setLeverage']) {
                 if (shortExchangeId === 'bingx') {
                     await shortExchange.setLeverage(symbolToUseShort, actualShortLeverage, { 'side': 'BOTH' }); 
                 } else if (shortExchangeId === 'binanceusdm') {
                     const binanceSymbolId = shortExchange.market(symbolToUseShort).id;
-                    await shortExchange.setLeverage(binanceSymbolId, actualShortLeverage); 
+                    await shortExchange.setLeverage(binanceSymbolId, actualShortLeverage, { 'positionSide': 'SHORT' }); // Thêm positionSide
                 } else {
                     await shortExchange.setLeverage(symbolToUseShort, actualShortLeverage);
                 }
@@ -470,24 +468,25 @@ async function executeTrades(opportunity, percentageToUse) {
 
         // --- Set Leverage for LONG side ---
         let desiredLeverageLong = opportunity.commonLeverage;
-        if (!desiredLeverageLong || desiredLeverageLong < 1) {
-            safeLog('warn', `[BOT_TRADE] Đòn bẩy từ server cho LONG ${longOriginalSymbol} không hợp lệ (${desiredLeverageLong}). Thử đặt đòn bẩy TỐI ĐA.`);
-            desiredLeverageLong = await getMaxLeverageForSymbol(longExchange, longOriginalSymbol);
-            if (!desiredLeverageLong) {
-                safeLog('error', `[BOT_TRADE] ❌ Không thể xác định đòn bẩy tối đa cho LONG ${longOriginalSymbol} trên ${longExchangeId}. HỦY BỎ LỆNH.`);
-                return false;
-            }
-        }
-        actualLongLeverage = desiredLeverageLong;
+        const symbolToUseLong = typeof longOriginalSymbol === 'string' ? longOriginalSymbol : String(longOriginalSymbol);
 
+        // Thử đặt đòn bẩy
         try {
-            const symbolToUseLong = typeof longOriginalSymbol === 'string' ? longOriginalSymbol : String(longOriginalSymbol);
+            if (!desiredLeverageLong || desiredLeverageLong < 1) {
+                safeLog('warn', `[BOT_TRADE] Đòn bẩy từ server cho LONG ${longOriginalSymbol} không hợp lệ (${desiredLeverageLong}). Thử đặt đòn bẩy TỐI ĐA.`);
+                desiredLeverageLong = await getMaxLeverageForSymbol(longExchange, longOriginalSymbol);
+                if (!desiredLeverageLong) {
+                    throw new Error(`Không thể xác định đòn bẩy tối đa cho LONG ${longOriginalSymbol} trên ${longExchangeId}.`);
+                }
+            }
+            actualLongLeverage = desiredLeverageLong;
+
             if (longExchange.has['setLeverage']) {
                 if (longExchangeId === 'bingx') {
                     await longExchange.setLeverage(symbolToUseLong, actualLongLeverage, { 'side': 'BOTH' });
                 } else if (longExchangeId === 'binanceusdm') {
                     const binanceSymbolId = longExchange.market(symbolToUseLong).id;
-                    await longExchange.setLeverage(binanceSymbolId, actualLongLeverage);
+                    await longExchange.setLeverage(binanceSymbolId, actualLongLeverage, { 'positionSide': 'LONG' }); // Thêm positionSide
                 } else {
                     await longExchange.setLeverage(symbolToUseLong, actualLongLeverage);
                 }
