@@ -33,7 +33,7 @@ const {
     bitgetApiKey, bitgetApiSecret, bitgetApiPassword
 } = require('./config.js');
 
-const { usdtDepositAddressesByNetwork } = require('./balance.js');
+const { usdtDepositAddressesByNetwork } = require('../balance.js');
 
 const BOT_PORT = 5006;
 const SERVER_DATA_URL = 'http://localhost:5005/api/data';
