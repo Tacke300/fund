@@ -367,13 +367,12 @@ async function getMaxLeverageForSymbol(exchange, symbol) {
  * @param {object} exchange Đối tượng sàn giao dịch CCXT.
  * @param {string} symbol Mã hiệu gốc của cặp giao dịch.
  * @param {number} desiredLeverage Đòn bẩy mong muốn (từ cơ hội).
- * @param {string} positionSide 'LONG' hoặc 'SHORT' (để dùng cho các params bổ sung nếu cần).
+ * @param {string} positionSide 'LONG' hoặc 'SHORT' (không dùng trực tiếp cho setLeverage Binance).
  * @returns {number|null} Đòn bẩy thực tế đã đặt hoặc null nếu thất bại hoàn toàn.
  */
 async function setLeverageSafely(exchange, symbol, desiredLeverage, positionSide) {
     const exchangeId = exchange.id;
     const symbolToUse = String(symbol); // Đảm bảo là string
-    let leverageToSet = desiredLeverage;
     let actualLeverage = null;
 
     if (!exchange.has['setLeverage']) {
@@ -389,9 +388,8 @@ async function setLeverageSafely(exchange, symbol, desiredLeverage, positionSide
             } else if (exchangeId === 'binanceusdm') {
                 const binanceMarket = exchange.market(symbolToUse);
                 if (!binanceMarket) throw new Error(`Không tìm thấy market object cho ${symbolToUse} trên BinanceUSDM.`);
-                // --- SỬA LỖI: Bỏ positionSide khỏi params của setLeverage cho Binance trực tiếp ---
-                // setLeverage trên Binance thường đặt cho toàn bộ symbol, không phải cho side cụ thể.
-                await exchange.setLeverage(binanceMarket.id, lev); 
+                // --- SỬA LỖI QUAN TRỌNG: Đổi thứ tự tham số cho Binance và bỏ positionSide ---
+                await exchange.setLeverage(lev, binanceMarket.id); // leverage trước, sau đó là market.id
             } else {
                 await exchange.setLeverage(symbolToUse, lev);
             }
@@ -404,11 +402,11 @@ async function setLeverageSafely(exchange, symbol, desiredLeverage, positionSide
 
     // 1. Thử đặt desiredLeverage từ cơ hội
     try {
-        if (leverageToSet && leverageToSet >= 1) {
-            actualLeverage = await trySetLeverage(leverageToSet, 'ban đầu');
+        if (desiredLeverage && desiredLeverage >= 1) {
+            actualLeverage = await trySetLeverage(desiredLeverage, 'ban đầu');
             return actualLeverage;
         } else {
-            safeLog('warn', `[BOT_TRADE] Đòn bẩy mong muốn (${leverageToSet}) không hợp lệ cho ${symbolToUse} trên ${exchangeId}. Thử lấy đòn bẩy TỐI ĐA.`);
+            safeLog('warn', `[BOT_TRADE] Đòn bẩy mong muốn (${desiredLeverage}) không hợp lệ cho ${symbolToUse} trên ${exchangeId}. Thử lấy đòn bẩy TỐI ĐA.`);
         }
     } catch (firstAttemptError) {
         safeLog('warn', `[BOT_TRADE] ⚠️ ${firstAttemptError.message}. Thử lại với đòn bẩy TỐI ĐA.`);
