@@ -183,13 +183,19 @@ async function processServerData(serverData) {
     const tempAllOpportunities = [];
 
     for (const op of serverData.arbitrageData) {
+        // --- SỬA LỖI: Kiểm tra op và op.details để tránh TypeError: Cannot read properties of undefined ---
+        if (!op || !op.details) {
+            safeLog('warn', `[PROCESS_DATA] Bỏ qua cơ hội không hợp lệ (op hoặc op.details undefined).`);
+            continue; 
+        }
+
         const minutesUntilFunding = (op.nextFundingTime - now) / (1000 * 60);
         const shortExIdNormalized = op.details.shortExchange.toLowerCase() === 'binance' ? 'binanceusdm' : op.details.shortExchange.toLowerCase();
         const longExIdNormalized = op.details.longExchange.toLowerCase() === 'binance' ? 'binanceusdm' : op.details.longExchange.toLowerCase();
 
         // --- Đã loại bỏ log cảnh báo cho các sàn bị tắt tại đây ---
         // Chỉ bỏ qua nếu sàn bị tắt hoặc chưa được khởi tạo.
-        if (DISABLED_EXCHANGES.includes(shortExIdNormalized) || DISABLED_EXCHANGES.includes(longExIdNormalized) ||
+        if (!activeExchangeIds.includes(shortExIdNormalized) || !activeExchangeIds.includes(longExIdNormalized) ||
             !exchanges[shortExIdNormalized] || !exchanges[longExIdNormalized]) {
             continue;
         }
@@ -290,7 +296,8 @@ async function processServerData(serverData) {
 
     if (bestForDisplay) {
         bestPotentialOpportunityForDisplay = bestForDisplay;
-        const shortExId = bestForDisplay.details.shortExchange.toLowerCase() === 'binance' ? 'binanceusdm' : bestForDisplay.T.details.shortExchange.toLowerCase();
+        // Đảm bảo sử dụng ID sàn đã chuẩn hóa cho việc tính toán số dư
+        const shortExId = bestForDisplay.details.shortExchange.toLowerCase() === 'binance' ? 'binanceusdm' : bestForDisplay.details.shortExchange.toLowerCase();
         const longExId = bestForDisplay.details.longExchange.toLowerCase() === 'binance' ? 'binanceusdm' : bestForDisplay.details.longExchange.toLowerCase();
         const minAvailableBalance = Math.min(balances[shortExId]?.available || 0, balances[longExId]?.available || 0);
         bestPotentialOpportunityForDisplay.estimatedTradeCollateral = (minAvailableBalance * (currentPercentageToUse / 100)).toFixed(2);
@@ -314,8 +321,6 @@ async function getMaxLeverageForSymbol(exchange, symbol) {
 
         switch (exchangeId) {
             case 'binanceusdm':
-                // CCXT Binance future api reference for `setLeverage` needs market id not symbol name.
-                // The `market` function ensures we get the proper market object including `id` if available.
                 if (market.info && market.info.leverageFilter && market.info.leverageFilter.maxLeverage) {
                     maxLeverage = parseInt(market.info.leverageFilter.maxLeverage, 10);
                 }
@@ -358,12 +363,12 @@ async function getMaxLeverageForSymbol(exchange, symbol) {
 }
 
 /**
- * Đặt đòn bẩy một cách an toàn, với tùy chọn thử lại đòn bẩy tối đa nếu lần đầu thất bại.
+ * Đặt đòn bẩy một cách an toàn, với tùy chọn thử lại đòn bẩy tối đa và cuối cùng là x1 nếu tất cả thất bại.
  * @param {object} exchange Đối tượng sàn giao dịch CCXT.
  * @param {string} symbol Mã hiệu gốc của cặp giao dịch.
- * @param {number} desiredLeverage Đòn bẩy mong muốn.
- * @param {string} positionSide 'LONG' hoặc 'SHORT' (để dùng cho Binance).
- * @returns {number|null} Đòn bẩy thực tế đã đặt hoặc null nếu thất bại.
+ * @param {number} desiredLeverage Đòn bẩy mong muốn (từ cơ hội).
+ * @param {string} positionSide 'LONG' hoặc 'SHORT' (để dùng cho các params bổ sung nếu cần).
+ * @returns {number|null} Đòn bẩy thực tế đã đặt hoặc null nếu thất bại hoàn toàn.
  */
 async function setLeverageSafely(exchange, symbol, desiredLeverage, positionSide) {
     const exchangeId = exchange.id;
@@ -371,66 +376,64 @@ async function setLeverageSafely(exchange, symbol, desiredLeverage, positionSide
     let leverageToSet = desiredLeverage;
     let actualLeverage = null;
 
-    // Lần thử đầu tiên: dùng desiredLeverage hoặc max leverage nếu desiredLeverage không hợp lệ
-    try {
-        if (!leverageToSet || leverageToSet < 1) {
-            safeLog('warn', `[BOT_TRADE] Đòn bẩy (${leverageToSet}) không hợp lệ cho ${symbolToUse} trên ${exchangeId}. Thử đặt đòn bẩy TỐI ĐA.`);
-            leverageToSet = await getMaxLeverageForSymbol(exchange, symbolToUse);
-            if (!leverageToSet) {
-                throw new Error(`Không thể xác định đòn bẩy tối đa cho ${symbolToUse} trên ${exchangeId}.`);
-            }
-        }
-        
-        if (exchange.has['setLeverage']) {
+    if (!exchange.has['setLeverage']) {
+        safeLog('warn', `[BOT_TRADE] Sàn ${exchangeId} không hỗ trợ chức năng setLeverage. Giả định đòn bẩy x1.`);
+        // Nếu sàn không hỗ trợ, giả định đòn bẩy x1 để tiếp tục (hoặc desiredLeverage nếu hợp lệ)
+        return (desiredLeverage && desiredLeverage >= 1) ? desiredLeverage : 1;
+    }
+
+    const trySetLeverage = async (lev, attemptType) => {
+        try {
             if (exchangeId === 'bingx') {
-                await exchange.setLeverage(symbolToUse, leverageToSet, { 'side': 'BOTH' });
+                await exchange.setLeverage(symbolToUse, lev, { 'side': 'BOTH' });
             } else if (exchangeId === 'binanceusdm') {
                 const binanceMarket = exchange.market(symbolToUse);
                 if (!binanceMarket) throw new Error(`Không tìm thấy market object cho ${symbolToUse} trên BinanceUSDM.`);
-                // Đối với Binance, setLeverage cần market id và positionSide trong params
-                await exchange.setLeverage(binanceMarket.id, leverageToSet, { 'positionSide': positionSide });
+                // --- SỬA LỖI: Bỏ positionSide khỏi params của setLeverage cho Binance trực tiếp ---
+                // setLeverage trên Binance thường đặt cho toàn bộ symbol, không phải cho side cụ thể.
+                await exchange.setLeverage(binanceMarket.id, lev); 
             } else {
-                await exchange.setLeverage(symbolToUse, leverageToSet);
+                await exchange.setLeverage(symbolToUse, lev);
             }
-            actualLeverage = leverageToSet;
-            safeLog('log', `[BOT_TRADE] ✅ Đặt đòn bẩy x${actualLeverage} cho ${symbolToUse} trên ${exchangeId} thành công.`);
+            safeLog('log', `[BOT_TRADE] ✅ Đặt đòn bẩy x${lev} (${attemptType}) cho ${symbolToUse} trên ${exchangeId} thành công.`);
+            return lev;
+        } catch (error) {
+            throw new Error(`Lỗi khi đặt đòn bẩy x${lev} (${attemptType}) cho ${symbolToUse} trên ${exchangeId}: ${error.message}`);
+        }
+    };
+
+    // 1. Thử đặt desiredLeverage từ cơ hội
+    try {
+        if (leverageToSet && leverageToSet >= 1) {
+            actualLeverage = await trySetLeverage(leverageToSet, 'ban đầu');
             return actualLeverage;
         } else {
-            safeLog('warn', `[BOT_TRADE] Sàn ${exchangeId} không hỗ trợ chức năng setLeverage.`);
-            // Nếu sàn không hỗ trợ setLeverage, ta giả định leverage là desiredLeverage nếu nó hợp lệ
-            if (leverageToSet && leverageToSet >= 1) {
-                 return leverageToSet;
-            }
-            return null;
+            safeLog('warn', `[BOT_TRADE] Đòn bẩy mong muốn (${leverageToSet}) không hợp lệ cho ${symbolToUse} trên ${exchangeId}. Thử lấy đòn bẩy TỐI ĐA.`);
         }
     } catch (firstAttemptError) {
-        // Nếu lần đầu thất bại (do setLeverage trả về lỗi), thử lại với max leverage
-        safeLog('warn', `[BOT_TRADE] ⚠️ Lỗi khi đặt đòn bẩy x${leverageToSet} cho ${symbolToUse} trên ${exchangeId}: ${firstAttemptError.message}. Thử lại với đòn bẩy TỐI ĐA.`, firstAttemptError);
-        
-        try {
-            const maxLeverage = await getMaxLeverageForSymbol(exchange, symbolToUse);
-            if (!maxLeverage) {
-                throw new Error(`Không thể xác định đòn bẩy tối đa cho ${symbolToUse} trên ${exchangeId} sau khi thử lại.`);
-            }
-            
-            if (exchange.has['setLeverage']) {
-                if (exchangeId === 'bingx') {
-                    await exchange.setLeverage(symbolToUse, maxLeverage, { 'side': 'BOTH' });
-                } else if (exchangeId === 'binanceusdm') {
-                    const binanceMarket = exchange.market(symbolToUse);
-                    if (!binanceMarket) throw new Error(`Không tìm thấy market object cho ${symbolToUse} trên BinanceUSDM (retry).`);
-                    await exchange.setLeverage(binanceMarket.id, maxLeverage, { 'positionSide': positionSide });
-                } else {
-                    await exchange.setLeverage(symbolToUse, maxLeverage);
-                }
-            }
-            actualLeverage = maxLeverage;
-            safeLog('log', `[BOT_TRADE] ✅ Đặt đòn bẩy x${actualLeverage} (tối đa) cho ${symbolToUse} trên ${exchangeId} thành công.`);
+        safeLog('warn', `[BOT_TRADE] ⚠️ ${firstAttemptError.message}. Thử lại với đòn bẩy TỐI ĐA.`);
+    }
+
+    // 2. Nếu desiredLeverage không thành công hoặc không hợp lệ, thử đặt Max Leverage
+    try {
+        const maxLeverage = await getMaxLeverageForSymbol(exchange, symbolToUse);
+        if (maxLeverage && maxLeverage >= 1) {
+            actualLeverage = await trySetLeverage(maxLeverage, 'tối đa');
             return actualLeverage;
-        } catch (secondAttemptError) {
-            safeLog('error', `[BOT_TRADE] ❌ Lỗi nghiêm trọng: Không thể đặt đòn bẩy cho ${symbolToUse} trên ${exchangeId} ngay cả với đòn bẩy TỐI ĐA: ${secondAttemptError.message}.`, secondAttemptError);
-            return null; // Báo hiệu thất bại
+        } else {
+            safeLog('warn', `[BOT_TRADE] Không thể xác định đòn bẩy tối đa cho ${symbolToUse} trên ${exchangeId}. Thử đặt đòn bẩy x1.`);
         }
+    } catch (secondAttemptError) {
+        safeLog('warn', `[BOT_TRADE] ⚠️ ${secondAttemptError.message}. Thử lại với đòn bẩy x1.`);
+    }
+
+    // 3. Nếu cả hai thất bại, đặt đòn bẩy x1 làm fallback
+    try {
+        actualLeverage = await trySetLeverage(1, 'fallback x1');
+        return actualLeverage;
+    } catch (finalAttemptError) {
+        safeLog('error', `[BOT_TRADE] ❌ Lỗi nghiêm trọng: Không thể đặt đòn bẩy cho ${symbolToUse} trên ${exchangeId} ngay cả với đòn bẩy x1: ${finalAttemptError.message}.`, finalAttemptError);
+        return null; // Báo hiệu thất bại hoàn toàn
     }
 }
 
