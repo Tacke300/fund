@@ -31,7 +31,7 @@ const {
     bingxApiKey, bingxApiSecret,
     okxApiKey, okxApiSecret, okxPassword,
     bitgetApiKey, bitgetApiSecret, bitgetApiPassword
-} = require('../config.js');
+} = require('./config.js');
 
 const { usdtDepositAddressesByNetwork } = require('./balance.js');
 
