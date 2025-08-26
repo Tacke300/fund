@@ -106,21 +106,21 @@ function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
 /**
  * Hàm giúp chuyển đổi symbol từ định dạng BASEQUOTE (ví dụ: BTCUSDT)
  * sang định dạng thống nhất BASE/QUOTE (ví dụ: BTC/USDT) mà CCXT mong đợi.
+ * Nếu đã ở định dạng thống nhất hoặc không khớp, trả về nguyên trạng.
  * @param {string} baseQuoteSymbol Symbol cần chuyển đổi.
- * @returns {string} Symbol ở định dạng thống nhất.
+ * @returns {string} Symbol ở định dạng thống nhất hoặc nguyên trạng.
  */
 function convertToUnifiedSymbol(baseQuoteSymbol) {
     if (typeof baseQuoteSymbol === 'string') {
-        // Một số sàn có thể sử dụng token khác ngoài USDT, nhưng phổ biến nhất là USDT
-        // Cần điều chỉnh regex nếu có nhiều stablecoin khác
-        const match = baseQuoteSymbol.match(/^(.+)(USDT|USD)$/i); // Bắt cả USDT và USD
+        // Tìm kiếm các cặp có hậu tố USDT hoặc USD (không phân biệt chữ hoa/thường)
+        const match = baseQuoteSymbol.match(/^(.+)(USDT|USD)$/i);
         if (match && match[1] && match[2]) {
             const base = match[1].toUpperCase();
             const quote = match[2].toUpperCase();
             return `${base}/${quote}`;
         }
     }
-    // Nếu không khớp hoặc đã ở định dạng thống nhất (ví dụ: BTC/USDT), trả về nguyên trạng
+    // Trả về nguyên trạng nếu không thể chuyển đổi hoặc đã ở định dạng khác
     return baseQuoteSymbol;
 }
 
@@ -157,7 +157,6 @@ async function updateBalances() {
 
             balances[id].available = usdtFreeBalance;
             balances[id].total = usdtTotalBalance;
-            // balances[id].originalSymbol = {}; // Dòng này không còn cần thiết ở đây nữa
             currentTotalOverall += balances[id].available;
 
             safeLog('log', `[BOT] ✅ ${id.toUpperCase()} Balance: Total ${usdtTotalBalance.toFixed(2)} USDT, Available ${balances[id].available.toFixed(2)} USDT.`);
@@ -198,34 +197,49 @@ async function processServerData(serverData) {
         let shortOriginalSymbol = null;
         let longOriginalSymbol = null;
 
-        // --- SỬA ĐỔI TẠI ĐÂY: Chuyển đổi op.coin sang định dạng thống nhất ---
-        const unifiedCoinSymbol = convertToUnifiedSymbol(op.coin);
+        // Thử cả hai định dạng symbol: gốc từ server và đã chuyển đổi sang unified
+        const potentialSymbols = [op.coin, convertToUnifiedSymbol(op.coin)];
 
-        // Lấy mã hiệu gốc của sàn bằng cách sử dụng markets đã tải
-        try {
-            const shortMarket = exchanges[shortExIdNormalized].market(unifiedCoinSymbol);
-            if (shortMarket && shortMarket.id) {
-                shortOriginalSymbol = shortMarket.id;
-            } else {
-                safeLog('warn', `[PROCESS_DATA] Không tìm thấy market CCXT cho symbol thống nhất "${unifiedCoinSymbol}" trên sàn ${shortExIdNormalized}. Bỏ qua cơ hội này.`);
-                continue;
+        // --- Tìm market cho sàn Short ---
+        let foundShortMarket = false;
+        for (const symbolAttempt of potentialSymbols) {
+            try {
+                const shortMarket = exchanges[shortExIdNormalized].market(symbolAttempt);
+                if (shortMarket && shortMarket.id) {
+                    shortOriginalSymbol = shortMarket.id; // Lấy mã hiệu gốc của sàn
+                    foundShortMarket = true;
+                    break; // Tìm thấy, dừng thử các định dạng khác
+                }
+            } catch (e) {
+                // Log dưới dạng debug/verbose, không phải lỗi, vì chúng ta sẽ thử định dạng khác
+                // safeLog('debug', `[PROCESS_DATA] DEBUG: Thử "${symbolAttempt}" trên ${shortExIdNormalized} không tìm thấy.`);
             }
-        } catch (e) {
-            safeLog('error', `[PROCESS_DATA] Lỗi khi lấy market cho ${unifiedCoinSymbol} trên sàn ${shortExIdNormalized}: ${e.message}. Bỏ qua cơ hội này.`);
-            continue;
         }
 
-        try {
-            const longMarket = exchanges[longExIdNormalized].market(unifiedCoinSymbol);
-            if (longMarket && longMarket.id) {
-                longOriginalSymbol = longMarket.id;
-            } else {
-                safeLog('warn', `[PROCESS_DATA] Không tìm thấy market CCXT cho symbol thống nhất "${unifiedCoinSymbol}" trên sàn ${longExIdNormalized}. Bỏ qua cơ hội này.`);
-                continue;
+        if (!foundShortMarket) {
+            safeLog('error', `[PROCESS_DATA] Lỗi: Không tìm thấy market cho "${op.coin}" trên sàn ${shortExIdNormalized}. Bỏ qua cơ hội này.`);
+            continue; // Bỏ qua cơ hội nếu không tìm thấy market trên sàn short
+        }
+
+        // --- Tìm market cho sàn Long ---
+        let foundLongMarket = false;
+        for (const symbolAttempt of potentialSymbols) {
+            try {
+                const longMarket = exchanges[longExIdNormalized].market(symbolAttempt);
+                if (longMarket && longMarket.id) {
+                    longOriginalSymbol = longMarket.id; // Lấy mã hiệu gốc của sàn
+                    foundLongMarket = true;
+                    break; // Tìm thấy, dừng thử các định dạng khác
+                }
+            } catch (e) {
+                // Log dưới dạng debug/verbose
+                // safeLog('debug', `[PROCESS_DATA] DEBUG: Thử "${symbolAttempt}" trên ${longExIdNormalized} không tìm thấy.`);
             }
-        } catch (e) {
-            safeLog('error', `[PROCESS_DATA] Lỗi khi lấy market cho ${unifiedCoinSymbol} trên sàn ${longExIdNormalized}: ${e.message}. Bỏ qua cơ hội này.`);
-            continue;
+        }
+        
+        if (!foundLongMarket) {
+            safeLog('error', `[PROCESS_DATA] Lỗi: Không tìm thấy market cho "${op.coin}" trên sàn ${longExIdNormalized}. Bỏ qua cơ hội này.`);
+            continue; // Bỏ qua cơ hội nếu không tìm thấy market trên sàn long
         }
 
         // Gán các mã hiệu gốc đã lấy được vào đối tượng details
@@ -349,7 +363,6 @@ async function executeTrades(opportunity, percentageToUse) {
         return false;
     }
 
-    // --- Bổ sung kiểm tra chi tiết các trường bị thiếu theo yêu cầu của bạn ---
     if (!opportunity.details) {
         safeLog('error', '[BOT_TRADE] Thông tin chi tiết cơ hội thiếu trường "details". Hủy bỏ lệnh.');
         return false;
@@ -370,7 +383,6 @@ async function executeTrades(opportunity, percentageToUse) {
         safeLog('error', '[BOT_TRADE] Thông tin chi tiết cơ hội thiếu trường "longOriginalSymbol" (mã coin gốc cho sàn long). Hủy bỏ lệnh.');
         return false;
     }
-    // --- Kết thúc phần bổ sung kiểm tra chi tiết ---
 
     const shortExchangeId = opportunity.details.shortExchange.toLowerCase() === 'binance' ? 'binanceusdm' : opportunity.details.shortExchange.toLowerCase();
     const longExchangeId = opportunity.details.longExchange.toLowerCase() === 'binance' ? 'binanceusdm' : opportunity.details.longExchange.toLowerCase();
@@ -735,8 +747,8 @@ async function mainBotLoop() {
                     minutesUntilFunding <= MAX_MINUTES_UNTIL_FUNDING) {
 
                     if (!bestOpportunityFoundForExecution ||
-                        minutesUntilFunding < bestOpportunityFoundForExecution.details.minutesUntilFunding ||
-                        (minutesUntilFunding === bestOpportunityFoundForExecution.details.minutesUntilFunding && op.estimatedPnl > bestOpportunityFoundForExecution.estimatedPnl)
+                        op.estimatedPnl > bestOpportunityFoundForExecution.estimatedPnl ||
+                        (op.estimatedPnl === bestOpportunityFoundForExecution.estimatedPnl && minutesUntilFunding < bestOpportunityFoundForExecution.details.minutesUntilFunding)
                     ) {
                         bestOpportunityFoundForExecution = op;
                     }
