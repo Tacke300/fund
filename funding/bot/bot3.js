@@ -40,7 +40,12 @@ const MAX_MINUTES_UNTIL_FUNDING = 30;
 const MIN_MINUTES_FOR_EXECUTION = 15;
 
 const DATA_FETCH_INTERVAL_SECONDS = 5;
-const HOURLY_FETCH_TIME_MINUTE = 45;
+// const HOURLY_FETCH_TIME_MINUTE = 45; // Không còn dùng trực tiếp
+
+// === Cấu hình Retry cho kết nối Server Dữ liệu ===
+const MAX_SERVER_DATA_RETRIES = 10; // Số lần thử lại tối đa (ngoài lần thử đầu tiên)
+const SERVER_DATA_RETRY_DELAY_MS = 5 * 60 * 1000; // Thời gian chờ giữa các lần thử lại (5 phút)
+// ===============================================
 
 const SL_PERCENT_OF_COLLATERAL = 200; 
 const TP_PERCENT_OF_COLLATERAL = 200; 
@@ -55,6 +60,7 @@ const activeExchangeIds = ALL_POSSIBLE_EXCHANGE_IDS.filter(id => !DISABLED_EXCHA
 
 let botState = 'STOPPED';
 let botLoopIntervalId = null;
+let serverDataRetryCount = 0; // Biến đếm số lần retry cho kết nối server dữ liệu
 
 const exchanges = {};
 activeExchangeIds.forEach(id => {
@@ -178,7 +184,7 @@ async function getExchangeSpecificSymbol(exchange, rawCoinSymbol) {
     return null; 
 }
 
-
+// Hàm fetchDataFromServer được sửa đổi để có cơ chế retry và dừng bot
 async function fetchDataFromServer() {
     try {
         const response = await fetch(SERVER_DATA_URL);
@@ -186,12 +192,30 @@ async function fetchDataFromServer() {
             throw new Error(`HTTP error! status: ${response.status}`);
         }
         const data = await response.json();
+        if (serverDataRetryCount > 0) {
+            safeLog('log', `[BOT] ✅ Kết nối lại với server dữ liệu thành công sau ${serverDataRetryCount} lần thử lại.`);
+        }
+        serverDataRetryCount = 0; // Reset số lần retry khi kết nối thành công
         return data;
     } catch (error) {
-        safeLog('error', `[BOT] ❌ Lỗi khi lấy dữ liệu từ server: ${error.message}`, error);
-        return null;
+        safeLog('error', `[BOT] ❌ Lỗi khi lấy dữ liệu từ server: ${error.message}`);
+        
+        serverDataRetryCount++;
+        if (serverDataRetryCount <= MAX_SERVER_DATA_RETRIES) {
+            safeLog('warn', `[BOT] Đang thử lại kết nối với server dữ liệu (lần ${serverDataRetryCount}/${MAX_SERVER_DATA_RETRIES})...`);
+            // Thay vì sleep ở đây, chúng ta sẽ dựa vào DATA_FETCH_INTERVAL_SECONDS và logic trong mainBotLoop
+            // để đảm bảo bot không bị blocking quá lâu và có thể dừng bot nếu cần.
+            // Thời gian chờ 5 phút sẽ được xử lý bằng cách bot không fetch lại ngay lập tức
+            // mà sẽ chờ vòng lặp tiếp theo của DATA_FETCH_INTERVAL_SECONDS (5 giây)
+            // và kiểm tra lại `serverDataRetryCount` trước khi thực hiện hành động.
+        } else {
+            safeLog('error', `[BOT] ❌ Đã hết số lần thử lại kết nối với server dữ liệu (${MAX_SERVER_DATA_RETRIES} lần). Đang dừng bot.`);
+            stopBot(); // Dừng bot nếu đã hết số lần thử lại
+        }
+        return null; // Trả về null nếu có lỗi hoặc đang trong quá trình retry
     }
 }
+
 
 async function updateBalances() {
     safeLog('log', '[BOT] 🔄 Cập nhật số dư từ các sàn...');
@@ -207,7 +231,7 @@ async function updateBalances() {
 
             const accountBalance = await exchange.fetchBalance({ 'type': 'future' });
             const usdtFreeBalance = accountBalance.free?.USDT || 0;
-            const usdtTotalBalance = accountBalance.total?.USDT || 0;
+            const usdtTotalBalance = accountBalance.balance?.USDT || 0; // Dùng 'balance' cho tổng số dư bao gồm cả đã dùng
 
             balances[id].available = usdtFreeBalance;
             balances[id].total = usdtTotalBalance;
@@ -219,7 +243,7 @@ async function updateBalances() {
         }
     }
     balances.totalOverall = currentTotalOverall;
-    safeLog('log', `[BOT] Tổng số dư khả dụng trên tất cả các sàn (có thể bao gồm âm): ${currentTotalOverall.toFixed(2)} USDT.`);
+    safeLog('log', `[BOT] Tổng số dư khả dụng trên tất cả các sàn: ${currentTotalOverall.toFixed(2)} USDT.`);
     if (initialTotalBalance === 0) {
         initialTotalBalance = currentTotalOverall;
     }
@@ -756,6 +780,7 @@ async function closeTradesAndCalculatePnL() {
 }
 
 let serverDataGlobal = null;
+let lastServerDataFetchAttempt = 0; // Thêm biến để theo dõi thời gian fetch cuối cùng
 
 async function mainBotLoop() {
     if (botLoopIntervalId) clearTimeout(botLoopIntervalId);
@@ -768,12 +793,14 @@ async function mainBotLoop() {
     const now = new Date();
     const currentMinute = now.getUTCMinutes();
     const currentSecond = now.getUTCSeconds();
+    const currentTimeMs = now.getTime();
 
     const minuteAligned = Math.floor(now.getTime() / (60 * 1000));
 
-    if (currentSecond % DATA_FETCH_INTERVAL_SECONDS === 0 && LAST_ACTION_TIMESTAMP.dataFetch !== currentSecond) {
-        LAST_ACTION_TIMESTAMP.dataFetch = currentSecond;
-
+    // Logic fetch dữ liệu với cơ chế retry dựa trên thời gian
+    if (currentTimeMs - lastServerDataFetchAttempt >= SERVER_DATA_RETRY_DELAY_MS || lastServerDataFetchAttempt === 0) {
+        lastServerDataFetchAttempt = currentTimeMs; // Cập nhật thời gian thử lại
+        safeLog('log', '[BOT_LOOP] Bắt đầu (hoặc thử lại) lấy dữ liệu từ server...');
         const fetchedData = await fetchDataFromServer();
         if (fetchedData) {
             serverDataGlobal = fetchedData;
@@ -781,7 +808,9 @@ async function mainBotLoop() {
         }
     }
 
-    if (currentMinute === 50 && currentSecond >= 0 && currentSecond < 5 && botState === 'RUNNING' && !currentTradeDetails && !currentSelectedOpportunityForExecution) {
+
+    // Logic chọn cơ hội vào phút 59, từ giây 0 đến giây 4
+    if (currentMinute === 59 && currentSecond >= 0 && currentSecond < 5 && botState === 'RUNNING' && !currentTradeDetails && !currentSelectedOpportunityForExecution) {
         if (LAST_ACTION_TIMESTAMP.selectionTime !== minuteAligned) {
             LAST_ACTION_TIMESTAMP.selectionTime = minuteAligned;
 
@@ -827,7 +856,7 @@ async function mainBotLoop() {
         }
     }
 
-    // Sửa: Mở lệnh lúc 59 phút 30s
+    // Mở lệnh lúc 59 phút 30s
     if (currentMinute === 59 && currentSecond >= 30 && currentSecond < 32 && botState === 'RUNNING' && currentSelectedOpportunityForExecution && !currentTradeDetails) {
         if (LAST_ACTION_TIMESTAMP.tradeExecution !== minuteAligned) {
             LAST_ACTION_TIMESTAMP.tradeExecution = minuteAligned;
@@ -874,6 +903,8 @@ function startBot() {
     if (botState === 'STOPPED') {
         safeLog('log', '[BOT] ▶️ Khởi động Bot...');
         botState = 'RUNNING';
+        serverDataRetryCount = 0; // Reset retry count khi khởi động bot
+        lastServerDataFetchAttempt = 0; // Reset thời gian fetch
         updateBalances().then(() => {
             safeLog('log', '[BOT] Đã cập nhật số dư ban đầu. Bắt đầu vòng lặp bot.');
             mainBotLoop();
@@ -895,6 +926,8 @@ function stopBot() {
             botLoopIntervalId = null;
         }
         botState = 'STOPPED';
+        serverDataRetryCount = 0; // Reset retry count khi dừng bot
+        lastServerDataFetchAttempt = 0; // Reset thời gian fetch
         safeLog('log', '[BOT] Bot đã dừng thành công.');
         return true;
     }
@@ -934,7 +967,8 @@ const botServer = http.createServer((req, res) => {
             cumulativePnl: cumulativePnl,
             tradeHistory: tradeHistory,
             currentSelectedOpportunity: bestPotentialOpportunityForDisplay,
-            currentTradeDetails: displayCurrentTradeDetails
+            currentTradeDetails: displayCurrentTradeDetails,
+            serverDataRetryCount: serverDataRetryCount // Thêm số lần retry hiện tại vào status
         };
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify(statusData));
