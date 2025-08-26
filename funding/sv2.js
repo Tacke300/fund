@@ -20,7 +20,6 @@ const PORT = 5005;
 // ----- CẤU HÌNH -----
 const EXCHANGE_IDS = ['binanceusdm', 'bingx', 'okx', 'bitget'];
 const FUNDING_DIFFERENCE_THRESHOLD = 0.00001;
-// THAY ĐỔI 1: Sửa điều kiện lên bảng 1 thành 5
 const MINIMUM_PNL_THRESHOLD = 5; 
 const IMMINENT_THRESHOLD_MINUTES = 15;
 
@@ -34,9 +33,13 @@ const BINGX_SINGLE_REQUEST_DELAY_MS = 1000;
 
 const DELAY_BEFORE_BINGX_MS = 60000; // 60 giây delay trước khi BingX bắt đầu lấy dữ liệu
 
-// Cấu hình cập nhật BingX ưu tiên
+// Cấu hình cập nhật BingX ưu tiên (5 phút)
 const BINGX_PRIORITY_UPDATE_INTERVAL_MINUTES = 5; // Cập nhật ưu tiên mỗi 5 phút
 const BINGX_PRIORITY_UPDATE_COOLDOWN_MS = 30 * 1000; // Cooldown cho các request liên tục trong cập nhật ưu tiên
+
+// Cấu hình cập nhật BingX siêu ưu tiên (phút 55-58)
+const BINGX_SUPER_PRIORITY_WINDOW_START_MINUTE = 55; // Bắt đầu từ phút này
+const BINGX_SUPER_PRIORITY_WINDOW_END_MINUTE = 59; // Kết thúc trước phút này (tức là phút 58 là cuối cùng)
 
 // ----- BIẾN TOÀN CỤC -----
 let leverageCache = {};
@@ -80,46 +83,30 @@ EXCHANGE_IDS.forEach(id => {
 });
 
 
-// ----- BIẾN TRẠNG THÁI MỚI -----
-let isBingxPriorityUpdateActive = false; // Biến cờ để kiểm soát khi cập nhật ưu tiên BingX đang chạy
+// ----- BIẾN TRẠNG THÁI MỚI VÀ ĐIỀU CHỈNH -----
+let isBingxPriorityUpdateActive = false;     // Biến cờ cho cập nhật ưu tiên 5 phút của BingX
+let isBingxSuperPriorityUpdateActive = false; // Biến cờ cho cập nhật ưu tiên cao (phút 55-58)
 let bingxContinuousLoopTimeoutId = null;
 let bingxPriorityLoopTimeoutId = null;
-let lastBingxFullUpdateStartTime = null; // Thời gian bắt đầu vòng cập nhật đầy đủ BingX cuối cùng
-let bingxNextPriorityUpdateTime = 0; // Thời điểm tiếp theo cho cập nhật ưu tiên BingX
+let bingxSuperPriorityLoopTimeoutId = null; // ID timeout cho vòng lặp siêu ưu tiên
+let lastBingxFullUpdateStartTime = null; 
+let bingxNextPriorityUpdateTime = 0; 
 
 
-// ----- HÀM HỖ TRỢ CHUNG (DEFINED BEFORE USE) -----
+// ----- HÀM HỖ TRỢ CHUNG -----
 const cleanSymbol = (symbol) => {
     let cleaned = symbol.toUpperCase();
-    
-    // 1. Loại bỏ hậu tố Bitget WS (dù không còn dùng WS để lấy funding, symbol có thể vẫn có dạng này)
     cleaned = cleaned.replace('_UMCBL', ''); 
-
-    // 2. Xử lý các ký tự phân tách phổ biến (/, :, _)
     cleaned = cleaned.replace(/[\/:_]/g, ''); 
-    
-    // 3. Xử lý định dạng COIN-USDT của BingX (ví dụ: chuyển BTC-USDT thành BTCUSDT)
     cleaned = cleaned.replace(/-USDT$/, 'USDT'); 
-
-    // 4. Loại bỏ các chữ số ở đầu symbol (ví dụ: 1000PEPEUSDT -> PEPEUSDT)
     cleaned = cleaned.replace(/^\d+/, ''); 
-
-    // 5. Loại bỏ các chữ số nằm trong phần tên coin ngay trước 'USDT' (ví dụ: OMNI1USDT -> OMNIUSDT, BTC2USDT -> BTCUSDT)
-    // Regex này tìm kiếm phần không phải chữ số (coin name), sau đó là các chữ số, rồi đến USDT.
-    // Nó sẽ thay thế (chữ số + USDT) bằng chỉ USDT, giữ lại phần tên coin.
     cleaned = cleaned.replace(/(\D+)\d+USDT$/, '$1USDT'); 
-
-    // 6. Đảm bảo symbol kết thúc bằng một 'USDT' duy nhất và loại bỏ mọi thứ sau nó
-    // Ví dụ: FOOUSDTUSDT -> FOOUSDT, PEPEUSDT_PERP -> PEPEUSDT, OMNIUSDT1 -> OMNIUSDT
     const usdtIndex = cleaned.indexOf('USDT');
     if (usdtIndex !== -1) {
-        // Lấy phần trước 'USDT' và nối với 'USDT'
         cleaned = cleaned.substring(0, usdtIndex) + 'USDT';
     } else if (symbol.toUpperCase().includes('USDT') && !cleaned.endsWith('USDT')) { 
-        // Fallback: Nếu symbol gốc có USDT nhưng bị mất trong quá trình clean (ví dụ: ETHUSD.P), hãy thêm lại
         cleaned = cleaned + 'USDT';
     }
-
     return cleaned;
 };
 
@@ -195,9 +182,9 @@ async function syncBinanceServerTime() {
         const binanceServerTime = parsedData.serverTime;
         const localTime = Date.now();
         binanceServerTimeOffset = binanceServerTime - localTime;
-        console.log(`[TIME SYNC] ✅ Đồng bộ thời gian Binance. Lệch: ${binanceServerTimeOffset} ms.`);
+        console.log(`[TIME_SYNC] ✅ Đồng bộ thời gian Binance. Lệch: ${binanceServerTimeOffset} ms.`);
     } catch (error) {
-        console.error(`[TIME SYNC] ❌ Lỗi đồng bộ thời gian Binance: ${error.msg || error.message}.`);
+        console.error(`[TIME_SYNC] ❌ Lỗi đồng bộ thời gian Binance: ${error.msg || error.message}.`);
         binanceServerTimeOffset = 0;
         throw error;
     }
@@ -239,7 +226,7 @@ async function callSignedBinanceAPI(fullEndpointPath, method = 'GET', params = {
         const rawData = await makeHttpRequest(method, BINANCE_BASE_HOST, requestPath, headers, requestBody);
         return JSON.parse(rawData);
     } catch (error) {
-        console.error(`[BINANCE API] Lỗi ký API Binance: ${error.code || 'UNKNOWN'} - ${error.msg || error.message}. Path: ${requestPath}`);
+        console.error(`[BINANCE_API] Lỗi ký API Binance: ${error.code || 'UNKNOWN'} - ${error.msg || error.message}. Path: ${requestPath}`);
         if (error.code === 400 && error.rawResponse && error.rawResponse.includes('-2015')) {
             console.error("  -> LỖI XÁC THỰC! Kiểm tra API Key/Secret và quyền Futures Binance.");
         } else if (error.code === 400 && error.rawResponse && error.rawResponse.includes('-1021')) {
@@ -400,8 +387,6 @@ async function getBingxFundingRateDirect(symbol) {
 // Hàm mới để lấy funding time từ Bitget Native REST API (đã khôi phục)
 async function fetchBitgetFundingTimeNativeApi(apiSymbol) {
     try {
-        // Bitget API symbol cho funding-time thường có dạng INST_ID (e.g., BTCUSDT_UMCBL)
-        // cleanSymbol đã loại bỏ _UMCBL, nên ta cần thêm lại nếu API gốc cần
         const formattedApiSymbol = apiSymbol.includes('_UMCBL') ? apiSymbol : `${apiSymbol}_UMCBL`;
         const apiPath = `/api/mix/v1/market/funding-time?symbol=${encodeURIComponent(formattedApiSymbol)}`;
         const rawData = await makeHttpRequest('GET', BITGET_NATIVE_REST_HOST, apiPath);
@@ -461,7 +446,7 @@ async function updateLeverageForExchange(id, symbolsToUpdate = null) {
                         const firstBracket = item.brackets.find(b => b.bracket === 1) || item.brackets[0];
                         const maxLeverage = parseInt(firstBracket.initialLeverage, 10);
                         if (!isNaN(maxLeverage) && maxLeverage > 0) {
-                            currentFetchedLeverageDataMap[cleanedSym] = maxLeverage; // Key đã clean
+                            currentFetchedLeverageDataMap[cleanedSym] = maxLeverage; 
                             successCount++;
                         }
                     }
@@ -494,13 +479,13 @@ async function updateLeverageForExchange(id, symbolsToUpdate = null) {
 
             for (const chunk of marketChunks) {
                 const chunkPromises = chunk.map(async market => {
-                    const formattedSymbolForAPI = market.symbol.replace('/', '-').replace(':USDT', ''); // Format API request
+                    const formattedSymbolForAPI = market.symbol.replace('/', '-').replace(':USDT', ''); 
                     const parsedMaxLeverage = await fetchBingxMaxLeverage(formattedSymbolForAPI);
                     fetchedCount++;
                     debugRawLeverageResponses[id].status = `Đang tải đòn bẩy BingX (${fetchedCount}/${totalSymbols})`;
                     debugRawLeverageResponses[id].timestamp = new Date();
                     if (parsedMaxLeverage !== null && parsedMaxLeverage > 0) {
-                        const cleanedSymForCache = cleanSymbol(market.symbol); // Clean symbol for cache key
+                        const cleanedSymForCache = cleanSymbol(market.symbol); 
                         currentFetchedLeverageDataMap[cleanedSymForCache] = parsedMaxLeverage; 
                         successCount++;
                     } else {
@@ -607,11 +592,9 @@ async function performFullLeverageUpdate() {
     const nonBingxExchangeIds = EXCHANGE_IDS.filter(id => id !== 'bingx');
     const bingxExchangeId = EXCHANGE_IDS.find(id => id === 'bingx');
 
-    // Giai đoạn 1: Lấy dữ liệu đòn bẩy cho các sàn non-BingX song song - CHỜ HOÀN TẤT
     const nonBingxLeveragePromises = nonBingxExchangeIds.map(id => updateLeverageForExchange(id, null));
     const nonBingxResults = await Promise.all(nonBingxLeveragePromises);
     
-    // Cập nhật trạng thái và cache cho các sàn non-BingX ngay sau khi chúng hoàn tất
     nonBingxResults.forEach(res => {
         if (res) {
             debugRawLeverageResponses[res.id].status = res.status;
@@ -620,7 +603,6 @@ async function performFullLeverageUpdate() {
         }
     });
 
-    // Giai đoạn 2: Bắt đầu lấy dữ liệu BingX trong nền (KHÔNG DÙNG AWAIT TRỰC TIẾP)
     if (bingxExchangeId) {
         console.log(`[LEVERAGE_SCHEDULER] ⏳ Bắt đầu cập nhật đòn bẩy BingX trong nền sau ${DELAY_BEFORE_BINGX_MS / 1000} giây.`);
         setTimeout(async () => {
@@ -683,7 +665,6 @@ async function performTargetedLeverageUpdate() {
 }
 
 
-// Hàm mới để lấy danh sách các symbol Futures hợp lệ từ Bitget API
 async function fetchBitgetValidFuturesSymbols() {
     console.log('[BITGET_SYMBOLS] 🔄 Đang tải danh sách symbol Futures hợp lệ từ Bitget...');
     try {
@@ -739,6 +720,42 @@ function isFundingUpdatePaused() {
     return utcMinute === 59 || utcMinute === 0 || utcMinute === 1 || utcMinute === 2;
 }
 
+/**
+ * Kiểm tra xem có đang trong cửa sổ cập nhật siêu ưu tiên BingX (phút 55 đến phút 59 UTC) hay không.
+ * @returns {boolean} True nếu đang trong cửa sổ, ngược lại là false.
+ */
+function isBingxInSuperPriorityWindow() {
+    const now = new Date();
+    const utcMinute = now.getUTCMinutes();
+    return utcMinute >= BINGX_SUPER_PRIORITY_WINDOW_START_MINUTE && utcMinute < BINGX_SUPER_PRIORITY_WINDOW_END_MINUTE;
+}
+
+/**
+ * Tính toán độ trễ để đợi đến đầu phút 55 UTC tiếp theo.
+ * @returns {number} Thời gian chờ (ms).
+ */
+function calculateDelayToNextBingxSuperPriorityWindow() {
+    const now = new Date();
+    const currentMinute = now.getUTCMinutes();
+    const currentSecond = now.getUTCSeconds();
+    const currentMs = now.getUTCMilliseconds();
+
+    let delayMs;
+
+    if (currentMinute < BINGX_SUPER_PRIORITY_WINDOW_START_MINUTE) {
+        // Vẫn trong cùng giờ, trước phút 55
+        delayMs = (BINGX_SUPER_PRIORITY_WINDOW_START_MINUTE - currentMinute) * 60 * 1000 
+                  - currentSecond * 1000 - currentMs;
+    } else {
+        // Đã qua phút 55 trong giờ hiện tại, hoặc đang ở phút 55 trở đi
+        // Lập lịch cho phút 55 của giờ tiếp theo
+        delayMs = (60 - currentMinute + BINGX_SUPER_PRIORITY_WINDOW_START_MINUTE) * 60 * 1000 
+                  - currentSecond * 1000 - currentMs;
+    }
+    // Đảm bảo có độ trễ tối thiểu để tránh vòng lặp tức thời trên cạnh phút
+    return Math.max(1000, delayMs); 
+}
+
 
 /**
  * Cập nhật funding rates cho các sàn non-BingX.
@@ -752,12 +769,11 @@ async function fetchFundingRatesForAllExchanges() {
     console.log('[DATA] Bắt đầu làm mới funding rates cho các sàn non-BingX...');
 
     const nonBingxExchangeIds = EXCHANGE_IDS.filter(id => id !== 'bingx');
-    const nonBingxResultsSummary = []; // Để lưu tóm tắt kết quả của các sàn non-BingX
+    const nonBingxResultsSummary = []; 
 
     const nonBingxFundingPromises = nonBingxExchangeIds.map(async (id) => {
         let processedRates = {};
         let currentStatus = 'Đang tải funding...';
-        let currentTimestamp = new Date();
         let currentError = null;
         let successCount = 0; 
 
@@ -766,7 +782,6 @@ async function fetchFundingRatesForAllExchanges() {
             const exchange = exchanges[id];
             const fundingRatesRaw = await exchange.fetchFundingRates();
             
-            // Lấy danh sách symbol hợp lệ để lọc cho Bitget
             if (id === 'bitget' && bitgetValidFuturesSymbolSet.size === 0) {
                 await fetchBitgetValidFuturesSymbols();
                 if (bitgetValidFuturesSymbolSet.size === 0) {
@@ -776,7 +791,6 @@ async function fetchFundingRatesForAllExchanges() {
             }
 
             for (const rate of Object.values(fundingRatesRaw)) {
-                // LỌC CHUNG: Chỉ lấy các cặp SWAP/PERPETUAL FUTURES VÀ CHỨA 'USDT'
                 if (rate.type && rate.type !== 'swap' && rate.type !== 'future') {
                      continue;
                 }
@@ -793,29 +807,24 @@ async function fetchFundingRatesForAllExchanges() {
                 let fundingRateValue = rate.fundingRate; 
                 let fundingTimestampValue = rate.fundingTimestamp || rate.nextFundingTime; 
 
-                // Logic cho Bitget: chỉ sử dụng API gốc
                 if (id === 'bitget') {
                     const bitgetApiSymbol = cleanSymbol(rate.symbol); 
-                    // Thêm _UMCBL nếu cleanSymbol đã loại bỏ để phù hợp với API Bitget native
                     const symbolForNativeApi = bitgetApiSymbol.includes('_UMCBL') ? bitgetApiSymbol : `${bitgetApiSymbol}_UMCBL`;
 
-                    // Lọc symbol dựa trên danh sách hợp lệ từ API gốc.
                     if (!bitgetValidFuturesSymbolSet.has(symbolForNativeApi)) {
                         continue; 
                     }
                     
                     const nativeFundingTime = await fetchBitgetFundingTimeNativeApi(bitgetApiSymbol);
                     if (nativeFundingTime !== null) {
-                        fundingTimestampValue = nativeFundingTime; // Ưu tiên thời gian từ Native API
+                        fundingTimestampValue = nativeFundingTime; 
                     } else {
-                        // Nếu Native API không lấy được, fallback về CCXT hoặc tính toán
                         if (!fundingTimestampValue || fundingTimestampValue <= 0) {
-                            fundingTimestampValue = calculateNextStandardFundingTime(); // Fallback cuối cùng
+                            fundingTimestampValue = calculateNextStandardFundingTime(); 
                         }
                     }
                 }
                 
-                // Fallback nếu không tìm thấy nextFundingTime/fundingTimestamp hợp lệ từ API
                 if (!fundingTimestampValue || fundingTimestampValue <= 0) {
                     fundingTimestampValue = calculateNextStandardFundingTime();
                 }
@@ -847,7 +856,7 @@ async function fetchFundingRatesForAllExchanges() {
 
     await Promise.all(nonBingxFundingPromises);
     console.log(`[DATA] ✅ Hoàn tất làm mới funding rates cho các sàn non-BingX: ${nonBingxResultsSummary.join(', ')}. Tính toán cơ hội lần đầu.`);
-    calculateArbitrageOpportunities(); // Tính toán cơ hội sau khi non-BingX hoàn tất
+    calculateArbitrageOpportunities(); 
 }
 
 
@@ -863,7 +872,7 @@ async function performBingxFundingRateUpdateRound() {
     let successCount = 0;
 
     console.log(`[BINGX_CONTINUOUS] 🔄 Bắt đầu vòng cập nhật funding rates BingX đầy đủ...`);
-    lastBingxFullUpdateStartTime = Date.now(); // Ghi nhận thời gian bắt đầu vòng mới
+    lastBingxFullUpdateStartTime = Date.now(); 
 
     try {
         const symbols = await getBingxSymbolsDirect(); 
@@ -874,12 +883,14 @@ async function performBingxFundingRateUpdateRound() {
         }
 
         for (const chunk of marketChunks) {
-            // Nếu có cập nhật ưu tiên BingX đang chạy, tạm dừng vòng lặp này.
             if (isBingxPriorityUpdateActive) {
-                console.log(`[BINGX_CONTINUOUS] ⏸️ Tạm dừng vòng cập nhật BingX đầy đủ vì cập nhật ưu tiên đang chạy.`);
+                console.log(`[BINGX_CONTINUOUS] ⏸️ Tạm dừng vòng cập nhật BingX đầy đủ vì cập nhật ưu tiên (5 phút) đang chạy.`);
                 throw new Error('Priority update active, pausing full BingX update.');
             }
-            // Nếu đang trong thời gian tạm dừng chung, dừng vòng lặp này.
+            if (isBingxSuperPriorityUpdateActive) {
+                console.log(`[BINGX_CONTINUOUS] ⏸️ Tạm dừng vòng cập nhật BingX đầy đủ vì cập nhật siêu ưu tiên đang chạy.`);
+                throw new Error('Super priority update active, pausing full BingX update.');
+            }
             if (isFundingUpdatePaused()) {
                 console.log(`[BINGX_CONTINUOUS] ⏸️ Tạm dừng vòng cập nhật BingX đầy đủ do tạm dừng chung (phút 59-2 UTC).`);
                 throw new Error('Global update paused, pausing full BingX update.');
@@ -923,22 +934,21 @@ async function performBingxFundingRateUpdateRound() {
         }
 
     } catch (e) {
-        if (e.message.includes('Priority update active') || e.message.includes('Global update paused')) {
+        if (e.message.includes('Priority update active') || e.message.includes('Super priority update active') || e.message.includes('Global update paused')) {
             console.log(`[BINGX_CONTINUOUS] Vòng cập nhật BingX đầy đủ đã tạm dừng.`);
-            // Do not log as an error if it's a controlled pause
         } else {
             let errorMessage = `Lỗi khi lấy funding từ ${bingxExchangeId.toUpperCase()}: ${e.message}.`;
             console.error(`[BINGX_CONTINUOUS] ❌ ${bingxExchangeId.toUpperCase()}: ${errorMessage}`);
             currentStatus = `Funding thất bại (lỗi: ${e.code || 'UNKNOWN'})`;
             currentError = { code: e.code, msg: e.message };
         }
-        successCount = 0; // Reset successCount if there was an error or pause
+        successCount = 0; 
     } finally {
         exchangeData = { ...exchangeData, [bingxExchangeId]: { rates: processedRates } };
         debugRawLeverageResponses[bingxExchangeId].status = currentStatus;
         debugRawLeverageResponses[bingxExchangeId].timestamp = new Date();
         debugRawLeverageResponses[bingxExchangeId].error = currentError;
-        calculateArbitrageOpportunities(); // Tính toán lại cơ hội sau khi BingX data được cập nhật
+        calculateArbitrageOpportunities(); 
         return successCount;
     }
 }
@@ -948,22 +958,25 @@ async function performBingxFundingRateUpdateRound() {
  * Vòng lặp liên tục để cập nhật funding rates của BingX.
  */
 async function bingxContinuousFundingLoop() {
-    clearTimeout(bingxContinuousLoopTimeoutId); // Xóa timeout cũ nếu có
+    clearTimeout(bingxContinuousLoopTimeoutId); 
 
-    const bingxExchangeId = 'bingx';
     const now = Date.now();
 
-    // 1. Kiểm tra tạm dừng chung
     if (isFundingUpdatePaused()) {
         console.log('[BINGX_LOOP] ⏸️ BingX Continuous Loop: Tạm dừng từ phút 59 đến phút 2 UTC. Kiểm tra lại sau 30 giây.');
-        bingxContinuousLoopTimeoutId = setTimeout(bingxContinuousFundingLoop, 30 * 1000); // Kiểm tra lại sau 30 giây
+        bingxContinuousLoopTimeoutId = setTimeout(bingxContinuousFundingLoop, 30 * 1000); 
         return;
     }
 
-    // 2. Kiểm tra nếu cập nhật ưu tiên đang chạy
     if (isBingxPriorityUpdateActive) {
-        console.log('[BINGX_LOOP] ⏳ BingX Continuous Loop: Cập nhật ưu tiên đang chạy. Đợi 10 giây...');
-        bingxContinuousLoopTimeoutId = setTimeout(bingxContinuousFundingLoop, 10 * 1000); // Đợi 10 giây và kiểm tra lại
+        console.log('[BINGX_LOOP] ⏳ BingX Continuous Loop: Cập nhật ưu tiên (5 phút) đang chạy. Đợi 10 giây...');
+        bingxContinuousLoopTimeoutId = setTimeout(bingxContinuousFundingLoop, 10 * 1000); 
+        return;
+    }
+
+    if (isBingxSuperPriorityUpdateActive) {
+        console.log('[BINGX_LOOP] ⏳ BingX Continuous Loop: Cập nhật siêu ưu tiên đang chạy. Đợi 10 giây...');
+        bingxContinuousLoopTimeoutId = setTimeout(bingxContinuousFundingLoop, 10 * 1000); 
         return;
     }
     
@@ -979,40 +992,42 @@ async function bingxContinuousFundingLoop() {
     } catch (error) {
         console.error(`[BINGX_LOOP] ❌ Lỗi trong vòng lặp cập nhật BingX đầy đủ: ${error.message}`);
     } finally {
-        // Luôn lập lịch cho vòng lặp tiếp theo, ngay lập tức nếu không có lỗi blocking
         bingxContinuousLoopTimeoutId = setTimeout(bingxContinuousFundingLoop, 0); 
     }
 }
 
 
 /**
- * Lập lịch và thực hiện cập nhật funding rate ưu tiên cho BingX.
+ * Lập lịch và thực hiện cập nhật funding rate ưu tiên (5 phút) cho BingX.
  */
 async function bingxPriorityUpdateScheduler() {
-    clearTimeout(bingxPriorityLoopTimeoutId); // Xóa timeout cũ nếu có
+    clearTimeout(bingxPriorityLoopTimeoutId); 
 
-    const bingxExchangeId = 'bingx';
     const now = Date.now();
 
-    // 1. Kiểm tra tạm dừng chung
     if (isFundingUpdatePaused()) {
         console.log('[BINGX_PRIORITY] ⏸️ Tạm dừng cập nhật ưu tiên BingX từ phút 59 đến phút 2 UTC. Kiểm tra lại sau 30 giây.');
-        bingxNextPriorityUpdateTime = now + 30 * 1000; // Đặt thời gian kiểm tra lại
+        bingxNextPriorityUpdateTime = now + 30 * 1000; 
         bingxPriorityLoopTimeoutId = setTimeout(bingxPriorityUpdateScheduler, 30 * 1000);
         return;
     }
 
-    // Kiểm tra xem đã đến lúc chạy cập nhật ưu tiên chưa
+    if (isBingxSuperPriorityUpdateActive) {
+        console.log('[BINGX_PRIORITY] ⏳ Cập nhật ưu tiên (5 phút) tạm dừng vì siêu ưu tiên đang chạy. Kiểm tra lại sau 10 giây.');
+        bingxPriorityLoopTimeoutId = setTimeout(bingxPriorityUpdateScheduler, 10 * 1000);
+        return;
+    }
+
     if (now < bingxNextPriorityUpdateTime) {
         const remainingDelay = bingxNextPriorityUpdateTime - now;
-        console.log(`[BINGX_PRIORITY] ⏳ Chờ đến lượt cập nhật ưu tiên BingX. Còn ${Math.ceil(remainingDelay / 1000)} giây.`);
+        console.log(`[BINGX_PRIORITY] ⏳ Chờ đến lượt cập nhật ưu tiên BingX (5 phút). Còn ${Math.ceil(remainingDelay / 1000)} giây.`);
         bingxPriorityLoopTimeoutId = setTimeout(bingxPriorityUpdateScheduler, remainingDelay);
         return;
     }
 
-    // Đặt thời gian cho lần chạy tiếp theo
     bingxNextPriorityUpdateTime = now + BINGX_PRIORITY_UPDATE_INTERVAL_MINUTES * 60 * 1000;
 
+    const bingxExchangeId = 'bingx';
     const prioritySymbols = arbitrageOpportunities
         .filter(op => op.details.shortExchange === bingxExchangeId.replace('usdm', '') || op.details.longExchange === bingxExchangeId.replace('usdm', ''))
         .filter(op => op.estimatedPnl >= MINIMUM_PNL_THRESHOLD)
@@ -1021,24 +1036,22 @@ async function bingxPriorityUpdateScheduler() {
     const uniquePrioritySymbols = Array.from(new Set(prioritySymbols));
 
     if (uniquePrioritySymbols.length === 0) {
-        console.log('[BINGX_PRIORITY] Không có coin BingX nào đủ điều kiện ưu tiên. Đặt lịch chạy tiếp theo.');
+        console.log('[BINGX_PRIORITY] Không có coin BingX nào đủ điều kiện ưu tiên (5 phút). Đặt lịch chạy tiếp theo.');
         bingxPriorityLoopTimeoutId = setTimeout(bingxPriorityUpdateScheduler, BINGX_PRIORITY_UPDATE_INTERVAL_MINUTES * 60 * 1000);
         return;
     }
 
-    console.log(`\n[BINGX_PRIORITY] 🔥 Bắt đầu cập nhật ưu tiên BingX cho ${uniquePrioritySymbols.length} coin: ${uniquePrioritySymbols.join(', ')}`);
-    isBingxPriorityUpdateActive = true; // Bật cờ ưu tiên
+    console.log(`\n[BINGX_PRIORITY] 🔥 Bắt đầu cập nhật ưu tiên (5 phút) BingX cho ${uniquePrioritySymbols.length} coin: ${uniquePrioritySymbols.join(', ')}`);
+    isBingxPriorityUpdateActive = true; 
 
     let successfulPriorityUpdates = 0;
     try {
         const symbolsToFetchInBatch = uniquePrioritySymbols; 
         
-        // Chia thành các lô nhỏ hơn để tránh rate limit nếu số lượng coin ưu tiên lớn
         const batchSize = BINGX_CONCURRENT_FETCH_LIMIT; 
         for (let i = 0; i < symbolsToFetchInBatch.length; i += batchSize) {
             const batch = symbolsToFetchInBatch.slice(i, i + batchSize);
             const batchPromises = batch.map(async (cleanSym) => {
-                // BingX direct API dùng symbol gốc như BTC-USDT
                 const bingxMarket = Object.values(exchanges[bingxExchangeId].markets).find(m => cleanSymbol(m.symbol) === cleanSym);
                 if (!bingxMarket) {
                     console.warn(`[BINGX_PRIORITY] ⚠️ Không tìm thấy market BingX cho symbol sạch: ${cleanSym}`);
@@ -1061,21 +1074,115 @@ async function bingxPriorityUpdateScheduler() {
                 }
             });
             await Promise.allSettled(batchPromises);
-            // Thêm độ trễ giữa các lô để giảm nguy cơ rate limit
             if (i + batchSize < symbolsToFetchInBatch.length) {
                 await sleep(BINGX_PRIORITY_UPDATE_COOLDOWN_MS); 
             }
         }
 
-        console.log(`[BINGX_PRIORITY] ✅ Hoàn tất cập nhật ưu tiên BingX cho ${successfulPriorityUpdates} coin.`);
+        console.log(`[BINGX_PRIORITY] ✅ Hoàn tất cập nhật ưu tiên (5 phút) BingX cho ${successfulPriorityUpdates} coin.`);
     } catch (error) {
-        console.error(`[BINGX_PRIORITY] ❌ Lỗi trong quá trình cập nhật ưu tiên BingX: ${error.message}`);
+        console.error(`[BINGX_PRIORITY] ❌ Lỗi trong quá trình cập nhật ưu tiên (5 phút) BingX: ${error.message}`);
     } finally {
-        isBingxPriorityUpdateActive = false; // Tắt cờ ưu tiên
-        calculateArbitrageOpportunities(); // Tính toán lại cơ hội sau cập nhật ưu tiên
-        // Lập lịch cho lần chạy tiếp theo của bộ lập lịch ưu tiên
+        isBingxPriorityUpdateActive = false; 
+        calculateArbitrageOpportunities(); 
         const delay = bingxNextPriorityUpdateTime - now;
         bingxPriorityLoopTimeoutId = setTimeout(bingxPriorityUpdateScheduler, Math.max(0, delay));
+    }
+}
+
+
+/**
+ * Vòng lặp liên tục để cập nhật funding rates siêu ưu tiên cho BingX trong cửa sổ phút 55-58.
+ */
+async function bingxSuperPriorityUpdateLoop() {
+    clearTimeout(bingxSuperPriorityLoopTimeoutId); 
+    const bingxExchangeId = 'bingx';
+    const now = Date.now();
+
+    // 1. Kiểm tra cửa sổ thời gian
+    if (!isBingxInSuperPriorityWindow()) {
+        if (isBingxSuperPriorityUpdateActive) { // Nếu vừa kết thúc cửa sổ
+            console.log(`[BINGX_SUPER_PRIORITY] 🏁 Cửa sổ cập nhật siêu ưu tiên BingX đã đóng.`);
+            isBingxSuperPriorityUpdateActive = false; 
+        }
+        const delay = calculateDelayToNextBingxSuperPriorityWindow();
+        console.log(`[BINGX_SUPER_PRIORITY] 😴 Đợi đến phút ${BINGX_SUPER_PRIORITY_WINDOW_START_MINUTE} để bắt đầu lại. Còn ${Math.ceil(delay / 1000)} giây.`);
+        bingxSuperPriorityLoopTimeoutId = setTimeout(bingxSuperPriorityUpdateLoop, delay);
+        return;
+    }
+
+    // 2. Kiểm tra tạm dừng chung
+    if (isFundingUpdatePaused()) {
+        console.log('[BINGX_SUPER_PRIORITY] ⏸️ Tạm dừng siêu ưu tiên BingX từ phút 59 đến phút 2 UTC. Kiểm tra lại sau 30 giây.');
+        bingxSuperPriorityLoopTimeoutId = setTimeout(bingxSuperPriorityUpdateLoop, 30 * 1000); 
+        return;
+    }
+
+    // Nếu đến đây, chúng ta đang trong cửa sổ siêu ưu tiên và không bị tạm dừng
+    isBingxSuperPriorityUpdateActive = true; 
+
+    const prioritySymbols = arbitrageOpportunities
+        .filter(op => op.details.shortExchange === bingxExchangeId.replace('usdm', '') || op.details.longExchange === bingxExchangeId.replace('usdm', ''))
+        .filter(op => op.estimatedPnl >= MINIMUM_PNL_THRESHOLD)
+        .map(op => op.coin);
+    
+    const uniqueSuperPrioritySymbols = Array.from(new Set(prioritySymbols));
+
+    if (uniqueSuperPrioritySymbols.length === 0) {
+        console.log('[BINGX_SUPER_PRIORITY] Không có coin BingX nào đủ điều kiện siêu ưu tiên. Tiếp tục vòng lặp.');
+        bingxSuperPriorityLoopTimeoutId = setTimeout(bingxSuperPriorityUpdateLoop, 10 * 1000); // Đợi 10s rồi kiểm tra lại
+        return;
+    }
+
+    console.log(`\n[BINGX_SUPER_PRIORITY] 🚀 Bắt đầu vòng cập nhật siêu ưu tiên BingX (${new Date().toLocaleTimeString()}) cho ${uniqueSuperPrioritySymbols.length} coin.`);
+    const startTime = Date.now();
+    let successfulUpdates = 0;
+
+    try {
+        const symbolsToFetchInBatch = uniqueSuperPrioritySymbols;
+        const batchSize = BINGX_CONCURRENT_FETCH_LIMIT; 
+
+        for (let i = 0; i < symbolsToFetchInBatch.length; i += batchSize) {
+            const batch = symbolsToFetchInBatch.slice(i, i + batchSize);
+            const batchPromises = batch.map(async (cleanSym) => {
+                const bingxMarket = Object.values(exchanges[bingxExchangeId].markets).find(m => cleanSymbol(m.symbol) === cleanSym);
+                if (!bingxMarket) {
+                    console.warn(`[BINGX_SUPER_PRIORITY] ⚠️ Không tìm thấy market BingX cho symbol sạch: ${cleanSym}`);
+                    return null;
+                }
+                const formattedSymbolForAPI = bingxMarket.symbol.replace('/', '-').replace(':USDT', '');
+
+                const result = await getBingxFundingRateDirect(formattedSymbolForAPI);
+                if (result && typeof result.fundingRate === 'number' && result.fundingTime) {
+                    const maxLeverageParsed = leverageCache[bingxExchangeId]?.[cleanSym] || null;
+                    exchangeData[bingxExchangeId].rates[cleanSym] = {
+                        symbol: cleanSym,
+                        fundingRate: result.fundingRate,
+                        fundingTimestamp: result.fundingTime,
+                        maxLeverage: maxLeverageParsed
+                    };
+                    successfulUpdates++;
+                } else {
+                    console.warn(`[BINGX_SUPER_PRIORITY] ⚠️ Lỗi cập nhật siêu ưu tiên funding cho ${cleanSym}.`);
+                }
+            });
+            await Promise.allSettled(batchPromises);
+            // Giảm độ trễ giữa các lô nhỏ hơn trong cửa sổ siêu ưu tiên để tăng tần suất cập nhật
+            if (i + batchSize < symbolsToFetchInBatch.length) {
+                await sleep(BINGX_SINGLE_REQUEST_DELAY_MS); 
+            }
+        }
+
+        const endTime = Date.now();
+        const durationSeconds = ((endTime - startTime) / 1000).toFixed(1);
+        console.log(`[BINGX_SUPER_PRIORITY] ✅ Hoàn tất 1 vòng cập nhật siêu ưu tiên cho ${successfulUpdates} coin. Mất ${durationSeconds} giây.`);
+
+    } catch (error) {
+        console.error(`[BINGX_SUPER_PRIORITY] ❌ Lỗi trong vòng lặp siêu ưu tiên BingX: ${error.message}`);
+    } finally {
+        calculateArbitrageOpportunities(); 
+        // Lập lịch để chạy vòng tiếp theo ngay lập tức nếu vẫn trong cửa sổ
+        bingxSuperPriorityLoopTimeoutId = setTimeout(bingxSuperPriorityUpdateLoop, 0); 
     }
 }
 
@@ -1178,10 +1285,9 @@ function calculateArbitrageOpportunities() {
 }
 
 async function masterLoop() {
-    clearTimeout(loopTimeoutId); // Xóa timeout cũ nếu có
+    clearTimeout(loopTimeoutId); 
     console.log(`\n[MASTER_LOOP] Bắt đầu vòng lặp chính lúc ${new Date().toLocaleTimeString()} (UTC: ${new Date().toUTCString()})...`);
     
-    // Luôn cố gắng đồng bộ thời gian Binance
     try {
         await syncBinanceServerTime();
     } catch (error) {
@@ -1221,9 +1327,9 @@ async function masterLoop() {
 }
 
 function scheduleNextLoop() {
-    clearTimeout(loopTimeoutId); // Đảm bảo chỉ có một timeout chạy
+    clearTimeout(loopTimeoutId); 
     const now = new Date();
-    const delaySeconds = (60 - now.getSeconds() + 5) % 60; // Chạy khoảng 5 giây sau mỗi phút mới
+    const delaySeconds = (60 - now.getSeconds() + 5) % 60; 
     const delayMs = (delaySeconds === 0 ? 60 : delaySeconds) * 1000;
     console.log(`[SCHEDULER] Vòng lặp chính kế tiếp sau ${delaySeconds.toFixed(0)} giây.`);
     loopTimeoutId = setTimeout(masterLoop, delayMs);
@@ -1251,7 +1357,6 @@ const server = http.createServer((req, res) => {
         const responseData = {
             lastUpdated: lastFullUpdateTimestamp,
             arbitrageData: arbitrageOpportunities,
-            // THAY ĐỔI 3: Sửa để gửi toàn bộ đối tượng exchangeData cho frontend
             rawRates: exchangeData, 
             debugRawLeverageResponses: debugRawLeverageResponses
         };
@@ -1281,7 +1386,6 @@ server.listen(PORT, async () => {
     await fetchBitgetValidFuturesSymbols();
     
     // 2. Thực hiện cập nhật đòn bẩy đầy đủ lần đầu tiên để populate leverageCache
-    // Chờ non-BingX hoàn tất, BingX kích hoạt chạy nền
     console.log('[STARTUP] Kích hoạt cập nhật TOÀN BỘ đòn bẩy ban đầu.');
     await performFullLeverageUpdate(); 
 
@@ -1291,11 +1395,14 @@ server.listen(PORT, async () => {
     }
 
     // 3. Bắt đầu các vòng lặp chính
-    masterLoop(); // Bắt đầu vòng lặp cho các sàn non-BingX và cập nhật đòn bẩy
+    masterLoop(); 
 
     // Bắt đầu vòng lặp cập nhật funding rate liên tục cho BingX
     bingxContinuousFundingLoop(); 
 
-    // Lập lịch cho vòng lặp cập nhật funding rate ưu tiên của BingX
+    // Lập lịch cho vòng lặp cập nhật funding rate ưu tiên 5 phút của BingX
     bingxPriorityUpdateScheduler(); 
+
+    // Lập lịch cho vòng lặp cập nhật funding rate siêu ưu tiên của BingX (phút 55-58)
+    bingxSuperPriorityUpdateLoop();
 });
