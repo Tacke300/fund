@@ -1,5 +1,5 @@
 // index.js
-// PHIÊN BẢN SẢN XUẤT - Đã sửa lỗi đọc cấu trúc Spot & Futures
+// PHIÊN BẢN SẢN XUẤT - Cập nhật danh sách coin theo yêu cầu
 
 const http = require("http");
 const https = require("https");
@@ -12,13 +12,12 @@ const { bingxApiKey, bingxApiSecret } = require("./config.js");
 const HOST = "open-api.bingx.com";
 const PORT = 1997;
 
-// DANH SÁCH 5 COIN CỤ THỂ ĐỂ TEST
+// DANH SÁCH COIN MỚI THEO YÊU CẦU CỦA BẠN
 const SYMBOLS_TO_FETCH = [
-    "BTC-USDT",
-    "ETH-USDT",
-    "SOL-USDT",
-    "DOGE-USDT",
-    "XRP-USDT"
+    "RLC-USDT",
+    "BIO-USDT",
+    "WAVE-USDT",
+    "CRO-USDT"
 ];
 
 // === HÀM KÝ HMAC-SHA256 (Chuẩn) ===
@@ -37,7 +36,7 @@ async function apiRequest(path, params = {}) {
         hostname: HOST,
         path: fullPath,
         method: 'GET',
-        headers: { 'X-BX-APIKEY': bingxApiKey, 'User-Agent': 'Node/BingX-Funding-Production-v1.0' },
+        headers: { 'X-BX-APIKEY': bingxApiKey, 'User-Agent': 'Node/BingX-Funding-Production-v1.1' },
         timeout: 15000
     };
 
@@ -61,13 +60,11 @@ async function apiRequest(path, params = {}) {
     });
 }
 
-// === LẤY GIÁ VÀ TÍNH TOÁN (ĐÃ SỬA LỖI CẢ 2 LOGIC) ===
+// === LẤY GIÁ VÀ TÍNH TOÁN (Đã ổn định) ===
 async function fetchFundingEstimate(symbol) {
     try {
         const [spotData, futuresData] = await Promise.all([
-            // Dữ liệu Spot trả về: [{ trades: [{ price: "..." }] }]
             apiRequest('/openApi/spot/v1/ticker/price', { symbol }),
-            // Dữ liệu Futures trả về: { lastPrice: "..." }
             apiRequest('/openApi/swap/v2/quote/ticker', { symbol })
         ]);
 
@@ -83,7 +80,6 @@ async function fetchFundingEstimate(symbol) {
         }
 
         let futuresPrice;
-        // Logic mới cho Futures: đọc trực tiếp từ đối tượng
         if (futuresData && typeof futuresData === 'object' && !Array.isArray(futuresData) && futuresData.lastPrice) {
             futuresPrice = parseFloat(futuresData.lastPrice);
         } else {
@@ -108,7 +104,7 @@ let latestFunding = { ts: null, data: [], errors: [] };
 async function refreshAll() {
     console.log(`\n[${new Date().toISOString()}] Bắt đầu chu trình cập nhật...`);
     
-    console.log(`[Tiến hành] Fetch dữ liệu cho ${SYMBOLS_TO_FETCH.length} symbol đã chọn...`);
+    console.log(`[Tiến hành] Fetch dữ liệu cho ${SYMBOLS_TO_FETCH.length} symbol đã chọn: ${SYMBOLS_TO_FETCH.join(', ')}`);
     const results = await Promise.all(SYMBOLS_TO_FETCH.map(symbol => fetchFundingEstimate(symbol)));
     
     results.forEach(result => {
@@ -132,7 +128,7 @@ async function refreshAll() {
 // === HTTP + WS SERVER (Không đổi) ===
 const server = http.createServer((req, res) => {
     if (req.url === "/api/funding-estimate" && req.method === "GET") {
-        res.writeHead(200, { "Content-Type": "application/json; charset-utf-8" });
+        res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
         const sortedData = {
             ...latestFunding,
             data: latestFunding.data.sort((a, b) => b.fundingEstimate - a.fundingEstimate)
@@ -140,7 +136,7 @@ const server = http.createServer((req, res) => {
         res.end(JSON.stringify(sortedData, null, 2));
         return;
     }
-    res.writeHead(404, { "Content-Type": "text/plain; charset-utf-8" });
+    res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
     res.end("Not Found");
 });
 const wss = new WebSocketServer({ noServer: true });
