@@ -1,5 +1,5 @@
 // index.js
-// PHIÊN BẢN CUỐI CÙNG v1.1 - Sửa lỗi Endpoint API Spot
+// PHIÊN BẢN 2.0 - TỐI ƯU HÓA: Chỉ lấy danh sách coin 1 lần duy nhất
 
 const http = require("http");
 const https = require("https");
@@ -28,7 +28,7 @@ async function apiRequest(path, params = {}) {
         hostname: HOST,
         path: fullPath,
         method: 'GET',
-        headers: { 'X-BX-APIKEY': bingxApiKey, 'User-Agent': 'Node/BingX-Funding-Auto-v1.1' },
+        headers: { 'X-BX-APIKEY': bingxApiKey, 'User-Agent': 'Node/BingX-Funding-Optimized-v2.0' },
         timeout: 15000
     };
 
@@ -38,6 +38,10 @@ async function apiRequest(path, params = {}) {
             res.on('data', (chunk) => (data += chunk));
             res.on('end', () => {
                 try {
+                    // Kiểm tra phản hồi lỗi rate limit trước khi parse
+                    if (data.includes("error code: 1015")) {
+                        return reject(new Error('Lỗi Rate Limit từ BingX (error code: 1015).'));
+                    }
                     const json = JSON.parse(data);
                     if (json.code !== 0) {
                         return reject(new Error(`API trả về lỗi: ${json.msg || JSON.stringify(json)}`));
@@ -52,38 +56,54 @@ async function apiRequest(path, params = {}) {
     });
 }
 
-// === Lấy danh sách tất cả các contract hợp lệ từ BingX ===
-async function fetchAllValidContracts() {
-    console.log("[Thông tin] Đang lấy danh sách symbols hợp lệ từ Spot và Futures...");
-    const [spotContracts, futuresContracts] = await Promise.all([
-        apiRequest('/openApi/spot/v1/common/symbols'),
-        apiRequest('/openApi/swap/v2/quote/contracts')
-    ]);
+// === LẤY DANH SÁCH COIN (Chỉ chạy 1 lần) ===
+async function fetchAndCacheSymbolList() {
+    console.log("[Thiết lập] Lần đầu khởi động, bắt đầu lấy danh sách symbols từ Spot và Futures...");
+    try {
+        const [spotContracts, futuresContracts] = await Promise.all([
+            apiRequest('/openApi/spot/v1/common/symbols'),
+            apiRequest('/openApi/swap/v2/quote/contracts')
+        ]);
 
-    if (!spotContracts || !Array.isArray(spotContracts.symbols)) {
-        throw new Error('Không thể lấy danh sách symbols hợp lệ từ Spot.');
-    }
-    if (!Array.isArray(futuresContracts)) {
-        throw new Error('Không thể lấy danh sách contracts hợp lệ từ Futures.');
-    }
+        if (!spotContracts || !Array.isArray(spotContracts.symbols)) {
+            throw new Error('Không thể lấy danh sách symbols hợp lệ từ Spot.');
+        }
+        if (!Array.isArray(futuresContracts)) {
+            throw new Error('Không thể lấy danh sách contracts hợp lệ từ Futures.');
+        }
 
-    return {
-        spot: new Set(spotContracts.symbols.map(c => c.symbol)),
-        futures: new Set(futuresContracts.map(c => c.symbol))
-    };
+        const spotSymbols = new Set(spotContracts.symbols.map(c => c.symbol));
+        const futuresSymbols = new Set(futuresContracts.map(c => c.symbol));
+        
+        console.log(`[Thông tin] Tìm thấy ${spotSymbols.size} symbol trên Spot và ${futuresSymbols.size} symbol trên Futures.`);
+
+        const intersection = [];
+        for (const symbol of futuresSymbols) {
+            if (spotSymbols.has(symbol)) {
+                intersection.push(symbol);
+            }
+        }
+        
+        console.log(`[Thành công] Đã xác định và lưu trữ ${intersection.length} symbol chung. Sẽ không lấy lại danh sách này nữa.`);
+        return intersection; // Trả về danh sách đã lọc
+
+    } catch (e) {
+        console.error("[Lỗi nghiêm trọng] Không thể lấy danh sách symbols từ BingX. Bot sẽ tự động thử lại sau 1 phút.", e.message);
+        return []; // Trả về mảng rỗng nếu lỗi
+    }
 }
 
-// === LẤY GIÁ VÀ TÍNH TOÁN (ĐÃ SỬA LỖI) ===
+
+// === LẤY GIÁ VÀ TÍNH TOÁN (Đã sửa lỗi) ===
 async function fetchFundingEstimate(symbol) {
     try {
-        // SỬA LỖI: Endpoint lấy giá Spot đã được sửa từ 'quote/price' thành 'ticker/price'
         const [spotData, futuresData] = await Promise.all([
-            apiRequest('/openApi/spot/v1/ticker/price', { symbol }), // <-- ĐÂY LÀ DÒNG ĐÃ SỬA
+            apiRequest('/openApi/spot/v1/ticker/price', { symbol }), // Endpoint ĐÚNG
             apiRequest('/openApi/swap/v2/quote/ticker', { symbol })
         ]);
 
         if (!Array.isArray(spotData) || spotData.length === 0 || typeof spotData[0].price === 'undefined') {
-            throw new Error('Dữ liệu Spot trả về không hợp lệ từ /ticker/price');
+            throw new Error('Dữ liệu Spot trả về không hợp lệ');
         }
         if (!Array.isArray(futuresData) || futuresData.length === 0 || typeof futuresData[0].lastPrice === 'undefined') {
             throw new Error('Dữ liệu Futures trả về không hợp lệ');
@@ -103,40 +123,19 @@ async function fetchFundingEstimate(symbol) {
     }
 }
 
-// === STATE & REFRESH (TỰ ĐỘNG HOÀN TOÀN) ===
+// === STATE & REFRESH (ĐÃ TỐI ƯU HÓA) ===
 let latestFunding = { ts: null, data: [], errors: [] };
-let symbolsToProcess = [];
+let symbolsToProcess = []; // Biến toàn cục để cache danh sách coin
 
 async function refreshAll() {
     console.log(`\n[${new Date().toISOString()}] Bắt đầu chu trình cập nhật...`);
-
-    if (symbolsToProcess.length === 0) {
-        try {
-            const validSymbols = await fetchAllValidContracts();
-            console.log(`[Thông tin] Tìm thấy ${validSymbols.spot.size} symbol trên Spot và ${validSymbols.futures.size} symbol trên Futures.`);
-
-            const intersection = [];
-            for (const symbol of validSymbols.futures) {
-                if (validSymbols.spot.has(symbol)) {
-                    intersection.push(symbol);
-                }
-            }
-            
-            symbolsToProcess = intersection;
-            console.log(`[Thiết lập] Đã xác định được ${symbolsToProcess.length} symbol chung để theo dõi.`);
-
-        } catch (e) {
-            console.error("[Lỗi nghiêm trọng] Không thể lấy danh sách symbols từ BingX. Thử lại sau 5 phút.", e.message);
-            return;
-        }
-    }
     
     if (symbolsToProcess.length === 0) {
-        console.warn("[Cảnh báo] Không tìm thấy symbol chung nào giữa Spot và Futures.");
+        console.warn("[Cảnh báo] Danh sách symbol đang trống. Bot sẽ không fetch giá.");
         return;
     }
 
-    console.log(`[Tiến hành] Fetch dữ liệu cho ${symbolsToProcess.length} symbol...`);
+    console.log(`[Tiến hành] Sử dụng danh sách đã lưu trữ, fetch dữ liệu cho ${symbolsToProcess.length} symbol...`);
     const results = await Promise.all(symbolsToProcess.map(symbol => fetchFundingEstimate(symbol)));
     
     const successfulResults = [];
@@ -152,7 +151,6 @@ async function refreshAll() {
 
     if (successfulResults.length > 0) {
         console.log(`[Thành công] Lấy dữ liệu thành công cho ${successfulResults.length} / ${symbolsToProcess.length} symbol.`);
-        // Log một ví dụ thành công
         console.log(`[Ví dụ] ${successfulResults[0].symbol}: ${successfulResults[0].fundingEstimatePercent}`);
     }
     if (errorResults.length > 0) {
@@ -196,8 +194,25 @@ wss.on("connection", (ws) => {
     ws.send(JSON.stringify({ type: "snapshot", data: latestFunding }));
 });
 
-server.listen(PORT, async () => {
-    console.log(`Server ước tính funding đang chạy tại: http://localhost:${PORT}/api/funding-estimate`);
-    await refreshAll();
-    setInterval(refreshAll, 5 * 60 * 1000);
-});
+
+// === KHỞI ĐỘNG SERVER ===
+async function startServer() {
+    // Bước 1: Lấy và cache danh sách coin. Thử lại nếu thất bại.
+    while (symbolsToProcess.length === 0) {
+        symbolsToProcess = await fetchAndCacheSymbolList();
+        if (symbolsToProcess.length === 0) {
+            await new Promise(resolve => setTimeout(resolve, 60 * 1000)); // Đợi 1 phút rồi thử lại
+        }
+    }
+
+    // Bước 2: Khi đã có danh sách, khởi động server và chu trình refresh
+    server.listen(PORT, () => {
+        console.log(`Server ước tính funding đang chạy tại: http://localhost:${PORT}/api/funding-estimate`);
+        // Chạy lần đầu ngay khi khởi động
+        refreshAll();
+        // Lặp lại sau mỗi 5 phút
+        setInterval(refreshAll, 5 * 60 * 1000);
+    });
+}
+
+startServer();
