@@ -1,5 +1,5 @@
 // index.js
-// PHIÊN BẢN HOÀN THIỆN - Tự động lọc coin hợp lệ trước khi fetch
+// PHIÊN BẢN HOÀN THIỆN V2 - Tự động lọc coin hợp lệ trên cả Spot và Futures
 
 const http = require("http");
 const https = require("https");
@@ -12,15 +12,16 @@ const { bingxApiKey, bingxApiSecret } = require("./config.js");
 const HOST = "open-api.bingx.com";
 const PORT = 1997;
 
-// DANH SÁCH COIN BẠN MUỐN THEO DÕI (Cứ điền thoải mái, code sẽ tự lọc)
+// DANH SÁCH COIN BẠN MUỐN THEO DÕI (Điền thoải mái, code sẽ tự lọc)
 const TARGET_COINS = [
     "LPT-USDT",
     "BTC-USDT",
     "ETH-USDT",
     "SOL-USDT",
-    "BIO-USDT",
-    "CAT-USDT",  // Coin này không tồn tại, sẽ bị tự động loại bỏ
-    "WAVE-USDT", // Coin này không tồn tại, sẽ bị tự động loại bỏ
+    "BIO-USDT",  // Coin này có thể chỉ có trên Futures
+    "DOGE-USDT", // Coin này có trên cả 2
+    "CAT-USDT",  // Coin này không tồn tại, sẽ bị loại bỏ
+    "WAVE-USDT", // Coin này không tồn tại, sẽ bị loại bỏ
 ];
 
 // === HÀM KÝ HMAC-SHA256 (Chuẩn) ===
@@ -39,7 +40,7 @@ async function apiRequest(path, params = {}) {
         hostname: HOST,
         path: fullPath,
         method: 'GET',
-        headers: { 'X-BX-APIKEY': bingxApiKey, 'User-Agent': 'Node/BingX-Funding-Pro' },
+        headers: { 'X-BX-APIKEY': bingxApiKey, 'User-Agent': 'Node/BingX-Funding-Pro-V2' },
         timeout: 15000
     };
 
@@ -65,18 +66,30 @@ async function apiRequest(path, params = {}) {
 
 // === CẢI TIẾN: Lấy danh sách tất cả các contract hợp lệ từ BingX ===
 async function fetchAllValidContracts() {
-    // Endpoint này không cần tham số nào khác ngoài timestamp
-    const contracts = await apiRequest('/openApi/swap/v2/quote/contracts');
-    if (!Array.isArray(contracts)) {
-        throw new Error('Không thể lấy danh sách contracts hợp lệ.');
+    console.log("[Thông tin] Đang lấy danh sách symbols hợp lệ từ Spot và Futures...");
+    const [spotContracts, futuresContracts] = await Promise.all([
+        apiRequest('/openApi/spot/v1/common/symbols'),
+        apiRequest('/openApi/swap/v2/quote/contracts')
+    ]);
+
+    if (!spotContracts || !Array.isArray(spotContracts.symbols)) {
+        throw new Error('Không thể lấy danh sách symbols hợp lệ từ Spot.');
     }
+    if (!Array.isArray(futuresContracts)) {
+        throw new Error('Không thể lấy danh sách contracts hợp lệ từ Futures.');
+    }
+
     // Trả về một Set để kiểm tra sự tồn tại nhanh hơn (O(1))
-    return new Set(contracts.map(c => c.symbol));
+    return {
+        spot: new Set(spotContracts.symbols.map(c => c.symbol)),
+        futures: new Set(futuresContracts.map(c => c.symbol))
+    };
 }
 
 // === LẤY GIÁ VÀ TÍNH TOÁN (Không đổi) ===
 async function fetchFundingEstimate(symbol) {
     try {
+        // Cả hai lệnh gọi này giờ đây chỉ được thực hiện khi symbol đã được xác thực
         const [spotData, futuresData] = await Promise.all([
             apiRequest('/openApi/spot/v1/ticker/24hr', { symbol }),
             apiRequest('/openApi/swap/v2/quote/ticker', { symbol })
@@ -91,7 +104,6 @@ async function fetchFundingEstimate(symbol) {
 
         const spotPrice = parseFloat(spotData.lastPrice);
         const futuresPrice = parseFloat(futuresData[0].lastPrice);
-        
         const fundingEstimate = (futuresPrice - spotPrice) / spotPrice;
 
         return {
@@ -100,68 +112,78 @@ async function fetchFundingEstimate(symbol) {
             ts: new Date().toISOString(),
         };
     } catch (e) {
+        // Lỗi ở đây bây giờ rất hiếm, thường là do API tạm thời lỗi chứ không phải do symbol sai
         return { symbol, error: e.message };
     }
 }
 
-// === STATE & REFRESH (Đã được nâng cấp) ===
-let latestFunding = { ts: null, data: [], notFound: [] };
+// === STATE & REFRESH (Nâng cấp toàn diện) ===
+let latestFunding = { ts: null, data: [], notFound: [], futuresOnly: [] };
 
 async function refreshAll() {
     console.log(`\n[${new Date().toISOString()}] Bắt đầu chu trình cập nhật...`);
-    
     let validSymbols;
     try {
-        // Bước 1: Lấy danh sách TẤT CẢ coin hợp lệ trên sàn
+        // Bước 1: Lấy danh sách TẤT CẢ coin hợp lệ trên cả hai sàn
         validSymbols = await fetchAllValidContracts();
-        console.log(`[Thông tin] Tìm thấy ${validSymbols.size} symbol hợp lệ trên BingX.`);
+        console.log(`[Thông tin] Tìm thấy ${validSymbols.spot.size} symbol trên Spot và ${validSymbols.futures.size} symbol trên Futures.`);
     } catch (e) {
-        console.error("[Lỗi nghiêm trọng] Không thể lấy danh sách contracts từ BingX. Hủy bỏ chu trình.", e.message);
+        console.error("[Lỗi nghiêm trọng] Không thể lấy danh sách symbols từ BingX. Hủy bỏ chu trình.", e.message);
         return; // Dừng lại nếu không lấy được danh sách
     }
 
-    // Bước 2: Lọc danh sách TARGET_COINS của bạn, chỉ giữ lại những coin thực sự tồn tại
+    // Bước 2: Lọc danh sách TARGET_COINS
     const symbolsToFetch = [];
     const notFoundSymbols = [];
+    const futuresOnlySymbols = [];
+
     TARGET_COINS.forEach(symbol => {
-        if (validSymbols.has(symbol)) {
-            symbolsToFetch.push(symbol);
+        const isOnFutures = validSymbols.futures.has(symbol);
+        const isOnSpot = validSymbols.spot.has(symbol);
+
+        if (isOnFutures && isOnSpot) {
+            symbolsToFetch.push(symbol); // Tồn tại trên cả hai -> Hợp lệ để tính funding
+        } else if (isOnFutures && !isOnSpot) {
+            futuresOnlySymbols.push(symbol); // Chỉ có trên Futures
         } else {
-            notFoundSymbols.push(symbol);
+            notFoundSymbols.push(symbol); // Không tồn tại trên Futures
         }
     });
 
     if (notFoundSymbols.length > 0) {
-        console.warn(`[Cảnh báo] Các symbol sau không tồn tại và đã được bỏ qua: ${notFoundSymbols.join(', ')}`);
+        console.warn(`[Cảnh báo] Các symbol sau không tồn tại trên sàn Futures và đã được bỏ qua: ${notFoundSymbols.join(', ')}`);
+    }
+    if (futuresOnlySymbols.length > 0) {
+        console.info(`[Thông tin] Các symbol sau chỉ có trên Futures, không có trên Spot (bỏ qua tính toán): ${futuresOnlySymbols.join(', ')}`);
     }
 
-    // Bước 3: Chỉ fetch dữ liệu cho các coin hợp lệ đã được lọc
-    console.log(`[Tiến hành] Fetch dữ liệu cho ${symbolsToFetch.length} symbol hợp lệ...`);
+    // Bước 3: Chỉ fetch dữ liệu cho các coin hợp lệ (tồn tại trên cả Spot và Futures)
+    console.log(`[Tiến hành] Fetch dữ liệu cho ${symbolsToFetch.length} symbol hợp lệ để tính funding...`);
     const results = await Promise.all(symbolsToFetch.map(symbol => fetchFundingEstimate(symbol)));
 
     for (const result of results) {
         if (!result.error) {
             console.log(`[Thành công] ${result.symbol}: Ước tính = ${result.fundingEstimatePercent}`);
         } else {
-            // Lỗi ở bước này thường là do API tạm thời trục trặc, không phải do symbol sai
             console.log(`[Thất bại] ${result.symbol}: ${result.error}`);
         }
     }
-    
-    // Cập nhật trạng thái cuối cùng, bao gồm cả các symbol không tìm thấy
-    latestFunding = { 
-        ts: new Date().toISOString(), 
-        data: results, 
-        notFound: notFoundSymbols 
+
+    // Cập nhật trạng thái cuối cùng, bao gồm cả các symbol không tìm thấy và chỉ có trên futures
+    latestFunding = {
+        ts: new Date().toISOString(),
+        data: results.filter(r => !r.error), // Chỉ lấy các kết quả thành công
+        errors: results.filter(r => r.error), // Các lỗi phát sinh lúc fetch
+        notFound: notFoundSymbols,
+        futuresOnly: futuresOnlySymbols
     };
+    
     broadcast({ type: "update", data: latestFunding });
     console.log(`Cập nhật hoàn tất.`);
 }
 
-
 // === HTTP + WS SERVER (Không thay đổi) ===
 const server = http.createServer((req, res) => {
-    // Đổi tên endpoint cho rõ ràng hơn
     if (req.url === "/api/funding-estimate" && req.method === "GET") {
         res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
         res.end(JSON.stringify(latestFunding, null, 2));
@@ -186,5 +208,5 @@ wss.on("connection", (ws) => {
 server.listen(PORT, async () => {
     console.log(`Server ước tính funding đang chạy tại: http://localhost:${PORT}/api/funding-estimate`);
     await refreshAll();
-    setInterval(refreshAll, 5 * 60 * 1000); // Tăng thời gian refresh lên 5 phút để giảm tải
+    setInterval(refreshAll, 5 * 60 * 1000); // 5 phút một lần
 });
