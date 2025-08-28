@@ -1,5 +1,5 @@
 // index.js
-// PHIÊN BẢN HOÀN HẢO - Đã sửa lỗi đọc cấu trúc dữ liệu Spot
+// PHIÊN BẢN CHẨN ĐOÁN 2 - In ra dữ liệu Futures thô để kiểm tra
 
 const http = require("http");
 const https = require("https");
@@ -37,7 +37,7 @@ async function apiRequest(path, params = {}) {
         hostname: HOST,
         path: fullPath,
         method: 'GET',
-        headers: { 'X-BX-APIKEY': bingxApiKey, 'User-Agent': 'Node/BingX-Funding-Perfected' },
+        headers: { 'X-BX-APIKEY': bingxApiKey, 'User-Agent': 'Node/BingX-Funding-Debug-Futures' },
         timeout: 15000
     };
 
@@ -61,7 +61,7 @@ async function apiRequest(path, params = {}) {
     });
 }
 
-// === LẤY GIÁ VÀ TÍNH TOÁN (ĐÃ SỬA LỖI LOGIC ĐỌC GIÁ) ===
+// === LẤY GIÁ VÀ TÍNH TOÁN (Thêm log chẩn đoán cho Futures) ===
 async function fetchFundingEstimate(symbol) {
     try {
         const [spotData, futuresData] = await Promise.all([
@@ -69,8 +69,11 @@ async function fetchFundingEstimate(symbol) {
             apiRequest('/openApi/swap/v2/quote/ticker', { symbol })
         ]);
 
+        // === DÒNG LOG CHẨN ĐOÁN MỚI CHO FUTURES ===
+        console.log(`[CHẨN ĐOÁN] Dữ liệu Futures thô nhận được cho ${symbol}:`, JSON.stringify(futuresData));
+        // =======================================
+
         let spotPrice;
-        // Logic mới: Đi sâu vào cấu trúc mảng -> đối tượng -> mảng trades để lấy giá
         if (
             Array.isArray(spotData) &&
             spotData.length > 0 &&
@@ -80,10 +83,10 @@ async function fetchFundingEstimate(symbol) {
         ) {
             spotPrice = parseFloat(spotData[0].trades[0].price);
         } else {
-            // Nếu cấu trúc không đúng như dự kiến, báo lỗi
             throw new Error('Không tìm thấy giá trong cấu trúc dữ liệu Spot trả về');
         }
 
+        // Logic kiểm tra Futures hiện tại, sẽ gây lỗi để chúng ta xem được log chẩn đoán
         if (!Array.isArray(futuresData) || futuresData.length === 0 || typeof futuresData[0].lastPrice === 'undefined') {
             throw new Error('Dữ liệu Futures trả về không hợp lệ');
         }
