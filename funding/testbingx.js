@@ -1,14 +1,10 @@
 // index.js
-// Tự tính funding estimate bằng cách lấy giá Spot & Futures qua API đã xác thực (ĐÃ SỬA LỖI KÝ)
+// Tự tính funding estimate bằng cách lấy giá Spot & Futures (Sửa lỗi triệt để - Không cần API Key)
 
 const http = require("http");
 const https = require("https");
-const crypto = require("crypto");
-const { URLSearchParams } = require("url");
 const { WebSocketServer } = require("ws");
-const { bingxApiKey, bingxApiSecret } = require("./config.js");
 
-const HOST = "open-api.bingx.com";
 const PORT = 1997;
 
 // === DANH SÁCH COIN YÊU CẦU ===
@@ -17,84 +13,57 @@ const TARGET_COINS = [
     "BTC-USDT",
     "ETH-USDT",
     "SOL-USDT",
-    "CAT-USDT", // Sẽ báo lỗi không tồn tại, đây là hành vi đúng
     "BIO-USDT",
+    "CAT-USDT",  // Sẽ báo lỗi không tồn tại, đây là hành vi đúng
     "WAVE-USDT", // Sẽ báo lỗi không tồn tại, đây là hành vi đúng
 ];
 
-// === HÀM KÝ HMAC-SHA256 ===
-function sign(queryString, secret) {
-    return crypto.createHmac("sha256", secret).update(queryString).digest("hex");
-}
-
-// === HÀM GỌI API TRUNG TÂM (ĐÃ SỬA LỖI) ===
-async function apiRequest(path, params = {}) {
-    // ---- SỬA LỖI TẠI ĐÂY ----
-    // 1. Gộp tất cả các tham số (bao gồm cả symbol) và timestamp VÀO NHAU
-    const allParams = { ...params, timestamp: Date.now() };
-
-    // 2. Tạo query string từ TẤT CẢ tham số
-    const queryString = new URLSearchParams(allParams).toString();
-
-    // 3. Ký trên query string đầy đủ này
-    const signature = sign(queryString, bingxApiSecret);
-
-    // 4. Tạo URL cuối cùng để gửi đi
-    const fullPath = `${path}?${queryString}&signature=${signature}`;
-
-    const options = {
-        hostname: HOST,
-        path: fullPath,
-        method: 'GET',
-        headers: {
-            'X-BX-APIKEY': bingxApiKey,
-            'User-Agent': 'Node/BingX-Funding-Calculator-V4-Fixed'
-        },
-        timeout: 10000
-    };
-
+// === HÀM GỌI API CÔNG KHAI (KHÔNG CẦN KÝ) ===
+function publicApiGet(url) {
     return new Promise((resolve, reject) => {
-        const req = https.request(options, (res) => {
+        https.get(url, { headers: { 'User-Agent': 'Node/BingX-Funding-Public-API' } }, (res) => {
             let data = '';
             res.on('data', (chunk) => (data += chunk));
             res.on('end', () => {
-                try {
-                    const json = JSON.parse(data);
-                    // API của BingX trả về code != 0 khi có lỗi
-                    if (json.code !== 0) {
-                        return reject(new Error(`BingX API error: ${JSON.stringify(json)}`));
+                if (res.statusCode >= 200 && res.statusCode < 300) {
+                    try {
+                        const json = JSON.parse(data);
+                        if (json.code !== 0) {
+                            return reject(new Error(`BingX API error: ${json.msg || JSON.stringify(json)}`));
+                        }
+                        resolve(json.data);
+                    } catch (e) {
+                        reject(new Error(`Lỗi parse JSON: ${data}`));
                     }
-                    resolve(json.data);
-                } catch (e) {
-                    reject(new Error(`Lỗi parse JSON: ${data}`));
+                } else {
+                    reject(new Error(`Lỗi HTTP ${res.statusCode} ${res.statusMessage}`));
                 }
             });
-        });
-
-        req.on('error', (e) => reject(new Error(`Lỗi Request: ${e.message}`)));
-        req.on('timeout', () => {
-            req.destroy();
-            reject(new Error('Request Timeout'));
-        });
-        req.end();
+        }).on('error', (e) => reject(new Error(`Lỗi Request: ${e.message}`)));
     });
 }
 
-// === LẤY GIÁ VÀ TÍNH TOÁN FUNDING ESTIMATE (Không thay đổi) ===
+// === LẤY GIÁ VÀ TÍNH TOÁN FUNDING ESTIMATE ===
 async function fetchFundingEstimate(symbol) {
     try {
+        // Tạo URL đầy đủ cho cả hai request
+        const spotUrl = `https://open-api.bingx.com/openApi/spot/v1/ticker/24hr?symbol=${symbol}`;
+        const futuresUrl = `https://open-api.bingx.com/openApi/swap/v2/quote/ticker?symbol=${symbol}`;
+
         const [spotData, futuresData] = await Promise.all([
-            apiRequest('/openApi/spot/v1/ticker/24hr', { symbol }),
-            apiRequest('/openApi/swap/v2/quote/ticker', { symbol })
+            publicApiGet(spotUrl).catch(err => { throw new Error(`Lỗi lấy giá Spot: ${err.message}`) }),
+            publicApiGet(futuresUrl).catch(err => { throw new Error(`Lỗi lấy giá Futures: ${err.message}`) })
         ]);
 
-        if (!spotData || !spotData.lastPrice) {
-            throw new Error('Dữ liệu Spot không hợp lệ hoặc không tìm thấy');
+        // Xử lý dữ liệu Spot (response là một object)
+        if (!spotData || typeof spotData.lastPrice === 'undefined') {
+            throw new Error('Dữ liệu Spot trả về không hợp lệ');
         }
         const spotPrice = parseFloat(spotData.lastPrice);
 
-        if (!Array.isArray(futuresData) || futuresData.length === 0 || !futuresData[0].lastPrice) {
-            throw new Error('Dữ liệu Futures không hợp lệ hoặc không tìm thấy');
+        // Xử lý dữ liệu Futures (response là một array)
+        if (!Array.isArray(futuresData) || futuresData.length === 0 || typeof futuresData[0].lastPrice === 'undefined') {
+            throw new Error('Dữ liệu Futures trả về không hợp lệ');
         }
         const futuresPrice = parseFloat(futuresData[0].lastPrice);
         
@@ -110,12 +79,11 @@ async function fetchFundingEstimate(symbol) {
         };
 
     } catch (e) {
-        // Trả về lỗi chi tiết từ API
         return { symbol, error: e.message };
     }
 }
 
-// === STATE & REFRESH (Không thay đổi) ===
+// === STATE & REFRESH (Giữ nguyên) ===
 let latestFunding = { ts: null, data: [] };
 
 async function refreshAll() {
@@ -136,7 +104,7 @@ async function refreshAll() {
     console.log(`Cập nhật hoàn tất.`);
 }
 
-// === HTTP + WS SERVER (Không thay đổi) ===
+// === HTTP + WS SERVER (Giữ nguyên) ===
 const server = http.createServer((req, res) => {
     if (req.url === "/api/funding-estimate" && req.method === "GET") {
         res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
