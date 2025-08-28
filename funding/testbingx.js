@@ -1,15 +1,10 @@
 // index.js
-// Tự tính funding estimate - Phiên bản cuối cùng, sửa lỗi ký và tăng độ ổn định
+// PHIÊN BẢN CUỐI CÙNG - Dùng đúng API công khai, không cần API Key, xử lý lỗi vững chắc
 
 const http = require("http");
 const https = require("https");
-const crypto = require("crypto");
-const { URLSearchParams } = require("url");
 const { WebSocketServer } = require("ws");
-// Đảm bảo bạn có file config.js với API key và secret
-const { bingxApiKey, bingxApiSecret } = require("./config.js");
 
-const HOST = "open-api.bingx.com";
 const PORT = 1997;
 
 const TARGET_COINS = [
@@ -18,81 +13,59 @@ const TARGET_COINS = [
     "ETH-USDT",
     "SOL-USDT",
     "BIO-USDT",
-    "CAT-USDT",  // Sẽ báo lỗi không tồn tại, đây là hành vi đúng
-    "WAVE-USDT", // Sẽ báo lỗi không tồn tại, đây là hành vi đúng
+    // Các symbol dưới đây có thể không tồn tại trên sàn, chương trình sẽ báo lỗi và bỏ qua
+    "CAT-USDT",
+    "WAVE-USDT",
 ];
 
-// === HÀM KÝ HMAC-SHA256 (Không đổi) ===
-function sign(queryString, secret) {
-    return crypto.createHmac("sha256", secret).update(queryString).digest("hex");
-}
-
-// === HÀM GỌI API TRUNG TÂM (ĐÃ SỬA LỖI VÀ THÊM RECVWINDOW) ===
-async function apiRequest(path, params = {}) {
-    // 1. Gộp tất cả các tham số (symbol) với các tham số bắt buộc (timestamp, recvWindow)
-    const allParams = {
-        ...params,
-        timestamp: Date.now(),
-        recvWindow: 5000 // Thêm recvWindow để tránh lỗi do lệch thời gian
-    };
-
-    // 2. Tạo query string từ TẤT CẢ các tham số trên
-    const queryString = new URLSearchParams(allParams).toString();
-
-    // 3. Ký trên query string đầy đủ đó
-    const signature = sign(queryString, bingxApiSecret);
-
-    // 4. Tạo URL cuối cùng để gửi đi
-    const fullPath = `${path}?${queryString}&signature=${signature}`;
-
-    const options = {
-        hostname: HOST,
-        path: fullPath,
-        method: 'GET',
-        headers: {
-            'X-BX-APIKEY': bingxApiKey,
-            'User-Agent': 'Node/BingX-Funding-Final-Fix'
-        },
-        timeout: 10000
-    };
-
+// === HÀM GỌI API CÔNG KHAI - Đơn giản và ổn định ===
+function publicApiGet(url) {
     return new Promise((resolve, reject) => {
-        const req = https.request(options, (res) => {
+        https.get(url, { headers: { 'User-Agent': 'Node/BingX-Funding-Correct-Version' } }, (res) => {
             let data = '';
             res.on('data', (chunk) => (data += chunk));
             res.on('end', () => {
-                try {
-                    const json = JSON.parse(data);
-                    if (json.code !== 0) {
-                        return reject(new Error(`BingX API error: ${json.msg || JSON.stringify(json)}`));
+                if (res.statusCode >= 200 && res.statusCode < 300) {
+                    try {
+                        const json = JSON.parse(data);
+                        if (json.code !== 0) {
+                            return reject(new Error(`API trả về lỗi: ${json.msg || 'Unknown Error'}`));
+                        }
+                        resolve(json.data);
+                    } catch (e) {
+                        reject(new Error(`Lỗi parse JSON từ phản hồi API: ${data}`));
                     }
-                    resolve(json.data);
-                } catch (e) {
-                    reject(new Error(`Lỗi parse JSON: ${data}`));
+                } else {
+                    reject(new Error(`Lỗi HTTP ${res.statusCode}`));
                 }
             });
-        });
-        req.on('error', (e) => reject(new Error(`Lỗi Request: ${e.message}`)));
-        req.on('timeout', () => { req.destroy(); reject(new Error('Request Timeout')); });
-        req.end();
+        }).on('error', (e) => reject(new Error(`Lỗi kết nối mạng: ${e.message}`)));
     });
 }
 
-// === LẤY GIÁ VÀ TÍNH TOÁN (Không thay đổi) ===
+// === LẤY GIÁ VÀ TÍNH TOÁN - Xử lý lỗi để không bao giờ crash ===
 async function fetchFundingEstimate(symbol) {
+    const spotUrl = `https://open-api.bingx.com/openApi/spot/v1/ticker/24hr?symbol=${symbol}`;
+    const futuresUrl = `https://open-api.bingx.com/openApi/swap/v2/quote/ticker?symbol=${symbol}`;
+
     try {
+        // Gọi cả 2 API song song để tiết kiệm thời gian
         const [spotData, futuresData] = await Promise.all([
-            apiRequest('/openApi/spot/v1/ticker/24hr', { symbol }),
-            apiRequest('/openApi/swap/v2/quote/ticker', { symbol })
+            publicApiGet(spotUrl),
+            publicApiGet(futuresUrl)
         ]);
+        
+        // --- BƯỚC KIỂM TRA DỮ LIỆU QUAN TRỌNG NHẤT ĐỂ TRÁNH CRASH ---
+        if (!spotData || typeof spotData.lastPrice === 'undefined') {
+            throw new Error('Dữ liệu Spot trả về không hợp lệ hoặc không tìm thấy');
+        }
+        if (!Array.isArray(futuresData) || futuresData.length === 0 || typeof futuresData[0].lastPrice === 'undefined') {
+            throw new Error('Dữ liệu Futures trả về không hợp lệ hoặc không tìm thấy');
+        }
 
         const spotPrice = parseFloat(spotData.lastPrice);
         const futuresPrice = parseFloat(futuresData[0].lastPrice);
         
-        if (isNaN(spotPrice) || isNaN(futuresPrice)) {
-            throw new Error("Dữ liệu giá không hợp lệ sau khi parse.");
-        }
-
         const fundingEstimate = (futuresPrice - spotPrice) / spotPrice;
 
         return {
@@ -103,8 +76,8 @@ async function fetchFundingEstimate(symbol) {
             fundingEstimatePercent: `${(fundingEstimate * 100).toFixed(6)}%`,
             ts: new Date().toISOString(),
         };
-
     } catch (e) {
+        // Nếu có bất kỳ lỗi nào xảy ra ở trên, chương trình sẽ không crash mà trả về thông báo lỗi
         return { symbol, error: e.message };
     }
 }
@@ -114,8 +87,7 @@ let latestFunding = { ts: null, data: [] };
 
 async function refreshAll() {
     console.log(`\n[${new Date().toISOString()}] Bắt đầu cập nhật dữ liệu...`);
-    const promises = TARGET_COINS.map(symbol => fetchFundingEstimate(symbol));
-    const results = await Promise.all(promises);
+    const results = await Promise.all(TARGET_COINS.map(symbol => fetchFundingEstimate(symbol)));
 
     for (const result of results) {
         if (!result.error) {
@@ -152,6 +124,7 @@ server.on("upgrade", (req, socket, head) => {
 wss.on("connection", (ws) => {
     ws.send(JSON.stringify({ type: "snapshot", data: latestFunding }));
 });
+
 server.listen(PORT, async () => {
     console.log(`Server ước tính funding đang chạy tại: http://localhost:${PORT}/api/funding-estimate`);
     await refreshAll();
