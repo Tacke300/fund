@@ -1,5 +1,5 @@
 // index.js
-// PHIÊN BẢN CUỐI CÙNG VÀ DUY NHẤT - Dùng API Key, đã sửa lỗi ký dứt điểm
+// PHIÊN BẢN HOÀN THIỆN - Tự động lọc coin hợp lệ trước khi fetch
 
 const http = require("http");
 const https = require("https");
@@ -12,47 +12,35 @@ const { bingxApiKey, bingxApiSecret } = require("./config.js");
 const HOST = "open-api.bingx.com";
 const PORT = 1997;
 
+// DANH SÁCH COIN BẠN MUỐN THEO DÕI (Cứ điền thoải mái, code sẽ tự lọc)
 const TARGET_COINS = [
     "LPT-USDT",
     "BTC-USDT",
     "ETH-USDT",
     "SOL-USDT",
     "BIO-USDT",
-    "CAT-USDT",
-    "WAVE-USDT",
+    "CAT-USDT",  // Coin này không tồn tại, sẽ bị tự động loại bỏ
+    "WAVE-USDT", // Coin này không tồn tại, sẽ bị tự động loại bỏ
 ];
 
-// === HÀM KÝ HMAC-SHA256 (Đúng và không đổi) ===
+// === HÀM KÝ HMAC-SHA256 (Chuẩn) ===
 function sign(queryString, secret) {
     return crypto.createHmac("sha256", secret).update(queryString).digest("hex");
 }
 
-// === HÀM GỌI API TRUNG TÂM (ĐÃ SỬA LỖI KÝ DỨT ĐIỂM) ===
+// === HÀM GỌI API TRUNG TÂM (Chuẩn) ===
 async function apiRequest(path, params = {}) {
-    // 1. Gộp tất cả các tham số (ví dụ: symbol) với tham số bắt buộc là timestamp
-    const allParams = {
-        ...params,
-        timestamp: Date.now(),
-    };
-
-    // 2. Tạo query string từ TẤT CẢ các tham số trên. Đây là chuỗi sẽ được ký.
+    const allParams = { ...params, timestamp: Date.now() };
     const queryString = new URLSearchParams(allParams).toString();
-
-    // 3. Ký trên query string đầy đủ đó
     const signature = sign(queryString, bingxApiSecret);
-
-    // 4. Tạo URL cuối cùng để gửi đi, bao gồm cả chữ ký
     const fullPath = `${path}?${queryString}&signature=${signature}`;
 
     const options = {
         hostname: HOST,
         path: fullPath,
         method: 'GET',
-        headers: {
-            'X-BX-APIKEY': bingxApiKey,
-            'User-Agent': 'Node/BingX-Funding-Correct-And-Final'
-        },
-        timeout: 15000 // Tăng timeout để đảm bảo
+        headers: { 'X-BX-APIKEY': bingxApiKey, 'User-Agent': 'Node/BingX-Funding-Pro' },
+        timeout: 15000
     };
 
     return new Promise((resolve, reject) => {
@@ -66,9 +54,7 @@ async function apiRequest(path, params = {}) {
                         return reject(new Error(`API trả về lỗi: ${json.msg || JSON.stringify(json)}`));
                     }
                     resolve(json.data);
-                } catch (e) {
-                    reject(new Error(`Lỗi parse JSON: ${data}`));
-                }
+                } catch (e) { reject(new Error(`Lỗi parse JSON: ${data}`)); }
             });
         });
         req.on('error', (e) => reject(new Error(`Lỗi Request: ${e.message}`)));
@@ -77,8 +63,18 @@ async function apiRequest(path, params = {}) {
     });
 }
 
+// === CẢI TIẾN: Lấy danh sách tất cả các contract hợp lệ từ BingX ===
+async function fetchAllValidContracts() {
+    // Endpoint này không cần tham số nào khác ngoài timestamp
+    const contracts = await apiRequest('/openApi/swap/v2/quote/contracts');
+    if (!Array.isArray(contracts)) {
+        throw new Error('Không thể lấy danh sách contracts hợp lệ.');
+    }
+    // Trả về một Set để kiểm tra sự tồn tại nhanh hơn (O(1))
+    return new Set(contracts.map(c => c.symbol));
+}
 
-// === LẤY GIÁ VÀ TÍNH TOÁN (Xử lý lỗi để không bao giờ crash) ===
+// === LẤY GIÁ VÀ TÍNH TOÁN (Không đổi) ===
 async function fetchFundingEstimate(symbol) {
     try {
         const [spotData, futuresData] = await Promise.all([
@@ -86,12 +82,11 @@ async function fetchFundingEstimate(symbol) {
             apiRequest('/openApi/swap/v2/quote/ticker', { symbol })
         ]);
 
-        // Kiểm tra chặt chẽ để không bao giờ crash
         if (!spotData || typeof spotData.lastPrice === 'undefined') {
-            throw new Error('Dữ liệu Spot trả về không hợp lệ hoặc không tìm thấy');
+            throw new Error('Dữ liệu Spot trả về không hợp lệ');
         }
         if (!Array.isArray(futuresData) || futuresData.length === 0 || typeof futuresData[0].lastPrice === 'undefined') {
-            throw new Error('Dữ liệu Futures trả về không hợp lệ hoặc không tìm thấy');
+            throw new Error('Dữ liệu Futures trả về không hợp lệ');
         }
 
         const spotPrice = parseFloat(spotData.lastPrice);
@@ -100,42 +95,73 @@ async function fetchFundingEstimate(symbol) {
         const fundingEstimate = (futuresPrice - spotPrice) / spotPrice;
 
         return {
-            symbol,
-            spot: spotPrice,
-            futures: futuresPrice,
-            fundingEstimate,
+            symbol, spot: spotPrice, futures: futuresPrice, fundingEstimate,
             fundingEstimatePercent: `${(fundingEstimate * 100).toFixed(6)}%`,
             ts: new Date().toISOString(),
         };
-
     } catch (e) {
         return { symbol, error: e.message };
     }
 }
 
-
-// === STATE & REFRESH (Không thay đổi) ===
-let latestFunding = { ts: null, data: [] };
+// === STATE & REFRESH (Đã được nâng cấp) ===
+let latestFunding = { ts: null, data: [], notFound: [] };
 
 async function refreshAll() {
-    console.log(`\n[${new Date().toISOString()}] Bắt đầu cập nhật dữ liệu...`);
-    const results = await Promise.all(TARGET_COINS.map(symbol => fetchFundingEstimate(symbol)));
+    console.log(`\n[${new Date().toISOString()}] Bắt đầu chu trình cập nhật...`);
+    
+    let validSymbols;
+    try {
+        // Bước 1: Lấy danh sách TẤT CẢ coin hợp lệ trên sàn
+        validSymbols = await fetchAllValidContracts();
+        console.log(`[Thông tin] Tìm thấy ${validSymbols.size} symbol hợp lệ trên BingX.`);
+    } catch (e) {
+        console.error("[Lỗi nghiêm trọng] Không thể lấy danh sách contracts từ BingX. Hủy bỏ chu trình.", e.message);
+        return; // Dừng lại nếu không lấy được danh sách
+    }
+
+    // Bước 2: Lọc danh sách TARGET_COINS của bạn, chỉ giữ lại những coin thực sự tồn tại
+    const symbolsToFetch = [];
+    const notFoundSymbols = [];
+    TARGET_COINS.forEach(symbol => {
+        if (validSymbols.has(symbol)) {
+            symbolsToFetch.push(symbol);
+        } else {
+            notFoundSymbols.push(symbol);
+        }
+    });
+
+    if (notFoundSymbols.length > 0) {
+        console.warn(`[Cảnh báo] Các symbol sau không tồn tại và đã được bỏ qua: ${notFoundSymbols.join(', ')}`);
+    }
+
+    // Bước 3: Chỉ fetch dữ liệu cho các coin hợp lệ đã được lọc
+    console.log(`[Tiến hành] Fetch dữ liệu cho ${symbolsToFetch.length} symbol hợp lệ...`);
+    const results = await Promise.all(symbolsToFetch.map(symbol => fetchFundingEstimate(symbol)));
 
     for (const result of results) {
         if (!result.error) {
-            console.log(`[Thành công] ${result.symbol}: Ước tính = ${result.fundingEstimatePercent} (Spot: ${result.spot}, Futures: ${result.futures})`);
+            console.log(`[Thành công] ${result.symbol}: Ước tính = ${result.fundingEstimatePercent}`);
         } else {
+            // Lỗi ở bước này thường là do API tạm thời trục trặc, không phải do symbol sai
             console.log(`[Thất bại] ${result.symbol}: ${result.error}`);
         }
     }
-
-    latestFunding = { ts: new Date().toISOString(), data: results };
+    
+    // Cập nhật trạng thái cuối cùng, bao gồm cả các symbol không tìm thấy
+    latestFunding = { 
+        ts: new Date().toISOString(), 
+        data: results, 
+        notFound: notFoundSymbols 
+    };
     broadcast({ type: "update", data: latestFunding });
     console.log(`Cập nhật hoàn tất.`);
 }
 
+
 // === HTTP + WS SERVER (Không thay đổi) ===
 const server = http.createServer((req, res) => {
+    // Đổi tên endpoint cho rõ ràng hơn
     if (req.url === "/api/funding-estimate" && req.method === "GET") {
         res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
         res.end(JSON.stringify(latestFunding, null, 2));
@@ -160,5 +186,5 @@ wss.on("connection", (ws) => {
 server.listen(PORT, async () => {
     console.log(`Server ước tính funding đang chạy tại: http://localhost:${PORT}/api/funding-estimate`);
     await refreshAll();
-    setInterval(refreshAll, 60 * 1000);
+    setInterval(refreshAll, 5 * 60 * 1000); // Tăng thời gian refresh lên 5 phút để giảm tải
 });
