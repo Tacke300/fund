@@ -1,21 +1,23 @@
 // index.js
-// ----------------------
-// LẤY FUNDING HIỆN TẠI TỪ SPOT + FUTURES (BingX)
-// - Chỉ tính LPT-USDT
-// - HTTP:  GET http://localhost:1997/api/funding
-// - WS:    ws://localhost:1997/ws
-// - Cập nhật mỗi 60s
-// ----------------------
+// Funding estimate hiện tại từ spot/futures BingX
+// HTTP:  GET http://localhost:1997/api/funding-estimate
+// WS:    ws://localhost:1997/ws
 
 const http = require("http");
 const https = require("https");
 const { WebSocketServer } = require("ws");
 
-const PORT = 1997; // giữ nguyên port
+const PORT = 1997;
 
-const SYMBOL = "LPT-USDT";
+// DANH SÁCH SYMBOL muốn tính
+const TARGET_COINS = [
+  "LPT-USDT",
+  "BIO-USDT",
+  "CAT-USDT",
+  "WAVE-USDT",
+];
 
-// === HTTPS GET ===
+// === HTTPS GET helper ===
 function httpGet(url) {
   return new Promise((resolve, reject) => {
     https
@@ -23,101 +25,80 @@ function httpGet(url) {
         let buf = "";
         res.on("data", (c) => (buf += c));
         res.on("end", () => {
-          if (res.statusCode >= 200 && res.statusCode < 300) return resolve(buf);
-          return reject(new Error(`HTTP ${res.statusCode} ${res.statusMessage} - ${buf}`));
+          if (res.statusCode >= 200 && res.statusCode < 300) resolve(buf);
+          else reject(new Error(`HTTP ${res.statusCode} ${res.statusMessage}`));
         });
       })
-      .on("error", reject)
-      .setTimeout(10000, function () {
-        this.destroy();
-        reject(new Error("Timeout"));
-      });
+      .on("error", reject);
   });
 }
 
-// === LẤY SPOT PRICE ===
-async function getSpotPrice(symbol) {
-  const url = `https://api.bingx.com/api/v1/market/ticker?symbol=${symbol}`;
-  const raw = await httpGet(url);
-  const json = JSON.parse(raw);
-  if (json.code === 0 && json.data && json.data.last) {
-    return parseFloat(json.data.last);
-  }
-  throw new Error(`Cannot get spot price for ${symbol}`);
-}
+// === Tính funding estimate ===
+async function fetchFundingEstimate(symbol) {
+  try {
+    // Spot price
+    const spotRaw = await httpGet(`https://api.bingx.com/api/v1/market/ticker?symbol=${symbol}`);
+    const spotJson = JSON.parse(spotRaw);
+    if (!spotJson || !spotJson.price) throw new Error("Spot not found");
 
-// === LẤY FUTURES MARK PRICE ===
-async function getFuturesMarkPrice(symbol) {
-  const url = `https://open-api.bingx.com/openApi/swap/v2/quote/markPrice?symbol=${symbol}`;
-  const raw = await httpGet(url);
-  const json = JSON.parse(raw);
-  if (json.code === 0 && json.data && json.data.markPrice) {
-    return parseFloat(json.data.markPrice);
-  }
-  throw new Error(`Cannot get futures mark price for ${symbol}`);
-}
+    // Futures price
+    const futuRaw = await httpGet(`https://open-api.bingx.com/openApi/swap/v2/quote/ticker?symbol=${symbol}`);
+    const futuJson = JSON.parse(futuRaw);
+    if (!futuJson || !futuJson.data || !futuJson.data[0]) throw new Error("Futu not found");
 
-// === TÍNH FUNDING RATE HIỆN TẠI ===
-function computeFundingRate(spot, markPrice) {
-  // ví dụ simple: (futures - spot)/spot / period
-  // giả sử period 8h, trả về rate 1 kỳ
-  return (markPrice - spot) / spot; // decimal
+    const S = parseFloat(spotJson.price);
+    const F = parseFloat(futuJson.data[0].lastPrice);
+    const rate = (F - S) / S; // funding estimate hiện tại
+
+    return {
+      symbol,
+      spot: S,
+      futures: F,
+      fundingEstimate: rate,
+      ts: new Date().toISOString(),
+    };
+  } catch (e) {
+    return { symbol, error: e.message };
+  }
 }
 
 // === STATE ===
 let latestFunding = { ts: null, data: [] };
 
-// === CẬP NHẬT ===
-async function refreshFunding() {
-  try {
-    const spot = await getSpotPrice(SYMBOL);
-    const mark = await getFuturesMarkPrice(SYMBOL);
-    const rate = computeFundingRate(spot, mark);
-    latestFunding = {
-      ts: new Date().toISOString(),
-      data: [
-        {
-          symbol: SYMBOL,
-          spot,
-          markPrice: mark,
-          fundingRate: rate,
-        },
-      ],
-    };
-    console.log(`[Funding] ${SYMBOL}: rate=${rate}, spot=${spot}, mark=${mark}`);
-    broadcast({ type: "update", data: latestFunding });
-  } catch (e) {
-    console.error("[Funding error]", e.message);
+// === Cập nhật tất cả symbol ===
+async function refreshAll() {
+  const out = [];
+  for (const s of TARGET_COINS) {
+    const d = await fetchFundingEstimate(s);
+    out.push(d);
+    if (!d.error)
+      console.log(`[FundingEstimate] ${s}: rate=${d.fundingEstimate.toFixed(6)}`);
+    else console.log(`[FundingError] ${s}: ${d.error}`);
   }
+  latestFunding = { ts: new Date().toISOString(), data: out };
+  broadcast({ type: "update", data: latestFunding });
 }
 
-// === HTTP + WS SERVER ===
+// === HTTP + WS server ===
 const server = http.createServer((req, res) => {
-  if (req.url === "/api/funding" && req.method === "GET") {
+  if (req.url === "/api/funding-estimate" && req.method === "GET") {
     res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
     res.end(JSON.stringify(latestFunding, null, 2));
     return;
   }
-  res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
+  res.writeHead(404, { "Content-Type": "text/plain" });
   res.end("Not Found");
 });
 
 const wss = new WebSocketServer({ noServer: true });
-function broadcast(msgObj) {
-  const data = JSON.stringify(msgObj);
-  for (const client of wss.clients) {
-    if (client.readyState === 1) client.send(data);
-  }
+function broadcast(msg) {
+  const data = JSON.stringify(msg);
+  for (const client of wss.clients) if (client.readyState === 1) client.send(data);
 }
 
 server.on("upgrade", (req, socket, head) => {
-  if (req.url === "/ws") {
-    wss.handleUpgrade(req, socket, head, (ws) => {
-      wss.emit("connection", ws, req);
-    });
-  } else {
-    socket.destroy();
-  }
+  if (req.url === "/ws") wss.handleUpgrade(req, socket, head, (ws) => wss.emit("connection", ws, req));
+  else socket.destroy();
 });
 
 wss.on("connection", (ws) => {
@@ -125,7 +106,7 @@ wss.on("connection", (ws) => {
 });
 
 server.listen(PORT, async () => {
-  console.log(`Server: http://localhost:${PORT}  (WS: /ws)`);
-  await refreshFunding(); // lần đầu
-  setInterval(refreshFunding, 60 * 1000); // mỗi 60s
+  console.log(`Funding estimate server running: http://localhost:${PORT}/api/funding-estimate`);
+  await refreshAll();
+  setInterval(refreshAll, 60 * 1000); // update mỗi 60s
 });
