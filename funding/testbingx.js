@@ -1,5 +1,5 @@
 // index.js
-// PHIÊN BẢN TEST - Chỉ lấy 5 coin cụ thể để kiểm tra lõi hệ thống
+// PHIÊN BẢN SỬA LỖI CUỐI CÙNG - Sửa lỗi mã hóa 'sha256'
 
 const http = require("http");
 const https = require("https");
@@ -21,9 +21,10 @@ const SYMBOLS_TO_FETCH = [
     "XRP-USDT"
 ];
 
-// === HÀM KÝ HMAC-SHA256 (Chuẩn) ===
+// === HÀM KÝ HMAC-SHA256 (ĐÃ SỬA LỖI) ===
 function sign(queryString, secret) {
-    return crypto.createHmac("sha26", secret).update(queryString).digest("hex");
+    // SỬA LỖI: Đã sửa "sha26" thành "sha256"
+    return crypto.createHmac("sha256", secret).update(queryString).digest("hex");
 }
 
 // === HÀM GỌI API TRUNG TÂM (Chuẩn) ===
@@ -37,7 +38,7 @@ async function apiRequest(path, params = {}) {
         hostname: HOST,
         path: fullPath,
         method: 'GET',
-        headers: { 'X-BX-APIKEY': bingxApiKey, 'User-Agent': 'Node/BingX-Funding-Simple-Test' },
+        headers: { 'X-BX-APIKEY': bingxApiKey, 'User-Agent': 'Node/BingX-Funding-Final-Fix' },
         timeout: 15000
     };
 
@@ -61,12 +62,12 @@ async function apiRequest(path, params = {}) {
     });
 }
 
-// === LẤY GIÁ VÀ TÍNH TOÁN (Đã sửa lỗi endpoint) ===
+// === LẤY GIÁ VÀ TÍNH TOÁN (Chuẩn) ===
 async function fetchFundingEstimate(symbol) {
     try {
         const [spotData, futuresData] = await Promise.all([
-            apiRequest('/openApi/spot/v1/ticker/price', { symbol }), // Endpoint Spot chính xác
-            apiRequest('/openApi/swap/v2/quote/ticker', { symbol })  // Endpoint Futures chính xác
+            apiRequest('/openApi/spot/v1/ticker/price', { symbol }),
+            apiRequest('/openApi/swap/v2/quote/ticker', { symbol })
         ]);
 
         if (!Array.isArray(spotData) || spotData.length === 0 || typeof spotData[0].price === 'undefined') {
@@ -152,8 +153,6 @@ wss.on("connection", (ws) => {
 // === KHỞI ĐỘNG SERVER (Đơn giản hóa) ===
 server.listen(PORT, async () => {
     console.log(`Server ước tính funding đang chạy tại: http://localhost:${PORT}/api/funding-estimate`);
-    // Chạy lần đầu ngay khi khởi động
     await refreshAll();
-    // Lặp lại sau mỗi 5 phút
     setInterval(refreshAll, 5 * 60 * 1000);
 });
