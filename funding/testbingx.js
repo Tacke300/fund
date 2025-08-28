@@ -1,5 +1,5 @@
 // index.js
-// PHIÊN BẢN CUỐI CÙNG - Tự động tìm và tính funding cho TẤT CẢ coin hợp lệ
+// PHIÊN BẢN CUỐI CÙNG v1.1 - Sửa lỗi Endpoint API Spot
 
 const http = require("http");
 const https = require("https");
@@ -28,7 +28,7 @@ async function apiRequest(path, params = {}) {
         hostname: HOST,
         path: fullPath,
         method: 'GET',
-        headers: { 'X-BX-APIKEY': bingxApiKey, 'User-Agent': 'Node/BingX-Funding-Auto' },
+        headers: { 'X-BX-APIKEY': bingxApiKey, 'User-Agent': 'Node/BingX-Funding-Auto-v1.1' },
         timeout: 15000
     };
 
@@ -73,25 +73,23 @@ async function fetchAllValidContracts() {
     };
 }
 
-// === LẤY GIÁ VÀ TÍNH TOÁN (ĐÃ TỐI ƯU) ===
+// === LẤY GIÁ VÀ TÍNH TOÁN (ĐÃ SỬA LỖI) ===
 async function fetchFundingEstimate(symbol) {
     try {
-        // Sử dụng /quote/price cho Spot - Ổn định và nhanh hơn
+        // SỬA LỖI: Endpoint lấy giá Spot đã được sửa từ 'quote/price' thành 'ticker/price'
         const [spotData, futuresData] = await Promise.all([
-            apiRequest('/openApi/spot/v1/quote/price', { symbol }),
+            apiRequest('/openApi/spot/v1/ticker/price', { symbol }), // <-- ĐÂY LÀ DÒNG ĐÃ SỬA
             apiRequest('/openApi/swap/v2/quote/ticker', { symbol })
         ]);
 
-        // Kiểm tra dữ liệu trả về từ /quote/price
-        if (!spotData || typeof spotData.price === 'undefined') {
-            throw new Error('Dữ liệu Spot trả về không hợp lệ từ /quote/price');
+        if (!Array.isArray(spotData) || spotData.length === 0 || typeof spotData[0].price === 'undefined') {
+            throw new Error('Dữ liệu Spot trả về không hợp lệ từ /ticker/price');
         }
-        // Kiểm tra dữ liệu trả về từ /quote/ticker
         if (!Array.isArray(futuresData) || futuresData.length === 0 || typeof futuresData[0].lastPrice === 'undefined') {
             throw new Error('Dữ liệu Futures trả về không hợp lệ');
         }
 
-        const spotPrice = parseFloat(spotData.price);
+        const spotPrice = parseFloat(spotData[0].price);
         const futuresPrice = parseFloat(futuresData[0].lastPrice);
         const fundingEstimate = (futuresPrice - spotPrice) / spotPrice;
 
@@ -107,18 +105,16 @@ async function fetchFundingEstimate(symbol) {
 
 // === STATE & REFRESH (TỰ ĐỘNG HOÀN TOÀN) ===
 let latestFunding = { ts: null, data: [], errors: [] };
-let symbolsToProcess = []; // Cache lại danh sách coin để không cần lấy lại mỗi lần refresh
+let symbolsToProcess = [];
 
 async function refreshAll() {
     console.log(`\n[${new Date().toISOString()}] Bắt đầu chu trình cập nhật...`);
 
-    // Chỉ lấy danh sách coin lần đầu tiên hoặc khi cache rỗng
     if (symbolsToProcess.length === 0) {
         try {
             const validSymbols = await fetchAllValidContracts();
             console.log(`[Thông tin] Tìm thấy ${validSymbols.spot.size} symbol trên Spot và ${validSymbols.futures.size} symbol trên Futures.`);
 
-            // Tìm những coin tồn tại trên cả hai thị trường
             const intersection = [];
             for (const symbol of validSymbols.futures) {
                 if (validSymbols.spot.has(symbol)) {
@@ -136,7 +132,7 @@ async function refreshAll() {
     }
     
     if (symbolsToProcess.length === 0) {
-        console.warn("[Cảnh báo] Không tìm thấy symbol chung nào giữa Spot và Futures. Kiểm tra lại API.");
+        console.warn("[Cảnh báo] Không tìm thấy symbol chung nào giữa Spot và Futures.");
         return;
     }
 
@@ -156,6 +152,8 @@ async function refreshAll() {
 
     if (successfulResults.length > 0) {
         console.log(`[Thành công] Lấy dữ liệu thành công cho ${successfulResults.length} / ${symbolsToProcess.length} symbol.`);
+        // Log một ví dụ thành công
+        console.log(`[Ví dụ] ${successfulResults[0].symbol}: ${successfulResults[0].fundingEstimatePercent}`);
     }
     if (errorResults.length > 0) {
         console.warn(`[Thất bại] Có lỗi khi lấy dữ liệu cho ${errorResults.length} symbol. Ví dụ: ${errorResults[0].symbol} - ${errorResults[0].error}`);
@@ -175,7 +173,6 @@ async function refreshAll() {
 const server = http.createServer((req, res) => {
     if (req.url === "/api/funding-estimate" && req.method === "GET") {
         res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
-        // Sắp xếp dữ liệu theo funding estimate giảm dần trước khi trả về
         const sortedData = {
             ...latestFunding,
             data: latestFunding.data.sort((a, b) => b.fundingEstimate - a.fundingEstimate)
@@ -201,8 +198,6 @@ wss.on("connection", (ws) => {
 
 server.listen(PORT, async () => {
     console.log(`Server ước tính funding đang chạy tại: http://localhost:${PORT}/api/funding-estimate`);
-    // Chạy lần đầu ngay khi khởi động
     await refreshAll();
-    // Lặp lại sau mỗi 5 phút
     setInterval(refreshAll, 5 * 60 * 1000);
 });
