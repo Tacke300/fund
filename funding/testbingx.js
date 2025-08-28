@@ -1,5 +1,5 @@
 // index.js
-// PHIÊN BẢN SỬA LỖI CUỐI CÙNG - Sửa lỗi mã hóa 'sha256'
+// PHIÊN BẢN CHẨN ĐOÁN - In ra dữ liệu Spot thô để kiểm tra
 
 const http = require("http");
 const https = require("https");
@@ -21,9 +21,8 @@ const SYMBOLS_TO_FETCH = [
     "XRP-USDT"
 ];
 
-// === HÀM KÝ HMAC-SHA256 (ĐÃ SỬA LỖI) ===
+// === HÀM KÝ HMAC-SHA256 (Đã sửa lỗi) ===
 function sign(queryString, secret) {
-    // SỬA LỖI: Đã sửa "sha26" thành "sha256"
     return crypto.createHmac("sha256", secret).update(queryString).digest("hex");
 }
 
@@ -38,7 +37,7 @@ async function apiRequest(path, params = {}) {
         hostname: HOST,
         path: fullPath,
         method: 'GET',
-        headers: { 'X-BX-APIKEY': bingxApiKey, 'User-Agent': 'Node/BingX-Funding-Final-Fix' },
+        headers: { 'X-BX-APIKEY': bingxApiKey, 'User-Agent': 'Node/BingX-Funding-Debug' },
         timeout: 15000
     };
 
@@ -62,7 +61,7 @@ async function apiRequest(path, params = {}) {
     });
 }
 
-// === LẤY GIÁ VÀ TÍNH TOÁN (Chuẩn) ===
+// === LẤY GIÁ VÀ TÍNH TOÁN (Thêm dòng log chẩn đoán) ===
 async function fetchFundingEstimate(symbol) {
     try {
         const [spotData, futuresData] = await Promise.all([
@@ -70,14 +69,24 @@ async function fetchFundingEstimate(symbol) {
             apiRequest('/openApi/swap/v2/quote/ticker', { symbol })
         ]);
 
-        if (!Array.isArray(spotData) || spotData.length === 0 || typeof spotData[0].price === 'undefined') {
-            throw new Error('Dữ liệu Spot trả về không hợp lệ');
+        // === DÒNG LOG CHẨN ĐOÁN QUAN TRỌNG ===
+        console.log(`[CHẨN ĐOÁN] Dữ liệu Spot thô nhận được cho ${symbol}:`, JSON.stringify(spotData));
+        // ===================================
+
+        // Logic kiểm tra được nới lỏng để thích ứng
+        let spotPrice;
+        if (Array.isArray(spotData) && spotData.length > 0 && spotData[0].price) {
+            spotPrice = parseFloat(spotData[0].price);
+        } else if (spotData && spotData.price) { // Thêm trường hợp nếu nó trả về 1 object
+             spotPrice = parseFloat(spotData.price);
+        } else {
+            throw new Error('Cấu trúc dữ liệu Spot không xác định hoặc thiếu "price"');
         }
+
         if (!Array.isArray(futuresData) || futuresData.length === 0 || typeof futuresData[0].lastPrice === 'undefined') {
             throw new Error('Dữ liệu Futures trả về không hợp lệ');
         }
 
-        const spotPrice = parseFloat(spotData[0].price);
         const futuresPrice = parseFloat(futuresData[0].lastPrice);
         const fundingEstimate = (futuresPrice - spotPrice) / spotPrice;
 
@@ -91,7 +100,7 @@ async function fetchFundingEstimate(symbol) {
     }
 }
 
-// === STATE & REFRESH (Đơn giản hóa) ===
+// === STATE & REFRESH (Không đổi) ===
 let latestFunding = { ts: null, data: [], errors: [] };
 
 async function refreshAll() {
@@ -100,30 +109,25 @@ async function refreshAll() {
     console.log(`[Tiến hành] Fetch dữ liệu cho ${SYMBOLS_TO_FETCH.length} symbol đã chọn...`);
     const results = await Promise.all(SYMBOLS_TO_FETCH.map(symbol => fetchFundingEstimate(symbol)));
     
-    const successfulResults = [];
-    const errorResults = [];
-
     results.forEach(result => {
         if (result.error) {
-            errorResults.push(result);
             console.log(`[Thất bại] ${result.symbol}: ${result.error}`);
         } else {
-            successfulResults.push(result);
             console.log(`[Thành công] ${result.symbol}: Ước tính = ${result.fundingEstimatePercent}`);
         }
     });
 
     latestFunding = {
         ts: new Date().toISOString(),
-        data: successfulResults,
-        errors: errorResults
+        data: results.filter(r => !r.error),
+        errors: results.filter(r => r.error)
     };
 
     broadcast({ type: "update", data: latestFunding });
     console.log(`Cập nhật hoàn tất.`);
 }
 
-// === HTTP + WS SERVER (Không thay đổi) ===
+// === HTTP + WS SERVER (Không đổi) ===
 const server = http.createServer((req, res) => {
     if (req.url === "/api/funding-estimate" && req.method === "GET") {
         res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
@@ -150,7 +154,7 @@ wss.on("connection", (ws) => {
     ws.send(JSON.stringify({ type: "snapshot", data: latestFunding }));
 });
 
-// === KHỞI ĐỘNG SERVER (Đơn giản hóa) ===
+// === KHỞI ĐỘNG SERVER (Không đổi) ===
 server.listen(PORT, async () => {
     console.log(`Server ước tính funding đang chạy tại: http://localhost:${PORT}/api/funding-estimate`);
     await refreshAll();
