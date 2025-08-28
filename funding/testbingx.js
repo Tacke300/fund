@@ -1,5 +1,5 @@
 // index.js
-// PHIÊN BẢN SẢN XUẤT - Cập nhật danh sách coin theo yêu cầu
+// PHIÊN BẢN SẢN XUẤT - Nâng cấp logic tự tính Funding Rate
 
 const http = require("http");
 const https = require("https");
@@ -12,20 +12,22 @@ const { bingxApiKey, bingxApiSecret } = require("./config.js");
 const HOST = "open-api.bingx.com";
 const PORT = 1997;
 
-// DANH SÁCH COIN MỚI THEO YÊU CẦU CỦA BẠN
 const SYMBOLS_TO_FETCH = [
     "RLC-USDT",
     "BIO-USDT",
     "WAVE-USDT",
-    "CRO-USDT"
+    "CRO-USDT",
+"TREE-USDT",
+    "SPK-USDT"
+
 ];
 
-// === HÀM KÝ HMAC-SHA256 (Chuẩn) ===
+// === HÀM KÝ HMAC-SHA256 (Không đổi) ===
 function sign(queryString, secret) {
     return crypto.createHmac("sha256", secret).update(queryString).digest("hex");
 }
 
-// === HÀM GỌI API TRUNG TÂM (Chuẩn) ===
+// === HÀM GỌI API TRUNG TÂM (Không đổi) ===
 async function apiRequest(path, params = {}) {
     const allParams = { ...params, timestamp: Date.now() };
     const queryString = new URLSearchParams(allParams).toString();
@@ -36,7 +38,7 @@ async function apiRequest(path, params = {}) {
         hostname: HOST,
         path: fullPath,
         method: 'GET',
-        headers: { 'X-BX-APIKEY': bingxApiKey, 'User-Agent': 'Node/BingX-Funding-Production-v1.1' },
+        headers: { 'X-BX-APIKEY': bingxApiKey, 'User-Agent': 'Node/BingX-Funding-SelfCalc-v2.0' },
         timeout: 15000
     };
 
@@ -50,7 +52,8 @@ async function apiRequest(path, params = {}) {
                     if (json.code !== 0) {
                         return reject(new Error(`API trả về lỗi: ${json.msg || JSON.stringify(json)}`));
                     }
-                    resolve(json.data);
+                     // Endpoint price trả về một mảng, ta lấy phần tử đầu tiên
+                    resolve(Array.isArray(json.data) ? json.data[0] : json.data);
                 } catch (e) { reject(new Error(`Lỗi parse JSON: ${data}`)); }
             });
         });
@@ -60,37 +63,32 @@ async function apiRequest(path, params = {}) {
     });
 }
 
-// === LẤY GIÁ VÀ TÍNH TOÁN (Đã ổn định) ===
-async function fetchFundingEstimate(symbol) {
+// === HÀM MỚI: TỰ TÍNH PREMIUM INDEX (Cách tiếp cận tốt nhất) ===
+async function calculateInstantaneousPremium(symbol) {
     try {
-        const [spotData, futuresData] = await Promise.all([
-            apiRequest('/openApi/spot/v1/ticker/price', { symbol }),
-            apiRequest('/openApi/swap/v2/quote/ticker', { symbol })
-        ]);
+        // Gọi API duy nhất để lấy cả Index Price và Mark Price
+        const priceData = await apiRequest('/openApi/swap/v2/quote/price', { symbol });
 
-        let spotPrice;
-        if (
-            Array.isArray(spotData) && spotData.length > 0 &&
-            Array.isArray(spotData[0].trades) && spotData[0].trades.length > 0 &&
-            spotData[0].trades[0].price
-        ) {
-            spotPrice = parseFloat(spotData[0].trades[0].price);
-        } else {
-            throw new Error('Cấu trúc dữ liệu Spot không hợp lệ');
+        if (!priceData || !priceData.indexPrice || !priceData.markPrice) {
+            throw new Error('Dữ liệu giá trả về không hợp lệ (thiếu indexPrice hoặc markPrice)');
         }
 
-        let futuresPrice;
-        if (futuresData && typeof futuresData === 'object' && !Array.isArray(futuresData) && futuresData.lastPrice) {
-            futuresPrice = parseFloat(futuresData.lastPrice);
-        } else {
-            throw new Error('Cấu trúc dữ liệu Futures không hợp lệ');
+        const indexPrice = parseFloat(priceData.indexPrice);
+        const markPrice = parseFloat(priceData.markPrice);
+        
+        if (indexPrice === 0) {
+            throw new Error('Index Price bằng 0, không thể chia');
         }
 
-        const fundingEstimate = (futuresPrice - spotPrice) / spotPrice;
+        // Áp dụng công thức tính Premium Index đã cải tiến
+        const premiumIndex = (markPrice - indexPrice) / indexPrice;
 
         return {
-            symbol, spot: spotPrice, futures: futuresPrice, fundingEstimate,
-            fundingEstimatePercent: `${(fundingEstimate * 100).toFixed(6)}%`,
+            symbol,
+            markPrice,
+            indexPrice,
+            premiumIndex, // Đây là kết quả tự tính của chúng ta
+            premiumIndexPercent: `${(premiumIndex * 100).toFixed(6)}%`,
             ts: new Date().toISOString(),
         };
     } catch (e) {
@@ -98,20 +96,21 @@ async function fetchFundingEstimate(symbol) {
     }
 }
 
-// === STATE & REFRESH (Không đổi) ===
+
+// === STATE & REFRESH (Cập nhật để dùng hàm tự tính mới) ===
 let latestFunding = { ts: null, data: [], errors: [] };
 
 async function refreshAll() {
     console.log(`\n[${new Date().toISOString()}] Bắt đầu chu trình cập nhật...`);
     
-    console.log(`[Tiến hành] Fetch dữ liệu cho ${SYMBOLS_TO_FETCH.length} symbol đã chọn: ${SYMBOLS_TO_FETCH.join(', ')}`);
-    const results = await Promise.all(SYMBOLS_TO_FETCH.map(symbol => fetchFundingEstimate(symbol)));
+    console.log(`[Tiến hành] Tự tính Premium Index cho ${SYMBOLS_TO_FETCH.length} symbol: ${SYMBOLS_TO_FETCH.join(', ')}`);
+    const results = await Promise.all(SYMBOLS_TO_FETCH.map(symbol => calculateInstantaneousPremium(symbol)));
     
     results.forEach(result => {
         if (result.error) {
             console.log(`[Thất bại] ${result.symbol}: ${result.error}`);
         } else {
-            console.log(`[Thành công] ${result.symbol}: Ước tính = ${result.fundingEstimatePercent}`);
+            console.log(`[Thành công] ${result.symbol}: Premium Index = ${result.premiumIndexPercent}`);
         }
     });
 
@@ -125,13 +124,13 @@ async function refreshAll() {
     console.log(`Cập nhật hoàn tất.`);
 }
 
-// === HTTP + WS SERVER (Không đổi) ===
+// === HTTP + WS SERVER (Cập nhật để sắp xếp theo premiumIndex) ===
 const server = http.createServer((req, res) => {
     if (req.url === "/api/funding-estimate" && req.method === "GET") {
         res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
         const sortedData = {
             ...latestFunding,
-            data: latestFunding.data.sort((a, b) => b.fundingEstimate - a.fundingEstimate)
+            data: latestFunding.data.sort((a, b) => b.premiumIndex - a.premiumIndex)
         };
         res.end(JSON.stringify(sortedData, null, 2));
         return;
@@ -154,7 +153,8 @@ wss.on("connection", (ws) => {
 
 // === KHỞI ĐỘNG SERVER (Không đổi) ===
 server.listen(PORT, async () => {
-    console.log(`Server ước tính funding đang chạy tại: http://localhost:${PORT}/api/funding-estimate`);
+    console.log(`Server tự tính funding đang chạy tại: http://localhost:${PORT}/api/funding-estimate`);
     await refreshAll();
-    setInterval(refreshAll, 5 * 60 * 1000);
+    // Premium Index biến động liên tục, refresh 5 phút là hợp lý
+    setInterval(refreshAll, 5 * 60 * 1000); 
 });
