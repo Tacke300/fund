@@ -1,5 +1,5 @@
 // index.js
-// PHIÊN BẢN CHẨN ĐOÁN - In ra dữ liệu Spot thô để kiểm tra
+// PHIÊN BẢN HOÀN HẢO - Đã sửa lỗi đọc cấu trúc dữ liệu Spot
 
 const http = require("http");
 const https = require("https");
@@ -21,7 +21,7 @@ const SYMBOLS_TO_FETCH = [
     "XRP-USDT"
 ];
 
-// === HÀM KÝ HMAC-SHA256 (Đã sửa lỗi) ===
+// === HÀM KÝ HMAC-SHA256 (Chuẩn) ===
 function sign(queryString, secret) {
     return crypto.createHmac("sha256", secret).update(queryString).digest("hex");
 }
@@ -37,7 +37,7 @@ async function apiRequest(path, params = {}) {
         hostname: HOST,
         path: fullPath,
         method: 'GET',
-        headers: { 'X-BX-APIKEY': bingxApiKey, 'User-Agent': 'Node/BingX-Funding-Debug' },
+        headers: { 'X-BX-APIKEY': bingxApiKey, 'User-Agent': 'Node/BingX-Funding-Perfected' },
         timeout: 15000
     };
 
@@ -61,7 +61,7 @@ async function apiRequest(path, params = {}) {
     });
 }
 
-// === LẤY GIÁ VÀ TÍNH TOÁN (Thêm dòng log chẩn đoán) ===
+// === LẤY GIÁ VÀ TÍNH TOÁN (ĐÃ SỬA LỖI LOGIC ĐỌC GIÁ) ===
 async function fetchFundingEstimate(symbol) {
     try {
         const [spotData, futuresData] = await Promise.all([
@@ -69,18 +69,19 @@ async function fetchFundingEstimate(symbol) {
             apiRequest('/openApi/swap/v2/quote/ticker', { symbol })
         ]);
 
-        // === DÒNG LOG CHẨN ĐOÁN QUAN TRỌNG ===
-        console.log(`[CHẨN ĐOÁN] Dữ liệu Spot thô nhận được cho ${symbol}:`, JSON.stringify(spotData));
-        // ===================================
-
-        // Logic kiểm tra được nới lỏng để thích ứng
         let spotPrice;
-        if (Array.isArray(spotData) && spotData.length > 0 && spotData[0].price) {
-            spotPrice = parseFloat(spotData[0].price);
-        } else if (spotData && spotData.price) { // Thêm trường hợp nếu nó trả về 1 object
-             spotPrice = parseFloat(spotData.price);
+        // Logic mới: Đi sâu vào cấu trúc mảng -> đối tượng -> mảng trades để lấy giá
+        if (
+            Array.isArray(spotData) &&
+            spotData.length > 0 &&
+            Array.isArray(spotData[0].trades) &&
+            spotData[0].trades.length > 0 &&
+            spotData[0].trades[0].price
+        ) {
+            spotPrice = parseFloat(spotData[0].trades[0].price);
         } else {
-            throw new Error('Cấu trúc dữ liệu Spot không xác định hoặc thiếu "price"');
+            // Nếu cấu trúc không đúng như dự kiến, báo lỗi
+            throw new Error('Không tìm thấy giá trong cấu trúc dữ liệu Spot trả về');
         }
 
         if (!Array.isArray(futuresData) || futuresData.length === 0 || typeof futuresData[0].lastPrice === 'undefined') {
