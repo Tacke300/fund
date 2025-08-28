@@ -1,5 +1,5 @@
 // index.js
-// PHIÊN BẢN CHẨN ĐOÁN 2 - In ra dữ liệu Futures thô để kiểm tra
+// PHIÊN BẢN SẢN XUẤT - Đã sửa lỗi đọc cấu trúc Spot & Futures
 
 const http = require("http");
 const https = require("https");
@@ -37,7 +37,7 @@ async function apiRequest(path, params = {}) {
         hostname: HOST,
         path: fullPath,
         method: 'GET',
-        headers: { 'X-BX-APIKEY': bingxApiKey, 'User-Agent': 'Node/BingX-Funding-Debug-Futures' },
+        headers: { 'X-BX-APIKEY': bingxApiKey, 'User-Agent': 'Node/BingX-Funding-Production-v1.0' },
         timeout: 15000
     };
 
@@ -61,37 +61,35 @@ async function apiRequest(path, params = {}) {
     });
 }
 
-// === LẤY GIÁ VÀ TÍNH TOÁN (Thêm log chẩn đoán cho Futures) ===
+// === LẤY GIÁ VÀ TÍNH TOÁN (ĐÃ SỬA LỖI CẢ 2 LOGIC) ===
 async function fetchFundingEstimate(symbol) {
     try {
         const [spotData, futuresData] = await Promise.all([
+            // Dữ liệu Spot trả về: [{ trades: [{ price: "..." }] }]
             apiRequest('/openApi/spot/v1/ticker/price', { symbol }),
+            // Dữ liệu Futures trả về: { lastPrice: "..." }
             apiRequest('/openApi/swap/v2/quote/ticker', { symbol })
         ]);
 
-        // === DÒNG LOG CHẨN ĐOÁN MỚI CHO FUTURES ===
-        console.log(`[CHẨN ĐOÁN] Dữ liệu Futures thô nhận được cho ${symbol}:`, JSON.stringify(futuresData));
-        // =======================================
-
         let spotPrice;
         if (
-            Array.isArray(spotData) &&
-            spotData.length > 0 &&
-            Array.isArray(spotData[0].trades) &&
-            spotData[0].trades.length > 0 &&
+            Array.isArray(spotData) && spotData.length > 0 &&
+            Array.isArray(spotData[0].trades) && spotData[0].trades.length > 0 &&
             spotData[0].trades[0].price
         ) {
             spotPrice = parseFloat(spotData[0].trades[0].price);
         } else {
-            throw new Error('Không tìm thấy giá trong cấu trúc dữ liệu Spot trả về');
+            throw new Error('Cấu trúc dữ liệu Spot không hợp lệ');
         }
 
-        // Logic kiểm tra Futures hiện tại, sẽ gây lỗi để chúng ta xem được log chẩn đoán
-        if (!Array.isArray(futuresData) || futuresData.length === 0 || typeof futuresData[0].lastPrice === 'undefined') {
-            throw new Error('Dữ liệu Futures trả về không hợp lệ');
+        let futuresPrice;
+        // Logic mới cho Futures: đọc trực tiếp từ đối tượng
+        if (futuresData && typeof futuresData === 'object' && !Array.isArray(futuresData) && futuresData.lastPrice) {
+            futuresPrice = parseFloat(futuresData.lastPrice);
+        } else {
+            throw new Error('Cấu trúc dữ liệu Futures không hợp lệ');
         }
 
-        const futuresPrice = parseFloat(futuresData[0].lastPrice);
         const fundingEstimate = (futuresPrice - spotPrice) / spotPrice;
 
         return {
@@ -134,7 +132,7 @@ async function refreshAll() {
 // === HTTP + WS SERVER (Không đổi) ===
 const server = http.createServer((req, res) => {
     if (req.url === "/api/funding-estimate" && req.method === "GET") {
-        res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+        res.writeHead(200, { "Content-Type": "application/json; charset-utf-8" });
         const sortedData = {
             ...latestFunding,
             data: latestFunding.data.sort((a, b) => b.fundingEstimate - a.fundingEstimate)
@@ -142,7 +140,7 @@ const server = http.createServer((req, res) => {
         res.end(JSON.stringify(sortedData, null, 2));
         return;
     }
-    res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
+    res.writeHead(404, { "Content-Type": "text/plain; charset-utf-8" });
     res.end("Not Found");
 });
 const wss = new WebSocketServer({ noServer: true });
