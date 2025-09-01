@@ -137,16 +137,13 @@ async function fetchKucoinFundingRatesInBatches(symbols) {
         const batch = symbols.slice(i, i + batchSize);
         const promises = batch.map(symbol =>
             makeHttpRequest('GET', KUCOIN_FUTURES_HOST, `/api/v1/funding-rate?symbol=${symbol}`)
-                // *** SỬA LỖI TẠI ĐÂY: Bỏ .data thứ hai ***
-                .then(rawData => ({ symbol, data: JSON.parse(rawData) }))
+                .then(rawData => ({ symbol, response: JSON.parse(rawData) }))
                 .catch(e => ({ symbol, error: e.message }))
         );
-        
-        const responses = await Promise.all(promises);
+        const responses = await Promise.all(responses);
 
-        // *** THÊM LOG DEBUG NHƯ BẠN YÊU CẦU ***
         if (isFirstBatch && responses.length > 0) {
-            console.log(`[KUCOIN_DEBUG] Dữ liệu thô của symbol đầu tiên (${responses[0].symbol}):`, JSON.stringify(responses[0].data, null, 2));
+            console.log(`[KUCOIN_DEBUG] Dữ liệu thô của symbol đầu tiên (${responses[0].symbol}):`, JSON.stringify(responses[0].response, null, 2));
             isFirstBatch = false;
         }
 
@@ -182,9 +179,9 @@ async function updateKucoinData() {
         if (!isNaN(maxLeverage) && maxLeverage > 0) kucoinLeverage[cleanedSym] = maxLeverage;
 
         const fundingInfo = fundingRateResults.find(fr => fr.symbol === contract.symbol);
-        // Kiểm tra fundingInfo.data.data
-        if (fundingInfo && !fundingInfo.error && fundingInfo.data && fundingInfo.data.data) {
-            const fundingData = fundingInfo.data.data;
+
+        if (fundingInfo && fundingInfo.response && fundingInfo.response.code === '200000') {
+            const fundingData = fundingInfo.response.data;
             const fundingRate = parseFloat(fundingData.fundingFeeRate);
             const fundingTimestamp = parseInt(fundingData.nextFundingFeeTime, 10);
             if (!isNaN(fundingRate) && !isNaN(fundingTimestamp) && fundingTimestamp > 0) {
