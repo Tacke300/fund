@@ -115,74 +115,36 @@ function calculateNextStandardFundingTime() {
     return nextFundingDate.getTime();
 }
 
-async function fetchKucoinActiveContracts() {
+async function updateKucoinData() {
+    console.log('[KUCOIN_DATA] 🔄 Bắt đầu chu trình cập nhật dữ liệu KuCoin (tối ưu hóa)...');
+    debugRawLeverageResponses['kucoin'].status = 'Đang tải contracts...';
+    
     try {
         const rawData = await makeHttpRequest('GET', KUCOIN_FUTURES_HOST, '/api/v1/contracts/active');
         const json = JSON.parse(rawData);
-        if (json.code === '200000' && Array.isArray(json.data)) return json.data;
-        console.error(`[KUCOIN_DATA] Lỗi khi lấy active contracts: ${json.msg || 'Unknown error'}`);
-        return [];
-    } catch (e) {
-        console.error(`[KUCOIN_DATA] Lỗi request khi lấy active contracts: ${e.message}`);
-        return [];
-    }
-}
 
-async function fetchKucoinFundingRatesInBatches(symbols) {
-    const batchSize = 20;
-    const allFundingRates = [];
-    console.log(`[KUCOIN_DATA] Bắt đầu lấy funding rates cho ${symbols.length} symbol theo lô ${batchSize}...`);
-    for (let i = 0; i < symbols.length; i += batchSize) {
-        const batch = symbols.slice(i, i + batchSize);
-        const promises = batch.map(symbol =>
-            makeHttpRequest('GET', KUCOIN_FUTURES_HOST, `/api/v1/funding-rate?symbol=${symbol}`)
-                .then(rawData => ({ symbol, response: JSON.parse(rawData) }))
-                .catch(e => ({ symbol, error: e.message }))
-        );
-        const responses = await Promise.all(promises);
-        allFundingRates.push(...responses);
-        debugRawLeverageResponses['kucoin'].status = `Funding Batch (${i + batch.length}/${symbols.length})`;
-        if (i + batchSize < symbols.length) await sleep(150);
-    }
-    return allFundingRates;
-}
+        if (json.code !== '200000' || !Array.isArray(json.data)) {
+            throw new Error(`API trả về lỗi: ${json.msg || 'Không rõ'}`);
+        }
 
-async function updateKucoinData() {
-    console.log('[KUCOIN_DATA] 🔄 Bắt đầu chu trình cập nhật dữ liệu KuCoin...');
-    debugRawLeverageResponses['kucoin'].status = 'Đang tải contracts...';
-    
-    const activeContracts = await fetchKucoinActiveContracts();
-    if (activeContracts.length === 0) {
-        console.error('[KUCOIN_DATA] ❌ Không lấy được danh sách active contracts. Bỏ qua chu trình.');
-        debugRawLeverageResponses['kucoin'].status = 'Lỗi tải contracts';
-        exchangeData['kucoin'] = { rates: {} };
-        return;
-    }
+        const activeContracts = json.data;
+        const processedRates = {};
+        const kucoinLeverage = {};
+        let successCount = 0;
 
-    // *** THÊM LOG DEBUG TẠI ĐÂY ***
-    if (activeContracts.length > 0) {
-        console.log(`[KUCOIN_DEBUG] Lấy được ${activeContracts.length} contracts. Cấu trúc của contract đầu tiên:`);
-        console.log(JSON.stringify(activeContracts[0], null, 2));
-    }
+        for (const contract of activeContracts) {
+            const cleanedSym = cleanSymbol(contract.symbol);
+            if (!cleanedSym.endsWith('USDT')) continue;
 
-    const symbols = activeContracts.map(c => c.symbol);
-    const fundingRateResults = await fetchKucoinFundingRatesInBatches(symbols);
-    
-    const processedRates = {};
-    let successCount = 0;
-    const kucoinLeverage = {};
+            const maxLeverage = parseInt(contract.maxLeverage, 10);
+            const fundingRate = parseFloat(contract.fundingFeeRate);
+            // KuCoin trả về timestamp tính bằng nano giây, cần chia cho 1.000.000 để ra mili giây
+            const fundingTimestamp = Math.floor(parseInt(contract.nextFundingRateTime, 10) / 1000000);
 
-    for (const contract of activeContracts) {
-        const cleanedSym = cleanSymbol(contract.symbol);
-        const maxLeverage = parseInt(contract.maxLeverage, 10);
-        if (!isNaN(maxLeverage) && maxLeverage > 0) kucoinLeverage[cleanedSym] = maxLeverage;
+            if (!isNaN(maxLeverage) && maxLeverage > 0) {
+                kucoinLeverage[cleanedSym] = maxLeverage;
+            }
 
-        const fundingInfo = fundingRateResults.find(fr => fr.symbol === contract.symbol);
-
-        if (fundingInfo && fundingInfo.response && fundingInfo.response.code === '200000') {
-            const fundingData = fundingInfo.response.data;
-            const fundingRate = parseFloat(fundingData.fundingFeeRate);
-            const fundingTimestamp = parseInt(fundingData.nextFundingFeeTime, 10);
             if (!isNaN(fundingRate) && !isNaN(fundingTimestamp) && fundingTimestamp > 0) {
                 processedRates[cleanedSym] = {
                     symbol: cleanedSym,
@@ -193,18 +155,25 @@ async function updateKucoinData() {
                 successCount++;
             }
         }
+
+        leverageCache['kucoin'] = kucoinLeverage;
+        exchangeData['kucoin'] = { rates: processedRates };
+
+        debugRawLeverageResponses['kucoin'].status = `Hoàn tất (${successCount} cặp)`;
+        debugRawLeverageResponses['kucoin'].timestamp = new Date();
+        debugRawLeverageResponses['kucoin'].data = `Đã lấy ${successCount} cặp.`;
+        debugRawLeverageResponses['kucoin'].error = null;
+
+        console.log(`[KUCOIN_DATA] ✅ Hoàn tất. Lấy được ${successCount} cặp dữ liệu từ 1 request.`);
+
+    } catch (e) {
+        console.error(`[KUCOIN_DATA] ❌ Lỗi nghiêm trọng khi cập nhật dữ liệu KuCoin: ${e.message}`);
+        debugRawLeverageResponses['kucoin'].status = 'Lỗi nghiêm trọng';
+        debugRawLeverageResponses['kucoin'].error = { code: 'FETCH_ERROR', msg: e.message };
+        exchangeData['kucoin'] = { rates: {} };
     }
-    
-    leverageCache['kucoin'] = kucoinLeverage;
-    exchangeData['kucoin'] = { rates: processedRates };
-    
-    debugRawLeverageResponses['kucoin'].status = `Hoàn tất (${successCount} cặp)`;
-    debugRawLeverageResponses['kucoin'].timestamp = new Date();
-    debugRawLeverageResponses['kucoin'].data = `Đã lấy ${successCount} cặp.`;
-    debugRawLeverageResponses['kucoin'].error = null;
-    
-    console.log(`[KUCOIN_DATA] ✅ Hoàn tất. Lấy được ${successCount} funding rates và ${Object.keys(kucoinLeverage).length} đòn bẩy.`);
 }
+
 
 async function fetchFundingRatesForOtherExchanges() {
     console.log('[DATA] Bắt đầu làm mới funding rates cho các sàn (trừ KuCoin)...');
