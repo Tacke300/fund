@@ -131,7 +131,6 @@ async function fetchKucoinActiveContracts() {
 async function fetchKucoinFundingRatesInBatches(symbols) {
     const batchSize = 20;
     const allFundingRates = [];
-    let isFirstBatch = true;
     console.log(`[KUCOIN_DATA] Bắt đầu lấy funding rates cho ${symbols.length} symbol theo lô ${batchSize}...`);
     for (let i = 0; i < symbols.length; i += batchSize) {
         const batch = symbols.slice(i, i + batchSize);
@@ -140,15 +139,7 @@ async function fetchKucoinFundingRatesInBatches(symbols) {
                 .then(rawData => ({ symbol, response: JSON.parse(rawData) }))
                 .catch(e => ({ symbol, error: e.message }))
         );
-        
-        // *** SỬA LỖI TẠI ĐÂY: Dùng `promises` thay vì `responses` ***
         const responses = await Promise.all(promises);
-
-        if (isFirstBatch && responses.length > 0) {
-            console.log(`[KUCOIN_DEBUG] Dữ liệu thô của symbol đầu tiên (${responses[0].symbol}):`, JSON.stringify(responses[0].response, null, 2));
-            isFirstBatch = false;
-        }
-
         allFundingRates.push(...responses);
         debugRawLeverageResponses['kucoin'].status = `Funding Batch (${i + batch.length}/${symbols.length})`;
         if (i + batchSize < symbols.length) await sleep(150);
@@ -166,6 +157,12 @@ async function updateKucoinData() {
         debugRawLeverageResponses['kucoin'].status = 'Lỗi tải contracts';
         exchangeData['kucoin'] = { rates: {} };
         return;
+    }
+
+    // *** THÊM LOG DEBUG TẠI ĐÂY ***
+    if (activeContracts.length > 0) {
+        console.log(`[KUCOIN_DEBUG] Lấy được ${activeContracts.length} contracts. Cấu trúc của contract đầu tiên:`);
+        console.log(JSON.stringify(activeContracts[0], null, 2));
     }
 
     const symbols = activeContracts.map(c => c.symbol);
