@@ -4,7 +4,6 @@ const fs = require('fs');
 const path = require('path');
 const ccxt = require('ccxt');
 const crypto = require('crypto');
-const { URLSearchParams } = require('url');
 
 const {
     binanceApiKey, binanceApiSecret,
@@ -37,7 +36,6 @@ let debugRawLeverageResponses = {
 const BINANCE_BASE_HOST = 'fapi.binance.com';
 const BITGET_NATIVE_REST_HOST = 'api.bitget.com';
 const KUCOIN_FUTURES_HOST = 'api-futures.kucoin.com';
-let binanceServerTimeOffset = 0;
 
 const exchanges = {};
 EXCHANGE_IDS.forEach(id => {
@@ -68,7 +66,7 @@ const cleanSymbol = (symbol) => {
 
 function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
 
-async function makeHttpRequest(method, hostname, path, headers = {}, postData = '') {
+async function makeHttpRequest(method, hostname, path, headers = {}) {
     return new Promise((resolve, reject) => {
         const options = { hostname, port: 443, path, method, headers: { ...headers, 'User-Agent': 'Mozilla/5.0' }, timeout: 20000 };
         const req = https.request(options, (res) => {
@@ -81,7 +79,6 @@ async function makeHttpRequest(method, hostname, path, headers = {}, postData = 
         });
         req.on('error', (e) => reject({ code: 'NETWORK_ERROR', msg: e.message }));
         req.on('timeout', () => { req.destroy(); reject({ code: 'TIMEOUT_ERROR', msg: 'Request timed out' }); });
-        if (postData) req.write(postData);
         req.end();
     });
 }
@@ -134,15 +131,25 @@ async function fetchKucoinActiveContracts() {
 async function fetchKucoinFundingRatesInBatches(symbols) {
     const batchSize = 20;
     const allFundingRates = [];
+    let isFirstBatch = true;
     console.log(`[KUCOIN_DATA] Bắt đầu lấy funding rates cho ${symbols.length} symbol theo lô ${batchSize}...`);
     for (let i = 0; i < symbols.length; i += batchSize) {
         const batch = symbols.slice(i, i + batchSize);
         const promises = batch.map(symbol =>
             makeHttpRequest('GET', KUCOIN_FUTURES_HOST, `/api/v1/funding-rate?symbol=${symbol}`)
-                .then(rawData => ({ symbol, data: JSON.parse(rawData).data }))
+                // *** SỬA LỖI TẠI ĐÂY: Bỏ .data thứ hai ***
+                .then(rawData => ({ symbol, data: JSON.parse(rawData) }))
                 .catch(e => ({ symbol, error: e.message }))
         );
+        
         const responses = await Promise.all(promises);
+
+        // *** THÊM LOG DEBUG NHƯ BẠN YÊU CẦU ***
+        if (isFirstBatch && responses.length > 0) {
+            console.log(`[KUCOIN_DEBUG] Dữ liệu thô của symbol đầu tiên (${responses[0].symbol}):`, JSON.stringify(responses[0].data, null, 2));
+            isFirstBatch = false;
+        }
+
         allFundingRates.push(...responses);
         debugRawLeverageResponses['kucoin'].status = `Funding Batch (${i + batch.length}/${symbols.length})`;
         if (i + batchSize < symbols.length) await sleep(150);
@@ -175,9 +182,11 @@ async function updateKucoinData() {
         if (!isNaN(maxLeverage) && maxLeverage > 0) kucoinLeverage[cleanedSym] = maxLeverage;
 
         const fundingInfo = fundingRateResults.find(fr => fr.symbol === contract.symbol);
-        if (fundingInfo && !fundingInfo.error && fundingInfo.data) {
-            const fundingRate = parseFloat(fundingInfo.data.fundingFeeRate);
-            const fundingTimestamp = parseInt(fundingInfo.data.nextFundingFeeTime, 10);
+        // Kiểm tra fundingInfo.data.data
+        if (fundingInfo && !fundingInfo.error && fundingInfo.data && fundingInfo.data.data) {
+            const fundingData = fundingInfo.data.data;
+            const fundingRate = parseFloat(fundingData.fundingFeeRate);
+            const fundingTimestamp = parseInt(fundingData.nextFundingFeeTime, 10);
             if (!isNaN(fundingRate) && !isNaN(fundingTimestamp) && fundingTimestamp > 0) {
                 processedRates[cleanedSym] = {
                     symbol: cleanedSym,
