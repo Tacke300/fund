@@ -4,7 +4,6 @@ const fs = require('fs');
 const path = require('path');
 const ccxt = require('ccxt');
 const crypto = require('crypto');
-const WebSocket = require('ws');
 const { URLSearchParams } = require('url');
 
 const {
@@ -48,6 +47,7 @@ let binanceServerTimeOffset = 0;
 
 const exchanges = {};
 EXCHANGE_IDS.forEach(id => {
+    if (id === 'kucoin') return; // Bỏ qua KuCoin trong ccxt init
     const exchangeClass = ccxt[id];
     const config = {
         'options': { 'defaultType': 'swap' },
@@ -60,17 +60,10 @@ EXCHANGE_IDS.forEach(id => {
     if (id === 'binanceusdm') { config.apiKey = binanceApiKey; config.secret = binanceApiSecret; }
     else if (id === 'okx') { config.apiKey = okxApiKey; config.secret = okxApiSecret; if(okxPassword) config.password = okxPassword; }
     else if (id === 'bitget') { config.apiKey = bitgetApiKey; config.secret = bitgetApiSecret; if(bitgetApiPassword) config.password = bitgetApiPassword; }
-    else if (id === 'kucoin') { config.apiKey = kucoinApiKey; config.secret = kucoinApiSecret; if(kucoinApiPassword) config.password = kucoinApiPassword; }
     else { console.warn(`[AUTH] ⚠️ Thiếu API Key/Secret hoặc cấu hình cho ${id.toUpperCase()}.`); }
 
     exchanges[id] = new exchangeClass(config);
 });
-
-let kucoinWsClient = null;
-let isKucoinWsConnected = false;
-let kucoinPingInterval = null;
-let kucoinRestFallbackInterval = null;
-let kucoinApiSymbols = [];
 
 // ----- HÀM HỖ TRỢ CHUNG -----
 const cleanSymbol = (symbol) => {
@@ -94,29 +87,6 @@ const cleanSymbol = (symbol) => {
 };
 
 function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
-
-function getMaxLeverageFromMarketInfo(market) {
-    if (typeof market?.limits?.leverage?.max === 'number' && market.limits.leverage.max > 0) {
-        return market.limits.leverage.max;
-    }
-    if (typeof market?.info === 'object' && market.info !== null) {
-        const possibleLeverageKeys = ['maxLeverage', 'leverage', 'initialLeverage', 'max_leverage'];
-        for (const key of possibleLeverageKeys) {
-            if (market.info.hasOwnProperty(key)) {
-                const value = market.info[key];
-                const leverage = parseInt(value, 10);
-                if (!isNaN(leverage) && leverage > 1) return leverage;
-            }
-        }
-    }
-    return null;
-}
-
-function createSignature(queryString, apiSecret) {
-    return crypto.createHmac('sha256', apiSecret)
-        .update(queryString)
-        .digest('hex');
-}
 
 async function makeHttpRequest(method, hostname, path, headers = {}, postData = '') {
     return new Promise((resolve, reject) => {
@@ -157,6 +127,7 @@ async function makeHttpRequest(method, hostname, path, headers = {}, postData = 
     });
 }
 
+// ... Giữ lại các hàm tiện ích khác như syncBinanceServerTime, callSignedBinanceAPI ...
 async function syncBinanceServerTime() {
     try {
         const data = await makeHttpRequest('GET', BINANCE_BASE_HOST, '/fapi/v1/time');
@@ -164,76 +135,50 @@ async function syncBinanceServerTime() {
         const binanceServerTime = parsedData.serverTime;
         const localTime = Date.now();
         binanceServerTimeOffset = binanceServerTime - localTime;
-        console.log(`[TIME_SYNC] ✅ Đồng bộ thời gian Binance. Lệch: ${binanceServerTimeOffset} ms.`);
     } catch (error) {
         console.error(`[TIME_SYNC] ❌ Lỗi đồng bộ thời gian Binance: ${error.msg || error.message}.`);
         binanceServerTimeOffset = 0;
-        throw error;
     }
 }
-
 async function callSignedBinanceAPI(fullEndpointPath, method = 'GET', params = {}) {
     if (!binanceApiKey || !binanceApiSecret) {
         throw new Error("API Key hoặc Secret Key cho Binance chưa được cấu hình.");
     }
     const recvWindow = 5000;
     const timestamp = Date.now() + binanceServerTimeOffset;
-
-    let queryString = Object.keys(params)
-        .map(key => `${key}=${params[key]}`)
-        .join('&');
-
+    let queryString = Object.keys(params).map(key => `${key}=${params[key]}`).join('&');
     queryString += (queryString ? '&' : '') + `timestamp=${timestamp}&recvWindow=${recvWindow}`;
-
-    const signature = createSignature(queryString, binanceApiSecret);
-
+    const signature = crypto.createHmac('sha256', binanceApiSecret).update(queryString).digest('hex');
     let requestPath;
     let requestBody = '';
-    const headers = {
-        'X-MBX-APIKEY': binanceApiKey,
-    };
-
+    const headers = { 'X-MBX-APIKEY': binanceApiKey, };
     if (method === 'GET') {
         requestPath = `${fullEndpointPath}?${queryString}&signature=${signature}`;
         headers['Content-Type'] = 'application/json';
-    } else if (method === 'POST' || method === 'PUT' || method === 'DELETE') {
+    } else {
         requestPath = fullEndpointPath;
         requestBody = `${queryString}&signature=${signature}`;
         headers['Content-Type'] = 'application/x-www-form-urlencoded';
-    } else {
-        throw new Error(`Method không hỗ trợ: ${method}`);
     }
-
     try {
         const rawData = await makeHttpRequest(method, BINANCE_BASE_HOST, requestPath, headers, requestBody);
         return JSON.parse(rawData);
     } catch (error) {
         console.error(`[BINANCE_API] Lỗi ký API Binance: ${error.code || 'UNKNOWN'} - ${error.msg || error.message}. Path: ${requestPath}`);
-        if (error.code === 400 && error.rawResponse && error.rawResponse.includes('-2015')) {
-            console.error("  -> LỖI XÁC THỰC! Kiểm tra API Key/Secret và quyền Futures Binance.");
-        } else if (error.code === 400 && error.rawResponse && error.rawResponse.includes('-1021')) {
-            console.error("  -> Lỗi lệch thời gian. Đồng bộ đồng hồ máy tính hoặc chạy lại bot.");
-        } else if (error.code === 429 || error.code === -1003) {
-            console.error("  -> BỊ CẤM IP TẠM THỜI (RATE LIMIT). CẦN GIẢM TẦN SUẤT GỌI API HOẶC ĐỢI!");
-        }
         throw error;
     }
 }
-
 async function fetchBitgetFundingTimeNativeApi(apiSymbol) {
     try {
         const formattedApiSymbol = apiSymbol.includes('_UMCBL') ? apiSymbol : `${apiSymbol}_UMCBL`;
         const apiPath = `/api/mix/v1/market/funding-time?symbol=${encodeURIComponent(formattedApiSymbol)}`;
         const rawData = await makeHttpRequest('GET', BITGET_NATIVE_REST_HOST, apiPath);
         const json = JSON.parse(rawData);
-
         if (json.code === '00000' && json.data) {
             const fundingData = Array.isArray(json.data) ? json.data[0] : json.data;
             if (fundingData && fundingData.fundingTime) {
                 const parsedFundingTime = parseInt(fundingData.fundingTime, 10);
-                if (!isNaN(parsedFundingTime) && parsedFundingTime > 0) {
-                    return parsedFundingTime;
-                }
+                if (!isNaN(parsedFundingTime) && parsedFundingTime > 0) return parsedFundingTime;
             }
         }
         return null;
@@ -243,376 +188,112 @@ async function fetchBitgetFundingTimeNativeApi(apiSymbol) {
     }
 }
 
+// ----- HÀM LẤY DỮ LIỆU KUCOIN MỚI -----
 
-async function updateLeverageForExchange(id, symbolsToUpdate = null) {
-    const exchange = exchanges[id];
-    let currentFetchedLeverageDataMap = {};
-    const updateType = symbolsToUpdate ? 'mục tiêu' : 'toàn bộ';
-    let status = `Đang tải đòn bẩy (${updateType})...`;
-    let error = null;
-
-    debugRawLeverageResponses[id].status = status;
-    debugRawLeverageResponses[id].timestamp = new Date();
-    debugRawLeverageResponses[id].error = null;
-
-    try {
-        if (id === 'binanceusdm') {
-            await syncBinanceServerTime();
-            const leverageBracketsResponse = await callSignedBinanceAPI('/fapi/v1/leverageBracket', 'GET');
-
-            let successCount = 0;
-            if (Array.isArray(leverageBracketsResponse)) {
-                for (const item of leverageBracketsResponse) {
-                    if (!item.symbol.includes('USDT')) {
-                        continue;
-                    }
-                    const cleanedSym = cleanSymbol(item.symbol);
-                    if (symbolsToUpdate && !symbolsToUpdate.includes(cleanedSym)) {
-                        continue;
-                    }
-                    if (item.symbol && Array.isArray(item.brackets) && item.brackets.length > 0) {
-                        const firstBracket = item.brackets.find(b => b.bracket === 1) || item.brackets[0];
-                        const maxLeverage = parseInt(firstBracket.initialLeverage, 10);
-                        if (!isNaN(maxLeverage) && maxLeverage > 0) {
-                            currentFetchedLeverageDataMap[cleanedSym] = maxLeverage;
-                            successCount++;
-                        }
-                    }
-                }
-                status = `Đòn bẩy hoàn tất (${successCount} cặp)`;
-                debugRawLeverageResponses[id].data = `Đã lấy ${successCount} cặp.`;
-                console.log(`[CACHE] ✅ Binance: Đã lấy ${successCount} cặp đòn bẩy USDT từ API trực tiếp.`);
-
-            }
-        }
-        else {
-            await exchange.loadMarkets(true);
-            
-            let successCount = 0;
-            if (exchange.has['fetchLeverageTiers']) {
-                const leverageTiers = await exchange.fetchLeverageTiers();
-                for (const symbol in leverageTiers) {
-                    const cleanedSym = cleanSymbol(symbol);
-                    if (symbolsToUpdate && !symbolsToUpdate.includes(cleanedSym)) {
-                        continue;
-                    }
-                    const market = exchange.markets[symbol];
-                    if (!market || !market.swap || !market.symbol.includes('USDT')) {
-                        continue;
-                    }
-
-                    const tiers = leverageTiers[symbol];
-                    if (Array.isArray(tiers) && tiers.length > 0) {
-                        const numericLeverages = tiers.map(t => typeof t.leverage === 'number' ? t.leverage : parseFloat(t.leverage)).filter(l => !isNaN(l) && l > 0);
-                        const parsedMaxLeverage = numericLeverages.length > 0 ? parseInt(Math.max(...numericLeverages), 10) : 0;
-                        if (parsedMaxLeverage > 0) {
-                            currentFetchedLeverageDataMap[cleanedSym] = parsedMaxLeverage;
-                            successCount++;
-                        }
-                    }
-                }
-                status = `Đòn bẩy hoàn tất (${successCount} cặp)`;
-                debugRawLeverageResponses[id].data = `Đã lấy ${successCount} cặp.`;
-                console.log(`[CACHE] ✅ ${id.toUpperCase()}: Đã lấy ${successCount} cặp đòn bẩy USDT từ fetchLeverageTiers.`);
-            } else {
-                console.log(`[CACHE] ${id.toUpperCase()}: fetchLeverageTiers không khả dụng. Dùng loadMarkets...`);
-                let loadMarketsSuccessCount = 0;
-                for (const market of Object.values(exchange.markets)) {
-                    if (!market.swap || !market.symbol.includes('USDT')) {
-                        continue;
-                    }
-
-                    const cleanedSym = cleanSymbol(market.symbol);
-                    if (symbolsToUpdate && !symbolsToUpdate.includes(cleanedSym)) {
-                        continue;
-                    }
-                    const maxLeverage = getMaxLeverageFromMarketInfo(market);
-                    if (maxLeverage !== null && maxLeverage > 0) {
-                        currentFetchedLeverageDataMap[cleanedSym] = maxLeverage;
-                        loadMarketsSuccessCount++;
-                    }
-                }
-                status = `Đòn bẩy hoàn tất (loadMarkets, ${loadMarketsSuccessCount} cặp)`;
-                debugRawLeverageResponses[id].data = `Đã lấy ${loadMarketsSuccessCount} cặp.`;
-                console.log(`[CACHE] ✅ ${id.toUpperCase()}: Đã lấy ${loadMarketsSuccessCount} cặp đòn bẩy USDT từ loadMarkets.`);
-            }
-        }
-        
-        if (symbolsToUpdate) {
-            symbolsToUpdate.forEach(sym => {
-                if (currentFetchedLeverageDataMap[sym]) {
-                    leverageCache[id][sym] = currentFetchedLeverageDataMap[sym];
-                }
-            });
-            console.log(`[CACHE] ✅ ${id.toUpperCase()}: Đã cập nhật ${Object.keys(leverageCache[id] || {}).length} cặp đòn bẩy mục tiêu.`);
-        } else {
-            leverageCache[id] = currentFetchedLeverageDataMap;
-            console.log(`[CACHE] ✅ ${id.toUpperCase()}: Tổng số mục đòn bẩy hiện tại: ${Object.keys(leverageCache[id]).length}.`);
-        }
-
-    } catch (e) {
-        let errorMessage = `Lỗi nghiêm trọng khi lấy đòn bẩy cho ${id.toUpperCase()}: ${e.message}.`;
-        console.error(`[CACHE] ❌ ${id.toUpperCase()}: ${errorMessage}`);
-        status = `Đòn bẩy thất bại (lỗi chung: ${e.code || 'UNKNOWN'})`;
-        error = { code: e.code, msg: e.message };
-        leverageCache[id] = {};
-    } finally {
-        return { id, processedData: currentFetchedLeverageDataMap, status, error };
-    }
-}
-
-async function performFullLeverageUpdate() {
-    console.log('\n[LEVERAGE_SCHEDULER] 🔄 Bắt đầu cập nhật TOÀN BỘ đòn bẩy cho tất cả các sàn...');
-    const leveragePromises = EXCHANGE_IDS.map(id => updateLeverageForExchange(id, null));
-    const results = await Promise.all(leveragePromises);
-
-    results.forEach(res => {
-        if (res) {
-            debugRawLeverageResponses[res.id].status = res.status;
-            debugRawLeverageResponses[res.id].timestamp = new Date();
-            debugRawLeverageResponses[res.id].error = res.error;
-        }
-    });
-    console.log('[LEVERAGE_SCHEDULER] ✅ Hoàn tất cập nhật đòn bẩy TOÀN BỘ.');
-}
-
-async function performTargetedLeverageUpdate() {
-    console.log('\n[LEVERAGE_SCHEDULER] 🎯 Bắt đầu cập nhật đòn bẩy MỤC TIÊU...');
-    const activeSymbols = new Set();
-    arbitrageOpportunities.forEach(op => activeSymbols.add(op.coin));
-
-    if (activeSymbols.size === 0) {
-        console.log('[LEVERAGE_SCHEDULER] Không có cơ hội arbitrage nào. Bỏ qua cập nhật đòn bẩy mục tiêu.');
-        EXCHANGE_IDS.forEach(id => {
-            debugRawLeverageResponses[id].status = 'Đòn bẩy bỏ qua (không có cơ hội)';
-            debugRawLeverageResponses[id].timestamp = new Date();
-            debugRawLeverageResponses[id].error = null;
-        });
-        return;
-    }
-
-    console.log(`[LEVERAGE_SCHEDULER] 🎯 Bắt đầu cập nhật đòn bẩy MỤC TIÊU cho ${activeSymbols.size} symbol.`);
-    const symbolsArray = Array.from(activeSymbols);
-    const leveragePromises = EXCHANGE_IDS.map(id => updateLeverageForExchange(id, symbolsArray));
-    const results = await Promise.all(leveragePromises);
-
-    results.forEach(res => {
-        if (res) {
-            debugRawLeverageResponses[res.id].status = res.status;
-            debugRawLeverageResponses[res.id].timestamp = new Date();
-            debugRawLeverageResponses[res.id].error = res.error;
-        }
-    });
-    console.log('[LEVERAGE_SCHEDULER] ✅ Hoàn tất kích hoạt cập nhật đòn bẩy MỤC TIÊU.');
-}
-
-
-async function fetchBitgetValidFuturesSymbols() {
-    console.log('[BITGET_SYMBOLS] 🔄 Đang tải danh sách symbol Futures hợp lệ từ Bitget...');
-    try {
-        const apiPath = '/api/mix/v1/market/contracts?productType=umcbl';
-        const rawData = await makeHttpRequest('GET', BITGET_NATIVE_REST_HOST, apiPath);
-        const json = JSON.parse(rawData);
-
-        if (json.code === '00000' && Array.isArray(json.data)) {
-            bitgetValidFuturesSymbolSet.clear();
-            json.data.forEach(contract => {
-                if (contract.symbol) {
-                    bitgetValidFuturesSymbolSet.add(contract.symbol);
-                }
-            });
-            console.log(`[BITGET_SYMBOLS] ✅ Đã tải ${bitgetValidFuturesSymbolSet.size} symbol Futures hợp lệ từ Bitget.`);
-            if (bitgetValidFuturesSymbolSet.size === 0) {
-                 console.warn('[BITGET_SYMBOLS] ⚠️ Bitget Native API trả về 0 symbol hợp lệ. Có thể ảnh hưởng đến việc lấy data.');
-            }
-            return bitgetValidFuturesSymbolSet;
-        } else {
-            console.error(`[BITGET_SYMBOLS] ❌ Lỗi khi tải danh sách symbol Futures Bitget: Code ${json.code}, Msg: ${json.msg || 'N/A'}. Raw: ${rawData.substring(0, Math.min(rawData.length, 200))}`);
-            return new Set();
-        }
-    } catch (e) {
-        console.error(`[BITGET_SYMBOLS] ❌ Lỗi request khi tải danh sách symbol Futures Bitget: ${e.msg || e.message}`);
-        return new Set();
-    }
-}
-
-
-function calculateNextStandardFundingTime() {
-    const now = new Date();
-    const fundingHoursUTC = [0, 8, 16];
-    let nextHourUTC = fundingHoursUTC.find(h => now.getUTCHours() < h);
-    const nextFundingDate = new Date(now);
-
-    if (nextHourUTC === undefined) {
-        nextHourUTC = fundingHoursUTC[0];
-        nextFundingDate.setUTCDate(now.getUTCDate() + 1);
-    }
-    nextFundingDate.setUTCHours(nextHourUTC, 0, 0, 0);
-    return nextFundingDate.getTime();
-}
-
-function isFundingUpdatePaused() {
-    const now = new Date();
-    const utcMinute = now.getUTCMinutes();
-    return utcMinute === 59 || utcMinute === 0 || utcMinute === 1 || utcMinute === 2;
-}
-
-async function fetchKucoinFundingRatesRest() {
-    console.log('[KUCOIN_REST] 🔄 Kích hoạt lấy dữ liệu KuCoin qua REST API (dự phòng)...');
-    debugRawLeverageResponses['kucoin'].status = 'Funding (REST Fallback)';
+async function fetchKucoinActiveContracts() {
     try {
         const rawData = await makeHttpRequest('GET', KUCOIN_FUTURES_HOST, '/api/v1/contracts/active');
         const json = JSON.parse(rawData);
-        
         if (json.code === '200000' && Array.isArray(json.data)) {
-            let successCount = 0;
-            const processedRates = {};
-            for (const contract of json.data) {
-                const cleanedSym = cleanSymbol(contract.symbol);
-                if (!cleanedSym.endsWith('USDT')) continue;
-
-                const fundingRate = parseFloat(contract.fundingFeeRate);
-                const fundingTimestamp = parseInt(contract.nextFundingFeeTime, 10);
-                const maxLeverage = leverageCache['kucoin']?.[cleanedSym] || parseInt(contract.maxLeverage, 10) || null;
-
-                if (!isNaN(fundingRate) && !isNaN(fundingTimestamp) && fundingTimestamp > 0) {
-                     processedRates[cleanedSym] = {
-                        symbol: cleanedSym,
-                        fundingRate: fundingRate,
-                        fundingTimestamp: fundingTimestamp,
-                        maxLeverage: maxLeverage
-                    };
-                    successCount++;
-                }
-            }
-            exchangeData['kucoin'] = { rates: processedRates };
-            calculateArbitrageOpportunities();
-            console.log(`[KUCOIN_REST] ✅ Lấy thành công ${successCount} funding rates qua REST API.`);
-            debugRawLeverageResponses['kucoin'].data = `Đã lấy ${successCount} cặp (REST).`;
-        } else {
-            throw new Error(`API response code ${json.code}: ${json.msg}`);
+            return json.data;
         }
+        console.error(`[KUCOIN_DATA] Lỗi khi lấy active contracts: ${json.msg || 'Unknown error'}`);
+        return [];
     } catch (e) {
-        console.error(`[KUCOIN_REST] ❌ Lỗi nghiêm trọng khi lấy funding KuCoin qua REST: ${e.message}`);
-        debugRawLeverageResponses['kucoin'].status = 'Funding (REST Fallback Lỗi)';
-        debugRawLeverageResponses['kucoin'].error = { code: e.code, msg: e.message };
+        console.error(`[KUCOIN_DATA] Lỗi request khi lấy active contracts: ${e.message}`);
+        return [];
     }
 }
 
-async function kucoinWsConnect() {
-    console.log('[KUCOIN_WS] Đang thử kết nối tới KuCoin WebSocket...');
-    debugRawLeverageResponses['kucoin'].status = 'Đang kết nối WS...';
+async function fetchKucoinFundingRatesInBatches(symbols) {
+    const batchSize = 20;
+    const allFundingRates = [];
+    console.log(`[KUCOIN_DATA] Bắt đầu lấy funding rates cho ${symbols.length} symbol theo lô ${batchSize}...`);
 
-    if (kucoinWsClient) {
-        kucoinWsClient.terminate();
-    }
-    clearInterval(kucoinPingInterval);
-    isKucoinWsConnected = false;
-
-    try {
-        const tokenResponse = await makeHttpRequest('POST', KUCOIN_FUTURES_HOST, '/api/v1/bullet-public');
-        const tokenData = JSON.parse(tokenResponse);
-        if (tokenData.code !== '200000') {
-            throw new Error('Không thể lấy token WebSocket từ KuCoin.');
+    for (let i = 0; i < symbols.length; i += batchSize) {
+        const batch = symbols.slice(i, i + batchSize);
+        const promises = batch.map(symbol =>
+            makeHttpRequest('GET', KUCOIN_FUTURES_HOST, `/api/v1/funding-rate?symbol=${symbol}`)
+                .then(rawData => ({ symbol, data: JSON.parse(rawData).data }))
+                .catch(e => ({ symbol, error: e.message }))
+        );
+        
+        const responses = await Promise.all(promises);
+        allFundingRates.push(...responses);
+        debugRawLeverageResponses['kucoin'].status = `Funding Batch (${i + batch.length}/${symbols.length})`;
+        
+        if (i + batchSize < symbols.length) {
+            await sleep(150);
         }
-
-        const { token, instanceServers } = tokenData.data;
-        const wsEndpoint = instanceServers[0].endpoint;
-        const connectId = Date.now();
-        const wsUrl = `${wsEndpoint}?token=${token}&connectId=${connectId}`;
-
-        kucoinWsClient = new WebSocket(wsUrl, { handshakeTimeout: 10000 });
-
-        kucoinWsClient.on('open', () => {
-            console.log('[KUCOIN_WS] ✅ Kết nối WebSocket với KuCoin thành công!');
-            isKucoinWsConnected = true;
-            debugRawLeverageResponses['kucoin'].status = 'WS đã kết nối';
-            debugRawLeverageResponses['kucoin'].error = null;
-            
-            clearInterval(kucoinRestFallbackInterval);
-            kucoinRestFallbackInterval = null;
-
-            kucoinPingInterval = setInterval(() => {
-                if (kucoinWsClient.readyState === WebSocket.OPEN) {
-                    kucoinWsClient.send(JSON.stringify({ id: Date.now(), type: 'ping' }));
-                }
-            }, instanceServers[0].pingInterval - 2000);
-
-            const topics = kucoinApiSymbols.map(s => `/contract/tickerV2:${s}`);
-            for (let i = 0; i < topics.length; i += 100) {
-                const batch = topics.slice(i, i + 100);
-                 kucoinWsClient.send(JSON.stringify({
-                    id: `${connectId}_${i}`,
-                    type: 'subscribe',
-                    topic: batch.join(','),
-                    privateChannel: false,
-                    response: true
-                }));
-            }
-            console.log(`[KUCOIN_WS] 💌 Đã gửi yêu cầu subscribe cho ${kucoinApiSymbols.length} cặp.`);
-        });
-
-        kucoinWsClient.on('message', (data) => {
-            const message = JSON.parse(data.toString());
-
-            if (message.type === 'message' && message.subject === 'tickerV2' && message.data) {
-                const contract = message.data;
-                const cleanedSym = cleanSymbol(contract.symbol);
-                if (!cleanedSym.endsWith('USDT')) return;
-
-                const fundingRate = parseFloat(contract.fundingRate);
-                const fundingTimestamp = parseInt(contract.nextFundingRateTime, 10);
-                const maxLeverage = leverageCache['kucoin']?.[cleanedSym] || null;
-
-                if (!isNaN(fundingRate) && !isNaN(fundingTimestamp) && fundingTimestamp > 0) {
-                     if (!exchangeData['kucoin']) exchangeData['kucoin'] = { rates: {} };
-                     exchangeData['kucoin'].rates[cleanedSym] = {
-                        symbol: cleanedSym,
-                        fundingRate: fundingRate,
-                        fundingTimestamp: fundingTimestamp,
-                        maxLeverage: maxLeverage
-                    };
-                    calculateArbitrageOpportunities();
-                }
-            }
-        });
-
-        kucoinWsClient.on('close', () => {
-            console.warn('[KUCOIN_WS] ⚠️ Kết nối WebSocket với KuCoin đã đóng. Thử kết nối lại sau 10 giây...');
-            isKucoinWsConnected = false;
-            clearInterval(kucoinPingInterval);
-            debugRawLeverageResponses['kucoin'].status = 'WS đã đóng, đang kết nối lại...';
-            setTimeout(kucoinWsConnect, 10000);
-        });
-
-        kucoinWsClient.on('error', (err) => {
-            console.error(`[KUCOIN_WS] ❌ Lỗi WebSocket KuCoin: ${err.message}.`);
-            debugRawLeverageResponses['kucoin'].error = { code: 'WS_ERROR', msg: err.message };
-            kucoinWsClient.close();
-        });
-
-    } catch (error) {
-        console.error(`[KUCOIN_WS] ❌ Lỗi nghiêm trọng khi khởi tạo kết nối KuCoin WS: ${error.message}.`);
-        console.log('[KUCOIN_WS] fallback sang REST API sau 30 giây.');
-        if (!kucoinRestFallbackInterval) {
-            fetchKucoinFundingRatesRest();
-            kucoinRestFallbackInterval = setInterval(fetchKucoinFundingRatesRest, 60000);
-        }
-        setTimeout(kucoinWsConnect, 30000);
     }
+    return allFundingRates;
 }
 
-async function fetchFundingRatesForAllExchanges() {
+async function updateKucoinData() {
+    console.log('[KUCOIN_DATA] 🔄 Bắt đầu chu trình cập nhật dữ liệu KuCoin...');
+    debugRawLeverageResponses['kucoin'].status = 'Đang tải contracts...';
+    
+    const activeContracts = await fetchKucoinActiveContracts();
+    if (activeContracts.length === 0) {
+        console.error('[KUCOIN_DATA] ❌ Không lấy được danh sách active contracts. Bỏ qua chu trình.');
+        debugRawLeverageResponses['kucoin'].status = 'Lỗi tải contracts';
+        return;
+    }
+
+    const symbols = activeContracts.map(c => c.symbol);
+    const fundingRateResults = await fetchKucoinFundingRatesInBatches(symbols);
+    
+    const processedRates = {};
+    let successCount = 0;
+    const kucoinLeverage = {};
+
+    for (const contract of activeContracts) {
+        const cleanedSym = cleanSymbol(contract.symbol);
+        const maxLeverage = parseInt(contract.maxLeverage, 10);
+        if (!isNaN(maxLeverage) && maxLeverage > 0) {
+            kucoinLeverage[cleanedSym] = maxLeverage;
+        }
+
+        const fundingInfo = fundingRateResults.find(fr => fr.symbol === contract.symbol);
+        if (fundingInfo && !fundingInfo.error && fundingInfo.data) {
+            const fundingRate = parseFloat(fundingInfo.data.fundingFeeRate);
+            const fundingTimestamp = parseInt(fundingInfo.data.nextFundingFeeTime, 10);
+
+            if (!isNaN(fundingRate) && !isNaN(fundingTimestamp) && fundingTimestamp > 0) {
+                processedRates[cleanedSym] = {
+                    symbol: cleanedSym,
+                    fundingRate: fundingRate,
+                    fundingTimestamp: fundingTimestamp,
+                    maxLeverage: kucoinLeverage[cleanedSym] || null
+                };
+                successCount++;
+            }
+        }
+    }
+    
+    leverageCache['kucoin'] = kucoinLeverage;
+    exchangeData['kucoin'] = { rates: processedRates };
+    
+    debugRawLeverageResponses['kucoin'].status = `Hoàn tất (${successCount} cặp)`;
+    debugRawLeverageResponses['kucoin'].timestamp = new Date();
+    debugRawLeverageResponses['kucoin'].data = `Đã lấy ${successCount} cặp.`;
+    debugRawLeverageResponses['kucoin'].error = null;
+    
+    console.log(`[KUCOIN_DATA] ✅ Hoàn tất. Lấy được ${successCount} funding rates và ${Object.keys(kucoinLeverage).length} đòn bẩy.`);
+}
+
+
+async function fetchFundingRatesForOtherExchanges() {
     if (isFundingUpdatePaused()) {
         console.log('[DATA] ⏸️ Tạm dừng cập nhật funding rates từ phút 59 đến phút 2 UTC.');
         return;
     }
     console.log('[DATA] Bắt đầu làm mới funding rates cho các sàn (trừ KuCoin)...');
 
-    const nonKucoinExchangeIds = EXCHANGE_IDS.filter(id => id !== 'kucoin');
+    const otherExchangeIds = EXCHANGE_IDS.filter(id => id !== 'kucoin');
     const resultsSummary = [];
 
-    const fundingPromises = nonKucoinExchangeIds.map(async (id) => {
+    const fundingPromises = otherExchangeIds.map(async (id) => {
         let processedRates = {};
         let currentStatus = 'Đang tải funding...';
         let currentError = null;
@@ -625,45 +306,22 @@ async function fetchFundingRatesForAllExchanges() {
 
             if (id === 'bitget' && bitgetValidFuturesSymbolSet.size === 0) {
                 await fetchBitgetValidFuturesSymbols();
-                if (bitgetValidFuturesSymbolSet.size === 0) {
-                    currentError = { code: 'NO_VALID_SYMBOLS', msg: 'Could not fetch valid Bitget symbols.' };
-                    throw new Error('Failed to load valid Bitget symbols for funding rates.');
-                }
             }
 
             for (const rate of Object.values(fundingRatesRaw)) {
-                if (rate.type && rate.type !== 'swap' && rate.type !== 'future') {
-                     continue;
-                }
-                if (rate.info?.contractType && rate.info.contractType !== 'PERPETUAL') {
-                    continue;
-                }
-                if (!rate.symbol.includes('USDT')) {
-                    continue;
-                }
+                if (!rate.symbol.includes('USDT')) continue;
 
                 const symbolCleaned = cleanSymbol(rate.symbol);
                 const maxLeverageParsed = leverageCache[id]?.[symbolCleaned] || null;
-
                 let fundingRateValue = rate.fundingRate;
                 let fundingTimestampValue = rate.fundingTimestamp || rate.nextFundingTime;
 
                 if (id === 'bitget') {
                     const bitgetApiSymbol = cleanSymbol(rate.symbol);
                     const symbolForNativeApi = bitgetApiSymbol.includes('_UMCBL') ? bitgetApiSymbol : `${bitgetApiSymbol}_UMCBL`;
-
-                    if (!bitgetValidFuturesSymbolSet.has(symbolForNativeApi)) {
-                        continue;
-                    }
-
+                    if (!bitgetValidFuturesSymbolSet.has(symbolForNativeApi)) continue;
                     const nativeFundingTime = await fetchBitgetFundingTimeNativeApi(bitgetApiSymbol);
-                    if (nativeFundingTime !== null) {
-                        fundingTimestampValue = nativeFundingTime;
-                    } else {
-                        if (!fundingTimestampValue || fundingTimestampValue <= 0) {
-                            fundingTimestampValue = calculateNextStandardFundingTime();
-                        }
-                    }
+                    if (nativeFundingTime !== null) fundingTimestampValue = nativeFundingTime;
                 }
 
                 if (!fundingTimestampValue || fundingTimestampValue <= 0) {
@@ -689,15 +347,12 @@ async function fetchFundingRatesForAllExchanges() {
             debugRawLeverageResponses[id].timestamp = new Date();
             debugRawLeverageResponses[id].data = `Đã lấy ${Object.keys(processedRates).length} cặp.`;
             debugRawLeverageResponses[id].error = currentError;
-            return { id };
         }
     });
 
     await Promise.all(fundingPromises);
     console.log(`[DATA] ✅ Hoàn tất làm mới funding rates cho các sàn (trừ KuCoin): ${resultsSummary.join(', ')}.`);
-    calculateArbitrageOpportunities();
 }
-
 
 function calculateArbitrageOpportunities() {
     const allFoundOpportunities = [];
@@ -708,15 +363,10 @@ function calculateArbitrageOpportunities() {
             const exchange1Id = EXCHANGE_IDS[i], exchange2Id = EXCHANGE_IDS[j];
             const exchange1Rates = currentExchangeData[exchange1Id]?.rates, exchange2Rates = currentExchangeData[exchange2Id]?.rates;
 
-            if (!exchange1Rates || !exchange2Rates || Object.keys(exchange1Rates).length === 0 || Object.keys(exchange2Rates).length === 0) {
-                continue;
-            }
+            if (!exchange1Rates || !exchange2Rates || Object.keys(exchange1Rates).length === 0 || Object.keys(exchange2Rates).length === 0) continue;
 
             const commonSymbols = Object.keys(exchange1Rates).filter(symbol => exchange2Rates[symbol]);
-
-            if (commonSymbols.length === 0) {
-                continue;
-            }
+            if (commonSymbols.length === 0) continue;
 
             for (const symbol of commonSymbols) {
                 const rate1Data = exchange1Rates[symbol];
@@ -725,15 +375,8 @@ function calculateArbitrageOpportunities() {
                 const parsedMaxLeverage1 = rate1Data.maxLeverage;
                 const parsedMaxLeverage2 = rate2Data.maxLeverage;
 
-                if (typeof parsedMaxLeverage1 !== 'number' || parsedMaxLeverage1 <= 0 ||
-                    typeof parsedMaxLeverage2 !== 'number' || parsedMaxLeverage2 <= 0) {
-                    continue;
-                }
-
-                if (typeof rate1Data.fundingRate !== 'number' || typeof rate2Data.fundingRate !== 'number' ||
-                    !rate1Data.fundingTimestamp || rate1Data.fundingTimestamp <= 0 || !rate2Data.fundingTimestamp || rate2Data.fundingTimestamp <= 0) {
-                    continue;
-                }
+                if (typeof parsedMaxLeverage1 !== 'number' || parsedMaxLeverage1 <= 0 || typeof parsedMaxLeverage2 !== 'number' || parsedMaxLeverage2 <= 0) continue;
+                if (typeof rate1Data.fundingRate !== 'number' || typeof rate2Data.fundingRate !== 'number' || !rate1Data.fundingTimestamp || !rate2Data.fundingTimestamp) continue;
 
                 let longExchange, shortExchange, longRate, shortRate;
                 if (rate1Data.fundingRate > rate2Data.fundingRate) {
@@ -751,9 +394,7 @@ function calculateArbitrageOpportunities() {
                     fundingDiff = fundingDiff - lowerAbsoluteFundingRate;
                 }
 
-                if (fundingDiff <= FUNDING_DIFFERENCE_THRESHOLD) {
-                    continue;
-                }
+                if (fundingDiff <= FUNDING_DIFFERENCE_THRESHOLD) continue;
 
                 const commonLeverage = Math.min(parsedMaxLeverage1, parsedMaxLeverage2);
                 const estimatedPnl = fundingDiff * commonLeverage * 100;
@@ -768,17 +409,12 @@ function calculateArbitrageOpportunities() {
                         exchanges: `${shortExchange.replace('usdm', '')} / ${longExchange.replace('usdm', '')}`,
                         fundingDiff: parseFloat(fundingDiff.toFixed(6)),
                         nextFundingTime: finalFundingTime,
-                        nextFundingTimeUTC: new Date(finalFundingTime).toISOString(),
                         commonLeverage: parseFloat(commonLeverage.toFixed(2)),
                         estimatedPnl: parseFloat(estimatedPnl.toFixed(2)),
                         isImminent: isImminent,
                         details: {
-                            shortExchange: shortExchange,
-                            shortRate: shortRate.fundingRate,
-                            shortLeverage: parsedMaxLeverage1,
-                            longExchange: longExchange,
-                            longRate: longRate.fundingRate,
-                            longLeverage: parsedMaxLeverage2,
+                            shortExchange, shortRate: shortRate.fundingRate, shortLeverage: parsedMaxLeverage1,
+                            longExchange, longRate: longRate.fundingRate, longLeverage: parsedMaxLeverage2,
                             minutesUntilFunding: parseFloat(minutesUntilFunding.toFixed(1))
                         }
                     });
@@ -791,43 +427,22 @@ function calculateArbitrageOpportunities() {
         if (a.nextFundingTime > b.nextFundingTime) return 1;
         return b.estimatedPnl - a.estimatedPnl;
     });
-
 }
 
 async function masterLoop() {
     clearTimeout(loopTimeoutId);
     console.log(`\n[MASTER_LOOP] Bắt đầu vòng lặp chính lúc ${new Date().toLocaleTimeString()} (UTC: ${new Date().toUTCString()})...`);
+    
+    await syncBinanceServerTime();
 
-    try {
-        await syncBinanceServerTime();
-    } catch (error) {
-        console.error("[MASTER_LOOP] Lỗi đồng bộ thời gian Binance, có thể ảnh hưởng đến các lệnh ký. Thử lại ở vòng lặp sau.");
-    }
-
-    const now = new Date();
-    const currentMinute = now.getUTCMinutes();
-    const currentHour = now.getUTCHours();
-    const currentSecond = now.getUTCSeconds();
-
-    await fetchFundingRatesForAllExchanges();
+    // Chạy các tác vụ song song
+    await Promise.all([
+        fetchFundingRatesForOtherExchanges(),
+        updateKucoinData()
+    ]);
+    
+    calculateArbitrageOpportunities();
     lastFullUpdateTimestamp = new Date().toISOString();
-
-    if (currentHour === FULL_LEVERAGE_REFRESH_AT_HOUR && currentMinute === 0 && currentSecond < 5) {
-        console.log('[LEVERAGE_SCHEDULER] 🔥 Kích hoạt cập nhật TOÀN BỘ đòn bẩy (00:00 UTC).');
-        await performFullLeverageUpdate();
-    }
-    else if (TARGETED_LEVERAGE_REFRESH_MINUTES.includes(currentMinute) && currentSecond < 5) {
-        console.log(`[LEVERAGE_SCHEDULER] 🎯 Kích hoạt cập nhật đòn bẩy MỤC TIÊU (${currentMinute} phút).`);
-        await performTargetedLeverageUpdate();
-    }
-    if (currentMinute === 59 && currentSecond >= 30 && currentSecond < 35) {
-        const nowMs = Date.now();
-        if (!masterLoop.lastSpecialLeverageTrigger || (nowMs - masterLoop.lastSpecialLeverageTrigger > 30 * 1000)) {
-            console.log('[SPECIAL_UPDATE] ⏰ Kích hoạt cập nhật ĐẶC BIỆT đòn bẩy (phút 59 giây 30).');
-            await performFullLeverageUpdate();
-            masterLoop.lastSpecialLeverageTrigger = nowMs;
-        }
-    }
 
     console.log(`[MASTER_LOOP] ✅ Tìm thấy ${arbitrageOpportunities.length} cơ hội. Vòng lặp chính hoàn tất.`);
     scheduleNextLoop();
@@ -842,7 +457,6 @@ function scheduleNextLoop() {
     loopTimeoutId = setTimeout(masterLoop, delayMs);
 }
 
-
 let lastApiDataLogTime = 0;
 const API_DATA_LOG_INTERVAL_MS = 30 * 1000;
 
@@ -850,7 +464,6 @@ const server = http.createServer((req, res) => {
     if (req.url === '/' && req.method === 'GET') {
         fs.readFile(path.join(__dirname, 'index.html'), (err, content) => {
             if (err) {
-                console.error('[SERVER] ❌ Lỗi khi đọc index.html:', err.message);
                 res.writeHead(500);
                 res.end('Lỗi khi đọc index.html');
                 return;
@@ -865,7 +478,6 @@ const server = http.createServer((req, res) => {
             rawRates: exchangeData,
             debugRawLeverageResponses: debugRawLeverageResponses
         };
-
         const now = Date.now();
         if (now - lastApiDataLogTime > API_DATA_LOG_INTERVAL_MS) {
             console.log(`[API_DATA] Gửi dữ liệu. Ops: ${responseData.arbitrageData.length}. ` +
@@ -875,7 +487,6 @@ const server = http.createServer((req, res) => {
                 `Kucoin: ${Object.keys(responseData.rawRates.kucoin?.rates || {}).length}.`);
             lastApiDataLogTime = now;
         }
-
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify(responseData));
     } else {
@@ -886,36 +497,14 @@ const server = http.createServer((req, res) => {
 server.listen(PORT, async () => {
     console.log(`✅ Máy chủ dữ liệu đang chạy tại http://localhost:${PORT}`);
 
-    await fetchBitgetValidFuturesSymbols();
-
-    console.log('[STARTUP] Kích hoạt cập nhật TOÀN BỘ đòn bẩy ban đầu.');
-    await performFullLeverageUpdate();
-
+    // Khởi tạo các biến
     EXCHANGE_IDS.forEach(id => {
-        if (!exchangeData[id]) {
-            exchangeData[id] = { rates: {} };
-        }
+        if (!exchangeData[id]) exchangeData[id] = { rates: {} };
+        if (!leverageCache[id]) leverageCache[id] = {};
     });
 
-    try {
-        await exchanges['kucoin'].loadMarkets(true);
-        kucoinApiSymbols = Object.values(exchanges['kucoin'].markets)
-            .filter(m => m.swap && m.symbol.includes('USDT'))
-            .map(m => m.id);
-        console.log(`[KUCOIN_WS] Đã tải ${kucoinApiSymbols.length} symbol Futures từ KuCoin để subscribe.`);
-    } catch(e) {
-        console.error(`[KUCOIN_WS] ❌ Không thể tải danh sách symbol của KuCoin: ${e.message}`);
-    }
-
-    if (kucoinApiSymbols.length > 0) {
-        kucoinWsConnect();
-    } else {
-        console.error('[KUCOIN_WS] Không có symbol nào để subscribe, sẽ thử lại qua REST.');
-        if (!kucoinRestFallbackInterval) {
-            fetchKucoinFundingRatesRest();
-            kucoinRestFallbackInterval = setInterval(fetchKucoinFundingRatesRest, 60000);
-        }
-    }
-
+    await fetchBitgetValidFuturesSymbols();
+    
+    // Bắt đầu vòng lặp chính
     masterLoop();
 });
