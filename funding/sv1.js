@@ -140,7 +140,9 @@ async function fetchKucoinFundingRatesInBatches(symbols) {
                 .then(rawData => ({ symbol, response: JSON.parse(rawData) }))
                 .catch(e => ({ symbol, error: e.message }))
         );
-        const responses = await Promise.all(responses);
+        
+        // *** SỬA LỖI TẠI ĐÂY: Dùng `promises` thay vì `responses` ***
+        const responses = await Promise.all(promises);
 
         if (isFirstBatch && responses.length > 0) {
             console.log(`[KUCOIN_DEBUG] Dữ liệu thô của symbol đầu tiên (${responses[0].symbol}):`, JSON.stringify(responses[0].response, null, 2));
