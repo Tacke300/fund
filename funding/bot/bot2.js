@@ -120,19 +120,16 @@ async function processServerData(serverData) {
         bestPotentialOpportunityForDisplay = null;
         return;
     }
-
     allCurrentOpportunities = serverData.arbitrageData
         .filter(op => {
             if (!op || !op.details || !op.details.shortExchange || !op.details.longExchange) return false;
-            // SỬA LỖI TẠI ĐÂY: Chuẩn hóa tên sàn trước khi kiểm tra
-            const shortExId = op.details.shortExchange.toLowerCase() === 'binance' ? 'binanceusdm' : op.details.shortExchange.toLowerCase();
-            const longExId = op.details.longExchange.toLowerCase() === 'binance' ? 'binanceusdm' : op.details.longExchange.toLowerCase();
+            const shortExId = op.details.shortExchange.toLowerCase().replace('usdm', '') === 'binance' ? 'binanceusdm' : op.details.shortExchange.toLowerCase();
+            const longExId = op.details.longExchange.toLowerCase().replace('usdm', '') === 'binance' ? 'binanceusdm' : op.details.longExchange.toLowerCase();
             return exchanges[shortExId] && exchanges[longExId];
         })
         .map(op => {
-            // Cập nhật lại tên đã chuẩn hóa vào đối tượng
-            op.details.shortExchange = op.details.shortExchange.toLowerCase() === 'binance' ? 'binanceusdm' : op.details.shortExchange.toLowerCase();
-            op.details.longExchange = op.details.longExchange.toLowerCase() === 'binance' ? 'binanceusdm' : op.details.longExchange.toLowerCase();
+            op.details.shortExchange = op.details.shortExchange.toLowerCase().replace('usdm', '') === 'binance' ? 'binanceusdm' : op.details.shortExchange.toLowerCase();
+            op.details.longExchange = op.details.longExchange.toLowerCase().replace('usdm', '') === 'binance' ? 'binanceusdm' : op.details.longExchange.toLowerCase();
             return op;
         })
         .sort((a, b) => {
@@ -141,7 +138,6 @@ async function processServerData(serverData) {
             }
             return b.estimatedPnl - a.estimatedPnl;
         });
-        
     bestPotentialOpportunityForDisplay = allCurrentOpportunities.length > 0 ? allCurrentOpportunities[0] : null;
 }
 
