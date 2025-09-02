@@ -1,5 +1,5 @@
 const http = require('http');
-const fs = require('fs');
+const fs =require('fs');
 const path = require('path');
 const ccxt = require('ccxt');
 
@@ -24,14 +24,13 @@ const {
 
 // --- Cài đặt Bot ---
 const BOT_PORT = 5008;
-// Dùng localhost vì bot và server chạy chung máy
 const SERVER_DATA_URL = 'http://localhost:5005/api/data'; 
 
 // --- Cài đặt Giao dịch ---
 const MIN_PNL_PERCENTAGE = 1; 
-const MIN_MINUTES_FOR_EXECUTION = 915; 
+const MIN_MINUTES_FOR_EXECUTION = 15; 
 const DATA_FETCH_INTERVAL_SECONDS = 5;
-const MAX_CONSECUTIVE_FAILS = 3; // Số lần lỗi liên tiếp trước khi tạm vô hiệu hóa sàn
+const MAX_CONSECUTIVE_FAILS = 3;
 
 // --- Khởi tạo Sàn Giao Dịch ---
 const ALL_POSSIBLE_EXCHANGE_IDS = ['binanceusdm', 'bitget', 'okx', 'kucoin'];
@@ -69,18 +68,14 @@ let allCurrentOpportunities = [];
 let currentTradeDetails = null;
 let tradeAwaitingPnl = null;
 let currentPercentageToUse = 50;
-
-// *** LOGIC MỚI: Hệ thống theo dõi sức khỏe sàn ***
 let exchangeHealth = {};
 activeExchangeIds.forEach(id => {
     balances[id] = { available: 0 };
     exchangeHealth[id] = { consecutiveFails: 0, isDisabled: false };
 });
 
-
 function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
 
-// --- Lấy Dữ Liệu Từ Server ---
 async function fetchDataFromServer() {
     try {
         const response = await fetch(SERVER_DATA_URL);
@@ -92,7 +87,6 @@ async function fetchDataFromServer() {
     }
 }
 
-// --- Quản lý Số dư (Đã nâng cấp với Health Check) ---
 async function updateBalances() {
     safeLog('log', '[BOT] Cập nhật số dư...');
     await Promise.all(activeExchangeIds.map(async (id) => {
@@ -100,30 +94,23 @@ async function updateBalances() {
         try {
             const balance = await exchanges[id].fetchBalance({ 'type': 'future' });
             balances[id] = { available: balance.free?.USDT || 0 };
-
-            // Nếu thành công, reset bộ đếm lỗi và kích hoạt lại sàn nếu cần
             if (exchangeHealth[id].isDisabled) {
                 safeLog('info', `[HEALTH] Sàn ${id.toUpperCase()} đã hoạt động trở lại.`);
                 exchangeHealth[id].isDisabled = false;
             }
             exchangeHealth[id].consecutiveFails = 0;
-
         } catch (e) {
             balances[id] = { available: 0 };
-            exchangeHealth[id].consecutiveFails++; // Tăng bộ đếm lỗi
-            
+            exchangeHealth[id].consecutiveFails++;
             safeLog('error', `[BOT] Lỗi khi lấy số dư ${id.toUpperCase()} (lần ${exchangeHealth[id].consecutiveFails}): ${e.message}`);
-
-            // Nếu lỗi quá nhiều lần, tạm thời vô hiệu hóa sàn
             if (exchangeHealth[id].consecutiveFails >= MAX_CONSECUTIVE_FAILS && !exchangeHealth[id].isDisabled) {
                 exchangeHealth[id].isDisabled = true;
-                safeLog('warn', `[HEALTH] Sàn ${id.toUpperCase()} đã bị tạm vô hiệu hóa do lỗi liên tục. Các cơ hội liên quan sẽ bị bỏ qua.`);
+                safeLog('warn', `[HEALTH] Sàn ${id.toUpperCase()} đã bị tạm vô hiệu hóa do lỗi liên tục.`);
             }
         }
     }));
 }
 
-// --- Xử lý Dữ liệu Cơ hội (Đã nâng cấp với Health Check) ---
 async function getExchangeSpecificSymbol(exchange, rawCoinSymbol) {
     try {
         if (!exchange.markets || Object.keys(exchange.markets).length === 0) await exchange.loadMarkets();
@@ -142,10 +129,13 @@ async function getExchangeSpecificSymbol(exchange, rawCoinSymbol) {
 
 const normalizeExchangeId = (id) => {
     if (!id) return null;
-    const lowerId = id.toLowerCase();
+    const lowerId = id.toLowerCase().trim(); // Thêm trim() để xóa khoảng trắng thừa
     return lowerId.replace('usdm', '') === 'binance' ? 'binanceusdm' : lowerId;
 };
 
+// =========================================================================================
+// =================== ĐÂY LÀ PHẦN SỬA ĐỔI QUAN TRỌNG NHẤT ==================================
+// =========================================================================================
 async function processServerData(serverData) {
     if (!serverData || !serverData.arbitrageData) {
         allCurrentOpportunities = [];
@@ -155,15 +145,36 @@ async function processServerData(serverData) {
 
     allCurrentOpportunities = serverData.arbitrageData
         .map(op => {
-            if (!op || !op.details || op.estimatedPnl < MIN_PNL_PERCENTAGE) return null;
-            op.details.shortExchange = normalizeExchangeId(op.details.shortExchange);
-            op.details.longExchange = normalizeExchangeId(op.details.longExchange);
+            // Bước 1: Kiểm tra dữ liệu thô từ server
+            // Nếu không có đối tượng, hoặc không có trường 'exchanges', hoặc PNL quá thấp -> Bỏ qua
+            if (!op || !op.exchanges || typeof op.exchanges !== 'string' || op.estimatedPnl < MIN_PNL_PERCENTAGE) {
+                return null;
+            }
+
+            // Bước 2: "Dịch" dữ liệu từ server sang định dạng bot cần
+            // Tách chuỗi "shortEx / longEx" thành một mảng, ví dụ: ["bitget", "binance"]
+            const exchangeParts = op.exchanges.split(' / ');
+            if (exchangeParts.length !== 2) {
+                // Nếu định dạng không phải là "A / B", đây là dữ liệu lỗi -> Bỏ qua
+                safeLog('warn', `[PROCESS] Dữ liệu cơ hội không đúng định dạng: ${op.exchanges}`);
+                return null; 
+            }
+
+            // Bước 3: TỰ TẠO RA TRƯỜNG "details" mà bot cần
+            // Gán short/long exchange dựa trên kết quả đã tách
+            op.details = {
+                shortExchange: normalizeExchangeId(exchangeParts[0]),
+                longExchange: normalizeExchangeId(exchangeParts[1])
+            };
+
+            // Bước 4: Trả về đối tượng 'op' đã được "dịch" và hoàn thiện
+            // Giờ đây, 'op' đã có trường 'op.details' và sẵn sàng cho các bước lọc tiếp theo
             return op;
         })
         .filter(op => {
+            // Bước lọc này bây giờ sẽ hoạt động vì 'op' và 'op.details' đã tồn tại
             if (!op) return false;
             const { shortExchange, longExchange } = op.details;
-            // *** LOGIC MỚI: Lọc bỏ cơ hội liên quan đến sàn đang bị vô hiệu hóa ***
             const isShortHealthy = exchanges[shortExchange] && !exchangeHealth[shortExchange]?.isDisabled;
             const isLongHealthy = exchanges[longExchange] && !exchangeHealth[longExchange]?.isDisabled;
             return isShortHealthy && isLongHealthy;
@@ -175,8 +186,11 @@ async function processServerData(serverData) {
 
     bestPotentialOpportunityForDisplay = allCurrentOpportunities.length > 0 ? allCurrentOpportunities[0] : null;
 }
+// =========================================================================================
+// ============================ KẾT THÚC PHẦN SỬA ĐỔI =======================================
+// =========================================================================================
 
-// --- Logic Thực thi Giao dịch (Không thay đổi nhiều) ---
+
 async function setLeverage(exchange, symbol, leverage) {
     try {
         await exchange.setLeverage(leverage, symbol);
@@ -255,7 +269,6 @@ async function calculatePnlAfterDelay(closedTrade) {
     tradeAwaitingPnl = null;
 }
 
-// --- Vòng lặp Chính của Bot ---
 async function mainBotLoop() {
     if (botState !== 'RUNNING') return;
     
@@ -287,7 +300,6 @@ async function mainBotLoop() {
     botLoopIntervalId = setTimeout(mainBotLoop, DATA_FETCH_INTERVAL_SECONDS * 1000);
 }
 
-// --- Các hàm điều khiển Bot ---
 function startBot() {
     if (botState === 'RUNNING') return false;
     botState = 'RUNNING';
@@ -305,7 +317,6 @@ function stopBot() {
     return true;
 }
 
-// --- Server HTTP cho Giao diện người dùng (UI) ---
 const botServer = http.createServer((req, res) => {
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
