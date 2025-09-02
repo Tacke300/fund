@@ -29,7 +29,7 @@ const SERVER_DATA_URL = 'http://localhost:5005/api/data';
 
 // --- Cài đặt Giao dịch ---
 const MIN_PNL_PERCENTAGE = 1; 
-const MIN_MINUTES_FOR_EXECUTION = 15; 
+const MIN_MINUTES_FOR_EXECUTION = 915; 
 const DATA_FETCH_INTERVAL_SECONDS = 5;
 const MAX_CONSECUTIVE_FAILS = 3; // Số lần lỗi liên tiếp trước khi tạm vô hiệu hóa sàn
 
