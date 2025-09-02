@@ -114,23 +114,33 @@ async function getExchangeSpecificSymbol(exchange, rawCoinSymbol) {
     }
 }
 
+const normalizeExchangeId = (id) => {
+    if (!id) return null;
+    const lowerId = id.toLowerCase();
+    if (lowerId.replace('usdm', '') === 'binance') {
+        return 'binanceusdm';
+    }
+    return lowerId;
+};
+
 async function processServerData(serverData) {
     if (!serverData || !serverData.arbitrageData) {
         allCurrentOpportunities = [];
         bestPotentialOpportunityForDisplay = null;
         return;
     }
+
     allCurrentOpportunities = serverData.arbitrageData
-        .filter(op => {
-            if (!op || !op.details || !op.details.shortExchange || !op.details.longExchange) return false;
-            const shortExId = op.details.shortExchange.toLowerCase().replace('usdm', '') === 'binance' ? 'binanceusdm' : op.details.shortExchange.toLowerCase();
-            const longExId = op.details.longExchange.toLowerCase().replace('usdm', '') === 'binance' ? 'binanceusdm' : op.details.longExchange.toLowerCase();
-            return exchanges[shortExId] && exchanges[longExId];
-        })
         .map(op => {
-            op.details.shortExchange = op.details.shortExchange.toLowerCase().replace('usdm', '') === 'binance' ? 'binanceusdm' : op.details.shortExchange.toLowerCase();
-            op.details.longExchange = op.details.longExchange.toLowerCase().replace('usdm', '') === 'binance' ? 'binanceusdm' : op.details.longExchange.toLowerCase();
+            if (!op || !op.details) return null;
+            op.details.shortExchange = normalizeExchangeId(op.details.shortExchange);
+            op.details.longExchange = normalizeExchangeId(op.details.longExchange);
             return op;
+        })
+        .filter(op => {
+            if (!op) return false;
+            const { shortExchange, longExchange } = op.details;
+            return exchanges[shortExchange] && exchanges[longExchange];
         })
         .sort((a, b) => {
             if (a.nextFundingTime !== b.nextFundingTime) {
@@ -138,6 +148,7 @@ async function processServerData(serverData) {
             }
             return b.estimatedPnl - a.estimatedPnl;
         });
+        
     bestPotentialOpportunityForDisplay = allCurrentOpportunities.length > 0 ? allCurrentOpportunities[0] : null;
 }
 
