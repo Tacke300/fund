@@ -28,8 +28,9 @@ const MAX_MINUTES_UNTIL_FUNDING = 30;
 const MIN_MINUTES_FOR_EXECUTION = 15;
 const DATA_FETCH_INTERVAL_SECONDS = 5;
 
+// SỬA LỖI: Kích hoạt OKX bằng cách xóa nó khỏi danh sách vô hiệu hóa
 const ALL_POSSIBLE_EXCHANGE_IDS = ['binanceusdm', 'bitget', 'okx', 'kucoin'];
-const DISABLED_EXCHANGES = ['okx'];
+const DISABLED_EXCHANGES = []; // OKX đã được cho phép hoạt động
 
 const activeExchangeIds = ALL_POSSIBLE_EXCHANGE_IDS.filter(id => !DISABLED_EXCHANGES.includes(id));
 
@@ -62,7 +63,6 @@ let bestPotentialOpportunityForDisplay = null;
 let allCurrentOpportunities = [];
 let currentTradeDetails = null;
 let tradeAwaitingPnl = null;
-
 let currentPercentageToUse = 50;
 
 function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
@@ -132,10 +132,9 @@ async function processServerData(serverData) {
     bestPotentialOpportunityForDisplay = allCurrentOpportunities.length > 0 ? allCurrentOpportunities[0] : null;
 }
 
-async function setLeverage(exchange, symbol, leverage, positionSide) {
+async function setLeverage(exchange, symbol, leverage) {
     try {
-        const params = exchange.id === 'bingx' ? { 'side': positionSide.toUpperCase() } : {};
-        await exchange.setLeverage(leverage, symbol, params);
+        await exchange.setLeverage(leverage, symbol);
         safeLog('log', `[BOT_TRADE] Đặt đòn bẩy x${leverage} cho ${symbol} trên ${exchange.id} thành công.`);
         return true;
     } catch (e) {
@@ -171,42 +170,35 @@ async function executeTrades(opportunity, percentageToUse) {
 
     try {
         safeLog('log', `[BOT_TRADE] Ưu tiên 1: Thử mở lệnh cho ${coin} với đòn bẩy chung x${commonLeverage}...`);
-        const setLeverageShortSuccess = await setLeverage(shortEx, shortOriginalSymbol, commonLeverage, 'SHORT');
-        const setLeverageLongSuccess = await setLeverage(longEx, longOriginalSymbol, commonLeverage, 'LONG');
-        if (!setLeverageShortSuccess || !setLeverageLongSuccess) throw new Error("Không thể đặt đòn bẩy chung.");
-
+        if (!(await setLeverage(shortEx, shortOriginalSymbol, commonLeverage)) || !(await setLeverage(longEx, longOriginalSymbol, commonLeverage))) {
+            throw new Error("Không thể đặt đòn bẩy chung.");
+        }
         const shortPrice = (await shortEx.fetchTicker(shortOriginalSymbol)).last;
         const longPrice = (await longEx.fetchTicker(longOriginalSymbol)).last;
         const shortAmount = shortEx.amountToPrecision(shortOriginalSymbol, (collateral * commonLeverage) / shortPrice);
         const longAmount = longEx.amountToPrecision(longOriginalSymbol, (collateral * commonLeverage) / longPrice);
-
         const shortOrder = await shortEx.createMarketSellOrder(shortOriginalSymbol, shortAmount);
         const longOrder = await longEx.createMarketBuyOrder(longOriginalSymbol, longAmount);
-
-        currentTradeDetails = { ...opportunity.details, coin, status: 'OPEN', openTime: Date.now(), shortOrderId: shortOrder.id, longOrderId: longOrder.id, shortOrderAmount: shortOrder.amount, longOrderAmount: longOrder.amount, commonLeverageUsed: commonLeverage, shortOriginalSymbol, longOriginalSymbol, shortBalanceBefore, longBalanceBefore };
+        currentTradeDetails = { ...opportunity.details, coin, status: 'OPEN', openTime: Date.now(), shortOrderAmount: shortOrder.amount, longOrderAmount: longOrder.amount, commonLeverageUsed: commonLeverage, shortOriginalSymbol, longOriginalSymbol, shortBalanceBefore, longBalanceBefore };
         safeLog('log', `[BOT_TRADE] Mở lệnh thành công với đòn bẩy chung.`);
         return true;
     } catch (e) {
-        safeLog('warn', `[BOT_TRADE] Ưu tiên 1 thất bại: ${e.message}. Chuyển sang Ưu tiên 2 (dự phòng).`);
+        safeLog('warn', `[BOT_TRADE] Ưu tiên 1 thất bại: ${e.message}. Chuyển sang Ưu tiên 2.`);
     }
 
     try {
         safeLog('log', `[BOT_TRADE] Ưu tiên 2: Thử mở lệnh với vốn bằng nhau, đòn bẩy tối đa...`);
         const maxLeverageShort = (await shortEx.fetchLeverageTiers([shortOriginalSymbol]))?.[shortOriginalSymbol]?.[0]?.maxLeverage || 20;
         const maxLeverageLong = (await longEx.fetchLeverageTiers([longOriginalSymbol]))?.[longOriginalSymbol]?.[0]?.maxLeverage || 20;
-
-        await setLeverage(shortEx, shortOriginalSymbol, maxLeverageShort, 'SHORT');
-        await setLeverage(longEx, longOriginalSymbol, maxLeverageLong, 'LONG');
-
+        await setLeverage(shortEx, shortOriginalSymbol, maxLeverageShort);
+        await setLeverage(longEx, longOriginalSymbol, maxLeverageLong);
         const shortPrice = (await shortEx.fetchTicker(shortOriginalSymbol)).last;
         const longPrice = (await longEx.fetchTicker(longOriginalSymbol)).last;
         const shortAmount = shortEx.amountToPrecision(shortOriginalSymbol, (collateral * maxLeverageShort) / shortPrice);
         const longAmount = longEx.amountToPrecision(longOriginalSymbol, (collateral * maxLeverageLong) / longPrice);
-
         const shortOrder = await shortEx.createMarketSellOrder(shortOriginalSymbol, shortAmount);
         const longOrder = await longEx.createMarketBuyOrder(longOriginalSymbol, longAmount);
-
-        currentTradeDetails = { ...opportunity.details, coin, status: 'OPEN', openTime: Date.now(), shortOrderId: shortOrder.id, longOrderId: longOrder.id, shortOrderAmount: shortOrder.amount, longOrderAmount: longOrder.amount, commonLeverageUsed: `Max(${maxLeverageShort}/${maxLeverageLong})`, shortOriginalSymbol, longOriginalSymbol, shortBalanceBefore, longBalanceBefore };
+        currentTradeDetails = { ...opportunity.details, coin, status: 'OPEN', openTime: Date.now(), shortOrderAmount: shortOrder.amount, longOrderAmount: longOrder.amount, commonLeverageUsed: `Max(${maxLeverageShort}/${maxLeverageLong})`, shortOriginalSymbol, longOriginalSymbol, shortBalanceBefore, longBalanceBefore };
         safeLog('log', `[BOT_TRADE] Mở lệnh thành công với chiến lược dự phòng.`);
         return true;
     } catch (e) {
@@ -223,8 +215,8 @@ async function closeTrades() {
     try {
         await exchanges[shortExchange].createMarketBuyOrder(shortOriginalSymbol, shortOrderAmount);
         await exchanges[longExchange].createMarketSellOrder(longOriginalSymbol, longOrderAmount);
-        safeLog('log', '[BOT_PNL] Gửi lệnh đóng cả hai vị thế thành công.');
-        currentTradeDetails.status = 'CLOSED';
+        safeLog('log', '[BOT_PNL] Gửi lệnh đóng thành công. Chờ 1 phút để tính PNL.');
+        currentTradeDetails.status = 'PENDING_PNL_CALC';
         currentTradeDetails.closeTime = Date.now();
         tradeAwaitingPnl = currentTradeDetails;
         currentTradeDetails = null;
@@ -247,7 +239,7 @@ async function calculatePnlAfterDelay(closedTrade) {
     safeLog('log', `[BOT_PNL] PNL Sàn Long (${closedTrade.longExchange}): ${longPnl.toFixed(4)} USDT (Trước: ${closedTrade.longBalanceBefore.toFixed(4)}, Sau: ${longBalanceAfter.toFixed(4)})`);
     safeLog('log', `[BOT_PNL] TỔNG PNL PHIÊN: ${totalPnl.toFixed(4)} USDT`);
     
-    tradeHistory.unshift({ ...closedTrade, actualPnl: totalPnl });
+    tradeHistory.unshift({ ...closedTrade, status: 'CLOSED', actualPnl: totalPnl });
     if (tradeHistory.length > 50) tradeHistory.pop();
     tradeAwaitingPnl = null;
 }
