@@ -9,9 +9,9 @@ const okxPassword = 'Altf4enter$';
 const bitgetApiKey = 'bg_a1ab0142c295779ac21123d5b59378e9';
 const bitgetApiSecret = 'c12fbe21cd82274bde810b3d4aa7be778e5eee30ca5f47cf8ffc9b950787c961';
 const bitgetApiPassword = 'Altf4enter';
-const kucoinApiKey = '68b57476df90c30001d11637';
-const kucoinApiSecret = '2582b58f-fab7-4aae-8d42-97b61023bdb6';
-const kucoinApiPassword = 'Altf4enter$';
+const kucoinApiKey = '68b67f0554d53500017304e1';
+const kucoinApiSecret = '278af47d-57fe-4120-90bb-be46fb1a5da2';
+const kucoinApiPassword = 'Altf4enter$$$';
 
 module.exports = {
     binanceApiKey, binanceApiSecret,
