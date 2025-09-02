@@ -66,23 +66,45 @@
             font-size: 1.1em; /* Kích thước chữ label */
             color: #e0e0e0;
             margin-right: 10px;
+            text-align: left;
+            width: 100%;
+            margin-bottom: 5px;
         }
 
-        .controls input[type="number"] {
+        .controls input[type="number"], .controls select {
             padding: 10px 15px;
-            font-size: 1em; /* Kích thước chữ input */
+            font-size: 1em; /* Kích thước chữ input/select */
             border: 1px solid #5a5d7e;
             border-radius: 8px;
             background-color: #3e405e;
             color: #e0e0e0;
-            width: 80px;
             text-align: center;
-            -moz-appearance: textfield; /* Hide arrows for Firefox */
+            -moz-appearance: textfield;
+            appearance: none;
+            cursor: pointer;
         }
-        .controls input[type="number"]::-webkit-outer-spin-button,
-        .controls input[type="number"]::-webkit-inner-spin-button {
-            -webkit-appearance: none;
-            margin: 0;
+        .controls input[type="number"] {
+            width: 80px;
+        }
+
+        .controls select {
+            width: 120px;
+            text-align-last: center;
+            text-align: center;
+        }
+
+        .control-group {
+            display: flex;
+            flex-direction: column;
+            align-items: flex-start;
+        }
+
+        .button-group {
+            display: flex;
+            gap: 10px;
+            margin-top: 20px;
+            width: 100%;
+            justify-content: center;
         }
 
         .controls button {
@@ -93,7 +115,6 @@
             border-radius: 8px;
             cursor: pointer;
             transition: background-color 0.3s ease, transform 0.2s ease, box-shadow 0.3s ease;
-            margin: 0 5px; /* Adjust margin for buttons */
             color: #fff;
             text-transform: uppercase;
             letter-spacing: 0.5px;
@@ -123,6 +144,7 @@
         #testOrderBtn {
             background-color: #50bfa4; /* A teal/green color */
             box-shadow: 0 4px 10px rgba(80, 191, 164, 0.4);
+            flex-grow: 1;
         }
         #testOrderBtn:hover {
             background-color: #3aa08a;
@@ -135,6 +157,7 @@
             background-color: #f1c40f; /* Yellow/Orange for Stop Test */
             color: #333; /* Dark text for contrast */
             box-shadow: 0 4px 10px rgba(241, 196, 15, 0.4);
+            flex-grow: 1;
         }
         #stopTestTradeBtn:hover {
             background-color: #e6b100;
@@ -143,56 +166,36 @@
         }
 
 
-        /* Status Cards Layout (stacked vertically) */
+        /* Status Cards Layout */
         .status-cards {
-            display: flex; /* Thay đổi từ grid sang flex */
-            flex-direction: column; /* Xếp theo hàng dọc */
-            gap: 25px; /* Khoảng cách giữa các card */
+            display: flex;
+            flex-direction: column;
+            gap: 25px;
             margin-bottom: 40px;
         }
 
         .card {
-            background-color: #3e405e; /* Lighter dark blue-purple for cards */
+            background-color: #3e405e;
             border-radius: 10px;
             padding: 25px;
             box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-            border: 1px solid rgba(154, 103, 234, 0.3); /* Purple tinted border */
+            border: 1px solid rgba(154, 103, 234, 0.3);
             transition: transform 0.2s ease, box-shadow 0.2s ease;
-        }
-        .card:hover {
-            transform: translateY(-5px);
-            box-shadow: 0 6px 18px rgba(0, 0, 0, 0.4);
         }
 
         .card p {
             margin: 10px 0;
-            color: #abb2bf; /* Grey text for card content */
-            font-size: 1em; /* Kích thước chữ p trong card */
+            color: #abb2bf;
+            font-size: 1em;
         }
 
-        .card strong {
-            color: #e0e0e0; /* Brighter grey for strong text */
-        }
-
-        .card pre {
-            background-color: #282c34; /* Darker background for code/JSON blocks */
-            padding: 15px;
-            border-radius: 8px;
-            overflow-x: auto;
-            font-size: 0.9em; /* Kích thước chữ pre */
-            color: #c0c5d2;
-            word-wrap: break-word; /* Ensure long lines wrap */
-            white-space: pre-wrap; /* Ensure preformatted text wraps */
-        }
-
-        /* Styling for the new "Best Potential Opportunity" display */
         .opportunity-details p {
             margin: 5px 0;
-            font-size: 0.95em; /* Kích thước chữ trong opportunity details */
-            display: flex; /* For horizontal layout */
-            justify-content: space-between; /* Space out label and value */
+            font-size: 0.95em;
+            display: flex;
+            justify-content: space-between;
             align-items: center;
-            border-bottom: 1px dashed rgba(154, 103, 234, 0.1); /* Subtle separator */
+            border-bottom: 1px dashed rgba(154, 103, 234, 0.1);
             padding-bottom: 5px;
         }
         .opportunity-details p:last-child {
@@ -201,31 +204,27 @@
         }
 
         .opportunity-details strong {
-            flex: 0 0 160px; /* Fixed width for labels */
+            flex: 0 0 160px;
             margin-right: 10px;
             color: #e0e0e0;
             text-align: left;
         }
         .opportunity-details span {
-            flex: 1; /* Take remaining space */
+            flex: 1;
             color: #abb2bf;
             text-align: right;
         }
 
 
         /* Trade History Table */
-        .trade-history h2 {
-            margin-bottom: 20px;
-        }
-
         .trade-history table {
             width: 100%;
-            border-collapse: separate; /* Use separate for rounded corners on rows */
+            border-collapse: separate;
             border-spacing: 0;
             margin-top: 20px;
-            background-color: #3e405e; /* Same as card background */
+            background-color: #3e405e;
             border-radius: 10px;
-            overflow: hidden; /* Ensures rounded corners are visible */
+            overflow: hidden;
             box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
         }
 
@@ -237,66 +236,21 @@
         }
 
         .trade-history th {
-            background-color: #4a4c6a; /* Darker grey-purple for table headers */
+            background-color: #4a4c6a;
             color: #e0e0e0;
             font-weight: bold;
             text-transform: uppercase;
-            font-size: 0.9em; /* Kích thước chữ header table */
+            font-size: 0.9em;
             letter-spacing: 0.5px;
         }
         .trade-history td {
-            font-size: 0.9em; /* Kích thước chữ cell table */
-        }
-
-        .trade-history tbody tr:last-child td {
-            border-bottom: none; /* No border for the last row */
-        }
-
-        .trade-history tbody tr:hover {
-            background-color: #4a4c6a; /* Hover effect for table rows */
-            cursor: pointer;
+            font-size: 0.9em;
         }
 
         /* Utility Classes for Text Colors */
-        .text-green { color: #50fa7b; } /* Bright green for positive values/running status */
-        .text-red { color: #ff5555; } /* Red for negative values/stopped status */
-        .text-yellow { color: #f1fa8c; } /* Yellow for warnings/pending status */
-        .text-purple { color: #bd93f9; } /* Lighter purple for specific highlights */
-
-        /* Responsive adjustments */
-        @media (max-width: 768px) {
-            .container {
-                padding: 20px;
-                max-width: 100%; /* Dùng toàn bộ chiều rộng trên mobile */
-            }
-            h1 { font-size: 1.8em; }
-            h2 { font-size: 1.5em; }
-            h3 { font-size: 1.2em; }
-
-            .controls {
-                flex-direction: column;
-                gap: 15px;
-            }
-            .controls button {
-                margin: 0; /* Remove horizontal margin */
-                width: 100%; /* Full width buttons */
-                padding: 12px 20px; /* Giảm padding cho mobile */
-                font-size: 1em; /* Giảm font-size cho mobile */
-            }
-            .controls input[type="number"] {
-                width: 100%;
-                padding: 12px 15px; /* Giảm padding cho mobile */
-                font-size: 1em; /* Giảm font-size cho mobile */
-            }
-            /* status-cards đã là column rồi, không cần điều chỉnh thêm */
-            .opportunity-details strong {
-                flex: 0 0 120px;
-            }
-            .trade-history th, .trade-history td {
-                padding: 10px 15px;
-                font-size: 0.8em; /* Giảm font-size cho table trên mobile */
-            }
-        }
+        .text-green { color: #50fa7b; }
+        .text-red { color: #ff5555; }
+        .text-yellow { color: #f1fa8c; }
     </style>
 </head>
 <body>
@@ -307,14 +261,30 @@
 
         <main>
             <section class="controls">
-                <div>
+                <div class="control-group">
                     <label for="percentageToUse">Phần trăm vốn mở lệnh (%):</label>
                     <input type="number" id="percentageToUse" value="50" min="1" max="100">
                 </div>
-                <button id="startBotBtn">▶️ Start Bot</button>
-                <button id="stopBotBtn">⏸️ Stop Bot</button>
-                <button id="testOrderBtn">⚡ Test Mở Lệnh</button>
-                <button id="stopTestTradeBtn">🛑 Dừng Lệnh Test</button>
+
+                <div class="control-group">
+                    <label for="shortExchangeSelect">Sàn SHORT Test:</label>
+                    <select id="shortExchangeSelect"></select>
+                </div>
+
+                <div class="control-group">
+                    <label for="longExchangeSelect">Sàn LONG Test:</label>
+                    <select id="longExchangeSelect"></select>
+                </div>
+
+                <div style="width: 100%;">
+                    <button id="startBotBtn">▶️ Start Bot</button>
+                    <button id="stopBotBtn">⏸️ Stop Bot</button>
+                </div>
+                
+                <div class="button-group">
+                    <button id="testOrderBtn">⚡ Test Mở Lệnh</button>
+                    <button id="stopTestTradeBtn">🛑 Dừng Lệnh Test</button>
+                </div>
             </section>
 
             <section class="status-cards">
@@ -372,9 +342,13 @@
     </div>
 
     <script>
-        // Các biến và hằng số liên quan đến chuyển tiền đã bị loại bỏ
-        // const SUPPORTED_EXCHANGES = ['binanceusdm', 'bingx', 'okx', 'bitget'];
-        // const FUND_TRANSFER_MIN_AMOUNT_FRONTEND = 10; 
+        const EXCHANGE_DISPLAY_NAMES = {
+            'binanceusdm': 'Binance',
+            'bingx': 'BingX',
+            'okx': 'OKX',
+            'bitget': 'Bitget',
+            'kucoin': 'KuCoin'
+        };
 
         // Hàm để lấy và cập nhật trạng thái bot từ server
         async function updateBotStatus() {
@@ -384,12 +358,11 @@
                     throw new Error(`HTTP error! status: ${response.status}`);
                 }
                 const data = await response.json();
-                // console.log('Bot status data received:', data); // Giữ lại để debug nếu cần
 
                 // Cập nhật trạng thái Bot
                 const botStateDisplay = document.getElementById('botStateDisplay');
                 botStateDisplay.textContent = data.botState;
-                botStateDisplay.className = ''; // Reset classes
+                botStateDisplay.className = '';
                 if (data.botState === 'RUNNING') {
                     botStateDisplay.classList.add('text-green');
                 } else if (data.botState === 'STOPPED') {
@@ -398,112 +371,55 @@
                     botStateDisplay.classList.add('text-yellow');
                 }
 
+                // Cập nhật Dropdowns (Chỉ chạy lần đầu hoặc khi cần)
+                if (document.getElementById('shortExchangeSelect').options.length === 0) {
+                    populateExchangeDropdowns(data.activeExchangeIds);
+                }
+
                 // Cập nhật số dư tài khoản
                 let balancesHtml = '';
                 if (data.balances) {
                     for (const exchangeId in data.balances) {
-                        if (exchangeId === 'totalOverall') continue; 
                         const bal = data.balances[exchangeId];
-                        // Màu đỏ nếu tổng balance âm
-                        const totalBalanceColorClass = bal.total < 0 ? 'text-red' : ''; 
-                        // available cũng có thể âm nếu PnL chưa thực hiện bị lỗ
-                        const availableBalanceColorClass = bal.available < 0 ? 'text-red' : ''; 
-
-                        balancesHtml += `<p><strong>${exchangeId.toUpperCase()}:</strong> Tổng <span class="${totalBalanceColorClass}">${bal.total.toFixed(2)} USDT</span>, Khả dụng <span class="${availableBalanceColorClass}">${bal.available.toFixed(2)} USDT</span></p>`;
+                        const availableBalanceColorClass = bal.available < 0 ? 'text-red' : 'text-green'; 
+                        
+                        balancesHtml += `<p><strong>${(EXCHANGE_DISPLAY_NAMES[exchangeId] || exchangeId).toUpperCase()}:</strong> Khả dụng <span class="${availableBalanceColorClass}">${bal.available.toFixed(2)} USDT</span></p>`;
                     }
-                    const totalOverallColorClass = data.balances.totalOverall < 0 ? 'text-red' : '';
-                    balancesHtml += `<p><strong>Tổng số dư khả dụng (Tất cả sàn, bao gồm cả âm):</strong> <span class="${totalOverallColorClass}">${data.balances.totalOverall.toFixed(2)} USDT</span></p>`;
-                } else {
-                    balancesHtml += '<p>Không có dữ liệu số dư.</p>';
                 }
-                balancesHtml += `<p><strong>Số dư ban đầu của phiên:</strong> ${data.initialTotalBalance.toFixed(2)} USDT</p>`;
                 document.getElementById('balancesDisplay').innerHTML = balancesHtml;
 
-                // Cập nhật PnL tổng hợp
+                // Cập nhật PnL tổng hợp (Lưu ý: bot.js hiện không tính PnL)
                 const cumulativePnlElement = document.getElementById('cumulativePnlDisplay');
-                cumulativePnlElement.textContent = data.cumulativePnl.toFixed(2) + ' USDT';
-                cumulativePnlElement.className = ''; // Reset classes
-                if (data.cumulativePnl >= 0) {
-                    cumulativePnlElement.classList.add('text-green');
-                } else {
-                    cumulativePnlElement.classList.add('text-red');
-                }
+                cumulativePnlElement.textContent = 'N/A USDT (Logic PnL đang được triển khai)'; 
 
                 // Cập nhật cơ hội arbitrage tốt nhất (dự kiến)
                 const bestPotentialOpportunityDisplayDiv = document.getElementById('bestPotentialOpportunityDisplay');
-                if (data.currentSelectedOpportunity) { // Đây là bestPotentialOpportunityForDisplay từ bot.js
-                    // Chuyển đổi timestamp sang giờ địa phương
-                    const nextFundingDate = new Date(data.currentSelectedOpportunity.nextFundingTime);
+                if (data.bestPotentialOpportunityForDisplay) {
+                    const op = data.bestPotentialOpportunityForDisplay;
+                    const nextFundingDate = new Date(op.nextFundingTime);
                     const fundingTimeFormatted = nextFundingDate.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit', hour12: false });
                     const fundingDateFormatted = nextFundingDate.toLocaleDateString('vi-VN');
 
-                    // Lấy Short/Long Exchange dựa trên funding rates
-                    let longExchangeName = data.currentSelectedOpportunity.details.longExchange || 'N/A';
-                    let shortExchangeName = data.currentSelectedOpportunity.details.shortExchange || 'N/A';
-
-                    // Cần kiểm tra nếu các trường này có tồn tại và hợp lệ
-                    const shortFr = data.currentSelectedOpportunity.details.shortFundingRate;
-                    const longFr = data.currentSelectedOpportunity.details.longFundingRate;
-                    const fundingDiff = data.currentSelectedOpportunity.fundingDiff;
-
-                    // Logic xác định Short/Long từ funding rates (nếu có dữ liệu)
-                    // Dùng logic đã sửa: Long FR thấp, Short FR cao
-                    if (typeof shortFr === 'number' && typeof longFr === 'number' && fundingDiff !== 'N/A') {
-                        if (shortFr > longFr) { // Short FR cao hơn Long FR
-                            shortExchangeName = data.currentSelectedOpportunity.details.shortExchange;
-                            longExchangeName = data.currentSelectedOpportunity.details.longExchange;
-                        } else if (longFr > shortFr) { // Long FR cao hơn Short FR (trường hợp hiếm trong arbitrage funding)
-                            // Đảo vai trò nếu logic arbitrage ngược lại
-                            shortExchangeName = data.currentSelectedOpportunity.details.longExchange;
-                            longExchangeName = data.currentSelectedOpportunity.details.shortExchange; // Đã sửa lỗi ở đây, đáng lẽ phải là shortExchange
-                        } else { // Funding rates bằng nhau
-                            shortExchangeName = data.currentSelectedOpportunity.details.shortExchange; // Vẫn giữ mặc định từ server
-                            longExchangeName = data.currentSelectedOpportunity.details.longExchange;
-                        }
-                    }
-
+                    // Lấy Short/Long Exchange dựa trên tên đã chuẩn hóa
+                    let shortExchangeName = EXCHANGE_DISPLAY_NAMES[op.details.shortExchange] || op.details.shortExchange;
+                    let longExchangeName = EXCHANGE_DISPLAY_NAMES[op.details.longExchange] || op.details.longExchange;
 
                     bestPotentialOpportunityDisplayDiv.innerHTML = `
-                        <p><strong>Coin:</strong> <span>${data.currentSelectedOpportunity.coin}</span></p>
-                        <p><strong>Sàn:</strong> <span>${data.currentSelectedOpportunity.exchanges}</span></p>
-                        <p><strong>PnL ước tính:</strong> <span>${data.currentSelectedOpportunity.estimatedPnl?.toFixed(2) || 'N/A'}%</span></p>
+                        <p><strong>Coin:</strong> <span>${op.coin}</span></p>
+                        <p><strong>Sàn:</strong> <span>${op.exchanges}</span></p>
+                        <p><strong>PnL ước tính:</strong> <span>${op.estimatedPnl?.toFixed(2) || 'N/A'}%</span></p>
                         <p><strong>Tới giờ funding:</strong> <span>${fundingTimeFormatted} ngày ${fundingDateFormatted}</span></p>
-                        <p><strong>Vốn dự kiến:</strong> <span>${data.currentSelectedOpportunity.estimatedTradeCollateral || 'N/A'} USDT</span></p>
-                        <p><strong>Max Lev sẽ mở:</strong> <span>${data.currentSelectedOpportunity.commonLeverage || 'N/A'}x</span></p>
-                        <p><strong>Long Sàn:</strong> <span>${longExchangeName} (${typeof longFr === 'number' ? longFr.toFixed(4) : 'N/A'}%)</span></p>
-                        <p><strong>Short Sàn:</strong> <span>${shortExchangeName} (${typeof shortFr === 'number' ? shortFr.toFixed(4) : 'N/A'}%)</span></p>
-                        <p><strong>Chênh lệch Funding:</strong> <span>${typeof fundingDiff === 'number' ? fundingDiff.toFixed(4) : 'N/A'}%</span></p>
+                        <p><strong>Max Lev chung:</strong> <span>${op.commonLeverage || 'N/A'}x</span></p>
+                        <p><strong>Sàn Short:</strong> <span>${shortExchangeName} (${op.details.shortRate?.toFixed(6) || 'N/A'}%)</span></p>
+                        <p><strong>Sàn Long:</strong> <span>${longExchangeName} (${op.details.longRate?.toFixed(6) || 'N/A'}%)</span></p>
                     `;
                 } else {
                     bestPotentialOpportunityDisplayDiv.textContent = 'Không có cơ hội nào khả dụng.';
                 }
 
-                // Cập nhật lịch sử giao dịch
+                // Cập nhật lịch sử giao dịch (Đã loại bỏ logic PNL cũ)
                 const tradeHistoryBody = document.getElementById('tradeHistoryBody');
-                tradeHistoryBody.innerHTML = ''; 
-                if (data.tradeHistory && data.tradeHistory.length > 0) {
-                    data.tradeHistory.forEach(trade => {
-                        const row = tradeHistoryBody.insertRow();
-                        row.insertCell().textContent = new Date(trade.timestamp).toLocaleString('vi-VN'); 
-                        row.insertCell().textContent = trade.coin;
-                        row.insertCell().textContent = trade.exchanges;
-                        row.insertCell().textContent = trade.fundingDiff ? trade.fundingDiff.toFixed(2) + '%' : 'N/A';
-                        row.insertCell().textContent = trade.estimatedPnl ? trade.estimatedPnl.toFixed(2) + '%' : 'N/A';
-                        const actualPnlCell = row.insertCell();
-                        actualPnlCell.textContent = trade.actualPnl ? trade.actualPnl.toFixed(2) + ' USDT' : 'N/A';
-                        if (trade.actualPnl !== undefined && trade.actualPnl !== null) {
-                            actualPnlCell.classList.add(trade.actualPnl >= 0 ? 'text-green' : 'text-red');
-                        }
-                    });
-                } else {
-                    const row = tradeHistoryBody.insertRow();
-                    const cell = row.insertCell();
-                    cell.colSpan = 6;
-                    cell.textContent = 'Chưa có lịch sử giao dịch nào.';
-                    cell.style.textAlign = 'center';
-                    cell.style.fontStyle = 'italic';
-                    cell.style.padding = '20px';
-                }
+                tradeHistoryBody.innerHTML = '<tr><td colspan="6" style="text-align: center; font-style: italic;">Chưa có lịch sử giao dịch (Đang chờ tính toán PnL mới).</td></tr>';
 
             } catch (error) {
                 console.error('Lỗi khi lấy trạng thái bot:', error);
@@ -512,18 +428,35 @@
             }
         }
 
-        // Các hàm liên quan đến dropdown chuyển tiền đã bị loại bỏ
-        // function populateExchangeDropdowns() { ... }
-        // Hàm xử lý chuyển tiền thủ công đã bị loại bỏ
-        // async function handleManualTransfer() { ... }
+        function populateExchangeDropdowns(activeIds) {
+            const shortSelect = document.getElementById('shortExchangeSelect');
+            const longSelect = document.getElementById('longExchangeSelect');
 
-        // Event Listeners cho nút Start và Stop
+            const ids = activeIds || [];
+            
+            // Clear existing options
+            shortSelect.innerHTML = '';
+            longSelect.innerHTML = '';
+
+            ids.forEach(id => {
+                const displayName = EXCHANGE_DISPLAY_NAMES[id] || id.toUpperCase();
+
+                const shortOption = document.createElement('option');
+                shortOption.value = id;
+                shortOption.textContent = displayName;
+                shortSelect.appendChild(shortOption);
+
+                const longOption = document.createElement('option');
+                longOption.value = id;
+                longOption.textContent = displayName;
+                longSelect.appendChild(longOption);
+            });
+        }
+
+
+        // Event Listeners
         document.getElementById('startBotBtn').addEventListener('click', async () => {
             const percentageToUse = document.getElementById('percentageToUse').value;
-            if (percentageToUse < 1 || percentageToUse > 100) {
-                alert('Phần trăm vốn mở lệnh phải từ 1 đến 100.');
-                return;
-            }
             try {
                 const response = await fetch('/bot-api/start', {
                     method: 'POST',
@@ -531,99 +464,68 @@
                     body: JSON.stringify({ percentageToUse: parseFloat(percentageToUse) }) 
                 });
                 const data = await response.json();
-                console.log('Phản hồi Start Bot:', data);
-                alert(data.message);
-                if (data.success) {
-                    updateBotStatus(); 
-                }
+                alert(data.message || 'Thao tác thành công.');
+                if (data.success) updateBotStatus();
             } catch (error) {
-                console.error('Lỗi khi khởi động bot:', error);
-                alert('Lỗi khi khởi động bot: ' + error.message);
+                alert('Lỗi khi khởi động bot.');
             }
         });
 
         document.getElementById('stopBotBtn').addEventListener('click', async () => {
             try {
-                const response = await fetch('/bot-api/stop', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({}) 
-                });
+                const response = await fetch('/bot-api/stop', { method: 'POST' });
                 const data = await response.json();
-                console.log('Phản hồi Stop Bot:', data);
-                alert(data.message);
-                if (data.success) {
-                    updateBotStatus(); 
-                }
+                alert(data.message || 'Thao tác thành công.');
+                if (data.success) updateBotStatus();
             } catch (error) {
-                console.error('Lỗi khi dừng bot:', error);
-                alert('Lỗi khi dừng bot: ' + error.message);
+                alert('Lỗi khi dừng bot.');
             }
         });
 
-        // Event Listener for Test Order Button
         document.getElementById('testOrderBtn').addEventListener('click', async () => {
             const percentageToUse = document.getElementById('percentageToUse').value;
-            if (percentageToUse < 1 || percentageToUse > 100) {
-                alert('Phần trăm vốn mở lệnh phải từ 1 đến 100.');
-                return;
-            }
+            const shortExchange = document.getElementById('shortExchangeSelect').value;
+            const longExchange = document.getElementById('longExchangeSelect').value;
 
-            // IMPORTANT WARNING FOR USER
-            if (!confirm('Bạn có chắc chắn muốn mở lệnh TEST ngay lập tức với thông tin dự kiến không? Việc này sẽ tốn phí giao dịch thật!')) {
+            if (!shortExchange || !longExchange) {
+                alert('Vui lòng chọn cả Sàn SHORT và Sàn LONG để Test.');
                 return;
             }
+            if (!confirm('Bạn có chắc chắn muốn mở lệnh TEST ngay lập tức không?')) return;
 
             try {
                 const response = await fetch('/bot-api/test-trade', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ percentageToUse: parseFloat(percentageToUse) })
+                    body: JSON.stringify({ 
+                        percentageToUse: parseFloat(percentageToUse),
+                        shortExchange: shortExchange,
+                        longExchange: longExchange
+                    })
                 });
                 const data = await response.json();
-                console.log('Phản hồi Test Lệnh:', data);
                 alert(data.message);
-                if (data.success) {
-                    updateBotStatus(); // Refresh UI after test
-                }
+                if (data.success) updateBotStatus();
             } catch (error) {
-                console.error('Lỗi khi thực hiện lệnh test:', error);
-                alert('Lỗi khi thực hiện lệnh test: ' + error.message);
+                alert('Lỗi khi thực hiện lệnh test.');
             }
         });
 
-        // NEW: Event Listener for Stop Test Trade Button
         document.getElementById('stopTestTradeBtn').addEventListener('click', async () => {
-            if (!confirm('Bạn có chắc chắn muốn đóng LỆNH ĐANG MỞ (bao gồm cả lệnh test hoặc lệnh bot tự động) không? Thao tác này sẽ đóng vị thế ngay lập tức và tính toán PnL. CẨN THẬN!')) {
-                return;
-            }
-
+            if (!confirm('Bạn có chắc chắn muốn đóng LỆNH ĐANG MỞ (bao gồm cả lệnh test) không?')) return;
             try {
-                const response = await fetch('/bot-api/stop-test-trade', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' }
-                });
+                const response = await fetch('/bot-api/stop-test-trade', { method: 'POST' });
                 const data = await response.json();
-                console.log('Phản hồi Dừng Lệnh Test:', data);
                 alert(data.message);
-                if (data.success) {
-                    updateBotStatus(); // Refresh UI after closing
-                }
+                if (data.success) updateBotStatus();
             } catch (error) {
-                console.error('Lỗi khi dừng lệnh test:', error);
-                alert('Lỗi khi dừng lệnh test: ' + error.message);
+                alert('Lỗi khi dừng lệnh.');
             }
         });
-
-        // Event Listener cho nút chuyển tiền thủ công đã bị loại bỏ
-        // document.getElementById('manualTransferBtn').addEventListener('click', handleManualTransfer);
-
 
         // Tải trạng thái ban đầu khi trang được load
         document.addEventListener('DOMContentLoaded', () => {
-            // populateExchangeDropdowns(); // Đã loại bỏ
             updateBotStatus();
-            // Thiết lập interval để tự động cập nhật trạng thái mỗi 5 giây
             setInterval(updateBotStatus, 5000); 
         });
     </script>
