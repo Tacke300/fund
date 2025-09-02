@@ -294,12 +294,12 @@ const botServer = http.createServer((req, res) => {
             currentPercentageToUse = parseFloat(JSON.parse(body).percentageToUse) || 50;
             const started = startBot();
             res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ success: started }));
+            res.end(JSON.stringify({ success: started, message: 'Bot đã khởi động.' }));
         });
     } else if (req.url === '/bot-api/stop' && req.method === 'POST') {
         const stopped = stopBot();
         res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ success: stopped }));
+        res.end(JSON.stringify({ success: stopped, message: 'Bot đã dừng.' }));
     } else if (req.url === '/bot-api/test-trade' && req.method === 'POST') {
         let body = '';
         req.on('data', chunk => { body += chunk.toString(); });
@@ -329,9 +329,11 @@ const botServer = http.createServer((req, res) => {
             }
         });
     } else if (req.url === '/bot-api/stop-test-trade' && req.method === 'POST') {
-        await closeTradesAndCalculatePnL();
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ success: true, message: 'Đã gửi lệnh đóng.' }));
+        req.on('end', async () => {
+            await closeTradesAndCalculatePnL();
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: true, message: 'Đã gửi lệnh đóng.' }));
+        });
     } else {
         res.writeHead(404);
         res.end('Not Found');
