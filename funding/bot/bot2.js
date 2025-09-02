@@ -28,9 +28,8 @@ const MAX_MINUTES_UNTIL_FUNDING = 30;
 const MIN_MINUTES_FOR_EXECUTION = 15;
 const DATA_FETCH_INTERVAL_SECONDS = 5;
 
-// SỬA LỖI: Kích hoạt OKX bằng cách xóa nó khỏi danh sách vô hiệu hóa
 const ALL_POSSIBLE_EXCHANGE_IDS = ['binanceusdm', 'bitget', 'okx', 'kucoin'];
-const DISABLED_EXCHANGES = []; // OKX đã được cho phép hoạt động
+const DISABLED_EXCHANGES = [];
 
 const activeExchangeIds = ALL_POSSIBLE_EXCHANGE_IDS.filter(id => !DISABLED_EXCHANGES.includes(id));
 
@@ -121,14 +120,28 @@ async function processServerData(serverData) {
         bestPotentialOpportunityForDisplay = null;
         return;
     }
+
     allCurrentOpportunities = serverData.arbitrageData
-        .filter(op => op && op.details && exchanges[op.details.shortExchange] && exchanges[op.details.longExchange])
+        .filter(op => {
+            if (!op || !op.details || !op.details.shortExchange || !op.details.longExchange) return false;
+            // SỬA LỖI TẠI ĐÂY: Chuẩn hóa tên sàn trước khi kiểm tra
+            const shortExId = op.details.shortExchange.toLowerCase() === 'binance' ? 'binanceusdm' : op.details.shortExchange.toLowerCase();
+            const longExId = op.details.longExchange.toLowerCase() === 'binance' ? 'binanceusdm' : op.details.longExchange.toLowerCase();
+            return exchanges[shortExId] && exchanges[longExId];
+        })
+        .map(op => {
+            // Cập nhật lại tên đã chuẩn hóa vào đối tượng
+            op.details.shortExchange = op.details.shortExchange.toLowerCase() === 'binance' ? 'binanceusdm' : op.details.shortExchange.toLowerCase();
+            op.details.longExchange = op.details.longExchange.toLowerCase() === 'binance' ? 'binanceusdm' : op.details.longExchange.toLowerCase();
+            return op;
+        })
         .sort((a, b) => {
             if (a.nextFundingTime !== b.nextFundingTime) {
                 return a.nextFundingTime - b.nextFundingTime;
             }
             return b.estimatedPnl - a.estimatedPnl;
         });
+        
     bestPotentialOpportunityForDisplay = allCurrentOpportunities.length > 0 ? allCurrentOpportunities[0] : null;
 }
 
