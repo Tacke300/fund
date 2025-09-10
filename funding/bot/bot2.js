@@ -42,6 +42,7 @@ const exchanges = {};
 activeExchangeIds.forEach(id => {
     try {
         const exchangeClass = ccxt[id];
+        // Đặt defaultType là 'swap' cho các sàn futures/swap
         const config = { 'options': { 'defaultType': 'swap' }, 'enableRateLimit': true };
         if (id === 'binanceusdm') { config.apiKey = binanceApiKey; config.secret = binanceApiSecret; }
         else if (id === 'okx') { config.apiKey = okxApiKey; config.secret = okxApiSecret; config.password = okxPassword; }
@@ -87,13 +88,23 @@ async function fetchDataFromServer() {
     }
 }
 
+// ======================= SỬA ĐỔI PHẦN updateBalances =======================
 async function updateBalances() {
     safeLog('log', '[BOT] Cập nhật số dư...');
     await Promise.all(activeExchangeIds.map(async (id) => {
         if (!exchanges[id]) return; 
         try {
-            const balance = await exchanges[id].fetchBalance({ 'type': 'future' });
-            balances[id] = { available: balance.free?.USDT || 0 };
+            let balance;
+            if (id === 'kucoin') {
+                // Với KuCoin, dựa vào 'defaultType': 'swap' đã set khi khởi tạo
+                // Thử gọi fetchBalance() mà không truyền type cụ thể
+                balance = await exchanges[id].fetchBalance(); 
+            } else {
+                // Giữ nguyên cho các sàn khác nếu chúng vẫn cần type: 'future'
+                balance = await exchanges[id].fetchBalance({ 'type': 'future' });
+            }
+            
+            balances[id] = { available: balance.free?.USDT || 0 }; // Lấy số dư USDT khả dụng
             if (exchangeHealth[id].isDisabled) {
                 safeLog('info', `[HEALTH] Sàn ${id.toUpperCase()} đã hoạt động trở lại.`);
                 exchangeHealth[id].isDisabled = false;
@@ -110,22 +121,55 @@ async function updateBalances() {
         }
     }));
 }
+// ======================= KẾT THÚC SỬA ĐỔI PHẦN updateBalances =======================
 
+// ======================= SỬA ĐỔI PHẦN getExchangeSpecificSymbol =======================
 async function getExchangeSpecificSymbol(exchange, rawCoinSymbol) {
     try {
-        if (!exchange.markets || Object.keys(exchange.markets).length === 0) await exchange.loadMarkets();
-        const base = rawCoinSymbol.substring(0, rawCoinSymbol.length - 4);
+        if (!exchange.markets || Object.keys(exchange.markets).length === 0) {
+            safeLog('debug', `[SYMBOL_RESOLVE] Tải lại markets cho ${exchange.id}...`);
+            await exchange.loadMarkets();
+        }
+        
+        const base = rawCoinSymbol.substring(0, rawCoinSymbol.length - 4); // VD: "OPEN" từ "OPENUSDT"
         const quote = 'USDT';
-        const attempts = [`${base}/${quote}`, `${base}/${quote}:${quote}`, `${base}-${quote}-SWAP`, rawCoinSymbol];
-        for (const attempt of attempts) {
+
+        // Các dạng symbol phổ biến trên KuCoin (Futures/Swap)
+        const kucoinSpecificAttempts = [
+            `${base}-${quote}M`,          // Ví dụ: OPEN-USDTM (thường thấy trên KuCoin Futures)
+            `${base}-${quote}-SWAP`,      // Ví dụ: OPEN-USDT-SWAP
+            `${base}/${quote}:USDT`,      // Format cho futures/swap của 1 số sàn (vd: FTX cũ)
+        ];
+        // Các dạng chung khác, áp dụng cho tất cả các sàn (bao gồm KuCoin nếu các dạng trên không khớp)
+        const generalAttempts = [
+            `${base}/${quote}`,           // Ví dụ: OPEN/USDT
+            `${base}/${quote}:${quote}`,  // Ví dụ: OPEN/USDT:USDT (đôi khi cho Binance)
+            rawCoinSymbol                 // Giữ nguyên rawCoinSymbol (phòng hờ)
+        ];
+
+        // Ưu tiên các định dạng KuCoin nếu sàn là KuCoin, sau đó mới đến các dạng chung
+        const allAttempts = (exchange.id === 'kucoin' ? kucoinSpecificAttempts : []).concat(generalAttempts);
+
+        for (const attempt of allAttempts) {
             try {
                 const market = exchange.market(attempt);
-                if (market && market.active) return market.id;
-            } catch (e) {}
+                if (market && market.active) {
+                    safeLog('log', `[SYMBOL_RESOLVE] Tìm thấy symbol ${market.id} cho ${rawCoinSymbol} trên ${exchange.id} với định dạng: ${attempt}`);
+                    return market.id;
+                }
+            } catch (e) {
+                // Bỏ qua lỗi khi thử symbol không tồn tại, chỉ log chi tiết nếu cần debug sâu
+                // safeLog('debug', `[SYMBOL_RESOLVE_ATTEMPT_FAIL] Sàn ${exchange.id}, Lỗi khi thử ${attempt}: ${e.message}`);
+            }
         }
+        safeLog('error', `[SYMBOL_RESOLVE] KHÔNG tìm thấy symbol hợp lệ cho ${rawCoinSymbol} trên ${exchange.id} sau khi thử tất cả các phương án.`);
         return null;
-    } catch (e) { return null; }
+    } catch (e) { 
+        safeLog('error', `[SYMBOL_RESOLVE_ERROR] Lỗi tổng quát khi lấy symbol trên ${exchange.id} cho ${rawCoinSymbol}: ${e.message}`);
+        return null; 
+    }
 }
+// ======================= KẾT THÚC SỬA ĐỔI PHẦN getExchangeSpecificSymbol =======================
 
 const normalizeExchangeId = (id) => {
     if (!id) return null;
