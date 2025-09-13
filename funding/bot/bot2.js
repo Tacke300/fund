@@ -57,7 +57,7 @@ activeExchangeIds.forEach(id => {
             config.password = kucoinApiPassword; 
             config.options = { 
                 ...config.options,
-                'defaultType': 'future',
+                'defaultType': 'contract', // Thử 'contract' cho KuCoin
             };
         }
 
@@ -113,24 +113,46 @@ async function updateBalances() {
         }
 
         try {
-            let balanceData;
+            let balanceData = null;
             
             if (id === 'kucoin') {
-                safeLog('debug', '[BALANCES] Thử lấy số dư KuCoin (defaultType: swap/future)...');
-                try {
-                    balanceData = await exchanges[id].fetchBalance(); 
-                } catch (kucoinError1) {
-                    safeLog('warn', `[BALANCES] Lỗi khi lấy số dư KuCoin (thử 1 - default): ${kucoinError1.message}. Thử với 'future' explicity...`);
+                safeLog('debug', '[BALANCES] Thử lấy số dư KuCoin (ưu tiên fetchBalance với type)...');
+                const kucoinBalanceTypes = ['future', 'margin', 'swap']; // Thứ tự ưu tiên
+                for (const type of kucoinBalanceTypes) {
                     try {
-                        balanceData = await exchanges[id].fetchBalance({ 'type': 'future' });
-                    } catch (kucoinError2) {
-                        safeLog('warn', `[BALANCES] Lỗi khi lấy số dư KuCoin (thử 2 - 'future'): ${kucoinError2.message}. Thử với 'margin' (ít khả năng)...`);
-                        try {
-                            balanceData = await exchanges[id].fetchBalance({ 'type': 'margin' });
-                        } catch (kucoinError3) {
-                             safeLog('error', `[BALANCES] Thất bại hoàn toàn khi lấy số dư KuCoin sau 3 lần thử: ${kucoinError3}`);
-                             throw kucoinError3;
+                        balanceData = await exchanges[id].fetchBalance({ 'type': type });
+                        if (balanceData && (balanceData.free?.USDT !== undefined || balanceData.total?.USDT !== undefined)) {
+                            safeLog('debug', `[BALANCES] Lấy số dư KuCoin thành công với type: '${type}'.`);
+                            break;
                         }
+                    } catch (e) {
+                        safeLog('warn', `[BALANCES] Lỗi khi lấy số dư KuCoin (thử type '${type}'): ${e.message}`);
+                        if (e instanceof ccxt.PermissionDenied && e.message.includes("margin trading")) {
+                            safeLog('error', `[BALANCES] LỖI QUAN TRỌNG: KuCoin yêu cầu "margin trading" được bật. Vui lòng kiểm tra quyền API và cài đặt tài khoản KuCoin của bạn!`);
+                            // Không ném lỗi ra ngoài để thử các type khác, nhưng sẽ ghi nhận lỗi
+                        }
+                    }
+                }
+
+                if (!balanceData || (balanceData.free?.USDT === undefined && balanceData.total?.USDT === undefined)) {
+                    safeLog('warn', `[BALANCES] KuCoin fetchBalance với các type đã thử thất bại. Thử fetchAccounts() làm phương án dự phòng...`);
+                    try {
+                        const accounts = await exchanges[id].fetchAccounts();
+                        const contractAccount = accounts.find(acc => acc.type === 'contract' || acc.type === 'future');
+                        if (contractAccount) {
+                            balanceData = {
+                                free: { USDT: contractAccount.free },
+                                total: { USDT: contractAccount.total },
+                                used: { USDT: contractAccount.used },
+                            };
+                            safeLog('debug', `[BALANCES] Lấy số dư KuCoin từ fetchAccounts() thành công.`);
+                        } else {
+                            safeLog('warn', '[BALANCES] Không tìm thấy tài khoản "contract" hoặc "future" trong fetchAccounts() của KuCoin.');
+                            throw new Error('Không thể lấy số dư hợp đồng KuCoin từ fetchAccounts().');
+                        }
+                    } catch (e) {
+                         safeLog('error', `[BALANCES] Thất bại hoàn toàn khi lấy số dư KuCoin sau nhiều lần thử: ${e}`);
+                         throw e;
                     }
                 }
             } else {
@@ -186,6 +208,8 @@ async function getExchangeSpecificSymbol(exchange, rawCoinSymbol) {
         `${base}/${quote}:USDT`,
         `${base}-${quote}-SWAP`,
         `${base}-${quote}`,
+        `${base}${quote}M`,
+        `${base}${quote}_SWAP`,
     ];
 
     const generalAttempts = [
@@ -267,11 +291,12 @@ async function processServerData(serverData) {
         });
 
     bestPotentialOpportunityForDisplay = allCurrentOpportunities.length > 0 ? allCurrentOpportunities[0] : null;
-    if (bestPotentialOpportunityForDisplay) {
-        safeLog('debug', `[PROCESS] Cơ hội tốt nhất: ${bestPotentialOpportunityForDisplay.coin} - PNL: ${bestPotentialOpportunityForDisplay.estimatedPnl.toFixed(2)}% (Short: ${bestPotentialOpportunityForDisplay.details.shortExchange.toUpperCase()}, Long: ${bestPotentialOpportunityForDisplay.details.longExchange.toUpperCase()})`);
-    } else {
-        safeLog('debug', '[PROCESS] Không tìm thấy cơ hội đủ điều kiện nào.');
-    }
+    // Tắt log cơ hội tốt nhất để giảm spam
+    // if (bestPotentialOpportunityForDisplay) {
+    //     safeLog('debug', `[PROCESS] Cơ hội tốt nhất: ${bestPotentialOpportunityForDisplay.coin} - PNL: ${bestPotentialOpportunityForDisplay.estimatedPnl.toFixed(2)}% (Short: ${bestPotentialOpportunityForDisplay.details.shortExchange.toUpperCase()}, Long: ${bestPotentialOpportunityForDisplay.details.longExchange.toUpperCase()})`);
+    // } else {
+    //     safeLog('debug', '[PROCESS] Không tìm thấy cơ hội đủ điều kiện nào.');
+    // }
 }
 
 async function setLeverage(exchange, symbol, leverage) {
