@@ -3,7 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const ccxt = require('ccxt');
 
-// ... (Toàn bộ code từ đầu đến trước hàm setLeverageSafely giữ nguyên, tôi sẽ dán lại để chắc chắn)
+// ... (Toàn bộ code từ đầu đến trước hàm setLeverageSafely giữ nguyên)
 
 const safeLog = (type, ...args) => {
     try {
@@ -144,49 +144,46 @@ async function getExchangeSpecificSymbol(exchange, rawCoinSymbol) {
     return null;
 }
 
-// *** HÀM setLeverage ĐÃ ĐƯỢC SỬA LẠI HOÀN TOÀN ***
+
+// *** HÀM setLeverage ĐÃ ĐƯỢC SỬA LẠI HOÀN TOÀN THEO ĐÚNG YÊU CẦU CỦA BẠN ***
 async function setLeverageSafely(exchange, symbol, desiredLeverage) {
     
     // Hàm con để thực hiện việc đặt đòn bẩy
     const trySet = async (leverageToSet) => {
         try {
             if (exchange.id === 'kucoin') {
-                // SỬ DỤNG API NGẦM (IMPLICIT) ĐỂ ĐẢM BẢO CHÍNH XÁC
-                await exchange.privatePostPositionLeverage({
-                    'symbol': symbol,
-                    'leverage': leverageToSet,
-                    'marginMode': 'cross' // Tham số bắt buộc
-                });
+                // CÁCH GỌI ĐÚNG CHO KUCOIN VỚI 3 THAM SỐ
+                await exchange.setLeverage(leverageToSet, symbol, { 'marginMode': 'cross' });
             } else {
-                // Sử dụng hàm chung cho các sàn khác
+                // CÁCH GỌI THÔNG THƯỜNG CHO CÁC SÀN KHÁC VỚI 2 THAM SỐ
                 await exchange.setLeverage(leverageToSet, symbol);
             }
             safeLog('log', `[LEVERAGE] ✅ Đặt đòn bẩy x${leverageToSet} cho ${symbol} trên ${exchange.id} thành công.`);
             return leverageToSet;
         } catch (e) {
             safeLog('warn', `[LEVERAGE] ⚠️ Lỗi khi đặt đòn bẩy x${leverageToSet} cho ${symbol}: ${e.message}`);
-            return null; // Trả về null nếu thất bại
+            return null;
         }
     };
     
-    // Bước 1: Luôn thử với đòn bẩy mong muốn trước
+    // Bước 1: Thử với đòn bẩy mong muốn
     let result = await trySet(desiredLeverage);
     if (result !== null) {
-        return result; // Thành công, trả về đòn bẩy đã đặt
+        return result;
     }
     
-    // Bước 2: Nếu thất bại, thử lại với một đòn bẩy thấp và an toàn (ví dụ: 10)
-    // Điều này phòng trường hợp `desiredLeverage` quá cao so với sàn cho phép
-    safeLog('log', `[LEVERAGE] Thử lại với đòn bẩy an toàn x10...`);
-    result = await trySet(10);
-     if (result !== null) {
-        return result; // Thành công, trả về đòn bẩy đã đặt
+    // Bước 2: Nếu thất bại, thử lại với một đòn bẩy thấp và an toàn (ví dụ: 20)
+    // Điều này để phòng trường hợp đòn bẩy mong muốn quá cao so với sàn cho phép
+    safeLog('log', `[LEVERAGE] Thử lại với đòn bẩy an toàn x20...`);
+    result = await trySet(20);
+    if (result !== null) {
+        return result;
     }
 
-    // Nếu tất cả đều thất bại
     safeLog('error', `[LEVERAGE] ❌ Không thể đặt bất kỳ đòn bẩy nào cho ${symbol} trên ${exchange.id}.`);
     return null;
 }
+
 
 const normalizeExchangeId = (id) => {
     if (!id) return null;
@@ -405,7 +402,6 @@ const botServer = http.createServer(async (req, res) => {
         res.end(JSON.stringify({ success: stopBot(), message: 'Đã gửi yêu cầu dừng bot.' }));
     } 
     
-    // API DÀNH CHO TEST TÙY CHỈNH
     else if (req.url === '/bot-api/custom-test-trade' && req.method === 'POST') {
         let body = '';
         req.on('data', chunk => body += chunk.toString());
