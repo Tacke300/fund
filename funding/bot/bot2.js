@@ -29,7 +29,7 @@ const MIN_PNL_PERCENTAGE = 1;
 const MIN_MINUTES_FOR_EXECUTION = 15;
 const DATA_FETCH_INTERVAL_SECONDS = 5;
 const MAX_CONSECUTIVE_FAILS = 3;
-const MIN_COLLATERAL_FOR_TRADE = 0.06; // *** SÀN AN TOÀN CHO VỐN THẾ CHẤP THEO YÊU CẦU ***
+const MIN_COLLATERAL_FOR_TRADE = 0.06;
 
 const ALL_POSSIBLE_EXCHANGE_IDS = ['binanceusdm', 'bitget', 'okx', 'kucoinfutures'];
 const DISABLED_EXCHANGES = [];
@@ -246,7 +246,6 @@ async function executeTrades(opportunity, percentageToUse) {
         return false;
     }
     
-    // *** BẮT ĐẦU SỬA LỖI KIỂM TRA SỐ DƯ ***
     const shortMarket = shortEx.market(shortOriginalSymbol);
     const longMarket = longEx.market(longOriginalSymbol);
     const minNotionalShort = shortMarket.limits?.cost?.min || 5.0;
@@ -267,7 +266,6 @@ async function executeTrades(opportunity, percentageToUse) {
         safeLog('info', `[TRADE] Gợi ý: Tăng % vốn sử dụng hoặc đảm bảo (số dư * % * đòn bẩy) > ${minRequiredNotional} USDT.`);
         return false;
     }
-    // *** KẾT THÚC SỬA LỖI KIỂM TRA SỐ DƯ ***
 
     try {
         const actualShortLeverage = await setLeverageSafely(shortEx, shortOriginalSymbol, desiredLeverage);
@@ -286,13 +284,17 @@ async function executeTrades(opportunity, percentageToUse) {
         safeLog('log', `[TRADE] Khối lượng tính toán dựa trên đòn bẩy thực tế x${leverageToUse}. Short: ${shortAmount}, Long: ${longAmount}`);
 
         const shortParams = {};
-        const longParams = {};
-
         if (shortEx.id === 'binanceusdm') {
             shortParams['positionSide'] = 'SHORT';
+        } else if (shortEx.id === 'kucoinfutures') {
+            shortParams['marginMode'] = 'cross';
         }
+
+        const longParams = {};
         if (longEx.id === 'binanceusdm') {
             longParams['positionSide'] = 'LONG';
+        } else if (longEx.id === 'kucoinfutures') {
+            longParams['marginMode'] = 'cross';
         }
 
         const shortOrder = await shortEx.createMarketSellOrder(shortOriginalSymbol, shortAmount, shortParams);
@@ -324,13 +326,17 @@ async function closeTrades() {
         const longEx = exchanges[tradeToClose.longExchange];
 
         const shortParams = {};
-        const longParams = {};
-
         if (shortEx.id === 'binanceusdm') {
             shortParams['positionSide'] = 'SHORT';
+        } else if (shortEx.id === 'kucoinfutures') {
+            shortParams['marginMode'] = 'cross';
         }
+        
+        const longParams = {};
         if (longEx.id === 'binanceusdm') {
             longParams['positionSide'] = 'LONG';
+        } else if (longEx.id === 'kucoinfutures') {
+            longParams['marginMode'] = 'cross';
         }
 
         await shortEx.createMarketBuyOrder(tradeToClose.shortOriginalSymbol, tradeToClose.shortOrderAmount, shortParams);
