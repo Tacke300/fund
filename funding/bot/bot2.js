@@ -3,6 +3,8 @@ const fs = require('fs');
 const path = require('path');
 const ccxt = require('ccxt');
 
+// ... (Toàn bộ code từ đầu đến trước hàm setLeverageSafely giữ nguyên)
+
 const safeLog = (type, ...args) => {
     try {
         const timestamp = new Date().toLocaleTimeString('vi-VN');
@@ -148,54 +150,67 @@ async function getExchangeSpecificSymbol(exchange, rawCoinSymbol) {
     return null;
 }
 
-// *** ĐÃ SỬA LỖI: setLeverage cho KuCoin ***
+// *** ĐÃ SỬA LỖI VÀ TỐI ƯU ***
 async function getMaxLeverage(exchange, symbol) {
     try {
         const markets = await exchange.fetchLeverageTiers([symbol]);
         const tiers = markets[symbol];
         if (tiers && tiers.length > 0) {
-            tiers.sort((a, b) => b.maxLeverage - a.maxLeverage);
-            return tiers[0].maxLeverage;
+            return tiers.reduce((max, tier) => Math.max(max, tier.maxLeverage), 0);
         }
     } catch (e) {
-        safeLog('debug', `[LEVERAGE] Không thể fetchLeverageTiers. Thử market info.`);
-        try {
-            const market = exchange.market(symbol);
-            if (market.limits?.leverage?.max) {
-                return market.limits.leverage.max;
-            }
-        } catch (e2) {
-             safeLog('warn', `[LEVERAGE] Không tìm thấy đòn bẩy tối đa cho ${symbol} trên ${exchange.id}.`);
-        }
+        safeLog('debug', `[LEVERAGE] Không thể fetchLeverageTiers cho ${symbol}. Thử market info.`);
     }
-    return null;
+    
+    try {
+        const market = exchange.market(symbol);
+        if (market.limits?.leverage?.max) {
+            return market.limits.leverage.max;
+        }
+    } catch (e2) {
+         safeLog('warn', `[LEVERAGE] Không thể lấy đòn bẩy tối đa từ market info cho ${symbol} trên ${exchange.id}.`);
+    }
+    
+    // Fallback nếu không tìm thấy, trả về một giá trị hợp lý
+    safeLog('warn', `[LEVERAGE] Không tìm thấy thông tin đòn bẩy tối đa, mặc định là 20.`);
+    return 20;
 }
 
 async function setLeverageSafely(exchange, symbol, desiredLeverage) {
-    // *** SỬA LỖI: Thêm params cho KuCoin ***
-    const params = {};
-    if (exchange.id === 'kucoin') {
-        params['marginMode'] = 'cross';
-    }
-
-    try {
-        await exchange.setLeverage(desiredLeverage, symbol, params);
-        safeLog('log', `[LEVERAGE] ✅ Đặt đòn bẩy mong muốn x${desiredLeverage} cho ${symbol} trên ${exchange.id} thành công.`);
-        return desiredLeverage;
-    } catch (e) {
-        safeLog('warn', `[LEVERAGE] ⚠️ Không thể đặt đòn bẩy x${desiredLeverage} (${e.message}). Thử với đòn bẩy tối đa...`);
-    }
-
+    
+    const trySet = async (leverageToSet) => {
+        try {
+            if (exchange.id === 'kucoin') {
+                // Cách gọi ĐÚNG cho KuCoin
+                await exchange.setLeverage(leverageToSet, undefined, { 'marginMode': 'cross', 'symbol': symbol });
+            } else {
+                // Cách gọi cho các sàn khác
+                await exchange.setLeverage(leverageToSet, symbol);
+            }
+            safeLog('log', `[LEVERAGE] ✅ Đặt đòn bẩy x${leverageToSet} cho ${symbol} trên ${exchange.id} thành công.`);
+            return leverageToSet;
+        } catch (e) {
+            safeLog('warn', `[LEVERAGE] ⚠️ Lỗi khi đặt đòn bẩy x${leverageToSet} cho ${symbol}: ${e.message}`);
+            return null;
+        }
+    };
+    
+    // 1. Thử đặt đòn bẩy mong muốn
+    let result = await trySet(desiredLeverage);
+    if (result !== null) return result;
+    
+    // 2. Nếu thất bại, thử với đòn bẩy tối đa
+    safeLog('log', `[LEVERAGE] Thử lại với đòn bẩy tối đa...`);
     const maxLeverage = await getMaxLeverage(exchange, symbol);
     if (maxLeverage) {
-        try {
-            await exchange.setLeverage(maxLeverage, symbol, params);
-            safeLog('log', `[LEVERAGE] ✅ Đặt đòn bẩy TỐI ĐA x${maxLeverage} cho ${symbol} trên ${exchange.id} thành công.`);
-            return maxLeverage;
-        } catch (e2) {
-            safeLog('error', `[LEVERAGE] ❌ Thất bại ngay cả khi đặt đòn bẩy tối đa x${maxLeverage} (${e2.message}).`);
-        }
+        result = await trySet(maxLeverage);
+        if (result !== null) return result;
     }
+    
+    // 3. Nếu vẫn thất bại, thử với đòn bẩy thấp (ví dụ x10)
+    safeLog('log', `[LEVERAGE] Thử lại với đòn bẩy an toàn x10...`);
+    result = await trySet(10);
+    if (result !== null) return result;
 
     safeLog('error', `[LEVERAGE] ❌ Không thể đặt bất kỳ đòn bẩy nào cho ${symbol} trên ${exchange.id}.`);
     return null;
@@ -243,6 +258,9 @@ async function executeTrades(opportunity, percentageToUse) {
     
     const shortEx = exchanges[shortExchange];
     const longEx = exchanges[longExchange];
+    await shortEx.loadMarkets(true); // Luôn tải lại market để có thông tin mới nhất
+    await longEx.loadMarkets(true);
+    
     const shortOriginalSymbol = await getExchangeSpecificSymbol(shortEx, coin);
     const longOriginalSymbol = await getExchangeSpecificSymbol(longEx, coin);
 
