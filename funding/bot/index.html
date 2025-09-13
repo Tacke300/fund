@@ -410,8 +410,8 @@
                         <p><strong>PnL ước tính:</strong> <span>${op.estimatedPnl?.toFixed(2) || 'N/A'}%</span></p>
                         <p><strong>Tới giờ funding:</strong> <span>${fundingTimeFormatted} ngày ${fundingDateFormatted}</span></p>
                         <p><strong>Max Lev chung:</strong> <span>${op.commonLeverage || 'N/A'}x</span></p>
-                        <p><strong>Sàn Short:</strong> <span>${shortExchangeName} (${op.details.shortRate?.toFixed(6) || 'N/A'}%)</span></p>
-                        <p><strong>Sàn Long:</strong> <span>${longExchangeName} (${op.details.longRate?.toFixed(6) || 'N/A'}%)</span></p>
+                        <p><strong>Sàn Short:</strong> <span>${shortExchangeName} </span></p>
+                        <p><strong>Sàn Long:</strong> <span>${longExchangeName} </span></p>
                     `;
                 } else {
                     bestPotentialOpportunityDisplayDiv.textContent = 'Không có cơ hội nào khả dụng.';
