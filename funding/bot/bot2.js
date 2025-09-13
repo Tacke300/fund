@@ -129,25 +129,45 @@ async function updateBalances() {
     safeLog('log', '[BALANCES] Hoàn tất cập nhật số dư.');
 }
 
+// *** NÂNG CẤP HÀM TÌM SYMBOL ***
 async function getExchangeSpecificSymbol(exchange, rawCoinSymbol) {
     try {
         if (!exchange.markets || Object.keys(exchange.markets).length === 0) await exchange.loadMarkets(true);
     } catch (e) {
-        safeLog('error', `[HELPER] Lỗi tải markets cho ${exchange.id}: ${e.message}`);
+        safeLog('error', `[SYMBOL] Lỗi tải markets cho ${exchange.id}: ${e.message}`);
         return null;
     }
-    const base = String(rawCoinSymbol).replace(/USDT$/, '');
-    const attempts = [`${base}/USDT:USDT`, `${base}/USDT`, rawCoinSymbol, `${base}USDTM`, `${base}-USDT-SWAP`];
+    const base = String(rawCoinSymbol).toUpperCase().replace(/USDT$/, '');
+    
+    // Thêm nhiều định dạng hơn để thử
+    const attempts = [
+        `${base}/USDT:USDT`,  // Binance
+        `${base}USDT.P`,      // Bybit
+        `${base}USDT`,        // Dạng chung
+        `${base}-USDT-SWAP`,  // OKX
+        `${base}USDTM`,       // KuCoin
+        `${base}PERP`,        // Một số sàn khác
+        `${base}/USDT`,       // Dạng chung
+    ];
+
+    if (base === 'BTC') { // Trường hợp đặc biệt cho Bitcoin
+        attempts.unshift('XBTUSDTM');
+    }
+
+    safeLog('debug', `[SYMBOL] Đang tìm ${rawCoinSymbol} trên ${exchange.id}. Thử các định dạng: ${attempts.join(', ')}`);
+
     for (const attempt of attempts) {
         const market = exchange.markets[attempt];
         if (market?.active && (market.contract || market.swap || market.future)) {
-            safeLog('debug', `[SYMBOL] Tìm thấy symbol ${market.id} cho ${rawCoinSymbol} trên ${exchange.id}`);
+            safeLog('log', `[SYMBOL] ✅ Tìm thấy symbol: ${market.id} cho ${rawCoinSymbol} trên ${exchange.id}`);
             return market.id;
         }
     }
-    safeLog('warn', `[SYMBOL] KHÔNG tìm thấy symbol hợp lệ cho ${rawCoinSymbol} trên ${exchange.id}`);
+
+    safeLog('warn', `[SYMBOL] ❌ KHÔNG tìm thấy symbol hợp lệ cho ${rawCoinSymbol} trên ${exchange.id} sau khi thử tất cả định dạng.`);
     return null;
 }
+
 
 const normalizeExchangeId = (id) => {
     if (!id) return null;
@@ -249,7 +269,7 @@ async function closeTrades() {
         safeLog('warn', '[PNL] Không có giao dịch nào đang mở để đóng.');
         return;
     }
-    const tradeToClose = { ...currentTradeDetails }; // Sao chép để tránh race condition
+    const tradeToClose = { ...currentTradeDetails };
     safeLog('log', `[PNL] Đang đóng giao dịch cho ${tradeToClose.coin}...`);
     try {
         await exchanges[tradeToClose.shortExchange].createMarketBuyOrder(tradeToClose.shortOriginalSymbol, tradeToClose.shortOrderAmount);
@@ -287,7 +307,7 @@ async function calculatePnlAfterDelay(closedTrade) {
 async function mainBotLoop() {
     if (botState !== 'RUNNING') return;
     
-    if (tradeAwaitingPnl && (Date.now() - tradeAwaitingPnl.closeTime >= 45000)) { // Chờ 45s
+    if (tradeAwaitingPnl && (Date.now() - tradeAwaitingPnl.closeTime >= 45000)) {
         await calculatePnlAfterDelay(tradeAwaitingPnl);
     }
     
@@ -336,6 +356,7 @@ function stopBot() {
 }
 
 // === HTTP Server for UI ===
+// *** SỬA LỖI CÚ PHÁP: Thêm "async" vào đây ***
 const botServer = http.createServer(async (req, res) => {
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
@@ -364,7 +385,7 @@ const botServer = http.createServer(async (req, res) => {
         res.end(JSON.stringify({ success: stopBot(), message: 'Đã gửi yêu cầu dừng bot.' }));
     } 
     
-    // === API DÀNH CHO TEST TÙY CHỈNH ===
+    // API DÀNH CHO TEST TÙY CHỈNH
     else if (req.url === '/bot-api/custom-test-trade' && req.method === 'POST') {
         let body = '';
         req.on('data', chunk => body += chunk.toString());
@@ -382,14 +403,10 @@ const botServer = http.createServer(async (req, res) => {
                     return res.end(JSON.stringify({ success: false, message: 'Đã có lệnh đang mở. Vui lòng đóng lệnh hiện tại trước.' }));
                 }
 
-                // Tạo một "cơ hội ảo" để test
                 const testOpportunity = {
-                    coin: bestPotentialOpportunityForDisplay.coin, // Lấy coin từ cơ hội tốt nhất
+                    coin: bestPotentialOpportunityForDisplay.coin,
                     commonLeverage: parseInt(leverage, 10) || 20,
-                    details: {
-                        shortExchange: shortExchange,
-                        longExchange: longExchange
-                    }
+                    details: { shortExchange, longExchange }
                 };
                 
                 safeLog('log', `[API_TEST] Yêu cầu Test Tùy Chỉnh:`, testOpportunity);
@@ -409,7 +426,7 @@ const botServer = http.createServer(async (req, res) => {
             }
         });
     } 
-    // Nút Stop Test dùng chung cho cả trade tự động và trade test
+    
     else if (req.url === '/bot-api/stop-test-trade' && req.method === 'POST') {
         if (!currentTradeDetails || currentTradeDetails.status !== 'OPEN') {
             res.writeHead(400, { 'Content-Type': 'application/json' });
