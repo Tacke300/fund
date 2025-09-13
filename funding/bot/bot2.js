@@ -3,8 +3,6 @@ const fs = require('fs');
 const path = require('path');
 const ccxt = require('ccxt');
 
-// ... (Toàn bộ code từ đầu đến trước hàm setLeverageSafely giữ nguyên)
-
 const safeLog = (type, ...args) => {
     try {
         const timestamp = new Date().toLocaleTimeString('vi-VN');
@@ -32,7 +30,7 @@ const MIN_MINUTES_FOR_EXECUTION = 15;
 const DATA_FETCH_INTERVAL_SECONDS = 5;
 const MAX_CONSECUTIVE_FAILS = 3;
 
-const ALL_POSSIBLE_EXCHANGE_IDS = ['binanceusdm', 'bitget', 'okx', 'kucoin'];
+const ALL_POSSIBLE_EXCHANGE_IDS = ['binanceusdm', 'bitget', 'okx', 'kucoinfutures'];
 const DISABLED_EXCHANGES = [];
 const activeExchangeIds = ALL_POSSIBLE_EXCHANGE_IDS.filter(id => !DISABLED_EXCHANGES.includes(id));
 
@@ -59,6 +57,7 @@ activeExchangeIds.forEach(id => {
     try {
         let exchangeClass;
         let config = { 'enableRateLimit': true, 'verbose': false };
+
         if (id === 'binanceusdm') {
             exchangeClass = ccxt.binanceusdm;
             config.apiKey = binanceApiKey; config.secret = binanceApiSecret;
@@ -71,11 +70,12 @@ activeExchangeIds.forEach(id => {
             exchangeClass = ccxt.bitget;
             config.apiKey = bitgetApiKey; config.secret = bitgetApiSecret; config.password = bitgetApiPassword;
             config.options = { 'defaultType': 'swap' };
-        } else if (id === 'kucoin') {
+        } else if (id === 'kucoinfutures') {
             exchangeClass = ccxt.kucoinfutures;
             config.apiKey = kucoinApiKey; config.secret = kucoinApiSecret; config.password = kucoinApiPassword;
         }
-        if (config.apiKey && config.secret && (id !== 'kucoin' || config.password)) {
+
+        if (config.apiKey && config.secret && (id !== 'kucoinfutures' || config.password)) {
             exchanges[id] = new exchangeClass(config);
             safeLog('log', `[INIT] Khởi tạo sàn ${id.toUpperCase()} thành công.`);
         } else {
@@ -102,7 +102,7 @@ async function updateBalances() {
     await Promise.all(activeExchangeIds.map(async (id) => {
         if (!exchanges[id] || exchangeHealth[id].isDisabled) return;
         try {
-            let balanceData = (id === 'kucoin') ? await exchanges[id].fetchBalance() : await exchanges[id].fetchBalance({ 'type': 'future' });
+            let balanceData = (id === 'kucoinfutures') ? await exchanges[id].fetchBalance() : await exchanges[id].fetchBalance({ 'type': 'future' });
             const usdtAvailable = balanceData?.free?.USDT || 0;
             const usdtTotal = balanceData?.total?.USDT || 0;
             balances[id] = { available: usdtAvailable, total: usdtTotal };
@@ -144,40 +144,51 @@ async function getExchangeSpecificSymbol(exchange, rawCoinSymbol) {
     return null;
 }
 
-
-// *** HÀM setLeverage ĐÃ ĐƯỢC SỬA LẠI HOÀN TOÀN THEO ĐÚNG YÊU CẦU CỦA BẠN ***
-async function setLeverageSafely(exchange, symbol, desiredLeverage) {
-    
-    // Hàm con để thực hiện việc đặt đòn bẩy
-    const trySet = async (leverageToSet) => {
-        try {
-            if (exchange.id === 'kucoin') {
-                // CÁCH GỌI ĐÚNG CHO KUCOIN VỚI 3 THAM SỐ
-                await exchange.setLeverage(leverageToSet, symbol, { 'marginMode': 'cross' });
-            } else {
-                // CÁCH GỌI THÔNG THƯỜNG CHO CÁC SÀN KHÁC VỚI 2 THAM SỐ
-                await exchange.setLeverage(leverageToSet, symbol);
-            }
-            safeLog('log', `[LEVERAGE] ✅ Đặt đòn bẩy x${leverageToSet} cho ${symbol} trên ${exchange.id} thành công.`);
-            return leverageToSet;
-        } catch (e) {
-            safeLog('warn', `[LEVERAGE] ⚠️ Lỗi khi đặt đòn bẩy x${leverageToSet} cho ${symbol}: ${e.message}`);
-            return null;
+async function getMaxLeverage(exchange, symbol) {
+    try {
+        const markets = await exchange.fetchLeverageTiers([symbol]);
+        const tiers = markets[symbol];
+        if (tiers && tiers.length > 0) {
+            tiers.sort((a, b) => b.maxLeverage - a.maxLeverage);
+            return tiers[0].maxLeverage;
         }
-    };
-    
-    // Bước 1: Thử với đòn bẩy mong muốn
-    let result = await trySet(desiredLeverage);
-    if (result !== null) {
-        return result;
+    } catch (e) {
+        safeLog('debug', `[LEVERAGE] Không thể fetchLeverageTiers. Thử market info.`);
+        try {
+            const market = exchange.market(symbol);
+            if (market.limits?.leverage?.max) {
+                return market.limits.leverage.max;
+            }
+        } catch (e2) {
+             safeLog('warn', `[LEVERAGE] Không tìm thấy đòn bẩy tối đa cho ${symbol} trên ${exchange.id}.`);
+        }
     }
-    
-    // Bước 2: Nếu thất bại, thử lại với một đòn bẩy thấp và an toàn (ví dụ: 20)
-    // Điều này để phòng trường hợp đòn bẩy mong muốn quá cao so với sàn cho phép
-    safeLog('log', `[LEVERAGE] Thử lại với đòn bẩy an toàn x20...`);
-    result = await trySet(20);
-    if (result !== null) {
-        return result;
+    return null;
+}
+
+async function setLeverageSafely(exchange, symbol, desiredLeverage) {
+    const params = {};
+    if (exchange.id === 'kucoinfutures') {
+        params['marginMode'] = 'cross';
+    }
+
+    try {
+        await exchange.setLeverage(desiredLeverage, symbol, params);
+        safeLog('log', `[LEVERAGE] ✅ Đặt đòn bẩy mong muốn x${desiredLeverage} cho ${symbol} trên ${exchange.id} thành công.`);
+        return desiredLeverage;
+    } catch (e) {
+        safeLog('warn', `[LEVERAGE] ⚠️ Không thể đặt đòn bẩy x${desiredLeverage} (${e.message}). Thử với đòn bẩy tối đa...`);
+    }
+
+    const maxLeverage = await getMaxLeverage(exchange, symbol);
+    if (maxLeverage) {
+        try {
+            await exchange.setLeverage(maxLeverage, symbol, params);
+            safeLog('log', `[LEVERAGE] ✅ Đặt đòn bẩy TỐI ĐA x${maxLeverage} cho ${symbol} trên ${exchange.id} thành công.`);
+            return maxLeverage;
+        } catch (e2) {
+            safeLog('error', `[LEVERAGE] ❌ Thất bại ngay cả khi đặt đòn bẩy tối đa x${maxLeverage} (${e2.message}).`);
+        }
     }
 
     safeLog('error', `[LEVERAGE] ❌ Không thể đặt bất kỳ đòn bẩy nào cho ${symbol} trên ${exchange.id}.`);
@@ -189,7 +200,7 @@ const normalizeExchangeId = (id) => {
     if (!id) return null;
     const lowerId = id.toLowerCase().trim();
     if (lowerId.includes('binance')) return 'binanceusdm';
-    if (lowerId.includes('kucoin')) return 'kucoin';
+    if (lowerId.includes('kucoin')) return 'kucoinfutures';
     return lowerId;
 };
 
@@ -226,9 +237,6 @@ async function executeTrades(opportunity, percentageToUse) {
     
     const shortEx = exchanges[shortExchange];
     const longEx = exchanges[longExchange];
-    await shortEx.loadMarkets(true);
-    await longEx.loadMarkets(true);
-    
     const shortOriginalSymbol = await getExchangeSpecificSymbol(shortEx, coin);
     const longOriginalSymbol = await getExchangeSpecificSymbol(longEx, coin);
 
@@ -259,11 +267,13 @@ async function executeTrades(opportunity, percentageToUse) {
             throw new Error(`Không thể đặt đòn bẩy cho một trong hai sàn.`);
         }
         
+        const leverageToUse = Math.min(actualShortLeverage, actualLongLeverage);
+        
         const shortPrice = (await shortEx.fetchTicker(shortOriginalSymbol)).last;
         const longPrice = (await longEx.fetchTicker(longOriginalSymbol)).last;
-        const shortAmount = shortEx.amountToPrecision(shortOriginalSymbol, (collateral * desiredLeverage) / shortPrice);
-        const longAmount = longEx.amountToPrecision(longOriginalSymbol, (collateral * desiredLeverage) / longPrice);
-        safeLog('log', `[TRADE] Khối lượng tính toán dựa trên đòn bẩy mong muốn x${desiredLeverage}. Short: ${shortAmount}, Long: ${longAmount}`);
+        const shortAmount = shortEx.amountToPrecision(shortOriginalSymbol, (collateral * leverageToUse) / shortPrice);
+        const longAmount = longEx.amountToPrecision(longOriginalSymbol, (collateral * leverageToUse) / longPrice);
+        safeLog('log', `[TRADE] Khối lượng tính toán dựa trên đòn bẩy thực tế x${leverageToUse}. Short: ${shortAmount}, Long: ${longAmount}`);
 
         const shortOrder = await shortEx.createMarketSellOrder(shortOriginalSymbol, shortAmount);
         const longOrder = await longEx.createMarketBuyOrder(longOriginalSymbol, longAmount);
@@ -271,7 +281,7 @@ async function executeTrades(opportunity, percentageToUse) {
         currentTradeDetails = {
             ...opportunity.details, coin, status: 'OPEN', openTime: Date.now(),
             shortOrderAmount: shortOrder.amount, longOrderAmount: longOrder.amount,
-            commonLeverageUsed: desiredLeverage, shortOriginalSymbol, longOriginalSymbol,
+            commonLeverageUsed: leverageToUse, shortOriginalSymbol, longOriginalSymbol,
             shortBalanceBefore, longBalanceBefore
         };
         safeLog('log', `[TRADE] Mở lệnh thành công cho ${coin}.`, currentTradeDetails);
@@ -373,7 +383,6 @@ function stopBot() {
     return true;
 }
 
-// === HTTP Server for UI ===
 const botServer = http.createServer(async (req, res) => {
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
