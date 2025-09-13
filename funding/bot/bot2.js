@@ -29,6 +29,7 @@ const MIN_PNL_PERCENTAGE = 1;
 const MIN_MINUTES_FOR_EXECUTION = 15;
 const DATA_FETCH_INTERVAL_SECONDS = 5;
 const MAX_CONSECUTIVE_FAILS = 3;
+const MIN_COLLATERAL_FOR_TRADE = 0.06; // *** SÀN AN TOÀN CHO VỐN THẾ CHẤP THEO YÊU CẦU ***
 
 const ALL_POSSIBLE_EXCHANGE_IDS = ['binanceusdm', 'bitget', 'okx', 'kucoinfutures'];
 const DISABLED_EXCHANGES = [];
@@ -245,19 +246,28 @@ async function executeTrades(opportunity, percentageToUse) {
         return false;
     }
     
+    // *** BẮT ĐẦU SỬA LỖI KIỂM TRA SỐ DƯ ***
     const shortMarket = shortEx.market(shortOriginalSymbol);
     const longMarket = longEx.market(longOriginalSymbol);
-    const minCostShort = shortMarket.limits?.cost?.min || 0.1;
-    const minCostLong = longMarket.limits?.cost?.min || 0.1;
-    const minRequiredCollateral = Math.max(minCostShort, minCostLong);
+    const minNotionalShort = shortMarket.limits?.cost?.min || 5.0;
+    const minNotionalLong = longMarket.limits?.cost?.min || 5.0;
+    const minRequiredNotional = Math.max(minNotionalShort, minNotionalLong);
 
     const minBalance = Math.min(shortBalanceBefore, longBalanceBefore);
     const collateral = minBalance * (percentageToUse / 100);
 
-    if (collateral < minRequiredCollateral) {
-        safeLog('error', `[TRADE] Vốn thế chấp (${collateral.toFixed(2)} USDT) nhỏ hơn mức tối thiểu yêu cầu (${minRequiredCollateral} USDT). Hủy bỏ.`);
+    if (collateral < MIN_COLLATERAL_FOR_TRADE) {
+        safeLog('error', `[TRADE] Vốn thế chấp (${collateral.toFixed(2)} USDT) nhỏ hơn mức sàn của bot (${MIN_COLLATERAL_FOR_TRADE} USDT). Hủy bỏ.`);
         return false;
     }
+    
+    const estimatedNotionalValue = collateral * desiredLeverage;
+    if (estimatedNotionalValue < minRequiredNotional) {
+        safeLog('error', `[TRADE] Giá trị lệnh dự kiến (${estimatedNotionalValue.toFixed(2)} USDT) nhỏ hơn mức tối thiểu sàn yêu cầu (${minRequiredNotional} USDT). Hủy bỏ.`);
+        safeLog('info', `[TRADE] Gợi ý: Tăng % vốn sử dụng hoặc đảm bảo (số dư * % * đòn bẩy) > ${minRequiredNotional} USDT.`);
+        return false;
+    }
+    // *** KẾT THÚC SỬA LỖI KIỂM TRA SỐ DƯ ***
 
     try {
         const actualShortLeverage = await setLeverageSafely(shortEx, shortOriginalSymbol, desiredLeverage);
@@ -275,8 +285,18 @@ async function executeTrades(opportunity, percentageToUse) {
         const longAmount = longEx.amountToPrecision(longOriginalSymbol, (collateral * leverageToUse) / longPrice);
         safeLog('log', `[TRADE] Khối lượng tính toán dựa trên đòn bẩy thực tế x${leverageToUse}. Short: ${shortAmount}, Long: ${longAmount}`);
 
-        const shortOrder = await shortEx.createMarketSellOrder(shortOriginalSymbol, shortAmount);
-        const longOrder = await longEx.createMarketBuyOrder(longOriginalSymbol, longAmount);
+        const shortParams = {};
+        const longParams = {};
+
+        if (shortEx.id === 'binanceusdm') {
+            shortParams['positionSide'] = 'SHORT';
+        }
+        if (longEx.id === 'binanceusdm') {
+            longParams['positionSide'] = 'LONG';
+        }
+
+        const shortOrder = await shortEx.createMarketSellOrder(shortOriginalSymbol, shortAmount, shortParams);
+        const longOrder = await longEx.createMarketBuyOrder(longOriginalSymbol, longAmount, longParams);
         
         currentTradeDetails = {
             ...opportunity.details, coin, status: 'OPEN', openTime: Date.now(),
@@ -300,8 +320,21 @@ async function closeTrades() {
     const tradeToClose = { ...currentTradeDetails };
     safeLog('log', `[PNL] Đang đóng giao dịch cho ${tradeToClose.coin}...`);
     try {
-        await exchanges[tradeToClose.shortExchange].createMarketBuyOrder(tradeToClose.shortOriginalSymbol, tradeToClose.shortOrderAmount);
-        await exchanges[tradeToClose.longExchange].createMarketSellOrder(tradeToClose.longOriginalSymbol, tradeToClose.longOrderAmount);
+        const shortEx = exchanges[tradeToClose.shortExchange];
+        const longEx = exchanges[tradeToClose.longExchange];
+
+        const shortParams = {};
+        const longParams = {};
+
+        if (shortEx.id === 'binanceusdm') {
+            shortParams['positionSide'] = 'SHORT';
+        }
+        if (longEx.id === 'binanceusdm') {
+            longParams['positionSide'] = 'LONG';
+        }
+
+        await shortEx.createMarketBuyOrder(tradeToClose.shortOriginalSymbol, tradeToClose.shortOrderAmount, shortParams);
+        await longEx.createMarketSellOrder(tradeToClose.longOriginalSymbol, tradeToClose.longOrderAmount, longParams);
         
         currentTradeDetails.status = 'PENDING_PNL_CALC';
         currentTradeDetails.closeTime = Date.now();
