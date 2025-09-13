@@ -34,7 +34,7 @@ const DATA_FETCH_INTERVAL_SECONDS = 5;
 const MAX_CONSECUTIVE_FAILS = 3;
 
 const ALL_POSSIBLE_EXCHANGE_IDS = ['binanceusdm', 'bitget', 'okx', 'kucoin'];
-const DISABLED_EXCHANGES = [];
+const DISABLED_EXCHANGES = []; // Ví dụ: ['kucoin'] nếu bạn muốn tạm thời tắt KuCoin
 
 const activeExchangeIds = ALL_POSSIBLE_EXCHANGE_IDS.filter(id => !DISABLED_EXCHANGES.includes(id));
 
@@ -66,10 +66,9 @@ activeExchangeIds.forEach(id => {
             config.apiKey = kucoinApiKey; 
             config.secret = kucoinApiSecret; 
             config.password = kucoinApiPassword; 
-            // KuCoin sử dụng 'swap' cho futures trading
             config.options = { 
                 ...config.options,
-                'defaultType': 'swap',
+                'defaultType': 'swap', // Đảm bảo KuCoin được cấu hình cho futures/swap
             };
         }
 
@@ -125,50 +124,54 @@ async function updateBalances() {
         }
 
         try {
-            let balanceData = null;
+            let usdtAvailable = 0;
+            let usdtTotal = 0;
             
             if (id === 'kucoin') {
-                safeLog('debug', '[BALANCES] Lấy số dư KuCoin (sử dụng fetchBalance mặc định cho swap)...');
+                safeLog('debug', '[BALANCES] Lấy số dư KuCoin (sử dụng fetchBalance mặc định cho swap/futures)...');
                 try {
-                    // KuCoin: Chỉ sử dụng fetchBalance() mặc định vì nó đã được config với defaultType: 'swap'
-                    balanceData = await exchanges[id].fetchBalance();
-                    if (balanceData && (balanceData.free?.USDT !== undefined || balanceData.total?.USDT !== undefined)) {
-                        safeLog('debug', `[BALANCES] Lấy số dư KuCoin thành công với fetchBalance() mặc định.`);
+                    // Thử fetchBalance() mặc định trước, vì nó đã được cấu hình với defaultType: 'swap'
+                    const balanceDataDefault = await exchanges[id].fetchBalance();
+                    
+                    // KuCoin thường trả về số dư futures dưới 'futures' hoặc 'swap' property trong balanceData.info.balances
+                    // Hoặc có thể trực tiếp ở level top nếu CCXT đã xử lý
+                    const futuresAccountInfo = balanceDataDefault?.info?.balances?.find(
+                        b => b.currency === 'USDT' && (b.type === 'futures' || b.type === 'swap' || b.type === 'contract')
+                    );
+
+                    if (futuresAccountInfo) {
+                        usdtAvailable = parseFloat(futuresAccountInfo.availableBalance || 0);
+                        usdtTotal = parseFloat(futuresAccountInfo.totalBalance || 0);
+                        safeLog('debug', `[BALANCES] Lấy số dư KuCoin từ fetchBalance().info (type: ${futuresAccountInfo.type}) thành công.`);
+                    } else if (balanceDataDefault.free?.USDT !== undefined || balanceDataDefault.total?.USDT !== undefined) {
+                        // Fallback nếu fetchBalance() mặc định có trả về USDT ở cấp top-level
+                        usdtAvailable = balanceDataDefault.free?.USDT || 0;
+                        usdtTotal = balanceDataDefault.total?.USDT || 0;
+                        safeLog('debug', `[BALANCES] Lấy số dư KuCoin thành công với fetchBalance() mặc định (top-level USDT).`);
                     } else {
-                        safeLog('warn', '[BALANCES] fetchBalance KuCoin mặc định không trả về số dư USDT. Thử fetchAccounts()...');
-                        throw new Error('No USDT balance found with default fetchBalance');
+                        safeLog('warn', '[BALANCES] fetchBalance KuCoin mặc định không trả về số dư USDT futures. Thử fetchAccounts()...');
+                        throw new Error('No USDT futures balance found with default fetchBalance');
                     }
                 } catch (e) {
-                    safeLog('warn', `[BALANCES] Lỗi khi lấy số dư KuCoin với fetchBalance(): ${e.message}`);
+                    safeLog('warn', `[BALANCES] Lỗi khi lấy số dư KuCoin với fetchBalance(): ${e.message}. Thử fetchAccounts()...`);
                     // Thử fetchAccounts làm phương án dự phòng
                     try {
                         safeLog('debug', '[BALANCES] Thử fetchAccounts() cho KuCoin...');
                         const accounts = await exchanges[id].fetchAccounts();
-                        safeLog('debug', `[BALANCES] KuCoin accounts: ${JSON.stringify(accounts.map(acc => ({type: acc.type, currency: acc.currency, free: acc.free, total: acc.total})), null, 2)}`);
+                        safeLog('debug', `[BALANCES] KuCoin accounts raw: ${JSON.stringify(accounts.map(acc => ({type: acc.type, currency: acc.currency, free: acc.free, total: acc.total})), null, 2)}`);
                         
-                        // Tìm tài khoản futures/contract hoặc main account có USDT
+                        // CHỈ TÌM TÀI KHOẢN FUTURES/CONTRACT/SWAP CÓ USDT
                         let targetAccount = accounts.find(acc => 
                             (acc.type === 'futures' || acc.type === 'contract' || acc.type === 'swap') && 
                             acc.currency === 'USDT'
                         );
                         
-                        if (!targetAccount) {
-                            // Nếu không tìm thấy futures account, thử tìm main account
-                            targetAccount = accounts.find(acc => 
-                                (acc.type === 'main' || acc.type === 'trade') && 
-                                acc.currency === 'USDT'
-                            );
-                        }
-                        
                         if (targetAccount) {
-                            balanceData = {
-                                free: { USDT: targetAccount.free || 0 },
-                                total: { USDT: targetAccount.total || 0 },
-                                used: { USDT: targetAccount.used || 0 },
-                            };
+                            usdtAvailable = targetAccount.free || 0;
+                            usdtTotal = targetAccount.total || 0;
                             safeLog('debug', `[BALANCES] Lấy số dư KuCoin từ fetchAccounts() thành công (type: ${targetAccount.type}).`);
                         } else {
-                            safeLog('warn', '[BALANCES] Không tìm thấy tài khoản USDT phù hợp trong fetchAccounts() của KuCoin.');
+                            safeLog('warn', '[BALANCES] Không tìm thấy tài khoản USDT FUTURES/CONTRACT/SWAP phù hợp trong fetchAccounts() của KuCoin.');
                             throw new Error('Không thể lấy số dư USDT KuCoin từ fetchAccounts().');
                         }
                     } catch (e2) {
@@ -178,12 +181,11 @@ async function updateBalances() {
                 }
             } else {
                 // Đối với các sàn khác, sử dụng type 'future'
-                balanceData = await exchanges[id].fetchBalance({ 'type': 'future' });
+                const balanceData = await exchanges[id].fetchBalance({ 'type': 'future' });
+                usdtAvailable = balanceData?.free?.USDT || 0;
+                usdtTotal = balanceData?.total?.USDT || 0;
             }
             
-            const usdtAvailable = balanceData?.free?.USDT || 0;
-            const usdtTotal = balanceData?.total?.USDT || 0;
-
             balances[id] = { available: usdtAvailable, total: usdtTotal };
             safeLog('log', `[BALANCES] Số dư ${id.toUpperCase()} cập nhật: USDT Khả dụng = ${usdtAvailable.toFixed(2)}, Tổng = ${usdtTotal.toFixed(2)}`);
 
@@ -225,16 +227,15 @@ async function getExchangeSpecificSymbol(exchange, rawCoinSymbol) {
     const availableSymbols = Object.keys(exchange.markets);
     safeLog('debug', `[SYMBOL_RESOLVE] Tìm kiếm symbol cho ${rawCoinSymbol} trên ${exchange.id} (Base: ${base}, Quote: ${quote}).`);
 
+    // Các định dạng symbol phổ biến cho KuCoin Futures
     const kucoinSpecificAttempts = [
         `${base}USDTM`,        // Ví dụ: BTCUSDTM (KuCoin Futures format)
-        `${base}/${quote}`,    // Ví dụ: BTC/USDT 
-        `${base}-${quote}M`,   // Ví dụ: BTC-USDTM
-        `${base}/${quote}:USDT`, // Ví dụ: BTC/USDT:USDT
+        `${base}/${quote}:USDT`, // Ví dụ: BTC/USDT:USDT (cũng có thể dùng cho futures)
         `${base}-${quote}-SWAP`, // Ví dụ: BTC-USDT-SWAP
-        `${base}${quote}M`,    // Ví dụ: BTCUSDTM
         `${base}${quote}_SWAP`, // Ví dụ: BTCUSDT_SWAP
     ];
 
+    // Các định dạng symbol chung cho các sàn
     const generalAttempts = [
         `${base}/${quote}`,
         `${base}/${quote}:${quote}`,
@@ -250,6 +251,7 @@ async function getExchangeSpecificSymbol(exchange, rawCoinSymbol) {
         try {
             if (availableSymbols.includes(attempt)) {
                 const market = exchange.market(attempt);
+                // Kiểm tra thêm để đảm bảo đây là thị trường hợp đồng/swap/futures
                 if (market && market.active && (market.contract || market.swap || market.future || market.type === 'swap')) {
                     safeLog('log', `[SYMBOL_RESOLVE] Tìm thấy symbol ${market.id} cho ${rawCoinSymbol} trên ${exchange.id} với định dạng: ${attempt}`);
                     return market.id;
@@ -372,11 +374,11 @@ async function executeTrades(opportunity, percentageToUse) {
         const longAmount = longEx.amountToPrecision(longOriginalSymbol, (collateral * commonLeverage) / longPrice);
         safeLog('debug', `[BOT_TRADE] Lượng Short: ${shortAmount} ${shortOriginalSymbol}, Lượng Long: ${longAmount} ${longOriginalSymbol}`);
 
-        safeLog('log', `[BOT_TRADE] Đang mở lệnh SHORT trên ${shortEx.id.toUpperCase()} cho ${shortAmount} ${shortOriginalSymbol}...`);
+        safeLog('log', `[BOT_TRADE] Đang mở lệnh SHORT (Market Sell) trên ${shortEx.id.toUpperCase()} cho ${shortAmount} ${shortOriginalSymbol}...`);
         const shortOrder = await shortEx.createMarketSellOrder(shortOriginalSymbol, shortAmount);
         safeLog('log', `[BOT_TRADE] Lệnh SHORT thành công. ID: ${shortOrder.id}`);
 
-        safeLog('log', `[BOT_TRADE] Đang mở lệnh LONG trên ${longEx.id.toUpperCase()} cho ${longAmount} ${longOriginalSymbol}...`);
+        safeLog('log', `[BOT_TRADE] Đang mở lệnh LONG (Market Buy) trên ${longEx.id.toUpperCase()} cho ${longAmount} ${longOriginalSymbol}...`);
         const longOrder = await longEx.createMarketBuyOrder(longOriginalSymbol, longAmount);
         safeLog('log', `[BOT_TRADE] Lệnh LONG thành công. ID: ${longOrder.id}`);
         
@@ -450,7 +452,7 @@ async function calculatePnlAfterDelay(closedTrade) {
 async function mainBotLoop() {
     if (botState !== 'RUNNING') return;
     
-    if (tradeAwaitingPnl && (Date.now() - tradeAwaitingPnl.closeTime >= 60000)) {
+    if (tradeAwaitingPnl && (Date.now() - tradeAwaitingPnl.closeTime >= 60000)) { // Chờ 60 giây trước khi tính PNL
         safeLog('log', `[BOT_LOOP] Đã đủ thời gian để tính PNL cho giao dịch ${tradeAwaitingPnl.coin}.`);
         await calculatePnlAfterDelay(tradeAwaitingPnl);
     }
@@ -462,9 +464,10 @@ async function mainBotLoop() {
     const currentMinute = now.getUTCMinutes();
     const currentSecond = now.getUTCSeconds();
     
-    // Tắt debug log để giảm spam
+    // Tắt debug log để giảm spam nếu không cần thiết
     // safeLog('debug', `[BOT_LOOP] Thời gian hiện tại: ${currentMinute} phút, ${currentSecond} giây UTC.`);
 
+    // Logic để mở giao dịch mới (ví dụ: 30-35 giây trước phút 00 của giờ tiếp theo)
     if (currentMinute === 59 && currentSecond >= 30 && currentSecond < 35 && !currentTradeDetails) {
         safeLog('log', '[BOT_LOOP] Đang tìm kiếm cơ hội để mở giao dịch mới...');
         for (const opportunity of allCurrentOpportunities) {
@@ -476,7 +479,7 @@ async function mainBotLoop() {
                 const tradeSuccess = await executeTrades(opportunity, currentPercentageToUse);
                 if (tradeSuccess) {
                     safeLog('log', `[BOT_LOOP] Đã mở giao dịch thành công cho ${opportunity.coin}.`);
-                    break;
+                    break; // Mở một giao dịch mỗi chu kỳ
                 } else {
                     safeLog('warn', `[BOT_LOOP] Mở giao dịch cho ${opportunity.coin} thất bại. Tiếp tục tìm kiếm cơ hội khác.`);
                 }
@@ -486,6 +489,7 @@ async function mainBotLoop() {
         }
     }
     
+    // Logic để đóng giao dịch (ví dụ: 5-10 giây sau phút 00 của giờ tiếp theo)
     if (currentMinute === 0 && currentSecond >= 5 && currentSecond < 10 && currentTradeDetails?.status === 'OPEN') {
         safeLog('log', `[BOT_LOOP] Phát hiện thời điểm đóng lệnh cho giao dịch ${currentTradeDetails.coin}.`);
         await closeTrades();
