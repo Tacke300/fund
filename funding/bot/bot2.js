@@ -148,46 +148,48 @@ async function getExchangeSpecificSymbol(exchange, rawCoinSymbol) {
     return null;
 }
 
-// *** NÂNG CẤP 1: HÀM ĐẶT ĐÒN BẨY THÔNG MINH ***
+// *** ĐÃ SỬA LỖI: setLeverage cho KuCoin ***
 async function getMaxLeverage(exchange, symbol) {
     try {
         const markets = await exchange.fetchLeverageTiers([symbol]);
         const tiers = markets[symbol];
         if (tiers && tiers.length > 0) {
-            // Sắp xếp để tìm tier có đòn bẩy cao nhất
             tiers.sort((a, b) => b.maxLeverage - a.maxLeverage);
             return tiers[0].maxLeverage;
         }
     } catch (e) {
-        // Fallback nếu fetchLeverageTiers không được hỗ trợ
-        safeLog('debug', `[LEVERAGE] Không thể fetchLeverageTiers cho ${symbol} trên ${exchange.id}. Thử kiểm tra market info.`);
+        safeLog('debug', `[LEVERAGE] Không thể fetchLeverageTiers. Thử market info.`);
         try {
             const market = exchange.market(symbol);
             if (market.limits?.leverage?.max) {
                 return market.limits.leverage.max;
             }
         } catch (e2) {
-             safeLog('warn', `[LEVERAGE] Không tìm thấy thông tin đòn bẩy tối đa cho ${symbol} trên ${exchange.id}.`);
+             safeLog('warn', `[LEVERAGE] Không tìm thấy đòn bẩy tối đa cho ${symbol} trên ${exchange.id}.`);
         }
     }
     return null;
 }
 
 async function setLeverageSafely(exchange, symbol, desiredLeverage) {
-    // 1. Thử đặt đòn bẩy mong muốn
+    // *** SỬA LỖI: Thêm params cho KuCoin ***
+    const params = {};
+    if (exchange.id === 'kucoin') {
+        params['marginMode'] = 'cross';
+    }
+
     try {
-        await exchange.setLeverage(desiredLeverage, symbol);
+        await exchange.setLeverage(desiredLeverage, symbol, params);
         safeLog('log', `[LEVERAGE] ✅ Đặt đòn bẩy mong muốn x${desiredLeverage} cho ${symbol} trên ${exchange.id} thành công.`);
         return desiredLeverage;
     } catch (e) {
-        safeLog('warn', `[LEVERAGE] ⚠️ Không thể đặt đòn bẩy mong muốn x${desiredLeverage} (${e.message}). Thử với đòn bẩy tối đa...`);
+        safeLog('warn', `[LEVERAGE] ⚠️ Không thể đặt đòn bẩy x${desiredLeverage} (${e.message}). Thử với đòn bẩy tối đa...`);
     }
 
-    // 2. Nếu thất bại, thử với đòn bẩy tối đa
     const maxLeverage = await getMaxLeverage(exchange, symbol);
     if (maxLeverage) {
         try {
-            await exchange.setLeverage(maxLeverage, symbol);
+            await exchange.setLeverage(maxLeverage, symbol, params);
             safeLog('log', `[LEVERAGE] ✅ Đặt đòn bẩy TỐI ĐA x${maxLeverage} cho ${symbol} trên ${exchange.id} thành công.`);
             return maxLeverage;
         } catch (e2) {
@@ -196,8 +198,9 @@ async function setLeverageSafely(exchange, symbol, desiredLeverage) {
     }
 
     safeLog('error', `[LEVERAGE] ❌ Không thể đặt bất kỳ đòn bẩy nào cho ${symbol} trên ${exchange.id}.`);
-    return null; // Trả về null nếu mọi nỗ lực đều thất bại
+    return null;
 }
+
 
 const normalizeExchangeId = (id) => {
     if (!id) return null;
@@ -248,10 +251,9 @@ async function executeTrades(opportunity, percentageToUse) {
         return false;
     }
     
-    // Nâng cấp 2: Kiểm tra vốn tối thiểu động
     const shortMarket = shortEx.market(shortOriginalSymbol);
     const longMarket = longEx.market(longOriginalSymbol);
-    const minCostShort = shortMarket.limits?.cost?.min || 0.1; // fallback 0.1$
+    const minCostShort = shortMarket.limits?.cost?.min || 0.1;
     const minCostLong = longMarket.limits?.cost?.min || 0.1;
     const minRequiredCollateral = Math.max(minCostShort, minCostLong);
 
@@ -273,8 +275,6 @@ async function executeTrades(opportunity, percentageToUse) {
         
         const shortPrice = (await shortEx.fetchTicker(shortOriginalSymbol)).last;
         const longPrice = (await longEx.fetchTicker(longOriginalSymbol)).last;
-
-        // Quan trọng: Luôn tính khối lượng dựa trên đòn bẩy MONG MUỐN
         const shortAmount = shortEx.amountToPrecision(shortOriginalSymbol, (collateral * desiredLeverage) / shortPrice);
         const longAmount = longEx.amountToPrecision(longOriginalSymbol, (collateral * desiredLeverage) / longPrice);
         safeLog('log', `[TRADE] Khối lượng tính toán dựa trên đòn bẩy mong muốn x${desiredLeverage}. Short: ${shortAmount}, Long: ${longAmount}`);
