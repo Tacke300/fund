@@ -3,7 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const ccxt = require('ccxt');
 
-// ... (Toàn bộ code từ đầu đến trước hàm setLeverageSafely giữ nguyên)
+// ... (Toàn bộ code từ đầu đến trước hàm setLeverageSafely giữ nguyên, tôi sẽ dán lại để chắc chắn)
 
 const safeLog = (type, ...args) => {
     try {
@@ -25,7 +25,6 @@ const {
     kucoinApiKey, kucoinApiSecret, kucoinApiPassword
 } = require('../config.js');
 
-// === Configuration ===
 const BOT_PORT = 5008;
 const SERVER_DATA_URL = 'http://localhost:5005/api/data';
 const MIN_PNL_PERCENTAGE = 1;
@@ -37,7 +36,6 @@ const ALL_POSSIBLE_EXCHANGE_IDS = ['binanceusdm', 'bitget', 'okx', 'kucoin'];
 const DISABLED_EXCHANGES = [];
 const activeExchangeIds = ALL_POSSIBLE_EXCHANGE_IDS.filter(id => !DISABLED_EXCHANGES.includes(id));
 
-// === Global State ===
 let botState = 'STOPPED';
 let botLoopIntervalId = null;
 let balances = {};
@@ -56,13 +54,11 @@ activeExchangeIds.forEach(id => {
 
 function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
 
-// === Exchange Initialization ===
 const exchanges = {};
 activeExchangeIds.forEach(id => {
     try {
         let exchangeClass;
         let config = { 'enableRateLimit': true, 'verbose': false };
-
         if (id === 'binanceusdm') {
             exchangeClass = ccxt.binanceusdm;
             config.apiKey = binanceApiKey; config.secret = binanceApiSecret;
@@ -79,7 +75,6 @@ activeExchangeIds.forEach(id => {
             exchangeClass = ccxt.kucoinfutures;
             config.apiKey = kucoinApiKey; config.secret = kucoinApiSecret; config.password = kucoinApiPassword;
         }
-
         if (config.apiKey && config.secret && (id !== 'kucoin' || config.password)) {
             exchanges[id] = new exchangeClass(config);
             safeLog('log', `[INIT] Khởi tạo sàn ${id.toUpperCase()} thành công.`);
@@ -91,7 +86,6 @@ activeExchangeIds.forEach(id => {
     }
 });
 
-// === Core Bot Logic ===
 async function fetchDataFromServer() {
     try {
         const response = await fetch(SERVER_DATA_URL);
@@ -150,72 +144,49 @@ async function getExchangeSpecificSymbol(exchange, rawCoinSymbol) {
     return null;
 }
 
-// *** ĐÃ SỬA LỖI VÀ TỐI ƯU ***
-async function getMaxLeverage(exchange, symbol) {
-    try {
-        const markets = await exchange.fetchLeverageTiers([symbol]);
-        const tiers = markets[symbol];
-        if (tiers && tiers.length > 0) {
-            return tiers.reduce((max, tier) => Math.max(max, tier.maxLeverage), 0);
-        }
-    } catch (e) {
-        safeLog('debug', `[LEVERAGE] Không thể fetchLeverageTiers cho ${symbol}. Thử market info.`);
-    }
-    
-    try {
-        const market = exchange.market(symbol);
-        if (market.limits?.leverage?.max) {
-            return market.limits.leverage.max;
-        }
-    } catch (e2) {
-         safeLog('warn', `[LEVERAGE] Không thể lấy đòn bẩy tối đa từ market info cho ${symbol} trên ${exchange.id}.`);
-    }
-    
-    // Fallback nếu không tìm thấy, trả về một giá trị hợp lý
-    safeLog('warn', `[LEVERAGE] Không tìm thấy thông tin đòn bẩy tối đa, mặc định là 20.`);
-    return 20;
-}
-
+// *** HÀM setLeverage ĐÃ ĐƯỢC SỬA LẠI HOÀN TOÀN ***
 async function setLeverageSafely(exchange, symbol, desiredLeverage) {
     
+    // Hàm con để thực hiện việc đặt đòn bẩy
     const trySet = async (leverageToSet) => {
         try {
             if (exchange.id === 'kucoin') {
-                // Cách gọi ĐÚNG cho KuCoin
-                await exchange.setLeverage(leverageToSet, undefined, { 'marginMode': 'cross', 'symbol': symbol });
+                // SỬ DỤNG API NGẦM (IMPLICIT) ĐỂ ĐẢM BẢO CHÍNH XÁC
+                await exchange.privatePostPositionLeverage({
+                    'symbol': symbol,
+                    'leverage': leverageToSet,
+                    'marginMode': 'cross' // Tham số bắt buộc
+                });
             } else {
-                // Cách gọi cho các sàn khác
+                // Sử dụng hàm chung cho các sàn khác
                 await exchange.setLeverage(leverageToSet, symbol);
             }
             safeLog('log', `[LEVERAGE] ✅ Đặt đòn bẩy x${leverageToSet} cho ${symbol} trên ${exchange.id} thành công.`);
             return leverageToSet;
         } catch (e) {
             safeLog('warn', `[LEVERAGE] ⚠️ Lỗi khi đặt đòn bẩy x${leverageToSet} cho ${symbol}: ${e.message}`);
-            return null;
+            return null; // Trả về null nếu thất bại
         }
     };
     
-    // 1. Thử đặt đòn bẩy mong muốn
+    // Bước 1: Luôn thử với đòn bẩy mong muốn trước
     let result = await trySet(desiredLeverage);
-    if (result !== null) return result;
-    
-    // 2. Nếu thất bại, thử với đòn bẩy tối đa
-    safeLog('log', `[LEVERAGE] Thử lại với đòn bẩy tối đa...`);
-    const maxLeverage = await getMaxLeverage(exchange, symbol);
-    if (maxLeverage) {
-        result = await trySet(maxLeverage);
-        if (result !== null) return result;
+    if (result !== null) {
+        return result; // Thành công, trả về đòn bẩy đã đặt
     }
     
-    // 3. Nếu vẫn thất bại, thử với đòn bẩy thấp (ví dụ x10)
+    // Bước 2: Nếu thất bại, thử lại với một đòn bẩy thấp và an toàn (ví dụ: 10)
+    // Điều này phòng trường hợp `desiredLeverage` quá cao so với sàn cho phép
     safeLog('log', `[LEVERAGE] Thử lại với đòn bẩy an toàn x10...`);
     result = await trySet(10);
-    if (result !== null) return result;
+     if (result !== null) {
+        return result; // Thành công, trả về đòn bẩy đã đặt
+    }
 
+    // Nếu tất cả đều thất bại
     safeLog('error', `[LEVERAGE] ❌ Không thể đặt bất kỳ đòn bẩy nào cho ${symbol} trên ${exchange.id}.`);
     return null;
 }
-
 
 const normalizeExchangeId = (id) => {
     if (!id) return null;
@@ -258,7 +229,7 @@ async function executeTrades(opportunity, percentageToUse) {
     
     const shortEx = exchanges[shortExchange];
     const longEx = exchanges[longExchange];
-    await shortEx.loadMarkets(true); // Luôn tải lại market để có thông tin mới nhất
+    await shortEx.loadMarkets(true);
     await longEx.loadMarkets(true);
     
     const shortOriginalSymbol = await getExchangeSpecificSymbol(shortEx, coin);
