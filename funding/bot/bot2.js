@@ -112,7 +112,6 @@ async function updateBalances() {
 
         try {
             let balanceData;
-            // SỬA LỖI KUCOIN: Gọi fetchBalance() không có tham số
             if (id === 'kucoin') {
                 balanceData = await exchanges[id].fetchBalance();
             } else {
@@ -265,7 +264,6 @@ async function executeTrades(opportunity, percentageToUse) {
         return true;
     } catch (e) {
         safeLog('error', `[BOT_TRADE] Mở lệnh cho ${coin} thất bại: ${e.message}`);
-        // Thêm logic cứu vãn nếu cần
         return false;
     }
 }
@@ -283,9 +281,9 @@ async function closeTrades() {
         
         currentTradeDetails.status = 'PENDING_PNL_CALC';
         currentTradeDetails.closeTime = Date.now();
-        tradeAwaitingPnl = { ...currentTradeDetails }; // Sao chép để tránh bị ghi đè
+        tradeAwaitingPnl = { ...currentTradeDetails };
         safeLog('log', `[BOT_PNL] Đã gửi lệnh đóng cho ${currentTradeDetails.coin}. Chờ tính PNL...`);
-        currentTradeDetails = null; // Reset giao dịch hiện tại
+        currentTradeDetails = null;
     } catch (e) { 
         safeLog('error', `[BOT_PNL] Lỗi khi đóng vị thế cho ${currentTradeDetails.coin}: ${e.message}`); 
     }
@@ -308,14 +306,13 @@ async function calculatePnlAfterDelay(closedTrade) {
 
     tradeHistory.unshift({ ...closedTrade, status: 'CLOSED', actualPnl: totalPnl });
     if (tradeHistory.length > 50) tradeHistory.pop();
-    tradeAwaitingPnl = null; // Xóa trade khỏi hàng chờ
+    tradeAwaitingPnl = null;
 }
 
 async function mainBotLoop() {
     if (botState !== 'RUNNING') return;
     
-    // Xử lý PNL cho trade đã đóng
-    if (tradeAwaitingPnl && (Date.now() - tradeAwaitingPnl.closeTime >= 60000)) { // Chờ 60s
+    if (tradeAwaitingPnl && (Date.now() - tradeAwaitingPnl.closeTime >= 60000)) {
         await calculatePnlAfterDelay(tradeAwaitingPnl);
     }
     
@@ -326,19 +323,17 @@ async function mainBotLoop() {
     const currentMinute = now.getUTCMinutes();
     const currentSecond = now.getUTCSeconds();
     
-    // Logic mở lệnh (59:30 -> 59:35)
     if (currentMinute === 59 && currentSecond >= 30 && currentSecond < 35 && !currentTradeDetails) {
         for (const opportunity of allCurrentOpportunities) {
             const minutesToFunding = (opportunity.nextFundingTime - Date.now()) / 60000;
             if (minutesToFunding < MIN_MINUTES_FOR_EXECUTION) {
                 safeLog('log', `[BOT_LOOP] Phát hiện cơ hội đủ điều kiện để mở: ${opportunity.coin}.`);
                 const tradeSuccess = await executeTrades(opportunity, currentPercentageToUse);
-                if (tradeSuccess) break; // Mở 1 trade mỗi chu kỳ
+                if (tradeSuccess) break;
             }
         }
     }
     
-    // Logic đóng lệnh (00:05 -> 00:10)
     if (currentMinute === 0 && currentSecond >= 5 && currentSecond < 10 && currentTradeDetails?.status === 'OPEN') {
         safeLog('log', `[BOT_LOOP] Phát hiện thời điểm đóng lệnh cho ${currentTradeDetails.coin}.`);
         await closeTrades();
@@ -369,7 +364,8 @@ function stopBot() {
 }
 
 // === HTTP Server for UI ===
-const botServer = http.createServer((req, res) => {
+// *** SỬA LỖI CÚ PHÁP: Thêm "async" vào đây ***
+const botServer = http.createServer(async (req, res) => {
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -399,8 +395,9 @@ const botServer = http.createServer((req, res) => {
         res.end(JSON.stringify({ success: stopped, message: stopped ? 'Bot đã dừng.' : 'Bot không chạy.' }));
     } 
     
-    // TÍCH HỢP TÍNH NĂNG "TEST NHANH"
     else if (req.url === '/bot-api/test-trade' && req.method === 'POST') {
+        // Hàm này xử lý body request, nên nó phải nằm trong callback của req.on('end')
+        // Callback này có thể là async
         let body = '';
         req.on('data', chunk => { body += chunk.toString(); });
         req.on('end', async () => {
@@ -422,7 +419,6 @@ const botServer = http.createServer((req, res) => {
                 }
                 
                 safeLog('log', `[API_TEST] Yêu cầu TEST MỞ LỆNH: ${bestPotentialOpportunityForDisplay.coin} với ${testPercentageToUse}% vốn.`);
-                // Gọi hàm executeTrades của phiên bản mới
                 const tradeSuccess = await executeTrades(bestPotentialOpportunityForDisplay, testPercentageToUse);
 
                 if (tradeSuccess) {
@@ -445,7 +441,7 @@ const botServer = http.createServer((req, res) => {
         }
         
         safeLog('log', '[API_TEST] Yêu cầu DỪNG LỆNH ĐANG MỞ...');
-        // Gọi hàm closeTrades của phiên bản mới. PNL sẽ được tính sau đó bởi mainBotLoop
+        // Bây giờ 'await' là hợp lệ vì hàm cha đã là 'async'
         await closeTrades(); 
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ success: true, message: 'Đã gửi lệnh đóng vị thế. PNL sẽ được tính sau giây lát.' }));
