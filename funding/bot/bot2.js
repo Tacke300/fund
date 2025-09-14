@@ -247,15 +247,17 @@ async function executeTrades(opportunity, percentageToUse) {
     if (!actualShortLeverage || !actualLongLeverage) return false;
     const leverageToUse = Math.min(actualShortLeverage, actualLongLeverage);
     
-    // ================== THAY ĐỔI QUAN TRỌNG ==================
-    // Áp dụng một hệ số an toàn 0.98 (giảm 2%) để tránh lỗi ký quỹ do làm tròn hoặc phí ẩn
     const safeCollateral = collateral * 0.98;
-    // ========================================================
 
     const shortMarket = shortEx.market(shortOriginalSymbol);
     const longMarket = longEx.market(longOriginalSymbol);
-    const minRequiredNotional = Math.max(shortMarket.limits?.cost?.min || 5.0, longMarket.limits?.cost?.min || 5.0);
-    const estimatedNotionalValue = safeCollateral * leverageToUse; // Sử dụng safeCollateral
+    
+    // ================== THAY ĐỔI QUAN TRỌNG ==================
+    // Hạ mức mặc định tối thiểu xuống 1.0 USDT để cho phép các lệnh nhỏ hơn đi qua
+    const minRequiredNotional = Math.max(shortMarket.limits?.cost?.min || 1.0, longMarket.limits?.cost?.min || 1.0);
+    // ========================================================
+
+    const estimatedNotionalValue = safeCollateral * leverageToUse;
 
     if (estimatedNotionalValue < minRequiredNotional) {
         safeLog('error', `[TRADE] Giá trị lệnh (${estimatedNotionalValue.toFixed(2)} USDT) < mức tối thiểu sàn yêu cầu (${minRequiredNotional} USDT).`);
