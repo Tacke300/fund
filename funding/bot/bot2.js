@@ -33,8 +33,6 @@ const MAX_CONSECUTIVE_FAILS = 3;
 const MIN_COLLATERAL_FOR_TRADE = 0.1;
 
 // --- CẤU HÌNH TP & SL ---
-// Vốn thế chấp (collateral) là số tiền bạn thực sự bỏ ra cho lệnh (ví dụ: 1 USDT).
-// PNL (lời/lỗ) = 150% vốn thế chấp = 1 * 1.5 = 1.5 USDT.
 const TP_SL_PNL_PERCENTAGE = 1.5; // 1.5 tương đương 150% PNL so với vốn thế chấp
 
 // --- GLOBAL STATE ---
@@ -197,7 +195,6 @@ async function placeTpSlOrders(exchange, symbol, side, amount, entryPrice, colla
     const pnlPerUnit = pnlAmount / amount;
     
     let tpPrice, slPrice;
-    // Side ở đây là side của vị thế chính
     if (side === 'sell') { // Vị thế Short
         tpPrice = entryPrice - pnlPerUnit;
         slPrice = entryPrice + pnlPerUnit;
@@ -206,28 +203,15 @@ async function placeTpSlOrders(exchange, symbol, side, amount, entryPrice, colla
         slPrice = entryPrice - pnlPerUnit;
     }
 
-    const tpOrderSide = (side === 'sell') ? 'buy' : 'sell';
-    const slOrderSide = (side === 'sell') ? 'buy' : 'sell';
-
+    const orderSide = (side === 'sell') ? 'buy' : 'sell';
     safeLog('log', `[TP/SL] Đang đặt lệnh TP/SL cho ${symbol} trên ${exchange.id}...`);
 
     try {
         const params = { 'reduceOnly': true };
-        
-        // --- Lệnh Take Profit ---
-        const tpResult = await exchange.createOrder(symbol, 'TAKE_PROFIT_MARKET', tpOrderSide, amount, undefined, {
-            ...params,
-            'stopPrice': exchange.priceToPrecision(symbol, tpPrice)
-        });
+        const tpResult = await exchange.createOrder(symbol, 'TAKE_PROFIT_MARKET', orderSide, amount, undefined, { ...params, 'stopPrice': exchange.priceToPrecision(symbol, tpPrice) });
         safeLog('log', `[TP/SL] ✅ Đặt lệnh TP cho ${symbol} thành công. ID: ${tpResult.id}`);
-
-        // --- Lệnh Stop Loss ---
-        const slResult = await exchange.createOrder(symbol, 'STOP_MARKET', slOrderSide, amount, undefined, {
-            ...params,
-            'stopPrice': exchange.priceToPrecision(symbol, slPrice)
-        });
+        const slResult = await exchange.createOrder(symbol, 'STOP_MARKET', orderSide, amount, undefined, { ...params, 'stopPrice': exchange.priceToPrecision(symbol, slPrice) });
         safeLog('log', `[TP/SL] ✅ Đặt lệnh SL cho ${symbol} thành công. ID: ${slResult.id}`);
-        
         return { tpOrderId: tpResult.id, slOrderId: slResult.id };
     } catch (e) {
         safeLog('error', `[TP/SL] ❌ Lỗi khi đặt lệnh TP/SL cho ${symbol} trên ${exchange.id}:`, e);
@@ -263,10 +247,15 @@ async function executeTrades(opportunity, percentageToUse) {
     if (!actualShortLeverage || !actualLongLeverage) return false;
     const leverageToUse = Math.min(actualShortLeverage, actualLongLeverage);
     
+    // ================== THAY ĐỔI QUAN TRỌNG ==================
+    // Áp dụng một hệ số an toàn 0.98 (giảm 2%) để tránh lỗi ký quỹ do làm tròn hoặc phí ẩn
+    const safeCollateral = collateral * 0.98;
+    // ========================================================
+
     const shortMarket = shortEx.market(shortOriginalSymbol);
     const longMarket = longEx.market(longOriginalSymbol);
     const minRequiredNotional = Math.max(shortMarket.limits?.cost?.min || 5.0, longMarket.limits?.cost?.min || 5.0);
-    const estimatedNotionalValue = collateral * leverageToUse;
+    const estimatedNotionalValue = safeCollateral * leverageToUse; // Sử dụng safeCollateral
 
     if (estimatedNotionalValue < minRequiredNotional) {
         safeLog('error', `[TRADE] Giá trị lệnh (${estimatedNotionalValue.toFixed(2)} USDT) < mức tối thiểu sàn yêu cầu (${minRequiredNotional} USDT).`);
@@ -347,7 +336,7 @@ async function closeTradeNow() {
     safeLog('log', `[API] Nhận yêu cầu đóng lệnh cho ${tradeToClose.coin}...`);
     
     await cancelPendingOrders(tradeToClose);
-    await sleep(1000); // Chờ 1 giây để sàn xử lý lệnh hủy
+    await sleep(1000);
 
     try {
         const shortEx = exchanges[tradeToClose.shortExchange];
