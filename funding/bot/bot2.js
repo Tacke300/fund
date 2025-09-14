@@ -74,9 +74,6 @@ const normalizeExchangeId = (id) => { if (!id) return null; const lowerId = id.t
 async function processServerData(serverData) { if (!serverData || !serverData.arbitrageData) { allCurrentOpportunities = []; bestPotentialOpportunityForDisplay = null; return; } const opportunities = []; for (const op of serverData.arbitrageData) { if (!op?.exchanges || typeof op.exchanges !== 'string' || op.estimatedPnl < MIN_PNL_PERCENTAGE) continue; const [shortExRaw, longExRaw] = op.exchanges.split(' / '); if (!shortExRaw || !longExRaw) continue; const shortExchange = normalizeExchangeId(shortExRaw); const longExchange = normalizeExchangeId(longExRaw); if (!exchanges[shortExchange] || exchangeHealth[shortExchange]?.isDisabled || !exchanges[longExchange] || exchangeHealth[longExchange]?.isDisabled) continue; op.details = { shortExchange, longExchange }; opportunities.push(op); } allCurrentOpportunities = opportunities.sort((a, b) => b.estimatedPnl - a.estimatedPnl); bestPotentialOpportunityForDisplay = allCurrentOpportunities.length > 0 ? allCurrentOpportunities[0] : null; }
 async function placeTpSlOrders(exchange, symbol, side, amount, entryPrice, collateral) { const pnlAmount = collateral * TP_SL_PNL_PERCENTAGE; const pnlPerUnit = pnlAmount / amount; let tpPrice, slPrice; if (side === 'sell') { tpPrice = entryPrice - pnlPerUnit; slPrice = entryPrice + pnlPerUnit; } else { tpPrice = entryPrice + pnlPerUnit; slPrice = entryPrice - pnlPerUnit; } const orderSide = (side === 'sell') ? 'buy' : 'sell'; safeLog('log', `[TP/SL] Đang đặt lệnh TP/SL cho ${symbol} trên ${exchange.id}...`); try { const params = { 'reduceOnly': true }; const tpResult = await exchange.createOrder(symbol, 'TAKE_PROFIT_MARKET', orderSide, amount, undefined, { ...params, 'stopPrice': exchange.priceToPrecision(symbol, tpPrice) }); safeLog('log', `[TP/SL] ✅ Đặt lệnh TP cho ${symbol} thành công. ID: ${tpResult.id}`); const slResult = await exchange.createOrder(symbol, 'STOP_MARKET', orderSide, amount, undefined, { ...params, 'stopPrice': exchange.priceToPrecision(symbol, slPrice) }); safeLog('log', `[TP/SL] ✅ Đặt lệnh SL cho ${symbol} thành công. ID: ${slResult.id}`); return { tpOrderId: tpResult.id, slOrderId: slResult.id }; } catch (e) { safeLog('error', `[TP/SL] ❌ Lỗi khi đặt lệnh TP/SL cho ${symbol} trên ${exchange.id}:`, e); return { tpOrderId: null, slOrderId: null }; } }
 
-// =========================================================================
-// ================== HÀM executeTrades ĐÃ ĐƯỢC SỬA LẠI ===================
-// =========================================================================
 async function executeTrades(opportunity, percentageToUse) {
     const { coin, commonLeverage: desiredLeverage } = opportunity;
     const { shortExchange, longExchange } = opportunity.details;
@@ -87,14 +84,11 @@ async function executeTrades(opportunity, percentageToUse) {
     const shortEx = exchanges[shortExchange];
     const longEx = exchanges[longExchange];
 
-    // ================== LOGIC ĐÚNG THEO YÊU CẦU ==================
-    // 1. Tìm số dư nhỏ nhất để làm cơ sở tính toán
     const shortBalance = balances[shortExchange]?.available || 0;
     const longBalance = balances[longExchange]?.available || 0;
     const minBalance = Math.min(shortBalance, longBalance);
     safeLog('log', `[TRADE] Số dư nhỏ nhất được chọn làm cơ sở: ${minBalance.toFixed(4)} USDT`);
 
-    // 2. Tính vốn thế chấp (collateral) từ số dư nhỏ nhất
     const collateral = minBalance * (percentageToUse / 100);
     if (collateral < MIN_COLLATERAL_FOR_TRADE) {
         safeLog('error', `[TRADE] Vốn thế chấp (${collateral.toFixed(2)} USDT) < mức sàn của bot (${MIN_COLLATERAL_FOR_TRADE} USDT).`);
@@ -109,16 +103,11 @@ async function executeTrades(opportunity, percentageToUse) {
     const actualLongLeverage = await setLeverageSafely(longEx, longOriginalSymbol, desiredLeverage);
     if (!actualShortLeverage || !actualLongLeverage) return false;
     
-    // Đảm bảo cả hai sàn dùng cùng đòn bẩy
     const leverageToUse = Math.min(actualShortLeverage, actualLongLeverage);
 
-    // 3. Áp dụng hệ số an toàn để tránh lỗi làm tròn / ký quỹ
     const safeCollateral = collateral * 0.98;
-    
-    // 4. Tính toán giá trị lệnh (notional value) và áp dụng cho CẢ HAI SÀN
     const notionalValue = safeCollateral * leverageToUse;
 
-    // 5. Kiểm tra giá trị lệnh tối thiểu
     const minNotionalShort = shortEx.market(shortOriginalSymbol).limits?.cost?.min || 1.0;
     const minNotionalLong = longEx.market(longOriginalSymbol).limits?.cost?.min || 1.0;
     if (notionalValue < minNotionalShort || notionalValue < minNotionalLong) {
@@ -131,9 +120,14 @@ async function executeTrades(opportunity, percentageToUse) {
         const shortPrice = (await shortEx.fetchTicker(shortOriginalSymbol)).last;
         const longPrice = (await longEx.fetchTicker(longOriginalSymbol)).last;
         
-        // 6. Tính khối lượng coin dựa trên CÙNG MỘT giá trị lệnh
-        const shortAmount = shortEx.amountToPrecision(shortOriginalSymbol, notionalValue / shortPrice);
-        const longAmount = longEx.amountToPrecision(longOriginalSymbol, notionalValue / longPrice);
+        // ================== SỬA LỖI LÀM TRÒN SỐ LƯỢNG ==================
+        const shortAmountRaw = notionalValue / shortPrice;
+        const longAmountRaw = notionalValue / longPrice;
+        
+        // Luôn làm tròn số lượng theo quy tắc của sàn trước khi gửi lệnh
+        const shortAmount = shortEx.amountToPrecision(shortOriginalSymbol, shortAmountRaw);
+        const longAmount = longEx.amountToPrecision(longOriginalSymbol, longAmountRaw);
+        // =============================================================
 
         safeLog('log', `[TRADE] Gửi lệnh giá trị ~${notionalValue.toFixed(2)} USDT: Short ${shortAmount} ${coin} trên ${shortEx.id} & Long ${longAmount} ${coin} trên ${longEx.id}`);
 
@@ -149,7 +143,6 @@ async function executeTrades(opportunity, percentageToUse) {
         return false;
     }
 
-    // Đặt TP/SL
     const shortEntryPrice = shortOrder.average || shortOrder.price;
     const longEntryPrice = longOrder.average || longOrder.price;
     const shortTpSlIds = await placeTpSlOrders(shortEx, shortOriginalSymbol, 'sell', shortOrder.amount, shortEntryPrice, collateral);
