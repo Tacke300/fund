@@ -29,7 +29,8 @@ const MIN_PNL_PERCENTAGE = 1;
 const MIN_MINUTES_FOR_EXECUTION = 15;
 const DATA_FETCH_INTERVAL_SECONDS = 5;
 const MAX_CONSECUTIVE_FAILS = 3;
-const MIN_COLLATERAL_FOR_TRADE = 0.06;
+// --- THAY ĐỔI GIÁ TRỊ TẠI ĐÂY ---
+const MIN_COLLATERAL_FOR_TRADE = 0.1;
 
 const ALL_POSSIBLE_EXCHANGE_IDS = ['binanceusdm', 'bitget', 'okx', 'kucoinfutures'];
 const DISABLED_EXCHANGES = [];
