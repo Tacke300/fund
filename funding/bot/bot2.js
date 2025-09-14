@@ -247,22 +247,19 @@ async function executeTrades(opportunity, percentageToUse) {
         const shortAmount = shortEx.amountToPrecision(shortOriginalSymbol, estimatedNotionalValue / shortPrice);
         const longAmount = longEx.amountToPrecision(longOriginalSymbol, estimatedNotionalValue / longPrice);
         
-        // --- SỬA ĐỔI CHO HEDGE MODE TOÀN DIỆN ---
+        // --- SỬA ĐỔI CHO ONE-WAY MODE ---
+        // Không gửi 'positionSide' nữa. Chỉ gửi 'marginMode' cho KuCoin.
         const shortParams = {};
-        if (shortEx.id === 'binanceusdm' || shortEx.id === 'bitget') {
-            shortParams['posSide'] = 'short';
-        } else if (shortEx.id === 'kucoinfutures') {
+        if (shortEx.id === 'kucoinfutures') {
             shortParams['marginMode'] = 'cross';
         }
 
         const longParams = {};
-        if (longEx.id === 'binanceusdm' || longEx.id === 'bitget') {
-            longParams['posSide'] = 'long';
-        } else if (longEx.id === 'kucoinfutures') {
+        if (longEx.id === 'kucoinfutures') {
             longParams['marginMode'] = 'cross';
         }
 
-        safeLog('log', `[TRADE] Gửi lệnh (Hedge Mode): Short ${shortAmount} ${coin} trên ${shortEx.id} và Long ${longAmount} ${coin} trên ${longEx.id}`);
+        safeLog('log', `[TRADE] Gửi lệnh (One-way): Short ${shortAmount} ${coin} trên ${shortEx.id} và Long ${longAmount} ${coin} trên ${longEx.id}`);
         const shortOrder = await shortEx.createMarketSellOrder(shortOriginalSymbol, shortAmount, shortParams);
         const longOrder = await longEx.createMarketBuyOrder(longOriginalSymbol, longAmount, longParams);
         
@@ -291,18 +288,15 @@ async function closeTrades() {
         const shortEx = exchanges[tradeToClose.shortExchange];
         const longEx = exchanges[tradeToClose.longExchange];
 
-        // --- SỬA ĐỔI CHO HEDGE MODE TOÀN DIỆN ---
+        // --- SỬA ĐỔI CHO ONE-WAY MODE ---
+        // Không gửi 'positionSide' nữa. Chỉ gửi 'marginMode' cho KuCoin.
         const shortParams = {};
-        if (shortEx.id === 'binanceusdm' || shortEx.id === 'bitget') {
-            shortParams['posSide'] = 'short';
-        } else if (shortEx.id === 'kucoinfutures') {
+        if (shortEx.id === 'kucoinfutures') {
             shortParams['marginMode'] = 'cross';
         }
         
         const longParams = {};
-        if (longEx.id === 'binanceusdm' || longEx.id === 'bitget') {
-            longParams['posSide'] = 'long';
-        } else if (longEx.id === 'kucoinfutures') {
+        if (longEx.id === 'kucoinfutures') {
             longParams['marginMode'] = 'cross';
         }
 
