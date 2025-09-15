@@ -30,7 +30,7 @@ const MIN_MINUTES_FOR_EXECUTION = 15;
 const DATA_FETCH_INTERVAL_SECONDS = 5;
 const MAX_CONSECUTIVE_FAILS = 3;
 const MIN_COLLATERAL_FOR_TRADE = 0.1;
-const TP_SL_PNL_PERCENTAGE = 1.5;
+const TP_SL_PNL_PERCENTAGE = 150; // <--- ĐÂY LÀ MỨC 1.5%
 
 const ALL_POSSIBLE_EXCHANGE_IDS = ['binanceusdm', 'bitget', 'okx', 'kucoinfutures'];
 const DISABLED_EXCHANGES = [];
@@ -254,7 +254,7 @@ async function placeTpSlOrders(exchange, symbol, side, amount, entryPrice, colla
     }
 
     const orderSide = (side === 'sell') ? 'buy' : 'sell';
-    safeLog('log', `[TP/SL] Chuẩn bị đặt lệnh TP/SL cho ${symbol} trên ${exchange.id}... (Giá TP ~${tpPrice.toFixed(5)}, Giá SL ~${slPrice.toFixed(5)})`);
+    safeLog('log', `[TP/SL] Chuẩn bị đặt lệnh TP/SL cho ${symbol} trên ${exchange.id}... (Giá gốc TP ~${tpPrice.toFixed(5)}, SL ~${slPrice.toFixed(5)})`);
 
     try {
         let tpResult, slResult;
@@ -272,37 +272,24 @@ async function placeTpSlOrders(exchange, symbol, side, amount, entryPrice, colla
         // Xử lý riêng cho Bitget
         } else if (exchange.id === 'bitget') {
             const holdSide = side === 'buy' ? 'long' : 'short';
-            const planType = 'normal_plan'; // Hoặc 'track_plan', 'pos_hold_plan' tùy chiến lược
-
-            // Bitget yêu cầu đặt lệnh TP/SL thông qua endpoint riêng hoặc params đặc biệt
-            // Sử dụng createOrder với params cho trigger order
-             const tpParams = {
-                'planType': planType,
-                'triggerPrice': exchange.priceToPrecision(symbol, tpPrice),
-                'holdSide': holdSide,
-            };
+            const tpParams = { 'planType': 'normal_plan', 'triggerPrice': exchange.priceToPrecision(symbol, tpPrice), 'holdSide': holdSide };
             tpResult = await exchange.createOrder(symbol, 'market', orderSide, amount, undefined, tpParams);
             safeLog('log', `[TP/SL] ✅ [Bitget] Đặt lệnh TP cho ${symbol} thành công. ID: ${tpResult.id}`);
 
-            const slParams = {
-                'planType': planType,
-                'triggerPrice': exchange.priceToPrecision(symbol, slPrice),
-                'holdSide': holdSide,
-            };
+            const slParams = { 'planType': 'normal_plan', 'triggerPrice': exchange.priceToPrecision(symbol, slPrice), 'holdSide': holdSide };
             slResult = await exchange.createOrder(symbol, 'market', orderSide, amount, undefined, slParams);
             safeLog('log', `[TP/SL] ✅ [Bitget] Đặt lệnh SL cho ${symbol} thành công. ID: ${slResult.id}`);
 
-        // Xử lý chung cho Binance, OKX và các sàn khác
+        // Xử lý chung cho Binance, OKX và các sàn tương tự
         } else {
             const market = exchange.market(symbol);
-            // Lấy độ chính xác của giá (tick size)
             const tickSize = market.precision.price ? Math.pow(10, -market.precision.price) : 0.00001;
             const offset = 2 * tickSize; // Tạo một khoảng đệm an toàn
 
             let finalTpPrice = tpPrice;
             let finalSlPrice = slPrice;
 
-            // Điều chỉnh giá để tránh lỗi "Order would immediately trigger"
+            // Điều chỉnh giá để tránh lỗi trigger ngay lập tức
             if (side === 'buy') { // Vị thế Long, lệnh đóng là Sell
                 finalTpPrice += offset; // Giá TP (bán) phải cao hơn giá vào lệnh
                 finalSlPrice -= offset; // Giá SL (bán) phải thấp hơn giá vào lệnh
@@ -446,9 +433,8 @@ async function cancelPendingOrders(tradeDetails) {
     for (const order of ordersToCancel) {
         if (order.id) {
             try {
-                // Kucoin có thể yêu cầu params đặc biệt để hủy stop order
                 if (order.ex.id === 'kucoinfutures' || order.ex.id === 'bitget') {
-                     await order.ex.cancelOrder(order.id, order.symbol, { 'stop': true }); // Giả định CCXT chuẩn hóa
+                     await order.ex.cancelOrder(order.id, order.symbol, { 'stop': true });
                 } else {
                     await order.ex.cancelOrder(order.id, order.symbol);
                 }
