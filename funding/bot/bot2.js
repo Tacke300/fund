@@ -227,10 +227,10 @@ async function placeTpSlOrders(exchange, symbol, side, amount, entryPrice, colla
     const priceChange = (pnlAmount / notionalValue) * entryPrice;
     
     let tpPrice, slPrice;
-    if (side === 'sell') {
+    if (side === 'sell') { // Lệnh Short ban đầu
         tpPrice = entryPrice - priceChange;
         slPrice = entryPrice + priceChange;
-    } else {
+    } else { // Lệnh Long ban đầu
         tpPrice = entryPrice + priceChange;
         slPrice = entryPrice - priceChange;
     }
@@ -264,16 +264,21 @@ async function placeTpSlOrders(exchange, symbol, side, amount, entryPrice, colla
             safeLog('log', `[TP/SL] ✅ [KuCoin] Đặt lệnh SL cho ${symbol} thành công. ID: ${slResult.id}`);
 
         } else if (exchange.id === 'bitget') {
+            // side ở đây là hướng của position ban đầu ('buy' cho long, 'sell' cho short)
+            const holdSide = side === 'buy' ? 'long' : 'short';
+
             const tpParams = {
                 'reduceOnly': true,
-                'takeProfitPrice': exchange.priceToPrecision(symbol, tpPrice)
+                'takeProfitPrice': exchange.priceToPrecision(symbol, tpPrice),
+                'holdSide': holdSide // ✅ FIX: Thêm holdSide bắt buộc
             };
             tpResult = await exchange.createOrder(symbol, 'market', orderSide, amount, undefined, tpParams);
             safeLog('log', `[TP/SL] ✅ [Bitget] Đặt lệnh TP cho ${symbol} thành công. ID: ${tpResult.id}`);
 
             const slParams = {
                 'reduceOnly': true,
-                'stopLossPrice': exchange.priceToPrecision(symbol, slPrice)
+                'stopLossPrice': exchange.priceToPrecision(symbol, slPrice),
+                'holdSide': holdSide // ✅ FIX: Thêm holdSide bắt buộc
             };
             slResult = await exchange.createOrder(symbol, 'market', orderSide, amount, undefined, slParams);
             safeLog('log', `[TP/SL] ✅ [Bitget] Đặt lệnh SL cho ${symbol} thành công. ID: ${slResult.id}`);
@@ -383,6 +388,7 @@ async function executeTrades(opportunity, percentageToUse) {
         return false;
     }
     
+    // Lệnh Short ban đầu có side = 'sell', Lệnh Long ban đầu có side = 'buy'
     const shortTpSlIds = await placeTpSlOrders(shortEx, shortOriginalSymbol, 'sell', shortOrderDetails.amount, shortEntryPrice, collateral, shortOrderDetails.notional);
     const longTpSlIds = await placeTpSlOrders(longEx, longOriginalSymbol, 'buy', longOrderDetails.amount, longEntryPrice, collateral, longOrderDetails.notional);
 
@@ -414,7 +420,11 @@ async function cancelPendingOrders(tradeDetails) {
             try {
                 if (order.ex.id === 'kucoinfutures') {
                     await order.ex.cancelOrder(order.id, order.symbol, { 'stop': true });
-                } else {
+                } else if (order.ex.id === 'bitget') {
+                     // Bitget có thể yêu cầu plan_type khi hủy
+                    await order.ex.cancelOrder(order.id, order.symbol);
+                }
+                else {
                     await order.ex.cancelOrder(order.id, order.symbol);
                 }
                 safeLog('log', `[CLEANUP] ✅ Hủy lệnh ${order.id} thành công.`);
