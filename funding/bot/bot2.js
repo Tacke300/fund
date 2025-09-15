@@ -3,7 +3,6 @@ const fs = require('fs');
 const path = require('path');
 const ccxt = require('ccxt');
 
-// --- CÁC HÀM TIỆN ÍCH VÀ KHAI BÁO BIẾN ---
 const safeLog = (type, ...args) => {
     try {
         const timestamp = new Date().toLocaleTimeString('vi-VN');
@@ -55,7 +54,6 @@ activeExchangeIds.forEach(id => {
 
 function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
 
-// --- KHỞI TẠO SÀN GIAO DỊCH ---
 const exchanges = {};
 activeExchangeIds.forEach(id => {
     try {
@@ -69,8 +67,6 @@ activeExchangeIds.forEach(id => {
         else { safeLog('warn', `[INIT] Bỏ qua ${id.toUpperCase()} do thiếu API Key/Secret/Password.`); }
     } catch (e) { safeLog('error', `[INIT] Lỗi khi khởi tạo sàn ${id.toUpperCase()}: ${e}`); }
 });
-
-// --- CÁC HÀM LOGIC CỐT LÕI CỦA BOT ---
 
 async function fetchDataFromServer() {
     try {
@@ -213,7 +209,6 @@ async function computeOrderDetails(exchange, symbol, targetNotionalUSDT, leverag
 }
 
 async function placeTpSlOrders(exchange, symbol, side, amount, entryPrice, collateral, notionalValue) {
-    // Chốt chặn an toàn #1: Kiểm tra dữ liệu đầu vào.
     if (!entryPrice || typeof entryPrice !== 'number' || entryPrice <= 0) {
         safeLog('error', `[TP/SL] ❌ DỮ LIỆU ĐẦU VÀO KHÔNG HỢP LỆ: entryPrice là '${entryPrice}'. Hủy đặt lệnh.`);
         return { tpOrderId: null, slOrderId: null };
@@ -235,9 +230,8 @@ async function placeTpSlOrders(exchange, symbol, side, amount, entryPrice, colla
         slPrice = entryPrice - priceChange;
     }
     
-    // Chốt chặn an toàn #2: Kiểm tra kết quả tính toán cơ bản.
-    if (isNaN(tpPrice) || isNaN(slPrice) || tpPrice <= 0 || slPrice <= 0) {
-        safeLog('error', `[TP/SL] ❌ Giá TP/SL cơ bản tính ra không hợp lệ/âm (TP: ${tpPrice}, SL: ${slPrice}). Hủy đặt lệnh.`);
+    if (isNaN(tpPrice) || isNaN(slPrice)) {
+        safeLog('error', `[TP/SL] ❌ Giá TP/SL cơ bản tính ra không hợp lệ (TP: ${tpPrice}, SL: ${slPrice}). Hủy đặt lệnh.`);
         return { tpOrderId: null, slOrderId: null };
     }
 
@@ -260,29 +254,16 @@ async function placeTpSlOrders(exchange, symbol, side, amount, entryPrice, colla
             slResult = await exchange.createOrder(symbol, 'market', orderSide, amount, undefined, slParams);
             safeLog('log', `[TP/SL] ✅ [Bitget] Đặt TP/SL thành công.`);
         } else {
-            const market = exchange.market(symbol);
-            const tickSize = market.precision.price ? Math.pow(10, -market.precision.price) : 0.000001;
-            const offset = 2 * tickSize;
-            let finalTpPrice, finalSlPrice;
+            const finalTpPrice = tpPrice;
+            const finalSlPrice = slPrice;
+            
+            safeLog('log', `[TP/SL] [${exchange.id.toUpperCase()}] Giá cuối cùng - TP: ${finalTpPrice.toFixed(6)}, SL: ${finalSlPrice.toFixed(6)}`);
 
-            if (side === 'buy') {
-                finalTpPrice = tpPrice + offset;
-                finalSlPrice = slPrice - offset;
-            } else {
-                finalTpPrice = tpPrice - offset;
-                finalSlPrice = slPrice + offset;
-            }
-
-            // Chốt chặn an toàn #3: Kiểm tra lần cuối sau khi áp dụng offset.
-            if (finalTpPrice <= 0 || finalSlPrice <= 0) {
-                 safeLog('error', `[TP/SL] ❌ Giá sau khi điều chỉnh offset bị âm (TP: ${finalTpPrice}, SL: ${finalSlPrice}). Hủy đặt lệnh.`);
-                 return { tpOrderId: null, slOrderId: null };
-            }
-            safeLog('log', `[TP/SL] [${exchange.id.toUpperCase()}] Giá đã điều chỉnh - TP: ${finalTpPrice.toFixed(6)}, SL: ${finalSlPrice.toFixed(6)}`);
-
-            const params = { 'reduceOnly': true };
+            const params = { 'closePosition': 'true' };
+            
             tpResult = await exchange.createOrder(symbol, 'TAKE_PROFIT_MARKET', orderSide, amount, undefined, { ...params, 'stopPrice': exchange.priceToPrecision(symbol, finalTpPrice) });
             slResult = await exchange.createOrder(symbol, 'STOP_MARKET', orderSide, amount, undefined, { ...params, 'stopPrice': exchange.priceToPrecision(symbol, finalSlPrice) });
+            
             safeLog('log', `[TP/SL] ✅ [${exchange.id.toUpperCase()}] Đặt TP/SL thành công.`);
         }
         return { tpOrderId: tpResult.id, slOrderId: slResult.id };
@@ -366,7 +347,7 @@ async function executeTrades(opportunity, percentageToUse) {
             throw new Error("Không tìm thấy giá khớp lệnh hợp lệ (average/price).");
         } catch (e) {
             safeLog('error', `[PRICE] ❌ Lỗi nghiêm trọng khi lấy giá khớp lệnh cho ${exchange.id}. Lỗi: ${e.message}`);
-            return null; // Trả về null khi có lỗi
+            return null;
         }
     };
 
@@ -375,7 +356,6 @@ async function executeTrades(opportunity, percentageToUse) {
         getReliableFillPrice(longEx, longSymbol, longOrder.id)
     ]);
 
-    // ====================== CHỐT CHẶN AN TOÀN QUAN TRỌNG NHẤT ======================
     if (!shortEntryPrice || !longEntryPrice) {
         safeLog('error', `[TRADE] ❌ KHÔNG THỂ XÁC ĐỊNH GIÁ VÀO LỆNH HỢP LỆ. Sẽ không đặt TP/SL. VUI LÒNG KIỂM TRA VÀ ĐÓNG LỆNH THỦ CÔNG!`);
         currentTradeDetails = { 
@@ -383,7 +363,7 @@ async function executeTrades(opportunity, percentageToUse) {
             shortOrderAmount: shortOrderDetails.amount, longOrderAmount: longOrderDetails.amount, 
             commonLeverageUsed: leverageToUse, shortOriginalSymbol: shortSymbol, longOriginalSymbol: longSymbol 
         };
-        return false; // Dừng lại tại đây
+        return false;
     }
     
     const [shortTpSlIds, longTpSlIds] = await Promise.all([
@@ -402,8 +382,6 @@ async function executeTrades(opportunity, percentageToUse) {
     return true;
 }
 
-
-// --- CÁC HÀM QUẢN LÝ GIAO DỊCH VÀ VÒNG LẶP ---
 async function cancelPendingOrders(tradeDetails) {
     if (!tradeDetails) return;
     safeLog('log', '[CLEANUP] Dọn dẹp các lệnh TP/SL đang chờ...');
@@ -536,7 +514,6 @@ function stopBot() {
     return true;
 }
 
-// --- KHỞI TẠO MÁY CHỦ GIAO DIỆN ---
 const botServer = http.createServer(async (req, res) => {
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
