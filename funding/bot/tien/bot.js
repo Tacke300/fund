@@ -85,7 +85,6 @@ function getMinTransferAmount(fromExchangeId) {
 function getTargetDepositInfo(fromExchangeId, toExchangeId) {
     let withdrawalNetwork = 'BEP20';
     let depositNetwork = 'BEP20';
-
     if (toExchangeId === 'kucoinfutures') {
         withdrawalNetwork = 'BEP20';
         depositNetwork = 'BEP20';
@@ -97,14 +96,11 @@ function getTargetDepositInfo(fromExchangeId, toExchangeId) {
     } else {
         safeLog('log', `[NETWORK] Chuyển giữa Binance/Bitget -> Sử dụng mạng BEP20.`);
     }
-
     const depositAddress = usdtDepositAddressesByNetwork[toExchangeId]?.[depositNetwork];
-
     if (!depositAddress || depositAddress.startsWith('ĐIỀN ĐỊA CHỈ')) {
         safeLog('error', `[HELPER] Lỗi: Địa chỉ nạp tiền cho sàn ${toExchangeId.toUpperCase()} qua mạng ${depositNetwork} chưa được cấu hình trong balance.js.`);
         return null;
     }
-
     return { network: withdrawalNetwork, address: depositAddress };
 }
 
@@ -112,22 +108,17 @@ async function pollForBalance(exchangeId, targetAmount, maxPollAttempts = 60, po
     safeLog('log', `[POLL] Bắt đầu theo dõi số dư trên ${exchangeId.toUpperCase()}. Chờ nhận ~${targetAmount.toFixed(2)} USDT...`);
     const exchange = exchanges[exchangeId];
     const DUST_AMOUNT = 0.001;
-
     for (let i = 0; i < maxPollAttempts; i++) {
         try {
             const fullBalance = await exchange.fetchBalance();
-            const possibleWallets = {
-                'main': fullBalance.main?.free?.USDT || 0,
-                'spot': fullBalance.spot?.free?.USDT || 0,
-                'funding': fullBalance.funding?.free?.USDT || 0,
-                'trading': fullBalance.trading?.free?.USDT || 0,
-                'fund': fullBalance.fund?.free?.USDT || 0,
-            };
-
-            for (const [type, balance] of Object.entries(possibleWallets)) {
-                if (balance >= DUST_AMOUNT) {
-                    safeLog('log', `[POLL] ✅ Đã nhận ${balance.toFixed(4)} USDT vào ví '${type}' trên ${exchangeId.toUpperCase()}.`);
-                    return { found: true, type: type, balance: balance };
+            if (fullBalance.free?.USDT && fullBalance.free.USDT >= DUST_AMOUNT) {
+                 safeLog('log', `[POLL] ✅ Đã nhận ${fullBalance.free.USDT.toFixed(4)} USDT vào ví chính (top-level) trên ${exchangeId.toUpperCase()}.`);
+                 return { found: true, type: 'spot', balance: fullBalance.free.USDT };
+            }
+            for (const [walletType, walletData] of Object.entries(fullBalance)) {
+                if (typeof walletData === 'object' && walletData !== null && walletData.free?.USDT && walletData.free.USDT >= DUST_AMOUNT) {
+                    safeLog('log', `[POLL] ✅ Đã nhận ${walletData.free.USDT.toFixed(4)} USDT vào ví '${walletType}' trên ${exchangeId.toUpperCase()}.`);
+                    return { found: true, type: walletType, balance: walletData.free.USDT };
                 }
             }
         } catch (e) {
@@ -235,7 +226,6 @@ async function processServerData(serverData) {
             op.details = { shortExchange: normalizeExchangeId(shortExRaw), longExchange: normalizeExchangeId(longExRaw) };
             return op;
         });
-
     allCurrentOpportunities = opportunities.sort((a, b) => b.estimatedPnl - a.estimatedPnl);
     bestPotentialOpportunityForDisplay = allCurrentOpportunities.length > 0 ? allCurrentOpportunities[0] : null;
 }
@@ -246,20 +236,16 @@ async function computeOrderDetails(exchange, symbol, targetNotionalUSDT, leverag
     const ticker = await exchange.fetchTicker(symbol);
     const price = ticker?.last || ticker?.close;
     if (!price) throw new Error(`Không lấy được giá cho ${symbol} trên ${exchange.id}`);
-
     const contractSize = market.contractSize ?? 1;
     let amount = parseFloat(exchange.amountToPrecision(symbol, targetNotionalUSDT / (price * contractSize)));
     if (exchange.id === 'kucoinfutures' && market.precision.amount === 0) amount = Math.round(amount);
-
     if (amount <= (market.limits.amount.min || 0)) {
          throw new Error(`Số lượng tính toán (${amount}) phải lớn hơn mức tối thiểu của sàn (${market.limits.amount.min}).`);
     }
-
     let currentNotional = amount * price * contractSize;
     if (market.limits?.cost?.min && currentNotional < market.limits.cost.min) {
         throw new Error(`Giá trị lệnh ${currentNotional.toFixed(4)} < mức tối thiểu ${market.limits.cost.min} USDT.`);
     }
-
     const requiredMargin = currentNotional / leverage;
     const safetyBuffer = 0.98;
     if (requiredMargin > availableBalance * safetyBuffer) {
@@ -267,7 +253,6 @@ async function computeOrderDetails(exchange, symbol, targetNotionalUSDT, leverag
         const maxNotional = availableBalance * leverage * safetyBuffer;
         let newAmount = parseFloat(exchange.amountToPrecision(symbol, maxNotional / (price * contractSize)));
         if (exchange.id === 'kucoinfutures' && market.precision.amount === 0) newAmount = Math.floor(newAmount);
-        
         if (newAmount <= (market.limits.amount.min || 0)) {
              throw new Error(`Không đủ ký quỹ sau khi điều chỉnh. Yêu cầu ${requiredMargin.toFixed(4)}, có sẵn ${availableBalance.toFixed(4)} USDT.`);
         }
@@ -275,7 +260,6 @@ async function computeOrderDetails(exchange, symbol, targetNotionalUSDT, leverag
         currentNotional = amount * price * contractSize;
         safeLog('log', `[ADJUST] Đã điều chỉnh: Số lượng -> ${amount}, Giá trị -> ${currentNotional.toFixed(2)} USDT.`);
     }
-    
     return { amount, price, notional: currentNotional, requiredMargin: currentNotional / leverage };
 }
 
@@ -288,10 +272,8 @@ async function placeTpSlOrders(exchange, symbol, side, amount, entryPrice, colla
         safeLog('error', `[TP/SL] ❌ Giá trị vị thế (notional) không hợp lệ (${notionalValue}), bỏ qua đặt TP/SL.`);
         return { tpOrderId: null, slOrderId: null };
     }
-
     const pnlAmount = collateral * (TP_SL_PNL_PERCENTAGE / 100);
     const priceChange = (pnlAmount / notionalValue) * entryPrice;
-    
     let tpPrice, slPrice;
     if (side === 'sell') {
         tpPrice = entryPrice - priceChange;
@@ -300,15 +282,12 @@ async function placeTpSlOrders(exchange, symbol, side, amount, entryPrice, colla
         tpPrice = entryPrice + priceChange;
         slPrice = entryPrice - priceChange;
     }
-    
     if (isNaN(tpPrice) || isNaN(slPrice)) {
         safeLog('error', `[TP/SL] ❌ Giá TP/SL cơ bản tính ra không hợp lệ (TP: ${tpPrice}, SL: ${slPrice}). Hủy đặt lệnh.`);
         return { tpOrderId: null, slOrderId: null };
     }
-
     const orderSide = (side === 'sell') ? 'buy' : 'sell';
     safeLog('log', `[TP/SL] Chuẩn bị đặt lệnh TP/SL cho ${symbol} trên ${exchange.id}... (Giá gốc TP ~${tpPrice.toFixed(6)}, SL ~${slPrice.toFixed(6)})`);
-
     try {
         let tpResult, slResult;
         if (exchange.id === 'kucoinfutures') {
@@ -327,14 +306,10 @@ async function placeTpSlOrders(exchange, symbol, side, amount, entryPrice, colla
         } else {
             const finalTpPrice = tpPrice;
             const finalSlPrice = slPrice;
-            
             safeLog('log', `[TP/SL] [${exchange.id.toUpperCase()}] Giá cuối cùng - TP: ${finalTpPrice.toFixed(6)}, SL: ${finalSlPrice.toFixed(6)}`);
-
             const params = { 'closePosition': 'true' };
-            
             tpResult = await exchange.createOrder(symbol, 'TAKE_PROFIT_MARKET', orderSide, amount, undefined, { ...params, 'stopPrice': exchange.priceToPrecision(symbol, finalTpPrice) });
             slResult = await exchange.createOrder(symbol, 'STOP_MARKET', orderSide, amount, undefined, { ...params, 'stopPrice': exchange.priceToPrecision(symbol, finalSlPrice) });
-            
             safeLog('log', `[TP/SL] ✅ [${exchange.id.toUpperCase()}] Đặt TP/SL thành công.`);
         }
         return { tpOrderId: tpResult.id, slOrderId: slResult.id };
@@ -348,30 +323,25 @@ async function executeTrades(opportunity, percentageToUse) {
     const { coin, commonLeverage: desiredLeverage } = opportunity;
     const { shortExchange, longExchange } = opportunity.details;
     safeLog('log', `[TRADE] Bắt đầu giao dịch ${coin} (Short: ${shortExchange.toUpperCase()}, Long: ${longExchange.toUpperCase()})...`);
-    
     await updateBalances();
     const shortEx = exchanges[shortExchange], longEx = exchanges[longExchange];
     const shortBalance = balances[shortExchange]?.available || 0, longBalance = balances[longExchange]?.available || 0;
     const minBalance = Math.min(shortBalance, longBalance);
     safeLog('log', `[TRADE] Số dư nhỏ nhất được chọn: ${minBalance.toFixed(4)} USDT`);
-
     const collateral = minBalance * (percentageToUse / 100);
     if (collateral < MIN_COLLATERAL_FOR_TRADE) {
         safeLog('error', `[TRADE] Vốn thế chấp (${collateral.toFixed(2)}) < mức tối thiểu (${MIN_COLLATERAL_FOR_TRADE} USDT). Hủy.`);
         return false;
     }
-    
     const shortSymbol = await getExchangeSpecificSymbol(shortEx, coin);
     const longSymbol = await getExchangeSpecificSymbol(longEx, coin);
     if (!shortSymbol || !longSymbol) return false;
-    
     const [actualShortLeverage, actualLongLeverage] = await Promise.all([
         setLeverageSafely(shortEx, shortSymbol, desiredLeverage),
         setLeverageSafely(longEx, longSymbol, desiredLeverage)
     ]);
     if (!actualShortLeverage || !actualLongLeverage) return false;
     const leverageToUse = Math.min(actualShortLeverage, actualLongLeverage);
-
     let shortOrderDetails, longOrderDetails;
     try {
         const targetNotional = collateral * leverageToUse;
@@ -386,7 +356,6 @@ async function executeTrades(opportunity, percentageToUse) {
         safeLog('error', `[PREPARE] ❌ Lỗi khi chuẩn bị lệnh:`, e.message);
         return false;
     }
-
     let shortOrder, longOrder;
     try {
         [shortOrder, longOrder] = await Promise.all([
@@ -398,10 +367,8 @@ async function executeTrades(opportunity, percentageToUse) {
         safeLog('error', `[TRADE] ❌ Mở lệnh chính thất bại:`, e);
         return false;
     }
-    
     safeLog('log', '[TRADE] Chờ 3 giây để lệnh được khớp và cập nhật...');
     await sleep(3000);
-
     const getReliableFillPrice = async (exchange, symbol, orderId) => {
         try {
             safeLog('log', `[PRICE] Đang lấy giá khớp lệnh cho order ${orderId} trên ${exchange.id}...`);
@@ -421,12 +388,10 @@ async function executeTrades(opportunity, percentageToUse) {
             return null;
         }
     };
-
     const [shortEntryPrice, longEntryPrice] = await Promise.all([
         getReliableFillPrice(shortEx, shortSymbol, shortOrder.id),
         getReliableFillPrice(longEx, longSymbol, longOrder.id)
     ]);
-
     if (!shortEntryPrice || !longEntryPrice) {
         safeLog('error', `[TRADE] ❌ KHÔNG THỂ XÁC ĐỊNH GIÁ VÀO LỆNH HỢP LỆ. Sẽ không đặt TP/SL. VUI LÒNG KIỂM TRA VÀ ĐÓNG LỆNH THỦ CÔNG!`);
         currentTradeDetails = { 
@@ -436,12 +401,10 @@ async function executeTrades(opportunity, percentageToUse) {
         };
         return false;
     }
-    
     const [shortTpSlIds, longTpSlIds] = await Promise.all([
         placeTpSlOrders(shortEx, shortSymbol, 'sell', shortOrderDetails.amount, shortEntryPrice, collateral, shortOrderDetails.notional),
         placeTpSlOrders(longEx, longSymbol, 'buy', longOrderDetails.amount, longEntryPrice, collateral, longOrderDetails.notional)
     ]);
-
     currentTradeDetails = {
         ...opportunity.details, coin, status: 'OPEN', openTime: Date.now(),
         shortOrderAmount: shortOrderDetails.amount, longOrderAmount: longOrderDetails.amount,
@@ -486,23 +449,19 @@ async function closeTradeNow() {
     }
     const tradeToClose = { ...currentTradeDetails };
     safeLog('log', `[API] Nhận yêu cầu đóng lệnh cho ${tradeToClose.coin}...`);
-    
     if (tradeToClose.status === 'OPEN') {
         await cancelPendingOrders(tradeToClose);
         await sleep(1000); 
     }
-
     try {
         const shortEx = exchanges[tradeToClose.shortExchange];
         const longEx = exchanges[tradeToClose.longExchange];
         const shortParams = { 'reduceOnly': true, ...(shortEx.id === 'kucoinfutures' && {'marginMode': 'cross'}) };
         const longParams = { 'reduceOnly': true, ...(longEx.id === 'kucoinfutures' && {'marginMode': 'cross'}) };
-
         await Promise.all([
             shortEx.createMarketBuyOrder(tradeToClose.shortOriginalSymbol, tradeToClose.shortOrderAmount, shortParams),
             longEx.createMarketSellOrder(tradeToClose.longOriginalSymbol, tradeToClose.longOrderAmount, longParams)
         ]);
-        
         tradeAwaitingPnl = { ...currentTradeDetails, status: 'PENDING_PNL_CALC', closeTime: Date.now() };
         safeLog('log', `[PNL] ✅ Đã gửi lệnh đóng cho ${tradeToClose.coin}. Chờ tính PNL...`);
         currentTradeDetails = null;
@@ -523,12 +482,10 @@ async function calculatePnlAfterDelay(closedTrade) {
     const pnlShort = shortBalanceAfter - closedTrade.shortBalanceBefore;
     const pnlLong = longBalanceAfter - closedTrade.longBalanceBefore;
     const totalPnl = pnlShort + pnlLong;
-
     safeLog('log', `[PNL] KẾT QUẢ PHIÊN (${closedTrade.coin}):`);
     safeLog('log', `  > ${closedTrade.shortExchange.toUpperCase()} PNL: ${pnlShort.toFixed(4)} USDT`);
     safeLog('log', `  > ${closedTrade.longExchange.toUpperCase()} PNL: ${pnlLong.toFixed(4)} USDT`);
     safeLog('log', `  > TỔNG PNL: ${totalPnl.toFixed(4)} USDT`);
-    
     tradeHistory.unshift({ ...closedTrade, status: 'CLOSED', actualPnl: totalPnl, pnlShort, pnlLong });
     if (tradeHistory.length > 50) tradeHistory.pop();
     tradeAwaitingPnl = null;
@@ -545,7 +502,6 @@ async function mainBotLoop() {
             await processServerData(serverData);
             const now = new Date();
             const currentMinute = now.getUTCMinutes();
-            
             if (currentMinute >= 55) {
                 for (const opportunity of allCurrentOpportunities) {
                     const minutesToFunding = (opportunity.nextFundingTime - Date.now()) / 60000;
@@ -590,13 +546,11 @@ const botServer = http.createServer(async (req, res) => {
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
     if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
-
     const url = req.url;
     const method = req.method;
     let body = '';
     req.on('data', chunk => body += chunk.toString());
     await new Promise(resolve => req.on('end', resolve));
-
     try {
         if (url === '/' && method === 'GET') {
             fs.readFile(path.join(__dirname, 'index.html'), (err, content) => {
@@ -633,7 +587,6 @@ const botServer = http.createServer(async (req, res) => {
             const { fromExchangeId, toExchangeId, amountStr } = JSON.parse(body);
             const amount = parseFloat(amountStr);
             const allowedExchanges = ['binanceusdm', 'bitget', 'kucoinfutures'];
-
             if (!allowedExchanges.includes(fromExchangeId) || !allowedExchanges.includes(toExchangeId)) {
                 return res.writeHead(400, { 'Content-Type': 'application/json' }).end(JSON.stringify({ success: false, message: `Chức năng này chỉ hỗ trợ Binance, Bitget, và KuCoin.` }));
             }
@@ -643,69 +596,56 @@ const botServer = http.createServer(async (req, res) => {
             if (fromExchangeId === toExchangeId) {
                 return res.writeHead(400, { 'Content-Type': 'application/json' }).end(JSON.stringify({ success: false, message: 'Không thể chuyển tiền đến cùng một sàn.' }));
             }
-
             const sourceExchange = exchanges[fromExchangeId];
             const targetExchange = exchanges[toExchangeId];
             if (!sourceExchange || !targetExchange) {
                 return res.writeHead(500, { 'Content-Type': 'application/json' }).end(JSON.stringify({ success: false, message: 'Sàn chưa được khởi tạo.' }));
             }
-
             const targetDepositInfo = getTargetDepositInfo(fromExchangeId, toExchangeId);
             if (!targetDepositInfo) {
                 return res.writeHead(400, { 'Content-Type': 'application/json' }).end(JSON.stringify({ success: false, message: 'Lỗi cấu hình địa chỉ/mạng. Vui lòng kiểm tra file balance.js.' }));
             }
-
             try {
                 const fromAccount = (fromExchangeId === 'bitget') ? 'swap' : 'future';
                 const toAccount = (fromExchangeId === 'kucoinfutures') ? 'main' : 'spot';
                 safeLog('log', `[TRANSFER] Bước 1: Chuyển ${amount} USDT từ ví '${fromAccount}' sang '${toAccount}' trên ${fromExchangeId.toUpperCase()}...`);
                 await sourceExchange.transfer('USDT', amount, fromAccount, toAccount);
                 await sleep(5000);
-
                 safeLog('log', `[TRANSFER] Bước 2: Rút ${amount} USDT từ ${fromExchangeId.toUpperCase()} sang ${toExchangeId.toUpperCase()} qua mạng ${targetDepositInfo.network}...`);
                 const withdrawResult = await sourceExchange.withdraw('USDT', amount, targetDepositInfo.address, undefined, { network: targetDepositInfo.network });
                 safeLog('log', `[TRANSFER] ✅ Yêu cầu rút tiền thành công. TxID/Info: ${withdrawResult.id || JSON.stringify(withdrawResult.info)}`);
-
                 const pollResult = await pollForBalance(toExchangeId, amount);
                 if (!pollResult.found) {
                     return res.writeHead(202, { 'Content-Type': 'application/json' }).end(JSON.stringify({ success: true, message: `Đã gửi yêu cầu rút tiền. CẢNH BÁO: Bot không xác nhận được tiền về. Vui lòng kiểm tra và chuyển vào ví Futures thủ công.` }));
                 }
-
                 try {
                     const targetFromAccount = pollResult.type;
                     const targetToAccount = (toExchangeId === 'bitget') ? 'swap' : 'future';
                     safeLog('log', `[TRANSFER] Bước 3: Chuyển ${pollResult.balance.toFixed(4)} USDT từ ví '${targetFromAccount}' sang '${targetToAccount}' trên ${toExchangeId.toUpperCase()}...`);
                     await targetExchange.transfer('USDT', pollResult.balance, targetFromAccount, targetToAccount);
                     safeLog('log', `[TRANSFER] ✅✅✅ Hoàn tất chuyển tiền!`);
-                    
                     setTimeout(updateBalances, 5000);
                     res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ success: true, message: 'Chuyển tiền thành công và đã được nạp vào ví Futures.' }));
                 } catch (internalError) {
                     safeLog('error', `[TRANSFER] Lỗi ở bước chuyển nội bộ cuối cùng:`, internalError);
                     res.writeHead(202, { 'Content-Type': 'application/json' }).end(JSON.stringify({ success: true, message: `Tiền đã về đến ví '${pollResult.type}' nhưng GẶP LỖI khi tự động chuyển vào ví Futures. Vui lòng chuyển thủ công.` }));
                 }
-
             } catch (e) {
                 safeLog('error', `[TRANSFER] Lỗi nghiêm trọng trong quá trình chuyển tiền:`, e);
                 res.writeHead(500, { 'Content-Type': 'application/json' }).end(JSON.stringify({ success: false, message: `Lỗi: ${e.message}` }));
             }
-
         } else if (url === '/bot-api/internal-transfer' && method === 'POST') {
             const { exchangeId, amountStr, fromAccount: genericFrom, toAccount: genericTo } = JSON.parse(body);
             const amount = parseFloat(amountStr);
-            
             if(!exchangeId || !amount || isNaN(amount) || amount <= 0 || !genericFrom || !genericTo) {
                  return res.writeHead(400, { 'Content-Type': 'application/json' }).end(JSON.stringify({ success: false, message: `Dữ liệu không hợp lệ.` }));
             }
-            
             const exchange = exchanges[exchangeId];
             if (!exchange) {
                  return res.writeHead(500, { 'Content-Type': 'application/json' }).end(JSON.stringify({ success: false, message: `Sàn ${exchangeId} chưa được khởi tạo.` }));
             }
-            
             let from = genericFrom;
             let to = genericTo;
-            
             if (exchangeId === 'bitget') {
                 if (from === 'future') from = 'swap';
                 if (to === 'future') to = 'swap';
@@ -713,7 +653,6 @@ const botServer = http.createServer(async (req, res) => {
                 if (from === 'spot') from = 'main';
                 if (to === 'spot') to = 'main';
             }
-
             try {
                 safeLog('log', `[INTERNAL_TRANSFER] Yêu cầu chuyển ${amount} USDT từ '${from}' sang '${to}' trên ${exchangeId.toUpperCase()}...`);
                 await exchange.transfer('USDT', amount, from, to);
@@ -724,7 +663,6 @@ const botServer = http.createServer(async (req, res) => {
                 safeLog('error', `[INTERNAL_TRANSFER] Lỗi khi chuyển nội bộ:`, e);
                 res.writeHead(500, { 'Content-Type': 'application/json' }).end(JSON.stringify({ success: false, message: `Lỗi: ${e.message}` }));
             }
-
         } else {
             res.writeHead(404).end('Not Found');
         }
