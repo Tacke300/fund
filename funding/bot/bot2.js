@@ -213,10 +213,6 @@ async function computeOrderDetails(exchange, symbol, targetNotionalUSDT, leverag
     };
 }
 
-
-// =================================================================
-// HÀM ĐƯỢC CẬP NHẬT: Nhận thêm 'notionalValue'
-// =================================================================
 async function placeTpSlOrders(exchange, symbol, side, amount, entryPrice, collateral, notionalValue) {
     if (!entryPrice || isNaN(entryPrice) || entryPrice <= 0) {
         safeLog('error', `[TP/SL] ❌ Giá vào lệnh không hợp lệ (${entryPrice}), bỏ qua đặt TP/SL cho ${symbol}`);
@@ -228,17 +224,13 @@ async function placeTpSlOrders(exchange, symbol, side, amount, entryPrice, colla
     }
 
     const pnlAmount = collateral * (TP_SL_PNL_PERCENTAGE / 100);
-    
-    // =================================================================
-    // CÔNG THỨC MỚI: An toàn hơn, không dùng contractSize
-    // =================================================================
     const priceChange = (pnlAmount / notionalValue) * entryPrice;
     
     let tpPrice, slPrice;
-    if (side === 'sell') { // Lệnh Short
+    if (side === 'sell') {
         tpPrice = entryPrice - priceChange;
         slPrice = entryPrice + priceChange;
-    } else { // Lệnh Long
+    } else {
         tpPrice = entryPrice + priceChange;
         slPrice = entryPrice - priceChange;
     }
@@ -249,18 +241,30 @@ async function placeTpSlOrders(exchange, symbol, side, amount, entryPrice, colla
     }
 
     const orderSide = (side === 'sell') ? 'buy' : 'sell';
-    safeLog('log', `[TP/SL] Đang đặt lệnh TP/SL cho ${symbol} trên ${exchange.id}... (TP: ${tpPrice}, SL: ${slPrice})`);
+    safeLog('log', `[TP/SL] Đang đặt lệnh TP/SL cho ${symbol} trên ${exchange.id}... (TP: ${tpPrice.toFixed(5)}, SL: ${slPrice.toFixed(5)})`);
 
     try {
         let tpResult, slResult;
 
         if (exchange.id === 'kucoinfutures') {
-            const tpParams = { 'reduceOnly': true, 'stop': side === 'sell' ? 'down' : 'up', 'stopPrice': exchange.priceToPrecision(symbol, tpPrice), 'stopPriceType': 'MP' };
-            tpResult = await exchange.createOrder(symbol, 'market', orderSide, amount, undefined, tpParams);
+            const tpParams = {
+                'reduceOnly': true,
+                'stop': side === 'sell' ? 'down' : 'up',
+                'stopPrice': exchange.priceToPrecision(symbol, tpPrice),
+                'stopPriceType': 'MP',
+                'size': amount
+            };
+            tpResult = await exchange.createOrder(symbol, 'market', orderSide, undefined, undefined, tpParams);
             safeLog('log', `[TP/SL] ✅ [KuCoin] Đặt lệnh TP cho ${symbol} thành công. ID: ${tpResult.id}`);
 
-            const slParams = { 'reduceOnly': true, 'stop': side === 'sell' ? 'up' : 'down', 'stopPrice': exchange.priceToPrecision(symbol, slPrice), 'stopPriceType': 'MP' };
-            slResult = await exchange.createOrder(symbol, 'market', orderSide, amount, undefined, slParams);
+            const slParams = {
+                'reduceOnly': true,
+                'stop': side === 'sell' ? 'up' : 'down',
+                'stopPrice': exchange.priceToPrecision(symbol, slPrice),
+                'stopPriceType': 'MP',
+                'size': amount
+            };
+            slResult = await exchange.createOrder(symbol, 'market', orderSide, undefined, undefined, slParams);
             safeLog('log', `[TP/SL] ✅ [KuCoin] Đặt lệnh SL cho ${symbol} thành công. ID: ${slResult.id}`);
 
         } else {
@@ -369,9 +373,6 @@ async function executeTrades(opportunity, percentageToUse) {
         return false;
     }
     
-    // =================================================================
-    // CẬP NHẬT LỜI GỌI HÀM: Truyền 'notional' vào
-    // =================================================================
     const shortTpSlIds = await placeTpSlOrders(shortEx, shortOriginalSymbol, 'sell', shortOrder.amount, shortEntryPrice, collateral, shortOrderDetails.notional);
     const longTpSlIds = await placeTpSlOrders(longEx, longOriginalSymbol, 'buy', longOrder.amount, longEntryPrice, collateral, longOrderDetails.notional);
 
