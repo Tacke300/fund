@@ -213,7 +213,7 @@ async function computeOrderDetails(exchange, symbol, targetNotionalUSDT, leverag
 }
 
 async function placeTpSlOrders(exchange, symbol, side, amount, entryPrice, collateral, notionalValue) {
-    // Lớp phòng vệ đầu tiên: Kiểm tra dữ liệu đầu vào
+    // Chốt chặn an toàn #1: Kiểm tra dữ liệu đầu vào.
     if (!entryPrice || typeof entryPrice !== 'number' || entryPrice <= 0) {
         safeLog('error', `[TP/SL] ❌ DỮ LIỆU ĐẦU VÀO KHÔNG HỢP LỆ: entryPrice là '${entryPrice}'. Hủy đặt lệnh.`);
         return { tpOrderId: null, slOrderId: null };
@@ -235,6 +235,7 @@ async function placeTpSlOrders(exchange, symbol, side, amount, entryPrice, colla
         slPrice = entryPrice - priceChange;
     }
     
+    // Chốt chặn an toàn #2: Kiểm tra kết quả tính toán cơ bản.
     if (isNaN(tpPrice) || isNaN(slPrice) || tpPrice <= 0 || slPrice <= 0) {
         safeLog('error', `[TP/SL] ❌ Giá TP/SL cơ bản tính ra không hợp lệ/âm (TP: ${tpPrice}, SL: ${slPrice}). Hủy đặt lệnh.`);
         return { tpOrderId: null, slOrderId: null };
@@ -272,6 +273,7 @@ async function placeTpSlOrders(exchange, symbol, side, amount, entryPrice, colla
                 finalSlPrice = slPrice + offset;
             }
 
+            // Chốt chặn an toàn #3: Kiểm tra lần cuối sau khi áp dụng offset.
             if (finalTpPrice <= 0 || finalSlPrice <= 0) {
                  safeLog('error', `[TP/SL] ❌ Giá sau khi điều chỉnh offset bị âm (TP: ${finalTpPrice}, SL: ${finalSlPrice}). Hủy đặt lệnh.`);
                  return { tpOrderId: null, slOrderId: null };
@@ -290,9 +292,6 @@ async function placeTpSlOrders(exchange, symbol, side, amount, entryPrice, colla
     }
 }
 
-// ===================================================================================
-// ================= HÀM executeTrades ĐÃ ĐƯỢC THÊM CHỐT CHẶN AN TOÀN =================
-// ===================================================================================
 async function executeTrades(opportunity, percentageToUse) {
     const { coin, commonLeverage: desiredLeverage } = opportunity;
     const { shortExchange, longExchange } = opportunity.details;
@@ -364,7 +363,7 @@ async function executeTrades(opportunity, percentageToUse) {
                 safeLog('log', `[PRICE] ✅ Lấy giá từ fetchMyTrades: ${trades[0].price}`);
                 return trades[0].price;
             }
-            throw new Error("Không tìm thấy giá khớp lệnh hợp lệ.");
+            throw new Error("Không tìm thấy giá khớp lệnh hợp lệ (average/price).");
         } catch (e) {
             safeLog('error', `[PRICE] ❌ Lỗi nghiêm trọng khi lấy giá khớp lệnh cho ${exchange.id}. Lỗi: ${e.message}`);
             return null; // Trả về null khi có lỗi
@@ -376,10 +375,8 @@ async function executeTrades(opportunity, percentageToUse) {
         getReliableFillPrice(longEx, longSymbol, longOrder.id)
     ]);
 
-    // =========================================================================
-    // ====================== CHỐT CHẶN AN TOÀN MỚI ============================
-    // =========================================================================
-    if (!shortEntryPrice || !longEntryPrice || typeof shortEntryPrice !== 'number' || typeof longEntryPrice !== 'number') {
+    // ====================== CHỐT CHẶN AN TOÀN QUAN TRỌNG NHẤT ======================
+    if (!shortEntryPrice || !longEntryPrice) {
         safeLog('error', `[TRADE] ❌ KHÔNG THỂ XÁC ĐỊNH GIÁ VÀO LỆNH HỢP LỆ. Sẽ không đặt TP/SL. VUI LÒNG KIỂM TRA VÀ ĐÓNG LỆNH THỦ CÔNG!`);
         currentTradeDetails = { 
             ...opportunity.details, coin, status: 'MANUAL_CHECK_NO_SL', openTime: Date.now(), 
@@ -441,7 +438,6 @@ async function closeTradeNow() {
     const tradeToClose = { ...currentTradeDetails };
     safeLog('log', `[API] Nhận yêu cầu đóng lệnh cho ${tradeToClose.coin}...`);
     
-    // Nếu giao dịch đang ở trạng thái cần kiểm tra thủ công, không hủy lệnh TP/SL vì chúng không tồn tại
     if (tradeToClose.status === 'OPEN') {
         await cancelPendingOrders(tradeToClose);
         await sleep(1000); 
