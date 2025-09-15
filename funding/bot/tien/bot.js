@@ -605,8 +605,9 @@ const botServer = http.createServer(async (req, res) => {
             });
         } else if (url === '/bot-api/status' && method === 'GET') {
             const transferExchanges = ['binanceusdm', 'bitget', 'kucoinfutures'];
+            const internalTransferExchanges = activeExchangeIds.filter(id => exchanges[id]);
             res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ botState, balances, tradeHistory, bestPotentialOpportunityForDisplay, currentTradeDetails, activeExchangeIds, exchangeHealth, transferExchanges }));
+            res.end(JSON.stringify({ botState, balances, tradeHistory, bestPotentialOpportunityForDisplay, currentTradeDetails, activeExchangeIds, exchangeHealth, transferExchanges, internalTransferExchanges }));
         } else if (url === '/bot-api/start' && method === 'POST') {
             try { currentPercentageToUse = parseFloat(JSON.parse(body).percentageToUse) || 50; } catch { currentPercentageToUse = 50; }
             res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -670,17 +671,46 @@ const botServer = http.createServer(async (req, res) => {
                     return res.writeHead(202, { 'Content-Type': 'application/json' }).end(JSON.stringify({ success: true, message: `Đã gửi yêu cầu rút tiền. CẢNH BÁO: Bot không xác nhận được tiền về. Vui lòng kiểm tra và chuyển vào ví Futures thủ công.` }));
                 }
 
-                safeLog('log', `[TRANSFER] Bước 3: Chuyển ${pollResult.balance.toFixed(4)} USDT từ ví '${pollResult.type}' sang 'future' trên ${toExchangeId.toUpperCase()}...`);
-                const targetFromAccount = pollResult.type;
-                const targetToAccount = (toExchangeId === 'kucoinfutures') ? 'future' : 'future';
-                await targetExchange.transfer('USDT', pollResult.balance, targetFromAccount, targetToAccount);
-                safeLog('log', `[TRANSFER] ✅✅✅ Hoàn tất chuyển tiền!`);
-
-                setTimeout(updateBalances, 5000);
-                res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ success: true, message: 'Chuyển tiền thành công và đã được nạp vào ví Futures.' }));
+                try {
+                    safeLog('log', `[TRANSFER] Bước 3: Chuyển ${pollResult.balance.toFixed(4)} USDT từ ví '${pollResult.type}' sang 'future' trên ${toExchangeId.toUpperCase()}...`);
+                    const targetFromAccount = pollResult.type;
+                    const targetToAccount = 'future';
+                    await targetExchange.transfer('USDT', pollResult.balance, targetFromAccount, targetToAccount);
+                    safeLog('log', `[TRANSFER] ✅✅✅ Hoàn tất chuyển tiền!`);
+                    
+                    setTimeout(updateBalances, 5000);
+                    res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ success: true, message: 'Chuyển tiền thành công và đã được nạp vào ví Futures.' }));
+                } catch (internalError) {
+                    safeLog('error', `[TRANSFER] Lỗi ở bước chuyển nội bộ cuối cùng:`, internalError);
+                    res.writeHead(202, { 'Content-Type': 'application/json' }).end(JSON.stringify({ success: true, message: `Tiền đã về đến ví '${pollResult.type}' nhưng GẶP LỖI khi tự động chuyển vào ví Futures. Vui lòng chuyển thủ công.` }));
+                }
 
             } catch (e) {
                 safeLog('error', `[TRANSFER] Lỗi nghiêm trọng trong quá trình chuyển tiền:`, e);
+                res.writeHead(500, { 'Content-Type': 'application/json' }).end(JSON.stringify({ success: false, message: `Lỗi: ${e.message}` }));
+            }
+
+        } else if (url === '/bot-api/internal-transfer' && method === 'POST') {
+            const { exchangeId, amountStr, fromAccount, toAccount } = JSON.parse(body);
+            const amount = parseFloat(amountStr);
+            
+            if(!exchangeId || !amount || isNaN(amount) || amount <= 0 || !fromAccount || !toAccount) {
+                 return res.writeHead(400, { 'Content-Type': 'application/json' }).end(JSON.stringify({ success: false, message: `Dữ liệu không hợp lệ.` }));
+            }
+            
+            const exchange = exchanges[exchangeId];
+            if (!exchange) {
+                 return res.writeHead(500, { 'Content-Type': 'application/json' }).end(JSON.stringify({ success: false, message: `Sàn ${exchangeId} chưa được khởi tạo.` }));
+            }
+            
+            try {
+                safeLog('log', `[INTERNAL_TRANSFER] Yêu cầu chuyển ${amount} USDT từ '${fromAccount}' sang '${toAccount}' trên ${exchangeId.toUpperCase()}...`);
+                await exchange.transfer('USDT', amount, fromAccount, toAccount);
+                safeLog('log', `[INTERNAL_TRANSFER] ✅ Chuyển nội bộ thành công.`);
+                setTimeout(updateBalances, 3000);
+                res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ success: true, message: 'Chuyển nội bộ thành công.' }));
+            } catch (e) {
+                safeLog('error', `[INTERNAL_TRANSFER] Lỗi khi chuyển nội bộ:`, e);
                 res.writeHead(500, { 'Content-Type': 'application/json' }).end(JSON.stringify({ success: false, message: `Lỗi: ${e.message}` }));
             }
 
