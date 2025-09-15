@@ -213,27 +213,34 @@ async function computeOrderDetails(exchange, symbol, targetNotionalUSDT, leverag
     };
 }
 
-async function placeTpSlOrders(exchange, symbol, side, amount, entryPrice, collateral) {
+
+// =================================================================
+// HÀM ĐƯỢC CẬP NHẬT: Nhận thêm 'notionalValue'
+// =================================================================
+async function placeTpSlOrders(exchange, symbol, side, amount, entryPrice, collateral, notionalValue) {
     if (!entryPrice || isNaN(entryPrice) || entryPrice <= 0) {
         safeLog('error', `[TP/SL] ❌ Giá vào lệnh không hợp lệ (${entryPrice}), bỏ qua đặt TP/SL cho ${symbol}`);
         return { tpOrderId: null, slOrderId: null };
     }
-
-    const pnlAmount = collateral * (TP_SL_PNL_PERCENTAGE / 100);
-    const totalAmountInBaseAsset = amount * (exchange.market(symbol).contractSize ?? 1);
-    if(totalAmountInBaseAsset === 0) {
-        safeLog('error', `[TP/SL] ❌ Số lượng quy đổi ra coin bằng 0, không thể tính PNL.`);
+    if (!notionalValue || notionalValue <= 0) {
+        safeLog('error', `[TP/SL] ❌ Giá trị vị thế (notional) không hợp lệ (${notionalValue}), bỏ qua đặt TP/SL.`);
         return { tpOrderId: null, slOrderId: null };
     }
-    const pnlPerUnit = pnlAmount / totalAmountInBaseAsset;
+
+    const pnlAmount = collateral * (TP_SL_PNL_PERCENTAGE / 100);
+    
+    // =================================================================
+    // CÔNG THỨC MỚI: An toàn hơn, không dùng contractSize
+    // =================================================================
+    const priceChange = (pnlAmount / notionalValue) * entryPrice;
     
     let tpPrice, slPrice;
-    if (side === 'sell') {
-        tpPrice = entryPrice - pnlPerUnit;
-        slPrice = entryPrice + pnlPerUnit;
-    } else {
-        tpPrice = entryPrice + pnlPerUnit;
-        slPrice = entryPrice - pnlPerUnit;
+    if (side === 'sell') { // Lệnh Short
+        tpPrice = entryPrice - priceChange;
+        slPrice = entryPrice + priceChange;
+    } else { // Lệnh Long
+        tpPrice = entryPrice + priceChange;
+        slPrice = entryPrice - priceChange;
     }
     
     if (isNaN(tpPrice) || isNaN(slPrice) || tpPrice <= 0 || slPrice <= 0) {
@@ -242,7 +249,7 @@ async function placeTpSlOrders(exchange, symbol, side, amount, entryPrice, colla
     }
 
     const orderSide = (side === 'sell') ? 'buy' : 'sell';
-    safeLog('log', `[TP/SL] Đang đặt lệnh TP/SL cho ${symbol} trên ${exchange.id}...`);
+    safeLog('log', `[TP/SL] Đang đặt lệnh TP/SL cho ${symbol} trên ${exchange.id}... (TP: ${tpPrice}, SL: ${slPrice})`);
 
     try {
         let tpResult, slResult;
@@ -329,52 +336,44 @@ async function executeTrades(opportunity, percentageToUse) {
         safeLog('error', `[TRADE] ❌ Mở lệnh chính thất bại:`, e);
         return false;
     }
-
-    // =================================================================
-    // THAY ĐỔI THEO YÊU CẦU: Chờ 3 giây rồi mới lấy giá
-    // =================================================================
+    
     safeLog('log', '[TRADE] Đang chờ 3 giây để sàn cập nhật trạng thái lệnh...');
     await sleep(3000);
 
     let shortEntryPrice, longEntryPrice;
 
-    // Lấy giá Short (Ưu tiên fetchMyTrades)
     try {
         const trades = await shortEx.fetchMyTrades(shortOriginalSymbol, undefined, 1);
         if (trades && trades.length > 0) {
-            shortEntryPrice = trades[trades.length - 1].price; // Lấy trade gần nhất
+            shortEntryPrice = trades[trades.length - 1].price;
             safeLog('log', `[PRICE] Lấy giá khớp lệnh Short từ fetchMyTrades: ${shortEntryPrice}`);
-        } else {
-            shortEntryPrice = shortOrder.average || (await shortEx.fetchTicker(shortOriginalSymbol)).last;
-            safeLog('warn', `[PRICE] Không tìm thấy trade khớp lệnh, dùng giá fallback cho Short: ${shortEntryPrice}`);
-        }
+        } else { throw new Error("Không có trade nào được tìm thấy."); }
     } catch (e) {
-        safeLog('error', `[PRICE] Lỗi khi lấy giá Short, dùng giá ticker cuối cùng: ${e.message}`);
+        safeLog('warn', `[PRICE] Lỗi khi lấy giá Short từ trade, thử lấy từ ticker: ${e.message}`);
         shortEntryPrice = (await shortEx.fetchTicker(shortOriginalSymbol)).last;
     }
 
-    // Lấy giá Long (Ưu tiên fetchMyTrades)
     try {
         const trades = await longEx.fetchMyTrades(longOriginalSymbol, undefined, 1);
         if (trades && trades.length > 0) {
-            longEntryPrice = trades[trades.length - 1].price; // Lấy trade gần nhất
+            longEntryPrice = trades[trades.length - 1].price;
             safeLog('log', `[PRICE] Lấy giá khớp lệnh Long từ fetchMyTrades: ${longEntryPrice}`);
-        } else {
-            longEntryPrice = longOrder.average || (await longEx.fetchTicker(longOriginalSymbol)).last;
-            safeLog('warn', `[PRICE] Không tìm thấy trade khớp lệnh, dùng giá fallback cho Long: ${longEntryPrice}`);
-        }
+        } else { throw new Error("Không có trade nào được tìm thấy."); }
     } catch (e) {
-        safeLog('error', `[PRICE] Lỗi khi lấy giá Long, dùng giá ticker cuối cùng: ${e.message}`);
+        safeLog('warn', `[PRICE] Lỗi khi lấy giá Long từ trade, thử lấy từ ticker: ${e.message}`);
         longEntryPrice = (await longEx.fetchTicker(longOriginalSymbol)).last;
     }
 
     if (!shortEntryPrice || !longEntryPrice || isNaN(shortEntryPrice) || isNaN(longEntryPrice)) {
         safeLog('error', `[TRADE] ❌ KHÔNG THỂ XÁC ĐỊNH GIÁ VÀO LỆNH SAU KHI CHỜ. Sẽ không đặt TP/SL. Vui lòng kiểm tra thủ công!`);
-        return false; // Dừng lại để tránh lỗi
+        return false;
     }
     
-    const shortTpSlIds = await placeTpSlOrders(shortEx, shortOriginalSymbol, 'sell', shortOrder.amount, shortEntryPrice, collateral);
-    const longTpSlIds = await placeTpSlOrders(longEx, longOriginalSymbol, 'buy', longOrder.amount, longEntryPrice, collateral);
+    // =================================================================
+    // CẬP NHẬT LỜI GỌI HÀM: Truyền 'notional' vào
+    // =================================================================
+    const shortTpSlIds = await placeTpSlOrders(shortEx, shortOriginalSymbol, 'sell', shortOrder.amount, shortEntryPrice, collateral, shortOrderDetails.notional);
+    const longTpSlIds = await placeTpSlOrders(longEx, longOriginalSymbol, 'buy', longOrder.amount, longEntryPrice, collateral, longOrderDetails.notional);
 
     currentTradeDetails = {
         ...opportunity.details, coin, status: 'OPEN', openTime: Date.now(),
