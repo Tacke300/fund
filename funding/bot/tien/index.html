@@ -368,15 +368,13 @@
                         <p>Không có cơ hội nào khả dụng.</p>
                     </div>
                 </div>
-
-                <!-- NOTE: "Giao dịch Đang mở" đã được gỡ bỏ theo yêu cầu của bạn -->
             </section>
 
-            <!-- NEW: Manual Fund Transfer Section -->
+            <!-- Manual Fund Transfer Section -->
             <section class="manual-transfer-section">
-                <h2>Chuyển tiền thủ công (USDT BEP20)</h2>
+                <h2>Chuyển tiền thủ công (USDT)</h2>
                 <p style="color: #f1fa8c; font-size: 0.9em;">
-                    <strong style="color: #ff5555;">CẢNH BÁO:</strong> Chức năng này cực kỳ rủi ro. Hãy đảm bảo địa chỉ nạp tiền BEP20 trong file `balance.js` là CHÍNH XÁC.
+                    <strong style="color: #ff5555;">CẢNH BÁO:</strong> Chức năng này cực kỳ rủi ro. Hãy đảm bảo địa chỉ nạp tiền trong file `balance.js` là CHÍNH XÁC.
                     Chuyển sai địa chỉ hoặc mạng lưới có thể dẫn đến MẤT TIỀN VĨNH VIỄN.
                     <br>API Key của sàn gửi PHẢI có quyền rút tiền (withdrawal permission).
                 </p>
@@ -428,11 +426,10 @@
     </div>
 
     <script>
-        // Global list of exchange IDs that the bot supports for transfer
-        const SUPPORTED_EXCHANGES = ['binanceusdm', 'bingx', 'okx', 'bitget'];
-        const FUND_TRANSFER_MIN_AMOUNT_FRONTEND = 10; // Đồng bộ với bot.js
+        // *** UPDATED: Replaced 'bingx' with 'kucoinfutures' ***
+        const SUPPORTED_EXCHANGES = ['binanceusdm', 'kucoinfutures', 'okx', 'bitget'];
+        const FUND_TRANSFER_MIN_AMOUNT_FRONTEND = 10;
 
-        // Hàm để lấy và cập nhật trạng thái bot từ server
         async function updateBotStatus() {
             try {
                 const response = await fetch('/bot-api/status');
@@ -440,12 +437,10 @@
                     throw new Error(`HTTP error! status: ${response.status}`);
                 }
                 const data = await response.json();
-                // console.log('Bot status data received:', data); // Giữ lại để debug nếu cần
 
-                // Cập nhật trạng thái Bot
                 const botStateDisplay = document.getElementById('botStateDisplay');
                 botStateDisplay.textContent = data.botState;
-                botStateDisplay.className = ''; // Reset classes
+                botStateDisplay.className = '';
                 if (data.botState === 'RUNNING') {
                     botStateDisplay.classList.add('text-green');
                 } else if (data.botState === 'STOPPED') {
@@ -454,15 +449,12 @@
                     botStateDisplay.classList.add('text-yellow');
                 }
 
-                // Cập nhật số dư tài khoản
                 let balancesHtml = '';
                 if (data.balances) {
                     for (const exchangeId in data.balances) {
                         if (exchangeId === 'totalOverall') continue; 
                         const bal = data.balances[exchangeId];
-                        // Màu đỏ nếu tổng balance âm
                         const totalBalanceColorClass = bal.total < 0 ? 'text-red' : ''; 
-                        // available cũng có thể âm nếu PnL chưa thực hiện bị lỗ
                         const availableBalanceColorClass = bal.available < 0 ? 'text-red' : ''; 
 
                         balancesHtml += `<p><strong>${exchangeId.toUpperCase()}:</strong> Tổng <span class="${totalBalanceColorClass}">${bal.total.toFixed(2)} USDT</span>, Khả dụng <span class="${availableBalanceColorClass}">${bal.available.toFixed(2)} USDT</span></p>`;
@@ -475,50 +467,28 @@
                 balancesHtml += `<p><strong>Số dư ban đầu của phiên:</strong> ${data.initialTotalBalance.toFixed(2)} USDT</p>`;
                 document.getElementById('balancesDisplay').innerHTML = balancesHtml;
 
-                // Cập nhật PnL tổng hợp
                 const cumulativePnlElement = document.getElementById('cumulativePnlDisplay');
                 cumulativePnlElement.textContent = data.cumulativePnl.toFixed(2) + ' USDT';
-                cumulativePnlElement.className = ''; // Reset classes
+                cumulativePnlElement.className = '';
                 if (data.cumulativePnl >= 0) {
                     cumulativePnlElement.classList.add('text-green');
                 } else {
                     cumulativePnlElement.classList.add('text-red');
                 }
 
-                // Cập nhật cơ hội arbitrage tốt nhất (dự kiến)
                 const bestPotentialOpportunityDisplayDiv = document.getElementById('bestPotentialOpportunityDisplay');
-                if (data.currentSelectedOpportunity) { // Đây là bestPotentialOpportunityForDisplay từ bot.js
-                    // Chuyển đổi timestamp sang giờ địa phương
+                if (data.currentSelectedOpportunity) {
                     const nextFundingDate = new Date(data.currentSelectedOpportunity.nextFundingTime);
                     const fundingTimeFormatted = nextFundingDate.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit', hour12: false });
                     const fundingDateFormatted = nextFundingDate.toLocaleDateString('vi-VN');
 
-                    // Lấy Short/Long Exchange dựa trên funding rates
                     let longExchangeName = data.currentSelectedOpportunity.details.longExchange || 'N/A';
                     let shortExchangeName = data.currentSelectedOpportunity.details.shortExchange || 'N/A';
 
-                    // Cần kiểm tra nếu các trường này có tồn tại và hợp lệ
                     const shortFr = data.currentSelectedOpportunity.details.shortFundingRate;
                     const longFr = data.currentSelectedOpportunity.details.longFundingRate;
                     const fundingDiff = data.currentSelectedOpportunity.fundingDiff;
-
-                    // Logic xác định Short/Long từ funding rates (nếu có dữ liệu)
-                    // Dùng logic đã sửa: Long FR thấp, Short FR cao
-                    if (typeof shortFr === 'number' && typeof longFr === 'number' && fundingDiff !== 'N/A') {
-                        if (shortFr > longFr) { // Short FR cao hơn Long FR
-                            shortExchangeName = data.currentSelectedOpportunity.details.shortExchange;
-                            longExchangeName = data.currentSelectedOpportunity.details.longExchange;
-                        } else if (longFr > shortFr) { // Long FR cao hơn Short FR (trường hợp hiếm trong arbitrage funding)
-                            // Đảo vai trò nếu logic arbitrage ngược lại
-                            shortExchangeName = data.currentSelectedOpportunity.details.longExchange;
-                            longExchangeName = data.currentSelectedOpportunity.details.longExchange; // Sửa lỗi ở đây, đáng lẽ phải là shortExchange
-                        } else { // Funding rates bằng nhau
-                            shortExchangeName = data.currentSelectedOpportunity.details.shortExchange; // Vẫn giữ mặc định từ server
-                            longExchangeName = data.currentSelectedOpportunity.details.longExchange;
-                        }
-                    }
-
-
+                    
                     bestPotentialOpportunityDisplayDiv.innerHTML = `
                         <p><strong>Coin:</strong> <span>${data.currentSelectedOpportunity.coin}</span></p>
                         <p><strong>Sàn:</strong> <span>${data.currentSelectedOpportunity.exchanges}</span></p>
@@ -534,7 +504,6 @@
                     bestPotentialOpportunityDisplayDiv.textContent = 'Không có cơ hội nào khả dụng.';
                 }
 
-                // Cập nhật lịch sử giao dịch
                 const tradeHistoryBody = document.getElementById('tradeHistoryBody');
                 tradeHistoryBody.innerHTML = ''; 
                 if (data.tradeHistory && data.tradeHistory.length > 0) {
@@ -568,7 +537,6 @@
             }
         }
 
-        // Hàm populate dropdowns
         function populateExchangeDropdowns() {
             const fromSelect = document.getElementById('fromExchangeSelect');
             const toSelect = document.getElementById('toExchangeSelect');
@@ -585,12 +553,11 @@
                 toSelect.appendChild(optionTo);
             });
 
-            // Set default values (e.g., Binance to BingX)
+            // *** UPDATED: Set default values to new exchange ***
             fromSelect.value = 'binanceusdm';
-            toSelect.value = 'bingx';
+            toSelect.value = 'kucoinfutures';
         }
 
-        // Hàm xử lý chuyển tiền thủ công
         async function handleManualTransfer() {
             const fromExchangeId = document.getElementById('fromExchangeSelect').value;
             const toExchangeId = document.getElementById('toExchangeSelect').value;
@@ -620,8 +587,7 @@
                 if (data.success) {
                     transferStatusDisplay.innerHTML = `<span class="text-green">✅ ${data.message}</span>`;
                     transferStatusDisplay.innerHTML += `<p>Thời gian dự kiến nhận: Khoảng **2-10 phút** (phụ thuộc vào tình trạng mạng blockchain và tốc độ xử lý của sàn nhận).</p>`;
-                    // Cập nhật lại số dư sau một khoảng thời gian
-                    setTimeout(updateBotStatus, 15000); // Cập nhật sau 15 giây
+                    setTimeout(updateBotStatus, 15000);
                 } else {
                     transferStatusDisplay.innerHTML = `<span class="text-red">❌ Lỗi: ${data.message}</span>`;
                 }
@@ -631,7 +597,6 @@
             }
         }
 
-        // Event Listeners cho nút Start và Stop
         document.getElementById('startBotBtn').addEventListener('click', async () => {
             const percentageToUse = document.getElementById('percentageToUse').value;
             if (percentageToUse < 1 || percentageToUse > 100) {
@@ -645,7 +610,6 @@
                     body: JSON.stringify({ percentageToUse: parseFloat(percentageToUse) }) 
                 });
                 const data = await response.json();
-                console.log('Phản hồi Start Bot:', data);
                 alert(data.message);
                 if (data.success) {
                     updateBotStatus(); 
@@ -664,7 +628,6 @@
                     body: JSON.stringify({}) 
                 });
                 const data = await response.json();
-                console.log('Phản hồi Stop Bot:', data);
                 alert(data.message);
                 if (data.success) {
                     updateBotStatus(); 
@@ -675,17 +638,14 @@
             }
         });
 
-        // Event Listener cho nút chuyển tiền thủ công
         document.getElementById('manualTransferBtn').addEventListener('click', handleManualTransfer);
 
 
-        // Tải trạng thái ban đầu khi trang được load
         document.addEventListener('DOMContentLoaded', () => {
-            populateExchangeDropdowns(); // Populate dropdowns first
+            populateExchangeDropdowns();
             updateBotStatus();
-            // Thiết lập interval để tự động cập nhật trạng thái mỗi 5 giây
             setInterval(updateBotStatus, 5000); 
         });
     </script>
 </body>
-</html>
+</html>```
