@@ -181,14 +181,11 @@ async function computeOrderDetails(exchange, symbol, targetNotionalUSDT, leverag
     const rawAmount = targetNotionalUSDT / (price * contractSize);
     let amount = parseFloat(exchange.amountToPrecision(symbol, rawAmount));
 
-    // =================================================================
-    // FIX 1: Làm tròn số lượng cho KuCoin để tránh lỗi precision
-    // =================================================================
-    if (exchange.id === 'kucoinfutures') {
+    if (exchange.id === 'kucoinfutures' && market.precision.amount === 0) {
         amount = Math.round(amount);
     }
-    if (amount <= 0) {
-        throw new Error(`Số lượng tính toán ra (${amount}) phải lớn hơn 0.`);
+    if (amount <= (market.limits.amount.min || 0)) {
+         throw new Error(`Số lượng tính toán (${amount}) phải lớn hơn mức tối thiểu của sàn (${market.limits.amount.min}).`);
     }
 
     const currentNotional = amount * price * contractSize;
@@ -206,10 +203,10 @@ async function computeOrderDetails(exchange, symbol, targetNotionalUSDT, leverag
         const maxRawAmount = maxNotional / (price * contractSize);
         let newAmount = parseFloat(exchange.amountToPrecision(symbol, maxRawAmount));
         
-        if (exchange.id === 'kucoinfutures') {
-            newAmount = Math.round(newAmount);
+        if (exchange.id === 'kucoinfutures' && market.precision.amount === 0) {
+            newAmount = Math.floor(newAmount);
         }
-        if (newAmount <= 0) {
+        if (newAmount <= (market.limits.amount.min || 0)) {
              throw new Error(`Không đủ ký quỹ sau khi điều chỉnh. Yêu cầu ${requiredMargin.toFixed(4)}, có sẵn ${availableBalance.toFixed(4)} USDT.`);
         }
         
@@ -277,35 +274,40 @@ async function placeTpSlOrders(exchange, symbol, side, amount, entryPrice, colla
             safeLog('log', `[TP/SL] ✅ [KuCoin] Đặt lệnh SL cho ${symbol} thành công. ID: ${slResult.id}`);
 
         } else if (exchange.id === 'bitget') {
-            // =================================================================
-            // FIX 2: Thêm 'holdSide' cho Bitget
-            // =================================================================
             const holdSide = side === 'buy' ? 'long' : 'short';
-
             const tpParams = {
-                'reduceOnly': true,
-                'takeProfitPrice': exchange.priceToPrecision(symbol, tpPrice),
+                'reduceOnly': true, 'takeProfitPrice': exchange.priceToPrecision(symbol, tpPrice),
                 'holdSide': holdSide
             };
             tpResult = await exchange.createOrder(symbol, 'market', orderSide, amount, undefined, tpParams);
             safeLog('log', `[TP/SL] ✅ [Bitget] Đặt lệnh TP cho ${symbol} thành công. ID: ${tpResult.id}`);
 
             const slParams = {
-                'reduceOnly': true,
-                'stopLossPrice': exchange.priceToPrecision(symbol, slPrice),
+                'reduceOnly': true, 'stopLossPrice': exchange.priceToPrecision(symbol, slPrice),
                 'holdSide': holdSide
             };
             slResult = await exchange.createOrder(symbol, 'market', orderSide, amount, undefined, slParams);
             safeLog('log', `[TP/SL] ✅ [Bitget] Đặt lệnh SL cho ${symbol} thành công. ID: ${slResult.id}`);
 
-        } else {
-            // =================================================================
-            // FIX 3: Phục hồi logic chuẩn cho Binance/OKX...
-            // =================================================================
+        } else { // Logic chuẩn cho Binance, OKX...
+            const market = exchange.market(symbol);
+            const tickSize = market.precision.price ? Math.pow(10, -market.precision.price) : 0.00001;
+            const offset = 2 * tickSize;
+
+            let finalTpPrice = tpPrice;
+            let finalSlPrice = slPrice;
+
+            if (side === 'buy') { // Vị thế Long, lệnh đóng là Sell
+                finalTpPrice -= offset; // Lệnh TP (Sell) phải có giá stop cao hơn giá thị trường
+                finalSlPrice += offset; // Lệnh SL (Sell) phải có giá stop thấp hơn giá thị trường
+            } else { // Vị thế Short, lệnh đóng là Buy
+                finalTpPrice += offset; // Lệnh TP (Buy) phải có giá stop thấp hơn giá thị trường
+                finalSlPrice -= offset; // Lệnh SL (Buy) phải có giá stop cao hơn giá thị trường
+            }
+
             const params = { 'reduceOnly': true };
             tpResult = await exchange.createOrder(symbol, 'TAKE_PROFIT_MARKET', orderSide, amount, undefined, { ...params, 'stopPrice': exchange.priceToPrecision(symbol, tpPrice) });
             safeLog('log', `[TP/SL] ✅ Đặt lệnh TP cho ${symbol} thành công. ID: ${tpResult.id}`);
-
             slResult = await exchange.createOrder(symbol, 'STOP_MARKET', orderSide, amount, undefined, { ...params, 'stopPrice': exchange.priceToPrecision(symbol, slPrice) });
             safeLog('log', `[TP/SL] ✅ Đặt lệnh SL cho ${symbol} thành công. ID: ${slResult.id}`);
         }
