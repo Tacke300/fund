@@ -135,7 +135,14 @@ async function executeFundTransfer(fromExchangeId, toExchangeId, amount) {
 
         const targetDepositInfo = getTargetDepositInfo(fromExchangeId, toExchangeId);
         transferStatus.message = `Bước 2/4: Đang gửi lệnh rút ${amount} USDT đến ${toExchangeId.toUpperCase()}...`;
-        const withdrawResult = await sourceExchange.withdraw('USDT', amount, targetDepositInfo.address, undefined, { network: targetDepositInfo.network });
+        
+        // SỬA LỖI 1: Luôn cung cấp network (chain) cho lệnh withdraw
+        const params = { network: targetDepositInfo.network };
+        if (fromExchangeId === 'bitget') {
+            params.chain = targetDepositInfo.network; // Bitget dùng 'chain' thay vì 'network' trong params
+        }
+        
+        const withdrawResult = await sourceExchange.withdraw('USDT', amount, targetDepositInfo.address, undefined, params);
         safeLog('log', `[TRANSFER] Yêu cầu rút tiền được chấp nhận. TxID/Info: ${withdrawResult.id || JSON.stringify(withdrawResult.info)}`);
 
         transferStatus.message = `Bước 3/4: Đang chờ xác nhận từ blockchain và sàn nhận. Việc này có thể mất vài phút...`;
@@ -147,12 +154,22 @@ async function executeFundTransfer(fromExchangeId, toExchangeId, amount) {
         
         safeLog('log', `[TRANSFER] Đã nhận ${pollResult.balance.toFixed(4)} USDT vào ví '${pollResult.type}' trên ${toExchangeId.toUpperCase()}.`);
         transferStatus.message = `Bước 4/4: Đã nhận tiền! Đang chuyển vào ví Futures trên ${toExchangeId.toUpperCase()}...`;
+        await sleep(5000); // Thêm 5 giây chờ để đảm bảo số dư hoàn toàn khả dụng
         
         try {
+            // SỬA LỖI 2: Xử lý số dư an toàn trước khi chuyển nội bộ
+            const fullReceivedBalance = await targetExchange.fetchBalance();
+            const availableBalance = fullReceivedBalance[pollResult.type].free['USDT'];
+            const amountToTransfer = parseFloat(targetExchange.currencyToPrecision('USDT', availableBalance));
+
+            if (amountToTransfer <= 0) {
+                 throw new Error('Số dư khả dụng để chuyển là 0.');
+            }
+
             const targetFromAccount = pollResult.type;
             const targetToAccount = (toExchangeId === 'bitget') ? 'swap' : 'future';
-            await targetExchange.transfer('USDT', pollResult.balance, targetFromAccount, targetToAccount);
-            transferStatus.message = `✅✅✅ Hoàn tất! ${pollResult.balance.toFixed(4)} USDT đã được chuyển thành công vào ví Futures.`;
+            await targetExchange.transfer('USDT', amountToTransfer, targetFromAccount, targetToAccount);
+            transferStatus.message = `✅✅✅ Hoàn tất! ${amountToTransfer.toFixed(4)} USDT đã được chuyển thành công vào ví Futures.`;
             setTimeout(updateBalances, 3000);
         } catch (internalError) {
             safeLog('error', `[TRANSFER] Lỗi chuyển nội bộ cuối cùng:`, internalError);
