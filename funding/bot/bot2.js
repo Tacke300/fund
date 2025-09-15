@@ -31,7 +31,7 @@ const MIN_MINUTES_FOR_EXECUTION = 15;
 const DATA_FETCH_INTERVAL_SECONDS = 5;
 const MAX_CONSECUTIVE_FAILS = 3;
 const MIN_COLLATERAL_FOR_TRADE = 0.1;
-const TP_SL_PNL_PERCENTAGE = 150;
+const TP_SL_PNL_PERCENTAGE = 1.5;
 
 const ALL_POSSIBLE_EXCHANGE_IDS = ['binanceusdm', 'bitget', 'okx', 'kucoinfutures'];
 const DISABLED_EXCHANGES = [];
@@ -212,12 +212,10 @@ async function computeOrderDetails(exchange, symbol, targetNotionalUSDT, leverag
     return { amount, price, notional: currentNotional, requiredMargin: currentNotional / leverage };
 }
 
-// ===================================================================================
-// ================= HÀM QUAN TRỌNG NHẤT - ĐÃ SỬA LỖI =================================
-// ===================================================================================
 async function placeTpSlOrders(exchange, symbol, side, amount, entryPrice, collateral, notionalValue) {
-    if (!entryPrice || isNaN(entryPrice) || entryPrice <= 0) {
-        safeLog('error', `[TP/SL] ❌ Giá vào lệnh không hợp lệ (${entryPrice}), bỏ qua đặt TP/SL cho ${symbol}`);
+    // Lớp phòng vệ đầu tiên: Kiểm tra dữ liệu đầu vào
+    if (!entryPrice || typeof entryPrice !== 'number' || entryPrice <= 0) {
+        safeLog('error', `[TP/SL] ❌ DỮ LIỆU ĐẦU VÀO KHÔNG HỢP LỆ: entryPrice là '${entryPrice}'. Hủy đặt lệnh.`);
         return { tpOrderId: null, slOrderId: null };
     }
     if (!notionalValue || notionalValue <= 0) {
@@ -229,10 +227,10 @@ async function placeTpSlOrders(exchange, symbol, side, amount, entryPrice, colla
     const priceChange = (pnlAmount / notionalValue) * entryPrice;
     
     let tpPrice, slPrice;
-    if (side === 'sell') { // Vị thế Short
+    if (side === 'sell') {
         tpPrice = entryPrice - priceChange;
         slPrice = entryPrice + priceChange;
-    } else { // Vị thế Long
+    } else {
         tpPrice = entryPrice + priceChange;
         slPrice = entryPrice - priceChange;
     }
@@ -247,14 +245,12 @@ async function placeTpSlOrders(exchange, symbol, side, amount, entryPrice, colla
 
     try {
         let tpResult, slResult;
-
         if (exchange.id === 'kucoinfutures') {
             const tpParams = { 'reduceOnly': true, 'stop': side === 'sell' ? 'down' : 'up', 'stopPrice': exchange.priceToPrecision(symbol, tpPrice), 'stopPriceType': 'MP' };
             tpResult = await exchange.createOrder(symbol, 'market', orderSide, amount, undefined, tpParams);
             const slParams = { 'reduceOnly': true, 'stop': side === 'sell' ? 'up' : 'down', 'stopPrice': exchange.priceToPrecision(symbol, slPrice), 'stopPriceType': 'MP' };
             slResult = await exchange.createOrder(symbol, 'market', orderSide, amount, undefined, slParams);
             safeLog('log', `[TP/SL] ✅ [KuCoin] Đặt TP/SL thành công.`);
-        
         } else if (exchange.id === 'bitget') {
             const holdSide = side === 'buy' ? 'long' : 'short';
             const tpParams = { 'planType': 'normal_plan', 'triggerPrice': exchange.priceToPrecision(symbol, tpPrice), 'holdSide': holdSide };
@@ -262,17 +258,16 @@ async function placeTpSlOrders(exchange, symbol, side, amount, entryPrice, colla
             const slParams = { 'planType': 'normal_plan', 'triggerPrice': exchange.priceToPrecision(symbol, slPrice), 'holdSide': holdSide };
             slResult = await exchange.createOrder(symbol, 'market', orderSide, amount, undefined, slParams);
             safeLog('log', `[TP/SL] ✅ [Bitget] Đặt TP/SL thành công.`);
-
-        } else { // Xử lý chung cho Binance, OKX, etc.
+        } else {
             const market = exchange.market(symbol);
             const tickSize = market.precision.price ? Math.pow(10, -market.precision.price) : 0.000001;
             const offset = 2 * tickSize;
-
             let finalTpPrice, finalSlPrice;
-            if (side === 'buy') { // Vị thế Long, lệnh đóng là Sell
+
+            if (side === 'buy') {
                 finalTpPrice = tpPrice + offset;
                 finalSlPrice = slPrice - offset;
-            } else { // Vị thế Short, lệnh đóng là Buy
+            } else {
                 finalTpPrice = tpPrice - offset;
                 finalSlPrice = slPrice + offset;
             }
@@ -295,7 +290,9 @@ async function placeTpSlOrders(exchange, symbol, side, amount, entryPrice, colla
     }
 }
 
-
+// ===================================================================================
+// ================= HÀM executeTrades ĐÃ ĐƯỢC THÊM CHỐT CHẶN AN TOÀN =================
+// ===================================================================================
 async function executeTrades(opportunity, percentageToUse) {
     const { coin, commonLeverage: desiredLeverage } = opportunity;
     const { shortExchange, longExchange } = opportunity.details;
@@ -348,7 +345,6 @@ async function executeTrades(opportunity, percentageToUse) {
         safeLog('log', `[TRADE] ✅ Mở lệnh chính thành công.`);
     } catch (e) {
         safeLog('error', `[TRADE] ❌ Mở lệnh chính thất bại:`, e);
-        // Cân nhắc thêm logic đóng lệnh đã mở nếu một trong hai lệnh thất bại
         return false;
     }
     
@@ -357,15 +353,21 @@ async function executeTrades(opportunity, percentageToUse) {
 
     const getReliableFillPrice = async (exchange, symbol, orderId) => {
         try {
+            safeLog('log', `[PRICE] Đang lấy giá khớp lệnh cho order ${orderId} trên ${exchange.id}...`);
             const order = await exchange.fetchOrder(orderId, symbol);
-            if (order?.average) return order.average;
+            if (order?.average && typeof order.average === 'number' && order.average > 0) {
+                safeLog('log', `[PRICE] ✅ Lấy giá từ fetchOrder: ${order.average}`);
+                return order.average;
+            }
             const trades = await exchange.fetchMyTrades(symbol, undefined, 1, { 'orderId': orderId });
-            if (trades?.[0]?.price) return trades[0].price;
-            throw new Error("Không tìm thấy giá khớp lệnh.");
+            if (trades?.[0]?.price && typeof trades[0].price === 'number' && trades[0].price > 0) {
+                safeLog('log', `[PRICE] ✅ Lấy giá từ fetchMyTrades: ${trades[0].price}`);
+                return trades[0].price;
+            }
+            throw new Error("Không tìm thấy giá khớp lệnh hợp lệ.");
         } catch (e) {
-            safeLog('warn', `[PRICE] Không thể lấy giá khớp lệnh cho ${exchange.id}, dùng giá ticker. Lỗi: ${e.message}`);
-            const ticker = await exchange.fetchTicker(symbol);
-            return ticker.last;
+            safeLog('error', `[PRICE] ❌ Lỗi nghiêm trọng khi lấy giá khớp lệnh cho ${exchange.id}. Lỗi: ${e.message}`);
+            return null; // Trả về null khi có lỗi
         }
     };
 
@@ -374,11 +376,17 @@ async function executeTrades(opportunity, percentageToUse) {
         getReliableFillPrice(longEx, longSymbol, longOrder.id)
     ]);
 
-    if (!shortEntryPrice || !longEntryPrice) {
-        safeLog('error', `[TRADE] ❌ KHÔNG THỂ XÁC ĐỊNH GIÁ VÀO LỆNH. Sẽ không đặt TP/SL. Vui lòng kiểm tra thủ công!`);
-        // Gán tạm currentTradeDetails để có thể đóng lệnh thủ công
-        currentTradeDetails = { ...opportunity.details, coin, status: 'MANUAL_CHECK', openTime: Date.now(), shortOrderAmount: shortOrderDetails.amount, longOrderAmount: longOrderDetails.amount, commonLeverageUsed: leverageToUse, shortOriginalSymbol: shortSymbol, longOriginalSymbol: longSymbol };
-        return false;
+    // =========================================================================
+    // ====================== CHỐT CHẶN AN TOÀN MỚI ============================
+    // =========================================================================
+    if (!shortEntryPrice || !longEntryPrice || typeof shortEntryPrice !== 'number' || typeof longEntryPrice !== 'number') {
+        safeLog('error', `[TRADE] ❌ KHÔNG THỂ XÁC ĐỊNH GIÁ VÀO LỆNH HỢP LỆ. Sẽ không đặt TP/SL. VUI LÒNG KIỂM TRA VÀ ĐÓNG LỆNH THỦ CÔNG!`);
+        currentTradeDetails = { 
+            ...opportunity.details, coin, status: 'MANUAL_CHECK_NO_SL', openTime: Date.now(), 
+            shortOrderAmount: shortOrderDetails.amount, longOrderAmount: longOrderDetails.amount, 
+            commonLeverageUsed: leverageToUse, shortOriginalSymbol: shortSymbol, longOriginalSymbol: longSymbol 
+        };
+        return false; // Dừng lại tại đây
     }
     
     const [shortTpSlIds, longTpSlIds] = await Promise.all([
@@ -397,8 +405,8 @@ async function executeTrades(opportunity, percentageToUse) {
     return true;
 }
 
-// --- CÁC HÀM QUẢN LÝ GIAO DỊCH VÀ VÒNG LẶP ---
 
+// --- CÁC HÀM QUẢN LÝ GIAO DỊCH VÀ VÒNG LẶP ---
 async function cancelPendingOrders(tradeDetails) {
     if (!tradeDetails) return;
     safeLog('log', '[CLEANUP] Dọn dẹp các lệnh TP/SL đang chờ...');
@@ -426,15 +434,18 @@ async function cancelPendingOrders(tradeDetails) {
 }
 
 async function closeTradeNow() {
-    if (!currentTradeDetails || currentTradeDetails.status !== 'OPEN') {
+    if (!currentTradeDetails) {
         safeLog('warn', '[API] Không có giao dịch nào đang mở để đóng.');
         return false;
     }
     const tradeToClose = { ...currentTradeDetails };
     safeLog('log', `[API] Nhận yêu cầu đóng lệnh cho ${tradeToClose.coin}...`);
     
-    await cancelPendingOrders(tradeToClose);
-    await sleep(1000); 
+    // Nếu giao dịch đang ở trạng thái cần kiểm tra thủ công, không hủy lệnh TP/SL vì chúng không tồn tại
+    if (tradeToClose.status === 'OPEN') {
+        await cancelPendingOrders(tradeToClose);
+        await sleep(1000); 
+    }
 
     try {
         const shortEx = exchanges[tradeToClose.shortExchange];
@@ -495,7 +506,7 @@ async function mainBotLoop() {
                     const minutesToFunding = (opportunity.nextFundingTime - Date.now()) / 60000;
                     if (minutesToFunding > 0 && minutesToFunding < MIN_MINUTES_FOR_EXECUTION) {
                         safeLog('log', `[LOOP] Phát hiện cơ hội đủ điều kiện: ${opportunity.coin} với PNL ${opportunity.estimatedPnl.toFixed(3)}%`);
-                        if (await executeTrades(opportunity, currentPercentageToUse)) break; // Chỉ thực hiện một giao dịch mỗi giờ
+                        if (await executeTrades(opportunity, currentPercentageToUse)) break;
                     }
                 }
             }
@@ -559,7 +570,8 @@ const botServer = http.createServer(async (req, res) => {
             res.writeHead(200, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ success: stopBot(), message: 'Đã gửi yêu cầu dừng bot.' }));
         } else if (url === '/bot-api/custom-test-trade' && method === 'POST') {
-            if (currentTradeDetails) return res.writeHead(409).end(JSON.stringify({ success: false, message: 'Đã có lệnh đang mở.' }));
+            if (currentTradeDetails) return res.writeHead(409, { 'Content-Type': 'application/json' }).end(JSON.stringify({ success: false, message: 'Đã có lệnh đang mở.' }));
+            if (!bestPotentialOpportunityForDisplay) return res.writeHead(400, { 'Content-Type': 'application/json' }).end(JSON.stringify({ success: false, message: 'Chưa có cơ hội nào.' }));
             const data = JSON.parse(body);
             const testOpportunity = {
                 coin: bestPotentialOpportunityForDisplay?.coin,
@@ -567,10 +579,10 @@ const botServer = http.createServer(async (req, res) => {
                 details: { shortExchange: data.shortExchange, longExchange: data.longExchange }
             };
             const tradeSuccess = await executeTrades(testOpportunity, parseFloat(data.percentage));
-            res.writeHead(tradeSuccess ? 200 : 500).end(JSON.stringify({ success: tradeSuccess, message: tradeSuccess ? 'Lệnh Test đã được gửi.' : 'Lỗi khi gửi lệnh Test.' }));
+            res.writeHead(tradeSuccess ? 200 : 500, { 'Content-Type': 'application/json' }).end(JSON.stringify({ success: tradeSuccess, message: tradeSuccess ? 'Lệnh Test đã được gửi.' : 'Lỗi khi gửi lệnh Test.' }));
         } else if (url === '/bot-api/close-trade-now' && method === 'POST') {
             const success = await closeTradeNow();
-            res.writeHead(success ? 200 : 400).end(JSON.stringify({ success, message: success ? 'Đã gửi yêu cầu đóng lệnh.' : 'Không có lệnh đang mở hoặc có lỗi.' }));
+            res.writeHead(success ? 200 : 400, { 'Content-Type': 'application/json' }).end(JSON.stringify({ success, message: success ? 'Đã gửi yêu cầu đóng lệnh.' : 'Không có lệnh đang mở hoặc có lỗi.' }));
         } else {
             res.writeHead(404).end('Not Found');
         }
