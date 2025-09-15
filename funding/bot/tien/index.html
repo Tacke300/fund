@@ -9,10 +9,11 @@
         .container { max-width: 1400px; margin: auto; }
         h1, h2 { color: #bb86fc; text-align: center; }
         .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1rem; }
-        .card { background-color: #1e1e1e; border: 1px solid #333; border-radius: 8px; padding: 1rem; }
+        .card { background-color: #1e1e1e; border: 1px solid #333; border-radius: 8px; padding: 1rem; margin-top: 1rem; }
         .card h3 { margin-top: 0; color: #03dac6; }
-        button { background-color: #6200ee; color: white; border: none; padding: 10px 15px; border-radius: 4px; cursor: pointer; transition: background-color 0.2s; }
+        button { background-color: #6200ee; color: white; border: none; padding: 10px 15px; border-radius: 4px; cursor: pointer; transition: background-color 0.2s; font-size: 14px; }
         button:hover { background-color: #3700b3; }
+        button:disabled { background-color: #333; cursor: not-allowed; }
         button.stop { background-color: #cf6679; }
         button.stop:hover { background-color: #b00020; }
         .controls, .manual-controls { display: flex; justify-content: center; align-items: center; gap: 1rem; margin-bottom: 1.5rem; flex-wrap: wrap; }
@@ -22,7 +23,8 @@
         th { background-color: #2c2c2c; }
         .text-green { color: #4caf50; }
         .text-red { color: #f44336; }
-        #transferStatusDisplay { margin-top: 1rem; padding: 1rem; background-color: #2c2c2c; border-radius: 4px; min-height: 20px; text-align: center; }
+        .text-yellow { color: #f1c40f; }
+        .status-display { margin-top: 1rem; padding: 1rem; background-color: #2c2c2c; border-radius: 4px; min-height: 20px; text-align: center; word-break: break-word; }
     </style>
 </head>
 <body>
@@ -43,7 +45,7 @@
             <p id="botStateDisplay">Đang tải...</p>
         </div>
         <div class="card">
-            <h3>Số dư</h3>
+            <h3>Số dư Futures</h3>
             <div id="balancesDisplay"><p>Đang tải...</p></div>
         </div>
         <div class="card">
@@ -56,19 +58,42 @@
         </div>
     </div>
     
-    <div class="card" style="margin-top: 1rem;">
-        <h2>Chuyển tiền Thủ công</h2>
-        <p style="color: #f48fb1;"><strong>CẢNH BÁO:</strong> Rủi ro cao. Sai địa chỉ hoặc mạng lưới có thể MẤT TIỀN. API Key phải có quyền Rút tiền.</p>
-        <div class="manual-controls">
-            <label>Từ:</label> <select id="fromExchangeSelect"></select>
-            <label>Tới:</label> <select id="toExchangeSelect"></select>
-            <label>Số lượng USDT:</label> <input type="number" id="transferAmount" value="10" min="1">
-            <button id="manualTransferBtn">Chuyển ngay</button>
+    <div class="grid">
+        <div class="card">
+            <h2>Chuyển tiền Ngoại sàn</h2>
+            <p style="color: #f48fb1;"><strong>CẢNH BÁO:</strong> Rủi ro cao. Sai địa chỉ/mạng có thể MẤT TIỀN. API Key phải có quyền Rút tiền.</p>
+            <div class="manual-controls">
+                <label>Từ:</label> <select id="fromExchangeSelect"></select>
+                <label>Tới:</label> <select id="toExchangeSelect"></select>
+                <label>Số lượng USDT:</label> <input type="number" id="transferAmount" value="10" min="1">
+                <button id="manualTransferBtn">Chuyển ngay</button>
+            </div>
+            <div id="transferStatusDisplay" class="status-display"></div>
         </div>
-        <div id="transferStatusDisplay"></div>
+        
+        <div class="card">
+            <h2>Chuyển tiền Nội bộ (Giữa các ví)</h2>
+            <p style="color: #80cbc4;">Sử dụng khi tiền bị kẹt ở ví Spot/Main sau khi chuyển ngoại sàn thất bại.</p>
+            <div class="manual-controls">
+                <label>Sàn:</label> <select id="internalExchangeSelect"></select>
+                <label>Từ ví:</label>
+                <select id="internalFromAccount">
+                    <option value="spot">Spot/Main</option>
+                    <option value="future">Future</option>
+                </select>
+                <label>Tới ví:</label>
+                 <select id="internalToAccount">
+                    <option value="future">Future</option>
+                    <option value="spot">Spot/Main</option>
+                </select>
+                <label>Số lượng USDT:</label> <input type="number" id="internalAmount" value="10" min="0.1">
+                <button id="internalTransferBtn">Chuyển Nội bộ</button>
+            </div>
+            <div id="internalTransferStatusDisplay" class="status-display"></div>
+        </div>
     </div>
 
-    <div class="card" style="margin-top: 1rem;">
+    <div class="card">
         <h2>Lịch sử Giao dịch</h2>
         <table>
             <thead>
@@ -87,7 +112,7 @@
 <script>
     const fromSelect = document.getElementById('fromExchangeSelect');
     const toSelect = document.getElementById('toExchangeSelect');
-    const transferStatusDisplay = document.getElementById('transferStatusDisplay');
+    const internalExchangeSelect = document.getElementById('internalExchangeSelect');
 
     async function updateBotStatus() {
         try {
@@ -135,7 +160,10 @@
             });
             
             if (fromSelect.options.length === 0 && data.transferExchanges) {
-                 populateExchangeDropdowns(data.transferExchanges);
+                 populateExternalDropdowns(data.transferExchanges);
+            }
+            if (internalExchangeSelect.options.length === 0 && data.internalTransferExchanges) {
+                 populateInternalDropdowns(data.internalTransferExchanges);
             }
 
         } catch (error) {
@@ -144,7 +172,7 @@
         }
     }
 
-    function populateExchangeDropdowns(exchanges) {
+    function populateExternalDropdowns(exchanges) {
         exchanges.forEach(id => {
             fromSelect.add(new Option(id.toUpperCase(), id));
             toSelect.add(new Option(id.toUpperCase(), id));
@@ -153,8 +181,19 @@
         if (exchanges.includes('kucoinfutures')) toSelect.value = 'kucoinfutures';
     }
 
-    async function postRequest(url, body) {
-        transferStatusDisplay.innerHTML = `<span style="color: #f1fa8c;">Đang xử lý...</span>`;
+    function populateInternalDropdowns(exchanges) {
+        exchanges.forEach(id => {
+            internalExchangeSelect.add(new Option(id.toUpperCase(), id));
+        });
+    }
+
+    async function postRequest(url, body, statusElementId) {
+        const statusEl = document.getElementById(statusElementId);
+        if (statusEl) statusEl.innerHTML = `<span class="text-yellow">Đang xử lý...</span>`;
+        
+        const button = event.target;
+        button.disabled = true;
+
         try {
             const response = await fetch(url, {
                 method: 'POST',
@@ -163,23 +202,57 @@
             });
             const data = await response.json();
             const messageColor = data.success ? 'text-green' : 'text-red';
-            transferStatusDisplay.innerHTML = `<span class="${messageColor}">${data.message}</span>`;
-            updateBotStatus();
+            if (statusEl) statusEl.innerHTML = `<span class="${messageColor}">${data.message}</span>`;
+            else alert(data.message);
+            
+            setTimeout(updateBotStatus, 2000);
         } catch (error) {
-            transferStatusDisplay.innerHTML = `<span class="text-red">Lỗi: ${error.message}</span>`;
+            if (statusEl) statusEl.innerHTML = `<span class="text-red">Lỗi: ${error.message}</span>`;
+            else alert(`Lỗi: ${error.message}`);
             console.error(`Lỗi request tới ${url}:`, error);
+        } finally {
+            button.disabled = false;
         }
     }
     
-    document.getElementById('startBotBtn').addEventListener('click', () => postRequest('/bot-api/start', { percentageToUse: document.getElementById('percentageToUse').value }));
-    document.getElementById('stopBotBtn').addEventListener('click', () => postRequest('/bot-api/stop', {}));
-    document.getElementById('closeTradeBtn').addEventListener('click', () => postRequest('/bot-api/close-trade-now', {}));
-    document.getElementById('manualTransferBtn').addEventListener('click', () => {
+    document.getElementById('startBotBtn').addEventListener('click', (e) => postRequest('/bot-api/start', { percentageToUse: document.getElementById('percentageToUse').value }, null));
+    document.getElementById('stopBotBtn').addEventListener('click', (e) => postRequest('/bot-api/stop', {}, null));
+    document.getElementById('closeTradeBtn').addEventListener('click', (e) => postRequest('/bot-api/close-trade-now', {}, null));
+    
+    document.getElementById('manualTransferBtn').addEventListener('click', (e) => {
         postRequest('/bot-api/transfer-funds', {
             fromExchangeId: fromSelect.value,
             toExchangeId: toSelect.value,
             amountStr: document.getElementById('transferAmount').value
-        });
+        }, 'transferStatusDisplay');
+    });
+
+    document.getElementById('internalTransferBtn').addEventListener('click', (e) => {
+        const fromAccount = document.getElementById('internalFromAccount').value;
+        const toAccount = document.getElementById('internalToAccount').value;
+
+        let finalFrom = fromAccount;
+        let finalTo = toAccount;
+
+        // Logic tự xác định ví chính cho từng sàn
+        if (fromAccount === 'spot') {
+            finalFrom = (internalExchangeSelect.value === 'kucoinfutures') ? 'main' : 'spot';
+        }
+        if (toAccount === 'spot') {
+            finalTo = (internalExchangeSelect.value === 'kucoinfutures') ? 'main' : 'spot';
+        }
+        
+        if (finalFrom === finalTo) {
+            document.getElementById('internalTransferStatusDisplay').innerHTML = `<span class="text-red">Không thể chuyển giữa cùng một loại ví.</span>`;
+            return;
+        }
+
+        postRequest('/bot-api/internal-transfer', {
+            exchangeId: internalExchangeSelect.value,
+            fromAccount: finalFrom,
+            toAccount: finalTo,
+            amountStr: document.getElementById('internalAmount').value
+        }, 'internalTransferStatusDisplay');
     });
 
     updateBotStatus();
