@@ -3,7 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const ccxt = require('ccxt');
 
-const { usdtDepositAddressesByNetwork } = require('../balance.js');
+const { usdtDepositAddressesByNetwork } = require('./balance.js');
 
 const safeLog = (type, ...args) => {
     try {
@@ -23,7 +23,7 @@ const {
     okxApiKey, okxApiSecret, okxPassword,
     bitgetApiKey, bitgetApiSecret, bitgetApiPassword,
     kucoinApiKey, kucoinApiSecret, kucoinApiPassword
-} = require('../config.js');
+} = require('./config.js');
 
 const BOT_PORT = 5008;
 const SERVER_DATA_URL = 'http://localhost:5005/api/data';
