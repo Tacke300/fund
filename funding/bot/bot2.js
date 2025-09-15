@@ -59,11 +59,11 @@ activeExchangeIds.forEach(id => {
     try {
         let exchangeClass;
         let config = { 'enableRateLimit': true, 'verbose': false };
-        if (id === 'binanceusdm') { exchangeClass = ccxt.binanceusdm; config.apiKey = binanceApiKey; config.secret = binanceApiSecret; config.options = { 'defaultType': 'swap' }; } 
-        else if (id === 'okx') { exchangeClass = ccxt.okx; config.apiKey = okxApiKey; config.secret = okxApiSecret; config.password = okxPassword; config.options = { 'defaultType': 'swap' }; } 
-        else if (id === 'bitget') { exchangeClass = ccxt.bitget; config.apiKey = bitgetApiKey; config.secret = bitgetApiSecret; config.password = bitgetApiPassword; config.options = { 'defaultType': 'swap' }; } 
+        if (id === 'binanceusdm') { exchangeClass = ccxt.binanceusdm; config.apiKey = binanceApiKey; config.secret = binanceApiSecret; config.options = { 'defaultType': 'swap' }; }
+        else if (id === 'okx') { exchangeClass = ccxt.okx; config.apiKey = okxApiKey; config.secret = okxApiSecret; config.password = okxPassword; config.options = { 'defaultType': 'swap' }; }
+        else if (id === 'bitget') { exchangeClass = ccxt.bitget; config.apiKey = bitgetApiKey; config.secret = bitgetApiSecret; config.password = bitgetApiPassword; config.options = { 'defaultType': 'swap' }; }
         else if (id === 'kucoinfutures') { exchangeClass = ccxt.kucoinfutures; config.apiKey = kucoinApiKey; config.secret = kucoinApiSecret; config.password = kucoinApiPassword; }
-        if (config.apiKey && config.secret && (id !== 'kucoinfutures' || config.password)) { exchanges[id] = new exchangeClass(config); safeLog('log', `[INIT] Khởi tạo sàn ${id.toUpperCase()} thành công.`); } 
+        if (config.apiKey && config.secret && (id !== 'kucoinfutures' || config.password)) { exchanges[id] = new exchangeClass(config); safeLog('log', `[INIT] Khởi tạo sàn ${id.toUpperCase()} thành công.`); }
         else { safeLog('warn', `[INIT] Bỏ qua ${id.toUpperCase()} do thiếu API Key/Secret/Password.`); }
     } catch (e) { safeLog('error', `[INIT] Lỗi khi khởi tạo sàn ${id.toUpperCase()}: ${e}`); }
 });
@@ -183,7 +183,7 @@ async function computeOrderDetails(exchange, symbol, targetNotionalUSDT, leverag
 
     const currentNotional = amount * price * contractSize;
     const requiredMargin = currentNotional / leverage;
-    
+
     const minCost = market.limits?.cost?.min ?? 0;
     if (minCost > 0 && currentNotional < minCost) {
         throw new Error(`Giá trị lệnh ${currentNotional.toFixed(4)} < mức tối thiểu ${minCost} USDT.`);
@@ -195,7 +195,7 @@ async function computeOrderDetails(exchange, symbol, targetNotionalUSDT, leverag
         const maxNotional = availableBalance * leverage * safetyBuffer;
         const maxRawAmount = maxNotional / (price * contractSize);
         let newAmount = parseFloat(exchange.amountToPrecision(symbol, maxRawAmount));
-        
+
         if (newAmount <= (market.limits?.amount?.min ?? 0)) {
             throw new Error(`Không đủ ký quỹ. Yêu cầu ${requiredMargin.toFixed(4)}, có sẵn ${availableBalance.toFixed(4)} USDT.`);
         }
@@ -204,7 +204,7 @@ async function computeOrderDetails(exchange, symbol, targetNotionalUSDT, leverag
         safeLog('log', `[ADJUST] Đã điều chỉnh: Số lượng ${amount} -> ${newAmount}, Giá trị ${currentNotional.toFixed(2)} -> ${newNotional.toFixed(2)} USDT.`);
         amount = newAmount;
     }
-    
+
     return {
         amount,
         price,
@@ -219,8 +219,8 @@ async function placeTpSlOrders(exchange, symbol, side, amount, entryPrice, colla
         return { tpOrderId: null, slOrderId: null };
     }
 
-    const pnlAmount = collateral * TP_SL_PNL_PERCENTAGE;
-    const pnlPerUnit = pnlAmount / amount;
+    const pnlAmount = collateral * (TP_SL_PNL_PERCENTAGE / 100);
+    const pnlPerUnit = pnlAmount / (amount * (exchange.market(symbol).contractSize ?? 1));
     
     let tpPrice, slPrice;
     if (side === 'sell') {
@@ -239,18 +239,31 @@ async function placeTpSlOrders(exchange, symbol, side, amount, entryPrice, colla
     const orderSide = (side === 'sell') ? 'buy' : 'sell';
     safeLog('log', `[TP/SL] Đang đặt lệnh TP/SL cho ${symbol} trên ${exchange.id}...`);
 
+    let tpResult, slResult;
     try {
-        const params = { 'reduceOnly': true };
-        const tpResult = await exchange.createOrder(symbol, 'TAKE_PROFIT_MARKET', orderSide, amount, undefined, { ...params, 'stopPrice': exchange.priceToPrecision(symbol, tpPrice) });
-        safeLog('log', `[TP/SL] ✅ Đặt lệnh TP cho ${symbol} thành công. ID: ${tpResult.id}`);
-        const slResult = await exchange.createOrder(symbol, 'STOP_MARKET', orderSide, amount, undefined, { ...params, 'stopPrice': exchange.priceToPrecision(symbol, slPrice) });
-        safeLog('log', `[TP/SL] ✅ Đặt lệnh SL cho ${symbol} thành công. ID: ${slResult.id}`);
+        if (exchange.id === 'kucoinfutures') {
+            const tpParams = { 'reduceOnly': true, 'stop': side === 'sell' ? 'down' : 'up', 'stopPrice': exchange.priceToPrecision(symbol, tpPrice), 'stopPriceType': 'MP' };
+            const slParams = { 'reduceOnly': true, 'stop': side === 'sell' ? 'up' : 'down', 'stopPrice': exchange.priceToPrecision(symbol, slPrice), 'stopPriceType': 'MP' };
+            tpResult = await exchange.createOrder(symbol, 'market', orderSide, amount, undefined, tpParams);
+            safeLog('log', `[TP/SL] ✅ Đặt lệnh TP cho ${symbol} trên KuCoin thành công. ID: ${tpResult.id}`);
+            slResult = await exchange.createOrder(symbol, 'market', orderSide, amount, undefined, slParams);
+            safeLog('log', `[TP/SL] ✅ Đặt lệnh SL cho ${symbol} trên KuCoin thành công. ID: ${slResult.id}`);
+        } else {
+            const params = { 'reduceOnly': true };
+            const tpOrderType = (exchange.id === 'okx' || exchange.id === 'bitget') ? 'TAKE_PROFIT_MARKET' : 'TAKE_PROFIT';
+            const slOrderType = (exchange.id === 'okx' || exchange.id === 'bitget') ? 'STOP_MARKET' : 'STOP';
+            tpResult = await exchange.createOrder(symbol, tpOrderType, orderSide, amount, undefined, { ...params, 'stopPrice': exchange.priceToPrecision(symbol, tpPrice) });
+            safeLog('log', `[TP/SL] ✅ Đặt lệnh TP cho ${symbol} thành công. ID: ${tpResult.id}`);
+            slResult = await exchange.createOrder(symbol, slOrderType, orderSide, amount, undefined, { ...params, 'stopPrice': exchange.priceToPrecision(symbol, slPrice) });
+            safeLog('log', `[TP/SL] ✅ Đặt lệnh SL cho ${symbol} thành công. ID: ${slResult.id}`);
+        }
         return { tpOrderId: tpResult.id, slOrderId: slResult.id };
     } catch (e) {
         safeLog('error', `[TP/SL] ❌ Lỗi khi đặt lệnh TP/SL cho ${symbol} trên ${exchange.id}:`, e);
         return { tpOrderId: null, slOrderId: null };
     }
 }
+
 
 async function executeTrades(opportunity, percentageToUse) {
     const { coin, commonLeverage: desiredLeverage } = opportunity;
@@ -309,8 +322,10 @@ async function executeTrades(opportunity, percentageToUse) {
         return false;
     }
 
-    const shortEntryPrice = shortOrder.average || (await shortEx.fetchTicker(shortOriginalSymbol)).last;
-    const longEntryPrice = longOrder.average || (await longEx.fetchTicker(longOriginalSymbol)).last;
+    await sleep(2000);
+
+    const shortEntryPrice = shortOrder.average || (await shortEx.fetchMyTrades(shortOriginalSymbol, undefined, 1))[0]?.price || (await shortEx.fetchTicker(shortOriginalSymbol)).last;
+    const longEntryPrice = longOrder.average || (await longEx.fetchMyTrades(longOriginalSymbol, undefined, 1))[0]?.price || (await longEx.fetchTicker(longOriginalSymbol)).last;
     
     const shortTpSlIds = await placeTpSlOrders(shortEx, shortOriginalSymbol, 'sell', shortOrder.amount, shortEntryPrice, collateral);
     const longTpSlIds = await placeTpSlOrders(longEx, longOriginalSymbol, 'buy', longOrder.amount, longEntryPrice, collateral);
@@ -341,7 +356,8 @@ async function cancelPendingOrders(tradeDetails) {
     for (const order of ordersToCancel) {
         if (order.id) {
             try {
-                await order.ex.cancelOrder(order.id, order.symbol);
+                const params = exchange.id === 'kucoinfutures' ? { 'stop': true } : {};
+                await order.ex.cancelOrder(order.id, order.symbol, params);
                 safeLog('log', `[CLEANUP] ✅ Hủy lệnh ${order.id} thành công.`);
             } catch (e) {
                 safeLog('warn', `[CLEANUP] ⚠️ Không thể hủy lệnh ${order.id} (có thể đã được khớp): ${e.message}`);
@@ -366,8 +382,8 @@ async function closeTradeNow() {
         if (shortEx.id === 'kucoinfutures') shortParams['marginMode'] = 'cross';
         const longParams = {};
         if (longEx.id === 'kucoinfutures') longParams['marginMode'] = 'cross';
-        await shortEx.createMarketBuyOrder(tradeToClose.shortOriginalSymbol, tradeToClose.shortOrderAmount, shortParams);
-        await longEx.createMarketSellOrder(tradeToClose.longOriginalSymbol, tradeToClose.longOrderAmount, longParams);
+        await shortEx.createMarketBuyOrder(tradeToClose.shortOriginalSymbol, tradeToClose.shortOrderAmount, { ...shortParams, reduceOnly: true });
+        await longEx.createMarketSellOrder(tradeToClose.longOriginalSymbol, tradeToClose.longOrderAmount, { ...longParams, reduceOnly: true });
         currentTradeDetails.status = 'PENDING_PNL_CALC';
         currentTradeDetails.closeTime = Date.now();
         tradeAwaitingPnl = { ...currentTradeDetails };
@@ -411,7 +427,7 @@ async function mainBotLoop() {
             await processServerData(serverData);
             const now = new Date();
             const currentMinute = now.getUTCMinutes();
-            if (currentMinute >= 55) {
+            if (currentMinute >= 55 || currentMinute < 5) { // Mở rộng cửa sổ thời gian
                 for (const opportunity of allCurrentOpportunities) {
                     const minutesToFunding = (opportunity.nextFundingTime - Date.now()) / 60000;
                     if (minutesToFunding > 0 && minutesToFunding < MIN_MINUTES_FOR_EXECUTION) {
@@ -495,7 +511,7 @@ const botServer = http.createServer(async (req, res) => {
                 const testOpportunity = {
                     coin: bestPotentialOpportunityForDisplay.coin,
                     commonLeverage: parseInt(leverage, 10) || 20,
-                    details: { shortExchange, longExchange }
+                    details: { shortExchange: normalizeExchangeId(shortExchange), longExchange: normalizeExchangeId(longExchange) }
                 };
                 const tradeSuccess = await executeTrades(testOpportunity, parseFloat(percentage));
                 if (tradeSuccess) {
