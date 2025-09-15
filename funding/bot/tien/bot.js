@@ -25,7 +25,7 @@ const {
     kucoinApiKey, kucoinApiSecret, kucoinApiPassword
 } = require('./config.js');
 
-const BOT_PORT = 5008;
+const BOT_PORT = 5006;
 const SERVER_DATA_URL = 'http://localhost:5005/api/data';
 const MIN_PNL_PERCENTAGE = 1;
 const MIN_MINUTES_FOR_EXECUTION = 15;
