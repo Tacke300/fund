@@ -656,7 +656,7 @@ const botServer = http.createServer(async (req, res) => {
             }
 
             try {
-                const fromAccount = 'future';
+                const fromAccount = (fromExchangeId === 'bitget') ? 'usdt_futures' : 'future';
                 const toAccount = (fromExchangeId === 'kucoinfutures') ? 'main' : 'spot';
                 safeLog('log', `[TRANSFER] Bước 1: Chuyển ${amount} USDT từ ví '${fromAccount}' sang '${toAccount}' trên ${fromExchangeId.toUpperCase()}...`);
                 await sourceExchange.transfer('USDT', amount, fromAccount, toAccount);
@@ -674,7 +674,7 @@ const botServer = http.createServer(async (req, res) => {
                 try {
                     safeLog('log', `[TRANSFER] Bước 3: Chuyển ${pollResult.balance.toFixed(4)} USDT từ ví '${pollResult.type}' sang 'future' trên ${toExchangeId.toUpperCase()}...`);
                     const targetFromAccount = pollResult.type;
-                    const targetToAccount = 'future';
+                    const targetToAccount = (toExchangeId === 'bitget') ? 'usdt_futures' : 'future';
                     await targetExchange.transfer('USDT', pollResult.balance, targetFromAccount, targetToAccount);
                     safeLog('log', `[TRANSFER] ✅✅✅ Hoàn tất chuyển tiền!`);
                     
@@ -691,10 +691,10 @@ const botServer = http.createServer(async (req, res) => {
             }
 
         } else if (url === '/bot-api/internal-transfer' && method === 'POST') {
-            const { exchangeId, amountStr, fromAccount, toAccount } = JSON.parse(body);
+            const { exchangeId, amountStr, fromAccount: genericFrom, toAccount: genericTo } = JSON.parse(body);
             const amount = parseFloat(amountStr);
             
-            if(!exchangeId || !amount || isNaN(amount) || amount <= 0 || !fromAccount || !toAccount) {
+            if(!exchangeId || !amount || isNaN(amount) || amount <= 0 || !genericFrom || !genericTo) {
                  return res.writeHead(400, { 'Content-Type': 'application/json' }).end(JSON.stringify({ success: false, message: `Dữ liệu không hợp lệ.` }));
             }
             
@@ -703,9 +703,21 @@ const botServer = http.createServer(async (req, res) => {
                  return res.writeHead(500, { 'Content-Type': 'application/json' }).end(JSON.stringify({ success: false, message: `Sàn ${exchangeId} chưa được khởi tạo.` }));
             }
             
+            let finalFromAccount = genericFrom;
+            let finalToAccount = genericTo;
+
+            if (exchangeId === 'bitget') {
+                if (genericFrom === 'future') finalFromAccount = 'usdt_futures';
+                if (genericTo === 'future') finalToAccount = 'usdt_futures';
+            }
+             if (exchangeId === 'kucoinfutures') {
+                if (genericFrom === 'spot') finalFromAccount = 'main';
+                 if (genericTo === 'spot') finalToAccount = 'main';
+            }
+
             try {
-                safeLog('log', `[INTERNAL_TRANSFER] Yêu cầu chuyển ${amount} USDT từ '${fromAccount}' sang '${toAccount}' trên ${exchangeId.toUpperCase()}...`);
-                await exchange.transfer('USDT', amount, fromAccount, toAccount);
+                safeLog('log', `[INTERNAL_TRANSFER] Yêu cầu chuyển ${amount} USDT từ '${finalFromAccount}' sang '${finalToAccount}' trên ${exchangeId.toUpperCase()}...`);
+                await exchange.transfer('USDT', amount, finalFromAccount, finalToAccount);
                 safeLog('log', `[INTERNAL_TRANSFER] ✅ Chuyển nội bộ thành công.`);
                 setTimeout(updateBalances, 3000);
                 res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ success: true, message: 'Chuyển nội bộ thành công.' }));
