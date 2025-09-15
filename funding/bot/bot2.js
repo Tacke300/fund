@@ -253,7 +253,7 @@ async function placeTpSlOrders(exchange, symbol, side, amount, entryPrice, colla
                 'stopPrice': exchange.priceToPrecision(symbol, tpPrice),
                 'stopPriceType': 'MP',
                 'size': amount,
-                'marginMode': 'cross' // ✅ FIX: Thêm marginMode để khớp với position
+                'marginMode': 'cross'
             };
             tpResult = await exchange.createOrder(symbol, 'market', orderSide, undefined, undefined, tpParams);
             safeLog('log', `[TP/SL] ✅ [KuCoin] Đặt lệnh TP cho ${symbol} thành công. ID: ${tpResult.id}`);
@@ -264,7 +264,7 @@ async function placeTpSlOrders(exchange, symbol, side, amount, entryPrice, colla
                 'stopPrice': exchange.priceToPrecision(symbol, slPrice),
                 'stopPriceType': 'MP',
                 'size': amount,
-                'marginMode': 'cross' // ✅ FIX: Thêm marginMode để khớp với position
+                'marginMode': 'cross'
             };
             slResult = await exchange.createOrder(symbol, 'market', orderSide, undefined, undefined, slParams);
             safeLog('log', `[TP/SL] ✅ [KuCoin] Đặt lệnh SL cho ${symbol} thành công. ID: ${slResult.id}`);
@@ -343,32 +343,40 @@ async function executeTrades(opportunity, percentageToUse) {
         return false;
     }
     
-    safeLog('log', '[TRADE] Đang chờ 3 giây để sàn cập nhật trạng thái lệnh...');
+    // =================================================================
+    // LOGIC CHỜ 3 GIÂY - ÁP DỤNG CHO TẤT CẢ CÁC SÀN
+    // =================================================================
+    safeLog('log', '[TRADE] Đang chờ 3 giây để tất cả sàn cập nhật trạng thái lệnh...');
     await sleep(3000);
 
     let shortEntryPrice, longEntryPrice;
 
-    try {
-        const trades = await shortEx.fetchMyTrades(shortOriginalSymbol, undefined, 1, {orderId: shortOrder.id});
-        if (trades && trades.length > 0) {
-            shortEntryPrice = trades[trades.length - 1].price;
-            safeLog('log', `[PRICE] Lấy giá khớp lệnh Short từ fetchMyTrades: ${shortEntryPrice}`);
-        } else { throw new Error("Không có trade nào được tìm thấy."); }
-    } catch (e) {
-        safeLog('warn', `[PRICE] Lỗi khi lấy giá Short từ trade, thử lấy từ ticker: ${e.message}`);
-        shortEntryPrice = (await shortEx.fetchTicker(shortOriginalSymbol)).last;
-    }
+    // Hàm trợ giúp để lấy giá khớp lệnh một cách đáng tin cậy
+    const getReliableFillPrice = async (exchange, symbol, orderId) => {
+        try {
+            // Ưu tiên lấy trade liên quan đến orderId để có giá chính xác nhất
+            const trades = await exchange.fetchMyTrades(symbol, undefined, 1, { 'orderId': orderId });
+            if (trades && trades.length > 0) {
+                safeLog('log', `[PRICE] Lấy giá khớp lệnh từ fetchMyTrades cho ${exchange.id}: ${trades[0].price}`);
+                return trades[0].price;
+            }
+            // Nếu không có trade, thử fetchOrder để lấy giá trung bình
+            const order = await exchange.fetchOrder(orderId, symbol);
+            if (order && order.average) {
+                safeLog('log', `[PRICE] Lấy giá khớp lệnh từ fetchOrder cho ${exchange.id}: ${order.average}`);
+                return order.average;
+            }
+            throw new Error("Không tìm thấy trade hoặc giá average trong order.");
+        } catch (e) {
+            safeLog('warn', `[PRICE] Không thể lấy giá khớp lệnh chính xác cho ${exchange.id} (Lỗi: ${e.message}). Dùng giá ticker làm phương án dự phòng.`);
+            const ticker = await exchange.fetchTicker(symbol);
+            return ticker.last;
+        }
+    };
 
-    try {
-        const trades = await longEx.fetchMyTrades(longOriginalSymbol, undefined, 1, {orderId: longOrder.id});
-        if (trades && trades.length > 0) {
-            longEntryPrice = trades[trades.length - 1].price;
-            safeLog('log', `[PRICE] Lấy giá khớp lệnh Long từ fetchMyTrades: ${longEntryPrice}`);
-        } else { throw new Error("Không có trade nào được tìm thấy."); }
-    } catch (e) {
-        safeLog('warn', `[PRICE] Lỗi khi lấy giá Long từ trade, thử lấy từ ticker: ${e.message}`);
-        longEntryPrice = (await longEx.fetchTicker(longOriginalSymbol)).last;
-    }
+    shortEntryPrice = await getReliableFillPrice(shortEx, shortOriginalSymbol, shortOrder.id);
+    longEntryPrice = await getReliableFillPrice(longEx, longOriginalSymbol, longOrder.id);
+
 
     if (!shortEntryPrice || !longEntryPrice || isNaN(shortEntryPrice) || isNaN(longEntryPrice)) {
         safeLog('error', `[TRADE] ❌ KHÔNG THỂ XÁC ĐỊNH GIÁ VÀO LỆNH SAU KHI CHỜ. Sẽ không đặt TP/SL. Vui lòng kiểm tra thủ công!`);
