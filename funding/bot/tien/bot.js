@@ -74,6 +74,23 @@ activeExchangeIds.forEach(id => {
     } catch (e) { safeLog('error', `[INIT] Lỗi khi khởi tạo sàn ${id.toUpperCase()}: ${e}`); }
 });
 
+async function bitgetInternalTransfer(exchange, amount, from, to) {
+    const typeMap = {
+        'spot': '1',
+        'usdt_futures': '3',
+    };
+    if (!typeMap[from] || !typeMap[to]) {
+        throw new Error(`Loại ví không hợp lệ cho Bitget: from='${from}', to='${to}'. Chỉ chấp nhận 'spot' hoặc 'usdt_futures'.`);
+    }
+    const request = {
+        'coin': 'USDT',
+        'amount': String(amount),
+        'fromType': typeMap[from],
+        'toType': typeMap[to]
+    };
+    return await exchange.privateSpotPostWalletTransfer(request);
+}
+
 function getMinTransferAmount(fromExchangeId) {
     if (fromExchangeId === 'binanceusdm') return FUND_TRANSFER_MIN_AMOUNT_BINANCE;
     if (fromExchangeId === 'kucoinfutures') return FUND_TRANSFER_MIN_AMOUNT_KUCOIN;
@@ -659,7 +676,11 @@ const botServer = http.createServer(async (req, res) => {
                 const fromAccount = (fromExchangeId === 'bitget') ? 'usdt_futures' : 'future';
                 const toAccount = (fromExchangeId === 'kucoinfutures') ? 'main' : 'spot';
                 safeLog('log', `[TRANSFER] Bước 1: Chuyển ${amount} USDT từ ví '${fromAccount}' sang '${toAccount}' trên ${fromExchangeId.toUpperCase()}...`);
-                await sourceExchange.transfer('USDT', amount, fromAccount, toAccount);
+                if (fromExchangeId === 'bitget') {
+                    await bitgetInternalTransfer(sourceExchange, amount, 'usdt_futures', 'spot');
+                } else {
+                    await sourceExchange.transfer('USDT', amount, fromAccount, toAccount);
+                }
                 await sleep(5000);
 
                 safeLog('log', `[TRANSFER] Bước 2: Rút ${amount} USDT từ ${fromExchangeId.toUpperCase()} sang ${toExchangeId.toUpperCase()} qua mạng ${targetDepositInfo.network}...`);
@@ -675,7 +696,11 @@ const botServer = http.createServer(async (req, res) => {
                     const targetFromAccount = pollResult.type;
                     const targetToAccount = (toExchangeId === 'bitget') ? 'usdt_futures' : 'future';
                     safeLog('log', `[TRANSFER] Bước 3: Chuyển ${pollResult.balance.toFixed(4)} USDT từ ví '${targetFromAccount}' sang '${targetToAccount}' trên ${toExchangeId.toUpperCase()}...`);
-                    await targetExchange.transfer('USDT', pollResult.balance, targetFromAccount, targetToAccount);
+                    if (toExchangeId === 'bitget') {
+                        await bitgetInternalTransfer(targetExchange, pollResult.balance, 'spot', 'usdt_futures');
+                    } else {
+                        await targetExchange.transfer('USDT', pollResult.balance, targetFromAccount, targetToAccount);
+                    }
                     safeLog('log', `[TRANSFER] ✅✅✅ Hoàn tất chuyển tiền!`);
                     
                     setTimeout(updateBalances, 5000);
@@ -703,22 +728,23 @@ const botServer = http.createServer(async (req, res) => {
                  return res.writeHead(500, { 'Content-Type': 'application/json' }).end(JSON.stringify({ success: false, message: `Sàn ${exchangeId} chưa được khởi tạo.` }));
             }
             
-            let finalFromAccount = genericFrom;
-            let finalToAccount = genericTo;
-            
-            if (exchangeId === 'bitget') {
-                if (genericFrom === 'future') finalFromAccount = 'usdt_futures';
-                else if (genericFrom === 'spot') finalFromAccount = 'spot';
-                if (genericTo === 'future') finalToAccount = 'usdt_futures';
-                else if (genericTo === 'spot') finalToAccount = 'spot';
-            } else if (exchangeId === 'kucoinfutures') {
-                if (genericFrom === 'spot') finalFromAccount = 'main';
-                if (genericTo === 'spot') finalToAccount = 'main';
-            }
-
             try {
-                safeLog('log', `[INTERNAL_TRANSFER] Yêu cầu chuyển ${amount} USDT từ '${finalFromAccount}' sang '${finalToAccount}' trên ${exchangeId.toUpperCase()}...`);
-                await exchange.transfer('USDT', amount, finalFromAccount, finalToAccount);
+                if (exchangeId === 'bitget') {
+                    const from = (genericFrom === 'future') ? 'usdt_futures' : 'spot';
+                    const to = (genericTo === 'future') ? 'usdt_futures' : 'spot';
+                    safeLog('log', `[INTERNAL_TRANSFER] Yêu cầu chuyển ${amount} USDT từ '${from}' sang '${to}' trên BITGET...`);
+                    await bitgetInternalTransfer(exchange, amount, from, to);
+                } else {
+                    let from = genericFrom;
+                    let to = genericTo;
+                    if (exchangeId === 'kucoinfutures') {
+                        if (from === 'spot') from = 'main';
+                        if (to === 'spot') to = 'main';
+                    }
+                    safeLog('log', `[INTERNAL_TRANSFER] Yêu cầu chuyển ${amount} USDT từ '${from}' sang '${to}' trên ${exchangeId.toUpperCase()}...`);
+                    await exchange.transfer('USDT', amount, from, to);
+                }
+                
                 safeLog('log', `[INTERNAL_TRANSFER] ✅ Chuyển nội bộ thành công.`);
                 setTimeout(updateBalances, 3000);
                 res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ success: true, message: 'Chuyển nội bộ thành công.' }));
