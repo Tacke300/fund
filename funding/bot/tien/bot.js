@@ -656,7 +656,7 @@ const botServer = http.createServer(async (req, res) => {
             }
 
             try {
-                const fromAccount = (fromExchangeId === 'bitget') ? 'usdt_futures' : 'future';
+                const fromAccount = (fromExchangeId === 'bitget') ? 'swap' : 'future';
                 const toAccount = (fromExchangeId === 'kucoinfutures') ? 'main' : 'spot';
                 safeLog('log', `[TRANSFER] Bước 1: Chuyển ${amount} USDT từ ví '${fromAccount}' sang '${toAccount}' trên ${fromExchangeId.toUpperCase()}...`);
                 await sourceExchange.transfer('USDT', amount, fromAccount, toAccount);
@@ -673,7 +673,7 @@ const botServer = http.createServer(async (req, res) => {
 
                 try {
                     const targetFromAccount = pollResult.type;
-                    const targetToAccount = (toExchangeId === 'bitget') ? 'usdt_futures' : 'future';
+                    const targetToAccount = (toExchangeId === 'bitget') ? 'swap' : 'future';
                     safeLog('log', `[TRANSFER] Bước 3: Chuyển ${pollResult.balance.toFixed(4)} USDT từ ví '${targetFromAccount}' sang '${targetToAccount}' trên ${toExchangeId.toUpperCase()}...`);
                     await targetExchange.transfer('USDT', pollResult.balance, targetFromAccount, targetToAccount);
                     safeLog('log', `[TRANSFER] ✅✅✅ Hoàn tất chuyển tiền!`);
@@ -707,8 +707,8 @@ const botServer = http.createServer(async (req, res) => {
             let to = genericTo;
             
             if (exchangeId === 'bitget') {
-                if (from === 'future') from = 'usdt_futures';
-                if (to === 'future') to = 'usdt_futures';
+                if (from === 'future') from = 'swap';
+                if (to === 'future') to = 'swap';
             } else if (exchangeId === 'kucoinfutures') {
                 if (from === 'spot') from = 'main';
                 if (to === 'spot') to = 'main';
