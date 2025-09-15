@@ -88,7 +88,7 @@ async function bitgetInternalTransfer(exchange, amount, from, to) {
         'fromType': typeMap[from],
         'toType': typeMap[to]
     };
-    return await exchange.privateSpotPostWalletTransfer(request);
+    return await exchange.privatePostSpotV1WalletTransfer(request);
 }
 
 function getMinTransferAmount(fromExchangeId) {
@@ -673,13 +673,12 @@ const botServer = http.createServer(async (req, res) => {
             }
 
             try {
-                const fromAccount = (fromExchangeId === 'bitget') ? 'usdt_futures' : 'future';
-                const toAccount = (fromExchangeId === 'kucoinfutures') ? 'main' : 'spot';
-                safeLog('log', `[TRANSFER] Bước 1: Chuyển ${amount} USDT từ ví '${fromAccount}' sang '${toAccount}' trên ${fromExchangeId.toUpperCase()}...`);
+                const fromAccount = (fromExchangeId === 'kucoinfutures') ? 'main' : 'spot';
+                safeLog('log', `[TRANSFER] Bước 1: Chuyển ${amount} USDT từ ví tương lai sang ví chính trên ${fromExchangeId.toUpperCase()}...`);
                 if (fromExchangeId === 'bitget') {
                     await bitgetInternalTransfer(sourceExchange, amount, 'usdt_futures', 'spot');
                 } else {
-                    await sourceExchange.transfer('USDT', amount, fromAccount, toAccount);
+                    await sourceExchange.transfer('USDT', amount, 'future', fromAccount);
                 }
                 await sleep(5000);
 
@@ -694,12 +693,11 @@ const botServer = http.createServer(async (req, res) => {
 
                 try {
                     const targetFromAccount = pollResult.type;
-                    const targetToAccount = (toExchangeId === 'bitget') ? 'usdt_futures' : 'future';
-                    safeLog('log', `[TRANSFER] Bước 3: Chuyển ${pollResult.balance.toFixed(4)} USDT từ ví '${targetFromAccount}' sang '${targetToAccount}' trên ${toExchangeId.toUpperCase()}...`);
+                    safeLog('log', `[TRANSFER] Bước 3: Chuyển ${pollResult.balance.toFixed(4)} USDT từ ví '${targetFromAccount}' sang ví tương lai trên ${toExchangeId.toUpperCase()}...`);
                     if (toExchangeId === 'bitget') {
                         await bitgetInternalTransfer(targetExchange, pollResult.balance, 'spot', 'usdt_futures');
                     } else {
-                        await targetExchange.transfer('USDT', pollResult.balance, targetFromAccount, targetToAccount);
+                        await targetExchange.transfer('USDT', pollResult.balance, targetFromAccount, 'future');
                     }
                     safeLog('log', `[TRANSFER] ✅✅✅ Hoàn tất chuyển tiền!`);
                     
