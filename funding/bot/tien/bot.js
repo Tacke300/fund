@@ -672,9 +672,9 @@ const botServer = http.createServer(async (req, res) => {
                 }
 
                 try {
-                    safeLog('log', `[TRANSFER] Bước 3: Chuyển ${pollResult.balance.toFixed(4)} USDT từ ví '${pollResult.type}' sang 'future' trên ${toExchangeId.toUpperCase()}...`);
                     const targetFromAccount = pollResult.type;
                     const targetToAccount = (toExchangeId === 'bitget') ? 'usdt_futures' : 'future';
+                    safeLog('log', `[TRANSFER] Bước 3: Chuyển ${pollResult.balance.toFixed(4)} USDT từ ví '${targetFromAccount}' sang '${targetToAccount}' trên ${toExchangeId.toUpperCase()}...`);
                     await targetExchange.transfer('USDT', pollResult.balance, targetFromAccount, targetToAccount);
                     safeLog('log', `[TRANSFER] ✅✅✅ Hoàn tất chuyển tiền!`);
                     
@@ -705,14 +705,15 @@ const botServer = http.createServer(async (req, res) => {
             
             let finalFromAccount = genericFrom;
             let finalToAccount = genericTo;
-
+            
             if (exchangeId === 'bitget') {
                 if (genericFrom === 'future') finalFromAccount = 'usdt_futures';
+                else if (genericFrom === 'spot') finalFromAccount = 'spot';
                 if (genericTo === 'future') finalToAccount = 'usdt_futures';
-            }
-             if (exchangeId === 'kucoinfutures') {
+                else if (genericTo === 'spot') finalToAccount = 'spot';
+            } else if (exchangeId === 'kucoinfutures') {
                 if (genericFrom === 'spot') finalFromAccount = 'main';
-                 if (genericTo === 'spot') finalToAccount = 'main';
+                if (genericTo === 'spot') finalToAccount = 'main';
             }
 
             try {
