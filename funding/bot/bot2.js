@@ -248,28 +248,37 @@ async function placeTpSlOrders(exchange, symbol, side, amount, entryPrice, colla
 
         if (exchange.id === 'kucoinfutures') {
             const tpParams = {
-                'reduceOnly': true,
-                'stop': side === 'sell' ? 'down' : 'up',
-                'stopPrice': exchange.priceToPrecision(symbol, tpPrice),
-                'stopPriceType': 'MP',
-                'size': amount,
-                'marginMode': 'cross'
+                'reduceOnly': true, 'stop': side === 'sell' ? 'down' : 'up',
+                'stopPrice': exchange.priceToPrecision(symbol, tpPrice), 'stopPriceType': 'MP',
+                'size': amount, 'marginMode': 'cross'
             };
             tpResult = await exchange.createOrder(symbol, 'market', orderSide, undefined, undefined, tpParams);
             safeLog('log', `[TP/SL] ✅ [KuCoin] Đặt lệnh TP cho ${symbol} thành công. ID: ${tpResult.id}`);
 
             const slParams = {
-                'reduceOnly': true,
-                'stop': side === 'sell' ? 'up' : 'down',
-                'stopPrice': exchange.priceToPrecision(symbol, slPrice),
-                'stopPriceType': 'MP',
-                'size': amount,
-                'marginMode': 'cross'
+                'reduceOnly': true, 'stop': side === 'sell' ? 'up' : 'down',
+                'stopPrice': exchange.priceToPrecision(symbol, slPrice), 'stopPriceType': 'MP',
+                'size': amount, 'marginMode': 'cross'
             };
             slResult = await exchange.createOrder(symbol, 'market', orderSide, undefined, undefined, slParams);
             safeLog('log', `[TP/SL] ✅ [KuCoin] Đặt lệnh SL cho ${symbol} thành công. ID: ${slResult.id}`);
 
-        } else {
+        } else if (exchange.id === 'bitget') {
+            const tpParams = {
+                'reduceOnly': true,
+                'takeProfitPrice': exchange.priceToPrecision(symbol, tpPrice)
+            };
+            tpResult = await exchange.createOrder(symbol, 'market', orderSide, amount, undefined, tpParams);
+            safeLog('log', `[TP/SL] ✅ [Bitget] Đặt lệnh TP cho ${symbol} thành công. ID: ${tpResult.id}`);
+
+            const slParams = {
+                'reduceOnly': true,
+                'stopLossPrice': exchange.priceToPrecision(symbol, slPrice)
+            };
+            slResult = await exchange.createOrder(symbol, 'market', orderSide, amount, undefined, slParams);
+            safeLog('log', `[TP/SL] ✅ [Bitget] Đặt lệnh SL cho ${symbol} thành công. ID: ${slResult.id}`);
+
+        } else { // Logic chuẩn cho Binance, OKX...
             const params = { 'reduceOnly': true };
             tpResult = await exchange.createOrder(symbol, 'TAKE_PROFIT_MARKET', orderSide, amount, undefined, { ...params, 'stopPrice': exchange.priceToPrecision(symbol, tpPrice) });
             safeLog('log', `[TP/SL] ✅ Đặt lệnh TP cho ${symbol} thành công. ID: ${tpResult.id}`);
@@ -343,24 +352,16 @@ async function executeTrades(opportunity, percentageToUse) {
         return false;
     }
     
-    // =================================================================
-    // LOGIC CHỜ 3 GIÂY - ÁP DỤNG CHO TẤT CẢ CÁC SÀN
-    // =================================================================
     safeLog('log', '[TRADE] Đang chờ 3 giây để tất cả sàn cập nhật trạng thái lệnh...');
     await sleep(3000);
 
-    let shortEntryPrice, longEntryPrice;
-
-    // Hàm trợ giúp để lấy giá khớp lệnh một cách đáng tin cậy
     const getReliableFillPrice = async (exchange, symbol, orderId) => {
         try {
-            // Ưu tiên lấy trade liên quan đến orderId để có giá chính xác nhất
             const trades = await exchange.fetchMyTrades(symbol, undefined, 1, { 'orderId': orderId });
             if (trades && trades.length > 0) {
                 safeLog('log', `[PRICE] Lấy giá khớp lệnh từ fetchMyTrades cho ${exchange.id}: ${trades[0].price}`);
                 return trades[0].price;
             }
-            // Nếu không có trade, thử fetchOrder để lấy giá trung bình
             const order = await exchange.fetchOrder(orderId, symbol);
             if (order && order.average) {
                 safeLog('log', `[PRICE] Lấy giá khớp lệnh từ fetchOrder cho ${exchange.id}: ${order.average}`);
@@ -374,9 +375,8 @@ async function executeTrades(opportunity, percentageToUse) {
         }
     };
 
-    shortEntryPrice = await getReliableFillPrice(shortEx, shortOriginalSymbol, shortOrder.id);
-    longEntryPrice = await getReliableFillPrice(longEx, longOriginalSymbol, longOrder.id);
-
+    let shortEntryPrice = await getReliableFillPrice(shortEx, shortOriginalSymbol, shortOrder.id);
+    let longEntryPrice = await getReliableFillPrice(longEx, longOriginalSymbol, longOrder.id);
 
     if (!shortEntryPrice || !longEntryPrice || isNaN(shortEntryPrice) || isNaN(longEntryPrice)) {
         safeLog('error', `[TRADE] ❌ KHÔNG THỂ XÁC ĐỊNH GIÁ VÀO LỆNH SAU KHI CHỜ. Sẽ không đặt TP/SL. Vui lòng kiểm tra thủ công!`);
