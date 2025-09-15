@@ -183,7 +183,7 @@ async function computeOrderDetails(exchange, symbol, targetNotionalUSDT, leverag
 
     const currentNotional = amount * price * contractSize;
     const requiredMargin = currentNotional / leverage;
-
+    
     const minCost = market.limits?.cost?.min ?? 0;
     if (minCost > 0 && currentNotional < minCost) {
         throw new Error(`Giá trị lệnh ${currentNotional.toFixed(4)} < mức tối thiểu ${minCost} USDT.`);
@@ -195,7 +195,7 @@ async function computeOrderDetails(exchange, symbol, targetNotionalUSDT, leverag
         const maxNotional = availableBalance * leverage * safetyBuffer;
         const maxRawAmount = maxNotional / (price * contractSize);
         let newAmount = parseFloat(exchange.amountToPrecision(symbol, maxRawAmount));
-
+        
         if (newAmount <= (market.limits?.amount?.min ?? 0)) {
             throw new Error(`Không đủ ký quỹ. Yêu cầu ${requiredMargin.toFixed(4)}, có sẵn ${availableBalance.toFixed(4)} USDT.`);
         }
@@ -204,7 +204,7 @@ async function computeOrderDetails(exchange, symbol, targetNotionalUSDT, leverag
         safeLog('log', `[ADJUST] Đã điều chỉnh: Số lượng ${amount} -> ${newAmount}, Giá trị ${currentNotional.toFixed(2)} -> ${newNotional.toFixed(2)} USDT.`);
         amount = newAmount;
     }
-
+    
     return {
         amount,
         price,
@@ -220,13 +220,14 @@ async function placeTpSlOrders(exchange, symbol, side, amount, entryPrice, colla
     }
 
     const pnlAmount = collateral * (TP_SL_PNL_PERCENTAGE / 100);
+    // Tính toán PNL trên mỗi đơn vị cơ sở (coin), không phải mỗi contract
     const pnlPerUnit = pnlAmount / (amount * (exchange.market(symbol).contractSize ?? 1));
     
     let tpPrice, slPrice;
     if (side === 'sell') {
         tpPrice = entryPrice - pnlPerUnit;
         slPrice = entryPrice + pnlPerUnit;
-    } else {
+    } else { // side === 'buy'
         tpPrice = entryPrice + pnlPerUnit;
         slPrice = entryPrice - pnlPerUnit;
     }
@@ -239,24 +240,39 @@ async function placeTpSlOrders(exchange, symbol, side, amount, entryPrice, colla
     const orderSide = (side === 'sell') ? 'buy' : 'sell';
     safeLog('log', `[TP/SL] Đang đặt lệnh TP/SL cho ${symbol} trên ${exchange.id}...`);
 
-    let tpResult, slResult;
     try {
+        let tpResult, slResult;
+
         if (exchange.id === 'kucoinfutures') {
-            const tpParams = { 'reduceOnly': true, 'stop': side === 'sell' ? 'down' : 'up', 'stopPrice': exchange.priceToPrecision(symbol, tpPrice), 'stopPriceType': 'MP' };
-            const slParams = { 'reduceOnly': true, 'stop': side === 'sell' ? 'up' : 'down', 'stopPrice': exchange.priceToPrecision(symbol, slPrice), 'stopPriceType': 'MP' };
+            // Logic ĐẶC BIỆT cho KuCoin Futures
+            const tpParams = {
+                'reduceOnly': true,
+                'stop': side === 'sell' ? 'down' : 'up', // TP Short: giá xuống, TP Long: giá lên
+                'stopPrice': exchange.priceToPrecision(symbol, tpPrice),
+                'stopPriceType': 'MP' // Dùng Mark Price để tránh bị quét
+            };
             tpResult = await exchange.createOrder(symbol, 'market', orderSide, amount, undefined, tpParams);
-            safeLog('log', `[TP/SL] ✅ Đặt lệnh TP cho ${symbol} trên KuCoin thành công. ID: ${tpResult.id}`);
+            safeLog('log', `[TP/SL] ✅ [KuCoin] Đặt lệnh TP cho ${symbol} thành công. ID: ${tpResult.id}`);
+
+            const slParams = {
+                'reduceOnly': true,
+                'stop': side === 'sell' ? 'up' : 'down', // SL Short: giá lên, SL Long: giá xuống
+                'stopPrice': exchange.priceToPrecision(symbol, slPrice),
+                'stopPriceType': 'MP'
+            };
             slResult = await exchange.createOrder(symbol, 'market', orderSide, amount, undefined, slParams);
-            safeLog('log', `[TP/SL] ✅ Đặt lệnh SL cho ${symbol} trên KuCoin thành công. ID: ${slResult.id}`);
+            safeLog('log', `[TP/SL] ✅ [KuCoin] Đặt lệnh SL cho ${symbol} thành công. ID: ${slResult.id}`);
+
         } else {
+            // Logic CHUẨN cho các sàn còn lại (Binance, OKX, Bitget...)
             const params = { 'reduceOnly': true };
-            const tpOrderType = (exchange.id === 'okx' || exchange.id === 'bitget') ? 'TAKE_PROFIT_MARKET' : 'TAKE_PROFIT';
-            const slOrderType = (exchange.id === 'okx' || exchange.id === 'bitget') ? 'STOP_MARKET' : 'STOP';
-            tpResult = await exchange.createOrder(symbol, tpOrderType, orderSide, amount, undefined, { ...params, 'stopPrice': exchange.priceToPrecision(symbol, tpPrice) });
+            tpResult = await exchange.createOrder(symbol, 'TAKE_PROFIT_MARKET', orderSide, amount, undefined, { ...params, 'stopPrice': exchange.priceToPrecision(symbol, tpPrice) });
             safeLog('log', `[TP/SL] ✅ Đặt lệnh TP cho ${symbol} thành công. ID: ${tpResult.id}`);
-            slResult = await exchange.createOrder(symbol, slOrderType, orderSide, amount, undefined, { ...params, 'stopPrice': exchange.priceToPrecision(symbol, slPrice) });
+
+            slResult = await exchange.createOrder(symbol, 'STOP_MARKET', orderSide, amount, undefined, { ...params, 'stopPrice': exchange.priceToPrecision(symbol, slPrice) });
             safeLog('log', `[TP/SL] ✅ Đặt lệnh SL cho ${symbol} thành công. ID: ${slResult.id}`);
         }
+
         return { tpOrderId: tpResult.id, slOrderId: slResult.id };
     } catch (e) {
         safeLog('error', `[TP/SL] ❌ Lỗi khi đặt lệnh TP/SL cho ${symbol} trên ${exchange.id}:`, e);
@@ -322,7 +338,7 @@ async function executeTrades(opportunity, percentageToUse) {
         return false;
     }
 
-    await sleep(2000);
+    await sleep(2000); // Thêm độ trễ nhỏ để đảm bảo lệnh đã được khớp và có thể lấy giá khớp lệnh
 
     const shortEntryPrice = shortOrder.average || (await shortEx.fetchMyTrades(shortOriginalSymbol, undefined, 1))[0]?.price || (await shortEx.fetchTicker(shortOriginalSymbol)).last;
     const longEntryPrice = longOrder.average || (await longEx.fetchMyTrades(longOriginalSymbol, undefined, 1))[0]?.price || (await longEx.fetchTicker(longOriginalSymbol)).last;
@@ -356,11 +372,31 @@ async function cancelPendingOrders(tradeDetails) {
     for (const order of ordersToCancel) {
         if (order.id) {
             try {
-                const params = exchange.id === 'kucoinfutures' ? { 'stop': true } : {};
-                await order.ex.cancelOrder(order.id, order.symbol, params);
+                // KuCoin yêu cầu cancel stop order theo cách khác
+                if (order.ex.id === 'kucoinfutures') {
+                    await order.ex.cancelOrder(order.id, order.symbol, { 'stop': true });
+                } else {
+                    await order.ex.cancelOrder(order.id, order.symbol);
+                }
                 safeLog('log', `[CLEANUP] ✅ Hủy lệnh ${order.id} thành công.`);
             } catch (e) {
-                safeLog('warn', `[CLEANUP] ⚠️ Không thể hủy lệnh ${order.id} (có thể đã được khớp): ${e.message}`);
+                // Thử cancelAllOrders nếu cancel đơn lẻ thất bại, đặc biệt hữu ích với KuCoin
+                if (e.message.includes('order not found')) {
+                     safeLog('warn', `[CLEANUP] ⚠️ Lệnh ${order.id} không tìm thấy (có thể đã khớp hoặc bị hủy).`);
+                } else {
+                    try {
+                        safeLog('log', `[CLEANUP] Thử hủy tất cả lệnh stop cho ${order.symbol} trên ${order.ex.id}...`);
+                        if (order.ex.id === 'kucoinfutures') {
+                            await order.ex.cancelAllOrders(order.symbol, { 'stop': true });
+                        } else {
+                            await order.ex.cancelAllOrders(order.symbol);
+                        }
+                        safeLog('log', `[CLEANUP] ✅ Hủy tất cả lệnh chờ cho ${order.symbol} thành công.`);
+                        break; 
+                    } catch (e2) {
+                        safeLog('warn', `[CLEANUP] ⚠️ Không thể hủy lệnh ${order.id} hoặc các lệnh chờ khác: ${e2.message}`);
+                    }
+                }
             }
         }
     }
@@ -373,26 +409,33 @@ async function closeTradeNow() {
     }
     const tradeToClose = { ...currentTradeDetails };
     safeLog('log', `[API] Nhận yêu cầu đóng lệnh cho ${tradeToClose.coin}...`);
+    
     await cancelPendingOrders(tradeToClose);
-    await sleep(1000);
+    await sleep(1000); 
+
     try {
         const shortEx = exchanges[tradeToClose.shortExchange];
         const longEx = exchanges[tradeToClose.longExchange];
-        const shortParams = {};
+        
+        const shortParams = { 'reduceOnly': true }; 
         if (shortEx.id === 'kucoinfutures') shortParams['marginMode'] = 'cross';
-        const longParams = {};
+        
+        const longParams = { 'reduceOnly': true };
         if (longEx.id === 'kucoinfutures') longParams['marginMode'] = 'cross';
-        await shortEx.createMarketBuyOrder(tradeToClose.shortOriginalSymbol, tradeToClose.shortOrderAmount, { ...shortParams, reduceOnly: true });
-        await longEx.createMarketSellOrder(tradeToClose.longOriginalSymbol, tradeToClose.longOrderAmount, { ...longParams, reduceOnly: true });
+
+        await shortEx.createMarketBuyOrder(tradeToClose.shortOriginalSymbol, tradeToClose.shortOrderAmount, shortParams);
+        await longEx.createMarketSellOrder(tradeToClose.longOriginalSymbol, tradeToClose.longOrderAmount, longParams);
+        
         currentTradeDetails.status = 'PENDING_PNL_CALC';
         currentTradeDetails.closeTime = Date.now();
         tradeAwaitingPnl = { ...currentTradeDetails };
+        
         safeLog('log', `[PNL] ✅ Đã gửi lệnh đóng cho ${tradeToClose.coin}. Chờ tính PNL...`);
         currentTradeDetails = null;
         return true;
     } catch (e) {
         safeLog('error', `[PNL] ❌ Lỗi khi đóng vị thế cho ${tradeToClose.coin}:`, e);
-        currentTradeDetails = null;
+        // Không nên xóa currentTradeDetails ở đây, để có thể thử lại
         return false;
     }
 }
@@ -427,7 +470,7 @@ async function mainBotLoop() {
             await processServerData(serverData);
             const now = new Date();
             const currentMinute = now.getUTCMinutes();
-            if (currentMinute >= 55 || currentMinute < 5) { // Mở rộng cửa sổ thời gian
+            if (currentMinute >= 55) {
                 for (const opportunity of allCurrentOpportunities) {
                     const minutesToFunding = (opportunity.nextFundingTime - Date.now()) / 60000;
                     if (minutesToFunding > 0 && minutesToFunding < MIN_MINUTES_FOR_EXECUTION) {
@@ -511,7 +554,7 @@ const botServer = http.createServer(async (req, res) => {
                 const testOpportunity = {
                     coin: bestPotentialOpportunityForDisplay.coin,
                     commonLeverage: parseInt(leverage, 10) || 20,
-                    details: { shortExchange: normalizeExchangeId(shortExchange), longExchange: normalizeExchangeId(longExchange) }
+                    details: { shortExchange, longExchange }
                 };
                 const tradeSuccess = await executeTrades(testOpportunity, parseFloat(percentage));
                 if (tradeSuccess) {
