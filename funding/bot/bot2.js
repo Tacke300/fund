@@ -213,6 +213,9 @@ async function computeOrderDetails(exchange, symbol, targetNotionalUSDT, leverag
     };
 }
 
+// =================================================================
+// HÀM ĐƯỢC SỬA LẠI LẦN CUỐI
+// =================================================================
 async function placeTpSlOrders(exchange, symbol, side, amount, entryPrice, collateral, notionalValue) {
     if (!entryPrice || isNaN(entryPrice) || entryPrice <= 0) {
         safeLog('error', `[TP/SL] ❌ Giá vào lệnh không hợp lệ (${entryPrice}), bỏ qua đặt TP/SL cho ${symbol}`);
@@ -264,12 +267,13 @@ async function placeTpSlOrders(exchange, symbol, side, amount, entryPrice, colla
             safeLog('log', `[TP/SL] ✅ [KuCoin] Đặt lệnh SL cho ${symbol} thành công. ID: ${slResult.id}`);
 
         } else if (exchange.id === 'bitget') {
+            // 'side' là hướng của position gốc: 'buy' là Long, 'sell' là Short.
             const holdSide = side === 'buy' ? 'long' : 'short';
 
             const tpParams = {
                 'reduceOnly': true,
                 'takeProfitPrice': exchange.priceToPrecision(symbol, tpPrice),
-                'holdSide': holdSide
+                'holdSide': holdSide 
             };
             tpResult = await exchange.createOrder(symbol, 'market', orderSide, amount, undefined, tpParams);
             safeLog('log', `[TP/SL] ✅ [Bitget] Đặt lệnh TP cho ${symbol} thành công. ID: ${tpResult.id}`);
