@@ -31,7 +31,7 @@ const MIN_MINUTES_FOR_EXECUTION = 15;
 const DATA_FETCH_INTERVAL_SECONDS = 5;
 const MAX_CONSECUTIVE_FAILS = 3;
 const MIN_COLLATERAL_FOR_TRADE = 0.1;
-const TP_SL_PNL_PERCENTAGE = 1.5;
+const TP_SL_PNL_PERCENTAGE = 150;
 
 const ALL_POSSIBLE_EXCHANGE_IDS = ['binanceusdm', 'bitget', 'okx', 'kucoinfutures'];
 const DISABLED_EXCHANGES = [];
