@@ -247,13 +247,17 @@ async function placeTpSlOrders(exchange, symbol, side, amount, entryPrice, colla
         let tpResult, slResult;
 
         if (exchange.id === 'kucoinfutures') {
+            // =================================================================
+            // SỬA LỖI THEO PHÂN TÍCH CỦA BẠN
+            // =================================================================
             const tpParams = {
                 'reduceOnly': true,
                 'stop': side === 'sell' ? 'down' : 'up',
                 'stopPrice': exchange.priceToPrecision(symbol, tpPrice),
                 'stopPriceType': 'MP',
-                'size': amount
+                'size': amount // ✅ FIX: Truyền số lượng hợp đồng vào 'size' trong params
             };
+            // Lệnh createOrder với amount và price là 'undefined' vì đã có đủ thông tin trong params
             tpResult = await exchange.createOrder(symbol, 'market', orderSide, undefined, undefined, tpParams);
             safeLog('log', `[TP/SL] ✅ [KuCoin] Đặt lệnh TP cho ${symbol} thành công. ID: ${tpResult.id}`);
 
@@ -262,12 +266,13 @@ async function placeTpSlOrders(exchange, symbol, side, amount, entryPrice, colla
                 'stop': side === 'sell' ? 'up' : 'down',
                 'stopPrice': exchange.priceToPrecision(symbol, slPrice),
                 'stopPriceType': 'MP',
-                'size': amount
+                'size': amount // ✅ FIX: Truyền số lượng hợp đồng vào 'size' trong params
             };
             slResult = await exchange.createOrder(symbol, 'market', orderSide, undefined, undefined, slParams);
             safeLog('log', `[TP/SL] ✅ [KuCoin] Đặt lệnh SL cho ${symbol} thành công. ID: ${slResult.id}`);
 
         } else {
+            // Logic chuẩn cho các sàn khác vẫn giữ nguyên
             const params = { 'reduceOnly': true };
             tpResult = await exchange.createOrder(symbol, 'TAKE_PROFIT_MARKET', orderSide, amount, undefined, { ...params, 'stopPrice': exchange.priceToPrecision(symbol, tpPrice) });
             safeLog('log', `[TP/SL] ✅ Đặt lệnh TP cho ${symbol} thành công. ID: ${tpResult.id}`);
@@ -373,12 +378,12 @@ async function executeTrades(opportunity, percentageToUse) {
         return false;
     }
     
-    const shortTpSlIds = await placeTpSlOrders(shortEx, shortOriginalSymbol, 'sell', shortOrder.amount, shortEntryPrice, collateral, shortOrderDetails.notional);
-    const longTpSlIds = await placeTpSlOrders(longEx, longOriginalSymbol, 'buy', longOrder.amount, longEntryPrice, collateral, longOrderDetails.notional);
+    const shortTpSlIds = await placeTpSlOrders(shortEx, shortOriginalSymbol, 'sell', shortOrderDetails.amount, shortEntryPrice, collateral, shortOrderDetails.notional);
+    const longTpSlIds = await placeTpSlOrders(longEx, longOriginalSymbol, 'buy', longOrderDetails.amount, longEntryPrice, collateral, longOrderDetails.notional);
 
     currentTradeDetails = {
         ...opportunity.details, coin, status: 'OPEN', openTime: Date.now(),
-        shortOrderAmount: shortOrder.amount, longOrderAmount: longOrder.amount,
+        shortOrderAmount: shortOrderDetails.amount, longOrderAmount: longOrderDetails.amount,
         commonLeverageUsed: leverageToUse, shortOriginalSymbol, longOriginalSymbol,
         shortBalanceBefore: shortBalance, longBalanceBefore: longBalance,
         shortTpOrderId: shortTpSlIds.tpOrderId, shortSlOrderId: shortTpSlIds.slOrderId,
