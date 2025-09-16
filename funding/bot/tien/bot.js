@@ -3,7 +3,6 @@ const fs = require('fs');
 const path = require('path');
 const ccxt = require('ccxt');
 
-// --- CẤU HÌNH CHÍNH ---
 const { usdtDepositAddressesByNetwork } = require('./balance.js');
 const {
     binanceApiKey, binanceApiSecret,
@@ -12,11 +11,10 @@ const {
     kucoinApiKey, kucoinApiSecret, kucoinApiPassword
 } = require('./config.js');
 
-const BOT_PORT = 5006; // Thay đổi port nếu cần
+const BOT_PORT = 5006;
 const SERVER_DATA_URL = 'http://localhost:5005/api/data';
 const HUB_EXCHANGE_ID = 'binanceusdm';
 
-// --- CẤU HÌNH GIAO DỊCH ---
 const MIN_PNL_PERCENTAGE = 1;
 const MIN_MINUTES_FOR_EXECUTION = 15;
 const DATA_FETCH_INTERVAL_SECONDS = 1;
@@ -24,7 +22,6 @@ const MAX_CONSECUTIVE_FAILS = 3;
 const MIN_COLLATERAL_FOR_TRADE = 0.1;
 const TP_SL_PNL_PERCENTAGE = 150;
 
-// --- CẤU HÌNH CHUYỂN TIỀN (ĐÃ SỬA) ---
 const FUND_TRANSFER_MIN_AMOUNT_BINANCE = 10;
 const FUND_TRANSFER_MIN_AMOUNT_KUCOIN = 1;
 const FUND_TRANSFER_MIN_AMOUNT_BITGET = 10;
@@ -39,6 +36,7 @@ let botLoopIntervalId = null;
 let balances = {};
 let tradeHistory = [];
 let bestPotentialOpportunityForDisplay = null;
+let allCurrentOpportunities = [];
 let currentTradeDetails = null;
 let tradeAwaitingPnl = null;
 let currentPercentageToUse = 50;
@@ -119,22 +117,24 @@ async function fetchAllBalances(type = 'future') {
 }
 const updateBalances = () => fetchAllBalances('future');
 
-async function pollForBalanceArrival(exchangeId, amountToReceive, maxPollAttempts = 90, pollIntervalMs = 10000) {
+async function pollForBalanceArrival(exchangeId, amountToReceive, maxPollAttempts = 90, pollIntervalMs = 25000) {
     const exchange = exchanges[exchangeId];
     const targetWalletType = (exchangeId === 'kucoinfutures') ? 'main' : 'spot';
-    
+    const params = { 'type': targetWalletType };
+
     try {
-        const initialBalanceData = await exchange.fetchBalance();
-        const initialBalance = initialBalanceData[targetWalletType]?.free?.USDT || 0;
-        safeLog('log', `[POLL] Bắt đầu theo dõi ví '${targetWalletType}'. Số dư ban đầu: ${initialBalance.toFixed(4)} USDT trên ${exchangeId.toUpperCase()}.`);
+        const initialBalanceData = await exchange.fetchBalance(params);
+        const initialBalance = initialBalanceData?.free?.USDT || 0;
+        safeLog('log', `[POLL] Bắt đầu theo dõi ví '${targetWalletType}'. Số dư ban đầu: ${initialBalance.toFixed(4)} USDT trên ${exchangeId.toUpperCase()}. Sẽ kiểm tra mỗi ${pollIntervalMs / 1000} giây.`);
 
         for (let i = 0; i < maxPollAttempts; i++) {
             await sleep(pollIntervalMs);
             try {
-                const currentBalanceData = await exchange.fetchBalance();
-                const currentBalance = currentBalanceData[targetWalletType]?.free?.USDT || 0;
+                const currentBalanceData = await exchange.fetchBalance(params);
+                const currentBalance = currentBalanceData?.free?.USDT || 0;
+                safeLog('log', `[POLL] Lần ${i+1}/${maxPollAttempts}: Số dư '${targetWalletType}' hiện tại trên ${exchangeId.toUpperCase()} là ${currentBalance.toFixed(4)} USDT.`);
                 
-                if (currentBalance > initialBalance && currentBalance >= initialBalance + (amountToReceive - 2)) {
+                if (currentBalance >= initialBalance + (amountToReceive * 0.99)) {
                     safeLog('info', `[POLL] ✅ TIỀN ĐÃ VỀ! Số dư mới trên ${exchangeId.toUpperCase()}: ${currentBalance.toFixed(4)} USDT.`);
                     return { success: true, receivedAmount: currentBalance - initialBalance };
                 }
@@ -145,7 +145,7 @@ async function pollForBalanceArrival(exchangeId, amountToReceive, maxPollAttempt
         safeLog('error', `[POLL] ❌ HẾT THỜI GIAN! Không nhận được ${amountToReceive} USDT trên ${exchangeId.toUpperCase()} sau khi chờ.`);
         return { success: false };
     } catch (e) {
-        safeLog('error', `[POLL] Lỗi nghiêm trọng khi lấy số dư ban đầu của ${exchangeId.toUpperCase()}: ${e.message}`);
+        safeLog('error', `[POLL] Lỗi nghiêm trọng khi lấy số dư ban đầu của ${exchangeId.toUpperCase()} từ ví '${targetWalletType}': ${e.message}`);
         return { success: false };
     }
 }
@@ -169,7 +169,10 @@ async function executeSingleFundTransfer(fromExchangeId, toExchangeId, amount) {
         if(!targetDepositInfo) throw new Error("Không tìm thấy thông tin địa chỉ nạp tiền.");
         
         transferStatus.message = `2/4: Gửi lệnh rút ${amount.toFixed(2)} USDT đến ${toExchangeId}...`;
-        const params = { network: targetDepositInfo.network, chain: targetDepositInfo.network };
+        const params = { network: targetDepositInfo.network };
+        if (fromExchangeId !== 'binanceusdm') {
+             params.chain = targetDepositInfo.network;
+        }
         await sourceExchange.withdraw('USDT', amount, targetDepositInfo.address, undefined, params);
         
         transferStatus.message = `3/4: Đang chờ blockchain xác nhận và tiền về ${toExchangeId}...`;
@@ -289,7 +292,8 @@ const normalizeExchangeId = (id) => {
 async function processServerData(serverData) {
     if (!serverData || !serverData.arbitrageData) {
         bestPotentialOpportunityForDisplay = null;
-        return null;
+        allCurrentOpportunities = [];
+        return;
     }
     const opportunities = serverData.arbitrageData.filter(op => {
         if (!op?.exchanges || typeof op.exchanges !== 'string' || op.estimatedPnl < MIN_PNL_PERCENTAGE) return false;
@@ -303,17 +307,11 @@ async function processServerData(serverData) {
         op.details = { shortExchange: normalizeExchangeId(shortExRaw), longExchange: normalizeExchangeId(longExRaw) };
         return op;
     });
-    const sortedOpportunities = opportunities.sort((a, b) => b.estimatedPnl - a.estimatedPnl);
-    bestPotentialOpportunityForDisplay = sortedOpportunities.length > 0 ? sortedOpportunities[0] : null;
     
-    if (bestPotentialOpportunityForDisplay) {
-        const minutesToFunding = (bestPotentialOpportunityForDisplay.nextFundingTime - Date.now()) / 60000;
-        if (minutesToFunding > 0 && minutesToFunding < MIN_MINUTES_FOR_EXECUTION) {
-             return bestPotentialOpportunityForDisplay;
-        }
-    }
-    return null;
+    allCurrentOpportunities = opportunities.sort((a, b) => b.estimatedPnl - a.estimatedPnl);
+    bestPotentialOpportunityForDisplay = allCurrentOpportunities.length > 0 ? allCurrentOpportunities[0] : null;
 }
+
 async function getExchangeSpecificSymbol(exchange, rawCoinSymbol) {
     try {
         if (!exchange.markets || Object.keys(exchange.markets).length === 0) await exchange.loadMarkets(true);
@@ -326,6 +324,7 @@ async function getExchangeSpecificSymbol(exchange, rawCoinSymbol) {
     }
     return null;
 }
+
 async function setLeverageSafely(exchange, symbol, desiredLeverage) {
     const params = (exchange.id === 'kucoinfutures') ? { 'marginMode': 'cross' } : {};
     try {
@@ -336,6 +335,7 @@ async function setLeverageSafely(exchange, symbol, desiredLeverage) {
         return null;
     }
 }
+
 async function computeOrderDetails(exchange, symbol, targetNotionalUSDT, leverage, availableBalance) {
     await exchange.loadMarkets();
     const market = exchange.market(symbol);
@@ -366,6 +366,7 @@ async function computeOrderDetails(exchange, symbol, targetNotionalUSDT, leverag
     }
     return { amount, price, notional: currentNotional, requiredMargin: currentNotional / leverage };
 }
+
 async function placeTpSlOrders(exchange, symbol, side, amount, entryPrice, collateral, notionalValue) {
     if (!entryPrice || typeof entryPrice !== 'number' || entryPrice <= 0) return { tpOrderId: null, slOrderId: null };
     if (!notionalValue || notionalValue <= 0) return { tpOrderId: null, slOrderId: null };
@@ -405,6 +406,7 @@ async function placeTpSlOrders(exchange, symbol, side, amount, entryPrice, colla
         return { tpOrderId: null, slOrderId: null };
     }
 }
+
 async function executeTrades(opportunity, percentageToUse) {
     const { coin, commonLeverage: desiredLeverage } = opportunity;
     const { shortExchange, longExchange } = opportunity.details;
@@ -500,6 +502,7 @@ async function executeTrades(opportunity, percentageToUse) {
     capitalManagementState = 'TRADE_OPEN';
     return true;
 }
+
 async function cancelPendingOrders(tradeDetails) {
     if (!tradeDetails) return;
     const ordersToCancel = [
@@ -520,6 +523,7 @@ async function cancelPendingOrders(tradeDetails) {
         }
     }));
 }
+
 async function closeTradeNow() {
     if (!currentTradeDetails) return false;
     const tradeToClose = { ...currentTradeDetails };
@@ -548,6 +552,7 @@ async function closeTradeNow() {
         return false;
     }
 }
+
 async function calculatePnlAfterDelay(closedTrade) {
     await sleep(5000);
     await updateBalances();
@@ -572,17 +577,22 @@ async function mainBotLoop() {
         const currentMinute = now.getUTCMinutes();
         const currentSecond = now.getUTCSeconds();
 
-        if (capitalManagementState === 'IDLE' && currentMinute === 50) {
-            safeLog('log', "[TIMER] Phút 50: Bắt đầu tìm kiếm cơ hội...");
+        if (capitalManagementState === 'IDLE' && currentMinute >= 50 && currentMinute < 59) {
+            safeLog('log', "[TIMER] Bắt đầu tìm kiếm cơ hội trong khung giờ vàng...");
             const serverData = await fetchDataFromServer();
-            const opportunity = await processServerData(serverData);
+            await processServerData(serverData);
             
-            if (opportunity) {
-                selectedOpportunityForNextTrade = opportunity;
-                safeLog('info', `[TIMER] Đã chọn cơ hội: ${selectedOpportunityForNextTrade.coin} trên ${selectedOpportunityForNextTrade.exchanges}.`);
+            const opportunityToExecute = allCurrentOpportunities.find(op => {
+                const minutesToFunding = (op.nextFundingTime - Date.now()) / 60000;
+                return minutesToFunding > 0 && minutesToFunding < MIN_MINUTES_FOR_EXECUTION;
+            });
+
+            if (opportunityToExecute) {
+                selectedOpportunityForNextTrade = opportunityToExecute;
+                safeLog('info', `[TIMER] Đã chọn cơ hội tốt nhất: ${selectedOpportunityForNextTrade.coin} trên ${selectedOpportunityForNextTrade.exchanges}. Bắt đầu gom vốn.`);
                 await manageFundDistribution(selectedOpportunityForNextTrade);
             } else {
-                safeLog('log', "[TIMER] Không tìm thấy cơ hội hợp lệ tại phút 50.");
+                safeLog('log', "[TIMER] Không tìm thấy cơ hội nào đủ điều kiện.");
             }
         }
         else if (capitalManagementState === 'FUNDS_READY' && currentMinute === 59) {
@@ -593,23 +603,23 @@ async function mainBotLoop() {
                 await returnFundsToHub();
             }
         }
-        else if (capitalManagementState === 'TRADE_OPEN' && currentMinute === 0 && currentSecond >= 5 && currentSecond < 10) {
+        else if (capitalManagementState === 'TRADE_OPEN' && currentMinute === 0 && currentSecond >= 5 && currentSecond < 15) {
             if (currentTradeDetails) {
                  safeLog('log', `[TIMER] Đầu giờ mới: Đóng vị thế cho ${currentTradeDetails.coin}.`);
                  await closeTradeNow();
             }
         }
-        else if (capitalManagementState === 'TRADE_OPEN' && currentMinute === 2 && !currentTradeDetails && !tradeAwaitingPnl) {
+        else if (capitalManagementState === 'TRADE_OPEN' && !currentTradeDetails && !tradeAwaitingPnl) {
             await returnFundsToHub();
         }
         else if (currentMinute > 5 && capitalManagementState !== 'IDLE' && capitalManagementState !== 'TRADE_OPEN') {
-            safeLog('warn', `[RESET] Trạng thái ${capitalManagementState} bị kẹt, đang reset về IDLE.`);
+            safeLog('warn', `[RESET] Trạng thái ${capitalManagementState} bị kẹt, đang reset về IDLE và dọn dẹp vốn.`);
             await returnFundsToHub();
         }
 
     } catch (e) {
         safeLog('error', '[LOOP] Lỗi nghiêm trọng trong vòng lặp chính:', e);
-        capitalManagementState = 'IDLE';
+        await returnFundsToHub();
     }
 
     if (botState === 'RUNNING') {
@@ -661,7 +671,7 @@ const botServer = http.createServer(async (req, res) => {
                 botState, capitalManagementState, balances, tradeHistory, 
                 bestPotentialOpportunityForDisplay, currentTradeDetails, 
                 exchangeHealth, transferStatus, transferExchanges, internalTransferExchanges,
-                activeExchangeIds // Thêm cái này để HTML biết các sàn đang hoạt động
+                activeExchangeIds
             }));
         } else if (url === '/bot-api/start' && method === 'POST') {
              try { currentPercentageToUse = parseFloat(JSON.parse(body).percentageToUse) || 50; } catch { currentPercentageToUse = 50; }
