@@ -43,10 +43,8 @@
     <div class="grid">
         <div class="card">
             <h3>Trạng thái Bot</h3>
-            <!-- START: MODIFIED_CODE_BLOCK_1 -->
             <p><strong>Trạng thái chung:</strong> <span id="botStateDisplay">Đang tải...</span></p>
             <p><strong>Hành động hiện tại:</strong> <span id="capitalStateDisplay">...</span></p>
-            <!-- END: MODIFIED_CODE_BLOCK_1 -->
         </div>
         <div class="card">
             <h3>Số dư Futures</h3>
@@ -63,6 +61,18 @@
     </div>
     
     <div class="grid">
+         <div class="card">
+            <h2>Test Lệnh Nhanh</h2>
+            <p style="color: #80cbc4;">Dùng cơ hội tốt nhất hiện tại để vào lệnh thủ công với các thông số tùy chỉnh.</p>
+            <div class="manual-controls" id="test-trade-form">
+                <label>Short trên:</label> <select id="testShortExchange"></select>
+                <label>Long trên:</label> <select id="testLongExchange"></select>
+                <label>Đòn bẩy:</label> <input type="number" id="testLeverage" value="20" min="1">
+                <label>% Vốn:</label> <input type="number" id="testPercentage" value="10" min="1" max="100">
+                <button id="testTradeBtn">Gửi Lệnh Test</button>
+            </div>
+            <div id="testStatusDisplay" class="status-display"></div>
+        </div>
         <div class="card">
             <h2>Chuyển tiền Ngoại sàn</h2>
             <p style="color: #f48fb1;"><strong>CẢNH BÁO:</strong> Rủi ro cao. Sai địa chỉ/mạng có thể MẤT TIỀN. API Key phải có quyền Rút tiền.</p>
@@ -76,8 +86,7 @@
         </div>
         
         <div class="card">
-            <h2>Chuyển tiền Nội bộ (Giữa các ví)</h2>
-            <p style="color: #80cbc4;">Sử dụng khi tiền bị kẹt ở ví Spot/Main sau khi chuyển ngoại sàn thất bại.</p>
+            <h2>Chuyển tiền Nội bộ</h2>
             <div class="manual-controls">
                 <label>Sàn:</label> <select id="internalExchangeSelect"></select>
                 <label>Từ ví:</label>
@@ -116,50 +125,51 @@
 </div>
 
 <script>
+    // Khai báo các element
+    const startBotBtn = document.getElementById('startBotBtn');
+    const stopBotBtn = document.getElementById('stopBotBtn');
+    const testTradeBtn = document.getElementById('testTradeBtn');
+    const testShortExchange = document.getElementById('testShortExchange');
+    const testLongExchange = document.getElementById('testLongExchange');
     const fromSelect = document.getElementById('fromExchangeSelect');
     const toSelect = document.getElementById('toExchangeSelect');
     const internalExchangeSelect = document.getElementById('internalExchangeSelect');
     const manualTransferBtn = document.getElementById('manualTransferBtn');
     const internalTransferBtn = document.getElementById('internalTransferBtn');
-
-    // Mảng chứa các sàn có thể chuyển tiền qua lại
-    const TRANSFERABLE_EXCHANGES = ['binanceusdm', 'bitget', 'kucoinfutures'];
+    
+    let activeExchangesInitialized = false;
 
     async function updateBotStatus() {
         try {
             const response = await fetch('/bot-api/status');
             const data = await response.json();
 
-            // --- Cập nhật Trạng thái Bot ---
+            // Cập nhật Trạng thái Bot
             const botStateEl = document.getElementById('botStateDisplay');
             botStateEl.textContent = data.botState;
             botStateEl.className = data.botState === 'RUNNING' ? 'text-green' : 'text-red';
+            startBotBtn.disabled = data.botState === 'RUNNING';
+            stopBotBtn.disabled = data.botState !== 'RUNNING';
             
-            // START: MODIFIED_CODE_BLOCK_2
             const capitalStateEl = document.getElementById('capitalStateDisplay');
             capitalStateEl.textContent = data.capitalManagementState || 'N/A';
             switch(data.capitalManagementState) {
-                case 'PREPARING_FUNDS':
-                case 'CLEANING_UP':
-                    capitalStateEl.className = 'text-yellow';
-                    break;
+                case 'PREPARING_FUNDS': case 'CLEANING_UP':
+                    capitalStateEl.className = 'text-yellow'; break;
                 case 'TRADE_OPEN':
-                    capitalStateEl.className = 'text-green';
-                    break;
+                    capitalStateEl.className = 'text-green'; break;
                 case 'FUNDS_READY':
-                    capitalStateEl.className = 'text-blue';
-                    break;
-                default: // IDLE
+                    capitalStateEl.className = 'text-blue'; break;
+                default:
                     capitalStateEl.className = '';
             }
 
-            // Vô hiệu hóa nút chuyển tiền thủ công khi bot đang tự động quản lý vốn
             const isBotBusy = data.botState === 'RUNNING' && data.capitalManagementState !== 'IDLE';
             manualTransferBtn.disabled = isBotBusy;
             internalTransferBtn.disabled = isBotBusy;
-            // END: MODIFIED_CODE_BLOCK_2
+            testTradeBtn.disabled = isBotBusy;
 
-            // --- Cập nhật Số dư ---
+            // Cập nhật Số dư
             let balancesHtml = '';
             for (const id in data.balances) {
                 const health = data.exchangeHealth[id];
@@ -168,31 +178,16 @@
             }
             document.getElementById('balancesDisplay').innerHTML = balancesHtml;
 
-            // --- Cập nhật Cơ hội Tốt nhất ---
+            // Cập nhật Cơ hội
             const oppEl = document.getElementById('bestOpportunityDisplay');
             if (data.bestPotentialOpportunityForDisplay) {
                 const opp = data.bestPotentialOpportunityForDisplay;
-                let estimatedAmountHtml = '---';
-                if (data.balances && opp.details) {
-                     const { shortExchange, longExchange } = opp.details;
-                     const shortBalance = data.balances[shortExchange]?.available || 0;
-                     const longBalance = data.balances[longExchange]?.available || 0;
-                     const minBalance = Math.min(shortBalance, longBalance);
-                     const percentage = parseFloat(document.getElementById('percentageToUse').value) || 50;
-                     estimatedAmountHtml = (minBalance * (percentage / 100)).toFixed(4);
-                }
-
-                oppEl.innerHTML = `
-                    <p><strong>Coin:</strong> ${opp.coin}</p>
-                    <p><strong>Sàn:</strong> ${opp.exchanges}</p>
-                    <p><strong>PNL ước tính:</strong> ${opp.estimatedPnl.toFixed(3)}%</p>
-                    <p><strong>Số tiền mở lệnh ước tính:</strong> <span class="text-yellow">${estimatedAmountHtml}</span> USDT</p>
-                `;
+                oppEl.innerHTML = `<p><strong>Coin:</strong> ${opp.coin}</p><p><strong>Sàn:</strong> ${opp.exchanges}</p><p><strong>PNL ước tính:</strong> ${opp.estimatedPnl.toFixed(3)}%</p>`;
             } else {
                 oppEl.innerHTML = '<p>Không có cơ hội nào khả dụng.</p>';
             }
 
-            // --- Cập nhật Giao dịch Hiện tại ---
+            // Cập nhật Giao dịch Hiện tại
             const tradeEl = document.getElementById('currentTradeDisplay');
             if (data.currentTradeDetails) {
                 const trade = data.currentTradeDetails;
@@ -201,7 +196,7 @@
                 tradeEl.innerHTML = '<p>Không có giao dịch nào đang mở.</p>';
             }
 
-            // --- Cập nhật Lịch sử Giao dịch ---
+            // Cập nhật Lịch sử
             const historyBody = document.getElementById('tradeHistoryBody');
             historyBody.innerHTML = '';
             data.tradeHistory.forEach(trade => {
@@ -216,96 +211,114 @@
                 pnlCell.className = trade.actualPnl >= 0 ? 'text-green' : 'text-red';
             });
             
-            // --- Khởi tạo Dropdowns (chỉ chạy 1 lần) ---
-            if (fromSelect.options.length === 0) {
-                 populateExternalDropdowns(TRANSFERABLE_EXCHANGES);
+            // Khởi tạo các dropdown nếu chưa có
+            if (!activeExchangesInitialized && data.activeExchangeIds) {
+                populateDropdowns(data.activeExchangeIds, [testShortExchange, testLongExchange, internalExchangeSelect]);
+                populateDropdowns(data.transferExchanges || [], [fromSelect, toSelect]);
+                activeExchangesInitialized = true;
             }
-            if (internalExchangeSelect.options.length === 0 && data.balances) {
-                 populateInternalDropdowns(Object.keys(data.balances));
-            }
-
         } catch (error) {
             console.error('Lỗi cập nhật trạng thái:', error);
             document.getElementById('botStateDisplay').textContent = 'LỖI KẾT NỐI';
         }
     }
-
-    function populateExternalDropdowns(exchanges) {
-        exchanges.forEach(id => {
-            fromSelect.add(new Option(id.toUpperCase(), id));
-            toSelect.add(new Option(id.toUpperCase(), id));
-        });
-        if (exchanges.includes('binanceusdm')) fromSelect.value = 'binanceusdm';
-        if (exchanges.includes('kucoinfutures')) toSelect.value = 'kucoinfutures';
-    }
-
-    function populateInternalDropdowns(exchanges) {
-        exchanges.forEach(id => {
-            internalExchangeSelect.add(new Option(id.toUpperCase(), id));
+    
+    function populateDropdowns(exchanges, dropdowns) {
+        if (!exchanges || exchanges.length === 0) return;
+        dropdowns.forEach(dropdown => {
+            if (!dropdown) return;
+            dropdown.innerHTML = ''; // Xóa các lựa chọn cũ
+            exchanges.forEach(id => {
+                dropdown.add(new Option(id.toUpperCase(), id));
+            });
         });
     }
 
-    async function postRequest(url, body, statusElementId) {
-        const statusEl = document.getElementById(statusElementId);
-        if (statusEl) statusEl.innerHTML = `<span class="text-yellow">Đang xử lý...</span>`;
-        
-        const button = event.target;
-        button.disabled = true;
-
+    async function postRequest(url, body) {
         try {
             const response = await fetch(url, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(body),
             });
-            const data = await response.json();
-            const messageColor = data.success ? 'text-green' : 'text-red';
-            if (statusEl) statusEl.innerHTML = `<span class="${messageColor}">${data.message}</span>`;
-            else alert(data.message);
-            
-            setTimeout(updateBotStatus, 2000);
+            return await response.json();
         } catch (error) {
-            if (statusEl) statusEl.innerHTML = `<span class="text-red">Lỗi: ${error.message}</span>`;
-            else alert(`Lỗi: ${error.message}`);
             console.error(`Lỗi request tới ${url}:`, error);
-        } finally {
-            if (button.id !== 'startBotBtn' && button.id !== 'stopBotBtn') {
-                button.disabled = false;
-            }
+            return { success: false, message: `Lỗi kết nối: ${error.message}` };
         }
     }
     
-    document.getElementById('startBotBtn').addEventListener('click', (e) => postRequest('/bot-api/start', { percentageToUse: document.getElementById('percentageToUse').value }, null));
-    document.getElementById('stopBotBtn').addEventListener('click', (e) => postRequest('/bot-api/stop', {}, null));
-    document.getElementById('closeTradeBtn').addEventListener('click', (e) => postRequest('/bot-api/close-trade-now', {}, null));
+    startBotBtn.addEventListener('click', async () => {
+        const result = await postRequest('/bot-api/start', { percentageToUse: document.getElementById('percentageToUse').value });
+        alert(result.message);
+        updateBotStatus();
+    });
+
+    stopBotBtn.addEventListener('click', async () => {
+        const result = await postRequest('/bot-api/stop', {});
+        alert(result.message);
+        updateBotStatus();
+    });
+
+    document.getElementById('closeTradeBtn').addEventListener('click', async () => {
+        if (confirm('Bạn có chắc muốn đóng lệnh và bắt đầu quá trình dọn dẹp không?')) {
+            const result = await postRequest('/bot-api/close-trade-now', {});
+            alert(result.message);
+            updateBotStatus();
+        }
+    });
     
-    manualTransferBtn.addEventListener('click', (e) => {
-        postRequest('/bot-api/transfer-funds', {
+    testTradeBtn.addEventListener('click', async (e) => {
+        const statusEl = document.getElementById('testStatusDisplay');
+        statusEl.textContent = 'Đang gửi lệnh...';
+        statusEl.className = 'text-yellow';
+        
+        const payload = {
+            shortExchange: testShortExchange.value,
+            longExchange: testLongExchange.value,
+            leverage: document.getElementById('testLeverage').value,
+            percentage: document.getElementById('testPercentage').value,
+        };
+        
+        const result = await postRequest('/bot-api/custom-test-trade', payload);
+        
+        statusEl.textContent = result.message;
+        statusEl.className = result.success ? 'text-green' : 'text-red';
+        
+        setTimeout(() => { statusEl.textContent = ''; }, 5000);
+        updateBotStatus();
+    });
+
+    manualTransferBtn.addEventListener('click', async (e) => {
+        const statusEl = document.getElementById('transferStatusDisplay');
+        statusEl.textContent = 'Đang gửi yêu cầu...';
+        statusEl.className = 'text-yellow';
+        const result = await postRequest('/bot-api/transfer-funds', {
             fromExchangeId: fromSelect.value,
             toExchangeId: toSelect.value,
             amountStr: document.getElementById('transferAmount').value
-        }, 'transferStatusDisplay');
+        });
+        statusEl.textContent = result.message;
+        statusEl.className = result.success ? 'text-green' : 'text-red';
     });
 
-    internalTransferBtn.addEventListener('click', (e) => {
-        const fromAccount = document.getElementById('internalFromAccount').value;
-        const toAccount = document.getElementById('internalToAccount').value;
-        
-        if (fromAccount === toAccount) {
-            document.getElementById('internalTransferStatusDisplay').innerHTML = `<span class="text-red">Không thể chuyển giữa cùng một loại ví.</span>`;
-            return;
-        }
-
-        postRequest('/bot-api/internal-transfer', {
+    internalTransferBtn.addEventListener('click', async (e) => {
+        const statusEl = document.getElementById('internalTransferStatusDisplay');
+        statusEl.textContent = 'Đang gửi yêu cầu...';
+        statusEl.className = 'text-yellow';
+        const result = await postRequest('/bot-api/internal-transfer', {
             exchangeId: internalExchangeSelect.value,
-            fromAccount: fromAccount,
-            toAccount: toAccount,
+            fromAccount: document.getElementById('internalFromAccount').value,
+            toAccount: document.getElementById('internalToAccount').value,
             amountStr: document.getElementById('internalAmount').value
-        }, 'internalTransferStatusDisplay');
+        });
+        statusEl.textContent = result.message;
+        statusEl.className = result.success ? 'text-green' : 'text-red';
     });
+
 
     updateBotStatus();
-    setInterval(updateBotStatus, 3000); // Tăng tần suất cập nhật để theo dõi trạng thái tốt hơn
+    setInterval(updateBotStatus, 3000);
 </script>
 </body>
 </html>
