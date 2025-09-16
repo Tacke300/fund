@@ -13,7 +13,7 @@
         .card h3 { margin-top: 0; color: #03dac6; }
         button { background-color: #6200ee; color: white; border: none; padding: 10px 15px; border-radius: 4px; cursor: pointer; transition: background-color 0.2s; font-size: 14px; }
         button:hover { background-color: #3700b3; }
-        button:disabled { background-color: #333; cursor: not-allowed; }
+        button:disabled { background-color: #333; color: #888; cursor: not-allowed; }
         button.stop { background-color: #cf6679; }
         button.stop:hover { background-color: #b00020; }
         .controls, .manual-controls { display: flex; justify-content: center; align-items: center; gap: 1rem; margin-bottom: 1.5rem; flex-wrap: wrap; }
@@ -24,6 +24,7 @@
         .text-green { color: #4caf50; }
         .text-red { color: #f44336; }
         .text-yellow { color: #f1c40f; }
+        .text-blue { color: #64b5f6; }
         .status-display { margin-top: 1rem; padding: 1rem; background-color: #2c2c2c; border-radius: 4px; min-height: 20px; text-align: center; word-break: break-word; }
     </style>
 </head>
@@ -36,13 +37,16 @@
         <input type="number" id="percentageToUse" value="50" min="1" max="100">
         <button id="startBotBtn">▶️ Start Bot</button>
         <button id="stopBotBtn" class="stop">⏸️ Stop Bot</button>
-        <button id="closeTradeBtn" class="stop">🛑 Đóng lệnh ngay</button>
+        <button id="closeTradeBtn" class="stop">🛑 Đóng lệnh & Dọn dẹp</button>
     </div>
 
     <div class="grid">
         <div class="card">
             <h3>Trạng thái Bot</h3>
-            <p id="botStateDisplay">Đang tải...</p>
+            <!-- START: MODIFIED_CODE_BLOCK_1 -->
+            <p><strong>Trạng thái chung:</strong> <span id="botStateDisplay">Đang tải...</span></p>
+            <p><strong>Hành động hiện tại:</strong> <span id="capitalStateDisplay">...</span></p>
+            <!-- END: MODIFIED_CODE_BLOCK_1 -->
         </div>
         <div class="card">
             <h3>Số dư Futures</h3>
@@ -101,11 +105,9 @@
                     <th>Thời gian</th>
                     <th>Coin</th>
                     <th>Sàn (Short/Long)</th>
-                    <!-- START: MODIFIED_CODE_BLOCK_1 -->
                     <th>PNL Ước tính (%)</th>
                     <th>Vốn sử dụng (USDT)</th>
                     <th>PNL Thực tế (USDT)</th>
-                    <!-- END: MODIFIED_CODE_BLOCK_1 -->
                 </tr>
             </thead>
             <tbody id="tradeHistoryBody"></tbody>
@@ -117,16 +119,47 @@
     const fromSelect = document.getElementById('fromExchangeSelect');
     const toSelect = document.getElementById('toExchangeSelect');
     const internalExchangeSelect = document.getElementById('internalExchangeSelect');
+    const manualTransferBtn = document.getElementById('manualTransferBtn');
+    const internalTransferBtn = document.getElementById('internalTransferBtn');
+
+    // Mảng chứa các sàn có thể chuyển tiền qua lại
+    const TRANSFERABLE_EXCHANGES = ['binanceusdm', 'bitget', 'kucoinfutures'];
 
     async function updateBotStatus() {
         try {
             const response = await fetch('/bot-api/status');
             const data = await response.json();
 
+            // --- Cập nhật Trạng thái Bot ---
             const botStateEl = document.getElementById('botStateDisplay');
             botStateEl.textContent = data.botState;
             botStateEl.className = data.botState === 'RUNNING' ? 'text-green' : 'text-red';
+            
+            // START: MODIFIED_CODE_BLOCK_2
+            const capitalStateEl = document.getElementById('capitalStateDisplay');
+            capitalStateEl.textContent = data.capitalManagementState || 'N/A';
+            switch(data.capitalManagementState) {
+                case 'PREPARING_FUNDS':
+                case 'CLEANING_UP':
+                    capitalStateEl.className = 'text-yellow';
+                    break;
+                case 'TRADE_OPEN':
+                    capitalStateEl.className = 'text-green';
+                    break;
+                case 'FUNDS_READY':
+                    capitalStateEl.className = 'text-blue';
+                    break;
+                default: // IDLE
+                    capitalStateEl.className = '';
+            }
 
+            // Vô hiệu hóa nút chuyển tiền thủ công khi bot đang tự động quản lý vốn
+            const isBotBusy = data.botState === 'RUNNING' && data.capitalManagementState !== 'IDLE';
+            manualTransferBtn.disabled = isBotBusy;
+            internalTransferBtn.disabled = isBotBusy;
+            // END: MODIFIED_CODE_BLOCK_2
+
+            // --- Cập nhật Số dư ---
             let balancesHtml = '';
             for (const id in data.balances) {
                 const health = data.exchangeHealth[id];
@@ -135,25 +168,31 @@
             }
             document.getElementById('balancesDisplay').innerHTML = balancesHtml;
 
+            // --- Cập nhật Cơ hội Tốt nhất ---
             const oppEl = document.getElementById('bestOpportunityDisplay');
             if (data.bestPotentialOpportunityForDisplay) {
                 const opp = data.bestPotentialOpportunityForDisplay;
-                // START: MODIFIED_CODE_BLOCK_2
                 let estimatedAmountHtml = '---';
-                if (data.estimatedOpenAmount !== null && data.estimatedOpenAmount > 0) {
-                    estimatedAmountHtml = data.estimatedOpenAmount.toFixed(4);
+                if (data.balances && opp.details) {
+                     const { shortExchange, longExchange } = opp.details;
+                     const shortBalance = data.balances[shortExchange]?.available || 0;
+                     const longBalance = data.balances[longExchange]?.available || 0;
+                     const minBalance = Math.min(shortBalance, longBalance);
+                     const percentage = parseFloat(document.getElementById('percentageToUse').value) || 50;
+                     estimatedAmountHtml = (minBalance * (percentage / 100)).toFixed(4);
                 }
+
                 oppEl.innerHTML = `
                     <p><strong>Coin:</strong> ${opp.coin}</p>
                     <p><strong>Sàn:</strong> ${opp.exchanges}</p>
                     <p><strong>PNL ước tính:</strong> ${opp.estimatedPnl.toFixed(3)}%</p>
                     <p><strong>Số tiền mở lệnh ước tính:</strong> <span class="text-yellow">${estimatedAmountHtml}</span> USDT</p>
                 `;
-                // END: MODIFIED_CODE_BLOCK_2
             } else {
                 oppEl.innerHTML = '<p>Không có cơ hội nào khả dụng.</p>';
             }
 
+            // --- Cập nhật Giao dịch Hiện tại ---
             const tradeEl = document.getElementById('currentTradeDisplay');
             if (data.currentTradeDetails) {
                 const trade = data.currentTradeDetails;
@@ -162,30 +201,27 @@
                 tradeEl.innerHTML = '<p>Không có giao dịch nào đang mở.</p>';
             }
 
+            // --- Cập nhật Lịch sử Giao dịch ---
             const historyBody = document.getElementById('tradeHistoryBody');
             historyBody.innerHTML = '';
-            // START: MODIFIED_CODE_BLOCK_3
             data.tradeHistory.forEach(trade => {
                 const row = historyBody.insertRow();
                 row.insertCell().textContent = new Date(trade.closeTime || trade.openTime).toLocaleString('vi-VN');
                 row.insertCell().textContent = trade.coin;
                 row.insertCell().textContent = `${trade.shortExchange.toUpperCase()}/${trade.longExchange.toUpperCase()}`;
-                
-                // Thêm các cột mới
                 row.insertCell().textContent = trade.estimatedPnlFromOpportunity ? trade.estimatedPnlFromOpportunity.toFixed(2) + '%' : 'N/A';
                 row.insertCell().textContent = trade.collateralUsed ? trade.collateralUsed.toFixed(4) : 'N/A';
-
                 const pnlCell = row.insertCell();
                 pnlCell.textContent = trade.actualPnl ? trade.actualPnl.toFixed(4) + ' USDT' : 'N/A';
                 pnlCell.className = trade.actualPnl >= 0 ? 'text-green' : 'text-red';
             });
-            // END: MODIFIED_CODE_BLOCK_3
             
-            if (fromSelect.options.length === 0 && data.transferExchanges) {
-                 populateExternalDropdowns(data.transferExchanges);
+            // --- Khởi tạo Dropdowns (chỉ chạy 1 lần) ---
+            if (fromSelect.options.length === 0) {
+                 populateExternalDropdowns(TRANSFERABLE_EXCHANGES);
             }
-            if (internalExchangeSelect.options.length === 0 && data.internalTransferExchanges) {
-                 populateInternalDropdowns(data.internalTransferExchanges);
+            if (internalExchangeSelect.options.length === 0 && data.balances) {
+                 populateInternalDropdowns(Object.keys(data.balances));
             }
 
         } catch (error) {
@@ -233,7 +269,9 @@
             else alert(`Lỗi: ${error.message}`);
             console.error(`Lỗi request tới ${url}:`, error);
         } finally {
-            button.disabled = false;
+            if (button.id !== 'startBotBtn' && button.id !== 'stopBotBtn') {
+                button.disabled = false;
+            }
         }
     }
     
@@ -241,7 +279,7 @@
     document.getElementById('stopBotBtn').addEventListener('click', (e) => postRequest('/bot-api/stop', {}, null));
     document.getElementById('closeTradeBtn').addEventListener('click', (e) => postRequest('/bot-api/close-trade-now', {}, null));
     
-    document.getElementById('manualTransferBtn').addEventListener('click', (e) => {
+    manualTransferBtn.addEventListener('click', (e) => {
         postRequest('/bot-api/transfer-funds', {
             fromExchangeId: fromSelect.value,
             toExchangeId: toSelect.value,
@@ -249,7 +287,7 @@
         }, 'transferStatusDisplay');
     });
 
-    document.getElementById('internalTransferBtn').addEventListener('click', (e) => {
+    internalTransferBtn.addEventListener('click', (e) => {
         const fromAccount = document.getElementById('internalFromAccount').value;
         const toAccount = document.getElementById('internalToAccount').value;
         
@@ -267,7 +305,7 @@
     });
 
     updateBotStatus();
-    setInterval(updateBotStatus, 5000);
+    setInterval(updateBotStatus, 3000); // Tăng tần suất cập nhật để theo dõi trạng thái tốt hơn
 </script>
 </body>
-</html>```
+</html>
