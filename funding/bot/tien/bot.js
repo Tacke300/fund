@@ -118,10 +118,6 @@ async function fetchAllBalances(type = 'future') {
 const updateBalances = () => fetchAllBalances('future');
 
 
-/**
- * [BUG FIX] Hàm theo dõi số dư mới, đáng tin cậy hơn.
- * Sẽ kiểm tra xem số dư có thực sự tăng lên sau khi chuyển hay không.
- */
 async function pollForBalanceArrival(exchangeId, amountToReceive, maxPollAttempts = 90, pollIntervalMs = 10000) {
     const exchange = exchanges[exchangeId];
     const targetWalletType = (exchangeId === 'kucoinfutures') ? 'main' : 'spot';
@@ -137,7 +133,6 @@ async function pollForBalanceArrival(exchangeId, amountToReceive, maxPollAttempt
                 const currentBalanceData = await exchange.fetchBalance();
                 const currentBalance = currentBalanceData[targetWalletType]?.free?.USDT || 0;
                 
-                // Điều kiện thành công: số dư mới phải lớn hơn số dư cũ cộng với 90% số tiền dự kiến nhận (trừ hao phí rút)
                 if (currentBalance > initialBalance && currentBalance >= initialBalance + (amountToReceive * 0.90)) {
                     safeLog('info', `[POLL] ✅ TIỀN ĐÃ VỀ! Số dư mới trên ${exchangeId.toUpperCase()}: ${currentBalance.toFixed(4)} USDT.`);
                     return { success: true, receivedAmount: currentBalance - initialBalance };
@@ -155,9 +150,6 @@ async function pollForBalanceArrival(exchangeId, amountToReceive, maxPollAttempt
 }
 
 
-/**
- * Hàm chuyển tiền được tái cấu trúc để trả về trạng thái thành công/thất bại.
- */
 async function executeSingleFundTransfer(fromExchangeId, toExchangeId, amount) {
     transferStatus = { inProgress: true, message: `Bắt đầu chuyển ${amount.toFixed(2)} USDT từ ${fromExchangeId} -> ${toExchangeId}.` };
     safeLog('log', `[TRANSFER] ${transferStatus.message}`);
@@ -181,10 +173,18 @@ async function executeSingleFundTransfer(fromExchangeId, toExchangeId, amount) {
         
         transferStatus.message = `2/4: Gửi lệnh rút ${amount.toFixed(2)} USDT đến ${toExchangeId}...`;
         safeLog('log', `[TRANSFER] ${transferStatus.message}`);
-        const params = (fromExchangeId === 'bitget') ? { chain: targetDepositInfo.network } : { network: targetDepositInfo.network };
+        
+        // --- START: BUG FIX ---
+        // Luôn cung cấp cả 'network' và 'chain' để đảm bảo tương thích với tất cả các sàn, bao gồm cả Bitget.
+        const params = {
+            network: targetDepositInfo.network,
+            chain: targetDepositInfo.network
+        };
+        // --- END: BUG FIX ---
+
         await sourceExchange.withdraw('USDT', amount, targetDepositInfo.address, undefined, params);
         
-        // 3. Chờ tiền về ở sàn đích (sử dụng hàm mới)
+        // 3. Chờ tiền về ở sàn đích
         transferStatus.message = `3/4: Đang chờ blockchain xác nhận và tiền về ${toExchangeId}...`;
         safeLog('log', `[TRANSFER] ${transferStatus.message}`);
         const pollResult = await pollForBalanceArrival(toExchangeId, amount);
@@ -200,7 +200,8 @@ async function executeSingleFundTransfer(fromExchangeId, toExchangeId, amount) {
         if (toExchangeId === 'kucoinfutures') { targetFromWallet = 'main'; }
         if (toExchangeId === 'bitget') { targetToWallet = 'swap'; }
         
-        await targetExchange.transfer('USDT', receivedAmount, targetFromWallet, targetToWallet);
+        const preciseAmountToTransfer = targetExchange.currencyToPrecision('USDT', receivedAmount);
+        await targetExchange.transfer('USDT', parseFloat(preciseAmountToTransfer), targetFromWallet, targetToWallet);
         
         transferStatus = { inProgress: false, message: `✅ Hoàn tất chuyển tiền tới ${toExchangeId}!` };
         safeLog('info', `[TRANSFER] ${transferStatus.message}`);
@@ -214,11 +215,8 @@ async function executeSingleFundTransfer(fromExchangeId, toExchangeId, amount) {
     }
 }
 
-// --- CÁC HÀM QUẢN LÝ VỐN TỰ ĐỘNG MỚI ---
 
-/**
- * Giai đoạn 1: Gom vốn từ Hub đến 2 sàn được chọn để giao dịch.
- */
+// --- CÁC HÀM QUẢN LÝ VỐN TỰ ĐỘNG MỚI ---
 async function manageFundDistribution(opportunity) {
     capitalManagementState = 'PREPARING_FUNDS';
     safeLog('info', "[CAPITAL] Bắt đầu Giai đoạn 1: Gom vốn cho cơ hội giao dịch.");
@@ -232,7 +230,7 @@ async function manageFundDistribution(opportunity) {
 
     let success = true;
     for (const targetEx of tradingExchanges) {
-        if (targetEx === HUB_EXCHANGE_ID) continue; // Không cần chuyển cho chính nó
+        if (targetEx === HUB_EXCHANGE_ID) continue; 
         
         const currentBalance = allFutBalances[targetEx] || 0;
         const amountNeeded = targetPerExchange - currentBalance;
@@ -261,9 +259,6 @@ async function manageFundDistribution(opportunity) {
     return true;
 }
 
-/**
- * Giai đoạn 3: Dọn dẹp, chuyển toàn bộ tiền từ các sàn phụ về Hub.
- */
 async function returnFundsToHub() {
     capitalManagementState = 'CLEANING_UP';
     safeLog('info', "[CLEANUP] Bắt đầu Giai đoạn 3: Dọn dẹp và chuyển toàn bộ vốn về Hub.");
@@ -272,7 +267,7 @@ async function returnFundsToHub() {
     const nonHubExchanges = activeExchangeIds.filter(id => id !== HUB_EXCHANGE_ID && exchanges[id]);
     
     for (const exId of nonHubExchanges) {
-        await sleep(5000); // Chờ 1 chút giữa các lần chuyển
+        await sleep(5000); 
         const balances = await fetchAllBalances('future');
         const amountToReturn = balances[exId] || 0;
         
@@ -289,11 +284,7 @@ async function returnFundsToHub() {
     selectedOpportunityForNextTrade = null;
 }
 
-// --- CÁC HÀM GIAO DỊCH (Giữ nguyên phần lớn) ---
-// ... (Hàm getExchangeSpecificSymbol, setLeverageSafely, computeOrderDetails, placeTpSlOrders, v.v...)
-// ... (Các hàm này không thay đổi, có thể copy từ code cũ)
-// --- BẮT ĐẦU CÁC HÀM GIAO DỊCH ---
-
+// --- CÁC HÀM GIAO DỊCH ---
 async function getExchangeSpecificSymbol(exchange, rawCoinSymbol) {
     try {
         if (!exchange.markets || Object.keys(exchange.markets).length === 0) await exchange.loadMarkets(true);
@@ -606,8 +597,7 @@ async function calculatePnlAfterDelay(closedTrade) {
     tradeAwaitingPnl = null;
 }
 
-// --- VÒNG LẶP CHÍNH CỦA BOT (ĐÃ VIẾT LẠI HOÀN TOÀN) ---
-
+// --- VÒNG LẶP CHÍNH CỦA BOT ---
 async function mainBotLoop() {
     if (botState !== 'RUNNING') return;
 
@@ -638,7 +628,7 @@ async function mainBotLoop() {
             const success = await executeTrades(selectedOpportunityForNextTrade, currentPercentageToUse);
             if (!success) {
                 safeLog('error', "[TIMER] Lỗi khi vào lệnh. Bắt đầu dọn dẹp vốn.");
-                await returnFundsToHub(); // Nếu vào lệnh lỗi, dọn dẹp ngay
+                await returnFundsToHub();
             }
         }
         
@@ -647,7 +637,6 @@ async function mainBotLoop() {
             if (currentTradeDetails) {
                  safeLog('log', `[TIMER] Đầu giờ mới: Đóng vị thế cho ${currentTradeDetails.coin}.`);
                  await closeTradeNow();
-                 // Sau khi đóng, bot sẽ chờ đến phút 02 để bắt đầu dọn dẹp
             }
         }
         
@@ -659,13 +648,12 @@ async function mainBotLoop() {
         // Reset trạng thái nếu bị kẹt
         else if (currentMinute > 5 && capitalManagementState !== 'IDLE' && capitalManagementState !== 'TRADE_OPEN') {
             safeLog('warn', `[RESET] Trạng thái ${capitalManagementState} bị kẹt, đang reset về IDLE.`);
-            capitalManagementState = 'IDLE';
-            selectedOpportunityForNextTrade = null;
+            await returnFundsToHub(); // Cố gắng dọn dẹp trước khi reset
         }
 
     } catch (e) {
         safeLog('error', '[LOOP] Lỗi nghiêm trọng trong vòng lặp chính:', e);
-        capitalManagementState = 'IDLE'; // Reset khi có lỗi
+        capitalManagementState = 'IDLE';
     }
 
     if (botState === 'RUNNING') {
@@ -675,7 +663,6 @@ async function mainBotLoop() {
 
 
 // --- ĐIỀU KHIỂN BOT VÀ SERVER API ---
-
 function startBot() {
     if (botState === 'RUNNING') return false;
     botState = 'RUNNING';
@@ -695,8 +682,7 @@ function stopBot() {
 }
 
 const botServer = http.createServer(async (req, res) => {
-    // ... (Phần server API không thay đổi nhiều, nhưng cần thêm `capitalManagementState` vào response)
-     res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
     if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
@@ -717,7 +703,7 @@ const botServer = http.createServer(async (req, res) => {
             res.writeHead(200, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ 
                 botState, 
-                capitalManagementState, // Gửi trạng thái mới cho UI
+                capitalManagementState,
                 balances, 
                 tradeHistory, 
                 bestPotentialOpportunityForDisplay, 
@@ -734,29 +720,31 @@ const botServer = http.createServer(async (req, res) => {
             res.end(JSON.stringify({ success: stopBot(), message: 'Đã gửi yêu cầu dừng bot.' }));
         } else if (url === '/bot-api/close-trade-now' && method === 'POST') {
             const success = await closeTradeNow();
-            if(success) await returnFundsToHub(); // Nếu đóng tay, cũng dọn dẹp luôn
+            if(success) await returnFundsToHub();
             res.writeHead(success ? 200 : 400, { 'Content-Type': 'application/json' }).end(JSON.stringify({ success, message: success ? 'Đã gửi yêu cầu đóng lệnh và dọn dẹp.' : 'Không có lệnh đang mở hoặc có lỗi.' }));
         } else if (url === '/bot-api/transfer-funds' && method === 'POST') {
-            if (capitalManagementState !== 'IDLE') {
+            if (botState === 'RUNNING' && capitalManagementState !== 'IDLE') {
                  return res.writeHead(429, { 'Content-Type': 'application/json' }).end(JSON.stringify({ success: false, message: 'Bot đang bận, không thể chuyển tiền thủ công.' }));
             }
              const { fromExchangeId, toExchangeId, amountStr } = JSON.parse(body);
             const amount = parseFloat(amountStr);
-            // ... (các validation khác)
+            if (!fromExchangeId || !toExchangeId || isNaN(amount) || amount <= 0) {
+                 return res.writeHead(400, { 'Content-Type': 'application/json' }).end(JSON.stringify({ success: false, message: 'Dữ liệu không hợp lệ.' }));
+            }
             executeSingleFundTransfer(fromExchangeId, toExchangeId, amount);
             res.writeHead(202, { 'Content-Type': 'application/json' }).end(JSON.stringify({ success: true, message: 'Đã nhận yêu cầu chuyển tiền.' }));
         }
-        // ... (các endpoint khác như internal-transfer có thể giữ nguyên)
         else {
             res.writeHead(404).end('Not Found');
         }
 
     } catch (error) {
         safeLog('error', `[SERVER] Lỗi xử lý yêu cầu ${method} ${url}:`, error);
-        res.writeHead(500).end('Internal Server Error');
+        if (!res.headersSent) {
+            res.writeHead(500).end('Internal Server Error');
+        }
     }
 });
-
 
 botServer.listen(BOT_PORT, () => {
     safeLog('log', `Máy chủ UI của Bot đang chạy tại http://localhost:${BOT_PORT}`);
