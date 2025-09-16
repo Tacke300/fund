@@ -12,7 +12,7 @@ const {
     kucoinApiKey, kucoinApiSecret, kucoinApiPassword
 } = require('./config.js');
 
-const BOT_PORT = 5006;
+const BOT_PORT = 5008; // Thay đổi port nếu cần
 const SERVER_DATA_URL = 'http://localhost:5005/api/data';
 const HUB_EXCHANGE_ID = 'binanceusdm';
 
@@ -24,11 +24,10 @@ const MAX_CONSECUTIVE_FAILS = 3;
 const MIN_COLLATERAL_FOR_TRADE = 0.1;
 const TP_SL_PNL_PERCENTAGE = 150;
 
-// --- START: MODIFICATION - Sửa Min Transfer ---
+// --- CẤU HÌNH CHUYỂN TIỀN (ĐÃ SỬA) ---
 const FUND_TRANSFER_MIN_AMOUNT_BINANCE = 10;
-const FUND_TRANSFER_MIN_AMOUNT_KUCOIN = 1;  // Sửa thành 1
-const FUND_TRANSFER_MIN_AMOUNT_BITGET = 10; // Sửa thành 10
-// --- END: MODIFICATION ---
+const FUND_TRANSFER_MIN_AMOUNT_KUCOIN = 1;
+const FUND_TRANSFER_MIN_AMOUNT_BITGET = 10;
 
 const ALL_POSSIBLE_EXCHANGE_IDS = ['binanceusdm', 'bitget', 'okx', 'kucoinfutures'];
 const DISABLED_EXCHANGES = [];
@@ -120,10 +119,8 @@ async function fetchAllBalances(type = 'future') {
 }
 const updateBalances = () => fetchAllBalances('future');
 
-// --- START: MODIFICATION - Sửa lỗi nhận tiền tại Bitget ---
 async function pollForBalanceArrival(exchangeId, amountToReceive, maxPollAttempts = 90, pollIntervalMs = 10000) {
     const exchange = exchanges[exchangeId];
-    // Sửa lại logic để xác định đúng ví spot cho tất cả các sàn, bao gồm cả Bitget
     const targetWalletType = (exchangeId === 'kucoinfutures') ? 'main' : 'spot';
     
     try {
@@ -152,9 +149,6 @@ async function pollForBalanceArrival(exchangeId, amountToReceive, maxPollAttempt
         return { success: false };
     }
 }
-// --- END: MODIFICATION ---
-
-// ... (Các hàm khác giữ nguyên, chỉ sửa lại các hàm bị ảnh hưởng)
 
 async function executeSingleFundTransfer(fromExchangeId, toExchangeId, amount) {
     transferStatus = { inProgress: true, message: `Bắt đầu chuyển ${amount.toFixed(2)} USDT từ ${fromExchangeId} -> ${toExchangeId}.` };
@@ -204,8 +198,6 @@ async function executeSingleFundTransfer(fromExchangeId, toExchangeId, amount) {
         return false;
     }
 }
-
-// ... (Các hàm khác giữ nguyên)
 
 async function manageFundDistribution(opportunity) {
     capitalManagementState = 'PREPARING_FUNDS';
@@ -294,11 +286,10 @@ const normalizeExchangeId = (id) => {
     return lowerId;
 };
 
-// ... Các hàm executeTrades, closeTradeNow, v.v. giữ nguyên như phiên bản trước ...
 async function processServerData(serverData) {
     if (!serverData || !serverData.arbitrageData) {
         bestPotentialOpportunityForDisplay = null;
-        return null; // Trả về null để báo không có cơ hội
+        return null;
     }
     const opportunities = serverData.arbitrageData.filter(op => {
         if (!op?.exchanges || typeof op.exchanges !== 'string' || op.estimatedPnl < MIN_PNL_PERCENTAGE) return false;
@@ -321,22 +312,17 @@ async function processServerData(serverData) {
              return bestPotentialOpportunityForDisplay;
         }
     }
-    return null; // Trả về null nếu không có cơ hội hợp lệ
+    return null;
 }
 async function getExchangeSpecificSymbol(exchange, rawCoinSymbol) {
     try {
         if (!exchange.markets || Object.keys(exchange.markets).length === 0) await exchange.loadMarkets(true);
-    } catch (e) {
-        safeLog('error', `[SYMBOL] Lỗi tải markets cho ${exchange.id}: ${e.message}`);
-        return null;
-    }
+    } catch (e) { return null; }
     const base = String(rawCoinSymbol).toUpperCase().replace(/USDT$/, '');
     const attempts = [`${base}/USDT:USDT`, `${base}USDT`, `${base}-USDT-SWAP`, `${base}USDTM`, `${base}/USDT`];
     for (const attempt of attempts) {
         const market = exchange.markets[attempt];
-        if (market?.active && (market.contract || market.swap || market.future)) {
-            return market.id;
-        }
+        if (market?.active && (market.contract || market.swap || market.future)) { return market.id; }
     }
     return null;
 }
@@ -443,11 +429,7 @@ async function executeTrades(opportunity, percentageToUse) {
         return false;
     }
 
-    const [actualShortLeverage, actualLongLeverage] = await Promise.all([
-        setLeverageSafely(shortEx, shortSymbol, desiredLeverage),
-        setLeverageSafely(longEx, longSymbol, desiredLeverage)
-    ]);
-
+    const [actualShortLeverage, actualLongLeverage] = await Promise.all([ setLeverageSafely(shortEx, shortSymbol, desiredLeverage), setLeverageSafely(longEx, longSymbol, desiredLeverage) ]);
     if (!actualShortLeverage || !actualLongLeverage) return false;
     const leverageToUse = Math.min(actualShortLeverage, actualLongLeverage);
 
@@ -487,10 +469,7 @@ async function executeTrades(opportunity, percentageToUse) {
         }
     };
 
-    const [shortEntryPrice, longEntryPrice] = await Promise.all([
-        getReliableFillPrice(shortEx, shortSymbol, shortOrder.id),
-        getReliableFillPrice(longEx, longSymbol, longOrder.id)
-    ]);
+    const [shortEntryPrice, longEntryPrice] = await Promise.all([ getReliableFillPrice(shortEx, shortSymbol, shortOrder.id), getReliableFillPrice(longEx, longSymbol, longOrder.id) ]);
     
     const tradeBaseInfo = {
         ...opportunity.details, coin,
@@ -583,8 +562,6 @@ async function calculatePnlAfterDelay(closedTrade) {
     tradeAwaitingPnl = null;
 }
 
-
-// --- START: MODIFICATION - Dọn dẹp Log Spam ---
 async function mainBotLoop() {
     if (botState !== 'RUNNING') return;
 
@@ -595,11 +572,9 @@ async function mainBotLoop() {
         const currentMinute = now.getUTCMinutes();
         const currentSecond = now.getUTCSeconds();
 
-        // Chỉ tìm cơ hội vào phút 50
         if (capitalManagementState === 'IDLE' && currentMinute === 50) {
             safeLog('log', "[TIMER] Phút 50: Bắt đầu tìm kiếm cơ hội...");
             const serverData = await fetchDataFromServer();
-            // Hàm này sẽ tự động cập nhật bestPotentialOpportunityForDisplay
             const opportunity = await processServerData(serverData);
             
             if (opportunity) {
@@ -641,10 +616,9 @@ async function mainBotLoop() {
         botLoopIntervalId = setTimeout(mainBotLoop, DATA_FETCH_INTERVAL_SECONDS * 1000);
     }
 }
-// --- END: MODIFICATION ---
 
 function startBot() {
-    if (botState !== 'RUNNING') return false;
+    if (botState === 'RUNNING') return false;
     botState = 'RUNNING';
     capitalManagementState = 'IDLE';
     currentTradeDetails = null;
@@ -686,18 +660,30 @@ const botServer = http.createServer(async (req, res) => {
             res.end(JSON.stringify({ 
                 botState, capitalManagementState, balances, tradeHistory, 
                 bestPotentialOpportunityForDisplay, currentTradeDetails, 
-                exchangeHealth, transferStatus, transferExchanges, internalTransferExchanges
+                exchangeHealth, transferStatus, transferExchanges, internalTransferExchanges,
+                activeExchangeIds // Thêm cái này để HTML biết các sàn đang hoạt động
             }));
         } else if (url === '/bot-api/start' && method === 'POST') {
              try { currentPercentageToUse = parseFloat(JSON.parse(body).percentageToUse) || 50; } catch { currentPercentageToUse = 50; }
-            res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ success: startBot(), message: 'Đã gửi yêu cầu khởi động bot.' }));
+            res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ success: startBot(), message: 'Đã gửi yêu cầu khởi động bot.' }));
         } else if (url === '/bot-api/stop' && method === 'POST') {
-             res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ success: stopBot(), message: 'Đã gửi yêu cầu dừng bot.' }));
-        } else if (url === '/bot-api/close-trade-now' && method === 'POST') {
+             res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ success: stopBot(), message: 'Đã gửi yêu cầu dừng bot.' }));
+        } else if (url === '/bot-api/custom-test-trade' && method === 'POST') {
+            if (currentTradeDetails) return res.writeHead(409, { 'Content-Type': 'application/json' }).end(JSON.stringify({ success: false, message: 'Bot đang bận với một giao dịch.' }));
+            if (!bestPotentialOpportunityForDisplay) return res.writeHead(400, { 'Content-Type': 'application/json' }).end(JSON.stringify({ success: false, message: 'Chưa có cơ hội nào.' }));
+            
+            const data = JSON.parse(body);
+            const testOpportunity = {
+                coin: bestPotentialOpportunityForDisplay?.coin,
+                commonLeverage: parseInt(data.leverage, 10) || 20,
+                details: { shortExchange: data.shortExchange, longExchange: data.longExchange }
+            };
+            const tradeSuccess = await executeTrades(testOpportunity, parseFloat(data.percentage));
+            res.writeHead(tradeSuccess ? 200 : 500, { 'Content-Type': 'application/json' }).end(JSON.stringify({ success: tradeSuccess, message: tradeSuccess ? 'Lệnh Test đã được gửi.' : 'Lỗi khi gửi lệnh Test.' }));
+        }
+        else if (url === '/bot-api/close-trade-now' && method === 'POST') {
             const success = await closeTradeNow();
-            if(success) await returnFundsToHub();
+            if(success && botState === 'RUNNING') await returnFundsToHub();
             res.writeHead(success ? 200 : 400, { 'Content-Type': 'application/json' }).end(JSON.stringify({ success, message: success ? 'Đã gửi yêu cầu đóng lệnh và dọn dẹp.' : 'Không có lệnh đang mở hoặc có lỗi.' }));
         } else if (url === '/bot-api/transfer-funds' && method === 'POST') {
             if (botState === 'RUNNING' && capitalManagementState !== 'IDLE') {
@@ -726,8 +712,7 @@ const botServer = http.createServer(async (req, res) => {
                 return res.writeHead(500, { 'Content-Type': 'application/json' }).end(JSON.stringify({ success: false, message: `Sàn ${exchangeId} chưa được khởi tạo.` }));
             }
             
-            let from = genericFrom;
-            let to = genericTo;
+            let from = genericFrom, to = genericTo;
         
             if (exchangeId === 'bitget') {
                 if (from === 'future') from = 'swap';
