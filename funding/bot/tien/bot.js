@@ -222,13 +222,14 @@ async function executeSingleFundTransfer(fromExchangeId, toExchangeId, amount) {
         
         transferStatus.message = `2/4: Gửi lệnh rút ${amount.toFixed(2)} USDT đến ${toExchangeId}...`;
         
-        let chainNameForApi = networkLookupKey;
+        let params;
         if (fromExchangeId === 'kucoinfutures') {
-            chainNameForApi = 'APT';
-            safeLog('log', `[TRANSFER] Sửa tên chain cho API KuCoin thành: '${chainNameForApi}'`);
+            params = { network: 'APT' };
+            safeLog('log', `[TRANSFER] Thử nghiệm cho KuCoin: Chỉ sử dụng tham số 'network': '${params.network}'`);
+        } else {
+            params = { chain: networkLookupKey };
         }
         
-        const params = { network: chainNameForApi, chain: chainNameForApi };
         await withdrawerExchange.withdraw('USDT', amount, targetDepositInfo.address, undefined, params);
         
         transferStatus.message = `3/4: Đang chờ blockchain xác nhận và tiền về ${toExchangeId}...`;
