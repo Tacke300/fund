@@ -207,21 +207,28 @@ async function executeSingleFundTransfer(fromExchangeId, toExchangeId, amount) {
         await sourceExchange.transfer('USDT', amount, fromWallet, toWallet);
         await sleep(5000);
 
-        let network = 'BEP20';
+        let networkLookupKey = 'BEP20';
         let withdrawerExchange = sourceExchange;
         
         if (fromExchangeId === 'kucoinfutures') {
-            network = 'TRC20';
+            networkLookupKey = 'APTOS';
             withdrawerExchange = exchanges['kucoin'];
             if (!withdrawerExchange) throw new Error("Instance KuCoin (Spot) chưa được khởi tạo để thực hiện rút tiền.");
-            safeLog('log', `[TRANSFER] Sàn nguồn là KuCoin, đã đổi sang instance SPOT và mạng lưới ${network} để rút tiền.`);
+            safeLog('log', `[TRANSFER] Sàn nguồn là KuCoin. Dùng mạng ${networkLookupKey} để tra cứu địa chỉ.`);
         }
         
-        const targetDepositInfo = getTargetDepositInfo(toExchangeId, network);
+        const targetDepositInfo = getTargetDepositInfo(toExchangeId, networkLookupKey);
         if(!targetDepositInfo) throw new Error("Không tìm thấy thông tin địa chỉ nạp tiền.");
         
         transferStatus.message = `2/4: Gửi lệnh rút ${amount.toFixed(2)} USDT đến ${toExchangeId}...`;
-        const params = { network: targetDepositInfo.network, chain: targetDepositInfo.network };
+        
+        let chainNameForApi = networkLookupKey;
+        if (fromExchangeId === 'kucoinfutures') {
+            chainNameForApi = 'APT';
+            safeLog('log', `[TRANSFER] Sửa tên chain cho API KuCoin thành: '${chainNameForApi}'`);
+        }
+        
+        const params = { network: chainNameForApi, chain: chainNameForApi };
         await withdrawerExchange.withdraw('USDT', amount, targetDepositInfo.address, undefined, params);
         
         transferStatus.message = `3/4: Đang chờ blockchain xác nhận và tiền về ${toExchangeId}...`;
