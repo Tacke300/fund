@@ -74,17 +74,28 @@ activeExchangeIds.forEach(id => {
 
 function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
 
-// --- CÁC HÀM TIỆN ÍCH VÀ LOGIC CỐT LÕI (ĐÃ NÂNG CẤP) ---
+// --- START: FIX 1 - THÊM LẠI HÀM BỊ THIẾU ---
+async function fetchDataFromServer() {
+    try {
+        const response = await fetch(SERVER_DATA_URL);
+        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+        return await response.json();
+    } catch (error) {
+        safeLog('error', `[BOT] Lỗi khi lấy dữ liệu từ server: ${error.message}`);
+        return null;
+    }
+}
+// --- END: FIX 1 ---
 
 function getMinTransferAmount(exchangeId) {
     if (exchangeId === 'binanceusdm') return FUND_TRANSFER_MIN_AMOUNT_BINANCE;
     if (exchangeId === 'kucoinfutures') return FUND_TRANSFER_MIN_AMOUNT_KUCOIN;
     if (exchangeId === 'bitget') return FUND_TRANSFER_MIN_AMOUNT_BITGET;
-    return 5; // Mặc định
+    return 5;
 }
 
 function getTargetDepositInfo(fromExchangeId, toExchangeId) {
-    const network = 'BEP20'; // Giả định BEP20 là mạng lưới chính
+    const network = 'BEP20';
     const depositAddress = usdtDepositAddressesByNetwork[toExchangeId]?.[network];
     if (!depositAddress || depositAddress.startsWith('ĐIỀN ĐỊA CHỈ')) {
         safeLog('error', `[HELPER] Lỗi: Địa chỉ nạp tiền cho ${toExchangeId.toUpperCase()} qua mạng ${network} chưa được cấu hình.`);
@@ -97,26 +108,22 @@ async function fetchAllBalances(type = 'future') {
     const allBalances = {};
     for (const id of activeExchangeIds) {
         if (!exchanges[id] || exchangeHealth[id].isDisabled) {
-            allBalances[id] = 0;
-            continue;
+            allBalances[id] = 0; continue;
         }
         try {
-            const balanceData = (id === 'kucoinfutures')
-                ? await exchanges[id].fetchBalance()
-                : await exchanges[id].fetchBalance({ 'type': type });
+            const balanceData = (id === 'kucoinfutures') ? await exchanges[id].fetchBalance() : await exchanges[id].fetchBalance({ 'type': type });
             const freeBalance = balanceData?.free?.USDT || 0;
             allBalances[id] = freeBalance;
-            if(type === 'future') balances[id] = { available: freeBalance, total: balanceData?.total?.USDT || 0 };
+            if (type === 'future') balances[id] = { available: freeBalance, total: balanceData?.total?.USDT || 0 };
         } catch (e) {
             safeLog('warn', `[BALANCE] Không thể lấy số dư ${type} từ ${id}: ${e.message}`);
             allBalances[id] = 0;
-             if(type === 'future') balances[id] = { available: 0, total: 0 };
+            if (type === 'future') balances[id] = { available: 0, total: 0 };
         }
     }
     return allBalances;
 }
 const updateBalances = () => fetchAllBalances('future');
-
 
 async function pollForBalanceArrival(exchangeId, amountToReceive, maxPollAttempts = 90, pollIntervalMs = 10000) {
     const exchange = exchanges[exchangeId];
@@ -133,7 +140,7 @@ async function pollForBalanceArrival(exchangeId, amountToReceive, maxPollAttempt
                 const currentBalanceData = await exchange.fetchBalance();
                 const currentBalance = currentBalanceData[targetWalletType]?.free?.USDT || 0;
                 
-                if (currentBalance > initialBalance && currentBalance >= initialBalance + (amountToReceive - 2)) { // Trừ hao phí
+                if (currentBalance > initialBalance && currentBalance >= initialBalance + (amountToReceive - 2)) {
                     safeLog('info', `[POLL] ✅ TIỀN ĐÃ VỀ! Số dư mới trên ${exchangeId.toUpperCase()}: ${currentBalance.toFixed(4)} USDT.`);
                     return { success: true, receivedAmount: currentBalance - initialBalance };
                 }
@@ -168,10 +175,7 @@ async function executeSingleFundTransfer(fromExchangeId, toExchangeId, amount) {
         if(!targetDepositInfo) throw new Error("Không tìm thấy thông tin địa chỉ nạp tiền.");
         
         transferStatus.message = `2/4: Gửi lệnh rút ${amount.toFixed(2)} USDT đến ${toExchangeId}...`;
-        const params = {
-            network: targetDepositInfo.network,
-            chain: targetDepositInfo.network // Cung cấp cả 2 để tương thích
-        };
+        const params = { network: targetDepositInfo.network, chain: targetDepositInfo.network };
         await sourceExchange.withdraw('USDT', amount, targetDepositInfo.address, undefined, params);
         
         transferStatus.message = `3/4: Đang chờ blockchain xác nhận và tiền về ${toExchangeId}...`;
@@ -201,7 +205,6 @@ async function executeSingleFundTransfer(fromExchangeId, toExchangeId, amount) {
     }
 }
 
-// --- CÁC HÀM QUẢN LÝ VỐN TỰ ĐỘNG ---
 async function manageFundDistribution(opportunity) {
     capitalManagementState = 'PREPARING_FUNDS';
     safeLog('info', "[CAPITAL] Bắt đầu Giai đoạn 1: Gom vốn cho cơ hội giao dịch.");
@@ -230,8 +233,7 @@ async function manageFundDistribution(opportunity) {
             const transferSuccess = await executeSingleFundTransfer(HUB_EXCHANGE_ID, targetEx, amountNeeded);
             if (!transferSuccess) {
                 safeLog('error', `[CAPITAL] Chuyển vốn đến ${targetEx.toUpperCase()} thất bại. Hủy phiên giao dịch.`);
-                success = false;
-                break; 
+                success = false; break; 
             }
         } else {
              safeLog('log', `[CAPITAL] Sàn ${targetEx.toUpperCase()} đã có đủ vốn hoặc số tiền cần chuyển quá nhỏ.`);
@@ -249,23 +251,33 @@ async function manageFundDistribution(opportunity) {
     return true;
 }
 
+// --- START: FIX 2 - LÀM CHO HÀM DỌN DẸP AN TOÀN HƠN ---
 async function returnFundsToHub() {
     capitalManagementState = 'CLEANING_UP';
     safeLog('info', "[CLEANUP] Bắt đầu Giai đoạn 3: Dọn dẹp và chuyển toàn bộ vốn về Hub.");
-    await sleep(2 * 60 * 1000); // Chờ 2 phút sau khi đóng lệnh
+    await sleep(2 * 60 * 1000);
     
     const nonHubExchanges = activeExchangeIds.filter(id => id !== HUB_EXCHANGE_ID && exchanges[id]);
     
     for (const exId of nonHubExchanges) {
         await sleep(5000); 
-        const balances = await fetchAllBalances('future');
-        const amountToReturn = balances[exId] || 0;
-        
-        if (amountToReturn > getMinTransferAmount(exId)) {
-            safeLog('log', `[CLEANUP] Phát hiện ${amountToReturn.toFixed(2)} USDT trên ${exId.toUpperCase()}. Bắt đầu chuyển về Hub...`);
-            await executeSingleFundTransfer(exId, HUB_EXCHANGE_ID, amountToReturn);
-        } else {
-            safeLog('log', `[CLEANUP] Không có đủ tiền trên ${exId.toUpperCase()} để chuyển về Hub.`);
+        try {
+            const exchange = exchanges[exId];
+            const fromWallet = (exId === 'bitget') ? 'swap' : 'future';
+            const balanceData = (exId === 'kucoinfutures') ? await exchange.fetchBalance() : await exchange.fetchBalance({ 'type': fromWallet });
+            
+            const amountToReturn = balanceData?.free?.USDT || 0;
+            
+            if (amountToReturn > getMinTransferAmount(exId)) {
+                // Áp dụng hệ số an toàn 99.9% để tránh lỗi "Exceeded Max transferable quantity"
+                const safeAmountToTransfer = amountToReturn * 0.999;
+                safeLog('log', `[CLEANUP] Phát hiện ${amountToReturn.toFixed(2)} USDT trên ${exId.toUpperCase()}. Bắt đầu chuyển ${safeAmountToTransfer.toFixed(2)} (99.9%) về Hub...`);
+                await executeSingleFundTransfer(exId, HUB_EXCHANGE_ID, safeAmountToTransfer);
+            } else {
+                safeLog('log', `[CLEANUP] Không có đủ tiền trên ${exId.toUpperCase()} để chuyển về Hub.`);
+            }
+        } catch (e) {
+            safeLog('error', `[CLEANUP] Lỗi khi xử lý dọn dẹp cho sàn ${exId}: ${e.message}`);
         }
     }
     
@@ -273,8 +285,8 @@ async function returnFundsToHub() {
     capitalManagementState = 'IDLE';
     selectedOpportunityForNextTrade = null;
 }
+// --- END: FIX 2 ---
 
-// --- CÁC HÀM GIAO DỊCH ---
 const normalizeExchangeId = (id) => {
     if (!id) return null;
     const lowerId = id.toLowerCase().trim();
@@ -288,21 +300,18 @@ async function processServerData(serverData) {
         bestPotentialOpportunityForDisplay = null;
         return;
     }
-    const opportunities = serverData.arbitrageData
-        .filter(op => {
-            if (!op?.exchanges || typeof op.exchanges !== 'string' || op.estimatedPnl < MIN_PNL_PERCENTAGE) return false;
-            const [shortExRaw, longExRaw] = op.exchanges.split(' / ');
-            if (!shortExRaw || !longExRaw) return false;
-            const shortExchange = normalizeExchangeId(shortExRaw);
-            const longExchange = normalizeExchangeId(longExRaw);
-            return exchanges[shortExchange] && !exchangeHealth[shortExchange]?.isDisabled &&
-                   exchanges[longExchange] && !exchangeHealth[longExchange]?.isDisabled;
-        })
-        .map(op => {
-            const [shortExRaw, longExRaw] = op.exchanges.split(' / ');
-            op.details = { shortExchange: normalizeExchangeId(shortExRaw), longExchange: normalizeExchangeId(longExRaw) };
-            return op;
-        });
+    const opportunities = serverData.arbitrageData.filter(op => {
+        if (!op?.exchanges || typeof op.exchanges !== 'string' || op.estimatedPnl < MIN_PNL_PERCENTAGE) return false;
+        const [shortExRaw, longExRaw] = op.exchanges.split(' / ');
+        if (!shortExRaw || !longExRaw) return false;
+        const shortExchange = normalizeExchangeId(shortExRaw);
+        const longExchange = normalizeExchangeId(longExRaw);
+        return exchanges[shortExchange] && !exchangeHealth[shortExchange]?.isDisabled && exchanges[longExchange] && !exchangeHealth[longExchange]?.isDisabled;
+    }).map(op => {
+        const [shortExRaw, longExRaw] = op.exchanges.split(' / ');
+        op.details = { shortExchange: normalizeExchangeId(shortExRaw), longExchange: normalizeExchangeId(longExRaw) };
+        return op;
+    });
     const sortedOpportunities = opportunities.sort((a, b) => b.estimatedPnl - a.estimatedPnl);
     bestPotentialOpportunityForDisplay = sortedOpportunities.length > 0 ? sortedOpportunities[0] : null;
     
@@ -317,7 +326,7 @@ async function processServerData(serverData) {
         selectedOpportunityForNextTrade = null;
     }
 }
-// ... (Các hàm trade khác không thay đổi)
+
 async function getExchangeSpecificSymbol(exchange, rawCoinSymbol) {
     try {
         if (!exchange.markets || Object.keys(exchange.markets).length === 0) await exchange.loadMarkets(true);
@@ -335,6 +344,7 @@ async function getExchangeSpecificSymbol(exchange, rawCoinSymbol) {
     }
     return null;
 }
+
 async function setLeverageSafely(exchange, symbol, desiredLeverage) {
     const params = (exchange.id === 'kucoinfutures') ? { 'marginMode': 'cross' } : {};
     try {
@@ -345,6 +355,7 @@ async function setLeverageSafely(exchange, symbol, desiredLeverage) {
         return null;
     }
 }
+
 async function computeOrderDetails(exchange, symbol, targetNotionalUSDT, leverage, availableBalance) {
     await exchange.loadMarkets();
     const market = exchange.market(symbol);
@@ -375,6 +386,7 @@ async function computeOrderDetails(exchange, symbol, targetNotionalUSDT, leverag
     }
     return { amount, price, notional: currentNotional, requiredMargin: currentNotional / leverage };
 }
+
 async function placeTpSlOrders(exchange, symbol, side, amount, entryPrice, collateral, notionalValue) {
     if (!entryPrice || typeof entryPrice !== 'number' || entryPrice <= 0) return { tpOrderId: null, slOrderId: null };
     if (!notionalValue || notionalValue <= 0) return { tpOrderId: null, slOrderId: null };
@@ -414,6 +426,7 @@ async function placeTpSlOrders(exchange, symbol, side, amount, entryPrice, colla
         return { tpOrderId: null, slOrderId: null };
     }
 }
+
 async function executeTrades(opportunity, percentageToUse) {
     const { coin, commonLeverage: desiredLeverage } = opportunity;
     const { shortExchange, longExchange } = opportunity.details;
@@ -516,6 +529,7 @@ async function executeTrades(opportunity, percentageToUse) {
     capitalManagementState = 'TRADE_OPEN';
     return true;
 }
+
 async function cancelPendingOrders(tradeDetails) {
     if (!tradeDetails) return;
     const ordersToCancel = [
@@ -536,6 +550,7 @@ async function cancelPendingOrders(tradeDetails) {
         }
     }));
 }
+
 async function closeTradeNow() {
     if (!currentTradeDetails) return false;
     const tradeToClose = { ...currentTradeDetails };
@@ -564,6 +579,7 @@ async function closeTradeNow() {
         return false;
     }
 }
+
 async function calculatePnlAfterDelay(closedTrade) {
     await sleep(5000);
     await updateBalances();
@@ -578,7 +594,6 @@ async function calculatePnlAfterDelay(closedTrade) {
     tradeAwaitingPnl = null;
 }
 
-// --- VÒNG LẶP CHÍNH CỦA BOT ---
 async function mainBotLoop() {
     if (botState !== 'RUNNING') return;
 
@@ -633,7 +648,6 @@ async function mainBotLoop() {
     }
 }
 
-// --- ĐIỀU KHIỂN BOT VÀ SERVER API ---
 function startBot() {
     if (botState === 'RUNNING') return false;
     botState = 'RUNNING';
@@ -675,16 +689,9 @@ const botServer = http.createServer(async (req, res) => {
             const internalTransferExchanges = activeExchangeIds.filter(id => exchanges[id]);
             res.writeHead(200, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ 
-                botState, 
-                capitalManagementState,
-                balances, 
-                tradeHistory, 
-                bestPotentialOpportunityForDisplay, 
-                currentTradeDetails, 
-                exchangeHealth, 
-                transferStatus,
-                transferExchanges,
-                internalTransferExchanges
+                botState, capitalManagementState, balances, tradeHistory, 
+                bestPotentialOpportunityForDisplay, currentTradeDetails, 
+                exchangeHealth, transferStatus, transferExchanges, internalTransferExchanges
             }));
         } else if (url === '/bot-api/start' && method === 'POST') {
              try { currentPercentageToUse = parseFloat(JSON.parse(body).percentageToUse) || 50; } catch { currentPercentageToUse = 50; }
@@ -726,7 +733,6 @@ const botServer = http.createServer(async (req, res) => {
         else {
             res.writeHead(404).end('Not Found');
         }
-
     } catch (error) {
         safeLog('error', `[SERVER] Lỗi xử lý yêu cầu ${method} ${url}:`, error);
         if (!res.headersSent) {
