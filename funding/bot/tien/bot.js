@@ -43,6 +43,7 @@ let currentPercentageToUse = 50;
 let exchangeHealth = {};
 let transferStatus = { inProgress: false, message: null };
 let selectedOpportunityForNextTrade = null;
+let hasLoggedNotFoundThisHour = false;
 
 const safeLog = (type, ...args) => {
     try {
@@ -88,8 +89,7 @@ function getMinTransferAmount(exchangeId) {
     return 5;
 }
 
-function getTargetDepositInfo(fromExchangeId, toExchangeId) {
-    const network = 'BEP20';
+function getTargetDepositInfo(toExchangeId, network) {
     const depositAddress = usdtDepositAddressesByNetwork[toExchangeId]?.[network];
     if (!depositAddress || depositAddress.startsWith('ĐIỀN ĐỊA CHỈ')) {
         safeLog('error', `[HELPER] Lỗi: Địa chỉ nạp tiền cho ${toExchangeId.toUpperCase()} qua mạng ${network} chưa được cấu hình.`);
@@ -165,14 +165,17 @@ async function executeSingleFundTransfer(fromExchangeId, toExchangeId, amount) {
         await sourceExchange.transfer('USDT', amount, fromWallet, toWallet);
         await sleep(5000);
 
-        const targetDepositInfo = getTargetDepositInfo(fromExchangeId, toExchangeId);
+        let network = 'BEP20';
+        if (fromExchangeId === 'kucoinfutures') {
+            network = 'APTOS';
+            safeLog('log', `[TRANSFER] Sàn nguồn là KuCoin, đã tự động chọn mạng lưới ${network}.`);
+        }
+        
+        const targetDepositInfo = getTargetDepositInfo(toExchangeId, network);
         if(!targetDepositInfo) throw new Error("Không tìm thấy thông tin địa chỉ nạp tiền.");
         
         transferStatus.message = `2/4: Gửi lệnh rút ${amount.toFixed(2)} USDT đến ${toExchangeId}...`;
-        const params = { network: targetDepositInfo.network };
-        if (fromExchangeId !== 'binanceusdm') {
-             params.chain = targetDepositInfo.network;
-        }
+        const params = { network: targetDepositInfo.network, chain: targetDepositInfo.network };
         await sourceExchange.withdraw('USDT', amount, targetDepositInfo.address, undefined, params);
         
         transferStatus.message = `3/4: Đang chờ blockchain xác nhận và tiền về ${toExchangeId}...`;
@@ -263,13 +266,19 @@ async function returnFundsToHub() {
             const balanceData = (exId === 'kucoinfutures') ? await exchange.fetchBalance() : await exchange.fetchBalance({ 'type': fromWallet });
             
             const amountToReturn = balanceData?.free?.USDT || 0;
-            
-            if (amountToReturn > getMinTransferAmount(exId)) {
-                const safeAmountToTransfer = amountToReturn * 0.999;
-                safeLog('log', `[CLEANUP] Phát hiện ${amountToReturn.toFixed(2)} USDT trên ${exId.toUpperCase()}. Bắt đầu chuyển ${safeAmountToTransfer.toFixed(2)} (99.9%) về Hub...`);
-                await executeSingleFundTransfer(exId, HUB_EXCHANGE_ID, safeAmountToTransfer);
+            let amountToSend = 0;
+
+            if (exId === 'kucoinfutures') {
+                amountToSend = amountToReturn - 0.5;
             } else {
-                safeLog('log', `[CLEANUP] Không có đủ tiền trên ${exId.toUpperCase()} để chuyển về Hub.`);
+                amountToSend = amountToReturn * 0.999;
+            }
+            
+            if (amountToSend > getMinTransferAmount(exId)) {
+                safeLog('log', `[CLEANUP] Phát hiện ${amountToReturn.toFixed(2)} USDT trên ${exId.toUpperCase()}. Bắt đầu chuyển ${amountToSend.toFixed(2)} về Hub...`);
+                await executeSingleFundTransfer(exId, HUB_EXCHANGE_ID, amountToSend);
+            } else {
+                safeLog('log', `[CLEANUP] Không có đủ tiền trên ${exId.toUpperCase()} để chuyển về Hub (Sau khi trừ phí).`);
             }
         } catch (e) {
             safeLog('error', `[CLEANUP] Lỗi khi xử lý dọn dẹp cho sàn ${exId}: ${e.message}`);
@@ -576,9 +585,12 @@ async function mainBotLoop() {
         const now = new Date();
         const currentMinute = now.getUTCMinutes();
         const currentSecond = now.getUTCSeconds();
+        
+        if (currentMinute === 1) {
+            hasLoggedNotFoundThisHour = false;
+        }
 
         if (capitalManagementState === 'IDLE' && currentMinute >= 50 && currentMinute < 59) {
-            safeLog('log', "[TIMER] Bắt đầu tìm kiếm cơ hội trong khung giờ vàng...");
             const serverData = await fetchDataFromServer();
             await processServerData(serverData);
             
@@ -589,10 +601,11 @@ async function mainBotLoop() {
 
             if (opportunityToExecute) {
                 selectedOpportunityForNextTrade = opportunityToExecute;
-                safeLog('info', `[TIMER] Đã chọn cơ hội tốt nhất: ${selectedOpportunityForNextTrade.coin} trên ${selectedOpportunityForNextTrade.exchanges}. Bắt đầu gom vốn.`);
+                safeLog('info', `[TIMER] ✅ ĐÃ CHỌN CƠ HỘI: ${selectedOpportunityForNextTrade.coin} trên ${selectedOpportunityForNextTrade.exchanges}. Bắt đầu gom vốn.`);
                 await manageFundDistribution(selectedOpportunityForNextTrade);
-            } else {
-                safeLog('log', "[TIMER] Không tìm thấy cơ hội nào đủ điều kiện.");
+            } else if (currentMinute === 58 && !hasLoggedNotFoundThisHour) {
+                safeLog('log', "[TIMER] Hết khung giờ vàng, không chọn được cơ hội nào.");
+                hasLoggedNotFoundThisHour = true;
             }
         }
         else if (capitalManagementState === 'FUNDS_READY' && currentMinute === 59) {
