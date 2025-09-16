@@ -74,7 +74,6 @@ activeExchangeIds.forEach(id => {
 
 function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
 
-// --- START: FIX 1 - THÊM LẠI HÀM BỊ THIẾU ---
 async function fetchDataFromServer() {
     try {
         const response = await fetch(SERVER_DATA_URL);
@@ -85,7 +84,6 @@ async function fetchDataFromServer() {
         return null;
     }
 }
-// --- END: FIX 1 ---
 
 function getMinTransferAmount(exchangeId) {
     if (exchangeId === 'binanceusdm') return FUND_TRANSFER_MIN_AMOUNT_BINANCE;
@@ -251,7 +249,6 @@ async function manageFundDistribution(opportunity) {
     return true;
 }
 
-// --- START: FIX 2 - LÀM CHO HÀM DỌN DẸP AN TOÀN HƠN ---
 async function returnFundsToHub() {
     capitalManagementState = 'CLEANING_UP';
     safeLog('info', "[CLEANUP] Bắt đầu Giai đoạn 3: Dọn dẹp và chuyển toàn bộ vốn về Hub.");
@@ -269,7 +266,6 @@ async function returnFundsToHub() {
             const amountToReturn = balanceData?.free?.USDT || 0;
             
             if (amountToReturn > getMinTransferAmount(exId)) {
-                // Áp dụng hệ số an toàn 99.9% để tránh lỗi "Exceeded Max transferable quantity"
                 const safeAmountToTransfer = amountToReturn * 0.999;
                 safeLog('log', `[CLEANUP] Phát hiện ${amountToReturn.toFixed(2)} USDT trên ${exId.toUpperCase()}. Bắt đầu chuyển ${safeAmountToTransfer.toFixed(2)} (99.9%) về Hub...`);
                 await executeSingleFundTransfer(exId, HUB_EXCHANGE_ID, safeAmountToTransfer);
@@ -285,7 +281,6 @@ async function returnFundsToHub() {
     capitalManagementState = 'IDLE';
     selectedOpportunityForNextTrade = null;
 }
-// --- END: FIX 2 ---
 
 const normalizeExchangeId = (id) => {
     if (!id) return null;
@@ -717,22 +712,44 @@ const botServer = http.createServer(async (req, res) => {
             res.writeHead(202, { 'Content-Type': 'application/json' }).end(JSON.stringify({ success: true, message: 'Đã nhận yêu cầu chuyển tiền.' }));
         } else if (url === '/bot-api/internal-transfer' && method === 'POST') {
             if (botState === 'RUNNING' && capitalManagementState !== 'IDLE') {
-                 return res.writeHead(429, { 'Content-Type': 'application/json' }).end(JSON.stringify({ success: false, message: 'Bot đang bận, không thể chuyển tiền thủ công.' }));
+                return res.writeHead(429, { 'Content-Type': 'application/json' }).end(JSON.stringify({ success: false, message: 'Bot đang bận, không thể chuyển tiền thủ công.' }));
             }
-            const { exchangeId, amountStr, fromAccount, toAccount } = JSON.parse(body);
+            const { exchangeId, amountStr, fromAccount: genericFrom, toAccount: genericTo } = JSON.parse(body);
             const amount = parseFloat(amountStr);
+        
+            if(!exchangeId || !amount || isNaN(amount) || amount <= 0 || !genericFrom || !genericTo || genericFrom === genericTo) {
+                return res.writeHead(400, { 'Content-Type': 'application/json' }).end(JSON.stringify({ success: false, message: `Dữ liệu không hợp lệ.` }));
+            }
+            
             const exchange = exchanges[exchangeId];
+            if (!exchange) {
+                return res.writeHead(500, { 'Content-Type': 'application/json' }).end(JSON.stringify({ success: false, message: `Sàn ${exchangeId} chưa được khởi tạo.` }));
+            }
+            
+            let from = genericFrom;
+            let to = genericTo;
+        
+            if (exchangeId === 'bitget') {
+                if (from === 'future') from = 'swap';
+                if (to === 'future') to = 'swap';
+            } else if (exchangeId === 'kucoinfutures') {
+                if (from === 'spot') from = 'main';
+                if (to === 'spot') to = 'main';
+            }
+        
             try {
-                await exchange.transfer('USDT', amount, fromAccount, toAccount);
+                await exchange.transfer('USDT', amount, from, to);
                 setTimeout(updateBalances, 3000);
                 res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ success: true, message: 'Chuyển nội bộ thành công.' }));
             } catch (e) {
+                safeLog('error', `[INTERNAL_TRANSFER] Lỗi khi chuyển ${amount} USDT từ ${from} -> ${to} trên ${exchangeId}:`, e);
                 res.writeHead(500, { 'Content-Type': 'application/json' }).end(JSON.stringify({ success: false, message: `Lỗi: ${e.message}` }));
             }
         }
         else {
             res.writeHead(404).end('Not Found');
         }
+
     } catch (error) {
         safeLog('error', `[SERVER] Lỗi xử lý yêu cầu ${method} ${url}:`, error);
         if (!res.headersSent) {
