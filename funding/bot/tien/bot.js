@@ -12,7 +12,7 @@ const {
     kucoinApiKey, kucoinApiSecret, kucoinApiPassword
 } = require('./config.js');
 
-const BOT_PORT = 5008; // Thay đổi port nếu cần
+const BOT_PORT = 5006; // Thay đổi port nếu cần
 const SERVER_DATA_URL = 'http://localhost:5005/api/data';
 const HUB_EXCHANGE_ID = 'binanceusdm';
 
