@@ -428,11 +428,23 @@ async function executeTrades(opportunity, percentageToUse) {
         getReliableFillPrice(shortEx, shortSymbol, shortOrder.id),
         getReliableFillPrice(longEx, longSymbol, longOrder.id)
     ]);
+    // Start: NEW_CODE_BLOCK_1
+    const tradeBaseInfo = {
+        ...opportunity.details, coin,
+        openTime: Date.now(),
+        shortOrderAmount: shortOrderDetails.amount, longOrderAmount: longOrderDetails.amount,
+        commonLeverageUsed: leverageToUse, shortOriginalSymbol: shortSymbol, longOriginalSymbol: longSymbol,
+        shortBalanceBefore: shortBalance, longBalanceBefore: longBalance,
+        // Thêm các thông tin yêu cầu vào đây
+        collateralUsed: collateral,
+        estimatedPnlFromOpportunity: opportunity.estimatedPnl,
+    };
+    // End: NEW_CODE_BLOCK_1
+
     if (!shortEntryPrice || !longEntryPrice) {
-        currentTradeDetails = { 
-            ...opportunity.details, coin, status: 'MANUAL_CHECK_NO_SL', openTime: Date.now(), 
-            shortOrderAmount: shortOrderDetails.amount, longOrderAmount: longOrderDetails.amount, 
-            commonLeverageUsed: leverageToUse, shortOriginalSymbol: shortSymbol, longOriginalSymbol: longSymbol 
+        currentTradeDetails = {
+            ...tradeBaseInfo,
+            status: 'MANUAL_CHECK_NO_SL',
         };
         safeLog('warn', `[TRADE] Không lấy được giá khớp lệnh, sẽ không đặt TP/SL. Vui lòng kiểm tra thủ công.`);
         return true; // Giao dịch vẫn thành công nhưng không có TP/SL
@@ -442,10 +454,8 @@ async function executeTrades(opportunity, percentageToUse) {
         placeTpSlOrders(longEx, longSymbol, 'buy', longOrderDetails.amount, longEntryPrice, collateral, longOrderDetails.notional)
     ]);
     currentTradeDetails = {
-        ...opportunity.details, coin, status: 'OPEN', openTime: Date.now(),
-        shortOrderAmount: shortOrderDetails.amount, longOrderAmount: longOrderDetails.amount,
-        commonLeverageUsed: leverageToUse, shortOriginalSymbol: shortSymbol, longOriginalSymbol: longSymbol,
-        shortBalanceBefore: shortBalance, longBalanceBefore: longBalance,
+        ...tradeBaseInfo,
+        status: 'OPEN',
         shortTpOrderId: shortTpSlIds.tpOrderId, shortSlOrderId: shortTpSlIds.slOrderId,
         longTpOrderId: longTpSlIds.tpOrderId, longSlOrderId: longTpSlIds.slOrderId,
     };
@@ -543,7 +553,9 @@ async function mainBotLoop() {
         else if (!tradeAwaitingPnl) {
             // **Bước 1: Chọn coin phút 50**
             if (currentMinute === 50 && !selectedOpportunityForNextTrade) {
-                safeLog('log', "[TIMER] Phút 50: Bắt đầu tìm kiếm cơ hội...");
+                // Start: NEW_CODE_BLOCK_2 - Xóa log spam
+                // safeLog('log', "[TIMER] Phút 50: Bắt đầu tìm kiếm cơ hội..."); // Có thể giữ lại nếu muốn
+                // End: NEW_CODE_BLOCK_2
                 const serverData = await fetchDataFromServer();
                 await processServerData(serverData);
 
@@ -553,12 +565,15 @@ async function mainBotLoop() {
                     if (minutesToFunding > 0 && minutesToFunding < MIN_MINUTES_FOR_EXECUTION) {
                         selectedOpportunityForNextTrade = bestOpp;
                         safeLog('info', `[TIMER] Đã chọn: ${bestOpp.coin} trên ${bestOpp.exchanges}. Chờ đến phút 59 để vào lệnh.`);
-                    } else {
-                        safeLog('warn', `[TIMER] Cơ hội tốt nhất không hợp lệ (còn ${minutesToFunding.toFixed(1)} phút).`);
-                    }
-                } else {
-                    safeLog('warn', "[TIMER] Không có cơ hội nào tại phút 50.");
+                    } 
+                    // Start: NEW_CODE_BLOCK_3 - Xóa log spam
+                    // else {
+                    //     safeLog('warn', `[TIMER] Cơ hội tốt nhất không hợp lệ (còn ${minutesToFunding.toFixed(1)} phút).`);
+                    // }
+                    // } else {
+                    //     safeLog('warn', "[TIMER] Không có cơ hội nào tại phút 50.");
                 }
+                // End: NEW_CODE_BLOCK_3
             }
             // **Bước 2: Mở lệnh phút 59**
             else if (currentMinute === 59 && selectedOpportunityForNextTrade && !tradeExecutionScheduled) {
@@ -626,8 +641,32 @@ const botServer = http.createServer(async (req, res) => {
         } else if (url === '/bot-api/status' && method === 'GET') {
             const transferExchanges = ['binanceusdm', 'bitget', 'kucoinfutures'];
             const internalTransferExchanges = activeExchangeIds.filter(id => exchanges[id]);
+            
+            // Start: NEW_CODE_BLOCK_4 - Thêm số tiền mở lệnh ước tính
+            let estimatedOpenAmount = null;
+            if (bestPotentialOpportunityForDisplay && bestPotentialOpportunityForDisplay.details) {
+                const { shortExchange, longExchange } = bestPotentialOpportunityForDisplay.details;
+                const shortBalance = balances[shortExchange]?.available || 0;
+                const longBalance = balances[longExchange]?.available || 0;
+                const minBalance = Math.min(shortBalance, longBalance);
+                estimatedOpenAmount = minBalance * (currentPercentageToUse / 100);
+            }
+            // End: NEW_CODE_BLOCK_4
+            
             res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ botState, balances, tradeHistory, bestPotentialOpportunityForDisplay, currentTradeDetails, activeExchangeIds, exchangeHealth, transferExchanges, internalTransferExchanges, transferStatus }));
+            res.end(JSON.stringify({
+                botState,
+                balances,
+                tradeHistory,
+                bestPotentialOpportunityForDisplay,
+                currentTradeDetails,
+                activeExchangeIds,
+                exchangeHealth,
+                transferExchanges,
+                internalTransferExchanges,
+                transferStatus,
+                estimatedOpenAmount // Thêm dữ liệu này vào response
+            }));
         } else if (url === '/bot-api/start' && method === 'POST') {
             try { currentPercentageToUse = parseFloat(JSON.parse(body).percentageToUse) || 50; } catch { currentPercentageToUse = 50; }
             res.writeHead(200, { 'Content-Type': 'application/json' });
