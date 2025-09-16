@@ -101,7 +101,11 @@
                     <th>Thời gian</th>
                     <th>Coin</th>
                     <th>Sàn (Short/Long)</th>
-                    <th>PNL Thực tế</th>
+                    <!-- START: MODIFIED_CODE_BLOCK_1 -->
+                    <th>PNL Ước tính (%)</th>
+                    <th>Vốn sử dụng (USDT)</th>
+                    <th>PNL Thực tế (USDT)</th>
+                    <!-- END: MODIFIED_CODE_BLOCK_1 -->
                 </tr>
             </thead>
             <tbody id="tradeHistoryBody"></tbody>
@@ -134,7 +138,18 @@
             const oppEl = document.getElementById('bestOpportunityDisplay');
             if (data.bestPotentialOpportunityForDisplay) {
                 const opp = data.bestPotentialOpportunityForDisplay;
-                oppEl.innerHTML = `<p><strong>Coin:</strong> ${opp.coin}</p><p><strong>Sàn:</strong> ${opp.exchanges}</p><p><strong>PNL ước tính:</strong> ${opp.estimatedPnl.toFixed(3)}%</p>`;
+                // START: MODIFIED_CODE_BLOCK_2
+                let estimatedAmountHtml = '---';
+                if (data.estimatedOpenAmount !== null && data.estimatedOpenAmount > 0) {
+                    estimatedAmountHtml = data.estimatedOpenAmount.toFixed(4);
+                }
+                oppEl.innerHTML = `
+                    <p><strong>Coin:</strong> ${opp.coin}</p>
+                    <p><strong>Sàn:</strong> ${opp.exchanges}</p>
+                    <p><strong>PNL ước tính:</strong> ${opp.estimatedPnl.toFixed(3)}%</p>
+                    <p><strong>Số tiền mở lệnh ước tính:</strong> <span class="text-yellow">${estimatedAmountHtml}</span> USDT</p>
+                `;
+                // END: MODIFIED_CODE_BLOCK_2
             } else {
                 oppEl.innerHTML = '<p>Không có cơ hội nào khả dụng.</p>';
             }
@@ -149,15 +164,22 @@
 
             const historyBody = document.getElementById('tradeHistoryBody');
             historyBody.innerHTML = '';
+            // START: MODIFIED_CODE_BLOCK_3
             data.tradeHistory.forEach(trade => {
                 const row = historyBody.insertRow();
                 row.insertCell().textContent = new Date(trade.closeTime || trade.openTime).toLocaleString('vi-VN');
                 row.insertCell().textContent = trade.coin;
                 row.insertCell().textContent = `${trade.shortExchange.toUpperCase()}/${trade.longExchange.toUpperCase()}`;
+                
+                // Thêm các cột mới
+                row.insertCell().textContent = trade.estimatedPnlFromOpportunity ? trade.estimatedPnlFromOpportunity.toFixed(2) + '%' : 'N/A';
+                row.insertCell().textContent = trade.collateralUsed ? trade.collateralUsed.toFixed(4) : 'N/A';
+
                 const pnlCell = row.insertCell();
                 pnlCell.textContent = trade.actualPnl ? trade.actualPnl.toFixed(4) + ' USDT' : 'N/A';
                 pnlCell.className = trade.actualPnl >= 0 ? 'text-green' : 'text-red';
             });
+            // END: MODIFIED_CODE_BLOCK_3
             
             if (fromSelect.options.length === 0 && data.transferExchanges) {
                  populateExternalDropdowns(data.transferExchanges);
@@ -230,27 +252,16 @@
     document.getElementById('internalTransferBtn').addEventListener('click', (e) => {
         const fromAccount = document.getElementById('internalFromAccount').value;
         const toAccount = document.getElementById('internalToAccount').value;
-
-        let finalFrom = fromAccount;
-        let finalTo = toAccount;
-
-        // Logic tự xác định ví chính cho từng sàn
-        if (fromAccount === 'spot') {
-            finalFrom = (internalExchangeSelect.value === 'kucoinfutures') ? 'main' : 'spot';
-        }
-        if (toAccount === 'spot') {
-            finalTo = (internalExchangeSelect.value === 'kucoinfutures') ? 'main' : 'spot';
-        }
         
-        if (finalFrom === finalTo) {
+        if (fromAccount === toAccount) {
             document.getElementById('internalTransferStatusDisplay').innerHTML = `<span class="text-red">Không thể chuyển giữa cùng một loại ví.</span>`;
             return;
         }
 
         postRequest('/bot-api/internal-transfer', {
             exchangeId: internalExchangeSelect.value,
-            fromAccount: finalFrom,
-            toAccount: finalTo,
+            fromAccount: fromAccount,
+            toAccount: toAccount,
             amountStr: document.getElementById('internalAmount').value
         }, 'internalTransferStatusDisplay');
     });
@@ -259,4 +270,4 @@
     setInterval(updateBotStatus, 5000);
 </script>
 </body>
-</html>
+</html>```
