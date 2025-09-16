@@ -174,7 +174,7 @@ async function pollForBalanceArrival(exchangeId, amountToReceive, initialBalance
         for (let i = 0; i < maxPollAttempts; i++) {
             await sleep(pollIntervalMs);
             try {
-                const currentBalanceData = await exchange.fetchBalance(); // Spot/Main wallets are default
+                const currentBalanceData = await exchange.fetchBalance();
                 const currentBalance = currentBalanceData?.free?.USDT || 0;
                 safeLog('log', `[POLL] Lần ${i+1}/${maxPollAttempts}: Số dư '${targetWalletType}' hiện tại trên ${exchangeId.toUpperCase()} là ${currentBalance.toFixed(4)} USDT.`);
                 
@@ -254,8 +254,11 @@ async function executeSingleFundTransfer(fromExchangeId, toExchangeId, amount) {
         if (toExchangeId === 'kucoinfutures') { targetFromWallet = 'main'; }
         if (toExchangeId === 'bitget') { targetToWallet = 'swap'; }
         
-        const preciseAmountToTransfer = targetExchange.currencyToPrecision('USDT', receivedAmount);
-        await targetExchange.transfer('USDT', parseFloat(preciseAmountToTransfer), targetFromWallet, targetToWallet);
+        let internalTransfererExchange = exchanges[targetCheckerId];
+        if (!internalTransfererExchange) throw new Error(`Instance ${targetCheckerId} không tồn tại để chuyển tiền nội bộ.`);
+
+        const preciseAmountToTransfer = internalTransfererExchange.currencyToPrecision('USDT', receivedAmount);
+        await internalTransfererExchange.transfer('USDT', parseFloat(preciseAmountToTransfer), targetFromWallet, targetToWallet);
         
         transferStatus = { inProgress: false, message: `✅ Hoàn tất chuyển tiền tới ${toExchangeId}!` };
         safeLog('info', `[TRANSFER] ${transferStatus.message}`);
@@ -329,14 +332,13 @@ async function returnFundsToHub() {
             const fromWallet = (exId === 'bitget') ? 'swap' : 'future';
             const balanceData = (exId === 'kucoinfutures') ? await exchange.fetchBalance() : await exchange.fetchBalance({ 'type': fromWallet });
             
-            const amountToReturn = balanceData?.free?.USDT || 0;
-            const amountToSend = amountToReturn * 0.999;
+            const amountToSend = balanceData?.free?.USDT || 0;
             
             if (amountToSend > getMinTransferAmount(exId)) {
-                safeLog('log', `[CLEANUP] Phát hiện ${amountToReturn.toFixed(2)} USDT trên ${exId.toUpperCase()}. Bắt đầu chuyển ${amountToSend.toFixed(2)} về Hub...`);
+                safeLog('log', `[CLEANUP] Phát hiện ${amountToSend.toFixed(4)} USDT trên ${exId.toUpperCase()}. Bắt đầu chuyển toàn bộ về Hub...`);
                 await executeSingleFundTransfer(exId, HUB_EXCHANGE_ID, amountToSend);
             } else {
-                safeLog('log', `[CLEANUP] Không có đủ tiền trên ${exId.toUpperCase()} để chuyển về Hub (Sau khi trừ phí).`);
+                safeLog('log', `[CLEANUP] Không có đủ tiền trên ${exId.toUpperCase()} để chuyển về Hub.`);
             }
         } catch (e) {
             safeLog('error', `[CLEANUP] Lỗi khi xử lý dọn dẹp cho sàn ${exId}: ${e.message}`);
