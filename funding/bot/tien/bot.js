@@ -224,10 +224,7 @@ async function executeSingleFundTransfer(fromExchangeId, toExchangeId, amount) {
         
         let chainNameForApi = networkLookupKey;
         if (fromExchangeId === 'kucoinfutures') {
-            // ==============================================================================
-            // == THAY THẾ 'KEY_CHINH_XAC' BẰNG KEY BẠN TÌM ĐƯỢC TỪ SCRIPT check_kucoin_chains.js ==
-            chainNameForApi = 'KEY_CHINH_XAC'; 
-            // ==============================================================================
+            chainNameForApi = 'APT';
             safeLog('log', `[TRANSFER] Sửa tên chain cho API KuCoin thành: '${chainNameForApi}'`);
         }
         
