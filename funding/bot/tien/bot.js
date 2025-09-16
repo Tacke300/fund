@@ -211,7 +211,7 @@ async function executeSingleFundTransfer(fromExchangeId, toExchangeId, amount) {
         let withdrawerExchange = sourceExchange;
         
         if (fromExchangeId === 'kucoinfutures') {
-            network = 'APTOS';
+            network = 'TRC20';
             withdrawerExchange = exchanges['kucoin'];
             if (!withdrawerExchange) throw new Error("Instance KuCoin (Spot) chưa được khởi tạo để thực hiện rút tiền.");
             safeLog('log', `[TRANSFER] Sàn nguồn là KuCoin, đã đổi sang instance SPOT và mạng lưới ${network} để rút tiền.`);
