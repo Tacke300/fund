@@ -20,7 +20,7 @@ const PORT = 5005;
 // ----- CẤU HÌNH -----
 const EXCHANGE_IDS = ['binanceusdm', 'bingx', 'okx', 'bitget'];
 const FUNDING_DIFFERENCE_THRESHOLD = 0.00001;
-const MINIMUM_PNL_THRESHOLD = 5; 
+const MINIMUM_PNL_THRESHOLD = 1; 
 const IMMINENT_THRESHOLD_MINUTES = 15;
 
 const FULL_LEVERAGE_REFRESH_AT_HOUR = 0;
