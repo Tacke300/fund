@@ -136,7 +136,7 @@ function getTargetDepositInfo(toExchangeId, network) {
     return { network, address: depositAddress };
 }
 
-// SỬA LỖI BITGET: Khôi phục logic đúng cho Bitget
+// SỬA LỖI BITGET: Khôi phục logic đúng, yêu cầu cả 'chain' và 'network'
 function getWithdrawParams(exchangeId, network) {
     const networkUpper = network.toUpperCase();
     if (exchangeId.includes('binance')) {
