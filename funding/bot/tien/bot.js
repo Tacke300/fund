@@ -18,7 +18,7 @@ const HUB_EXCHANGE_ID = 'binanceusdm';
 const MIN_PNL_PERCENTAGE = 1;
 const MIN_MINUTES_FOR_EXECUTION = 15;
 const DATA_FETCH_INTERVAL_SECONDS = 1;
-const MAX_CONSECUTIVE_FAILS = 3;
+const MAX_CONSEC_FAILS = 3;
 const MIN_COLLATERAL_FOR_TRADE = 0.1;
 const TP_SL_PNL_PERCENTAGE = 150;
 
@@ -133,29 +133,22 @@ function getTargetDepositInfo(toExchangeId, network) {
     return { network, address: depositAddress };
 }
 
-// SỬA LỖI 1: Hàm mới để lấy đúng tham số mạng cho từng sàn
 function getWithdrawParams(exchangeId, network) {
     const networkUpper = network.toUpperCase();
-    // Binance và các sàn con của nó thường dùng 'network' và 'BSC' cho BEP20
     if (exchangeId.includes('binance')) {
         if (networkUpper === 'BEP20') return { network: 'BSC' };
     }
-    // KuCoin dùng 'network' và 'APT' cho Aptos
     if (exchangeId.includes('kucoin')) {
         if (networkUpper === 'APTOS') return { network: 'APT' };
     }
-    // Bitget thường dùng 'chain'
     if (exchangeId.includes('bitget')) {
         if (networkUpper === 'BEP20') return { chain: 'BSC' };
     }
-    // OKX thường dùng 'chain' và tên mạng cụ thể
     if (exchangeId.includes('okx')) {
         if (networkUpper === 'BEP20') return { chain: 'BEP20' };
     }
-    // Trường hợp mặc định an toàn, dùng 'network'
     return { network: networkUpper };
 }
-
 
 async function fetchAllBalances(type = 'future') {
     const allBalances = {};
@@ -267,7 +260,6 @@ async function executeSingleFundTransfer(fromExchangeId, toExchangeId, amount) {
         
         transferStatus.message = `2/2: Gửi lệnh rút ${amount.toFixed(2)} USDT đến ${toExchangeId}. Kích hoạt chế độ theo dõi...`;
         
-        // SỬA LỖI 1: Sử dụng hàm mới để lấy params chính xác
         const params = getWithdrawParams(fromExchangeId, networkLookupKey);
         
         await withdrawerExchange.withdraw('USDT', amount, targetDepositInfo.address, undefined, params);
@@ -457,17 +449,14 @@ async function placeTpSlOrders(exchange, symbol, side, amount, entryPrice, colla
     }
     if (isNaN(tpPrice) || isNaN(slPrice)) return { tpOrderId: null, slOrderId: null };
     const orderSide = (side === 'sell') ? 'buy' : 'sell';
-
     try {
         let tpResult, slResult;
         if (exchange.id === 'kucoinfutures') {
-            // SỬA LỖI 2: Thay đổi loại lệnh và cách truyền tham số cho KuCoin
-            const tpParams = { 'reduceOnly': true, 'stop': side === 'sell' ? 'down' : 'up', 'stopPriceType': 'MP' };
-            tpResult = await exchange.createOrder(symbol, 'stop_market', orderSide, amount, undefined, { ...tpParams, stopPrice: exchange.priceToPrecision(symbol, tpPrice) });
-            
-            const slParams = { 'reduceOnly': true, 'stop': side === 'sell' ? 'up' : 'down', 'stopPriceType': 'MP' };
-            slResult = await exchange.createOrder(symbol, 'stop_market', orderSide, amount, undefined, { ...slParams, stopPrice: exchange.priceToPrecision(symbol, slPrice) });
-
+            // SỬA LỖI 2.1: Quay lại dùng type 'market' và thêm 'marginMode' để đảm bảo tính nhất quán.
+            const tpParams = { 'reduceOnly': true, 'stop': side === 'sell' ? 'down' : 'up', 'stopPrice': exchange.priceToPrecision(symbol, tpPrice), 'stopPriceType': 'MP', 'marginMode': 'cross' };
+            tpResult = await exchange.createOrder(symbol, 'market', orderSide, amount, undefined, tpParams);
+            const slParams = { 'reduceOnly': true, 'stop': side === 'sell' ? 'up' : 'down', 'stopPrice': exchange.priceToPrecision(symbol, slPrice), 'stopPriceType': 'MP', 'marginMode': 'cross' };
+            slResult = await exchange.createOrder(symbol, 'market', orderSide, amount, undefined, slParams);
         } else if (exchange.id === 'bitget') {
             const holdSide = side === 'buy' ? 'long' : 'short';
             const tpParams = { 'planType': 'normal_plan', 'triggerPrice': exchange.priceToPrecision(symbol, tpPrice), 'holdSide': holdSide };
@@ -482,7 +471,6 @@ async function placeTpSlOrders(exchange, symbol, side, amount, entryPrice, colla
         return { tpOrderId: tpResult.id, slOrderId: slResult.id };
     } catch (e) {
         safeLog('error', `[TP/SL] Lỗi khi đặt lệnh TP/SL cho ${symbol} trên ${exchange.id}:`, e);
-        // Ném lỗi ra ngoài để hàm gọi biết và xử lý
         throw e;
     }
 }
@@ -580,37 +568,15 @@ async function executeTrades(opportunity, percentageToUse) {
             longTpOrderId: longTpSlIds.tpOrderId, longSlOrderId: longTpSlIds.slOrderId,
         };
     } catch (e) {
-        // Nếu đặt TP/SL thất bại, đóng ngay lệnh để đảm bảo an toàn
         safeLog('error', `[TRADE] Lỗi nghiêm trọng khi đặt TP/SL. Sẽ đóng ngay vị thế vừa mở. Lỗi:`, e);
-        currentTradeDetails = { ...tradeBaseInfo, status: 'CLOSE_IMMEDIATELY' }; // Đặt trạng thái đặc biệt
-        await closeTradeNow(); // Gọi hàm đóng ngay lập tức
-        return false; // Giao dịch không thành công
+        currentTradeDetails = { ...tradeBaseInfo, status: 'CLOSING_DUE_TO_ERROR' };
+        await closeTradeNow();
+        return false;
     }
 
     safeLog('info', `[TRADE] ✅ Mở lệnh thành công cho ${coin}.`);
     capitalManagementState = 'TRADE_OPEN';
     return true;
-}
-
-async function cancelPendingOrders(tradeDetails) {
-    if (!tradeDetails) return;
-    const ordersToCancel = [
-        { ex: exchanges[tradeDetails.shortExchange], symbol: tradeDetails.shortOriginalSymbol, id: tradeDetails.shortTpOrderId },
-        { ex: exchanges[tradeDetails.shortExchange], symbol: tradeDetails.shortOriginalSymbol, id: tradeDetails.shortSlOrderId },
-        { ex: exchanges[tradeDetails.longExchange], symbol: tradeDetails.longOriginalSymbol, id: tradeDetails.longTpOrderId },
-        { ex: exchanges[tradeDetails.longExchange], symbol: tradeDetails.longOriginalSymbol, id: tradeDetails.longSlOrderId },
-    ];
-    await Promise.all(ordersToCancel.map(async (order) => {
-        if (order.id && order.ex) {
-            try {
-                await order.ex.cancelOrder(order.id, order.symbol, (order.ex.id === 'kucoinfutures' || order.ex.id === 'bitget') ? { 'stop': true } : {});
-            } catch (e) {
-                 if (!e.message.includes('order not found')) {
-                    safeLog('warn', `[CLEANUP] Không thể hủy lệnh ${order.id}: ${e.message}`);
-                 }
-            }
-        }
-    }));
 }
 
 async function closeTradeNow() {
@@ -621,18 +587,21 @@ async function closeTradeNow() {
     const longEx = exchanges[tradeToClose.longExchange];
 
     try {
-        // SỬA LỖI 3: Thêm bước hủy toàn bộ lệnh chờ để đảm bảo đóng lệnh thành công
+        // Giữ nguyên logic hủy lệnh chờ để đảm bảo an toàn
         safeLog('info', `[CLEANUP] Hủy toàn bộ lệnh chờ cho ${tradeToClose.shortOriginalSymbol} trên ${shortEx.id}.`);
         await shortEx.cancelAllOrders(tradeToClose.shortOriginalSymbol);
         safeLog('info', `[CLEANUP] Hủy toàn bộ lệnh chờ cho ${tradeToClose.longOriginalSymbol} trên ${longEx.id}.`);
         await sleep(1000);
 
         safeLog('info', `[CLEANUP] Đang đóng vị thế cho ${tradeToClose.coin}...`);
-        const params = { 'reduceOnly': true, ...(shortEx.id === 'kucoinfutures' && {'marginMode': 'cross'}) };
+        
+        // SỬA LỖI 2.2: Đảm bảo params luôn có marginMode cho KuCoin khi đóng lệnh
+        const shortParams = { 'reduceOnly': true, ...(shortEx.id === 'kucoinfutures' && {'marginMode': 'cross'}) };
+        const longParams = { 'reduceOnly': true, ...(longEx.id === 'kucoinfutures' && {'marginMode': 'cross'}) };
 
         await Promise.all([
-            shortEx.createMarketBuyOrder(tradeToClose.shortOriginalSymbol, tradeToClose.shortOrderAmount, params),
-            longEx.createMarketSellOrder(tradeToClose.longOriginalSymbol, tradeToClose.longOrderAmount, params)
+            shortEx.createMarketBuyOrder(tradeToClose.shortOriginalSymbol, tradeToClose.shortOrderAmount, shortParams),
+            longEx.createMarketSellOrder(tradeToClose.longOriginalSymbol, tradeToClose.longOrderAmount, longParams)
         ]);
         tradeAwaitingPnl = { ...currentTradeDetails, status: 'PENDING_PNL_CALC', closeTime: Date.now() };
         currentTradeDetails = null;
@@ -646,7 +615,6 @@ async function closeTradeNow() {
 
 async function calculatePnlAfterDelay(closedTrade) {
     await sleep(5000);
-    // SỬA LỖI 4: Bọc trong try-catch và gọi dọn dẹp trực tiếp
     try {
         await updateBalances();
         const shortBalanceAfter = balances[closedTrade.shortExchange]?.available || 0;
@@ -659,7 +627,6 @@ async function calculatePnlAfterDelay(closedTrade) {
         if (tradeHistory.length > 50) tradeHistory.pop();
         tradeAwaitingPnl = null;
 
-        // Kích hoạt dọn dẹp ngay sau khi tính PNL xong
         if (botState === 'RUNNING') {
             safeLog('info', '[STATE] Tính PNL hoàn tất. Bắt đầu dọn dẹp và chuyển vốn về Hub.');
             await returnFundsToHub();
@@ -667,8 +634,8 @@ async function calculatePnlAfterDelay(closedTrade) {
 
     } catch (e) {
         safeLog('error', '[PNL] Lỗi nghiêm trọng khi đang tính toán PNL:', e);
-        tradeAwaitingPnl = null; // Reset để tránh bị kẹt
-        capitalManagementState = 'IDLE'; // Buộc bot về trạng thái an toàn để bắt đầu lại
+        tradeAwaitingPnl = null;
+        capitalManagementState = 'IDLE';
     }
 }
 
@@ -718,7 +685,6 @@ async function mainBotLoop() {
                  await closeTradeNow();
             }
         }
-        // SỬA LỖI 4: Xóa bỏ khối lệnh `else if` thừa để tránh xung đột với logic mới
         else if (currentMinute > 5 && capitalManagementState !== 'IDLE' && capitalManagementState !== 'TRADE_OPEN') {
             safeLog('warn', `[RESET] Trạng thái ${capitalManagementState} bị kẹt, đang reset về IDLE và dọn dẹp vốn.`);
             await returnFundsToHub();
