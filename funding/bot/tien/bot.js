@@ -136,7 +136,7 @@ function getTargetDepositInfo(toExchangeId, network) {
     return { network, address: depositAddress };
 }
 
-// SỬA LỖI BITGET: Khôi phục logic đúng, yêu cầu cả 'chain' và 'network'
+// SỬA LỖI BITGET: Trả về giá trị "BEP20" thay vì "BSC"
 function getWithdrawParams(exchangeId, network) {
     const networkUpper = network.toUpperCase();
     if (exchangeId.includes('binance')) {
@@ -146,13 +146,14 @@ function getWithdrawParams(exchangeId, network) {
         if (networkUpper === 'APTOS') return { network: 'APT' };
     }
     if (exchangeId.includes('bitget')) {
-        if (networkUpper === 'BEP20') return { chain: 'BSC', network: 'BSC' };
+        if (networkUpper === 'BEP20') return { chain: 'BEP20', network: 'BEP20' }; // Sửa lại giá trị thành BEP20
     }
     if (exchangeId.includes('okx')) {
         if (networkUpper === 'BEP20') return { chain: 'BEP20' };
     }
     return { network: networkUpper };
 }
+
 
 async function fetchAllBalances(type = 'future') {
     const allBalances = {};
