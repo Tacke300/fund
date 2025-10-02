@@ -26,7 +26,6 @@ const FUND_TRANSFER_MIN_AMOUNT_BINANCE = 10;
 const FUND_TRANSFER_MIN_AMOUNT_KUCOIN = 1;
 const FUND_TRANSFER_MIN_AMOUNT_BITGET = 10;
 
-// SỬA LỖI 1: Yêu cầu vốn tối thiểu để gom vốn là 5 USDT
 const MIN_TOTAL_CAPITAL_FOR_DISTRIBUTION = 5;
 const FUND_ARRIVAL_TOLERANCE = 2; 
 
@@ -137,6 +136,7 @@ function getTargetDepositInfo(toExchangeId, network) {
     return { network, address: depositAddress };
 }
 
+// SỬA LỖI BITGET: Khôi phục logic đúng cho Bitget
 function getWithdrawParams(exchangeId, network) {
     const networkUpper = network.toUpperCase();
     if (exchangeId.includes('binance')) {
@@ -146,7 +146,7 @@ function getWithdrawParams(exchangeId, network) {
         if (networkUpper === 'APTOS') return { network: 'APT' };
     }
     if (exchangeId.includes('bitget')) {
-        if (networkUpper === 'BEP20') return { chain: 'BSC' };
+        if (networkUpper === 'BEP20') return { chain: 'BSC', network: 'BSC' };
     }
     if (exchangeId.includes('okx')) {
         if (networkUpper === 'BEP20') return { chain: 'BEP20' };
@@ -277,7 +277,6 @@ async function executeSingleFundTransfer(fromExchangeId, toExchangeId, amount) {
         
         await withdrawerExchange.withdraw('USDT', amount, targetDepositInfo.address, undefined, params);
         
-        // SỬA LỖI 2: Logic này giờ đã chạy đúng cho cả thủ công và tự động
         attemptInternalTransferOnArrival(toExchangeId, fromExchangeId, amount);
         
         return true;
@@ -298,7 +297,6 @@ async function manageFundDistribution(opportunity) {
     const allFutBalances = await fetchAllBalances('future');
     const totalCapital = Object.values(allFutBalances).reduce((sum, bal) => sum + bal, 0);
 
-    // SỬA LỖI 1: Thay đổi logic kiểm tra vốn tối thiểu
     if (totalCapital < MIN_TOTAL_CAPITAL_FOR_DISTRIBUTION) {
         safeLog('warn', `[CAPITAL] Tổng vốn ${totalCapital.toFixed(2)} USDT quá nhỏ, không đủ để phân bổ (cần ít nhất ${MIN_TOTAL_CAPITAL_FOR_DISTRIBUTION} USDT).`);
         capitalManagementState = 'IDLE';
