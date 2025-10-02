@@ -26,6 +26,10 @@ const FUND_TRANSFER_MIN_AMOUNT_BINANCE = 10;
 const FUND_TRANSFER_MIN_AMOUNT_KUCOIN = 1;
 const FUND_TRANSFER_MIN_AMOUNT_BITGET = 10;
 
+// SỬA LỖI 1: Yêu cầu vốn tối thiểu để gom vốn là 5 USDT
+const MIN_TOTAL_CAPITAL_FOR_DISTRIBUTION = 5;
+const FUND_ARRIVAL_TOLERANCE = 2; 
+
 const ALL_POSSIBLE_EXCHANGE_IDS = ['binanceusdm', 'bitget', 'okx', 'kucoinfutures', 'kucoin', 'binance'];
 const DISABLED_EXCHANGES = [];
 const activeExchangeIds = ALL_POSSIBLE_EXCHANGE_IDS.filter(id => !DISABLED_EXCHANGES.includes(id));
@@ -178,10 +182,9 @@ async function attemptInternalTransferOnArrival(toExchangeId, fromExchangeId, am
     const maxRetries = 30;
     const retryIntervalMs = 20000;
 
-    let amountToTransfer = amountSent;
+    let amountRequired = amountSent;
     if (fromExchangeId === 'kucoinfutures') {
-        amountToTransfer = amountSent - 0.5;
-        safeLog('log', `[RETRY-TRANSFER] Tiền đến từ KuCoin, số tiền sẽ được chuyển nội bộ là ${amountToTransfer.toFixed(2)} USDT.`);
+        amountRequired = amountSent - 0.5;
     }
 
     let targetFromWallet = 'spot', targetToWallet = 'future';
@@ -205,17 +208,27 @@ async function attemptInternalTransferOnArrival(toExchangeId, fromExchangeId, am
             const balanceData = await internalTransfererExchange.fetchBalance();
             const availableAmount = balanceData?.free?.USDT || 0;
 
-            if (availableAmount >= amountToTransfer) {
-                safeLog('info', `[RETRY-TRANSFER] ✅ Tiền đã về! Đang chuyển ${amountToTransfer.toFixed(2)} USDT từ ${targetFromWallet} sang ${targetToWallet} trên ${toExchangeId}.`);
-                const preciseAmount = internalTransfererExchange.currencyToPrecision('USDT', amountToTransfer);
-                await internalTransfererExchange.transfer('USDT', parseFloat(preciseAmount), targetFromWallet, targetToWallet);
+            if (availableAmount >= amountRequired - FUND_ARRIVAL_TOLERANCE) {
+                safeLog('info', `[RETRY-TRANSFER] ✅ Tiền đã về! (Có ${availableAmount.toFixed(2)} / Cần >= ${amountRequired - FUND_ARRIVAL_TOLERANCE}). Chờ 3s để sàn ổn định...`);
+                await sleep(3000); 
+
+                const finalBalanceData = await internalTransfererExchange.fetchBalance();
+                const finalAvailableAmount = finalBalanceData?.free?.USDT || 0;
+
+                if (finalAvailableAmount > 0) {
+                    safeLog('info', `Đang chuyển ${finalAvailableAmount.toFixed(2)} USDT từ ${targetFromWallet} sang ${targetToWallet} trên ${toExchangeId}.`);
+                    const preciseAmount = internalTransfererExchange.currencyToPrecision('USDT', finalAvailableAmount);
+                    await internalTransfererExchange.transfer('USDT', parseFloat(preciseAmount), targetFromWallet, targetToWallet);
                 
-                transferStatus = { inProgress: false, message: `✅ Hoàn tất chuyển tiền và nạp vào ví Future!` };
-                safeLog('info', `[RETRY-TRANSFER] Chuyển nội bộ thành công!`);
-                await updateBalances();
-                return;
+                    transferStatus = { inProgress: false, message: `✅ Hoàn tất chuyển tiền và nạp vào ví Future!` };
+                    safeLog('info', `[RETRY-TRANSFER] Chuyển nội bộ thành công!`);
+                    await updateBalances();
+                    return;
+                } else {
+                     safeLog('warn', `[RETRY-TRANSFER] Số dư khả dụng là 0 sau khi chờ, không thể chuyển nội bộ.`);
+                }
             } else {
-                safeLog('log', `[RETRY-TRANSFER] Lần ${i}/${maxRetries}: Chưa có đủ tiền trên ví ${targetFromWallet} của ${toExchangeId} (Có ${availableAmount.toFixed(2)} / Cần ${amountToTransfer.toFixed(2)}). Thử lại sau 20s.`);
+                safeLog('log', `[RETRY-TRANSFER] Lần ${i}/${maxRetries}: Chưa có đủ tiền trên ví ${targetFromWallet} của ${toExchangeId} (Có ${availableAmount.toFixed(2)} / Cần ${amountRequired.toFixed(2)}). Thử lại sau 20s.`);
             }
         } catch (e) {
             if (e instanceof ccxt.InsufficientFunds) {
@@ -264,6 +277,7 @@ async function executeSingleFundTransfer(fromExchangeId, toExchangeId, amount) {
         
         await withdrawerExchange.withdraw('USDT', amount, targetDepositInfo.address, undefined, params);
         
+        // SỬA LỖI 2: Logic này giờ đã chạy đúng cho cả thủ công và tự động
         attemptInternalTransferOnArrival(toExchangeId, fromExchangeId, amount);
         
         return true;
@@ -283,8 +297,10 @@ async function manageFundDistribution(opportunity) {
     
     const allFutBalances = await fetchAllBalances('future');
     const totalCapital = Object.values(allFutBalances).reduce((sum, bal) => sum + bal, 0);
-    if (totalCapital < getMinTransferAmount(HUB_EXCHANGE_ID) * 2) {
-        safeLog('warn', `[CAPITAL] Tổng vốn ${totalCapital.toFixed(2)} USDT quá nhỏ, không đủ để phân bổ.`);
+
+    // SỬA LỖI 1: Thay đổi logic kiểm tra vốn tối thiểu
+    if (totalCapital < MIN_TOTAL_CAPITAL_FOR_DISTRIBUTION) {
+        safeLog('warn', `[CAPITAL] Tổng vốn ${totalCapital.toFixed(2)} USDT quá nhỏ, không đủ để phân bổ (cần ít nhất ${MIN_TOTAL_CAPITAL_FOR_DISTRIBUTION} USDT).`);
         capitalManagementState = 'IDLE';
         return false;
     }
@@ -452,7 +468,6 @@ async function placeTpSlOrders(exchange, symbol, side, amount, entryPrice, colla
     try {
         let tpResult, slResult;
         if (exchange.id === 'kucoinfutures') {
-            // SỬA LỖI 2.1: Quay lại dùng type 'market' và thêm 'marginMode' để đảm bảo tính nhất quán.
             const tpParams = { 'reduceOnly': true, 'stop': side === 'sell' ? 'down' : 'up', 'stopPrice': exchange.priceToPrecision(symbol, tpPrice), 'stopPriceType': 'MP', 'marginMode': 'cross' };
             tpResult = await exchange.createOrder(symbol, 'market', orderSide, amount, undefined, tpParams);
             const slParams = { 'reduceOnly': true, 'stop': side === 'sell' ? 'up' : 'down', 'stopPrice': exchange.priceToPrecision(symbol, slPrice), 'stopPriceType': 'MP', 'marginMode': 'cross' };
@@ -587,7 +602,6 @@ async function closeTradeNow() {
     const longEx = exchanges[tradeToClose.longExchange];
 
     try {
-        // Giữ nguyên logic hủy lệnh chờ để đảm bảo an toàn
         safeLog('info', `[CLEANUP] Hủy toàn bộ lệnh chờ cho ${tradeToClose.shortOriginalSymbol} trên ${shortEx.id}.`);
         await shortEx.cancelAllOrders(tradeToClose.shortOriginalSymbol);
         safeLog('info', `[CLEANUP] Hủy toàn bộ lệnh chờ cho ${tradeToClose.longOriginalSymbol} trên ${longEx.id}.`);
@@ -595,7 +609,6 @@ async function closeTradeNow() {
 
         safeLog('info', `[CLEANUP] Đang đóng vị thế cho ${tradeToClose.coin}...`);
         
-        // SỬA LỖI 2.2: Đảm bảo params luôn có marginMode cho KuCoin khi đóng lệnh
         const shortParams = { 'reduceOnly': true, ...(shortEx.id === 'kucoinfutures' && {'marginMode': 'cross'}) };
         const longParams = { 'reduceOnly': true, ...(longEx.id === 'kucoinfutures' && {'marginMode': 'cross'}) };
 
