@@ -2,7 +2,7 @@
 
 echo "===== BẮT ĐẦU DEPLOY ====="
 
-cd /home/tacke300/fundingbotpromax || {
+cd /home/fund || {
   echo "[LỖI] Không vào được thư mục dự án!"
   exit 1
 }
@@ -29,6 +29,6 @@ git pull --rebase origin main && echo "[B3] Pull thành công." || {
 
 # Copy souce code vào folder nginx
 
-ls -al /var/www/html/fundingbotpromax
+ls -al /var/www/html/fund
 
 echo "===== DEPLOY THÀNH CÔNG ====="
