@@ -7,15 +7,13 @@ const cors = require('cors');
 const app = express();
 const port = 80;
 
-// BƯỚC 1: Các middleware xử lý dữ liệu luôn ở trên cùng
+// 1. MIDDLEWARE CƠ BẢN (LUÔN Ở TRÊN CÙNG)
 app.use(cors());
 app.use(express.json());
 
 const saltRounds = 10;
 
-// BƯỚC 2: Định nghĩa các API ENDPOINT ngay sau đó (ƯU TIÊN CAO NHẤT)
-
-// Endpoint để đăng ký
+// 2. CÁC API ENDPOINT (ƯU TIÊN XỬ LÝ TRƯỚC)
 app.post('/register', (req, res) => {
     const { username, password } = req.body;
     if (!username || !password) {
@@ -36,7 +34,6 @@ app.post('/register', (req, res) => {
     });
 });
 
-// Endpoint để đăng nhập
 app.post('/login', (req, res) => {
     const { username, password } = req.body;
     if (!username || !password) {
@@ -56,19 +53,22 @@ app.post('/login', (req, res) => {
     });
 });
 
-// BƯỚC 3: Định nghĩa rõ ràng trang chủ (landing page)
-// Khi người dùng vào thẳng domain (http://yourdomain.com), server sẽ gửi file này.
+
+// 3. PHỤC VỤ FILE TĨNH (CHO CSS, JS, CÁC FILE HTML PHỤ)
+// Nó sẽ tìm file trong thư mục gốc 'fund' và thư mục 'html'
+app.use(express.static(path.join(__dirname, '..')));
+app.use(express.static(path.join(__dirname, '..', 'html')));
+
+
+// 4. ROUTE TRANG CHỦ (FALLBACK)
+// Nếu request không khớp với API hay file tĩnh nào ở trên, nó sẽ trả về index.html
+// Dựa trên quy trình bạn mô tả, trang chủ sẽ là reg-log.html
 app.get('/', (req, res) => {
-    res.sendFile(path.join(__dirname, '..', 'index.html'));
+  res.sendFile(path.join(__dirname, '..', 'html', 'reg-log.html'));
 });
 
 
-// BƯỚC 4: Phục vụ các file tĩnh khác (CSS, fundingbot.html...) - ĐẶT Ở CUỐI CÙNG
-// Server sẽ tìm các file này trong thư mục gốc 'fund'
-app.use(express.static(path.join(__dirname, '..')));
-
-
-// Khởi động server
+// 5. KHỞI ĐỘNG SERVER
 app.listen(port, () => {
     console.log(`Server is running on http://localhost:${port}`);
 });
