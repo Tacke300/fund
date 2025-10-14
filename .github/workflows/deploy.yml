@@ -15,14 +15,14 @@ jobs:
     - name: Setup SSH with tacke300 key
       run: |
         mkdir -p ~/.ssh
-        echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_ed25519
+        echo "${{ secrets.SSH_PRI }}" > ~/.ssh/id_ed25519
         chmod 600 ~/.ssh/id_ed25519
-        ssh-keyscan -H 34.142.248.96 >> ~/.ssh/known_hosts
+        ssh-keyscan -H 35.240.146.86 >> ~/.ssh/known_hosts
        
     - name: Deploy to VPS 1
       run: |
-        ssh -i ~/.ssh/id_ed25519 tacke300@34.142.248.96 '
-          cd /home/tacke300/fundingbotpromax && 
+        ssh -i ~/.ssh/id_ed25519 your_email@example.com '
+          cd /home/fund && 
           git pull && 
           ./autopull.sh
         '
