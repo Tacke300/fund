@@ -4,8 +4,9 @@ const path = require('path');
 const ccxt = require('ccxt');
 const sqlite3 = require('sqlite3').verbose();
 
-const BOT_PORT = 5678;
-const DB_FILE = 'users.db';
+const BOT_PORT = 5006;
+const DB_FILE = 'user.db'; // Đảm bảo tên file khớp với file database của bạn
+const ADMIN_SECRET_KEY = 'huyen'; // <-- THAY MẬT KHẨU BÍ MẬT CỦA BẠN VÀO ĐÂY
 
 const db = new sqlite3.Database(DB_FILE, (err) => {
     if (err) {
@@ -14,11 +15,8 @@ const db = new sqlite3.Database(DB_FILE, (err) => {
     console.log('Connected to the SQLite database.');
     db.run(`CREATE TABLE IF NOT EXISTS users (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        username TEXT UNIQUE NOT NULL,
-        password TEXT NOT NULL,
-        is_vip INTEGER DEFAULT 0,
-        vip_level INTEGER,
-        vip_expiry_timestamp INTEGER,
+        username TEXT UNIQUE NOT NULL, password TEXT NOT NULL,
+        is_vip INTEGER DEFAULT 0, vip_level INTEGER, vip_expiry_timestamp INTEGER,
         pnl REAL DEFAULT 0,
         binance_apikey TEXT, binance_secret TEXT,
         bitget_apikey TEXT, bitget_secret TEXT, bitget_password TEXT,
@@ -28,15 +26,8 @@ const db = new sqlite3.Database(DB_FILE, (err) => {
 });
 
 let activeBotInstance = {
-    username: null,
-    state: 'STOPPED',
-    capitalState: 'IDLE',
-    loopId: null,
-    exchanges: {},
-    tradeDetails: null,
-    tradeHistory: [],
-    balances: {},
-    pnl: 0
+    username: null, state: 'STOPPED', loopId: null, exchanges: {},
+    tradeDetails: null, tradeHistory: [], balances: {}, pnl: 0
 };
 
 const safeLog = (type, ...args) => {
@@ -53,19 +44,13 @@ async function initializeExchangesForUser(userData) {
         { id: 'okx', apiKey: userData.okx_apikey, secret: userData.okx_secret, password: userData.okx_password, options: { 'defaultType': 'swap' } },
         { id: 'kucoinfutures', apiKey: userData.kucoin_apikey, secret: userData.kucoin_secret, password: userData.kucoin_password },
     ];
-
     for (const config of exchangeConfigs) {
         if (config.apiKey && config.secret) {
             try {
                 const exchangeClass = ccxt[config.id];
                 userExchanges[config.id] = new exchangeClass({
-                    apiKey: config.apiKey,
-                    secret: config.secret,
-                    password: config.password,
-                    enableRateLimit: true,
-                    ...config.options
+                    apiKey: config.apiKey, secret: config.secret, password: config.password, enableRateLimit: true, ...config.options
                 });
-                safeLog('info', `Initialized ${config.id} for ${userData.username}`);
             } catch (e) {
                 safeLog('error', `Failed to init ${config.id} for ${userData.username}:`, e.message);
             }
@@ -89,42 +74,21 @@ async function mainBotLoop() {
 }
 
 async function startBot(username, marginOptions) {
-    if (activeBotInstance.state === 'RUNNING') {
-        safeLog('warn', 'A bot is already running. Stop it before starting a new one.');
-        return false;
-    }
-
+    if (activeBotInstance.state === 'RUNNING') return false;
     const user = await new Promise((resolve, reject) => {
         db.get('SELECT * FROM users WHERE username = ?', [username], (err, row) => {
             if (err) reject(err);
             resolve(row);
         });
     });
-
-    if (!user) {
-        safeLog('error', `Attempted to start bot for non-existent user: ${username}`);
-        return false;
-    }
-
+    if (!user) return false;
     const userExchanges = await initializeExchangesForUser(user);
-    if (Object.keys(userExchanges).length === 0) {
-        safeLog('error', `No valid API keys found for ${username}. Bot cannot start.`);
-        return false;
-    }
+    if (Object.keys(userExchanges).length === 0) return false;
 
     activeBotInstance = {
-        username: username,
-        state: 'RUNNING',
-        capitalState: 'IDLE',
-        loopId: null,
-        exchanges: userExchanges,
-        tradeDetails: null,
-        tradeHistory: [],
-        balances: {},
-        pnl: user.pnl,
-        marginOptions: marginOptions
+        username: username, state: 'RUNNING', loopId: null, exchanges: userExchanges,
+        tradeDetails: null, tradeHistory: [], balances: {}, pnl: user.pnl, marginOptions: marginOptions
     };
-
     safeLog('info', `Bot started for user: ${username} with options`, marginOptions);
     mainBotLoop();
     return true;
@@ -132,20 +96,12 @@ async function startBot(username, marginOptions) {
 
 async function stopBot() {
     if (activeBotInstance.state !== 'RUNNING') return false;
-
     clearTimeout(activeBotInstance.loopId);
-    const finalPnl = activeBotInstance.pnl;
-    const username = activeBotInstance.username;
-    
-    activeBotInstance = {
-        username: null, state: 'STOPPED', capitalState: 'IDLE', loopId: null,
-        exchanges: {}, tradeDetails: null, tradeHistory: [], balances: {}, pnl: 0
-    };
-
+    const { pnl: finalPnl, username } = activeBotInstance;
+    activeBotInstance = { username: null, state: 'STOPPED', loopId: null, exchanges: {}, tradeDetails: null, tradeHistory: [], balances: {}, pnl: 0 };
     db.run('UPDATE users SET pnl = ? WHERE username = ?', [finalPnl, username], (err) => {
-        if(err) safeLog('error', 'Failed to save final PNL to DB:', err.message);
+        if (err) safeLog('error', 'Failed to save final PNL to DB:', err.message);
     });
-    
     safeLog('info', `Bot stopped for user: ${username}. Final PNL ${finalPnl} saved.`);
     return true;
 }
@@ -154,32 +110,37 @@ const server = http.createServer(async (req, res) => {
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-    if (req.method === 'OPTIONS') {
-        res.writeHead(204);
-        res.end();
-        return;
-    }
+    if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
 
     const url = new URL(req.url, `http://${req.headers.host}`);
     let body = '';
     req.on('data', chunk => body += chunk.toString());
     await new Promise(resolve => req.on('end', resolve));
-    
-    const sendJSON = (statusCode, data) => {
-        res.writeHead(statusCode, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify(data));
-    };
+    const sendJSON = (statusCode, data) => { res.writeHead(statusCode, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(data)); };
 
     try {
         if (url.pathname === '/') {
-            fs.readFile(path.join(__dirname, 'index.html'), (err, content) => {
-                res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-                res.end(content);
-            });
+            fs.readFile(path.join(__dirname, 'index.html'), (err, content) => { res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }); res.end(content); });
         } else if (url.pathname === '/script.js') {
-            fs.readFile(path.join(__dirname, 'script.js'), (err, content) => {
-                res.writeHead(200, { 'Content-Type': 'application/javascript' });
-                res.end(content);
+            fs.readFile(path.join(__dirname, 'script.js'), (err, content) => { res.writeHead(200, { 'Content-Type': 'application/javascript' }); res.end(content); });
+        } else if (url.pathname.startsWith('/admin')) {
+            const secret = url.searchParams.get('secret');
+            if (secret !== ADMIN_SECRET_KEY) return sendJSON(403, { error: 'Forbidden' });
+            db.all('SELECT * FROM users', [], (err, rows) => {
+                if (err) return sendJSON(500, { error: err.message });
+                res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+                let html = '<style>table{width:100%;border-collapse:collapse;}th,td{border:1px solid #ddd;padding:8px;text-align:left;}tr:nth-child(even){background-color:#f2f2f2;}</style><table><tr>';
+                if(rows.length > 0){
+                    Object.keys(rows[0]).forEach(key => html += `<th>${key}</th>`);
+                    html += '</tr>';
+                    rows.forEach(row => {
+                        html += '<tr>';
+                        Object.values(row).forEach(val => html += `<td>${val === null ? '' : val}</td>`);
+                        html += '</tr>';
+                    });
+                }
+                html += '</table>';
+                res.end(html);
             });
         } else if (url.pathname === '/api/register' && req.method === 'POST') {
             const { username, password } = JSON.parse(body);
@@ -197,33 +158,23 @@ const server = http.createServer(async (req, res) => {
             const { username } = JSON.parse(body);
             db.get('SELECT id, username, is_vip, vip_level, vip_expiry_timestamp, pnl FROM users WHERE username = ?', [username], (err, user) => {
                 if (err || !user) return sendJSON(404, { message: 'User not found.' });
-                const isBotCurrentlyForThisUser = activeBotInstance.username === username;
+                const isBotForThisUser = activeBotInstance.username === username;
                 sendJSON(200, {
-                    is_vip: user.is_vip,
-                    vip_level: user.vip_level,
-                    vip_expiry_timestamp: user.vip_expiry_timestamp,
-                    pnl: isBotCurrentlyForThisUser ? activeBotInstance.pnl : user.pnl,
-                    isBotRunning: isBotCurrentlyForThisUser && activeBotInstance.state === 'RUNNING',
-                    totalUsdt: isBotCurrentlyForThisUser ? Object.values(activeBotInstance.balances).reduce((s, b) => s + (b.total || 0), 0) : 0,
-                    tradeHistory: isBotCurrentlyForThisUser ? activeBotInstance.tradeHistory : []
+                    is_vip: user.is_vip, vip_level: user.vip_level, vip_expiry_timestamp: user.vip_expiry_timestamp,
+                    pnl: isBotForThisUser ? activeBotInstance.pnl : user.pnl,
+                    isBotRunning: isBotForThisUser && activeBotInstance.state === 'RUNNING',
+                    totalUsdt: isBotForThisUser ? Object.values(activeBotInstance.balances).reduce((s, b) => s + (b.total || 0), 0) : 0,
+                    tradeHistory: isBotForThisUser ? activeBotInstance.tradeHistory : []
                 });
             });
         } else if (url.pathname === '/api/save-settings' && req.method === 'POST') {
             const { username, settings } = JSON.parse(body);
-            db.run(`UPDATE users SET 
-                binance_apikey = ?, binance_secret = ?,
-                bitget_apikey = ?, bitget_secret = ?, bitget_password = ?
-                WHERE username = ?`,
-                [
-                    settings.binance_apikey, settings.binance_secret,
-                    settings.bitget_apikey, settings.bitget_secret, settings.bitget_password,
-                    username
-                ],
+            db.run(`UPDATE users SET binance_apikey = ?, binance_secret = ?, bitget_apikey = ?, bitget_secret = ?, bitget_password = ? WHERE username = ?`,
+                [settings.binance_apikey, settings.binance_secret, settings.bitget_apikey, settings.bitget_secret, settings.bitget_password, username],
                 function(err) {
                     if (err) return sendJSON(500, { success: false, message: 'Database error.' });
                     sendJSON(200, { success: true, message: 'Settings saved successfully.' });
-                }
-            );
+                });
         } else if (url.pathname === '/api/start' && req.method === 'POST') {
             const { username, marginOptions } = JSON.parse(body);
             const success = await startBot(username, marginOptions);
@@ -243,9 +194,7 @@ const server = http.createServer(async (req, res) => {
         }
     } catch (error) {
         safeLog('error', `Server Error: ${error.message}`);
-        if (!res.headersSent) {
-            sendJSON(500, { message: 'Internal Server Error' });
-        }
+        if (!res.headersSent) sendJSON(500, { message: 'Internal Server Error' });
     }
 });
 
