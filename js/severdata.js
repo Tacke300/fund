@@ -11,7 +11,7 @@ const app = express();
 const port = 3000;
 
 let backupTimeout;
-const DEBOUNCE_DELAY = 10000;
+const DEBOUNC_DELAY = 10000;
 
 async function backupAndCommit() {
     const sourcePath = path.join(__dirname, 'user.db');
@@ -58,7 +58,7 @@ function runWithBackup(sql, params, callback) {
         if (!err) {
             console.log('Phát hiện thay đổi CSDL, đặt lại bộ đếm thời gian sao lưu...');
             clearTimeout(backupTimeout);
-            backupTimeout = setTimeout(backupAndCommit, DEBOUNCE_DELAY);
+            backupTimeout = setTimeout(backupAndCommit, DEBOUNC_DELAY);
         }
     });
 }
@@ -109,4 +109,4 @@ app.get('/', (req, res) => {
 
 app.listen(port, () => {
     console.log(`Server is running on http://localhost:${port}`);
-});```
+});
