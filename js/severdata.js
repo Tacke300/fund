@@ -7,7 +7,7 @@ const bcrypt = require('bcrypt');
 const cors = require('cors');
 
 const app = express();
-
+const port = 80
 
 // Middlewares
 app.use(cors());
