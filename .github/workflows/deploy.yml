@@ -1,4 +1,4 @@
-name: Deploy tacke300 to VPS
+name: Deploy to VPS
 
 on:
   push:
@@ -12,17 +12,18 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v3
 
-    - name: Setup SSH with tacke300 key
+    - name: Setup SSH
+      # Sử dụng một Action có sẵn để thiết lập SSH an toàn hơn
+      # Nó sẽ tự động thêm key và cấu hình known_hosts
+      uses: webfactory/ssh-agent@v0.8.0
+      with:
+        ssh-private-key: ${{ secrets.SSH_PRI }}
+
+    - name: Add remote server to known_hosts
+      # Chạy ssh-keyscan để đảm bảo kết nối không bị chặn
+      run: ssh-keyscan -H 35.240.146.86 >> ~/.ssh/known_hosts
+
+    - name: Deploy and Restart Application
+      # Thay 'tacke300' bằng username trên VPS của bạn nếu nó khác
       run: |
-        mkdir -p ~/.ssh
-        echo "${{ secrets.SSH_PRI }}" > ~/.ssh/id_ed25519
-        chmod 600 ~/.ssh/id_ed25519
-        ssh-keyscan -H 35.240.146.86 >> ~/.ssh/known_hosts
-       
-    - name: Deploy to VPS 1
-      run: |
-        ssh -i ~/.ssh/id_ed25519 your_email@example.com '
-          cd /home/tacke300/fund && 
-          git pull && 
-          ./autopull.sh
-        '
+        ssh tacke300@35.240.146.86
