@@ -1,6 +1,6 @@
 const express = require('express');
 const path = require('path');
-const db = require('./database.js');
+const db = require('./database.js'); 
 // const bcrypt = require('bcrypt'); // <-- Không cần dùng nữa, có thể xóa dòng này
 const cors = require('cors');
 
