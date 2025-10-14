@@ -5,7 +5,7 @@ const bcrypt = require('bcrypt');
 const cors = require('cors');
 
 const app = express();
-const port = 80;
+const port = 3000;
 
 // 1. MIDDLEWARE CƠ BẢN (LUÔN Ở TRÊN CÙNG)
 app.use(cors());
