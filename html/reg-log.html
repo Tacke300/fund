@@ -123,10 +123,9 @@
   <div id="funding-container" style="display:none">
     <iframe src="fundingbot.html" id="funding-iframe"></iframe>
   </div>
-
-  <script>
-    const USERS_URL = 'https://tramnanrzruzvkehpydl.supabase.co/rest/v1/users';
-    const SUPABASE_API_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRyYW1uYW5yenJ1enZrZWhweWRsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDU3NTM1NTMsImV4cCI6MjA2MTMyOTU1M30.L0Ytkxi80AbYjkjpDfGyQtfyfqjfHLF98OrVce9Hi-0';
+<script>
+    // URL của server backend mới
+    const API_URL = 'http://localhost:3000';
 
     function showRegister() {
       document.getElementById('login-container').style.display = 'none';
@@ -154,23 +153,22 @@
       }
 
       try {
-        const response = await fetch(USERS_URL, {
+        const response = await fetch(`${API_URL}/register`, {
           method: 'POST',
-          headers: {6
-            'apikey': SUPABASE_API_KEY,
-            'Authorization': 'Bearer ' + SUPABASE_API_KEY,
-            'Content-Type': 'application/json',
-            'Prefer': 'resolution=merge-duplicates'
+          headers: {
+            'Content-Type': 'application/json'
           },
           body: JSON.stringify({
-            user_id: username,
+            username: username,
             password: password
           })
         });
 
+        const result = await response.json();
+
         if (!response.ok) {
-          const errorData = await response.json();
-          throw new Error(errorData.message || 'Error Server');
+          // Ném lỗi với thông điệp từ server
+          throw new Error(result.message || 'Error Server');
         }
 
         alert("Sign Up done!");
@@ -191,24 +189,28 @@
       }
 
       try {
-        const response = await fetch(`${USERS_URL}?user_id=eq.${encodeURIComponent(username)}&password=eq.${encodeURIComponent(password)}`, {
-          method: 'GET',
+        const response = await fetch(`${API_URL}/login`, {
+          method: 'POST',
           headers: {
-            'apikey': SUPABASE_API_KEY,
-            'Authorization': `Bearer ${SUPABASE_API_KEY}`,
             'Content-Type': 'application/json'
-          }
+          },
+          body: JSON.stringify({
+              username: username,
+              password: password
+          })
         });
 
-        const data = await response.json();
+        const result = await response.json();
 
-        if (data.length === 0) {
-          alert("Wrong account or password.");
-        } else {
-          document.getElementById('login-container').style.display = 'none';
-          document.getElementById('register-container').style.display = 'none';
-          document.getElementById('funding-container').style.display = 'block';
+        if (!response.ok) {
+          throw new Error(result.message || 'Error Server');
         }
+        
+        // Đăng nhập thành công
+        document.getElementById('login-container').style.display = 'none';
+        document.getElementById('register-container').style.display = 'none';
+        document.getElementById('funding-container').style.display = 'block';
+
       } catch (error) {
         alert("Error Login: " + error.message);
         console.error(error);
