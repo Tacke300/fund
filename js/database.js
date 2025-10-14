@@ -1,13 +1,13 @@
-// database.js
 const sqlite3 = require('sqlite3').verbose();
 
-// Tạo hoặc kết nối đến tệp user.db
 const db = new sqlite3.Database('./user.db', sqlite3.OPEN_READWRITE | sqlite3.OPEN_CREATE, (err) => {
     if (err) {
-        console.error("Lỗi khi tạo cơ sở dữ liệu", err.message);
-    } else {
-        console.log("Kết nối cơ sở dữ liệu thành công.");
-        // Lệnh SQL để tạo bảng users nếu nó chưa tồn tại
+        return console.error("Lỗi khi kết nối đến CSDL", err.message);
+    }
+    console.log("Kết nối CSDL thành công.");
+
+    db.serialize(() => {
+        // Bước 1: Luôn tạo bảng nếu nó chưa tồn tại với cấu trúc cơ bản nhất
         const createTableSql = `
             CREATE TABLE IF NOT EXISTS users (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -16,40 +16,50 @@ const db = new sqlite3.Database('./user.db', sqlite3.OPEN_READWRITE | sqlite3.OP
             );
         `;
         db.run(createTableSql, (err) => {
-            if (err) {
-                console.error("Lỗi khi tạo bảng", err.message);
-            } else {
-                console.log("Bảng 'users' đã sẵn sàng.");
-            }
+            if (err) return console.error("Lỗi khi tạo bảng 'users'", err.message);
+            console.log("Bảng 'users' đã sẵn sàng.");
+
+            // Bước 2: Bắt đầu quá trình "Migration" (Thêm cột nếu thiếu)
+            const columnsToAdd = [
+                { name: 'binance_apikey', type: 'TEXT' },
+                { name: 'binance_secret', type: 'TEXT' },
+                { name: 'binance_password', type: 'TEXT' },
+                { name: 'bitget_apikey', type: 'TEXT' },
+                { name: 'bitget_secret', type: 'TEXT' },
+                { name: 'bitget_password', type: 'TEXT' },
+                { name: 'okx_apikey', type: 'TEXT' },
+                { name: 'okx_secret', type: 'TEXT' },
+                { name: 'okx_password', type: 'TEXT' },
+                { name: 'kucoin_apikey', type: 'TEXT' },
+                { name: 'kucoin_secret', type: 'TEXT' },
+                { name: 'kucoin_password', type: 'TEXT' },
+                { name: 'total_pnl', type: 'REAL' }, // REAL dùng cho số có dấu phẩy
+                { name: 'usdt', type: 'REAL' }
+            ];
+
+            // Lấy thông tin các cột hiện có của bảng 'users'
+            db.all("PRAGMA table_info(users)", (err, existingColumns) => {
+                if (err) return console.error("Lỗi khi lấy thông tin bảng", err.message);
+
+                const existingColumnNames = existingColumns.map(col => col.name);
+
+                // Lặp qua các cột chúng ta muốn thêm
+                columnsToAdd.forEach(column => {
+                    // Nếu cột chưa tồn tại, thì thêm nó vào
+                    if (!existingColumnNames.includes(column.name)) {
+                        const addColumnSql = `ALTER TABLE users ADD COLUMN ${column.name} ${column.type}`;
+                        db.run(addColumnSql, (err) => {
+                            if (err) {
+                                console.error(`Lỗi khi thêm cột '${column.name}':`, err.message);
+                            } else {
+                                console.log(`Đã thêm cột '${column.name}' vào bảng 'users'.`);
+                            }
+                        });
+                    }
+                });
+            });
         });
-    }
-});
-
-// Hàm để lấy và hiển thị mật khẩu của người dùng
-function getUserPassword(username) {
-    const sql = `SELECT password FROM users WHERE username = ?`;
-    db.get(sql, [username], (err, row) => {
-        if (err) {
-            return console.error("Lỗi khi truy vấn người dùng:", err.message);
-        }
-        if (row) {
-            console.log(`Mật khẩu cho người dùng '${username}' là: ${row.password}`);
-        } else {
-            console.log(`Không tìm thấy người dùng có tên '${username}'.`);
-        }
     });
-}
-
-// Ví dụ về cách chèn người dùng mới
-const insertSql = `INSERT INTO users (username, password) VALUES (?, ?)`;
-db.run(insertSql, ['user', 'password123'], function(err) {
-    if (err) {
-        // Lỗi này sẽ xảy ra nếu bạn chạy lại file vì username là duy nhất
-        return console.error("Lỗi khi chèn người dùng:", err.message);
-    }
-    console.log(`Một hàng đã được chèn với rowid ${this.lastID}`);
-    // Gọi hàm để hiển thị mật khẩu sau khi chèn
-    getUserPassword('user');
 });
 
 module.exports = db;
