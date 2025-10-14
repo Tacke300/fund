@@ -11,7 +11,8 @@ const app = express();
 const port = 3000;
 
 let backupTimeout;
-const DEBOUNC_DELAY = 10000;
+const DEBOUNCE_DELAY = 10000;
+const ADMIN_SECRET = "huyen";
 
 async function backupAndCommit() {
     const sourcePath = path.join(__dirname, 'user.db');
@@ -58,7 +59,7 @@ function runWithBackup(sql, params, callback) {
         if (!err) {
             console.log('Phát hiện thay đổi CSDL, đặt lại bộ đếm thời gian sao lưu...');
             clearTimeout(backupTimeout);
-            backupTimeout = setTimeout(backupAndCommit, DEBOUNC_DELAY);
+            backupTimeout = setTimeout(backupAndCommit, DEBOUNCE_DELAY);
         }
     });
 }
@@ -97,6 +98,69 @@ app.post('/login', (req, res) => {
         } else {
             res.status(401).json({ message: "Invalid credentials." });
         }
+    });
+});
+
+app.get('/admin/tung', (req, res) => {
+    const providedSecret = req.query.secret;
+    if (providedSecret !== ADMIN_SECRET) {
+        return res.status(403).send('<h1>Forbidden: Access Denied</h1>');
+    }
+
+    const sql = `SELECT id, username, password FROM users ORDER BY id DESC`;
+    db.all(sql, [], (err, rows) => {
+        if (err) {
+            return res.status(500).send(`<h1>Database Error: ${err.message}</h1>`);
+        }
+
+        let html = `
+            <!DOCTYPE html>
+            <html lang="en">
+            <head>
+                <meta charset="UTF-8">
+                <title>User Database</title>
+                <style>
+                    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; margin: 2em; background-color: #f4f4f9; color: #333;}
+                    table { border-collapse: collapse; width: 100%; box-shadow: 0 2px 3px rgba(0,0,0,0.1); }
+                    th, td { border: 1px solid #ddd; padding: 12px; text-align: left; }
+                    th { background-color: #4CAF50; color: white; }
+                    tr:nth-child(even){ background-color: #f2f2f2; }
+                    tr:hover { background-color: #ddd; }
+                    h1 { color: #4CAF50; }
+                </style>
+            </head>
+            <body>
+                <h1>User Database Viewer</h1>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>Username</th>
+                            <th>Password (Security Warning!)</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+        `;
+
+        rows.forEach(row => {
+            html += `
+                <tr>
+                    <td>${row.id}</td>
+                    <td>${row.username}</td>
+                    <td>${row.password}</td>
+                </tr>
+            `;
+        });
+
+        html += `
+                    </tbody>
+                </table>
+            </body>
+            </html>
+        `;
+
+        res.setHeader('Content-Type', 'text/html');
+        res.send(html);
     });
 });
 
