@@ -26,4 +26,4 @@ jobs:
     - name: Deploy and Restart Application
       # Thay 'tacke300' bằng username trên VPS của bạn nếu nó khác
       run: |
-        ssh tacke300@35.240.146.86
+        ssh tungpham240497@35.240.146.86
