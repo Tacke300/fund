@@ -1,36 +1,24 @@
 // js/severdata.js
 
 const express = require('express');
-const path = require('path'); // << THÊM DÒNG NÀY
+const path = require('path');
 const db = require('./database.js');
 const bcrypt = require('bcrypt');
 const cors = require('cors');
 
 const app = express();
-const PORT = 80
+const port = 80;
 
-// Middlewares
+// Middlewares xử lý dữ liệu phải ở trên cùng
 app.use(cors());
 app.use(express.json());
 
-// --- PHẦN SỬA ĐỔI QUAN TRỌNG ---
-// Thay vì tìm thư mục 'public', chúng ta sẽ phục vụ file từ 2 nơi:
-
-// 1. Phục vụ các file từ thư mục gốc của dự án (ví dụ: ~/fund)
-//    path.join(__dirname, '..') sẽ trỏ từ '~/fund/js' ra thư mục cha là '~/fund'
-app.use(express.static(path.join(__dirname, '..')));
-
-// 2. Phục vụ các file từ thư mục 'html' (ví dụ: ~/fund/html)
-app.use(express.static(path.join(__dirname, '..', 'html')));
-// ------------------------------------
-
 const saltRounds = 10;
 
-// === API ENDPOINTS (Không thay đổi) ===
+// === KHAI BÁO API ENDPOINTS TRƯỚC ===
 
 // 1. Endpoint để đăng ký
 app.post('/register', (req, res) => {
-    // ... code đăng ký giữ nguyên ...
     const { username, password } = req.body;
 
     if (!username || !password) {
@@ -57,7 +45,6 @@ app.post('/register', (req, res) => {
 
 // 2. Endpoint để đăng nhập
 app.post('/login', (req, res) => {
-    // ... code đăng nhập giữ nguyên ...
     const { username, password } = req.body;
 
     if (!username || !password) {
@@ -83,7 +70,31 @@ app.post('/login', (req, res) => {
     });
 });
 
+
+// --- PHỤC VỤ FILE TĨNH ĐẶT Ở CUỐI CÙNG ---
+// Middleware này sẽ chỉ chạy nếu request không khớp với bất kỳ API endpoint nào ở trên
+
+// 1. Phục vụ các file từ thư mục gốc của dự án (ví dụ: ~/fund)
+app.use(express.static(path.join(__dirname, '..')));
+
+// 2. Phục vụ các file từ thư mục 'html' (ví dụ: ~/fund/html)
+app.use(express.static(path.join(__dirname, '..', 'html')));
+
+
 // Khởi động server
-app.listen(PORT, () => {
-    console.log(`Server is running on http://localhost:${PORT}`);
-});
+app.listen(port, () => {
+    console.log(`Server is running on http://localhost:${port}`);
+});```
+
+### **Hành động Ngay Bây Giờ**
+
+1.  Mở file `~/fund/js/severdata.js`.
+2.  Xóa toàn bộ nội dung cũ.
+3.  Dán nội dung mới ở trên vào.
+4.  Lưu file lại.
+5.  **Quan trọng:** Khởi động lại server để áp dụng thay đổi từ phía backend:
+    ```bash
+    pm2 restart severdata
+    ```
+
+Sau khi restart, lỗi "is not valid JSON" sẽ hoàn toàn biến mất. Chúc bạn thành công
