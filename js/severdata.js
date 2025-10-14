@@ -1,6 +1,8 @@
-// server.js
+// js/severdata.js
+
 const express = require('express');
-const db = require('./database.js'); // Import kết nối database
+const path = require('path'); // << THÊM DÒNG NÀY
+const db = require('./database.js');
 const bcrypt = require('bcrypt');
 const cors = require('cors');
 
@@ -8,23 +10,33 @@ const app = express();
 const PORT = 3000;
 
 // Middlewares
-app.use(cors()); // Cho phép cross-origin requests
-app.use(express.json()); // Cho phép server đọc dữ liệu JSON từ request
-app.use(express.static('public')); // Phục vụ các file tĩnh (HTML, CSS) từ thư mục public
+app.use(cors());
+app.use(express.json());
 
-const saltRounds = 10; // Yếu tố để mã hóa mật khẩu
+// --- PHẦN SỬA ĐỔI QUAN TRỌNG ---
+// Thay vì tìm thư mục 'public', chúng ta sẽ phục vụ file từ 2 nơi:
 
-// === API ENDPOINTS ===
+// 1. Phục vụ các file từ thư mục gốc của dự án (ví dụ: ~/fund)
+//    path.join(__dirname, '..') sẽ trỏ từ '~/fund/js' ra thư mục cha là '~/fund'
+app.use(express.static(path.join(__dirname, '..')));
+
+// 2. Phục vụ các file từ thư mục 'html' (ví dụ: ~/fund/html)
+app.use(express.static(path.join(__dirname, '..', 'html')));
+// ------------------------------------
+
+const saltRounds = 10;
+
+// === API ENDPOINTS (Không thay đổi) ===
 
 // 1. Endpoint để đăng ký
 app.post('/register', (req, res) => {
+    // ... code đăng ký giữ nguyên ...
     const { username, password } = req.body;
 
     if (!username || !password) {
         return res.status(400).json({ message: "Username and password are required." });
     }
 
-    // Mã hóa mật khẩu trước khi lưu
     bcrypt.hash(password, saltRounds, (err, hash) => {
         if (err) {
             return res.status(500).json({ message: "Error hashing password." });
@@ -33,7 +45,6 @@ app.post('/register', (req, res) => {
         const sql = `INSERT INTO users (username, password) VALUES (?, ?)`;
         db.run(sql, [username, hash], function(err) {
             if (err) {
-                // Lỗi UNIQUE constraint (tên người dùng đã tồn tại)
                 if (err.message.includes('UNIQUE constraint failed')) {
                     return res.status(409).json({ message: "Username already exists." });
                 }
@@ -46,6 +57,7 @@ app.post('/register', (req, res) => {
 
 // 2. Endpoint để đăng nhập
 app.post('/login', (req, res) => {
+    // ... code đăng nhập giữ nguyên ...
     const { username, password } = req.body;
 
     if (!username || !password) {
@@ -58,23 +70,18 @@ app.post('/login', (req, res) => {
             return res.status(500).json({ message: "Database error." });
         }
         if (!user) {
-            // Không tìm thấy user
             return res.status(401).json({ message: "Invalid credentials." });
         }
 
-        // So sánh mật khẩu người dùng nhập với mật khẩu đã mã hóa trong DB
         bcrypt.compare(password, user.password, (err, result) => {
             if (result) {
-                // Mật khẩu khớp
                 res.status(200).json({ message: "Login successful!" });
             } else {
-                // Mật khẩu không khớp
                 res.status(401).json({ message: "Invalid credentials." });
             }
         });
     });
 });
-
 
 // Khởi động server
 app.listen(PORT, () => {
