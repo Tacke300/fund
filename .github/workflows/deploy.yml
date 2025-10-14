@@ -13,17 +13,34 @@ jobs:
       uses: actions/checkout@v3
 
     - name: Setup SSH
-      # Sử dụng một Action có sẵn để thiết lập SSH an toàn hơn
-      # Nó sẽ tự động thêm key và cấu hình known_hosts
       uses: webfactory/ssh-agent@v0.8.0
       with:
         ssh-private-key: ${{ secrets.SSH_PRI }}
 
     - name: Add remote server to known_hosts
-      # Chạy ssh-keyscan để đảm bảo kết nối không bị chặn
       run: ssh-keyscan -H 35.240.146.86 >> ~/.ssh/known_hosts
 
     - name: Deploy and Restart Application
-      # Thay 'tacke300' bằng username trên VPS của bạn nếu nó khác
       run: |
-        ssh tungpham240497@35.240.146.86
+        ssh tungpham240497@35.240.146.86 '
+          echo "===== BẮT ĐẦU DEPLOY ====="
+          
+          cd /home/tungpham240497/fund
+          
+          echo "[B1] Đã vào thư mục dự án."
+          
+          git fetch origin main
+          git reset --hard origin/main
+          
+          echo "[B2] Đã cập nhật code từ GitHub."
+          
+          # npm install
+          
+          echo "[B3] Bỏ qua npm install (nếu được comment)."
+          
+          pm2 restart severdata
+          
+          echo "[B4] Đã khởi động lại ứng dụng severdata."
+          
+          echo "===== DEPLOY THÀNH CÔNG ====="
+        '
