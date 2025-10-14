@@ -99,8 +99,13 @@ function renderVipView(mainContent) {
         vipPanel.style.display = 'flex';
         const startButton = createButton('start-btn', AppState.isBotRunning ? 'fa-stop-circle' : 'fa-play-circle', AppState.isBotRunning ? 'Stop Bot' : 'Start Bot', handleStartStopClick);
         if (AppState.isBotRunning) startButton.classList.add('stop-state');
+        
+        // --- KHÔI PHỤC ĐẦY ĐỦ CÁC NÚT ---
+        const historyFundingButton = createButton('history-funding-btn', 'fa-history', 'History Funding', () => showHistoryPopup('funding'));
         const historyStartButton = createButton('history-start-btn', 'fa-scroll', 'History Start', () => showHistoryPopup('start'));
-        mainContent.append(startButton, historyStartButton);
+        const supportButton = createButton('support-btn', 'fa-life-ring', 'Support', () => alert('Please contact support via Telegram.'));
+        
+        mainContent.append(startButton, historyFundingButton, historyStartButton, supportButton);
     }
 }
 
@@ -186,6 +191,7 @@ async function handleSaveSettings(event) {
 function showHistoryPopup(type) {
     const title = document.getElementById('history-title'), head = document.getElementById('history-table-head'), body = document.getElementById('history-table-body');
     head.innerHTML = ''; body.innerHTML = '';
+
     if (type === 'start') {
         title.textContent = 'History Start';
         head.innerHTML = `<tr><th>Coin</th><th>Margin</th><th>PNL</th></tr>`;
@@ -197,6 +203,11 @@ function showHistoryPopup(type) {
                 body.innerHTML += `<tr><td>${row.coin}</td><td>$${row.collateralUsed.toFixed(2)}</td><td class="${pnlClass}">${row.actualPnl.toFixed(4)}</td></tr>`;
             });
         }
+    } else if (type === 'funding') {
+        title.textContent = 'History Funding';
+        head.innerHTML = `<tr><th>Coin</th><th>Est. PNL</th></tr>`;
+        // TODO: Replace with real funding history data from server when available
+        body.innerHTML = `<tr><td colspan="2">No funding history data yet.</td></tr>`;
     }
     togglePopup('history-popup', true);
 }
@@ -251,7 +262,7 @@ function handleLogout() {
     localStorage.removeItem('username');
     localStorage.removeItem('vip_panel_visible');
     AppState.username = null;
-    showAuthPage();
+    window.location.reload();
 }
 function showAuthPage() {
     document.getElementById('auth-page').style.display = 'block';
