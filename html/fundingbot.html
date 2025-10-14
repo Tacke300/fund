@@ -3,65 +3,217 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Lời Chúc May Mắn</title>
+    <title>Funding Bot Dashboard</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
     <style>
+        :root {
+            --primary-color: #00ddb3;
+            --background-color: #0d1117;
+            --surface-color: #161b22;
+            --border-color: #30363d;
+            --text-color: #c9d1d9;
+            --text-secondary-color: #8b949e;
+            --danger-color: #e5534b;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--background-color);
+            color: var(--text-color);
             display: flex;
-            justify-content: center;
-            align-items: center;
+            flex-direction: column;
             min-height: 100vh;
-            margin: 0;
-            background-color: #f0f8ff; /* Nền xanh nhạt */
-            overflow: hidden; /* Ẩn thanh cuộn nếu có hiệu ứng tràn */
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            overflow-x: hidden;
         }
-
-        .lucky-message {
-            font-size: 3em; /* Kích thước chữ lớn */
-            font-weight: bold;
-            color: #ff6347; /* Màu đỏ cam ban đầu */
-            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.2); /* Đổ bóng chữ */
-            animation:
-                sparkle 1.5s infinite alternate, /* Hiệu ứng lung linh */
-                colorChange 3s infinite alternate; /* Hiệu ứng đổi màu */
-            padding: 20px;
-            border-radius: 15px;
-            background: linear-gradient(45deg, #ffe0b2, #ffd180); /* Nền gradient nhẹ cho chữ */
-            box-shadow: 0 0 20px rgba(255, 165, 0, 0.6); /* Hiệu ứng phát sáng */
-            display: inline-block; /* Để padding và box-shadow hoạt động tốt */
+        body::before {
+            content: ''; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: radial-gradient(circle at top left, rgba(0, 221, 179, 0.1), transparent 30%),
+                        radial-gradient(circle at bottom right, rgba(0, 120, 255, 0.1), transparent 30%);
+            z-index: -1; animation: gradient-pan 15s ease infinite alternate;
         }
-
-        /* Keyframes cho hiệu ứng lung linh */
-        @keyframes sparkle {
-            0% { transform: scale(1); opacity: 1; }
-            50% { transform: scale(1.05); opacity: 0.9; }
-            100% { transform: scale(1); opacity: 1; }
+        @keyframes gradient-pan { 0% { background-position: 0% 0%; } 100% { background-position: 100% 100%; } }
+        .container { width: 90%; max-width: 1200px; margin: 0 auto; padding: 20px; flex-grow: 1; display: flex; flex-direction: column; }
+        header { display: flex; justify-content: space-between; align-items: center; padding-bottom: 20px; border-bottom: 1px solid var(--border-color); }
+        .logo { font-size: 1.8em; font-weight: bold; color: var(--primary-color); text-shadow: 0 0 10px rgba(0, 221, 179, 0.5); }
+        .header-actions { display: flex; align-items: center; gap: 20px; }
+        .header-btn { background: none; border: none; color: var(--text-secondary-color); font-size: 1.8em; cursor: pointer; transition: color 0.3s, transform 0.3s; }
+        .header-btn:hover { color: var(--primary-color); }
+        #settings-btn:hover { transform: rotate(90deg); }
+        #logout-btn:hover { color: var(--danger-color); }
+        main { padding-top: 40px; display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px; text-align: center; }
+        .action-button {
+            background-color: var(--surface-color); border: 1px solid var(--border-color); color: var(--text-color); padding: 25px;
+            font-size: 1.2em; border-radius: 8px; cursor: pointer; transition: all 0.3s ease; display: flex; flex-direction: column;
+            align-items: center; justify-content: center; gap: 10px;
         }
-
-        /* Keyframes cho hiệu ứng đổi màu */
-        @keyframes colorChange {
-            0% { color: #ff6347; } /* Đỏ cam */
-            33% { color: #32cd32; } /* Xanh lá cây */
-            66% { color: #1e90ff; } /* Xanh dương */
-            100% { color: #ff6347; }
+        .action-button i { font-size: 2em; margin-bottom: 10px; }
+        .action-button:hover { border-color: var(--primary-color); transform: translateY(-5px); box-shadow: 0 8px 20px rgba(0, 221, 179, 0.1); }
+        #start-btn { color: #28a745; }
+        #stop-btn { color: #dc3545; }
+        footer { text-align: center; padding: 20px; margin-top: auto; color: var(--text-secondary-color); font-size: 0.9em; }
+        .popup {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0, 0, 0, 0.7);
+            display: flex; justify-content: center; align-items: flex-end; z-index: 1000; opacity: 0;
+            visibility: hidden; transition: opacity 0.4s, visibility 0.4s;
         }
-
-        /* Hiệu ứng emoji */
-        .emoji {
-            animation: bounce 1s infinite alternate; /* Hiệu ứng nảy */
-            display: inline-block; /* Đảm bảo emoji nằm cùng dòng */
+        .popup.active { opacity: 1; visibility: visible; }
+        .popup-content {
+            background-color: var(--surface-color); width: 100%; max-width: 600px; height: 90vh; max-height: 800px;
+            border-top-left-radius: 20px; border-top-right-radius: 20px; padding: 25px; display: flex; flex-direction: column;
+            transform: translateY(100%); transition: transform 0.4s ease-out;
         }
-
-        /* Keyframes cho hiệu ứng nảy của emoji */
-        @keyframes bounce {
-            0% { transform: translateY(0); }
-            100% { transform: translateY(-10px); }
+        .popup.active .popup-content { transform: translateY(0); }
+        .popup-header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-color); padding-bottom: 15px; margin-bottom: 20px; }
+        .popup-header h2 { font-size: 1.5em; }
+        #close-popup-btn { background: none; border: none; font-size: 1.8em; color: var(--text-secondary-color); cursor: pointer; transition: color 0.3s; }
+        #close-popup-btn:hover { color: var(--primary-color); }
+        .popup-body { overflow-y: auto; flex-grow: 1; }
+        .exchange-group { margin-bottom: 25px; border: 1px solid var(--border-color); padding: 20px; border-radius: 8px; }
+        .exchange-group h3 { color: var(--primary-color); margin-bottom: 15px; }
+        .input-group { margin-bottom: 15px; }
+        .input-group label { display: block; margin-bottom: 5px; color: var(--text-secondary-color); }
+        .input-group input { width: 100%; padding: 10px; background-color: var(--background-color); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-color); font-size: 1em; }
+        #submit-settings-btn {
+            background-color: var(--primary-color); color: var(--background-color); border: none; padding: 15px; width: 100%;
+            border-radius: 8px; font-size: 1.1em; font-weight: bold; cursor: pointer; margin-top: 20px; transition: background-color 0.3s;
         }
+        #submit-settings-btn:hover { background-color: #00b894; }
     </style>
 </head>
 <body>
-    <div class="lucky-message">
-        Chúc bạn một ngày may mắn <span class="emoji">🍀</span><span class="emoji">🍀</span><span class="emoji">🍀</span>
+
+    <div class="container">
+        <header>
+            <div class="logo">FUNDING BOT CRYPTO</div>
+            <div class="header-actions">
+                <button id="settings-btn" class="header-btn" title="Cài đặt"><i class="fas fa-cog"></i></button>
+                <button id="logout-btn" class="header-btn" title="Đăng xuất"><i class="fas fa-sign-out-alt"></i></button>
+            </div>
+        </header>
+
+        <main>
+            <button class="action-button" id="start-btn"><i class="fas fa-play-circle"></i><span>Start Bot</span></button>
+            <button class="action-button" id="stop-btn"><i class="fas fa-stop-circle"></i><span>Stop Bot</span></button>
+            <button class="action-button" id="history-funding-btn"><i class="fas fa-history"></i><span>History Funding</span></button>
+            <button class="action-button" id="history-start-btn"><i class="fas fa-scroll"></i><span>History Start</span></button>
+            <button class="action-button" id="support-btn"><i class="fas fa-life-ring"></i><span>Support</span></button>
+        </main>
     </div>
+
+    <footer>
+        &copy; 2024 FUNDING BOT CRYPTO. All rights reserved.
+    </footer>
+
+    <div class="popup" id="settings-popup">
+        <div class="popup-content">
+            <div class="popup-header">
+                <h2>Cài đặt API</h2>
+                <button id="close-popup-btn">&times;</button>
+            </div>
+            <div class="popup-body">
+                <form id="settings-form">
+                    <div class="exchange-group">
+                        <h3><i class="fas fa-coins"></i> Binance</h3>
+                        <div class="input-group"><label for="binance_apikey">API Key</label><input type="text" id="binance_apikey" name="binance_apikey"></div>
+                        <div class="input-group"><label for="binance_secret">Secret Key</label><input type="password" id="binance_secret" name="binance_secret"></div>
+                        <div class="input-group"><label for="binance_password">Password (nếu có)</label><input type="password" id="binance_password" name="binance_password"></div>
+                    </div>
+                    <div class="exchange-group">
+                        <h3><i class="fas fa-coins"></i> Bitget</h3>
+                        <div class="input-group"><label for="bitget_apikey">API Key</label><input type="text" id="bitget_apikey" name="bitget_apikey"></div>
+                        <div class="input-group"><label for="bitget_secret">Secret Key</label><input type="password" id="bitget_secret" name="bitget_secret"></div>
+                        <div class="input-group"><label for="bitget_password">Password (nếu có)</label><input type="password" id="bitget_password" name="bitget_password"></div>
+                    </div>
+                    <div class="exchange-group">
+                        <h3><i class="fas fa-coins"></i> OKX</h3>
+                        <div class="input-group"><label for="okx_apikey">API Key</label><input type="text" id="okx_apikey" name="okx_apikey"></div>
+                        <div class="input-group"><label for="okx_secret">Secret Key</label><input type="password" id="okx_secret" name="okx_secret"></div>
+                        <div class="input-group"><label for="okx_password">Password (nếu có)</label><input type="password" id="okx_password" name="okx_password"></div>
+                    </div>
+                     <div class="exchange-group">
+                        <h3><i class="fas fa-coins"></i> KuCoin</h3>
+                        <div class="input-group"><label for="kucoin_apikey">API Key</label><input type="text" id="kucoin_apikey" name="kucoin_apikey"></div>
+                        <div class="input-group"><label for="kucoin_secret">Secret Key</label><input type="password" id="kucoin_secret" name="kucoin_secret"></div>
+                        <div class="input-group"><label for="kucoin_password">Password (nếu có)</label><input type="password" id="kucoin_password" name="kucoin_password"></div>
+                    </div>
+                    <button type="submit" id="submit-settings-btn">Lưu Cài Đặt</button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- BẢO VỆ TRANG: KIỂM TRA ĐĂNG NHẬP KHI TẢI TRANG ---
+        document.addEventListener('DOMContentLoaded', () => {
+            const currentUsername = localStorage.getItem('username');
+            if (!currentUsername) {
+                // Nếu không có username trong cache, chuyển về trang đăng nhập
+                // Thay 'reg-log.html' bằng tên file đăng nhập của bạn
+                alert('Vui lòng đăng nhập để tiếp tục.');
+                window.location.href = 'reg-log.html'; 
+            }
+        });
+
+        // --- XỬ LÝ CÁC NÚT VÀ POPUP ---
+        const settingsBtn = document.getElementById('settings-btn');
+        const logoutBtn = document.getElementById('logout-btn');
+        const closePopupBtn = document.getElementById('close-popup-btn');
+        const settingsPopup = document.getElementById('settings-popup');
+        const settingsForm = document.getElementById('settings-form');
+
+        function openPopup() { settingsPopup.classList.add('active'); }
+        function closePopup() { settingsPopup.classList.remove('active'); }
+
+        settingsBtn.addEventListener('click', openPopup);
+        closePopupBtn.addEventListener('click', closePopup);
+        settingsPopup.addEventListener('click', (event) => {
+            if (event.target === settingsPopup) closePopup();
+        });
+
+        // --- XỬ LÝ ĐĂNG XUẤT ---
+        logoutBtn.addEventListener('click', () => {
+            if (confirm('Bạn có chắc chắn muốn đăng xuất không?')) {
+                // Xóa dữ liệu người dùng khỏi localStorage
+                localStorage.removeItem('username');
+                
+                // Chuyển hướng về trang đăng nhập
+                // Thay 'reg-log.html' bằng tên file đăng nhập của bạn
+                window.location.href = 'reg-log.html';
+            }
+        });
+
+        // --- XỬ LÝ LƯU CÀI ĐẶT ---
+        settingsForm.addEventListener('submit', (event) => {
+            event.preventDefault();
+            
+            const currentUsername = localStorage.getItem('username');
+            if (!currentUsername) {
+                alert('Lỗi: Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.');
+                window.location.href = 'reg-log.html';
+                return;
+            }
+
+            const formData = new FormData(settingsForm);
+            const settingsData = Object.fromEntries(formData.entries());
+            settingsData.username = currentUsername;
+
+            fetch('/api/save-settings', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(settingsData),
+            })
+            .then(response => response.json())
+            .then(data => {
+                alert(data.message);
+                if (data.message.includes('successfully')) {
+                    closePopup();
+                }
+            })
+            .catch((error) => {
+                console.error('Error:', error);
+                alert('Đã có lỗi xảy ra khi kết nối đến server.');
+            });
+        });
+    </script>
 </body>
 </html>
