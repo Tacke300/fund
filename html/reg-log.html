@@ -102,22 +102,22 @@
 </head>
 <body>
   <div class="container" id="login-container">
-    <h2>Đăng nhập</h2>
+    <h2>Login</h2>
     <input id="login-username" type="text" placeholder="User ID" class="form-input" />
     <input id="login-password" type="password" placeholder="Password" class="form-input" />
-    <button onclick="login()">Đăng nhập</button>
-    <div class="link" onclick="showRegister()">Chưa có tài khoản? Đăng ký</div>
+    <button onclick="login()">Login</button>
+    <div class="link" onclick="showRegister()">Don't have an account? Sign up</div>
   </div>
 
   <div class="container" id="register-container" style="display:none">
-    <h1>SET API OKX</h1>
-    <input type="text" id="username" placeholder="Tên đăng nhập" class="form-input" />
-    <input type="password" id="password" placeholder="Mật khẩu" class="form-input" />
-    <input type="password" id="repassword" placeholder="Nhập lại mật khẩu" class="form-input" />
+    <h1>Sign Up</h1>
+    <input type="text" id="username" placeholder="User name" class="form-input" />
+    <input type="password" id="password" placeholder="Password" class="form-input" />
+    <input type="password" id="repassword" placeholder="Re-Password" class="form-input" />
     <div class="popup-buttons">
-      <button onclick="submitReg()">Đăng ký</button>
+      <button onclick="submitReg()">Sign Up</button>
     </div>
-    <div class="link" onclick="hideRegister()">Hủy</div>
+    <div class="link" onclick="hideRegister()">Cancel</div>
   </div>
 
   <div id="funding-container" style="display:none">
@@ -144,19 +144,19 @@
       const repassword = document.getElementById('repassword').value.trim();
 
       if (!username || !password || !repassword) {
-        alert("Vui lòng điền đầy đủ thông tin.");
+        alert("Please fill in all information.");
         return;
       }
 
       if (password !== repassword) {
-        alert("Mật khẩu không khớp.");
+        alert("Passwords do not match.");
         return;
       }
 
       try {
         const response = await fetch(USERS_URL, {
           method: 'POST',
-          headers: {
+          headers: {6
             'apikey': SUPABASE_API_KEY,
             'Authorization': 'Bearer ' + SUPABASE_API_KEY,
             'Content-Type': 'application/json',
@@ -170,13 +170,13 @@
 
         if (!response.ok) {
           const errorData = await response.json();
-          throw new Error(errorData.message || 'Lỗi Server');
+          throw new Error(errorData.message || 'Error Server');
         }
 
-        alert("Đăng ký thành công!");
+        alert("Sign Up done!");
         hideRegister();
       } catch (error) {
-        alert("Lỗi đăng ký: " + error.message);
+        alert("Error Sign Up: " + error.message);
         console.error(error);
       }
     }
@@ -186,7 +186,7 @@
       const password = document.getElementById('login-password').value;
 
       if (!username || !password) {
-        alert("Vui lòng nhập tài khoản và mật khẩu.");
+        alert("Please enter your account and password.");
         return;
       }
 
@@ -203,14 +203,14 @@
         const data = await response.json();
 
         if (data.length === 0) {
-          alert("Sai tài khoản hoặc mật khẩu.");
+          alert("Wrong account or password.");
         } else {
           document.getElementById('login-container').style.display = 'none';
           document.getElementById('register-container').style.display = 'none';
           document.getElementById('funding-container').style.display = 'block';
         }
       } catch (error) {
-        alert("Lỗi đăng nhập: " + error.message);
+        alert("Error Login: " + error.message);
         console.error(error);
       }
     }
