@@ -14,7 +14,6 @@
     color: #f0f0f0;
   }
 
-  /* Container cho login và register */
   .container {
     background: #2a2a40;
     padding: 30px;
@@ -75,7 +74,6 @@
     text-decoration: underline;
   }
 
-  /* Fullscreen iframe */
   #funding-container {
     position: fixed;
     top: 0;
@@ -85,7 +83,7 @@
     margin: 0;
     padding: 0;
     z-index: 9999;
-    background: #000; /* đề phòng trang iframe bị trắng */
+    background: #000;
   }
 
   #funding-container iframe {
@@ -124,9 +122,6 @@
     <iframe src="fundingbot.html" id="funding-iframe"></iframe>
   </div>
 <script>
-    // URL của server backend mới
-    const API_URL = 'http://35.240.146.86:80';
-
     function showRegister() {
       document.getElementById('login-container').style.display = 'none';
       document.getElementById('register-container').style.display = 'block';
@@ -153,7 +148,7 @@
       }
 
       try {
-        const response = await fetch(`${API_URL}/register`, {
+        const response = await fetch('/register', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json'
@@ -167,7 +162,6 @@
         const result = await response.json();
 
         if (!response.ok) {
-          // Ném lỗi với thông điệp từ server
           throw new Error(result.message || 'Error Server');
         }
 
@@ -189,7 +183,7 @@
       }
 
       try {
-        const response = await fetch(`${API_URL}/login`, {
+        const response = await fetch('/login', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json'
@@ -206,7 +200,6 @@
           throw new Error(result.message || 'Error Server');
         }
         
-        // Đăng nhập thành công
         document.getElementById('login-container').style.display = 'none';
         document.getElementById('register-container').style.display = 'none';
         document.getElementById('funding-container').style.display = 'block';
@@ -216,6 +209,6 @@
         console.error(error);
       }
     }
-  </script>
+</script>
 </body>
 </html>
