@@ -22,7 +22,7 @@ jobs:
     - name: Deploy to VPS 1
       run: |
         ssh -i ~/.ssh/id_ed25519 your_email@example.com '
-          cd /home/fund && 
+          cd /home/tacke300/fund && 
           git pull && 
           ./autopull.sh
         '
