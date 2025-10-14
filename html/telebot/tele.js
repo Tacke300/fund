@@ -4,7 +4,7 @@ const path = require('path');
 const ccxt = require('ccxt');
 const sqlite3 = require('sqlite3').verbose();
 
-const BOT_PORT = 5006;
+const BOT_PORT = 5678;
 const DB_FILE = 'users.db';
 
 const db = new sqlite3.Database(DB_FILE, (err) => {
