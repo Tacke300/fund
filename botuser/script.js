@@ -3,7 +3,7 @@ const COIN_DATA_URL = 'http://35.240.146.86:5005/api/data';
 
 const AppState = {
     isVip: false, vipLevel: null, vipExpiry: null, isBotRunning: false,
-    username: null, pnl: 0, totalUsdt: 0, vipPanelVisible: false, tradeHistory: []
+    username: null, pnl: 0, totalUsdt: 0, tradeHistory: []
 };
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -38,6 +38,8 @@ async function fetchStatus() {
         if (!response) throw new Error('Could not connect to bot server.');
 
         const lastRunningState = AppState.isBotRunning;
+        const lastVipState = AppState.isVip;
+
         AppState.isVip = response.is_vip === 1;
         AppState.vipLevel = response.vip_level;
         AppState.vipExpiry = response.vip_expiry_timestamp;
@@ -46,10 +48,7 @@ async function fetchStatus() {
         AppState.totalUsdt = response.totalUsdt;
         AppState.tradeHistory = response.tradeHistory || [];
 
-        const panelPreviouslyVisible = AppState.vipPanelVisible;
-        AppState.vipPanelVisible = localStorage.getItem('vip_panel_visible') === 'true';
-
-        if (lastRunningState !== AppState.isBotRunning || panelPreviouslyVisible !== AppState.vipPanelVisible) {
+        if (lastRunningState !== AppState.isBotRunning || lastVipState !== AppState.isVip) {
             renderUI();
         }
         updateVipPanel();
@@ -87,25 +86,16 @@ function renderNonVipView(mainContent) {
 
 function renderVipView(mainContent) {
     const vipPanel = document.getElementById('vip-info-panel');
-    if (!AppState.vipPanelVisible) {
-        const startNowButton = createButton('start-now-btn', 'fa-rocket', 'Start Now', () => {
-            AppState.vipPanelVisible = true;
-            localStorage.setItem('vip_panel_visible', 'true');
-            renderUI();
-        });
-        mainContent.appendChild(startNowButton);
-        vipPanel.style.display = 'none';
-    } else {
-        vipPanel.style.display = 'flex';
-        const startButton = createButton('start-btn', AppState.isBotRunning ? 'fa-stop-circle' : 'fa-play-circle', AppState.isBotRunning ? 'Stop Bot' : 'Start Bot', handleStartStopClick);
-        if (AppState.isBotRunning) startButton.classList.add('stop-state');
-        
-        const historyFundingButton = createButton('history-funding-btn', 'fa-history', 'History Funding', () => showHistoryPopup('funding'));
-        const historyStartButton = createButton('history-start-btn', 'fa-scroll', 'History Start', () => showHistoryPopup('start'));
-        const supportButton = createButton('support-btn', 'fa-life-ring', 'Support', () => alert('Please contact support via Telegram.'));
-        
-        mainContent.append(startButton, historyFundingButton, historyStartButton, supportButton);
-    }
+    vipPanel.style.display = 'flex';
+
+    const startButton = createButton('start-btn', AppState.isBotRunning ? 'fa-stop-circle' : 'fa-play-circle', AppState.isBotRunning ? 'Stop Bot' : 'Start Bot', handleStartStopClick);
+    if (AppState.isBotRunning) startButton.classList.add('stop-state');
+    
+    const historyFundingButton = createButton('history-funding-btn', 'fa-history', 'History Funding', () => showHistoryPopup('funding'));
+    const historyStartButton = createButton('history-start-btn', 'fa-scroll', 'History Start', () => showHistoryPopup('start'));
+    const supportButton = createButton('support-btn', 'fa-life-ring', 'Support', () => alert('Please contact support via Telegram.'));
+    
+    mainContent.append(startButton, historyFundingButton, historyStartButton, supportButton);
 }
 
 function createButton(id, icon, text, onClick, customClass = 'action-button') {
@@ -211,7 +201,7 @@ function showHistoryPopup(type) {
 }
 
 async function fetchCoinData() {
-    if (!AppState.isVip || !AppState.vipPanelVisible) return;
+    if (!AppState.isVip) return;
     try {
         const response = await fetch(COIN_DATA_URL);
         const data = await response.json();
@@ -258,7 +248,6 @@ async function handleRegister(e) {
 }
 function handleLogout() {
     localStorage.removeItem('username');
-    localStorage.removeItem('vip_panel_visible');
     AppState.username = null;
     window.location.reload();
 }
