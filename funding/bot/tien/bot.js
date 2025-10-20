@@ -136,7 +136,6 @@ function getTargetDepositInfo(toExchangeId, network) {
     return { network, address: depositAddress };
 }
 
-// SỬA LỖI BITGET: Trả về giá trị "BEP20" thay vì "BSC"
 function getWithdrawParams(exchangeId, network) {
     const networkUpper = network.toUpperCase();
     if (exchangeId.includes('binance')) {
@@ -146,14 +145,14 @@ function getWithdrawParams(exchangeId, network) {
         if (networkUpper === 'APTOS') return { network: 'APT' };
     }
     if (exchangeId.includes('bitget')) {
-        if (networkUpper === 'BEP20') return { chain: 'BEP20', network: 'BEP20' }; // Sửa lại giá trị thành BEP20
+        if (networkUpper === 'BEP20') return { chain: 'BEP20', network: 'BEP20' };
     }
     if (exchangeId.includes('okx')) {
         if (networkUpper === 'BEP20') return { chain: 'BEP20' };
+        if (networkUpper === 'APTOS') return { chain: 'APTOS' };
     }
     return { network: networkUpper };
 }
-
 
 async function fetchAllBalances(type = 'future') {
     const allBalances = {};
@@ -191,6 +190,7 @@ async function attemptInternalTransferOnArrival(toExchangeId, fromExchangeId, am
     let targetFromWallet = 'spot', targetToWallet = 'future';
     if (toExchangeId === 'kucoinfutures') targetFromWallet = 'main';
     if (toExchangeId === 'bitget') targetToWallet = 'swap';
+    if (toExchangeId === 'okx') targetFromWallet = 'funding';
 
     let checkerId = toExchangeId;
     if (toExchangeId === 'kucoinfutures') checkerId = 'kucoin';
@@ -256,6 +256,7 @@ async function executeSingleFundTransfer(fromExchangeId, toExchangeId, amount) {
         let fromWallet = 'future', toWallet = 'spot';
         if (fromExchangeId === 'bitget') fromWallet = 'swap';
         if (fromExchangeId === 'kucoinfutures') toWallet = 'main';
+        if (fromExchangeId === 'okx') toWallet = 'funding';
         
         transferStatus.message = `1/2: Chuyển ${amount.toFixed(2)} USDT sang ví ${toWallet} trên ${fromExchangeId}...`;
         await sourceExchange.transfer('USDT', amount, fromWallet, toWallet);
@@ -263,10 +264,12 @@ async function executeSingleFundTransfer(fromExchangeId, toExchangeId, amount) {
 
         let networkLookupKey = 'BEP20';
         let withdrawerExchange = sourceExchange;
-        if (fromExchangeId === 'kucoinfutures') {
+        if (fromExchangeId === 'kucoinfutures' || fromExchangeId === 'okx') {
             networkLookupKey = 'APTOS';
-            withdrawerExchange = exchanges['kucoin'];
-            if (!withdrawerExchange) throw new Error("Instance KuCoin (Spot) chưa được khởi tạo.");
+            if (fromExchangeId === 'kucoinfutures') {
+                withdrawerExchange = exchanges['kucoin'];
+                if (!withdrawerExchange) throw new Error("Instance KuCoin (Spot) chưa được khởi tạo.");
+            }
         }
         
         const targetDepositInfo = getTargetDepositInfo(toExchangeId, networkLookupKey);
@@ -683,12 +686,22 @@ async function mainBotLoop() {
                 hasLoggedNotFoundThisHour = true;
             }
         }
-        else if (capitalManagementState === 'FUNDS_READY' && currentMinute === 59) {
-            safeLog('log', `[TIMER] Phút 59: Thực hiện giao dịch cho ${selectedOpportunityForNextTrade.coin}.`);
-            const success = await executeTrades(selectedOpportunityForNextTrade, currentPercentageToUse);
-            if (!success) {
-                safeLog('error', "[TIMER] Lỗi khi vào lệnh. Bắt đầu dọn dẹp vốn.");
-                await returnFundsToHub();
+        else if (capitalManagementState === 'FUNDS_READY' && selectedOpportunityForNextTrade) {
+            if (selectedOpportunityForNextTrade.isManualTest) {
+                safeLog('info', `[MANUAL-TEST] Vốn đã sẵn sàng. Thực hiện giao dịch test cho ${selectedOpportunityForNextTrade.coin}.`);
+                const success = await executeTrades(selectedOpportunityForNextTrade, selectedOpportunityForNextTrade.percentageToUse);
+                if (!success) {
+                    safeLog('error', "[MANUAL-TEST] Lỗi khi vào lệnh test. Bắt đầu dọn dẹp vốn.");
+                    await returnFundsToHub();
+                }
+            }
+            else if (currentMinute === 59) {
+                safeLog('log', `[TIMER] Phút 59: Thực hiện giao dịch cho ${selectedOpportunityForNextTrade.coin}.`);
+                const success = await executeTrades(selectedOpportunityForNextTrade, currentPercentageToUse);
+                if (!success) {
+                    safeLog('error', "[TIMER] Lỗi khi vào lệnh. Bắt đầu dọn dẹp vốn.");
+                    await returnFundsToHub();
+                }
             }
         }
         else if (capitalManagementState === 'TRADE_OPEN' && currentMinute === 0 && currentSecond >= 5 && currentSecond < 15) {
@@ -749,7 +762,7 @@ const botServer = http.createServer(async (req, res) => {
                 res.end(err ? 'Lỗi đọc file index.html' : content);
             });
         } else if (url === '/bot-api/status' && method === 'GET') {
-             const transferExchanges = ['binanceusdm', 'bitget', 'kucoinfutures'];
+             const transferExchanges = ['binanceusdm', 'bitget', 'kucoinfutures', 'okx'];
             const internalTransferExchanges = activeExchangeIds.filter(id => exchanges[id] && id !== 'kucoin' && id !== 'binance');
             res.writeHead(200, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ 
@@ -764,17 +777,27 @@ const botServer = http.createServer(async (req, res) => {
         } else if (url === '/bot-api/stop' && method === 'POST') {
              res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ success: stopBot(), message: 'Đã gửi yêu cầu dừng bot.' }));
         } else if (url === '/bot-api/custom-test-trade' && method === 'POST') {
-            if (currentTradeDetails) return res.writeHead(409, { 'Content-Type': 'application/json' }).end(JSON.stringify({ success: false, message: 'Bot đang bận với một giao dịch.' }));
-            if (!bestPotentialOpportunityForDisplay) return res.writeHead(400, { 'Content-Type': 'application/json' }).end(JSON.stringify({ success: false, message: 'Chưa có cơ hội nào.' }));
-            
-            const data = JSON.parse(body);
-            const testOpportunity = {
-                coin: bestPotentialOpportunityForDisplay?.coin,
-                commonLeverage: parseInt(data.leverage, 10) || 20,
-                details: { shortExchange: data.shortExchange, longExchange: data.longExchange }
-            };
-            const tradeSuccess = await executeTrades(testOpportunity, parseFloat(data.percentage));
-            res.writeHead(tradeSuccess ? 200 : 500, { 'Content-Type': 'application/json' }).end(JSON.stringify({ success: tradeSuccess, message: tradeSuccess ? 'Lệnh Test đã được gửi.' : 'Lỗi khi gửi lệnh Test.' }));
+            if (capitalManagementState !== 'IDLE') {
+                return res.writeHead(409, { 'Content-Type': 'application/json' }).end(JSON.stringify({ success: false, message: `Bot đang bận với tác vụ '${capitalManagementState}'. Không thể test.` }));
+            }
+            if (!bestPotentialOpportunityForDisplay) {
+                return res.writeHead(400, { 'Content-Type': 'application/json' }).end(JSON.stringify({ success: false, message: 'Chưa có cơ hội nào để test.' }));
+            }
+            try {
+                const data = JSON.parse(body);
+                selectedOpportunityForNextTrade = {
+                    coin: bestPotentialOpportunityForDisplay.coin,
+                    commonLeverage: parseInt(data.leverage, 10) || 20,
+                    details: { shortExchange: data.shortExchange, longExchange: data.longExchange },
+                    isManualTest: true,
+                    percentageToUse: parseFloat(data.percentage) || 50
+                };
+                safeLog('info', `[MANUAL-TEST] Nhận yêu cầu test thủ công cho ${selectedOpportunityForNextTrade.coin}. Bắt đầu gom vốn.`);
+                manageFundDistribution(selectedOpportunityForNextTrade);
+                res.writeHead(202, { 'Content-Type': 'application/json' }).end(JSON.stringify({ success: true, message: 'Đã nhận yêu cầu Test. Bot đang gom vốn, sẽ tự động vào lệnh khi vốn sẵn sàng.' }));
+            } catch(e) {
+                res.writeHead(400, { 'Content-Type': 'application/json' }).end(JSON.stringify({ success: false, message: 'Dữ liệu yêu cầu không hợp lệ.' }));
+            }
         }
         else if (url === '/bot-api/close-trade-now' && method === 'POST') {
             const success = await closeTradeNow();
@@ -815,9 +838,9 @@ const botServer = http.createServer(async (req, res) => {
             } else if (exchangeId === 'kucoinfutures' || exchangeId === 'kucoin') {
                 if (from === 'spot') from = 'main';
                 if (to === 'spot') to = 'main';
-                if (from === 'main') exchange = exchanges['kucoin']; // Use spot instance
+                if (from === 'main') exchange = exchanges['kucoin'];
             } else if (exchangeId === 'binanceusdm' || exchangeId === 'binance') {
-                if (from === 'spot') exchange = exchanges['binance']; // Use spot instance
+                if (from === 'spot') exchange = exchanges['binance'];
             }
         
             try {
