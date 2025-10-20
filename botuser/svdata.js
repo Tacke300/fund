@@ -180,7 +180,7 @@ async function executeTrades(opportunity) {
             computeOrderDetails(longEx, longSymbol, targetNotional, desiredLeverage, longBalance)
         ]);
         
-        const [shortOrder, longOrder] = await Promise.all([
+        await Promise.all([
             shortEx.createMarketSellOrder(shortSymbol, shortOrderDetails.amount),
             longEx.createMarketBuyOrder(longSymbol, longOrderDetails.amount)
         ]);
