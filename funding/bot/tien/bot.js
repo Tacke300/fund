@@ -107,6 +107,20 @@ activeExchangeIds.forEach(id => {
     }
 });
 
+(async () => {
+    safeLog('log', '[INIT] Bắt đầu tải trước (warm-up) dữ liệu markets cho tất cả các sàn...');
+    const marketLoadPromises = [];
+    for (const id in exchanges) {
+        marketLoadPromises.push(exchanges[id].loadMarkets());
+    }
+    try {
+        await Promise.all(marketLoadPromises);
+        safeLog('info', '[INIT] ✅ Tải trước toàn bộ markets thành công!');
+    } catch (e) {
+        safeLog('error', '[INIT] Lỗi khi tải trước markets:', e.message);
+    }
+})();
+
 function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
 
 async function fetchDataFromServer() {
@@ -148,11 +162,11 @@ function getWithdrawParams(exchangeId, network) {
         if (networkUpper === 'BEP20') return { chain: 'BEP20', network: 'BEP20' };
     }
     if (exchangeId.includes('okx')) {
-        if (networkUpper === 'BEP20') return { chain: 'BEP20' };
         if (networkUpper === 'APTOS') return { chain: 'APTOS' };
     }
     return { network: networkUpper };
 }
+
 
 async function fetchAllBalances(type = 'future') {
     const allBalances = {};
@@ -421,8 +435,48 @@ async function setLeverageSafely(exchange, symbol, desiredLeverage) {
     }
 }
 
+async function prepareForTrade(opportunity) {
+    const { coin, commonLeverage: desiredLeverage } = opportunity;
+    const { shortExchange, longExchange } = opportunity.details;
+    const shortEx = exchanges[shortExchange];
+    const longEx = exchanges[longExchange];
+
+    try {
+        safeLog('log', `[PREPARE] Bắt đầu chuẩn bị cho giao dịch ${coin} giữa ${shortExchange} và ${longExchange}.`);
+
+        const shortSymbol = await getExchangeSpecificSymbol(shortEx, coin);
+        const longSymbol = await getExchangeSpecificSymbol(longEx, coin);
+        if (!shortSymbol || !longSymbol) {
+            throw new Error(`Không tìm thấy symbol ${coin} trên một trong hai sàn.`);
+        }
+
+        const [actualShortLeverage, actualLongLeverage] = await Promise.all([
+            setLeverageSafely(shortEx, shortSymbol, desiredLeverage),
+            setLeverageSafely(longEx, longSymbol, desiredLeverage)
+        ]);
+        if (!actualShortLeverage || !actualLongLeverage) {
+            throw new Error('Không thể cài đặt đòn bẩy trên một trong hai sàn.');
+        }
+        
+        const leverageToUse = Math.min(actualShortLeverage, actualLongLeverage);
+
+        opportunity.preparedData = {
+            shortSymbol,
+            longSymbol,
+            leverageToUse
+        };
+        
+        safeLog('info', `[PREPARE] ✅ Chuẩn bị thành công cho ${coin}. Đòn bẩy hiệu dụng: x${leverageToUse}.`);
+        return true;
+
+    } catch (e) {
+        safeLog('error', `[PREPARE] Lỗi nghiêm trọng khi chuẩn bị cho giao dịch ${coin}:`, e.message);
+        opportunity.preparedData = null;
+        return false;
+    }
+}
+
 async function computeOrderDetails(exchange, symbol, targetNotionalUSDT, leverage, availableBalance) {
-    await exchange.loadMarkets();
     const market = exchange.market(symbol);
     const ticker = await exchange.fetchTicker(symbol);
     const price = ticker?.last || ticker?.close;
@@ -493,8 +547,14 @@ async function placeTpSlOrders(exchange, symbol, side, amount, entryPrice, colla
 }
 
 async function executeTrades(opportunity, percentageToUse) {
-    const { coin, commonLeverage: desiredLeverage } = opportunity;
+    if (!opportunity.preparedData) {
+        safeLog('error', `[TRADE] Hủy bỏ giao dịch do quá trình chuẩn bị trước đó đã thất bại.`);
+        return false;
+    }
+
+    const { coin } = opportunity;
     const { shortExchange, longExchange } = opportunity.details;
+    const { shortSymbol, longSymbol, leverageToUse } = opportunity.preparedData;
     
     await updateBalances();
     const shortEx = exchanges[shortExchange], longEx = exchanges[longExchange];
@@ -509,17 +569,6 @@ async function executeTrades(opportunity, percentageToUse) {
         return false;
     }
 
-    const shortSymbol = await getExchangeSpecificSymbol(shortEx, coin);
-    const longSymbol = await getExchangeSpecificSymbol(longEx, coin);
-    if (!shortSymbol || !longSymbol) {
-        safeLog('warn', `[TRADE] Không tìm thấy symbol ${coin} trên một trong hai sàn.`);
-        return false;
-    }
-
-    const [actualShortLeverage, actualLongLeverage] = await Promise.all([ setLeverageSafely(shortEx, shortSymbol, desiredLeverage), setLeverageSafely(longEx, longSymbol, desiredLeverage) ]);
-    if (!actualShortLeverage || !actualLongLeverage) return false;
-    const leverageToUse = Math.min(actualShortLeverage, actualLongLeverage);
-
     let shortOrderDetails, longOrderDetails;
     try {
         const targetNotional = collateral * leverageToUse;
@@ -528,9 +577,11 @@ async function executeTrades(opportunity, percentageToUse) {
             computeOrderDetails(longEx, longSymbol, targetNotional, leverageToUse, longBalance)
         ]);
     } catch (e) {
-        safeLog('error', `[PREPARE] Lỗi khi chuẩn bị lệnh:`, e.message);
+        safeLog('error', `[EXECUTE] Lỗi khi tính toán chi tiết lệnh cuối cùng:`, e.message);
         return false;
     }
+
+    safeLog('info', `[EXECUTE] 🔥 KÍCH HOẠT LỆNH! Short ${shortOrderDetails.amount} ${coin} trên ${shortExchange} | Long ${longOrderDetails.amount} ${coin} trên ${longExchange}.`);
 
     let shortOrder, longOrder;
     try {
@@ -539,7 +590,7 @@ async function executeTrades(opportunity, percentageToUse) {
             longEx.createMarketBuyOrder(longSymbol, longOrderDetails.amount, (longEx.id === 'kucoinfutures' ? {'marginMode':'cross'} : {}))
         ]);
     } catch (e) {
-        safeLog('error', `[TRADE] Mở lệnh chính thất bại:`, e);
+        safeLog('error', `[EXECUTE] Mở lệnh chính thất bại:`, e);
         return false;
     }
 
@@ -679,8 +730,11 @@ async function mainBotLoop() {
 
             if (opportunityToExecute) {
                 selectedOpportunityForNextTrade = opportunityToExecute;
-                safeLog('info', `[TIMER] ✅ Đã chọn cơ hội: ${selectedOpportunityForNextTrade.coin} trên ${selectedOpportunityForNextTrade.exchanges}. Bắt đầu gom vốn.`);
-                await manageFundDistribution(selectedOpportunityForNextTrade);
+                safeLog('info', `[TIMER] ✅ Đã chọn cơ hội: ${selectedOpportunityForNextTrade.coin} trên ${selectedOpportunityForNextTrade.exchanges}.`);
+                Promise.all([
+                    manageFundDistribution(selectedOpportunityForNextTrade),
+                    prepareForTrade(selectedOpportunityForNextTrade)
+                ]);
             } else if (!hasLoggedNotFoundThisHour) {
                 safeLog('log', "[TIMER] Không tìm thấy cơ hội nào hợp lệ tại phút 50.");
                 hasLoggedNotFoundThisHour = true;
@@ -792,9 +846,12 @@ const botServer = http.createServer(async (req, res) => {
                     isManualTest: true,
                     percentageToUse: parseFloat(data.percentage) || 50
                 };
-                safeLog('info', `[MANUAL-TEST] Nhận yêu cầu test thủ công cho ${selectedOpportunityForNextTrade.coin}. Bắt đầu gom vốn.`);
-                manageFundDistribution(selectedOpportunityForNextTrade);
-                res.writeHead(202, { 'Content-Type': 'application/json' }).end(JSON.stringify({ success: true, message: 'Đã nhận yêu cầu Test. Bot đang gom vốn, sẽ tự động vào lệnh khi vốn sẵn sàng.' }));
+                safeLog('info', `[MANUAL-TEST] Nhận yêu cầu test thủ công cho ${selectedOpportunityForNextTrade.coin}. Bắt đầu gom vốn và chuẩn bị.`);
+                Promise.all([
+                    manageFundDistribution(selectedOpportunityForNextTrade),
+                    prepareForTrade(selectedOpportunityForNextTrade)
+                ]);
+                res.writeHead(202, { 'Content-Type': 'application/json' }).end(JSON.stringify({ success: true, message: 'Đã nhận yêu cầu Test. Bot đang gom vốn và chuẩn bị, sẽ tự động vào lệnh khi sẵn sàng.' }));
             } catch(e) {
                 res.writeHead(400, { 'Content-Type': 'application/json' }).end(JSON.stringify({ success: false, message: 'Dữ liệu yêu cầu không hợp lệ.' }));
             }
