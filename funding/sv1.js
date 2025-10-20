@@ -107,7 +107,6 @@ async function callSignedBinanceAPI(fullEndpointPath, params = {}) {
     return JSON.parse(rawData);
 }
 
-// === KHÔI PHỤC LOGIC LẤY ĐÒN BẨY GỐC ===
 function getMaxLeverageFromMarketInfo(market) {
     if (market?.limits?.leverage?.max) return market.limits.leverage.max;
     if (market?.info?.maxLeverage) return parseInt(market.info.maxLeverage, 10);
@@ -174,7 +173,6 @@ async function performTargetedLeverageUpdate() {
     const nonKucoinExchanges = EXCHANGE_IDS.filter(id => id !== 'kucoin');
     await Promise.all(nonKucoinExchanges.map(id => updateLeverageForExchange(id, activeSymbols)));
 }
-// === KẾT THÚC KHÔI PHỤC ===
 
 async function fetchBitgetValidFuturesSymbols() {
     try {
@@ -215,7 +213,6 @@ async function updateKucoinData() {
 
             const maxLeverage = parseInt(contract.maxLeverage, 10);
             const fundingRate = parseFloat(contract.fundingFeeRate);
-            // *** SỬA LỖI TẠI ĐÂY: Dùng nextFundingRateDateTime ***
             const fundingTimestamp = parseInt(contract.nextFundingRateDateTime, 10);
 
             if (!isNaN(maxLeverage) && maxLeverage > 0) kucoinLeverage[cleanedSym] = maxLeverage;
@@ -275,30 +272,55 @@ async function fetchFundingRatesForOtherExchanges() {
 function calculateArbitrageOpportunities() {
     const allFoundOpportunities = [];
     const currentExchangeData = JSON.parse(JSON.stringify(exchangeData));
+
     for (let i = 0; i < EXCHANGE_IDS.length; i++) {
         for (let j = i + 1; j < EXCHANGE_IDS.length; j++) {
             const id1 = EXCHANGE_IDS[i], id2 = EXCHANGE_IDS[j];
             const rates1 = currentExchangeData[id1]?.rates, rates2 = currentExchangeData[id2]?.rates;
             if (!rates1 || !rates2) continue;
+
             const commonSymbols = Object.keys(rates1).filter(symbol => rates2[symbol]);
+
             for (const symbol of commonSymbols) {
                 const r1 = rates1[symbol], r2 = rates2[symbol];
                 if (!r1.maxLeverage || r1.maxLeverage <= 0 || !r2.maxLeverage || r2.maxLeverage <= 0) continue;
+
                 let [longEx, shortEx, longR, shortR] = r1.fundingRate > r2.fundingRate ? [id2, id1, r2, r1] : [id1, id2, r1, r2];
                 let fundingDiff = shortR.fundingRate - longR.fundingRate;
-                if (Math.sign(shortR.fundingRate) === Math.sign(longR.fundingRate)) fundingDiff -= Math.min(Math.abs(shortR.fundingRate), Math.abs(longR.fundingRate));
+                if (Math.sign(shortR.fundingRate) === Math.sign(longR.fundingRate)) {
+                    fundingDiff -= Math.min(Math.abs(shortR.fundingRate), Math.abs(longR.fundingRate));
+                }
+
                 if (fundingDiff <= FUNDING_DIFFERENCE_THRESHOLD) continue;
+
                 const commonLeverage = Math.min(r1.maxLeverage, r2.maxLeverage);
                 const estimatedPnl = fundingDiff * commonLeverage * 100;
+
                 if (estimatedPnl >= MINIMUM_PNL_THRESHOLD) {
                     const finalFundingTime = Math.max(r1.fundingTimestamp, r2.fundingTimestamp);
                     const minutesUntilFunding = (finalFundingTime - Date.now()) / 60000;
-                    allFoundOpportunities.push({ coin: symbol, exchanges: `${shortEx.replace('usdm','')} / ${longEx.replace('usdm','')}`, fundingDiff, nextFundingTime: finalFundingTime, commonLeverage, estimatedPnl, isImminent: minutesUntilFunding > 0 && minutesUntilFunding <= IMMINENT_THRESHOLD_MINUTES });
+                    allFoundOpportunities.push({
+                        coin: symbol,
+                        exchanges: `${shortEx.replace('usdm','')} / ${longEx.replace('usdm','')}`,
+                        fundingDiff,
+                        nextFundingTime: finalFundingTime,
+                        commonLeverage,
+                        estimatedPnl,
+                        isImminent: minutesUntilFunding > 0 && minutesUntilFunding <= IMMINENT_THRESHOLD_MINUTES
+                    });
                 }
             }
         }
     }
-    arbitrageOpportunities = allFoundOpportunities.sort((a, b) => a.nextFundingTime - b.nextFundingTime || b.estimatedPnl - a.estimatedPnl);
+
+    if (allFoundOpportunities.length === 0) {
+        arbitrageOpportunities = [];
+        return;
+    }
+
+    const sortedOpportunities = allFoundOpportunities.sort((a, b) => a.nextFundingTime - b.nextFundingTime || b.estimatedPnl - a.estimatedPnl);
+    const nearestFundingTimestamp = sortedOpportunities[0].nextFundingTime;
+    arbitrageOpportunities = sortedOpportunities.filter(op => op.nextFundingTime === nearestFundingTimestamp);
 }
 
 async function masterLoop() {
@@ -359,6 +381,6 @@ server.listen(PORT, async () => {
     });
 
     await fetchBitgetValidFuturesSymbols();
-    await performFullLeverageUpdate(); // Chạy lần đầu để có dữ liệu đòn bẩy
+    await performFullLeverageUpdate();
     masterLoop();
 });
