@@ -13,20 +13,13 @@ const SERVER_DATA_URL = 'http://35.240.146.86:5005/api/data';
 const MIN_PNL_PERCENTAGE = 1;
 const DATA_FETCH_INTERVAL_SECONDS = 2;
 const MIN_COLLATERAL_FOR_TRADE = 1;
+const TP_SL_PNL_PERCENTAGE = 150;
 
 let activeBotInstance = {
-    username: null,
-    userData: null,
-    marginOptions: null,
-    botState: 'STOPPED',
-    capitalManagementState: 'IDLE',
-    botLoopIntervalId: null,
-    balances: {},
-    tradeHistory: [],
-    currentTradeDetails: null,
-    tradeAwaitingPnl: null,
-    hasLoggedNotFoundThisHour: false,
-    exchanges: {}
+    username: null, userData: null, marginOptions: null,
+    botState: 'STOPPED', capitalManagementState: 'IDLE', botLoopIntervalId: null,
+    balances: {}, tradeHistory: [], currentTradeDetails: null, tradeAwaitingPnl: null,
+    hasLoggedNotFoundThisHour: false, exchanges: {}
 };
 
 const db = new sqlite3.Database(DB_FILE, (err) => {
@@ -69,7 +62,7 @@ async function initializeExchangesForUser(userData) {
                 await userExchanges[config.id].loadMarkets();
                 safeLog('info', `Khởi tạo sàn ${config.id.toUpperCase()} thành công.`);
             } catch (e) {
-                safeLog('error', `Lỗi khi khởi tạo sàn ${config.id} cho ${userData.username}:`, e.message);
+                safeLog('error', `Lỗi khi khởi tạo sàn ${config.id}:`, e.message);
             }
         }
     }
@@ -80,13 +73,9 @@ async function fetchAllBalances() {
     for (const id in activeBotInstance.exchanges) {
         try {
             const balanceData = await activeBotInstance.exchanges[id].fetchBalance({ 'type': 'swap' });
-            activeBotInstance.balances[id] = {
-                available: balanceData?.free?.USDT || 0,
-                total: balanceData?.total?.USDT || 0
-            };
+            activeBotInstance.balances[id] = { available: balanceData?.free?.USDT || 0, total: balanceData?.total?.USDT || 0 };
         } catch (e) {
-            safeLog('warn', `[BALANCE] Không thể lấy số dư từ ${id}: ${e.message}`);
-            activeBotInstance.balances[id] = { available: 0, total: 0 };
+            safeLog('warn', `Không thể lấy số dư từ ${id}: ${e.message}`);
         }
     }
 }
@@ -100,14 +89,55 @@ async function getExchangeSpecificSymbol(exchange, rawCoinSymbol) {
     return null;
 }
 
+async function setLeverageSafely(exchange, symbol, desiredLeverage) {
+    try {
+        await exchange.setLeverage(desiredLeverage, symbol, (exchange.id === 'kucoinfutures' ? { 'marginMode': 'cross' } : {}));
+        return desiredLeverage;
+    } catch (e) {
+        safeLog('error', `Không thể đặt đòn bẩy x${desiredLeverage} cho ${symbol} trên ${exchange.id}. Lỗi: ${e.message}`);
+        return null;
+    }
+}
+
+async function computeOrderDetails(exchange, symbol, targetNotionalUSDT, leverage, availableBalance) {
+    const market = exchange.market(symbol);
+    const ticker = await exchange.fetchTicker(symbol);
+    const price = ticker?.last || ticker?.close;
+    if (!price) throw new Error(`Không lấy được giá cho ${symbol} trên ${exchange.id}`);
+    
+    let amount = parseFloat(exchange.amountToPrecision(symbol, targetNotionalUSDT / price));
+    let currentNotional = amount * price;
+
+    if (currentNotional / leverage > availableBalance * 0.98) {
+        amount = parseFloat(exchange.amountToPrecision(symbol, (availableBalance * 0.98 * leverage) / price));
+        currentNotional = amount * price;
+    }
+
+    if (amount <= (market.limits.amount.min || 0)) throw new Error(`Số lượng (${amount}) nhỏ hơn mức tối thiểu của sàn.`);
+    return { amount, price, notional: currentNotional };
+}
+
+async function placeTpSlOrders(exchange, symbol, side, amount, entryPrice, collateral, notionalValue) {
+    if (!entryPrice || notionalValue <= 0) return;
+    const pnlAmount = collateral * (TP_SL_PNL_PERCENTAGE / 100);
+    const priceChange = (pnlAmount / notionalValue) * entryPrice;
+    const tpPrice = side === 'sell' ? entryPrice - priceChange : entryPrice + priceChange;
+    const slPrice = side === 'sell' ? entryPrice + priceChange : entryPrice - priceChange;
+    const orderSide = (side === 'sell') ? 'buy' : 'sell';
+
+    try {
+        await exchange.createOrder(symbol, 'TAKE_PROFIT_MARKET', orderSide, amount, undefined, { 'stopPrice': exchange.priceToPrecision(symbol, tpPrice), 'reduceOnly': true });
+        await exchange.createOrder(symbol, 'STOP_MARKET', orderSide, amount, undefined, { 'stopPrice': exchange.priceToPrecision(symbol, slPrice), 'reduceOnly': true });
+    } catch (e) {
+        safeLog('error', `Lỗi khi đặt lệnh TP/SL cho ${symbol} trên ${exchange.id}:`, e);
+    }
+}
+
 async function executeTrades(opportunity) {
     const { coin, commonLeverage: desiredLeverage } = opportunity;
-    const [shortExId, longExId] = opportunity.exchanges.split(' / ').map(e => e.toLowerCase().trim().replace('usdm','').replace('futures',''));
-    if (shortExId.includes('binance')) shortExId = 'binanceusdm';
-    if (longExId.includes('binance')) longExId = 'binanceusdm';
-    if (shortExId.includes('kucoin')) shortExId = 'kucoinfutures';
-    if (longExId.includes('kucoin')) longExId = 'kucoinfutures';
-    
+    const [shortExIdRaw, longExIdRaw] = opportunity.exchanges.split(' / ');
+    const shortExId = shortExIdRaw.toLowerCase().trim().replace('usdm','').replace('futures','') === 'binance' ? 'binanceusdm' : shortExIdRaw.toLowerCase().trim().replace('usdm','').replace('futures','');
+    const longExId = longExIdRaw.toLowerCase().trim().replace('usdm','').replace('futures','') === 'binance' ? 'binanceusdm' : longExIdRaw.toLowerCase().trim().replace('usdm','').replace('futures','');
 
     await fetchAllBalances();
     const shortEx = activeBotInstance.exchanges[shortExId];
@@ -129,7 +159,7 @@ async function executeTrades(opportunity) {
     }
 
     if (collateral < MIN_COLLATERAL_FOR_TRADE) {
-        safeLog('warn', `Vốn không đủ để giao dịch. Yêu cầu > ${MIN_COLLATERAL_FOR_TRADE}, đang có ${collateral.toFixed(4)}.`);
+        safeLog('warn', `Vốn không đủ để giao dịch.`);
         activeBotInstance.capitalManagementState = 'IDLE';
         return false;
     }
@@ -142,32 +172,43 @@ async function executeTrades(opportunity) {
         const longSymbol = await getExchangeSpecificSymbol(longEx, coin);
         if (!shortSymbol || !longSymbol) throw new Error(`Không tìm thấy symbol cho ${coin}`);
 
-        await Promise.all([
-            shortEx.setLeverage(desiredLeverage, shortSymbol, (shortEx.id === 'kucoinfutures' ? { 'marginMode': 'cross' } : {})),
-            longEx.setLeverage(desiredLeverage, longSymbol, (longEx.id === 'kucoinfutures' ? { 'marginMode': 'cross' } : {}))
-        ]);
+        await Promise.all([ setLeverageSafely(shortEx, shortSymbol, desiredLeverage), setLeverageSafely(longEx, longSymbol, desiredLeverage) ]);
 
         const targetNotional = collateral * desiredLeverage;
-        const shortTicker = await shortEx.fetchTicker(shortSymbol);
-        const longTicker = await longEx.fetchTicker(longSymbol);
-        const shortAmount = targetNotional / shortTicker.last;
-        const longAmount = targetNotional / longTicker.last;
-
-        await Promise.all([
-            shortEx.createMarketSellOrder(shortSymbol, shortAmount),
-            longEx.createMarketBuyOrder(longSymbol, longAmount)
+        const [shortOrderDetails, longOrderDetails] = await Promise.all([
+            computeOrderDetails(shortEx, shortSymbol, targetNotional, desiredLeverage, shortBalance),
+            computeOrderDetails(longEx, longSymbol, targetNotional, desiredLeverage, longBalance)
         ]);
         
+        const [shortOrder, longOrder] = await Promise.all([
+            shortEx.createMarketSellOrder(shortSymbol, shortOrderDetails.amount),
+            longEx.createMarketBuyOrder(longSymbol, longOrderDetails.amount)
+        ]);
+
         activeBotInstance.currentTradeDetails = {
             coin, shortExchange: shortExId, longExchange: longExId,
-            shortOrderAmount: shortAmount, longOrderAmount: longAmount,
+            shortOrderAmount: shortOrderDetails.amount, longOrderAmount: longOrderDetails.amount,
             shortSymbol, longSymbol, collateralUsed: collateral, status: 'OPEN',
             shortBalanceBefore: shortBalance, longBalanceBefore: longBalance
         };
-        safeLog('info', `✅ Mở lệnh thành công cho ${coin}.`);
+        safeLog('info', `✅ Mở lệnh chính thành công cho ${coin}. Đang đặt TP/SL...`);
+        
+        await sleep(2000);
+        const [shortFill, longFill] = await Promise.all([ shortEx.fetchMyTrades(shortSymbol, undefined, 1), longEx.fetchMyTrades(longSymbol, undefined, 1) ]);
+        
+        if (shortFill.length > 0 && longFill.length > 0) {
+            await Promise.all([
+                placeTpSlOrders(shortEx, shortSymbol, 'sell', shortOrderDetails.amount, shortFill[0].price, collateral, shortOrderDetails.notional),
+                placeTpSlOrders(longEx, longSymbol, 'buy', longOrderDetails.amount, longFill[0].price, collateral, longOrderDetails.notional)
+            ]);
+        } else {
+            safeLog('warn', 'Không lấy được giá khớp lệnh, sẽ không đặt TP/SL.');
+        }
+
         return true;
     } catch (e) {
         safeLog('error', `[TRADE] Lỗi nghiêm trọng khi vào lệnh:`, e);
+        await closeTradeNow();
         activeBotInstance.capitalManagementState = 'IDLE';
         return false;
     }
@@ -182,6 +223,11 @@ async function closeTradeNow() {
         const shortEx = activeBotInstance.exchanges[trade.shortExchange];
         const longEx = activeBotInstance.exchanges[trade.longExchange];
         
+        await Promise.all([
+            shortEx.cancelAllOrders(trade.shortSymbol),
+            longEx.cancelAllOrders(trade.longSymbol)
+        ]);
+
         await Promise.all([
             shortEx.createMarketBuyOrder(trade.shortSymbol, trade.shortOrderAmount, { 'reduceOnly': true }),
             longEx.createMarketSellOrder(trade.longSymbol, trade.longOrderAmount, { 'reduceOnly': true })
@@ -384,7 +430,7 @@ app.get('/admin', (req, res) => {
     const secret = req.query.secret;
     if (secret !== ADMIN_SECRET_KEY) return res.status(403).send('<h1>Forbidden</h1>');
 
-    db.all('SELECT id, username, password, is_vip, vip_level, vip_expiry_timestamp, pnl FROM users ORDER BY id DESC', [], (err, rows) => {
+    db.all('SELECT * FROM users ORDER BY id DESC', [], (err, rows) => {
         if (err) return res.status(500).send(`<h1>Database Error: ${err.message}</h1>`);
         
         if (rows.length === 0) {
