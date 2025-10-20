@@ -167,14 +167,32 @@ app.post('/api/stop', async (req, res) => {
     res.status(200).json({ success });
 });
 
-app.post('/api/set-vip', (req, res) => {
-    const { username, level, days } = req.body;
-    const expiry = Date.now() + (days * 86400000);
-    db.run('UPDATE users SET is_vip = 1, vip_level = ?, vip_expiry_timestamp = ? WHERE username = ?', [level, expiry, username], (err) => {
-        if(err) return res.status(500).json({success: false, message: err.message});
-        res.status(200).json({success: true, message: `${username} is now VIP level ${level} for ${days} days.`});
+app.get('/admin/setvip', (req, res) => {
+    const { secret, username, level, days } = req.query;
+
+    if (secret !== ADMIN_SECRET_KEY) {
+        return res.status(403).json({ error: 'Forbidden. Invalid secret key.' });
+    }
+
+    if (!username || !level || !days) {
+        return res.status(400).json({ error: 'Missing parameters. Required: username, level, days.' });
+    }
+
+    const expiry = Date.now() + (parseInt(days) * 86400000);
+    const vipLevel = parseInt(level);
+    const sql = `UPDATE users SET is_vip = 1, vip_level = ?, vip_expiry_timestamp = ? WHERE username = ?`;
+
+    db.run(sql, [vipLevel, expiry, username], function(err) {
+        if (err) {
+            return res.status(500).json({ success: false, message: 'Database error.', error: err.message });
+        }
+        if (this.changes === 0) {
+             return res.status(404).json({ success: false, message: `User '${username}' not found.` });
+        }
+        res.status(200).json({ success: true, message: `Successfully set user '${username}' to VIP level ${level} for ${days} days.` });
     });
 });
+
 
 app.get('/admin', (req, res) => {
     const secret = req.query.secret;
