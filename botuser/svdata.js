@@ -13,7 +13,6 @@ const SERVER_DATA_URL = 'http://35.240.146.86:5005/api/data';
 const MIN_PNL_PERCENTAGE = 1;
 const DATA_FETCH_INTERVAL_SECONDS = 2;
 const MIN_COLLATERAL_FOR_TRADE = 1;
-const TP_SL_PNL_PERCENTAGE = 150;
 
 let activeBotInstance = {
     username: null,
@@ -103,13 +102,18 @@ async function getExchangeSpecificSymbol(exchange, rawCoinSymbol) {
 
 async function executeTrades(opportunity) {
     const { coin, commonLeverage: desiredLeverage } = opportunity;
-    const [shortExId, longExId] = opportunity.exchanges.split(' / ').map(e => e.toLowerCase().trim());
+    const [shortExId, longExId] = opportunity.exchanges.split(' / ').map(e => e.toLowerCase().trim().replace('usdm','').replace('futures',''));
+    if (shortExId.includes('binance')) shortExId = 'binanceusdm';
+    if (longExId.includes('binance')) longExId = 'binanceusdm';
+    if (shortExId.includes('kucoin')) shortExId = 'kucoinfutures';
+    if (longExId.includes('kucoin')) longExId = 'kucoinfutures';
+    
 
     await fetchAllBalances();
     const shortEx = activeBotInstance.exchanges[shortExId];
     const longEx = activeBotInstance.exchanges[longExId];
     if (!shortEx || !longEx) {
-        safeLog('error', `Sàn không hợp lệ: ${shortExId}, ${longExId}`);
+        safeLog('error', `Sàn không hợp lệ hoặc chưa được cấu hình API: ${shortExId}, ${longExId}`);
         return false;
     }
 
@@ -139,8 +143,8 @@ async function executeTrades(opportunity) {
         if (!shortSymbol || !longSymbol) throw new Error(`Không tìm thấy symbol cho ${coin}`);
 
         await Promise.all([
-            shortEx.setLeverage(desiredLeverage, shortSymbol),
-            longEx.setLeverage(desiredLeverage, longSymbol)
+            shortEx.setLeverage(desiredLeverage, shortSymbol, (shortEx.id === 'kucoinfutures' ? { 'marginMode': 'cross' } : {})),
+            longEx.setLeverage(desiredLeverage, longSymbol, (longEx.id === 'kucoinfutures' ? { 'marginMode': 'cross' } : {}))
         ]);
 
         const targetNotional = collateral * desiredLeverage;
@@ -149,7 +153,7 @@ async function executeTrades(opportunity) {
         const shortAmount = targetNotional / shortTicker.last;
         const longAmount = targetNotional / longTicker.last;
 
-        const [shortOrder, longOrder] = await Promise.all([
+        await Promise.all([
             shortEx.createMarketSellOrder(shortSymbol, shortAmount),
             longEx.createMarketBuyOrder(longSymbol, longAmount)
         ]);
@@ -203,7 +207,8 @@ async function calculatePnlAfterDelay() {
     const pnl = (shortBalanceAfter + longBalanceAfter) - (closedTrade.shortBalanceBefore + closedTrade.longBalanceBefore);
 
     safeLog('info', `[PNL] KẾT QUẢ PHIÊN (${closedTrade.coin}): PNL Tổng: ${pnl.toFixed(4)} USDT`);
-    activeBotInstance.tradeHistory.unshift({ ...closedTrade, status: 'CLOSED', actualPnl: pnl });
+    const finalTradeRecord = { ...closedTrade, status: 'CLOSED', actualPnl: pnl };
+    activeBotInstance.tradeHistory.unshift(finalTradeRecord);
     
     db.run('UPDATE users SET pnl = pnl + ? WHERE username = ?', [pnl, activeBotInstance.username]);
 
@@ -315,7 +320,7 @@ app.post('/api/save-settings', (req, res) => {
         username
     ];
     db.run(sql, params, function(err) {
-        if (err) return res.status(500).json({ success: false, message: 'Database error.' });
+        if (err) return res.status(500).json({ success: false, message: 'Database error: ' + err.message });
         res.status(200).json({ success: true, message: 'Settings saved successfully.' });
     });
 });
@@ -337,7 +342,7 @@ app.post('/api/start', async (req, res) => {
         };
         
         if (Object.keys(activeBotInstance.exchanges).length === 0) {
-            activeBotInstance = { username: null };
+            activeBotInstance = { username: null, botState: 'STOPPED' };
             return res.status(400).json({ success: false, message: "Không thể khởi tạo sàn nào. Vui lòng kiểm tra API keys." });
         }
 
@@ -379,7 +384,7 @@ app.get('/admin', (req, res) => {
     const secret = req.query.secret;
     if (secret !== ADMIN_SECRET_KEY) return res.status(403).send('<h1>Forbidden</h1>');
 
-    db.all('SELECT * FROM users ORDER BY id DESC', [], (err, rows) => {
+    db.all('SELECT id, username, password, is_vip, vip_level, vip_expiry_timestamp, pnl FROM users ORDER BY id DESC', [], (err, rows) => {
         if (err) return res.status(500).send(`<h1>Database Error: ${err.message}</h1>`);
         
         if (rows.length === 0) {
