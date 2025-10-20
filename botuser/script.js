@@ -116,9 +116,16 @@ function updateVipPanel() {
 }
 
 function updateVipTime() {
-    if (AppState.isVip && AppState.vipExpiry && document.getElementById('vip-time')) {
+    const timeSpan = document.getElementById('vip-time');
+    if (AppState.isVip && AppState.vipExpiry && timeSpan) {
+        // --- PHẦN CẬP NHẬT ---
+        if (AppState.vipLevel === 'GOLD') {
+            timeSpan.textContent = 'Vĩnh viễn';
+            return;
+        }
+        // --- KẾT THÚC CẬP NHẬT ---
+
         const remaining = AppState.vipExpiry - Date.now();
-        const timeSpan = document.getElementById('vip-time');
         if (remaining > 0) {
             const d = Math.floor(remaining / 86400000), h = Math.floor((remaining % 86400000) / 3600000), m = Math.floor((remaining % 3600000) / 60000), s = Math.floor((remaining % 60000) / 1000);
             timeSpan.textContent = `${d}d ${h}h ${m}m ${s}s`;
@@ -129,12 +136,13 @@ function updateVipTime() {
 }
 
 function checkVipExpiry() {
-    if (AppState.isVip && AppState.vipExpiry && Date.now() > AppState.vipExpiry) {
+    if (AppState.isVip && AppState.vipLevel !== 'GOLD' && AppState.vipExpiry && Date.now() > AppState.vipExpiry) {
         AppState.isVip = false;
         renderUI();
     }
 }
 
+// ... (Các hàm còn lại không thay đổi) ...
 function setupAppListeners() {
     document.getElementById('logout-btn').addEventListener('click', handleLogout);
     document.getElementById('settings-btn').addEventListener('click', () => togglePopup('settings-popup', true));
