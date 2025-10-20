@@ -4,6 +4,7 @@ const AppState = {
     botState: 'STOPPED',
     capitalManagementState: 'IDLE',
     currentTradeDetails: null,
+    tradeHistory: []
 };
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -41,6 +42,7 @@ async function fetchStatus() {
         AppState.botState = response.botState;
         AppState.capitalManagementState = response.capitalManagementState;
         AppState.currentTradeDetails = response.currentTradeDetails;
+        AppState.tradeHistory = response.tradeHistory || [];
 
         document.getElementById('vip-user').textContent = AppState.username;
         document.getElementById('vip-pnl').textContent = response.pnl?.toFixed(4) || '0.00';
@@ -56,6 +58,15 @@ async function fetchStatus() {
     }
 }
 
+function createButton(id, icon, text, onClick, customClass = 'action-button') {
+    const button = document.createElement('button');
+    button.className = customClass;
+    if (id) button.id = id;
+    if (icon && text) button.innerHTML = `<i class="fas ${icon}"></i><span>${text}</span>`;
+    if (onClick) button.addEventListener('click', onClick);
+    return button;
+}
+
 function renderUI() {
     const mainContent = document.getElementById('main-content');
     mainContent.innerHTML = '';
@@ -65,11 +76,14 @@ function renderUI() {
         document.getElementById('bot-status-panel').style.display = 'flex';
         
         const isBotRunning = AppState.botState === 'RUNNING';
-        const button = document.createElement('button');
-        button.className = `action-button ${isBotRunning ? 'stop-state' : ''}`;
-        button.innerHTML = `<i class="fas ${isBotRunning ? 'fa-stop-circle' : 'fa-play-circle'}"></i><span>${isBotRunning ? 'Stop Bot' : 'Start Bot'}</span>`;
-        button.onclick = isBotRunning ? handleStopBot : () => togglePopup('start-options-popup', true);
-        mainContent.appendChild(button);
+        const startButton = createButton('start-btn', isBotRunning ? 'fa-stop-circle' : 'fa-play-circle', isBotRunning ? 'Stop Bot' : 'Start Bot', isBotRunning ? handleStopBot : () => togglePopup('start-options-popup', true));
+        if (isBotRunning) startButton.classList.add('stop-state');
+
+        const historyFundingButton = createButton('history-funding-btn', 'fa-history', 'History Funding', () => showHistoryPopup('funding'));
+        const historyStartButton = createButton('history-start-btn', 'fa-scroll', 'History Start', () => showHistoryPopup('start'));
+        const supportButton = createButton('support-btn', 'fa-life-ring', 'Support', () => alert('Please contact support via Telegram.'));
+        
+        mainContent.append(startButton, historyFundingButton, historyStartButton, supportButton);
 
     } else {
         document.getElementById('vip-info-panel').style.display = 'none';
@@ -109,6 +123,29 @@ function updateVipTime() {
             }
         }
     }
+}
+
+function showHistoryPopup(type) {
+    const title = document.getElementById('history-title'), head = document.getElementById('history-table-head'), body = document.getElementById('history-table-body');
+    head.innerHTML = ''; body.innerHTML = '';
+
+    if (type === 'start') {
+        title.textContent = 'History Start';
+        head.innerHTML = `<tr><th>Coin</th><th>Margin</th><th>PNL</th></tr>`;
+        if (AppState.tradeHistory.length === 0) {
+            body.innerHTML = `<tr><td colspan="3">No history data.</td></tr>`;
+        } else {
+            AppState.tradeHistory.forEach(row => {
+                const pnlClass = row.actualPnl >= 0 ? 'pnl-positive' : 'pnl-negative';
+                body.innerHTML += `<tr><td>${row.coin}</td><td>$${row.collateralUsed.toFixed(2)}</td><td class="${pnlClass}">${row.actualPnl.toFixed(4)}</td></tr>`;
+            });
+        }
+    } else if (type === 'funding') {
+        title.textContent = 'History Funding';
+        head.innerHTML = `<tr><th>Coin</th><th>Est. PNL</th></tr>`;
+        body.innerHTML = `<tr><td colspan="2">No funding history data yet.</td></tr>`;
+    }
+    togglePopup('history-popup', true);
 }
 
 async function handleStartBot(event) {
