@@ -9,115 +9,256 @@ const port = 3000;
 const DB_FILE = 'user.db';
 const ADMIN_SECRET_KEY = 'huyen';
 
-const db = new sqlite3.Database(DB_FILE, (err) => {
-    if (err) {
-        return console.error(err.message);
-    }
-    console.log('Connected to the SQLite database.');
-    db.run(`CREATE TABLE IF NOT EXISTS users (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        username TEXT UNIQUE NOT NULL, password TEXT NOT NULL,
-        is_vip INTEGER DEFAULT 0, vip_level TEXT, vip_expiry_timestamp INTEGER,
-        pnl REAL DEFAULT 0,
-        binance_apikey TEXT, binance_secret TEXT,
-        bitget_apikey TEXT, bitget_secret TEXT, bitget_password TEXT,
-        okx_apikey TEXT, okx_secret TEXT, okx_password TEXT,
-        kucoin_apikey TEXT, kucoin_secret TEXT, kucoin_password TEXT
-    )`);
-});
+const SERVER_DATA_URL = 'http://35.240.146.86:5005/api/data';
+const MIN_PNL_PERCENTAGE = 1;
+const DATA_FETCH_INTERVAL_SECONDS = 2;
+const MIN_COLLATERAL_FOR_TRADE = 1;
+const TP_SL_PNL_PERCENTAGE = 150;
 
 let activeBotInstance = {
-    username: null, state: 'STOPPED', loopId: null, exchanges: {},
-    tradeDetails: null, tradeHistory: [], balances: {}, pnl: 0
+    username: null,
+    userData: null,
+    marginOptions: null,
+    botState: 'STOPPED',
+    capitalManagementState: 'IDLE',
+    botLoopIntervalId: null,
+    balances: {},
+    tradeHistory: [],
+    currentTradeDetails: null,
+    tradeAwaitingPnl: null,
+    hasLoggedNotFoundThisHour: false,
+    exchanges: {}
 };
+
+const db = new sqlite3.Database(DB_FILE, (err) => {
+    if (err) return console.error(err.message);
+    console.log('Connected to the SQLite database.');
+    const tableSchema = `
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE NOT NULL, password TEXT NOT NULL,
+            is_vip INTEGER DEFAULT 0, vip_level TEXT, vip_expiry_timestamp INTEGER, pnl REAL DEFAULT 0,
+            binance_apikey TEXT, binance_secret TEXT,
+            bitget_apikey TEXT, bitget_secret TEXT, bitget_password TEXT,
+            kucoin_apikey TEXT, kucoin_secret TEXT, kucoin_password TEXT,
+            binance_bep20 TEXT, binance_aptos TEXT,
+            bitget_bep20 TEXT, bitget_aptos TEXT,
+            kucoin_aptos TEXT
+        )`;
+    db.run(tableSchema);
+});
 
 const safeLog = (type, ...args) => {
+    const user = activeBotInstance.username ? `[${activeBotInstance.username}]` : '';
     const timestamp = new Date().toLocaleTimeString('vi-VN');
-    const message = args.map(arg => typeof arg === 'object' ? JSON.stringify(arg, null, 2) : arg).join(' ');
-    console[type](`[${timestamp}]`, message);
+    const message = args.map(arg => (arg instanceof Error) ? (arg.stack || arg.message) : (typeof arg === 'object' ? JSON.stringify(arg, null, 2) : arg)).join(' ');
+    console[type](`[${timestamp}]${user}`, message);
 };
 
-// ... (Các hàm bot như initializeExchangesForUser, mainBotLoop, startBot, stopBot không thay đổi) ...
+const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
 async function initializeExchangesForUser(userData) {
     const userExchanges = {};
     const exchangeConfigs = [
         { id: 'binanceusdm', apiKey: userData.binance_apikey, secret: userData.binance_secret, options: { 'defaultType': 'swap' } },
         { id: 'bitget', apiKey: userData.bitget_apikey, secret: userData.bitget_secret, password: userData.bitget_password, options: { 'defaultType': 'swap' } },
-        { id: 'okx', apiKey: userData.okx_apikey, secret: userData.okx_secret, password: userData.okx_password, options: { 'defaultType': 'swap' } },
         { id: 'kucoinfutures', apiKey: userData.kucoin_apikey, secret: userData.kucoin_secret, password: userData.kucoin_password },
     ];
     for (const config of exchangeConfigs) {
         if (config.apiKey && config.secret) {
             try {
-                const exchangeClass = ccxt[config.id];
-                userExchanges[config.id] = new exchangeClass({
-                    apiKey: config.apiKey, secret: config.secret, password: config.password, enableRateLimit: true, ...config.options
-                });
+                userExchanges[config.id] = new ccxt[config.id]({ apiKey: config.apiKey, secret: config.secret, password: config.password, enableRateLimit: true, ...config.options });
+                await userExchanges[config.id].loadMarkets();
+                safeLog('info', `Khởi tạo sàn ${config.id.toUpperCase()} thành công.`);
             } catch (e) {
-                safeLog('error', `Failed to init ${config.id} for ${userData.username}:`, e.message);
+                safeLog('error', `Lỗi khi khởi tạo sàn ${config.id} cho ${userData.username}:`, e.message);
             }
         }
     }
     return userExchanges;
 }
 
-async function mainBotLoop() {
-    if (activeBotInstance.state !== 'RUNNING') {
-        clearTimeout(activeBotInstance.loopId);
-        return;
+async function fetchAllBalances() {
+    for (const id in activeBotInstance.exchanges) {
+        try {
+            const balanceData = await activeBotInstance.exchanges[id].fetchBalance({ 'type': 'swap' });
+            activeBotInstance.balances[id] = {
+                available: balanceData?.free?.USDT || 0,
+                total: balanceData?.total?.USDT || 0
+            };
+        } catch (e) {
+            safeLog('warn', `[BALANCE] Không thể lấy số dư từ ${id}: ${e.message}`);
+            activeBotInstance.balances[id] = { available: 0, total: 0 };
+        }
     }
+}
+
+async function getExchangeSpecificSymbol(exchange, rawCoinSymbol) {
+    const base = String(rawCoinSymbol).toUpperCase().replace(/USDT$/, '');
+    const attempts = [`${base}/USDT:USDT`, `${base}USDT`, `${base}-USDT-SWAP`];
+    for (const attempt of attempts) {
+        if (exchange.markets[attempt]?.active) return exchange.markets[attempt].id;
+    }
+    return null;
+}
+
+async function executeTrades(opportunity) {
+    const { coin, commonLeverage: desiredLeverage } = opportunity;
+    const [shortExId, longExId] = opportunity.exchanges.split(' / ').map(e => e.toLowerCase().trim());
+
+    await fetchAllBalances();
+    const shortEx = activeBotInstance.exchanges[shortExId];
+    const longEx = activeBotInstance.exchanges[longExId];
+    if (!shortEx || !longEx) {
+        safeLog('error', `Sàn không hợp lệ: ${shortExId}, ${longExId}`);
+        return false;
+    }
+
+    const shortBalance = activeBotInstance.balances[shortExId]?.available || 0;
+    const longBalance = activeBotInstance.balances[longExId]?.available || 0;
+    const minBalance = Math.min(shortBalance, longBalance);
+    
+    let collateral;
+    if (activeBotInstance.marginOptions.type === 'percent') {
+        collateral = minBalance * (parseFloat(activeBotInstance.marginOptions.value) / 100);
+    } else {
+        collateral = Math.min(minBalance, parseFloat(activeBotInstance.marginOptions.value));
+    }
+
+    if (collateral < MIN_COLLATERAL_FOR_TRADE) {
+        safeLog('warn', `Vốn không đủ để giao dịch. Yêu cầu > ${MIN_COLLATERAL_FOR_TRADE}, đang có ${collateral.toFixed(4)}.`);
+        activeBotInstance.capitalManagementState = 'IDLE';
+        return false;
+    }
+
+    safeLog('info', `Bắt đầu vào lệnh cho ${coin} với ký quỹ ${collateral.toFixed(2)} USDT.`);
+    activeBotInstance.capitalManagementState = 'TRADE_OPEN';
+
     try {
-        safeLog('log', `Bot loop running for ${activeBotInstance.username}...`);
+        const shortSymbol = await getExchangeSpecificSymbol(shortEx, coin);
+        const longSymbol = await getExchangeSpecificSymbol(longEx, coin);
+        if (!shortSymbol || !longSymbol) throw new Error(`Không tìm thấy symbol cho ${coin}`);
+
+        await Promise.all([
+            shortEx.setLeverage(desiredLeverage, shortSymbol),
+            longEx.setLeverage(desiredLeverage, longSymbol)
+        ]);
+
+        const targetNotional = collateral * desiredLeverage;
+        const shortTicker = await shortEx.fetchTicker(shortSymbol);
+        const longTicker = await longEx.fetchTicker(longSymbol);
+        const shortAmount = targetNotional / shortTicker.last;
+        const longAmount = targetNotional / longTicker.last;
+
+        const [shortOrder, longOrder] = await Promise.all([
+            shortEx.createMarketSellOrder(shortSymbol, shortAmount),
+            longEx.createMarketBuyOrder(longSymbol, longAmount)
+        ]);
+        
+        activeBotInstance.currentTradeDetails = {
+            coin, shortExchange: shortExId, longExchange: longExId,
+            shortOrderAmount: shortAmount, longOrderAmount: longAmount,
+            shortSymbol, longSymbol, collateralUsed: collateral, status: 'OPEN',
+            shortBalanceBefore: shortBalance, longBalanceBefore: longBalance
+        };
+        safeLog('info', `✅ Mở lệnh thành công cho ${coin}.`);
+        return true;
     } catch (e) {
-        safeLog('error', 'Critical error in main loop:', e);
-        await stopBot();
+        safeLog('error', `[TRADE] Lỗi nghiêm trọng khi vào lệnh:`, e);
+        activeBotInstance.capitalManagementState = 'IDLE';
+        return false;
     }
-    activeBotInstance.loopId = setTimeout(mainBotLoop, 5000);
 }
 
-async function startBot(username, marginOptions) {
-    if (activeBotInstance.state === 'RUNNING') return false;
-    const user = await new Promise((resolve, reject) => {
-        db.get('SELECT * FROM users WHERE username = ?', [username], (err, row) => {
-            if (err) reject(err);
-            resolve(row);
-        });
-    });
-    if (!user) return false;
-    const userExchanges = await initializeExchangesForUser(user);
-    if (Object.keys(userExchanges).length === 0) return false;
+async function closeTradeNow() {
+    if (!activeBotInstance.currentTradeDetails) return;
+    const trade = activeBotInstance.currentTradeDetails;
+    safeLog('info', `Bắt đầu đóng vị thế cho ${trade.coin}`);
 
-    activeBotInstance = {
-        username: username, state: 'RUNNING', loopId: null, exchanges: userExchanges,
-        tradeDetails: null, tradeHistory: [], balances: {}, pnl: user.pnl, marginOptions: marginOptions
-    };
-    safeLog('info', `Bot started for user: ${username} with options`, marginOptions);
-    mainBotLoop();
-    return true;
+    try {
+        const shortEx = activeBotInstance.exchanges[trade.shortExchange];
+        const longEx = activeBotInstance.exchanges[trade.longExchange];
+        
+        await Promise.all([
+            shortEx.createMarketBuyOrder(trade.shortSymbol, trade.shortOrderAmount, { 'reduceOnly': true }),
+            longEx.createMarketSellOrder(trade.longSymbol, trade.longOrderAmount, { 'reduceOnly': true })
+        ]);
+
+        activeBotInstance.tradeAwaitingPnl = { ...trade, status: 'PENDING_PNL_CALC', closeTime: Date.now() };
+        activeBotInstance.currentTradeDetails = null;
+    } catch (e) {
+        safeLog('error', `[CLOSE] Lỗi khi đóng vị thế:`, e);
+        activeBotInstance.currentTradeDetails.status = "CLOSE_FAILED";
+    }
 }
 
-async function stopBot() {
-    if (activeBotInstance.state !== 'RUNNING') return false;
-    clearTimeout(activeBotInstance.loopId);
-    const { pnl: finalPnl, username } = activeBotInstance;
-    activeBotInstance = { username: null, state: 'STOPPED', loopId: null, exchanges: {}, tradeDetails: null, tradeHistory: [], balances: {}, pnl: 0 };
-    db.run('UPDATE users SET pnl = ? WHERE username = ?', [finalPnl, username], (err) => {
-        if (err) safeLog('error', 'Failed to save final PNL to DB:', err.message);
-    });
-    safeLog('info', `Bot stopped for user: ${username}. Final PNL ${finalPnl} saved.`);
-    return true;
+async function calculatePnlAfterDelay() {
+    if (!activeBotInstance.tradeAwaitingPnl) return;
+    const closedTrade = activeBotInstance.tradeAwaitingPnl;
+    
+    await sleep(5000);
+    await fetchAllBalances();
+    
+    const shortBalanceAfter = activeBotInstance.balances[closedTrade.shortExchange]?.available || 0;
+    const longBalanceAfter = activeBotInstance.balances[closedTrade.longExchange]?.available || 0;
+    const pnl = (shortBalanceAfter + longBalanceAfter) - (closedTrade.shortBalanceBefore + closedTrade.longBalanceBefore);
+
+    safeLog('info', `[PNL] KẾT QUẢ PHIÊN (${closedTrade.coin}): PNL Tổng: ${pnl.toFixed(4)} USDT`);
+    activeBotInstance.tradeHistory.unshift({ ...closedTrade, status: 'CLOSED', actualPnl: pnl });
+    
+    db.run('UPDATE users SET pnl = pnl + ? WHERE username = ?', [pnl, activeBotInstance.username]);
+
+    activeBotInstance.tradeAwaitingPnl = null;
+    activeBotInstance.capitalManagementState = 'IDLE';
 }
 
+async function mainBotLoop() {
+    if (activeBotInstance.botState !== 'RUNNING') return;
+    try {
+        if (activeBotInstance.tradeAwaitingPnl) await calculatePnlAfterDelay();
+
+        const response = await fetch(SERVER_DATA_URL);
+        const serverData = await response.json();
+        
+        const now = new Date();
+        const minute = now.getUTCMinutes();
+        const second = now.getUTCSeconds();
+
+        if (minute === 1) activeBotInstance.hasLoggedNotFoundThisHour = false;
+        
+        if (activeBotInstance.capitalManagementState === 'IDLE' && minute >= 50 && minute < 59) {
+            const opportunity = serverData.arbitrageData.find(op => 
+                op.estimatedPnl >= MIN_PNL_PERCENTAGE &&
+                (op.nextFundingTime - Date.now()) / 60000 < 15
+            );
+            if (opportunity) {
+                safeLog('info', `[FIND] Tìm thấy cơ hội: ${opportunity.coin} (${opportunity.exchanges}). Bắt đầu thực hiện.`);
+                activeBotInstance.capitalManagementState = 'PREPARING_FUNDS';
+                await executeTrades(opportunity);
+            } else if (!activeBotInstance.hasLoggedNotFoundThisHour) {
+                safeLog('log', "[FIND] Không tìm thấy cơ hội nào hợp lệ.");
+                activeBotInstance.hasLoggedNotFoundThisHour = true;
+            }
+        }
+        
+        if (activeBotInstance.capitalManagementState === 'TRADE_OPEN' && minute === 59 && second >= 58) {
+             await closeTradeNow();
+        }
+
+    } catch (e) {
+        safeLog('error', '[LOOP] Lỗi nghiêm trọng trong vòng lặp chính:', e);
+        activeBotInstance.capitalManagementState = 'IDLE';
+    }
+    if (activeBotInstance.botState === 'RUNNING') {
+        activeBotInstance.botLoopIntervalId = setTimeout(mainBotLoop, DATA_FETCH_INTERVAL_SECONDS * 1000);
+    }
+}
 
 app.use(cors());
 app.use(express.json());
 app.use(express.static(__dirname));
 
-app.get('/', (req, res) => {
-  res.sendFile(path.join(__dirname, 'index.html'));
-});
+app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
 
-// ... (Các API cho người dùng cuối không thay đổi) ...
 app.post('/api/register', (req, res) => {
     const { username, password } = req.body;
     db.run('INSERT INTO users (username, password) VALUES (?, ?)', [username, password], function(err) {
@@ -125,6 +266,7 @@ app.post('/api/register', (req, res) => {
         res.status(201).json({ success: true, message: 'User registered successfully.' });
     });
 });
+
 app.post('/api/login', (req, res) => {
     const { username, password } = req.body;
     db.get('SELECT * FROM users WHERE username = ? AND password = ?', [username, password], (err, row) => {
@@ -132,74 +274,104 @@ app.post('/api/login', (req, res) => {
         res.status(200).json({ success: true, username: row.username });
     });
 });
+
 app.post('/api/status', (req, res) => {
     const { username } = req.body;
-    db.get('SELECT id, username, is_vip, vip_level, vip_expiry_timestamp, pnl FROM users WHERE username = ?', [username], (err, user) => {
+    db.get('SELECT * FROM users WHERE username = ?', [username], (err, user) => {
         if (err || !user) return res.status(404).json({ message: 'User not found.' });
-        const isBotForThisUser = activeBotInstance.username === username;
-        res.status(200).json({
-            is_vip: user.is_vip, vip_level: user.vip_level, vip_expiry_timestamp: user.vip_expiry_timestamp,
-            pnl: isBotForThisUser ? activeBotInstance.pnl : user.pnl,
-            isBotRunning: isBotForThisUser && activeBotInstance.state === 'RUNNING',
-            totalUsdt: isBotForThisUser ? Object.values(activeBotInstance.balances).reduce((s, b) => s + (b.total || 0), 0) : 0,
-            tradeHistory: isBotForThisUser ? activeBotInstance.tradeHistory : []
-        });
+        
+        if (activeBotInstance.username === username) {
+            res.status(200).json({
+                is_vip: user.is_vip, vip_level: user.vip_level, vip_expiry_timestamp: user.vip_expiry_timestamp, pnl: user.pnl,
+                botState: activeBotInstance.botState,
+                capitalManagementState: activeBotInstance.capitalManagementState,
+                currentTradeDetails: activeBotInstance.currentTradeDetails,
+                tradeHistory: activeBotInstance.tradeHistory,
+                balances: activeBotInstance.balances
+            });
+        } else {
+             res.status(200).json({ is_vip: user.is_vip, vip_level: user.vip_level, vip_expiry_timestamp: user.vip_expiry_timestamp, pnl: user.pnl, botState: 'STOPPED' });
+        }
     });
 });
+
 app.post('/api/save-settings', (req, res) => {
     const { username, settings } = req.body;
-    db.run(`UPDATE users SET binance_apikey = ?, binance_secret = ?, bitget_apikey = ?, bitget_secret = ?, bitget_password = ? WHERE username = ?`,
-        [settings.binance_apikey, settings.binance_secret, settings.bitget_apikey, settings.bitget_secret, settings.bitget_password, username],
-        function(err) {
-            if (err) return res.status(500).json({ success: false, message: 'Database error.' });
-            res.status(200).json({ success: true, message: 'Settings saved successfully.' });
-        });
+    const sql = `UPDATE users SET 
+        binance_apikey = ?, binance_secret = ?, 
+        bitget_apikey = ?, bitget_secret = ?, bitget_password = ?,
+        kucoin_apikey = ?, kucoin_secret = ?, kucoin_password = ?,
+        binance_bep20 = ?, binance_aptos = ?,
+        bitget_bep20 = ?, bitget_aptos = ?,
+        kucoin_aptos = ?
+        WHERE username = ?`;
+    const params = [
+        settings.binance_apikey, settings.binance_secret,
+        settings.bitget_apikey, settings.bitget_secret, settings.bitget_password,
+        settings.kucoin_apikey, settings.kucoin_secret, settings.kucoin_password,
+        settings.binance_bep20, settings.binance_aptos,
+        settings.bitget_bep20, settings.bitget_aptos,
+        settings.kucoin_aptos,
+        username
+    ];
+    db.run(sql, params, function(err) {
+        if (err) return res.status(500).json({ success: false, message: 'Database error.' });
+        res.status(200).json({ success: true, message: 'Settings saved successfully.' });
+    });
 });
+
 app.post('/api/start', async (req, res) => {
+    if (activeBotInstance.username) {
+        return res.status(409).json({ success: false, message: `Bot đã được chạy bởi user: ${activeBotInstance.username}` });
+    }
     const { username, marginOptions } = req.body;
-    const success = await startBot(username, marginOptions);
-    res.status(200).json({ success });
+    db.get('SELECT * FROM users WHERE username = ?', [username], async (err, user) => {
+        if (err || !user) return res.status(404).json({ success: false, message: "User không tồn tại." });
+        
+        activeBotInstance = {
+            username, userData: user, marginOptions,
+            botState: 'RUNNING', capitalManagementState: 'IDLE',
+            botLoopIntervalId: null, balances: {}, tradeHistory: [],
+            currentTradeDetails: null, tradeAwaitingPnl: null, hasLoggedNotFoundThisHour: false,
+            exchanges: await initializeExchangesForUser(user)
+        };
+        
+        if (Object.keys(activeBotInstance.exchanges).length === 0) {
+            activeBotInstance = { username: null };
+            return res.status(400).json({ success: false, message: "Không thể khởi tạo sàn nào. Vui lòng kiểm tra API keys." });
+        }
+
+        mainBotLoop();
+        res.status(200).json({ success: true });
+    });
 });
+
 app.post('/api/stop', async (req, res) => {
-    const success = await stopBot();
-    res.status(200).json({ success });
+    if (activeBotInstance.username) {
+        safeLog('info', `Nhận yêu cầu dừng bot từ user ${activeBotInstance.username}.`);
+        clearTimeout(activeBotInstance.botLoopIntervalId);
+        activeBotInstance = { username: null, botState: 'STOPPED' };
+    }
+    res.status(200).json({ success: true });
 });
-
-
-// --- PHẦN ADMIN NÂNG CẤP ---
 
 app.post('/admin/update-user', (req, res) => {
     const { secret, username, level, days } = req.body;
-
-    if (secret !== ADMIN_SECRET_KEY) {
-        return res.status(403).json({ success: false, message: 'Forbidden. Invalid secret key.' });
-    }
-
-    let sql, params;
+    if (secret !== ADMIN_SECRET_KEY) return res.status(403).json({ success: false, message: 'Forbidden.' });
     
+    let sql, params;
     if (level === 'NONE') {
         sql = 'UPDATE users SET is_vip = 0, vip_level = NULL, vip_expiry_timestamp = NULL WHERE username = ?';
         params = [username];
     } else {
-        const is_vip = 1;
-        const vip_level = level; // '1', '2', '3', 'GOLD'
-        // Dùng năm 9999 để biểu thị vĩnh viễn
-        const expiry_timestamp = (level === 'GOLD') 
-            ? new Date('9999-12-31T23:59:59Z').getTime()
-            : Date.now() + (parseInt(days) * 86400000);
-
-        sql = 'UPDATE users SET is_vip = ?, vip_level = ?, vip_expiry_timestamp = ? WHERE username = ?';
-        params = [is_vip, vip_level, expiry_timestamp, username];
+        const expiry_timestamp = (level === 'GOLD') ? new Date('9999-12-31T23:59:59Z').getTime() : Date.now() + (parseInt(days) * 86400000);
+        sql = 'UPDATE users SET is_vip = 1, vip_level = ?, vip_expiry_timestamp = ? WHERE username = ?';
+        params = [level, expiry_timestamp, username];
     }
-
     db.run(sql, params, function(err) {
-        if (err) {
-            return res.status(500).json({ success: false, message: 'Database error.', error: err.message });
-        }
-        if (this.changes === 0) {
-            return res.status(404).json({ success: false, message: `User '${username}' not found.` });
-        }
-        res.status(200).json({ success: true, message: `User '${username}' updated successfully.` });
+        if (err) return res.status(500).json({ success: false, message: err.message });
+        if (this.changes === 0) return res.status(404).json({ success: false, message: `User '${username}' not found.` });
+        res.status(200).json({ success: true, message: `User '${username}' updated.` });
     });
 });
 
@@ -207,20 +379,23 @@ app.get('/admin', (req, res) => {
     const secret = req.query.secret;
     if (secret !== ADMIN_SECRET_KEY) return res.status(403).send('<h1>Forbidden</h1>');
 
-    db.all('SELECT id, username, is_vip, vip_level, vip_expiry_timestamp FROM users ORDER BY id DESC', [], (err, rows) => {
+    db.all('SELECT * FROM users ORDER BY id DESC', [], (err, rows) => {
         if (err) return res.status(500).send(`<h1>Database Error: ${err.message}</h1>`);
         
-        let userRowsHtml = rows.map(row => {
-            const expiryDate = row.vip_expiry_timestamp ? new Date(row.vip_expiry_timestamp).toLocaleString('vi-VN') : 'N/A';
-            const vipStatus = row.is_vip ? `${row.vip_level} (Hết hạn: ${row.vip_level === 'GOLD' ? 'Vĩnh viễn' : expiryDate})` : 'Không';
+        if (rows.length === 0) {
+            return res.send('<h1>Admin - User Database</h1><p>No users found.</p>');
+        }
+
+        const headers = Object.keys(rows[0]);
+        const headerHtml = headers.map(h => `<th>${h}</th>`).join('') + '<th>Actions</th>';
+
+        const userRowsHtml = rows.map(row => {
+            const cells = headers.map(header => `<td>${row[header] === null ? '' : row[header]}</td>`).join('');
             return `
                 <tr>
-                    <td>${row.id}</td>
-                    <td>${row.username}</td>
-                    <td>${vipStatus}</td>
+                    ${cells}
                     <td><button onclick="openVipModal('${row.username}', '${row.vip_level || ''}')">Set VIP</button></td>
-                </tr>
-            `;
+                </tr>`;
         }).join('');
 
         res.send(`
@@ -228,113 +403,81 @@ app.get('/admin', (req, res) => {
             <html lang="vi">
             <head>
                 <meta charset="UTF-8">
-                <title>Admin - Quản lý User</title>
+                <title>Admin - User Database</title>
                 <style>
-                    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 2em; background-color: #f4f4f9; color: #333; }
-                    table { border-collapse: collapse; width: 100%; box-shadow: 0 2px 3px rgba(0,0,0,0.1); }
-                    th, td { border: 1px solid #ddd; padding: 12px; text-align: left; }
-                    th { background-color: #007bff; color: white; }
+                    body { font-family: sans-serif; margin: 2em; background-color: #f4f4f9; color: #333; }
+                    .table-container { overflow-x: auto; }
+                    table { border-collapse: collapse; width: 100%; min-width: 1200px; box-shadow: 0 2px 3px rgba(0,0,0,0.1); }
+                    th, td { border: 1px solid #ddd; padding: 12px; text-align: left; white-space: nowrap; }
+                    th { background-color: #343a40; color: white; }
                     tr:nth-child(even){ background-color: #f2f2f2; }
                     button { background-color: #007bff; color: white; border: none; padding: 8px 12px; border-radius: 4px; cursor: pointer; }
                     button:hover { background-color: #0056b3; }
-                    .modal { position: fixed; z-index: 100; left: 0; top: 0; width: 100%; height: 100%; overflow: auto; background-color: rgba(0,0,0,0.5); display: none; justify-content: center; align-items: center; }
+                    .modal { position: fixed; z-index: 100; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.5); display: none; justify-content: center; align-items: center; }
                     .modal-content { background-color: #fefefe; padding: 20px; border: 1px solid #888; width: 80%; max-width: 400px; border-radius: 8px; }
-                    .modal-header { padding-bottom: 10px; border-bottom: 1px solid #ccc; }
-                    .close-btn { color: #aaa; float: right; font-size: 28px; font-weight: bold; cursor: pointer; }
-                    .form-group { margin: 15px 0; }
-                    label { display: block; margin-bottom: 5px; }
-                    select, input { width: 100%; padding: 8px; box-sizing: border-box; }
+                    .close-btn { color: #aaa; float: right; font-size: 28px; cursor: pointer; }
                 </style>
             </head>
             <body>
-                <h1>Quản lý User</h1>
-                <table>
-                    <thead><tr><th>ID</th><th>Username</th><th>Trạng thái VIP</th><th>Hành động</th></tr></thead>
-                    <tbody>${userRowsHtml}</tbody>
-                </table>
+                <h1>Admin - User Database</h1>
+                <div class="table-container">
+                    <table>
+                        <thead><tr>${headerHtml}</tr></thead>
+                        <tbody>${userRowsHtml}</tbody>
+                    </table>
+                </div>
 
                 <div id="vip-modal" class="modal">
                     <div class="modal-content">
-                        <div class="modal-header">
-                            <span class="close-btn" onclick="closeVipModal()">&times;</span>
-                            <h2 id="modal-title">Set VIP cho User</h2>
+                        <span class="close-btn" onclick="closeVipModal()">&times;</span>
+                        <h2 id="modal-title">Set VIP</h2>
+                        <input type="hidden" id="modal-username">
+                        <div>
+                            <label for="vip-level">Cấp VIP</label>
+                            <select id="vip-level" onchange="toggleDaysInput()">
+                                <option value="NONE">Không phải VIP</option>
+                                <option value="1">VIP 1</option>
+                                <option value="2">VIP 2</option>
+                                <option value="3">VIP 3</option>
+                                <option value="GOLD">VIP GOLD (Vĩnh viễn)</option>
+                            </select>
                         </div>
-                        <div class="modal-body">
-                            <input type="hidden" id="modal-username">
-                            <div class="form-group">
-                                <label for="vip-level">Cấp VIP</label>
-                                <select id="vip-level" onchange="toggleDaysInput()">
-                                    <option value="NONE">Không phải VIP</option>
-                                    <option value="1">VIP 1</option>
-                                    <option value="2">VIP 2</option>
-                                    <option value="3">VIP 3</option>
-                                    <option value="GOLD">VIP GOLD (Vĩnh viễn)</option>
-                                </select>
-                            </div>
-                            <div class="form-group" id="days-group">
-                                <label for="vip-days">Số ngày</label>
-                                <input type="number" id="vip-days" value="30">
-                            </div>
-                            <button onclick="saveVipSettings()">Lưu thay đổi</button>
+                        <div id="days-group" style="margin-top: 15px;">
+                            <label for="vip-days">Số ngày</label>
+                            <input type="number" id="vip-days" value="30">
                         </div>
+                        <button onclick="saveVipSettings()" style="margin-top: 20px;">Lưu thay đổi</button>
                     </div>
                 </div>
 
                 <script>
                     const modal = document.getElementById('vip-modal');
-                    const usernameInput = document.getElementById('modal-username');
-                    const levelSelect = document.getElementById('vip-level');
-                    const daysInput = document.getElementById('vip-days');
-                    const daysGroup = document.getElementById('days-group');
-                    const modalTitle = document.getElementById('modal-title');
-
                     function openVipModal(username, currentLevel) {
-                        modalTitle.innerText = 'Set VIP cho ' + username;
-                        usernameInput.value = username;
-                        levelSelect.value = currentLevel || 'NONE';
+                        document.getElementById('modal-title').innerText = 'Set VIP cho ' + username;
+                        document.getElementById('modal-username').value = username;
+                        document.getElementById('vip-level').value = currentLevel || 'NONE';
                         toggleDaysInput();
                         modal.style.display = 'flex';
                     }
-
-                    function closeVipModal() {
-                        modal.style.display = 'none';
-                    }
-
+                    function closeVipModal() { modal.style.display = 'none'; }
                     function toggleDaysInput() {
-                        const selectedLevel = levelSelect.value;
-                        daysGroup.style.display = (selectedLevel === 'NONE' || selectedLevel === 'GOLD') ? 'none' : 'block';
+                        const level = document.getElementById('vip-level').value;
+                        document.getElementById('days-group').style.display = (level === 'NONE' || level === 'GOLD') ? 'none' : 'block';
                     }
-
                     async function saveVipSettings() {
-                        const username = usernameInput.value;
-                        const level = levelSelect.value;
-                        const days = daysInput.value;
-
+                        const username = document.getElementById('modal-username').value;
+                        const level = document.getElementById('vip-level').value;
+                        const days = document.getElementById('vip-days').value;
                         const response = await fetch('/admin/update-user', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({
-                                secret: '${ADMIN_SECRET_KEY}',
-                                username: username,
-                                level: level,
-                                days: days
-                            })
+                            body: JSON.stringify({ secret: '${ADMIN_SECRET_KEY}', username, level, days })
                         });
-
                         const result = await response.json();
-                        if (result.success) {
-                            alert('Cập nhật thành công!');
-                            window.location.reload();
-                        } else {
-                            alert('Lỗi: ' + result.message);
-                        }
+                        alert(result.message);
+                        if (result.success) window.location.reload();
                     }
-
-                    window.onclick = function(event) {
-                        if (event.target == modal) {
-                            closeVipModal();
-                        }
-                    }
+                    window.onclick = (event) => { if (event.target == modal) closeVipModal(); }
                 </script>
             </body>
             </html>
@@ -342,6 +485,4 @@ app.get('/admin', (req, res) => {
     });
 });
 
-app.listen(port, () => {
-    safeLog('info', `Unified server running at http://localhost:${port}`);
-});
+app.listen(port, () => safeLog('info', `Server tổng hợp đang chạy tại http://localhost:${port}`));
