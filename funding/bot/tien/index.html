@@ -3,38 +3,213 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Bot Arbitrage UI</title>
+    <title>Dashboard Bot Arbitrage</title>
     <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background-color: #121212; color: #e0e0e0; margin: 0; padding: 1rem; }
-        .container { max-width: 1400px; margin: auto; }
-        h1, h2 { color: #bb86fc; text-align: center; }
-        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1rem; }
-        .card { background-color: #1e1e1e; border: 1px solid #333; border-radius: 8px; padding: 1rem; margin-top: 1rem; }
-        .card h3 { margin-top: 0; color: #03dac6; }
-        button { background-color: #6200ee; color: white; border: none; padding: 10px 15px; border-radius: 4px; cursor: pointer; transition: background-color 0.2s; font-size: 14px; }
-        button:hover { background-color: #3700b3; }
-        button:disabled { background-color: #333; color: #888; cursor: not-allowed; }
-        button.stop { background-color: #cf6679; }
-        button.stop:hover { background-color: #b00020; }
-        .controls, .manual-controls { display: flex; justify-content: center; align-items: center; gap: 1rem; margin-bottom: 1.5rem; flex-wrap: wrap; }
-        input, select { padding: 8px; background-color: #333; color: #e0e0e0; border: 1px solid #555; border-radius: 4px; }
-        table { width: 100%; border-collapse: collapse; margin-top: 1rem; }
-        th, td { padding: 0.75rem; text-align: left; border-bottom: 1px solid #333; }
-        th { background-color: #2c2c2c; }
-        .text-green { color: #4caf50; }
-        .text-red { color: #f44336; }
-        .text-yellow { color: #f1c40f; }
-        .text-blue { color: #64b5f6; }
-        .status-display { margin-top: 1rem; padding: 1rem; background-color: #2c2c2c; border-radius: 4px; min-height: 20px; text-align: center; word-break: break-word; }
+        /* --- Cài đặt gốc & Font chữ --- */
+        :root {
+            --bg-color: #0d1117;
+            --card-color: #161b22;
+            --border-color: #30363d;
+            --text-color: #c9d1d9;
+            --text-secondary-color: #8b949e;
+            --primary-color: #58a6ff;
+            --primary-hover-color: #79c0ff;
+            --green-color: #3fb950;
+            --red-color: #f85149;
+            --yellow-color: #d29922;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            margin: 0;
+            padding: 1.5rem;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+        }
+
+        /* --- Layout chính --- */
+        .container {
+            max-width: 1600px;
+            margin: auto;
+        }
+
+        h1, h2 {
+            text-align: center;
+            font-weight: 600;
+        }
+
+        h1 {
+            font-size: 2.5rem;
+            color: var(--primary-color);
+            margin-bottom: 2rem;
+            letter-spacing: 1px;
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+            gap: 1.5rem;
+            margin-bottom: 2rem;
+        }
+
+        /* --- Thẻ (Card) --- */
+        .card {
+            background-color: var(--card-color);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 1.5rem;
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+        }
+        
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 8px 25px rgba(88, 166, 255, 0.1);
+        }
+
+        .card h3 {
+            margin-top: 0;
+            color: var(--primary-hover-color);
+            border-bottom: 1px solid var(--border-color);
+            padding-bottom: 0.75rem;
+            margin-bottom: 1rem;
+        }
+        
+        .card h2 {
+             color: var(--primary-color);
+        }
+
+        /* --- Nút bấm & Form --- */
+        button {
+            background-color: var(--primary-color);
+            color: #ffffff;
+            border: none;
+            padding: 12px 20px;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: background-color 0.2s, transform 0.1s;
+            font-size: 14px;
+            font-weight: 600;
+            letter-spacing: 0.5px;
+        }
+
+        button:hover {
+            background-color: var(--primary-hover-color);
+            transform: scale(1.03);
+        }
+        
+        button:active {
+            transform: scale(0.98);
+        }
+
+        button:disabled {
+            background-color: #21262d;
+            color: var(--text-secondary-color);
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        button.stop { background-color: var(--red-color); }
+        button.stop:hover { background-color: #ff756f; }
+
+        .controls, .manual-controls {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 1rem;
+            margin-bottom: 2rem;
+            flex-wrap: wrap;
+            background-color: var(--card-color);
+            padding: 1.5rem;
+            border-radius: 12px;
+            border: 1px solid var(--border-color);
+        }
+        
+        .manual-controls {
+            flex-direction: column;
+            gap: 1.2rem;
+            align-items: stretch;
+            margin-bottom: 0;
+        }
+        
+        .manual-controls > * {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        input, select {
+            width: 50%;
+            padding: 10px;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            transition: border-color 0.2s, box-shadow 0.2s;
+        }
+
+        input:focus, select:focus {
+            outline: none;
+            border-color: var(--primary-color);
+            box-shadow: 0 0 0 3px rgba(88, 166, 255, 0.3);
+        }
+
+        /* --- Bảng dữ liệu --- */
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 1rem;
+        }
+
+        th, td {
+            padding: 1rem;
+            text-align: left;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        th {
+            background-color: #10151c;
+            font-weight: 600;
+            text-transform: uppercase;
+            font-size: 0.8rem;
+            letter-spacing: 1px;
+        }
+        
+        tbody tr {
+            transition: background-color 0.15s ease;
+        }
+        
+        tbody tr:hover {
+            background-color: #1c222c;
+        }
+
+        /* --- Helper Classes --- */
+        .text-green { color: var(--green-color); }
+        .text-red { color: var(--red-color); }
+        .text-yellow { color: var(--yellow-color); }
+        .text-blue { color: var(--primary-hover-color); }
+        
+        .status-display {
+            margin-top: 1rem;
+            padding: 1rem;
+            background-color: var(--bg-color);
+            border-radius: 8px;
+            min-height: 20px;
+            text-align: center;
+            word-break: break-word;
+            font-weight: 500;
+        }
     </style>
 </head>
 <body>
 <div class="container">
-    <h1>📈 Bot Arbitrage Trading</h1>
+    <h1>Dashboard Bot Arbitrage</h1>
 
     <div class="controls">
         <label for="percentageToUse">Vốn mỗi lệnh (%):</label>
-        <input type="number" id="percentageToUse" value="50" min="1" max="100">
+        <input type="number" id="percentageToUse" value="50" min="1" max="100" style="width: 80px;">
         <button id="startBotBtn">▶️ Start Bot</button>
         <button id="stopBotBtn" class="stop">⏸️ Stop Bot</button>
         <button id="closeTradeBtn" class="stop">🛑 Đóng lệnh & Dọn dẹp</button>
@@ -63,23 +238,23 @@
     <div class="grid">
          <div class="card">
             <h2>Test Lệnh Nhanh</h2>
-            <p style="color: #80cbc4;">Dùng cơ hội tốt nhất hiện tại để vào lệnh thủ công với các thông số tùy chỉnh.</p>
+            <p style="color: var(--text-secondary-color);">Dùng cơ hội tốt nhất hiện tại để vào lệnh thủ công với các thông số tùy chỉnh.</p>
             <div class="manual-controls" id="test-trade-form">
-                <label>Short trên:</label> <select id="testShortExchange"></select>
-                <label>Long trên:</label> <select id="testLongExchange"></select>
-                <label>Đòn bẩy:</label> <input type="number" id="testLeverage" value="20" min="1">
-                <label>% Vốn:</label> <input type="number" id="testPercentage" value="10" min="1" max="100">
+                <div><label>Short trên:</label> <select id="testShortExchange"></select></div>
+                <div><label>Long trên:</label> <select id="testLongExchange"></select></div>
+                <div><label>Đòn bẩy:</label> <input type="number" id="testLeverage" value="20" min="1"></div>
+                <div><label>% Vốn:</label> <input type="number" id="testPercentage" value="10" min="1" max="100"></div>
                 <button id="testTradeBtn">Gửi Lệnh Test</button>
             </div>
             <div id="testStatusDisplay" class="status-display"></div>
         </div>
         <div class="card">
             <h2>Chuyển tiền Ngoại sàn</h2>
-            <p style="color: #f48fb1;"><strong>CẢNH BÁO:</strong> Rủi ro cao. Sai địa chỉ/mạng có thể MẤT TIỀN. API Key phải có quyền Rút tiền.</p>
+            <p style="color: var(--red-color); font-weight: 500;"><strong>CẢNH BÁO:</strong> Rủi ro cao. Sai địa chỉ/mạng có thể MẤT TIỀN. API Key phải có quyền Rút tiền.</p>
             <div class="manual-controls">
-                <label>Từ:</label> <select id="fromExchangeSelect"></select>
-                <label>Tới:</label> <select id="toExchangeSelect"></select>
-                <label>Số lượng USDT:</label> <input type="number" id="transferAmount" value="10" min="1">
+                <div><label>Từ:</label> <select id="fromExchangeSelect"></select></div>
+                <div><label>Tới:</label> <select id="toExchangeSelect"></select></div>
+                <div><label>Số lượng USDT:</label> <input type="number" id="transferAmount" value="10" min="1"></div>
                 <button id="manualTransferBtn">Chuyển ngay</button>
             </div>
             <div id="transferStatusDisplay" class="status-display"></div>
@@ -87,19 +262,20 @@
         
         <div class="card">
             <h2>Chuyển tiền Nội bộ</h2>
+            <p style="color: var(--text-secondary-color);">Chuyển USDT giữa các ví Spot và Future trên cùng một sàn.</p>
             <div class="manual-controls">
-                <label>Sàn:</label> <select id="internalExchangeSelect"></select>
-                <label>Từ ví:</label>
+                <div><label>Sàn:</label> <select id="internalExchangeSelect"></select></div>
+                <div><label>Từ ví:</label>
                 <select id="internalFromAccount">
                     <option value="spot">Spot/Main</option>
                     <option value="future">Future</option>
-                </select>
-                <label>Tới ví:</label>
+                </select></div>
+                <div><label>Tới ví:</label>
                  <select id="internalToAccount">
                     <option value="future">Future</option>
                     <option value="spot">Spot/Main</option>
-                </select>
-                <label>Số lượng USDT:</label> <input type="number" id="internalAmount" value="10" min="0.1">
+                </select></div>
+                <div><label>Số lượng USDT:</label> <input type="number" id="internalAmount" value="10" min="0.1"></div>
                 <button id="internalTransferBtn">Chuyển Nội bộ</button>
             </div>
             <div id="internalTransferStatusDisplay" class="status-display"></div>
@@ -125,7 +301,7 @@
 </div>
 
 <script>
-    // Khai báo các element
+    // Toàn bộ phần Javascript được giữ nguyên vì nó đã đủ linh hoạt
     const startBotBtn = document.getElementById('startBotBtn');
     const stopBotBtn = document.getElementById('stopBotBtn');
     const testTradeBtn = document.getElementById('testTradeBtn');
