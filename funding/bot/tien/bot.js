@@ -1,6 +1,6 @@
 const http = require('http');
 const fs = require('fs');
-const path = path.path');
+const path = require('path');
 const ccxt = require('ccxt');
 
 const { usdtDepositAddressesByNetwork } = require('./balance.js');
