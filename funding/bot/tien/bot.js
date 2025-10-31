@@ -276,7 +276,6 @@ async function attemptInternalTransferOnArrival(toExchangeId, fromExchangeId, am
     transferStatus = { inProgress: false, message: `Lỗi: Hết lần thử chuyển tiền nội bộ trên ${toExchangeId}.` };
 }
 
-
 async function executeSingleFundTransfer(fromExchangeId, toExchangeId, amount) {
     transferStatus = { inProgress: true, message: `Bắt đầu chuyển ${amount.toFixed(2)} USDT từ ${fromExchangeId} -> ${toExchangeId}.` };
     safeLog('log', `[TRANSFER] ${transferStatus.message}`);
@@ -833,26 +832,30 @@ const botServer = http.createServer(async (req, res) => {
                 return res.writeHead(400, { 'Content-Type': 'application/json' }).end(JSON.stringify({ success: false, message: `Dữ liệu không hợp lệ.` }));
             }
             
-            let exchange = exchanges[exchangeId];
-            if (!exchange) {
-                return res.writeHead(500, { 'Content-Type': 'application/json' }).end(JSON.stringify({ success: false, message: `Sàn ${exchangeId} chưa được khởi tạo.` }));
-            }
-            
-            let from = genericFrom, to = genericTo;
-        
-            if (exchangeId === 'bitget') {
-                if (from === 'future') from = 'swap';
-                if (to === 'future') to = 'swap';
-            } else if (exchangeId === 'kucoinfutures' || exchangeId === 'kucoin') {
+            let from = genericFrom;
+            let to = genericTo;
+            let transferer;
+
+            if (exchangeId.includes('kucoin')) {
+                transferer = exchanges['kucoin'];
                 if (from === 'spot') from = 'main';
                 if (to === 'spot') to = 'main';
-                if (from === 'main') exchange = exchanges['kucoin']; // Use spot instance
-            } else if (exchangeId === 'binanceusdm' || exchangeId === 'binance') {
-                if (from === 'spot') exchange = exchanges['binance']; // Use spot instance
+            } else if (exchangeId.includes('binance')) {
+                transferer = exchanges['binance'];
+            } else if (exchangeId === 'bitget') {
+                transferer = exchanges['bitget'];
+                if (from === 'future') from = 'swap';
+                if (to === 'future') to = 'swap';
+            } else {
+                transferer = exchanges[exchangeId];
             }
         
+            if (!transferer) {
+                return res.writeHead(500, { 'Content-Type': 'application/json' }).end(JSON.stringify({ success: false, message: `Không tìm thấy instance sàn ${exchangeId} phù hợp.` }));
+            }
+
             try {
-                await exchange.transfer('USDT', amount, from, to);
+                await transferer.transfer('USDT', amount, from, to);
                 setTimeout(updateBalances, 3000);
                 res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ success: true, message: 'Chuyển nội bộ thành công.' }));
             } catch (e) {
