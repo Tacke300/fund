@@ -191,7 +191,8 @@ async function attemptInternalTransferOnArrival(toExchangeId, fromExchangeId, am
         amountRequired = amountSent - 0.5;
     }
 
-    let targetFromWallet = 'spot', targetToWallet = 'future';
+    let targetFromWallet = 'spot';
+    let targetToWallet = 'future';
     if (toExchangeId === 'kucoinfutures') targetFromWallet = 'main';
     if (toExchangeId === 'bitget') targetToWallet = 'swap';
 
@@ -217,33 +218,54 @@ async function attemptInternalTransferOnArrival(toExchangeId, fromExchangeId, am
         await sleep(retryIntervalMs);
         try {
             const balanceData = await balanceCheckerExchange.fetchBalance();
-            const availableAmount = balanceData?.free?.USDT || 0;
+            
+            let arrivalWalletType = null;
+            let availableAmount = 0;
 
-            if (availableAmount >= amountRequired - FUND_ARRIVAL_TOLERANCE) {
-                safeLog('info', `[RETRY-TRANSFER] ✅ Tiền đã về! (Có ${availableAmount.toFixed(2)} / Cần >= ${amountRequired - FUND_ARRIVAL_TOLERANCE}). Chờ 3s để sàn ổn định...`);
+            const mainOrFreeBalance = balanceData?.free?.USDT || 0;
+            if (mainOrFreeBalance >= amountRequired - FUND_ARRIVAL_TOLERANCE) {
+                arrivalWalletType = targetFromWallet;
+                availableAmount = mainOrFreeBalance;
+            }
+
+            if (!arrivalWalletType && toExchangeId === 'kucoinfutures') {
+                const tradeBalance = balanceData?.trade?.free?.USDT || 0;
+                if (tradeBalance >= amountRequired - FUND_ARRIVAL_TOLERANCE) {
+                    arrivalWalletType = 'trade';
+                    availableAmount = tradeBalance;
+                }
+            }
+
+            if (arrivalWalletType) {
+                safeLog('info', `[RETRY-TRANSFER] ✅ Tiền đã về ví '${arrivalWalletType}'! (Có ${availableAmount.toFixed(2)}). Chờ 3s...`);
                 await sleep(3000);
 
                 const finalBalanceData = await balanceCheckerExchange.fetchBalance();
-                const finalAvailableAmount = finalBalanceData?.free?.USDT || 0;
+                let finalAvailableAmount = 0;
+                if (arrivalWalletType === 'trade') {
+                    finalAvailableAmount = finalBalanceData?.trade?.free?.USDT || 0;
+                } else {
+                    finalAvailableAmount = finalBalanceData?.free?.USDT || 0;
+                }
 
                 if (finalAvailableAmount > 0) {
-                    safeLog('info', `Đang chuyển ${finalAvailableAmount.toFixed(2)} USDT từ ${targetFromWallet} sang ${targetToWallet} trên ${toExchangeId}.`);
-                    const preciseAmount = balanceCheckerExchange.currencyToPrecision('USDT', finalAvailableAmount);
-                    await internalTransfererExchange.transfer('USDT', parseFloat(preciseAmount), targetFromWallet, targetToWallet);
+                    safeLog('info', `Đang chuyển ${finalAvailableAmount.toFixed(2)} USDT từ ${arrivalWalletType} sang ${targetToWallet} trên ${toExchangeId}.`);
+                    await internalTransfererExchange.transfer('USDT', finalAvailableAmount, arrivalWalletType, targetToWallet);
                 
                     transferStatus = { inProgress: false, message: `✅ Hoàn tất chuyển tiền và nạp vào ví Future!` };
                     safeLog('info', `[RETRY-TRANSFER] Chuyển nội bộ thành công!`);
                     await updateBalances();
                     return;
                 } else {
-                     safeLog('warn', `[RETRY-TRANSFER] Số dư khả dụng là 0 sau khi chờ, không thể chuyển nội bộ.`);
+                     safeLog('warn', `[RETRY-TRANSFER] Số dư khả dụng trong ví '${arrivalWalletType}' là 0 sau khi chờ, không thể chuyển.`);
                 }
             } else {
-                safeLog('log', `[RETRY-TRANSFER] Lần ${i}/${maxRetries}: Chưa có đủ tiền trên ví ${targetFromWallet} của ${toExchangeId} (Có ${availableAmount.toFixed(2)} / Cần ${amountRequired.toFixed(2)}). Thử lại sau 20s.`);
+                const currentBalance = Math.max(balanceData?.free?.USDT || 0, balanceData?.trade?.free?.USDT || 0);
+                safeLog('log', `[RETRY-TRANSFER] Lần ${i}/${maxRetries}: Chưa có đủ tiền trên ví đích của ${toExchangeId} (Có ${currentBalance.toFixed(2)} / Cần ${amountRequired.toFixed(2)}). Thử lại...`);
             }
         } catch (e) {
             if (e instanceof ccxt.InsufficientFunds) {
-                safeLog('log', `[RETRY-TRANSFER] Lần ${i}/${maxRetries}: Lỗi không đủ tiền (có thể do API trễ hoặc sai instance), thử lại sau 20s.`);
+                safeLog('log', `[RETRY-TRANSFER] Lần ${i}/${maxRetries}: Lỗi không đủ tiền (API trễ), thử lại sau 20s.`);
             } else {
                 safeLog('error', `[RETRY-TRANSFER] Lỗi nghiêm trọng khi thử chuyển tiền nội bộ lần ${i}:`, e);
                 transferStatus = { inProgress: false, message: `Lỗi khi chuyển nội bộ: ${e.message}` };
