@@ -6,6 +6,7 @@ const ccxt = require('ccxt');
 const { usdtDepositAddressesByNetwork } = require('./balance.js');
 const {
     binanceApiKey, binanceApiSecret,
+    okxApiKey, okxApiSecret, okxPassword,
     bitgetApiKey, bitgetApiSecret, bitgetApiPassword,
     kucoinApiKey, kucoinApiSecret, kucoinApiPassword
 } = require('./config.js');
@@ -26,9 +27,9 @@ const FUND_TRANSFER_MIN_AMOUNT_KUCOIN = 1;
 const FUND_TRANSFER_MIN_AMOUNT_BITGET = 10;
 
 const MIN_TOTAL_CAPITAL_FOR_DISTRIBUTION = 5;
-const FUND_ARRIVAL_TOLERANCE = 2;
+const FUND_ARRIVAL_TOLERANCE = 2; 
 
-const ALL_POSSIBLE_EXCHANGE_IDS = ['binanceusdm', 'bitget', 'kucoinfutures', 'kucoin', 'binance'];
+const ALL_POSSIBLE_EXCHANGE_IDS = ['binanceusdm', 'bitget', 'okx', 'kucoinfutures', 'kucoin', 'binance'];
 const DISABLED_EXCHANGES = [];
 const activeExchangeIds = ALL_POSSIBLE_EXCHANGE_IDS.filter(id => !DISABLED_EXCHANGES.includes(id));
 
@@ -62,57 +63,49 @@ activeExchangeIds.forEach(id => {
     try {
         let exchangeClass, config = { 'enableRateLimit': true, 'verbose': false };
 
-        if (id === 'binanceusdm') {
-            exchangeClass = ccxt.binanceusdm;
-            config.apiKey = binanceApiKey;
-            config.secret = binanceApiSecret;
+        if (id === 'binanceusdm') { 
+            exchangeClass = ccxt.binanceusdm; 
+            config.apiKey = binanceApiKey; 
+            config.secret = binanceApiSecret; 
             config.options = { 'defaultType': 'swap' };
         } else if (id === 'binance') {
-            exchangeClass = ccxt.binance;
-            config.apiKey = binanceApiKey;
+            exchangeClass = ccxt.binance; 
+            config.apiKey = binanceApiKey; 
             config.secret = binanceApiSecret;
-        } else if (id === 'bitget') {
-            exchangeClass = ccxt.bitget;
-            config.apiKey = bitgetApiKey;
-            config.secret = bitgetApiSecret;
-            config.password = bitgetApiPassword;
+        } else if (id === 'okx') { 
+            exchangeClass = ccxt.okx; 
+            config.apiKey = okxApiKey; 
+            config.secret = okxApiSecret; 
+            config.password = okxPassword; 
             config.options = { 'defaultType': 'swap' };
-        } else if (id === 'kucoinfutures') {
-            exchangeClass = ccxt.kucoinfutures;
-            config.apiKey = kucoinApiKey;
-            config.secret = kucoinApiSecret;
-            config.password = kucoinApiPassword;
+        } else if (id === 'bitget') { 
+            exchangeClass = ccxt.bitget; 
+            config.apiKey = bitgetApiKey; 
+            config.secret = bitgetApiSecret; 
+            config.password = bitgetApiPassword; 
+            config.options = { 'defaultType': 'swap' };
+        } else if (id === 'kucoinfutures') { 
+            exchangeClass = ccxt.kucoinfutures; 
+            config.apiKey = kucoinApiKey; 
+            config.secret = kucoinApiSecret; 
+            config.password = kucoinApiPassword; 
         } else if (id === 'kucoin') {
-            exchangeClass = ccxt.kucoin;
-            config.apiKey = kucoinApiKey;
-            config.secret = kucoinApiSecret;
+            exchangeClass = ccxt.kucoin; 
+            config.apiKey = kucoinApiKey; 
+            config.secret = kucoinApiSecret; 
             config.password = kucoinApiPassword;
         }
-
-        if (exchangeClass && config.apiKey && config.secret) {
-            exchanges[id] = new exchangeClass(config);
-            safeLog('log', `[INIT] Khởi tạo sàn ${id.toUpperCase()} thành công.`);
-        } else if (exchangeClass) {
-            safeLog('warn', `[INIT] Bỏ qua ${id.toUpperCase()} do thiếu API Key/Secret.`);
+        
+        if (exchangeClass && config.apiKey && config.secret) { 
+            exchanges[id] = new exchangeClass(config); 
+            safeLog('log', `[INIT] Khởi tạo sàn ${id.toUpperCase()} thành công.`); 
+        } else if (exchangeClass) { 
+            safeLog('warn', `[INIT] Bỏ qua ${id.toUpperCase()} do thiếu API Key/Secret.`); 
         }
-    } catch (e) {
-        safeLog('error', `[INIT] Lỗi khi khởi tạo sàn ${id.toUpperCase()}: ${e}`);
+    } catch (e) { 
+        safeLog('error', `[INIT] Lỗi khi khởi tạo sàn ${id.toUpperCase()}: ${e}`); 
     }
 });
-
-(async () => {
-    safeLog('log', '[INIT] Bắt đầu tải trước (warm-up) dữ liệu markets cho tất cả các sàn...');
-    const marketLoadPromises = [];
-    for (const id in exchanges) {
-        marketLoadPromises.push(exchanges[id].loadMarkets());
-    }
-    try {
-        await Promise.all(marketLoadPromises);
-        safeLog('info', '[INIT] ✅ Tải trước toàn bộ markets thành công!');
-    } catch (e) {
-        safeLog('error', '[INIT] Lỗi khi tải trước markets:', e.message);
-    }
-})();
 
 function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
 
@@ -154,6 +147,9 @@ function getWithdrawParams(exchangeId, network) {
     if (exchangeId.includes('bitget')) {
         if (networkUpper === 'BEP20') return { chain: 'BEP20', network: 'BEP20' };
     }
+    if (exchangeId.includes('okx')) {
+        if (networkUpper === 'BEP20') return { chain: 'BEP20' };
+    }
     return { network: networkUpper };
 }
 
@@ -162,9 +158,9 @@ async function fetchAllBalances(type = 'future') {
     const allBalances = {};
     const tradingExchanges = activeExchangeIds.filter(id => id !== 'kucoin' && id !== 'binance');
     for (const id of tradingExchanges) {
-        if (!exchanges[id] || exchangeHealth[id].isDisabled) {
-            allBalances[id] = 0;
-            continue;
+        if (!exchanges[id] || exchangeHealth[id].isDisabled) { 
+            allBalances[id] = 0; 
+            continue; 
         }
         try {
             const balanceData = (id === 'kucoinfutures') ? await exchanges[id].fetchBalance() : await exchanges[id].fetchBalance({ 'type': type });
@@ -191,26 +187,26 @@ async function attemptInternalTransferOnArrival(toExchangeId, fromExchangeId, am
         amountRequired = amountSent - 0.5;
     }
 
-    let targetFromWallet = 'spot';
     let targetToWallet = 'future';
-    if (toExchangeId === 'kucoinfutures') targetFromWallet = 'main';
     if (toExchangeId === 'bitget') targetToWallet = 'swap';
 
     let checkerId = toExchangeId;
-    if (toExchangeId === 'kucoinfutures') checkerId = 'kucoin';
-    else if (toExchangeId === 'binanceusdm') checkerId = 'binance';
+    let transfererId = toExchangeId;
+
+    if (toExchangeId === 'kucoinfutures') {
+        checkerId = 'kucoin'; 
+        transfererId = 'kucoinfutures'; 
+    } else if (toExchangeId === 'binanceusdm') {
+        checkerId = 'binance';
+        transfererId = 'binanceusdm';
+    }
     
     const balanceCheckerExchange = exchanges[checkerId];
-    if (!balanceCheckerExchange) {
-        safeLog('error', `[RETRY-TRANSFER] Không tìm thấy instance ${checkerId} để kiểm tra số dư.`);
-        transferStatus = { inProgress: false, message: `Lỗi nghiêm trọng: Thiếu instance ${checkerId}` };
-        return;
-    }
+    const internalTransfererExchange = exchanges[transfererId];
 
-    const internalTransfererExchange = exchanges[toExchangeId];
-    if (!internalTransfererExchange) {
-        safeLog('error', `[RETRY-TRANSFER] Không tìm thấy instance ${toExchangeId} để chuyển tiền nội bộ.`);
-        transferStatus = { inProgress: false, message: `Lỗi nghiêm trọng: Thiếu instance ${toExchangeId}` };
+    if (!balanceCheckerExchange || !internalTransfererExchange) {
+        safeLog('error', `[RETRY-TRANSFER] Không tìm thấy instance sàn cần thiết (${checkerId} or ${transfererId}).`);
+        transferStatus = { inProgress: false, message: `Lỗi nghiêm trọng: Thiếu instance sàn.` };
         return;
     }
 
@@ -222,14 +218,15 @@ async function attemptInternalTransferOnArrival(toExchangeId, fromExchangeId, am
             let arrivalWalletType = null;
             let availableAmount = 0;
 
-            const mainOrFreeBalance = balanceData?.free?.USDT || 0;
-            if (mainOrFreeBalance >= amountRequired - FUND_ARRIVAL_TOLERANCE) {
-                arrivalWalletType = targetFromWallet;
-                availableAmount = mainOrFreeBalance;
+            const mainBalance = balanceData?.free?.USDT || 0;
+            if (mainBalance >= amountRequired - FUND_ARRIVAL_TOLERANCE) {
+                arrivalWalletType = 'main'; 
+                if (toExchangeId === 'binanceusdm') arrivalWalletType = 'spot';
+                availableAmount = mainBalance;
             }
 
-            if (!arrivalWalletType && toExchangeId === 'kucoinfutures') {
-                const tradeBalance = balanceData?.trade?.free?.USDT || 0;
+            if (!arrivalWalletType && toExchangeId === 'kucoinfutures' && balanceData.trade) {
+                const tradeBalance = balanceData.trade.free?.USDT || 0;
                 if (tradeBalance >= amountRequired - FUND_ARRIVAL_TOLERANCE) {
                     arrivalWalletType = 'trade';
                     availableAmount = tradeBalance;
@@ -242,10 +239,11 @@ async function attemptInternalTransferOnArrival(toExchangeId, fromExchangeId, am
 
                 const finalBalanceData = await balanceCheckerExchange.fetchBalance();
                 let finalAvailableAmount = 0;
-                if (arrivalWalletType === 'trade') {
-                    finalAvailableAmount = finalBalanceData?.trade?.free?.USDT || 0;
+
+                if (arrivalWalletType === 'trade' && finalBalanceData.trade) {
+                    finalAvailableAmount = finalBalanceData.trade.free?.USDT || 0;
                 } else {
-                    finalAvailableAmount = finalBalanceData?.free?.USDT || 0;
+                    finalAvailableAmount = finalBalanceData.free?.USDT || 0;
                 }
 
                 if (finalAvailableAmount > 0) {
@@ -260,7 +258,7 @@ async function attemptInternalTransferOnArrival(toExchangeId, fromExchangeId, am
                      safeLog('warn', `[RETRY-TRANSFER] Số dư khả dụng trong ví '${arrivalWalletType}' là 0 sau khi chờ, không thể chuyển.`);
                 }
             } else {
-                const currentBalance = Math.max(balanceData?.free?.USDT || 0, balanceData?.trade?.free?.USDT || 0);
+                 const currentBalance = Math.max(balanceData?.free?.USDT || 0, balanceData?.trade?.free?.USDT || 0);
                 safeLog('log', `[RETRY-TRANSFER] Lần ${i}/${maxRetries}: Chưa có đủ tiền trên ví đích của ${toExchangeId} (Có ${currentBalance.toFixed(2)} / Cần ${amountRequired.toFixed(2)}). Thử lại...`);
             }
         } catch (e) {
@@ -277,6 +275,7 @@ async function attemptInternalTransferOnArrival(toExchangeId, fromExchangeId, am
     safeLog('error', `[RETRY-TRANSFER] ❌ HẾT SỐ LẦN THỬ! Không thể chuyển tiền nội bộ trên ${toExchangeId} sau ${maxRetries} lần.`);
     transferStatus = { inProgress: false, message: `Lỗi: Hết lần thử chuyển tiền nội bộ trên ${toExchangeId}.` };
 }
+
 
 async function executeSingleFundTransfer(fromExchangeId, toExchangeId, amount) {
     transferStatus = { inProgress: true, message: `Bắt đầu chuyển ${amount.toFixed(2)} USDT từ ${fromExchangeId} -> ${toExchangeId}.` };
@@ -295,7 +294,6 @@ async function executeSingleFundTransfer(fromExchangeId, toExchangeId, amount) {
 
         let networkLookupKey = 'BEP20';
         let withdrawerExchange = sourceExchange;
-        
         if (fromExchangeId === 'kucoinfutures') {
             networkLookupKey = 'APTOS';
             withdrawerExchange = exchanges['kucoin'];
@@ -340,7 +338,7 @@ async function manageFundDistribution(opportunity) {
     safeLog('log', `[CAPITAL] Tổng vốn: ${totalCapital.toFixed(2)} USDT. Mục tiêu mỗi sàn: ${targetPerExchange.toFixed(2)} USDT.`);
 
     for (const targetEx of tradingExchanges) {
-        if (targetEx === HUB_EXCHANGE_ID) continue;
+        if (targetEx === HUB_EXCHANGE_ID) continue; 
         
         const currentBalance = allFutBalances[targetEx] || 0;
         const amountNeeded = targetPerExchange - currentBalance;
@@ -369,7 +367,7 @@ async function returnFundsToHub() {
     const nonHubExchanges = activeExchangeIds.filter(id => id !== HUB_EXCHANGE_ID && exchanges[id] && id !== 'kucoin' && id !== 'binance');
     
     for (const exId of nonHubExchanges) {
-        await sleep(2000);
+        await sleep(2000); 
         try {
             const exchange = exchanges[exId];
             const fromWallet = (exId === 'bitget') ? 'swap' : 'future';
@@ -451,48 +449,8 @@ async function setLeverageSafely(exchange, symbol, desiredLeverage) {
     }
 }
 
-async function prepareForTrade(opportunity) {
-    const { coin, commonLeverage: desiredLeverage } = opportunity;
-    const { shortExchange, longExchange } = opportunity.details;
-    const shortEx = exchanges[shortExchange];
-    const longEx = exchanges[longExchange];
-
-    try {
-        safeLog('log', `[PREPARE] Bắt đầu chuẩn bị cho giao dịch ${coin} giữa ${shortExchange} và ${longExchange}.`);
-
-        const shortSymbol = await getExchangeSpecificSymbol(shortEx, coin);
-        const longSymbol = await getExchangeSpecificSymbol(longEx, coin);
-        if (!shortSymbol || !longSymbol) {
-            throw new Error(`Không tìm thấy symbol ${coin} trên một trong hai sàn.`);
-        }
-
-        const [actualShortLeverage, actualLongLeverage] = await Promise.all([
-            setLeverageSafely(shortEx, shortSymbol, desiredLeverage),
-            setLeverageSafely(longEx, longSymbol, desiredLeverage)
-        ]);
-        if (!actualShortLeverage || !actualLongLeverage) {
-            throw new Error('Không thể cài đặt đòn bẩy trên một trong hai sàn.');
-        }
-        
-        const leverageToUse = Math.min(actualShortLeverage, actualLongLeverage);
-
-        opportunity.preparedData = {
-            shortSymbol,
-            longSymbol,
-            leverageToUse
-        };
-        
-        safeLog('info', `[PREPARE] ✅ Chuẩn bị thành công cho ${coin}. Đòn bẩy hiệu dụng: x${leverageToUse}.`);
-        return true;
-
-    } catch (e) {
-        safeLog('error', `[PREPARE] Lỗi nghiêm trọng khi chuẩn bị cho giao dịch ${coin}:`, e.message);
-        opportunity.preparedData = null;
-        return false;
-    }
-}
-
 async function computeOrderDetails(exchange, symbol, targetNotionalUSDT, leverage, availableBalance) {
+    await exchange.loadMarkets();
     const market = exchange.market(symbol);
     const ticker = await exchange.fetchTicker(symbol);
     const price = ticker?.last || ticker?.close;
@@ -563,14 +521,8 @@ async function placeTpSlOrders(exchange, symbol, side, amount, entryPrice, colla
 }
 
 async function executeTrades(opportunity, percentageToUse) {
-    if (!opportunity.preparedData) {
-        safeLog('error', `[TRADE] Hủy bỏ giao dịch do quá trình chuẩn bị trước đó đã thất bại.`);
-        return false;
-    }
-
-    const { coin } = opportunity;
+    const { coin, commonLeverage: desiredLeverage } = opportunity;
     const { shortExchange, longExchange } = opportunity.details;
-    const { shortSymbol, longSymbol, leverageToUse } = opportunity.preparedData;
     
     await updateBalances();
     const shortEx = exchanges[shortExchange], longEx = exchanges[longExchange];
@@ -585,6 +537,17 @@ async function executeTrades(opportunity, percentageToUse) {
         return false;
     }
 
+    const shortSymbol = await getExchangeSpecificSymbol(shortEx, coin);
+    const longSymbol = await getExchangeSpecificSymbol(longEx, coin);
+    if (!shortSymbol || !longSymbol) {
+        safeLog('warn', `[TRADE] Không tìm thấy symbol ${coin} trên một trong hai sàn.`);
+        return false;
+    }
+
+    const [actualShortLeverage, actualLongLeverage] = await Promise.all([ setLeverageSafely(shortEx, shortSymbol, desiredLeverage), setLeverageSafely(longEx, longSymbol, desiredLeverage) ]);
+    if (!actualShortLeverage || !actualLongLeverage) return false;
+    const leverageToUse = Math.min(actualShortLeverage, actualLongLeverage);
+
     let shortOrderDetails, longOrderDetails;
     try {
         const targetNotional = collateral * leverageToUse;
@@ -593,11 +556,9 @@ async function executeTrades(opportunity, percentageToUse) {
             computeOrderDetails(longEx, longSymbol, targetNotional, leverageToUse, longBalance)
         ]);
     } catch (e) {
-        safeLog('error', `[EXECUTE] Lỗi khi tính toán chi tiết lệnh cuối cùng:`, e.message);
+        safeLog('error', `[PREPARE] Lỗi khi chuẩn bị lệnh:`, e.message);
         return false;
     }
-
-    safeLog('info', `[EXECUTE] 🔥 KÍCH HOẠT LỆNH! Short ${shortOrderDetails.amount} ${coin} trên ${shortExchange} | Long ${longOrderDetails.amount} ${coin} trên ${longExchange}.`);
 
     let shortOrder, longOrder;
     try {
@@ -606,7 +567,7 @@ async function executeTrades(opportunity, percentageToUse) {
             longEx.createMarketBuyOrder(longSymbol, longOrderDetails.amount, (longEx.id === 'kucoinfutures' ? {'marginMode':'cross'} : {}))
         ]);
     } catch (e) {
-        safeLog('error', `[EXECUTE] Mở lệnh chính thất bại:`, e);
+        safeLog('error', `[TRADE] Mở lệnh chính thất bại:`, e);
         return false;
     }
 
@@ -746,32 +707,19 @@ async function mainBotLoop() {
 
             if (opportunityToExecute) {
                 selectedOpportunityForNextTrade = opportunityToExecute;
-                safeLog('info', `[TIMER] ✅ Đã chọn cơ hội: ${selectedOpportunityForNextTrade.coin} trên ${selectedOpportunityForNextTrade.exchanges}.`);
-                Promise.all([
-                    manageFundDistribution(selectedOpportunityForNextTrade),
-                    prepareForTrade(selectedOpportunityForNextTrade)
-                ]);
+                safeLog('info', `[TIMER] ✅ Đã chọn cơ hội: ${selectedOpportunityForNextTrade.coin} trên ${selectedOpportunityForNextTrade.exchanges}. Bắt đầu gom vốn.`);
+                await manageFundDistribution(selectedOpportunityForNextTrade);
             } else if (!hasLoggedNotFoundThisHour) {
                 safeLog('log', "[TIMER] Không tìm thấy cơ hội nào hợp lệ tại phút 50.");
                 hasLoggedNotFoundThisHour = true;
             }
         }
-        else if (capitalManagementState === 'FUNDS_READY' && selectedOpportunityForNextTrade) {
-            if (selectedOpportunityForNextTrade.isManualTest) {
-                safeLog('info', `[MANUAL-TEST] Vốn đã sẵn sàng. Thực hiện giao dịch test cho ${selectedOpportunityForNextTrade.coin}.`);
-                const success = await executeTrades(selectedOpportunityForNextTrade, selectedOpportunityForNextTrade.percentageToUse);
-                if (!success) {
-                    safeLog('error', "[MANUAL-TEST] Lỗi khi vào lệnh test. Bắt đầu dọn dẹp vốn.");
-                    await returnFundsToHub();
-                }
-            }
-            else if (currentMinute === 59) {
-                safeLog('log', `[TIMER] Phút 59: Thực hiện giao dịch cho ${selectedOpportunityForNextTrade.coin}.`);
-                const success = await executeTrades(selectedOpportunityForNextTrade, currentPercentageToUse);
-                if (!success) {
-                    safeLog('error', "[TIMER] Lỗi khi vào lệnh. Bắt đầu dọn dẹp vốn.");
-                    await returnFundsToHub();
-                }
+        else if (capitalManagementState === 'FUNDS_READY' && currentMinute === 59) {
+            safeLog('log', `[TIMER] Phút 59: Thực hiện giao dịch cho ${selectedOpportunityForNextTrade.coin}.`);
+            const success = await executeTrades(selectedOpportunityForNextTrade, currentPercentageToUse);
+            if (!success) {
+                safeLog('error', "[TIMER] Lỗi khi vào lệnh. Bắt đầu dọn dẹp vốn.");
+                await returnFundsToHub();
             }
         }
         else if (capitalManagementState === 'TRADE_OPEN' && currentMinute === 0 && currentSecond >= 5 && currentSecond < 15) {
@@ -832,12 +780,12 @@ const botServer = http.createServer(async (req, res) => {
                 res.end(err ? 'Lỗi đọc file index.html' : content);
             });
         } else if (url === '/bot-api/status' && method === 'GET') {
-            const transferExchanges = ['binanceusdm', 'bitget', 'kucoinfutures'];
+             const transferExchanges = ['binanceusdm', 'bitget', 'kucoinfutures'];
             const internalTransferExchanges = activeExchangeIds.filter(id => exchanges[id] && id !== 'kucoin' && id !== 'binance');
             res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({
-                botState, capitalManagementState, balances, tradeHistory,
-                bestPotentialOpportunityForDisplay, currentTradeDetails,
+            res.end(JSON.stringify({ 
+                botState, capitalManagementState, balances, tradeHistory, 
+                bestPotentialOpportunityForDisplay, currentTradeDetails, 
                 exchangeHealth, transferStatus, transferExchanges, internalTransferExchanges,
                 activeExchangeIds: internalTransferExchanges
             }));
@@ -847,30 +795,17 @@ const botServer = http.createServer(async (req, res) => {
         } else if (url === '/bot-api/stop' && method === 'POST') {
              res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ success: stopBot(), message: 'Đã gửi yêu cầu dừng bot.' }));
         } else if (url === '/bot-api/custom-test-trade' && method === 'POST') {
-            if (capitalManagementState !== 'IDLE') {
-                return res.writeHead(409, { 'Content-Type': 'application/json' }).end(JSON.stringify({ success: false, message: `Bot đang bận với tác vụ '${capitalManagementState}'. Không thể test.` }));
-            }
-            if (!bestPotentialOpportunityForDisplay) {
-                return res.writeHead(400, { 'Content-Type': 'application/json' }).end(JSON.stringify({ success: false, message: 'Chưa có cơ hội nào để test.' }));
-            }
-            try {
-                const data = JSON.parse(body);
-                selectedOpportunityForNextTrade = {
-                    coin: bestPotentialOpportunityForDisplay.coin,
-                    commonLeverage: parseInt(data.leverage, 10) || 20,
-                    details: { shortExchange: data.shortExchange, longExchange: data.longExchange },
-                    isManualTest: true,
-                    percentageToUse: parseFloat(data.percentage) || 50
-                };
-                safeLog('info', `[MANUAL-TEST] Nhận yêu cầu test thủ công cho ${selectedOpportunityForNextTrade.coin}. Bắt đầu gom vốn và chuẩn bị.`);
-                Promise.all([
-                    manageFundDistribution(selectedOpportunityForNextTrade),
-                    prepareForTrade(selectedOpportunityForNextTrade)
-                ]);
-                res.writeHead(202, { 'Content-Type': 'application/json' }).end(JSON.stringify({ success: true, message: 'Đã nhận yêu cầu Test. Bot đang gom vốn và chuẩn bị, sẽ tự động vào lệnh khi sẵn sàng.' }));
-            } catch(e) {
-                res.writeHead(400, { 'Content-Type': 'application/json' }).end(JSON.stringify({ success: false, message: 'Dữ liệu yêu cầu không hợp lệ.' }));
-            }
+            if (currentTradeDetails) return res.writeHead(409, { 'Content-Type': 'application/json' }).end(JSON.stringify({ success: false, message: 'Bot đang bận với một giao dịch.' }));
+            if (!bestPotentialOpportunityForDisplay) return res.writeHead(400, { 'Content-Type': 'application/json' }).end(JSON.stringify({ success: false, message: 'Chưa có cơ hội nào.' }));
+            
+            const data = JSON.parse(body);
+            const testOpportunity = {
+                coin: bestPotentialOpportunityForDisplay?.coin,
+                commonLeverage: parseInt(data.leverage, 10) || 20,
+                details: { shortExchange: data.shortExchange, longExchange: data.longExchange }
+            };
+            const tradeSuccess = await executeTrades(testOpportunity, parseFloat(data.percentage));
+            res.writeHead(tradeSuccess ? 200 : 500, { 'Content-Type': 'application/json' }).end(JSON.stringify({ success: tradeSuccess, message: tradeSuccess ? 'Lệnh Test đã được gửi.' : 'Lỗi khi gửi lệnh Test.' }));
         }
         else if (url === '/bot-api/close-trade-now' && method === 'POST') {
             const success = await closeTradeNow();
@@ -911,9 +846,9 @@ const botServer = http.createServer(async (req, res) => {
             } else if (exchangeId === 'kucoinfutures' || exchangeId === 'kucoin') {
                 if (from === 'spot') from = 'main';
                 if (to === 'spot') to = 'main';
-                if (from === 'main') exchange = exchanges['kucoin'];
+                if (from === 'main') exchange = exchanges['kucoin']; // Use spot instance
             } else if (exchangeId === 'binanceusdm' || exchangeId === 'binance') {
-                if (from === 'spot') exchange = exchanges['binance'];
+                if (from === 'spot') exchange = exchanges['binance']; // Use spot instance
             }
         
             try {
