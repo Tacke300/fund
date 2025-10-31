@@ -1,6 +1,6 @@
 const http = require('http');
 const fs = require('fs');
-const path = require('path');
+const path = path.path');
 const ccxt = require('ccxt');
 
 const { usdtDepositAddressesByNetwork } = require('./balance.js');
@@ -28,7 +28,6 @@ const FUND_TRANSFER_MIN_AMOUNT_BITGET = 10;
 const MIN_TOTAL_CAPITAL_FOR_DISTRIBUTION = 5;
 const FUND_ARRIVAL_TOLERANCE = 2;
 
-// Đã loại bỏ 'okx' khỏi danh sách
 const ALL_POSSIBLE_EXCHANGE_IDS = ['binanceusdm', 'bitget', 'kucoinfutures', 'kucoin', 'binance'];
 const DISABLED_EXCHANGES = [];
 const activeExchangeIds = ALL_POSSIBLE_EXCHANGE_IDS.filter(id => !DISABLED_EXCHANGES.includes(id));
@@ -89,8 +88,6 @@ activeExchangeIds.forEach(id => {
             config.secret = kucoinApiSecret;
             config.password = kucoinApiPassword;
         }
-        
-        // Đã xóa khối logic khởi tạo cho OKX
 
         if (exchangeClass && config.apiKey && config.secret) {
             exchanges[id] = new exchangeClass(config);
@@ -157,7 +154,6 @@ function getWithdrawParams(exchangeId, network) {
     if (exchangeId.includes('bitget')) {
         if (networkUpper === 'BEP20') return { chain: 'BEP20', network: 'BEP20' };
     }
-    // Đã xóa khối logic cho OKX
     return { network: networkUpper };
 }
 
@@ -198,35 +194,41 @@ async function attemptInternalTransferOnArrival(toExchangeId, fromExchangeId, am
     let targetFromWallet = 'spot', targetToWallet = 'future';
     if (toExchangeId === 'kucoinfutures') targetFromWallet = 'main';
     if (toExchangeId === 'bitget') targetToWallet = 'swap';
-    // Đã xóa dòng if cho OKX
 
     let checkerId = toExchangeId;
     if (toExchangeId === 'kucoinfutures') checkerId = 'kucoin';
     else if (toExchangeId === 'binanceusdm') checkerId = 'binance';
     
-    const internalTransfererExchange = exchanges[checkerId];
-    if (!internalTransfererExchange) {
-        safeLog('error', `[RETRY-TRANSFER] Không tìm thấy instance ${checkerId} để chuyển tiền nội bộ.`);
+    const balanceCheckerExchange = exchanges[checkerId];
+    if (!balanceCheckerExchange) {
+        safeLog('error', `[RETRY-TRANSFER] Không tìm thấy instance ${checkerId} để kiểm tra số dư.`);
         transferStatus = { inProgress: false, message: `Lỗi nghiêm trọng: Thiếu instance ${checkerId}` };
+        return;
+    }
+
+    const internalTransfererExchange = exchanges[toExchangeId];
+    if (!internalTransfererExchange) {
+        safeLog('error', `[RETRY-TRANSFER] Không tìm thấy instance ${toExchangeId} để chuyển tiền nội bộ.`);
+        transferStatus = { inProgress: false, message: `Lỗi nghiêm trọng: Thiếu instance ${toExchangeId}` };
         return;
     }
 
     for (let i = 1; i <= maxRetries; i++) {
         await sleep(retryIntervalMs);
         try {
-            const balanceData = await internalTransfererExchange.fetchBalance();
+            const balanceData = await balanceCheckerExchange.fetchBalance();
             const availableAmount = balanceData?.free?.USDT || 0;
 
             if (availableAmount >= amountRequired - FUND_ARRIVAL_TOLERANCE) {
                 safeLog('info', `[RETRY-TRANSFER] ✅ Tiền đã về! (Có ${availableAmount.toFixed(2)} / Cần >= ${amountRequired - FUND_ARRIVAL_TOLERANCE}). Chờ 3s để sàn ổn định...`);
                 await sleep(3000);
 
-                const finalBalanceData = await internalTransfererExchange.fetchBalance();
+                const finalBalanceData = await balanceCheckerExchange.fetchBalance();
                 const finalAvailableAmount = finalBalanceData?.free?.USDT || 0;
 
                 if (finalAvailableAmount > 0) {
                     safeLog('info', `Đang chuyển ${finalAvailableAmount.toFixed(2)} USDT từ ${targetFromWallet} sang ${targetToWallet} trên ${toExchangeId}.`);
-                    const preciseAmount = internalTransfererExchange.currencyToPrecision('USDT', finalAvailableAmount);
+                    const preciseAmount = balanceCheckerExchange.currencyToPrecision('USDT', finalAvailableAmount);
                     await internalTransfererExchange.transfer('USDT', parseFloat(preciseAmount), targetFromWallet, targetToWallet);
                 
                     transferStatus = { inProgress: false, message: `✅ Hoàn tất chuyển tiền và nạp vào ví Future!` };
@@ -241,7 +243,7 @@ async function attemptInternalTransferOnArrival(toExchangeId, fromExchangeId, am
             }
         } catch (e) {
             if (e instanceof ccxt.InsufficientFunds) {
-                safeLog('log', `[RETRY-TRANSFER] Lần ${i}/${maxRetries}: Lỗi không đủ tiền (có thể do API trễ), thử lại sau 20s.`);
+                safeLog('log', `[RETRY-TRANSFER] Lần ${i}/${maxRetries}: Lỗi không đủ tiền (có thể do API trễ hoặc sai instance), thử lại sau 20s.`);
             } else {
                 safeLog('error', `[RETRY-TRANSFER] Lỗi nghiêm trọng khi thử chuyển tiền nội bộ lần ${i}:`, e);
                 transferStatus = { inProgress: false, message: `Lỗi khi chuyển nội bộ: ${e.message}` };
@@ -264,7 +266,6 @@ async function executeSingleFundTransfer(fromExchangeId, toExchangeId, amount) {
         let fromWallet = 'future', toWallet = 'spot';
         if (fromExchangeId === 'bitget') fromWallet = 'swap';
         if (fromExchangeId === 'kucoinfutures') toWallet = 'main';
-        // Đã xóa dòng if cho OKX
         
         transferStatus.message = `1/2: Chuyển ${amount.toFixed(2)} USDT sang ví ${toWallet} trên ${fromExchangeId}...`;
         await sourceExchange.transfer('USDT', amount, fromWallet, toWallet);
@@ -273,7 +274,6 @@ async function executeSingleFundTransfer(fromExchangeId, toExchangeId, amount) {
         let networkLookupKey = 'BEP20';
         let withdrawerExchange = sourceExchange;
         
-        // Đã xóa logic || fromExchangeId === 'okx'
         if (fromExchangeId === 'kucoinfutures') {
             networkLookupKey = 'APTOS';
             withdrawerExchange = exchanges['kucoin'];
@@ -810,7 +810,6 @@ const botServer = http.createServer(async (req, res) => {
                 res.end(err ? 'Lỗi đọc file index.html' : content);
             });
         } else if (url === '/bot-api/status' && method === 'GET') {
-            // Đã loại bỏ 'okx' khỏi danh sách
             const transferExchanges = ['binanceusdm', 'bitget', 'kucoinfutures'];
             const internalTransferExchanges = activeExchangeIds.filter(id => exchanges[id] && id !== 'kucoin' && id !== 'binance');
             res.writeHead(200, { 'Content-Type': 'application/json' });
