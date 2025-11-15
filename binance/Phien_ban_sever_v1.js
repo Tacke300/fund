@@ -12,7 +12,7 @@ const port = 9000;
 const BINANCE_FAPI_BASE_URL = 'fapi.binance.com';
 const BINANCE_WS_URL = 'wss://fstream.binance.com/stream?streams=';
 
-const WINDOW_MINUTES = 5;
+const WINDOW_MINUTES = 30;
 let coinData = {};
 let topRankedCoinsForApi = [];
 let allSymbols = [];
