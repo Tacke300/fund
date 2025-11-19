@@ -69,21 +69,10 @@ class CriticalApiError extends Error {
 const MIN_USDT_BALANCE_TO_OPEN = 0.1; 
 
 // SỐ PHẦN TRĂM CỦA TÀI KHOẢN USDT KHẢ DỤNG SẼ DÙNG CHO MỖI LỆNH
-const PERCENT_ACCOUNT_PER_TRADE = 0.5; // 1 = 100% (All-in)
+const PERCENT_ACCOUNT_PER_TRADE = 1; // 1 = 100% (All-in)
 
-// Bảng ánh xạ maxLeverage với Target ROE gốc (Sẽ được nhân 3 trong logic).
-// Ví dụ: 0.15 (15%) * 3 = 45% ROE
-const TAKE_PROFIT_PERCENTAGES = {
-    20: 0.15,  
-    25: 0.15,  
-    50: 0.18,  
-    75: 0.2,  
-    100: 0.25, 
-    125: 0.33, 
-};
-
-// --- ĐIỀU KIỆN FUNDING ---
-const MIN_FUNDING_RATE_THRESHOLD = -0.3; 
+// --- [THAY ĐỔI 1] ĐIỀU KIỆN FUNDING MỚI ---
+const MIN_FUNDING_RATE_THRESHOLD = -0.1; // Sửa thành -0.1
 
 // Thời gian tối đa giữ một vị thế (ví dụ: 180 giây = 3 phút)
 const MAX_POSITION_LIFETIME_SECONDS = 180; 
@@ -115,7 +104,6 @@ const THIS_BOT_PM2_NAME = 'befor';
 
 // --- HÀM TIỆN ÍCH ---
 
-// Hàm addLog lưu RAM
 function addLog(message, isImportant = false) {
     const now = new Date();
     const time = `${now.toLocaleDateString('en-GB')} ${now.toLocaleTimeString('en-US', { hour12: false })}.${String(now.getMilliseconds()).padStart(3, '0')}`;
@@ -305,7 +293,7 @@ async function openLongPreFunding(symbol, maxLeverage, availableBalance) {
 
         addLog(`✅ Đã mở LONG lót đường ${symbol}. Qty: ${quantity}`, true);
 
-        // SL Long vẫn giữ 100% theo yêu cầu trước
+        // SL Long vẫn giữ 100%
         const slPriceRaw = currentPrice - (initialMargin / quantity);
         const slPrice = Math.floor(slPriceRaw / symbolInfo.tickSize) * symbolInfo.tickSize;
 
@@ -417,7 +405,7 @@ function stopCountdownFrontend() {
     currentCountdownMessage = "Không có lệnh.";
 }
 
-// --- HÀM MỞ LỆNH SHORT CHÍNH (ĐÃ SỬA LOGIC TP/SL THEO ROE X3) ---
+// --- HÀM MỞ LỆNH SHORT CHÍNH (ĐÃ CẬP NHẬT TP/SL THEO YÊU CẦU MỚI) ---
 async function openShortPosition(symbol, fundingRate, usdtBalance, maxLeverage) {
     addLog(`>>> Mở SHORT ${symbol} (FR: ${fundingRate})...`, true);
     try {
@@ -441,23 +429,29 @@ async function openShortPosition(symbol, fundingRate, usdtBalance, maxLeverage) 
         const entryPrice = parseFloat(orderRes.avgFillPrice || currentPrice);
         addLog(`✅ Đã mở SHORT ${symbol} @ ${entryPrice}`, true);
 
-        // 3. TÍNH TOÁN TP VÀ SL THEO ROE (X3)
-        // Lấy % gốc (ví dụ 0.15)
-        const baseTpPercent = TAKE_PROFIT_PERCENTAGES[maxLeverage] || 0.1;
+        // 3. TÍNH TOÁN TP VÀ SL THEO YÊU CẦU MỚI
+        // - Nếu FR <= -0.5 -> TP 50%
+        // - Nếu FR -0.1 đến -0.499 -> TP 30%
+        // - SL luôn là 100%
         
-        // Nhân 3 lên theo yêu cầu (ví dụ 0.15 * 3 = 0.45 hay 45% ROE)
-        const targetRoe = baseTpPercent * 3;
-        
-        // Quy đổi ROE ra % biến động giá cần thiết: PriceMove = ROE / Leverage
-        const priceMovePercent = targetRoe / maxLeverage;
+        let targetRoe = 0.30; // Mặc định 30% (cho range -0.1 đến -0.499)
+        if (fundingRate <= -0.5) {
+            targetRoe = 0.50; // 50% nếu âm sâu hơn -0.5
+        }
 
-        // Tính giá TP (Short thì giá giảm -> trừ đi)
-        const tpPrice = parseFloat((entryPrice * (1 - priceMovePercent)).toFixed(symbolInfo.pricePrecision));
+        const stopLossRoe = 1.0; // 100% SL cho mọi trường hợp
 
-        // Tính giá SL (Short thì giá tăng -> cộng vào) - SL bằng TP (theo ROE)
-        const slPrice = parseFloat((entryPrice * (1 + priceMovePercent)).toFixed(symbolInfo.pricePrecision));
+        // Tính % biến động giá cần thiết = ROE / Leverage
+        const tpMovePercent = targetRoe / maxLeverage;
+        const slMovePercent = stopLossRoe / maxLeverage;
 
-        addLog(`>>> Cài đặt: Target ROE ${targetRoe * 100}% | SL/TP Price Move: ${(priceMovePercent * 100).toFixed(2)}%`, true);
+        // Tính giá TP (Short -> Giá giảm)
+        const tpPrice = parseFloat((entryPrice * (1 - tpMovePercent)).toFixed(symbolInfo.pricePrecision));
+
+        // Tính giá SL (Short -> Giá tăng)
+        const slPrice = parseFloat((entryPrice * (1 + slMovePercent)).toFixed(symbolInfo.pricePrecision));
+
+        addLog(`>>> Cài đặt: TP ${targetRoe * 100}% | SL ${stopLossRoe * 100}% (ROE)`, true);
         addLog(`>>> TP @ ${tpPrice} | SL @ ${slPrice}`, true);
 
         try {
@@ -522,6 +516,7 @@ async function runTradingLogic() {
 
         for (const item of allFunding) {
             const fr = parseFloat(item.lastFundingRate);
+            // [THAY ĐỔI] Điều kiện funding mới: <= -0.1
             if (fr <= MIN_FUNDING_RATE_THRESHOLD && item.symbol.endsWith('USDT')) {
                 const timeLeftMin = (item.nextFundingTime - now) / 60000;
                 if (timeLeftMin > 0 && timeLeftMin <= FUNDING_WINDOW_MINUTES) {
@@ -566,7 +561,7 @@ async function runTradingLogic() {
                 scheduleNextMainCycle();
             }
         } else {
-            addLog('⚠️ Không tìm thấy coin FR <= -0.3%.', true);
+            addLog('⚠️ Không tìm thấy coin FR <= -0.1%.', true);
             scheduleNextMainCycle();
         }
 
