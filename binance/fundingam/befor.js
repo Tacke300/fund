@@ -11,7 +11,6 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // --- CẤU HÌNH API KEY VÀ SECRET KEY ---
-// (Dùng API Key của tài khoản 0.59$)
 const API_KEY = 'cZ1Y2O0kggVEggEaPvhFcYQHS5b1EsT2OWZb8zdY9C0jGqNROvXRZHTJjnQ7OG4Q'.trim(); 
 const SECRET_KEY = 'oU6pZFHgEvbpD9NmFXp5ZVnYFMQ7EIkBiz88aTzvmC3SpT9nEf4fcDf0pEnFzoTc'.trim(); 
 
@@ -58,7 +57,7 @@ class CriticalApiError extends Error {
 // --- CẤU HÌNH BOT ---
 const MIN_USDT_BALANCE_TO_OPEN = 0.1; 
 
-// 0.5 = 50% VỐN (ĐÚNG)
+// 0.5 = 50% VỐN
 const PERCENT_ACCOUNT_PER_TRADE = 0.5; 
 
 // -0.1% = -0.001 trên API
@@ -274,7 +273,14 @@ async function logBestCandidate() {
         }
 
         if (candidates.length > 0) {
-            candidates.sort((a, b) => a.fr - b.fr);
+            // SẮP XẾP: Ưu tiên Thời gian trước, sau đó mới đến Funding Rate
+            candidates.sort((a, b) => {
+                if (a.time !== b.time) {
+                    return a.time - b.time; 
+                }
+                return a.fr - b.fr;
+            });
+
             const topCoin = candidates[0];
             let leverage = await getLeverageBracketForSymbol(topCoin.symbol);
             if (!leverage) leverage = 20; 
@@ -306,6 +312,7 @@ async function openLongPreFunding(symbol, maxLeverage, availableBalance) {
         quantity = Math.floor(quantity / symbolInfo.stepSize) * symbolInfo.stepSize;
         quantity = parseFloat(quantity.toFixed(symbolInfo.quantityPrecision));
 
+        // Hedge Mode: Phải có positionSide: 'LONG'
         await callSignedAPI('/fapi/v1/order', 'POST', {
             symbol: symbol, side: 'BUY', positionSide: 'LONG', type: 'MARKET', quantity: quantity
         });
@@ -316,6 +323,7 @@ async function openLongPreFunding(symbol, maxLeverage, availableBalance) {
         const slPrice = Math.floor(slPriceRaw / symbolInfo.tickSize) * symbolInfo.tickSize;
 
         try {
+            // Hedge Mode: Đóng Long là SELL + positionSide: 'LONG'
             await callSignedAPI('/fapi/v1/order', 'POST', {
                 symbol: symbol, side: 'SELL', positionSide: 'LONG', type: 'STOP_MARKET',
                 quantity: quantity, stopPrice: parseFloat(slPrice.toFixed(symbolInfo.pricePrecision))
@@ -337,6 +345,7 @@ async function closeLongPreFunding() {
     const { symbol, quantity } = currentLongPosition;
     addLog(`>>> Đóng lệnh LONG lót đường ${symbol}...`, true);
     try {
+        // Hedge Mode: Đóng Long -> SELL + LONG
         await callSignedAPI('/fapi/v1/order', 'POST', {
             symbol: symbol, side: 'SELL', positionSide: 'LONG', type: 'MARKET',
             quantity: quantity
@@ -356,6 +365,7 @@ async function closeShortPosition(symbol, quantityToClose, reason = 'manual') {
     try {
         if (currentLongPosition) await closeLongPreFunding();
 
+        // Hedge Mode: Đóng Short -> BUY + SHORT
         await callSignedAPI('/fapi/v1/order', 'POST', {
             symbol: symbol, side: 'BUY', positionSide: 'SHORT', type: 'MARKET',
             quantity: quantityToClose
@@ -387,6 +397,7 @@ async function checkAndHandleRemainingPosition(symbol, attempt = 1) {
 
     try {
         const positions = await callSignedAPI('/fapi/v2/positionRisk', 'GET');
+        // Hedge Mode check: positionSide = SHORT và positionAmt < 0
         const remPos = positions.find(p => p.symbol === symbol && p.positionSide === 'SHORT' && parseFloat(p.positionAmt) < 0);
         
         if (remPos && Math.abs(parseFloat(remPos.positionAmt)) > 0) {
@@ -429,6 +440,7 @@ async function openShortPosition(symbol, fundingRate, usdtBalance, maxLeverage) 
         quantity = Math.floor(quantity / symbolInfo.stepSize) * symbolInfo.stepSize;
         quantity = parseFloat(quantity.toFixed(symbolInfo.quantityPrecision));
 
+        // Hedge Mode: Mở Short -> SELL + SHORT
         const orderRes = await callSignedAPI('/fapi/v1/order', 'POST', {
             symbol: symbol, side: 'SELL', positionSide: 'SHORT', type: 'MARKET',
             quantity: quantity, newOrderRespType: 'FULL'
@@ -439,8 +451,8 @@ async function openShortPosition(symbol, fundingRate, usdtBalance, maxLeverage) 
         const entryPrice = parseFloat(orderRes.avgFillPrice || currentPrice);
         addLog(`✅ Đã mở SHORT ${symbol} @ ${entryPrice}`, true);
 
-        let targetRoe = 0.30; 
-        if (fundingRate <= -0.005) targetRoe = 0.50;
+        // [THAY ĐỔI] TP 105% CỐ ĐỊNH CHO MỌI LỆNH
+        const targetRoe = 1.05; 
         const stopLossRoe = 1.0; 
 
         const tpMovePercent = targetRoe / maxLeverage;
@@ -453,6 +465,7 @@ async function openShortPosition(symbol, fundingRate, usdtBalance, maxLeverage) 
         addLog(`>>> TP @ ${tpPrice} | SL @ ${slPrice}`, true);
 
         try {
+            // Hedge Mode: TP Short -> BUY + SHORT
             await callSignedAPI('/fapi/v1/order', 'POST', {
                 symbol: symbol, side: 'BUY', positionSide: 'SHORT', type: 'STOP_MARKET',
                 quantity: quantity, stopPrice: slPrice, closePosition: 'true'
@@ -522,7 +535,14 @@ async function runTradingLogic() {
         }
 
         if (candidates.length > 0) {
-            candidates.sort((a, b) => a.fr - b.fr);
+            // SẮP XẾP: Ưu tiên Thời gian trước, sau đó mới đến Funding Rate
+            candidates.sort((a, b) => {
+                if (a.time !== b.time) {
+                    return a.time - b.time; 
+                }
+                return a.fr - b.fr;
+            });
+
             const best = candidates[0];
             
             const shortTime = best.time - (OPEN_TRADE_BEFORE_FUNDING_SECONDS * 1000) + OPEN_TRADE_AFTER_SECOND_OFFSET_MS;
@@ -590,7 +610,8 @@ async function startBotLogicInternal() {
         if (periodicLogInterval) clearInterval(periodicLogInterval);
         periodicLogInterval = setInterval(() => {
             const currentMin = new Date().getUTCMinutes();
-            if (currentMin % 10 === 0 && currentMin !== lastLoggedMinute) {
+            // [THAY ĐỔI] Check mỗi 2 phút (chia hết cho 2)
+            if (currentMin % 2 === 0 && currentMin !== lastLoggedMinute) {
                 lastLoggedMinute = currentMin;
                 logBestCandidate();
             }
