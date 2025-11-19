@@ -69,7 +69,7 @@ class CriticalApiError extends Error {
 const MIN_USDT_BALANCE_TO_OPEN = 0.1; 
 
 // SỐ PHẦN TRĂM CỦA TÀI KHOẢN USDT KHẢ DỤNG SẼ DÙNG CHO MỖI LỆNH
-const PERCENT_ACCOUNT_PER_TRADE = 1; // 1 = 100% (All-in)
+const PERCENT_ACCOUNT_PER_TRADE = 0.5; // 1 = 100% (All-in)
 
 // Bảng ánh xạ maxLeverage với Target ROE gốc (Sẽ được nhân 3 trong logic).
 // Ví dụ: 0.15 (15%) * 3 = 45% ROE
