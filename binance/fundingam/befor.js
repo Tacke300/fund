@@ -30,9 +30,8 @@ let positionCheckInterval = null;
 let nextScheduledTimeout = null; 
 let scheduledLongTimeout = null; 
 let retryBotTimeout = null; 
-// Biến interval cho việc log định kỳ 10 phút
 let periodicLogInterval = null;
-let lastLoggedMinute = -1; // Tránh spam log trong cùng 1 phút
+let lastLoggedMinute = -1; 
 
 let currentCountdownMessage = "Không có lệnh đang chờ đóng.";
 let countdownIntervalFrontend = null; 
@@ -57,12 +56,12 @@ class CriticalApiError extends Error {
 
 // --- CẤU HÌNH BOT ---
 const MIN_USDT_BALANCE_TO_OPEN = 0.1; 
-const PERCENT_ACCOUNT_PER_TRADE = 0.5; // 100% Vốn
+const PERCENT_ACCOUNT_PER_TRADE = 50; // 100% Vốn
 
-// Cấu hình điều kiện Funding
-const MIN_FUNDING_RATE_THRESHOLD = -0.1; 
+// [QUAN TRỌNG] SỬA LỖI ĐƠN VỊ TÍNH
+// -0.1% = -0.001 trên API
+const MIN_FUNDING_RATE_THRESHOLD = -0.001; 
 
-// [THAY ĐỔI QUAN TRỌNG] Tăng lên 3 phút để tránh bị lỡ nhịp quét
 const FUNDING_WINDOW_MINUTES = 3; 
 
 const MAX_POSITION_LIFETIME_SECONDS = 60; 
@@ -89,7 +88,7 @@ function addLog(message, isImportant = false) {
     if (message.startsWith('✅')) consoleEntry = `\x1b[32m${consoleEntry}\x1b[0m`;
     else if (message.startsWith('❌')) consoleEntry = `\x1b[31m${consoleEntry}\x1b[0m`;
     else if (message.startsWith('⚠️')) consoleEntry = `\x1b[33m${consoleEntry}\x1b[0m`;
-    else if (message.startsWith('🔮')) consoleEntry = `\x1b[35m${consoleEntry}\x1b[0m`; // Màu tím cho dự báo
+    else if (message.startsWith('🔮')) consoleEntry = `\x1b[35m${consoleEntry}\x1b[0m`; 
     else if (isImportant) consoleEntry = `\x1b[36m${consoleEntry}\x1b[0m`;
 
     const messageHash = crypto.createHash('md5').update(message).digest('hex');
@@ -121,7 +120,6 @@ function formatTimeUTC7(dateObject) {
     return formatter.format(dateObject);
 }
 
-// Hàm chỉ lấy Giờ:Phút theo UTC+7
 function formatHourMinuteUTC7(ms) {
     const date = new Date(ms);
     return date.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Ho_Chi_Minh' });
@@ -258,10 +256,9 @@ async function cancelOpenOrdersForSymbol(symbol) {
     } catch (error) { return false; }
 }
 
-// --- HÀM DỰ BÁO COIN TIỀM NĂNG (CHẠY MỖI 10 PHÚT) ---
+// --- HÀM DỰ BÁO (ĐÃ FIX HIỂN THỊ %) ---
 async function logBestCandidate() {
     if (!botRunning) return;
-    // addLog('🔮 Đang quét tìm coin tiềm năng nhất...', false);
     
     try {
         const acc = await callSignedAPI('/fapi/v2/account', 'GET');
@@ -271,31 +268,31 @@ async function logBestCandidate() {
         let candidates = [];
         for (const item of allFunding) {
             const fr = parseFloat(item.lastFundingRate);
-            // Chỉ quan tâm coin có funding âm <= -0.1
+            // -0.001 là -0.1%
             if (fr <= MIN_FUNDING_RATE_THRESHOLD && item.symbol.endsWith('USDT')) {
                 candidates.push({ symbol: item.symbol, fr, time: item.nextFundingTime });
             }
         }
 
         if (candidates.length > 0) {
-            // Sắp xếp âm sâu nhất lên đầu
             candidates.sort((a, b) => a.fr - b.fr);
             const topCoin = candidates[0];
 
-            // Lấy thêm thông tin đòn bẩy để tính tiền
             let leverage = await getLeverageBracketForSymbol(topCoin.symbol);
-            if (!leverage) leverage = 20; // Giá trị mặc định nếu lỗi
+            if (!leverage) leverage = 20; 
 
-            // Tính tiền ước tính
             const initialMargin = balance * PERCENT_ACCOUNT_PER_TRADE;
-            const notionalValue = initialMargin * leverage; // Tổng giá trị lệnh (đã x đòn bẩy)
+            const notionalValue = initialMargin * leverage; 
+            // Nhân 100 để hiển thị %
+            const displayFr = (topCoin.fr * 100).toFixed(4);
 
             addLog(`🔮 [DỰ BÁO] Ứng cử viên số 1 hiện tại:`, true);
-            addLog(`   👉 Symbol: ${topCoin.symbol} | Funding: ${topCoin.fr}%`);
+            addLog(`   👉 Symbol: ${topCoin.symbol} | Funding: ${displayFr}%`);
             addLog(`   👉 Giờ Funding: ${formatHourMinuteUTC7(topCoin.time)} (UTC+7)`);
             addLog(`   👉 Vốn dự kiến: ${initialMargin.toFixed(2)}$ (x${leverage} = ${notionalValue.toFixed(2)}$)`);
         } else {
-            addLog(`🔮 [DỰ BÁO] Hiện không có coin nào FR <= ${MIN_FUNDING_RATE_THRESHOLD}%`);
+            // Nhân 100 để log hiển thị đúng -0.1%
+            addLog(`🔮 [DỰ BÁO] Hiện không có coin nào FR <= ${(MIN_FUNDING_RATE_THRESHOLD * 100)}%`);
         }
 
     } catch (error) {
@@ -303,7 +300,6 @@ async function logBestCandidate() {
     }
 }
 
-// --- HÀM XỬ LÝ LONG/SHORT NHƯ CŨ ---
 async function openLongPreFunding(symbol, maxLeverage, availableBalance) {
     addLog(`>>> Mở LONG lót đường cho ${symbol}...`, true);
     try {
@@ -429,7 +425,7 @@ function stopCountdownFrontend() {
 }
 
 async function openShortPosition(symbol, fundingRate, usdtBalance, maxLeverage) {
-    addLog(`>>> Mở SHORT ${symbol} (FR: ${fundingRate})...`, true);
+    addLog(`>>> Mở SHORT ${symbol} (FR: ${(fundingRate * 100).toFixed(4)}%)...`, true);
     try {
         const symbolInfo = exchangeInfoCache[symbol];
         const currentPrice = await getCurrentPrice(symbol);
@@ -450,7 +446,8 @@ async function openShortPosition(symbol, fundingRate, usdtBalance, maxLeverage) 
         addLog(`✅ Đã mở SHORT ${symbol} @ ${entryPrice}`, true);
 
         let targetRoe = 0.30; 
-        if (fundingRate <= -0.5) targetRoe = 0.50;
+        // -0.005 tức là -0.5%
+        if (fundingRate <= -0.005) targetRoe = 0.50;
         const stopLossRoe = 1.0; 
 
         const tpMovePercent = targetRoe / maxLeverage;
@@ -522,6 +519,7 @@ async function runTradingLogic() {
 
         for (const item of allFunding) {
             const fr = parseFloat(item.lastFundingRate);
+            // So sánh với -0.001 (tức -0.1%)
             if (fr <= MIN_FUNDING_RATE_THRESHOLD && item.symbol.endsWith('USDT')) {
                 const timeLeftMin = (item.nextFundingTime - now) / 60000;
                 if (timeLeftMin > 0 && timeLeftMin <= FUNDING_WINDOW_MINUTES) {
@@ -541,7 +539,8 @@ async function runTradingLogic() {
             const delayLong = longTime - Date.now();
 
             if (delayShort > 0 && delayShort <= ONLY_OPEN_IF_FUNDING_IN_SECONDS * 1000) {
-                addLog(`✅ CHỌN: ${best.symbol} (FR: ${best.fr})`, true);
+                // Hiển thị % cho dễ đọc
+                addLog(`✅ CHỌN: ${best.symbol} (FR: ${(best.fr * 100).toFixed(4)}%)`, true);
                 addLog(`-> Long lót đường sau: ${Math.ceil(delayLong/1000)}s`);
                 addLog(`-> Short chính sau: ${Math.ceil(delayShort/1000)}s`);
                 
@@ -565,7 +564,7 @@ async function runTradingLogic() {
                 scheduleNextMainCycle();
             }
         } else {
-            addLog(`⚠️ Không tìm thấy coin FR <= ${MIN_FUNDING_RATE_THRESHOLD}%.`, true);
+            addLog(`⚠️ Không tìm thấy coin FR <= ${(MIN_FUNDING_RATE_THRESHOLD * 100)}%.`, true);
             scheduleNextMainCycle();
         }
 
@@ -597,16 +596,14 @@ async function startBotLogicInternal() {
         botStartTime = new Date();
         scheduleNextMainCycle();
         
-        // Khởi động Interval quét định kỳ mỗi 10 phút
         if (periodicLogInterval) clearInterval(periodicLogInterval);
         periodicLogInterval = setInterval(() => {
             const currentMin = new Date().getUTCMinutes();
-            // Check phút 10, 20, 30, 40, 50 (hoặc 00 nếu chưa vào trading logic)
             if (currentMin % 10 === 0 && currentMin !== lastLoggedMinute) {
                 lastLoggedMinute = currentMin;
                 logBestCandidate();
             }
-        }, 30000); // Check mỗi 30s
+        }, 30000); 
 
         return 'Bot đã bắt đầu.';
     } catch (e) { return 'Lỗi khởi động: ' + e.message; }
