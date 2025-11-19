@@ -69,13 +69,13 @@ class CriticalApiError extends Error {
 const MIN_USDT_BALANCE_TO_OPEN = 0.1; 
 
 // SỐ PHẦN TRĂM CỦA TÀI KHOẢN USDT KHẢ DỤNG SẼ DÙNG CHO MỖI LỆNH
-const PERCENT_ACCOUNT_PER_TRADE = 1; // 1 = 100% (All-in)
+const PERCENT_ACCOUNT_PER_TRADE = 0.5; // 1 = 100% (All-in)
 
 // --- [THAY ĐỔI 1] ĐIỀU KIỆN FUNDING MỚI ---
 const MIN_FUNDING_RATE_THRESHOLD = -0.1; // Sửa thành -0.1
 
 // Thời gian tối đa giữ một vị thế (ví dụ: 180 giây = 3 phút)
-const MAX_POSITION_LIFETIME_SECONDS = 180; 
+const MAX_POSITION_LIFETIME_SECONDS = 120; 
 
 // Cửa sổ thời gian (tính bằng phút) TRƯỚC giờ funding mà bot sẽ bắt đầu quét.
 const FUNDING_WINDOW_MINUTES = 1; 
