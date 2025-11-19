@@ -56,7 +56,7 @@ class CriticalApiError extends Error {
 
 // --- CẤU HÌNH BOT ---
 const MIN_USDT_BALANCE_TO_OPEN = 0.1; 
-const PERCENT_ACCOUNT_PER_TRADE = 50; // 100% Vốn
+const PERCENT_ACCOUNT_PER_TRADE = 0.5; // 100% Vốn
 
 // [QUAN TRỌNG] SỬA LỖI ĐƠN VỊ TÍNH
 // -0.1% = -0.001 trên API
