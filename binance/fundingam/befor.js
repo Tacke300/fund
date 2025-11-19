@@ -112,12 +112,12 @@ const RETRY_CHECK_POSITION_ATTEMPTS = 6; // 6 lần
 const RETRY_CHECK_POSITION_DELAY_MS = 30000; // 30 giây
 
 // --- CẤU HÌNH WEB SERVER VÀ LOG PM2 ---
-const WEB_SERVER_PORT = 3000; // Cổng cho giao diện web
+const WEB_SERVER_PORT = 9999; // Cổng cho giao diện web
 // Đường dẫn tới file log của PM2 cho bot này (để web server đọc).
 // Đảm bảo đường dẫn này chính xác với cấu hình PM2 của bạn.
 const BOT_LOG_FILE = '/home/tacke300/.pm2/logs/bot-bina-out.log';
 // Tên của bot trong PM2, phải khớp với tên bạn đã dùng khi start bot bằng PM2.
-const THIS_BOT_PM2_NAME = 'bot_bina';
+const THIS_BOT_PM2_NAME = 'befor';
 
 // --- HÀM TIỆN ÍCH ---
 
