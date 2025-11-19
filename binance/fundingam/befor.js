@@ -11,6 +11,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // --- CẤU HÌNH API KEY VÀ SECRET KEY ---
+// (Dùng API Key của tài khoản 0.59$)
 const API_KEY = 'cZ1Y2O0kggVEggEaPvhFcYQHS5b1EsT2OWZb8zdY9C0jGqNROvXRZHTJjnQ7OG4Q'.trim(); 
 const SECRET_KEY = 'oU6pZFHgEvbpD9NmFXp5ZVnYFMQ7EIkBiz88aTzvmC3SpT9nEf4fcDf0pEnFzoTc'.trim(); 
 
@@ -57,7 +58,7 @@ class CriticalApiError extends Error {
 // --- CẤU HÌNH BOT ---
 const MIN_USDT_BALANCE_TO_OPEN = 0.1; 
 
-// 0.5 = 50% vốn
+// 0.5 = 50% VỐN (ĐÚNG)
 const PERCENT_ACCOUNT_PER_TRADE = 0.5; 
 
 // -0.1% = -0.001 trên API
@@ -293,7 +294,7 @@ async function logBestCandidate() {
     }
 }
 
-// --- CẬP NHẬT CHO HEDGE MODE: THÊM positionSide ---
+// --- HEDGE MODE COMPATIBLE ---
 async function openLongPreFunding(symbol, maxLeverage, availableBalance) {
     addLog(`>>> Mở LONG lót đường cho ${symbol}...`, true);
     try {
@@ -305,7 +306,6 @@ async function openLongPreFunding(symbol, maxLeverage, availableBalance) {
         quantity = Math.floor(quantity / symbolInfo.stepSize) * symbolInfo.stepSize;
         quantity = parseFloat(quantity.toFixed(symbolInfo.quantityPrecision));
 
-        // Hedge Mode: Phải có positionSide: 'LONG'
         await callSignedAPI('/fapi/v1/order', 'POST', {
             symbol: symbol, side: 'BUY', positionSide: 'LONG', type: 'MARKET', quantity: quantity
         });
@@ -316,7 +316,6 @@ async function openLongPreFunding(symbol, maxLeverage, availableBalance) {
         const slPrice = Math.floor(slPriceRaw / symbolInfo.tickSize) * symbolInfo.tickSize;
 
         try {
-            // Hedge Mode: Đóng Long là SELL + positionSide: 'LONG'
             await callSignedAPI('/fapi/v1/order', 'POST', {
                 symbol: symbol, side: 'SELL', positionSide: 'LONG', type: 'STOP_MARKET',
                 quantity: quantity, stopPrice: parseFloat(slPrice.toFixed(symbolInfo.pricePrecision))
@@ -338,7 +337,6 @@ async function closeLongPreFunding() {
     const { symbol, quantity } = currentLongPosition;
     addLog(`>>> Đóng lệnh LONG lót đường ${symbol}...`, true);
     try {
-        // Hedge Mode: Đóng Long -> SELL + LONG
         await callSignedAPI('/fapi/v1/order', 'POST', {
             symbol: symbol, side: 'SELL', positionSide: 'LONG', type: 'MARKET',
             quantity: quantity
@@ -358,7 +356,6 @@ async function closeShortPosition(symbol, quantityToClose, reason = 'manual') {
     try {
         if (currentLongPosition) await closeLongPreFunding();
 
-        // Hedge Mode: Đóng Short -> BUY + SHORT
         await callSignedAPI('/fapi/v1/order', 'POST', {
             symbol: symbol, side: 'BUY', positionSide: 'SHORT', type: 'MARKET',
             quantity: quantityToClose
@@ -390,7 +387,6 @@ async function checkAndHandleRemainingPosition(symbol, attempt = 1) {
 
     try {
         const positions = await callSignedAPI('/fapi/v2/positionRisk', 'GET');
-        // Hedge Mode check: positionSide = SHORT và positionAmt < 0
         const remPos = positions.find(p => p.symbol === symbol && p.positionSide === 'SHORT' && parseFloat(p.positionAmt) < 0);
         
         if (remPos && Math.abs(parseFloat(remPos.positionAmt)) > 0) {
@@ -433,7 +429,6 @@ async function openShortPosition(symbol, fundingRate, usdtBalance, maxLeverage) 
         quantity = Math.floor(quantity / symbolInfo.stepSize) * symbolInfo.stepSize;
         quantity = parseFloat(quantity.toFixed(symbolInfo.quantityPrecision));
 
-        // Hedge Mode: Mở Short -> SELL + SHORT
         const orderRes = await callSignedAPI('/fapi/v1/order', 'POST', {
             symbol: symbol, side: 'SELL', positionSide: 'SHORT', type: 'MARKET',
             quantity: quantity, newOrderRespType: 'FULL'
@@ -458,7 +453,6 @@ async function openShortPosition(symbol, fundingRate, usdtBalance, maxLeverage) 
         addLog(`>>> TP @ ${tpPrice} | SL @ ${slPrice}`, true);
 
         try {
-            // Hedge Mode: TP Short -> BUY + SHORT
             await callSignedAPI('/fapi/v1/order', 'POST', {
                 symbol: symbol, side: 'BUY', positionSide: 'SHORT', type: 'STOP_MARKET',
                 quantity: quantity, stopPrice: slPrice, closePosition: 'true'
@@ -520,4 +514,110 @@ async function runTradingLogic() {
             const fr = parseFloat(item.lastFundingRate);
             if (fr <= MIN_FUNDING_RATE_THRESHOLD && item.symbol.endsWith('USDT')) {
                 const timeLeftMin = (item.nextFundingTime - now) / 60000;
-                if (timeLeftMin > 0 && timeLeftMin <= FUNDING_WIND
+                if (timeLeftMin > 0 && timeLeftMin <= FUNDING_WINDOW_MINUTES) {
+                    const leverage = await getLeverageBracketForSymbol(item.symbol);
+                    if (leverage) candidates.push({ symbol: item.symbol, fr, time: item.nextFundingTime, leverage });
+                }
+            }
+        }
+
+        if (candidates.length > 0) {
+            candidates.sort((a, b) => a.fr - b.fr);
+            const best = candidates[0];
+            
+            const shortTime = best.time - (OPEN_TRADE_BEFORE_FUNDING_SECONDS * 1000) + OPEN_TRADE_AFTER_SECOND_OFFSET_MS;
+            const delayShort = shortTime - Date.now();
+            const longTime = best.time - (OPEN_LONG_BEFORE_FUNDING_SECONDS * 1000);
+            const delayLong = longTime - Date.now();
+
+            if (delayShort > 0 && delayShort <= ONLY_OPEN_IF_FUNDING_IN_SECONDS * 1000) {
+                addLog(`✅ CHỌN: ${best.symbol} (FR: ${(best.fr * 100).toFixed(4)}%)`, true);
+                addLog(`-> Long lót đường sau: ${Math.ceil(delayLong/1000)}s`);
+                addLog(`-> Short chính sau: ${Math.ceil(delayShort/1000)}s`);
+                
+                await setLeverage(best.symbol, best.leverage);
+
+                clearTimeout(scheduledLongTimeout);
+                if (delayLong > 0) {
+                    scheduledLongTimeout = setTimeout(() => {
+                        if (botRunning) openLongPreFunding(best.symbol, best.leverage, balance);
+                    }, delayLong);
+                }
+
+                clearTimeout(nextScheduledTimeout);
+                nextScheduledTimeout = setTimeout(() => {
+                    if (botRunning && !currentOpenPosition) {
+                        openShortPosition(best.symbol, best.fr, balance, best.leverage);
+                    }
+                }, delayShort);
+            } else {
+                addLog('⚠️ Không kịp giờ vào lệnh.', true);
+                scheduleNextMainCycle();
+            }
+        } else {
+            addLog(`⚠️ Không tìm thấy coin FR <= ${(MIN_FUNDING_RATE_THRESHOLD * 100)}%.`, true);
+            scheduleNextMainCycle();
+        }
+
+    } catch (error) {
+        addLog('❌ Lỗi Logic: ' + error.message);
+        scheduleNextMainCycle();
+    }
+}
+
+async function scheduleNextMainCycle() {
+    if (!botRunning || currentOpenPosition) return;
+    clearTimeout(nextScheduledTimeout);
+    const now = Date.now();
+    const min = new Date(now).getUTCMinutes();
+    let delayMs = ((59 - min + (min >= 59 ? 60 : 0)) * 60 * 1000) - (now % 60000) - 500; 
+    if (delayMs < 1000) delayMs = 1000;
+    
+    addLog(`>>> Chờ quét tiếp theo vào phút :59...`);
+    nextScheduledTimeout = setTimeout(runTradingLogic, delayMs);
+}
+
+async function startBotLogicInternal() {
+    if (botRunning) return 'Bot đang chạy.';
+    addLog('--- KHỞI ĐỘNG BOT ---', true);
+    try {
+        await syncServerTime();
+        await getExchangeInfo();
+        botRunning = true; 
+        botStartTime = new Date();
+        scheduleNextMainCycle();
+        
+        if (periodicLogInterval) clearInterval(periodicLogInterval);
+        periodicLogInterval = setInterval(() => {
+            const currentMin = new Date().getUTCMinutes();
+            if (currentMin % 10 === 0 && currentMin !== lastLoggedMinute) {
+                lastLoggedMinute = currentMin;
+                logBestCandidate();
+            }
+        }, 30000); 
+
+        return 'Bot đã bắt đầu.';
+    } catch (e) { return 'Lỗi khởi động: ' + e.message; }
+}
+
+function stopBotLogicInternal() {
+    botRunning = false;
+    clearTimeout(nextScheduledTimeout);
+    clearTimeout(scheduledLongTimeout);
+    clearInterval(positionCheckInterval);
+    clearInterval(periodicLogInterval);
+    positionCheckInterval = null;
+    periodicLogInterval = null;
+    addLog('--- ĐÃ DỪNG BOT ---', true);
+    return 'Bot đã dừng.';
+}
+
+const app = express();
+app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
+app.get('/api/logs', (req, res) => res.send(memoryLogs.join('\n')));
+app.get('/api/status', (req, res) => res.send(botRunning ? `BOT ĐANG CHẠY (Uptime: ${botStartTime ? ((Date.now() - botStartTime)/60000).toFixed(1) : 0}m)` : 'BOT ĐÃ DỪNG'));
+app.get('/api/countdown', (req, res) => res.send(currentCountdownMessage));
+app.get('/start_bot_logic', async (req, res) => res.send(await startBotLogicInternal()));
+app.get('/stop_bot_logic', (req, res) => res.send(stopBotLogicInternal()));
+
+app.listen(WEB_SERVER_PORT, () => addLog(`Server running on port ${WEB_SERVER_PORT}`, true));
