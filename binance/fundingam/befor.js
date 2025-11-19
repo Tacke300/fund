@@ -69,7 +69,7 @@ const MAX_POSITION_LIFETIME_SECONDS = 60;
 const ONLY_OPEN_IF_FUNDING_IN_SECONDS = 60; 
 
 const OPEN_TRADE_BEFORE_FUNDING_SECONDS = 1; 
-const OPEN_TRADE_AFTER_SECOND_OFFSET_MS = 850; 
+const OPEN_TRADE_AFTER_SECOND_OFFSET_MS = 999; 
 const OPEN_LONG_BEFORE_FUNDING_SECONDS = 10; 
 
 const DELAY_BEFORE_CANCEL_ORDERS_MS = 3.5 * 60 * 1000; 
@@ -289,7 +289,7 @@ async function logBestCandidate() {
             const displayFr = (topCoin.fr * 100).toFixed(4);
 
             addLog(`🔮 [DỰ BÁO] Ứng cử viên số 1 hiện tại:`, true);
-            addLog(`   👉 Symbol: ${topCoin.symbol} | Funding: ${displayFr}%`);
+            addLog(`   💲 Symbol: ${topCoin.symbol} | Funding: ${displayFr}%`);
             addLog(`   👉 Giờ Funding: ${formatHourMinuteUTC7(topCoin.time)} (UTC+7)`);
             addLog(`   👉 Vốn dự kiến: ${initialMargin.toFixed(2)}$ (x${leverage} = ${notionalValue.toFixed(2)}$)`);
         } else {
@@ -452,7 +452,7 @@ async function openShortPosition(symbol, fundingRate, usdtBalance, maxLeverage) 
         addLog(`✅ Đã mở SHORT ${symbol} @ ${entryPrice}`, true);
 
         // [THAY ĐỔI] TP 105% CỐ ĐỊNH CHO MỌI LỆNH
-        const targetRoe = 1.05; 
+        const targetRoe = 0.66; 
         const stopLossRoe = 1.0; 
 
         const tpMovePercent = targetRoe / maxLeverage;
