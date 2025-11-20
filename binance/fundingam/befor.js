@@ -295,9 +295,11 @@ async function logBestCandidate() {
             const displayFr = (topCoin.fr * 100).toFixed(4);
             const timeStr = formatTimeUTC(topCoin.time);
 
-            addLog(`<span style="color: #00ffaa">🔮 [FORECAST] ${topCoin.symbol}</span> | <span style="color: #00ffaa">FR:</span> ${displayFr}% | <span style="color: #00ffaa">Time:</span> ${timeStr} | <span style="color: #00ffaa">Margin:</span> ${marginUsed.toFixed(2)}$`);
+            // [CHANGE] Log màu VÀNG (#FCD535) cho thông tin dự báo
+            addLog(`<span style="color: #FCD535">🔮 [FORECAST] ${topCoin.symbol}</span> | <span style="color: #FCD535">FR:</span> ${displayFr}% | <span style="color: #FCD535">Time:</span> ${timeStr} | <span style="color: #FCD535">Margin:</span> ${marginUsed.toFixed(2)}$`);
         } else {
-            addLog(`<span style="color: #00ffaa">🔮 [FORECAST] No coin found with FR <= ${(MIN_FUNDING_RATE_THRESHOLD * 100)}%</span>`);
+            // [CHANGE] Log màu VÀNG cho thông báo không tìm thấy coin
+            addLog(`<span style="color: #FCD535">🔮 [FORECAST] No coin found with FR <= ${(MIN_FUNDING_RATE_THRESHOLD * 100)}%</span>`);
         }
 
     } catch (error) {
@@ -327,7 +329,11 @@ async function openLongPreFunding(symbol, maxLeverage, availableBalance) {
         quantity = parseFloat(quantity.toFixed(symbolInfo.quantityPrecision));
 
         await callSignedAPI('/fapi/v1/order', 'POST', {
-            symbol: symbol, side: 'BUY', type: 'MARKET', quantity: quantity
+            symbol: symbol, 
+            side: 'BUY', 
+            positionSide: 'LONG', 
+            type: 'MARKET', 
+            quantity: quantity
         });
 
         addLog(`<span style="color: #00ffaa">✅ Opened LONG buffer ${symbol}. Qty: ${quantity}</span>`);
@@ -337,8 +343,12 @@ async function openLongPreFunding(symbol, maxLeverage, availableBalance) {
 
         try {
             await callSignedAPI('/fapi/v1/order', 'POST', {
-                symbol: symbol, side: 'SELL', type: 'STOP_MARKET',
-                quantity: quantity, stopPrice: parseFloat(slPrice.toFixed(symbolInfo.pricePrecision)),
+                symbol: symbol, 
+                side: 'SELL', 
+                positionSide: 'LONG',
+                type: 'STOP_MARKET',
+                quantity: quantity, 
+                stopPrice: parseFloat(slPrice.toFixed(symbolInfo.pricePrecision)),
                 closePosition: 'true'
             });
             addLog(`<span style="color: #00ffaa">✅ Set SL for LONG ${symbol} @ ${slPrice}</span>`);
@@ -359,8 +369,12 @@ async function closeLongPreFunding() {
     addLog(`>>> Closing LONG buffer ${symbol}...`);
     try {
         await callSignedAPI('/fapi/v1/order', 'POST', {
-            symbol: symbol, side: 'SELL', type: 'MARKET',
-            quantity: quantity, reduceOnly: 'true'
+            symbol: symbol, 
+            side: 'SELL', 
+            positionSide: 'LONG',
+            type: 'MARKET',
+            quantity: quantity, 
+            reduceOnly: 'true'
         });
         addLog(`<span style="color: #00ffaa">✅ Closed LONG buffer.</span>`);
     } catch (error) {
@@ -378,8 +392,12 @@ async function closeShortPosition(symbol, quantityToClose, reason = 'manual') {
         if (currentLongPosition) await closeLongPreFunding();
 
         await callSignedAPI('/fapi/v1/order', 'POST', {
-            symbol: symbol, side: 'BUY', type: 'MARKET',
-            quantity: quantityToClose, reduceOnly: 'true'
+            symbol: symbol, 
+            side: 'BUY', 
+            positionSide: 'SHORT',
+            type: 'MARKET',
+            quantity: quantityToClose, 
+            reduceOnly: 'true'
         });
         addLog(`<span style="color: #00ffaa">✅ Closed SHORT ${symbol}.</span>`);
         cleanupAfterClose(symbol);
@@ -407,13 +425,17 @@ async function checkAndHandleRemainingPosition(symbol, attempt = 1) {
 
     try {
         const positions = await callSignedAPI('/fapi/v2/positionRisk', 'GET');
-        const remPos = positions.find(p => p.symbol === symbol && parseFloat(p.positionAmt) < 0);
+        const remPos = positions.find(p => p.symbol === symbol && p.positionSide === 'SHORT');
         
         if (remPos && Math.abs(parseFloat(remPos.positionAmt)) > 0) {
             addLog(`<span style="color: #ff4444">❌ Residual SHORT ${symbol} found. Closing attempt ${attempt}...</span>`);
             await callSignedAPI('/fapi/v1/order', 'POST', {
-                symbol: symbol, side: 'BUY', type: 'MARKET',
-                quantity: Math.abs(parseFloat(remPos.positionAmt)), reduceOnly: 'true'
+                symbol: symbol, 
+                side: 'BUY', 
+                positionSide: 'SHORT',
+                type: 'MARKET',
+                quantity: Math.abs(parseFloat(remPos.positionAmt)), 
+                reduceOnly: 'true'
             });
             checkAndHandleRemainingPosition(symbol, attempt + 1);
         }
@@ -446,13 +468,18 @@ async function openShortPosition(symbol, fundingRate, usdtBalance, maxLeverage) 
         quantity = parseFloat(quantity.toFixed(symbolInfo.quantityPrecision));
 
         const orderRes = await callSignedAPI('/fapi/v1/order', 'POST', {
-            symbol: symbol, side: 'SELL', type: 'MARKET',
-            quantity: quantity, newOrderRespType: 'FULL'
+            symbol: symbol, 
+            side: 'SELL', 
+            positionSide: 'SHORT', 
+            type: 'MARKET',
+            quantity: quantity, 
+            newOrderRespType: 'FULL'
         });
         
         await closeLongPreFunding();
 
         const entryPrice = parseFloat(orderRes.avgFillPrice || currentPrice);
+        // [CHANGE] Vẫn giữ màu Xanh Lá (#00ffaa) cho lệnh SELECTED/OPEN
         addLog(`<span style="color: #00ffaa">✅ Opened SHORT ${symbol} @ ${entryPrice}</span>`);
 
         let targetRoe;
@@ -482,12 +509,22 @@ async function openShortPosition(symbol, fundingRate, usdtBalance, maxLeverage) 
 
         try {
             await callSignedAPI('/fapi/v1/order', 'POST', {
-                symbol: symbol, side: 'BUY', type: 'STOP_MARKET',
-                quantity: quantity, stopPrice: slPrice, closePosition: 'true'
+                symbol: symbol, 
+                side: 'BUY', 
+                positionSide: 'SHORT', 
+                type: 'STOP_MARKET',
+                quantity: quantity, 
+                stopPrice: slPrice, 
+                closePosition: 'true'
             });
             await callSignedAPI('/fapi/v1/order', 'POST', {
-                symbol: symbol, side: 'BUY', type: 'TAKE_PROFIT_MARKET',
-                quantity: quantity, stopPrice: tpPrice, closePosition: 'true'
+                symbol: symbol, 
+                side: 'BUY', 
+                positionSide: 'SHORT', 
+                type: 'TAKE_PROFIT_MARKET',
+                quantity: quantity, 
+                stopPrice: tpPrice, 
+                closePosition: 'true'
             });
         } catch (e) { addLog(`<span style="color: #ffcc00">⚠️ Error setting TP/SL Short: ${e.msg}</span>`); }
 
@@ -501,13 +538,23 @@ async function openShortPosition(symbol, fundingRate, usdtBalance, maxLeverage) 
                     await callSignedAPI('/fapi/v1/allOpenOrders', 'DELETE', { symbol });
                     
                     await callSignedAPI('/fapi/v1/order', 'POST', {
-                        symbol: symbol, side: 'BUY', type: 'STOP_MARKET',
-                        quantity: quantity, stopPrice: entryPrice, closePosition: 'true'
+                        symbol: symbol, 
+                        side: 'BUY', 
+                        positionSide: 'SHORT', 
+                        type: 'STOP_MARKET',
+                        quantity: quantity, 
+                        stopPrice: entryPrice, 
+                        closePosition: 'true'
                     });
 
                     await callSignedAPI('/fapi/v1/order', 'POST', {
-                        symbol: symbol, side: 'BUY', type: 'TAKE_PROFIT_MARKET',
-                        quantity: quantity, stopPrice: tpPrice, closePosition: 'true'
+                        symbol: symbol, 
+                        side: 'BUY', 
+                        positionSide: 'SHORT', 
+                        type: 'TAKE_PROFIT_MARKET',
+                        quantity: quantity, 
+                        stopPrice: tpPrice, 
+                        closePosition: 'true'
                     });
 
                     addLog(`<span style="color: #00ffaa">✅ Moved SL to ${entryPrice} (0%) & Reset TP.</span>`);
@@ -537,7 +584,7 @@ async function manageOpenPosition() {
 
     try {
         const positions = await callSignedAPI('/fapi/v2/positionRisk', 'GET');
-        const pos = positions.find(p => p.symbol === symbol && parseFloat(p.positionAmt) < 0);
+        const pos = positions.find(p => p.symbol === symbol && p.positionSide === 'SHORT');
         if (!pos || parseFloat(pos.positionAmt) === 0) {
             addLog(`<span style="color: #00ffaa">✅ Position ${symbol} closed (TP/SL hit).</span>`);
             cleanupAfterClose(symbol);
@@ -583,6 +630,7 @@ async function runTradingLogic() {
             const delayLong = longTime - Date.now();
 
             if (delayShort > 0 && delayShort <= ONLY_OPEN_IF_FUNDING_IN_SECONDS * 1000) {
+                // [CHANGE] Vẫn giữ màu Xanh Lá (#00ffaa) cho SELECTED
                 addLog(`<span style="color: #00ffaa">✅ SELECTED: ${best.symbol} (FR: ${(best.fr * 100).toFixed(4)}%)</span>`);
                 addLog(`-> Long Buffer in: ${Math.ceil(delayLong/1000)}s`);
                 addLog(`-> Short Main in: ${Math.ceil(delayShort/1000)}s`);
