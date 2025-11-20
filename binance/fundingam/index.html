@@ -3,12 +3,13 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Bot Binance Funding Crypto</title>
-  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@700&display=swap" rel="stylesheet">
+  <title>Binance Bot - Config & Monitor</title>
+  <!-- Font Fredoka (Béo, tròn, xinh) -->
+  <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;600&display=swap" rel="stylesheet">
   <style>
     body {
-      font-family: 'Orbitron', sans-serif;
-      background: linear-gradient(135deg, #0f0c29, #302b63, #24243e);
+      font-family: 'Fredoka', sans-serif; /* Font mới cho toàn bộ UI */
+      background: linear-gradient(135deg, #1a1a2e, #16213e, #0f3460);
       color: #eee;
       display: flex;
       flex-direction: column;
@@ -20,7 +21,7 @@
       box-sizing: border-box;
     }
     
-    /* Hiệu ứng Grid Cyberpunk */
+    /* Grid Background Effect */
     body::before {
         content: "";
         position: fixed;
@@ -28,7 +29,7 @@
         background-image: 
             linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px),
             linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
-        background-size: 30px 30px;
+        background-size: 40px 40px;
         z-index: -1;
         pointer-events: none;
     }
@@ -36,14 +37,17 @@
     #top {
       font-size: 8vw;
       line-height: 1.2;
-      background: linear-gradient(270deg, #d000ff, #00ffe1, #d000ff);
+      /* Gradient Text */
+      background: linear-gradient(270deg, #ff00cc, #3333ff, #ff00cc);
       background-size: 300% 300%;
       -webkit-background-clip: text;
       -webkit-text-fill-color: transparent;
       animation: moveGradient 5s ease infinite;
-      margin-bottom: 40px;
+      margin-bottom: 30px;
       text-align: center;
-      text-shadow: 0 0 15px rgba(208, 0, 255, 0.5);
+      text-shadow: 0 5px 15px rgba(0,0,0,0.3);
+      font-weight: 600;
+      letter-spacing: 2px;
     }
 
     @keyframes moveGradient {
@@ -52,25 +56,20 @@
       100% { background-position: 0% 50%; }
     }
 
-    .status-bar, .countdown-bar {
+    .status-bar {
         width: 95%;
         max-width: 900px;
-        background: rgba(20, 20, 20, 0.8);
-        color: #00ff00;
-        padding: 10px 15px;
-        margin-bottom: 15px;
-        border-radius: 8px;
-        font-size: 1.1rem;
+        background: rgba(20, 20, 20, 0.6);
+        color: #00ffcc;
+        padding: 15px;
+        margin-bottom: 20px;
+        border-radius: 15px;
+        font-size: 1.2rem;
         text-align: center;
         box-sizing: border-box;
-        border: 1px solid #00ff00;
-        box-shadow: 0 0 10px rgba(0, 255, 0, 0.2);
-        backdrop-filter: blur(5px);
-    }
-    .countdown-bar {
-        color: #ffcc00;
-        border: 1px solid #ffcc00;
-        box-shadow: 0 0 10px rgba(255, 204, 0, 0.2);
+        border: 2px solid #00ffcc;
+        box-shadow: 0 0 15px rgba(0, 255, 204, 0.2);
+        backdrop-filter: blur(10px);
     }
 
     #log {
@@ -78,71 +77,87 @@
       width: 95%;
       max-width: 900px;
       overflow-y: auto;
-      background: rgba(10, 10, 10, 0.85);
-      padding: 0;
+      background: rgba(10, 10, 10, 0.8);
+      padding: 5px;
       font-size: 0.9rem;
-      border: 1px solid #888;
-      margin-bottom: 20px;
-      font-family: 'Courier New', Courier, monospace;
+      border: 1px solid #555;
+      margin-bottom: 25px;
+      /* Giữ font log như cũ */
+      font-family: 'Courier New', Courier, monospace; 
       box-sizing: border-box;
       color: #fff;
-      border-radius: 8px;
-      box-shadow: inset 0 0 20px rgba(0,0,0,0.9);
+      border-radius: 12px;
+      box-shadow: inset 0 0 20px rgba(0,0,0,0.8);
     }
 
     #log div.log-line {
-        padding: 5px 10px;
+        padding: 6px 10px;
         line-height: 1.4;
         border-bottom: 1px solid #222;
     }
-    #log div.log-line:nth-child(odd) { background-color: rgba(255,255,255,0.02); }
+    #log div.log-line:nth-child(odd) { background-color: rgba(255,255,255,0.03); }
 
     /* --- SETTINGS PANEL --- */
     .settings-panel {
         width: 95%;
         max-width: 900px;
-        background: rgba(30, 30, 40, 0.9);
-        border: 1px solid #d000ff;
-        border-radius: 10px;
-        padding: 20px;
-        margin-bottom: 20px;
-        box-shadow: 0 0 15px rgba(208, 0, 255, 0.3);
+        background: rgba(255, 255, 255, 0.1);
+        border: 2px solid #ff00cc;
+        border-radius: 20px;
+        padding: 25px;
+        margin-bottom: 30px;
+        box-shadow: 0 0 20px rgba(255, 0, 204, 0.2);
         display: flex;
         flex-direction: column;
-        gap: 15px;
+        gap: 20px;
+        backdrop-filter: blur(5px);
     }
 
     .input-group {
         display: flex;
         flex-wrap: wrap;
-        gap: 10px;
+        gap: 15px;
         align-items: center;
         justify-content: space-between;
-        padding-bottom: 10px;
+        padding-bottom: 15px;
         border-bottom: 1px solid rgba(255,255,255,0.1);
     }
     
     .input-group:last-child { border-bottom: none; }
 
     .input-label {
-        color: #00ffe1;
-        min-width: 120px;
-        font-size: 1rem;
+        color: #ff99ff;
+        min-width: 150px;
+        font-size: 1.1rem;
+        font-weight: 600;
     }
 
     input[type="text"], input[type="number"], input[type="password"] {
-        background: #111;
-        border: 1px solid #555;
+        background: rgba(0,0,0,0.5);
+        border: 2px solid #666;
         color: #fff;
-        padding: 8px;
-        border-radius: 4px;
-        font-family: 'Courier New', monospace;
+        padding: 10px 15px;
+        border-radius: 10px;
+        font-family: 'Fredoka', sans-serif; /* Font input */
+        font-size: 1rem;
         flex-grow: 1;
+        transition: 0.3s;
     }
 
-    input[type="radio"] { margin-right: 5px; }
+    input:focus {
+        border-color: #00ffcc;
+        outline: none;
+    }
+
+    .radio-group { 
+        display: flex; 
+        gap: 20px; 
+        align-items: center; 
+        color: #fff; 
+        font-size: 1rem; 
+    }
     
-    .radio-group { display: flex; gap: 15px; align-items: center; color: #ccc; font-size: 0.9rem; }
+    input[type="radio"] { transform: scale(1.2); margin-right: 5px; }
 
     .hidden { display: none !important; }
 
@@ -150,61 +165,64 @@
       display: flex;
       flex-wrap: wrap;
       justify-content: center;
-      gap: 15px;
+      gap: 20px;
       width: 100%;
+      margin-top: 10px;
     }
 
     button {
-      padding: 15px 25px;
-      font-size: 1.2rem;
+      padding: 15px 30px;
+      font-size: 1.3rem;
       border: none;
       cursor: pointer;
-      border-radius: 8px;
+      border-radius: 50px; /* Rounded buttons */
       transition: 0.3s;
-      font-family: 'Orbitron', sans-serif;
+      font-family: 'Fredoka', sans-serif;
+      font-weight: 600;
       flex-grow: 1;
       min-width: 150px;
       color: white;
-      text-shadow: 0 1px 2px rgba(0,0,0,0.5);
+      text-transform: uppercase;
+      letter-spacing: 1px;
     }
 
     .start-btn {
-      background: linear-gradient(45deg, #00b09b, #96c93d);
-      box-shadow: 0 4px 15px rgba(0, 176, 155, 0.4);
+      background: linear-gradient(45deg, #11998e, #38ef7d);
+      box-shadow: 0 5px 15px rgba(56, 239, 125, 0.4);
     }
     
     .stop-btn {
-      background: linear-gradient(45deg, #ff416c, #ff4b2b);
-      box-shadow: 0 4px 15px rgba(255, 65, 108, 0.4);
+      background: linear-gradient(45deg, #cb2d3e, #ef473a);
+      box-shadow: 0 5px 15px rgba(239, 71, 58, 0.4);
     }
 
-    button:hover { transform: scale(1.02); filter: brightness(1.2); }
-    button:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+    button:hover { transform: translateY(-3px); filter: brightness(1.1); }
+    button:active { transform: translateY(1px); }
 
     .copyright {
-      margin-top: 30px;
-      font-size: 0.8rem;
-      color: #888;
-      font-family: monospace;
+      margin-top: 40px;
+      font-size: 0.9rem;
+      color: #aaa;
       text-align: center;
+      opacity: 0.7;
     }
 
     @media (max-width: 600px) {
         #top { font-size: 12vw; }
-        .input-group { flex-direction: column; align-items: flex-start; }
+        .input-group { flex-direction: column; align-items: flex-start; gap: 5px; }
         .input-label { margin-bottom: 5px; }
-        input { width: 100%; }
-        .radio-group { width: 100%; justify-content: space-around; margin-top: 5px; }
+        input { width: 100%; box-sizing: border-box; }
+        .radio-group { width: 100%; justify-content: flex-start; margin-top: 5px; }
+        .settings-panel { padding: 15px; }
     }
   </style>
 </head>
 <body>
-  <h1 id="top">BOT BINANCE</h1>
+  <h1 id="top">BINANCE BOT</h1>
 
-  <div class="status-bar" id="statusBar">Bot Status: Loading...</div>
-  <div class="countdown-bar" id="countdownBar">Không có lệnh đang chờ đóng.</div>
+  <div class="status-bar" id="statusBar">Status: Loading...</div>
 
-  <div id="log"><div class="log-line">Đang tải nhật ký...</div></div>
+  <div id="log"><div class="log-line">Loading logs...</div></div>
 
   <!-- SETTINGS PANEL -->
   <div class="settings-panel" id="settingsPanel">
@@ -212,28 +230,33 @@
     <!-- API KEYS -->
     <div class="input-group" id="apiSection">
         <div class="input-label">API Key (Optional):</div>
-        <input type="text" id="apiKey" placeholder="Để trống nếu dùng Key mặc định">
+        <input type="text" id="apiKey" placeholder="Blank = Use Saved/Default Key">
     </div>
     <div class="input-group" id="secretSection">
         <div class="input-label">Secret Key (Optional):</div>
-        <input type="password" id="secretKey" placeholder="Để trống nếu dùng Key mặc định">
+        <input type="password" id="secretKey" placeholder="Blank = Use Saved/Default Key">
     </div>
 
     <!-- AMOUNT -->
     <div class="input-group">
-        <div class="input-label">Vốn Vào Lệnh:</div>
+        <div class="input-label">Entry Margin:</div>
         <div class="radio-group">
             <label><input type="radio" name="amountMode" value="percent" checked onchange="toggleAmountPlaceholder()"> % Balance</label>
-            <label><input type="radio" name="amountMode" value="fixed" onchange="toggleAmountPlaceholder()"> USDT (Margin)</label>
+            <label><input type="radio" name="amountMode" value="fixed" onchange="toggleAmountPlaceholder()"> USDT (Fixed)</label>
         </div>
         <input type="number" id="amountVal" value="25" placeholder="%">
     </div>
 
     <!-- TP / SL -->
     <div class="input-group">
-        <div class="input-label">TP / SL (%):</div>
-        <input type="number" id="tpVal" value="55" placeholder="TP %" style="margin-right: 5px;">
-        <input type="number" id="slVal" value="100" placeholder="SL %">
+        <div class="input-label">TP (Large FD) / SL:</div>
+        <div style="display: flex; gap: 10px; flex-grow: 1; width: 100%;">
+            <input type="number" id="tpVal" value="105" placeholder="TP % (Large Funding)">
+            <input type="number" id="slVal" value="100" placeholder="SL %">
+        </div>
+        <div style="width: 100%; font-size: 0.8rem; color: #aaa; margin-top: 5px;">
+            * Note: Small Funding (< 0.5%) is FIXED at 55% TP.
+        </div>
     </div>
 
     <div class="button-row">
@@ -242,12 +265,11 @@
     </div>
   </div>
 
-  <div class="copyright">&copy; 2025 Bot Funding Crypto. All rights reserved.</div>
+  <div class="copyright">&copy; 2025 TunggBeoo. All rights reserved.</div>
 
   <script>
     const logDiv = document.getElementById('log');
     const statusBar = document.getElementById('statusBar');
-    const countdownBar = document.getElementById('countdownBar');
     const apiSection = document.getElementById('apiSection');
     const secretSection = document.getElementById('secretSection');
     const amountInput = document.getElementById('amountVal');
@@ -255,10 +277,10 @@
     function toggleAmountPlaceholder() {
         const mode = document.querySelector('input[name="amountMode"]:checked').value;
         if(mode === 'percent') {
-            amountInput.placeholder = "Nhập % (vd: 25)";
+            amountInput.placeholder = "Enter % (e.g. 25)";
             if(amountInput.value > 100) amountInput.value = 25;
         } else {
-            amountInput.placeholder = "Nhập số USDT (vd: 50)";
+            amountInput.placeholder = "Enter USDT (e.g. 50)";
         }
     }
 
@@ -281,8 +303,8 @@
     function fetchStatus() {
         fetch('/api/status').then(res => res.text()).then(data => {
             statusBar.textContent = data;
-            // Nếu bot đang chạy, ẩn phần nhập API
-            if(data.includes("BOT ĐANG CHẠY")) {
+            // Hide API inputs if running
+            if(data.includes("RUNNING")) {
                  apiSection.classList.add('hidden');
                  secretSection.classList.add('hidden');
             } else {
@@ -290,10 +312,6 @@
                  secretSection.classList.remove('hidden');
             }
         });
-    }
-
-    function fetchCountdown() {
-        fetch('/api/countdown').then(res => res.text()).then(data => countdownBar.textContent = data);
     }
 
     async function startBot() {
@@ -304,22 +322,21 @@
         const tp = document.getElementById('tpVal').value;
         const sl = document.getElementById('slVal').value;
 
-        statusBar.textContent = 'Đang gửi lệnh khởi động...';
+        statusBar.textContent = 'Sending Start Command...';
         try {
-            // Gửi params lên, nếu apiKey/secret rỗng thì server sẽ tự dùng mặc định
             const query = `?apiKey=${encodeURIComponent(apiKey)}&secret=${encodeURIComponent(secret)}&amountMode=${amountMode}&amountVal=${amountVal}&tp=${tp}&sl=${sl}`;
             const response = await fetch('/start_bot_logic' + query);
             const msg = await response.text();
             alert(msg);
             fetchStatus();
         } catch (e) {
-            alert('Lỗi: ' + e.message);
+            alert('Error: ' + e.message);
         }
     }
 
     async function stopBot() {
-        if(!confirm("Bạn có chắc chắn muốn dừng Bot?")) return;
-        statusBar.textContent = 'Đang gửi lệnh dừng...';
+        if(!confirm("Are you sure you want to STOP the bot?")) return;
+        statusBar.textContent = 'Sending Stop Command...';
         try {
             await fetch('/stop_bot_logic');
             fetchStatus();
@@ -328,11 +345,9 @@
 
     setInterval(fetchLogs, 1000);
     setInterval(fetchStatus, 3000);
-    setInterval(fetchCountdown, 1000);
 
     fetchLogs();
     fetchStatus();
-    fetchCountdown();
   </script>
 </body>
 </html>
