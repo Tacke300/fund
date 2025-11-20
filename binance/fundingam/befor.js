@@ -74,10 +74,10 @@ class CriticalApiError extends Error {
 
 const MIN_FUNDING_RATE_THRESHOLD = -0.001; 
 const FUNDING_WINDOW_MINUTES = 3; 
-const MAX_POSITION_LIFETIME_SECONDS = 120; 
+const MAX_POSITION_LIFETIME_SECONDS = 60; 
 const ONLY_OPEN_IF_FUNDING_IN_SECONDS = 60; 
 const OPEN_TRADE_BEFORE_FUNDING_SECONDS = 1; 
-const OPEN_TRADE_AFTER_SECOND_OFFSET_MS = 999; 
+const OPEN_TRADE_AFTER_SECOND_OFFSET_MS = 740; 
 const OPEN_LONG_BEFORE_FUNDING_SECONDS = 10; 
 const DELAY_BEFORE_CANCEL_ORDERS_MS = 3.5 * 60 * 1000; 
 const RETRY_CHECK_POSITION_ATTEMPTS = 6; 
@@ -256,29 +256,24 @@ async function cancelOpenOrdersForSymbol(symbol) {
     } catch (error) { return false; }
 }
 
-// --- HÀM DỌN DẸP MẠNH TAY ---
+// --- AGGRESSIVE CLEANUP ---
 async function aggressiveCleanup(symbol) {
     addLog(`>>> 🧹 CLEANUP: Clearing Orders & Positions for ${symbol}...`);
     try {
-        // 1. Xóa lệnh chờ
         await cancelOpenOrdersForSymbol(symbol);
 
-        // 2. Đóng vị thế (Hedge Mode) - Quét chính xác symbol đó
         const positions = await callSignedAPI('/fapi/v2/positionRisk', 'GET', { symbol });
-        
         for (const pos of positions) {
             const amt = parseFloat(pos.positionAmt);
             if (Math.abs(amt) > 0) {
-                // Nếu vị thế đang Long (>0) -> Bán (Sell) để đóng
-                // Nếu vị thế đang Short (<0) -> Mua (Buy) để đóng
                 const side = amt > 0 ? 'SELL' : 'BUY';
-                
                 addLog(`<span style="color: #ffcc00">⚠️ Closing existing ${pos.positionSide} (${amt})...</span>`);
                 
+                // [FIX] NO reduceOnly in Hedge Mode
                 await callSignedAPI('/fapi/v1/order', 'POST', {
                     symbol: symbol,
                     side: side,
-                    positionSide: pos.positionSide, // Quan trọng: Đóng đúng chiều
+                    positionSide: pos.positionSide,
                     type: 'MARKET',
                     quantity: Math.abs(amt)
                 });
@@ -400,13 +395,13 @@ async function closeLongPreFunding() {
     const { symbol, quantity } = currentLongPosition;
     addLog(`>>> Closing LONG buffer ${symbol}...`);
     try {
+        // [FIX] NO reduceOnly
         await callSignedAPI('/fapi/v1/order', 'POST', {
             symbol: symbol, 
             side: 'SELL', 
             positionSide: 'LONG',
             type: 'MARKET',
-            quantity: quantity, 
-            reduceOnly: 'true'
+            quantity: quantity
         });
         addLog(`<span style="color: #00ffaa">✅ Closed LONG buffer.</span>`);
     } catch (error) {
@@ -423,19 +418,16 @@ async function closeShortPosition(symbol, quantityToClose, reason = 'manual') {
     try {
         if (currentLongPosition) await closeLongPreFunding();
 
+        // [FIX] NO reduceOnly
         await callSignedAPI('/fapi/v1/order', 'POST', {
             symbol: symbol, 
             side: 'BUY', 
             positionSide: 'SHORT',
             type: 'MARKET',
-            quantity: quantityToClose, 
-            reduceOnly: 'true'
+            quantity: quantityToClose
         });
         addLog(`<span style="color: #00ffaa">✅ Closed SHORT ${symbol}.</span>`);
-        
-        // Gọi cleanup sau khi đóng
         cleanupAfterClose(symbol);
-
     } catch (error) {
         addLog(`<span style="color: #ff4444">❌ Error closing SHORT: ${error.msg}</span>`);
         isClosingPosition = false;
@@ -447,12 +439,35 @@ function cleanupAfterClose(symbol) {
     if (positionCheckInterval) { clearInterval(positionCheckInterval); positionCheckInterval = null; }
     
     setTimeout(async () => {
-        // [CHANGE] Sử dụng aggressiveCleanup để dọn dẹp triệt để sau khi hết chu kỳ
         await aggressiveCleanup(symbol);
-        
         if (botRunning) scheduleNextMainCycle();
         isClosingPosition = false;
     }, DELAY_BEFORE_CANCEL_ORDERS_MS);
+}
+
+async function checkAndHandleRemainingPosition(symbol, attempt = 1) {
+    if (attempt > RETRY_CHECK_POSITION_ATTEMPTS) return;
+    await delay(RETRY_CHECK_POSITION_DELAY_MS);
+
+    try {
+        const positions = await callSignedAPI('/fapi/v2/positionRisk', 'GET');
+        const remPos = positions.find(p => p.symbol === symbol && p.positionSide === 'SHORT');
+        
+        if (remPos && Math.abs(parseFloat(remPos.positionAmt)) > 0) {
+            addLog(`<span style="color: #ff4444">❌ Residual SHORT ${symbol} found. Closing attempt ${attempt}...</span>`);
+            // [FIX] NO reduceOnly
+            await callSignedAPI('/fapi/v1/order', 'POST', {
+                symbol: symbol, 
+                side: 'BUY', 
+                positionSide: 'SHORT',
+                type: 'MARKET',
+                quantity: Math.abs(parseFloat(remPos.positionAmt))
+            });
+            checkAndHandleRemainingPosition(symbol, attempt + 1);
+        }
+    } catch (e) { 
+        checkAndHandleRemainingPosition(symbol, attempt + 1);
+    }
 }
 
 async function openShortPosition(symbol, fundingRate, usdtBalance, maxLeverage) {
@@ -489,6 +504,7 @@ async function openShortPosition(symbol, fundingRate, usdtBalance, maxLeverage) 
         
         await closeLongPreFunding();
 
+        // Get Actual Entry Price
         const entryPrice = parseFloat(orderRes.avgFillPrice || currentPrice);
         addLog(`<span style="color: #00ffaa">✅ Opened SHORT ${symbol} @ ${entryPrice}</span>`);
 
@@ -514,29 +530,35 @@ async function openShortPosition(symbol, fundingRate, usdtBalance, maxLeverage) 
         const slPrice = parseFloat((entryPrice * (1 + slMovePercent)).toFixed(symbolInfo.pricePrecision));
 
         addLog(`>>> Setting: TP ${(targetRoe*100).toFixed(0)}% | SL ${userConfig.slPercent}% (ROE)`);
-        addLog(`>>> TP @ ${tpPrice} | SL @ ${slPrice}`);
-        addLog(`>>> Auto Move SL: ${enableAutoMoveSL ? 'ON (after 10s)' : 'OFF'}`);
+        
+        // [FIX] DELAY TP/SL SETTING BY 3 SECONDS
+        addLog(`⏳ Waiting 3s to set TP/SL...`);
+        
+        setTimeout(async () => {
+            addLog(`>>> Setting TP @ ${tpPrice} | SL @ ${slPrice} (After 3s)`);
+            try {
+                await callSignedAPI('/fapi/v1/order', 'POST', {
+                    symbol: symbol, 
+                    side: 'BUY', 
+                    positionSide: 'SHORT', 
+                    type: 'STOP_MARKET',
+                    quantity: quantity, 
+                    stopPrice: slPrice, 
+                    closePosition: 'true'
+                });
+                await callSignedAPI('/fapi/v1/order', 'POST', {
+                    symbol: symbol, 
+                    side: 'BUY', 
+                    positionSide: 'SHORT', 
+                    type: 'TAKE_PROFIT_MARKET',
+                    quantity: quantity, 
+                    stopPrice: tpPrice, 
+                    closePosition: 'true'
+                });
+            } catch (e) { addLog(`<span style="color: #ffcc00">⚠️ Error setting TP/SL Short: ${e.msg}</span>`); }
+        }, 3000);
 
-        try {
-            await callSignedAPI('/fapi/v1/order', 'POST', {
-                symbol: symbol, 
-                side: 'BUY', 
-                positionSide: 'SHORT', 
-                type: 'STOP_MARKET',
-                quantity: quantity, 
-                stopPrice: slPrice, 
-                closePosition: 'true'
-            });
-            await callSignedAPI('/fapi/v1/order', 'POST', {
-                symbol: symbol, 
-                side: 'BUY', 
-                positionSide: 'SHORT', 
-                type: 'TAKE_PROFIT_MARKET',
-                quantity: quantity, 
-                stopPrice: tpPrice, 
-                closePosition: 'true'
-            });
-        } catch (e) { addLog(`<span style="color: #ffcc00">⚠️ Error setting TP/SL Short: ${e.msg}</span>`); }
+        addLog(`>>> Auto Move SL: ${enableAutoMoveSL ? 'ON (after 10s)' : 'OFF'}`);
 
         currentOpenPosition = { symbol, quantity, openTime: new Date(), initialSLPrice: slPrice, initialTPPrice: tpPrice };
         
@@ -646,7 +668,6 @@ async function runTradingLogic() {
                 
                 await setLeverage(best.symbol, best.leverage);
 
-                // [ACTION] Dọn dẹp ngay tại phút 59
                 await aggressiveCleanup(best.symbol);
 
                 clearTimeout(scheduledLongTimeout);
