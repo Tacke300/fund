@@ -2,16 +2,21 @@ import https from 'https';
 import crypto from 'crypto';
 import express from 'express';
 import path from 'path';
+import fs from 'fs'; // Thêm thư viện quản lý file
 import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// --- API KEY VÀ SECRET KEY MẶC ĐỊNH ---
+// --- TÊN FILE CẤU HÌNH ---
+const CONFIG_FILE = path.join(__dirname, 'config.json');
+
+// --- API KEY VÀ SECRET KEY MẶC ĐỊNH (HARDCODE) ---
+// Đây là key dự phòng nếu chưa có file config.json
 const DEFAULT_API_KEY = 'cZ1Y2O0kggVEggEaPvhFcYQHS5b1EsT2OWZb8zdY9C0jGqNROvXRZHTJjnQ7OG4Q'.trim();
 const DEFAULT_SECRET_KEY = 'oU6pZFHgEvbpD9NmFXp5ZVnYFMQ7EIkBiz88aTzvmC3SpT9nEf4fcDf0pEnFzoTc'.trim();
 
-// --- CẤU HÌNH NGƯỜI DÙNG (Sẽ cập nhật từ Web) ---
+// --- CẤU HÌNH KHỞI TẠO ---
 let userConfig = {
     apiKey: DEFAULT_API_KEY,
     secretKey: DEFAULT_SECRET_KEY,
@@ -20,6 +25,30 @@ let userConfig = {
     tpPercent: 55,         
     slPercent: 100         
 };
+
+// --- HÀM ĐỌC/GHI CONFIG ---
+function loadConfigFromFile() {
+    try {
+        if (fs.existsSync(CONFIG_FILE)) {
+            const rawData = fs.readFileSync(CONFIG_FILE, 'utf8');
+            const savedConfig = JSON.parse(rawData);
+            // Trộn cấu hình đã lưu vào cấu hình hiện tại
+            userConfig = { ...userConfig, ...savedConfig };
+            addLog('📂 Đã tải cấu hình đã lưu từ file config.json', true);
+        }
+    } catch (error) {
+        addLog('⚠️ Không thể đọc file config (sẽ dùng mặc định).');
+    }
+}
+
+function saveConfigToFile() {
+    try {
+        fs.writeFileSync(CONFIG_FILE, JSON.stringify(userConfig, null, 2), 'utf8');
+        addLog('💾 Đã lưu cấu hình mới vào file config.json', true);
+    } catch (error) {
+        addLog('❌ Lỗi khi lưu file config: ' + error.message);
+    }
+}
 
 // --- BASE URL CỦA BINANCE FUTURES API ---
 const BASE_HOST = 'fapi.binance.com';
@@ -84,6 +113,7 @@ function addLog(message, isImportant = false) {
     else if (message.startsWith('❌')) consoleEntry = `\x1b[31m${consoleEntry}\x1b[0m`;
     else if (message.startsWith('⚠️')) consoleEntry = `\x1b[33m${consoleEntry}\x1b[0m`;
     else if (message.startsWith('🔮')) consoleEntry = `\x1b[35m${consoleEntry}\x1b[0m`; 
+    else if (message.startsWith('📂') || message.startsWith('💾')) consoleEntry = `\x1b[34m${consoleEntry}\x1b[0m`;
     else if (isImportant) consoleEntry = `\x1b[36m${consoleEntry}\x1b[0m`;
 
     const messageHash = crypto.createHash('md5').update(message).digest('hex');
@@ -270,7 +300,6 @@ async function logBestCandidate() {
             let leverage = await getLeverageBracketForSymbol(topCoin.symbol);
             if (!leverage) leverage = 20; 
 
-            // Tính vốn dự kiến để hiển thị log
             let marginUsed = 0;
             if (userConfig.amountMode === 'percent') {
                 marginUsed = balance * (userConfig.amountValue / 100);
@@ -316,7 +345,6 @@ async function openLongPreFunding(symbol, maxLeverage, availableBalance) {
 
         addLog(`✅ Đã mở LONG lót đường ${symbol}. Qty: ${quantity}`, true);
 
-        // Đặt SL 100% cho lệnh Long
         const slPriceRaw = currentPrice - (initialMargin / quantity);
         const slPrice = Math.floor(slPriceRaw / symbolInfo.tickSize) * symbolInfo.tickSize;
 
@@ -454,18 +482,9 @@ async function openShortPosition(symbol, fundingRate, usdtBalance, maxLeverage) 
         const entryPrice = parseFloat(orderRes.avgFillPrice || currentPrice);
         addLog(`✅ Đã mở SHORT ${symbol} @ ${entryPrice}`, true);
 
-        // --- LOGIC TP/SL (DÙNG INPUT NGƯỜI DÙNG) ---
         let targetRoe = userConfig.tpPercent / 100;
-        // Logic tự chỉnh lại TP nếu Funding > -0.5% (cũ) đã bị ghi đè bởi người dùng nhập
-        // Nhưng yêu cầu là: nhập TP/SL thì mở lệnh theo TP/SL đó.
-        // Tuy nhiên logic cũ có phần:
-        // -0.1% đến -0.5% -> TP 55%
-        // < -0.5% -> TP 105%
-        // Nếu người dùng đã nhập TP vào ô input, ta sẽ ưu tiên số người dùng nhập.
         
-        // Logic tự động dời SL về Entry
         let enableAutoMoveSL = false;
-        // Nếu Funding > -0.005 (từ -0.1% đến -0.49%) -> BẬT Move SL
         if (fundingRate > -0.005) {
             enableAutoMoveSL = true;
         }
@@ -495,7 +514,6 @@ async function openShortPosition(symbol, fundingRate, usdtBalance, maxLeverage) 
 
         currentOpenPosition = { symbol, quantity, openTime: new Date(), initialSLPrice: slPrice, initialTPPrice: tpPrice };
         
-        // --- LOGIC DỜI SL SAU 10S (NẾU ĐƯỢC BẬT) ---
         if (enableAutoMoveSL) {
             setTimeout(async () => {
                 if (!currentOpenPosition || currentOpenPosition.symbol !== symbol || isClosingPosition) return;
@@ -557,7 +575,6 @@ async function runTradingLogic() {
         const acc = await callSignedAPI('/fapi/v2/account', 'GET');
         const balance = parseFloat(acc.assets.find(a => a.asset === 'USDT')?.availableBalance || 0);
         
-        // Kiểm tra số dư tối thiểu (5u)
         if (balance < 5) { 
             addLog('⚠️ Số dư khả dụng quá thấp (< 5 USDT).', true);
             scheduleNextMainCycle(); return;
@@ -637,29 +654,31 @@ async function scheduleNextMainCycle() {
 async function startBotLogicInternal(query) {
     if (botRunning) return 'Bot đang chạy.';
 
-    // Logic ghi đè API Key:
-    // 1. Nếu query.apiKey có dữ liệu (không rỗng) -> Dùng Key mới.
-    // 2. Nếu query.apiKey rỗng (người dùng không nhập) -> Giữ nguyên (Key mặc định).
+    let isUpdated = false;
+
+    // 1. Xử lý Key:
+    // Nếu có Key mới -> Cập nhật
     if (query.apiKey && query.apiKey.trim() !== '') {
         userConfig.apiKey = query.apiKey.trim();
-        addLog('⚙️ Sử dụng API Key MỚI từ Input.');
-    } else {
-        // Đảm bảo nếu chưa từng set thì lấy default
-        if (!userConfig.apiKey) userConfig.apiKey = DEFAULT_API_KEY;
-        addLog('⚙️ Sử dụng API Key MẶC ĐỊNH.');
+        isUpdated = true;
+        addLog('⚙️ Nhận API Key mới từ Web.');
     }
-
+    
     if (query.secret && query.secret.trim() !== '') {
         userConfig.secretKey = query.secret.trim();
-    } else {
-        if (!userConfig.secretKey) userConfig.secretKey = DEFAULT_SECRET_KEY;
+        isUpdated = true;
     }
 
-    // Cập nhật các config khác
-    userConfig.amountMode = query.amountMode || 'percent';
-    userConfig.amountValue = parseFloat(query.amountVal) || 25;
-    userConfig.tpPercent = parseFloat(query.tp) || 55;
-    userConfig.slPercent = parseFloat(query.sl) || 100;
+    // 2. Xử lý Cấu hình (Vốn/TP/SL)
+    if (query.amountMode) { userConfig.amountMode = query.amountMode; isUpdated = true; }
+    if (query.amountVal) { userConfig.amountValue = parseFloat(query.amountVal); isUpdated = true; }
+    if (query.tp) { userConfig.tpPercent = parseFloat(query.tp); isUpdated = true; }
+    if (query.sl) { userConfig.slPercent = parseFloat(query.sl); isUpdated = true; }
+
+    // 3. NẾU CÓ THAY ĐỔI -> LƯU VÀO FILE
+    if (isUpdated) {
+        saveConfigToFile();
+    }
 
     addLog('--- KHỞI ĐỘNG BOT ---', true);
     addLog(`⚙️ Cấu hình: Vốn ${userConfig.amountValue}${userConfig.amountMode === 'percent' ? '%' : '$'} | TP ${userConfig.tpPercent}% | SL ${userConfig.slPercent}%`);
@@ -696,8 +715,11 @@ function stopBotLogicInternal() {
     return 'Bot đã dừng.';
 }
 
+// --- KHỞI TẠO ---
+// Tự động tải config cũ nếu có file
+loadConfigFromFile();
+
 const app = express();
-// Serve file html
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
 app.get('/api/logs', (req, res) => res.send(memoryLogs.join('\n')));
 app.get('/api/status', (req, res) => res.send(botRunning ? `BOT ĐANG CHẠY (Uptime: ${botStartTime ? ((Date.now() - botStartTime)/60000).toFixed(1) : 0}m)` : 'BOT ĐÃ DỪNG'));
