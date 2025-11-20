@@ -3,14 +3,17 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Binance Bot - Config & Monitor</title>
-  <!-- Font Fredoka (Béo, tròn, xinh) -->
-  <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;600&display=swap" rel="stylesheet">
+  <title>Binance Bot</title>
+  <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600&display=swap" rel="stylesheet">
   <style>
+    * {
+      box-sizing: border-box;
+    }
+
     body {
-      font-family: 'Fredoka', sans-serif; /* Font mới cho toàn bộ UI */
-      background: linear-gradient(135deg, #1a1a2e, #16213e, #0f3460);
-      color: #eee;
+      font-family: 'Fredoka', sans-serif;
+      background-color: #05080a;
+      color: #e0f7fa;
       display: flex;
       flex-direction: column;
       justify-content: flex-start;
@@ -18,58 +21,89 @@
       min-height: 100vh;
       margin: 0;
       padding: 20px 10px;
-      box-sizing: border-box;
+      overflow-x: hidden;
+      position: relative;
     }
     
-    /* Grid Background Effect */
     body::before {
         content: "";
         position: fixed;
         top: 0; left: 0; width: 100%; height: 100%;
-        background-image: 
-            linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px),
-            linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
-        background-size: 40px 40px;
+        background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)' opacity='0.07'/%3E%3C/svg%3E");
         z-index: -1;
+        opacity: 0.4;
         pointer-events: none;
+    }
+
+    .glow-bg {
+        position: fixed;
+        border-radius: 50%;
+        filter: blur(80px);
+        opacity: 0.6;
+        z-index: -2;
+        animation: float 15s infinite alternate ease-in-out;
+    }
+
+    .glow-1 {
+        top: -10%; left: -10%;
+        width: 50vw; height: 50vw;
+        background: radial-gradient(circle, #00ff88 0%, transparent 70%);
+        animation-duration: 20s;
+    }
+    
+    .glow-2 {
+        bottom: -10%; right: -10%;
+        width: 60vw; height: 60vw;
+        background: radial-gradient(circle, #004e92 0%, transparent 70%);
+        animation-duration: 25s;
+        animation-delay: -5s;
+    }
+
+    .glow-3 {
+        top: 40%; left: 30%;
+        width: 30vw; height: 30vw;
+        background: radial-gradient(circle, #50c878 0%, transparent 70%);
+        animation-duration: 18s;
+        opacity: 0.4;
+    }
+
+    @keyframes float {
+        0% { transform: translate(0, 0) scale(1); }
+        100% { transform: translate(50px, 50px) scale(1.1); }
     }
 
     #top {
       font-size: 8vw;
       line-height: 1.2;
-      /* Gradient Text */
-      background: linear-gradient(270deg, #ff00cc, #3333ff, #ff00cc);
-      background-size: 300% 300%;
+      background: linear-gradient(to bottom, #ffffff, #a5d6a7);
       -webkit-background-clip: text;
       -webkit-text-fill-color: transparent;
-      animation: moveGradient 5s ease infinite;
       margin-bottom: 30px;
       text-align: center;
-      text-shadow: 0 5px 15px rgba(0,0,0,0.3);
       font-weight: 600;
-      letter-spacing: 2px;
+      letter-spacing: 3px;
+      filter: drop-shadow(0 0 15px rgba(0, 255, 136, 0.5));
     }
 
-    @keyframes moveGradient {
-      0% { background-position: 0% 50%; }
-      50% { background-position: 100% 50%; }
-      100% { background-position: 0% 50%; }
+    .status-bar, .settings-panel, #log {
+        background: rgba(12, 20, 28, 0.6);
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        border: 1px solid rgba(0, 255, 136, 0.2);
+        box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.3);
     }
 
     .status-bar {
         width: 95%;
         max-width: 900px;
-        background: rgba(20, 20, 20, 0.6);
-        color: #00ffcc;
+        color: #00ffaa;
         padding: 15px;
         margin-bottom: 20px;
-        border-radius: 15px;
+        border-radius: 16px;
         font-size: 1.2rem;
         text-align: center;
-        box-sizing: border-box;
-        border: 2px solid #00ffcc;
-        box-shadow: 0 0 15px rgba(0, 255, 204, 0.2);
-        backdrop-filter: blur(10px);
+        text-shadow: 0 0 10px rgba(0, 255, 170, 0.4);
+        border-bottom: 2px solid #00ffaa;
     }
 
     #log {
@@ -77,40 +111,31 @@
       width: 95%;
       max-width: 900px;
       overflow-y: auto;
-      background: rgba(10, 10, 10, 0.8);
       padding: 5px;
       font-size: 0.9rem;
-      border: 1px solid #555;
       margin-bottom: 25px;
-      /* Giữ font log như cũ */
       font-family: 'Courier New', Courier, monospace; 
-      box-sizing: border-box;
-      color: #fff;
       border-radius: 12px;
-      box-shadow: inset 0 0 20px rgba(0,0,0,0.8);
+      color: #cfd8dc;
     }
 
     #log div.log-line {
         padding: 6px 10px;
         line-height: 1.4;
-        border-bottom: 1px solid #222;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.05);
     }
-    #log div.log-line:nth-child(odd) { background-color: rgba(255,255,255,0.03); }
+    #log div.log-line:nth-child(odd) { background-color: rgba(0, 255, 136, 0.03); }
 
-    /* --- SETTINGS PANEL --- */
     .settings-panel {
         width: 95%;
         max-width: 900px;
-        background: rgba(255, 255, 255, 0.1);
-        border: 2px solid #ff00cc;
-        border-radius: 20px;
+        border-radius: 24px;
         padding: 25px;
         margin-bottom: 30px;
-        box-shadow: 0 0 20px rgba(255, 0, 204, 0.2);
         display: flex;
         flex-direction: column;
         gap: 20px;
-        backdrop-filter: blur(5px);
+        transition: all 0.3s ease;
     }
 
     .input-group {
@@ -120,158 +145,157 @@
         align-items: center;
         justify-content: space-between;
         padding-bottom: 15px;
-        border-bottom: 1px solid rgba(255,255,255,0.1);
+        border-bottom: 1px solid rgba(0, 255, 136, 0.1);
+        width: 100%;
     }
     
     .input-group:last-child { border-bottom: none; }
 
     .input-label {
-        color: #ff99ff;
+        color: #69f0ae;
         min-width: 150px;
         font-size: 1.1rem;
-        font-weight: 600;
+        font-weight: 500;
+        text-shadow: 0 0 5px rgba(105, 240, 174, 0.3);
     }
 
     input[type="text"], input[type="number"], input[type="password"] {
-        background: rgba(0,0,0,0.5);
-        border: 2px solid #666;
+        background: rgba(0, 0, 0, 0.4);
+        border: 1px solid rgba(0, 255, 136, 0.3);
         color: #fff;
-        padding: 10px 15px;
-        border-radius: 10px;
-        font-family: 'Fredoka', sans-serif; /* Font input */
+        padding: 12px 15px;
+        border-radius: 12px;
+        font-family: 'Fredoka', sans-serif;
         font-size: 1rem;
         flex-grow: 1;
         transition: 0.3s;
+        width: 100%;
     }
 
-    input:focus {
-        border-color: #00ffcc;
-        outline: none;
+    input:focus { 
+        border-color: #00ffaa; 
+        box-shadow: 0 0 15px rgba(0, 255, 170, 0.2);
+        outline: none; 
     }
 
-    .radio-group { 
-        display: flex; 
-        gap: 20px; 
-        align-items: center; 
-        color: #fff; 
-        font-size: 1rem; 
-    }
-    
-    input[type="radio"] { transform: scale(1.2); margin-right: 5px; }
+    .radio-group { display: flex; gap: 20px; align-items: center; color: #e0f2f1; font-size: 1rem; }
+    input[type="radio"] { transform: scale(1.3); margin-right: 5px; accent-color: #00ffaa; }
 
     .hidden { display: none !important; }
 
     .button-row {
       display: flex;
-      flex-wrap: wrap;
       justify-content: center;
-      gap: 20px;
       width: 100%;
       margin-top: 10px;
     }
 
     button {
-      padding: 15px 30px;
+      padding: 16px 30px;
       font-size: 1.3rem;
       border: none;
       cursor: pointer;
-      border-radius: 50px; /* Rounded buttons */
-      transition: 0.3s;
+      border-radius: 50px;
+      transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
       font-family: 'Fredoka', sans-serif;
       font-weight: 600;
-      flex-grow: 1;
-      min-width: 150px;
-      color: white;
+      width: 100%;
+      color: #002015;
       text-transform: uppercase;
       letter-spacing: 1px;
     }
 
     .start-btn {
-      background: linear-gradient(45deg, #11998e, #38ef7d);
-      box-shadow: 0 5px 15px rgba(56, 239, 125, 0.4);
+      background: linear-gradient(135deg, #00ffaa, #00cdac);
+      box-shadow: 0 5px 20px rgba(0, 255, 170, 0.4);
     }
     
     .stop-btn {
-      background: linear-gradient(45deg, #cb2d3e, #ef473a);
-      box-shadow: 0 5px 15px rgba(239, 71, 58, 0.4);
+      background: linear-gradient(135deg, #ff512f, #dd2476);
+      color: white;
+      box-shadow: 0 5px 20px rgba(221, 36, 118, 0.4);
     }
 
-    button:hover { transform: translateY(-3px); filter: brightness(1.1); }
-    button:active { transform: translateY(1px); }
+    button:hover { 
+        transform: translateY(-4px) scale(1.02); 
+        filter: brightness(1.2);
+    }
+    button:active { transform: translateY(2px); }
 
     .copyright {
       margin-top: 40px;
       font-size: 0.9rem;
-      color: #aaa;
+      color: #546e7a;
       text-align: center;
-      opacity: 0.7;
     }
 
     @media (max-width: 600px) {
         #top { font-size: 12vw; }
-        .input-group { flex-direction: column; align-items: flex-start; gap: 5px; }
-        .input-label { margin-bottom: 5px; }
-        input { width: 100%; box-sizing: border-box; }
-        .radio-group { width: 100%; justify-content: flex-start; margin-top: 5px; }
-        .settings-panel { padding: 15px; }
+        .input-group { flex-direction: column; align-items: flex-start; gap: 8px; }
+        input { width: 100%; }
+        .settings-panel { padding: 20px; }
     }
   </style>
 </head>
 <body>
+  <div class="glow-bg glow-1"></div>
+  <div class="glow-bg glow-2"></div>
+  <div class="glow-bg glow-3"></div>
+
   <h1 id="top">BINANCE BOT</h1>
 
   <div class="status-bar" id="statusBar">Status: Loading...</div>
 
   <div id="log"><div class="log-line">Loading logs...</div></div>
 
-  <!-- SETTINGS PANEL -->
   <div class="settings-panel" id="settingsPanel">
     
-    <!-- API KEYS -->
-    <div class="input-group" id="apiSection">
-        <div class="input-label">API Key (Optional):</div>
-        <input type="text" id="apiKey" placeholder="Blank = Use Saved/Default Key">
-    </div>
-    <div class="input-group" id="secretSection">
-        <div class="input-label">Secret Key (Optional):</div>
-        <input type="password" id="secretKey" placeholder="Blank = Use Saved/Default Key">
-    </div>
-
-    <!-- AMOUNT -->
-    <div class="input-group">
-        <div class="input-label">Entry Margin:</div>
-        <div class="radio-group">
-            <label><input type="radio" name="amountMode" value="percent" checked onchange="toggleAmountPlaceholder()"> % Balance</label>
-            <label><input type="radio" name="amountMode" value="fixed" onchange="toggleAmountPlaceholder()"> USDT (Fixed)</label>
+    <div id="inputContainer">
+        <div class="input-group">
+            <div class="input-label">API Key (Optional):</div>
+            <input type="text" id="apiKey" placeholder="Blank = Use Saved/Default Key">
         </div>
-        <input type="number" id="amountVal" value="25" placeholder="%">
-    </div>
-
-    <!-- TP / SL -->
-    <div class="input-group">
-        <div class="input-label">TP (Large FD) / SL:</div>
-        <div style="display: flex; gap: 10px; flex-grow: 1; width: 100%;">
-            <input type="number" id="tpVal" value="105" placeholder="TP % (Large Funding)">
-            <input type="number" id="slVal" value="100" placeholder="SL %">
+        <div class="input-group">
+            <div class="input-label">Secret Key (Optional):</div>
+            <input type="password" id="secretKey" placeholder="Blank = Use Saved/Default Key">
         </div>
-        <div style="width: 100%; font-size: 0.8rem; color: #aaa; margin-top: 5px;">
-            * Note: Small Funding (< 0.5%) is FIXED at 55% TP.
+
+        <div class="input-group">
+            <div class="input-label">Entry Margin:</div>
+            <div class="radio-group">
+                <label><input type="radio" name="amountMode" value="percent" checked onchange="toggleAmountPlaceholder()"> % Balance</label>
+                <label><input type="radio" name="amountMode" value="fixed" onchange="toggleAmountPlaceholder()"> USDT (Fixed)</label>
+            </div>
+            <input type="number" id="amountVal" value="25" placeholder="%">
+        </div>
+
+        <div class="input-group">
+            <div class="input-label">TP (Large FD) / SL:</div>
+            <div style="display: flex; gap: 10px; flex-grow: 1; width: 100%;">
+                <input type="number" id="tpVal" value="105" placeholder="TP % (Large Funding)">
+                <input type="number" id="slVal" value="100" placeholder="SL %">
+            </div>
+            <div style="width: 100%; font-size: 0.8rem; color: #80cbc4; margin-top: 5px; font-style: italic;">
+                * Note: Small Funding (< 0.5%) is FIXED at 55% TP.
+            </div>
         </div>
     </div>
 
     <div class="button-row">
-        <button class="start-btn" onclick="startBot()">START BOT</button>
-        <button class="stop-btn" onclick="stopBot()">STOP BOT</button>
+        <button id="btnStart" class="start-btn" onclick="startBot()">START BOT</button>
+        <button id="btnStop" class="stop-btn hidden" onclick="stopBot()">STOP BOT</button>
     </div>
   </div>
 
-  <div class="copyright">&copy; 2025 TunggBeoo. All rights reserved.</div>
+  <div class="copyright">&copy; 2025 Funding Bot Crypto. All rights reserved.</div>
 
   <script>
     const logDiv = document.getElementById('log');
     const statusBar = document.getElementById('statusBar');
-    const apiSection = document.getElementById('apiSection');
-    const secretSection = document.getElementById('secretSection');
+    
+    const inputContainer = document.getElementById('inputContainer');
+    const btnStart = document.getElementById('btnStart');
+    const btnStop = document.getElementById('btnStop');
     const amountInput = document.getElementById('amountVal');
 
     function toggleAmountPlaceholder() {
@@ -300,17 +324,27 @@
             });
     }
 
+    function updateUI(isRunning) {
+        if (isRunning) {
+            inputContainer.classList.add('hidden');
+            btnStart.classList.add('hidden');
+            btnStop.classList.remove('hidden');
+            statusBar.style.boxShadow = "0 0 25px #00ffaa";
+            statusBar.style.borderColor = "#00ffaa";
+        } else {
+            inputContainer.classList.remove('hidden');
+            btnStart.classList.remove('hidden');
+            btnStop.classList.add('hidden');
+            statusBar.style.boxShadow = "0 0 15px rgba(0, 255, 204, 0.2)";
+            statusBar.style.borderColor = "rgba(0, 255, 204, 0.5)";
+        }
+    }
+
     function fetchStatus() {
         fetch('/api/status').then(res => res.text()).then(data => {
             statusBar.textContent = data;
-            // Hide API inputs if running
-            if(data.includes("RUNNING")) {
-                 apiSection.classList.add('hidden');
-                 secretSection.classList.add('hidden');
-            } else {
-                 apiSection.classList.remove('hidden');
-                 secretSection.classList.remove('hidden');
-            }
+            const isRunning = data.includes("RUNNING");
+            updateUI(isRunning);
         });
     }
 
