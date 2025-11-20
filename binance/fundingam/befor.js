@@ -17,7 +17,7 @@ let userConfig = {
     apiKey: DEFAULT_API_KEY,
     secretKey: DEFAULT_SECRET_KEY,
     amountMode: 'percent', 
-    amountValue: 25,       
+    amountValue: 24,       
     tpPercent: 105,        
     slPercent: 100         
 };
