@@ -19,7 +19,7 @@ let userConfig = {
     amountMode: 'percent', 
     amountValue: 25,       
     tpPercent: 55,        
-    slPercent: 200         
+    slPercent: 100         
 };
 
 function loadConfigFromFile() {
@@ -74,7 +74,6 @@ class CriticalApiError extends Error {
 
 const MIN_FUNDING_RATE_THRESHOLD = -0.001; 
 const FUNDING_WINDOW_MINUTES = 3; 
-const MAX_POSITION_LIFETIME_SECONDS = 60; 
 const ONLY_OPEN_IF_FUNDING_IN_SECONDS = 60; 
 const OPEN_TRADE_BEFORE_FUNDING_SECONDS = 1; 
 const OPEN_TRADE_AFTER_SECOND_OFFSET_MS = 833; 
@@ -212,8 +211,14 @@ async function syncServerTime() {
 async function getLeverageBracketForSymbol(symbol) {
     try {
         const response = await callSignedAPI('/fapi/v1/leverageBracket', 'GET', { symbol });
-        return response[0]?.brackets[0]?.initialLeverage || null;
-    } catch (error) { return null; }
+        const brackets = response[0]?.brackets || [];
+        brackets.sort((a, b) => b.initialLeverage - a.initialLeverage);
+        
+        if (brackets.length > 0) {
+            return brackets[0].initialLeverage; 
+        }
+        return 20;
+    } catch (error) { return 20; }
 }
 
 async function setLeverage(symbol, leverage) {
@@ -269,7 +274,6 @@ async function aggressiveCleanup(symbol) {
                 const side = amt > 0 ? 'SELL' : 'BUY';
                 addLog(`<span style="color: #ffcc00">⚠️ Closing existing ${pos.positionSide} (${amt})...</span>`);
                 
-                // [FIX] NO reduceOnly in Hedge Mode
                 await callSignedAPI('/fapi/v1/order', 'POST', {
                     symbol: symbol,
                     side: side,
@@ -395,11 +399,10 @@ async function closeLongPreFunding() {
     const { symbol, quantity } = currentLongPosition;
     addLog(`>>> Closing LONG buffer ${symbol}...`);
     try {
-        // [FIX] NO reduceOnly
         await callSignedAPI('/fapi/v1/order', 'POST', {
             symbol: symbol, 
             side: 'SELL', 
-            positionSide: 'LONG',
+            positionSide: 'LONG', 
             type: 'MARKET',
             quantity: quantity
         });
@@ -418,7 +421,6 @@ async function closeShortPosition(symbol, quantityToClose, reason = 'manual') {
     try {
         if (currentLongPosition) await closeLongPreFunding();
 
-        // [FIX] NO reduceOnly
         await callSignedAPI('/fapi/v1/order', 'POST', {
             symbol: symbol, 
             side: 'BUY', 
@@ -455,11 +457,10 @@ async function checkAndHandleRemainingPosition(symbol, attempt = 1) {
         
         if (remPos && Math.abs(parseFloat(remPos.positionAmt)) > 0) {
             addLog(`<span style="color: #ff4444">❌ Residual SHORT ${symbol} found. Closing attempt ${attempt}...</span>`);
-            // [FIX] NO reduceOnly
             await callSignedAPI('/fapi/v1/order', 'POST', {
                 symbol: symbol, 
                 side: 'BUY', 
-                positionSide: 'SHORT',
+                positionSide: 'SHORT', 
                 type: 'MARKET',
                 quantity: Math.abs(parseFloat(remPos.positionAmt))
             });
@@ -504,12 +505,10 @@ async function openShortPosition(symbol, fundingRate, usdtBalance, maxLeverage) 
         
         await closeLongPreFunding();
 
-        // [THAY ĐỔI QUAN TRỌNG]: Không tính TP/SL ngay, mà đợi 5s để lấy Entry Price chuẩn
         addLog(`<span style="color: #00ffaa">✅ SHORT Placed. Waiting 5s to set accurate TP/SL...</span>`);
 
         setTimeout(async () => {
             try {
-                // 1. Lấy thông tin vị thế thực tế từ Binance
                 const positions = await callSignedAPI('/fapi/v2/positionRisk', 'GET', { symbol });
                 const pos = positions.find(p => p.symbol === symbol && p.positionSide === 'SHORT');
                 
@@ -519,93 +518,99 @@ async function openShortPosition(symbol, fundingRate, usdtBalance, maxLeverage) 
                 }
 
                 const realEntryPrice = parseFloat(pos.entryPrice);
-                addLog(`>>> Real Entry Price Found: ${realEntryPrice}`);
+                const realLeverage = parseInt(pos.leverage);
+                
+                addLog(`>>> Data Sync: Entry ${realEntryPrice} | Lev x${realLeverage}`);
 
-                // 2. Tính toán TP/SL dựa trên Real Entry Price
+                // --- TÍNH TOÁN TP/SL & TIME LIMIT ---
                 let targetRoe;
                 let enableAutoMoveSL = false;
+                let positionTimeLimit = 120; // Mặc định 120s
 
                 if (fundingRate > -0.005) {
-                    targetRoe = 0.25; // 55%
+                    // SMALL FUNDING
+                    targetRoe = 0.25; // [FIX] TP 25%
+                    positionTimeLimit = 60; // [FIX] Hold 60s
                     enableAutoMoveSL = true;
+                    addLog(`⚡ Small Funding -> TP Fixed 25% | Limit 60s`);
                 } else {
+                    // LARGE FUNDING
                     targetRoe = userConfig.tpPercent / 100;
+                    positionTimeLimit = 120; // [FIX] Hold 120s
                     enableAutoMoveSL = false;
+                    addLog(`⚡ Large Funding -> TP User Config | Limit 120s`);
                 }
 
                 const stopLossRoe = userConfig.slPercent / 100;
 
-                // Công thức ROE: Price Change % = ROE / Leverage
-                const tpMovePercent = targetRoe / maxLeverage;
-                const slMovePercent = stopLossRoe / maxLeverage;
+                const tpMovePercent = targetRoe / realLeverage; 
+                const slMovePercent = stopLossRoe / realLeverage;
 
-                // Short: TP < Entry, SL > Entry
                 const tpPrice = parseFloat((realEntryPrice * (1 - tpMovePercent)).toFixed(symbolInfo.pricePrecision));
                 const slPrice = parseFloat((realEntryPrice * (1 + slMovePercent)).toFixed(symbolInfo.pricePrecision));
 
                 addLog(`>>> Setting TP @ ${tpPrice} (${(targetRoe*100).toFixed(0)}%) | SL @ ${slPrice} (${userConfig.slPercent}%)`);
 
-                // 3. Đặt lệnh TP/SL
+                // ĐẶT TP/SL BAN ĐẦU
                 await callSignedAPI('/fapi/v1/order', 'POST', {
-                    symbol: symbol, 
-                    side: 'BUY', 
-                    positionSide: 'SHORT', 
-                    type: 'STOP_MARKET',
-                    quantity: quantity, 
-                    stopPrice: slPrice, 
-                    closePosition: 'true'
+                    symbol: symbol, side: 'BUY', positionSide: 'SHORT', type: 'STOP_MARKET',
+                    quantity: quantity, stopPrice: slPrice, closePosition: 'true', workingType: 'MARK_PRICE'
                 });
                 await callSignedAPI('/fapi/v1/order', 'POST', {
-                    symbol: symbol, 
-                    side: 'BUY', 
-                    positionSide: 'SHORT', 
-                    type: 'TAKE_PROFIT_MARKET',
-                    quantity: quantity, 
-                    stopPrice: tpPrice, 
-                    closePosition: 'true'
+                    symbol: symbol, side: 'BUY', positionSide: 'SHORT', type: 'TAKE_PROFIT_MARKET',
+                    quantity: quantity, stopPrice: tpPrice, closePosition: 'true', workingType: 'MARK_PRICE'
                 });
 
-                // 4. Cập nhật lại trạng thái bot
                 currentOpenPosition = { 
-                    symbol, 
-                    quantity, 
+                    symbol, quantity, 
                     openTime: new Date(), 
                     initialSLPrice: slPrice, 
-                    initialTPPrice: tpPrice 
+                    initialTPPrice: tpPrice,
+                    timeLimit: positionTimeLimit // Lưu lại thời gian giới hạn
                 };
 
-                // Auto Move SL Logic (Nếu cần)
+                // --- AUTO MOVE SL LOGIC (CÓ CƠ CHẾ PHỤC HỒI) ---
                 if (enableAutoMoveSL) {
                     addLog(`>>> Auto Move SL: ON (after 10s)`);
                     setTimeout(async () => {
                         if (!currentOpenPosition || currentOpenPosition.symbol !== symbol || isClosingPosition) return;
                         addLog(`⏳ [10s] Moving SL to Entry (${realEntryPrice})...`);
+                        
                         try {
+                            // 1. Xóa lệnh cũ
                             await callSignedAPI('/fapi/v1/allOpenOrders', 'DELETE', { symbol });
                             
+                            // 2. Cố gắng đặt SL về Entry
                             await callSignedAPI('/fapi/v1/order', 'POST', {
-                                symbol: symbol, 
-                                side: 'BUY', 
-                                positionSide: 'SHORT', 
-                                type: 'STOP_MARKET',
-                                quantity: quantity, 
-                                stopPrice: realEntryPrice, 
-                                closePosition: 'true'
+                                symbol: symbol, side: 'BUY', positionSide: 'SHORT', type: 'STOP_MARKET',
+                                quantity: quantity, stopPrice: realEntryPrice, closePosition: 'true', workingType: 'MARK_PRICE'
                             });
 
+                            // 3. Đặt lại TP
                             await callSignedAPI('/fapi/v1/order', 'POST', {
-                                symbol: symbol, 
-                                side: 'BUY', 
-                                positionSide: 'SHORT', 
-                                type: 'TAKE_PROFIT_MARKET',
-                                quantity: quantity, 
-                                stopPrice: tpPrice, 
-                                closePosition: 'true'
+                                symbol: symbol, side: 'BUY', positionSide: 'SHORT', type: 'TAKE_PROFIT_MARKET',
+                                quantity: quantity, stopPrice: tpPrice, closePosition: 'true', workingType: 'MARK_PRICE'
                             });
 
                             addLog(`<span style="color: #00ffaa">✅ Moved SL to ${realEntryPrice} (0%) & Reset TP.</span>`);
                         } catch (e) {
-                            addLog(`<span style="color: #ffcc00">⚠️ Error moving SL: ${e.msg}</span>`);
+                            // [FIX] LỖI XẢY RA -> PHỤC HỒI LẠI TP/SL GỐC NGAY LẬP TỨC
+                            addLog(`<span style="color: #ff4444">⚠️ Move SL Failed (PnL Negative/Error). REVERTING TO ORIGINAL SL/TP...</span>`);
+                            try {
+                                await callSignedAPI('/fapi/v1/allOpenOrders', 'DELETE', { symbol }); // Xóa rác nếu có
+                                
+                                await callSignedAPI('/fapi/v1/order', 'POST', {
+                                    symbol: symbol, side: 'BUY', positionSide: 'SHORT', type: 'STOP_MARKET',
+                                    quantity: quantity, stopPrice: slPrice, closePosition: 'true', workingType: 'MARK_PRICE'
+                                });
+                                await callSignedAPI('/fapi/v1/order', 'POST', {
+                                    symbol: symbol, side: 'BUY', positionSide: 'SHORT', type: 'TAKE_PROFIT_MARKET',
+                                    quantity: quantity, stopPrice: tpPrice, closePosition: 'true', workingType: 'MARK_PRICE'
+                                });
+                                addLog(`<span style="color: #00ffaa">✅ Reverted to Original SL/TP. Position Safe.</span>`);
+                            } catch (revertError) {
+                                addLog(`<span style="color: #ff4444">❌ CRITICAL: Failed to revert SL/TP. Close Manually!</span>`);
+                            }
                         }
                     }, 10000);
                 }
@@ -615,7 +620,7 @@ async function openShortPosition(symbol, fundingRate, usdtBalance, maxLeverage) 
             } catch (e) {
                 addLog(`<span style="color: #ffcc00">⚠️ Error setting TP/SL Short: ${e.msg || e.message}</span>`);
             }
-        }, 5000); // Đợi 5 giây
+        }, 5000); 
 
     } catch (error) {
         addLog(`<span style="color: #ff4444">❌ Error opening SHORT: ${error.message || error.msg}</span>`);
@@ -626,9 +631,12 @@ async function openShortPosition(symbol, fundingRate, usdtBalance, maxLeverage) 
 
 async function manageOpenPosition() {
     if (!currentOpenPosition || isClosingPosition) return;
-    const { symbol, quantity, openTime } = currentOpenPosition;
+    const { symbol, quantity, openTime, timeLimit } = currentOpenPosition;
+    
+    // [FIX] SỬ DỤNG TIME LIMIT ĐỘNG (60s hoặc 120s)
+    const limitSeconds = timeLimit || 120;
 
-    if ((new Date() - openTime) / 1000 >= MAX_POSITION_LIFETIME_SECONDS) {
+    if ((new Date() - openTime) / 1000 >= limitSeconds) {
         await closeShortPosition(symbol, quantity, 'Time Limit');
         return;
     }
