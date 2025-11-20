@@ -28,26 +28,29 @@
       display: flex;
       align-items: center;
       justify-content: center;
-      gap: 10px;
+      gap: 12px;
       margin-bottom: 25px;
       margin-top: 10px;
+      width: 100%;
     }
 
     .binance-logo {
-      width: 32px;
-      height: 32px;
+      width: 36px;
+      height: 36px;
       fill: #FCD535;
-      display: block;
+      flex-shrink: 0;
     }
 
     h1 {
       font-size: 1.8rem;
-      font-weight: 700;
+      font-weight: 600;
       color: #FCD535;
       margin: 0;
       line-height: 1;
       letter-spacing: 0.5px;
       text-transform: uppercase;
+      display: flex;
+      align-items: center; 
     }
 
     .status-bar {
@@ -81,13 +84,16 @@
     }
 
     #log div.log-line {
-      padding: 6px 12px;
+      padding: 8px 12px;
       line-height: 1.4;
       border-bottom: none;
     }
 
     #log div.log-line:nth-child(even) {
       background-color: #161A1E;
+    }
+    #log div.log-line:nth-child(odd) {
+      background-color: #0B0E11;
     }
 
     .settings-panel {
@@ -133,9 +139,7 @@
       background-color: #181A20;
     }
 
-    input::placeholder {
-      color: #5E6673;
-    }
+    input::placeholder { color: #5E6673; }
 
     .radio-group {
       display: flex;
@@ -165,9 +169,7 @@
       margin: 0;
     }
 
-    input[type="radio"]:checked {
-      border-color: #FCD535;
-    }
+    input[type="radio"]:checked { border-color: #FCD535; }
 
     input[type="radio"]:checked::after {
       content: '';
@@ -180,23 +182,18 @@
       border-radius: 50%;
     }
 
-    .row {
-      display: flex;
-      gap: 12px;
-    }
+    .row { display: flex; gap: 12px; }
 
     .helper-text {
       font-size: 0.75rem;
       color: #848E9C;
-      margin-top: 5px; 
+      margin-top: 8px; 
       font-style: italic;
     }
 
     .hidden { display: none !important; }
 
-    .button-row {
-      margin-top: 5px;
-    }
+    .button-row { margin-top: 5px; }
 
     button {
       padding: 12px 20px;
@@ -210,15 +207,8 @@
       transition: opacity 0.2s;
     }
 
-    .start-btn {
-      background-color: #FCD535;
-      color: #181A20;
-    }
-    
-    .stop-btn {
-      background-color: #F03D4D; 
-      color: #FFFFFF;
-    }
+    .start-btn { background-color: #FCD535; color: #181A20; }
+    .stop-btn { background-color: #F03D4D; color: #FFFFFF; }
 
     button:hover { opacity: 0.9; }
     button:active { transform: scale(0.99); }
@@ -238,7 +228,7 @@
 
   <div class="header-container">
     <svg class="binance-logo" viewBox="0 0 32 32">
-      <path d="M16 0l6.063 6.063-2.688 2.688L16 5.375l-3.375 3.375-2.688-2.688L16 0zm-9.438 9.438L9.25 12.125l-3.375 3.375L2.5 12.125l4.063-2.688zm18.875 0l4.063 2.688-3.375 3.375-3.375-3.375 2.688-2.688zM16 10.75l5.875 5.875L24.563 14 16 5.438 7.438 14l2.688 2.625L16 10.75zm0 5.375l-3.375 3.375L16 22.875l3.375-3.375L16 16.125zM5.875 18.875l3.375-3.375 2.688 2.688L16 24.063l-6.063 6.063-6.063-6.063 2.688-2.688 2.688-2.688 3.375 3.375-3.375-3.375-3.25 3.25zm20.25 0l-3.375-3.375-3.375 3.375 2.688 2.688 4.063-2.688zM16 26.625l-3.375-3.375-2.688 2.688L16 32l6.063-6.063-2.688-2.688L16 26.625z"/>
+      <path d="M16 0l6.06 6.06-2.69 2.69L16 5.38l-3.37 3.37-2.69-2.69L16 0zm-9.44 9.44L9.25 12.13l-3.37 3.37L2.5 12.13l4.06-2.69zm18.88 0l4.06 2.69-3.37 3.37-3.37-3.37 2.68-2.69zM16 10.75l5.88 5.88L24.56 14 16 5.44 7.44 14l2.69 2.63L16 10.75zm0 5.38l-3.37 3.37L16 22.88l3.37-3.38L16 16.13zM5.88 18.88l3.37-3.38 2.69 2.69L16 24.06l-6.06 6.06-6.06-6.06 2.69-2.69 2.69-2.69 3.37 3.38-3.37-3.38-3.25 3.25zm20.25 0l-3.37-3.38-3.37 3.38 2.69 2.69 4.06-2.69zM16 26.63l-3.37-3.38-2.69 2.69L16 32l6.06-6.06-2.69-2.69-3.37 3.38z"/>
     </svg>
     <h1>BINANCE BOT</h1>
   </div>
