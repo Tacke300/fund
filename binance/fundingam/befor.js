@@ -256,6 +256,40 @@ async function cancelOpenOrdersForSymbol(symbol) {
     } catch (error) { return false; }
 }
 
+// --- HÀM DỌN DẸP MẠNH TAY ---
+async function aggressiveCleanup(symbol) {
+    addLog(`>>> 🧹 CLEANUP: Clearing Orders & Positions for ${symbol}...`);
+    try {
+        // 1. Xóa lệnh chờ
+        await cancelOpenOrdersForSymbol(symbol);
+
+        // 2. Đóng vị thế (Hedge Mode) - Quét chính xác symbol đó
+        const positions = await callSignedAPI('/fapi/v2/positionRisk', 'GET', { symbol });
+        
+        for (const pos of positions) {
+            const amt = parseFloat(pos.positionAmt);
+            if (Math.abs(amt) > 0) {
+                // Nếu vị thế đang Long (>0) -> Bán (Sell) để đóng
+                // Nếu vị thế đang Short (<0) -> Mua (Buy) để đóng
+                const side = amt > 0 ? 'SELL' : 'BUY';
+                
+                addLog(`<span style="color: #ffcc00">⚠️ Closing existing ${pos.positionSide} (${amt})...</span>`);
+                
+                await callSignedAPI('/fapi/v1/order', 'POST', {
+                    symbol: symbol,
+                    side: side,
+                    positionSide: pos.positionSide, // Quan trọng: Đóng đúng chiều
+                    type: 'MARKET',
+                    quantity: Math.abs(amt)
+                });
+            }
+        }
+        addLog(`<span style="color: #00ffaa">✅ ${symbol} Cleaned. Ready.</span>`);
+    } catch (e) {
+        addLog(`<span style="color: #ff4444">⚠️ Cleanup error: ${e.message}</span>`);
+    }
+}
+
 async function logBestCandidate() {
     if (!botRunning) return;
     
@@ -295,10 +329,8 @@ async function logBestCandidate() {
             const displayFr = (topCoin.fr * 100).toFixed(4);
             const timeStr = formatTimeUTC(topCoin.time);
 
-            // [CHANGE] Log màu VÀNG (#FCD535) cho thông tin dự báo
             addLog(`<span style="color: #FCD535">🔮 [FORECAST] ${topCoin.symbol}</span> | <span style="color: #FCD535">FR:</span> ${displayFr}% | <span style="color: #FCD535">Time:</span> ${timeStr} | <span style="color: #FCD535">Margin:</span> ${marginUsed.toFixed(2)}$`);
         } else {
-            // [CHANGE] Log màu VÀNG cho thông báo không tìm thấy coin
             addLog(`<span style="color: #FCD535">🔮 [FORECAST] No coin found with FR <= ${(MIN_FUNDING_RATE_THRESHOLD * 100)}%</span>`);
         }
 
@@ -400,7 +432,10 @@ async function closeShortPosition(symbol, quantityToClose, reason = 'manual') {
             reduceOnly: 'true'
         });
         addLog(`<span style="color: #00ffaa">✅ Closed SHORT ${symbol}.</span>`);
+        
+        // Gọi cleanup sau khi đóng
         cleanupAfterClose(symbol);
+
     } catch (error) {
         addLog(`<span style="color: #ff4444">❌ Error closing SHORT: ${error.msg}</span>`);
         isClosingPosition = false;
@@ -412,36 +447,12 @@ function cleanupAfterClose(symbol) {
     if (positionCheckInterval) { clearInterval(positionCheckInterval); positionCheckInterval = null; }
     
     setTimeout(async () => {
-        await cancelOpenOrdersForSymbol(symbol);
-        await checkAndHandleRemainingPosition(symbol);
+        // [CHANGE] Sử dụng aggressiveCleanup để dọn dẹp triệt để sau khi hết chu kỳ
+        await aggressiveCleanup(symbol);
+        
         if (botRunning) scheduleNextMainCycle();
         isClosingPosition = false;
     }, DELAY_BEFORE_CANCEL_ORDERS_MS);
-}
-
-async function checkAndHandleRemainingPosition(symbol, attempt = 1) {
-    if (attempt > RETRY_CHECK_POSITION_ATTEMPTS) return;
-    await delay(RETRY_CHECK_POSITION_DELAY_MS);
-
-    try {
-        const positions = await callSignedAPI('/fapi/v2/positionRisk', 'GET');
-        const remPos = positions.find(p => p.symbol === symbol && p.positionSide === 'SHORT');
-        
-        if (remPos && Math.abs(parseFloat(remPos.positionAmt)) > 0) {
-            addLog(`<span style="color: #ff4444">❌ Residual SHORT ${symbol} found. Closing attempt ${attempt}...</span>`);
-            await callSignedAPI('/fapi/v1/order', 'POST', {
-                symbol: symbol, 
-                side: 'BUY', 
-                positionSide: 'SHORT',
-                type: 'MARKET',
-                quantity: Math.abs(parseFloat(remPos.positionAmt)), 
-                reduceOnly: 'true'
-            });
-            checkAndHandleRemainingPosition(symbol, attempt + 1);
-        }
-    } catch (e) { 
-        checkAndHandleRemainingPosition(symbol, attempt + 1);
-    }
 }
 
 async function openShortPosition(symbol, fundingRate, usdtBalance, maxLeverage) {
@@ -479,7 +490,6 @@ async function openShortPosition(symbol, fundingRate, usdtBalance, maxLeverage) 
         await closeLongPreFunding();
 
         const entryPrice = parseFloat(orderRes.avgFillPrice || currentPrice);
-        // [CHANGE] Vẫn giữ màu Xanh Lá (#00ffaa) cho lệnh SELECTED/OPEN
         addLog(`<span style="color: #00ffaa">✅ Opened SHORT ${symbol} @ ${entryPrice}</span>`);
 
         let targetRoe;
@@ -630,12 +640,14 @@ async function runTradingLogic() {
             const delayLong = longTime - Date.now();
 
             if (delayShort > 0 && delayShort <= ONLY_OPEN_IF_FUNDING_IN_SECONDS * 1000) {
-                // [CHANGE] Vẫn giữ màu Xanh Lá (#00ffaa) cho SELECTED
                 addLog(`<span style="color: #00ffaa">✅ SELECTED: ${best.symbol} (FR: ${(best.fr * 100).toFixed(4)}%)</span>`);
                 addLog(`-> Long Buffer in: ${Math.ceil(delayLong/1000)}s`);
                 addLog(`-> Short Main in: ${Math.ceil(delayShort/1000)}s`);
                 
                 await setLeverage(best.symbol, best.leverage);
+
+                // [ACTION] Dọn dẹp ngay tại phút 59
+                await aggressiveCleanup(best.symbol);
 
                 clearTimeout(scheduledLongTimeout);
                 if (delayLong > 0) {
