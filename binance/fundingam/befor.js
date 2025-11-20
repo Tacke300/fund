@@ -30,7 +30,7 @@ function loadConfigFromFile() {
             userConfig = { ...userConfig, ...savedConfig };
         }
     } catch (error) {
-        addLog('Warning: Could not read config file.');
+        addLog('<span style="color: #ffcc00">⚠️ Warning: Could not read config file.</span>');
     }
 }
 
@@ -38,7 +38,7 @@ function saveConfigToFile() {
     try {
         fs.writeFileSync(CONFIG_FILE, JSON.stringify(userConfig, null, 2), 'utf8');
     } catch (error) {
-        addLog('Error saving config file: ' + error.message);
+        addLog('<span style="color: #ff4444">❌ Error saving config file: ' + error.message + '</span>');
     }
 }
 
@@ -84,7 +84,7 @@ const RETRY_CHECK_POSITION_ATTEMPTS = 6;
 const RETRY_CHECK_POSITION_DELAY_MS = 30000; 
 const WEB_SERVER_PORT = 9999; 
 
-function addLog(message, isImportant = false) {
+function addLog(message) {
     const now = new Date();
     
     const day = String(now.getUTCDate()).padStart(2, '0');
@@ -97,30 +97,21 @@ function addLog(message, isImportant = false) {
     const time = `${day}/${month} ${hours}:${minutes}:${seconds}.${ms}`;
     let logEntry = `[${time}] ${message}`;
 
-    let consoleEntry = logEntry;
-    if (message.startsWith('✅')) consoleEntry = `\x1b[32m${consoleEntry}\x1b[0m`;
-    else if (message.startsWith('❌')) consoleEntry = `\x1b[31m${consoleEntry}\x1b[0m`;
-    else if (message.startsWith('⚠️')) consoleEntry = `\x1b[33m${consoleEntry}\x1b[0m`;
-    else if (message.startsWith('🔮')) consoleEntry = `\x1b[35m${consoleEntry}\x1b[0m`; 
-    else if (message.startsWith('Update done')) consoleEntry = `\x1b[34m${consoleEntry}\x1b[0m`;
-    else if (isImportant) consoleEntry = `\x1b[36m${consoleEntry}\x1b[0m`;
-
-    const messageHash = crypto.createHash('md5').update(message).digest('hex');
+    const plainTextMsg = message.replace(/<[^>]*>?/gm, ''); 
+    const messageHash = crypto.createHash('md5').update(plainTextMsg).digest('hex');
+    
     if (logCounts[messageHash]) {
         logCounts[messageHash].count++;
-        if (!isImportant && (now.getTime() - logCounts[messageHash].lastLoggedTime.getTime()) < LOG_COOLDOWN_MS) {
+        if ((now.getTime() - logCounts[messageHash].lastLoggedTime.getTime()) < LOG_COOLDOWN_MS) {
             return; 
         } else {
-            if (logCounts[messageHash].count > 1) {
-                console.log(`[${time}] (Repeat x${logCounts[messageHash].count}) ${message}`);
-            }
             logCounts[messageHash] = { count: 1, lastLoggedTime: now };
         }
     } else {
         logCounts[messageHash] = { count: 1, lastLoggedTime: now };
-        console.log(consoleEntry);
     }
 
+    console.log(`[${time}] ${plainTextMsg}`); 
     memoryLogs.push(logEntry);
     if (memoryLogs.length > MAX_LOG_SIZE) memoryLogs.shift(); 
 }
@@ -186,7 +177,7 @@ async function callSignedAPI(fullEndpointPath, method = 'GET', params = {}) {
         return JSON.parse(rawData);
     } catch (error) {
         consecutiveApiErrors++;
-        addLog(`❌ API Error: ${error.code} - ${error.msg || error.message}`);
+        addLog(`<span style="color: #ff4444">❌ API Error: ${error.code} - ${error.msg || error.message}</span>`);
         if (consecutiveApiErrors >= MAX_CONSECUTIVE_API_ERRORS) {
             throw new CriticalApiError("Critical API Error.");
         }
@@ -213,7 +204,7 @@ async function syncServerTime() {
         const data = await callPublicAPI('/fapi/v1/time');
         serverTimeOffset = data.serverTime - Date.now();
     } catch (error) {
-        addLog(`❌ Sync time error: ${error.message}.`, true);
+        addLog(`<span style="color: #ff4444">❌ Sync time error: ${error.message}.</span>`);
         throw error;
     }
 }
@@ -282,7 +273,13 @@ async function logBestCandidate() {
         }
 
         if (candidates.length > 0) {
-            candidates.sort((a, b) => a.fr - b.fr);
+            candidates.sort((a, b) => {
+                if (a.time === b.time) {
+                    return a.fr - b.fr; 
+                }
+                return a.time - b.time; 
+            });
+
             const topCoin = candidates[0];
 
             let leverage = await getLeverageBracketForSymbol(topCoin.symbol);
@@ -298,18 +295,18 @@ async function logBestCandidate() {
             const displayFr = (topCoin.fr * 100).toFixed(4);
             const timeStr = formatTimeUTC(topCoin.time);
 
-            addLog(`🔮 [FORECAST] ${topCoin.symbol} | FR: ${displayFr}% | Time: ${timeStr} | Margin: ${marginUsed.toFixed(2)}$`);
+            addLog(`<span style="color: #00ffaa">🔮 [FORECAST] ${topCoin.symbol}</span> | <span style="color: #00ffaa">FR:</span> ${displayFr}% | <span style="color: #00ffaa">Time:</span> ${timeStr} | <span style="color: #00ffaa">Margin:</span> ${marginUsed.toFixed(2)}$`);
         } else {
-            addLog(`🔮 [FORECAST] No coin found with FR <= ${(MIN_FUNDING_RATE_THRESHOLD * 100)}%`);
+            addLog(`<span style="color: #00ffaa">🔮 [FORECAST] No coin found with FR <= ${(MIN_FUNDING_RATE_THRESHOLD * 100)}%</span>`);
         }
 
     } catch (error) {
-        addLog(`🔮 Forecast Error: ${error.message}`);
+        addLog(`<span style="color: #ff4444">🔮 Forecast Error: ${error.message}</span>`);
     }
 }
 
 async function openLongPreFunding(symbol, maxLeverage, availableBalance) {
-    addLog(`>>> Opening LONG buffer for ${symbol}...`, true);
+    addLog(`>>> Opening LONG buffer for ${symbol}...`);
     try {
         const symbolInfo = exchangeInfoCache[symbol];
         const currentPrice = await getCurrentPrice(symbol);
@@ -321,6 +318,10 @@ async function openLongPreFunding(symbol, maxLeverage, availableBalance) {
             initialMargin = userConfig.amountValue;
         }
 
+        if (initialMargin > availableBalance) {
+             throw new Error("Insufficient funds for order.");
+        }
+
         let quantity = (initialMargin * maxLeverage) / currentPrice;
         quantity = Math.floor(quantity / symbolInfo.stepSize) * symbolInfo.stepSize;
         quantity = parseFloat(quantity.toFixed(symbolInfo.quantityPrecision));
@@ -329,7 +330,7 @@ async function openLongPreFunding(symbol, maxLeverage, availableBalance) {
             symbol: symbol, side: 'BUY', type: 'MARKET', quantity: quantity
         });
 
-        addLog(`✅ Opened LONG buffer ${symbol}. Qty: ${quantity}`, true);
+        addLog(`<span style="color: #00ffaa">✅ Opened LONG buffer ${symbol}. Qty: ${quantity}</span>`);
 
         const slPriceRaw = currentPrice - (initialMargin / quantity);
         const slPrice = Math.floor(slPriceRaw / symbolInfo.tickSize) * symbolInfo.tickSize;
@@ -340,30 +341,30 @@ async function openLongPreFunding(symbol, maxLeverage, availableBalance) {
                 quantity: quantity, stopPrice: parseFloat(slPrice.toFixed(symbolInfo.pricePrecision)),
                 closePosition: 'true'
             });
-            addLog(`✅ Set SL for LONG ${symbol} @ ${slPrice}`, true);
+            addLog(`<span style="color: #00ffaa">✅ Set SL for LONG ${symbol} @ ${slPrice}</span>`);
         } catch (e) {
-            addLog(`⚠️ Error setting SL for Long: ${e.msg}`);
+            addLog(`<span style="color: #ffcc00">⚠️ Error setting SL for Long: ${e.msg}</span>`);
         }
 
         currentLongPosition = { symbol, quantity };
 
     } catch (error) {
-        addLog(`❌ Error opening LONG buffer: ${error.msg || error.message}`, true);
+        addLog(`<span style="color: #ff4444">❌ Error opening LONG buffer: ${error.msg || error.message}</span>`);
     }
 }
 
 async function closeLongPreFunding() {
     if (!currentLongPosition) return;
     const { symbol, quantity } = currentLongPosition;
-    addLog(`>>> Closing LONG buffer ${symbol}...`, true);
+    addLog(`>>> Closing LONG buffer ${symbol}...`);
     try {
         await callSignedAPI('/fapi/v1/order', 'POST', {
             symbol: symbol, side: 'SELL', type: 'MARKET',
             quantity: quantity, reduceOnly: 'true'
         });
-        addLog(`✅ Closed LONG buffer.`, true);
+        addLog(`<span style="color: #00ffaa">✅ Closed LONG buffer.</span>`);
     } catch (error) {
-        addLog(`⚠️ Error closing Long (maybe already closed): ${error.msg}`);
+        addLog(`<span style="color: #ffcc00">⚠️ Error closing Long (maybe already closed): ${error.msg}</span>`);
     }
     currentLongPosition = null;
 }
@@ -371,7 +372,7 @@ async function closeLongPreFunding() {
 async function closeShortPosition(symbol, quantityToClose, reason = 'manual') {
     if (isClosingPosition) return;
     isClosingPosition = true;
-    addLog(`>>> Closing SHORT ${symbol} (${reason})...`, true);
+    addLog(`>>> Closing SHORT ${symbol} (${reason})...`);
     
     try {
         if (currentLongPosition) await closeLongPreFunding();
@@ -380,10 +381,10 @@ async function closeShortPosition(symbol, quantityToClose, reason = 'manual') {
             symbol: symbol, side: 'BUY', type: 'MARKET',
             quantity: quantityToClose, reduceOnly: 'true'
         });
-        addLog(`✅ Closed SHORT ${symbol}.`, true);
+        addLog(`<span style="color: #00ffaa">✅ Closed SHORT ${symbol}.</span>`);
         cleanupAfterClose(symbol);
     } catch (error) {
-        addLog(`❌ Error closing SHORT: ${error.msg}`);
+        addLog(`<span style="color: #ff4444">❌ Error closing SHORT: ${error.msg}</span>`);
         isClosingPosition = false;
     }
 }
@@ -409,7 +410,7 @@ async function checkAndHandleRemainingPosition(symbol, attempt = 1) {
         const remPos = positions.find(p => p.symbol === symbol && parseFloat(p.positionAmt) < 0);
         
         if (remPos && Math.abs(parseFloat(remPos.positionAmt)) > 0) {
-            addLog(`❌ Residual SHORT ${symbol} found. Closing attempt ${attempt}...`, true);
+            addLog(`<span style="color: #ff4444">❌ Residual SHORT ${symbol} found. Closing attempt ${attempt}...</span>`);
             await callSignedAPI('/fapi/v1/order', 'POST', {
                 symbol: symbol, side: 'BUY', type: 'MARKET',
                 quantity: Math.abs(parseFloat(remPos.positionAmt)), reduceOnly: 'true'
@@ -422,7 +423,7 @@ async function checkAndHandleRemainingPosition(symbol, attempt = 1) {
 }
 
 async function openShortPosition(symbol, fundingRate, usdtBalance, maxLeverage) {
-    addLog(`>>> Opening SHORT ${symbol} (FR: ${(fundingRate * 100).toFixed(4)}%)...`, true);
+    addLog(`>>> Opening SHORT ${symbol} (FR: ${(fundingRate * 100).toFixed(4)}%)...`);
     try {
         const symbolInfo = exchangeInfoCache[symbol];
         const currentPrice = await getCurrentPrice(symbol);
@@ -436,6 +437,10 @@ async function openShortPosition(symbol, fundingRate, usdtBalance, maxLeverage) 
             addLog(`>>> Entry Margin: Fixed ${initialMargin.toFixed(2)}$`);
         }
         
+        if (initialMargin > usdtBalance) {
+            throw new Error("Insufficient funds for order.");
+        }
+
         let quantity = (initialMargin * maxLeverage) / currentPrice;
         quantity = Math.floor(quantity / symbolInfo.stepSize) * symbolInfo.stepSize;
         quantity = parseFloat(quantity.toFixed(symbolInfo.quantityPrecision));
@@ -448,7 +453,7 @@ async function openShortPosition(symbol, fundingRate, usdtBalance, maxLeverage) 
         await closeLongPreFunding();
 
         const entryPrice = parseFloat(orderRes.avgFillPrice || currentPrice);
-        addLog(`✅ Opened SHORT ${symbol} @ ${entryPrice}`, true);
+        addLog(`<span style="color: #00ffaa">✅ Opened SHORT ${symbol} @ ${entryPrice}</span>`);
 
         let targetRoe;
         let enableAutoMoveSL = false;
@@ -456,11 +461,11 @@ async function openShortPosition(symbol, fundingRate, usdtBalance, maxLeverage) 
         if (fundingRate > -0.005) {
             targetRoe = 0.55; 
             enableAutoMoveSL = true;
-            addLog(`⚡ Small Funding -> TP Fixed at 55%`, true);
+            addLog(`⚡ Small Funding -> TP Fixed at 55%`);
         } else {
             targetRoe = userConfig.tpPercent / 100; 
             enableAutoMoveSL = false;
-            addLog(`⚡ Large Funding -> TP set to User Input (${userConfig.tpPercent}%)`, true);
+            addLog(`⚡ Large Funding -> TP set to User Input (${userConfig.tpPercent}%)`);
         }
         
         const stopLossRoe = userConfig.slPercent / 100;
@@ -471,8 +476,8 @@ async function openShortPosition(symbol, fundingRate, usdtBalance, maxLeverage) 
         const tpPrice = parseFloat((entryPrice * (1 - tpMovePercent)).toFixed(symbolInfo.pricePrecision));
         const slPrice = parseFloat((entryPrice * (1 + slMovePercent)).toFixed(symbolInfo.pricePrecision));
 
-        addLog(`>>> Setting: TP ${(targetRoe*100).toFixed(0)}% | SL ${userConfig.slPercent}% (ROE)`, true);
-        addLog(`>>> TP @ ${tpPrice} | SL @ ${slPrice}`, true);
+        addLog(`>>> Setting: TP ${(targetRoe*100).toFixed(0)}% | SL ${userConfig.slPercent}% (ROE)`);
+        addLog(`>>> TP @ ${tpPrice} | SL @ ${slPrice}`);
         addLog(`>>> Auto Move SL: ${enableAutoMoveSL ? 'ON (after 10s)' : 'OFF'}`);
 
         try {
@@ -484,14 +489,14 @@ async function openShortPosition(symbol, fundingRate, usdtBalance, maxLeverage) 
                 symbol: symbol, side: 'BUY', type: 'TAKE_PROFIT_MARKET',
                 quantity: quantity, stopPrice: tpPrice, closePosition: 'true'
             });
-        } catch (e) { addLog(`⚠️ Error setting TP/SL Short: ${e.msg}`); }
+        } catch (e) { addLog(`<span style="color: #ffcc00">⚠️ Error setting TP/SL Short: ${e.msg}</span>`); }
 
         currentOpenPosition = { symbol, quantity, openTime: new Date(), initialSLPrice: slPrice, initialTPPrice: tpPrice };
         
         if (enableAutoMoveSL) {
             setTimeout(async () => {
                 if (!currentOpenPosition || currentOpenPosition.symbol !== symbol || isClosingPosition) return;
-                addLog(`⏳ [10s] Moving SL to Entry (${entryPrice})...`, true);
+                addLog(`⏳ [10s] Moving SL to Entry (${entryPrice})...`);
                 try {
                     await callSignedAPI('/fapi/v1/allOpenOrders', 'DELETE', { symbol });
                     
@@ -505,9 +510,9 @@ async function openShortPosition(symbol, fundingRate, usdtBalance, maxLeverage) 
                         quantity: quantity, stopPrice: tpPrice, closePosition: 'true'
                     });
 
-                    addLog(`✅ Moved SL to ${entryPrice} (0%) & Reset TP.`, true);
+                    addLog(`<span style="color: #00ffaa">✅ Moved SL to ${entryPrice} (0%) & Reset TP.</span>`);
                 } catch (e) {
-                    addLog(`⚠️ Error moving SL: ${e.msg}`);
+                    addLog(`<span style="color: #ffcc00">⚠️ Error moving SL: ${e.msg}</span>`);
                 }
             }, 10000); 
         }
@@ -515,7 +520,7 @@ async function openShortPosition(symbol, fundingRate, usdtBalance, maxLeverage) 
         positionCheckInterval = setInterval(manageOpenPosition, 300);
 
     } catch (error) {
-        addLog(`❌ Error opening SHORT: ${error.msg}`, true);
+        addLog(`<span style="color: #ff4444">❌ Error opening SHORT: ${error.message || error.msg}</span>`);
         await closeLongPreFunding(); 
         scheduleNextMainCycle();
     }
@@ -534,7 +539,7 @@ async function manageOpenPosition() {
         const positions = await callSignedAPI('/fapi/v2/positionRisk', 'GET');
         const pos = positions.find(p => p.symbol === symbol && parseFloat(p.positionAmt) < 0);
         if (!pos || parseFloat(pos.positionAmt) === 0) {
-            addLog(`✅ Position ${symbol} closed (TP/SL hit).`, true);
+            addLog(`<span style="color: #00ffaa">✅ Position ${symbol} closed (TP/SL hit).</span>`);
             cleanupAfterClose(symbol);
         }
     } catch (error) { }
@@ -542,17 +547,11 @@ async function manageOpenPosition() {
 
 async function runTradingLogic() {
     if (!botRunning || currentOpenPosition) return;
-    addLog('>>> Waiting for opportunity (Min :59)...', true);
-
+    
     try {
         const acc = await callSignedAPI('/fapi/v2/account', 'GET');
         const balance = parseFloat(acc.assets.find(a => a.asset === 'USDT')?.availableBalance || 0);
         
-        if (balance < 5) { 
-            addLog('⚠️ Low Balance (< 5 USDT).', true);
-            scheduleNextMainCycle(); return;
-        }
-
         const allFunding = await callPublicAPI('/fapi/v1/premiumIndex');
         const now = Date.now();
         let candidates = [];
@@ -569,7 +568,13 @@ async function runTradingLogic() {
         }
 
         if (candidates.length > 0) {
-            candidates.sort((a, b) => a.fr - b.fr);
+            candidates.sort((a, b) => {
+                if (a.time === b.time) {
+                    return a.fr - b.fr; 
+                }
+                return a.time - b.time; 
+            });
+
             const best = candidates[0];
             
             const shortTime = best.time - (OPEN_TRADE_BEFORE_FUNDING_SECONDS * 1000) + OPEN_TRADE_AFTER_SECOND_OFFSET_MS;
@@ -578,7 +583,7 @@ async function runTradingLogic() {
             const delayLong = longTime - Date.now();
 
             if (delayShort > 0 && delayShort <= ONLY_OPEN_IF_FUNDING_IN_SECONDS * 1000) {
-                addLog(`✅ SELECTED: ${best.symbol} (FR: ${(best.fr * 100).toFixed(4)}%)`, true);
+                addLog(`<span style="color: #00ffaa">✅ SELECTED: ${best.symbol} (FR: ${(best.fr * 100).toFixed(4)}%)</span>`);
                 addLog(`-> Long Buffer in: ${Math.ceil(delayLong/1000)}s`);
                 addLog(`-> Short Main in: ${Math.ceil(delayShort/1000)}s`);
                 
@@ -598,16 +603,16 @@ async function runTradingLogic() {
                     }
                 }, delayShort);
             } else {
-                addLog('⚠️ Opportunity too close/passed.', true);
+                addLog('<span style="color: #ffcc00">⚠️ Opportunity too close/passed.</span>');
                 scheduleNextMainCycle();
             }
         } else {
-            addLog(`⚠️ No coin FR <= ${(MIN_FUNDING_RATE_THRESHOLD * 100)}%.`, true);
+            addLog(`<span style="color: #ffcc00">⚠️ No coin FR <= ${(MIN_FUNDING_RATE_THRESHOLD * 100)}%.</span>`);
             scheduleNextMainCycle();
         }
 
     } catch (error) {
-        addLog('❌ Logic Error: ' + error.message);
+        addLog(`<span style="color: #ff4444">❌ Logic Error: ${error.message}</span>`);
         scheduleNextMainCycle();
     }
 }
@@ -628,17 +633,14 @@ async function startBotLogicInternal(query) {
     if (botRunning) return 'Bot is already running.';
 
     let isUpdated = false;
-    let updateDetails = [];
 
     if (query.apiKey && query.apiKey.trim() !== '') {
         userConfig.apiKey = query.apiKey.trim();
         isUpdated = true;
-        updateDetails.push("API Key");
     }
     if (query.secret && query.secret.trim() !== '') {
         userConfig.secretKey = query.secret.trim();
         isUpdated = true;
-        updateDetails.push("Secret");
     }
 
     if (query.amountMode) { 
@@ -664,10 +666,10 @@ async function startBotLogicInternal(query) {
 
     if (isUpdated) {
         saveConfigToFile();
-        addLog(`Update done. Config: ${userConfig.amountValue}${userConfig.amountMode === 'percent' ? '%' : '$'} | TP(Large) ${userConfig.tpPercent}% | SL ${userConfig.slPercent}%`);
+        addLog(`<span style="color: #00ffaa">Update done.</span> Config: ${userConfig.amountValue}${userConfig.amountMode === 'percent' ? '%' : '$'} | TP(Large) ${userConfig.tpPercent}% | SL ${userConfig.slPercent}%`);
     }
 
-    addLog('--- STARTING BOT ---', true);
+    addLog('--- STARTING BOT ---');
 
     try {
         await syncServerTime();
@@ -694,7 +696,7 @@ function stopBotLogicInternal() {
     clearInterval(periodicLogInterval);
     positionCheckInterval = null;
     periodicLogInterval = null;
-    addLog('--- BOT STOPPED ---', true);
+    addLog('--- BOT STOPPED ---');
     return 'Bot Stopped.';
 }
 
@@ -711,4 +713,4 @@ app.get('/start_bot_logic', async (req, res) => {
 
 app.get('/stop_bot_logic', (req, res) => res.send(stopBotLogicInternal()));
 
-app.listen(WEB_SERVER_PORT, () => addLog(`Server running on port ${WEB_SERVER_PORT}`, true));
+app.listen(WEB_SERVER_PORT);
