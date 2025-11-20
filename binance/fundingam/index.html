@@ -4,16 +4,17 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Binance Bot</title>
-  <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
   <style>
     * {
       box-sizing: border-box;
+      outline: none;
     }
 
     body {
-      font-family: 'Fredoka', sans-serif;
-      background-color: #05080a;
-      color: #e0f7fa;
+      font-family: 'IBM Plex Sans', sans-serif;
+      background-color: #181A20;
+      color: #EAECEF;
       display: flex;
       flex-direction: column;
       justify-content: flex-start;
@@ -21,278 +22,288 @@
       min-height: 100vh;
       margin: 0;
       padding: 20px 10px;
-      overflow-x: hidden;
-      position: relative;
-    }
-    
-    body::before {
-        content: "";
-        position: fixed;
-        top: 0; left: 0; width: 100%; height: 100%;
-        background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)' opacity='0.07'/%3E%3C/svg%3E");
-        z-index: -1;
-        opacity: 0.4;
-        pointer-events: none;
     }
 
-    .glow-bg {
-        position: fixed;
-        border-radius: 50%;
-        filter: blur(80px);
-        opacity: 0.6;
-        z-index: -2;
-        animation: float 15s infinite alternate ease-in-out;
-    }
-
-    .glow-1 {
-        top: -10%; left: -10%;
-        width: 50vw; height: 50vw;
-        background: radial-gradient(circle, #00ff88 0%, transparent 70%);
-        animation-duration: 20s;
-    }
-    
-    .glow-2 {
-        bottom: -10%; right: -10%;
-        width: 60vw; height: 60vw;
-        background: radial-gradient(circle, #004e92 0%, transparent 70%);
-        animation-duration: 25s;
-        animation-delay: -5s;
-    }
-
-    .glow-3 {
-        top: 40%; left: 30%;
-        width: 30vw; height: 30vw;
-        background: radial-gradient(circle, #50c878 0%, transparent 70%);
-        animation-duration: 18s;
-        opacity: 0.4;
-    }
-
-    @keyframes float {
-        0% { transform: translate(0, 0) scale(1); }
-        100% { transform: translate(50px, 50px) scale(1.1); }
-    }
-
-    #top {
-      font-size: 8vw;
-      line-height: 1.2;
-      background: linear-gradient(to bottom, #ffffff, #a5d6a7);
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
+    .header-container {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
       margin-bottom: 30px;
-      text-align: center;
-      font-weight: 600;
-      letter-spacing: 3px;
-      filter: drop-shadow(0 0 15px rgba(0, 255, 136, 0.5));
+      margin-top: 10px;
     }
 
-    .status-bar, .settings-panel, #log {
-        background: rgba(12, 20, 28, 0.6);
-        backdrop-filter: blur(12px);
-        -webkit-backdrop-filter: blur(12px);
-        border: 1px solid rgba(0, 255, 136, 0.2);
-        box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.3);
+    .binance-logo {
+      width: 40px;
+      height: 40px;
+      fill: #FCD535;
+    }
+
+    h1 {
+      font-size: 2rem;
+      font-weight: 700;
+      color: #FCD535;
+      margin: 0;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
     }
 
     .status-bar {
-        width: 95%;
-        max-width: 900px;
-        color: #00ffaa;
-        padding: 15px;
-        margin-bottom: 20px;
-        border-radius: 16px;
-        font-size: 1.2rem;
-        text-align: center;
-        text-shadow: 0 0 10px rgba(0, 255, 170, 0.4);
-        border-bottom: 2px solid #00ffaa;
+      width: 100%;
+      max-width: 500px;
+      background-color: #2B3139;
+      color: #EAECEF;
+      padding: 15px;
+      margin-bottom: 20px;
+      border-radius: 8px;
+      font-size: 1rem;
+      font-weight: 500;
+      text-align: center;
+      border-left: 4px solid #FCD535;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
     }
 
     #log {
-      height: 50vh;
-      width: 95%;
-      max-width: 900px;
+      height: 45vh;
+      width: 100%;
+      max-width: 500px;
       overflow-y: auto;
-      padding: 5px;
-      font-size: 0.9rem;
-      margin-bottom: 25px;
-      font-family: 'Courier New', Courier, monospace; 
-      border-radius: 12px;
-      color: #cfd8dc;
+      background-color: #0B0E11;
+      padding: 10px;
+      font-size: 0.85rem;
+      margin-bottom: 20px;
+      font-family: 'IBM Plex Sans', monospace; 
+      border-radius: 8px;
+      color: #848E9C;
+      border: 1px solid #2B3139;
     }
 
     #log div.log-line {
-        padding: 6px 10px;
-        line-height: 1.4;
-        border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+      padding: 4px 8px;
+      line-height: 1.4;
+      border-bottom: 1px solid #1E2329;
     }
-    #log div.log-line:nth-child(odd) { background-color: rgba(0, 255, 136, 0.03); }
 
     .settings-panel {
-        width: 95%;
-        max-width: 900px;
-        border-radius: 24px;
-        padding: 25px;
-        margin-bottom: 30px;
-        display: flex;
-        flex-direction: column;
-        gap: 20px;
-        transition: all 0.3s ease;
+      width: 100%;
+      max-width: 500px;
+      background-color: #2B3139;
+      border-radius: 16px;
+      padding: 24px;
+      margin-bottom: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.1);
     }
 
     .input-group {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 15px;
-        align-items: center;
-        justify-content: space-between;
-        padding-bottom: 15px;
-        border-bottom: 1px solid rgba(0, 255, 136, 0.1);
-        width: 100%;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      width: 100%;
     }
-    
-    .input-group:last-child { border-bottom: none; }
 
     .input-label {
-        color: #69f0ae;
-        min-width: 150px;
-        font-size: 1.1rem;
-        font-weight: 500;
-        text-shadow: 0 0 5px rgba(105, 240, 174, 0.3);
+      color: #848E9C;
+      font-size: 0.9rem;
+      font-weight: 500;
     }
 
     input[type="text"], input[type="number"], input[type="password"] {
-        background: rgba(0, 0, 0, 0.4);
-        border: 1px solid rgba(0, 255, 136, 0.3);
-        color: #fff;
-        padding: 12px 15px;
-        border-radius: 12px;
-        font-family: 'Fredoka', sans-serif;
-        font-size: 1rem;
-        flex-grow: 1;
-        transition: 0.3s;
-        width: 100%;
+      background-color: #474D57;
+      border: 1px solid transparent;
+      color: #EAECEF;
+      padding: 12px 16px;
+      border-radius: 8px;
+      font-family: 'IBM Plex Sans', sans-serif;
+      font-size: 1rem;
+      width: 100%;
+      transition: 0.2s;
     }
 
     input:focus { 
-        border-color: #00ffaa; 
-        box-shadow: 0 0 15px rgba(0, 255, 170, 0.2);
-        outline: none; 
+      border-color: #FCD535; 
+      background-color: #181A20;
     }
 
-    .radio-group { display: flex; gap: 20px; align-items: center; color: #e0f2f1; font-size: 1rem; }
-    input[type="radio"] { transform: scale(1.3); margin-right: 5px; accent-color: #00ffaa; }
+    input::placeholder {
+      color: #5E6673;
+    }
+
+    .radio-group {
+      display: flex;
+      gap: 20px;
+      align-items: center;
+      margin-bottom: 5px;
+    }
+
+    .radio-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      cursor: pointer;
+      color: #EAECEF;
+      font-size: 0.95rem;
+    }
+
+    input[type="radio"] {
+      appearance: none;
+      width: 18px;
+      height: 18px;
+      border: 2px solid #848E9C;
+      border-radius: 50%;
+      background-color: transparent;
+      position: relative;
+      cursor: pointer;
+    }
+
+    input[type="radio"]:checked {
+      border-color: #FCD535;
+    }
+
+    input[type="radio"]:checked::after {
+      content: '';
+      position: absolute;
+      top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      width: 10px;
+      height: 10px;
+      background-color: #FCD535;
+      border-radius: 50%;
+    }
+
+    .row {
+      display: flex;
+      gap: 15px;
+    }
+
+    .helper-text {
+      font-size: 0.75rem;
+      color: #848E9C;
+      margin-top: -5px;
+    }
 
     .hidden { display: none !important; }
 
     .button-row {
-      display: flex;
-      justify-content: center;
-      width: 100%;
       margin-top: 10px;
     }
 
     button {
-      padding: 16px 30px;
-      font-size: 1.3rem;
+      padding: 14px 20px;
+      font-size: 1rem;
       border: none;
       cursor: pointer;
-      border-radius: 50px;
-      transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-      font-family: 'Fredoka', sans-serif;
+      border-radius: 8px;
+      font-family: 'IBM Plex Sans', sans-serif;
       font-weight: 600;
       width: 100%;
-      color: #002015;
-      text-transform: uppercase;
-      letter-spacing: 1px;
+      transition: opacity 0.2s;
     }
 
     .start-btn {
-      background: linear-gradient(135deg, #00ffaa, #00cdac);
-      box-shadow: 0 5px 20px rgba(0, 255, 170, 0.4);
+      background-color: #FCD535;
+      color: #181A20;
     }
     
     .stop-btn {
-      background: linear-gradient(135deg, #ff512f, #dd2476);
-      color: white;
-      box-shadow: 0 5px 20px rgba(221, 36, 118, 0.4);
+      background-color: #F03D4D; 
+      color: #FFFFFF;
     }
 
     button:hover { 
-        transform: translateY(-4px) scale(1.02); 
-        filter: brightness(1.2);
+      opacity: 0.9;
     }
-    button:active { transform: translateY(2px); }
+    
+    button:active {
+      transform: scale(0.99);
+    }
 
     .copyright {
-      margin-top: 40px;
-      font-size: 0.9rem;
-      color: #546e7a;
-      text-align: center;
+      margin-top: 30px;
+      font-size: 0.8rem;
+      color: #474D57;
     }
 
-    @media (max-width: 600px) {
-        #top { font-size: 12vw; }
-        .input-group { flex-direction: column; align-items: flex-start; gap: 8px; }
-        input { width: 100%; }
-        .settings-panel { padding: 20px; }
+    ::-webkit-scrollbar {
+      width: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: #0B0E11; 
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #474D57; 
+      border-radius: 3px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: #5E6673; 
     }
   </style>
 </head>
 <body>
-  <div class="glow-bg glow-1"></div>
-  <div class="glow-bg glow-2"></div>
-  <div class="glow-bg glow-3"></div>
 
-  <h1 id="top">BINANCE BOT</h1>
+  <div class="header-container">
+    <svg class="binance-logo" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+      <path d="M16 0l6.063 6.063-2.688 2.688L16 5.375l-3.375 3.375-2.688-2.688L16 0zm-9.438 9.438L9.25 12.125l-3.375 3.375L2.5 12.125l4.063-2.688zm18.875 0l4.063 2.688-3.375 3.375-3.375-3.375 2.688-2.688zM16 10.75l5.875 5.875L24.563 14 16 5.438 7.438 14l2.688 2.625L16 10.75zm0 5.375l-3.375 3.375L16 22.875l3.375-3.375L16 16.125zM5.875 18.875l3.375-3.375 2.688 2.688L16 24.063l-6.063 6.063-6.063-6.063 2.688-2.688 2.688-2.688 3.375 3.375-3.375-3.375-3.25 3.25zm20.25 0l-3.375-3.375-3.375 3.375 2.688 2.688 4.063-2.688zM16 26.625l-3.375-3.375-2.688 2.688L16 32l6.063-6.063-2.688-2.688L16 26.625z"/>
+    </svg>
+    <h1>BINANCE BOT</h1>
+  </div>
 
   <div class="status-bar" id="statusBar">Status: Loading...</div>
 
-  <div id="log"><div class="log-line">Loading logs...</div></div>
+  <div id="log"><div class="log-line">System ready.</div></div>
 
   <div class="settings-panel" id="settingsPanel">
-    
     <div id="inputContainer">
         <div class="input-group">
-            <div class="input-label">API Key (Optional):</div>
-            <input type="text" id="apiKey" placeholder="Blank = Use Saved/Default Key">
+            <div class="input-label">API Key (Optional)</div>
+            <input type="text" id="apiKey" placeholder="Saved key will be used if blank">
         </div>
         <div class="input-group">
-            <div class="input-label">Secret Key (Optional):</div>
-            <input type="password" id="secretKey" placeholder="Blank = Use Saved/Default Key">
+            <div class="input-label">Secret Key (Optional)</div>
+            <input type="password" id="secretKey" placeholder="Saved key will be used if blank">
         </div>
 
-        <div class="input-group">
-            <div class="input-label">Entry Margin:</div>
+        <div class="input-group" style="margin-top: 10px;">
+            <div class="input-label">Entry Margin</div>
             <div class="radio-group">
-                <label><input type="radio" name="amountMode" value="percent" checked onchange="toggleAmountPlaceholder()"> % Balance</label>
-                <label><input type="radio" name="amountMode" value="fixed" onchange="toggleAmountPlaceholder()"> USDT (Fixed)</label>
+                <label class="radio-item">
+                    <input type="radio" name="amountMode" value="percent" checked onchange="toggleAmountPlaceholder()">
+                    % Balance
+                </label>
+                <label class="radio-item">
+                    <input type="radio" name="amountMode" value="fixed" onchange="toggleAmountPlaceholder()">
+                    USDT (Fixed)
+                </label>
             </div>
-            <input type="number" id="amountVal" value="25" placeholder="%">
+            <input type="number" id="amountVal" value="25" placeholder="Enter % (e.g. 25)">
         </div>
 
-        <div class="input-group">
-            <div class="input-label">TP (Large FD) / SL:</div>
-            <div style="display: flex; gap: 10px; flex-grow: 1; width: 100%;">
-                <input type="number" id="tpVal" value="105" placeholder="TP % (Large Funding)">
-                <input type="number" id="slVal" value="100" placeholder="SL %">
+        <div class="row">
+            <div class="input-group">
+                <div class="input-label">TP (Large FD) %</div>
+                <input type="number" id="tpVal" value="105">
             </div>
-            <div style="width: 100%; font-size: 0.8rem; color: #80cbc4; margin-top: 5px; font-style: italic;">
-                * Note: Small Funding (< 0.5%) is FIXED at 55% TP.
+            <div class="input-group">
+                <div class="input-label">SL %</div>
+                <input type="number" id="slVal" value="100">
             </div>
         </div>
+        <div class="helper-text">* Small Funding (< 0.5%) is fixed at 55% TP</div>
     </div>
 
     <div class="button-row">
-        <button id="btnStart" class="start-btn" onclick="startBot()">START BOT</button>
-        <button id="btnStop" class="stop-btn hidden" onclick="stopBot()">STOP BOT</button>
+        <button id="btnStart" class="start-btn" onclick="startBot()">Start Bot</button>
+        <button id="btnStop" class="stop-btn hidden" onclick="stopBot()">Stop Bot</button>
     </div>
   </div>
 
-  <div class="copyright">&copy; 2025 Funding Bot Crypto. All rights reserved.</div>
+  <div class="copyright">&copy; 2025 TunggBeoo. All rights reserved.</div>
 
   <script>
     const logDiv = document.getElementById('log');
     const statusBar = document.getElementById('statusBar');
-    
     const inputContainer = document.getElementById('inputContainer');
     const btnStart = document.getElementById('btnStart');
     const btnStop = document.getElementById('btnStop');
@@ -329,14 +340,14 @@
             inputContainer.classList.add('hidden');
             btnStart.classList.add('hidden');
             btnStop.classList.remove('hidden');
-            statusBar.style.boxShadow = "0 0 25px #00ffaa";
-            statusBar.style.borderColor = "#00ffaa";
+            statusBar.style.color = "#00C087";
+            statusBar.style.borderLeftColor = "#00C087";
         } else {
             inputContainer.classList.remove('hidden');
             btnStart.classList.remove('hidden');
             btnStop.classList.add('hidden');
-            statusBar.style.boxShadow = "0 0 15px rgba(0, 255, 204, 0.2)";
-            statusBar.style.borderColor = "rgba(0, 255, 204, 0.5)";
+            statusBar.style.color = "#EAECEF";
+            statusBar.style.borderLeftColor = "#FCD535";
         }
     }
 
