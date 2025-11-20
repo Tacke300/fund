@@ -3,12 +3,12 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Bot Binance Design By TunggBeoo</title>
+  <title>Bot Binance Funding Crypto</title>
   <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@700&display=swap" rel="stylesheet">
   <style>
     body {
       font-family: 'Orbitron', sans-serif;
-      background: #000;
+      background: linear-gradient(135deg, #0f0c29, #302b63, #24243e);
       color: #eee;
       display: flex;
       flex-direction: column;
@@ -19,17 +19,31 @@
       padding: 20px 10px;
       box-sizing: border-box;
     }
+    
+    /* Hiệu ứng Grid Cyberpunk */
+    body::before {
+        content: "";
+        position: fixed;
+        top: 0; left: 0; width: 100%; height: 100%;
+        background-image: 
+            linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+            linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+        background-size: 30px 30px;
+        z-index: -1;
+        pointer-events: none;
+    }
 
     #top {
       font-size: 8vw;
       line-height: 1.2;
-      background: linear-gradient(270deg, #00ffe1, #0066ff, #00ffe1);
+      background: linear-gradient(270deg, #d000ff, #00ffe1, #d000ff);
       background-size: 300% 300%;
       -webkit-background-clip: text;
       -webkit-text-fill-color: transparent;
       animation: moveGradient 5s ease infinite;
       margin-bottom: 40px;
       text-align: center;
+      text-shadow: 0 0 15px rgba(208, 0, 255, 0.5);
     }
 
     @keyframes moveGradient {
@@ -41,69 +55,108 @@
     .status-bar, .countdown-bar {
         width: 95%;
         max-width: 900px;
-        background: #222;
+        background: rgba(20, 20, 20, 0.8);
         color: #00ff00;
         padding: 10px 15px;
         margin-bottom: 15px;
-        border-radius: 5px;
+        border-radius: 8px;
         font-size: 1.1rem;
         text-align: center;
         box-sizing: border-box;
-        white-space: pre-wrap;
-        word-wrap: break-word;
         border: 1px solid #00ff00;
+        box-shadow: 0 0 10px rgba(0, 255, 0, 0.2);
+        backdrop-filter: blur(5px);
     }
     .countdown-bar {
         color: #ffcc00;
         border: 1px solid #ffcc00;
+        box-shadow: 0 0 10px rgba(255, 204, 0, 0.2);
     }
 
-
     #log {
-      height: 70vh;
+      height: 50vh;
       width: 95%;
       max-width: 900px;
       overflow-y: auto;
-      overflow-x: hidden;
-      background: #111;
+      background: rgba(10, 10, 10, 0.85);
       padding: 0;
       font-size: 0.9rem;
-      border: 1px solid #333;
-      margin-bottom: 30px;
+      border: 1px solid #888;
+      margin-bottom: 20px;
       font-family: 'Courier New', Courier, monospace;
       box-sizing: border-box;
       color: #fff;
+      border-radius: 8px;
+      box-shadow: inset 0 0 20px rgba(0,0,0,0.9);
     }
 
     #log div.log-line {
         padding: 5px 10px;
         line-height: 1.4;
-        white-space: pre-wrap;
-        word-break: break-word;
-        overflow-wrap: break-word;
+        border-bottom: 1px solid #222;
+    }
+    #log div.log-line:nth-child(odd) { background-color: rgba(255,255,255,0.02); }
+
+    /* --- SETTINGS PANEL --- */
+    .settings-panel {
+        width: 95%;
+        max-width: 900px;
+        background: rgba(30, 30, 40, 0.9);
+        border: 1px solid #d000ff;
+        border-radius: 10px;
+        padding: 20px;
+        margin-bottom: 20px;
+        box-shadow: 0 0 15px rgba(208, 0, 255, 0.3);
+        display: flex;
+        flex-direction: column;
+        gap: 15px;
     }
 
-    #log div.log-line:nth-child(odd) {
-        background-color: #1a1a1a;
+    .input-group {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        align-items: center;
+        justify-content: space-between;
+        padding-bottom: 10px;
+        border-bottom: 1px solid rgba(255,255,255,0.1);
+    }
+    
+    .input-group:last-child { border-bottom: none; }
+
+    .input-label {
+        color: #00ffe1;
+        min-width: 120px;
+        font-size: 1rem;
     }
 
-    #log div.log-line:nth-child(even) {
-        background-color: #0d0d0d;
+    input[type="text"], input[type="number"], input[type="password"] {
+        background: #111;
+        border: 1px solid #555;
+        color: #fff;
+        padding: 8px;
+        border-radius: 4px;
+        font-family: 'Courier New', monospace;
+        flex-grow: 1;
     }
+
+    input[type="radio"] { margin-right: 5px; }
+    
+    .radio-group { display: flex; gap: 15px; align-items: center; color: #ccc; font-size: 0.9rem; }
+
+    .hidden { display: none !important; }
 
     .button-row {
       display: flex;
       flex-wrap: wrap;
       justify-content: center;
       gap: 15px;
-      width: 95%;
-      max-width: 900px;
-      margin-bottom: 20px;
+      width: 100%;
     }
 
     button {
       padding: 15px 25px;
-      font-size: 1.5rem;
+      font-size: 1.2rem;
       border: none;
       cursor: pointer;
       border-radius: 8px;
@@ -111,51 +164,37 @@
       font-family: 'Orbitron', sans-serif;
       flex-grow: 1;
       min-width: 150px;
-      box-sizing: border-box;
-      box-shadow: 0 4px 8px rgba(0, 0, 0, 0.4);
+      color: white;
+      text-shadow: 0 1px 2px rgba(0,0,0,0.5);
     }
 
     .start-btn {
-      background: #00cc66;
-      color: white;
+      background: linear-gradient(45deg, #00b09b, #96c93d);
+      box-shadow: 0 4px 15px rgba(0, 176, 155, 0.4);
     }
-
+    
     .stop-btn {
-      background: #cc0000;
-      color: white;
+      background: linear-gradient(45deg, #ff416c, #ff4b2b);
+      box-shadow: 0 4px 15px rgba(255, 65, 108, 0.4);
     }
 
-    button:hover {
-      transform: scale(1.05);
-      opacity: 0.9;
-    }
+    button:hover { transform: scale(1.02); filter: brightness(1.2); }
+    button:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
 
     .copyright {
-      margin-top: 50px;
-      font-size: 0.9rem;
-      color: #666;
+      margin-top: 30px;
+      font-size: 0.8rem;
+      color: #888;
       font-family: monospace;
       text-align: center;
-      padding: 0 10px;
     }
 
-    /* --- MEDIA QUERIES --- */
-    @media (max-width: 768px) {
-      #top { font-size: 10vw; margin-bottom: 30px; }
-      .status-bar, .countdown-bar { font-size: 1rem; padding: 8px 10px; }
-      #log { font-size: 0.8rem; height: 50vh; margin-bottom: 25px; }
-      #log div.log-line { padding: 6px 12px; line-height: 1.3; }
-      button { font-size: 1.2rem; padding: 10px 15px; min-width: unset; }
-      .button-row { flex-direction: column; gap: 10px; margin-bottom: 15px; }
-    }
-
-    @media (max-width: 480px) {
-        #top { font-size: 12vw; margin-bottom: 25px; }
-        .status-bar, .countdown-bar { font-size: 0.9rem; }
-        #log { font-size: 0.75rem; height: 40vh; margin-bottom: 20px; }
-        #log div.log-line { padding: 4px 8px; line-height: 1.2; }
-        button { font-size: 1rem; padding: 8px 12px; }
-        .copyright { font-size: 0.8rem; }
+    @media (max-width: 600px) {
+        #top { font-size: 12vw; }
+        .input-group { flex-direction: column; align-items: flex-start; }
+        .input-label { margin-bottom: 5px; }
+        input { width: 100%; }
+        .radio-group { width: 100%; justify-content: space-around; margin-top: 5px; }
     }
   </style>
 </head>
@@ -165,23 +204,63 @@
   <div class="status-bar" id="statusBar">Bot Status: Loading...</div>
   <div class="countdown-bar" id="countdownBar">Không có lệnh đang chờ đóng.</div>
 
-  <p style="color: #bbb; font-size: 0.9rem; margin-top: -10px; margin-bottom: 20px; text-align: center;">Version: 1.0.1 -- After FD</p>
+  <div id="log"><div class="log-line">Đang tải nhật ký...</div></div>
 
-  <div id="log">
-    <div class="log-line">Đang tải nhật ký...</div>
+  <!-- SETTINGS PANEL -->
+  <div class="settings-panel" id="settingsPanel">
+    
+    <!-- API KEYS -->
+    <div class="input-group" id="apiSection">
+        <div class="input-label">API Key (Optional):</div>
+        <input type="text" id="apiKey" placeholder="Để trống nếu dùng Key mặc định">
+    </div>
+    <div class="input-group" id="secretSection">
+        <div class="input-label">Secret Key (Optional):</div>
+        <input type="password" id="secretKey" placeholder="Để trống nếu dùng Key mặc định">
+    </div>
+
+    <!-- AMOUNT -->
+    <div class="input-group">
+        <div class="input-label">Vốn Vào Lệnh:</div>
+        <div class="radio-group">
+            <label><input type="radio" name="amountMode" value="percent" checked onchange="toggleAmountPlaceholder()"> % Balance</label>
+            <label><input type="radio" name="amountMode" value="fixed" onchange="toggleAmountPlaceholder()"> USDT (Margin)</label>
+        </div>
+        <input type="number" id="amountVal" value="25" placeholder="%">
+    </div>
+
+    <!-- TP / SL -->
+    <div class="input-group">
+        <div class="input-label">TP / SL (%):</div>
+        <input type="number" id="tpVal" value="55" placeholder="TP %" style="margin-right: 5px;">
+        <input type="number" id="slVal" value="100" placeholder="SL %">
+    </div>
+
+    <div class="button-row">
+        <button class="start-btn" onclick="startBot()">START BOT</button>
+        <button class="stop-btn" onclick="stopBot()">STOP BOT</button>
+    </div>
   </div>
 
-  <div class="button-row">
-    <button class="start-btn" onclick="startBot()">Khởi động Bot</button>
-    <button class="stop-btn" onclick="stopBot()">Dừng Bot</button>
-    </div>
-  <div class="copyright">&copy; 2025 TunggBeoo. All rights reserved.</div>
+  <div class="copyright">&copy; 2025 Bot Funding Crypto. All rights reserved.</div>
 
   <script>
     const logDiv = document.getElementById('log');
     const statusBar = document.getElementById('statusBar');
     const countdownBar = document.getElementById('countdownBar');
-    // ĐÃ XÓA: const copyMessageElem = document.getElementById('copyMessage');
+    const apiSection = document.getElementById('apiSection');
+    const secretSection = document.getElementById('secretSection');
+    const amountInput = document.getElementById('amountVal');
+
+    function toggleAmountPlaceholder() {
+        const mode = document.querySelector('input[name="amountMode"]:checked').value;
+        if(mode === 'percent') {
+            amountInput.placeholder = "Nhập % (vd: 25)";
+            if(amountInput.value > 100) amountInput.value = 25;
+        } else {
+            amountInput.placeholder = "Nhập số USDT (vd: 50)";
+        }
+    }
 
     function scrollToBottomLog() {
         logDiv.scrollTop = logDiv.scrollHeight;
@@ -189,116 +268,62 @@
 
     function fetchLogs() {
         fetch('/api/logs')
-            .then(response => {
-                if (!response.ok) {
-                    return response.text().then(text => { throw new Error(text) });
-                }
-                return response.text();
-            })
+            .then(res => res.text())
             .then(data => {
-                const isScrolledToBottom = logDiv.scrollHeight - logDiv.clientHeight <= logDiv.scrollTop + 5;
-
+                const isBottom = logDiv.scrollHeight - logDiv.clientHeight <= logDiv.scrollTop + 10;
                 const cleanData = data.replace(/[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g, '');
-
-                const logLines = cleanData.split('\n'); 
-                let htmlContent = '';
-                logLines.forEach(line => {
-                    const lineDiv = document.createElement('div');
-                    lineDiv.classList.add('log-line');
-                    lineDiv.textContent = line;
-                    htmlContent += lineDiv.outerHTML;
-                });
-
-                logDiv.innerHTML = htmlContent;
-                
-                if (isScrolledToBottom) {
-                    scrollToBottomLog();
-                }
-            })
-            .catch(error => {
-                console.error('Lỗi khi tải nhật ký:', error);
-                logDiv.innerHTML = `<div class="log-line" style="color: red;">Lỗi tải nhật ký: ${error.message || error}. Vui lòng kiểm tra máy chủ bot.</div>`;
+                const lines = cleanData.split('\n');
+                logDiv.innerHTML = lines.map(line => `<div class="log-line">${line}</div>`).join('');
+                if (isBottom) scrollToBottomLog();
             });
     }
 
     function fetchStatus() {
-        fetch('/api/status')
-            .then(response => {
-                if (!response.ok) {
-                    return response.text().then(text => { throw new Error(text) });
-                }
-                return response.text();
-            })
-            .then(data => {
-                statusBar.textContent = data;
-            })
-            .catch(error => {
-                console.error('Lỗi khi tải trạng thái:', error);
-                statusBar.textContent = `Trạng thái Bot: Lỗi khi tải trạng thái. (${error.message || error})`;
-            });
+        fetch('/api/status').then(res => res.text()).then(data => {
+            statusBar.textContent = data;
+            // Nếu bot đang chạy, ẩn phần nhập API
+            if(data.includes("BOT ĐANG CHẠY")) {
+                 apiSection.classList.add('hidden');
+                 secretSection.classList.add('hidden');
+            } else {
+                 apiSection.classList.remove('hidden');
+                 secretSection.classList.remove('hidden');
+            }
+        });
     }
 
     function fetchCountdown() {
-        fetch('/api/countdown')
-            .then(response => {
-                if (!response.ok) {
-                    return response.text().then(text => { throw new Error(text) });
-                }
-                return response.text();
-            })
-            .then(data => {
-                countdownBar.textContent = data;
-            })
-            .catch(error => {
-                console.error('Lỗi khi tải đếm ngược:', error);
-                countdownBar.textContent = `Thông báo vị thế: Lỗi tải. (${error.message || error})`;
-            });
+        fetch('/api/countdown').then(res => res.text()).then(data => countdownBar.textContent = data);
     }
 
-    // ĐÃ XÓA: Hàm copyLog()
-
     async function startBot() {
-        statusBar.textContent = 'Trạng thái Bot: Đang gửi lệnh khởi động...';
-        document.querySelector('.start-btn').disabled = true;
-        document.querySelector('.stop-btn').disabled = true;
-        // ĐÃ XÓA: document.querySelector('.copy-btn').disabled = true;
+        const apiKey = document.getElementById('apiKey').value.trim();
+        const secret = document.getElementById('secretKey').value.trim();
+        const amountMode = document.querySelector('input[name="amountMode"]:checked').value;
+        const amountVal = document.getElementById('amountVal').value;
+        const tp = document.getElementById('tpVal').value;
+        const sl = document.getElementById('slVal').value;
+
+        statusBar.textContent = 'Đang gửi lệnh khởi động...';
         try {
-            const response = await fetch('/start_bot_logic');
-            const message = await response.text();
+            // Gửi params lên, nếu apiKey/secret rỗng thì server sẽ tự dùng mặc định
+            const query = `?apiKey=${encodeURIComponent(apiKey)}&secret=${encodeURIComponent(secret)}&amountMode=${amountMode}&amountVal=${amountVal}&tp=${tp}&sl=${sl}`;
+            const response = await fetch('/start_bot_logic' + query);
+            const msg = await response.text();
+            alert(msg);
             fetchStatus();
-            fetchLogs();
-            fetchCountdown();
-        } catch (error) {
-            alert('Lỗi khi gửi lệnh khởi động bot: ' + error.message);
-            console.error('Lỗi khi gửi lệnh khởi động bot:', error);
-            statusBar.textContent = `Trạng thái Bot: Lỗi khởi động. (${error.message || error})`;
-        } finally {
-            document.querySelector('.start-btn').disabled = false;
-            document.querySelector('.stop-btn').disabled = false;
-            // ĐÃ XÓA: document.querySelector('.copy-btn').disabled = false;
+        } catch (e) {
+            alert('Lỗi: ' + e.message);
         }
     }
 
     async function stopBot() {
-        statusBar.textContent = 'Trạng thái Bot: Đang gửi lệnh dừng...';
-        document.querySelector('.start-btn').disabled = true;
-        document.querySelector('.stop-btn').disabled = true;
-        // ĐÃ XÓA: document.querySelector('.copy-btn').disabled = true;
+        if(!confirm("Bạn có chắc chắn muốn dừng Bot?")) return;
+        statusBar.textContent = 'Đang gửi lệnh dừng...';
         try {
-            const response = await fetch('/stop_bot_logic');
-            const message = await response.text();
+            await fetch('/stop_bot_logic');
             fetchStatus();
-            fetchLogs();
-            fetchCountdown();
-        } catch (error) {
-            alert('Lỗi khi gửi lệnh dừng bot: ' + error.message);
-            console.error('Lỗi khi gửi lệnh dừng bot:', error);
-            statusBar.textContent = `Trạng thái Bot: Lỗi dừng. (${error.message || error})`;
-        } finally {
-            document.querySelector('.start-btn').disabled = false;
-            document.querySelector('.stop-btn').disabled = false;
-            // ĐÃ XÓA: document.querySelector('.copy-btn').disabled = false;
-        }
+        } catch (e) { alert(e); }
     }
 
     setInterval(fetchLogs, 1000);
