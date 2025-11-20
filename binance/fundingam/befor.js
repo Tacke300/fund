@@ -8,48 +8,40 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// --- CONFIG FILE NAME ---
 const CONFIG_FILE = path.join(__dirname, 'config.json');
 
-// --- DEFAULT HARDCODED KEYS ---
 const DEFAULT_API_KEY = 'cZ1Y2O0kggVEggEaPvhFcYQHS5b1EsT2OWZb8zdY9C0jGqNROvXRZHTJjnQ7OG4Q'.trim();
 const DEFAULT_SECRET_KEY = 'oU6pZFHgEvbpD9NmFXp5ZVnYFMQ7EIkBiz88aTzvmC3SpT9nEf4fcDf0pEnFzoTc'.trim();
 
-// --- INITIAL CONFIG ---
-// tpPercent here is for LARGE FUNDING (Default 105)
 let userConfig = {
     apiKey: DEFAULT_API_KEY,
     secretKey: DEFAULT_SECRET_KEY,
     amountMode: 'percent', 
     amountValue: 25,       
-    tpPercent: 105, // Default for Large Funding        
+    tpPercent: 105,        
     slPercent: 100         
 };
 
-// --- CONFIG LOAD/SAVE ---
 function loadConfigFromFile() {
     try {
         if (fs.existsSync(CONFIG_FILE)) {
             const rawData = fs.readFileSync(CONFIG_FILE, 'utf8');
             const savedConfig = JSON.parse(rawData);
             userConfig = { ...userConfig, ...savedConfig };
-            addLog('📂 Loaded configuration from config.json', true);
         }
     } catch (error) {
-        addLog('⚠️ Could not read config file (using defaults).');
+        addLog('Warning: Could not read config file.');
     }
 }
 
 function saveConfigToFile() {
     try {
         fs.writeFileSync(CONFIG_FILE, JSON.stringify(userConfig, null, 2), 'utf8');
-        addLog('💾 Saved new configuration to config.json', true);
     } catch (error) {
-        addLog('❌ Error saving config file: ' + error.message);
+        addLog('Error saving config file: ' + error.message);
     }
 }
 
-// --- BINANCE FUTURES BASE URL ---
 const BASE_HOST = 'fapi.binance.com';
 
 let serverTimeOffset = 0; 
@@ -66,7 +58,6 @@ let scheduledLongTimeout = null;
 let periodicLogInterval = null;
 let lastLoggedMinute = -1; 
 
-// === ERROR HANDLING ===
 let consecutiveApiErrors = 0; 
 const MAX_CONSECUTIVE_API_ERRORS = 5; 
 const memoryLogs = [];
@@ -81,8 +72,7 @@ class CriticalApiError extends Error {
     }
 }
 
-// --- CONSTANTS ---
-const MIN_FUNDING_RATE_THRESHOLD = -0.001; // -0.1%
+const MIN_FUNDING_RATE_THRESHOLD = -0.001; 
 const FUNDING_WINDOW_MINUTES = 3; 
 const MAX_POSITION_LIFETIME_SECONDS = 60; 
 const ONLY_OPEN_IF_FUNDING_IN_SECONDS = 60; 
@@ -94,10 +84,14 @@ const RETRY_CHECK_POSITION_ATTEMPTS = 6;
 const RETRY_CHECK_POSITION_DELAY_MS = 30000; 
 const WEB_SERVER_PORT = 9999; 
 
-// --- UTILS ---
 function addLog(message, isImportant = false) {
     const now = new Date();
-    const time = `${now.toLocaleDateString('en-GB')} ${now.toLocaleTimeString('en-US', { hour12: false })}.${String(now.getMilliseconds()).padStart(3, '0')}`;
+    const day = String(now.getDate()).padStart(2, '0');
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const timeStr = now.toLocaleTimeString('en-US', { hour12: false });
+    const ms = String(now.getMilliseconds()).padStart(3, '0');
+    
+    const time = `${day}/${month} ${timeStr}.${ms}`;
     let logEntry = `[${time}] ${message}`;
 
     let consoleEntry = logEntry;
@@ -105,7 +99,7 @@ function addLog(message, isImportant = false) {
     else if (message.startsWith('❌')) consoleEntry = `\x1b[31m${consoleEntry}\x1b[0m`;
     else if (message.startsWith('⚠️')) consoleEntry = `\x1b[33m${consoleEntry}\x1b[0m`;
     else if (message.startsWith('🔮')) consoleEntry = `\x1b[35m${consoleEntry}\x1b[0m`; 
-    else if (message.startsWith('📂') || message.startsWith('💾')) consoleEntry = `\x1b[34m${consoleEntry}\x1b[0m`;
+    else if (message.startsWith('Update done')) consoleEntry = `\x1b[34m${consoleEntry}\x1b[0m`;
     else if (isImportant) consoleEntry = `\x1b[36m${consoleEntry}\x1b[0m`;
 
     const messageHash = crypto.createHash('md5').update(message).digest('hex');
@@ -213,7 +207,6 @@ async function syncServerTime() {
     try {
         const data = await callPublicAPI('/fapi/v1/time');
         serverTimeOffset = data.serverTime - Date.now();
-        addLog(`✅ Time synced. Offset: ${serverTimeOffset} ms.`, true);
     } catch (error) {
         addLog(`❌ Sync time error: ${error.message}.`, true);
         throw error;
@@ -267,7 +260,6 @@ async function cancelOpenOrdersForSymbol(symbol) {
     } catch (error) { return false; }
 }
 
-// --- FORECAST ---
 async function logBestCandidate() {
     if (!botRunning) return;
     
@@ -455,18 +447,15 @@ async function openShortPosition(symbol, fundingRate, usdtBalance, maxLeverage) 
         const entryPrice = parseFloat(orderRes.avgFillPrice || currentPrice);
         addLog(`✅ Opened SHORT ${symbol} @ ${entryPrice}`, true);
 
-        // --- TP / SL LOGIC ---
         let targetRoe;
         let enableAutoMoveSL = false;
         
-        // FR > -0.005 means FR is between -0.1% and -0.49% (Small Funding)
         if (fundingRate > -0.005) {
-            targetRoe = 0.55; // FIXED 55% for Small Funding
+            targetRoe = 0.55; 
             enableAutoMoveSL = true;
             addLog(`⚡ Small Funding -> TP Fixed at 55%`, true);
         } else {
-            // FR <= -0.005 (Large Funding)
-            targetRoe = userConfig.tpPercent / 100; // Use Web Input (Default 105%)
+            targetRoe = userConfig.tpPercent / 100; 
             enableAutoMoveSL = false;
             addLog(`⚡ Large Funding -> TP set to User Input (${userConfig.tpPercent}%)`, true);
         }
@@ -636,35 +625,46 @@ async function startBotLogicInternal(query) {
     if (botRunning) return 'Bot is already running.';
 
     let isUpdated = false;
+    let updateDetails = [];
 
-    // 1. API Keys
     if (query.apiKey && query.apiKey.trim() !== '') {
         userConfig.apiKey = query.apiKey.trim();
         isUpdated = true;
-        addLog('⚙️ Updated API Key from Web.');
+        updateDetails.push("API Key");
     }
     if (query.secret && query.secret.trim() !== '') {
         userConfig.secretKey = query.secret.trim();
         isUpdated = true;
+        updateDetails.push("Secret");
     }
 
-    // 2. Config
-    if (query.amountMode) { userConfig.amountMode = query.amountMode; isUpdated = true; }
-    if (query.amountVal) { userConfig.amountValue = parseFloat(query.amountVal); isUpdated = true; }
+    if (query.amountMode) { 
+        userConfig.amountMode = query.amountMode; 
+        isUpdated = true; 
+    }
+    if (query.amountVal) { 
+        userConfig.amountValue = parseFloat(query.amountVal); 
+        isUpdated = true; 
+    }
     
-    // If TP is not provided, default to 105 (for large funding)
-    if (query.tp) { userConfig.tpPercent = parseFloat(query.tp); isUpdated = true; }
-    else if (!userConfig.tpPercent) { userConfig.tpPercent = 105; } // Ensure default if never set
+    if (query.tp) { 
+        userConfig.tpPercent = parseFloat(query.tp); 
+        isUpdated = true; 
+    } else if (!userConfig.tpPercent) { 
+        userConfig.tpPercent = 105; 
+    }
 
-    if (query.sl) { userConfig.slPercent = parseFloat(query.sl); isUpdated = true; }
+    if (query.sl) { 
+        userConfig.slPercent = parseFloat(query.sl); 
+        isUpdated = true; 
+    }
 
-    // 3. Save if changed
     if (isUpdated) {
         saveConfigToFile();
+        addLog(`Update done. Config: ${userConfig.amountValue}${userConfig.amountMode === 'percent' ? '%' : '$'} | TP(Large) ${userConfig.tpPercent}% | SL ${userConfig.slPercent}%`);
     }
 
     addLog('--- STARTING BOT ---', true);
-    addLog(`⚙️ Config: Margin ${userConfig.amountValue}${userConfig.amountMode === 'percent' ? '%' : '$'} | TP (Large) ${userConfig.tpPercent}% | SL ${userConfig.slPercent}%`);
 
     try {
         await syncServerTime();
@@ -675,12 +675,9 @@ async function startBotLogicInternal(query) {
         
         if (periodicLogInterval) clearInterval(periodicLogInterval);
         periodicLogInterval = setInterval(() => {
-            const currentMin = new Date().getUTCMinutes();
-            if (currentMin % 10 === 0 && currentMin !== lastLoggedMinute) {
-                lastLoggedMinute = currentMin;
-                logBestCandidate();
-            }
-        }, 30000); 
+            logBestCandidate();
+        }, 120000); 
+        logBestCandidate(); 
 
         return 'Bot Started Successfully.';
     } catch (e) { return 'Start Error: ' + e.message; }
@@ -698,7 +695,6 @@ function stopBotLogicInternal() {
     return 'Bot Stopped.';
 }
 
-// --- INIT ---
 loadConfigFromFile();
 
 const app = express();
