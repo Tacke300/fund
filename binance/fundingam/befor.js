@@ -1,4 +1,4 @@
-import https from 'https';
+5import https from 'https';
 import crypto from 'crypto';
 import express from 'express';
 import path from 'path';
@@ -74,7 +74,7 @@ class CriticalApiError extends Error {
 
 const MIN_FUNDING_RATE_THRESHOLD = -0.001; 
 const FUNDING_WINDOW_MINUTES = 3; 
-const MAX_POSITION_LIFETIME_SECONDS = 60; 
+const MAX_POSITION_LIFETIME_SECONDS = 120; 
 const ONLY_OPEN_IF_FUNDING_IN_SECONDS = 60; 
 const OPEN_TRADE_BEFORE_FUNDING_SECONDS = 1; 
 const OPEN_TRADE_AFTER_SECOND_OFFSET_MS = 999; 
