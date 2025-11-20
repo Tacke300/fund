@@ -86,12 +86,15 @@ const WEB_SERVER_PORT = 9999;
 
 function addLog(message, isImportant = false) {
     const now = new Date();
-    const day = String(now.getDate()).padStart(2, '0');
-    const month = String(now.getMonth() + 1).padStart(2, '0');
-    const timeStr = now.toLocaleTimeString('en-US', { hour12: false });
-    const ms = String(now.getMilliseconds()).padStart(3, '0');
     
-    const time = `${day}/${month} ${timeStr}.${ms}`;
+    const day = String(now.getUTCDate()).padStart(2, '0');
+    const month = String(now.getUTCMonth() + 1).padStart(2, '0');
+    const hours = String(now.getUTCHours()).padStart(2, '0');
+    const minutes = String(now.getUTCMinutes()).padStart(2, '0');
+    const seconds = String(now.getUTCSeconds()).padStart(2, '0');
+    const ms = String(now.getUTCMilliseconds()).padStart(3, '0');
+
+    const time = `${day}/${month} ${hours}:${minutes}:${seconds}.${ms}`;
     let logEntry = `[${time}] ${message}`;
 
     let consoleEntry = logEntry;
@@ -122,9 +125,11 @@ function addLog(message, isImportant = false) {
     if (memoryLogs.length > MAX_LOG_SIZE) memoryLogs.shift(); 
 }
 
-function formatHourMinuteUTC7(ms) {
+function formatTimeUTC(ms) {
     const date = new Date(ms);
-    return date.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Ho_Chi_Minh' });
+    const hours = String(date.getUTCHours()).padStart(2, '0');
+    const minutes = String(date.getUTCMinutes()).padStart(2, '0');
+    return `${hours}:${minutes}`;
 }
 
 const delay = ms => new Promise(resolve => setTimeout(() => resolve(), ms));
@@ -290,12 +295,10 @@ async function logBestCandidate() {
                 marginUsed = userConfig.amountValue;
             }
             
-            const notionalValue = marginUsed * leverage; 
             const displayFr = (topCoin.fr * 100).toFixed(4);
+            const timeStr = formatTimeUTC(topCoin.time);
 
-            addLog(`🔮 [FORECAST] Top Candidate: ${topCoin.symbol} | FR: ${displayFr}%`);
-            addLog(`   👉 Funding Time: ${formatHourMinuteUTC7(topCoin.time)}`);
-            addLog(`   👉 Est. Margin: ${marginUsed.toFixed(2)}$ (x${leverage} = ${notionalValue.toFixed(2)}$)`);
+            addLog(`🔮 [FORECAST] ${topCoin.symbol} | FR: ${displayFr}% | Time: ${timeStr} | Margin: ${marginUsed.toFixed(2)}$`);
         } else {
             addLog(`🔮 [FORECAST] No coin found with FR <= ${(MIN_FUNDING_RATE_THRESHOLD * 100)}%`);
         }
