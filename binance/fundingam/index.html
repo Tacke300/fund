@@ -28,22 +28,24 @@
       display: flex;
       align-items: center;
       justify-content: center;
-      gap: 12px;
-      margin-bottom: 30px;
+      gap: 10px;
+      margin-bottom: 25px;
       margin-top: 10px;
     }
 
     .binance-logo {
-      width: 40px;
-      height: 40px;
+      width: 32px;
+      height: 32px;
       fill: #FCD535;
+      display: block;
     }
 
     h1 {
-      font-size: 2rem;
+      font-size: 1.8rem;
       font-weight: 700;
       color: #FCD535;
       margin: 0;
+      line-height: 1;
       letter-spacing: 0.5px;
       text-transform: uppercase;
     }
@@ -53,10 +55,10 @@
       max-width: 500px;
       background-color: #2B3139;
       color: #EAECEF;
-      padding: 15px;
-      margin-bottom: 20px;
+      padding: 12px;
+      margin-bottom: 15px;
       border-radius: 8px;
-      font-size: 1rem;
+      font-size: 0.95rem;
       font-weight: 500;
       text-align: center;
       border-left: 4px solid #FCD535;
@@ -69,8 +71,8 @@
       max-width: 500px;
       overflow-y: auto;
       background-color: #0B0E11;
-      padding: 10px;
-      font-size: 0.85rem;
+      padding: 0;
+      font-size: 0.8rem;
       margin-bottom: 20px;
       font-family: 'IBM Plex Sans', monospace; 
       border-radius: 8px;
@@ -79,34 +81,38 @@
     }
 
     #log div.log-line {
-      padding: 4px 8px;
+      padding: 6px 12px;
       line-height: 1.4;
-      border-bottom: 1px solid #1E2329;
+      border-bottom: none;
+    }
+
+    #log div.log-line:nth-child(even) {
+      background-color: #161A1E;
     }
 
     .settings-panel {
       width: 100%;
       max-width: 500px;
       background-color: #2B3139;
-      border-radius: 16px;
-      padding: 24px;
+      border-radius: 12px;
+      padding: 20px;
       margin-bottom: 20px;
       display: flex;
       flex-direction: column;
-      gap: 20px;
+      gap: 15px;
       box-shadow: 0 4px 12px rgba(0,0,0,0.1);
     }
 
     .input-group {
       display: flex;
       flex-direction: column;
-      gap: 8px;
+      gap: 6px;
       width: 100%;
     }
 
     .input-label {
       color: #848E9C;
-      font-size: 0.9rem;
+      font-size: 0.85rem;
       font-weight: 500;
     }
 
@@ -114,10 +120,10 @@
       background-color: #474D57;
       border: 1px solid transparent;
       color: #EAECEF;
-      padding: 12px 16px;
-      border-radius: 8px;
+      padding: 10px 14px;
+      border-radius: 6px;
       font-family: 'IBM Plex Sans', sans-serif;
-      font-size: 1rem;
+      font-size: 0.95rem;
       width: 100%;
       transition: 0.2s;
     }
@@ -144,18 +150,19 @@
       gap: 8px;
       cursor: pointer;
       color: #EAECEF;
-      font-size: 0.95rem;
+      font-size: 0.9rem;
     }
 
     input[type="radio"] {
       appearance: none;
-      width: 18px;
-      height: 18px;
+      width: 16px;
+      height: 16px;
       border: 2px solid #848E9C;
       border-radius: 50%;
       background-color: transparent;
       position: relative;
       cursor: pointer;
+      margin: 0;
     }
 
     input[type="radio"]:checked {
@@ -167,35 +174,36 @@
       position: absolute;
       top: 50%; left: 50%;
       transform: translate(-50%, -50%);
-      width: 10px;
-      height: 10px;
+      width: 8px;
+      height: 8px;
       background-color: #FCD535;
       border-radius: 50%;
     }
 
     .row {
       display: flex;
-      gap: 15px;
+      gap: 12px;
     }
 
     .helper-text {
       font-size: 0.75rem;
       color: #848E9C;
-      margin-top: -5px;
+      margin-top: 5px; 
+      font-style: italic;
     }
 
     .hidden { display: none !important; }
 
     .button-row {
-      margin-top: 10px;
+      margin-top: 5px;
     }
 
     button {
-      padding: 14px 20px;
+      padding: 12px 20px;
       font-size: 1rem;
       border: none;
       cursor: pointer;
-      border-radius: 8px;
+      border-radius: 6px;
       font-family: 'IBM Plex Sans', sans-serif;
       font-weight: 600;
       width: 100%;
@@ -212,39 +220,24 @@
       color: #FFFFFF;
     }
 
-    button:hover { 
-      opacity: 0.9;
-    }
-    
-    button:active {
-      transform: scale(0.99);
-    }
+    button:hover { opacity: 0.9; }
+    button:active { transform: scale(0.99); }
 
     .copyright {
       margin-top: 30px;
-      font-size: 0.8rem;
+      font-size: 0.75rem;
       color: #474D57;
     }
 
-    ::-webkit-scrollbar {
-      width: 6px;
-    }
-    ::-webkit-scrollbar-track {
-      background: #0B0E11; 
-    }
-    ::-webkit-scrollbar-thumb {
-      background: #474D57; 
-      border-radius: 3px;
-    }
-    ::-webkit-scrollbar-thumb:hover {
-      background: #5E6673; 
-    }
+    ::-webkit-scrollbar { width: 4px; }
+    ::-webkit-scrollbar-track { background: #0B0E11; }
+    ::-webkit-scrollbar-thumb { background: #474D57; border-radius: 2px; }
   </style>
 </head>
 <body>
 
   <div class="header-container">
-    <svg class="binance-logo" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+    <svg class="binance-logo" viewBox="0 0 32 32">
       <path d="M16 0l6.063 6.063-2.688 2.688L16 5.375l-3.375 3.375-2.688-2.688L16 0zm-9.438 9.438L9.25 12.125l-3.375 3.375L2.5 12.125l4.063-2.688zm18.875 0l4.063 2.688-3.375 3.375-3.375-3.375 2.688-2.688zM16 10.75l5.875 5.875L24.563 14 16 5.438 7.438 14l2.688 2.625L16 10.75zm0 5.375l-3.375 3.375L16 22.875l3.375-3.375L16 16.125zM5.875 18.875l3.375-3.375 2.688 2.688L16 24.063l-6.063 6.063-6.063-6.063 2.688-2.688 2.688-2.688 3.375 3.375-3.375-3.375-3.25 3.25zm20.25 0l-3.375-3.375-3.375 3.375 2.688 2.688 4.063-2.688zM16 26.625l-3.375-3.375-2.688 2.688L16 32l6.063-6.063-2.688-2.688L16 26.625z"/>
     </svg>
     <h1>BINANCE BOT</h1>
@@ -367,25 +360,24 @@
         const tp = document.getElementById('tpVal').value;
         const sl = document.getElementById('slVal').value;
 
-        statusBar.textContent = 'Sending Start Command...';
+        statusBar.textContent = 'Starting...';
         try {
             const query = `?apiKey=${encodeURIComponent(apiKey)}&secret=${encodeURIComponent(secret)}&amountMode=${amountMode}&amountVal=${amountVal}&tp=${tp}&sl=${sl}`;
-            const response = await fetch('/start_bot_logic' + query);
-            const msg = await response.text();
-            alert(msg);
+            await fetch('/start_bot_logic' + query);
             fetchStatus();
         } catch (e) {
-            alert('Error: ' + e.message);
+            statusBar.textContent = 'Error: ' + e.message;
         }
     }
 
     async function stopBot() {
-        if(!confirm("Are you sure you want to STOP the bot?")) return;
-        statusBar.textContent = 'Sending Stop Command...';
+        statusBar.textContent = 'Stopping...';
         try {
             await fetch('/stop_bot_logic');
             fetchStatus();
-        } catch (e) { alert(e); }
+        } catch (e) {
+             statusBar.textContent = 'Error: ' + e.message;
+        }
     }
 
     setInterval(fetchLogs, 1000);
