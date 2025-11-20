@@ -17,7 +17,7 @@ let userConfig = {
     apiKey: DEFAULT_API_KEY,
     secretKey: DEFAULT_SECRET_KEY,
     amountMode: 'percent', 
-    amountValue: 24,       
+    amountValue: 25,       
     tpPercent: 105,        
     slPercent: 100         
 };
@@ -504,39 +504,48 @@ async function openShortPosition(symbol, fundingRate, usdtBalance, maxLeverage) 
         
         await closeLongPreFunding();
 
-        // Get Actual Entry Price
-        const entryPrice = parseFloat(orderRes.avgFillPrice || currentPrice);
-        addLog(`<span style="color: #00ffaa">✅ Opened SHORT ${symbol} @ ${entryPrice}</span>`);
+        // [THAY ĐỔI QUAN TRỌNG]: Không tính TP/SL ngay, mà đợi 5s để lấy Entry Price chuẩn
+        addLog(`<span style="color: #00ffaa">✅ SHORT Placed. Waiting 5s to set accurate TP/SL...</span>`);
 
-        let targetRoe;
-        let enableAutoMoveSL = false;
-        
-        if (fundingRate > -0.005) {
-            targetRoe = 0.55; 
-            enableAutoMoveSL = true;
-            addLog(`⚡ Small Funding -> TP Fixed at 55%`);
-        } else {
-            targetRoe = userConfig.tpPercent / 100; 
-            enableAutoMoveSL = false;
-            addLog(`⚡ Large Funding -> TP set to User Input (${userConfig.tpPercent}%)`);
-        }
-        
-        const stopLossRoe = userConfig.slPercent / 100;
-
-        const tpMovePercent = targetRoe / maxLeverage;
-        const slMovePercent = stopLossRoe / maxLeverage;
-
-        const tpPrice = parseFloat((entryPrice * (1 - tpMovePercent)).toFixed(symbolInfo.pricePrecision));
-        const slPrice = parseFloat((entryPrice * (1 + slMovePercent)).toFixed(symbolInfo.pricePrecision));
-
-        addLog(`>>> Setting: TP ${(targetRoe*100).toFixed(0)}% | SL ${userConfig.slPercent}% (ROE)`);
-        
-        // [FIX] DELAY TP/SL SETTING BY 3 SECONDS
-        addLog(`⏳ Waiting 3s to set TP/SL...`);
-        
         setTimeout(async () => {
-            addLog(`>>> Setting TP @ ${tpPrice} | SL @ ${slPrice} (After 3s)`);
             try {
+                // 1. Lấy thông tin vị thế thực tế từ Binance
+                const positions = await callSignedAPI('/fapi/v2/positionRisk', 'GET', { symbol });
+                const pos = positions.find(p => p.symbol === symbol && p.positionSide === 'SHORT');
+                
+                if (!pos || parseFloat(pos.positionAmt) === 0) {
+                    addLog(`<span style="color: #ffcc00">⚠️ Position closed before TP/SL could be set.</span>`);
+                    return;
+                }
+
+                const realEntryPrice = parseFloat(pos.entryPrice);
+                addLog(`>>> Real Entry Price Found: ${realEntryPrice}`);
+
+                // 2. Tính toán TP/SL dựa trên Real Entry Price
+                let targetRoe;
+                let enableAutoMoveSL = false;
+
+                if (fundingRate > -0.005) {
+                    targetRoe = 0.55; // 55%
+                    enableAutoMoveSL = true;
+                } else {
+                    targetRoe = userConfig.tpPercent / 100;
+                    enableAutoMoveSL = false;
+                }
+
+                const stopLossRoe = userConfig.slPercent / 100;
+
+                // Công thức ROE: Price Change % = ROE / Leverage
+                const tpMovePercent = targetRoe / maxLeverage;
+                const slMovePercent = stopLossRoe / maxLeverage;
+
+                // Short: TP < Entry, SL > Entry
+                const tpPrice = parseFloat((realEntryPrice * (1 - tpMovePercent)).toFixed(symbolInfo.pricePrecision));
+                const slPrice = parseFloat((realEntryPrice * (1 + slMovePercent)).toFixed(symbolInfo.pricePrecision));
+
+                addLog(`>>> Setting TP @ ${tpPrice} (${(targetRoe*100).toFixed(0)}%) | SL @ ${slPrice} (${userConfig.slPercent}%)`);
+
+                // 3. Đặt lệnh TP/SL
                 await callSignedAPI('/fapi/v1/order', 'POST', {
                     symbol: symbol, 
                     side: 'BUY', 
@@ -555,48 +564,58 @@ async function openShortPosition(symbol, fundingRate, usdtBalance, maxLeverage) 
                     stopPrice: tpPrice, 
                     closePosition: 'true'
                 });
-            } catch (e) { addLog(`<span style="color: #ffcc00">⚠️ Error setting TP/SL Short: ${e.msg}</span>`); }
-        }, 3000);
 
-        addLog(`>>> Auto Move SL: ${enableAutoMoveSL ? 'ON (after 10s)' : 'OFF'}`);
+                // 4. Cập nhật lại trạng thái bot
+                currentOpenPosition = { 
+                    symbol, 
+                    quantity, 
+                    openTime: new Date(), 
+                    initialSLPrice: slPrice, 
+                    initialTPPrice: tpPrice 
+                };
 
-        currentOpenPosition = { symbol, quantity, openTime: new Date(), initialSLPrice: slPrice, initialTPPrice: tpPrice };
-        
-        if (enableAutoMoveSL) {
-            setTimeout(async () => {
-                if (!currentOpenPosition || currentOpenPosition.symbol !== symbol || isClosingPosition) return;
-                addLog(`⏳ [10s] Moving SL to Entry (${entryPrice})...`);
-                try {
-                    await callSignedAPI('/fapi/v1/allOpenOrders', 'DELETE', { symbol });
-                    
-                    await callSignedAPI('/fapi/v1/order', 'POST', {
-                        symbol: symbol, 
-                        side: 'BUY', 
-                        positionSide: 'SHORT', 
-                        type: 'STOP_MARKET',
-                        quantity: quantity, 
-                        stopPrice: entryPrice, 
-                        closePosition: 'true'
-                    });
+                // Auto Move SL Logic (Nếu cần)
+                if (enableAutoMoveSL) {
+                    addLog(`>>> Auto Move SL: ON (after 10s)`);
+                    setTimeout(async () => {
+                        if (!currentOpenPosition || currentOpenPosition.symbol !== symbol || isClosingPosition) return;
+                        addLog(`⏳ [10s] Moving SL to Entry (${realEntryPrice})...`);
+                        try {
+                            await callSignedAPI('/fapi/v1/allOpenOrders', 'DELETE', { symbol });
+                            
+                            await callSignedAPI('/fapi/v1/order', 'POST', {
+                                symbol: symbol, 
+                                side: 'BUY', 
+                                positionSide: 'SHORT', 
+                                type: 'STOP_MARKET',
+                                quantity: quantity, 
+                                stopPrice: realEntryPrice, 
+                                closePosition: 'true'
+                            });
 
-                    await callSignedAPI('/fapi/v1/order', 'POST', {
-                        symbol: symbol, 
-                        side: 'BUY', 
-                        positionSide: 'SHORT', 
-                        type: 'TAKE_PROFIT_MARKET',
-                        quantity: quantity, 
-                        stopPrice: tpPrice, 
-                        closePosition: 'true'
-                    });
+                            await callSignedAPI('/fapi/v1/order', 'POST', {
+                                symbol: symbol, 
+                                side: 'BUY', 
+                                positionSide: 'SHORT', 
+                                type: 'TAKE_PROFIT_MARKET',
+                                quantity: quantity, 
+                                stopPrice: tpPrice, 
+                                closePosition: 'true'
+                            });
 
-                    addLog(`<span style="color: #00ffaa">✅ Moved SL to ${entryPrice} (0%) & Reset TP.</span>`);
-                } catch (e) {
-                    addLog(`<span style="color: #ffcc00">⚠️ Error moving SL: ${e.msg}</span>`);
+                            addLog(`<span style="color: #00ffaa">✅ Moved SL to ${realEntryPrice} (0%) & Reset TP.</span>`);
+                        } catch (e) {
+                            addLog(`<span style="color: #ffcc00">⚠️ Error moving SL: ${e.msg}</span>`);
+                        }
+                    }, 10000);
                 }
-            }, 10000); 
-        }
 
-        positionCheckInterval = setInterval(manageOpenPosition, 300);
+                positionCheckInterval = setInterval(manageOpenPosition, 300);
+
+            } catch (e) {
+                addLog(`<span style="color: #ffcc00">⚠️ Error setting TP/SL Short: ${e.msg || e.message}</span>`);
+            }
+        }, 5000); // Đợi 5 giây
 
     } catch (error) {
         addLog(`<span style="color: #ff4444">❌ Error opening SHORT: ${error.message || error.msg}</span>`);
