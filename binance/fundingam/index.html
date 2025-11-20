@@ -34,23 +34,25 @@
       width: 100%;
     }
 
+    /* Chỉnh lại class cho thẻ IMG */
     .binance-logo {
-      width: 36px;
-      height: 36px;
-      fill: #FCD535;
-      flex-shrink: 0;
+      width: 40px;  /* Kích thước chuẩn */
+      height: 40px;
+      object-fit: contain; /* Đảm bảo ảnh không bị méo */
     }
 
     h1 {
       font-size: 1.8rem;
-      font-weight: 600;
+      font-weight: 700;
       color: #FCD535;
       margin: 0;
       line-height: 1;
       letter-spacing: 0.5px;
       text-transform: uppercase;
-      display: flex;
-      align-items: center; 
+      /* Flex để căn giữa chữ theo chiều dọc so với logo */
+      display: flex; 
+      align-items: center;
+      height: 40px; /* Khớp chiều cao với logo */
     }
 
     .status-bar {
@@ -226,10 +228,13 @@
 </head>
 <body>
 
+  <!-- DÙNG ẢNH PNG CHUẨN TỪ WIKIMEDIA -->
   <div class="header-container">
-    <svg class="binance-logo" viewBox="0 0 32 32">
-      <path d="M16 0l6.06 6.06-2.69 2.69L16 5.38l-3.37 3.37-2.69-2.69L16 0zm-9.44 9.44L9.25 12.13l-3.37 3.37L2.5 12.13l4.06-2.69zm18.88 0l4.06 2.69-3.37 3.37-3.37-3.37 2.68-2.69zM16 10.75l5.88 5.88L24.56 14 16 5.44 7.44 14l2.69 2.63L16 10.75zm0 5.38l-3.37 3.37L16 22.88l3.37-3.38L16 16.13zM5.88 18.88l3.37-3.38 2.69 2.69L16 24.06l-6.06 6.06-6.06-6.06 2.69-2.69 2.69-2.69 3.37 3.38-3.37-3.38-3.25 3.25zm20.25 0l-3.37-3.38-3.37 3.38 2.69 2.69 4.06-2.69zM16 26.63l-3.37-3.38-2.69 2.69L16 32l6.06-6.06-2.69-2.69-3.37 3.38z"/>
-    </svg>
+    <img 
+        src="https://upload.wikimedia.org/wikipedia/commons/f/fc/Binance-coin-bnb-logo.png" 
+        alt="Binance Logo" 
+        class="binance-logo"
+    >
     <h1>BINANCE BOT</h1>
   </div>
 
