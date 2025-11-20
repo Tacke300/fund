@@ -18,8 +18,8 @@ let userConfig = {
     secretKey: DEFAULT_SECRET_KEY,
     amountMode: 'percent', 
     amountValue: 25,       
-    tpPercent: 105,        
-    slPercent: 100         
+    tpPercent: 55,        
+    slPercent: 200         
 };
 
 function loadConfigFromFile() {
@@ -74,10 +74,10 @@ class CriticalApiError extends Error {
 
 const MIN_FUNDING_RATE_THRESHOLD = -0.001; 
 const FUNDING_WINDOW_MINUTES = 3; 
-const MAX_POSITION_LIFETIME_SECONDS = 120; 
+const MAX_POSITION_LIFETIME_SECONDS = 60; 
 const ONLY_OPEN_IF_FUNDING_IN_SECONDS = 60; 
 const OPEN_TRADE_BEFORE_FUNDING_SECONDS = 1; 
-const OPEN_TRADE_AFTER_SECOND_OFFSET_MS = 800; 
+const OPEN_TRADE_AFTER_SECOND_OFFSET_MS = 833; 
 const OPEN_LONG_BEFORE_FUNDING_SECONDS = 10; 
 const DELAY_BEFORE_CANCEL_ORDERS_MS = 3.5 * 60 * 1000; 
 const RETRY_CHECK_POSITION_ATTEMPTS = 6; 
@@ -526,7 +526,7 @@ async function openShortPosition(symbol, fundingRate, usdtBalance, maxLeverage) 
                 let enableAutoMoveSL = false;
 
                 if (fundingRate > -0.005) {
-                    targetRoe = 0.55; // 55%
+                    targetRoe = 0.25; // 55%
                     enableAutoMoveSL = true;
                 } else {
                     targetRoe = userConfig.tpPercent / 100;
