@@ -76,7 +76,8 @@ const MIN_FUNDING_RATE_THRESHOLD = -0.001;
 const FUNDING_WINDOW_MINUTES = 3; 
 const ONLY_OPEN_IF_FUNDING_IN_SECONDS = 60; 
 const OPEN_TRADE_BEFORE_FUNDING_SECONDS = 1; 
-const OPEN_TRADE_AFTER_SECOND_OFFSET_MS = 833; 
+// [OPTIMIZED] Đặt 1000 để kích hoạt ngay khi bước sang giây :00 (Vừa nhận Funding xong là múc ngay)
+const OPEN_TRADE_AFTER_SECOND_OFFSET_MS = 1000; 
 const OPEN_LONG_BEFORE_FUNDING_SECONDS = 10; 
 const DELAY_BEFORE_CANCEL_ORDERS_MS = 3.5 * 60 * 1000; 
 const RETRY_CHECK_POSITION_ATTEMPTS = 6; 
@@ -213,10 +214,7 @@ async function getLeverageBracketForSymbol(symbol) {
         const response = await callSignedAPI('/fapi/v1/leverageBracket', 'GET', { symbol });
         const brackets = response[0]?.brackets || [];
         brackets.sort((a, b) => b.initialLeverage - a.initialLeverage);
-        
-        if (brackets.length > 0) {
-            return brackets[0].initialLeverage; 
-        }
+        if (brackets.length > 0) return brackets[0].initialLeverage;
         return 20;
     } catch (error) { return 20; }
 }
@@ -261,19 +259,16 @@ async function cancelOpenOrdersForSymbol(symbol) {
     } catch (error) { return false; }
 }
 
-// --- AGGRESSIVE CLEANUP ---
 async function aggressiveCleanup(symbol) {
     addLog(`>>> 🧹 CLEANUP: Clearing Orders & Positions for ${symbol}...`);
     try {
         await cancelOpenOrdersForSymbol(symbol);
-
         const positions = await callSignedAPI('/fapi/v2/positionRisk', 'GET', { symbol });
         for (const pos of positions) {
             const amt = parseFloat(pos.positionAmt);
             if (Math.abs(amt) > 0) {
                 const side = amt > 0 ? 'SELL' : 'BUY';
                 addLog(`<span style="color: #ffcc00">⚠️ Closing existing ${pos.positionSide} (${amt})...</span>`);
-                
                 await callSignedAPI('/fapi/v1/order', 'POST', {
                     symbol: symbol,
                     side: side,
@@ -291,7 +286,6 @@ async function aggressiveCleanup(symbol) {
 
 async function logBestCandidate() {
     if (!botRunning) return;
-    
     try {
         const acc = await callSignedAPI('/fapi/v2/account', 'GET');
         const balance = parseFloat(acc.assets.find(a => a.asset === 'USDT')?.availableBalance || 0);
@@ -312,27 +306,21 @@ async function logBestCandidate() {
                 }
                 return a.time - b.time; 
             });
-
             const topCoin = candidates[0];
-
             let leverage = await getLeverageBracketForSymbol(topCoin.symbol);
             if (!leverage) leverage = 20; 
-
             let marginUsed = 0;
             if (userConfig.amountMode === 'percent') {
                 marginUsed = balance * (userConfig.amountValue / 100);
             } else {
                 marginUsed = userConfig.amountValue;
             }
-            
             const displayFr = (topCoin.fr * 100).toFixed(4);
             const timeStr = formatTimeUTC(topCoin.time);
-
             addLog(`<span style="color: #FCD535">🔮 [FORECAST] ${topCoin.symbol}</span> | <span style="color: #FCD535">FR:</span> ${displayFr}% | <span style="color: #FCD535">Time:</span> ${timeStr} | <span style="color: #FCD535">Margin:</span> ${marginUsed.toFixed(2)}$`);
         } else {
             addLog(`<span style="color: #FCD535">🔮 [FORECAST] No coin found with FR <= ${(MIN_FUNDING_RATE_THRESHOLD * 100)}%</span>`);
         }
-
     } catch (error) {
         addLog(`<span style="color: #ff4444">🔮 Forecast Error: ${error.message}</span>`);
     }
@@ -350,21 +338,14 @@ async function openLongPreFunding(symbol, maxLeverage, availableBalance) {
         } else {
             initialMargin = userConfig.amountValue;
         }
-
-        if (initialMargin > availableBalance) {
-             throw new Error("Insufficient funds for order.");
-        }
+        if (initialMargin > availableBalance) throw new Error("Insufficient funds for order.");
 
         let quantity = (initialMargin * maxLeverage) / currentPrice;
         quantity = Math.floor(quantity / symbolInfo.stepSize) * symbolInfo.stepSize;
         quantity = parseFloat(quantity.toFixed(symbolInfo.quantityPrecision));
 
         await callSignedAPI('/fapi/v1/order', 'POST', {
-            symbol: symbol, 
-            side: 'BUY', 
-            positionSide: 'LONG', 
-            type: 'MARKET', 
-            quantity: quantity
+            symbol: symbol, side: 'BUY', positionSide: 'LONG', type: 'MARKET', quantity: quantity
         });
 
         addLog(`<span style="color: #00ffaa">✅ Opened LONG buffer ${symbol}. Qty: ${quantity}</span>`);
@@ -374,21 +355,14 @@ async function openLongPreFunding(symbol, maxLeverage, availableBalance) {
 
         try {
             await callSignedAPI('/fapi/v1/order', 'POST', {
-                symbol: symbol, 
-                side: 'SELL', 
-                positionSide: 'LONG',
-                type: 'STOP_MARKET',
-                quantity: quantity, 
-                stopPrice: parseFloat(slPrice.toFixed(symbolInfo.pricePrecision)),
-                closePosition: 'true'
+                symbol: symbol, side: 'SELL', positionSide: 'LONG', type: 'STOP_MARKET',
+                quantity: quantity, stopPrice: parseFloat(slPrice.toFixed(symbolInfo.pricePrecision)), closePosition: 'true'
             });
             addLog(`<span style="color: #00ffaa">✅ Set SL for LONG ${symbol} @ ${slPrice}</span>`);
         } catch (e) {
             addLog(`<span style="color: #ffcc00">⚠️ Error setting SL for Long: ${e.msg}</span>`);
         }
-
         currentLongPosition = { symbol, quantity };
-
     } catch (error) {
         addLog(`<span style="color: #ff4444">❌ Error opening LONG buffer: ${error.msg || error.message}</span>`);
     }
@@ -397,18 +371,14 @@ async function openLongPreFunding(symbol, maxLeverage, availableBalance) {
 async function closeLongPreFunding() {
     if (!currentLongPosition) return;
     const { symbol, quantity } = currentLongPosition;
-    addLog(`>>> Closing LONG buffer ${symbol}...`);
+    // addLog(`>>> Closing LONG buffer ${symbol}...`); // [OPTIMIZED] Giảm log
     try {
         await callSignedAPI('/fapi/v1/order', 'POST', {
-            symbol: symbol, 
-            side: 'SELL', 
-            positionSide: 'LONG', 
-            type: 'MARKET',
-            quantity: quantity
+            symbol: symbol, side: 'SELL', positionSide: 'LONG', type: 'MARKET', quantity: quantity
         });
         addLog(`<span style="color: #00ffaa">✅ Closed LONG buffer.</span>`);
     } catch (error) {
-        addLog(`<span style="color: #ffcc00">⚠️ Error closing Long (maybe already closed): ${error.msg}</span>`);
+        addLog(`<span style="color: #ffcc00">⚠️ Error closing Long: ${error.msg}</span>`);
     }
     currentLongPosition = null;
 }
@@ -417,16 +387,10 @@ async function closeShortPosition(symbol, quantityToClose, reason = 'manual') {
     if (isClosingPosition) return;
     isClosingPosition = true;
     addLog(`>>> Closing SHORT ${symbol} (${reason})...`);
-    
     try {
         if (currentLongPosition) await closeLongPreFunding();
-
         await callSignedAPI('/fapi/v1/order', 'POST', {
-            symbol: symbol, 
-            side: 'BUY', 
-            positionSide: 'SHORT',
-            type: 'MARKET',
-            quantity: quantityToClose
+            symbol: symbol, side: 'BUY', positionSide: 'SHORT', type: 'MARKET', quantity: quantityToClose
         });
         addLog(`<span style="color: #00ffaa">✅ Closed SHORT ${symbol}.</span>`);
         cleanupAfterClose(symbol);
@@ -439,7 +403,6 @@ async function closeShortPosition(symbol, quantityToClose, reason = 'manual') {
 function cleanupAfterClose(symbol) {
     currentOpenPosition = null;
     if (positionCheckInterval) { clearInterval(positionCheckInterval); positionCheckInterval = null; }
-    
     setTimeout(async () => {
         await aggressiveCleanup(symbol);
         if (botRunning) scheduleNextMainCycle();
@@ -447,64 +410,23 @@ function cleanupAfterClose(symbol) {
     }, DELAY_BEFORE_CANCEL_ORDERS_MS);
 }
 
-async function checkAndHandleRemainingPosition(symbol, attempt = 1) {
-    if (attempt > RETRY_CHECK_POSITION_ATTEMPTS) return;
-    await delay(RETRY_CHECK_POSITION_DELAY_MS);
+// [MODIFIED] Hàm này giờ nhận trực tiếp quantity, không tính toán lại
+async function openShortPosition(symbol, fundingRate, quantity) {
+    // [OPTIMIZED] 1. Gửi lệnh ngay lập tức - Fire and Forget
+    const shortOrderPromise = callSignedAPI('/fapi/v1/order', 'POST', {
+        symbol: symbol, side: 'SELL', positionSide: 'SHORT', type: 'MARKET',
+        quantity: quantity, newOrderRespType: 'FULL'
+    });
+    
+    // [OPTIMIZED] 2. Đóng Long song song luôn, không chờ
+    closeLongPreFunding(); 
+
+    // 3. Giờ mới Log để không chậm lệnh
+    addLog(`🚀 EXECUTING SHORT ${symbol} (Qty: ${quantity})...`);
 
     try {
-        const positions = await callSignedAPI('/fapi/v2/positionRisk', 'GET');
-        const remPos = positions.find(p => p.symbol === symbol && p.positionSide === 'SHORT');
+        const orderRes = await shortOrderPromise; // Đợi kết quả để lấy Entry Price chuẩn nếu có (hoặc fallback)
         
-        if (remPos && Math.abs(parseFloat(remPos.positionAmt)) > 0) {
-            addLog(`<span style="color: #ff4444">❌ Residual SHORT ${symbol} found. Closing attempt ${attempt}...</span>`);
-            await callSignedAPI('/fapi/v1/order', 'POST', {
-                symbol: symbol, 
-                side: 'BUY', 
-                positionSide: 'SHORT', 
-                type: 'MARKET',
-                quantity: Math.abs(parseFloat(remPos.positionAmt))
-            });
-            checkAndHandleRemainingPosition(symbol, attempt + 1);
-        }
-    } catch (e) { 
-        checkAndHandleRemainingPosition(symbol, attempt + 1);
-    }
-}
-
-async function openShortPosition(symbol, fundingRate, usdtBalance, maxLeverage) {
-    addLog(`>>> Opening SHORT ${symbol} (FR: ${(fundingRate * 100).toFixed(4)}%)...`);
-    try {
-        const symbolInfo = exchangeInfoCache[symbol];
-        const currentPrice = await getCurrentPrice(symbol);
-        
-        let initialMargin = 0;
-        if (userConfig.amountMode === 'percent') {
-            initialMargin = usdtBalance * (userConfig.amountValue / 100);
-            addLog(`>>> Entry Margin: ${userConfig.amountValue}% Bal (${initialMargin.toFixed(2)}$)`);
-        } else {
-            initialMargin = userConfig.amountValue;
-            addLog(`>>> Entry Margin: Fixed ${initialMargin.toFixed(2)}$`);
-        }
-        
-        if (initialMargin > usdtBalance) {
-            throw new Error("Insufficient funds for order.");
-        }
-
-        let quantity = (initialMargin * maxLeverage) / currentPrice;
-        quantity = Math.floor(quantity / symbolInfo.stepSize) * symbolInfo.stepSize;
-        quantity = parseFloat(quantity.toFixed(symbolInfo.quantityPrecision));
-
-        const orderRes = await callSignedAPI('/fapi/v1/order', 'POST', {
-            symbol: symbol, 
-            side: 'SELL', 
-            positionSide: 'SHORT', 
-            type: 'MARKET',
-            quantity: quantity, 
-            newOrderRespType: 'FULL'
-        });
-        
-        await closeLongPreFunding();
-
         addLog(`<span style="color: #00ffaa">✅ SHORT Placed. Waiting 5s to set accurate TP/SL...</span>`);
 
         setTimeout(async () => {
@@ -519,39 +441,35 @@ async function openShortPosition(symbol, fundingRate, usdtBalance, maxLeverage) 
 
                 const realEntryPrice = parseFloat(pos.entryPrice);
                 const realLeverage = parseInt(pos.leverage);
+                const symbolInfo = exchangeInfoCache[symbol]; // Lấy lại info từ cache
                 
                 addLog(`>>> Data Sync: Entry ${realEntryPrice} | Lev x${realLeverage}`);
 
-                // --- TÍNH TOÁN TP/SL & TIME LIMIT ---
                 let targetRoe;
                 let enableAutoMoveSL = false;
-                let positionTimeLimit = 120; // Mặc định 120s
+                let positionTimeLimit = 120; 
 
                 if (fundingRate > -0.005) {
-                    // SMALL FUNDING
-                    targetRoe = 0.25; // [FIX] TP 25%
-                    positionTimeLimit = 60; // [FIX] Hold 60s
+                    targetRoe = 0.25; 
+                    positionTimeLimit = 60; 
                     enableAutoMoveSL = true;
                     addLog(`⚡ Small Funding -> TP Fixed 25% | Limit 60s`);
                 } else {
-                    // LARGE FUNDING
                     targetRoe = userConfig.tpPercent / 100;
-                    positionTimeLimit = 120; // [FIX] Hold 120s
+                    positionTimeLimit = 120; 
                     enableAutoMoveSL = false;
                     addLog(`⚡ Large Funding -> TP User Config | Limit 120s`);
                 }
 
                 const stopLossRoe = userConfig.slPercent / 100;
-
                 const tpMovePercent = targetRoe / realLeverage; 
                 const slMovePercent = stopLossRoe / realLeverage;
 
                 const tpPrice = parseFloat((realEntryPrice * (1 - tpMovePercent)).toFixed(symbolInfo.pricePrecision));
                 const slPrice = parseFloat((realEntryPrice * (1 + slMovePercent)).toFixed(symbolInfo.pricePrecision));
 
-                addLog(`>>> Setting TP @ ${tpPrice} (${(targetRoe*100).toFixed(0)}%) | SL @ ${slPrice} (${userConfig.slPercent}%)`);
+                addLog(`>>> Setting TP @ ${tpPrice} | SL @ ${slPrice}`);
 
-                // ĐẶT TP/SL BAN ĐẦU
                 await callSignedAPI('/fapi/v1/order', 'POST', {
                     symbol: symbol, side: 'BUY', positionSide: 'SHORT', type: 'STOP_MARKET',
                     quantity: quantity, stopPrice: slPrice, closePosition: 'true', workingType: 'MARK_PRICE'
@@ -566,39 +484,29 @@ async function openShortPosition(symbol, fundingRate, usdtBalance, maxLeverage) 
                     openTime: new Date(), 
                     initialSLPrice: slPrice, 
                     initialTPPrice: tpPrice,
-                    timeLimit: positionTimeLimit // Lưu lại thời gian giới hạn
+                    timeLimit: positionTimeLimit 
                 };
 
-                // --- AUTO MOVE SL LOGIC (CÓ CƠ CHẾ PHỤC HỒI) ---
                 if (enableAutoMoveSL) {
                     addLog(`>>> Auto Move SL: ON (after 10s)`);
                     setTimeout(async () => {
                         if (!currentOpenPosition || currentOpenPosition.symbol !== symbol || isClosingPosition) return;
-                        addLog(`⏳ [10s] Moving SL to Entry (${realEntryPrice})...`);
-                        
+                        addLog(`⏳ [10s] Moving SL to Entry...`);
                         try {
-                            // 1. Xóa lệnh cũ
                             await callSignedAPI('/fapi/v1/allOpenOrders', 'DELETE', { symbol });
-                            
-                            // 2. Cố gắng đặt SL về Entry
                             await callSignedAPI('/fapi/v1/order', 'POST', {
                                 symbol: symbol, side: 'BUY', positionSide: 'SHORT', type: 'STOP_MARKET',
                                 quantity: quantity, stopPrice: realEntryPrice, closePosition: 'true', workingType: 'MARK_PRICE'
                             });
-
-                            // 3. Đặt lại TP
                             await callSignedAPI('/fapi/v1/order', 'POST', {
                                 symbol: symbol, side: 'BUY', positionSide: 'SHORT', type: 'TAKE_PROFIT_MARKET',
                                 quantity: quantity, stopPrice: tpPrice, closePosition: 'true', workingType: 'MARK_PRICE'
                             });
-
-                            addLog(`<span style="color: #00ffaa">✅ Moved SL to ${realEntryPrice} (0%) & Reset TP.</span>`);
+                            addLog(`<span style="color: #00ffaa">✅ Moved SL to Entry.</span>`);
                         } catch (e) {
-                            // [FIX] LỖI XẢY RA -> PHỤC HỒI LẠI TP/SL GỐC NGAY LẬP TỨC
-                            addLog(`<span style="color: #ff4444">⚠️ Move SL Failed (PnL Negative/Error). REVERTING TO ORIGINAL SL/TP...</span>`);
+                            addLog(`<span style="color: #ff4444">⚠️ Move SL Failed. Reverting...</span>`);
                             try {
-                                await callSignedAPI('/fapi/v1/allOpenOrders', 'DELETE', { symbol }); // Xóa rác nếu có
-                                
+                                await callSignedAPI('/fapi/v1/allOpenOrders', 'DELETE', { symbol });
                                 await callSignedAPI('/fapi/v1/order', 'POST', {
                                     symbol: symbol, side: 'BUY', positionSide: 'SHORT', type: 'STOP_MARKET',
                                     quantity: quantity, stopPrice: slPrice, closePosition: 'true', workingType: 'MARK_PRICE'
@@ -607,14 +515,10 @@ async function openShortPosition(symbol, fundingRate, usdtBalance, maxLeverage) 
                                     symbol: symbol, side: 'BUY', positionSide: 'SHORT', type: 'TAKE_PROFIT_MARKET',
                                     quantity: quantity, stopPrice: tpPrice, closePosition: 'true', workingType: 'MARK_PRICE'
                                 });
-                                addLog(`<span style="color: #00ffaa">✅ Reverted to Original SL/TP. Position Safe.</span>`);
-                            } catch (revertError) {
-                                addLog(`<span style="color: #ff4444">❌ CRITICAL: Failed to revert SL/TP. Close Manually!</span>`);
-                            }
+                            } catch (revertError) {}
                         }
                     }, 10000);
                 }
-
                 positionCheckInterval = setInterval(manageOpenPosition, 300);
 
             } catch (e) {
@@ -632,20 +536,17 @@ async function openShortPosition(symbol, fundingRate, usdtBalance, maxLeverage) 
 async function manageOpenPosition() {
     if (!currentOpenPosition || isClosingPosition) return;
     const { symbol, quantity, openTime, timeLimit } = currentOpenPosition;
-    
-    // [FIX] SỬ DỤNG TIME LIMIT ĐỘNG (60s hoặc 120s)
     const limitSeconds = timeLimit || 120;
 
     if ((new Date() - openTime) / 1000 >= limitSeconds) {
         await closeShortPosition(symbol, quantity, 'Time Limit');
         return;
     }
-
     try {
         const positions = await callSignedAPI('/fapi/v2/positionRisk', 'GET');
         const pos = positions.find(p => p.symbol === symbol && p.positionSide === 'SHORT');
         if (!pos || parseFloat(pos.positionAmt) === 0) {
-            addLog(`<span style="color: #00ffaa">✅ Position ${symbol} closed (TP/SL hit).</span>`);
+            addLog(`<span style="color: #00ffaa">✅ Position ${symbol} closed.</span>`);
             cleanupAfterClose(symbol);
         }
     } catch (error) { }
@@ -657,7 +558,6 @@ async function runTradingLogic() {
     try {
         const acc = await callSignedAPI('/fapi/v2/account', 'GET');
         const balance = parseFloat(acc.assets.find(a => a.asset === 'USDT')?.availableBalance || 0);
-        
         const allFunding = await callPublicAPI('/fapi/v1/premiumIndex');
         const now = Date.now();
         let candidates = [];
@@ -675,9 +575,7 @@ async function runTradingLogic() {
 
         if (candidates.length > 0) {
             candidates.sort((a, b) => {
-                if (a.time === b.time) {
-                    return a.fr - b.fr; 
-                }
+                if (a.time === b.time) return a.fr - b.fr; 
                 return a.time - b.time; 
             });
 
@@ -690,12 +588,23 @@ async function runTradingLogic() {
 
             if (delayShort > 0 && delayShort <= ONLY_OPEN_IF_FUNDING_IN_SECONDS * 1000) {
                 addLog(`<span style="color: #00ffaa">✅ SELECTED: ${best.symbol} (FR: ${(best.fr * 100).toFixed(4)}%)</span>`);
-                addLog(`-> Long Buffer in: ${Math.ceil(delayLong/1000)}s`);
                 addLog(`-> Short Main in: ${Math.ceil(delayShort/1000)}s`);
                 
                 await setLeverage(best.symbol, best.leverage);
-
                 await aggressiveCleanup(best.symbol);
+
+                // [OPTIMIZED] TÍNH TOÁN QUANTITY NGAY TẠI ĐÂY (Trước khi Timeout chạy)
+                const symbolInfo = exchangeInfoCache[best.symbol];
+                const currentPrice = await getCurrentPrice(best.symbol); // Lấy giá lúc này, sai lệch 10-20s không vấn đề với margin
+                let initialMargin = 0;
+                if (userConfig.amountMode === 'percent') initialMargin = balance * (userConfig.amountValue / 100);
+                else initialMargin = userConfig.amountValue;
+
+                let quantity = (initialMargin * best.leverage) / currentPrice;
+                quantity = Math.floor(quantity / symbolInfo.stepSize) * symbolInfo.stepSize;
+                quantity = parseFloat(quantity.toFixed(symbolInfo.quantityPrecision));
+                
+                addLog(`>>> Pre-calculated Qty: ${quantity} (at price ~${currentPrice})`);
 
                 clearTimeout(scheduledLongTimeout);
                 if (delayLong > 0) {
@@ -707,7 +616,8 @@ async function runTradingLogic() {
                 clearTimeout(nextScheduledTimeout);
                 nextScheduledTimeout = setTimeout(() => {
                     if (botRunning && !currentOpenPosition) {
-                        openShortPosition(best.symbol, best.fr, balance, best.leverage);
+                        // [OPTIMIZED] Truyền thẳng quantity vào, không cần tính lại
+                        openShortPosition(best.symbol, best.fr, quantity);
                     }
                 }, delayShort);
             } else {
@@ -718,7 +628,6 @@ async function runTradingLogic() {
             addLog(`<span style="color: #ffcc00">⚠️ No coin FR <= ${(MIN_FUNDING_RATE_THRESHOLD * 100)}%.</span>`);
             scheduleNextMainCycle();
         }
-
     } catch (error) {
         addLog(`<span style="color: #ff4444">❌ Logic Error: ${error.message}</span>`);
         scheduleNextMainCycle();
@@ -732,66 +641,30 @@ async function scheduleNextMainCycle() {
     const min = new Date(now).getUTCMinutes();
     let delayMs = ((59 - min + (min >= 59 ? 60 : 0)) * 60 * 1000) - (now % 60000) - 500; 
     if (delayMs < 1000) delayMs = 1000;
-    
     addLog(`>>> Next scan scheduled at :59...`);
     nextScheduledTimeout = setTimeout(runTradingLogic, delayMs);
 }
 
 async function startBotLogicInternal(query) {
     if (botRunning) return 'Bot is already running.';
-
     let isUpdated = false;
-
-    if (query.apiKey && query.apiKey.trim() !== '') {
-        userConfig.apiKey = query.apiKey.trim();
-        isUpdated = true;
-    }
-    if (query.secret && query.secret.trim() !== '') {
-        userConfig.secretKey = query.secret.trim();
-        isUpdated = true;
-    }
-
-    if (query.amountMode) { 
-        userConfig.amountMode = query.amountMode; 
-        isUpdated = true; 
-    }
-    if (query.amountVal) { 
-        userConfig.amountValue = parseFloat(query.amountVal); 
-        isUpdated = true; 
-    }
-    
-    if (query.tp) { 
-        userConfig.tpPercent = parseFloat(query.tp); 
-        isUpdated = true; 
-    } else if (!userConfig.tpPercent) { 
-        userConfig.tpPercent = 105; 
-    }
-
-    if (query.sl) { 
-        userConfig.slPercent = parseFloat(query.sl); 
-        isUpdated = true; 
-    }
-
-    if (isUpdated) {
-        saveConfigToFile();
-        addLog(`<span style="color: #00ffaa">Update done.</span> Config: ${userConfig.amountValue}${userConfig.amountMode === 'percent' ? '%' : '$'} | TP(Large) ${userConfig.tpPercent}% | SL ${userConfig.slPercent}%`);
-    }
-
+    if (query.apiKey && query.apiKey.trim() !== '') { userConfig.apiKey = query.apiKey.trim(); isUpdated = true; }
+    if (query.secret && query.secret.trim() !== '') { userConfig.secretKey = query.secret.trim(); isUpdated = true; }
+    if (query.amountMode) { userConfig.amountMode = query.amountMode; isUpdated = true; }
+    if (query.amountVal) { userConfig.amountValue = parseFloat(query.amountVal); isUpdated = true; }
+    if (query.tp) { userConfig.tpPercent = parseFloat(query.tp); isUpdated = true; } else if (!userConfig.tpPercent) { userConfig.tpPercent = 105; }
+    if (query.sl) { userConfig.slPercent = parseFloat(query.sl); isUpdated = true; }
+    if (isUpdated) { saveConfigToFile(); addLog(`<span style="color: #00ffaa">Update done.</span>`); }
     addLog('--- STARTING BOT ---');
-
     try {
         await syncServerTime();
         await getExchangeInfo();
         botRunning = true; 
         botStartTime = new Date();
         scheduleNextMainCycle();
-        
         if (periodicLogInterval) clearInterval(periodicLogInterval);
-        periodicLogInterval = setInterval(() => {
-            logBestCandidate();
-        }, 120000); 
+        periodicLogInterval = setInterval(() => { logBestCandidate(); }, 120000); 
         logBestCandidate(); 
-
         return 'Bot Started Successfully.';
     } catch (e) { return 'Start Error: ' + e.message; }
 }
@@ -814,11 +687,6 @@ const app = express();
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
 app.get('/api/logs', (req, res) => res.send(memoryLogs.join('\n')));
 app.get('/api/status', (req, res) => res.send(botRunning ? `RUNNING (Uptime: ${botStartTime ? ((Date.now() - botStartTime)/60000).toFixed(1) : 0}m)` : 'STOPPED'));
-
-app.get('/start_bot_logic', async (req, res) => {
-    res.send(await startBotLogicInternal(req.query));
-});
-
+app.get('/start_bot_logic', async (req, res) => { res.send(await startBotLogicInternal(req.query)); });
 app.get('/stop_bot_logic', (req, res) => res.send(stopBotLogicInternal()));
-
 app.listen(WEB_SERVER_PORT);
