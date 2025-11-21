@@ -447,11 +447,11 @@ async function openShortPosition(symbol, fundingRate, quantity) {
 
                 let targetRoe;
                 let enableAutoMoveSL = false;
-                let positionTimeLimit = 120; 
+                let positionTimeLimit = 180; 
 
                 if (fundingRate > -0.005) {
                     targetRoe = 0.25; 
-                    positionTimeLimit = 60; 
+                    positionTimeLimit = 120; 
                     enableAutoMoveSL = true;
                     addLog(`⚡ Small Funding -> TP Fixed 25% | Limit 60s`);
                 } else {
