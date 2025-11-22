@@ -321,7 +321,11 @@ async function executeSingleFundTransfer(fromExchangeId, toExchangeId, amount) {
 
 async function manageFundDistribution(opportunity) {
     capitalManagementState = 'PREPARING_FUNDS';
-    safeLog('info', "[CAPITAL] Bắt đầu Giai đoạn 1: Gom vốn cho cơ hội giao dịch.");
+    safeLog('info', "[CAPITAL] Bắt đầu Giai đoạn 1: Gom vốn cho cơ hội giao dịch (TÍNH NĂNG TỰ ĐỘNG CHUYỂN TIỀN ĐANG TẮT).");
+    
+    /* =====================================================================================
+       [ĐÃ TẮT] LOGIC GOM VỐN TỰ ĐỘNG CŨ - GIỮ NGUYÊN ĐỂ BACKUP
+       =====================================================================================
     const { shortExchange, longExchange } = opportunity.details;
     const tradingExchanges = [shortExchange, longExchange];
     
@@ -354,15 +358,20 @@ async function manageFundDistribution(opportunity) {
              safeLog('log', `[CAPITAL] Sàn ${targetEx.toUpperCase()} đã có đủ vốn hoặc số tiền cần chuyển quá nhỏ.`);
         }
     }
-    
     safeLog('info', "[CAPITAL] ✅ Đã gửi các lệnh gom vốn. Chờ tiền về và chuyển nội bộ tự động.");
+    ===================================================================================== */
+    
+    safeLog('warn', `[CAPITAL] Bot sẽ sử dụng nguồn vốn hiện có trên ${opportunity.details.shortExchange} và ${opportunity.details.longExchange}.`);
     capitalManagementState = 'FUNDS_READY';
 }
 
 async function returnFundsToHub() {
     capitalManagementState = 'CLEANING_UP';
-    safeLog('info', "[CLEANUP] Bắt đầu Giai đoạn 3: Dọn dẹp và chuyển toàn bộ vốn về Hub.");
+    safeLog('info', "[CLEANUP] Bắt đầu Giai đoạn 3: Dọn dẹp (TÍNH NĂNG GOM TIỀN VỀ ĐANG TẮT).");
     
+    /* =====================================================================================
+       [ĐÃ TẮT] LOGIC GOM TIỀN VỀ HUB CŨ - GIỮ NGUYÊN ĐỂ BACKUP
+       =====================================================================================
     const nonHubExchanges = activeExchangeIds.filter(id => id !== HUB_EXCHANGE_ID && exchanges[id] && id !== 'kucoin' && id !== 'binance');
     
     for (const exId of nonHubExchanges) {
@@ -390,6 +399,16 @@ async function returnFundsToHub() {
         capitalManagementState = 'IDLE';
         selectedOpportunityForNextTrade = null;
     }, 5000);
+    ===================================================================================== */
+
+    safeLog('warn', "[CLEANUP] Tiền sẽ được giữ lại trên ví Future của các sàn.");
+    
+    // Reset trạng thái về IDLE nhanh chóng
+    setTimeout(() => {
+        safeLog('info', "[CLEANUP] ✅ Bot reset về trạng thái IDLE.");
+        capitalManagementState = 'IDLE';
+        selectedOpportunityForNextTrade = null;
+    }, 2000);
 }
 
 const normalizeExchangeId = (id) => {
@@ -413,6 +432,14 @@ async function processServerData(serverData) {
         if (!shortExRaw || !longExRaw) return false;
         const shortExchange = normalizeExchangeId(shortExRaw);
         const longExchange = normalizeExchangeId(longExRaw);
+
+        // [MỚI THÊM] BỘ LỌC CHỈ LẤY CẶP BINANCE & KUCOIN
+        // Nếu một trong hai sàn KHÔNG PHẢI là binanceusdm HOẶC kucoinfutures thì loại bỏ
+        const allowed = ['binanceusdm', 'kucoinfutures'];
+        if (!allowed.includes(shortExchange) || !allowed.includes(longExchange)) {
+            return false; // Loại bỏ Bitget, OKX...
+        }
+        
         return exchanges[shortExchange] && !exchangeHealth[shortExchange]?.isDisabled && exchanges[longExchange] && !exchangeHealth[longExchange]?.isDisabled;
     }).map(op => {
         const [shortExRaw, longExRaw] = op.exchanges.split(' / ');
@@ -670,7 +697,7 @@ async function calculatePnlAfterDelay(closedTrade) {
         tradeAwaitingPnl = null;
 
         if (botState === 'RUNNING') {
-            safeLog('info', '[STATE] Tính PNL hoàn tất. Bắt đầu dọn dẹp và chuyển vốn về Hub.');
+            safeLog('info', '[STATE] Tính PNL hoàn tất. Bắt đầu dọn dẹp (bỏ qua gom tiền).');
             await returnFundsToHub();
         }
 
@@ -706,10 +733,10 @@ async function mainBotLoop() {
 
             if (opportunityToExecute) {
                 selectedOpportunityForNextTrade = opportunityToExecute;
-                safeLog('info', `[TIMER] ✅ Đã chọn cơ hội: ${selectedOpportunityForNextTrade.coin} trên ${selectedOpportunityForNextTrade.exchanges}. Bắt đầu gom vốn.`);
+                safeLog('info', `[TIMER] ✅ Đã chọn cơ hội: ${selectedOpportunityForNextTrade.coin} trên ${selectedOpportunityForNextTrade.exchanges}. Bắt đầu chuẩn bị.`);
                 await manageFundDistribution(selectedOpportunityForNextTrade);
             } else if (!hasLoggedNotFoundThisHour) {
-                safeLog('log', "[TIMER] Không tìm thấy cơ hội nào hợp lệ tại phút 50.");
+                safeLog('log', "[TIMER] Không tìm thấy cơ hội nào hợp lệ (chỉ Binance/KuCoin) tại phút 50.");
                 hasLoggedNotFoundThisHour = true;
             }
         }
@@ -728,7 +755,7 @@ async function mainBotLoop() {
             }
         }
         else if (currentMinute > 5 && capitalManagementState !== 'IDLE' && capitalManagementState !== 'TRADE_OPEN') {
-            safeLog('warn', `[RESET] Trạng thái ${capitalManagementState} bị kẹt, đang reset về IDLE và dọn dẹp vốn.`);
+            safeLog('warn', `[RESET] Trạng thái ${capitalManagementState} bị kẹt, đang reset về IDLE.`);
             await returnFundsToHub();
         }
 
