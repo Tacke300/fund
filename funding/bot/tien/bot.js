@@ -23,8 +23,8 @@ const MIN_COLLATERAL_FOR_TRADE = 0.1;
 const TP_SL_PNL_PERCENTAGE = 150;
 
 // [CONFIG] Cấu hình lệnh TEST
-// Tăng lên 1$ để đảm bảo > 5$ min notional của Binance (1$ * 20x = 20$)
-const TEST_TRADE_MARGIN = 1.0; 
+// Theo yêu cầu: 0.3$
+const TEST_TRADE_MARGIN = 0.3; 
 
 const FUND_TRANSFER_MIN_AMOUNT_BINANCE = 10;
 const FUND_TRANSFER_MIN_AMOUNT_KUCOIN = 1;
@@ -106,17 +106,18 @@ activeExchangeIds.forEach(id => {
             exchanges[id] = new exchangeClass(config); 
             safeLog('log', `[INIT] Khởi tạo sàn ${id.toUpperCase()} thành công.`); 
             
-            // [FIX] Tự động chuyển Binance sang One-Way Mode để tránh lỗi -4061
+            // [MODIFIED] Tự động chuyển Binance sang HEDGE MODE (2 chiều)
             if (id === 'binanceusdm') {
                 setTimeout(async () => {
                     try {
-                        // Gọi API set Dual Side Position = false (One-Way Mode)
-                        await exchanges[id].fapiPrivatePostPositionSideDual({ 'dualSidePosition': 'false' });
-                        safeLog('info', `[INIT] ✅ Đã chuyển Binance sang chế độ One-Way Mode thành công.`);
+                        // dualSidePosition: 'true' => Hedge Mode
+                        await exchanges[id].fapiPrivatePostPositionSideDual({ 'dualSidePosition': 'true' });
+                        safeLog('info', `[INIT] ✅ Đã chuyển Binance sang HEDGE MODE (2 chiều).`);
                     } catch (e) {
-                        // Bỏ qua lỗi nếu nó báo là "Không cần thay đổi" (-4046)
-                        if (!e.message.includes("-4046")) {
-                            safeLog('warn', `[INIT] Không thể chuyển Binance sang One-Way Mode (Có thể do đang có lệnh treo): ${e.message}`);
+                        if (!e.message.includes("-4046")) { // -4046: No need to change
+                            safeLog('warn', `[INIT] Không thể chuyển Binance sang Hedge Mode: ${e.message}`);
+                        } else {
+                            safeLog('info', `[INIT] ✅ Binance đã ở sẵn HEDGE MODE.`);
                         }
                     }
                 }, 2000);
@@ -269,7 +270,6 @@ async function attemptInternalTransferOnArrival(toExchangeId, fromExchangeId, am
                     finalAvailableAmount = finalBalanceData.free?.USDT || 0;
                 }
                 
-                // [FIX] Trừ 0.05 để tránh lỗi làm tròn số
                 if (finalAvailableAmount > 0.1) {
                     finalAvailableAmount = finalAvailableAmount - 0.05; 
                 }
@@ -465,23 +465,42 @@ async function computeOrderDetails(exchange, symbol, targetNotionalUSDT, leverag
     return { amount, price, notional: currentNotional, requiredMargin: currentNotional / leverage };
 }
 
+// [MODIFIED] Hàm hỗ trợ đặt lệnh TP/SL tương thích Hedge Mode
 async function placeTpSlOrders(exchange, symbol, side, amount, entryPrice, collateral, notionalValue) {
     if (!entryPrice || typeof entryPrice !== 'number' || entryPrice <= 0) return { tpOrderId: null, slOrderId: null };
     if (!notionalValue || notionalValue <= 0) return { tpOrderId: null, slOrderId: null };
     const pnlAmount = collateral * (TP_SL_PNL_PERCENTAGE / 100);
     const priceChange = (pnlAmount / notionalValue) * entryPrice;
+    
+    // Tính giá
     let tpPrice, slPrice;
-    if (side === 'sell') {
+    // Side truyền vào là side của lệnh Mở (Open). 
+    // Nếu Open Sell (Short) -> TP/SL là Buy.
+    // Nếu Open Buy (Long) -> TP/SL là Sell.
+    if (side === 'sell') { // Short Position
         tpPrice = entryPrice - priceChange;
         slPrice = entryPrice + priceChange;
-    } else {
+    } else { // Long Position
         tpPrice = entryPrice + priceChange;
         slPrice = entryPrice - priceChange;
     }
+    
     if (isNaN(tpPrice) || isNaN(slPrice)) return { tpOrderId: null, slOrderId: null };
-    const orderSide = (side === 'sell') ? 'buy' : 'sell';
+
+    // Params cho Hedge Mode
+    const orderSide = (side === 'sell') ? 'buy' : 'sell'; // Ngược lại với lệnh mở
+    
+    // Binance Hedge Params: Phải chỉ định positionSide của vị thế đang giữ
+    // Nếu đang giữ Short (Open Sell) -> positionSide='SHORT'
+    // Nếu đang giữ Long (Open Buy) -> positionSide='LONG'
+    let binanceParams = {};
+    if (exchange.id === 'binanceusdm') {
+        binanceParams = { 'positionSide': (side === 'sell') ? 'SHORT' : 'LONG' };
+    }
+
     try {
         let tpResult, slResult;
+        
         if (exchange.id === 'kucoinfutures') {
             const tpParams = { 'reduceOnly': true, 'stop': side === 'sell' ? 'down' : 'up', 'stopPrice': exchange.priceToPrecision(symbol, tpPrice), 'stopPriceType': 'MP', 'marginMode': 'cross' };
             tpResult = await exchange.createOrder(symbol, 'market', orderSide, amount, undefined, tpParams);
@@ -494,9 +513,10 @@ async function placeTpSlOrders(exchange, symbol, side, amount, entryPrice, colla
             const slParams = { 'planType': 'normal_plan', 'triggerPrice': exchange.priceToPrecision(symbol, slPrice), 'holdSide': holdSide };
             slResult = await exchange.createOrder(symbol, 'market', orderSide, amount, undefined, slParams);
         } else {
-            const params = { 'closePosition': 'true' };
-            tpResult = await exchange.createOrder(symbol, 'TAKE_PROFIT_MARKET', orderSide, amount, undefined, { ...params, 'stopPrice': exchange.priceToPrecision(symbol, tpPrice) });
-            slResult = await exchange.createOrder(symbol, 'STOP_MARKET', orderSide, amount, undefined, { ...params, 'stopPrice': exchange.priceToPrecision(symbol, slPrice) });
+            // Binance & Others
+            const commonParams = { 'closePosition': 'true', ...binanceParams };
+            tpResult = await exchange.createOrder(symbol, 'TAKE_PROFIT_MARKET', orderSide, amount, undefined, { ...commonParams, 'stopPrice': exchange.priceToPrecision(symbol, tpPrice) });
+            slResult = await exchange.createOrder(symbol, 'STOP_MARKET', orderSide, amount, undefined, { ...commonParams, 'stopPrice': exchange.priceToPrecision(symbol, slPrice) });
         }
         return { tpOrderId: tpResult.id, slOrderId: slResult.id };
     } catch (e) {
@@ -552,16 +572,26 @@ async function executeTestTrade(opportunity) {
         return false;
     }
 
+    // [MODIFIED] Chuẩn bị params mở lệnh (Hedge Mode cho Binance)
+    const shortParams = (shortEx.id === 'binanceusdm') ? { 'positionSide': 'SHORT' } : (shortEx.id === 'kucoinfutures' ? {'marginMode':'cross'} : {});
+    const longParams = (longEx.id === 'binanceusdm') ? { 'positionSide': 'LONG' } : (longEx.id === 'kucoinfutures' ? {'marginMode':'cross'} : {});
+
     let shortOrder, longOrder;
     try {
         [shortOrder, longOrder] = await Promise.all([
-            shortEx.createMarketSellOrder(shortSymbol, shortOrderDetails.amount, (shortEx.id === 'kucoinfutures' ? {'marginMode':'cross'} : {})),
-            longEx.createMarketBuyOrder(longSymbol, longOrderDetails.amount, (longEx.id === 'kucoinfutures' ? {'marginMode':'cross'} : {}))
+            shortEx.createMarketSellOrder(shortSymbol, shortOrderDetails.amount, shortParams),
+            longEx.createMarketBuyOrder(longSymbol, longOrderDetails.amount, longParams)
         ]);
     } catch (e) {
         safeLog('error', `[TEST-TRADE] ❌ Lỗi mở lệnh test: ${shortEx.id} ${e.message}`);
-        if (shortOrder) await shortEx.createMarketBuyOrder(shortSymbol, shortOrderDetails.amount, {'reduceOnly': true});
-        if (longOrder) await longEx.createMarketSellOrder(longSymbol, longOrderDetails.amount, {'reduceOnly': true});
+        // Cleanup ngay nếu lỗi 1 đầu
+        // Đóng SHORT: Buy, positionSide=SHORT
+        const closeShortParams = (shortEx.id === 'binanceusdm') ? { 'positionSide': 'SHORT' } : {'reduceOnly': true};
+        // Đóng LONG: Sell, positionSide=LONG
+        const closeLongParams = (longEx.id === 'binanceusdm') ? { 'positionSide': 'LONG' } : {'reduceOnly': true};
+
+        if (shortOrder) await shortEx.createMarketBuyOrder(shortSymbol, shortOrderDetails.amount, closeShortParams);
+        if (longOrder) await longEx.createMarketSellOrder(longSymbol, longOrderDetails.amount, closeLongParams);
         return false;
     }
 
@@ -570,11 +600,15 @@ async function executeTestTrade(opportunity) {
     };
     const [shortEntry, longEntry] = await Promise.all([ getPrice(shortEx, shortSymbol, shortOrder.id), getPrice(longEx, longSymbol, longOrder.id) ]);
 
+    // Params đóng lệnh để cleanup
+    const closeShortParams = (shortEx.id === 'binanceusdm') ? { 'positionSide': 'SHORT' } : {'reduceOnly': true, ...(shortEx.id === 'kucoinfutures' && {'marginMode': 'cross'})};
+    const closeLongParams = (longEx.id === 'binanceusdm') ? { 'positionSide': 'LONG' } : {'reduceOnly': true, ...(longEx.id === 'kucoinfutures' && {'marginMode': 'cross'})};
+
     if (!shortEntry || !longEntry) {
          safeLog('error', '[TEST-TRADE] ❌ Không lấy được giá khớp lệnh.');
          await Promise.all([
-            shortEx.createMarketBuyOrder(shortSymbol, shortOrderDetails.amount, {'reduceOnly': true}),
-            longEx.createMarketSellOrder(longSymbol, longOrderDetails.amount, {'reduceOnly': true})
+            shortEx.createMarketBuyOrder(shortSymbol, shortOrderDetails.amount, closeShortParams),
+            longEx.createMarketSellOrder(longSymbol, longOrderDetails.amount, closeLongParams)
          ]);
          return false;
     }
@@ -586,6 +620,7 @@ async function executeTestTrade(opportunity) {
         ]);
     } catch (e) {
          safeLog('error', '[TEST-TRADE] ❌ Lỗi đặt TP/SL.'); 
+         // TP/SL lỗi thì vẫn phải cleanup
     }
 
     safeLog('info', `[TEST-TRADE] ✅ Test thành công! Đang dọn dẹp...`);
@@ -594,8 +629,8 @@ async function executeTestTrade(opportunity) {
         await shortEx.cancelAllOrders(shortSymbol);
         await longEx.cancelAllOrders(longSymbol);
         await Promise.all([
-            shortEx.createMarketBuyOrder(shortSymbol, shortOrderDetails.amount, {'reduceOnly': true, ...(shortEx.id === 'kucoinfutures' && {'marginMode': 'cross'})}),
-            longEx.createMarketSellOrder(longSymbol, longOrderDetails.amount, {'reduceOnly': true, ...(longEx.id === 'kucoinfutures' && {'marginMode': 'cross'})})
+            shortEx.createMarketBuyOrder(shortSymbol, shortOrderDetails.amount, closeShortParams),
+            longEx.createMarketSellOrder(longSymbol, longOrderDetails.amount, closeLongParams)
         ]);
         return true;
     } catch (e) {
@@ -630,9 +665,13 @@ async function runTestTradeSequence() {
             isRunningTestSequence = false;
             return;
         } else {
-            safeLog('warn', `[TEST-SEQUENCE] ⚠️ Coin ${op.coin} lỗi. Thêm vào danh sách bỏ qua.`);
+            safeLog('warn', `[TEST-SEQUENCE] ⚠️ Coin ${op.coin} lỗi. Dọn dẹp & Nghỉ 5s...`);
             failedCoinsInSession.add(op.coin);
-            await closeTradeNow(); 
+            
+            await closeTradeNow(); // Dọn dẹp dự phòng
+            
+            // [MODIFIED] Nghỉ 5s trước khi thử coin tiếp theo
+            await sleep(5000); 
         }
     }
     
@@ -641,7 +680,6 @@ async function runTestTradeSequence() {
 
 
 async function executeTrades(opportunity, percentageToUse) {
-    // Hàm này dùng cho cả LỆNH THẬT (59:50) và LỆNH THỦ CÔNG (Manual)
     const { coin, commonLeverage: desiredLeverage } = opportunity;
     const { shortExchange, longExchange } = opportunity.details;
     
@@ -693,11 +731,15 @@ async function executeTrades(opportunity, percentageToUse) {
             return false;
         }
 
+        // [MODIFIED] Params cho Hedge Mode
+        const shortParams = (shortEx.id === 'binanceusdm') ? { 'positionSide': 'SHORT' } : (shortEx.id === 'kucoinfutures' ? {'marginMode':'cross'} : {});
+        const longParams = (longEx.id === 'binanceusdm') ? { 'positionSide': 'LONG' } : (longEx.id === 'kucoinfutures' ? {'marginMode':'cross'} : {});
+
         let shortOrder, longOrder;
         try {
             [shortOrder, longOrder] = await Promise.all([
-                shortEx.createMarketSellOrder(shortSymbol, shortOrderDetails.amount, (shortEx.id === 'kucoinfutures' ? {'marginMode':'cross'} : {})),
-                longEx.createMarketBuyOrder(longSymbol, longOrderDetails.amount, (longEx.id === 'kucoinfutures' ? {'marginMode':'cross'} : {}))
+                shortEx.createMarketSellOrder(shortSymbol, shortOrderDetails.amount, shortParams),
+                longEx.createMarketBuyOrder(longSymbol, longOrderDetails.amount, longParams)
             ]);
         } catch (e) {
             safeLog('error', `[EXECUTE] Lỗi mở lệnh: ${e.message}`);
@@ -777,12 +819,13 @@ async function closeTradeNow() {
 
         safeLog('info', `[CLEANUP] Đang đóng vị thế...`);
         
-        const shortParams = { 'reduceOnly': true, ...(shortEx.id === 'kucoinfutures' && {'marginMode': 'cross'}) };
-        const longParams = { 'reduceOnly': true, ...(longEx.id === 'kucoinfutures' && {'marginMode': 'cross'}) };
+        // [MODIFIED] Params đóng lệnh tương thích Hedge Mode
+        const closeShortParams = (shortEx.id === 'binanceusdm') ? { 'positionSide': 'SHORT' } : {'reduceOnly': true, ...(shortEx.id === 'kucoinfutures' && {'marginMode': 'cross'})};
+        const closeLongParams = (longEx.id === 'binanceusdm') ? { 'positionSide': 'LONG' } : {'reduceOnly': true, ...(longEx.id === 'kucoinfutures' && {'marginMode': 'cross'})};
 
         await Promise.all([
-            shortEx.createMarketBuyOrder(tradeToClose.shortOriginalSymbol, tradeToClose.shortOrderAmount, shortParams),
-            longEx.createMarketSellOrder(tradeToClose.longOriginalSymbol, tradeToClose.longOrderAmount, longParams)
+            shortEx.createMarketBuyOrder(tradeToClose.shortOriginalSymbol, tradeToClose.shortOrderAmount, closeShortParams),
+            longEx.createMarketSellOrder(tradeToClose.longOriginalSymbol, tradeToClose.longOrderAmount, closeLongParams)
         ]);
         tradeAwaitingPnl = { ...currentTradeDetails, status: 'PENDING_PNL_CALC', closeTime: Date.now() };
         currentTradeDetails = null;
