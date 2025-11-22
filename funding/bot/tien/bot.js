@@ -25,8 +25,8 @@ const MIN_COLLATERAL_FOR_TRADE = 0.1;
 const TEST_START_MINUTE = 50; 
 
 // [CONFIG] Cấu hình TP / SL (Theo % Vốn lệnh)
-const SL_PERCENTAGE = 100; 
-const TP_PERCENTAGE = 150; 
+const SL_PERCENTAGE = 90; 
+const TP_PERCENTAGE = 155; 
 
 // [CONFIG] Cấu hình lệnh TEST (0.3$)
 const TEST_TRADE_MARGIN = 0.3; 
