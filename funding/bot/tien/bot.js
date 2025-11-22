@@ -21,6 +21,10 @@ const DATA_FETCH_INTERVAL_SECONDS = 1;
 const MAX_CONSEC_FAILS = 3;
 const MIN_COLLATERAL_FOR_TRADE = 0.1;
 
+// [CONFIG] Cấu hình Phút bắt đầu chạy Test (0-59)
+// Để 0 nghĩa là chạy từ đầu giờ. Để 50 nghĩa là phút 50 mới bắt đầu test.
+const TEST_START_MINUTE = 0; 
+
 // [CONFIG] Cấu hình TP / SL (Theo % Vốn lệnh)
 const SL_PERCENTAGE = 100; // Cháy 100% margin lệnh thì cắt
 const TP_PERCENTAGE = 200; // Lời 200% margin lệnh thì chốt
@@ -470,8 +474,6 @@ async function placeTpSlOrders(exchange, symbol, side, amount, entryPrice, colla
     if (!notionalValue || notionalValue <= 0) return { tpOrderId: null, slOrderId: null };
     
     // Tính PnL dựa trên % Margin (100% SL, 200% TP)
-    // Giá trị thay đổi = Entry * (% / 100 / Leverage)
-    // Ví dụ: Entry 100, Lev 20, SL 100% => Giá thay đổi = 100 * (1/20) = 5.
     const slPriceChange = entryPrice * (SL_PERCENTAGE / 100 / (notionalValue / collateral));
     const tpPriceChange = entryPrice * (TP_PERCENTAGE / 100 / (notionalValue / collateral));
 
@@ -527,10 +529,8 @@ async function getReliableFillPrice(exchange, symbol, orderId) {
             const order = await exchange.fetchOrder(orderId, symbol);
             if (order.average) return order.average;
             if (order.price) return order.price;
-            // Nếu sàn trả về filled > 0 thì tự tính
             if (order.filled > 0 && order.cost > 0) return order.cost / order.filled;
             
-            // Fallback: Fetch My Trades
             const trades = await exchange.fetchMyTrades(symbol, undefined, 1, { 'orderId': orderId });
             if (trades.length > 0) return trades[0].price;
         } catch (e) { }
@@ -739,6 +739,7 @@ async function executeTrades(opportunity, percentageToUse) {
             return false;
         }
 
+        // [MODIFIED] Params cho Hedge Mode
         const shortParams = (shortEx.id === 'binanceusdm') ? { 'positionSide': 'SHORT' } : (shortEx.id === 'kucoinfutures' ? {'marginMode':'cross'} : {});
         const longParams = (longEx.id === 'binanceusdm') ? { 'positionSide': 'LONG' } : (longEx.id === 'kucoinfutures' ? {'marginMode':'cross'} : {});
 
@@ -753,7 +754,7 @@ async function executeTrades(opportunity, percentageToUse) {
             return false;
         }
 
-        // [MODIFIED] Sử dụng hàm lấy giá Retry cho lệnh thật luôn
+        await sleep(3000);
         const [shortEntryPrice, longEntryPrice] = await Promise.all([ 
             getReliableFillPrice(shortEx, shortSymbol, shortOrder.id), 
             getReliableFillPrice(longEx, longSymbol, longOrder.id) 
@@ -881,7 +882,8 @@ async function mainBotLoop() {
             failedCoinsInSession.clear();
         }
 
-        if (capitalManagementState === 'IDLE' && currentMinute >= 50 && currentMinute < 59) {
+        // [MODIFIED] Logic quét test dựa trên TEST_START_MINUTE
+        if (capitalManagementState === 'IDLE' && currentMinute >= TEST_START_MINUTE && currentMinute < 59) {
             if (!selectedOpportunityForNextTrade && !isRunningTestSequence) {
                 if (allCurrentOpportunities.length > 0) {
                      await runTestTradeSequence(); 
@@ -902,9 +904,8 @@ async function mainBotLoop() {
                 }
             }
         }
-        // [REMOVED] Logic đóng lệnh ở phút 00 đã bị xóa để giữ lệnh
+        // [REMOVED] Không còn tự đóng lệnh lúc 00:00 nữa.
 
-        // Safety reset
         else if (currentMinute > 5 && capitalManagementState !== 'IDLE' && capitalManagementState !== 'TRADE_OPEN') {
             safeLog('warn', `[RESET] Trạng thái ${capitalManagementState} bị kẹt, đang reset về IDLE.`);
             await returnFundsToHub();
