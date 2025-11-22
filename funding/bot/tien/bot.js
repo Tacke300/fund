@@ -23,7 +23,8 @@ const MIN_COLLATERAL_FOR_TRADE = 0.1;
 const TP_SL_PNL_PERCENTAGE = 150;
 
 // [CONFIG] Cấu hình lệnh TEST
-const TEST_TRADE_MARGIN = 0.5; // 0.2$ Margin cho lệnh test
+// Tăng lên 1$ để đảm bảo > 5$ min notional của Binance (1$ * 20x = 20$)
+const TEST_TRADE_MARGIN = 1.0; 
 
 const FUND_TRANSFER_MIN_AMOUNT_BINANCE = 10;
 const FUND_TRANSFER_MIN_AMOUNT_KUCOIN = 1;
@@ -51,8 +52,6 @@ let transferStatus = { inProgress: false, message: null };
 let selectedOpportunityForNextTrade = null;
 let hasLoggedNotFoundThisHour = false;
 let isRunningTestSequence = false; 
-
-// [NEW] Danh sách các coin đã test lỗi trong phiên này (để không thử lại liên tục)
 let failedCoinsInSession = new Set();
 
 const safeLog = (type, ...args) => {
@@ -106,6 +105,23 @@ activeExchangeIds.forEach(id => {
         if (exchangeClass && config.apiKey && config.secret) { 
             exchanges[id] = new exchangeClass(config); 
             safeLog('log', `[INIT] Khởi tạo sàn ${id.toUpperCase()} thành công.`); 
+            
+            // [FIX] Tự động chuyển Binance sang One-Way Mode để tránh lỗi -4061
+            if (id === 'binanceusdm') {
+                setTimeout(async () => {
+                    try {
+                        // Gọi API set Dual Side Position = false (One-Way Mode)
+                        await exchanges[id].fapiPrivatePostPositionSideDual({ 'dualSidePosition': 'false' });
+                        safeLog('info', `[INIT] ✅ Đã chuyển Binance sang chế độ One-Way Mode thành công.`);
+                    } catch (e) {
+                        // Bỏ qua lỗi nếu nó báo là "Không cần thay đổi" (-4046)
+                        if (!e.message.includes("-4046")) {
+                            safeLog('warn', `[INIT] Không thể chuyển Binance sang One-Way Mode (Có thể do đang có lệnh treo): ${e.message}`);
+                        }
+                    }
+                }, 2000);
+            }
+
         } else if (exchangeClass) { 
             safeLog('warn', `[INIT] Bỏ qua ${id.toUpperCase()} do thiếu API Key/Secret.`); 
         }
@@ -332,7 +348,6 @@ async function executeSingleFundTransfer(fromExchangeId, toExchangeId, amount) {
 }
 
 async function manageFundDistribution(opportunity) {
-    // Hàm này giữ nguyên để không lỗi code cũ, nhưng logic chính đã chuyển sang quy trình test
     capitalManagementState = 'FUNDS_READY';
 }
 
@@ -340,10 +355,6 @@ async function returnFundsToHub() {
     capitalManagementState = 'CLEANING_UP';
     safeLog('info', "[CLEANUP] Bắt đầu Giai đoạn 3: Dọn dẹp (TÍNH NĂNG GOM TIỀN VỀ ĐANG TẮT).");
     
-    /* =====================================================================================
-       [ĐÃ TẮT] LOGIC GOM TIỀN VỀ HUB CŨ
-    ===================================================================================== */
-
     safeLog('warn', "[CLEANUP] Tiền sẽ được giữ lại trên ví Future của các sàn.");
     
     // Reset trạng thái về IDLE nhanh chóng
@@ -351,7 +362,6 @@ async function returnFundsToHub() {
         safeLog('info', "[CLEANUP] ✅ Bot reset về trạng thái IDLE.");
         capitalManagementState = 'IDLE';
         selectedOpportunityForNextTrade = null;
-        // [QUAN TRỌNG] Reset danh sách coin lỗi để chuẩn bị cho chu kỳ giờ tiếp theo
         failedCoinsInSession.clear(); 
     }, 2000);
 }
@@ -378,7 +388,6 @@ async function processServerData(serverData) {
         const shortExchange = normalizeExchangeId(shortExRaw);
         const longExchange = normalizeExchangeId(longExRaw);
 
-        // [FILTER] CHỈ LẤY CẶP BINANCE & KUCOIN
         const allowed = ['binanceusdm', 'kucoinfutures'];
         if (!allowed.includes(shortExchange) || !allowed.includes(longExchange)) {
             return false; 
@@ -439,7 +448,6 @@ async function computeOrderDetails(exchange, symbol, targetNotionalUSDT, leverag
     if (!price) throw new Error(`Không lấy được giá cho ${symbol} trên ${exchange.id}`);
     const contractSize = market.contractSize ?? 1;
     
-    // Tính toán amount
     let amount = parseFloat(exchange.amountToPrecision(symbol, targetNotionalUSDT / (price * contractSize)));
     
     if (exchange.id === 'kucoinfutures' && market.precision.amount === 0) amount = Math.round(amount);
@@ -551,7 +559,7 @@ async function executeTestTrade(opportunity) {
             longEx.createMarketBuyOrder(longSymbol, longOrderDetails.amount, (longEx.id === 'kucoinfutures' ? {'marginMode':'cross'} : {}))
         ]);
     } catch (e) {
-        safeLog('error', `[TEST-TRADE] ❌ Lỗi mở lệnh test: ${e.message}`);
+        safeLog('error', `[TEST-TRADE] ❌ Lỗi mở lệnh test: ${shortEx.id} ${e.message}`);
         if (shortOrder) await shortEx.createMarketBuyOrder(shortSymbol, shortOrderDetails.amount, {'reduceOnly': true});
         if (longOrder) await longEx.createMarketSellOrder(longSymbol, longOrderDetails.amount, {'reduceOnly': true});
         return false;
@@ -604,7 +612,6 @@ async function runTestTradeSequence() {
     const candidates = allCurrentOpportunities.filter(op => !failedCoinsInSession.has(op.coin));
 
     if (candidates.length === 0) {
-        // Hết coin để thử, chờ đợt fetch data tiếp theo (tự động thoát hàm)
         isRunningTestSequence = false;
         return;
     }
@@ -629,7 +636,6 @@ async function runTestTradeSequence() {
         }
     }
     
-    // Nếu chạy hết vòng lặp mà không được coin nào
     isRunningTestSequence = false;
 }
 
@@ -827,19 +833,15 @@ async function mainBotLoop() {
         const currentMinute = now.getUTCMinutes();
         const currentSecond = now.getUTCSeconds();
         
-        // Reset cờ log mỗi đầu phút
         if (currentMinute !== new Date(now.getTime() - 1000).getUTCMinutes()) {
             hasLoggedNotFoundThisHour = false;
         }
         
-        // Reset danh sách coin fail khi sang giờ mới (phút 49 để an toàn)
         if (currentMinute === 49) {
             failedCoinsInSession.clear();
         }
 
-        // [MODIFIED] Quét coin liên tục từ phút 50 -> 59
         if (capitalManagementState === 'IDLE' && currentMinute >= 50 && currentMinute < 59) {
-            // Nếu chưa chọn được coin, và cũng đang không chạy test -> Chạy test
             if (!selectedOpportunityForNextTrade && !isRunningTestSequence) {
                 if (allCurrentOpportunities.length > 0) {
                      await runTestTradeSequence(); 
@@ -850,7 +852,6 @@ async function mainBotLoop() {
             }
         }
         
-        // [MODIFIED] Vào lệnh thật lúc 59:50
         else if (capitalManagementState === 'FUNDS_READY' && currentMinute === 59 && currentSecond >= 50) {
             if (selectedOpportunityForNextTrade) {
                 safeLog('log', `[TIMER] ⏰ 59:50 -> EXECUTE lệnh thật cho ${selectedOpportunityForNextTrade.coin}.`);
@@ -936,7 +937,6 @@ const botServer = http.createServer(async (req, res) => {
         } else if (url === '/bot-api/stop' && method === 'POST') {
              res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ success: stopBot(), message: 'Đã gửi yêu cầu dừng bot.' }));
         } else if (url === '/bot-api/custom-test-trade' && method === 'POST') {
-            // [MODIFIED] Log rõ ràng khi nhận request test thủ công
             safeLog('log', '[MANUAL] 📩 Nhận yêu cầu test thủ công từ UI...');
             
             if (currentTradeDetails) {
@@ -955,7 +955,6 @@ const botServer = http.createServer(async (req, res) => {
                 details: { shortExchange: data.shortExchange, longExchange: data.longExchange }
             };
             
-            // Gọi hàm executeTrades và bắt lỗi kỹ càng
             try {
                 const tradeSuccess = await executeTrades(testOpportunity, parseFloat(data.percentage));
                 res.writeHead(tradeSuccess ? 200 : 500, { 'Content-Type': 'application/json' }).end(JSON.stringify({ success: tradeSuccess, message: tradeSuccess ? 'Lệnh Test đã được gửi.' : 'Lỗi khi gửi lệnh Test (Xem log).' }));
