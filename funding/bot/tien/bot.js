@@ -16,18 +16,17 @@ const SERVER_DATA_URL = 'http://localhost:5005/api/data';
 const HUB_EXCHANGE_ID = 'binanceusdm';
 
 const MIN_PNL_PERCENTAGE = 1;
-const MIN_MINUTES_FOR_EXECUTION = 15;
+const MIN_MINUTES_FOR_EXECUTION = 15; // Chỉ trade nếu còn dưới 15 phút tới giờ Funding
 const DATA_FETCH_INTERVAL_SECONDS = 1;
 const MAX_CONSEC_FAILS = 3;
 const MIN_COLLATERAL_FOR_TRADE = 0.1;
 
 // [CONFIG] Cấu hình Phút bắt đầu chạy Test (0-59)
-// Đã sửa lại thành 50 theo yêu cầu
 const TEST_START_MINUTE = 50; 
 
 // [CONFIG] Cấu hình TP / SL (Theo % Vốn lệnh)
 const SL_PERCENTAGE = 100; 
-const TP_PERCENTAGE = 200; 
+const TP_PERCENTAGE = 150; 
 
 // [CONFIG] Cấu hình lệnh TEST (0.3$)
 const TEST_TRADE_MARGIN = 0.3; 
@@ -419,6 +418,18 @@ async function getExchangeSpecificSymbol(exchange, rawCoinSymbol) {
     return null;
 }
 
+async function getMaxLeverage(exchange, symbol) {
+    try {
+        const market = exchange.market(symbol);
+        if (market.limits && market.limits.leverage && market.limits.leverage.max) {
+            return market.limits.leverage.max;
+        }
+        return 20; 
+    } catch (e) {
+        return 20;
+    }
+}
+
 async function setLeverageSafely(exchange, symbol, desiredLeverage) {
     const params = (exchange.id === 'kucoinfutures') ? { 'marginMode': 'cross' } : {};
     try {
@@ -521,7 +532,6 @@ async function getReliableFillPrice(exchange, symbol, orderId) {
     return null;
 }
 
-// Hàm Clean Position trước khi Test
 async function ensureNoPosition(exchange, symbol, side) {
     try {
         if (exchange.id === 'binanceusdm') {
@@ -581,7 +591,7 @@ async function executeTestTrade(opportunity) {
         return false;
     }
 
-    // [MODIFIED] Dùng luôn đòn bẩy server, không tự tính Max sàn nữa
+    // Dùng luôn đòn bẩy server
     const leverageToUse = opportunity.commonLeverage;
     safeLog('info', `[TEST-TRADE] Sử dụng đòn bẩy x${leverageToUse} (Server).`);
     
@@ -666,20 +676,22 @@ async function executeTestTrade(opportunity) {
     }
 }
 
-async function runTestTradeSequence() {
+// [MODIFIED] Thêm tham số candidates để nhận list coin đã lọc theo giờ
+async function runTestTradeSequence(candidates) {
     if (isRunningTestSequence) return;
     isRunningTestSequence = true;
     
-    const candidates = allCurrentOpportunities.filter(op => !failedCoinsInSession.has(op.coin));
+    // Lọc bỏ những coin đã test fail trước đó
+    const finalCandidates = candidates.filter(op => !failedCoinsInSession.has(op.coin));
 
-    if (candidates.length === 0) {
+    if (finalCandidates.length === 0) {
         isRunningTestSequence = false;
         return;
     }
 
-    safeLog('info', `[TEST-SEQUENCE] 🔍 Bắt đầu quét danh sách coin...`);
+    safeLog('info', `[TEST-SEQUENCE] 🔍 Bắt đầu quét danh sách ${finalCandidates.length} coin hợp lệ...`);
     
-    for (const op of candidates) {
+    for (const op of finalCandidates) {
         safeLog('info', `[TEST-SEQUENCE] 👉 Thử Coin: ${op.coin}`);
         
         const success = await executeTestTrade(op);
@@ -897,12 +909,21 @@ async function mainBotLoop() {
             failedCoinsInSession.clear();
         }
 
+        // [FIXED] Chỉ test nếu trong khung giờ cho phép (>= 50) VÀ coin sắp đến giờ Funding
         if (capitalManagementState === 'IDLE' && currentMinute >= TEST_START_MINUTE && currentMinute < 59) {
+            
+            // Lọc ra các coin sắp trả funding trong vòng 15 phút tới
+            const fundingCandidates = allCurrentOpportunities.filter(op => {
+                const msToFunding = op.nextFundingTime - Date.now();
+                const minutesToFunding = msToFunding / 60000;
+                return minutesToFunding > 0 && minutesToFunding <= MIN_MINUTES_FOR_EXECUTION;
+            });
+
             if (!selectedOpportunityForNextTrade && !isRunningTestSequence) {
-                if (allCurrentOpportunities.length > 0) {
-                     await runTestTradeSequence(); 
+                if (fundingCandidates.length > 0) {
+                     await runTestTradeSequence(fundingCandidates); 
                 } else if (!hasLoggedNotFoundThisHour) {
-                    safeLog('log', "[TIMER] Chưa tìm thấy cơ hội nào. Đang chờ dữ liệu...");
+                    safeLog('log', "[TIMER] Phút 50: Chưa có coin nào sắp đến giờ Funding (còn > 15p).");
                     hasLoggedNotFoundThisHour = true;
                 }
             }
