@@ -246,6 +246,12 @@ async function attemptInternalTransferOnArrival(toExchangeId, fromExchangeId, am
                     finalAvailableAmount = finalBalanceData.free?.USDT || 0;
                 }
 
+                // --- [FIX] KHẮC PHỤC LỖI INSUFFICIENT FUNDS KHI CHUYỂN TOÀN BỘ SỐ DƯ ---
+                if (finalAvailableAmount > 0.1) {
+                    finalAvailableAmount = finalAvailableAmount - 0.05; 
+                }
+                // ----------------------------------------------------------------------
+
                 if (finalAvailableAmount > 0) {
                     safeLog('info', `Đang chuyển ${finalAvailableAmount.toFixed(2)} USDT từ ${arrivalWalletType} sang ${targetToWallet} trên ${toExchangeId}.`);
                     await internalTransfererExchange.transfer('USDT', finalAvailableAmount, arrivalWalletType, targetToWallet);
@@ -433,7 +439,7 @@ async function processServerData(serverData) {
         const shortExchange = normalizeExchangeId(shortExRaw);
         const longExchange = normalizeExchangeId(longExRaw);
 
-        // [MỚI THÊM] BỘ LỌC CHỈ LẤY CẶP BINANCE & KUCOIN
+        // [FILTER] CHỈ LẤY CẶP BINANCE & KUCOIN
         // Nếu một trong hai sàn KHÔNG PHẢI là binanceusdm HOẶC kucoinfutures thì loại bỏ
         const allowed = ['binanceusdm', 'kucoinfutures'];
         if (!allowed.includes(shortExchange) || !allowed.includes(longExchange)) {
