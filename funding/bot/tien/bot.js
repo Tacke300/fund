@@ -22,7 +22,8 @@ const MAX_CONSEC_FAILS = 3;
 const MIN_COLLATERAL_FOR_TRADE = 0.1;
 
 // [CONFIG] Cấu hình Phút bắt đầu chạy Test (0-59)
-const TEST_START_MINUTE = 0; 
+// Đã sửa lại thành 50 theo yêu cầu
+const TEST_START_MINUTE = 50; 
 
 // [CONFIG] Cấu hình TP / SL (Theo % Vốn lệnh)
 const SL_PERCENTAGE = 100; 
@@ -418,18 +419,6 @@ async function getExchangeSpecificSymbol(exchange, rawCoinSymbol) {
     return null;
 }
 
-async function getMaxLeverage(exchange, symbol) {
-    try {
-        const market = exchange.market(symbol);
-        if (market.limits && market.limits.leverage && market.limits.leverage.max) {
-            return market.limits.leverage.max;
-        }
-        return 20; 
-    } catch (e) {
-        return 20;
-    }
-}
-
 async function setLeverageSafely(exchange, symbol, desiredLeverage) {
     const params = (exchange.id === 'kucoinfutures') ? { 'marginMode': 'cross' } : {};
     try {
@@ -532,13 +521,11 @@ async function getReliableFillPrice(exchange, symbol, orderId) {
     return null;
 }
 
-// [MODIFIED] Hàm Clean Position trước khi Test
+// Hàm Clean Position trước khi Test
 async function ensureNoPosition(exchange, symbol, side) {
     try {
-        // Binance: Check positionRisk
         if (exchange.id === 'binanceusdm') {
             const positions = await exchange.fapiPrivateGetPositionRisk({ 'symbol': symbol.replace('/', '') });
-            // Tìm position khớp side
             const targetPos = positions.find(p => p.positionSide === (side === 'sell' ? 'SHORT' : 'LONG'));
             const amt = parseFloat(targetPos?.positionAmt || 0);
             if (Math.abs(amt) > 0) {
@@ -548,7 +535,6 @@ async function ensureNoPosition(exchange, symbol, side) {
                 await exchange.createMarketOrder(symbol, closeSide, Math.abs(amt), undefined, { 'positionSide': posSide });
             }
         } 
-        // Kucoin/Others: Fetch Position
         else {
             const positions = await exchange.fetchPositions([symbol]);
             const pos = positions.find(p => p.symbol === symbol && p.contracts > 0);
@@ -559,7 +545,6 @@ async function ensureNoPosition(exchange, symbol, side) {
                 await exchange.createMarketOrder(symbol, closeSide, pos.contracts, undefined, params);
             }
         }
-        // Cancel all open orders
         await exchange.cancelAllOrders(symbol);
     } catch (e) {
         safeLog('error', `[PRE-CLEAN] Lỗi khi dọn dẹp vị thế cũ trên ${exchange.id}: ${e.message}`);
@@ -574,7 +559,6 @@ async function executeTestTrade(opportunity) {
     const shortEx = exchanges[shortExchange];
     const longEx = exchanges[longExchange];
     
-    // [NEW] Dọn dẹp vị thế cũ trước
     const shortSymbol = await getExchangeSpecificSymbol(shortEx, coin);
     const longSymbol = await getExchangeSpecificSymbol(longEx, coin);
     
@@ -597,11 +581,9 @@ async function executeTestTrade(opportunity) {
         return false;
     }
 
-    const maxShortLev = await getMaxLeverage(shortEx, shortSymbol);
-    const maxLongLev = await getMaxLeverage(longEx, longSymbol);
-    const leverageToUse = Math.min(maxShortLev, maxLongLev); 
-    
-    safeLog('info', `[TEST-TRADE] Sử dụng đòn bẩy x${leverageToUse}.`);
+    // [MODIFIED] Dùng luôn đòn bẩy server, không tự tính Max sàn nữa
+    const leverageToUse = opportunity.commonLeverage;
+    safeLog('info', `[TEST-TRADE] Sử dụng đòn bẩy x${leverageToUse} (Server).`);
     
     const [actualShortLeverage, actualLongLeverage] = await Promise.all([ 
         setLeverageSafely(shortEx, shortSymbol, leverageToUse), 
@@ -633,7 +615,7 @@ async function executeTestTrade(opportunity) {
         ]);
     } catch (e) {
         safeLog('error', `[TEST-TRADE] ❌ Lỗi mở lệnh test: ${shortEx.id} ${e.message}`);
-        // Cleanup 
+        
         const closeShortParams = (shortEx.id === 'binanceusdm') ? { 'positionSide': 'SHORT' } : {'reduceOnly': true};
         const closeLongParams = (longEx.id === 'binanceusdm') ? { 'positionSide': 'LONG' } : {'reduceOnly': true};
 
@@ -713,7 +695,6 @@ async function runTestTradeSequence() {
             failedCoinsInSession.add(op.coin);
             
             await closeTradeNow(); 
-            // [IMPORTANT] Nghỉ 5s
             await sleep(5000); 
         }
     }
@@ -938,7 +919,6 @@ async function mainBotLoop() {
             }
         }
 
-        // [FIXED] Safety Reset logic: Bỏ qua FUNDS_READY để không bị reset khi đã chọn được coin
         else if (currentMinute > 5 && currentMinute < 59 && capitalManagementState !== 'IDLE' && capitalManagementState !== 'TRADE_OPEN' && capitalManagementState !== 'FUNDS_READY') {
             safeLog('warn', `[RESET] Trạng thái ${capitalManagementState} bị kẹt, đang reset về IDLE.`);
             await returnFundsToHub();
