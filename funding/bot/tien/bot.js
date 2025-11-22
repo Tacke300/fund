@@ -21,12 +21,12 @@ const DATA_FETCH_INTERVAL_SECONDS = 1;
 const MAX_CONSEC_FAILS = 3;
 const MIN_COLLATERAL_FOR_TRADE = 0.1;
 
-// [CONFIG] Cấu hình Phút bắt đầu chạy Test (0-59)
+// [CONFIG] Cấu hình Phút bắt đầu chạy Test (50 là chuẩn)
 const TEST_START_MINUTE = 50; 
 
 // [CONFIG] Cấu hình TP / SL (Theo % Vốn lệnh)
-const SL_PERCENTAGE = 90; 
-const TP_PERCENTAGE = 155; 
+const SL_PERCENTAGE = 100; 
+const TP_PERCENTAGE = 200; 
 
 // [CONFIG] Cấu hình lệnh TEST (0.3$)
 const TEST_TRADE_MARGIN = 0.3; 
@@ -676,12 +676,10 @@ async function executeTestTrade(opportunity) {
     }
 }
 
-// [MODIFIED] Thêm tham số candidates để nhận list coin đã lọc theo giờ
 async function runTestTradeSequence(candidates) {
     if (isRunningTestSequence) return;
     isRunningTestSequence = true;
     
-    // Lọc bỏ những coin đã test fail trước đó
     const finalCandidates = candidates.filter(op => !failedCoinsInSession.has(op.coin));
 
     if (finalCandidates.length === 0) {
@@ -909,10 +907,9 @@ async function mainBotLoop() {
             failedCoinsInSession.clear();
         }
 
-        // [FIXED] Chỉ test nếu trong khung giờ cho phép (>= 50) VÀ coin sắp đến giờ Funding
         if (capitalManagementState === 'IDLE' && currentMinute >= TEST_START_MINUTE && currentMinute < 59) {
             
-            // Lọc ra các coin sắp trả funding trong vòng 15 phút tới
+            // Lọc coin sắp Funding
             const fundingCandidates = allCurrentOpportunities.filter(op => {
                 const msToFunding = op.nextFundingTime - Date.now();
                 const minutesToFunding = msToFunding / 60000;
@@ -929,18 +926,24 @@ async function mainBotLoop() {
             }
         }
         
-        else if (capitalManagementState === 'FUNDS_READY' && currentMinute === 59 && currentSecond >= 50) {
-            if (selectedOpportunityForNextTrade) {
-                safeLog('log', `[TIMER] ⏰ 59:50 -> EXECUTE lệnh thật cho ${selectedOpportunityForNextTrade.coin}.`);
-                const success = await executeTrades(selectedOpportunityForNextTrade, currentPercentageToUse);
-                if (!success) {
-                    safeLog('error', "[TIMER] Vào lệnh thất bại.");
-                    await returnFundsToHub();
+        else if (capitalManagementState === 'FUNDS_READY') {
+            if (currentMinute === 59 && currentSecond >= 50) {
+                if (selectedOpportunityForNextTrade) {
+                    safeLog('log', `[TIMER] ⏰ 59:50 -> EXECUTE lệnh thật cho ${selectedOpportunityForNextTrade.coin}.`);
+                    const success = await executeTrades(selectedOpportunityForNextTrade, currentPercentageToUse);
+                    if (!success) {
+                        safeLog('error', "[TIMER] Vào lệnh thất bại.");
+                        await returnFundsToHub();
+                    }
                 }
+            } else if (currentSecond === 0) {
+                // Heartbeat mỗi đầu phút để biết bot vẫn đang chờ
+                safeLog('info', `[WAITING] ✅ Đã chọn ${selectedOpportunityForNextTrade?.coin}. Đang chờ đến 59:50 để vào lệnh...`);
             }
         }
 
-        else if (currentMinute > 5 && currentMinute < 59 && capitalManagementState !== 'IDLE' && capitalManagementState !== 'TRADE_OPEN' && capitalManagementState !== 'FUNDS_READY') {
+        // [FIXED] Safety Reset logic: KHÔNG BAO GIỜ RESET NẾU ĐANG ĐỢI LỆNH (FUNDS_READY)
+        else if (capitalManagementState !== 'IDLE' && capitalManagementState !== 'TRADE_OPEN' && capitalManagementState !== 'FUNDS_READY' && currentMinute > 5 && currentMinute < 59) {
             safeLog('warn', `[RESET] Trạng thái ${capitalManagementState} bị kẹt, đang reset về IDLE.`);
             await returnFundsToHub();
         }
