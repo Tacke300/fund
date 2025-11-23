@@ -155,6 +155,31 @@
             border-color: var(--primary-color);
             box-shadow: 0 0 0 3px rgba(88, 166, 255, 0.3);
         }
+        
+        /* Style cho radio button */
+        .input-group-radio {
+            display: flex;
+            gap: 15px;
+            align-items: center;
+            background: #21262d;
+            padding: 8px 15px;
+            border-radius: 8px;
+            border: 1px solid var(--border-color);
+        }
+        
+        .input-group-radio label {
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            font-weight: 500;
+        }
+
+        input[type="radio"] {
+            width: auto;
+            margin: 0;
+            cursor: pointer;
+        }
 
         /* --- Bảng dữ liệu --- */
         table {
@@ -207,9 +232,22 @@
 <div class="container">
     <h1>Dashboard Bot Arbitrage</h1>
 
+    <!-- Controls chính -->
     <div class="controls">
-        <label for="percentageToUse">Vốn mỗi lệnh (%):</label>
-        <input type="number" id="percentageToUse" value="50" min="1" max="100" style="width: 80px;">
+        <div class="input-group-radio">
+            <label>
+                <input type="radio" name="capitalMode" value="percent" checked onchange="updateCapitalLabel()"> Theo % Vốn
+            </label>
+            <label>
+                <input type="radio" name="capitalMode" value="fixed" onchange="updateCapitalLabel()"> Theo $ Cố định
+            </label>
+        </div>
+        
+        <div style="display: flex; align-items: center; gap: 10px;">
+            <label id="capitalLabel" for="capitalValue" style="font-weight: bold;">Giá trị (%):</label>
+            <input type="number" id="capitalValue" value="50" min="1" style="width: 120px; font-weight: bold; color: var(--primary-color);">
+        </div>
+
         <button id="startBotBtn">▶️ Start Bot</button>
         <button id="stopBotBtn" class="stop">⏸️ Stop Bot</button>
         <button id="closeTradeBtn" class="stop">🛑 Đóng lệnh & Dọn dẹp</button>
@@ -238,7 +276,7 @@
     <div class="grid">
          <div class="card">
             <h2>Test Lệnh Nhanh</h2>
-            <p style="color: var(--text-secondary-color);">Dùng cơ hội tốt nhất hiện tại để vào lệnh thủ công với các thông số tùy chỉnh.</p>
+            <p style="color: var(--text-secondary-color);">Dùng cơ hội tốt nhất hiện tại để vào lệnh thủ công.</p>
             <div class="manual-controls" id="test-trade-form">
                 <div><label>Short trên:</label> <select id="testShortExchange"></select></div>
                 <div><label>Long trên:</label> <select id="testLongExchange"></select></div>
@@ -248,21 +286,10 @@
             </div>
             <div id="testStatusDisplay" class="status-display"></div>
         </div>
-        <div class="card">
-            <h2>Chuyển tiền Ngoại sàn</h2>
-            <p style="color: var(--red-color); font-weight: 500;"><strong>CẢNH BÁO:</strong> Rủi ro cao. Sai địa chỉ/mạng có thể MẤT TIỀN. API Key phải có quyền Rút tiền.</p>
-            <div class="manual-controls">
-                <div><label>Từ:</label> <select id="fromExchangeSelect"></select></div>
-                <div><label>Tới:</label> <select id="toExchangeSelect"></select></div>
-                <div><label>Số lượng USDT:</label> <input type="number" id="transferAmount" value="10" min="1"></div>
-                <button id="manualTransferBtn">Chuyển ngay</button>
-            </div>
-            <div id="transferStatusDisplay" class="status-display"></div>
-        </div>
         
         <div class="card">
             <h2>Chuyển tiền Nội bộ</h2>
-            <p style="color: var(--text-secondary-color);">Chuyển USDT giữa các ví Spot và Future trên cùng một sàn.</p>
+            <p style="color: var(--text-secondary-color);">Chuyển USDT giữa ví Spot và Future.</p>
             <div class="manual-controls">
                 <div><label>Sàn:</label> <select id="internalExchangeSelect"></select></div>
                 <div><label>Từ ví:</label>
@@ -280,6 +307,18 @@
             </div>
             <div id="internalTransferStatusDisplay" class="status-display"></div>
         </div>
+
+        <div class="card">
+            <h2>Chuyển tiền Ngoại sàn</h2>
+            <p style="color: var(--red-color); font-weight: 500;"><strong>CẢNH BÁO:</strong> Rủi ro cao. Sai mạng mất tiền.</p>
+            <div class="manual-controls">
+                <div><label>Từ:</label> <select id="fromExchangeSelect"></select></div>
+                <div><label>Tới:</label> <select id="toExchangeSelect"></select></div>
+                <div><label>Số lượng:</label> <input type="number" id="transferAmount" value="10" min="1"></div>
+                <button id="manualTransferBtn">Chuyển ngay</button>
+            </div>
+            <div id="transferStatusDisplay" class="status-display"></div>
+        </div>
     </div>
 
     <div class="card">
@@ -289,11 +328,11 @@
                 <tr>
                     <th>Thời gian</th>
                     <th>Coin</th>
-                    <th>Sàn (Short/Long)</th>
-                    <th>PNL Ước tính (%)</th>
+                    <th>Sàn</th>
+                    <th>PNL Ước tính</th>
                     <th>Vốn (USDT)</th>
-                    <th>PNL Thực tế (USDT)</th>
-                    <th>TỔNG PNL (Cộng dồn)</th>
+                    <th>PNL Thực (USDT)</th>
+                    <th>TỔNG PNL</th>
                 </tr>
             </thead>
             <tbody id="tradeHistoryBody"></tbody>
@@ -312,8 +351,23 @@
     const internalExchangeSelect = document.getElementById('internalExchangeSelect');
     const manualTransferBtn = document.getElementById('manualTransferBtn');
     const internalTransferBtn = document.getElementById('internalTransferBtn');
+    const capitalValueInput = document.getElementById('capitalValue');
     
     let activeExchangesInitialized = false;
+
+    // Cập nhật nhãn khi chọn chế độ vốn
+    function updateCapitalLabel() {
+        const mode = document.querySelector('input[name="capitalMode"]:checked').value;
+        const label = document.getElementById('capitalLabel');
+        if (mode === 'percent') {
+            label.textContent = 'Giá trị (%):';
+            capitalValueInput.setAttribute('max', '100');
+            if (parseFloat(capitalValueInput.value) > 100) capitalValueInput.value = 100;
+        } else {
+            label.textContent = 'Số tiền (USDT):';
+            capitalValueInput.removeAttribute('max');
+        }
+    }
 
     async function updateBotStatus() {
         try {
@@ -345,10 +399,10 @@
             internalTransferBtn.disabled = isBotBusy;
             testTradeBtn.disabled = isBotBusy;
 
-            // Cập nhật Số dư (Đã lọc bỏ Binance Spot và Kucoin Spot)
+            // Cập nhật Số dư (Ẩn ví Spot)
             let balancesHtml = '';
             for (const id in data.balances) {
-                if (id === 'binance' || id === 'kucoin') continue; // Ẩn ví Spot
+                if (id === 'binance' || id === 'kucoin') continue; // Ẩn Binance Spot & Kucoin Spot
                 
                 const health = data.exchangeHealth[id];
                 const healthStatus = health.isDisabled ? ` (<span class="text-red">Mất kết nối</span>)` : '';
@@ -356,15 +410,14 @@
             }
             document.getElementById('balancesDisplay').innerHTML = balancesHtml;
 
-            // Cập nhật Cơ hội (Thêm hiển thị Funding Diff)
+            // Cập nhật Cơ hội (Thêm Funding Diff)
             const oppEl = document.getElementById('bestOpportunityDisplay');
             if (data.bestPotentialOpportunityForDisplay) {
                 const opp = data.bestPotentialOpportunityForDisplay;
-                // Giả định server gửi về chênh lệch funding, nếu không có thì tự tính hoặc để N/A
-                const fundingDiff = opp.fundingDiff !== undefined ? opp.fundingDiff.toFixed(4) + '%' : 'N/A';
+                const fundingDiff = (opp.fundingDiff !== undefined) ? opp.fundingDiff.toFixed(4) + '%' : 'N/A';
                 
                 oppEl.innerHTML = `
-                    <p><strong>Coin:</strong> ${opp.coin}</p>
+                    <p><strong>Coin:</strong> <span class="text-blue">${opp.coin}</span></p>
                     <p><strong>Sàn:</strong> ${opp.exchanges}</p>
                     <p><strong>PNL ước tính:</strong> <span class="text-green">${opp.estimatedPnl.toFixed(3)}%</span></p>
                     <p><strong>Chênh lệch Funding:</strong> ${fundingDiff}</p>
@@ -373,11 +426,11 @@
                 oppEl.innerHTML = '<p>Không có cơ hội nào khả dụng.</p>';
             }
 
-            // Cập nhật Giao dịch Hiện tại
+            // Cập nhật Giao dịch
             const tradeEl = document.getElementById('currentTradeDisplay');
             if (data.currentTradeDetails) {
                 const trade = data.currentTradeDetails;
-                tradeEl.innerHTML = `<p><strong>Coin:</strong> ${trade.coin}</p><p><strong>Trạng thái:</strong> ${trade.status}</p><p><strong>Short:</strong> ${trade.shortExchange.toUpperCase()}</p><p><strong>Long:</strong> ${trade.longExchange.toUpperCase()}</p>`;
+                tradeEl.innerHTML = `<p><strong>Coin:</strong> ${trade.coin}</p><p><strong>Trạng thái:</strong> <span class="text-yellow">${trade.status}</span></p><p>Short: ${trade.shortExchange.toUpperCase()} | Long: ${trade.longExchange.toUpperCase()}</p>`;
             } else {
                 tradeEl.innerHTML = '<p>Không có giao dịch nào đang mở.</p>';
             }
@@ -386,18 +439,18 @@
             const historyBody = document.getElementById('tradeHistoryBody');
             historyBody.innerHTML = '';
             
+            // Tính toán cộng dồn từ giao dịch cũ nhất đến mới nhất
             let cumulativePnl = 0;
-            // Đảo ngược mảng để tính từ cũ đến mới (nếu server gửi về mới nhất ở index 0)
-            const historySorted = [...data.tradeHistory].reverse(); 
+            // Sao chép mảng và đảo ngược để duyệt từ cũ -> mới
+            const historyFromOldest = [...data.tradeHistory].reverse(); 
             
-            // Tính toán cộng dồn
-            const historyWithCumulative = historySorted.map(trade => {
+            const historyWithCumulative = historyFromOldest.map(trade => {
                 const pnl = trade.actualPnl || 0;
                 cumulativePnl += pnl;
                 return { ...trade, cumulativeTotal: cumulativePnl };
             });
 
-            // Đảo ngược lại để hiển thị mới nhất lên đầu
+            // Đảo ngược lại để hiển thị mới nhất lên đầu bảng
             const finalHistoryToDisplay = historyWithCumulative.reverse();
 
             finalHistoryToDisplay.forEach(trade => {
@@ -456,7 +509,13 @@
     }
     
     startBotBtn.addEventListener('click', async () => {
-        const result = await postRequest('/bot-api/start', { percentageToUse: document.getElementById('percentageToUse').value });
+        const mode = document.querySelector('input[name="capitalMode"]:checked').value;
+        const value = document.getElementById('capitalValue').value;
+        
+        const result = await postRequest('/bot-api/start', { 
+            tradeConfig: { mode: mode, value: parseFloat(value) } 
+        });
+        
         alert(result.message);
         updateBotStatus();
     });
