@@ -21,14 +21,10 @@ const DATA_FETCH_INTERVAL_SECONDS = 1;
 const MAX_CONSEC_FAILS = 3;
 const MIN_COLLATERAL_FOR_TRADE = 0.1;
 
-// [CONFIG] Cấu hình Phút bắt đầu chạy Test
+// [CONFIG]
 const TEST_START_MINUTE = 50; 
-
-// [CONFIG] Cấu hình TP / SL (Theo % Vốn lệnh)
 const SL_PERCENTAGE = 95;  
 const TP_PERCENTAGE = 155; 
-
-// [CONFIG] Cấu hình lệnh TEST
 const TEST_TRADE_MARGIN = 0.3; 
 
 const FUND_TRANSFER_MIN_AMOUNT_BINANCE = 10;
@@ -49,18 +45,11 @@ let balances = {};
 let tradeHistory = [];
 let bestPotentialOpportunityForDisplay = null;
 let allCurrentOpportunities = [];
-let currentTradeDetails = null;
-let tradeAwaitingPnl = null;
-
-// Cấu hình vốn
-let currentTradeConfig = { mode: 'percent', value: 50 };
-
-// Danh sách các lệnh đang chạy (Multi-Trade)
 let activeTrades = []; 
-
+let selectedOpportunityForNextTrade = null;
+let currentTradeConfig = { mode: 'percent', value: 50 };
 let exchangeHealth = {};
 let transferStatus = { inProgress: false, message: null };
-let selectedOpportunityForNextTrade = null;
 let hasLoggedNotFoundThisHour = false;
 let isRunningTestSequence = false; 
 let failedCoinsInSession = new Set();
@@ -563,6 +552,7 @@ async function ensureNoPosition(exchange, symbol, side) {
             if (pos) {
                 safeLog('warn', `[PRE-CLEAN] ${exchange.id} đang có vị thế ${symbol}. Đóng ngay...`);
                 const closeSide = pos.side === 'long' ? 'sell' : 'buy';
+                // [FIX] Thêm marginMode cross cho lệnh close
                 const params = (exchange.id === 'kucoinfutures') ? {'reduceOnly': true, 'marginMode': 'cross'} : {'reduceOnly': true};
                 await exchange.createMarketOrder(symbol, closeSide, pos.contracts, undefined, params);
             }
@@ -581,22 +571,15 @@ async function executeTestTrade(opportunity) {
     const shortEx = exchanges[shortExchange];
     const longEx = exchanges[longExchange];
     
-    // [NEW LOGIC] Dọn dẹp & Kiểm tra vị thế cũ
     const shortSymbol = await getExchangeSpecificSymbol(shortEx, coin);
     const longSymbol = await getExchangeSpecificSymbol(longEx, coin);
     
     if (shortSymbol && longSymbol) {
-        // Dọn dẹp lệnh chờ (chỉ hủy lệnh chờ, KHÔNG đóng vị thế)
         await Promise.all([
             shortEx.cancelAllOrders(shortSymbol),
             longEx.cancelAllOrders(longSymbol)
         ]);
     }
-
-    // --- [QUAN TRỌNG] Bỏ qua bước ensureNoPosition để giữ lệnh cũ ---
-    // Nhưng lệnh Test thì phải dùng ReduceOnly hoặc kiểm tra kỹ
-    // Tuy nhiên, để đơn giản: Test sẽ mở thêm 1 vị thế nhỏ rồi đóng ngay.
-    // Lệnh đóng test sẽ dùng ReduceOnly nên chỉ đóng đúng phần test, không ảnh hưởng lệnh to.
 
     const shortBal = balances[shortExchange]?.available || 0;
     const longBal = balances[longExchange]?.available || 0;
@@ -644,8 +627,9 @@ async function executeTestTrade(opportunity) {
     } catch (e) {
         safeLog('error', `[TEST-TRADE] ❌ Lỗi mở lệnh test: ${shortEx.id} ${e.message}`);
         
-        const closeShortParams = (shortEx.id === 'binanceusdm') ? { 'positionSide': 'SHORT' } : {'reduceOnly': true};
-        const closeLongParams = (longEx.id === 'binanceusdm') ? { 'positionSide': 'LONG' } : {'reduceOnly': true};
+        // [FIX] Close params chuẩn
+        const closeShortParams = (shortEx.id === 'binanceusdm') ? { 'positionSide': 'SHORT' } : {'reduceOnly': true, ...(shortEx.id === 'kucoinfutures' && {'marginMode': 'cross'})};
+        const closeLongParams = (longEx.id === 'binanceusdm') ? { 'positionSide': 'LONG' } : {'reduceOnly': true, ...(longEx.id === 'kucoinfutures' && {'marginMode': 'cross'})};
 
         if (shortOrder) await shortEx.createMarketBuyOrder(shortSymbol, shortOrderDetails.amount, closeShortParams);
         if (longOrder) await longEx.createMarketSellOrder(longSymbol, longOrderDetails.amount, closeLongParams);
@@ -657,6 +641,7 @@ async function executeTestTrade(opportunity) {
         getReliableFillPrice(longEx, longSymbol, longOrder.id) 
     ]);
 
+    // [FIX] Close params chuẩn
     const closeShortParams = (shortEx.id === 'binanceusdm') ? { 'positionSide': 'SHORT' } : {'reduceOnly': true, ...(shortEx.id === 'kucoinfutures' && {'marginMode': 'cross'})};
     const closeLongParams = (longEx.id === 'binanceusdm') ? { 'positionSide': 'LONG' } : {'reduceOnly': true, ...(longEx.id === 'kucoinfutures' && {'marginMode': 'cross'})};
 
@@ -708,7 +693,6 @@ async function runTestTradeSequence(candidates) {
     safeLog('info', `[TEST-SEQUENCE] 🔍 Bắt đầu quét danh sách ${finalCandidates.length} coin hợp lệ...`);
     
     for (const op of finalCandidates) {
-        // [FIX] Kiểm tra xem coin này có đang chạy lệnh cũ không
         const isAlreadyActive = activeTrades.some(trade => trade.coin === op.coin);
         
         if (isAlreadyActive) {
@@ -949,8 +933,9 @@ async function closeTradeNow() {
             await shortEx.cancelAllOrders(trade.shortSymbol);
             await longEx.cancelAllOrders(trade.longSymbol);
 
-            const closeShortParams = (shortEx.id === 'binanceusdm') ? { 'positionSide': 'SHORT' } : {'reduceOnly': true};
-            const closeLongParams = (longEx.id === 'binanceusdm') ? { 'positionSide': 'LONG' } : {'reduceOnly': true};
+            // [FIX] Close params chuẩn
+            const closeShortParams = (shortEx.id === 'binanceusdm') ? { 'positionSide': 'SHORT' } : {'reduceOnly': true, ...(shortEx.id === 'kucoinfutures' && {'marginMode': 'cross'})};
+            const closeLongParams = (longEx.id === 'binanceusdm') ? { 'positionSide': 'LONG' } : {'reduceOnly': true, ...(longEx.id === 'kucoinfutures' && {'marginMode': 'cross'})};
 
             await Promise.all([
                 shortEx.createMarketBuyOrder(trade.shortSymbol, trade.shortAmount, closeShortParams),
