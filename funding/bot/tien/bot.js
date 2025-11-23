@@ -16,19 +16,15 @@ const SERVER_DATA_URL = 'http://localhost:5005/api/data';
 const HUB_EXCHANGE_ID = 'binanceusdm';
 
 const MIN_PNL_PERCENTAGE = 1;
-const MIN_MINUTES_FOR_EXECUTION = 15; // Chỉ trade nếu còn dưới 15 phút tới giờ Funding
+const MIN_MINUTES_FOR_EXECUTION = 15; 
 const DATA_FETCH_INTERVAL_SECONDS = 1;
 const MAX_CONSEC_FAILS = 3;
 const MIN_COLLATERAL_FOR_TRADE = 0.1;
 
-// [CONFIG] Cấu hình Phút bắt đầu chạy Test (50 là chuẩn bài săn Funding)
+// [CONFIG]
 const TEST_START_MINUTE = 50; 
-
-// [CONFIG] Cấu hình TP / SL (Theo % Vốn lệnh)
 const SL_PERCENTAGE = 95;  
 const TP_PERCENTAGE = 155; 
-
-// [CONFIG] Cấu hình lệnh TEST (0.3$)
 const TEST_TRADE_MARGIN = 0.3; 
 
 const FUND_TRANSFER_MIN_AMOUNT_BINANCE = 10;
@@ -49,15 +45,15 @@ let balances = {};
 let tradeHistory = [];
 let bestPotentialOpportunityForDisplay = null;
 let allCurrentOpportunities = [];
-let currentTradeDetails = null;
-let tradeAwaitingPnl = null;
 
-// [NEW] Cấu hình vốn (Mặc định là 50%)
+// [NEW] Thay đổi từ biến đơn sang mảng để hỗ trợ nhiều lệnh cùng lúc
+let activeTrades = []; 
+// Biến này chỉ dùng để lưu coin đang chuẩn bị vào lệnh (sau khi test thành công)
+let selectedOpportunityForNextTrade = null;
+
 let currentTradeConfig = { mode: 'percent', value: 50 };
-
 let exchangeHealth = {};
 let transferStatus = { inProgress: false, message: null };
-let selectedOpportunityForNextTrade = null;
 let hasLoggedNotFoundThisHour = false;
 let isRunningTestSequence = false; 
 let failedCoinsInSession = new Set();
@@ -356,18 +352,11 @@ async function manageFundDistribution(opportunity) {
 }
 
 async function returnFundsToHub() {
-    capitalManagementState = 'CLEANING_UP';
-    safeLog('info', "[CLEANUP] Bắt đầu Giai đoạn 3: Dọn dẹp (TÍNH NĂNG GOM TIỀN VỀ ĐANG TẮT).");
-    
-    safeLog('warn', "[CLEANUP] Tiền sẽ được giữ lại trên ví Future của các sàn.");
-    
-    // Reset trạng thái về IDLE nhanh chóng
-    setTimeout(() => {
-        safeLog('info', "[CLEANUP] ✅ Bot reset về trạng thái IDLE.");
-        capitalManagementState = 'IDLE';
-        selectedOpportunityForNextTrade = null;
-        failedCoinsInSession.clear(); 
-    }, 2000);
+    // Hàm này giờ chỉ reset state thôi, không chuyển tiền nữa
+    safeLog('info', "[CLEANUP] Dọn dẹp trạng thái. Không chuyển tiền.");
+    capitalManagementState = 'IDLE';
+    selectedOpportunityForNextTrade = null;
+    failedCoinsInSession.clear(); 
 }
 
 const normalizeExchangeId = (id) => {
@@ -551,7 +540,6 @@ async function getReliableFillPrice(exchange, symbol, orderId) {
 async function ensureNoPosition(exchange, symbol, side) {
     try {
         if (exchange.id === 'binanceusdm') {
-            // [FIX] Symbol cho positionRisk API không được có dấu /
             const cleanSymbol = symbol.replace('/', '');
             const positions = await exchange.fapiPrivateGetPositionRisk({ 'symbol': cleanSymbol });
             const targetPos = positions.find(p => p.positionSide === (side === 'sell' ? 'SHORT' : 'LONG'));
@@ -713,10 +701,10 @@ async function runTestTradeSequence(candidates) {
         
         if (success) {
             selectedOpportunityForNextTrade = op;
-            capitalManagementState = 'FUNDS_READY';
+            capitalManagementState = 'FUNDS_READY'; // Chuyển trạng thái để đợi lệnh
             safeLog('info', `[TEST-SEQUENCE] 🎯 Đã CHỐT coin: ${op.coin}. Chờ đến 59:50.`);
             isRunningTestSequence = false;
-            return;
+            return; 
         } else {
             safeLog('warn', `[TEST-SEQUENCE] ⚠️ Coin ${op.coin} lỗi. Dọn dẹp & Nghỉ 5s...`);
             failedCoinsInSession.add(op.coin);
@@ -730,7 +718,6 @@ async function runTestTradeSequence(candidates) {
 }
 
 
-// [MODIFIED] Không nhận tham số (dùng biến toàn cục currentTradeConfig)
 async function executeTrades(opportunity) {
     const { coin, commonLeverage: desiredLeverage } = opportunity;
     const { shortExchange, longExchange } = opportunity.details;
@@ -751,7 +738,6 @@ async function executeTrades(opportunity) {
         
         const minBalance = Math.min(shortBalance, longBalance);
         
-        // [FIXED] Dùng biến toàn cục currentTradeConfig để tính toán vốn
         let collateral = 0;
         if (currentTradeConfig.mode === 'fixed') {
             collateral = currentTradeConfig.value;
@@ -814,18 +800,38 @@ async function executeTrades(opportunity) {
             getReliableFillPrice(longEx, longSymbol, longOrder.id) 
         ]);
         
-        const tradeBaseInfo = {
-            ...opportunity.details, coin,
-            openTime: Date.now(),
-            shortOrderAmount: shortOrderDetails.amount, longOrderAmount: longOrderDetails.amount,
-            commonLeverageUsed: leverageToUse, shortOriginalSymbol: shortSymbol, longOriginalSymbol: longSymbol,
-            shortBalanceBefore: shortBalance, longBalanceBefore: longBalance,
+        // [NEW] Tạo đối tượng trade và đẩy vào danh sách Active Trades
+        const trade = {
+            id: Date.now(),
+            coin,
+            shortExchange,
+            longExchange,
+            shortSymbol,
+            longSymbol,
+            shortOrderId: shortOrder.id,
+            longOrderId: longOrder.id,
+            entryTime: Date.now(),
+            shortEntryPrice,
+            longEntryPrice,
+            shortAmount: shortOrderDetails.amount,
+            longAmount: longOrderDetails.amount,
             collateralUsed: collateral,
+            leverage: leverageToUse,
+            status: 'OPEN',
             estimatedPnlFromOpportunity: opportunity.estimatedPnl,
+            initialBalanceShort: shortBalance,
+            initialBalanceLong: longBalance
         };
 
+        // Đẩy vào danh sách quản lý
+        activeTrades.push(trade);
+        
+        // Reset trạng thái về IDLE để bot có thể săn lệnh khác
+        capitalManagementState = 'IDLE';
+        selectedOpportunityForNextTrade = null;
+
         if (!shortEntryPrice || !longEntryPrice) {
-            currentTradeDetails = { ...tradeBaseInfo, status: 'MANUAL_CHECK_NO_SL' };
+            trade.status = 'MANUAL_CHECK_NO_SL';
             safeLog('warn', `[EXECUTE] Không lấy được giá khớp lệnh. Check Manual.`);
             return true;
         }
@@ -835,20 +841,17 @@ async function executeTrades(opportunity) {
                 placeTpSlOrders(shortEx, shortSymbol, 'sell', shortOrderDetails.amount, shortEntryPrice, collateral, shortOrderDetails.notional),
                 placeTpSlOrders(longEx, longSymbol, 'buy', longOrderDetails.amount, longEntryPrice, collateral, longOrderDetails.notional)
             ]);
-            currentTradeDetails = {
-                ...tradeBaseInfo, status: 'OPEN',
-                shortTpOrderId: shortTpSlIds.tpOrderId, shortSlOrderId: shortTpSlIds.slOrderId,
-                longTpOrderId: longTpSlIds.tpOrderId, longSlOrderId: longTpSlIds.slOrderId,
-            };
+            
+            trade.shortTpId = shortTpSlIds.tpOrderId;
+            trade.shortSlId = shortTpSlIds.slOrderId;
+            trade.longTpId = longTpSlIds.tpOrderId;
+            trade.longSlId = longTpSlIds.slOrderId;
+
         } catch (e) {
-            safeLog('error', `[EXECUTE] Lỗi TP/SL. Đóng lệnh ngay.`, e);
-            currentTradeDetails = { ...tradeBaseInfo, status: 'CLOSING_DUE_TO_ERROR' };
-            await closeTradeNow();
-            return false;
+            safeLog('error', `[EXECUTE] Lỗi TP/SL. Trade vẫn được lưu vào danh sách nhưng cần check tay.`, e);
         }
 
-        safeLog('info', `[EXECUTE] ✅ Vào lệnh thành công!`);
-        capitalManagementState = 'TRADE_OPEN';
+        safeLog('info', `[EXECUTE] ✅ Vào lệnh thành công! Đã thêm vào danh sách theo dõi (Active Trades: ${activeTrades.length}).`);
         return true;
 
     } catch (e) {
@@ -857,69 +860,118 @@ async function executeTrades(opportunity) {
     }
 }
 
-async function closeTradeNow() {
-    if (!currentTradeDetails) return false;
-    const tradeToClose = { ...currentTradeDetails };
-    
-    const shortEx = exchanges[tradeToClose.shortExchange];
-    const longEx = exchanges[tradeToClose.longExchange];
+// [NEW] Hàm giám sát các lệnh đang mở
+async function monitorActiveTrades() {
+    if (activeTrades.length === 0) return;
 
-    try {
-        safeLog('info', `[CLEANUP] Hủy lệnh chờ...`);
-        await shortEx.cancelAllOrders(tradeToClose.shortOriginalSymbol);
-        await longEx.cancelAllOrders(tradeToClose.longOriginalSymbol);
-        await sleep(1000);
+    for (let i = activeTrades.length - 1; i >= 0; i--) {
+        const trade = activeTrades[i];
+        const shortEx = exchanges[trade.shortExchange];
+        const longEx = exchanges[trade.longExchange];
 
-        safeLog('info', `[CLEANUP] Đang đóng vị thế...`);
-        
-        const closeShortParams = (shortEx.id === 'binanceusdm') ? { 'positionSide': 'SHORT' } : {'reduceOnly': true, ...(shortEx.id === 'kucoinfutures' && {'marginMode': 'cross'})};
-        const closeLongParams = (longEx.id === 'binanceusdm') ? { 'positionSide': 'LONG' } : {'reduceOnly': true, ...(longEx.id === 'kucoinfutures' && {'marginMode': 'cross'})};
+        try {
+            // Kiểm tra xem lệnh TP/SL đã khớp chưa hoặc vị thế đã đóng chưa
+            // Cách đơn giản nhất: Kiểm tra xem order gốc đã Closed chưa (với Binance Hedge Mode thì check PositionRisk)
+            // Nhưng để tiết kiệm API, ta check xem lệnh TP/SL có status 'closed' hay không
+            
+            let isClosed = false;
+            
+            // Check Short side (Check SL order)
+            if (trade.shortSlId) {
+                try {
+                    const slOrder = await shortEx.fetchOrder(trade.shortSlId, trade.shortSymbol);
+                    if (slOrder.status === 'closed' || slOrder.status === 'filled') isClosed = true;
+                } catch {}
+            }
+            
+            // Check Long side
+            if (!isClosed && trade.longSlId) {
+                try {
+                    const slOrder = await longEx.fetchOrder(trade.longSlId, trade.longSymbol);
+                    if (slOrder.status === 'closed' || slOrder.status === 'filled') isClosed = true;
+                } catch {}
+            }
 
-        await Promise.all([
-            shortEx.createMarketBuyOrder(tradeToClose.shortOriginalSymbol, tradeToClose.shortOrderAmount, closeShortParams),
-            longEx.createMarketSellOrder(tradeToClose.longOriginalSymbol, tradeToClose.longOrderAmount, closeLongParams)
-        ]);
-        tradeAwaitingPnl = { ...currentTradeDetails, status: 'PENDING_PNL_CALC', closeTime: Date.now() };
-        currentTradeDetails = null;
-        return true;
-    } catch (e) {
-        safeLog('error', `[PNL] Lỗi khi đóng vị thế:`, e);
-        currentTradeDetails.status = "CLOSE_FAILED";
-        return false;
+            // Nếu phát hiện đã đóng (dính SL hoặc TP)
+            if (isClosed) {
+                safeLog('info', `[MONITOR] Phát hiện lệnh ${trade.coin} đã đóng. Đang tính PnL...`);
+                
+                // Hủy các lệnh treo còn lại
+                try { await shortEx.cancelAllOrders(trade.shortSymbol); } catch {}
+                try { await longEx.cancelAllOrders(trade.longSymbol); } catch {}
+
+                // Tính PnL
+                const shortBalNow = (await shortEx.fetchBalance()).free.USDT;
+                const longBalNow = (await longEx.fetchBalance()).free.USDT;
+                
+                const pnlShort = shortBalNow - trade.initialBalanceShort;
+                const pnlLong = longBalNow - trade.initialBalanceLong;
+                const totalPnl = pnlShort + pnlLong;
+
+                trade.actualPnl = totalPnl;
+                trade.closeTime = Date.now();
+                trade.status = 'CLOSED';
+
+                // Chuyển sang lịch sử
+                tradeHistory.unshift(trade);
+                if (tradeHistory.length > 50) tradeHistory.pop();
+
+                // Xóa khỏi danh sách active
+                activeTrades.splice(i, 1);
+                
+                safeLog('info', `[MONITOR] ✅ Đã chốt sổ lệnh ${trade.coin}. PNL: ${totalPnl.toFixed(4)} USDT.`);
+            }
+
+        } catch (e) {
+            // Lỗi mạng hoặc API, bỏ qua vòng này
+        }
     }
 }
 
-async function calculatePnlAfterDelay(closedTrade) {
-    await sleep(5000);
-    try {
-        await updateBalances();
-        const shortBalanceAfter = balances[closedTrade.shortExchange]?.available || 0;
-        const longBalanceAfter = balances[closedTrade.longExchange]?.available || 0;
-        const pnlShort = shortBalanceAfter - closedTrade.shortBalanceBefore;
-        const pnlLong = longBalanceAfter - closedTrade.longBalanceBefore;
-        const totalPnl = pnlShort + pnlLong;
-        safeLog('log', `[PNL] KẾT QUẢ PHIÊN (${closedTrade.coin}): PNL Tổng: ${totalPnl.toFixed(4)} USDT`);
-        tradeHistory.unshift({ ...closedTrade, status: 'CLOSED', actualPnl: totalPnl, pnlShort, pnlLong });
-        if (tradeHistory.length > 50) tradeHistory.pop();
-        tradeAwaitingPnl = null;
-
-        if (botState === 'RUNNING') {
-            safeLog('info', '[STATE] Tính PNL hoàn tất. Bắt đầu dọn dẹp (bỏ qua gom tiền).');
-            await returnFundsToHub();
-        }
-
-    } catch (e) {
-        safeLog('error', '[PNL] Lỗi nghiêm trọng khi đang tính toán PNL:', e);
-        tradeAwaitingPnl = null;
-        capitalManagementState = 'IDLE';
+// Giữ nguyên hàm closeTradeNow để dùng cho nút "Đóng khẩn cấp"
+async function closeTradeNow() {
+    // Hàm này sẽ đóng TOÀN BỘ các lệnh đang active
+    if (activeTrades.length === 0) {
+        safeLog('warn', '[CLEANUP] Không có lệnh nào đang mở để đóng.');
+        return false;
     }
+
+    safeLog('info', `[CLEANUP] 🛑 Đang đóng khẩn cấp ${activeTrades.length} lệnh...`);
+
+    for (const trade of activeTrades) {
+        const shortEx = exchanges[trade.shortExchange];
+        const longEx = exchanges[trade.longExchange];
+        
+        try {
+            await shortEx.cancelAllOrders(trade.shortSymbol);
+            await longEx.cancelAllOrders(trade.longSymbol);
+
+            const closeShortParams = (shortEx.id === 'binanceusdm') ? { 'positionSide': 'SHORT' } : {'reduceOnly': true};
+            const closeLongParams = (longEx.id === 'binanceusdm') ? { 'positionSide': 'LONG' } : {'reduceOnly': true};
+
+            await Promise.all([
+                shortEx.createMarketBuyOrder(trade.shortSymbol, trade.shortAmount, closeShortParams),
+                longEx.createMarketSellOrder(trade.longSymbol, trade.longAmount, closeLongParams)
+            ]);
+            
+            trade.status = 'CLOSED_MANUALLY';
+            trade.closeTime = Date.now();
+            tradeHistory.unshift(trade);
+        } catch (e) {
+            safeLog('error', `[CLEANUP] Lỗi khi đóng ${trade.coin}:`, e);
+        }
+    }
+    
+    activeTrades = []; // Xóa sạch
+    return true;
 }
 
 async function mainBotLoop() {
     if (botState !== 'RUNNING') return;
 
     try {
-        if (tradeAwaitingPnl) await calculatePnlAfterDelay(tradeAwaitingPnl);
+        // [NEW] Chạy giám sát các lệnh đang mở
+        await monitorActiveTrades();
         
         const serverData = await fetchDataFromServer();
         await processServerData(serverData);
@@ -948,7 +1000,7 @@ async function mainBotLoop() {
                 if (fundingCandidates.length > 0) {
                      await runTestTradeSequence(fundingCandidates); 
                 } else if (!hasLoggedNotFoundThisHour) {
-                    safeLog('log', `[TIMER] Phút ${currentMinute}: Chưa có coin nào sắp đến giờ Funding (còn > 15p).`);
+                    safeLog('log', `[TIMER] Phút ${currentMinute}: Chưa có coin nào sắp đến giờ Funding.`);
                     hasLoggedNotFoundThisHour = true;
                 }
             }
@@ -959,11 +1011,12 @@ async function mainBotLoop() {
             if (currentMinute === 59 && currentSecond >= 50) {
                 if (selectedOpportunityForNextTrade) {
                     safeLog('log', `[TIMER] ⏰ 59:50 -> EXECUTE lệnh thật cho ${selectedOpportunityForNextTrade.coin}.`);
-                    // [FIXED] Không cần truyền tham số percentageToUse nữa
                     const success = await executeTrades(selectedOpportunityForNextTrade);
                     if (!success) {
                         safeLog('error', "[TIMER] Vào lệnh thất bại.");
-                        await returnFundsToHub();
+                        // Nếu fail thì reset về IDLE để chờ cơ hội khác
+                        capitalManagementState = 'IDLE';
+                        selectedOpportunityForNextTrade = null;
                     }
                 }
             } else if (currentSecond === 0) {
@@ -971,15 +1024,8 @@ async function mainBotLoop() {
             }
         }
 
-        // [FIXED] Safety Reset: Bỏ qua nếu đang chờ lệnh (FUNDS_READY)
-        else if (capitalManagementState !== 'IDLE' && capitalManagementState !== 'TRADE_OPEN' && capitalManagementState !== 'FUNDS_READY' && currentMinute > 5 && currentMinute < 50) {
-            safeLog('warn', `[RESET] Trạng thái ${capitalManagementState} bị kẹt, đang reset về IDLE.`);
-            await returnFundsToHub();
-        }
-
     } catch (e) {
         safeLog('error', '[LOOP] Lỗi nghiêm trọng trong vòng lặp chính:', e);
-        await returnFundsToHub();
     }
 
     if (botState === 'RUNNING') {
@@ -1031,7 +1077,8 @@ const botServer = http.createServer(async (req, res) => {
             res.writeHead(200, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ 
                 botState, capitalManagementState, balances, tradeHistory, 
-                bestPotentialOpportunityForDisplay, currentTradeDetails, 
+                bestPotentialOpportunityForDisplay, currentTradeDetails: activeTrades[0] || null, // Show lệnh đầu tiên nếu có
+                activeTrades, // Gửi thêm danh sách full
                 exchangeHealth, transferStatus, transferExchanges, internalTransferExchanges,
                 activeExchangeIds: internalTransferExchanges
             }));
@@ -1050,17 +1097,6 @@ const botServer = http.createServer(async (req, res) => {
         } else if (url === '/bot-api/stop' && method === 'POST') {
              res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ success: stopBot(), message: 'Đã gửi yêu cầu dừng bot.' }));
         } else if (url === '/bot-api/custom-test-trade' && method === 'POST') {
-            safeLog('log', '[MANUAL] 📩 Nhận yêu cầu test thủ công từ UI...');
-            
-            if (currentTradeDetails) {
-                 safeLog('warn', '[MANUAL] Bot đang bận, từ chối lệnh test.');
-                 return res.writeHead(409, { 'Content-Type': 'application/json' }).end(JSON.stringify({ success: false, message: 'Bot đang bận với một giao dịch.' }));
-            }
-            if (!bestPotentialOpportunityForDisplay) {
-                 safeLog('warn', '[MANUAL] Không có cơ hội nào để test.');
-                 return res.writeHead(400, { 'Content-Type': 'application/json' }).end(JSON.stringify({ success: false, message: 'Chưa có cơ hội nào.' }));
-            }
-            
             const data = JSON.parse(body);
             const testOpportunity = {
                 coin: bestPotentialOpportunityForDisplay?.coin,
@@ -1069,27 +1105,22 @@ const botServer = http.createServer(async (req, res) => {
             };
             
             try {
-                // Manual Trade tạm thời vẫn dùng config từ UI gửi lên
-                // Nhưng cần set tạm currentTradeConfig để hàm executeTrades hiểu
+                // Manual Trade dùng config tạm thời
                 const oldConfig = currentTradeConfig;
                 currentTradeConfig = { mode: 'percent', value: parseFloat(data.percentage) }; 
-                
                 const tradeSuccess = await executeTrades(testOpportunity);
-                
-                // Restore lại config cũ
                 currentTradeConfig = oldConfig;
 
                 res.writeHead(tradeSuccess ? 200 : 500, { 'Content-Type': 'application/json' }).end(JSON.stringify({ success: tradeSuccess, message: tradeSuccess ? 'Lệnh Test đã được gửi.' : 'Lỗi khi gửi lệnh Test (Xem log).' }));
             } catch (err) {
-                safeLog('error', '[MANUAL] Lỗi nghiêm trọng khi gọi executeTrades:', err);
+                safeLog('error', '[MANUAL] Lỗi:', err);
                 res.writeHead(500, { 'Content-Type': 'application/json' }).end(JSON.stringify({ success: false, message: `Lỗi: ${err.message}` }));
             }
 
         }
         else if (url === '/bot-api/close-trade-now' && method === 'POST') {
             const success = await closeTradeNow();
-            if(success && botState === 'RUNNING') await returnFundsToHub();
-            res.writeHead(success ? 200 : 400, { 'Content-Type': 'application/json' }).end(JSON.stringify({ success, message: success ? 'Đã gửi yêu cầu đóng lệnh và dọn dẹp.' : 'Không có lệnh đang mở hoặc có lỗi.' }));
+            res.writeHead(success ? 200 : 400, { 'Content-Type': 'application/json' }).end(JSON.stringify({ success, message: success ? 'Đã đóng tất cả lệnh.' : 'Không có lệnh nào.' }));
         } else if (url === '/bot-api/transfer-funds' && method === 'POST') {
             if (botState === 'RUNNING' && capitalManagementState !== 'IDLE') {
                  return res.writeHead(429, { 'Content-Type': 'application/json' }).end(JSON.stringify({ success: false, message: 'Bot đang bận, không thể chuyển tiền thủ công.' }));
