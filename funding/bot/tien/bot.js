@@ -401,12 +401,25 @@ async function processServerData(serverData) {
     }).map(op => {
         const [shortExRaw, longExRaw] = op.exchanges.split(' / ');
         op.details = { shortExchange: normalizeExchangeId(shortExRaw), longExchange: normalizeExchangeId(longExRaw) };
-        // [MODIFIED] Tính toán Funding Diff để hiển thị
-        if (op.shortFundingRate !== undefined && op.longFundingRate !== undefined) {
+        
+        // [FIX] Logic lấy Funding Diff chuẩn
+        // Nếu server có gửi fundingDiff thì dùng nó
+        if (op.fundingDiff !== undefined) {
+            // Giữ nguyên, không làm gì cả
+        } 
+        // Nếu server gửi tên khác
+        else if (op.fundingDifference !== undefined) {
+            op.fundingDiff = op.fundingDifference;
+        }
+        // Nếu không có, mới tự tính
+        else if (op.shortFundingRate !== undefined && op.longFundingRate !== undefined) {
             op.fundingDiff = Math.abs(op.shortFundingRate - op.longFundingRate);
-        } else {
+        } 
+        // Nếu server không gửi gì cả về fundingDiff thì gán 0
+        else {
             op.fundingDiff = 0;
         }
+
         return op;
     });
     
@@ -741,7 +754,6 @@ async function executeTrades(opportunity, percentageToUse) {
         
         const minBalance = Math.min(shortBalance, longBalance);
         
-        // [MODIFIED] Tính toán vốn dựa trên Config (Percent hoặc Fixed)
         let collateral = 0;
         if (currentTradeConfig.mode === 'fixed') {
             collateral = currentTradeConfig.value;
@@ -1062,7 +1074,6 @@ const botServer = http.createServer(async (req, res) => {
             };
             
             try {
-                // Manual trade vẫn dùng tham số phần trăm cũ, bạn có thể nâng cấp nếu cần
                 const tradeSuccess = await executeTrades(testOpportunity, parseFloat(data.percentage));
                 res.writeHead(tradeSuccess ? 200 : 500, { 'Content-Type': 'application/json' }).end(JSON.stringify({ success: tradeSuccess, message: tradeSuccess ? 'Lệnh Test đã được gửi.' : 'Lỗi khi gửi lệnh Test (Xem log).' }));
             } catch (err) {
