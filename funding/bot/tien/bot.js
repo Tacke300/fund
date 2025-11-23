@@ -121,7 +121,7 @@ activeExchangeIds.forEach(id => {
                         safeLog('info', `[INIT] ✅ Đã chuyển Binance sang HEDGE MODE.`);
                     } catch (e) {
                         if (!e.message.includes("-4046")) { 
-                            safeLog('warn', `[INIT] Không thể chuyển Binance sang Hedge Mode (Có thể do đang treo lệnh): ${e.message}`);
+                            safeLog('warn', `[INIT] Không thể chuyển Binance sang Hedge Mode: ${e.message}`);
                         }
                     }
                 }, 2000);
@@ -223,7 +223,6 @@ async function attemptInternalTransferOnArrival(toExchangeId, fromExchangeId, am
 
     if (toExchangeId === 'kucoinfutures') {
         checkerId = 'kucoin'; 
-        // [FIX] Dùng instance 'kucoin' (Spot) để chuyển tiền từ Main -> Future
         transfererId = 'kucoin'; 
     } else if (toExchangeId === 'binanceusdm') {
         checkerId = 'binance';
@@ -552,7 +551,9 @@ async function getReliableFillPrice(exchange, symbol, orderId) {
 async function ensureNoPosition(exchange, symbol, side) {
     try {
         if (exchange.id === 'binanceusdm') {
-            const positions = await exchange.fapiPrivateGetPositionRisk({ 'symbol': symbol.replace('/', '') });
+            // [FIX] Symbol cho positionRisk API không được có dấu /
+            const cleanSymbol = symbol.replace('/', '');
+            const positions = await exchange.fapiPrivateGetPositionRisk({ 'symbol': cleanSymbol });
             const targetPos = positions.find(p => p.positionSide === (side === 'sell' ? 'SHORT' : 'LONG'));
             const amt = parseFloat(targetPos?.positionAmt || 0);
             if (Math.abs(amt) > 0) {
@@ -729,11 +730,12 @@ async function runTestTradeSequence(candidates) {
 }
 
 
-async function executeTrades(opportunity, percentageToUse) {
+// [MODIFIED] Không nhận tham số (dùng biến toàn cục currentTradeConfig)
+async function executeTrades(opportunity) {
     const { coin, commonLeverage: desiredLeverage } = opportunity;
     const { shortExchange, longExchange } = opportunity.details;
     
-    safeLog('info', `[EXECUTE] 🚀 Bắt đầu vào lệnh cho ${coin} (${percentageToUse}% vốn)...`);
+    safeLog('info', `[EXECUTE] 🚀 Bắt đầu vào lệnh cho ${coin}...`);
 
     try {
         await updateBalances();
@@ -749,6 +751,7 @@ async function executeTrades(opportunity, percentageToUse) {
         
         const minBalance = Math.min(shortBalance, longBalance);
         
+        // [FIXED] Dùng biến toàn cục currentTradeConfig để tính toán vốn
         let collateral = 0;
         if (currentTradeConfig.mode === 'fixed') {
             collateral = currentTradeConfig.value;
@@ -933,10 +936,8 @@ async function mainBotLoop() {
             failedCoinsInSession.clear();
         }
 
-        // [LOGIC] Test Coin: Chỉ test nếu còn dưới 15 phút đến giờ Funding
+        // [LOGIC] Test Coin
         if (capitalManagementState === 'IDLE' && currentMinute >= TEST_START_MINUTE && currentMinute < 59) {
-            
-            // Lọc coin sắp Funding
             const fundingCandidates = allCurrentOpportunities.filter(op => {
                 const msToFunding = op.nextFundingTime - Date.now();
                 const minutesToFunding = msToFunding / 60000;
@@ -958,7 +959,8 @@ async function mainBotLoop() {
             if (currentMinute === 59 && currentSecond >= 50) {
                 if (selectedOpportunityForNextTrade) {
                     safeLog('log', `[TIMER] ⏰ 59:50 -> EXECUTE lệnh thật cho ${selectedOpportunityForNextTrade.coin}.`);
-                    const success = await executeTrades(selectedOpportunityForNextTrade, currentPercentageToUse);
+                    // [FIXED] Không cần truyền tham số percentageToUse nữa
+                    const success = await executeTrades(selectedOpportunityForNextTrade);
                     if (!success) {
                         safeLog('error', "[TIMER] Vào lệnh thất bại.");
                         await returnFundsToHub();
@@ -1036,11 +1038,9 @@ const botServer = http.createServer(async (req, res) => {
         } else if (url === '/bot-api/start' && method === 'POST') {
              try {
                  const payload = JSON.parse(body);
-                 // Nhận tradeConfig từ UI
                  if (payload.tradeConfig) {
                      currentTradeConfig = payload.tradeConfig;
                  } else if (payload.percentageToUse) {
-                     // Fallback cho UI cũ
                      currentTradeConfig = { mode: 'percent', value: parseFloat(payload.percentageToUse) };
                  }
              } catch { 
@@ -1069,7 +1069,16 @@ const botServer = http.createServer(async (req, res) => {
             };
             
             try {
-                const tradeSuccess = await executeTrades(testOpportunity, parseFloat(data.percentage));
+                // Manual Trade tạm thời vẫn dùng config từ UI gửi lên
+                // Nhưng cần set tạm currentTradeConfig để hàm executeTrades hiểu
+                const oldConfig = currentTradeConfig;
+                currentTradeConfig = { mode: 'percent', value: parseFloat(data.percentage) }; 
+                
+                const tradeSuccess = await executeTrades(testOpportunity);
+                
+                // Restore lại config cũ
+                currentTradeConfig = oldConfig;
+
                 res.writeHead(tradeSuccess ? 200 : 500, { 'Content-Type': 'application/json' }).end(JSON.stringify({ success: tradeSuccess, message: tradeSuccess ? 'Lệnh Test đã được gửi.' : 'Lỗi khi gửi lệnh Test (Xem log).' }));
             } catch (err) {
                 safeLog('error', '[MANUAL] Lỗi nghiêm trọng khi gọi executeTrades:', err);
