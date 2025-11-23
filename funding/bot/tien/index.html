@@ -291,8 +291,9 @@
                     <th>Coin</th>
                     <th>Sàn (Short/Long)</th>
                     <th>PNL Ước tính (%)</th>
-                    <th>Vốn sử dụng (USDT)</th>
+                    <th>Vốn (USDT)</th>
                     <th>PNL Thực tế (USDT)</th>
+                    <th>TỔNG PNL (Cộng dồn)</th>
                 </tr>
             </thead>
             <tbody id="tradeHistoryBody"></tbody>
@@ -301,7 +302,6 @@
 </div>
 
 <script>
-    // Toàn bộ phần Javascript được giữ nguyên vì nó đã đủ linh hoạt
     const startBotBtn = document.getElementById('startBotBtn');
     const stopBotBtn = document.getElementById('stopBotBtn');
     const testTradeBtn = document.getElementById('testTradeBtn');
@@ -340,25 +340,35 @@
                     capitalStateEl.className = '';
             }
 
-            const isBotBusy = data.botState === 'RUNNING' && data.capitalManagementState !== 'IDLE';
+            const isBotBusy = data.botState === 'RUNNING' && data.capitalManagementState !== 'IDLE' && data.capitalManagementState !== 'FUNDS_READY';
             manualTransferBtn.disabled = isBotBusy;
             internalTransferBtn.disabled = isBotBusy;
             testTradeBtn.disabled = isBotBusy;
 
-            // Cập nhật Số dư
+            // Cập nhật Số dư (Đã lọc bỏ Binance Spot và Kucoin Spot)
             let balancesHtml = '';
             for (const id in data.balances) {
+                if (id === 'binance' || id === 'kucoin') continue; // Ẩn ví Spot
+                
                 const health = data.exchangeHealth[id];
                 const healthStatus = health.isDisabled ? ` (<span class="text-red">Mất kết nối</span>)` : '';
                 balancesHtml += `<p><strong>${id.toUpperCase()}:</strong> ${data.balances[id].available.toFixed(2)} USDT ${healthStatus}</p>`;
             }
             document.getElementById('balancesDisplay').innerHTML = balancesHtml;
 
-            // Cập nhật Cơ hội
+            // Cập nhật Cơ hội (Thêm hiển thị Funding Diff)
             const oppEl = document.getElementById('bestOpportunityDisplay');
             if (data.bestPotentialOpportunityForDisplay) {
                 const opp = data.bestPotentialOpportunityForDisplay;
-                oppEl.innerHTML = `<p><strong>Coin:</strong> ${opp.coin}</p><p><strong>Sàn:</strong> ${opp.exchanges}</p><p><strong>PNL ước tính:</strong> ${opp.estimatedPnl.toFixed(3)}%</p>`;
+                // Giả định server gửi về chênh lệch funding, nếu không có thì tự tính hoặc để N/A
+                const fundingDiff = opp.fundingDiff !== undefined ? opp.fundingDiff.toFixed(4) + '%' : 'N/A';
+                
+                oppEl.innerHTML = `
+                    <p><strong>Coin:</strong> ${opp.coin}</p>
+                    <p><strong>Sàn:</strong> ${opp.exchanges}</p>
+                    <p><strong>PNL ước tính:</strong> <span class="text-green">${opp.estimatedPnl.toFixed(3)}%</span></p>
+                    <p><strong>Chênh lệch Funding:</strong> ${fundingDiff}</p>
+                `;
             } else {
                 oppEl.innerHTML = '<p>Không có cơ hội nào khả dụng.</p>';
             }
@@ -372,22 +382,43 @@
                 tradeEl.innerHTML = '<p>Không có giao dịch nào đang mở.</p>';
             }
 
-            // Cập nhật Lịch sử
+            // Cập nhật Lịch sử & Tính PNL Cộng dồn
             const historyBody = document.getElementById('tradeHistoryBody');
             historyBody.innerHTML = '';
-            data.tradeHistory.forEach(trade => {
+            
+            let cumulativePnl = 0;
+            // Đảo ngược mảng để tính từ cũ đến mới (nếu server gửi về mới nhất ở index 0)
+            const historySorted = [...data.tradeHistory].reverse(); 
+            
+            // Tính toán cộng dồn
+            const historyWithCumulative = historySorted.map(trade => {
+                const pnl = trade.actualPnl || 0;
+                cumulativePnl += pnl;
+                return { ...trade, cumulativeTotal: cumulativePnl };
+            });
+
+            // Đảo ngược lại để hiển thị mới nhất lên đầu
+            const finalHistoryToDisplay = historyWithCumulative.reverse();
+
+            finalHistoryToDisplay.forEach(trade => {
                 const row = historyBody.insertRow();
                 row.insertCell().textContent = new Date(trade.closeTime || trade.openTime).toLocaleString('vi-VN');
                 row.insertCell().textContent = trade.coin;
                 row.insertCell().textContent = `${trade.shortExchange.toUpperCase()}/${trade.longExchange.toUpperCase()}`;
                 row.insertCell().textContent = trade.estimatedPnlFromOpportunity ? trade.estimatedPnlFromOpportunity.toFixed(2) + '%' : 'N/A';
-                row.insertCell().textContent = trade.collateralUsed ? trade.collateralUsed.toFixed(4) : 'N/A';
+                row.insertCell().textContent = trade.collateralUsed ? trade.collateralUsed.toFixed(2) : 'N/A';
+                
                 const pnlCell = row.insertCell();
-                pnlCell.textContent = trade.actualPnl ? trade.actualPnl.toFixed(4) + ' USDT' : 'N/A';
-                pnlCell.className = trade.actualPnl >= 0 ? 'text-green' : 'text-red';
+                pnlCell.textContent = trade.actualPnl ? trade.actualPnl.toFixed(4) + ' USDT' : '0.0000';
+                pnlCell.className = (trade.actualPnl >= 0) ? 'text-green' : 'text-red';
+
+                // Cột Tổng PNL Cộng dồn
+                const totalCell = row.insertCell();
+                totalCell.textContent = trade.cumulativeTotal.toFixed(4) + ' USDT';
+                totalCell.className = (trade.cumulativeTotal >= 0) ? 'text-green' : 'text-red';
+                totalCell.style.fontWeight = 'bold';
             });
             
-            // Khởi tạo các dropdown nếu chưa có
             if (!activeExchangesInitialized && data.activeExchangeIds) {
                 populateDropdowns(data.activeExchangeIds, [testShortExchange, testLongExchange, internalExchangeSelect]);
                 populateDropdowns(data.transferExchanges || [], [fromSelect, toSelect]);
@@ -403,7 +434,7 @@
         if (!exchanges || exchanges.length === 0) return;
         dropdowns.forEach(dropdown => {
             if (!dropdown) return;
-            dropdown.innerHTML = ''; // Xóa các lựa chọn cũ
+            dropdown.innerHTML = ''; 
             exchanges.forEach(id => {
                 dropdown.add(new Option(id.toUpperCase(), id));
             });
@@ -491,7 +522,6 @@
         statusEl.textContent = result.message;
         statusEl.className = result.success ? 'text-green' : 'text-red';
     });
-
 
     updateBotStatus();
     setInterval(updateBotStatus, 3000);
