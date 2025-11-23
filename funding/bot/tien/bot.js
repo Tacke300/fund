@@ -121,7 +121,7 @@ activeExchangeIds.forEach(id => {
                         safeLog('info', `[INIT] ✅ Đã chuyển Binance sang HEDGE MODE.`);
                     } catch (e) {
                         if (!e.message.includes("-4046")) { 
-                            safeLog('warn', `[INIT] Không thể chuyển Binance sang Hedge Mode: ${e.message}`);
+                            safeLog('warn', `[INIT] Không thể chuyển Binance sang Hedge Mode (Có thể do đang treo lệnh): ${e.message}`);
                         }
                     }
                 }, 2000);
@@ -223,7 +223,8 @@ async function attemptInternalTransferOnArrival(toExchangeId, fromExchangeId, am
 
     if (toExchangeId === 'kucoinfutures') {
         checkerId = 'kucoin'; 
-        transfererId = 'kucoinfutures'; 
+        // [FIX] Dùng instance 'kucoin' (Spot) để chuyển tiền từ Main -> Future
+        transfererId = 'kucoin'; 
     } else if (toExchangeId === 'binanceusdm') {
         checkerId = 'binance';
         transfererId = 'binanceusdm';
@@ -402,20 +403,14 @@ async function processServerData(serverData) {
         const [shortExRaw, longExRaw] = op.exchanges.split(' / ');
         op.details = { shortExchange: normalizeExchangeId(shortExRaw), longExchange: normalizeExchangeId(longExRaw) };
         
-        // [FIX] Logic lấy Funding Diff chuẩn
-        // Nếu server có gửi fundingDiff thì dùng nó
         if (op.fundingDiff !== undefined) {
-            // Giữ nguyên, không làm gì cả
         } 
-        // Nếu server gửi tên khác
         else if (op.fundingDifference !== undefined) {
             op.fundingDiff = op.fundingDifference;
         }
-        // Nếu không có, mới tự tính
         else if (op.shortFundingRate !== undefined && op.longFundingRate !== undefined) {
             op.fundingDiff = Math.abs(op.shortFundingRate - op.longFundingRate);
         } 
-        // Nếu server không gửi gì cả về fundingDiff thì gán 0
         else {
             op.fundingDiff = 0;
         }
