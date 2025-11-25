@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Multi-User Bot</title>
+    <title>Arbitrage Bot</title>
     <style>
         :root {
             --bg-color: #000000;
@@ -23,7 +23,7 @@
             padding: 15px;
         }
 
-        /* --- LOGIN/REGISTER OVERLAY --- */
+        /* LOGIN */
         .auth-overlay {
             position: fixed; top: 0; left: 0; width: 100%; height: 100%;
             background: #000; z-index: 2000;
@@ -31,47 +31,52 @@
             flex-direction: column;
         }
         .auth-box {
-            background: #1a1a1a; padding: 40px; border-radius: 12px;
+            background: #1a1a1a; padding: 30px; border-radius: 12px;
             border: 1px solid var(--binance-yellow);
-            text-align: center; width: 320px;
-            box-shadow: 0 0 20px rgba(240, 185, 11, 0.2);
+            text-align: center; width: 300px;
         }
-        .auth-box h2 { color: var(--binance-yellow); margin-bottom: 20px; }
-        
-        /* [REQ] Input text hiển thị rõ ràng */
         .auth-box input {
-            width: 100%; padding: 12px; margin: 10px 0;
+            width: 100%; padding: 12px; margin: 8px 0;
             background: #000; border: 1px solid #444; color: #fff;
-            border-radius: 6px; font-size: 1rem; text-align: center; box-sizing: border-box;
+            border-radius: 6px; font-size: 1rem; box-sizing: border-box;
         }
         .btn-auth {
             width: 100%; padding: 12px; background: var(--binance-yellow);
             color: #000; font-weight: bold; border: none; border-radius: 6px;
-            cursor: pointer; font-size: 1rem; margin-top: 10px;
+            cursor: pointer; font-size: 1rem; margin-top: 15px;
         }
         .link-text { color: #888; margin-top: 15px; font-size: 0.9rem; cursor: pointer; text-decoration: underline; }
 
-        /* --- HEADER --- */
-        .header {
-            display: flex; justify-content: space-between; align-items: center;
-            margin-bottom: 20px; padding: 10px 20px;
-            background: #0a0a0a; border-bottom: 1px solid #222;
-            white-space: nowrap; overflow-x: auto;
+        /* HEADER (Mobile Fixed) */
+        .header-container {
+            background: #0a0a0a; padding: 10px; margin-bottom: 20px;
+            border-bottom: 1px solid #222;
+            /* Center everything */
+            display: flex; flex-direction: column; align-items: center; gap: 10px;
         }
-        .brand-group { display: flex; align-items: center; gap: 20px; }
-        .brand { display: flex; align-items: center; gap: 8px; font-weight: bold; font-size: 1.1rem; }
-        .logo { height: 30px; }
-        .logo-kucoin { height: 30px; filter: grayscale(100%) brightness(80%) sepia(100%) hue-rotate(100deg) saturate(500%); }
+        .logos-row {
+            display: flex; align-items: center; gap: 20px;
+            flex-wrap: nowrap; /* Force 1 line */
+        }
+        .brand { display: flex; align-items: center; gap: 5px; font-weight: bold; font-size: 1rem; white-space: nowrap; }
+        .logo { height: 25px; }
+        .logo-kucoin { height: 25px; filter: grayscale(100%) brightness(80%) sepia(100%) hue-rotate(100deg) saturate(500%); }
         .text-yellow { color: var(--binance-yellow); }
         .text-green { color: var(--kucoin-green); }
-        .user-email { color: #666; font-size: 0.9rem; }
+        
+        .user-info-row {
+            display: flex; align-items: center; gap: 15px;
+            background: #1a1a1a; padding: 5px 15px; border-radius: 20px;
+            font-size: 0.9rem; color: #ccc; border: 1px solid #333;
+        }
+        .logout-btn { color: var(--danger); cursor: pointer; font-weight: bold; font-size: 0.7rem; text-transform: uppercase; }
 
-        /* --- CONTROLS --- */
+        /* MAIN UI */
+        .container { max-width: 1200px; margin: 0 auto; }
         .controls-bar {
             display: flex; flex-wrap: wrap; gap: 10px; align-items: center;
             background: var(--card-bg); border: 1px solid #222;
             padding: 15px; border-radius: 8px; margin-bottom: 20px;
-            box-shadow: 0 5px 15px rgba(0,0,0,0.3);
         }
         
         .hide-on-run.active { display: none !important; }
@@ -86,32 +91,28 @@
             padding: 5px; border-radius: 3px; width: 60px; text-align: center; font-weight: bold;
         }
 
-        /* BUTTONS */
-        .btn { padding: 10px 20px; border: none; border-radius: 4px; font-weight: bold; cursor: pointer; }
+        .btn { padding: 10px 20px; border: none; border-radius: 4px; font-weight: bold; cursor: pointer; text-transform: uppercase; white-space: nowrap; }
         .btn-config { background: #333; color: #fff; border: 1px solid #555; }
         .btn-start { background: var(--binance-yellow); color: #000; }
         .btn-stop { background: var(--danger); color: #fff; }
-        .btn-close { background: #ff5722; color: #fff; display: block; margin: 20px auto; padding: 10px 30px; }
 
         /* GRID */
         .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 15px; }
         .card {
             background: var(--card-bg); border: 1px solid #222;
             border-radius: 12px; padding: 15px;
-            box-shadow: 4px 4px 10px rgba(0,0,0,0.5), -1px -1px 5px rgba(255,255,255,0.03);
+            box-shadow: 4px 4px 10px rgba(0,0,0,0.5);
         }
         .card h3 { margin: 0 0 10px 0; border-bottom: 1px solid #333; padding-bottom: 8px; color: var(--binance-yellow); font-size: 1rem; }
 
         /* MODAL */
         .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.9); z-index: 1000; justify-content: center; align-items: center; }
-        .modal-content { background: #111; border: 2px solid var(--binance-yellow); padding: 20px; border-radius: 10px; width: 90%; max-width: 400px; }
-        .form-row { margin-bottom: 10px; }
-        .form-row label { display: block; margin-bottom: 3px; color: #aaa; font-size: 0.8rem; }
-        .form-row input { 
-            width: 100%; padding: 8px; background: #222; border: 1px solid #444; 
-            color: #fff; box-sizing: border-box; font-family: monospace; /* Dễ nhìn key */
-        }
-        .btn-save { width: 100%; background: var(--kucoin-green); color: #000; margin-top: 10px; padding: 10px; border:none; font-weight:bold; cursor:pointer; }
+        .modal-content { background: #111; border: 2px solid var(--binance-yellow); padding: 20px; border-radius: 10px; width: 90%; max-width: 500px; }
+        .form-row { margin-bottom: 12px; }
+        .form-row label { display: block; margin-bottom: 4px; color: #aaa; font-size: 0.8rem; }
+        /* [REQ] Type Text for Config */
+        .form-row input { width: 100%; padding: 10px; background: #222; border: 1px solid #444; color: #fff; box-sizing: border-box; font-family: monospace; }
+        .btn-save { width: 100%; background: var(--kucoin-green); color: #000; margin-top: 10px; padding: 12px; border:none; font-weight:bold; cursor:pointer; }
 
         /* TABLE */
         table { width: 100%; border-collapse: collapse; font-size: 0.85rem; margin-top: 10px; }
@@ -121,9 +122,7 @@
         .text-neg { color: var(--danger); }
 
         @media (max-width: 600px) {
-            .brand-group { gap: 10px; }
-            .brand { font-size: 0.9rem; }
-            .logo, .logo-kucoin { height: 25px; }
+            .logos-row { gap: 15px; } /* Tighten logo gap */
             .controls-bar { flex-direction: column; align-items: stretch; }
             .input-group { justify-content: space-between; }
         }
@@ -131,23 +130,22 @@
 </head>
 <body>
 
-    <!-- LOGIN SCREEN -->
+    <!-- LOGIN -->
     <div id="loginSection" class="auth-overlay">
         <div class="auth-box">
             <h2>LOGIN</h2>
-            <!-- [REQ] Type Text -->
-            <input type="text" id="loginEmail" placeholder="Email">
+            <input type="text" id="loginUser" placeholder="Username">
             <input type="text" id="loginPass" placeholder="Password">
             <button class="btn-auth" onclick="handleLogin()">LOGIN</button>
-            <div class="link-text" onclick="showRegister()">Create new account</div>
+            <div class="link-text" onclick="showRegister()">Create New Account</div>
         </div>
     </div>
 
-    <!-- REGISTER SCREEN -->
+    <!-- REGISTER -->
     <div id="registerSection" class="auth-overlay" style="display:none;">
         <div class="auth-box">
             <h2 style="color: var(--kucoin-green);">REGISTER</h2>
-            <input type="text" id="regEmail" placeholder="Email">
+            <input type="text" id="regUser" placeholder="Username">
             <input type="text" id="regPass1" placeholder="Password">
             <input type="text" id="regPass2" placeholder="Confirm Password">
             <button class="btn-auth" style="background: var(--kucoin-green);" onclick="handleRegister()">REGISTER</button>
@@ -155,21 +153,25 @@
         </div>
     </div>
 
-    <!-- MAIN DASHBOARD -->
+    <!-- DASHBOARD -->
     <div id="dashboardSection" style="display:none;">
-        <div class="header">
-            <div class="brand-group">
+        
+        <div class="header-container">
+            <div class="logos-row">
                 <div class="brand">
                     <img src="https://upload.wikimedia.org/wikipedia/commons/e/e8/Binance_Logo.svg" class="logo">
                     <span class="text-yellow">BINANCE</span>
                 </div>
-                <span class="x-sign" style="color:#444">✕</span>
+                <span style="color:#444;">✕</span>
                 <div class="brand">
                     <img src="https://cryptologos.cc/logos/kucoin-token-kcs-logo.png?v=025" class="logo-kucoin">
                     <span class="text-green">KUCOIN</span>
                 </div>
             </div>
-            <div class="user-email" id="userEmailDisplay"></div>
+            <div class="user-info-row">
+                <span id="userDisplay">User</span>
+                <span class="logout-btn" onclick="logout()">LOGOUT ➔</span>
+            </div>
         </div>
 
         <div class="container">
@@ -209,10 +211,6 @@
                     <div id="oppContent" style="text-align: center; padding: 15px;"><span style="color:#555">Connecting...</span></div>
                 </div>
             </div>
-            
-            <div id="closeContainer" style="display:none;">
-                <button class="btn btn-close" onclick="closeAll()">🛑 EMERGENCY CLOSE</button>
-            </div>
 
             <div class="card" style="margin-top: 20px;">
                 <h3>Trade History</h3>
@@ -229,11 +227,11 @@
     <!-- CONFIG MODAL -->
     <div id="configModal" class="modal">
         <div class="modal-content">
-            <div class="modal-header" style="display:flex; justify-content:space-between;">
+            <div class="modal-header" style="display:flex; justify-content:space-between; margin-bottom:20px;">
                 <h3 style="margin:0; color:#fff;">BOT SETUP</h3>
                 <span style="cursor: pointer; color:#666;" onclick="closeModal()">✕</span>
             </div>
-            <!-- [REQ] Type Text to show chars -->
+            <!-- [REQ] Type Text -->
             <div class="form-row"><label>Binance API Key</label><input type="text" id="cfgBinKey"></div>
             <div class="form-row"><label>Binance Secret</label><input type="text" id="cfgBinSec"></div>
             <div class="form-row"><label>Binance Aptos Addr</label><input type="text" id="cfgBinWal"></div>
@@ -247,8 +245,7 @@
     </div>
 
     <script>
-        // --- AUTH ---
-        let currentUserEmail = localStorage.getItem('bot_user_email');
+        let currentUsername = localStorage.getItem('bot_username');
 
         function showLogin() {
             document.getElementById('registerSection').style.display = 'none';
@@ -260,17 +257,22 @@
             document.getElementById('registerSection').style.display = 'flex';
         }
 
+        function logout() {
+            localStorage.removeItem('bot_username');
+            location.reload();
+        }
+
         async function handleRegister() {
-            const email = document.getElementById('regEmail').value;
+            const user = document.getElementById('regUser').value;
             const p1 = document.getElementById('regPass1').value;
             const p2 = document.getElementById('regPass2').value;
             
-            if(!email || !p1) return alert("Enter details");
+            if(!user || !p1) return alert("Enter details");
             if(p1 !== p2) return alert("Passwords do not match");
 
             const res = await fetch('/bot-api/register', {
                 method: 'POST',
-                body: JSON.stringify({ email, password: p1 })
+                body: JSON.stringify({ username: user, password: p1 })
             });
             const data = await res.json();
             if(data.success) {
@@ -282,17 +284,17 @@
         }
 
         async function handleLogin() {
-            const email = document.getElementById('loginEmail').value;
+            const user = document.getElementById('loginUser').value;
             const pass = document.getElementById('loginPass').value;
             
             const res = await fetch('/bot-api/login', {
                 method: 'POST',
-                body: JSON.stringify({ email, password: pass })
+                body: JSON.stringify({ username: user, password: pass })
             });
             const data = await res.json();
             if(data.success) {
-                currentUserEmail = email;
-                localStorage.setItem('bot_user_email', email);
+                currentUsername = user;
+                localStorage.setItem('bot_username', user);
                 initApp();
             } else {
                 alert(data.message || "Login Failed");
@@ -303,30 +305,25 @@
             document.getElementById('loginSection').style.display = 'none';
             document.getElementById('registerSection').style.display = 'none';
             document.getElementById('dashboardSection').style.display = 'block';
-            document.getElementById('userEmailDisplay').textContent = currentUserEmail;
+            document.getElementById('userDisplay').textContent = currentUsername;
             loadInitConfig();
             updateUI();
         }
 
-        if (currentUserEmail) {
-            initApp();
-        }
+        if (currentUsername) initApp();
 
-        // --- API WRAPPER ---
         async function apiCall(endpoint, method = 'GET', body = null) {
-            if (!currentUserEmail) return null;
+            if (!currentUsername) return null;
             const headers = { 
                 'Content-Type': 'application/json',
-                'x-user-email': currentUserEmail 
+                'x-username': currentUsername 
             };
             const options = { method, headers };
             if (body) options.body = JSON.stringify(body);
             try {
                 const res = await fetch(endpoint, options);
                 if (res.status === 401) {
-                    alert("Session expired.");
-                    localStorage.removeItem('bot_user_email');
-                    location.reload();
+                    logout();
                     return null;
                 }
                 return await res.json();
@@ -334,12 +331,10 @@
         }
 
         // --- LOGIC ---
-        let currentConfig = {};
-
         function openModal() {
             document.getElementById('configModal').style.display = 'flex';
             const inputs = document.querySelectorAll('.modal input');
-            inputs.forEach(i => i.value = ''); // Always empty
+            inputs.forEach(i => i.value = ''); 
         }
         function closeModal() { document.getElementById('configModal').style.display = 'none'; }
 
@@ -392,18 +387,13 @@
             updateUI();
         }
 
-        async function closeAll() {
-            if(confirm("CLOSE ALL?")) await apiCall('/bot-api/close-trade-now', 'POST');
-        }
-
         async function updateUI() {
-            if (!currentUserEmail) return;
+            if (!currentUsername) return;
             const data = await apiCall('/bot-api/status');
             if (!data) return;
 
             const isRunning = data.botState === 'RUNNING';
             
-            // Toggle Visibility
             const hideEl = document.querySelectorAll('.hide-on-run');
             hideEl.forEach(el => {
                 if (isRunning) el.classList.add('active');
@@ -419,9 +409,6 @@
             stt.textContent = isRunning ? "RUNNING" : "STOPPED";
             stt.style.color = isRunning ? "#00D095" : "#777";
 
-            document.getElementById('closeContainer').style.display = (data.activeTrades && data.activeTrades.length > 0) ? 'block' : 'none';
-
-            // Balances
             let balHtml = '';
             if (isRunning && data.balances) {
                 for(let ex in data.balances) {
@@ -434,7 +421,6 @@
             } else balHtml = '<span style="color:#555;">Bot stopped.</span>';
             document.getElementById('balancesContent').innerHTML = balHtml;
 
-            // Opportunity
             if(data.bestPotentialOpportunityForDisplay) {
                 const op = data.bestPotentialOpportunityForDisplay;
                 document.getElementById('oppContent').innerHTML = `
@@ -444,7 +430,6 @@
                 `;
             } else document.getElementById('oppContent').innerHTML = '<span style="color:#555">Scanning...</span>';
 
-            // History
             let histHtml = '';
             if(data.tradeHistory) {
                 data.tradeHistory.slice(0, 5).forEach(t => {
