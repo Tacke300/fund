@@ -15,7 +15,7 @@ try {
 }
 
 // [GLOBAL CONFIG]
-const BOT_PORT = 5004;
+const BOT_PORT = 2025;
 const SERVER_DATA_URL = 'http://localhost:5005/api/data';
 const USER_DATA_DIR = path.join(__dirname, 'user_data');
 
