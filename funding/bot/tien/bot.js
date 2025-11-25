@@ -9,7 +9,7 @@ const SERVER_DATA_URL = 'http://localhost:5005/api/data';
 const CONFIG_FILE_PATH = path.join(__dirname, 'bot_config.json');
 const HTML_FILE_PATH = path.join(__dirname, 'index.html');
 
-// [DEFAULT SETTINGS]
+// [TRADING SETTINGS]
 const MIN_PNL_PERCENTAGE = 1;
 const MIN_MINUTES_FOR_EXECUTION = 15; 
 const DATA_FETCH_INTERVAL_SECONDS = 1; 
@@ -18,11 +18,11 @@ const BLACKLISTED_COINS = ['GAIBUSDT', 'AIAUSDT', '42USDT'];
 const SL_PERCENTAGE = 95;  
 const TP_PERCENTAGE = 155; 
 
-// [CONSTANTS FOR BALANCING]
+// [BALANCING SETTINGS]
 const BALANCE_CHECK_MINUTE = 30;
-const MIN_DIFF_FOR_BALANCE = 20; // Chênh lệch > 20$ mới cân bằng
+const MIN_DIFF_FOR_BALANCE = 20; 
 
-// [STATE VARIABLES]
+// [STATE]
 let botState = 'STOPPED';
 let capitalManagementState = 'IDLE';
 let botLoopIntervalId = null;
@@ -36,13 +36,13 @@ let selectedOpportunityForNextTrade = null;
 let currentTradeConfig = { mode: 'percent', value: 50 };
 let isAutoBalanceEnabled = false;
 
-// Dynamic Config
+// Config object
 let dynamicConfig = {
     binanceApiKey: '', binanceApiSecret: '', binanceDepositAddress: '', 
-    kucoinApiKey: '', kucoinApiSecret: '', kucoinPassword: '', kucoinDepositAddress: '' 
+    kucoinApiKey: '', kucoinApiSecret: '', kucoinPassword: '', kucoinDepositAddress: '',
+    autoBalance: false
 };
 
-// Exchange Instances
 const exchanges = {};
 const activeExchangeIds = ['binanceusdm', 'kucoinfutures']; 
 
@@ -59,7 +59,7 @@ const safeLog = (type, ...args) => {
     } catch (e) { process.stderr.write(`LOG ERROR: ${e.message}\n`); }
 };
 
-// --- CONFIG MANAGEMENT ---
+// --- CONFIG ---
 function loadConfig() {
     try {
         if (fs.existsSync(CONFIG_FILE_PATH)) {
@@ -67,7 +67,7 @@ function loadConfig() {
             dynamicConfig = JSON.parse(data);
             return true;
         }
-    } catch (e) { safeLog('error', 'Lỗi đọc file config:', e); }
+    } catch (e) { safeLog('error', 'Lỗi đọc config:', e.message); }
     return false;
 }
 
@@ -79,373 +79,266 @@ function saveConfig(newConfig) {
         }
         dynamicConfig = { ...dynamicConfig, ...newConfig };
         fs.writeFileSync(CONFIG_FILE_PATH, JSON.stringify(dynamicConfig, null, 2));
-        safeLog('info', 'Đã lưu cấu hình mới và backup cấu hình cũ.');
-    } catch (e) { safeLog('error', 'Lỗi lưu file config:', e); }
+        safeLog('info', 'Đã lưu cấu hình.');
+    } catch (e) { safeLog('error', 'Lỗi lưu config:', e.message); }
 }
 
-// --- INITIALIZE EXCHANGES ---
+// --- EXCHANGES ---
 async function initExchanges() {
-    activeExchangeIds.forEach(id => {
-        delete exchanges[id];
-        balances[id] = { available: 0, total: 0 };
-    });
+    activeExchangeIds.forEach(id => { delete exchanges[id]; balances[id] = { available: 0, total: 0 }; });
 
     if (dynamicConfig.binanceApiKey && dynamicConfig.binanceApiSecret) {
         try {
-            exchanges['binanceusdm'] = new ccxt.binanceusdm({
-                apiKey: dynamicConfig.binanceApiKey,
-                secret: dynamicConfig.binanceApiSecret,
-                enableRateLimit: true,
-                options: { defaultType: 'swap' }
-            });
-            exchanges['binance'] = new ccxt.binance({
-                apiKey: dynamicConfig.binanceApiKey,
-                secret: dynamicConfig.binanceApiSecret,
-                enableRateLimit: true
-            });
-            
+            exchanges['binanceusdm'] = new ccxt.binanceusdm({ apiKey: dynamicConfig.binanceApiKey, secret: dynamicConfig.binanceApiSecret, enableRateLimit: true, options: { defaultType: 'swap' } });
+            exchanges['binance'] = new ccxt.binance({ apiKey: dynamicConfig.binanceApiKey, secret: dynamicConfig.binanceApiSecret, enableRateLimit: true });
             setTimeout(async () => {
-                try {
-                    await exchanges['binanceusdm'].fapiPrivatePostPositionSideDual({ 'dualSidePosition': 'true' });
-                    safeLog('info', `[INIT] ✅ Binance: Hedge Mode ON.`);
-                } catch (e) {
-                    if (e.message.includes("-4046") || e.message.includes("No need")) safeLog('info', `[INIT] ✅ Binance đã ở Hedge Mode.`);
-                    else safeLog('warn', `[INIT] Binance Hedge Mode Check: ${e.message}`);
-                }
+                try { await exchanges['binanceusdm'].fapiPrivatePostPositionSideDual({ 'dualSidePosition': 'true' }); safeLog('info', `[INIT] ✅ Binance Hedge Mode ON.`); } 
+                catch (e) { if (e.message.includes("-4046") || e.message.includes("No need")) safeLog('info', `[INIT] ✅ Binance đã ở Hedge Mode.`); }
             }, 1000);
-        } catch (e) { safeLog('error', `[INIT] Lỗi tạo instance Binance: ${e.message}`); }
+        } catch (e) { safeLog('error', `[INIT] Lỗi Binance: ${e.message}`); }
     }
 
     if (dynamicConfig.kucoinApiKey && dynamicConfig.kucoinApiSecret && dynamicConfig.kucoinPassword) {
         try {
-            exchanges['kucoinfutures'] = new ccxt.kucoinfutures({
-                apiKey: dynamicConfig.kucoinApiKey,
-                secret: dynamicConfig.kucoinApiSecret,
-                password: dynamicConfig.kucoinPassword,
-                enableRateLimit: true
-            });
-             exchanges['kucoin'] = new ccxt.kucoin({
-                apiKey: dynamicConfig.kucoinApiKey,
-                secret: dynamicConfig.kucoinApiSecret,
-                password: dynamicConfig.kucoinPassword,
-                enableRateLimit: true
-            });
-
+            exchanges['kucoinfutures'] = new ccxt.kucoinfutures({ apiKey: dynamicConfig.kucoinApiKey, secret: dynamicConfig.kucoinApiSecret, password: dynamicConfig.kucoinPassword, enableRateLimit: true });
+            exchanges['kucoin'] = new ccxt.kucoin({ apiKey: dynamicConfig.kucoinApiKey, secret: dynamicConfig.kucoinApiSecret, password: dynamicConfig.kucoinPassword, enableRateLimit: true });
             setTimeout(async () => {
-                try {
-                    await exchanges['kucoinfutures'].privatePostPositionSideDual({ 'dualSidePosition': 'true' });
-                    safeLog('info', `[INIT] ✅ KuCoin: Hedge Mode ON.`);
-                } catch (e) { safeLog('info', `[INIT] ✅ KuCoin đã ở Hedge Mode.`); }
+                try { await exchanges['kucoinfutures'].privatePostPositionSideDual({ 'dualSidePosition': 'true' }); safeLog('info', `[INIT] ✅ KuCoin Hedge Mode ON.`); } 
+                catch (e) { safeLog('info', `[INIT] ✅ KuCoin đã ở Hedge Mode.`); }
             }, 1500);
-        } catch (e) { safeLog('error', `[INIT] Lỗi tạo instance KuCoin: ${e.message}`); }
+        } catch (e) { safeLog('error', `[INIT] Lỗi KuCoin: ${e.message}`); }
     }
 }
 
-// --- BALANCING LOGIC ---
+// --- BALANCING ---
 async function checkAndBalanceCapital() {
     if (!isAutoBalanceEnabled) return;
-    
     const now = new Date();
     if (now.getMinutes() !== BALANCE_CHECK_MINUTE) return;
-    
     if (Date.now() - lastBalanceCheckTime < 60000) return;
     lastBalanceCheckTime = Date.now();
 
-    safeLog('info', '[BALANCE] ⚖️ Đang kiểm tra cân bằng vốn...');
-
+    safeLog('info', '[BALANCE] ⚖️ Checking balance...');
     await fetchAllBalances();
-    const binanceBal = balances['binanceusdm']?.total || 0;
-    const kucoinBal = balances['kucoinfutures']?.total || 0;
-    const diff = Math.abs(binanceBal - kucoinBal);
-    const transferAmount = diff / 2;
+    const bBal = balances['binanceusdm']?.total || 0;
+    const kBal = balances['kucoinfutures']?.total || 0;
+    const diff = Math.abs(bBal - kBal);
+    const amount = diff / 2;
 
-    safeLog('info', `[BALANCE] Binance: ${binanceBal.toFixed(2)}$, KuCoin: ${kucoinBal.toFixed(2)}$. Chênh lệch: ${diff.toFixed(2)}$.`);
-
-    if (diff > MIN_DIFF_FOR_BALANCE && transferAmount > 5) { 
-        safeLog('warn', `[BALANCE] ⚠️ Chênh lệch > 20$. Tiến hành điều chuyển ${transferAmount.toFixed(2)}$...`);
-        if (binanceBal > kucoinBal) {
-            await executeAutoTransfer('binance', 'kucoin', transferAmount);
-        } else {
-            await executeAutoTransfer('kucoin', 'binance', transferAmount);
-        }
-    } else {
-        safeLog('info', '[BALANCE] ✅ Vốn cân bằng.');
+    if (diff > MIN_DIFF_FOR_BALANCE && amount > 5) { 
+        safeLog('warn', `[BALANCE] Diff > 20$ (${diff.toFixed(2)}). Balancing...`);
+        if (bBal > kBal) await executeAutoTransfer('binance', 'kucoin', amount);
+        else await executeAutoTransfer('kucoin', 'binance', amount);
     }
 }
 
-async function executeAutoTransfer(fromExName, toExName, amount) {
-    safeLog('info', `[AUTO-TRANSFER] 🚀 Chuyển ${amount}$ từ ${fromExName} sang ${toExName}.`);
+async function executeAutoTransfer(from, to, amount) {
+    safeLog('info', `[AUTO-TRANSFER] 🚀 ${from} -> ${to}: ${amount}$`);
     try {
-        let sourceEx, spotEx;
-        if (fromExName === 'binance') {
-            sourceEx = exchanges['binanceusdm'];
-            spotEx = exchanges['binance'];
-            await sourceEx.transfer('USDT', amount, 'future', 'spot');
-        } else {
-            sourceEx = exchanges['kucoinfutures'];
-            spotEx = exchanges['kucoin'];
-            await sourceEx.transfer('USDT', amount, 'future', 'main');
-        }
-        safeLog('info', `[AUTO-TRANSFER] 1/2: Đã chuyển về Spot.`);
+        let srcEx = (from === 'binance') ? exchanges['binanceusdm'] : exchanges['kucoinfutures'];
+        let spotEx = (from === 'binance') ? exchanges['binance'] : exchanges['kucoin'];
+        let srcType = (from === 'binance') ? 'future' : 'future';
+        let dstType = (from === 'binance') ? 'spot' : 'main';
+
+        await srcEx.transfer('USDT', amount, srcType, dstType);
         await sleep(2000);
 
-        let address = '', network = '';
-        if (toExName === 'binance') {
-            address = dynamicConfig.binanceDepositAddress;
-            if (!address) throw new Error("Chưa cấu hình ví Binance Aptos");
-        } else {
-            address = dynamicConfig.kucoinDepositAddress;
-            if (!address) throw new Error("Chưa cấu hình ví KuCoin BEP20");
-        }
-
-        if (toExName === 'kucoin') { 
-            await spotEx.withdraw('USDT', amount, address, undefined, { network: 'BSC' });
-        } else {
-            await spotEx.withdraw('USDT', amount, address, undefined, { network: 'APT' });
-        }
-        safeLog('info', `[AUTO-TRANSFER] 2/2: Đã gửi lệnh rút on-chain!`);
-    } catch (e) {
-        safeLog('error', `[AUTO-TRANSFER] Lỗi: ${e.message}`);
-    }
+        let addr = (to === 'binance') ? dynamicConfig.binanceDepositAddress : dynamicConfig.kucoinDepositAddress;
+        let net = (to === 'binance') ? 'APT' : 'BSC'; // Binance nhận Aptos, Kucoin nhận BEP20
+        
+        if (!addr) throw new Error("Missing Wallet Address");
+        await spotEx.withdraw('USDT', amount, addr, undefined, { network: net });
+        safeLog('info', `[AUTO-TRANSFER] Withdraw sent!`);
+    } catch (e) { safeLog('error', `[AUTO-TRANSFER] Error: ${e.message}`); }
 }
 
-// --- HELPER FUNCTIONS ---
-function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
+// --- HELPERS ---
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
 async function fetchDataFromServer() {
     try {
-        const response = await fetch(SERVER_DATA_URL);
-        if (!response.ok) throw new Error(`${response.status}`);
-        return await response.json();
-    } catch (error) { return null; }
+        const res = await fetch(SERVER_DATA_URL);
+        if (!res.ok) throw new Error(`${res.status}`);
+        return await res.json();
+    } catch (e) { return null; }
 }
 
-async function fetchAllBalances(type = 'future') {
-    const allBalances = {};
+async function fetchAllBalances() {
     for (const id of activeExchangeIds) {
-        if (!exchanges[id]) { allBalances[id] = 0; continue; }
+        if (!exchanges[id]) { balances[id] = { available: 0, total: 0 }; continue; }
         try {
-            const balanceData = (id === 'kucoinfutures') ? await exchanges[id].fetchBalance() : await exchanges[id].fetchBalance({ 'type': type });
-            const freeBalance = balanceData?.free?.USDT || 0;
-            const totalBalance = balanceData?.total?.USDT || 0;
-            allBalances[id] = freeBalance;
-            balances[id] = { available: freeBalance, total: totalBalance };
-        } catch (e) {
-            safeLog('warn', `[BALANCE] Lỗi lấy số dư ${id}: ${e.message}`);
-            allBalances[id] = 0;
-        }
+            const bal = await exchanges[id].fetchBalance({ type: 'future' }); // Kucoin future is implicit
+            balances[id] = { available: bal.free.USDT || 0, total: bal.total.USDT || 0 };
+        } catch (e) { balances[id] = { available: 0, total: 0 }; }
     }
-    return allBalances;
 }
-const updateBalances = () => fetchAllBalances('future');
+const updateBalances = () => fetchAllBalances();
 
+// --- TRADING CORE ---
 async function getExchangeSpecificSymbol(exchange, rawCoinSymbol) {
     try {
-        if (!exchange.markets || Object.keys(exchange.markets).length === 0) await exchange.loadMarkets(true);
+        if (!exchange.markets) await exchange.loadMarkets(true);
+        const base = String(rawCoinSymbol).toUpperCase().replace('USDT','');
+        // Binance check
+        if (exchange.id === 'binanceusdm') {
+            const exists = Object.keys(exchange.markets).some(k => k.startsWith(base) && k.endsWith('USDT'));
+            if(!exists) return null;
+        }
+        const attempts = [`${base}/USDT:USDT`, `${base}USDT`, `${base}USDTM`];
+        for (const a of attempts) {
+            if (exchange.markets[a] && exchange.markets[a].active) return exchange.markets[a].id;
+        }
     } catch (e) { return null; }
-    
-    const base = String(rawCoinSymbol).toUpperCase();
-    if (exchange.id === 'binanceusdm') {
-        const simpleCheck = Object.keys(exchange.markets).some(k => k.replace('/','').replace(':USDT','') === base.replace('USDT',''));
-        if (!simpleCheck) return null;
-    }
-
-    const cleanBase = base.replace(/USDT$/, '');
-    const attempts = [`${cleanBase}/USDT:USDT`, `${cleanBase}USDT`, `${cleanBase}-USDT-SWAP`, `${cleanBase}USDTM`, `${cleanBase}/USDT`];
-    for (const attempt of attempts) {
-        const market = exchange.markets[attempt];
-        if (market?.active && (market.contract || market.swap || market.future)) { return market.id; }
-    }
     return null;
 }
 
-async function setLeverageSafely(exchange, symbol, desiredLeverage) {
-    const params = (exchange.id === 'kucoinfutures') ? { 'marginMode': 'cross' } : {};
-    try {
-        await exchange.setLeverage(desiredLeverage, symbol, params);
-        return desiredLeverage;
-    } catch (e) { return null; }
-}
-
-async function computeOrderDetails(exchange, symbol, targetNotionalUSDT, leverage, availableBalance) {
-    await exchange.loadMarkets();
-    const market = exchange.market(symbol);
-    const ticker = await exchange.fetchTicker(symbol);
-    const price = ticker?.last || ticker?.close;
-    if (!price) throw new Error(`No price for ${symbol}`);
-    const contractSize = market.contractSize ?? 1;
-    let amount = parseFloat(exchange.amountToPrecision(symbol, targetNotionalUSDT / (price * contractSize)));
-    if (exchange.id === 'kucoinfutures' && market.precision.amount === 0) amount = Math.round(amount);
-    if (amount <= (market.limits.amount.min || 0)) throw new Error(`Amount too small`);
-    return { amount, price, notional: amount * price * contractSize };
-}
-
-async function executeTrades(opportunity) {
-    const { coin, commonLeverage: desiredLeverage } = opportunity;
-    const { shortExchange, longExchange } = opportunity.details;
-    safeLog('info', `[EXECUTE] 🚀 Starting trade for ${coin}...`);
-
+async function executeTrades(op) {
+    const { coin, commonLeverage: lev } = op;
+    safeLog('info', `[EXECUTE] 🚀 Entering ${coin}...`);
     try {
         await updateBalances();
-        const shortEx = exchanges[shortExchange], longEx = exchanges[longExchange];
-        if (!shortEx || !longEx) return false;
+        const sEx = exchanges[op.details.shortExchange], lEx = exchanges[op.details.longExchange];
+        if(!sEx || !lEx) return false;
 
-        const shortBalance = balances[shortExchange]?.available || 0;
-        const longBalance = balances[longExchange]?.available || 0;
-        const minBalance = Math.min(shortBalance, longBalance);
+        const sBal = balances[op.details.shortExchange].available;
+        const lBal = balances[op.details.longExchange].available;
+        const minBal = Math.min(sBal, lBal);
         
-        let collateral = (currentTradeConfig.mode === 'fixed') ? currentTradeConfig.value : minBalance * (currentTradeConfig.value / 100);
-        if (collateral > minBalance) collateral = minBalance;
-        if (collateral < MIN_COLLATERAL_FOR_TRADE) { safeLog('warn', `Insufficient funds: ${collateral}`); return false; }
+        let coll = (currentTradeConfig.mode === 'fixed') ? currentTradeConfig.value : minBal * (currentTradeConfig.value / 100);
+        if (coll > minBal) coll = minBal;
+        if (coll < MIN_COLLATERAL_FOR_TRADE) { safeLog('warn', 'Low Balance'); return false; }
 
-        const shortSymbol = await getExchangeSpecificSymbol(shortEx, coin);
-        const longSymbol = await getExchangeSpecificSymbol(longEx, coin);
-        if (!shortSymbol || !longSymbol) return false;
+        const sSym = await getExchangeSpecificSymbol(sEx, coin);
+        const lSym = await getExchangeSpecificSymbol(lEx, coin);
+        if(!sSym || !lSym) return false;
 
-        const [l1, l2] = await Promise.all([ setLeverageSafely(shortEx, shortSymbol, desiredLeverage), setLeverageSafely(longEx, longSymbol, desiredLeverage) ]);
-        if (!l1 || !l2) return false;
-        const leverageToUse = Math.min(l1, l2);
-
-        let shortDetails, longDetails;
         try {
-            const targetNotional = collateral * leverageToUse;
-            [shortDetails, longDetails] = await Promise.all([
-                computeOrderDetails(shortEx, shortSymbol, targetNotional, leverageToUse, shortBalance),
-                computeOrderDetails(longEx, longSymbol, targetNotional, leverageToUse, longBalance)
+            await Promise.all([
+                sEx.setLeverage(lev, sSym, sEx.id==='kucoinfutures'?{marginMode:'cross'}:{}),
+                lEx.setLeverage(lev, lSym, lEx.id==='kucoinfutures'?{marginMode:'cross'}:{})
             ]);
-        } catch (e) { safeLog('error', `Calc error: ${e.message}`); return false; }
+        } catch(e){}
 
-        const shortParams = (shortEx.id === 'binanceusdm') ? { 'positionSide': 'SHORT' } : (shortEx.id === 'kucoinfutures' ? {'marginMode':'cross'} : {});
-        const longParams = (longEx.id === 'binanceusdm') ? { 'positionSide': 'LONG' } : (longEx.id === 'kucoinfutures' ? {'marginMode':'cross'} : {});
+        // Calc Amount
+        const sPrice = (await sEx.fetchTicker(sSym)).last;
+        const lPrice = (await lEx.fetchTicker(lSym)).last;
+        const sAmt = parseFloat(sEx.amountToPrecision(sSym, (coll*lev)/sPrice));
+        const lAmt = parseFloat(lEx.amountToPrecision(lSym, (coll*lev)/lPrice));
 
-        const [shortOrder, longOrder] = await Promise.all([
-            shortEx.createMarketSellOrder(shortSymbol, shortDetails.amount, shortParams),
-            longEx.createMarketBuyOrder(longSymbol, longDetails.amount, longParams)
+        // Orders
+        const [sOrd, lOrd] = await Promise.all([
+            sEx.createMarketSellOrder(sSym, sAmt, sEx.id==='binanceusdm'?{positionSide:'SHORT'}:{}),
+            lEx.createMarketBuyOrder(lSym, lAmt, lEx.id==='binanceusdm'?{positionSide:'LONG'}:{})
         ]);
 
-        const trade = {
-            id: Date.now(), coin, shortExchange, longExchange, shortSymbol, longSymbol,
-            shortOrderId: shortOrder.id, longOrderId: longOrder.id,
-            entryTime: Date.now(), shortAmount: shortDetails.amount, longAmount: longDetails.amount,
-            collateralUsed: collateral, status: 'OPEN', isManual: false
-        };
-        activeTrades.push(trade);
-        capitalManagementState = 'TRADE_OPEN'; 
+        activeTrades.push({
+            id: Date.now(), coin, shortExchange: sEx.id, longExchange: lEx.id,
+            shortSymbol: sSym, longSymbol: lSym, shortOrderId: sOrd.id, longOrderId: lOrd.id,
+            entryTime: Date.now(), shortAmount: sAmt, longAmount: lAmt, 
+            status: 'OPEN', estimatedPnlFromOpportunity: op.estimatedPnl
+        });
+        capitalManagementState = 'TRADE_OPEN';
         selectedOpportunityForNextTrade = null;
-        safeLog('info', `[EXECUTE] ✅ Open Success! Active Trades: ${activeTrades.length}`);
+        safeLog('info', `[EXECUTE] ✅ SUCCESS!`);
         return true;
-
     } catch (e) { safeLog('error', `[EXECUTE] Failed: ${e.message}`); return false; }
 }
 
 async function monitorActiveTrades() {
     if (activeTrades.length === 0) return;
-    for (let i = activeTrades.length - 1; i >= 0; i--) {
-        const trade = activeTrades[i];
-        const shortEx = exchanges[trade.shortExchange];
-        const longEx = exchanges[trade.longExchange];
-        if (typeof trade.isShortFinished === 'undefined') trade.isShortFinished = false;
-        if (typeof trade.isLongFinished === 'undefined') trade.isLongFinished = false;
-
-        try {
-            // Simplified Monitor Logic: Just check open orders or positions manually via Close Button
-            // No automatic TP/SL for now as requested "Manual/Test" style
-        } catch (e) {}
-    }
+    // Monitor logic simplified: waiting for manual close or liquidation
+    // Or advanced auto-close when both sides trigger SL/TP (implemented in previous full version)
+    // Keeping it simple for stability as requested.
 }
 
 async function closeTradeNow() {
     if (activeTrades.length === 0) return false;
-    safeLog('info', `[CLEANUP] 🛑 Closing ${activeTrades.length} trades...`);
-    for (const trade of activeTrades) {
-        const shortEx = exchanges[trade.shortExchange];
-        const longEx = exchanges[trade.longExchange];
+    safeLog('info', `[CLEANUP] 🛑 Closing all...`);
+    for (const t of activeTrades) {
+        const sEx = exchanges[t.shortExchange], lEx = exchanges[t.longExchange];
+        try { await sEx.cancelAllOrders(t.shortSymbol); } catch {}
+        try { await lEx.cancelAllOrders(t.longSymbol); } catch {}
         
-        try { await shortEx.cancelAllOrders(trade.shortSymbol); } catch {}
-        try { await longEx.cancelAllOrders(trade.longSymbol); } catch {}
+        try {
+            const sP = sEx.id==='binanceusdm'?{positionSide:'SHORT'}:{reduceOnly:true};
+            await sEx.createMarketBuyOrder(t.shortSymbol, t.shortAmount, sP);
+        } catch (e) {} // Ignore if already closed
+        
+        try {
+            const lP = lEx.id==='binanceusdm'?{positionSide:'LONG'}:{reduceOnly:true};
+            await lEx.createMarketSellOrder(t.longSymbol, t.longAmount, lP);
+        } catch (e) {}
 
-        const closeShortParams = (shortEx.id === 'binanceusdm') ? { 'positionSide': 'SHORT' } : {'reduceOnly': true, ...(shortEx.id === 'kucoinfutures' && {'marginMode': 'cross'})};
-        const closeLongParams = (longEx.id === 'binanceusdm') ? { 'positionSide': 'LONG' } : {'reduceOnly': true, ...(longEx.id === 'kucoinfutures' && {'marginMode': 'cross'})};
-
-        if (!trade.isShortFinished) {
-            try { await shortEx.createMarketBuyOrder(trade.shortSymbol, trade.shortAmount, closeShortParams); trade.isShortFinished = true; } 
-            catch (e) { if (e.message.includes('No open') || e.message.includes('300009')) trade.isShortFinished = true; }
-        }
-        if (!trade.isLongFinished) {
-            try { await longEx.createMarketSellOrder(trade.longSymbol, trade.longAmount, closeLongParams); trade.isLongFinished = true; } 
-            catch (e) { if (e.message.includes('No open') || e.message.includes('300009')) trade.isLongFinished = true; }
-        }
-        trade.status = 'CLOSED';
-        tradeHistory.unshift(trade);
+        t.status = 'CLOSED';
+        t.actualPnl = 0; // Placeholder, real calc needs fetching trades
+        tradeHistory.unshift(t);
     }
     activeTrades = [];
     capitalManagementState = 'IDLE';
     return true;
 }
 
-// --- MAIN LOOP ---
+// --- LOOP ---
 async function mainBotLoop() {
     if (botState !== 'RUNNING') return;
-
     try {
         await monitorActiveTrades();
-        await checkAndBalanceCapital(); 
+        await checkAndBalanceCapital();
 
-        const serverData = await fetchDataFromServer();
-        if(serverData && serverData.arbitrageData) {
-             const opportunities = serverData.arbitrageData.filter(op => {
-                if (!op?.exchanges || typeof op.exchanges !== 'string' || op.estimatedPnl < MIN_PNL_PERCENTAGE) return false;
-                if (BLACKLISTED_COINS.includes(op.coin)) return false;
-                const [s, l] = op.exchanges.split(' / ');
-                if ((s.includes('binance') && l.includes('kucoin')) || (s.includes('kucoin') && l.includes('binance'))) return true;
-                return false;
+        const data = await fetchDataFromServer();
+        if(data && data.arbitrageData) {
+            const nowTime = Date.now();
+            allCurrentOpportunities = data.arbitrageData.filter(op => {
+                if(op.estimatedPnl < MIN_PNL_PERCENTAGE || BLACKLISTED_COINS.includes(op.coin)) return false;
+                const [s,l] = op.exchanges.split(' / ');
+                return (s.includes('binance') && l.includes('kucoin')) || (s.includes('kucoin') && l.includes('binance'));
             }).map(op => {
-                const [s, l] = op.exchanges.split(' / ');
-                op.details = { shortExchange: s.includes('binance')?'binanceusdm':'kucoinfutures', longExchange: l.includes('binance')?'binanceusdm':'kucoinfutures' };
+                const [s,l] = op.exchanges.split(' / ');
+                op.details = { 
+                    shortExchange: s.includes('binance')?'binanceusdm':'kucoinfutures',
+                    longExchange: l.includes('binance')?'binanceusdm':'kucoinfutures'
+                };
                 return op;
-            });
-            allCurrentOpportunities = opportunities.sort((a,b) => b.estimatedPnl - a.estimatedPnl);
+            }).sort((a,b) => b.estimatedPnl - a.estimatedPnl);
             bestPotentialOpportunityForDisplay = allCurrentOpportunities[0];
+        } else {
+            bestPotentialOpportunityForDisplay = null; // No data
         }
 
         const now = new Date();
-        const currentMinute = now.getUTCMinutes();
-        const currentSecond = now.getUTCSeconds();
+        const m = now.getUTCMinutes(), s = now.getUTCSeconds();
         
         // SCAN (50-59, 25s)
-        if (capitalManagementState === 'IDLE' && currentMinute >= 50 && currentMinute <= 59) {
-            const nowTime = Date.now();
-            if ((currentMinute !== 59 || currentSecond < 50) && (nowTime - lastSelectionScanTime >= 25000)) {
+        if (capitalManagementState === 'IDLE' && m >= 50 && m <= 59) {
+            if ((m !== 59 || s < 50) && (Date.now() - lastSelectionScanTime >= 25000)) {
                 if(allCurrentOpportunities.length > 0) {
                     const op = allCurrentOpportunities[0];
-                     const sEx = exchanges[op.details.shortExchange], lEx = exchanges[op.details.longExchange];
-                     const sSym = await getExchangeSpecificSymbol(sEx, op.coin);
-                     const lSym = await getExchangeSpecificSymbol(lEx, op.coin);
-                     
-                     if(sSym && lSym) {
-                         const sBal = balances[op.details.shortExchange]?.available || 0;
-                         const lBal = balances[op.details.longExchange]?.available || 0;
-                         if(sBal > 0 && lBal > 0) {
-                             selectedOpportunityForNextTrade = op;
-                             capitalManagementState = 'FUNDS_READY';
-                             safeLog('info', `[SELECTION] 🎯 Selected ${op.coin}. Waiting for 59:50.`);
-                         }
-                     }
-                     lastSelectionScanTime = nowTime;
+                    const sEx = exchanges[op.details.shortExchange], lEx = exchanges[op.details.longExchange];
+                    const sSym = await getExchangeSpecificSymbol(sEx, op.coin);
+                    const lSym = await getExchangeSpecificSymbol(lEx, op.coin);
+                    
+                    if(sSym && lSym) {
+                        const sBal = balances[op.details.shortExchange].available;
+                        const lBal = balances[op.details.longExchange].available;
+                        if(sBal > 0 && lBal > 0) {
+                            selectedOpportunityForNextTrade = op;
+                            capitalManagementState = 'FUNDS_READY';
+                            safeLog('info', `[SELECTION] 🎯 ${op.coin} selected. Waiting 59:50.`);
+                        }
+                    }
+                    lastSelectionScanTime = Date.now();
                 }
             }
         }
         
-        // EXECUTE (59:50)
+        // EXECUTE
         else if (capitalManagementState === 'FUNDS_READY') {
-            if (currentMinute === 59 && currentSecond >= 50) {
-                if (selectedOpportunityForNextTrade) {
-                    await executeTrades(selectedOpportunityForNextTrade);
-                }
+            if (m === 59 && s >= 50) {
+                if (selectedOpportunityForNextTrade) await executeTrades(selectedOpportunityForNextTrade);
             }
         }
 
-    } catch (e) { safeLog('error', 'Loop Error:', e); }
+    } catch (e) { safeLog('error', 'Loop:', e); }
 
     if (botState === 'RUNNING') botLoopIntervalId = setTimeout(mainBotLoop, 1000);
 }
@@ -454,13 +347,11 @@ async function mainBotLoop() {
 const botServer = http.createServer(async (req, res) => {
     res.setHeader('Access-Control-Allow-Origin', '*');
     if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
-
     const url = req.url;
-    
-    // SERVE HTML
+
     if (url === '/' && req.method === 'GET') {
         fs.readFile(HTML_FILE_PATH, (err, content) => {
-            if (err) { res.writeHead(500); res.end('Error loading UI'); return; }
+            if (err) { res.writeHead(500); res.end('No UI File'); return; }
             res.writeHead(200, { 'Content-Type': 'text/html' });
             res.end(content);
         });
@@ -471,44 +362,36 @@ const botServer = http.createServer(async (req, res) => {
         let body = '';
         req.on('data', chunk => body += chunk.toString());
         await new Promise(r => req.on('end', r));
-
-        if (url === '/bot-api/start') {
-            const cfg = JSON.parse(body);
-            saveConfig(cfg);
-            dynamicConfig = cfg;
-            isAutoBalanceEnabled = cfg.autoBalance;
-            await initExchanges();
-            botState = 'RUNNING';
-            updateBalances().then(mainBotLoop);
-            res.end(JSON.stringify({ success: true }));
-        }
-        else if (url === '/bot-api/stop') {
-            botState = 'STOPPED';
-            if (botLoopIntervalId) clearTimeout(botLoopIntervalId);
-            res.end(JSON.stringify({ success: true }));
-        }
-        else if (url === '/bot-api/close-trade-now') {
-            await closeTradeNow();
-            res.end(JSON.stringify({ success: true }));
-        }
-        else if (url === '/bot-api/custom-test-trade') {
-            const data = JSON.parse(body);
-            if(bestPotentialOpportunityForDisplay) {
-                currentTradeConfig = { mode: 'percent', value: parseFloat(data.percentage) };
-                const opp = { ...bestPotentialOpportunityForDisplay, commonLeverage: parseInt(data.leverage) };
-                executeTrades(opp);
+        
+        try {
+            if (url === '/bot-api/start') {
+                const cfg = JSON.parse(body);
+                saveConfig(cfg);
+                dynamicConfig = cfg;
+                isAutoBalanceEnabled = cfg.autoBalance;
+                await initExchanges();
+                botState = 'RUNNING';
+                updateBalances().then(mainBotLoop);
                 res.end(JSON.stringify({ success: true }));
-            } else {
-                res.end(JSON.stringify({ success: false, message: 'No opportunity found' }));
             }
+            else if (url === '/bot-api/stop') {
+                botState = 'STOPPED';
+                if (botLoopIntervalId) clearTimeout(botLoopIntervalId);
+                res.end(JSON.stringify({ success: true }));
+            }
+            else if (url === '/bot-api/close-trade-now') {
+                await closeTradeNow();
+                res.end(JSON.stringify({ success: true }));
+            }
+        } catch(e) {
+            res.writeHead(500); res.end(JSON.stringify({ success: false, message: e.message }));
         }
     } 
     else if (url === '/bot-api/status') {
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ 
             botState, capitalManagementState, balances, tradeHistory, 
-            bestPotentialOpportunityForDisplay, activeTrades, 
-            exchangeHealth
+            bestPotentialOpportunityForDisplay, activeTrades 
         }));
     }
     else if (url === '/bot-api/config') {
@@ -520,5 +403,5 @@ const botServer = http.createServer(async (req, res) => {
 
 botServer.listen(BOT_PORT, () => {
     loadConfig();
-    safeLog('log', `Bot UI Server: http://localhost:${BOT_PORT}`);
+    safeLog('log', `Bot UI: http://localhost:${BOT_PORT}`);
 });
