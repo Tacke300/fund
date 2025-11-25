@@ -2,14 +2,14 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Binance x KuCoin</title>
     <style>
         :root {
-            --bg-color: #050505;
-            --card-bg: #121212;
+            --bg-color: #000000;
+            --card-bg: #111111;
             --binance-yellow: #F0B90B;
-            --kucoin-green: #00D095; /* Màu xanh Kucoin mới */
+            --kucoin-green: #24AE8F;
             --text-color: #EAECEF;
             --danger: #F6465D;
             --border-color: #333;
@@ -20,114 +20,95 @@
             background-color: var(--bg-color);
             color: var(--text-color);
             margin: 0;
-            padding: 20px;
+            padding: 15px;
         }
 
-        /* --- HEADER (Clean, No Border) --- */
+        /* --- HEADER --- */
         .header {
             display: flex;
             justify-content: center;
             align-items: center;
-            margin-bottom: 30px;
-            gap: 40px;
-            padding: 20px;
-            /* Removed border as requested */
+            margin-bottom: 20px;
+            gap: 30px;
+            padding: 10px;
         }
 
         .brand {
-            display: flex; align-items: center; gap: 12px;
-            font-size: 2rem; font-weight: 800; letter-spacing: 1px;
+            display: flex; align-items: center; gap: 8px;
+            font-size: 1.2rem; font-weight: bold; letter-spacing: 1px;
         }
-        .logo { height: 50px; filter: drop-shadow(0 0 5px rgba(255,255,255,0.1)); }
-        
-        /* Logo KuCoin fix màu xanh */
-        .logo-kucoin { 
-            height: 50px; 
-            /* Filter để biến logo gốc thành màu xanh #00D095 */
-            filter: grayscale(100%) brightness(80%) sepia(100%) hue-rotate(100deg) saturate(500%);
-        }
-
-        .text-yellow { color: var(--binance-yellow); text-shadow: 0 0 10px rgba(240, 185, 11, 0.3); }
-        .text-green { color: var(--kucoin-green); text-shadow: 0 0 10px rgba(0, 208, 149, 0.3); }
-        .x-sign { font-size: 1.5rem; color: #444; }
+        .logo { height: 35px; }
+        .text-yellow { color: var(--binance-yellow); }
+        .text-green { color: var(--kucoin-green); }
+        .x-sign { font-size: 1rem; color: #555; }
 
         /* --- LAYOUT --- */
         .container { max-width: 1200px; margin: 0 auto; }
         
         .grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
-            gap: 25px;
-            margin-bottom: 25px;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 15px;
+            margin-bottom: 15px;
         }
 
-        /* --- CARD (Floating Effect) --- */
         .card {
             background-color: var(--card-bg);
-            border-radius: 12px;
-            padding: 25px;
-            /* Hiệu ứng nổi */
-            box-shadow: 5px 5px 15px rgba(0,0,0,0.5), 
-                        -2px -2px 10px rgba(255,255,255,0.03);
-            border: 1px solid #222;
-            transition: transform 0.2s;
+            border: 1px solid var(--binance-yellow);
+            border-radius: 8px;
+            padding: 15px;
         }
-        .card:hover { transform: translateY(-2px); }
 
         .card h3 {
             margin-top: 0;
-            border-bottom: 2px solid #222;
-            padding-bottom: 12px;
-            color: #888;
-            font-size: 0.9rem;
-            letter-spacing: 1px;
+            border-bottom: 1px solid var(--border-color);
+            padding-bottom: 8px;
+            color: var(--binance-yellow);
+            font-size: 1rem;
             text-transform: uppercase;
         }
 
         /* --- CONTROLS BAR --- */
         .controls-bar {
-            display: flex; flex-wrap: wrap; gap: 15px; align-items: center;
-            background: var(--card-bg); 
-            padding: 20px; border-radius: 12px; margin-bottom: 30px;
-            box-shadow: 0 10px 20px rgba(0,0,0,0.3);
-            border: 1px solid #222;
+            display: flex; flex-wrap: wrap; gap: 10px; align-items: center;
+            background: var(--card-bg); border: 1px solid var(--binance-yellow);
+            padding: 15px; border-radius: 8px; margin-bottom: 20px;
         }
 
         .input-group {
-            display: flex; align-items: center; gap: 10px;
-            background: #080808; padding: 10px 15px;
-            border-radius: 6px; border: 1px solid #333;
+            display: flex; align-items: center; gap: 8px;
+            background: #000; padding: 8px 12px;
+            border: 1px solid #444; border-radius: 4px;
         }
 
         input[type="number"] {
-            background: transparent; border: none; color: var(--binance-yellow);
-            font-size: 1.1rem; width: 70px; text-align: center; font-weight: bold;
+            background: #222; border: 1px solid #444; color: var(--binance-yellow);
+            padding: 5px; border-radius: 3px; width: 60px; text-align: center; font-weight: bold;
         }
-        input:focus { outline: none; }
 
         /* --- BUTTONS --- */
         .btn {
-            padding: 12px 25px; border: none; border-radius: 6px;
-            font-weight: bold; cursor: pointer; font-size: 0.95rem;
-            text-transform: uppercase; transition: 0.2s; letter-spacing: 0.5px;
+            padding: 10px 20px; border: none; border-radius: 4px;
+            font-weight: bold; cursor: pointer; font-size: 0.9rem;
+            text-transform: uppercase; transition: 0.2s; white-space: nowrap;
         }
-        .btn-config { background: #222; color: #aaa; border: 1px solid #444; }
-        .btn-config:hover { background: #333; color: #fff; }
-
-        .btn-start { 
-            background: linear-gradient(135deg, #F0B90B 0%, #d6a100 100%); 
-            color: #000; box-shadow: 0 4px 15px rgba(240, 185, 11, 0.3);
+        .btn-config { background: #333; color: #fff; border: 1px solid #555; }
+        .btn-start { background: var(--binance-yellow); color: #000; }
+        .btn-stop { background: var(--danger); color: #fff; }
+        
+        /* Nút Close Trade: Nhỏ lại, không chiếm hết dòng */
+        .btn-close { 
+            background: #ff5722; color: #fff; 
+            width: auto; /* Không full width */
+            display: none; 
+            margin: 0 auto; /* Căn giữa */
+            display: block;
+            font-size: 0.8rem;
+            padding: 8px 15px;
         }
-        .btn-start:hover { transform: scale(1.05); }
-        .btn-start:disabled { opacity: 0.7; cursor: wait; }
-
-        .btn-stop { 
-            background: linear-gradient(135deg, #F6465D 0%, #c0263b 100%);
-            color: #fff; box-shadow: 0 4px 15px rgba(246, 70, 93, 0.3);
+        .close-container {
+            text-align: center; margin-top: 20px; display: none;
         }
-        .btn-stop:hover { transform: scale(1.05); }
-
-        .btn-close { background: #ff5722; color: #fff; width: 100%; margin-top: 20px; font-size: 1.1rem; }
 
         /* --- MODAL --- */
         .modal {
@@ -136,32 +117,39 @@
             justify-content: center; align-items: center;
         }
         .modal-content {
-            background: #151515; border: 1px solid #333;
-            padding: 30px; border-radius: 15px; width: 500px; max-width: 95%;
-            box-shadow: 0 20px 50px rgba(0,0,0,0.7);
+            background: #111; border: 2px solid var(--binance-yellow);
+            padding: 20px; border-radius: 10px; width: 90%; max-width: 400px;
         }
-        .modal-header { display: flex; justify-content: space-between; margin-bottom: 25px; }
-        .form-row { margin-bottom: 15px; }
-        .form-row label { display: block; margin-bottom: 5px; color: #777; font-size: 0.85rem; }
-        .form-row input { 
-            width: 100%; padding: 12px; background: #080808; border: 1px solid #333; 
-            color: #fff; border-radius: 6px; box-sizing: border-box; font-size: 1rem;
-        }
-        .form-row input:focus { border-color: var(--binance-yellow); outline: none; }
-        .btn-save { width: 100%; background: var(--kucoin-green); color: #000; margin-top: 15px; padding: 15px; }
+        .modal-header { display: flex; justify-content: space-between; margin-bottom: 15px; }
+        .form-row { margin-bottom: 10px; }
+        .form-row label { display: block; margin-bottom: 3px; color: #aaa; font-size: 0.8rem; }
+        .form-row input { width: 100%; padding: 8px; background: #222; border: 1px solid #444; color: #fff; border-radius: 4px; box-sizing: border-box; }
+        .btn-save { width: 100%; background: var(--kucoin-green); color: #fff; margin-top: 10px; padding: 10px; }
 
         /* --- TABLE --- */
-        table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
-        th { text-align: left; color: #555; padding: 10px; border-bottom: 1px solid #222; font-size: 0.8rem; }
-        td { padding: 12px 10px; border-bottom: 1px solid #1a1a1a; }
+        table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+        th { text-align: left; color: #777; padding: 8px 5px; border-bottom: 1px solid #333; }
+        td { padding: 8px 5px; border-bottom: 1px solid #222; }
         .text-pos { color: var(--kucoin-green); }
         .text-neg { color: var(--danger); }
         
-        .status-tag { padding: 6px 12px; border-radius: 20px; font-weight: bold; font-size: 0.8rem; letter-spacing: 1px; }
-        
-        /* Checkbox Style */
-        input[type="checkbox"] { cursor: pointer; width: 16px; height: 16px; accent-color: var(--kucoin-green); }
-        .checkbox-label { display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 0.9rem; color: #ccc; }
+        .status-tag { padding: 5px 10px; border-radius: 4px; font-weight: bold; font-size: 0.8rem; }
+
+        /* --- MOBILE CSS --- */
+        @media (max-width: 768px) {
+            body { padding: 10px; }
+            .header { flex-direction: column; gap: 10px; padding: 10px; margin-bottom: 15px; }
+            .brand { font-size: 1.1rem; }
+            .logo { height: 30px; }
+            
+            .controls-bar { flex-direction: column; align-items: stretch; gap: 10px; padding: 10px; }
+            .input-group { justify-content: space-between; }
+            .btn { width: 100%; padding: 12px; }
+            
+            .grid { grid-template-columns: 1fr; gap: 15px; }
+            
+            th, td { padding: 6px 2px; font-size: 0.8rem; }
+        }
     </style>
 </head>
 <body>
@@ -173,8 +161,7 @@
         </div>
         <span class="x-sign">✕</span>
         <div class="brand">
-            <!-- Logo KuCoin chính gốc -->
-            <img src="https://cryptologos.cc/logos/kucoin-token-kcs-logo.png?v=025" class="logo-kucoin">
+            <img src="https://cryptologos.cc/logos/kucoin-token-kcs-logo.png?v=025" class="logo">
             <span class="text-green">KUCOIN</span>
         </div>
     </div>
@@ -183,83 +170,85 @@
         <!-- CONTROLS -->
         <div class="controls-bar">
             <div class="input-group">
-                <label style="margin-right: 10px;"><input type="radio" name="capMode" value="percent" checked> % Cap</label>
+                <label style="margin-right:10px"><input type="radio" name="capMode" value="percent" checked> % Cap</label>
                 <label><input type="radio" name="capMode" value="fixed"> Fixed $</label>
             </div>
             <div class="input-group" style="border-color: var(--binance-yellow);">
                 <span style="color:#aaa">Value:</span>
                 <input type="number" id="capitalInput" value="50">
             </div>
-            <div class="input-group" style="border-color: var(--kucoin-green);">
-                <label class="checkbox-label">
-                    <input type="checkbox" id="autoBalanceDisplay" onchange="updateAutoBalance()"> 
-                    Auto-Balance (30m)
+            <div class="input-group">
+                <label style="cursor: pointer; font-size: 0.9rem;">
+                    <input type="checkbox" id="autoBalanceDisplay" onchange="updateAutoBalance()"> Auto-Balance
                 </label>
             </div>
-
-            <div style="flex-grow: 1;"></div>
 
             <button class="btn btn-config" onclick="openModal()">⚙️ Set Bot</button>
             <button id="btnStart" class="btn btn-start" onclick="startBot()">▶ START</button>
             <button id="btnStop" class="btn btn-stop" onclick="stopBot()" style="display:none;">⏹ STOP</button>
             
-            <div id="statusText" class="status-tag" style="background:#222; color:#555;">STOPPED</div>
+            <div id="statusText" class="status-tag" style="background:#222; color:#777; text-align: center;">STOPPED</div>
         </div>
 
         <div class="grid">
             <!-- BALANCES -->
             <div class="card">
                 <h3>Wallet Balances</h3>
-                <div id="balancesContent" style="min-height: 50px; padding-top:10px;">
-                    <span style="color:#555;">Waiting for Start...</span>
+                <div id="balancesContent" style="min-height: 40px; padding-top:5px;">
+                    <span style="color:#555;">Waiting...</span>
                 </div>
             </div>
             
             <!-- OPPORTUNITY -->
             <div class="card">
                 <h3>Best Opportunity</h3>
-                <div id="oppContent" style="text-align: center; padding: 20px;">
-                    <span style="color:#555; font-style: italic;">Connecting to Signal Server...</span>
+                <div id="oppContent" style="text-align: center; padding: 15px;">
+                    <span style="color:#555">Connecting...</span>
                 </div>
             </div>
         </div>
         
-        <button id="btnClose" class="btn btn-close" onclick="closeAll()">🛑 EMERGENCY CLOSE ALL TRADES</button>
+        <!-- CLOSE BUTTON CONTAINER (Hidden by default) -->
+        <div id="closeContainer" class="close-container">
+            <button class="btn btn-close" onclick="closeAll()">🛑 EMERGENCY CLOSE</button>
+        </div>
 
         <!-- HISTORY -->
-        <div class="card" style="margin-top: 30px;">
+        <div class="card" style="margin-top: 20px;">
             <h3>Trade History</h3>
-            <table>
-                <thead>
-                    <tr>
-                        <th>Time</th>
-                        <th>Coin</th>
-                        <th>Pair</th>
-                        <th>Est. PNL</th>
-                        <th>Realized PNL</th>
-                    </tr>
-                </thead>
-                <tbody id="historyBody"></tbody>
-            </table>
+            <div style="overflow-x: auto;">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Time</th>
+                            <th>Coin</th>
+                            <th>Pair</th>
+                            <th>Est.</th>
+                            <th>Real.</th>
+                        </tr>
+                    </thead>
+                    <tbody id="historyBody"></tbody>
+                </table>
+            </div>
         </div>
     </div>
 
-    <!-- CONFIG MODAL (Cleaned) -->
+    <!-- CONFIG MODAL (Removed Auto Balance Checkbox) -->
     <div id="configModal" class="modal">
         <div class="modal-content">
             <div class="modal-header">
-                <h2 style="color: #fff; margin: 0;">BOT SETUP</h2>
-                <span style="cursor: pointer; font-size: 1.5rem; color: #666;" onclick="closeModal()">✕</span>
+                <h2 style="color: var(--binance-yellow); margin: 0; font-size:1.2rem;">BOT SETUP</h2>
+                <span style="cursor: pointer; font-size: 1.5rem;" onclick="closeModal()">✕</span>
             </div>
             
             <div class="form-row"><label>Binance API Key</label><input type="text" id="cfgBinKey"></div>
             <div class="form-row"><label>Binance Secret</label><input type="password" id="cfgBinSec"></div>
-            <div class="form-row"><label>Binance Aptos Wallet</label><input type="text" id="cfgBinWal"></div>
-            <hr style="border-color: #222; margin: 20px 0;">
+            <div class="form-row"><label>Binance Wallet (Aptos)</label><input type="text" id="cfgBinWal"></div>
+            <hr style="border-color: #333; margin: 15px 0;">
             <div class="form-row"><label>KuCoin API Key</label><input type="text" id="cfgKuKey"></div>
             <div class="form-row"><label>KuCoin Secret</label><input type="password" id="cfgKuSec"></div>
             <div class="form-row"><label>KuCoin Passphrase</label><input type="password" id="cfgKuPass"></div>
-            <div class="form-row"><label>KuCoin BEP20 Wallet</label><input type="text" id="cfgKuWal"></div>
+            <div class="form-row"><label>KuCoin Wallet (BEP20)</label><input type="text" id="cfgKuWal"></div>
             
             <button class="btn btn-save" onclick="saveAndStart()">SAVE & START</button>
         </div>
@@ -270,14 +259,16 @@
 
         function openModal() {
             document.getElementById('configModal').style.display = 'flex';
-            // Load data into form
-            document.getElementById('cfgBinKey').value = currentConfig.binanceApiKey || '';
-            document.getElementById('cfgBinSec').value = currentConfig.binanceApiSecret || '';
-            document.getElementById('cfgBinWal').value = currentConfig.binanceDepositAddress || '';
-            document.getElementById('cfgKuKey').value = currentConfig.kucoinApiKey || '';
-            document.getElementById('cfgKuSec').value = currentConfig.kucoinApiSecret || '';
-            document.getElementById('cfgKuPass').value = currentConfig.kucoinPassword || '';
-            document.getElementById('cfgKuWal').value = currentConfig.kucoinDepositAddress || '';
+            // Populate if data exists
+            if(currentConfig) {
+                document.getElementById('cfgBinKey').value = currentConfig.binanceApiKey || '';
+                document.getElementById('cfgBinSec').value = currentConfig.binanceApiSecret || '';
+                document.getElementById('cfgBinWal').value = currentConfig.binanceDepositAddress || '';
+                document.getElementById('cfgKuKey').value = currentConfig.kucoinApiKey || '';
+                document.getElementById('cfgKuSec').value = currentConfig.kucoinApiSecret || '';
+                document.getElementById('cfgKuPass').value = currentConfig.kucoinPassword || '';
+                document.getElementById('cfgKuWal').value = currentConfig.kucoinDepositAddress || '';
+            }
         }
 
         function closeModal() { document.getElementById('configModal').style.display = 'none'; }
@@ -286,7 +277,7 @@
             try {
                 const res = await fetch('/bot-api/config');
                 currentConfig = await res.json();
-                // Update Auto Balance Checkbox from Config
+                // Set auto-balance checkbox from saved config
                 document.getElementById('autoBalanceDisplay').checked = currentConfig.autoBalance || false;
             } catch(e) {}
         }
@@ -299,7 +290,7 @@
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({ autoBalance: isChecked })
                 });
-            } catch(e) { alert("Failed to update Auto Balance setting"); }
+            } catch(e) {}
         }
 
         async function saveAndStart() {
@@ -311,24 +302,23 @@
                 kucoinApiSecret: document.getElementById('cfgKuSec').value,
                 kucoinPassword: document.getElementById('cfgKuPass').value,
                 kucoinDepositAddress: document.getElementById('cfgKuWal').value,
-                // Auto Balance is handled by outer checkbox now, not modal
             };
             closeModal();
             await startBot(newConfig);
         }
 
         async function startBot(configFromModal = {}) {
+            // Nút bấm phản hồi ngay lập tức để tránh cảm giác lag
             const btn = document.getElementById('btnStart');
             btn.textContent = "STARTING...";
             btn.disabled = true;
 
-            // Config from dashboard inputs
             const tradeConfig = {
                 mode: document.querySelector('input[name="capMode"]:checked').value,
                 value: parseFloat(document.getElementById('capitalInput').value)
             };
             
-            // Merge: Modal Config > Current Config > Dashboard Inputs
+            // Merge config
             const payload = { ...configFromModal, tradeConfig };
             
             try {
@@ -339,14 +329,14 @@
                 });
                 const data = await res.json();
                 if(data.success) {
-                    updateUI(); 
+                    updateUI();
                 } else {
-                    alert("START FAILED: " + data.message);
+                    alert("Error: " + data.message);
                     btn.textContent = "▶ START";
                     btn.disabled = false;
                 }
             } catch(e) { 
-                alert("NETWORK ERROR: Check backend connection!"); 
+                alert("Connection Error"); 
                 btn.textContent = "▶ START";
                 btn.disabled = false;
             }
@@ -372,56 +362,57 @@
 
                 const isRunning = data.botState === 'RUNNING';
                 
-                // Reset buttons text
-                const btnStart = document.getElementById('btnStart');
-                const btnStop = document.getElementById('btnStop');
-                btnStart.textContent = "▶ START"; btnStart.disabled = false;
-                btnStop.textContent = "⏹ STOP"; btnStop.disabled = false;
-
-                btnStart.style.display = isRunning ? 'none' : 'inline-block';
-                btnStop.style.display = isRunning ? 'inline-block' : 'none';
+                // Buttons
+                document.getElementById('btnStart').style.display = isRunning ? 'none' : 'inline-block';
+                document.getElementById('btnStop').style.display = isRunning ? 'inline-block' : 'none';
+                document.getElementById('btnStart').textContent = "▶ START";
+                document.getElementById('btnStart').disabled = false;
+                document.getElementById('btnStop').textContent = "⏹ STOP";
                 
+                // Status Tag
                 const statusEl = document.getElementById('statusText');
                 statusEl.textContent = isRunning ? "RUNNING" : "STOPPED";
-                statusEl.style.color = isRunning ? "#00D095" : "#777";
-                statusEl.style.background = isRunning ? "rgba(0, 208, 149, 0.1)" : "#222";
+                statusEl.style.color = isRunning ? "var(--kucoin-green)" : "#777";
                 
-                document.getElementById('btnClose').style.display = (data.activeTrades && data.activeTrades.length > 0) ? 'block' : 'none';
+                // Close Button Visibility
+                document.getElementById('closeContainer').style.display = (data.activeTrades && data.activeTrades.length > 0) ? 'block' : 'none';
 
+                // Balances
                 let balHtml = '';
                 if (isRunning && data.balances) {
                     for(let ex in data.balances) {
                         let color = ex.includes('binance') ? 'var(--binance-yellow)' : 'var(--kucoin-green)';
-                        balHtml += `<div style="display:flex; justify-content:space-between; border-bottom:1px solid #222; padding:12px 0;">
-                            <span style="color:${color}; font-weight:bold; font-size:1.1rem;">${ex.toUpperCase()}</span>
-                            <span style="font-size:1.1rem;">${data.balances[ex].available.toFixed(2)} $</span>
+                        balHtml += `<div style="display:flex; justify-content:space-between; border-bottom:1px solid #222; padding:8px 0;">
+                            <span style="color:${color}; font-weight:bold; font-size:0.9rem;">${ex.toUpperCase()}</span>
+                            <span>${data.balances[ex].available.toFixed(2)} $</span>
                         </div>`;
                     }
                 } else {
-                    balHtml = '<span style="color:#555; font-style:italic;">Bot is stopped.</span>';
+                    balHtml = '<span style="color:#555; font-style:italic;">Bot stopped.</span>';
                 }
                 document.getElementById('balancesContent').innerHTML = balHtml;
 
+                // Opportunity
                 if(data.bestPotentialOpportunityForDisplay) {
                     const op = data.bestPotentialOpportunityForDisplay;
                     document.getElementById('oppContent').innerHTML = `
-                        <div style="font-size:2rem; font-weight:bold; color:#fff; margin-bottom:5px;">${op.coin}</div>
-                        <div style="color:var(--kucoin-green); font-size:1.2rem;">PNL: ${op.estimatedPnl.toFixed(2)}%</div>
-                        <div style="font-size:0.9rem; color:#666; margin-top:10px;">${op.exchanges}</div>
+                        <div style="font-size:1.8rem; font-weight:bold; color:#fff; margin-bottom:5px;">${op.coin}</div>
+                        <div style="color:var(--kucoin-green); font-size:1.1rem;">PNL: ${op.estimatedPnl.toFixed(2)}%</div>
+                        <div style="font-size:0.8rem; color:#666; margin-top:8px;">${op.exchanges}</div>
                     `;
                 } else {
-                    const text = isRunning ? "Scanning (25s)..." : "Scanner Idle";
-                    document.getElementById('oppContent').innerHTML = `<span style="color:#555">${text}</span>`;
+                    document.getElementById('oppContent').innerHTML = `<span style="color:#555">${isRunning ? "Scanning (25s)..." : "Waiting..."}</span>`;
                 }
 
+                // History
                 let histHtml = '';
                 if(data.tradeHistory) {
-                    data.tradeHistory.slice(0, 8).forEach(t => {
+                    data.tradeHistory.slice(0, 5).forEach(t => { // Show 5 items on mobile
                         const pnl = t.actualPnl || 0;
                         histHtml += `<tr>
                             <td>${new Date(t.entryTime).toLocaleTimeString()}</td>
                             <td>${t.coin}</td>
-                            <td>${t.shortExchange.substr(0,3).toUpperCase()}/${t.longExchange.substr(0,3).toUpperCase()}</td>
+                            <td>${t.shortExchange.substr(0,1).toUpperCase()}/${t.longExchange.substr(0,1).toUpperCase()}</td>
                             <td class="${pnl>=0?'text-pos':'text-neg'}">${(t.estimatedPnlFromOpportunity||0).toFixed(1)}%</td>
                             <td class="${pnl>=0?'text-pos':'text-neg'}" style="font-weight:bold">${pnl.toFixed(4)}</td>
                         </tr>`;
