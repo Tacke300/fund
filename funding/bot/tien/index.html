@@ -31,13 +31,23 @@
             margin-bottom: 20px;
             gap: 30px;
             padding: 10px;
+            /* 1 Hàng trên Mobile */
+            flex-wrap: nowrap;
         }
 
         .brand {
             display: flex; align-items: center; gap: 8px;
             font-size: 1.2rem; font-weight: bold; letter-spacing: 1px;
+            white-space: nowrap;
         }
         .logo { height: 35px; }
+        
+        /* Logo KuCoin filter xanh */
+        .logo-kucoin { 
+            height: 35px; 
+            filter: grayscale(100%) brightness(80%) sepia(100%) hue-rotate(100deg) saturate(500%);
+        }
+
         .text-yellow { color: var(--binance-yellow); }
         .text-green { color: var(--kucoin-green); }
         .x-sign { font-size: 1rem; color: #555; }
@@ -52,11 +62,13 @@
             margin-bottom: 15px;
         }
 
+        /* --- CARD (Hiệu ứng nổi) --- */
         .card {
             background-color: var(--card-bg);
-            border: 1px solid var(--binance-yellow);
-            border-radius: 8px;
+            border-radius: 12px;
             padding: 15px;
+            box-shadow: 4px 4px 10px rgba(0,0,0,0.5), -1px -1px 5px rgba(255,255,255,0.05);
+            border: 1px solid #222;
         }
 
         .card h3 {
@@ -71,9 +83,14 @@
         /* --- CONTROLS BAR --- */
         .controls-bar {
             display: flex; flex-wrap: wrap; gap: 10px; align-items: center;
-            background: var(--card-bg); border: 1px solid var(--binance-yellow);
+            background: var(--card-bg); border: 1px solid #222;
             padding: 15px; border-radius: 8px; margin-bottom: 20px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.3);
         }
+
+        /* Class để ẩn khi chạy */
+        .hide-on-run { transition: opacity 0.3s; }
+        .running .hide-on-run { display: none !important; }
 
         .input-group {
             display: flex; align-items: center; gap: 8px;
@@ -96,19 +113,13 @@
         .btn-start { background: var(--binance-yellow); color: #000; }
         .btn-stop { background: var(--danger); color: #fff; }
         
-        /* Nút Close Trade: Nhỏ lại, không chiếm hết dòng */
+        /* Nút Close Trade: Gọn gàng */
         .btn-close { 
             background: #ff5722; color: #fff; 
-            width: auto; /* Không full width */
-            display: none; 
-            margin: 0 auto; /* Căn giữa */
-            display: block;
-            font-size: 0.8rem;
-            padding: 8px 15px;
+            font-size: 0.8rem; padding: 8px 15px;
+            margin: 0 auto; display: none;
         }
-        .close-container {
-            text-align: center; margin-top: 20px; display: none;
-        }
+        .close-container { text-align: center; margin-top: 20px; display: none; }
 
         /* --- MODAL --- */
         .modal {
@@ -135,20 +146,14 @@
         
         .status-tag { padding: 5px 10px; border-radius: 4px; font-weight: bold; font-size: 0.8rem; }
 
-        /* --- MOBILE CSS --- */
-        @media (max-width: 768px) {
-            body { padding: 10px; }
-            .header { flex-direction: column; gap: 10px; padding: 10px; margin-bottom: 15px; }
-            .brand { font-size: 1.1rem; }
-            .logo { height: 30px; }
-            
-            .controls-bar { flex-direction: column; align-items: stretch; gap: 10px; padding: 10px; }
+        /* Mobile Fix */
+        @media (max-width: 600px) {
+            .header { gap: 15px; padding: 10px; }
+            .brand { font-size: 1rem; }
+            .logo, .logo-kucoin { height: 25px; }
+            .grid { grid-template-columns: 1fr; }
+            .controls-bar { flex-direction: column; align-items: stretch; }
             .input-group { justify-content: space-between; }
-            .btn { width: 100%; padding: 12px; }
-            
-            .grid { grid-template-columns: 1fr; gap: 15px; }
-            
-            th, td { padding: 6px 2px; font-size: 0.8rem; }
         }
     </style>
 </head>
@@ -161,29 +166,33 @@
         </div>
         <span class="x-sign">✕</span>
         <div class="brand">
-            <img src="https://cryptologos.cc/logos/kucoin-token-kcs-logo.png?v=025" class="logo">
+            <img src="https://cryptologos.cc/logos/kucoin-token-kcs-logo.png?v=025" class="logo-kucoin">
             <span class="text-green">KUCOIN</span>
         </div>
     </div>
 
     <div class="container">
         <!-- CONTROLS -->
-        <div class="controls-bar">
-            <div class="input-group">
+        <div class="controls-bar" id="controlsBar">
+            
+            <!-- Nhóm ẩn khi chạy -->
+            <div class="input-group hide-on-run">
                 <label style="margin-right:10px"><input type="radio" name="capMode" value="percent" checked> % Cap</label>
                 <label><input type="radio" name="capMode" value="fixed"> Fixed $</label>
             </div>
-            <div class="input-group" style="border-color: var(--binance-yellow);">
+            <div class="input-group hide-on-run" style="border-color: var(--binance-yellow);">
                 <span style="color:#aaa">Value:</span>
                 <input type="number" id="capitalInput" value="50">
             </div>
-            <div class="input-group">
+            <div class="input-group hide-on-run">
                 <label style="cursor: pointer; font-size: 0.9rem;">
-                    <input type="checkbox" id="autoBalanceDisplay" onchange="updateAutoBalance()"> Auto-Balance
+                    <input type="checkbox" id="autoBalanceDisplay"> Auto-Balance
                 </label>
             </div>
+            <button class="btn btn-config hide-on-run" onclick="openModal()">⚙️ Set Bot</button>
 
-            <button class="btn btn-config" onclick="openModal()">⚙️ Set Bot</button>
+            <div style="flex-grow: 1;"></div>
+
             <button id="btnStart" class="btn btn-start" onclick="startBot()">▶ START</button>
             <button id="btnStop" class="btn btn-stop" onclick="stopBot()" style="display:none;">⏹ STOP</button>
             
@@ -208,9 +217,9 @@
             </div>
         </div>
         
-        <!-- CLOSE BUTTON CONTAINER (Hidden by default) -->
+        <!-- CLOSE BUTTON CONTAINER -->
         <div id="closeContainer" class="close-container">
-            <button class="btn btn-close" onclick="closeAll()">🛑 EMERGENCY CLOSE</button>
+            <button class="btn btn-close" onclick="closeAll()">🛑 EMERGENCY CLOSE ALL</button>
         </div>
 
         <!-- HISTORY -->
@@ -220,11 +229,7 @@
                 <table>
                     <thead>
                         <tr>
-                            <th>Time</th>
-                            <th>Coin</th>
-                            <th>Pair</th>
-                            <th>Est.</th>
-                            <th>Real.</th>
+                            <th>Time</th><th>Coin</th><th>Pair</th><th>Est.</th><th>Real.</th>
                         </tr>
                     </thead>
                     <tbody id="historyBody"></tbody>
@@ -233,14 +238,15 @@
         </div>
     </div>
 
-    <!-- CONFIG MODAL (Removed Auto Balance Checkbox) -->
+    <!-- CONFIG MODAL -->
     <div id="configModal" class="modal">
         <div class="modal-content">
             <div class="modal-header">
-                <h2 style="color: var(--binance-yellow); margin: 0; font-size:1.2rem;">BOT SETUP</h2>
+                <h2 style="color: #fff; margin: 0; font-size:1.2rem;">BOT SETUP</h2>
                 <span style="cursor: pointer; font-size: 1.5rem;" onclick="closeModal()">✕</span>
             </div>
             
+            <!-- Trống rỗng khi mở -->
             <div class="form-row"><label>Binance API Key</label><input type="text" id="cfgBinKey"></div>
             <div class="form-row"><label>Binance Secret</label><input type="password" id="cfgBinSec"></div>
             <div class="form-row"><label>Binance Wallet (Aptos)</label><input type="text" id="cfgBinWal"></div>
@@ -248,52 +254,23 @@
             <div class="form-row"><label>KuCoin API Key</label><input type="text" id="cfgKuKey"></div>
             <div class="form-row"><label>KuCoin Secret</label><input type="password" id="cfgKuSec"></div>
             <div class="form-row"><label>KuCoin Passphrase</label><input type="password" id="cfgKuPass"></div>
-            <div class="form-row"><label>KuCoin Wallet (BEP20)</label><input type="text" id="cfgKuWal"></div>
+            <div class="form-row"><label>KuCoin BEP20 Wallet</label><input type="text" id="cfgKuWal"></div>
             
-            <button class="btn btn-save" onclick="saveAndStart()">SAVE & START</button>
+            <button class="btn btn-save" onclick="saveConfig()">SAVE CONFIG</button>
         </div>
     </div>
 
     <script>
-        let currentConfig = {};
-
         function openModal() {
             document.getElementById('configModal').style.display = 'flex';
-            // Populate if data exists
-            if(currentConfig) {
-                document.getElementById('cfgBinKey').value = currentConfig.binanceApiKey || '';
-                document.getElementById('cfgBinSec').value = currentConfig.binanceApiSecret || '';
-                document.getElementById('cfgBinWal').value = currentConfig.binanceDepositAddress || '';
-                document.getElementById('cfgKuKey').value = currentConfig.kucoinApiKey || '';
-                document.getElementById('cfgKuSec').value = currentConfig.kucoinApiSecret || '';
-                document.getElementById('cfgKuPass').value = currentConfig.kucoinPassword || '';
-                document.getElementById('cfgKuWal').value = currentConfig.kucoinDepositAddress || '';
-            }
+            // Luôn reset trống khi mở (theo yêu cầu)
+            const inputs = document.querySelectorAll('.modal input');
+            inputs.forEach(i => i.value = '');
         }
 
         function closeModal() { document.getElementById('configModal').style.display = 'none'; }
 
-        async function loadInitConfig() {
-            try {
-                const res = await fetch('/bot-api/config');
-                currentConfig = await res.json();
-                // Set auto-balance checkbox from saved config
-                document.getElementById('autoBalanceDisplay').checked = currentConfig.autoBalance || false;
-            } catch(e) {}
-        }
-
-        async function updateAutoBalance() {
-            const isChecked = document.getElementById('autoBalanceDisplay').checked;
-            try {
-                await fetch('/bot-api/update-balance-config', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({ autoBalance: isChecked })
-                });
-            } catch(e) {}
-        }
-
-        async function saveAndStart() {
+        async function saveConfig() {
             const newConfig = {
                 binanceApiKey: document.getElementById('cfgBinKey').value,
                 binanceApiSecret: document.getElementById('cfgBinSec').value,
@@ -303,12 +280,19 @@
                 kucoinPassword: document.getElementById('cfgKuPass').value,
                 kucoinDepositAddress: document.getElementById('cfgKuWal').value,
             };
-            closeModal();
-            await startBot(newConfig);
+            
+            try {
+                await fetch('/bot-api/save-config', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(newConfig)
+                });
+                alert("Config Saved!");
+                closeModal();
+            } catch(e) { alert("Save Failed"); }
         }
 
-        async function startBot(configFromModal = {}) {
-            // Nút bấm phản hồi ngay lập tức để tránh cảm giác lag
+        async function startBot() {
             const btn = document.getElementById('btnStart');
             btn.textContent = "STARTING...";
             btn.disabled = true;
@@ -318,8 +302,11 @@
                 value: parseFloat(document.getElementById('capitalInput').value)
             };
             
-            // Merge config
-            const payload = { ...configFromModal, tradeConfig };
+            // Gửi cài đặt trade & trạng thái checkbox auto balance
+            const payload = {
+                tradeConfig,
+                autoBalance: document.getElementById('autoBalanceDisplay').checked
+            };
             
             try {
                 const res = await fetch('/bot-api/start', {
@@ -329,9 +316,9 @@
                 });
                 const data = await res.json();
                 if(data.success) {
-                    updateUI();
+                    updateUI(); 
                 } else {
-                    alert("Error: " + data.message);
+                    alert("Start Failed: " + data.message);
                     btn.textContent = "▶ START";
                     btn.disabled = false;
                 }
@@ -362,6 +349,11 @@
 
                 const isRunning = data.botState === 'RUNNING';
                 
+                // Ẩn hiện controls
+                const controlsBar = document.getElementById('controlsBar');
+                if (isRunning) controlsBar.classList.add('running');
+                else controlsBar.classList.remove('running');
+
                 // Buttons
                 document.getElementById('btnStart').style.display = isRunning ? 'none' : 'inline-block';
                 document.getElementById('btnStop').style.display = isRunning ? 'inline-block' : 'none';
@@ -369,15 +361,13 @@
                 document.getElementById('btnStart').disabled = false;
                 document.getElementById('btnStop').textContent = "⏹ STOP";
                 
-                // Status Tag
                 const statusEl = document.getElementById('statusText');
                 statusEl.textContent = isRunning ? "RUNNING" : "STOPPED";
-                statusEl.style.color = isRunning ? "var(--kucoin-green)" : "#777";
+                statusEl.style.color = isRunning ? "#00D095" : "#777";
+                statusEl.style.background = isRunning ? "rgba(0, 208, 149, 0.1)" : "#222";
                 
-                // Close Button Visibility
                 document.getElementById('closeContainer').style.display = (data.activeTrades && data.activeTrades.length > 0) ? 'block' : 'none';
 
-                // Balances
                 let balHtml = '';
                 if (isRunning && data.balances) {
                     for(let ex in data.balances) {
@@ -392,7 +382,6 @@
                 }
                 document.getElementById('balancesContent').innerHTML = balHtml;
 
-                // Opportunity
                 if(data.bestPotentialOpportunityForDisplay) {
                     const op = data.bestPotentialOpportunityForDisplay;
                     document.getElementById('oppContent').innerHTML = `
@@ -404,10 +393,9 @@
                     document.getElementById('oppContent').innerHTML = `<span style="color:#555">${isRunning ? "Scanning (25s)..." : "Waiting..."}</span>`;
                 }
 
-                // History
                 let histHtml = '';
                 if(data.tradeHistory) {
-                    data.tradeHistory.slice(0, 5).forEach(t => { // Show 5 items on mobile
+                    data.tradeHistory.slice(0, 5).forEach(t => {
                         const pnl = t.actualPnl || 0;
                         histHtml += `<tr>
                             <td>${new Date(t.entryTime).toLocaleTimeString()}</td>
@@ -425,6 +413,14 @@
             setTimeout(updateUI, 2000);
         }
 
+        // Load config checkbox status initially
+        async function loadInitConfig() {
+            try {
+                const res = await fetch('/bot-api/config');
+                const cfg = await res.json();
+                document.getElementById('autoBalanceDisplay').checked = cfg.autoBalance || false;
+            } catch(e) {}
+        }
         loadInitConfig();
         updateUI();
     </script>
