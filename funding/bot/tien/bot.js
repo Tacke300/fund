@@ -3,25 +3,22 @@ const fs = require('fs');
 const path = require('path');
 const ccxt = require('ccxt');
 
+// [IMPORT CONFIG CŨ - FALLBACK]
+const hardcodedConfig = require('./config.js'); 
+// const hardcodedBalance = require('./balance.js'); // Nếu cần dùng địa chỉ ví từ file này
+
 // [GLOBAL CONFIG]
 const BOT_PORT = 5004;
 const SERVER_DATA_URL = 'http://localhost:5005/api/data';
 const CONFIG_FILE_PATH = path.join(__dirname, 'bot_config.json');
-const HISTORY_FILE_PATH = path.join(__dirname, 'bot_config_history.json'); // File lịch sử duy nhất
 const HTML_FILE_PATH = path.join(__dirname, 'index.html');
 
-// [TRADING SETTINGS]
+// [SETTINGS]
 const MIN_PNL_PERCENTAGE = 1;
 const MIN_MINUTES_FOR_EXECUTION = 15; 
 const DATA_FETCH_INTERVAL_SECONDS = 1; 
 const MIN_COLLATERAL_FOR_TRADE = 0.05; 
 const BLACKLISTED_COINS = ['GAIBUSDT', 'AIAUSDT', '42USDT'];
-const SL_PERCENTAGE = 95;  
-const TP_PERCENTAGE = 155; 
-
-// [BALANCING SETTINGS]
-const BALANCE_CHECK_MINUTE = 30;
-const MIN_DIFF_FOR_BALANCE = 20; 
 
 // [STATE]
 let botState = 'STOPPED';
@@ -36,107 +33,104 @@ let activeTrades = [];
 let selectedOpportunityForNextTrade = null;
 let currentTradeConfig = { mode: 'percent', value: 50 };
 
-// Config object default
-let dynamicConfig = {
-    binanceApiKey: '', binanceApiSecret: '', binanceDepositAddress: '', 
-    kucoinApiKey: '', kucoinApiSecret: '', kucoinPassword: '', kucoinDepositAddress: '',
-    autoBalance: false
-};
+// Config động (Lưu những gì người dùng nhập đè lên)
+let dynamicConfig = {};
 
 const exchanges = {};
 const activeExchangeIds = ['binanceusdm', 'kucoinfutures']; 
+
+// --- HELPER: LẤY CONFIG CUỐI CÙNG ---
+// Ưu tiên: Dynamic (Json) > Hardcoded (Config.js)
+function getEffectiveConfig() {
+    return {
+        binanceApiKey: dynamicConfig.binanceApiKey || hardcodedConfig.binanceApiKey,
+        binanceApiSecret: dynamicConfig.binanceApiSecret || hardcodedConfig.binanceApiSecret,
+        // Nếu trong config.js không có field address thì phải chịu khó nhập, hoặc hardcode thêm vào file config.js
+        binanceDepositAddress: dynamicConfig.binanceDepositAddress || hardcodedConfig.binanceDepositAddress || '',
+        
+        kucoinApiKey: dynamicConfig.kucoinApiKey || hardcodedConfig.kucoinApiKey,
+        kucoinApiSecret: dynamicConfig.kucoinApiSecret || hardcodedConfig.kucoinApiSecret,
+        kucoinPassword: dynamicConfig.kucoinPassword || hardcodedConfig.kucoinPassword,
+        kucoinDepositAddress: dynamicConfig.kucoinDepositAddress || hardcodedConfig.kucoinDepositAddress || '',
+        
+        autoBalance: (dynamicConfig.autoBalance !== undefined) ? dynamicConfig.autoBalance : false
+    };
+}
 
 // --- LOGGER ---
 const safeLog = (type, ...args) => {
     try {
         const timestamp = new Date().toLocaleTimeString('vi-VN');
         let message = args.map(arg => (arg instanceof Error) ? (arg.stack || arg.message) : (typeof arg === 'object' ? JSON.stringify(arg, null, 2) : arg)).join(' ');
-        if (message.includes('<!DOCTYPE html>') || message.includes('<html>')) {
-            if (type === 'error') console.warn(`[${timestamp} WARN] ⚠️ Sàn trả về lỗi HTML/404. Đã ẩn log.`);
-            return;
-        }
+        if (message.includes('<!DOCTYPE html>') || message.includes('<html>')) return;
         console[type](`[${timestamp} ${type.toUpperCase()}]`, message);
     } catch (e) { process.stderr.write(`LOG ERROR: ${e.message}\n`); }
 };
 
-// --- CONFIG & HISTORY MANAGEMENT ---
+// --- CONFIG IO ---
 function loadConfig() {
     try {
         if (fs.existsSync(CONFIG_FILE_PATH)) {
             const data = fs.readFileSync(CONFIG_FILE_PATH, 'utf8');
-            const loaded = JSON.parse(data);
-            // Merge để đảm bảo không mất key nếu file cũ thiếu
-            dynamicConfig = { ...dynamicConfig, ...loaded };
-            return true;
+            dynamicConfig = JSON.parse(data);
         }
-    } catch (e) { safeLog('error', 'Lỗi đọc config:', e.message); }
-    return false;
+    } catch (e) { safeLog('error', 'Lỗi đọc config JSON, dùng config.js mặc định.'); }
 }
 
 function saveConfig(newConfig) {
     try {
-        // 1. Xử lý History: Gom vào 1 file duy nhất
-        let history = [];
-        if (fs.existsSync(HISTORY_FILE_PATH)) {
-            try {
-                history = JSON.parse(fs.readFileSync(HISTORY_FILE_PATH, 'utf8'));
-                if (!Array.isArray(history)) history = [];
-            } catch(e) {}
+        // Chỉ lưu những field có dữ liệu, không lưu chuỗi rỗng đè lên
+        let cleanConfig = { ...dynamicConfig };
+        for (let key in newConfig) {
+            if (newConfig[key] !== '' && newConfig[key] !== null && newConfig[key] !== undefined) {
+                cleanConfig[key] = newConfig[key];
+            }
         }
-
-        // Thêm config hiện tại vào đầu danh sách history (trước khi bị ghi đè)
-        // Chỉ lưu nếu có thay đổi quan trọng để tránh spam history
-        const timestamp = new Date().toISOString();
-        const historyEntry = { timestamp, config: { ...dynamicConfig } };
-        history.unshift(historyEntry);
-
-        // Giới hạn lịch sử 50 bản ghi để không quá nặng
-        if (history.length > 50) history = history.slice(0, 50);
-        
-        fs.writeFileSync(HISTORY_FILE_PATH, JSON.stringify(history, null, 2));
-
-        // 2. Lưu Config Mới
-        // Merge thông minh: Chỉ update những field có giá trị (không null/undefined)
-        // Nếu newConfig gửi lên là chuỗi rỗng, ta GIỮ NGUYÊN cái cũ (logic xử lý ở route POST)
-        dynamicConfig = { ...dynamicConfig, ...newConfig };
+        dynamicConfig = cleanConfig;
         fs.writeFileSync(CONFIG_FILE_PATH, JSON.stringify(dynamicConfig, null, 2));
-        
-        safeLog('info', 'Đã lưu cấu hình và cập nhật lịch sử.');
     } catch (e) { safeLog('error', 'Lỗi lưu config:', e.message); }
 }
 
-// --- EXCHANGES ---
+// --- INIT EXCHANGES ---
 async function initExchanges() {
+    const cfg = getEffectiveConfig(); // Lấy config gộp
+    
     activeExchangeIds.forEach(id => { delete exchanges[id]; balances[id] = { available: 0, total: 0 }; });
 
-    if (dynamicConfig.binanceApiKey && dynamicConfig.binanceApiSecret) {
+    if (cfg.binanceApiKey && cfg.binanceApiSecret) {
         try {
-            exchanges['binanceusdm'] = new ccxt.binanceusdm({ apiKey: dynamicConfig.binanceApiKey, secret: dynamicConfig.binanceApiSecret, enableRateLimit: true, options: { defaultType: 'swap' } });
-            exchanges['binance'] = new ccxt.binance({ apiKey: dynamicConfig.binanceApiKey, secret: dynamicConfig.binanceApiSecret, enableRateLimit: true });
+            exchanges['binanceusdm'] = new ccxt.binanceusdm({ apiKey: cfg.binanceApiKey, secret: cfg.binanceApiSecret, enableRateLimit: true, options: { defaultType: 'swap' } });
+            exchanges['binance'] = new ccxt.binance({ apiKey: cfg.binanceApiKey, secret: cfg.binanceApiSecret, enableRateLimit: true });
             setTimeout(async () => {
-                try { await exchanges['binanceusdm'].fapiPrivatePostPositionSideDual({ 'dualSidePosition': 'true' }); safeLog('info', `[INIT] ✅ Binance Hedge Mode ON.`); } 
-                catch (e) { if (e.message.includes("-4046") || e.message.includes("No need")) safeLog('info', `[INIT] ✅ Binance đã ở Hedge Mode.`); }
+                try { await exchanges['binanceusdm'].fapiPrivatePostPositionSideDual({ 'dualSidePosition': 'true' }); safeLog('info', `[INIT] ✅ Binance Hedge OK.`); } 
+                catch (e) { if (e.message.includes("-4046") || e.message.includes("No need")) safeLog('info', `[INIT] ✅ Binance Hedge OK.`); }
             }, 1000);
         } catch (e) { safeLog('error', `[INIT] Lỗi Binance: ${e.message}`); }
+    } else {
+        safeLog('warn', '[INIT] Thiếu API Key Binance (Kiểm tra file config.js hoặc nhập trên web)');
     }
 
-    if (dynamicConfig.kucoinApiKey && dynamicConfig.kucoinApiSecret && dynamicConfig.kucoinPassword) {
+    if (cfg.kucoinApiKey && cfg.kucoinApiSecret && cfg.kucoinPassword) {
         try {
-            exchanges['kucoinfutures'] = new ccxt.kucoinfutures({ apiKey: dynamicConfig.kucoinApiKey, secret: dynamicConfig.kucoinApiSecret, password: dynamicConfig.kucoinPassword, enableRateLimit: true });
-            exchanges['kucoin'] = new ccxt.kucoin({ apiKey: dynamicConfig.kucoinApiKey, secret: dynamicConfig.kucoinApiSecret, password: dynamicConfig.kucoinPassword, enableRateLimit: true });
+            exchanges['kucoinfutures'] = new ccxt.kucoinfutures({ apiKey: cfg.kucoinApiKey, secret: cfg.kucoinApiSecret, password: cfg.kucoinPassword, enableRateLimit: true });
+            exchanges['kucoin'] = new ccxt.kucoin({ apiKey: cfg.kucoinApiKey, secret: cfg.kucoinApiSecret, password: cfg.kucoinPassword, enableRateLimit: true });
             setTimeout(async () => {
-                try { await exchanges['kucoinfutures'].privatePostPositionSideDual({ 'dualSidePosition': 'true' }); safeLog('info', `[INIT] ✅ KuCoin Hedge Mode ON.`); } 
-                catch (e) { safeLog('info', `[INIT] ✅ KuCoin đã ở Hedge Mode.`); }
+                try { await exchanges['kucoinfutures'].privatePostPositionSideDual({ 'dualSidePosition': 'true' }); safeLog('info', `[INIT] ✅ KuCoin Hedge OK.`); } 
+                catch (e) { safeLog('info', `[INIT] ✅ KuCoin Hedge OK.`); }
             }, 1500);
         } catch (e) { safeLog('error', `[INIT] Lỗi KuCoin: ${e.message}`); }
+    } else {
+        safeLog('warn', '[INIT] Thiếu API Key KuCoin (Kiểm tra file config.js hoặc nhập trên web)');
     }
 }
 
 // --- BALANCING ---
 async function checkAndBalanceCapital() {
-    if (!dynamicConfig.autoBalance) return; // Check trực tiếp từ dynamicConfig
+    const cfg = getEffectiveConfig();
+    if (!cfg.autoBalance) return; 
+    
     const now = new Date();
-    if (now.getMinutes() !== BALANCE_CHECK_MINUTE) return;
+    if (now.getMinutes() !== 30) return;
     if (Date.now() - lastBalanceCheckTime < 60000) return;
     lastBalanceCheckTime = Date.now();
 
@@ -147,7 +141,7 @@ async function checkAndBalanceCapital() {
     const diff = Math.abs(bBal - kBal);
     const amount = diff / 2;
 
-    if (diff > MIN_DIFF_FOR_BALANCE && amount > 5) { 
+    if (diff > 20 && amount > 5) { 
         safeLog('warn', `[BALANCE] Diff > 20$ (${diff.toFixed(2)}). Balancing...`);
         if (bBal > kBal) await executeAutoTransfer('binance', 'kucoin', amount);
         else await executeAutoTransfer('kucoin', 'binance', amount);
@@ -155,20 +149,21 @@ async function checkAndBalanceCapital() {
 }
 
 async function executeAutoTransfer(from, to, amount) {
+    const cfg = getEffectiveConfig();
     safeLog('info', `[AUTO-TRANSFER] 🚀 ${from} -> ${to}: ${amount}$`);
     try {
         let srcEx = (from === 'binance') ? exchanges['binanceusdm'] : exchanges['kucoinfutures'];
         let spotEx = (from === 'binance') ? exchanges['binance'] : exchanges['kucoin'];
-        let srcType = (from === 'binance') ? 'future' : 'future';
+        let srcType = 'future';
         let dstType = (from === 'binance') ? 'spot' : 'main';
 
         await srcEx.transfer('USDT', amount, srcType, dstType);
         await sleep(2000);
 
-        let addr = (to === 'binance') ? dynamicConfig.binanceDepositAddress : dynamicConfig.kucoinDepositAddress;
+        let addr = (to === 'binance') ? cfg.binanceDepositAddress : cfg.kucoinDepositAddress;
         let net = (to === 'binance') ? 'APT' : 'BSC'; 
         
-        if (!addr) throw new Error("Missing Wallet Address");
+        if (!addr) throw new Error("Chưa có địa chỉ ví (Check config.js hoặc nhập web)");
         await spotEx.withdraw('USDT', amount, addr, undefined, { network: net });
         safeLog('info', `[AUTO-TRANSFER] Withdraw sent!`);
     } catch (e) { safeLog('error', `[AUTO-TRANSFER] Error: ${e.message}`); }
@@ -180,7 +175,7 @@ function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 async function fetchDataFromServer() {
     try {
         const res = await fetch(SERVER_DATA_URL);
-        if (!res.ok) throw new Error(`${res.status}`);
+        if (!res.ok) throw new Error();
         return await res.json();
     } catch (e) { return null; }
 }
@@ -196,6 +191,7 @@ async function fetchAllBalances() {
 }
 const updateBalances = () => fetchAllBalances();
 
+// --- TRADING CORE ---
 async function getExchangeSpecificSymbol(exchange, rawCoinSymbol) {
     try {
         if (!exchange.markets) await exchange.loadMarkets(true);
@@ -226,7 +222,7 @@ async function executeTrades(op) {
         
         let coll = (currentTradeConfig.mode === 'fixed') ? currentTradeConfig.value : minBal * (currentTradeConfig.value / 100);
         if (coll > minBal) coll = minBal;
-        if (coll < MIN_COLLATERAL_FOR_TRADE) { safeLog('warn', 'Low Balance'); return false; }
+        if (coll < MIN_COLLATERAL_FOR_TRADE) { safeLog('warn', `Low Balance: ${coll}`); return false; }
 
         const sSym = await getExchangeSpecificSymbol(sEx, coin);
         const lSym = await getExchangeSpecificSymbol(lEx, coin);
@@ -264,6 +260,7 @@ async function executeTrades(op) {
 
 async function monitorActiveTrades() {
     if (activeTrades.length === 0) return;
+    // Monitor logic here (check liquidation/manual close)
 }
 
 async function closeTradeNow() {
@@ -315,9 +312,7 @@ async function mainBotLoop() {
                 return op;
             }).sort((a,b) => b.estimatedPnl - a.estimatedPnl);
             bestPotentialOpportunityForDisplay = allCurrentOpportunities[0];
-        } else {
-            bestPotentialOpportunityForDisplay = null;
-        }
+        } else { bestPotentialOpportunityForDisplay = null; }
 
         const now = new Date();
         const m = now.getUTCMinutes(), s = now.getUTCSeconds();
@@ -350,7 +345,7 @@ async function mainBotLoop() {
             }
         }
 
-    } catch (e) { safeLog('error', 'Loop:', e); }
+    } catch (e) { safeLog('error', 'Loop:', e.message); }
 
     if (botState === 'RUNNING') botLoopIntervalId = setTimeout(mainBotLoop, 1000);
 }
@@ -363,7 +358,7 @@ const botServer = http.createServer(async (req, res) => {
 
     if (url === '/' && req.method === 'GET') {
         fs.readFile(HTML_FILE_PATH, (err, content) => {
-            if (err) { res.writeHead(500); res.end('No UI File'); return; }
+            if (err) { res.writeHead(500); res.end('No UI'); return; }
             res.writeHead(200, { 'Content-Type': 'text/html' });
             res.end(content);
         });
@@ -377,39 +372,25 @@ const botServer = http.createServer(async (req, res) => {
         
         try {
             if (url === '/bot-api/start') {
-                // Logic merge config thông minh
-                const incomingCfg = JSON.parse(body);
+                const incoming = JSON.parse(body);
+                // Chỉ lưu nếu có dữ liệu nhập
+                saveConfig(incoming);
                 
-                // Chỉ update những key nào có giá trị (không rỗng)
-                let cleanCfg = {};
-                for (let key in incomingCfg) {
-                    if (incomingCfg[key] !== "" && incomingCfg[key] !== null && incomingCfg[key] !== undefined) {
-                        cleanCfg[key] = incomingCfg[key];
-                    }
-                }
-                
-                // Lưu config (merge cleanCfg vào dynamicConfig hiện tại)
-                saveConfig(cleanCfg);
-                
-                // Áp dụng config
-                if (incomingCfg.tradeConfig) {
-                    currentTradeConfig = incomingCfg.tradeConfig;
-                }
+                if (incoming.tradeConfig) currentTradeConfig = incoming.tradeConfig;
                 
                 await initExchanges();
                 botState = 'RUNNING';
                 updateBalances().then(mainBotLoop);
                 res.end(JSON.stringify({ success: true }));
             }
-            else if (url === '/bot-api/update-balance-config') {
-                // API riêng để update checkbox auto balance
-                const cfg = JSON.parse(body);
-                saveConfig({ autoBalance: cfg.autoBalance });
-                res.end(JSON.stringify({ success: true }));
-            }
             else if (url === '/bot-api/stop') {
                 botState = 'STOPPED';
                 if (botLoopIntervalId) clearTimeout(botLoopIntervalId);
+                res.end(JSON.stringify({ success: true }));
+            }
+            else if (url === '/bot-api/update-balance-config') {
+                const cfg = JSON.parse(body);
+                saveConfig({ autoBalance: cfg.autoBalance });
                 res.end(JSON.stringify({ success: true }));
             }
             else if (url === '/bot-api/close-trade-now') {
@@ -430,7 +411,7 @@ const botServer = http.createServer(async (req, res) => {
     else if (url === '/bot-api/config') {
         loadConfig();
         res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify(dynamicConfig));
+        res.end(JSON.stringify(getEffectiveConfig()));
     }
 });
 
