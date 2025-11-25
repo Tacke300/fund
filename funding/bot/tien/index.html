@@ -34,7 +34,7 @@
         .text-yellow { color: var(--binance-yellow); } .text-green { color: var(--kucoin-green); }
         .user-info-row { display: flex; align-items: center; gap: 15px; background: #1a1a1a; padding: 5px 20px; border-radius: 20px; font-size: 0.9rem; color: #ccc; border: 1px solid #333; }
         .logout-btn { color: var(--danger); cursor: pointer; font-weight: bold; font-size: 0.75rem; text-transform: uppercase; }
-        .vip-badge { color: gold; font-weight: bold; border: 1px solid gold; padding: 0 5px; border-radius: 4px; font-size: 0.7rem; }
+        .vip-badge { color: gold; font-weight: bold; border: 1px solid gold; padding: 0 5px; border-radius: 4px; font-size: 0.7rem; display: none; }
 
         /* CONTROLS */
         .container { max-width: 1200px; margin: 0 auto; }
@@ -55,7 +55,7 @@
         .btn-start { background: var(--binance-yellow); color: #000; }
         .btn-start:disabled { background: #444; color: #888; cursor: not-allowed; opacity: 0.7; }
         .btn-stop { background: var(--danger); color: #fff; }
-        .btn-vip { background: gold; color: #000; font-size: 0.7rem; padding: 5px 10px; }
+        .btn-vip { background: gold; color: #000; font-size: 0.7rem; padding: 5px 10px; display: inline-block; }
 
         .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 15px; }
         .card { background: var(--card-bg); border: 1px solid #222; border-radius: 12px; padding: 15px; box-shadow: 4px 4px 10px rgba(0,0,0,0.5); }
@@ -69,7 +69,7 @@
         .form-row input, .form-row select { width: 100%; padding: 10px; background: #222; border: 1px solid #444; color: #fff; box-sizing: border-box; font-family: monospace; }
         .btn-save { width: 100%; background: var(--kucoin-green); color: #000; margin-top: 10px; padding: 12px; border:none; font-weight:bold; cursor:pointer; }
 
-        /* TERMS CONTENT (MERGED) */
+        /* TERMS CONTENT */
         .terms-content { color: #ddd; font-size: 0.9rem; line-height: 1.6; text-align: left; }
         .terms-content h4 { color: var(--binance-yellow); margin-top: 15px; margin-bottom: 5px; }
         .terms-content ul { padding-left: 20px; margin: 0; }
@@ -122,7 +122,9 @@
             </div>
             <div class="user-info-row">
                 <span id="userDisplay">User</span>
-                <span id="vipBadge" class="vip-badge" style="display:none">VIP</span>
+                <!-- Badge hiển thị khi là VIP -->
+                <span id="vipBadge" class="vip-badge">VIP</span>
+                <!-- Nút mua hiển thị khi chưa là VIP -->
                 <button id="upgradeBtn" class="btn-vip" onclick="upgradeVip()">UPGRADE VIP ($200/Mo)</button>
                 <span class="logout-btn" onclick="logout()">LOGOUT ➔</span>
             </div>
@@ -217,7 +219,7 @@
         </div>
     </div>
 
-    <!-- TERMS MODAL (OLD + NEW) -->
+    <!-- TERMS MODAL -->
     <div id="termsModal" class="modal">
         <div class="modal-content" style="border-color: var(--danger);">
             <div class="modal-header" style="display:flex; justify-content:space-between; margin-bottom:10px;">
@@ -302,13 +304,23 @@
             const c = await apiCall('/bot-api/config');
             if(c) {
                 document.getElementById('autoBalanceDisplay').checked = c.autoBalance;
-                if(c.vipStatus === 'vip' || c.vipStatus === 'vip_pro') {
-                    document.getElementById('vipBadge').style.display = 'inline';
-                    document.getElementById('upgradeBtn').style.display = 'none';
-                } else {
-                    document.getElementById('vipBadge').style.display = 'none';
-                    document.getElementById('upgradeBtn').style.display = 'inline-block';
-                }
+                // CHECK NGAY KHI LOAD
+                updateVipButton(c.vipStatus);
+            }
+        }
+        
+        // HÀM CẬP NHẬT NÚT VIP
+        function updateVipButton(status) {
+            const btn = document.getElementById('upgradeBtn');
+            const badge = document.getElementById('vipBadge');
+            
+            if (status === 'vip' || status === 'vip_pro') {
+                btn.style.display = 'none';
+                badge.style.display = 'inline-block';
+                badge.innerText = status === 'vip_pro' ? 'VIP PRO' : 'VIP';
+            } else {
+                btn.style.display = 'inline-block';
+                badge.style.display = 'none';
             }
         }
         
@@ -324,10 +336,14 @@
         }
 
         async function upgradeVip() {
-            // KHÔNG CÒN CONFIRM
+            // BỎ HỎI - TRỪ LUÔN
             const r = await apiCall('/bot-api/upgrade-vip','POST');
-            if(r.success) { alert("Nâng cấp thành công!"); loadInitConfig(); } 
-            else alert("Thất bại: Không đủ số dư trên sàn.");
+            if(r.success) { 
+                alert("Nâng cấp thành công!"); 
+                loadInitConfig(); 
+            } else {
+                alert("Thất bại: Không đủ số dư trên sàn.");
+            }
         }
 
         async function manualTransfer() {
@@ -348,7 +364,6 @@
             if(res && res.success) {
                 updateUI();
             } else {
-                // XỬ LÝ LỖI KHÔNG ĐỦ TIỀN PHÍ
                 if (res.message === 'INSUFFICIENT_FEE_BALANCE') {
                     alert("Không đủ số dư trả phí bot! Vui lòng nạp thêm tiền.");
                 } else {
@@ -373,6 +388,9 @@
 
             if(run) document.querySelectorAll('.hide-on-run').forEach(e=>e.classList.add('active'));
             else { document.querySelectorAll('.hide-on-run').forEach(e=>e.classList.remove('active')); checkTerms(); }
+
+            // CẬP NHẬT TRẠNG THÁI VIP LIÊN TỤC (ĐỂ NẾU HẾT HẠN THÌ HIỆN LẠI NÚT)
+            updateVipButton(d.vipStatus);
 
             let bH = '';
             for(let k in d.balances) bH += `<div style="display:flex;justify-content:space-between;border-bottom:1px solid #333;padding:5px"><span>${k.includes('binance')?'BINANCE':'KUCOIN'}</span><span>${d.balances[k].available.toFixed(2)}$</span></div>`;
