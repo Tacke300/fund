@@ -149,43 +149,51 @@
     <script>
         // Load config on init
         window.onload = async () => {
-            const res = await fetch('/bot-api/config');
-            const cfg = await res.json();
-            if(cfg) {
-                document.getElementById('binKey').value = cfg.binanceApiKey || '';
-                document.getElementById('binSec').value = cfg.binanceApiSecret || '';
-                document.getElementById('binWal').value = cfg.binanceDepositAddress || '';
-                document.getElementById('kuKey').value = cfg.kucoinApiKey || '';
-                document.getElementById('kuSec').value = cfg.kucoinApiSecret || '';
-                document.getElementById('kuPass').value = cfg.kucoinPassword || '';
-                document.getElementById('kuWal').value = cfg.kucoinDepositAddress || '';
+            try {
+                const res = await fetch('/bot-api/config');
+                const cfg = await res.json();
+                if(cfg) {
+                    document.getElementById('binKey').value = cfg.binanceApiKey || '';
+                    document.getElementById('binSec').value = cfg.binanceApiSecret || '';
+                    document.getElementById('binWal').value = cfg.binanceDepositAddress || '';
+                    document.getElementById('kuKey').value = cfg.kucoinApiKey || '';
+                    document.getElementById('kuSec').value = cfg.kucoinApiSecret || '';
+                    document.getElementById('kuPass').value = cfg.kucoinPassword || '';
+                    document.getElementById('kuWal').value = cfg.kucoinDepositAddress || '';
+                }
+                setInterval(updateStatus, 2000);
+            } catch (e) {
+                console.log("Waiting for server...");
             }
-            setInterval(updateStatus, 2000);
         };
 
         async function startBot() {
-            const config = {
-                binanceApiKey: document.getElementById('binKey').value,
-                binanceApiSecret: document.getElementById('binSec').value,
-                binanceDepositAddress: document.getElementById('binWal').value,
-                kucoinApiKey: document.getElementById('kuKey').value,
-                kucoinApiSecret: document.getElementById('kuSec').value,
-                kucoinPassword: document.getElementById('kuPass').value,
-                kucoinDepositAddress: document.getElementById('kuWal').value,
-                autoBalance: document.getElementById('autoBalance').checked
-            };
+            try {
+                const config = {
+                    binanceApiKey: document.getElementById('binKey').value,
+                    binanceApiSecret: document.getElementById('binSec').value,
+                    binanceDepositAddress: document.getElementById('binWal').value,
+                    kucoinApiKey: document.getElementById('kuKey').value,
+                    kucoinApiSecret: document.getElementById('kuSec').value,
+                    kucoinPassword: document.getElementById('kuPass').value,
+                    kucoinDepositAddress: document.getElementById('kuWal').value,
+                    autoBalance: document.getElementById('autoBalance').checked
+                };
 
-            const res = await fetch('/bot-api/start', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify(config)
-            });
-            const data = await res.json();
-            if(data.success) {
-                document.getElementById('setupScreen').style.display = 'none';
-                document.getElementById('mainDashboard').classList.add('active');
-            } else {
-                alert('Start failed: ' + data.message);
+                const res = await fetch('/bot-api/start', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(config)
+                });
+                const data = await res.json();
+                if(data.success) {
+                    document.getElementById('setupScreen').style.display = 'none';
+                    document.getElementById('mainDashboard').classList.add('active');
+                } else {
+                    alert('Start failed: ' + data.message);
+                }
+            } catch (e) {
+                alert("Lỗi kết nối tới Bot Server: " + e.message);
             }
         }
 
@@ -203,12 +211,17 @@
         async function sendTestTrade() {
             const lev = document.getElementById('testLev').value;
             const cap = document.getElementById('testCap').value;
-            await fetch('/bot-api/custom-test-trade', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ leverage: lev, percentage: cap })
-            });
-            alert('Test Trade Sent!');
+            try {
+                const res = await fetch('/bot-api/custom-test-trade', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ leverage: lev, percentage: cap })
+                });
+                const data = await res.json();
+                alert(data.message || 'Test Trade Sent!');
+            } catch (e) {
+                alert('Error sending trade');
+            }
         }
 
         async function updateStatus() {
@@ -238,20 +251,24 @@
                         <div style="font-size:1.2rem; color:var(--kucoin-green)">${op.coin}</div>
                         <div>PNL: ${op.estimatedPnl.toFixed(2)}%</div>
                     `;
+                } else {
+                    document.getElementById('opportunity').innerHTML = 'Scanning...';
                 }
 
                 // History
                 let histHtml = '';
-                data.tradeHistory.slice(0, 10).forEach(t => {
-                    const pnl = t.actualPnl || 0;
-                    histHtml += `<tr>
-                        <td>${new Date(t.entryTime).toLocaleTimeString()}</td>
-                        <td>${t.coin}</td>
-                        <td>${t.shortExchange}/${t.longExchange}</td>
-                        <td class="${pnl>=0?'text-green':'text-red'}">${t.estimatedPnlFromOpportunity.toFixed(2)}%</td>
-                        <td class="${pnl>=0?'text-green':'text-red'}">${pnl.toFixed(4)}</td>
-                    </tr>`;
-                });
+                if (data.tradeHistory) {
+                    data.tradeHistory.slice(0, 10).forEach(t => {
+                        const pnl = t.actualPnl || 0;
+                        histHtml += `<tr>
+                            <td>${new Date(t.entryTime).toLocaleTimeString()}</td>
+                            <td>${t.coin}</td>
+                            <td>${t.shortExchange}/${t.longExchange}</td>
+                            <td class="${pnl>=0?'text-green':'text-red'}">${(t.estimatedPnlFromOpportunity || 0).toFixed(2)}%</td>
+                            <td class="${pnl>=0?'text-green':'text-red'}">${pnl.toFixed(4)}</td>
+                        </tr>`;
+                    });
+                }
                 document.getElementById('history').innerHTML = histHtml;
 
             } catch(e) {}
