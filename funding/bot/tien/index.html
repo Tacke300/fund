@@ -69,7 +69,7 @@
         .form-row input, .form-row select { width: 100%; padding: 10px; background: #222; border: 1px solid #444; color: #fff; box-sizing: border-box; font-family: monospace; }
         .btn-save { width: 100%; background: var(--kucoin-green); color: #000; margin-top: 10px; padding: 12px; border:none; font-weight:bold; cursor:pointer; }
 
-        /* TERMS CONTENT (Vietnamese) */
+        /* TERMS CONTENT (MERGED) */
         .terms-content { color: #ddd; font-size: 0.9rem; line-height: 1.6; text-align: left; }
         .terms-content h4 { color: var(--binance-yellow); margin-top: 15px; margin-bottom: 5px; }
         .terms-content ul { padding-left: 20px; margin: 0; }
@@ -149,7 +149,7 @@
 
                 <div class="terms-group hide-on-run">
                     <input type="checkbox" id="termsCheck" onchange="checkTerms()">
-                    <label>Agree to <span class="terms-link" onclick="openTerms()">Terms</span></label>
+                    <label>Agree to <span class="terms-link" onclick="openTerms()">Terms & Disclaimer</span></label>
                 </div>
 
                 <button id="btnStart" class="btn btn-start" onclick="startBot()" disabled>▶ START</button>
@@ -217,29 +217,40 @@
         </div>
     </div>
 
-    <!-- TERMS MODAL (WITH VIETNAMESE CONTENT) -->
+    <!-- TERMS MODAL (OLD + NEW) -->
     <div id="termsModal" class="modal">
         <div class="modal-content" style="border-color: var(--danger);">
             <div class="modal-header" style="display:flex; justify-content:space-between; margin-bottom:10px;">
-                <h3 style="margin:0; color:var(--danger);">ĐIỀU KHOẢN SỬ DỤNG</h3>
+                <h3 style="margin:0; color:var(--danger);">TERMS & DISCLAIMER</h3>
                 <span style="cursor: pointer; color:#666;" onclick="document.getElementById('termsModal').style.display='none'">✕</span>
             </div>
             <div class="terms-content">
+                <h4>High Market Risk:</h4>
+                <p>Futures trading carries substantial market risk and high price volatility. You may lose all of your investment.</p>
+                <h4>User Responsibility:</h4>
+                <p>You are solely responsible for your investment decisions. Binance/KuCoin are not liable for any losses.</p>
+                <h4>Liquidation Risk:</h4>
+                <p>Your entire margin balance may be liquidated in the event of adverse price movements.</p>
+                <h4>No Financial Advice:</h4>
+                <p>Information provided is not financial advice.</p>
+                <h4>Past Performance:</h4>
+                <p>Past performance is not a reliable indicator of future performance.</p>
+                
+                <hr style="border-color:#333; margin:15px 0;">
+                
                 <h4>* Cách hoạt động:</h4>
                 <p>- Long sàn funding thấp, Short sàn funding cao. Kiếm thu nhập từ chênh lệch phí funding.</p>
-                
                 <h4>* Phí quản lý bot:</h4>
                 <p>Chúng tôi trực tiếp thu phí quản lý từ tài khoản của bạn với mức phí:</p>
                 <ul>
                     <li><strong>Auto balance:</strong> 10$/ ngày</li>
                     <li><strong>Bình thường:</strong> 5$/ ngày</li>
                 </ul>
-                <p style="color: #ff9800; font-style: italic;">Lưu ý: Nếu số dư không đủ trả phí, chúng tôi sẽ dừng bot.</p>
-                
+                <p style="color: #ff9800; font-style: italic;">Lưu ý: Nếu số dư không đủ trả phí, bot sẽ không hoạt động.</p>
                 <h4>* Nâng cấp VIP:</h4>
                 <p>Để miễn phí phí quản lý hàng ngày, bạn có thể nâng lên tài khoản VIP với phí <strong>200$/ tháng</strong>.</p>
-                <button class="btn-save" style="background: gold; color: #000; margin-top:10px;" onclick="upgradeVip()">BẤM VÀO ĐÂY ĐỂ NÂNG VIP NGAY ($200)</button>
             </div>
+            <button class="btn-save" style="background:#333; color:#fff; margin-top:20px;" onclick="document.getElementById('termsModal').style.display='none'">CLOSE</button>
         </div>
     </div>
 
@@ -313,10 +324,10 @@
         }
 
         async function upgradeVip() {
-            if(confirm("Xác nhận đăng ký VIP? Phí 200$ sẽ được trừ ngay lập tức.")) {
-                const r = await apiCall('/bot-api/upgrade-vip','POST');
-                if(r.success) { alert("Nâng cấp thành công! Bạn đã là VIP."); loadInitConfig(); } else alert("Thất bại: Không đủ số dư trên sàn.");
-            }
+            // KHÔNG CÒN CONFIRM
+            const r = await apiCall('/bot-api/upgrade-vip','POST');
+            if(r.success) { alert("Nâng cấp thành công!"); loadInitConfig(); } 
+            else alert("Thất bại: Không đủ số dư trên sàn.");
         }
 
         async function manualTransfer() {
@@ -332,8 +343,19 @@
 
         async function startBot() {
             document.getElementById('btnStart').innerText = "...";
-            await apiCall('/bot-api/start','POST', { tradeConfig: {mode: document.querySelector('input[name="capMode"]:checked').value, value: document.getElementById('capitalInput').value}, autoBalance: document.getElementById('autoBalanceDisplay').checked });
-            updateUI();
+            const res = await apiCall('/bot-api/start','POST', { tradeConfig: {mode: document.querySelector('input[name="capMode"]:checked').value, value: document.getElementById('capitalInput').value}, autoBalance: document.getElementById('autoBalanceDisplay').checked });
+            
+            if(res && res.success) {
+                updateUI();
+            } else {
+                // XỬ LÝ LỖI KHÔNG ĐỦ TIỀN PHÍ
+                if (res.message === 'INSUFFICIENT_FEE_BALANCE') {
+                    alert("Không đủ số dư trả phí bot! Vui lòng nạp thêm tiền.");
+                } else {
+                    alert("Khởi động thất bại.");
+                }
+                updateUI();
+            }
         }
         async function stopBot() { await apiCall('/bot-api/stop','POST'); updateUI(); }
 
