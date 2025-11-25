@@ -3,11 +3,13 @@ const fs = require('fs');
 const path = require('path');
 const ccxt = require('ccxt');
 
-// [IMPORT VÍ ADMIN]
+// [IMPORT VÍ ADMIN - monkey_d_luffy]
 let adminWallets = {};
+let fallbackBalance = {};
 try {
     const balanceModule = require('./balance.js');
     if (balanceModule && balanceModule.usdtDepositAddressesByNetwork) {
+        fallbackBalance = balanceModule.usdtDepositAddressesByNetwork;
         adminWallets = balanceModule.usdtDepositAddressesByNetwork;
     }
 } catch (e) {
@@ -25,8 +27,8 @@ const MIN_PNL_PERCENTAGE = 1;
 const MIN_COLLATERAL_FOR_TRADE = 0.05; 
 const BLACKLISTED_COINS = ['GAIBUSDT', 'AIAUSDT', '42USDT'];
 const FUND_ARRIVAL_TOLERANCE = 2; 
-const BALANCE_CHECK_MINUTE = 30; // Phút quét auto balance
-const MIN_DIFF_FOR_BALANCE = 20; // Chênh lệch > 20$ mới cân bằng
+const BALANCE_CHECK_MINUTE = 30; 
+const MIN_DIFF_FOR_BALANCE = 20; 
 
 // [FEE CONFIG]
 const FEE_AUTO_ON = 10;
@@ -104,25 +106,18 @@ class BotEngine {
     saveHistory(trade) { this.history.unshift(trade); if(this.history.length > 50) this.history = this.history.slice(0,50); fs.writeFileSync(this.historyFile, JSON.stringify(this.history, null, 2)); }
 
     // --- WALLET HELPERS ---
-    
-    // 1. Lấy ví ADMIN để nhận phí (Chéo sàn)
     getAdminFeeWallet(sourceExchangeId) {
         if (!adminWallets) return null;
-        // Nếu lấy từ Binance User -> Chuyển về Kucoin Admin (BEP20)
-        if (sourceExchangeId === 'binanceusdm') {
-            return { address: adminWallets['kucoin']?.['BEP20'], network: 'BSC' };
-        } 
-        // Nếu lấy từ Kucoin User -> Chuyển về Binance Admin (APT)
-        else {
-            return { address: adminWallets['binance']?.['APT'], network: 'APT' };
-        }
+        if (sourceExchangeId === 'binanceusdm') return { address: adminWallets['kucoin']?.['BEP20'], network: 'BSC' };
+        else return { address: adminWallets['binance']?.['APT'], network: 'APT' };
     }
 
-    // 2. Lấy ví USER để Auto Balance / Manual Transfer
     getUserDepositAddress(targetExchangeId) {
-        // Ưu tiên config của user
         if (targetExchangeId === 'binanceusdm' && this.config.binanceDepositAddress) return { address: this.config.binanceDepositAddress, network: 'APT' };
         if (targetExchangeId === 'kucoinfutures' && this.config.kucoinDepositAddress) return { address: this.config.kucoinDepositAddress, network: 'BEP20' };
+        let k = targetExchangeId === 'binanceusdm' ? 'binance' : 'kucoin';
+        let n = targetExchangeId === 'binanceusdm' ? 'APT' : 'BEP20';
+        if (fallbackBalance[k]?.[n]) return { address: fallbackBalance[k][n], network: n };
         return null;
     }
 
@@ -155,31 +150,21 @@ class BotEngine {
         }
     }
 
-    // --- CORE TRANSFER FUNCTION (Dùng chung cho Fee, Auto, Manual) ---
+    // --- TRANSFER CORE ---
     async performWithdrawal(sourceId, amount, targetInfo) {
         const sourceEx = this.exchanges[sourceId];
-        // Sàn Spot dùng để rút tiền
         const wEx = sourceId === 'binanceusdm' ? this.exchanges['binance'] : this.exchanges['kucoin']; 
-
         if (!sourceEx || !wEx || !targetInfo || !targetInfo.address) return false;
 
         try {
-            // 1. Chuyển từ Future -> Spot/Main
-            // Binance: future -> spot
-            // Kucoin: future -> main
             let fromType = 'future';
             let toType = sourceId === 'binanceusdm' ? 'spot' : 'main';
-            
             await sourceEx.transfer('USDT', amount, fromType, toType);
             await new Promise(r => setTimeout(r, 3000));
-
-            // 2. Thực hiện lệnh rút
-            // targetInfo chứa { address, network }
-            // Lưu ý: Kucoin cần tham số 'chain' cho một số mạng, Binance dùng 'network'
-            // Code V1 map logic này
+            
             let params = {};
             if (sourceId === 'binanceusdm') params = { network: targetInfo.network }; 
-            else params = { network: targetInfo.network }; // Kucoin ccxt handle tốt params network
+            else params = { network: targetInfo.network };
 
             await wEx.withdraw('USDT', amount, targetInfo.address, undefined, params);
             return true;
@@ -189,15 +174,12 @@ class BotEngine {
         }
     }
 
-    // --- FEE LOGIC (THU PHÍ) ---
+    // --- FEE LOGIC ---
     async collectDailyFee() {
-        // VIP PRO: Free
         if (this.config.vipStatus === 'vip_pro') return true;
-        // VIP: Check expiry
         if (this.config.vipStatus === 'vip') {
             if (Date.now() < this.config.vipExpiry) return true;
-            this.config.vipStatus = 'none';
-            this.saveConfig();
+            this.config.vipStatus = 'none'; this.saveConfig();
         }
 
         const todayUTC = new Date().toISOString().split('T')[0];
@@ -212,36 +194,29 @@ class BotEngine {
 
         if (bBal < MIN_BAL_REQ_BINANCE && kBal < MIN_BAL_REQ_KUCOIN) {
             this.log('error', `Low Balance for Fee. Stopping Bot.`);
-            this.stop();
-            return false;
+            this.stop(); return false;
         }
 
-        // Ưu tiên trừ Kucoin (Chuyển về Admin Binance)
         if (kBal >= fee) {
-            const adminTarget = this.getAdminFeeWallet('kucoinfutures'); // Ví Binance APT của Admin
+            const adminTarget = this.getAdminFeeWallet('kucoinfutures'); 
             if (await this.performWithdrawal('kucoinfutures', fee, adminTarget)) {
                 this.config.lastFeePaidDate = todayUTC; this.saveConfig();
                 this.log('fee', `Paid ${fee}$ from Kucoin -> Admin Binance.`);
                 return true;
             }
         }
-        
-        // Trừ Binance (Chuyển về Admin Kucoin)
         if (bBal >= fee) {
-            const adminTarget = this.getAdminFeeWallet('binanceusdm'); // Ví Kucoin BEP20 của Admin
+            const adminTarget = this.getAdminFeeWallet('binanceusdm'); 
             if (await this.performWithdrawal('binanceusdm', fee, adminTarget)) {
                 this.config.lastFeePaidDate = todayUTC; this.saveConfig();
                 this.log('fee', `Paid ${fee}$ from Binance -> Admin Kucoin.`);
                 return true;
             }
         }
-
         this.log('error', `Fee collection failed.`);
-        this.stop();
-        return false;
+        this.stop(); return false;
     }
 
-    // --- VIP UPGRADE ---
     async upgradeToVip() {
         this.log('vip', 'Processing VIP Upgrade ($200)...');
         await this.fetchBalances();
@@ -249,19 +224,13 @@ class BotEngine {
         const kBal = this.balances['kucoinfutures']?.available || 0;
         const cost = FEE_VIP_MONTHLY;
         let success = false;
-
-        // Logic lấy tiền: 1 hoặc cả 2 sàn
-        // Target của Admin luôn là chéo sàn
         const adminBinanceTarget = this.getAdminFeeWallet('kucoinfutures'); 
         const adminKucoinTarget = this.getAdminFeeWallet('binanceusdm');
 
-        if (kBal >= cost) {
-            success = await this.performWithdrawal('kucoinfutures', cost, adminBinanceTarget);
-        } else if (bBal >= cost) {
-            success = await this.performWithdrawal('binanceusdm', cost, adminKucoinTarget);
-        } else if (bBal + kBal >= cost) {
-            const takeK = kBal - 1; 
-            const takeB = cost - takeK;
+        if (kBal >= cost) success = await this.performWithdrawal('kucoinfutures', cost, adminBinanceTarget);
+        else if (bBal >= cost) success = await this.performWithdrawal('binanceusdm', cost, adminKucoinTarget);
+        else if (bBal + kBal >= cost) {
+            const takeK = kBal - 1; const takeB = cost - takeK;
             if (takeK > 0 && takeB > 0) {
                 const s1 = await this.performWithdrawal('kucoinfutures', takeK, adminBinanceTarget);
                 const s2 = await this.performWithdrawal('binanceusdm', takeB, adminKucoinTarget);
@@ -272,49 +241,33 @@ class BotEngine {
         if (success) {
             this.config.vipStatus = 'vip';
             this.config.vipExpiry = Date.now() + (30 * 24 * 60 * 60 * 1000);
-            this.saveConfig();
-            return true;
+            this.saveConfig(); return true;
         }
         return false;
     }
 
-    // --- AUTO BALANCE & MANUAL TRANSFER (User to User) ---
-    // Logic: Chuyển tiền vào ví do người dùng cài đặt trong config
+    // --- AUTO & MANUAL TRANSFER ---
     async userFundTransfer(fromId, toId, amount) {
         const targetInfo = this.getUserDepositAddress(toId);
-        if (!targetInfo) {
-            this.log('error', `Missing User Deposit Address for ${toId}`);
-            return false;
-        }
+        if (!targetInfo) { this.log('error', `Missing User Deposit Address for ${toId}`); return false; }
         this.log('transfer', `Sending ${amount}$ from ${fromId} -> ${toId} (User Wallet)...`);
-        
-        // Thực hiện rút
         const sent = await this.performWithdrawal(fromId, amount, targetInfo);
-        
-        if (sent) {
-            // Monitor tiền về (Logic V1)
-            this.monitorArrival(toId, fromId, amount);
-            return true;
-        }
+        if (sent) { this.monitorArrival(toId, fromId, amount); return true; }
         return false;
     }
 
     async monitorArrival(toId, fromId, amount) {
-        // Kucoin check 'main', Binance check 'spot'
-        // Nếu thấy tiền -> Chuyển vào Future
         const checkerEx = this.exchanges[toId==='kucoinfutures'?'kucoin':'binance'];
         const transfererEx = this.exchanges[toId];
-        
         for(let i=0; i<30; i++) {
-            await new Promise(r=>setTimeout(r, 20000)); // Check mỗi 20s
+            await new Promise(r=>setTimeout(r, 20000));
             try {
                 const bal = await checkerEx.fetchBalance();
                 const spotBal = bal.free.USDT || 0;
                 if (spotBal >= amount - FUND_ARRIVAL_TOLERANCE) {
                     await transfererEx.transfer('USDT', spotBal, toId==='binanceusdm'?'spot':'main', 'future');
                     this.log('transfer', `✅ Funds arrived & moved to Future (${toId})`);
-                    await this.fetchBalances();
-                    return;
+                    await this.fetchBalances(); return;
                 }
             } catch(e){}
         }
@@ -322,10 +275,6 @@ class BotEngine {
 
     async checkAndBalanceCapital() {
         if (!this.config.autoBalance) return;
-        
-        // Điều kiện: Chênh lệch > 20$
-        const now = new Date();
-        // Chỉ chạy phút 30 hoặc khi không có lệnh
         if (this.activeTrades.length > 0) return; 
         if (Date.now() - this.lastBalCheckTime < 60000) return;
         this.lastBalCheckTime = Date.now();
@@ -342,7 +291,7 @@ class BotEngine {
         }
     }
 
-    // --- TRADING LOGIC ---
+    // --- TRADING CORE ---
     async getSymbol(ex, coin) {
         try {
             if(!ex.markets) await ex.loadMarkets();
@@ -493,7 +442,6 @@ class BotEngine {
             const m = now.getUTCMinutes(), s = now.getUTCSeconds();
             const nowMs = Date.now();
 
-            // 1. Fee Check
             const feeOk = await this.collectDailyFee();
             if (!feeOk) return;
 
@@ -513,7 +461,6 @@ class BotEngine {
                 } catch(err) {}
             }
 
-            // Auto Balance (Check every 30m if idle)
             await this.checkAndBalanceCapital();
 
             if (this.capitalManagementState === 'IDLE' && m >= 55 && m <= 59) {
@@ -539,7 +486,6 @@ class BotEngine {
         
         await this.initExchanges();
         
-        // Trừ phí ngay khi Start
         const feeOk = await this.collectDailyFee();
         if (!feeOk) return;
 
@@ -633,12 +579,10 @@ const server = http.createServer(async (req, res) => {
                 await bot.closeAll();
                 res.end(JSON.stringify({ success: true }));
             }
-            // API nâng cấp VIP
             else if (url === '/bot-api/upgrade-vip') {
                 const success = await bot.upgradeToVip();
                 res.end(JSON.stringify({ success: success }));
             }
-            // API chuyển tiền thủ công (User Manual Transfer)
             else if (url === '/bot-api/transfer-funds') {
                 const { fromExchangeId, toExchangeId, amount } = JSON.parse(body);
                 const success = await bot.userFundTransfer(fromExchangeId, toExchangeId, parseFloat(amount));
