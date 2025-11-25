@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Binance x KuCoin Bot</title>
+    <style>
+        :root {
+            --bg-dark: #0b0e11;
+            --binance-yellow: #F0B90B;
+            --kucoin-green: #24AE8F;
+            --text: #EAECEF;
+            --card-bg: #1e2329;
+            --danger: #F6465D;
+        }
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            color: var(--text);
+            /* SPLIT BACKGROUND: Half Yellow/Black, Half Green/Blackish */
+            background: linear-gradient(90deg, #1e2026 50%, #001f16 50%);
+            min-height: 100vh;
+        }
+        .header {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+            background: rgba(0,0,0,0.3);
+            gap: 20px;
+        }
+        .logo { height: 50px; }
+        .x-sign { font-size: 2rem; font-weight: bold; color: #fff; }
+        
+        .container { max-width: 1200px; margin: 20px auto; padding: 0 15px; }
+        
+        /* Config Form (Overlay) */
+        .setup-overlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.9);
+            display: flex; justify-content: center; align-items: center;
+            z-index: 1000;
+        }
+        .setup-box {
+            background: var(--card-bg); padding: 30px; border-radius: 12px;
+            width: 500px; border: 1px solid #444;
+        }
+        .setup-box h2 { text-align: center; color: var(--binance-yellow); }
+        .form-group { margin-bottom: 15px; }
+        .form-group label { display: block; margin-bottom: 5px; font-size: 0.9rem; }
+        .form-group input { 
+            width: 100%; padding: 10px; background: #2b3139; 
+            border: 1px solid #444; color: #fff; border-radius: 4px; box-sizing: border-box;
+        }
+        .btn-start {
+            width: 100%; padding: 12px; background: var(--binance-yellow);
+            color: #000; font-weight: bold; border: none; border-radius: 4px; cursor: pointer;
+            font-size: 1.1rem;
+        }
+        
+        /* Dashboard */
+        .dashboard { display: none; }
+        .active { display: block; }
+        
+        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; margin-bottom: 20px; }
+        .card { background: var(--card-bg); padding: 20px; border-radius: 8px; border: 1px solid #333; }
+        .card h3 { margin-top: 0; border-bottom: 1px solid #444; padding-bottom: 10px; }
+        
+        .btn { padding: 10px 20px; border-radius: 4px; cursor: pointer; border: none; font-weight: bold; }
+        .btn-stop { background: var(--danger); color: #fff; }
+        .btn-close { background: #FF9800; color: #000; display: none; }
+        .btn-test { background: var(--kucoin-green); color: #fff; width: 100%; margin-top: 10px; }
+        
+        table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+        th, td { padding: 10px; text-align: left; border-bottom: 1px solid #444; }
+        .text-green { color: var(--kucoin-green); }
+        .text-red { color: var(--danger); }
+        
+        .control-panel { display: flex; gap: 15px; align-items: center; margin-bottom: 20px; background: var(--card-bg); padding: 15px; border-radius: 8px; }
+    </style>
+</head>
+<body>
+
+    <div class="header">
+        <img src="https://upload.wikimedia.org/wikipedia/commons/e/e8/Binance_Logo.svg" class="logo" alt="Binance">
+        <span class="x-sign">X</span>
+        <img src="https://assets.staticimg.com/cms/media/3gL2X75a5e3J20j4F4d2g2.png" class="logo" alt="KuCoin">
+    </div>
+
+    <!-- SETUP FORM (Start Screen) -->
+    <div id="setupScreen" class="setup-overlay">
+        <div class="setup-box">
+            <h2>BOT CONFIGURATION</h2>
+            <div class="form-group"><label>Binance API Key</label><input type="text" id="binKey"></div>
+            <div class="form-group"><label>Binance Secret</label><input type="password" id="binSec"></div>
+            <div class="form-group"><label>Binance Aptos Wallet (For Receiving)</label><input type="text" id="binWal"></div>
+            <hr style="border-color: #444;">
+            <div class="form-group"><label>KuCoin API Key</label><input type="text" id="kuKey"></div>
+            <div class="form-group"><label>KuCoin Secret</label><input type="password" id="kuSec"></div>
+            <div class="form-group"><label>KuCoin Passphrase</label><input type="password" id="kuPass"></div>
+            <div class="form-group"><label>KuCoin BEP20 Wallet (For Receiving)</label><input type="text" id="kuWal"></div>
+            <div class="form-group">
+                <label>
+                    <input type="checkbox" id="autoBalance"> Enable Auto Capital Balancing (Min 30)
+                </label>
+            </div>
+            <button class="btn-start" onclick="startBot()">START BOT</button>
+        </div>
+    </div>
+
+    <!-- MAIN DASHBOARD -->
+    <div id="mainDashboard" class="container dashboard">
+        <div class="control-panel">
+            <button class="btn btn-stop" onclick="stopBot()">STOP BOT</button>
+            <button id="btnClose" class="btn btn-close" onclick="closeTrades()">CLOSE & CLEANUP</button>
+            <div style="margin-left: auto;">
+                Status: <span id="statusText" style="font-weight:bold;">RUNNING</span>
+            </div>
+        </div>
+
+        <div class="grid">
+            <div class="card">
+                <h3>Balances</h3>
+                <div id="balances">Loading...</div>
+            </div>
+            <div class="card">
+                <h3>Best Opportunity</h3>
+                <div id="opportunity">Scanning...</div>
+            </div>
+             <div class="card">
+                <h3>Fast Test Trade</h3>
+                <label>Leverage: <input type="number" id="testLev" value="20" style="width:50px"></label>
+                <label>% Capital: <input type="number" id="testCap" value="10" style="width:50px"></label>
+                <button class="btn btn-test" onclick="sendTestTrade()">OPEN TEST TRADE</button>
+            </div>
+        </div>
+
+        <div class="card">
+            <h3>Trade History</h3>
+            <table>
+                <thead>
+                    <tr><th>Time</th><th>Coin</th><th>Pair</th><th>PNL</th><th>Profit (USDT)</th></tr>
+                </thead>
+                <tbody id="history"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+        // Load config on init
+        window.onload = async () => {
+            const res = await fetch('/bot-api/config');
+            const cfg = await res.json();
+            if(cfg) {
+                document.getElementById('binKey').value = cfg.binanceApiKey || '';
+                document.getElementById('binSec').value = cfg.binanceApiSecret || '';
+                document.getElementById('binWal').value = cfg.binanceDepositAddress || '';
+                document.getElementById('kuKey').value = cfg.kucoinApiKey || '';
+                document.getElementById('kuSec').value = cfg.kucoinApiSecret || '';
+                document.getElementById('kuPass').value = cfg.kucoinPassword || '';
+                document.getElementById('kuWal').value = cfg.kucoinDepositAddress || '';
+            }
+            setInterval(updateStatus, 2000);
+        };
+
+        async function startBot() {
+            const config = {
+                binanceApiKey: document.getElementById('binKey').value,
+                binanceApiSecret: document.getElementById('binSec').value,
+                binanceDepositAddress: document.getElementById('binWal').value,
+                kucoinApiKey: document.getElementById('kuKey').value,
+                kucoinApiSecret: document.getElementById('kuSec').value,
+                kucoinPassword: document.getElementById('kuPass').value,
+                kucoinDepositAddress: document.getElementById('kuWal').value,
+                autoBalance: document.getElementById('autoBalance').checked
+            };
+
+            const res = await fetch('/bot-api/start', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(config)
+            });
+            const data = await res.json();
+            if(data.success) {
+                document.getElementById('setupScreen').style.display = 'none';
+                document.getElementById('mainDashboard').classList.add('active');
+            } else {
+                alert('Start failed: ' + data.message);
+            }
+        }
+
+        async function stopBot() {
+            await fetch('/bot-api/stop', { method: 'POST' });
+            location.reload(); 
+        }
+
+        async function closeTrades() {
+            if(confirm('Close all trades?')) {
+                await fetch('/bot-api/close-trade-now', { method: 'POST' });
+            }
+        }
+
+        async function sendTestTrade() {
+            const lev = document.getElementById('testLev').value;
+            const cap = document.getElementById('testCap').value;
+            await fetch('/bot-api/custom-test-trade', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ leverage: lev, percentage: cap })
+            });
+            alert('Test Trade Sent!');
+        }
+
+        async function updateStatus() {
+            try {
+                const res = await fetch('/bot-api/status');
+                const data = await res.json();
+                
+                // Show/Hide Close Button
+                const btnClose = document.getElementById('btnClose');
+                if(data.activeTrades && data.activeTrades.length > 0) {
+                    btnClose.style.display = 'block';
+                } else {
+                    btnClose.style.display = 'none';
+                }
+
+                // Update Balances
+                let balHtml = '';
+                for(let k in data.balances) {
+                    balHtml += `<div>${k.toUpperCase()}: ${data.balances[k].available.toFixed(2)} USDT</div>`;
+                }
+                document.getElementById('balances').innerHTML = balHtml;
+
+                // Update Opp
+                if(data.bestPotentialOpportunityForDisplay) {
+                    const op = data.bestPotentialOpportunityForDisplay;
+                    document.getElementById('opportunity').innerHTML = `
+                        <div style="font-size:1.2rem; color:var(--kucoin-green)">${op.coin}</div>
+                        <div>PNL: ${op.estimatedPnl.toFixed(2)}%</div>
+                    `;
+                }
+
+                // History
+                let histHtml = '';
+                data.tradeHistory.slice(0, 10).forEach(t => {
+                    const pnl = t.actualPnl || 0;
+                    histHtml += `<tr>
+                        <td>${new Date(t.entryTime).toLocaleTimeString()}</td>
+                        <td>${t.coin}</td>
+                        <td>${t.shortExchange}/${t.longExchange}</td>
+                        <td class="${pnl>=0?'text-green':'text-red'}">${t.estimatedPnlFromOpportunity.toFixed(2)}%</td>
+                        <td class="${pnl>=0?'text-green':'text-red'}">${pnl.toFixed(4)}</td>
+                    </tr>`;
+                });
+                document.getElementById('history').innerHTML = histHtml;
+
+            } catch(e) {}
+        }
+    </script>
+</body>
+</html>
