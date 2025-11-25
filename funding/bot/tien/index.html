@@ -122,9 +122,7 @@
             </div>
             <div class="user-info-row">
                 <span id="userDisplay">User</span>
-                <!-- Badge hiển thị khi là VIP -->
-                <span id="vipBadge" class="vip-badge">VIP</span>
-                <!-- Nút mua hiển thị khi chưa là VIP -->
+                <span id="vipBadge" class="vip-badge" style="display:none">VIP</span>
                 <button id="upgradeBtn" class="btn-vip" onclick="upgradeVip()">UPGRADE VIP ($200/Mo)</button>
                 <span class="logout-btn" onclick="logout()">LOGOUT ➔</span>
             </div>
@@ -240,19 +238,21 @@
                 
                 <hr style="border-color:#333; margin:15px 0;">
                 
-                <h4>* Cách hoạt động:</h4>
-                <p>- Long sàn funding thấp, Short sàn funding cao. Kiếm thu nhập từ chênh lệch phí funding.</p>
-                <h4>* Phí quản lý bot:</h4>
-                <p>Chúng tôi trực tiếp thu phí quản lý từ tài khoản của bạn với mức phí:</p>
+                <h4>* How it works:</h4>
+                <p>- Long on low funding rate exchange, Short on high funding rate exchange. Earn income from funding fee difference.</p>
+                
+                <h4>* Bot Management Fees:</h4>
+                <p>We directly collect management fees from your account at the following rates:</p>
                 <ul>
-                    <li><strong>Auto balance:</strong> 10$/ ngày</li>
-                    <li><strong>Bình thường:</strong> 5$/ ngày</li>
+                    <li><strong>Auto balance:</strong> 10$/ day</li>
+                    <li><strong>Standard:</strong> 5$/ day</li>
                 </ul>
-                <p style="color: #ff9800; font-style: italic;">Lưu ý: Nếu số dư không đủ trả phí, bot sẽ không hoạt động.</p>
-                <h4>* Nâng cấp VIP:</h4>
-                <p>Để miễn phí phí quản lý hàng ngày, bạn có thể nâng lên tài khoản VIP với phí <strong>200$/ tháng</strong>.</p>
+                <p style="color: #ff9800; font-style: italic;">Note: If the balance is insufficient to pay the fee, the bot will stop.</p>
+                
+                <h4>* VIP Upgrade:</h4>
+                <p>To waive daily fees, you can upgrade to a VIP account for <strong>200$/ month</strong>.</p>
+                <button class="btn-save" style="background: gold; color: #000; margin-top:10px;" onclick="upgradeVip()">CLICK HERE TO UPGRADE VIP ($200)</button>
             </div>
-            <button class="btn-save" style="background:#333; color:#fff; margin-top:20px;" onclick="document.getElementById('termsModal').style.display='none'">CLOSE</button>
         </div>
     </div>
 
@@ -261,6 +261,14 @@
         function showLogin() { document.getElementById('registerSection').style.display='none'; document.getElementById('loginSection').style.display='flex'; }
         function showRegister() { document.getElementById('loginSection').style.display='none'; document.getElementById('registerSection').style.display='flex'; }
         function logout() { localStorage.removeItem('bot_username'); location.reload(); }
+
+        // FORMAT TIME (Phút:Giây)
+        function formatTime(ms) {
+            if (ms < 0) return "00:00";
+            const m = Math.floor(ms / 60000);
+            const s = Math.floor((ms % 60000) / 1000);
+            return `${m}:${s < 10 ? '0'+s : s}`;
+        }
 
         async function handleRegister() {
             const res = await fetch('/bot-api/register', { method:'POST', body:JSON.stringify({username:document.getElementById('regUser').value, password:document.getElementById('regPass1').value, email:document.getElementById('regEmail').value}) });
@@ -304,12 +312,10 @@
             const c = await apiCall('/bot-api/config');
             if(c) {
                 document.getElementById('autoBalanceDisplay').checked = c.autoBalance;
-                // CHECK NGAY KHI LOAD
                 updateVipButton(c.vipStatus);
             }
         }
         
-        // HÀM CẬP NHẬT NÚT VIP
         function updateVipButton(status) {
             const btn = document.getElementById('upgradeBtn');
             const badge = document.getElementById('vipBadge');
@@ -336,24 +342,20 @@
         }
 
         async function upgradeVip() {
-            // BỎ HỎI - TRỪ LUÔN
+            // NO CONFIRM POPUP
             const r = await apiCall('/bot-api/upgrade-vip','POST');
-            if(r.success) { 
-                alert("Nâng cấp thành công!"); 
-                loadInitConfig(); 
-            } else {
-                alert("Thất bại: Không đủ số dư trên sàn.");
-            }
+            if(r.success) { alert("Upgrade successful! You are now a VIP."); loadInitConfig(); } 
+            else alert("Failed: Insufficient balance on exchanges.");
         }
 
         async function manualTransfer() {
             const amt = document.getElementById('tAmt').value;
             const from = document.getElementById('tFrom').value;
             const to = document.getElementById('tTo').value;
-            if(!amt || from===to) return alert("Kiểm tra lại thông tin");
-            if(confirm(`Chuyển ${amt}$ từ ${from} sang ${to}?`)) {
+            if(!amt || from===to) return alert("Please check input details.");
+            if(confirm(`Transfer ${amt}$ from ${from} to ${to}?`)) {
                 const r = await apiCall('/bot-api/transfer-funds','POST', {fromExchangeId:from, toExchangeId:to, amount:amt});
-                if(r.success) { alert("Đã gửi lệnh chuyển tiền!"); document.getElementById('manualModal').style.display='none'; } else alert("Lỗi khi gửi lệnh.");
+                if(r.success) { alert("Transfer command sent!"); document.getElementById('manualModal').style.display='none'; } else alert("Error sending command.");
             }
         }
 
@@ -365,9 +367,9 @@
                 updateUI();
             } else {
                 if (res.message === 'INSUFFICIENT_FEE_BALANCE') {
-                    alert("Không đủ số dư trả phí bot! Vui lòng nạp thêm tiền.");
+                    alert("Insufficient balance for bot fees! Please deposit more funds.");
                 } else {
-                    alert("Khởi động thất bại.");
+                    alert("Start failed.");
                 }
                 updateUI();
             }
@@ -389,16 +391,44 @@
             if(run) document.querySelectorAll('.hide-on-run').forEach(e=>e.classList.add('active'));
             else { document.querySelectorAll('.hide-on-run').forEach(e=>e.classList.remove('active')); checkTerms(); }
 
-            // CẬP NHẬT TRẠNG THÁI VIP LIÊN TỤC (ĐỂ NẾU HẾT HẠN THÌ HIỆN LẠI NÚT)
             updateVipButton(d.vipStatus);
 
             let bH = '';
             for(let k in d.balances) bH += `<div style="display:flex;justify-content:space-between;border-bottom:1px solid #333;padding:5px"><span>${k.includes('binance')?'BINANCE':'KUCOIN'}</span><span>${d.balances[k].available.toFixed(2)}$</span></div>`;
             document.getElementById('balancesContent').innerHTML = bH;
 
+            // --- DISPLAY OPPORTUNITY DETAILS ---
             if(d.bestPotentialOpportunityForDisplay) {
-                const o = d.bestPotentialOpportunityForDisplay;
-                document.getElementById('oppContent').innerHTML = `<h2 style="margin:0;color:#fff">${o.coin}</h2><div style="color:var(--kucoin-green);font-size:1.2rem">Est PNL: ${o.estimatedPnl}%</div>`;
+                const op = d.bestPotentialOpportunityForDisplay;
+                const now = Date.now();
+                const timeLeft = op.nextFundingTime ? (op.nextFundingTime - now) : 0;
+                const timerText = timeLeft > 0 ? formatTime(timeLeft) : "NOW";
+
+                const sExName = op.details.shortExchange.includes('binance') ? 'BINANCE' : 'KUCOIN';
+                const lExName = op.details.longExchange.includes('binance') ? 'BINANCE' : 'KUCOIN';
+                
+                const sColor = sExName === 'BINANCE' ? 'var(--binance-yellow)' : 'var(--kucoin-green)';
+                const lColor = lExName === 'BINANCE' ? 'var(--binance-yellow)' : 'var(--kucoin-green)';
+
+                document.getElementById('oppContent').innerHTML = `
+                    <div style="font-size:1.8rem; font-weight:bold; color:#fff; margin-bottom:5px;">${op.coin}</div>
+                    <div style="color:var(--kucoin-green); font-size:1.2rem; margin-bottom:10px;">PNL: ${op.estimatedPnl.toFixed(2)}%</div>
+                    
+                    <div style="display:flex; justify-content:space-between; width:100%; font-size:0.9rem; border-top:1px solid #333; padding-top:10px;">
+                        <div style="text-align:left">
+                            <span style="color:#ff5722; font-weight:bold;">SHORT</span><br>
+                            <span style="color:${sColor}">${sExName}</span>
+                        </div>
+                        <div style="text-align:center">
+                            <span style="color:#888;">COUNTDOWN</span><br>
+                            <span style="color:#fff; font-weight:bold;">${timerText}</span>
+                        </div>
+                        <div style="text-align:right">
+                            <span style="color:#00d095; font-weight:bold;">LONG</span><br>
+                            <span style="color:${lColor}">${lExName}</span>
+                        </div>
+                    </div>
+                `;
             } else document.getElementById('oppContent').innerHTML = `<span style="color:#555">Scanning...</span>`;
 
             let hH = '';
