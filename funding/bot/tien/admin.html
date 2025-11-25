@@ -9,17 +9,20 @@
         body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', sans-serif; margin: 0; padding: 20px; }
         h2 { margin-top: 0; color: var(--accent); border-bottom: 1px solid #333; padding-bottom: 10px; }
 
+        /* TABLE */
         table { width: 100%; border-collapse: collapse; background: var(--card); font-size: 0.9rem; }
         th, td { padding: 12px; border: 1px solid var(--border); text-align: left; }
         th { background: #252525; text-transform: uppercase; color: #aaa; position: sticky; top: 0; }
         tr:hover { background: #2a2a2a; }
         .user-link { color: var(--accent); cursor: pointer; text-decoration: underline; font-weight: bold; }
         
+        /* STATUS COLORS */
         .pnl-pos { color: var(--success); font-weight: bold; }
         .pnl-neg { color: var(--danger); font-weight: bold; }
         .vip-tag { color: #000; background: var(--vip); padding: 2px 6px; border-radius: 4px; font-weight: bold; font-size: 0.75rem; }
         .vip-pro-tag { color: #fff; background: linear-gradient(45deg, #ff00cc, #333399); padding: 2px 6px; border-radius: 4px; font-weight: bold; font-size: 0.75rem; }
 
+        /* PANEL */
         .panel { background: var(--card); padding: 20px; border-radius: 8px; margin-bottom: 20px; border: 1px solid var(--border); box-shadow: 0 4px 6px rgba(0,0,0,0.3); }
         .controls { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 15px; align-items: end; }
         
@@ -34,6 +37,7 @@
 
         #selectionInfo { color: var(--warning); font-weight: bold; margin-top: 10px; }
 
+        /* MODAL */
         .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.85); z-index: 1000; justify-content: center; align-items: center; }
         .modal-content { background: var(--card); padding: 20px; width: 700px; max-height: 90vh; overflow-y: auto; border-radius: 8px; border: 1px solid var(--accent); }
         .acc-item { border: 1px solid var(--border); margin-bottom: 5px; }
@@ -47,7 +51,7 @@
 </head>
 <body>
 
-    <!-- 1. BẢNG CHUYỂN TIỀN ADMIN -->
+    <!-- 1. BẢNG CHUYỂN TIỀN -->
     <div class="panel">
         <h2 style="color: var(--danger);">💸 Chuyển Tiền Admin</h2>
         <div class="controls">
@@ -83,10 +87,11 @@
         <div id="actionLog">Logs...</div>
     </div>
 
-    <!-- 2. BẢNG QUẢN LÝ VIP (MỚI) -->
+    <!-- 2. BẢNG QUẢN LÝ VIP -->
     <div class="panel" style="border-color: var(--vip);">
-        <h2 style="color: var(--vip);">👑 Nâng Cấp VIP</h2>
+        <h2 style="color: var(--vip);">👑 Cập Nhật VIP (Hàng Loạt)</h2>
         <div id="selectionInfo">Đang chọn: 0 Users</div>
+        
         <div class="controls" style="margin-top: 10px; align-items: center;">
             <div style="display: flex; gap: 10px; width: 100%;">
                 <select id="vipSelect" style="flex: 2;">
@@ -94,7 +99,7 @@
                     <option value="vip">VIP (30 Ngày)</option>
                     <option value="vip_pro">VIP PRO (Free Trọn Đời)</option>
                 </select>
-                <button class="vip-btn" style="flex: 1;" onclick="executeVipUpdate()">CẬP NHẬT VIP</button>
+                <button class="vip-btn" style="flex: 1;" onclick="executeVipUpdate()">CẬP NHẬT VIP NGAY</button>
             </div>
         </div>
     </div>
@@ -102,7 +107,7 @@
     <!-- 3. DANH SÁCH USER -->
     <div class="panel">
         <div style="display:flex; justify-content:space-between; align-items:center;">
-            <h2>👥 Danh Sách Tài Khoản</h2>
+            <h2>👥 Danh Sách Tài Khoản (Snapshot khi Start)</h2>
             <button onclick="loadUsers()" style="width:auto; background:#333;">🔄 Refresh</button>
         </div>
         
@@ -114,11 +119,14 @@
                     <th>Email</th>
                     <th>Status</th>
                     <th>Last Login</th>
+                    <th>Binance Fut</th>
+                    <th>KuCoin Fut</th>
+                    <th style="color: var(--success);">TỔNG TÀI SẢN</th>
                     <th>Tổng PNL</th>
                 </tr>
             </thead>
             <tbody id="userTableBody">
-                <tr><td colspan="6">Đang tải dữ liệu...</td></tr>
+                <tr><td colspan="9">Đang tải dữ liệu...</td></tr>
             </tbody>
         </table>
     </div>
@@ -136,12 +144,14 @@
         let usersData = [];
         let selectedUsernames = new Set();
 
+        // --- LOAD USERS ---
         async function loadUsers() {
             try {
                 const res = await fetch('/api/users');
                 usersData = await res.json();
                 
-                usersData.sort((a, b) => b.totalPnl - a.totalPnl);
+                // Sort: Giàu nhất lên đầu
+                usersData.sort((a, b) => b.totalAll - a.totalAll);
 
                 const tbody = document.getElementById('userTableBody');
                 tbody.innerHTML = '';
@@ -149,7 +159,6 @@
                 usersData.forEach(u => {
                     const pnlClass = u.totalPnl >= 0 ? 'pnl-pos' : 'pnl-neg';
                     const lastLogin = u.lastLogin ? new Date(u.lastLogin).toLocaleString('vi-VN') : '-';
-                    // userId = filename without .json
                     const userId = u.username; 
 
                     let statusTag = '<span style="color:#777">Std</span>';
@@ -165,6 +174,12 @@
                         <td>${u.email || '-'}</td>
                         <td>${statusTag}</td>
                         <td style="font-size:0.8rem; color:#aaa;">${lastLogin}</td>
+                        
+                        <!-- CÁC CỘT SỐ DƯ ĐỌC TỪ SNAPSHOT -->
+                        <td style="color:#F0B90B">${(u.binanceFuture || 0).toFixed(1)} $</td>
+                        <td style="color:#24AE8F">${(u.kucoinFuture || 0).toFixed(1)} $</td>
+                        <td style="font-weight:bold; color:#fff;">${(u.totalAll || 0).toFixed(1)} $</td>
+                        
                         <td class="${pnlClass}">${u.totalPnl.toFixed(2)} $</td>
                     `;
                     tbody.appendChild(tr);
@@ -173,6 +188,7 @@
             } catch(e) { console.error(e); }
         }
 
+        // --- SELECTION ---
         function toggleCheckAll() {
             const isChecked = document.getElementById('checkAll').checked;
             document.querySelectorAll('.user-check').forEach(cb => cb.checked = isChecked);
@@ -205,6 +221,7 @@
             if (!targets) return alert("Vui lòng chọn ít nhất 1 User.");
             
             const level = document.getElementById('vipSelect').value;
+            
             const res = await fetch('/api/admin/set-vip', {
                 method: 'POST',
                 body: JSON.stringify({ users: targets, vipStatus: level })
@@ -275,6 +292,7 @@
                 let rows = items.map(i => `<tr><td>${i.coin}</td><td>${i.amount.toFixed(4)}</td><td style="color:${color}">${i.value.toFixed(2)}$</td></tr>`).join('');
                 return `<div class="acc-item"><div class="acc-header" onclick="this.nextElementSibling.classList.toggle('show')"><span>${title}</span><span style="color:${color}">${total.toFixed(2)} $</span></div><div class="acc-content"><table>${rows}</table></div></div>`;
             };
+            // Hiển thị chi tiết
             html += renderSection('BINANCE FUT', data.binance.future, data.binance.total, '#F0B90B');
             html += renderSection('KUCOIN FUT', data.kucoin.future, data.kucoin.total, '#24AE8F');
             html += renderSection('BINANCE SPOT', data.binance.spot, data.binance.spot.reduce((a,b)=>a+b.value,0), '#F0B90B');
