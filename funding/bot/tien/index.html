@@ -20,7 +20,7 @@
             background-color: var(--bg-color);
             color: var(--text-color);
             margin: 0;
-            padding: 15px;
+            padding: 10px; /* Giảm padding body cho mobile */
         }
 
         /* --- AUTH OVERLAY --- */
@@ -49,38 +49,100 @@
         }
         .link-text { color: #888; margin-top: 15px; font-size: 0.9rem; cursor: pointer; text-decoration: underline; }
 
-        /* --- HEADER --- */
-        .header {
-            display: flex; justify-content: space-between; align-items: center;
-            margin-bottom: 20px; padding: 10px 20px;
-            background: #0a0a0a; border-bottom: 1px solid #222;
-            white-space: nowrap; overflow-x: auto;
+        /* --- HEADER (Fixed Layout) --- */
+        .header-container {
+            background: #0a0a0a; 
+            padding: 15px; 
+            margin-bottom: 20px;
+            border-bottom: 1px solid #222;
+            /* Luôn xếp dọc: Logo trên, User dưới */
+            display: flex; 
+            flex-direction: column; 
+            align-items: center; 
+            gap: 15px;
         }
-        .brand-group { display: flex; align-items: center; gap: 20px; }
-        .brand { display: flex; align-items: center; gap: 8px; font-weight: bold; font-size: 1.1rem; }
+        
+        .logos-row {
+            display: flex; align-items: center; gap: 25px;
+            flex-wrap: nowrap; /* Không bao giờ xuống dòng logo */
+        }
+        .brand { display: flex; align-items: center; gap: 6px; font-weight: bold; font-size: 1.1rem; white-space: nowrap; }
         .logo { height: 30px; }
         .logo-kucoin { height: 30px; filter: grayscale(100%) brightness(80%) sepia(100%) hue-rotate(100deg) saturate(500%); }
         .text-yellow { color: var(--binance-yellow); }
         .text-green { color: var(--kucoin-green); }
-        .user-info-row { display:flex; align-items:center; gap:15px; background:#1a1a1a; padding:5px 15px; border-radius:20px; border:1px solid #333; font-size:0.9rem; }
-        .logout-btn { color:var(--danger); cursor:pointer; font-weight:bold; font-size:0.7rem; text-transform:uppercase; }
+        
+        /* User Info Row */
+        .user-info-row {
+            display: flex; align-items: center; gap: 15px;
+            background: #151515; padding: 6px 20px; border-radius: 20px;
+            font-size: 0.9rem; color: #bbb; border: 1px solid #333;
+        }
+        .logout-btn { color: var(--danger); cursor: pointer; font-weight: bold; font-size: 0.75rem; text-transform: uppercase; }
 
         /* --- CONTROLS --- */
         .container { max-width: 1200px; margin: 0 auto; }
         .controls-bar {
-            display: flex; flex-wrap: wrap; gap: 10px; align-items: center;
+            display: flex; flex-wrap: wrap; gap: 12px; align-items: center;
             background: var(--card-bg); border: 1px solid #222;
             padding: 15px; border-radius: 8px; margin-bottom: 20px;
             box-shadow: 0 5px 15px rgba(0,0,0,0.3);
         }
+        
         .hide-on-run.active { display: none !important; }
-        .input-group { display: flex; align-items: center; gap: 8px; background: #000; padding: 8px 12px; border: 1px solid #444; border-radius: 4px; }
-        input[type="number"] { background: #222; border: 1px solid #444; color: var(--binance-yellow); padding: 5px; border-radius: 3px; width: 60px; text-align: center; font-weight: bold; }
-        .btn { padding: 10px 20px; border: none; border-radius: 4px; font-weight: bold; cursor: pointer; }
+
+        .input-group {
+            display: flex; align-items: center; gap: 8px;
+            background: #000; padding: 8px 12px;
+            border: 1px solid #444; border-radius: 4px;
+        }
+        input[type="number"] {
+            background: #222; border: 1px solid #444; color: var(--binance-yellow);
+            padding: 5px; border-radius: 3px; width: 60px; text-align: center; font-weight: bold;
+        }
+
+        /* AUTO BALANCE & HELP ICON */
+        .auto-bal-wrapper {
+            display: flex; align-items: center; gap: 6px;
+            position: relative;
+        }
+        .checkbox-label {
+            cursor: pointer; font-size: 0.9rem; color: #ccc;
+            display: flex; align-items: center; gap: 6px;
+        }
+        input[type="checkbox"] { accent-color: var(--kucoin-green); cursor: pointer; }
+        
+        /* Nút ? Tròn nhỏ */
+        .help-circle {
+            display: inline-flex; justify-content: center; align-items: center;
+            width: 16px; height: 16px;
+            border: 1px solid #666; border-radius: 50%;
+            color: #888; font-size: 10px; font-weight: bold;
+            cursor: pointer;
+        }
+        
+        .tooltip {
+            display: none; position: absolute; top: 30px; left: 0;
+            background: #222; border: 1px solid #444; padding: 10px;
+            border-radius: 6px; width: 220px; z-index: 100;
+            color: #eee; font-size: 0.8rem; line-height: 1.4;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.5);
+        }
+
+        /* TERMS */
+        .terms-group {
+            display: flex; align-items: center; gap: 8px; font-size: 0.85rem; color: #aaa;
+            margin-right: 10px;
+        }
+        .terms-link { color: var(--binance-yellow); text-decoration: underline; cursor: pointer; }
+
+        /* BUTTONS */
+        .btn { padding: 10px 20px; border: none; border-radius: 4px; font-weight: bold; cursor: pointer; text-transform: uppercase; white-space: nowrap; }
         .btn-config { background: #333; color: #fff; border: 1px solid #555; }
         .btn-start { background: var(--binance-yellow); color: #000; }
         .btn-start:disabled { background: #444; color: #888; cursor: not-allowed; opacity: 0.7; }
         .btn-stop { background: var(--danger); color: #fff; }
+        .btn-close { background: #ff5722; color: #fff; display: block; margin: 20px auto; padding: 10px 30px; }
 
         /* GRID */
         .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 15px; }
@@ -89,17 +151,17 @@
             border-radius: 12px; padding: 15px;
             box-shadow: 4px 4px 10px rgba(0,0,0,0.5);
         }
-        .card h3 { margin: 0 0 10px 0; border-bottom: 1px solid #333; padding-bottom: 8px; color: var(--binance-yellow); font-size: 1rem; }
+        .card h3 { margin: 0 0 10px 0; border-bottom: 1px solid #333; padding-bottom: 8px; color: var(--binance-yellow); font-size: 1rem; text-transform: uppercase; }
 
         /* MODAL */
         .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.9); z-index: 1000; justify-content: center; align-items: center; }
         .modal-content { background: #111; border: 2px solid var(--binance-yellow); padding: 20px; border-radius: 10px; width: 90%; max-width: 500px; max-height: 90vh; overflow-y: auto; }
         .form-row { margin-bottom: 12px; }
-        .form-row label { display: block; margin-bottom: 3px; color: #aaa; font-size: 0.8rem; }
+        .form-row label { display: block; margin-bottom: 4px; color: #aaa; font-size: 0.8rem; }
         .form-row input { width: 100%; padding: 10px; background: #222; border: 1px solid #444; color: #fff; box-sizing: border-box; font-family: monospace; }
         .btn-save { width: 100%; background: var(--kucoin-green); color: #000; margin-top: 10px; padding: 12px; border:none; font-weight:bold; cursor:pointer; }
 
-        /* TERMS */
+        /* TERMS CONTENT */
         .terms-content { color: #ddd; font-size: 0.9rem; line-height: 1.5; text-align: left; }
         .terms-content h4 { color: var(--danger); margin-top: 15px; margin-bottom: 5px; }
 
@@ -111,11 +173,9 @@
         .text-neg { color: var(--danger); }
 
         @media (max-width: 600px) {
-            .brand-group { gap: 10px; }
-            .brand { font-size: 0.9rem; }
-            .logo, .logo-kucoin { height: 25px; }
             .controls-bar { flex-direction: column; align-items: stretch; }
             .input-group { justify-content: space-between; }
+            /* Header đã set flex-column ở trên nên mobile tự đẹp */
         }
     </style>
 </head>
@@ -136,7 +196,6 @@
     <div id="registerSection" class="auth-overlay" style="display:none;">
         <div class="auth-box">
             <h2 style="color: var(--kucoin-green);">REGISTER</h2>
-            <!-- [REQ] Thêm ô Email -->
             <input type="text" id="regEmail" placeholder="Email">
             <input type="text" id="regUser" placeholder="Username">
             <input type="text" id="regPass1" placeholder="Password">
@@ -149,18 +208,20 @@
     <!-- DASHBOARD -->
     <div id="dashboardSection" style="display:none;">
         
-        <div class="header">
-            <div class="brand-group">
+        <div class="header-container">
+            <!-- Hàng 1: Logo -->
+            <div class="logos-row">
                 <div class="brand">
                     <img src="https://upload.wikimedia.org/wikipedia/commons/e/e8/Binance_Logo.svg" class="logo">
                     <span class="text-yellow">BINANCE</span>
                 </div>
-                <span class="x-sign" style="color:#444">✕</span>
+                <span style="color:#444; font-size:1.2rem;">✕</span>
                 <div class="brand">
                     <img src="https://cryptologos.cc/logos/kucoin-token-kcs-logo.png?v=025" class="logo-kucoin">
                     <span class="text-green">KUCOIN</span>
                 </div>
             </div>
+            <!-- Hàng 2: User Info (Luôn nằm dưới) -->
             <div class="user-info-row">
                 <span id="userDisplay">User</span>
                 <span class="logout-btn" onclick="logout()">LOGOUT ➔</span>
@@ -170,6 +231,7 @@
         <div class="container">
             <div class="controls-bar" id="controlsBar">
                 
+                <!-- Vốn -->
                 <div class="input-group hide-on-run">
                     <label style="margin-right:10px"><input type="radio" name="capMode" value="percent" checked> % Cap</label>
                     <label><input type="radio" name="capMode" value="fixed"> Fixed $</label>
@@ -179,13 +241,14 @@
                     <input type="number" id="capitalInput" value="50">
                 </div>
                 
-                <div class="auto-bal-group hide-on-run">
-                    <label style="cursor: pointer; display:flex; align-items:center; gap:5px;">
+                <!-- Auto Balance + Help Icon -->
+                <div class="auto-bal-wrapper hide-on-run">
+                    <label class="checkbox-label">
                         <input type="checkbox" id="autoBalanceDisplay" onchange="updateAutoBalance()"> Auto-Balance
                     </label>
-                    <span class="help-btn" onclick="toggleTooltip(event)">?</span>
+                    <span class="help-circle" onclick="toggleTooltip(event)">?</span>
                     <div id="balTooltip" class="tooltip">
-                        When the balance difference between Binance/KuCoin is > $20, the Bot automatically transfers funds to equalize both accounts.
+                        When balance difference > $20, Bot automatically equalizes funds between Binance & KuCoin (Check every 30 mins).
                     </div>
                 </div>
 
@@ -195,7 +258,7 @@
 
                 <div class="terms-group hide-on-run">
                     <input type="checkbox" id="termsCheck" onchange="checkTerms()">
-                    <label>I agree to <span class="terms-link" onclick="openTerms()">Terms & Disclaimer</span></label>
+                    <label>Agree to <span class="terms-link" onclick="openTerms()">Terms & Disclaimer</span></label>
                 </div>
 
                 <button id="btnStart" class="btn btn-start" onclick="startBot()" disabled>▶ START</button>
@@ -213,6 +276,10 @@
                     <h3>Best Opportunity</h3>
                     <div id="oppContent" style="text-align: center; padding: 15px;"><span style="color:#555">Connecting...</span></div>
                 </div>
+            </div>
+            
+            <div id="closeContainer" style="display:none;">
+                <button class="btn btn-close" onclick="closeAll()">🛑 EMERGENCY CLOSE</button>
             </div>
 
             <div class="card" style="margin-top: 20px;">
