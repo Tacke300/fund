@@ -50,75 +50,33 @@
         .link-text { color: #888; margin-top: 15px; font-size: 0.9rem; cursor: pointer; text-decoration: underline; }
 
         /* --- HEADER --- */
-        .header-container {
-            background: #0a0a0a; padding: 15px; margin-bottom: 20px;
-            border-bottom: 1px solid #222;
-            display: flex; flex-direction: column; align-items: center; gap: 15px;
+        .header {
+            display: flex; justify-content: space-between; align-items: center;
+            margin-bottom: 20px; padding: 10px 20px;
+            background: #0a0a0a; border-bottom: 1px solid #222;
+            white-space: nowrap; overflow-x: auto;
         }
-        .logos-row {
-            display: flex; align-items: center; gap: 30px;
-        }
-        .brand { display: flex; align-items: center; gap: 8px; font-weight: bold; font-size: 1.2rem; }
-        .logo { height: 35px; }
-        .logo-kucoin { height: 35px; filter: grayscale(100%) brightness(80%) sepia(100%) hue-rotate(100deg) saturate(500%); }
+        .brand-group { display: flex; align-items: center; gap: 20px; }
+        .brand { display: flex; align-items: center; gap: 8px; font-weight: bold; font-size: 1.1rem; }
+        .logo { height: 30px; }
+        .logo-kucoin { height: 30px; filter: grayscale(100%) brightness(80%) sepia(100%) hue-rotate(100deg) saturate(500%); }
         .text-yellow { color: var(--binance-yellow); }
         .text-green { color: var(--kucoin-green); }
-        
-        .user-info-row {
-            display: flex; align-items: center; gap: 15px;
-            background: #1a1a1a; padding: 8px 20px; border-radius: 20px;
-            font-size: 0.9rem; color: #ccc; border: 1px solid #333;
-        }
-        .logout-btn { color: var(--danger); cursor: pointer; font-weight: bold; font-size: 0.75rem; text-transform: uppercase; }
+        .user-info-row { display:flex; align-items:center; gap:15px; background:#1a1a1a; padding:5px 15px; border-radius:20px; border:1px solid #333; font-size:0.9rem; }
+        .logout-btn { color:var(--danger); cursor:pointer; font-weight:bold; font-size:0.7rem; text-transform:uppercase; }
 
         /* --- CONTROLS --- */
         .container { max-width: 1200px; margin: 0 auto; }
         .controls-bar {
-            display: flex; flex-wrap: wrap; gap: 15px; align-items: center;
+            display: flex; flex-wrap: wrap; gap: 10px; align-items: center;
             background: var(--card-bg); border: 1px solid #222;
             padding: 15px; border-radius: 8px; margin-bottom: 20px;
             box-shadow: 0 5px 15px rgba(0,0,0,0.3);
         }
-        
         .hide-on-run.active { display: none !important; }
-
-        .input-group {
-            display: flex; align-items: center; gap: 8px;
-            background: #000; padding: 8px 12px;
-            border: 1px solid #444; border-radius: 4px;
-        }
-        input[type="number"] {
-            background: #222; border: 1px solid #444; color: var(--binance-yellow);
-            padding: 5px; border-radius: 3px; width: 60px; text-align: center; font-weight: bold;
-        }
-
-        /* AUTO BALANCE */
-        .auto-bal-group {
-            display: flex; align-items: center; gap: 5px;
-            font-size: 0.9rem; color: #ccc; position: relative;
-        }
-        .help-btn {
-            background: #333; color: #fff; border-radius: 50%; width: 18px; height: 18px;
-            display: inline-flex; justify-content: center; align-items: center;
-            font-size: 12px; cursor: pointer; font-weight: bold;
-        }
-        .tooltip {
-            display: none; position: absolute; top: 30px; left: 0;
-            background: #222; border: 1px solid #444; padding: 10px;
-            border-radius: 6px; width: 250px; z-index: 100;
-            color: #eee; font-size: 0.8rem; line-height: 1.4;
-            box-shadow: 0 5px 15px rgba(0,0,0,0.5);
-        }
-
-        /* TERMS */
-        .terms-group {
-            display: flex; align-items: center; gap: 8px; font-size: 0.9rem; color: #aaa;
-            margin-right: 10px;
-        }
-        .terms-link { color: var(--binance-yellow); text-decoration: underline; cursor: pointer; }
-
-        /* BUTTONS */
-        .btn { padding: 10px 20px; border: none; border-radius: 4px; font-weight: bold; cursor: pointer; text-transform: uppercase; }
+        .input-group { display: flex; align-items: center; gap: 8px; background: #000; padding: 8px 12px; border: 1px solid #444; border-radius: 4px; }
+        input[type="number"] { background: #222; border: 1px solid #444; color: var(--binance-yellow); padding: 5px; border-radius: 3px; width: 60px; text-align: center; font-weight: bold; }
+        .btn { padding: 10px 20px; border: none; border-radius: 4px; font-weight: bold; cursor: pointer; }
         .btn-config { background: #333; color: #fff; border: 1px solid #555; }
         .btn-start { background: var(--binance-yellow); color: #000; }
         .btn-start:disabled { background: #444; color: #888; cursor: not-allowed; opacity: 0.7; }
@@ -131,17 +89,17 @@
             border-radius: 12px; padding: 15px;
             box-shadow: 4px 4px 10px rgba(0,0,0,0.5);
         }
-        .card h3 { margin: 0 0 10px 0; border-bottom: 1px solid #333; padding-bottom: 8px; color: var(--binance-yellow); font-size: 1rem; text-transform: uppercase; }
+        .card h3 { margin: 0 0 10px 0; border-bottom: 1px solid #333; padding-bottom: 8px; color: var(--binance-yellow); font-size: 1rem; }
 
         /* MODAL */
         .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.9); z-index: 1000; justify-content: center; align-items: center; }
         .modal-content { background: #111; border: 2px solid var(--binance-yellow); padding: 20px; border-radius: 10px; width: 90%; max-width: 500px; max-height: 90vh; overflow-y: auto; }
         .form-row { margin-bottom: 12px; }
-        .form-row label { display: block; margin-bottom: 4px; color: #aaa; font-size: 0.8rem; }
+        .form-row label { display: block; margin-bottom: 3px; color: #aaa; font-size: 0.8rem; }
         .form-row input { width: 100%; padding: 10px; background: #222; border: 1px solid #444; color: #fff; box-sizing: border-box; font-family: monospace; }
         .btn-save { width: 100%; background: var(--kucoin-green); color: #000; margin-top: 10px; padding: 12px; border:none; font-weight:bold; cursor:pointer; }
 
-        /* TERMS CONTENT */
+        /* TERMS */
         .terms-content { color: #ddd; font-size: 0.9rem; line-height: 1.5; text-align: left; }
         .terms-content h4 { color: var(--danger); margin-top: 15px; margin-bottom: 5px; }
 
@@ -153,12 +111,11 @@
         .text-neg { color: var(--danger); }
 
         @media (max-width: 600px) {
+            .brand-group { gap: 10px; }
+            .brand { font-size: 0.9rem; }
+            .logo, .logo-kucoin { height: 25px; }
             .controls-bar { flex-direction: column; align-items: stretch; }
             .input-group { justify-content: space-between; }
-            .logos-row { gap: 15px; }
-            .brand { font-size: 1rem; }
-            .logo, .logo-kucoin { height: 25px; }
-            .header-container { gap: 15px; }
         }
     </style>
 </head>
@@ -179,6 +136,8 @@
     <div id="registerSection" class="auth-overlay" style="display:none;">
         <div class="auth-box">
             <h2 style="color: var(--kucoin-green);">REGISTER</h2>
+            <!-- [REQ] Thêm ô Email -->
+            <input type="text" id="regEmail" placeholder="Email">
             <input type="text" id="regUser" placeholder="Username">
             <input type="text" id="regPass1" placeholder="Password">
             <input type="text" id="regPass2" placeholder="Confirm Password">
@@ -190,13 +149,13 @@
     <!-- DASHBOARD -->
     <div id="dashboardSection" style="display:none;">
         
-        <div class="header-container">
-            <div class="logos-row">
+        <div class="header">
+            <div class="brand-group">
                 <div class="brand">
                     <img src="https://upload.wikimedia.org/wikipedia/commons/e/e8/Binance_Logo.svg" class="logo">
                     <span class="text-yellow">BINANCE</span>
                 </div>
-                <span style="color:#444; font-size:1.2rem;">✕</span>
+                <span class="x-sign" style="color:#444">✕</span>
                 <div class="brand">
                     <img src="https://cryptologos.cc/logos/kucoin-token-kcs-logo.png?v=025" class="logo-kucoin">
                     <span class="text-green">KUCOIN</span>
@@ -348,16 +307,17 @@
         }
 
         async function handleRegister() {
+            const email = document.getElementById('regEmail').value;
             const user = document.getElementById('regUser').value;
             const p1 = document.getElementById('regPass1').value;
             const p2 = document.getElementById('regPass2').value;
             
-            if(!user || !p1) return alert("Enter details");
+            if(!user || !p1 || !email) return alert("Enter details");
             if(p1 !== p2) return alert("Passwords do not match");
 
             const res = await fetch('/bot-api/register', {
                 method: 'POST',
-                body: JSON.stringify({ username: user, password: p1 })
+                body: JSON.stringify({ username: user, password: p1, email: email })
             });
             const data = await res.json();
             if(data.success) {
