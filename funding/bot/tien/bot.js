@@ -47,6 +47,7 @@ class BotEngine {
         this.config = {
             username: username,
             password: '',
+            email: '', // [NEW] Thêm trường email
             binanceApiKey: '', binanceApiSecret: '', binanceDepositAddress: '',
             kucoinApiKey: '', kucoinApiSecret: '', kucoinPassword: '', kucoinDepositAddress: '',
             autoBalance: false
@@ -202,7 +203,8 @@ class BotEngine {
                 id: Date.now(), coin: op.coin, shortExchange: sEx.id, longExchange: lEx.id,
                 shortSymbol: sSym, longSymbol: lSym, shortOrderId: sOrd.id, longOrderId: lOrd.id,
                 entryTime: Date.now(), estimatedPnlFromOpportunity: op.estimatedPnl, 
-                shortAmount: sAmt, longAmount: lAmt, status: 'OPEN'
+                shortAmount: sAmt, longAmount: lAmt, status: 'OPEN',
+                leverage: lev
             };
             this.activeTrades.push(trade);
             this.capitalManagementState = 'TRADE_OPEN';
@@ -236,13 +238,11 @@ class BotEngine {
             const m = now.getUTCMinutes(), s = now.getUTCSeconds();
             const nowMs = Date.now();
 
-            // Reset lock phút 01
             if (m === 1 && this.capitalManagementState === 'FUNDS_READY') {
                 this.capitalManagementState = 'IDLE';
                 this.lockedOpp = null;
             }
 
-            // Lấy dữ liệu server
             if (!this.lockedOpp) {
                 const res = await fetch(SERVER_DATA_URL);
                 const data = await res.json();
@@ -267,7 +267,6 @@ class BotEngine {
                 }
             }
 
-            // 1. Quét (Phút 55 - 59)
             if (this.capitalManagementState === 'IDLE' && m >= 55 && m <= 59) {
                 if ((m !== 59 || s < 30) && (nowMs - this.lastScanTime >= 25000)) {
                     if (this.opp) { 
@@ -276,7 +275,6 @@ class BotEngine {
                     }
                 }
             } 
-            // 2. Vào lệnh (59:30) [REQ] Sửa thành giây 30
             else if (this.capitalManagementState === 'FUNDS_READY') {
                 if (m === 59 && s >= 30) {
                     if (this.lockedOpp) await this.executeTrade(this.lockedOpp);
@@ -344,19 +342,21 @@ const server = http.createServer(async (req, res) => {
             await new Promise(r => req.on('end', r));
         }
 
+        // [MODIFIED] REGISTER WITH EMAIL
         if (url === '/bot-api/register' && req.method === 'POST') {
             try {
-                const { username, password } = JSON.parse(body);
+                const { username, password, email } = JSON.parse(body); // Get email
                 const safeName = getSafeFileName(username);
                 const cfgPath = path.join(USER_DATA_DIR, `${safeName}_config.json`);
                 
                 if (fs.existsSync(cfgPath)) {
-                    res.writeHead(400); res.end(JSON.stringify({ success: false, message: 'User exists' }));
+                    res.writeHead(400); res.end(JSON.stringify({ success: false, message: 'Username exists' }));
                     return;
                 }
                 
+                // Save email to config
                 const newConfig = {
-                    username, password,
+                    username, password, email,
                     binanceApiKey: '', binanceApiSecret: '', binanceDepositAddress: '', 
                     kucoinApiKey: '', kucoinApiSecret: '', kucoinPassword: '', kucoinDepositAddress: ''
                 };
@@ -425,7 +425,7 @@ const server = http.createServer(async (req, res) => {
             }
             else if (url === '/bot-api/config') {
                 res.writeHead(200, { 'Content-Type': 'application/json' });
-                res.end(JSON.stringify(bot.config)); // Trả về full (bao gồm pass)
+                res.end(JSON.stringify(bot.config));
             }
             else if (url === '/bot-api/update-balance-config') {
                 const cfg = JSON.parse(body);
