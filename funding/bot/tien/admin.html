@@ -3,89 +3,57 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Admin Quản Lý Bot</title>
+    <title>Admin Quản Lý</title>
     <style>
-        :root { --bg: #121212; --card: #1e1e1e; --text: #e0e0e0; --accent: #007bff; --border: #333; }
-        body { background: var(--bg); color: var(--text); font-family: sans-serif; margin: 0; padding: 20px; }
-        h1, h2 { color: var(--accent); }
+        :root { --bg: #121212; --card: #1e1e1e; --text: #e0e0e0; --accent: #007bff; --border: #333; --danger: #ff4444; --success: #00c851; }
+        body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', sans-serif; margin: 0; padding: 20px; }
         
-        /* Table */
-        table { width: 100%; border-collapse: collapse; margin-top: 20px; background: var(--card); }
-        th, td { padding: 12px; border: 1px solid var(--border); text-align: left; }
-        th { background: #252525; }
-        tr:hover { background: #2a2a2a; cursor: pointer; }
-        .user-link { color: #4db8ff; text-decoration: underline; }
+        h1, h2 { margin-top: 0; color: var(--accent); }
+        
+        /* TABLE */
+        table { width: 100%; border-collapse: collapse; background: var(--card); }
+        th, td { padding: 12px; border: 1px solid var(--border); text-align: left; font-size: 0.9rem; }
+        th { background: #252525; text-transform: uppercase; color: #aaa; }
+        tr:hover { background: #2a2a2a; }
+        .user-link { color: var(--accent); cursor: pointer; text-decoration: underline; font-weight: bold; }
 
-        /* Card/Panel */
-        .panel { background: var(--card); padding: 20px; border-radius: 8px; margin-bottom: 20px; border: 1px solid var(--border); }
-        .controls { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; align-items: end; }
+        /* PANEL */
+        .panel { background: var(--card); padding: 20px; border-radius: 8px; margin-bottom: 20px; border: 1px solid var(--border); box-shadow: 0 4px 6px rgba(0,0,0,0.3); }
+        .controls { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 15px; align-items: end; }
         
-        input, select, button { padding: 10px; background: #2b2b2b; border: 1px solid #444; color: #fff; border-radius: 4px; width: 100%; box-sizing: border-box; }
-        button { background: var(--accent); border: none; font-weight: bold; cursor: pointer; }
+        input, select { padding: 10px; background: #2b2b2b; border: 1px solid #444; color: #fff; border-radius: 4px; width: 100%; box-sizing: border-box; }
+        button { padding: 10px; background: var(--accent); border: none; color: white; font-weight: bold; cursor: pointer; border-radius: 4px; width: 100%; }
         button:hover { opacity: 0.9; }
         
-        .checkbox-wrapper { display: flex; align-items: center; gap: 10px; height: 40px; }
-        input[type="checkbox"] { width: 20px; height: 20px; }
+        .checkbox-wrapper { display: flex; align-items: center; gap: 10px; height: 40px; background: #252525; padding: 0 10px; border-radius: 4px; border: 1px solid #444; }
+        input[type="checkbox"] { width: 20px; height: 20px; accent-color: var(--danger); }
 
-        /* Modal */
-        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 1000; justify-content: center; align-items: center; }
-        .modal-content { background: var(--card); padding: 20px; width: 600px; max-height: 80vh; overflow-y: auto; border-radius: 8px; }
-        .close { float: right; cursor: pointer; font-size: 1.5rem; }
-        
-        /* Log */
-        #actionLog { background: #000; padding: 10px; height: 200px; overflow-y: scroll; font-family: monospace; border: 1px solid #444; margin-top: 10px; color: #0f0; }
+        /* ACCORDION (CHI TIẾT) */
+        .acc-item { border: 1px solid var(--border); margin-bottom: 5px; border-radius: 4px; overflow: hidden; }
+        .acc-header { background: #2a2a2a; padding: 15px; cursor: pointer; display: flex; justify-content: space-between; font-weight: bold; }
+        .acc-header:hover { background: #333; }
+        .acc-content { display: none; padding: 0; background: #1a1a1a; }
+        .acc-content table { margin: 0; border: none; }
+        .acc-content td { border-bottom: 1px solid #333; border-top: none; color: #bbb; }
+        .show { display: block; }
+        .total-highlight { color: var(--success); }
+
+        /* MODAL */
+        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.85); z-index: 1000; justify-content: center; align-items: center; }
+        .modal-content { background: var(--card); padding: 20px; width: 700px; max-height: 90vh; overflow-y: auto; border-radius: 8px; border: 1px solid var(--accent); }
+        .close { float: right; cursor: pointer; font-size: 1.5rem; color: #aaa; }
+
+        /* LOG */
+        #actionLog { background: #000; padding: 10px; height: 200px; overflow-y: scroll; font-family: monospace; border: 1px solid #444; margin-top: 10px; color: #0f0; font-size: 0.85rem; }
     </style>
 </head>
 <body>
 
-    <h1>ADMIN DASHBOARD</h1>
+    <h1>QUẢN TRỊ BOT</h1>
 
-    <!-- TRANSFER PANEL -->
+    <!-- USER LIST -->
     <div class="panel">
-        <h2>💰 Chuyển Tiền & Thanh Lý</h2>
-        <div class="controls">
-            <div>
-                <label>Chiều Chuyển:</label>
-                <select id="direction">
-                    <option value="binance_to_kucoin">Binance ➔ KuCoin</option>
-                    <option value="kucoin_to_binance">KuCoin ➔ Binance</option>
-                </select>
-            </div>
-            <div>
-                <label>Nguồn Tiền:</label>
-                <select id="sourceWallet">
-                    <option value="both">Cả Futures & Spot</option>
-                    <option value="future">Chỉ Futures</option>
-                    <option value="spot">Chỉ Spot</option>
-                </select>
-            </div>
-            <div>
-                <label>Đối Tượng:</label>
-                <select id="targetUser">
-                    <option value="ALL">--- TẤT CẢ USER ---</option>
-                    <!-- User list will be populated here -->
-                </select>
-            </div>
-            <div>
-                <label>Coin:</label>
-                <input type="text" id="coinName" value="USDT">
-            </div>
-            <div>
-                <label>Số Lượng:</label>
-                <input type="number" id="amount" placeholder="Nhập số tiền">
-            </div>
-            <div class="checkbox-wrapper">
-                <input type="checkbox" id="getAllCheck">
-                <label for="getAllCheck" style="color: #ff4d4d; font-weight: bold;">GET ALL (Thanh Lý Hết)</label>
-            </div>
-            <button onclick="executeAction()">THỰC HIỆN</button>
-        </div>
-        <div id="actionLog">Logs sẽ hiện ở đây...</div>
-    </div>
-
-    <!-- USER TABLE -->
-    <div class="panel">
-        <h2>👥 Danh Sách Người Dùng</h2>
+        <h2>👥 Danh sách tài khoản</h2>
         <table>
             <thead>
                 <tr>
@@ -94,7 +62,7 @@
                     <th>Email</th>
                     <th>Binance Fut ($)</th>
                     <th>KuCoin Fut ($)</th>
-                    <th>Tổng ($)</th>
+                    <th>Tạm tính ($)</th> <!-- Note: Chỉ tính Future để load nhanh -->
                 </tr>
             </thead>
             <tbody id="userTableBody">
@@ -103,22 +71,62 @@
         </table>
     </div>
 
-    <!-- DETAIL MODAL -->
+    <!-- TRANSFER -->
+    <div class="panel">
+        <h2 style="color: var(--danger);">💸 Chuyển tiền / Thanh lý</h2>
+        <div class="controls">
+            <div>
+                <label>Hướng chuyển:</label>
+                <select id="direction">
+                    <option value="binance_to_kucoin">Binance ➔ KuCoin</option>
+                    <option value="kucoin_to_binance">KuCoin ➔ Binance</option>
+                    <option value="both_ways" style="font-weight:bold; color:#ffff00;">⇄ CẢ 2 CHIỀU (Rút chéo)</option>
+                </select>
+            </div>
+            <div>
+                <label>Nguồn tiền:</label>
+                <select id="sourceWallet">
+                    <option value="both">Gom cả Future & Spot</option>
+                    <option value="future">Chỉ từ Future</option>
+                    <option value="spot">Chỉ từ Spot</option>
+                </select>
+            </div>
+            <div>
+                <label>Tài khoản:</label>
+                <select id="targetUser">
+                    <option value="ALL">--- TẤT CẢ USER ---</option>
+                </select>
+            </div>
+            <div>
+                <label>Coin:</label>
+                <input type="text" id="coinName" value="USDT">
+            </div>
+            <div>
+                <label>Số lượng:</label>
+                <input type="number" id="amount" placeholder="Nhập số USDT">
+            </div>
+            <div class="checkbox-wrapper">
+                <input type="checkbox" id="getAllCheck">
+                <label for="getAllCheck" style="color: var(--danger); font-weight: bold;">GET ALL (Rút Hết)</label>
+            </div>
+            <button onclick="executeAction()">THỰC HIỆN</button>
+        </div>
+        <div id="actionLog">Logs...</div>
+    </div>
+
+    <!-- DETAIL MODAL (ACCORDION) -->
     <div id="detailModal" class="modal">
         <div class="modal-content">
             <span class="close" onclick="document.getElementById('detailModal').style.display='none'">&times;</span>
             <h2 id="modalTitle">Chi tiết tài sản</h2>
-            <table id="detailTable">
-                <thead><tr><th>Loại Ví</th><th>Coin</th><th>Số lượng</th></tr></thead>
-                <tbody></tbody>
-            </table>
+            <div id="accordionContainer">Đang quét dữ liệu... (Mất vài giây)</div>
         </div>
     </div>
 
     <script>
         let usersData = [];
 
-        // Load Users
+        // --- 1. LOAD USERS ---
         async function loadUsers() {
             const res = await fetch('/api/users');
             usersData = await res.json();
@@ -126,74 +134,119 @@
             const select = document.getElementById('targetUser');
             
             tbody.innerHTML = '';
-            // Reset select but keep ALL
             select.innerHTML = '<option value="ALL">--- TẤT CẢ USER ---</option>';
 
             usersData.forEach(u => {
-                // Add to Table
                 const tr = document.createElement('tr');
                 tr.innerHTML = `
                     <td>${u.id}</td>
                     <td class="user-link" onclick="showDetails('${u.filename}', '${u.username}')">${u.username}</td>
                     <td>${u.email}</td>
-                    <td>${u.binanceFuture.toFixed(2)}</td>
-                    <td>${u.kucoinFuture.toFixed(2)}</td>
-                    <td style="font-weight:bold">${u.total.toFixed(2)}</td>
+                    <td style="color:#F0B90B">${u.binanceFuture.toFixed(2)}</td>
+                    <td style="color:#24AE8F">${u.kucoinFuture.toFixed(2)}</td>
+                    <td>${u.tempTotal.toFixed(2)} (Fut)</td>
                 `;
                 tbody.appendChild(tr);
 
-                // Add to Dropdown
                 const opt = document.createElement('option');
-                opt.value = u.filename; // Use filename as ID
+                opt.value = u.filename.replace('_config.json', '');
                 opt.innerText = u.username;
                 select.appendChild(opt);
             });
         }
 
-        // Show Details
+        // --- 2. SHOW DETAILS (ACCORDION) ---
         async function showDetails(filename, username) {
             const modal = document.getElementById('detailModal');
+            const container = document.getElementById('accordionContainer');
             const title = document.getElementById('modalTitle');
-            const tbody = document.querySelector('#detailTable tbody');
             
             title.innerText = `Chi tiết: ${username}`;
-            tbody.innerHTML = '<tr><td colspan="3">Đang quét...</td></tr>';
+            container.innerHTML = '<div style="text-align:center; padding:20px; color:#aaa;">Đang quét toàn bộ ví (Spot, Earn, Margin...)...<br>Vui lòng chờ...</div>';
             modal.style.display = 'flex';
 
             const res = await fetch(`/api/details/${filename}`);
-            const details = await res.json();
+            const data = await res.json();
             
-            tbody.innerHTML = '';
-            if(details.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="3">Không có tài sản > 1$</td></tr>';
-            } else {
-                details.forEach(d => {
-                    tbody.innerHTML += `<tr><td>${d.type}</td><td>${d.coin}</td><td>${d.amount.toFixed(4)}</td></tr>`;
-                });
-            }
+            // Render Accordion
+            let html = `<div style="margin-bottom:15px; font-size:1.2rem; color:#fff;">TỔNG TÀI SẢN (Quy đổi): <span style="color:#00c851; font-weight:bold;">${data.totalUsdt.toFixed(2)} USDT</span></div>`;
+
+            // Helper render section
+            const renderSection = (title, items, total, color) => {
+                if (total < 1) return ''; // Ẩn nếu < 1$
+                let rows = items.map(i => `<tr>
+                    <td>${i.coin}</td>
+                    <td>${i.amount.toFixed(4)}</td>
+                    <td>${i.price.toFixed(2)}$</td>
+                    <td style="font-weight:bold; color:${color}">${i.value.toFixed(2)}$</td>
+                </tr>`).join('');
+
+                return `
+                <div class="acc-item">
+                    <div class="acc-header" onclick="this.nextElementSibling.classList.toggle('show')">
+                        <span>${title}</span>
+                        <span style="color:${color}">${total.toFixed(2)} USDT ▼</span>
+                    </div>
+                    <div class="acc-content">
+                        <table>
+                            <thead><tr><th>Coin</th><th>Số lượng</th><th>Giá</th><th>Giá trị</th></tr></thead>
+                            <tbody>${rows}</tbody>
+                        </table>
+                    </div>
+                </div>`;
+            };
+
+            html += renderSection('BINANCE SPOT', data.binance.spot, data.binance.total, '#F0B90B');
+            html += renderSection('BINANCE FUTURE', data.binance.future, data.binance.future.reduce((a,b)=>a+b.value,0), '#F0B90B');
+            html += renderSection('BINANCE MARGIN/EARN', data.binance.margin, data.binance.margin.reduce((a,b)=>a+b.value,0), '#d6a100');
+            
+            html += renderSection('KUCOIN SPOT', data.kucoin.spot, data.kucoin.total, '#24AE8F');
+            html += renderSection('KUCOIN FUTURE', data.kucoin.future, data.kucoin.future.reduce((a,b)=>a+b.value,0), '#24AE8F');
+            html += renderSection('KUCOIN MARGIN', data.kucoin.margin, data.kucoin.margin.reduce((a,b)=>a+b.value,0), '#1d8c73');
+
+            container.innerHTML = html;
         }
 
-        // Execute Action
+        // --- 3. EXECUTE ACTION ---
+        const getAllCheck = document.getElementById('getAllCheck');
+        getAllCheck.addEventListener('change', function() {
+            const inputs = [document.getElementById('amount'), document.getElementById('coinName')];
+            inputs.forEach(i => i.disabled = this.checked);
+            if(this.checked) {
+                document.getElementById('amount').placeholder = "Tự động tối đa";
+                document.getElementById('coinName').value = "USDT";
+            } else {
+                document.getElementById('amount').placeholder = "Nhập số tiền";
+            }
+        });
+
         async function executeAction() {
             const direction = document.getElementById('direction').value;
-            const fromExchange = direction.split('_')[0]; // binance or kucoin
-            const toExchange = direction.split('_')[2];
+            let fromEx, toEx;
             
+            if (direction === 'both_ways') {
+                fromEx = 'both_ways';
+                toEx = 'both_ways';
+            } else {
+                fromEx = direction.split('_')[0];
+                toEx = direction.split('_')[2];
+            }
+
             const payload = {
-                fromExchange: fromExchange,
-                toExchange: toExchange,
+                fromExchange: fromEx,
+                toExchange: toEx,
                 sourceWallet: document.getElementById('sourceWallet').value,
                 username: document.getElementById('targetUser').value,
-                coin: document.getElementById('coinName').value,
+                coin: document.getElementById('coinName').value, 
                 amount: document.getElementById('amount').value,
                 isGetAll: document.getElementById('getAllCheck').checked
             };
 
-            if (!payload.isGetAll && !payload.amount) return alert("Vui lòng nhập số tiền!");
-            if (payload.isGetAll && !confirm("CẢNH BÁO: Bạn đang chọn GET ALL.\nHành động này sẽ ĐÓNG TOÀN BỘ VỊ THẾ, bán coin ra USDT và chuyển hết đi.\nBạn chắc chắn chứ?")) return;
+            if (!payload.isGetAll && !payload.amount) return alert("Nhập số tiền!");
+            if (payload.isGetAll && !confirm("⚠️ CẢNH BÁO: Bạn đang chọn RÚT HẾT (GET ALL).\nBot sẽ đóng lệnh Futures, bán coin Spot và rút sạch tiền.\nTiếp tục?")) return;
 
             const logDiv = document.getElementById('actionLog');
-            logDiv.innerHTML += `<div>> Bắt đầu lệnh...</div>`;
+            logDiv.innerHTML += `<div>> Sending command...</div>`;
 
             const res = await fetch('/api/transfer', {
                 method: 'POST',
@@ -203,17 +256,18 @@
             
             data.logs.forEach(userLogs => {
                 userLogs.forEach(line => {
-                    logDiv.innerHTML += `<div>${line}</div>`;
+                    let color = line.includes('❌') || line.includes('Lỗi') ? '#ff4444' : '#00c851';
+                    if(line.includes('User:')) color = '#ffff00';
+                    logDiv.innerHTML += `<div style="color:${color}">${line}</div>`;
                 });
                 logDiv.innerHTML += `<div>-------------------</div>`;
             });
             logDiv.scrollTop = logDiv.scrollHeight;
-            loadUsers(); // Refresh balances
+            loadUsers(); 
         }
 
-        // Init
         loadUsers();
-        setInterval(loadUsers, 30000); // Auto refresh table every 30s
+        setInterval(loadUsers, 30000);
     </script>
 </body>
 </html>
