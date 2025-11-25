@@ -1,281 +1,601 @@
 <!DOCTYPE html>
-<html lang="vi">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Super Admin Bot</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Arbitrage Bot</title>
     <style>
-        :root { --bg: #121212; --card: #1e1e1e; --text: #e0e0e0; --accent: #007bff; --border: #333; --danger: #ff4444; --success: #00c851; --warning: #ffbb33; }
-        body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', sans-serif; margin: 0; padding: 20px; }
-        h2 { margin-top: 0; color: var(--accent); border-bottom: 1px solid #333; padding-bottom: 10px; }
+        :root {
+            --bg-color: #000000;
+            --card-bg: #111111;
+            --binance-yellow: #F0B90B;
+            --kucoin-green: #00D095;
+            --text-color: #EAECEF;
+            --danger: #F6465D;
+            --border-color: #333;
+        }
+
+        body {
+            font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            margin: 0;
+            padding: 15px;
+        }
+
+        /* --- AUTH OVERLAY (LOGIN/REGISTER) --- */
+        .auth-overlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: #000; z-index: 2000;
+            display: flex; justify-content: center; align-items: center;
+            flex-direction: column;
+        }
+        .auth-box {
+            background: #1a1a1a; padding: 30px; border-radius: 12px;
+            border: 1px solid var(--binance-yellow);
+            text-align: center; width: 300px;
+            box-shadow: 0 0 20px rgba(240, 185, 11, 0.2);
+        }
+        .auth-box h2 { color: var(--binance-yellow); margin-bottom: 20px; }
+        
+        .auth-box input {
+            width: 100%; padding: 12px; margin: 8px 0;
+            background: #000; border: 1px solid #444; color: #fff;
+            border-radius: 6px; font-size: 1rem; box-sizing: border-box; text-align: center;
+        }
+        
+        .btn-auth {
+            width: 100%; padding: 12px; background: var(--binance-yellow);
+            color: #000; font-weight: bold; border: none; border-radius: 6px;
+            cursor: pointer; font-size: 1rem; margin-top: 15px;
+        }
+        .link-text { color: #888; margin-top: 15px; font-size: 0.9rem; cursor: pointer; text-decoration: underline; }
+
+        /* --- HEADER --- */
+        .header-container {
+            background: #0a0a0a; padding: 15px; margin-bottom: 20px;
+            border-bottom: 1px solid #222;
+            display: flex; flex-direction: column; align-items: center; gap: 15px;
+        }
+        .logos-row {
+            display: flex; align-items: center; gap: 30px;
+        }
+        .brand { display: flex; align-items: center; gap: 8px; font-weight: bold; font-size: 1.2rem; }
+        .logo { height: 35px; }
+        /* Filter để chỉnh màu logo KuCoin cho đúng điệu */
+        .logo-kucoin { height: 35px; filter: grayscale(100%) brightness(80%) sepia(100%) hue-rotate(100deg) saturate(500%); }
+        .text-yellow { color: var(--binance-yellow); }
+        .text-green { color: var(--kucoin-green); }
+        
+        .user-info-row {
+            display: flex; align-items: center; gap: 15px;
+            background: #1a1a1a; padding: 5px 20px; border-radius: 20px;
+            font-size: 0.9rem; color: #ccc; border: 1px solid #333;
+        }
+        .logout-btn { color: var(--danger); cursor: pointer; font-weight: bold; font-size: 0.75rem; text-transform: uppercase; }
+
+        /* --- CONTROLS BAR --- */
+        .container { max-width: 1200px; margin: 0 auto; }
+        .controls-bar {
+            display: flex; flex-wrap: wrap; gap: 10px; align-items: center;
+            background: var(--card-bg); border: 1px solid #222;
+            padding: 15px; border-radius: 8px; margin-bottom: 20px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.3);
+        }
+        
+        .hide-on-run.active { display: none !important; }
+
+        .input-group {
+            display: flex; align-items: center; gap: 8px;
+            background: #000; padding: 8px 12px;
+            border: 1px solid #444; border-radius: 4px;
+        }
+        input[type="number"] {
+            background: #222; border: 1px solid #444; color: var(--binance-yellow);
+            padding: 5px; border-radius: 3px; width: 60px; text-align: center; font-weight: bold;
+        }
+
+        /* AUTO BALANCE & TOOLTIP */
+        .auto-bal-wrapper {
+            display: flex; align-items: center; gap: 6px; position: relative;
+        }
+        .checkbox-label {
+            cursor: pointer; font-size: 0.9rem; color: #ccc;
+            display: flex; align-items: center; gap: 6px;
+        }
+        input[type="checkbox"] { accent-color: var(--kucoin-green); cursor: pointer; width: 16px; height: 16px; }
+        
+        .help-circle {
+            display: inline-flex; justify-content: center; align-items: center;
+            width: 16px; height: 16px;
+            border: 1px solid #666; border-radius: 50%;
+            color: #888; font-size: 10px; font-weight: bold; cursor: pointer;
+        }
+        .tooltip {
+            display: none; position: absolute; top: 30px; left: 0;
+            background: #222; border: 1px solid #444; padding: 10px;
+            border-radius: 6px; width: 220px; z-index: 100;
+            color: #eee; font-size: 0.8rem; line-height: 1.4;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.5);
+        }
+
+        /* TERMS */
+        .terms-group {
+            display: flex; align-items: center; gap: 8px; font-size: 0.85rem; color: #aaa;
+            margin-right: 10px;
+        }
+        .terms-link { color: var(--binance-yellow); text-decoration: underline; cursor: pointer; }
+
+        /* BUTTONS */
+        .btn { padding: 10px 20px; border: none; border-radius: 4px; font-weight: bold; cursor: pointer; text-transform: uppercase; white-space: nowrap; }
+        .btn-config { background: #333; color: #fff; border: 1px solid #555; }
+        .btn-start { background: var(--binance-yellow); color: #000; }
+        .btn-start:disabled { background: #444; color: #888; cursor: not-allowed; opacity: 0.7; }
+        .btn-stop { background: var(--danger); color: #fff; }
+
+        /* GRID */
+        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 15px; }
+        .card {
+            background: var(--card-bg); border: 1px solid #222;
+            border-radius: 12px; padding: 15px;
+            box-shadow: 4px 4px 10px rgba(0,0,0,0.5);
+        }
+        .card h3 { margin: 0 0 10px 0; border-bottom: 1px solid #333; padding-bottom: 8px; color: var(--binance-yellow); font-size: 1rem; text-transform: uppercase; }
+
+        /* MODAL */
+        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.9); z-index: 1000; justify-content: center; align-items: center; }
+        .modal-content { background: #111; border: 2px solid var(--binance-yellow); padding: 20px; border-radius: 10px; width: 90%; max-width: 500px; max-height: 90vh; overflow-y: auto; }
+        .form-row { margin-bottom: 12px; }
+        .form-row label { display: block; margin-bottom: 4px; color: #aaa; font-size: 0.8rem; }
+        
+        /* INPUT TRONG CONFIG: TYPE TEXT ĐỂ HIỆN CHỮ */
+        .form-row input { 
+            width: 100%; padding: 10px; background: #222; border: 1px solid #444; 
+            color: #fff; box-sizing: border-box; font-family: monospace; 
+        }
+        .btn-save { width: 100%; background: var(--kucoin-green); color: #000; margin-top: 10px; padding: 12px; border:none; font-weight:bold; cursor:pointer; }
+
+        /* TERMS CONTENT */
+        .terms-content { color: #ddd; font-size: 0.9rem; line-height: 1.5; text-align: left; }
+        .terms-content h4 { color: var(--danger); margin-top: 15px; margin-bottom: 5px; }
 
         /* TABLE */
-        table { width: 100%; border-collapse: collapse; background: var(--card); font-size: 0.9rem; }
-        th, td { padding: 12px; border: 1px solid var(--border); text-align: left; }
-        th { background: #252525; text-transform: uppercase; color: #aaa; position: sticky; top: 0; }
-        tr:hover { background: #2a2a2a; }
-        .user-link { color: var(--accent); cursor: pointer; text-decoration: underline; font-weight: bold; }
-        
-        /* PNL COLORS */
-        .pnl-pos { color: var(--success); font-weight: bold; }
-        .pnl-neg { color: var(--danger); font-weight: bold; }
+        table { width: 100%; border-collapse: collapse; font-size: 0.85rem; margin-top: 10px; }
+        th { text-align: left; color: #777; padding: 8px 5px; border-bottom: 1px solid #333; }
+        td { padding: 8px 5px; border-bottom: 1px solid #222; }
+        .text-pos { color: var(--kucoin-green); }
+        .text-neg { color: var(--danger); }
 
-        /* PANEL */
-        .panel { background: var(--card); padding: 20px; border-radius: 8px; margin-bottom: 20px; border: 1px solid var(--border); box-shadow: 0 4px 6px rgba(0,0,0,0.3); }
-        .controls { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 15px; align-items: end; }
-        
-        input, select { padding: 10px; background: #2b2b2b; border: 1px solid #444; color: #fff; border-radius: 4px; width: 100%; box-sizing: border-box; }
-        button { padding: 10px; background: var(--accent); border: none; color: white; font-weight: bold; cursor: pointer; border-radius: 4px; width: 100%; }
-        button:hover { opacity: 0.9; }
-        button.exec { background: linear-gradient(45deg, #007bff, #0056b3); }
-        
-        .checkbox-wrapper { display: flex; align-items: center; gap: 10px; height: 40px; background: #2a2222; padding: 0 10px; border-radius: 4px; border: 1px solid #ff4444; }
-        input[type="checkbox"] { width: 18px; height: 18px; accent-color: var(--danger); cursor: pointer; }
-
-        /* SELECTION INFO */
-        #selectionInfo { color: var(--warning); font-weight: bold; margin-top: 10px; }
-
-        /* MODAL & ACCORDION (Giữ nguyên style cũ cho gọn) */
-        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.85); z-index: 1000; justify-content: center; align-items: center; }
-        .modal-content { background: var(--card); padding: 20px; width: 700px; max-height: 90vh; overflow-y: auto; border-radius: 8px; border: 1px solid var(--accent); }
-        .acc-item { border: 1px solid var(--border); margin-bottom: 5px; }
-        .acc-header { background: #2a2a2a; padding: 10px; cursor: pointer; display: flex; justify-content: space-between; }
-        .acc-content { display: none; padding: 0; }
-        .show { display: block; }
-        .close { float: right; cursor: pointer; font-size: 1.5rem; }
-        
-        #actionLog { background: #000; padding: 10px; height: 150px; overflow-y: scroll; font-family: monospace; border: 1px solid #444; margin-top: 15px; color: #0f0; font-size: 0.85rem; }
+        @media (max-width: 600px) {
+            .brand-group { gap: 10px; }
+            .brand { font-size: 0.9rem; }
+            .logo, .logo-kucoin { height: 25px; }
+            .controls-bar { flex-direction: column; align-items: stretch; }
+            .input-group { justify-content: space-between; }
+            .header-container { gap: 15px; }
+        }
     </style>
 </head>
 <body>
 
-    <!-- 1. BẢNG CHUYỂN TIỀN (LÊN ĐẦU) -->
-    <div class="panel">
-        <h2 style="color: var(--danger);">💸 Chuyển Tiền & Thanh Lý</h2>
-        
-        <div id="selectionInfo">Đang chọn: 0 Users (Hãy tích chọn bên dưới hoặc chọn ALL)</div>
-        
-        <div class="controls" style="margin-top: 10px;">
-            <div>
-                <label>Hướng chuyển:</label>
-                <select id="direction">
-                    <option value="binance_to_kucoin">Binance ➔ KuCoin</option>
-                    <option value="kucoin_to_binance">KuCoin ➔ Binance</option>
-                    <option value="both_ways" style="color:#ffff00; font-weight:bold;">⇄ Rút Chéo (2 Chiều)</option>
-                </select>
-            </div>
-            <div>
-                <label>Nguồn tiền:</label>
-                <select id="sourceWallet">
-                    <option value="both">Gom Future & Spot</option>
-                    <option value="future">Chỉ từ Future</option>
-                    <option value="spot">Chỉ từ Spot</option>
-                </select>
-            </div>
-            <div>
-                <label>Coin:</label>
-                <input type="text" id="coinName" value="USDT">
-            </div>
-            <div>
-                <label>Số lượng:</label>
-                <input type="number" id="amount" placeholder="Nhập số USDT">
-            </div>
-            <div class="checkbox-wrapper">
-                <input type="checkbox" id="getAllCheck">
-                <label for="getAllCheck" style="color: var(--danger); font-weight: bold; cursor:pointer;">GET ALL (Rút Hết)</label>
-            </div>
-            <button class="exec" onclick="executeAction()">THỰC HIỆN</button>
+    <!-- LOGIN SCREEN -->
+    <div id="loginSection" class="auth-overlay">
+        <div class="auth-box">
+            <h2>LOGIN</h2>
+            <input type="text" id="loginUser" placeholder="Username">
+            <input type="text" id="loginPass" placeholder="Password">
+            <button class="btn-auth" onclick="handleLogin()">LOGIN</button>
+            <div class="link-text" onclick="showRegister()">Create New Account</div>
         </div>
-        <div id="actionLog">Logs...</div>
     </div>
 
-    <!-- 2. DANH SÁCH NGƯỜI DÙNG -->
-    <div class="panel">
-        <div style="display:flex; justify-content:space-between; align-items:center;">
-            <h2>👥 Danh Sách Tài Khoản (Xếp theo Tổng Tài Sản)</h2>
-            <button onclick="loadUsers()" style="width:auto; background:#333;">🔄 Refresh</button>
+    <!-- REGISTER SCREEN -->
+    <div id="registerSection" class="auth-overlay" style="display:none;">
+        <div class="auth-box">
+            <h2 style="color: var(--kucoin-green);">REGISTER</h2>
+            <input type="text" id="regEmail" placeholder="Email">
+            <input type="text" id="regUser" placeholder="Username">
+            <input type="text" id="regPass1" placeholder="Password">
+            <input type="text" id="regPass2" placeholder="Confirm Password">
+            <button class="btn-auth" style="background: var(--kucoin-green);" onclick="handleRegister()">REGISTER</button>
+            <div class="link-text" onclick="showLogin()">Back to Login</div>
         </div>
-        
-        <table>
-            <thead>
-                <tr>
-                    <th style="width: 40px; text-align:center;"><input type="checkbox" id="checkAll" onchange="toggleCheckAll()"></th>
-                    <th>Username</th>
-                    <th>Email</th>
-                    <th>Last Login</th>
-                    <th>Binance Fut ($)</th>
-                    <th>KuCoin Fut ($)</th>
-                    <th style="color: var(--success);">TỔNG TÀI SẢN</th>
-                    <th>Tổng PNL</th>
-                </tr>
-            </thead>
-            <tbody id="userTableBody">
-                <tr><td colspan="8">Đang tải dữ liệu...</td></tr>
-            </tbody>
-        </table>
     </div>
 
-    <!-- MODAL CHI TIẾT -->
-    <div id="detailModal" class="modal">
+    <!-- DASHBOARD -->
+    <div id="dashboardSection" style="display:none;">
+        
+        <div class="header-container">
+            <!-- Logos -->
+            <div class="logos-row">
+                <div class="brand">
+                    <img src="https://upload.wikimedia.org/wikipedia/commons/e/e8/Binance_Logo.svg" class="logo">
+                    <span class="text-yellow">BINANCE</span>
+                </div>
+                <span style="color:#444; font-size:1.2rem;">✕</span>
+                <div class="brand">
+                    <img src="https://cryptologos.cc/logos/kucoin-token-kcs-logo.png?v=025" class="logo-kucoin">
+                    <span class="text-green">KUCOIN</span>
+                </div>
+            </div>
+            <!-- User Info -->
+            <div class="user-info-row">
+                <span id="userDisplay">User</span>
+                <span class="logout-btn" onclick="logout()">LOGOUT ➔</span>
+            </div>
+        </div>
+
+        <div class="container">
+            <div class="controls-bar" id="controlsBar">
+                
+                <!-- Vốn -->
+                <div class="input-group hide-on-run">
+                    <label style="margin-right:10px"><input type="radio" name="capMode" value="percent" checked> % Cap</label>
+                    <label><input type="radio" name="capMode" value="fixed"> Fixed $</label>
+                </div>
+                <div class="input-group hide-on-run" style="border-color: var(--binance-yellow);">
+                    <span style="color:#aaa">Value:</span>
+                    <input type="number" id="capitalInput" value="50">
+                </div>
+                
+                <!-- Auto Balance + Help Icon -->
+                <div class="auto-bal-wrapper hide-on-run">
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="autoBalanceDisplay" onchange="updateAutoBalance()"> Auto-Balance
+                    </label>
+                    <span class="help-circle" onclick="toggleTooltip(event)">?</span>
+                    <div id="balTooltip" class="tooltip">
+                        When balance difference > $20, Bot automatically equalizes funds between Binance & KuCoin (Check every 30 mins).
+                    </div>
+                </div>
+
+                <div style="flex-grow: 1;"></div>
+
+                <!-- Set Bot -->
+                <button class="btn btn-config hide-on-run" onclick="openModal()">⚙️ Set Bot</button>
+
+                <!-- Terms Checkbox -->
+                <div class="terms-group hide-on-run">
+                    <input type="checkbox" id="termsCheck" onchange="checkTerms()">
+                    <label>Agree to <span class="terms-link" onclick="openTerms()">Terms & Disclaimer</span></label>
+                </div>
+
+                <!-- Start/Stop -->
+                <button id="btnStart" class="btn btn-start" onclick="startBot()" disabled>▶ START</button>
+                <button id="btnStop" class="btn btn-stop" onclick="stopBot()" style="display:none;">⏹ STOP</button>
+                
+                <div id="statusText" style="padding: 5px 10px; border-radius: 4px; background:#222; color:#777; font-weight:bold; font-size:0.8rem;">STOPPED</div>
+            </div>
+
+            <div class="grid">
+                <!-- Balances -->
+                <div class="card">
+                    <h3>Wallet Balances</h3>
+                    <div id="balancesContent" style="min-height: 40px; padding-top:5px;"><span style="color:#555;">Waiting...</span></div>
+                </div>
+                
+                <!-- Opportunity -->
+                <div class="card">
+                    <h3>Best Opportunity</h3>
+                    <div id="oppContent" style="text-align: center; padding: 15px;"><span style="color:#555">Connecting...</span></div>
+                </div>
+            </div>
+
+            <!-- History -->
+            <div class="card" style="margin-top: 20px;">
+                <h3>Trade History</h3>
+                <div style="overflow-x: auto;">
+                    <table>
+                        <thead><tr><th>Time</th><th>Coin</th><th>Lev</th><th>Est.</th><th>Real.</th></tr></thead>
+                        <tbody id="historyBody"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- CONFIG MODAL -->
+    <div id="configModal" class="modal">
         <div class="modal-content">
-            <span class="close" onclick="document.getElementById('detailModal').style.display='none'">&times;</span>
-            <h2 id="modalTitle">Chi tiết</h2>
-            <div id="accordionContainer">Loading...</div>
+            <div class="modal-header" style="display:flex; justify-content:space-between; margin-bottom:20px;">
+                <h3 style="margin:0; color:#fff;">BOT SETUP</h3>
+                <span style="cursor: pointer; color:#666;" onclick="closeModal()">✕</span>
+            </div>
+            <div class="form-row"><label>Binance API Key</label><input type="text" id="cfgBinKey"></div>
+            <div class="form-row"><label>Binance Secret</label><input type="text" id="cfgBinSec"></div>
+            <div class="form-row"><label>Wallet Binance Aptos</label><input type="text" id="cfgBinWal"></div>
+            <hr style="border-color: #333; margin: 15px 0;">
+            <div class="form-row"><label>KuCoin API Key</label><input type="text" id="cfgKuKey"></div>
+            <div class="form-row"><label>KuCoin Secret</label><input type="text" id="cfgKuSec"></div>
+            <div class="form-row"><label>KuCoin Passphrase</label><input type="text" id="cfgKuPass"></div>
+            <div class="form-row"><label>Wallet KuCoin BEP20</label><input type="text" id="cfgKuWal"></div>
+            <button class="btn btn-save" onclick="saveConfig()">SAVE CONFIG</button>
+        </div>
+    </div>
+
+    <!-- TERMS MODAL -->
+    <div id="termsModal" class="modal">
+        <div class="modal-content" style="border-color: var(--danger);">
+            <div class="modal-header" style="display:flex; justify-content:space-between; margin-bottom:10px;">
+                <h3 style="margin:0; color:var(--danger);">TERMS & DISCLAIMER</h3>
+                <span style="cursor: pointer; color:#666;" onclick="document.getElementById('termsModal').style.display='none'">✕</span>
+            </div>
+            <div class="terms-content">
+                <h4>High Market Risk:</h4>
+                <p>Futures trading carries substantial market risk and high price volatility. You may lose all of your investment.</p>
+                <h4>User Responsibility:</h4>
+                <p>You are solely responsible for your investment decisions. Binance/KuCoin are not liable for any losses.</p>
+                <h4>Liquidation Risk:</h4>
+                <p>Your entire margin balance may be liquidated in the event of adverse price movements.</p>
+                <h4>No Financial Advice:</h4>
+                <p>Information provided is not financial advice.</p>
+                <h4>Past Performance:</h4>
+                <p>Past performance is not a reliable indicator of future performance.</p>
+                <p style="margin-top:20px; font-style:italic; color:#aaa; border-top:1px solid #333; padding-top:10px;">
+                    These statements emphasize the high risk of crypto derivatives trading. Please trade responsibly.
+                </p>
+            </div>
+            <button class="btn-save" style="background:#333; color:#fff; margin-top:20px;" onclick="document.getElementById('termsModal').style.display='none'">CLOSE</button>
         </div>
     </div>
 
     <script>
-        let usersData = [];
-        let selectedUsernames = new Set();
+        function toggleTooltip(e) {
+            e.stopPropagation();
+            const t = document.getElementById('balTooltip');
+            t.style.display = 'block';
+            setTimeout(() => { t.style.display = 'none'; }, 5000);
+        }
+        document.addEventListener('click', () => { document.getElementById('balTooltip').style.display = 'none'; });
 
-        // --- LOAD & SORT USERS ---
-        async function loadUsers() {
-            const res = await fetch('/api/users');
-            usersData = await res.json();
-            
-            // SORT: Giàu nhất lên đầu
-            usersData.sort((a, b) => b.totalAll - a.totalAll);
-
-            const tbody = document.getElementById('userTableBody');
-            tbody.innerHTML = '';
-
-            usersData.forEach(u => {
-                const pnlClass = u.totalPnl >= 0 ? 'pnl-pos' : 'pnl-neg';
-                const lastLogin = u.lastLogin ? new Date(u.lastLogin).toLocaleString('vi-VN') : 'Chưa có';
-                // Filename dùng làm ID để select (bỏ _config.json)
-                const userId = u.filename.replace('_config.json', '');
-
-                const tr = document.createElement('tr');
-                tr.innerHTML = `
-                    <td style="text-align:center;">
-                        <input type="checkbox" class="user-check" value="${userId}" onchange="updateSelection()">
-                    </td>
-                    <td class="user-link" onclick="showDetails('${u.filename}', '${u.username}')">${u.username}</td>
-                    <td>${u.email}</td>
-                    <td style="font-size:0.85rem; color:#aaa;">${lastLogin}</td>
-                    <td style="color:#F0B90B">${u.binanceFuture.toFixed(2)}</td>
-                    <td style="color:#24AE8F">${u.kucoinFuture.toFixed(2)}</td>
-                    <td style="font-weight:bold; color:#fff; font-size:1rem;">${u.totalAll.toFixed(2)}</td>
-                    <td class="${pnlClass}">${u.totalPnl.toFixed(2)}</td>
-                `;
-                tbody.appendChild(tr);
-            });
-            updateSelection(); // Reset selection display
+        function openTerms() { document.getElementById('termsModal').style.display = 'flex'; }
+        
+        function checkTerms() {
+            const isChecked = document.getElementById('termsCheck').checked;
+            const isRunning = document.getElementById('statusText').textContent === 'RUNNING';
+            document.getElementById('btnStart').disabled = isRunning || !isChecked;
         }
 
-        // --- SELECTION LOGIC ---
-        function toggleCheckAll() {
-            const isChecked = document.getElementById('checkAll').checked;
-            document.querySelectorAll('.user-check').forEach(cb => cb.checked = isChecked);
-            updateSelection();
+        let currentUsername = localStorage.getItem('bot_username');
+
+        function showLogin() {
+            document.getElementById('registerSection').style.display = 'none';
+            document.getElementById('loginSection').style.display = 'flex';
         }
 
-        function updateSelection() {
-            selectedUsernames.clear();
-            document.querySelectorAll('.user-check:checked').forEach(cb => {
-                selectedUsernames.add(cb.value);
-            });
+        function showRegister() {
+            document.getElementById('loginSection').style.display = 'none';
+            document.getElementById('registerSection').style.display = 'flex';
+        }
+
+        function logout() {
+            localStorage.removeItem('bot_username');
+            location.reload();
+        }
+
+        async function handleRegister() {
+            const email = document.getElementById('regEmail').value;
+            const user = document.getElementById('regUser').value;
+            const p1 = document.getElementById('regPass1').value;
+            const p2 = document.getElementById('regPass2').value;
             
-            const info = document.getElementById('selectionInfo');
-            if (selectedUsernames.size > 0) {
-                info.innerHTML = `✅ Đang chọn: <span style="color:#fff; font-size:1.1rem;">${selectedUsernames.size}</span> Users`;
+            if(!user || !p1 || !email) return alert("Enter details");
+            if(p1 !== p2) return alert("Passwords do not match");
+
+            const res = await fetch('/bot-api/register', {
+                method: 'POST',
+                body: JSON.stringify({ username: user, password: p1, email: email })
+            });
+            const data = await res.json();
+            if(data.success) {
+                alert("Registered! Please Login.");
+                showLogin();
             } else {
-                info.innerHTML = `⚪ Chưa chọn User nào (Mặc định sẽ không thực hiện)`;
+                alert(data.message || "Register Failed");
             }
         }
 
-        // --- EXECUTE ---
-        const getAllCheck = document.getElementById('getAllCheck');
-        getAllCheck.addEventListener('change', function() {
-            const inputs = [document.getElementById('amount'), document.getElementById('coinName')];
-            inputs.forEach(i => i.disabled = this.checked);
-            document.getElementById('amount').placeholder = this.checked ? "Tự động tối đa" : "Nhập số tiền";
-            if(this.checked) document.getElementById('coinName').value = "USDT";
-        });
-
-        async function executeAction() {
-            // Lấy danh sách user
-            let targets = Array.from(selectedUsernames);
+        async function handleLogin() {
+            const user = document.getElementById('loginUser').value;
+            const pass = document.getElementById('loginPass').value;
             
-            if (targets.length === 0) {
-                // Nếu chưa tích ai -> Hỏi có muốn chạy ALL không?
-                if(confirm("Bạn chưa tích chọn User nào.\nBạn có muốn chạy cho TẤT CẢ (ALL USERS) không?")) {
-                    targets = 'ALL';
-                } else {
-                    return;
-                }
+            const res = await fetch('/bot-api/login', {
+                method: 'POST',
+                body: JSON.stringify({ username: user, password: pass })
+            });
+            const data = await res.json();
+            if(data.success) {
+                currentUsername = user;
+                localStorage.setItem('bot_username', user);
+                initApp();
+            } else {
+                alert(data.message || "Login Failed");
             }
+        }
 
-            const direction = document.getElementById('direction').value;
-            let fromEx = direction === 'both_ways' ? 'both_ways' : direction.split('_')[0];
-            let toEx = direction === 'both_ways' ? 'both_ways' : direction.split('_')[2];
+        function initApp() {
+            document.getElementById('loginSection').style.display = 'none';
+            document.getElementById('registerSection').style.display = 'none';
+            document.getElementById('dashboardSection').style.display = 'block';
+            document.getElementById('userDisplay').textContent = currentUsername;
+            loadInitConfig();
+            updateUI();
+        }
+
+        if (currentUsername) initApp();
+
+        async function apiCall(endpoint, method = 'GET', body = null) {
+            if (!currentUsername) return null;
+            const headers = { 
+                'Content-Type': 'application/json',
+                'x-username': currentUsername 
+            };
+            const options = { method, headers };
+            if (body) options.body = JSON.stringify(body);
+            try {
+                const res = await fetch(endpoint, options);
+                if (res.status === 401) {
+                    logout();
+                    return null;
+                }
+                return await res.json();
+            } catch(e) { return null; }
+        }
+
+        // --- LOGIC ---
+        function openModal() {
+            document.getElementById('configModal').style.display = 'flex';
+            const inputs = document.querySelectorAll('.modal input');
+            inputs.forEach(i => i.value = ''); 
+        }
+        function closeModal() { document.getElementById('configModal').style.display = 'none'; }
+
+        async function loadInitConfig() {
+            const cfg = await apiCall('/bot-api/config');
+            if (cfg) {
+                document.getElementById('autoBalanceDisplay').checked = cfg.autoBalance || false;
+            }
+        }
+
+        async function updateAutoBalance() {
+            const isChecked = document.getElementById('autoBalanceDisplay').checked;
+            await apiCall('/bot-api/update-balance-config', 'POST', { autoBalance: isChecked });
+        }
+
+        async function saveConfig() {
+            const newConfig = {
+                binanceApiKey: document.getElementById('cfgBinKey').value,
+                binanceApiSecret: document.getElementById('cfgBinSec').value,
+                binanceDepositAddress: document.getElementById('cfgBinWal').value,
+                kucoinApiKey: document.getElementById('cfgKuKey').value,
+                kucoinApiSecret: document.getElementById('cfgKuSec').value,
+                kucoinPassword: document.getElementById('cfgKuPass').value,
+                kucoinDepositAddress: document.getElementById('cfgKuWal').value,
+            };
+            const res = await apiCall('/bot-api/save-config', 'POST', newConfig);
+            if (res && res.success) { alert("Saved!"); closeModal(); loadInitConfig(); }
+            else alert("Save Failed");
+        }
+
+        async function startBot() {
+            const btn = document.getElementById('btnStart');
+            btn.textContent = "..."; btn.disabled = true;
 
             const payload = {
-                fromExchange: fromEx,
-                toExchange: toEx,
-                sourceWallet: document.getElementById('sourceWallet').value,
-                users: targets, // Gửi mảng user hoặc 'ALL'
-                coin: document.getElementById('coinName').value, 
-                amount: document.getElementById('amount').value,
-                isGetAll: document.getElementById('getAllCheck').checked
+                tradeConfig: {
+                    mode: document.querySelector('input[name="capMode"]:checked').value,
+                    value: parseFloat(document.getElementById('capitalInput').value)
+                },
+                autoBalance: document.getElementById('autoBalanceDisplay').checked
             };
-
-            if (!payload.isGetAll && !payload.amount) return alert("Nhập số tiền!");
-            if (payload.isGetAll && !confirm("⚠️ CẢNH BÁO: RÚT HẾT (GET ALL).\nBot sẽ đóng lệnh, bán coin và rút sạch tiền.\nTiếp tục?")) return;
-
-            const logDiv = document.getElementById('actionLog');
-            logDiv.innerHTML = `<div>> Đang xử lý ${targets === 'ALL' ? 'TẤT CẢ' : targets.length + ' User'}...</div>`;
-
-            const res = await fetch('/api/transfer', {
-                method: 'POST',
-                body: JSON.stringify(payload)
-            });
-            const data = await res.json();
             
-            logDiv.innerHTML = '';
-            data.logs.forEach(userLogs => {
-                userLogs.forEach(line => {
-                    let color = line.includes('❌') || line.includes('Lỗi') ? '#ff4444' : '#00c851';
-                    if(line.includes('User:')) { color = '#ffff00'; logDiv.innerHTML += `<br>`; }
-                    logDiv.innerHTML += `<div style="color:${color}">${line}</div>`;
+            const res = await apiCall('/bot-api/start', 'POST', payload);
+            if (res && res.success) updateUI();
+            else { alert("Failed"); checkTerms(); }
+        }
+
+        async function stopBot() {
+            await apiCall('/bot-api/stop', 'POST');
+            updateUI();
+        }
+
+        function formatTime(ms) {
+            if (ms < 0) return "00:00";
+            const m = Math.floor(ms / 60000);
+            const s = Math.floor((ms % 60000) / 1000);
+            return `${m}:${s < 10 ? '0'+s : s}`;
+        }
+
+        async function updateUI() {
+            if (!currentUsername) return;
+            const data = await apiCall('/bot-api/status');
+            if (!data) return;
+
+            const isRunning = data.botState === 'RUNNING';
+            
+            // Toggle Visibility
+            const hideEl = document.querySelectorAll('.hide-on-run');
+            hideEl.forEach(el => {
+                if (isRunning) el.classList.add('active');
+                else el.classList.remove('active');
+            });
+
+            document.getElementById('btnStart').style.display = isRunning ? 'none' : 'inline-block';
+            document.getElementById('btnStop').style.display = isRunning ? 'inline-block' : 'none';
+            
+            if (!isRunning) checkTerms(); 
+
+            const stt = document.getElementById('statusText');
+            stt.textContent = isRunning ? "RUNNING" : "STOPPED";
+            stt.style.color = isRunning ? "#00D095" : "#777";
+
+            // Balances
+            let balHtml = '';
+            if (isRunning && data.balances) {
+                for(let ex in data.balances) {
+                    let displayName = ex.includes('binance') ? 'BINANCE' : 'KUCOIN';
+                    let color = ex.includes('binance') ? 'var(--binance-yellow)' : 'var(--kucoin-green)';
+                    balHtml += `<div style="display:flex; justify-content:space-between; border-bottom:1px solid #222; padding:8px 0;">
+                        <span style="color:${color}; font-weight:bold;">${displayName}</span>
+                        <span>${data.balances[ex].available.toFixed(2)} $</span>
+                    </div>`;
+                }
+            } else balHtml = '<span style="color:#555;">Bot stopped.</span>';
+            document.getElementById('balancesContent').innerHTML = balHtml;
+
+            // Opportunity
+            if(data.bestPotentialOpportunityForDisplay) {
+                const op = data.bestPotentialOpportunityForDisplay;
+                
+                const now = Date.now();
+                const timeLeft = op.nextFundingTime ? (op.nextFundingTime - now) : 0;
+                const timerText = timeLeft > 0 ? formatTime(timeLeft) : "NOW";
+
+                const sExName = op.details.shortExchange.includes('binance') ? 'BINANCE' : 'KUCOIN';
+                const lExName = op.details.longExchange.includes('binance') ? 'BINANCE' : 'KUCOIN';
+                
+                const sColor = sExName === 'BINANCE' ? 'var(--binance-yellow)' : 'var(--kucoin-green)';
+                const lColor = lExName === 'BINANCE' ? 'var(--binance-yellow)' : 'var(--kucoin-green)';
+
+                document.getElementById('oppContent').innerHTML = `
+                    <div style="font-size:1.8rem; font-weight:bold; color:#fff; margin-bottom:5px;">${op.coin}</div>
+                    <div style="color:var(--kucoin-green); font-size:1.2rem; margin-bottom:10px;">PNL: ${op.estimatedPnl.toFixed(2)}%</div>
+                    
+                    <div style="display:flex; justify-content:space-between; width:100%; font-size:0.9rem; border-top:1px solid #333; padding-top:10px;">
+                        <div style="text-align:left">
+                            <span style="color:#ff5722; font-weight:bold;">SHORT</span><br>
+                            <span style="color:${sColor}">${sExName}</span>
+                        </div>
+                        <div style="text-align:center">
+                            <span style="color:#888;">COUNTDOWN</span><br>
+                            <span style="color:#fff; font-weight:bold;">${timerText}</span>
+                        </div>
+                        <div style="text-align:right">
+                            <span style="color:#00d095; font-weight:bold;">LONG</span><br>
+                            <span style="color:${lColor}">${lExName}</span>
+                        </div>
+                    </div>
+                `;
+            } else document.getElementById('oppContent').innerHTML = '<span style="color:#555">Scanning...</span>';
+
+            // History
+            let histHtml = '';
+            if(data.tradeHistory) {
+                data.tradeHistory.slice(0, 5).forEach(t => {
+                    const pnl = t.actualPnl || 0;
+                    histHtml += `<tr>
+                        <td>${new Date(t.entryTime).toLocaleTimeString()}</td>
+                        <td>${t.coin}</td>
+                        <td>x${t.leverage || 20}</td>
+                        <td class="${pnl>=0?'text-pos':'text-neg'}">${(t.estimatedPnlFromOpportunity||0).toFixed(1)}%</td>
+                        <td class="${pnl>=0?'text-pos':'text-neg'}" style="font-weight:bold">${pnl.toFixed(4)}</td>
+                    </tr>`;
                 });
-            });
-            logDiv.scrollTop = logDiv.scrollHeight;
-            
-            // Auto refresh sau khi chạy xong để cập nhật số dư
-            setTimeout(loadUsers, 3000);
+            }
+            document.getElementById('historyBody').innerHTML = histHtml;
+
+            setTimeout(updateUI, 1000);
         }
-
-        // --- SHOW DETAILS (Giữ nguyên logic cũ) ---
-        async function showDetails(filename, username) {
-            const modal = document.getElementById('detailModal');
-            const container = document.getElementById('accordionContainer');
-            document.getElementById('modalTitle').innerText = `Chi tiết: ${username}`;
-            container.innerHTML = '<div style="text-align:center; color:#aaa;">Đang quét dữ liệu...</div>';
-            modal.style.display = 'flex';
-
-            const res = await fetch(`/api/details/${filename}`);
-            const data = await res.json();
-            
-            let html = `<div style="margin-bottom:15px; font-size:1.2rem; text-align:center;">
-                TỔNG: <span style="color:#00c851;">${data.totalUsdt.toFixed(2)} $</span>
-            </div>`;
-            
-            const renderSection = (title, items, total, color) => {
-                if (total < 1) return '';
-                let rows = items.map(i => `<tr><td>${i.coin}</td><td>${i.amount.toFixed(4)}</td><td style="color:${color}">${i.value.toFixed(2)}$</td></tr>`).join('');
-                return `<div class="acc-item"><div class="acc-header" onclick="this.nextElementSibling.classList.toggle('show')"><span>${title}</span><span style="color:${color}">${total.toFixed(2)} $</span></div><div class="acc-content"><table>${rows}</table></div></div>`;
-            };
-
-            html += renderSection('BINANCE SPOT', data.binance.spot, data.binance.total, '#F0B90B');
-            html += renderSection('BINANCE FUT', data.binance.future, data.binance.future.reduce((a,b)=>a+b.value,0), '#F0B90B');
-            html += renderSection('KUCOIN SPOT', data.kucoin.spot, data.kucoin.total, '#24AE8F');
-            html += renderSection('KUCOIN FUT', data.kucoin.future, data.kucoin.future.reduce((a,b)=>a+b.value,0), '#24AE8F');
-            container.innerHTML = html;
-        }
-
-        loadUsers();
-        setInterval(loadUsers, 60000); 
     </script>
 </body>
 </html>
