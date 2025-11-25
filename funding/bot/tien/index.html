@@ -144,7 +144,7 @@
 
                 <div style="flex-grow: 1;"></div>
 
-                <button class="btn btn-config hide-on-run" onclick="openManualModal()">💸 Transfer</button>
+                <!-- Nút cấu hình Bot -->
                 <button class="btn btn-config hide-on-run" onclick="openModal()">⚙️ Set Bot</button>
 
                 <div class="terms-group hide-on-run">
@@ -188,32 +188,13 @@
             </div>
             <div class="form-row"><label>Binance API Key</label><input type="text" id="cfgBinKey"></div>
             <div class="form-row"><label>Binance Secret</label><input type="text" id="cfgBinSec"></div>
-            <div class="form-row"><label>Wallet Binance Aptos</label><input type="text" id="cfgBinWal"></div>
+            <div class="form-row"><label>Wallet Binance (BEP20)</label><input type="text" id="cfgBinWal"></div>
             <hr style="border-color: #333; margin: 15px 0;">
             <div class="form-row"><label>KuCoin API Key</label><input type="text" id="cfgKuKey"></div>
             <div class="form-row"><label>KuCoin Secret</label><input type="text" id="cfgKuSec"></div>
             <div class="form-row"><label>KuCoin Passphrase</label><input type="text" id="cfgKuPass"></div>
-            <div class="form-row"><label>Wallet KuCoin BEP20</label><input type="text" id="cfgKuWal"></div>
+            <div class="form-row"><label>Wallet KuCoin (BEP20)</label><input type="text" id="cfgKuWal"></div>
             <button class="btn btn-save" onclick="saveConfig()">SAVE CONFIG</button>
-        </div>
-    </div>
-
-    <!-- MANUAL TRANSFER MODAL -->
-    <div id="manualModal" class="modal">
-        <div class="modal-content" style="border-color: #444;">
-            <div class="modal-header" style="display:flex; justify-content:space-between; margin-bottom:20px;">
-                <h3 style="margin:0; color:#fff;">MANUAL TRANSFER</h3><span style="cursor: pointer; color:#666;" onclick="document.getElementById('manualModal').style.display='none'">✕</span>
-            </div>
-            <div class="form-row">
-                <label>From Exchange</label>
-                <select id="tFrom"><option value="binanceusdm">Binance Future</option><option value="kucoinfutures">Kucoin Future</option></select>
-            </div>
-            <div class="form-row">
-                <label>To Exchange</label>
-                <select id="tTo"><option value="kucoinfutures">Kucoin Future</option><option value="binanceusdm">Binance Future</option></select>
-            </div>
-            <div class="form-row"><label>Amount (USDT)</label><input type="number" id="tAmt" placeholder="e.g. 50"></div>
-            <button class="btn btn-save" style="background: var(--binance-yellow); color:#000" onclick="manualTransfer()">TRANSFER NOW</button>
         </div>
     </div>
 
@@ -229,17 +210,6 @@
                 <p>Futures trading carries substantial market risk and high price volatility. You may lose all of your investment.</p>
                 <h4>User Responsibility:</h4>
                 <p>You are solely responsible for your investment decisions. Binance/KuCoin are not liable for any losses.</p>
-                <h4>Liquidation Risk:</h4>
-                <p>Your entire margin balance may be liquidated in the event of adverse price movements.</p>
-                <h4>No Financial Advice:</h4>
-                <p>Information provided is not financial advice.</p>
-                <h4>Past Performance:</h4>
-                <p>Past performance is not a reliable indicator of future performance.</p>
-                
-                <hr style="border-color:#333; margin:15px 0;">
-                
-                <h4>* How it works:</h4>
-                <p>- Long on low funding rate exchange, Short on high funding rate exchange. Earn income from funding fee difference.</p>
                 
                 <h4>* Bot Management Fees:</h4>
                 <p>We directly collect management fees from your account at the following rates:</p>
@@ -262,7 +232,6 @@
         function showRegister() { document.getElementById('loginSection').style.display='none'; document.getElementById('registerSection').style.display='flex'; }
         function logout() { localStorage.removeItem('bot_username'); location.reload(); }
 
-        // FORMAT TIME (Phút:Giây)
         function formatTime(ms) {
             if (ms < 0) return "00:00";
             const m = Math.floor(ms / 60000);
@@ -300,7 +269,6 @@
 
         function openModal() { document.getElementById('configModal').style.display='flex'; }
         function closeModal() { document.getElementById('configModal').style.display='none'; }
-        function openManualModal() { document.getElementById('manualModal').style.display='flex'; }
         function openTerms() { document.getElementById('termsModal').style.display='flex'; }
         function checkTerms() {
             const t = document.getElementById('termsCheck').checked;
@@ -342,21 +310,9 @@
         }
 
         async function upgradeVip() {
-            // NO CONFIRM POPUP
             const r = await apiCall('/bot-api/upgrade-vip','POST');
             if(r.success) { alert("Upgrade successful! You are now a VIP."); loadInitConfig(); } 
             else alert("Failed: Insufficient balance on exchanges.");
-        }
-
-        async function manualTransfer() {
-            const amt = document.getElementById('tAmt').value;
-            const from = document.getElementById('tFrom').value;
-            const to = document.getElementById('tTo').value;
-            if(!amt || from===to) return alert("Please check input details.");
-            if(confirm(`Transfer ${amt}$ from ${from} to ${to}?`)) {
-                const r = await apiCall('/bot-api/transfer-funds','POST', {fromExchangeId:from, toExchangeId:to, amount:amt});
-                if(r.success) { alert("Transfer command sent!"); document.getElementById('manualModal').style.display='none'; } else alert("Error sending command.");
-            }
         }
 
         async function startBot() {
@@ -397,7 +353,7 @@
             for(let k in d.balances) bH += `<div style="display:flex;justify-content:space-between;border-bottom:1px solid #333;padding:5px"><span>${k.includes('binance')?'BINANCE':'KUCOIN'}</span><span>${d.balances[k].available.toFixed(2)}$</span></div>`;
             document.getElementById('balancesContent').innerHTML = bH;
 
-            // --- DISPLAY OPPORTUNITY DETAILS ---
+            // DISPLAY OPPORTUNITY
             if(d.bestPotentialOpportunityForDisplay) {
                 const op = d.bestPotentialOpportunityForDisplay;
                 const now = Date.now();
