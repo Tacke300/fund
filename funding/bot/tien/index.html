@@ -23,7 +23,7 @@
             padding: 15px;
         }
 
-        /* LOGIN */
+        /* --- AUTH OVERLAY --- */
         .auth-overlay {
             position: fixed; top: 0; left: 0; width: 100%; height: 100%;
             background: #000; z-index: 2000;
@@ -34,6 +34,7 @@
             background: #1a1a1a; padding: 30px; border-radius: 12px;
             border: 1px solid var(--binance-yellow);
             text-align: center; width: 300px;
+            box-shadow: 0 0 20px rgba(240, 185, 11, 0.2);
         }
         .auth-box h2 { color: var(--binance-yellow); margin-bottom: 20px; }
         .auth-box input {
@@ -48,50 +49,101 @@
         }
         .link-text { color: #888; margin-top: 15px; font-size: 0.9rem; cursor: pointer; text-decoration: underline; }
 
-        /* HEADER */
-        .header {
-            display: flex; justify-content: space-between; align-items: center;
-            margin-bottom: 20px; padding: 10px 20px;
-            background: #0a0a0a; border-bottom: 1px solid #222;
-            white-space: nowrap; overflow-x: auto;
+        /* --- HEADER --- */
+        .header-container {
+            background: #0a0a0a; padding: 15px; margin-bottom: 20px;
+            border-bottom: 1px solid #222;
+            display: flex; flex-direction: column; align-items: center; gap: 15px;
         }
-        .brand-group { display: flex; align-items: center; gap: 20px; }
-        .brand { display: flex; align-items: center; gap: 8px; font-weight: bold; font-size: 1.1rem; }
-        .logo { height: 30px; }
-        .logo-kucoin { height: 30px; filter: grayscale(100%) brightness(80%) sepia(100%) hue-rotate(100deg) saturate(500%); }
+        .logos-row {
+            display: flex; align-items: center; gap: 30px;
+        }
+        .brand { display: flex; align-items: center; gap: 8px; font-weight: bold; font-size: 1.2rem; }
+        .logo { height: 35px; }
+        .logo-kucoin { height: 35px; filter: grayscale(100%) brightness(80%) sepia(100%) hue-rotate(100deg) saturate(500%); }
         .text-yellow { color: var(--binance-yellow); }
         .text-green { color: var(--kucoin-green); }
-        .user-info-row { display:flex; align-items:center; gap:15px; background:#1a1a1a; padding:5px 15px; border-radius:20px; border:1px solid #333; font-size:0.9rem; }
-        .logout-btn { color:var(--danger); cursor:pointer; font-weight:bold; font-size:0.7rem; text-transform:uppercase; }
+        
+        .user-info-row {
+            display: flex; align-items: center; gap: 15px;
+            background: #1a1a1a; padding: 8px 20px; border-radius: 20px;
+            font-size: 0.9rem; color: #ccc; border: 1px solid #333;
+        }
+        .logout-btn { color: var(--danger); cursor: pointer; font-weight: bold; font-size: 0.75rem; text-transform: uppercase; }
 
-        /* MAIN */
+        /* --- CONTROLS --- */
         .container { max-width: 1200px; margin: 0 auto; }
         .controls-bar {
-            display: flex; flex-wrap: wrap; gap: 10px; align-items: center;
+            display: flex; flex-wrap: wrap; gap: 15px; align-items: center;
             background: var(--card-bg); border: 1px solid #222;
             padding: 15px; border-radius: 8px; margin-bottom: 20px;
             box-shadow: 0 5px 15px rgba(0,0,0,0.3);
         }
+        
         .hide-on-run.active { display: none !important; }
-        .input-group { display: flex; align-items: center; gap: 8px; background: #000; padding: 8px 12px; border: 1px solid #444; border-radius: 4px; }
-        input[type="number"] { background: #222; border: 1px solid #444; color: var(--binance-yellow); padding: 5px; border-radius: 3px; width: 60px; text-align: center; font-weight: bold; }
-        .btn { padding: 10px 20px; border: none; border-radius: 4px; font-weight: bold; cursor: pointer; }
+
+        .input-group {
+            display: flex; align-items: center; gap: 8px;
+            background: #000; padding: 8px 12px;
+            border: 1px solid #444; border-radius: 4px;
+        }
+        input[type="number"] {
+            background: #222; border: 1px solid #444; color: var(--binance-yellow);
+            padding: 5px; border-radius: 3px; width: 60px; text-align: center; font-weight: bold;
+        }
+
+        /* AUTO BALANCE */
+        .auto-bal-group {
+            display: flex; align-items: center; gap: 5px;
+            font-size: 0.9rem; color: #ccc; position: relative;
+        }
+        .help-btn {
+            background: #333; color: #fff; border-radius: 50%; width: 18px; height: 18px;
+            display: inline-flex; justify-content: center; align-items: center;
+            font-size: 12px; cursor: pointer; font-weight: bold;
+        }
+        .tooltip {
+            display: none; position: absolute; top: 30px; left: 0;
+            background: #222; border: 1px solid #444; padding: 10px;
+            border-radius: 6px; width: 250px; z-index: 100;
+            color: #eee; font-size: 0.8rem; line-height: 1.4;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.5);
+        }
+
+        /* TERMS */
+        .terms-group {
+            display: flex; align-items: center; gap: 8px; font-size: 0.9rem; color: #aaa;
+            margin-right: 10px;
+        }
+        .terms-link { color: var(--binance-yellow); text-decoration: underline; cursor: pointer; }
+
+        /* BUTTONS */
+        .btn { padding: 10px 20px; border: none; border-radius: 4px; font-weight: bold; cursor: pointer; text-transform: uppercase; }
         .btn-config { background: #333; color: #fff; border: 1px solid #555; }
         .btn-start { background: var(--binance-yellow); color: #000; }
+        .btn-start:disabled { background: #444; color: #888; cursor: not-allowed; opacity: 0.7; }
         .btn-stop { background: var(--danger); color: #fff; }
 
         /* GRID */
         .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 15px; }
-        .card { background: var(--card-bg); border: 1px solid #222; border-radius: 12px; padding: 15px; box-shadow: 4px 4px 10px rgba(0,0,0,0.5); }
-        .card h3 { margin: 0 0 10px 0; border-bottom: 1px solid #333; padding-bottom: 8px; color: var(--binance-yellow); font-size: 1rem; }
+        .card {
+            background: var(--card-bg); border: 1px solid #222;
+            border-radius: 12px; padding: 15px;
+            box-shadow: 4px 4px 10px rgba(0,0,0,0.5);
+        }
+        .card h3 { margin: 0 0 10px 0; border-bottom: 1px solid #333; padding-bottom: 8px; color: var(--binance-yellow); font-size: 1rem; text-transform: uppercase; }
 
         /* MODAL */
         .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.9); z-index: 1000; justify-content: center; align-items: center; }
-        .modal-content { background: #111; border: 2px solid var(--binance-yellow); padding: 20px; border-radius: 10px; width: 90%; max-width: 500px; }
+        .modal-content { background: #111; border: 2px solid var(--binance-yellow); padding: 20px; border-radius: 10px; width: 90%; max-width: 500px; max-height: 90vh; overflow-y: auto; }
         .form-row { margin-bottom: 12px; }
-        .form-row label { display: block; margin-bottom: 3px; color: #aaa; font-size: 0.8rem; }
-        .form-row input { width: 100%; padding: 8px; background: #222; border: 1px solid #444; color: #fff; box-sizing: border-box; }
-        .btn-save { width: 100%; background: var(--kucoin-green); color: #000; margin-top: 10px; padding: 10px; border:none; font-weight:bold; cursor:pointer; }
+        .form-row label { display: block; margin-bottom: 4px; color: #aaa; font-size: 0.8rem; }
+        .form-row input { width: 100%; padding: 10px; background: #222; border: 1px solid #444; color: #fff; box-sizing: border-box; font-family: monospace; }
+        .btn-save { width: 100%; background: var(--kucoin-green); color: #000; margin-top: 10px; padding: 12px; border:none; font-weight:bold; cursor:pointer; }
+
+        /* TERMS CONTENT */
+        .terms-content { color: #ddd; font-size: 0.9rem; line-height: 1.5; text-align: left; }
+        .terms-content h4 { color: var(--danger); margin-top: 15px; margin-bottom: 5px; }
 
         /* TABLE */
         table { width: 100%; border-collapse: collapse; font-size: 0.85rem; margin-top: 10px; }
@@ -101,11 +153,12 @@
         .text-neg { color: var(--danger); }
 
         @media (max-width: 600px) {
-            .brand-group { gap: 10px; }
-            .brand { font-size: 0.9rem; }
-            .logo, .logo-kucoin { height: 25px; }
             .controls-bar { flex-direction: column; align-items: stretch; }
             .input-group { justify-content: space-between; }
+            .logos-row { gap: 15px; }
+            .brand { font-size: 1rem; }
+            .logo, .logo-kucoin { height: 25px; }
+            .header-container { gap: 15px; }
         }
     </style>
 </head>
@@ -137,13 +190,13 @@
     <!-- DASHBOARD -->
     <div id="dashboardSection" style="display:none;">
         
-        <div class="header">
-            <div class="brand-group">
+        <div class="header-container">
+            <div class="logos-row">
                 <div class="brand">
                     <img src="https://upload.wikimedia.org/wikipedia/commons/e/e8/Binance_Logo.svg" class="logo">
                     <span class="text-yellow">BINANCE</span>
                 </div>
-                <span class="x-sign" style="color:#444">✕</span>
+                <span style="color:#444; font-size:1.2rem;">✕</span>
                 <div class="brand">
                     <img src="https://cryptologos.cc/logos/kucoin-token-kcs-logo.png?v=025" class="logo-kucoin">
                     <span class="text-green">KUCOIN</span>
@@ -166,17 +219,27 @@
                     <span style="color:#aaa">Value:</span>
                     <input type="number" id="capitalInput" value="50">
                 </div>
-                <div class="input-group hide-on-run" style="border-color: var(--kucoin-green);">
-                    <label style="cursor: pointer; font-size: 0.9rem; display:flex; align-items:center; gap:5px;">
+                
+                <div class="auto-bal-group hide-on-run">
+                    <label style="cursor: pointer; display:flex; align-items:center; gap:5px;">
                         <input type="checkbox" id="autoBalanceDisplay" onchange="updateAutoBalance()"> Auto-Balance
                     </label>
+                    <span class="help-btn" onclick="toggleTooltip(event)">?</span>
+                    <div id="balTooltip" class="tooltip">
+                        When the balance difference between Binance/KuCoin is > $20, the Bot automatically transfers funds to equalize both accounts.
+                    </div>
                 </div>
-
-                <button class="btn btn-config hide-on-run" onclick="openModal()">⚙️ Set Bot</button>
 
                 <div style="flex-grow: 1;"></div>
 
-                <button id="btnStart" class="btn btn-start" onclick="startBot()">▶ START</button>
+                <button class="btn btn-config hide-on-run" onclick="openModal()">⚙️ Set Bot</button>
+
+                <div class="terms-group hide-on-run">
+                    <input type="checkbox" id="termsCheck" onchange="checkTerms()">
+                    <label>I agree to <span class="terms-link" onclick="openTerms()">Terms & Disclaimer</span></label>
+                </div>
+
+                <button id="btnStart" class="btn btn-start" onclick="startBot()" disabled>▶ START</button>
                 <button id="btnStop" class="btn btn-stop" onclick="stopBot()" style="display:none;">⏹ STOP</button>
                 
                 <div id="statusText" style="padding: 5px 10px; border-radius: 4px; background:#222; color:#777; font-weight:bold; font-size:0.8rem;">STOPPED</div>
@@ -184,7 +247,7 @@
 
             <div class="grid">
                 <div class="card">
-                    <h3>Balances</h3>
+                    <h3>Wallet Balances</h3>
                     <div id="balancesContent" style="min-height: 40px; padding-top:5px;"><span style="color:#555;">Waiting...</span></div>
                 </div>
                 <div class="card">
@@ -197,7 +260,7 @@
                 <h3>Trade History</h3>
                 <div style="overflow-x: auto;">
                     <table>
-                        <thead><tr><th>Time</th><th>Coin</th><th>Pair</th><th>Est.</th><th>Real.</th></tr></thead>
+                        <thead><tr><th>Time</th><th>Coin</th><th>Lev</th><th>Est.</th><th>Real.</th></tr></thead>
                         <tbody id="historyBody"></tbody>
                     </table>
                 </div>
@@ -224,7 +287,49 @@
         </div>
     </div>
 
+    <!-- TERMS MODAL -->
+    <div id="termsModal" class="modal">
+        <div class="modal-content" style="border-color: var(--danger);">
+            <div class="modal-header" style="display:flex; justify-content:space-between; margin-bottom:10px;">
+                <h3 style="margin:0; color:var(--danger);">TERMS & DISCLAIMER</h3>
+                <span style="cursor: pointer; color:#666;" onclick="document.getElementById('termsModal').style.display='none'">✕</span>
+            </div>
+            <div class="terms-content">
+                <h4>High Market Risk:</h4>
+                <p>Futures trading carries substantial market risk and high price volatility. You may lose all of your investment.</p>
+                <h4>User Responsibility:</h4>
+                <p>You are solely responsible for your investment decisions. Binance/KuCoin are not liable for any losses.</p>
+                <h4>Liquidation Risk:</h4>
+                <p>Your entire margin balance may be liquidated in the event of adverse price movements.</p>
+                <h4>No Financial Advice:</h4>
+                <p>Information provided is not financial advice.</p>
+                <h4>Past Performance:</h4>
+                <p>Past performance is not a reliable indicator of future performance.</p>
+                <p style="margin-top:20px; font-style:italic; color:#aaa; border-top:1px solid #333; padding-top:10px;">
+                    These statements emphasize the high risk of crypto derivatives trading. Please trade responsibly.
+                </p>
+            </div>
+            <button class="btn-save" style="background:#333; color:#fff; margin-top:20px;" onclick="document.getElementById('termsModal').style.display='none'">CLOSE</button>
+        </div>
+    </div>
+
     <script>
+        function toggleTooltip(e) {
+            e.stopPropagation();
+            const t = document.getElementById('balTooltip');
+            t.style.display = 'block';
+            setTimeout(() => { t.style.display = 'none'; }, 5000);
+        }
+        document.addEventListener('click', () => { document.getElementById('balTooltip').style.display = 'none'; });
+
+        function openTerms() { document.getElementById('termsModal').style.display = 'flex'; }
+        
+        function checkTerms() {
+            const isChecked = document.getElementById('termsCheck').checked;
+            const isRunning = document.getElementById('statusText').textContent === 'RUNNING';
+            document.getElementById('btnStart').disabled = isRunning || !isChecked;
+        }
+
         let currentUsername = localStorage.getItem('bot_username');
 
         function showLogin() {
@@ -310,7 +415,6 @@
             } catch(e) { return null; }
         }
 
-        // --- LOGIC ---
         function openModal() {
             document.getElementById('configModal').style.display = 'flex';
             const inputs = document.querySelectorAll('.modal input');
@@ -359,7 +463,7 @@
             
             const res = await apiCall('/bot-api/start', 'POST', payload);
             if (res && res.success) updateUI();
-            else { alert("Failed"); btn.textContent = "▶ START"; btn.disabled = false; }
+            else { alert("Failed"); checkTerms(); }
         }
 
         async function stopBot() {
@@ -367,7 +471,6 @@
             updateUI();
         }
 
-        // FORMAT TIME
         function formatTime(ms) {
             if (ms < 0) return "00:00";
             const m = Math.floor(ms / 60000);
@@ -390,18 +493,16 @@
 
             document.getElementById('btnStart').style.display = isRunning ? 'none' : 'inline-block';
             document.getElementById('btnStop').style.display = isRunning ? 'inline-block' : 'none';
-            document.getElementById('btnStart').disabled = false;
-            document.getElementById('btnStart').textContent = "▶ START";
+            
+            if (!isRunning) checkTerms(); 
 
             const stt = document.getElementById('statusText');
             stt.textContent = isRunning ? "RUNNING" : "STOPPED";
             stt.style.color = isRunning ? "#00D095" : "#777";
 
-            // Balances
             let balHtml = '';
             if (isRunning && data.balances) {
                 for(let ex in data.balances) {
-                    // Map Internal ID to Display Name
                     let displayName = ex.includes('binance') ? 'BINANCE' : 'KUCOIN';
                     let color = ex.includes('binance') ? 'var(--binance-yellow)' : 'var(--kucoin-green)';
                     balHtml += `<div style="display:flex; justify-content:space-between; border-bottom:1px solid #222; padding:8px 0;">
@@ -412,16 +513,13 @@
             } else balHtml = '<span style="color:#555;">Bot stopped.</span>';
             document.getElementById('balancesContent').innerHTML = balHtml;
 
-            // Opportunity
             if(data.bestPotentialOpportunityForDisplay) {
                 const op = data.bestPotentialOpportunityForDisplay;
                 
-                // Calc countdown
                 const now = Date.now();
                 const timeLeft = op.nextFundingTime ? (op.nextFundingTime - now) : 0;
                 const timerText = timeLeft > 0 ? formatTime(timeLeft) : "NOW";
 
-                // Determine Sides
                 const sExName = op.details.shortExchange.includes('binance') ? 'BINANCE' : 'KUCOIN';
                 const lExName = op.details.longExchange.includes('binance') ? 'BINANCE' : 'KUCOIN';
                 
@@ -438,7 +536,7 @@
                             <span style="color:${sColor}">${sExName}</span>
                         </div>
                         <div style="text-align:center">
-                            <span style="color:#888;">FUNDING IN</span><br>
+                            <span style="color:#888;">COUNTDOWN</span><br>
                             <span style="color:#fff; font-weight:bold;">${timerText}</span>
                         </div>
                         <div style="text-align:right">
@@ -449,7 +547,6 @@
                 `;
             } else document.getElementById('oppContent').innerHTML = '<span style="color:#555">Scanning...</span>';
 
-            // History
             let histHtml = '';
             if(data.tradeHistory) {
                 data.tradeHistory.slice(0, 5).forEach(t => {
@@ -457,7 +554,7 @@
                     histHtml += `<tr>
                         <td>${new Date(t.entryTime).toLocaleTimeString()}</td>
                         <td>${t.coin}</td>
-                        <td>${t.shortExchange.substr(0,1).toUpperCase()}/${t.longExchange.substr(0,1).toUpperCase()}</td>
+                        <td>x${t.leverage || 20}</td>
                         <td class="${pnl>=0?'text-pos':'text-neg'}">${(t.estimatedPnlFromOpportunity||0).toFixed(1)}%</td>
                         <td class="${pnl>=0?'text-pos':'text-neg'}" style="font-weight:bold">${pnl.toFixed(4)}</td>
                     </tr>`;
@@ -465,7 +562,7 @@
             }
             document.getElementById('historyBody').innerHTML = histHtml;
 
-            setTimeout(updateUI, 1000); // 1s for timer
+            setTimeout(updateUI, 1000);
         }
     </script>
 </body>
