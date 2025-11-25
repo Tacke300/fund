@@ -7,7 +7,7 @@ const ccxt = require('ccxt');
 const PORT = 4953;
 const USER_DATA_DIR = path.join(__dirname, 'user_data');
 
-// Load địa chỉ ví từ file balance.js
+// Load địa chỉ ví
 let depositAddresses = {};
 try {
     const balanceModule = require('./balance.js');
@@ -18,7 +18,6 @@ try {
 
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
-// Helper: Init Exchange
 function initExchange(exchangeId, config) {
     try {
         let exchangeClass;
@@ -34,13 +33,11 @@ function initExchange(exchangeId, config) {
             options.secret = config.kucoinApiSecret;
             options.password = config.kucoinPassword || config.kucoinApiPassword;
         }
-
         if (!options.apiKey || !options.secret) return null;
         return new exchangeClass(options);
     } catch (e) { return null; }
 }
 
-// Helper: Lấy giá coin hiện tại (USDT)
 async function getPrice(exchange, symbol) {
     try {
         if (symbol === 'USDT') return 1;
@@ -49,7 +46,7 @@ async function getPrice(exchange, symbol) {
     } catch (e) { return 0; }
 }
 
-// Helper: Quét chi tiết ví (Spot/Margin/Future/Earn)
+// Helper: Quét chi tiết ví & Tính tổng
 async function fetchWalletDetails(config) {
     const report = {
         totalUsdt: 0,
@@ -63,11 +60,7 @@ async function fetchWalletDetails(config) {
 
     if (binSpot) {
         try {
-            // 1. Spot & Margin & Earn (Binance trả chung trong fetchBalance nếu config đúng, hoặc cần endpoint riêng)
-            // Ở đây dùng fetchBalance mặc định cho Spot/Flex
             const bal = await binSpot.fetchBalance();
-            
-            // Quét Spot Assets
             for (const [coin, amt] of Object.entries(bal.total)) {
                 if (amt > 0) {
                     const price = await getPrice(binSpot, coin);
@@ -78,25 +71,6 @@ async function fetchWalletDetails(config) {
                     }
                 }
             }
-            
-            // Quét Margin (Nếu có) - CCXT Binance hỗ trợ type: 'margin'
-            try {
-                const marginBal = await binSpot.fetchBalance({ type: 'margin' });
-                for (const [coin, amt] of Object.entries(marginBal.total)) {
-                    if (amt > 0) {
-                        const price = await getPrice(binSpot, coin);
-                        // Margin Value = Asset - Liability (Nợ)
-                        const debt = marginBal.debt ? (marginBal.debt[coin] || 0) : 0;
-                        const netValue = (amt - debt) * price;
-                        
-                        if (Math.abs(netValue) >= 1) {
-                            report.binance.margin.push({ coin, amount: amt, debt, value: netValue, price });
-                            report.binance.total += netValue;
-                        }
-                    }
-                }
-            } catch(e) {}
-
         } catch(e) {}
     }
 
@@ -128,22 +102,6 @@ async function fetchWalletDetails(config) {
                     }
                 }
             }
-            // Kucoin Margin check (Type: margin)
-            try {
-                const marginBal = await kuSpot.fetchBalance({ type: 'margin' });
-                for (const [coin, amt] of Object.entries(marginBal.total)) {
-                    if (amt > 0) {
-                        const price = await getPrice(kuSpot, coin);
-                        const debt = marginBal.debt ? (marginBal.debt[coin] || 0) : 0;
-                        const netValue = (amt - debt) * price;
-                        if (Math.abs(netValue) >= 1) {
-                            report.kucoin.margin.push({ coin, amount: amt, debt, value: netValue, price });
-                            report.kucoin.total += netValue;
-                        }
-                    }
-                }
-            } catch(e) {}
-
         } catch(e) {}
     }
 
@@ -162,9 +120,7 @@ async function fetchWalletDetails(config) {
     return report;
 }
 
-// --- API HANDLERS ---
-
-// 1. Danh sách User (Có tổng tiền)
+// API: Lấy danh sách user + PNL + Last Login
 async function getAllUsersSummary() {
     if (!fs.existsSync(USER_DATA_DIR)) return [];
     const files = fs.readdirSync(USER_DATA_DIR).filter(f => f.endsWith('_config.json'));
@@ -174,50 +130,64 @@ async function getAllUsersSummary() {
 
     for (const file of files) {
         try {
-            const config = JSON.parse(fs.readFileSync(path.join(USER_DATA_DIR, file), 'utf8'));
+            const filePath = path.join(USER_DATA_DIR, file);
+            const config = JSON.parse(fs.readFileSync(filePath, 'utf8'));
             
-            // Fetch nhanh số dư Futures (Spot tính sau vì lâu)
-            let binFut = 0, kuFut = 0;
-            try {
-                const b = initExchange('binanceusdm', config);
-                if (b) binFut = (await b.fetchBalance()).total?.USDT || 0;
-            } catch(e){}
-            try {
-                const k = initExchange('kucoinfutures', config);
-                if (k) kuFut = (await k.fetchBalance()).total?.USDT || 0;
-            } catch(e){}
+            // 1. Lấy thông tin file để biết Last Active
+            const stats = fs.statSync(filePath);
+            const lastLogin = stats.mtime; // Thời gian sửa file lần cuối
+
+            // 2. Tính tổng PNL từ file history
+            let totalPnl = 0;
+            const histFile = file.replace('_config.json', '_history.json');
+            const histPath = path.join(USER_DATA_DIR, histFile);
+            if (fs.existsSync(histPath)) {
+                try {
+                    const history = JSON.parse(fs.readFileSync(histPath, 'utf8'));
+                    if (Array.isArray(history)) {
+                        totalPnl = history.reduce((sum, trade) => sum + (trade.actualPnl || 0), 0);
+                    }
+                } catch(e) {}
+            }
+
+            // 3. Quét tài sản
+            const details = await fetchWalletDetails(config);
+            const binFutVal = details.binance.future.reduce((sum, item) => sum + item.value, 0);
+            const kuFutVal = details.kucoin.future.reduce((sum, item) => sum + item.value, 0);
 
             users.push({
                 id: index++,
                 username: config.username || file.replace('_config.json', ''),
                 email: config.email || 'N/A',
-                binanceFuture: binFut,
-                kucoinFuture: kuFut,
-                // Tổng tạm tính (chỉ futures) để hiển thị nhanh bảng ngoài
-                // Muốn tổng full phải bấm vào chi tiết vì fetch Spot rất lâu
-                tempTotal: binFut + kuFut, 
+                binanceFuture: binFutVal,
+                kucoinFuture: kuFutVal,
+                totalAll: details.totalUsdt,
+                totalPnl: totalPnl,
+                lastLogin: lastLogin,
                 filename: file
             });
-        } catch (e) {}
+            
+            await sleep(100); 
+
+        } catch (e) { console.log(`Lỗi user ${file}:`, e.message); }
     }
+    // Sort ở Frontend hoặc Backend đều được, ở đây backend trả raw
     return users;
 }
 
-// 2. Logic Rút tiền đơn lẻ
+// Logic Rút tiền đơn lẻ
 async function transferOneWay(config, fromExName, toExName, coin, amount, sourceWallet, isGetAll, log) {
     const isFromBinance = fromExName === 'binance';
-    const srcEx = initExchange(isFromBinance ? 'binance' : 'kucoin', config); // Spot
-    const srcFut = initExchange(isFromBinance ? 'binanceusdm' : 'kucoinfutures', config); // Future
+    const srcEx = initExchange(isFromBinance ? 'binance' : 'kucoin', config);
+    const srcFut = initExchange(isFromBinance ? 'binanceusdm' : 'kucoinfutures', config);
 
-    if (!srcEx) { log.push(`! Lỗi kết nối ${fromExName}`); return; }
+    if (!srcEx) { log.push(`! [${fromExName}] Lỗi kết nối API`); return; }
 
     try {
-        // B1: Dọn dẹp Futures & Margin nếu GetAll
         if (isGetAll) {
-            log.push(`[${fromExName}] Đang thanh lý toàn bộ...`);
+            log.push(`[${fromExName}] Thanh lý toàn bộ...`);
             if (srcFut) {
                 try { await srcFut.cancelAllOrders(); } catch(e){}
-                // Close Positions (Giả lập logic close market)
                 const pos = await srcFut.fetchPositions();
                 for (const p of pos) {
                     if (parseFloat(p.contracts) > 0) {
@@ -227,12 +197,10 @@ async function transferOneWay(config, fromExName, toExName, coin, amount, source
                     }
                 }
                 await sleep(2000);
-                // Move Future -> Spot
                 const bal = await srcFut.fetchBalance();
                 const av = bal.free.USDT || 0;
                 if (av > 1) await srcFut.transfer('USDT', av, 'future', isFromBinance ? 'spot' : 'main');
             }
-            // Bán Spot -> USDT
             const spotBal = await srcEx.fetchBalance();
             for(const [c, amt] of Object.entries(spotBal.free)) {
                 if (c !== 'USDT' && amt > 0) {
@@ -240,19 +208,17 @@ async function transferOneWay(config, fromExName, toExName, coin, amount, source
                 }
             }
         } 
-        // Nếu không GetAll nhưng chọn nguồn Future -> Gom về Spot
         else if (sourceWallet === 'future' || sourceWallet === 'both') {
             if (srcFut) {
                 const bal = await srcFut.fetchBalance();
                 const av = bal.free.USDT || 0;
                 if (av > 1) {
                     await srcFut.transfer('USDT', av, 'future', isFromBinance ? 'spot' : 'main');
-                    log.push(`[${fromExName}] Gom ${av.toFixed(2)}$ Future -> Spot`);
+                    log.push(`[${fromExName}] Gom ${av.toFixed(2)}$ Fut->Spot`);
                 }
             }
         }
 
-        // B2: Thực hiện Rút
         await sleep(1000);
         const spotBal = await srcEx.fetchBalance();
         const avail = spotBal.free[coin] || 0;
@@ -260,62 +226,62 @@ async function transferOneWay(config, fromExName, toExName, coin, amount, source
         if (withdrawAmt > avail) withdrawAmt = avail;
 
         if (withdrawAmt < 10) {
-            log.push(`[${fromExName}] Số dư không đủ rút (${withdrawAmt} < 10)`);
+            log.push(`[${fromExName}] Số dư < 10$ (${withdrawAmt.toFixed(2)}), không rút.`);
             return;
         }
 
-        // Lấy địa chỉ đích
         let addr = '', net = '';
-        if (toExName === 'binance') { // Rút về Binance (Aptos)
+        if (toExName === 'binance') { 
             if (depositAddresses.binanceusdm?.APT) { addr = depositAddresses.binanceusdm.APT; net = 'APT'; }
             else if (depositAddresses.binance?.APT) { addr = depositAddresses.binance.APT; net = 'APT'; }
-        } else { // Rút về Kucoin (BEP20)
+        } else { 
             if (depositAddresses.kucoinfutures?.BEP20) { addr = depositAddresses.kucoinfutures.BEP20; net = 'BSC'; }
             else if (depositAddresses.kucoin?.BEP20) { addr = depositAddresses.kucoin.BEP20; net = 'BSC'; }
         }
 
-        if (!addr) { log.push(`[${fromExName}] ❌ Không thấy địa chỉ ví đích!`); return; }
+        if (!addr) { log.push(`[${fromExName}] ❌ Không có ví đích!`); return; }
 
         try {
             await srcEx.withdraw(coin, withdrawAmt, addr, undefined, { network: net });
-            log.push(`[${fromExName}] ✅ Đã rút ${withdrawAmt} ${coin} -> ${toExName} (${net})`);
+            log.push(`[${fromExName}] ✅ Rút ${withdrawAmt.toFixed(2)} ${coin} -> ${toExName}`);
         } catch(e) { log.push(`[${fromExName}] ❌ Lỗi rút: ${e.message}`); }
 
-    } catch (e) { log.push(`[${fromExName}] Lỗi xử lý: ${e.message}`); }
+    } catch (e) { log.push(`[${fromExName}] Lỗi: ${e.message}`); }
 }
 
-// 3. Xử lý Chuyển tiền (API Main)
+// API Main Transfer
 async function processTransfer(reqData) {
-    const { fromExchange, toExchange, sourceWallet, username, coin, amount, isGetAll } = reqData;
-    // Nếu GetAll -> Ép coin là USDT
-    const targetCoin = isGetAll ? 'USDT' : coin.toUpperCase();
+    let { fromExchange, toExchange, sourceWallet, users, coin, amount, isGetAll } = reqData;
+    if (isGetAll) coin = 'USDT'; 
     
     const results = [];
     let targetFiles = [];
     
-    if (username === 'ALL') targetFiles = fs.readdirSync(USER_DATA_DIR).filter(f => f.endsWith('_config.json'));
-    else {
-        const all = fs.readdirSync(USER_DATA_DIR);
-        const found = all.find(f => f.includes(username)); // username gửi lên là safeName hoặc realName
-        if(found) targetFiles = [found];
+    // Xử lý danh sách users (Mảng hoặc 'ALL')
+    if (users === 'ALL') {
+        targetFiles = fs.readdirSync(USER_DATA_DIR).filter(f => f.endsWith('_config.json'));
+    } else if (Array.isArray(users)) {
+        targetFiles = users.map(u => `${u}_config.json`); // Giả định user gửi lên là safeName
+    } else {
+        targetFiles = [`${users}_config.json`];
     }
 
     for (const file of targetFiles) {
+        // Check file tồn tại
+        if (!fs.existsSync(path.join(USER_DATA_DIR, file))) continue;
+
         let log = [`User: ${file.replace('_config.json','')}`];
         try {
             const config = JSON.parse(fs.readFileSync(path.join(USER_DATA_DIR, file), 'utf8'));
-            
             if (fromExchange === 'both_ways') {
-                // Chạy song song: Bin -> Ku VÀ Ku -> Bin
-                log.push(">>> Chạy Rút chéo (2 chiều)...");
+                log.push(">>> Rút chéo 2 chiều...");
                 await Promise.all([
-                    transferOneWay(config, 'binance', 'kucoin', targetCoin, amount, sourceWallet, isGetAll, log),
-                    transferOneWay(config, 'kucoin', 'binance', targetCoin, amount, sourceWallet, isGetAll, log)
+                    transferOneWay(config, 'binance', 'kucoin', coin, amount, sourceWallet, isGetAll, log),
+                    transferOneWay(config, 'kucoin', 'binance', coin, amount, sourceWallet, isGetAll, log)
                 ]);
             } else {
-                await transferOneWay(config, fromExchange, toExchange, targetCoin, amount, sourceWallet, isGetAll, log);
+                await transferOneWay(config, fromExchange, toExchange, coin, amount, sourceWallet, isGetAll, log);
             }
-
         } catch (e) { log.push(`Lỗi file: ${e.message}`); }
         results.push(log);
     }
