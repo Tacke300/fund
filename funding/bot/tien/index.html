@@ -3,276 +3,511 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Binance x KuCoin Bot</title>
+    <title>Binance x KuCoin Arbitrage</title>
     <style>
         :root {
-            --bg-dark: #0b0e11;
+            --bg-color: #000000;
+            --card-bg: #111111;
             --binance-yellow: #F0B90B;
             --kucoin-green: #24AE8F;
-            --text: #EAECEF;
-            --card-bg: #1e2329;
+            --text-color: #EAECEF;
             --danger: #F6465D;
         }
+
         body {
-            font-family: Arial, sans-serif;
+            font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-color);
             margin: 0;
-            color: var(--text);
-            /* SPLIT BACKGROUND: Half Yellow/Black, Half Green/Blackish */
-            background: linear-gradient(90deg, #1e2026 50%, #001f16 50%);
-            min-height: 100vh;
+            padding: 20px;
         }
+
+        /* --- HEADER --- */
         .header {
             display: flex;
             justify-content: center;
             align-items: center;
-            padding: 20px;
-            background: rgba(0,0,0,0.3);
-            gap: 20px;
+            margin-bottom: 30px;
+            gap: 30px;
+            background: #0a0a0a;
+            padding: 15px;
+            border: 1px solid var(--binance-yellow);
+            border-radius: 8px;
+            box-shadow: 0 0 15px rgba(240, 185, 11, 0.2);
         }
-        .logo { height: 50px; }
-        .x-sign { font-size: 2rem; font-weight: bold; color: #fff; }
-        
-        .container { max-width: 1200px; margin: 20px auto; padding: 0 15px; }
-        
-        /* Config Form (Overlay) */
-        .setup-overlay {
-            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-            background: rgba(0,0,0,0.9);
-            display: flex; justify-content: center; align-items: center;
-            z-index: 1000;
+
+        .brand {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 1.8rem;
+            font-weight: bold;
+            letter-spacing: 1px;
         }
-        .setup-box {
-            background: var(--card-bg); padding: 30px; border-radius: 12px;
-            width: 500px; border: 1px solid #444;
-        }
-        .setup-box h2 { text-align: center; color: var(--binance-yellow); }
-        .form-group { margin-bottom: 15px; }
-        .form-group label { display: block; margin-bottom: 5px; font-size: 0.9rem; }
-        .form-group input { 
-            width: 100%; padding: 10px; background: #2b3139; 
-            border: 1px solid #444; color: #fff; border-radius: 4px; box-sizing: border-box;
-        }
-        .btn-start {
-            width: 100%; padding: 12px; background: var(--binance-yellow);
-            color: #000; font-weight: bold; border: none; border-radius: 4px; cursor: pointer;
-            font-size: 1.1rem;
-        }
-        
-        /* Dashboard */
-        .dashboard { display: none; }
-        .active { display: block; }
-        
-        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; margin-bottom: 20px; }
-        .card { background: var(--card-bg); padding: 20px; border-radius: 8px; border: 1px solid #333; }
-        .card h3 { margin-top: 0; border-bottom: 1px solid #444; padding-bottom: 10px; }
-        
-        .btn { padding: 10px 20px; border-radius: 4px; cursor: pointer; border: none; font-weight: bold; }
-        .btn-stop { background: var(--danger); color: #fff; }
-        .btn-close { background: #FF9800; color: #000; display: none; }
-        .btn-test { background: var(--kucoin-green); color: #fff; width: 100%; margin-top: 10px; }
-        
-        table { width: 100%; border-collapse: collapse; margin-top: 10px; }
-        th, td { padding: 10px; text-align: left; border-bottom: 1px solid #444; }
+
+        .logo { height: 45px; }
+        .text-yellow { color: var(--binance-yellow); }
         .text-green { color: var(--kucoin-green); }
-        .text-red { color: var(--danger); }
+        .x-sign { font-size: 1.5rem; color: #555; }
+
+        /* --- LAYOUT --- */
+        .container { max-width: 1400px; margin: 0 auto; }
         
-        .control-panel { display: flex; gap: 15px; align-items: center; margin-bottom: 20px; background: var(--card-bg); padding: 15px; border-radius: 8px; }
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+
+        .card {
+            background-color: var(--card-bg);
+            border: 1px solid var(--binance-yellow); /* Viền vàng theo yêu cầu */
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+        }
+
+        .card h3 {
+            margin-top: 0;
+            border-bottom: 1px solid #333;
+            padding-bottom: 10px;
+            color: var(--binance-yellow);
+            font-size: 1.1rem;
+            text-transform: uppercase;
+        }
+
+        /* --- CONTROLS BAR --- */
+        .controls-bar {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 15px;
+            align-items: center;
+            background: var(--card-bg);
+            border: 1px solid var(--binance-yellow);
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+
+        .input-group {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            background: #000;
+            padding: 8px 15px;
+            border: 1px solid #444;
+            border-radius: 4px;
+        }
+
+        input[type="number"] {
+            background: transparent;
+            border: none;
+            color: var(--binance-yellow);
+            font-weight: bold;
+            font-size: 1.1rem;
+            width: 80px;
+            text-align: center;
+        }
+        input:focus { outline: none; }
+
+        /* --- BUTTONS --- */
+        .btn {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 4px;
+            font-weight: bold;
+            cursor: pointer;
+            font-size: 1rem;
+            transition: all 0.2s;
+            text-transform: uppercase;
+        }
+
+        .btn-config { background: #333; color: #fff; border: 1px solid #555; }
+        .btn-config:hover { background: #444; }
+
+        .btn-start { background: var(--binance-yellow); color: #000; }
+        .btn-start:hover { filter: brightness(1.1); }
+        .btn-start:disabled { opacity: 0.3; cursor: not-allowed; }
+
+        .btn-stop { background: var(--danger); color: #fff; }
+        .btn-stop:hover { filter: brightness(1.1); }
+        .btn-stop:disabled { opacity: 0.3; cursor: not-allowed; }
+
+        .btn-close { background: #ff5722; color: #fff; width: 100%; margin-top: 10px; }
+
+        /* --- MODAL (POPUP) --- */
+        .modal {
+            display: none; 
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.85);
+            z-index: 1000;
+            justify-content: center; align-items: center;
+        }
+        .modal-content {
+            background: #111;
+            border: 2px solid var(--binance-yellow);
+            padding: 30px;
+            border-radius: 10px;
+            width: 500px;
+            max-width: 90%;
+        }
+        .modal-header { display: flex; justify-content: space-between; margin-bottom: 20px; }
+        .form-row { margin-bottom: 15px; }
+        .form-row label { display: block; margin-bottom: 5px; color: #aaa; font-size: 0.9rem; }
+        .form-row input { 
+            width: 100%; padding: 10px; background: #222; border: 1px solid #444; 
+            color: #fff; box-sizing: border-box; border-radius: 4px;
+        }
+        .btn-save { width: 100%; background: var(--kucoin-green); color: #fff; }
+
+        /* --- TABLES --- */
+        table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+        th { text-align: left; color: #777; padding: 8px; border-bottom: 1px solid #333; }
+        td { padding: 10px 8px; border-bottom: 1px solid #222; }
+        .pnl-pos { color: var(--kucoin-green); }
+        .pnl-neg { color: var(--danger); }
+
+        /* --- UTILS --- */
+        .status-tag { font-weight: bold; padding: 5px 10px; border-radius: 4px; }
+        .status-running { background: rgba(36, 174, 143, 0.2); color: var(--kucoin-green); border: 1px solid var(--kucoin-green); }
+        .status-stopped { background: rgba(246, 70, 93, 0.2); color: var(--danger); border: 1px solid var(--danger); }
     </style>
 </head>
 <body>
 
+    <!-- HEADER -->
     <div class="header">
-        <img src="https://upload.wikimedia.org/wikipedia/commons/e/e8/Binance_Logo.svg" class="logo" alt="Binance">
-        <span class="x-sign">X</span>
-        <img src="https://assets.staticimg.com/cms/media/3gL2X75a5e3J20j4F4d2g2.png" class="logo" alt="KuCoin">
+        <div class="brand">
+            <img src="https://upload.wikimedia.org/wikipedia/commons/e/e8/Binance_Logo.svg" class="logo" alt="Binance">
+            <span class="text-yellow">BINANCE</span>
+        </div>
+        <span class="x-sign">✕</span>
+        <div class="brand">
+            <img src="https://assets.staticimg.com/cms/media/3gL2X75a5e3J20j4F4d2g2.png" class="logo" alt="KuCoin">
+            <span class="text-green">KUCOIN</span>
+        </div>
     </div>
 
-    <!-- SETUP FORM (Start Screen) -->
-    <div id="setupScreen" class="setup-overlay">
-        <div class="setup-box">
-            <h2>BOT CONFIGURATION</h2>
-            <div class="form-group"><label>Binance API Key</label><input type="text" id="binKey"></div>
-            <div class="form-group"><label>Binance Secret</label><input type="password" id="binSec"></div>
-            <div class="form-group"><label>Binance Aptos Wallet (For Receiving)</label><input type="text" id="binWal"></div>
-            <hr style="border-color: #444;">
-            <div class="form-group"><label>KuCoin API Key</label><input type="text" id="kuKey"></div>
-            <div class="form-group"><label>KuCoin Secret</label><input type="password" id="kuSec"></div>
-            <div class="form-group"><label>KuCoin Passphrase</label><input type="password" id="kuPass"></div>
-            <div class="form-group"><label>KuCoin BEP20 Wallet (For Receiving)</label><input type="text" id="kuWal"></div>
-            <div class="form-group">
-                <label>
-                    <input type="checkbox" id="autoBalance"> Enable Auto Capital Balancing (Min 30)
+    <div class="container">
+        
+        <!-- CONTROLS -->
+        <div class="controls-bar">
+            <!-- Vốn -->
+            <div class="input-group">
+                <label><input type="radio" name="capMode" value="percent" checked> % Capital</label>
+                <label><input type="radio" name="capMode" value="fixed"> Fixed $</label>
+            </div>
+            <div class="input-group" style="border-color: var(--binance-yellow);">
+                <span style="color:#aaa">Value:</span>
+                <input type="number" id="capitalInput" value="50">
+            </div>
+
+            <!-- Auto Balance Checkbox -->
+            <div class="input-group">
+                <label style="cursor: pointer;">
+                    <input type="checkbox" id="autoBalanceDisplay" disabled> 
+                    Auto-Balance (Min 30)
                 </label>
             </div>
-            <button class="btn-start" onclick="startBot()">START BOT</button>
-        </div>
-    </div>
 
-    <!-- MAIN DASHBOARD -->
-    <div id="mainDashboard" class="container dashboard">
-        <div class="control-panel">
-            <button class="btn btn-stop" onclick="stopBot()">STOP BOT</button>
-            <button id="btnClose" class="btn btn-close" onclick="closeTrades()">CLOSE & CLEANUP</button>
-            <div style="margin-left: auto;">
-                Status: <span id="statusText" style="font-weight:bold;">RUNNING</span>
-            </div>
+            <div style="flex-grow: 1;"></div>
+
+            <button class="btn btn-config" onclick="openModal()">⚙️ Set Bot</button>
+            <button id="btnStart" class="btn btn-start" onclick="startBot()">▶ START</button>
+            <button id="btnStop" class="btn btn-stop" onclick="stopBot()" style="display:none;">⏹ STOP</button>
+            
+            <div id="statusIndicator" class="status-tag status-stopped">STOPPED</div>
         </div>
 
+        <!-- GRID INFO -->
         <div class="grid">
             <div class="card">
-                <h3>Balances</h3>
-                <div id="balances">Loading...</div>
+                <h3>Wallet Balances</h3>
+                <div id="balancesContent">Loading...</div>
             </div>
+            
             <div class="card">
-                <h3>Best Opportunity</h3>
-                <div id="opportunity">Scanning...</div>
+                <h3>Market Opportunity</h3>
+                <div id="oppContent" style="font-size: 1.1rem; text-align: center; padding: 20px;">
+                    Searching...
+                </div>
             </div>
-             <div class="card">
-                <h3>Fast Test Trade</h3>
-                <label>Leverage: <input type="number" id="testLev" value="20" style="width:50px"></label>
-                <label>% Capital: <input type="number" id="testCap" value="10" style="width:50px"></label>
-                <button class="btn btn-test" onclick="sendTestTrade()">OPEN TEST TRADE</button>
+
+            <div class="card">
+                <h3>Manual Test</h3>
+                <div style="display: flex; gap: 10px; margin-bottom: 10px;">
+                    <input type="number" id="testLev" placeholder="Lev x20" value="20" style="width: 60px; padding: 5px;">
+                    <input type="number" id="testCap" placeholder="Cap %" value="10" style="width: 60px; padding: 5px;">
+                    <button class="btn" style="background: var(--kucoin-green); color: white; padding: 5px 15px; font-size: 0.9rem;" onclick="sendTest()">EXECUTE</button>
+                </div>
+                <button id="btnClose" class="btn btn-close" onclick="closeAll()" style="display: none;">🛑 EMERGENCY CLOSE</button>
             </div>
         </div>
 
+        <!-- HISTORY -->
         <div class="card">
             <h3>Trade History</h3>
             <table>
                 <thead>
-                    <tr><th>Time</th><th>Coin</th><th>Pair</th><th>PNL</th><th>Profit (USDT)</th></tr>
+                    <tr>
+                        <th>Time</th>
+                        <th>Coin</th>
+                        <th>Exchanges</th>
+                        <th>Est. PNL</th>
+                        <th>Realized PNL</th>
+                    </tr>
                 </thead>
-                <tbody id="history"></tbody>
+                <tbody id="historyBody"></tbody>
             </table>
         </div>
     </div>
 
+    <!-- MODAL CONFIG -->
+    <div id="configModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 style="color: var(--binance-yellow); margin: 0;">BOT CONFIGURATION</h2>
+                <span style="cursor: pointer; font-size: 1.5rem;" onclick="closeModal()">✕</span>
+            </div>
+            
+            <div class="form-row">
+                <label>Binance API Key</label>
+                <input type="text" id="cfgBinKey">
+            </div>
+            <div class="form-row">
+                <label>Binance Secret</label>
+                <input type="password" id="cfgBinSec">
+            </div>
+            <div class="form-row">
+                <label>Binance Wallet (Aptos)</label>
+                <input type="text" id="cfgBinWal">
+            </div>
+            
+            <hr style="border-color: #333; margin: 20px 0;">
+
+            <div class="form-row">
+                <label>KuCoin API Key</label>
+                <input type="text" id="cfgKuKey">
+            </div>
+            <div class="form-row">
+                <label>KuCoin Secret</label>
+                <input type="password" id="cfgKuSec">
+            </div>
+            <div class="form-row">
+                <label>KuCoin Passphrase</label>
+                <input type="password" id="cfgKuPass">
+            </div>
+            <div class="form-row">
+                <label>KuCoin Wallet (BEP20)</label>
+                <input type="text" id="cfgKuWal">
+            </div>
+
+            <div class="form-row" style="margin-top: 20px;">
+                <label style="display: flex; align-items: center; gap: 10px; color: #fff; font-size: 1rem;">
+                    <input type="checkbox" id="cfgAutoBal" style="width: auto;"> Enable Auto Capital Balancing
+                </label>
+                <small style="color: #666;">Checks every hour at minute 30. Transfers if diff > $20.</small>
+            </div>
+
+            <button class="btn btn-save" onclick="saveAndStart()">SAVE & START BOT</button>
+        </div>
+    </div>
+
     <script>
-        // Load config on init
-        window.onload = async () => {
+        // Global config cache
+        let currentConfig = {};
+
+        // --- MODAL FUNCTIONS ---
+        function openModal() {
+            document.getElementById('configModal').style.display = 'flex';
+            // Pre-fill
+            document.getElementById('cfgBinKey').value = currentConfig.binanceApiKey || '';
+            document.getElementById('cfgBinSec').value = currentConfig.binanceApiSecret || '';
+            document.getElementById('cfgBinWal').value = currentConfig.binanceDepositAddress || '';
+            document.getElementById('cfgKuKey').value = currentConfig.kucoinApiKey || '';
+            document.getElementById('cfgKuSec').value = currentConfig.kucoinApiSecret || '';
+            document.getElementById('cfgKuPass').value = currentConfig.kucoinPassword || '';
+            document.getElementById('cfgKuWal').value = currentConfig.kucoinDepositAddress || '';
+            document.getElementById('cfgAutoBal').checked = currentConfig.autoBalance || false;
+        }
+
+        function closeModal() {
+            document.getElementById('configModal').style.display = 'none';
+        }
+
+        // --- API ACTIONS ---
+        async function loadInitConfig() {
             try {
                 const res = await fetch('/bot-api/config');
-                const cfg = await res.json();
-                if(cfg) {
-                    document.getElementById('binKey').value = cfg.binanceApiKey || '';
-                    document.getElementById('binSec').value = cfg.binanceApiSecret || '';
-                    document.getElementById('binWal').value = cfg.binanceDepositAddress || '';
-                    document.getElementById('kuKey').value = cfg.kucoinApiKey || '';
-                    document.getElementById('kuSec').value = cfg.kucoinApiSecret || '';
-                    document.getElementById('kuPass').value = cfg.kucoinPassword || '';
-                    document.getElementById('kuWal').value = cfg.kucoinDepositAddress || '';
-                }
-                setInterval(updateStatus, 2000);
-            } catch (e) {
-                console.log("Waiting for server...");
-            }
-        };
+                currentConfig = await res.json();
+                // Update UI checkboxes
+                document.getElementById('autoBalanceDisplay').checked = currentConfig.autoBalance || false;
+            } catch(e) {}
+        }
 
         async function startBot() {
-            try {
-                const config = {
-                    binanceApiKey: document.getElementById('binKey').value,
-                    binanceApiSecret: document.getElementById('binSec').value,
-                    binanceDepositAddress: document.getElementById('binWal').value,
-                    kucoinApiKey: document.getElementById('kuKey').value,
-                    kucoinApiSecret: document.getElementById('kuSec').value,
-                    kucoinPassword: document.getElementById('kuPass').value,
-                    kucoinDepositAddress: document.getElementById('kuWal').value,
-                    autoBalance: document.getElementById('autoBalance').checked
-                };
+            // Nếu người dùng bấm Start ở ngoài, dùng config hiện tại
+            // Gửi kèm trade config (vốn)
+            const tradeConfig = {
+                mode: document.querySelector('input[name="capMode"]:checked').value,
+                value: parseFloat(document.getElementById('capitalInput').value)
+            };
 
+            // Merge config cũ và config giao diện (nếu API rỗng thì dùng cũ)
+            const payload = { ...currentConfig, ...tradeConfig };
+            
+            try {
                 const res = await fetch('/bot-api/start', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify(config)
+                    body: JSON.stringify(payload)
                 });
                 const data = await res.json();
-                if(data.success) {
-                    document.getElementById('setupScreen').style.display = 'none';
-                    document.getElementById('mainDashboard').classList.add('active');
-                } else {
-                    alert('Start failed: ' + data.message);
+                if(data.success) alert('Bot Started Successfully!');
+                else alert('Error: ' + data.message);
+                updateUI();
+            } catch(e) { alert('Connection Error'); }
+        }
+
+        async function saveAndStart() {
+            // Lấy dữ liệu từ Modal
+            const newConfig = {
+                binanceApiKey: document.getElementById('cfgBinKey').value,
+                binanceApiSecret: document.getElementById('cfgBinSec').value,
+                binanceDepositAddress: document.getElementById('cfgBinWal').value,
+                kucoinApiKey: document.getElementById('cfgKuKey').value,
+                kucoinApiSecret: document.getElementById('cfgKuSec').value,
+                kucoinPassword: document.getElementById('cfgKuPass').value,
+                kucoinDepositAddress: document.getElementById('cfgKuWal').value,
+                autoBalance: document.getElementById('cfgAutoBal').checked
+            };
+
+            // Nếu ô nào trống, giữ nguyên config cũ
+            for (let key in newConfig) {
+                if (newConfig[key] === '' || newConfig[key] === null) {
+                    newConfig[key] = currentConfig[key];
                 }
-            } catch (e) {
-                alert("Lỗi kết nối tới Bot Server: " + e.message);
             }
+
+            // Cập nhật lại currentConfig
+            currentConfig = newConfig;
+            
+            // Gọi lệnh Start với config mới
+            document.querySelector('input[name="capMode"]').checked = true; // Reset về percent mặc định hoặc giữ nguyên
+            
+            // Đóng modal và Start
+            closeModal();
+            await startBot();
         }
 
         async function stopBot() {
             await fetch('/bot-api/stop', { method: 'POST' });
-            location.reload(); 
+            updateUI();
         }
 
-        async function closeTrades() {
-            if(confirm('Close all trades?')) {
+        async function closeAll() {
+            if(confirm("DANGER: Close all trades immediately?")) {
                 await fetch('/bot-api/close-trade-now', { method: 'POST' });
+                alert("Close signal sent.");
             }
         }
 
-        async function sendTestTrade() {
+        async function sendTest() {
             const lev = document.getElementById('testLev').value;
             const cap = document.getElementById('testCap').value;
-            try {
-                const res = await fetch('/bot-api/custom-test-trade', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({ leverage: lev, percentage: cap })
-                });
-                const data = await res.json();
-                alert(data.message || 'Test Trade Sent!');
-            } catch (e) {
-                alert('Error sending trade');
-            }
+            await fetch('/bot-api/custom-test-trade', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ leverage: lev, percentage: cap })
+            });
+            alert("Test trade sent!");
         }
 
-        async function updateStatus() {
+        // --- POLLING UI ---
+        async function updateUI() {
             try {
                 const res = await fetch('/bot-api/status');
                 const data = await res.json();
-                
-                // Show/Hide Close Button
+
+                // 1. Status & Buttons
+                const isRunning = data.botState === 'RUNNING';
+                const statusDiv = document.getElementById('statusIndicator');
+                const btnStart = document.getElementById('btnStart');
+                const btnStop = document.getElementById('btnStop');
+
+                if(isRunning) {
+                    statusDiv.textContent = "RUNNING";
+                    statusDiv.className = "status-tag status-running";
+                    btnStart.style.display = "none";
+                    btnStop.style.display = "inline-block";
+                } else {
+                    statusDiv.textContent = "STOPPED";
+                    statusDiv.className = "status-tag status-stopped";
+                    btnStart.style.display = "inline-block";
+                    btnStop.style.display = "none";
+                }
+
+                // 2. Show/Hide Emergency Close
                 const btnClose = document.getElementById('btnClose');
                 if(data.activeTrades && data.activeTrades.length > 0) {
-                    btnClose.style.display = 'block';
+                    btnClose.style.display = "block";
                 } else {
-                    btnClose.style.display = 'none';
+                    btnClose.style.display = "none";
                 }
 
-                // Update Balances
+                // 3. Balances
                 let balHtml = '';
-                for(let k in data.balances) {
-                    balHtml += `<div>${k.toUpperCase()}: ${data.balances[k].available.toFixed(2)} USDT</div>`;
+                for(let ex in data.balances) {
+                    let color = ex.includes('binance') ? 'var(--binance-yellow)' : 'var(--kucoin-green)';
+                    balHtml += `<div style="display:flex; justify-content:space-between; margin-bottom:5px; border-bottom:1px solid #333; padding-bottom:5px;">
+                        <span style="color:${color}">${ex.toUpperCase()}</span>
+                        <span style="font-weight:bold">${data.balances[ex].available.toFixed(2)} $</span>
+                    </div>`;
                 }
-                document.getElementById('balances').innerHTML = balHtml;
+                document.getElementById('balancesContent').innerHTML = balHtml;
 
-                // Update Opp
+                // 4. Opportunity
                 if(data.bestPotentialOpportunityForDisplay) {
                     const op = data.bestPotentialOpportunityForDisplay;
-                    document.getElementById('opportunity').innerHTML = `
-                        <div style="font-size:1.2rem; color:var(--kucoin-green)">${op.coin}</div>
-                        <div>PNL: ${op.estimatedPnl.toFixed(2)}%</div>
+                    document.getElementById('oppContent').innerHTML = `
+                        <div style="color: #fff; font-size: 1.5rem; font-weight: bold;">${op.coin}</div>
+                        <div style="color: var(--kucoin-green); margin-top: 5px;">PNL: ${op.estimatedPnl.toFixed(2)}%</div>
+                        <div style="color: #666; font-size: 0.8rem; margin-top: 5px;">${op.exchanges}</div>
                     `;
                 } else {
-                    document.getElementById('opportunity').innerHTML = 'Scanning...';
+                    document.getElementById('oppContent').innerHTML = `<span style="color:#555">Scanning market (50s-59s)...</span>`;
                 }
 
-                // History
+                // 5. History
                 let histHtml = '';
-                if (data.tradeHistory) {
-                    data.tradeHistory.slice(0, 10).forEach(t => {
+                if(data.tradeHistory) {
+                    data.tradeHistory.slice(0, 8).forEach(t => {
                         const pnl = t.actualPnl || 0;
+                        const pnlClass = pnl >= 0 ? 'pnl-pos' : 'pnl-neg';
                         histHtml += `<tr>
                             <td>${new Date(t.entryTime).toLocaleTimeString()}</td>
                             <td>${t.coin}</td>
-                            <td>${t.shortExchange}/${t.longExchange}</td>
-                            <td class="${pnl>=0?'text-green':'text-red'}">${(t.estimatedPnlFromOpportunity || 0).toFixed(2)}%</td>
-                            <td class="${pnl>=0?'text-green':'text-red'}">${pnl.toFixed(4)}</td>
+                            <td>${t.shortExchange.substr(0,3).toUpperCase()}/${t.longExchange.substr(0,3).toUpperCase()}</td>
+                            <td class="${pnlClass}">${(t.estimatedPnlFromOpportunity||0).toFixed(1)}%</td>
+                            <td class="${pnlClass}" style="font-weight:bold">${pnl.toFixed(4)}</td>
                         </tr>`;
                     });
                 }
-                document.getElementById('history').innerHTML = histHtml;
+                document.getElementById('historyBody').innerHTML = histHtml;
 
-            } catch(e) {}
+            } catch(e) {
+                // console.log("Polling error (harmless if restarting)");
+            }
+            
+            // Recursive timeout for better performance than setInterval
+            setTimeout(updateUI, 2000); 
         }
+
+        // Init
+        loadInitConfig();
+        updateUI();
+
     </script>
 </body>
 </html>
