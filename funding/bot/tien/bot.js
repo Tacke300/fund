@@ -14,14 +14,16 @@ const {
 const BOT_PORT = 5004;
 const SERVER_DATA_URL = 'http://localhost:5005/api/data';
 
-// [CONFIG] Cấu hình cơ bản
+// [CONFIG] Cấu hình
 const MIN_PNL_PERCENTAGE = 1;
 const MIN_MINUTES_FOR_EXECUTION = 15; 
-const DATA_FETCH_INTERVAL_SECONDS = 1; // Giữ 1s để canh giờ vào lệnh chính xác
-const MIN_COLLATERAL_FOR_TRADE = 0.1; // Số dư tối thiểu để vào lệnh (>0)
+const DATA_FETCH_INTERVAL_SECONDS = 1; 
 
-// [CONFIG] Danh sách đen (Không bao giờ trade)
-const BLACKLISTED_COINS = ['GAIBUSDT'];
+// [CHANGE] Sửa vốn tối thiểu xuống 0.05
+const MIN_COLLATERAL_FOR_TRADE = 0.05; 
+
+// [CONFIG] Danh sách đen
+const BLACKLISTED_COINS = ['GAIBUSDT', 'AIAUSDT', '42USDT'];
 
 // [CONFIG] TP / SL
 const SL_PERCENTAGE = 95;  
@@ -40,7 +42,7 @@ const activeExchangeIds = ALL_POSSIBLE_EXCHANGE_IDS.filter(id => !DISABLED_EXCHA
 let botState = 'STOPPED';
 let capitalManagementState = 'IDLE';
 let botLoopIntervalId = null;
-let lastSelectionScanTime = 0; // Biến nhớ thời gian quét lần cuối
+let lastSelectionScanTime = 0; 
 let balances = {};
 let tradeHistory = [];
 let bestPotentialOpportunityForDisplay = null;
@@ -53,14 +55,28 @@ let transferStatus = { inProgress: false, message: null };
 let hasLoggedNotFoundThisHour = false;
 let failedCoinsInSession = new Set();
 
+// ------------------------------------------------------------------
+// SAFE LOG
+// ------------------------------------------------------------------
 const safeLog = (type, ...args) => {
     try {
         const timestamp = new Date().toLocaleTimeString('vi-VN');
-        const message = args.map(arg => (arg instanceof Error) ? (arg.stack || arg.message) : (typeof arg === 'object' ? JSON.stringify(arg, null, 2) : arg)).join(' ');
+        let message = args.map(arg => (arg instanceof Error) ? (arg.stack || arg.message) : (typeof arg === 'object' ? JSON.stringify(arg, null, 2) : arg)).join(' ');
+        
+        if (message.includes('<!DOCTYPE html>') || message.includes('<html>') || message.includes('<head>')) {
+            if (type === 'error') {
+                console.warn(`[${timestamp} WARN] ⚠️ Sàn trả về lỗi 404/HTML (Coin rác hoặc không tồn tại). Đã ẩn log chi tiết.`);
+            }
+            return;
+        }
+
         console[type](`[${timestamp} ${type.toUpperCase()}]`, message);
     } catch (e) { process.stderr.write(`FATAL LOG ERROR: ${e.message}\n`); }
 };
 
+// ------------------------------------------------------------------
+// KHỞI TẠO SÀN (Đã thêm KuCoin Hedge & Fix Binance Log)
+// ------------------------------------------------------------------
 const exchanges = {};
 activeExchangeIds.forEach(id => {
     balances[id] = { available: 0, total: 0 };
@@ -105,17 +121,42 @@ activeExchangeIds.forEach(id => {
             exchanges[id] = new exchangeClass(config); 
             safeLog('log', `[INIT] Khởi tạo sàn ${id.toUpperCase()} thành công.`); 
             
+            // --- [FIX] BINANCE HEDGE MODE LOGIC ---
             if (id === 'binanceusdm') {
                 setTimeout(async () => {
                     try {
                         await exchanges[id].fapiPrivatePostPositionSideDual({ 'dualSidePosition': 'true' });
                         safeLog('info', `[INIT] ✅ Đã chuyển Binance sang HEDGE MODE.`);
                     } catch (e) {
-                        if (!e.message.includes("-4046")) { 
-                            safeLog('warn', `[INIT] Không thể chuyển Binance sang Hedge Mode: ${e.message}`);
+                        // Nếu lỗi báo là "No need to change" (code -4046) thì coi như thành công
+                        if (e.message.includes("-4046") || e.message.includes("No need to change")) {
+                             safeLog('info', `[INIT] ✅ Binance đã ở chế độ HEDGE MODE (Không cần đổi).`);
+                        } else {
+                            // Các lỗi khác thì log bình thường
+                            safeLog('warn', `[INIT] Check Binance Hedge Mode: ${e.message}`);
                         }
                     }
                 }, 2000);
+            }
+
+            // --- [NEW] KUCOIN HEDGE MODE LOGIC ---
+            if (id === 'kucoinfutures') {
+                setTimeout(async () => {
+                    try {
+                        // Gọi API riêng của KuCoin để bật Dual Side (Hedge Mode)
+                        // true = Hedge Mode, false = One-way Mode
+                        await exchanges[id].privatePostPositionSideDual({ 'dualSidePosition': 'true' });
+                        safeLog('info', `[INIT] ✅ Đã chuyển KuCoin Futures sang HEDGE MODE.`);
+                    } catch (e) {
+                        // KuCoin không trả về mã lỗi rõ ràng như Binance, nhưng nếu bật rồi nó có thể báo lỗi
+                        // Ta log info nhẹ nhàng
+                        if(e.message.includes('already') || e.message.includes('No need')) {
+                            safeLog('info', `[INIT] ✅ KuCoin đã ở chế độ HEDGE MODE.`);
+                        } else {
+                            safeLog('warn', `[INIT] KuCoin Hedge Mode: ${e.message}`);
+                        }
+                    }
+                }, 2500);
             }
 
         } else if (exchangeClass) { 
@@ -403,12 +444,24 @@ async function processServerData(serverData) {
     bestPotentialOpportunityForDisplay = allCurrentOpportunities.length > 0 ? allCurrentOpportunities[0] : null;
 }
 
+// ------------------------------------------------------------------
+// CHECK SYMBOL
+// ------------------------------------------------------------------
 async function getExchangeSpecificSymbol(exchange, rawCoinSymbol) {
     try {
         if (!exchange.markets || Object.keys(exchange.markets).length === 0) await exchange.loadMarkets(true);
     } catch (e) { return null; }
-    const base = String(rawCoinSymbol).toUpperCase().replace(/USDT$/, '');
-    const attempts = [`${base}/USDT:USDT`, `${base}USDT`, `${base}-USDT-SWAP`, `${base}USDTM`, `${base}/USDT`];
+    
+    const base = String(rawCoinSymbol).toUpperCase();
+
+    // Binance Check
+    if (exchange.id === 'binanceusdm') {
+        const simpleCheck = Object.keys(exchange.markets).some(k => k.replace('/','').replace(':USDT','') === base.replace('USDT',''));
+        if (!simpleCheck) return null;
+    }
+
+    const cleanBase = base.replace(/USDT$/, '');
+    const attempts = [`${cleanBase}/USDT:USDT`, `${cleanBase}USDT`, `${cleanBase}-USDT-SWAP`, `${cleanBase}USDTM`, `${cleanBase}/USDT`];
     for (const attempt of attempts) {
         const market = exchange.markets[attempt];
         if (market?.active && (market.contract || market.swap || market.future)) { return market.id; }
@@ -518,6 +571,9 @@ async function getReliableFillPrice(exchange, symbol, orderId) {
     return null;
 }
 
+// ------------------------------------------------------------------
+// PNL CALCULATION
+// ------------------------------------------------------------------
 async function getPreciseTradeResult(exchange, symbol, openOrderId, closeOrderId, startTime, endTime, side) {
     let totalPnl = 0;
     let totalFee = 0;
@@ -529,7 +585,6 @@ async function getPreciseTradeResult(exchange, symbol, openOrderId, closeOrderId
             if (t.fee) totalFee += t.fee.cost;
         }
 
-        // Lưu ý: closeOrderId có thể là null nếu đóng bằng SL/TP, nên ta nên quét rộng hơn nếu có thể
         const closeTrades = await exchange.fetchMyTrades(symbol, undefined, undefined, { 'orderId': closeOrderId });
         let realized = 0;
         for (const t of closeTrades) {
@@ -553,6 +608,7 @@ async function getPreciseTradeResult(exchange, symbol, openOrderId, closeOrderId
 
         if (exchange.id === 'binanceusdm') {
             try {
+                // Quét Income theo thời gian để bắt được Funding Fee
                 const income = await exchange.fapiPrivateGetIncome({
                     'symbol': symbol.replace('/', ''),
                     'incomeType': 'FUNDING_FEE',
@@ -573,7 +629,7 @@ async function getPreciseTradeResult(exchange, symbol, openOrderId, closeOrderId
 }
 
 // -------------------------------------------------------------------
-// HÀM CHỌN COIN (Sửa: > 0 là chọn, không cần > 5$)
+// CHỌN COIN
 // -------------------------------------------------------------------
 async function runSelectionSequence(candidates) {
     if (!candidates || candidates.length === 0) return;
@@ -600,7 +656,7 @@ async function runSelectionSequence(candidates) {
             }
         }
     }
-    safeLog('log', `[SCAN] ⏳ Đã quét ${candidates.length} coin nhưng chưa chọn được (Đang chờ 30s sau quét lại)...`);
+    safeLog('log', `[SCAN] ⏳ Đã quét ${candidates.length} coin nhưng chưa chọn được (Đang chờ 25s sau quét lại)...`);
 }
 
 async function executeTrades(opportunity) {
@@ -742,7 +798,7 @@ async function executeTrades(opportunity) {
 }
 
 // -------------------------------------------------------------------
-// HÀM GIÁM SÁT (Sửa: Đợi cả 2 bên cùng đóng mới tính PNL)
+// MONITOR
 // -------------------------------------------------------------------
 async function monitorActiveTrades() {
     if (activeTrades.length === 0) return;
@@ -828,6 +884,9 @@ async function monitorActiveTrades() {
     }
 }
 
+// -------------------------------------------------------------------
+// MANUAL CLOSE
+// -------------------------------------------------------------------
 async function closeTradeNow() {
     if (activeTrades.length === 0) {
         safeLog('warn', '[CLEANUP] Không có lệnh nào đang mở để đóng.');
@@ -840,35 +899,52 @@ async function closeTradeNow() {
         const shortEx = exchanges[trade.shortExchange];
         const longEx = exchanges[trade.longExchange];
         
-        try {
-            await shortEx.cancelAllOrders(trade.shortSymbol);
-            await longEx.cancelAllOrders(trade.longSymbol);
+        try { await shortEx.cancelAllOrders(trade.shortSymbol); } catch {}
+        try { await longEx.cancelAllOrders(trade.longSymbol); } catch {}
 
-            const closeShortParams = (shortEx.id === 'binanceusdm') ? { 'positionSide': 'SHORT' } : {'reduceOnly': true, ...(shortEx.id === 'kucoinfutures' && {'marginMode': 'cross'})};
-            const closeLongParams = (longEx.id === 'binanceusdm') ? { 'positionSide': 'LONG' } : {'reduceOnly': true, ...(longEx.id === 'kucoinfutures' && {'marginMode': 'cross'})};
+        const closeShortParams = (shortEx.id === 'binanceusdm') ? { 'positionSide': 'SHORT' } : {'reduceOnly': true, ...(shortEx.id === 'kucoinfutures' && {'marginMode': 'cross'})};
+        const closeLongParams = (longEx.id === 'binanceusdm') ? { 'positionSide': 'LONG' } : {'reduceOnly': true, ...(longEx.id === 'kucoinfutures' && {'marginMode': 'cross'})};
 
-            const [closeShort, closeLong] = await Promise.all([
-                shortEx.createMarketBuyOrder(trade.shortSymbol, trade.shortAmount, closeShortParams),
-                longEx.createMarketSellOrder(trade.longSymbol, trade.longAmount, closeLongParams)
-            ]);
-            
-            // Đóng tay thì tính luôn
-            trade.closeShortOrderId = closeShort.id;
-            trade.closeLongOrderId = closeLong.id;
-            trade.isShortFinished = true;
-            trade.isLongFinished = true;
-            trade.status = 'WAITING_FINAL_CALC';
-            trade.allClosedTime = Date.now();
-            
-        } catch (e) {
-            safeLog('error', `[CLEANUP] Lỗi khi đóng ${trade.coin}:`, e);
+        if (!trade.isShortFinished) {
+            try {
+                const closeShort = await shortEx.createMarketBuyOrder(trade.shortSymbol, trade.shortAmount, closeShortParams);
+                trade.closeShortOrderId = closeShort.id;
+                trade.isShortFinished = true;
+                safeLog('info', `[CLEANUP] ✅ Đã đóng chân Short ${trade.coin}.`);
+            } catch (e) {
+                if (e.message.includes('No open positions') || e.message.includes('300009') || e.message.includes('-2011')) {
+                    trade.isShortFinished = true;
+                    safeLog('warn', `[CLEANUP] ⚠️ Chân Short ${trade.coin} đã đóng từ trước. Bỏ qua.`);
+                } else {
+                    safeLog('error', `[CLEANUP] Lỗi đóng Short ${trade.coin}: ${e.message}`);
+                }
+            }
         }
+
+        if (!trade.isLongFinished) {
+            try {
+                const closeLong = await longEx.createMarketSellOrder(trade.longSymbol, trade.longAmount, closeLongParams);
+                trade.closeLongOrderId = closeLong.id;
+                trade.isLongFinished = true;
+                safeLog('info', `[CLEANUP] ✅ Đã đóng chân Long ${trade.coin}.`);
+            } catch (e) {
+                if (e.message.includes('No open positions') || e.message.includes('300009') || e.message.includes('-2011')) {
+                    trade.isLongFinished = true;
+                    safeLog('warn', `[CLEANUP] ⚠️ Chân Long ${trade.coin} đã đóng từ trước. Bỏ qua.`);
+                } else {
+                    safeLog('error', `[CLEANUP] Lỗi đóng Long ${trade.coin}: ${e.message}`);
+                }
+            }
+        }
+
+        trade.status = 'WAITING_FINAL_CALC';
+        trade.allClosedTime = Date.now();
     }
     return true;
 }
 
 // -------------------------------------------------------------------
-// VÒNG LẶP CHÍNH (Sửa: Quét 50-59, 30s/lần)
+// LOOP: QUÉT 25s/LẦN
 // -------------------------------------------------------------------
 async function mainBotLoop() {
     if (botState !== 'RUNNING') return;
@@ -889,12 +965,13 @@ async function mainBotLoop() {
         }
         if (currentMinute === 49) failedCoinsInSession.clear();
 
-        // 1. QUÉT COIN (Phút 50 -> 59, mỗi 30s)
+        // 1. QUÉT COIN (50-59, 25s/lần)
         if (capitalManagementState === 'IDLE' && currentMinute >= 50 && currentMinute <= 59) {
             
             const isTooLateToSelect = (currentMinute === 59 && currentSecond >= 50);
 
-            if (!isTooLateToSelect && (nowTime - lastSelectionScanTime >= 30000)) {
+            // [FIX] Sửa 30000 -> 25000 (25 giây)
+            if (!isTooLateToSelect && (nowTime - lastSelectionScanTime >= 25000)) {
                 
                 const fundingCandidates = allCurrentOpportunities.filter(op => {
                     if (BLACKLISTED_COINS.includes(op.coin)) return false;
