@@ -3,257 +3,319 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Arbitrage Bot V2</title>
+    <title>Arbitrage Bot</title>
     <style>
-        :root { --bg-color: #000; --card-bg: #111; --binance-yellow: #F0B90B; --kucoin-green: #00D095; --text-color: #EAECEF; --danger: #F6465D; }
-        body { font-family: sans-serif; background: var(--bg-color); color: var(--text-color); margin: 0; padding: 15px; }
-        
+        :root {
+            --bg-color: #000000;
+            --card-bg: #111111;
+            --binance-yellow: #F0B90B;
+            --kucoin-green: #00D095;
+            --text-color: #EAECEF;
+            --danger: #F6465D;
+            --border-color: #333;
+        }
+
+        body { font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: var(--bg-color); color: var(--text-color); margin: 0; padding: 15px; }
+
+        /* AUTH */
         .auth-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #000; z-index: 2000; display: flex; justify-content: center; align-items: center; flex-direction: column; }
-        .auth-box { background: #1a1a1a; padding: 30px; border: 1px solid var(--binance-yellow); text-align: center; width: 300px; border-radius: 10px; }
-        .auth-box input { width: 100%; padding: 10px; margin: 8px 0; background: #000; border: 1px solid #444; color: #fff; box-sizing: border-box; }
-        .btn-auth { width: 100%; padding: 10px; background: var(--binance-yellow); border: none; font-weight: bold; cursor: pointer; margin-top: 10px; }
+        .auth-box { background: #1a1a1a; padding: 30px; border-radius: 12px; border: 1px solid var(--binance-yellow); text-align: center; width: 300px; box-shadow: 0 0 20px rgba(240, 185, 11, 0.2); }
+        .auth-box h2 { color: var(--binance-yellow); margin-bottom: 20px; }
+        .auth-box input { width: 100%; padding: 12px; margin: 8px 0; background: #000; border: 1px solid #444; color: #fff; border-radius: 6px; font-size: 1rem; box-sizing: border-box; text-align: center; }
+        .btn-auth { width: 100%; padding: 12px; background: var(--binance-yellow); color: #000; font-weight: bold; border: none; border-radius: 6px; cursor: pointer; font-size: 1rem; margin-top: 15px; }
+        .link-text { color: #888; margin-top: 15px; font-size: 0.9rem; cursor: pointer; text-decoration: underline; }
 
-        .header-container { background: #0a0a0a; padding: 10px; margin-bottom: 20px; display: flex; flex-direction: column; align-items: center; gap: 10px; border-bottom: 1px solid #222; }
-        .logos-row { display: flex; gap: 20px; align-items: center; }
-        .logo { height: 30px; }
-        .logo-kucoin { height: 30px; filter: grayscale(100%) brightness(80%) sepia(100%) hue-rotate(100deg) saturate(500%); }
-        .user-row { background: #1a1a1a; padding: 5px 15px; border-radius: 15px; font-size: 0.9rem; border: 1px solid #333; }
-        .logout { color: var(--danger); cursor: pointer; margin-left: 10px; font-weight: bold; }
+        /* HEADER */
+        .header-container { background: #0a0a0a; padding: 15px; margin-bottom: 20px; border-bottom: 1px solid #222; display: flex; flex-direction: column; align-items: center; gap: 15px; }
+        .logos-row { display: flex; align-items: center; gap: 30px; }
+        .brand { display: flex; align-items: center; gap: 8px; font-weight: bold; font-size: 1.2rem; }
+        .logo { height: 35px; }
+        .logo-kucoin { height: 35px; filter: grayscale(100%) brightness(80%) sepia(100%) hue-rotate(100deg) saturate(500%); }
+        .text-yellow { color: var(--binance-yellow); } .text-green { color: var(--kucoin-green); }
+        .user-info-row { display: flex; align-items: center; gap: 15px; background: #1a1a1a; padding: 5px 20px; border-radius: 20px; font-size: 0.9rem; color: #ccc; border: 1px solid #333; }
+        .logout-btn { color: var(--danger); cursor: pointer; font-weight: bold; font-size: 0.75rem; text-transform: uppercase; }
+        .vip-badge { color: gold; font-weight: bold; border: 1px solid gold; padding: 0 5px; border-radius: 4px; font-size: 0.7rem; }
 
+        /* CONTROLS */
         .container { max-width: 1200px; margin: 0 auto; }
-        .controls-bar { display: flex; flex-wrap: wrap; gap: 10px; background: var(--card-bg); padding: 15px; border-radius: 8px; border: 1px solid #222; align-items: center; }
-        .input-group { display: flex; align-items: center; gap: 5px; background: #000; padding: 5px 10px; border: 1px solid #444; border-radius: 4px; }
-        .input-group input[type="number"] { width: 50px; background: #222; border: none; color: var(--binance-yellow); font-weight: bold; text-align: center; }
-        
-        .btn { padding: 8px 15px; border: none; border-radius: 4px; font-weight: bold; cursor: pointer; }
-        .btn-config { background: #333; color: #fff; }
-        .btn-start { background: var(--binance-yellow); color: #000; }
-        .btn-stop { background: var(--danger); color: #fff; }
-        
-        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 15px; margin-top: 20px; }
-        .card { background: var(--card-bg); border: 1px solid #222; border-radius: 10px; padding: 15px; }
-        .card h3 { margin: 0 0 10px 0; color: var(--binance-yellow); font-size: 1rem; border-bottom: 1px solid #333; padding-bottom: 5px; }
-
-        table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
-        th, td { text-align: left; padding: 8px 5px; border-bottom: 1px solid #222; color: #aaa; }
-        .text-pos { color: var(--kucoin-green); } .text-neg { color: var(--danger); }
-        
+        .controls-bar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; background: var(--card-bg); border: 1px solid #222; padding: 15px; border-radius: 8px; margin-bottom: 20px; box-shadow: 0 5px 15px rgba(0,0,0,0.3); }
         .hide-on-run.active { display: none !important; }
-        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.9); z-index: 1000; justify-content: center; align-items: center; }
-        .modal-content { background: #111; padding: 20px; border: 1px solid #444; width: 90%; max-width: 450px; }
-        .modal-content input { width: 100%; padding: 8px; background: #222; border: 1px solid #444; color: #fff; margin-bottom: 10px; box-sizing: border-box; }
+        .input-group { display: flex; align-items: center; gap: 8px; background: #000; padding: 8px 12px; border: 1px solid #444; border-radius: 4px; }
+        input[type="number"] { background: #222; border: 1px solid #444; color: var(--binance-yellow); padding: 5px; border-radius: 3px; width: 60px; text-align: center; font-weight: bold; }
+        
+        .auto-bal-wrapper { display: flex; align-items: center; gap: 6px; position: relative; }
+        .checkbox-label { cursor: pointer; font-size: 0.9rem; color: #ccc; display: flex; align-items: center; gap: 6px; }
+        input[type="checkbox"] { accent-color: var(--kucoin-green); cursor: pointer; width: 16px; height: 16px; }
 
-        .vip-status { color: gold; font-weight: bold; margin-left: 10px; }
-        .vip-btn { background: gold; color: black; font-size: 0.8rem; padding: 2px 5px; border-radius: 3px; cursor: pointer; border: none; margin-left: 5px; }
+        .terms-group { display: flex; align-items: center; gap: 8px; font-size: 0.85rem; color: #aaa; margin-right: 10px; }
+        .terms-link { color: var(--binance-yellow); text-decoration: underline; cursor: pointer; }
+
+        .btn { padding: 10px 20px; border: none; border-radius: 4px; font-weight: bold; cursor: pointer; text-transform: uppercase; white-space: nowrap; }
+        .btn-config { background: #333; color: #fff; border: 1px solid #555; }
+        .btn-start { background: var(--binance-yellow); color: #000; }
+        .btn-start:disabled { background: #444; color: #888; cursor: not-allowed; opacity: 0.7; }
+        .btn-stop { background: var(--danger); color: #fff; }
+        .btn-vip { background: gold; color: #000; font-size: 0.7rem; padding: 5px 10px; }
+
+        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 15px; }
+        .card { background: var(--card-bg); border: 1px solid #222; border-radius: 12px; padding: 15px; box-shadow: 4px 4px 10px rgba(0,0,0,0.5); }
+        .card h3 { margin: 0 0 10px 0; border-bottom: 1px solid #333; padding-bottom: 8px; color: var(--binance-yellow); font-size: 1rem; text-transform: uppercase; }
+
+        /* MODAL */
+        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.9); z-index: 1000; justify-content: center; align-items: center; }
+        .modal-content { background: #111; border: 2px solid var(--binance-yellow); padding: 20px; border-radius: 10px; width: 90%; max-width: 500px; max-height: 90vh; overflow-y: auto; }
+        .form-row { margin-bottom: 12px; }
+        .form-row label { display: block; margin-bottom: 4px; color: #aaa; font-size: 0.8rem; }
+        .form-row input, .form-row select { width: 100%; padding: 10px; background: #222; border: 1px solid #444; color: #fff; box-sizing: border-box; font-family: monospace; }
+        .btn-save { width: 100%; background: var(--kucoin-green); color: #000; margin-top: 10px; padding: 12px; border:none; font-weight:bold; cursor:pointer; }
+
+        /* TERMS CONTENT (Vietnamese) */
+        .terms-content { color: #ddd; font-size: 0.9rem; line-height: 1.6; text-align: left; }
+        .terms-content h4 { color: var(--binance-yellow); margin-top: 15px; margin-bottom: 5px; }
+        .terms-content ul { padding-left: 20px; margin: 0; }
+        .terms-content li { margin-bottom: 5px; }
+
+        table { width: 100%; border-collapse: collapse; font-size: 0.85rem; margin-top: 10px; }
+        th { text-align: left; color: #777; padding: 8px 5px; border-bottom: 1px solid #333; }
+        td { padding: 8px 5px; border-bottom: 1px solid #222; }
+        .text-pos { color: var(--kucoin-green); } .text-neg { color: var(--danger); }
+
+        @media (max-width: 600px) {
+            .brand { font-size: 0.9rem; } .logo, .logo-kucoin { height: 25px; }
+            .controls-bar { flex-direction: column; align-items: stretch; }
+            .input-group { justify-content: space-between; }
+        }
     </style>
 </head>
 <body>
-    <!-- AUTH -->
+
+    <!-- LOGIN -->
     <div id="loginSection" class="auth-overlay">
         <div class="auth-box">
             <h2>LOGIN</h2>
-            <input type="text" id="lUser" placeholder="User"><input type="password" id="lPass" placeholder="Pass">
-            <button class="btn-auth" onclick="auth('login')">LOGIN</button>
-            <div style="margin-top:10px; color:#888; cursor:pointer;" onclick="toggleAuth()">Create Account</div>
+            <input type="text" id="loginUser" placeholder="Username">
+            <input type="password" id="loginPass" placeholder="Password">
+            <button class="btn-auth" onclick="handleLogin()">LOGIN</button>
+            <div class="link-text" onclick="showRegister()">Create New Account</div>
         </div>
     </div>
+    <!-- REGISTER -->
     <div id="registerSection" class="auth-overlay" style="display:none;">
         <div class="auth-box">
-            <h2 style="color:var(--kucoin-green)">REGISTER</h2>
-            <input type="text" id="rEmail" placeholder="Email"><input type="text" id="rUser" placeholder="User"><input type="password" id="rPass" placeholder="Pass">
-            <button class="btn-auth" style="background:var(--kucoin-green)" onclick="auth('register')">REGISTER</button>
-            <div style="margin-top:10px; color:#888; cursor:pointer;" onclick="toggleAuth()">Back to Login</div>
+            <h2 style="color: var(--kucoin-green);">REGISTER</h2>
+            <input type="text" id="regEmail" placeholder="Email">
+            <input type="text" id="regUser" placeholder="Username">
+            <input type="password" id="regPass1" placeholder="Password">
+            <input type="password" id="regPass2" placeholder="Confirm Password">
+            <button class="btn-auth" style="background: var(--kucoin-green);" onclick="handleRegister()">REGISTER</button>
+            <div class="link-text" onclick="showLogin()">Back to Login</div>
         </div>
     </div>
 
     <!-- MAIN -->
-    <div id="mainSection" style="display:none;">
+    <div id="dashboardSection" style="display:none;">
         <div class="header-container">
             <div class="logos-row">
-                <img src="https://upload.wikimedia.org/wikipedia/commons/e/e8/Binance_Logo.svg" class="logo">
-                <span style="color:#555">✖</span>
-                <img src="https://cryptologos.cc/logos/kucoin-token-kcs-logo.png?v=025" class="logo-kucoin">
+                <div class="brand"><img src="https://upload.wikimedia.org/wikipedia/commons/e/e8/Binance_Logo.svg" class="logo"><span class="text-yellow">BINANCE</span></div>
+                <span style="color:#444; font-size:1.2rem;">✕</span>
+                <div class="brand"><img src="https://cryptologos.cc/logos/kucoin-token-kcs-logo.png?v=025" class="logo-kucoin"><span class="text-green">KUCOIN</span></div>
             </div>
-            <div class="user-row">
-                <span id="uName">User</span>
-                <span id="vipTag" class="vip-status"></span>
-                <button id="vipBtn" class="vip-btn" onclick="upgradeVip()" style="display:none">UPGRADE VIP</button>
-                <span class="logout" onclick="logout()">LOGOUT</span>
+            <div class="user-info-row">
+                <span id="userDisplay">User</span>
+                <span id="vipBadge" class="vip-badge" style="display:none">VIP</span>
+                <button id="upgradeBtn" class="btn-vip" onclick="upgradeVip()">UPGRADE VIP ($200/Mo)</button>
+                <span class="logout-btn" onclick="logout()">LOGOUT ➔</span>
             </div>
         </div>
 
         <div class="container">
-            <div class="controls-bar">
+            <div class="controls-bar" id="controlsBar">
                 <div class="input-group hide-on-run">
-                    <label><input type="radio" name="cap" value="percent" checked> %</label>
-                    <label><input type="radio" name="cap" value="fixed"> $</label>
+                    <label style="margin-right:10px"><input type="radio" name="capMode" value="percent" checked> % Cap</label>
+                    <label><input type="radio" name="capMode" value="fixed"> Fixed $</label>
                 </div>
-                <div class="input-group hide-on-run">
-                    <span>Val:</span><input type="number" id="capVal" value="50">
-                </div>
-                <div class="hide-on-run" style="display:flex; align-items:center; gap:5px; margin-left:10px;">
-                    <input type="checkbox" id="autoBal"> <span style="font-size:0.9rem; color:#ccc;">Auto-Bal</span>
-                    <span style="font-size:0.7rem; color:#f0b90b;">(Fee: 10$/day)</span>
+                <div class="input-group hide-on-run" style="border-color: var(--binance-yellow);">
+                    <span style="color:#aaa">Value:</span><input type="number" id="capitalInput" value="50">
                 </div>
                 
-                <div style="flex-grow:1"></div>
+                <div class="auto-bal-wrapper hide-on-run">
+                    <label class="checkbox-label"><input type="checkbox" id="autoBalanceDisplay" onchange="updateAutoBalance()"> Auto-Balance</label>
+                </div>
 
-                <button class="btn btn-config hide-on-run" onclick="document.getElementById('manualModal').style.display='flex'">💸 Transfer</button>
-                <button class="btn btn-config hide-on-run" onclick="document.getElementById('cfgModal').style.display='flex'">⚙️ Set Bot</button>
-                <div class="hide-on-run" style="font-size:0.8rem; color:#888; display:flex; align-items:center;">
-                    <input type="checkbox" id="terms" onchange="checkTerms()"> Agree Terms
+                <div style="flex-grow: 1;"></div>
+
+                <button class="btn btn-config hide-on-run" onclick="openManualModal()">💸 Transfer</button>
+                <button class="btn btn-config hide-on-run" onclick="openModal()">⚙️ Set Bot</button>
+
+                <div class="terms-group hide-on-run">
+                    <input type="checkbox" id="termsCheck" onchange="checkTerms()">
+                    <label>Agree to <span class="terms-link" onclick="openTerms()">Terms</span></label>
                 </div>
-                
-                <button id="startBtn" class="btn btn-start" onclick="toggleBot(true)" disabled>START</button>
-                <button id="stopBtn" class="btn btn-stop" onclick="toggleBot(false)" style="display:none">STOP</button>
-                <span id="status" style="font-weight:bold; color:#777; margin-left:10px;">STOPPED</span>
+
+                <button id="btnStart" class="btn btn-start" onclick="startBot()" disabled>▶ START</button>
+                <button id="btnStop" class="btn btn-stop" onclick="stopBot()" style="display:none;">⏹ STOP</button>
+                <div id="statusText" style="padding: 5px 10px; border-radius: 4px; background:#222; color:#777; font-weight:bold; font-size:0.8rem;">STOPPED</div>
             </div>
 
             <div class="grid">
                 <div class="card">
-                    <h3>Balances</h3>
-                    <div id="balContent"></div>
+                    <h3>Wallet Balances</h3>
+                    <div id="balancesContent" style="min-height: 40px; padding-top:5px;"><span style="color:#555;">Waiting...</span></div>
                 </div>
                 <div class="card">
-                    <h3>Opportunity</h3>
-                    <div id="oppContent" style="text-align:center; padding:10px;">Searching...</div>
+                    <h3>Best Opportunity</h3>
+                    <div id="oppContent" style="text-align: center; padding: 15px;"><span style="color:#555">Connecting...</span></div>
                 </div>
             </div>
 
-            <div class="card" style="margin-top:15px">
-                <h3>History</h3>
-                <table>
-                    <thead><tr><th>Time</th><th>Coin</th><th>Lev</th><th>Est%</th><th>Real$</th></tr></thead>
-                    <tbody id="histBody"></tbody>
-                </table>
+            <div class="card" style="margin-top: 20px;">
+                <h3>Trade History</h3>
+                <div style="overflow-x: auto;">
+                    <table>
+                        <thead><tr><th>Time</th><th>Coin</th><th>Lev</th><th>Est.</th><th>Real.</th></tr></thead>
+                        <tbody id="historyBody"></tbody>
+                    </table>
+                </div>
             </div>
         </div>
     </div>
 
-    <!-- MODALS -->
-    <div id="cfgModal" class="modal">
+    <!-- CONFIG MODAL -->
+    <div id="configModal" class="modal">
         <div class="modal-content">
-            <h3 style="margin-top:0; color:#fff">CONFIG</h3>
-            <label style="color:#888; font-size:0.8rem">Binance API Key</label><input id="bk">
-            <label style="color:#888; font-size:0.8rem">Binance Secret</label><input id="bs">
-            <label style="color:#888; font-size:0.8rem">Binance Wallet (APT)</label><input id="bw">
-            <hr style="border-color:#333">
-            <label style="color:#888; font-size:0.8rem">Kucoin API Key</label><input id="kk">
-            <label style="color:#888; font-size:0.8rem">Kucoin Secret</label><input id="ks">
-            <label style="color:#888; font-size:0.8rem">Kucoin Pass</label><input id="kp">
-            <label style="color:#888; font-size:0.8rem">Kucoin Wallet (BEP20)</label><input id="kw">
-            <button class="btn" style="width:100%; background:var(--kucoin-green)" onclick="saveCfg()">SAVE</button>
-            <button class="btn" style="width:100%; background:#333; color:#fff; margin-top:5px" onclick="document.getElementById('cfgModal').style.display='none'">CLOSE</button>
+            <div class="modal-header" style="display:flex; justify-content:space-between; margin-bottom:20px;">
+                <h3 style="margin:0; color:#fff;">BOT SETUP</h3><span style="cursor: pointer; color:#666;" onclick="closeModal()">✕</span>
+            </div>
+            <div class="form-row"><label>Binance API Key</label><input type="text" id="cfgBinKey"></div>
+            <div class="form-row"><label>Binance Secret</label><input type="text" id="cfgBinSec"></div>
+            <div class="form-row"><label>Wallet Binance Aptos</label><input type="text" id="cfgBinWal"></div>
+            <hr style="border-color: #333; margin: 15px 0;">
+            <div class="form-row"><label>KuCoin API Key</label><input type="text" id="cfgKuKey"></div>
+            <div class="form-row"><label>KuCoin Secret</label><input type="text" id="cfgKuSec"></div>
+            <div class="form-row"><label>KuCoin Passphrase</label><input type="text" id="cfgKuPass"></div>
+            <div class="form-row"><label>Wallet KuCoin BEP20</label><input type="text" id="cfgKuWal"></div>
+            <button class="btn btn-save" onclick="saveConfig()">SAVE CONFIG</button>
         </div>
     </div>
 
     <!-- MANUAL TRANSFER MODAL -->
     <div id="manualModal" class="modal">
         <div class="modal-content" style="border-color: #444;">
-            <h3 style="margin-top:0; color:#fff">MANUAL TRANSFER</h3>
-            <p style="color:#888; font-size:0.8rem; margin-bottom:15px;">Move funds between your configured wallets.</p>
-            
-            <label style="color:#aaa; font-size:0.8rem">From Exchange</label>
-            <select id="tFrom" style="width:100%; padding:8px; background:#222; color:#fff; border:1px solid #555; margin-bottom:10px;">
-                <option value="binanceusdm">Binance Future</option>
-                <option value="kucoinfutures">Kucoin Future</option>
-            </select>
+            <div class="modal-header" style="display:flex; justify-content:space-between; margin-bottom:20px;">
+                <h3 style="margin:0; color:#fff;">MANUAL TRANSFER</h3><span style="cursor: pointer; color:#666;" onclick="document.getElementById('manualModal').style.display='none'">✕</span>
+            </div>
+            <div class="form-row">
+                <label>From Exchange</label>
+                <select id="tFrom"><option value="binanceusdm">Binance Future</option><option value="kucoinfutures">Kucoin Future</option></select>
+            </div>
+            <div class="form-row">
+                <label>To Exchange</label>
+                <select id="tTo"><option value="kucoinfutures">Kucoin Future</option><option value="binanceusdm">Binance Future</option></select>
+            </div>
+            <div class="form-row"><label>Amount (USDT)</label><input type="number" id="tAmt" placeholder="e.g. 50"></div>
+            <button class="btn btn-save" style="background: var(--binance-yellow); color:#000" onclick="manualTransfer()">TRANSFER NOW</button>
+        </div>
+    </div>
 
-            <label style="color:#aaa; font-size:0.8rem">To Exchange</label>
-            <select id="tTo" style="width:100%; padding:8px; background:#222; color:#fff; border:1px solid #555; margin-bottom:10px;">
-                <option value="kucoinfutures">Kucoin Future</option>
-                <option value="binanceusdm">Binance Future</option>
-            </select>
-
-            <label style="color:#aaa; font-size:0.8rem">Amount (USDT)</label>
-            <input type="number" id="tAmt" placeholder="e.g. 50">
-
-            <button class="btn" style="width:100%; background:var(--binance-yellow); color:#000" onclick="manualTransfer()">TRANSFER NOW</button>
-            <button class="btn" style="width:100%; background:#333; color:#fff; margin-top:5px" onclick="document.getElementById('manualModal').style.display='none'">CLOSE</button>
+    <!-- TERMS MODAL (WITH VIETNAMESE CONTENT) -->
+    <div id="termsModal" class="modal">
+        <div class="modal-content" style="border-color: var(--danger);">
+            <div class="modal-header" style="display:flex; justify-content:space-between; margin-bottom:10px;">
+                <h3 style="margin:0; color:var(--danger);">ĐIỀU KHOẢN SỬ DỤNG</h3>
+                <span style="cursor: pointer; color:#666;" onclick="document.getElementById('termsModal').style.display='none'">✕</span>
+            </div>
+            <div class="terms-content">
+                <h4>* Cách hoạt động:</h4>
+                <p>- Long sàn funding thấp, Short sàn funding cao. Kiếm thu nhập từ chênh lệch phí funding.</p>
+                
+                <h4>* Phí quản lý bot:</h4>
+                <p>Chúng tôi trực tiếp thu phí quản lý từ tài khoản của bạn với mức phí:</p>
+                <ul>
+                    <li><strong>Auto balance:</strong> 10$/ ngày</li>
+                    <li><strong>Bình thường:</strong> 5$/ ngày</li>
+                </ul>
+                <p style="color: #ff9800; font-style: italic;">Lưu ý: Nếu số dư không đủ trả phí, chúng tôi sẽ dừng bot.</p>
+                
+                <h4>* Nâng cấp VIP:</h4>
+                <p>Để miễn phí phí quản lý hàng ngày, bạn có thể nâng lên tài khoản VIP với phí <strong>200$/ tháng</strong>.</p>
+                <button class="btn-save" style="background: gold; color: #000; margin-top:10px;" onclick="upgradeVip()">BẤM VÀO ĐÂY ĐỂ NÂNG VIP NGAY ($200)</button>
+            </div>
         </div>
     </div>
 
     <script>
-        let user = localStorage.getItem('bot_user');
-        if(user) init(); else document.getElementById('loginSection').style.display='flex';
+        let currentUsername = localStorage.getItem('bot_username');
+        function showLogin() { document.getElementById('registerSection').style.display='none'; document.getElementById('loginSection').style.display='flex'; }
+        function showRegister() { document.getElementById('loginSection').style.display='none'; document.getElementById('registerSection').style.display='flex'; }
+        function logout() { localStorage.removeItem('bot_username'); location.reload(); }
 
-        function toggleAuth() {
-            const l = document.getElementById('loginSection'), r = document.getElementById('registerSection');
-            if(l.style.display==='none') { l.style.display='flex'; r.style.display='none'; }
-            else { l.style.display='none'; r.style.display='flex'; }
+        async function handleRegister() {
+            const res = await fetch('/bot-api/register', { method:'POST', body:JSON.stringify({username:document.getElementById('regUser').value, password:document.getElementById('regPass1').value, email:document.getElementById('regEmail').value}) });
+            const data = await res.json();
+            if(data.success) { alert("Registered!"); showLogin(); } else alert("Error");
         }
-
-        async function auth(type) {
-            const ep = type==='login'?'/bot-api/login':'/bot-api/register';
-            const body = type==='login' 
-                ? { username: document.getElementById('lUser').value, password: document.getElementById('lPass').value }
-                : { username: document.getElementById('rUser').value, password: document.getElementById('rPass').value, email: document.getElementById('rEmail').value };
-            
-            const res = await fetch(ep, { method:'POST', body:JSON.stringify(body) });
-            const d = await res.json();
-            if(d.success) { 
-                if(type==='login') { user=body.username; localStorage.setItem('bot_user', user); init(); }
-                else { alert('Registered'); toggleAuth(); }
-            } else alert(d.message || 'Error');
+        async function handleLogin() {
+            const res = await fetch('/bot-api/login', { method:'POST', body:JSON.stringify({username:document.getElementById('loginUser').value, password:document.getElementById('loginPass').value}) });
+            const data = await res.json();
+            if(data.success) { currentUsername=document.getElementById('loginUser').value; localStorage.setItem('bot_username', currentUsername); initApp(); } else alert("Login Failed");
         }
+        if (currentUsername) initApp();
 
-        function logout() { localStorage.removeItem('bot_user'); location.reload(); }
-
-        function init() {
+        function initApp() {
             document.querySelectorAll('.auth-overlay').forEach(e=>e.style.display='none');
-            document.getElementById('mainSection').style.display='block';
-            document.getElementById('uName').innerText = user;
-            loadCfg();
-            setInterval(update, 1000);
+            document.getElementById('dashboardSection').style.display='block';
+            document.getElementById('userDisplay').innerText = currentUsername;
+            loadInitConfig();
+            updateUI();
         }
 
-        async function req(ep, method='GET', body) {
+        async function apiCall(ep, method='GET', body) {
             try {
-                const res = await fetch(ep, { method, headers:{'x-username':user}, body:body?JSON.stringify(body):undefined });
+                const res = await fetch(ep, { method, headers: {'x-username':currentUsername}, body:body?JSON.stringify(body):undefined });
                 if(res.status===401) logout();
                 return await res.json();
             } catch(e) { return null; }
         }
 
-        async function loadCfg() {
-            const c = await req('/bot-api/config');
+        function openModal() { document.getElementById('configModal').style.display='flex'; }
+        function closeModal() { document.getElementById('configModal').style.display='none'; }
+        function openManualModal() { document.getElementById('manualModal').style.display='flex'; }
+        function openTerms() { document.getElementById('termsModal').style.display='flex'; }
+        function checkTerms() {
+            const t = document.getElementById('termsCheck').checked;
+            const r = document.getElementById('statusText').innerText === 'RUNNING';
+            document.getElementById('btnStart').disabled = r || !t;
+        }
+
+        async function loadInitConfig() {
+            const c = await apiCall('/bot-api/config');
             if(c) {
-                document.getElementById('autoBal').checked = c.autoBalance;
-                document.getElementById('vipTag').innerText = c.vipStatus === 'vip' ? 'VIP' : (c.vipStatus==='vip_pro'?'VIP PRO':'Standard');
-                if(c.vipStatus === 'none') document.getElementById('vipBtn').style.display = 'inline-block';
+                document.getElementById('autoBalanceDisplay').checked = c.autoBalance;
+                if(c.vipStatus === 'vip' || c.vipStatus === 'vip_pro') {
+                    document.getElementById('vipBadge').style.display = 'inline';
+                    document.getElementById('upgradeBtn').style.display = 'none';
+                } else {
+                    document.getElementById('vipBadge').style.display = 'none';
+                    document.getElementById('upgradeBtn').style.display = 'inline-block';
+                }
             }
         }
+        
+        async function updateAutoBalance() { await apiCall('/bot-api/update-balance-config','POST', {autoBalance: document.getElementById('autoBalanceDisplay').checked}); }
 
-        async function saveCfg() {
+        async function saveConfig() {
             const body = {
-                binanceApiKey: document.getElementById('bk').value, binanceApiSecret: document.getElementById('bs').value, binanceDepositAddress: document.getElementById('bw').value,
-                kucoinApiKey: document.getElementById('kk').value, kucoinApiSecret: document.getElementById('ks').value, kucoinPassword: document.getElementById('kp').value, kucoinDepositAddress: document.getElementById('kw').value
+                binanceApiKey: document.getElementById('cfgBinKey').value, binanceApiSecret: document.getElementById('cfgBinSec').value, binanceDepositAddress: document.getElementById('cfgBinWal').value,
+                kucoinApiKey: document.getElementById('cfgKuKey').value, kucoinApiSecret: document.getElementById('cfgKuSec').value, kucoinPassword: document.getElementById('cfgKuPass').value, kucoinDepositAddress: document.getElementById('cfgKuWal').value
             };
-            await req('/bot-api/save-config','POST',body);
-            document.getElementById('cfgModal').style.display='none';
-            alert('Saved');
-        }
-
-        function checkTerms() {
-            const t = document.getElementById('terms').checked;
-            const r = document.getElementById('status').innerText === 'RUNNING';
-            document.getElementById('startBtn').disabled = r || !t;
-        }
-
-        async function toggleBot(start) {
-            if(start) {
-                const cfg = {
-                    tradeConfig: { mode: document.querySelector('input[name=cap]:checked').value, value: document.getElementById('capVal').value },
-                    autoBalance: document.getElementById('autoBal').checked
-                };
-                await req('/bot-api/start','POST',cfg);
-            } else await req('/bot-api/stop','POST');
+            await apiCall('/bot-api/save-config','POST', body);
+            alert("Saved!"); closeModal(); loadInitConfig();
         }
 
         async function upgradeVip() {
-            if(confirm("Upgrade VIP for 200$?")) {
-                const r = await req('/bot-api/upgrade-vip','POST');
-                if(r.success) { alert("Upgraded!"); location.reload(); } else alert("Failed (Insufficient funds)");
+            if(confirm("Xác nhận đăng ký VIP? Phí 200$ sẽ được trừ ngay lập tức.")) {
+                const r = await apiCall('/bot-api/upgrade-vip','POST');
+                if(r.success) { alert("Nâng cấp thành công! Bạn đã là VIP."); loadInitConfig(); } else alert("Thất bại: Không đủ số dư trên sàn.");
             }
         }
 
@@ -261,41 +323,51 @@
             const amt = document.getElementById('tAmt').value;
             const from = document.getElementById('tFrom').value;
             const to = document.getElementById('tTo').value;
-            if(!amt || from === to) return alert("Invalid inputs");
-            if(confirm(`Transfer ${amt}$ from ${from} to ${to}?`)) {
-                const r = await req('/bot-api/transfer-funds','POST', { fromExchangeId: from, toExchangeId: to, amount: amt });
-                if(r.success) { alert("Transfer Started!"); document.getElementById('manualModal').style.display='none'; } 
-                else alert("Failed");
+            if(!amt || from===to) return alert("Kiểm tra lại thông tin");
+            if(confirm(`Chuyển ${amt}$ từ ${from} sang ${to}?`)) {
+                const r = await apiCall('/bot-api/transfer-funds','POST', {fromExchangeId:from, toExchangeId:to, amount:amt});
+                if(r.success) { alert("Đã gửi lệnh chuyển tiền!"); document.getElementById('manualModal').style.display='none'; } else alert("Lỗi khi gửi lệnh.");
             }
         }
 
-        async function update() {
-            const d = await req('/bot-api/status');
+        async function startBot() {
+            document.getElementById('btnStart').innerText = "...";
+            await apiCall('/bot-api/start','POST', { tradeConfig: {mode: document.querySelector('input[name="capMode"]:checked').value, value: document.getElementById('capitalInput').value}, autoBalance: document.getElementById('autoBalanceDisplay').checked });
+            updateUI();
+        }
+        async function stopBot() { await apiCall('/bot-api/stop','POST'); updateUI(); }
+
+        async function updateUI() {
+            if(!currentUsername) return;
+            const d = await apiCall('/bot-api/status');
             if(!d) return;
 
             const run = d.botState === 'RUNNING';
-            document.getElementById('startBtn').style.display = run ? 'none':'inline-block';
-            document.getElementById('stopBtn').style.display = run ? 'inline-block':'none';
-            document.getElementById('status').innerText = d.botState;
-            document.getElementById('status').style.color = run ? '#00D095':'#777';
+            document.getElementById('btnStart').style.display = run ? 'none':'inline-block';
+            document.getElementById('btnStart').innerText = "▶ START";
+            document.getElementById('btnStop').style.display = run ? 'inline-block':'none';
+            document.getElementById('statusText').innerText = run ? 'RUNNING' : 'STOPPED';
+            document.getElementById('statusText').style.color = run ? '#00D095' : '#777';
+
             if(run) document.querySelectorAll('.hide-on-run').forEach(e=>e.classList.add('active'));
             else { document.querySelectorAll('.hide-on-run').forEach(e=>e.classList.remove('active')); checkTerms(); }
 
             let bH = '';
-            for(let k in d.balances) bH += `<div style="display:flex;justify-content:space-between;border-bottom:1px solid #333;padding:5px"><span>${k}</span><span>${d.balances[k].available.toFixed(2)}$</span></div>`;
-            document.getElementById('balContent').innerHTML = bH;
+            for(let k in d.balances) bH += `<div style="display:flex;justify-content:space-between;border-bottom:1px solid #333;padding:5px"><span>${k.includes('binance')?'BINANCE':'KUCOIN'}</span><span>${d.balances[k].available.toFixed(2)}$</span></div>`;
+            document.getElementById('balancesContent').innerHTML = bH;
 
             if(d.bestPotentialOpportunityForDisplay) {
                 const o = d.bestPotentialOpportunityForDisplay;
-                document.getElementById('oppContent').innerHTML = `<h2 style="margin:0">${o.coin}</h2><div style="color:var(--kucoin-green)">PNL: ${o.estimatedPnl}%</div>`;
-            }
+                document.getElementById('oppContent').innerHTML = `<h2 style="margin:0;color:#fff">${o.coin}</h2><div style="color:var(--kucoin-green);font-size:1.2rem">Est PNL: ${o.estimatedPnl}%</div>`;
+            } else document.getElementById('oppContent').innerHTML = `<span style="color:#555">Scanning...</span>`;
 
             let hH = '';
             (d.tradeHistory||[]).slice(0,5).forEach(t => {
                 const p = t.actualPnl||0;
                 hH += `<tr><td>${new Date(t.entryTime).toLocaleTimeString()}</td><td>${t.coin}</td><td>x${t.leverage}</td><td>${t.estimatedPnlFromOpportunity}%</td><td class="${p>=0?'text-pos':'text-neg'}">${p.toFixed(2)}</td></tr>`;
             });
-            document.getElementById('histBody').innerHTML = hH;
+            document.getElementById('historyBody').innerHTML = hH;
+            setTimeout(updateUI, 1000);
         }
     </script>
 </body>
