@@ -3,7 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const ccxt = require('ccxt');
 
-// [IMPORT VÍ ADMIN - monkey_d_luffy]
+// [IMPORT VÍ ADMIN]
 let adminWallets = {};
 let fallbackBalance = {};
 try {
@@ -86,7 +86,6 @@ class BotEngine {
         this.loadHistory();
     }
 
-    // --- LOGGING ---
     log(type, msg) {
         if (!['error', 'trade', 'result', 'fee', 'vip', 'transfer'].includes(type)) return;
         const t = new Date().toLocaleTimeString('vi-VN', { hour12: false });
@@ -99,13 +98,11 @@ class BotEngine {
         else if (type === 'transfer') console.log(`${prefix} 🏦 ${msg}`);
     }
 
-    // --- CONFIG & HISTORY ---
     loadConfig() { try { if (fs.existsSync(this.configFile)) this.config = { ...this.config, ...JSON.parse(fs.readFileSync(this.configFile, 'utf8')) }; } catch (e) {} }
     saveConfig(newConfig = {}) { for (let k in newConfig) if (newConfig[k] !== undefined) this.config[k] = newConfig[k]; fs.writeFileSync(this.configFile, JSON.stringify(this.config, null, 2)); }
     loadHistory() { try { if (fs.existsSync(this.historyFile)) this.history = JSON.parse(fs.readFileSync(this.historyFile, 'utf8')); } catch(e) {} }
     saveHistory(trade) { this.history.unshift(trade); if(this.history.length > 50) this.history = this.history.slice(0,50); fs.writeFileSync(this.historyFile, JSON.stringify(this.history, null, 2)); }
 
-    // --- WALLET HELPERS ---
     getAdminFeeWallet(sourceExchangeId) {
         if (!adminWallets) return null;
         if (sourceExchangeId === 'binanceusdm') return { address: adminWallets['kucoin']?.['BEP20'], network: 'BSC' };
@@ -150,22 +147,18 @@ class BotEngine {
         }
     }
 
-    // --- TRANSFER CORE ---
     async performWithdrawal(sourceId, amount, targetInfo) {
         const sourceEx = this.exchanges[sourceId];
         const wEx = sourceId === 'binanceusdm' ? this.exchanges['binance'] : this.exchanges['kucoin']; 
         if (!sourceEx || !wEx || !targetInfo || !targetInfo.address) return false;
-
         try {
             let fromType = 'future';
             let toType = sourceId === 'binanceusdm' ? 'spot' : 'main';
             await sourceEx.transfer('USDT', amount, fromType, toType);
             await new Promise(r => setTimeout(r, 3000));
-            
             let params = {};
             if (sourceId === 'binanceusdm') params = { network: targetInfo.network }; 
             else params = { network: targetInfo.network };
-
             await wEx.withdraw('USDT', amount, targetInfo.address, undefined, params);
             return true;
         } catch (e) {
@@ -174,7 +167,6 @@ class BotEngine {
         }
     }
 
-    // --- FEE LOGIC ---
     async collectDailyFee() {
         if (this.config.vipStatus === 'vip_pro') return true;
         if (this.config.vipStatus === 'vip') {
@@ -192,9 +184,10 @@ class BotEngine {
         const bBal = this.balances['binanceusdm']?.available || 0;
         const kBal = this.balances['kucoinfutures']?.available || 0;
 
+        // CHECK SỐ DƯ TỐI THIỂU ĐỂ TRẢ PHÍ
         if (bBal < MIN_BAL_REQ_BINANCE && kBal < MIN_BAL_REQ_KUCOIN) {
             this.log('error', `Low Balance for Fee. Stopping Bot.`);
-            this.stop(); return false;
+            return false;
         }
 
         if (kBal >= fee) {
@@ -213,8 +206,7 @@ class BotEngine {
                 return true;
             }
         }
-        this.log('error', `Fee collection failed.`);
-        this.stop(); return false;
+        return false; // Failed to pay
     }
 
     async upgradeToVip() {
@@ -246,7 +238,6 @@ class BotEngine {
         return false;
     }
 
-    // --- AUTO & MANUAL TRANSFER ---
     async userFundTransfer(fromId, toId, amount) {
         const targetInfo = this.getUserDepositAddress(toId);
         if (!targetInfo) { this.log('error', `Missing User Deposit Address for ${toId}`); return false; }
@@ -291,7 +282,6 @@ class BotEngine {
         }
     }
 
-    // --- TRADING CORE ---
     async getSymbol(ex, coin) {
         try {
             if(!ex.markets) await ex.loadMarkets();
@@ -442,8 +432,12 @@ class BotEngine {
             const m = now.getUTCMinutes(), s = now.getUTCSeconds();
             const nowMs = Date.now();
 
+            // CHECK & THU PHÍ
             const feeOk = await this.collectDailyFee();
-            if (!feeOk) return;
+            if (!feeOk) {
+                this.stop(); // Tự động dừng nếu k đủ tiền trả phí
+                return;
+            }
 
             if (m === 1 && this.capitalManagementState === 'FUNDS_READY') {
                 this.capitalManagementState = 'IDLE'; this.lockedOpp = null;
@@ -481,18 +475,23 @@ class BotEngine {
     }
 
     async start(tradeCfg) {
-        if (this.state === 'RUNNING') return;
+        if (this.state === 'RUNNING') return true;
         if (tradeCfg) this.tradeConfig = tradeCfg;
         
         await this.initExchanges();
         
+        // CHECK PHÍ KHI START
         const feeOk = await this.collectDailyFee();
-        if (!feeOk) return;
+        if (!feeOk) {
+            // Trả về false để UI biết là do thiếu phí
+            return false; 
+        }
 
         await this.fetchBalances();
         this.state = 'RUNNING';
         this.activeTrades = []; 
         this.loop();
+        return true;
     }
 
     stop() {
@@ -564,8 +563,15 @@ const server = http.createServer(async (req, res) => {
                 bot.saveConfig(payload); 
                 if(payload.autoBalance !== undefined) bot.config.autoBalance = payload.autoBalance;
                 bot.saveConfig({}); 
-                await bot.start(payload.tradeConfig);
-                res.end(JSON.stringify({ success: true }));
+                
+                // GỌI START VÀ CHỜ KẾT QUẢ CHECK PHÍ
+                const startResult = await bot.start(payload.tradeConfig);
+                if (startResult) {
+                    res.end(JSON.stringify({ success: true }));
+                } else {
+                    // Trả về message đặc biệt để UI hiển thị popup
+                    res.end(JSON.stringify({ success: false, message: 'INSUFFICIENT_FEE_BALANCE' }));
+                }
             }
             else if (url === '/bot-api/stop') {
                 bot.stop();
