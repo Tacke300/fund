@@ -3,34 +3,38 @@ const fs = require('fs');
 const path = require('path');
 const ccxt = require('ccxt');
 
-// [GLOBAL SERVER CONFIG]
+// [IMPORT LEGACY FILES - FALLBACK]
+let legacyConfig = {};
+let legacyBalance = {};
+try { legacyConfig = require('./config.js'); } catch(e) {}
+try { legacyBalance = require('./balance.js'); } catch(e) {}
+
+// [GLOBAL CONFIG]
 const BOT_PORT = 5004;
 const SERVER_DATA_URL = 'http://localhost:5005/api/data';
 const USER_DATA_DIR = path.join(__dirname, 'user_data');
 
-// Tạo thư mục user_data nếu chưa có
 if (!fs.existsSync(USER_DATA_DIR)) fs.mkdirSync(USER_DATA_DIR);
 
 // [CONSTANTS]
 const MIN_PNL_PERCENTAGE = 1;
 const MIN_MINUTES_FOR_EXECUTION = 15; 
-const MIN_COLLATERAL_FOR_TRADE = 0.05; // [REQ] Giữ nguyên 0.05
+const MIN_COLLATERAL_FOR_TRADE = 0.05; 
 const BLACKLISTED_COINS = ['GAIBUSDT', 'AIAUSDT', '42USDT'];
 const BALANCE_CHECK_MINUTE = 30;
 const MIN_DIFF_FOR_BALANCE = 20; 
 
-// Helper: Email -> Filename
-function getSafeFileName(email) {
-    return email.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+function getSafeFileName(username) {
+    return username.replace(/[^a-z0-9]/gi, '_').toLowerCase();
 }
 
 // ============================================================
 // CLASS: BOT ENGINE
 // ============================================================
 class BotEngine {
-    constructor(email) {
-        this.email = email;
-        const safeName = getSafeFileName(email);
+    constructor(username) {
+        this.username = username;
+        const safeName = getSafeFileName(username);
         this.configFile = path.join(USER_DATA_DIR, `${safeName}_config.json`);
         this.historyFile = path.join(USER_DATA_DIR, `${safeName}_history.json`);
         
@@ -42,13 +46,13 @@ class BotEngine {
         this.balances = {};
         this.history = [];
         this.activeTrades = [];
-        this.opp = null; // Live Opportunity from Server
-        this.lockedOpp = null; // [REQ] Selected Opportunity (Frozen)
+        this.opp = null; // Live data
+        this.lockedOpp = null; // [LOGIC CŨ] Cơ hội đã chốt
         this.tradeConfig = { mode: 'percent', value: 50 };
         
         this.config = {
-            email: email, // Lưu email vào config
-            password: '', // Lưu pass vào config
+            username: username,
+            password: '',
             binanceApiKey: '', binanceApiSecret: '', binanceDepositAddress: '',
             kucoinApiKey: '', kucoinApiSecret: '', kucoinPassword: '', kucoinDepositAddress: '',
             autoBalance: false
@@ -63,16 +67,22 @@ class BotEngine {
         const t = new Date().toLocaleTimeString('vi-VN');
         let msg = args.map(a => (typeof a === 'object' ? JSON.stringify(a) : a)).join(' ');
         if (msg.includes('<!DOCTYPE') || msg.includes('<html>')) return;
-        console.log(`[${t}] [${this.email}] [${type.toUpperCase()}] ${msg}`);
+        console.log(`[${t}] [USER:${this.username}] [${type.toUpperCase()}] ${msg}`);
     }
 
     loadConfig() {
         try {
             if (fs.existsSync(this.configFile)) {
-                // Merge để không mất các trường cũ (như password)
                 const saved = JSON.parse(fs.readFileSync(this.configFile, 'utf8'));
                 this.config = { ...this.config, ...saved };
-            } 
+            } else {
+                // Fallback config.js cũ
+                this.config.binanceApiKey = legacyConfig.binanceApiKey || '';
+                this.config.binanceApiSecret = legacyConfig.binanceApiSecret || '';
+                this.config.kucoinApiKey = legacyConfig.kucoinApiKey || '';
+                this.config.kucoinApiSecret = legacyConfig.kucoinApiSecret || '';
+                this.config.kucoinPassword = legacyConfig.kucoinPassword || legacyConfig.kucoinApiPassword || '';
+            }
         } catch (e) {}
     }
 
@@ -85,14 +95,10 @@ class BotEngine {
     }
 
     saveConfig(newConfig = {}) {
-        // Merge thông minh: Chỉ update các trường có giá trị, giữ nguyên các trường cũ (như password)
         for (let k in newConfig) {
-            if (newConfig[k] !== undefined) {
-                this.config[k] = newConfig[k];
-            }
+            if (newConfig[k] !== undefined) this.config[k] = newConfig[k];
         }
         fs.writeFileSync(this.configFile, JSON.stringify(this.config, null, 2));
-        this.log('info', 'Config Saved.');
     }
 
     saveHistory(trade) {
@@ -101,7 +107,6 @@ class BotEngine {
         fs.writeFileSync(this.historyFile, JSON.stringify(this.history, null, 2));
     }
 
-    // --- EXCHANGE INIT ---
     async initExchanges() {
         const cfg = this.config;
         this.exchanges = {}; 
@@ -121,7 +126,6 @@ class BotEngine {
             try {
                 this.exchanges['kucoinfutures'] = new ccxt.kucoinfutures({ apiKey: cfg.kucoinApiKey, secret: cfg.kucoinApiSecret, password: cfg.kucoinPassword, enableRateLimit:true });
                 this.exchanges['kucoin'] = new ccxt.kucoin({ apiKey: cfg.kucoinApiKey, secret: cfg.kucoinApiSecret, password: cfg.kucoinPassword, enableRateLimit:true });
-                
                 setTimeout(async () => {
                     try { await this.exchanges['kucoinfutures'].privatePostPositionSideDual({ 'dualSidePosition': 'true' }); } catch(e){}
                 }, 1000);
@@ -139,7 +143,6 @@ class BotEngine {
         }
     }
 
-    // --- CORE TRADING ---
     async getSymbol(ex, coin) {
         try {
             if(!ex.markets) await ex.loadMarkets();
@@ -154,6 +157,7 @@ class BotEngine {
         return null;
     }
 
+    // --- LOGIC CHỌN COIN ---
     async runSelection(candidates) {
         for (const op of candidates) {
             if (this.activeTrades.some(t => t.coin === op.coin)) continue;
@@ -161,10 +165,10 @@ class BotEngine {
             const sBal = this.balances[op.details.shortExchange]?.available || 0;
             const lBal = this.balances[op.details.longExchange]?.available || 0;
             
-            if (sBal > 0 && lBal > 0) {
-                this.lockedOpp = op; // [REQ] Khóa cơ hội để hiển thị
+            if (sBal > MIN_COLLATERAL_FOR_TRADE && lBal > MIN_COLLATERAL_FOR_TRADE) {
+                this.lockedOpp = op; // [LOGIC CŨ] Khóa cứng cơ hội này
                 this.capitalManagementState = 'FUNDS_READY';
-                this.log('info', `🎯 Selected ${op.coin} (Waiting 59:50)`);
+                this.log('info', `🎯 Selected ${op.coin}. Locked until execution.`);
                 return;
             }
         }
@@ -187,7 +191,7 @@ class BotEngine {
         
         let coll = (this.tradeConfig.mode === 'fixed') ? this.tradeConfig.value : minBal * (this.tradeConfig.value / 100);
         if (coll > minBal) coll = minBal;
-        if (coll < MIN_COLLATERAL_FOR_TRADE) { this.log('warn', `Low Balance: ${coll}`); return; }
+        if (coll < MIN_COLLATERAL_FOR_TRADE) return;
 
         const lev = op.commonLeverage;
         try {
@@ -215,77 +219,72 @@ class BotEngine {
             };
             this.activeTrades.push(trade);
             this.capitalManagementState = 'TRADE_OPEN';
-            this.lockedOpp = null; // Reset locked opp after execution
+            this.lockedOpp = null;
             this.log('info', '✅ Trade Opened');
         } catch(e) {
             this.log('error', `Open Failed: ${e.message}`);
         }
     }
 
-    async closeAll() {
-        this.log('warn', 'Closing All Trades...');
-        for (const t of this.activeTrades) {
-            const sEx = this.exchanges[t.shortExchange];
-            const lEx = this.exchanges[t.longExchange];
-            try { await sEx.createMarketBuyOrder(t.shortSymbol, t.shortAmount, sEx.id==='binanceusdm'?{positionSide:'SHORT'}:{reduceOnly:true}); } catch(e){}
-            try { await lEx.createMarketSellOrder(t.longSymbol, t.longAmount, lEx.id==='binanceusdm'?{positionSide:'LONG'}:{reduceOnly:true}); } catch(e){}
-            
-            t.status = 'CLOSED';
-            this.saveHistory(t);
-        }
-        this.activeTrades = [];
-        this.capitalManagementState = 'IDLE';
-        this.lockedOpp = null;
-    }
-
     // --- MAIN LOOP ---
     async loop() {
         if (this.state !== 'RUNNING') return;
         try {
-            // Reset Locked Opp at minute 01 (New Hour) if no trade
             const now = new Date();
             const m = now.getUTCMinutes(), s = now.getUTCSeconds();
             const nowMs = Date.now();
 
+            // Reset lock phút 01
             if (m === 1 && this.capitalManagementState === 'FUNDS_READY') {
                 this.capitalManagementState = 'IDLE';
                 this.lockedOpp = null;
-                this.log('info', 'Resetting selection for new hour.');
+                this.log('info', 'Reset selection (New Hour).');
             }
 
-            // Get Server Data (Only if we don't have a locked selection)
+            // Lấy dữ liệu server (chỉ khi chưa lock)
             if (!this.lockedOpp) {
                 const res = await fetch(SERVER_DATA_URL);
                 const data = await res.json();
                 if (data && data.arbitrageData) {
-                    const cands = data.arbitrageData.filter(op => 
-                        op.estimatedPnl >= MIN_PNL_PERCENTAGE && !BLACKLISTED_COINS.includes(op.coin)
-                    ).map(op => {
-                        const [s,l] = op.exchanges.split(' / ');
-                        op.details = { shortExchange: s.includes('binance')?'binanceusdm':'kucoinfutures', longExchange: l.includes('binance')?'binanceusdm':'kucoinfutures' };
+                    const cands = data.arbitrageData.filter(op => {
+                        // [BỘ LỌC CỐT LÕI] Chỉ lấy Binance và Kucoin
+                        const [s, l] = op.exchanges.toLowerCase().split(' / ');
+                        const isBinance = s.includes('binance') || l.includes('binance');
+                        const isKucoin = s.includes('kucoin') || l.includes('kucoin');
+                        
+                        return isBinance && isKucoin && 
+                               op.estimatedPnl >= MIN_PNL_PERCENTAGE && 
+                               !BLACKLISTED_COINS.includes(op.coin);
+                    }).map(op => {
+                        const [s,l] = op.exchanges.toLowerCase().split(' / ');
+                        // Map lại ID chuẩn
+                        op.details = { 
+                            shortExchange: s.includes('binance') ? 'binanceusdm' : 'kucoinfutures', 
+                            longExchange: l.includes('binance') ? 'binanceusdm' : 'kucoinfutures' 
+                        };
                         return op;
                     }).sort((a,b) => b.estimatedPnl - a.estimatedPnl);
-                    this.opp = cands[0]; // Update live opp
+                    this.opp = cands[0];
                 }
             }
 
-            // 1. Scan (55-59) [REQ] Sửa thành 55
+            // 1. Quét (Phút 55 - 59)
             if (this.capitalManagementState === 'IDLE' && m >= 55 && m <= 59) {
                 if ((m !== 59 || s < 50) && (nowMs - this.lastScanTime >= 25000)) {
-                    if (this.opp) { // Use current live opp
+                    if (this.opp) { 
                         await this.runSelection([this.opp]);
                         this.lastScanTime = nowMs;
                     }
                 }
             } 
-            // 2. Execute (59:50)
+            // 2. Vào lệnh (59:50)
             else if (this.capitalManagementState === 'FUNDS_READY') {
                 if (m === 59 && s >= 50) {
                     if (this.lockedOpp) await this.executeTrade(this.lockedOpp);
                 }
             }
 
-        } catch (e) { this.log('error', 'Loop Err', e.message); }
+        } catch (e) { }
 
         if (this.state === 'RUNNING') {
             this.loopId = setTimeout(() => this.loop(), 1000);
@@ -309,23 +308,23 @@ class BotEngine {
 }
 
 // ============================================================
-// SERVER: MULTI-USER MANAGER
+// SERVER
 // ============================================================
 const userSessions = new Map(); 
 
 function getSession(req) {
-    const email = req.headers['x-user-email'];
-    if (!email) return null;
-    const normalizedEmail = email.toLowerCase().trim();
-    if (!userSessions.has(normalizedEmail)) {
-        userSessions.set(normalizedEmail, new BotEngine(normalizedEmail));
+    const username = req.headers['x-username'];
+    if (!username) return null;
+    const safeUser = getSafeFileName(username);
+    if (!userSessions.has(safeUser)) {
+        userSessions.set(safeUser, new BotEngine(username));
     }
-    return userSessions.get(normalizedEmail);
+    return userSessions.get(safeUser);
 }
 
 const server = http.createServer(async (req, res) => {
     res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-user-email'); 
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-username'); 
     if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
 
     const url = req.url;
@@ -346,21 +345,20 @@ const server = http.createServer(async (req, res) => {
             await new Promise(r => req.on('end', r));
         }
 
-        // AUTH ROUTES
+        // REGISTER
         if (url === '/bot-api/register' && req.method === 'POST') {
             try {
-                const { email, password } = JSON.parse(body);
-                const safeName = getSafeFileName(email);
+                const { username, password } = JSON.parse(body);
+                const safeName = getSafeFileName(username);
                 const cfgPath = path.join(USER_DATA_DIR, `${safeName}_config.json`);
                 
                 if (fs.existsSync(cfgPath)) {
-                    res.writeHead(400); res.end(JSON.stringify({ success: false, message: 'Email exists' }));
+                    res.writeHead(400); res.end(JSON.stringify({ success: false, message: 'User exists' }));
                     return;
                 }
                 
                 const newConfig = {
-                    email: email,
-                    password: password, // [REQ] Lưu pass công khai
+                    username, password,
                     binanceApiKey: '', binanceApiSecret: '', 
                     kucoinApiKey: '', kucoinApiSecret: '', kucoinPassword: ''
                 };
@@ -370,10 +368,11 @@ const server = http.createServer(async (req, res) => {
             return;
         }
 
+        // LOGIN
         if (url === '/bot-api/login' && req.method === 'POST') {
             try {
-                const { email, password } = JSON.parse(body);
-                const safeName = getSafeFileName(email);
+                const { username, password } = JSON.parse(body);
+                const safeName = getSafeFileName(username);
                 const cfgPath = path.join(USER_DATA_DIR, `${safeName}_config.json`);
                 
                 if (!fs.existsSync(cfgPath)) {
@@ -391,10 +390,10 @@ const server = http.createServer(async (req, res) => {
             return;
         }
 
-        // PROTECTED ROUTES
+        // PROTECTED
         const bot = getSession(req);
         if (!bot) {
-            res.writeHead(401); res.end(JSON.stringify({ success: false, message: 'Invalid Session' }));
+            res.writeHead(401); res.end(JSON.stringify({ success: false, message: 'No Session' }));
             return;
         }
 
@@ -402,6 +401,8 @@ const server = http.createServer(async (req, res) => {
             if (url === '/bot-api/start' && req.method === 'POST') {
                 const payload = JSON.parse(body);
                 bot.saveConfig(payload); 
+                if(payload.autoBalance !== undefined) bot.config.autoBalance = payload.autoBalance;
+                bot.saveConfig({}); 
                 await bot.start(payload.tradeConfig);
                 res.end(JSON.stringify({ success: true }));
             }
@@ -413,18 +414,12 @@ const server = http.createServer(async (req, res) => {
                 bot.saveConfig(JSON.parse(body));
                 res.end(JSON.stringify({ success: true }));
             }
-            else if (url === '/bot-api/close-trade-now') {
-                await bot.closeAll();
-                res.end(JSON.stringify({ success: true }));
-            }
             else if (url === '/bot-api/status') {
                 res.writeHead(200, { 'Content-Type': 'application/json' });
-                // [REQ] Nếu đã khóa kèo (Funds Ready), trả về lockedOpp để giao diện đứng im
-                // Nếu chưa, trả về live opp
+                // [REQ] Trả về lockedOpp nếu có để UI đứng im
                 const displayOpp = (bot.capitalManagementState === 'FUNDS_READY' && bot.lockedOpp) ? bot.lockedOpp : bot.opp;
-
                 res.end(JSON.stringify({
-                    email: bot.email,
+                    username: bot.username,
                     botState: bot.state,
                     capitalManagementState: bot.capitalManagementState,
                     balances: bot.balances,
@@ -435,7 +430,7 @@ const server = http.createServer(async (req, res) => {
             }
             else if (url === '/bot-api/config') {
                 res.writeHead(200, { 'Content-Type': 'application/json' });
-                res.end(JSON.stringify(bot.config)); // Trả về full config gồm cả pass (dạng text)
+                res.end(JSON.stringify(bot.config));
             }
             else if (url === '/bot-api/update-balance-config') {
                 const cfg = JSON.parse(body);
@@ -453,5 +448,5 @@ const server = http.createServer(async (req, res) => {
 });
 
 server.listen(BOT_PORT, () => {
-    console.log(`Multi-User Bot running on port ${BOT_PORT}`);
+    console.log(`Bot Server running on port ${BOT_PORT}`);
 });
