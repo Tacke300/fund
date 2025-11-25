@@ -7,6 +7,7 @@ const ccxt = require('ccxt');
 const BOT_PORT = 5004;
 const SERVER_DATA_URL = 'http://localhost:5005/api/data';
 const CONFIG_FILE_PATH = path.join(__dirname, 'bot_config.json');
+const HISTORY_FILE_PATH = path.join(__dirname, 'bot_config_history.json'); // File lịch sử duy nhất
 const HTML_FILE_PATH = path.join(__dirname, 'index.html');
 
 // [TRADING SETTINGS]
@@ -34,9 +35,8 @@ let allCurrentOpportunities = [];
 let activeTrades = []; 
 let selectedOpportunityForNextTrade = null;
 let currentTradeConfig = { mode: 'percent', value: 50 };
-let isAutoBalanceEnabled = false;
 
-// Config object
+// Config object default
 let dynamicConfig = {
     binanceApiKey: '', binanceApiSecret: '', binanceDepositAddress: '', 
     kucoinApiKey: '', kucoinApiSecret: '', kucoinPassword: '', kucoinDepositAddress: '',
@@ -59,12 +59,14 @@ const safeLog = (type, ...args) => {
     } catch (e) { process.stderr.write(`LOG ERROR: ${e.message}\n`); }
 };
 
-// --- CONFIG ---
+// --- CONFIG & HISTORY MANAGEMENT ---
 function loadConfig() {
     try {
         if (fs.existsSync(CONFIG_FILE_PATH)) {
             const data = fs.readFileSync(CONFIG_FILE_PATH, 'utf8');
-            dynamicConfig = JSON.parse(data);
+            const loaded = JSON.parse(data);
+            // Merge để đảm bảo không mất key nếu file cũ thiếu
+            dynamicConfig = { ...dynamicConfig, ...loaded };
             return true;
         }
     } catch (e) { safeLog('error', 'Lỗi đọc config:', e.message); }
@@ -73,13 +75,33 @@ function loadConfig() {
 
 function saveConfig(newConfig) {
     try {
-        if (fs.existsSync(CONFIG_FILE_PATH)) {
-            const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-            fs.copyFileSync(CONFIG_FILE_PATH, path.join(__dirname, `bot_config_history_${timestamp}.json`));
+        // 1. Xử lý History: Gom vào 1 file duy nhất
+        let history = [];
+        if (fs.existsSync(HISTORY_FILE_PATH)) {
+            try {
+                history = JSON.parse(fs.readFileSync(HISTORY_FILE_PATH, 'utf8'));
+                if (!Array.isArray(history)) history = [];
+            } catch(e) {}
         }
+
+        // Thêm config hiện tại vào đầu danh sách history (trước khi bị ghi đè)
+        // Chỉ lưu nếu có thay đổi quan trọng để tránh spam history
+        const timestamp = new Date().toISOString();
+        const historyEntry = { timestamp, config: { ...dynamicConfig } };
+        history.unshift(historyEntry);
+
+        // Giới hạn lịch sử 50 bản ghi để không quá nặng
+        if (history.length > 50) history = history.slice(0, 50);
+        
+        fs.writeFileSync(HISTORY_FILE_PATH, JSON.stringify(history, null, 2));
+
+        // 2. Lưu Config Mới
+        // Merge thông minh: Chỉ update những field có giá trị (không null/undefined)
+        // Nếu newConfig gửi lên là chuỗi rỗng, ta GIỮ NGUYÊN cái cũ (logic xử lý ở route POST)
         dynamicConfig = { ...dynamicConfig, ...newConfig };
         fs.writeFileSync(CONFIG_FILE_PATH, JSON.stringify(dynamicConfig, null, 2));
-        safeLog('info', 'Đã lưu cấu hình.');
+        
+        safeLog('info', 'Đã lưu cấu hình và cập nhật lịch sử.');
     } catch (e) { safeLog('error', 'Lỗi lưu config:', e.message); }
 }
 
@@ -112,7 +134,7 @@ async function initExchanges() {
 
 // --- BALANCING ---
 async function checkAndBalanceCapital() {
-    if (!isAutoBalanceEnabled) return;
+    if (!dynamicConfig.autoBalance) return; // Check trực tiếp từ dynamicConfig
     const now = new Date();
     if (now.getMinutes() !== BALANCE_CHECK_MINUTE) return;
     if (Date.now() - lastBalanceCheckTime < 60000) return;
@@ -144,7 +166,7 @@ async function executeAutoTransfer(from, to, amount) {
         await sleep(2000);
 
         let addr = (to === 'binance') ? dynamicConfig.binanceDepositAddress : dynamicConfig.kucoinDepositAddress;
-        let net = (to === 'binance') ? 'APT' : 'BSC'; // Binance nhận Aptos, Kucoin nhận BEP20
+        let net = (to === 'binance') ? 'APT' : 'BSC'; 
         
         if (!addr) throw new Error("Missing Wallet Address");
         await spotEx.withdraw('USDT', amount, addr, undefined, { network: net });
@@ -167,19 +189,17 @@ async function fetchAllBalances() {
     for (const id of activeExchangeIds) {
         if (!exchanges[id]) { balances[id] = { available: 0, total: 0 }; continue; }
         try {
-            const bal = await exchanges[id].fetchBalance({ type: 'future' }); // Kucoin future is implicit
+            const bal = await exchanges[id].fetchBalance({ type: 'future' }); 
             balances[id] = { available: bal.free.USDT || 0, total: bal.total.USDT || 0 };
         } catch (e) { balances[id] = { available: 0, total: 0 }; }
     }
 }
 const updateBalances = () => fetchAllBalances();
 
-// --- TRADING CORE ---
 async function getExchangeSpecificSymbol(exchange, rawCoinSymbol) {
     try {
         if (!exchange.markets) await exchange.loadMarkets(true);
         const base = String(rawCoinSymbol).toUpperCase().replace('USDT','');
-        // Binance check
         if (exchange.id === 'binanceusdm') {
             const exists = Object.keys(exchange.markets).some(k => k.startsWith(base) && k.endsWith('USDT'));
             if(!exists) return null;
@@ -219,13 +239,11 @@ async function executeTrades(op) {
             ]);
         } catch(e){}
 
-        // Calc Amount
         const sPrice = (await sEx.fetchTicker(sSym)).last;
         const lPrice = (await lEx.fetchTicker(lSym)).last;
         const sAmt = parseFloat(sEx.amountToPrecision(sSym, (coll*lev)/sPrice));
         const lAmt = parseFloat(lEx.amountToPrecision(lSym, (coll*lev)/lPrice));
 
-        // Orders
         const [sOrd, lOrd] = await Promise.all([
             sEx.createMarketSellOrder(sSym, sAmt, sEx.id==='binanceusdm'?{positionSide:'SHORT'}:{}),
             lEx.createMarketBuyOrder(lSym, lAmt, lEx.id==='binanceusdm'?{positionSide:'LONG'}:{})
@@ -246,9 +264,6 @@ async function executeTrades(op) {
 
 async function monitorActiveTrades() {
     if (activeTrades.length === 0) return;
-    // Monitor logic simplified: waiting for manual close or liquidation
-    // Or advanced auto-close when both sides trigger SL/TP (implemented in previous full version)
-    // Keeping it simple for stability as requested.
 }
 
 async function closeTradeNow() {
@@ -262,7 +277,7 @@ async function closeTradeNow() {
         try {
             const sP = sEx.id==='binanceusdm'?{positionSide:'SHORT'}:{reduceOnly:true};
             await sEx.createMarketBuyOrder(t.shortSymbol, t.shortAmount, sP);
-        } catch (e) {} // Ignore if already closed
+        } catch (e) {}
         
         try {
             const lP = lEx.id==='binanceusdm'?{positionSide:'LONG'}:{reduceOnly:true};
@@ -270,7 +285,7 @@ async function closeTradeNow() {
         } catch (e) {}
 
         t.status = 'CLOSED';
-        t.actualPnl = 0; // Placeholder, real calc needs fetching trades
+        t.actualPnl = 0; 
         tradeHistory.unshift(t);
     }
     activeTrades = [];
@@ -287,7 +302,6 @@ async function mainBotLoop() {
 
         const data = await fetchDataFromServer();
         if(data && data.arbitrageData) {
-            const nowTime = Date.now();
             allCurrentOpportunities = data.arbitrageData.filter(op => {
                 if(op.estimatedPnl < MIN_PNL_PERCENTAGE || BLACKLISTED_COINS.includes(op.coin)) return false;
                 const [s,l] = op.exchanges.split(' / ');
@@ -302,13 +316,12 @@ async function mainBotLoop() {
             }).sort((a,b) => b.estimatedPnl - a.estimatedPnl);
             bestPotentialOpportunityForDisplay = allCurrentOpportunities[0];
         } else {
-            bestPotentialOpportunityForDisplay = null; // No data
+            bestPotentialOpportunityForDisplay = null;
         }
 
         const now = new Date();
         const m = now.getUTCMinutes(), s = now.getUTCSeconds();
         
-        // SCAN (50-59, 25s)
         if (capitalManagementState === 'IDLE' && m >= 50 && m <= 59) {
             if ((m !== 59 || s < 50) && (Date.now() - lastSelectionScanTime >= 25000)) {
                 if(allCurrentOpportunities.length > 0) {
@@ -331,7 +344,6 @@ async function mainBotLoop() {
             }
         }
         
-        // EXECUTE
         else if (capitalManagementState === 'FUNDS_READY') {
             if (m === 59 && s >= 50) {
                 if (selectedOpportunityForNextTrade) await executeTrades(selectedOpportunityForNextTrade);
@@ -365,13 +377,34 @@ const botServer = http.createServer(async (req, res) => {
         
         try {
             if (url === '/bot-api/start') {
-                const cfg = JSON.parse(body);
-                saveConfig(cfg);
-                dynamicConfig = cfg;
-                isAutoBalanceEnabled = cfg.autoBalance;
+                // Logic merge config thông minh
+                const incomingCfg = JSON.parse(body);
+                
+                // Chỉ update những key nào có giá trị (không rỗng)
+                let cleanCfg = {};
+                for (let key in incomingCfg) {
+                    if (incomingCfg[key] !== "" && incomingCfg[key] !== null && incomingCfg[key] !== undefined) {
+                        cleanCfg[key] = incomingCfg[key];
+                    }
+                }
+                
+                // Lưu config (merge cleanCfg vào dynamicConfig hiện tại)
+                saveConfig(cleanCfg);
+                
+                // Áp dụng config
+                if (incomingCfg.tradeConfig) {
+                    currentTradeConfig = incomingCfg.tradeConfig;
+                }
+                
                 await initExchanges();
                 botState = 'RUNNING';
                 updateBalances().then(mainBotLoop);
+                res.end(JSON.stringify({ success: true }));
+            }
+            else if (url === '/bot-api/update-balance-config') {
+                // API riêng để update checkbox auto balance
+                const cfg = JSON.parse(body);
+                saveConfig({ autoBalance: cfg.autoBalance });
                 res.end(JSON.stringify({ success: true }));
             }
             else if (url === '/bot-api/stop') {
