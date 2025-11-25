@@ -14,7 +14,7 @@ if (!fs.existsSync(USER_DATA_DIR)) fs.mkdirSync(USER_DATA_DIR);
 // [CONSTANTS]
 const MIN_PNL_PERCENTAGE = 1;
 const MIN_MINUTES_FOR_EXECUTION = 15; 
-const MIN_COLLATERAL_FOR_TRADE = 6; // [FIX] Tăng lên 6$ để tránh lỗi Binance < 5$
+const MIN_COLLATERAL_FOR_TRADE = 0.05; // [REQ] Giữ nguyên 0.05
 const BLACKLISTED_COINS = ['GAIBUSDT', 'AIAUSDT', '42USDT'];
 const BALANCE_CHECK_MINUTE = 30;
 const MIN_DIFF_FOR_BALANCE = 20; 
@@ -42,14 +42,16 @@ class BotEngine {
         this.balances = {};
         this.history = [];
         this.activeTrades = [];
-        this.opp = null; // Best Opportunity
+        this.opp = null; // Live Opportunity from Server
+        this.lockedOpp = null; // [REQ] Selected Opportunity (Frozen)
         this.tradeConfig = { mode: 'percent', value: 50 };
         
         this.config = {
+            email: email, // Lưu email vào config
+            password: '', // Lưu pass vào config
             binanceApiKey: '', binanceApiSecret: '', binanceDepositAddress: '',
             kucoinApiKey: '', kucoinApiSecret: '', kucoinPassword: '', kucoinDepositAddress: '',
-            autoBalance: false,
-            password: '' // User password for login
+            autoBalance: false
         };
         
         this.exchanges = {};
@@ -67,7 +69,9 @@ class BotEngine {
     loadConfig() {
         try {
             if (fs.existsSync(this.configFile)) {
-                this.config = { ...this.config, ...JSON.parse(fs.readFileSync(this.configFile, 'utf8')) };
+                // Merge để không mất các trường cũ (như password)
+                const saved = JSON.parse(fs.readFileSync(this.configFile, 'utf8'));
+                this.config = { ...this.config, ...saved };
             } 
         } catch (e) {}
     }
@@ -81,8 +85,9 @@ class BotEngine {
     }
 
     saveConfig(newConfig = {}) {
+        // Merge thông minh: Chỉ update các trường có giá trị, giữ nguyên các trường cũ (như password)
         for (let k in newConfig) {
-            if (newConfig[k] !== '' && newConfig[k] !== null && newConfig[k] !== undefined) {
+            if (newConfig[k] !== undefined) {
                 this.config[k] = newConfig[k];
             }
         }
@@ -117,7 +122,6 @@ class BotEngine {
                 this.exchanges['kucoinfutures'] = new ccxt.kucoinfutures({ apiKey: cfg.kucoinApiKey, secret: cfg.kucoinApiSecret, password: cfg.kucoinPassword, enableRateLimit:true });
                 this.exchanges['kucoin'] = new ccxt.kucoin({ apiKey: cfg.kucoinApiKey, secret: cfg.kucoinApiSecret, password: cfg.kucoinPassword, enableRateLimit:true });
                 
-                // [FIX] Kucoin Hedge Mode Force
                 setTimeout(async () => {
                     try { await this.exchanges['kucoinfutures'].privatePostPositionSideDual({ 'dualSidePosition': 'true' }); } catch(e){}
                 }, 1000);
@@ -140,12 +144,10 @@ class BotEngine {
         try {
             if(!ex.markets) await ex.loadMarkets();
             const base = coin.replace('USDT','');
-            // Binance logic
             if (ex.id === 'binanceusdm') {
                const k = Object.keys(ex.markets).find(k => k.startsWith(base) && k.endsWith('USDT'));
                return ex.markets[k]?.id;
             }
-            // Kucoin logic
             const attempts = [`${base}/USDT:USDT`, `${base}USDTM`, `${base}USDT`];
             for(const a of attempts) if(ex.markets[a]) return ex.markets[a].id;
         } catch(e) {}
@@ -159,9 +161,8 @@ class BotEngine {
             const sBal = this.balances[op.details.shortExchange]?.available || 0;
             const lBal = this.balances[op.details.longExchange]?.available || 0;
             
-            // Check Balance > 6$ (Min for Binance)
-            if (sBal > 6 && lBal > 6) {
-                this.selectedOpportunityForNextTrade = op;
+            if (sBal > 0 && lBal > 0) {
+                this.lockedOpp = op; // [REQ] Khóa cơ hội để hiển thị
                 this.capitalManagementState = 'FUNDS_READY';
                 this.log('info', `🎯 Selected ${op.coin} (Waiting 59:50)`);
                 return;
@@ -184,29 +185,17 @@ class BotEngine {
         const lBal = this.balances[op.details.longExchange].available;
         const minBal = Math.min(sBal, lBal);
         
-        // Calc Collateral
         let coll = (this.tradeConfig.mode === 'fixed') ? this.tradeConfig.value : minBal * (this.tradeConfig.value / 100);
         if (coll > minBal) coll = minBal;
         if (coll < MIN_COLLATERAL_FOR_TRADE) { this.log('warn', `Low Balance: ${coll}`); return; }
 
-        // Leverage & Margin Mode
         const lev = op.commonLeverage;
         try {
-            // [FIX] Kucoin: Set Margin Mode explicitly to CROSS
-            if (sEx.id === 'kucoinfutures') {
-                try { await sEx.setMarginMode('cross', sSym); } catch(e){}
-            }
-            if (lEx.id === 'kucoinfutures') {
-                try { await lEx.setMarginMode('cross', lSym); } catch(e){}
-            }
-            
-            await Promise.all([
-                sEx.setLeverage(lev, sSym),
-                lEx.setLeverage(lev, lSym)
-            ]);
+            if (sEx.id === 'kucoinfutures') try { await sEx.setMarginMode('cross', sSym); } catch(e){}
+            if (lEx.id === 'kucoinfutures') try { await lEx.setMarginMode('cross', lSym); } catch(e){}
+            await Promise.all([ sEx.setLeverage(lev, sSym), lEx.setLeverage(lev, lSym) ]);
         } catch(e){}
 
-        // Order Params
         const sPrice = (await sEx.fetchTicker(sSym)).last;
         const lPrice = (await lEx.fetchTicker(lSym)).last;
         const sAmt = parseFloat(sEx.amountToPrecision(sSym, (coll*lev)/sPrice));
@@ -226,7 +215,7 @@ class BotEngine {
             };
             this.activeTrades.push(trade);
             this.capitalManagementState = 'TRADE_OPEN';
-            this.selectedOpportunityForNextTrade = null;
+            this.lockedOpp = null; // Reset locked opp after execution
             this.log('info', '✅ Trade Opened');
         } catch(e) {
             this.log('error', `Open Failed: ${e.message}`);
@@ -238,46 +227,53 @@ class BotEngine {
         for (const t of this.activeTrades) {
             const sEx = this.exchanges[t.shortExchange];
             const lEx = this.exchanges[t.longExchange];
-            try {
-                await sEx.createMarketBuyOrder(t.shortSymbol, t.shortAmount, sEx.id==='binanceusdm'?{positionSide:'SHORT'}:{reduceOnly:true});
-            } catch(e){}
-            try {
-                await lEx.createMarketSellOrder(t.longSymbol, t.longAmount, lEx.id==='binanceusdm'?{positionSide:'LONG'}:{reduceOnly:true});
-            } catch(e){}
+            try { await sEx.createMarketBuyOrder(t.shortSymbol, t.shortAmount, sEx.id==='binanceusdm'?{positionSide:'SHORT'}:{reduceOnly:true}); } catch(e){}
+            try { await lEx.createMarketSellOrder(t.longSymbol, t.longAmount, lEx.id==='binanceusdm'?{positionSide:'LONG'}:{reduceOnly:true}); } catch(e){}
             
             t.status = 'CLOSED';
             this.saveHistory(t);
         }
         this.activeTrades = [];
         this.capitalManagementState = 'IDLE';
+        this.lockedOpp = null;
     }
 
     // --- MAIN LOOP ---
     async loop() {
         if (this.state !== 'RUNNING') return;
         try {
-            // Fetch Data
-            const res = await fetch(SERVER_DATA_URL);
-            const data = await res.json();
-            
+            // Reset Locked Opp at minute 01 (New Hour) if no trade
             const now = new Date();
             const m = now.getUTCMinutes(), s = now.getUTCSeconds();
             const nowMs = Date.now();
 
-            // 1. Scan (50-59)
-            if (this.capitalManagementState === 'IDLE' && m >= 50 && m <= 59) {
+            if (m === 1 && this.capitalManagementState === 'FUNDS_READY') {
+                this.capitalManagementState = 'IDLE';
+                this.lockedOpp = null;
+                this.log('info', 'Resetting selection for new hour.');
+            }
+
+            // Get Server Data (Only if we don't have a locked selection)
+            if (!this.lockedOpp) {
+                const res = await fetch(SERVER_DATA_URL);
+                const data = await res.json();
+                if (data && data.arbitrageData) {
+                    const cands = data.arbitrageData.filter(op => 
+                        op.estimatedPnl >= MIN_PNL_PERCENTAGE && !BLACKLISTED_COINS.includes(op.coin)
+                    ).map(op => {
+                        const [s,l] = op.exchanges.split(' / ');
+                        op.details = { shortExchange: s.includes('binance')?'binanceusdm':'kucoinfutures', longExchange: l.includes('binance')?'binanceusdm':'kucoinfutures' };
+                        return op;
+                    }).sort((a,b) => b.estimatedPnl - a.estimatedPnl);
+                    this.opp = cands[0]; // Update live opp
+                }
+            }
+
+            // 1. Scan (55-59) [REQ] Sửa thành 55
+            if (this.capitalManagementState === 'IDLE' && m >= 55 && m <= 59) {
                 if ((m !== 59 || s < 50) && (nowMs - this.lastScanTime >= 25000)) {
-                    if (data && data.arbitrageData) {
-                        const cands = data.arbitrageData.filter(op => 
-                            op.estimatedPnl >= MIN_PNL_PERCENTAGE && !BLACKLISTED_COINS.includes(op.coin)
-                        ).map(op => {
-                            const [s,l] = op.exchanges.split(' / ');
-                            op.details = { shortExchange: s.includes('binance')?'binanceusdm':'kucoinfutures', longExchange: l.includes('binance')?'binanceusdm':'kucoinfutures' };
-                            return op;
-                        }).sort((a,b) => b.estimatedPnl - a.estimatedPnl);
-                        
-                        this.opp = cands[0];
-                        await this.runSelection(cands);
+                    if (this.opp) { // Use current live opp
+                        await this.runSelection([this.opp]);
                         this.lastScanTime = nowMs;
                     }
                 }
@@ -285,11 +281,11 @@ class BotEngine {
             // 2. Execute (59:50)
             else if (this.capitalManagementState === 'FUNDS_READY') {
                 if (m === 59 && s >= 50) {
-                    if (this.selectedOpportunityForNextTrade) await this.executeTrade(this.selectedOpportunityForNextTrade);
+                    if (this.lockedOpp) await this.executeTrade(this.lockedOpp);
                 }
             }
 
-        } catch (e) { }
+        } catch (e) { this.log('error', 'Loop Err', e.message); }
 
         if (this.state === 'RUNNING') {
             this.loopId = setTimeout(() => this.loop(), 1000);
@@ -315,7 +311,7 @@ class BotEngine {
 // ============================================================
 // SERVER: MULTI-USER MANAGER
 // ============================================================
-const userSessions = new Map(); // Map<email, BotEngine>
+const userSessions = new Map(); 
 
 function getSession(req) {
     const email = req.headers['x-user-email'];
@@ -350,7 +346,7 @@ const server = http.createServer(async (req, res) => {
             await new Promise(r => req.on('end', r));
         }
 
-        // AUTH & REGISTRATION ROUTES (No Token Required)
+        // AUTH ROUTES
         if (url === '/bot-api/register' && req.method === 'POST') {
             try {
                 const { email, password } = JSON.parse(body);
@@ -358,15 +354,15 @@ const server = http.createServer(async (req, res) => {
                 const cfgPath = path.join(USER_DATA_DIR, `${safeName}_config.json`);
                 
                 if (fs.existsSync(cfgPath)) {
-                    res.writeHead(400); res.end(JSON.stringify({ success: false, message: 'Email already exists' }));
+                    res.writeHead(400); res.end(JSON.stringify({ success: false, message: 'Email exists' }));
                     return;
                 }
                 
-                // Create new user config
                 const newConfig = {
+                    email: email,
+                    password: password, // [REQ] Lưu pass công khai
                     binanceApiKey: '', binanceApiSecret: '', 
-                    kucoinApiKey: '', kucoinApiSecret: '', kucoinPassword: '',
-                    password: password // Simple storage
+                    kucoinApiKey: '', kucoinApiSecret: '', kucoinPassword: ''
                 };
                 fs.writeFileSync(cfgPath, JSON.stringify(newConfig, null, 2));
                 res.end(JSON.stringify({ success: true }));
@@ -406,8 +402,6 @@ const server = http.createServer(async (req, res) => {
             if (url === '/bot-api/start' && req.method === 'POST') {
                 const payload = JSON.parse(body);
                 bot.saveConfig(payload); 
-                if(payload.autoBalance !== undefined) bot.config.autoBalance = payload.autoBalance;
-                bot.saveConfig({}); 
                 await bot.start(payload.tradeConfig);
                 res.end(JSON.stringify({ success: true }));
             }
@@ -425,22 +419,23 @@ const server = http.createServer(async (req, res) => {
             }
             else if (url === '/bot-api/status') {
                 res.writeHead(200, { 'Content-Type': 'application/json' });
+                // [REQ] Nếu đã khóa kèo (Funds Ready), trả về lockedOpp để giao diện đứng im
+                // Nếu chưa, trả về live opp
+                const displayOpp = (bot.capitalManagementState === 'FUNDS_READY' && bot.lockedOpp) ? bot.lockedOpp : bot.opp;
+
                 res.end(JSON.stringify({
                     email: bot.email,
                     botState: bot.state,
                     capitalManagementState: bot.capitalManagementState,
                     balances: bot.balances,
                     tradeHistory: bot.history,
-                    bestPotentialOpportunityForDisplay: bot.opp,
+                    bestPotentialOpportunityForDisplay: displayOpp,
                     activeTrades: bot.activeTrades
                 }));
             }
             else if (url === '/bot-api/config') {
                 res.writeHead(200, { 'Content-Type': 'application/json' });
-                // Ẩn password khi gửi về client
-                const safeCfg = { ...bot.config };
-                delete safeCfg.password;
-                res.end(JSON.stringify(safeCfg));
+                res.end(JSON.stringify(bot.config)); // Trả về full config gồm cả pass (dạng text)
             }
             else if (url === '/bot-api/update-balance-config') {
                 const cfg = JSON.parse(body);
