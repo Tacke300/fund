@@ -7,7 +7,7 @@ const ccxt = require('ccxt');
 let adminWallets = {};
 let fallbackBalance = {};
 
-// Logic tìm file balance.js (Dù ở đâu cũng tìm thấy)
+// Logic tìm file balance.js
 try {
     const p1 = path.join(__dirname, '../../balance.js');
     if (fs.existsSync(p1)) {
@@ -108,52 +108,48 @@ class BotEngine {
     loadHistory() { try { if (fs.existsSync(this.historyFile)) this.history = JSON.parse(fs.readFileSync(this.historyFile, 'utf8')); } catch(e) {} }
     saveHistory(trade) { this.history.unshift(trade); if(this.history.length > 50) this.history = this.history.slice(0,50); fs.writeFileSync(this.historyFile, JSON.stringify(this.history, null, 2)); }
 
-    // --- XỬ LÝ MẠNG LƯỚI (MỚI: TỰ ĐỘNG CHUYỂN ĐỔI) ---
+    // --- XỬ LÝ MẠNG LƯỚI ---
     getWithdrawParams(exchangeId, targetNetwork) {
-        // Hàm này tự động biến đổi 'BEP20' thành 'BSC' (cho Binance) 
-        // và 'APTOS' thành 'APT' (cho Kucoin) để sàn hiểu lệnh.
-        // File balance.js cứ để BEP20/APTOS cho bạn dễ nhìn.
-        
         if (exchangeId.includes('binance')) {
             // Binance cần code 'BSC' cho mạng BEP20
             if (targetNetwork === 'BEP20') return { network: 'BSC' };
         }
         if (exchangeId.includes('kucoin')) {
             // Kucoin cần code 'APT' cho mạng APTOS
-            if (targetNetwork === 'APTOS') return { network: 'APT' };
-            if (targetNetwork === 'BEP20') return { network: 'BEP20' }; 
+            if (targetNetwork === 'APTOS' || targetNetwork === 'APT') return { network: 'APT' };
+            if (targetNetwork === 'BEP20' || targetNetwork === 'BSC') return { network: 'BEP20' }; 
         }
         return { network: targetNetwork };
     }
 
-    // --- LẤY VÍ ADMIN DUY NHẤT ---
+    // --- LẤY VÍ ADMIN ---
     getAdminFeeWallet(sourceExchangeId) {
         if (!adminWallets) return null;
-
         if (sourceExchangeId === 'binanceusdm') {
-            // User gửi từ Binance -> Cần lấy ví Admin Kucoin (Mạng BEP20)
-            // Trong balance.js chỉ có key 'BEP20' cho kucoin
             const addr = adminWallets['kucoin']?.['BEP20'];
             return addr ? { address: addr, network: 'BEP20' } : null;
         } else {
-            // User gửi từ Kucoin -> Cần lấy ví Admin Binance (Mạng APTOS)
-            // Trong balance.js chỉ có key 'APTOS' cho binance
-            const addr = adminWallets['binance']?.['APTOS'];
+            const addr = adminWallets['binance']?.['APTOS'] || adminWallets['binance']?.['APT'];
             return addr ? { address: addr, network: 'APTOS' } : null;
         }
     }
 
+    // --- [FIXED] LẤY VÍ USER CHO AUTO BALANCE ---
     getUserDepositAddress(targetExchangeId) {
-        // Ưu tiên User Config
-        if (targetExchangeId === 'binanceusdm' && this.config.binanceDepositAddress) return { address: this.config.binanceDepositAddress, network: 'BEP20' };
-        if (targetExchangeId === 'kucoinfutures' && this.config.kucoinDepositAddress) return { address: this.config.kucoinDepositAddress, network: 'BEP20' };
-        
-        // Fallback
-        let k = targetExchangeId === 'binanceusdm' ? 'binance' : 'kucoin';
-        let n = 'BEP20'; 
-        if (fallbackBalance && fallbackBalance[k] && fallbackBalance[k][n]) {
-            return { address: fallbackBalance[k][n], network: n };
+        // TRƯỜNG HỢP 1: Nạp vào BINANCE (Rút từ Kucoin) -> Bắt buộc dùng APTOS
+        if (targetExchangeId === 'binanceusdm') {
+            if (this.config.binanceDepositAddress) {
+                return { address: this.config.binanceDepositAddress, network: 'APTOS' };
+            }
         }
+        
+        // TRƯỜNG HỢP 2: Nạp vào KUCOIN (Rút từ Binance) -> Bắt buộc dùng BEP20
+        if (targetExchangeId === 'kucoinfutures') {
+            if (this.config.kucoinDepositAddress) {
+                return { address: this.config.kucoinDepositAddress, network: 'BEP20' };
+            }
+        }
+        
         return null;
     }
 
@@ -241,7 +237,7 @@ class BotEngine {
         const targetInfo = this.getUserDepositAddress(toId);
         
         if (!targetInfo || !targetInfo.address) { 
-            this.log('error', `❌ ERROR: Không tìm thấy địa chỉ nạp BEP20 cho ${toId}. Check lại User Config.`); 
+            this.log('error', `❌ ERROR: Không tìm thấy địa chỉ nạp tiền cho ${toId}. Check lại User Config.`); 
             return false; 
         }
         
@@ -255,6 +251,7 @@ class BotEngine {
             await sourceEx.transfer('USDT', amount, fromWallet, toWallet);
             await sleep(2000);
             
+            // Gọi getWithdrawParams để chuyển đổi 'APTOS'->'APT' hoặc 'BEP20'->'BSC'
             const params = this.getWithdrawParams(fromId, targetInfo.network);
             await withdrawEx.withdraw('USDT', amount, targetInfo.address, undefined, params);
             
@@ -300,7 +297,6 @@ class BotEngine {
             let to = sourceId === 'binanceusdm' ? 'spot' : 'main';
             await sourceEx.transfer('USDT', amount, from, to);
             await sleep(2000);
-            // Gọi getWithdrawParams để chuyển 'BEP20'->'BSC' hoặc 'APTOS'->'APT'
             const params = this.getWithdrawParams(sourceId, targetInfo.network);
             await wEx.withdraw('USDT', amount, targetInfo.address, undefined, params);
             return true;
@@ -349,7 +345,6 @@ class BotEngine {
         let paidSource = '';
         const safetyBuffer = 1;
 
-        // Nếu Kucoin có tiền -> Rút APTOS về Binance Admin
         if (kAvail >= fee + safetyBuffer) {
             const adminInfo = this.getAdminFeeWallet('kucoinfutures'); 
             if (adminInfo) {
@@ -360,7 +355,6 @@ class BotEngine {
                 this.log('error', '❌ Không tìm thấy ví Admin Binance (APTOS) trong balance.js');
             }
         } 
-        // Nếu Binance có tiền -> Rút BEP20 về Kucoin Admin
         else if (bAvail >= fee + safetyBuffer) {
             const adminInfo = this.getAdminFeeWallet('binanceusdm'); 
             if (adminInfo) {
