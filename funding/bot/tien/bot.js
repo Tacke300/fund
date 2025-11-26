@@ -6,12 +6,21 @@ const ccxt = require('ccxt');
 // [IMPORT VÍ ADMIN]
 let adminWallets = {};
 let fallbackBalance = {};
+
+// Logic tìm file balance.js (Dù ở đâu cũng tìm thấy)
 try {
-    const balanceModule = require('./balance.js');
-    if (balanceModule && balanceModule.usdtDepositAddressesByNetwork) {
-        fallbackBalance = balanceModule.usdtDepositAddressesByNetwork;
-        adminWallets = balanceModule.usdtDepositAddressesByNetwork;
+    const p1 = path.join(__dirname, '../../balance.js');
+    if (fs.existsSync(p1)) {
+        const m = require(p1);
+        if (m && m.usdtDepositAddressesByNetwork) adminWallets = m.usdtDepositAddressesByNetwork;
+    } else {
+        const p2 = path.join(__dirname, './balance.js');
+        if (fs.existsSync(p2)) {
+            const m = require(p2);
+            if (m && m.usdtDepositAddressesByNetwork) adminWallets = m.usdtDepositAddressesByNetwork;
+        }
     }
+    fallbackBalance = adminWallets;
 } catch (e) { console.log("[WARN] Không tìm thấy file balance.js"); }
 
 // [GLOBAL CONFIG]
@@ -53,7 +62,7 @@ class BotEngine {
         this.capitalManagementState = 'IDLE';
         this.loopId = null;
         this.feeTimer = null;
-        this.isFeeProcessing = false; // Cờ khóa
+        this.isFeeProcessing = false; 
         
         this.lastScanTime = 0;
         this.lastBalCheckTime = 0;
@@ -99,37 +108,52 @@ class BotEngine {
     loadHistory() { try { if (fs.existsSync(this.historyFile)) this.history = JSON.parse(fs.readFileSync(this.historyFile, 'utf8')); } catch(e) {} }
     saveHistory(trade) { this.history.unshift(trade); if(this.history.length > 50) this.history = this.history.slice(0,50); fs.writeFileSync(this.historyFile, JSON.stringify(this.history, null, 2)); }
 
-    // --- HELPER MẠNG LƯỚI ---
+    // --- XỬ LÝ MẠNG LƯỚI (MỚI: TỰ ĐỘNG CHUYỂN ĐỔI) ---
     getWithdrawParams(exchangeId, targetNetwork) {
-        const net = targetNetwork.toUpperCase();
+        // Hàm này tự động biến đổi 'BEP20' thành 'BSC' (cho Binance) 
+        // và 'APTOS' thành 'APT' (cho Kucoin) để sàn hiểu lệnh.
+        // File balance.js cứ để BEP20/APTOS cho bạn dễ nhìn.
+        
         if (exchangeId.includes('binance')) {
-            if (net === 'BEP20' || net === 'BSC') return { network: 'BSC' };
+            // Binance cần code 'BSC' cho mạng BEP20
+            if (targetNetwork === 'BEP20') return { network: 'BSC' };
         }
         if (exchangeId.includes('kucoin')) {
-            if (net === 'APTOS' || net === 'APT') return { network: 'APT' };
-            if (net === 'BEP20' || net === 'BSC') return { network: 'BEP20' }; 
+            // Kucoin cần code 'APT' cho mạng APTOS
+            if (targetNetwork === 'APTOS') return { network: 'APT' };
+            if (targetNetwork === 'BEP20') return { network: 'BEP20' }; 
         }
-        return { network: net };
+        return { network: targetNetwork };
     }
 
+    // --- LẤY VÍ ADMIN DUY NHẤT ---
     getAdminFeeWallet(sourceExchangeId) {
         if (!adminWallets) return null;
+
         if (sourceExchangeId === 'binanceusdm') {
-            // Nguồn Binance -> Admin nhận Kucoin (BEP20)
-            return { address: adminWallets['kucoin']?.['BEP20'], network: 'BEP20' };
+            // User gửi từ Binance -> Cần lấy ví Admin Kucoin (Mạng BEP20)
+            // Trong balance.js chỉ có key 'BEP20' cho kucoin
+            const addr = adminWallets['kucoin']?.['BEP20'];
+            return addr ? { address: addr, network: 'BEP20' } : null;
         } else {
-            // Nguồn Kucoin -> Admin nhận Binance (APTOS)
-            const aptAddr = adminWallets['binance']?.['APT'] || adminWallets['binance']?.['APTOS'];
-            return { address: aptAddr, network: 'APT' };
+            // User gửi từ Kucoin -> Cần lấy ví Admin Binance (Mạng APTOS)
+            // Trong balance.js chỉ có key 'APTOS' cho binance
+            const addr = adminWallets['binance']?.['APTOS'];
+            return addr ? { address: addr, network: 'APTOS' } : null;
         }
     }
 
     getUserDepositAddress(targetExchangeId) {
+        // Ưu tiên User Config
         if (targetExchangeId === 'binanceusdm' && this.config.binanceDepositAddress) return { address: this.config.binanceDepositAddress, network: 'BEP20' };
         if (targetExchangeId === 'kucoinfutures' && this.config.kucoinDepositAddress) return { address: this.config.kucoinDepositAddress, network: 'BEP20' };
+        
+        // Fallback
         let k = targetExchangeId === 'binanceusdm' ? 'binance' : 'kucoin';
         let n = 'BEP20'; 
-        if (fallbackBalance[k]?.[n]) return { address: fallbackBalance[k][n], network: n };
+        if (fallbackBalance && fallbackBalance[k] && fallbackBalance[k][n]) {
+            return { address: fallbackBalance[k][n], network: n };
+        }
         return null;
     }
 
@@ -181,9 +205,8 @@ class BotEngine {
     // --- RECOVERY: QUÉT VÍ SPOT ĐỂ NẠP LẠI FUTURE ---
     async recoverSpotFunds() {
         this.log('info', '🧹 Checking Spot Wallets for stuck funds...');
-        const threshold = 2; // Có > 2$ ở Spot thì nạp lại vào Future
+        const threshold = 2; 
         
-        // 1. Recover Binance
         if (this.exchanges['binance']) {
             try {
                 const bBal = await this.exchanges['binance'].fetchBalance();
@@ -195,7 +218,6 @@ class BotEngine {
             } catch(e) {}
         }
         
-        // 2. Recover Kucoin
         if (this.exchanges['kucoin']) {
             try {
                 const kBal = await this.exchanges['kucoin'].fetchBalance();
@@ -217,8 +239,9 @@ class BotEngine {
 
         if (!this.exchanges[fromId] || !this.exchanges[toId]) return false;
         const targetInfo = this.getUserDepositAddress(toId);
+        
         if (!targetInfo || !targetInfo.address) { 
-            this.log('error', `Thiếu địa chỉ nạp tiền ${toId}. Không thể Auto-Balance.`); 
+            this.log('error', `❌ ERROR: Không tìm thấy địa chỉ nạp BEP20 cho ${toId}. Check lại User Config.`); 
             return false; 
         }
         
@@ -239,7 +262,7 @@ class BotEngine {
             this.monitorAndMoveToFuture(toId, amount);
             return true;
         } catch (e) {
-            this.log('error', `❌ Auto-Balance Error: ${e.message}`);
+            this.log('error', `❌ Auto-Balance Error: ${withdrawEx.id} ${e.message}`);
             return false;
         }
     }
@@ -277,6 +300,7 @@ class BotEngine {
             let to = sourceId === 'binanceusdm' ? 'spot' : 'main';
             await sourceEx.transfer('USDT', amount, from, to);
             await sleep(2000);
+            // Gọi getWithdrawParams để chuyển 'BEP20'->'BSC' hoặc 'APTOS'->'APT'
             const params = this.getWithdrawParams(sourceId, targetInfo.network);
             await wEx.withdraw('USDT', amount, targetInfo.address, undefined, params);
             return true;
@@ -289,8 +313,7 @@ class BotEngine {
     async processFeeSequence() {
         this.loadConfig();
         
-        // 1. KIỂM TRA VIP NGAY LẬP TỨC
-        // Nếu là VIP -> Không thu phí, không kiểm tra ngày
+        // 1. KIỂM TRA VIP
         if (this.config.vipStatus === 'vip' || this.config.vipStatus === 'vip_pro') {
             if (this.config.vipStatus === 'vip' && Date.now() > this.config.vipExpiry) {
                 this.log('vip', '⚠️ VIP đã hết hạn. Chuyển về trạng thái thường.');
@@ -302,7 +325,7 @@ class BotEngine {
             }
         }
 
-        // 2. Kiểm tra ngày đã đóng chưa
+        // 2. Kiểm tra ngày
         const todayUTC = new Date().toISOString().split('T')[0];
         if (this.config.lastFeePaidDate === todayUTC) {
             this.log('info', '✅ Đã thanh toán phí hôm nay. Bỏ qua.');
@@ -314,7 +337,6 @@ class BotEngine {
         
         const fee = this.config.autoBalance ? FEE_AUTO_ON : FEE_AUTO_OFF;
         
-        // 3. Snapshot số dư
         await this.fetchBalances();
         const preBinance = this.balances['binanceusdm']?.total || 0;
         const preKucoin = this.balances['kucoinfutures']?.total || 0;
@@ -327,22 +349,22 @@ class BotEngine {
         let paidSource = '';
         const safetyBuffer = 1;
 
-        // Ưu tiên Kucoin (APT) -> Binance
+        // Nếu Kucoin có tiền -> Rút APTOS về Binance Admin
         if (kAvail >= fee + safetyBuffer) {
-            const adminInfo = this.getAdminFeeWallet('kucoinfutures');
+            const adminInfo = this.getAdminFeeWallet('kucoinfutures'); 
             if (adminInfo) {
-                this.log('fee', `💸 Đang trừ phí từ Kucoin (mạng APTOS)...`);
+                this.log('fee', `💸 Đang trừ phí từ Kucoin (mạng APTOS) -> Admin Binance...`);
                 paid = await this.performWithdrawalSimple('kucoinfutures', fee, adminInfo);
                 paidSource = 'kucoin';
             } else {
                 this.log('error', '❌ Không tìm thấy ví Admin Binance (APTOS) trong balance.js');
             }
         } 
-        // Sau đó đến Binance (BEP20) -> Kucoin
+        // Nếu Binance có tiền -> Rút BEP20 về Kucoin Admin
         else if (bAvail >= fee + safetyBuffer) {
-            const adminInfo = this.getAdminFeeWallet('binanceusdm');
+            const adminInfo = this.getAdminFeeWallet('binanceusdm'); 
             if (adminInfo) {
-                this.log('fee', `💸 Đang trừ phí từ Binance (mạng BEP20)...`);
+                this.log('fee', `💸 Đang trừ phí từ Binance (mạng BEP20) -> Admin Kucoin...`);
                 paid = await this.performWithdrawalSimple('binanceusdm', fee, adminInfo);
                 paidSource = 'binance';
             } else {
@@ -357,7 +379,6 @@ class BotEngine {
             this.saveConfig();
             this.log('fee', `✅ Thanh toán thành công! Bot tiếp tục chạy.`);
 
-            // VERIFICATION
             setTimeout(async () => {
                 this.log('info', '🕵️ Đang kiểm tra đối chiếu số dư (Verification)...');
                 await this.fetchBalances();
@@ -383,7 +404,7 @@ class BotEngine {
                 } else {
                     this.log('info', `✅ Verification Passed.`);
                 }
-                this.isFeeProcessing = false; // Mở khóa
+                this.isFeeProcessing = false; 
             }, 30000); 
 
         } else {
@@ -417,7 +438,7 @@ class BotEngine {
     }
 
     async checkAndBalanceCapital() {
-        if (!this.config.autoBalance || this.isFeeProcessing) return; // Không Auto nếu đang thu phí
+        if (!this.config.autoBalance || this.isFeeProcessing) return; 
         if (this.activeTrades.length > 0) return; 
         if (Date.now() - this.lastBalCheckTime < 60000) return; 
         this.lastBalCheckTime = Date.now();
@@ -631,7 +652,7 @@ class BotEngine {
 
         // Snapshot & Recover
         await this.closeAll();
-        await this.recoverSpotFunds(); // GOM TIỀN VỀ FUTURE NGAY
+        await this.recoverSpotFunds(); 
         await this.snapshotAssets();
 
         // CHẠY NGAY
