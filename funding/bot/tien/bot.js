@@ -28,7 +28,7 @@ const SERVER_DATA_URL = 'http://localhost:5005/api/data';
 const USER_DATA_DIR = path.join(__dirname, 'user_data');
 if (!fs.existsSync(USER_DATA_DIR)) fs.mkdirSync(USER_DATA_DIR);
 
-// [CONSTANTS FROM DEMO]
+// [CONSTANTS]
 const MIN_PNL_PERCENTAGE = 1;
 const MIN_COLLATERAL_FOR_TRADE = 0.05; 
 const BLACKLISTED_COINS = ['GAIBUSDT', 'AIAUSDT', '42USDT', 'WAVESUSDT'];
@@ -40,9 +40,9 @@ const FEE_AUTO_OFF = 5;
 const FEE_VIP_MONTHLY = 200;
 const FEE_CHECK_DELAY = 60000; 
 
-// [TP/SL CONFIG FROM DEMO]
+// [TP/SL CONFIG]
 const SL_PERCENTAGE = 95;  
-const TP_PERCENTAGE = 155; // Theo bản demo
+const TP_PERCENTAGE = 155; // Cập nhật theo demo
 
 function getSafeFileName(username) {
     return username.replace(/[^a-z0-9]/gi, '_').toLowerCase();
@@ -107,7 +107,7 @@ class BotEngine {
     loadHistory() { try { if (fs.existsSync(this.historyFile)) this.history = JSON.parse(fs.readFileSync(this.historyFile, 'utf8')); } catch(e) {} }
     saveHistory(trade) { this.history.unshift(trade); if(this.history.length > 50) this.history = this.history.slice(0,50); fs.writeFileSync(this.historyFile, JSON.stringify(this.history, null, 2)); }
 
-    // --- HELPER MẠNG LƯỚI (GIỮ NGUYÊN CẤU TRÚC BOT) ---
+    // --- HELPER MẠNG LƯỚI ---
     getWithdrawParams(exchangeId, targetNetwork) {
         if (exchangeId.includes('binance')) {
             if (targetNetwork === 'BEP20') return { network: 'BSC' };
@@ -140,11 +140,30 @@ class BotEngine {
         return null;
     }
 
-    // ==========================================================================
-    // PHẦN "RUỘT" GIAO DỊCH TỪ BẢN DEMO (START)
-    // ==========================================================================
+    // --- INIT ---
+    async initExchanges() {
+        const cfg = this.config;
+        this.exchanges = {}; this.balances = {};
+        try {
+            if (cfg.binanceApiKey) {
+                this.exchanges['binanceusdm'] = new ccxt.binanceusdm({ apiKey: cfg.binanceApiKey, secret: cfg.binanceApiSecret, enableRateLimit:true, options: { defaultType: 'swap' } });
+                this.exchanges['binance'] = new ccxt.binance({ apiKey: cfg.binanceApiKey, secret: cfg.binanceApiSecret, enableRateLimit:true });
+                await this.exchanges['binanceusdm'].loadMarkets();
+                setTimeout(async()=>{try{await this.exchanges['binanceusdm'].fapiPrivatePostPositionSideDual({'dualSidePosition':'true'})}catch(e){}},1000);
+            }
+            if (cfg.kucoinApiKey) {
+                this.exchanges['kucoinfutures'] = new ccxt.kucoinfutures({ apiKey: cfg.kucoinApiKey, secret: cfg.kucoinApiSecret, password: cfg.kucoinPassword, enableRateLimit:true });
+                this.exchanges['kucoin'] = new ccxt.kucoin({ apiKey: cfg.kucoinApiKey, secret: cfg.kucoinApiSecret, password: cfg.kucoinPassword, enableRateLimit:true });
+                await this.exchanges['kucoinfutures'].loadMarkets();
+                setTimeout(async()=>{try{await this.exchanges['kucoinfutures'].privatePostPositionSideDual({'dualSidePosition':'true'})}catch(e){}},1000);
+            }
+        } catch(e) { this.log('error', `Init Fail: ${e.message}`); }
+    }
 
-    // 1. Lấy Symbol chuẩn (Fix lỗi 404/Symbol not found)
+    // ==================================================================================
+    // PHẦN MỚI: CÁC HÀM HỖ TRỢ GIAO DỊCH (TỪ DEMO) - GIÚP TÍNH TOÁN CHUẨN XÁC
+    // ==================================================================================
+
     async getExchangeSpecificSymbol(exchange, rawCoinSymbol) {
         try {
             if (!exchange.markets || Object.keys(exchange.markets).length === 0) await exchange.loadMarkets(true);
@@ -165,20 +184,18 @@ class BotEngine {
         return null;
     }
 
-    // 2. Đặt Leverage an toàn (Fix lỗi Margin Mode)
     async setLeverageSafely(exchange, symbol, desiredLeverage) {
         const params = (exchange.id === 'kucoinfutures') ? { 'marginMode': 'cross' } : {};
         try {
             await exchange.setLeverage(desiredLeverage, symbol, params);
             return desiredLeverage;
         } catch (e) {
-            this.log('warn', `[LEVERAGE] Không thể đặt đòn bẩy x${desiredLeverage} cho ${symbol} trên ${exchange.id}: ${e.message}`);
+            // Không log lỗi để tránh spam, chỉ return null để xử lý sau
             return null;
         }
     }
 
-    // 3. Tính toán khối lượng (Fix lỗi Precision, Min Amount, Min Cost)
-    async computeOrderDetails(exchange, symbol, targetNotionalUSDT, leverage, availableBalance) {
+    async computeOrderDetails(exchange, symbol, targetNotionalUSDT, leverage) {
         await exchange.loadMarkets();
         const market = exchange.market(symbol);
         const ticker = await exchange.fetchTicker(symbol);
@@ -190,19 +207,20 @@ class BotEngine {
         
         if (exchange.id === 'kucoinfutures' && market.precision.amount === 0) amount = Math.round(amount);
         
+        // Check min amount
         if (amount <= (market.limits.amount.min || 0)) {
-             throw new Error(`Số lượng tính toán (${amount}) < mức tối thiểu của sàn.`);
+             throw new Error(`Số lượng ${amount} < mức tối thiểu.`);
         }
         
+        // Check min cost
         let currentNotional = amount * price * contractSize;
         if (market.limits?.cost?.min && currentNotional < market.limits.cost.min) {
-             throw new Error(`Giá trị lệnh ${currentNotional.toFixed(4)} < mức tối thiểu ${market.limits.cost.min} USDT.`);
+             throw new Error(`Giá trị lệnh ${currentNotional.toFixed(2)} < mức tối thiểu ${market.limits.cost.min}.`);
         }
 
         return { amount, price, notional: currentNotional };
     }
 
-    // 4. Đặt TP/SL chuẩn Demo
     async placeTpSlOrders(exchange, symbol, side, amount, entryPrice, collateral, notionalValue) {
         if (!entryPrice || entryPrice <= 0) return;
         
@@ -236,7 +254,7 @@ class BotEngine {
                 await exchange.createOrder(symbol, 'STOP_MARKET', orderSide, amount, undefined, { ...commonParams, 'stopPrice': exchange.priceToPrecision(symbol, slPrice) });
             }
         } catch (e) {
-            this.log('error', `[TP/SL] Lỗi đặt TP/SL: ${e.message}`);
+            this.log('warn', `TP/SL Fail: ${e.message}`);
         }
     }
 
@@ -248,25 +266,30 @@ class BotEngine {
                 if (order.price) return order.price;
                 if (order.filled > 0 && order.cost > 0) return order.cost / order.filled;
             } catch (e) { }
-            await sleep(1000); 
+            await sleep(800); 
         }
         return null;
     }
 
-    // 5. Hàm Execute Trade (Chuẩn Demo + Parallel Execution để an toàn)
+    // ==================================================================================
+    // HÀM XỬ LÝ LỆNH CHÍNH - ĐÃ THAY THẾ BẰNG LOGIC CỦA DEMO
+    // ==================================================================================
+
     async executeTrade(op) {
         const sEx = this.exchanges[op.details.shortExchange];
         const lEx = this.exchanges[op.details.longExchange];
         if(!sEx || !lEx) return;
         
+        // 1. Lấy Symbol chuẩn (Fix lỗi 404)
         const sSym = await this.getExchangeSpecificSymbol(sEx, op.coin);
         const lSym = await this.getExchangeSpecificSymbol(lEx, op.coin);
         if(!sSym || !lSym) {
-            this.log('error', `Không tìm thấy symbol ${op.coin} trên sàn.`);
+            this.log('error', `Symbol not found: ${op.coin}`);
             this.lockedOpp = null; this.capitalManagementState = 'IDLE';
             return;
         }
 
+        // 2. Tính toán vốn (Tôn trọng cài đặt User)
         await this.fetchBalances();
         const sBal = this.balances[op.details.shortExchange].available;
         const lBal = this.balances[op.details.longExchange].available;
@@ -276,12 +299,20 @@ class BotEngine {
         if (this.tradeConfig.mode === 'fixed') collateral = parseFloat(this.tradeConfig.value);
         else collateral = minBal * (parseFloat(this.tradeConfig.value) / 100);
 
+        // Safety Clamp (96% nếu đánh full tài khoản)
+        const maxSafe = minBal * 0.96;
+        if (collateral > maxSafe) {
+            collateral = maxSafe;
+            this.log('warn', `Adjusted amount to ${collateral.toFixed(2)}$ (96%) to prevent margin error.`);
+        }
+
         if (collateral < MIN_COLLATERAL_FOR_TRADE) {
-            this.log('warn', `Vốn ${collateral.toFixed(2)}$ quá nhỏ. Bỏ qua.`);
+            this.log('warn', `Amount too small (${collateral.toFixed(2)}$). Skipped.`);
             this.lockedOpp = null; this.capitalManagementState = 'IDLE';
             return;
         }
 
+        // 3. Leverage & Order Details
         const lev = op.commonLeverage;
         const [realSLev, realLLev] = await Promise.all([
             this.setLeverageSafely(sEx, sSym, lev),
@@ -293,11 +324,11 @@ class BotEngine {
         try {
             const targetNotional = collateral * usedLev;
             [sDetails, lDetails] = await Promise.all([
-                this.computeOrderDetails(sEx, sSym, targetNotional, usedLev, sBal),
-                this.computeOrderDetails(lEx, lSym, targetNotional, usedLev, lBal)
+                this.computeOrderDetails(sEx, sSym, targetNotional, usedLev),
+                this.computeOrderDetails(lEx, lSym, targetNotional, usedLev)
             ]);
         } catch(e) {
-            this.log('error', `Lỗi tính toán lệnh (Demo logic): ${e.message}`);
+            this.log('error', `Calc Error: ${e.message}`);
             this.lockedOpp = null; this.capitalManagementState = 'IDLE';
             return;
         }
@@ -305,7 +336,7 @@ class BotEngine {
         const sParams = (sEx.id === 'binanceusdm') ? { 'positionSide': 'SHORT' } : (sEx.id === 'kucoinfutures' ? {'marginMode':'cross'} : {});
         const lParams = (lEx.id === 'binanceusdm') ? { 'positionSide': 'LONG' } : (lEx.id === 'kucoinfutures' ? {'marginMode':'cross'} : {});
 
-        // THỰC THI SONG SONG (Để đảm bảo nếu lỗi 1 bên thì đóng bên kia ngay)
+        // 4. PARALLEL EXECUTION (An toàn tuyệt đối - Như đã bàn)
         const results = await Promise.allSettled([
             sEx.createMarketSellOrder(sSym, sDetails.amount, sParams),
             lEx.createMarketBuyOrder(lSym, lDetails.amount, lParams)
@@ -314,6 +345,7 @@ class BotEngine {
         const sResult = results[0];
         const lResult = results[1];
 
+        // 5. Xử lý kết quả
         if (sResult.status === 'fulfilled' && lResult.status === 'fulfilled') {
             const trade = {
                 id: Date.now(), coin: op.coin, shortExchange: sEx.id, longExchange: lEx.id, shortSymbol: sSym, longSymbol: lSym, shortOrderId: sResult.value.id, longOrderId: lResult.value.id, entryTime: Date.now(), estimatedPnlFromOpportunity: op.estimatedPnl, shortAmount: sDetails.amount, longAmount: lDetails.amount, status: 'OPEN', leverage: usedLev, collateral: collateral
@@ -322,12 +354,11 @@ class BotEngine {
             this.capitalManagementState = 'TRADE_OPEN';
             this.lockedOpp = null;
             
-            // Lấy giá khớp thật (Demo Logic)
             const sPrice = await this.getReliableFillPrice(sEx, sSym, sResult.value.id);
             const lPrice = await this.getReliableFillPrice(lEx, lSym, lResult.value.id);
             trade.entryPriceShort = sPrice; trade.entryPriceLong = lPrice;
 
-            this.log('trade', `OPEN SUCCESS | ${op.coin} | Money: ${collateral.toFixed(1)}$`);
+            this.log('trade', `OPEN | ${op.coin} | Money: ${collateral.toFixed(1)}$`);
             this.placeTpSlOrders(sEx, sSym, 'sell', sDetails.amount, sPrice, collateral, sDetails.notional);
             this.placeTpSlOrders(lEx, lSym, 'buy', lDetails.amount, lPrice, collateral, lDetails.notional);
         }
@@ -341,19 +372,17 @@ class BotEngine {
             }
             this.stop();
         } else {
-            this.log('error', `Cả 2 lệnh đều thất bại. Reset. S: ${sResult.reason?.message} | L: ${lResult.reason?.message}`);
+            this.log('error', `Cả 2 lệnh đều thất bại. Reset.`);
             this.lockedOpp = null; this.capitalManagementState = 'IDLE';
         }
     }
 
-    // 6. Hàm Close All (Dùng Logic của Demo)
     async closeAll() {
-        this.log('info', '🛑 Closing all positions (Demo Logic)...');
+        this.log('info', '🛑 Closing all positions...');
         for (const t of this.activeTrades) {
             const sEx = this.exchanges[t.shortExchange];
             const lEx = this.exchanges[t.longExchange];
             
-            // Hủy lệnh chờ
             try { await sEx.cancelAllOrders(t.shortSymbol); } catch(e){}
             try { await lEx.cancelAllOrders(t.longSymbol); } catch(e){}
             
@@ -371,41 +400,9 @@ class BotEngine {
         this.lockedOpp = null;
     }
 
-    // ==========================================================================
-    // PHẦN "RUỘT" GIAO DỊCH TỪ BẢN DEMO (END)
-    // ==========================================================================
-
-    // --- INIT ---
-    async initExchanges() {
-        const cfg = this.config;
-        this.exchanges = {}; this.balances = {};
-        try {
-            if (cfg.binanceApiKey) {
-                this.exchanges['binanceusdm'] = new ccxt.binanceusdm({ apiKey: cfg.binanceApiKey, secret: cfg.binanceApiSecret, enableRateLimit:true, options: { defaultType: 'swap' } });
-                this.exchanges['binance'] = new ccxt.binance({ apiKey: cfg.binanceApiKey, secret: cfg.binanceApiSecret, enableRateLimit:true });
-                await this.exchanges['binanceusdm'].loadMarkets();
-                setTimeout(async()=>{try{await this.exchanges['binanceusdm'].fapiPrivatePostPositionSideDual({'dualSidePosition':'true'})}catch(e){}},1000);
-            }
-            if (cfg.kucoinApiKey) {
-                this.exchanges['kucoinfutures'] = new ccxt.kucoinfutures({ apiKey: cfg.kucoinApiKey, secret: cfg.kucoinApiSecret, password: cfg.kucoinPassword, enableRateLimit:true });
-                this.exchanges['kucoin'] = new ccxt.kucoin({ apiKey: cfg.kucoinApiKey, secret: cfg.kucoinApiSecret, password: cfg.kucoinPassword, enableRateLimit:true });
-                await this.exchanges['kucoinfutures'].loadMarkets();
-                setTimeout(async()=>{try{await this.exchanges['kucoinfutures'].privatePostPositionSideDual({'dualSidePosition':'true'})}catch(e){}},1000);
-            }
-        } catch(e) { this.log('error', `Init Fail: ${e.message}`); }
-    }
-
-    // --- BALANCES & RECOVERY ---
-    async fetchBalances() {
-        for (const id of ['binanceusdm', 'kucoinfutures']) {
-            if (!this.exchanges[id]) { this.balances[id] = { available: 0, total: 0 }; continue; }
-            try {
-                const bal = await this.exchanges[id].fetchBalance({ type: 'future' });
-                this.balances[id] = { available: bal.free.USDT || 0, total: bal.total.USDT || 0 };
-            } catch (e) { this.balances[id] = { available: 0, total: 0 }; }
-        }
-        return this.balances;
-    }
+    // ==================================================================================
+    // CÁC HÀM CŨ (GIỮ NGUYÊN 100% ĐỂ KHÔNG LỖI DỮ LIỆU)
+    // ==================================================================================
 
     async snapshotAssets() {
         this.log('info', '📸 Snapshotting assets...');
@@ -422,6 +419,17 @@ class BotEngine {
         this.saveConfig();
         this.log('info', `✅ Snapshot: B-Fut:${bFut.toFixed(1)}$, K-Fut:${kFut.toFixed(1)}$, Total:${totalAssets.toFixed(1)}$`);
         await this.fetchBalances();
+    }
+
+    async fetchBalances() {
+        for (const id of ['binanceusdm', 'kucoinfutures']) {
+            if (!this.exchanges[id]) { this.balances[id] = { available: 0, total: 0 }; continue; }
+            try {
+                const bal = await this.exchanges[id].fetchBalance({ type: 'future' });
+                this.balances[id] = { available: bal.free.USDT || 0, total: bal.total.USDT || 0 };
+            } catch (e) { this.balances[id] = { available: 0, total: 0 }; }
+        }
+        return this.balances;
     }
 
     async recoverSpotFunds() {
@@ -443,7 +451,6 @@ class BotEngine {
         }
     }
 
-    // --- AUTO BALANCE ---
     async autoFundTransfer(fromId, toId, amount) {
         if (this.isFeeProcessing) return false;
         if (!this.exchanges[fromId] || !this.exchanges[toId]) return false;
@@ -493,7 +500,6 @@ class BotEngine {
         }
     }
 
-    // --- FEE ---
     async performWithdrawalSimple(sourceId, amount, targetInfo) {
         const sourceEx = this.exchanges[sourceId];
         const wEx = sourceId === 'binanceusdm' ? this.exchanges['binance'] : this.exchanges['kucoin']; 
@@ -569,6 +575,28 @@ class BotEngine {
         }
     }
 
+    // --- LOGIC LỌC CƠ HỘI (GIỮ NGUYÊN ĐỂ KHÔNG MẤT DỮ LIỆU) ---
+    async getSymbol(ex, coin) {
+        try {
+            if(!ex.markets) await ex.loadMarkets();
+            const base = coin.replace('USDT','');
+            if (ex.id === 'binanceusdm') {
+               const k = Object.keys(ex.markets).find(k => k.startsWith(base) && k.endsWith('USDT'));
+               return ex.markets[k]?.id;
+            }
+            const attempts = [`${base}/USDT:USDT`, `${base}USDTM`, `${base}USDT`];
+            for(const a of attempts) if(ex.markets[a]) return ex.markets[a].id;
+        } catch(e) {}
+        return null;
+    }
+
+    async hasOpenPosition(ex, sym) {
+        try {
+            const positions = await ex.fetchPositions();
+            return !!positions.find(p => (p.symbol === sym || p.info.symbol === sym) && parseFloat(p.contracts || p.info.positionAmt || 0) !== 0);
+        } catch (e) { return false; }
+    }
+
     async filterTradableOps(rawOps) {
         const tradable = [];
         for (const op of rawOps) {
@@ -582,8 +610,8 @@ class BotEngine {
             const sEx = this.exchanges[opDetail.details.shortExchange];
             const lEx = this.exchanges[opDetail.details.longExchange];
             if (!sEx || !lEx) continue;
-            const sSym = await this.getExchangeSpecificSymbol(sEx, op.coin);
-            const lSym = await this.getExchangeSpecificSymbol(lEx, op.coin);
+            const sSym = await this.getSymbol(sEx, op.coin);
+            const lSym = await this.getSymbol(lEx, op.coin);
             if (sSym && lSym) tradable.push(opDetail);
         }
         return tradable.sort((a,b) => b.estimatedPnl - a.estimatedPnl);
@@ -594,9 +622,11 @@ class BotEngine {
             if (this.activeTrades.some(t => t.coin === op.coin)) continue;
             const sEx = this.exchanges[op.details.shortExchange];
             const lEx = this.exchanges[op.details.longExchange];
-            const sSym = await this.getExchangeSpecificSymbol(sEx, op.coin);
-            const lSym = await this.getExchangeSpecificSymbol(lEx, op.coin);
-            
+            const sSym = await this.getSymbol(sEx, op.coin);
+            const lSym = await this.getSymbol(lEx, op.coin);
+            const hasShort = await this.hasOpenPosition(sEx, sSym);
+            const hasLong = await this.hasOpenPosition(lEx, lSym);
+            if (hasShort || hasLong) continue;
             const sBal = this.balances[op.details.shortExchange]?.available || 0;
             const lBal = this.balances[op.details.longExchange]?.available || 0;
             if (sBal <= MIN_COLLATERAL_FOR_TRADE || lBal <= MIN_COLLATERAL_FOR_TRADE) continue;
