@@ -41,8 +41,8 @@ const FEE_VIP_MONTHLY = 200;
 const FEE_CHECK_DELAY = 60000; 
 
 // [TP/SL CONFIG - UPDATED]
-const SL_PERCENTAGE = 65;   // Sửa thành 65%
-const TP_PERCENTAGE = 115;  // Sửa thành 115%
+const SL_PERCENTAGE = 65;   
+const TP_PERCENTAGE = 115; 
 
 function getSafeFileName(username) {
     return username.replace(/[^a-z0-9]/gi, '_').toLowerCase();
@@ -149,6 +149,7 @@ class BotEngine {
         const find = (ex) => {
             if (!ex.markets) return null;
             const base = String(rawCoinSymbol).toUpperCase();
+            
             if (ex.id === 'binanceusdm') {
                 const k = Object.keys(ex.markets).find(k => k.replace('/','').replace(':USDT','') === base.replace('USDT',''));
                 if(k) return ex.markets[k].id;
@@ -163,23 +164,14 @@ class BotEngine {
 
         let sym = find(exchange);
         if (!sym) {
-            try {
-                await exchange.loadMarkets(true); 
-                sym = find(exchange);
-            } catch (e) { return null; }
+            try { await exchange.loadMarkets(true); sym = find(exchange); } catch (e) { return null; }
         }
         return sym;
     }
 
-    // [FIX] SET ISOLATED MARGIN
     async setLeverageSafely(exchange, symbol, desiredLeverage) {
         try {
-            // Ép buộc set ISOLATED cho cả Binance và Kucoin
-            try {
-                await exchange.setMarginMode('isolated', symbol);
-            } catch (e) {
-                // Một số sàn có thể báo lỗi nếu đã ở chế độ đó rồi
-            }
+            try { await exchange.setMarginMode('isolated', symbol); } catch (e) {}
             await exchange.setLeverage(desiredLeverage, symbol);
             return desiredLeverage;
         } catch (e) { return null; }
@@ -214,7 +206,6 @@ class BotEngine {
 
         try {
             if (exchange.id === 'kucoinfutures') {
-                // Kucoin params cho ISOLATED
                 const tpParams = { 'reduceOnly': true, 'stop': side === 'sell' ? 'down' : 'up', 'stopPrice': exchange.priceToPrecision(symbol, tpPrice), 'stopPriceType': 'MP', 'marginMode': 'isolated' };
                 await exchange.createOrder(symbol, 'market', orderSide, amount, undefined, tpParams);
                 const slParams = { 'reduceOnly': true, 'stop': side === 'sell' ? 'up' : 'down', 'stopPrice': exchange.priceToPrecision(symbol, slPrice), 'stopPriceType': 'MP', 'marginMode': 'isolated' };
@@ -242,7 +233,7 @@ class BotEngine {
         return null;
     }
 
-    // --- EXECUTE TRADE (VỚI CƠ CHẾ CHỜ 10S & RETRY) ---
+    // --- EXECUTE TRADE (CÓ LOG CHI TIẾT) ---
     async executeTrade(op) {
         const sEx = this.exchanges[op.details.shortExchange];
         const lEx = this.exchanges[op.details.longExchange];
@@ -252,7 +243,7 @@ class BotEngine {
         const lSym = await this.getExchangeSpecificSymbol(lEx, op.coin);
         
         if(!sSym || !lSym) {
-            this.log('warn', `Symbol ${op.coin} not found. Blacklisting.`);
+            this.log('warn', `Symbol ${op.coin} not found.`);
             this.sessionBlacklist.add(op.coin);
             this.lockedOpp = null; this.capitalManagementState = 'IDLE';
             return;
@@ -302,7 +293,6 @@ class BotEngine {
             return;
         }
 
-        // Params cho ISOLATED
         const sParams = (sEx.id === 'binanceusdm') ? { 'positionSide': 'SHORT' } : (sEx.id === 'kucoinfutures' ? {'marginMode':'isolated'} : {});
         const lParams = (lEx.id === 'binanceusdm') ? { 'positionSide': 'LONG' } : (lEx.id === 'kucoinfutures' ? {'marginMode':'isolated'} : {});
 
@@ -314,6 +304,10 @@ class BotEngine {
 
         const sResult = results[0];
         const lResult = results[1];
+
+        // Log chi tiết kết quả để debug
+        if (sResult.status === 'rejected') this.log('error', `SHORT Fail (${sEx.id}): ${sResult.reason.message}`);
+        if (lResult.status === 'rejected') this.log('error', `LONG Fail (${lEx.id}): ${lResult.reason.message}`);
 
         if (sResult.status === 'fulfilled' && lResult.status === 'fulfilled') {
             const trade = {
@@ -332,44 +326,44 @@ class BotEngine {
             this.placeTpSlOrders(lEx, lSym, 'buy', lDetails.amount, lPrice, collateral, lDetails.notional);
         }
         else if (sResult.status === 'fulfilled' || lResult.status === 'fulfilled') {
-            // [FIX] CƠ CHẾ CHỜ 10S & RETRY
             this.log('warn', `⚠️ LỆCH LỆNH! Đang chờ 10s để Retry bên lỗi...`);
             
-            // Thử lại bên bị lỗi 1 lần nữa
+            // 10s Retry Logic
             let retrySuccess = false;
-            if (sResult.status === 'rejected') {
-                try {
-                    await sleep(1000); // Đợi 1s rồi retry
-                    const retryOrd = await sEx.createMarketSellOrder(sSym, sDetails.amount, sParams);
-                    this.log('info', `✅ Retry Short thành công!`);
-                    // Cập nhật kết quả thành công giả để chạy tiếp logic
-                    sResult.status = 'fulfilled'; sResult.value = retryOrd;
-                    retrySuccess = true;
-                } catch(e) { this.log('warn', `Retry Short thất bại: ${e.message}`); }
-            } else {
-                try {
-                    await sleep(1000); // Đợi 1s rồi retry
-                    const retryOrd = await lEx.createMarketBuyOrder(lSym, lDetails.amount, lParams);
-                    this.log('info', `✅ Retry Long thành công!`);
-                    lResult.status = 'fulfilled'; lResult.value = retryOrd;
-                    retrySuccess = true;
-                } catch(e) { this.log('warn', `Retry Long thất bại: ${e.message}`); }
+            for (let i = 0; i < 5; i++) { // Thử 5 lần, mỗi lần 2s
+                await sleep(2000);
+                if (sResult.status === 'rejected') {
+                    try {
+                        const retryOrd = await sEx.createMarketSellOrder(sSym, sDetails.amount, sParams);
+                        this.log('info', `✅ Retry Short thành công!`);
+                        sResult.status = 'fulfilled'; sResult.value = retryOrd;
+                        retrySuccess = true;
+                        break;
+                    } catch(e) { this.log('warn', `Retry Short lần ${i+1} thất bại: ${e.message}`); }
+                } else {
+                    try {
+                        const retryOrd = await lEx.createMarketBuyOrder(lSym, lDetails.amount, lParams);
+                        this.log('info', `✅ Retry Long thành công!`);
+                        lResult.status = 'fulfilled'; lResult.value = retryOrd;
+                        retrySuccess = true;
+                        break;
+                    } catch(e) { this.log('warn', `Retry Long lần ${i+1} thất bại: ${e.message}`); }
+                }
             }
 
             if (!retrySuccess) {
-                // Nếu retry vẫn xịt -> Đợi nốt 9s còn lại rồi đóng
-                await sleep(9000);
                 this.log('fatal', `❌ RETRY THẤT BẠI. ĐÓNG KHẨN CẤP & DỪNG BOT!`);
-                
                 if (sResult.status === 'fulfilled') try { await sEx.createMarketBuyOrder(sSym, sDetails.amount, sEx.id==='binanceusdm'?{positionSide:'SHORT'}:{reduceOnly:true}); } catch(e){}
                 if (lResult.status === 'fulfilled') try { await lEx.createMarketSellOrder(lSym, lDetails.amount, lEx.id==='binanceusdm'?{positionSide:'LONG'}:{reduceOnly:true}); } catch(e){}
                 this.stop();
             } else {
-                // Nếu Retry thành công -> Chạy tiếp logic lưu trade như bình thường
-                // (Copy lại logic thành công ở trên - để code gọn tôi gọi lại hàm này hoặc xử lý tiếp ở đây,
-                // nhưng để an toàn tôi sẽ close luôn lệnh vừa cứu được để reset cho sạch sẽ)
-                 this.log('info', `⚠️ Đã cứu được lệnh lệch. Đóng ngay để bảo toàn vốn.`);
-                 this.closeAll();
+                this.log('info', `⚠️ Đã cứu được lệnh lệch. Đóng ngay để bảo toàn vốn.`);
+                // Lưu trade để có history, sau đó close
+                 const trade = {
+                    id: Date.now(), coin: op.coin, shortExchange: sEx.id, longExchange: lEx.id, shortSymbol: sSym, longSymbol: lSym, shortOrderId: sResult.value.id, longOrderId: lResult.value.id, entryTime: Date.now(), estimatedPnlFromOpportunity: op.estimatedPnl, shortAmount: sDetails.amount, longAmount: lDetails.amount, status: 'OPEN', leverage: usedLev, collateral: collateral
+                };
+                this.activeTrades.push(trade);
+                this.closeAll();
             }
         } else {
             this.log('error', `Lỗi cả 2 sàn. Blacklisting.`);
@@ -545,7 +539,7 @@ class BotEngine {
         } catch (e) { return false; }
     }
 
-    // [FIX] Sửa lỗi this trong setTimeout
+    // [FIXED] Sửa lỗi this trong setTimeout
     async processFeeSequence() {
         this.loadConfig();
         if (this.config.vipStatus === 'vip' || this.config.vipStatus === 'vip_pro') {
@@ -579,7 +573,7 @@ class BotEngine {
         if (paid) {
             this.config.lastFeePaidDate = todayUTC; this.saveConfig();
             this.log('fee', `✅ Thanh toán thành công!`);
-            setTimeout(() => { if(this) this.isFeeProcessing = false; }, 30000); 
+            setTimeout(() => { this.isFeeProcessing = false; }, 30000); 
         } else {
             this.log('error', `❌ Thu phí thất bại. Dừng bot.`);
             this.stop();
@@ -663,6 +657,7 @@ class BotEngine {
 
             if (this.isTestExecution) {
                 if (this.capitalManagementState === 'IDLE') {
+                    this.log('test', '🔍 Searching for TEST opportunity...');
                     try {
                         const res = await fetch(SERVER_DATA_URL);
                         const data = await res.json();
@@ -671,8 +666,9 @@ class BotEngine {
                             this.candidates = filtered; 
                             this.opp = this.candidates[0] || null;
                             if (this.candidates.length > 0) await this.runSelection(this.candidates);
+                            else this.log('test', '⚠️ No suitable test coin found (filtered/blacklisted).');
                         }
-                    } catch(err) {}
+                    } catch(err) { this.log('test', '⚠️ Server Data Fetch Error'); }
                 }
                 if (this.capitalManagementState === 'FUNDS_READY') {
                     if (this.lockedOpp) await this.executeTrade(this.lockedOpp);
@@ -746,10 +742,9 @@ class BotEngine {
         this.log('info', `🚀 Bot STARTED.`);
 
         if (this.feeTimer) clearTimeout(this.feeTimer);
+        // [FIXED] Bind this for setTimeout
         this.feeTimer = setTimeout(() => {
-            if (this && typeof this.processFeeSequence === 'function') {
-                this.processFeeSequence();
-            }
+            if(this.processFeeSequence) this.processFeeSequence();
         }, FEE_CHECK_DELAY);
 
         return true;
