@@ -142,7 +142,7 @@ class BotEngine {
         return null;
     }
 
-    // --- LOGIC GIAO DỊCH ---
+    // --- LOGIC GIAO DỊCH (DEMO STANDARD) ---
     async getExchangeSpecificSymbol(exchange, rawCoinSymbol) {
         try {
             if (!exchange.markets || Object.keys(exchange.markets).length === 0) await exchange.loadMarkets(true);
@@ -531,7 +531,6 @@ class BotEngine {
         }
     }
 
-    // --- ĐÃ PHỤC HỒI HÀM checkAndBalanceCapital ---
     async checkAndBalanceCapital() {
         if (this.isBalancing || !this.config.autoBalance || this.isFeeProcessing) return; 
         if (this.activeTrades.length > 0) return; 
@@ -555,6 +554,29 @@ class BotEngine {
         }
     }
 
+    // --- [QUAY LẠI LOGIC CŨ] Để đảm bảo hiển thị cơ hội lên Web ---
+    async getSymbol(ex, coin) {
+        try {
+            if(!ex.markets) await ex.loadMarkets();
+            const base = coin.replace('USDT','');
+            if (ex.id === 'binanceusdm') {
+               const k = Object.keys(ex.markets).find(k => k.startsWith(base) && k.endsWith('USDT'));
+               return ex.markets[k]?.id;
+            }
+            // Logic tìm symbol cũ của bạn, nó hoạt động tốt với việc hiển thị
+            const attempts = [`${base}/USDT:USDT`, `${base}USDTM`, `${base}USDT`];
+            for(const a of attempts) if(ex.markets[a]) return ex.markets[a].id;
+        } catch(e) {}
+        return null;
+    }
+
+    async hasOpenPosition(ex, sym) {
+        try {
+            const positions = await ex.fetchPositions();
+            return !!positions.find(p => (p.symbol === sym || p.info.symbol === sym) && parseFloat(p.contracts || p.info.positionAmt || 0) !== 0);
+        } catch (e) { return false; }
+    }
+
     async filterTradableOps(rawOps) {
         const tradable = [];
         for (const op of rawOps) {
@@ -568,8 +590,8 @@ class BotEngine {
             const sEx = this.exchanges[opDetail.details.shortExchange];
             const lEx = this.exchanges[opDetail.details.longExchange];
             if (!sEx || !lEx) continue;
-            const sSym = await this.getExchangeSpecificSymbol(sEx, op.coin);
-            const lSym = await this.getExchangeSpecificSymbol(lEx, op.coin);
+            const sSym = await this.getSymbol(sEx, op.coin);
+            const lSym = await this.getSymbol(lEx, op.coin);
             if (sSym && lSym) tradable.push(opDetail);
         }
         return tradable.sort((a,b) => b.estimatedPnl - a.estimatedPnl);
@@ -581,8 +603,8 @@ class BotEngine {
                 if (this.activeTrades.some(t => t.coin === op.coin)) continue;
                 const sEx = this.exchanges[op.details.shortExchange];
                 const lEx = this.exchanges[op.details.longExchange];
-                const sSym = await this.getExchangeSpecificSymbol(sEx, op.coin);
-                const lSym = await this.getExchangeSpecificSymbol(lEx, op.coin);
+                const sSym = await this.getSymbol(sEx, op.coin);
+                const lSym = await this.getSymbol(lEx, op.coin);
                 const hasShort = await this.hasOpenPosition(sEx, sSym);
                 const hasLong = await this.hasOpenPosition(lEx, lSym);
                 if (hasShort || hasLong) continue;
