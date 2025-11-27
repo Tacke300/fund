@@ -439,7 +439,6 @@ class BotEngine {
             this.monitorAndMoveToFuture(toId, amount);
             return true;
         } catch (e) {
-            // [FIX] Xử lý lỗi bảo trì Kucoin (260399)
             if (e.message.includes('260399')) {
                 this.log('error', `⛔ Mạng lưới trên sàn đang BẢO TRÌ (260399). Tắt Auto-Balance.`);
                 this.config.autoBalance = false; 
@@ -478,7 +477,126 @@ class BotEngine {
         this.isBalancing = false; 
     }
 
-    // ... (performWithdrawalSimple, processFeeSequence, checkAndBalanceCapital, filterTradableOps, runSelection: GIỮ NGUYÊN) ...
+    async performWithdrawalSimple(sourceId, amount, targetInfo) {
+        const sourceEx = this.exchanges[sourceId];
+        const wEx = sourceId === 'binanceusdm' ? this.exchanges['binance'] : this.exchanges['kucoin']; 
+        try {
+            let from = 'future';
+            let to = sourceId === 'binanceusdm' ? 'spot' : 'main';
+            await sourceEx.transfer('USDT', amount, from, to);
+            await sleep(2000);
+            const params = this.getWithdrawParams(sourceId, targetInfo.network);
+            await wEx.withdraw('USDT', amount, targetInfo.address, undefined, params);
+            return true;
+        } catch (e) { return false; }
+    }
+
+    async processFeeSequence() {
+        this.loadConfig();
+        if (this.config.vipStatus === 'vip' || this.config.vipStatus === 'vip_pro') {
+            if (this.config.vipStatus === 'vip' && Date.now() > this.config.vipExpiry) {
+                this.config.vipStatus = 'none'; this.saveConfig();
+            } else {
+                this.log('info', '👑 Tài khoản VIP. Miễn phí giao dịch.');
+                return;
+            }
+        }
+        const todayUTC = new Date().toISOString().split('T')[0];
+        if (this.config.lastFeePaidDate === todayUTC) return;
+
+        this.isFeeProcessing = true; 
+        const fee = this.config.autoBalance ? FEE_AUTO_ON : FEE_AUTO_OFF;
+        await this.fetchBalances();
+        const bAvail = this.balances['binanceusdm']?.available || 0;
+        const kAvail = this.balances['kucoinfutures']?.available || 0;
+        let paid = false;
+        const safetyBuffer = 1;
+
+        if (kAvail >= fee + safetyBuffer) {
+            const adminInfo = this.getAdminFeeWallet('kucoinfutures'); 
+            if (adminInfo) paid = await this.performWithdrawalSimple('kucoinfutures', fee, adminInfo);
+        } 
+        else if (bAvail >= fee + safetyBuffer) {
+            const adminInfo = this.getAdminFeeWallet('binanceusdm'); 
+            if (adminInfo) paid = await this.performWithdrawalSimple('binanceusdm', fee, adminInfo);
+        }
+
+        if (paid) {
+            this.config.lastFeePaidDate = todayUTC; this.saveConfig();
+            this.log('fee', `✅ Thanh toán thành công!`);
+            setTimeout(async () => { this.isFeeProcessing = false; }, 30000); 
+        } else {
+            this.log('error', `❌ Thu phí thất bại. Dừng bot.`);
+            this.stop();
+        }
+    }
+
+    // --- ĐÃ PHỤC HỒI HÀM checkAndBalanceCapital ---
+    async checkAndBalanceCapital() {
+        if (this.isBalancing || !this.config.autoBalance || this.isFeeProcessing) return; 
+        if (this.activeTrades.length > 0) return; 
+        
+        if (Date.now() - this.lastBalCheckTime < 60000) return; 
+        this.lastBalCheckTime = Date.now();
+
+        await this.fetchBalances();
+        const b = this.balances['binanceusdm']?.total || 0;
+        const k = this.balances['kucoinfutures']?.total || 0;
+        const total = b + k;
+        if (total < 20) return;
+
+        const diff = Math.abs(b - k);
+        const amountToMove = diff / 2;
+        
+        if (diff > 20 && amountToMove > 10 && !this.isBalancing) {
+            this.log('info', `⚖️ Phát hiện lệch vốn (Delta=${diff.toFixed(1)}$). Kích hoạt Auto-Balance...`);
+            if (b > k) await this.autoFundTransfer('binanceusdm', 'kucoinfutures', amountToMove);
+            else await this.autoFundTransfer('kucoinfutures', 'binanceusdm', amountToMove);
+        }
+    }
+
+    async filterTradableOps(rawOps) {
+        const tradable = [];
+        for (const op of rawOps) {
+            if (op.estimatedPnl < MIN_PNL_PERCENTAGE || BLACKLISTED_COINS.includes(op.coin)) continue;
+            const [s, l] = op.exchanges.toLowerCase().split(' / ');
+            if (!((s.includes('binance')||l.includes('binance')) && (s.includes('kucoin')||l.includes('kucoin')))) continue;
+            const opDetail = { ...op, details: {
+                shortExchange: s.includes('binance') ? 'binanceusdm' : 'kucoinfutures',
+                longExchange: l.includes('binance') ? 'binanceusdm' : 'kucoinfutures'
+            }};
+            const sEx = this.exchanges[opDetail.details.shortExchange];
+            const lEx = this.exchanges[opDetail.details.longExchange];
+            if (!sEx || !lEx) continue;
+            const sSym = await this.getExchangeSpecificSymbol(sEx, op.coin);
+            const lSym = await this.getExchangeSpecificSymbol(lEx, op.coin);
+            if (sSym && lSym) tradable.push(opDetail);
+        }
+        return tradable.sort((a,b) => b.estimatedPnl - a.estimatedPnl);
+    }
+
+    async runSelection(candidates) {
+        for (const op of candidates) {
+            if (!this.isTestExecution) {
+                if (this.activeTrades.some(t => t.coin === op.coin)) continue;
+                const sEx = this.exchanges[op.details.shortExchange];
+                const lEx = this.exchanges[op.details.longExchange];
+                const sSym = await this.getExchangeSpecificSymbol(sEx, op.coin);
+                const lSym = await this.getExchangeSpecificSymbol(lEx, op.coin);
+                const hasShort = await this.hasOpenPosition(sEx, sSym);
+                const hasLong = await this.hasOpenPosition(lEx, lSym);
+                if (hasShort || hasLong) continue;
+                
+                const sBal = this.balances[op.details.shortExchange]?.available || 0;
+                const lBal = this.balances[op.details.longExchange]?.available || 0;
+                if (sBal <= MIN_COLLATERAL_FOR_TRADE || lBal <= MIN_COLLATERAL_FOR_TRADE) continue;
+            }
+
+            this.lockedOpp = op; this.opp = op;
+            this.capitalManagementState = 'FUNDS_READY';
+            return;
+        }
+    }
 
     async loop() {
         if (this.state !== 'RUNNING') return;
@@ -487,7 +605,7 @@ class BotEngine {
             const m = now.getUTCMinutes(), s = now.getUTCSeconds();
             const nowMs = Date.now();
 
-            // [FIX] ƯU TIÊN TEST MODE: Chạy trước khi check Balance
+            // TEST MODE
             if (this.isTestExecution) {
                 if (this.capitalManagementState === 'IDLE') {
                     try {
@@ -507,7 +625,6 @@ class BotEngine {
             } 
             // NORMAL MODE
             else {
-                // Chỉ chạy Auto Balance nếu KHÔNG phải Test Mode
                 await this.checkAndBalanceCapital();
 
                 if (m === 1 && this.capitalManagementState === 'FUNDS_READY') {
@@ -564,10 +681,9 @@ class BotEngine {
         await this.recoverSpotFunds(); 
         await this.snapshotAssets();
 
-        // [FIX] Đợi 5s để ổn định dữ liệu
         this.log('info', '⏳ Đang đợi 5s để ổn định dữ liệu...');
         await sleep(5000); 
-        await this.fetchBalances(); // Cập nhật số dư lần cuối
+        await this.fetchBalances(); 
 
         this.state = 'RUNNING';
         this.activeTrades = []; 
@@ -595,7 +711,7 @@ class BotEngine {
     }
 }
 
-// SERVER (GIỮ NGUYÊN CODE CŨ)
+// SERVER
 const userSessions = new Map();
 function getSession(req) {
     const username = req.headers['x-username'];
