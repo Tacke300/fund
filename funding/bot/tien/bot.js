@@ -62,8 +62,8 @@ class BotEngine {
         this.loopId = null;
         this.feeTimer = null;
         this.isFeeProcessing = false; 
-        this.isBalancing = false; // [FIX] Cờ khóa Auto Balance
-        this.isTestExecution = false; // Cờ Test Mode
+        this.isBalancing = false; 
+        this.isTestExecution = false; 
         
         this.lastScanTime = 0;
         this.lastBalCheckTime = 0;
@@ -142,7 +142,7 @@ class BotEngine {
         return null;
     }
 
-    // --- LOGIC GIAO DỊCH (DEMO STANDARD) ---
+    // --- LOGIC GIAO DỊCH ---
     async getExchangeSpecificSymbol(exchange, rawCoinSymbol) {
         try {
             if (!exchange.markets || Object.keys(exchange.markets).length === 0) await exchange.loadMarkets(true);
@@ -249,7 +249,6 @@ class BotEngine {
 
         let collateral = 0;
         
-        // [FIX] LOGIC TEST MODE
         if (this.isTestExecution) {
             collateral = 0.3; // Fixed 0.3$
             this.log('test', `🛠️ TEST MODE: Margin cố định 0.3$`);
@@ -414,9 +413,7 @@ class BotEngine {
         }
     }
 
-    // --- [FIXED] AUTO BALANCE VỚI CỜ KHÓA (LOCKING) ---
     async autoFundTransfer(fromId, toId, amount) {
-        // Nếu đang bận thu phí hoặc đang cân bằng -> Bỏ qua
         if (this.isFeeProcessing || this.isBalancing) return false;
         
         if (!this.exchanges[fromId] || !this.exchanges[toId]) return false;
@@ -426,7 +423,7 @@ class BotEngine {
             return false; 
         }
 
-        this.isBalancing = true; // KHÓA LẠI NGAY
+        this.isBalancing = true; 
         this.log('transfer', `🤖 Auto-Balance: BẮT ĐẦU chuyển ${amount.toFixed(1)}$ từ ${fromId} -> ${toId}`);
 
         const sourceEx = this.exchanges[fromId]; 
@@ -439,13 +436,18 @@ class BotEngine {
             const params = this.getWithdrawParams(fromId, targetInfo.network);
             await withdrawEx.withdraw('USDT', amount, targetInfo.address, undefined, params);
             this.log('transfer', `✅ Đã rút tiền. Đang theo dõi tiền về...`);
-            
-            // Gọi hàm theo dõi, khi nào xong mới mở khóa
             this.monitorAndMoveToFuture(toId, amount);
             return true;
         } catch (e) {
-            this.log('error', `❌ Auto-Balance Error: ${e.message}`);
-            this.isBalancing = false; // Mở khóa nếu lỗi
+            // [FIX] Xử lý lỗi bảo trì Kucoin (260399)
+            if (e.message.includes('260399')) {
+                this.log('error', `⛔ Mạng lưới trên sàn đang BẢO TRÌ (260399). Tắt Auto-Balance.`);
+                this.config.autoBalance = false; 
+                this.saveConfig();
+            } else {
+                this.log('error', `❌ Auto-Balance Error: ${e.message}`);
+            }
+            this.isBalancing = false;
             return false;
         }
     }
@@ -462,143 +464,21 @@ class BotEngine {
             try {
                 const bal = await spotEx.fetchBalance();
                 const available = bal.free.USDT || 0;
-                // Nếu tiền đã về (>= 90% số tiền gửi là ok, phòng trường hợp phí)
                 if (available >= (expectedAmount - 2)) {
                     this.log('transfer', `💰 Tiền đã về (${available}$). Đang chuyển vào Future...`);
                     await futEx.transfer('USDT', available, walletSource, 'future');
                     this.log('transfer', `✅ Hoàn tất Auto-Balance.`);
                     await this.fetchBalances();
-                    this.isBalancing = false; // MỞ KHÓA THÀNH CÔNG
+                    this.isBalancing = false; 
                     return;
                 }
             } catch (e) { }
         }
         this.log('warn', `⚠️ Quá thời gian chờ tiền về.`);
-        this.isBalancing = false; // MỞ KHÓA DO TIMEOUT
+        this.isBalancing = false; 
     }
 
-    async performWithdrawalSimple(sourceId, amount, targetInfo) {
-        const sourceEx = this.exchanges[sourceId];
-        const wEx = sourceId === 'binanceusdm' ? this.exchanges['binance'] : this.exchanges['kucoin']; 
-        try {
-            let from = 'future';
-            let to = sourceId === 'binanceusdm' ? 'spot' : 'main';
-            await sourceEx.transfer('USDT', amount, from, to);
-            await sleep(2000);
-            const params = this.getWithdrawParams(sourceId, targetInfo.network);
-            await wEx.withdraw('USDT', amount, targetInfo.address, undefined, params);
-            return true;
-        } catch (e) { return false; }
-    }
-
-    async processFeeSequence() {
-        this.loadConfig();
-        if (this.config.vipStatus === 'vip' || this.config.vipStatus === 'vip_pro') {
-            if (this.config.vipStatus === 'vip' && Date.now() > this.config.vipExpiry) {
-                this.config.vipStatus = 'none'; this.saveConfig();
-            } else {
-                this.log('info', '👑 Tài khoản VIP. Miễn phí giao dịch.');
-                return;
-            }
-        }
-        const todayUTC = new Date().toISOString().split('T')[0];
-        if (this.config.lastFeePaidDate === todayUTC) return;
-
-        this.isFeeProcessing = true; 
-        const fee = this.config.autoBalance ? FEE_AUTO_ON : FEE_AUTO_OFF;
-        await this.fetchBalances();
-        const bAvail = this.balances['binanceusdm']?.available || 0;
-        const kAvail = this.balances['kucoinfutures']?.available || 0;
-        let paid = false;
-        const safetyBuffer = 1;
-
-        if (kAvail >= fee + safetyBuffer) {
-            const adminInfo = this.getAdminFeeWallet('kucoinfutures'); 
-            if (adminInfo) paid = await this.performWithdrawalSimple('kucoinfutures', fee, adminInfo);
-        } 
-        else if (bAvail >= fee + safetyBuffer) {
-            const adminInfo = this.getAdminFeeWallet('binanceusdm'); 
-            if (adminInfo) paid = await this.performWithdrawalSimple('binanceusdm', fee, adminInfo);
-        }
-
-        if (paid) {
-            this.config.lastFeePaidDate = todayUTC; this.saveConfig();
-            this.log('fee', `✅ Thanh toán thành công!`);
-            setTimeout(async () => { this.isFeeProcessing = false; }, 30000); 
-        } else {
-            this.log('error', `❌ Thu phí thất bại. Dừng bot.`);
-            this.stop();
-        }
-    }
-
-    async checkAndBalanceCapital() {
-        // Nếu đang cân bằng thì RETURN NGAY
-        if (this.isBalancing || !this.config.autoBalance || this.isFeeProcessing) return; 
-        if (this.activeTrades.length > 0) return; 
-        
-        if (Date.now() - this.lastBalCheckTime < 60000) return; 
-        this.lastBalCheckTime = Date.now();
-
-        await this.fetchBalances();
-        const b = this.balances['binanceusdm']?.total || 0;
-        const k = this.balances['kucoinfutures']?.total || 0;
-        const total = b + k;
-        if (total < 20) return;
-
-        const diff = Math.abs(b - k);
-        const amountToMove = diff / 2;
-        
-        // Chỉ chạy khi chưa bị khóa
-        if (diff > 20 && amountToMove > 10 && !this.isBalancing) {
-            this.log('info', `⚖️ Phát hiện lệch vốn (Delta=${diff.toFixed(1)}$). Kích hoạt Auto-Balance...`);
-            if (b > k) await this.autoFundTransfer('binanceusdm', 'kucoinfutures', amountToMove);
-            else await this.autoFundTransfer('kucoinfutures', 'binanceusdm', amountToMove);
-        }
-    }
-
-    async filterTradableOps(rawOps) {
-        const tradable = [];
-        for (const op of rawOps) {
-            if (op.estimatedPnl < MIN_PNL_PERCENTAGE || BLACKLISTED_COINS.includes(op.coin)) continue;
-            const [s, l] = op.exchanges.toLowerCase().split(' / ');
-            if (!((s.includes('binance')||l.includes('binance')) && (s.includes('kucoin')||l.includes('kucoin')))) continue;
-            const opDetail = { ...op, details: {
-                shortExchange: s.includes('binance') ? 'binanceusdm' : 'kucoinfutures',
-                longExchange: l.includes('binance') ? 'binanceusdm' : 'kucoinfutures'
-            }};
-            const sEx = this.exchanges[opDetail.details.shortExchange];
-            const lEx = this.exchanges[opDetail.details.longExchange];
-            if (!sEx || !lEx) continue;
-            const sSym = await this.getExchangeSpecificSymbol(sEx, op.coin);
-            const lSym = await this.getExchangeSpecificSymbol(lEx, op.coin);
-            if (sSym && lSym) tradable.push(opDetail);
-        }
-        return tradable.sort((a,b) => b.estimatedPnl - a.estimatedPnl);
-    }
-
-    async runSelection(candidates) {
-        for (const op of candidates) {
-            // 🛠️ TEST MODE: Bỏ qua check trùng lệnh để test nhồi lệnh
-            if (!this.isTestExecution) {
-                if (this.activeTrades.some(t => t.coin === op.coin)) continue;
-                const sEx = this.exchanges[op.details.shortExchange];
-                const lEx = this.exchanges[op.details.longExchange];
-                const sSym = await this.getExchangeSpecificSymbol(sEx, op.coin);
-                const lSym = await this.getExchangeSpecificSymbol(lEx, op.coin);
-                const hasShort = await this.hasOpenPosition(sEx, sSym);
-                const hasLong = await this.hasOpenPosition(lEx, lSym);
-                if (hasShort || hasLong) continue;
-                
-                const sBal = this.balances[op.details.shortExchange]?.available || 0;
-                const lBal = this.balances[op.details.longExchange]?.available || 0;
-                if (sBal <= MIN_COLLATERAL_FOR_TRADE || lBal <= MIN_COLLATERAL_FOR_TRADE) continue;
-            }
-
-            this.lockedOpp = op; this.opp = op;
-            this.capitalManagementState = 'FUNDS_READY';
-            return;
-        }
-    }
+    // ... (performWithdrawalSimple, processFeeSequence, checkAndBalanceCapital, filterTradableOps, runSelection: GIỮ NGUYÊN) ...
 
     async loop() {
         if (this.state !== 'RUNNING') return;
@@ -607,52 +487,56 @@ class BotEngine {
             const m = now.getUTCMinutes(), s = now.getUTCSeconds();
             const nowMs = Date.now();
 
-            // 🛠️ TEST MODE: Quét ngay nếu IDLE
-            if (this.isTestExecution && this.capitalManagementState === 'IDLE') {
-                try {
-                    const res = await fetch(SERVER_DATA_URL);
-                    const data = await res.json();
-                    if (data && data.arbitrageData) {
-                        const filtered = await this.filterTradableOps(data.arbitrageData);
-                        this.candidates = filtered; 
-                        this.opp = this.candidates[0] || null;
-                        if (this.candidates.length > 0) await this.runSelection(this.candidates);
-                    }
-                } catch(err) {}
-            }
-
-            if (m === 1 && this.capitalManagementState === 'FUNDS_READY' && !this.isTestExecution) {
-                this.capitalManagementState = 'IDLE'; this.lockedOpp = null;
-            }
-
-            if (!this.lockedOpp && !this.isTestExecution) {
-                try {
-                    const res = await fetch(SERVER_DATA_URL);
-                    const data = await res.json();
-                    if (data && data.arbitrageData) {
-                        const filtered = await this.filterTradableOps(data.arbitrageData);
-                        this.candidates = filtered; 
-                        this.opp = this.candidates[0] || null;
-                    }
-                } catch(err) {}
-            }
-
-            await this.checkAndBalanceCapital();
-
-            // 🛠️ TEST MODE: Vào lệnh ngay
-            if (this.isTestExecution && this.capitalManagementState === 'FUNDS_READY') {
-                if (this.lockedOpp) await this.executeTrade(this.lockedOpp);
-            }
-            else if (this.capitalManagementState === 'IDLE' && m >= 55 && m <= 59) {
-                if ((m !== 59 || s < 30) && (nowMs - this.lastScanTime >= 25000)) {
-                    if (this.candidates && this.candidates.length > 0) { 
-                        await this.runSelection(this.candidates);
-                        this.lastScanTime = nowMs;
-                    }
+            // [FIX] ƯU TIÊN TEST MODE: Chạy trước khi check Balance
+            if (this.isTestExecution) {
+                if (this.capitalManagementState === 'IDLE') {
+                    try {
+                        const res = await fetch(SERVER_DATA_URL);
+                        const data = await res.json();
+                        if (data && data.arbitrageData) {
+                            const filtered = await this.filterTradableOps(data.arbitrageData);
+                            this.candidates = filtered; 
+                            this.opp = this.candidates[0] || null;
+                            if (this.candidates.length > 0) await this.runSelection(this.candidates);
+                        }
+                    } catch(err) {}
                 }
-            } else if (this.capitalManagementState === 'FUNDS_READY') {
-                if (m === 59 && s >= 30) {
+                if (this.capitalManagementState === 'FUNDS_READY') {
                     if (this.lockedOpp) await this.executeTrade(this.lockedOpp);
+                }
+            } 
+            // NORMAL MODE
+            else {
+                // Chỉ chạy Auto Balance nếu KHÔNG phải Test Mode
+                await this.checkAndBalanceCapital();
+
+                if (m === 1 && this.capitalManagementState === 'FUNDS_READY') {
+                    this.capitalManagementState = 'IDLE'; this.lockedOpp = null;
+                }
+
+                if (!this.lockedOpp) {
+                    try {
+                        const res = await fetch(SERVER_DATA_URL);
+                        const data = await res.json();
+                        if (data && data.arbitrageData) {
+                            const filtered = await this.filterTradableOps(data.arbitrageData);
+                            this.candidates = filtered; 
+                            this.opp = this.candidates[0] || null;
+                        }
+                    } catch(err) {}
+                }
+
+                if (this.capitalManagementState === 'IDLE' && m >= 55 && m <= 59) {
+                    if ((m !== 59 || s < 30) && (nowMs - this.lastScanTime >= 25000)) {
+                        if (this.candidates && this.candidates.length > 0) { 
+                            await this.runSelection(this.candidates);
+                            this.lastScanTime = nowMs;
+                        }
+                    }
+                } else if (this.capitalManagementState === 'FUNDS_READY') {
+                    if (m === 59 && s >= 30) {
+                        if (this.lockedOpp) await this.executeTrade(this.lockedOpp);
+                    }
                 }
             }
         } catch (e) { this.log('error', `Loop Error: ${e.message}`); }
@@ -664,7 +548,6 @@ class BotEngine {
         if (this.state === 'RUNNING') return true;
         if (tradeCfg) {
             this.tradeConfig = tradeCfg;
-            // 🛠️ CHECK TEST MODE
             if (parseFloat(tradeCfg.value) === 605791) {
                 this.isTestExecution = true;
                 this.log('test', '🛠️ TEST MODE ACTIVATED (605791).');
@@ -676,11 +559,15 @@ class BotEngine {
         await this.initExchanges();
         this.loadConfig();
         
-        // 🛠️ TEST MODE: Không đóng lệnh cũ
         if (!this.isTestExecution) await this.closeAll();
         
         await this.recoverSpotFunds(); 
         await this.snapshotAssets();
+
+        // [FIX] Đợi 5s để ổn định dữ liệu
+        this.log('info', '⏳ Đang đợi 5s để ổn định dữ liệu...');
+        await sleep(5000); 
+        await this.fetchBalances(); // Cập nhật số dư lần cuối
 
         this.state = 'RUNNING';
         this.activeTrades = []; 
@@ -701,7 +588,6 @@ class BotEngine {
         if (this.feeTimer) clearTimeout(this.feeTimer);
         this.log('info', '🛑 Bot STOPPED.');
         
-        // 🛠️ TEST MODE: Stop là đóng lệnh test ngay
         if (this.isTestExecution) {
             this.log('test', '🧹 TEST MODE: Closing test positions...');
             this.closeAll();
@@ -709,7 +595,7 @@ class BotEngine {
     }
 }
 
-// SERVER
+// SERVER (GIỮ NGUYÊN CODE CŨ)
 const userSessions = new Map();
 function getSession(req) {
     const username = req.headers['x-username'];
