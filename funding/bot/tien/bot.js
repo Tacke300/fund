@@ -143,25 +143,46 @@ class BotEngine {
     }
 
     // ==================================================================================
-    // COPY Y NGUYÊN LOGIC TỪ BẢN DEMO (ĐỂ FIX LỖI TÌM SYMBOL)
+    // TÁCH BIỆT LOGIC: 1. TÌM ĐỂ HIỂN THỊ (SIMPLE) | 2. TÌM ĐỂ VÀO LỆNH (STRICT)
     // ==================================================================================
 
+    // 1. Hàm tìm Symbol ĐƠN GIẢN (Dùng cho filterTradableOps để hiển thị cơ hội)
+    // -> Không loadMarkets(true), không check quá kỹ, chỉ cần khớp tên
+    async getSymbolSimple(ex, coin) {
+        try {
+            if(!ex.markets) await ex.loadMarkets();
+            const base = coin.replace('USDT','').toUpperCase();
+            
+            // Tìm theo Key
+            if (ex.id === 'binanceusdm') {
+               const k = Object.keys(ex.markets).find(k => k.startsWith(base) && k.endsWith('USDT'));
+               if (k) return ex.markets[k].id;
+            }
+            
+            const attempts = [`${base}/USDT:USDT`, `${base}USDTM`, `${base}USDT`, `${base}-USDT-SWAP`];
+            for(const a of attempts) {
+                if(ex.markets[a]) return ex.markets[a].id;
+            }
+        } catch(e) {}
+        return null;
+    }
+
+    // 2. Hàm tìm Symbol CHUẨN (Dùng cho executeTrade từ Demo)
+    // -> Load kỹ, check chặt chẽ
     async getExchangeSpecificSymbol(exchange, rawCoinSymbol) {
         try {
-            // Demo luôn load lại markets nếu tìm không ra hoặc lần đầu
             if (!exchange.markets || Object.keys(exchange.markets).length === 0) await exchange.loadMarkets(true);
         } catch (e) { return null; }
         
         const base = String(rawCoinSymbol).toUpperCase();
+        const cleanBase = base.replace(/USDT$/, '');
 
-        // Binance Check (Logic Demo)
+        // Binance Check
         if (exchange.id === 'binanceusdm') {
             const simpleCheck = Object.keys(exchange.markets).some(k => k.replace('/','').replace(':USDT','') === base.replace('USDT',''));
             if (!simpleCheck) return null;
         }
 
-        const cleanBase = base.replace(/USDT$/, '');
-        // List các đuôi từ Demo
         const attempts = [`${cleanBase}/USDT:USDT`, `${cleanBase}USDT`, `${cleanBase}-USDT-SWAP`, `${cleanBase}USDTM`, `${cleanBase}/USDT`];
         for (const attempt of attempts) {
             const market = exchange.markets[attempt];
@@ -187,35 +208,17 @@ class BotEngine {
         const contractSize = market.contractSize ?? 1;
         
         let amount = parseFloat(exchange.amountToPrecision(symbol, targetNotionalUSDT / (price * contractSize)));
-        
         if (exchange.id === 'kucoinfutures' && market.precision.amount === 0) amount = Math.round(amount);
-        
-        if (amount <= (market.limits.amount.min || 0)) {
-             throw new Error(`Số lượng tính toán (${amount}) < mức tối thiểu của sàn.`);
-        }
-        
-        let currentNotional = amount * price * contractSize;
-        if (market.limits?.cost?.min && currentNotional < market.limits.cost.min) {
-             throw new Error(`Giá trị lệnh ${currentNotional.toFixed(4)} < mức tối thiểu ${market.limits.cost.min} USDT.`);
-        }
-
-        return { amount, price, notional: currentNotional };
+        if (amount <= (market.limits.amount.min || 0)) throw new Error(`Số lượng ${amount} < mức tối thiểu.`);
+        return { amount, price, notional: amount * price * contractSize };
     }
 
     async placeTpSlOrders(exchange, symbol, side, amount, entryPrice, collateral, notionalValue) {
         if (!entryPrice || entryPrice <= 0) return;
-        
         const slPriceChange = entryPrice * (SL_PERCENTAGE / 100 / (notionalValue / collateral));
         const tpPriceChange = entryPrice * (TP_PERCENTAGE / 100 / (notionalValue / collateral));
-
-        let tpPrice, slPrice;
-        if (side === 'sell') { 
-            tpPrice = entryPrice - tpPriceChange;
-            slPrice = entryPrice + slPriceChange;
-        } else { 
-            tpPrice = entryPrice + tpPriceChange;
-            slPrice = entryPrice - slPriceChange;
-        }
+        let tpPrice = side === 'sell' ? entryPrice - tpPriceChange : entryPrice + tpPriceChange;
+        let slPrice = side === 'sell' ? entryPrice + slPriceChange : entryPrice - slPriceChange;
         
         const orderSide = (side === 'sell') ? 'buy' : 'sell'; 
         let binanceParams = {};
@@ -234,9 +237,7 @@ class BotEngine {
                 await exchange.createOrder(symbol, 'TAKE_PROFIT_MARKET', orderSide, amount, undefined, { ...commonParams, 'stopPrice': exchange.priceToPrecision(symbol, tpPrice) });
                 await exchange.createOrder(symbol, 'STOP_MARKET', orderSide, amount, undefined, { ...commonParams, 'stopPrice': exchange.priceToPrecision(symbol, slPrice) });
             }
-        } catch (e) {
-            this.log('warn', `[TP/SL] Fail: ${e.message}`);
-        }
+        } catch (e) { this.log('warn', `[TP/SL] Fail: ${e.message}`); }
     }
 
     async getReliableFillPrice(exchange, symbol, orderId) {
@@ -254,12 +255,13 @@ class BotEngine {
         return null;
     }
 
-    // --- EXECUTE TRADE ---
+    // --- EXECUTE TRADE (DÙNG LOGIC DEMO) ---
     async executeTrade(op) {
         const sEx = this.exchanges[op.details.shortExchange];
         const lEx = this.exchanges[op.details.longExchange];
         if(!sEx || !lEx) return;
         
+        // Dùng hàm chuẩn (Strict) để lấy Symbol khi vào lệnh
         const sSym = await this.getExchangeSpecificSymbol(sEx, op.coin);
         const lSym = await this.getExchangeSpecificSymbol(lEx, op.coin);
         
@@ -277,7 +279,7 @@ class BotEngine {
         let collateral = 0;
         
         if (this.isTestExecution) {
-            collateral = 0.3; // Fixed 0.3$
+            collateral = 0.3; 
             this.log('test', `🛠️ TEST MODE: Margin cố định 0.3$`);
         } else {
             if (this.tradeConfig.mode === 'fixed') collateral = parseFloat(this.tradeConfig.value);
@@ -316,7 +318,6 @@ class BotEngine {
         const sParams = (sEx.id === 'binanceusdm') ? { 'positionSide': 'SHORT' } : (sEx.id === 'kucoinfutures' ? {'marginMode':'cross'} : {});
         const lParams = (lEx.id === 'binanceusdm') ? { 'positionSide': 'LONG' } : (lEx.id === 'kucoinfutures' ? {'marginMode':'cross'} : {});
 
-        // PARALLEL EXECUTION
         const results = await Promise.allSettled([
             sEx.createMarketSellOrder(sSym, sDetails.amount, sParams),
             lEx.createMarketBuyOrder(lSym, lDetails.amount, lParams)
@@ -559,7 +560,6 @@ class BotEngine {
         }
     }
 
-    // --- [FIXED] ĐÃ THÊM LẠI HÀM NÀY (TRƯỚC BỊ THIẾU) ---
     async checkAndBalanceCapital() {
         if (this.isBalancing || !this.config.autoBalance || this.isFeeProcessing) return; 
         if (this.activeTrades.length > 0) return; 
@@ -583,6 +583,7 @@ class BotEngine {
         }
     }
 
+    // --- [QUAN TRỌNG] SỬ DỤNG HÀM TÌM KIẾM ĐƠN GIẢN CHO VIỆC LỌC (HIỂN THỊ WEB) ---
     async filterTradableOps(rawOps) {
         const tradable = [];
         for (const op of rawOps) {
@@ -596,8 +597,9 @@ class BotEngine {
             const sEx = this.exchanges[opDetail.details.shortExchange];
             const lEx = this.exchanges[opDetail.details.longExchange];
             if (!sEx || !lEx) continue;
-            const sSym = await this.getExchangeSpecificSymbol(sEx, op.coin);
-            const lSym = await this.getExchangeSpecificSymbol(lEx, op.coin);
+            // Dùng hàm Simple để lọc -> Đảm bảo luôn thấy cơ hội
+            const sSym = await this.getSymbolSimple(sEx, op.coin);
+            const lSym = await this.getSymbolSimple(lEx, op.coin);
             if (sSym && lSym) tradable.push(opDetail);
         }
         return tradable.sort((a,b) => b.estimatedPnl - a.estimatedPnl);
@@ -609,11 +611,16 @@ class BotEngine {
                 if (this.activeTrades.some(t => t.coin === op.coin)) continue;
                 const sEx = this.exchanges[op.details.shortExchange];
                 const lEx = this.exchanges[op.details.longExchange];
-                const sSym = await this.getExchangeSpecificSymbol(sEx, op.coin);
-                const lSym = await this.getExchangeSpecificSymbol(lEx, op.coin);
-                const hasShort = await this.hasOpenPosition(sEx, sSym);
-                const hasLong = await this.hasOpenPosition(lEx, lSym);
-                if (hasShort || hasLong) continue;
+                // Ở đây vẫn dùng hàm Simple để check sơ bộ
+                const sSym = await this.getSymbolSimple(sEx, op.coin);
+                const lSym = await this.getSymbolSimple(lEx, op.coin);
+                
+                // Check position
+                try {
+                    const positions = await sEx.fetchPositions();
+                    const has = positions.find(p => (p.symbol === sSym || p.info.symbol === sSym) && parseFloat(p.contracts || p.info.positionAmt || 0) !== 0);
+                    if (has) continue;
+                } catch(e){}
                 
                 const sBal = this.balances[op.details.shortExchange]?.available || 0;
                 const lBal = this.balances[op.details.longExchange]?.available || 0;
@@ -633,6 +640,7 @@ class BotEngine {
             const m = now.getUTCMinutes(), s = now.getUTCSeconds();
             const nowMs = Date.now();
 
+            // TEST MODE
             if (this.isTestExecution) {
                 if (this.capitalManagementState === 'IDLE') {
                     try {
@@ -650,8 +658,8 @@ class BotEngine {
                     if (this.lockedOpp) await this.executeTrade(this.lockedOpp);
                 }
             } 
+            // NORMAL MODE
             else {
-                // GỌI HÀM CHECK BALANCE (ĐÃ SỬA LỖI)
                 await this.checkAndBalanceCapital();
 
                 if (m === 1 && this.capitalManagementState === 'FUNDS_READY') {
