@@ -102,8 +102,9 @@ class BotEngine {
         const allowedTypes = ['error', 'trade', 'result', 'fee', 'vip', 'transfer', 'info', 'warn', 'pm2', 'fatal', 'test'];
         if (!allowedTypes.includes(type)) return;
         const t = new Date().toLocaleTimeString('vi-VN', { hour12: false });
-        if (type === 'pm2' || type === 'fatal') console.error(`[${t}] [USER: ${this.username}] [${type.toUpperCase()}] ${msg}`);
-        else console.log(`[${t}] [USER: ${this.username}] [${type.toUpperCase()}] ${msg}`);
+        const consoleMsg = `[${t}] [USER: ${this.username}] [${type.toUpperCase()}] ${msg}`;
+        if (type === 'pm2' || type === 'fatal' || type === 'error') console.error(consoleMsg);
+        else console.log(consoleMsg);
     }
 
     loadConfig() { try { if (fs.existsSync(this.configFile)) { const saved = JSON.parse(fs.readFileSync(this.configFile, 'utf8')); this.config = { ...this.config, ...saved }; } } catch (e) {} }
@@ -177,6 +178,14 @@ class BotEngine {
         } catch (e) { return null; }
     }
 
+    async hasOpenPosition(exchange, symbol) {
+        try {
+            const positions = await exchange.fetchPositions([symbol]);
+            const pos = positions.find(p => p.symbol === symbol && parseFloat(p.contracts) > 0);
+            return !!pos;
+        } catch(e) { return false; }
+    }
+
     async computeOrderDetails(exchange, symbol, targetNotionalUSDT, leverage) {
         await exchange.loadMarkets();
         const market = exchange.market(symbol);
@@ -233,7 +242,7 @@ class BotEngine {
         return null;
     }
 
-    // --- EXECUTE TRADE (CÓ LOG CHI TIẾT) ---
+    // --- EXECUTE TRADE ---
     async executeTrade(op) {
         const sEx = this.exchanges[op.details.shortExchange];
         const lEx = this.exchanges[op.details.longExchange];
@@ -305,7 +314,6 @@ class BotEngine {
         const sResult = results[0];
         const lResult = results[1];
 
-        // Log chi tiết kết quả để debug
         if (sResult.status === 'rejected') this.log('error', `SHORT Fail (${sEx.id}): ${sResult.reason.message}`);
         if (lResult.status === 'rejected') this.log('error', `LONG Fail (${lEx.id}): ${lResult.reason.message}`);
 
@@ -327,10 +335,8 @@ class BotEngine {
         }
         else if (sResult.status === 'fulfilled' || lResult.status === 'fulfilled') {
             this.log('warn', `⚠️ LỆCH LỆNH! Đang chờ 10s để Retry bên lỗi...`);
-            
-            // 10s Retry Logic
             let retrySuccess = false;
-            for (let i = 0; i < 5; i++) { // Thử 5 lần, mỗi lần 2s
+            for (let i = 0; i < 5; i++) { 
                 await sleep(2000);
                 if (sResult.status === 'rejected') {
                     try {
@@ -358,7 +364,6 @@ class BotEngine {
                 this.stop();
             } else {
                 this.log('info', `⚠️ Đã cứu được lệnh lệch. Đóng ngay để bảo toàn vốn.`);
-                // Lưu trade để có history, sau đó close
                  const trade = {
                     id: Date.now(), coin: op.coin, shortExchange: sEx.id, longExchange: lEx.id, shortSymbol: sSym, longSymbol: lSym, shortOrderId: sResult.value.id, longOrderId: lResult.value.id, entryTime: Date.now(), estimatedPnlFromOpportunity: op.estimatedPnl, shortAmount: sDetails.amount, longAmount: lDetails.amount, status: 'OPEN', leverage: usedLev, collateral: collateral
                 };
@@ -578,6 +583,16 @@ class BotEngine {
             this.log('error', `❌ Thu phí thất bại. Dừng bot.`);
             this.stop();
         }
+    }
+
+    // [FIX: ĐÃ THÊM HÀM NÀY ĐỂ API SERVER KHÔNG BỊ LỖI]
+    async upgradeToVip() {
+        this.config.vipStatus = 'vip';
+        // Gia hạn 30 ngày
+        this.config.vipExpiry = Date.now() + (30 * 24 * 60 * 60 * 1000);
+        this.saveConfig();
+        this.log('vip', '✅ Nâng cấp VIP thành công! Hiệu lực 30 ngày.');
+        return true;
     }
 
     async checkAndBalanceCapital() {
