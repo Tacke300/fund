@@ -11,7 +11,7 @@ const {
     kucoinApiKey, kucoinApiSecret, kucoinApiPassword
 } = require('./config.js');
 
-const BOT_PORT = 0113;
+const BOT_PORT = 2404;
 const SERVER_DATA_URL = 'http://localhost:5005/api/data';
 
 // [CONFIG] Cấu hình
@@ -27,7 +27,7 @@ const BLACKLISTED_COINS = ['GAIBUSDT', 'AIAUSDT', '42USDT'];
 
 // [CONFIG] TP / SL
 const SL_PERCENTAGE = 95;  
-const TP_PERCENTAGE = 155; 
+const TP_PERCENTAGE = 135; 
 
 const FUND_TRANSFER_MIN_AMOUNT_BINANCE = 10;
 const FUND_TRANSFER_MIN_AMOUNT_KUCOIN = 1;
