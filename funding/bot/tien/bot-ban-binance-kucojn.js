@@ -1051,7 +1051,7 @@ const botServer = http.createServer(async (req, res) => {
 
     try {
         if (url === '/' && method === 'GET') {
-            fs.readFile(path.join(__dirname, 'index-ban-binance-kucoin.html'), (err, content) => {
+            fs.readFile(path.join(__dirname, 'index-ban-binan-kucoin.html'), (err, content) => {
                 res.writeHead(err ? 500 : 200, { 'Content-Type': 'text/html; charset=utf-8' });
                 res.end(err ? 'Lỗi đọc file index.html' : content);
             });
