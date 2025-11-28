@@ -169,7 +169,7 @@ class BotEngine {
         return sym;
     }
 
-    // [CHẾ ĐỘ CROSS] & [FIX LEVERAGE KUCOIN]
+    // [CHẾ ĐỘ CROSS] & [FIX KUCOIN LEVERAGE INT]
     async setLeverageSafely(exchange, symbol, desiredLeverage) {
         try {
             try {
@@ -181,7 +181,7 @@ class BotEngine {
                 }
             } catch (e) { }
 
-            // [FIX] Kucoin yêu cầu đòn bẩy là số nguyên (VD: 20 chứ không phải 20.5)
+            // Kucoin bắt buộc đòn bẩy là số nguyên
             let finalLev = desiredLeverage;
             if (exchange.id === 'kucoinfutures') {
                 finalLev = Math.round(desiredLeverage);
@@ -248,7 +248,7 @@ class BotEngine {
         return null;
     }
 
-    // --- NEW FEATURES: SAVE & RESTORE ORDERS ---
+    // --- SAVE & RESTORE ORDERS ---
     async saveUserOrders(exchange, symbol) {
         try {
             const orders = await exchange.fetchOpenOrders(symbol);
@@ -297,7 +297,7 @@ class BotEngine {
         }
     }
 
-    // --- EXECUTE TRADE (CÓ LOG CHI TIẾT) ---
+    // --- EXECUTE TRADE ---
     async executeTrade(op) {
         const sEx = this.exchanges[op.details.shortExchange];
         const lEx = this.exchanges[op.details.longExchange];
@@ -313,7 +313,6 @@ class BotEngine {
             return;
         }
 
-        // Lưu lệnh cũ
         const savedShortOrders = await this.saveUserOrders(sEx, sSym);
         const savedLongOrders = await this.saveUserOrders(lEx, lSym);
         if (savedShortOrders.length > 0) this.log('info', `📝 Đã ghi nhớ ${savedShortOrders.length} lệnh treo cũ bên Short (${sEx.id}).`);
@@ -343,7 +342,6 @@ class BotEngine {
         }
 
         const lev = op.commonLeverage;
-        // setLeverageSafely đã ép CROSS và làm tròn số
         const [realSLev, realLLev] = await Promise.all([
             this.setLeverageSafely(sEx, sSym, lev),
             this.setLeverageSafely(lEx, lSym, lev)
@@ -365,15 +363,16 @@ class BotEngine {
             return;
         }
 
-        // Params Cross
-        // [FIX] Thêm 'leverage' vào params Kucoin để chắc chắn
+        // [FIX LEVERAGE KUCOIN] Nhồi leverage đã làm tròn vào params
+        const finalLev = Math.round(usedLev);
+        
         const sParams = (sEx.id === 'binanceusdm') 
             ? { 'positionSide': 'SHORT' } 
-            : (sEx.id === 'kucoinfutures' ? {'marginMode': 'cross', 'leverage': usedLev} : {});
+            : (sEx.id === 'kucoinfutures' ? {'marginMode': 'cross', 'leverage': finalLev} : {});
             
         const lParams = (lEx.id === 'binanceusdm') 
             ? { 'positionSide': 'LONG' } 
-            : (lEx.id === 'kucoinfutures' ? {'marginMode': 'cross', 'leverage': usedLev} : {});
+            : (lEx.id === 'kucoinfutures' ? {'marginMode': 'cross', 'leverage': finalLev} : {});
 
         // VÀO LỆNH
         const results = await Promise.allSettled([
@@ -464,7 +463,6 @@ class BotEngine {
             try { await sEx.createMarketBuyOrder(t.shortSymbol, t.shortAmount, closeSParams); } catch(e){ this.log('error', `Close Short Err: ${e.message}`); }
             try { await lEx.createMarketSellOrder(t.longSymbol, t.longAmount, closeLParams); } catch(e){ this.log('error', `Close Long Err: ${e.message}`); }
             
-            // Khôi phục lệnh TP/SL cũ nếu có
             if (t.savedShortOrders && t.savedShortOrders.length > 0) {
                 await this.restoreUserOrders(sEx, t.shortSymbol, t.savedShortOrders);
             }
