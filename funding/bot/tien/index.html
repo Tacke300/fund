@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Arbitrage Bot</title>
+    <title>Arbitrage Bot Multi</title>
     <style>
         :root {
             --bg-color: #000000;
@@ -17,7 +17,6 @@
 
         body { font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: var(--bg-color); color: var(--text-color); margin: 0; padding: 15px; }
 
-        /* AUTH */
         .auth-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #000; z-index: 2000; display: flex; justify-content: center; align-items: center; flex-direction: column; }
         .auth-box { background: #1a1a1a; padding: 30px; border-radius: 12px; border: 1px solid var(--binance-yellow); text-align: center; width: 300px; box-shadow: 0 0 20px rgba(240, 185, 11, 0.2); }
         .auth-box h2 { color: var(--binance-yellow); margin-bottom: 20px; }
@@ -25,7 +24,6 @@
         .btn-auth { width: 100%; padding: 12px; background: var(--binance-yellow); color: #000; font-weight: bold; border: none; border-radius: 6px; cursor: pointer; font-size: 1rem; margin-top: 15px; }
         .link-text { color: #888; margin-top: 15px; font-size: 0.9rem; cursor: pointer; text-decoration: underline; }
 
-        /* HEADER */
         .header-container { background: #0a0a0a; padding: 15px; margin-bottom: 20px; border-bottom: 1px solid #222; display: flex; flex-direction: column; align-items: center; gap: 15px; }
         .logos-row { display: flex; align-items: center; gap: 30px; }
         .brand { display: flex; align-items: center; gap: 8px; font-weight: bold; font-size: 1.2rem; }
@@ -36,7 +34,6 @@
         .logout-btn { color: var(--danger); cursor: pointer; font-weight: bold; font-size: 0.75rem; text-transform: uppercase; }
         .vip-badge { color: gold; font-weight: bold; border: 1px solid gold; padding: 0 5px; border-radius: 4px; font-size: 0.7rem; display: none; }
 
-        /* CONTROLS */
         .container { max-width: 1200px; margin: 0 auto; }
         .controls-bar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; background: var(--card-bg); border: 1px solid #222; padding: 15px; border-radius: 8px; margin-bottom: 20px; box-shadow: 0 5px 15px rgba(0,0,0,0.3); }
         .hide-on-run.active { display: none !important; }
@@ -61,7 +58,6 @@
         .card { background: var(--card-bg); border: 1px solid #222; border-radius: 12px; padding: 15px; box-shadow: 4px 4px 10px rgba(0,0,0,0.5); }
         .card h3 { margin: 0 0 10px 0; border-bottom: 1px solid #333; padding-bottom: 8px; color: var(--binance-yellow); font-size: 1rem; text-transform: uppercase; }
 
-        /* MODAL */
         .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.9); z-index: 1000; justify-content: center; align-items: center; }
         .modal-content { background: #111; border: 2px solid var(--binance-yellow); padding: 20px; border-radius: 10px; width: 90%; max-width: 500px; max-height: 90vh; overflow-y: auto; }
         .form-row { margin-bottom: 12px; }
@@ -69,7 +65,6 @@
         .form-row input, .form-row select { width: 100%; padding: 10px; background: #222; border: 1px solid #444; color: #fff; box-sizing: border-box; font-family: monospace; }
         .btn-save { width: 100%; background: var(--kucoin-green); color: #000; margin-top: 10px; padding: 12px; border:none; font-weight:bold; cursor:pointer; }
 
-        /* TERMS CONTENT */
         .terms-content { color: #ddd; font-size: 0.9rem; line-height: 1.6; text-align: left; }
         .terms-content h4 { color: var(--binance-yellow); margin-top: 15px; margin-bottom: 5px; }
         .terms-content ul { padding-left: 20px; margin: 0; }
@@ -79,6 +74,10 @@
         th { text-align: left; color: #777; padding: 8px 5px; border-bottom: 1px solid #333; }
         td { padding: 8px 5px; border-bottom: 1px solid #222; }
         .text-pos { color: var(--kucoin-green); } .text-neg { color: var(--danger); }
+        
+        .opp-item { border-bottom: 1px solid #333; padding-bottom: 10px; margin-bottom: 10px; }
+        .opp-item:last-child { border-bottom: none; margin-bottom: 0; }
+        .rank-badge { background: #333; color: #fff; font-size: 0.7rem; padding: 2px 6px; border-radius: 4px; margin-right: 5px; }
 
         @media (max-width: 600px) {
             .brand { font-size: 0.9rem; } .logo, .logo-kucoin { height: 25px; }
@@ -89,7 +88,6 @@
 </head>
 <body>
 
-    <!-- LOGIN -->
     <div id="loginSection" class="auth-overlay">
         <div class="auth-box">
             <h2>LOGIN</h2>
@@ -99,7 +97,7 @@
             <div class="link-text" onclick="showRegister()">Create New Account</div>
         </div>
     </div>
-    <!-- REGISTER -->
+    
     <div id="registerSection" class="auth-overlay" style="display:none;">
         <div class="auth-box">
             <h2 style="color: var(--kucoin-green);">REGISTER</h2>
@@ -112,7 +110,6 @@
         </div>
     </div>
 
-    <!-- MAIN -->
     <div id="dashboardSection" style="display:none;">
         <div class="header-container">
             <div class="logos-row">
@@ -144,7 +141,6 @@
 
                 <div style="flex-grow: 1;"></div>
 
-                <!-- Nút cấu hình Bot -->
                 <button class="btn btn-config hide-on-run" onclick="openModal()">⚙️ Set Bot</button>
 
                 <div class="terms-group hide-on-run">
@@ -163,8 +159,8 @@
                     <div id="balancesContent" style="min-height: 40px; padding-top:5px;"><span style="color:#555;">Waiting...</span></div>
                 </div>
                 <div class="card">
-                    <h3>Best Opportunity</h3>
-                    <div id="oppContent" style="text-align: center; padding: 15px;"><span style="color:#555">Connecting...</span></div>
+                    <h3>Top Opportunities</h3>
+                    <div id="oppContent" style="padding: 10px;"><span style="color:#555">Scanning...</span></div>
                 </div>
             </div>
 
@@ -180,7 +176,6 @@
         </div>
     </div>
 
-    <!-- CONFIG MODAL -->
     <div id="configModal" class="modal">
         <div class="modal-content">
             <div class="modal-header" style="display:flex; justify-content:space-between; margin-bottom:20px;">
@@ -198,7 +193,6 @@
         </div>
     </div>
 
-    <!-- TERMS MODAL -->
     <div id="termsModal" class="modal">
         <div class="modal-content" style="border-color: var(--danger);">
             <div class="modal-header" style="display:flex; justify-content:space-between; margin-bottom:10px;">
@@ -353,39 +347,36 @@
             for(let k in d.balances) bH += `<div style="display:flex;justify-content:space-between;border-bottom:1px solid #333;padding:5px"><span>${k.includes('binance')?'BINANCE':'KUCOIN'}</span><span>${d.balances[k].available.toFixed(2)}$</span></div>`;
             document.getElementById('balancesContent').innerHTML = bH;
 
-            // DISPLAY OPPORTUNITY
-            if(d.bestPotentialOpportunityForDisplay) {
-                const op = d.bestPotentialOpportunityForDisplay;
-                const now = Date.now();
-                const timeLeft = op.nextFundingTime ? (op.nextFundingTime - now) : 0;
-                const timerText = timeLeft > 0 ? formatTime(timeLeft) : "NOW";
+            const opps = d.bestPotentialOpportunityForDisplay;
+            if (Array.isArray(opps) && opps.length > 0) {
+                let html = '';
+                const delays = ['59:00', '59:25', '59:45'];
+                opps.forEach((op, idx) => {
+                    const now = Date.now();
+                    const timeLeft = op.nextFundingTime ? (op.nextFundingTime - now) : 0;
+                    const timerText = timeLeft > 0 ? formatTime(timeLeft) : "NOW";
+                    const sExName = op.details.shortExchange.includes('binance') ? 'BIN' : 'KUC';
+                    const lExName = op.details.longExchange.includes('binance') ? 'BIN' : 'KUC';
+                    const sColor = sExName === 'BIN' ? 'var(--binance-yellow)' : 'var(--kucoin-green)';
+                    const lColor = lExName === 'BIN' ? 'var(--binance-yellow)' : 'var(--kucoin-green)';
+                    const executeTime = delays[idx] || '';
 
-                const sExName = op.details.shortExchange.includes('binance') ? 'BINANCE' : 'KUCOIN';
-                const lExName = op.details.longExchange.includes('binance') ? 'BINANCE' : 'KUCOIN';
-                
-                const sColor = sExName === 'BINANCE' ? 'var(--binance-yellow)' : 'var(--kucoin-green)';
-                const lColor = lExName === 'BINANCE' ? 'var(--binance-yellow)' : 'var(--kucoin-green)';
-
-                document.getElementById('oppContent').innerHTML = `
-                    <div style="font-size:1.8rem; font-weight:bold; color:#fff; margin-bottom:5px;">${op.coin}</div>
-                    <div style="color:var(--kucoin-green); font-size:1.2rem; margin-bottom:10px;">PNL: ${op.estimatedPnl.toFixed(2)}%</div>
-                    
-                    <div style="display:flex; justify-content:space-between; width:100%; font-size:0.9rem; border-top:1px solid #333; padding-top:10px;">
-                        <div style="text-align:left">
-                            <span style="color:#ff5722; font-weight:bold;">SHORT</span><br>
-                            <span style="color:${sColor}">${sExName}</span>
+                    html += `
+                    <div class="opp-item">
+                        <div style="display:flex; justify-content:space-between; align-items:center;">
+                            <div style="font-weight:bold; color:#fff; font-size:1.1rem;"><span class="rank-badge">#${idx+1}</span> ${op.coin}</div>
+                            <div style="color:var(--kucoin-green); font-weight:bold;">${op.estimatedPnl.toFixed(2)}%</div>
                         </div>
-                        <div style="text-align:center">
-                            <span style="color:#888;">COUNTDOWN</span><br>
-                            <span style="color:#fff; font-weight:bold;">${timerText}</span>
+                        <div style="display:flex; justify-content:space-between; font-size:0.85rem; margin-top:5px; color:#aaa;">
+                            <div>S: <span style="color:${sColor}">${sExName}</span> | L: <span style="color:${lColor}">${lExName}</span></div>
+                            <div>Exec: <span style="color:#fff;">${executeTime}</span></div>
                         </div>
-                        <div style="text-align:right">
-                            <span style="color:#00d095; font-weight:bold;">LONG</span><br>
-                            <span style="color:${lColor}">${lExName}</span>
-                        </div>
-                    </div>
-                `;
-            } else document.getElementById('oppContent').innerHTML = `<span style="color:#555">Scanning...</span>`;
+                    </div>`;
+                });
+                document.getElementById('oppContent').innerHTML = html;
+            } else {
+                document.getElementById('oppContent').innerHTML = `<span style="color:#555">Scanning...</span>`;
+            }
 
             let hH = '';
             (d.tradeHistory||[]).slice(0,5).forEach(t => {
