@@ -33,6 +33,7 @@ const MIN_PNL_PERCENTAGE = 1;
 const MIN_COLLATERAL_FOR_TRADE = 0.05; 
 const BLACKLISTED_COINS = ['GAIBUSDT', 'AIAUSDT', '42USDT', 'WAVESUSDT'];
 const FUND_ARRIVAL_TOLERANCE = 1; 
+const MIN_MINUTES_FOR_EXECUTION = 15; // [MỚI] Giới hạn 15 phút funding
 
 // [FEE CONFIG]
 const FEE_AUTO_ON = 10;
@@ -169,6 +170,7 @@ class BotEngine {
         return sym;
     }
 
+    // [THÊM] Hàm kiểm tra vị thế (đã sửa lỗi thiếu hàm)
     async hasOpenPosition(exchange, symbol) {
         try {
             const positions = await exchange.fetchPositions([symbol]);
@@ -179,6 +181,7 @@ class BotEngine {
         }
     }
 
+    // [FIX] KuCoin Leverage & Cross Mode
     async setLeverageSafely(exchange, symbol, desiredLeverage) {
         try {
             try {
@@ -190,7 +193,6 @@ class BotEngine {
                 }
             } catch (e) { }
 
-            // [FIX KUCOIN LEVERAGE INT]
             let finalLev = desiredLeverage;
             if (exchange.id === 'kucoinfutures') {
                 finalLev = Math.round(desiredLeverage);
@@ -215,6 +217,7 @@ class BotEngine {
         return { amount, price, notional: amount * price * contractSize };
     }
 
+    // [FIX] Binance ID & ReduceOnly
     async placeTpSlOrders(exchange, symbol, side, amount, entryPrice, collateral, notionalValue) {
         if (!entryPrice || entryPrice <= 0) return;
         const slPriceChange = entryPrice * (SL_PERCENTAGE / 100 / (notionalValue / collateral));
@@ -272,6 +275,7 @@ class BotEngine {
         return null;
     }
 
+    // [TÍNH NĂNG 1] Lưu TP/SL cũ
     async saveUserOrders(exchange, symbol) {
         try {
             const orders = await exchange.fetchOpenOrders(symbol);
@@ -291,6 +295,7 @@ class BotEngine {
         } catch (e) { return []; }
     }
 
+    // [TÍNH NĂNG 2] Khôi phục lệnh
     async restoreUserOrders(exchange, symbol, savedOrders) {
         if (!savedOrders || savedOrders.length === 0) return;
         this.log('info', `🔄 Đang khôi phục ${savedOrders.length} lệnh TP/SL cũ cho ${symbol}...`);
@@ -322,6 +327,7 @@ class BotEngine {
         }
     }
 
+    // [TÍNH NĂNG 3] Real PnL (Dùng fetchMyTrades)
     async calculateSessionPnL(exchange, symbol, startTime, endTime) {
         let totalPnl = 0;
         try {
@@ -330,17 +336,23 @@ class BotEngine {
             
             for (const t of trades) {
                 const cost = t.cost ? parseFloat(t.cost) : (parseFloat(t.price) * parseFloat(t.amount)); 
+                
                 if (t.side === 'buy') buyCost += cost;
                 if (t.side === 'sell') sellCost += cost;
-                if (t.fee && t.fee.cost) fees += parseFloat(t.fee.cost);
+                
+                if (t.fee && t.fee.cost) {
+                    fees += parseFloat(t.fee.cost);
+                }
             }
             totalPnl = sellCost - buyCost - fees;
+
         } catch(e) { 
             this.log('error', `PnL Calc Error (${exchange.id}): ${e.message}`); 
         }
         return totalPnl;
     }
 
+    // [TÍNH NĂNG 4] Chỉ dọn dẹp lệnh Bot
     async cleanupBotOrders(exchange, symbol) {
         try {
             const openOrders = await exchange.fetchOpenOrders(symbol);
@@ -353,6 +365,7 @@ class BotEngine {
         } catch(e){}
     }
 
+    // --- EXECUTE TRADE ---
     async executeTrade(op) {
         const sEx = this.exchanges[op.details.shortExchange];
         const lEx = this.exchanges[op.details.longExchange];
@@ -417,7 +430,6 @@ class BotEngine {
             return;
         }
 
-        // [FIX KUCOIN PARAMS]
         const finalLev = Math.round(usedLev);
         const sParams = (sEx.id === 'binanceusdm') 
             ? { 'positionSide': 'SHORT' } 
@@ -601,7 +613,7 @@ class BotEngine {
         }
     }
 
-    // [CHỈ SỬA LOGIC LỌC COIN THEO YÊU CẦU]
+    // [THAY ĐỔI: LOGIC LỌC COIN 15 PHÚT]
     async filterTradableOps(rawOps) {
         const now = Date.now();
         const tradable = [];
@@ -609,14 +621,14 @@ class BotEngine {
             if (op.estimatedPnl < MIN_PNL_PERCENTAGE || BLACKLISTED_COINS.includes(op.coin)) continue;
             if (this.sessionBlacklist.has(op.coin)) continue;
 
-            // [LOGIC DEMO03] Kiểm tra nếu còn <= 15 phút tới Funding
+            // [LOGIC DEMO03] Kiểm tra 15 phút Funding
             if (op.nextFundingTime) {
                 const diff = op.nextFundingTime - now;
                 const minutes = diff / 60000;
-                // Nếu > 15 phút hoặc đã qua giờ Funding thì bỏ
-                if (minutes <= 0 || minutes > 15) continue;
+                // Nếu < 0 hoặc > 15 phút thì bỏ qua
+                if (minutes <= 0 || minutes > MIN_MINUTES_FOR_EXECUTION) continue;
             } else {
-                continue; // Không có thời gian thì bỏ qua
+                continue; // Không có data time thì bỏ qua
             }
 
             const [s, l] = op.exchanges.toLowerCase().split(' / ');
@@ -673,7 +685,7 @@ class BotEngine {
                         const res = await fetch(SERVER_DATA_URL);
                         const data = await res.json();
                         if (data && data.arbitrageData) {
-                            // Test: Không cần check time, chỉ check PnL
+                            // Test: Không check 15p, chỉ check PnL
                             const filtered = [];
                             for(const op of data.arbitrageData) {
                                 if (BLACKLISTED_COINS.includes(op.coin)) continue;
@@ -705,7 +717,7 @@ class BotEngine {
                         const res = await fetch(SERVER_DATA_URL);
                         const data = await res.json();
                         if (data && data.arbitrageData) {
-                            // Lọc coin theo logic 15 phút
+                            // Gọi hàm filter mới (check 15p)
                             const filtered = await this.filterTradableOps(data.arbitrageData);
                             this.candidates = filtered; 
                             this.opp = this.candidates[0] || null;
@@ -713,7 +725,7 @@ class BotEngine {
                     } catch(err) {}
                 }
 
-                // Giữ nguyên logic quét từ phút 45
+                // [GIỮ NGUYÊN] Quét từ phút 45 (để bắt được coin sắp funding)
                 if (this.capitalManagementState === 'IDLE' && m >= 45 && m <= 59) {
                     if ((m !== 59 || s < 30) && (nowMs - this.lastScanTime >= 25000)) {
                         if (this.candidates && this.candidates.length > 0) { 
@@ -748,9 +760,9 @@ class BotEngine {
         this.loadConfig();
         this.sessionBlacklist.clear();
         
-        // Không cleanup khi start để tránh mất lệnh
         if (!this.isTestExecution) {
             for (const k in this.exchanges) {
+                // Logic riêng
             }
         }
         
