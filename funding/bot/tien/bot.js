@@ -204,7 +204,6 @@ class BotEngine {
         return { amount, price, notional: amount * price * contractSize };
     }
 
-    // [FIX 1: SỬA LỖI -1106 BINANCE]
     async placeTpSlOrders(exchange, symbol, side, amount, entryPrice, collateral, notionalValue) {
         if (!entryPrice || entryPrice <= 0) return;
         const slPriceChange = entryPrice * (SL_PERCENTAGE / 100 / (notionalValue / collateral));
@@ -218,7 +217,6 @@ class BotEngine {
         let commonParams = {};
         
         if (exchange.id === 'binanceusdm') {
-            // [FIX] Binance KHÔNG được gửi reduceOnly cho lệnh STOP/TP MARKET khi đã có positionSide
             commonParams = { 
                 'positionSide': (side === 'sell') ? 'SHORT' : 'LONG',
                 'newClientOrderId': botId 
@@ -263,7 +261,6 @@ class BotEngine {
         return null;
     }
 
-    // [TÍNH NĂNG 1] Lưu TP/SL cũ
     async saveUserOrders(exchange, symbol) {
         try {
             const orders = await exchange.fetchOpenOrders(symbol);
@@ -283,7 +280,6 @@ class BotEngine {
         } catch (e) { return []; }
     }
 
-    // [TÍNH NĂNG 2] Khôi phục lệnh
     async restoreUserOrders(exchange, symbol, savedOrders) {
         if (!savedOrders || savedOrders.length === 0) return;
         this.log('info', `🔄 Đang khôi phục ${savedOrders.length} lệnh TP/SL cũ cho ${symbol}...`);
@@ -315,7 +311,6 @@ class BotEngine {
         }
     }
 
-    // [TÍNH NĂNG 3] Tính Real PnL (Dựa trên lịch sử dòng tiền thật)
     async calculateSessionPnL(exchange, symbol, startTime, endTime) {
         let totalPnl = 0;
         try {
@@ -340,13 +335,14 @@ class BotEngine {
         return totalPnl;
     }
 
-    // [TÍNH NĂNG 4] Chỉ dọn dẹp lệnh do Bot tạo ra
+    // [FIX 2: HỦY LỆNH AN TOÀN TUYỆT ĐỐI CHO BINANCE]
     async cleanupBotOrders(exchange, symbol) {
         try {
             const openOrders = await exchange.fetchOpenOrders(symbol);
             for (const o of openOrders) {
-                const cid = o.clientOrderId || o.clientOid || (o.info && o.info.clientOid) || '';
-                if (cid.includes('ab_')) {
+                // Kiểm tra kỹ ID gốc từ sàn (info) cho chắc chắn
+                const rawId = (o.info && o.info.clientOrderId) ? o.info.clientOrderId : (o.clientOrderId || '');
+                if (rawId.includes('ab_')) {
                     try { await exchange.cancelOrder(o.id, symbol); } catch(e){}
                 }
             }
@@ -453,7 +449,6 @@ class BotEngine {
             this.lockedOpp = null;
             
             this.log('trade', `OPEN SUCCESS | ${op.coin} | Money: ${collateral.toFixed(1)}$`);
-            // Đặt TP/SL riêng cho bot
             this.placeTpSlOrders(sEx, sSym, 'sell', sDetails.amount, sPrice, collateral, sDetails.notional);
             this.placeTpSlOrders(lEx, lSym, 'buy', lDetails.amount, lPrice, collateral, lDetails.notional);
         }
@@ -507,7 +502,6 @@ class BotEngine {
             const sEx = this.exchanges[t.shortExchange];
             const lEx = this.exchanges[t.longExchange];
             
-            // Hủy lệnh bot trước khi đóng
             await this.cleanupBotOrders(sEx, t.shortSymbol);
             await this.cleanupBotOrders(lEx, t.longSymbol);
             
@@ -517,11 +511,9 @@ class BotEngine {
             try { await sEx.createMarketBuyOrder(t.shortSymbol, t.shortAmount, closeSParams); } catch(e){ this.log('error', `Close Short Err: ${e.message}`); }
             try { await lEx.createMarketSellOrder(t.longSymbol, t.longAmount, closeLParams); } catch(e){ this.log('error', `Close Long Err: ${e.message}`); }
             
-            // Khôi phục lệnh cũ
             if (t.savedShortOrders && t.savedShortOrders.length > 0) await this.restoreUserOrders(sEx, t.shortSymbol, t.savedShortOrders);
             if (t.savedLongOrders && t.savedLongOrders.length > 0) await this.restoreUserOrders(lEx, t.longSymbol, t.savedLongOrders);
 
-            // Tính Real PnL (Đợi 30s)
             this.log('info', `⏳ Đợi 30s để sàn chốt sổ PnL...`);
             await sleep(30000);
             
@@ -726,6 +718,7 @@ class BotEngine {
         }
     }
 
+    // [TÍNH NĂNG MỚI: KIỂM TRA TỶ LỆ KÝ QUỸ TRƯỚC KHI CÂN BẰNG VỐN]
     async checkAndBalanceCapital() {
         if (this.isBalancing || !this.config.autoBalance || this.isFeeProcessing) return; 
         if (this.activeTrades.length > 0) return; 
@@ -738,6 +731,36 @@ class BotEngine {
         const k = this.balances['kucoinfutures']?.total || 0;
         const total = b + k;
         if (total < 20) return;
+
+        // [MỚI] Check xem đang có vị thế lớn không. Nếu Margin Used >= 50% Balance thì KHÔNG cân bằng
+        try {
+            // Lấy danh sách vị thế để tính tổng ký quỹ
+            const [bPos, kPos] = await Promise.all([
+                this.exchanges['binanceusdm'].fetchPositions(),
+                this.exchanges['kucoinfutures'].fetchPositions()
+            ]);
+
+            // Tính tổng Margin đang dùng trên Binance
+            const bMarginUsed = bPos.reduce((sum, p) => sum + parseFloat(p.initialMargin || 0), 0);
+            if (b > 0 && (bMarginUsed / b) >= 0.5) {
+                this.log('warn', `⛔ Auto-Balance TẠM DỪNG: Binance đang dùng >50% vốn vào lệnh (${(bMarginUsed/b*100).toFixed(1)}%).`);
+                return;
+            }
+
+            // Tính tổng Margin đang dùng trên KuCoin (initialMargin hoặc notional/leverage)
+            const kMarginUsed = kPos.reduce((sum, p) => {
+                let margin = parseFloat(p.initialMargin || 0);
+                if (margin === 0 && p.notional && p.leverage) margin = Math.abs(parseFloat(p.notional)) / parseFloat(p.leverage);
+                return sum + margin;
+            }, 0);
+            if (k > 0 && (kMarginUsed / k) >= 0.5) {
+                this.log('warn', `⛔ Auto-Balance TẠM DỪNG: KuCoin đang dùng >50% vốn vào lệnh (${(kMarginUsed/k*100).toFixed(1)}%).`);
+                return;
+            }
+
+        } catch (err) {
+            // Nếu lỗi check margin thì thôi bỏ qua bước này, vẫn cho chạy balance nếu cần
+        }
 
         const diff = Math.abs(b - k);
         const amountToMove = diff / 2;
