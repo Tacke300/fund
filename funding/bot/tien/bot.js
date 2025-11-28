@@ -169,6 +169,18 @@ class BotEngine {
         return sym;
     }
 
+    // [THÊM LẠI HÀM BỊ THIẾU] Kiểm tra vị thế đang mở
+    async hasOpenPosition(exchange, symbol) {
+        try {
+            const positions = await exchange.fetchPositions([symbol]);
+            const pos = positions.find(p => p.symbol === symbol);
+            // Check contracts > 0 để biết có vị thế không
+            return pos && parseFloat(pos.contracts) > 0;
+        } catch (e) {
+            return false;
+        }
+    }
+
     async setLeverageSafely(exchange, symbol, desiredLeverage) {
         try {
             try {
@@ -311,38 +323,38 @@ class BotEngine {
         }
     }
 
+    // PnL dựa trên fetchMyTrades
     async calculateSessionPnL(exchange, symbol, startTime, endTime) {
         let totalPnl = 0;
         try {
-            if (exchange.id === 'binanceusdm') {
-                const incomes = await exchange.fetchIncome(symbol, startTime, undefined, { 'endTime': endTime });
-                for (const item of incomes) {
-                    totalPnl += parseFloat(item.info.income || item.amount); 
+            const trades = await exchange.fetchMyTrades(symbol, startTime, undefined, { 'endTime': endTime });
+            let buyCost = 0, sellCost = 0, fees = 0;
+            
+            for (const t of trades) {
+                const cost = t.cost ? parseFloat(t.cost) : (parseFloat(t.price) * parseFloat(t.amount)); 
+                
+                if (t.side === 'buy') buyCost += cost;
+                if (t.side === 'sell') sellCost += cost;
+                
+                if (t.fee && t.fee.cost) {
+                    fees += parseFloat(t.fee.cost);
                 }
-            } 
-            else if (exchange.id === 'kucoinfutures') {
-                const trades = await exchange.fetchMyTrades(symbol, startTime, undefined, { 'endTime': endTime });
-                let buyCost = 0, sellCost = 0, fees = 0;
-                for (const t of trades) {
-                    const cost = t.cost ? t.cost : (t.price * t.amount); 
-                    if (t.side === 'buy') buyCost += cost;
-                    if (t.side === 'sell') sellCost += cost;
-                    if (t.fee) fees += t.fee.cost;
-                }
-                totalPnl = sellCost - buyCost - fees;
             }
-        } catch(e) { this.log('error', `PnL Calc Error: ${e.message}`); }
+            totalPnl = sellCost - buyCost - fees;
+
+        } catch(e) { 
+            this.log('error', `PnL Calc Error (${exchange.id}): ${e.message}`); 
+        }
         return totalPnl;
     }
 
-    // [FIX 2: HỦY LỆNH AN TOÀN TUYỆT ĐỐI CHO BINANCE]
     async cleanupBotOrders(exchange, symbol) {
         try {
             const openOrders = await exchange.fetchOpenOrders(symbol);
             for (const o of openOrders) {
-                // Kiểm tra kỹ ID gốc từ sàn (info) cho chắc chắn
                 const rawId = (o.info && o.info.clientOrderId) ? o.info.clientOrderId : (o.clientOrderId || '');
-                if (rawId.includes('ab_')) {
+                // Check prefix
+                if (rawId.startsWith('ab_')) {
                     try { await exchange.cancelOrder(o.id, symbol); } catch(e){}
                 }
             }
@@ -718,7 +730,6 @@ class BotEngine {
         }
     }
 
-    // [TÍNH NĂNG MỚI: KIỂM TRA TỶ LỆ KÝ QUỸ TRƯỚC KHI CÂN BẰNG VỐN]
     async checkAndBalanceCapital() {
         if (this.isBalancing || !this.config.autoBalance || this.isFeeProcessing) return; 
         if (this.activeTrades.length > 0) return; 
@@ -732,35 +743,28 @@ class BotEngine {
         const total = b + k;
         if (total < 20) return;
 
-        // [MỚI] Check xem đang có vị thế lớn không. Nếu Margin Used >= 50% Balance thì KHÔNG cân bằng
         try {
-            // Lấy danh sách vị thế để tính tổng ký quỹ
             const [bPos, kPos] = await Promise.all([
                 this.exchanges['binanceusdm'].fetchPositions(),
                 this.exchanges['kucoinfutures'].fetchPositions()
             ]);
 
-            // Tính tổng Margin đang dùng trên Binance
             const bMarginUsed = bPos.reduce((sum, p) => sum + parseFloat(p.initialMargin || 0), 0);
             if (b > 0 && (bMarginUsed / b) >= 0.5) {
-                this.log('warn', `⛔ Auto-Balance TẠM DỪNG: Binance đang dùng >50% vốn vào lệnh (${(bMarginUsed/b*100).toFixed(1)}%).`);
+                this.log('warn', `⛔ Auto-Balance TẠM DỪNG: Binance dùng >50% vốn vào lệnh.`);
                 return;
             }
 
-            // Tính tổng Margin đang dùng trên KuCoin (initialMargin hoặc notional/leverage)
             const kMarginUsed = kPos.reduce((sum, p) => {
                 let margin = parseFloat(p.initialMargin || 0);
                 if (margin === 0 && p.notional && p.leverage) margin = Math.abs(parseFloat(p.notional)) / parseFloat(p.leverage);
                 return sum + margin;
             }, 0);
             if (k > 0 && (kMarginUsed / k) >= 0.5) {
-                this.log('warn', `⛔ Auto-Balance TẠM DỪNG: KuCoin đang dùng >50% vốn vào lệnh (${(kMarginUsed/k*100).toFixed(1)}%).`);
+                this.log('warn', `⛔ Auto-Balance TẠM DỪNG: KuCoin dùng >50% vốn vào lệnh.`);
                 return;
             }
-
-        } catch (err) {
-            // Nếu lỗi check margin thì thôi bỏ qua bước này, vẫn cho chạy balance nếu cần
-        }
+        } catch (err) {}
 
         const diff = Math.abs(b - k);
         const amountToMove = diff / 2;
@@ -802,6 +806,7 @@ class BotEngine {
                 const lEx = this.exchanges[op.details.longExchange];
                 const sSym = await this.getExchangeSpecificSymbol(sEx, op.coin);
                 const lSym = await this.getExchangeSpecificSymbol(lEx, op.coin);
+                
                 const hasShort = await this.hasOpenPosition(sEx, sSym);
                 const hasLong = await this.hasOpenPosition(lEx, lSym);
                 if (hasShort || hasLong) continue;
