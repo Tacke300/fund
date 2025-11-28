@@ -169,7 +169,7 @@ class BotEngine {
         return sym;
     }
 
-    // [CHẾ ĐỘ CROSS] & [FIX KUCOIN LEVERAGE INT]
+    // [CHẾ ĐỘ CROSS] & [FIX LEVERAGE KUCOIN]
     async setLeverageSafely(exchange, symbol, desiredLeverage) {
         try {
             try {
@@ -181,7 +181,7 @@ class BotEngine {
                 }
             } catch (e) { }
 
-            // Kucoin bắt buộc đòn bẩy là số nguyên
+            // [FIX] Kucoin yêu cầu đòn bẩy là số nguyên
             let finalLev = desiredLeverage;
             if (exchange.id === 'kucoinfutures') {
                 finalLev = Math.round(desiredLeverage);
@@ -248,7 +248,7 @@ class BotEngine {
         return null;
     }
 
-    // --- SAVE & RESTORE ORDERS ---
+    // --- FEATURES: SAVE & RESTORE ORDERS ---
     async saveUserOrders(exchange, symbol) {
         try {
             const orders = await exchange.fetchOpenOrders(symbol);
@@ -498,6 +498,57 @@ class BotEngine {
         } catch(e) { this.log('error', `Init Fail: ${e.message}`); }
     }
 
+    // [GIỮ NGUYÊN BỘ LỌC CHUẨN ĐỂ KHÔNG MẤT CƠ HỘI]
+    async filterTradableOps(rawOps) {
+        const tradable = [];
+        for (const op of rawOps) {
+            if (op.estimatedPnl < MIN_PNL_PERCENTAGE || BLACKLISTED_COINS.includes(op.coin)) continue;
+            if (this.sessionBlacklist.has(op.coin)) continue;
+
+            const [s, l] = op.exchanges.toLowerCase().split(' / ');
+            if (!((s.includes('binance')||l.includes('binance')) && (s.includes('kucoin')||l.includes('kucoin')))) continue;
+            
+            // Standard: s=Short, l=Long
+            const opDetail = { ...op, details: {
+                shortExchange: s.includes('binance') ? 'binanceusdm' : 'kucoinfutures',
+                longExchange: l.includes('binance') ? 'binanceusdm' : 'kucoinfutures'
+            }};
+            
+            const sEx = this.exchanges[opDetail.details.shortExchange];
+            const lEx = this.exchanges[opDetail.details.longExchange];
+            if (!sEx || !lEx) continue;
+            
+            const sSym = await this.getExchangeSpecificSymbol(sEx, op.coin);
+            const lSym = await this.getExchangeSpecificSymbol(lEx, op.coin);
+            
+            if (sSym && lSym) tradable.push(opDetail);
+        }
+        return tradable.sort((a,b) => b.estimatedPnl - a.estimatedPnl);
+    }
+
+    async runSelection(candidates) {
+        for (const op of candidates) {
+            if (!this.isTestExecution) {
+                if (this.activeTrades.some(t => t.coin === op.coin)) continue;
+                const sEx = this.exchanges[op.details.shortExchange];
+                const lEx = this.exchanges[op.details.longExchange];
+                const sSym = await this.getExchangeSpecificSymbol(sEx, op.coin);
+                const lSym = await this.getExchangeSpecificSymbol(lEx, op.coin);
+                const hasShort = await this.hasOpenPosition(sEx, sSym);
+                const hasLong = await this.hasOpenPosition(lEx, lSym);
+                if (hasShort || hasLong) continue;
+                
+                const sBal = this.balances[op.details.shortExchange]?.available || 0;
+                const lBal = this.balances[op.details.longExchange]?.available || 0;
+                if (sBal <= MIN_COLLATERAL_FOR_TRADE || lBal <= MIN_COLLATERAL_FOR_TRADE) continue;
+            }
+
+            this.lockedOpp = op; this.opp = op;
+            this.capitalManagementState = 'FUNDS_READY';
+            return;
+        }
+    }
+
     async snapshotAssets() {
         this.log('info', '📸 Snapshotting assets...');
         let bFut = 0, kFut = 0, bSpot = 0, kSpot = 0;
@@ -683,51 +734,6 @@ class BotEngine {
             this.log('info', `⚖️ Phát hiện lệch vốn (Delta=${diff.toFixed(1)}$). Kích hoạt Auto-Balance...`);
             if (b > k) await this.autoFundTransfer('binanceusdm', 'kucoinfutures', amountToMove);
             else await this.autoFundTransfer('kucoinfutures', 'binanceusdm', amountToMove);
-        }
-    }
-
-    async filterTradableOps(rawOps) {
-        const tradable = [];
-        for (const op of rawOps) {
-            if (op.estimatedPnl < MIN_PNL_PERCENTAGE || BLACKLISTED_COINS.includes(op.coin)) continue;
-            if (this.sessionBlacklist.has(op.coin)) continue;
-
-            const [s, l] = op.exchanges.toLowerCase().split(' / ');
-            if (!((s.includes('binance')||l.includes('binance')) && (s.includes('kucoin')||l.includes('kucoin')))) continue;
-            const opDetail = { ...op, details: {
-                shortExchange: s.includes('binance') ? 'binanceusdm' : 'kucoinfutures',
-                longExchange: l.includes('binance') ? 'binanceusdm' : 'kucoinfutures'
-            }};
-            const sEx = this.exchanges[opDetail.details.shortExchange];
-            const lEx = this.exchanges[opDetail.details.longExchange];
-            if (!sEx || !lEx) continue;
-            const sSym = await this.getExchangeSpecificSymbol(sEx, op.coin);
-            const lSym = await this.getExchangeSpecificSymbol(lEx, op.coin);
-            if (sSym && lSym) tradable.push(opDetail);
-        }
-        return tradable.sort((a,b) => b.estimatedPnl - a.estimatedPnl);
-    }
-
-    async runSelection(candidates) {
-        for (const op of candidates) {
-            if (!this.isTestExecution) {
-                if (this.activeTrades.some(t => t.coin === op.coin)) continue;
-                const sEx = this.exchanges[op.details.shortExchange];
-                const lEx = this.exchanges[op.details.longExchange];
-                const sSym = await this.getExchangeSpecificSymbol(sEx, op.coin);
-                const lSym = await this.getExchangeSpecificSymbol(lEx, op.coin);
-                const hasShort = await this.hasOpenPosition(sEx, sSym);
-                const hasLong = await this.hasOpenPosition(lEx, lSym);
-                if (hasShort || hasLong) continue;
-                
-                const sBal = this.balances[op.details.shortExchange]?.available || 0;
-                const lBal = this.balances[op.details.longExchange]?.available || 0;
-                if (sBal <= MIN_COLLATERAL_FOR_TRADE || lBal <= MIN_COLLATERAL_FOR_TRADE) continue;
-            }
-
-            this.lockedOpp = op; this.opp = op;
-            this.capitalManagementState = 'FUNDS_READY';
-            return;
         }
     }
 
