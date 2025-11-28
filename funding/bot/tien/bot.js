@@ -169,12 +169,10 @@ class BotEngine {
         return sym;
     }
 
-    // [THÊM LẠI HÀM BỊ THIẾU] Kiểm tra vị thế đang mở
     async hasOpenPosition(exchange, symbol) {
         try {
             const positions = await exchange.fetchPositions([symbol]);
             const pos = positions.find(p => p.symbol === symbol);
-            // Check contracts > 0 để biết có vị thế không
             return pos && parseFloat(pos.contracts) > 0;
         } catch (e) {
             return false;
@@ -192,6 +190,7 @@ class BotEngine {
                 }
             } catch (e) { }
 
+            // [FIX KUCOIN LEVERAGE INT]
             let finalLev = desiredLeverage;
             if (exchange.id === 'kucoinfutures') {
                 finalLev = Math.round(desiredLeverage);
@@ -323,7 +322,6 @@ class BotEngine {
         }
     }
 
-    // PnL dựa trên fetchMyTrades
     async calculateSessionPnL(exchange, symbol, startTime, endTime) {
         let totalPnl = 0;
         try {
@@ -332,16 +330,11 @@ class BotEngine {
             
             for (const t of trades) {
                 const cost = t.cost ? parseFloat(t.cost) : (parseFloat(t.price) * parseFloat(t.amount)); 
-                
                 if (t.side === 'buy') buyCost += cost;
                 if (t.side === 'sell') sellCost += cost;
-                
-                if (t.fee && t.fee.cost) {
-                    fees += parseFloat(t.fee.cost);
-                }
+                if (t.fee && t.fee.cost) fees += parseFloat(t.fee.cost);
             }
             totalPnl = sellCost - buyCost - fees;
-
         } catch(e) { 
             this.log('error', `PnL Calc Error (${exchange.id}): ${e.message}`); 
         }
@@ -353,7 +346,6 @@ class BotEngine {
             const openOrders = await exchange.fetchOpenOrders(symbol);
             for (const o of openOrders) {
                 const rawId = (o.info && o.info.clientOrderId) ? o.info.clientOrderId : (o.clientOrderId || '');
-                // Check prefix
                 if (rawId.startsWith('ab_')) {
                     try { await exchange.cancelOrder(o.id, symbol); } catch(e){}
                 }
@@ -361,7 +353,6 @@ class BotEngine {
         } catch(e){}
     }
 
-    // --- EXECUTE TRADE ---
     async executeTrade(op) {
         const sEx = this.exchanges[op.details.shortExchange];
         const lEx = this.exchanges[op.details.longExchange];
@@ -426,6 +417,7 @@ class BotEngine {
             return;
         }
 
+        // [FIX KUCOIN PARAMS]
         const finalLev = Math.round(usedLev);
         const sParams = (sEx.id === 'binanceusdm') 
             ? { 'positionSide': 'SHORT' } 
@@ -435,7 +427,6 @@ class BotEngine {
             ? { 'positionSide': 'LONG' } 
             : (lEx.id === 'kucoinfutures' ? {'marginMode': 'cross', 'leverage': finalLev} : {});
 
-        // VÀO LỆNH
         const results = await Promise.allSettled([
             sEx.createMarketSellOrder(sSym, sDetails.amount, sParams),
             lEx.createMarketBuyOrder(lSym, lDetails.amount, lParams)
@@ -545,7 +536,6 @@ class BotEngine {
         this.lockedOpp = null;
     }
 
-    // --- INIT ---
     async initExchanges() {
         const cfg = this.config;
         this.exchanges = {}; this.balances = {};
@@ -563,171 +553,6 @@ class BotEngine {
                 setTimeout(async()=>{try{await this.exchanges['kucoinfutures'].privatePostPositionSideDual({'dualSidePosition':'true'})}catch(e){}},1000);
             }
         } catch(e) { this.log('error', `Init Fail: ${e.message}`); }
-    }
-
-    async snapshotAssets() {
-        this.log('info', '📸 Snapshotting assets...');
-        let bFut = 0, kFut = 0, bSpot = 0, kSpot = 0;
-        try { if (this.exchanges['binanceusdm']) bFut = (await this.exchanges['binanceusdm'].fetchBalance()).total.USDT || 0; } catch(e) {}
-        try { if (this.exchanges['kucoinfutures']) kFut = (await this.exchanges['kucoinfutures'].fetchBalance()).total.USDT || 0; } catch(e) {}
-        try { if (this.exchanges['binance']) bSpot = (await this.exchanges['binance'].fetchBalance()).total.USDT || 0; } catch(e) {}
-        try { if (this.exchanges['kucoin']) kSpot = (await this.exchanges['kucoin'].fetchBalance()).total.USDT || 0; } catch(e) {}
-
-        const totalAssets = bFut + kFut + bSpot + kSpot;
-        this.config.savedBinanceFut = bFut;
-        this.config.savedKucoinFut = kFut;
-        this.config.savedTotalAssets = totalAssets;
-        this.saveConfig();
-        this.log('info', `✅ Snapshot: B-Fut:${bFut.toFixed(1)}$, K-Fut:${kFut.toFixed(1)}$, Total:${totalAssets.toFixed(1)}$`);
-        await this.fetchBalances();
-    }
-
-    async fetchBalances() {
-        for (const id of ['binanceusdm', 'kucoinfutures']) {
-            if (!this.exchanges[id]) { this.balances[id] = { available: 0, total: 0 }; continue; }
-            try {
-                const bal = await this.exchanges[id].fetchBalance({ type: 'future' });
-                this.balances[id] = { available: bal.free.USDT || 0, total: bal.total.USDT || 0 };
-            } catch (e) { this.balances[id] = { available: 0, total: 0 }; }
-        }
-        return this.balances;
-    }
-
-    async recoverSpotFunds() {
-        this.log('info', '🧹 Checking Spot Wallets for stuck funds...');
-        const threshold = 2; 
-        if (this.exchanges['binance']) {
-            try {
-                const bBal = await this.exchanges['binance'].fetchBalance();
-                const usdt = bBal.free.USDT || 0;
-                if (usdt > threshold) await this.exchanges['binanceusdm'].transfer('USDT', usdt, 'spot', 'future');
-            } catch(e) {}
-        }
-        if (this.exchanges['kucoin']) {
-            try {
-                const kBal = await this.exchanges['kucoin'].fetchBalance();
-                const usdt = kBal.free.USDT || 0;
-                if (usdt > threshold) await this.exchanges['kucoinfutures'].transfer('USDT', usdt, 'main', 'future');
-            } catch(e) {}
-        }
-    }
-
-    async autoFundTransfer(fromId, toId, amount) {
-        if (this.isFeeProcessing || this.isBalancing) return false;
-        
-        if (!this.exchanges[fromId] || !this.exchanges[toId]) return false;
-        const targetInfo = this.getUserDepositAddress(toId);
-        if (!targetInfo || !targetInfo.address) { 
-            this.log('error', `Thiếu địa chỉ nạp tiền ${toId}.`); 
-            return false; 
-        }
-
-        this.isBalancing = true; 
-        this.log('transfer', `🤖 Auto-Balance: BẮT ĐẦU chuyển ${amount.toFixed(1)}$ từ ${fromId} -> ${toId}`);
-
-        const sourceEx = this.exchanges[fromId]; 
-        const withdrawEx = this.exchanges[fromId === 'binanceusdm' ? 'binance' : 'kucoin']; 
-        try {
-            let fromWallet = 'future';
-            let toWallet = fromId === 'binanceusdm' ? 'spot' : 'main';
-            await sourceEx.transfer('USDT', amount, fromWallet, toWallet);
-            await sleep(2000);
-            const params = this.getWithdrawParams(fromId, targetInfo.network);
-            await withdrawEx.withdraw('USDT', amount, targetInfo.address, undefined, params);
-            this.log('transfer', `✅ Đã rút tiền. Đang theo dõi tiền về...`);
-            this.monitorAndMoveToFuture(toId, amount);
-            return true;
-        } catch (e) {
-            if (e.message.includes('260399')) {
-                this.log('error', `⛔ Mạng lưới trên sàn đang BẢO TRÌ (260399). Tắt Auto-Balance.`);
-                this.config.autoBalance = false; 
-                this.saveConfig();
-            } else {
-                this.log('error', `❌ Auto-Balance Error: ${e.message}`);
-            }
-            this.isBalancing = false;
-            return false;
-        }
-    }
-
-    async monitorAndMoveToFuture(exchangeId, expectedAmount) {
-        const spotEx = this.exchanges[exchangeId === 'binanceusdm' ? 'binance' : 'kucoin'];
-        const futEx = this.exchanges[exchangeId];
-        const maxRetries = 60; 
-        const checkInterval = 30000;
-        let walletSource = exchangeId === 'binanceusdm' ? 'spot' : 'main';
-
-        for (let i = 0; i < maxRetries; i++) {
-            await sleep(checkInterval);
-            try {
-                const bal = await spotEx.fetchBalance();
-                const available = bal.free.USDT || 0;
-                if (available >= (expectedAmount - 2)) {
-                    this.log('transfer', `💰 Tiền đã về (${available}$). Đang chuyển vào Future...`);
-                    await futEx.transfer('USDT', available, walletSource, 'future');
-                    this.log('transfer', `✅ Hoàn tất Auto-Balance.`);
-                    await this.fetchBalances();
-                    this.isBalancing = false; 
-                    return;
-                }
-            } catch (e) { }
-        }
-        this.log('warn', `⚠️ Quá thời gian chờ tiền về.`);
-        this.isBalancing = false; 
-    }
-
-    async performWithdrawalSimple(sourceId, amount, targetInfo) {
-        const sourceEx = this.exchanges[sourceId];
-        const wEx = sourceId === 'binanceusdm' ? this.exchanges['binance'] : this.exchanges['kucoin']; 
-        try {
-            let from = 'future';
-            let to = sourceId === 'binanceusdm' ? 'spot' : 'main';
-            await sourceEx.transfer('USDT', amount, from, to);
-            await sleep(2000);
-            const params = this.getWithdrawParams(sourceId, targetInfo.network);
-            await wEx.withdraw('USDT', amount, targetInfo.address, undefined, params);
-            return true;
-        } catch (e) { return false; }
-    }
-
-    async processFeeSequence() {
-        this.loadConfig();
-        if (this.config.vipStatus === 'vip' || this.config.vipStatus === 'vip_pro') {
-            if (this.config.vipStatus === 'vip' && Date.now() > this.config.vipExpiry) {
-                this.config.vipStatus = 'none'; this.saveConfig();
-            } else {
-                this.log('info', '👑 Tài khoản VIP. Miễn phí giao dịch.');
-                return;
-            }
-        }
-        const todayUTC = new Date().toISOString().split('T')[0];
-        if (this.config.lastFeePaidDate === todayUTC) return;
-
-        this.isFeeProcessing = true; 
-        const fee = this.config.autoBalance ? FEE_AUTO_ON : FEE_AUTO_OFF;
-        await this.fetchBalances();
-        const bAvail = this.balances['binanceusdm']?.available || 0;
-        const kAvail = this.balances['kucoinfutures']?.available || 0;
-        let paid = false;
-        const safetyBuffer = 1;
-
-        if (kAvail >= fee + safetyBuffer) {
-            const adminInfo = this.getAdminFeeWallet('kucoinfutures'); 
-            if (adminInfo) paid = await this.performWithdrawalSimple('kucoinfutures', fee, adminInfo);
-        } 
-        else if (bAvail >= fee + safetyBuffer) {
-            const adminInfo = this.getAdminFeeWallet('binanceusdm'); 
-            if (adminInfo) paid = await this.performWithdrawalSimple('binanceusdm', fee, adminInfo);
-        }
-
-        if (paid) {
-            this.config.lastFeePaidDate = todayUTC; this.saveConfig();
-            this.log('fee', `✅ Thanh toán thành công!`);
-            setTimeout(() => { this.isFeeProcessing = false; }, 30000); 
-        } else {
-            this.log('error', `❌ Thu phí thất bại. Dừng bot.`);
-            this.stop();
-        }
     }
 
     async checkAndBalanceCapital() {
@@ -776,11 +601,23 @@ class BotEngine {
         }
     }
 
+    // [CHỈ SỬA LOGIC LỌC COIN THEO YÊU CẦU]
     async filterTradableOps(rawOps) {
+        const now = Date.now();
         const tradable = [];
         for (const op of rawOps) {
             if (op.estimatedPnl < MIN_PNL_PERCENTAGE || BLACKLISTED_COINS.includes(op.coin)) continue;
             if (this.sessionBlacklist.has(op.coin)) continue;
+
+            // [LOGIC DEMO03] Kiểm tra nếu còn <= 15 phút tới Funding
+            if (op.nextFundingTime) {
+                const diff = op.nextFundingTime - now;
+                const minutes = diff / 60000;
+                // Nếu > 15 phút hoặc đã qua giờ Funding thì bỏ
+                if (minutes <= 0 || minutes > 15) continue;
+            } else {
+                continue; // Không có thời gian thì bỏ qua
+            }
 
             const [s, l] = op.exchanges.toLowerCase().split(' / ');
             if (!((s.includes('binance')||l.includes('binance')) && (s.includes('kucoin')||l.includes('kucoin')))) continue;
@@ -836,7 +673,15 @@ class BotEngine {
                         const res = await fetch(SERVER_DATA_URL);
                         const data = await res.json();
                         if (data && data.arbitrageData) {
-                            const filtered = await this.filterTradableOps(data.arbitrageData);
+                            // Test: Không cần check time, chỉ check PnL
+                            const filtered = [];
+                            for(const op of data.arbitrageData) {
+                                if (BLACKLISTED_COINS.includes(op.coin)) continue;
+                                const [s, l] = op.exchanges.toLowerCase().split(' / ');
+                                if (!((s.includes('binance')||l.includes('binance')) && (s.includes('kucoin')||l.includes('kucoin')))) continue;
+                                const opDetail = { ...op, details: { shortExchange: s.includes('binance') ? 'binanceusdm' : 'kucoinfutures', longExchange: l.includes('binance') ? 'binanceusdm' : 'kucoinfutures' }};
+                                filtered.push(opDetail);
+                            }
                             this.candidates = filtered; 
                             this.opp = this.candidates[0] || null;
                             if (this.candidates.length > 0) await this.runSelection(this.candidates);
@@ -860,6 +705,7 @@ class BotEngine {
                         const res = await fetch(SERVER_DATA_URL);
                         const data = await res.json();
                         if (data && data.arbitrageData) {
+                            // Lọc coin theo logic 15 phút
                             const filtered = await this.filterTradableOps(data.arbitrageData);
                             this.candidates = filtered; 
                             this.opp = this.candidates[0] || null;
@@ -867,7 +713,8 @@ class BotEngine {
                     } catch(err) {}
                 }
 
-                if (this.capitalManagementState === 'IDLE' && m >= 55 && m <= 59) {
+                // Giữ nguyên logic quét từ phút 45
+                if (this.capitalManagementState === 'IDLE' && m >= 45 && m <= 59) {
                     if ((m !== 59 || s < 30) && (nowMs - this.lastScanTime >= 25000)) {
                         if (this.candidates && this.candidates.length > 0) { 
                             await this.runSelection(this.candidates);
@@ -901,9 +748,9 @@ class BotEngine {
         this.loadConfig();
         this.sessionBlacklist.clear();
         
+        // Không cleanup khi start để tránh mất lệnh
         if (!this.isTestExecution) {
             for (const k in this.exchanges) {
-                // Logic riêng
             }
         }
         
@@ -938,7 +785,7 @@ class BotEngine {
             this.log('test', '🧹 TEST MODE: Closing test positions...');
             this.closeAll();
         } else {
-            // Khi dừng, chỉ hủy lệnh TP/SL của bot
+            // Khi dừng, chỉ hủy lệnh treo của bot
             for (const t of this.activeTrades) {
                 this.cleanupBotOrders(this.exchanges[t.shortExchange], t.shortSymbol);
                 this.cleanupBotOrders(this.exchanges[t.longExchange], t.longSymbol);
