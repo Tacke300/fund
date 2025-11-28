@@ -33,7 +33,7 @@ const MIN_PNL_PERCENTAGE = 1;
 const MIN_COLLATERAL_FOR_TRADE = 0.05; 
 const BLACKLISTED_COINS = ['GAIBUSDT', 'AIAUSDT', '42USDT', 'WAVESUSDT'];
 const FUND_ARRIVAL_TOLERANCE = 1; 
-const MIN_MINUTES_FOR_EXECUTION = 15; // Chỉ đánh coin sắp funding trong 15p
+const MIN_MINUTES_FOR_EXECUTION = 15; // [MỚI] Chỉ đánh coin sắp funding trong 15p
 
 // [FEE CONFIG]
 const FEE_AUTO_ON = 10;
@@ -170,7 +170,6 @@ class BotEngine {
         return sym;
     }
 
-    // [THÊM] Hàm check vị thế bị thiếu
     async hasOpenPosition(exchange, symbol) {
         try {
             const positions = await exchange.fetchPositions([symbol]);
@@ -331,11 +330,16 @@ class BotEngine {
             
             for (const t of trades) {
                 const cost = t.cost ? parseFloat(t.cost) : (parseFloat(t.price) * parseFloat(t.amount)); 
+                
                 if (t.side === 'buy') buyCost += cost;
                 if (t.side === 'sell') sellCost += cost;
-                if (t.fee && t.fee.cost) fees += parseFloat(t.fee.cost);
+                
+                if (t.fee && t.fee.cost) {
+                    fees += parseFloat(t.fee.cost);
+                }
             }
             totalPnl = sellCost - buyCost - fees;
+
         } catch(e) { 
             this.log('error', `PnL Calc Error (${exchange.id}): ${e.message}`); 
         }
@@ -354,7 +358,6 @@ class BotEngine {
         } catch(e){}
     }
 
-    // --- EXECUTE TRADE ---
     async executeTrade(op) {
         const sEx = this.exchanges[op.details.shortExchange];
         const lEx = this.exchanges[op.details.longExchange];
@@ -537,6 +540,7 @@ class BotEngine {
         this.lockedOpp = null;
     }
 
+    // --- INIT ---
     async initExchanges() {
         const cfg = this.config;
         this.exchanges = {}; this.balances = {};
@@ -602,7 +606,7 @@ class BotEngine {
         }
     }
 
-    // [CHỈ CHỌN COIN SẮP FUNDING <= 15p]
+    // [CHỈ SỬA LOGIC LỌC COIN: THÊM ĐIỀU KIỆN 15 PHÚT]
     async filterTradableOps(rawOps) {
         const now = Date.now();
         const tradable = [];
@@ -610,13 +614,14 @@ class BotEngine {
             if (op.estimatedPnl < MIN_PNL_PERCENTAGE || BLACKLISTED_COINS.includes(op.coin)) continue;
             if (this.sessionBlacklist.has(op.coin)) continue;
 
-            // Kiểm tra 15 phút
+            // Kiểm tra thời gian Funding <= 15 phút
             if (op.nextFundingTime) {
                 const diff = op.nextFundingTime - now;
                 const minutes = diff / 60000;
+                // Nếu < 0 (đã qua) hoặc > 15 (còn xa) thì bỏ qua
                 if (minutes <= 0 || minutes > MIN_MINUTES_FOR_EXECUTION) continue;
             } else {
-                continue;
+                continue; // Không có data time thì bỏ qua
             }
 
             const [s, l] = op.exchanges.toLowerCase().split(' / ');
@@ -673,6 +678,7 @@ class BotEngine {
                         const res = await fetch(SERVER_DATA_URL);
                         const data = await res.json();
                         if (data && data.arbitrageData) {
+                            // Test: Không check 15p, chỉ check PnL
                             const filtered = [];
                             for(const op of data.arbitrageData) {
                                 if (BLACKLISTED_COINS.includes(op.coin)) continue;
@@ -704,7 +710,7 @@ class BotEngine {
                         const res = await fetch(SERVER_DATA_URL);
                         const data = await res.json();
                         if (data && data.arbitrageData) {
-                            // Filter 15 phút
+                            // Gọi hàm filter mới (check 15p)
                             const filtered = await this.filterTradableOps(data.arbitrageData);
                             this.candidates = filtered; 
                             this.opp = this.candidates[0] || null;
@@ -712,8 +718,8 @@ class BotEngine {
                     } catch(err) {}
                 }
 
-                // Giữ khung giờ quét từ phút 45
-                if (this.capitalManagementState === 'IDLE' && m >= 45 && m <= 59) {
+                // Giữ khung giờ quét từ phút 55
+                if (this.capitalManagementState === 'IDLE' && m >= 55 && m <= 59) {
                     if ((m !== 59 || s < 30) && (nowMs - this.lastScanTime >= 25000)) {
                         if (this.candidates && this.candidates.length > 0) { 
                             await this.runSelection(this.candidates);
@@ -747,6 +753,7 @@ class BotEngine {
         this.loadConfig();
         this.sessionBlacklist.clear();
         
+        // Không cleanup khi start để tránh mất lệnh
         if (!this.isTestExecution) {
             for (const k in this.exchanges) {
             }
