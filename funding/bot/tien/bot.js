@@ -102,9 +102,8 @@ class BotEngine {
         const allowedTypes = ['error', 'trade', 'result', 'fee', 'vip', 'transfer', 'info', 'warn', 'pm2', 'fatal', 'test'];
         if (!allowedTypes.includes(type)) return;
         const t = new Date().toLocaleTimeString('vi-VN', { hour12: false });
-        const consoleMsg = `[${t}] [USER: ${this.username}] [${type.toUpperCase()}] ${msg}`;
-        if (type === 'pm2' || type === 'fatal' || type === 'error') console.error(consoleMsg);
-        else console.log(consoleMsg);
+        if (type === 'pm2' || type === 'fatal') console.error(`[${t}] [USER: ${this.username}] [${type.toUpperCase()}] ${msg}`);
+        else console.log(`[${t}] [USER: ${this.username}] [${type.toUpperCase()}] ${msg}`);
     }
 
     loadConfig() { try { if (fs.existsSync(this.configFile)) { const saved = JSON.parse(fs.readFileSync(this.configFile, 'utf8')); this.config = { ...this.config, ...saved }; } } catch (e) {} }
@@ -170,20 +169,25 @@ class BotEngine {
         return sym;
     }
 
+    // [ĐÃ CHỈNH SỬA] Ép buộc ISOLATED
     async setLeverageSafely(exchange, symbol, desiredLeverage) {
         try {
-            try { await exchange.setMarginMode('isolated', symbol); } catch (e) {}
+            // Cố gắng set Margin Mode sang ISOLATED trước
+            try {
+                if (exchange.id === 'binanceusdm') {
+                    await exchange.setMarginMode('isolated', symbol);
+                }
+                // KuCoin thường set Isolated qua params lệnh, nhưng gọi API này cũng an toàn
+                if (exchange.id === 'kucoinfutures') {
+                    await exchange.setMarginMode('isolated', symbol);
+                }
+            } catch (e) {
+                // Bỏ qua lỗi nếu đã là Isolated (code 4046 hoặc message 'No need to change')
+            }
+
             await exchange.setLeverage(desiredLeverage, symbol);
             return desiredLeverage;
         } catch (e) { return null; }
-    }
-
-    async hasOpenPosition(exchange, symbol) {
-        try {
-            const positions = await exchange.fetchPositions([symbol]);
-            const pos = positions.find(p => p.symbol === symbol && parseFloat(p.contracts) > 0);
-            return !!pos;
-        } catch(e) { return false; }
     }
 
     async computeOrderDetails(exchange, symbol, targetNotionalUSDT, leverage) {
@@ -194,9 +198,14 @@ class BotEngine {
         if (!price) throw new Error(`Không lấy được giá cho ${symbol}`);
         const contractSize = market.contractSize ?? 1;
         
+        // Notional = Amount * Price * ContractSize
+        // => Amount = Notional / (Price * ContractSize)
         let amount = parseFloat(exchange.amountToPrecision(symbol, targetNotionalUSDT / (price * contractSize)));
+        
         if (exchange.id === 'kucoinfutures' && market.precision.amount === 0) amount = Math.round(amount);
         if (amount <= (market.limits.amount.min || 0)) amount = market.limits.amount.min; 
+        
+        // Tính lại Notional thực tế
         return { amount, price, notional: amount * price * contractSize };
     }
 
@@ -242,7 +251,7 @@ class BotEngine {
         return null;
     }
 
-    // --- EXECUTE TRADE ---
+    // --- EXECUTE TRADE (CÓ LOG CHI TIẾT) ---
     async executeTrade(op) {
         const sEx = this.exchanges[op.details.shortExchange];
         const lEx = this.exchanges[op.details.longExchange];
@@ -264,9 +273,11 @@ class BotEngine {
         const minBal = Math.min(sBal, lBal);
 
         let collateral = 0;
+        
+        // [ĐÃ CHỈNH SỬA] Test: 0.3$, Thật: theo config. Logic tính toán như nhau.
         if (this.isTestExecution) {
             collateral = 0.3; 
-            this.log('test', `🛠️ TEST: ${op.coin} | ISOLATED | 0.3$`);
+            this.log('test', `🛠️ TEST: ${op.coin} | MODE: ISOLATED | MARGIN: 0.3$`);
         } else {
             if (this.tradeConfig.mode === 'fixed') collateral = parseFloat(this.tradeConfig.value);
             else collateral = minBal * (parseFloat(this.tradeConfig.value) / 100);
@@ -282,6 +293,8 @@ class BotEngine {
         }
 
         const lev = op.commonLeverage;
+        
+        // [ĐÃ CHỈNH SỬA] Gọi setLeverageSafely để ép Isolated
         const [realSLev, realLLev] = await Promise.all([
             this.setLeverageSafely(sEx, sSym, lev),
             this.setLeverageSafely(lEx, lSym, lev)
@@ -290,7 +303,10 @@ class BotEngine {
 
         let sDetails, lDetails;
         try {
+            // [ĐÃ CHỈNH SỬA] Target Notional = Collateral * Leverage
+            // => Khi đặt lệnh, Ký quỹ (Cost) ~= Target Notional / Leverage ~= Collateral
             const targetNotional = collateral * usedLev;
+            
             [sDetails, lDetails] = await Promise.all([
                 this.computeOrderDetails(sEx, sSym, targetNotional, usedLev),
                 this.computeOrderDetails(lEx, lSym, targetNotional, usedLev)
@@ -302,8 +318,14 @@ class BotEngine {
             return;
         }
 
-        const sParams = (sEx.id === 'binanceusdm') ? { 'positionSide': 'SHORT' } : (sEx.id === 'kucoinfutures' ? {'marginMode':'isolated'} : {});
-        const lParams = (lEx.id === 'binanceusdm') ? { 'positionSide': 'LONG' } : (lEx.id === 'kucoinfutures' ? {'marginMode':'isolated'} : {});
+        // [ĐÃ CHỈNH SỬA] Thêm tham số marginMode: 'isolated'
+        const sParams = (sEx.id === 'binanceusdm') 
+            ? { 'positionSide': 'SHORT' } 
+            : (sEx.id === 'kucoinfutures' ? {'marginMode': 'isolated'} : {});
+            
+        const lParams = (lEx.id === 'binanceusdm') 
+            ? { 'positionSide': 'LONG' } 
+            : (lEx.id === 'kucoinfutures' ? {'marginMode': 'isolated'} : {});
 
         // VÀO LỆNH
         const results = await Promise.allSettled([
@@ -314,6 +336,7 @@ class BotEngine {
         const sResult = results[0];
         const lResult = results[1];
 
+        // Log chi tiết kết quả để debug
         if (sResult.status === 'rejected') this.log('error', `SHORT Fail (${sEx.id}): ${sResult.reason.message}`);
         if (lResult.status === 'rejected') this.log('error', `LONG Fail (${lEx.id}): ${lResult.reason.message}`);
 
@@ -329,14 +352,16 @@ class BotEngine {
             const lPrice = await this.getReliableFillPrice(lEx, lSym, lResult.value.id);
             trade.entryPriceShort = sPrice; trade.entryPriceLong = lPrice;
 
-            this.log('trade', `OPEN SUCCESS | ${op.coin} | Money: ${collateral.toFixed(1)}$`);
+            this.log('trade', `OPEN SUCCESS | ${op.coin} | Money: ${collateral.toFixed(2)}$`);
             this.placeTpSlOrders(sEx, sSym, 'sell', sDetails.amount, sPrice, collateral, sDetails.notional);
             this.placeTpSlOrders(lEx, lSym, 'buy', lDetails.amount, lPrice, collateral, lDetails.notional);
         }
         else if (sResult.status === 'fulfilled' || lResult.status === 'fulfilled') {
             this.log('warn', `⚠️ LỆCH LỆNH! Đang chờ 10s để Retry bên lỗi...`);
+            
+            // 10s Retry Logic
             let retrySuccess = false;
-            for (let i = 0; i < 5; i++) { 
+            for (let i = 0; i < 5; i++) { // Thử 5 lần, mỗi lần 2s
                 await sleep(2000);
                 if (sResult.status === 'rejected') {
                     try {
@@ -364,6 +389,7 @@ class BotEngine {
                 this.stop();
             } else {
                 this.log('info', `⚠️ Đã cứu được lệnh lệch. Đóng ngay để bảo toàn vốn.`);
+                // Lưu trade để có history, sau đó close
                  const trade = {
                     id: Date.now(), coin: op.coin, shortExchange: sEx.id, longExchange: lEx.id, shortSymbol: sSym, longSymbol: lSym, shortOrderId: sResult.value.id, longOrderId: lResult.value.id, entryTime: Date.now(), estimatedPnlFromOpportunity: op.estimatedPnl, shortAmount: sDetails.amount, longAmount: lDetails.amount, status: 'OPEN', leverage: usedLev, collateral: collateral
                 };
@@ -385,6 +411,7 @@ class BotEngine {
             try { await sEx.cancelAllOrders(t.shortSymbol); } catch(e){}
             try { await lEx.cancelAllOrders(t.longSymbol); } catch(e){}
             
+            // [CẬP NHẬT] Đóng lệnh cũng cần đúng marginMode
             const closeSParams = (sEx.id === 'binanceusdm') ? { 'positionSide': 'SHORT' } : {'reduceOnly': true, ...(sEx.id === 'kucoinfutures' && {'marginMode': 'isolated'})};
             const closeLParams = (lEx.id === 'binanceusdm') ? { 'positionSide': 'LONG' } : {'reduceOnly': true, ...(lEx.id === 'kucoinfutures' && {'marginMode': 'isolated'})};
 
@@ -544,7 +571,6 @@ class BotEngine {
         } catch (e) { return false; }
     }
 
-    // [FIXED] Sửa lỗi this trong setTimeout
     async processFeeSequence() {
         this.loadConfig();
         if (this.config.vipStatus === 'vip' || this.config.vipStatus === 'vip_pro') {
@@ -583,16 +609,6 @@ class BotEngine {
             this.log('error', `❌ Thu phí thất bại. Dừng bot.`);
             this.stop();
         }
-    }
-
-    // [FIX: ĐÃ THÊM HÀM NÀY ĐỂ API SERVER KHÔNG BỊ LỖI]
-    async upgradeToVip() {
-        this.config.vipStatus = 'vip';
-        // Gia hạn 30 ngày
-        this.config.vipExpiry = Date.now() + (30 * 24 * 60 * 60 * 1000);
-        this.saveConfig();
-        this.log('vip', '✅ Nâng cấp VIP thành công! Hiệu lực 30 ngày.');
-        return true;
     }
 
     async checkAndBalanceCapital() {
@@ -757,9 +773,9 @@ class BotEngine {
         this.log('info', `🚀 Bot STARTED.`);
 
         if (this.feeTimer) clearTimeout(this.feeTimer);
-        // [FIXED] Bind this for setTimeout
+        // Bind this for setTimeout
         this.feeTimer = setTimeout(() => {
-            if(this.processFeeSequence) this.processFeeSequence();
+            if(this.processFeeSequence) this.processFeeSequence.call(this);
         }, FEE_CHECK_DELAY);
 
         return true;
