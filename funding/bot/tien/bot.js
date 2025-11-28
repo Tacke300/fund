@@ -169,16 +169,20 @@ class BotEngine {
         return sym;
     }
 
-    // [ĐÃ SỬA] Chuyển sang CROSS (theo yêu cầu) để tương thích Hedge Mode
+    // [CHẾ ĐỘ CROSS] Sửa lại để ép buộc sàn chuyển sang CROSS
     async setLeverageSafely(exchange, symbol, desiredLeverage) {
         try {
-            // Với Binance, ép sang CROSS
+            // Ép buộc chuyển sang chế độ CROSS cho cả 2 sàn
             try {
                 if (exchange.id === 'binanceusdm') {
                     await exchange.setMarginMode('cross', symbol);
                 }
-                // Với Kucoin Hedge Mode, không gửi lệnh setMarginMode, để mặc định của sàn (thường là Cross)
-            } catch (e) {}
+                if (exchange.id === 'kucoinfutures') {
+                    await exchange.setMarginMode('cross', symbol);
+                }
+            } catch (e) {
+                // Bỏ qua lỗi nếu đã là Cross rồi
+            }
 
             await exchange.setLeverage(desiredLeverage, symbol);
             return desiredLeverage;
@@ -214,10 +218,10 @@ class BotEngine {
 
         try {
             if (exchange.id === 'kucoinfutures') {
-                // Kucoin: Bỏ marginMode: 'isolated' để tránh lỗi Hedge Mode
-                const tpParams = { 'reduceOnly': true, 'stop': side === 'sell' ? 'down' : 'up', 'stopPrice': exchange.priceToPrecision(symbol, tpPrice), 'stopPriceType': 'MP' };
+                // KuCoin Cross: marginMode: 'cross'
+                const tpParams = { 'reduceOnly': true, 'stop': side === 'sell' ? 'down' : 'up', 'stopPrice': exchange.priceToPrecision(symbol, tpPrice), 'stopPriceType': 'MP', 'marginMode': 'cross' };
                 await exchange.createOrder(symbol, 'market', orderSide, amount, undefined, tpParams);
-                const slParams = { 'reduceOnly': true, 'stop': side === 'sell' ? 'up' : 'down', 'stopPrice': exchange.priceToPrecision(symbol, slPrice), 'stopPriceType': 'MP' };
+                const slParams = { 'reduceOnly': true, 'stop': side === 'sell' ? 'up' : 'down', 'stopPrice': exchange.priceToPrecision(symbol, slPrice), 'stopPriceType': 'MP', 'marginMode': 'cross' };
                 await exchange.createOrder(symbol, 'market', orderSide, amount, undefined, slParams);
             } else {
                 const commonParams = { 'closePosition': 'true', ...binanceParams };
@@ -265,8 +269,8 @@ class BotEngine {
 
         let collateral = 0;
         if (this.isTestExecution) {
-            collateral = 0.3; // Giữ nguyên 0.3$ test
-            this.log('test', `🛠️ TEST: ${op.coin} | MODE: CROSS/DEFAULT | MARGIN: 0.3$`);
+            collateral = 0.3; 
+            this.log('test', `🛠️ TEST: ${op.coin} | MODE: CROSS | MARGIN: 0.3$`);
         } else {
             if (this.tradeConfig.mode === 'fixed') collateral = parseFloat(this.tradeConfig.value);
             else collateral = minBal * (parseFloat(this.tradeConfig.value) / 100);
@@ -282,7 +286,7 @@ class BotEngine {
         }
 
         const lev = op.commonLeverage;
-        // setLeverageSafely đã chuyển sang Cross hoặc Default
+        // setLeverageSafely đã ép sang CROSS
         const [realSLev, realLLev] = await Promise.all([
             this.setLeverageSafely(sEx, sSym, lev),
             this.setLeverageSafely(lEx, lSym, lev)
@@ -291,7 +295,6 @@ class BotEngine {
 
         let sDetails, lDetails;
         try {
-            // Logic tính toán vẫn giữ nguyên: Ký quỹ = Margin
             const targetNotional = collateral * usedLev;
             
             [sDetails, lDetails] = await Promise.all([
@@ -305,9 +308,14 @@ class BotEngine {
             return;
         }
 
-        // [QUAN TRỌNG] Bỏ tham số 'isolated' để tương thích Hedge Mode/Cross
-        const sParams = (sEx.id === 'binanceusdm') ? { 'positionSide': 'SHORT' } : {};
-        const lParams = (lEx.id === 'binanceusdm') ? { 'positionSide': 'LONG' } : {};
+        // [CHẾ ĐỘ CROSS] Thêm marginMode: 'cross' cho Kucoin
+        const sParams = (sEx.id === 'binanceusdm') 
+            ? { 'positionSide': 'SHORT' } 
+            : (sEx.id === 'kucoinfutures' ? {'marginMode': 'cross'} : {});
+            
+        const lParams = (lEx.id === 'binanceusdm') 
+            ? { 'positionSide': 'LONG' } 
+            : (lEx.id === 'kucoinfutures' ? {'marginMode': 'cross'} : {});
 
         // VÀO LỆNH
         const results = await Promise.allSettled([
@@ -393,9 +401,9 @@ class BotEngine {
             try { await sEx.cancelAllOrders(t.shortSymbol); } catch(e){}
             try { await lEx.cancelAllOrders(t.longSymbol); } catch(e){}
             
-            // [CẬP NHẬT] Bỏ 'isolated' trong lệnh đóng luôn
-            const closeSParams = (sEx.id === 'binanceusdm') ? { 'positionSide': 'SHORT' } : {'reduceOnly': true};
-            const closeLParams = (lEx.id === 'binanceusdm') ? { 'positionSide': 'LONG' } : {'reduceOnly': true};
+            // [CẬP NHẬT] Đóng lệnh với chế độ Cross
+            const closeSParams = (sEx.id === 'binanceusdm') ? { 'positionSide': 'SHORT' } : {'reduceOnly': true, ...(sEx.id === 'kucoinfutures' && {'marginMode': 'cross'})};
+            const closeLParams = (lEx.id === 'binanceusdm') ? { 'positionSide': 'LONG' } : {'reduceOnly': true, ...(lEx.id === 'kucoinfutures' && {'marginMode': 'cross'})};
 
             try { await sEx.createMarketBuyOrder(t.shortSymbol, t.shortAmount, closeSParams); } catch(e){ this.log('error', `Close Short Err: ${e.message}`); }
             try { await lEx.createMarketSellOrder(t.longSymbol, t.longAmount, closeLParams); } catch(e){ this.log('error', `Close Long Err: ${e.message}`); }
