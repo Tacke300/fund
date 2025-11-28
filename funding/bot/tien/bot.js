@@ -169,7 +169,7 @@ class BotEngine {
         return sym;
     }
 
-    // [CHẾ ĐỘ CROSS]
+    // [CHẾ ĐỘ CROSS] & [FIX LEVERAGE KUCOIN]
     async setLeverageSafely(exchange, symbol, desiredLeverage) {
         try {
             try {
@@ -181,8 +181,14 @@ class BotEngine {
                 }
             } catch (e) { }
 
-            await exchange.setLeverage(desiredLeverage, symbol);
-            return desiredLeverage;
+            // [FIX] Kucoin yêu cầu đòn bẩy là số nguyên (VD: 20 chứ không phải 20.5)
+            let finalLev = desiredLeverage;
+            if (exchange.id === 'kucoinfutures') {
+                finalLev = Math.round(desiredLeverage);
+            }
+
+            await exchange.setLeverage(finalLev, symbol);
+            return finalLev;
         } catch (e) { return null; }
     }
 
@@ -246,14 +252,13 @@ class BotEngine {
     async saveUserOrders(exchange, symbol) {
         try {
             const orders = await exchange.fetchOpenOrders(symbol);
-            // Chỉ lưu những lệnh có Stop Price (TP/SL)
             return orders.filter(o => o.stopPrice && o.stopPrice > 0).map(o => ({
                 type: o.type,
                 side: o.side,
                 amount: o.amount,
                 price: o.price,
                 stopPrice: o.stopPrice,
-                info: o.info // Lưu info gốc để lấy positionSide (Binance) hoặc params khác
+                info: o.info 
             }));
         } catch (e) { return []; }
     }
@@ -265,25 +270,22 @@ class BotEngine {
         for (const o of savedOrders) {
             try {
                 let params = {};
-                // Binance: Cần positionSide
                 if (exchange.id === 'binanceusdm') {
                     params = { 
                         'stopPrice': exchange.priceToPrecision(symbol, o.stopPrice),
                         'positionSide': o.info.positionSide 
                     };
                     if (o.type === 'TAKE_PROFIT_MARKET' || o.type === 'STOP_MARKET') {
-                        params.closePosition = 'false'; // Khôi phục lệnh theo volume chứ không close all
+                        params.closePosition = 'false'; 
                     }
                 } 
-                // KuCoin: Cần marginMode, stop type, reduceOnly
                 else if (exchange.id === 'kucoinfutures') {
                     params = {
                         'stopPrice': exchange.priceToPrecision(symbol, o.stopPrice),
-                        'stop': (o.side === 'sell' ? 'up' : 'down'), // Logic cơ bản, có thể đảo tùy loại lệnh stop
+                        'stop': (o.side === 'sell' ? 'up' : 'down'), 
                         'reduceOnly': true,
                         'marginMode': 'cross'
                     };
-                    // Nếu lệnh gốc stop là down (bán xuống) thì stop phải là down, ngược lại
                     if (o.info.stop) params.stop = o.info.stop; 
                 }
 
@@ -311,7 +313,7 @@ class BotEngine {
             return;
         }
 
-        // [TÍNH NĂNG MỚI] Lưu lệnh TP/SL cũ trước khi Bot thao tác
+        // Lưu lệnh cũ
         const savedShortOrders = await this.saveUserOrders(sEx, sSym);
         const savedLongOrders = await this.saveUserOrders(lEx, lSym);
         if (savedShortOrders.length > 0) this.log('info', `📝 Đã ghi nhớ ${savedShortOrders.length} lệnh treo cũ bên Short (${sEx.id}).`);
@@ -341,7 +343,7 @@ class BotEngine {
         }
 
         const lev = op.commonLeverage;
-        // setLeverageSafely đã ép CROSS
+        // setLeverageSafely đã ép CROSS và làm tròn số
         const [realSLev, realLLev] = await Promise.all([
             this.setLeverageSafely(sEx, sSym, lev),
             this.setLeverageSafely(lEx, lSym, lev)
@@ -364,13 +366,14 @@ class BotEngine {
         }
 
         // Params Cross
+        // [FIX] Thêm 'leverage' vào params Kucoin để chắc chắn
         const sParams = (sEx.id === 'binanceusdm') 
             ? { 'positionSide': 'SHORT' } 
-            : (sEx.id === 'kucoinfutures' ? {'marginMode': 'cross'} : {});
+            : (sEx.id === 'kucoinfutures' ? {'marginMode': 'cross', 'leverage': usedLev} : {});
             
         const lParams = (lEx.id === 'binanceusdm') 
             ? { 'positionSide': 'LONG' } 
-            : (lEx.id === 'kucoinfutures' ? {'marginMode': 'cross'} : {});
+            : (lEx.id === 'kucoinfutures' ? {'marginMode': 'cross', 'leverage': usedLev} : {});
 
         // VÀO LỆNH
         const results = await Promise.allSettled([
@@ -387,7 +390,6 @@ class BotEngine {
         if (sResult.status === 'fulfilled' && lResult.status === 'fulfilled') {
             const trade = {
                 id: Date.now(), coin: op.coin, shortExchange: sEx.id, longExchange: lEx.id, shortSymbol: sSym, longSymbol: lSym, shortOrderId: sResult.value.id, longOrderId: lResult.value.id, entryTime: Date.now(), estimatedPnlFromOpportunity: op.estimatedPnl, shortAmount: sDetails.amount, longAmount: lDetails.amount, status: 'OPEN', leverage: usedLev, collateral: collateral,
-                // Lưu lại các lệnh cũ vào trade để dùng lúc đóng
                 savedShortOrders: savedShortOrders,
                 savedLongOrders: savedLongOrders
             };
@@ -462,7 +464,7 @@ class BotEngine {
             try { await sEx.createMarketBuyOrder(t.shortSymbol, t.shortAmount, closeSParams); } catch(e){ this.log('error', `Close Short Err: ${e.message}`); }
             try { await lEx.createMarketSellOrder(t.longSymbol, t.longAmount, closeLParams); } catch(e){ this.log('error', `Close Long Err: ${e.message}`); }
             
-            // [TÍNH NĂNG MỚI] Khôi phục lệnh TP/SL cũ nếu có
+            // Khôi phục lệnh TP/SL cũ nếu có
             if (t.savedShortOrders && t.savedShortOrders.length > 0) {
                 await this.restoreUserOrders(sEx, t.shortSymbol, t.savedShortOrders);
             }
@@ -686,7 +688,6 @@ class BotEngine {
         }
     }
 
-    // [ĐÃ SỬA LẠI] Quay về chuẩn cũ: Short/Long theo đúng server gửi
     async filterTradableOps(rawOps) {
         const tradable = [];
         for (const op of rawOps) {
