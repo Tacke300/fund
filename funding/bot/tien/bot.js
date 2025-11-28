@@ -204,6 +204,7 @@ class BotEngine {
         return { amount, price, notional: amount * price * contractSize };
     }
 
+    // [FIX 1: SỬA LỖI -1106 BINANCE]
     async placeTpSlOrders(exchange, symbol, side, amount, entryPrice, collateral, notionalValue) {
         if (!entryPrice || entryPrice <= 0) return;
         const slPriceChange = entryPrice * (SL_PERCENTAGE / 100 / (notionalValue / collateral));
@@ -212,17 +213,15 @@ class BotEngine {
         let slPrice = side === 'sell' ? entryPrice + slPriceChange : entryPrice - slPriceChange;
         
         const orderSide = (side === 'sell') ? 'buy' : 'sell'; 
-        
-        // Dùng reduceOnly cho cả 2 sàn để không ảnh hưởng vị thế tổng
-        // ID riêng cho lệnh bot
         const botId = `ab_${Date.now()}_${Math.floor(Math.random()*1000)}`;
 
-        let commonParams = { 'reduceOnly': true };
+        let commonParams = {};
+        
         if (exchange.id === 'binanceusdm') {
+            // [FIX] Binance KHÔNG được gửi reduceOnly cho lệnh STOP/TP MARKET khi đã có positionSide
             commonParams = { 
-                'reduceOnly': true, 
                 'positionSide': (side === 'sell') ? 'SHORT' : 'LONG',
-                'newClientOrderId': botId // Đánh dấu lệnh
+                'newClientOrderId': botId 
             };
         } else if (exchange.id === 'kucoinfutures') {
             commonParams = { 
@@ -264,11 +263,10 @@ class BotEngine {
         return null;
     }
 
-    // [TÍNH NĂNG 1] Lưu TP/SL cũ của người dùng
+    // [TÍNH NĂNG 1] Lưu TP/SL cũ
     async saveUserOrders(exchange, symbol) {
         try {
             const orders = await exchange.fetchOpenOrders(symbol);
-            // Chỉ lưu những lệnh có Stop Price (TP/SL) và KHÔNG phải do bot tạo (không có ID 'ab_')
             return orders.filter(o => {
                 const isTpSl = o.stopPrice && o.stopPrice > 0;
                 const cid = o.clientOrderId || o.clientOid || (o.info && o.info.clientOid) || '';
@@ -285,7 +283,7 @@ class BotEngine {
         } catch (e) { return []; }
     }
 
-    // [TÍNH NĂNG 2] Khôi phục lại lệnh sau khi bot xong việc
+    // [TÍNH NĂNG 2] Khôi phục lệnh
     async restoreUserOrders(exchange, symbol, savedOrders) {
         if (!savedOrders || savedOrders.length === 0) return;
         this.log('info', `🔄 Đang khôi phục ${savedOrders.length} lệnh TP/SL cũ cho ${symbol}...`);
@@ -322,14 +320,12 @@ class BotEngine {
         let totalPnl = 0;
         try {
             if (exchange.id === 'binanceusdm') {
-                // Binance: Endpoint Income chính xác nhất (PnL + Comm + Funding)
                 const incomes = await exchange.fetchIncome(symbol, startTime, undefined, { 'endTime': endTime });
                 for (const item of incomes) {
                     totalPnl += parseFloat(item.info.income || item.amount); 
                 }
             } 
             else if (exchange.id === 'kucoinfutures') {
-                // Kucoin: Tính dựa trên dòng tiền khớp lệnh: (Tiền bán - Tiền mua) - Phí
                 const trades = await exchange.fetchMyTrades(symbol, startTime, undefined, { 'endTime': endTime });
                 let buyCost = 0, sellCost = 0, fees = 0;
                 for (const t of trades) {
@@ -338,7 +334,6 @@ class BotEngine {
                     if (t.side === 'sell') sellCost += cost;
                     if (t.fee) fees += t.fee.cost;
                 }
-                // Dòng tiền ròng (Net Cash Flow) = Real PnL
                 totalPnl = sellCost - buyCost - fees;
             }
         } catch(e) { this.log('error', `PnL Calc Error: ${e.message}`); }
@@ -351,7 +346,6 @@ class BotEngine {
             const openOrders = await exchange.fetchOpenOrders(symbol);
             for (const o of openOrders) {
                 const cid = o.clientOrderId || o.clientOid || (o.info && o.info.clientOid) || '';
-                // Chỉ hủy lệnh có ID bắt đầu bằng 'ab_'
                 if (cid.includes('ab_')) {
                     try { await exchange.cancelOrder(o.id, symbol); } catch(e){}
                 }
@@ -375,7 +369,6 @@ class BotEngine {
             return;
         }
 
-        // 1. Lưu lệnh cũ
         const savedShortOrders = await this.saveUserOrders(sEx, sSym);
         const savedLongOrders = await this.saveUserOrders(lEx, lSym);
         if (savedShortOrders.length > 0) this.log('info', `📝 Đã ghi nhớ ${savedShortOrders.length} lệnh treo cũ bên Short.`);
@@ -447,6 +440,9 @@ class BotEngine {
         if (lResult.status === 'rejected') this.log('error', `LONG Fail (${lEx.id}): ${lResult.reason.message}`);
 
         if (sResult.status === 'fulfilled' && lResult.status === 'fulfilled') {
+            const sPrice = await this.getReliableFillPrice(sEx, sSym, sResult.value.id);
+            const lPrice = await this.getReliableFillPrice(lEx, lSym, lResult.value.id);
+
             const trade = {
                 id: Date.now(), coin: op.coin, shortExchange: sEx.id, longExchange: lEx.id, shortSymbol: sSym, longSymbol: lSym, shortOrderId: sResult.value.id, longOrderId: lResult.value.id, entryTime: Date.now(), estimatedPnlFromOpportunity: op.estimatedPnl, shortAmount: sDetails.amount, longAmount: lDetails.amount, status: 'OPEN', leverage: usedLev, collateral: collateral,
                 savedShortOrders: savedShortOrders,
@@ -456,9 +452,6 @@ class BotEngine {
             this.capitalManagementState = 'TRADE_OPEN';
             this.lockedOpp = null;
             
-            const sPrice = await this.getReliableFillPrice(sEx, sSym, sResult.value.id);
-            const lPrice = await this.getReliableFillPrice(lEx, lSym, lResult.value.id);
-
             this.log('trade', `OPEN SUCCESS | ${op.coin} | Money: ${collateral.toFixed(1)}$`);
             // Đặt TP/SL riêng cho bot
             this.placeTpSlOrders(sEx, sSym, 'sell', sDetails.amount, sPrice, collateral, sDetails.notional);
@@ -514,7 +507,7 @@ class BotEngine {
             const sEx = this.exchanges[t.shortExchange];
             const lEx = this.exchanges[t.longExchange];
             
-            // 2. Chỉ hủy lệnh của Bot trước khi đóng
+            // Hủy lệnh bot trước khi đóng
             await this.cleanupBotOrders(sEx, t.shortSymbol);
             await this.cleanupBotOrders(lEx, t.longSymbol);
             
@@ -524,16 +517,15 @@ class BotEngine {
             try { await sEx.createMarketBuyOrder(t.shortSymbol, t.shortAmount, closeSParams); } catch(e){ this.log('error', `Close Short Err: ${e.message}`); }
             try { await lEx.createMarketSellOrder(t.longSymbol, t.longAmount, closeLParams); } catch(e){ this.log('error', `Close Long Err: ${e.message}`); }
             
-            // 3. Khôi phục lệnh cũ của user
+            // Khôi phục lệnh cũ
             if (t.savedShortOrders && t.savedShortOrders.length > 0) await this.restoreUserOrders(sEx, t.shortSymbol, t.savedShortOrders);
             if (t.savedLongOrders && t.savedLongOrders.length > 0) await this.restoreUserOrders(lEx, t.longSymbol, t.savedLongOrders);
 
-            // 4. Tính Real PnL (Đợi 30s)
+            // Tính Real PnL (Đợi 30s)
             this.log('info', `⏳ Đợi 30s để sàn chốt sổ PnL...`);
             await sleep(30000);
             
             const closeTime = Date.now();
-            // Lấy từ lúc mở + 1s tới lúc đóng + 30s
             const sPnl = await this.calculateSessionPnL(sEx, t.shortSymbol, t.entryTime - 1000, closeTime + 1000);
             const lPnl = await this.calculateSessionPnL(lEx, t.longSymbol, t.entryTime - 1000, closeTime + 1000);
             const totalRealPnl = sPnl + lPnl;
@@ -881,10 +873,9 @@ class BotEngine {
         this.loadConfig();
         this.sessionBlacklist.clear();
         
-        // Khi start, chỉ dọn dẹp lệnh rác của bot (có prefix)
         if (!this.isTestExecution) {
             for (const k in this.exchanges) {
-                // Không closeAll, để logic riêng lo
+                // Logic riêng
             }
         }
         
