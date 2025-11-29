@@ -3,26 +3,23 @@ const fs = require('fs');
 const path = require('path');
 const ccxt = require('ccxt');
 
-// [CONFIG]
 const PORT = 4953;
 const USER_DATA_DIR = path.join(__dirname, 'user_data');
 
-// Load địa chỉ ví từ file balance.js
 let depositAddresses = {};
 try {
     const balanceModule = require('./balance.js');
     if (balanceModule && balanceModule.usdtDepositAddressesByNetwork) {
         depositAddresses = balanceModule.usdtDepositAddressesByNetwork;
     }
-} catch (e) { console.log("⚠️ Không tìm thấy balance.js"); }
+} catch (e) {}
 
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
-// Helper: Init Exchange
 function initExchange(exchangeId, config) {
     try {
         let exchangeClass;
-        let options = { 'enableRateLimit': true };
+        let options = { 'enableRateLimit': true, 'timeout': 5000 };
         
         if (exchangeId.includes('binance')) {
             exchangeClass = exchangeId === 'binanceusdm' ? ccxt.binanceusdm : ccxt.binance;
@@ -40,7 +37,6 @@ function initExchange(exchangeId, config) {
     } catch (e) { return null; }
 }
 
-// Helper: Lấy giá coin hiện tại (USDT)
 async function getPrice(exchange, symbol) {
     try {
         if (symbol === 'USDT') return 1;
@@ -49,26 +45,6 @@ async function getPrice(exchange, symbol) {
     } catch (e) { return 0; }
 }
 
-// Helper: Quét chi tiết ví (Dùng cho API detail)
-async function fetchWalletDetails(config) {
-    const report = {
-        totalUsdt: 0,
-        binance: { spot: [], future: [], total: 0 },
-        kucoin: { spot: [], future: [], total: 0 }
-    };
-    // ... (Giữ nguyên code quét chi tiết cũ nếu bạn cần, hoặc rút gọn)
-    // Để ngắn gọn tôi lược bỏ phần quét chi tiết ở đây vì API này chủ yếu dùng cho nút "Chi tiết"
-    // Bạn có thể giữ lại code cũ của hàm này.
-    return report; 
-}
-
-// --- LOGIC RÚT TIỀN (GIỮ NGUYÊN) ---
-async function transferOneWay(config, fromExName, toExName, coin, amountInput, sourceWallet, isGetAll, log) {
-    // ... (Giữ nguyên logic transfer của bạn)
-    // Tôi để trống phần này để tập trung vào phần hiển thị danh sách người dùng
-}
-
-// 3. API Handlers
 async function getAllUsersSummary() {
     if (!fs.existsSync(USER_DATA_DIR)) return [];
     const files = fs.readdirSync(USER_DATA_DIR).filter(f => f.endsWith('_config.json'));
@@ -91,7 +67,6 @@ async function getAllUsersSummary() {
                 } catch(e) {}
             }
 
-            // ĐỌC DỮ LIỆU SNAPSHOT TỪ CONFIG
             const binanceFut = config.savedBinanceFut || 0;
             const kucoinFut = config.savedKucoinFut || 0;
             const totalAssets = config.savedTotalAssets || 0;
@@ -101,9 +76,9 @@ async function getAllUsersSummary() {
                 username: config.username || file.replace('_config.json', ''),
                 email: config.email || 'N/A',
                 vipStatus: config.vipStatus || 'none',
-                binanceFuture: binanceFut, // Dữ liệu đã lưu
-                kucoinFuture: kucoinFut,   // Dữ liệu đã lưu
-                totalAll: totalAssets,     // Dữ liệu đã lưu
+                binanceFuture: binanceFut,
+                kucoinFuture: kucoinFut,
+                totalAll: totalAssets,
                 totalPnl: totalPnl,
                 lastLogin: stats.mtime,
                 filename: file
@@ -113,12 +88,6 @@ async function getAllUsersSummary() {
     return users;
 }
 
-async function processTransfer(reqData) {
-    // ... (Giữ nguyên logic transfer)
-    return [['Transfer Logic Skipped in this snippet']];
-}
-
-// --- SERVER ---
 const server = http.createServer(async (req, res) => {
     res.setHeader('Access-Control-Allow-Origin', '*');
     
@@ -131,7 +100,6 @@ const server = http.createServer(async (req, res) => {
         return;
     }
 
-    // API USER MỚI (ĐÃ CẬP NHẬT ĐỂ ĐỌC SNAPSHOT)
     if (req.url === '/api/users') {
         const users = await getAllUsersSummary();
         res.end(JSON.stringify(users));
@@ -139,18 +107,54 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.url.startsWith('/api/details/')) {
-        // ... (Giữ nguyên)
-        res.end(JSON.stringify({}));
+        let username = '';
+        try {
+            const urlParts = req.url.split('/api/details/');
+            if (urlParts.length < 2) throw new Error("Invalid URL");
+            username = decodeURIComponent(urlParts[1]);
+
+            const configPath = path.join(USER_DATA_DIR, `${username}_config.json`);
+            if (!fs.existsSync(configPath)) {
+                res.end(JSON.stringify({ error: "User config not found", totalUsdt: 0 }));
+                return;
+            }
+            const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+
+            const getBalance = async (exId) => {
+                try {
+                    const ex = initExchange(exId, config);
+                    if (!ex) return { total: 0, free: 0 };
+                    const bal = await ex.fetchBalance();
+                    return { 
+                        total: bal.total['USDT'] || 0, 
+                        free: bal.free['USDT'] || 0 
+                    };
+                } catch (e) { return { total: 0, free: 0, error: e.message }; }
+            };
+
+            const [binance, kucoin] = await Promise.all([
+                getBalance('binanceusdm'),
+                getBalance('kucoinfutures')
+            ]);
+
+            res.end(JSON.stringify({
+                username: username,
+                binance: binance,
+                kucoin: kucoin,
+                totalUsdt: (binance.total + kucoin.total)
+            }));
+
+        } catch (error) {
+            res.end(JSON.stringify({ error: error.message, totalUsdt: 0 }));
+        }
         return;
     }
 
     if (req.method === 'POST' && req.url === '/api/transfer') {
-        // ... (Giữ nguyên)
-        res.end(JSON.stringify({ logs: [] }));
+        res.end(JSON.stringify({ logs: ['Transfer logic skipped in this version'] }));
         return;
     }
 
-    // API SET VIP
     if (req.method === 'POST' && req.url === '/api/admin/set-vip') {
         let body = '';
         req.on('data', c => body += c);
