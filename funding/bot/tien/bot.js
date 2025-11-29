@@ -203,10 +203,11 @@ class BotEngine {
                 await exchange.createOrder(symbol, 'market', orderSide, amount, undefined, tpParams);
                 const slParams = { 'reduceOnly': true, 'stop': side === 'sell' ? 'up' : 'down', 'stopPrice': exchange.priceToPrecision(symbol, slPrice), 'stopPriceType': 'MP', 'marginMode': 'cross' };
                 await exchange.createOrder(symbol, 'market', orderSide, amount, undefined, slParams);
-            } else {
-                const commonParams = { 'closePosition': 'true', ...binanceParams };
-                await exchange.createOrder(symbol, 'TAKE_PROFIT_MARKET', orderSide, amount, undefined, { ...commonParams, 'stopPrice': exchange.priceToPrecision(symbol, tpPrice) });
-                await exchange.createOrder(symbol, 'STOP_MARKET', orderSide, amount, undefined, { ...commonParams, 'stopPrice': exchange.priceToPrecision(symbol, slPrice) });
+            } else { // Binanceusdm
+                // BỎ 'closePosition: true' và THÊM 'reduceOnly: true' để chỉ đóng khối lượng (amount) của bot, không đóng toàn bộ vị thế.
+                const commonParams = { ...binanceParams };
+                await exchange.createOrder(symbol, 'TAKE_PROFIT_MARKET', orderSide, amount, undefined, { ...commonParams, 'stopPrice': exchange.priceToPrecision(symbol, tpPrice), 'reduceOnly': 'true' });
+                await exchange.createOrder(symbol, 'STOP_MARKET', orderSide, amount, undefined, { ...commonParams, 'stopPrice': exchange.priceToPrecision(symbol, slPrice), 'reduceOnly': 'true' });
             }
         } catch (e) { this.log('warn', `[TP/SL] Fail: ${e.message}`); }
     }
