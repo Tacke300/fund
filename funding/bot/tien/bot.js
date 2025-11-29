@@ -710,7 +710,7 @@ class BotEngine {
                     this.capitalManagementState = 'IDLE'; this.lockedOpps = [];
                 }
 
-                if (nowMs - this.lastScanTime >= 60000) {
+                if (nowMs - this.lastScanTime >= 1000) {
                     try {
                         const res = await fetch(SERVER_DATA_URL);
                         const data = await res.json();
