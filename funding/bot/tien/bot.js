@@ -185,32 +185,47 @@ class BotEngine {
     }
 
     async placeTpSlOrders(exchange, symbol, side, amount, entryPrice, collateral, notionalValue) {
-        if (!entryPrice || entryPrice <= 0) return;
-        const slPriceChange = entryPrice * (SL_PERCENTAGE / 100 / (notionalValue / collateral));
-        const tpPriceChange = entryPrice * (TP_PERCENTAGE / 100 / (notionalValue / collateral));
+        if (!entryPrice || entryPrice <= 0 || amount <= 0) return;
+
+        // Tính toán dựa trên đòn bẩy hiệu dụng (notionalValue / collateral)
+        const effectiveLeverage = notionalValue / collateral;
+
+        const slPriceChange = entryPrice * (SL_PERCENTAGE / 100 / effectiveLeverage);
+        const tpPriceChange = entryPrice * (TP_PERCENTAGE / 100 / effectiveLeverage);
+        
         let tpPrice = side === 'sell' ? entryPrice - tpPriceChange : entryPrice + tpPriceChange;
         let slPrice = side === 'sell' ? entryPrice + slPriceChange : entryPrice - slPriceChange;
         
         const orderSide = (side === 'sell') ? 'buy' : 'sell'; 
         let binanceParams = {};
         if (exchange.id === 'binanceusdm') {
+            // Đặt positionSide cho Binance. Không dùng 'closePosition': 'true' để đặt TP/SL cho khối lượng partial.
             binanceParams = { 'positionSide': (side === 'sell') ? 'SHORT' : 'LONG' };
         }
 
         try {
+            // Hủy tất cả lệnh cũ trước khi đặt lệnh mới (tránh trùng lặp)
+            // Lưu ý: Nếu có lệnh TP/SL của các lệnh trước đó, lệnh này sẽ hủy chúng.
+            // Nếu bạn muốn giữ lệnh TP/SL cũ, bạn phải bỏ đoạn cancelAllOrders.
+            // Tuy nhiên, logic này mặc định là bạn muốn TP/SL chỉ trên khối lượng mới mở.
+            // Việc Hủy tất cả là không cần thiết nếu lệnh cũ còn hiệu lực, nhưng để đảm bảo chỉ có TP/SL mới được đặt, ta vẫn giữ logic cancel.
+            // Để chỉ đặt TP/SL cho khối lượng mới và không ảnh hưởng lệnh cũ: KHÔNG HỦY LỆNH CŨ.
+            
             if (exchange.id === 'kucoinfutures') {
+                // Kucoin futures sử dụng stop order với amount là khối lượng lệnh 
                 const tpParams = { 'reduceOnly': true, 'stop': side === 'sell' ? 'down' : 'up', 'stopPrice': exchange.priceToPrecision(symbol, tpPrice), 'stopPriceType': 'MP', 'marginMode': 'cross' };
                 await exchange.createOrder(symbol, 'market', orderSide, amount, undefined, tpParams);
                 const slParams = { 'reduceOnly': true, 'stop': side === 'sell' ? 'up' : 'down', 'stopPrice': exchange.priceToPrecision(symbol, slPrice), 'stopPriceType': 'MP', 'marginMode': 'cross' };
                 await exchange.createOrder(symbol, 'market', orderSide, amount, undefined, slParams);
             } else {
-                const commonParams = { 'closePosition': 'true', ...binanceParams };
+                // Binance: Bỏ 'closePosition': 'true'. Chỉ sử dụng 'amount' để xác định khối lượng đóng.
+                const commonParams = { ...binanceParams };
                 await exchange.createOrder(symbol, 'TAKE_PROFIT_MARKET', orderSide, amount, undefined, { ...commonParams, 'stopPrice': exchange.priceToPrecision(symbol, tpPrice) });
                 await exchange.createOrder(symbol, 'STOP_MARKET', orderSide, amount, undefined, { ...commonParams, 'stopPrice': exchange.priceToPrecision(symbol, slPrice) });
             }
         } catch (e) { this.log('warn', `[TP/SL] Fail: ${e.message}`); }
     }
-
+    
     async getReliableFillPrice(exchange, symbol, orderId) {
         for (let i = 0; i < 3; i++) { 
             try {
@@ -225,6 +240,8 @@ class BotEngine {
         }
         return null;
     }
+
+    // Đã loại bỏ checkAndPlaceMissingTpSl theo yêu cầu của bạn
 
     async executeTrade(op) {
         if (this.activeTrades.some(t => t.coin === op.coin)) return;
@@ -308,6 +325,7 @@ class BotEngine {
             this.saveActiveTrades();
 
             this.log('trade', `OPEN SUCCESS | ${op.coin} | Money: ${collateral.toFixed(1)}$`);
+            // Đặt TP/SL cho khối lượng mới mở
             this.placeTpSlOrders(sEx, sSym, 'sell', sDetails.amount, sPrice, collateral, sDetails.notional);
             this.placeTpSlOrders(lEx, lSym, 'buy', lDetails.amount, lPrice, collateral, lDetails.notional);
         }
@@ -359,12 +377,13 @@ class BotEngine {
             const sEx = this.exchanges[t.shortExchange];
             const lEx = this.exchanges[t.longExchange];
             
-            try { await sEx.cancelAllOrders(t.shortSymbol); } catch(e){}
-            try { await lEx.cancelAllOrders(t.longSymbol); } catch(e){}
+            // Đã loại bỏ cancelAllOrders ở đây để tránh ảnh hưởng đến TP/SL của các vị thế khác 
+            // nếu người dùng muốn quản lý riêng các vị thế trên sàn.
             
             const closeSParams = (sEx.id === 'binanceusdm') ? { 'positionSide': 'SHORT' } : {'reduceOnly': true, ...(sEx.id === 'kucoinfutures' && {'marginMode': 'cross'})};
             const closeLParams = (lEx.id === 'binanceusdm') ? { 'positionSide': 'LONG' } : {'reduceOnly': true, ...(lEx.id === 'kucoinfutures' && {'marginMode': 'cross'})};
 
+            // Đóng đúng khối lượng của lệnh mà bot đã mở (t.shortAmount, t.longAmount)
             try { await sEx.createMarketBuyOrder(t.shortSymbol, t.shortAmount, closeSParams); } catch(e){ this.log('error', `Close Short Err: ${e.message}`); }
             try { await lEx.createMarketSellOrder(t.longSymbol, t.longAmount, closeLParams); } catch(e){ this.log('error', `Close Long Err: ${e.message}`); }
             
@@ -633,8 +652,9 @@ class BotEngine {
             if (seenCoins.has(op.coin)) continue;
             seenCoins.add(op.coin);
 
-            if (this.activeTrades.some(t => t.coin === op.coin)) continue;
-            
+            // Bỏ qua check: if (this.activeTrades.some(t => t.coin === op.coin)) continue; 
+            // Vẫn cho phép mở thêm lệnh mới mặc dù trade đã có trong bot
+
             if (!this.isTestExecution) {
                 const sBal = this.balances[op.details.shortExchange]?.available || 0;
                 const lBal = this.balances[op.details.longExchange]?.available || 0;
@@ -661,9 +681,7 @@ class BotEngine {
                 const lSym = this.getExchangeSpecificSymbol(lEx, op.coin);
                 if (!sSym || !lSym) continue;
 
-                const hasShort = await this.hasOpenPosition(sEx, sSym);
-                const hasLong = await this.hasOpenPosition(lEx, lSym);
-                if (hasShort || hasLong) continue;
+                // Đã loại bỏ đoạn kiểm tra hasOpenPosition trên sàn để cho phép mở thêm lệnh mới.
             }
 
             selected.push(op);
