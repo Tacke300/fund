@@ -75,9 +75,27 @@
         td { padding: 8px 5px; border-bottom: 1px solid #222; }
         .text-pos { color: var(--kucoin-green); } .text-neg { color: var(--danger); }
         
-        .opp-item { border-bottom: 1px solid #333; padding-bottom: 10px; margin-bottom: 10px; }
-        .opp-item:last-child { border-bottom: none; margin-bottom: 0; }
-        .rank-badge { background: #333; color: #fff; font-size: 0.7rem; padding: 2px 6px; border-radius: 4px; margin-right: 5px; }
+        /* --- NEW STYLES FOR OPP ITEMS --- */
+        .opp-item { 
+            background: #1a1a1a; 
+            border: 1px solid #333; 
+            border-radius: 8px; 
+            padding: 12px; 
+            margin-bottom: 12px; 
+            transition: all 0.2s;
+        }
+        .opp-item:hover { border-color: var(--binance-yellow); background: #222; }
+        .opp-row-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+        .opp-coin-name { font-size: 1.4rem; font-weight: 800; color: #fff; display: flex; align-items: center; gap: 8px; }
+        .rank-badge { background: var(--binance-yellow); color: #000; font-size: 0.8rem; padding: 2px 6px; border-radius: 4px; font-weight: bold; }
+        .opp-pnl { font-size: 1.2rem; font-weight: bold; color: var(--kucoin-green); text-shadow: 0 0 10px rgba(0, 208, 149, 0.2); }
+        
+        .opp-row-mid { display: flex; gap: 10px; margin-bottom: 10px; font-size: 0.85rem; }
+        .tag { background: #333; padding: 4px 8px; border-radius: 4px; color: #ccc; border: 1px solid #444; display: flex; align-items: center; gap: 4px; }
+        .tag-highlight { border-color: #666; color: #fff; }
+
+        .opp-row-bot { display: flex; justify-content: space-between; align-items: center; font-size: 0.9rem; padding-top: 8px; border-top: 1px solid #333; color: #aaa; }
+        .exec-timer { color: #fff; font-weight: bold; display: flex; align-items: center; gap: 5px; }
 
         @media (max-width: 600px) {
             .brand { font-size: 0.9rem; } .logo, .logo-kucoin { height: 25px; }
@@ -160,7 +178,7 @@
                 </div>
                 <div class="card">
                     <h3>Top Opportunities</h3>
-                    <div id="oppContent" style="padding: 10px;"><span style="color:#555">Scanning...</span></div>
+                    <div id="oppContent" style="padding: 0;"><span style="color:#555; padding: 10px; display:block;">Scanning...</span></div>
                 </div>
             </div>
 
@@ -231,6 +249,14 @@
             const m = Math.floor(ms / 60000);
             const s = Math.floor((ms % 60000) / 1000);
             return `${m}:${s < 10 ? '0'+s : s}`;
+        }
+        
+        function formatCountDown(ms) {
+            if (ms <= 0) return "00:00:00";
+            const h = Math.floor(ms / (1000 * 60 * 60));
+            const m = Math.floor((ms % (1000 * 60 * 60)) / (1000 * 60));
+            const s = Math.floor((ms % (1000 * 60)) / 1000);
+            return `${h}:${m < 10 ? '0'+m : m}:${s < 10 ? '0'+s : s}`;
         }
 
         async function handleRegister() {
@@ -351,31 +377,39 @@
             if (Array.isArray(opps) && opps.length > 0) {
                 let html = '';
                 const delays = ['59:00', '59:25', '59:45'];
+                const now = Date.now();
+                
                 opps.forEach((op, idx) => {
-                    const now = Date.now();
                     const timeLeft = op.nextFundingTime ? (op.nextFundingTime - now) : 0;
-                    const timerText = timeLeft > 0 ? formatTime(timeLeft) : "NOW";
+                    const timerText = timeLeft > 0 ? formatCountDown(timeLeft) : "--:--:--";
                     const sExName = op.details.shortExchange.includes('binance') ? 'BIN' : 'KUC';
                     const lExName = op.details.longExchange.includes('binance') ? 'BIN' : 'KUC';
                     const sColor = sExName === 'BIN' ? 'var(--binance-yellow)' : 'var(--kucoin-green)';
                     const lColor = lExName === 'BIN' ? 'var(--binance-yellow)' : 'var(--kucoin-green)';
                     const executeTime = delays[idx] || '';
+                    const leverage = op.commonLeverage || 1;
 
                     html += `
                     <div class="opp-item">
-                        <div style="display:flex; justify-content:space-between; align-items:center;">
-                            <div style="font-weight:bold; color:#fff; font-size:1.1rem;"><span class="rank-badge">#${idx+1}</span> ${op.coin}</div>
-                            <div style="color:var(--kucoin-green); font-weight:bold;">${op.estimatedPnl.toFixed(2)}%</div>
+                        <div class="opp-row-top">
+                            <div class="opp-coin-name"><span class="rank-badge">#${idx+1}</span> ${op.coin}</div>
+                            <div class="opp-pnl">+${op.estimatedPnl.toFixed(2)}%</div>
                         </div>
-                        <div style="display:flex; justify-content:space-between; font-size:0.85rem; margin-top:5px; color:#aaa;">
-                            <div>S: <span style="color:${sColor}">${sExName}</span> | L: <span style="color:${lColor}">${lExName}</span></div>
-                            <div>Exec: <span style="color:#fff;">${executeTime}</span></div>
+                        <div class="opp-row-mid">
+                            <div class="tag tag-highlight">Lev: x${leverage}</div>
+                            <div class="tag">Funding: ⏳ ${timerText}</div>
+                        </div>
+                        <div class="opp-row-bot">
+                            <div>
+                                <span style="color:${sColor}">S: ${sExName}</span> ⚡ <span style="color:${lColor}">L: ${lExName}</span>
+                            </div>
+                            <div class="exec-timer">⏰ Exec: ${executeTime}</div>
                         </div>
                     </div>`;
                 });
                 document.getElementById('oppContent').innerHTML = html;
             } else {
-                document.getElementById('oppContent').innerHTML = `<span style="color:#555">Scanning...</span>`;
+                document.getElementById('oppContent').innerHTML = `<span style="color:#555; padding: 10px; display:block;">Scanning...</span>`;
             }
 
             let hH = '';
