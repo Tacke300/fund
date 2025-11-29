@@ -158,7 +158,8 @@ class BotEngine {
 
     async setLeverageSafely(exchange, symbol, desiredLeverage) {
         try {
-            try { await exchange.setMarginMode('isolated', symbol); } catch (e) {}
+            // [MODIFIED] Chuyển sang CROSS
+            try { await exchange.setMarginMode('cross', symbol); } catch (e) {}
             await exchange.setLeverage(desiredLeverage, symbol);
             return desiredLeverage;
         } catch (e) { return null; }
@@ -192,9 +193,10 @@ class BotEngine {
 
         try {
             if (exchange.id === 'kucoinfutures') {
-                const tpParams = { 'reduceOnly': true, 'stop': side === 'sell' ? 'down' : 'up', 'stopPrice': exchange.priceToPrecision(symbol, tpPrice), 'stopPriceType': 'MP', 'marginMode': 'isolated' };
+                // [MODIFIED] Chuyển sang CROSS
+                const tpParams = { 'reduceOnly': true, 'stop': side === 'sell' ? 'down' : 'up', 'stopPrice': exchange.priceToPrecision(symbol, tpPrice), 'stopPriceType': 'MP', 'marginMode': 'cross' };
                 await exchange.createOrder(symbol, 'market', orderSide, amount, undefined, tpParams);
-                const slParams = { 'reduceOnly': true, 'stop': side === 'sell' ? 'up' : 'down', 'stopPrice': exchange.priceToPrecision(symbol, slPrice), 'stopPriceType': 'MP', 'marginMode': 'isolated' };
+                const slParams = { 'reduceOnly': true, 'stop': side === 'sell' ? 'up' : 'down', 'stopPrice': exchange.priceToPrecision(symbol, slPrice), 'stopPriceType': 'MP', 'marginMode': 'cross' };
                 await exchange.createOrder(symbol, 'market', orderSide, amount, undefined, slParams);
             } else {
                 const commonParams = { 'closePosition': 'true', ...binanceParams };
@@ -274,8 +276,9 @@ class BotEngine {
             return;
         }
 
-        const sParams = (sEx.id === 'binanceusdm') ? { 'positionSide': 'SHORT' } : (sEx.id === 'kucoinfutures' ? {'marginMode':'isolated'} : {});
-        const lParams = (lEx.id === 'binanceusdm') ? { 'positionSide': 'LONG' } : (lEx.id === 'kucoinfutures' ? {'marginMode':'isolated'} : {});
+        // [MODIFIED] Chuyển sang CROSS
+        const sParams = (sEx.id === 'binanceusdm') ? { 'positionSide': 'SHORT' } : (sEx.id === 'kucoinfutures' ? {'marginMode':'cross'} : {});
+        const lParams = (lEx.id === 'binanceusdm') ? { 'positionSide': 'LONG' } : (lEx.id === 'kucoinfutures' ? {'marginMode':'cross'} : {});
 
         const results = await Promise.allSettled([
             sEx.createMarketSellOrder(sSym, sDetails.amount, sParams),
@@ -351,8 +354,9 @@ class BotEngine {
             try { await sEx.cancelAllOrders(t.shortSymbol); } catch(e){}
             try { await lEx.cancelAllOrders(t.longSymbol); } catch(e){}
             
-            const closeSParams = (sEx.id === 'binanceusdm') ? { 'positionSide': 'SHORT' } : {'reduceOnly': true, ...(sEx.id === 'kucoinfutures' && {'marginMode': 'isolated'})};
-            const closeLParams = (lEx.id === 'binanceusdm') ? { 'positionSide': 'LONG' } : {'reduceOnly': true, ...(lEx.id === 'kucoinfutures' && {'marginMode': 'isolated'})};
+            // [MODIFIED] Chuyển sang CROSS
+            const closeSParams = (sEx.id === 'binanceusdm') ? { 'positionSide': 'SHORT' } : {'reduceOnly': true, ...(sEx.id === 'kucoinfutures' && {'marginMode': 'cross'})};
+            const closeLParams = (lEx.id === 'binanceusdm') ? { 'positionSide': 'LONG' } : {'reduceOnly': true, ...(lEx.id === 'kucoinfutures' && {'marginMode': 'cross'})};
 
             try { await sEx.createMarketBuyOrder(t.shortSymbol, t.shortAmount, closeSParams); } catch(e){ this.log('error', `Close Short Err: ${e.message}`); }
             try { await lEx.createMarketSellOrder(t.longSymbol, t.longAmount, closeLParams); } catch(e){ this.log('error', `Close Long Err: ${e.message}`); }
@@ -614,13 +618,6 @@ class BotEngine {
             if (this.activeTrades.some(t => t.coin === op.coin)) continue;
             
             if (!this.isTestExecution) {
-                if (op.nextFundingTime) {
-                    const diff = op.nextFundingTime - Date.now();
-                    if (diff <= 0 || diff > 900000) continue; 
-                } else {
-                    continue; 
-                }
-                
                 const sBal = this.balances[op.details.shortExchange]?.available || 0;
                 const lBal = this.balances[op.details.longExchange]?.available || 0;
                 if (sBal <= MIN_COLLATERAL_FOR_TRADE || lBal <= MIN_COLLATERAL_FOR_TRADE) continue;
@@ -654,12 +651,14 @@ class BotEngine {
             selected.push(op);
         }
 
+        // CẬP NHẬT GIAO DIỆN NGAY LẬP TỨC
         this.opps = selected;
 
+        // CHỈ KHÓA (LOCK) NẾU ĐÃ ĐẾN PHÚT 55 VÀ ĐANG RẢNH
         if (m >= 55 && selected.length > 0 && this.activeTrades.length === 0) {
             this.lockedOpps = selected.map(o => ({...o, executed: false}));
             this.capitalManagementState = 'FUNDS_READY';
-            this.log('info', `🔒 Locked ${selected.length} opps. Waiting for 59:xx.`);
+            this.log('info', `🔒 LOCKED Top opportunities at minute ${m}. Waiting for 59:xx...`);
         }
     }
 
@@ -706,8 +705,11 @@ class BotEngine {
             else {
                 await this.checkAndBalanceCapital();
 
+                // RESET VÒNG LẶP SAU KHI QUA GIỜ FUNDING (PHÚT 01)
                 if (m === 1 && this.capitalManagementState === 'FUNDS_READY') {
-                    this.capitalManagementState = 'IDLE'; this.lockedOpps = [];
+                    this.capitalManagementState = 'IDLE'; 
+                    this.lockedOpps = [];
+                    this.log('info', '🔄 Reset cycle. Scanning for next hour...');
                 }
 
                 if (nowMs - this.lastScanTime >= 1000) {
@@ -718,6 +720,7 @@ class BotEngine {
                             const filtered = this.filterTradableOps(data.arbitrageData);
                             this.candidates = filtered; 
                             
+                            // NẾU CHƯA KHÓA LỆNH THÌ QUÉT VÀ HIỆN LIÊN TỤC
                             if (this.capitalManagementState === 'IDLE') {
                                 await this.runSelection(this.candidates);
                             }
@@ -726,6 +729,7 @@ class BotEngine {
                     this.lastScanTime = nowMs;
                 }
 
+                // THỰC THI LỆNH ĐÃ KHÓA TẠI PHÚT 59
                 if (this.capitalManagementState === 'FUNDS_READY' && m === 59) {
                     if (this.lockedOpps[0] && !this.lockedOpps[0].executed && s >= 0) {
                         this.log('info', `⚡ EXECUTING TOP 1: ${this.lockedOpps[0].coin} at 59:00`);
