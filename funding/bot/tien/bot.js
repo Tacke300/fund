@@ -720,21 +720,24 @@ class BotEngine {
                     } catch(err) { }
                 }
                 
-                // Sửa lỗi lặp lệnh ở Test Mode: Chuyển logic thực thi ra khỏi vòng lặp vô hạn
-                if (this.capitalManagementState === 'FUNDS_READY') {
+                // FIX: Sửa lỗi lặp lệnh ở Test Mode
+                if (this.capitalManagementState === 'FUNDS_READY' && this.lockedOpps.some(o => !o.executed)) {
                     for (let i = 0; i < this.lockedOpps.length; i++) {
                         const opp = this.lockedOpps[i];
                         if (!opp.executed) {
-                            opp.executed = true; // Đánh dấu đã thực thi ngay lập tức
+                            opp.executed = true;
                             this.log('test', `⚡ EXECUTING TEST TRADE ${i+1}: ${opp.coin}`);
                             await this.executeTrade(opp);
-                            if (i < this.lockedOpps.length - 1) {
+                            if (i < this.lockedOpps.length - 1 && this.lockedOpps.some(o => !o.executed)) { // Kiểm tra xem còn lệnh nào cần mở không
                                 this.log('test', `⏳ Waiting 25s before next order...`);
                                 await sleep(25000);
                             }
                         }
                     }
-                    this.capitalManagementState = 'IDLE'; // Chuyển về IDLE sau khi thực thi xong
+                    this.capitalManagementState = 'IDLE'; 
+                    this.lockedOpps = [];
+                } else if (this.capitalManagementState === 'FUNDS_READY' && this.lockedOpps.every(o => o.executed)) {
+                    this.capitalManagementState = 'IDLE'; 
                     this.lockedOpps = [];
                 }
             } 
