@@ -12,14 +12,14 @@ try {
     if (balanceModule && balanceModule.usdtDepositAddressesByNetwork) {
         depositAddresses = balanceModule.usdtDepositAddressesByNetwork;
     }
-} catch (e) {}
-
-const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+} catch (e) {
+    console.log("[SYSTEM] Warning: balance.js not found");
+}
 
 function initExchange(exchangeId, config) {
     try {
         let exchangeClass;
-        let options = { 'enableRateLimit': true, 'timeout': 5000 };
+        let options = { 'enableRateLimit': true, 'timeout': 10000 };
         
         if (exchangeId.includes('binance')) {
             exchangeClass = exchangeId === 'binanceusdm' ? ccxt.binanceusdm : ccxt.binance;
@@ -32,17 +32,15 @@ function initExchange(exchangeId, config) {
             options.password = config.kucoinPassword || config.kucoinApiPassword;
         }
 
-        if (!options.apiKey || !options.secret) return null;
+        if (!options.apiKey || !options.secret) {
+            console.log(`[EXCHANGE] Missing API Key/Secret for ${exchangeId}`);
+            return null;
+        }
         return new exchangeClass(options);
-    } catch (e) { return null; }
-}
-
-async function getPrice(exchange, symbol) {
-    try {
-        if (symbol === 'USDT') return 1;
-        const ticker = await exchange.fetchTicker(`${symbol}/USDT`);
-        return ticker.last || 0;
-    } catch (e) { return 0; }
+    } catch (e) {
+        console.error(`[EXCHANGE] Init Error: ${e.message}`);
+        return null;
+    }
 }
 
 async function getAllUsersSummary() {
@@ -83,7 +81,9 @@ async function getAllUsersSummary() {
                 lastLogin: stats.mtime,
                 filename: file
             });
-        } catch (e) {}
+        } catch (e) {
+            console.error(`[USER LOAD] Error loading ${file}: ${e.message}`);
+        }
     }
     return users;
 }
@@ -91,6 +91,8 @@ async function getAllUsersSummary() {
 const server = http.createServer(async (req, res) => {
     res.setHeader('Access-Control-Allow-Origin', '*');
     
+    console.log(`[REQUEST] ${req.method} ${req.url}`);
+
     if (req.method === 'GET' && req.url === '/') {
         fs.readFile(path.join(__dirname, 'admin.html'), (err, content) => {
             if(err) { res.end('Admin HTML not found'); return; }
@@ -101,57 +103,80 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.url === '/api/users') {
-        const users = await getAllUsersSummary();
-        res.end(JSON.stringify(users));
+        try {
+            const users = await getAllUsersSummary();
+            res.end(JSON.stringify(users));
+        } catch (e) {
+            console.error(`[API USERS] Error: ${e.message}`);
+            res.end('[]');
+        }
         return;
     }
 
     if (req.url.startsWith('/api/details/')) {
-        let username = '';
+        let username = 'UNKNOWN';
         try {
             const urlParts = req.url.split('/api/details/');
-            if (urlParts.length < 2) throw new Error("Invalid URL");
+            if (urlParts.length < 2) throw new Error("URL Invalid");
             username = decodeURIComponent(urlParts[1]);
+
+            console.log(`[DETAILS] Processing for: ${username}`);
 
             const configPath = path.join(USER_DATA_DIR, `${username}_config.json`);
             if (!fs.existsSync(configPath)) {
+                console.log(`[DETAILS] Config file missing for ${username}`);
+                res.writeHead(404);
                 res.end(JSON.stringify({ error: "User config not found", totalUsdt: 0 }));
                 return;
             }
             const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
 
-            const getBalance = async (exId) => {
+            const checkExchange = async (exName, exId) => {
+                console.log(`[DETAILS] Connecting to ${exName}...`);
                 try {
                     const ex = initExchange(exId, config);
                     if (!ex) return { total: 0, free: 0 };
-                    const bal = await ex.fetchBalance();
-                    return { 
-                        total: bal.total['USDT'] || 0, 
-                        free: bal.free['USDT'] || 0 
-                    };
-                } catch (e) { return { total: 0, free: 0, error: e.message }; }
+
+                    const result = await Promise.race([
+                        ex.fetchBalance(),
+                        new Promise((_, reject) => setTimeout(() => reject(new Error('TIMEOUT_10S')), 10000))
+                    ]);
+
+                    const total = result.total['USDT'] || 0;
+                    console.log(`[DETAILS] ${exName} OK: ${total} USDT`);
+                    return { total: total, free: result.free['USDT'] || 0 };
+                } catch (e) {
+                    console.log(`[DETAILS] ${exName} FAILED: ${e.message}`);
+                    return { total: 0, free: 0, error: e.message };
+                }
             };
 
             const [binance, kucoin] = await Promise.all([
-                getBalance('binanceusdm'),
-                getBalance('kucoinfutures')
+                checkExchange('Binance', 'binanceusdm'),
+                checkExchange('Kucoin', 'kucoinfutures')
             ]);
 
-            res.end(JSON.stringify({
+            const responsePayload = {
                 username: username,
                 binance: binance,
                 kucoin: kucoin,
                 totalUsdt: (binance.total + kucoin.total)
-            }));
+            };
+
+            console.log(`[DETAILS] Sending response for ${username}`);
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify(responsePayload));
 
         } catch (error) {
+            console.error(`[DETAILS] CRITICAL ERROR: ${error.message}`);
+            res.writeHead(500, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ error: error.message, totalUsdt: 0 }));
         }
         return;
     }
 
     if (req.method === 'POST' && req.url === '/api/transfer') {
-        res.end(JSON.stringify({ logs: ['Transfer logic skipped in this version'] }));
+        res.end(JSON.stringify({ logs: ['Skipped'] }));
         return;
     }
 
@@ -178,8 +203,13 @@ const server = http.createServer(async (req, res) => {
                         count++;
                     }
                 }
+                console.log(`[ADMIN] VIP updated for ${count} users`);
                 res.end(JSON.stringify({ success: true, message: `Updated ${count} users.` }));
-            } catch(e) { res.writeHead(500); res.end(JSON.stringify({ success: false })); }
+            } catch(e) {
+                console.error(`[ADMIN] VIP Set Error: ${e.message}`);
+                res.writeHead(500); 
+                res.end(JSON.stringify({ success: false })); 
+            }
         });
         return;
     }
