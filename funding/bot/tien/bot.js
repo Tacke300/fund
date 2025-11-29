@@ -141,28 +141,19 @@ class BotEngine {
         return null;
     }
 
-    async getExchangeSpecificSymbol(exchange, rawCoinSymbol) {
-        const find = (ex) => {
-            if (!ex.markets) return null;
-            const base = String(rawCoinSymbol).toUpperCase();
-            
-            if (ex.id === 'binanceusdm') {
-                const k = Object.keys(ex.markets).find(k => k.replace('/','').replace(':USDT','') === base.replace('USDT',''));
-                if(k) return ex.markets[k].id;
-            }
-            const cleanBase = base.replace(/USDT$/, '');
-            const attempts = [`${cleanBase}/USDT:USDT`, `${cleanBase}USDT`, `${cleanBase}-USDT-SWAP`, `${cleanBase}USDTM`, `${cleanBase}/USDT`];
-            for (const attempt of attempts) {
-                if(ex.markets[attempt]) return ex.markets[attempt].id;
-            }
-            return null;
-        };
-
-        let sym = find(exchange);
-        if (!sym) {
-            try { await exchange.loadMarkets(true); sym = find(exchange); } catch (e) { return null; }
+    getExchangeSpecificSymbol(exchange, rawCoinSymbol) {
+        if (!exchange.markets) return null;
+        const base = String(rawCoinSymbol).toUpperCase();
+        if (exchange.id === 'binanceusdm') {
+            const k = Object.keys(exchange.markets).find(k => k.replace('/','').replace(':USDT','') === base.replace('USDT',''));
+            if(k) return exchange.markets[k].id;
         }
-        return sym;
+        const cleanBase = base.replace(/USDT$/, '');
+        const attempts = [`${cleanBase}/USDT:USDT`, `${cleanBase}USDT`, `${cleanBase}-USDT-SWAP`, `${cleanBase}USDTM`, `${cleanBase}/USDT`];
+        for (const attempt of attempts) {
+            if(exchange.markets[attempt]) return exchange.markets[attempt].id;
+        }
+        return null;
     }
 
     async setLeverageSafely(exchange, symbol, desiredLeverage) {
@@ -174,7 +165,6 @@ class BotEngine {
     }
 
     async computeOrderDetails(exchange, symbol, targetNotionalUSDT, leverage) {
-        await exchange.loadMarkets();
         const market = exchange.market(symbol);
         const ticker = await exchange.fetchTicker(symbol);
         const price = ticker?.last || ticker?.close;
@@ -236,8 +226,8 @@ class BotEngine {
         const lEx = this.exchanges[op.details.longExchange];
         if(!sEx || !lEx) return;
         
-        const sSym = await this.getExchangeSpecificSymbol(sEx, op.coin);
-        const lSym = await this.getExchangeSpecificSymbol(lEx, op.coin);
+        const sSym = this.getExchangeSpecificSymbol(sEx, op.coin);
+        const lSym = this.getExchangeSpecificSymbol(lEx, op.coin);
         
         if(!sSym || !lSym) {
             this.sessionBlacklist.add(op.coin);
@@ -583,7 +573,7 @@ class BotEngine {
         }
     }
 
-    async filterTradableOps(rawOps) {
+    filterTradableOps(rawOps) {
         const tradable = [];
         for (const op of rawOps) {
             if (op.estimatedPnl < MIN_PNL_PERCENTAGE || BLACKLISTED_COINS.includes(op.coin)) continue;
@@ -598,8 +588,8 @@ class BotEngine {
             const sEx = this.exchanges[opDetail.details.shortExchange];
             const lEx = this.exchanges[opDetail.details.longExchange];
             if (!sEx || !lEx) continue;
-            const sSym = await this.getExchangeSpecificSymbol(sEx, op.coin);
-            const lSym = await this.getExchangeSpecificSymbol(lEx, op.coin);
+            const sSym = this.getExchangeSpecificSymbol(sEx, op.coin);
+            const lSym = this.getExchangeSpecificSymbol(lEx, op.coin);
             if (sSym && lSym) tradable.push(opDetail);
         }
         return tradable.sort((a,b) => b.estimatedPnl - a.estimatedPnl);
@@ -612,13 +602,17 @@ class BotEngine {
         const selected = [];
         const seenCoins = new Set();
         
+        const totalAccountBal = (this.balances['binanceusdm']?.total || 0) + (this.balances['kucoinfutures']?.total || 0);
+        let currentUsedMargin = this.activeTrades.reduce((acc, t) => acc + (t.collateral || 0), 0);
+
         for (const op of candidates) {
             if (selected.length >= 3) break;
+            
             if (seenCoins.has(op.coin)) continue;
             seenCoins.add(op.coin);
-            
-            if (this.activeTrades.some(t => t.coin === op.coin)) continue;
 
+            if (this.activeTrades.some(t => t.coin === op.coin)) continue;
+            
             if (!this.isTestExecution) {
                 if (op.nextFundingTime) {
                     const diff = op.nextFundingTime - Date.now();
@@ -626,18 +620,35 @@ class BotEngine {
                 } else {
                     continue; 
                 }
-
-                const sEx = this.exchanges[op.details.shortExchange];
-                const lEx = this.exchanges[op.details.longExchange];
-                const sSym = await this.getExchangeSpecificSymbol(sEx, op.coin);
-                const lSym = await this.getExchangeSpecificSymbol(lEx, op.coin);
-                const hasShort = await this.hasOpenPosition(sEx, sSym);
-                const hasLong = await this.hasOpenPosition(lEx, lSym);
-                if (hasShort || hasLong) continue;
                 
                 const sBal = this.balances[op.details.shortExchange]?.available || 0;
                 const lBal = this.balances[op.details.longExchange]?.available || 0;
                 if (sBal <= MIN_COLLATERAL_FOR_TRADE || lBal <= MIN_COLLATERAL_FOR_TRADE) continue;
+
+                const minBal = Math.min(sBal, lBal);
+                let potentialCollateral = 0;
+                if (this.tradeConfig.mode === 'fixed') {
+                    potentialCollateral = parseFloat(this.tradeConfig.value);
+                } else {
+                    potentialCollateral = minBal * (parseFloat(this.tradeConfig.value) / 100);
+                }
+                const maxSafe = minBal * 0.90;
+                if (potentialCollateral > maxSafe) potentialCollateral = maxSafe;
+
+                if (totalAccountBal > 0 && (currentUsedMargin + potentialCollateral) >= (totalAccountBal * 0.6)) {
+                    continue;
+                }
+                currentUsedMargin += potentialCollateral;
+
+                const sEx = this.exchanges[op.details.shortExchange];
+                const lEx = this.exchanges[op.details.longExchange];
+                const sSym = this.getExchangeSpecificSymbol(sEx, op.coin);
+                const lSym = this.getExchangeSpecificSymbol(lEx, op.coin);
+                if (!sSym || !lSym) continue;
+
+                const hasShort = await this.hasOpenPosition(sEx, sSym);
+                const hasLong = await this.hasOpenPosition(lEx, lSym);
+                if (hasShort || hasLong) continue;
             }
 
             selected.push(op);
@@ -675,7 +686,7 @@ class BotEngine {
                         const res = await fetch(SERVER_DATA_URL);
                         const data = await res.json();
                         if (data && data.arbitrageData) {
-                            const filtered = await this.filterTradableOps(data.arbitrageData);
+                            const filtered = this.filterTradableOps(data.arbitrageData);
                             this.candidates = filtered; 
                             if (this.candidates.length > 0) {
                                 this.opps = this.candidates.slice(0, 3);
@@ -704,7 +715,7 @@ class BotEngine {
                         const res = await fetch(SERVER_DATA_URL);
                         const data = await res.json();
                         if (data && data.arbitrageData) {
-                            const filtered = await this.filterTradableOps(data.arbitrageData);
+                            const filtered = this.filterTradableOps(data.arbitrageData);
                             this.candidates = filtered; 
                             
                             if (this.capitalManagementState === 'IDLE') {
