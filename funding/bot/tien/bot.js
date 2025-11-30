@@ -158,17 +158,28 @@ class BotEngine {
 
     async setLeverageSafely(exchange, symbol, desiredLeverage) {
         try {
+            const market = exchange.market(symbol);
+            let actualLeverage = desiredLeverage;
+
+            if (market && market.limits && market.limits.leverage && market.limits.leverage.max) {
+                if (actualLeverage > market.limits.leverage.max) {
+                    actualLeverage = market.limits.leverage.max;
+                }
+            }
+
             try { 
                 await exchange.setMarginMode('cross', symbol); 
             } catch (e) {}
             
-            await exchange.setLeverage(desiredLeverage, symbol);
+            await exchange.setLeverage(actualLeverage, symbol);
             
             if (exchange.id === 'kucoinfutures') {
                 await sleep(1000); 
             }
-            return desiredLeverage;
-        } catch (e) { return null; }
+            return actualLeverage;
+        } catch (e) { 
+            return null; 
+        }
     }
 
     async computeOrderDetails(exchange, symbol, targetNotionalUSDT, leverage) {
@@ -274,7 +285,10 @@ class BotEngine {
             this.setLeverageSafely(sEx, sSym, lev),
             this.setLeverageSafely(lEx, lSym, lev)
         ]);
-        const usedLev = Math.min(realSLev || lev, realLLev || lev);
+        
+        const validSLev = realSLev || lev;
+        const validLLev = realLLev || lev;
+        const usedLev = Math.min(validSLev, validLLev);
 
         let sDetails, lDetails;
         try {
@@ -311,12 +325,15 @@ class BotEngine {
             trade.entryPriceShort = sPrice; trade.entryPriceLong = lPrice;
             this.saveActiveTrades();
 
-            this.log('trade', `OPEN SUCCESS | ${op.coin} | Money: ${collateral.toFixed(1)}$`);
+            this.log('trade', `OPEN SUCCESS | ${op.coin} | Money: ${collateral.toFixed(1)}$ | Lev: ${usedLev}x`);
             this.placeTpSlOrders(sEx, sSym, 'sell', sDetails.amount, sPrice, collateral, sDetails.notional);
             this.placeTpSlOrders(lEx, lSym, 'buy', lDetails.amount, lPrice, collateral, lDetails.notional);
         }
         else if (sResult.status === 'fulfilled' || lResult.status === 'fulfilled') {
             this.log('warn', `⚠️ Cụt chân (${op.coin})! Không retry, chờ 10s để check...`);
+            
+            this.sessionBlacklist.add(op.coin);
+            
             await sleep(10000); 
 
             this.log('fatal', `❌ Đã qua 10s, vẫn cụt chân (${op.coin}). Đóng khẩn cấp bên đã khớp!`);
@@ -683,8 +700,16 @@ class BotEngine {
 
     async hasOpenPosition(exchange, symbol) {
         try {
-            const positions = await exchange.fetchPositions(); 
-            const pos = positions.find(p => p.symbol === symbol && parseFloat(p.contracts) > 0);
+            const positions = await exchange.fetchPositions();
+            const cleanTarget = symbol.replace(/[\/\-_: ]/g, '').toUpperCase().replace('USDT', '');
+            
+            const pos = positions.find(p => {
+                const size = parseFloat(p.contracts);
+                if (isNaN(size) || size <= 0) return false;
+                
+                const cleanP = p.symbol.replace(/[\/\-_: ]/g, '').toUpperCase().replace('USDT', '');
+                return cleanP === cleanTarget;
+            });
             return !!pos;
         } catch(e) { return false; }
     }
