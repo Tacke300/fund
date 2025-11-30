@@ -204,12 +204,12 @@ class BotEngine {
                 const slParams = { 'reduceOnly': true, 'stop': side === 'sell' ? 'up' : 'down', 'stopPrice': exchange.priceToPrecision(symbol, slPrice), 'stopPriceType': 'MP', 'marginMode': 'cross' };
                 await exchange.createOrder(symbol, 'market', orderSide, amount, undefined, slParams);
             } else { // Binanceusdm
-                // BỎ 'closePosition: true' và THÊM 'reduceOnly: true' để chỉ đóng khối lượng (amount) của bot, không đóng toàn bộ vị thế.
+                // FIX: Xóa 'reduceOnly: true' vì Binance Hedge Mode dùng positionSide để định danh
                 const commonParams = { ...binanceParams };
-                await exchange.createOrder(symbol, 'TAKE_PROFIT_MARKET', orderSide, amount, undefined, { ...commonParams, 'stopPrice': exchange.priceToPrecision(symbol, tpPrice), 'reduceOnly': 'true' });
-                await exchange.createOrder(symbol, 'STOP_MARKET', orderSide, amount, undefined, { ...commonParams, 'stopPrice': exchange.priceToPrecision(symbol, slPrice), 'reduceOnly': 'true' });
+                await exchange.createOrder(symbol, 'TAKE_PROFIT_MARKET', orderSide, amount, undefined, { ...commonParams, 'stopPrice': exchange.priceToPrecision(symbol, tpPrice) });
+                await exchange.createOrder(symbol, 'STOP_MARKET', orderSide, amount, undefined, { ...commonParams, 'stopPrice': exchange.priceToPrecision(symbol, slPrice) });
             }
-        } catch (e) { this.log('warn', `[TP/SL] Fail: ${e.message}`); }
+        } catch (e) { this.log('warn', `[TP/SL] Fail: ${exchange.id} ${e.message}`); }
     }
 
     async getReliableFillPrice(exchange, symbol, orderId) {
@@ -245,7 +245,7 @@ class BotEngine {
         const hasShort = await this.hasOpenPosition(sEx, sSym);
         const hasLong = await this.hasOpenPosition(lEx, lSym);
         if (hasShort || hasLong) {
-            this.log('fatal', `❌ [EXECUTION BLOCK] Position for ${op.coin} detected on ${hasShort ? sEx.id : lEx.id}. ABORTING trade execution.`);
+            this.log('fatal', `❌ [EXECUTION BLOCK] Position for ${op.coin} detected. ABORTING.`);
             return;
         }
 
@@ -292,6 +292,7 @@ class BotEngine {
         const sParams = (sEx.id === 'binanceusdm') ? { 'positionSide': 'SHORT' } : (sEx.id === 'kucoinfutures' ? {'marginMode':'cross'} : {});
         const lParams = (lEx.id === 'binanceusdm') ? { 'positionSide': 'LONG' } : (lEx.id === 'kucoinfutures' ? {'marginMode':'cross'} : {});
 
+        // Gửi lệnh song song
         const results = await Promise.allSettled([
             sEx.createMarketSellOrder(sSym, sDetails.amount, sParams),
             lEx.createMarketBuyOrder(lSym, lDetails.amount, lParams)
@@ -300,9 +301,7 @@ class BotEngine {
         const sResult = results[0];
         const lResult = results[1];
 
-        if (sResult.status === 'rejected') this.log('error', `SHORT Fail (${sEx.id} - ${op.coin}): ${sResult.reason.message}`);
-        if (lResult.status === 'rejected') this.log('error', `LONG Fail (${lEx.id} - ${op.coin}): ${lResult.reason.message}`);
-
+        // Trường hợp cả 2 thành công
         if (sResult.status === 'fulfilled' && lResult.status === 'fulfilled') {
             const trade = {
                 id: Date.now(), coin: op.coin, shortExchange: sEx.id, longExchange: lEx.id, shortSymbol: sSym, longSymbol: lSym, shortOrderId: sResult.value.id, longOrderId: lResult.value.id, entryTime: Date.now(), estimatedPnlFromOpportunity: op.estimatedPnl, shortAmount: sDetails.amount, longAmount: lDetails.amount, status: 'OPEN', leverage: usedLev, collateral: collateral
@@ -319,42 +318,43 @@ class BotEngine {
             this.placeTpSlOrders(sEx, sSym, 'sell', sDetails.amount, sPrice, collateral, sDetails.notional);
             this.placeTpSlOrders(lEx, lSym, 'buy', lDetails.amount, lPrice, collateral, lDetails.notional);
         }
+        // Trường hợp Cụt chân (1 được 1 mất)
         else if (sResult.status === 'fulfilled' || lResult.status === 'fulfilled') {
-            this.log('warn', `⚠️ LỆNH LỆNH (${op.coin})! Retry...`);
-            let retrySuccess = false;
-            for (let i = 0; i < 5; i++) { 
-                await sleep(2000);
-                if (sResult.status === 'rejected') {
-                    try {
-                        const retryOrd = await sEx.createMarketSellOrder(sSym, sDetails.amount, sParams);
-                        this.log('info', `✅ Retry Short thành công!`);
-                        sResult.status = 'fulfilled'; sResult.value = retryOrd;
-                        retrySuccess = true;
-                        break;
-                    } catch(e) { }
-                } else {
-                    try {
-                        const retryOrd = await lEx.createMarketBuyOrder(lSym, lDetails.amount, lParams);
-                        this.log('info', `✅ Retry Long thành công!`);
-                        lResult.status = 'fulfilled'; lResult.value = retryOrd;
-                        retrySuccess = true;
-                        break;
-                    } catch(e) { }
-                }
+            this.log('warn', `⚠️ Cụt chân (${op.coin})! Không retry, chờ 10s để check...`);
+            
+            // Yêu cầu: Sau 10s mà vẫn chưa đủ 2 chân thì đóng lệnh.
+            await sleep(10000); 
+
+            // Sau 10s, ta coi như bên fail là fail hẳn, đóng bên đã khớp.
+            this.log('fatal', `❌ Đã qua 10s, vẫn cụt chân (${op.coin}). Đóng khẩn cấp bên đã khớp!`);
+            
+            if (sResult.status === 'fulfilled') {
+                try {
+                    // Check xem có vị thế không trước khi đóng
+                    const hasPos = await this.hasOpenPosition(sEx, sSym);
+                    if (hasPos) {
+                         const closeParams = (sEx.id === 'binanceusdm') ? { 'positionSide': 'SHORT' } : { 'reduceOnly': true, 'marginMode': 'cross' };
+                         await sEx.createMarketBuyOrder(sSym, sDetails.amount, closeParams);
+                         this.log('info', `✅ Đã đóng Short ${op.coin}`);
+                    }
+                } catch(e){ this.log('error', `Close Short Cụt chân Err: ${e.message}`); }
             }
 
-            if (!retrySuccess) {
-                this.log('fatal', `❌ RETRY THẤT BẠI (${op.coin}). ĐÓNG KHẨN CẤP!`);
-                if (sResult.status === 'fulfilled') try { await sEx.createMarketBuyOrder(sSym, sDetails.amount, sEx.id==='binanceusdm'?{positionSide:'SHORT'}:{reduceOnly:true}); } catch(e){}
-                if (lResult.status === 'fulfilled') try { await lEx.createMarketSellOrder(lSym, lDetails.amount, lEx.id==='binanceusdm'?{positionSide:'LONG'}:{reduceOnly:true}); } catch(e){}
-            } else {
-                 const trade = {
-                    id: Date.now(), coin: op.coin, shortExchange: sEx.id, longExchange: lEx.id, shortSymbol: sSym, longSymbol: lSym, shortOrderId: sResult.value.id, longOrderId: lResult.value.id, entryTime: Date.now(), estimatedPnlFromOpportunity: op.estimatedPnl, shortAmount: sDetails.amount, longAmount: lDetails.amount, status: 'OPEN', leverage: usedLev, collateral: collateral
-                };
-                this.activeTrades.push(trade);
-                this.saveActiveTrades();
-                this.closeAll();
+            if (lResult.status === 'fulfilled') {
+                try {
+                    const hasPos = await this.hasOpenPosition(lEx, lSym);
+                    if (hasPos) {
+                        const closeParams = (lEx.id === 'binanceusdm') ? { 'positionSide': 'LONG' } : { 'reduceOnly': true, 'marginMode': 'cross' };
+                        await lEx.createMarketSellOrder(lSym, lDetails.amount, closeParams);
+                        this.log('info', `✅ Đã đóng Long ${op.coin}`);
+                    }
+                } catch(e){ this.log('error', `Close Long Cụt chân Err: ${e.message}`); }
             }
+        }
+        else {
+             // Cả 2 đều fail
+             if (sResult.status === 'rejected') this.log('error', `SHORT Fail (${sEx.id} - ${op.coin}): ${sResult.reason.message}`);
+             if (lResult.status === 'rejected') this.log('error', `LONG Fail (${lEx.id} - ${op.coin}): ${lResult.reason.message}`);
         }
     }
 
@@ -367,14 +367,24 @@ class BotEngine {
             const sEx = this.exchanges[t.shortExchange];
             const lEx = this.exchanges[t.longExchange];
             
-            try { await sEx.cancelAllOrders(t.shortSymbol); } catch(e){}
-            try { await lEx.cancelAllOrders(t.longSymbol); } catch(e){}
-            
+            // Yêu cầu: Không xóa lệnh chờ cũ (đã bỏ cancelAllOrders)
+            // Tuy nhiên, nếu là lệnh TP/SL bot đặt, nó có thể treo. Nhưng tuân thủ yêu cầu: k xóa.
+
             const closeSParams = (sEx.id === 'binanceusdm') ? { 'positionSide': 'SHORT' } : {'reduceOnly': true, ...(sEx.id === 'kucoinfutures' && {'marginMode': 'cross'})};
             const closeLParams = (lEx.id === 'binanceusdm') ? { 'positionSide': 'LONG' } : {'reduceOnly': true, ...(lEx.id === 'kucoinfutures' && {'marginMode': 'cross'})};
 
-            try { await sEx.createMarketBuyOrder(t.shortSymbol, t.shortAmount, closeSParams); } catch(e){ this.log('error', `Close Short Err: ${e.message}`); }
-            try { await lEx.createMarketSellOrder(t.longSymbol, t.longAmount, closeLParams); } catch(e){ this.log('error', `Close Long Err: ${e.message}`); }
+            // FIX: Check vị thế trước khi đóng để tránh lỗi -2022 / 300009
+            try { 
+                const hasS = await this.hasOpenPosition(sEx, t.shortSymbol);
+                if (hasS) await sEx.createMarketBuyOrder(t.shortSymbol, t.shortAmount, closeSParams);
+                else this.log('warn', `Short pos ${t.coin} not found/already closed.`);
+            } catch(e){ this.log('error', `Close Short Err: ${e.message}`); }
+
+            try { 
+                const hasL = await this.hasOpenPosition(lEx, t.longSymbol);
+                if (hasL) await lEx.createMarketSellOrder(t.longSymbol, t.longAmount, closeLParams);
+                else this.log('warn', `Long pos ${t.coin} not found/already closed.`);
+            } catch(e){ this.log('error', `Close Long Err: ${e.message}`); }
             
             t.status = 'CLOSED'; this.saveHistory(t);
             this.log('result', `CLOSE | Coin: ${t.coin}`);
