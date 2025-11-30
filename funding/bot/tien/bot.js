@@ -203,8 +203,7 @@ class BotEngine {
                 await exchange.createOrder(symbol, 'market', orderSide, amount, undefined, tpParams);
                 const slParams = { 'reduceOnly': true, 'stop': side === 'sell' ? 'up' : 'down', 'stopPrice': exchange.priceToPrecision(symbol, slPrice), 'stopPriceType': 'MP', 'marginMode': 'cross' };
                 await exchange.createOrder(symbol, 'market', orderSide, amount, undefined, slParams);
-            } else { // Binanceusdm
-                // FIX: Xóa 'reduceOnly: true' vì Binance Hedge Mode dùng positionSide để định danh
+            } else { 
                 const commonParams = { ...binanceParams };
                 await exchange.createOrder(symbol, 'TAKE_PROFIT_MARKET', orderSide, amount, undefined, { ...commonParams, 'stopPrice': exchange.priceToPrecision(symbol, tpPrice) });
                 await exchange.createOrder(symbol, 'STOP_MARKET', orderSide, amount, undefined, { ...commonParams, 'stopPrice': exchange.priceToPrecision(symbol, slPrice) });
@@ -292,7 +291,6 @@ class BotEngine {
         const sParams = (sEx.id === 'binanceusdm') ? { 'positionSide': 'SHORT' } : (sEx.id === 'kucoinfutures' ? {'marginMode':'cross'} : {});
         const lParams = (lEx.id === 'binanceusdm') ? { 'positionSide': 'LONG' } : (lEx.id === 'kucoinfutures' ? {'marginMode':'cross'} : {});
 
-        // Gửi lệnh song song
         const results = await Promise.allSettled([
             sEx.createMarketSellOrder(sSym, sDetails.amount, sParams),
             lEx.createMarketBuyOrder(lSym, lDetails.amount, lParams)
@@ -301,7 +299,6 @@ class BotEngine {
         const sResult = results[0];
         const lResult = results[1];
 
-        // Trường hợp cả 2 thành công
         if (sResult.status === 'fulfilled' && lResult.status === 'fulfilled') {
             const trade = {
                 id: Date.now(), coin: op.coin, shortExchange: sEx.id, longExchange: lEx.id, shortSymbol: sSym, longSymbol: lSym, shortOrderId: sResult.value.id, longOrderId: lResult.value.id, entryTime: Date.now(), estimatedPnlFromOpportunity: op.estimatedPnl, shortAmount: sDetails.amount, longAmount: lDetails.amount, status: 'OPEN', leverage: usedLev, collateral: collateral
@@ -318,19 +315,14 @@ class BotEngine {
             this.placeTpSlOrders(sEx, sSym, 'sell', sDetails.amount, sPrice, collateral, sDetails.notional);
             this.placeTpSlOrders(lEx, lSym, 'buy', lDetails.amount, lPrice, collateral, lDetails.notional);
         }
-        // Trường hợp Cụt chân (1 được 1 mất)
         else if (sResult.status === 'fulfilled' || lResult.status === 'fulfilled') {
             this.log('warn', `⚠️ Cụt chân (${op.coin})! Không retry, chờ 10s để check...`);
-            
-            // Yêu cầu: Sau 10s mà vẫn chưa đủ 2 chân thì đóng lệnh.
             await sleep(10000); 
 
-            // Sau 10s, ta coi như bên fail là fail hẳn, đóng bên đã khớp.
             this.log('fatal', `❌ Đã qua 10s, vẫn cụt chân (${op.coin}). Đóng khẩn cấp bên đã khớp!`);
             
             if (sResult.status === 'fulfilled') {
                 try {
-                    // Check xem có vị thế không trước khi đóng
                     const hasPos = await this.hasOpenPosition(sEx, sSym);
                     if (hasPos) {
                          const closeParams = (sEx.id === 'binanceusdm') ? { 'positionSide': 'SHORT' } : { 'reduceOnly': true, 'marginMode': 'cross' };
@@ -352,7 +344,6 @@ class BotEngine {
             }
         }
         else {
-             // Cả 2 đều fail
              if (sResult.status === 'rejected') this.log('error', `SHORT Fail (${sEx.id} - ${op.coin}): ${sResult.reason.message}`);
              if (lResult.status === 'rejected') this.log('error', `LONG Fail (${lEx.id} - ${op.coin}): ${lResult.reason.message}`);
         }
@@ -367,13 +358,9 @@ class BotEngine {
             const sEx = this.exchanges[t.shortExchange];
             const lEx = this.exchanges[t.longExchange];
             
-            // Yêu cầu: Không xóa lệnh chờ cũ (đã bỏ cancelAllOrders)
-            // Tuy nhiên, nếu là lệnh TP/SL bot đặt, nó có thể treo. Nhưng tuân thủ yêu cầu: k xóa.
-
             const closeSParams = (sEx.id === 'binanceusdm') ? { 'positionSide': 'SHORT' } : {'reduceOnly': true, ...(sEx.id === 'kucoinfutures' && {'marginMode': 'cross'})};
             const closeLParams = (lEx.id === 'binanceusdm') ? { 'positionSide': 'LONG' } : {'reduceOnly': true, ...(lEx.id === 'kucoinfutures' && {'marginMode': 'cross'})};
 
-            // FIX: Check vị thế trước khi đóng để tránh lỗi -2022 / 300009
             try { 
                 const hasS = await this.hasOpenPosition(sEx, t.shortSymbol);
                 if (hasS) await sEx.createMarketBuyOrder(t.shortSymbol, t.shortAmount, closeSParams);
@@ -696,7 +683,7 @@ class BotEngine {
 
     async hasOpenPosition(exchange, symbol) {
         try {
-            const positions = await exchange.fetchPositions([symbol]);
+            const positions = await exchange.fetchPositions(); 
             const pos = positions.find(p => p.symbol === symbol && parseFloat(p.contracts) > 0);
             return !!pos;
         } catch(e) { return false; }
@@ -729,19 +716,24 @@ class BotEngine {
                 }
                 if (this.capitalManagementState === 'FUNDS_READY') {
                     for (let i = 0; i < this.lockedOpps.length; i++) {
+                        if (this.state !== 'RUNNING') break;
                         const opp = this.lockedOpps[i];
                         if (!opp.executed) {
                             opp.executed = true;
                             this.log('test', `⚡ EXECUTING TEST TRADE ${i+1}: ${opp.coin}`);
                             await this.executeTrade(opp);
                             if (i < this.lockedOpps.length - 1) {
+                                if (this.state !== 'RUNNING') break;
                                 this.log('test', `⏳ Waiting 25s before next order...`);
                                 await sleep(25000);
+                                if (this.state !== 'RUNNING') break;
                             }
                         }
                     }
-                    this.capitalManagementState = 'IDLE';
-                    this.lockedOpps = [];
+                    if (this.state === 'RUNNING') {
+                        this.capitalManagementState = 'IDLE';
+                        this.lockedOpps = [];
+                    }
                 }
             } 
             else {
