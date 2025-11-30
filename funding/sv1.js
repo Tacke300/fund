@@ -129,7 +129,7 @@ async function updateLeverageForExchange(id, symbolsToUpdate = null) {
                     currentLeverageData[cleanedSym] = parseInt(item.brackets[0].initialLeverage, 10);
                 }
             }
-        } else { // OKX, Bitget
+        } else {
             await exchange.loadMarkets(true);
             for (const market of Object.values(exchange.markets)) {
                 if (!market.swap || !market.symbol.includes('USDT')) continue;
@@ -287,10 +287,7 @@ function calculateArbitrageOpportunities() {
 
                 let [longEx, shortEx, longR, shortR] = r1.fundingRate > r2.fundingRate ? [id2, id1, r2, r1] : [id1, id2, r1, r2];
                 let fundingDiff = shortR.fundingRate - longR.fundingRate;
-                if (Math.sign(shortR.fundingRate) === Math.sign(longR.fundingRate)) {
-                    fundingDiff -= Math.min(Math.abs(shortR.fundingRate), Math.abs(longR.fundingRate));
-                }
-
+                
                 if (fundingDiff <= FUNDING_DIFFERENCE_THRESHOLD) continue;
 
                 const commonLeverage = Math.min(r1.maxLeverage, r2.maxLeverage);
