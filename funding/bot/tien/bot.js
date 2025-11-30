@@ -160,7 +160,7 @@ class BotEngine {
         try {
             const market = exchange.market(symbol);
             let actualLeverage = desiredLeverage;
-
+            
             if (market && market.limits && market.limits.leverage && market.limits.leverage.max) {
                 if (actualLeverage > market.limits.leverage.max) {
                     actualLeverage = market.limits.leverage.max;
@@ -177,9 +177,7 @@ class BotEngine {
                 await sleep(1000); 
             }
             return actualLeverage;
-        } catch (e) { 
-            return null; 
-        }
+        } catch (e) { return null; }
     }
 
     async computeOrderDetails(exchange, symbol, targetNotionalUSDT, leverage) {
@@ -285,10 +283,7 @@ class BotEngine {
             this.setLeverageSafely(sEx, sSym, lev),
             this.setLeverageSafely(lEx, lSym, lev)
         ]);
-        
-        const validSLev = realSLev || lev;
-        const validLLev = realLLev || lev;
-        const usedLev = Math.min(validSLev, validLLev);
+        const usedLev = Math.min(realSLev || lev, realLLev || lev);
 
         let sDetails, lDetails;
         try {
@@ -325,15 +320,12 @@ class BotEngine {
             trade.entryPriceShort = sPrice; trade.entryPriceLong = lPrice;
             this.saveActiveTrades();
 
-            this.log('trade', `OPEN SUCCESS | ${op.coin} | Money: ${collateral.toFixed(1)}$ | Lev: ${usedLev}x`);
+            this.log('trade', `OPEN SUCCESS | ${op.coin} | Money: ${collateral.toFixed(1)}$`);
             this.placeTpSlOrders(sEx, sSym, 'sell', sDetails.amount, sPrice, collateral, sDetails.notional);
             this.placeTpSlOrders(lEx, lSym, 'buy', lDetails.amount, lPrice, collateral, lDetails.notional);
         }
         else if (sResult.status === 'fulfilled' || lResult.status === 'fulfilled') {
             this.log('warn', `⚠️ Cụt chân (${op.coin})! Không retry, chờ 10s để check...`);
-            
-            this.sessionBlacklist.add(op.coin);
-            
             await sleep(10000); 
 
             this.log('fatal', `❌ Đã qua 10s, vẫn cụt chân (${op.coin}). Đóng khẩn cấp bên đã khớp!`);
@@ -700,16 +692,8 @@ class BotEngine {
 
     async hasOpenPosition(exchange, symbol) {
         try {
-            const positions = await exchange.fetchPositions();
-            const cleanTarget = symbol.replace(/[\/\-_: ]/g, '').toUpperCase().replace('USDT', '');
-            
-            const pos = positions.find(p => {
-                const size = parseFloat(p.contracts);
-                if (isNaN(size) || size <= 0) return false;
-                
-                const cleanP = p.symbol.replace(/[\/\-_: ]/g, '').toUpperCase().replace('USDT', '');
-                return cleanP === cleanTarget;
-            });
+            const positions = await exchange.fetchPositions([symbol]);
+            const pos = positions.find(p => p.symbol === symbol && parseFloat(p.contracts) > 0);
             return !!pos;
         } catch(e) { return false; }
     }
@@ -741,24 +725,19 @@ class BotEngine {
                 }
                 if (this.capitalManagementState === 'FUNDS_READY') {
                     for (let i = 0; i < this.lockedOpps.length; i++) {
-                        if (this.state !== 'RUNNING') break;
                         const opp = this.lockedOpps[i];
                         if (!opp.executed) {
                             opp.executed = true;
                             this.log('test', `⚡ EXECUTING TEST TRADE ${i+1}: ${opp.coin}`);
                             await this.executeTrade(opp);
                             if (i < this.lockedOpps.length - 1) {
-                                if (this.state !== 'RUNNING') break;
                                 this.log('test', `⏳ Waiting 25s before next order...`);
                                 await sleep(25000);
-                                if (this.state !== 'RUNNING') break;
                             }
                         }
                     }
-                    if (this.state === 'RUNNING') {
-                        this.capitalManagementState = 'IDLE';
-                        this.lockedOpps = [];
-                    }
+                    this.capitalManagementState = 'IDLE';
+                    this.lockedOpps = [];
                 }
             } 
             else {
