@@ -691,7 +691,7 @@ class BotEngine {
 
         this.opps = selected;
 
-        if (m >= 55 && selected.length > 0 && this.activeTrades.length === 0) {
+        if (m >= 55 && selected.length > 0) {
             this.lockedOpps = selected.map(o => ({...o, executed: false}));
             this.capitalManagementState = 'FUNDS_READY';
             this.log('info', `🔒 LOCKED Top opportunities at minute ${m}. Waiting for 59:xx...`);
@@ -733,24 +733,19 @@ class BotEngine {
                 }
                 if (this.capitalManagementState === 'FUNDS_READY') {
                     for (let i = 0; i < this.lockedOpps.length; i++) {
-                        if (this.state !== 'RUNNING') break;
                         const opp = this.lockedOpps[i];
                         if (!opp.executed) {
                             opp.executed = true;
                             this.log('test', `⚡ EXECUTING TEST TRADE ${i+1}: ${opp.coin}`);
                             await this.executeTrade(opp);
                             if (i < this.lockedOpps.length - 1) {
-                                if (this.state !== 'RUNNING') break;
                                 this.log('test', `⏳ Waiting 25s before next order...`);
                                 await sleep(25000);
-                                if (this.state !== 'RUNNING') break;
                             }
                         }
                     }
-                    if (this.state === 'RUNNING') {
-                        this.capitalManagementState = 'IDLE';
-                        this.lockedOpps = [];
-                    }
+                    this.capitalManagementState = 'IDLE';
+                    this.lockedOpps = [];
                 }
             } 
             else {
