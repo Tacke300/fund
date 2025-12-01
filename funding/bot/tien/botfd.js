@@ -2,10 +2,6 @@ const fs = require('fs');
 const path = require('path');
 const ccxt = require('ccxt');
 
-// ============================================================
-// LOGIC BOT GỐC (GIỮ NGUYÊN 100% NHƯ YÊU CẦU)
-// ============================================================
-
 let adminWallets = {};
 let fallbackBalance = {};
 
@@ -52,7 +48,6 @@ class BotEngine {
         this.configFile = path.join(USER_DATA_DIR, `${safeName}_config.json`);
         this.historyFile = path.join(USER_DATA_DIR, `${safeName}_history.json`);
         this.activeTradesFile = path.join(USER_DATA_DIR, `${safeName}_active_trades.json`);
-        // File status: Dùng để giao tiếp với Server Manager
         this.statusFile = path.join(USER_DATA_DIR, `${safeName}_status.json`);
         
         this.state = 'STOPPED';
@@ -96,11 +91,9 @@ class BotEngine {
         this.loadHistory();
         this.loadActiveTrades();
         
-        // Load config trade từ file (quan trọng khi start qua PM2)
         if (this.config.tradeConfig) this.tradeConfig = this.config.tradeConfig;
     }
 
-    // Hàm export status cho Server đọc
     exportStatus() {
         try {
             const displayOpp = (this.capitalManagementState === 'FUNDS_READY' && this.lockedOpps.length > 0) ? this.lockedOpps : this.opps;
@@ -124,14 +117,12 @@ class BotEngine {
         if (!allowedTypes.includes(type)) return;
         const t = new Date().toLocaleTimeString('vi-VN', { hour12: false });
         
-        // GHI LOG RA CONSOLE ĐỂ PM2 BẮT ĐƯỢC
         if (type === 'pm2' || type === 'fatal' || type === 'error') {
             console.error(`[${t}] [BOT] [${this.username}] [${type.toUpperCase()}] ${msg}`);
         } else {
             console.log(`[${t}] [BOT] [${this.username}] [${type.toUpperCase()}] ${msg}`);
         }
         
-        // Cập nhật status ngay lập tức
         this.exportStatus(); 
     }
 
@@ -886,185 +877,19 @@ class BotEngine {
     }
 }
 
-
-// ============================================================
-// PHẦN 2: CHẾ ĐỘ QUẢN LÝ (PHẦN NÀY ĐỂ START WORKER)
-// ============================================================
-
 const args = process.argv.slice(2);
-const usernameArg = args[0]; // Kiểm tra có user truyền vào không
+const usernameArg = args[0];
 
 if (usernameArg) {
-    // --- [CHẾ ĐỘ 1: BOT WORKER] ---
-    // Được gọi bởi PM2 để chạy riêng cho 1 user
-    console.log(`[WORKER] Starting worker for user: ${usernameArg}`);
     const bot = new BotEngine(usernameArg);
-    // Tự động start nếu có config lưu sẵn
     const safeName = getSafeFileName(usernameArg);
     const configFile = path.join(USER_DATA_DIR, `${safeName}_config.json`);
     
     if (fs.existsSync(configFile)) {
         const cfg = JSON.parse(fs.readFileSync(configFile));
-        // Logic fix: Luôn đọc tradeConfig từ file để start
         const tradeCfg = cfg.tradeConfig || { mode: 'percent', value: 50 };
-        console.log(`[WORKER] Config loaded, starting bot...`);
         bot.start(tradeCfg);
     } else {
         console.error(`[WORKER] No config found for ${usernameArg}`);
     }
-} 
-else {
-    // --- [CHẾ ĐỘ 2: API SERVER QUẢN LÝ] ---
-    // Chạy mặc định (quản lý login, start/stop PM2)
-    console.log(`[SERVER] Starting Manager Server on port ${BOT_PORT}`);
-    const server = http.createServer(async (req, res) => {
-        res.setHeader('Access-Control-Allow-Origin', '*');
-        res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-username');
-        if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
-
-        const url = req.url;
-        if (req.method === 'POST' || req.method === 'GET') {
-            let body = '';
-            if (req.method === 'POST') {
-                req.on('data', c => body += c);
-                await new Promise(r => req.on('end', r));
-            }
-
-            if (url === '/' && req.method === 'GET') {
-                fs.readFile(path.join(__dirname, 'index.html'), (err, c) => {
-                    if (err) { res.writeHead(500); res.end('No UI File found'); return; }
-                    res.writeHead(200, { 'Content-Type': 'text/html' }); res.end(c);
-                });
-                return;
-            }
-
-            // --- AUTH ---
-            if (url === '/bot-api/register') {
-                try {
-                    const { username, password, email } = JSON.parse(body);
-                    const p = path.join(USER_DATA_DIR, `${getSafeFileName(username)}_config.json`);
-                    if (fs.existsSync(p)) { res.writeHead(400); res.end(JSON.stringify({success:false})); return; }
-                    fs.writeFileSync(p, JSON.stringify({username, password, email, vipStatus: 'none', savedTotalAssets: 0, savedBinanceFut: 0, savedKucoinFut: 0}, null, 2));
-                    res.end(JSON.stringify({success:true}));
-                } catch(e) { res.writeHead(500); res.end(JSON.stringify({success:false})); }
-                return;
-            }
-            if (url === '/bot-api/login') {
-                try {
-                    const { username, password } = JSON.parse(body);
-                    const p = path.join(USER_DATA_DIR, `${getSafeFileName(username)}_config.json`);
-                    if (!fs.existsSync(p)) { res.writeHead(401); res.end(JSON.stringify({success:false})); return; }
-                    const c = JSON.parse(fs.readFileSync(p));
-                    if (c.password===password) res.end(JSON.stringify({success:true})); else { res.writeHead(401); res.end(JSON.stringify({success:false})); }
-                } catch(e) { res.writeHead(500); res.end(JSON.stringify({success:false})); }
-                return;
-            }
-
-            // --- QUẢN LÝ PM2 ---
-            const username = req.headers['x-username'];
-            if (!username) { res.writeHead(401); res.end(JSON.stringify({success:false})); return; }
-            
-            const safeUser = getSafeFileName(username);
-            const configFile = path.join(USER_DATA_DIR, `${safeUser}_config.json`);
-            const statusFile = path.join(USER_DATA_DIR, `${safeUser}_status.json`);
-            const pm2Name = `bot_${safeUser}`;
-            
-            // QUAN TRỌNG: Đường dẫn tuyệt đối để PM2 biết file nào mà chạy
-            const scriptPath = path.resolve(__dirname, 'bot.js');
-
-            try {
-                if (url === '/bot-api/start') {
-                    const payload = JSON.parse(body);
-                    // Cập nhật config trước khi start để Worker đọc được
-                    let currentConfig = {};
-                    if (fs.existsSync(configFile)) currentConfig = JSON.parse(fs.readFileSync(configFile));
-                    currentConfig.tradeConfig = payload.tradeConfig;
-                    if(payload.autoBalance !== undefined) currentConfig.autoBalance = payload.autoBalance;
-                    fs.writeFileSync(configFile, JSON.stringify(currentConfig, null, 2));
-
-                    // Gọi PM2: Chú ý dấu -- để tách argument cho script
-                    exec(`pm2 start "${scriptPath}" --name ${pm2Name} -- "${username}"`, (err) => {
-                       if (err) {
-                           // Nếu đã tồn tại thì restart
-                           exec(`pm2 restart ${pm2Name}`, (err2) => {
-                               if(err2) { res.end(JSON.stringify({ success: false, message: err2.message })); }
-                               else { res.end(JSON.stringify({ success: true, message: 'Bot restarted.' })); }
-                           });
-                       } else {
-                           res.end(JSON.stringify({ success: true, message: 'Bot started.' }));
-                       }
-                    });
-                }
-                else if (url === '/bot-api/stop') {
-                    exec(`pm2 stop ${pm2Name}`, (err) => {
-                        // Cập nhật file status thủ công để UI biết đã dừng
-                        if(fs.existsSync(statusFile)) {
-                            const s = JSON.parse(fs.readFileSync(statusFile));
-                            s.botState = 'STOPPED';
-                            fs.writeFileSync(statusFile, JSON.stringify(s, null, 2));
-                        }
-                        res.end(JSON.stringify({ success: true }));
-                    });
-                }
-                else if (url === '/bot-api/save-config') {
-                    let currentConfig = {};
-                    if (fs.existsSync(configFile)) currentConfig = JSON.parse(fs.readFileSync(configFile));
-                    const newConfig = JSON.parse(body);
-                    const finalConfig = { ...currentConfig, ...newConfig };
-                    fs.writeFileSync(configFile, JSON.stringify(finalConfig, null, 2));
-                    // Restart để nhận config mới
-                    exec(`pm2 restart ${pm2Name}`, () => {
-                         res.end(JSON.stringify({ success: true }));
-                    });
-                }
-                else if (url === '/bot-api/close-trade-now') {
-                    // Restart bot để nó tự check/close hoặc xử lý logic close
-                    exec(`pm2 restart ${pm2Name}`, () => {
-                         res.end(JSON.stringify({ success: true }));
-                    });
-                }
-                else if (url === '/bot-api/upgrade-vip') {
-                    // FIX: Ghi VIP vào config, sau đó restart để worker đọc lại
-                    let currentConfig = {};
-                    if (fs.existsSync(configFile)) currentConfig = JSON.parse(fs.readFileSync(configFile));
-                    currentConfig.vipStatus = 'vip';
-                    currentConfig.vipExpiry = Date.now() + 30 * 24 * 60 * 60 * 1000;
-                    fs.writeFileSync(configFile, JSON.stringify(currentConfig, null, 2));
-                    
-                    exec(`pm2 restart ${pm2Name}`, () => {
-                         res.end(JSON.stringify({ success: true }));
-                    });
-                }
-                else if (url === '/bot-api/status') {
-                    // Đọc file status do worker ghi ra
-                    if (fs.existsSync(statusFile)) {
-                        const status = JSON.parse(fs.readFileSync(statusFile));
-                        res.writeHead(200, { 'Content-Type': 'application/json' });
-                        res.end(JSON.stringify(status));
-                    } else {
-                         res.writeHead(200, { 'Content-Type': 'application/json' });
-                         res.end(JSON.stringify({ botState: 'STOPPED', username: username }));
-                    }
-                }
-                else if (url === '/bot-api/config') {
-                    if (fs.existsSync(configFile)) {
-                        const c = JSON.parse(fs.readFileSync(configFile));
-                        res.writeHead(200, { 'Content-Type': 'application/json' });
-                        res.end(JSON.stringify(c));
-                    } else { res.end('{}'); }
-                }
-                else if (url === '/bot-api/update-balance-config') {
-                    let currentConfig = {};
-                    if (fs.existsSync(configFile)) currentConfig = JSON.parse(fs.readFileSync(configFile));
-                    const cfg = JSON.parse(body);
-                    currentConfig.autoBalance = cfg.autoBalance;
-                    fs.writeFileSync(configFile, JSON.stringify(currentConfig, null, 2));
-                    res.end(JSON.stringify({ success: true }));
-                }
-                else { res.writeHead(404); res.end(); }
-            } catch (e) { res.writeHead(500); res.end(JSON.stringify({success:false, message:e.message})); }
-        }
-    });
-
-    server.listen(BOT_PORT, () => { console.log(`Manager Server running on port ${BOT_PORT}`); });
 }
