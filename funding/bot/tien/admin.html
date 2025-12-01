@@ -3,283 +3,357 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Admin Dashboard Pro</title>
+    <title>Super Admin Bot</title>
     <style>
-        :root { --bg: #0f1014; --card: #1b1e26; --text: #e0e0e0; --accent: #3772ff; --green: #00c851; --red: #ff4444; --yellow: #ffbb33; }
-        body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', monospace; margin: 0; padding: 20px; font-size: 14px; }
-        
-        /* LAYOUT */
-        .container { display: grid; grid-template-columns: 3fr 1fr; gap: 20px; }
-        .panel { background: var(--card); padding: 15px; border-radius: 6px; border: 1px solid #333; margin-bottom: 20px; }
-        h3 { margin: 0 0 15px 0; padding-bottom: 8px; border-bottom: 2px solid #333; color: var(--accent); text-transform: uppercase; letter-spacing: 1px; }
-
-        /* LOG BOX */
-        #systemLog {
-            background: #000; color: #0f0; font-family: 'Consolas', monospace; 
-            height: 300px; overflow-y: auto; padding: 10px; border: 1px solid #444; font-size: 12px;
-        }
-        .log-time { color: #666; margin-right: 5px; }
-        .log-err { color: #f00; }
-        .log-warn { color: var(--yellow); }
-        .log-info { color: #0ff; }
+        :root { --bg: #121212; --card: #1e1e1e; --text: #e0e0e0; --accent: #007bff; --border: #333; --danger: #ff4444; --success: #00c851; --warning: #ffbb33; --vip: #ffd700; }
+        body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', sans-serif; margin: 0; padding: 20px; }
+        h2 { margin-top: 0; color: var(--accent); border-bottom: 1px solid #333; padding-bottom: 10px; }
 
         /* TABLE */
-        table { width: 100%; border-collapse: collapse; font-size: 13px; }
-        th { background: #252a35; padding: 10px; text-align: left; color: #888; position: sticky; top: 0; }
-        td { padding: 8px 10px; border-bottom: 1px solid #2a2e38; }
-        tr:hover { background: #252a35; }
-        
+        table { width: 100%; border-collapse: collapse; background: var(--card); font-size: 0.9rem; }
+        th, td { padding: 12px; border: 1px solid var(--border); text-align: left; }
+        th { background: #252525; text-transform: uppercase; color: #aaa; position: sticky; top: 0; }
+        tr:hover { background: #2a2a2a; }
         .user-link { color: var(--accent); cursor: pointer; text-decoration: underline; font-weight: bold; }
-        .val-pos { color: var(--green); }
-        .val-neg { color: var(--red); }
-        .vip-bd { background: var(--yellow); color: #000; padding: 2px 4px; border-radius: 3px; font-weight: bold; font-size: 10px; }
+        
+        /* STATUS COLORS */
+        .pnl-pos { color: var(--success); font-weight: bold; }
+        .pnl-neg { color: var(--danger); font-weight: bold; }
+        .vip-tag { color: #000; background: var(--vip); padding: 2px 6px; border-radius: 4px; font-weight: bold; font-size: 0.75rem; }
+        .vip-pro-tag { color: #fff; background: linear-gradient(45deg, #ff00cc, #333399); padding: 2px 6px; border-radius: 4px; font-weight: bold; font-size: 0.75rem; }
+
+        /* PANEL */
+        .panel { background: var(--card); padding: 20px; border-radius: 8px; margin-bottom: 20px; border: 1px solid var(--border); box-shadow: 0 4px 6px rgba(0,0,0,0.3); }
+        .controls { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 15px; align-items: end; }
+        
+        input, select { padding: 10px; background: #2b2b2b; border: 1px solid #444; color: #fff; border-radius: 4px; width: 100%; box-sizing: border-box; }
+        button { padding: 10px; background: var(--accent); border: none; color: white; font-weight: bold; cursor: pointer; border-radius: 4px; width: 100%; }
+        button:hover { opacity: 0.9; }
+        button.exec { background: linear-gradient(45deg, #007bff, #0056b3); }
+        button.vip-btn { background: var(--vip); color: #000; }
+        
+        .checkbox-wrapper { display: flex; align-items: center; gap: 10px; height: 40px; background: #2a2222; padding: 0 10px; border-radius: 4px; border: 1px solid #ff4444; }
+        input[type="checkbox"] { width: 18px; height: 18px; accent-color: var(--danger); cursor: pointer; }
+
+        #selectionInfo { color: var(--warning); font-weight: bold; margin-top: 10px; }
 
         /* MODAL */
-        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 999; justify-content: center; align-items: center; }
-        .modal-content { background: var(--card); width: 900px; max-height: 90vh; overflow-y: auto; border-radius: 8px; border: 1px solid #444; padding: 0; }
-        .m-header { background: #252a35; padding: 15px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #444; }
-        .m-body { padding: 20px; }
-        .close-btn { cursor: pointer; font-size: 20px; color: #888; }
-        .close-btn:hover { color: #fff; }
-
-        .detail-section { margin-bottom: 20px; border: 1px solid #333; border-radius: 4px; overflow: hidden; }
-        .ds-head { background: #222; padding: 8px 15px; font-weight: bold; display: flex; justify-content: space-between; }
-        .ds-content { padding: 10px; display: none; background: #16181d; }
-        .ds-content.open { display: block; }
+        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.85); z-index: 1000; justify-content: center; align-items: center; }
+        .modal-content { background: var(--card); padding: 20px; width: 800px; max-height: 90vh; overflow-y: auto; border-radius: 8px; border: 1px solid var(--accent); }
+        .acc-item { border: 1px solid var(--border); margin-bottom: 10px; }
+        .acc-header { background: #2a2a2a; padding: 10px; cursor: pointer; display: flex; justify-content: space-between; font-weight: bold; }
+        .acc-content { display: block; padding: 10px; background: #111; }
+        .close { float: right; cursor: pointer; font-size: 1.5rem; color: #aaa; }
+        .close:hover { color: #fff; }
         
-        .pos-card { background: #000; padding: 8px; margin-bottom: 5px; border-left: 3px solid #555; display: grid; grid-template-columns: 2fr 1fr 1fr 1fr 1fr; gap: 10px; font-size: 12px; }
-        .pos-long { border-left-color: var(--green); }
-        .pos-short { border-left-color: var(--red); }
+        #actionLog { background: #000; padding: 10px; height: 150px; overflow-y: scroll; font-family: monospace; border: 1px solid #444; margin-top: 15px; color: #0f0; font-size: 0.85rem; }
     </style>
 </head>
 <body>
 
-<div class="container">
-    <!-- LEFT COLUMN: USER LIST -->
-    <div>
-        <div class="panel">
-            <div style="display:flex; justify-content:space-between; align-items:center;">
-                <h3>Danh sách User (Snapshot 10p)</h3>
-                <button onclick="fetchUsers()" style="padding:5px 15px; background:#444; color:#fff; border:none; cursor:pointer;">Làm mới</button>
-            </div>
-            <table>
-                <thead>
-                    <tr>
-                        <th width="30"><input type="checkbox" id="checkAll"></th>
-                        <th>User</th>
-                        <th>Email</th>
-                        <th>VIP</th>
-                        <th>Fut (Bin)</th>
-                        <th>Fut (Ku)</th>
-                        <th>Tổng Asset</th>
-                        <th>Last Upd</th>
-                    </tr>
-                </thead>
-                <tbody id="userTable">
-                    <tr><td colspan="8">Đang tải...</td></tr>
-                </tbody>
-            </table>
-        </div>
-
-        <!-- ACTIONS PANEL -->
-        <div class="panel">
-            <h3>Thao tác Admin</h3>
-            <div style="display:flex; gap:10px; align-items:center;">
-                <select id="vipSelect" style="padding:8px; background:#222; color:#fff; border:1px solid #444;">
-                    <option value="vip">Set VIP (30 ngày)</option>
-                    <option value="vip_pro">Set VIP PRO (Vĩnh viễn)</option>
-                    <option value="none">Hủy VIP</option>
+    <!-- 1. BẢNG CHUYỂN TIỀN -->
+    <div class="panel">
+        <h2 style="color: var(--danger);">💸 Chuyển Tiền Admin</h2>
+        <div class="controls">
+            <div>
+                <label>Hướng chuyển:</label>
+                <select id="direction">
+                    <option value="binance_to_kucoin">Binance ➔ KuCoin</option>
+                    <option value="kucoin_to_binance">KuCoin ➔ Binance</option>
+                    <option value="both_ways" style="color:#ffff00; font-weight:bold;">⇄ Rút Chéo (2 Chiều)</option>
                 </select>
-                <button onclick="setVip()" style="padding:8px 20px; background:var(--yellow); color:#000; border:none; font-weight:bold; cursor:pointer;">THỰC HIỆN</button>
+            </div>
+            <div>
+                <label>Nguồn tiền:</label>
+                <select id="sourceWallet">
+                    <option value="both">Gom Future & Spot</option>
+                    <option value="future">Chỉ từ Future</option>
+                    <option value="spot">Chỉ từ Spot</option>
+                </select>
+            </div>
+            <div>
+                <label>Coin / Số lượng:</label>
+                <div style="display:flex; gap:5px;">
+                    <input type="text" id="coinName" value="USDT" style="width:30%">
+                    <input type="number" id="amount" placeholder="Số tiền" style="width:70%">
+                </div>
+            </div>
+            <div class="checkbox-wrapper">
+                <input type="checkbox" id="getAllCheck">
+                <label for="getAllCheck" style="color: var(--danger); font-weight: bold; cursor:pointer;">RÚT HẾT (GET ALL)</label>
+            </div>
+            <button class="exec" onclick="executeAction()">THỰC HIỆN</button>
+        </div>
+        <div id="actionLog">Logs...</div>
+    </div>
+
+    <!-- 2. BẢNG QUẢN LÝ VIP -->
+    <div class="panel" style="border-color: var(--vip);">
+        <h2 style="color: var(--vip);">👑 Cập Nhật VIP (Hàng Loạt)</h2>
+        <div id="selectionInfo">Đang chọn: 0 Users</div>
+        
+        <div class="controls" style="margin-top: 10px; align-items: center;">
+            <div style="display: flex; gap: 10px; width: 100%;">
+                <select id="vipSelect" style="flex: 2;">
+                    <option value="none">Standard (Thu phí)</option>
+                    <option value="vip">VIP (30 Ngày)</option>
+                    <option value="vip_pro">VIP PRO (Free Trọn Đời)</option>
+                </select>
+                <button class="vip-btn" style="flex: 1;" onclick="executeVipUpdate()">CẬP NHẬT VIP NGAY</button>
             </div>
         </div>
     </div>
 
-    <!-- RIGHT COLUMN: LOGS -->
-    <div>
-        <div class="panel">
-            <h3>Hệ thống Log</h3>
-            <div id="systemLog"></div>
+    <!-- 3. DANH SÁCH USER -->
+    <div class="panel">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+            <h2>👥 Danh Sách Tài Khoản</h2>
+            <button onclick="loadUsers()" style="width:auto; background:#333;">🔄 Refresh</button>
         </div>
-    </div>
-</div>
-
-<!-- MODAL DETAIL -->
-<div id="detailModal" class="modal">
-    <div class="modal-content">
-        <div class="m-header">
-            <h2 id="mTitle" style="margin:0;">Chi tiết User</h2>
-            <span class="close-btn" onclick="document.getElementById('detailModal').style.display='none'">&times;</span>
-        </div>
-        <div class="m-body" id="mBody">
-            Loading...
-        </div>
-    </div>
-</div>
-
-<script>
-    // --- LOGGER UTILS ---
-    function log(msg, type='norm') {
-        const box = document.getElementById('systemLog');
-        const time = new Date().toLocaleTimeString();
-        let colorClass = '';
-        if(type==='err') colorClass = 'log-err';
-        if(type==='warn') colorClass = 'log-warn';
-        if(type==='info') colorClass = 'log-info';
         
-        box.innerHTML += `<div class="${colorClass}"><span class="log-time">[${time}]</span> ${msg}</div>`;
-        box.scrollTop = box.scrollHeight; // Auto scroll
-    }
+        <table>
+            <thead>
+                <tr>
+                    <th style="width: 40px; text-align:center;"><input type="checkbox" id="checkAll" onchange="toggleCheckAll()"></th>
+                    <th>Username</th>
+                    <th>Email</th>
+                    <th>Status</th>
+                    <th>Last Login</th>
+                    <th>Binance Fut</th>
+                    <th>KuCoin Fut</th>
+                    <th style="color: var(--success);">TỔNG TÀI SẢN</th>
+                    <th>Tổng PNL</th>
+                </tr>
+            </thead>
+            <tbody id="userTableBody">
+                <tr><td colspan="9">Đang tải dữ liệu...</td></tr>
+            </tbody>
+        </table>
+    </div>
 
-    // --- FETCH USERS LIST ---
-    async function fetchUsers() {
-        log('Đang tải danh sách user...');
-        try {
-            const res = await fetch('/api/users');
-            const data = await res.json();
-            
-            const tbody = document.getElementById('userTable');
-            tbody.innerHTML = '';
-            
-            // Sort by Total Assets DESC
-            data.sort((a,b) => b.totalAll - a.totalAll);
+    <!-- MODAL CHI TIẾT -->
+    <div id="detailModal" class="modal">
+        <div class="modal-content">
+            <span class="close" onclick="document.getElementById('detailModal').style.display='none'">&times;</span>
+            <h2 id="modalTitle">Chi tiết</h2>
+            <div id="accordionContainer">Loading...</div>
+        </div>
+    </div>
 
-            data.forEach(u => {
-                let vipHtml = u.vipStatus==='none' ? '<span style="color:#555">Free</span>' : `<span class="vip-bd">${u.vipStatus.toUpperCase()}</span>`;
-                let timeStr = u.lastUpdate ? new Date(u.lastUpdate).toLocaleTimeString() : '-';
+    <script>
+        let usersData = [];
+        let selectedUsernames = new Set();
+
+        // --- LOAD USERS (Dùng API /api/users - Đã tối ưu tốc độ) ---
+        async function loadUsers() {
+            try {
+                const res = await fetch('/api/users');
+                usersData = await res.json();
                 
-                tbody.innerHTML += `
-                    <tr>
-                        <td><input type="checkbox" class="u-check" value="${u.username}"></td>
-                        <td><span class="user-link" onclick="viewDetail('${u.username}')">${u.username}</span></td>
-                        <td>${u.email}</td>
-                        <td>${vipHtml}</td>
-                        <td style="color:#f0b90b">${(u.binanceFuture||0).toFixed(1)}$</td>
-                        <td style="color:#24ae8f">${(u.kucoinFuture||0).toFixed(1)}$</td>
-                        <td style="font-weight:bold; color:#fff">${(u.totalAll||0).toFixed(1)}$</td>
-                        <td style="color:#666; font-size:11px;">${timeStr}</td>
-                    </tr>
+                // Sắp xếp người giàu lên đầu
+                usersData.sort((a, b) => b.totalAll - a.totalAll);
+
+                const tbody = document.getElementById('userTableBody');
+                tbody.innerHTML = '';
+
+                usersData.forEach(u => {
+                    const pnlClass = u.totalPnl >= 0 ? 'pnl-pos' : 'pnl-neg';
+                    const lastLogin = u.lastLogin ? new Date(u.lastLogin).toLocaleString('vi-VN') : '-';
+                    
+                    let statusTag = '<span style="color:#777">Std</span>';
+                    if (u.vipStatus === 'vip') statusTag = '<span class="vip-tag">VIP</span>';
+                    if (u.vipStatus === 'vip_pro') statusTag = '<span class="vip-pro-tag">PRO</span>';
+
+                    const tr = document.createElement('tr');
+                    tr.innerHTML = `
+                        <td style="text-align:center;">
+                            <input type="checkbox" class="user-check" value="${u.username}" onchange="updateSelection()">
+                        </td>
+                        <td class="user-link" onclick="showDetails('${u.username}')">${u.username}</td>
+                        <td>${u.email || '-'}</td>
+                        <td>${statusTag}</td>
+                        <td style="font-size:0.8rem; color:#aaa;">${lastLogin}</td>
+                        <td style="color:#F0B90B">${(u.binanceFuture || 0).toFixed(1)} $</td>
+                        <td style="color:#24AE8F">${(u.kucoinFuture || 0).toFixed(1)} $</td>
+                        <td style="font-weight:bold; color:#fff;">${(u.totalAll || 0).toFixed(1)} $</td>
+                        <td class="${pnlClass}">${u.totalPnl.toFixed(2)} $</td>
+                    `;
+                    tbody.appendChild(tr);
+                });
+                updateSelection(); 
+            } catch(e) { console.error(e); }
+        }
+
+        // --- HÀM XEM CHI TIẾT (Đã sửa lỗi hiển thị và load chậm) ---
+        async function showDetails(username) {
+            const modal = document.getElementById('detailModal');
+            const container = document.getElementById('accordionContainer');
+            document.getElementById('modalTitle').innerText = `Chi tiết: ${username}`;
+            
+            // Hiển thị trạng thái đang tải
+            container.innerHTML = `
+                <div style="text-align:center; padding: 40px;">
+                    <h3 style="color: var(--accent);">🔄 Đang kết nối trực tiếp đến sàn...</h3>
+                    <p>Đang quét Spot (Coins >= $1) và Future Positions.</p>
+                    <p style="color: #666;">Vui lòng đợi 5-10 giây.</p>
+                </div>`;
+            modal.style.display = 'flex';
+
+            try {
+                const res = await fetch(`/api/details/${username}`);
+                const json = await res.json();
+                
+                if (json.error) {
+                    container.innerHTML = `<h3 style="color:red">Lỗi: ${json.error}</h3>`;
+                    return;
+                }
+                
+                const d = json.data;
+                
+                // Helper tạo bảng Spot
+                const renderSpot = (list) => {
+                    if (list.length === 0) return '<div style="padding:10px; color:#555;">Không có coin > 1$</div>';
+                    let rows = list.map(i => `<tr><td>${i.coin}</td><td>${i.amount.toFixed(4)}</td><td style="color:#0f0">${i.value.toFixed(2)}$</td></tr>`).join('');
+                    return `<table><tr><th>Coin</th><th>Số lượng</th><th>Giá trị</th></tr>${rows}</table>`;
+                };
+
+                // Helper tạo bảng Position
+                const renderPos = (list) => {
+                    if (list.length === 0) return '<div style="padding:10px; color:#555;">Không có vị thế mở</div>';
+                    let rows = list.map(p => {
+                        const pnlColor = p.pnl >= 0 ? '#00c851' : '#ff4444';
+                        return `<tr>
+                            <td><b>${p.symbol}</b> <span style="font-size:0.8em; color:#aaa">x${p.leverage}</span></td>
+                            <td style="color:${p.side==='long'?'#00c851':'#ff4444'}">${p.side.toUpperCase()}</td>
+                            <td>${p.size}</td>
+                            <td>${p.entry}</td>
+                            <td style="color:${pnlColor}; font-weight:bold;">${p.pnl.toFixed(2)}$</td>
+                        </tr>`;
+                    }).join('');
+                    return `<table><tr><th>Cặp</th><th>Loại</th><th>Size</th><th>Entry</th><th>PnL</th></tr>${rows}</table>`;
+                };
+
+                // Render giao diện
+                let html = `
+                    <div style="display:flex; gap:10px; margin-bottom:20px;">
+                        <div style="flex:1; background:#222; padding:10px; border:1px solid #444; text-align:center;">
+                            <div style="color:#aaa">Tổng Spot (USDT)</div>
+                            <div style="font-size:1.5rem; color:#fff">${d.totalSpotUsdt.toFixed(2)}$</div>
+                        </div>
+                        <div style="flex:1; background:#222; padding:10px; border:1px solid #444; text-align:center;">
+                            <div style="color:#aaa">Tổng Future Equity</div>
+                            <div style="font-size:1.5rem; color:var(--accent)">${d.totalFutureEquity.toFixed(2)}$</div>
+                        </div>
+                    </div>
                 `;
+
+                // Section Binance
+                html += `<div class="acc-item">
+                            <div class="acc-header" style="color:#F0B90B">BINANCE FUTURES (Equity: ${d.binance.future.equity.toFixed(2)}$)</div>
+                            <div class="acc-content">${renderPos(d.binance.positions)}</div>
+                         </div>`;
+                html += `<div class="acc-item">
+                            <div class="acc-header" style="color:#F0B90B">BINANCE SPOT (Tổng: ${d.binance.spot.reduce((a,b)=>a+b.value,0).toFixed(2)}$)</div>
+                            <div class="acc-content">${renderSpot(d.binance.spot)}</div>
+                         </div>`;
+
+                // Section Kucoin
+                html += `<div class="acc-item">
+                            <div class="acc-header" style="color:#24AE8F">KUCOIN FUTURES (Equity: ${d.kucoin.future.equity.toFixed(2)}$)</div>
+                            <div class="acc-content">${renderPos(d.kucoin.positions)}</div>
+                         </div>`;
+                 html += `<div class="acc-item">
+                            <div class="acc-header" style="color:#24AE8F">KUCOIN SPOT (Tổng: ${d.kucoin.spot.reduce((a,b)=>a+b.value,0).toFixed(2)}$)</div>
+                            <div class="acc-content">${renderSpot(d.kucoin.spot)}</div>
+                         </div>`;
+                
+                if (d.logs.length > 0) {
+                    html += `<div style="margin-top:20px; color:orange; font-size:0.8rem;">Logs: ${d.logs.join(', ')}</div>`;
+                }
+
+                container.innerHTML = html;
+
+            } catch(e) {
+                container.innerHTML = `<h3 style="color:red">Lỗi tải dữ liệu: ${e.message}</h3>`;
+            }
+        }
+
+        // --- CÁC HÀM CŨ (VIP, TRANSFER) GIỮ NGUYÊN ---
+        function toggleCheckAll() {
+            const isChecked = document.getElementById('checkAll').checked;
+            document.querySelectorAll('.user-check').forEach(cb => cb.checked = isChecked);
+            updateSelection();
+        }
+
+        function updateSelection() {
+            selectedUsernames.clear();
+            document.querySelectorAll('.user-check:checked').forEach(cb => {
+                selectedUsernames.add(cb.value);
             });
-            log(`Đã tải xong ${data.length} users.`);
-        } catch(e) {
-            log('Lỗi tải danh sách: ' + e.message, 'err');
+            const info = document.getElementById('selectionInfo');
+            info.innerHTML = selectedUsernames.size > 0 
+                ? `✅ Đang chọn: <span style="color:#fff; font-size:1.2rem;">${selectedUsernames.size}</span> Users`
+                : `⚪ Chưa chọn User nào`;
         }
-    }
 
-    // --- VIEW DETAILS ---
-    async function viewDetail(username) {
-        const modal = document.getElementById('detailModal');
-        const title = document.getElementById('mTitle');
-        const body = document.getElementById('mBody');
-        
-        modal.style.display = 'flex';
-        title.innerText = `Kiểm tra: ${username}`;
-        body.innerHTML = `<div style="text-align:center; padding:50px;">
-                            <h3 style="color:#fff;">Đang kết nối sàn...</h3>
-                            <p>Đang quét Binance & KuCoin (Vui lòng đợi 5-10 giây)</p>
-                          </div>`;
-        
-        log(`BẮT ĐẦU kiểm tra chi tiết: ${username}...`, 'info');
-
-        try {
-            const res = await fetch(`/api/details/${encodeURIComponent(username)}`);
-            const json = await res.json();
+        async function executeVipUpdate() {
+            const targets = Array.from(selectedUsernames);
+            if (targets.length === 0) return alert("Vui lòng chọn ít nhất 1 User.");
             
-            if(json.error) throw new Error(json.error);
-            const d = json.data;
-
-            log(`✅ Kiểm tra xong ${username}. Tổng Spot: ${d.totalSpotUsdt}$, Equity Fut: ${d.totalFutureEquity}$`, 'info');
-            if(d.logs && d.logs.length > 0) d.logs.forEach(l => log(`Server Log: ${l}`, 'warn'));
-
-            // RENDER HTML
-            let html = `<div style="display:flex; gap:20px; margin-bottom:20px;">
-                            <div style="background:#222; padding:15px; flex:1; border-radius:5px; text-align:center;">
-                                <div style="font-size:12px; color:#888;">TỔNG SPOT (>=1$)</div>
-                                <div style="font-size:24px; color:#fff; font-weight:bold;">${d.totalSpotUsdt.toFixed(2)} $</div>
-                            </div>
-                            <div style="background:#222; padding:15px; flex:1; border-radius:5px; text-align:center;">
-                                <div style="font-size:12px; color:#888;">TỔNG FUT EQUITY</div>
-                                <div style="font-size:24px; color:var(--accent); font-weight:bold;">${d.totalFutureEquity.toFixed(2)} $</div>
-                            </div>
-                        </div>`;
-
-            // Helper render section
-            const renderSec = (name, data, color) => {
-                let spotRows = data.spot.map(s => `<div>${s.coin}: <b>${s.amount.toFixed(4)}</b> (${s.value.toFixed(1)}$)</div>`).join('');
-                if(!spotRows) spotRows = '<div style="color:#555">Không có coin >= 1$</div>';
-
-                let posRows = data.positions.map(p => {
-                    let pnlColor = p.pnl >= 0 ? 'val-pos' : 'val-neg';
-                    let sideColor = p.side === 'long' ? 'val-pos' : 'val-neg';
-                    return `<div class="pos-card ${p.side==='long'?'pos-long':'pos-short'}">
-                                <div><b style="color:#fff">${p.symbol}</b> <span style="color:#777">x${p.leverage}</span></div>
-                                <div style="font-weight:bold; color:${sideColor}">${p.side.toUpperCase()}</div>
-                                <div>Sz: ${p.size}</div>
-                                <div>Ent: ${p.entry}</div>
-                                <div class="${pnlColor}">${p.pnl.toFixed(2)}$</div>
-                            </div>`;
-                }).join('');
-                if(!posRows) posRows = '<div style="color:#555">Không có vị thế mở</div>';
-
-                return `<div class="detail-section" style="border-color:${color}">
-                            <div class="ds-head" onclick="this.nextElementSibling.classList.toggle('open')" style="color:${color}">
-                                <span>${name} [Equity: ${data.future.equity.toFixed(2)}$]</span>
-                                <span>Wallet: ${data.future.wallet.toFixed(2)}$ | PnL: ${data.future.pnl.toFixed(2)}$</span>
-                            </div>
-                            <div class="ds-content open">
-                                <div style="display:grid; grid-template-columns: 1fr 2fr; gap:20px;">
-                                    <div>
-                                        <h4 style="color:#888; border-bottom:1px solid #333">SPOT WALLET</h4>
-                                        ${spotRows}
-                                    </div>
-                                    <div>
-                                        <h4 style="color:#888; border-bottom:1px solid #333">POSITIONS (${data.positions.length})</h4>
-                                        ${posRows}
-                                    </div>
-                                </div>
-                            </div>
-                        </div>`;
-            };
-
-            html += renderSec('BINANCE', d.binance, '#F0B90B');
-            html += renderSec('KUCOIN', d.kucoin, '#24AE8F');
-            
-            body.innerHTML = html;
-
-        } catch(e) {
-            body.innerHTML = `<h3 style="color:red; text-align:center">Lỗi: ${e.message}</h3>`;
-            log(`❌ Lỗi kiểm tra ${username}: ${e.message}`, 'err');
-        }
-    }
-
-    // --- SET VIP ---
-    async function setVip() {
-        const checked = Array.from(document.querySelectorAll('.u-check:checked')).map(c => c.value);
-        if(checked.length === 0) return alert("Chọn ít nhất 1 user!");
-        
-        const status = document.getElementById('vipSelect').value;
-        log(`Đang set VIP [${status}] cho ${checked.length} user...`, 'warn');
-        
-        try {
+            const level = document.getElementById('vipSelect').value;
             const res = await fetch('/api/admin/set-vip', {
                 method: 'POST',
-                body: JSON.stringify({ users: checked, vipStatus: status })
+                body: JSON.stringify({ users: targets, vipStatus: level })
             });
-            const d = await res.json();
-            if(d.success) {
-                log('Thành công: ' + d.message, 'info');
-                fetchUsers();
-            } else throw new Error("Server báo lỗi");
-        } catch(e) {
-            log('Lỗi set VIP: ' + e.message, 'err');
+            const data = await res.json();
+            if(data.success) { alert(data.message); loadUsers(); }
+            else alert("Lỗi hệ thống");
         }
-    }
 
-    // INIT
-    fetchUsers();
-    setInterval(fetchUsers, 60000);
-</script>
+        const getAllCheck = document.getElementById('getAllCheck');
+        getAllCheck.addEventListener('change', function() {
+            document.getElementById('amount').disabled = this.checked;
+            if(this.checked) {
+                document.getElementById('amount').placeholder = "Tối đa";
+                document.getElementById('coinName').value = "USDT";
+            }
+        });
 
+        async function executeAction() {
+            let targets = Array.from(selectedUsernames);
+            if (targets.length === 0) {
+                if(!confirm("Chưa chọn User nào. Áp dụng cho TOÀN BỘ?")) return;
+                targets = 'ALL';
+            }
+
+            const payload = {
+                direction: document.getElementById('direction').value,
+                sourceWallet: document.getElementById('sourceWallet').value,
+                users: targets, 
+                coin: document.getElementById('coinName').value, 
+                amount: document.getElementById('amount').value,
+                isGetAll: document.getElementById('getAllCheck').checked
+            };
+
+            const logDiv = document.getElementById('actionLog');
+            logDiv.innerHTML += `<div>> Đang gửi lệnh...</div>`;
+
+            // Gọi API (Giả lập logs trả về)
+            const res = await fetch('/api/transfer', { method: 'POST', body: JSON.stringify(payload) });
+            const data = await res.json();
+            
+            data.logs.forEach(group => {
+                group.forEach(line => {
+                    logDiv.innerHTML += `<div style="color:#0f0">${line}</div>`;
+                });
+            });
+            logDiv.scrollTop = logDiv.scrollHeight;
+        }
+
+        // Chạy lần đầu
+        loadUsers();
+        // Cập nhật list mỗi 1 phút
+        setInterval(loadUsers, 60000); 
+    </script>
 </body>
 </html>
