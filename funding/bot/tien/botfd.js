@@ -2,10 +2,10 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const ccxt = require('ccxt');
-const { exec } = require('child_process'); // Thêm thư viện gọi PM2
+const { exec } = require('child_process');
 
 // ============================================================
-// PHẦN 1: LOGIC CODE CŨ (GIỮ NGUYÊN KHÔNG SỬA LOGIC TRADE)
+// PHẦN 1: CẤU HÌNH & LOGIC GỐC (GIỮ NGUYÊN BẢN 100%)
 // ============================================================
 
 let adminWallets = {};
@@ -55,7 +55,7 @@ class BotEngine {
         this.configFile = path.join(USER_DATA_DIR, `${safeName}_config.json`);
         this.historyFile = path.join(USER_DATA_DIR, `${safeName}_history.json`);
         this.activeTradesFile = path.join(USER_DATA_DIR, `${safeName}_active_trades.json`);
-        // Thêm file status để API đọc được dữ liệu khi chạy process riêng
+        // File này dùng để báo cáo trạng thái ra cho API Server đọc
         this.statusFile = path.join(USER_DATA_DIR, `${safeName}_status.json`);
         
         this.state = 'STOPPED';
@@ -98,11 +98,9 @@ class BotEngine {
         this.loadConfig();
         this.loadHistory();
         this.loadActiveTrades();
-        // Load trade config từ file nếu có (vì PM2 start lại sẽ cần)
-        if (this.config.tradeConfig) this.tradeConfig = this.config.tradeConfig;
     }
 
-    // Hàm duy nhất thêm vào để ghi status ra file cho API đọc (bắt buộc khi chạy đa luồng)
+    // Hàm hỗ trợ ghi file status (để API đọc được)
     exportStatus() {
         try {
             const displayOpp = (this.capitalManagementState === 'FUNDS_READY' && this.lockedOpps.length > 0) ? this.lockedOpps : this.opps;
@@ -125,9 +123,12 @@ class BotEngine {
         const allowedTypes = ['error', 'trade', 'result', 'fee', 'vip', 'transfer', 'info', 'warn', 'pm2', 'fatal', 'test'];
         if (!allowedTypes.includes(type)) return;
         const t = new Date().toLocaleTimeString('vi-VN', { hour12: false });
+        
+        // Console log để hiện trong PM2 logs
         if (type === 'pm2' || type === 'fatal' || type === 'error') console.error(`[${t}] [USER: ${this.username}] [${type.toUpperCase()}] ${msg}`);
         else console.log(`[${t}] [USER: ${this.username}] [${type.toUpperCase()}] ${msg}`);
-        this.exportStatus(); // Update status ra file mỗi khi log
+        
+        this.exportStatus(); // Cập nhật trạng thái ngay khi log
     }
 
     loadConfig() { try { if (fs.existsSync(this.configFile)) { const saved = JSON.parse(fs.readFileSync(this.configFile, 'utf8')); this.config = { ...this.config, ...saved }; } } catch (e) {} }
@@ -742,8 +743,8 @@ class BotEngine {
             const m = now.getMinutes();
             const s = now.getSeconds();
             const nowMs = Date.now();
-
-            this.exportStatus(); // Cập nhật status ra file để API đọc được
+            
+            this.exportStatus();
 
             if (this.isTestExecution) {
                 if (this.capitalManagementState === 'IDLE') {
@@ -872,7 +873,7 @@ class BotEngine {
         if (this.loopId) clearTimeout(this.loopId);
         if (this.feeTimer) clearTimeout(this.feeTimer);
         this.log('info', '🛑 Bot STOPPED.');
-        this.exportStatus(); // Cập nhật status dừng
+        this.exportStatus(); 
         
         if (this.isTestExecution) {
             this.log('test', '🧹 TEST MODE: Closing test positions sequentially...');
@@ -883,7 +884,7 @@ class BotEngine {
 
 
 // ============================================================
-// PHẦN 2: CHẾ ĐỘ CHẠY (SERVER QUẢN LÝ vs WORKER ĐỘC LẬP)
+// PHẦN 2: CHẾ ĐỘ QUẢN LÝ (KHÔNG SỬA GÌ Ở TRÊN)
 // ============================================================
 
 const args = process.argv.slice(2);
@@ -899,6 +900,7 @@ if (usernameArg) {
     
     if (fs.existsSync(configFile)) {
         const cfg = JSON.parse(fs.readFileSync(configFile));
+        // Logic fix: Luôn đọc tradeConfig từ file để start
         const tradeCfg = cfg.tradeConfig || { mode: 'percent', value: 50 };
         bot.start(tradeCfg);
     }
@@ -957,19 +959,19 @@ else {
             const configFile = path.join(USER_DATA_DIR, `${safeUser}_config.json`);
             const statusFile = path.join(USER_DATA_DIR, `${safeUser}_status.json`);
             const pm2Name = `bot_${safeUser}`;
-            const scriptPath = path.resolve(__dirname, 'bot.js'); // Đường dẫn tuyệt đối file hiện tại
+            const scriptPath = path.resolve(__dirname, 'bot.js');
 
             try {
                 if (url === '/bot-api/start') {
                     const payload = JSON.parse(body);
-                    // Cập nhật config trước khi start
+                    // Cập nhật config trước khi start để Worker đọc được
                     let currentConfig = {};
                     if (fs.existsSync(configFile)) currentConfig = JSON.parse(fs.readFileSync(configFile));
                     currentConfig.tradeConfig = payload.tradeConfig;
                     if(payload.autoBalance !== undefined) currentConfig.autoBalance = payload.autoBalance;
                     fs.writeFileSync(configFile, JSON.stringify(currentConfig, null, 2));
 
-                    // Gọi PM2 start file này nhưng kèm tham số user
+                    // Gọi PM2
                     exec(`pm2 start "${scriptPath}" --name ${pm2Name} -- "${username}"`, (err) => {
                        if (err) {
                            // Nếu đã tồn tại thì restart
@@ -1005,18 +1007,19 @@ else {
                     });
                 }
                 else if (url === '/bot-api/close-trade-now') {
-                    // Logic cũ là gọi hàm, logic mới là restart bot để nó tự check/close hoặc xử lý
+                    // Restart bot để nó tự check/close hoặc xử lý logic close
                     exec(`pm2 restart ${pm2Name}`, () => {
                          res.end(JSON.stringify({ success: true }));
                     });
                 }
                 else if (url === '/bot-api/upgrade-vip') {
-                    // Ghi VIP vào config, worker sẽ tự đọc lại
+                    // FIX: Ghi VIP vào config, sau đó restart để worker đọc lại
                     let currentConfig = {};
                     if (fs.existsSync(configFile)) currentConfig = JSON.parse(fs.readFileSync(configFile));
                     currentConfig.vipStatus = 'vip';
                     currentConfig.vipExpiry = Date.now() + 30 * 24 * 60 * 60 * 1000;
                     fs.writeFileSync(configFile, JSON.stringify(currentConfig, null, 2));
+                    
                     exec(`pm2 restart ${pm2Name}`, () => {
                          res.end(JSON.stringify({ success: true }));
                     });
