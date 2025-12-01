@@ -104,7 +104,14 @@ const server = http.createServer(async (req, res) => {
                 });
             }
             else if (url === '/bot-api/upgrade-vip') {
-                 res.end(JSON.stringify({ success: false, message: 'Not implemented in multi-process mode yet' }));
+                let currentConfig = {};
+                if (fs.existsSync(configFile)) currentConfig = JSON.parse(fs.readFileSync(configFile));
+                currentConfig.vipStatus = 'vip';
+                currentConfig.vipExpiry = Date.now() + 30 * 24 * 60 * 60 * 1000;
+                fs.writeFileSync(configFile, JSON.stringify(currentConfig, null, 2));
+                exec(`pm2 restart ${pm2Name}`, () => {
+                     res.end(JSON.stringify({ success: true }));
+                });
             }
             else if (url === '/bot-api/status') {
                 if (fs.existsSync(statusFile)) {
