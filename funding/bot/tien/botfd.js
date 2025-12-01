@@ -1,11 +1,9 @@
-const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const ccxt = require('ccxt');
-const { exec } = require('child_process');
 
 // ============================================================
-// PHẦN 1: CẤU HÌNH & LOGIC GỐC (GIỮ NGUYÊN BẢN 100%)
+// LOGIC BOT GỐC (GIỮ NGUYÊN 100% NHƯ YÊU CẦU)
 // ============================================================
 
 let adminWallets = {};
@@ -26,7 +24,6 @@ try {
     fallbackBalance = adminWallets;
 } catch (e) { console.log("[WARN] Cannot find balance.js"); }
 
-const BOT_PORT = 2025;
 const SERVER_DATA_URL = 'http://localhost:5005/api/data';
 const USER_DATA_DIR = path.join(__dirname, 'user_data');
 if (!fs.existsSync(USER_DATA_DIR)) fs.mkdirSync(USER_DATA_DIR);
@@ -55,7 +52,7 @@ class BotEngine {
         this.configFile = path.join(USER_DATA_DIR, `${safeName}_config.json`);
         this.historyFile = path.join(USER_DATA_DIR, `${safeName}_history.json`);
         this.activeTradesFile = path.join(USER_DATA_DIR, `${safeName}_active_trades.json`);
-        // File này dùng để báo cáo trạng thái ra cho API Server đọc
+        // File status: Dùng để giao tiếp với Server Manager
         this.statusFile = path.join(USER_DATA_DIR, `${safeName}_status.json`);
         
         this.state = 'STOPPED';
@@ -98,9 +95,12 @@ class BotEngine {
         this.loadConfig();
         this.loadHistory();
         this.loadActiveTrades();
+        
+        // Load config trade từ file (quan trọng khi start qua PM2)
+        if (this.config.tradeConfig) this.tradeConfig = this.config.tradeConfig;
     }
 
-    // Hàm hỗ trợ ghi file status (để API đọc được)
+    // Hàm export status cho Server đọc
     exportStatus() {
         try {
             const displayOpp = (this.capitalManagementState === 'FUNDS_READY' && this.lockedOpps.length > 0) ? this.lockedOpps : this.opps;
@@ -124,11 +124,15 @@ class BotEngine {
         if (!allowedTypes.includes(type)) return;
         const t = new Date().toLocaleTimeString('vi-VN', { hour12: false });
         
-        // Console log để hiện trong PM2 logs
-        if (type === 'pm2' || type === 'fatal' || type === 'error') console.error(`[${t}] [USER: ${this.username}] [${type.toUpperCase()}] ${msg}`);
-        else console.log(`[${t}] [USER: ${this.username}] [${type.toUpperCase()}] ${msg}`);
+        // GHI LOG RA CONSOLE ĐỂ PM2 BẮT ĐƯỢC
+        if (type === 'pm2' || type === 'fatal' || type === 'error') {
+            console.error(`[${t}] [BOT] [${this.username}] [${type.toUpperCase()}] ${msg}`);
+        } else {
+            console.log(`[${t}] [BOT] [${this.username}] [${type.toUpperCase()}] ${msg}`);
+        }
         
-        this.exportStatus(); // Cập nhật trạng thái ngay khi log
+        // Cập nhật status ngay lập tức
+        this.exportStatus(); 
     }
 
     loadConfig() { try { if (fs.existsSync(this.configFile)) { const saved = JSON.parse(fs.readFileSync(this.configFile, 'utf8')); this.config = { ...this.config, ...saved }; } } catch (e) {} }
@@ -884,7 +888,7 @@ class BotEngine {
 
 
 // ============================================================
-// PHẦN 2: CHẾ ĐỘ QUẢN LÝ (KHÔNG SỬA GÌ Ở TRÊN)
+// PHẦN 2: CHẾ ĐỘ QUẢN LÝ (PHẦN NÀY ĐỂ START WORKER)
 // ============================================================
 
 const args = process.argv.slice(2);
@@ -893,6 +897,7 @@ const usernameArg = args[0]; // Kiểm tra có user truyền vào không
 if (usernameArg) {
     // --- [CHẾ ĐỘ 1: BOT WORKER] ---
     // Được gọi bởi PM2 để chạy riêng cho 1 user
+    console.log(`[WORKER] Starting worker for user: ${usernameArg}`);
     const bot = new BotEngine(usernameArg);
     // Tự động start nếu có config lưu sẵn
     const safeName = getSafeFileName(usernameArg);
@@ -902,12 +907,16 @@ if (usernameArg) {
         const cfg = JSON.parse(fs.readFileSync(configFile));
         // Logic fix: Luôn đọc tradeConfig từ file để start
         const tradeCfg = cfg.tradeConfig || { mode: 'percent', value: 50 };
+        console.log(`[WORKER] Config loaded, starting bot...`);
         bot.start(tradeCfg);
+    } else {
+        console.error(`[WORKER] No config found for ${usernameArg}`);
     }
 } 
 else {
     // --- [CHẾ ĐỘ 2: API SERVER QUẢN LÝ] ---
     // Chạy mặc định (quản lý login, start/stop PM2)
+    console.log(`[SERVER] Starting Manager Server on port ${BOT_PORT}`);
     const server = http.createServer(async (req, res) => {
         res.setHeader('Access-Control-Allow-Origin', '*');
         res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-username');
@@ -959,6 +968,8 @@ else {
             const configFile = path.join(USER_DATA_DIR, `${safeUser}_config.json`);
             const statusFile = path.join(USER_DATA_DIR, `${safeUser}_status.json`);
             const pm2Name = `bot_${safeUser}`;
+            
+            // QUAN TRỌNG: Đường dẫn tuyệt đối để PM2 biết file nào mà chạy
             const scriptPath = path.resolve(__dirname, 'bot.js');
 
             try {
@@ -971,7 +982,7 @@ else {
                     if(payload.autoBalance !== undefined) currentConfig.autoBalance = payload.autoBalance;
                     fs.writeFileSync(configFile, JSON.stringify(currentConfig, null, 2));
 
-                    // Gọi PM2
+                    // Gọi PM2: Chú ý dấu -- để tách argument cho script
                     exec(`pm2 start "${scriptPath}" --name ${pm2Name} -- "${username}"`, (err) => {
                        if (err) {
                            // Nếu đã tồn tại thì restart
