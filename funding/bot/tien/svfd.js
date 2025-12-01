@@ -33,7 +33,7 @@ const FEE_AUTO_OFF = 5;
 const FEE_CHECK_DELAY = 60000; 
 
 const SL_PERCENTAGE = 65;   
-const TP_PERCENTAGE = 85; 
+const TP_PERCENTAGE = 115; 
 
 function getSafeFileName(username) {
     return username.replace(/[^a-z0-9]/gi, '_').toLowerCase();
@@ -99,20 +99,13 @@ class BotEngine {
         const t = new Date().toLocaleTimeString('vi-VN', { hour12: false });
         if (type === 'pm2' || type === 'fatal' || type === 'error') console.error(`[${t}] [USER: ${this.username}] [${type.toUpperCase()}] ${msg}`);
         else console.log(`[${t}] [USER: ${this.username}] [${type.toUpperCase()}] ${msg}`);
+        this.exportStatus();
     }
 
-    loadConfig() { try { if (fs.existsSync(this.configFile)) { const saved = JSON.parse(fs.readFileSync(this.configFile, 'utf8')); this.config = { ...this.config, ...saved }; } } catch (e) {} }
-    saveConfig(newConfig = {}) { for (let k in newConfig) if (newConfig[k] !== undefined) this.config[k] = newConfig[k]; fs.writeFileSync(this.configFile, JSON.stringify(this.config, null, 2)); }
-    loadHistory() { try { if (fs.existsSync(this.historyFile)) this.history = JSON.parse(fs.readFileSync(this.historyFile, 'utf8')); } catch(e) {} }
-    saveHistory(trade) { this.history.unshift(trade); if(this.history.length > 50) this.history = this.history.slice(0,50); fs.writeFileSync(this.historyFile, JSON.stringify(this.history, null, 2)); }
-    
-    loadActiveTrades() { try { if (fs.existsSync(this.activeTradesFile)) this.activeTrades = JSON.parse(fs.readFileSync(this.activeTradesFile, 'utf8')); } catch(e) { this.activeTrades = []; } }
-    saveActiveTrades() { fs.writeFileSync(this.activeTradesFile, JSON.stringify(this.activeTrades, null, 2)); }
-    
-    saveStatus() {
+    exportStatus() {
         try {
             const displayOpp = (this.capitalManagementState === 'FUNDS_READY' && this.lockedOpps.length > 0) ? this.lockedOpps : this.opps;
-            const statusData = {
+            const s = {
                 username: this.username,
                 botState: this.state,
                 capitalManagementState: this.capitalManagementState,
@@ -123,9 +116,17 @@ class BotEngine {
                 vipStatus: this.config.vipStatus,
                 vipExpiry: this.config.vipExpiry
             };
-            fs.writeFileSync(this.statusFile, JSON.stringify(statusData, null, 2));
-        } catch(e) {}
+            fs.writeFileSync(this.statusFile, JSON.stringify(s, null, 2));
+        } catch (e) {}
     }
+
+    loadConfig() { try { if (fs.existsSync(this.configFile)) { const saved = JSON.parse(fs.readFileSync(this.configFile, 'utf8')); this.config = { ...this.config, ...saved }; } } catch (e) {} }
+    saveConfig(newConfig = {}) { for (let k in newConfig) if (newConfig[k] !== undefined) this.config[k] = newConfig[k]; fs.writeFileSync(this.configFile, JSON.stringify(this.config, null, 2)); }
+    loadHistory() { try { if (fs.existsSync(this.historyFile)) this.history = JSON.parse(fs.readFileSync(this.historyFile, 'utf8')); } catch(e) {} }
+    saveHistory(trade) { this.history.unshift(trade); if(this.history.length > 50) this.history = this.history.slice(0,50); fs.writeFileSync(this.historyFile, JSON.stringify(this.history, null, 2)); }
+    
+    loadActiveTrades() { try { if (fs.existsSync(this.activeTradesFile)) this.activeTrades = JSON.parse(fs.readFileSync(this.activeTradesFile, 'utf8')); } catch(e) { this.activeTrades = []; } }
+    saveActiveTrades() { fs.writeFileSync(this.activeTradesFile, JSON.stringify(this.activeTrades, null, 2)); }
 
     getWithdrawParams(exchangeId, targetNetwork) {
         if (exchangeId.includes('binance')) {
@@ -732,7 +733,7 @@ class BotEngine {
             const s = now.getSeconds();
             const nowMs = Date.now();
             
-            this.saveStatus();
+            this.exportStatus();
 
             if (this.isTestExecution) {
                 if (this.capitalManagementState === 'IDLE') {
@@ -861,7 +862,7 @@ class BotEngine {
         if (this.loopId) clearTimeout(this.loopId);
         if (this.feeTimer) clearTimeout(this.feeTimer);
         this.log('info', '🛑 Bot STOPPED.');
-        this.saveStatus();
+        this.exportStatus();
         
         if (this.isTestExecution) {
             this.log('test', '🧹 TEST MODE: Closing test positions sequentially...');
@@ -871,8 +872,16 @@ class BotEngine {
 }
 
 const args = process.argv.slice(2);
-if (args.length > 0) {
-    const username = args[0];
+const username = args[0];
+
+if (username) {
     const bot = new BotEngine(username);
-    bot.start(bot.config.tradeConfig || { mode: 'percent', value: 50 });
+    const safeName = getSafeFileName(username);
+    const configFile = path.join(USER_DATA_DIR, `${safeName}_config.json`);
+    
+    if (fs.existsSync(configFile)) {
+        const cfg = JSON.parse(fs.readFileSync(configFile));
+        const tradeCfg = cfg.tradeConfig || { mode: 'percent', value: 50 };
+        bot.start(tradeCfg);
+    }
 }
