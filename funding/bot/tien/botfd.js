@@ -4,8 +4,6 @@ const ccxt = require('ccxt');
 
 // --- KHỞI TẠO VÍ ---
 let adminWallets = {};
-let fallbackBalance = {};
-
 try {
     const p1 = path.join(__dirname, '../../balance.js');
     if (fs.existsSync(p1)) {
@@ -18,7 +16,6 @@ try {
             if (m && m.usdtDepositAddressesByNetwork) adminWallets = m.usdtDepositAddressesByNetwork;
         }
     }
-    fallbackBalance = adminWallets;
 } catch (e) { }
 
 const SERVER_DATA_URL = 'http://localhost:5005/api/data';
@@ -34,7 +31,7 @@ const FEE_AUTO_OFF = 5;
 const FEE_CHECK_DELAY = 60000;
 
 const SL_PERCENTAGE = 65;
-const TP_PERCENTAGE = 85; 
+const TP_PERCENTAGE = 85;
 
 function getSafeFileName(username) {
     return username.replace(/[^a-z0-9]/gi, '_').toLowerCase();
@@ -81,7 +78,7 @@ class BotEngine {
             binanceApiKey: '', binanceApiSecret: '', binanceDepositAddress: '',
             kucoinApiKey: '', kucoinApiSecret: '', kucoinPassword: '', kucoinDepositAddress: '',
             autoBalance: false,
-            maxOpps: 3, 
+            maxOpps: 3,
             vipStatus: 'none',
             vipExpiry: 0,
             lastFeePaidDate: '',
@@ -127,13 +124,13 @@ class BotEngine {
     }
 
     log(type, msg) {
-        // --- CHỐNG SPAM LOG ---
-        if (msg.includes('Scanning') || msg.includes('Searching') || msg.includes('Wait') || msg.includes('Waiting')) return;
-        
+        // CHẶN TRIỆT ĐỂ LOG RÁC
+        if (['Scanning', 'Wait', 'Searching'].some(k => msg.includes(k))) return;
+
         const t = new Date().toLocaleTimeString('vi-VN', { hour12: false });
         let prefix = type.toUpperCase();
-        if(type === 'trade') prefix = '💰 TRADE';
-        if(type === 'error') prefix = '❌ ERROR';
+        if (type === 'trade') prefix = '💰 TRADE';
+        if (type === 'error') prefix = '❌ ERROR';
         console.log(`[${t}] [${this.username}] [${prefix}] ${msg}`);
         this.exportStatus();
     }
@@ -249,7 +246,7 @@ class BotEngine {
                     await exchange.createOrder(symbol, 'TAKE_PROFIT_MARKET', orderSide, amount, undefined, { ...commonParams, 'stopPrice': exchange.priceToPrecision(symbol, tpPrice) });
                     await exchange.createOrder(symbol, 'STOP_MARKET', orderSide, amount, undefined, { ...commonParams, 'stopPrice': exchange.priceToPrecision(symbol, slPrice) });
                 }
-                break; 
+                break;
             } catch (e) { await sleep(1500); }
         }
     }
@@ -270,11 +267,10 @@ class BotEngine {
     }
 
     async executeTrade(op) {
-        // Fix: Check số lượng lệnh chặt chẽ
         if (this.activeTrades.some(t => t.coin === op.coin)) return;
-        if (this.activeTrades.length >= (this.config.maxOpps || 3)) {
-            return;
-        }
+        
+        // CHECK SỐ LƯỢNG LỆNH CHẶT CHẼ
+        if (this.activeTrades.length >= (this.config.maxOpps || 3)) return;
 
         const sEx = this.exchanges[op.details.shortExchange];
         const lEx = this.exchanges[op.details.longExchange];
@@ -286,7 +282,10 @@ class BotEngine {
 
         const hasShort = await this.hasOpenPosition(sEx, sSym);
         const hasLong = await this.hasOpenPosition(lEx, lSym);
-        if (hasShort || hasLong) return;
+        if (hasShort || hasLong) {
+            this.log('warn', `⛔ Pos Exists: ${op.coin}`);
+            return;
+        }
 
         const sBal = this.balances[op.details.shortExchange].available;
         const lBal = this.balances[op.details.longExchange].available;
@@ -298,9 +297,13 @@ class BotEngine {
         } else {
             if (this.tradeConfig.mode === 'fixed') collateral = parseFloat(this.tradeConfig.value);
             else collateral = minBal * (parseFloat(this.tradeConfig.value) / 100);
+            
             const maxSafe = minBal * 0.90;
             if (collateral > maxSafe) collateral = maxSafe;
-            if (collateral < MIN_COLLATERAL_FOR_TRADE) return;
+            if (collateral < MIN_COLLATERAL_FOR_TRADE) {
+                this.log('warn', `Low Bal ${op.coin}. Skip.`);
+                return;
+            }
         }
 
         const lev = op.commonLeverage;
@@ -310,7 +313,7 @@ class BotEngine {
         ]);
 
         if (!realSLev || !realLLev) {
-            this.log('error', `❌ Lev Fail ${op.coin}. Skip.`);
+            this.log('error', `❌ Lev Fail ${op.coin}.`);
             this.sessionBlacklist.add(op.coin);
             return;
         }
@@ -351,7 +354,7 @@ class BotEngine {
             trade.entryPriceShort = sPrice; trade.entryPriceLong = lPrice;
             this.saveActiveTrades();
 
-            this.log('trade', `OPEN SUCCESS | ${op.coin} | $${collateral.toFixed(1)} | x${usedLev}`);
+            this.log('trade', `OPEN SUCCESS | ${op.coin} | $${collateral.toFixed(1)} | x${usedLev} | S:${sPrice} L:${lPrice}`);
             await sleep(3000);
             this.placeTpSlOrders(sEx, sSym, 'sell', sDetails.amount, sPrice, collateral, sDetails.notional);
             this.placeTpSlOrders(lEx, lSym, 'buy', lDetails.amount, lPrice, collateral, lDetails.notional);
@@ -846,21 +849,32 @@ if (usernameArg) {
     const bot = new BotEngine(usernameArg);
     const safeName = getSafeFileName(usernameArg);
     
-    // KEEP ALIVE PROCESS (Tạo vòng lặp rỗng để Process không chết khi STOPPED)
     setInterval(() => {
         if(bot.state === 'STOPPED') bot.exportStatus();
     }, 1000);
 
-    // --- IPC LISTENER: ĐỂ NHẬN LỆNH START TỪ SERVER ---
+    // --- FIX NÚT START: NHẬN MỌI LOẠI MESSAGE ---
     process.on('message', async (msg) => {
-        const type = msg.type || msg.topic;
-        const data = msg.data || msg.payload || msg;
+        // Log để debug xem server gửi gì nếu cần
+        // console.log("IPC MSG:", msg); 
+        
+        let command = '';
+        let data = {};
 
-        if (type === 'start' || type === 'START_BOT') {
+        if (typeof msg === 'string') {
+            command = msg;
+        } else if (typeof msg === 'object') {
+            command = msg.type || msg.topic || msg.action || msg.op || '';
+            data = msg.data || msg.payload || msg;
+        }
+
+        const cmdLower = command.toLowerCase();
+
+        if (cmdLower.includes('start')) {
             await bot.start(data.tradeConfig, data.autoBalance, data.maxOpps);
-        } else if (type === 'stop' || type === 'STOP_BOT') {
+        } else if (cmdLower.includes('stop')) {
             bot.stop();
-        } else if (type === 'shutdown') {
+        } else if (cmdLower.includes('shutdown')) {
             process.exit(0);
         }
     });
