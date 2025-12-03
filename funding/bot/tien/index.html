@@ -4,7 +4,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Arbitrage Bot Multi</title>
-    <!-- Yêu cầu 9: Thư viện Chart.js -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
         :root {
@@ -40,7 +39,8 @@
         .controls-bar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; background: var(--card-bg); border: 1px solid #222; padding: 15px; border-radius: 8px; margin-bottom: 20px; box-shadow: 0 5px 15px rgba(0,0,0,0.3); }
         .hide-on-run.active { display: none !important; }
         .input-group { display: flex; align-items: center; gap: 8px; background: #000; padding: 8px 12px; border: 1px solid #444; border-radius: 4px; }
-        input[type="number"] { background: #222; border: 1px solid #444; color: var(--binance-yellow); padding: 5px; border-radius: 3px; width: 60px; text-align: center; font-weight: bold; }
+        input[type="number"], select { background: #222; border: 1px solid #444; color: var(--binance-yellow); padding: 5px; border-radius: 3px; text-align: center; font-weight: bold; }
+        input[type="number"] { width: 60px; }
         
         .auto-bal-wrapper { display: flex; align-items: center; gap: 6px; position: relative; }
         .checkbox-label { cursor: pointer; font-size: 0.9rem; color: #ccc; display: flex; align-items: center; gap: 6px; }
@@ -98,7 +98,6 @@
         .opp-row-bot { display: flex; justify-content: space-between; align-items: center; font-size: 0.9rem; padding-top: 8px; border-top: 1px solid #333; color: #aaa; }
         .exec-timer { color: #fff; font-weight: bold; display: flex; align-items: center; gap: 5px; }
 
-        /* Chart Controls */
         .chart-controls { display: flex; gap: 5px; margin-bottom: 10px; justify-content: flex-end; }
         .chart-btn { background: #222; border: 1px solid #444; color: #aaa; padding: 4px 8px; font-size: 0.75rem; cursor: pointer; border-radius: 3px; }
         .chart-btn.active { background: var(--binance-yellow); color: #000; border-color: var(--binance-yellow); font-weight: bold; }
@@ -158,6 +157,15 @@
             <div class="input-group hide-on-run" style="border-color: var(--binance-yellow);">
                 <span style="color:#aaa">Value:</span><input type="number" id="capitalInput" value="50">
             </div>
+            <!-- Yêu cầu 1: Thêm Max Orders Options -->
+            <div class="input-group hide-on-run">
+                <span style="color:#aaa">Max Orders:</span>
+                <select id="maxOppsSelect">
+                    <option value="1">1</option>
+                    <option value="2">2</option>
+                    <option value="3" selected>3</option>
+                </select>
+            </div>
             
             <div class="auto-bal-wrapper hide-on-run">
                 <label class="checkbox-label"><input type="checkbox" id="autoBalanceDisplay" onchange="updateAutoBalance()"> Auto-Balance</label>
@@ -177,7 +185,6 @@
             <div id="statusText" style="padding: 5px 10px; border-radius: 4px; background:#222; color:#777; font-weight:bold; font-size:0.8rem;">STOPPED</div>
         </div>
 
-        <!-- Chart Section -->
         <div class="card" style="margin-bottom: 20px;">
             <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #333; padding-bottom:10px; margin-bottom:10px;">
                 <h3 style="margin:0; border:none;">Balance Growth</h3>
@@ -327,15 +334,15 @@
         const c = await apiCall('/bot-api/config');
         if(c) {
             document.getElementById('autoBalanceDisplay').checked = c.autoBalance;
+            // Load Max Opps
+            if(c.maxOpps) document.getElementById('maxOppsSelect').value = c.maxOpps;
             updateVipButton(c.vipStatus);
         }
     }
     
-    // Yêu cầu 5: Ẩn nút Update VIP
     function updateVipButton(status) {
         const btn = document.getElementById('upgradeBtn');
         const badge = document.getElementById('vipBadge');
-        
         if (status === 'vip' || status === 'vip_pro') {
             btn.style.display = 'none';
             badge.style.display = 'inline-block';
@@ -365,7 +372,13 @@
 
     async function startBot() {
         document.getElementById('btnStart').innerText = "...";
-        const res = await apiCall('/bot-api/start','POST', { tradeConfig: {mode: document.querySelector('input[name="capMode"]:checked').value, value: document.getElementById('capitalInput').value}, autoBalance: document.getElementById('autoBalanceDisplay').checked });
+        // Gửi maxOpps lên server
+        const maxOpps = document.getElementById('maxOppsSelect').value;
+        const res = await apiCall('/bot-api/start','POST', { 
+            tradeConfig: {mode: document.querySelector('input[name="capMode"]:checked').value, value: document.getElementById('capitalInput').value}, 
+            autoBalance: document.getElementById('autoBalanceDisplay').checked,
+            maxOpps: maxOpps 
+        });
         
         if(res && res.success) {
             updateUI();
@@ -380,7 +393,7 @@
     }
     async function stopBot() { await apiCall('/bot-api/stop','POST'); updateUI(); }
 
-    /* --- CHART LOGIC --- */
+    /* --- CHART LOGIC FIXED --- */
     function initChart() {
         const ctx = document.getElementById('balanceChart').getContext('2d');
         balanceChart = new Chart(ctx, {
@@ -389,41 +402,22 @@
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
-                tension: 0.4, // Parabol effect
-                interaction: {
-                    mode: 'index',
-                    intersect: false,
-                },
+                tension: 0.4,
+                interaction: { mode: 'index', intersect: false },
                 plugins: {
                     legend: { display: false },
                     tooltip: {
-                        mode: 'index',
-                        intersect: false,
-                        callbacks: {
-                            label: function(context) {
-                                return context.dataset.label + ': $' + context.parsed.y.toFixed(2);
-                            }
-                        }
+                        mode: 'index', intersect: false,
+                        callbacks: { label: function(context) { return context.dataset.label + ': $' + context.parsed.y.toFixed(2); } }
                     }
                 },
                 scales: {
                     x: { display: false },
-                    y: { 
-                        grid: { color: '#222' },
-                        ticks: { color: '#666' } 
-                    }
+                    y: { grid: { color: '#222' }, ticks: { color: '#666' } }
                 }
             }
         });
-        loadChartData();
-    }
-
-    async function loadChartData() {
-        const data = await apiCall('/bot-api/balance-history');
-        if (data && Array.isArray(data)) {
-            balanceHistoryData = data;
-            renderChart();
-        }
+        // Không gọi API riêng lẻ nữa, chờ dữ liệu từ Status
     }
 
     function updateChartTimeframe(tf, btn) {
@@ -434,7 +428,7 @@
     }
 
     function renderChart() {
-        if (!balanceHistoryData.length) return;
+        if (!balanceHistoryData || !balanceHistoryData.length) return;
         
         const now = Date.now();
         let limit = 0;
@@ -446,6 +440,7 @@
         if (limit > 0) {
             filtered = balanceHistoryData.filter(d => (now - d.time) <= limit);
         }
+        if (filtered.length === 0) return;
 
         const labels = filtered.map(d => new Date(d.time).toLocaleTimeString());
         const totalData = filtered.map(d => d.total);
@@ -471,15 +466,15 @@
                 {
                     label: 'Binance',
                     data: binData,
-                    borderColor: '#F0B90B', // Yellow
+                    borderColor: '#F0B90B',
                     borderWidth: 1,
                     pointRadius: 0,
-                    hidden: false // Show on hover via tooltip interaction
+                    hidden: false
                 },
                 {
                     label: 'KuCoin',
                     data: kucData,
-                    borderColor: '#00D095', // Green
+                    borderColor: '#00D095',
                     borderWidth: 1,
                     pointRadius: 0,
                     hidden: false
@@ -494,6 +489,12 @@
         const d = await apiCall('/bot-api/status');
         if(!d) return;
 
+        // Cập nhật dữ liệu biểu đồ từ Status (Giải pháp mới)
+        if (d.balanceHistory && Array.isArray(d.balanceHistory)) {
+            balanceHistoryData = d.balanceHistory;
+            renderChart();
+        }
+
         const run = d.botState === 'RUNNING';
         document.getElementById('btnStart').style.display = run ? 'none':'inline-block';
         document.getElementById('btnStart').innerText = "▶ START";
@@ -505,6 +506,11 @@
         else { document.querySelectorAll('.hide-on-run').forEach(e=>e.classList.remove('active')); checkTerms(); }
 
         updateVipButton(d.vipStatus);
+        
+        // Sync config back to UI if running
+        if(d.config && d.config.maxOpps && !run) { // Only update UI when stopped to avoid conflict
+            document.getElementById('maxOppsSelect').value = d.config.maxOpps;
+        }
 
         let bH = '';
         for(let k in d.balances) bH += `<div style="display:flex;justify-content:space-between;border-bottom:1px solid #333;padding:5px"><span>${k.includes('binance')?'BINANCE':'KUCOIN'}</span><span>${d.balances[k].available.toFixed(2)}$</span></div>`;
@@ -546,32 +552,19 @@
             });
             document.getElementById('oppContent').innerHTML = html;
         } else {
-            // Yêu cầu 4: Đã xử lý ở backend, nhưng frontend vẫn hiển thị fallback
             document.getElementById('oppContent').innerHTML = `<span style="color:#555; padding: 10px; display:block;">Scanning...</span>`;
         }
 
-        // Yêu cầu 6: Update History Table
         let hH = '';
         (d.tradeHistory||[]).slice(0,10).forEach(t => {
             const p = t.actualPnl; 
             const pnlDisplay = (p !== undefined && p !== null) ? p.toFixed(2) : '...';
             const pClass = (p >= 0) ? 'text-pos' : 'text-neg';
             const margin = t.collateral ? t.collateral.toFixed(1) : '0';
-            
-            hH += `<tr>
-                <td>${new Date(t.entryTime).toLocaleTimeString()}</td>
-                <td>${t.coin}</td>
-                <td>${margin}$</td>
-                <td>x${t.leverage}</td>
-                <td>${t.estimatedPnlFromOpportunity}%</td>
-                <td class="${pClass}">${pnlDisplay}</td>
-            </tr>`;
+            hH += `<tr><td>${new Date(t.entryTime).toLocaleTimeString()}</td><td>${t.coin}</td><td>${margin}$</td><td>x${t.leverage}</td><td>${t.estimatedPnlFromOpportunity}%</td><td class="${pClass}">${pnlDisplay}</td></tr>`;
         });
         document.getElementById('historyBody').innerHTML = hH;
         
-        // Refresh chart occasionally
-        if(Math.random() < 0.1) loadChartData();
-
         setTimeout(updateUI, 1000);
     }
 </script>
