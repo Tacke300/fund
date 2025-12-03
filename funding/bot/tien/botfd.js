@@ -72,7 +72,7 @@ class BotEngine {
         this.candidates = [];
         this.opps = [];
         this.lockedOpps = [];
-        this.lastKnownOpps = [];
+        this.lastKnownOpps = []; // Biến này quan trọng để tránh hiện tượng "Scanning..."
 
         this.sessionBlacklist = new Set();
 
@@ -101,14 +101,20 @@ class BotEngine {
         if (this.config.tradeConfig) this.tradeConfig = this.config.tradeConfig;
     }
 
-    // --- XUẤT TRẠNG THÁI RA FILE JSON (CHO HTML ĐỌC) ---
+    // --- XUẤT TRẠNG THÁI RA FILE JSON ---
     exportStatus() {
         try {
+            // Logic hiển thị: Nếu đang lock (phút 55-00) thì hiện lockedOpps.
+            // Nếu không, hiện opps mới nhất.
+            // Nếu opps rỗng (do chưa scan xong), dùng lastKnownOpps để lấp vào.
             let displayOpp = (this.capitalManagementState === 'FUNDS_READY' && this.lockedOpps.length > 0) ? this.lockedOpps : this.opps;
-            if (!displayOpp || displayOpp.length === 0) displayOpp = this.lastKnownOpps;
-            else this.lastKnownOpps = displayOpp;
+            
+            if (!displayOpp || displayOpp.length === 0) {
+                displayOpp = this.lastKnownOpps;
+            } else {
+                this.lastKnownOpps = displayOpp; // Cập nhật cache nếu có dữ liệu mới
+            }
 
-            // Đọc lịch sử số dư để vẽ biểu đồ
             let balHist = [];
             if(fs.existsSync(this.balanceHistoryFile)) {
                 try { balHist = JSON.parse(fs.readFileSync(this.balanceHistoryFile, 'utf8')); } catch(e){}
@@ -131,10 +137,8 @@ class BotEngine {
         } catch (e) { }
     }
 
-    // --- HỆ THỐNG LOGGING (PM2 CATCH) ---
     log(type, msg) {
         const t = new Date().toLocaleTimeString('vi-VN', { hour12: false });
-        // Log ra console để PM2 bắt được
         console.log(`[${t}] [${this.username}] [${type.toUpperCase()}] ${msg}`);
         this.exportStatus();
     }
@@ -160,13 +164,12 @@ class BotEngine {
                 total: bFut + kFut
             };
             history.push(record);
-            // Giữ lại ~1 tháng dữ liệu (mỗi phút 1 record -> 45000)
             if (history.length > 45000) history = history.slice(history.length - 45000);
             fs.writeFileSync(this.balanceHistoryFile, JSON.stringify(history));
         } catch (e) { }
     }
 
-    // --- CÁC HÀM HỖ TRỢ RÚT/NẠP ---
+    // --- HÀM RÚT/NẠP ---
     getWithdrawParams(exchangeId, targetNetwork) {
         if (exchangeId.includes('binance')) {
             if (targetNetwork === 'BEP20') return { network: 'BSC' };
@@ -214,23 +217,20 @@ class BotEngine {
         return null;
     }
 
-    // --- CÀI ĐẶT ĐÒN BẨY (FIX LỖI KUCOIN) ---
+    // --- CÀI LEVERAGE (CÓ FIX KUCOIN) ---
     async setLeverageSafely(exchange, symbol, desiredLeverage) {
         try {
             const market = exchange.market(symbol);
             let actualLeverage = desiredLeverage;
             
-            // 1. Check giới hạn của sàn
             if (market && market.limits && market.limits.leverage && market.limits.leverage.max) {
                 if (actualLeverage > market.limits.leverage.max) {
                     actualLeverage = market.limits.leverage.max;
                 }
             }
             
-            // 2. Set Margin Mode
             try { await exchange.setMarginMode('cross', symbol); } catch (e) { }
             
-            // 3. Set Leverage (FIX: Thêm params cho Kucoin)
             let params = {};
             if (exchange.id === 'kucoinfutures') {
                 params = { 'marginMode': 'cross' }; 
@@ -242,11 +242,10 @@ class BotEngine {
             return actualLeverage;
         } catch (e) {
             this.log('error', `Set Leverage Fail (${exchange.id} - ${symbol}): ${e.message}`);
-            return null; // Trả về null để chặn mở lệnh nếu lỗi
+            return null;
         }
     }
 
-    // --- TÍNH TOÁN KHỐI LƯỢNG LỆNH ---
     async computeOrderDetails(exchange, symbol, targetNotionalUSDT, leverage) {
         const market = exchange.market(symbol);
         const ticker = await exchange.fetchTicker(symbol);
@@ -260,7 +259,6 @@ class BotEngine {
         return { amount, price, notional: amount * price * contractSize };
     }
 
-    // --- ĐẶT TP/SL (CÓ RETRY) ---
     async placeTpSlOrders(exchange, symbol, side, amount, entryPrice, collateral, notionalValue) {
         if (!entryPrice || entryPrice <= 0) return;
         const slPriceChange = entryPrice * (SL_PERCENTAGE / 100 / (notionalValue / collateral));
@@ -318,7 +316,6 @@ class BotEngine {
         return null;
     }
 
-    // --- THỰC THI LỆNH ---
     async executeTrade(op) {
         if (this.activeTrades.some(t => t.coin === op.coin)) return;
 
@@ -361,7 +358,6 @@ class BotEngine {
         }
 
         const lev = op.commonLeverage;
-        // Thực hiện set leverage và đợi kết quả
         const [realSLev, realLLev] = await Promise.all([
             this.setLeverageSafely(sEx, sSym, lev),
             this.setLeverageSafely(lEx, lSym, lev)
@@ -725,7 +721,7 @@ class BotEngine {
         const diff = Math.abs(b - k);
         const amountToMove = diff / 2;
         
-        this.log('info', `[BALANCE CHECK] Binance: ${b.toFixed(1)}$, Kucoin: ${k.toFixed(1)}$, Diff: ${diff.toFixed(1)}$`);
+        this.log('info', `[BALANCE CHECK] Binance: ${b.toFixed(1)}$, Kucoin: ${k.toFixed(1)}$, Diff: ${diff.toFixed(1)}$ (Needs > 20$)`);
 
         if (total < 20) return;
     
@@ -890,7 +886,10 @@ class BotEngine {
                     this.log('info', '🔄 Reset cycle. Scanning for next hour...');
                 }
 
-                if (nowMs - this.lastScanTime >= 1000) {
+                const isLockedPeriod = (m >= 55);
+
+                // --- LOGIC MỚI: QUÉT 30S MỘT LẦN (NẾU KHÔNG BỊ LOCK) ---
+                if (!isLockedPeriod && (nowMs - this.lastScanTime >= 30000)) {
                     try {
                         const res = await fetch(SERVER_DATA_URL);
                         const data = await res.json();
@@ -904,7 +903,8 @@ class BotEngine {
                     } catch (err) { }
                     this.lastScanTime = nowMs;
                 }
-
+                
+                // Nếu đang lock thì vẫn dùng lockedOpps để thực thi
                 if (this.capitalManagementState === 'FUNDS_READY' && m === 59) {
                     if (this.lockedOpps[0] && !this.lockedOpps[0].executed && s >= 0) {
                         this.log('info', `⚡ EXECUTING TOP 1: ${this.lockedOpps[0].coin} at 59:00`);
