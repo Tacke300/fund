@@ -93,6 +93,9 @@ const server = http.createServer(async (req, res) => {
                 if (fs.existsSync(configFile)) currentConfig = JSON.parse(fs.readFileSync(configFile));
                 currentConfig.tradeConfig = payload.tradeConfig;
                 if(payload.autoBalance !== undefined) currentConfig.autoBalance = payload.autoBalance;
+                
+                currentConfig.forceStart = true;
+
                 fs.writeFileSync(configFile, JSON.stringify(currentConfig, null, 2));
 
                 exec(`pm2 start "${botScriptPath}" --name ${pm2Name} -- "${username}"`, (err, stdout, stderr) => {
