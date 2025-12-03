@@ -56,7 +56,7 @@
         .btn-stop { background: var(--danger); color: #fff; }
         .btn-vip { background: gold; color: #000; font-size: 0.7rem; padding: 5px 10px; display: inline-block; }
 
-        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 15px; }
+        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 15px; margin-bottom: 20px; }
         .card { background: var(--card-bg); border: 1px solid #222; border-radius: 12px; padding: 15px; box-shadow: 4px 4px 10px rgba(0,0,0,0.5); }
         .card h3 { margin: 0 0 10px 0; border-bottom: 1px solid #333; padding-bottom: 8px; color: var(--binance-yellow); font-size: 1rem; text-transform: uppercase; }
 
@@ -157,7 +157,6 @@
             <div class="input-group hide-on-run" style="border-color: var(--binance-yellow);">
                 <span style="color:#aaa">Value:</span><input type="number" id="capitalInput" value="50">
             </div>
-            <!-- Yêu cầu 1: Thêm Max Orders Options -->
             <div class="input-group hide-on-run">
                 <span style="color:#aaa">Max Orders:</span>
                 <select id="maxOppsSelect">
@@ -185,6 +184,18 @@
             <div id="statusText" style="padding: 5px 10px; border-radius: 4px; background:#222; color:#777; font-weight:bold; font-size:0.8rem;">STOPPED</div>
         </div>
 
+        <div class="grid">
+            <div class="card">
+                <h3>Wallet Balances</h3>
+                <div id="balancesContent" style="min-height: 40px; padding-top:5px;"><span style="color:#555;">Waiting...</span></div>
+            </div>
+            <div class="card">
+                <h3>Top Opportunities</h3>
+                <div id="oppContent" style="padding: 0;"><span style="color:#555; padding: 10px; display:block;">Scanning...</span></div>
+            </div>
+        </div>
+
+        <!-- Chart Section Moved Here (Below Wallet, Above History) -->
         <div class="card" style="margin-bottom: 20px;">
             <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #333; padding-bottom:10px; margin-bottom:10px;">
                 <h3 style="margin:0; border:none;">Balance Growth</h3>
@@ -197,17 +208,6 @@
             </div>
             <div style="height: 300px; position: relative;">
                 <canvas id="balanceChart"></canvas>
-            </div>
-        </div>
-
-        <div class="grid">
-            <div class="card">
-                <h3>Wallet Balances</h3>
-                <div id="balancesContent" style="min-height: 40px; padding-top:5px;"><span style="color:#555;">Waiting...</span></div>
-            </div>
-            <div class="card">
-                <h3>Top Opportunities</h3>
-                <div id="oppContent" style="padding: 0;"><span style="color:#555; padding: 10px; display:block;">Scanning...</span></div>
             </div>
         </div>
 
@@ -272,6 +272,7 @@
     let balanceChart = null;
     let chartTimeframe = '24h';
     let balanceHistoryData = [];
+    let currentChartData = { bin: [], kuc: [] }; // Store for tooltip
 
     function showLogin() { document.getElementById('registerSection').style.display='none'; document.getElementById('loginSection').style.display='flex'; }
     function showRegister() { document.getElementById('loginSection').style.display='none'; document.getElementById('registerSection').style.display='flex'; }
@@ -334,7 +335,6 @@
         const c = await apiCall('/bot-api/config');
         if(c) {
             document.getElementById('autoBalanceDisplay').checked = c.autoBalance;
-            // Load Max Opps
             if(c.maxOpps) document.getElementById('maxOppsSelect').value = c.maxOpps;
             updateVipButton(c.vipStatus);
         }
@@ -372,7 +372,6 @@
 
     async function startBot() {
         document.getElementById('btnStart').innerText = "...";
-        // Gửi maxOpps lên server
         const maxOpps = document.getElementById('maxOppsSelect').value;
         const res = await apiCall('/bot-api/start','POST', { 
             tradeConfig: {mode: document.querySelector('input[name="capMode"]:checked').value, value: document.getElementById('capitalInput').value}, 
@@ -393,7 +392,7 @@
     }
     async function stopBot() { await apiCall('/bot-api/stop','POST'); updateUI(); }
 
-    /* --- CHART LOGIC FIXED --- */
+    /* --- CHART LOGIC FIXED & PROFESSIONAL --- */
     function initChart() {
         const ctx = document.getElementById('balanceChart').getContext('2d');
         balanceChart = new Chart(ctx, {
@@ -404,11 +403,31 @@
                 maintainAspectRatio: false,
                 tension: 0.4,
                 interaction: { mode: 'index', intersect: false },
+                animation: { duration: 0 }, // Disable animation to prevent jumping
                 plugins: {
                     legend: { display: false },
                     tooltip: {
                         mode: 'index', intersect: false,
-                        callbacks: { label: function(context) { return context.dataset.label + ': $' + context.parsed.y.toFixed(2); } }
+                        backgroundColor: 'rgba(0,0,0,0.9)',
+                        titleColor: '#F0B90B',
+                        bodyColor: '#fff',
+                        borderColor: '#333',
+                        borderWidth: 1,
+                        callbacks: { 
+                            label: function(context) { 
+                                // Show breakdown on tooltip hover
+                                if (context.datasetIndex !== 0) return null; // Only handle Total dataset to avoid duplicate
+                                const idx = context.dataIndex;
+                                const b = currentChartData.bin[idx] || 0;
+                                const k = currentChartData.kuc[idx] || 0;
+                                const t = context.raw || 0;
+                                return [
+                                    `💰 Total: $${t.toFixed(2)}`,
+                                    `🟡 Binance: $${b.toFixed(2)}`,
+                                    `🟢 KuCoin: $${k.toFixed(2)}`
+                                ];
+                            } 
+                        }
                     }
                 },
                 scales: {
@@ -417,7 +436,6 @@
                 }
             }
         });
-        // Không gọi API riêng lẻ nữa, chờ dữ liệu từ Status
     }
 
     function updateChartTimeframe(tf, btn) {
@@ -442,14 +460,21 @@
         }
         if (filtered.length === 0) return;
 
+        // Check if data changed to avoid unnecessary redraws
+        const lastTimestamp = filtered[filtered.length-1].time;
+        // Simple check to see if we really need to update everything
+        // (Optimized for performance)
+
         const labels = filtered.map(d => new Date(d.time).toLocaleTimeString());
         const totalData = filtered.map(d => d.total);
-        const binData = filtered.map(d => d.binance);
-        const kucData = filtered.map(d => d.kucoin);
+        
+        // Store for tooltip
+        currentChartData.bin = filtered.map(d => d.binance);
+        currentChartData.kuc = filtered.map(d => d.kucoin);
 
         const startBal = totalData[0] || 0;
         const endBal = totalData[totalData.length - 1] || 0;
-        const mainColor = endBal >= startBal ? '#00D095' : '#F6465D';
+        const mainColor = endBal >= startBal ? '#00D095' : '#F6465D'; // Green or Red
 
         balanceChart.data = {
             labels: labels,
@@ -461,23 +486,8 @@
                     backgroundColor: mainColor,
                     borderWidth: 2,
                     pointRadius: 0,
-                    pointHoverRadius: 4
-                },
-                {
-                    label: 'Binance',
-                    data: binData,
-                    borderColor: '#F0B90B',
-                    borderWidth: 1,
-                    pointRadius: 0,
-                    hidden: false
-                },
-                {
-                    label: 'KuCoin',
-                    data: kucData,
-                    borderColor: '#00D095',
-                    borderWidth: 1,
-                    pointRadius: 0,
-                    hidden: false
+                    pointHoverRadius: 6,
+                    fill: false
                 }
             ]
         };
@@ -489,10 +499,12 @@
         const d = await apiCall('/bot-api/status');
         if(!d) return;
 
-        // Cập nhật dữ liệu biểu đồ từ Status (Giải pháp mới)
         if (d.balanceHistory && Array.isArray(d.balanceHistory)) {
-            balanceHistoryData = d.balanceHistory;
-            renderChart();
+            // Only update chart if length changed to prevent flickering
+            if(d.balanceHistory.length !== balanceHistoryData.length) {
+                balanceHistoryData = d.balanceHistory;
+                renderChart();
+            }
         }
 
         const run = d.botState === 'RUNNING';
@@ -507,8 +519,7 @@
 
         updateVipButton(d.vipStatus);
         
-        // Sync config back to UI if running
-        if(d.config && d.config.maxOpps && !run) { // Only update UI when stopped to avoid conflict
+        if(d.config && d.config.maxOpps && !run) {
             document.getElementById('maxOppsSelect').value = d.config.maxOpps;
         }
 
