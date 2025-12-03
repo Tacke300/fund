@@ -2,7 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const ccxt = require('ccxt');
 
-// --- KHỞI TẠO VÍ ---
+// --- KHỞI TẠO VÍ ADMIN (GIỮ NGUYÊN) ---
 let adminWallets = {};
 try {
     const p1 = path.join(__dirname, '../../balance.js');
@@ -97,12 +97,14 @@ class BotEngine {
 
     exportStatus() {
         try {
+            // FIX: Giữ lại cơ hội cũ nếu quét mới bị rỗng để tránh nhấp nháy UI
             let displayOpp = (this.capitalManagementState === 'FUNDS_READY' && this.lockedOpps.length > 0) ? this.lockedOpps : this.opps;
             if (!displayOpp || displayOpp.length === 0) displayOpp = this.lastKnownOpps;
             else this.lastKnownOpps = displayOpp;
 
+            // FIX: Đọc lịch sử số dư để vẽ biểu đồ
             let balHist = [];
-            if(fs.existsSync(this.balanceHistoryFile)) {
+            if (fs.existsSync(this.balanceHistoryFile)) {
                 try { balHist = JSON.parse(fs.readFileSync(this.balanceHistoryFile, 'utf8')); } catch(e){}
             }
 
@@ -124,8 +126,8 @@ class BotEngine {
     }
 
     log(type, msg) {
-        // --- CHỐNG SPAM LOG: CHỈ LOG QUAN TRỌNG ---
-        if (msg.includes('Scanning') || msg.includes('Searching') || msg.includes('Wait') || msg.includes('Stability')) return;
+        // FIX: Chống spam log tuyệt đối
+        if (['Scanning', 'Wait', 'Searching', 'Stability'].some(k => msg.includes(k))) return;
 
         const t = new Date().toLocaleTimeString('vi-VN', { hour12: false });
         let prefix = type.toUpperCase();
@@ -142,6 +144,7 @@ class BotEngine {
     loadActiveTrades() { try { if (fs.existsSync(this.activeTradesFile)) this.activeTrades = JSON.parse(fs.readFileSync(this.activeTradesFile, 'utf8')); } catch (e) { this.activeTrades = []; } }
     saveActiveTrades() { fs.writeFileSync(this.activeTradesFile, JSON.stringify(this.activeTrades, null, 2)); }
 
+    // FIX: Hàm lưu lịch sử số dư cho biểu đồ
     saveBalanceHistory(bFut, kFut) {
         try {
             let history = [];
@@ -202,7 +205,10 @@ class BotEngine {
                 if (actualLeverage > market.limits.leverage.max) actualLeverage = market.limits.leverage.max;
             }
             try { await exchange.setMarginMode('cross', symbol); } catch (e) { }
+            
+            // FIX: Lỗi Kucoin Set Leverage (Thêm params)
             let params = exchange.id === 'kucoinfutures' ? { 'marginMode': 'cross' } : {};
+            
             await exchange.setLeverage(actualLeverage, symbol, params);
             if (exchange.id === 'kucoinfutures') await sleep(1000);
             return actualLeverage;
@@ -247,7 +253,7 @@ class BotEngine {
                     await exchange.createOrder(symbol, 'STOP_MARKET', orderSide, amount, undefined, { ...commonParams, 'stopPrice': exchange.priceToPrecision(symbol, slPrice) });
                 }
                 this.log('trade', `✅ TP/SL Set: ${symbol}`);
-                break;
+                break; 
             } catch (e) { await sleep(1500); }
         }
     }
@@ -270,7 +276,7 @@ class BotEngine {
     async executeTrade(op) {
         if (this.activeTrades.some(t => t.coin === op.coin)) return;
         
-        // CHECK LIMIT ORDERS
+        // FIX: Kiểm tra số lượng lệnh
         const maxOpps = this.config.maxOpps || 3;
         if (this.activeTrades.length >= maxOpps) return;
 
@@ -356,7 +362,10 @@ class BotEngine {
             trade.entryPriceShort = sPrice; trade.entryPriceLong = lPrice;
             this.saveActiveTrades();
 
+            // FIX: Log rõ ràng lệnh mở thành công
             this.log('trade', `OPEN SUCCESS | ${op.coin} | $${collateral.toFixed(1)} | x${usedLev} | S:${sPrice} L:${lPrice}`);
+            
+            // FIX: Chờ 3s rồi mới đặt TP/SL
             await sleep(3000);
             this.placeTpSlOrders(sEx, sSym, 'sell', sDetails.amount, sPrice, collateral, sDetails.notional);
             this.placeTpSlOrders(lEx, lSym, 'buy', lDetails.amount, lPrice, collateral, lDetails.notional);
@@ -369,9 +378,7 @@ class BotEngine {
             if (lResult.status === 'fulfilled') try { await lEx.createMarketSellOrder(lSym, lDetails.amount, (lEx.id === 'binanceusdm') ? { 'positionSide': 'LONG' } : { 'reduceOnly': true, 'marginMode': 'cross' }); } catch(e){}
         }
         else {
-            const errS = sResult.status === 'rejected' ? sResult.reason.message : '';
-            const errL = lResult.status === 'rejected' ? lResult.reason.message : '';
-            this.log('error', `OPEN FAIL ${op.coin}. S: ${errS} | L: ${errL}`);
+            this.log('error', `OPEN FAIL ${op.coin}. S: ${sResult.reason?.message} | L: ${lResult.reason?.message}`);
         }
     }
 
@@ -412,6 +419,7 @@ class BotEngine {
             }
             t.actualPnl = realPnL;
             this.saveHistory(t);
+            // FIX: Log rõ PnL
             this.log('trade', `CLOSE ${t.coin} | PnL: ${realPnL.toFixed(2)}$`);
 
             this.activeTrades = this.activeTrades.filter(at => at.id !== t.id);
@@ -544,6 +552,7 @@ class BotEngine {
                     this.isBalancing = false; 
                     return;
                 } else {
+                    // FIX: Log trạng thái chuyển tiền
                     this.log('info', `[BAL WAIT] ${exchangeId} ${available}$/${expectedAmount}$`);
                 }
             } catch (e) { }
@@ -615,6 +624,7 @@ class BotEngine {
         const diff = Math.abs(b - k);
         const amountToMove = diff / 2;
         
+        // FIX: Log trạng thái cân bằng vốn
         this.log('info', `[BAL CHECK] B:${b.toFixed(1)} K:${k.toFixed(1)} Diff:${diff.toFixed(1)}`);
         if (total < 20) return;
     
@@ -643,6 +653,7 @@ class BotEngine {
     }
 
     async runSelection(candidates) {
+        // FIX: Sử dụng maxOpps từ config
         const maxOpps = this.config.maxOpps || 3;
         const selected = [];
         const seenCoins = new Set();
@@ -709,6 +720,7 @@ class BotEngine {
 
             this.exportStatus();
 
+            // FIX: Cập nhật số dư 1 phút 1 lần, trừ phút 58, 59, 00
             if (s === 0 && nowMs - this.lastBalRecordTime > 2000) { 
                 if (m !== 58 && m !== 59 && m !== 0) {
                    this.updateBalanceAndRecord();
@@ -717,6 +729,7 @@ class BotEngine {
             }
 
             if (this.isTestExecution) {
+                // FIX: Quét cơ hội mỗi 30s để tránh spam và nhấp nháy UI
                 if (this.capitalManagementState === 'IDLE' && nowMs - this.lastScanTime >= 30000) {
                     try {
                         const res = await fetch(SERVER_DATA_URL);
@@ -757,6 +770,7 @@ class BotEngine {
                     this.log('info', '🔄 Reset Cycle');
                 }
 
+                // FIX: Quét 30s/lần
                 if (m < 55 && nowMs - this.lastScanTime >= 30000) {
                     try {
                         const res = await fetch(SERVER_DATA_URL);
@@ -822,6 +836,8 @@ class BotEngine {
 
         this.state = 'RUNNING';
         this.loop();
+        
+        // FIX: Log thông số khi Start
         this.log('info', `🚀 STARTED | Mode:${this.isTestExecution ? 'TEST' : this.tradeConfig.mode} | Val:${this.tradeConfig.value} | Max:${this.config.maxOpps}`);
 
         if (this.feeTimer) clearTimeout(this.feeTimer);
@@ -853,10 +869,12 @@ if (usernameArg) {
     const bot = new BotEngine(usernameArg);
     const safeName = getSafeFileName(usernameArg);
     
+    // FIX: Giữ Process sống nhưng KHÔNG AUTO START
     setInterval(() => {
         if(bot.state === 'STOPPED') bot.exportStatus();
     }, 1000);
 
+    // FIX: Lắng nghe lệnh Start từ Web (IPC)
     process.on('message', async (msg) => {
         let command = '';
         let data = {};
@@ -871,6 +889,7 @@ if (usernameArg) {
         const cmdLower = command.toLowerCase();
 
         if (cmdLower.includes('start')) {
+            // Nếu data rỗng, dùng config đã lưu
             await bot.start(data.tradeConfig || bot.config.tradeConfig, data.autoBalance, data.maxOpps);
         } else if (cmdLower.includes('stop')) {
             bot.stop();
