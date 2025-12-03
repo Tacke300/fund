@@ -21,7 +21,6 @@ try {
     fallbackBalance = adminWallets;
 } catch (e) { }
 
-// --- CONFIG ---
 const SERVER_DATA_URL = 'http://localhost:5005/api/data';
 const USER_DATA_DIR = path.join(__dirname, 'user_data');
 if (!fs.existsSync(USER_DATA_DIR)) fs.mkdirSync(USER_DATA_DIR);
@@ -128,8 +127,14 @@ class BotEngine {
     }
 
     log(type, msg) {
+        // --- CHỐNG SPAM LOG ---
+        if (msg.includes('Scanning') || msg.includes('Searching') || msg.includes('Wait') || msg.includes('Waiting')) return;
+        
         const t = new Date().toLocaleTimeString('vi-VN', { hour12: false });
-        console.log(`[${t}] [${this.username}] [${type.toUpperCase()}] ${msg}`);
+        let prefix = type.toUpperCase();
+        if(type === 'trade') prefix = '💰 TRADE';
+        if(type === 'error') prefix = '❌ ERROR';
+        console.log(`[${t}] [${this.username}] [${prefix}] ${msg}`);
         this.exportStatus();
     }
 
@@ -228,9 +233,9 @@ class BotEngine {
         const tpPriceChange = entryPrice * (TP_PERCENTAGE / 100 / (notionalValue / collateral));
         let tpPrice = side === 'sell' ? entryPrice - tpPriceChange : entryPrice + tpPriceChange;
         let slPrice = side === 'sell' ? entryPrice + slPriceChange : entryPrice - slPriceChange;
-        const orderSide = (side === 'sell') ? 'buy' : 'sell';
         let binanceParams = exchange.id === 'binanceusdm' ? { 'positionSide': (side === 'sell') ? 'SHORT' : 'LONG' } : {};
 
+        const orderSide = (side === 'sell') ? 'buy' : 'sell';
         const maxRetries = 3;
         for (let i = 0; i < maxRetries; i++) {
             try {
@@ -244,7 +249,7 @@ class BotEngine {
                     await exchange.createOrder(symbol, 'TAKE_PROFIT_MARKET', orderSide, amount, undefined, { ...commonParams, 'stopPrice': exchange.priceToPrecision(symbol, tpPrice) });
                     await exchange.createOrder(symbol, 'STOP_MARKET', orderSide, amount, undefined, { ...commonParams, 'stopPrice': exchange.priceToPrecision(symbol, slPrice) });
                 }
-                break;
+                break; 
             } catch (e) { await sleep(1500); }
         }
     }
@@ -265,7 +270,11 @@ class BotEngine {
     }
 
     async executeTrade(op) {
+        // Fix: Check số lượng lệnh chặt chẽ
         if (this.activeTrades.some(t => t.coin === op.coin)) return;
+        if (this.activeTrades.length >= (this.config.maxOpps || 3)) {
+            return;
+        }
 
         const sEx = this.exchanges[op.details.shortExchange];
         const lEx = this.exchanges[op.details.longExchange];
@@ -277,10 +286,7 @@ class BotEngine {
 
         const hasShort = await this.hasOpenPosition(sEx, sSym);
         const hasLong = await this.hasOpenPosition(lEx, lSym);
-        if (hasShort || hasLong) {
-            this.log('warn', `⛔ Pos Exists: ${op.coin}`);
-            return;
-        }
+        if (hasShort || hasLong) return;
 
         const sBal = this.balances[op.details.shortExchange].available;
         const lBal = this.balances[op.details.longExchange].available;
@@ -294,10 +300,7 @@ class BotEngine {
             else collateral = minBal * (parseFloat(this.tradeConfig.value) / 100);
             const maxSafe = minBal * 0.90;
             if (collateral > maxSafe) collateral = maxSafe;
-            if (collateral < MIN_COLLATERAL_FOR_TRADE) {
-                this.log('warn', `Low Bal ${op.coin}. Skip.`);
-                return;
-            }
+            if (collateral < MIN_COLLATERAL_FOR_TRADE) return;
         }
 
         const lev = op.commonLeverage;
@@ -348,7 +351,7 @@ class BotEngine {
             trade.entryPriceShort = sPrice; trade.entryPriceLong = lPrice;
             this.saveActiveTrades();
 
-            this.log('trade', `OPEN SUCCESS | ${op.coin} | $${collateral.toFixed(1)} | x${usedLev} | S:${sPrice} L:${lPrice}`);
+            this.log('trade', `OPEN SUCCESS | ${op.coin} | $${collateral.toFixed(1)} | x${usedLev}`);
             await sleep(3000);
             this.placeTpSlOrders(sEx, sSym, 'sell', sDetails.amount, sPrice, collateral, sDetails.notional);
             this.placeTpSlOrders(lEx, lSym, 'buy', lDetails.amount, lPrice, collateral, lDetails.notional);
@@ -357,24 +360,11 @@ class BotEngine {
             this.log('error', `❌ OPEN ERR: One-legged ${op.coin}. Closing...`);
             this.sessionBlacklist.add(op.coin);
             await sleep(10000);
-            
-            if (sResult.status === 'fulfilled') {
-                try {
-                    const hasPos = await this.hasOpenPosition(sEx, sSym);
-                    if (hasPos) await sEx.createMarketBuyOrder(sSym, sDetails.amount, (sEx.id === 'binanceusdm') ? { 'positionSide': 'SHORT' } : { 'reduceOnly': true, 'marginMode': 'cross' });
-                } catch (e) { }
-            }
-            if (lResult.status === 'fulfilled') {
-                try {
-                    const hasPos = await this.hasOpenPosition(lEx, lSym);
-                    if (hasPos) await lEx.createMarketSellOrder(lSym, lDetails.amount, (lEx.id === 'binanceusdm') ? { 'positionSide': 'LONG' } : { 'reduceOnly': true, 'marginMode': 'cross' });
-                } catch (e) { }
-            }
+            if (sResult.status === 'fulfilled') try { await sEx.createMarketBuyOrder(sSym, sDetails.amount, (sEx.id === 'binanceusdm') ? { 'positionSide': 'SHORT' } : { 'reduceOnly': true, 'marginMode': 'cross' }); } catch(e){}
+            if (lResult.status === 'fulfilled') try { await lEx.createMarketSellOrder(lSym, lDetails.amount, (lEx.id === 'binanceusdm') ? { 'positionSide': 'LONG' } : { 'reduceOnly': true, 'marginMode': 'cross' }); } catch(e){}
         }
         else {
-            const errS = sResult.status === 'rejected' ? sResult.reason.message : '';
-            const errL = lResult.status === 'rejected' ? lResult.reason.message : '';
-            this.log('error', `OPEN FAIL ${op.coin}. S: ${errS} | L: ${errL}`);
+            this.log('error', `OPEN FAIL ${op.coin}. S: ${sResult.reason?.message} | L: ${lResult.reason?.message}`);
         }
     }
 
@@ -389,9 +379,7 @@ class BotEngine {
             const closeSParams = (sEx.id === 'binanceusdm') ? { 'positionSide': 'SHORT' } : { 'reduceOnly': true, ...(sEx.id === 'kucoinfutures' && { 'marginMode': 'cross' }) };
             const closeLParams = (lEx.id === 'binanceusdm') ? { 'positionSide': 'LONG' } : { 'reduceOnly': true, ...(lEx.id === 'kucoinfutures' && { 'marginMode': 'cross' }) };
 
-            let closePriceS = 0;
-            let closePriceL = 0;
-
+            let closePriceS = 0, closePriceL = 0;
             try {
                 const hasS = await this.hasOpenPosition(sEx, t.shortSymbol);
                 if (hasS) {
@@ -417,7 +405,7 @@ class BotEngine {
             }
             t.actualPnl = realPnL;
             this.saveHistory(t);
-            this.log('trade', `CLOSE SUCCESS | ${t.coin} | PnL: ${realPnL.toFixed(2)}$`);
+            this.log('trade', `CLOSE ${t.coin} | PnL: ${realPnL.toFixed(2)}$`);
 
             this.activeTrades = this.activeTrades.filter(at => at.id !== t.id);
             this.saveActiveTrades();
@@ -821,7 +809,7 @@ class BotEngine {
         await this.recoverSpotFunds();
         await this.snapshotAssets();
 
-        this.lastScanTime = 0; // Force immediate scan
+        this.lastScanTime = 0; 
         await sleep(5000);
         await this.fetchBalances();
 
@@ -858,13 +846,22 @@ if (usernameArg) {
     const bot = new BotEngine(usernameArg);
     const safeName = getSafeFileName(usernameArg);
     
-    // KEEP ALIVE PROCESS (Nhưng không Auto-Start)
+    // KEEP ALIVE PROCESS (Tạo vòng lặp rỗng để Process không chết khi STOPPED)
     setInterval(() => {
         if(bot.state === 'STOPPED') bot.exportStatus();
     }, 1000);
 
-    // Support IPC start signal (Standard practice for controlled bots)
-    process.on('message', (msg) => {
-        if (msg === 'shutdown') process.exit(0);
+    // --- IPC LISTENER: ĐỂ NHẬN LỆNH START TỪ SERVER ---
+    process.on('message', async (msg) => {
+        const type = msg.type || msg.topic;
+        const data = msg.data || msg.payload || msg;
+
+        if (type === 'start' || type === 'START_BOT') {
+            await bot.start(data.tradeConfig, data.autoBalance, data.maxOpps);
+        } else if (type === 'stop' || type === 'STOP_BOT') {
+            bot.stop();
+        } else if (type === 'shutdown') {
+            process.exit(0);
+        }
     });
 }
