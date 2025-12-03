@@ -2,6 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const ccxt = require('ccxt');
 
+// --- KHỞI TẠO VÍ ---
 let adminWallets = {};
 let fallbackBalance = {};
 
@@ -18,8 +19,9 @@ try {
         }
     }
     fallbackBalance = adminWallets;
-} catch (e) { console.log("[WARN] Cannot find balance.js"); }
+} catch (e) { }
 
+// --- CONFIG ---
 const SERVER_DATA_URL = 'http://localhost:5005/api/data';
 const USER_DATA_DIR = path.join(__dirname, 'user_data');
 if (!fs.existsSync(USER_DATA_DIR)) fs.mkdirSync(USER_DATA_DIR);
@@ -72,7 +74,6 @@ class BotEngine {
         this.lastKnownOpps = [];
 
         this.sessionBlacklist = new Set();
-
         this.tradeConfig = { mode: 'percent', value: 50 };
 
         this.config = {
@@ -128,12 +129,7 @@ class BotEngine {
 
     log(type, msg) {
         const t = new Date().toLocaleTimeString('vi-VN', { hour12: false });
-        let prefix = type.toUpperCase();
-        if(type === 'trade') prefix = '🤝 TRADE';
-        if(type === 'info') prefix = 'ℹ️ INFO';
-        if(type === 'error') prefix = '❌ ERROR';
-        if(type === 'test') prefix = '🧪 TEST';
-        console.log(`[${t}] [${this.username}] [${prefix}] ${msg}`);
+        console.log(`[${t}] [${this.username}] [${type.toUpperCase()}] ${msg}`);
         this.exportStatus();
     }
 
@@ -147,15 +143,8 @@ class BotEngine {
     saveBalanceHistory(bFut, kFut) {
         try {
             let history = [];
-            if (fs.existsSync(this.balanceHistoryFile)) {
-                history = JSON.parse(fs.readFileSync(this.balanceHistoryFile, 'utf8'));
-            }
-            const record = {
-                time: Date.now(),
-                binance: bFut,
-                kucoin: kFut,
-                total: bFut + kFut
-            };
+            if (fs.existsSync(this.balanceHistoryFile)) history = JSON.parse(fs.readFileSync(this.balanceHistoryFile, 'utf8'));
+            const record = { time: Date.now(), binance: bFut, kucoin: kFut, total: bFut + kFut };
             history.push(record);
             if (history.length > 45000) history = history.slice(history.length - 45000);
             fs.writeFileSync(this.balanceHistoryFile, JSON.stringify(history));
@@ -163,9 +152,7 @@ class BotEngine {
     }
 
     getWithdrawParams(exchangeId, targetNetwork) {
-        if (exchangeId.includes('binance')) {
-            if (targetNetwork === 'BEP20') return { network: 'BSC' };
-        }
+        if (exchangeId.includes('binance')) return targetNetwork === 'BEP20' ? { network: 'BSC' } : { network: targetNetwork };
         if (exchangeId.includes('kucoin')) {
             if (targetNetwork === 'APTOS' || targetNetwork === 'APT') return { network: 'APT' };
             if (targetNetwork === 'BEP20' || targetNetwork === 'BSC') return { network: 'BEP20' };
@@ -185,12 +172,8 @@ class BotEngine {
     }
 
     getUserDepositAddress(targetExchangeId) {
-        if (targetExchangeId === 'binanceusdm') {
-            if (this.config.binanceDepositAddress) return { address: this.config.binanceDepositAddress, network: 'APTOS' };
-        }
-        if (targetExchangeId === 'kucoinfutures') {
-            if (this.config.kucoinDepositAddress) return { address: this.config.kucoinDepositAddress, network: 'BEP20' };
-        }
+        if (targetExchangeId === 'binanceusdm') return this.config.binanceDepositAddress ? { address: this.config.binanceDepositAddress, network: 'APTOS' } : null;
+        if (targetExchangeId === 'kucoinfutures') return this.config.kucoinDepositAddress ? { address: this.config.kucoinDepositAddress, network: 'BEP20' } : null;
         return null;
     }
 
@@ -214,15 +197,10 @@ class BotEngine {
             const market = exchange.market(symbol);
             let actualLeverage = desiredLeverage;
             if (market && market.limits && market.limits.leverage && market.limits.leverage.max) {
-                if (actualLeverage > market.limits.leverage.max) {
-                    actualLeverage = market.limits.leverage.max;
-                }
+                if (actualLeverage > market.limits.leverage.max) actualLeverage = market.limits.leverage.max;
             }
             try { await exchange.setMarginMode('cross', symbol); } catch (e) { }
-            
-            let params = {};
-            if (exchange.id === 'kucoinfutures') params = { 'marginMode': 'cross' }; 
-            
+            let params = exchange.id === 'kucoinfutures' ? { 'marginMode': 'cross' } : {};
             await exchange.setLeverage(actualLeverage, symbol, params);
             if (exchange.id === 'kucoinfutures') await sleep(1000);
             return actualLeverage;
@@ -238,7 +216,6 @@ class BotEngine {
         const price = ticker?.last || ticker?.close;
         if (!price) throw new Error(`Price not found for ${symbol}`);
         const contractSize = market.contractSize ?? 1;
-
         let amount = parseFloat(exchange.amountToPrecision(symbol, targetNotionalUSDT / (price * contractSize)));
         if (exchange.id === 'kucoinfutures' && market.precision.amount === 0) amount = Math.round(amount);
         if (amount <= (market.limits.amount.min || 0)) amount = market.limits.amount.min;
@@ -251,12 +228,8 @@ class BotEngine {
         const tpPriceChange = entryPrice * (TP_PERCENTAGE / 100 / (notionalValue / collateral));
         let tpPrice = side === 'sell' ? entryPrice - tpPriceChange : entryPrice + tpPriceChange;
         let slPrice = side === 'sell' ? entryPrice + slPriceChange : entryPrice - slPriceChange;
-
         const orderSide = (side === 'sell') ? 'buy' : 'sell';
-        let binanceParams = {};
-        if (exchange.id === 'binanceusdm') {
-            binanceParams = { 'positionSide': (side === 'sell') ? 'SHORT' : 'LONG' };
-        }
+        let binanceParams = exchange.id === 'binanceusdm' ? { 'positionSide': (side === 'sell') ? 'SHORT' : 'LONG' } : {};
 
         const maxRetries = 3;
         for (let i = 0; i < maxRetries; i++) {
@@ -271,18 +244,9 @@ class BotEngine {
                     await exchange.createOrder(symbol, 'TAKE_PROFIT_MARKET', orderSide, amount, undefined, { ...commonParams, 'stopPrice': exchange.priceToPrecision(symbol, tpPrice) });
                     await exchange.createOrder(symbol, 'STOP_MARKET', orderSide, amount, undefined, { ...commonParams, 'stopPrice': exchange.priceToPrecision(symbol, slPrice) });
                 }
-                this.log('trade', `✅ TP/SL Set: ${symbol}`);
                 break;
-            } catch (e) {
-                this.log('warn', `⚠️ TP/SL Retry ${i+1}: ${e.message}`);
-                await sleep(1500);
-            }
+            } catch (e) { await sleep(1500); }
         }
-        await sleep(2000);
-        try {
-            const openOrders = await exchange.fetchOpenOrders(symbol);
-            if (openOrders.length < 2) this.log('warn', `⚠️ Check TP/SL: Missing orders for ${symbol}.`);
-        } catch (e) { }
     }
 
     async getReliableFillPrice(exchange, symbol, orderId) {
@@ -301,7 +265,6 @@ class BotEngine {
     }
 
     async executeTrade(op) {
-        // Fix: Check chính xác coin đã có trong activeTrades chưa
         if (this.activeTrades.some(t => t.coin === op.coin)) return;
 
         const sEx = this.exchanges[op.details.shortExchange];
@@ -310,15 +273,12 @@ class BotEngine {
 
         const sSym = this.getExchangeSpecificSymbol(sEx, op.coin);
         const lSym = this.getExchangeSpecificSymbol(lEx, op.coin);
-        if (!sSym || !lSym) {
-            this.sessionBlacklist.add(op.coin);
-            return;
-        }
+        if (!sSym || !lSym) { this.sessionBlacklist.add(op.coin); return; }
 
         const hasShort = await this.hasOpenPosition(sEx, sSym);
         const hasLong = await this.hasOpenPosition(lEx, lSym);
         if (hasShort || hasLong) {
-            this.log('warn', `⛔ Exists pos for ${op.coin}. Skip.`);
+            this.log('warn', `⛔ Pos Exists: ${op.coin}`);
             return;
         }
 
@@ -332,10 +292,8 @@ class BotEngine {
         } else {
             if (this.tradeConfig.mode === 'fixed') collateral = parseFloat(this.tradeConfig.value);
             else collateral = minBal * (parseFloat(this.tradeConfig.value) / 100);
-
             const maxSafe = minBal * 0.90;
             if (collateral > maxSafe) collateral = maxSafe;
-
             if (collateral < MIN_COLLATERAL_FOR_TRADE) {
                 this.log('warn', `Low Bal ${op.coin}. Skip.`);
                 return;
@@ -349,7 +307,7 @@ class BotEngine {
         ]);
 
         if (!realSLev || !realLLev) {
-            this.log('error', `❌ Lev Fail ${op.coin}.`);
+            this.log('error', `❌ Lev Fail ${op.coin}. Skip.`);
             this.sessionBlacklist.add(op.coin);
             return;
         }
@@ -390,36 +348,26 @@ class BotEngine {
             trade.entryPriceShort = sPrice; trade.entryPriceLong = lPrice;
             this.saveActiveTrades();
 
-            this.log('trade', `OPEN ${op.coin} | $${collateral.toFixed(1)} | x${usedLev} | S:${sPrice} L:${lPrice}`);
+            this.log('trade', `OPEN SUCCESS | ${op.coin} | $${collateral.toFixed(1)} | x${usedLev} | S:${sPrice} L:${lPrice}`);
             await sleep(3000);
-
             this.placeTpSlOrders(sEx, sSym, 'sell', sDetails.amount, sPrice, collateral, sDetails.notional);
             this.placeTpSlOrders(lEx, lSym, 'buy', lDetails.amount, lPrice, collateral, lDetails.notional);
         }
         else if (sResult.status === 'fulfilled' || lResult.status === 'fulfilled') {
-            this.log('warn', `⚠️ One-Legged ${op.coin}. Check 10s...`);
+            this.log('error', `❌ OPEN ERR: One-legged ${op.coin}. Closing...`);
             this.sessionBlacklist.add(op.coin);
             await sleep(10000);
             
             if (sResult.status === 'fulfilled') {
                 try {
                     const hasPos = await this.hasOpenPosition(sEx, sSym);
-                    if (hasPos) {
-                        const closeParams = (sEx.id === 'binanceusdm') ? { 'positionSide': 'SHORT' } : { 'reduceOnly': true, 'marginMode': 'cross' };
-                        await sEx.createMarketBuyOrder(sSym, sDetails.amount, closeParams);
-                        this.log('info', `✅ Closed Orphan Short ${op.coin}`);
-                    }
+                    if (hasPos) await sEx.createMarketBuyOrder(sSym, sDetails.amount, (sEx.id === 'binanceusdm') ? { 'positionSide': 'SHORT' } : { 'reduceOnly': true, 'marginMode': 'cross' });
                 } catch (e) { }
             }
-
             if (lResult.status === 'fulfilled') {
                 try {
                     const hasPos = await this.hasOpenPosition(lEx, lSym);
-                    if (hasPos) {
-                        const closeParams = (lEx.id === 'binanceusdm') ? { 'positionSide': 'LONG' } : { 'reduceOnly': true, 'marginMode': 'cross' };
-                        await lEx.createMarketSellOrder(lSym, lDetails.amount, closeParams);
-                        this.log('info', `✅ Closed Orphan Long ${op.coin}`);
-                    }
+                    if (hasPos) await lEx.createMarketSellOrder(lSym, lDetails.amount, (lEx.id === 'binanceusdm') ? { 'positionSide': 'LONG' } : { 'reduceOnly': true, 'marginMode': 'cross' });
                 } catch (e) { }
             }
         }
@@ -438,7 +386,6 @@ class BotEngine {
             const t = tradesToClose[i];
             const sEx = this.exchanges[t.shortExchange];
             const lEx = this.exchanges[t.longExchange];
-
             const closeSParams = (sEx.id === 'binanceusdm') ? { 'positionSide': 'SHORT' } : { 'reduceOnly': true, ...(sEx.id === 'kucoinfutures' && { 'marginMode': 'cross' }) };
             const closeLParams = (lEx.id === 'binanceusdm') ? { 'positionSide': 'LONG' } : { 'reduceOnly': true, ...(lEx.id === 'kucoinfutures' && { 'marginMode': 'cross' }) };
 
@@ -470,16 +417,13 @@ class BotEngine {
             }
             t.actualPnl = realPnL;
             this.saveHistory(t);
-            this.log('result', `CLOSE ${t.coin} | PnL: ${realPnL.toFixed(2)}$`);
+            this.log('trade', `CLOSE SUCCESS | ${t.coin} | PnL: ${realPnL.toFixed(2)}$`);
 
             this.activeTrades = this.activeTrades.filter(at => at.id !== t.id);
             this.saveActiveTrades();
             await this.updateBalanceAndRecord();
 
-            if (this.isTestExecution && i < tradesToClose.length - 1) {
-                this.log('test', `⏳ Waiting 25s...`);
-                await sleep(25000);
-            }
+            if (this.isTestExecution && i < tradesToClose.length - 1) await sleep(25000);
         }
 
         this.activeTrades = [];
@@ -508,7 +452,6 @@ class BotEngine {
     }
 
     async snapshotAssets() {
-        this.log('info', '📸 Snapshotting...');
         let bFut = 0, kFut = 0, bSpot = 0, kSpot = 0;
         try { if (this.exchanges['binanceusdm']) bFut = (await this.exchanges['binanceusdm'].fetchBalance()).total.USDT || 0; } catch (e) { }
         try { if (this.exchanges['kucoinfutures']) kFut = (await this.exchanges['kucoinfutures'].fetchBalance()).total.USDT || 0; } catch (e) { }
@@ -521,7 +464,6 @@ class BotEngine {
         this.config.savedTotalAssets = totalAssets;
         this.saveConfig();
         this.saveBalanceHistory(bFut, kFut);
-        this.log('info', `✅ Snapshot: B:${bFut.toFixed(1)} K:${kFut.toFixed(1)} T:${totalAssets.toFixed(1)}`);
         await this.fetchBalances();
     }
 
@@ -563,41 +505,27 @@ class BotEngine {
 
     async autoFundTransfer(fromId, toId, amount) {
         if (this.isFeeProcessing || this.isBalancing) return false;
-        
         if (!this.exchanges[fromId] || !this.exchanges[toId]) return false;
         const targetInfo = this.getUserDepositAddress(toId);
-        if (!targetInfo || !targetInfo.address) { 
-            this.log('error', `No deposit for ${toId}`); 
-            return false; 
-        }
+        if (!targetInfo || !targetInfo.address) { this.log('error', `No Deposit Addr ${toId}`); return false; }
     
         this.isBalancing = true; 
-        this.log('info', `🤖 BAL: ${amount.toFixed(1)}$ ${fromId}->${toId}`);
+        this.log('info', `🤖 BAL START: ${amount.toFixed(1)}$ ${fromId}->${toId}`);
     
         const sourceEx = this.exchanges[fromId]; 
         const withdrawEx = this.exchanges[fromId === 'binanceusdm' ? 'binance' : 'kucoin']; 
         try {
             let fromWallet = 'future';
             let toWallet = fromId === 'binanceusdm' ? 'spot' : 'main';
-            
             await sourceEx.transfer('USDT', amount, fromWallet, toWallet);
             await sleep(2000);
-            
             const params = this.getWithdrawParams(fromId, targetInfo.network);
             await withdrawEx.withdraw('USDT', amount, targetInfo.address, undefined, params);
-            
-            this.log('info', `✅ Withdrawn. Monitor...`);
             this.monitorAndMoveToFuture(toId, amount);
             return true;
         } catch (e) {
-            if (e.message.includes('260399')) {
-                this.log('error', `⛔ Network Suspend. AutoBal OFF.`);
-                this.config.autoBalance = false; 
-                this.saveConfig();
-            } else {
-                this.log('error', `❌ AutoBal Err: ${e.message}`);
-            }
             this.isBalancing = false;
+            this.log('error', `❌ AutoBal Err: ${e.message}`);
             return false;
         }
     }
@@ -621,11 +549,10 @@ class BotEngine {
                     this.isBalancing = false; 
                     return;
                 } else {
-                    this.log('info', `[MONITOR] ${exchangeId}: ${available}$ / ${expectedAmount}$`);
+                    this.log('info', `[BAL WAIT] ${exchangeId} ${available}$/${expectedAmount}$`);
                 }
             } catch (e) { }
         }
-        this.log('warn', `⚠️ Money late.`);
         this.isBalancing = false; 
     }
 
@@ -648,9 +575,7 @@ class BotEngine {
         if (this.config.vipStatus === 'vip' || this.config.vipStatus === 'vip_pro') {
             if (this.config.vipStatus === 'vip' && Date.now() > this.config.vipExpiry) {
                 this.config.vipStatus = 'none'; this.saveConfig();
-            } else {
-                return;
-            }
+            } else return;
         }
         const todayUTC = new Date().toISOString().split('T')[0];
         if (this.config.lastFeePaidDate === todayUTC) return;
@@ -677,7 +602,7 @@ class BotEngine {
             this.log('info', `✅ Fee Paid`);
             setTimeout(() => { this.isFeeProcessing = false; }, 30000);
         } else {
-            this.log('error', `❌ Fee Fail. Stop.`);
+            this.log('error', `❌ Fee Failed. Stop.`);
             this.stop();
         }
     }
@@ -685,7 +610,6 @@ class BotEngine {
     async checkAndBalanceCapital() {
         if (this.isBalancing || !this.config.autoBalance || this.isFeeProcessing) return;
         if (this.activeTrades.length > 0) return;
-        
         if (Date.now() - this.lastBalCheckTime < 60000) return; 
         this.lastBalCheckTime = Date.now();
     
@@ -696,12 +620,10 @@ class BotEngine {
         const diff = Math.abs(b - k);
         const amountToMove = diff / 2;
         
-        this.log('info', `[BAL] B:${b.toFixed(1)} K:${k.toFixed(1)} Diff:${diff.toFixed(1)}`);
-
+        this.log('info', `[BAL CHECK] B:${b.toFixed(1)} K:${k.toFixed(1)} Diff:${diff.toFixed(1)}`);
         if (total < 20) return;
     
         if (diff > 20 && amountToMove > 10 && !this.isBalancing) {
-            this.log('info', `⚖️ Balancing...`);
             if (b > k) await this.autoFundTransfer('binanceusdm', 'kucoinfutures', amountToMove);
             else await this.autoFundTransfer('kucoinfutures', 'binanceusdm', amountToMove);
         }
@@ -714,12 +636,7 @@ class BotEngine {
             if (this.sessionBlacklist.has(op.coin)) continue;
             const [s, l] = op.exchanges.toLowerCase().split(' / ');
             if (!((s.includes('binance') || l.includes('binance')) && (s.includes('kucoin') || l.includes('kucoin')))) continue;
-            const opDetail = {
-                ...op, details: {
-                    shortExchange: s.includes('binance') ? 'binanceusdm' : 'kucoinfutures',
-                    longExchange: l.includes('binance') ? 'binanceusdm' : 'kucoinfutures'
-                }
-            };
+            const opDetail = { ...op, details: { shortExchange: s.includes('binance') ? 'binanceusdm' : 'kucoinfutures', longExchange: l.includes('binance') ? 'binanceusdm' : 'kucoinfutures' }};
             const sEx = this.exchanges[opDetail.details.shortExchange];
             const lEx = this.exchanges[opDetail.details.longExchange];
             if (!sEx || !lEx) continue;
@@ -731,7 +648,7 @@ class BotEngine {
     }
 
     async runSelection(candidates) {
-        const maxOpps = this.config.maxOpps || 3; 
+        const maxOpps = this.config.maxOpps || 3;
         const selected = [];
         const seenCoins = new Set();
         const totalAccountBal = (this.balances['binanceusdm']?.total || 0) + (this.balances['kucoinfutures']?.total || 0);
@@ -750,14 +667,11 @@ class BotEngine {
 
                 const minBal = Math.min(sBal, lBal);
                 let potentialCollateral = 0;
-                if (this.tradeConfig.mode === 'fixed') {
-                    potentialCollateral = parseFloat(this.tradeConfig.value);
-                } else {
-                    potentialCollateral = minBal * (parseFloat(this.tradeConfig.value) / 100);
-                }
+                if (this.tradeConfig.mode === 'fixed') potentialCollateral = parseFloat(this.tradeConfig.value);
+                else potentialCollateral = minBal * (parseFloat(this.tradeConfig.value) / 100);
+                
                 const maxSafe = minBal * 0.90;
                 if (potentialCollateral > maxSafe) potentialCollateral = maxSafe;
-
                 if (totalAccountBal > 0 && (currentUsedMargin + potentialCollateral) >= (totalAccountBal * 0.6)) continue;
                 currentUsedMargin += potentialCollateral;
 
@@ -766,7 +680,6 @@ class BotEngine {
                 const sSym = this.getExchangeSpecificSymbol(sEx, op.coin);
                 const lSym = this.getExchangeSpecificSymbol(lEx, op.coin);
                 if (!sSym || !lSym) continue;
-
                 const hasShort = await this.hasOpenPosition(sEx, sSym);
                 const hasLong = await this.hasOpenPosition(lEx, lSym);
                 if (hasShort || hasLong) continue;
@@ -810,7 +723,6 @@ class BotEngine {
 
             if (this.isTestExecution) {
                 if (this.capitalManagementState === 'IDLE' && nowMs - this.lastScanTime >= 30000) {
-                    this.log('test', '🔍 Scanning...');
                     try {
                         const res = await fetch(SERVER_DATA_URL);
                         const data = await res.json();
@@ -834,11 +746,7 @@ class BotEngine {
                             opp.executed = true;
                             this.log('test', `⚡ EXEC TEST ${i + 1}: ${opp.coin}`);
                             await this.executeTrade(opp);
-                            // Nếu còn lệnh tiếp theo thì mới chờ
-                            if (i < this.lockedOpps.length - 1) {
-                                this.log('test', `⏳ Wait 25s...`);
-                                await sleep(25000);
-                            }
+                            if (i < this.lockedOpps.length - 1) await sleep(25000);
                         }
                     }
                     this.capitalManagementState = 'IDLE';
@@ -855,7 +763,6 @@ class BotEngine {
                 }
 
                 if (m < 55 && nowMs - this.lastScanTime >= 30000) {
-                    this.log('info', '🔍 Scanning...');
                     try {
                         const res = await fetch(SERVER_DATA_URL);
                         const data = await res.json();
@@ -914,13 +821,13 @@ class BotEngine {
         await this.recoverSpotFunds();
         await this.snapshotAssets();
 
-        this.log('info', `⏳ Wait 5s...`);
+        this.lastScanTime = 0; // Force immediate scan
         await sleep(5000);
         await this.fetchBalances();
 
         this.state = 'RUNNING';
         this.loop();
-        this.log('info', `🚀 STARTED. Mode:${this.isTestExecution ? 'TEST' : 'REAL'} MaxOpps:${this.config.maxOpps}`);
+        this.log('info', `🚀 STARTED | Mode:${this.isTestExecution ? 'TEST' : this.tradeConfig.mode} | Val:${this.tradeConfig.value} | Max:${this.config.maxOpps}`);
 
         if (this.feeTimer) clearTimeout(this.feeTimer);
         this.feeTimer = setTimeout(() => {
@@ -950,13 +857,14 @@ const usernameArg = args[0];
 if (usernameArg) {
     const bot = new BotEngine(usernameArg);
     const safeName = getSafeFileName(usernameArg);
-    const configFile = path.join(USER_DATA_DIR, `${safeName}_config.json`);
+    
+    // KEEP ALIVE PROCESS (Nhưng không Auto-Start)
+    setInterval(() => {
+        if(bot.state === 'STOPPED') bot.exportStatus();
+    }, 1000);
 
-    if (fs.existsSync(configFile)) {
-        const cfg = JSON.parse(fs.readFileSync(configFile));
-        const tradeCfg = cfg.tradeConfig || { mode: 'percent', value: 50 };
-        bot.start(tradeCfg, cfg.autoBalance, cfg.maxOpps || 3);
-    } else {
-        console.error(`[WORKER] No config found for ${usernameArg}`);
-    }
+    // Support IPC start signal (Standard practice for controlled bots)
+    process.on('message', (msg) => {
+        if (msg === 'shutdown') process.exit(0);
+    });
 }
