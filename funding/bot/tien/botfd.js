@@ -32,8 +32,8 @@ const FEE_AUTO_ON = 10;
 const FEE_AUTO_OFF = 5;
 const FEE_CHECK_DELAY = 60000;
 
-const SL_PERCENTAGE = 95;
-const TP_PERCENTAGE = 135; 
+const SL_PERCENTAGE = 65;
+const TP_PERCENTAGE = 85; 
 
 function getSafeFileName(username) {
     return username.replace(/[^a-z0-9]/gi, '_').toLowerCase();
@@ -81,7 +81,7 @@ class BotEngine {
             binanceApiKey: '', binanceApiSecret: '', binanceDepositAddress: '',
             kucoinApiKey: '', kucoinApiSecret: '', kucoinPassword: '', kucoinDepositAddress: '',
             autoBalance: false,
-            maxOpps: 3, // Default là 3
+            maxOpps: 3, 
             vipStatus: 'none',
             vipExpiry: 0,
             lastFeePaidDate: '',
@@ -104,7 +104,6 @@ class BotEngine {
             if (!displayOpp || displayOpp.length === 0) displayOpp = this.lastKnownOpps;
             else this.lastKnownOpps = displayOpp;
 
-            // Đọc history balance để nhúng vào status
             let balHist = [];
             if(fs.existsSync(this.balanceHistoryFile)) {
                 try { balHist = JSON.parse(fs.readFileSync(this.balanceHistoryFile, 'utf8')); } catch(e){}
@@ -120,8 +119,8 @@ class BotEngine {
                 activeTrades: this.activeTrades,
                 vipStatus: this.config.vipStatus,
                 vipExpiry: this.config.vipExpiry,
-                balanceHistory: balHist, // Nhúng dữ liệu biểu đồ vào đây
-                config: { maxOpps: this.config.maxOpps || 3 } // Trả về config để UI biết
+                balanceHistory: balHist,
+                config: { maxOpps: this.config.maxOpps || 3 }
             };
             fs.writeFileSync(this.statusFile, JSON.stringify(s, null, 2));
         } catch (e) { }
@@ -547,6 +546,7 @@ class BotEngine {
         this.saveBalanceHistory(b, k);
     }
 
+    // === KHÔI PHỤC LOGIC GỐC ===
     async recoverSpotFunds() {
         this.log('info', '🧹 Checking Spot Wallets for stuck funds...');
         const threshold = 2; 
@@ -687,26 +687,26 @@ class BotEngine {
     async checkAndBalanceCapital() {
         if (this.isBalancing || !this.config.autoBalance || this.isFeeProcessing) return;
         if (this.activeTrades.length > 0) return;
-
-        // Code cũ là 60s, ở đây tôi dùng 60s để kiểm tra
+        
         if (Date.now() - this.lastBalCheckTime < 60000) return; 
         this.lastBalCheckTime = Date.now();
-
+    
         await this.fetchBalances();
         const b = this.balances['binanceusdm']?.total || 0;
         const k = this.balances['kucoinfutures']?.total || 0;
         const total = b + k;
         if (total < 20) return;
-
+    
         const diff = Math.abs(b - k);
         const amountToMove = diff / 2;
-
+        
         if (diff > 20 && amountToMove > 10 && !this.isBalancing) {
             this.log('info', `⚖️ Balancing Capital (Delta=${diff.toFixed(1)}$)...`);
             if (b > k) await this.autoFundTransfer('binanceusdm', 'kucoinfutures', amountToMove);
             else await this.autoFundTransfer('kucoinfutures', 'binanceusdm', amountToMove);
         }
     }
+    // === HẾT PHẦN KHÔI PHỤC ===
 
     filterTradableOps(rawOps) {
         const tradable = [];
@@ -737,13 +737,13 @@ class BotEngine {
 
         const selected = [];
         const seenCoins = new Set();
-        const maxOpps = this.config.maxOpps || 3; // Lấy từ config
+        const maxOpps = this.config.maxOpps || 3; 
 
         const totalAccountBal = (this.balances['binanceusdm']?.total || 0) + (this.balances['kucoinfutures']?.total || 0);
         let currentUsedMargin = this.activeTrades.reduce((acc, t) => acc + (t.collateral || 0), 0);
 
         for (const op of candidates) {
-            if (selected.length >= maxOpps) break; // Dùng maxOpps thay vì 3
+            if (selected.length >= maxOpps) break;
 
             if (seenCoins.has(op.coin)) continue;
             seenCoins.add(op.coin);
@@ -854,7 +854,6 @@ class BotEngine {
                 }
             }
             else {
-                // Giữ nguyên logic Auto Balance gốc, chỉ bọc điều kiện thời gian
                 if (m !== 58 && m !== 59 && m !== 0) await this.checkAndBalanceCapital();
 
                 if (m === 1 && this.capitalManagementState === 'FUNDS_READY') {
@@ -970,7 +969,6 @@ if (usernameArg) {
     if (fs.existsSync(configFile)) {
         const cfg = JSON.parse(fs.readFileSync(configFile));
         const tradeCfg = cfg.tradeConfig || { mode: 'percent', value: 50 };
-        // Pass thêm maxOpps nếu có trong config
         bot.start(tradeCfg, cfg.autoBalance, cfg.maxOpps || 3);
     } else {
         console.error(`[WORKER] No config found for ${usernameArg}`);
