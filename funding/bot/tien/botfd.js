@@ -124,6 +124,7 @@ class BotEngine {
     }
 
     log(type, msg) {
+        // CHẶN LOG RÁC
         if (['Scanning', 'Wait', 'Searching', 'Stability'].some(k => msg.includes(k))) return;
 
         const t = new Date().toLocaleTimeString('vi-VN', { hour12: false });
@@ -246,7 +247,7 @@ class BotEngine {
                     await exchange.createOrder(symbol, 'STOP_MARKET', orderSide, amount, undefined, { ...commonParams, 'stopPrice': exchange.priceToPrecision(symbol, slPrice) });
                 }
                 this.log('trade', `✅ TP/SL Set: ${symbol}`);
-                break;
+                break; 
             } catch (e) { await sleep(1500); }
         }
     }
@@ -737,7 +738,7 @@ class BotEngine {
                         const opp = this.lockedOpps[i];
                         if (!opp.executed) {
                             opp.executed = true;
-                            this.log('test', `⚡ EXEC TEST ${i + 1}: ${opp.coin}`);
+                            this.log('trade', `⚡ EXEC TEST ${i + 1}: ${opp.coin}`);
                             await this.executeTrade(opp);
                             if (i < this.lockedOpps.length - 1) await sleep(25000);
                         }
@@ -795,6 +796,9 @@ class BotEngine {
     async start(tradeCfg, autoBalance, maxOpps) {
         if (this.state === 'RUNNING') return true;
         
+        // TỐI ƯU START: Cập nhật trạng thái ngay lập tức để UI phản hồi
+        this.state = 'RUNNING';
+        
         if (tradeCfg) {
             this.tradeConfig = tradeCfg;
             this.isTestExecution = (parseFloat(tradeCfg.value) === 605791);
@@ -805,6 +809,7 @@ class BotEngine {
         if (maxOpps !== undefined) this.config.maxOpps = parseInt(maxOpps);
         this.saveConfig();
 
+        // Chạy setup nền
         await this.initExchanges();
         this.loadConfig();
         this.loadActiveTrades();
@@ -814,12 +819,8 @@ class BotEngine {
 
         await this.recoverSpotFunds();
         await this.snapshotAssets();
-        
-        this.lastScanTime = 0; 
-        await sleep(5000);
         await this.fetchBalances();
 
-        this.state = 'RUNNING';
         this.loop();
         this.log('info', `🚀 STARTED | Mode:${this.isTestExecution ? 'TEST' : this.tradeConfig.mode} | Val:${this.tradeConfig.value} | Max:${this.config.maxOpps}`);
 
@@ -851,9 +852,8 @@ const usernameArg = args[0];
 if (usernameArg) {
     const bot = new BotEngine(usernameArg);
     const safeName = getSafeFileName(usernameArg);
-    const configFile = path.join(USER_DATA_DIR, `${safeName}_config.json`);
-
-    // KHÔNG AUTO START (CHỜ TÍN HIỆU)
+    
+    // GIỮ PROCESS SỐNG NHƯNG KHÔNG TỰ CHẠY
     setInterval(() => {
         if(bot.state === 'STOPPED') bot.exportStatus();
     }, 1000);
