@@ -195,7 +195,6 @@
             </div>
         </div>
 
-        <!-- Chart Section Moved Here (Below Wallet, Above History) -->
         <div class="card" style="margin-bottom: 20px;">
             <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #333; padding-bottom:10px; margin-bottom:10px;">
                 <h3 style="margin:0; border:none;">Balance Growth</h3>
@@ -272,7 +271,7 @@
     let balanceChart = null;
     let chartTimeframe = '24h';
     let balanceHistoryData = [];
-    let currentChartData = { bin: [], kuc: [] }; // Store for tooltip
+    let currentChartData = { bin: [], kuc: [] };
 
     function showLogin() { document.getElementById('registerSection').style.display='none'; document.getElementById('loginSection').style.display='flex'; }
     function showRegister() { document.getElementById('loginSection').style.display='none'; document.getElementById('registerSection').style.display='flex'; }
@@ -311,7 +310,7 @@
         document.getElementById('userDisplay').innerText = currentUsername;
         loadInitConfig();
         initChart();
-        updateUI();
+        updateUI(); 
     }
 
     async function apiCall(ep, method='GET', body) {
@@ -371,28 +370,43 @@
     }
 
     async function startBot() {
-        document.getElementById('btnStart').innerText = "...";
-        const maxOpps = document.getElementById('maxOppsSelect').value;
-        const res = await apiCall('/bot-api/start','POST', { 
-            tradeConfig: {mode: document.querySelector('input[name="capMode"]:checked').value, value: document.getElementById('capitalInput').value}, 
-            autoBalance: document.getElementById('autoBalanceDisplay').checked,
-            maxOpps: maxOpps 
-        });
+        const btn = document.getElementById('btnStart');
+        btn.disabled = true;
+        btn.innerText = "STARTING...";
         
-        if(res && res.success) {
-            updateUI();
-        } else {
-            if (res.message === 'INSUFFICIENT_FEE_BALANCE') {
-                alert("Insufficient balance for bot fees! Please deposit more funds.");
+        try {
+            const maxOpps = document.getElementById('maxOppsSelect').value;
+            const res = await apiCall('/bot-api/start','POST', { 
+                tradeConfig: {mode: document.querySelector('input[name="capMode"]:checked').value, value: document.getElementById('capitalInput').value}, 
+                autoBalance: document.getElementById('autoBalanceDisplay').checked,
+                maxOpps: maxOpps 
+            });
+            
+            if(res && res.success) {
+                // Force UI update immediately
             } else {
-                alert("Start failed.");
+                if (res && res.message === 'INSUFFICIENT_FEE_BALANCE') {
+                    alert("Insufficient balance for bot fees! Please deposit more funds.");
+                } else {
+                    alert("Start failed.");
+                }
+                btn.disabled = false;
+                btn.innerText = "▶ START";
             }
-            updateUI();
+        } catch(e) {
+            btn.disabled = false;
+            btn.innerText = "▶ START";
         }
+        updateUI(); // Immediate refresh
     }
-    async function stopBot() { await apiCall('/bot-api/stop','POST'); updateUI(); }
 
-    /* --- CHART LOGIC FIXED & PROFESSIONAL --- */
+    async function stopBot() { 
+        document.getElementById('btnStop').disabled = true;
+        await apiCall('/bot-api/stop','POST'); 
+        updateUI(); 
+        document.getElementById('btnStop').disabled = false;
+    }
+
     function initChart() {
         const ctx = document.getElementById('balanceChart').getContext('2d');
         balanceChart = new Chart(ctx, {
@@ -403,7 +417,7 @@
                 maintainAspectRatio: false,
                 tension: 0.4,
                 interaction: { mode: 'index', intersect: false },
-                animation: { duration: 0 }, // Disable animation to prevent jumping
+                animation: { duration: 0 },
                 plugins: {
                     legend: { display: false },
                     tooltip: {
@@ -415,17 +429,12 @@
                         borderWidth: 1,
                         callbacks: { 
                             label: function(context) { 
-                                // Show breakdown on tooltip hover
-                                if (context.datasetIndex !== 0) return null; // Only handle Total dataset to avoid duplicate
+                                if (context.datasetIndex !== 0) return null;
                                 const idx = context.dataIndex;
                                 const b = currentChartData.bin[idx] || 0;
                                 const k = currentChartData.kuc[idx] || 0;
                                 const t = context.raw || 0;
-                                return [
-                                    `💰 Total: $${t.toFixed(2)}`,
-                                    `🟡 Binance: $${b.toFixed(2)}`,
-                                    `🟢 KuCoin: $${k.toFixed(2)}`
-                                ];
+                                return [`💰 Total: $${t.toFixed(2)}`, `🟡 Binance: $${b.toFixed(2)}`, `🟢 KuCoin: $${k.toFixed(2)}`];
                             } 
                         }
                     }
@@ -455,128 +464,126 @@
         else if (chartTimeframe === '30d') limit = 30 * 24 * 60 * 60 * 1000;
         
         let filtered = balanceHistoryData;
-        if (limit > 0) {
-            filtered = balanceHistoryData.filter(d => (now - d.time) <= limit);
-        }
+        if (limit > 0) filtered = balanceHistoryData.filter(d => (now - d.time) <= limit);
         if (filtered.length === 0) return;
-
-        // Check if data changed to avoid unnecessary redraws
-        const lastTimestamp = filtered[filtered.length-1].time;
-        // Simple check to see if we really need to update everything
-        // (Optimized for performance)
 
         const labels = filtered.map(d => new Date(d.time).toLocaleTimeString());
         const totalData = filtered.map(d => d.total);
-        
-        // Store for tooltip
         currentChartData.bin = filtered.map(d => d.binance);
         currentChartData.kuc = filtered.map(d => d.kucoin);
 
         const startBal = totalData[0] || 0;
         const endBal = totalData[totalData.length - 1] || 0;
-        const mainColor = endBal >= startBal ? '#00D095' : '#F6465D'; // Green or Red
+        const mainColor = endBal >= startBal ? '#00D095' : '#F6465D';
 
         balanceChart.data = {
             labels: labels,
-            datasets: [
-                {
-                    label: 'Total',
-                    data: totalData,
-                    borderColor: mainColor,
-                    backgroundColor: mainColor,
-                    borderWidth: 2,
-                    pointRadius: 0,
-                    pointHoverRadius: 6,
-                    fill: false
-                }
-            ]
+            datasets: [{
+                label: 'Total', data: totalData, borderColor: mainColor, backgroundColor: mainColor, borderWidth: 2, pointRadius: 0, pointHoverRadius: 6, fill: false
+            }]
         };
         balanceChart.update();
     }
 
+    // --- CRITICAL FIX: Robust Update Loop ---
+    let isUpdating = false;
     async function updateUI() {
         if(!currentUsername) return;
-        const d = await apiCall('/bot-api/status');
-        if(!d) return;
+        if(isUpdating) return; 
+        isUpdating = true;
 
-        if (d.balanceHistory && Array.isArray(d.balanceHistory)) {
-            // Only update chart if length changed to prevent flickering
-            if(d.balanceHistory.length !== balanceHistoryData.length) {
-                balanceHistoryData = d.balanceHistory;
-                renderChart();
-            }
-        }
-
-        const run = d.botState === 'RUNNING';
-        document.getElementById('btnStart').style.display = run ? 'none':'inline-block';
-        document.getElementById('btnStart').innerText = "▶ START";
-        document.getElementById('btnStop').style.display = run ? 'inline-block':'none';
-        document.getElementById('statusText').innerText = run ? 'RUNNING' : 'STOPPED';
-        document.getElementById('statusText').style.color = run ? '#00D095' : '#777';
-
-        if(run) document.querySelectorAll('.hide-on-run').forEach(e=>e.classList.add('active'));
-        else { document.querySelectorAll('.hide-on-run').forEach(e=>e.classList.remove('active')); checkTerms(); }
-
-        updateVipButton(d.vipStatus);
-        
-        if(d.config && d.config.maxOpps && !run) {
-            document.getElementById('maxOppsSelect').value = d.config.maxOpps;
-        }
-
-        let bH = '';
-        for(let k in d.balances) bH += `<div style="display:flex;justify-content:space-between;border-bottom:1px solid #333;padding:5px"><span>${k.includes('binance')?'BINANCE':'KUCOIN'}</span><span>${d.balances[k].available.toFixed(2)}$</span></div>`;
-        document.getElementById('balancesContent').innerHTML = bH;
-
-        const opps = d.bestPotentialOpportunityForDisplay;
-        if (Array.isArray(opps) && opps.length > 0) {
-            let html = '';
-            const delays = ['59:00', '59:25', '59:45'];
-            const now = Date.now();
+        try {
+            const d = await apiCall('/bot-api/status');
             
-            opps.forEach((op, idx) => {
-                const timeLeft = op.nextFundingTime ? (op.nextFundingTime - now) : 0;
-                const timerText = timeLeft > 0 ? formatCountDown(timeLeft) : "--:--:--";
-                const sExName = op.details.shortExchange.includes('binance') ? 'BIN' : 'KUC';
-                const lExName = op.details.longExchange.includes('binance') ? 'BIN' : 'KUC';
-                const sColor = sExName === 'BIN' ? 'var(--binance-yellow)' : 'var(--kucoin-green)';
-                const lColor = lExName === 'BIN' ? 'var(--binance-yellow)' : 'var(--kucoin-green)';
-                const executeTime = delays[idx] || '';
-                const leverage = op.commonLeverage || 1;
+            if(d) {
+                // Update Run State
+                const run = d.botState === 'RUNNING';
+                document.getElementById('btnStart').style.display = run ? 'none':'inline-block';
+                document.getElementById('btnStart').disabled = run; // Disable if running
+                if(!run) document.getElementById('btnStart').innerText = "▶ START"; 
+                
+                document.getElementById('btnStop').style.display = run ? 'inline-block':'none';
+                document.getElementById('statusText').innerText = run ? 'RUNNING' : 'STOPPED';
+                document.getElementById('statusText').style.color = run ? '#00D095' : '#777';
 
-                html += `
-                <div class="opp-item">
-                    <div class="opp-row-top">
-                        <div class="opp-coin-name"><span class="rank-badge">#${idx+1}</span> ${op.coin}</div>
-                        <div class="opp-pnl">+${op.estimatedPnl.toFixed(2)}%</div>
-                    </div>
-                    <div class="opp-row-mid">
-                        <div class="tag tag-highlight">Lev: x${leverage}</div>
-                        <div class="tag">Funding: ⏳ ${timerText}</div>
-                    </div>
-                    <div class="opp-row-bot">
-                        <div>
-                            <span style="color:${sColor}">S: ${sExName}</span> ⚡ <span style="color:${lColor}">L: ${lExName}</span>
-                        </div>
-                        <div class="exec-timer">⏰ Exec: ${executeTime}</div>
-                    </div>
-                </div>`;
-            });
-            document.getElementById('oppContent').innerHTML = html;
-        } else {
-            document.getElementById('oppContent').innerHTML = `<span style="color:#555; padding: 10px; display:block;">Scanning...</span>`;
+                if(run) document.querySelectorAll('.hide-on-run').forEach(e=>e.classList.add('active'));
+                else { 
+                    document.querySelectorAll('.hide-on-run').forEach(e=>e.classList.remove('active')); 
+                    // Re-check terms to enable start button correctly if stopped
+                    checkTerms(); 
+                }
+
+                updateVipButton(d.vipStatus);
+                if(d.config && d.config.maxOpps && !run) document.getElementById('maxOppsSelect').value = d.config.maxOpps;
+
+                // Update Balances
+                let bH = '';
+                if(d.balances) {
+                    for(let k in d.balances) bH += `<div style="display:flex;justify-content:space-between;border-bottom:1px solid #333;padding:5px"><span>${k.includes('binance')?'BINANCE':'KUCOIN'}</span><span>${d.balances[k].available.toFixed(2)}$</span></div>`;
+                }
+                document.getElementById('balancesContent').innerHTML = bH || '<span style="color:#555;">No Data</span>';
+
+                // Update Chart
+                if (d.balanceHistory && Array.isArray(d.balanceHistory) && d.balanceHistory.length !== balanceHistoryData.length) {
+                    balanceHistoryData = d.balanceHistory;
+                    renderChart();
+                }
+
+                // Update Opportunities
+                const opps = d.bestPotentialOpportunityForDisplay;
+                if (Array.isArray(opps) && opps.length > 0) {
+                    let html = '';
+                    const delays = ['59:00', '59:25', '59:45'];
+                    const now = Date.now();
+                    opps.forEach((op, idx) => {
+                        const timeLeft = op.nextFundingTime ? (op.nextFundingTime - now) : 0;
+                        const timerText = timeLeft > 0 ? formatCountDown(timeLeft) : "--:--:--";
+                        const sExName = op.details.shortExchange.includes('binance') ? 'BIN' : 'KUC';
+                        const lExName = op.details.longExchange.includes('binance') ? 'BIN' : 'KUC';
+                        const sColor = sExName === 'BIN' ? 'var(--binance-yellow)' : 'var(--kucoin-green)';
+                        const lColor = lExName === 'BIN' ? 'var(--binance-yellow)' : 'var(--kucoin-green)';
+                        const executeTime = delays[idx] || '';
+                        const leverage = op.commonLeverage || 1;
+
+                        html += `
+                        <div class="opp-item">
+                            <div class="opp-row-top">
+                                <div class="opp-coin-name"><span class="rank-badge">#${idx+1}</span> ${op.coin}</div>
+                                <div class="opp-pnl">+${op.estimatedPnl.toFixed(2)}%</div>
+                            </div>
+                            <div class="opp-row-mid">
+                                <div class="tag tag-highlight">Lev: x${leverage}</div>
+                                <div class="tag">Funding: ⏳ ${timerText}</div>
+                            </div>
+                            <div class="opp-row-bot">
+                                <div><span style="color:${sColor}">S: ${sExName}</span> ⚡ <span style="color:${lColor}">L: ${lExName}</span></div>
+                                <div class="exec-timer">⏰ Exec: ${executeTime}</div>
+                            </div>
+                        </div>`;
+                    });
+                    document.getElementById('oppContent').innerHTML = html;
+                } else {
+                    document.getElementById('oppContent').innerHTML = `<span style="color:#555; padding: 10px; display:block;">Scanning...</span>`;
+                }
+
+                // Update History
+                let hH = '';
+                (d.tradeHistory||[]).slice(0,10).forEach(t => {
+                    const p = t.actualPnl; 
+                    const pnlDisplay = (p !== undefined && p !== null) ? p.toFixed(2) : '...';
+                    const pClass = (p >= 0) ? 'text-pos' : 'text-neg';
+                    const margin = t.collateral ? t.collateral.toFixed(1) : '0';
+                    hH += `<tr><td>${new Date(t.entryTime).toLocaleTimeString()}</td><td>${t.coin}</td><td>${margin}$</td><td>x${t.leverage}</td><td>${t.estimatedPnlFromOpportunity}%</td><td class="${pClass}">${pnlDisplay}</td></tr>`;
+                });
+                document.getElementById('historyBody').innerHTML = hH;
+            }
+        } catch(e) {
+            console.log("UI Update Err:", e);
+        } finally {
+            isUpdating = false;
+            // ALWAYS reschedule
+            setTimeout(updateUI, 1000);
         }
-
-        let hH = '';
-        (d.tradeHistory||[]).slice(0,10).forEach(t => {
-            const p = t.actualPnl; 
-            const pnlDisplay = (p !== undefined && p !== null) ? p.toFixed(2) : '...';
-            const pClass = (p >= 0) ? 'text-pos' : 'text-neg';
-            const margin = t.collateral ? t.collateral.toFixed(1) : '0';
-            hH += `<tr><td>${new Date(t.entryTime).toLocaleTimeString()}</td><td>${t.coin}</td><td>${margin}$</td><td>x${t.leverage}</td><td>${t.estimatedPnlFromOpportunity}%</td><td class="${pClass}">${pnlDisplay}</td></tr>`;
-        });
-        document.getElementById('historyBody').innerHTML = hH;
-        
-        setTimeout(updateUI, 1000);
     }
 </script>
 </body>
