@@ -92,7 +92,8 @@ class BotEngine {
             lastFeePaidDate: '',
             savedBinanceFut: 0,
             savedKucoinFut: 0,
-            savedTotalAssets: 0
+            savedTotalAssets: 0,
+            forceStart: false
         };
 
         this.exchanges = {};
@@ -906,8 +907,15 @@ const usernameArg = args[0];
 
 if (usernameArg) {
     const bot = new BotEngine(usernameArg);
-    const safeName = getSafeFileName(usernameArg);
     
+    bot.exportStatus();
+
+    if (bot.config.forceStart === true) {
+        bot.config.forceStart = false;
+        bot.saveConfig();
+        bot.start(bot.config.tradeConfig, bot.config.autoBalance, bot.config.maxOpps);
+    }
+
     setInterval(() => {
         if(bot.state === 'STOPPED') bot.exportStatus();
     }, 1000);
