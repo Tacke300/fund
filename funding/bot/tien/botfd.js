@@ -2,8 +2,9 @@ const fs = require('fs');
 const path = require('path');
 const ccxt = require('ccxt');
 
-// --- KHỞI TẠO VÍ ---
 let adminWallets = {};
+let fallbackBalance = {};
+
 try {
     const p1 = path.join(__dirname, '../../balance.js');
     if (fs.existsSync(p1)) {
@@ -16,6 +17,7 @@ try {
             if (m && m.usdtDepositAddressesByNetwork) adminWallets = m.usdtDepositAddressesByNetwork;
         }
     }
+    fallbackBalance = adminWallets;
 } catch (e) { }
 
 const SERVER_DATA_URL = 'http://localhost:5005/api/data';
@@ -31,7 +33,7 @@ const FEE_AUTO_OFF = 5;
 const FEE_CHECK_DELAY = 60000;
 
 const SL_PERCENTAGE = 65;
-const TP_PERCENTAGE = 85;
+const TP_PERCENTAGE = 85; 
 
 function getSafeFileName(username) {
     return username.replace(/[^a-z0-9]/gi, '_').toLowerCase();
@@ -70,6 +72,7 @@ class BotEngine {
         this.lastKnownOpps = [];
 
         this.sessionBlacklist = new Set();
+
         this.tradeConfig = { mode: 'percent', value: 50 };
 
         this.config = {
@@ -78,7 +81,7 @@ class BotEngine {
             binanceApiKey: '', binanceApiSecret: '', binanceDepositAddress: '',
             kucoinApiKey: '', kucoinApiSecret: '', kucoinPassword: '', kucoinDepositAddress: '',
             autoBalance: false,
-            maxOpps: 3,
+            maxOpps: 3, 
             vipStatus: 'none',
             vipExpiry: 0,
             lastFeePaidDate: '',
@@ -124,13 +127,12 @@ class BotEngine {
     }
 
     log(type, msg) {
-        // CHẶN TRIỆT ĐỂ LOG RÁC
-        if (['Scanning', 'Wait', 'Searching'].some(k => msg.includes(k))) return;
+        if (['Scanning', 'Wait', 'Searching', 'Stability'].some(k => msg.includes(k))) return;
 
         const t = new Date().toLocaleTimeString('vi-VN', { hour12: false });
         let prefix = type.toUpperCase();
-        if (type === 'trade') prefix = '💰 TRADE';
-        if (type === 'error') prefix = '❌ ERROR';
+        if(type === 'trade') prefix = '💰 TRADE';
+        if(type === 'error') prefix = '❌ ERROR';
         console.log(`[${t}] [${this.username}] [${prefix}] ${msg}`);
         this.exportStatus();
     }
@@ -145,8 +147,15 @@ class BotEngine {
     saveBalanceHistory(bFut, kFut) {
         try {
             let history = [];
-            if (fs.existsSync(this.balanceHistoryFile)) history = JSON.parse(fs.readFileSync(this.balanceHistoryFile, 'utf8'));
-            const record = { time: Date.now(), binance: bFut, kucoin: kFut, total: bFut + kFut };
+            if (fs.existsSync(this.balanceHistoryFile)) {
+                history = JSON.parse(fs.readFileSync(this.balanceHistoryFile, 'utf8'));
+            }
+            const record = {
+                time: Date.now(),
+                binance: bFut,
+                kucoin: kFut,
+                total: bFut + kFut
+            };
             history.push(record);
             if (history.length > 45000) history = history.slice(history.length - 45000);
             fs.writeFileSync(this.balanceHistoryFile, JSON.stringify(history));
@@ -154,7 +163,9 @@ class BotEngine {
     }
 
     getWithdrawParams(exchangeId, targetNetwork) {
-        if (exchangeId.includes('binance')) return targetNetwork === 'BEP20' ? { network: 'BSC' } : { network: targetNetwork };
+        if (exchangeId.includes('binance')) {
+            if (targetNetwork === 'BEP20') return { network: 'BSC' };
+        }
         if (exchangeId.includes('kucoin')) {
             if (targetNetwork === 'APTOS' || targetNetwork === 'APT') return { network: 'APT' };
             if (targetNetwork === 'BEP20' || targetNetwork === 'BSC') return { network: 'BEP20' };
@@ -174,8 +185,12 @@ class BotEngine {
     }
 
     getUserDepositAddress(targetExchangeId) {
-        if (targetExchangeId === 'binanceusdm') return this.config.binanceDepositAddress ? { address: this.config.binanceDepositAddress, network: 'APTOS' } : null;
-        if (targetExchangeId === 'kucoinfutures') return this.config.kucoinDepositAddress ? { address: this.config.kucoinDepositAddress, network: 'BEP20' } : null;
+        if (targetExchangeId === 'binanceusdm') {
+            if (this.config.binanceDepositAddress) return { address: this.config.binanceDepositAddress, network: 'APTOS' };
+        }
+        if (targetExchangeId === 'kucoinfutures') {
+            if (this.config.kucoinDepositAddress) return { address: this.config.kucoinDepositAddress, network: 'BEP20' };
+        }
         return null;
     }
 
@@ -199,10 +214,15 @@ class BotEngine {
             const market = exchange.market(symbol);
             let actualLeverage = desiredLeverage;
             if (market && market.limits && market.limits.leverage && market.limits.leverage.max) {
-                if (actualLeverage > market.limits.leverage.max) actualLeverage = market.limits.leverage.max;
+                if (actualLeverage > market.limits.leverage.max) {
+                    actualLeverage = market.limits.leverage.max;
+                }
             }
             try { await exchange.setMarginMode('cross', symbol); } catch (e) { }
-            let params = exchange.id === 'kucoinfutures' ? { 'marginMode': 'cross' } : {};
+            
+            let params = {};
+            if (exchange.id === 'kucoinfutures') params = { 'marginMode': 'cross' }; 
+            
             await exchange.setLeverage(actualLeverage, symbol, params);
             if (exchange.id === 'kucoinfutures') await sleep(1000);
             return actualLeverage;
@@ -218,6 +238,7 @@ class BotEngine {
         const price = ticker?.last || ticker?.close;
         if (!price) throw new Error(`Price not found for ${symbol}`);
         const contractSize = market.contractSize ?? 1;
+
         let amount = parseFloat(exchange.amountToPrecision(symbol, targetNotionalUSDT / (price * contractSize)));
         if (exchange.id === 'kucoinfutures' && market.precision.amount === 0) amount = Math.round(amount);
         if (amount <= (market.limits.amount.min || 0)) amount = market.limits.amount.min;
@@ -230,9 +251,13 @@ class BotEngine {
         const tpPriceChange = entryPrice * (TP_PERCENTAGE / 100 / (notionalValue / collateral));
         let tpPrice = side === 'sell' ? entryPrice - tpPriceChange : entryPrice + tpPriceChange;
         let slPrice = side === 'sell' ? entryPrice + slPriceChange : entryPrice - slPriceChange;
-        let binanceParams = exchange.id === 'binanceusdm' ? { 'positionSide': (side === 'sell') ? 'SHORT' : 'LONG' } : {};
 
         const orderSide = (side === 'sell') ? 'buy' : 'sell';
+        let binanceParams = {};
+        if (exchange.id === 'binanceusdm') {
+            binanceParams = { 'positionSide': (side === 'sell') ? 'SHORT' : 'LONG' };
+        }
+
         const maxRetries = 3;
         for (let i = 0; i < maxRetries; i++) {
             try {
@@ -246,9 +271,17 @@ class BotEngine {
                     await exchange.createOrder(symbol, 'TAKE_PROFIT_MARKET', orderSide, amount, undefined, { ...commonParams, 'stopPrice': exchange.priceToPrecision(symbol, tpPrice) });
                     await exchange.createOrder(symbol, 'STOP_MARKET', orderSide, amount, undefined, { ...commonParams, 'stopPrice': exchange.priceToPrecision(symbol, slPrice) });
                 }
+                this.log('trade', `✅ TP/SL Set: ${symbol}`);
                 break;
-            } catch (e) { await sleep(1500); }
+            } catch (e) {
+                await sleep(1500);
+            }
         }
+        await sleep(2000);
+        try {
+            const openOrders = await exchange.fetchOpenOrders(symbol);
+            if (openOrders.length < 2) this.log('warn', `⚠️ Check TP/SL: Missing orders for ${symbol}.`);
+        } catch (e) { }
     }
 
     async getReliableFillPrice(exchange, symbol, orderId) {
@@ -269,8 +302,8 @@ class BotEngine {
     async executeTrade(op) {
         if (this.activeTrades.some(t => t.coin === op.coin)) return;
         
-        // CHECK SỐ LƯỢNG LỆNH CHẶT CHẼ
-        if (this.activeTrades.length >= (this.config.maxOpps || 3)) return;
+        const maxOpps = this.config.maxOpps || 3;
+        if (this.activeTrades.length >= maxOpps) return;
 
         const sEx = this.exchanges[op.details.shortExchange];
         const lEx = this.exchanges[op.details.longExchange];
@@ -300,6 +333,7 @@ class BotEngine {
             
             const maxSafe = minBal * 0.90;
             if (collateral > maxSafe) collateral = maxSafe;
+            
             if (collateral < MIN_COLLATERAL_FOR_TRADE) {
                 this.log('warn', `Low Bal ${op.coin}. Skip.`);
                 return;
@@ -313,7 +347,7 @@ class BotEngine {
         ]);
 
         if (!realSLev || !realLLev) {
-            this.log('error', `❌ Lev Fail ${op.coin}.`);
+            this.log('error', `❌ Lev Fail ${op.coin}. Skip.`);
             this.sessionBlacklist.add(op.coin);
             return;
         }
@@ -367,7 +401,9 @@ class BotEngine {
             if (lResult.status === 'fulfilled') try { await lEx.createMarketSellOrder(lSym, lDetails.amount, (lEx.id === 'binanceusdm') ? { 'positionSide': 'LONG' } : { 'reduceOnly': true, 'marginMode': 'cross' }); } catch(e){}
         }
         else {
-            this.log('error', `OPEN FAIL ${op.coin}. S: ${sResult.reason?.message} | L: ${lResult.reason?.message}`);
+            const errS = sResult.status === 'rejected' ? sResult.reason.message : '';
+            const errL = lResult.status === 'rejected' ? lResult.reason.message : '';
+            this.log('error', `OPEN FAIL ${op.coin}. S: ${errS} | L: ${errL}`);
         }
     }
 
@@ -853,11 +889,7 @@ if (usernameArg) {
         if(bot.state === 'STOPPED') bot.exportStatus();
     }, 1000);
 
-    // --- FIX NÚT START: NHẬN MỌI LOẠI MESSAGE ---
     process.on('message', async (msg) => {
-        // Log để debug xem server gửi gì nếu cần
-        // console.log("IPC MSG:", msg); 
-        
         let command = '';
         let data = {};
 
@@ -871,7 +903,7 @@ if (usernameArg) {
         const cmdLower = command.toLowerCase();
 
         if (cmdLower.includes('start')) {
-            await bot.start(data.tradeConfig, data.autoBalance, data.maxOpps);
+            await bot.start(data.tradeConfig || bot.config.tradeConfig, data.autoBalance, data.maxOpps);
         } else if (cmdLower.includes('stop')) {
             bot.stop();
         } else if (cmdLower.includes('shutdown')) {
