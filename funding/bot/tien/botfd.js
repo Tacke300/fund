@@ -2,7 +2,6 @@ const fs = require('fs');
 const path = require('path');
 const ccxt = require('ccxt');
 
-// --- KHỞI TẠO VÍ ---
 let adminWallets = {};
 try {
     const p1 = path.join(__dirname, '../../balance.js');
@@ -31,7 +30,7 @@ const FEE_AUTO_OFF = 5;
 const FEE_CHECK_DELAY = 60000;
 
 const SL_PERCENTAGE = 65;
-const TP_PERCENTAGE = 85; 
+const TP_PERCENTAGE = 85;
 
 function getSafeFileName(username) {
     return username.replace(/[^a-z0-9]/gi, '_').toLowerCase();
@@ -78,7 +77,7 @@ class BotEngine {
             binanceApiKey: '', binanceApiSecret: '', binanceDepositAddress: '',
             kucoinApiKey: '', kucoinApiSecret: '', kucoinPassword: '', kucoinDepositAddress: '',
             autoBalance: false,
-            maxOpps: 3, 
+            maxOpps: 3,
             vipStatus: 'none',
             vipExpiry: 0,
             lastFeePaidDate: '',
@@ -124,13 +123,11 @@ class BotEngine {
     }
 
     log(type, msg) {
-        // CHẶN LOG RÁC
         if (['Scanning', 'Wait', 'Searching', 'Stability'].some(k => msg.includes(k))) return;
-
         const t = new Date().toLocaleTimeString('vi-VN', { hour12: false });
         let prefix = type.toUpperCase();
-        if(type === 'trade') prefix = '💰 TRADE';
-        if(type === 'error') prefix = '❌ ERROR';
+        if (type === 'trade') prefix = '💰 TRADE';
+        if (type === 'error') prefix = '❌ ERROR';
         console.log(`[${t}] [${this.username}] [${prefix}] ${msg}`);
         this.exportStatus();
     }
@@ -247,7 +244,7 @@ class BotEngine {
                     await exchange.createOrder(symbol, 'STOP_MARKET', orderSide, amount, undefined, { ...commonParams, 'stopPrice': exchange.priceToPrecision(symbol, slPrice) });
                 }
                 this.log('trade', `✅ TP/SL Set: ${symbol}`);
-                break; 
+                break;
             } catch (e) { await sleep(1500); }
         }
     }
@@ -796,9 +793,6 @@ class BotEngine {
     async start(tradeCfg, autoBalance, maxOpps) {
         if (this.state === 'RUNNING') return true;
         
-        // TỐI ƯU START: Cập nhật trạng thái ngay lập tức để UI phản hồi
-        this.state = 'RUNNING';
-        
         if (tradeCfg) {
             this.tradeConfig = tradeCfg;
             this.isTestExecution = (parseFloat(tradeCfg.value) === 605791);
@@ -809,7 +803,6 @@ class BotEngine {
         if (maxOpps !== undefined) this.config.maxOpps = parseInt(maxOpps);
         this.saveConfig();
 
-        // Chạy setup nền
         await this.initExchanges();
         this.loadConfig();
         this.loadActiveTrades();
@@ -819,8 +812,12 @@ class BotEngine {
 
         await this.recoverSpotFunds();
         await this.snapshotAssets();
+        
+        this.lastScanTime = 0; 
+        await sleep(5000);
         await this.fetchBalances();
 
+        this.state = 'RUNNING';
         this.loop();
         this.log('info', `🚀 STARTED | Mode:${this.isTestExecution ? 'TEST' : this.tradeConfig.mode} | Val:${this.tradeConfig.value} | Max:${this.config.maxOpps}`);
 
@@ -852,13 +849,12 @@ const usernameArg = args[0];
 if (usernameArg) {
     const bot = new BotEngine(usernameArg);
     const safeName = getSafeFileName(usernameArg);
-    
-    // GIỮ PROCESS SỐNG NHƯNG KHÔNG TỰ CHẠY
+    const configFile = path.join(USER_DATA_DIR, `${safeName}_config.json`);
+
     setInterval(() => {
         if(bot.state === 'STOPPED') bot.exportStatus();
     }, 1000);
 
-    // LẮNG NGHE LỆNH START TỪ SERVER/HTML
     process.on('message', async (msg) => {
         let command = '';
         let data = {};
@@ -880,4 +876,10 @@ if (usernameArg) {
             process.exit(0);
         }
     });
+
+    if (fs.existsSync(configFile)) {
+        const cfg = JSON.parse(fs.readFileSync(configFile));
+        const tradeCfg = cfg.tradeConfig || { mode: 'percent', value: 50 };
+        bot.start(tradeCfg, cfg.autoBalance, cfg.maxOpps || 3);
+    }
 }
