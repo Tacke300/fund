@@ -7,6 +7,11 @@ const PORT = 2025;
 const USER_DATA_DIR = path.join(__dirname, 'user_data');
 if (!fs.existsSync(USER_DATA_DIR)) fs.mkdirSync(USER_DATA_DIR);
 
+// Tự động giết process cũ đang chiếm cổng khi khởi động
+exec(`fuser -k ${PORT}/tcp`, (err) => {
+    if(!err) console.log(`[SERVER] Killed old process on port ${PORT}`);
+});
+
 function getSafeFileName(username) {
     return username.replace(/[^a-z0-9]/gi, '_').toLowerCase();
 }
@@ -83,26 +88,21 @@ const server = http.createServer(async (req, res) => {
                 if(payload.autoBalance !== undefined) currentConfig.autoBalance = payload.autoBalance;
                 
                 currentConfig.forceStart = true;
-
                 fs.writeFileSync(configFile, JSON.stringify(currentConfig, null, 2));
 
-                exec(`pm2 start "${botScriptPath}" --name ${pm2Name} -- "${username}"`, (err, stdout, stderr) => {
+                exec(`pm2 start "${botScriptPath}" --name ${pm2Name} -- "${username}"`, (err) => {
                     if (err) {
                         exec(`pm2 restart ${pm2Name}`, (err2) => {
-                            if(err2) {
-                                res.end(JSON.stringify({ success: false, message: err2.message }));
-                            } else {
-                                res.end(JSON.stringify({ success: true, message: 'Bot restarted.' }));
-                            }
+                            if(err2) res.end(JSON.stringify({ success: false, message: err2.message }));
+                            else res.end(JSON.stringify({ success: true, message: 'Bot restarted.' }));
                         });
                     } else {
                         res.end(JSON.stringify({ success: true, message: 'Bot started.' }));
                     }
                 });
             }
-
             else if (url === '/bot-api/stop') {
-                exec(`pm2 stop ${pm2Name}`, (err) => {
+                exec(`pm2 stop ${pm2Name}`, () => {
                     if(fs.existsSync(statusFile)) {
                         const s = JSON.parse(fs.readFileSync(statusFile));
                         s.botState = 'STOPPED';
@@ -111,32 +111,22 @@ const server = http.createServer(async (req, res) => {
                     res.end(JSON.stringify({ success: true }));
                 });
             }
-
             else if (url === '/bot-api/upgrade-vip') {
                 let currentConfig = {};
                 if (fs.existsSync(configFile)) currentConfig = JSON.parse(fs.readFileSync(configFile));
-                
                 currentConfig.vipStatus = 'vip';
                 currentConfig.vipExpiry = Date.now() + 30 * 24 * 60 * 60 * 1000;
                 fs.writeFileSync(configFile, JSON.stringify(currentConfig, null, 2));
-
-                exec(`pm2 restart ${pm2Name}`, () => {
-                    res.end(JSON.stringify({ success: true }));
-                });
+                exec(`pm2 restart ${pm2Name}`, () => res.end(JSON.stringify({ success: true })));
             }
-
             else if (url === '/bot-api/save-config') {
                 let currentConfig = {};
                 if (fs.existsSync(configFile)) currentConfig = JSON.parse(fs.readFileSync(configFile));
                 const newConfig = JSON.parse(body);
                 const finalConfig = { ...currentConfig, ...newConfig };
                 fs.writeFileSync(configFile, JSON.stringify(finalConfig, null, 2));
-                
-                exec(`pm2 restart ${pm2Name}`, () => {
-                     res.end(JSON.stringify({ success: true }));
-                });
+                exec(`pm2 restart ${pm2Name}`, () => res.end(JSON.stringify({ success: true })));
             }
-
             else if (url === '/bot-api/status') {
                 if (fs.existsSync(statusFile)) {
                     const status = JSON.parse(fs.readFileSync(statusFile));
@@ -147,7 +137,6 @@ const server = http.createServer(async (req, res) => {
                     res.end(JSON.stringify({ botState: 'STOPPED', username: username }));
                 }
             }
-
             else if (url === '/bot-api/config') {
                 if (fs.existsSync(configFile)) {
                     const c = JSON.parse(fs.readFileSync(configFile));
@@ -155,7 +144,6 @@ const server = http.createServer(async (req, res) => {
                     res.end(JSON.stringify(c));
                 } else { res.end('{}'); }
             }
-            
             else if (url === '/bot-api/update-balance-config') {
                 let currentConfig = {};
                 if (fs.existsSync(configFile)) currentConfig = JSON.parse(fs.readFileSync(configFile));
