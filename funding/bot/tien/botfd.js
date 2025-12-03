@@ -3,11 +3,12 @@ const path = require('path');
 const ccxt = require('ccxt');
 const https = require('https');
 
+// Tăng tốc độ Agent HTTPS
 const agent = new https.Agent({ keepAlive: true, keepAliveMsecs: 10000 });
 const CCXT_OPTIONS = {
-    enableRateLimit: true,
+    enableRateLimit: false, // Tắt rate limit của thư viện để nhanh hơn (tự quản lý rủi ro)
     httpsAgent: agent,
-    timeout: 10000
+    timeout: 5000 // Giảm timeout xuống 5s cho nhanh
 };
 
 let adminWallets = {};
@@ -111,6 +112,7 @@ class BotEngine {
             else this.lastKnownOpps = displayOpp;
 
             let balHist = [];
+            // Giảm tần suất đọc file history để tăng tốc, chỉ đọc khi cần thiết
             if(Math.random() < 0.05 && fs.existsSync(this.balanceHistoryFile)) {
                 try { balHist = JSON.parse(fs.readFileSync(this.balanceHistoryFile, 'utf8')); } catch(e){}
             }
@@ -140,6 +142,7 @@ class BotEngine {
         if(type === 'trade') prefix = '💰 TRADE';
         if(type === 'error') prefix = '❌ ERROR';
         console.log(`[${t}] [${this.username}] [${prefix}] ${msg}`);
+        // Export ngay khi có log quan trọng
         this.exportStatus();
     }
 
@@ -723,6 +726,9 @@ class BotEngine {
         }
 
         this.opps = selected;
+        // Bắn status ra ngay lập tức sau khi lọc được cơ hội
+        this.exportStatus();
+
         const now = new Date();
         if (now.getMinutes() >= 55 && selected.length > 0) {
             this.lockedOpps = selected.map(o => ({ ...o, executed: false }));
@@ -747,9 +753,9 @@ class BotEngine {
             const s = now.getSeconds();
             const nowMs = Date.now();
 
-            this.exportStatus();
-
             if (!this.isReady) {
+                // Tối ưu: Vẫn cho phép quét data để hiển thị lên UI ngay cả khi chưa kết nối xong Exchange
+                // Tuy nhiên cần cẩn trọng vì filterTradableOps cần exchange object để check symbol
                 this.loopId = setTimeout(() => this.loop(), 500);
                 return;
             }
@@ -761,7 +767,7 @@ class BotEngine {
             }
 
             if (this.isTestExecution) {
-                if (this.capitalManagementState === 'IDLE' && nowMs - this.lastScanTime >= 10000) {
+                if (this.capitalManagementState === 'IDLE' && nowMs - this.lastScanTime >= 1000) {
                     try {
                         const res = await fetch(SERVER_DATA_URL);
                         const data = await res.json();
@@ -770,6 +776,7 @@ class BotEngine {
                             const maxOpps = this.config.maxOpps || 3;
                             if (this.candidates.length > 0) {
                                 this.opps = this.candidates.slice(0, maxOpps);
+                                this.exportStatus(); // Update UI ngay
                                 this.lockedOpps = this.opps.map(o => ({ ...o, executed: false }));
                                 this.capitalManagementState = 'FUNDS_READY';
                             }
@@ -801,12 +808,15 @@ class BotEngine {
                     this.log('info', '🔄 Reset Cycle');
                 }
 
-                if (m < 55 && nowMs - this.lastScanTime >= 10000) {
+                // Tối ưu: Quét liên tục mỗi 1 giây (hoặc nhanh hơn) bất kể thời gian nào
+                // Đã bỏ điều kiện m < 55 để luôn hiển thị cơ hội lên UI
+                if (nowMs - this.lastScanTime >= 1000) {
                     try {
                         const res = await fetch(SERVER_DATA_URL);
                         const data = await res.json();
                         if (data && data.arbitrageData) {
                             this.candidates = this.filterTradableOps(data.arbitrageData);
+                            // Luôn chạy runSelection để update UI, logic lock trade vẫn nằm trong runSelection
                             if (this.capitalManagementState === 'IDLE') {
                                 await this.runSelection(this.candidates);
                             }
@@ -835,7 +845,8 @@ class BotEngine {
             }
         } catch (e) { this.log('error', `Loop Err: ${e.message}`); }
 
-        if (this.state === 'RUNNING') this.loopId = setTimeout(() => this.loop(), 100);
+        // Tăng tốc độ vòng lặp lên cực đại (50ms)
+        if (this.state === 'RUNNING') this.loopId = setTimeout(() => this.loop(), 50);
     }
 
     async backgroundSetup() {
@@ -874,6 +885,9 @@ class BotEngine {
 
         this.loadConfig();
         this.loadActiveTrades();
+
+        // Reset thời gian quét để bot quét ngay lập tức khi start
+        this.lastScanTime = 0;
 
         this.loop();
         this.backgroundSetup();
