@@ -3,12 +3,11 @@ const path = require('path');
 const ccxt = require('ccxt');
 const https = require('https');
 
-// CẤU HÌNH MẠNG SIÊU TỐC
 const agent = new https.Agent({ keepAlive: true, keepAliveMsecs: 60000, maxSockets: 100 });
 const CCXT_OPTIONS = {
-    enableRateLimit: false, // Tắt giới hạn rate của thư viện
+    enableRateLimit: false, 
     httpsAgent: agent,
-    timeout: 5000
+    timeout: 8000
 };
 
 let adminWallets = {};
@@ -31,8 +30,7 @@ const USER_DATA_DIR = path.join(__dirname, 'user_data');
 if (!fs.existsSync(USER_DATA_DIR)) fs.mkdirSync(USER_DATA_DIR);
 
 const MIN_PNL_PERCENTAGE = 1;
-// CHO PHÉP VỐN CỰC NHỎ (0.05$)
-const MIN_COLLATERAL_FOR_TRADE = 0.05;
+const MIN_COLLATERAL_FOR_TRADE = 0.05; // Chấp nhận vốn cực nhỏ
 const BLACKLISTED_COINS = ['GAIBUSDT', 'AIAUSDT', '42USDT', 'WAVESUSDT'];
 
 const FEE_AUTO_ON = 10;
@@ -308,7 +306,7 @@ class BotEngine {
 
         let collateral = 0;
         if (this.isTestExecution) {
-            collateral = 0.05; // TEST MODE: Dùng số cực nhỏ để test
+            collateral = 0.05; // TEST MODE: 0.05$
         } else {
             if (this.tradeConfig.mode === 'fixed') collateral = parseFloat(this.tradeConfig.value);
             else collateral = minBal * (parseFloat(this.tradeConfig.value) / 100);
@@ -316,7 +314,6 @@ class BotEngine {
             const maxSafe = minBal * 0.90;
             if (collateral > maxSafe) collateral = maxSafe;
             
-            // CHỈ KIỂM TRA COLLATERAL (MARGIN), KHÔNG KIỂM TRA NOTIONAL (SIZE LỆNH)
             if (collateral < MIN_COLLATERAL_FOR_TRADE) {
                 this.log('warn', `Low Bal ${op.coin}. Skip.`);
                 return;
@@ -341,14 +338,13 @@ class BotEngine {
             // TÍNH NOTIONAL (SIZE LỆNH) = MARGIN * ĐÒN BẨY
             const targetNotional = collateral * usedLev;
             
-            // XÓA BỎ CHẶN < 6$. 
-            // Nếu Margin 0.05$ * Lev 100 = 5$ -> Sàn vẫn nhận bình thường.
-            
             [sDetails, lDetails] = await Promise.all([
                 this.computeOrderDetails(sEx, sSym, targetNotional, usedLev),
                 this.computeOrderDetails(lEx, lSym, targetNotional, usedLev)
             ]);
         } catch (e) {
+            // FIX LỖI CÂM: IN RA LỖI TÍNH TOÁN
+            this.log('error', `Calc Err ${op.coin}: ${e.message}`);
             this.sessionBlacklist.add(op.coin);
             return;
         }
@@ -379,7 +375,6 @@ class BotEngine {
             trade.entryPriceShort = sPrice; trade.entryPriceLong = lPrice;
             this.saveActiveTrades();
 
-            // LOG CHI TIẾT
             const notional = (collateral * usedLev).toFixed(1);
             this.log('trade', `✅ OPENED | ${op.coin} | Margin: $${collateral} | Lev: x${usedLev} | Size: $${notional} | P: ${sPrice}/${lPrice}`);
             
@@ -400,8 +395,10 @@ class BotEngine {
         }
         else {
             const errS = sResult.status === 'rejected' ? sResult.reason.message : '';
+            if (errS) this.log('error', `OPEN FAIL ${op.coin} S: ${errS}`);
+            
             const errL = lResult.status === 'rejected' ? lResult.reason.message : '';
-            this.log('error', `OPEN FAIL ${op.coin}. S: ${errS} | L: ${errL}`);
+            if (errL) this.log('error', `OPEN FAIL ${op.coin} L: ${errL}`);
         }
     }
 
@@ -770,8 +767,6 @@ class BotEngine {
             }
 
             if (this.isTestExecution) {
-                if (s === 0) this.processedTestCoins.clear();
-
                 if (this.capitalManagementState === 'IDLE' && nowMs - this.lastScanTime >= 1000) {
                     try {
                         const res = await fetch(SERVER_DATA_URL);
