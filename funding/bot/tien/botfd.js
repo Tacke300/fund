@@ -2,6 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const ccxt = require('ccxt');
 
+// --- KHỞI TẠO VÍ ADMIN ---
 let adminWallets = {};
 let fallbackBalance = {};
 
@@ -20,6 +21,7 @@ try {
     fallbackBalance = adminWallets;
 } catch (e) { console.log("[WARN] Cannot find balance.js"); }
 
+// --- CẤU HÌNH ---
 const SERVER_DATA_URL = 'http://localhost:5005/api/data';
 const USER_DATA_DIR = path.join(__dirname, 'user_data');
 if (!fs.existsSync(USER_DATA_DIR)) fs.mkdirSync(USER_DATA_DIR);
@@ -41,6 +43,7 @@ function getSafeFileName(username) {
 
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
+// --- CLASS BOT ENGINE ---
 class BotEngine {
     constructor(username) {
         this.username = username;
@@ -98,12 +101,14 @@ class BotEngine {
         if (this.config.tradeConfig) this.tradeConfig = this.config.tradeConfig;
     }
 
+    // --- XUẤT TRẠNG THÁI RA FILE JSON (CHO HTML ĐỌC) ---
     exportStatus() {
         try {
             let displayOpp = (this.capitalManagementState === 'FUNDS_READY' && this.lockedOpps.length > 0) ? this.lockedOpps : this.opps;
             if (!displayOpp || displayOpp.length === 0) displayOpp = this.lastKnownOpps;
             else this.lastKnownOpps = displayOpp;
 
+            // Đọc lịch sử số dư để vẽ biểu đồ
             let balHist = [];
             if(fs.existsSync(this.balanceHistoryFile)) {
                 try { balHist = JSON.parse(fs.readFileSync(this.balanceHistoryFile, 'utf8')); } catch(e){}
@@ -126,20 +131,15 @@ class BotEngine {
         } catch (e) { }
     }
 
+    // --- HỆ THỐNG LOGGING (PM2 CATCH) ---
     log(type, msg) {
-        const allowedTypes = ['error', 'trade', 'result', 'fee', 'vip', 'transfer', 'info', 'warn', 'pm2', 'fatal', 'test'];
-        if (!allowedTypes.includes(type)) return;
         const t = new Date().toLocaleTimeString('vi-VN', { hour12: false });
-
-        if (type === 'pm2' || type === 'fatal' || type === 'error' || type === 'trade' || type === 'result') {
-            console.log(`[${t}] [${this.username}] [${type.toUpperCase()}] ${msg}`);
-        } else {
-            console.log(`[${t}] [${this.username}] [${type.toUpperCase()}] ${msg}`);
-        }
-
+        // Log ra console để PM2 bắt được
+        console.log(`[${t}] [${this.username}] [${type.toUpperCase()}] ${msg}`);
         this.exportStatus();
     }
 
+    // --- QUẢN LÝ FILE ---
     loadConfig() { try { if (fs.existsSync(this.configFile)) { const saved = JSON.parse(fs.readFileSync(this.configFile, 'utf8')); this.config = { ...this.config, ...saved }; } } catch (e) { } }
     saveConfig(newConfig = {}) { for (let k in newConfig) if (newConfig[k] !== undefined) this.config[k] = newConfig[k]; fs.writeFileSync(this.configFile, JSON.stringify(this.config, null, 2)); }
     loadHistory() { try { if (fs.existsSync(this.historyFile)) this.history = JSON.parse(fs.readFileSync(this.historyFile, 'utf8')); } catch (e) { } }
@@ -160,11 +160,13 @@ class BotEngine {
                 total: bFut + kFut
             };
             history.push(record);
+            // Giữ lại ~1 tháng dữ liệu (mỗi phút 1 record -> 45000)
             if (history.length > 45000) history = history.slice(history.length - 45000);
             fs.writeFileSync(this.balanceHistoryFile, JSON.stringify(history));
         } catch (e) { }
     }
 
+    // --- CÁC HÀM HỖ TRỢ RÚT/NẠP ---
     getWithdrawParams(exchangeId, targetNetwork) {
         if (exchangeId.includes('binance')) {
             if (targetNetwork === 'BEP20') return { network: 'BSC' };
@@ -212,25 +214,39 @@ class BotEngine {
         return null;
     }
 
+    // --- CÀI ĐẶT ĐÒN BẨY (FIX LỖI KUCOIN) ---
     async setLeverageSafely(exchange, symbol, desiredLeverage) {
         try {
             const market = exchange.market(symbol);
             let actualLeverage = desiredLeverage;
+            
+            // 1. Check giới hạn của sàn
             if (market && market.limits && market.limits.leverage && market.limits.leverage.max) {
                 if (actualLeverage > market.limits.leverage.max) {
                     actualLeverage = market.limits.leverage.max;
                 }
             }
+            
+            // 2. Set Margin Mode
             try { await exchange.setMarginMode('cross', symbol); } catch (e) { }
-            await exchange.setLeverage(actualLeverage, symbol);
+            
+            // 3. Set Leverage (FIX: Thêm params cho Kucoin)
+            let params = {};
+            if (exchange.id === 'kucoinfutures') {
+                params = { 'marginMode': 'cross' }; 
+            }
+            
+            await exchange.setLeverage(actualLeverage, symbol, params);
+            
             if (exchange.id === 'kucoinfutures') await sleep(1000);
             return actualLeverage;
         } catch (e) {
             this.log('error', `Set Leverage Fail (${exchange.id} - ${symbol}): ${e.message}`);
-            return null;
+            return null; // Trả về null để chặn mở lệnh nếu lỗi
         }
     }
 
+    // --- TÍNH TOÁN KHỐI LƯỢNG LỆNH ---
     async computeOrderDetails(exchange, symbol, targetNotionalUSDT, leverage) {
         const market = exchange.market(symbol);
         const ticker = await exchange.fetchTicker(symbol);
@@ -244,6 +260,7 @@ class BotEngine {
         return { amount, price, notional: amount * price * contractSize };
     }
 
+    // --- ĐẶT TP/SL (CÓ RETRY) ---
     async placeTpSlOrders(exchange, symbol, side, amount, entryPrice, collateral, notionalValue) {
         if (!entryPrice || entryPrice <= 0) return;
         const slPriceChange = entryPrice * (SL_PERCENTAGE / 100 / (notionalValue / collateral));
@@ -301,6 +318,7 @@ class BotEngine {
         return null;
     }
 
+    // --- THỰC THI LỆNH ---
     async executeTrade(op) {
         if (this.activeTrades.some(t => t.coin === op.coin)) return;
 
@@ -343,6 +361,7 @@ class BotEngine {
         }
 
         const lev = op.commonLeverage;
+        // Thực hiện set leverage và đợi kết quả
         const [realSLev, realLLev] = await Promise.all([
             this.setLeverageSafely(sEx, sSym, lev),
             this.setLeverageSafely(lEx, lSym, lev)
@@ -546,7 +565,6 @@ class BotEngine {
         this.saveBalanceHistory(b, k);
     }
 
-    // === KHÔI PHỤC LOGIC GỐC ===
     async recoverSpotFunds() {
         this.log('info', '🧹 Checking Spot Wallets for stuck funds...');
         const threshold = 2; 
@@ -584,9 +602,15 @@ class BotEngine {
         try {
             let fromWallet = 'future';
             let toWallet = fromId === 'binanceusdm' ? 'spot' : 'main';
+            
+            this.log('info', `Transferring internal ${fromId}: ${amount}$ from ${fromWallet} to ${toWallet}`);
             await sourceEx.transfer('USDT', amount, fromWallet, toWallet);
+            
             await sleep(2000);
+            
             const params = this.getWithdrawParams(fromId, targetInfo.network);
+            this.log('info', `Withdrawing from ${fromId} to ${targetInfo.address} (${targetInfo.network})`);
+            
             await withdrawEx.withdraw('USDT', amount, targetInfo.address, undefined, params);
             this.log('transfer', `✅ Withdrawn. Monitoring...`);
             this.monitorAndMoveToFuture(toId, amount);
@@ -623,6 +647,8 @@ class BotEngine {
                     await this.fetchBalances();
                     this.isBalancing = false; 
                     return;
+                } else {
+                    this.log('info', `[MONITOR] Waiting funds ${exchangeId}. Curr Spot: ${available}$ / Expect: ${expectedAmount}$`);
                 }
             } catch (e) { }
         }
@@ -695,18 +721,20 @@ class BotEngine {
         const b = this.balances['binanceusdm']?.total || 0;
         const k = this.balances['kucoinfutures']?.total || 0;
         const total = b + k;
-        if (total < 20) return;
-    
+        
         const diff = Math.abs(b - k);
         const amountToMove = diff / 2;
         
+        this.log('info', `[BALANCE CHECK] Binance: ${b.toFixed(1)}$, Kucoin: ${k.toFixed(1)}$, Diff: ${diff.toFixed(1)}$`);
+
+        if (total < 20) return;
+    
         if (diff > 20 && amountToMove > 10 && !this.isBalancing) {
             this.log('info', `⚖️ Balancing Capital (Delta=${diff.toFixed(1)}$)...`);
             if (b > k) await this.autoFundTransfer('binanceusdm', 'kucoinfutures', amountToMove);
             else await this.autoFundTransfer('kucoinfutures', 'binanceusdm', amountToMove);
         }
     }
-    // === HẾT PHẦN KHÔI PHỤC ===
 
     filterTradableOps(rawOps) {
         const tradable = [];
