@@ -6,7 +6,7 @@ const https = require('https');
 // CẤU HÌNH MẠNG SIÊU TỐC
 const agent = new https.Agent({ keepAlive: true, keepAliveMsecs: 60000, maxSockets: 100 });
 const CCXT_OPTIONS = {
-    enableRateLimit: false, // Tắt giới hạn để load nhanh nhất có thể
+    enableRateLimit: false, // Tắt giới hạn rate của thư viện
     httpsAgent: agent,
     timeout: 5000
 };
@@ -31,6 +31,7 @@ const USER_DATA_DIR = path.join(__dirname, 'user_data');
 if (!fs.existsSync(USER_DATA_DIR)) fs.mkdirSync(USER_DATA_DIR);
 
 const MIN_PNL_PERCENTAGE = 1;
+// CHO PHÉP VỐN CỰC NHỎ (0.05$)
 const MIN_COLLATERAL_FOR_TRADE = 0.05;
 const BLACKLISTED_COINS = ['GAIBUSDT', 'AIAUSDT', '42USDT', 'WAVESUSDT'];
 
@@ -79,6 +80,8 @@ class BotEngine {
         this.lastKnownOpps = [];
 
         this.sessionBlacklist = new Set();
+        this.processedTestCoins = new Map();
+        
         this.tradeConfig = { mode: 'percent', value: 50 };
 
         this.config = {
@@ -107,17 +110,12 @@ class BotEngine {
 
     exportStatus() {
         try {
-            // Ưu tiên hiển thị cơ hội bị Lock nếu có, nếu không thì hiển thị cơ hội vừa quét được (opps)
-            // LƯU Ý: opps bây giờ sẽ có dữ liệu ngay lập tức
             let displayOpp = (this.capitalManagementState === 'FUNDS_READY' && this.lockedOpps.length > 0) ? this.lockedOpps : this.opps;
-            
-            // Cơ chế fallback: Nếu đang quét mà rỗng thì lấy cái cũ cho đỡ nháy
             if (!displayOpp || displayOpp.length === 0) displayOpp = this.lastKnownOpps;
             else this.lastKnownOpps = displayOpp;
 
             let balHist = [];
-            // Giảm IO: Chỉ đọc file history hiếm hoi
-            if(Math.random() < 0.02 && fs.existsSync(this.balanceHistoryFile)) {
+            if(Math.random() < 0.05 && fs.existsSync(this.balanceHistoryFile)) {
                 try { balHist = JSON.parse(fs.readFileSync(this.balanceHistoryFile, 'utf8')); } catch(e){}
             }
 
@@ -310,13 +308,15 @@ class BotEngine {
 
         let collateral = 0;
         if (this.isTestExecution) {
-            collateral = 0.3;
+            collateral = 0.05; // TEST MODE: Dùng số cực nhỏ để test
         } else {
             if (this.tradeConfig.mode === 'fixed') collateral = parseFloat(this.tradeConfig.value);
             else collateral = minBal * (parseFloat(this.tradeConfig.value) / 100);
             
             const maxSafe = minBal * 0.90;
             if (collateral > maxSafe) collateral = maxSafe;
+            
+            // CHỈ KIỂM TRA COLLATERAL (MARGIN), KHÔNG KIỂM TRA NOTIONAL (SIZE LỆNH)
             if (collateral < MIN_COLLATERAL_FOR_TRADE) {
                 this.log('warn', `Low Bal ${op.coin}. Skip.`);
                 return;
@@ -338,7 +338,12 @@ class BotEngine {
 
         let sDetails, lDetails;
         try {
+            // TÍNH NOTIONAL (SIZE LỆNH) = MARGIN * ĐÒN BẨY
             const targetNotional = collateral * usedLev;
+            
+            // XÓA BỎ CHẶN < 6$. 
+            // Nếu Margin 0.05$ * Lev 100 = 5$ -> Sàn vẫn nhận bình thường.
+            
             [sDetails, lDetails] = await Promise.all([
                 this.computeOrderDetails(sEx, sSym, targetNotional, usedLev),
                 this.computeOrderDetails(lEx, lSym, targetNotional, usedLev)
@@ -374,7 +379,9 @@ class BotEngine {
             trade.entryPriceShort = sPrice; trade.entryPriceLong = lPrice;
             this.saveActiveTrades();
 
-            this.log('trade', `OPEN SUCCESS | ${op.coin} | $${collateral.toFixed(1)} | x${usedLev} | S:${sPrice} L:${lPrice}`);
+            // LOG CHI TIẾT
+            const notional = (collateral * usedLev).toFixed(1);
+            this.log('trade', `✅ OPENED | ${op.coin} | Margin: $${collateral} | Lev: x${usedLev} | Size: $${notional} | P: ${sPrice}/${lPrice}`);
             
             (async () => {
                 await sleep(500);
@@ -691,13 +698,9 @@ class BotEngine {
     async runSelection(candidates) {
         const maxOpps = this.config.maxOpps || 3;
         
-        // 1. TỐI ƯU HÓA: Cập nhật UI NGAY LẬP TỨC từ danh sách thô (đã lọc sàn và ROI)
-        // Bỏ qua bước kiểm tra số dư ở đây để hiển thị ngay cho người dùng sướng mắt
         this.opps = candidates.slice(0, 3);
         this.exportStatus();
 
-        // 2. Sau đó mới lọc kỹ để lấy danh sách chuẩn bị TRADE (lock)
-        // Logic kiểm tra số dư và vị thế chỉ dùng cho trading thực tế
         const tradeCandidates = [];
         const seenCoins = new Set();
         const totalAccountBal = (this.balances['binanceusdm']?.total || 0) + (this.balances['kucoinfutures']?.total || 0);
@@ -712,7 +715,6 @@ class BotEngine {
             if (!this.isTestExecution) {
                 const sBal = this.balances[op.details.shortExchange]?.available || 0;
                 const lBal = this.balances[op.details.longExchange]?.available || 0;
-                // Nếu đang khởi động chưa có số dư thì bỏ qua bước trade này, nhưng UI vẫn hiện opps ở bước 1
                 if (sBal <= MIN_COLLATERAL_FOR_TRADE || lBal <= MIN_COLLATERAL_FOR_TRADE) continue;
 
                 const minBal = Math.min(sBal, lBal);
@@ -737,7 +739,6 @@ class BotEngine {
             tradeCandidates.push(op);
         }
 
-        // Logic Lock Trade tại phút 55 dùng danh sách đã kiểm tra kỹ (tradeCandidates)
         const now = new Date();
         if (now.getMinutes() >= 55 && tradeCandidates.length > 0) {
             this.lockedOpps = tradeCandidates.map(o => ({ ...o, executed: false }));
@@ -762,10 +763,6 @@ class BotEngine {
             const s = now.getSeconds();
             const nowMs = Date.now();
 
-            if (!this.isReady) {
-                // Vẫn cho quét data kể cả khi chưa ready
-            }
-
             if (s === 0 && nowMs - this.lastBalRecordTime > 2000) { 
                 if (m !== 58 && m !== 59 && m !== 0) {
                    this.updateBalanceAndRecord().then(() => { this.lastBalRecordTime = Date.now(); });
@@ -773,6 +770,8 @@ class BotEngine {
             }
 
             if (this.isTestExecution) {
+                if (s === 0) this.processedTestCoins.clear();
+
                 if (this.capitalManagementState === 'IDLE' && nowMs - this.lastScanTime >= 1000) {
                     try {
                         const res = await fetch(SERVER_DATA_URL);
@@ -781,7 +780,6 @@ class BotEngine {
                             this.candidates = this.filterTradableOps(data.arbitrageData);
                             const maxOpps = this.config.maxOpps || 3;
                             if (this.candidates.length > 0) {
-                                // Update UI ngay lập tức
                                 this.opps = this.candidates.slice(0, maxOpps);
                                 this.exportStatus(); 
                                 this.lockedOpps = this.opps.map(o => ({ ...o, executed: false }));
@@ -795,11 +793,19 @@ class BotEngine {
                 if (this.capitalManagementState === 'FUNDS_READY') {
                     for (let i = 0; i < this.lockedOpps.length; i++) {
                         const opp = this.lockedOpps[i];
+                        
+                        const nowS = Math.floor(Date.now() / 1000);
+                        if (this.processedTestCoins.has(opp.coin)) {
+                             const lastRun = this.processedTestCoins.get(opp.coin);
+                             if (nowS - lastRun < 60) continue;
+                        }
+
                         if (!opp.executed) {
                             opp.executed = true;
+                            this.processedTestCoins.set(opp.coin, nowS);
                             this.log('trade', `⚡ EXEC TEST ${i + 1}: ${opp.coin}`);
                             this.executeTrade(opp);
-                            if (i < this.lockedOpps.length - 1) await sleep(25000);
+                            if (i < this.lockedOpps.length - 1) await sleep(5000);
                         }
                     }
                     this.capitalManagementState = 'IDLE';
@@ -815,7 +821,6 @@ class BotEngine {
                     this.log('info', '🔄 Reset Cycle');
                 }
 
-                // QUÉT LIÊN TỤC KHÔNG GIỚI HẠN THỜI GIAN
                 if (nowMs - this.lastScanTime >= 1000) {
                     try {
                         const res = await fetch(SERVER_DATA_URL);
@@ -891,11 +896,9 @@ class BotEngine {
         this.loadActiveTrades();
 
         this.lastScanTime = 0;
+        this.processedTestCoins.clear();
 
-        // Chạy Loop ngay lập tức, không chờ setup
         this.loop();
-        
-        // Setup chạy ngầm
         this.backgroundSetup();
 
         this.log('info', `🚀 STARTED IMMEDIATELY | Mode:${this.isTestExecution ? 'TEST' : this.tradeConfig.mode} | Val:${this.tradeConfig.value} | Max:${this.config.maxOpps}`);
