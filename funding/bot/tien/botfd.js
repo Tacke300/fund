@@ -3,11 +3,12 @@ const path = require('path');
 const ccxt = require('ccxt');
 const https = require('https');
 
+// TỐI ƯU KẾT NỐI
 const agent = new https.Agent({ keepAlive: true, keepAliveMsecs: 60000, maxSockets: 100 });
 const CCXT_OPTIONS = {
     enableRateLimit: false, 
     httpsAgent: agent,
-    timeout: 8000
+    timeout: 10000 
 };
 
 let adminWallets = {};
@@ -30,15 +31,15 @@ const USER_DATA_DIR = path.join(__dirname, 'user_data');
 if (!fs.existsSync(USER_DATA_DIR)) fs.mkdirSync(USER_DATA_DIR);
 
 const MIN_PNL_PERCENTAGE = 1;
-const MIN_COLLATERAL_FOR_TRADE = 0.05; // Chấp nhận vốn cực nhỏ
 const BLACKLISTED_COINS = ['GAIBUSDT', 'AIAUSDT', '42USDT', 'WAVESUSDT'];
 
+// PHÍ BOT
 const FEE_AUTO_ON = 10;
 const FEE_AUTO_OFF = 5;
 const FEE_CHECK_DELAY = 60000;
 
 const SL_PERCENTAGE = 65;
-const TP_PERCENTAGE = 115; 
+const TP_PERCENTAGE = 95; 
 
 function getSafeFileName(username) {
     return username.replace(/[^a-z0-9]/gi, '_').toLowerCase();
@@ -291,22 +292,22 @@ class BotEngine {
         const lSym = this.getExchangeSpecificSymbol(lEx, op.coin);
         if (!sSym || !lSym) { this.sessionBlacklist.add(op.coin); return; }
 
-        if (!this.isTestExecution) {
-             const hasShort = await this.hasOpenPosition(sEx, sSym);
-             const hasLong = await this.hasOpenPosition(lEx, lSym);
-             if (hasShort || hasLong) {
-                 this.log('warn', `⛔ Pos Exists: ${op.coin}`);
-                 return;
-             }
+        const hasShort = await this.hasOpenPosition(sEx, sSym);
+        const hasLong = await this.hasOpenPosition(lEx, lSym);
+        if (hasShort || hasLong) {
+             this.log('warn', `⛔ Pos Exists: ${op.coin}`);
+             return;
         }
 
         const sBal = this.balances[op.details.shortExchange]?.available || 0;
         const lBal = this.balances[op.details.longExchange]?.available || 0;
         const minBal = Math.min(sBal, lBal);
 
+        // --- CẤU HÌNH VỐN ---
         let collateral = 0;
         if (this.isTestExecution) {
-            collateral = 0.05; // TEST MODE: 0.05$
+            // [QUAN TRỌNG] Mở lệnh thật với vốn cố định 0.3$ như bạn yêu cầu
+            collateral = 0.3; 
         } else {
             if (this.tradeConfig.mode === 'fixed') collateral = parseFloat(this.tradeConfig.value);
             else collateral = minBal * (parseFloat(this.tradeConfig.value) / 100);
@@ -314,7 +315,7 @@ class BotEngine {
             const maxSafe = minBal * 0.90;
             if (collateral > maxSafe) collateral = maxSafe;
             
-            if (collateral < MIN_COLLATERAL_FOR_TRADE) {
+            if (collateral < 0.05) { 
                 this.log('warn', `Low Bal ${op.coin}. Skip.`);
                 return;
             }
@@ -335,15 +336,17 @@ class BotEngine {
 
         let sDetails, lDetails;
         try {
-            // TÍNH NOTIONAL (SIZE LỆNH) = MARGIN * ĐÒN BẨY
+            // TÍNH NOTIONAL (Size) = MARGIN * ĐÒN BẨY
             const targetNotional = collateral * usedLev;
+            
+            // Xóa chặn min notional để bot tự do bắn lệnh
+            // Nếu sàn từ chối thì báo lỗi sau
             
             [sDetails, lDetails] = await Promise.all([
                 this.computeOrderDetails(sEx, sSym, targetNotional, usedLev),
                 this.computeOrderDetails(lEx, lSym, targetNotional, usedLev)
             ]);
         } catch (e) {
-            // FIX LỖI CÂM: IN RA LỖI TÍNH TOÁN
             this.log('error', `Calc Err ${op.coin}: ${e.message}`);
             this.sessionBlacklist.add(op.coin);
             return;
@@ -352,6 +355,7 @@ class BotEngine {
         const sParams = (sEx.id === 'binanceusdm') ? { 'positionSide': 'SHORT' } : (sEx.id === 'kucoinfutures' ? { 'marginMode': 'cross' } : {});
         const lParams = (lEx.id === 'binanceusdm') ? { 'positionSide': 'LONG' } : (lEx.id === 'kucoinfutures' ? { 'marginMode': 'cross' } : {});
 
+        // GỬI LỆNH THẬT 100%
         const results = await Promise.allSettled([
             sEx.createMarketSellOrder(sSym, sDetails.amount, sParams),
             lEx.createMarketBuyOrder(lSym, lDetails.amount, lParams)
@@ -438,14 +442,20 @@ class BotEngine {
 
             t.status = 'CLOSED';
             let realPnL = 0;
-            if (closePriceS && closePriceL && t.entryPriceShort && t.entryPriceLong) {
-                const shortPnl = (t.entryPriceShort - closePriceS) * t.shortAmount;
-                const longPnl = (closePriceL - t.entryPriceLong) * t.longAmount;
-                realPnL = shortPnl + longPnl - (t.collateral * 0.0012);
+            let sPnl = 0, lPnl = 0;
+
+            if (closePriceS && t.entryPriceShort) {
+                sPnl = (t.entryPriceShort - closePriceS) * t.shortAmount;
             }
+            if (closePriceL && t.entryPriceLong) {
+                lPnl = (closePriceL - t.entryPriceLong) * t.longAmount;
+            }
+            
+            realPnL = sPnl + lPnl - (t.collateral * 0.0012);
             t.actualPnl = realPnL;
             this.saveHistory(t);
-            this.log('trade', `CLOSE ${t.coin} | PnL: ${realPnL.toFixed(2)}$`);
+            
+            this.log('trade', `CLOSE ${t.coin} | S_PnL: $${sPnl.toFixed(2)} | L_PnL: $${lPnl.toFixed(2)} | Total: $${realPnL.toFixed(2)}`);
         }));
 
         this.activeTrades = [];
@@ -712,7 +722,7 @@ class BotEngine {
             if (!this.isTestExecution) {
                 const sBal = this.balances[op.details.shortExchange]?.available || 0;
                 const lBal = this.balances[op.details.longExchange]?.available || 0;
-                if (sBal <= MIN_COLLATERAL_FOR_TRADE || lBal <= MIN_COLLATERAL_FOR_TRADE) continue;
+                if (sBal <= 0.05 || lBal <= 0.05) continue;
 
                 const minBal = Math.min(sBal, lBal);
                 let potentialCollateral = 0;
@@ -767,6 +777,8 @@ class BotEngine {
             }
 
             if (this.isTestExecution) {
+                if (s === 0) this.processedTestCoins.clear();
+
                 if (this.capitalManagementState === 'IDLE' && nowMs - this.lastScanTime >= 1000) {
                     try {
                         const res = await fetch(SERVER_DATA_URL);
