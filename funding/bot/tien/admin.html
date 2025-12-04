@@ -9,17 +9,20 @@
         body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', sans-serif; margin: 0; padding: 20px; }
         h2 { margin-top: 0; color: var(--accent); border-bottom: 1px solid #333; padding-bottom: 10px; }
 
+        /* TABLE */
         table { width: 100%; border-collapse: collapse; background: var(--card); font-size: 0.9rem; }
         th, td { padding: 12px; border: 1px solid var(--border); text-align: left; }
         th { background: #252525; text-transform: uppercase; color: #aaa; position: sticky; top: 0; }
         tr:hover { background: #2a2a2a; }
         .user-link { color: var(--accent); cursor: pointer; text-decoration: underline; font-weight: bold; }
         
+        /* STATUS COLORS */
         .pnl-pos { color: var(--success); font-weight: bold; }
         .pnl-neg { color: var(--danger); font-weight: bold; }
         .vip-tag { color: #000; background: var(--vip); padding: 2px 6px; border-radius: 4px; font-weight: bold; font-size: 0.75rem; }
         .vip-pro-tag { color: #fff; background: linear-gradient(45deg, #ff00cc, #333399); padding: 2px 6px; border-radius: 4px; font-weight: bold; font-size: 0.75rem; }
 
+        /* PANEL */
         .panel { background: var(--card); padding: 20px; border-radius: 8px; margin-bottom: 20px; border: 1px solid var(--border); box-shadow: 0 4px 6px rgba(0,0,0,0.3); }
         .controls { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 15px; align-items: end; }
         
@@ -34,6 +37,7 @@
 
         #selectionInfo { color: var(--warning); font-weight: bold; margin-top: 10px; }
 
+        /* MODAL */
         .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.85); z-index: 1000; justify-content: center; align-items: center; }
         .modal-content { background: var(--card); padding: 20px; width: 800px; max-height: 90vh; overflow-y: auto; border-radius: 8px; border: 1px solid var(--accent); }
         .acc-item { border: 1px solid var(--border); margin-bottom: 10px; }
@@ -47,6 +51,7 @@
 </head>
 <body>
 
+    <!-- 1. BẢNG CHUYỂN TIỀN -->
     <div class="panel">
         <h2 style="color: var(--danger);">💸 Chuyển Tiền Admin</h2>
         <div class="controls">
@@ -82,6 +87,7 @@
         <div id="actionLog">Logs...</div>
     </div>
 
+    <!-- 2. BẢNG QUẢN LÝ VIP -->
     <div class="panel" style="border-color: var(--vip);">
         <h2 style="color: var(--vip);">👑 Cập Nhật VIP (Hàng Loạt)</h2>
         <div id="selectionInfo">Đang chọn: 0 Users</div>
@@ -98,6 +104,7 @@
         </div>
     </div>
 
+    <!-- 3. DANH SÁCH USER -->
     <div class="panel">
         <div style="display:flex; justify-content:space-between; align-items:center;">
             <h2>👥 Danh Sách Tài Khoản</h2>
@@ -115,7 +122,7 @@
                     <th>Binance Fut</th>
                     <th>KuCoin Fut</th>
                     <th style="color: var(--success);">TỔNG TÀI SẢN</th>
-                    <th>Tổng PNL</th>
+                    <th>Tổng PNL (Đã đóng)</th>
                 </tr>
             </thead>
             <tbody id="userTableBody">
@@ -124,6 +131,7 @@
         </table>
     </div>
 
+    <!-- MODAL CHI TIẾT -->
     <div id="detailModal" class="modal">
         <div class="modal-content">
             <span class="close" onclick="document.getElementById('detailModal').style.display='none'">&times;</span>
@@ -136,10 +144,12 @@
         let usersData = [];
         let selectedUsernames = new Set();
 
+        // --- LOAD USERS ---
         async function loadUsers() {
             try {
                 const res = await fetch('/api/users');
                 usersData = await res.json();
+                
                 usersData.sort((a, b) => b.totalAll - a.totalAll);
 
                 const tbody = document.getElementById('userTableBody');
@@ -173,6 +183,7 @@
             } catch(e) { console.error(e); }
         }
 
+        // --- HÀM XEM CHI TIẾT (Đã sửa để khớp server) ---
         async function showDetails(username) {
             const modal = document.getElementById('detailModal');
             const container = document.getElementById('accordionContainer');
@@ -181,57 +192,42 @@
             container.innerHTML = `
                 <div style="text-align:center; padding: 40px;">
                     <h3 style="color: var(--accent);">🔄 Đang kết nối trực tiếp đến sàn...</h3>
-                    <p>Đang quét Spot (Coins >= $1) và Future Positions.</p>
-                    <p style="color: #666;">Vui lòng đợi 5-10 giây.</p>
+                    <p style="color: #666;">Vui lòng đợi giây lát.</p>
                 </div>`;
             modal.style.display = 'flex';
 
             try {
                 const res = await fetch(`/api/details/${username}`);
-                const json = await res.json();
+                const d = await res.json();
                 
-                if (json.error) {
-                    container.innerHTML = `<h3 style="color:red">Lỗi: ${json.error}</h3>`;
+                if (d.error) {
+                    container.innerHTML = `<h3 style="color:red">Lỗi: ${d.error}</h3>`;
                     return;
                 }
                 
-                const d = json.data;
-                
+                // Helper render Spot
                 const renderSpot = (list) => {
                     if (!list || list.length === 0) return '<div style="padding:10px; color:#555;">Không có coin > 1$</div>';
-                    let rows = list.map(i => `<tr><td>${i.coin}</td><td>${i.amount.toFixed(4)}</td><td style="color:#0f0">${i.value.toFixed(2)}$</td></tr>`).join('');
+                    let rows = list.map(i => `<tr><td>${i.coin}</td><td>${parseFloat(i.amount).toFixed(4)}</td><td style="color:#0f0">${parseFloat(i.value).toFixed(2)}$</td></tr>`).join('');
                     return `<table><tr><th>Coin</th><th>Số lượng</th><th>Giá trị</th></tr>${rows}</table>`;
                 };
 
+                // Helper render Positions (Fix Leverage)
                 const renderPos = (list) => {
                     if (!list || list.length === 0) return '<div style="padding:10px; color:#555;">Không có vị thế mở</div>';
-                    
                     let rows = list.map(p => {
                         const pnlColor = p.pnl >= 0 ? '#00c851' : '#ff4444';
+                        // Đã fix: Lấy leverage từ server gửi về
+                        const levDisplay = p.leverage ? `x${p.leverage}` : 'x?';
                         return `<tr>
-                            <td>
-                                <b>${p.symbol}</b> <br>
-                                <span style="font-size:0.8em; color:gold; border:1px solid #444; padding:0 3px;">x${p.leverage || '?'}</span>
-                            </td>
-                            <td style="color:${p.side==='long'?'#00c851':'#ff4444'}; font-weight:bold;">${p.side ? p.side.toUpperCase() : '-'}</td>
-                            <td>
-                                <div>Size: ${p.size}</div>
-                                <div style="font-size:0.8em; color:#aaa;">Val: ${p.notional ? p.notional.toFixed(1) : 0}$</div>
-                            </td>
-                            <td>
-                                <div style="color:cyan;">${p.margin ? p.margin.toFixed(2) : 0}$</div>
-                            </td>
+                            <td><b>${p.symbol}</b> <span style="font-size:0.8em; color:#aaa; border:1px solid #555; padding:0 3px; border-radius:3px;">${levDisplay}</span></td>
+                            <td style="color:${p.side==='long'?'#00c851':'#ff4444'}">${p.side ? p.side.toUpperCase() : '?'}</td>
+                            <td>${p.size}</td>
                             <td>${p.entry}</td>
                             <td style="color:${pnlColor}; font-weight:bold;">${p.pnl.toFixed(2)}$</td>
                         </tr>`;
                     }).join('');
-                    
-                    return `<table>
-                                <thead>
-                                    <tr><th>Symbol/Lev</th><th>Side</th><th>Size/Val</th><th>Margin</th><th>Entry</th><th>PnL</th></tr>
-                                </thead>
-                                <tbody>${rows}</tbody>
-                            </table>`;
+                    return `<table><tr><th>Cặp</th><th>Loại</th><th>Size</th><th>Entry</th><th>Unrealized PnL</th></tr>${rows}</table>`;
                 };
 
                 let html = `
@@ -249,25 +245,21 @@
 
                 html += `<div class="acc-item">
                             <div class="acc-header" style="color:#F0B90B">BINANCE FUTURES (Equity: ${d.binance.future.equity.toFixed(2)}$)</div>
-                            <div class="acc-content">${renderPos(d.binance.future.positions)}</div>
+                            <div class="acc-content">${renderPos(d.binance.positions)}</div>
                          </div>`;
                 html += `<div class="acc-item">
                             <div class="acc-header" style="color:#F0B90B">BINANCE SPOT</div>
-                            <div class="acc-content">${renderSpot(d.binance.future.spot)}</div>
+                            <div class="acc-content">${renderSpot(d.binance.spot)}</div>
                          </div>`;
 
                 html += `<div class="acc-item">
                             <div class="acc-header" style="color:#24AE8F">KUCOIN FUTURES (Equity: ${d.kucoin.future.equity.toFixed(2)}$)</div>
-                            <div class="acc-content">${renderPos(d.kucoin.future.positions)}</div>
+                            <div class="acc-content">${renderPos(d.kucoin.positions)}</div>
                          </div>`;
                  html += `<div class="acc-item">
                             <div class="acc-header" style="color:#24AE8F">KUCOIN SPOT</div>
-                            <div class="acc-content">${renderSpot(d.kucoin.future.spot)}</div>
+                            <div class="acc-content">${renderSpot(d.kucoin.spot)}</div>
                          </div>`;
-                
-                if (d.logs && d.logs.length > 0) {
-                    html += `<div style="margin-top:20px; color:orange; font-size:0.8rem;">Logs: ${d.logs.join(', ')}</div>`;
-                }
 
                 container.innerHTML = html;
 
@@ -276,6 +268,7 @@
             }
         }
 
+        // --- CÁC HÀM CŨ GIỮ NGUYÊN ---
         function toggleCheckAll() {
             const isChecked = document.getElementById('checkAll').checked;
             document.querySelectorAll('.user-check').forEach(cb => cb.checked = isChecked);
@@ -303,7 +296,7 @@
                 body: JSON.stringify({ users: targets, vipStatus: level })
             });
             const data = await res.json();
-            if(data.success) { alert(data.message); loadUsers(); }
+            if(data.success) { alert(data.message || "Updated"); loadUsers(); }
             else alert("Lỗi hệ thống");
         }
 
@@ -338,11 +331,11 @@
             const res = await fetch('/api/transfer', { method: 'POST', body: JSON.stringify(payload) });
             const data = await res.json();
             
-            data.logs.forEach(group => {
-                group.forEach(line => {
+            if(data.logs) {
+                data.logs.forEach(line => {
                     logDiv.innerHTML += `<div style="color:#0f0">${line}</div>`;
                 });
-            });
+            }
             logDiv.scrollTop = logDiv.scrollHeight;
         }
 
