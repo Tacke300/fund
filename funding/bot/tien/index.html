@@ -102,6 +102,12 @@
         .chart-btn { background: #222; border: 1px solid #444; color: #aaa; padding: 4px 8px; font-size: 0.75rem; cursor: pointer; border-radius: 3px; }
         .chart-btn.active { background: var(--binance-yellow); color: #000; border-color: var(--binance-yellow); font-weight: bold; }
 
+        .log-container { background: #000; border: 1px solid #333; height: 150px; overflow-y: scroll; padding: 10px; font-family: monospace; font-size: 0.8rem; margin-bottom: 20px; color: #aaa; }
+        .log-line { margin-bottom: 2px; border-bottom: 1px solid #111; }
+        .log-TRADE { color: var(--kucoin-green); }
+        .log-ERROR { color: var(--danger); }
+        .log-INFO { color: #aaa; }
+
         @media (max-width: 600px) {
             .brand { font-size: 0.9rem; } .logo, .logo-kucoin { height: 25px; }
             .controls-bar { flex-direction: column; align-items: stretch; }
@@ -183,6 +189,11 @@
             <button id="btnStop" class="btn btn-stop" onclick="stopBot()" style="display:none;">⏹ STOP</button>
             <div id="statusText" style="padding: 5px 10px; border-radius: 4px; background:#222; color:#777; font-weight:bold; font-size:0.8rem;">STOPPED</div>
         </div>
+        
+        <div class="card" style="margin-bottom: 20px;">
+            <h3>📝 Live Logs</h3>
+            <div id="logBox" class="log-container">Initializing...</div>
+        </div>
 
         <div class="grid">
             <div class="card">
@@ -192,13 +203,6 @@
             <div class="card">
                 <h3>Top Opportunities</h3>
                 <div id="oppContent" style="padding: 0;"><span style="color:#555; padding: 10px; display:block;">Scanning...</span></div>
-            </div>
-        </div>
-
-        <div class="card" style="margin-bottom: 20px;">
-            <h3>Live Logs</h3>
-            <div id="logsContainer" style="height: 150px; overflow-y: scroll; background: #000; padding: 10px; font-family: monospace; font-size: 0.8rem; color: #0f0; border: 1px solid #333;">
-                <div>Waiting for logs...</div>
             </div>
         </div>
 
@@ -218,7 +222,10 @@
         </div>
 
         <div class="card" style="margin-top: 20px;">
-            <h3>Trade History</h3>
+            <div style="display:flex; justify-content:space-between;">
+                <h3>Trade History</h3>
+                <h3 id="totalPnlDisplay" style="color:#fff">Total PnL: $0.00</h3>
+            </div>
             <div style="overflow-x: auto;">
                 <table>
                     <thead><tr><th>Time</th><th>Coin</th><th>Margin</th><th>Lev</th><th>Est.</th><th>Real PnL</th></tr></thead>
@@ -503,7 +510,7 @@
             if(d) {
                 const run = d.botState === 'RUNNING';
                 document.getElementById('btnStart').style.display = run ? 'none':'inline-block';
-                document.getElementById('btnStart').disabled = run;
+                document.getElementById('btnStart').disabled = run; 
                 if(!run) document.getElementById('btnStart').innerText = "▶ START"; 
                 
                 document.getElementById('btnStop').style.display = run ? 'inline-block':'none';
@@ -519,24 +526,26 @@
                 updateVipButton(d.vipStatus);
                 if(d.config && d.config.maxOpps && !run) document.getElementById('maxOppsSelect').value = d.config.maxOpps;
 
+                if (d.logs && d.logs.length) {
+                    const logHtml = d.logs.map(l => {
+                        let cls = 'log-INFO';
+                        if(l.includes('TRADE')) cls = 'log-TRADE';
+                        if(l.includes('ERROR')) cls = 'log-ERROR';
+                        return `<div class="log-line ${cls}">${l}</div>`;
+                    }).join('');
+                    document.getElementById('logBox').innerHTML = logHtml;
+                }
+
+                if (d.totalPnl !== undefined) {
+                    const c = d.totalPnl >= 0 ? 'var(--kucoin-green)' : 'var(--danger)';
+                    document.getElementById('totalPnlDisplay').innerHTML = `Total PnL: <span style="color:${c}">${d.totalPnl.toFixed(2)}$</span>`;
+                }
+
                 let bH = '';
                 if(d.balances) {
                     for(let k in d.balances) bH += `<div style="display:flex;justify-content:space-between;border-bottom:1px solid #333;padding:5px"><span>${k.includes('binance')?'BINANCE':'KUCOIN'}</span><span>${d.balances[k].available.toFixed(2)}$</span></div>`;
                 }
                 document.getElementById('balancesContent').innerHTML = bH || '<span style="color:#555;">No Data</span>';
-
-                if (d.logs && Array.isArray(d.logs)) {
-                    const logBox = document.getElementById('logsContainer');
-                    if (logBox.childElementCount !== d.logs.length) {
-                        logBox.innerHTML = d.logs.map(l => {
-                            let color = '#0f0';
-                            if(l.includes('ERROR')) color = '#ff4444';
-                            if(l.includes('TRADE')) color = 'gold';
-                            return `<div style="color:${color}; margin-bottom:2px; border-bottom:1px dashed #222;">${l}</div>`;
-                        }).join('');
-                        logBox.scrollTop = 0;
-                    }
-                }
 
                 if (d.balanceHistory && Array.isArray(d.balanceHistory) && d.balanceHistory.length !== balanceHistoryData.length) {
                     balanceHistoryData = d.balanceHistory;
@@ -580,7 +589,7 @@
                 }
 
                 let hH = '';
-                (d.tradeHistory||[]).slice(0,10).forEach(t => {
+                (d.tradeHistory||[]).slice(0, 50).forEach(t => {
                     const p = t.actualPnl; 
                     const pnlDisplay = (p !== undefined && p !== null) ? p.toFixed(2) : '...';
                     const pClass = (p >= 0) ? 'text-pos' : 'text-neg';
@@ -590,6 +599,7 @@
                 document.getElementById('historyBody').innerHTML = hH;
             }
         } catch(e) {
+            console.log("UI Update Err:", e);
         } finally {
             isUpdating = false;
             setTimeout(updateUI, 1000);
