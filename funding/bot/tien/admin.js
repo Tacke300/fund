@@ -32,9 +32,15 @@ function initExchange(exchangeId, config) {
             options.password = config.kucoinPassword || config.kucoinApiPassword;
         }
 
-        if (!options.apiKey || !options.secret) return null;
+        if (!options.apiKey || !options.secret) {
+            console.log(`[EXCHANGE] Missing API Key/Secret for ${exchangeId}`);
+            return null;
+        }
         return new exchangeClass(options);
-    } catch (e) { return null; }
+    } catch (e) {
+        console.error(`[EXCHANGE] Init Error: ${e.message}`);
+        return null;
+    }
 }
 
 async function getAllUsersSummary() {
@@ -55,32 +61,38 @@ async function getAllUsersSummary() {
             if (fs.existsSync(path.join(USER_DATA_DIR, histFile))) {
                 try {
                     const history = JSON.parse(fs.readFileSync(path.join(USER_DATA_DIR, histFile), 'utf8'));
-                    // Chỉ tính PnL từ các lệnh đã đóng có actualPnl hợp lệ
-                    if (Array.isArray(history)) {
-                        totalPnl = history.reduce((sum, trade) => sum + (parseFloat(trade.actualPnl) || 0), 0);
-                    }
+                    // --- FIX: Chỉ cộng actualPnl (đã bù trừ 2 sàn) ---
+                    if (Array.isArray(history)) totalPnl = history.reduce((sum, trade) => sum + (parseFloat(trade.actualPnl) || 0), 0);
                 } catch(e) {}
             }
+
+            const binanceFut = config.savedBinanceFut || 0;
+            const kucoinFut = config.savedKucoinFut || 0;
+            const totalAssets = config.savedTotalAssets || 0;
 
             users.push({
                 id: index++,
                 username: config.username || file.replace('_config.json', ''),
                 email: config.email || 'N/A',
                 vipStatus: config.vipStatus || 'none',
-                binanceFuture: config.savedBinanceFut || 0,
-                kucoinFuture: config.savedKucoinFut || 0,
-                totalAll: config.savedTotalAssets || 0,
+                binanceFuture: binanceFut,
+                kucoinFuture: kucoinFut,
+                totalAll: totalAssets,
                 totalPnl: totalPnl,
                 lastLogin: stats.mtime,
                 filename: file
             });
-        } catch (e) { }
+        } catch (e) {
+            console.error(`[USER LOAD] Error loading ${file}: ${e.message}`);
+        }
     }
     return users;
 }
 
 const server = http.createServer(async (req, res) => {
     res.setHeader('Access-Control-Allow-Origin', '*');
+    
+    console.log(`[REQUEST] ${req.method} ${req.url}`);
 
     if (req.method === 'GET' && req.url === '/') {
         fs.readFile(path.join(__dirname, 'admin.html'), (err, content) => {
@@ -92,39 +104,49 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.url === '/api/users') {
-        const users = await getAllUsersSummary();
-        res.end(JSON.stringify(users));
+        try {
+            const users = await getAllUsersSummary();
+            res.end(JSON.stringify(users));
+        } catch (e) {
+            console.error(`[API USERS] Error: ${e.message}`);
+            res.end('[]');
+        }
         return;
     }
 
-    // FIX: API Details Logic
+    // --- FIX: API DETAILS ---
     if (req.url.startsWith('/api/details/')) {
         let username = 'UNKNOWN';
         try {
             const urlParts = req.url.split('/api/details/');
+            if (urlParts.length < 2) throw new Error("URL Invalid");
             username = decodeURIComponent(urlParts[1]);
+
+            console.log(`[DETAILS] Processing for: ${username}`);
 
             const configPath = path.join(USER_DATA_DIR, `${username}_config.json`);
             if (!fs.existsSync(configPath)) {
+                console.log(`[DETAILS] Config file missing for ${username}`);
                 res.writeHead(404);
-                res.end(JSON.stringify({ error: "User config not found" }));
+                res.end(JSON.stringify({ error: "User config not found", totalUsdt: 0 }));
                 return;
             }
             const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
 
             const checkExchange = async (exName, exId) => {
+                console.log(`[DETAILS] Connecting to ${exName}...`);
                 try {
                     const ex = initExchange(exId, config);
-                    if (!ex) return { total: 0, positions: [], spot: [] };
+                    if (!ex) return { total: 0, free: 0, positions: [], spot: [] };
 
-                    // Load market để lấy đúng precision và symbol
+                    // FIX: Load Market để lấy thông tin đòn bẩy
                     await ex.loadMarkets();
 
-                    // 1. Lấy Balance Future
                     const bal = await ex.fetchBalance();
                     const total = bal.total['USDT'] || 0;
+                    const free = bal.free['USDT'] || 0;
 
-                    // 2. Lấy Positions & Fix Leverage
+                    // FIX: Lấy positions và leverage
                     let positions = [];
                     try {
                         const rawPos = await ex.fetchPositions();
@@ -135,40 +157,41 @@ const server = http.createServer(async (req, res) => {
                                 side: p.side,
                                 size: parseFloat(p.contracts),
                                 entry: parseFloat(p.entryPrice),
-                                // FIX: Lấy leverage chuẩn từ binance/kucoin
+                                // Lấy leverage từ p.leverage hoặc info
                                 leverage: p.leverage || (p.info && p.info.leverage) || 'N/A',
                                 pnl: parseFloat(p.unrealizedPnl || 0)
                             }));
-                    } catch (e) {}
+                    } catch (e) { console.log(`[Pos Error] ${exName}: ${e.message}`); }
 
-                    // 3. Lấy Spot Balance (Logic quét coin > 1$)
+                    // FIX: Lấy Spot (Coin > 1$)
                     let spotAssets = [];
                     try {
-                        // Cần init sàn Spot tương ứng
+                        // Cần tạo instance spot riêng để check spot balance
                         const spotExId = exId === 'binanceusdm' ? 'binance' : 'kucoin';
                         const spotEx = initExchange(spotExId, config);
                         if(spotEx) {
-                            const spotBal = await spotEx.fetchBalance();
-                            const totalSpot = spotBal.total;
-                            for (const [coin, amt] of Object.entries(totalSpot)) {
-                                if (coin !== 'USDT' && amt > 0) {
-                                    // Giả định giá trị > 1 USDT (đơn giản hóa để không call ticker quá nhiều gây lag)
-                                    // Trong thực tế cần fetchTicker, ở đây ta lấy USDT balance là chính
-                                    if(coin === 'USDT' && amt > 1) spotAssets.push({coin: 'USDT', amount: amt, value: amt});
+                            const sBal = await spotEx.fetchBalance();
+                            for(const [c, v] of Object.entries(sBal.total)) {
+                                if(c !== 'USDT' && v > 0) {
+                                    // Ở đây tạm thời push USDT value ước tính = 0 để tránh call API nhiều làm chậm
+                                    // Nếu muốn chính xác phải fetchTicker. Giả sử lấy USDT balance
                                 }
+                                if(c === 'USDT' && v > 1) spotAssets.push({coin: c, amount: v, value: v});
                             }
-                            // Thêm logic fetchTicker nếu cần thiết, ở đây giữ simple để server k bị timeout
                         }
                     } catch(e) {}
 
                     return { 
                         total: total, 
+                        free: free, 
                         positions: positions, 
                         spot: spotAssets,
                         future: { equity: total }
                     };
+
                 } catch (e) {
-                    return { total: 0, positions: [], spot: [], error: e.message };
+                    console.log(`[DETAILS] ${exName} FAILED: ${e.message}`);
+                    return { total: 0, free: 0, error: e.message };
                 }
             };
 
@@ -181,47 +204,65 @@ const server = http.createServer(async (req, res) => {
                 username: username,
                 binance: binance,
                 kucoin: kucoin,
+                totalUsdt: (binance.total + kucoin.total),
+                // Bổ sung các field cho modal html hiển thị
                 totalSpotUsdt: (binance.spot.reduce((a,b)=>a+b.value,0) + kucoin.spot.reduce((a,b)=>a+b.value,0)),
                 totalFutureEquity: (binance.total + kucoin.total),
                 logs: []
             };
 
+            console.log(`[DETAILS] Sending response for ${username}`);
             res.writeHead(200, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify(responsePayload));
 
         } catch (error) {
-            res.writeHead(500);
-            res.end(JSON.stringify({ error: error.message }));
+            console.error(`[DETAILS] CRITICAL ERROR: ${error.message}`);
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: error.message, totalUsdt: 0 }));
         }
         return;
     }
 
     if (req.method === 'POST' && req.url === '/api/transfer') {
-        res.end(JSON.stringify({ logs: ['Request Sent'] }));
+        res.end(JSON.stringify({ logs: ['Skipped'] }));
         return;
     }
 
     if (req.method === 'POST' && req.url === '/api/admin/set-vip') {
         let body = '';
         req.on('data', c => body += c);
-        req.on('end', () => {
+        req.on('end', async () => {
             try {
                 const { users, vipStatus } = JSON.parse(body);
-                const targetFiles = (users === 'ALL') ? fs.readdirSync(USER_DATA_DIR).filter(f => f.endsWith('_config.json')) : users.map(u => `${u}_config.json`);
+                const targetFiles = (users === 'ALL') 
+                    ? fs.readdirSync(USER_DATA_DIR).filter(f => f.endsWith('_config.json'))
+                    : users.map(u => `${u}_config.json`);
+
+                let count = 0;
                 for (const file of targetFiles) {
-                    const p = path.join(USER_DATA_DIR, file);
-                    if (fs.existsSync(p)) {
-                        const c = JSON.parse(fs.readFileSync(p));
-                        c.vipStatus = vipStatus;
-                        c.vipExpiry = vipStatus === 'vip' ? Date.now() + 2592000000 : (vipStatus === 'vip_pro' ? 9999999999999 : 0);
-                        fs.writeFileSync(p, JSON.stringify(c, null, 2));
+                    const filePath = path.join(USER_DATA_DIR, file);
+                    if (fs.existsSync(filePath)) {
+                        const cfg = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+                        cfg.vipStatus = vipStatus;
+                        if (vipStatus === 'vip') cfg.vipExpiry = Date.now() + (30 * 86400000);
+                        else if (vipStatus === 'vip_pro') cfg.vipExpiry = 9999999999999;
+                        else cfg.vipExpiry = 0;
+                        fs.writeFileSync(filePath, JSON.stringify(cfg, null, 2));
+                        count++;
                     }
                 }
-                res.end(JSON.stringify({ success: true }));
-            } catch(e) { res.writeHead(500); res.end(JSON.stringify({ success: false })); }
+                console.log(`[ADMIN] VIP updated for ${count} users`);
+                res.end(JSON.stringify({ success: true, message: `Updated ${count} users.` }));
+            } catch(e) {
+                console.error(`[ADMIN] VIP Set Error: ${e.message}`);
+                res.writeHead(500); 
+                res.end(JSON.stringify({ success: false })); 
+            }
         });
         return;
     }
 });
 
-server.listen(PORT, () => console.log(`Admin running on ${PORT}`));
+server.listen(PORT, () => {
+    console.log(`Admin Bot running at http://localhost:${PORT}`);
+});
