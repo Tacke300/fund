@@ -196,6 +196,13 @@
         </div>
 
         <div class="card" style="margin-bottom: 20px;">
+            <h3>Live Logs</h3>
+            <div id="logsContainer" style="height: 150px; overflow-y: scroll; background: #000; padding: 10px; font-family: monospace; font-size: 0.8rem; color: #0f0; border: 1px solid #333;">
+                <div>Waiting for logs...</div>
+            </div>
+        </div>
+
+        <div class="card" style="margin-bottom: 20px;">
             <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #333; padding-bottom:10px; margin-bottom:10px;">
                 <h3 style="margin:0; border:none;">Balance Growth</h3>
                 <div class="chart-controls">
@@ -383,7 +390,6 @@
             });
             
             if(res && res.success) {
-                // Force UI update immediately
             } else {
                 if (res && res.message === 'INSUFFICIENT_FEE_BALANCE') {
                     alert("Insufficient balance for bot fees! Please deposit more funds.");
@@ -397,7 +403,7 @@
             btn.disabled = false;
             btn.innerText = "▶ START";
         }
-        updateUI(); // Immediate refresh
+        updateUI();
     }
 
     async function stopBot() { 
@@ -485,7 +491,6 @@
         balanceChart.update();
     }
 
-    // --- CRITICAL FIX: Robust Update Loop ---
     let isUpdating = false;
     async function updateUI() {
         if(!currentUsername) return;
@@ -496,10 +501,9 @@
             const d = await apiCall('/bot-api/status');
             
             if(d) {
-                // Update Run State
                 const run = d.botState === 'RUNNING';
                 document.getElementById('btnStart').style.display = run ? 'none':'inline-block';
-                document.getElementById('btnStart').disabled = run; // Disable if running
+                document.getElementById('btnStart').disabled = run;
                 if(!run) document.getElementById('btnStart').innerText = "▶ START"; 
                 
                 document.getElementById('btnStop').style.display = run ? 'inline-block':'none';
@@ -509,27 +513,36 @@
                 if(run) document.querySelectorAll('.hide-on-run').forEach(e=>e.classList.add('active'));
                 else { 
                     document.querySelectorAll('.hide-on-run').forEach(e=>e.classList.remove('active')); 
-                    // Re-check terms to enable start button correctly if stopped
                     checkTerms(); 
                 }
 
                 updateVipButton(d.vipStatus);
                 if(d.config && d.config.maxOpps && !run) document.getElementById('maxOppsSelect').value = d.config.maxOpps;
 
-                // Update Balances
                 let bH = '';
                 if(d.balances) {
                     for(let k in d.balances) bH += `<div style="display:flex;justify-content:space-between;border-bottom:1px solid #333;padding:5px"><span>${k.includes('binance')?'BINANCE':'KUCOIN'}</span><span>${d.balances[k].available.toFixed(2)}$</span></div>`;
                 }
                 document.getElementById('balancesContent').innerHTML = bH || '<span style="color:#555;">No Data</span>';
 
-                // Update Chart
+                if (d.logs && Array.isArray(d.logs)) {
+                    const logBox = document.getElementById('logsContainer');
+                    if (logBox.childElementCount !== d.logs.length) {
+                        logBox.innerHTML = d.logs.map(l => {
+                            let color = '#0f0';
+                            if(l.includes('ERROR')) color = '#ff4444';
+                            if(l.includes('TRADE')) color = 'gold';
+                            return `<div style="color:${color}; margin-bottom:2px; border-bottom:1px dashed #222;">${l}</div>`;
+                        }).join('');
+                        logBox.scrollTop = 0;
+                    }
+                }
+
                 if (d.balanceHistory && Array.isArray(d.balanceHistory) && d.balanceHistory.length !== balanceHistoryData.length) {
                     balanceHistoryData = d.balanceHistory;
                     renderChart();
                 }
 
-                // Update Opportunities
                 const opps = d.bestPotentialOpportunityForDisplay;
                 if (Array.isArray(opps) && opps.length > 0) {
                     let html = '';
@@ -566,7 +579,6 @@
                     document.getElementById('oppContent').innerHTML = `<span style="color:#555; padding: 10px; display:block;">Scanning...</span>`;
                 }
 
-                // Update History
                 let hH = '';
                 (d.tradeHistory||[]).slice(0,10).forEach(t => {
                     const p = t.actualPnl; 
@@ -578,10 +590,8 @@
                 document.getElementById('historyBody').innerHTML = hH;
             }
         } catch(e) {
-            console.log("UI Update Err:", e);
         } finally {
             isUpdating = false;
-            // ALWAYS reschedule
             setTimeout(updateUI, 1000);
         }
     }
