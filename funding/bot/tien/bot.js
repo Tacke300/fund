@@ -35,8 +35,8 @@ const BLACKLISTED_COINS = ['GAIBUSDT', 'AIAUSDT', '42USDT', 'WAVESUSDT'];
 const FEE_AUTO_ON = 10;
 const FEE_AUTO_OFF = 5;
 const FEE_CHECK_DELAY = 60000;
-const SL_PERCENTAGE = 95;
-const TP_PERCENTAGE = 135; 
+const SL_PERCENTAGE = 65;
+const TP_PERCENTAGE = 115; 
 const MIN_COLLATERAL_FOR_TRADE = 0.05; 
 
 function getSafeFileName(username) {
@@ -91,7 +91,7 @@ class BotEngine {
             savedBinanceFut: 0,
             savedKucoinFut: 0,
             savedTotalAssets: 0,
-            runningState: false // Cờ nhớ trạng thái
+            runningState: false
         };
 
         this.exchanges = {};
@@ -114,7 +114,7 @@ class BotEngine {
             }
             const s = {
                 username: this.username,
-                botState: this.state,
+                botState: this.state, // Server sẽ ưu tiên config.runningState nếu cái này chưa kịp update
                 isReady: !!this.exchanges['binanceusdm'],
                 capitalManagementState: this.capitalManagementState,
                 balances: this.balances,
@@ -282,7 +282,7 @@ class BotEngine {
             const maxSafe = minBal * 0.90;
             if (collateral > maxSafe) collateral = maxSafe;
             if (collateral < MIN_COLLATERAL_FOR_TRADE) {
-                this.log('warn', `Low Bal ${op.coin} ($${collateral.toFixed(2)}). Skip.`);
+                this.log('warn', `Low Bal ${op.coin}. Skip.`);
                 return;
             }
         }
@@ -314,7 +314,7 @@ class BotEngine {
         }
 
         const sParams = (sEx.id === 'binanceusdm') ? { 'positionSide': 'SHORT' } : (sEx.id === 'kucoinfutures' ? {'marginMode':'cross'} : {});
-        const lParams = (lEx.id === 'binanceusdm') ? { 'positionSide': 'LONG' } : (lEx.id === 'kucoinfutures' ? {'marginMode':'cross'} : {});
+        const lParams = (lEx.id === 'binanceusdm') ? { 'positionSide': 'LONG' } : (lEx.id === 'kucoinfutures' ? { 'marginMode': 'cross' } : {});
 
         const typeStr = this.isTestExecution ? 'TEST-REAL' : 'REAL';
         this.log('info', `🚀 EXEC ${typeStr}: ${op.coin} | Margin: ${collateral}$ | Lev: ${usedLev}x`);
@@ -595,7 +595,7 @@ class BotEngine {
 
         if (paid) {
             this.config.lastFeePaidDate = todayUTC; this.saveConfig();
-            this.log('fee', `✅ Fee Paid`);
+            this.log('info', `✅ Fee Paid`);
             setTimeout(() => { this.isFeeProcessing = false; }, 30000);
         } else {
             this.log('error', `❌ Fee Failed. Stop.`);
@@ -792,7 +792,7 @@ class BotEngine {
             }
         } catch (e) { this.log('error', `Loop Err: ${e.message}`); }
 
-        if (this.state === 'RUNNING') this.loopId = setTimeout(() => this.loop(), 1000);
+        if (this.state === 'RUNNING') this.loopId = setTimeout(() => this.loop(), 100);
     }
 
     async backgroundSetup() {
@@ -831,7 +831,6 @@ class BotEngine {
         this.loadConfig();
         this.loadActiveTrades();
 
-        // Clear cache for Test Mode to ensure fresh start
         if(this.isTestExecution) this.activeTrades = [];
 
         this.loop();
