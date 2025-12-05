@@ -102,7 +102,7 @@
         .chart-btn { background: #222; border: 1px solid #444; color: #aaa; padding: 4px 8px; font-size: 0.75rem; cursor: pointer; border-radius: 3px; }
         .chart-btn.active { background: var(--binance-yellow); color: #000; border-color: var(--binance-yellow); font-weight: bold; }
 
-        /* --- NEW: CSS LOGS (Yêu cầu 6) --- */
+        /* NEW LOGS */
         .log-container { background: #000; border: 1px solid #333; height: 150px; overflow-y: scroll; padding: 10px; font-family: monospace; font-size: 0.8rem; margin-bottom: 20px; color: #aaa; }
         .log-line { margin-bottom: 2px; border-bottom: 1px solid #111; }
         .log-TRADE { color: var(--kucoin-green); }
@@ -191,7 +191,6 @@
             <div id="statusText" style="padding: 5px 10px; border-radius: 4px; background:#222; color:#777; font-weight:bold; font-size:0.8rem;">STOPPED</div>
         </div>
         
-        <!-- NEW: Log Tab (Yêu cầu 6) -->
         <div class="card" style="margin-bottom: 20px;">
             <h3>📝 Live Logs</h3>
             <div id="logBox" class="log-container">Initializing...</div>
@@ -224,14 +223,9 @@
         </div>
 
         <div class="card" style="margin-top: 20px;">
-            <div style="display:flex; justify-content:space-between;">
-                <h3>Trade History</h3>
-                <!-- NEW: Total PnL (Yêu cầu 3) -->
-                <h3 id="totalPnlDisplay" style="color:#fff">Total PnL: $0.00</h3>
-            </div>
+            <h3>Trade History</h3>
             <div style="overflow-x: auto;">
                 <table>
-                    <!-- NEW: Thêm cột Margin (Yêu cầu 2) -->
                     <thead><tr><th>Time</th><th>Coin</th><th>Margin</th><th>Lev</th><th>Est.</th><th>Real PnL</th></tr></thead>
                     <tbody id="historyBody"></tbody>
                 </table>
@@ -401,6 +395,7 @@
             });
             
             if(res && res.success) {
+                // Force UI update immediately
             } else {
                 if (res && res.message === 'INSUFFICIENT_FEE_BALANCE') {
                     alert("Insufficient balance for bot fees! Please deposit more funds.");
@@ -414,7 +409,7 @@
             btn.disabled = false;
             btn.innerText = "▶ START";
         }
-        updateUI();
+        updateUI(); // Immediate refresh
     }
 
     async function stopBot() { 
@@ -502,6 +497,7 @@
         balanceChart.update();
     }
 
+    // --- CRITICAL FIX: Robust Update Loop ---
     let isUpdating = false;
     async function updateUI() {
         if(!currentUsername) return;
@@ -512,10 +508,10 @@
             const d = await apiCall('/bot-api/status');
             
             if(d) {
-                // --- UPDATE: State Handling (Yêu cầu 5) ---
+                // Update Run State
                 const run = d.botState === 'RUNNING';
                 document.getElementById('btnStart').style.display = run ? 'none':'inline-block';
-                document.getElementById('btnStart').disabled = run; 
+                document.getElementById('btnStart').disabled = run; // Disable if running
                 if(!run) document.getElementById('btnStart').innerText = "▶ START"; 
                 
                 document.getElementById('btnStop').style.display = run ? 'inline-block':'none';
@@ -525,40 +521,27 @@
                 if(run) document.querySelectorAll('.hide-on-run').forEach(e=>e.classList.add('active'));
                 else { 
                     document.querySelectorAll('.hide-on-run').forEach(e=>e.classList.remove('active')); 
+                    // Re-check terms to enable start button correctly if stopped
                     checkTerms(); 
                 }
 
                 updateVipButton(d.vipStatus);
                 if(d.config && d.config.maxOpps && !run) document.getElementById('maxOppsSelect').value = d.config.maxOpps;
 
-                // --- NEW: Logs Display (Yêu cầu 6) ---
-                if (d.logs && d.logs.length) {
-                    const logHtml = d.logs.map(l => {
-                        let cls = 'log-INFO';
-                        if(l.includes('TRADE')) cls = 'log-TRADE';
-                        if(l.includes('ERROR')) cls = 'log-ERROR';
-                        return `<div class="log-line ${cls}">${l}</div>`;
-                    }).join('');
-                    document.getElementById('logBox').innerHTML = logHtml;
-                }
-
-                // --- NEW: Total PnL (Yêu cầu 3) ---
-                if (d.totalPnl !== undefined) {
-                    const c = d.totalPnl >= 0 ? 'var(--kucoin-green)' : 'var(--danger)';
-                    document.getElementById('totalPnlDisplay').innerHTML = `Total PnL: <span style="color:${c}">${d.totalPnl.toFixed(2)}$</span>`;
-                }
-
+                // Update Balances
                 let bH = '';
                 if(d.balances) {
                     for(let k in d.balances) bH += `<div style="display:flex;justify-content:space-between;border-bottom:1px solid #333;padding:5px"><span>${k.includes('binance')?'BINANCE':'KUCOIN'}</span><span>${d.balances[k].available.toFixed(2)}$</span></div>`;
                 }
                 document.getElementById('balancesContent').innerHTML = bH || '<span style="color:#555;">No Data</span>';
 
+                // Update Chart
                 if (d.balanceHistory && Array.isArray(d.balanceHistory) && d.balanceHistory.length !== balanceHistoryData.length) {
                     balanceHistoryData = d.balanceHistory;
                     renderChart();
                 }
 
+                // Update Opportunities
                 const opps = d.bestPotentialOpportunityForDisplay;
                 if (Array.isArray(opps) && opps.length > 0) {
                     let html = '';
@@ -595,12 +578,23 @@
                     document.getElementById('oppContent').innerHTML = `<span style="color:#555; padding: 10px; display:block;">Scanning...</span>`;
                 }
 
+                // Update Logs
+                if (d.logs && d.logs.length) {
+                    const logHtml = d.logs.map(l => {
+                        let cls = 'log-INFO';
+                        if(l.includes('TRADE')) cls = 'log-TRADE';
+                        if(l.includes('ERROR')) cls = 'log-ERROR';
+                        return `<div class="log-line ${cls}">${l}</div>`;
+                    }).join('');
+                    document.getElementById('logBox').innerHTML = logHtml;
+                }
+
+                // Update History
                 let hH = '';
-                (d.tradeHistory||[]).slice(0, 50).forEach(t => {
+                (d.tradeHistory||[]).slice(0,10).forEach(t => {
                     const p = t.actualPnl; 
                     const pnlDisplay = (p !== undefined && p !== null) ? p.toFixed(2) : '...';
                     const pClass = (p >= 0) ? 'text-pos' : 'text-neg';
-                    // --- NEW: Margin (Yêu cầu 2) ---
                     const margin = t.collateral ? t.collateral.toFixed(1) : '0';
                     hH += `<tr><td>${new Date(t.entryTime).toLocaleTimeString()}</td><td>${t.coin}</td><td>${margin}$</td><td>x${t.leverage}</td><td>${t.estimatedPnlFromOpportunity}%</td><td class="${pClass}">${pnlDisplay}</td></tr>`;
                 });
@@ -610,9 +604,178 @@
             console.log("UI Update Err:", e);
         } finally {
             isUpdating = false;
+            // ALWAYS reschedule
             setTimeout(updateUI, 1000);
         }
     }
 </script>
 </body>
 </html>
+Sever.js
+const http = require('http');
+const fs = require('fs');
+const path = require('path');
+const { exec } = require('child_process');
+
+const PORT = 2025;
+const USER_DATA_DIR = path.join(__dirname, 'user_data');
+if (!fs.existsSync(USER_DATA_DIR)) fs.mkdirSync(USER_DATA_DIR);
+
+// Tự động giết process cũ đang chiếm cổng khi khởi động
+exec(`fuser -k ${PORT}/tcp`, (err) => {
+    if(!err) console.log(`[SERVER] Killed old process on port ${PORT}`);
+});
+
+function getSafeFileName(username) {
+    return username.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+}
+
+const server = http.createServer(async (req, res) => {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-username');
+    if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
+
+    const url = req.url;
+    
+    if (url === '/' && req.method === 'GET') {
+        fs.readFile(path.join(__dirname, 'index.html'), (err, c) => {
+            if (err) { res.writeHead(500); res.end('UI Error'); return; }
+            res.writeHead(200, { 'Content-Type': 'text/html' }); res.end(c);
+        });
+        return;
+    }
+
+    if (req.method === 'POST' || req.method === 'GET') {
+        let body = '';
+        if (req.method === 'POST') {
+            req.on('data', c => body += c);
+            await new Promise(r => req.on('end', r));
+        }
+
+        if (url === '/bot-api/register') {
+            try {
+                const { username, password, email } = JSON.parse(body);
+                const p = path.join(USER_DATA_DIR, `${getSafeFileName(username)}_config.json`);
+                if (fs.existsSync(p)) { 
+                    res.writeHead(400); res.end(JSON.stringify({success:false})); 
+                } else {
+                    fs.writeFileSync(p, JSON.stringify({username, password, email, vipStatus: 'none', savedTotalAssets: 0, forceStart: false}, null, 2));
+                    res.end(JSON.stringify({success:true}));
+                }
+            } catch(e) { res.writeHead(500); res.end(JSON.stringify({success:false})); }
+            return;
+        }
+
+        if (url === '/bot-api/login') {
+            try {
+                const { username, password } = JSON.parse(body);
+                const p = path.join(USER_DATA_DIR, `${getSafeFileName(username)}_config.json`);
+                if (!fs.existsSync(p)) {
+                    res.writeHead(401); res.end(JSON.stringify({success:false}));
+                } else {
+                    const c = JSON.parse(fs.readFileSync(p));
+                    if (c.password === password) {
+                        res.end(JSON.stringify({success:true}));
+                    } else {
+                        res.writeHead(401); res.end(JSON.stringify({success:false}));
+                    }
+                }
+            } catch(e) { res.writeHead(500); res.end(JSON.stringify({success:false})); }
+            return;
+        }
+
+        const username = req.headers['x-username'];
+        if (!username) { res.writeHead(401); res.end(JSON.stringify({success:false})); return; }
+        
+        const safeUser = getSafeFileName(username);
+        const configFile = path.join(USER_DATA_DIR, `${safeUser}_config.json`);
+        const statusFile = path.join(USER_DATA_DIR, `${safeUser}_status.json`);
+        const pm2Name = `bot_${safeUser}`;
+        const botScriptPath = path.resolve(__dirname, 'bot.js'); // Đảm bảo tên file bot đúng
+
+        try {
+            if (url === '/bot-api/start') {
+                const payload = JSON.parse(body);
+                let currentConfig = {};
+                if (fs.existsSync(configFile)) currentConfig = JSON.parse(fs.readFileSync(configFile));
+                currentConfig.tradeConfig = payload.tradeConfig;
+                if(payload.autoBalance !== undefined) currentConfig.autoBalance = payload.autoBalance;
+                
+                // Set forceStart để bot tự chạy khi khởi động
+                currentConfig.forceStart = true;
+                fs.writeFileSync(configFile, JSON.stringify(currentConfig, null, 2));
+
+                exec(`pm2 start "${botScriptPath}" --name ${pm2Name} -- "${username}"`, (err) => {
+                    if (err) {
+                        // Nếu đã chạy rồi thì restart
+                        exec(`pm2 restart ${pm2Name}`, (err2) => {
+                            if(err2) res.end(JSON.stringify({ success: false, message: err2.message }));
+                            else res.end(JSON.stringify({ success: true, message: 'Bot restarted.' }));
+                        });
+                    } else {
+                        res.end(JSON.stringify({ success: true, message: 'Bot started.' }));
+                    }
+                });
+            }
+            else if (url === '/bot-api/stop') {
+                exec(`pm2 stop ${pm2Name}`, () => {
+                    if(fs.existsSync(statusFile)) {
+                        const s = JSON.parse(fs.readFileSync(statusFile));
+                        s.botState = 'STOPPED';
+                        fs.writeFileSync(statusFile, JSON.stringify(s, null, 2));
+                    }
+                    res.end(JSON.stringify({ success: true }));
+                });
+            }
+            else if (url === '/bot-api/upgrade-vip') {
+                let currentConfig = {};
+                if (fs.existsSync(configFile)) currentConfig = JSON.parse(fs.readFileSync(configFile));
+                currentConfig.vipStatus = 'vip';
+                currentConfig.vipExpiry = Date.now() + 30 * 24 * 60 * 60 * 1000;
+                fs.writeFileSync(configFile, JSON.stringify(currentConfig, null, 2));
+                exec(`pm2 restart ${pm2Name}`, () => res.end(JSON.stringify({ success: true })));
+            }
+            else if (url === '/bot-api/save-config') {
+                let currentConfig = {};
+                if (fs.existsSync(configFile)) currentConfig = JSON.parse(fs.readFileSync(configFile));
+                const newConfig = JSON.parse(body);
+                const finalConfig = { ...currentConfig, ...newConfig };
+                fs.writeFileSync(configFile, JSON.stringify(finalConfig, null, 2));
+                exec(`pm2 restart ${pm2Name}`, () => res.end(JSON.stringify({ success: true })));
+            }
+            else if (url === '/bot-api/status') {
+                if (fs.existsSync(statusFile)) {
+                    const status = JSON.parse(fs.readFileSync(statusFile));
+                    res.writeHead(200, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify(status));
+                } else {
+                    res.writeHead(200, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ botState: 'STOPPED', username: username }));
+                }
+            }
+            else if (url === '/bot-api/config') {
+                if (fs.existsSync(configFile)) {
+                    const c = JSON.parse(fs.readFileSync(configFile));
+                    res.writeHead(200, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify(c));
+                } else { res.end('{}'); }
+            }
+            else if (url === '/bot-api/update-balance-config') {
+                let currentConfig = {};
+                if (fs.existsSync(configFile)) currentConfig = JSON.parse(fs.readFileSync(configFile));
+                const cfg = JSON.parse(body);
+                currentConfig.autoBalance = cfg.autoBalance;
+                fs.writeFileSync(configFile, JSON.stringify(currentConfig, null, 2));
+                res.end(JSON.stringify({ success: true }));
+            }
+            else { res.writeHead(404); res.end(); }
+
+        } catch (e) { 
+            res.writeHead(500); res.end(JSON.stringify({success:false, message:e.message})); 
+        }
+    }
+});
+
+server.listen(PORT, () => {
+    console.log(`[SERVER] MANAGER RUNNING ON PORT ${PORT}`);
+});
