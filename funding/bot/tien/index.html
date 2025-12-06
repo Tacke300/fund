@@ -432,7 +432,10 @@
                         borderWidth: 1,
                         callbacks: {
                             title: function(context) {
-                                if (context[0]) return new Date(balanceHistoryData[context[0].dataIndex].time).toLocaleString();
+                                if (context[0]) {
+                                    const d = currentChartData.fullData[context[0].dataIndex];
+                                    if(d) return new Date(d.time).toLocaleString();
+                                }
                                 return '';
                             },
                             label: function(context) { 
@@ -466,48 +469,48 @@
         
         const now = Date.now();
         let limit = 0;
-        let downsampleInterval = 0;
+        let step = 0;
 
         if (chartTimeframe === '24h') {
             limit = 24 * 60 * 60 * 1000;
         } else if (chartTimeframe === '7d') {
             limit = 7 * 24 * 60 * 60 * 1000;
-            downsampleInterval = 60 * 60 * 1000; 
+            step = 60 * 60 * 1000;
         } else if (chartTimeframe === '30d') {
             limit = 30 * 24 * 60 * 60 * 1000;
-            downsampleInterval = 4 * 60 * 60 * 1000;
+            step = 4 * 60 * 60 * 1000;
         } else if (chartTimeframe === 'all') {
             limit = 0;
-            downsampleInterval = 24 * 60 * 60 * 1000;
+            step = 24 * 60 * 60 * 1000;
         }
         
         let filtered = balanceHistoryData;
         if (limit > 0) filtered = balanceHistoryData.filter(d => (now - d.time) <= limit);
 
-        if (downsampleInterval > 0 && filtered.length > 0) {
-            const downsampled = [];
-            let lastTime = 0;
+        let finalData = [];
+        if (step > 0 && filtered.length > 0) {
+            let lastIncludedTime = 0;
             for (let i = 0; i < filtered.length; i++) {
-                if (filtered[i].time - lastTime >= downsampleInterval) {
-                    downsampled.push(filtered[i]);
-                    lastTime = filtered[i].time;
+                if (i === 0 || i === filtered.length - 1 || (filtered[i].time - lastIncludedTime >= step)) {
+                    finalData.push(filtered[i]);
+                    lastIncludedTime = filtered[i].time;
                 }
             }
-            if (downsampled.length === 0 || downsampled[downsampled.length-1].time !== filtered[filtered.length-1].time) {
-                downsampled.push(filtered[filtered.length-1]);
-            }
-            filtered = downsampled;
+        } else {
+            finalData = filtered;
         }
 
-        if (filtered.length === 0) return;
+        if (finalData.length === 0 && balanceHistoryData.length > 0 && chartTimeframe === 'all') finalData = balanceHistoryData;
+        if (finalData.length === 0) return;
 
-        const labels = filtered.map(d => {
+        const labels = finalData.map(d => {
             const date = new Date(d.time);
             return (chartTimeframe === '24h') ? date.toLocaleTimeString() : date.toLocaleString();
         });
-        const totalData = filtered.map(d => d.total);
-        currentChartData.bin = filtered.map(d => d.binance);
-        currentChartData.kuc = filtered.map(d => d.kucoin);
+        const totalData = finalData.map(d => d.total);
+        currentChartData.bin = finalData.map(d => d.binance);
+        currentChartData.kuc = finalData.map(d => d.kucoin);
+        currentChartData.fullData = finalData;
 
         const startBal = totalData[0] || 0;
         const endBal = totalData[totalData.length - 1] || 0;
@@ -543,15 +546,17 @@
 
                 if(run) {
                     document.querySelectorAll('.hide-on-run').forEach(e=>e.classList.add('active'));
-                    if (d.config && d.config.tradeConfig) {
-                        if (d.config.tradeConfig.mode) {
-                            const radio = document.querySelector(`input[name="capMode"][value="${d.config.tradeConfig.mode}"]`);
-                            if(radio) radio.checked = true;
+                    try {
+                        if (d.config && d.config.tradeConfig) {
+                            if (d.config.tradeConfig.mode) {
+                                const radio = document.querySelector(`input[name="capMode"][value="${d.config.tradeConfig.mode}"]`);
+                                if(radio) radio.checked = true;
+                            }
+                            if (d.config.tradeConfig.value) document.getElementById('capitalInput').value = d.config.tradeConfig.value;
                         }
-                        if (d.config.tradeConfig.value) document.getElementById('capitalInput').value = d.config.tradeConfig.value;
-                    }
-                    if (d.config && d.config.maxOpps) document.getElementById('maxOppsSelect').value = d.config.maxOpps;
-                    if (d.config && d.config.autoBalance !== undefined) document.getElementById('autoBalanceDisplay').checked = d.config.autoBalance;
+                        if (d.config && d.config.maxOpps) document.getElementById('maxOppsSelect').value = d.config.maxOpps;
+                        if (d.config && d.config.autoBalance !== undefined) document.getElementById('autoBalanceDisplay').checked = d.config.autoBalance;
+                    } catch (err) {}
                 }
                 else { 
                     document.querySelectorAll('.hide-on-run').forEach(e=>e.classList.remove('active')); 
