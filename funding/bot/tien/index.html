@@ -102,12 +102,6 @@
         .chart-btn { background: #222; border: 1px solid #444; color: #aaa; padding: 4px 8px; font-size: 0.75rem; cursor: pointer; border-radius: 3px; }
         .chart-btn.active { background: var(--binance-yellow); color: #000; border-color: var(--binance-yellow); font-weight: bold; }
 
-        .log-container { background: #000; border: 1px solid #333; height: 150px; overflow-y: scroll; padding: 10px; font-family: monospace; font-size: 0.8rem; margin-bottom: 20px; color: #aaa; }
-        .log-line { margin-bottom: 2px; border-bottom: 1px solid #111; }
-        .log-TRADE { color: var(--kucoin-green); }
-        .log-ERROR { color: var(--danger); }
-        .log-INFO { color: #aaa; }
-
         @media (max-width: 600px) {
             .brand { font-size: 0.9rem; } .logo, .logo-kucoin { height: 25px; }
             .controls-bar { flex-direction: column; align-items: stretch; }
@@ -157,15 +151,15 @@
     <div class="container">
         <div class="controls-bar" id="controlsBar">
             <div class="input-group hide-on-run">
-                <label style="margin-right:10px"><input type="radio" name="capMode" value="percent" checked onchange="saveLocalSettings()"> % Cap</label>
-                <label><input type="radio" name="capMode" value="fixed" onchange="saveLocalSettings()"> Fixed $</label>
+                <label style="margin-right:10px"><input type="radio" name="capMode" value="percent" checked> % Cap</label>
+                <label><input type="radio" name="capMode" value="fixed"> Fixed $</label>
             </div>
             <div class="input-group hide-on-run" style="border-color: var(--binance-yellow);">
-                <span style="color:#aaa">Value:</span><input type="number" id="capitalInput" value="50" onchange="saveLocalSettings()">
+                <span style="color:#aaa">Value:</span><input type="number" id="capitalInput" value="50">
             </div>
             <div class="input-group hide-on-run">
                 <span style="color:#aaa">Max Orders:</span>
-                <select id="maxOppsSelect" onchange="saveLocalSettings()">
+                <select id="maxOppsSelect">
                     <option value="1">1</option>
                     <option value="2">2</option>
                     <option value="3" selected>3</option>
@@ -173,7 +167,7 @@
             </div>
             
             <div class="auto-bal-wrapper hide-on-run">
-                <label class="checkbox-label"><input type="checkbox" id="autoBalanceDisplay" onchange="updateAutoBalance(); saveLocalSettings()"> Auto-Balance</label>
+                <label class="checkbox-label"><input type="checkbox" id="autoBalanceDisplay" onchange="updateAutoBalance()"> Auto-Balance</label>
             </div>
 
             <div style="flex-grow: 1;"></div>
@@ -189,7 +183,7 @@
             <button id="btnStop" class="btn btn-stop" onclick="stopBot()" style="display:none;">⏹ STOP</button>
             <div id="statusText" style="padding: 5px 10px; border-radius: 4px; background:#222; color:#777; font-weight:bold; font-size:0.8rem;">STOPPED</div>
         </div>
-        
+
         <div class="grid">
             <div class="card">
                 <h3>Wallet Balances</h3>
@@ -198,6 +192,13 @@
             <div class="card">
                 <h3>Top Opportunities</h3>
                 <div id="oppContent" style="padding: 0;"><span style="color:#555; padding: 10px; display:block;">Scanning...</span></div>
+            </div>
+        </div>
+
+        <div class="card" style="margin-bottom: 20px;">
+            <h3>Live Logs</h3>
+            <div id="logsContainer" style="height: 150px; overflow-y: scroll; background: #000; padding: 10px; font-family: monospace; font-size: 0.8rem; color: #0f0; border: 1px solid #333;">
+                <div>Waiting for logs...</div>
             </div>
         </div>
 
@@ -216,10 +217,7 @@
             </div>
         </div>
 
-        <div class="card" style="margin-bottom: 20px;">
-            <h3>📝 Live Logs</h3>
-            <div id="logBox" class="log-container">Initializing...</div>
-        </div>
+        
     </div>
 </div>
 
@@ -309,52 +307,9 @@
         document.querySelectorAll('.auth-overlay').forEach(e=>e.style.display='none');
         document.getElementById('dashboardSection').style.display='block';
         document.getElementById('userDisplay').innerText = currentUsername;
-        
-        restoreLocalState(); 
-        
-        const cachedData = localStorage.getItem('local_bot_data');
-        if (cachedData) {
-            try {
-                const d = JSON.parse(cachedData);
-                renderBotData(d);
-            } catch(e) {}
-        }
-        
         loadInitConfig();
         initChart();
         updateUI(); 
-    }
-    
-    function restoreLocalState() {
-        const savedState = localStorage.getItem('local_bot_state');
-        const settings = JSON.parse(localStorage.getItem('local_bot_settings') || '{}');
-        
-        if (settings.capMode) {
-            const radio = document.querySelector(`input[name="capMode"][value="${settings.capMode}"]`);
-            if(radio) radio.checked = true;
-        }
-        if (settings.value) document.getElementById('capitalInput').value = settings.value;
-        if (settings.maxOpps) document.getElementById('maxOppsSelect').value = settings.maxOpps;
-        if (settings.autoBalance !== undefined) document.getElementById('autoBalanceDisplay').checked = settings.autoBalance;
-
-        if (savedState === 'RUNNING') {
-            document.getElementById('btnStart').style.display = 'none';
-            document.getElementById('btnStop').style.display = 'inline-block';
-            document.getElementById('statusText').innerText = 'RUNNING';
-            document.getElementById('statusText').style.color = '#00D095';
-            document.querySelectorAll('.hide-on-run').forEach(e=>e.classList.add('active'));
-            document.getElementById('btnStart').disabled = true;
-        }
-    }
-
-    function saveLocalSettings() {
-        const settings = {
-            capMode: document.querySelector('input[name="capMode"]:checked').value,
-            value: document.getElementById('capitalInput').value,
-            maxOpps: document.getElementById('maxOppsSelect').value,
-            autoBalance: document.getElementById('autoBalanceDisplay').checked
-        };
-        localStorage.setItem('local_bot_settings', JSON.stringify(settings));
     }
 
     async function apiCall(ep, method='GET', body) {
@@ -380,7 +335,6 @@
             document.getElementById('autoBalanceDisplay').checked = c.autoBalance;
             if(c.maxOpps) document.getElementById('maxOppsSelect').value = c.maxOpps;
             updateVipButton(c.vipStatus);
-            saveLocalSettings();
         }
     }
     
@@ -428,7 +382,6 @@
             });
             
             if(res && res.success) {
-                localStorage.setItem('local_bot_state', 'RUNNING');
             } else {
                 if (res && res.message === 'INSUFFICIENT_FEE_BALANCE') {
                     alert("Insufficient balance for bot fees! Please deposit more funds.");
@@ -448,7 +401,6 @@
     async function stopBot() { 
         document.getElementById('btnStop').disabled = true;
         await apiCall('/bot-api/stop','POST'); 
-        localStorage.setItem('local_bot_state', 'STOPPED');
         updateUI(); 
         document.getElementById('btnStop').disabled = false;
     }
@@ -474,9 +426,6 @@
                         borderColor: '#333',
                         borderWidth: 1,
                         callbacks: { 
-                            title: function(context) {
-                                return new Date(context[0].parsed.x).toLocaleString();
-                            },
                             label: function(context) { 
                                 if (context.datasetIndex !== 0) return null;
                                 const idx = context.dataIndex;
@@ -489,10 +438,7 @@
                     }
                 },
                 scales: {
-                    x: { 
-                        display: false,
-                        type: 'category' 
-                    },
+                    x: { display: false },
                     y: { grid: { color: '#222' }, ticks: { color: '#666' } }
                 }
             }
@@ -511,148 +457,30 @@
         
         const now = Date.now();
         let limit = 0;
-        let interval = 0;
-
-        if (chartTimeframe === '24h') {
-            limit = 24 * 60 * 60 * 1000;
-            interval = 0; 
-        }
-        else if (chartTimeframe === '7d') {
-            limit = 7 * 24 * 60 * 60 * 1000;
-            interval = 4 * 60 * 60 * 1000; 
-        }
-        else if (chartTimeframe === '30d') {
-            limit = 30 * 24 * 60 * 60 * 1000;
-            interval = 24 * 60 * 60 * 1000; 
-        }
-        else if (chartTimeframe === 'all') {
-            limit = 0;
-            interval = 24 * 60 * 60 * 1000; 
-        }
+        if (chartTimeframe === '24h') limit = 24 * 60 * 60 * 1000;
+        else if (chartTimeframe === '7d') limit = 7 * 24 * 60 * 60 * 1000;
+        else if (chartTimeframe === '30d') limit = 30 * 24 * 60 * 60 * 1000;
         
-        let processedData = [];
-        let lastTime = 0;
+        let filtered = balanceHistoryData;
+        if (limit > 0) filtered = balanceHistoryData.filter(d => (now - d.time) <= limit);
+        if (filtered.length === 0) return;
 
-        for (let i = 0; i < balanceHistoryData.length; i++) {
-            const d = balanceHistoryData[i];
-            if (limit > 0 && (now - d.time) > limit) continue;
+        const labels = filtered.map(d => new Date(d.time).toLocaleTimeString());
+        const totalData = filtered.map(d => d.total);
+        currentChartData.bin = filtered.map(d => d.binance);
+        currentChartData.kuc = filtered.map(d => d.kucoin);
 
-            if (interval > 0) {
-                if (d.time - lastTime >= interval) {
-                    processedData.push(d);
-                    lastTime = d.time;
-                }
-            } else {
-                processedData.push(d);
-            }
-        }
-        
-        if (processedData.length === 0) return;
-
-        const labels = processedData.map(d => d.time); 
-        const totalData = processedData.map(d => ({ x: d.time, y: d.total }));
-        currentChartData.bin = processedData.map(d => d.binance);
-        currentChartData.kuc = processedData.map(d => d.kucoin);
-
-        const startBal = totalData[0].y || 0;
-        const endBal = totalData[totalData.length - 1].y || 0;
+        const startBal = totalData[0] || 0;
+        const endBal = totalData[totalData.length - 1] || 0;
         const mainColor = endBal >= startBal ? '#00D095' : '#F6465D';
 
         balanceChart.data = {
-            labels: labels, 
+            labels: labels,
             datasets: [{
-                label: 'Total', 
-                data: totalData, 
-                borderColor: mainColor, 
-                backgroundColor: mainColor, 
-                borderWidth: 2, 
-                pointRadius: 0, 
-                pointHoverRadius: 6, 
-                fill: false
+                label: 'Total', data: totalData, borderColor: mainColor, backgroundColor: mainColor, borderWidth: 2, pointRadius: 0, pointHoverRadius: 6, fill: false
             }]
         };
         balanceChart.update();
-    }
-
-    function renderBotData(d) {
-        if (!d) return;
-        const run = d.botState === 'RUNNING';
-        document.getElementById('btnStart').style.display = run ? 'none':'inline-block';
-        document.getElementById('btnStart').disabled = run; 
-        if(!run) document.getElementById('btnStart').innerText = "▶ START"; 
-        
-        document.getElementById('btnStop').style.display = run ? 'inline-block':'none';
-        document.getElementById('statusText').innerText = run ? 'RUNNING' : 'STOPPED';
-        document.getElementById('statusText').style.color = run ? '#00D095' : '#777';
-
-        if(run) document.querySelectorAll('.hide-on-run').forEach(e=>e.classList.add('active'));
-        else { 
-            document.querySelectorAll('.hide-on-run').forEach(e=>e.classList.remove('active')); 
-            checkTerms(); 
-        }
-
-        updateVipButton(d.vipStatus);
-        
-        if (d.logs && d.logs.length) {
-            const logHtml = d.logs.map(l => {
-                let cls = 'log-INFO';
-                if(l.includes('TRADE')) cls = 'log-TRADE';
-                if(l.includes('ERROR')) cls = 'log-ERROR';
-                return `<div class="log-line ${cls}">${l}</div>`;
-            }).join('');
-            document.getElementById('logBox').innerHTML = logHtml;
-        }
-
-        let bH = '';
-        if(d.balances) {
-            for(let k in d.balances) bH += `<div style="display:flex;justify-content:space-between;border-bottom:1px solid #333;padding:5px"><span>${k.includes('binance')?'BINANCE':'KUCOIN'}</span><span>${d.balances[k].available.toFixed(2)}$</span></div>`;
-        }
-        document.getElementById('balancesContent').innerHTML = bH || '<span style="color:#555;">No Data</span>';
-
-        if (d.balanceHistory && Array.isArray(d.balanceHistory) && d.balanceHistory.length > 0) {
-            if (d.balanceHistory.length !== balanceHistoryData.length) {
-                balanceHistoryData = d.balanceHistory;
-                renderChart();
-            }
-        }
-
-        const opps = d.bestPotentialOpportunityForDisplay;
-        if (Array.isArray(opps) && opps.length > 0) {
-            let html = '';
-            const delays = ['59:00', '59:25', '59:45'];
-            const now = Date.now();
-            opps.forEach((op, idx) => {
-                const timeLeft = op.nextFundingTime ? (op.nextFundingTime - now) : 0;
-                const timerText = timeLeft > 0 ? formatCountDown(timeLeft) : "--:--:--";
-                const sExName = op.details.shortExchange.includes('binance') ? 'BIN' : 'KUC';
-                const lExName = op.details.longExchange.includes('binance') ? 'BIN' : 'KUC';
-                const sColor = sExName === 'BIN' ? 'var(--binance-yellow)' : 'var(--kucoin-green)';
-                const lColor = lExName === 'BIN' ? 'var(--binance-yellow)' : 'var(--kucoin-green)';
-                const executeTime = delays[idx] || '';
-                const leverage = op.commonLeverage || 1;
-
-                html += `
-                <div class="opp-item">
-                    <div class="opp-row-top">
-                        <div class="opp-coin-name"><span class="rank-badge">#${idx+1}</span> ${op.coin}</div>
-                        <div class="opp-pnl">+${op.estimatedPnl.toFixed(2)}%</div>
-                    </div>
-                    <div class="opp-row-mid">
-                        <div class="tag tag-highlight">Lev: x${leverage}</div>
-                        <div class="tag">Funding: ⏳ ${timerText}</div>
-                    </div>
-                    <div class="opp-row-bot">
-                        <div><span style="color:${sColor}">S: ${sExName}</span> ⚡ <span style="color:${lColor}">L: ${lExName}</span></div>
-                        <div class="exec-timer">⏰ Exec: ${executeTime}</div>
-                    </div>
-                </div>`;
-            });
-            document.getElementById('oppContent').innerHTML = html;
-        } else {
-            if (!document.getElementById('oppContent').innerHTML.includes('rank-badge')) {
-                 document.getElementById('oppContent').innerHTML = `<span style="color:#555; padding: 10px; display:block;">Scanning...</span>`;
-            }
-        }
     }
 
     let isUpdating = false;
@@ -665,18 +493,95 @@
             const d = await apiCall('/bot-api/status');
             
             if(d) {
-                localStorage.setItem('local_bot_data', JSON.stringify(d));
-                localStorage.setItem('local_bot_state', d.botState);
-
-                if (d.config) {
-                    if (d.config.maxOpps) document.getElementById('maxOppsSelect').value = d.config.maxOpps;
-                    saveLocalSettings();
-                }
+                const run = d.botState === 'RUNNING';
+                document.getElementById('btnStart').style.display = run ? 'none':'inline-block';
+                document.getElementById('btnStart').disabled = run;
+                if(!run) document.getElementById('btnStart').innerText = "▶ START"; 
                 
-                renderBotData(d);
+                document.getElementById('btnStop').style.display = run ? 'inline-block':'none';
+                document.getElementById('statusText').innerText = run ? 'RUNNING' : 'STOPPED';
+                document.getElementById('statusText').style.color = run ? '#00D095' : '#777';
+
+                if(run) document.querySelectorAll('.hide-on-run').forEach(e=>e.classList.add('active'));
+                else { 
+                    document.querySelectorAll('.hide-on-run').forEach(e=>e.classList.remove('active')); 
+                    checkTerms(); 
+                }
+
+                updateVipButton(d.vipStatus);
+                if(d.config && d.config.maxOpps && !run) document.getElementById('maxOppsSelect').value = d.config.maxOpps;
+
+                let bH = '';
+                if(d.balances) {
+                    for(let k in d.balances) bH += `<div style="display:flex;justify-content:space-between;border-bottom:1px solid #333;padding:5px"><span>${k.includes('binance')?'BINANCE':'KUCOIN'}</span><span>${d.balances[k].available.toFixed(2)}$</span></div>`;
+                }
+                document.getElementById('balancesContent').innerHTML = bH || '<span style="color:#555;">No Data</span>';
+
+                if (d.logs && Array.isArray(d.logs)) {
+                    const logBox = document.getElementById('logsContainer');
+                    if (logBox.childElementCount !== d.logs.length) {
+                        logBox.innerHTML = d.logs.map(l => {
+                            let color = '#0f0';
+                            if(l.includes('ERROR')) color = '#ff4444';
+                            if(l.includes('TRADE')) color = 'gold';
+                            return `<div style="color:${color}; margin-bottom:2px; border-bottom:1px dashed #222;">${l}</div>`;
+                        }).join('');
+                        logBox.scrollTop = 0;
+                    }
+                }
+
+                if (d.balanceHistory && Array.isArray(d.balanceHistory) && d.balanceHistory.length !== balanceHistoryData.length) {
+                    balanceHistoryData = d.balanceHistory;
+                    renderChart();
+                }
+
+                const opps = d.bestPotentialOpportunityForDisplay;
+                if (Array.isArray(opps) && opps.length > 0) {
+                    let html = '';
+                    const delays = ['59:00', '59:25', '59:45'];
+                    const now = Date.now();
+                    opps.forEach((op, idx) => {
+                        const timeLeft = op.nextFundingTime ? (op.nextFundingTime - now) : 0;
+                        const timerText = timeLeft > 0 ? formatCountDown(timeLeft) : "--:--:--";
+                        const sExName = op.details.shortExchange.includes('binance') ? 'BIN' : 'KUC';
+                        const lExName = op.details.longExchange.includes('binance') ? 'BIN' : 'KUC';
+                        const sColor = sExName === 'BIN' ? 'var(--binance-yellow)' : 'var(--kucoin-green)';
+                        const lColor = lExName === 'BIN' ? 'var(--binance-yellow)' : 'var(--kucoin-green)';
+                        const executeTime = delays[idx] || '';
+                        const leverage = op.commonLeverage || 1;
+
+                        html += `
+                        <div class="opp-item">
+                            <div class="opp-row-top">
+                                <div class="opp-coin-name"><span class="rank-badge">#${idx+1}</span> ${op.coin}</div>
+                                <div class="opp-pnl">+${op.estimatedPnl.toFixed(2)}%</div>
+                            </div>
+                            <div class="opp-row-mid">
+                                <div class="tag tag-highlight">Lev: x${leverage}</div>
+                                <div class="tag">Funding: ⏳ ${timerText}</div>
+                            </div>
+                            <div class="opp-row-bot">
+                                <div><span style="color:${sColor}">S: ${sExName}</span> ⚡ <span style="color:${lColor}">L: ${lExName}</span></div>
+                                <div class="exec-timer">⏰ Exec: ${executeTime}</div>
+                            </div>
+                        </div>`;
+                    });
+                    document.getElementById('oppContent').innerHTML = html;
+                } else {
+                    document.getElementById('oppContent').innerHTML = `<span style="color:#555; padding: 10px; display:block;">Scanning...</span>`;
+                }
+
+                let hH = '';
+                (d.tradeHistory||[]).slice(0,10).forEach(t => {
+                    const p = t.actualPnl; 
+                    const pnlDisplay = (p !== undefined && p !== null) ? p.toFixed(2) : '...';
+                    const pClass = (p >= 0) ? 'text-pos' : 'text-neg';
+                    const margin = t.collateral ? t.collateral.toFixed(1) : '0';
+                    hH += `<tr><td>${new Date(t.entryTime).toLocaleTimeString()}</td><td>${t.coin}</td><td>${margin}$</td><td>x${t.leverage}</td><td>${t.estimatedPnlFromOpportunity}%</td><td class="${pClass}">${pnlDisplay}</td></tr>`;
+                });
+                document.getElementById('historyBody').innerHTML = hH;
             }
         } catch(e) {
-            console.log("UI Update Err:", e);
         } finally {
             isUpdating = false;
             setTimeout(updateUI, 1000);
@@ -684,4 +589,4 @@
     }
 </script>
 </body>
-</html>
+                </html> 
