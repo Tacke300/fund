@@ -161,7 +161,7 @@
                 <label><input type="radio" name="capMode" value="fixed"> Fixed $</label>
             </div>
             <div class="input-group hide-on-run" style="border-color: var(--binance-yellow);">
-                <span style="color:#aaa">Value:</span><input type="number" id="capitalInput" value="50">
+                <span style="color:#aaa">Value:</span><input type="number" id="capitalInput" value="1">
             </div>
             <div class="input-group hide-on-run">
                 <span style="color:#aaa">Max Orders:</span>
@@ -204,11 +204,14 @@
         <div class="card" style="margin-bottom: 20px;">
             <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #333; padding-bottom:10px; margin-bottom:10px;">
                 <h3 style="margin:0; border:none;">Balance Growth</h3>
-                <div class="chart-controls">
-                    <button class="chart-btn active" onclick="updateChartTimeframe('24h', this)">24H</button>
-                    <button class="chart-btn" onclick="updateChartTimeframe('7d', this)">7D</button>
-                    <button class="chart-btn" onclick="updateChartTimeframe('30d', this)">30D</button>
-                    <button class="chart-btn" onclick="updateChartTimeframe('all', this)">ALL</button>
+                <div style="display:flex; align-items:center;">
+                    <h3 id="totalPnlDisplay" style="color:#fff; margin:0 15px 0 0; font-size:0.9rem;">Total PnL: $0.00</h3>
+                    <div class="chart-controls" style="margin:0;">
+                        <button class="chart-btn active" onclick="updateChartTimeframe('24h', this)">24H</button>
+                        <button class="chart-btn" onclick="updateChartTimeframe('7d', this)">7D</button>
+                        <button class="chart-btn" onclick="updateChartTimeframe('30d', this)">30D</button>
+                        <button class="chart-btn" onclick="updateChartTimeframe('all', this)">ALL</button>
+                    </div>
                 </div>
             </div>
             <div style="height: 300px; position: relative;">
@@ -427,7 +430,11 @@
                         bodyColor: '#fff',
                         borderColor: '#333',
                         borderWidth: 1,
-                        callbacks: { 
+                        callbacks: {
+                            title: function(context) {
+                                if (context[0]) return new Date(balanceHistoryData[context[0].dataIndex].time).toLocaleString();
+                                return '';
+                            },
                             label: function(context) { 
                                 if (context.datasetIndex !== 0) return null;
                                 const idx = context.dataIndex;
@@ -459,15 +466,45 @@
         
         const now = Date.now();
         let limit = 0;
-        if (chartTimeframe === '24h') limit = 24 * 60 * 60 * 1000;
-        else if (chartTimeframe === '7d') limit = 7 * 24 * 60 * 60 * 1000;
-        else if (chartTimeframe === '30d') limit = 30 * 24 * 60 * 60 * 1000;
+        let downsampleInterval = 0;
+
+        if (chartTimeframe === '24h') {
+            limit = 24 * 60 * 60 * 1000;
+        } else if (chartTimeframe === '7d') {
+            limit = 7 * 24 * 60 * 60 * 1000;
+            downsampleInterval = 60 * 60 * 1000; 
+        } else if (chartTimeframe === '30d') {
+            limit = 30 * 24 * 60 * 60 * 1000;
+            downsampleInterval = 4 * 60 * 60 * 1000;
+        } else if (chartTimeframe === 'all') {
+            limit = 0;
+            downsampleInterval = 24 * 60 * 60 * 1000;
+        }
         
         let filtered = balanceHistoryData;
         if (limit > 0) filtered = balanceHistoryData.filter(d => (now - d.time) <= limit);
+
+        if (downsampleInterval > 0 && filtered.length > 0) {
+            const downsampled = [];
+            let lastTime = 0;
+            for (let i = 0; i < filtered.length; i++) {
+                if (filtered[i].time - lastTime >= downsampleInterval) {
+                    downsampled.push(filtered[i]);
+                    lastTime = filtered[i].time;
+                }
+            }
+            if (downsampled.length === 0 || downsampled[downsampled.length-1].time !== filtered[filtered.length-1].time) {
+                downsampled.push(filtered[filtered.length-1]);
+            }
+            filtered = downsampled;
+        }
+
         if (filtered.length === 0) return;
 
-        const labels = filtered.map(d => new Date(d.time).toLocaleTimeString());
+        const labels = filtered.map(d => {
+            const date = new Date(d.time);
+            return (chartTimeframe === '24h') ? date.toLocaleTimeString() : date.toLocaleString();
+        });
         const totalData = filtered.map(d => d.total);
         currentChartData.bin = filtered.map(d => d.binance);
         currentChartData.kuc = filtered.map(d => d.kucoin);
@@ -504,7 +541,18 @@
                 document.getElementById('statusText').innerText = run ? 'RUNNING' : 'STOPPED';
                 document.getElementById('statusText').style.color = run ? '#00D095' : '#777';
 
-                if(run) document.querySelectorAll('.hide-on-run').forEach(e=>e.classList.add('active'));
+                if(run) {
+                    document.querySelectorAll('.hide-on-run').forEach(e=>e.classList.add('active'));
+                    if (d.config && d.config.tradeConfig) {
+                        if (d.config.tradeConfig.mode) {
+                            const radio = document.querySelector(`input[name="capMode"][value="${d.config.tradeConfig.mode}"]`);
+                            if(radio) radio.checked = true;
+                        }
+                        if (d.config.tradeConfig.value) document.getElementById('capitalInput').value = d.config.tradeConfig.value;
+                    }
+                    if (d.config && d.config.maxOpps) document.getElementById('maxOppsSelect').value = d.config.maxOpps;
+                    if (d.config && d.config.autoBalance !== undefined) document.getElementById('autoBalanceDisplay').checked = d.config.autoBalance;
+                }
                 else { 
                     document.querySelectorAll('.hide-on-run').forEach(e=>e.classList.remove('active')); 
                     checkTerms(); 
@@ -521,6 +569,11 @@
                         return `<div class="log-line ${cls}">${l}</div>`;
                     }).join('');
                     document.getElementById('logBox').innerHTML = logHtml;
+                }
+
+                if (d.totalPnl !== undefined) {
+                    const c = d.totalPnl >= 0 ? 'var(--kucoin-green)' : 'var(--danger)';
+                    document.getElementById('totalPnlDisplay').innerHTML = `Total PnL: <span style="color:${c}">${d.totalPnl.toFixed(2)}$</span>`;
                 }
 
                 let bH = '';
