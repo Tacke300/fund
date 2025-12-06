@@ -1,7 +1,4 @@
-1,Cái biểu đồ 7d, 1m, all khi chuyển nó không cập nhật được ngay mất rất lâu, t cần nó cập nhật lập tức, và ghi thêm thông tin ngày trên biểu đồ khi bấm vào.
-2, khi bot đang chạy => f5 làm mới trang => html lại ở trạng thái bot chưa chạy. T cần bot đang chạy khi f5 trang web => vẫn ở trạng thái bot chạy.
 
-Bot cần phải làm những gì. Thảo luận k viết code
 
 const fs = require('fs');
 const path = require('path');
