@@ -349,8 +349,12 @@
 
     async function apiCall(ep, method='GET', body) {
         try {
-            const separator = ep.includes('?') ? '&' : '?';
-            const url = ep + separator + 't=' + Date.now();
+            let url = ep;
+            // Chỉ thêm chống cache cho phương thức GET để tránh lỗi POST trên một số server
+            if (method === 'GET') {
+                const separator = ep.includes('?') ? '&' : '?';
+                url = ep + separator + 't=' + Date.now();
+            }
             const res = await fetch(url, { method, headers: {'x-username':currentUsername}, body:body?JSON.stringify(body):undefined });
             if(res.status===401) logout();
             return await res.json();
