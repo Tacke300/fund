@@ -312,7 +312,6 @@
         
         restoreLocalState(); 
         
-        // --- INSTANT LOAD ---
         const cachedData = localStorage.getItem('local_bot_data');
         if (cachedData) {
             try {
@@ -520,15 +519,15 @@
         }
         else if (chartTimeframe === '7d') {
             limit = 7 * 24 * 60 * 60 * 1000;
-            interval = 4 * 60 * 60 * 1000; // 4h
+            interval = 4 * 60 * 60 * 1000; 
         }
         else if (chartTimeframe === '30d') {
             limit = 30 * 24 * 60 * 60 * 1000;
-            interval = 24 * 60 * 60 * 1000; // 24h
+            interval = 24 * 60 * 60 * 1000; 
         }
         else if (chartTimeframe === 'all') {
             limit = 0;
-            interval = 24 * 60 * 60 * 1000; // 24h
+            interval = 24 * 60 * 60 * 1000; 
         }
         
         let processedData = [];
@@ -650,11 +649,7 @@
             });
             document.getElementById('oppContent').innerHTML = html;
         } else {
-            // FIX: Không hiển thị "Scanning..." nếu đang có dữ liệu trong cache
-            if (document.getElementById('oppContent').innerHTML.includes('Scanning')) {
-                 // Giữ nguyên hoặc không làm gì
-            } else {
-                 // Nếu thực sự rỗng
+            if (!document.getElementById('oppContent').innerHTML.includes('rank-badge')) {
                  document.getElementById('oppContent').innerHTML = `<span style="color:#555; padding: 10px; display:block;">Scanning...</span>`;
             }
         }
