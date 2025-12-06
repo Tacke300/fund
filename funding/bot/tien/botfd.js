@@ -123,6 +123,7 @@ if (!displayOpp || displayOpp.length === 0) displayOpp = this.lastKnownOpps;
 else this.lastKnownOpps = displayOpp;
 
 let balHist = [];
+// MODIFIED: Luôn đọc file lịch sử nếu tồn tại, không dùng random nữa
 if(fs.existsSync(this.balanceHistoryFile)) {
     try { balHist = JSON.parse(fs.readFileSync(this.balanceHistoryFile, 'utf8')); } catch(e){}
 }
