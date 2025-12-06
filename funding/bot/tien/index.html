@@ -14,13 +14,11 @@
         .card-header { background-color: #252525; border-bottom: 1px solid #333; font-weight: 600; }
         .btn-control { width: 100px; }
         .log-box { height: 300px; overflow-y: scroll; background: #000; padding: 10px; font-family: monospace; font-size: 12px; border: 1px solid #333; color: #0f0; }
-        .status-badge { font-size: 0.9em; padding: 5px 10px; border-radius: 4px; }
         .text-pnl-pos { color: #00e676; }
         .text-pnl-neg { color: #ff5252; }
         .chart-container { position: relative; height: 350px; width: 100%; }
         .table-dark { background-color: #1e1e1e; color: #e0e0e0; }
-        .table-dark th { border-color: #333; }
-        .table-dark td { border-color: #333; }
+        .table-dark th, .table-dark td { border-color: #333; }
     </style>
 </head>
 <body>
@@ -164,10 +162,7 @@
                             type: 'time',
                             time: {
                                 tooltipFormat: 'DD/MM/YYYY HH:mm',
-                                displayFormats: {
-                                    hour: 'HH:mm',
-                                    day: 'DD/MM'
-                                }
+                                displayFormats: { hour: 'HH:mm', day: 'DD/MM' }
                             },
                             grid: { color: '#333' },
                             ticks: { color: '#aaa' }
@@ -190,38 +185,40 @@
             const processed = [];
             const seenKeys = new Set();
             
-            // Sort ascending time
             data.sort((a, b) => a.time - b.time);
 
             data.forEach(item => {
                 const time = item.time;
-                // UTC+7 Offset calculation: Local time logic
-                // We create a Date object which browser handles in local time (assuming user is in VN)
-                // Or we explicitly handle offset. Here we use Date object methods which use browser's timezone.
-                // Assuming browser is set to user's timezone (VN).
+                const dateVN = new Date(time + 7 * 60 * 60 * 1000);
                 
-                const d = new Date(time);
-                let key = '';
                 let include = false;
+                let key = '';
 
                 if (period === '7d') {
-                    // Filter: Last 7 days
                     if (time >= now - 7 * 24 * 60 * 60 * 1000) {
-                        // Group by Hour: YYYY-MM-DD-HH
-                        key = `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}-${d.getHours()}`;
+                        key = `${dateVN.getUTCFullYear()}-${dateVN.getUTCMonth()}-${dateVN.getUTCDate()}-${dateVN.getUTCHours()}`;
                         if (!seenKeys.has(key)) include = true;
                     }
-                } else if (period === '1m') {
-                     // Filter: Last 30 days
-                    if (time >= now - 30 * 24 * 60 * 60 * 1000) {
-                        // Group by Day (00:00): YYYY-MM-DD
-                        key = `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
-                        if (!seenKeys.has(key)) include = true; // First point found for that day
+                } else {
+                    const cutoff = (period === '1m') ? (now - 30 * 24 * 60 * 60 * 1000) : 0;
+                    if (time >= cutoff) {
+                        const h = dateVN.getUTCHours();
+                        const m = dateVN.getUTCMinutes();
+                        
+                        key = `${dateVN.getUTCFullYear()}-${dateVN.getUTCMonth()}-${dateVN.getUTCDate()}`;
+                        
+                        if (!seenKeys.has(key)) {
+                             if (h === 0 && m < 5) {
+                                include = true;
+                             } else if (!seenKeys.has(key)) {
+                                 const existingDay = processed.find(p => {
+                                     const pDate = new Date(p.x + 7 * 60 * 60 * 1000);
+                                     return pDate.getUTCDate() === dateVN.getUTCDate() && pDate.getUTCMonth() === dateVN.getUTCMonth();
+                                 });
+                                 if (!existingDay) include = true; 
+                             }
+                        }
                     }
-                } else if (period === 'all') {
-                    // Group by Day
-                    key = `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
-                    if (!seenKeys.has(key)) include = true;
                 }
 
                 if (include) {
@@ -249,20 +246,10 @@
 
         async function fetchStatus() {
             try {
-                // Fetch status.json (mapped to this URL in your server setup)
-                // Assuming your server serves static files from user_data or provides an API
-                // Adjust URL below to your actual endpoint. Usually it's same domain.
-                const username = window.location.pathname.split('/')[2] || 'default'; 
-                // For this standalone HTML, we use a relative path or expect an API endpoint
-                // Since user didn't provide API code, assuming standard /status endpoint or similar.
-                // Reverting to fetch logic compatible with the provided nodejs code structure which writes to user_data
-                // We will assume there is an endpoint /api/status that reads the JSON file.
-                
-                const res = await fetch('/api/status'); // You need to ensure your server has this route
-                if (!res.ok) throw new Error('Network response was not ok');
+                const res = await fetch('/api/status');
+                if (!res.ok) return;
                 const data = await res.json();
 
-                // Update Bot State (Immediate F5 fix)
                 const badge = document.getElementById('botStatusBadge');
                 const btnStart = document.getElementById('btnStart');
                 const btnStop = document.getElementById('btnStop');
@@ -279,7 +266,6 @@
                     btnStop.classList.add('d-none');
                 }
 
-                // Update Balance
                 if (data.balances) {
                     const b = data.balances.binanceusdm?.total || 0;
                     const k = data.balances.kucoinfutures?.total || 0;
@@ -291,7 +277,6 @@
                 document.getElementById('valPnl').innerText = (data.totalPnl || 0).toFixed(2) + ' $';
                 document.getElementById('valPnl').className = (data.totalPnl >= 0) ? 'text-pnl-pos' : 'text-pnl-neg';
 
-                // Update Config Inputs if not focused
                 if (document.activeElement !== document.getElementById('cfgMaxOpps')) {
                     document.getElementById('cfgMaxOpps').value = data.config?.maxOpps || 3;
                 }
@@ -299,7 +284,6 @@
                     document.getElementById('cfgAutoBal').checked = data.config?.autoBalance || false;
                 }
 
-                // Update Trades
                 const tbody = document.getElementById('activeTradesList');
                 tbody.innerHTML = '';
                 (data.activeTrades || []).forEach(t => {
@@ -313,7 +297,6 @@
                     tbody.innerHTML += row;
                 });
 
-                // Update Logs
                 const logDiv = document.getElementById('logsContainer');
                 if (data.logs && data.logs.length > 0) {
                     const latest = data.logs[0];
@@ -323,15 +306,12 @@
                     }
                 }
 
-                // Update History (Only if backend sends it)
                 if (data.balanceHistory && data.balanceHistory.length > 0) {
                     globalBalanceHistory = data.balanceHistory;
-                    updateChart(); // Trigger calculation instantly
+                    updateChart();
                 }
 
-            } catch (e) {
-                console.error("Fetch error", e);
-            }
+            } catch (e) { }
         }
 
         async function sendCommand(cmd) {
@@ -349,7 +329,6 @@
         }
 
         async function applyConfig() {
-            // Only updates config without restarting if running
             const payload = { 
                 op: 'update_config',
                 maxOpps: document.getElementById('cfgMaxOpps').value,
@@ -363,7 +342,7 @@
         }
 
         window.onload = () => {
-            fetchStatus(); // Run immediately on load
+            fetchStatus();
             setInterval(fetchStatus, 2000);
         };
     </script>
