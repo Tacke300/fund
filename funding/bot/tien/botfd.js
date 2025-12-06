@@ -58,6 +58,7 @@ class BotEngine {
         this.state = 'STOPPED';
         this.capitalManagementState = 'IDLE';
         this.loopId = null;
+        this.statusInterval = null; // Tách riêng luồng cập nhật trạng thái
         this.feeTimer = null;
         this.isFeeProcessing = false;
         this.isBalancing = false;
@@ -105,19 +106,19 @@ class BotEngine {
         this.loadHistory();
         this.loadActiveTrades();
 
-        // --- FIX INSTANT LOAD: Đọc ngay dữ liệu cũ từ file khi khởi động ---
+        // --- INSTANT LOAD: Load lại RAM từ file ngay khi khởi động ---
         try {
             if (fs.existsSync(this.statusFile)) {
                 const s = JSON.parse(fs.readFileSync(this.statusFile, 'utf8'));
-                if(s) {
+                if (s) {
                     this.balances = s.balances || {};
                     this.opps = s.bestPotentialOpportunityForDisplay || [];
                     this.lastKnownOpps = this.opps;
                     this.logs = s.logs || [];
                 }
             }
-        } catch(e) {}
-        // ------------------------------------------------------------------
+        } catch (e) {}
+        // -----------------------------------------------------------
 
         this.totalPnl = this.history.reduce((sum, item) => sum + (item.actualPnl || 0), 0);
 
@@ -136,7 +137,7 @@ class BotEngine {
             else this.lastKnownOpps = displayOpp;
 
             let balHist = [];
-            // FIX: Luôn đọc file history nếu có
+            // Luôn đọc lịch sử để vẽ biểu đồ
             if(fs.existsSync(this.balanceHistoryFile)) {
                 try { balHist = JSON.parse(fs.readFileSync(this.balanceHistoryFile, 'utf8')); } catch(e){}
             }
@@ -873,9 +874,6 @@ class BotEngine {
     async loop() {
         if (this.state !== 'RUNNING') return;
         try {
-            // FIX: Bắt buộc ghi file status mỗi vòng lặp
-            this.exportStatus();
-
             await this.monitorPassiveExits();
 
             const now = new Date();
@@ -1021,6 +1019,13 @@ class BotEngine {
         this.lastScanTime = 0;
         this.processedTestCoins.clear();
 
+        // --- CƠ CHẾ MỚI: Tách việc ghi file trạng thái ra khỏi vòng lặp ---
+        if (this.statusInterval) clearInterval(this.statusInterval);
+        this.statusInterval = setInterval(() => {
+            this.exportStatus();
+        }, 1000);
+        // -----------------------------------------------------------------
+
         if (this.isTestExecution) {
             this.activeTrades = [];
             this.saveActiveTrades();
@@ -1044,6 +1049,11 @@ class BotEngine {
         this.saveConfig();
         if (this.loopId) clearTimeout(this.loopId);
         if (this.feeTimer) clearTimeout(this.feeTimer);
+        
+        // --- CƠ CHẾ MỚI: Dừng luồng ghi file trạng thái ---
+        if (this.statusInterval) clearInterval(this.statusInterval);
+        // ---------------------------------------------------
+
         this.log('info', '🛑 STOPPED. Force Cleaning...');
         this.exportStatus();
 
