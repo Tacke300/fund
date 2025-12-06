@@ -105,20 +105,19 @@ class BotEngine {
         this.loadHistory();
         this.loadActiveTrades();
 
-        // --- INSTANT LOAD FIX: Đọc trạng thái cũ ngay khi khởi động ---
+        // --- FIX INSTANT LOAD: Đọc ngay dữ liệu cũ từ file khi khởi động ---
         try {
             if (fs.existsSync(this.statusFile)) {
-                const lastStatus = JSON.parse(fs.readFileSync(this.statusFile, 'utf8'));
-                if (lastStatus) {
-                    this.balances = lastStatus.balances || {};
-                    this.opps = lastStatus.bestPotentialOpportunityForDisplay || [];
+                const s = JSON.parse(fs.readFileSync(this.statusFile, 'utf8'));
+                if(s) {
+                    this.balances = s.balances || {};
+                    this.opps = s.bestPotentialOpportunityForDisplay || [];
                     this.lastKnownOpps = this.opps;
-                    this.logs = lastStatus.logs || [];
-                    // Giữ lại state nếu cần, nhưng cẩn thận loop
+                    this.logs = s.logs || [];
                 }
             }
-        } catch (e) { console.log("Load status fail:", e.message); }
-        // -------------------------------------------------------------
+        } catch(e) {}
+        // ------------------------------------------------------------------
 
         this.totalPnl = this.history.reduce((sum, item) => sum + (item.actualPnl || 0), 0);
 
@@ -137,6 +136,7 @@ class BotEngine {
             else this.lastKnownOpps = displayOpp;
 
             let balHist = [];
+            // FIX: Luôn đọc file history nếu có
             if(fs.existsSync(this.balanceHistoryFile)) {
                 try { balHist = JSON.parse(fs.readFileSync(this.balanceHistoryFile, 'utf8')); } catch(e){}
             }
@@ -148,7 +148,7 @@ class BotEngine {
                 capitalManagementState: this.capitalManagementState,
                 balances: this.balances,
                 tradeHistory: this.history,
-                bestPotentialOpportunityForDisplay: displayOpp || [], // Đảm bảo luôn là mảng
+                bestPotentialOpportunityForDisplay: displayOpp || [],
                 activeTrades: this.activeTrades,
                 vipStatus: this.config.vipStatus,
                 vipExpiry: this.config.vipExpiry,
@@ -873,6 +873,9 @@ class BotEngine {
     async loop() {
         if (this.state !== 'RUNNING') return;
         try {
+            // FIX: Bắt buộc ghi file status mỗi vòng lặp
+            this.exportStatus();
+
             await this.monitorPassiveExits();
 
             const now = new Date();
