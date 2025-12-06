@@ -111,7 +111,6 @@ class BotEngine {
         
         if (this.config.isRunning) {
             this.state = 'RUNNING';
-            this.exportStatus();
             this.log('info', '🔄 Restarting bot from saved state...');
             this.start(this.config.tradeConfig, this.config.autoBalance, this.config.maxOpps);
         }
@@ -142,7 +141,7 @@ class BotEngine {
                 balanceHistory: balHist,
                 logs: this.logs.slice(0, 50),
                 totalPnl: this.totalPnl,
-                config: this.config
+                config: { maxOpps: this.config.maxOpps || 3 }
             };
             fs.writeFileSync(this.statusFile, JSON.stringify(s, null, 2));
         } catch (e) { }
