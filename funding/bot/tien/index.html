@@ -275,7 +275,7 @@
     let balanceChart = null;
     let chartTimeframe = '24h';
     let balanceHistoryData = [];
-    let currentChartData = { bin: [], kuc: [] };
+    let currentChartData = { bin: [], kuc: [], fullData: [] };
 
     function showLogin() { document.getElementById('registerSection').style.display='none'; document.getElementById('loginSection').style.display='flex'; }
     function showRegister() { document.getElementById('loginSection').style.display='none'; document.getElementById('registerSection').style.display='flex'; }
@@ -432,7 +432,10 @@
                         borderWidth: 1,
                         callbacks: {
                             title: function(context) {
-                                if (context[0]) return new Date(balanceHistoryData[context[0].dataIndex].time).toLocaleString();
+                                if (context[0]) {
+                                    const d = currentChartData.fullData[context[0].dataIndex];
+                                    if(d) return new Date(d.time).toLocaleString();
+                                }
                                 return '';
                             },
                             label: function(context) { 
@@ -488,7 +491,7 @@
         if (step > 0 && filtered.length > 0) {
             let lastTime = 0;
             for (let i = 0; i < filtered.length; i++) {
-                if (filtered[i].time - lastTime >= step) {
+                if (i === 0 || i === filtered.length - 1 || (filtered[i].time - lastTime >= step)) {
                     finalData.push(filtered[i]);
                     lastTime = filtered[i].time;
                 }
@@ -497,7 +500,7 @@
             finalData = filtered;
         }
 
-        if (finalData.length === 0 && filtered.length > 0) finalData.push(filtered[filtered.length - 1]);
+        if (finalData.length === 0 && balanceHistoryData.length > 0 && chartTimeframe === 'all') finalData = balanceHistoryData;
         if (finalData.length === 0) return;
 
         const labels = finalData.map(d => {
@@ -507,6 +510,7 @@
         const totalData = finalData.map(d => d.total);
         currentChartData.bin = finalData.map(d => d.binance);
         currentChartData.kuc = finalData.map(d => d.kucoin);
+        currentChartData.fullData = finalData;
 
         const startBal = totalData[0] || 0;
         const endBal = totalData[totalData.length - 1] || 0;
@@ -552,7 +556,7 @@
                         }
                         if (d.config && d.config.maxOpps) document.getElementById('maxOppsSelect').value = d.config.maxOpps;
                         if (d.config && d.config.autoBalance !== undefined) document.getElementById('autoBalanceDisplay').checked = d.config.autoBalance;
-                    } catch (e) {}
+                    } catch (err) {}
                 }
                 else { 
                     document.querySelectorAll('.hide-on-run').forEach(e=>e.classList.remove('active')); 
