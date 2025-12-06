@@ -105,6 +105,21 @@ class BotEngine {
         this.loadHistory();
         this.loadActiveTrades();
 
+        // --- INSTANT LOAD FIX: Đọc trạng thái cũ ngay khi khởi động ---
+        try {
+            if (fs.existsSync(this.statusFile)) {
+                const lastStatus = JSON.parse(fs.readFileSync(this.statusFile, 'utf8'));
+                if (lastStatus) {
+                    this.balances = lastStatus.balances || {};
+                    this.opps = lastStatus.bestPotentialOpportunityForDisplay || [];
+                    this.lastKnownOpps = this.opps;
+                    this.logs = lastStatus.logs || [];
+                    // Giữ lại state nếu cần, nhưng cẩn thận loop
+                }
+            }
+        } catch (e) { console.log("Load status fail:", e.message); }
+        // -------------------------------------------------------------
+
         this.totalPnl = this.history.reduce((sum, item) => sum + (item.actualPnl || 0), 0);
 
         if (this.config.tradeConfig) this.tradeConfig = this.config.tradeConfig;
@@ -133,7 +148,7 @@ class BotEngine {
                 capitalManagementState: this.capitalManagementState,
                 balances: this.balances,
                 tradeHistory: this.history,
-                bestPotentialOpportunityForDisplay: displayOpp,
+                bestPotentialOpportunityForDisplay: displayOpp || [], // Đảm bảo luôn là mảng
                 activeTrades: this.activeTrades,
                 vipStatus: this.config.vipStatus,
                 vipExpiry: this.config.vipExpiry,
