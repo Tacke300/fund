@@ -58,7 +58,7 @@ class BotEngine {
         this.state = 'STOPPED';
         this.capitalManagementState = 'IDLE';
         this.loopId = null;
-        this.statusInterval = null; // Tách riêng luồng cập nhật trạng thái
+        this.statusInterval = null;
         this.feeTimer = null;
         this.isFeeProcessing = false;
         this.isBalancing = false;
@@ -106,7 +106,6 @@ class BotEngine {
         this.loadHistory();
         this.loadActiveTrades();
 
-        // --- INSTANT LOAD: Load lại RAM từ file ngay khi khởi động ---
         try {
             if (fs.existsSync(this.statusFile)) {
                 const s = JSON.parse(fs.readFileSync(this.statusFile, 'utf8'));
@@ -115,10 +114,10 @@ class BotEngine {
                     this.opps = s.bestPotentialOpportunityForDisplay || [];
                     this.lastKnownOpps = this.opps;
                     this.logs = s.logs || [];
+                    this.totalPnl = s.totalPnl || 0;
                 }
             }
         } catch (e) {}
-        // -----------------------------------------------------------
 
         this.totalPnl = this.history.reduce((sum, item) => sum + (item.actualPnl || 0), 0);
 
@@ -137,7 +136,6 @@ class BotEngine {
             else this.lastKnownOpps = displayOpp;
 
             let balHist = [];
-            // Luôn đọc lịch sử để vẽ biểu đồ
             if(fs.existsSync(this.balanceHistoryFile)) {
                 try { balHist = JSON.parse(fs.readFileSync(this.balanceHistoryFile, 'utf8')); } catch(e){}
             }
@@ -175,7 +173,6 @@ class BotEngine {
 
         this.logs.unshift(line);
         if (this.logs.length > 100) this.logs = this.logs.slice(0, 100);
-        this.exportStatus();
     }
 
     loadConfig() { try { if (fs.existsSync(this.configFile)) { const saved = JSON.parse(fs.readFileSync(this.configFile, 'utf8')); this.config = { ...this.config, ...saved }; } } catch (e) { } }
@@ -815,7 +812,7 @@ class BotEngine {
         const maxOpps = this.config.maxOpps || 3;
 
         this.opps = candidates.slice(0, 3);
-        this.exportStatus();
+        // Không exportStatus ở đây nữa, để setInterval lo
 
         const tradeCandidates = [];
         const seenCoins = new Set();
@@ -899,7 +896,6 @@ class BotEngine {
                             const maxOpps = this.config.maxOpps || 3;
                             if (this.candidates.length > 0) {
                                 this.opps = this.candidates.slice(0, maxOpps);
-                                this.exportStatus(); 
                                 this.lockedOpps = this.opps.map(o => ({ ...o, executed: false }));
                                 this.capitalManagementState = 'FUNDS_READY';
                             }
@@ -1019,12 +1015,11 @@ class BotEngine {
         this.lastScanTime = 0;
         this.processedTestCoins.clear();
 
-        // --- CƠ CHẾ MỚI: Tách việc ghi file trạng thái ra khỏi vòng lặp ---
+        // TÁCH RIÊNG LUỒNG GHI STATUS ĐỂ KHÔNG BỊ BLOCK
         if (this.statusInterval) clearInterval(this.statusInterval);
         this.statusInterval = setInterval(() => {
             this.exportStatus();
         }, 1000);
-        // -----------------------------------------------------------------
 
         if (this.isTestExecution) {
             this.activeTrades = [];
@@ -1050,12 +1045,11 @@ class BotEngine {
         if (this.loopId) clearTimeout(this.loopId);
         if (this.feeTimer) clearTimeout(this.feeTimer);
         
-        // --- CƠ CHẾ MỚI: Dừng luồng ghi file trạng thái ---
+        // Dừng luồng ghi status riêng
         if (this.statusInterval) clearInterval(this.statusInterval);
-        // ---------------------------------------------------
 
         this.log('info', '🛑 STOPPED. Force Cleaning...');
-        this.exportStatus();
+        this.exportStatus(); // Ghi phát cuối
 
         this.closeAll().then(() => {
             this.log('info', '✅ Cleanup Finished.');
