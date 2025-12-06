@@ -190,11 +190,6 @@
             <div id="statusText" style="padding: 5px 10px; border-radius: 4px; background:#222; color:#777; font-weight:bold; font-size:0.8rem;">STOPPED</div>
         </div>
         
-        <div class="card" style="margin-bottom: 20px;">
-            <h3>📝 Live Logs</h3>
-            <div id="logBox" class="log-container">Initializing...</div>
-        </div>
-
         <div class="grid">
             <div class="card">
                 <h3>Wallet Balances</h3>
@@ -221,17 +216,9 @@
             </div>
         </div>
 
-        <div class="card" style="margin-top: 20px;">
-            <div style="display:flex; justify-content:space-between;">
-                <h3>Trade History</h3>
-                <h3 id="totalPnlDisplay" style="color:#fff">Total PnL: $0.00</h3>
-            </div>
-            <div style="overflow-x: auto;">
-                <table>
-                    <thead><tr><th>Time</th><th>Coin</th><th>Margin</th><th>Lev</th><th>Est.</th><th>Real PnL</th></tr></thead>
-                    <tbody id="historyBody"></tbody>
-                </table>
-            </div>
+        <div class="card" style="margin-bottom: 20px;">
+            <h3>📝 Live Logs</h3>
+            <div id="logBox" class="log-container">Initializing...</div>
         </div>
     </div>
 </div>
@@ -536,11 +523,6 @@
                     document.getElementById('logBox').innerHTML = logHtml;
                 }
 
-                if (d.totalPnl !== undefined) {
-                    const c = d.totalPnl >= 0 ? 'var(--kucoin-green)' : 'var(--danger)';
-                    document.getElementById('totalPnlDisplay').innerHTML = `Total PnL: <span style="color:${c}">${d.totalPnl.toFixed(2)}$</span>`;
-                }
-
                 let bH = '';
                 if(d.balances) {
                     for(let k in d.balances) bH += `<div style="display:flex;justify-content:space-between;border-bottom:1px solid #333;padding:5px"><span>${k.includes('binance')?'BINANCE':'KUCOIN'}</span><span>${d.balances[k].available.toFixed(2)}$</span></div>`;
@@ -587,16 +569,6 @@
                 } else {
                     document.getElementById('oppContent').innerHTML = `<span style="color:#555; padding: 10px; display:block;">Scanning...</span>`;
                 }
-
-                let hH = '';
-                (d.tradeHistory||[]).slice(0, 50).forEach(t => {
-                    const p = t.actualPnl; 
-                    const pnlDisplay = (p !== undefined && p !== null) ? p.toFixed(2) : '...';
-                    const pClass = (p >= 0) ? 'text-pos' : 'text-neg';
-                    const margin = t.collateral ? t.collateral.toFixed(1) : '0';
-                    hH += `<tr><td>${new Date(t.entryTime).toLocaleTimeString()}</td><td>${t.coin}</td><td>${margin}$</td><td>x${t.leverage}</td><td>${t.estimatedPnlFromOpportunity}%</td><td class="${pClass}">${pnlDisplay}</td></tr>`;
-                });
-                document.getElementById('historyBody').innerHTML = hH;
             }
         } catch(e) {
             console.log("UI Update Err:", e);
