@@ -309,7 +309,18 @@
         document.querySelectorAll('.auth-overlay').forEach(e=>e.style.display='none');
         document.getElementById('dashboardSection').style.display='block';
         document.getElementById('userDisplay').innerText = currentUsername;
+        
         restoreLocalState(); 
+        
+        // --- INSTANT LOAD: Hiển thị ngay dữ liệu cũ từ Cache ---
+        const cachedData = localStorage.getItem('local_bot_data');
+        if (cachedData) {
+            try {
+                const d = JSON.parse(cachedData);
+                renderBotData(d);
+            } catch(e) {}
+        }
+        
         loadInitConfig();
         initChart();
         updateUI(); 
@@ -567,6 +578,85 @@
         balanceChart.update();
     }
 
+    function renderBotData(d) {
+        if (!d) return;
+        const run = d.botState === 'RUNNING';
+        document.getElementById('btnStart').style.display = run ? 'none':'inline-block';
+        document.getElementById('btnStart').disabled = run; 
+        if(!run) document.getElementById('btnStart').innerText = "▶ START"; 
+        
+        document.getElementById('btnStop').style.display = run ? 'inline-block':'none';
+        document.getElementById('statusText').innerText = run ? 'RUNNING' : 'STOPPED';
+        document.getElementById('statusText').style.color = run ? '#00D095' : '#777';
+
+        if(run) document.querySelectorAll('.hide-on-run').forEach(e=>e.classList.add('active'));
+        else { 
+            document.querySelectorAll('.hide-on-run').forEach(e=>e.classList.remove('active')); 
+            checkTerms(); 
+        }
+
+        updateVipButton(d.vipStatus);
+        
+        if (d.logs && d.logs.length) {
+            const logHtml = d.logs.map(l => {
+                let cls = 'log-INFO';
+                if(l.includes('TRADE')) cls = 'log-TRADE';
+                if(l.includes('ERROR')) cls = 'log-ERROR';
+                return `<div class="log-line ${cls}">${l}</div>`;
+            }).join('');
+            document.getElementById('logBox').innerHTML = logHtml;
+        }
+
+        let bH = '';
+        if(d.balances) {
+            for(let k in d.balances) bH += `<div style="display:flex;justify-content:space-between;border-bottom:1px solid #333;padding:5px"><span>${k.includes('binance')?'BINANCE':'KUCOIN'}</span><span>${d.balances[k].available.toFixed(2)}$</span></div>`;
+        }
+        document.getElementById('balancesContent').innerHTML = bH || '<span style="color:#555;">No Data</span>';
+
+        if (d.balanceHistory && Array.isArray(d.balanceHistory) && d.balanceHistory.length > 0) {
+            if (d.balanceHistory.length !== balanceHistoryData.length) {
+                balanceHistoryData = d.balanceHistory;
+                renderChart();
+            }
+        }
+
+        const opps = d.bestPotentialOpportunityForDisplay;
+        if (Array.isArray(opps) && opps.length > 0) {
+            let html = '';
+            const delays = ['59:00', '59:25', '59:45'];
+            const now = Date.now();
+            opps.forEach((op, idx) => {
+                const timeLeft = op.nextFundingTime ? (op.nextFundingTime - now) : 0;
+                const timerText = timeLeft > 0 ? formatCountDown(timeLeft) : "--:--:--";
+                const sExName = op.details.shortExchange.includes('binance') ? 'BIN' : 'KUC';
+                const lExName = op.details.longExchange.includes('binance') ? 'BIN' : 'KUC';
+                const sColor = sExName === 'BIN' ? 'var(--binance-yellow)' : 'var(--kucoin-green)';
+                const lColor = lExName === 'BIN' ? 'var(--binance-yellow)' : 'var(--kucoin-green)';
+                const executeTime = delays[idx] || '';
+                const leverage = op.commonLeverage || 1;
+
+                html += `
+                <div class="opp-item">
+                    <div class="opp-row-top">
+                        <div class="opp-coin-name"><span class="rank-badge">#${idx+1}</span> ${op.coin}</div>
+                        <div class="opp-pnl">+${op.estimatedPnl.toFixed(2)}%</div>
+                    </div>
+                    <div class="opp-row-mid">
+                        <div class="tag tag-highlight">Lev: x${leverage}</div>
+                        <div class="tag">Funding: ⏳ ${timerText}</div>
+                    </div>
+                    <div class="opp-row-bot">
+                        <div><span style="color:${sColor}">S: ${sExName}</span> ⚡ <span style="color:${lColor}">L: ${lExName}</span></div>
+                        <div class="exec-timer">⏰ Exec: ${executeTime}</div>
+                    </div>
+                </div>`;
+            });
+            document.getElementById('oppContent').innerHTML = html;
+        } else {
+            document.getElementById('oppContent').innerHTML = `<span style="color:#555; padding: 10px; display:block;">Scanning...</span>`;
+        }
+    }
+
     let isUpdating = false;
     async function updateUI() {
         if(!currentUsername) return;
@@ -577,90 +667,16 @@
             const d = await apiCall('/bot-api/status');
             
             if(d) {
-                // Save state to localStorage immediately
+                // --- SAVE CACHE: Lưu dữ liệu mới nhất vào LocalStorage ---
+                localStorage.setItem('local_bot_data', JSON.stringify(d));
                 localStorage.setItem('local_bot_state', d.botState);
+
                 if (d.config) {
-                    // Update local settings from remote if available
                     if (d.config.maxOpps) document.getElementById('maxOppsSelect').value = d.config.maxOpps;
                     saveLocalSettings();
                 }
-
-                const run = d.botState === 'RUNNING';
-                document.getElementById('btnStart').style.display = run ? 'none':'inline-block';
-                document.getElementById('btnStart').disabled = run; 
-                if(!run) document.getElementById('btnStart').innerText = "▶ START"; 
                 
-                document.getElementById('btnStop').style.display = run ? 'inline-block':'none';
-                document.getElementById('statusText').innerText = run ? 'RUNNING' : 'STOPPED';
-                document.getElementById('statusText').style.color = run ? '#00D095' : '#777';
-
-                if(run) document.querySelectorAll('.hide-on-run').forEach(e=>e.classList.add('active'));
-                else { 
-                    document.querySelectorAll('.hide-on-run').forEach(e=>e.classList.remove('active')); 
-                    checkTerms(); 
-                }
-
-                updateVipButton(d.vipStatus);
-                
-                if (d.logs && d.logs.length) {
-                    const logHtml = d.logs.map(l => {
-                        let cls = 'log-INFO';
-                        if(l.includes('TRADE')) cls = 'log-TRADE';
-                        if(l.includes('ERROR')) cls = 'log-ERROR';
-                        return `<div class="log-line ${cls}">${l}</div>`;
-                    }).join('');
-                    document.getElementById('logBox').innerHTML = logHtml;
-                }
-
-                let bH = '';
-                if(d.balances) {
-                    for(let k in d.balances) bH += `<div style="display:flex;justify-content:space-between;border-bottom:1px solid #333;padding:5px"><span>${k.includes('binance')?'BINANCE':'KUCOIN'}</span><span>${d.balances[k].available.toFixed(2)}$</span></div>`;
-                }
-                document.getElementById('balancesContent').innerHTML = bH || '<span style="color:#555;">No Data</span>';
-
-                if (d.balanceHistory && Array.isArray(d.balanceHistory) && d.balanceHistory.length > 0) {
-                    // Only update if we have new data or length changed significantly
-                    if (d.balanceHistory.length !== balanceHistoryData.length) {
-                        balanceHistoryData = d.balanceHistory;
-                        renderChart();
-                    }
-                }
-
-                const opps = d.bestPotentialOpportunityForDisplay;
-                if (Array.isArray(opps) && opps.length > 0) {
-                    let html = '';
-                    const delays = ['59:00', '59:25', '59:45'];
-                    const now = Date.now();
-                    opps.forEach((op, idx) => {
-                        const timeLeft = op.nextFundingTime ? (op.nextFundingTime - now) : 0;
-                        const timerText = timeLeft > 0 ? formatCountDown(timeLeft) : "--:--:--";
-                        const sExName = op.details.shortExchange.includes('binance') ? 'BIN' : 'KUC';
-                        const lExName = op.details.longExchange.includes('binance') ? 'BIN' : 'KUC';
-                        const sColor = sExName === 'BIN' ? 'var(--binance-yellow)' : 'var(--kucoin-green)';
-                        const lColor = lExName === 'BIN' ? 'var(--binance-yellow)' : 'var(--kucoin-green)';
-                        const executeTime = delays[idx] || '';
-                        const leverage = op.commonLeverage || 1;
-
-                        html += `
-                        <div class="opp-item">
-                            <div class="opp-row-top">
-                                <div class="opp-coin-name"><span class="rank-badge">#${idx+1}</span> ${op.coin}</div>
-                                <div class="opp-pnl">+${op.estimatedPnl.toFixed(2)}%</div>
-                            </div>
-                            <div class="opp-row-mid">
-                                <div class="tag tag-highlight">Lev: x${leverage}</div>
-                                <div class="tag">Funding: ⏳ ${timerText}</div>
-                            </div>
-                            <div class="opp-row-bot">
-                                <div><span style="color:${sColor}">S: ${sExName}</span> ⚡ <span style="color:${lColor}">L: ${lExName}</span></div>
-                                <div class="exec-timer">⏰ Exec: ${executeTime}</div>
-                            </div>
-                        </div>`;
-                    });
-                    document.getElementById('oppContent').innerHTML = html;
-                } else {
-                    document.getElementById('oppContent').innerHTML = `<span style="color:#555; padding: 10px; display:block;">Scanning...</span>`;
-                }
+                renderBotData(d);
             }
         } catch(e) {
             console.log("UI Update Err:", e);
