@@ -312,7 +312,7 @@
         
         restoreLocalState(); 
         
-        // --- INSTANT LOAD: Lấy dữ liệu cũ từ Cache hiển thị ngay ---
+        // --- INSTANT LOAD ---
         const cachedData = localStorage.getItem('local_bot_data');
         if (cachedData) {
             try {
@@ -534,13 +534,11 @@
         let processedData = [];
         let lastTime = 0;
 
-        // Iterate through all history
         for (let i = 0; i < balanceHistoryData.length; i++) {
             const d = balanceHistoryData[i];
             if (limit > 0 && (now - d.time) > limit) continue;
 
             if (interval > 0) {
-                // For 30d/All, try to align with 00:00 UTC roughly, or just simple interval
                 if (d.time - lastTime >= interval) {
                     processedData.push(d);
                     lastTime = d.time;
@@ -552,8 +550,7 @@
         
         if (processedData.length === 0) return;
 
-        // Map data to chart format. We use x as timestamp for tooltip, but labels for x-axis
-        const labels = processedData.map(d => d.time); // Used for x-axis parsing in tooltip
+        const labels = processedData.map(d => d.time); 
         const totalData = processedData.map(d => ({ x: d.time, y: d.total }));
         currentChartData.bin = processedData.map(d => d.binance);
         currentChartData.kuc = processedData.map(d => d.kucoin);
@@ -563,7 +560,7 @@
         const mainColor = endBal >= startBal ? '#00D095' : '#F6465D';
 
         balanceChart.data = {
-            labels: labels, // Dummy labels for category scale, but we use parsed.x
+            labels: labels, 
             datasets: [{
                 label: 'Total', 
                 data: totalData, 
@@ -653,7 +650,13 @@
             });
             document.getElementById('oppContent').innerHTML = html;
         } else {
-            document.getElementById('oppContent').innerHTML = `<span style="color:#555; padding: 10px; display:block;">Scanning...</span>`;
+            // FIX: Không hiển thị "Scanning..." nếu đang có dữ liệu trong cache
+            if (document.getElementById('oppContent').innerHTML.includes('Scanning')) {
+                 // Giữ nguyên hoặc không làm gì
+            } else {
+                 // Nếu thực sự rỗng
+                 document.getElementById('oppContent').innerHTML = `<span style="color:#555; padding: 10px; display:block;">Scanning...</span>`;
+            }
         }
     }
 
@@ -667,7 +670,6 @@
             const d = await apiCall('/bot-api/status');
             
             if(d) {
-                // --- SAVE CACHE: Lưu dữ liệu mới nhất vào LocalStorage ---
                 localStorage.setItem('local_bot_data', JSON.stringify(d));
                 localStorage.setItem('local_bot_state', d.botState);
 
