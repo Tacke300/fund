@@ -1,3 +1,6 @@
+
+
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -586,5 +589,587 @@
         }
     }
 </script>
+</body>
+</html>
+Sever.js
+const http = require('http');
+const fs = require('fs');
+const path = require('path');
+const ccxt = require('ccxt');
+
+const PORT = 4953;
+const USER_DATA_DIR = path.join(__dirname, 'user_data');
+
+let depositAddresses = {};
+try {
+    const balanceModule = require('./balance.js');
+    if (balanceModule && balanceModule.usdtDepositAddressesByNetwork) {
+        depositAddresses = balanceModule.usdtDepositAddressesByNetwork;
+    }
+} catch (e) {
+    console.log("[SYSTEM] Warning: balance.js not found");
+}
+
+function initExchange(exchangeId, config) {
+    try {
+        let exchangeClass;
+        let options = { 'enableRateLimit': true, 'timeout': 10000 };
+        
+        if (exchangeId.includes('binance')) {
+            exchangeClass = exchangeId === 'binanceusdm' ? ccxt.binanceusdm : ccxt.binance;
+            options.apiKey = config.binanceApiKey;
+            options.secret = config.binanceApiSecret;
+        } else if (exchangeId.includes('kucoin')) {
+            exchangeClass = exchangeId === 'kucoinfutures' ? ccxt.kucoinfutures : ccxt.kucoin;
+            options.apiKey = config.kucoinApiKey;
+            options.secret = config.kucoinApiSecret;
+            options.password = config.kucoinPassword || config.kucoinApiPassword;
+        }
+
+        if (!options.apiKey || !options.secret) {
+            console.log(`[EXCHANGE] Missing API Key/Secret for ${exchangeId}`);
+            return null;
+        }
+        return new exchangeClass(options);
+    } catch (e) {
+        console.error(`[EXCHANGE] Init Error: ${e.message}`);
+        return null;
+    }
+}
+
+async function getAllUsersSummary() {
+    if (!fs.existsSync(USER_DATA_DIR)) return [];
+    const files = fs.readdirSync(USER_DATA_DIR).filter(f => f.endsWith('_config.json'));
+    
+    const users = [];
+    let index = 1;
+
+    for (const file of files) {
+        try {
+            const filePath = path.join(USER_DATA_DIR, file);
+            const config = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+            const stats = fs.statSync(filePath);
+            
+            let totalPnl = 0;
+            const histFile = file.replace('_config.json', '_history.json');
+            if (fs.existsSync(path.join(USER_DATA_DIR, histFile))) {
+                try {
+                    const history = JSON.parse(fs.readFileSync(path.join(USER_DATA_DIR, histFile), 'utf8'));
+                    if (Array.isArray(history)) totalPnl = history.reduce((sum, trade) => sum + (trade.actualPnl || 0), 0);
+                } catch(e) {}
+            }
+
+            const binanceFut = config.savedBinanceFut || 0;
+            const kucoinFut = config.savedKucoinFut || 0;
+            const totalAssets = config.savedTotalAssets || 0;
+
+            users.push({
+                id: index++,
+                username: config.username || file.replace('_config.json', ''),
+                email: config.email || 'N/A',
+                vipStatus: config.vipStatus || 'none',
+                binanceFuture: binanceFut,
+                kucoinFuture: kucoinFut,
+                totalAll: totalAssets,
+                totalPnl: totalPnl,
+                lastLogin: stats.mtime,
+                filename: file
+            });
+        } catch (e) {
+            console.error(`[USER LOAD] Error loading ${file}: ${e.message}`);
+        }
+    }
+    return users;
+}
+
+const server = http.createServer(async (req, res) => {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    
+    console.log(`[REQUEST] ${req.method} ${req.url}`);
+
+    if (req.method === 'GET' && req.url === '/') {
+        fs.readFile(path.join(__dirname, 'admin.html'), (err, content) => {
+            if(err) { res.end('Admin HTML not found'); return; }
+            res.writeHead(200, {'Content-Type': 'text/html'});
+            res.end(content);
+        });
+        return;
+    }
+
+    if (req.url === '/api/users') {
+        try {
+            const users = await getAllUsersSummary();
+            res.end(JSON.stringify(users));
+        } catch (e) {
+            console.error(`[API USERS] Error: ${e.message}`);
+            res.end('[]');
+        }
+        return;
+    }
+
+    if (req.url.startsWith('/api/details/')) {
+        let username = 'UNKNOWN';
+        try {
+            const urlParts = req.url.split('/api/details/');
+            if (urlParts.length < 2) throw new Error("URL Invalid");
+            username = decodeURIComponent(urlParts[1]);
+
+            console.log(`[DETAILS] Processing for: ${username}`);
+
+            const configPath = path.join(USER_DATA_DIR, `${username}_config.json`);
+            if (!fs.existsSync(configPath)) {
+                console.log(`[DETAILS] Config file missing for ${username}`);
+                res.writeHead(404);
+                res.end(JSON.stringify({ error: "User config not found", totalUsdt: 0 }));
+                return;
+            }
+            const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+
+            const checkExchange = async (exName, exId) => {
+                console.log(`[DETAILS] Connecting to ${exName}...`);
+                try {
+                    const ex = initExchange(exId, config);
+                    if (!ex) return { total: 0, free: 0 };
+
+                    const result = await Promise.race([
+                        ex.fetchBalance(),
+                        new Promise((_, reject) => setTimeout(() => reject(new Error('TIMEOUT_10S')), 10000))
+                    ]);
+
+                    const total = result.total['USDT'] || 0;
+                    console.log(`[DETAILS] ${exName} OK: ${total} USDT`);
+                    return { total: total, free: result.free['USDT'] || 0 };
+                } catch (e) {
+                    console.log(`[DETAILS] ${exName} FAILED: ${e.message}`);
+                    return { total: 0, free: 0, error: e.message };
+                }
+            };
+
+            const [binance, kucoin] = await Promise.all([
+                checkExchange('Binance', 'binanceusdm'),
+                checkExchange('Kucoin', 'kucoinfutures')
+            ]);
+
+            const responsePayload = {
+                username: username,
+                binance: binance,
+                kucoin: kucoin,
+                totalUsdt: (binance.total + kucoin.total)
+            };
+
+            console.log(`[DETAILS] Sending response for ${username}`);
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify(responsePayload));
+
+        } catch (error) {
+            console.error(`[DETAILS] CRITICAL ERROR: ${error.message}`);
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: error.message, totalUsdt: 0 }));
+        }
+        return;
+    }
+
+    if (req.method === 'POST' && req.url === '/api/transfer') {
+        res.end(JSON.stringify({ logs: ['Skipped'] }));
+        return;
+    }
+
+    if (req.method === 'POST' && req.url === '/api/admin/set-vip') {
+        let body = '';
+        req.on('data', c => body += c);
+        req.on('end', async () => {
+            try {
+                const { users, vipStatus } = JSON.parse(body);
+                const targetFiles = (users === 'ALL') 
+                    ? fs.readdirSync(USER_DATA_DIR).filter(f => f.endsWith('_config.json'))
+                    : users.map(u => `${u}_config.json`);
+
+                let count = 0;
+                for (const file of targetFiles) {
+                    const filePath = path.join(USER_DATA_DIR, file);
+                    if (fs.existsSync(filePath)) {
+                        const cfg = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+                        cfg.vipStatus = vipStatus;
+                        if (vipStatus === 'vip') cfg.vipExpiry = Date.now() + (30 * 86400000);
+                        else if (vipStatus === 'vip_pro') cfg.vipExpiry = 9999999999999;
+                        else cfg.vipExpiry = 0;
+                        fs.writeFileSync(filePath, JSON.stringify(cfg, null, 2));
+                        count++;
+                    }
+                }
+                console.log(`[ADMIN] VIP updated for ${count} users`);
+                res.end(JSON.stringify({ success: true, message: `Updated ${count} users.` }));
+            } catch(e) {
+                console.error(`[ADMIN] VIP Set Error: ${e.message}`);
+                res.writeHead(500); 
+                res.end(JSON.stringify({ success: false })); 
+            }
+        });
+        return;
+    }
+});
+
+server.listen(PORT, () => {
+    console.log(`Admin Bot running at http://localhost:${PORT}`);
+});
+
+                
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Super Admin Bot</title>
+    <style>
+        :root { --bg: #121212; --card: #1e1e1e; --text: #e0e0e0; --accent: #007bff; --border: #333; --danger: #ff4444; --success: #00c851; --warning: #ffbb33; --vip: #ffd700; }
+        body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', sans-serif; margin: 0; padding: 20px; }
+        h2 { margin-top: 0; color: var(--accent); border-bottom: 1px solid #333; padding-bottom: 10px; }
+
+        /* TABLE */
+        table { width: 100%; border-collapse: collapse; background: var(--card); font-size: 0.9rem; }
+        th, td { padding: 12px; border: 1px solid var(--border); text-align: left; }
+        th { background: #252525; text-transform: uppercase; color: #aaa; position: sticky; top: 0; }
+        tr:hover { background: #2a2a2a; }
+        .user-link { color: var(--accent); cursor: pointer; text-decoration: underline; font-weight: bold; }
+        
+        /* STATUS COLORS */
+        .pnl-pos { color: var(--success); font-weight: bold; }
+        .pnl-neg { color: var(--danger); font-weight: bold; }
+        .vip-tag { color: #000; background: var(--vip); padding: 2px 6px; border-radius: 4px; font-weight: bold; font-size: 0.75rem; }
+        .vip-pro-tag { color: #fff; background: linear-gradient(45deg, #ff00cc, #333399); padding: 2px 6px; border-radius: 4px; font-weight: bold; font-size: 0.75rem; }
+
+        /* PANEL */
+        .panel { background: var(--card); padding: 20px; border-radius: 8px; margin-bottom: 20px; border: 1px solid var(--border); box-shadow: 0 4px 6px rgba(0,0,0,0.3); }
+        .controls { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 15px; align-items: end; }
+        
+        input, select { padding: 10px; background: #2b2b2b; border: 1px solid #444; color: #fff; border-radius: 4px; width: 100%; box-sizing: border-box; }
+        button { padding: 10px; background: var(--accent); border: none; color: white; font-weight: bold; cursor: pointer; border-radius: 4px; width: 100%; }
+        button:hover { opacity: 0.9; }
+        button.exec { background: linear-gradient(45deg, #007bff, #0056b3); }
+        button.vip-btn { background: var(--vip); color: #000; }
+        
+        .checkbox-wrapper { display: flex; align-items: center; gap: 10px; height: 40px; background: #2a2222; padding: 0 10px; border-radius: 4px; border: 1px solid #ff4444; }
+        input[type="checkbox"] { width: 18px; height: 18px; accent-color: var(--danger); cursor: pointer; }
+
+        #selectionInfo { color: var(--warning); font-weight: bold; margin-top: 10px; }
+
+        /* MODAL */
+        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.85); z-index: 1000; justify-content: center; align-items: center; }
+        .modal-content { background: var(--card); padding: 20px; width: 800px; max-height: 90vh; overflow-y: auto; border-radius: 8px; border: 1px solid var(--accent); }
+        .acc-item { border: 1px solid var(--border); margin-bottom: 10px; }
+        .acc-header { background: #2a2a2a; padding: 10px; cursor: pointer; display: flex; justify-content: space-between; font-weight: bold; }
+        .acc-content { display: block; padding: 10px; background: #111; }
+        .close { float: right; cursor: pointer; font-size: 1.5rem; color: #aaa; }
+        .close:hover { color: #fff; }
+        
+        #actionLog { background: #000; padding: 10px; height: 150px; overflow-y: scroll; font-family: monospace; border: 1px solid #444; margin-top: 15px; color: #0f0; font-size: 0.85rem; }
+    </style>
+</head>
+<body>
+
+    <!-- 1. BẢNG CHUYỂN TIỀN -->
+    <div class="panel">
+        <h2 style="color: var(--danger);">💸 Chuyển Tiền Admin</h2>
+        <div class="controls">
+            <div>
+                <label>Hướng chuyển:</label>
+                <select id="direction">
+                    <option value="binance_to_kucoin">Binance ➔ KuCoin</option>
+                    <option value="kucoin_to_binance">KuCoin ➔ Binance</option>
+                    <option value="both_ways" style="color:#ffff00; font-weight:bold;">⇄ Rút Chéo (2 Chiều)</option>
+                </select>
+            </div>
+            <div>
+                <label>Nguồn tiền:</label>
+                <select id="sourceWallet">
+                    <option value="both">Gom Future & Spot</option>
+                    <option value="future">Chỉ từ Future</option>
+                    <option value="spot">Chỉ từ Spot</option>
+                </select>
+            </div>
+            <div>
+                <label>Coin / Số lượng:</label>
+                <div style="display:flex; gap:5px;">
+                    <input type="text" id="coinName" value="USDT" style="width:30%">
+                    <input type="number" id="amount" placeholder="Số tiền" style="width:70%">
+                </div>
+            </div>
+            <div class="checkbox-wrapper">
+                <input type="checkbox" id="getAllCheck">
+                <label for="getAllCheck" style="color: var(--danger); font-weight: bold; cursor:pointer;">RÚT HẾT (GET ALL)</label>
+            </div>
+            <button class="exec" onclick="executeAction()">THỰC HIỆN</button>
+        </div>
+        <div id="actionLog">Logs...</div>
+    </div>
+
+    <!-- 2. BẢNG QUẢN LÝ VIP -->
+    <div class="panel" style="border-color: var(--vip);">
+        <h2 style="color: var(--vip);">👑 Cập Nhật VIP (Hàng Loạt)</h2>
+        <div id="selectionInfo">Đang chọn: 0 Users</div>
+        
+        <div class="controls" style="margin-top: 10px; align-items: center;">
+            <div style="display: flex; gap: 10px; width: 100%;">
+                <select id="vipSelect" style="flex: 2;">
+                    <option value="none">Standard (Thu phí)</option>
+                    <option value="vip">VIP (30 Ngày)</option>
+                    <option value="vip_pro">VIP PRO (Free Trọn Đời)</option>
+                </select>
+                <button class="vip-btn" style="flex: 1;" onclick="executeVipUpdate()">CẬP NHẬT VIP NGAY</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 3. DANH SÁCH USER -->
+    <div class="panel">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+            <h2>👥 Danh Sách Tài Khoản</h2>
+            <button onclick="loadUsers()" style="width:auto; background:#333;">🔄 Refresh</button>
+        </div>
+        
+        <table>
+            <thead>
+                <tr>
+                    <th style="width: 40px; text-align:center;"><input type="checkbox" id="checkAll" onchange="toggleCheckAll()"></th>
+                    <th>Username</th>
+                    <th>Email</th>
+                    <th>Status</th>
+                    <th>Last Login</th>
+                    <th>Binance Fut</th>
+                    <th>KuCoin Fut</th>
+                    <th style="color: var(--success);">TỔNG TÀI SẢN</th>
+                    <th>Tổng PNL</th>
+                </tr>
+            </thead>
+            <tbody id="userTableBody">
+                <tr><td colspan="9">Đang tải dữ liệu...</td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <!-- MODAL CHI TIẾT -->
+    <div id="detailModal" class="modal">
+        <div class="modal-content">
+            <span class="close" onclick="document.getElementById('detailModal').style.display='none'">&times;</span>
+            <h2 id="modalTitle">Chi tiết</h2>
+            <div id="accordionContainer">Loading...</div>
+        </div>
+    </div>
+
+    <script>
+        let usersData = [];
+        let selectedUsernames = new Set();
+
+        // --- LOAD USERS (Dùng API /api/users - Đã tối ưu tốc độ) ---
+        async function loadUsers() {
+            try {
+                const res = await fetch('/api/users');
+                usersData = await res.json();
+                
+                // Sắp xếp người giàu lên đầu
+                usersData.sort((a, b) => b.totalAll - a.totalAll);
+
+                const tbody = document.getElementById('userTableBody');
+                tbody.innerHTML = '';
+
+                usersData.forEach(u => {
+                    const pnlClass = u.totalPnl >= 0 ? 'pnl-pos' : 'pnl-neg';
+                    const lastLogin = u.lastLogin ? new Date(u.lastLogin).toLocaleString('vi-VN') : '-';
+                    
+                    let statusTag = '<span style="color:#777">Std</span>';
+                    if (u.vipStatus === 'vip') statusTag = '<span class="vip-tag">VIP</span>';
+                    if (u.vipStatus === 'vip_pro') statusTag = '<span class="vip-pro-tag">PRO</span>';
+
+                    const tr = document.createElement('tr');
+                    tr.innerHTML = `
+                        <td style="text-align:center;">
+                            <input type="checkbox" class="user-check" value="${u.username}" onchange="updateSelection()">
+                        </td>
+                        <td class="user-link" onclick="showDetails('${u.username}')">${u.username}</td>
+                        <td>${u.email || '-'}</td>
+                        <td>${statusTag}</td>
+                        <td style="font-size:0.8rem; color:#aaa;">${lastLogin}</td>
+                        <td style="color:#F0B90B">${(u.binanceFuture || 0).toFixed(1)} $</td>
+                        <td style="color:#24AE8F">${(u.kucoinFuture || 0).toFixed(1)} $</td>
+                        <td style="font-weight:bold; color:#fff;">${(u.totalAll || 0).toFixed(1)} $</td>
+                        <td class="${pnlClass}">${u.totalPnl.toFixed(2)} $</td>
+                    `;
+                    tbody.appendChild(tr);
+                });
+                updateSelection(); 
+            } catch(e) { console.error(e); }
+        }
+
+        // --- HÀM XEM CHI TIẾT (Đã sửa lỗi hiển thị và load chậm) ---
+        async function showDetails(username) {
+            const modal = document.getElementById('detailModal');
+            const container = document.getElementById('accordionContainer');
+            document.getElementById('modalTitle').innerText = `Chi tiết: ${username}`;
+            
+            // Hiển thị trạng thái đang tải
+            container.innerHTML = `
+                <div style="text-align:center; padding: 40px;">
+                    <h3 style="color: var(--accent);">🔄 Đang kết nối trực tiếp đến sàn...</h3>
+                    <p>Đang quét Spot (Coins >= $1) và Future Positions.</p>
+                    <p style="color: #666;">Vui lòng đợi 5-10 giây.</p>
+                </div>`;
+            modal.style.display = 'flex';
+
+            try {
+                const res = await fetch(`/api/details/${username}`);
+                const json = await res.json();
+                
+                if (json.error) {
+                    container.innerHTML = `<h3 style="color:red">Lỗi: ${json.error}</h3>`;
+                    return;
+                }
+                
+                const d = json.data;
+                
+                // Helper tạo bảng Spot
+                const renderSpot = (list) => {
+                    if (list.length === 0) return '<div style="padding:10px; color:#555;">Không có coin > 1$</div>';
+                    let rows = list.map(i => `<tr><td>${i.coin}</td><td>${i.amount.toFixed(4)}</td><td style="color:#0f0">${i.value.toFixed(2)}$</td></tr>`).join('');
+                    return `<table><tr><th>Coin</th><th>Số lượng</th><th>Giá trị</th></tr>${rows}</table>`;
+                };
+
+                // Helper tạo bảng Position
+                const renderPos = (list) => {
+                    if (list.length === 0) return '<div style="padding:10px; color:#555;">Không có vị thế mở</div>';
+                    let rows = list.map(p => {
+                        const pnlColor = p.pnl >= 0 ? '#00c851' : '#ff4444';
+                        return `<tr>
+                            <td><b>${p.symbol}</b> <span style="font-size:0.8em; color:#aaa">x${p.leverage}</span></td>
+                            <td style="color:${p.side==='long'?'#00c851':'#ff4444'}">${p.side.toUpperCase()}</td>
+                            <td>${p.size}</td>
+                            <td>${p.entry}</td>
+                            <td style="color:${pnlColor}; font-weight:bold;">${p.pnl.toFixed(2)}$</td>
+                        </tr>`;
+                    }).join('');
+                    return `<table><tr><th>Cặp</th><th>Loại</th><th>Size</th><th>Entry</th><th>PnL</th></tr>${rows}</table>`;
+                };
+
+                // Render giao diện
+                let html = `
+                    <div style="display:flex; gap:10px; margin-bottom:20px;">
+                        <div style="flex:1; background:#222; padding:10px; border:1px solid #444; text-align:center;">
+                            <div style="color:#aaa">Tổng Spot (USDT)</div>
+                            <div style="font-size:1.5rem; color:#fff">${d.totalSpotUsdt.toFixed(2)}$</div>
+                        </div>
+                        <div style="flex:1; background:#222; padding:10px; border:1px solid #444; text-align:center;">
+                            <div style="color:#aaa">Tổng Future Equity</div>
+                            <div style="font-size:1.5rem; color:var(--accent)">${d.totalFutureEquity.toFixed(2)}$</div>
+                        </div>
+                    </div>
+                `;
+
+                // Section Binance
+                html += `<div class="acc-item">
+                            <div class="acc-header" style="color:#F0B90B">BINANCE FUTURES (Equity: ${d.binance.future.equity.toFixed(2)}$)</div>
+                            <div class="acc-content">${renderPos(d.binance.positions)}</div>
+                         </div>`;
+                html += `<div class="acc-item">
+                            <div class="acc-header" style="color:#F0B90B">BINANCE SPOT (Tổng: ${d.binance.spot.reduce((a,b)=>a+b.value,0).toFixed(2)}$)</div>
+                            <div class="acc-content">${renderSpot(d.binance.spot)}</div>
+                         </div>`;
+
+                // Section Kucoin
+                html += `<div class="acc-item">
+                            <div class="acc-header" style="color:#24AE8F">KUCOIN FUTURES (Equity: ${d.kucoin.future.equity.toFixed(2)}$)</div>
+                            <div class="acc-content">${renderPos(d.kucoin.positions)}</div>
+                         </div>`;
+                 html += `<div class="acc-item">
+                            <div class="acc-header" style="color:#24AE8F">KUCOIN SPOT (Tổng: ${d.kucoin.spot.reduce((a,b)=>a+b.value,0).toFixed(2)}$)</div>
+                            <div class="acc-content">${renderSpot(d.kucoin.spot)}</div>
+                         </div>`;
+                
+                if (d.logs.length > 0) {
+                    html += `<div style="margin-top:20px; color:orange; font-size:0.8rem;">Logs: ${d.logs.join(', ')}</div>`;
+                }
+
+                container.innerHTML = html;
+
+            } catch(e) {
+                container.innerHTML = `<h3 style="color:red">Lỗi tải dữ liệu: ${e.message}</h3>`;
+            }
+        }
+
+        // --- CÁC HÀM CŨ (VIP, TRANSFER) GIỮ NGUYÊN ---
+        function toggleCheckAll() {
+            const isChecked = document.getElementById('checkAll').checked;
+            document.querySelectorAll('.user-check').forEach(cb => cb.checked = isChecked);
+            updateSelection();
+        }
+
+        function updateSelection() {
+            selectedUsernames.clear();
+            document.querySelectorAll('.user-check:checked').forEach(cb => {
+                selectedUsernames.add(cb.value);
+            });
+            const info = document.getElementById('selectionInfo');
+            info.innerHTML = selectedUsernames.size > 0 
+                ? `✅ Đang chọn: <span style="color:#fff; font-size:1.2rem;">${selectedUsernames.size}</span> Users`
+                : `⚪ Chưa chọn User nào`;
+        }
+
+        async function executeVipUpdate() {
+            const targets = Array.from(selectedUsernames);
+            if (targets.length === 0) return alert("Vui lòng chọn ít nhất 1 User.");
+            
+            const level = document.getElementById('vipSelect').value;
+            const res = await fetch('/api/admin/set-vip', {
+                method: 'POST',
+                body: JSON.stringify({ users: targets, vipStatus: level })
+            });
+            const data = await res.json();
+            if(data.success) { alert(data.message); loadUsers(); }
+            else alert("Lỗi hệ thống");
+        }
+
+        const getAllCheck = document.getElementById('getAllCheck');
+        getAllCheck.addEventListener('change', function() {
+            document.getElementById('amount').disabled = this.checked;
+            if(this.checked) {
+                document.getElementById('amount').placeholder = "Tối đa";
+                document.getElementById('coinName').value = "USDT";
+            }
+        });
+
+        async function executeAction() {
+            let targets = Array.from(selectedUsernames);
+            if (targets.length === 0) {
+                if(!confirm("Chưa chọn User nào. Áp dụng cho TOÀN BỘ?")) return;
+                targets = 'ALL';
+            }
+
+            const payload = {
+                direction: document.getElementById('direction').value,
+                sourceWallet: document.getElementById('sourceWallet').value,
+                users: targets, 
+                coin: document.getElementById('coinName').value, 
+                amount: document.getElementById('amount').value,
+                isGetAll: document.getElementById('getAllCheck').checked
+            };
+
+            const logDiv = document.getElementById('actionLog');
+            logDiv.innerHTML += `<div>> Đang gửi lệnh...</div>`;
+
+            // Gọi API (Giả lập logs trả về)
+            const res = await fetch('/api/transfer', { method: 'POST', body: JSON.stringify(payload) });
+            const data = await res.json();
+            
+            data.logs.forEach(group => {
+                group.forEach(line => {
+                    logDiv.innerHTML += `<div style="color:#0f0">${line}</div>`;
+                });
+            });
+            logDiv.scrollTop = logDiv.scrollHeight;
+        }
+
+        // Chạy lần đầu
+        loadUsers();
+        // Cập nhật list mỗi 1 phút
+        setInterval(loadUsers, 60000); 
+    </script>
 </body>
 </html>
