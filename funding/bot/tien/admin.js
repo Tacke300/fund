@@ -32,47 +32,14 @@ function initExchange(exchangeId, config) {
             options.password = config.kucoinPassword || config.kucoinApiPassword;
         }
 
-        if (!options.apiKey || !options.secret) return null;
+        if (!options.apiKey || !options.secret) {
+            console.log(`[EXCHANGE] Missing API Key/Secret for ${exchangeId}`);
+            return null;
+        }
         return new exchangeClass(options);
     } catch (e) {
+        console.error(`[EXCHANGE] Init Error: ${e.message}`);
         return null;
-    }
-}
-
-// Hàm tối ưu dữ liệu biểu đồ (Downsampling)
-function getOptimizedBalanceHistory(username) {
-    try {
-        const file = path.join(USER_DATA_DIR, `${username}_balance_history.json`);
-        if (!fs.existsSync(file)) return [];
-        const raw = JSON.parse(fs.readFileSync(file, 'utf8'));
-        if (!Array.isArray(raw) || raw.length === 0) return [];
-
-        // Nếu dữ liệu quá lớn, chỉ lấy mẫu khoảng 300 điểm để vẽ chart cho nhanh
-        const targetPoints = 300;
-        if (raw.length <= targetPoints) return raw;
-
-        const step = Math.ceil(raw.length / targetPoints);
-        const optimized = [];
-        for (let i = 0; i < raw.length; i += step) {
-            optimized.push(raw[i]);
-        }
-        // Luôn lấy điểm cuối cùng
-        if (optimized[optimized.length - 1] !== raw[raw.length - 1]) {
-            optimized.push(raw[raw.length - 1]);
-        }
-        return optimized;
-    } catch (e) {
-        return [];
-    }
-}
-
-function getUserTradeHistory(username) {
-    try {
-        const file = path.join(USER_DATA_DIR, `${username}_history.json`);
-        if (!fs.existsSync(file)) return [];
-        return JSON.parse(fs.readFileSync(file, 'utf8'));
-    } catch (e) {
-        return [];
     }
 }
 
@@ -98,19 +65,25 @@ async function getAllUsersSummary() {
                 } catch(e) {}
             }
 
+            const binanceFut = config.savedBinanceFut || 0;
+            const kucoinFut = config.savedKucoinFut || 0;
+            const totalAssets = config.savedTotalAssets || 0;
+
             users.push({
                 id: index++,
                 username: config.username || file.replace('_config.json', ''),
                 email: config.email || 'N/A',
                 vipStatus: config.vipStatus || 'none',
-                binanceFuture: config.savedBinanceFut || 0,
-                kucoinFuture: config.savedKucoinFut || 0,
-                totalAll: config.savedTotalAssets || 0,
+                binanceFuture: binanceFut,
+                kucoinFuture: kucoinFut,
+                totalAll: totalAssets,
                 totalPnl: totalPnl,
                 lastLogin: stats.mtime,
                 filename: file
             });
-        } catch (e) { }
+        } catch (e) {
+            console.error(`[USER LOAD] Error loading ${file}: ${e.message}`);
+        }
     }
     return users;
 }
@@ -118,6 +91,8 @@ async function getAllUsersSummary() {
 const server = http.createServer(async (req, res) => {
     res.setHeader('Access-Control-Allow-Origin', '*');
     
+    console.log(`[REQUEST] ${req.method} ${req.url}`);
+
     if (req.method === 'GET' && req.url === '/') {
         fs.readFile(path.join(__dirname, 'admin.html'), (err, content) => {
             if(err) { res.end('Admin HTML not found'); return; }
@@ -131,7 +106,10 @@ const server = http.createServer(async (req, res) => {
         try {
             const users = await getAllUsersSummary();
             res.end(JSON.stringify(users));
-        } catch (e) { res.end('[]'); }
+        } catch (e) {
+            console.error(`[API USERS] Error: ${e.message}`);
+            res.end('[]');
+        }
         return;
     }
 
@@ -142,20 +120,25 @@ const server = http.createServer(async (req, res) => {
             if (urlParts.length < 2) throw new Error("URL Invalid");
             username = decodeURIComponent(urlParts[1]);
 
+            console.log(`[DETAILS] Processing for: ${username}`);
+
             const configPath = path.join(USER_DATA_DIR, `${username}_config.json`);
             if (!fs.existsSync(configPath)) {
+                console.log(`[DETAILS] Config file missing for ${username}`);
                 res.writeHead(404);
-                res.end(JSON.stringify({ error: "User config not found" }));
+                res.end(JSON.stringify({ error: "User config not found", totalUsdt: 0 }));
                 return;
             }
             const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
 
             const checkExchange = async (exName, exId) => {
+                console.log(`[DETAILS] Connecting to ${exName}...`);
                 try {
                     const ex = initExchange(exId, config);
                     if (!ex) return { total: 0, free: 0, positions: [], spot: [] };
 
                     await ex.loadMarkets();
+
                     const bal = await ex.fetchBalance();
                     const total = bal.total['USDT'] || 0;
                     const free = bal.free['USDT'] || 0;
@@ -173,7 +156,7 @@ const server = http.createServer(async (req, res) => {
                                 leverage: p.leverage || (p.info && p.info.leverage) || 'N/A',
                                 pnl: parseFloat(p.unrealizedPnl || 0)
                             }));
-                    } catch (e) {}
+                    } catch (e) { console.log(`[Pos Error] ${exName}: ${e.message}`); }
 
                     let spotAssets = [];
                     try {
@@ -187,8 +170,16 @@ const server = http.createServer(async (req, res) => {
                         }
                     } catch(e) {}
 
-                    return { total: total, free: free, positions: positions, spot: spotAssets };
+                    return { 
+                        total: total, 
+                        free: free, 
+                        positions: positions, 
+                        spot: spotAssets,
+                        future: { equity: total }
+                    };
+
                 } catch (e) {
+                    console.log(`[DETAILS] ${exName} FAILED: ${e.message}`);
                     return { total: 0, free: 0, error: e.message, positions: [], spot: [] };
                 }
             };
@@ -198,26 +189,54 @@ const server = http.createServer(async (req, res) => {
                 checkExchange('Kucoin', 'kucoinfutures')
             ]);
 
-            // Lấy dữ liệu lịch sử và biểu đồ
-            const balanceHistory = getOptimizedBalanceHistory(username);
-            const tradeHistory = getUserTradeHistory(username);
+            let balanceHistory = [];
+            try {
+                const bFile = path.join(USER_DATA_DIR, `${username}_balance_history.json`);
+                if (fs.existsSync(bFile)) {
+                    const raw = JSON.parse(fs.readFileSync(bFile, 'utf8'));
+                    if (raw.length > 500) {
+                        const step = Math.ceil(raw.length / 500);
+                        balanceHistory = raw.filter((_, i) => i % step === 0);
+                    } else {
+                        balanceHistory = raw;
+                    }
+                }
+            } catch(e) {}
+
+            let tradeHistory = [];
+            try {
+                const hFile = path.join(USER_DATA_DIR, `${username}_history.json`);
+                if (fs.existsSync(hFile)) {
+                    tradeHistory = JSON.parse(fs.readFileSync(hFile, 'utf8'));
+                }
+            } catch(e) {}
 
             const responsePayload = {
                 username: username,
                 binance: binance,
                 kucoin: kucoin,
                 totalUsdt: (binance.total + kucoin.total),
+                totalSpotUsdt: (binance.spot.reduce((a,b)=>a+b.value,0) + kucoin.spot.reduce((a,b)=>a+b.value,0)),
+                totalFutureEquity: (binance.total + kucoin.total),
                 balanceHistory: balanceHistory,
-                tradeHistory: tradeHistory
+                tradeHistory: tradeHistory,
+                logs: []
             };
 
+            console.log(`[DETAILS] Sending response for ${username}`);
             res.writeHead(200, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify(responsePayload));
 
         } catch (error) {
+            console.error(`[DETAILS] CRITICAL ERROR: ${error.message}`);
             res.writeHead(500, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ error: error.message }));
+            res.end(JSON.stringify({ error: error.message, totalUsdt: 0 }));
         }
+        return;
+    }
+
+    if (req.method === 'POST' && req.url === '/api/transfer') {
+        res.end(JSON.stringify({ logs: ['Skipped'] }));
         return;
     }
 
@@ -231,6 +250,7 @@ const server = http.createServer(async (req, res) => {
                     ? fs.readdirSync(USER_DATA_DIR).filter(f => f.endsWith('_config.json'))
                     : users.map(u => `${u}_config.json`);
 
+                let count = 0;
                 for (const file of targetFiles) {
                     const filePath = path.join(USER_DATA_DIR, file);
                     if (fs.existsSync(filePath)) {
@@ -240,10 +260,13 @@ const server = http.createServer(async (req, res) => {
                         else if (vipStatus === 'vip_pro') cfg.vipExpiry = 9999999999999;
                         else cfg.vipExpiry = 0;
                         fs.writeFileSync(filePath, JSON.stringify(cfg, null, 2));
+                        count++;
                     }
                 }
-                res.end(JSON.stringify({ success: true }));
+                console.log(`[ADMIN] VIP updated for ${count} users`);
+                res.end(JSON.stringify({ success: true, message: `Updated ${count} users.` }));
             } catch(e) {
+                console.error(`[ADMIN] VIP Set Error: ${e.message}`);
                 res.writeHead(500); 
                 res.end(JSON.stringify({ success: false })); 
             }
