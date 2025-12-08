@@ -32,14 +32,47 @@ function initExchange(exchangeId, config) {
             options.password = config.kucoinPassword || config.kucoinApiPassword;
         }
 
-        if (!options.apiKey || !options.secret) {
-            console.log(`[EXCHANGE] Missing API Key/Secret for ${exchangeId}`);
-            return null;
-        }
+        if (!options.apiKey || !options.secret) return null;
         return new exchangeClass(options);
     } catch (e) {
-        console.error(`[EXCHANGE] Init Error: ${e.message}`);
         return null;
+    }
+}
+
+// Hàm tối ưu dữ liệu biểu đồ (Downsampling)
+function getOptimizedBalanceHistory(username) {
+    try {
+        const file = path.join(USER_DATA_DIR, `${username}_balance_history.json`);
+        if (!fs.existsSync(file)) return [];
+        const raw = JSON.parse(fs.readFileSync(file, 'utf8'));
+        if (!Array.isArray(raw) || raw.length === 0) return [];
+
+        // Nếu dữ liệu quá lớn, chỉ lấy mẫu khoảng 300 điểm để vẽ chart cho nhanh
+        const targetPoints = 300;
+        if (raw.length <= targetPoints) return raw;
+
+        const step = Math.ceil(raw.length / targetPoints);
+        const optimized = [];
+        for (let i = 0; i < raw.length; i += step) {
+            optimized.push(raw[i]);
+        }
+        // Luôn lấy điểm cuối cùng
+        if (optimized[optimized.length - 1] !== raw[raw.length - 1]) {
+            optimized.push(raw[raw.length - 1]);
+        }
+        return optimized;
+    } catch (e) {
+        return [];
+    }
+}
+
+function getUserTradeHistory(username) {
+    try {
+        const file = path.join(USER_DATA_DIR, `${username}_history.json`);
+        if (!fs.existsSync(file)) return [];
+        return JSON.parse(fs.readFileSync(file, 'utf8'));
+    } catch (e) {
+        return [];
     }
 }
 
@@ -61,30 +94,23 @@ async function getAllUsersSummary() {
             if (fs.existsSync(path.join(USER_DATA_DIR, histFile))) {
                 try {
                     const history = JSON.parse(fs.readFileSync(path.join(USER_DATA_DIR, histFile), 'utf8'));
-                    // --- FIX: Chỉ cộng actualPnl (đã bù trừ 2 sàn) ---
                     if (Array.isArray(history)) totalPnl = history.reduce((sum, trade) => sum + (parseFloat(trade.actualPnl) || 0), 0);
                 } catch(e) {}
             }
-
-            const binanceFut = config.savedBinanceFut || 0;
-            const kucoinFut = config.savedKucoinFut || 0;
-            const totalAssets = config.savedTotalAssets || 0;
 
             users.push({
                 id: index++,
                 username: config.username || file.replace('_config.json', ''),
                 email: config.email || 'N/A',
                 vipStatus: config.vipStatus || 'none',
-                binanceFuture: binanceFut,
-                kucoinFuture: kucoinFut,
-                totalAll: totalAssets,
+                binanceFuture: config.savedBinanceFut || 0,
+                kucoinFuture: config.savedKucoinFut || 0,
+                totalAll: config.savedTotalAssets || 0,
                 totalPnl: totalPnl,
                 lastLogin: stats.mtime,
                 filename: file
             });
-        } catch (e) {
-            console.error(`[USER LOAD] Error loading ${file}: ${e.message}`);
-        }
+        } catch (e) { }
     }
     return users;
 }
@@ -92,8 +118,6 @@ async function getAllUsersSummary() {
 const server = http.createServer(async (req, res) => {
     res.setHeader('Access-Control-Allow-Origin', '*');
     
-    console.log(`[REQUEST] ${req.method} ${req.url}`);
-
     if (req.method === 'GET' && req.url === '/') {
         fs.readFile(path.join(__dirname, 'admin.html'), (err, content) => {
             if(err) { res.end('Admin HTML not found'); return; }
@@ -107,14 +131,10 @@ const server = http.createServer(async (req, res) => {
         try {
             const users = await getAllUsersSummary();
             res.end(JSON.stringify(users));
-        } catch (e) {
-            console.error(`[API USERS] Error: ${e.message}`);
-            res.end('[]');
-        }
+        } catch (e) { res.end('[]'); }
         return;
     }
 
-    // --- FIX: API DETAILS ---
     if (req.url.startsWith('/api/details/')) {
         let username = 'UNKNOWN';
         try {
@@ -122,31 +142,24 @@ const server = http.createServer(async (req, res) => {
             if (urlParts.length < 2) throw new Error("URL Invalid");
             username = decodeURIComponent(urlParts[1]);
 
-            console.log(`[DETAILS] Processing for: ${username}`);
-
             const configPath = path.join(USER_DATA_DIR, `${username}_config.json`);
             if (!fs.existsSync(configPath)) {
-                console.log(`[DETAILS] Config file missing for ${username}`);
                 res.writeHead(404);
-                res.end(JSON.stringify({ error: "User config not found", totalUsdt: 0 }));
+                res.end(JSON.stringify({ error: "User config not found" }));
                 return;
             }
             const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
 
             const checkExchange = async (exName, exId) => {
-                console.log(`[DETAILS] Connecting to ${exName}...`);
                 try {
                     const ex = initExchange(exId, config);
                     if (!ex) return { total: 0, free: 0, positions: [], spot: [] };
 
-                    // FIX: Load Market để lấy thông tin đòn bẩy
                     await ex.loadMarkets();
-
                     const bal = await ex.fetchBalance();
                     const total = bal.total['USDT'] || 0;
                     const free = bal.free['USDT'] || 0;
 
-                    // FIX: Lấy positions và leverage
                     let positions = [];
                     try {
                         const rawPos = await ex.fetchPositions();
@@ -157,41 +170,26 @@ const server = http.createServer(async (req, res) => {
                                 side: p.side,
                                 size: parseFloat(p.contracts),
                                 entry: parseFloat(p.entryPrice),
-                                // Lấy leverage từ p.leverage hoặc info
                                 leverage: p.leverage || (p.info && p.info.leverage) || 'N/A',
                                 pnl: parseFloat(p.unrealizedPnl || 0)
                             }));
-                    } catch (e) { console.log(`[Pos Error] ${exName}: ${e.message}`); }
+                    } catch (e) {}
 
-                    // FIX: Lấy Spot (Coin > 1$)
                     let spotAssets = [];
                     try {
-                        // Cần tạo instance spot riêng để check spot balance
                         const spotExId = exId === 'binanceusdm' ? 'binance' : 'kucoin';
                         const spotEx = initExchange(spotExId, config);
                         if(spotEx) {
                             const sBal = await spotEx.fetchBalance();
                             for(const [c, v] of Object.entries(sBal.total)) {
-                                if(c !== 'USDT' && v > 0) {
-                                    // Ở đây tạm thời push USDT value ước tính = 0 để tránh call API nhiều làm chậm
-                                    // Nếu muốn chính xác phải fetchTicker. Giả sử lấy USDT balance
-                                }
                                 if(c === 'USDT' && v > 1) spotAssets.push({coin: c, amount: v, value: v});
                             }
                         }
                     } catch(e) {}
 
-                    return { 
-                        total: total, 
-                        free: free, 
-                        positions: positions, 
-                        spot: spotAssets,
-                        future: { equity: total }
-                    };
-
+                    return { total: total, free: free, positions: positions, spot: spotAssets };
                 } catch (e) {
-                    console.log(`[DETAILS] ${exName} FAILED: ${e.message}`);
-                    return { total: 0, free: 0, error: e.message };
+                    return { total: 0, free: 0, error: e.message, positions: [], spot: [] };
                 }
             };
 
@@ -200,31 +198,26 @@ const server = http.createServer(async (req, res) => {
                 checkExchange('Kucoin', 'kucoinfutures')
             ]);
 
+            // Lấy dữ liệu lịch sử và biểu đồ
+            const balanceHistory = getOptimizedBalanceHistory(username);
+            const tradeHistory = getUserTradeHistory(username);
+
             const responsePayload = {
                 username: username,
                 binance: binance,
                 kucoin: kucoin,
                 totalUsdt: (binance.total + kucoin.total),
-                // Bổ sung các field cho modal html hiển thị
-                totalSpotUsdt: (binance.spot.reduce((a,b)=>a+b.value,0) + kucoin.spot.reduce((a,b)=>a+b.value,0)),
-                totalFutureEquity: (binance.total + kucoin.total),
-                logs: []
+                balanceHistory: balanceHistory,
+                tradeHistory: tradeHistory
             };
 
-            console.log(`[DETAILS] Sending response for ${username}`);
             res.writeHead(200, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify(responsePayload));
 
         } catch (error) {
-            console.error(`[DETAILS] CRITICAL ERROR: ${error.message}`);
             res.writeHead(500, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ error: error.message, totalUsdt: 0 }));
+            res.end(JSON.stringify({ error: error.message }));
         }
-        return;
-    }
-
-    if (req.method === 'POST' && req.url === '/api/transfer') {
-        res.end(JSON.stringify({ logs: ['Skipped'] }));
         return;
     }
 
@@ -238,7 +231,6 @@ const server = http.createServer(async (req, res) => {
                     ? fs.readdirSync(USER_DATA_DIR).filter(f => f.endsWith('_config.json'))
                     : users.map(u => `${u}_config.json`);
 
-                let count = 0;
                 for (const file of targetFiles) {
                     const filePath = path.join(USER_DATA_DIR, file);
                     if (fs.existsSync(filePath)) {
@@ -248,13 +240,10 @@ const server = http.createServer(async (req, res) => {
                         else if (vipStatus === 'vip_pro') cfg.vipExpiry = 9999999999999;
                         else cfg.vipExpiry = 0;
                         fs.writeFileSync(filePath, JSON.stringify(cfg, null, 2));
-                        count++;
                     }
                 }
-                console.log(`[ADMIN] VIP updated for ${count} users`);
-                res.end(JSON.stringify({ success: true, message: `Updated ${count} users.` }));
+                res.end(JSON.stringify({ success: true }));
             } catch(e) {
-                console.error(`[ADMIN] VIP Set Error: ${e.message}`);
                 res.writeHead(500); 
                 res.end(JSON.stringify({ success: false })); 
             }
