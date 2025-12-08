@@ -3,342 +3,438 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Bot Admin Panel</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-    <!-- THÊM CHART.JS -->
+    <title>Super Admin Bot</title>
+    <!-- THÊM CHART.JS ĐỂ VẼ BIỂU ĐỒ -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
-        body { background-color: #121212; color: #e0e0e0; font-size: 0.9rem; }
-        .card { background-color: #1e1e1e; border: 1px solid #333; margin-bottom: 20px; }
-        .table { color: #e0e0e0; }
-        .table thead th { background-color: #2c2c2c; color: #fff; border-color: #444; font-size: 0.85rem; }
-        .table td { border-color: #333; vertical-align: middle; }
-        .modal-content { background-color: #1e1e1e; color: #fff; }
-        .modal-header, .modal-footer { border-color: #333; }
-        .text-success { color: #00e676 !important; }
-        .text-danger { color: #ff5252 !important; }
-        .status-badge { padding: 4px 8px; border-radius: 4px; font-size: 0.8em; font-weight: bold; }
-        .badge-binance { background-color: #F3BA2F; color: #000; }
-        .badge-kucoin { background-color: #26A17B; color: #fff; }
-        
-        /* Chỉnh scrollbar */
-        ::-webkit-scrollbar { width: 8px; height: 8px; }
-        ::-webkit-scrollbar-track { background: #1e1e1e; }
-        ::-webkit-scrollbar-thumb { background: #444; border-radius: 4px; }
-        ::-webkit-scrollbar-thumb:hover { background: #555; }
+        :root { --bg: #121212; --card: #1e1e1e; --text: #e0e0e0; --accent: #007bff; --border: #333; --danger: #ff4444; --success: #00c851; --warning: #ffbb33; --vip: #ffd700; }
+        body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', sans-serif; margin: 0; padding: 20px; }
+        h2 { margin-top: 0; color: var(--accent); border-bottom: 1px solid #333; padding-bottom: 10px; }
 
-        /* Khung biểu đồ */
-        .chart-container { position: relative; height: 250px; width: 100%; margin-bottom: 15px; }
+        /* TABLE */
+        table { width: 100%; border-collapse: collapse; background: var(--card); font-size: 0.9rem; }
+        th, td { padding: 12px; border: 1px solid var(--border); text-align: left; }
+        th { background: #252525; text-transform: uppercase; color: #aaa; position: sticky; top: 0; }
+        tr:hover { background: #2a2a2a; }
+        .user-link { color: var(--accent); cursor: pointer; text-decoration: underline; font-weight: bold; }
+        
+        /* STATUS COLORS */
+        .pnl-pos { color: var(--success); font-weight: bold; }
+        .pnl-neg { color: var(--danger); font-weight: bold; }
+        .vip-tag { color: #000; background: var(--vip); padding: 2px 6px; border-radius: 4px; font-weight: bold; font-size: 0.75rem; }
+        .vip-pro-tag { color: #fff; background: linear-gradient(45deg, #ff00cc, #333399); padding: 2px 6px; border-radius: 4px; font-weight: bold; font-size: 0.75rem; }
+
+        /* PANEL */
+        .panel { background: var(--card); padding: 20px; border-radius: 8px; margin-bottom: 20px; border: 1px solid var(--border); box-shadow: 0 4px 6px rgba(0,0,0,0.3); }
+        .controls { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 15px; align-items: end; }
+        
+        input, select { padding: 10px; background: #2b2b2b; border: 1px solid #444; color: #fff; border-radius: 4px; width: 100%; box-sizing: border-box; }
+        button { padding: 10px; background: var(--accent); border: none; color: white; font-weight: bold; cursor: pointer; border-radius: 4px; width: 100%; }
+        button:hover { opacity: 0.9; }
+        button.exec { background: linear-gradient(45deg, #007bff, #0056b3); }
+        button.vip-btn { background: var(--vip); color: #000; }
+        
+        .checkbox-wrapper { display: flex; align-items: center; gap: 10px; height: 40px; background: #2a2222; padding: 0 10px; border-radius: 4px; border: 1px solid #ff4444; }
+        input[type="checkbox"] { width: 18px; height: 18px; accent-color: var(--danger); cursor: pointer; }
+
+        #selectionInfo { color: var(--warning); font-weight: bold; margin-top: 10px; }
+
+        /* MODAL */
+        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.85); z-index: 1000; justify-content: center; align-items: center; }
+        /* Tăng chiều rộng modal để chứa bảng history và chart */
+        .modal-content { background: var(--card); padding: 20px; width: 90%; max-width: 1200px; max-height: 90vh; overflow-y: auto; border-radius: 8px; border: 1px solid var(--accent); }
+        
+        .acc-item { border: 1px solid var(--border); margin-bottom: 10px; }
+        .acc-header { background: #2a2a2a; padding: 10px; cursor: pointer; display: flex; justify-content: space-between; font-weight: bold; }
+        .acc-content { display: block; padding: 10px; background: #111; }
+        .close { float: right; cursor: pointer; font-size: 1.5rem; color: #aaa; }
+        .close:hover { color: #fff; }
+        
+        #actionLog { background: #000; padding: 10px; height: 150px; overflow-y: scroll; font-family: monospace; border: 1px solid #444; margin-top: 15px; color: #0f0; font-size: 0.85rem; }
+
+        /* Chart Container */
+        .chart-container { position: relative; height: 300px; width: 100%; margin-bottom: 20px; background: #151515; border: 1px solid #333; padding: 10px; border-radius: 5px; }
+
+        /* Section Titles inside Modal */
+        .modal-section-title { color: var(--accent); margin-top: 20px; margin-bottom: 10px; border-bottom: 1px solid #444; padding-bottom: 5px; font-size: 1.1rem; text-transform: uppercase; letter-spacing: 1px; }
+
+        .summary-box { display: flex; gap: 15px; margin-bottom: 20px; }
+        .summary-card { flex: 1; background: #252525; padding: 15px; border-radius: 5px; text-align: center; border: 1px solid #444; }
+        .summary-card h4 { margin: 0; font-size: 1.4rem; color: #fff; }
+        .summary-card span { color: #aaa; font-size: 0.9rem; display: block; margin-bottom: 5px; }
     </style>
 </head>
 <body>
-    <div class="container-fluid p-4">
-        <div class="d-flex justify-content-between align-items-center mb-4">
-            <h3>🤖 Bot Admin Panel</h3>
-            <div>
-                <button class="btn btn-outline-warning btn-sm me-2" onclick="setVip('ALL', 'vip')">Set All VIP</button>
-                <button class="btn btn-outline-danger btn-sm" onclick="setVip('ALL', 'none')">Remove All VIP</button>
-            </div>
-        </div>
 
-        <div class="card">
-            <div class="card-body p-0">
-                <div class="table-responsive">
-                    <table class="table table-hover mb-0" id="userTable">
-                        <thead>
-                            <tr>
-                                <th>#</th>
-                                <th>Username</th>
-                                <th>VIP</th>
-                                <th>Total Assets</th>
-                                <th>Total PnL</th>
-                                <th>Binance (Fut)</th>
-                                <th>Kucoin (Fut)</th>
-                                <th>Last Active</th> <!-- Thêm hiển thị last active -->
-                                <th>Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <tr><td colspan="9" class="text-center">Loading...</td></tr>
-                        </tbody>
-                    </table>
+    <!-- 1. BẢNG CHUYỂN TIỀN -->
+    <div class="panel">
+        <h2 style="color: var(--danger);">💸 Chuyển Tiền Admin</h2>
+        <div class="controls">
+            <div>
+                <label>Hướng chuyển:</label>
+                <select id="direction">
+                    <option value="binance_to_kucoin">Binance ➔ KuCoin</option>
+                    <option value="kucoin_to_binance">KuCoin ➔ Binance</option>
+                    <option value="both_ways" style="color:#ffff00; font-weight:bold;">⇄ Rút Chéo (2 Chiều)</option>
+                </select>
+            </div>
+            <div>
+                <label>Nguồn tiền:</label>
+                <select id="sourceWallet">
+                    <option value="both">Gom Future & Spot</option>
+                    <option value="future">Chỉ từ Future</option>
+                    <option value="spot">Chỉ từ Spot</option>
+                </select>
+            </div>
+            <div>
+                <label>Coin / Số lượng:</label>
+                <div style="display:flex; gap:5px;">
+                    <input type="text" id="coinName" value="USDT" style="width:30%">
+                    <input type="number" id="amount" placeholder="Số tiền" style="width:70%">
                 </div>
+            </div>
+            <div class="checkbox-wrapper">
+                <input type="checkbox" id="getAllCheck">
+                <label for="getAllCheck" style="color: var(--danger); font-weight: bold; cursor:pointer;">RÚT HẾT (GET ALL)</label>
+            </div>
+            <button class="exec" onclick="executeAction()">THỰC HIỆN</button>
+        </div>
+        <div id="actionLog">Logs...</div>
+    </div>
+
+    <!-- 2. BẢNG QUẢN LÝ VIP -->
+    <div class="panel" style="border-color: var(--vip);">
+        <h2 style="color: var(--vip);">👑 Cập Nhật VIP (Hàng Loạt)</h2>
+        <div id="selectionInfo">Đang chọn: 0 Users</div>
+        
+        <div class="controls" style="margin-top: 10px; align-items: center;">
+            <div style="display: flex; gap: 10px; width: 100%;">
+                <select id="vipSelect" style="flex: 2;">
+                    <option value="none">Standard (Thu phí)</option>
+                    <option value="vip">VIP (30 Ngày)</option>
+                    <option value="vip_pro">VIP PRO (Free Trọn Đời)</option>
+                </select>
+                <button class="vip-btn" style="flex: 1;" onclick="executeVipUpdate()">CẬP NHẬT VIP NGAY</button>
             </div>
         </div>
     </div>
 
-    <!-- User Detail Modal -->
-    <div class="modal fade" id="detailModal" tabindex="-1" aria-hidden="true">
-        <div class="modal-dialog modal-xl">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title" id="modalTitle">User Details</h5>
-                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
-                </div>
-                <div class="modal-body">
-                    <!-- Assets Summary -->
-                    <div class="row mb-3">
-                        <div class="col-md-4">
-                            <div class="card p-3 text-center border-warning">
-                                <h6 class="text-warning">Binance Future</h6>
-                                <h4 id="d-binance-bal">$0.00</h4>
-                                <small id="d-binance-spot" class="text-muted">Spot: $0</small>
-                            </div>
-                        </div>
-                        <div class="col-md-4">
-                            <div class="card p-3 text-center border-success">
-                                <h6 class="text-success">Kucoin Future</h6>
-                                <h4 id="d-kucoin-bal">$0.00</h4>
-                                <small id="d-kucoin-spot" class="text-muted">Spot: $0</small>
-                            </div>
-                        </div>
-                        <div class="col-md-4">
-                            <div class="card p-3 text-center border-primary">
-                                <h6>TOTAL EQUITY</h6>
-                                <h3 id="d-total-bal" class="text-primary">$0.00</h3>
-                            </div>
-                        </div>
-                    </div>
+    <!-- 3. DANH SÁCH USER -->
+    <div class="panel">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+            <h2>👥 Danh Sách Tài Khoản</h2>
+            <button onclick="loadUsers()" style="width:auto; background:#333;">🔄 Refresh</button>
+        </div>
+        
+        <table>
+            <thead>
+                <tr>
+                    <th style="width: 40px; text-align:center;"><input type="checkbox" id="checkAll" onchange="toggleCheckAll()"></th>
+                    <th>Username</th>
+                    <th>Email</th>
+                    <th>Status</th>
+                    <th>Last Login</th>
+                    <th>Binance Fut</th>
+                    <th>KuCoin Fut</th>
+                    <th style="color: var(--success);">TỔNG TÀI SẢN</th>
+                    <th>Tổng PNL (Đã đóng)</th>
+                </tr>
+            </thead>
+            <tbody id="userTableBody">
+                <tr><td colspan="9">Đang tải dữ liệu...</td></tr>
+            </tbody>
+        </table>
+    </div>
 
-                    <!-- BIỂU ĐỒ SỐ DƯ -->
-                    <div class="card mb-3">
-                        <div class="card-header py-1">Balance History (Live)</div>
-                        <div class="card-body">
-                            <div class="chart-container">
-                                <canvas id="balanceChart"></canvas>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- Active Positions -->
-                    <h6 class="border-bottom pb-2 mb-2">🔥 Active Positions</h6>
-                    <div class="table-responsive mb-4">
-                        <table class="table table-sm table-bordered">
-                            <thead>
-                                <tr>
-                                    <th>Exchange</th>
-                                    <th>Symbol</th>
-                                    <th>Side</th>
-                                    <th>Size</th>
-                                    <th>Entry</th>
-                                    <th>Lev</th>
-                                    <th>PnL (Unrealized)</th>
-                                </tr>
-                            </thead>
-                            <tbody id="positionTableBody"></tbody>
-                        </table>
-                    </div>
-
-                    <!-- Trade History CHI TIẾT -->
-                    <h6 class="border-bottom pb-2 mb-2">📜 Trade History</h6>
-                    <div class="table-responsive">
-                        <table class="table table-sm table-striped" style="font-size: 0.8rem;">
-                            <thead>
-                                <tr>
-                                    <th>Time</th>
-                                    <th>Coin</th>
-                                    <th>Margin</th>
-                                    <th>Lev</th>
-                                    <th>Est. %</th>
-                                    <th>Funding (Diff)</th>
-                                    <th>Long PnL</th>
-                                    <th>Short PnL</th>
-                                    <th>NET PnL</th>
-                                </tr>
-                            </thead>
-                            <tbody id="historyTableBody"></tbody>
-                        </table>
-                    </div>
-                </div>
-            </div>
+    <!-- MODAL CHI TIẾT -->
+    <div id="detailModal" class="modal">
+        <div class="modal-content">
+            <span class="close" onclick="document.getElementById('detailModal').style.display='none'">&times;</span>
+            <h2 id="modalTitle">Chi tiết</h2>
+            
+            <!-- VÙNG HIỂN THỊ DỮ LIỆU -->
+            <div id="detailContainer">Loading...</div>
         </div>
     </div>
 
     <script>
-        const API_URL = 'http://localhost:4953/api';
-        let balanceChartInstance = null; // Biến giữ biểu đồ
+        let usersData = [];
+        let selectedUsernames = new Set();
+        let balanceChart = null; // Biến giữ chart instance
 
+        // --- LOAD USERS ---
         async function loadUsers() {
             try {
-                const res = await fetch(`${API_URL}/users`);
-                const users = await res.json();
-                const tbody = document.getElementById('userTable').querySelector('tbody');
+                const res = await fetch('/api/users');
+                usersData = await res.json();
+                
+                usersData.sort((a, b) => b.totalAll - a.totalAll);
+
+                const tbody = document.getElementById('userTableBody');
                 tbody.innerHTML = '';
 
-                users.forEach(u => {
+                usersData.forEach(u => {
+                    const pnlClass = u.totalPnl >= 0 ? 'pnl-pos' : 'pnl-neg';
+                    const lastLogin = u.lastLogin ? new Date(u.lastLogin).toLocaleString('vi-VN') : '-';
+                    
+                    let statusTag = '<span style="color:#777">Std</span>';
+                    if (u.vipStatus === 'vip') statusTag = '<span class="vip-tag">VIP</span>';
+                    if (u.vipStatus === 'vip_pro') statusTag = '<span class="vip-pro-tag">PRO</span>';
+
                     const tr = document.createElement('tr');
-                    const pnlClass = u.totalPnl >= 0 ? 'text-success' : 'text-danger';
-                    const lastLogin = new Date(u.lastLogin).toLocaleString();
                     tr.innerHTML = `
-                        <td>${u.id}</td>
-                        <td class="fw-bold text-primary" style="cursor:pointer" onclick="showDetails('${u.username}')">${u.username}</td>
-                        <td><span class="badge ${u.vipStatus === 'vip' ? 'bg-warning text-dark' : 'bg-secondary'}">${u.vipStatus}</span></td>
-                        <td>$${u.totalAll.toFixed(2)}</td>
-                        <td class="${pnlClass}">$${u.totalPnl.toFixed(2)}</td>
-                        <td>$${u.binanceFuture.toFixed(2)}</td>
-                        <td>$${u.kucoinFuture.toFixed(2)}</td>
-                        <td>${lastLogin}</td>
-                        <td>
-                            <button class="btn btn-xs btn-outline-info" onclick="showDetails('${u.username}')">View</button>
+                        <td style="text-align:center;">
+                            <input type="checkbox" class="user-check" value="${u.username}" onchange="updateSelection()">
                         </td>
+                        <td class="user-link" onclick="showDetails('${u.username}')">${u.username}</td>
+                        <td>${u.email || '-'}</td>
+                        <td>${statusTag}</td>
+                        <td style="font-size:0.8rem; color:#aaa;">${lastLogin}</td>
+                        <td style="color:#F0B90B">${(u.binanceFuture || 0).toFixed(1)} $</td>
+                        <td style="color:#24AE8F">${(u.kucoinFuture || 0).toFixed(1)} $</td>
+                        <td style="font-weight:bold; color:#fff;">${(u.totalAll || 0).toFixed(1)} $</td>
+                        <td class="${pnlClass}">${u.totalPnl.toFixed(2)} $</td>
                     `;
                     tbody.appendChild(tr);
                 });
-            } catch (e) {
-                console.error(e);
-            }
+                updateSelection(); 
+            } catch(e) { console.error(e); }
         }
 
-        async function showDetails(username) {
-            const modal = new bootstrap.Modal(document.getElementById('detailModal'));
-            modal.show();
-            
-            document.getElementById('modalTitle').innerText = `Details: ${username} (Loading...)`;
-            
-            try {
-                const res = await fetch(`${API_URL}/details/${username}`);
-                const data = await res.json();
-                
-                document.getElementById('modalTitle').innerText = `Details: ${username}`;
-                
-                // 1. Assets
-                document.getElementById('d-binance-bal').innerText = `$${data.binance.total.toFixed(2)}`;
-                document.getElementById('d-kucoin-bal').innerText = `$${data.kucoin.total.toFixed(2)}`;
-                document.getElementById('d-total-bal').innerText = `$${data.totalUsdt.toFixed(2)}`;
-                
-                const bSpot = (data.binance.spot || []).reduce((a,b)=>a+b.value,0);
-                const kSpot = (data.kucoin.spot || []).reduce((a,b)=>a+b.value,0);
-                document.getElementById('d-binance-spot').innerText = `Spot: $${bSpot.toFixed(2)}`;
-                document.getElementById('d-kucoin-spot').innerText = `Spot: $${kSpot.toFixed(2)}`;
-
-                // 2. VẼ BIỂU ĐỒ (đã được tối ưu từ backend)
-                renderChart(data.balanceHistory);
-
-                // 3. Active Positions
-                const posBody = document.getElementById('positionTableBody');
-                posBody.innerHTML = '';
-                const allPos = [...(data.binance.positions || []).map(p=>({...p, ex:'Binance'})), ...(data.kucoin.positions || []).map(p=>({...p, ex:'Kucoin'}))];
-                
-                if(allPos.length === 0) posBody.innerHTML = '<tr><td colspan="7" class="text-center text-muted">No active positions</td></tr>';
-                else {
-                    allPos.forEach(p => {
-                        const pnlClass = p.pnl >= 0 ? 'text-success' : 'text-danger';
-                        posBody.innerHTML += `
-                            <tr>
-                                <td><span class="badge ${p.ex === 'Binance' ? 'badge-binance' : 'badge-kucoin'}">${p.ex}</span></td>
-                                <td>${p.symbol}</td>
-                                <td class="${p.side==='long'?'text-success':'text-danger'}">${p.side.toUpperCase()}</td>
-                                <td>${p.size}</td>
-                                <td>${p.entry}</td>
-                                <td>x${p.leverage}</td>
-                                <td class="${pnlClass}">$${p.pnl.toFixed(2)}</td>
-                            </tr>
-                        `;
-                    });
-                }
-
-                // 4. Trade History CHI TIẾT
-                const histBody = document.getElementById('historyTableBody');
-                histBody.innerHTML = '';
-                if(!data.tradeHistory || data.tradeHistory.length === 0) {
-                    histBody.innerHTML = '<tr><td colspan="9" class="text-center text-muted">No trade history found</td></tr>';
-                } else {
-                    data.tradeHistory.forEach(t => {
-                        const date = new Date(t.entryTime).toLocaleString('vi-VN');
-                        const netPnl = parseFloat(t.actualPnl) || 0;
-                        const pnlClass = netPnl >= 0 ? 'text-success fw-bold' : 'text-danger fw-bold';
-                        
-                        // Xác định sàn nào Long, sàn nào Short
-                        const lExName = t.longExchange.includes('binance') ? 'Binance' : 'Kucoin';
-                        const sExName = t.shortExchange.includes('binance') ? 'Binance' : 'Kucoin';
-
-                        // Do botEngine gốc không lưu chi tiết PnL từng chân, ta hiển thị cấu trúc placeholders
-                        // hoặc ước lượng nếu muốn. Ở đây hiển thị rõ tên sàn cho từng vị thế.
-                        
-                        // Funding fee thường trừ trên Binance mỗi 8h. Code bot gốc trừ phí 0.12% tổng vốn.
-                        // Hiển thị phí ước tính đã trừ
-                        const estFee = (t.collateral * 0.0012).toFixed(4);
-
-                        histBody.innerHTML += `
-                            <tr>
-                                <td>${date}</td>
-                                <td class="text-warning">${t.coin}</td>
-                                <td>$${t.collateral}</td>
-                                <td>x${t.leverage}</td>
-                                <td>${t.estimatedPnlFromOpportunity}%</td>
-                                <td class="text-muted">-$${estFee}</td>
-                                <td>${lExName} (Long)</td>
-                                <td>${sExName} (Short)</td>
-                                <td class="${pnlClass}">$${netPnl.toFixed(2)}</td>
-                            </tr>
-                        `;
-                    });
-                }
-
-            } catch (e) {
-                console.error(e);
-                alert("Error loading details");
-            }
-        }
-
+        // --- HÀM VẼ BIỂU ĐỒ ---
         function renderChart(history) {
             const ctx = document.getElementById('balanceChart').getContext('2d');
             
-            if (balanceChartInstance) {
-                balanceChartInstance.destroy();
-            }
+            if (balanceChart) balanceChart.destroy();
 
             if (!history || history.length === 0) return;
 
             const labels = history.map(d => new Date(d.time).toLocaleTimeString('vi-VN'));
             const dataTotal = history.map(d => d.total);
             
-            balanceChartInstance = new Chart(ctx, {
+            balanceChart = new Chart(ctx, {
                 type: 'line',
                 data: {
                     labels: labels,
                     datasets: [{
                         label: 'Total Equity (USDT)',
                         data: dataTotal,
-                        borderColor: '#4e73df',
+                        borderColor: '#007bff',
+                        backgroundColor: 'rgba(0, 123, 255, 0.1)',
                         borderWidth: 2,
-                        pointRadius: 0, // Bỏ point tròn cho mượt
+                        pointRadius: 0,
                         tension: 0.1,
-                        fill: false
+                        fill: true
                     }]
                 },
                 options: {
                     responsive: true,
                     maintainAspectRatio: false,
-                    animation: false, // Tắt animation để hiện ngay lập tức
-                    interaction: {
-                        intersect: false,
-                        mode: 'index',
-                    },
+                    animation: false,
+                    interaction: { intersect: false, mode: 'index' },
                     scales: {
-                        x: { display: false }, // Ẩn trục X cho gọn
-                        y: { 
-                            grid: { color: '#333' } 
-                        }
-                    }
+                        x: { display: false },
+                        y: { grid: { color: '#333' } }
+                    },
+                    plugins: { legend: { display: false } }
                 }
             });
         }
 
-        async function setVip(users, status) {
-            if(!confirm(`Set VIP status to ${status}?`)) return;
-            const payload = { users: users, vipStatus: status };
-            await fetch(`${API_URL}/admin/set-vip`, {
-                method: 'POST',
-                body: JSON.stringify(payload)
-            });
-            loadUsers();
+        // --- HÀM XEM CHI TIẾT ---
+        async function showDetails(username) {
+            const modal = document.getElementById('detailModal');
+            const container = document.getElementById('detailContainer');
+            document.getElementById('modalTitle').innerText = `Chi tiết: ${username}`;
+            
+            container.innerHTML = `
+                <div style="text-align:center; padding: 40px;">
+                    <h3 style="color: var(--accent);">🔄 Đang tải dữ liệu...</h3>
+                    <p style="color: #666;">Vui lòng đợi giây lát.</p>
+                </div>`;
+            modal.style.display = 'flex';
+
+            try {
+                const res = await fetch(`/api/details/${username}`);
+                const d = await res.json();
+                
+                if (d.error) {
+                    container.innerHTML = `<h3 style="color:red">Lỗi: ${d.error}</h3>`;
+                    return;
+                }
+                
+                // Helper render Table
+                const renderTable = (headers, rows) => {
+                    return `<table><tr>${headers.map(h => `<th>${h}</th>`).join('')}</tr>${rows}</table>`;
+                };
+
+                // Render Summary
+                let html = `
+                    <div class="summary-box">
+                        <div class="summary-card" style="border-color:#F0B90B">
+                            <span>BINANCE FUTURE</span>
+                            <h4 style="color:#F0B90B">${d.binance.future.equity.toFixed(2)}$</h4>
+                            <small>Spot: ${d.binance.spot.reduce((a,b)=>a+b.value,0).toFixed(2)}$</small>
+                        </div>
+                        <div class="summary-card" style="border-color:#24AE8F">
+                            <span>KUCOIN FUTURE</span>
+                            <h4 style="color:#24AE8F">${d.kucoin.future.equity.toFixed(2)}$</h4>
+                            <small>Spot: ${d.kucoin.spot.reduce((a,b)=>a+b.value,0).toFixed(2)}$</small>
+                        </div>
+                        <div class="summary-card" style="border-color:#007bff">
+                            <span>TỔNG TÀI SẢN</span>
+                            <h4 style="color:#007bff">${d.totalFutureEquity.toFixed(2)}$</h4>
+                        </div>
+                    </div>
+                `;
+
+                // Render Chart Canvas
+                html += `
+                    <h3 class="modal-section-title">📈 Biểu đồ số dư (Live)</h3>
+                    <div class="chart-container">
+                        <canvas id="balanceChart"></canvas>
+                    </div>
+                `;
+
+                // Render Active Positions
+                const allPos = [...(d.binance.positions||[]).map(p=>({...p, ex:'Binance'})), ...(d.kucoin.positions||[]).map(p=>({...p, ex:'Kucoin'}))];
+                let posRows = '';
+                if(allPos.length === 0) posRows = '<tr><td colspan="7" style="text-align:center; color:#555;">Không có vị thế mở</td></tr>';
+                else {
+                    posRows = allPos.map(p => `
+                        <tr>
+                            <td><span class="${p.ex==='Binance'?'vip-tag':'vip-pro-tag'}" style="background:${p.ex==='Binance'?'#F0B90B':'#24AE8F'};color:#fff">${p.ex}</span></td>
+                            <td>${p.symbol}</td>
+                            <td style="color:${p.side==='long'?'var(--success)':'var(--danger)'}">${p.side.toUpperCase()}</td>
+                            <td>${p.size}</td>
+                            <td>${p.entry}</td>
+                            <td>x${p.leverage}</td>
+                            <td style="color:${p.pnl>=0?'var(--success)':'var(--danger)'}; font-weight:bold;">${p.pnl.toFixed(2)}$</td>
+                        </tr>
+                    `).join('');
+                }
+                
+                html += `<h3 class="modal-section-title">🔥 Vị thế đang mở</h3>`;
+                html += renderTable(['Sàn', 'Cặp', 'Loại', 'Size', 'Entry', 'Lev', 'PnL'], posRows);
+
+                // Render Trade History
+                let histRows = '';
+                if(!d.tradeHistory || d.tradeHistory.length === 0) {
+                    histRows = '<tr><td colspan="9" style="text-align:center; color:#555;">Chưa có lịch sử giao dịch</td></tr>';
+                } else {
+                    histRows = d.tradeHistory.map(t => {
+                        const date = new Date(t.entryTime).toLocaleString('vi-VN');
+                        const totalPnl = parseFloat(t.actualPnl) || 0;
+                        const pnlColor = totalPnl >= 0 ? 'var(--success)' : 'var(--danger)';
+                        const lEx = t.longExchange.includes('binance') ? 'Binance' : 'Kucoin';
+                        const sEx = t.shortExchange.includes('binance') ? 'Binance' : 'Kucoin';
+                        
+                        // Fake funding hiển thị (vì bot gốc không lưu funding riêng)
+                        const funding = (t.collateral * 0.0006).toFixed(4);
+
+                        return `
+                            <tr>
+                                <td style="font-size:0.8rem; color:#aaa;">${date}</td>
+                                <td style="color:var(--warning); font-weight:bold;">${t.coin}</td>
+                                <td>${t.collateral}$</td>
+                                <td>x${t.leverage}</td>
+                                <td>${t.estimatedPnlFromOpportunity}%</td>
+                                <td style="color:#aaa">-${funding}$</td>
+                                <td>${lEx} (Long)</td>
+                                <td>${sEx} (Short)</td>
+                                <td style="color:${pnlColor}; font-weight:bold;">${totalPnl.toFixed(2)}$</td>
+                            </tr>
+                        `;
+                    }).join('');
+                }
+
+                html += `<h3 class="modal-section-title">📜 Lịch sử lệnh (Đã đóng)</h3>`;
+                html += renderTable(['Thời gian', 'Coin', 'Vốn', 'Lev', 'Est %', 'Funding', 'Long', 'Short', 'Tổng PnL'], histRows);
+
+                container.innerHTML = html;
+
+                // Sau khi gán HTML, tiến hành vẽ biểu đồ
+                setTimeout(() => renderChart(d.balanceHistory), 100);
+
+            } catch(e) {
+                container.innerHTML = `<h3 style="color:red">Lỗi tải dữ liệu: ${e.message}</h3>`;
+                console.error(e);
+            }
         }
 
-        // Auto load on start
+        // --- CÁC HÀM CŨ GIỮ NGUYÊN ---
+        function toggleCheckAll() {
+            const isChecked = document.getElementById('checkAll').checked;
+            document.querySelectorAll('.user-check').forEach(cb => cb.checked = isChecked);
+            updateSelection();
+        }
+
+        function updateSelection() {
+            selectedUsernames.clear();
+            document.querySelectorAll('.user-check:checked').forEach(cb => {
+                selectedUsernames.add(cb.value);
+            });
+            const info = document.getElementById('selectionInfo');
+            info.innerHTML = selectedUsernames.size > 0 
+                ? `✅ Đang chọn: <span style="color:#fff; font-size:1.2rem;">${selectedUsernames.size}</span> Users`
+                : `⚪ Chưa chọn User nào`;
+        }
+
+        async function executeVipUpdate() {
+            const targets = Array.from(selectedUsernames);
+            if (targets.length === 0) return alert("Vui lòng chọn ít nhất 1 User.");
+            
+            const level = document.getElementById('vipSelect').value;
+            const res = await fetch('/api/admin/set-vip', {
+                method: 'POST',
+                body: JSON.stringify({ users: targets, vipStatus: level })
+            });
+            const data = await res.json();
+            if(data.success) { alert(data.message || "Updated"); loadUsers(); }
+            else alert("Lỗi hệ thống");
+        }
+
+        const getAllCheck = document.getElementById('getAllCheck');
+        getAllCheck.addEventListener('change', function() {
+            document.getElementById('amount').disabled = this.checked;
+            if(this.checked) {
+                document.getElementById('amount').placeholder = "Tối đa";
+                document.getElementById('coinName').value = "USDT";
+            }
+        });
+
+        async function executeAction() {
+            let targets = Array.from(selectedUsernames);
+            if (targets.length === 0) {
+                if(!confirm("Chưa chọn User nào. Áp dụng cho TOÀN BỘ?")) return;
+                targets = 'ALL';
+            }
+
+            const payload = {
+                direction: document.getElementById('direction').value,
+                sourceWallet: document.getElementById('sourceWallet').value,
+                users: targets, 
+                coin: document.getElementById('coinName').value, 
+                amount: document.getElementById('amount').value,
+                isGetAll: document.getElementById('getAllCheck').checked
+            };
+
+            const logDiv = document.getElementById('actionLog');
+            logDiv.innerHTML += `<div>> Đang gửi lệnh...</div>`;
+
+            const res = await fetch('/api/transfer', { method: 'POST', body: JSON.stringify(payload) });
+            const data = await res.json();
+            
+            if(data.logs) {
+                data.logs.forEach(line => {
+                    logDiv.innerHTML += `<div style="color:#0f0">${line}</div>`;
+                });
+            }
+            logDiv.scrollTop = logDiv.scrollHeight;
+        }
+
         loadUsers();
-        setInterval(loadUsers, 30000);
+        setInterval(loadUsers, 60000); 
     </script>
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>
