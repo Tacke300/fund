@@ -137,6 +137,7 @@ const server = http.createServer(async (req, res) => {
                     const ex = initExchange(exId, config);
                     if (!ex) return { total: 0, free: 0, positions: [], spot: [] };
 
+                    // Thêm: Load Markets để có data chuẩn
                     await ex.loadMarkets();
 
                     const bal = await ex.fetchBalance();
@@ -180,7 +181,7 @@ const server = http.createServer(async (req, res) => {
 
                 } catch (e) {
                     console.log(`[DETAILS] ${exName} FAILED: ${e.message}`);
-                    return { total: 0, free: 0, error: e.message, positions: [], spot: [] };
+                    return { total: 0, free: 0, error: e.message };
                 }
             };
 
@@ -189,37 +190,39 @@ const server = http.createServer(async (req, res) => {
                 checkExchange('Kucoin', 'kucoinfutures')
             ]);
 
-            let balanceHistory = [];
-            try {
-                const bFile = path.join(USER_DATA_DIR, `${username}_balance_history.json`);
-                if (fs.existsSync(bFile)) {
-                    const raw = JSON.parse(fs.readFileSync(bFile, 'utf8'));
-                    if (raw.length > 500) {
-                        const step = Math.ceil(raw.length / 500);
-                        balanceHistory = raw.filter((_, i) => i % step === 0);
-                    } else {
-                        balanceHistory = raw;
-                    }
-                }
-            } catch(e) {}
-
+            // --- ĐOẠN CODE THÊM MỚI: Xử lý History và Biểu đồ ---
             let tradeHistory = [];
-            try {
-                const hFile = path.join(USER_DATA_DIR, `${username}_history.json`);
-                if (fs.existsSync(hFile)) {
-                    tradeHistory = JSON.parse(fs.readFileSync(hFile, 'utf8'));
-                }
-            } catch(e) {}
+            const histPath = path.join(USER_DATA_DIR, `${username}_history.json`);
+            if (fs.existsSync(histPath)) {
+                try { tradeHistory = JSON.parse(fs.readFileSync(histPath, 'utf8')); } catch(e){}
+            }
+
+            let balanceHistory = [];
+            const balPath = path.join(USER_DATA_DIR, `${username}_balance_history.json`);
+            if (fs.existsSync(balPath)) {
+                try { 
+                    const rawBal = JSON.parse(fs.readFileSync(balPath, 'utf8')); 
+                    // Tối ưu biểu đồ: Chỉ lấy tối đa 100 điểm để không lag
+                    if (rawBal.length > 100) {
+                        const step = Math.ceil(rawBal.length / 100);
+                        balanceHistory = rawBal.filter((_, i) => i % step === 0);
+                    } else {
+                        balanceHistory = rawBal;
+                    }
+                } catch(e){}
+            }
+            // ---------------------------------------------------
 
             const responsePayload = {
                 username: username,
                 binance: binance,
                 kucoin: kucoin,
                 totalUsdt: (binance.total + kucoin.total),
-                totalSpotUsdt: (binance.spot.reduce((a,b)=>a+b.value,0) + kucoin.spot.reduce((a,b)=>a+b.value,0)),
+                totalSpotUsdt: (binance.spot ? binance.spot.reduce((a,b)=>a+b.value,0) : 0) + (kucoin.spot ? kucoin.spot.reduce((a,b)=>a+b.value,0) : 0),
                 totalFutureEquity: (binance.total + kucoin.total),
-                balanceHistory: balanceHistory,
+                // Trả về thêm 2 trường này
                 tradeHistory: tradeHistory,
+                balanceHistory: balanceHistory,
                 logs: []
             };
 
