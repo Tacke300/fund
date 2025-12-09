@@ -37,8 +37,9 @@ const FEE_AUTO_ON = 10;
 const FEE_AUTO_OFF = 5;
 const FEE_CHECK_DELAY = 60000;
 
-const SL_PERCENTAGE = 95;
-const TP_PERCENTAGE = 155; 
+// --- MODIFIED CONFIG AS REQUESTED ---
+const SL_PERCENTAGE = 290; // Updated from 95
+const TP_PERCENTAGE = 410; // Updated from 155 
 
 function getSafeFileName(username) {
     return username.replace(/[^a-z0-9]/gi, '_').toLowerCase();
@@ -349,6 +350,10 @@ class BotEngine {
             const sParams = (sEx.id === 'binanceusdm') ? { 'positionSide': 'SHORT' } : (sEx.id === 'kucoinfutures' ? { 'marginMode': 'cross' } : {});
             const lParams = (lEx.id === 'binanceusdm') ? { 'positionSide': 'LONG' } : (lEx.id === 'kucoinfutures' ? { 'marginMode': 'cross' } : {});
 
+            // REQUESTED: Dọn sạch lệnh chờ trước khi mở
+            try { await sEx.cancelAllOrders(sSym); } catch (e) {}
+            try { await lEx.cancelAllOrders(lSym); } catch (e) {}
+
             // GỬI LỆNH THẬT
             this.log('info', `🚀 Sending Order: ${op.coin} (Margin: ${collateral}$)`);
 
@@ -380,10 +385,31 @@ class BotEngine {
                 
                 (async () => {
                     await sleep(500);
-                    Promise.all([
+                    // Đặt TP/SL ngay lập tức
+                    await Promise.all([
                         this.placeTpSlOrders(sEx, sSym, 'sell', sDetails.amount, sPrice, collateral, sDetails.notional),
                         this.placeTpSlOrders(lEx, lSym, 'buy', lDetails.amount, lPrice, collateral, lDetails.notional)
                     ]).catch(e => {});
+
+                    // REQUESTED: Sau 10s kiểm tra lại TP/SL
+                    await sleep(10000); 
+                    const checkAndFix = async (ex, sym, side, amt, price, col, notional) => {
+                        try {
+                            const hasPos = await this.hasOpenPosition(ex, sym);
+                            if (!hasPos) return; // Nếu vị thế đóng rồi thì thôi
+                            
+                            const openOrders = await ex.fetchOpenOrders(sym);
+                            // Nếu không có lệnh chờ nào (nghĩa là thiếu TP/SL) -> đặt lại
+                            if (openOrders.length === 0) {
+                                this.log('trade', `⚠️ Re-placing TP/SL for ${sym}`);
+                                await this.placeTpSlOrders(ex, sym, side, amt, price, col, notional);
+                            }
+                        } catch(e) {}
+                    };
+                    await Promise.all([
+                        checkAndFix(sEx, sSym, 'sell', sDetails.amount, sPrice, collateral, sDetails.notional),
+                        checkAndFix(lEx, lSym, 'buy', lDetails.amount, lPrice, collateral, lDetails.notional)
+                    ]);
                 })();
             }
             else if (sResult.status === 'fulfilled' || lResult.status === 'fulfilled') {
@@ -459,6 +485,10 @@ class BotEngine {
             this.saveHistory(t);
             
             this.log('trade', `CLOSE ${t.coin} | S_PnL: $${sPnl.toFixed(2)} | L_PnL: $${lPnl.toFixed(2)} | Total: $${realPnL.toFixed(2)}`);
+
+            // REQUESTED: Sau khi đóng vị thế => dọn sạch lệnh chờ
+            try { await sEx.cancelAllOrders(t.shortSymbol); } catch(e){}
+            try { await lEx.cancelAllOrders(t.longSymbol); } catch(e){}
         }));
 
         this.activeTrades = [];
