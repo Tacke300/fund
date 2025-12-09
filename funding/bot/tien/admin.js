@@ -6,49 +6,45 @@ const ccxt = require('ccxt');
 const PORT = 4953;
 const USER_DATA_DIR = path.join(__dirname, 'user_data');
 
-// Hàm hỗ trợ tên file
 function getSafeFileName(username) {
     return username.replace(/[^a-z0-9]/gi, '_').toLowerCase();
 }
 
-// Hàm gộp các trade lẻ thành 1 dòng lịch sử gọn gàng
+// Hàm gộp các lệnh khớp lẻ thành 1 dòng lịch sử
 function aggregateTrades(trades) {
     const groups = {};
     trades.forEach(t => {
-        // Gom theo Order ID. Nếu không có orderId thì dùng timestamp làm key tạm
-        const key = t.order || t.id;
-        if (!groups[key]) {
-            groups[key] = {
+        const orderId = t.order || t.id; // Dùng OrderID để gom
+        if (!groups[orderId]) {
+            groups[orderId] = {
                 timestamp: t.timestamp,
                 symbol: t.symbol,
                 side: t.side,
                 amount: 0,
-                cost: 0, // Giá trị = price * amount
+                cost: 0,
                 realizedPnl: 0,
-                fee: 0
+                fee: 0,
+                leverage: (t.info && t.info.leverage) ? t.info.leverage : null // Cố lấy leverage nếu có
             };
         }
-        const g = groups[key];
+        const g = groups[orderId];
         g.amount += parseFloat(t.amount);
         g.cost += (parseFloat(t.price) * parseFloat(t.amount));
-        if (t.fee && t.fee.cost) g.fee += parseFloat(t.fee.cost);
-
-        // Lấy PnL (Chỉ Binance có sẵn trong info)
-        let pnl = 0;
-        if (t.info && t.info.realizedPnl) pnl = parseFloat(t.info.realizedPnl);
-        g.realizedPnl += pnl;
+        
+        // PnL (Binance có sẵn trong info.realizedPnl)
+        if (t.info && t.info.realizedPnl) g.realizedPnl += parseFloat(t.info.realizedPnl);
     });
 
-    // Chuyển object thành array và tính giá trung bình
     return Object.values(groups).map(g => ({
         timestamp: g.timestamp,
         symbol: g.symbol,
         side: g.side,
         amount: g.amount,
-        price: g.amount > 0 ? (g.cost / g.amount) : 0, // Giá TB
+        price: g.amount > 0 ? (g.cost / g.amount) : 0,
+        cost: g.cost,
         realizedPnl: g.realizedPnl,
-        fee: g.fee
-    })).sort((a, b) => b.timestamp - a.timestamp); // Mới nhất lên đầu
+        leverage: g.leverage
+    })).sort((a, b) => b.timestamp - a.timestamp);
 }
 
 function initExchange(exchangeId, config) {
@@ -56,8 +52,8 @@ function initExchange(exchangeId, config) {
         let exchangeClass;
         let options = { 
             'enableRateLimit': true, 
-            'timeout': 15000,
-            'options': { 'defaultType': 'future', 'warnOnFetchOpenOrdersWithoutSymbol': false }
+            'timeout': 20000, // Tăng timeout
+            'options': { 'defaultType': 'future' } 
         };
         
         if (exchangeId.includes('binance')) {
@@ -90,7 +86,6 @@ async function getAllUsersSummary() {
             const config = JSON.parse(fs.readFileSync(filePath, 'utf8'));
             const stats = fs.statSync(filePath);
             
-            // Lấy tạm PnL từ file history bot nếu có (chỉ để hiện ngoài danh sách)
             let totalPnl = 0;
             const histFile = path.join(USER_DATA_DIR, `${safeName}_history.json`);
             if (fs.existsSync(histFile)) {
@@ -109,7 +104,8 @@ async function getAllUsersSummary() {
                 kucoinFuture: config.savedKucoinFut || 0,
                 totalAll: config.savedTotalAssets || 0,
                 totalPnl: totalPnl,
-                lastLogin: stats.mtime
+                lastLogin: stats.mtime,
+                filename: file
             });
         } catch (e) {}
     }
@@ -134,7 +130,7 @@ const server = http.createServer(async (req, res) => {
         return;
     }
 
-    // --- XỬ LÝ CHI TIẾT ---
+    // --- API DETAILS ---
     if (req.url.startsWith('/api/details/')) {
         let username = 'UNKNOWN';
         try {
@@ -150,20 +146,19 @@ const server = http.createServer(async (req, res) => {
             }
             const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
 
-            // Đọc file biểu đồ
+            // Biểu đồ
             let balanceHistory = [];
             try {
                 const bPath = path.join(USER_DATA_DIR, `${safeName}_balance_history.json`);
                 if (fs.existsSync(bPath)) {
                     const raw = JSON.parse(fs.readFileSync(bPath, 'utf8'));
-                    if(raw.length > 250) { 
-                        const step = Math.ceil(raw.length / 250);
+                    if (raw.length > 300) { 
+                        const step = Math.ceil(raw.length / 300);
                         balanceHistory = raw.filter((_, i) => i % step === 0);
                     } else balanceHistory = raw;
                 }
             } catch(e){}
 
-            // Hàm kết nối sàn lấy dữ liệu
             const checkExchange = async (exName, exId) => {
                 try {
                     const ex = initExchange(exId, config);
@@ -176,14 +171,12 @@ const server = http.createServer(async (req, res) => {
                     let positions = [];
                     try {
                         const rawPos = await ex.fetchPositions();
-                        // Lọc những lệnh size > 0
                         positions = rawPos.filter(p => parseFloat(p.contracts) > 0).map(p => {
-                            // Fix đòn bẩy Binance (thường nằm sâu trong info)
+                            // Fix đòn bẩy Binance
                             let lev = p.leverage;
                             if (exId === 'binanceusdm' && (!lev || lev == 'undefined')) {
-                                lev = p.info.leverage;
+                                lev = (p.info && p.info.leverage) ? p.info.leverage : '20';
                             }
-                            
                             return {
                                 symbol: p.symbol,
                                 side: p.side,
@@ -191,8 +184,8 @@ const server = http.createServer(async (req, res) => {
                                 entryPrice: parseFloat(p.entryPrice),
                                 leverage: lev,
                                 unrealizedPnl: parseFloat(p.unrealizedPnl),
-                                // Margin ước tính nếu sàn không trả về
-                                margin: p.initialMargin ? parseFloat(p.initialMargin) : ((parseFloat(p.entryPrice) * parseFloat(p.contracts)) / parseFloat(lev || 1))
+                                // Tính margin ước tính
+                                margin: p.initialMargin ? parseFloat(p.initialMargin) : ((parseFloat(p.entryPrice)*parseFloat(p.contracts))/parseFloat(lev||1))
                             };
                         });
                     } catch(e) { console.log(`${exName} Pos Err: ${e.message}`); }
@@ -201,18 +194,18 @@ const server = http.createServer(async (req, res) => {
                     let openOrders = [];
                     try {
                         const rawOrd = await ex.fetchOpenOrders();
-                        openOrders = rawOrd.map(o => ({
-                            symbol: o.symbol,
-                            type: o.type,
-                            side: o.side,
-                            stopPrice: o.stopPrice || o.price // Binance dùng stopPrice, Kucoin có thể dùng price
+                        openOrders = rawOrd.map(o => ({ 
+                            symbol: o.symbol, 
+                            type: o.type, 
+                            side: o.side, 
+                            price: o.stopPrice || o.price 
                         }));
                     } catch(e) {}
 
-                    // Map TP/SL vào Position (Sử dụng include để match symbol Kucoin)
+                    // Map TP/SL vào Positions
                     positions = positions.map(p => {
-                        // Kucoin: BTC/USDT:USDT vs BTC-USDT-SWAP -> Cần chuẩn hóa
-                        // Cách đơn giản: remove hết ký tự đặc biệt rồi so sánh
+                        // Kucoin symbol format có thể khác (BTC-USDT-SWAP vs BTC/USDT)
+                        // Chuẩn hóa bằng cách xóa ký tự đặc biệt
                         const cleanSym = p.symbol.replace(/[-_/: ]/g, '');
                         const related = openOrders.filter(o => o.symbol.replace(/[-_/: ]/g, '') === cleanSym);
                         return { ...p, openOrders: related };
@@ -221,22 +214,11 @@ const server = http.createServer(async (req, res) => {
                     // 3. HISTORY (fetchMyTrades -> Aggregate)
                     let history = [];
                     try {
-                        // Lấy 50 trade gần nhất
+                        // Lấy 50 trade gần nhất để cover các lệnh partial fill
                         const trades = await ex.fetchMyTrades(undefined, undefined, 50);
-                        
-                        // Lọc:
-                        // - Binance: Chỉ lấy lệnh có PnL != 0 (là lệnh đóng vị thế)
-                        // - Kucoin: Lấy hết (vì Kucoin k trả PnL ở đây, ta hiển thị giá khớp)
-                        
-                        let filteredTrades = trades;
-                        if (exId === 'binanceusdm') {
-                            filteredTrades = trades.filter(t => t.info && parseFloat(t.info.realizedPnl) !== 0);
-                        }
-
-                        history = aggregateTrades(filteredTrades);
+                        history = aggregateTrades(trades);
                     } catch(e) { console.log(`${exName} Hist Err: ${e.message}`); }
 
-                    // 4. SPOT
                     let spotTotal = 0;
                     try {
                         const spotExId = exId === 'binanceusdm' ? 'binance' : 'kucoin';
@@ -277,7 +259,6 @@ const server = http.createServer(async (req, res) => {
                 totalSpotUsdt: (binance.spot + kucoin.spot),
                 totalFutureEquity: (binance.total + kucoin.total),
                 
-                // Dữ liệu hiển thị
                 livePositions: [...binance.positions.map(p=>({...p, ex:'Binance'})), ...kucoin.positions.map(p=>({...p, ex:'Kucoin'}))],
                 exchangeHistory: mergedHistory,
                 balanceHistory: balanceHistory
@@ -293,11 +274,11 @@ const server = http.createServer(async (req, res) => {
         return;
     }
 
-    // API cũ
     if (req.method === 'POST' && req.url === '/api/transfer') {
         res.end(JSON.stringify({ logs: ['Skipped'] }));
         return;
     }
+
     if (req.method === 'POST' && req.url === '/api/admin/set-vip') {
         let body = '';
         req.on('data', c => body += c);
