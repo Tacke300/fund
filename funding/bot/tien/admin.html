@@ -49,7 +49,7 @@
         <table>
             <thead>
                 <tr>
-                    <th>#</th>
+                    <th style="width:40px">#</th>
                     <th>Username</th>
                     <th>VIP</th>
                     <th>Tổng Tài Sản</th>
@@ -102,7 +102,7 @@
             const content = document.getElementById('detailContent');
             document.getElementById('modalTitle').innerText = `Chi tiết: ${username}`;
             modal.style.display = 'flex';
-            content.innerHTML = '<div style="text-align:center; padding:30px"><h3>🔄 Đang kết nối API Sàn...</h3></div>';
+            content.innerHTML = '<div style="text-align:center; padding:30px"><h3>🔄 Đang kết nối API Sàn (Lấy 50 trade gần nhất)...</h3></div>';
 
             try {
                 const res = await fetch(`/api/details/${username}`);
@@ -117,14 +117,13 @@
                 else {
                     posRows = d.livePositions.map(p => {
                         const pnlColor = p.unrealizedPnl >= 0 ? '#00c851' : '#ff4444';
-                        
-                        // TP/SL
+                        // TP/SL Tags
                         let tpsl = '';
                         if(p.openOrders && p.openOrders.length > 0) {
                             p.openOrders.forEach(o => {
-                                const type = o.type.includes('take_profit') ? 'TP' : 'SL';
+                                const type = o.type.toUpperCase().includes('PROFIT') ? 'TP' : 'SL'; // Tìm chữ PROFIT trong type
                                 const color = type==='TP'?'#00e676':'#ff5252';
-                                tpsl += `<span class="order-tag" style="color:${color}; border-color:${color}">${type}: ${parseFloat(o.price||0).toFixed(4)}</span>`;
+                                tpsl += `<span class="order-tag" style="color:${color}; border-color:${color}">${type}: ${parseFloat(o.stopPrice||0).toFixed(4)}</span>`;
                             });
                         } else tpsl = '<span style="color:#666; font-size:0.8em">--</span>';
 
@@ -144,25 +143,31 @@
 
                 // --- 2. HISTORY (Aggregated) ---
                 let histRows = '';
-                if(d.exchangeHistory.length === 0) histRows = '<tr><td colspan="7" style="text-align:center; color:#555">Chưa có lịch sử giao dịch</td></tr>';
+                if(d.exchangeHistory.length === 0) histRows = '<tr><td colspan="7" style="text-align:center; color:#555">Chưa có lịch sử khớp lệnh</td></tr>';
                 else {
                     histRows = d.exchangeHistory.map(h => {
                         const date = new Date(h.timestamp).toLocaleString('vi-VN');
                         const exClass = h.ex === 'Binance' ? 'ex-binance' : 'ex-kucoin';
                         const sideColor = h.side === 'buy' ? '#00c851' : '#ff4444';
-                        // PnL
-                        let pnlDisplay = '<span style="color:#666">0.00</span>';
+                        
+                        // PnL: Chỉ hiển thị nếu != 0
+                        let pnlDisplay = '<span style="color:#666">--</span>';
                         if (h.realizedPnl !== 0) {
                             pnlDisplay = `<span style="color:${h.realizedPnl>=0?'#00c851':'#ff4444'}; font-weight:bold">$${h.realizedPnl.toFixed(2)}</span>`;
                         }
+
+                        // Tính Margin ước tính (nếu có giá và amount)
+                        // Bỏ amount, hiển thị Margin ước tính
+                        const estMargin = (h.price * h.amount) / 20; // Giả sử đòn bẩy TB 20 nếu k có data
+                        const displayCost = `$${(h.price*h.amount).toFixed(1)}`; // Giá trị lệnh
 
                         return `<tr>
                             <td class="${exClass}">${h.ex}</td>
                             <td>${date}</td>
                             <td><b>${h.symbol}</b></td>
                             <td style="color:${sideColor}">${h.side.toUpperCase()}</td>
-                            <td>$${h.margin.toFixed(2)}</td>
-                            <td>x${h.leverage||'?'}</td>
+                            <td>${displayCost} (Cost)</td> 
+                            <td>x?</td> <!-- History thường k lưu lev -->
                             <td>${pnlDisplay}</td>
                         </tr>`;
                     }).join('');
@@ -192,9 +197,9 @@
                         ${posRows}
                     </table>
 
-                    <h3 style="color:#00c851; border-bottom:1px solid #444; margin-top:20px;">📜 Lịch sử Khớp lệnh Sàn (Gộp theo OrderID)</h3>
+                    <h3 style="color:#00c851; border-bottom:1px solid #444; margin-top:20px;">📜 Lịch sử Khớp lệnh Sàn (Gần nhất)</h3>
                     <table>
-                        <tr><th>Sàn</th><th>Thời gian</th><th>Coin</th><th>Side</th><th>Margin (Est)</th><th>Lev</th><th>PnL Thực</th></tr>
+                        <tr><th>Sàn</th><th>Thời gian</th><th>Coin</th><th>Side</th><th>Giá trị (Cost)</th><th>Lev</th><th>PnL Thực</th></tr>
                         ${histRows}
                     </table>
                 `;
@@ -209,10 +214,8 @@
             if(!ctx) return;
             if (chartInstance) chartInstance.destroy();
             if (!history || history.length === 0) return;
-            
             const labels = history.map(d => new Date(d.time).toLocaleTimeString());
             const dataTotal = history.map(d => d.total);
-            
             chartInstance = new Chart(ctx.getContext('2d'), {
                 type: 'line',
                 data: {
