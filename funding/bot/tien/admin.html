@@ -24,13 +24,14 @@
         input, select, button { padding: 10px; width: 100%; box-sizing: border-box; border-radius: 4px; border: 1px solid #444; background: #2b2b2b; color: #fff; }
         button { background: var(--accent); border: none; font-weight: bold; cursor: pointer; }
 
+        /* MODAL */
         .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.85); z-index: 1000; justify-content: center; align-items: center; }
         .modal-content { background: var(--card); padding: 20px; width: 95%; max-width: 1400px; max-height: 90vh; overflow-y: auto; border-radius: 8px; border: 1px solid var(--accent); }
         .close { float: right; cursor: pointer; font-size: 1.5rem; color: #aaa; }
         
         .chart-container { position: relative; height: 300px; width: 100%; margin-bottom: 20px; background: #151515; }
         
-        /* Màu sàn */
+        /* MÀU SÀN */
         .ex-binance { color: #F0B90B; font-weight: bold; }
         .ex-kucoin { color: #24AE8F; font-weight: bold; }
         
@@ -39,7 +40,7 @@
 </head>
 <body>
 
-    <!-- Các Panel cũ (Chuyển tiền, VIP, Danh sách) GIỮ NGUYÊN -->
+    <!-- GIỮ NGUYÊN CÁC PANEL CŨ -->
     <div class="panel">
         <div style="display:flex; justify-content:space-between; align-items:center;">
             <h2>👥 Danh Sách Tài Khoản</h2>
@@ -48,13 +49,13 @@
         <table>
             <thead>
                 <tr>
-                    <th style="width:40px">#</th>
+                    <th>#</th>
                     <th>Username</th>
                     <th>VIP</th>
                     <th>Tổng Tài Sản</th>
                     <th>Tổng PnL (Bot)</th>
                     <th>Binance Fut</th>
-                    <th>Kucoin Fut</th>
+                    <th>KuCoin Fut</th>
                     <th>Action</th>
                 </tr>
             </thead>
@@ -72,26 +73,25 @@
     </div>
 
     <script>
-        let usersData = [];
         let chartInstance = null;
 
         async function loadUsers() {
             try {
                 const res = await fetch('/api/users');
-                usersData = await res.json();
-                usersData.sort((a,b) => b.totalAll - a.totalAll);
+                const users = await res.json();
+                users.sort((a,b) => b.totalAll - a.totalAll);
                 const tbody = document.getElementById('userTableBody');
                 tbody.innerHTML = '';
-                usersData.forEach((u, idx) => {
+                users.forEach((u, idx) => {
                     tbody.innerHTML += `<tr>
                         <td>${idx+1}</td>
                         <td class="user-link" onclick="showDetails('${u.username}')">${u.username}</td>
-                        <td>${u.vipStatus==='vip' ? '<span class="vip-tag">VIP</span>' : 'Std'}</td>
+                        <td>${u.vipStatus}</td>
                         <td style="font-weight:bold; color:#fff">$${u.totalAll.toFixed(1)}</td>
                         <td class="${u.totalPnl>=0?'text-success':'text-danger'}">$${u.totalPnl.toFixed(1)}</td>
                         <td style="color:#F0B90B">$${u.binanceFuture.toFixed(1)}</td>
                         <td style="color:#24AE8F">$${u.kucoinFuture.toFixed(1)}</td>
-                        <td><button onclick="showDetails('${u.username}')" style="padding:5px; font-size:0.8em">Xem</button></td>
+                        <td><button onclick="showDetails('${u.username}')">Xem</button></td>
                     </tr>`;
                 });
             } catch(e) {}
@@ -109,23 +109,22 @@
                 const d = await res.json();
                 if(d.error) { content.innerHTML = `<h3 style="color:red">Lỗi: ${d.error}</h3>`; return; }
 
-                // 1. CHART
                 setTimeout(() => renderChart(d.balanceHistory), 100);
 
-                // 2. LIVE POSITIONS
+                // --- 1. LIVE POSITIONS ---
                 let posRows = '';
                 if(d.livePositions.length === 0) posRows = '<tr><td colspan="7" style="text-align:center; color:#555">Không có vị thế mở trên sàn</td></tr>';
                 else {
                     posRows = d.livePositions.map(p => {
                         const pnlColor = p.unrealizedPnl >= 0 ? '#00c851' : '#ff4444';
                         
-                        // TP/SL Tags
+                        // TP/SL
                         let tpsl = '';
                         if(p.openOrders && p.openOrders.length > 0) {
                             p.openOrders.forEach(o => {
-                                const type = (o.type.includes('take_profit')) ? 'TP' : 'SL';
+                                const type = o.type.includes('take_profit') ? 'TP' : 'SL';
                                 const color = type==='TP'?'#00e676':'#ff5252';
-                                tpsl += `<span class="order-tag" style="color:${color}; border-color:${color}">${type}: ${parseFloat(o.stopPrice||0).toFixed(4)}</span>`;
+                                tpsl += `<span class="order-tag" style="color:${color}; border-color:${color}">${type}: ${parseFloat(o.price||0).toFixed(4)}</span>`;
                             });
                         } else tpsl = '<span style="color:#666; font-size:0.8em">--</span>';
 
@@ -143,21 +142,18 @@
                     }).join('');
                 }
 
-                // 3. UNIFIED HISTORY (From Exchange API)
+                // --- 2. HISTORY (Aggregated) ---
                 let histRows = '';
                 if(d.exchangeHistory.length === 0) histRows = '<tr><td colspan="7" style="text-align:center; color:#555">Chưa có lịch sử giao dịch</td></tr>';
                 else {
                     histRows = d.exchangeHistory.map(h => {
-                        const date = new Date(h.time).toLocaleString('vi-VN');
+                        const date = new Date(h.timestamp).toLocaleString('vi-VN');
                         const exClass = h.ex === 'Binance' ? 'ex-binance' : 'ex-kucoin';
-                        const sideColor = h.side === 'buy' ? '#00c851' : '#ff4444'; // Buy/Sell
-                        
-                        // PnL (Chỉ Binance có realizedPnl rõ ràng trong API trade)
-                        let pnlDisplay = '';
-                        if (h.pnl !== 0 && h.pnl !== undefined) {
-                            pnlDisplay = `<span style="color:${h.pnl>=0?'#00c851':'#ff4444'}; font-weight:bold">$${h.pnl.toFixed(2)}</span>`;
-                        } else {
-                            pnlDisplay = '<span style="color:#666">--</span>';
+                        const sideColor = h.side === 'buy' ? '#00c851' : '#ff4444';
+                        // PnL
+                        let pnlDisplay = '<span style="color:#666">0.00</span>';
+                        if (h.realizedPnl !== 0) {
+                            pnlDisplay = `<span style="color:${h.realizedPnl>=0?'#00c851':'#ff4444'}; font-weight:bold">$${h.realizedPnl.toFixed(2)}</span>`;
                         }
 
                         return `<tr>
@@ -165,8 +161,8 @@
                             <td>${date}</td>
                             <td><b>${h.symbol}</b></td>
                             <td style="color:${sideColor}">${h.side.toUpperCase()}</td>
-                            <td>${parseFloat(h.price).toFixed(4)}</td>
-                            <td>${parseFloat(h.amount).toFixed(3)}</td>
+                            <td>$${h.margin.toFixed(2)}</td>
+                            <td>x${h.leverage||'?'}</td>
                             <td>${pnlDisplay}</td>
                         </tr>`;
                     }).join('');
@@ -176,11 +172,11 @@
                     <div style="display:flex; gap:10px; margin-bottom:20px;">
                         <div style="flex:1; background:#222; padding:10px; border:1px solid #444; text-align:center;">
                             <div style="color:#aaa">Binance Equity</div>
-                            <div style="font-size:1.5rem; color:#F0B90B">${d.binanceTotal.toFixed(2)}$</div>
+                            <div style="font-size:1.5rem; color:#F0B90B">${d.binance.total.toFixed(2)}$</div>
                         </div>
                         <div style="flex:1; background:#222; padding:10px; border:1px solid #444; text-align:center;">
                             <div style="color:#aaa">Kucoin Equity</div>
-                            <div style="font-size:1.5rem; color:#24AE8F">${d.kucoinTotal.toFixed(2)}$</div>
+                            <div style="font-size:1.5rem; color:#24AE8F">${d.kucoin.total.toFixed(2)}$</div>
                         </div>
                         <div style="flex:1; background:#222; padding:10px; border:1px solid #007bff; text-align:center;">
                             <div style="color:#aaa">TỔNG TÀI SẢN</div>
@@ -192,16 +188,17 @@
 
                     <h3 style="color:#ffbb33; border-bottom:1px solid #444">🔥 Vị thế đang mở (Live Sàn)</h3>
                     <table>
-                        <tr><th>Sàn</th><th>Coin (TP/SL)</th><th>Side</th><th>Margin</th><th>Lev</th><th>Entry</th><th>PnL (Unrealized)</th></tr>
+                        <tr><th>Sàn</th><th>Coin (TP/SL)</th><th>Side</th><th>Margin</th><th>Lev</th><th>Entry</th><th>PnL</th></tr>
                         ${posRows}
                     </table>
 
-                    <h3 style="color:#00c851; border-bottom:1px solid #444; margin-top:30px;">📜 Lịch sử lệnh Sàn (Gần nhất)</h3>
+                    <h3 style="color:#00c851; border-bottom:1px solid #444; margin-top:20px;">📜 Lịch sử Khớp lệnh Sàn (Gộp theo OrderID)</h3>
                     <table>
-                        <tr><th>Sàn</th><th>Thời gian (Khớp)</th><th>Coin</th><th>Side</th><th>Price</th><th>Amount</th><th>PnL (Closed)</th></tr>
+                        <tr><th>Sàn</th><th>Thời gian</th><th>Coin</th><th>Side</th><th>Margin (Est)</th><th>Lev</th><th>PnL Thực</th></tr>
                         ${histRows}
                     </table>
                 `;
+
                 content.innerHTML = html;
 
             } catch(e) { console.error(e); }
