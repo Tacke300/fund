@@ -10,61 +10,34 @@ function getSafeFileName(username) {
     return username.replace(/[^a-z0-9]/gi, '_').toLowerCase();
 }
 
-// Chuẩn hóa tên coin: "RIVER/USDT:USDT" -> "RIVERUSDT"
 function normSym(symbol) {
     if (!symbol) return '';
     return symbol.replace(/[-_/: ]/g, '').toUpperCase().replace('USDTM', 'USDT');
 }
 
-// GỘP LỆNH THÔNG MINH
-// Gộp các lệnh cùng Symbol + Side + Gần thời gian nhau (trong vòng 2 phút)
-function smartAggregate(trades) {
-    if (!trades || trades.length === 0) return [];
-    
-    // Sắp xếp theo thời gian
-    trades.sort((a, b) => a.timestamp - b.timestamp);
-
-    const merged = [];
-    let current = null;
-
-    for (const t of trades) {
-        // Bỏ qua lệnh quá nhỏ (< 1$) để đỡ rác
-        const cost = parseFloat(t.cost) || (parseFloat(t.price) * parseFloat(t.amount));
-        if (cost < 1) continue;
-
-        if (!current) {
-            current = { ...t, amount: parseFloat(t.amount), cost: cost, realizedPnl: 0 };
-            if (t.info && t.info.realizedPnl) current.realizedPnl = parseFloat(t.info.realizedPnl);
-            continue;
+// Cách 4: Hàm gộp lệnh
+function aggregateTrades(trades) {
+    const groups = {};
+    trades.forEach(t => {
+        const key = t.order || t.id;
+        if (!groups[key]) {
+            groups[key] = {
+                timestamp: t.timestamp,
+                symbol: t.symbol,
+                side: t.side,
+                amount: 0,
+                cost: 0,
+                realizedPnl: 0
+            };
         }
-
-        // Nếu cùng Symbol, cùng Side và thời gian chênh lệch < 2 phút -> Gộp
-        if (t.symbol === current.symbol && t.side === current.side && (t.timestamp - current.timestamp < 120000)) {
-            current.amount += parseFloat(t.amount);
-            current.cost += cost;
-            if (t.info && t.info.realizedPnl) current.realizedPnl += parseFloat(t.info.realizedPnl);
-            // Cập nhật timestamp mới nhất
-            current.timestamp = t.timestamp;
-        } else {
-            // Đẩy lệnh cũ vào list, tạo lệnh mới
-            merged.push(current);
-            current = { ...t, amount: parseFloat(t.amount), cost: cost, realizedPnl: 0 };
-            if (t.info && t.info.realizedPnl) current.realizedPnl = parseFloat(t.info.realizedPnl);
-        }
-    }
-    if (current) merged.push(current);
-
-    return merged.reverse(); // Mới nhất lên đầu
-}
-
-let depositAddresses = {};
-try {
-    const balanceModule = require('./balance.js');
-    if (balanceModule && balanceModule.usdtDepositAddressesByNetwork) {
-        depositAddresses = balanceModule.usdtDepositAddressesByNetwork;
-    }
-} catch (e) {
-    console.log("[SYSTEM] Warning: balance.js not found");
+        groups[key].amount += parseFloat(t.amount);
+        groups[key].cost += (parseFloat(t.price) * parseFloat(t.amount));
+        if (t.info && t.info.realizedPnl) groups[key].realizedPnl += parseFloat(t.info.realizedPnl);
+    });
+    return Object.values(groups).map(g => ({
+        ...g,
+        price: g.amount > 0 ? g.cost / g.amount : 0
+    })).sort((a, b) => b.timestamp - a.timestamp);
 }
 
 function initExchange(exchangeId, config) {
@@ -72,8 +45,8 @@ function initExchange(exchangeId, config) {
         let exchangeClass;
         let options = { 
             'enableRateLimit': true, 
-            'timeout': 15000,
-            'options': { 'defaultType': 'future', 'warnOnFetchOpenOrdersWithoutSymbol': false }
+            'timeout': 15000, 
+            'options': { 'defaultType': 'future', 'warnOnFetchOpenOrdersWithoutSymbol': false } 
         };
         
         if (exchangeId.includes('binance')) {
@@ -124,8 +97,7 @@ async function getAllUsersSummary() {
                 kucoinFuture: config.savedKucoinFut || 0,
                 totalAll: config.savedTotalAssets || 0,
                 totalPnl: totalPnl,
-                lastLogin: stats.mtime,
-                filename: file
+                lastLogin: stats.mtime
             });
         } catch (e) {}
     }
@@ -150,7 +122,7 @@ const server = http.createServer(async (req, res) => {
         return;
     }
 
-    // --- API DETAILS ---
+    // --- API CHI TIẾT ---
     if (req.url.startsWith('/api/details/')) {
         let username = 'UNKNOWN';
         const logs = [];
@@ -167,31 +139,14 @@ const server = http.createServer(async (req, res) => {
             }
             const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
 
-            // 1. DATA BOT (Tham chiếu)
-            let botHistory = [];
+            // [CÁCH 1] FILE BOT
+            let fileHistory = [];
             try {
                 const hFile = path.join(USER_DATA_DIR, `${safeName}_history.json`);
-                if(fs.existsSync(hFile)) botHistory = JSON.parse(fs.readFileSync(hFile, 'utf8'));
+                if(fs.existsSync(hFile)) fileHistory = JSON.parse(fs.readFileSync(hFile, 'utf8'));
             } catch(e){}
 
-            let botActive = [];
-            try {
-                const aFile = path.join(USER_DATA_DIR, `${safeName}_active_trades.json`);
-                if(fs.existsSync(aFile)) botActive = JSON.parse(fs.readFileSync(aFile, 'utf8'));
-            } catch(e){}
-
-            // Hàm tìm info từ Bot (Thêm check lỏng hơn)
-            const enrichInfo = (symbol) => {
-                const clean = normSym(symbol); // Ví dụ: RIVERUSDT
-                // Tìm coin có chứa chuỗi (để khớp RIVERUSDT với RIVER)
-                let match = botActive.find(b => clean.includes(normSym(b.coin)));
-                if (!match) match = botHistory.find(b => clean.includes(normSym(b.coin)));
-                
-                if (match) return { margin: match.collateral, lev: match.leverage, openTime: match.entryTime };
-                return { margin: null, lev: null, openTime: null };
-            };
-
-            // Chart Data
+            // [BIỂU ĐỒ]
             let balanceHistory = [];
             try {
                 const bFile = path.join(USER_DATA_DIR, `${safeName}_balance_history.json`);
@@ -206,7 +161,7 @@ const server = http.createServer(async (req, res) => {
             const checkExchange = async (exName, exId) => {
                 try {
                     const ex = initExchange(exId, config);
-                    if (!ex) return { total: 0, positions: [], history: [], spot: 0 };
+                    if (!ex) return { total: 0, positions: [], closed: [], trades: [], income: [], spot: 0 };
 
                     await ex.loadMarkets();
                     const bal = await ex.fetchBalance();
@@ -216,75 +171,84 @@ const server = http.createServer(async (req, res) => {
                     try {
                         const rawPos = await ex.fetchPositions();
                         positions = rawPos.filter(p => parseFloat(p.contracts) > 0).map(p => {
-                            const botInfo = enrichInfo(p.symbol);
                             let lev = p.leverage;
-                            if (exId === 'binanceusdm' && (!lev || lev == 'undefined')) {
-                                lev = (p.info && p.info.leverage) ? p.info.leverage : botInfo.lev;
-                            }
-
+                            if (exId === 'binanceusdm' && (!lev || lev == 'undefined')) lev = p.info.leverage || 20;
                             return {
                                 symbol: p.symbol,
                                 side: p.side,
                                 size: parseFloat(p.contracts),
                                 entryPrice: parseFloat(p.entryPrice),
-                                leverage: lev || 20,
+                                leverage: lev,
                                 unrealizedPnl: parseFloat(p.unrealizedPnl),
-                                margin: botInfo.margin || p.initialMargin || ((parseFloat(p.entryPrice)*parseFloat(p.contracts))/(lev||1))
+                                margin: p.initialMargin || ((parseFloat(p.entryPrice)*parseFloat(p.contracts))/(lev||1))
                             };
                         });
                     } catch(e) { logs.push(`${exName} Pos: ${e.message}`); }
 
-                    // B. TP/SL
+                    // B. OPEN ORDERS (TP/SL)
                     let openOrders = [];
                     try {
                         const rawOrd = await ex.fetchOpenOrders();
                         openOrders = rawOrd.map(o => ({ symbol: o.symbol, type: o.type, side: o.side, stopPrice: o.stopPrice || o.price }));
                     } catch(e) {}
 
-                    // C. HISTORY (LẤY & GỘP)
-                    let history = [];
-                    try {
-                        let trades = [];
-                        if (exId === 'binanceusdm') {
-                            // Lấy danh sách coin từ Bot + Position + BTC/ETH
-                            let coinsToCheck = [...botHistory.slice(0, 5).map(b=>b.coin), ...positions.map(p=>p.symbol), 'BTC/USDT'];
-                            // Map sang ID market
-                            let symbolsIds = [];
-                            coinsToCheck.forEach(c => {
-                                const m = Object.values(ex.markets).find(m => normSym(m.symbol).includes(normSym(c)));
-                                if(m) symbolsIds.push(m.id);
-                            });
-                            symbolsIds = [...new Set(symbolsIds)];
-
-                            const promises = symbolsIds.slice(0, 5).map(sym => ex.fetchMyTrades(sym, undefined, 10).catch(e=>[]));
-                            const results = await Promise.all(promises);
-                            trades = results.flat();
-                        } else {
-                            try {
-                                const t = await ex.fetchMyTrades(undefined, undefined, 50); // Kucoin lấy 50 lệnh
-                                trades = t;
-                            } catch(e) {}
-                        }
-
-                        // GỘP LỆNH (Tránh partial fills)
-                        const aggregated = smartAggregate(trades);
-
-                        history = aggregated.map(t => {
-                            const botInfo = enrichInfo(t.symbol);
-                            return {
-                                timeClose: t.timestamp,
-                                timeOpen: botInfo.openTime,
-                                symbol: t.symbol,
-                                side: t.side,
-                                margin: botInfo.margin, // Lấy từ bot
-                                leverage: botInfo.lev,  // Lấy từ bot
-                                realizedPnl: t.realizedPnl
-                            };
+                    // C. CHUẨN BỊ SYMBOL ĐỂ LẤY LỊCH SỬ (Fix Binance)
+                    let symbolsIds = [];
+                    if (exId === 'binanceusdm') {
+                        // Lấy 5 coin từ Bot History + Position
+                        let coins = [...fileHistory.slice(0, 5).map(b=>b.coin), ...positions.map(p=>p.symbol)];
+                        coins = [...new Set(coins)];
+                        coins.forEach(c => {
+                            const m = Object.values(ex.markets).find(m => normSym(m.symbol).includes(normSym(c)));
+                            if(m) symbolsIds.push(m.id);
                         });
+                    }
 
-                    } catch(e) { logs.push(`${exName} Hist: ${e.message}`); }
+                    // [CÁCH 2] CLOSED ORDERS
+                    let closedOrders = [];
+                    try {
+                        let raw = [];
+                        if (exId === 'binanceusdm') {
+                            for (let sym of symbolsIds) {
+                                try { raw.push(...await ex.fetchClosedOrders(sym, undefined, 5)); } catch(e){}
+                            }
+                        } else {
+                            raw = await ex.fetchClosedOrders(undefined, undefined, 20);
+                        }
+                        closedOrders = raw.sort((a,b)=>b.timestamp-a.timestamp);
+                    } catch(e) { logs.push(`${exName} Closed: ${e.message}`); }
 
-                    // D. SPOT
+                    // [CÁCH 3] MY TRADES (RAW)
+                    let myTrades = [];
+                    try {
+                        let raw = [];
+                        if (exId === 'binanceusdm') {
+                            for (let sym of symbolsIds) {
+                                try { raw.push(...await ex.fetchMyTrades(sym, undefined, 5)); } catch(e){}
+                            }
+                        } else {
+                            raw = await ex.fetchMyTrades(undefined, undefined, 20);
+                        }
+                        myTrades = raw.sort((a,b)=>b.timestamp-a.timestamp);
+                    } catch(e) { logs.push(`${exName} Trades: ${e.message}`); }
+
+                    // [CÁCH 5] INCOME / TRANSACTION HISTORY (PnL Thực)
+                    let income = [];
+                    try {
+                        if (exId === 'binanceusdm') {
+                            // Binance: fetchIncome lấy dòng tiền (REALIZED_PNL, FUNDING_FEE)
+                            // Cần symbol hoặc lấy chung (binance hỗ trợ lấy chung income nhưng giới hạn thời gian)
+                            const rawInc = await ex.fetchIncome(undefined, undefined, 50, {incomeType: 'REALIZED_PNL'});
+                            income = rawInc;
+                        } else {
+                            // Kucoin: fetchLedger
+                            // Kucoin futures ledger
+                            const rawLed = await ex.fetchLedger(undefined, undefined, 20);
+                            income = rawLed.filter(l => l.info.type === 'RealisedPNL'); // Lọc PnL
+                        }
+                    } catch(e) { logs.push(`${exName} Income: ${e.message}`); }
+
+                    // Spot
                     let spotTotal = 0;
                     try {
                         const spotExId = exId === 'binanceusdm' ? 'binance' : 'kucoin';
@@ -302,10 +266,13 @@ const server = http.createServer(async (req, res) => {
                         return { ...p, openOrders: related };
                     });
 
-                    return { total: bal.total['USDT'] || 0, positions, history, spot: spotTotal };
+                    return { 
+                        total: bal.total['USDT'] || 0, 
+                        positions, closedOrders, trades: myTrades, income, spot: spotTotal 
+                    };
 
                 } catch (e) {
-                    return { total: 0, positions: [], history: [], spot: 0, error: e.message };
+                    return { total: 0, positions: [], closed: [], trades: [], income: [], spot: 0, error: e.message };
                 }
             };
 
@@ -314,20 +281,30 @@ const server = http.createServer(async (req, res) => {
                 checkExchange('Kucoin', 'kucoinfutures')
             ]);
 
-            const unifiedHistory = [
-                ...binance.history.map(h => ({...h, ex: 'Binance'})),
-                ...kucoin.history.map(h => ({...h, ex: 'Kucoin'}))
-            ].sort((a,b) => b.timeClose - a.timeClose);
+            // [CÁCH 4] AGGREGATED TRADES
+            const binanceAgg = aggregateTrades(binance.trades);
+            const kucoinAgg = aggregateTrades(kucoin.trades);
 
             const responsePayload = {
                 username: username,
                 binance: binance,
                 kucoin: kucoin,
+                // Data cho 5 bảng
+                fileHistory: fileHistory,
+                
+                binanceClosed: binance.closedOrders,
+                kucoinClosed: kucoin.closedOrders,
+                
+                binanceRaw: binance.trades,
+                kucoinRaw: kucoin.trades,
+                
+                binanceAgg: binanceAgg,
+                kucoinAgg: kucoinAgg,
+                
+                binanceIncome: binance.income,
+                kucoinIncome: kucoin.income,
+
                 totalUsdt: (binance.total + kucoin.total),
-                totalSpotUsdt: (binance.spot + kucoin.spot),
-                totalFutureEquity: (binance.total + kucoin.total),
-                livePositions: [...binance.positions.map(p=>({...p, ex:'Binance'})), ...kucoin.positions.map(p=>({...p, ex:'Kucoin'}))],
-                exchangeHistory: unifiedHistory,
                 balanceHistory: balanceHistory,
                 logs: logs
             };
@@ -342,7 +319,6 @@ const server = http.createServer(async (req, res) => {
         return;
     }
 
-    // Các API khác giữ nguyên...
     if (req.method === 'POST' && req.url === '/api/transfer') {
         res.end(JSON.stringify({ logs: ['Skipped'] }));
         return;
@@ -361,7 +337,7 @@ const server = http.createServer(async (req, res) => {
                     if (fs.existsSync(filePath)) {
                         const cfg = JSON.parse(fs.readFileSync(filePath, 'utf8'));
                         cfg.vipStatus = vipStatus;
-                        cfg.vipExpiry = (vipStatus === 'vip') ? Date.now() + 30*86400000 : 0;
+                        cfg.vipExpiry = (vipStatus==='vip') ? Date.now()+30*86400000 : 0;
                         fs.writeFileSync(filePath, JSON.stringify(cfg, null, 2));
                     }
                 }
