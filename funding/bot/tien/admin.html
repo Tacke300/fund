@@ -10,7 +10,7 @@
         body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', sans-serif; margin: 0; padding: 20px; }
         h2 { margin-top: 0; color: var(--accent); border-bottom: 1px solid #333; padding-bottom: 10px; }
 
-        table { width: 100%; border-collapse: collapse; background: var(--card); font-size: 0.85rem; margin-bottom: 10px; }
+        table { width: 100%; border-collapse: collapse; background: var(--card); font-size: 0.85rem; margin-bottom: 20px; }
         th, td { padding: 8px; border: 1px solid var(--border); text-align: left; }
         th { background: #252525; text-transform: uppercase; color: #aaa; position: sticky; top: 0; }
         tr:hover { background: #2a2a2a; }
@@ -25,30 +25,40 @@
         input, select, button { padding: 10px; width: 100%; box-sizing: border-box; }
         button { background: var(--accent); border: none; color: white; font-weight: bold; cursor: pointer; }
 
+        /* MODAL */
         .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.9); z-index: 1000; justify-content: center; align-items: center; }
-        .modal-content { background: #111; padding: 20px; width: 98%; max-width: 1800px; max-height: 98vh; overflow-y: auto; border: 1px solid #444; }
+        .modal-content { background: var(--card); padding: 20px; width: 98%; max-width: 1700px; max-height: 98vh; overflow-y: auto; border-radius: 8px; border: 1px solid var(--accent); }
         .close { float: right; cursor: pointer; font-size: 2rem; color: #fff; }
         
-        .chart-container { position: relative; height: 250px; width: 100%; margin-bottom: 20px; background: #181818; }
+        .chart-container { position: relative; height: 250px; width: 100%; margin-bottom: 20px; background: #151515; }
         .ex-binance { color: #F0B90B; font-weight: bold; }
         .ex-kucoin { color: #24AE8F; font-weight: bold; }
-        .tab-title { color: #fff; background: #333; padding: 8px; margin-top: 30px; font-size: 1rem; border-left: 4px solid var(--accent); }
+        .tab-title { color: var(--warning); border-bottom: 1px solid #444; padding-bottom: 5px; margin-top: 30px; border-left: 4px solid var(--accent); padding-left: 10px; }
+        .order-tag { font-size: 0.7em; padding: 1px 4px; background: #333; margin-right: 3px; border: 1px solid #555; display: inline-block; margin-top: 2px; }
+        
+        #actionLog { background: #000; padding: 10px; height: 150px; overflow-y: scroll; font-family: monospace; border: 1px solid #444; margin-top: 15px; color: #0f0; font-size: 0.85rem; }
     </style>
 </head>
 <body>
 
-    <!-- 1. CHUYỂN TIỀN (GỐC) -->
+    <!-- 1. BẢNG CHUYỂN TIỀN (GỐC) -->
     <div class="panel">
         <h2 style="color: var(--danger);">💸 Chuyển Tiền Admin</h2>
         <div class="controls">
+            <div><label>Hướng:</label><select id="direction"><option value="binance_to_kucoin">Binance ➔ KuCoin</option><option value="kucoin_to_binance">KuCoin ➔ Binance</option></select></div>
+            <div><label>Nguồn:</label><select id="sourceWallet"><option value="both">All</option><option value="future">Future</option></select></div>
+            <div><label>Coin:</label><input type="text" id="coinName" value="USDT"></div>
+            <div><label>Số lượng:</label><input type="number" id="amount" placeholder="Amount"></div>
+            <div><input type="checkbox" id="getAllCheck"> Get All</div>
             <button onclick="executeAction()">THỰC HIỆN</button>
         </div>
         <div id="actionLog">Logs...</div>
     </div>
 
-    <!-- 2. VIP (GỐC) -->
+    <!-- 2. PANEL VIP (GỐC) -->
     <div class="panel" style="border-color: var(--vip);">
         <h2 style="color: var(--vip);">👑 Cập Nhật VIP</h2>
+        <div id="selectionInfo">Đang chọn: 0 Users</div>
         <div class="controls">
             <select id="vipSelect"><option value="vip">VIP</option><option value="none">Std</option></select>
             <button onclick="executeVipUpdate()">Update VIP</button>
@@ -62,9 +72,7 @@
             <button onclick="loadUsers()" style="width:auto; background:#333;">🔄 Refresh</button>
         </div>
         <table>
-            <thead>
-                <tr><th>#</th><th>Username</th><th>VIP</th><th>Tài Sản</th><th>PnL Bot</th><th>Binance</th><th>Kucoin</th><th>Action</th></tr>
-            </thead>
+            <thead><tr><th><input type="checkbox" id="checkAll" onchange="toggleCheckAll()"></th><th>Username</th><th>VIP</th><th>Tài Sản</th><th>PnL Bot</th><th>Binance</th><th>Kucoin</th><th>Action</th></tr></thead>
             <tbody id="userTableBody"><tr><td colspan="8">...</td></tr></tbody>
         </table>
     </div>
@@ -80,6 +88,7 @@
 
     <script>
         let chartInstance = null;
+        let selectedUsernames = new Set();
 
         async function loadUsers() {
             try {
@@ -90,7 +99,8 @@
                 tbody.innerHTML = '';
                 users.forEach((u,i) => {
                     tbody.innerHTML += `<tr>
-                        <td>${i+1}</td><td class="user-link" onclick="showDetails('${u.username}')">${u.username}</td>
+                        <td><input type="checkbox" class="user-check" value="${u.username}" onchange="updateSelection()"></td>
+                        <td class="user-link" onclick="showDetails('${u.username}')">${u.username}</td>
                         <td>${u.vipStatus}</td><td style="font-weight:bold">$${u.totalAll.toFixed(1)}</td>
                         <td class="${u.totalPnl>=0?'text-success':'text-danger'}">${u.totalPnl.toFixed(1)}</td>
                         <td class="ex-binance">${u.binanceFuture.toFixed(1)}</td><td class="ex-kucoin">${u.kucoinFuture.toFixed(1)}</td>
@@ -105,7 +115,7 @@
             const content = document.getElementById('detailContent');
             document.getElementById('modalTitle').innerText = username;
             modal.style.display = 'flex';
-            content.innerHTML = '<h3 style="text-align:center; color:#aaa">🔄 Đang tải 10 Bảng dữ liệu...</h3>';
+            content.innerHTML = '<h3 style="text-align:center; color:#aaa">🔄 Đang tải 10 Bảng (Sẽ mất 5-10s)...</h3>';
 
             try {
                 const res = await fetch(`/api/details/${username}`);
@@ -114,38 +124,36 @@
 
                 setTimeout(() => renderChart(d.balanceHistory), 100);
 
-                // --- HELPER ---
                 const table = (h, r) => `<table><tr>${h.map(x=>`<th>${x}</th>`).join('')}</tr>${r}</table>`;
-                const date = (t) => new Date(t).toLocaleString('vi-VN');
+                const date = (t) => t ? new Date(t).toLocaleString('vi-VN') : '--';
                 const pnl = (v) => `<span class="${v>=0?'text-success':'text-danger'}">${parseFloat(v).toFixed(4)}</span>`;
-                const allHist = (list, ex) => list.map(x=>({...x, ex})).sort((a,b)=>b.timestamp-a.timestamp);
+                const all = (list, ex) => list.map(x=>({...x, ex})).sort((a,b)=>b.timestamp-a.timestamp);
 
-                // 1. LIVE
-                const liveRows = [...d.binance.positions.map(p=>({...p,ex:'Binance'})), ...d.kucoin.positions.map(p=>({...p,ex:'Kucoin'}))].map(p => 
-                    `<tr><td class="${p.ex==='Binance'?'ex-binance':'ex-kucoin'}">${p.ex}</td><td>${p.symbol}</td><td>${p.side}</td><td>$${p.margin}</td><td>x${p.lev}</td><td>${p.entry}</td><td>${pnl(p.pnl)}</td></tr>`
-                ).join('') || '<tr><td colspan="7">Trống</td></tr>';
+                // --- 1. LIVE ---
+                const liveRows = [...d.binance.m1_live.map(p=>({...p,ex:'Binance'})), ...d.kucoin.m1_live.map(p=>({...p,ex:'Kucoin'}))].map(p => {
+                    let tpsl = (p.openOrders||[]).map(o => `${o.type.includes('take')?'TP':'SL'}: ${parseFloat(o.stopPrice||o.price).toFixed(4)}`).join(' ');
+                    const margin = p.margin ? `$${parseFloat(p.margin).toFixed(2)}` : '--';
+                    return `<tr><td class="${p.ex==='Binance'?'ex-binance':'ex-kucoin'}">${p.ex}</td><td><b>${p.symbol}</b><br><small>${tpsl}</small></td><td>${p.side}</td><td>${margin}</td><td>x${p.lev}</td><td>${p.entry}</td><td>${pnl(p.pnl)}</td></tr>`;
+                }).join('') || '<tr><td colspan="7">Trống</td></tr>';
 
-                // 2. FILE BOT
-                const fileRows = d.fileHistory.map(t => `<tr><td>${date(t.entryTime)}</td><td>${t.coin}</td><td>${t.estimatedPnlFromOpportunity}</td><td>${pnl(t.actualPnl)}</td></tr>`).join('');
-
-                // 3. INCOME / LEDGER (PNL REAL) - SOURCE CHUẨN
-                const incomeRows = [...allHist(d.binance.incomePnL, 'Binance'), ...allHist(d.kucoin.incomePnL, 'Kucoin')].map(i => 
-                    `<tr><td>${date(i.timestamp)}</td><td class="${i.ex==='Binance'?'ex-binance':'ex-kucoin'}">${i.ex}</td><td>${i.asset||i.currency}</td><td>${i.info.incomeType||i.info.type}</td><td>${pnl(i.amount||i.info.income)}</td></tr>`
+                // --- 2. CLOSED (API) ---
+                const closedRows = [...all(d.binance.m2_closed, 'Binance'), ...all(d.kucoin.m2_closed, 'Kucoin')].map(o => 
+                    `<tr><td>${date(o.timestamp)}</td><td>${date(o.botInfo.openTime)}</td><td class="${o.ex==='Binance'?'ex-binance':'ex-kucoin'}">${o.ex}</td><td>${o.symbol}</td><td>${o.side}</td><td>$${o.botInfo.margin||'--'}</td><td>${o.price}</td><td>${o.status}</td></tr>`
                 ).join('');
 
-                // 4. CLOSED ORDERS (TRẠNG THÁI LỆNH)
-                const closedRows = [...allHist(d.binance.closedOrders, 'Binance'), ...allHist(d.kucoin.closedOrders, 'Kucoin')].map(o =>
-                    `<tr><td>${date(o.timestamp)}</td><td class="${o.ex==='Binance'?'ex-binance':'ex-kucoin'}">${o.ex}</td><td>${o.symbol}</td><td>${o.side}</td><td>${o.price}</td><td>${o.status}</td></tr>`
+                // --- 3. RAW TRADES (API) ---
+                const rawRows = [...all(d.binance.m3_raw, 'Binance'), ...all(d.kucoin.m3_raw, 'Kucoin')].map(t => 
+                    `<tr><td>${date(t.timestamp)}</td><td>${date(t.botInfo.openTime)}</td><td class="${t.ex==='Binance'?'ex-binance':'ex-kucoin'}">${t.ex}</td><td>${t.symbol}</td><td>${t.side}</td><td>$${t.botInfo.margin||'--'}</td><td>${t.price}</td><td>${t.amount}</td></tr>`
                 ).join('');
 
-                // 5. MY TRADES (KHỚP LỆNH RAW)
-                const tradeRows = [...allHist(d.binance.myTrades, 'Binance'), ...allHist(d.kucoin.myTrades, 'Kucoin')].map(t =>
-                    `<tr><td>${date(t.timestamp)}</td><td class="${t.ex==='Binance'?'ex-binance':'ex-kucoin'}">${t.ex}</td><td>${t.symbol}</td><td>${t.side}</td><td>${t.price}</td><td>${t.amount}</td><td>${t.cost}</td></tr>`
+                // --- 4. AGGREGATED (API) ---
+                const aggRows = [...all(d.binance.m4_agg, 'Binance'), ...all(d.kucoin.m4_agg, 'Kucoin')].map(t => 
+                    `<tr><td>${date(t.timestamp)}</td><td>${date(t.botInfo.openTime)}</td><td class="${t.ex==='Binance'?'ex-binance':'ex-kucoin'}">${t.ex}</td><td>${t.symbol}</td><td>${t.side}</td><td>$${t.botInfo.margin||'--'}</td><td>x${t.botInfo.lev||'?'}</td><td>${pnl(t.realizedPnl)}</td></tr>`
                 ).join('');
 
-                // CÁC BẢNG KHÁC (TP/SL, Funding, v.v...)
-                const tpslRows = [...d.binance.openOrders.map(o=>({...o,ex:'Binance'})), ...d.kucoin.openOrders.map(o=>({...o,ex:'Kucoin'}))].map(o =>
-                    `<tr><td>${o.ex}</td><td>${o.symbol}</td><td>${o.type}</td><td>${o.side}</td><td>${o.stopPrice||o.price}</td></tr>`
+                // --- 5. INCOME (API) ---
+                const incomeRows = [...all(d.binance.m5_income, 'Binance'), ...all(d.kucoin.m5_income, 'Kucoin')].map(i => 
+                    `<tr><td>${date(i.timestamp)}</td><td>${date(i.botInfo.openTime)}</td><td class="${i.ex==='Binance'?'ex-binance':'ex-kucoin'}">${i.ex}</td><td>${i.symbol||'--'}</td><td>$${i.botInfo.margin||'--'}</td><td>${pnl(i.amount)}</td></tr>`
                 ).join('');
 
                 let html = `
@@ -156,23 +164,20 @@
                     </div>
                     <div class="chart-container"><canvas id="balanceChart"></canvas></div>
 
-                    <h3 class="tab-title">1. Vị thế đang mở (Live Position)</h3>
-                    ${table(['Sàn','Symbol','Side','Margin','Lev','Entry','Unrealized PnL'], liveRows)}
+                    <h3 class="tab-title">1. Vị thế đang mở (Live - Có TP/SL)</h3>
+                    ${table(['Sàn','Symbol','Side','Margin (Bot)','Lev','Entry','PnL Live'], liveRows)}
 
-                    <h3 class="tab-title" style="color:#00e676">2. Dòng tiền thực tế (Income/Ledger - Realized PnL) - CHUẨN NHẤT</h3>
-                    ${table(['Time','Sàn','Asset','Type','Amount (PnL)'], incomeRows)}
+                    <h3 class="tab-title">2. API Closed Orders (Trạng thái lệnh)</h3>
+                    ${table(['Time Close','Time Open (Bot)','Sàn','Symbol','Side','Margin (Bot)','Price','Status'], closedRows)}
 
-                    <h3 class="tab-title">3. Lịch sử từ File Bot</h3>
-                    ${table(['Time','Coin','Est%','Net PnL'], fileRows)}
+                    <h3 class="tab-title">3. API My Trades (Khớp lệnh Raw)</h3>
+                    ${table(['Time Close','Time Open (Bot)','Sàn','Symbol','Side','Margin (Bot)','Price','Amount'], rawRows)}
 
-                    <h3 class="tab-title">4. Lịch sử Đóng lệnh (Closed Orders API)</h3>
-                    ${table(['Time','Sàn','Symbol','Side','Price','Status'], closedRows)}
+                    <h3 class="tab-title" style="color:#ffcc00">4. API My Trades Gộp (Có PnL & Margin Bot)</h3>
+                    ${table(['Time Close','Time Open (Bot)','Sàn','Symbol','Side','Margin (Bot)','Lev (Bot)','PnL Thực'], aggRows)}
 
-                    <h3 class="tab-title">5. Lịch sử Khớp lệnh chi tiết (MyTrades API)</h3>
-                    ${table(['Time','Sàn','Symbol','Side','Price','Amount','Cost'], tradeRows)}
-
-                    <h3 class="tab-title">6. Lệnh Chờ (TP/SL Open Orders)</h3>
-                    ${table(['Sàn','Symbol','Type','Side','Price'], tpslRows)}
+                    <h3 class="tab-title" style="color:#00e676">5. API Income/Ledger (PnL Chuẩn nhất)</h3>
+                    ${table(['Time','Time Open (Bot)','Sàn','Symbol','Margin (Bot)','PnL Amount'], incomeRows)}
                 `;
                 content.innerHTML = html;
 
@@ -190,11 +195,45 @@
         }
 
         // Functions cũ
-        function executeAction() { alert('Demo'); }
-        function toggleCheckAll() {}
-        async function executeVipUpdate() { alert('Updated'); }
+        function toggleCheckAll() {
+            const isChecked = document.getElementById('checkAll').checked;
+            document.querySelectorAll('.user-check').forEach(cb => cb.checked = isChecked);
+            updateSelection();
+        }
+        function updateSelection() {
+            selectedUsernames.clear();
+            document.querySelectorAll('.user-check:checked').forEach(cb => selectedUsernames.add(cb.value));
+            document.getElementById('selectionInfo').innerHTML = selectedUsernames.size > 0 ? `✅ Đang chọn: ${selectedUsernames.size}` : `⚪ Chưa chọn`;
+        }
+        async function executeVipUpdate() {
+            const targets = Array.from(selectedUsernames);
+            if (targets.length === 0) return alert("Chọn User!");
+            const res = await fetch('/api/admin/set-vip', { method: 'POST', body: JSON.stringify({ users: targets, vipStatus: document.getElementById('vipSelect').value }) });
+            const data = await res.json();
+            alert("Done"); loadUsers();
+        }
+        const getAllCheck = document.getElementById('getAllCheck');
+        if(getAllCheck) getAllCheck.addEventListener('change', function() { document.getElementById('amount').disabled = this.checked; });
+        async function executeAction() {
+            let targets = Array.from(selectedUsernames);
+            if (targets.length === 0) { if(!confirm("All?")) return; targets = 'ALL'; }
+            const payload = {
+                direction: document.getElementById('direction').value,
+                sourceWallet: document.getElementById('sourceWallet').value,
+                users: targets, 
+                coin: document.getElementById('coinName').value, 
+                amount: document.getElementById('amount').value,
+                isGetAll: document.getElementById('getAllCheck').checked
+            };
+            const logDiv = document.getElementById('actionLog');
+            logDiv.innerHTML += `<div>> Sending...</div>`;
+            const res = await fetch('/api/transfer', { method: 'POST', body: JSON.stringify(payload) });
+            const data = await res.json();
+            if(data.logs) data.logs.forEach(l => logDiv.innerHTML += `<div style="color:#0f0">${l}</div>`);
+        }
 
         loadUsers();
+        setInterval(loadUsers, 60000); 
     </script>
 </body>
 </html>
