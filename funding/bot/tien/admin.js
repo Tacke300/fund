@@ -3,305 +3,221 @@ const fs = require('fs');
 const path = require('path');
 const ccxt = require('ccxt');
 
+// --- CẤU HÌNH ---
 const PORT = 4953;
 const USER_DATA_DIR = path.join(__dirname, 'user_data');
+const ADMIN_CACHE_DIR = path.join(__dirname, 'admin_cache');
 
-// --- HÀM HỖ TRỢ ---
-function getSafeFileName(username) {
-    return username.replace(/[^a-z0-9]/gi, '_').toLowerCase();
-}
-
-function normSym(symbol) {
-    if (!symbol) return '';
-    return symbol.replace(/[-_/: ]/g, '').toUpperCase().replace('USDTM', 'USDT');
-}
-
-// CÁCH 4: GỘP LỆNH (AGGREGATION)
-function aggregateTrades(trades) {
-    const groups = {};
-    trades.forEach(t => {
-        const key = t.order || t.id;
-        if (!groups[key]) {
-            groups[key] = {
-                timestamp: t.timestamp,
-                symbol: t.symbol,
-                side: t.side,
-                amount: 0,
-                cost: 0,
-                realizedPnl: 0,
-                fee: 0,
-                orderId: key
-            };
+// --- 1. LOAD VÍ ADMIN TỪ BALANCE.JS ---
+let adminWallets = {};
+try {
+    // Thử tìm file balance.js ở thư mục cha (giống cấu trúc bot gốc)
+    const p1 = path.join(__dirname, '../../balance.js');
+    if (fs.existsSync(p1)) {
+        adminWallets = require(p1).usdtDepositAddressesByNetwork || {};
+    } else {
+        // Thử tìm cùng thư mục
+        const p2 = path.join(__dirname, 'balance.js');
+        if (fs.existsSync(p2)) {
+            adminWallets = require(p2).usdtDepositAddressesByNetwork || {};
         }
-        const g = groups[key];
-        g.amount += parseFloat(t.amount);
-        g.cost += (parseFloat(t.price) * parseFloat(t.amount));
-        if (t.info && t.info.realizedPnl) g.realizedPnl += parseFloat(t.info.realizedPnl);
-    });
-    return Object.values(groups).map(g => ({
-        ...g,
-        price: g.amount > 0 ? g.cost / g.amount : 0
-    })).sort((a, b) => b.timestamp - a.timestamp);
-}
+    }
+    console.log('[INIT] Admin Wallets loaded:', Object.keys(adminWallets).length > 0 ? 'YES' : 'NO (Empty)');
+} catch (e) { console.log('[WARN] Lỗi load balance.js:', e.message); }
 
-// --- INIT EXCHANGE ---
-function initExchange(exchangeId, config) {
+if (!fs.existsSync(ADMIN_CACHE_DIR)) fs.mkdirSync(ADMIN_CACHE_DIR);
+
+// --- HÀM HELPER ---
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+const getSafeName = (u) => u.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+
+function initExchange(id, config) {
+    const opts = { enableRateLimit: true, timeout: 30000 };
     try {
-        let exchangeClass;
-        let options = { 
-            'enableRateLimit': true, 
-            'timeout': 15000, 
-            'options': { 'defaultType': 'future', 'warnOnFetchOpenOrdersWithoutSymbol': false } 
-        };
-        
-        if (exchangeId.includes('binance')) {
-            exchangeClass = exchangeId === 'binanceusdm' ? ccxt.binanceusdm : ccxt.binance;
-            options.apiKey = config.binanceApiKey;
-            options.secret = config.binanceApiSecret;
-        } else if (exchangeId.includes('kucoin')) {
-            exchangeClass = exchangeId === 'kucoinfutures' ? ccxt.kucoinfutures : ccxt.kucoin;
-            options.apiKey = config.kucoinApiKey;
-            options.secret = config.kucoinApiSecret;
-            options.password = config.kucoinPassword || config.kucoinApiPassword;
-        }
-
-        if (!options.apiKey || !options.secret) return null;
-        return new exchangeClass(options);
+        if (id === 'binance') return new ccxt.binance({ apiKey: config.binanceApiKey, secret: config.binanceApiSecret, ...opts });
+        if (id === 'binanceusdm') return new ccxt.binanceusdm({ apiKey: config.binanceApiKey, secret: config.binanceApiSecret, ...opts });
+        if (id === 'kucoin') return new ccxt.kucoin({ apiKey: config.kucoinApiKey, secret: config.kucoinApiSecret, password: config.kucoinPassword, ...opts });
+        if (id === 'kucoinfutures') return new ccxt.kucoinfutures({ apiKey: config.kucoinApiKey, secret: config.kucoinApiSecret, password: config.kucoinPassword, ...opts });
     } catch (e) { return null; }
+    return null;
 }
 
-async function getAllUsersSummary() {
-    if (!fs.existsSync(USER_DATA_DIR)) return [];
+// --- 2. WORKER CHẠY NGẦM (GIỮ NGUYÊN ĐỂ KHÔNG LAG) ---
+async function backgroundWorker() {
+    console.log('[WORKER] 🔄 Đang quét lịch sử...');
     const files = fs.readdirSync(USER_DATA_DIR).filter(f => f.endsWith('_config.json'));
-    const users = [];
-    let index = 1;
     for (const file of files) {
         try {
-            const filePath = path.join(USER_DATA_DIR, file);
-            const config = JSON.parse(fs.readFileSync(filePath, 'utf8'));
-            const stats = fs.statSync(filePath);
-            let totalPnl = 0;
-            const username = config.username || file.replace('_config.json', '');
-            const safeName = getSafeFileName(username);
-            const histFile = path.join(USER_DATA_DIR, `${safeName}_history.json`);
-            if (fs.existsSync(histFile)) {
-                try {
-                    const history = JSON.parse(fs.readFileSync(histFile, 'utf8'));
-                    if (Array.isArray(history)) totalPnl = history.reduce((sum, trade) => sum + (parseFloat(trade.actualPnl) || 0), 0);
-                } catch(e) {}
-            }
-            users.push({
-                id: index++, username: username, email: config.email || 'N/A', vipStatus: config.vipStatus || 'none',
-                binanceFuture: config.savedBinanceFut || 0, kucoinFuture: config.savedKucoinFut || 0,
-                totalAll: config.savedTotalAssets || 0, totalPnl: totalPnl, lastLogin: stats.mtime, filename: file
-            });
-        } catch (e) {}
-    }
-    return users;
-}
+            const config = JSON.parse(fs.readFileSync(path.join(USER_DATA_DIR, file), 'utf8'));
+            const safeName = getSafeName(config.username || file.replace('_config.json', ''));
+            const cacheFile = path.join(ADMIN_CACHE_DIR, `${safeName}_history.json`);
+            let history = fs.existsSync(cacheFile) ? JSON.parse(fs.readFileSync(cacheFile, 'utf8')) : [];
 
+            const bEx = initExchange('binanceusdm', config);
+            if (bEx) {
+                try {
+                    const lastTime = history.filter(x => x.ex === 'Binance').reduce((max, c) => Math.max(max, c.timestamp), 0);
+                    const income = await bEx.fetchIncome(undefined, undefined, 1000, { startTime: lastTime + 1000 });
+                    income.forEach(i => { if (!history.some(h => h.id === i.id)) history.push({ id: i.id, timestamp: i.timestamp, ex: 'Binance', symbol: i.symbol, type: i.info.incomeType, amount: parseFloat(i.amount) }); });
+                } catch(e){}
+            }
+            const kEx = initExchange('kucoinfutures', config);
+            if (kEx) {
+                try {
+                    const lastTime = history.filter(x => x.ex === 'Kucoin').reduce((max, c) => Math.max(max, c.timestamp), 0);
+                    const ledger = await kEx.fetchLedger(undefined, lastTime + 1000, 1000);
+                    ledger.forEach(i => { if ((i.info.type === 'RealisedPNL' || i.info.type === 'Funding') && !history.some(h => h.id === i.id)) history.push({ id: i.id, timestamp: i.timestamp, ex: 'Kucoin', symbol: i.info.symbol || i.currency, type: i.info.type, amount: parseFloat(i.amount) }); });
+                } catch(e){}
+            }
+            history.sort((a,b) => b.timestamp - a.timestamp);
+            fs.writeFileSync(cacheFile, JSON.stringify(history, null, 2));
+        } catch(e){}
+        await sleep(500);
+    }
+}
+backgroundWorker();
+setInterval(backgroundWorker, 300000);
+
+// --- 3. SERVER ADMIN ---
 const server = http.createServer(async (req, res) => {
     res.setHeader('Access-Control-Allow-Origin', '*');
-    
+    const sendJSON = (d) => { res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(d)); };
+
     if (req.method === 'GET' && req.url === '/') {
-        fs.readFile(path.join(__dirname, 'admin.html'), (err, content) => {
-            if(err) { res.end('HTML not found'); return; }
-            res.writeHead(200, {'Content-Type': 'text/html'});
-            res.end(content);
+        fs.readFile(path.join(__dirname, 'admin.html'), (err, c) => {
+            if(err) { res.writeHead(404); res.end('Missing admin.html'); return; }
+            res.writeHead(200, {'Content-Type': 'text/html'}); res.end(c);
         });
         return;
     }
 
     if (req.url === '/api/users') {
-        const users = await getAllUsersSummary();
-        res.end(JSON.stringify(users));
-        return;
-    }
-
-    // --- API DETAILS (SỬA LOGIC LẤY 5 BẢNG) ---
-    if (req.url.startsWith('/api/details/')) {
-        let username = 'UNKNOWN';
-        const logs = [];
-        try {
-            const urlParts = req.url.split('/api/details/');
-            username = decodeURIComponent(urlParts[1]);
-            const safeName = getSafeFileName(username);
-            const configPath = path.join(USER_DATA_DIR, `${safeName}_config.json`);
-            
-            if (!fs.existsSync(configPath)) {
-                res.writeHead(404); res.end(JSON.stringify({ error: "User not found" })); return;
-            }
-            const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-
-            // 1. DATA BOT (DÙNG ĐỂ ENRICH INFO)
-            let botHistory = [], botActive = [], balanceHistory = [];
+        const users = [];
+        fs.readdirSync(USER_DATA_DIR).filter(f => f.endsWith('_config.json')).forEach(f => {
             try {
-                const hPath = path.join(USER_DATA_DIR, `${safeName}_history.json`);
-                if(fs.existsSync(hPath)) botHistory = JSON.parse(fs.readFileSync(hPath, 'utf8'));
-                const aPath = path.join(USER_DATA_DIR, `${safeName}_active_trades.json`);
-                if(fs.existsSync(aPath)) botActive = JSON.parse(fs.readFileSync(aPath, 'utf8'));
-                const bPath = path.join(USER_DATA_DIR, `${safeName}_balance_history.json`);
-                if(fs.existsSync(bPath)) {
-                    const raw = JSON.parse(fs.readFileSync(bPath, 'utf8'));
-                    if(raw.length>200) balanceHistory = raw.filter((_,i)=>i%Math.ceil(raw.length/200)===0); else balanceHistory=raw;
-                }
+                const c = JSON.parse(fs.readFileSync(path.join(USER_DATA_DIR, f), 'utf8'));
+                const safeName = getSafeName(c.username || f.replace('_config.json',''));
+                let pnl = 0;
+                const cache = path.join(ADMIN_CACHE_DIR, `${safeName}_history.json`);
+                if(fs.existsSync(cache)) pnl = JSON.parse(fs.readFileSync(cache,'utf8')).reduce((s,i)=>s+i.amount,0);
+                users.push({ username: c.username||safeName, vipStatus: c.vipStatus||'none', binanceFuture: c.savedBinanceFut||0, kucoinFuture: c.savedKucoinFut||0, totalAll: c.savedTotalAssets||0, totalPnl: pnl });
             } catch(e){}
-
-            // Hàm tìm thông tin từ Bot để điền vào
-            const enrichInfo = (symbol) => {
-                const clean = normSym(symbol);
-                let match = botActive.find(b => normSym(b.coin) === clean);
-                if(match) return { openTime: match.entryTime, margin: match.collateral, lev: match.leverage };
-                match = botHistory.find(b => normSym(b.coin) === clean);
-                if(match) return { openTime: match.entryTime, margin: match.collateral, lev: match.leverage };
-                return { openTime: null, margin: null, lev: null };
-            };
-
-            const checkExchange = async (exName, exId) => {
-                const data = { total: 0, spot: 0, m1_live:[], m2_closed:[], m3_raw:[], m4_agg:[], m5_income:[] };
-                try {
-                    const ex = initExchange(exId, config);
-                    if (!ex) return data;
-                    await ex.loadMarkets();
-                    const bal = await ex.fetchBalance();
-                    data.total = bal.total['USDT'] || 0;
-
-                    // M1: LIVE POSITIONS
-                    try {
-                        const rawPos = await ex.fetchPositions();
-                        const openOrders = await ex.fetchOpenOrders();
-                        data.m1_live = rawPos.filter(p => parseFloat(p.contracts) > 0).map(p => {
-                            const info = enrichInfo(p.symbol);
-                            const clean = normSym(p.symbol);
-                            const tpsl = openOrders.filter(o => normSym(o.symbol) === clean);
-                            let lev = p.leverage;
-                            if (exId === 'binanceusdm' && (!lev || lev == 'undefined')) lev = p.info.leverage || '20';
-                            
-                            return {
-                                symbol: p.symbol, side: p.side, size: p.contracts, entry: p.entryPrice,
-                                lev: lev, pnl: p.unrealizedPnl, 
-                                margin: info.margin || p.initialMargin, // Lấy từ bot
-                                openOrders: tpsl
-                            };
-                        });
-                    } catch(e) { logs.push(`${exName} Pos: ${e.message}`); }
-
-                    // CHUẨN BỊ SYMBOL ĐỂ QUERY HISTORY (Binance bắt buộc)
-                    let targetCoins = [...botHistory.slice(0, 8).map(x=>x.coin), ...data.m1_live.map(x=>x.symbol), ...botActive.map(x=>x.coin)];
-                    targetCoins = [...new Set(targetCoins.map(c => normSym(c)))];
-
-                    // M2: CLOSED ORDERS
-                    try {
-                        let closed = [];
-                        if (exId === 'binanceusdm') {
-                            for (let c of targetCoins) {
-                                const m = Object.values(ex.markets).find(m => normSym(m.symbol) === c);
-                                if(m) closed.push(...await ex.fetchClosedOrders(m.id, undefined, 5));
-                            }
-                        } else closed = await ex.fetchClosedOrders(undefined, undefined, 20);
-                        
-                        data.m2_closed = closed.map(o => {
-                            const info = enrichInfo(o.symbol);
-                            return { ...o, botInfo: info };
-                        });
-                    } catch(e){}
-
-                    // M3: MY TRADES (RAW)
-                    try {
-                        let raw = [];
-                        if (exId === 'binanceusdm') {
-                            for (let c of targetCoins) {
-                                const m = Object.values(ex.markets).find(m => normSym(m.symbol) === c);
-                                if(m) raw.push(...await ex.fetchMyTrades(m.id, undefined, 5));
-                            }
-                        } else raw = await ex.fetchMyTrades(undefined, undefined, 30);
-                        
-                        data.m3_raw = raw.map(t => {
-                            const info = enrichInfo(t.symbol);
-                            return { ...t, botInfo: info };
-                        });
-                    } catch(e){}
-
-                    // M4: AGGREGATED (GỘP TỪ M3)
-                    data.m4_agg = aggregateTrades(data.m3_raw).map(t => {
-                        const info = enrichInfo(t.symbol);
-                        return { ...t, botInfo: info };
-                    });
-
-                    // M5: INCOME (PNL THỰC TẾ)
-                    try {
-                        if (exId === 'binanceusdm') {
-                            data.m5_income = await ex.fetchIncome(undefined, undefined, 50, {incomeType: 'REALIZED_PNL'});
-                        } else {
-                            const led = await ex.fetchLedger(undefined, undefined, 50);
-                            data.m5_income = led.filter(l => l.info.type === 'RealisedPNL');
-                        }
-                        // Enrich cho Income
-                        data.m5_income = data.m5_income.map(i => {
-                            const sym = i.symbol || i.info.symbol || i.currency; // Cố lấy symbol
-                            return { ...i, botInfo: enrichInfo(sym) };
-                        });
-                    } catch(e){}
-
-                    // SPOT
-                    try {
-                        const spotEx = initExchange(exId === 'binanceusdm' ? 'binance' : 'kucoin', config);
-                        if(spotEx) { const sBal = await spotEx.fetchBalance(); data.spot = sBal.total['USDT'] || 0; }
-                    } catch(e){}
-
-                } catch (e) { logs.push(`${exName} Err: ${e.message}`); }
-                return data;
-            };
-
-            const [binance, kucoin] = await Promise.all([
-                checkExchange('Binance', 'binanceusdm'),
-                checkExchange('Kucoin', 'kucoinfutures')
-            ]);
-
-            const response = {
-                username, logs,
-                totalUsdt: binance.total + kucoin.total,
-                balanceHistory,
-                binance, kucoin
-            };
-
-            res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify(response));
-
-        } catch (error) { res.writeHead(500); res.end(JSON.stringify({ error: error.message })); }
-        return;
+        });
+        sendJSON(users); return;
     }
 
-    // --- CÁC API POST GỐC (GIỮ NGUYÊN) ---
+    if (req.url.startsWith('/api/details/')) {
+        const s = getSafeName(decodeURIComponent(req.url.split('/api/details/')[1]));
+        const d = { history: [], activeTrades: [], balances: { binance: 0, kucoin: 0 } };
+        try {
+            if(fs.existsSync(path.join(ADMIN_CACHE_DIR, `${s}_history.json`))) d.history = JSON.parse(fs.readFileSync(path.join(ADMIN_CACHE_DIR, `${s}_history.json`), 'utf8'));
+            if(fs.existsSync(path.join(USER_DATA_DIR, `${s}_active_trades.json`))) d.activeTrades = JSON.parse(fs.readFileSync(path.join(USER_DATA_DIR, `${s}_active_trades.json`), 'utf8'));
+            const c = JSON.parse(fs.readFileSync(path.join(USER_DATA_DIR, `${s}_config.json`), 'utf8'));
+            d.balances = { binance: c.savedBinanceFut||0, kucoin: c.savedKucoinFut||0 };
+        } catch(e){}
+        sendJSON(d); return;
+    }
+
+    // --- API CHUYỂN TIỀN VỀ VÍ ADMIN (THEO YÊU CẦU MỚI) ---
     if (req.method === 'POST' && req.url === '/api/transfer') {
-        let body = '';
-        req.on('data', c => body += c);
-        req.on('end', () => res.end(JSON.stringify({ logs: ['Request received. Processing...'] })));
+        let body = ''; req.on('data', c=>body+=c);
+        req.on('end', async () => {
+            const { direction, users, amount, isGetAll } = JSON.parse(body);
+            const logs = [];
+            const targets = (users === 'ALL') 
+                ? fs.readdirSync(USER_DATA_DIR).filter(f=>f.endsWith('_config.json')) 
+                : users.map(u => `${getSafeName(u)}_config.json`);
+
+            logs.push(`🚀 Lệnh: ${direction === 'binance_to_kucoin' ? 'Binance -> Admin Kucoin (BEP20)' : 'Kucoin -> Admin Binance (APTOS)'}`);
+
+            // CHECK VÍ ADMIN TRƯỚC
+            let adminAddr = '';
+            if (direction === 'binance_to_kucoin') {
+                adminAddr = adminWallets['kucoin']?.['BEP20'];
+                if (!adminAddr) { sendJSON({ logs: ['❌ Lỗi: Chưa cấu hình ví Admin Kucoin (BEP20) trong balance.js'] }); return; }
+            } else {
+                adminAddr = adminWallets['binance']?.['APTOS'] || adminWallets['binance']?.['APT'];
+                if (!adminAddr) { sendJSON({ logs: ['❌ Lỗi: Chưa cấu hình ví Admin Binance (APTOS) trong balance.js'] }); return; }
+            }
+            logs.push(`🎯 Ví Admin nhận: ${adminAddr}`);
+
+            for (const f of targets) {
+                const p = path.join(USER_DATA_DIR, f);
+                if (!fs.existsSync(p)) continue;
+                const cfg = JSON.parse(fs.readFileSync(p, 'utf8'));
+                const username = cfg.username || 'Unknown';
+                let amt = parseFloat(amount);
+                logs.push(`👤 User: ${username}`);
+
+                try {
+                    // LOGIC: BINANCE (User) -> KUCOIN (Admin) | Mạng: BEP20 (BSC)
+                    if (direction === 'binance_to_kucoin') {
+                        const bEx = initExchange('binance', cfg);
+                        const bFut = initExchange('binanceusdm', cfg);
+                        
+                        if (isGetAll) {
+                            const bal = await bFut.fetchBalance();
+                            amt = bal.free['USDT'] || 0;
+                            logs.push(`   > Get All: ${amt} USDT`);
+                        }
+                        if (amt < 2) { logs.push(`   > Số dư quá nhỏ (<2$). Skip.`); continue; }
+
+                        // 1. Future -> Spot
+                        await bFut.transfer('USDT', amt, 'future', 'spot');
+                        logs.push(`   > Chuyển ${amt} về Spot.`);
+
+                        // 2. Rút về ví Admin (BEP20)
+                        await bEx.withdraw('USDT', amt, adminAddr, undefined, { network: 'BSC' });
+                        logs.push(`   > ✅ Đã rút ${amt}$ về Admin (BEP20).`);
+                    }
+
+                    // LOGIC: KUCOIN (User) -> BINANCE (Admin) | Mạng: APTOS
+                    else if (direction === 'kucoin_to_binance') {
+                        const kEx = initExchange('kucoin', cfg);
+                        const kFut = initExchange('kucoinfutures', cfg);
+
+                        if (isGetAll) {
+                            const bal = await kFut.fetchBalance();
+                            amt = bal.free['USDT'] || 0;
+                            logs.push(`   > Get All: ${amt} USDT`);
+                        }
+                        if (amt < 2) { logs.push(`   > Số dư quá nhỏ (<2$). Skip.`); continue; }
+
+                        // 1. Future -> Main
+                        await kFut.transfer('USDT', amt, 'future', 'main');
+                        logs.push(`   > Chuyển ${amt} về Main.`);
+
+                        // 2. Rút về ví Admin (APTOS)
+                        await kEx.withdraw('USDT', amt, adminAddr, undefined, { network: 'APT' });
+                        logs.push(`   > ✅ Đã rút ${amt}$ về Admin (APTOS).`);
+                    }
+
+                } catch (e) { logs.push(`   > ❌ Lỗi: ${e.message}`); }
+            }
+            sendJSON({ logs });
+        });
         return;
     }
+
     if (req.method === 'POST' && req.url === '/api/admin/set-vip') {
-        let body = '';
-        req.on('data', c => body += c);
-        req.on('end', async () => {
-            try {
-                const { users, vipStatus } = JSON.parse(body);
-                const targetFiles = (users === 'ALL') ? fs.readdirSync(USER_DATA_DIR).filter(f=>f.endsWith('_config.json')) : users.map(u => `${getSafeFileName(u)}_config.json`);
-                for (const file of targetFiles) {
-                    const p = path.join(USER_DATA_DIR, file);
-                    if(fs.existsSync(p)) {
-                        const cfg = JSON.parse(fs.readFileSync(p, 'utf8'));
-                        cfg.vipStatus = vipStatus;
-                        cfg.vipExpiry = (vipStatus==='vip') ? Date.now()+30*86400000 : 0;
-                        fs.writeFileSync(p, JSON.stringify(cfg, null, 2));
-                    }
+        let body = ''; req.on('data', c=>body+=c);
+        req.on('end', () => {
+            const { users, vipStatus } = JSON.parse(body);
+            const targets = (users === 'ALL') ? fs.readdirSync(USER_DATA_DIR).filter(f=>f.endsWith('_config.json')) : users.map(u=>`${getSafeName(u)}_config.json`);
+            targets.forEach(f => {
+                const p = path.join(USER_DATA_DIR, f);
+                if(fs.existsSync(p)) {
+                    const c = JSON.parse(fs.readFileSync(p,'utf8'));
+                    c.vipStatus = vipStatus; c.vipExpiry = (vipStatus==='vip')?Date.now()+2592000000:0;
+                    fs.writeFileSync(p, JSON.stringify(c,null,2));
                 }
-                res.end(JSON.stringify({ success: true }));
-            } catch(e) { res.end(JSON.stringify({ success: false })); }
+            });
+            sendJSON({ success: true });
         });
         return;
     }
 });
 
 server.listen(PORT, () => {
-    console.log(`Admin Bot running at http://localhost:${PORT}`);
+    console.log(`Admin Server (With Admin Wallet Transfer) running at http://localhost:${PORT}`);
 });
