@@ -12,31 +12,49 @@
         h2 { margin-top: 0; color: var(--accent); border-bottom: 1px solid #333; padding-bottom: 10px; }
 
         /* TABLE */
-        table { width: 100%; border-collapse: collapse; background: var(--card); font-size: 0.9rem; margin-bottom: 20px; }
+        table { width: 100%; border-collapse: collapse; background: var(--card); font-size: 0.9rem; }
         th, td { padding: 12px; border: 1px solid var(--border); text-align: left; }
         th { background: #252525; text-transform: uppercase; color: #aaa; position: sticky; top: 0; }
         tr:hover { background: #2a2a2a; }
         .user-link { color: var(--accent); cursor: pointer; text-decoration: underline; font-weight: bold; }
         
+        /* STATUS COLORS */
         .pnl-pos { color: var(--success); font-weight: bold; }
         .pnl-neg { color: var(--danger); font-weight: bold; }
-        .vip-tag { background: var(--vip); color: #000; padding: 2px 6px; border-radius: 4px; font-weight:bold; font-size:0.8em; }
+        .vip-tag { color: #000; background: var(--vip); padding: 2px 6px; border-radius: 4px; font-weight: bold; font-size: 0.75rem; }
+        .vip-pro-tag { color: #fff; background: linear-gradient(45deg, #ff00cc, #333399); padding: 2px 6px; border-radius: 4px; font-weight: bold; font-size: 0.75rem; }
 
-        .panel { background: var(--card); padding: 20px; border-radius: 8px; margin-bottom: 20px; border: 1px solid var(--border); }
+        /* PANEL */
+        .panel { background: var(--card); padding: 20px; border-radius: 8px; margin-bottom: 20px; border: 1px solid var(--border); box-shadow: 0 4px 6px rgba(0,0,0,0.3); }
         .controls { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 15px; align-items: end; }
-        input, select, button { padding: 10px; width: 100%; box-sizing: border-box; }
-        button { background: var(--accent); border: none; color: white; font-weight: bold; cursor: pointer; }
+        
+        input, select { padding: 10px; background: #2b2b2b; border: 1px solid #444; color: #fff; border-radius: 4px; width: 100%; box-sizing: border-box; }
+        button { padding: 10px; background: var(--accent); border: none; color: white; font-weight: bold; cursor: pointer; border-radius: 4px; width: 100%; }
+        button:hover { opacity: 0.9; }
+        button.exec { background: linear-gradient(45deg, #007bff, #0056b3); }
+        button.vip-btn { background: var(--vip); color: #000; }
+        
+        .checkbox-wrapper { display: flex; align-items: center; gap: 10px; height: 40px; background: #2a2222; padding: 0 10px; border-radius: 4px; border: 1px solid #ff4444; }
+        input[type="checkbox"] { width: 18px; height: 18px; accent-color: var(--danger); cursor: pointer; }
+
+        #selectionInfo { color: var(--warning); font-weight: bold; margin-top: 10px; }
 
         /* MODAL */
         .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.85); z-index: 1000; justify-content: center; align-items: center; }
         .modal-content { background: var(--card); padding: 20px; width: 95%; max-width: 1400px; max-height: 90vh; overflow-y: auto; border-radius: 8px; border: 1px solid var(--accent); }
+        .acc-item { border: 1px solid var(--border); margin-bottom: 10px; }
+        .acc-header { background: #2a2a2a; padding: 10px; cursor: pointer; display: flex; justify-content: space-between; font-weight: bold; }
+        .acc-content { display: block; padding: 10px; background: #111; }
         .close { float: right; cursor: pointer; font-size: 1.5rem; color: #aaa; }
+        .close:hover { color: #fff; }
         
-        /* Chart */
+        #actionLog { background: #000; padding: 10px; height: 150px; overflow-y: scroll; font-family: monospace; border: 1px solid #444; margin-top: 15px; color: #0f0; font-size: 0.85rem; }
+
+        /* MỚI: CHART VÀ TAG */
         .chart-container { position: relative; height: 300px; width: 100%; margin-bottom: 20px; background: #151515; }
-        
-        .tab-title { color: var(--warning); border-bottom: 1px solid #444; padding-bottom: 5px; margin-top: 30px; text-transform: uppercase; }
-        .order-tag { font-size: 0.7em; padding: 2px 4px; background: #333; margin-right: 4px; border: 1px solid #555; }
+        .order-tag { font-size: 0.75rem; padding: 2px 4px; border-radius: 3px; background: #333; margin-right: 4px; border: 1px solid #555; display: inline-block; margin-top: 3px; }
+        .ex-binance { color: #F0B90B; font-weight: bold; }
+        .ex-kucoin { color: #24AE8F; font-weight: bold; }
     </style>
 </head>
 <body>
@@ -45,10 +63,53 @@
     <div class="panel">
         <h2 style="color: var(--danger);">💸 Chuyển Tiền Admin</h2>
         <div class="controls">
-            <!-- Giữ nguyên các controls cũ -->
-            <button onclick="executeAction()">THỰC HIỆN</button>
+            <div>
+                <label>Hướng chuyển:</label>
+                <select id="direction">
+                    <option value="binance_to_kucoin">Binance ➔ KuCoin</option>
+                    <option value="kucoin_to_binance">KuCoin ➔ Binance</option>
+                    <option value="both_ways" style="color:#ffff00; font-weight:bold;">⇄ Rút Chéo (2 Chiều)</option>
+                </select>
+            </div>
+            <div>
+                <label>Nguồn tiền:</label>
+                <select id="sourceWallet">
+                    <option value="both">Gom Future & Spot</option>
+                    <option value="future">Chỉ từ Future</option>
+                    <option value="spot">Chỉ từ Spot</option>
+                </select>
+            </div>
+            <div>
+                <label>Coin / Số lượng:</label>
+                <div style="display:flex; gap:5px;">
+                    <input type="text" id="coinName" value="USDT" style="width:30%">
+                    <input type="number" id="amount" placeholder="Số tiền" style="width:70%">
+                </div>
+            </div>
+            <div class="checkbox-wrapper">
+                <input type="checkbox" id="getAllCheck">
+                <label for="getAllCheck" style="color: var(--danger); font-weight: bold; cursor:pointer;">RÚT HẾT (GET ALL)</label>
+            </div>
+            <button class="exec" onclick="executeAction()">THỰC HIỆN</button>
         </div>
         <div id="actionLog">Logs...</div>
+    </div>
+
+    <!-- 2. BẢNG QUẢN LÝ VIP -->
+    <div class="panel" style="border-color: var(--vip);">
+        <h2 style="color: var(--vip);">👑 Cập Nhật VIP (Hàng Loạt)</h2>
+        <div id="selectionInfo">Đang chọn: 0 Users</div>
+        
+        <div class="controls" style="margin-top: 10px; align-items: center;">
+            <div style="display: flex; gap: 10px; width: 100%;">
+                <select id="vipSelect" style="flex: 2;">
+                    <option value="none">Standard (Thu phí)</option>
+                    <option value="vip">VIP (30 Ngày)</option>
+                    <option value="vip_pro">VIP PRO (Free Trọn Đời)</option>
+                </select>
+                <button class="vip-btn" style="flex: 1;" onclick="executeVipUpdate()">CẬP NHẬT VIP NGAY</button>
+            </div>
+        </div>
     </div>
 
     <!-- 3. DANH SÁCH USER -->
@@ -61,18 +122,20 @@
         <table>
             <thead>
                 <tr>
-                    <th>#</th>
+                    <th style="width: 40px; text-align:center;"><input type="checkbox" id="checkAll" onchange="toggleCheckAll()"></th>
                     <th>Username</th>
                     <th>Email</th>
                     <th>Status</th>
                     <th>Last Login</th>
                     <th>Binance Fut</th>
                     <th>KuCoin Fut</th>
-                    <th>TỔNG TÀI SẢN</th>
-                    <th>Tổng PNL</th>
+                    <th style="color: var(--success);">TỔNG TÀI SẢN</th>
+                    <th>Tổng PNL (File Bot)</th>
                 </tr>
             </thead>
-            <tbody id="userTableBody"><tr><td colspan="9">Đang tải...</td></tr></tbody>
+            <tbody id="userTableBody">
+                <tr><td colspan="9">Đang tải dữ liệu...</td></tr>
+            </tbody>
         </table>
     </div>
 
@@ -87,8 +150,10 @@
 
     <script>
         let usersData = [];
+        let selectedUsernames = new Set();
         let chartInstance = null;
 
+        // --- LOAD USERS ---
         async function loadUsers() {
             try {
                 const res = await fetch('/api/users');
@@ -96,30 +161,54 @@
                 usersData.sort((a, b) => b.totalAll - a.totalAll);
                 const tbody = document.getElementById('userTableBody');
                 tbody.innerHTML = '';
-                usersData.forEach((u, idx) => {
+                usersData.forEach(u => {
                     const pnlClass = u.totalPnl >= 0 ? 'pnl-pos' : 'pnl-neg';
+                    const lastLogin = u.lastLogin ? new Date(u.lastLogin).toLocaleString('vi-VN') : '-';
+                    let statusTag = '<span style="color:#777">Std</span>';
+                    if (u.vipStatus === 'vip') statusTag = '<span class="vip-tag">VIP</span>';
+                    if (u.vipStatus === 'vip_pro') statusTag = '<span class="vip-pro-tag">PRO</span>';
                     const tr = document.createElement('tr');
                     tr.innerHTML = `
-                        <td>${idx+1}</td>
+                        <td style="text-align:center;"><input type="checkbox" class="user-check" value="${u.username}" onchange="updateSelection()"></td>
                         <td class="user-link" onclick="showDetails('${u.username}')">${u.username}</td>
-                        <td>${u.email||'-'}</td>
-                        <td>${u.vipStatus}</td>
-                        <td>${u.lastLogin ? new Date(u.lastLogin).toLocaleString() : '-'}</td>
-                        <td style="color:#F0B90B">$${u.binanceFuture.toFixed(1)}</td>
-                        <td style="color:#24AE8F">$${u.kucoinFuture.toFixed(1)}</td>
-                        <td style="font-weight:bold">$${u.totalAll.toFixed(1)}</td>
-                        <td class="${pnlClass}">$${u.totalPnl.toFixed(1)}</td>
+                        <td>${u.email || '-'}</td>
+                        <td>${statusTag}</td>
+                        <td style="font-size:0.8rem; color:#aaa;">${lastLogin}</td>
+                        <td style="color:#F0B90B">${(u.binanceFuture || 0).toFixed(1)} $</td>
+                        <td style="color:#24AE8F">${(u.kucoinFuture || 0).toFixed(1)} $</td>
+                        <td style="font-weight:bold; color:#fff;">${(u.totalAll || 0).toFixed(1)} $</td>
+                        <td class="${pnlClass}">${u.totalPnl.toFixed(2)} $</td>
                     `;
                     tbody.appendChild(tr);
                 });
-            } catch(e) {}
+                updateSelection(); 
+            } catch(e) { console.error(e); }
         }
 
+        // --- HÀM VẼ BIỂU ĐỒ ---
+        function renderChart(history) {
+            const ctx = document.getElementById('balanceChart');
+            if(!ctx) return;
+            if (chartInstance) chartInstance.destroy();
+            if (!history || history.length === 0) return;
+            const labels = history.map(d => new Date(d.time).toLocaleTimeString('vi-VN'));
+            const dataTotal = history.map(d => d.total);
+            chartInstance = new Chart(ctx.getContext('2d'), {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [{ label: 'Total Equity', data: dataTotal, borderColor: '#0d6efd', borderWidth: 2, pointRadius: 0, tension: 0.1 }]
+                },
+                options: { responsive: true, maintainAspectRatio: false, scales: { x: { display: false }, y: { grid: { color: '#333' } } } }
+            });
+        }
+
+        // --- HÀM XEM CHI TIẾT ---
         async function showDetails(username) {
             const modal = document.getElementById('detailModal');
             const container = document.getElementById('accordionContainer');
             document.getElementById('modalTitle').innerText = `Chi tiết: ${username}`;
-            container.innerHTML = '<div style="text-align:center; padding:40px"><h3>🔄 Đang tải 5 bảng lịch sử...</h3></div>';
+            container.innerHTML = `<div style="text-align:center; padding: 40px;"><h3>🔄 Đang kết nối sàn (Lấy PnL thực)...</h3></div>`;
             modal.style.display = 'flex';
 
             try {
@@ -128,93 +217,172 @@
                 
                 if (d.error) { container.innerHTML = `<h3 style="color:red">Lỗi: ${d.error}</h3>`; return; }
 
-                // --- VẼ BIỂU ĐỒ ---
-                setTimeout(() => {
-                    const ctx = document.getElementById('balanceChart');
-                    if(ctx && d.balanceHistory) {
-                        if(chartInstance) chartInstance.destroy();
-                        chartInstance = new Chart(ctx.getContext('2d'), {
-                            type: 'line',
-                            data: {
-                                labels: d.balanceHistory.map(i=>new Date(i.time).toLocaleTimeString()),
-                                datasets: [{ label: 'Total Equity', data: d.balanceHistory.map(i=>i.total), borderColor: '#007bff', tension: 0.1 }]
-                            },
-                            options: { responsive:true, maintainAspectRatio:false, scales:{x:{display:false}, y:{grid:{color:'#333'}}} }
-                        });
-                    }
-                }, 100);
+                // --- 1. RENDER LIVE POSITIONS (Có TP/SL) ---
+                let posRows = '';
+                if(d.livePositions.length === 0) posRows = '<tr><td colspan="7" style="text-align:center; color:#555">Không có vị thế mở trên sàn</td></tr>';
+                else {
+                    posRows = d.livePositions.map(p => {
+                        const pnlColor = p.unrealizedPnl >= 0 ? '#00c851' : '#ff4444';
+                        // TP/SL Tags
+                        let tpsl = '';
+                        if(p.openOrders && p.openOrders.length > 0) {
+                            p.openOrders.forEach(o => {
+                                const type = o.type.toUpperCase().includes('PROFIT') ? 'TP' : 'SL';
+                                const color = type==='TP'?'#00e676':'#ff5252';
+                                tpsl += `<span class="order-tag" style="color:${color}; border-color:${color}">${type}: ${parseFloat(o.stopPrice||o.price||0).toFixed(4)}</span>`;
+                            });
+                        } else tpsl = '<span style="color:#666; font-size:0.8em">--</span>';
 
-                // --- HELPER RENDER TABLE ---
-                const renderTable = (headers, rows) => `<table style="margin-bottom:20px;"><tr>${headers.map(h=>`<th>${h}</th>`).join('')}</tr>${rows}</table>`;
-
-                // 1. LIVE POSITIONS
-                const posRows = [...(d.binance.positions||[]).map(p=>({...p,ex:'Binance'})), ...(d.kucoin.positions||[]).map(p=>({...p,ex:'Kucoin'}))].map(p => {
-                    let tpsl = '';
-                    if(p.openOrders && p.openOrders.length) {
-                        p.openOrders.forEach(o => {
-                            const type = o.type.includes('take') ? 'TP' : 'SL';
-                            const color = type==='TP'?'#00e676':'#ff5252';
-                            tpsl += `<span class="order-tag" style="color:${color}">${type}: ${parseFloat(o.stopPrice||o.price).toFixed(4)}</span>`;
-                        });
-                    }
-                    return `<tr><td>${p.ex}</td><td><b>${p.symbol}</b><br>${tpsl}</td><td>${p.side.toUpperCase()}</td><td>x${p.leverage}</td><td>$${p.unrealizedPnl.toFixed(2)}</td></tr>`;
-                }).join('') || '<tr><td colspan="5" style="text-align:center">Trống</td></tr>';
-
-                // 2. AGGREGATED TRADES (Gộp)
-                const aggRows = [...(d.binance.aggTrades||[]).map(t=>({...t,ex:'Binance'})), ...(d.kucoin.aggTrades||[]).map(t=>({...t,ex:'Kucoin'}))]
-                    .sort((a,b)=>b.timestamp-a.timestamp).map(t => {
-                        return `<tr><td>${new Date(t.timestamp).toLocaleString()}</td><td>${t.ex}</td><td>${t.symbol}</td><td>${t.side}</td><td>$${t.realizedPnl.toFixed(2)}</td></tr>`;
+                        const exClass = p.ex === 'Binance' ? 'ex-binance' : 'ex-kucoin';
+                        return `<tr>
+                            <td class="${exClass}">${p.ex}</td>
+                            <td><b>${p.symbol}</b><br>${tpsl}</td>
+                            <td style="color:${p.side==='long'?'#00c851':'#ff4444'}">${p.side.toUpperCase()}</td>
+                            <td>$${p.margin.toFixed(2)}</td>
+                            <td>x${p.leverage}</td>
+                            <td>${p.entryPrice}</td>
+                            <td style="color:${pnlColor}; font-weight:bold">$${p.unrealizedPnl.toFixed(2)}</td>
+                        </tr>`;
                     }).join('');
+                }
 
-                // 3. RAW TRADES (Thô)
-                const rawRows = [...(d.binance.rawTrades||[]).map(t=>({...t,ex:'Binance'})), ...(d.kucoin.rawTrades||[]).map(t=>({...t,ex:'Kucoin'}))]
-                    .sort((a,b)=>b.timestamp-a.timestamp).map(t => {
-                        return `<tr><td>${new Date(t.timestamp).toLocaleString()}</td><td>${t.ex}</td><td>${t.symbol}</td><td>${t.side}</td><td>${parseFloat(t.price).toFixed(4)}</td></tr>`;
+                // --- 2. RENDER HISTORY (Aggregated) ---
+                let histRows = '';
+                if(d.exchangeHistory.length === 0) histRows = '<tr><td colspan="7" style="text-align:center; color:#555">Chưa có lịch sử khớp lệnh</td></tr>';
+                else {
+                    histRows = d.exchangeHistory.map(h => {
+                        const date = new Date(h.timestamp).toLocaleString('vi-VN');
+                        const exClass = h.ex === 'Binance' ? 'ex-binance' : 'ex-kucoin';
+                        const sideColor = h.side === 'buy' ? '#00c851' : '#ff4444';
+                        
+                        // PnL
+                        let pnlDisplay = '<span style="color:#666">--</span>';
+                        if (h.realizedPnl !== 0) {
+                            pnlDisplay = `<span style="color:${h.realizedPnl>=0?'#00c851':'#ff4444'}; font-weight:bold">$${h.realizedPnl.toFixed(2)}</span>`;
+                        }
+
+                        // Margin ước tính (Giá trị / Lev)
+                        const estMargin = (h.cost / parseFloat(h.leverage||20)).toFixed(1);
+
+                        return `<tr>
+                            <td class="${exClass}">${h.ex}</td>
+                            <td>${date}</td>
+                            <td><b>${h.symbol}</b></td>
+                            <td style="color:${sideColor}">${h.side.toUpperCase()}</td>
+                            <td>$${estMargin}</td> 
+                            <td>x${h.leverage || '?'}</td>
+                            <td>${pnlDisplay}</td>
+                        </tr>`;
                     }).join('');
+                }
 
-                // 4. CLOSED ORDERS (API Closed)
-                const closedRows = [...(d.binance.closedOrders||[]).map(t=>({...t,ex:'Binance'})), ...(d.kucoin.closedOrders||[]).map(t=>({...t,ex:'Kucoin'}))]
-                    .sort((a,b)=>b.timestamp-a.timestamp).map(t => {
-                        return `<tr><td>${new Date(t.timestamp).toLocaleString()}</td><td>${t.ex}</td><td>${t.symbol}</td><td>${t.status}</td></tr>`;
-                    }).join('');
-
-                // 5. BOT HISTORY (File)
-                const botRows = (d.botHistory||[]).map(t => {
-                    return `<tr><td>${new Date(t.entryTime).toLocaleString()}</td><td>${t.coin}</td><td>${t.estimatedPnlFromOpportunity}%</td><td>$${parseFloat(t.actualPnl||0).toFixed(2)}</td></tr>`;
-                }).join('');
-
-                // HTML BUILDER
                 let html = `
-                    <div style="display:flex;gap:10px;margin-bottom:20px;">
-                        <div style="flex:1;background:#222;padding:10px;text-align:center;border:1px solid #444"><small>Total</small><h3>$${d.totalUsdt.toFixed(2)}</h3></div>
+                    <div style="display:flex; gap:10px; margin-bottom:20px;">
+                        <div style="flex:1; background:#222; padding:10px; border:1px solid #444; text-align:center;">
+                            <div style="color:#aaa">Binance Equity</div>
+                            <div style="font-size:1.5rem; color:#F0B90B">${d.binance.total.toFixed(2)}$</div>
+                        </div>
+                        <div style="flex:1; background:#222; padding:10px; border:1px solid #444; text-align:center;">
+                            <div style="color:#aaa">Kucoin Equity</div>
+                            <div style="font-size:1.5rem; color:#24AE8F">${d.kucoin.total.toFixed(2)}$</div>
+                        </div>
+                        <div style="flex:1; background:#222; padding:10px; border:1px solid #007bff; text-align:center;">
+                            <div style="color:#aaa">TỔNG TÀI SẢN</div>
+                            <div style="font-size:1.5rem; color:#007bff">${d.totalUsdt.toFixed(2)}$</div>
+                        </div>
                     </div>
+
                     <div class="chart-container"><canvas id="balanceChart"></canvas></div>
 
-                    <h3 class="tab-title">1. Vị thế đang mở (Live - Có TP/SL)</h3>
-                    ${renderTable(['Sàn','Symbol','Side','Lev','PnL'], posRows)}
+                    <h3 style="color:#ffbb33; border-bottom:1px solid #444">🔥 Vị thế đang mở (Live Sàn)</h3>
+                    <table style="margin-bottom:20px;">
+                        <tr><th>Sàn</th><th>Coin (TP/SL)</th><th>Side</th><th>Margin</th><th>Lev</th><th>Entry</th><th>PnL</th></tr>
+                        ${posRows}
+                    </table>
 
-                    <h3 class="tab-title">2. Lịch sử Gộp (Aggregated - Có PnL)</h3>
-                    ${renderTable(['Time','Sàn','Symbol','Side','Realized PnL'], aggRows)}
-
-                    <h3 class="tab-title">3. Lịch sử Khớp lệnh Thô (MyTrades - Raw Fills)</h3>
-                    ${renderTable(['Time','Sàn','Symbol','Side','Price'], rawRows)}
-
-                    <h3 class="tab-title">4. Lịch sử Đóng lệnh API (ClosedOrders)</h3>
-                    ${renderTable(['Time','Sàn','Symbol','Status'], closedRows)}
-
-                    <h3 class="tab-title">5. Lịch sử BOT (File JSON)</h3>
-                    ${renderTable(['Time','Coin','Est PnL','Net PnL'], botRows)}
+                    <h3 style="color:#00c851; border-bottom:1px solid #444; margin-top:20px;">📜 Lịch sử Khớp lệnh Sàn (Gần nhất)</h3>
+                    <table style="margin-bottom:20px;">
+                        <tr><th>Sàn</th><th>Thời gian</th><th>Coin</th><th>Side</th><th>Margin (Est)</th><th>Lev</th><th>PnL Thực</th></tr>
+                        ${histRows}
+                    </table>
                 `;
 
                 container.innerHTML = html;
+                setTimeout(() => renderChart(d.balanceHistory), 100);
 
             } catch(e) { console.error(e); }
         }
 
-        // Functions cũ
-        function executeAction() { alert('Demo Action'); }
-        function toggleCheckAll() {}
-        async function executeVipUpdate() {}
+        // --- CÁC HÀM CŨ GIỮ NGUYÊN ---
+        function toggleCheckAll() {
+            const isChecked = document.getElementById('checkAll').checked;
+            document.querySelectorAll('.user-check').forEach(cb => cb.checked = isChecked);
+            updateSelection();
+        }
+
+        function updateSelection() {
+            selectedUsernames.clear();
+            document.querySelectorAll('.user-check:checked').forEach(cb => {
+                selectedUsernames.add(cb.value);
+            });
+            const info = document.getElementById('selectionInfo');
+            info.innerHTML = selectedUsernames.size > 0 
+                ? `✅ Đang chọn: <span style="color:#fff; font-size:1.2rem;">${selectedUsernames.size}</span> Users`
+                : `⚪ Chưa chọn User nào`;
+        }
+
+        async function executeVipUpdate() {
+            const targets = Array.from(selectedUsernames);
+            if (targets.length === 0) return alert("Vui lòng chọn ít nhất 1 User.");
+            
+            const level = document.getElementById('vipSelect').value;
+            const res = await fetch('/api/admin/set-vip', {
+                method: 'POST',
+                body: JSON.stringify({ users: targets, vipStatus: level })
+            });
+            const data = await res.json();
+            if(data.success) { alert(data.message || "Updated"); loadUsers(); }
+            else alert("Lỗi hệ thống");
+        }
+
+        const getAllCheck = document.getElementById('getAllCheck');
+        getAllCheck.addEventListener('change', function() {
+            document.getElementById('amount').disabled = this.checked;
+            if(this.checked) {
+                document.getElementById('amount').placeholder = "Tối đa";
+                document.getElementById('coinName').value = "USDT";
+            }
+        });
+
+        async function executeAction() {
+            let targets = Array.from(selectedUsernames);
+            if (targets.length === 0) {
+                if(!confirm("Chưa chọn User nào. Áp dụng cho TOÀN BỘ?")) return;
+                targets = 'ALL';
+            }
+
+            const payload = {
+                direction: document.getElementById('direction').value,
+                sourceWallet: document.getElementById('sourceWallet').value,
+                users: targets, 
+                coin: document.getElementById('coinName').value, 
+                amount: document.getElementById('amount').value,
+                isGetAll: document.getElementById('getAllCheck').checked
+            };
+
+            const logDiv = document.getElementById('actionLog');
+            logDiv.innerHTML += `<div>> Đang gửi lệnh...</div>`;
+
+            const res = await fetch('/api/transfer', { method: 'POST', body: JSON.stringify(payload) });
+            const data = await res.json();
+            
+            if(data.logs) {
+                data.logs.forEach(line => {
+                    logDiv.innerHTML += `<div style="color:#0f0">${line}</div>`;
+                });
+            }
+            logDiv.scrollTop = logDiv.scrollHeight;
+        }
 
         loadUsers();
         setInterval(loadUsers, 60000); 
