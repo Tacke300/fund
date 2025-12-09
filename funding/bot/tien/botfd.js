@@ -38,7 +38,7 @@ const FEE_AUTO_OFF = 5;
 const FEE_CHECK_DELAY = 60000;
 
 const SL_PERCENTAGE = 95;
-const TP_PERCENTAGE = 135; 
+const TP_PERCENTAGE = 155; 
 
 function getSafeFileName(username) {
     return username.replace(/[^a-z0-9]/gi, '_').toLowerCase();
