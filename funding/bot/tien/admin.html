@@ -1,30 +1,27 @@
-<!DOCTYPE html>
+</html><!DOCTYPE html>
 <html lang="vi">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Super Admin Bot</title>
-    <!-- THÊM CHART JS -->
+    <!-- THÊM CHART.JS -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
         :root { --bg: #121212; --card: #1e1e1e; --text: #e0e0e0; --accent: #007bff; --border: #333; --danger: #ff4444; --success: #00c851; --warning: #ffbb33; --vip: #ffd700; }
         body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', sans-serif; margin: 0; padding: 20px; }
         h2 { margin-top: 0; color: var(--accent); border-bottom: 1px solid #333; padding-bottom: 10px; }
 
-        /* TABLE */
         table { width: 100%; border-collapse: collapse; background: var(--card); font-size: 0.9rem; }
         th, td { padding: 12px; border: 1px solid var(--border); text-align: left; }
         th { background: #252525; text-transform: uppercase; color: #aaa; position: sticky; top: 0; }
         tr:hover { background: #2a2a2a; }
         .user-link { color: var(--accent); cursor: pointer; text-decoration: underline; font-weight: bold; }
         
-        /* STATUS COLORS */
         .pnl-pos { color: var(--success); font-weight: bold; }
         .pnl-neg { color: var(--danger); font-weight: bold; }
         .vip-tag { color: #000; background: var(--vip); padding: 2px 6px; border-radius: 4px; font-weight: bold; font-size: 0.75rem; }
         .vip-pro-tag { color: #fff; background: linear-gradient(45deg, #ff00cc, #333399); padding: 2px 6px; border-radius: 4px; font-weight: bold; font-size: 0.75rem; }
 
-        /* PANEL */
         .panel { background: var(--card); padding: 20px; border-radius: 8px; margin-bottom: 20px; border: 1px solid var(--border); box-shadow: 0 4px 6px rgba(0,0,0,0.3); }
         .controls { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 15px; align-items: end; }
         
@@ -41,25 +38,23 @@
 
         /* MODAL */
         .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.85); z-index: 1000; justify-content: center; align-items: center; }
-        /* Tăng size modal */
+        /* Tăng chiều rộng modal */
         .modal-content { background: var(--card); padding: 20px; width: 95%; max-width: 1300px; max-height: 90vh; overflow-y: auto; border-radius: 8px; border: 1px solid var(--accent); }
-        
-        .acc-item { border: 1px solid var(--border); margin-bottom: 10px; }
-        .acc-header { background: #2a2a2a; padding: 10px; cursor: pointer; display: flex; justify-content: space-between; font-weight: bold; }
-        .acc-content { display: block; padding: 10px; background: #111; }
         .close { float: right; cursor: pointer; font-size: 1.5rem; color: #aaa; }
         .close:hover { color: #fff; }
         
         #actionLog { background: #000; padding: 10px; height: 150px; overflow-y: scroll; font-family: monospace; border: 1px solid #444; margin-top: 15px; color: #0f0; font-size: 0.85rem; }
 
-        /* Chart & Tags */
+        /* Chart */
         .chart-container { position: relative; height: 250px; width: 100%; margin-bottom: 20px; background: #151515; }
-        .order-tag { font-size: 0.7em; padding: 2px 4px; border-radius: 3px; background: #333; margin-right: 4px; border: 1px solid #555; display: inline-block; }
+        
+        /* TP/SL Tag */
+        .order-tag { font-size: 0.75rem; padding: 2px 4px; border-radius: 3px; background: #333; margin-right: 4px; border: 1px solid #555; display: inline-block; margin-top: 3px; }
     </style>
 </head>
 <body>
 
-    <!-- CÁC PANEL CŨ GIỮ NGUYÊN -->
+    <!-- 1. BẢNG CHUYỂN TIỀN (Giữ nguyên) -->
     <div class="panel">
         <h2 style="color: var(--danger);">💸 Chuyển Tiền Admin</h2>
         <div class="controls">
@@ -95,21 +90,23 @@
         <div id="actionLog">Logs...</div>
     </div>
 
+    <!-- 2. BẢNG VIP (Giữ nguyên) -->
     <div class="panel" style="border-color: var(--vip);">
-        <h2 style="color: var(--vip);">👑 Cập Nhật VIP (Hàng Loạt)</h2>
+        <h2 style="color: var(--vip);">👑 Cập Nhật VIP</h2>
         <div id="selectionInfo">Đang chọn: 0 Users</div>
         <div class="controls" style="margin-top: 10px; align-items: center;">
             <div style="display: flex; gap: 10px; width: 100%;">
                 <select id="vipSelect" style="flex: 2;">
-                    <option value="none">Standard (Thu phí)</option>
+                    <option value="none">Standard</option>
                     <option value="vip">VIP (30 Ngày)</option>
-                    <option value="vip_pro">VIP PRO (Free Trọn Đời)</option>
+                    <option value="vip_pro">VIP PRO (Trọn Đời)</option>
                 </select>
                 <button class="vip-btn" style="flex: 1;" onclick="executeVipUpdate()">CẬP NHẬT VIP NGAY</button>
             </div>
         </div>
     </div>
 
+    <!-- 3. DANH SÁCH USER -->
     <div class="panel">
         <div style="display:flex; justify-content:space-between; align-items:center;">
             <h2>👥 Danh Sách Tài Khoản</h2>
@@ -126,11 +123,11 @@
                     <th>Binance Fut</th>
                     <th>KuCoin Fut</th>
                     <th style="color: var(--success);">TỔNG TÀI SẢN</th>
-                    <th>Tổng PNL (Đã đóng)</th>
+                    <th>Tổng PNL (Closed)</th>
                 </tr>
             </thead>
             <tbody id="userTableBody">
-                <tr><td colspan="9">Đang tải dữ liệu...</td></tr>
+                <tr><td colspan="9">Đang tải...</td></tr>
             </tbody>
         </table>
     </div>
@@ -147,7 +144,7 @@
     <script>
         let usersData = [];
         let selectedUsernames = new Set();
-        let balanceChart = null;
+        let chartInstance = null;
 
         async function loadUsers() {
             try {
@@ -180,22 +177,22 @@
             } catch(e) { console.error(e); }
         }
 
+        // HÀM VẼ BIỂU ĐỒ
         function renderChart(history) {
             const ctx = document.getElementById('balanceChart').getContext('2d');
-            if (balanceChart) balanceChart.destroy();
+            if (chartInstance) chartInstance.destroy();
             if (!history || history.length === 0) return;
             const labels = history.map(d => new Date(d.time).toLocaleTimeString('vi-VN'));
             const dataTotal = history.map(d => d.total);
-            balanceChart = new Chart(ctx, {
+            chartInstance = new Chart(ctx, {
                 type: 'line',
                 data: {
                     labels: labels,
-                    datasets: [{ label: 'Total Equity', data: dataTotal, borderColor: '#007bff', borderWidth: 2, pointRadius: 0, tension: 0.1 }]
+                    datasets: [{ label: 'Tổng Tài Sản', data: dataTotal, borderColor: '#007bff', borderWidth: 2, pointRadius: 0, tension: 0.1 }]
                 },
                 options: {
                     responsive: true,
                     maintainAspectRatio: false,
-                    animation: false,
                     interaction: { intersect: false, mode: 'index' },
                     scales: { x: { display: false }, y: { grid: { color: '#333' } } },
                     plugins: { legend: { display: false } }
@@ -207,7 +204,7 @@
             const modal = document.getElementById('detailModal');
             const container = document.getElementById('accordionContainer');
             document.getElementById('modalTitle').innerText = `Chi tiết: ${username}`;
-            container.innerHTML = `<div style="text-align:center; padding: 40px;"><h3>🔄 Đang tải...</h3></div>`;
+            container.innerHTML = `<div style="text-align:center; padding: 40px;"><h3>🔄 Đang kết nối sàn...</h3></div>`;
             modal.style.display = 'flex';
 
             try {
@@ -216,62 +213,53 @@
                 
                 if (d.error) { container.innerHTML = `<h3 style="color:red">Lỗi: ${d.error}</h3>`; return; }
 
-                // --- HELPER RENDER TABLE ---
-                const renderTable = (headers, rows) => {
-                    return `<table style="margin-bottom:20px;"><tr>${headers.map(h => `<th>${h}</th>`).join('')}</tr>${rows}</table>`;
-                };
-
-                // --- 1. RENDER ACTIVE POSITIONS (Gồm TP/SL) ---
+                // --- 1. VỊ THẾ ĐANG MỞ (Gồm cả TP/SL) ---
                 let activeRows = '';
                 if (!d.activeTrades || d.activeTrades.length === 0) {
-                    activeRows = '<tr><td colspan="9" style="text-align:center; color:#555">Không có vị thế mở</td></tr>';
+                    activeRows = '<tr><td colspan="9" style="text-align:center; color:#555">Không có vị thế Bot mở</td></tr>';
                 } else {
                     activeRows = d.activeTrades.map(t => {
                         const date = new Date(t.entryTime).toLocaleString('vi-VN');
                         const netPnl = t.livePnlLong + t.livePnlShort;
                         const pnlColor = netPnl >= 0 ? '#00c851' : '#ff4444';
                         
-                        // Render TP/SL
+                        // TP/SL HTML
                         let tpSlHtml = '';
                         if(t.tpSl && t.tpSl.length > 0) {
-                            tpSlHtml = '<div style="margin-top:5px;">';
+                            tpSlHtml = '<div style="margin-top:2px;">';
                             t.tpSl.forEach(o => {
                                 const type = o.type.toUpperCase().includes('STOP') ? 'SL' : 'TP';
                                 const color = type === 'TP' ? '#00e676' : '#ff5252';
                                 tpSlHtml += `<span class="order-tag" style="color:${color}">${type}: ${parseFloat(o.price).toFixed(4)}</span>`;
                             });
                             tpSlHtml += '</div>';
-                        } else tpSlHtml = '<div style="font-size:0.7em; color:#666">No TP/SL</div>';
+                        } else tpSlHtml = '<span style="color:#666; font-size:0.8em">--</span>';
 
-                        // Funding ước tính
-                        const fund = (t.collateral * 0.0006).toFixed(4);
                         const lEx = t.longExchange.includes('binance') ? 'Binance' : 'Kucoin';
                         const sEx = t.shortExchange.includes('binance') ? 'Binance' : 'Kucoin';
 
                         return `<tr>
                             <td>${date}</td>
-                            <td><b style="color:#ffbb33">${t.coin}</b>${tpSlHtml}</td>
+                            <td><b style="color:#ffbb33">${t.coin}</b><br>${tpSlHtml}</td>
                             <td>${t.collateral}$</td>
                             <td>x${t.leverage}</td>
                             <td>${t.estimatedPnlFromOpportunity}%</td>
-                            <td style="color:#aaa">-${fund}</td>
                             <td>${lEx} <br><small style="color:${t.livePnlLong>=0?'#00c851':'#ff4444'}">${t.livePnlLong.toFixed(2)}$</small></td>
                             <td>${sEx} <br><small style="color:${t.livePnlShort>=0?'#00c851':'#ff4444'}">${t.livePnlShort.toFixed(2)}$</small></td>
-                            <td style="color:${pnlColor};font-weight:bold;font-size:1.1em">${netPnl.toFixed(2)}$</td>
+                            <td style="color:${pnlColor};font-weight:bold;">${netPnl.toFixed(2)}$</td>
                         </tr>`;
                     }).join('');
                 }
 
-                // --- 2. RENDER HISTORY ---
-                let histRows = '';
-                if (!d.tradeHistory || d.tradeHistory.length === 0) {
-                    histRows = '<tr><td colspan="9" style="text-align:center; color:#555">Chưa có lịch sử</td></tr>';
+                // --- 2. LỊCH SỬ BOT (Paired) ---
+                let botHistRows = '';
+                if (!d.botHistory || d.botHistory.length === 0) {
+                    botHistRows = '<tr><td colspan="9" style="text-align:center; color:#555">Chưa có lịch sử Bot</td></tr>';
                 } else {
-                    histRows = d.tradeHistory.map(t => {
+                    botHistRows = d.botHistory.map(t => {
                         const date = new Date(t.entryTime).toLocaleString('vi-VN');
                         const netPnl = parseFloat(t.actualPnl) || 0;
                         const pnlColor = netPnl >= 0 ? '#00c851' : '#ff4444';
-                        const fund = (t.collateral * 0.0012).toFixed(4);
                         const lEx = t.longExchange.includes('binance') ? 'Binance' : 'Kucoin';
                         const sEx = t.shortExchange.includes('binance') ? 'Binance' : 'Kucoin';
 
@@ -281,10 +269,32 @@
                             <td>${t.collateral}$</td>
                             <td>x${t.leverage}</td>
                             <td>${t.estimatedPnlFromOpportunity}%</td>
-                            <td style="color:#aaa">-${fund}</td>
                             <td>${lEx}</td>
                             <td>${sEx}</td>
                             <td style="color:${pnlColor};font-weight:bold;">${netPnl.toFixed(2)}$</td>
+                        </tr>`;
+                    }).join('');
+                }
+
+                // --- 3. LỊCH SỬ USER/SÀN (Raw) ---
+                let userHistRows = '';
+                const userTrades = [...d.exchangeHistory.binance.map(o=>({...o, ex:'Binance'})), ...d.exchangeHistory.kucoin.map(o=>({...o, ex:'Kucoin'}))];
+                userTrades.sort((a,b) => b.time - a.time); // Sắp xếp thời gian
+
+                if (userTrades.length === 0) {
+                    userHistRows = '<tr><td colspan="7" style="text-align:center; color:#555">Chưa có giao dịch sàn</td></tr>';
+                } else {
+                    userHistRows = userTrades.map(t => {
+                        const date = new Date(t.time).toLocaleString('vi-VN');
+                        const sideColor = t.side==='buy'?'#00c851':'#ff4444';
+                        return `<tr>
+                            <td>${date}</td>
+                            <td><span class="${t.ex==='Binance'?'vip-tag':'vip-pro-tag'}">${t.ex}</span></td>
+                            <td>${t.symbol}</td>
+                            <td style="color:${sideColor}">${t.side.toUpperCase()}</td>
+                            <td>${parseFloat(t.price).toFixed(4)}</td>
+                            <td>${parseFloat(t.amount).toFixed(3)}</td>
+                            <td>${parseFloat(t.cost).toFixed(2)}$</td>
                         </tr>`;
                     }).join('');
                 }
@@ -293,26 +303,40 @@
                     <div style="display:flex; gap:10px; margin-bottom:20px;">
                         <div style="flex:1; background:#222; padding:10px; border:1px solid #444; text-align:center;">
                             <div style="color:#aaa">Binance Equity</div>
-                            <div style="font-size:1.5rem; color:#F0B90B">${d.binance.future.equity.toFixed(2)}$</div>
+                            <div style="font-size:1.5rem; color:#F0B90B">${d.binanceTotal.toFixed(2)}$</div>
                         </div>
                         <div style="flex:1; background:#222; padding:10px; border:1px solid #444; text-align:center;">
                             <div style="color:#aaa">Kucoin Equity</div>
-                            <div style="font-size:1.5rem; color:#24AE8F">${d.kucoin.future.equity.toFixed(2)}$</div>
+                            <div style="font-size:1.5rem; color:#24AE8F">${d.kucoinTotal.toFixed(2)}$</div>
                         </div>
                         <div style="flex:1; background:#222; padding:10px; border:1px solid #007bff; text-align:center;">
                             <div style="color:#aaa">TỔNG TÀI SẢN</div>
-                            <div style="font-size:1.5rem; color:#007bff">${d.totalFutureEquity.toFixed(2)}$</div>
+                            <div style="font-size:1.5rem; color:#007bff">${d.totalUsdt.toFixed(2)}$</div>
                         </div>
                     </div>
-                    
-                    <h3 style="color:#007bff; border-bottom:1px solid #444; margin-top:20px;">📈 Biểu đồ số dư</h3>
-                    <div class="chart-container"><canvas id="balanceChart"></canvas></div>
 
-                    <h3 style="color:#ffbb33; border-bottom:1px solid #444; margin-top:20px;">🔥 Vị thế đang mở (Live)</h3>
-                    ${renderTable(['Thời gian', 'Coin', 'Margin', 'Lev', 'Est%', 'Fund', 'Long PnL', 'Short PnL', 'NET PNL'], activeRows)}
+                    <div style="background:#151515; border:1px solid #333; margin-bottom:20px;">
+                        <h4 style="color:#007bff; padding:10px; margin:0; border-bottom:1px solid #333">📈 Biểu đồ số dư</h4>
+                        <div class="chart-container"><canvas id="balanceChart"></canvas></div>
+                    </div>
 
-                    <h3 style="color:#00c851; border-bottom:1px solid #444; margin-top:20px;">📜 Lịch sử lệnh (Closed)</h3>
-                    ${renderTable(['Thời gian', 'Coin', 'Margin', 'Lev', 'Est%', 'Fund', 'Long', 'Short', 'NET PNL'], histRows)}
+                    <h3 style="color:#ffbb33; border-bottom:1px solid #444;">🔥 Vị thế đang mở (Live - Paired)</h3>
+                    <table>
+                        <tr><th>Thời gian</th><th>Coin (TP/SL)</th><th>Margin</th><th>Lev</th><th>Est %</th><th>Long PnL</th><th>Short PnL</th><th>NET PNL</th></tr>
+                        ${activeRows}
+                    </table>
+
+                    <h3 style="color:#00c851; border-bottom:1px solid #444; margin-top:30px;">🤖 Lịch sử BOT (Paired)</h3>
+                    <table>
+                        <tr><th>Thời gian</th><th>Coin</th><th>Margin</th><th>Lev</th><th>Est %</th><th>Long</th><th>Short</th><th>NET PNL</th></tr>
+                        ${botHistRows}
+                    </table>
+
+                    <h3 style="color:#aaa; border-bottom:1px solid #444; margin-top:30px;">👤 Lịch sử Sàn (Raw - User & Bot)</h3>
+                    <table>
+                        <tr><th>Thời gian</th><th>Sàn</th><th>Symbol</th><th>Side</th><th>Price</th><th>Size</th><th>Value</th></tr>
+                        ${userHistRows}
+                    </table>
                 `;
 
                 container.innerHTML = html;
@@ -321,7 +345,6 @@
             } catch(e) { container.innerHTML = `<h3 style="color:red">Lỗi tải dữ liệu: ${e.message}</h3>`; }
         }
 
-        // Functions cũ
         function toggleCheckAll() {
             const isChecked = document.getElementById('checkAll').checked;
             document.querySelectorAll('.user-check').forEach(cb => cb.checked = isChecked);
@@ -339,8 +362,7 @@
             loadUsers();
         }
         async function executeAction() {
-            // Logic chuyển tiền giữ nguyên
-            alert("Đã gửi lệnh chuyển tiền"); 
+            alert("Đã gửi lệnh chuyển tiền (Demo)"); 
         }
 
         loadUsers();
