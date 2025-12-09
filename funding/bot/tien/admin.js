@@ -16,7 +16,7 @@ function initExchange(exchangeId, config) {
         let options = { 
             'enableRateLimit': true, 
             'timeout': 15000,
-            'options': { 'defaultType': 'future' } // Bắt buộc để lấy đúng future binance
+            'options': { 'defaultType': 'future' } 
         };
         
         if (exchangeId.includes('binance')) {
@@ -49,6 +49,7 @@ async function getAllUsersSummary() {
             const config = JSON.parse(fs.readFileSync(filePath, 'utf8'));
             const stats = fs.statSync(filePath);
             
+            // Lấy PnL tạm thời từ file history bot để hiển thị ngoài danh sách tổng (nếu có)
             let totalPnl = 0;
             const histFile = path.join(USER_DATA_DIR, `${safeName}_history.json`);
             if (fs.existsSync(histFile)) {
@@ -92,6 +93,7 @@ const server = http.createServer(async (req, res) => {
         return;
     }
 
+    // --- API DETAILS ---
     if (req.url.startsWith('/api/details/')) {
         let username = 'UNKNOWN';
         try {
@@ -107,24 +109,12 @@ const server = http.createServer(async (req, res) => {
             }
             const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
 
-            // --- LẤY DỮ LIỆU FILE BOT TRƯỚC ---
-            let botActiveTrades = [];
-            try {
-                const p = path.join(USER_DATA_DIR, `${safeName}_active_trades.json`);
-                if (fs.existsSync(p)) botActiveTrades = JSON.parse(fs.readFileSync(p, 'utf8'));
-            } catch(e){}
-
-            let botHistory = [];
-            try {
-                const p = path.join(USER_DATA_DIR, `${safeName}_history.json`);
-                if (fs.existsSync(p)) botHistory = JSON.parse(fs.readFileSync(p, 'utf8'));
-            } catch(e){}
-
+            // --- LẤY BIỂU ĐỒ (DOWNSAMPLE) ---
             let balanceHistory = [];
             try {
-                const p = path.join(USER_DATA_DIR, `${safeName}_balance_history.json`);
-                if (fs.existsSync(p)) {
-                    const raw = JSON.parse(fs.readFileSync(p, 'utf8'));
+                const bPath = path.join(USER_DATA_DIR, `${safeName}_balance_history.json`);
+                if (fs.existsSync(bPath)) {
+                    const raw = JSON.parse(fs.readFileSync(bPath, 'utf8'));
                     if(raw.length > 300) { 
                         const step = Math.ceil(raw.length / 300);
                         balanceHistory = raw.filter((_, i) => i % step === 0);
@@ -132,21 +122,19 @@ const server = http.createServer(async (req, res) => {
                 }
             } catch(e){}
 
-
             // --- KẾT NỐI SÀN ---
             const checkExchange = async (exName, exId) => {
                 try {
                     const ex = initExchange(exId, config);
-                    if (!ex) return { total: 0, positions: [], closed: [], spot: 0 };
+                    if (!ex) return { total: 0, positions: [], history: [], spot: 0 };
 
                     await ex.loadMarkets();
                     const bal = await ex.fetchBalance();
                     
-                    // 1. Live Positions (Source of Truth)
+                    // 1. Live Positions
                     let positions = [];
                     try {
                         const rawPos = await ex.fetchPositions();
-                        // Chỉ lấy vị thế đang mở (size > 0)
                         positions = rawPos.filter(p => parseFloat(p.contracts) > 0).map(p => ({
                             symbol: p.symbol,
                             side: p.side,
@@ -158,39 +146,48 @@ const server = http.createServer(async (req, res) => {
                         }));
                     } catch(e) { console.log(`${exName} Pos Error: ${e.message}`); }
 
-                    // 2. Open Orders (TP/SL)
+                    // 2. Open Orders (Để xem TP/SL)
                     let openOrders = [];
                     try {
                         const rawOrders = await ex.fetchOpenOrders();
-                        openOrders = rawOrders.map(o => ({
-                            symbol: o.symbol,
-                            type: o.type,
-                            side: o.side,
-                            price: o.price,
-                            stopPrice: o.stopPrice
-                        }));
+                        openOrders = rawOrders.map(o => ({ symbol: o.symbol, type: o.type, side: o.side, stopPrice: o.stopPrice || o.price }));
                     } catch(e) {}
 
-                    // 3. Closed Orders (History Sàn)
-                    let closed = [];
+                    // 3. Trade History (Quan trọng: Lấy PnL thực tế)
+                    let history = [];
                     try {
-                        // Lấy 30 lệnh gần nhất
-                        const rawClosed = await ex.fetchClosedOrders(undefined, undefined, 30);
-                        closed = rawClosed.map(o => ({
-                            id: o.id,
-                            timestamp: o.timestamp,
-                            symbol: o.symbol,
-                            side: o.side,
-                            price: o.price || o.average,
-                            amount: o.amount,
-                            cost: o.cost,
-                            status: o.status,
-                            // Binance thường có realizedPnl trong info
-                            realizedPnl: (o.info && o.info.realizedPnl) ? parseFloat(o.info.realizedPnl) : null 
-                        }));
+                        // Lấy 50 giao dịch gần nhất
+                        const trades = await ex.fetchMyTrades(undefined, undefined, 50);
+                        
+                        history = trades.map(t => {
+                            let realizedPnl = 0;
+                            // Binance: PnL nằm trong info.realizedPnl
+                            if (t.info && t.info.realizedPnl) realizedPnl = parseFloat(t.info.realizedPnl);
+                            // Kucoin: PnL thường nằm trong info (tùy API) hoặc không trả về trực tiếp ở endpoint này
+                            
+                            return {
+                                id: t.id,
+                                time: t.timestamp,
+                                symbol: t.symbol,
+                                side: t.side,
+                                price: t.price,
+                                amount: t.amount,
+                                cost: t.cost,
+                                pnl: realizedPnl // Quan trọng
+                            };
+                        });
+                        
+                        // Đối với Binance, ta chỉ quan tâm các lệnh Close (có PnL != 0) hoặc lệnh mở mới
+                        // Ở đây ta trả về hết, frontend sẽ lọc hoặc hiển thị
                     } catch(e) { console.log(`${exName} Hist Error: ${e.message}`); }
 
-                    // 4. Spot
+                    // Map TP/SL vào Positions
+                    positions = positions.map(p => {
+                        const relatedOrders = openOrders.filter(o => o.symbol === p.symbol);
+                        return { ...p, openOrders: relatedOrders };
+                    });
+
+                    // 4. Spot Balance
                     let spotTotal = 0;
                     try {
                         const spotExId = exId === 'binanceusdm' ? 'binance' : 'kucoin';
@@ -201,20 +198,14 @@ const server = http.createServer(async (req, res) => {
                         }
                     } catch(e) {}
 
-                    // Map TP/SL vào Positions
-                    positions = positions.map(p => {
-                        const relatedOrders = openOrders.filter(o => o.symbol === p.symbol);
-                        return { ...p, openOrders: relatedOrders };
-                    });
-
                     return { 
                         total: bal.total['USDT'] || 0, 
                         positions: positions, 
-                        closed: closed,
+                        history: history,
                         spot: spotTotal 
                     };
                 } catch (e) {
-                    return { total: 0, positions: [], closed: [], spot: 0, error: e.message };
+                    return { total: 0, positions: [], history: [], spot: 0, error: e.message };
                 }
             };
 
@@ -223,77 +214,12 @@ const server = http.createServer(async (req, res) => {
                 checkExchange('Kucoin', 'kucoinfutures')
             ]);
 
-            // --- XỬ LÝ MERGE HISTORY (QUAN TRỌNG) ---
-            // Gộp lịch sử 2 sàn lại
-            let unifiedHistory = [];
-
-            // Helper: Tìm xem lệnh sàn này có khớp với Bot không
-            const findBotMatch = (exOrder, exchangeName) => {
-                // Logic: Tìm trong botHistory xem có lệnh nào gần giờ đó, cùng Symbol không
-                // Bot lưu trade (Long+Short). Exchange lưu Order lẻ.
-                // Đơn giản: Check symbol và thời gian entry (trong khoảng 5 phút)
-                return botHistory.find(b => {
-                    const isSymbolMatch = (exchangeName === 'Binance' ? b.shortExchange.includes('binance') || b.longExchange.includes('binance') : b.shortExchange.includes('kucoin') || b.longExchange.includes('kucoin')) 
-                                          && b.coin.includes(exOrder.symbol.replace('/USDT','').replace('USDT',''));
-                    // Bot history time là Entry Time. Closed order time là Exit Time.
-                    // Cái này khó match chính xác 100% nếu không lưu OrderID.
-                    // Tạm thời: Nếu user không trade tay nhiều thì giả định các lệnh lạ là User.
-                    // Ở đây ta sẽ check xem OrderID có trong Bot Active Trades cũ không (nếu có lưu).
-                    // Vì bot cũ ko lưu closed OrderID, ta dùng Heuristic:
-                    return isSymbolMatch; 
-                });
-            };
-            
-            // Xử lý Binance History
-            binance.closed.forEach(o => {
-                const botMatch = findBotMatch(o, 'Binance');
-                unifiedHistory.push({
-                    time: o.timestamp,
-                    exchange: 'Binance',
-                    symbol: o.symbol,
-                    side: o.side,
-                    price: o.price,
-                    amount: o.amount,
-                    pnl: o.realizedPnl, // PnL thực tế từ sàn
-                    source: botMatch ? 'BOT' : 'USER'
-                });
-            });
-
-            // Xử lý Kucoin History
-            kucoin.closed.forEach(o => {
-                const botMatch = findBotMatch(o, 'Kucoin');
-                unifiedHistory.push({
-                    time: o.timestamp,
-                    exchange: 'Kucoin',
-                    symbol: o.symbol,
-                    side: o.side,
-                    price: o.price,
-                    amount: o.amount,
-                    pnl: null, // Kucoin API closed orders thường không trả PnL trực tiếp
-                    source: botMatch ? 'BOT' : 'USER'
-                });
-            });
-
-            // Sắp xếp lịch sử mới nhất
-            unifiedHistory.sort((a,b) => b.time - a.time);
-
-
-            // --- XỬ LÝ LIVE POSITIONS ---
-            // Tag xem Position nào là của Bot
-            const tagPosition = (pos, exName) => {
-                const match = botActiveTrades.find(b => pos.symbol.includes(b.coin.replace('USDT','')));
-                return {
-                    ...pos,
-                    source: match ? 'BOT' : 'USER',
-                    botData: match || null // Kèm data margin/entry gốc của bot nếu cần
-                };
-            };
-
-            const livePositions = [
-                ...binance.positions.map(p => ({...tagPosition(p, 'Binance'), exchange: 'Binance'})),
-                ...kucoin.positions.map(p => ({...tagPosition(p, 'Kucoin'), exchange: 'Kucoin'}))
-            ];
-
+            // GỘP LỊCH SỬ 2 SÀN
+            // Lưu ý: Binance trả về PnL rõ ràng. Kucoin thì ít khi trả về PnL qua API trade thường.
+            const mergedHistory = [
+                ...binance.history.map(h => ({ ...h, ex: 'Binance' })),
+                ...kucoin.history.map(h => ({ ...h, ex: 'Kucoin' }))
+            ].sort((a,b) => b.time - a.time); // Sắp xếp mới nhất trước
 
             const responsePayload = {
                 username: username,
@@ -302,9 +228,9 @@ const server = http.createServer(async (req, res) => {
                 totalUsdt: (binance.total + kucoin.total),
                 totalSpotUsdt: binance.spot + kucoin.spot,
                 
-                livePositions: livePositions,   // Dữ liệu thực tế từ sàn
-                unifiedHistory: unifiedHistory, // Lịch sử gộp (Có Bot/User)
-                balanceHistory: balanceHistory  // Biểu đồ
+                livePositions: [...binance.positions.map(p=>({...p, ex:'Binance'})), ...kucoin.positions.map(p=>({...p, ex:'Kucoin'}))],
+                exchangeHistory: mergedHistory, // Lịch sử gộp
+                balanceHistory: balanceHistory
             };
 
             res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -318,9 +244,8 @@ const server = http.createServer(async (req, res) => {
         return;
     }
 
-    // API cũ giữ nguyên
     if (req.method === 'POST' && req.url === '/api/transfer') {
-        res.end(JSON.stringify({ logs: ['Request received'] }));
+        res.end(JSON.stringify({ logs: ['Skipped'] }));
         return;
     }
 
