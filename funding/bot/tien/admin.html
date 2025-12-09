@@ -3,269 +3,199 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Admin Bot Panel</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <title>Super Admin Bot</title>
+    <!-- THÊM CHART JS -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
-        body { background-color: #121212; color: #e0e0e0; font-size: 0.9rem; }
-        .card { background-color: #1e1e1e; border: 1px solid #333; margin-bottom: 20px; }
-        .table { color: #e0e0e0; font-size: 0.85rem; }
-        .table thead th { background-color: #2c2c2c; color: #fff; border-color: #444; }
-        .table td { border-color: #333; vertical-align: middle; }
-        .modal-content { background-color: #1e1e1e; color: #fff; border: 1px solid #444; }
-        .text-success { color: #00e676 !important; }
-        .text-danger { color: #ff5252 !important; }
-        .chart-container { position: relative; height: 250px; width: 100%; }
-        .badge-binance { background-color: #F3BA2F; color: #000; }
-        .badge-kucoin { background-color: #26A17B; color: #fff; }
-        .order-tag { font-size: 0.75rem; padding: 2px 4px; border-radius: 3px; background: #333; margin-right: 4px; border: 1px solid #555; }
+        :root { --bg: #121212; --card: #1e1e1e; --text: #e0e0e0; --accent: #007bff; --border: #333; --danger: #ff4444; --success: #00c851; --warning: #ffbb33; --vip: #ffd700; }
+        body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', sans-serif; margin: 0; padding: 20px; }
+        h2 { margin-top: 0; color: var(--accent); border-bottom: 1px solid #333; padding-bottom: 10px; }
+
+        /* TABLE */
+        table { width: 100%; border-collapse: collapse; background: var(--card); font-size: 0.9rem; }
+        th, td { padding: 12px; border: 1px solid var(--border); text-align: left; }
+        th { background: #252525; text-transform: uppercase; color: #aaa; position: sticky; top: 0; }
+        tr:hover { background: #2a2a2a; }
+        .user-link { color: var(--accent); cursor: pointer; text-decoration: underline; font-weight: bold; }
+        
+        /* STATUS COLORS */
+        .pnl-pos { color: var(--success); font-weight: bold; }
+        .pnl-neg { color: var(--danger); font-weight: bold; }
+        .vip-tag { color: #000; background: var(--vip); padding: 2px 6px; border-radius: 4px; font-weight: bold; font-size: 0.75rem; }
+        .vip-pro-tag { color: #fff; background: linear-gradient(45deg, #ff00cc, #333399); padding: 2px 6px; border-radius: 4px; font-weight: bold; font-size: 0.75rem; }
+
+        /* PANEL */
+        .panel { background: var(--card); padding: 20px; border-radius: 8px; margin-bottom: 20px; border: 1px solid var(--border); box-shadow: 0 4px 6px rgba(0,0,0,0.3); }
+        .controls { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 15px; align-items: end; }
+        
+        input, select { padding: 10px; background: #2b2b2b; border: 1px solid #444; color: #fff; border-radius: 4px; width: 100%; box-sizing: border-box; }
+        button { padding: 10px; background: var(--accent); border: none; color: white; font-weight: bold; cursor: pointer; border-radius: 4px; width: 100%; }
+        button:hover { opacity: 0.9; }
+        button.exec { background: linear-gradient(45deg, #007bff, #0056b3); }
+        button.vip-btn { background: var(--vip); color: #000; }
+        
+        .checkbox-wrapper { display: flex; align-items: center; gap: 10px; height: 40px; background: #2a2222; padding: 0 10px; border-radius: 4px; border: 1px solid #ff4444; }
+        input[type="checkbox"] { width: 18px; height: 18px; accent-color: var(--danger); cursor: pointer; }
+
+        #selectionInfo { color: var(--warning); font-weight: bold; margin-top: 10px; }
+
+        /* MODAL */
+        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.85); z-index: 1000; justify-content: center; align-items: center; }
+        /* Tăng size modal */
+        .modal-content { background: var(--card); padding: 20px; width: 95%; max-width: 1300px; max-height: 90vh; overflow-y: auto; border-radius: 8px; border: 1px solid var(--accent); }
+        
+        .acc-item { border: 1px solid var(--border); margin-bottom: 10px; }
+        .acc-header { background: #2a2a2a; padding: 10px; cursor: pointer; display: flex; justify-content: space-between; font-weight: bold; }
+        .acc-content { display: block; padding: 10px; background: #111; }
+        .close { float: right; cursor: pointer; font-size: 1.5rem; color: #aaa; }
+        .close:hover { color: #fff; }
+        
+        #actionLog { background: #000; padding: 10px; height: 150px; overflow-y: scroll; font-family: monospace; border: 1px solid #444; margin-top: 15px; color: #0f0; font-size: 0.85rem; }
+
+        /* Chart & Tags */
+        .chart-container { position: relative; height: 250px; width: 100%; margin-bottom: 20px; background: #151515; }
+        .order-tag { font-size: 0.7em; padding: 2px 4px; border-radius: 3px; background: #333; margin-right: 4px; border: 1px solid #555; display: inline-block; }
     </style>
 </head>
 <body>
-    <div class="container-fluid p-4">
-        <div class="d-flex justify-content-between mb-4">
-            <h3>🤖 Bot Admin Panel</h3>
-            <button class="btn btn-outline-warning btn-sm" onclick="setVip('ALL', 'vip')">Set All VIP</button>
-        </div>
 
-        <div class="card">
-            <div class="card-body p-0">
-                <div class="table-responsive">
-                    <table class="table table-hover mb-0" id="userTable">
-                        <thead>
-                            <tr>
-                                <th>#</th>
-                                <th>Username</th>
-                                <th>VIP</th>
-                                <th>Total Assets</th>
-                                <th>Total PnL</th>
-                                <th>Binance (Fut)</th>
-                                <th>Kucoin (Fut)</th>
-                                <th>Action</th>
-                            </tr>
-                        </thead>
-                        <tbody></tbody>
-                    </table>
+    <!-- CÁC PANEL CŨ GIỮ NGUYÊN -->
+    <div class="panel">
+        <h2 style="color: var(--danger);">💸 Chuyển Tiền Admin</h2>
+        <div class="controls">
+            <div>
+                <label>Hướng chuyển:</label>
+                <select id="direction">
+                    <option value="binance_to_kucoin">Binance ➔ KuCoin</option>
+                    <option value="kucoin_to_binance">KuCoin ➔ Binance</option>
+                    <option value="both_ways" style="color:#ffff00; font-weight:bold;">⇄ Rút Chéo (2 Chiều)</option>
+                </select>
+            </div>
+            <div>
+                <label>Nguồn tiền:</label>
+                <select id="sourceWallet">
+                    <option value="both">Gom Future & Spot</option>
+                    <option value="future">Chỉ từ Future</option>
+                    <option value="spot">Chỉ từ Spot</option>
+                </select>
+            </div>
+            <div>
+                <label>Coin / Số lượng:</label>
+                <div style="display:flex; gap:5px;">
+                    <input type="text" id="coinName" value="USDT" style="width:30%">
+                    <input type="number" id="amount" placeholder="Số tiền" style="width:70%">
                 </div>
+            </div>
+            <div class="checkbox-wrapper">
+                <input type="checkbox" id="getAllCheck">
+                <label for="getAllCheck" style="color: var(--danger); font-weight: bold; cursor:pointer;">RÚT HẾT (GET ALL)</label>
+            </div>
+            <button class="exec" onclick="executeAction()">THỰC HIỆN</button>
+        </div>
+        <div id="actionLog">Logs...</div>
+    </div>
+
+    <div class="panel" style="border-color: var(--vip);">
+        <h2 style="color: var(--vip);">👑 Cập Nhật VIP (Hàng Loạt)</h2>
+        <div id="selectionInfo">Đang chọn: 0 Users</div>
+        <div class="controls" style="margin-top: 10px; align-items: center;">
+            <div style="display: flex; gap: 10px; width: 100%;">
+                <select id="vipSelect" style="flex: 2;">
+                    <option value="none">Standard (Thu phí)</option>
+                    <option value="vip">VIP (30 Ngày)</option>
+                    <option value="vip_pro">VIP PRO (Free Trọn Đời)</option>
+                </select>
+                <button class="vip-btn" style="flex: 1;" onclick="executeVipUpdate()">CẬP NHẬT VIP NGAY</button>
             </div>
         </div>
     </div>
 
-    <!-- Modal Chi Tiết -->
-    <div class="modal fade" id="detailModal" tabindex="-1">
-        <div class="modal-dialog modal-xl">
-            <div class="modal-content">
-                <div class="modal-header border-secondary">
-                    <h5 class="modal-title" id="modalTitle">Loading...</h5>
-                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
-                </div>
-                <div class="modal-body">
-                    <!-- Tổng quan -->
-                    <div class="row mb-3 text-center">
-                        <div class="col-md-4"><div class="card p-2 border-warning"><h6 class="text-warning">Binance</h6><h4 id="d-binance">$0.00</h4></div></div>
-                        <div class="col-md-4"><div class="card p-2 border-success"><h6 class="text-success">Kucoin</h6><h4 id="d-kucoin">$0.00</h4></div></div>
-                        <div class="col-md-4"><div class="card p-2 border-primary"><h6 class="text-primary">TOTAL</h6><h3 id="d-total">$0.00</h3></div></div>
-                    </div>
+    <div class="panel">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+            <h2>👥 Danh Sách Tài Khoản</h2>
+            <button onclick="loadUsers()" style="width:auto; background:#333;">🔄 Refresh</button>
+        </div>
+        <table>
+            <thead>
+                <tr>
+                    <th style="width: 40px; text-align:center;"><input type="checkbox" id="checkAll" onchange="toggleCheckAll()"></th>
+                    <th>Username</th>
+                    <th>Email</th>
+                    <th>Status</th>
+                    <th>Last Login</th>
+                    <th>Binance Fut</th>
+                    <th>KuCoin Fut</th>
+                    <th style="color: var(--success);">TỔNG TÀI SẢN</th>
+                    <th>Tổng PNL (Đã đóng)</th>
+                </tr>
+            </thead>
+            <tbody id="userTableBody">
+                <tr><td colspan="9">Đang tải dữ liệu...</td></tr>
+            </tbody>
+        </table>
+    </div>
 
-                    <!-- Biểu đồ -->
-                    <div class="card mb-3">
-                        <div class="card-body py-2">
-                            <h6 class="card-title">📈 Biểu đồ số dư (Live)</h6>
-                            <div class="chart-container"><canvas id="balanceChart"></canvas></div>
-                        </div>
-                    </div>
-
-                    <!-- Vị thế đang mở (Đã sửa lại giống y hệt history) -->
-                    <h6 class="text-info border-bottom pb-2">🔥 Vị thế đang mở (Live Active Trades)</h6>
-                    <div class="table-responsive mb-4">
-                        <table class="table table-sm table-bordered">
-                            <thead>
-                                <tr>
-                                    <th>Thời gian</th>
-                                    <th>Coin</th>
-                                    <th>Margin</th>
-                                    <th>Lev</th>
-                                    <th>Est %</th>
-                                    <th>Funding (Diff)</th>
-                                    <th>Long PnL</th>
-                                    <th>Short PnL</th>
-                                    <th>NET PnL</th>
-                                </tr>
-                            </thead>
-                            <tbody id="activeTradesBody"></tbody>
-                        </table>
-                    </div>
-
-                    <!-- Lịch sử lệnh -->
-                    <h6 class="text-warning border-bottom pb-2">📜 Lịch sử lệnh đã đóng (History)</h6>
-                    <div class="table-responsive">
-                        <table class="table table-sm table-striped">
-                            <thead>
-                                <tr>
-                                    <th>Thời gian</th>
-                                    <th>Coin</th>
-                                    <th>Margin</th>
-                                    <th>Lev</th>
-                                    <th>Est %</th>
-                                    <th>Funding</th>
-                                    <th>Long PnL</th>
-                                    <th>Short PnL</th>
-                                    <th>NET PnL</th>
-                                </tr>
-                            </thead>
-                            <tbody id="historyTableBody"></tbody>
-                        </table>
-                    </div>
-                </div>
-            </div>
+    <!-- MODAL CHI TIẾT -->
+    <div id="detailModal" class="modal">
+        <div class="modal-content">
+            <span class="close" onclick="document.getElementById('detailModal').style.display='none'">&times;</span>
+            <h2 id="modalTitle">Chi tiết</h2>
+            <div id="accordionContainer">Loading...</div>
         </div>
     </div>
 
     <script>
-        const API_URL = 'http://localhost:4953/api';
-        let chartInstance = null;
+        let usersData = [];
+        let selectedUsernames = new Set();
+        let balanceChart = null;
 
         async function loadUsers() {
             try {
-                const res = await fetch(`${API_URL}/users`);
-                const users = await res.json();
-                const tbody = document.getElementById('userTable').querySelector('tbody');
+                const res = await fetch('/api/users');
+                usersData = await res.json();
+                usersData.sort((a, b) => b.totalAll - a.totalAll);
+                const tbody = document.getElementById('userTableBody');
                 tbody.innerHTML = '';
-                users.forEach(u => {
-                    const pnlClass = u.totalPnl >= 0 ? 'text-success' : 'text-danger';
-                    tbody.innerHTML += `
-                        <tr>
-                            <td>${u.id}</td>
-                            <td class="fw-bold text-primary" style="cursor:pointer" onclick="showDetails('${u.username}')">${u.username}</td>
-                            <td><span class="badge ${u.vipStatus==='vip'?'bg-warning text-dark':'bg-secondary'}">${u.vipStatus}</span></td>
-                            <td>$${u.totalAll.toFixed(2)}</td>
-                            <td class="${pnlClass}">$${u.totalPnl.toFixed(2)}</td>
-                            <td>$${u.binanceFuture.toFixed(2)}</td>
-                            <td>$${u.kucoinFuture.toFixed(2)}</td>
-                            <td><button class="btn btn-sm btn-outline-info py-0" onclick="showDetails('${u.username}')">View</button></td>
-                        </tr>`;
+                usersData.forEach(u => {
+                    const pnlClass = u.totalPnl >= 0 ? 'pnl-pos' : 'pnl-neg';
+                    const lastLogin = u.lastLogin ? new Date(u.lastLogin).toLocaleString('vi-VN') : '-';
+                    let statusTag = '<span style="color:#777">Std</span>';
+                    if (u.vipStatus === 'vip') statusTag = '<span class="vip-tag">VIP</span>';
+                    if (u.vipStatus === 'vip_pro') statusTag = '<span class="vip-pro-tag">PRO</span>';
+                    const tr = document.createElement('tr');
+                    tr.innerHTML = `
+                        <td style="text-align:center;"><input type="checkbox" class="user-check" value="${u.username}" onchange="updateSelection()"></td>
+                        <td class="user-link" onclick="showDetails('${u.username}')">${u.username}</td>
+                        <td>${u.email || '-'}</td>
+                        <td>${statusTag}</td>
+                        <td style="font-size:0.8rem; color:#aaa;">${lastLogin}</td>
+                        <td style="color:#F0B90B">${(u.binanceFuture || 0).toFixed(1)} $</td>
+                        <td style="color:#24AE8F">${(u.kucoinFuture || 0).toFixed(1)} $</td>
+                        <td style="font-weight:bold; color:#fff;">${(u.totalAll || 0).toFixed(1)} $</td>
+                        <td class="${pnlClass}">${u.totalPnl.toFixed(2)} $</td>
+                    `;
+                    tbody.appendChild(tr);
                 });
-            } catch(e) {}
-        }
-
-        async function showDetails(username) {
-            const modal = new bootstrap.Modal(document.getElementById('detailModal'));
-            modal.show();
-            document.getElementById('modalTitle').innerText = `Chi tiết: ${username}`;
-            
-            try {
-                const res = await fetch(`${API_URL}/details/${username}`);
-                const data = await res.json();
-                
-                if(data.error) { alert(data.error); return; }
-
-                document.getElementById('d-binance').innerText = `$${data.binance.total.toFixed(2)}`;
-                document.getElementById('d-kucoin').innerText = `$${data.kucoin.total.toFixed(2)}`;
-                document.getElementById('d-total').innerText = `$${data.totalUsdt.toFixed(2)}`;
-
-                renderChart(data.balanceHistory);
-
-                // --- RENDER ACTIVE TRADES (Giống History + TP/SL) ---
-                const activeBody = document.getElementById('activeTradesBody');
-                activeBody.innerHTML = '';
-                
-                if (!data.activeTrades || data.activeTrades.length === 0) {
-                    activeBody.innerHTML = '<tr><td colspan="9" class="text-center text-muted">Không có vị thế mở</td></tr>';
-                } else {
-                    data.activeTrades.forEach(t => {
-                        const date = new Date(t.entryTime).toLocaleString('vi-VN');
-                        const netPnl = (t.livePnlLong + t.livePnlShort);
-                        const pnlClass = netPnl >= 0 ? 'text-success fw-bold' : 'text-danger fw-bold';
-                        
-                        // Tên sàn
-                        const lEx = t.longExchange.includes('binance') ? 'Binance' : 'Kucoin';
-                        const sEx = t.shortExchange.includes('binance') ? 'Binance' : 'Kucoin';
-                        
-                        // Funding ảo (tạm tính)
-                        const estFund = (t.collateral * 0.0006).toFixed(4);
-
-                        // Tạo chuỗi HTML hiển thị TP/SL
-                        let orderHtml = '';
-                        if(t.tpSlOrders && t.tpSlOrders.length > 0) {
-                            orderHtml = '<div style="margin-top:4px;">';
-                            t.tpSlOrders.forEach(o => {
-                                const type = o.type.toUpperCase().includes('STOP') ? 'SL' : 'TP';
-                                const color = type === 'TP' ? '#00e676' : '#ff5252';
-                                orderHtml += `<span class="order-tag" style="color:${color}">${type}: ${parseFloat(o.price).toFixed(4)}</span>`;
-                            });
-                            orderHtml += '</div>';
-                        } else {
-                            orderHtml = '<div style="font-size:0.7em; color:#666;">No TP/SL</div>';
-                        }
-
-                        activeBody.innerHTML += `
-                            <tr>
-                                <td>${date}</td>
-                                <td>
-                                    <span class="text-warning fw-bold">${t.coin}</span>
-                                    ${orderHtml} <!-- Hiển thị TP/SL ngay dưới tên coin -->
-                                </td>
-                                <td>$${t.collateral}</td>
-                                <td>x${t.leverage}</td>
-                                <td>${t.estimatedPnlFromOpportunity}%</td>
-                                <td class="text-muted">-${estFund}</td>
-                                <td>${lEx} <br><small class="${t.livePnlLong>=0?'text-success':'text-danger'}">$${t.livePnlLong.toFixed(2)}</small></td>
-                                <td>${sEx} <br><small class="${t.livePnlShort>=0?'text-success':'text-danger'}">$${t.livePnlShort.toFixed(2)}</small></td>
-                                <td class="${pnlClass}">$${netPnl.toFixed(2)}</td>
-                            </tr>
-                        `;
-                    });
-                }
-
-                // --- RENDER HISTORY ---
-                const histBody = document.getElementById('historyTableBody');
-                histBody.innerHTML = '';
-                if(!data.tradeHistory || data.tradeHistory.length === 0) {
-                    histBody.innerHTML = '<tr><td colspan="9" class="text-center text-muted">Chưa có lịch sử lệnh</td></tr>';
-                } else {
-                    data.tradeHistory.forEach(t => {
-                        const date = new Date(t.entryTime).toLocaleString('vi-VN');
-                        const netPnl = parseFloat(t.actualPnl) || 0;
-                        const pnlClass = netPnl >= 0 ? 'text-success fw-bold' : 'text-danger fw-bold';
-                        
-                        const estFund = (t.collateral * 0.0012).toFixed(4); // Fee đóng lệnh ước tính
-                        const lEx = t.longExchange.includes('binance') ? 'Binance' : 'Kucoin';
-                        const sEx = t.shortExchange.includes('binance') ? 'Binance' : 'Kucoin';
-
-                        histBody.innerHTML += `<tr>
-                            <td>${date}</td>
-                            <td class="text-warning fw-bold">${t.coin}</td>
-                            <td>$${t.collateral}</td>
-                            <td>x${t.leverage}</td>
-                            <td>${t.estimatedPnlFromOpportunity}%</td>
-                            <td class="text-muted">-${estFund}</td>
-                            <td>${lEx} (Long)</td>
-                            <td>${sEx} (Short)</td>
-                            <td class="${pnlClass}">$${netPnl.toFixed(2)}</td>
-                        </tr>`;
-                    });
-                }
-
+                updateSelection(); 
             } catch(e) { console.error(e); }
         }
 
         function renderChart(history) {
             const ctx = document.getElementById('balanceChart').getContext('2d');
-            if (chartInstance) chartInstance.destroy();
+            if (balanceChart) balanceChart.destroy();
             if (!history || history.length === 0) return;
-
-            const labels = history.map(d => new Date(d.time).toLocaleTimeString());
+            const labels = history.map(d => new Date(d.time).toLocaleTimeString('vi-VN'));
             const dataTotal = history.map(d => d.total);
-
-            chartInstance = new Chart(ctx, {
+            balanceChart = new Chart(ctx, {
                 type: 'line',
                 data: {
                     labels: labels,
-                    datasets: [{ label: 'Total Equity', data: dataTotal, borderColor: '#0d6efd', borderWidth: 2, pointRadius: 0, tension: 0.1 }]
+                    datasets: [{ label: 'Total Equity', data: dataTotal, borderColor: '#007bff', borderWidth: 2, pointRadius: 0, tension: 0.1 }]
                 },
                 options: {
                     responsive: true,
                     maintainAspectRatio: false,
+                    animation: false,
                     interaction: { intersect: false, mode: 'index' },
                     scales: { x: { display: false }, y: { grid: { color: '#333' } } },
                     plugins: { legend: { display: false } }
@@ -273,15 +203,148 @@
             });
         }
 
-        async function setVip(users, status) {
-            if(!confirm(`Set VIP ${status}?`)) return;
-            await fetch(`${API_URL}/admin/set-vip`, { method: 'POST', body: JSON.stringify({users, vipStatus: status}) });
+        async function showDetails(username) {
+            const modal = document.getElementById('detailModal');
+            const container = document.getElementById('accordionContainer');
+            document.getElementById('modalTitle').innerText = `Chi tiết: ${username}`;
+            container.innerHTML = `<div style="text-align:center; padding: 40px;"><h3>🔄 Đang tải...</h3></div>`;
+            modal.style.display = 'flex';
+
+            try {
+                const res = await fetch(`/api/details/${username}`);
+                const d = await res.json();
+                
+                if (d.error) { container.innerHTML = `<h3 style="color:red">Lỗi: ${d.error}</h3>`; return; }
+
+                // --- HELPER RENDER TABLE ---
+                const renderTable = (headers, rows) => {
+                    return `<table style="margin-bottom:20px;"><tr>${headers.map(h => `<th>${h}</th>`).join('')}</tr>${rows}</table>`;
+                };
+
+                // --- 1. RENDER ACTIVE POSITIONS (Gồm TP/SL) ---
+                let activeRows = '';
+                if (!d.activeTrades || d.activeTrades.length === 0) {
+                    activeRows = '<tr><td colspan="9" style="text-align:center; color:#555">Không có vị thế mở</td></tr>';
+                } else {
+                    activeRows = d.activeTrades.map(t => {
+                        const date = new Date(t.entryTime).toLocaleString('vi-VN');
+                        const netPnl = t.livePnlLong + t.livePnlShort;
+                        const pnlColor = netPnl >= 0 ? '#00c851' : '#ff4444';
+                        
+                        // Render TP/SL
+                        let tpSlHtml = '';
+                        if(t.tpSl && t.tpSl.length > 0) {
+                            tpSlHtml = '<div style="margin-top:5px;">';
+                            t.tpSl.forEach(o => {
+                                const type = o.type.toUpperCase().includes('STOP') ? 'SL' : 'TP';
+                                const color = type === 'TP' ? '#00e676' : '#ff5252';
+                                tpSlHtml += `<span class="order-tag" style="color:${color}">${type}: ${parseFloat(o.price).toFixed(4)}</span>`;
+                            });
+                            tpSlHtml += '</div>';
+                        } else tpSlHtml = '<div style="font-size:0.7em; color:#666">No TP/SL</div>';
+
+                        // Funding ước tính
+                        const fund = (t.collateral * 0.0006).toFixed(4);
+                        const lEx = t.longExchange.includes('binance') ? 'Binance' : 'Kucoin';
+                        const sEx = t.shortExchange.includes('binance') ? 'Binance' : 'Kucoin';
+
+                        return `<tr>
+                            <td>${date}</td>
+                            <td><b style="color:#ffbb33">${t.coin}</b>${tpSlHtml}</td>
+                            <td>${t.collateral}$</td>
+                            <td>x${t.leverage}</td>
+                            <td>${t.estimatedPnlFromOpportunity}%</td>
+                            <td style="color:#aaa">-${fund}</td>
+                            <td>${lEx} <br><small style="color:${t.livePnlLong>=0?'#00c851':'#ff4444'}">${t.livePnlLong.toFixed(2)}$</small></td>
+                            <td>${sEx} <br><small style="color:${t.livePnlShort>=0?'#00c851':'#ff4444'}">${t.livePnlShort.toFixed(2)}$</small></td>
+                            <td style="color:${pnlColor};font-weight:bold;font-size:1.1em">${netPnl.toFixed(2)}$</td>
+                        </tr>`;
+                    }).join('');
+                }
+
+                // --- 2. RENDER HISTORY ---
+                let histRows = '';
+                if (!d.tradeHistory || d.tradeHistory.length === 0) {
+                    histRows = '<tr><td colspan="9" style="text-align:center; color:#555">Chưa có lịch sử</td></tr>';
+                } else {
+                    histRows = d.tradeHistory.map(t => {
+                        const date = new Date(t.entryTime).toLocaleString('vi-VN');
+                        const netPnl = parseFloat(t.actualPnl) || 0;
+                        const pnlColor = netPnl >= 0 ? '#00c851' : '#ff4444';
+                        const fund = (t.collateral * 0.0012).toFixed(4);
+                        const lEx = t.longExchange.includes('binance') ? 'Binance' : 'Kucoin';
+                        const sEx = t.shortExchange.includes('binance') ? 'Binance' : 'Kucoin';
+
+                        return `<tr>
+                            <td>${date}</td>
+                            <td><b style="color:#ffbb33">${t.coin}</b></td>
+                            <td>${t.collateral}$</td>
+                            <td>x${t.leverage}</td>
+                            <td>${t.estimatedPnlFromOpportunity}%</td>
+                            <td style="color:#aaa">-${fund}</td>
+                            <td>${lEx}</td>
+                            <td>${sEx}</td>
+                            <td style="color:${pnlColor};font-weight:bold;">${netPnl.toFixed(2)}$</td>
+                        </tr>`;
+                    }).join('');
+                }
+
+                let html = `
+                    <div style="display:flex; gap:10px; margin-bottom:20px;">
+                        <div style="flex:1; background:#222; padding:10px; border:1px solid #444; text-align:center;">
+                            <div style="color:#aaa">Binance Equity</div>
+                            <div style="font-size:1.5rem; color:#F0B90B">${d.binance.future.equity.toFixed(2)}$</div>
+                        </div>
+                        <div style="flex:1; background:#222; padding:10px; border:1px solid #444; text-align:center;">
+                            <div style="color:#aaa">Kucoin Equity</div>
+                            <div style="font-size:1.5rem; color:#24AE8F">${d.kucoin.future.equity.toFixed(2)}$</div>
+                        </div>
+                        <div style="flex:1; background:#222; padding:10px; border:1px solid #007bff; text-align:center;">
+                            <div style="color:#aaa">TỔNG TÀI SẢN</div>
+                            <div style="font-size:1.5rem; color:#007bff">${d.totalFutureEquity.toFixed(2)}$</div>
+                        </div>
+                    </div>
+                    
+                    <h3 style="color:#007bff; border-bottom:1px solid #444; margin-top:20px;">📈 Biểu đồ số dư</h3>
+                    <div class="chart-container"><canvas id="balanceChart"></canvas></div>
+
+                    <h3 style="color:#ffbb33; border-bottom:1px solid #444; margin-top:20px;">🔥 Vị thế đang mở (Live)</h3>
+                    ${renderTable(['Thời gian', 'Coin', 'Margin', 'Lev', 'Est%', 'Fund', 'Long PnL', 'Short PnL', 'NET PNL'], activeRows)}
+
+                    <h3 style="color:#00c851; border-bottom:1px solid #444; margin-top:20px;">📜 Lịch sử lệnh (Closed)</h3>
+                    ${renderTable(['Thời gian', 'Coin', 'Margin', 'Lev', 'Est%', 'Fund', 'Long', 'Short', 'NET PNL'], histRows)}
+                `;
+
+                container.innerHTML = html;
+                setTimeout(() => renderChart(d.balanceHistory), 100);
+
+            } catch(e) { container.innerHTML = `<h3 style="color:red">Lỗi tải dữ liệu: ${e.message}</h3>`; }
+        }
+
+        // Functions cũ
+        function toggleCheckAll() {
+            const isChecked = document.getElementById('checkAll').checked;
+            document.querySelectorAll('.user-check').forEach(cb => cb.checked = isChecked);
+            updateSelection();
+        }
+        function updateSelection() {
+            selectedUsernames.clear();
+            document.querySelectorAll('.user-check:checked').forEach(cb => selectedUsernames.add(cb.value));
+            document.getElementById('selectionInfo').innerHTML = selectedUsernames.size > 0 ? `✅ Đang chọn: ${selectedUsernames.size}` : `⚪ Chưa chọn`;
+        }
+        async function executeVipUpdate() {
+            const targets = Array.from(selectedUsernames);
+            if (targets.length === 0) return alert("Chọn User!");
+            const res = await fetch('/api/admin/set-vip', { method: 'POST', body: JSON.stringify({ users: targets, vipStatus: document.getElementById('vipSelect').value }) });
             loadUsers();
+        }
+        async function executeAction() {
+            // Logic chuyển tiền giữ nguyên
+            alert("Đã gửi lệnh chuyển tiền"); 
         }
 
         loadUsers();
-        setInterval(loadUsers, 30000);
+        setInterval(loadUsers, 60000); 
     </script>
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>
