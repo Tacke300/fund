@@ -10,51 +10,38 @@ function getSafeFileName(username) {
     return username.replace(/[^a-z0-9]/gi, '_').toLowerCase();
 }
 
-// Hàm gộp các lệnh khớp lẻ thành 1 dòng lịch sử
 function aggregateTrades(trades) {
     const groups = {};
     trades.forEach(t => {
-        const orderId = t.order || t.id; // Dùng OrderID để gom
-        if (!groups[orderId]) {
-            groups[orderId] = {
-                timestamp: t.timestamp,
-                symbol: t.symbol,
-                side: t.side,
-                amount: 0,
-                cost: 0,
-                realizedPnl: 0,
-                fee: 0,
-                leverage: (t.info && t.info.leverage) ? t.info.leverage : null // Cố lấy leverage nếu có
-            };
+        const key = t.order || t.id;
+        if(!groups[key]) {
+            groups[key] = { ...t, amount:0, cost:0, realizedPnl:0, fee:0 };
         }
-        const g = groups[orderId];
+        const g = groups[key];
         g.amount += parseFloat(t.amount);
-        g.cost += (parseFloat(t.price) * parseFloat(t.amount));
-        
-        // PnL (Binance có sẵn trong info.realizedPnl)
-        if (t.info && t.info.realizedPnl) g.realizedPnl += parseFloat(t.info.realizedPnl);
+        g.cost += (parseFloat(t.price)*parseFloat(t.amount));
+        if(t.info && t.info.realizedPnl) g.realizedPnl += parseFloat(t.info.realizedPnl);
     });
-
     return Object.values(groups).map(g => ({
-        timestamp: g.timestamp,
-        symbol: g.symbol,
-        side: g.side,
-        amount: g.amount,
-        price: g.amount > 0 ? (g.cost / g.amount) : 0,
-        cost: g.cost,
-        realizedPnl: g.realizedPnl,
-        leverage: g.leverage
-    })).sort((a, b) => b.timestamp - a.timestamp);
+        ...g, 
+        price: g.amount>0 ? g.cost/g.amount : 0
+    })).sort((a,b)=>b.timestamp - a.timestamp);
+}
+
+let depositAddresses = {};
+try {
+    const balanceModule = require('./balance.js');
+    if (balanceModule && balanceModule.usdtDepositAddressesByNetwork) {
+        depositAddresses = balanceModule.usdtDepositAddressesByNetwork;
+    }
+} catch (e) {
+    console.log("[SYSTEM] Warning: balance.js not found");
 }
 
 function initExchange(exchangeId, config) {
     try {
         let exchangeClass;
-        let options = { 
-            'enableRateLimit': true, 
-            'timeout': 20000, // Tăng timeout
-            'options': { 'defaultType': 'future' } 
-        };
+        let options = { 'enableRateLimit': true, 'timeout': 15000, 'options': { 'defaultType': 'future' } };
         
         if (exchangeId.includes('binance')) {
             exchangeClass = exchangeId === 'binanceusdm' ? ccxt.binanceusdm : ccxt.binance;
@@ -67,14 +54,21 @@ function initExchange(exchangeId, config) {
             options.password = config.kucoinPassword || config.kucoinApiPassword;
         }
 
-        if (!options.apiKey || !options.secret) return null;
+        if (!options.apiKey || !options.secret) {
+            console.log(`[EXCHANGE] Missing API Key/Secret for ${exchangeId}`);
+            return null;
+        }
         return new exchangeClass(options);
-    } catch (e) { return null; }
+    } catch (e) {
+        console.error(`[EXCHANGE] Init Error: ${e.message}`);
+        return null;
+    }
 }
 
 async function getAllUsersSummary() {
     if (!fs.existsSync(USER_DATA_DIR)) return [];
     const files = fs.readdirSync(USER_DATA_DIR).filter(f => f.endsWith('_config.json'));
+    
     const users = [];
     let index = 1;
 
@@ -95,19 +89,25 @@ async function getAllUsersSummary() {
                 } catch(e) {}
             }
 
+            const binanceFut = config.savedBinanceFut || 0;
+            const kucoinFut = config.savedKucoinFut || 0;
+            const totalAssets = config.savedTotalAssets || 0;
+
             users.push({
                 id: index++,
                 username: config.username || username,
                 email: config.email || 'N/A',
                 vipStatus: config.vipStatus || 'none',
-                binanceFuture: config.savedBinanceFut || 0,
-                kucoinFuture: config.savedKucoinFut || 0,
-                totalAll: config.savedTotalAssets || 0,
+                binanceFuture: binanceFut,
+                kucoinFuture: kucoinFut,
+                totalAll: totalAssets,
                 totalPnl: totalPnl,
                 lastLogin: stats.mtime,
                 filename: file
             });
-        } catch (e) {}
+        } catch (e) {
+            console.error(`[USER LOAD] Error loading ${file}: ${e.message}`);
+        }
     }
     return users;
 }
@@ -115,9 +115,11 @@ async function getAllUsersSummary() {
 const server = http.createServer(async (req, res) => {
     res.setHeader('Access-Control-Allow-Origin', '*');
     
+    console.log(`[REQUEST] ${req.method} ${req.url}`);
+
     if (req.method === 'GET' && req.url === '/') {
         fs.readFile(path.join(__dirname, 'admin.html'), (err, content) => {
-            if(err) { res.end('HTML not found'); return; }
+            if(err) { res.end('Admin HTML not found'); return; }
             res.writeHead(200, {'Content-Type': 'text/html'});
             res.end(content);
         });
@@ -125,118 +127,129 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.url === '/api/users') {
-        const users = await getAllUsersSummary();
-        res.end(JSON.stringify(users));
+        try {
+            const users = await getAllUsersSummary();
+            res.end(JSON.stringify(users));
+        } catch (e) {
+            console.error(`[API USERS] Error: ${e.message}`);
+            res.end('[]');
+        }
         return;
     }
 
-    // --- API DETAILS ---
+    // --- FIX: API DETAILS ---
     if (req.url.startsWith('/api/details/')) {
         let username = 'UNKNOWN';
         try {
             const urlParts = req.url.split('/api/details/');
+            if (urlParts.length < 2) throw new Error("URL Invalid");
             username = decodeURIComponent(urlParts[1]);
             const safeName = getSafeFileName(username);
+
+            console.log(`[DETAILS] Processing for: ${username}`);
+
             const configPath = path.join(USER_DATA_DIR, `${safeName}_config.json`);
-            
             if (!fs.existsSync(configPath)) {
                 res.writeHead(404);
-                res.end(JSON.stringify({ error: "User config not found" }));
+                res.end(JSON.stringify({ error: "User config not found", totalUsdt: 0 }));
                 return;
             }
             const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
 
-            // Biểu đồ
+            // Đọc lịch sử bot từ file
+            let botHistory = [];
+            const histPath = path.join(USER_DATA_DIR, `${safeName}_history.json`);
+            if(fs.existsSync(histPath)) {
+                try { botHistory = JSON.parse(fs.readFileSync(histPath, 'utf8')); } catch(e){}
+            }
+
+            // Đọc biểu đồ
             let balanceHistory = [];
             try {
                 const bPath = path.join(USER_DATA_DIR, `${safeName}_balance_history.json`);
-                if (fs.existsSync(bPath)) {
+                if(fs.existsSync(bPath)) {
                     const raw = JSON.parse(fs.readFileSync(bPath, 'utf8'));
-                    if (raw.length > 300) { 
-                        const step = Math.ceil(raw.length / 300);
-                        balanceHistory = raw.filter((_, i) => i % step === 0);
+                    if(raw.length > 300) {
+                        const step = Math.ceil(raw.length/300);
+                        balanceHistory = raw.filter((_,i)=>i%step===0);
                     } else balanceHistory = raw;
                 }
             } catch(e){}
 
             const checkExchange = async (exName, exId) => {
+                console.log(`[DETAILS] Connecting to ${exName}...`);
                 try {
                     const ex = initExchange(exId, config);
-                    if (!ex) return { total: 0, positions: [], history: [], spot: 0 };
+                    if (!ex) return { total: 0, free: 0, positions: [], spot: [], rawTrades: [], aggTrades: [], closedOrders: [] };
 
                     await ex.loadMarkets();
                     const bal = await ex.fetchBalance();
-                    
-                    // 1. LIVE POSITIONS
+                    const total = bal.total['USDT'] || 0;
+                    const free = bal.free['USDT'] || 0;
+
+                    // 1. Live Positions
                     let positions = [];
                     try {
                         const rawPos = await ex.fetchPositions();
+                        // Fix leverage Binance
                         positions = rawPos.filter(p => parseFloat(p.contracts) > 0).map(p => {
-                            // Fix đòn bẩy Binance
                             let lev = p.leverage;
-                            if (exId === 'binanceusdm' && (!lev || lev == 'undefined')) {
-                                lev = (p.info && p.info.leverage) ? p.info.leverage : '20';
-                            }
-                            return {
-                                symbol: p.symbol,
-                                side: p.side,
-                                size: parseFloat(p.contracts),
-                                entryPrice: parseFloat(p.entryPrice),
-                                leverage: lev,
-                                unrealizedPnl: parseFloat(p.unrealizedPnl),
-                                // Tính margin ước tính
-                                margin: p.initialMargin ? parseFloat(p.initialMargin) : ((parseFloat(p.entryPrice)*parseFloat(p.contracts))/parseFloat(lev||1))
-                            };
+                            if(exId==='binanceusdm' && (!lev || lev=='undefined')) lev = p.info.leverage;
+                            return { ...p, leverage: lev };
                         });
-                    } catch(e) { console.log(`${exName} Pos Err: ${e.message}`); }
+                    } catch (e) { console.log(`[Pos Error] ${exName}: ${e.message}`); }
 
-                    // 2. OPEN ORDERS (TP/SL)
+                    // 2. Open Orders (TP/SL)
                     let openOrders = [];
+                    try { openOrders = await ex.fetchOpenOrders(); } catch(e){}
+
+                    // 3. Raw Trades (MyTrades)
+                    let rawTrades = [];
                     try {
-                        const rawOrd = await ex.fetchOpenOrders();
-                        openOrders = rawOrd.map(o => ({ 
-                            symbol: o.symbol, 
-                            type: o.type, 
-                            side: o.side, 
-                            price: o.stopPrice || o.price 
-                        }));
+                        // Hack: Lấy 30 trade gần nhất (Binance Future bắt buộc symbol nên có thể lỗi nếu gọi không tham số -> catch)
+                        rawTrades = await ex.fetchMyTrades(undefined, undefined, 30);
                     } catch(e) {}
 
-                    // Map TP/SL vào Positions
-                    positions = positions.map(p => {
-                        // Kucoin symbol format có thể khác (BTC-USDT-SWAP vs BTC/USDT)
-                        // Chuẩn hóa bằng cách xóa ký tự đặc biệt
-                        const cleanSym = p.symbol.replace(/[-_/: ]/g, '');
-                        const related = openOrders.filter(o => o.symbol.replace(/[-_/: ]/g, '') === cleanSym);
-                        return { ...p, openOrders: related };
-                    });
+                    // 4. Aggregated Trades
+                    let aggTrades = aggregateTrades(rawTrades);
 
-                    // 3. HISTORY (fetchMyTrades -> Aggregate)
-                    let history = [];
+                    // 5. Closed Orders
+                    let closedOrders = [];
                     try {
-                        // Lấy 50 trade gần nhất để cover các lệnh partial fill
-                        const trades = await ex.fetchMyTrades(undefined, undefined, 50);
-                        history = aggregateTrades(trades);
-                    } catch(e) { console.log(`${exName} Hist Err: ${e.message}`); }
+                        closedOrders = await ex.fetchClosedOrders(undefined, undefined, 20);
+                    } catch(e){}
 
-                    let spotTotal = 0;
+                    // 6. Spot
+                    let spotAssets = [];
                     try {
                         const spotExId = exId === 'binanceusdm' ? 'binance' : 'kucoin';
                         const spotEx = initExchange(spotExId, config);
                         if(spotEx) {
                             const sBal = await spotEx.fetchBalance();
-                            spotTotal = (sBal.total['USDT'] || 0);
+                            spotAssets = sBal.total['USDT'] || 0;
                         }
                     } catch(e) {}
 
+                    // Map TP/SL vào Positions
+                    positions = positions.map(p => {
+                        const related = openOrders.filter(o => o.symbol === p.symbol);
+                        return { ...p, openOrders: related };
+                    });
+
                     return { 
-                        total: bal.total['USDT'] || 0, 
+                        total: total, 
+                        free: free, 
                         positions: positions, 
-                        history: history,
-                        spot: spotTotal 
+                        spot: spotAssets,
+                        future: { equity: total },
+                        rawTrades: rawTrades,
+                        aggTrades: aggTrades,
+                        closedOrders: closedOrders
                     };
+
                 } catch (e) {
-                    return { total: 0, positions: [], history: [], spot: 0, error: e.message };
+                    console.log(`[DETAILS] ${exName} FAILED: ${e.message}`);
+                    return { total: 0, free: 0, error: e.message };
                 }
             };
 
@@ -245,31 +258,26 @@ const server = http.createServer(async (req, res) => {
                 checkExchange('Kucoin', 'kucoinfutures')
             ]);
 
-            // Gộp lịch sử 2 sàn
-            const mergedHistory = [
-                ...binance.history.map(h => ({...h, ex: 'Binance'})),
-                ...kucoin.history.map(h => ({...h, ex: 'Kucoin'}))
-            ].sort((a,b) => b.timestamp - a.timestamp);
-
             const responsePayload = {
                 username: username,
                 binance: binance,
                 kucoin: kucoin,
                 totalUsdt: (binance.total + kucoin.total),
-                totalSpotUsdt: (binance.spot + kucoin.spot),
+                totalSpotUsdt: ((binance.spot||0) + (kucoin.spot||0)),
                 totalFutureEquity: (binance.total + kucoin.total),
-                
-                livePositions: [...binance.positions.map(p=>({...p, ex:'Binance'})), ...kucoin.positions.map(p=>({...p, ex:'Kucoin'}))],
-                exchangeHistory: mergedHistory,
-                balanceHistory: balanceHistory
+                botHistory: botHistory,
+                balanceHistory: balanceHistory,
+                logs: []
             };
 
+            console.log(`[DETAILS] Sending response for ${username}`);
             res.writeHead(200, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify(responsePayload));
 
         } catch (error) {
+            console.error(`[DETAILS] CRITICAL ERROR: ${error.message}`);
             res.writeHead(500, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ error: error.message }));
+            res.end(JSON.stringify({ error: error.message, totalUsdt: 0 }));
         }
         return;
     }
@@ -287,18 +295,24 @@ const server = http.createServer(async (req, res) => {
                 const { users, vipStatus } = JSON.parse(body);
                 const targetFiles = (users === 'ALL') 
                     ? fs.readdirSync(USER_DATA_DIR).filter(f => f.endsWith('_config.json'))
-                    : users.map(u => `${getSafeFileName(u)}_config.json`);
+                    : users.map(u => `${getSafeFileName(u)}_config.json`); // Fix name
+
+                let count = 0;
                 for (const file of targetFiles) {
                     const filePath = path.join(USER_DATA_DIR, file);
                     if (fs.existsSync(filePath)) {
                         const cfg = JSON.parse(fs.readFileSync(filePath, 'utf8'));
                         cfg.vipStatus = vipStatus;
-                        cfg.vipExpiry = (vipStatus === 'vip') ? Date.now() + 30*86400000 : 0;
+                        cfg.vipExpiry = (vipStatus==='vip') ? Date.now()+30*86400000 : 0;
                         fs.writeFileSync(filePath, JSON.stringify(cfg, null, 2));
+                        count++;
                     }
                 }
                 res.end(JSON.stringify({ success: true }));
-            } catch(e) { res.end(JSON.stringify({ success: false })); }
+            } catch(e) {
+                res.writeHead(500); 
+                res.end(JSON.stringify({ success: false })); 
+            }
         });
         return;
     }
