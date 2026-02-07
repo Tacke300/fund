@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="vi" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Shopee Auto Reup Bot Pro</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        tailwind.config = { darkMode: 'class', theme: { extend: { colors: { shopee: '#ee4d2d', darkbg: '#18181b', card: '#27272a' } } } }
+    </script>
+    <style>
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: #18181b; }
+        ::-webkit-scrollbar-thumb { background: #3f3f46; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #52525b; }
+        .log-line { font-family: 'Consolas', monospace; font-size: 0.9rem; }
+    </style>
+</head>
+<body class="bg-darkbg text-gray-200 font-sans min-h-screen p-4 md:p-8">
+
+    <div class="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-3 gap-6">
+        
+        <!-- Cột 1: Control Panel -->
+        <div class="lg:col-span-1 space-y-6">
+            <!-- Login Card -->
+            <div class="bg-card p-6 rounded-xl shadow-lg border border-gray-700">
+                <h2 class="text-2xl font-bold text-shopee mb-4 flex items-center">
+                    <svg class="w-6 h-6 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>
+                    Cấu Hình Bot
+                </h2>
+                <div class="space-y-4">
+                    <div>
+                        <label class="block text-sm font-medium mb-1">Email / SĐT Shopee</label>
+                        <input type="text" id="email" class="w-full bg-gray-800 border border-gray-600 rounded-lg px-4 py-2 focus:outline-none focus:border-shopee" placeholder="Nhập tài khoản...">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium mb-1">Mật khẩu</label>
+                        <input type="password" id="pass" class="w-full bg-gray-800 border border-gray-600 rounded-lg px-4 py-2 focus:outline-none focus:border-shopee" placeholder="Nhập mật khẩu...">
+                    </div>
+                    
+                    <div id="otp-section" class="hidden">
+                        <label class="block text-sm font-medium mb-1 text-yellow-400">Yêu cầu xác thực OTP</label>
+                        <input type="text" id="otp" class="w-full bg-gray-800 border border-yellow-500 rounded-lg px-4 py-2" placeholder="Nhập mã OTP nếu có...">
+                    </div>
+
+                    <button onclick="startBot()" class="w-full bg-shopee hover:bg-orange-600 text-white font-bold py-3 rounded-lg transition duration-200 shadow-lg transform active:scale-95">
+                        KHỞI CHẠY BOT
+                    </button>
+                    <p class="text-xs text-gray-500 text-center mt-2">*Bot sẽ mở trình duyệt Chrome để bạn giám sát</p>
+                </div>
+            </div>
+
+            <!-- Stats Card -->
+            <div class="bg-card p-6 rounded-xl shadow-lg border border-gray-700">
+                <h3 class="text-xl font-bold mb-4 text-white">Thống Kê Hiệu Suất</h3>
+                <div class="grid grid-cols-2 gap-4">
+                    <div class="bg-gray-800 p-3 rounded-lg text-center">
+                        <div class="text-gray-400 text-xs uppercase">Hôm nay</div>
+                        <div class="text-2xl font-bold text-green-400" id="stat-today">0</div>
+                    </div>
+                    <div class="bg-gray-800 p-3 rounded-lg text-center">
+                        <div class="text-gray-400 text-xs uppercase">Tuần này</div>
+                        <div class="text-2xl font-bold text-blue-400" id="stat-week">0</div>
+                    </div>
+                    <div class="bg-gray-800 p-3 rounded-lg text-center">
+                        <div class="text-gray-400 text-xs uppercase">Tháng này</div>
+                        <div class="text-2xl font-bold text-purple-400" id="stat-month">0</div>
+                    </div>
+                    <div class="bg-gray-800 p-3 rounded-lg text-center">
+                        <div class="text-gray-400 text-xs uppercase">Tổng cộng</div>
+                        <div class="text-2xl font-bold text-shopee" id="stat-total">0</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Cột 2 & 3: Logs và Table -->
+        <div class="lg:col-span-2 space-y-6">
+            
+            <!-- Terminal Logs -->
+            <div class="bg-black rounded-xl shadow-lg border border-gray-700 overflow-hidden flex flex-col h-64">
+                <div class="bg-gray-800 px-4 py-2 flex justify-between items-center border-b border-gray-700">
+                    <span class="text-xs font-mono text-green-400">root@shopee-bot:~# logs</span>
+                    <div class="flex space-x-2">
+                        <div class="w-3 h-3 rounded-full bg-red-500"></div>
+                        <div class="w-3 h-3 rounded-full bg-yellow-500"></div>
+                        <div class="w-3 h-3 rounded-full bg-green-500"></div>
+                    </div>
+                </div>
+                <div id="log-container" class="p-4 overflow-y-auto flex-1 font-mono text-sm space-y-1">
+                    <!-- Logs will appear here -->
+                    <div class="log-line text-gray-500">System ready. Waiting for command...</div>
+                </div>
+            </div>
+
+            <!-- Data Table -->
+            <div class="bg-card rounded-xl shadow-lg border border-gray-700 overflow-hidden">
+                <div class="p-4 border-b border-gray-700 flex justify-between items-center">
+                    <h3 class="font-bold text-lg">Lịch sử Upload</h3>
+                    <select id="filter-date" class="bg-gray-800 border border-gray-600 text-xs rounded px-2 py-1 focus:outline-none">
+                        <option value="today">Hôm nay</option>
+                        <option value="all">Tất cả</option>
+                    </select>
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left border-collapse">
+                        <thead>
+                            <tr class="bg-gray-800 text-gray-400 text-xs uppercase">
+                                <th class="p-3">Thời gian</th>
+                                <th class="p-3">Tên sản phẩm</th>
+                                <th class="p-3">Trạng thái</th>
+                                <th class="p-3">Chi tiết</th>
+                            </tr>
+                        </thead>
+                        <tbody id="table-body" class="text-sm divide-y divide-gray-700">
+                            <!-- Rows -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const socket = io();
+        const logContainer = document.getElementById('log-container');
+        const tableBody = document.getElementById('table-body');
+
+        // Hàm thêm log
+        socket.on('log', (data) => {
+            const div = document.createElement('div');
+            div.className = 'log-line';
+            
+            let color = 'text-gray-300';
+            if (data.type === 'error') color = 'text-red-500 font-bold';
+            if (data.type === 'warning') color = 'text-yellow-400';
+            if (data.type === 'success') color = 'text-green-400';
+            
+            // Format time
+            const time = new Date().toLocaleTimeString();
+            div.innerHTML = `<span class="text-gray-600">[${time}]</span> <span class="${color}">${data.msg}</span>`;
+            
+            logContainer.appendChild(div);
+            logContainer.scrollTop = logContainer.scrollHeight;
+        });
+
+        // Hàm Start Bot
+        function startBot() {
+            const email = document.getElementById('email').value;
+            const pass = document.getElementById('pass').value;
+            
+            if(!email || !pass) {
+                alert("Vui lòng nhập Email và Mật khẩu!");
+                return;
+            }
+            
+            // Disable button
+            document.querySelector('button').innerText = "ĐANG CHẠY...";
+            document.querySelector('button').disabled = true;
+            document.querySelector('button').classList.add('opacity-50');
+
+            socket.emit('start-bot', { email, password: pass });
+        }
+
+        // Cập nhật bảng thống kê
+        function fetchStats() {
+            fetch('/api/stats')
+                .then(res => res.json())
+                .then(data => {
+                    // Update số liệu
+                    document.getElementById('stat-today').innerText = data.today;
+                    document.getElementById('stat-week').innerText = data.week;
+                    document.getElementById('stat-month').innerText = data.month;
+                    document.getElementById('stat-total').innerText = data.total;
+
+                    // Update bảng
+                    renderTable(data.history);
+                });
+        }
+
+        function renderTable(history) {
+            const filter = document.getElementById('filter-date').value;
+            const today = new Date().toLocaleDateString('vi-VN');
+            
+            tableBody.innerHTML = '';
+            
+            history.forEach(item => {
+                if (filter === 'today' && item.date !== today) return;
+
+                const row = `
+                    <tr class="hover:bg-gray-800 transition">
+                        <td class="p-3 text-gray-400">${item.date} ${item.time}</td>
+                        <td class="p-3 font-medium text-white truncate max-w-xs" title="${item.name}">${item.name}</td>
+                        <td class="p-3"><span class="bg-green-900 text-green-300 py-1 px-2 rounded text-xs">Thành công</span></td>
+                        <td class="p-3 text-gray-400 text-xs truncate max-w-xs">${item.tags.substring(0, 30)}...</td>
+                    </tr>
+                `;
+                tableBody.innerHTML += row;
+            });
+        }
+
+        // Tự động load stats khi vào trang
+        fetchStats();
+        
+        // Lắng nghe sự kiện update từ server
+        socket.on('update_stats', fetchStats);
+        
+        // Sự kiện lọc
+        document.getElementById('filter-date').addEventListener('change', fetchStats);
+
+    </script>
+</body>
+</html>
