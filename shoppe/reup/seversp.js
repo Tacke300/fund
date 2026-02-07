@@ -1,60 +1,58 @@
-// server.js
 const express = require('express');
 const http = require('http');
 const socketIo = require('socket.io');
 const bodyParser = require('body-parser');
 const fs = require('fs-extra');
 const path = require('path');
-const botEngine = require('./bot'); // File bot logic
+const botEngine = require('./bot');
 
 const app = express();
 const server = http.createServer(app);
 const io = socketIo(server);
 const PORT = 2026;
 
-// Setup Middleware
 app.use(express.static('public'));
 app.use(bodyParser.json());
 
-// Khởi tạo database nếu chưa có
 const DB_PATH = path.join(__dirname, 'data', 'database.json');
-if (!fs.existsSync(DB_PATH)) {
-    fs.ensureDirSync(path.join(__dirname, 'data'));
-    fs.writeJsonSync(DB_PATH, []);
-}
+fs.ensureDirSync(path.join(__dirname, 'data'));
+if (!fs.existsSync(DB_PATH)) fs.writeJsonSync(DB_PATH, []);
 
-// API: Lấy thống kê
+// API Lấy thống kê
 app.get('/api/stats', async (req, res) => {
     try {
         const data = await fs.readJson(DB_PATH);
-        const today = new Date().toLocaleDateString('vi-VN');
-        
-        const stats = {
-            today: data.filter(d => d.date === today).length,
-            week: data.length, // Demo logic (cần xử lý date kỹ hơn cho tuần/tháng)
-            month: data.length,
+        res.json({
             total: data.length,
-            history: data.reverse() // Mới nhất lên đầu
-        };
-        res.json(stats);
-    } catch (e) {
-        res.json({ error: true });
-    }
+            history: data.reverse()
+        });
+    } catch (e) { res.json({ total: 0, history: [] }); }
 });
 
-// Socket.io connection
 io.on('connection', (socket) => {
-    console.log('Client connected UI');
+    console.log('Client UI connected');
 
-    // Nhận lệnh Start từ UI
-    socket.on('start-bot', (credentials) => {
-        io.emit('log', { type: 'info', msg: '🚀 Đang khởi động Bot...' });
-        
-        // Gọi bot chạy
-        botEngine.start(credentials, io, DB_PATH);
+    // 1. Lệnh Đăng nhập
+    socket.on('cmd-login', async (creds) => {
+        const result = await botEngine.loginShopee(creds, io);
+        if (result) {
+            socket.emit('login-success');
+        } else {
+            socket.emit('login-fail');
+        }
+    });
+
+    // 2. Lệnh Chạy Bot (Start)
+    socket.on('cmd-start', () => {
+        botEngine.startLoop(io, DB_PATH);
+    });
+
+    // 3. Lệnh Dừng Bot (Stop)
+    socket.on('cmd-stop', () => {
+        botEngine.stopLoop(io);
     });
 });
 
 server.listen(PORT, () => {
-    console.log(`Server running at http://localhost:${PORT}`);
+    console.log(`Server tunggbeoo running at http://localhost:${PORT}`);
 });
