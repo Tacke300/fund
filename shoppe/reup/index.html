@@ -3,8 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Shopee Bot Auto Reup - System v2.1</title>
-    <!-- Tailwind CSS & Google Fonts -->
+    <title>Shopee Bot System v2.2</title>
+    <!-- Tailwind CSS & Socket.io -->
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="/socket.io/socket.io.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
@@ -14,327 +14,244 @@
             darkMode: 'class',
             theme: {
                 extend: {
-                    colors: { 
-                        shopee: '#ee4d2d', 
-                        darkbg: '#0f172a', 
-                        card: '#1e293b',
-                        terminal: '#0a0f1e'
-                    },
-                    fontFamily: { 
-                        mono: ['"JetBrains Mono"', 'monospace'],
-                        sans: ['Inter', 'sans-serif']
-                    }
+                    colors: { shopee: '#ee4d2d', darkbg: '#0f172a', card: '#1e293b', terminal: '#0a0f1e' },
+                    fontFamily: { mono: ['"JetBrains Mono"', 'monospace'], sans: ['Inter', 'sans-serif'] }
                 }
             }
         }
     </script>
     <style>
-        body { background-color: #0f172a; color: #e2e8f0; font-family: 'Inter', sans-serif; }
+        body { background-color: #0f172a; color: #e2e8f0; font-family: 'Inter', sans-serif; overflow-x: hidden; }
         .hidden-section { display: none !important; }
-        #log-box::-webkit-scrollbar { width: 6px; }
-        #log-box::-webkit-scrollbar-track { background: #0a0f1e; }
+        #log-box::-webkit-scrollbar { width: 4px; }
         #log-box::-webkit-scrollbar-thumb { background: #334155; border-radius: 10px; }
-        .neon-border { box-shadow: 0 0 15px rgba(238, 77, 45, 0.2); border: 1px solid rgba(238, 77, 45, 0.3); }
-        @keyframes pulse-red { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
-        .status-dot { animation: pulse-red 2s infinite; }
+        .status-pulse { animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .5; } }
     </style>
 </head>
 <body class="flex flex-col min-h-screen">
 
     <!-- HEADER -->
-    <header class="bg-card border-b border-gray-700 p-4 sticky top-0 z-50 shadow-2xl">
+    <header class="bg-card border-b border-gray-700 p-4 sticky top-0 z-50 shadow-xl">
         <div class="max-w-6xl mx-auto flex justify-between items-center">
-            <div class="flex items-center space-x-3">
-                <div class="bg-shopee text-white font-black px-3 py-1 rounded shadow-lg">SHOPEE BOT</div>
-                <div class="hidden md:block">
-                    <span class="text-gray-400 text-xs tracking-tighter uppercase font-bold">Automation & Affiliate System</span>
-                </div>
+            <div class="flex items-center space-x-2">
+                <div class="bg-shopee text-white font-black px-2 py-0.5 rounded text-sm">SBOT</div>
+                <span class="text-gray-400 text-[10px] uppercase tracking-widest font-bold hidden md:block">Auto Affiliate System</span>
             </div>
-            <div class="flex items-center space-x-4 text-xs font-mono">
-                <div class="flex items-center">
-                    <span class="w-2 h-2 bg-green-500 rounded-full mr-2 status-dot"></span>
-                    <span class="text-gray-300">SERVER ONLINE</span>
-                </div>
-                <span class="text-gray-500">PORT: 2026</span>
+            <div id="connection-status" class="flex items-center space-x-2 text-[10px] font-mono">
+                <span class="w-2 h-2 bg-green-500 rounded-full status-pulse"></span>
+                <span class="text-green-500">CONNECTED</span>
             </div>
         </div>
     </header>
 
-    <!-- MAIN CONTENT -->
-    <main class="flex-grow p-4 md:p-8">
-        <div class="max-w-6xl mx-auto">
+    <main class="flex-grow p-4 md:p-6">
+        <div class="max-w-5xl mx-auto">
 
             <!-- 1. LOGIN SECTION -->
-            <div id="section-login" class="max-w-md mx-auto mt-12 bg-card p-8 rounded-2xl shadow-2xl border border-gray-700 transition-all">
-                <div class="text-center mb-8">
-                    <h2 class="text-2xl font-bold text-white">Chào mừng trở lại</h2>
-                    <p class="text-gray-400 text-sm mt-2">Vui lòng đăng nhập tài khoản Shopee</p>
+            <div id="section-login" class="max-w-md mx-auto mt-10 bg-card p-8 rounded-2xl shadow-2xl border border-gray-700">
+                <div class="text-center mb-6">
+                    <h2 class="text-xl font-bold text-white">Kết nối Shopee</h2>
+                    <p class="text-gray-400 text-xs mt-1">Hệ thống sẽ tự nạp Cookie nếu có</p>
                 </div>
-                
-                <div class="space-y-5">
+                <div class="space-y-4">
                     <div>
-                        <label class="block text-xs font-semibold text-gray-400 uppercase mb-2">Tên đăng nhập / Email</label>
-                        <input type="text" id="email" placeholder="Nhập username Shopee" 
-                               class="w-full bg-gray-900 border border-gray-600 rounded-lg p-3 text-white focus:border-shopee focus:ring-1 focus:ring-shopee focus:outline-none transition">
+                        <label class="block text-[10px] font-bold text-gray-500 uppercase mb-1">Tài khoản / Email</label>
+                        <input type="text" id="email" class="w-full bg-gray-900 border border-gray-600 rounded-lg p-3 text-sm text-white focus:border-shopee focus:outline-none transition">
                     </div>
                     <div>
-                        <label class="block text-xs font-semibold text-gray-400 uppercase mb-2">Mật khẩu</label>
-                        <input type="password" id="pass" placeholder="••••••••" 
-                               class="w-full bg-gray-900 border border-gray-600 rounded-lg p-3 text-white focus:border-shopee focus:ring-1 focus:ring-shopee focus:outline-none transition">
+                        <label class="block text-[10px] font-bold text-gray-500 uppercase mb-1">Mật khẩu</label>
+                        <input type="password" id="pass" class="w-full bg-gray-900 border border-gray-600 rounded-lg p-3 text-sm text-white focus:border-shopee focus:outline-none transition">
                     </div>
-                    <button onclick="handleLogin()" id="btn-login" 
-                            class="w-full bg-shopee hover:bg-orange-600 text-white font-bold py-3.5 rounded-lg shadow-lg transition transform active:scale-95 flex justify-center items-center">
-                        <span>ĐĂNG NHẬP HỆ THỐNG</span>
+                    <button onclick="doLogin()" id="btn-login" class="w-full bg-shopee hover:bg-orange-600 text-white font-bold py-3 rounded-lg shadow-lg transition active:scale-95">
+                        KẾT NỐI SERVER
                     </button>
-                    <p class="text-[10px] text-center text-gray-500 italic uppercase tracking-wider">
-                        Bot tự động xử lý Cookie & OTP qua Chromium ngầm
-                    </p>
                 </div>
             </div>
 
-            <!-- 2. DASHBOARD SECTION (Mặc định ẩn) -->
+            <!-- 2. DASHBOARD SECTION -->
             <div id="section-dashboard" class="hidden-section space-y-6">
                 
-                <!-- Stats Row -->
-                <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-                    <!-- Controls -->
-                    <div class="bg-card p-6 rounded-xl border border-gray-700 shadow-lg neon-border">
-                        <h3 class="text-sm font-bold mb-4 text-gray-400 uppercase">Bảng điều khiển</h3>
-                        <div class="flex space-x-3 mb-6">
-                            <button onclick="handleStart()" id="btn-start" class="flex-1 bg-green-600 hover:bg-green-500 text-white font-bold py-4 rounded-xl shadow-lg transition flex flex-col items-center">
-                                <span class="text-lg">▶</span>
-                                <span class="text-[10px]">CHẠY BOT</span>
-                            </button>
-                            <button onclick="handleStop()" id="btn-stop" disabled class="flex-1 bg-red-600 hover:bg-red-500 text-white font-bold py-4 rounded-xl shadow-lg transition opacity-50 cursor-not-allowed flex flex-col items-center">
-                                <span class="text-lg">⏹</span>
-                                <span class="text-[10px]">DỪNG</span>
-                            </button>
+                <!-- Controls Card -->
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div class="bg-card p-5 rounded-xl border border-gray-700 shadow-lg">
+                        <div class="flex justify-between items-start mb-4">
+                            <h3 class="text-xs font-bold text-gray-400 uppercase">Điều khiển</h3>
+                            <button onclick="doLogout()" class="text-[10px] bg-gray-700 hover:bg-red-900 text-gray-300 px-2 py-1 rounded transition">ĐĂNG XUẤT</button>
                         </div>
-                        <!-- Progress Area -->
-                        <div class="space-y-2">
-                            <div class="flex justify-between text-[10px] font-mono text-gray-400">
-                                <span id="current-task">Đang rảnh...</span>
-                                <span id="percent-text">0%</span>
+                        <div class="flex space-x-2 mb-4">
+                            <button onclick="doStart()" id="btn-start" class="flex-1 bg-green-600 hover:bg-green-500 text-white font-bold py-3 rounded-lg shadow-md transition">CHẠY</button>
+                            <button onclick="doStop()" id="btn-stop" disabled class="flex-1 bg-red-600 hover:bg-red-500 text-white font-bold py-3 rounded-lg shadow-md transition opacity-50">DỪNG</button>
+                        </div>
+                        <div class="space-y-1.5">
+                            <div class="flex justify-between text-[10px] font-mono">
+                                <span id="task-name" class="text-gray-400 truncate w-40">Đang chờ...</span>
+                                <span id="percent-val" class="text-shopee">0%</span>
                             </div>
-                            <div class="bg-gray-800 rounded-full h-2.5 w-full overflow-hidden">
-                                <div id="progress-bar" class="bg-shopee h-full w-0 transition-all duration-500 shadow-[0_0_8px_#ee4d2d]"></div>
+                            <div class="bg-gray-800 rounded-full h-1.5 overflow-hidden">
+                                <div id="progress-bar" class="bg-shopee h-full w-0 transition-all duration-500"></div>
                             </div>
                         </div>
                     </div>
 
-                    <!-- Counter -->
-                    <div class="bg-card p-6 rounded-xl border border-gray-700 shadow-lg flex items-center justify-center">
-                        <div class="text-center">
-                            <div class="text-gray-500 text-xs uppercase font-bold tracking-widest mb-2">Sản phẩm đã xử lý</div>
-                            <div class="text-6xl font-black text-white font-mono" id="stat-total">0</div>
-                            <div class="mt-2 inline-block px-2 py-1 bg-green-500/10 text-green-500 text-[10px] rounded border border-green-500/20 uppercase font-bold">
-                                Realtime Sync
-                            </div>
-                        </div>
+                    <div class="bg-card p-5 rounded-xl border border-gray-700 shadow-lg flex flex-col justify-center items-center">
+                        <span class="text-gray-500 text-[10px] uppercase font-bold">Đã xử lý</span>
+                        <span class="text-5xl font-black text-white my-1" id="stat-total">0</span>
+                        <span class="text-[9px] text-green-500 font-mono">LIVESYNC: OK</span>
                     </div>
 
-                    <!-- Config Status -->
-                    <div class="bg-card p-6 rounded-xl border border-gray-700 shadow-lg">
-                        <h3 class="text-sm font-bold mb-4 text-gray-400 uppercase">Cấu hình Bot</h3>
-                        <div class="space-y-3">
-                            <div class="flex justify-between text-xs">
-                                <span class="text-gray-500">Engine:</span>
-                                <span class="text-blue-400 font-bold">Puppeteer Stealth</span>
-                            </div>
-                            <div class="flex justify-between text-xs">
-                                <span class="text-gray-500">Kiến trúc:</span>
-                                <span class="text-yellow-500 font-bold">Chromium Alpine</span>
-                            </div>
-                            <div class="flex justify-between text-xs">
-                                <span class="text-gray-500">Render:</span>
-                                <span class="text-purple-400 font-bold">FFmpeg v6.0</span>
-                            </div>
-                            <div class="flex justify-between text-xs">
-                                <span class="text-gray-500">Anti-Spam:</span>
-                                <span class="text-green-500 font-bold">Đã kích hoạt</span>
-                            </div>
+                    <div class="bg-card p-5 rounded-xl border border-gray-700 shadow-lg">
+                        <h3 class="text-xs font-bold text-gray-400 uppercase mb-3">Thông số</h3>
+                        <div class="space-y-2 text-[11px]">
+                            <div class="flex justify-between"><span class="text-gray-500">Trạng thái:</span><span class="text-green-400 font-bold">Hoạt động</span></div>
+                            <div class="flex justify-between"><span class="text-gray-500">Môi trường:</span><span class="text-blue-400">Dcoder Alpine</span></div>
+                            <div class="flex justify-between"><span class="text-gray-500">Engine:</span><span class="text-yellow-500">Puppeteer-Core</span></div>
                         </div>
                     </div>
                 </div>
 
-                <!-- Terminal -->
+                <!-- Terminal Log -->
                 <div class="bg-terminal rounded-xl border border-gray-700 overflow-hidden shadow-2xl">
                     <div class="bg-gray-800/50 px-4 py-2 flex items-center justify-between border-b border-gray-700">
-                        <div class="flex items-center space-x-2">
-                            <div class="w-2.5 h-2.5 rounded-full bg-red-500"></div>
-                            <div class="w-2.5 h-2.5 rounded-full bg-yellow-500"></div>
-                            <div class="w-2.5 h-2.5 rounded-full bg-green-500"></div>
-                            <span class="ml-2 text-[10px] font-mono text-gray-400">root@shopeebot:~/logs</span>
-                        </div>
-                        <button onclick="document.getElementById('log-box').innerHTML=''" class="text-[10px] text-gray-500 hover:text-white transition">CLEAR</button>
+                        <span class="text-[10px] font-mono text-gray-400 tracking-widest">LOGS OUTPUT</span>
+                        <button onclick="document.getElementById('log-box').innerHTML=''" class="text-[9px] text-gray-500 hover:text-white underline">CLEAR</button>
                     </div>
-                    <div id="log-box" class="h-64 overflow-y-auto p-4 font-mono text-[11px] leading-relaxed space-y-1 scroll-smooth">
-                        <div class="text-gray-600 italic">>> Khởi tạo hệ thống thành công. Đang chờ đăng nhập...</div>
+                    <div id="log-box" class="h-60 overflow-y-auto p-4 font-mono text-[11px] space-y-1 leading-relaxed">
+                        <div class="text-gray-600">>> Hệ thống sẵn sàng.</div>
                     </div>
                 </div>
 
                 <!-- History Table -->
                 <div class="bg-card rounded-xl border border-gray-700 overflow-hidden shadow-lg">
-                    <div class="px-5 py-4 bg-gray-800/30 border-b border-gray-700">
-                        <h3 class="text-xs font-bold text-gray-300 uppercase tracking-widest">Lịch sử Reup 10 sản phẩm gần nhất</h3>
-                    </div>
-                    <div class="overflow-x-auto">
-                        <table class="w-full text-left text-sm">
-                            <thead class="bg-gray-900/50 text-[10px] uppercase text-gray-500 font-bold">
-                                <tr>
-                                    <th class="p-4">Thời gian</th>
-                                    <th class="p-4">Sản Phẩm</th>
-                                    <th class="p-4">ID</th>
-                                    <th class="p-4 text-center">Trạng thái</th>
-                                </tr>
-                            </thead>
-                            <tbody id="table-body" class="divide-y divide-gray-800">
-                                <!-- Dữ liệu sẽ load ở đây -->
-                            </tbody>
-                        </table>
-                    </div>
+                    <table class="w-full text-left text-xs">
+                        <thead class="bg-gray-900/50 text-gray-500 font-bold uppercase">
+                            <tr>
+                                <th class="p-4">Thời gian</th>
+                                <th class="p-4">Sản Phẩm</th>
+                                <th class="p-4 text-center">Kết quả</th>
+                            </tr>
+                        </thead>
+                        <tbody id="table-body" class="divide-y divide-gray-800">
+                            <!-- Data -->
+                        </tbody>
+                    </table>
                 </div>
 
             </div>
         </div>
     </main>
 
-    <!-- FOOTER -->
-    <footer class="p-6 text-center text-gray-600">
-        <div class="text-[10px] font-mono uppercase tracking-[0.2em]">
-            Shopee Automation v2.1.0 ● Built by TungGBeoo ● 2026
-        </div>
+    <footer class="p-6 text-center text-[10px] text-gray-600 font-mono uppercase tracking-[0.3em]">
+        © 2026 TungGBeoo ● Shopee Bot v2.2
     </footer>
 
-    <!-- SCRIPTS HOÀN CHỈNH -->
+    <!-- LOGIC SCRIPTS -->
     <script>
         const socket = io();
-        
-        // Element cache
         const el = {
-            loginSection: document.getElementById('section-login'),
-            dashboardSection: document.getElementById('section-dashboard'),
+            loginSect: document.getElementById('section-login'),
+            dashSect: document.getElementById('section-dashboard'),
             logBox: document.getElementById('log-box'),
             total: document.getElementById('stat-total'),
-            progBar: document.getElementById('progress-bar'),
-            progText: document.getElementById('percent-text'),
-            task: document.getElementById('current-task'),
+            prog: document.getElementById('progress-bar'),
+            progText: document.getElementById('percent-val'),
+            task: document.getElementById('task-name'),
             btnStart: document.getElementById('btn-start'),
             btnStop: document.getElementById('btn-stop'),
             tbody: document.getElementById('table-body')
         };
 
-        // 1. Xử lý Đăng nhập
-        function handleLogin() {
+        // 1. LOGIN / LOGOUT
+        function doLogin() {
             const email = document.getElementById('email').value;
             const pass = document.getElementById('pass').value;
+            if(!email || !pass) return alert('Nhập đủ tài khoản!');
             
-            if(!email || !pass) {
-                return alert('Vui lòng nhập đầy đủ Tài khoản và Mật khẩu!');
-            }
-
-            document.getElementById('btn-login').innerHTML = "<span>ĐANG KẾT NỐI...</span>";
-            document.getElementById('btn-login').disabled = true;
-            
+            document.getElementById('btn-login').innerText = "ĐANG KẾT NỐI...";
             socket.emit('cmd-login', { email, password: pass });
         }
 
         socket.on('login-success', () => {
-            el.loginSection.classList.add('hidden-section');
-            el.dashboardSection.classList.remove('hidden-section');
-            updateStats();
+            el.loginSect.classList.add('hidden-section');
+            el.dashSect.classList.remove('hidden-section');
+            fetchStats();
         });
 
         socket.on('login-fail', () => {
-            alert('Đăng nhập thất bại! Vui lòng kiểm tra lại tài khoản hoặc Log.');
-            document.getElementById('btn-login').innerHTML = "<span>ĐĂNG NHẬP HỆ THỐNG</span>";
-            document.getElementById('btn-login').disabled = false;
+            alert('Đăng nhập thất bại!');
+            document.getElementById('btn-login').innerText = "KẾT NỐI SERVER";
         });
 
-        // 2. Xử lý Điều khiển Bot
-        function handleStart() {
+        function doLogout() {
+            if(confirm('Bạn muốn đăng xuất và xóa Cookie?')) socket.emit('cmd-logout');
+        }
+
+        socket.on('logout-done', () => {
+            alert('Đã xóa Cookie. Trang sẽ tải lại.');
+            location.reload();
+        });
+
+        // 2. BOT CONTROLS
+        function doStart() {
             el.btnStart.disabled = true;
-            el.btnStart.classList.add('opacity-50', 'cursor-not-allowed');
+            el.btnStart.classList.add('opacity-50');
             el.btnStop.disabled = false;
-            el.btnStop.classList.remove('opacity-50', 'cursor-not-allowed');
+            el.btnStop.classList.remove('opacity-50');
             socket.emit('cmd-start');
         }
 
-        function handleStop() {
-            el.btnStop.innerText = "ĐANG DỪNG...";
+        function doStop() {
             socket.emit('cmd-stop');
+            el.btnStop.innerText = "DỪNG...";
         }
 
         socket.on('bot_finished', () => {
             el.btnStart.disabled = false;
-            el.btnStart.classList.remove('opacity-50', 'cursor-not-allowed');
+            el.btnStart.classList.remove('opacity-50');
             el.btnStop.disabled = true;
-            el.btnStop.classList.add('opacity-50', 'cursor-not-allowed');
-            el.btnStop.innerHTML = '<span class="text-lg">⏹</span><span class="text-[10px]">DỪNG</span>';
-            el.task.innerText = "Hoàn thành vòng lặp.";
-            el.progBar.style.width = '0%';
-            el.progText.innerText = '0%';
+            el.btnStop.classList.add('opacity-50');
+            el.btnStop.innerText = "DỪNG";
+            el.task.innerText = "Đã xong.";
+            el.prog.style.width = '0%';
         });
 
-        // 3. Xử lý Log & Progress
-        function appendLog(type, msg, time = new Date().toLocaleTimeString()) {
+        // 3. LOGS & PROGRESS
+        socket.on('log', (data) => {
             const div = document.createElement('div');
-            const colors = {
-                error: 'text-red-500 font-bold',
-                success: 'text-green-400',
-                warning: 'text-yellow-400',
-                info: 'text-blue-400'
-            };
-            
-            div.innerHTML = `
-                <span class="text-gray-600 mr-2">[${time}]</span>
-                <span class="${colors[type] || 'text-white'}">>> ${msg}</span>
-            `;
+            const colors = { error: 'text-red-500', success: 'text-green-400', warning: 'text-yellow-400', info: 'text-blue-300' };
+            div.innerHTML = `<span class="text-gray-600 mr-2">[${data.time}]</span><span class="${colors[data.type] || 'text-white'}">>> ${data.msg}</span>`;
             el.logBox.appendChild(div);
             el.logBox.scrollTop = el.logBox.scrollHeight;
-        }
-
-        socket.on('log', (data) => appendLog(data.type, data.msg, data.time));
+        });
 
         socket.on('progress_update', (data) => {
             if(data.status) el.task.innerText = data.status;
             if(data.percent !== undefined) {
-                el.progBar.style.width = `${data.percent}%`;
-                el.progText.innerText = `${data.percent}%`;
+                el.prog.style.width = data.percent + '%';
+                el.progText.innerText = data.percent + '%';
             }
         });
 
-        // 4. Cập nhật Thống kê
-        socket.on('update_stats', updateStats);
+        // 4. STATS
+        socket.on('update_stats', fetchStats);
 
-        async function updateStats() {
+        async function fetchStats() {
             try {
                 const res = await fetch('/api/stats');
                 const data = await res.json();
-                
                 el.total.innerText = data.total;
-                el.tbody.innerHTML = '';
-                
-                data.history.forEach(item => {
-                    el.tbody.innerHTML += `
-                        <tr class="hover:bg-gray-800/50 transition border-b border-gray-800/50">
-                            <td class="p-4 text-gray-500 text-[10px] font-mono">${item.date}</td>
-                            <td class="p-4 text-gray-200 font-semibold">${item.name}</td>
-                            <td class="p-4 text-gray-500 font-mono text-[10px]">${item.id}</td>
-                            <td class="p-4 text-center">
-                                <span class="bg-green-500/10 text-green-500 text-[9px] px-2 py-1 rounded border border-green-500/20 font-bold uppercase">SUCCESS</span>
-                            </td>
-                        </tr>
-                    `;
-                });
-            } catch (err) {
-                console.error("Lỗi fetch stats:", err);
-            }
+                el.tbody.innerHTML = data.history.map(item => `
+                    <tr class="hover:bg-gray-800/40 border-b border-gray-800/50 transition">
+                        <td class="p-4 text-gray-500 text-[10px] font-mono">${item.date}</td>
+                        <td class="p-4 text-gray-200 font-medium">${item.name}</td>
+                        <td class="p-4 text-center"><span class="bg-green-500/10 text-green-500 text-[9px] px-2 py-0.5 rounded border border-green-500/20 font-bold uppercase">OK</span></td>
+                    </tr>
+                `).join('');
+            } catch (e) { console.error("Stats Error:", e); }
         }
-        
-        // Tự động load stats khi vào trang
-        updateStats();
 
+        // Tự động load stats
+        fetchStats();
     </script>
 </body>
 </html>
