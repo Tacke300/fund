@@ -4,7 +4,7 @@ const socketIo = require('socket.io');
 const bodyParser = require('body-parser');
 const fs = require('fs-extra');
 const path = require('path');
-const botEngine = require('./bot');
+const botEngine = require('./botsp');
 
 const app = express();
 const server = http.createServer(app);
