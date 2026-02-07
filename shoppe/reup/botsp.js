@@ -73,7 +73,7 @@ async function loginShopee(creds, io) {
 
         log(io, 'info', 'Khởi tạo trình duyệt...');
         browser = await puppeteer.launch({
-            headless: false,
+            headless: true,
             args: ['--no-sandbox', '--disable-setuid-sandbox'],
             userDataDir: './user_data'
         });
