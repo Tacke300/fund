@@ -1,4 +1,3 @@
-// seversp.js
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
@@ -18,30 +17,19 @@ if (!fs.existsSync(DB_PATH)) fs.writeJsonSync(DB_PATH, []);
 
 app.use(express.static(__dirname));
 
-app.get('/api/stats', async (req, res) => {
-    try {
-        const data = await fs.readJson(DB_PATH);
-        res.json({ total: data.length, history: data.slice(-10).reverse() });
-    } catch { res.json({ total: 0, history: [] }); }
-});
-
 io.on('connection', (socket) => {
-    console.log('UI Connected:', socket.id);
-
     socket.on('cmd-login', async (creds) => {
         const ok = await botEngine.loginShopee(creds, io);
         socket.emit(ok ? 'login-success' : 'login-fail');
     });
 
-    socket.on('cmd-start', () => {
-        botEngine.startLoop(io, DB_PATH);
+    socket.on('cmd-logout', async () => {
+        const ok = await botEngine.logoutShopee(io);
+        socket.emit('logout-done');
     });
 
-    socket.on('cmd-stop', () => {
-        botEngine.stopLoop(io);
-    });
+    socket.on('cmd-start', () => botEngine.startLoop(io, DB_PATH));
+    socket.on('cmd-stop', () => botEngine.stopLoop(io));
 });
 
-server.listen(PORT, '0.0.0.0', () => {
-    console.log(`Server: http://localhost:${PORT}`);
-});
+server.listen(PORT, '0.0.0.0', () => console.log(`Server: http://localhost:${PORT}`));
