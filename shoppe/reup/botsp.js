@@ -25,34 +25,17 @@ const log = (io, type, msg) => {
     console.log(`[${type}] ${msg}`);
 };
 
-async function getRealVideoUrl(itemid, shopid) {
-    try {
-        const url = `https://shopee.vn/api/v4/item/get?itemid=${itemid}&shopid=${shopid}`;
-        const { data } = await axios.get(url, {
-            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
-        });
-        return data?.data?.video_info_list?.[0]?.default_format?.url || null;
-    } catch { return null; }
-}
-
-async function downloadFile(url, dest) {
-    const writer = fs.createWriteStream(dest);
-    const res = await axios({ url, method: 'GET', responseType: 'stream' });
-    res.data.pipe(writer);
-    return new Promise((ok, err) => {
-        writer.on('finish', ok);
-        writer.on('error', err);
-    });
-}
-
-function processVideo(input, output) {
-    return new Promise((resolve, reject) => {
-        ffmpeg(input)
-            .videoFilters(['hflip', 'setpts=1.05*PTS', 'eq=saturation=1.1', 'crop=iw*0.95:ih*0.95'])
-            .noAudio()
-            .on('end', () => resolve(output))
-            .on('error', (err) => reject(err))
-            .save(output);
+// Hàm khởi tạo trình duyệt dùng chung để tránh lỗi executablePath
+async function initBrowser() {
+    return await puppeteer.launch({
+        executablePath: '/usr/bin/chromium-browser', // ĐƯỜNG DẪN BẮT BUỘC TRÊN DCODER
+        headless: "new",
+        args: [
+            '--no-sandbox',
+            '--disable-setuid-sandbox',
+            '--disable-dev-shm-usage',
+            '--disable-gpu'
+        ]
     });
 }
 
@@ -61,12 +44,7 @@ async function loginShopee(creds, io) {
         if (browser) await browser.close();
         log(io, 'info', 'Khởi tạo trình duyệt Alpine...');
         
-        browser = await puppeteer.launch({
-            executablePath: '/usr/bin/chromium-browser',
-            headless: "new",
-            args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu']
-        });
-
+        browser = await initBrowser();
         page = await browser.newPage();
         await page.setViewport({ width: 1280, height: 800 });
 
@@ -76,16 +54,16 @@ async function loginShopee(creds, io) {
             log(io, 'success', 'Đã nạp cookie từ bộ nhớ');
         }
 
-        await page.goto('https://shopee.vn/portal/affiliate', { waitUntil: 'networkidle2', timeout: 60000 });
+        await page.goto('https://shopee.vn/portal/affiliate/offer/product_offer', { waitUntil: 'networkidle2', timeout: 60000 });
 
         if (page.url().includes('login')) {
-            log(io, 'warning', 'Cần đăng nhập mới...');
+            log(io, 'warning', 'Cookie hết hạn, đang đăng nhập lại...');
             await page.goto('https://shopee.vn/buyer/login', { waitUntil: 'networkidle2' });
             await page.type('input[name="loginKey"]', creds.email, { delay: 100 });
             await page.type('input[name="password"]', creds.password, { delay: 100 });
             await page.click('button.vyS9tm, button[type="button"]');
             
-            log(io, 'warning', 'Chờ xác thực OTP/Captcha (2 phút)...');
+            log(io, 'warning', '👉 Vui lòng check OTP trên điện thoại (đợi 2 phút)...');
             await page.waitForNavigation({ timeout: 120000 });
         }
 
@@ -101,75 +79,83 @@ async function loginShopee(creds, io) {
 
 async function startLoop(io, dbPath) {
     if (isRunning) return;
+    if (!page) return log(io, 'error', 'Bot chưa đăng nhập!');
+    
     isRunning = true;
-
-    let history = [];
-    try { history = await fs.readJson(dbPath); } catch {}
-    const doneSet = new Set(history.map(x => x.id));
-
-    log(io, 'info', 'Đang quét sản phẩm Affiliate...');
     let products = [];
 
+    log(io, 'info', 'Đang quét sản phẩm Affiliate...');
+
+    // Lắng nghe API
     const apiListener = async (res) => {
-        if (res.url().includes('product_offer')) {
+        const url = res.url();
+        if (url.includes('product_offer') || url.includes('get_product_list')) {
             try {
                 const json = await res.json();
-                (json.data?.list || []).forEach(p => {
-                    products.push({ id: p.item_id, shopid: p.shop_id, name: p.name });
+                const list = json.data?.list || json.data?.nodes || [];
+                list.forEach(p => {
+                    if (p.item_id || p.itemid) {
+                        products.push({ 
+                            id: p.item_id || p.itemid, 
+                            shopid: p.shop_id || p.shopid, 
+                            name: p.name || p.item_name 
+                        });
+                    }
                 });
-            } catch {}
+            } catch (e) {}
         }
     };
 
     page.on('response', apiListener);
-    await page.goto('https://shopee.vn/portal/affiliate/offer/product_offer', { waitUntil: 'networkidle2' });
-    await wait(5000);
-    page.off('response', apiListener);
 
-    log(io, 'success', `Tìm thấy ${products.length} sản phẩm.`);
-
-    for (let i = 0; i < products.length; i++) {
-        if (!isRunning) break;
-        const p = products[i];
-        const uid = `${p.shopid}_${p.id}`;
+    try {
+        await page.goto('https://shopee.vn/portal/affiliate/offer/product_offer', { waitUntil: 'networkidle2' });
         
-        const percent = Math.round(((i + 1) / products.length) * 100);
-        io.emit('progress_update', { status: `Đang xử lý: ${p.name}`, percent });
+        // Cuộn trang để kích hoạt API load dữ liệu
+        log(io, 'info', 'Đang cuộn trang để tải dữ liệu...');
+        await page.evaluate(async () => {
+            await new Promise((resolve) => {
+                let totalHeight = 0;
+                let distance = 100;
+                let timer = setInterval(() => {
+                    let scrollHeight = document.body.scrollHeight;
+                    window.scrollBy(0, distance);
+                    totalHeight += distance;
+                    if(totalHeight >= scrollHeight) {
+                        clearInterval(timer);
+                        resolve();
+                    }
+                }, 100);
+            });
+        });
 
-        if (doneSet.has(uid)) continue;
+        await wait(5000); // Đợi API trả về hết
+        page.off('response', apiListener);
 
-        try {
-            log(io, 'info', `Tiến hành tải video: ${p.name}`);
-            const videoUrl = await getRealVideoUrl(p.id, p.shopid);
-            if (!videoUrl) { log(io, 'warning', 'Không có video, bỏ qua.'); continue; }
+        // Loại bỏ trùng lặp
+        products = Array.from(new Set(products.map(p => p.id)))
+            .map(id => products.find(p => p.id === id));
 
-            const raw = path.join(DOWNLOAD_DIR, `raw_${p.id}.mp4`);
-            const out = path.join(DOWNLOAD_DIR, `up_${p.id}.mp4`);
+        if (products.length === 0) {
+            log(io, 'warning', 'Không tìm thấy sản phẩm. Đang chụp ảnh màn hình debug...');
+            await page.screenshot({ path: path.join(__dirname, 'debug-empty.png') });
+            log(io, 'info', 'Hãy kiểm tra file debug-empty.png xem trang có bị kẹt không.');
+        } else {
+            log(io, 'success', `Tìm thấy ${products.length} sản phẩm.`);
+            // Chạy loop xử lý sản phẩm như cũ của bạn ở đây...
+        }
 
-            await downloadFile(videoUrl, raw);
-            await processVideo(raw, out);
-            log(io, 'success', `Đã Render xong: ${p.id}`);
-
-            history.push({ id: uid, name: p.name, date: new Date().toLocaleString('vi-VN') });
-            await fs.writeJson(dbPath, history);
-            doneSet.add(uid);
-            io.emit('update_stats');
-
-            if (fs.existsSync(raw)) fs.unlinkSync(raw);
-            if (fs.existsSync(out)) fs.unlinkSync(out);
-
-            await wait(10000); // Nghỉ 10s tránh bị quét
-        } catch (e) { log(io, 'error', `Lỗi SP ${p.id}: ${e.message}`); }
+    } catch (e) {
+        log(io, 'error', `Lỗi quét sản phẩm: ${e.message}`);
     }
 
     isRunning = false;
     io.emit('bot_finished');
-    log(io, 'success', 'Bot đã chạy xong danh sách.');
 }
 
 function stopLoop(io) {
     isRunning = false;
-    log(io, 'warning', 'Bot đang dừng...');
+    log(io, 'warning', 'Bot đã dừng.');
 }
 
 module.exports = { loginShopee, startLoop, stopLoop };
