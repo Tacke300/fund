@@ -13,27 +13,23 @@ const DOWNLOAD_DIR = path.join(__dirname, 'downloads');
 fs.ensureDirSync(DOWNLOAD_DIR);
 fs.ensureDirSync(path.join(__dirname, 'data'));
 
-let browser = null;
-let page = null;
-let isRunning = false;
-
-const wait = (ms) => new Promise(r => setTimeout(r, ms));
+let browser = null, page = null, isRunning = false;
 
 const log = (io, type, msg) => {
     const time = new Date().toLocaleTimeString('vi-VN');
     if (io) io.emit('log', { type, msg, time });
-    console.log(`[${type.toUpperCase()}] [${time}] ${msg}`);
+    console.log(`[${type.toUpperCase()}] ${msg}`);
 };
 
 async function loginShopee(creds, io) {
     try {
         if (browser) await browser.close();
-        log(io, 'info', 'Khởi tạo trình duyệt Alpine (Path: /usr/bin/chromium-browser)...');
+        log(io, 'info', 'Đang mở Chromium (Vui lòng đợi)...');
         
         browser = await puppeteer.launch({
-            executablePath: '/usr/bin/chromium-browser', // CỐ ĐỊNH ĐƯỜNG DẪN
+            executablePath: '/usr/bin/chromium-browser',
             headless: "new",
-            args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
+            args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu']
         });
 
         page = await browser.newPage();
@@ -42,103 +38,87 @@ async function loginShopee(creds, io) {
         if (fs.existsSync(COOKIE_PATH)) {
             const cookies = await fs.readJson(COOKIE_PATH);
             await page.setCookie(...cookies);
-            log(io, 'success', 'Đã nạp cookie.');
+            log(io, 'success', 'Đã nạp Cookie cũ.');
         }
 
-        log(io, 'info', 'Đang kiểm tra trạng thái đăng nhập...');
-        await page.goto('https://shopee.vn/portal/affiliate/offer/product_offer', { waitUntil: 'networkidle2', timeout: 60000 });
+        // Tối ưu tốc độ: dùng 'domcontentloaded' thay vì 'networkidle2'
+        await page.goto('https://shopee.vn/portal/affiliate/offer/product_offer', { waitUntil: 'domcontentloaded' });
+        await new Promise(r => setTimeout(r, 3000));
 
-        const currentUrl = page.url();
-        const title = await page.title();
-        log(io, 'info', `URL hiện tại: ${currentUrl}`);
-        log(io, 'info', `Tiêu đề trang: ${title}`);
-
-        if (currentUrl.includes('login') || title.includes('Login') || title.includes('Đăng nhập')) {
-            log(io, 'warning', 'Trạng thái: CHƯA ĐĂNG NHẬP. Đang thử điền Form...');
-            await page.goto('https://shopee.vn/buyer/login', { waitUntil: 'networkidle2' });
-            await page.type('input[name="loginKey"]', creds.email, { delay: 100 });
-            await page.type('input[name="password"]', creds.password, { delay: 100 });
+        if (page.url().includes('login')) {
+            log(io, 'warning', 'Cookie hết hạn. Đang thử đăng nhập bằng User/Pass...');
+            await page.goto('https://shopee.vn/buyer/login');
+            await page.type('input[name="loginKey"]', creds.email, { delay: 50 });
+            await page.type('input[name="password"]', creds.password, { delay: 50 });
             await page.click('button.vyS9tm, button[type="button"]');
-            
-            log(io, 'warning', '👉 Đợi bạn giải mã OTP/Captcha trên App (120s)...');
+            log(io, 'warning', '👉 Hãy xác thực OTP trên điện thoại nếu có (2 phút)...');
             await page.waitForNavigation({ timeout: 120000 });
-            
-            const cookiesAfter = await page.cookies();
-            await fs.writeJson(COOKIE_PATH, cookiesAfter);
-            log(io, 'success', 'Đã cập nhật Cookie mới.');
-        } else {
-            log(io, 'success', 'Trạng thái: ĐÃ ĐĂNG NHẬP.');
         }
 
+        const newCookies = await page.cookies();
+        await fs.writeJson(COOKIE_PATH, newCookies);
+        log(io, 'success', 'Sẵn sàng hoạt động!');
         return true;
     } catch (e) {
-        log(io, 'error', `Lỗi login: ${e.message}`);
+        log(io, 'error', `Khởi tạo thất bại: ${e.message}`);
         return false;
     }
 }
 
+async function logoutShopee(io) {
+    try {
+        if (fs.existsSync(COOKIE_PATH)) fs.unlinkSync(COOKIE_PATH);
+        if (browser) await browser.close();
+        browser = null; page = null;
+        log(io, 'warning', 'Đã đăng xuất và xóa Cookie.');
+        return true;
+    } catch (e) { return false; }
+}
+
 async function startLoop(io, dbPath) {
     if (isRunning) return;
-    if (!page) return log(io, 'error', 'Lỗi: Page rỗng, hãy Login trước!');
-    
+    if (!page) return log(io, 'error', 'Bot chưa được khởi tạo. Hãy nhấn Kết nối trước!');
+
     isRunning = true;
     let products = [];
 
-    log(io, 'info', 'Bắt đầu quét dữ liệu Affiliate...');
-
-    // Lắng nghe API ngầm
     const apiListener = async (res) => {
-        const url = res.url();
-        if (url.includes('product_offer') || url.includes('get_product_list')) {
+        if (res.url().includes('product_offer') || res.url().includes('get_product_list')) {
             try {
                 const json = await res.json();
                 const list = json.data?.list || json.data?.nodes || [];
-                list.forEach(p => {
-                    products.push({ id: p.item_id || p.itemid, shopid: p.shop_id || p.shopid, name: p.name });
-                });
-                log(io, 'info', `Hệ thống vừa bắt được API: ${list.length} SP`);
+                list.forEach(p => products.push({ id: p.item_id || p.itemid, shopid: p.shop_id || p.shopid, name: p.name }));
             } catch (e) {}
         }
     };
 
     page.on('response', apiListener);
+    log(io, 'info', 'Đang quét danh sách sản phẩm...');
 
     try {
-        await page.goto('https://shopee.vn/portal/affiliate/offer/product_offer', { waitUntil: 'networkidle2' });
-        
-        // KIỂM TRA XEM CÓ BỊ CHẶN KHÔNG
-        const pageTitle = await page.title();
-        const pageUrl = page.url();
-        log(io, 'info', `DEBUG - URL: ${pageUrl}`);
-        log(io, 'info', `DEBUG - Title: ${pageTitle}`);
+        await page.goto('https://shopee.vn/portal/affiliate/offer/product_offer', { waitUntil: 'domcontentloaded' });
+        await new Promise(r => setTimeout(r, 5000));
 
-        // Đọc thử xem có chữ "Captcha" hay "Verification" trong HTML không
-        const bodyText = await page.evaluate(() => document.body.innerText);
-        if (bodyText.includes('CAPTCHA') || bodyText.includes('xác minh')) {
-            log(io, 'error', 'DỪNG: Shopee đang hiện CAPTCHA thanh trượt. Bot không thể quét.');
-        } else if (pageUrl.includes('login')) {
-            log(io, 'error', 'DỪNG: Bị đá ra trang Login. Cookie đã hỏng.');
+        // Kiểm tra lỗi tại sao 0 sản phẩm
+        const content = await page.content();
+        const url = page.url();
+
+        if (url.includes('login')) {
+            log(io, 'error', 'LỖI: Bị đá ra trang đăng nhập. Hãy nhấn Đăng xuất rồi Kết nối lại.');
+        } else if (content.includes('punish') || content.includes('captcha')) {
+            log(io, 'error', 'LỖI: Shopee chặn Robot (Captcha). Hãy tạm dừng bot và thử lại sau.');
+        } else if (products.length === 0) {
+            log(io, 'warning', 'KHÔNG CÓ SẢN PHẨM: Tài khoản này có thể chưa đăng ký Shopee Affiliate hoặc danh sách trống.');
         } else {
-            log(io, 'info', 'Đang cuộn trang để kích hoạt load dữ liệu...');
-            await page.evaluate(() => window.scrollBy(0, 800));
-            await wait(7000); 
+            log(io, 'success', `Bắt đầu xử lý ${products.length} sản phẩm...`);
+            // Logic xử lý video giữ nguyên...
         }
-
-        page.off('response', apiListener);
-
-        if (products.length === 0) {
-            log(io, 'warning', 'KẾT QUẢ: 0 sản phẩm. Nguyên nhân: Trang trống hoặc bị Shopee chặn truy cập API.');
-        } else {
-            log(io, 'success', `TỔNG CỘNG: Tìm thấy ${products.length} sản phẩm.`);
-            // Chạy loop render video của bạn...
-        }
-
     } catch (e) {
-        log(io, 'error', `Lỗi khi quét: ${e.message}`);
+        log(io, 'error', `Lỗi quét: ${e.message}`);
     }
 
     isRunning = false;
     io.emit('bot_finished');
 }
 
-module.exports = { loginShopee, startLoop, stopLoop: (io) => { isRunning = false; log(io, 'warning', 'Đã dừng bot.'); } };
+module.exports = { loginShopee, logoutShopee, startLoop, stopLoop: (io) => { isRunning = false; log(io, 'warning', 'Đã dừng.'); } };
