@@ -99,7 +99,7 @@ async function syncBinanceServerTime() {
 
 async function callSignedBinanceAPI(fullEndpointPath, params = {}) {
     const timestamp = Date.now() + binanceServerTimeOffset;
-    const queryString = new URLSearchParams({ ...params, timestamp, recvWindow: 5000 }).toString();
+    const queryString = new URLSearchParams({ ...params, timestamp, recvWindow: 60000 }).toString();
     const signature = crypto.createHmac('sha256', binanceApiSecret).update(queryString).digest('hex');
     const url = `${fullEndpointPath}?${queryString}&signature=${signature}`;
     const headers = { 'X-MBX-APIKEY': binanceApiKey };
