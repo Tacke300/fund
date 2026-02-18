@@ -1,7 +1,12 @@
-const express = require('express');
-const { chromium } = require('playwright');
-const path = require('path');
-const axios = require('axios');
+import express from 'express';
+import { chromium } from 'playwright';
+import path from 'path';
+import axios from 'axios';
+import { fileURLToPath } from 'url';
+
+// Xử lý __dirname cho ES Module
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const app = express();
 const port = 9999;
@@ -28,10 +33,9 @@ async function getAnalysis(symbol) {
         
         const side = change >= 0 ? "LONG 🟢" : "SHORT 🔴";
         const entry = price;
-        const tp = side.includes("LONG") ? price * 1.03 : price * 0.97; // Mục tiêu 3%
-        const sl = side.includes("LONG") ? price * 0.98 : price * 1.02; // Cắt lỗ 2%
+        const tp = side.includes("LONG") ? price * 1.03 : price * 0.97;
+        const sl = side.includes("LONG") ? price * 0.98 : price * 1.02;
 
-        // Link Chart 4H từ TradingView (Dạng Snapshot)
         const chartUrl = `https://s3.tradingview.com/external-embedding/embed-widget-mini-symbol-overview.html?symbol=BINANCE%3A${symbol}USDT&width=400&height=400&dateRange=12M&colorTheme=dark&trendLineColor=rgb%2841%2C%2098%2C%20255%29&underLineColor=rgba%2841%2C%2098%2C%20255%2C%200.3%29&underLineBottomColor=rgba%2841%2C%2098%2C%20255%2C%200%29&isTransparent=false&autosize=false&locale=vi_VN`;
 
         return {
@@ -89,6 +93,7 @@ async function postTask() {
         const data = await getAnalysis(coin);
         if (!data) return;
 
+        // headless: true để chạy ẩn trên terminal
         browser = await chromium.launchPersistentContext(userDataDir, { headless: true, args: ['--no-sandbox'] });
         const page = await browser.newPage();
         await page.goto('https://www.binance.com/vi/square', { timeout: 60000 });
@@ -105,11 +110,9 @@ async function postTask() {
             `#${coin} #TradingSignal #TechnicalAnalysis\n` +
             `$${coin} $BTC $BNB`;
 
-        // Nhập nội dung
         await page.fill(editorSelector, content);
         await page.waitForTimeout(2000);
 
-        // Đăng bài
         await page.click('button:has-text("Đăng")');
         await page.waitForTimeout(5000);
 
@@ -117,6 +120,8 @@ async function postTask() {
         botState.lastRun = new Date().toLocaleTimeString();
         botState.history.unshift({ coin, time: botState.lastRun, status: 'Thành công', views: 0, viewDisplay: '0' });
         if (botState.history.length > 100) botState.history.pop();
+
+        console.log(`[${botState.lastRun}] Đã đăng bài $${coin}`);
 
     } catch (err) {
         console.error("Lỗi đăng bài:", err.message);
@@ -132,8 +137,8 @@ app.get('/start', (req, res) => {
     if (!botState.isRunning) {
         botState.isRunning = true;
         postTask();
-        botState.timer = setInterval(postTask, 5 * 60 * 1000); // 5 phút
-        botState.viewTimer = setInterval(updateViews, 20 * 60 * 1000); // 20 phút cập nhật view
+        botState.timer = setInterval(postTask, 5 * 60 * 1000);
+        botState.viewTimer = setInterval(updateViews, 20 * 60 * 1000);
     }
     res.json({ status: 'ok' });
 });
@@ -144,4 +149,4 @@ app.get('/stop', (req, res) => {
     res.json({ status: 'ok' });
 });
 
-app.listen(port, () => console.log(`Server running at http://localhost:${port}`));
+app.listen(port, () => console.log(`🚀 Squad Bot running at http://localhost:${port}`));
