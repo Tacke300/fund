@@ -26,58 +26,114 @@ function logStep(message) {
     console.log(`[${new Date().toLocaleTimeString()}] ➡️ ${message}`);
 }
 
-// --- LẤY COIN FUTURES ---
-async function refreshCoinQueue() {
-    try {
-        logStep("📊 Lấy danh sách Futures (Sắp xếp giá Cao -> Thấp)...");
-        const res = await axios.get('https://fapi.binance.com/fapi/v1/ticker/price');
-        coinQueue = res.data
-            .filter(c => c.symbol.endsWith('USDT'))
-            .map(c => ({ symbol: c.symbol.replace('USDT', ''), price: parseFloat(c.price) }))
-            .sort((a, b) => b.price - a.price);
-        logStep(`✅ Đã nạp ${coinQueue.length} coin.`);
-    } catch (e) {
-        logStep("❌ Lỗi API: " + e.message);
-    }
+// --- HÀM LÀM TRÒN GIÁ THÔNG MINH ---
+function smartRound(price) {
+    const p = parseFloat(price);
+    if (p > 1000) return Math.round(p / 10) * 10;
+    if (p > 10) return Math.round(p * 10) / 10;
+    if (p > 1) return Math.round(p * 100) / 100;
+    return Math.round(p * 10000) / 10000;
 }
 
-// --- TẠO NỘI DUNG PHÂN TÁCH DÒNG ---
-function generateFinalContent(coin, price, change) {
-    const entry = parseFloat(price);
-    const isUp = parseFloat(change) >= 0;
-    const tp1 = isUp ? entry * 1.03 : entry * 0.97;
-    const tp2 = isUp ? entry * 1.08 : entry * 0.92;
-    const sl = isUp ? entry * 0.95 : entry * 1.05;
+// --- KHO NỘI DUNG KHỔNG LỒ (50 MỞ - 50 THÂN - 50 KẾT) ---
+const intros = [
+    "Điểm tin nhanh về biến động của $COIN.", "Anh em đã thấy cú move này của $COIN chưa?", "Nhìn lại chart $COIN hôm nay có nhiều điều thú vị.",
+    "Cập nhật trạng thái mới nhất cho mã $COIN.", "Dòng tiền đang đổ dồn sự chú ý vào $COIN.", "Phân tích nhanh vị thế của $COIN lúc này.",
+    "Liệu $COIN có chuẩn bị cho một cú bứt phá?", "Góc nhìn cá nhân về hướng đi của $COIN.", "Sức nóng của $COIN trên Square vẫn chưa hạ nhiệt.",
+    "Đừng bỏ qua diễn biến hiện tại của $COIN.", "Check nhanh cấu trúc nến của $COIN anh em nhé.", "Vùng giá này của $COIN thực sự rất đáng xem xét.",
+    "Có nên vào hàng $COIN lúc này không?", "Mọi con mắt đang đổ dồn về biến động của $COIN.", "Tín hiệu từ $COIN đang dần rõ nét hơn.",
+    "Phân tích nhanh khung thời gian ngắn hạn của $COIN.", "Nhận định về khả năng hồi phục của $COIN.", "Góc trading: $COIN đang ở vùng nhạy cảm.",
+    "Cơ hội nào cho trader với mã $COIN hôm nay?", "Dữ liệu on-chain của $COIN đang có dấu hiệu lạ.", "Báo động đỏ/xanh cho các vị thế $COIN.",
+    "Chiến thuật giao dịch $COIN hiệu quả lúc này.", "Bản tin Crypto: Tâm điểm gọi tên $COIN.", "Sóng $COIN đang cuộn trào, anh em sẵn sàng chưa?",
+    "Cùng soi qua các mốc quan trọng của $COIN.", "Thị trường đang định giá lại $COIN khá gắt.", "Sự im lặng của $COIN có thể là dấu hiệu bão tố.",
+    "Phá vỡ hay điều chỉnh? Câu hỏi cho $COIN.", "Bức tranh toàn cảnh về mã $COIN trong phiên này.", "Kèo nhanh cho anh em quan tâm đến $COIN.",
+    "Vốn hóa $COIN đang có sự dịch chuyển đáng kể.", "Khối lượng giao dịch $COIN tăng vọt bất ngờ.", "Điểm lại các sự kiện tác động đến giá $COIN.",
+    "Dự báo xu hướng tiếp theo của đồng $COIN.", "Anh em holder $COIN chắc đang rất hồi hộp.", "Cú lội ngược dòng ngoạn mục từ $COIN.",
+    "Vùng kháng cự của $COIN liệu có bị xuyên thủng?", "Hỗ trợ của $COIN đang được kiểm chứng gắt gao.", "Tâm lý thị trường đối với $COIN đang rất tốt.",
+    "Phân tích dòng tiền (Flow) chảy vào $COIN.", "Tín hiệu phân kỳ xuất hiện trên chart $COIN.", "Sức mạnh tương đối của $COIN so với phần còn lại.",
+    "Cập nhật kịch bản giao dịch cho $COIN.", "Đánh giá lực mua/bán hiện tại của $COIN.", "Những lưu ý quan trọng khi trade $COIN lúc này.",
+    "Nhịp đập thị trường: Sức mạnh của $COIN.", "Đừng để bị 'giũ hàng' khỏi mã $COIN quá sớm.", "Vùng entry của $COIN đang hiện ra rất rõ.",
+    "Phân tích sâu về lực cầu tại vùng giá $COIN.", "Kế hoạch săn lợi nhuận cùng với $COIN."
+];
 
-    // Chọn ngẫu nhiên 2 coin khác từ hàng đợi để làm tag
+const bodies = [
+    "Giá hiện tại đang neo đậu tại mức ổn định.", "Cấu trúc nến cho thấy phe bò đang cố gắng kiểm soát.", "Áp lực bán dường như đã cạn kiệt ở vùng này.",
+    "Xu hướng tăng được củng cố bởi khối lượng giao dịch.", "Mô hình hai đáy đang dần hình thành trên đồ thị.", "Giá đang tích lũy trong một biên độ hẹp.",
+    "Sự thay đổi CHANGE% cho thấy biên độ dao động lớn.", "Các chỉ báo kỹ thuật đang tiến sát vùng quá mua.", "Kháng cự ngắn hạn đang ngăn cản đà tăng trưởng.",
+    "Lực cầu bắt đáy xuất hiện mạnh mẽ khi giá giảm.", "Thị trường đang chờ đợi một cú hích từ tin tức.", "Sự dịch chuyển của dòng tiền đang ưu ái mã này.",
+    "Dấu hiệu rút râu cho thấy lực từ chối giá phía dưới.", "Các đường trung bình động đang bắt đầu cắt nhau.", "Chỉ số RSI cho thấy vẫn còn dư địa để tăng.",
+    "Mô hình nến nhấn chìm xuất hiện ở khung H4.", "Sự phân kỳ kín đang báo hiệu tiếp diễn xu hướng.", "Vùng giá này đóng vai trò là hỗ trợ tâm lý quan trọng.",
+    "Cần chú ý đến các lệnh mua lớn vừa được thực hiện.", "Giá đang bám sát dải trên của Bollinger Bands.", "Một cú breakout giả có thể vừa mới xảy ra.",
+    "Thị trường phái sinh đang có OI tăng đột biến.", "Tỷ lệ Long/Short đang nghiêng hẳn về một phía.", "Hành động giá cho thấy sự lưỡng lự của các trader.",
+    "Vùng thanh khoản phía trên là mục tiêu tiếp theo.", "Giá đang kiểm tra lại (retest) vùng phá vỡ trước đó.", "Lực bán chủ động đang có dấu hiệu chậm lại.",
+    "Sự tích lũy này thường dẫn đến một biến động mạnh.", "Các mốc fibonacci đang cho thấy điểm xoay chiều.", "Cấu trúc đỉnh sau cao hơn đỉnh trước vẫn duy trì.",
+    "Thị trường đang phản ánh đúng các thông tin cơ bản.", "Dòng vốn đang xoay vòng từ các Altcoin sang đây.", "Giá đã thoát khỏi kênh giảm giá dài hạn.",
+    "Lượng cung trên sàn đang giảm dần là tín hiệu tốt.", "Cần cẩn thận với các bẫy giá trong khung nhỏ.", "Lực hồi phục này cần thêm khối lượng để xác nhận.",
+    "Điểm entry này mang lại tỷ lệ R/R rất hấp dẫn.", "Giá đang giao dịch trên các mốc hỗ trợ then chốt.", "Dấu hiệu gom hàng của cá voi đang khá rõ nét.",
+    "Nhịp điều chỉnh này là cần thiết để đi xa hơn.", "Sự giao thoa của nhiều chỉ báo tại mốc giá này.", "Cú đẩy giá vừa rồi đã quét hết các lệnh short.",
+    "Thị trường đang trong trạng thái cực kỳ hưng phấn.", "Cần một sự xác nhận rõ ràng hơn từ nến đóng cửa.", "Biên độ dao động đang thu hẹp dần theo mô hình nêm.",
+    "Dòng tiền thông minh (Smart Money) đang hoạt động.", "Vùng giá này là nơi tập trung nhiều lệnh chờ mua.", "Xu hướng chính vẫn đang được bảo toàn rất tốt.",
+    "Lực bán từ các thợ đào dường như đã hạ nhiệt.", "Mức giá này phản ánh kỳ vọng tích cực từ nhà đầu tư."
+];
+
+const closings = [
+    "Chúc anh em có một ngày giao dịch thắng lợi!", "Quản lý vốn là chìa khóa để sống sót lâu dài.", "Đừng quên đặt Stop Loss để bảo vệ tài khoản.",
+    "Hãy luôn tỉnh táo trước mọi biến động.", "Lợi nhuận sẽ đến với người kiên nhẫn.", "Kỷ luật thép sẽ tạo nên lợi nhuận bền vững.",
+    "Cảm ơn anh em đã theo dõi nhận định này.", "Hẹn gặp lại ở những kèo chất lượng tiếp theo.", "Thị trường luôn đúng, hãy đi theo xu hướng.",
+    "Không nên FOMO khi giá đã chạy quá xa.", "Giao dịch an toàn và luôn giữ cái đầu lạnh.", "Chúc may mắn với các vị thế đã mở!",
+    "Theo dõi mình để không bỏ lỡ tín hiệu nào.", "Cùng chia sẻ quan điểm của bạn ở dưới nhé.", "Trade ít nhưng chất lượng, đó là bí quyết.",
+    "Hy vọng bài viết mang lại thông tin hữu ích.", "Thị trường Crypto luôn đầy rẫy cơ hội.", "Hãy tự chịu trách nhiệm với túi tiền của mình.",
+    "Đi volume hợp lý là cách tốt nhất để ngủ ngon.", "Sẵn sàng cho những nhịp sóng tiếp theo thôi!", "Đừng để cảm xúc chi phối việc vào lệnh.",
+    "Học cách chấp nhận thua lỗ để thắng lớn hơn.", "Bình tĩnh, tự tin và quyết đoán khi giao dịch.", "Mục tiêu là tích lũy chứ không phải đánh bạc.",
+    "Chúc anh em 'về bờ' và có lợi nhuận đậm.", "Mọi phân tích chỉ mang tính chất tham khảo.", "Hãy kiểm chứng lại trước khi thực hiện giao dịch.",
+    "Trading là một hành trình, không phải cuộc đua.", "Kiên nhẫn chờ đợi điểm entry hoàn hảo nhất.", "Cắt lỗ đúng lúc là chiến thắng bản thân.",
+    "Tập trung vào kế hoạch, bỏ qua các tiếng ồn.", "Giữ vững tâm lý trước những cú rũ hàng.", "Lợi nhuận chỉ dành cho người có chuẩn bị.",
+    "Chúc mừng anh em đã chốt lời thành công!", "Đừng bao giờ tất tay vào một vị thế duy nhất.", "Thị trường sẽ luôn cho bạn cơ hội thứ hai.",
+    "Hãy là một trader thông minh và có chiến thuật.", "Ghi chép nhật ký giao dịch để tiến bộ hơn.", "Tiền trong túi mình mới thực sự là tiền của mình.",
+    "Chốt lời không bao giờ sai, hãy ghi nhớ.", "Tận hưởng hành trình chinh phục thị trường.", "Hãy coi trading là một công việc nghiêm túc.",
+    "Học hỏi từ sai lầm là cách nhanh nhất để giỏi.", "Cập nhật kiến thức mỗi ngày để không tụt hậu.", "Thành công không đến sau một đêm.",
+    "Hãy trân trọng từng đồng vốn nhỏ của bạn.", "Sự nhất quán tạo nên sự khác biệt lớn.", "Chúc anh em gặt hái được nhiều 'lúa'!",
+    "Trade safe, stay safe anh em Square!", "Hành trình vạn dặm bắt đầu từ một bước chân."
+];
+
+function generateFinalContent(coin, price, change) {
+    const entry = smartRound(price);
+    const isUp = parseFloat(change) >= 0;
+    const tp1 = smartRound(isUp ? entry * 1.03 : entry * 0.97);
+    const tp2 = smartRound(isUp ? entry * 1.08 : entry * 0.92);
+    const sl = smartRound(isUp ? entry * 0.95 : entry * 1.05);
+
+    const intro = intros[Math.floor(Math.random() * intros.length)].replace("$COIN", `$${coin}`);
+    const body = bodies[Math.floor(Math.random() * bodies.length)].replace("CHANGE%", `${change}%`);
+    const closing = closings[Math.floor(Math.random() * closings.length)];
+
+    const text = `🔥 [PHÂN TÍCH CHIẾN THUẬT]: $${coin}\n\n` +
+                 `${intro}\n\n` +
+                 `${body}\n\n` +
+                 `📍 ENTRY: ${entry}\n` +
+                 `🎯 TP1: ${tp1}\n` +
+                 `🎯 TP2: ${tp2}\n` +
+                 `🛡 SL: ${sl}\n\n` +
+                 `${closing}`;
+
     const randomCoins = coinQueue
         .filter(c => c.symbol !== coin)
         .sort(() => 0.5 - Math.random())
         .slice(0, 2)
         .map(c => `$${c.symbol}`);
 
-    const body = `🔥 PHÂN TÍCH THỊ TRƯỜNG: ${coin}\n\n` +
-                 `Thị trường đang có những phản ứng đáng chú ý tại vùng giá hiện tại. Với mức biến động ${change}% trong 24h qua, cấu trúc giá đang dần hình thành vùng thanh khoản quan trọng.\n\n` +
-                 `📍 ENTRY: ${entry.toFixed(4)}\n` +
-                 `🎯 TP1: ${tp1.toFixed(4)}\n` +
-                 `🎯 TP2: ${tp2.toFixed(4)}\n` +
-                 `🛡 SL: ${sl.toFixed(4)}\n\n` +
-                 `Lưu ý: Đây là nhận định cá nhân dựa trên phân tích kỹ thuật, anh em hãy luôn quản lý vốn chặt chẽ và cài đặt SL đầy đủ trước khi vào lệnh.`;
-
     return {
-        body,
+        body: text,
         tags: [`$${coin}`, ...randomCoins],
-        hashes: [`#${coin}`, `#BinanceSquare`, `#CryptoAnalysis`]
+        hashes: [`#${coin}`, `#BinanceSquare`, `#TradingSignal`]
     };
 }
 
+// --- LOGIC TRÌNH DUYỆT ---
 async function initBrowser(show = false) {
-    if (context) {
-        try { await context.pages(); return context; } catch (e) { context = null; }
-    }
+    if (context) { try { await context.pages(); return context; } catch (e) { context = null; } }
     context = await chromium.launchPersistentContext(userDataDir, {
-        headless: !show,
-        viewport: { width: 1280, height: 800 },
+        headless: !show, viewport: { width: 1280, height: 800 },
         args: ['--disable-blink-features=AutomationControlled', '--no-sandbox']
     });
     return context;
@@ -95,36 +151,37 @@ async function ensureMainPage() {
 
 async function postTaskWithForce() {
     if (!isRunning) return;
-    if (coinQueue.length === 0) await refreshCoinQueue();
-    
+    if (coinQueue.length === 0) {
+        try {
+            const res = await axios.get('https://fapi.binance.com/fapi/v1/ticker/price');
+            coinQueue = res.data
+                .filter(c => c.symbol.endsWith('USDT'))
+                .map(c => ({ symbol: c.symbol.replace('USDT', ''), price: parseFloat(c.price) }))
+                .sort((a, b) => b.price - a.price);
+        } catch (e) { logStep("Lỗi API: " + e.message); return; }
+    }
+
     const currentCoin = coinQueue.shift();
     if (!currentCoin) return;
 
-    let page; // Định nghĩa biến page ở đây để catch có thể dùng
+    let page;
     try {
         page = await ensureMainPage();
-        
-        // Lấy dữ liệu 24h
         const ticker = await axios.get(`https://api.binance.com/api/v3/ticker/24hr?symbol=${currentCoin.symbol}USDT`);
         const content = generateFinalContent(currentCoin.symbol, ticker.data.lastPrice, ticker.data.priceChangePercent);
 
         const textbox = await page.locator('div[contenteditable="true"], div[role="textbox"]').first();
-        if (!(await textbox.isVisible())) {
-            logStep("⏳ Đợi ô soạn thảo (30s)...");
-            await page.waitForTimeout(30000);
-        }
-
-        logStep(`🖱 Soạn bài cho $${currentCoin.symbol}. Đợi 5s...`);
+        logStep(`📝 Soạn bài lần lượt: $${currentCoin.symbol}.`);
         await textbox.click();
         await page.waitForTimeout(5000);
 
         await page.keyboard.press('Control+A');
         await page.keyboard.press('Backspace');
 
-        // Gõ nội dung
+        // Viết mạch văn bản trước
         await page.keyboard.type(content.body + "\n\n", { delay: 5 });
 
-        // Gõ Tags $
+        // Sau đó mới ghi 3$
         for (const t of content.tags) {
             await page.keyboard.type(t, { delay: 10 });
             await page.waitForTimeout(1500);
@@ -132,7 +189,7 @@ async function postTaskWithForce() {
             await page.keyboard.type(' ', { delay: 5 });
         }
 
-        // Gõ Hashes #
+        // Và 3# (Trong đó có 1 cái là tên coin)
         for (const h of content.hashes) {
             await page.keyboard.type("\n" + h, { delay: 10 });
             await page.waitForTimeout(1500);
@@ -142,28 +199,16 @@ async function postTaskWithForce() {
 
         await page.waitForTimeout(8000);
 
-        // Click nút Đăng của bài viết
         const postBtn = await page.locator('button').filter({ hasText: /^Đăng$|^Post$/ }).last();
         if (await postBtn.isEnabled()) {
             await postBtn.click();
-            logStep(`🎯 Đã bấm Đăng $${currentCoin.symbol}.`);
-            await page.waitForTimeout(15000);
-
-            if ((await page.content()).includes(currentCoin.symbol)) {
-                logStep(`✅ THÀNH CÔNG: $${currentCoin.symbol}`);
-                totalPosts++;
-                history.unshift({ coin: currentCoin.symbol, time: new Date().toLocaleTimeString(), status: 'Thành công' });
-                return;
-            }
+            logStep(`🎯 Đã đăng bài $${currentCoin.symbol}. Chờ 15s nghỉ...`);
+            await page.waitForTimeout(10000);
+            totalPosts++;
+            history.unshift({ coin: currentCoin.symbol, time: new Date().toLocaleTimeString(), status: 'Thành công' });
         }
-        throw new Error("Không xác nhận được bài đăng");
-
     } catch (err) {
         logStep(`❌ LỖI: ${err.message}`);
-        if (page) await page.screenshot({ path: `err_${Date.now()}.png` }).catch(()=>{});
-        logStep("🔄 Thử lại sau 20s...");
-        await new Promise(r => setTimeout(r, 20000));
-        // Đưa coin lỗi vào lại hàng đợi để không bỏ sót
         if (currentCoin) coinQueue.push(currentCoin);
     }
 }
@@ -172,35 +217,15 @@ async function startLoop() {
     while (isRunning) {
         await postTaskWithForce();
         if (isRunning) {
-            logStep("😴 Nghỉ 1 phút...");
-            for (let i = 0; i < 60 && isRunning; i++) await new Promise(r => setTimeout(r, 1000));
+            for (let i = 0; i < 15 && isRunning; i++) await new Promise(r => setTimeout(r, 1000));
         }
     }
 }
 
 // --- API ---
-app.get('/start', (req, res) => {
-    if (!isRunning) { isRunning = true; logStep("🏁 KHỞI CHẠY"); startLoop(); }
-    res.json({ status: 'started' });
-});
-
-app.get('/stop', async (req, res) => {
-    isRunning = false; logStep("🛑 DỪNG");
-    if (context) { await context.close().catch(() => {}); context = null; }
-    mainPage = null;
-    res.json({ status: 'stopped' });
-});
-
+app.get('/start', (req, res) => { if (!isRunning) { isRunning = true; logStep("🏁 KHỞI CHẠY"); startLoop(); } res.json({ status: 'started' }); });
+app.get('/stop', async (req, res) => { isRunning = false; logStep("🛑 DỪNG"); if (context) { await context.close().catch(() => {}); context = null; } mainPage = null; res.json({ status: 'stopped' }); });
 app.get('/stats', (req, res) => res.json({ isRunning, totalPosts, history, userInfo }));
-
-app.get('/login', async (req, res) => {
-    if (context) { await context.close(); context = null; }
-    const ctx = await initBrowser(true);
-    const p = await ctx.newPage();
-    await p.goto('https://www.binance.com/vi/square');
-    res.send("Đã mở Chrome.");
-});
-
-app.get('/', (req, res) => res.send("Bot is running. Check /stats"));
-
+app.get('/login', async (req, res) => { if (context) { await context.close(); context = null; } const ctx = await initBrowser(true); const p = await ctx.newPage(); await p.goto('https://www.binance.com/vi/square'); res.send("Mở Chrome đăng nhập."); });
+app.get('/', (req, res) => res.send("Bot Live. /stats"));
 app.listen(port, '0.0.0.0', () => logStep(`SERVER LIVE: ${port}`));
