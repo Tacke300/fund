@@ -19,32 +19,30 @@ let context = null;
 
 const log = (msg) => console.log(`[${new Date().toLocaleTimeString()}] ➡️ ${msg}`);
 
-// Hàm lấy Browser (Fix lỗi tranh chấp context)
+// Hàm quản lý Browser - Đã fix để không bị lock profile
 async function getBrowser(show = false) {
     if (context) {
         try {
-            // Kiểm tra xem context còn sống không
             await context.browser().version();
             return context;
         } catch (e) {
-            context = null; // Nếu chết thì reset để tạo mới
+            context = null;
         }
     }
-    
     context = await chromium.launchPersistentContext(userDataDir, {
         headless: !show,
         args: [
             '--disable-blink-features=AutomationControlled',
             '--use-fake-ui-for-media-stream',
             '--window-size=1280,720',
-            '--no-sandbox',
-            '--disable-dev-shm-usage'
+            '--no-sandbox'
         ],
         userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
     });
     return context;
 }
 
+// Hàm đăng bài - Giữ nguyên selector của bạn
 async function postTask() {
     if (!isRunning) return;
     log("🚀 Bắt đầu tiến trình đăng bài...");
@@ -55,30 +53,22 @@ async function postTask() {
         stealthSync(page);
 
         log("Đang vào Square...");
-        // Tăng timeout lên một chút để tránh "chó gặm" khi mạng lag
         await page.goto('https://www.binance.com/vi/square', { waitUntil: 'domcontentloaded', timeout: 60000 });
 
         log("Đang tìm ô nhập liệu...");
-        // Selector của Binance Square rất hay thay đổi, dùng tổ hợp này cho chắc
-        const box = await page.waitForSelector('div[role="textbox"], .public-DraftEditor-content, [contenteditable="true"]', { timeout: 60000 });
+        const box = await page.waitForSelector('div[role="textbox"], .public-DraftEditor-content, [contenteditable="true"]', { timeout: 45000 });
         
         if (box) {
             const coin = TOP_COINS[Math.floor(Math.random() * TOP_COINS.length)];
             const res = await axios.get(`https://api.binance.com/api/v3/ticker/24hr?symbol=${coin}USDT`);
-            const price = parseFloat(res.data.lastPrice).toFixed(2);
-            const change = parseFloat(res.data.priceChangePercent).toFixed(2);
-            
-            const content = `📊 $${coin} Signal: ${change >= 0 ? "LONG 🟢" : "SHORT 🔴"}\n💰 Price: ${price}\n📈 24h: ${change}%\n#BinanceSquare`;
+            const content = `📊 $${coin} Signal: ${parseFloat(res.data.priceChangePercent) >= 0 ? "LONG 🟢" : "SHORT 🔴"}\n💰 Price: ${res.data.lastPrice}\n#BinanceSquare`;
             
             await box.click();
-            await page.keyboard.type(content, { delay: 50 });
-            await page.waitForTimeout(3000);
+            await page.keyboard.type(content, { delay: 30 });
+            await page.waitForTimeout(2000);
             
             const btn = page.locator('button:has-text("Đăng"), button:has-text("Post")').first();
             await btn.click();
-            
-            // Đợi một chút xem có lỗi gì hiện ra không
-            await page.waitForTimeout(5000);
             
             log(`✅ Thành công: $${coin}`);
             totalPosts++;
@@ -86,35 +76,39 @@ async function postTask() {
         }
     } catch (e) {
         log(`❌ Lỗi: ${e.message.split('\n')[0]}`);
-        // Nếu lỗi do trình duyệt đóng ngang, xóa context để lần sau mở lại
-        if (e.message.includes('closed') || e.message.includes('not found')) context = null;
+        if (e.message.includes('closed')) context = null;
     } finally {
         if (page) await page.close().catch(() => {});
     }
 }
 
-// --- API Routes (Giữ nguyên như cũ của bạn) ---
-app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
-app.get('/stats', (req, res) => res.json({ isRunning, totalPosts, history, userInfo }));
+// --- FULL API ROUTES ---
 
-app.get('/login', async (req, res) => {
-    log("🔑 Mở trình duyệt để Login...");
-    if (context) {
-        await context.close().catch(() => {});
-        context = null;
-    }
-    const ctx = await getBrowser(true);
-    await ctx.newPage().then(p => p.goto('https://www.binance.com/vi/square'));
-    res.send("Đã mở Chrome. Đăng nhập xong hãy TẮT CỬA SỔ CHROME đó đi, rồi quay lại web này bấm START.");
+app.get('/', (req, res) => {
+    res.sendFile(path.join(__dirname, 'index.html'));
 });
 
+app.get('/stats', (req, res) => {
+    res.json({ isRunning, totalPosts, history, userInfo });
+});
+
+app.get('/login', async (req, res) => {
+    log("🔑 Mở trình duyệt cho Login...");
+    if (context) { await context.close().catch(() => {}); context = null; }
+    const ctx = await getBrowser(true);
+    const page = await ctx.newPage();
+    await page.goto('https://www.binance.com/vi/square');
+    res.send("Đã mở Chrome. Đăng nhập xong hãy TẮT CHROME để bot chạy ẩn.");
+});
+
+// Trả lại hàm check bị thiếu
 app.get('/check', async (req, res) => {
-    log("🔍 Check tài khoản...");
+    log("🔍 Kiểm tra tài khoản...");
     let page = null;
     try {
         const ctx = await getBrowser(false);
         page = await ctx.newPage();
-        await page.goto('https://www.binance.com/vi/square/profile/moncey_d_luffy', { waitUntil: 'domcontentloaded', timeout: 45000 });
+        await page.goto('https://www.binance.com/vi/square/profile/moncey_d_luffy', { waitUntil: 'domcontentloaded' });
         await page.waitForTimeout(5000);
         const title = await page.title();
         userInfo = { name: title.includes("Luffy") ? "Luffy OK" : "Chưa nhận diện", status: "Online" };
@@ -131,13 +125,13 @@ app.get('/start', (req, res) => {
         isRunning = true;
         postTask();
         setInterval(postTask, 15 * 60 * 1000);
-        log("🏁 Bot đã bắt đầu chạy tự động (15p/lần)");
+        log("🏁 Bot đã bắt đầu chạy.");
     }
     res.json({ status: 'started' });
 });
 
 app.listen(9999, '0.0.0.0', () => {
-    console.log("==========================================");
+    log("==========================================");
     log("SERVER LIVE: http://localhost:9999");
-    console.log("==========================================");
+    log("==========================================");
 });
