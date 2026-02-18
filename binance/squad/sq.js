@@ -27,53 +27,51 @@ function logStep(message) {
     console.log(`[${new Date().toLocaleTimeString()}] ➡️ ${message}`);
 }
 
-// --- BƯỚC 1: GIỮ NGUYÊN BẢN CŨ CỦA BẠN ---
+// --- KHỞI TẠO BROWSER ---
 async function initBrowser(show = false) {
     if (context) {
         try { await context.pages(); return context; } catch (e) { context = null; }
     }
-    logStep(show ? "Mở Chrome hiện hình..." : "Khởi tạo trình duyệt ngầm...");
     context = await chromium.launchPersistentContext(userDataDir, {
         headless: !show,
         viewport: { width: 1280, height: 800 },
-        args: [
-            '--disable-blink-features=AutomationControlled',
-            '--no-sandbox',
-            '--disable-dev-shm-usage'
-        ]
+        args: ['--disable-blink-features=AutomationControlled', '--no-sandbox']
     });
     context.setDefaultTimeout(60000);
     return context;
 }
 
-// --- BƯỚC 2: TỐI ƯU TÌM KIẾM & ĐĂNG BÀI (10 CÁCH) ---
+// --- HÀM TẠO NỘI DUNG PHÂN TÍCH CHUYÊN SÂU ---
+function generateSignal(coin, price, change) {
+    const isUp = parseFloat(change) >= 0;
+    const side = isUp ? "LONG 🟢" : "SHORT 🔴";
+    const trend = isUp ? "đang tích lũy tăng mạnh" : "đang chịu áp lực xả";
+    
+    // Tính toán Entry/TP/SL giả lập dựa trên giá hiện tại
+    const entry = parseFloat(price);
+    const tp = isUp ? entry * 1.05 : entry * 0.95; // 5% profit
+    const sl = isUp ? entry * 0.97 : entry * 1.03; // 3% stop loss
+
+    return `🔥 PHÂN TÍCH NHANH: $${coin}
+    
+📊 Nhận định: Thị trường ${trend} trong khung 24h qua với biến động ${change}%.
+    
+🚀 Tín hiệu: ${side}
+📍 Entry: ${entry.toFixed(4)}
+🎯 TP: ${tp.toFixed(4)}
+🛡 SL: ${sl.toFixed(4)}
+
+💡 Tin tức: Dòng tiền đang đổ vào các Altcoin top đầu, $${coin} có dấu hiệu phá vỡ vùng kháng cự ngắn hạn. Anh em chú ý quản lý vốn!
+
+$${coin} $BTC $BNB
+#Binance #CryptoNews #TradingSignal`;
+}
 
 async function findTextbox(page) {
-    logStep("🔍 Đang quét 10 phương thức tìm ô nhập liệu...");
-    
-    const selectors = [
-        'div[role="textbox"]',                                 // 1. Chuẩn ARIA
-        'div[contenteditable="true"]',                         // 2. Thuộc tính soạn thảo
-        '.public-DraftEditor-content',                        // 3. Draft.js (Phổ biến ở Binance)
-        'textarea[placeholder*="đang nghĩ gì"]',               // 4. Placeholder VN
-        'textarea[placeholder*="mind"]',                      // 5. Placeholder EN
-        '[data-testid="rich-text-editor"]',                    // 6. Test ID
-        '.css-18t94o4 div[contenteditable]',                  // 7. Cấu trúc CSS cụ thể
-        'div[aria-label*="nội dung"]',                         // 8. Label VN
-        'div[aria-label*="content"]',                          // 9. Label EN
-        'div.notranslate.public-DraftEditor-content'           // 10. Class cụ thể của editor
-    ];
-
-    for (let i = 0; i < selectors.length; i++) {
-        try {
-            const el = await page.locator(selectors[i]).first();
-            if (await el.isVisible()) {
-                logStep(`🎯 Đã tìm thấy ô nhập liệu bằng cách ${i + 1}: (${selectors[i]})`);
-                return el;
-            }
-        } catch (e) {
-            continue;
-        }
+    const selectors = ['div[contenteditable="true"]', 'div[role="textbox"]', '.public-DraftEditor-content'];
+    for (let s of selectors) {
+        const el = await page.locator(s).first();
+        if (await el.isVisible()) return el;
     }
     return null;
 }
@@ -82,8 +80,9 @@ async function ensureMainPage() {
     const ctx = await initBrowser(false);
     if (!mainPage || mainPage.isClosed()) {
         mainPage = await ctx.newPage();
-        logStep("🌍 Đang mở Binance Square...");
+        logStep("🌍 Mở Binance Square...");
         await mainPage.goto('https://www.binance.com/vi/square', { waitUntil: 'domcontentloaded' });
+        await mainPage.waitForTimeout(5000);
     }
     return mainPage;
 }
@@ -93,73 +92,81 @@ async function postTaskWithForce() {
     
     try {
         const page = await ensureMainPage();
-        logStep("🚀 Kiểm tra trang để bắt đầu đăng bài...");
-
         const textbox = await findTextbox(page);
         
         if (!textbox) {
-            logStep("⚠️ Không thấy ô nhập bài. Thử reload nhẹ trang...");
-            await page.reload({ waitUntil: 'domcontentloaded' });
-            throw new Error("Không tìm thấy textbox sau khi quét 10 cách");
+            logStep("⚠️ Không thấy ô nhập. Reload...");
+            await page.reload();
+            throw new Error("Không thấy textbox");
         }
 
-        // Lấy dữ liệu coin
+        // Lấy dữ liệu thật từ API
         const coin = TOP_COINS[Math.floor(Math.random() * TOP_COINS.length)];
         const res = await axios.get(`https://api.binance.com/api/v3/ticker/24hr?symbol=${coin}USDT`);
-        const content = `📊 $${coin} Signal: ${parseFloat(res.data.priceChangePercent) >= 0 ? "LONG 🟢" : "SHORT 🔴"}\n💰 Giá: ${parseFloat(res.data.lastPrice)}\n#BinanceSquare #$${coin}`;
+        const content = generateSignal(coin, res.data.lastPrice, res.data.priceChangePercent);
 
-        logStep(`📝 Đang nhập nội dung bài đăng $${coin}...`);
+        logStep(`📝 Đang soạn bài phân tích $${coin}...`);
         await textbox.click();
         await page.keyboard.press('Control+A');
         await page.keyboard.press('Backspace');
-        await page.keyboard.type(content, { delay: 30 });
+        await page.waitForTimeout(1500);
         
-        await page.waitForTimeout(2000);
+        // TỐC ĐỘ GÕ NHANH (delay 10ms)
+        await page.keyboard.type(content, { delay: 10 });
         
-        logStep("🔘 Đang tìm nút Đăng...");
-        const postBtn = await page.locator('button:has-text("Đăng"), button:has-text("Post"), .css-1q6p6u8').first();
+        // CHỜ LÂU HƠN SAU KHI GÕ (8 giây) để giống người đang đọc lại bài
+        logStep("⏳ Đã gõ xong. Đang ngâm bài 8s trước khi đăng...");
+        await page.waitForTimeout(8000);
+
+        logStep("🔘 Bấm nút Đăng...");
+        const postBtn = await page.locator('button:has-text("Đăng"), button:has-text("Post")').filter({ hasNotText: 'đăng bài' }).first();
         
-        if (await postBtn.isEnabled()) {
+        if (await postBtn.isVisible()) {
             await postBtn.click();
-            logStep(`🎉 THÀNH CÔNG: Đã đăng bài $${coin}`);
-            totalPosts++;
-            history.unshift({ coin, time: new Date().toLocaleTimeString(), status: 'Thành công' });
+            logStep("⏳ Đã bấm. Chờ 15s kiểm tra...");
+            await page.waitForTimeout(15000);
+
+            const newContent = await page.content();
+            if (newContent.includes(`$${coin}`)) {
+                logStep(`🎉 THÀNH CÔNG: Bài đăng $${coin} đã lên sàn!`);
+                totalPosts++;
+                history.unshift({ coin, time: new Date().toLocaleTimeString(), status: 'Thành công' });
+            } else {
+                throw new Error("Không thấy bài đăng sau khi bấm nút.");
+            }
         } else {
-            throw new Error("Nút Đăng bị vô hiệu hóa (có thể do trùng bài hoặc nội dung ngắn)");
+            throw new Error("Nút Đăng bị ẩn.");
         }
 
     } catch (err) {
-        logStep(`❌ Lỗi chi tiết: ${err.message}`);
-        // Chụp ảnh lỗi để debug nếu cần
-        if (mainPage) await mainPage.screenshot({ path: `log_error_${Date.now()}.png` }).catch(()=>{});
-        logStep("🔄 Sẽ thử lại sau 30 giây...");
-        await new Promise(r => setTimeout(r, 30000));
-        return await postTaskWithForce(); // Đệ quy: Retry đến khi thành công
+        logStep(`❌ LỖI: ${err.message}`);
+        if (mainPage) await mainPage.screenshot({ path: `error_${Date.now()}.png` }).catch(()=>{});
+        logStep("🔄 Thử lại sau 20 giây...");
+        await new Promise(r => setTimeout(r, 20000));
+        return await postTaskWithForce(); 
     }
 }
 
 async function startLoop() {
     while (isRunning) {
         await postTaskWithForce();
-        logStep("⏳ Nghỉ 15 phút trước khi đăng bài tiếp theo...");
-        for (let i = 0; i < 900 && isRunning; i++) {
+        logStep("⏳ Nghỉ 1 phút (60s) theo yêu cầu...");
+        for (let i = 0; i < 60 && isRunning; i++) {
             await new Promise(r => setTimeout(r, 1000));
         }
     }
 }
 
-// --- GIỮ NGUYÊN API ROUTES ---
+// --- CÁC ROUTE API GIỮ NGUYÊN ---
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
 app.get('/stats', (req, res) => res.json({ isRunning, totalPosts, history, userInfo }));
-
 app.get('/login', async (req, res) => {
     if (context) { await context.close().catch(() => {}); context = null; }
     const ctx = await initBrowser(true);
     const p = await ctx.newPage();
     await p.goto('https://www.binance.com/vi/square');
-    res.send("ĐÃ MỞ CHROME. Đăng nhập xong hãy TẮT Chrome.");
+    res.send("ĐÃ MỞ CHROME. Hãy đăng nhập xong rồi TẮT Chrome.");
 });
-
 app.get('/check', async (req, res) => {
     logStep("🔍 Đang kiểm tra profile...");
     try {
@@ -173,19 +180,12 @@ app.get('/check', async (req, res) => {
     } catch (e) { logStep("Check fail"); }
     res.json(userInfo);
 });
-
 app.get('/start', (req, res) => {
-    if (!isRunning) {
-        isRunning = true;
-        logStep("🏁 BẮT ĐẦU BOT");
-        startLoop();
-    }
+    if (!isRunning) { isRunning = true; logStep("🏁 BẮT ĐẦU BOT"); startLoop(); }
     res.json({ status: 'started' });
 });
-
 app.get('/stop', async (req, res) => {
-    isRunning = false;
-    logStep("🛑 DỪNG BOT");
+    isRunning = false; logStep("🛑 DỪNG BOT");
     if (context) { await context.close().catch(() => {}); context = null; }
     mainPage = null;
     res.json({ status: 'stopped' });
