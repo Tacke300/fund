@@ -1,158 +1,111 @@
-import { chromium } from 'playwright-extra';
-import stealth from 'puppeteer-extra-plugin-stealth';
+import { chromium } from 'playwright';
+import { stealthSync } from 'playwright-stealth';
 import express from 'express';
 import path from 'path';
 import axios from 'axios';
 import { fileURLToPath } from 'url';
-import fs from 'fs';
-
-chromium.use(stealth()); // Kích hoạt chế độ lách luật
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const app = express();
-const port = 9999;
 const userDataDir = path.join(__dirname, 'bot_session_final');
 
 const TOP_COINS = ["BTC", "ETH", "BNB", "SOL", "XRP", "ADA", "AVAX", "DOGE", "DOT", "LINK", "MATIC", "NEAR"];
 let isRunning = false;
 let totalPosts = 0;
 let history = [];
-let userInfo = { name: "Chưa kiểm tra", followers: "0", status: "Offline" };
+let userInfo = { name: "N/A", status: "Offline" };
 let context = null;
-let postInterval = null;
 
-function logStep(message) {
-    console.log(`[${new Date().toLocaleTimeString()}] ➡️ ${message}`);
-}
+const log = (msg) => console.log(`[${new Date().toLocaleTimeString()}] ➡️ ${msg}`);
 
-// Hàm khởi tạo trình duyệt - MẶC ĐỊNH CHẠY ẨN (headless: true)
-async function initBrowser(show = false) {
+async function getBrowser(show = false) {
     if (context) return context;
-    logStep(show ? "Mở trình duyệt (hiện hình) để Login..." : "Khởi tạo trình duyệt chạy ngầm...");
     context = await chromium.launchPersistentContext(userDataDir, {
-        headless: !show, 
-        channel: 'chrome', // Dùng Chrome thật trên máy để tăng độ tin cậy
-        viewport: { width: 1366, height: 768 },
+        headless: !show,
         args: [
             '--disable-blink-features=AutomationControlled',
-            '--no-sandbox',
-            '--disable-web-security'
-        ]
+            '--use-fake-ui-for-media-stream',
+            '--window-size=1280,720'
+        ],
+        userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
     });
     return context;
 }
 
-// --- CHECK ACCOUNT (SỬA SELECTOR MỚI NHẤT) ---
-async function checkAccount() {
-    logStep("🔍 Đang kiểm tra profile...");
-    try {
-        const ctx = await initBrowser(false);
-        const page = await ctx.newPage();
-        await page.goto('https://www.binance.com/vi/square/profile/moncey_d_luffy', { waitUntil: 'domcontentloaded' });
-        
-        // Chờ selector tên xuất hiện (thử nhiều class khác nhau của Binance)
-        const nameNode = await page.waitForSelector('div[class*="name"], h1, div[class*="css-1o8m8j"]', { timeout: 15000 }).catch(() => null);
-        
-        if (nameNode) {
-            const name = await nameNode.innerText();
-            userInfo = { name: name.trim(), followers: "Đã cập nhật", status: "Sẵn sàng ✅" };
-            logStep(`✅ Đã nhận diện User: ${name}`);
-        } else {
-            userInfo.status = "Cần Login lại";
-            logStep("⚠️ Không tìm thấy tên. Có thể session đã hết hạn.");
-        }
-        await page.close();
-    } catch (e) {
-        logStep(`❌ Lỗi Check: ${e.message}`);
-    }
-}
-
-// --- POST TASK (NHANH VÀ KHÔNG TREO) ---
-async function postTaskWithRetry() {
+async function postTask() {
     if (!isRunning) return;
-    logStep("🚀 Tiến trình đăng bài bắt đầu...");
-    
+    log("🚀 Bắt đầu tiến trình đăng bài...");
+    let page = null;
     try {
-        const ctx = await initBrowser(false);
-        const page = await ctx.newPage();
-        
-        // Bước 1: Vào trang Square
-        await page.goto('https://www.binance.com/vi/square', { waitUntil: 'networkidle' });
+        const ctx = await getBrowser(false);
+        page = await ctx.newPage();
+        stealthSync(page); // Áp dụng stealth cho từng page
 
-        // Bước 2: Tìm ô nhập liệu bằng nhiều cách (Selector linh hoạt)
-        const selectors = [
-            'div[role="textbox"]',
-            '.public-DraftEditor-content',
-            'div[contenteditable="true"]'
-        ];
-        
-        let textbox = null;
-        for (let s of selectors) {
-            textbox = await page.$(s);
-            if (textbox) break;
-        }
+        // Chỉ đợi 15s cho trang load cơ bản
+        log("Đang vào Square...");
+        await page.goto('https://www.binance.com/vi/square', { waitUntil: 'commit', timeout: 30000 });
 
-        if (textbox) {
-            logStep("🎯 Đã thấy ô nhập liệu. Đang soạn bài...");
+        // Tìm ô nhập liệu (Thử 3 loại selector phổ biến nhất của Binance)
+        log("Đang tìm ô nhập liệu...");
+        const box = await page.waitForSelector('div[role="textbox"], .public-DraftEditor-content, [contenteditable="true"]', { timeout: 45000 });
+        
+        if (box) {
             const coin = TOP_COINS[Math.floor(Math.random() * TOP_COINS.length)];
             const res = await axios.get(`https://api.binance.com/api/v3/ticker/24hr?symbol=${coin}USDT`);
-            const content = `📊 $${coin} Signal: ${parseFloat(res.data.priceChangePercent) >= 0 ? "LONG 🟢" : "SHORT 🔴"}\n💰 Price: ${res.data.lastPrice}\n#BinanceSquare #$${coin}`;
+            const content = `📊 $${coin} Signal: ${parseFloat(res.data.priceChangePercent) >= 0 ? "LONG 🟢" : "SHORT 🔴"}\n💰 Price: ${res.data.lastPrice}\n#BinanceSquare`;
             
-            await textbox.focus();
-            await page.keyboard.type(content, { delay: 50 }); // Gõ như người thật
+            await box.click();
+            await page.keyboard.type(content, { delay: 30 });
             await page.waitForTimeout(2000);
             
-            // Tìm nút Đăng
-            const postBtn = await page.locator('button:has-text("Đăng"), button:has-text("Post")').first();
-            await postBtn.click();
+            const btn = page.locator('button:has-text("Đăng"), button:has-text("Post")').first();
+            await btn.click();
             
-            logStep(`🎉 Thành công! Đã đăng bài $${coin}`);
+            log(`✅ Thành công: $${coin}`);
             totalPosts++;
             history.unshift({ coin, time: new Date().toLocaleTimeString(), status: 'Thành công' });
-        } else {
-            logStep("❌ Không tìm thấy ô nhập liệu. Có thể do chưa Login.");
         }
-        await page.close();
-    } catch (err) {
-        logStep(`❌ Lỗi tiến trình: ${err.message}`);
+    } catch (e) {
+        log(`❌ Lỗi: ${e.message.split('\n')[0]}`);
+    } finally {
+        if (page) await page.close();
     }
 }
 
-// --- API ---
+// API Routes
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
 app.get('/stats', (req, res) => res.json({ isRunning, totalPosts, history, userInfo }));
 
 app.get('/login', async (req, res) => {
-    logStep("🔑 Đang mở trình duyệt hiện hình để bạn Login...");
-    if (context) { await context.close(); context = null; }
-    const ctx = await initBrowser(true); // show = true
+    if (context) await context.close(); context = null;
+    const ctx = await getBrowser(true);
     const page = await ctx.newPage();
     await page.goto('https://www.binance.com/vi/square');
-    res.send("ĐÃ MỞ CHROME. Đăng nhập xong bạn có thể ĐÓNG CỬA SỔ CHROME đó lại. Bot sẽ tự chạy ngầm bằng cửa sổ khác.");
+    res.send("Đã mở Chrome. Đăng nhập xong hãy tắt Chrome này đi để Bot chạy ẩn.");
 });
 
 app.get('/check', async (req, res) => {
-    await checkAccount();
+    log("🔍 Check tài khoản...");
+    try {
+        const ctx = await getBrowser(false);
+        const page = await ctx.newPage();
+        await page.goto('https://www.binance.com/vi/square/profile/moncey_d_luffy', { waitUntil: 'domcontentloaded' });
+        await page.waitForTimeout(5000);
+        const name = await page.title(); // Lấy title trang cho nhanh
+        userInfo = { name: name.includes("Luffy") ? "Luffy OK" : "Chưa nhận diện", status: "Online" };
+        await page.close();
+    } catch (e) { userInfo.status = "Lỗi"; }
     res.json(userInfo);
 });
 
 app.get('/start', (req, res) => {
     if (!isRunning) {
-        logStep("🏁 KÍCH HOẠT CHẾ ĐỘ CHẠY NGẦM");
         isRunning = true;
-        postTaskWithRetry();
-        postInterval = setInterval(postTaskWithRetry, 15 * 60 * 1000);
+        postTask();
+        setInterval(postTask, 15 * 60 * 1000);
     }
     res.json({ status: 'started' });
 });
 
-app.get('/stop', async (req, res) => {
-    logStep("🛑 DỪNG BOT");
-    isRunning = false;
-    if (postInterval) clearInterval(postInterval);
-    if (context) { await context.close().catch(() => {}); context = null; }
-    res.json({ status: 'stopped' });
-});
-
-app.listen(port, '0.0.0.0', () => logStep(`SERVER LIVE TẠI ${port}`));
+app.listen(9999, '0.0.0.0', () => log("SERVER LIVE: 9999"));
