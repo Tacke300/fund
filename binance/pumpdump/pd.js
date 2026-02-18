@@ -11,185 +11,216 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const HISTORY_FILE = path.join(__dirname, 'trade_history.json');
 
-// --- Cấu hình mặc định ---
-const VPS1_DATA_URL = 'http://34.142.248.96:9000/';
-const BASE_HOST = 'fapi.binance.com';
-const APP = express();
-APP.use(express.json());
-APP.use(express.static(__dirname));
-
+// Cấu hình bot
 let botSettings = {
     isRunning: false,
-    maxPositions: 5,
-    investmentType: 'fixed', // 'fixed' ($) hoặc 'percent' (%)
-    investmentValue: 1.5,
-    minVolatility: 5.0,
-    openInterval: 30000 // 30s
+    maxPositions: 10,
+    invValue: 1.5,
+    invType: 'fixed', 
+    minVol: 5.0,
+    accountSLValue: 30,
+    accountSLType: 'percent', 
+    isProtectProfit: true,
+    openInterval: 30000 
 };
 
-let activePositions = new Set();
-let blacklist = new Set();
-let totalNetPnl = 0;
-let lastOpenTime = 0;
-let serverTimeOffset = 0;
-
-// --- Helper Functions ---
-const addLog = (msg) => {
-    const time = new Date().toLocaleString('vi-VN');
-    console.log(`[${time}] ${msg}`);
+let status = {
+    initialBalance: 0,
+    highestBalance: 0,
+    currentBalance: 0,
+    lastOpenTimestamp: 0,
+    exchangeInfo: null,
+    blacklist: new Set()
 };
 
-const saveHistory = (data) => {
-    let history = [];
-    if (fs.existsSync(HISTORY_FILE)) {
-        history = JSON.parse(fs.readFileSync(HISTORY_FILE));
-    }
-    history.push(data);
-    fs.writeFileSync(HISTORY_FILE, JSON.stringify(history, null, 2));
-};
+// --- HÀM CORE: XỬ LÝ API BINANCE CHUẨN ---
+async function callSignedAPI(endpoint, method = 'GET', params = {}) {
+    const timestamp = Date.now();
+    let queryString = Object.keys(params).map(k => `${k}=${encodeURIComponent(params[k])}`).join('&');
+    queryString += (queryString ? '&' : '') + `timestamp=${timestamp}&recvWindow=5000`;
+    const signature = crypto.createHmac('sha256', SECRET_KEY).update(queryString).digest('hex');
+    const url = `https://fapi.binance.com${endpoint}?${queryString}&signature=${signature}`;
 
-// --- Binance API Cơ bản ---
-async function callApi(method, path, params = {}, signed = true) {
-    const timestamp = Date.now() + serverTimeOffset;
-    let queryString = Object.keys(params).map(k => `${k}=${params[k]}`).join('&');
-    if (signed) {
-        queryString += (queryString ? '&' : '') + `timestamp=${timestamp}&recvWindow=5000`;
-        const signature = crypto.createHmac('sha256', SECRET_KEY).update(queryString).digest('hex');
-        queryString += `&signature=${signature}`;
-    }
-    
-    const url = `https://${BASE_HOST}${path}${queryString ? '?' + queryString : ''}`;
     return new Promise((resolve, reject) => {
         const options = { method, headers: { 'X-MBX-APIKEY': API_KEY } };
-        const req = https.request(url, options, res => {
+        const req = https.request(url, options, (res) => {
             let data = '';
-            res.on('data', d => data += d);
+            res.on('data', chunk => data += chunk);
             res.on('end', () => {
-                const resData = JSON.parse(data);
-                if (res.statusCode >= 200 && res.statusCode < 300) resolve(resData);
-                else reject(resData);
+                try {
+                    const json = JSON.parse(data);
+                    if (res.statusCode >= 200 && res.statusCode < 300) resolve(json);
+                    else reject(json);
+                } catch (e) { reject({ msg: "JSON Parse Error", raw: data }); }
             });
         });
-        req.on('error', reject);
+        req.on('error', e => reject({ msg: e.message }));
         req.end();
     });
 }
 
-// --- Logic Chính ---
-async function pumpDumpStrategy() {
+// Lấy thông tin bước giá (Vô cùng quan trọng để không bị lỗi sàn)
+async function refreshExchangeInfo() {
+    try {
+        const res = await new Promise((resolve) => {
+            https.get('https://fapi.binance.com/fapi/v1/exchangeInfo', r => {
+                let d = ''; r.on('data', c => d += c);
+                r.on('end', () => resolve(JSON.parse(d)));
+            });
+        });
+        status.exchangeInfo = {};
+        res.symbols.forEach(s => {
+            const priceFilter = s.filters.find(f => f.filterType === 'PRICE_FILTER');
+            const lotFilter = s.filters.find(f => f.filterType === 'LOT_SIZE');
+            status.exchangeInfo[s.symbol] = {
+                pricePrecision: s.pricePrecision,
+                quantityPrecision: s.quantityPrecision,
+                tickSize: parseFloat(priceFilter.tickSize),
+                stepSize: parseFloat(lotFilter.stepSize)
+            };
+        });
+    } catch (e) { console.error("Lỗi lấy ExchangeInfo:", e); }
+}
+
+// --- LOGIC CHIẾN LƯỢC PUMPDUMP ---
+async function mainLoop() {
     if (!botSettings.isRunning) return;
 
-    // 1. Kiểm tra số lượng vị thế hiện tại
     try {
-        const positions = await callApi('GET', '/fapi/v2/positionRisk');
-        const currentActive = positions.filter(p => parseFloat(p.positionAmt) !== 0);
-        activePositions = new Set(currentActive.map(p => p.symbol));
+        // 1. Cập nhật số dư & Kiểm tra SL Tổng
+        const acc = await callSignedAPI('/fapi/v2/account');
+        status.currentBalance = parseFloat(acc.totalMarginBalance);
 
-        if (currentActive.length >= botSettings.maxPositions) return;
+        if (status.initialBalance === 0) {
+            status.initialBalance = status.currentBalance;
+            status.highestBalance = status.currentBalance;
+        }
 
-        // Giãn cách 30s
-        if (Date.now() - lastOpenTime < botSettings.openInterval) return;
+        if (botSettings.isProtectProfit && status.currentBalance > status.highestBalance) {
+            status.highestBalance = status.currentBalance;
+        }
 
-        // 2. Lấy dữ liệu VPS1
-        const vpsRes = await new Promise(resolve => {
-            http.get(VPS1_DATA_URL, res => {
-                let d = ''; res.on('data', chunk => d += chunk);
-                res.on('end', () => resolve(JSON.parse(d)));
+        let stopThreshold = botSettings.accountSLType === 'fixed' 
+            ? status.highestBalance - botSettings.accountSLValue 
+            : status.highestBalance * (1 - botSettings.accountSLValue / 100);
+
+        if (status.currentBalance <= stopThreshold) {
+            return await panicStop("Chạm ngưỡng sụt giảm tài khoản (Account SL)!");
+        }
+
+        // 2. Kiểm tra số lượng vị thế & Giãn cách
+        const positions = await callSignedAPI('/fapi/v2/positionRisk');
+        const activePos = positions.filter(p => parseFloat(p.positionAmt) !== 0);
+
+        if (activePos.length >= botSettings.maxPositions) return;
+        if (Date.now() - status.lastOpenTimestamp < botSettings.openInterval) return;
+
+        // 3. Quét VPS1 tìm coin biến động nhất
+        http.get('http://34.142.248.96:9000/', (res) => {
+            let data = ''; res.on('data', d => data += d);
+            res.on('end', async () => {
+                const vps = JSON.parse(data);
+                if (vps.status !== "running_data_available") return;
+
+                const candidates = vps.data
+                    .filter(c => Math.abs(c.changePercent) >= botSettings.minVol)
+                    .filter(c => !activePos.some(p => p.symbol === c.symbol))
+                    .filter(c => !status.blacklist.has(c.symbol))
+                    .sort((a, b) => Math.abs(b.changePercent) - Math.abs(a.changePercent));
+
+                if (candidates.length > 0) await openPumpDumpOrder(candidates[0]);
             });
         });
 
-        if (vpsRes.status !== "running_data_available") return;
-
-        // 3. Lọc và ưu tiên coin % cao nhất
-        const candidates = vpsRes.data
-            .filter(c => Math.abs(c.changePercent) >= botSettings.minVolatility)
-            .filter(c => !activePositions.has(c.symbol) && !blacklist.has(c.symbol))
-            .sort((a, b) => Math.abs(b.changePercent) - Math.abs(a.changePercent));
-
-        if (candidates.length > 0) {
-            const target = candidates[0];
-            await openPosition(target);
-        }
-    } catch (e) {
-        addLog(`Lỗi chiến lược: ${e.message || JSON.stringify(e)}`);
-    }
+    } catch (e) { console.error("Lỗi vòng lặp chính:", e.msg || e); }
 }
 
-async function openPosition(coin) {
+async function openPumpDumpOrder(coin) {
     try {
-        addLog(`Đang mở lệnh cho ${coin.symbol} (${coin.changePercent}%)...`);
-        
-        // Cài đặt đòn bẩy (mặc định lấy theo bracket cao nhất có thể hoặc fix 20-50x)
-        const leverage = 20; // Có thể lấy động từ leverageBracket
-        await callApi('POST', '/fapi/v1/leverage', { symbol: coin.symbol, leverage });
+        const symbol = coin.symbol;
+        const info = status.exchangeInfo[symbol];
+        if (!info) return;
 
+        // Xác định hướng: Biến động âm -> Short, Dương -> Long
         const side = coin.changePercent > 0 ? 'BUY' : 'SELL';
         const posSide = coin.changePercent > 0 ? 'LONG' : 'SHORT';
-        
-        // Tính toán khối lượng
-        const price = await callApi('GET', '/fapi/v1/ticker/price', { symbol: coin.symbol }).then(r => parseFloat(r.price));
-        let amount = botSettings.investmentValue;
-        if (botSettings.investmentType === 'percent') {
-            const acc = await callApi('GET', '/fapi/v2/account');
-            amount = (parseFloat(acc.totalMarginBalance) * botSettings.investmentValue) / 100;
-        }
-        
-        const qty = (amount * leverage) / price;
-        // (Lưu ý: Cần thêm logic làm tròn theo stepSize của sàn ở đây để chạy thực tế)
-        const finalQty = qty.toFixed(2); 
 
-        // Đặt lệnh Market
-        await callApi('POST', '/fapi/v1/order', {
-            symbol: coin.symbol,
-            side: side,
-            positionSide: posSide,
-            type: 'MARKET',
-            quantity: finalQty
+        // Lấy giá hiện tại
+        const ticker = await new Promise(res => {
+            https.get(`https://fapi.binance.com/fapi/v1/ticker/price?symbol=${symbol}`, r => {
+                let d = ''; r.on('data', c => d += c); r.on('end', () => res(JSON.parse(d)));
+            });
+        });
+        const price = parseFloat(ticker.price);
+
+        // Tính toán đòn bẩy và TP/SL theo yêu cầu của bạn
+        let leverage = 20; 
+        if (coin.changePercent > 10) leverage = 50; // Ví dụ tăng đòn bẩy nếu pump mạnh
+        await callSignedAPI('/fapi/v1/leverage', 'POST', { symbol, leverage });
+
+        // Tính khối lượng (Quantity)
+        let investUSD = botSettings.invType === 'fixed' ? botSettings.invValue : (status.currentBalance * botSettings.invValue / 100);
+        let qty = (investUSD * leverage) / price;
+        qty = Math.floor(qty / info.stepSize) * info.stepSize;
+        const finalQty = qty.toFixed(info.quantityPrecision);
+
+        // ĐẶT LỆNH MARKET
+        const order = await callSignedAPI('/fapi/v1/order', 'POST', {
+            symbol, side, positionSide: posSide, type: 'MARKET', quantity: finalQty
         });
 
-        // Tính toán TP/SL theo đòn bẩy
-        let pnlTarget = 1.0; // Mặc định 100%
-        if (leverage >= 75) pnlTarget = 5.0;
-        else if (leverage >= 50) pnlTarget = 3.5;
-        else if (leverage >= 26) pnlTarget = 2.0;
+        // TÍNH TP/SL THEO ĐÒN BẨY (Target Profit Margin %)
+        let marginGain = 1.0; // Mặc định 100%
+        if (leverage >= 75) marginGain = 5.0; 
+        else if (leverage >= 50) marginGain = 3.5;
+        else if (leverage >= 26) marginGain = 2.0;
 
-        const priceChange = (price * pnlTarget) / leverage;
-        const tpPrice = posSide === 'LONG' ? price + priceChange : price - priceChange;
-        const slPrice = posSide === 'LONG' ? price - (priceChange / 2) : price + (priceChange / 2);
+        const priceMove = (price * marginGain) / leverage;
+        const tpPrice = (posSide === 'LONG' ? price + priceMove : price - priceMove);
+        const slPrice = (posSide === 'LONG' ? price - (priceMove/2) : price + (priceMove/2));
 
-        // Đặt TP/SL (Batch)
+        const tpPriceFinal = (Math.round(tpPrice / info.tickSize) * info.tickSize).toFixed(info.pricePrecision);
+        const slPriceFinal = (Math.round(slPrice / info.tickSize) * info.tickSize).toFixed(info.pricePrecision);
+
+        // ĐẶT TP/SL BẰNG BATCH ORDERS
         const batch = [
-            { symbol: coin.symbol, side: side === 'BUY' ? 'SELL' : 'BUY', positionSide: posSide, type: 'TAKE_PROFIT_MARKET', stopPrice: tpPrice.toFixed(4), closePosition: 'true' },
-            { symbol: coin.symbol, side: side === 'BUY' ? 'SELL' : 'BUY', positionSide: posSide, type: 'STOP_MARKET', stopPrice: slPrice.toFixed(4), closePosition: 'true' }
+            { symbol, side: side === 'BUY' ? 'SELL' : 'BUY', positionSide: posSide, type: 'TAKE_PROFIT_MARKET', stopPrice: tpPriceFinal, closePosition: 'true' },
+            { symbol, side: side === 'BUY' ? 'SELL' : 'BUY', positionSide: posSide, type: 'STOP_MARKET', stopPrice: slPriceFinal, closePosition: 'true' }
         ];
+        await callSignedAPI('/fapi/v1/batchOrders', 'POST', { batchOrders: JSON.stringify(batch) });
 
-        await callApi('POST', '/fapi/v1/batchOrders', { batchOrders: JSON.stringify(batch) });
-        
-        lastOpenTime = Date.now();
-        addLog(`Thành công: Mở ${posSide} ${coin.symbol}. TP: ${tpPrice.toFixed(4)}, SL: ${slPrice.toFixed(4)}`);
+        status.lastOpenTimestamp = Date.now();
+        saveLog(symbol, posSide, investUSD, tpPriceFinal, slPriceFinal);
 
     } catch (e) {
-        addLog(`Lỗi mở lệnh ${coin.symbol}: ${JSON.stringify(e)}`);
-        blacklist.add(coin.symbol);
+        console.error(`Lỗi vào lệnh ${coin.symbol}:`, e.msg || e);
+        status.blacklist.add(coin.symbol);
     }
 }
 
-// --- API cho Giao diện ---
-APP.post('/api/settings', (req, res) => {
-    botSettings = { ...botSettings, ...req.body };
-    addLog(`Cập nhật cài đặt: Bot ${botSettings.isRunning ? 'START' : 'STOP'}`);
-    res.json({ status: 'ok' });
-});
+async function panicStop(reason) {
+    botSettings.isRunning = false;
+    // Gửi lệnh đóng toàn bộ vị thế Market ở đây...
+    console.error("PANIC STOP KÍCH HOẠT:", reason);
+}
 
+function saveLog(symbol, side, capital, tp, sl) {
+    const log = { symbol, side, capital, tp, sl, time: new Date().toLocaleString() };
+    let logs = [];
+    if (fs.existsSync(HISTORY_FILE)) logs = JSON.parse(fs.readFileSync(HISTORY_FILE));
+    logs.push(log);
+    fs.writeFileSync(HISTORY_FILE, JSON.stringify(logs, null, 2));
+}
+
+// Khởi động bot
+refreshExchangeInfo();
+setInterval(mainLoop, 5000);
+
+// API cho giao diện HTML
+const APP = express();
+APP.use(express.json());
+APP.post('/api/settings', (req, res) => { botSettings = {...botSettings, ...req.body}; res.sendStatus(200); });
 APP.get('/api/status', async (req, res) => {
-    res.json({
-        settings: botSettings,
-        activePositions: Array.from(activePositions),
-        totalNetPnl,
-        history: fs.existsSync(HISTORY_FILE) ? JSON.parse(fs.readFileSync(HISTORY_FILE)) : []
-    });
+    res.json({ botSettings, status, history: fs.existsSync(HISTORY_FILE) ? JSON.parse(fs.readFileSync(HISTORY_FILE)).slice(-10) : [] });
 });
-
-// Khởi chạy
-setInterval(pumpDumpStrategy, 5000);
-APP.listen(9001, () => addLog('Web Server chạy tại port 9001'));
+APP.listen(9001);
