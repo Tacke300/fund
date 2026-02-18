@@ -2,237 +2,210 @@
 <html lang="vi">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Binance Pump-Dump VIP PRO</title>
+    <title>LUFFY PIRATE BOT</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Rajdhani:wght@300;500;700&display=swap');
-
-        :root {
-            --neon-blue: #00d2ff;
-            --neon-purple: #9d50bb;
-            --glass-bg: rgba(15, 23, 42, 0.8);
-        }
-
+        @import url('https://fonts.googleapis.com/css2?family=Bangers&family=Inter:wght@400;700&family=JetBrains+Mono&display=swap');
+        
         body {
-            background: radial-gradient(circle at top right, #1e293b, #0f172a);
-            color: #e2e8f0;
-            font-family: 'Rajdhani', sans-serif;
-            min-height: 100vh;
+            background: #0a0a0b;
+            color: #eee;
+            font-family: 'Inter', sans-serif;
+            background-image: linear-gradient(rgba(10,10,11,0.9), rgba(10,10,11,0.9)), url('https://images.alphacoders.com/605/605592.png');
+            background-size: cover;
+            height: 100vh;
+            overflow: hidden;
         }
-
-        .glass-card {
-            background: var(--glass-bg);
-            backdrop-filter: blur(12px);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.8);
-            border-radius: 20px;
-        }
-
-        .neon-text {
-            text-shadow: 0 0 10px var(--neon-blue), 0 0 20px var(--neon-blue);
-            font-family: 'Orbitron', sans-serif;
-        }
-
-        .status-running {
-            background: #10b981;
-            box-shadow: 0 0 15px #10b981;
-        }
-
-        .status-stopped {
-            background: #ef4444;
-            box-shadow: 0 0 15px #ef4444;
-        }
-
-        .cyber-input {
-            background: rgba(255, 255, 255, 0.05);
-            border: 1px solid rgba(255, 255, 255, 0.2);
-            color: white;
-            transition: all 0.3s;
-        }
-
-        .cyber-input:focus {
-            border-color: var(--neon-blue);
-            box-shadow: 0 0 10px rgba(0, 210, 255, 0.5);
-            outline: none;
-        }
-
-        .btn-vipro {
-            background: linear-gradient(45deg, var(--neon-blue), var(--neon-purple));
-            transition: transform 0.2s, box-shadow 0.2s;
-        }
-
-        .btn-vipro:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 0 20px rgba(0, 210, 255, 0.6);
-        }
-
-        /* Scrollbar xịn */
-        ::-webkit-scrollbar { width: 5px; }
-        ::-webkit-scrollbar-track { background: transparent; }
-        ::-webkit-scrollbar-thumb { background: var(--neon-blue); border-radius: 10px; }
+        .luffy-font { font-family: 'Bangers', cursive; letter-spacing: 2px; }
+        .mono { font-family: 'JetBrains Mono', monospace; }
+        .card { background: rgba(20, 20, 25, 0.8); backdrop-filter: blur(10px); border: 1px solid rgba(255, 69, 0, 0.2); border-radius: 12px; }
+        .btn-luffy { background: #e63946; color: white; transition: 0.3s; font-weight: bold; border-bottom: 4px solid #b91c1c; }
+        .btn-luffy:active { border-bottom: 0; transform: translateY(4px); }
+        .stat-value { font-size: 1.5rem; font-weight: 800; color: #fbbf24; }
+        input, select { background: #1f1f23; border: 1px solid #3f3f46; color: white; padding: 5px 10px; border-radius: 6px; outline: none; }
+        input:focus { border-color: #e63946; }
     </style>
 </head>
-<body class="p-4 md:p-8">
+<body class="p-4 flex flex-col gap-4">
 
-    <div class="max-w-7xl mx-auto">
-        <header class="flex justify-between items-center mb-8 glass-card p-6 border-b-2 border-cyan-500">
+    <header class="flex justify-between items-center bg-black/40 p-3 rounded-xl border-b border-red-500/50">
+        <div class="flex items-center gap-4">
+            <img src="https://api.dicebear.com/7.x/avataaars/svg?seed=Luffy" class="w-12 h-12 bg-red-500 rounded-full border-2 border-yellow-400">
             <div>
-                <h1 class="text-3xl font-bold neon-text tracking-widest">PUMP-DUMP TERMINAL</h1>
-                <p class="text-xs text-cyan-400 opacity-70">SYSTEM VERSION 4.0 PRO MAX</p>
+                <h1 class="luffy-font text-3xl text-red-500">PIRATE KING <span class="text-yellow-400">BOT</span></h1>
+                <p class="text-[10px] uppercase font-bold text-gray-400 tracking-widest">Hải trình chinh phục Binance</p>
             </div>
-            <div class="flex items-center gap-4">
-                <div id="statusDot" class="w-3 h-3 rounded-full status-stopped"></div>
-                <button id="toggleBtn" onclick="toggleBot()" class="btn-vipro px-6 py-2 rounded-full font-bold uppercase text-sm">Start System</button>
+        </div>
+        <div class="flex gap-10">
+            <div class="text-right">
+                <span class="text-[10px] text-gray-500 uppercase block font-bold">Vốn hiện tại</span>
+                <span id="equity" class="stat-value mono">$0.00</span>
             </div>
-        </header>
+            <div class="text-right border-l border-white/10 pl-10">
+                <span class="text-[10px] text-gray-500 uppercase block font-bold">Ngưỡng Stop Bot</span>
+                <span id="slBotAt" class="stat-value mono text-red-500">$0.00</span>
+            </div>
+        </div>
+    </header>
 
-        <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
-            
-            <div class="lg:col-span-1 space-y-6">
-                <div class="glass-card p-6">
-                    <h3 class="text-cyan-400 font-bold mb-4 uppercase italic">Live Balance</h3>
-                    <div class="text-4xl font-bold mb-2" id="currentBalance">$0.00</div>
-                    <div class="flex justify-between text-sm opacity-70">
-                        <span>Initial: <b id="initialBalance">$0</b></span>
-                        <span>ATH: <b id="highestBalance">$0</b></span>
+    <div class="flex-grow grid grid-cols-12 gap-4 overflow-hidden">
+        <div class="col-span-3 flex flex-col gap-4">
+            <div class="card p-5 space-y-4">
+                <h3 class="luffy-font text-xl text-yellow-400"><i class="fas fa-anchor"></i> Cài đặt thuyền</h3>
+                <div class="space-y-4 text-xs">
+                    <div class="flex justify-between items-center">
+                        <span class="font-bold uppercase">Rời Dừng Lỗ (Auto SL)</span>
+                        <input type="checkbox" id="isProtectProfit" class="w-5 h-5 accent-red-500">
                     </div>
-                    <div class="mt-4 h-2 bg-gray-700 rounded-full overflow-hidden">
-                        <div id="pnlBar" class="h-full bg-cyan-500 w-0 transition-all duration-500"></div>
-                    </div>
-                </div>
-
-                <div class="glass-card p-6">
-                    <h3 class="text-purple-400 font-bold mb-4 uppercase italic">Configuration</h3>
-                    <div class="space-y-4">
-                        <div>
-                            <label class="block text-xs mb-1">MAX POSITIONS</label>
-                            <input type="number" id="maxPositions" class="cyber-input w-full p-2 rounded">
+                    <div class="space-y-2">
+                        <label class="text-gray-500 uppercase font-bold">Vốn Mỗi Lệnh (Vốn)</label>
+                        <div class="flex gap-2">
+                            <input type="number" id="invValue" class="flex-grow mono" value="1.5">
+                            <select id="invType" class="w-20"><option value="fixed">USD</option><option value="percent">%</option></select>
                         </div>
-                        <div class="grid grid-cols-2 gap-2">
-                            <div>
-                                <label class="block text-xs mb-1">INV VALUE</label>
-                                <input type="number" id="invValue" class="cyber-input w-full p-2 rounded">
-                            </div>
-                            <div>
-                                <label class="block text-xs mb-1">TYPE</label>
-                                <select id="invType" class="cyber-input w-full p-2 rounded">
-                                    <option value="fixed">Fixed (USD)</option>
-                                    <option value="percent">% Balance</option>
-                                </select>
-                            </div>
-                        </div>
-                        <button onclick="updateSettings()" class="w-full bg-white/10 hover:bg-white/20 py-2 rounded font-bold transition">APPLY SETTINGS</button>
                     </div>
+                    <div class="space-y-2">
+                        <label class="text-gray-500 uppercase font-bold">Số Lệnh Tối Đa</label>
+                        <input type="number" id="maxPositions" class="w-full mono" value="10">
+                    </div>
+                    <button onclick="updateSettings()" class="btn-luffy w-full py-3 rounded-lg uppercase italic">Cập nhật thông số</button>
+                    <button id="runBtn" onclick="toggleRun()" class="w-full py-3 rounded-lg font-black border-2 border-red-500 uppercase text-xs">Chế độ: Đang dừng</button>
                 </div>
             </div>
 
-            <div class="lg:col-span-2 space-y-6">
-                <div class="glass-card p-6 h-[500px] flex flex-col">
-                    <h3 class="text-cyan-400 font-bold mb-4 uppercase italic flex items-center gap-2">
-                        <i class="fas fa-list-ul"></i> Recent Orders
-                    </h3>
-                    <div class="overflow-y-auto flex-grow pr-2">
-                        <table class="w-full text-left">
-                            <thead class="sticky top-0 bg-[#0f172a] text-xs opacity-50">
-                                <tr>
-                                    <th class="pb-2">COIN</th>
-                                    <th class="pb-2">SIDE</th>
-                                    <th class="pb-2">CAPITAL</th>
-                                    <th class="pb-2">TP/SL</th>
-                                    <th class="pb-2">TIME</th>
-                                </tr>
-                            </thead>
-                            <tbody id="historyBody" class="text-sm">
-                                </tbody>
-                        </table>
+            <div class="card p-5 flex-grow flex flex-col justify-around text-center">
+                <div>
+                    <p class="text-[10px] text-gray-500 uppercase font-bold mb-1">Tỉ lệ thắng (Winrate)</p>
+                    <div id="winRateText" class="luffy-font text-6xl text-green-400">0%</div>
+                </div>
+                <div class="grid grid-cols-2 gap-2 border-t border-white/5 pt-4">
+                    <div class="text-center">
+                        <span class="text-[10px] text-gray-500 uppercase block">Tổng Lãi</span>
+                        <span id="totalProfit" class="text-green-500 font-bold mono">+$0</span>
+                    </div>
+                    <div class="text-center border-l border-white/5">
+                        <span class="text-[10px] text-gray-500 uppercase block">Tổng Lỗ</span>
+                        <span id="totalLoss" class="text-red-500 font-bold mono">-$0</span>
                     </div>
                 </div>
             </div>
+        </div>
 
+        <div class="col-span-6 card flex flex-col overflow-hidden border-t-4 border-red-500">
+            <div class="p-4 bg-red-500/10 flex justify-between items-center">
+                <span class="luffy-font text-lg text-white">Vị thế đang mở</span>
+                <span id="activeCount" class="mono font-bold text-yellow-400 bg-black/50 px-3 py-1 rounded-full text-xs">0</span>
+            </div>
+            <div class="flex-grow overflow-y-auto">
+                <table class="w-full text-left">
+                    <thead class="text-[10px] text-gray-400 bg-black/40 sticky top-0 uppercase font-bold">
+                        <tr><th class="p-4">Đồng Coin</th><th class="p-4">Vị thế</th><th class="p-4">Vốn</th><th class="p-4 text-right">Lời/Lỗ (%)</th></tr>
+                    </thead>
+                    <tbody id="activeBody" class="mono text-sm"></tbody>
+                </table>
+            </div>
+            <div class="p-4 bg-yellow-400/5 text-right border-t border-white/5">
+                <span class="text-[10px] text-gray-500 uppercase mr-4">Tổng PnL tạm tính:</span>
+                <span id="totalActivePnL" class="mono font-bold text-green-400">+$0.00</span>
+            </div>
+        </div>
+
+        <div class="col-span-3 card flex flex-col overflow-hidden">
+            <div class="p-4 border-b border-white/5 flex justify-between items-center">
+                <span class="luffy-font text-lg text-gray-400">Nhật ký</span>
+                <i class="fas fa-scroll text-gray-600"></i>
+            </div>
+            <div class="flex-grow overflow-y-auto">
+                <table class="w-full text-[11px] mono">
+                    <tbody id="historyBody" class="divide-y divide-white/5"></tbody>
+                </table>
+            </div>
         </div>
     </div>
 
     <script>
-        async function updateUI() {
+        let isRunning = false;
+
+        async function sync() {
             try {
                 const res = await fetch('/api/status');
                 const data = await res.json();
                 
-                // Cập nhật số dư
-                document.getElementById('currentBalance').innerText = '$' + data.status.currentBalance.toFixed(2);
-                document.getElementById('initialBalance').innerText = '$' + data.status.initialBalance.toFixed(2);
-                document.getElementById('highestBalance').innerText = '$' + data.status.highestBalance.toFixed(2);
-                
-                // Cập nhật trạng thái nút
-                const dot = document.getElementById('statusDot');
-                const btn = document.getElementById('toggleBtn');
-                if(data.botSettings.isRunning) {
-                    dot.className = "w-3 h-3 rounded-full status-running";
-                    btn.innerText = "STOP SYSTEM";
-                    btn.classList.replace('btn-vipro', 'bg-red-500');
-                } else {
-                    dot.className = "w-3 h-3 rounded-full status-stopped";
-                    btn.innerText = "START SYSTEM";
-                    btn.className = "btn-vipro px-6 py-2 rounded-full font-bold uppercase text-sm";
-                }
-
-                // Cập nhật bảng history
-                const tbody = document.getElementById('historyBody');
-                tbody.innerHTML = data.history.reverse().map(log => `
-                    <tr class="border-b border-white/5 hover:bg-white/5 transition">
-                        <td class="py-3 font-bold text-cyan-300">${log.symbol}</td>
-                        <td class="py-3">
-                            <span class="px-2 py-0.5 rounded text-[10px] ${log.side === 'LONG' ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}">
-                                ${log.side}
-                            </span>
-                        </td>
-                        <td class="py-3 text-gray-400">$${log.capital}</td>
-                        <td class="py-3 text-[11px]">
-                            <span class="text-green-400">T: ${log.tp}</span><br>
-                            <span class="text-red-400">S: ${log.sl}</span>
-                        </td>
-                        <td class="py-3 text-[10px] opacity-50">${log.time.split(',')[1]}</td>
-                    </tr>
-                `).join('');
-
-                // Fill inputs if empty
-                if(!document.activeElement.classList.contains('cyber-input')) {
-                    document.getElementById('maxPositions').value = data.botSettings.maxPositions;
+                // Đồng bộ settings
+                if (document.activeElement.tagName !== 'INPUT') {
+                    document.getElementById('isProtectProfit').checked = data.botSettings.isProtectProfit;
                     document.getElementById('invValue').value = data.botSettings.invValue;
+                    document.getElementById('maxPositions').value = data.botSettings.maxPositions;
                     document.getElementById('invType').value = data.botSettings.invType;
                 }
 
-            } catch (e) { console.error("UI Update Error", e); }
+                // Header & Stop Bot
+                document.getElementById('equity').innerText = '$' + data.status.currentBalance.toFixed(2);
+                let slAt = data.botSettings.accountSLType === 'fixed' 
+                    ? data.status.highestBalance - data.botSettings.accountSLValue 
+                    : data.status.highestBalance * (1 - data.botSettings.accountSLValue / 100);
+                document.getElementById('slBotAt').innerText = '$' + slAt.toFixed(2);
+
+                // Nút Run
+                isRunning = data.botSettings.isRunning;
+                const btn = document.getElementById('runBtn');
+                btn.innerText = isRunning ? "DỪNG LẠI (PANIC STOP)" : "RA KHƠI (START BOT)";
+                btn.style.background = isRunning ? "rgba(230, 57, 70, 0.2)" : "transparent";
+                btn.style.color = isRunning ? "#e63946" : "white";
+
+                // Vị thế đang chạy
+                const activeBody = document.getElementById('activeBody');
+                let totalPnL = 0;
+                activeBody.innerHTML = data.activePositions.map(p => {
+                    totalPnL += parseFloat(p.pnl);
+                    return `<tr class="border-b border-white/5 hover:bg-white/5">
+                        <td class="p-4 font-bold">${p.symbol}</td>
+                        <td class="p-4"><span class="px-2 py-0.5 rounded text-[10px] font-bold ${p.side === 'LONG' ? 'bg-green-500 text-black' : 'bg-red-500 text-white'}">${p.side}</span></td>
+                        <td class="p-4 text-gray-500 italic">$${p.margin}</td>
+                        <td class="p-4 text-right font-bold ${p.pnl >= 0 ? 'text-green-400' : 'text-red-500'}">${p.pnlPercent}%</td>
+                    </tr>`;
+                }).join('');
+                document.getElementById('activeCount').innerText = data.activePositions.length;
+                document.getElementById('totalActivePnL').innerText = (totalPnL >= 0 ? '+' : '') + '$' + totalPnL.toFixed(2);
+
+                // Lịch sử & Thống kê
+                let win = 0, profit = 0, loss = 0;
+                data.history.forEach(h => {
+                    if (h.pnl > 0) { win++; profit += h.pnl; } else { loss += Math.abs(h.pnl); }
+                });
+                document.getElementById('winRateText').innerText = data.history.length > 0 ? Math.round(win/data.history.length*100) + '%' : '0%';
+                document.getElementById('totalProfit').innerText = '+$' + profit.toFixed(1);
+                document.getElementById('totalLoss').innerText = '-$' + loss.toFixed(1);
+                
+                document.getElementById('historyBody').innerHTML = data.history.reverse().map(h => `
+                    <tr class="hover:bg-red-500/5">
+                        <td class="p-3 text-gray-500">${h.symbol}<br><span class="text-[9px] uppercase">${h.side}</span></td>
+                        <td class="p-3 text-right font-bold ${h.pnl > 0 ? 'text-green-400' : 'text-red-500'}">${h.pnl > 0 ? '+' : ''}${h.pnl}%</td>
+                    </tr>
+                `).join('');
+
+            } catch (e) { console.error("Kết nối hạm đội thất bại..."); }
         }
 
         async function updateSettings() {
             const body = {
-                maxPositions: parseInt(document.getElementById('maxPositions').value),
+                isProtectProfit: document.getElementById('isProtectProfit').checked,
                 invValue: parseFloat(document.getElementById('invValue').value),
-                invType: document.getElementById('invType').value
+                invType: document.getElementById('invType').value,
+                maxPositions: parseInt(document.getElementById('maxPositions').value)
             };
-            await fetch('/api/settings', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify(body)
-            });
-            alert("✅ Đã cập nhật cấu hình VIP!");
+            await fetch('/api/settings', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body) });
+            alert("Đã cập nhật chiến thuật!");
         }
 
-        async function toggleBot() {
-            const res = await fetch('/api/status');
-            const data = await res.json();
-            await fetch('/api/settings', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ isRunning: !data.botSettings.isRunning })
-            });
+        async function toggleRun() {
+            await fetch('/api/settings', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ isRunning: !isRunning }) });
+            sync();
         }
 
-        setInterval(updateUI, 2000);
-        updateUI();
+        setInterval(sync, 2000);
+        sync();
     </script>
 </body>
 </html>
