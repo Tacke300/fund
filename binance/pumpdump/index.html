@@ -3,183 +3,177 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>LUFFY PIRATE BOT</title>
+    <title>LUFFY PIRATE KING BOT</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=Bangers&family=JetBrains+Mono:wght@400;700&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Bangers&family=JetBrains+Mono:wght@400;700&family=Inter:wght@400;900&display=swap');
         
         body {
             background: #050505;
             color: #eee;
             font-family: 'Inter', sans-serif;
-            background-image: linear-gradient(rgba(0,0,0,0.85), rgba(0,0,0,0.85)), url('https://images.alphacoders.com/605/605592.png');
+            background-image: linear-gradient(rgba(0,0,0,0.9), rgba(0,0,0,0.9)), url('https://images.alphacoders.com/605/605592.png');
             background-size: cover;
             background-position: center;
             height: 100vh;
-            overflow: hidden; /* Chống tràn toàn trang */
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
         }
         .luffy-font { font-family: 'Bangers', cursive; letter-spacing: 1.5px; }
         .mono { font-family: 'JetBrains Mono', monospace; }
         
-        /* Card Style */
+        /* Glassmorphism Card */
         .card { 
-            background: rgba(15, 15, 20, 0.7); 
-            backdrop-filter: blur(12px); 
-            border: 1px solid rgba(255, 255, 255, 0.05); 
-            border-radius: 16px;
-            box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+            background: rgba(20, 20, 25, 0.7); 
+            backdrop-filter: blur(15px); 
+            border: 1px solid rgba(255, 255, 255, 0.08); 
+            border-radius: 20px;
         }
-        
-        .btn-luffy { 
-            background: linear-gradient(135deg, #e63946 0%, #9b2226 100%);
-            color: white; 
-            transition: all 0.2s; 
-            font-weight: bold; 
-            box-shadow: 0 4px 15px rgba(230, 57, 70, 0.3);
-        }
-        .btn-luffy:hover { transform: scale(1.02); filter: brightness(1.2); }
-        .btn-luffy:active { transform: scale(0.98); }
 
-        /* Custom Scrollbar */
+        /* Scrollbar tinh tế */
         ::-webkit-scrollbar { width: 4px; }
-        ::-webkit-scrollbar-track { background: rgba(0,0,0,0.1); }
         ::-webkit-scrollbar-thumb { background: #444; border-radius: 10px; }
-        ::-webkit-scrollbar-thumb:hover { background: #e63946; }
+        ::-webkit-scrollbar-thumb:hover { background: #ff4d4d; }
+
+        /* Animation cho nút Running */
+        @keyframes pulse-red {
+            0% { box-shadow: 0 0 0 0 rgba(220, 38, 38, 0.7); }
+            70% { box-shadow: 0 0 0 15px rgba(220, 38, 38, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(220, 38, 38, 0); }
+        }
+        .btn-running { animation: pulse-red 2s infinite; }
 
         input, select { 
-            background: rgba(255,255,255,0.05); 
+            background: rgba(0,0,0,0.4); 
             border: 1px solid rgba(255,255,255,0.1); 
             color: white; 
-            padding: 8px 12px; 
-            border-radius: 8px; 
+            padding: 10px; 
+            border-radius: 10px; 
             outline: none;
-            transition: 0.3s;
         }
-        input:focus { border-color: #e63946; background: rgba(255,255,255,0.1); }
+        input:focus { border-color: #ff4d4d; }
     </style>
 </head>
-<body class="p-4 flex flex-col h-screen max-h-screen">
+<body class="p-4">
 
-    <header class="flex justify-between items-center mb-4 px-2">
+    <header class="flex justify-between items-center mb-6 bg-black/40 p-4 rounded-2xl border border-white/5">
         <div class="flex items-center gap-4">
             <div class="relative">
-                <img src="https://api.dicebear.com/7.x/avataaars/svg?seed=Luffy" class="w-14 h-14 bg-red-600 rounded-2xl border-2 border-yellow-500 shadow-lg shadow-red-900/40">
-                <div id="statusDot" class="absolute -bottom-1 -right-1 w-4 h-4 bg-gray-500 border-2 border-black rounded-full"></div>
+                <img src="https://api.dicebear.com/7.x/avataaars/svg?seed=Luffy" class="w-16 h-16 bg-red-600 rounded-2xl border-2 border-yellow-500 shadow-2xl">
+                <div id="statusDot" class="absolute -bottom-1 -right-1 w-5 h-5 bg-gray-500 border-4 border-black rounded-full"></div>
             </div>
             <div>
-                <h1 class="luffy-font text-3xl text-white uppercase italic">Pirate <span class="text-red-500">King</span> Bot</h1>
-                <div class="flex items-center gap-2">
-                    <span class="text-[10px] bg-red-500/20 text-red-400 px-2 py-0.5 rounded border border-red-500/30 font-bold uppercase tracking-tighter">Binance Futures</span>
-                    <span id="botMode" class="text-[10px] text-gray-500 font-bold uppercase">OFFLINE</span>
-                </div>
+                <h1 class="luffy-font text-4xl text-white uppercase italic leading-none">Pirate <span class="text-red-500">King</span></h1>
+                <p id="botMode" class="text-xs font-black text-gray-500 tracking-[0.2em] mt-1 uppercase">Hệ thống đang dừng</p>
             </div>
         </div>
         
-        <div class="flex gap-6">
+        <div class="flex gap-8">
             <div class="text-right">
-                <p class="text-[10px] text-gray-400 uppercase font-bold opacity-60">Vốn hiện tại</p>
-                <p id="equity" class="text-2xl font-black mono text-yellow-400">$0.00</p>
+                <p class="text-[10px] text-gray-500 uppercase font-bold mb-1">Số dư hạm đội</p>
+                <p id="equity" class="text-3xl font-black mono text-yellow-400 leading-none">$0.00</p>
             </div>
-            <div class="text-right border-l border-white/10 pl-6">
-                <p class="text-[10px] text-gray-400 uppercase font-bold opacity-60">Chốt chặn SL</p>
-                <p id="slBotAt" class="text-2xl font-black mono text-red-500">$0.00</p>
+            <div class="text-right border-l border-white/10 pl-8">
+                <p class="text-[10px] text-gray-500 uppercase font-bold mb-1">Giới hạn rút lui (SL)</p>
+                <p id="slBotAt" class="text-3xl font-black mono text-red-500 leading-none">$0.00</p>
             </div>
         </div>
     </header>
 
-    <div class="flex-grow grid grid-cols-12 gap-4 min-h-0 overflow-hidden">
+    <div class="flex-grow grid grid-cols-12 gap-6 min-h-0">
         
-        <div class="col-span-3 flex flex-col gap-4 min-h-0">
-            <div class="card p-5 border-t-2 border-yellow-500/50">
-                <h3 class="luffy-font text-lg text-yellow-500 mb-4 flex items-center gap-2">
-                    <i class="fas fa-cog"></i> Cài đặt hạm đội
-                </h3>
-                <div class="space-y-4">
-                    <div class="flex justify-between items-center bg-white/5 p-3 rounded-xl border border-white/5">
-                        <span class="text-xs font-bold uppercase text-gray-300">Auto SL Profit</span>
-                        <input type="checkbox" id="isProtectProfit" class="w-5 h-5 accent-red-600">
-                    </div>
-                    
-                    <div class="space-y-2">
-                        <label class="text-[10px] text-gray-500 uppercase font-bold ml-1">Vốn mỗi lệnh</label>
-                        <div class="flex gap-2">
-                            <input type="number" id="invValue" class="w-full mono font-bold" value="1.5">
-                            <select id="invType" class="text-xs font-bold">
-                                <option value="fixed">USD</option>
-                                <option value="percent">%</option>
-                            </select>
+        <div class="col-span-3 flex flex-col gap-6">
+            <div class="card p-6 flex flex-col justify-between h-full">
+                <div>
+                    <h3 class="luffy-font text-xl text-yellow-500 mb-6 flex items-center gap-3">
+                        <i class="fas fa-anchor"></i> Lệnh Truy Nã
+                    </h3>
+                    <div class="space-y-5">
+                        <div class="flex justify-between items-center bg-white/5 p-4 rounded-xl border border-white/5">
+                            <span class="text-xs font-bold uppercase text-gray-400">Bảo vệ lãi (Auto SL)</span>
+                            <input type="checkbox" id="isProtectProfit" class="w-6 h-6 accent-red-600 cursor-pointer">
                         </div>
-                    </div>
+                        
+                        <div class="space-y-2">
+                            <label class="text-[10px] text-gray-500 uppercase font-bold ml-1 italic">Vàng đặt cược mỗi lệnh</label>
+                            <div class="flex gap-2">
+                                <input type="number" id="invValue" class="w-full mono text-lg font-bold" value="1.5">
+                                <select id="invType" class="font-bold text-xs">
+                                    <option value="fixed">USD</option>
+                                    <option value="percent">%</option>
+                                </select>
+                            </div>
+                        </div>
 
-                    <div class="space-y-2">
-                        <label class="text-[10px] text-gray-500 uppercase font-bold ml-1">Số lệnh tối đa</label>
-                        <input type="number" id="maxPositions" class="w-full mono font-bold" value="10">
-                    </div>
+                        <div class="space-y-2">
+                            <label class="text-[10px] text-gray-500 uppercase font-bold ml-1 italic">Số hạm đội tối đa (Positions)</label>
+                            <input type="number" id="maxPositions" class="w-full mono text-lg font-bold" value="10">
+                        </div>
 
-                    <div class="pt-2 space-y-2">
-                        <button onclick="updateSettings()" class="btn-luffy w-full py-3 rounded-xl text-xs uppercase tracking-widest">
-                            <i class="fas fa-save mr-2"></i> Lưu cấu hình
-                        </button>
-                        <button id="runBtn" onclick="toggleRun()" class="w-full py-3 rounded-xl font-black border border-white/10 text-xs uppercase transition-all duration-500">
-                            Đang kiểm tra...
+                        <button onclick="updateSettings()" class="w-full py-3 rounded-xl text-[10px] font-bold uppercase tracking-widest bg-white/10 hover:bg-white/20 transition-all border border-white/10">
+                            Cập nhật thông số
                         </button>
                     </div>
                 </div>
-            </div>
 
-            <div class="card p-5 flex-grow flex flex-col justify-between border-b-2 border-green-500/50">
-                <div class="text-center">
-                    <p class="text-[10px] text-gray-500 uppercase font-bold tracking-widest mb-2">Tỉ lệ thắng</p>
-                    <div id="winRateText" class="luffy-font text-6xl text-green-400 drop-shadow-[0_0_10px_rgba(74,222,128,0.3)]">0%</div>
+                <div id="btnContainer" class="mt-8">
+                    <button id="runBtn" onclick="toggleRun()" class="w-full py-5 rounded-2xl font-black text-white uppercase text-sm tracking-widest transition-all duration-300 shadow-xl">
+                        ĐANG TẢI...
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-span-6 flex flex-col gap-4">
+            <div class="card flex flex-col h-full overflow-hidden border-t-4 border-red-500">
+                <div class="p-5 bg-white/5 border-b border-white/5 flex justify-between items-center">
+                    <span class="luffy-font text-2xl text-white italic tracking-wider">Hạm đội đang chiến đấu</span>
+                    <span id="activeCount" class="mono font-bold text-yellow-400 bg-yellow-400/10 px-4 py-1 rounded-full border border-yellow-400/20">0</span>
                 </div>
                 
-                <div class="grid grid-cols-2 gap-4 mt-4">
-                    <div class="bg-green-500/5 p-3 rounded-xl border border-green-500/10 text-center">
-                        <span class="text-[9px] text-gray-500 uppercase block font-bold">Tổng Lãi</span>
-                        <span id="totalProfit" class="text-green-400 font-bold mono">+$0</span>
-                    </div>
-                    <div class="bg-red-500/5 p-3 rounded-xl border border-red-500/10 text-center">
-                        <span class="text-[9px] text-gray-500 uppercase block font-bold">Tổng Lỗ</span>
-                        <span id="totalLoss" class="text-red-400 font-bold mono">-$0</span>
-                    </div>
+                <div class="flex-grow overflow-y-auto">
+                    <table class="w-full text-left">
+                        <thead class="text-[10px] text-gray-500 bg-black/40 sticky top-0 uppercase font-bold z-10">
+                            <tr>
+                                <th class="p-5">Cặp Tiền</th>
+                                <th class="p-5">Vị Thế</th>
+                                <th class="p-5 text-right">PnL (%)</th>
+                            </tr>
+                        </thead>
+                        <tbody id="activeBody" class="mono text-sm divide-y divide-white/5">
+                            </tbody>
+                    </table>
+                </div>
+
+                <div class="p-5 bg-black/40 border-t border-white/5 flex justify-between items-center">
+                    <span class="text-xs text-gray-500 uppercase font-bold">Tổng PnL tạm tính:</span>
+                    <span id="totalActivePnL" class="text-2xl font-black mono text-green-400">+$0.00</span>
                 </div>
             </div>
         </div>
 
-        <div class="col-span-6 card flex flex-col overflow-hidden border-t-2 border-red-500">
-            <div class="p-4 bg-white/5 border-b border-white/5 flex justify-between items-center">
-                <span class="luffy-font text-xl text-white italic">Vị thế trên sàn</span>
-                <span id="activeCount" class="mono font-bold text-red-500 bg-red-500/10 px-4 py-1 rounded-lg border border-red-500/20 text-sm">0</span>
-            </div>
-            
-            <div class="flex-grow overflow-y-auto scroll-area">
-                <table class="w-full text-left border-collapse">
-                    <thead class="text-[10px] text-gray-400 bg-black/60 sticky top-0 uppercase font-bold z-10">
-                        <tr>
-                            <th class="p-4 border-b border-white/5">Đồng Coin</th>
-                            <th class="p-4 border-b border-white/5">Vị thế</th>
-                            <th class="p-4 border-b border-white/5 text-right">Lời/Lỗ (%)</th>
-                        </tr>
-                    </thead>
-                    <tbody id="activeBody" class="mono text-sm divide-y divide-white/5">
-                        </tbody>
-                </table>
+        <div class="col-span-3 flex flex-col gap-6">
+            <div class="card p-6 text-center border-b-4 border-green-500">
+                <p class="text-[10px] text-gray-500 uppercase font-bold tracking-widest mb-2">Tỉ lệ thắng (Winrate)</p>
+                <div id="winRateText" class="luffy-font text-6xl text-green-400">0%</div>
+                <div class="flex gap-2 mt-4">
+                    <div class="flex-grow bg-green-500/10 rounded-lg p-2 border border-green-500/20">
+                        <span id="totalProfit" class="text-green-400 font-bold mono text-xs">+$0</span>
+                    </div>
+                    <div class="flex-grow bg-red-500/10 rounded-lg p-2 border border-red-500/20">
+                        <span id="totalLoss" class="text-red-400 font-bold mono text-xs">-$0</span>
+                    </div>
+                </div>
             </div>
 
-            <div class="p-4 bg-black/40 border-t border-white/5 flex justify-between items-center">
-                <span class="text-[10px] text-gray-500 uppercase font-bold">Tổng PnL hiện tại:</span>
-                <span id="totalActivePnL" class="text-xl font-black mono text-green-400">+$0.00</span>
-            </div>
-        </div>
-
-        <div class="col-span-3 card flex flex-col overflow-hidden border-t-2 border-gray-500">
-            <div class="p-4 bg-white/5 border-b border-white/5 flex justify-between items-center">
-                <span class="luffy-font text-lg text-gray-400">Nhật ký hải trình</span>
-                <i class="fas fa-history text-gray-600"></i>
-            </div>
-            <div class="flex-grow overflow-y-auto p-2">
-                <div id="historyBody" class="space-y-2">
+            <div class="card flex flex-col flex-grow overflow-hidden border-t-4 border-gray-600">
+                <div class="p-4 bg-white/5 border-b border-white/5 flex justify-between items-center">
+                    <span class="luffy-font text-lg text-gray-400 italic">Nhật ký hải trình</span>
+                    <i class="fas fa-scroll text-gray-600"></i>
+                </div>
+                <div class="flex-grow overflow-y-auto p-4 space-y-3" id="historyBody">
                     </div>
             </div>
         </div>
@@ -194,54 +188,53 @@
                 const res = await fetch('/api/status');
                 const data = await res.json();
                 
-                // Cập nhật UI Header
+                // Cập nhật Vốn & SL
                 document.getElementById('equity').innerText = '$' + (data.status.currentBalance || 0).toFixed(2);
-                
                 let slAt = data.botSettings.accountSLType === 'fixed' 
                     ? data.status.highestBalance - data.botSettings.accountSLValue 
                     : data.status.highestBalance * (1 - data.botSettings.accountSLValue / 100);
                 document.getElementById('slBotAt').innerText = '$' + (slAt || 0).toFixed(2);
 
-                // Nút Run & Status
+                // TRẠNG THÁI NÚT START/STOP
                 isRunning = data.botSettings.isRunning;
                 const btn = document.getElementById('runBtn');
                 const dot = document.getElementById('statusDot');
                 const modeText = document.getElementById('botMode');
 
                 if (isRunning) {
-                    btn.innerText = "DỪNG HÀNH TRÌNH";
-                    btn.className = "w-full py-3 rounded-xl font-black bg-red-500/10 text-red-500 border border-red-500 hover:bg-red-500 hover:text-white uppercase text-xs";
-                    dot.className = "absolute -bottom-1 -right-1 w-4 h-4 bg-green-500 border-2 border-black rounded-full shadow-[0_0_10px_#22c55e]";
-                    modeText.innerText = "RUNNING";
-                    modeText.className = "text-[10px] text-green-400 font-bold uppercase tracking-widest";
+                    btn.innerText = "🛑 DỪNG CHIẾN ĐẤU";
+                    btn.className = "w-full py-5 rounded-2xl font-black bg-red-600 text-white border-b-4 border-red-800 uppercase text-sm tracking-widest shadow-2xl btn-running transition-all";
+                    dot.className = "absolute -bottom-1 -right-1 w-5 h-5 bg-green-500 border-4 border-black rounded-full shadow-[0_0_15px_#22c55e]";
+                    modeText.innerText = "HÀNH QUÂN TRÊN BIỂN";
+                    modeText.classList.replace('text-gray-500', 'text-green-500');
                 } else {
-                    btn.innerText = "GIƯƠNG BUỒM RA KHƠI";
-                    btn.className = "w-full py-3 rounded-xl font-black bg-white/5 text-white border border-white/10 hover:border-red-500 uppercase text-xs";
-                    dot.className = "absolute -bottom-1 -right-1 w-4 h-4 bg-gray-500 border-2 border-black rounded-full";
-                    modeText.innerText = "OFFLINE";
-                    modeText.className = "text-[10px] text-gray-500 font-bold uppercase tracking-widest";
+                    btn.innerText = "🚢 GIƯƠNG BUỒM (START)";
+                    btn.className = "w-full py-5 rounded-2xl font-black bg-green-500 text-white border-b-4 border-green-800 uppercase text-sm tracking-widest shadow-lg hover:scale-[1.02] transition-all";
+                    dot.className = "absolute -bottom-1 -right-1 w-5 h-5 bg-gray-600 border-4 border-black rounded-full";
+                    modeText.innerText = "HÀNH QUÂN TẠI CHỖ";
+                    modeText.classList.replace('text-green-500', 'text-gray-500');
                 }
 
-                // Vị thế đang chạy
+                // Cập nhật Vị thế (Positions)
                 const activeBody = document.getElementById('activeBody');
                 let totalPnL = 0;
                 activeBody.innerHTML = data.activePositions.map(p => {
                     totalPnL += parseFloat(p.pnl || 0);
                     const isLong = p.side === 'LONG';
                     return `
-                        <tr class="hover:bg-white/5 transition-colors">
-                            <td class="p-4">
-                                <span class="block font-bold text-white">${p.symbol}</span>
-                                <span class="text-[9px] text-gray-500">Margin: $${p.margin}</span>
+                        <tr class="hover:bg-white/5 transition-colors group">
+                            <td class="p-5 font-bold">
+                                <span class="text-white text-base">${p.symbol}</span>
+                                <span class="block text-[10px] text-gray-500 font-normal">Margin: $${p.margin}</span>
                             </td>
-                            <td class="p-4">
-                                <span class="px-2 py-1 rounded text-[10px] font-black ${isLong ? 'bg-green-500/20 text-green-500' : 'bg-red-500/20 text-red-500'}">
+                            <td class="p-5">
+                                <span class="px-3 py-1 rounded-md text-[10px] font-black ${isLong ? 'bg-green-500/20 text-green-500' : 'bg-red-500/20 text-red-500'} border ${isLong ? 'border-green-500/20' : 'border-red-500/20'}">
                                     ${p.side}
                                 </span>
                             </td>
-                            <td class="p-4 text-right">
-                                <div class="font-bold ${p.pnl >= 0 ? 'text-green-400' : 'text-red-500'}">${p.pnlPercent}%</div>
-                                <div class="text-[10px] opacity-50">$${p.pnl}</div>
+                            <td class="p-5 text-right font-bold">
+                                <div class="${p.pnl >= 0 ? 'text-green-400' : 'text-red-500'} text-lg">${p.pnlPercent}%</div>
+                                <div class="text-[10px] opacity-40">$${p.pnl}</div>
                             </td>
                         </tr>
                     `;
@@ -249,33 +242,31 @@
 
                 document.getElementById('activeCount').innerText = data.activePositions.length;
                 document.getElementById('totalActivePnL').innerText = (totalPnL >= 0 ? '+' : '') + '$' + totalPnL.toFixed(2);
-                document.getElementById('totalActivePnL').className = `text-xl font-black mono ${totalPnL >= 0 ? 'text-green-400' : 'text-red-500'}`;
+                document.getElementById('totalActivePnL').className = `text-2xl font-black mono ${totalPnL >= 0 ? 'text-green-400' : 'text-red-500'}`;
 
-                // Thống kê & Lịch sử
+                // Winrate & History
                 let win = 0, profit = 0, loss = 0;
                 data.history.forEach(h => {
-                    const pnlVal = parseFloat(h.pnl || 0);
-                    if (pnlVal > 0) { win++; profit += pnlVal; } 
-                    else { loss += Math.abs(pnlVal); }
+                    const val = parseFloat(h.pnl || 0);
+                    if (val > 0) { win++; profit += val; } else { loss += Math.abs(val); }
                 });
-
                 document.getElementById('winRateText').innerText = data.history.length > 0 ? Math.round(win/data.history.length*100) + '%' : '0%';
                 document.getElementById('totalProfit').innerText = '+$' + profit.toFixed(1);
                 document.getElementById('totalLoss').innerText = '-$' + loss.toFixed(1);
 
                 document.getElementById('historyBody').innerHTML = data.history.slice().reverse().map(h => `
-                    <div class="bg-black/30 p-3 rounded-lg border-l-2 ${h.pnl > 0 ? 'border-green-500' : 'border-red-500'} flex justify-between items-center">
+                    <div class="bg-black/40 p-3 rounded-xl border-l-4 ${h.pnl > 0 ? 'border-green-500' : 'border-red-500'} flex justify-between items-center transition-all hover:translate-x-1">
                         <div>
-                            <span class="text-xs font-bold text-gray-200">${h.symbol}</span>
-                            <span class="block text-[9px] text-gray-500 uppercase">${h.side} | ${h.time.split(',')[1]}</span>
+                            <p class="text-xs font-black text-gray-200">${h.symbol}</p>
+                            <p class="text-[9px] text-gray-500 uppercase">${h.side} | ${h.time.split(',')[1]}</p>
                         </div>
-                        <div class="text-right font-bold ${h.pnl > 0 ? 'text-green-400' : 'text-red-400'} text-xs">
+                        <p class="font-bold ${h.pnl > 0 ? 'text-green-400' : 'text-red-400'} text-xs">
                             ${h.pnl > 0 ? '+' : ''}${h.pnl}%
-                        </div>
+                        </p>
                     </div>
-                `).join('') || '<p class="text-center text-gray-600 text-[10px] mt-10 uppercase tracking-widest">Chưa có nhật ký</p>';
+                `).join('') || '<p class="text-gray-700 text-[10px] text-center mt-10">CHƯA CÓ LỊCH SỬ</p>';
 
-            } catch (e) { console.error("Mất kết nối hạm đội..."); }
+            } catch (e) { console.error("⚠️ Mất kết nối hạm đội!"); }
         }
 
         async function updateSettings() {
@@ -286,11 +277,12 @@
                 maxPositions: parseInt(document.getElementById('maxPositions').value)
             };
             await fetch('/api/settings', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body) });
-            alert("Chiến thuật đã được cập nhật, thưa thuyền trưởng!");
+            alert("✅ Lệnh của thuyền trưởng đã được thực thi!");
         }
 
         async function toggleRun() {
-            await fetch('/api/settings', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ isRunning: !isRunning }) });
+            const nextStatus = !isRunning;
+            await fetch('/api/settings', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ isRunning: nextStatus }) });
             sync();
         }
 
