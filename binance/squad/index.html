@@ -1,110 +1,66 @@
 <!DOCTYPE html>
-<html lang="vi">
+<html>
 <head>
-    <meta charset="UTF-8">
-    <title>Binance Square Analyst Bot</title>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <title>Binance Square Control</title>
     <style>
-        :root {
-            --bg: #0b0e11; --card: #1e2329; --yellow: #fcd535; --text: #eaecef;
-            --muted: #848e9c; --green: #0ecb81; --red: #f6465d;
-        }
-        body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', Tahoma; margin: 0; padding: 20px; }
-        .container { max-width: 1000px; margin: auto; }
-        .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #333; padding-bottom: 20px; }
-        .stats-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; margin: 20px 0; }
-        .stat-card { background: var(--card); padding: 20px; border-radius: 12px; border: 1px solid #333; text-align: center; }
-        .stat-value { font-size: 32px; font-weight: bold; color: var(--yellow); }
-        .card { background: var(--card); border-radius: 12px; padding: 20px; border: 1px solid #333; }
-        .btn-group { display: flex; gap: 10px; margin-bottom: 20px; }
-        .btn { border: none; padding: 12px 24px; border-radius: 8px; font-weight: bold; cursor: pointer; color: white; }
-        .btn-start { background: var(--green); }
-        .btn-stop { background: var(--red); }
-        .btn-sort { background: #474d57; font-size: 12px; }
-        .btn-sort.active { background: var(--yellow); color: black; }
-        table { width: 100%; border-collapse: collapse; margin-top: 10px; }
-        th { text-align: left; color: var(--muted); padding: 12px; border-bottom: 1px solid #333; }
-        td { padding: 15px 12px; border-bottom: 1px solid #2b3139; }
-        .coin-tag { background: rgba(252, 213, 53, 0.1); color: var(--yellow); padding: 4px 8px; border-radius: 4px; }
-        .dot { height: 10px; width: 10px; border-radius: 50%; display: inline-block; margin-right: 5px; }
-        .online { background: var(--green); box-shadow: 0 0 10px var(--green); }
-        .offline { background: var(--red); }
+        body { background: #0b0e11; color: #eaecef; font-family: sans-serif; padding: 20px; }
+        .card { background: #1e2329; border-radius: 10px; padding: 20px; margin-bottom: 20px; border: 1px solid #333; }
+        .btn { padding: 10px 20px; border-radius: 5px; cursor: pointer; border: none; font-weight: bold; }
+        .btn-login { background: #fcd535; color: #000; }
+        .btn-check { background: #474d57; color: #fff; }
+        .btn-start { background: #0ecb81; color: #fff; }
+        .user-info { font-size: 1.2em; color: #fcd535; margin: 10px 0; }
+        table { width: 100%; margin-top: 20px; border-collapse: collapse; }
+        th, td { text-align: left; padding: 10px; border-bottom: 1px solid #333; }
     </style>
 </head>
 <body>
-<div class="container">
-    <div class="header">
-        <h1 style="color: var(--yellow)"><i class="fa-solid fa-chart-line"></i> BINANCE SQUARE ANALYST</h1>
-        <div id="statusInfo"><span class="dot offline"></span> Hệ thống đang dừng</div>
-    </div>
+    <h1>🚀 Binance Square Squad Bot</h1>
 
-    <div class="stats-grid">
-        <div class="stat-card"><div style="color:var(--muted)">Tổng bài đăng</div><div class="stat-value" id="totalPosts">0</div></div>
-        <div class="stat-card"><div style="color:var(--muted)">Lần đăng cuối</div><div class="stat-value" id="lastRun" style="font-size: 24px;">--:--</div></div>
-        <div class="stat-card"><div style="color:var(--muted)">Cổng hệ thống</div><div class="stat-value">9999</div></div>
+    <div class="card">
+        <h3>Bước 1: Xác thực tài khoản</h3>
+        <button class="btn btn-login" onclick="fetch('/login')">1. Mở trình duyệt Đăng nhập</button>
+        <button class="btn btn-check" onclick="updateInfo()">2. Kiểm tra trạng thái Acc</button>
+        
+        <div class="user-info" id="userInfo">Account: Chưa kiểm tra</div>
+        <div id="userStats" style="color: #848e9c;">--</div>
     </div>
 
     <div class="card">
-        <div class="btn-group">
-            <button class="btn btn-start" onclick="fetch('/start')"><i class="fa-solid fa-play"></i> BẮT ĐẦU BOT</button>
-            <button class="btn btn-stop" onclick="fetch('/stop')"><i class="fa-solid fa-stop"></i> DỪNG BOT</button>
-        </div>
+        <h3>Bước 2: Điều khiển Bot</h3>
+        <button class="btn btn-start" onclick="fetch('/start')">BẮT ĐẦU ĐĂNG BÀI</button>
+        <button class="btn" style="background:#f6465d; color:white" onclick="fetch('/stop')">DỪNG</button>
+        <p id="botStatus">Trạng thái: Đang dừng</p>
+    </div>
 
-        <div style="margin-bottom: 15px;">
-            <span style="font-size: 13px; color: var(--muted);">Sắp xếp lượt xem: </span>
-            <button id="sNone" class="btn btn-sort active" onclick="setSort('none')">Mới nhất</button>
-            <button id="sDesc" class="btn btn-sort" onclick="setSort('desc')">View Cao -> Thấp</button>
-            <button id="sAsc" class="btn btn-sort" onclick="setSort('asc')">View Thấp -> Cao</button>
-        </div>
-
+    <div class="card">
+        <h3>Lịch sử đăng bài (Tổng: <span id="total">0</span>)</h3>
         <table>
-            <thead>
-                <tr><th>Đồng Coin</th><th>Thời gian</th><th>Lượt xem thực</th><th>Trạng thái</th></tr>
-            </thead>
-            <tbody id="logTable"></tbody>
+            <thead><tr><th>Coin</th><th>Thời gian</th><th>Trạng thái</th></tr></thead>
+            <tbody id="logs"></tbody>
         </table>
     </div>
-</div>
 
-<script>
-    let currentSort = 'none';
+    <script>
+        async function updateInfo() {
+            const res = await fetch('/check');
+            const data = await res.json();
+            document.getElementById('userInfo').innerText = "Account: " + data.name;
+            document.getElementById('userStats').innerText = data.followers + " | Status: " + data.status;
+        }
 
-    function setSort(type) {
-        currentSort = type;
-        document.querySelectorAll('.btn-sort').forEach(b => b.classList.remove('active'));
-        if(type === 'none') document.getElementById('sNone').classList.add('active');
-        if(type === 'desc') document.getElementById('sDesc').classList.add('active');
-        if(type === 'asc') document.getElementById('sAsc').classList.add('active');
-        refresh();
-    }
-
-    async function refresh() {
-        const res = await fetch('/stats');
-        const data = await res.json();
-
-        document.getElementById('totalPosts').innerText = data.totalPosts;
-        document.getElementById('lastRun').innerText = data.lastRun || '--:--';
-        
-        const statusDiv = document.getElementById('statusInfo');
-        statusDiv.innerHTML = data.isRunning ? '<span class="dot online"></span> Đang hoạt động' : '<span class="dot offline"></span> Hệ thống dừng';
-
-        let history = [...data.history];
-        if (currentSort === 'desc') history.sort((a, b) => b.views - a.views);
-        if (currentSort === 'asc') history.sort((a, b) => a.views - b.views);
-
-        const rows = history.map(h => `
-            <tr>
-                <td><span class="coin-tag">$${h.coin}</span></td>
-                <td>${h.time}</td>
-                <td style="color: var(--yellow); font-weight: bold;"><i class="fa-solid fa-eye"></i> ${h.viewDisplay || 0}</td>
-                <td><span style="color: var(--green)">Thành công</span></td>
-            </tr>
-        `).join('');
-        document.getElementById('logTable').innerHTML = rows;
-    }
-
-    setInterval(refresh, 3000);
-    refresh();
-</script>
+        setInterval(async () => {
+            const res = await fetch('/stats');
+            const data = await res.json();
+            document.getElementById('total').innerText = data.totalPosts;
+            document.getElementById('botStatus').innerText = "Trạng thái: " + (data.isRunning ? "Đang chạy 🟢" : "Đang dừng 🔴");
+            document.getElementById('userInfo').innerText = "Account: " + data.userInfo.name;
+            document.getElementById('userStats').innerText = data.userInfo.followers + " | Status: " + data.userInfo.status;
+            
+            document.getElementById('logs').innerHTML = data.history.map(h => `
+                <tr><td>$${h.coin}</td><td>${h.time}</td><td style="color:#0ecb81">${h.status}</td></tr>
+            `).join('');
+        }, 3000);
+    </script>
 </body>
 </html>
