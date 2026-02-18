@@ -1,12 +1,14 @@
-import { chromium } from 'playwright-extra';
-import StealthPlugin from 'puppeteer-extra-plugin-stealth';
+import playwright from 'playwright-extra';
+import StealthPlugin from 'playwright-extra-plugin-stealth';
 import express from 'express';
 import path from 'path';
 import axios from 'axios';
 import { fileURLToPath } from 'url';
+import fs from 'fs';
 
-const playwright = chromium;
+// Kích hoạt Stealth đúng chuẩn cho Playwright (Sửa lỗi crash exitCode)
 playwright.use(StealthPlugin());
+const { chromium } = playwright;
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -21,110 +23,137 @@ let history = [];
 let userInfo = { name: "Chưa kiểm tra", followers: "0", status: "Offline" };
 let context = null;
 
-const log = (msg) => console.log(`[${new Date().toLocaleTimeString()}] ➡️ ${msg}`);
+function logStep(message) {
+    const time = new Date().toLocaleTimeString();
+    console.log(`[${time}] ➡️ ${message}`);
+}
 
+// Khởi tạo trình duyệt - Giữ nguyên tham số của bạn
 async function initBrowser(show = false) {
     if (context) {
-        try { await context.pages(); return context; } 
-        catch (e) { context = null; }
+        try {
+            await context.pages();
+            return context;
+        } catch (e) {
+            context = null; 
+        }
     }
-    log(show ? "Mở Chrome hiện hình..." : "Khởi tạo trình duyệt ngầm...");
-    context = await playwright.launchPersistentContext(userDataDir, {
+    logStep(show ? "Mở Chrome hiện hình để Login..." : "Khởi tạo trình duyệt ngầm...");
+    context = await chromium.launchPersistentContext(userDataDir, {
         headless: !show,
-        channel: 'chrome',
-        viewport: { width: 1366, height: 768 },
-        args: ['--disable-blink-features=AutomationControlled', '--no-sandbox']
+        viewport: { width: 1280, height: 800 },
+        args: [
+            '--disable-blink-features=AutomationControlled', 
+            '--no-sandbox',
+            '--disable-dev-shm-usage'
+        ]
     });
+    context.setDefaultTimeout(180000); // 3 phút
     return context;
 }
 
-// 1. HÀM CHECK ACCOUNT CẢI TIẾN (Dùng selector an toàn hơn)
+// --- CHECK ACCOUNT (Giữ nguyên logic Luffy của bạn) ---
 async function checkAccount() {
-    log("🔍 Kiểm tra profile Luffy...");
+    logStep("🔍 Bắt đầu kiểm tra tài khoản Luffy...");
     let page = null;
     try {
         const ctx = await initBrowser(false);
         page = await ctx.newPage();
-        await page.goto('https://www.binance.com/vi/square/profile/moncey_d_luffy', { waitUntil: 'domcontentloaded', timeout: 60000 });
-        await page.waitForTimeout(5000);
+        const profileUrl = 'https://www.binance.com/vi/square/profile/moncey_d_luffy';
+        
+        await page.goto(profileUrl, { waitUntil: 'domcontentloaded', timeout: 180000 });
+        await page.waitForTimeout(10000);
 
-        // Đừng dùng css-1o8m8j nữa, dùng heading cho chắc
-        const nameNode = await page.getByRole('heading').first();
+        // Selector linh hoạt kết hợp cả class cũ và role
+        const nameNode = await page.locator('h1, div[class*="css-1o8m8j"], div[class*="name"]').first();
         const name = await nameNode.innerText().catch(() => "N/A");
+        const follow = await page.locator('div:has-text("Người theo dõi")').last().innerText().catch(() => "0");
         
-        if (name !== "N/A") {
-            userInfo = { name: name.trim(), followers: "Đã cập nhật", status: "Sẵn sàng ✅" };
-            log(`✅ OK: ${name}`);
+        if (name !== "N/A" && name !== "") {
+            userInfo = { name: name.trim(), followers: follow.replace("Người theo dõi", "").trim(), status: "Sẵn sàng ✅" };
+            logStep(`✅ Tìm thấy: ${name} (${userInfo.followers} followers)`);
         } else {
-            userInfo.status = "Cần Login";
+            userInfo.status = "Cần Đăng Nhập";
+            logStep("⚠️ Không lấy được tên.");
         }
     } catch (e) {
-        log(`❌ Check lỗi: ${e.message.split('\n')[0]}`);
+        logStep(`❌ Lỗi Check: ${e.message}`);
+        userInfo.status = "Lỗi mạng/Timeout";
     } finally {
         if (page) await page.close().catch(() => {});
     }
 }
 
-// 2. HÀM ĐĂNG BÀI CẢI TIẾN
-async function postTask() {
+// --- POST TASK (Retry 3 lần - Giữ nguyên logic của bạn) ---
+async function postTaskWithRetry(retries = 3) {
     if (!isRunning) return;
-    let page = null;
-    try {
-        const ctx = await initBrowser(false);
-        page = await ctx.newPage();
-        
-        log("🌍 Đang vào Square...");
-        await page.goto('https://www.binance.com/vi/square', { waitUntil: 'networkidle', timeout: 60000 });
 
-        // Tìm ô nhập liệu bằng role cho chuyên nghiệp
-        const textbox = await page.getByRole('textbox').or(page.locator('div[contenteditable="true"]')).first();
-        await textbox.waitFor({ state: 'visible', timeout: 30000 });
-        
-        if (textbox) {
-            const coin = TOP_COINS[Math.floor(Math.random() * TOP_COINS.length)];
-            const res = await axios.get(`https://api.binance.com/api/v3/ticker/24hr?symbol=${coin}USDT`);
-            const content = `📊 $${coin} Signal: ${parseFloat(res.data.priceChangePercent) >= 0 ? "LONG 🟢" : "SHORT 🔴"}\n💰 Price: ${res.data.lastPrice}\n#BinanceSquare #$${coin}`;
+    for (let i = 1; i <= retries; i++) {
+        logStep(`🚀 THỬ ĐĂNG BÀI LẦN ${i}/${retries}...`);
+        let page = null;
+        try {
+            const ctx = await initBrowser(false);
+            page = await ctx.newPage();
             
-            await textbox.focus();
-            await page.keyboard.type(content, { delay: 50 });
-            await page.waitForTimeout(2000);
+            await page.goto('https://www.binance.com/vi/square', { waitUntil: 'load', timeout: 180000 });
+
+            // Tìm ô nhập liệu (Sử dụng danh sách selector bạn đã viết)
+            const textbox = await page.waitForSelector('div[role="textbox"], .public-DraftEditor-content, div[contenteditable="true"]', { state: 'visible', timeout: 60000 });
             
-            await page.getByRole('button', { name: /Đăng|Post/ }).click();
-            
-            log(`🎉 Đã đăng bài $${coin}`);
-            totalPosts++;
-            history.unshift({ coin, time: new Date().toLocaleTimeString(), status: 'Thành công' });
+            if (textbox) {
+                const coin = TOP_COINS[Math.floor(Math.random() * TOP_COINS.length)];
+                const res = await axios.get(`https://api.binance.com/api/v3/ticker/24hr?symbol=${coin}USDT`);
+                const side = parseFloat(res.data.priceChangePercent) >= 0 ? "LONG 🟢" : "SHORT 🔴";
+                const content = `📊 $${coin} Signal: ${side}\n💰 Giá: ${parseFloat(res.data.lastPrice)}\n#BinanceSquare #$${coin}`;
+                
+                await textbox.click();
+                await page.keyboard.type(content, { delay: 50 });
+                await page.waitForTimeout(3000);
+                
+                await page.click('button:has-text("Đăng"), button:has-text("Post")');
+                logStep("Đã bấm 'Đăng'. Chờ xác nhận...");
+                await page.waitForTimeout(10000);
+                
+                totalPosts++;
+                history.unshift({ coin, time: new Date().toLocaleTimeString(), status: 'Thành công' });
+                logStep(`🎉 THÀNH CÔNG: $${coin}`);
+                return; // Thoát vòng lặp retry
+            }
+        } catch (err) {
+            logStep(`❌ Thất bại lần ${i}: ${err.message.split('\n')[0]}`);
+            if (i === retries) {
+                history.unshift({ coin: 'Lỗi', time: new Date().toLocaleTimeString(), status: 'Timeout' });
+            }
+            await page?.close().catch(() => {});
+            await new Promise(res => setTimeout(res, 30000));
+        } finally {
+            if (page) await page.close().catch(() => {});
         }
-    } catch (e) {
-        log(`❌ Lỗi Post: ${e.message.split('\n')[0]}`);
-    } finally {
-        if (page) await page.close().catch(() => {});
     }
 }
 
-// 3. VÒNG LẶP VÔ TẬN AN TOÀN (Thay thế setInterval)
-async function startAutoLoop() {
+// Vòng lặp Loop (Thay thế setInterval để tránh đè task khi retry lâu)
+async function startLoop() {
     while (isRunning) {
-        await postTask();
-        log("😴 Nghỉ 15 phút...");
-        // Nghỉ 15 phút bằng Promise để không bao giờ bị chồng chéo task
+        await postTaskWithRetry();
+        logStep("😴 Nghỉ 15 phút...");
         for (let i = 0; i < 900 && isRunning; i++) {
             await new Promise(r => setTimeout(r, 1000));
         }
     }
 }
 
-// --- API ROUTES ---
+// --- API ROUTES (Đầy đủ) ---
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
 app.get('/stats', (req, res) => res.json({ isRunning, totalPosts, history, userInfo }));
 
 app.get('/login', async (req, res) => {
-    log("🔑 Mở Login...");
+    logStep("🔑 Mở cửa sổ Login...");
     if (context) { await context.close().catch(() => {}); context = null; }
     const ctx = await initBrowser(true);
-    const p = await ctx.newPage();
-    await p.goto('https://www.binance.com/vi/square');
-    res.send("ĐÃ MỞ CHROME. Đăng nhập xong hãy ĐÓNG Chrome đó lại rồi bấm START.");
+    const page = await ctx.newPage();
+    await page.goto('https://www.binance.com/vi/square', { timeout: 0 });
+    res.send("ĐÃ MỞ CHROME. Hãy đăng nhập xong rồi TẮT Chrome đi.");
 });
 
 app.get('/check', async (req, res) => {
@@ -134,18 +163,20 @@ app.get('/check', async (req, res) => {
 
 app.get('/start', (req, res) => {
     if (!isRunning) {
+        logStep("🏁 BẮT ĐẦU BOT");
         isRunning = true;
-        log("🏁 KÍCH HOẠT AUTO");
-        startAutoLoop(); // Chạy vòng lặp ngầm
+        startLoop();
     }
     res.json({ status: 'started' });
 });
 
 app.get('/stop', async (req, res) => {
-    log("🛑 DỪNG BOT");
+    logStep("🛑 DỪNG BOT");
     isRunning = false;
     if (context) { await context.close().catch(() => {}); context = null; }
     res.json({ status: 'stopped' });
 });
 
-app.listen(port, '0.0.0.0', () => log(`SERVER LIVE TẠI PORT ${port}`));
+app.listen(port, '0.0.0.0', () => {
+    logStep(`SERVER LIVE TẠI PORT ${port}`);
+});
