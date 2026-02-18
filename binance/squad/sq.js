@@ -1,12 +1,8 @@
-import { chromium } from 'playwright-extra';
-import stealth from 'puppeteer-extra-stealth';
+import { chromium } from 'playwright';
 import express from 'express';
 import path from 'path';
 import axios from 'axios';
 import { fileURLToPath } from 'url';
-
-// Kích hoạt Stealth để chống Binance chặn
-chromium.use(stealth());
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -22,102 +18,90 @@ let history = [];
 let userInfo = { name: "Chưa kiểm tra", followers: "0", status: "Offline" };
 let mainTimer = null;
 
-// Hàm mở trình duyệt ngụy trang
+// --- HÀM MỞ TRÌNH DUYỆT (DÙNG PLAYWRIGHT CHUẨN - KHÔNG DÙNG EXTRA) ---
 async function getBrowserContext(isHeadless) {
     return await chromium.launchPersistentContext(userDataDir, {
         headless: isHeadless,
         channel: 'chrome', 
+        viewport: { width: 1280, height: 800 },
         args: [
-            '--disable-blink-features=AutomationControlled',
+            '--disable-blink-features=AutomationControlled', // Lách luật bot cơ bản
             '--no-sandbox',
-            '--disable-setuid-sandbox'
-        ],
-        viewport: { width: 1280, height: 800 }
+            '--disable-infobars',
+            '--window-position=0,0',
+            '--ignore-certificate-errors'
+        ]
     });
 }
 
-// --- HÀM KIỂM TRA TÀI KHOẢN & FOLLOWERS ---
+// --- HÀM KIỂM TRA TÀI KHOẢN ---
 async function checkAccount() {
     let context;
     try {
         context = await getBrowserContext(true);
         const page = await context.newPage();
-        await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36');
+        // Ghi đè thuộc tính webdriver bằng code tay thay vì dùng stealth plugin
+        await page.addInitScript(() => {
+            Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+        });
         
-        await page.goto('https://www.binance.com/vi/square/profile/me', { waitUntil: 'networkidle', timeout: 60000 });
+        await page.goto('https://www.binance.com/vi/square/profile/me', { waitUntil: 'domcontentloaded', timeout: 60000 });
         await page.waitForTimeout(5000);
 
-        // Lấy tên hiển thị
         const nameText = await page.locator('div[class*="css-1o8m8j"]').first().innerText().catch(() => "N/A");
-        // Lấy số followers (tìm text có chữ người theo dõi)
         const followText = await page.locator('div:has-text("Người theo dõi")').last().innerText().catch(() => "0");
         
         if (nameText !== "N/A") {
-            userInfo = { 
-                name: nameText, 
-                followers: followText.replace("Người theo dõi", "").trim(), 
-                status: "Đã đăng nhập ✅" 
-            };
+            userInfo = { name: nameText, followers: followText.replace("Người theo dõi", "").trim(), status: "Đã đăng nhập ✅" };
             return true;
         }
         userInfo.status = "Chưa đăng nhập";
         return false;
     } catch (e) {
-        userInfo.status = "Lỗi kết nối";
+        userInfo.status = "Lỗi: " + e.message;
         return false;
     } finally {
         if (context) await context.close();
     }
 }
 
-// --- HÀM ĐĂNG BÀI TỰ ĐỘNG ---
+// --- HÀM ĐĂNG BÀI ---
 async function postTask() {
     if (!isRunning) return;
     let context;
     try {
         context = await getBrowserContext(true);
         const page = await context.newPage();
-        await page.goto('https://www.binance.com/vi/square', { waitUntil: 'networkidle', timeout: 60000 });
+        await page.goto('https://www.binance.com/vi/square', { waitUntil: 'domcontentloaded', timeout: 60000 });
 
         const editorSelector = 'div[role="textbox"]';
-        await page.waitForSelector(editorSelector, { timeout: 30000 });
+        await page.waitForSelector(editorSelector, { timeout: 20000 });
 
         const coin = TOP_COINS[Math.floor(Math.random() * TOP_COINS.length)];
         const res = await axios.get(`https://api.binance.com/api/v3/ticker/24hr?symbol=${coin}USDT`);
-        const p = parseFloat(res.data.lastPrice);
         
-        const content = `📊 Square Update: $${coin}\n💰 Giá: ${p}\n📈 Biến động: ${res.data.priceChangePercent}%\n#$${coin} #BinanceSquare #Trading`;
+        const content = `📊 Square Update: $${coin} đang ở mức giá ${parseFloat(res.data.lastPrice)}. #$${coin} #BinanceSquare`;
 
         await page.fill(editorSelector, content);
         await page.waitForTimeout(2000);
         await page.click('button:has-text("Đăng")');
-        await page.waitForTimeout(4000);
+        await page.waitForTimeout(5000);
 
         totalPosts++;
         history.unshift({ coin, time: new Date().toLocaleTimeString(), status: 'Thành công' });
-    } catch (err) {
-        console.log("Lỗi đăng bài:", err.message);
-    } finally {
-        if (context) await context.close();
-    }
+    } catch (err) { console.log("Lỗi:", err.message); }
+    finally { if (context) await context.close(); }
 }
 
-// --- ROUTES ĐIỀU KHIỂN ---
+// --- API ---
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
 app.get('/stats', (req, res) => res.json({ isRunning, totalPosts, history, userInfo }));
-
 app.get('/login', async (req, res) => {
     const context = await getBrowserContext(false);
-    const page = await context.newPage();
-    await page.goto('https://www.binance.com/vi/square');
-    res.send("ĐÃ MỞ TRÌNH DUYỆT TRÊN MÁY TÍNH. Đăng nhập xong hãy ĐÓNG Chrome lại.");
+    await context.newPage().then(p => p.goto('https://www.binance.com/vi/square'));
+    res.send("Đã mở Chrome. Đăng nhập xong hãy ĐÓNG Chrome lại.");
 });
-
-app.get('/check', async (req, res) => {
-    await checkAccount();
-    res.json(userInfo);
-});
-
+app.get('/check', async (req, res) => { await checkAccount(); res.json(userInfo); });
 app.get('/start', (req, res) => {
     if (!isRunning) {
         isRunning = true;
@@ -127,10 +111,4 @@ app.get('/start', (req, res) => {
     res.json({ status: 'started' });
 });
 
-app.get('/stop', (req, res) => {
-    isRunning = false;
-    if (mainTimer) clearInterval(mainTimer);
-    res.json({ status: 'stopped' });
-});
-
-app.listen(port, '0.0.0.0', () => console.log(`🚀 Bot Full chạy tại: http://localhost:${port}`));
+app.listen(port, '0.0.0.0', () => console.log(`🚀 Bot SẠCH chạy tại: http://localhost:${port}`));
