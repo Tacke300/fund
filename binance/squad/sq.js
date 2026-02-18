@@ -38,7 +38,7 @@ app.get('/check', async (req, res) => {
     try {
         const ctx = await initBrowser(false);
         const page = await ctx.newPage();
-        await page.goto('https://www.binance.com/vi/square/profile/me', { waitUntil: 'domcontentloaded' });
+        await page.goto('https://www.binance.com/vi/square/profile/moncey_d_luffy', { waitUntil: 'domcontentloaded' });
         await page.waitForTimeout(4000);
         
         const name = await page.locator('div[class*="css-1o8m8j"]').first().innerText().catch(() => "N/A");
