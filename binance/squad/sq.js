@@ -5,6 +5,7 @@ import path from 'path';
 import axios from 'axios';
 import { fileURLToPath } from 'url';
 
+// Kích hoạt Stealth để chống Binance chặn
 chromium.use(stealth());
 
 const __filename = fileURLToPath(import.meta.url);
@@ -18,53 +19,58 @@ const TOP_COINS = ["BTC", "ETH", "BNB", "SOL", "XRP", "ADA", "AVAX", "DOGE", "DO
 let isRunning = false;
 let totalPosts = 0;
 let history = [];
-let userInfo = { name: "Chưa kiểm tra", followers: 0, status: "Offline" };
+let userInfo = { name: "Chưa kiểm tra", followers: "0", status: "Offline" };
 let mainTimer = null;
 
-// Hàm mở trình duyệt (Dùng chung cho cả Login và Check)
+// Hàm mở trình duyệt ngụy trang
 async function getBrowserContext(isHeadless) {
     return await chromium.launchPersistentContext(userDataDir, {
         headless: isHeadless,
-        channel: 'chrome', // Sử dụng Chrome thật trên máy thay vì Chromium bản thiếu
+        channel: 'chrome', 
         args: [
             '--disable-blink-features=AutomationControlled',
-            '--no-sandbox'
+            '--no-sandbox',
+            '--disable-setuid-sandbox'
         ],
         viewport: { width: 1280, height: 800 }
     });
 }
 
-// --- HÀM KIỂM TRA TÀI KHOẢN ---
+// --- HÀM KIỂM TRA TÀI KHOẢN & FOLLOWERS ---
 async function checkAccount() {
     let context;
     try {
         context = await getBrowserContext(true);
         const page = await context.newPage();
-        // Giả lập User Agent người dùng thật
         await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36');
         
         await page.goto('https://www.binance.com/vi/square/profile/me', { waitUntil: 'networkidle', timeout: 60000 });
         await page.waitForTimeout(5000);
 
-        // Lấy tên Profile
+        // Lấy tên hiển thị
         const nameText = await page.locator('div[class*="css-1o8m8j"]').first().innerText().catch(() => "N/A");
+        // Lấy số followers (tìm text có chữ người theo dõi)
+        const followText = await page.locator('div:has-text("Người theo dõi")').last().innerText().catch(() => "0");
         
-        if (nameText !== "N/A" && nameText.length > 0) {
-            userInfo = { name: nameText, followers: "Đã xác thực", status: "Đã đăng nhập ✅" };
+        if (nameText !== "N/A") {
+            userInfo = { 
+                name: nameText, 
+                followers: followText.replace("Người theo dõi", "").trim(), 
+                status: "Đã đăng nhập ✅" 
+            };
             return true;
-        } else {
-            userInfo.status = "Chưa đăng nhập hoặc bị chặn";
-            return false;
         }
+        userInfo.status = "Chưa đăng nhập";
+        return false;
     } catch (e) {
-        userInfo.status = "Lỗi: " + e.message;
+        userInfo.status = "Lỗi kết nối";
         return false;
     } finally {
         if (context) await context.close();
     }
 }
 
-// --- HÀM ĐĂNG BÀI ---
+// --- HÀM ĐĂNG BÀI TỰ ĐỘNG ---
 async function postTask() {
     if (!isRunning) return;
     let context;
@@ -76,10 +82,11 @@ async function postTask() {
         const editorSelector = 'div[role="textbox"]';
         await page.waitForSelector(editorSelector, { timeout: 30000 });
 
-        const res = await axios.get(`https://api.binance.com/api/v3/ticker/24hr?symbol=${TOP_COINS[Math.floor(Math.random() * TOP_COINS.length)]}USDT`);
+        const coin = TOP_COINS[Math.floor(Math.random() * TOP_COINS.length)];
+        const res = await axios.get(`https://api.binance.com/api/v3/ticker/24hr?symbol=${coin}USDT`);
         const p = parseFloat(res.data.lastPrice);
         
-        const content = `📊 Phân tích nhanh: $${res.data.symbol}\nGiá hiện tại: ${p}\nXu hướng: ${parseFloat(res.data.priceChangePercent) > 0 ? "Tăng 🟢" : "Giảm 🔴"}\n#TradingSignal #BinanceSquare`;
+        const content = `📊 Square Update: $${coin}\n💰 Giá: ${p}\n📈 Biến động: ${res.data.priceChangePercent}%\n#$${coin} #BinanceSquare #Trading`;
 
         await page.fill(editorSelector, content);
         await page.waitForTimeout(2000);
@@ -87,25 +94,23 @@ async function postTask() {
         await page.waitForTimeout(4000);
 
         totalPosts++;
-        history.unshift({ coin: res.data.symbol, time: new Date().toLocaleTimeString(), status: 'Thành công' });
+        history.unshift({ coin, time: new Date().toLocaleTimeString(), status: 'Thành công' });
     } catch (err) {
-        console.error("Lỗi Post:", err.message);
+        console.log("Lỗi đăng bài:", err.message);
     } finally {
         if (context) await context.close();
     }
 }
 
-// --- ROUTES ---
+// --- ROUTES ĐIỀU KHIỂN ---
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
 app.get('/stats', (req, res) => res.json({ isRunning, totalPosts, history, userInfo }));
 
 app.get('/login', async (req, res) => {
-    // Mở Chrome thật để đăng nhập
     const context = await getBrowserContext(false);
     const page = await context.newPage();
-    await page.goto('https://www.binance.com/vi/square', { timeout: 0 });
-    // Không đóng context ở đây để người dùng tự đóng sau khi đăng nhập xong
-    res.send("Đang mở trình duyệt. Hãy đăng nhập rồi ĐÓNG trình duyệt lại.");
+    await page.goto('https://www.binance.com/vi/square');
+    res.send("ĐÃ MỞ TRÌNH DUYỆT TRÊN MÁY TÍNH. Đăng nhập xong hãy ĐÓNG Chrome lại.");
 });
 
 app.get('/check', async (req, res) => {
@@ -128,4 +133,4 @@ app.get('/stop', (req, res) => {
     res.json({ status: 'stopped' });
 });
 
-app.listen(port, () => console.log(`🚀 Bot Square: http://localhost:${port}`));
+app.listen(port, '0.0.0.0', () => console.log(`🚀 Bot Full chạy tại: http://localhost:${port}`));
