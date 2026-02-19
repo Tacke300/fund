@@ -50,46 +50,57 @@ function calcTPSL(lev, side, entryPrice) {
     };
 }
 
-function fetchCandidates() {
-    http.get('http://127.0.0.1:9000/api/live', res => {
-        let d = ''; res.on('data', chunk => d += chunk);
-        res.on('end', () => {
-            try {
-                const allData = JSON.parse(d);
-                status.candidatesList = allData
-                    .filter(c => Math.abs(c.changePercent) >= botSettings.minVol)
-                    .sort((a, b) => Math.abs(b.changePercent) - Math.abs(a.changePercent));
-            } catch (e) { status.candidatesList = []; }
-        });
-    }).on('error', () => { status.candidatesList = []; });
-}
-
-async function patrol() {
+// HÀM QUAN TRỌNG: KIỂM TRA VÀ GHIM TP/SL
+async function enforceTPSL() {
     if (!botSettings.isRunning) return;
     try {
         const positions = await callBinance('/fapi/v2/positionRisk');
         const active = positions.filter(p => parseFloat(p.positionAmt) !== 0);
         const orders = await callBinance('/fapi/v1/openOrders');
 
-        for (const o of orders) {
-            if (!active.find(p => p.symbol === o.symbol && p.positionSide === o.positionSide)) {
-                await callBinance('/fapi/v1/order', 'DELETE', { symbol: o.symbol, orderId: o.orderId });
-            }
-        }
+        // 1. Xử lý vị thế đang mở
         for (const p of active) {
-            const hasTP = orders.some(o => o.symbol === p.symbol && o.positionSide === p.positionSide && o.type === 'TAKE_PROFIT_MARKET');
-            const hasSL = orders.some(o => o.symbol === p.symbol && o.positionSide === p.positionSide && o.type === 'STOP_MARKET');
+            const symbol = p.symbol;
+            const side = p.positionSide; // LONG hoặc SHORT
+            const amt = Math.abs(parseFloat(p.positionAmt));
+            
+            // Tìm lệnh TP và SL hiện có cho vị thế này
+            const hasTP = orders.some(o => o.symbol === symbol && o.positionSide === side && o.type === 'TAKE_PROFIT_MARKET');
+            const hasSL = orders.some(o => o.symbol === symbol && o.positionSide === side && o.type === 'STOP_MARKET');
+
             if (!hasTP || !hasSL) {
-                const plan = calcTPSL(parseFloat(p.leverage), p.positionSide, parseFloat(p.entryPrice));
-                const side = p.positionSide === 'LONG' ? 'SELL' : 'BUY';
-                const info = status.exchangeInfo[p.symbol];
-                const qty = Math.abs(parseFloat(p.positionAmt)).toFixed(info.quantityPrecision);
-                if (!hasTP) await callBinance('/fapi/v1/order', 'POST', { symbol: p.symbol, side, positionSide: p.positionSide, type: 'TAKE_PROFIT_MARKET', stopPrice: plan.tp.toFixed(info.pricePrecision), quantity: qty, workingType: 'MARK_PRICE' });
-                if (!hasSL) await callBinance('/fapi/v1/order', 'POST', { symbol: p.symbol, side, positionSide: p.positionSide, type: 'STOP_MARKET', stopPrice: plan.sl.toFixed(info.pricePrecision), quantity: qty, workingType: 'MARK_PRICE' });
-                addBotLog(`🛡️ Đã ghim TP/SL cho ${p.symbol}`, "success");
+                const info = status.exchangeInfo[symbol];
+                const plan = calcTPSL(parseFloat(p.leverage), side, parseFloat(p.entryPrice));
+                const closeSide = side === 'LONG' ? 'SELL' : 'BUY';
+                const qty = amt.toFixed(info.quantityPrecision);
+
+                if (!hasTP) {
+                    await callBinance('/fapi/v1/order', 'POST', {
+                        symbol, side: closeSide, positionSide: side, type: 'TAKE_PROFIT_MARKET',
+                        stopPrice: plan.tp.toFixed(info.pricePrecision), quantity: qty, workingType: 'MARK_PRICE', closePosition: 'true'
+                    });
+                }
+                if (!hasSL) {
+                    await callBinance('/fapi/v1/order', 'POST', {
+                        symbol, side: closeSide, positionSide: side, type: 'STOP_MARKET',
+                        stopPrice: plan.sl.toFixed(info.pricePrecision), quantity: qty, workingType: 'MARK_PRICE', closePosition: 'true'
+                    });
+                }
+                addBotLog(`🛡️ Đã ghim TP/SL cho ${symbol} (${side})`, "success");
             }
         }
-    } catch (e) {}
+
+        // 2. Dọn dẹp: Nếu có lệnh chờ mà KHÔNG có vị thế tương ứng thì xóa sạch
+        for (const o of orders) {
+            const hasPos = active.some(p => p.symbol === o.symbol && p.positionSide === o.positionSide);
+            if (!hasPos) {
+                await callBinance('/fapi/v1/order', 'DELETE', { symbol: o.symbol, orderId: o.orderId });
+                addBotLog(`🧹 Xóa lệnh chờ thừa: ${o.symbol} [${o.positionSide}]`, "warn");
+            }
+        }
+    } catch (e) {
+        console.log("Lỗi tuần tra TP/SL:", e.msg || e.message);
+    }
 }
 
 async function hunt() {
@@ -117,15 +128,15 @@ async function hunt() {
                 if ((qty * price) < 5.0) qty = Math.ceil(5.1 / price / info.stepSize) * info.stepSize;
 
                 const finalQty = qty.toFixed(info.quantityPrecision);
-                const order = await callBinance('/fapi/v1/order', 'POST', { 
+                await callBinance('/fapi/v1/order', 'POST', { 
                     symbol: c.symbol, side: posSide === 'LONG' ? 'BUY' : 'SELL', 
                     positionSide: posSide, type: 'MARKET', quantity: finalQty 
                 });
 
-                addBotLog(`🚀 VÀO LỆNH: ${posSide} ${c.symbol} | Đòn bẩy: ${lev}x | Giá: ${price} | Qty: ${finalQty} | Tổng: $${(qty*price).toFixed(2)}`, "success");
+                addBotLog(`🚀 VÀO LỆNH: ${posSide} ${c.symbol} | ${lev}x | Giá: ${price} | Qty: ${finalQty}`, "success");
                 
-                // Ghim TP/SL ngay lập tức
-                setTimeout(patrol, 1000); 
+                // Đợi 2 giây cho sàn cập nhật vị thế rồi ghim TP/SL ngay
+                setTimeout(enforceTPSL, 2000); 
             } catch (err) { 
                 if (err.code !== 'ENOTFOUND' && err.code !== 'ETIMEDOUT') {
                     botSettings.isRunning = false;
@@ -137,6 +148,20 @@ async function hunt() {
     } catch (e) {}
 }
 
+function fetchCandidates() {
+    http.get('http://127.0.0.1:9000/api/live', res => {
+        let d = ''; res.on('data', chunk => d += chunk);
+        res.on('end', () => {
+            try {
+                const allData = JSON.parse(d);
+                status.candidatesList = allData
+                    .filter(c => Math.abs(c.changePercent) >= botSettings.minVol)
+                    .sort((a, b) => Math.abs(b.changePercent) - Math.abs(a.changePercent));
+            } catch (e) { status.candidatesList = []; }
+        });
+    }).on('error', () => { status.candidatesList = []; });
+}
+
 const APP = express();
 APP.use(express.json());
 APP.use(express.static(__dirname));
@@ -145,13 +170,11 @@ APP.get('/api/status', async (req, res) => {
     try {
         const pos = await callBinance('/fapi/v2/positionRisk');
         const active = pos.filter(p => parseFloat(p.positionAmt) !== 0).map(p => {
-            let pnl = "0.00";
             const entry = parseFloat(p.entryPrice);
             const amt = Math.abs(parseFloat(p.positionAmt));
-            if (entry > 0 && amt > 0) pnl = ((parseFloat(p.unrealizedProfit) / ((entry * amt) / p.leverage)) * 100).toFixed(2);
+            const pnl = (entry > 0 && amt > 0) ? ((parseFloat(p.unrealizedProfit) / ((entry * amt) / p.leverage)) * 100).toFixed(2) : "0.00";
             return { symbol: p.symbol, side: p.positionSide, leverage: p.leverage, entryPrice: p.entryPrice, markPrice: p.markPrice, pnlPercent: pnl };
         });
-        // Trả về thêm candidatesList để hiện trên HTML
         res.json({ botSettings, status, activePositions: active, candidatesList: status.candidatesList });
     } catch (e) { res.status(500).send(); }
 });
@@ -163,10 +186,8 @@ APP.post('/api/settings', (req, res) => {
 });
 
 async function init() {
-    console.log("📡 Đang nạp dữ liệu sàn...");
     https.get('https://fapi.binance.com/fapi/v1/exchangeInfo', (response) => {
-        let d = '';
-        response.on('data', c => d += c);
+        let d = ''; response.on('data', c => d += c);
         response.on('end', () => {
             try {
                 JSON.parse(d).symbols.forEach(s => {
@@ -183,5 +204,5 @@ async function init() {
 init();
 setInterval(fetchCandidates, 5000);
 setInterval(hunt, 5000);
-setInterval(patrol, 15000);
+setInterval(enforceTPSL, 15000); // Quét ghim TP/SL và dọn rác mỗi 15 giây
 APP.listen(9001, '0.0.0.0');
