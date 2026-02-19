@@ -206,15 +206,26 @@ async function postTaskWithForce() {
     }
 }
 
+
 async function startLoop() {
     while (isRunning) {
-        await postTaskWithForce();
+        try {
+            await postTaskWithForce();
+        } catch (err) {
+            logStep("❌ LOOP CRASH: " + err.message);
+
+            // 🔥 FIX: nếu loop chết thì reset browser
+            context = null;
+            mainPage = null;
+        }
+
         if (isRunning) {
-            for (let i = 0; i < 15 && isRunning; i++) await new Promise(r => setTimeout(r, 1000));
+            for (let i = 0; i < 15 && isRunning; i++) {
+                await new Promise(r => setTimeout(r, 1000));
+            }
         }
     }
 }
-
 // --- API ---
 app.get('/start', (req, res) => {
     if (!isRunning) { isRunning = true; logStep("🏁 BẮT ĐẦU"); startLoop(); }
