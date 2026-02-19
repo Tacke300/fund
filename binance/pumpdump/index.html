@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>LUFFY PIRATE BOT V.04 - FINAL</title>
+    <title>LUFFY PIRATE BOT V.05 - FINAL BATTLE</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
@@ -22,8 +22,10 @@
         .log-entry { font-size: 10px; border-left: 3px solid #444; padding-left: 8px; margin-bottom: 3px; line-height: 1.4; }
         .btn-start { background: #22c55e; border-bottom: 4px solid #14532d; transition: 0.2s; font-weight: 900; }
         .btn-stop { background: #ef4444; border-bottom: 4px solid #7f1d1d; animation: pulse 2s infinite; font-weight: 900; }
+        .btn-emergency { background: #ea580c; border-bottom: 4px solid #7c2d12; font-weight: 900; transition: 0.2s; }
+        .btn-emergency:hover { background: #f97316; }
+        
         @keyframes pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(0.98); } }
-        /* Scrollbar tinh tế */
         ::-webkit-scrollbar { width: 4px; }
         ::-webkit-scrollbar-track { background: transparent; }
         ::-webkit-scrollbar-thumb { background: #333; border-radius: 10px; }
@@ -35,21 +37,20 @@
         <div class="flex items-center gap-4">
             <img src="https://cdn.pixabay.com/photo/2023/07/22/09/04/luffy-8142966_1280.png" class="w-16 h-16 rounded-full border-2 border-red-500 shadow-[0_0_20px_rgba(239,68,68,0.5)] object-cover">
             <div>
-                <h1 class="luffy-font text-3xl text-white">LUFFY <span class="text-red-500">PIRATE</span> <span class="text-[10px] bg-red-600 px-1 rounded ml-1 italic">V.04</span></h1>
+                <h1 class="luffy-font text-3xl text-white">LUFFY <span class="text-red-500">PIRATE</span> <span class="text-[10px] bg-red-600 px-1 rounded ml-1 italic">V.05</span></h1>
                 <div class="flex items-center gap-2">
                     <span id="botStatusText" class="text-[10px] font-bold text-gray-500 uppercase tracking-widest">OFFLINE</span>
-                    <span class="text-[10px] text-gray-600">|</span>
-                    <span id="ipStatus" class="text-[10px] text-blue-400 mono">IP: Checking...</span>
+                    <span id="queueStatus" class="text-[9px] bg-blue-900/50 text-blue-400 px-2 rounded hidden">ĐANG XỬ LÝ LỆNH...</span>
                 </div>
             </div>
         </div>
         <div class="text-right">
-            <p class="text-[9px] text-gray-500 font-bold uppercase tracking-widest">Tài sản (Futures Balance)</p>
-            <p id="balance" class="text-4xl font-black text-yellow-400 mono tracking-tighter shadow-sm">$0.00</p>
+            <p class="text-[9px] text-gray-500 font-bold uppercase tracking-widest tracking-tighter">Futures Balance</p>
+            <p id="balance" class="text-4xl font-black text-yellow-400 mono tracking-tighter">$0.00</p>
         </div>
     </header>
 
-    <div class="grid grid-cols-1 md:grid-cols-7 gap-3 mb-3">
+    <div class="grid grid-cols-1 md:grid-cols-8 gap-3 mb-3">
         <div class="card flex flex-col justify-center">
             <label class="text-[9px] text-gray-400 font-bold uppercase mb-1">Vốn ($/Lệnh)</label>
             <input type="number" id="invValue" value="1.5">
@@ -60,49 +61,55 @@
             <input type="number" id="maxPositions" value="10">
         </div>
 
-        <div class="card flex flex-col justify-center">
+        <div class="card flex flex-col justify-center col-span-1 md:col-span-2">
             <label class="text-[9px] text-gray-400 font-bold uppercase mb-1">Dừng Lỗ TK (SL)</label>
             <div class="flex gap-1">
                 <input type="number" id="accountSL" class="w-2/3" value="30">
-                <select id="slUnit" class="w-1/3">
+                <select id="slUnit" class="w-1/3 text-[10px]">
                     <option value="percent">%</option>
                     <option value="dollar">$</option>
                 </select>
             </div>
             <label class="flex items-center gap-1 mt-1 cursor-pointer">
                 <input type="checkbox" id="useTrailingSL" class="w-3 h-3">
-                <span class="text-[9px] text-blue-400 font-black uppercase hover:text-blue-300">Bật Trailing SL</span>
+                <span class="text-[9px] text-blue-400 font-black uppercase">Trailing SL (Vốn Cộng Dồn)</span>
             </label>
         </div>
 
         <div class="card flex flex-col justify-center">
-            <label class="text-[9px] text-gray-400 font-bold uppercase mb-1">Min Biến Động (%)</label>
+            <label class="text-[9px] text-gray-400 font-bold uppercase mb-1">Min Vol (%)</label>
             <input type="number" id="minVol" value="5.0">
         </div>
 
         <div class="card flex items-center justify-around">
-            <div class="text-center">
+            <div class="text-center border-r border-white/10 pr-2 w-full">
                 <p class="text-[9px] text-gray-500 uppercase">Winrate</p>
                 <p id="winRate" class="text-xl font-black text-green-400 luffy-font">0%</p>
             </div>
-            <div class="text-center border-l border-white/10 pl-3">
-                <p class="text-[9px] text-gray-500 uppercase">Hạm Đội PnL</p>
+            <div class="text-center pl-2 w-full">
+                <p class="text-[9px] text-gray-500 uppercase">Tổng PnL</p>
                 <p id="totalPnL" class="text-xl font-black text-white mono">$0.00</p>
             </div>
         </div>
 
-        <button id="runBtn" onclick="handleToggle()" class="btn-start rounded-lg text-[10px] uppercase text-white shadow-lg">🚢 XUẤT QUÂN</button>
-        <button onclick="handleUpdate()" class="bg-blue-600 hover:bg-blue-500 font-black rounded-lg text-[10px] uppercase text-white border-b-4 border-blue-900 transition-all">⚙️ LƯU CẤU HÌNH</button>
+        <div class="flex flex-col gap-2">
+            <button id="runBtn" onclick="handleToggle()" class="h-full btn-start rounded-lg text-[10px] uppercase text-white shadow-lg">🚢 XUẤT QUÂN</button>
+        </div>
+
+        <div class="flex flex-col gap-2">
+            <button onclick="handleEmergencyStop()" class="btn-emergency h-1/2 rounded-lg text-[9px] uppercase text-white shadow-lg">💀 DỪNG LỆNH</button>
+            <button onclick="handleUpdate()" class="bg-blue-600 h-1/2 hover:bg-blue-500 font-black rounded-lg text-[9px] uppercase text-white border-b-2 border-blue-900 transition-all">⚙️ LƯU CẤU HÌNH</button>
+        </div>
     </div>
 
     <div class="flex-grow grid grid-cols-1 md:grid-cols-12 gap-3 overflow-hidden">
         <div class="md:col-span-3 flex flex-col gap-3 overflow-hidden">
             <div class="card flex-grow flex flex-col overflow-hidden border-t-2 border-blue-500">
-                <p class="text-[10px] font-black text-blue-400 uppercase mb-2">Nhật ký hành trình</p>
+                <p class="text-[10px] font-black text-blue-400 uppercase mb-2">Nhật ký Pirate</p>
                 <div id="botLogs" class="flex-grow overflow-y-auto pr-1 mono"></div>
             </div>
-            <div class="card h-[160px] border-t-2 border-yellow-500 overflow-hidden">
-                <p class="text-[10px] font-black text-yellow-500 uppercase mb-1">Sóng Radar</p>
+            <div class="card h-[140px] border-t-2 border-yellow-500 overflow-hidden">
+                <p class="text-[10px] font-black text-yellow-500 uppercase mb-1">Radar Cơ Hội</p>
                 <div id="radarList" class="space-y-1 overflow-y-auto h-full pr-1"></div>
             </div>
         </div>
@@ -129,7 +136,7 @@
             </div>
 
             <div class="card flex-[1.5] flex flex-col border-t-2 border-green-500">
-                <p class="text-[10px] font-black text-green-500 uppercase mb-1">Biểu đồ tăng trưởng PnL</p>
+                <p class="text-[10px] font-black text-green-500 uppercase mb-1 italic">Biểu đồ tăng trưởng PnL</p>
                 <div class="flex-grow relative">
                     <canvas id="pnlChart"></canvas>
                 </div>
@@ -144,9 +151,8 @@
         let pnlLabels = [];
         let lastLogTime = "";
 
-        // 1. KHỞI TẠO & LOCALSTORAGE
         window.onload = function() {
-            const saved = localStorage.getItem('luffy_v4_cfg');
+            const saved = localStorage.getItem('luffy_v5_cfg');
             if(saved) {
                 const cfg = JSON.parse(saved);
                 document.getElementById('invValue').value = cfg.invValue || 1.5;
@@ -157,16 +163,7 @@
                 document.getElementById('useTrailingSL').checked = cfg.useTrailingSL || false;
             }
             initChart();
-            checkIP();
         };
-
-        async function checkIP() {
-            try {
-                const r = await fetch('https://api.ipify.org?format=json');
-                const d = await r.json();
-                document.getElementById('ipStatus').innerText = "IP: " + d.ip;
-            } catch(e) { document.getElementById('ipStatus').innerText = "IP: Offline"; }
-        }
 
         function initChart() {
             const ctx = document.getElementById('pnlChart').getContext('2d');
@@ -204,29 +201,32 @@
                 isRunning = data.botSettings.isRunning;
                 document.getElementById('balance').innerText = `$${data.status.currentBalance.toFixed(2)}`;
                 
-                // Cập nhật Table
+                // Hiển thị trạng thái hàng đợi (Processing)
+                const queueLabel = document.getElementById('queueStatus');
+                if(data.status.isProcessing) {
+                    queueLabel.classList.remove('hidden');
+                } else {
+                    queueLabel.classList.add('hidden');
+                }
+
+                // Cập nhật Vị thế
                 document.getElementById('posCount').innerText = `${data.activePositions.length} LỆNH`;
                 document.getElementById('positionTable').innerHTML = data.activePositions.map(p => `
                     <tr class="hover:bg-white/5 transition">
                         <td class="p-3 font-bold text-white">${p.symbol}</td>
-                        <td class="p-3"><span class="${p.side === 'LONG' ? 'text-green-400' : 'text-red-400'} font-black italic">${p.side}</span> <span class="text-gray-500 text-[9px]">${p.leverage}x</span></td>
-                        <td class="p-3 text-[10px] text-gray-500">${p.entryPrice}<br><span class="text-white">${p.markPrice}</span></td>
+                        <td class="p-3"><span class="${p.side === 'LONG' ? 'text-green-400' : 'text-red-400'} font-black">${p.side}</span> <span class="text-gray-500 text-[9px]">${p.leverage}x</span></td>
+                        <td class="p-3 text-[10px] text-gray-400">${p.entryPrice}<br><span class="text-white">${p.markPrice}</span></td>
                         <td class="p-3 text-right font-black ${p.pnlValue >= 0 ? 'text-green-400' : 'text-red-400'}">${p.pnlPercent}%<br><span class="text-[9px] text-gray-500">$${p.pnlValue.toFixed(2)}</span></td>
                     </tr>
                 `).join('');
 
-                // Radar
-                document.getElementById('radarList').innerHTML = data.status.candidatesList.map(c => `
-                    <div class="flex justify-between items-center bg-white/5 p-2 rounded border-l-2 ${c.changePercent > 0 ? 'border-green-500' : 'border-red-500'}">
-                        <span class="text-[10px] font-bold uppercase">${c.symbol}</span>
-                        <span class="text-[10px] font-black ${c.changePercent > 0 ? 'text-green-400' : 'text-red-400'}">${c.changePercent.toFixed(2)}%</span>
-                    </div>
-                `).join('');
-
-                // PnL & Chart
+                // PnL & Winrate
                 let totalPnLNow = data.activePositions.reduce((a, b) => a + b.pnlValue, 0);
                 document.getElementById('totalPnL').innerText = (totalPnLNow >= 0 ? '+' : '') + `$${totalPnLNow.toFixed(2)}`;
                 document.getElementById('totalPnL').className = `text-xl font-black mono ${totalPnLNow >= 0 ? 'text-green-400' : 'text-red-400'}`;
+                
+                let winCount = data.history.filter(h => h.pnl > 0).length;
+                document.getElementById('winRate').innerText = data.history.length > 0 ? Math.round((winCount/data.history.length)*100) + "%" : "0%";
 
                 if (isRunning) {
                     pnlData.push(totalPnLNow.toFixed(2));
@@ -235,11 +235,7 @@
                     pnlChart.update();
                 }
 
-                // Winrate (Logic mẫu)
-                let winCount = data.history.filter(h => h.pnl > 0).length;
-                document.getElementById('winRate').innerText = data.history.length > 0 ? Math.round((winCount/data.history.length)*100) + "%" : "0%";
-
-                // Logs
+                // Nhật ký (Logs)
                 if (data.status.botLogs.length > 0) {
                     const latest = data.status.botLogs[0];
                     if (latest.time !== lastLogTime) {
@@ -260,7 +256,7 @@
             const btn = document.getElementById('runBtn');
             const txt = document.getElementById('botStatusText');
             btn.innerText = isRunning ? "🛑 DỪNG CHIẾN" : "🚢 XUẤT QUÂN";
-            btn.className = isRunning ? "btn-stop rounded-lg text-xs uppercase text-white shadow-lg" : "btn-start rounded-lg text-xs uppercase text-white shadow-lg";
+            btn.className = isRunning ? "btn-stop rounded-lg text-[10px] uppercase text-white shadow-lg" : "btn-start rounded-lg text-[10px] uppercase text-white shadow-lg";
             txt.innerText = isRunning ? "ĐANG TRUY QUÉT..." : "OFFLINE";
             txt.className = isRunning ? "text-[10px] font-bold text-green-500 uppercase tracking-widest animate-pulse" : "text-[10px] font-bold text-gray-500 uppercase tracking-widest";
         }
@@ -274,16 +270,26 @@
                 minVol: parseFloat(document.getElementById('minVol').value),
                 useTrailingSL: document.getElementById('useTrailingSL').checked
             };
-            localStorage.setItem('luffy_v4_cfg', JSON.stringify(cfg));
+            localStorage.setItem('luffy_v5_cfg', JSON.stringify(cfg));
             await fetch('/api/settings', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(cfg) });
-            // Gửi một log nhẹ báo thành công
-            const box = document.getElementById('botLogs');
-            box.insertAdjacentHTML('afterbegin', `<div class="log-entry border-blue-500 text-blue-400"><span class="opacity-40 text-[9px]">[${new Date().toLocaleTimeString()}]</span> Cấu hình đã được lưu!</div>`);
+            addLocalLog("Cấu hình hạm đội đã được cập nhật!");
         }
 
         async function handleToggle() {
             await handleUpdate();
             await fetch('/api/settings', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ isRunning: !isRunning }) });
+        }
+
+        async function handleEmergencyStop() {
+            if(confirm("THUYỀN TRƯỞNG: Ngài có muốn ĐÓNG TẤT CẢ lệnh và DỪNG BOT không?")) {
+                await fetch('/api/stop-all', { method: 'POST' });
+                addLocalLog("Lệnh rút quân khẩn cấp đã phát đi!");
+            }
+        }
+
+        function addLocalLog(msg) {
+            const box = document.getElementById('botLogs');
+            box.insertAdjacentHTML('afterbegin', `<div class="log-entry border-blue-500 text-blue-400 font-bold"><span class="opacity-40 text-[9px]">[${new Date().toLocaleTimeString()}]</span> ${msg}</div>`);
         }
 
         setInterval(sync, 2000);
