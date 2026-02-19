@@ -17,7 +17,7 @@ const userDataDir = path.join(__dirname, 'bot_session_final');
 let isRunning = false;
 let totalPosts = 0;
 let history = [];
-let userInfo = { name: "Chưa kiểm tra", status: "Offline" };
+let userInfo = { name: "Chưa kiểm tra", status: "Offline", followers: "0" };
 let context = null;
 let mainPage = null;
 let coinQueue = [];
@@ -35,7 +35,7 @@ function smartRound(price) {
     return Math.round(p * 10000) / 10000;
 }
 
-// --- KHO DỮ LIỆU TRIỆU BIẾN THỂ (100 CÂU MỖI MẢNG) ---
+// --- KHO DỮ LIỆU ---
 const intros = [
     "Điểm tin nhanh về biến động của COIN.", "Anh em đã thấy cú move này của COIN chưa?", "Nhìn lại chart COIN hôm nay có nhiều điều thú vị.", "Cập nhật trạng thái mới nhất cho mã COIN.", "Dòng tiền đang đổ dồn sự chú ý vào COIN.", "Phân tích nhanh vị thế của COIN lúc này.", "Liệu COIN có chuẩn bị cho một cú bứt phá?", "Góc nhìn cá nhân về hướng đi của COIN.", "Sức nóng của COIN trên Square vẫn chưa hạ nhiệt.", "Đừng bỏ qua diễn biến hiện tại của COIN.",
     "Check nhanh cấu trúc nến của COIN anh em nhé.", "Vùng giá này của COIN thực sự rất đáng xem xét.", "Có nên vào hàng COIN lúc này không?", "Mọi con mắt đang đổ dồn về biến động của COIN.", "Tín hiệu từ COIN đang dần rõ nét hơn.", "Phân tích nhanh khung thời gian ngắn hạn của COIN.", "Nhận định về khả năng hồi phục của COIN.", "Góc trading: COIN đang ở vùng nhạy cảm.", "Cơ hội nào cho trader với mã COIN hôm nay?", "Dữ liệu on-chain của COIN đang có dấu hiệu lạ.",
@@ -101,8 +101,8 @@ function generateFinalContent(coin, price, change) {
 
     return {
         body: text,
-        dollarTags: [coin, randomSelection[0].symbol, randomSelection[1].symbol],
-        hashTags: [coin, randomSelection[2].symbol, randomSelection[3].symbol]
+        dollarTags: [coin, randomSelection[0]?.symbol || "BTC", randomSelection[1]?.symbol || "ETH"],
+        hashTags: [coin, randomSelection[2]?.symbol || "BNB", randomSelection[3]?.symbol || "SOL"]
     };
 }
 
@@ -124,7 +124,7 @@ async function ensureMainPage() {
     if (!mainPage || mainPage.isClosed()) {
         mainPage = await ctx.newPage();
         await mainPage.goto('https://www.binance.com/vi/square', { waitUntil: 'domcontentloaded' });
-        await mainPage.waitForTimeout(30000);
+        await mainPage.waitForTimeout(5000);
     }
     return mainPage;
 }
@@ -159,44 +159,37 @@ async function postTaskWithForce() {
         const textbox = await page.locator('div[contenteditable="true"], div[role="textbox"]').first();
         logStep(`📝 Soạn bài cho $${currentCoin.symbol}`);
         await textbox.click();
-        await page.waitForTimeout(5000);
+        await page.waitForTimeout(2000);
 
         await page.keyboard.press('Control+A');
         await page.keyboard.press('Backspace');
 
-        // 1. Viết mạch văn bản thuần trước
-        await page.keyboard.type(content.body, { delay: 5 });
+        await page.keyboard.type(content.body, { delay: 2 });
+        await page.keyboard.press('Enter');
+        await page.keyboard.press('Enter');
 
-        // 2. Xuống 2 dòng để ghi 3$
-        await page.keyboard.press('Enter');
-        await page.keyboard.press('Enter');
-        logStep("🏷 Chèn Tags $ cuối bài...");
         for (const symbol of content.dollarTags) {
-            await page.keyboard.type(`$${symbol}`, { delay: 10 });
-            await page.waitForTimeout(1500); 
+            await page.keyboard.type(`$${symbol}`, { delay: 2 });
+            await page.waitForTimeout(1000); 
             await page.keyboard.press('Enter');
-            await page.keyboard.type('  ', { delay: 5 }); 
+            await page.keyboard.type(' ', { delay: 2 }); 
         }
 
-        // 3. Xuống 2 dòng ghi 3# (là các đồng coin ngẫu nhiên)
         await page.keyboard.press('Enter');
-        await page.keyboard.press('Enter');
-        logStep("🏷 Chèn Tags # cuối bài...");
         for (const symbol of content.hashTags) {
-            await page.keyboard.type(`#${symbol}`, { delay: 10 });
-            await page.waitForTimeout(1500);
+            await page.keyboard.type(`#${symbol}`, { delay: 2 });
+            await page.waitForTimeout(1000);
             await page.keyboard.press('Enter');
-            await page.keyboard.type('  ', { delay: 5 });
+            await page.keyboard.type(' ', { delay: 2 });
         }
 
-        await page.waitForTimeout(8000);
+        await page.waitForTimeout(3000);
 
-        // Nút Đăng của bài đang soạn
         const postBtn = await page.locator('button').filter({ hasText: /^Đăng$|^Post$/ }).last();
         if (await postBtn.isEnabled()) {
             await postBtn.click();
             logStep(`🎯 Đã đăng xong $${currentCoin.symbol}. Nghỉ 15s...`);
-            await page.waitForTimeout(10000);
+            await page.waitForTimeout(5000);
             totalPosts++;
             history.unshift({ coin: currentCoin.symbol, time: new Date().toLocaleTimeString(), status: 'Thành công' });
         }
@@ -206,15 +199,12 @@ async function postTaskWithForce() {
     }
 }
 
-
 async function startLoop() {
     while (isRunning) {
         try {
             await postTaskWithForce();
         } catch (err) {
             logStep("❌ LOOP CRASH: " + err.message);
-
-            // 🔥 FIX: nếu loop chết thì reset browser
             context = null;
             mainPage = null;
         }
@@ -226,7 +216,14 @@ async function startLoop() {
         }
     }
 }
-// --- API ---
+
+// --- CÁC ROUTE API ---
+
+// Trang chủ gửi file index.html
+app.get('/', (req, res) => {
+    res.sendFile(path.join(__dirname, 'index.html'));
+});
+
 app.get('/start', (req, res) => {
     if (!isRunning) { isRunning = true; logStep("🏁 BẮT ĐẦU"); startLoop(); }
     res.json({ status: 'started' });
@@ -241,23 +238,30 @@ app.get('/stop', async (req, res) => {
 
 app.get('/stats', (req, res) => res.json({ isRunning, totalPosts, history, userInfo }));
 
+// Route để HTML gọi kiểm tra trạng thái Acc
+app.get('/check', async (req, res) => {
+    try {
+        const page = await ensureMainPage();
+        // Giả lập lấy tên từ giao diện nếu đã login
+        const nameNode = await page.locator('.bn-avatar + div, [class*="userName"]').first();
+        if (await nameNode.isVisible()) {
+            userInfo.name = await nameNode.innerText();
+            userInfo.status = "Online";
+        }
+    } catch (e) {}
+    res.json(userInfo);
+});
+
 app.get('/login', async (req, res) => {
     if (context) { await context.close(); context = null; }
     const ctx = await initBrowser(true);
     const p = await ctx.newPage();
     await p.goto('https://www.binance.com/vi/square');
-    res.send("Đã mở Chrome. Đăng nhập xong hãy TẮT nó.");
+    res.send("Đã mở trình duyệt. Hãy đăng nhập trên cửa sổ Chrome vừa hiện ra, sau đó quay lại trang quản lý.");
 });
-
-app.get('/', (req, res) => res.send("Bot is Live. Check /stats"));
 
 app.listen(port, '0.0.0.0', async () => {
     logStep(`SERVER MỞ TẠI PORT: ${port}`);
-
-    // 🔥 AUTO START SAU KHI RESTART
-    if (!isRunning) {
-        isRunning = true;
-        logStep("♻️ AUTO START SAU RESTART");
-        startLoop().catch(err => logStep("Loop lỗi: " + err.message));
-    }
+    // Tự động chạy nếu cần
+    // isRunning = true; startLoop();
 });
