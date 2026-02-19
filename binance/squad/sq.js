@@ -240,4 +240,13 @@ app.get('/login', async (req, res) => {
 
 app.get('/', (req, res) => res.send("Bot is Live. Check /stats"));
 
-app.listen(port, '0.0.0.0', () => logStep(`SERVER MỞ TẠI PORT: ${port}`));
+app.listen(port, '0.0.0.0', async () => {
+    logStep(`SERVER MỞ TẠI PORT: ${port}`);
+
+    // 🔥 AUTO START SAU KHI RESTART
+    if (!isRunning) {
+        isRunning = true;
+        logStep("♻️ AUTO START SAU RESTART");
+        startLoop().catch(err => logStep("Loop lỗi: " + err.message));
+    }
+});
