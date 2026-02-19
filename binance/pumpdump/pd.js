@@ -1,7 +1,7 @@
 /**
- * LUFFY PIRATE BOT - BẢN 08 (FULL TRÊN MỘT FILE - FIX LỖI NaN PnL)
+ * LUFFY PIRATE BOT - BẢN 08 (FULL - CHI TIẾT LỖI & FIX NaN)
  * Chế độ: Hedge Mode (Phòng hộ)
- * Chức năng: Tự động đòn bẩy, Mở lệnh Market, Kiểm soát TP/SL 15s/lần, Dọn dẹp lệnh rác.
+ * Chức năng: Tự động đòn bẩy, Mở lệnh Market, Kiểm soát TP/SL, Báo lỗi chi tiết.
  */
 
 import https from 'https';
@@ -37,7 +37,7 @@ let status = {
 let tempBlacklist = new Map();
 let isLoggedStop = true;
 
-// --- HÀM QUẢN LÝ LOG (CHẶN SPAM KHI DỪNG BOT) ---
+// --- HÀM QUẢN LÝ LOG ---
 function addBotLog(msg, type = 'info') {
     if (!botSettings.isRunning) {
         if (type === 'warn' && !isLoggedStop) {
@@ -55,7 +55,7 @@ function addBotLog(msg, type = 'info') {
     console.log(`[${type.toUpperCase()}] ${msg}`);
 }
 
-// --- HÀM GỌI API BINANCE (ĐÃ FIX ĐỐI SỐ) ---
+// --- HÀM GỌI API BINANCE (BẮT LỖI CHI TIẾT) ---
 async function callSignedAPI(endpoint, method = 'GET', params = {}) {
     const timestamp = Date.now();
     let queryObj = { ...params, timestamp, recvWindow: 5000 };
@@ -76,8 +76,12 @@ async function callSignedAPI(endpoint, method = 'GET', params = {}) {
             res.on('end', () => {
                 try {
                     const json = JSON.parse(data);
-                    if (res.statusCode >= 200 && res.statusCode < 300) resolve(json);
-                    else reject(json);
+                    if (res.statusCode >= 200 && res.statusCode < 300) {
+                        resolve(json);
+                    } else {
+                        // Trả về object lỗi chi tiết từ sàn
+                        reject({ code: json.code, msg: json.msg, status: res.statusCode });
+                    }
                 } catch (e) { reject({ msg: "LỖI PHẢN HỒI JSON" }); }
             });
         });
@@ -86,15 +90,16 @@ async function callSignedAPI(endpoint, method = 'GET', params = {}) {
     });
 }
 
-// --- TÍNH TOÁN GIÁ TP/SL THEO ĐÒN BẨY ---
+// --- TÍNH TOÁN GIÁ TP/SL ---
 function getPricePlan(leverage, posSide, entryPrice) {
+    const lev = parseFloat(leverage) || 20;
     let mult = 1.11;
-    if (leverage >= 26 && leverage <= 49) mult = 2.22;
-    else if (leverage >= 50 && leverage <= 74) mult = 3.33;
-    else if (leverage >= 75) mult = 5.55;
+    if (lev >= 26 && lev <= 49) mult = 2.22;
+    else if (lev >= 50 && lev <= 74) mult = 3.33;
+    else if (lev >= 75) mult = 5.55;
 
-    const tpRate = mult / leverage;
-    const slRate = (mult * 0.5) / leverage;
+    const tpRate = mult / lev;
+    const slRate = (mult * 0.5) / lev;
 
     return {
         tp: posSide === 'LONG' ? entryPrice * (1 + tpRate) : entryPrice * (1 - tpRate),
@@ -103,7 +108,7 @@ function getPricePlan(leverage, posSide, entryPrice) {
     };
 }
 
-// --- CƠ CHẾ TUẦN TRA & KIỂM SOÁT TP/SL (15 GIÂY) ---
+// --- KIỂM SOÁT TP/SL ---
 async function enforceTPSL() {
     if (!botSettings.isRunning) return;
     try {
@@ -111,7 +116,6 @@ async function enforceTPSL() {
         const activePos = positions.filter(p => parseFloat(p.positionAmt) !== 0);
         const allOrders = await callSignedAPI('/fapi/v1/openOrders');
 
-        // 1. Dọn dẹp lệnh rác (Có lệnh chờ nhưng không còn vị thế)
         for (const order of allOrders) {
             const hasPosition = activePos.find(p => p.symbol === order.symbol && p.positionSide === order.positionSide);
             if (!hasPosition && (order.type === 'TAKE_PROFIT_MARKET' || order.type === 'STOP_MARKET')) {
@@ -120,7 +124,6 @@ async function enforceTPSL() {
             }
         }
 
-        // 2. Kiểm tra và bổ sung TP/SL thiếu
         for (const p of activePos) {
             const symbol = p.symbol;
             const posSide = p.positionSide;
@@ -153,13 +156,13 @@ async function enforceTPSL() {
                         quantity: qty, workingType: 'MARK_PRICE'
                     });
                 }
-                addBotLog(`🛡️ Hệ thống: Đã ghim bổ sung TP/SL cho ${symbol} [${posSide}]`, "success");
+                addBotLog(`🛡️ Hệ thống: Đã ghim TP/SL cho ${symbol} [${posSide}]`, "success");
             }
         }
-    } catch (e) { /* Tuần tra thầm lặng */ }
+    } catch (e) { }
 }
 
-// --- VÒNG LẶP ĐI SĂN CHÍNH ---
+// --- VÒNG LẶP ĐI SĂN ---
 async function mainLoop() {
     if (!botSettings.isRunning) return;
     try {
@@ -190,37 +193,42 @@ async function mainLoop() {
                             const info = status.exchangeInfo[cand.symbol];
                             if (!info) continue;
 
-                            // 1. Set Leverage
+                            // 1. Lấy đòn bẩy tối đa
                             const brackets = await callSignedAPI('/fapi/v1/leverageBracket', { symbol: cand.symbol });
                             const maxLev = brackets[0].brackets[0].initialLeverage;
                             await callSignedAPI('/fapi/v1/leverage', 'POST', { symbol: cand.symbol, leverage: maxLev });
 
-                            // 2. Lấy giá và tính toán vốn
+                            // 2. Tính toán vốn và Check Min Notional
                             const ticker = await callSignedAPI('/fapi/v1/ticker/price', { symbol: cand.symbol });
                             const price = parseFloat(ticker.price);
                             let margin = botSettings.invType === 'fixed' ? botSettings.invValue : (status.currentBalance * botSettings.invValue / 100);
                             
-                            const plan = getPricePlan(maxLev, posSide, price);
-                            
-                            // LOG TỔNG TRƯỚC KHI MỞ
-                            addBotLog(`🛠️ Chuẩn bị mở ${posSide} ${cand.symbol}: Vốn $${margin.toFixed(2)}, Lev ${maxLev}x, TP ${plan.multiplierText}%`, "info");
+                            const totalValue = margin * maxLev;
+                            if (totalValue < 5.5) {
+                                addBotLog(`⚠️ ${cand.symbol}: Vốn quá thấp ($${totalValue.toFixed(2)} < 5.5$). Bỏ qua.`, "warn");
+                                continue;
+                            }
 
                             // 3. Mở Market
-                            let qty = (margin * maxLev) / price;
+                            let qty = totalValue / price;
                             qty = Math.floor(qty / info.stepSize) * info.stepSize;
+                            const qtyStr = qty.toFixed(info.quantityPrecision);
 
-                            const order = await callSignedAPI('/fapi/v1/order', 'POST', {
+                            await callSignedAPI('/fapi/v1/order', 'POST', {
                                 symbol: cand.symbol, side: posSide === 'LONG' ? 'BUY' : 'SELL',
-                                positionSide: posSide, type: 'MARKET', quantity: qty.toFixed(info.quantityPrecision)
+                                positionSide: posSide, type: 'MARKET', quantity: qtyStr
                             });
 
-                            addBotLog(`✅ ${cand.symbol} [${posSide}]: Mở lệnh Market thành công!`, "success");
-
-                            // Đợi 5s hậu kiểm
-                            setTimeout(enforceTPSL, 5000);
+                            addBotLog(`✅ ${cand.symbol} [${posSide}]: Mở Market thành công!`, "success");
+                            setTimeout(enforceTPSL, 3000);
 
                         } catch (err) {
-                            addBotLog(`❌ Lỗi ${cand.symbol}: ${err.msg || "Sàn từ chối lệnh"}`, "error");
+                            let errorReason = err.msg || "Lỗi không xác định";
+                            if (err.code === -2019) errorReason = "Hết tiền (Insufficient Margin)";
+                            if (err.code === -4046) errorReason = "Sai chế độ Hedge/One-way";
+                            if (err.code === -1013) errorReason = "Lệnh quá nhỏ (Min Notional)";
+                            
+                            addBotLog(`❌ ${cand.symbol}: ${errorReason} [Code: ${err.code || '?'}]`, "error");
                             tempBlacklist.set(cand.symbol, Date.now() + 60000);
                         }
                     }
@@ -245,7 +253,6 @@ APP.get('/api/status', async (req, res) => {
             const unrealizedProfit = parseFloat(p.unrealizedProfit);
             const positionAmt = Math.abs(parseFloat(p.positionAmt));
 
-            // FIX LỖI NaN: Kiểm tra các giá trị đầu vào của phép chia
             let pnl = "0.00";
             if (entryPrice > 0 && leverage > 0 && positionAmt > 0) {
                 const marginUsed = (entryPrice * positionAmt) / leverage;
@@ -253,11 +260,8 @@ APP.get('/api/status', async (req, res) => {
             }
 
             return {
-                symbol: p.symbol,
-                side: p.positionSide,
-                leverage: p.leverage,
-                entryPrice: entryPrice.toFixed(5),
-                markPrice: markPrice.toFixed(5),
+                symbol: p.symbol, side: p.positionSide, leverage: p.leverage,
+                entryPrice: entryPrice.toFixed(5), markPrice: markPrice.toFixed(5),
                 pnlPercent: pnl
             };
         });
@@ -276,7 +280,6 @@ APP.post('/api/settings', (req, res) => {
     res.sendStatus(200);
 });
 
-// --- KHỞI TẠO DỮ LIỆU SÀN ---
 async function init() {
     try {
         const res = await new Promise(resolve => https.get('https://fapi.binance.com/fapi/v1/exchangeInfo', r => {
@@ -295,6 +298,6 @@ async function init() {
 }
 
 init();
-setInterval(mainLoop, 5000); // Săn kèo mỗi 5s
-setInterval(enforceTPSL, 15000); // Tuần tra TP/SL mỗi 15s
+setInterval(mainLoop, 5000);
+setInterval(enforceTPSL, 15000);
 APP.listen(9001, '0.0.0.0', () => console.log("Hạm đội Luffy sẵn sàng tại cổng 9001"));
