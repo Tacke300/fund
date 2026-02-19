@@ -50,7 +50,7 @@ function calcTPSL(lev, side, entryPrice) {
     };
 }
 
-// HÀM QUAN TRỌNG: KIỂM TRA VÀ GHIM TP/SL
+// HÀM GHIM TP/SL: LẤY ENTRY PRICE THỰC TẾ
 async function enforceTPSL() {
     if (!botSettings.isRunning) return;
     try {
@@ -58,48 +58,52 @@ async function enforceTPSL() {
         const active = positions.filter(p => parseFloat(p.positionAmt) !== 0);
         const orders = await callBinance('/fapi/v1/openOrders');
 
-        // 1. Xử lý vị thế đang mở
         for (const p of active) {
             const symbol = p.symbol;
-            const side = p.positionSide; // LONG hoặc SHORT
-            const amt = Math.abs(parseFloat(p.positionAmt));
+            const side = p.positionSide;
+            const entryPrice = parseFloat(p.entryPrice);
             
-            // Tìm lệnh TP và SL hiện có cho vị thế này
             const hasTP = orders.some(o => o.symbol === symbol && o.positionSide === side && o.type === 'TAKE_PROFIT_MARKET');
             const hasSL = orders.some(o => o.symbol === symbol && o.positionSide === side && o.type === 'STOP_MARKET');
 
-            if (!hasTP || !hasSL) {
+            if ((!hasTP || !hasSL) && entryPrice > 0) {
                 const info = status.exchangeInfo[symbol];
-                const plan = calcTPSL(parseFloat(p.leverage), side, parseFloat(p.entryPrice));
+                const plan = calcTPSL(parseFloat(p.leverage), side, entryPrice);
                 const closeSide = side === 'LONG' ? 'SELL' : 'BUY';
-                const qty = amt.toFixed(info.quantityPrecision);
 
                 if (!hasTP) {
                     await callBinance('/fapi/v1/order', 'POST', {
-                        symbol, side: closeSide, positionSide: side, type: 'TAKE_PROFIT_MARKET',
-                        stopPrice: plan.tp.toFixed(info.pricePrecision), quantity: qty, workingType: 'MARK_PRICE', closePosition: 'true'
+                        symbol, side: closeSide, positionSide: side, 
+                        type: 'TAKE_PROFIT_MARKET',
+                        stopPrice: plan.tp.toFixed(info.pricePrecision), 
+                        workingType: 'MARK_PRICE', closePosition: 'true'
                     });
                 }
                 if (!hasSL) {
                     await callBinance('/fapi/v1/order', 'POST', {
-                        symbol, side: closeSide, positionSide: side, type: 'STOP_MARKET',
-                        stopPrice: plan.sl.toFixed(info.pricePrecision), quantity: qty, workingType: 'MARK_PRICE', closePosition: 'true'
+                        symbol, side: closeSide, positionSide: side, 
+                        type: 'STOP_MARKET',
+                        stopPrice: plan.sl.toFixed(info.pricePrecision), 
+                        workingType: 'MARK_PRICE', closePosition: 'true'
                     });
                 }
-                addBotLog(`🛡️ Đã ghim TP/SL cho ${symbol} (${side})`, "success");
+                addBotLog(`🛡️ Ghim TP/SL: ${symbol} (${side}) - Entry: ${entryPrice}`, "success");
             }
         }
 
-        // 2. Dọn dẹp: Nếu có lệnh chờ mà KHÔNG có vị thế tương ứng thì xóa sạch
+        // Dọn lệnh rác
         for (const o of orders) {
-            const hasPos = active.some(p => p.symbol === o.symbol && p.positionSide === o.positionSide);
-            if (!hasPos) {
-                await callBinance('/fapi/v1/order', 'DELETE', { symbol: o.symbol, orderId: o.orderId });
-                addBotLog(`🧹 Xóa lệnh chờ thừa: ${o.symbol} [${o.positionSide}]`, "warn");
+            const isAlgo = o.type === 'TAKE_PROFIT_MARKET' || o.type === 'STOP_MARKET';
+            if (isAlgo) {
+                const hasPos = active.some(p => p.symbol === o.symbol && p.positionSide === o.positionSide);
+                if (!hasPos) {
+                    await callBinance('/fapi/v1/order', 'DELETE', { symbol: o.symbol, orderId: o.orderId });
+                    addBotLog(`🧹 Hủy lệnh treo: ${o.symbol}`, "warn");
+                }
             }
         }
     } catch (e) {
-        console.log("Lỗi tuần tra TP/SL:", e.msg || e.message);
+        console.log("Lỗi tuần tra:", e.msg || e.message);
     }
 }
 
@@ -133,14 +137,14 @@ async function hunt() {
                     positionSide: posSide, type: 'MARKET', quantity: finalQty 
                 });
 
-                addBotLog(`🚀 VÀO LỆNH: ${posSide} ${c.symbol} | ${lev}x | Giá: ${price} | Qty: ${finalQty}`, "success");
+                addBotLog(`🚀 VÀO LỆNH: ${posSide} ${c.symbol} | ${lev}x`, "success");
                 
-                // Đợi 2 giây cho sàn cập nhật vị thế rồi ghim TP/SL ngay
-                setTimeout(enforceTPSL, 2000); 
+                // ĐỢI ĐÚNG 5 GIÂY ĐỂ LẤY GIÁ VÀO LỆNH CHUẨN RỒI CÀI TP/SL
+                setTimeout(enforceTPSL, 5000); 
             } catch (err) { 
                 if (err.code !== 'ENOTFOUND' && err.code !== 'ETIMEDOUT') {
                     botSettings.isRunning = false;
-                    addBotLog(`🚨 LỖI ĐẶT LỆNH: ${err.msg || JSON.stringify(err)}`, "error");
+                    addBotLog(`🚨 LỖI LỆNH: ${err.msg || JSON.stringify(err)}`, "error");
                     break;
                 }
             }
@@ -204,5 +208,5 @@ async function init() {
 init();
 setInterval(fetchCandidates, 5000);
 setInterval(hunt, 5000);
-setInterval(enforceTPSL, 15000); // Quét ghim TP/SL và dọn rác mỗi 15 giây
+setInterval(enforceTPSL, 15000); // Quét lại toàn bộ vị thế mỗi 15 giây
 APP.listen(9001, '0.0.0.0');
