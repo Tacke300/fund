@@ -11,9 +11,10 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 let botSettings = { isRunning: false, maxPositions: 10, invValue: 1.5, invType: 'fixed', minVol: 5.0 };
 let status = { currentBalance: 0, botLogs: [], exchangeInfo: {} };
 let isLoggedStop = true;
+let isInitializing = true; // Chặn bot chạy khi chưa tải xong data sàn
 
 function addBotLog(msg, type = 'info') {
-    if (!botSettings.isRunning && type !== 'warn') return;
+    if (!botSettings.isRunning && type !== 'warn' && type !== 'error') return;
     const entry = { time: new Date().toLocaleTimeString(), msg, type };
     status.botLogs.unshift(entry);
     if (status.botLogs.length > 50) status.botLogs.pop();
@@ -28,15 +29,17 @@ async function callBinance(endpoint, method = 'GET', params = {}) {
     const url = `https://fapi.binance.com${endpoint}?${fullQuery}&signature=${signature}`;
 
     return new Promise((resolve, reject) => {
-        https.request(url, { method, headers: { 'X-MBX-APIKEY': API_KEY } }, res => {
+        const req = https.request(url, { method, headers: { 'X-MBX-APIKEY': API_KEY } }, res => {
             let d = ''; res.on('data', chunk => d += chunk);
             res.on('end', () => {
                 try { 
                     const j = JSON.parse(d); 
                     if (res.statusCode >= 200 && res.statusCode < 300) resolve(j); else reject(j);
-                } catch (e) { reject(e); }
+                } catch (e) { reject({ msg: "JSON_PARSE_ERROR" }); }
             });
-        }).on('error', reject).end();
+        });
+        req.on('error', e => reject({ msg: e.message }));
+        req.end();
     });
 }
 
@@ -79,7 +82,7 @@ async function patrol() {
 }
 
 async function hunt() {
-    if (!botSettings.isRunning) return;
+    if (!botSettings.isRunning || isInitializing) return;
     try {
         const positions = await callBinance('/fapi/v2/positionRisk');
         const active = positions.filter(p => parseFloat(p.positionAmt) !== 0);
@@ -97,6 +100,8 @@ async function hunt() {
                         
                         try {
                             const info = status.exchangeInfo[c.symbol];
+                            if (!info) continue;
+
                             const brackets = await callBinance('/fapi/v1/leverageBracket', 'GET', { symbol: c.symbol });
                             const lev = brackets[0].brackets[0].initialLeverage;
                             await callBinance('/fapi/v1/leverage', 'POST', { symbol: c.symbol, leverage: lev });
@@ -104,31 +109,24 @@ async function hunt() {
                             const ticker = await callBinance('/fapi/v1/ticker/price', 'GET', { symbol: c.symbol });
                             const price = parseFloat(ticker.price);
                             
-                            // LOGIC TÍNH QTY CHUẨN: Vốn bỏ ra x Đòn bẩy / Giá
-                            let marginAmount = botSettings.invValue; // Ví dụ 0.06$
-                            let rawQty = (marginAmount * lev) / price;
-                            
-                            // Làm tròn theo stepSize (Dùng Math.ceil để không bị hụt 5$)
+                            let rawQty = (botSettings.invValue * lev) / price;
                             let qty = Math.ceil(rawQty / info.stepSize) * info.stepSize;
-                            
-                            // Kiểm tra Notional (Giá trị vị thế = Qty * Price)
-                            // Nếu < 5.1$ thì tăng Qty thêm cho đủ min của sàn
-                            if ((qty * price) < 5.0) {
-                                qty = Math.ceil(5.1 / price / info.stepSize) * info.stepSize;
-                            }
+                            if ((qty * price) < 5.0) qty = Math.ceil(5.1 / price / info.stepSize) * info.stepSize;
 
-                            addBotLog(`🚀 Mở ${posSide} ${c.symbol} (${lev}x) | Margin: ${marginAmount}$ | Qty: ${qty.toFixed(info.quantityPrecision)}`, "info");
+                            addBotLog(`🚀 Mở ${posSide} ${c.symbol} (${lev}x) | Qty: ${qty.toFixed(info.quantityPrecision)}`, "info");
                             
                             await callBinance('/fapi/v1/order', 'POST', { 
-                                symbol: c.symbol, 
-                                side: posSide === 'LONG' ? 'BUY' : 'SELL', 
-                                positionSide: posSide, 
-                                type: 'MARKET', 
-                                quantity: qty.toFixed(info.quantityPrecision) 
+                                symbol: c.symbol, side: posSide === 'LONG' ? 'BUY' : 'SELL', 
+                                positionSide: posSide, type: 'MARKET', quantity: qty.toFixed(info.quantityPrecision) 
                             });
                             
                             setTimeout(patrol, 2000); 
-                        } catch (err) { addBotLog(`Lỗi ${c.symbol}: ${err.msg || JSON.stringify(err)}`, "error"); }
+                        } catch (err) { 
+                            // CẦU CHÌ TỰ NGẮT: LỖI LÀ DỪNG BOT NGAY
+                            botSettings.isRunning = false;
+                            addBotLog(`🚨 LỖI LỆNH: ${err.msg || JSON.stringify(err)}. DỪNG BOT ĐỂ KIỂM TRA!`, "error");
+                            break; 
+                        }
                     }
                 } catch (e) {}
             });
@@ -146,15 +144,13 @@ APP.get('/api/status', async (req, res) => {
             let pnl = "0.00";
             const entry = parseFloat(p.entryPrice);
             const amt = Math.abs(parseFloat(p.positionAmt));
-            if (entry > 0 && amt > 0) {
-                const marginUsed = (entry * amt) / p.leverage;
-                pnl = ((parseFloat(p.unrealizedProfit) / marginUsed) * 100).toFixed(2);
-            }
+            if (entry > 0 && amt > 0) pnl = ((parseFloat(p.unrealizedProfit) / ((entry * amt) / p.leverage)) * 100).toFixed(2);
             return { symbol: p.symbol, side: p.positionSide, leverage: p.leverage, entryPrice: p.entryPrice, markPrice: p.markPrice, pnlPercent: pnl };
         });
         res.json({ botSettings, status, activePositions: active });
     } catch (e) { res.status(500).send(); }
 });
+
 APP.post('/api/settings', (req, res) => {
     botSettings = { ...botSettings, ...req.body };
     if (!botSettings.isRunning) { isLoggedStop = false; addBotLog("⚓ HẠ BUỒM!", "warn"); }
@@ -163,21 +159,26 @@ APP.post('/api/settings', (req, res) => {
 });
 
 async function init() {
+    addBotLog("📡 Đang tải dữ liệu sàn, vui lòng đợi...", "info");
     try {
-        https.get('https://fapi.binance.com/fapi/v1/exchangeInfo', res => {
-            let d = ''; res.on('data', chunk => d += chunk);
-            res.on('end', () => {
-                JSON.parse(d).symbols.forEach(s => {
-                    const lot = s.filters.find(f => f.filterType === 'LOT_SIZE');
-                    status.exchangeInfo[s.symbol] = { quantityPrecision: s.quantityPrecision, pricePrecision: s.pricePrecision, stepSize: parseFloat(lot.stepSize) };
-                });
-                console.log("⚓ Hệ thống dữ liệu sàn đã sẵn sàng.");
-            });
+        const data = await new Promise((resolve, reject) => {
+            https.get('https://fapi.binance.com/fapi/v1/exchangeInfo', res => {
+                let d = ''; res.on('data', chunk => d += chunk);
+                res.on('end', () => resolve(JSON.parse(d)));
+            }).on('error', reject);
         });
-    } catch (e) {}
+        data.symbols.forEach(s => {
+            const lot = s.filters.find(f => f.filterType === 'LOT_SIZE');
+            status.exchangeInfo[s.symbol] = { quantityPrecision: s.quantityPrecision, pricePrecision: s.pricePrecision, stepSize: parseFloat(lot.stepSize) };
+        });
+        isInitializing = false;
+        addBotLog("⚓ Dữ liệu sàn OK. Hệ thống sẵn sàng!", "success");
+    } catch (e) {
+        addBotLog("❌ Không thể tải dữ liệu sàn. Kiểm tra mạng!", "error");
+    }
 }
 
 init();
 setInterval(hunt, 5000);
 setInterval(patrol, 15000);
-APP.listen(9001);
+APP.listen(9001, '0.0.0.0');
