@@ -29,7 +29,7 @@ async function callBinance(endpoint, method = 'GET', params = {}) {
 
     return new Promise((resolve, reject) => {
         https.request(url, { method, headers: { 'X-MBX-APIKEY': API_KEY } }, res => {
-            let d = ''; res.on('data', c => d += c);
+            let d = ''; res.on('data', chunk => d += chunk);
             res.on('end', () => {
                 try { 
                     const j = JSON.parse(d); 
@@ -86,7 +86,7 @@ async function hunt() {
         if (active.length >= botSettings.maxPositions) return;
 
         http.get('http://127.0.0.1:9000/api/live', res => {
-            let d = ''; res.on('data', c => d += c);
+            let d = ''; res.on('data', chunk => d += chunk);
             res.on('end', async () => {
                 try {
                     const candidates = JSON.parse(d).filter(c => Math.abs(c.changePercent) >= botSettings.minVol);
@@ -103,18 +103,32 @@ async function hunt() {
 
                             const ticker = await callBinance('/fapi/v1/ticker/price', 'GET', { symbol: c.symbol });
                             const price = parseFloat(ticker.price);
-                            let margin = botSettings.invType === 'fixed' ? botSettings.invValue : (status.currentBalance * botSettings.invValue / 100);
                             
-                            // TÍNH TOÁN QTY VÀ FIX LỖI 4003 (MỨC MIN QTY)
-                            let qty = (margin * lev) / price;
-                            qty = Math.max(qty, info.stepSize); // Đảm bảo qty ít nhất bằng 1 stepSize
-                            qty = Math.floor(qty / info.stepSize) * info.stepSize;
-                            if (qty <= 0) qty = info.stepSize; 
+                            // LOGIC TÍNH QTY CHUẨN: Vốn bỏ ra x Đòn bẩy / Giá
+                            let marginAmount = botSettings.invValue; // Ví dụ 0.06$
+                            let rawQty = (marginAmount * lev) / price;
+                            
+                            // Làm tròn theo stepSize (Dùng Math.ceil để không bị hụt 5$)
+                            let qty = Math.ceil(rawQty / info.stepSize) * info.stepSize;
+                            
+                            // Kiểm tra Notional (Giá trị vị thế = Qty * Price)
+                            // Nếu < 5.1$ thì tăng Qty thêm cho đủ min của sàn
+                            if ((qty * price) < 5.0) {
+                                qty = Math.ceil(5.1 / price / info.stepSize) * info.stepSize;
+                            }
 
-                            addBotLog(`🚀 Mở ${posSide} ${c.symbol} (${lev}x) Qty: ${qty}`, "info");
-                            await callBinance('/fapi/v1/order', 'POST', { symbol: c.symbol, side: posSide === 'LONG' ? 'BUY' : 'SELL', positionSide: posSide, type: 'MARKET', quantity: qty.toFixed(info.quantityPrecision) });
+                            addBotLog(`🚀 Mở ${posSide} ${c.symbol} (${lev}x) | Margin: ${marginAmount}$ | Qty: ${qty.toFixed(info.quantityPrecision)}`, "info");
+                            
+                            await callBinance('/fapi/v1/order', 'POST', { 
+                                symbol: c.symbol, 
+                                side: posSide === 'LONG' ? 'BUY' : 'SELL', 
+                                positionSide: posSide, 
+                                type: 'MARKET', 
+                                quantity: qty.toFixed(info.quantityPrecision) 
+                            });
+                            
                             setTimeout(patrol, 2000); 
-                        } catch (err) { console.log(err); }
+                        } catch (err) { addBotLog(`Lỗi ${c.symbol}: ${err.msg || JSON.stringify(err)}`, "error"); }
                     }
                 } catch (e) {}
             });
@@ -132,7 +146,10 @@ APP.get('/api/status', async (req, res) => {
             let pnl = "0.00";
             const entry = parseFloat(p.entryPrice);
             const amt = Math.abs(parseFloat(p.positionAmt));
-            if (entry > 0 && amt > 0) pnl = ((parseFloat(p.unrealizedProfit) / ((entry * amt) / p.leverage)) * 100).toFixed(2);
+            if (entry > 0 && amt > 0) {
+                const marginUsed = (entry * amt) / p.leverage;
+                pnl = ((parseFloat(p.unrealizedProfit) / marginUsed) * 100).toFixed(2);
+            }
             return { symbol: p.symbol, side: p.positionSide, leverage: p.leverage, entryPrice: p.entryPrice, markPrice: p.markPrice, pnlPercent: pnl };
         });
         res.json({ botSettings, status, activePositions: active });
@@ -148,7 +165,7 @@ APP.post('/api/settings', (req, res) => {
 async function init() {
     try {
         https.get('https://fapi.binance.com/fapi/v1/exchangeInfo', res => {
-            let d = ''; res.on('data', c => d += c);
+            let d = ''; res.on('data', chunk => d += chunk);
             res.on('end', () => {
                 JSON.parse(d).symbols.forEach(s => {
                     const lot = s.filters.find(f => f.filterType === 'LOT_SIZE');
