@@ -13,7 +13,7 @@
             background: #050505;
             color: #eee;
             font-family: 'Inter', sans-serif;
-            background-image: linear-gradient(rgba(0,0,0,0.9), rgba(0,0,0,0.9)), url('https://images.alphacoders.com/605/605592.png');
+            background-image: linear-gradient(rgba(0,0,0,0.85), rgba(0,0,0,0.85)), url('https://images.alphacoders.com/605/605592.png');
             background-size: cover;
             background-position: center;
             height: 100vh;
@@ -24,7 +24,6 @@
         .luffy-font { font-family: 'Bangers', cursive; letter-spacing: 1.5px; }
         .mono { font-family: 'JetBrains Mono', monospace; }
         
-        /* Glassmorphism Card */
         .card { 
             background: rgba(20, 20, 25, 0.7); 
             backdrop-filter: blur(15px); 
@@ -32,12 +31,10 @@
             border-radius: 20px;
         }
 
-        /* Scrollbar tinh tế */
         ::-webkit-scrollbar { width: 4px; }
         ::-webkit-scrollbar-thumb { background: #444; border-radius: 10px; }
         ::-webkit-scrollbar-thumb:hover { background: #ff4d4d; }
 
-        /* Animation cho nút Running */
         @keyframes pulse-red {
             0% { box-shadow: 0 0 0 0 rgba(220, 38, 38, 0.7); }
             70% { box-shadow: 0 0 0 15px rgba(220, 38, 38, 0); }
@@ -61,8 +58,9 @@
     <header class="flex justify-between items-center mb-6 bg-black/40 p-4 rounded-2xl border border-white/5">
         <div class="flex items-center gap-4">
             <div class="relative">
-                <img src="https://api.dicebear.com/7.x/avataaars/svg?seed=Luffy" class="w-16 h-16 bg-red-600 rounded-2xl border-2 border-yellow-500 shadow-2xl">
-                <div id="statusDot" class="absolute -bottom-1 -right-1 w-5 h-5 bg-gray-500 border-4 border-black rounded-full"></div>
+                <img src="https://i.pinimg.com/originals/f3/32/30/f3323087090006934b07447477028f0e.png" 
+                     class="w-16 h-16 bg-red-600 rounded-2xl border-2 border-yellow-500 shadow-2xl object-cover">
+                <div id="statusDot" class="absolute -bottom-1 -right-1 w-5 h-5 bg-gray-500 border-4 border-black rounded-full transition-all duration-500"></div>
             </div>
             <div>
                 <h1 class="luffy-font text-4xl text-white uppercase italic leading-none">Pirate <span class="text-red-500">King</span></h1>
@@ -108,19 +106,19 @@
                         </div>
 
                         <div class="space-y-2">
-                            <label class="text-[10px] text-gray-500 uppercase font-bold ml-1 italic">Số hạm đội tối đa (Positions)</label>
+                            <label class="text-[10px] text-gray-500 uppercase font-bold ml-1 italic">Số hạm đội tối đa</label>
                             <input type="number" id="maxPositions" class="w-full mono text-lg font-bold" value="10">
                         </div>
 
-                        <button onclick="updateSettings()" class="w-full py-3 rounded-xl text-[10px] font-bold uppercase tracking-widest bg-white/10 hover:bg-white/20 transition-all border border-white/10">
+                        <button onclick="updateSettings()" class="w-full py-3 rounded-xl text-[10px] font-bold uppercase tracking-widest bg-white/10 hover:bg-white/20 transition-all border border-white/10 text-white">
                             Cập nhật thông số
                         </button>
                     </div>
                 </div>
 
                 <div id="btnContainer" class="mt-8">
-                    <button id="runBtn" onclick="toggleRun()" class="w-full py-5 rounded-2xl font-black text-white uppercase text-sm tracking-widest transition-all duration-300 shadow-xl">
-                        ĐANG TẢI...
+                    <button id="runBtn" onclick="toggleRun()" class="w-full py-5 rounded-2xl font-black text-white bg-blue-600 uppercase text-sm tracking-widest transition-all duration-300 shadow-xl cursor-pointer">
+                        ĐANG KẾT NỐI...
                     </button>
                 </div>
             </div>
@@ -143,7 +141,7 @@
                             </tr>
                         </thead>
                         <tbody id="activeBody" class="mono text-sm divide-y divide-white/5">
-                            </tbody>
+                        </tbody>
                     </table>
                 </div>
 
@@ -174,7 +172,7 @@
                     <i class="fas fa-scroll text-gray-600"></i>
                 </div>
                 <div class="flex-grow overflow-y-auto p-4 space-y-3" id="historyBody">
-                    </div>
+                </div>
             </div>
         </div>
 
@@ -186,16 +184,10 @@
         async function sync() {
             try {
                 const res = await fetch('/api/status');
+                if (!res.ok) throw new Error("Server Error");
                 const data = await res.json();
                 
-                // Cập nhật Vốn & SL
-                document.getElementById('equity').innerText = '$' + (data.status.currentBalance || 0).toFixed(2);
-                let slAt = data.botSettings.accountSLType === 'fixed' 
-                    ? data.status.highestBalance - data.botSettings.accountSLValue 
-                    : data.status.highestBalance * (1 - data.botSettings.accountSLValue / 100);
-                document.getElementById('slBotAt').innerText = '$' + (slAt || 0).toFixed(2);
-
-                // TRẠNG THÁI NÚT START/STOP
+                // 1. CẬP NHẬT TRẠNG THÁI NÚT START/STOP (Đây là phần ông cần)
                 isRunning = data.botSettings.isRunning;
                 const btn = document.getElementById('runBtn');
                 const dot = document.getElementById('statusDot');
@@ -203,23 +195,31 @@
 
                 if (isRunning) {
                     btn.innerText = "🛑 DỪNG CHIẾN ĐẤU";
-                    btn.className = "w-full py-5 rounded-2xl font-black bg-red-600 text-white border-b-4 border-red-800 uppercase text-sm tracking-widest shadow-2xl btn-running transition-all";
+                    btn.className = "w-full py-5 rounded-2xl font-black bg-red-600 text-white border-b-4 border-red-800 uppercase text-sm tracking-widest shadow-2xl btn-running transition-all cursor-pointer hover:bg-red-500";
                     dot.className = "absolute -bottom-1 -right-1 w-5 h-5 bg-green-500 border-4 border-black rounded-full shadow-[0_0_15px_#22c55e]";
                     modeText.innerText = "HÀNH QUÂN TRÊN BIỂN";
-                    modeText.classList.replace('text-gray-500', 'text-green-500');
+                    modeText.className = "text-xs font-black text-green-500 tracking-[0.2em] mt-1 uppercase";
                 } else {
                     btn.innerText = "🚢 GIƯƠNG BUỒM (START)";
-                    btn.className = "w-full py-5 rounded-2xl font-black bg-green-500 text-white border-b-4 border-green-800 uppercase text-sm tracking-widest shadow-lg hover:scale-[1.02] transition-all";
+                    btn.className = "w-full py-5 rounded-2xl font-black bg-green-500 text-white border-b-4 border-green-800 uppercase text-sm tracking-widest shadow-lg hover:scale-[1.02] transition-all cursor-pointer hover:bg-green-400";
                     dot.className = "absolute -bottom-1 -right-1 w-5 h-5 bg-gray-600 border-4 border-black rounded-full";
                     modeText.innerText = "HÀNH QUÂN TẠI CHỖ";
-                    modeText.classList.replace('text-green-500', 'text-gray-500');
+                    modeText.className = "text-xs font-black text-gray-500 tracking-[0.2em] mt-1 uppercase";
                 }
 
-                // Cập nhật Vị thế (Positions)
+                // 2. Cập nhật Vốn & SL
+                document.getElementById('equity').innerText = '$' + (data.status.currentBalance || 0).toFixed(2);
+                let slAt = data.botSettings.accountSLType === 'fixed' 
+                    ? data.status.highestBalance - data.botSettings.accountSLValue 
+                    : data.status.highestBalance * (1 - data.botSettings.accountSLValue / 100);
+                document.getElementById('slBotAt').innerText = '$' + (slAt || 0).toFixed(2);
+
+                // 3. Cập nhật danh sách lệnh đang chạy
                 const activeBody = document.getElementById('activeBody');
                 let totalPnL = 0;
                 activeBody.innerHTML = data.activePositions.map(p => {
-                    totalPnL += parseFloat(p.pnl || 0);
+                    const pnlVal = parseFloat(p.pnl || 0);
+                    totalPnL += pnlVal;
                     const isLong = p.side === 'LONG';
                     return `
                         <tr class="hover:bg-white/5 transition-colors group">
@@ -233,8 +233,8 @@
                                 </span>
                             </td>
                             <td class="p-5 text-right font-bold">
-                                <div class="${p.pnl >= 0 ? 'text-green-400' : 'text-red-500'} text-lg">${p.pnlPercent}%</div>
-                                <div class="text-[10px] opacity-40">$${p.pnl}</div>
+                                <div class="${pnlVal >= 0 ? 'text-green-400' : 'text-red-500'} text-lg">${p.pnlPercent}%</div>
+                                <div class="text-[10px] opacity-40">$${pnlVal.toFixed(2)}</div>
                             </td>
                         </tr>
                     `;
@@ -244,7 +244,7 @@
                 document.getElementById('totalActivePnL').innerText = (totalPnL >= 0 ? '+' : '') + '$' + totalPnL.toFixed(2);
                 document.getElementById('totalActivePnL').className = `text-2xl font-black mono ${totalPnL >= 0 ? 'text-green-400' : 'text-red-500'}`;
 
-                // Winrate & History
+                // 4. Winrate & History
                 let win = 0, profit = 0, loss = 0;
                 data.history.forEach(h => {
                     const val = parseFloat(h.pnl || 0);
@@ -254,19 +254,23 @@
                 document.getElementById('totalProfit').innerText = '+$' + profit.toFixed(1);
                 document.getElementById('totalLoss').innerText = '-$' + loss.toFixed(1);
 
-                document.getElementById('historyBody').innerHTML = data.history.slice().reverse().map(h => `
-                    <div class="bg-black/40 p-3 rounded-xl border-l-4 ${h.pnl > 0 ? 'border-green-500' : 'border-red-500'} flex justify-between items-center transition-all hover:translate-x-1">
+                document.getElementById('historyBody').innerHTML = data.history.slice().reverse().slice(0, 10).map(h => `
+                    <div class="bg-black/40 p-3 rounded-xl border-l-4 ${parseFloat(h.pnl) > 0 ? 'border-green-500' : 'border-red-500'} flex justify-between items-center transition-all hover:translate-x-1">
                         <div>
                             <p class="text-xs font-black text-gray-200">${h.symbol}</p>
-                            <p class="text-[9px] text-gray-500 uppercase">${h.side} | ${h.time.split(',')[1]}</p>
+                            <p class="text-[9px] text-gray-500 uppercase">${h.side} | ${h.time ? h.time.split(',')[1] : 'N/A'}</p>
                         </div>
-                        <p class="font-bold ${h.pnl > 0 ? 'text-green-400' : 'text-red-400'} text-xs">
-                            ${h.pnl > 0 ? '+' : ''}${h.pnl}%
+                        <p class="font-bold ${parseFloat(h.pnl) > 0 ? 'text-green-400' : 'text-red-400'} text-xs">
+                            ${parseFloat(h.pnl) > 0 ? '+' : ''}${h.pnl}%
                         </p>
                     </div>
-                `).join('') || '<p class="text-gray-700 text-[10px] text-center mt-10">CHƯA CÓ LỊCH SỬ</p>';
+                `).join('') || '<p class="text-gray-700 text-[10px] text-center mt-10 uppercase font-bold">Chưa có nhật ký</p>';
 
-            } catch (e) { console.error("⚠️ Mất kết nối hạm đội!"); }
+            } catch (e) { 
+                console.error("⚠️ Lỗi kết nối:", e);
+                document.getElementById('runBtn').innerText = "⚠️ LỖI KẾT NỐI";
+                document.getElementById('runBtn').className = "w-full py-5 rounded-2xl font-black bg-gray-800 text-red-500 border-b-4 border-black uppercase text-sm tracking-widest shadow-lg";
+            }
         }
 
         async function updateSettings() {
@@ -276,17 +280,31 @@
                 invType: document.getElementById('invType').value,
                 maxPositions: parseInt(document.getElementById('maxPositions').value)
             };
-            await fetch('/api/settings', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body) });
-            alert("✅ Lệnh của thuyền trưởng đã được thực thi!");
+            try {
+                await fetch('/api/settings', { 
+                    method: 'POST', 
+                    headers: {'Content-Type': 'application/json'}, 
+                    body: JSON.stringify(body) 
+                });
+                alert("✅ Lệnh của thuyền trưởng đã được thực thi!");
+            } catch(e) { alert("❌ Lỗi cập nhật!"); }
         }
 
         async function toggleRun() {
             const nextStatus = !isRunning;
-            await fetch('/api/settings', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ isRunning: nextStatus }) });
-            sync();
+            try {
+                await fetch('/api/settings', { 
+                    method: 'POST', 
+                    headers: {'Content-Type': 'application/json'}, 
+                    body: JSON.stringify({ isRunning: nextStatus }) 
+                });
+                sync();
+            } catch(e) { alert("❌ Không thể đổi trạng thái!"); }
         }
 
+        // Tự động đồng bộ mỗi 2 giây
         setInterval(sync, 2000);
+        // Chạy ngay khi load trang
         sync();
     </script>
 </body>
