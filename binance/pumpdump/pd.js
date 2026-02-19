@@ -13,7 +13,6 @@ let status = { currentBalance: 0, botLogs: [], exchangeInfo: {}, candidatesList:
 let isInitializing = true;
 
 function addBotLog(msg, type = 'info') {
-    if (!botSettings.isRunning && !['success', 'error', 'warn'].includes(type)) return;
     const entry = { time: new Date().toLocaleTimeString(), msg, type };
     status.botLogs.unshift(entry);
     if (status.botLogs.length > 50) status.botLogs.pop();
@@ -51,24 +50,18 @@ function calcTPSL(lev, side, entryPrice) {
     };
 }
 
-// MẮT THẦN: LUÔN QUÉT KÈO DÙ START HAY STOP
 function fetchCandidates() {
     http.get('http://127.0.0.1:9000/api/live', res => {
         let d = ''; res.on('data', chunk => d += chunk);
         res.on('end', () => {
             try {
                 const allData = JSON.parse(d);
-                const filtered = allData.filter(c => Math.abs(c.changePercent) >= botSettings.minVol);
-                status.candidatesList = filtered.sort((a, b) => Math.abs(b.changePercent) - Math.abs(a.changePercent));
-                // Chỉ log khi có kèo mới và bot đang chạy để tránh spam
-                if (status.candidatesList.length > 0 && botSettings.isRunning) {
-                    console.log(`[SCAN] Tìm thấy ${status.candidatesList.length} kèo thỏa mãn.`);
-                }
+                status.candidatesList = allData
+                    .filter(c => Math.abs(c.changePercent) >= botSettings.minVol)
+                    .sort((a, b) => Math.abs(b.changePercent) - Math.abs(a.changePercent));
             } catch (e) { status.candidatesList = []; }
         });
-    }).on('error', () => { 
-        status.candidatesList = []; 
-    });
+    }).on('error', () => { status.candidatesList = []; });
 }
 
 async function patrol() {
@@ -123,16 +116,21 @@ async function hunt() {
                 let qty = Math.ceil(((botSettings.invValue * lev) / price) / info.stepSize) * info.stepSize;
                 if ((qty * price) < 5.0) qty = Math.ceil(5.1 / price / info.stepSize) * info.stepSize;
 
-                addBotLog(`🚀 Mở ${posSide} ${c.symbol} (${lev}x)`, "info");
-                await callBinance('/fapi/v1/order', 'POST', { symbol: c.symbol, side: posSide === 'LONG' ? 'BUY' : 'SELL', positionSide: posSide, type: 'MARKET', quantity: qty.toFixed(info.quantityPrecision) });
-                setTimeout(patrol, 3000); 
+                const finalQty = qty.toFixed(info.quantityPrecision);
+                const order = await callBinance('/fapi/v1/order', 'POST', { 
+                    symbol: c.symbol, side: posSide === 'LONG' ? 'BUY' : 'SELL', 
+                    positionSide: posSide, type: 'MARKET', quantity: finalQty 
+                });
+
+                addBotLog(`🚀 VÀO LỆNH: ${posSide} ${c.symbol} | Đòn bẩy: ${lev}x | Giá: ${price} | Qty: ${finalQty} | Tổng: $${(qty*price).toFixed(2)}`, "success");
+                
+                // Ghim TP/SL ngay lập tức
+                setTimeout(patrol, 1000); 
             } catch (err) { 
-                if (err.code === 'ENOTFOUND' || err.code === 'ETIMEDOUT') {
-                    addBotLog("📡 Sóng yếu, bỏ qua kèo...", "warn");
-                } else {
+                if (err.code !== 'ENOTFOUND' && err.code !== 'ETIMEDOUT') {
                     botSettings.isRunning = false;
-                    addBotLog(`🚨 LỖI SÀN: ${err.msg || JSON.stringify(err)}. DỪNG BOT!`, "error");
-                    break; 
+                    addBotLog(`🚨 LỖI ĐẶT LỆNH: ${err.msg || JSON.stringify(err)}`, "error");
+                    break;
                 }
             }
         }
@@ -153,18 +151,17 @@ APP.get('/api/status', async (req, res) => {
             if (entry > 0 && amt > 0) pnl = ((parseFloat(p.unrealizedProfit) / ((entry * amt) / p.leverage)) * 100).toFixed(2);
             return { symbol: p.symbol, side: p.positionSide, leverage: p.leverage, entryPrice: p.entryPrice, markPrice: p.markPrice, pnlPercent: pnl };
         });
-        res.json({ botSettings, status, activePositions: active });
+        // Trả về thêm candidatesList để hiện trên HTML
+        res.json({ botSettings, status, activePositions: active, candidatesList: status.candidatesList });
     } catch (e) { res.status(500).send(); }
 });
 
 APP.post('/api/settings', (req, res) => {
     botSettings = { ...botSettings, ...req.body };
-    if (!botSettings.isRunning) addBotLog("⚓ HẠ BUỒM!", "warn");
-    else addBotLog("🚢 GIƯƠNG BUỒM!", "success");
+    addBotLog(botSettings.isRunning ? "🚢 GIƯƠNG BUỒM!" : "⚓ HẠ BUỒM!", botSettings.isRunning ? "success" : "warn");
     res.sendStatus(200);
 });
 
-// SỬA LỖI RES IS NOT DEFINED TẠI ĐÂY
 async function init() {
     console.log("📡 Đang nạp dữ liệu sàn...");
     https.get('https://fapi.binance.com/fapi/v1/exchangeInfo', (response) => {
@@ -172,23 +169,15 @@ async function init() {
         response.on('data', c => d += c);
         response.on('end', () => {
             try {
-                const parsed = JSON.parse(d);
-                parsed.symbols.forEach(s => {
+                JSON.parse(d).symbols.forEach(s => {
                     const lot = s.filters.find(f => f.filterType === 'LOT_SIZE');
-                    status.exchangeInfo[s.symbol] = { 
-                        quantityPrecision: s.quantityPrecision, 
-                        pricePrecision: s.pricePrecision, 
-                        stepSize: parseFloat(lot.stepSize) 
-                    };
+                    status.exchangeInfo[s.symbol] = { quantityPrecision: s.quantityPrecision, pricePrecision: s.pricePrecision, stepSize: parseFloat(lot.stepSize) };
                 });
                 isInitializing = false;
                 addBotLog("⚓ Hệ thống sẵn sàng!", "success");
-            } catch (e) { console.error("Lỗi parse dữ liệu sàn."); }
+            } catch (e) {}
         });
-    }).on('error', (e) => {
-        console.error("Lỗi kết nối sàn: " + e.message);
-        setTimeout(init, 5000);
-    });
+    }).on('error', () => setTimeout(init, 5000));
 }
 
 init();
