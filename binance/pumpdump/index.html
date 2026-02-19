@@ -1,277 +1,325 @@
-
 <!DOCTYPE html>
 <html lang="vi">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>LUFFY PIRATE BOT - BẢN SỬA 02</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
-    <style>
-        @import url('https://fonts.googleapis.com/css2?family=Bangers&family=JetBrains+Mono:wght@400;700&display=swap');
-        body {
-            background: #050505; color: #eee; font-family: 'Inter', sans-serif;
-            background-image: linear-gradient(rgba(0,0,0,0.9), rgba(0,0,0,0.9)), url('https://images.alphacoders.com/605/605592.png');
-            background-size: cover; background-attachment: fixed; height: 100vh; overflow: hidden; display: flex; flex-direction: column;
-        }
-        .luffy-font { font-family: 'Bangers', cursive; letter-spacing: 1.5px; }
-        .mono { font-family: 'JetBrains Mono', monospace; }
-        .card { background: rgba(20, 20, 25, 0.95); backdrop-filter: blur(20px); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 12px; padding: 10px; }
-        
-        /* Grid 6 ô */
-        .grid-6 { display: grid; grid-template-columns: repeat(1, 1fr); gap: 10px; }
-        @media (min-width: 1024px) { .grid-6 { grid-template-columns: repeat(6, 1fr); } }
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LUFFY PIRATE BOT - KING OF TRADING</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Bangers&family=JetBrains+Mono:wght@400;700&display=swap');
+        
+        :root {
+            --luffy-red: #ff4d4d;
+            --luffy-yellow: #ffbe0b;
+            --bg-dark: #0a0a0c;
+        }
 
-        .log-entry { border-left: 3px solid #444; padding-left: 8px; margin-bottom: 2px; font-size: 11px; line-height: 1.4; }
-        .log-error { border-color: #ef4444; color: #f87171; background: rgba(239, 68, 68, 0.05); }
-        .log-success { border-color: #22c55e; color: #4ade80; }
-        .log-warn { border-color: #eab308; color: #facc15; }
+        body {
+            background: var(--bg-dark);
+            color: #eee;
+            font-family: 'Inter', sans-serif;
+            background-image: 
+                radial-gradient(circle at 50% 50%, rgba(255, 0, 0, 0.05) 0%, transparent 80%),
+                url('https://images.alphacoders.com/605/605592.png');
+            background-size: cover;
+            background-attachment: fixed;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
 
-        .btn-start { background: #22c55e; border-bottom: 4px solid #14532d; transition: 0.2s; }
-        .btn-stop { background: #ef4444; border-bottom: 4px solid #7f1d1d; animation: pulse 2s infinite; }
-        @keyframes pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(0.98); } }
-        
-        .ip-badge { background: #1e1b4b; border: 1px solid #4338ca; color: #818cf8; padding: 2px 6px; border-radius: 4px; font-size: 10px; }
-    </style>
+        .luffy-font { font-family: 'Bangers', cursive; letter-spacing: 1px; }
+        .mono { font-family: 'JetBrains Mono', monospace; }
+
+        .card { 
+            background: rgba(15, 15, 20, 0.8); 
+            backdrop-filter: blur(12px); 
+            border: 1px solid rgba(255, 255, 255, 0.08); 
+            border-radius: 16px; 
+            box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+        }
+
+        /* Glow effect cho chỉ số quan trọng */
+        .glow-yellow { text-shadow: 0 0 10px rgba(255, 190, 11, 0.5); }
+        .glow-red { text-shadow: 0 0 10px rgba(255, 77, 77, 0.5); }
+
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar { width: 4px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #333; border-radius: 10px; }
+
+        .btn-action {
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            text-transform: uppercase;
+            font-weight: 900;
+        }
+
+        .btn-start { background: linear-gradient(135deg, #22c55e, #15803d); box-shadow: 0 4px 15px rgba(34, 197, 94, 0.3); }
+        .btn-stop { background: linear-gradient(135deg, #ef4444, #b91c1c); box-shadow: 0 4px 15px rgba(239, 68, 68, 0.3); animation: pulse 2s infinite; }
+
+        @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.8; } 100% { opacity: 1; } }
+        
+        .status-tag { font-size: 9px; padding: 2px 6px; border-radius: 4px; background: rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.1); }
+    </style>
 </head>
-<body class="p-2 md:p-4">
+<body class="p-2 md:p-6">
 
-    <header class="flex justify-between items-center mb-4 bg-black/60 p-3 rounded-xl border border-white/10">
-        <div class="flex items-center gap-3">
-            <img src="https://i.ibb.co/vYm0Fm6/luffy-gear-5.png" class="w-12 h-12 rounded-lg border-2 border-yellow-500">
-            <div>
-                <h1 class="luffy-font text-2xl text-white">LUFFY <span class="text-red-500">PIRATE</span> <span class="text-[10px] bg-red-600 px-1 rounded ml-1">V.02</span></h1>
-                <div class="flex items-center gap-2">
-                    <span id="ipStatus" class="ip-badge mono">Đang kiểm tra IP...</span>
-                    <span id="botStatusText" class="text-[10px] font-bold text-gray-500 uppercase">OFFLINE</span>
-                </div>
-            </div>
-        </div>
-        <div class="text-right">
-            <p class="text-[9px] text-gray-400 font-bold uppercase tracking-widest">Tài khoản Futures</p>
-            <p id="balance" class="text-2xl font-black text-yellow-400 mono tracking-tighter">$0.00</p>
-        </div>
-    </header>
+    <header class="card p-4 mb-4 flex flex-wrap justify-between items-center gap-4 border-b-2 border-yellow-500">
+        <div class="flex items-center gap-4">
+            <div class="relative">
+                <img src="https://i.ibb.co/vYm0Fm6/luffy-gear-5.png" class="w-14 h-14 rounded-full border-2 border-yellow-500 shadow-lg shadow-yellow-500/20">
+                <div class="absolute -bottom-1 -right-1 w-4 h-4 bg-green-500 rounded-full border-2 border-black"></div>
+            </div>
+            <div>
+                <h1 class="luffy-font text-3xl md:text-4xl text-white">LUFFY <span class="text-red-500">PIRATE</span></h1>
+                <div class="flex gap-2 mt-1">
+                    <span id="ipStatus" class="status-tag mono text-blue-400">CHECKING IP...</span>
+                    <span id="botStatusText" class="status-tag text-gray-400 uppercase">OFFLINE</span>
+                </div>
+            </div>
+        </div>
 
-    <div class="grid-6 mb-4">
-        <div class="card flex flex-col justify-center">
-            <label class="text-[9px] text-gray-500 font-bold uppercase mb-1">Cấu hình Vốn</label>
-            <div class="flex gap-1">
-                <input type="number" id="invValue" class="w-2/3 bg-black border border-white/10 p-1 rounded text-xs text-white mono" value="1.5">
-                <select id="invType" class="w-1/3 bg-black border border-white/10 p-1 rounded text-[10px] text-yellow-500 font-bold">
-                    <option value="fixed">$</option>
-                    <option value="percent">%</option>
-                </select>
-            </div>
-        </div>
+        <div class="flex gap-6 items-center bg-black/40 p-3 rounded-2xl border border-white/5">
+            <div class="text-center">
+                <p class="text-[10px] text-gray-500 uppercase font-bold tracking-widest">Available Balance</p>
+                <p id="balance" class="text-2xl font-black text-yellow-400 mono glow-yellow">$0.00</p>
+            </div>
+            <div class="h-10 w-[1px] bg-white/10"></div>
+            <div class="text-center">
+                <p class="text-[10px] text-gray-500 uppercase font-bold tracking-widest">Win Rate</p>
+                <p id="winRate" class="luffy-font text-3xl text-green-400">0%</p>
+            </div>
+        </div>
+    </header>
 
-        <div class="card flex flex-col justify-center">
-            <label class="text-[9px] text-gray-500 font-bold uppercase mb-1">Lọc Biến Động (%)</label>
-            <input type="number" id="minVol" class="w-full bg-black border border-white/10 p-1 rounded text-xs text-red-500 font-bold mono" value="5.0">
-        </div>
+    <div class="grid grid-cols-2 md:grid-cols-6 gap-3 mb-4">
+        <div class="card p-3 flex flex-col justify-center">
+            <label class="text-[10px] text-gray-400 font-bold uppercase mb-2"><i class="fas fa-coins mr-1 text-yellow-500"></i> Vốn/Lệnh</label>
+            <div class="flex gap-1">
+                <input type="number" id="invValue" class="w-full bg-black/50 border border-white/10 p-2 rounded-lg text-xs mono outline-none focus:border-yellow-500" value="1.5">
+                <select id="invType" class="bg-black border border-white/10 p-2 rounded-lg text-[10px] text-yellow-500 font-bold">
+                    <option value="fixed">$</option>
+                    <option value="percent">%</option>
+                </select>
+            </div>
+        </div>
 
-        <div class="card flex flex-col justify-center">
-            <label class="text-[9px] text-gray-500 font-bold uppercase mb-1">Giới hạn Hạm Đội</label>
-            <div class="flex gap-1">
-                <input type="number" id="maxPositions" class="w-1/2 bg-black border border-white/10 p-1 rounded text-xs text-white mono" value="10" title="Max Lệnh">
-                <input type="number" id="accountSL" class="w-1/2 bg-black border border-white/10 p-1 rounded text-xs text-orange-500 mono" value="30" title="SL TK %">
-            </div>
-        </div>
+        <div class="card p-3 flex flex-col justify-center">
+            <label class="text-[10px] text-gray-400 font-bold uppercase mb-2"><i class="fas fa-chart-line mr-1 text-red-500"></i> Biến động %</label>
+            <input type="number" id="minVol" class="w-full bg-black/50 border border-white/10 p-2 rounded-lg text-xs text-red-400 font-bold mono outline-none" value="5.0">
+        </div>
 
-        <div class="card flex flex-col items-center justify-center">
-            <p class="text-[9px] text-gray-400 uppercase italic">Tỷ lệ thắng</p>
-            <p id="winRate" class="luffy-font text-3xl text-green-400">0%</p>
-        </div>
+        <div class="card p-3 flex flex-col justify-center">
+            <label class="text-[10px] text-gray-400 font-bold uppercase mb-2"><i class="fas fa-layer-group mr-1 text-blue-500"></i> Max Hạm Đội</label>
+            <input type="number" id="maxPositions" class="w-full bg-black/50 border border-white/10 p-2 rounded-lg text-xs mono" value="10">
+        </div>
 
-        <div class="card flex items-center justify-center">
-            <button id="runBtn" onclick="handleToggle()" class="btn-start w-full py-3 text-white text-[11px] font-black uppercase rounded-lg">🚢 GIƯƠNG BUỒM</button>
-        </div>
+        <div class="card p-3 flex flex-col justify-center">
+            <label class="text-[10px] text-gray-400 font-bold uppercase mb-2"><i class="fas fa-shield-alt mr-1 text-orange-500"></i> SL Tổng %</label>
+            <input type="number" id="accountSL" class="w-full bg-black/50 border border-white/10 p-2 rounded-lg text-xs text-orange-500 mono" value="30">
+        </div>
 
-        <div class="card flex items-center justify-center">
-            <button onclick="handleUpdate()" class="w-full py-3 bg-blue-600 hover:bg-blue-500 text-white text-[10px] font-black uppercase rounded-lg transition">CẬP NHẬT</button>
-        </div>
-    </div>
+        <div class="card p-2 flex items-center justify-center col-span-1">
+            <button id="runBtn" onclick="handleToggle()" class="btn-action btn-start w-full h-full rounded-xl text-xs">🚢 RA KHƠI</button>
+        </div>
 
-    <div class="flex-grow grid grid-cols-1 md:grid-cols-12 gap-4 min-h-0 overflow-hidden">
-        
-        <div class="md:col-span-4 flex flex-col gap-4 overflow-hidden">
-            <div class="card flex-grow flex flex-col overflow-hidden border-t-2 border-blue-500">
-                <div class="flex justify-between items-center mb-2">
-                    <h3 class="text-[10px] font-black text-blue-400 uppercase italic">Nhật ký (Anti-Spam)</h3>
-                    <button onclick="clearLogs()" class="text-[8px] text-gray-600 hover:text-red-500 uppercase">Xóa hết</button>
-                </div>
-                <div id="botLogs" class="flex-grow overflow-y-auto mono pr-1 space-y-1"></div>
-            </div>
-            
-            <div class="card h-[160px] flex flex-col border-t-2 border-yellow-500">
-                <h3 class="text-[10px] font-black text-yellow-500 uppercase mb-2">Sóng Biến Động Radar</h3>
-                <div id="radarList" class="flex-grow overflow-y-auto grid grid-cols-1 gap-1"></div>
-            </div>
-        </div>
+        <div class="card p-2 flex items-center justify-center col-span-1">
+            <button onclick="handleUpdate()" class="btn-action bg-white/5 hover:bg-white/10 w-full h-full rounded-xl text-[10px] border border-white/10">LƯU CÀI ĐẶT</button>
+        </div>
+    </div>
 
-        <div class="md:col-span-8 card flex flex-col overflow-hidden border-t-2 border-red-500 p-0">
-            <div class="p-3 border-b border-white/5 flex justify-between bg-black/40 items-center">
-                <span class="luffy-font text-lg text-red-500">CHIẾN TRƯỜNG LIVE</span>
-                <span id="posCount" class="text-[10px] font-black text-white bg-red-600 px-2 py-1 rounded italic">0 LỆNH</span>
-            </div>
-            <div class="flex-grow overflow-y-auto">
-                <table class="w-full text-left text-[11px] mono">
-                    <thead class="bg-black/90 sticky top-0 text-gray-500 uppercase border-b border-white/10">
-                        <tr>
-                            <th class="p-3">Cặp Tiền</th>
-                            <th class="p-3">Side/Lev</th>
-                            <th class="p-3">Entry/Mark</th>
-                            <th class="p-3 text-right">PnL%</th>
-                        </tr>
-                    </thead>
-                    <tbody id="positionTable" class="divide-y divide-white/5"></tbody>
-                </table>
-            </div>
-        </div>
-    </div>
+    <div class="flex-grow grid grid-cols-1 md:grid-cols-12 gap-4 overflow-hidden">
+        
+        <div class="md:col-span-4 flex flex-col gap-4 overflow-hidden">
+            <div class="card flex-grow flex flex-col overflow-hidden border-t-4 border-blue-500">
+                <div class="p-3 border-b border-white/5 flex justify-between items-center bg-blue-500/5">
+                    <span class="text-[10px] font-black text-blue-400 uppercase tracking-tighter"><i class="fas fa-terminal mr-2"></i>Hệ thống truyền tin</span>
+                    <button onclick="clearLogs()" class="text-[9px] text-gray-500 hover:text-red-500 transition uppercase">Clear</button>
+                </div>
+                <div id="botLogs" class="flex-grow overflow-y-auto p-3 mono text-[10px] space-y-2"></div>
+            </div>
+            
+            <div class="card h-[200px] flex flex-col border-t-4 border-yellow-600">
+                <div class="p-3 border-b border-white/5 bg-yellow-500/5">
+                    <span class="text-[10px] font-black text-yellow-500 uppercase italic">Radar Truy Nã (Vol 24h)</span>
+                </div>
+                <div id="radarList" class="flex-grow overflow-y-auto p-2 grid grid-cols-1 gap-1"></div>
+            </div>
+        </div>
 
-    <script>
-        /** * JAVASCRIPT BẢN SỬA BOT 02 
-         * FIX: Anti-Spam Log & Show Public IP
-         */
-        let isRunning = false;
-        let lastErrorMsg = "";
-        let errorCount = 0;
+        <div class="md:col-span-8 card flex flex-col overflow-hidden border-t-4 border-red-600">
+            <div class="p-4 border-b border-white/5 flex justify-between bg-red-500/5 items-center">
+                <h3 class="luffy-font text-xl text-red-500 tracking-widest">CHIẾN TRƯỜNG LIVE</h3>
+                <span id="posCount" class="px-3 py-1 bg-red-600 text-white text-[10px] font-black rounded-full shadow-lg shadow-red-600/20">0 LỆNH</span>
+            </div>
+            <div class="flex-grow overflow-y-auto">
+                <table class="w-full text-left text-[11px] mono">
+                    <thead class="bg-black/60 sticky top-0 text-gray-500 uppercase text-[9px] border-b border-white/10">
+                        <tr>
+                            <th class="p-4">Cặp Tiền</th>
+                            <th class="p-4">Vị Thế</th>
+                            <th class="p-4">Entry/Mark</th>
+                            <th class="p-4 text-right">PnL%</th>
+                        </tr>
+                    </thead>
+                    <tbody id="positionTable" class="divide-y divide-white/5">
+                        </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
 
-        // 1. Lấy IP Public thật sự để Whitelist Binance
-        async function checkPublicIP() {
-            try {
-                const res = await fetch('https://api.ipify.org?format=json');
-                const data = await res.json();
-                document.getElementById('ipStatus').innerText = "IP WAN: " + data.ip;
-                document.getElementById('ipStatus').classList.add('text-green-400');
-            } catch (e) {
-                document.getElementById('ipStatus').innerText = "Không lấy được IP WAN";
-            }
-        }
+    <script>
+        let isRunning = false;
+        let lastErrorMsg = "";
+        let errorCount = 0;
 
-        function pushLog(msg, type = 'info') {
-            const botLogs = document.getElementById('botLogs');
-            
-            // CHẶN SPAM: Nếu lỗi lặp lại, chỉ tăng số lượng
-            if (type === 'error' && msg === lastErrorMsg) {
-                errorCount++;
-                if (botLogs.firstChild) {
-                    botLogs.firstChild.innerHTML = `<span class="opacity-40 text-[9px]">[${new Date().toLocaleTimeString()}]</span> <span class="font-bold">LẶP LẠI (x${errorCount}):</span> ${msg}`;
-                }
-                return;
-            }
-            
-            lastErrorMsg = (type === 'error') ? msg : "";
-            errorCount = 1;
+        async function checkPublicIP() {
+            try {
+                const res = await fetch('https://api.ipify.org?format=json');
+                const data = await res.json();
+                const el = document.getElementById('ipStatus');
+                el.innerText = "IP: " + data.ip;
+                el.classList.replace('text-blue-400', 'text-green-400');
+            } catch (e) {
+                document.getElementById('ipStatus').innerText = "IP: UNKNOWN";
+            }
+        }
 
-            const div = document.createElement('div');
-            div.className = `log-entry log-${type}`;
-            div.innerHTML = `<span class="opacity-40 text-[9px]">[${new Date().toLocaleTimeString()}]</span> ${msg}`;
-            botLogs.prepend(div);
-            
-            if (botLogs.children.length > 50) botLogs.lastChild.remove();
-        }
+        function pushLog(msg, type = 'info') {
+            // Lọc lỗi Algo API gây spam
+            if(msg.includes("Algo Order API")) {
+                msg = "⚠️ Hệ thống đang chờ khớp lệnh StopLoss/TakeProfit...";
+                type = "warn";
+            }
 
-        function clearLogs() { document.getElementById('botLogs').innerHTML = ''; }
+            const botLogs = document.getElementById('botLogs');
+            if (type === 'error' && msg === lastErrorMsg) {
+                errorCount++;
+                if (botLogs.firstChild) {
+                    botLogs.firstChild.innerHTML = `<span class="text-gray-600">[${new Date().toLocaleTimeString()}]</span> <span class="font-bold text-red-500">LẶP LẠI (x${errorCount}):</span> ${msg}`;
+                }
+                return;
+            }
+            
+            lastErrorMsg = (type === 'error') ? msg : "";
+            errorCount = 1;
 
-        function updateUI(status_bool) {
-            isRunning = status_bool;
-            const btn = document.getElementById('runBtn');
-            const txt = document.getElementById('botStatusText');
-            if(isRunning) {
-                btn.innerText = "🛑 DỪNG CHIẾN";
-                btn.className = "btn-stop w-full py-3 text-white text-[11px] font-black uppercase rounded-lg";
-                txt.innerText = "ĐANG QUÉT KÈO...";
-                txt.className = "text-[10px] font-bold text-green-500 uppercase";
-            } else {
-                btn.innerText = "🚢 GIƯƠNG BUỒM";
-                btn.className = "btn-start w-full py-3 text-white text-[11px] font-black uppercase rounded-lg";
-                txt.innerText = "OFFLINE";
-                txt.className = "text-[10px] font-bold text-gray-500 uppercase";
-            }
-        }
+            const div = document.createElement('div');
+            const colors = {
+                info: 'border-gray-500 text-gray-300',
+                success: 'border-green-500 text-green-400',
+                warn: 'border-yellow-500 text-yellow-400',
+                error: 'border-red-500 text-red-400'
+            };
+            
+            div.className = `pl-2 border-l-2 ${colors[type]} py-1 bg-white/5 rounded-r`;
+            div.innerHTML = `<span class="opacity-40">[${new Date().toLocaleTimeString()}]</span> ${msg}`;
+            botLogs.prepend(div);
+            if (botLogs.children.length > 40) botLogs.lastChild.remove();
+        }
 
-        async function sync() {
-            try {
-                const res = await fetch('/api/status');
-                if(!res.ok) throw new Error("Server disconnected");
-                const data = await res.json();
+        function updateUI(status_bool) {
+            isRunning = status_bool;
+            const btn = document.getElementById('runBtn');
+            const txt = document.getElementById('botStatusText');
+            if(isRunning) {
+                btn.innerText = "🛑 DỪNG CHIẾN";
+                btn.className = "btn-action btn-stop w-full h-full rounded-xl text-xs";
+                txt.innerText = "ĐANG TUẦN TRA...";
+                txt.className = "status-tag text-green-500 border-green-500/50";
+            } else {
+                btn.innerText = "🚢 RA KHƠI";
+                btn.className = "btn-action btn-start w-full h-full rounded-xl text-xs";
+                txt.innerText = "OFFLINE";
+                txt.className = "status-tag text-gray-500";
+            }
+        }
 
-                if(data.botSettings.isRunning !== isRunning) updateUI(data.botSettings.isRunning);
-                
-                document.getElementById('balance').innerText = `$${(data.status.currentBalance || 0).toFixed(2)}`;
-                
-                // Winrate
-                let win = data.history.filter(h => parseFloat(h.pnl) > 0).length;
-                document.getElementById('winRate').innerText = data.history.length > 0 ? Math.round((win/data.history.length)*100) + "%" : "0%";
+        async function sync() {
+            try {
+                const res = await fetch('/api/status');
+                const data = await res.json();
 
-                // Bảng lệnh
-                document.getElementById('posCount').innerText = `${data.activePositions.length} LỆNH`;
-                document.getElementById('positionTable').innerHTML = data.activePositions.map(p => `
-                    <tr class="hover:bg-white/5 transition">
-                        <td class="p-3 font-bold text-white">${p.symbol}</td>
-                        <td class="p-3"><span class="${p.side === 'LONG' ? 'text-green-400' : 'text-red-400'} font-black">${p.side}</span> <span class="text-gray-500 text-[9px]">${p.leverage}x</span></td>
-                        <td class="p-3 text-[10px]">$${p.entryPrice}<br><span class="text-white opacity-60">$${p.markPrice}</span></td>
-                        <td class="p-3 text-right font-black ${parseFloat(p.pnlPercent) >= 0 ? 'text-green-400' : 'text-red-400'}">${p.pnlPercent}%</td>
-                    </tr>
-                `).join('');
+                if(data.botSettings.isRunning !== isRunning) updateUI(data.botSettings.isRunning);
+                
+                document.getElementById('balance').innerText = `$${(data.status.currentBalance || 0).toLocaleString(undefined, {minimumFractionDigits: 2})}`;
+                
+                let win = data.history.filter(h => parseFloat(h.pnl) > 0).length;
+                document.getElementById('winRate').innerText = data.history.length > 0 ? Math.round((win/data.history.length)*100) + "%" : "0%";
 
-                // Radar
-                if(data.status.candidatesList) {
-                    document.getElementById('radarList').innerHTML = data.status.candidatesList.map(c => `
-                        <div class="flex justify-between items-center bg-white/5 p-2 rounded border-l-2 ${c.changePercent > 0 ? 'border-green-500' : 'border-red-500'}">
-                            <span class="text-[10px] font-bold">${c.symbol}</span>
-                            <span class="text-[10px] font-bold ${c.changePercent > 0 ? 'text-green-400' : 'text-red-400'}">${c.changePercent}%</span>
-                        </div>
-                    `).join('');
-                }
+                document.getElementById('posCount').innerText = `${data.activePositions.length} LỆNH`;
+                document.getElementById('positionTable').innerHTML = data.activePositions.map(p => `
+                    <tr class="hover:bg-white/5 transition border-b border-white/5">
+                        <td class="p-4 font-bold text-white text-xs">${p.symbol}</td>
+                        <td class="p-4">
+                            <span class="${p.side === 'LONG' ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'} px-2 py-0.5 rounded text-[9px] font-black">${p.side}</span>
+                            <span class="text-gray-500 ml-1">${p.leverage}x</span>
+                        </td>
+                        <td class="p-4 text-[10px]">
+                            <span class="text-gray-400">$${p.entryPrice}</span><br>
+                            <span class="text-white font-bold">$${p.markPrice}</span>
+                        </td>
+                        <td class="p-4 text-right font-black ${parseFloat(p.pnlPercent) >= 0 ? 'text-green-400' : 'text-red-400'} text-xs">
+                            ${parseFloat(p.pnlPercent) > 0 ? '+' : ''}${p.pnlPercent}%
+                        </td>
+                    </tr>
+                `).join('');
 
-                // Log từ Server
-                if (data.status.botLogs && data.status.botLogs.length > 0) {
-                    const latest = data.status.botLogs[0];
-                    pushLog(latest.msg, latest.type);
-                }
+                if(data.status.candidatesList) {
+                    document.getElementById('radarList').innerHTML = data.status.candidatesList.slice(0, 10).map(c => `
+                        <div class="flex justify-between items-center bg-black/40 p-2 rounded-lg border border-white/5">
+                            <span class="text-[10px] font-bold text-gray-300">${c.symbol}</span>
+                            <span class="text-[10px] font-black ${c.changePercent > 0 ? 'text-green-400' : 'text-red-400'}">${c.changePercent}%</span>
+                        </div>
+                    `).join('');
+                }
 
-            } catch (e) {
-                pushLog("Mất kết nối API Bot Cổng 9001", "error");
-            }
-        }
+                if (data.status.botLogs?.length > 0) {
+                    pushLog(data.status.botLogs[0].msg, data.status.botLogs[0].type);
+                }
 
-        async function handleToggle() {
-            const next = !isRunning;
-            updateUI(next);
-            try {
-                await fetch('/api/settings', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({ isRunning: next })
-                });
-                pushLog(next ? "Gửi lệnh xuất quân!" : "Lệnh hạ buồm!", "warn");
-            } catch (e) { pushLog("Lỗi lệnh điều khiển", "error"); }
-        }
+            } catch (e) {
+                // Hạn chế log error mất kết nối để tránh rối mắt
+            }
+        }
 
-        async function handleUpdate() {
-            const body = {
-                invValue: parseFloat(document.getElementById('invValue').value),
-                invType: document.getElementById('invType').value,
-                minVol: parseFloat(document.getElementById('minVol').value),
-                maxPositions: parseInt(document.getElementById('maxPositions').value),
-                accountSL: parseFloat(document.getElementById('accountSL').value)
-            };
-            try {
-                await fetch('/api/settings', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify(body)
-                });
-                pushLog("Cấu hình hạm đội đã lưu!", "success");
-            } catch (e) { pushLog("Lỗi lưu cấu hình", "error"); }
-        }
+        async function handleToggle() {
+            const next = !isRunning;
+            updateUI(next);
+            try {
+                await fetch('/api/settings', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ isRunning: next })
+                });
+                pushLog(next ? "Thuyền trưởng hạ lệnh xuất quân!" : "Thu quân về đảo!", "warn");
+            } catch (e) { pushLog("Lỗi gửi lệnh điều khiển", "error"); }
+        }
 
-        checkPublicIP();
-        setInterval(sync, 2000);
-    </script>
+        async function handleUpdate() {
+            const body = {
+                invValue: parseFloat(document.getElementById('invValue').value),
+                invType: document.getElementById('invType').value,
+                minVol: parseFloat(document.getElementById('minVol').value),
+                maxPositions: parseInt(document.getElementById('maxPositions').value),
+                accountSL: parseFloat(document.getElementById('accountSL').value)
+            };
+            try {
+                await fetch('/api/settings', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(body)
+                });
+                pushLog("Cấu hình hạm đội đã cập nhật!", "success");
+            } catch (e) { pushLog("Lỗi lưu cấu hình", "error"); }
+        }
+
+        function clearLogs() { document.getElementById('botLogs').innerHTML = ''; }
+        
+        checkPublicIP();
+        setInterval(sync, 2000);
+    </script>
 </body>
 </html>
-
