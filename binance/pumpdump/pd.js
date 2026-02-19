@@ -8,16 +8,25 @@ import { API_KEY, SECRET_KEY } from './config.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-// Cấu hình mặc định
-let botSettings = { isRunning: false, maxPositions: 10, invValue: 1.5, invType: 'fixed', minVol: 5.0, accountSL: 30 };
-let status = { currentBalance: 0, botLogs: [], exchangeInfo: {}, candidatesList: [] };
+// CẤU HÌNH GỐC
+let botSettings = { 
+    isRunning: false, maxPositions: 10, invValue: 1.5, minVol: 5.0, 
+    accountSL: 30, slUnit: 'percent', useTrailingSL: false 
+};
+
+let status = { 
+    currentBalance: 0, 
+    startBalance: 0, 
+    highestBalance: 0, 
+    botLogs: [], 
+    exchangeInfo: {}, 
+    candidatesList: [] 
+};
 let history = []; 
 let isInitializing = true;
 
 function addBotLog(msg, type = 'info') {
-    // Chống spam: Nếu log mới giống hệt log cũ nhất thì bỏ qua
     if (status.botLogs.length > 0 && status.botLogs[0].msg === msg) return;
-    
     const entry = { time: new Date().toLocaleTimeString(), msg, type };
     status.botLogs.unshift(entry);
     if (status.botLogs.length > 20) status.botLogs.pop();
@@ -36,8 +45,8 @@ async function callBinance(endpoint, method = 'GET', params = {}) {
             let d = ''; res.on('data', chunk => d += chunk);
             res.on('end', () => {
                 try { 
-                    const j = JSON.parse(d); 
-                    if (res.statusCode >= 200 && res.statusCode < 300) resolve(j); else reject(j); 
+                    const j = JSON.parse(d);
+                    if (res.statusCode >= 200 && res.statusCode < 300) resolve(j); else reject(j);
                 } catch (e) { reject({ msg: "JSON_ERROR" }); }
             });
         });
@@ -46,6 +55,7 @@ async function callBinance(endpoint, method = 'GET', params = {}) {
     });
 }
 
+// 1. TÍNH TOÁN TP/SL 1:1
 function calcTPSL(lev, side, entryPrice) {
     let m = lev < 26 ? 1.11 : (lev < 50 ? 2.22 : (lev < 75 ? 3.33 : 5.55));
     const rate = m / lev; 
@@ -55,7 +65,7 @@ function calcTPSL(lev, side, entryPrice) {
     };
 }
 
-// TỐI ƯU TỐC ĐỘ: Hàm ghim TP/SL riêng biệt cho từng Symbol
+// 2. GHIM TP/SL SIÊU TỐC
 async function fastEnforce(symbol) {
     try {
         const pos = await callBinance('/fapi/v2/positionRisk', 'GET', { symbol });
@@ -68,7 +78,6 @@ async function fastEnforce(symbol) {
         const plan = calcTPSL(parseFloat(p.leverage), side, entry);
         const closeSide = side === 'LONG' ? 'SELL' : 'BUY';
 
-        // Đặt song song cả 2 lệnh cùng lúc
         await Promise.all([
             callBinance('/fapi/v1/order', 'POST', {
                 symbol, side: closeSide, positionSide: side, type: 'TAKE_PROFIT_MARKET',
@@ -79,17 +88,44 @@ async function fastEnforce(symbol) {
                 stopPrice: plan.sl.toFixed(info.pricePrecision), workingType: 'MARK_PRICE', closePosition: 'true'
             })
         ]);
-        addBotLog(`🛡️ [Ghim Xong] TP/SL cho ${symbol} (ROE 1:1)`, "success");
-    } catch (e) {
-        console.log(`Lỗi ghim nhanh ${symbol}:`, e.msg || "");
+        addBotLog(`🛡️ Đã ghim TP/SL (1:1) cho ${symbol}`, "success");
+    } catch (e) { console.log(`Lỗi ghim ${symbol}:`, e.msg); }
+}
+
+// 3. KIỂM TRA TRAILING ACCOUNT STOP LOSS
+function checkAccountSL() {
+    if (!botSettings.isRunning || status.currentBalance === 0) return;
+
+    if (botSettings.useTrailingSL) {
+        if (status.currentBalance > status.highestBalance) status.highestBalance = status.currentBalance;
+    } else {
+        status.highestBalance = status.startBalance;
+    }
+
+    let threshold = botSettings.slUnit === 'percent' 
+        ? status.highestBalance * (1 - botSettings.accountSL / 100)
+        : status.highestBalance - botSettings.accountSL;
+
+    if (status.currentBalance <= threshold) {
+        botSettings.isRunning = false;
+        addBotLog(`🚨 CHẠM SL TÀI KHOẢN ($${status.currentBalance.toFixed(2)}). DỪNG BOT!`, "error");
     }
 }
 
+// 4. LUỒNG SĂN KÈO
 async function hunt() {
-    if (isInitializing || !botSettings.isRunning) return;
+    if (isInitializing) return;
     try {
         const acc = await callBinance('/fapi/v2/account');
         status.currentBalance = parseFloat(acc.totalMarginBalance);
+        
+        if (botSettings.isRunning && status.startBalance === 0) {
+            status.startBalance = status.currentBalance;
+            status.highestBalance = status.currentBalance;
+        }
+        if (!botSettings.isRunning) { status.startBalance = 0; return; }
+
+        checkAccountSL();
 
         const pos = await callBinance('/fapi/v2/positionRisk');
         const active = pos.filter(p => parseFloat(p.positionAmt) !== 0);
@@ -107,6 +143,7 @@ async function hunt() {
 
                 const ticker = await callBinance('/fapi/v1/ticker/price', 'GET', { symbol: c.symbol });
                 const price = parseFloat(ticker.price);
+                
                 let qty = Math.floor(((botSettings.invValue * lev) / price) / info.stepSize) * info.stepSize;
                 if ((qty * price) < 5.0) qty = Math.ceil(5.1 / price / info.stepSize) * info.stepSize;
 
@@ -115,26 +152,14 @@ async function hunt() {
                     positionSide: side, type: 'MARKET', quantity: qty.toFixed(info.quantityPrecision) 
                 });
 
-                // Ghi vào lịch sử để HTML hiển thị
-                history.unshift({
-                    symbol: c.symbol,
-                    side: side,
-                    leverage: lev,
-                    margin: botSettings.invValue,
-                    change: c.changePercent.toFixed(2) + "%",
-                    time: new Date().toLocaleTimeString()
-                });
-                if (history.length > 50) history.pop();
-
                 addBotLog(`🚀 Mở ${side} ${c.symbol} (${c.changePercent.toFixed(2)}%)`, "success");
-                
-                // KÍCH HOẠT GHIM NHANH SAU 5 GIÂY (Không đợi chu kỳ 30s)
                 setTimeout(() => fastEnforce(c.symbol), 5000);
-            } catch (err) {}
+            } catch (err) { console.log("Lỗi mở lệnh:", err.msg); }
         }
     } catch (e) {}
 }
 
+// 5. QUÉT KÈO TỪ SCANNER
 function fetchCandidates() {
     http.get('http://127.0.0.1:9000/api/live', res => {
         let d = ''; res.on('data', chunk => d += chunk);
@@ -150,19 +175,20 @@ function fetchCandidates() {
     }).on('error', () => {});
 }
 
+// 6. SERVER API & GIAO DIỆN
 const APP = express();
 APP.use(express.json());
 APP.use(express.static(__dirname));
 
-// API cung cấp dữ liệu cho HTML
 APP.get('/api/status', async (req, res) => {
     try {
         const pos = await callBinance('/fapi/v2/positionRisk');
         const active = pos.filter(p => parseFloat(p.positionAmt) !== 0).map(p => {
             const entry = parseFloat(p.entryPrice);
             const amt = Math.abs(parseFloat(p.positionAmt));
-            const pnl = (entry > 0) ? ((parseFloat(p.unrealizedProfit) / ((entry * amt) / p.leverage)) * 100).toFixed(2) : "0.00";
-            return { symbol: p.symbol, side: p.positionSide, leverage: p.leverage, entryPrice: p.entryPrice, markPrice: p.markPrice, pnlPercent: pnl };
+            const pnlVal = parseFloat(p.unrealizedProfit);
+            const pnlPct = (entry > 0) ? ((pnlVal / ((entry * amt) / p.leverage)) * 100).toFixed(2) : "0.00";
+            return { symbol: p.symbol, side: p.positionSide, leverage: p.leverage, entryPrice: p.entryPrice, markPrice: p.markPrice, pnlPercent: pnlPct, pnlValue: pnlVal };
         });
         res.json({ botSettings, status, activePositions: active, history });
     } catch (e) { res.status(500).send(); }
