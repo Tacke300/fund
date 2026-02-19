@@ -49,7 +49,6 @@ function calcTPSL(lev, side, entryPrice) {
     };
 }
 
-// TUẦN TRA NGHIÊM NGẶT 15S/LẦN
 async function patrol() {
     if (!botSettings.isRunning) return;
     try {
@@ -57,14 +56,12 @@ async function patrol() {
         const active = positions.filter(p => parseFloat(p.positionAmt) !== 0);
         const orders = await callBinance('/fapi/v1/openOrders');
 
-        // 1. Hủy lệnh rác
         for (const o of orders) {
             if (!active.find(p => p.symbol === o.symbol && p.positionSide === o.positionSide)) {
                 await callBinance('/fapi/v1/order', 'DELETE', { symbol: o.symbol, orderId: o.orderId });
                 addBotLog(`🧹 Hủy lệnh rác: ${o.symbol}`, "warn");
             }
         }
-        // 2. Ghim TP/SL thiếu
         for (const p of active) {
             const hasTP = orders.some(o => o.symbol === p.symbol && o.positionSide === p.positionSide && o.type === 'TAKE_PROFIT_MARKET');
             const hasSL = orders.some(o => o.symbol === p.symbol && o.positionSide === p.positionSide && o.type === 'STOP_MARKET');
@@ -72,8 +69,9 @@ async function patrol() {
                 const plan = calcTPSL(parseFloat(p.leverage), p.positionSide, parseFloat(p.entryPrice));
                 const side = p.positionSide === 'LONG' ? 'SELL' : 'BUY';
                 const info = status.exchangeInfo[p.symbol];
-                if (!hasTP) await callBinance('/fapi/v1/order', 'POST', { symbol: p.symbol, side, positionSide: p.positionSide, type: 'TAKE_PROFIT_MARKET', stopPrice: plan.tp.toFixed(info.pricePrecision), quantity: Math.abs(p.positionAmt), workingType: 'MARK_PRICE' });
-                if (!hasSL) await callBinance('/fapi/v1/order', 'POST', { symbol: p.symbol, side, positionSide: p.positionSide, type: 'STOP_MARKET', stopPrice: plan.sl.toFixed(info.pricePrecision), quantity: Math.abs(p.positionAmt), workingType: 'MARK_PRICE' });
+                const qty = Math.abs(parseFloat(p.positionAmt)).toFixed(info.quantityPrecision);
+                if (!hasTP) await callBinance('/fapi/v1/order', 'POST', { symbol: p.symbol, side, positionSide: p.positionSide, type: 'TAKE_PROFIT_MARKET', stopPrice: plan.tp.toFixed(info.pricePrecision), quantity: qty, workingType: 'MARK_PRICE' });
+                if (!hasSL) await callBinance('/fapi/v1/order', 'POST', { symbol: p.symbol, side, positionSide: p.positionSide, type: 'STOP_MARKET', stopPrice: plan.sl.toFixed(info.pricePrecision), quantity: qty, workingType: 'MARK_PRICE' });
                 addBotLog(`🛡️ Đã ghim TP/SL cho ${p.symbol}`, "success");
             }
         }
@@ -90,28 +88,35 @@ async function hunt() {
         http.get('http://127.0.0.1:9000/api/live', res => {
             let d = ''; res.on('data', c => d += c);
             res.on('end', async () => {
-                const candidates = JSON.parse(d).filter(c => Math.abs(c.changePercent) >= botSettings.minVol);
-                for (const c of candidates) {
-                    if (!botSettings.isRunning) break;
-                    const posSide = c.changePercent > 0 ? 'LONG' : 'SHORT';
-                    if (active.find(p => p.symbol === c.symbol && p.positionSide === posSide)) continue;
-                    
-                    try {
-                        const info = status.exchangeInfo[c.symbol];
-                        const brackets = await callBinance('/fapi/v1/leverageBracket', 'GET', { symbol: c.symbol });
-                        const lev = brackets[0].brackets[0].initialLeverage;
-                        await callBinance('/fapi/v1/leverage', 'POST', { symbol: c.symbol, leverage: lev });
+                try {
+                    const candidates = JSON.parse(d).filter(c => Math.abs(c.changePercent) >= botSettings.minVol);
+                    for (const c of candidates) {
+                        if (!botSettings.isRunning) break;
+                        const posSide = c.changePercent > 0 ? 'LONG' : 'SHORT';
+                        if (active.find(p => p.symbol === c.symbol && p.positionSide === posSide)) continue;
+                        
+                        try {
+                            const info = status.exchangeInfo[c.symbol];
+                            const brackets = await callBinance('/fapi/v1/leverageBracket', 'GET', { symbol: c.symbol });
+                            const lev = brackets[0].brackets[0].initialLeverage;
+                            await callBinance('/fapi/v1/leverage', 'POST', { symbol: c.symbol, leverage: lev });
 
-                        const ticker = await callBinance('/fapi/v1/ticker/price', 'GET', { symbol: c.symbol });
-                        let margin = botSettings.invType === 'fixed' ? botSettings.invValue : (status.currentBalance * botSettings.invValue / 100);
-                        let qty = (margin * lev) / parseFloat(ticker.price);
-                        qty = Math.floor(qty / info.stepSize) * info.stepSize;
+                            const ticker = await callBinance('/fapi/v1/ticker/price', 'GET', { symbol: c.symbol });
+                            const price = parseFloat(ticker.price);
+                            let margin = botSettings.invType === 'fixed' ? botSettings.invValue : (status.currentBalance * botSettings.invValue / 100);
+                            
+                            // TÍNH TOÁN QTY VÀ FIX LỖI 4003 (MỨC MIN QTY)
+                            let qty = (margin * lev) / price;
+                            qty = Math.max(qty, info.stepSize); // Đảm bảo qty ít nhất bằng 1 stepSize
+                            qty = Math.floor(qty / info.stepSize) * info.stepSize;
+                            if (qty <= 0) qty = info.stepSize; 
 
-                        addBotLog(`🚀 Mở ${posSide} ${c.symbol} (${lev}x)`, "info");
-                        await callBinance('/fapi/v1/order', 'POST', { symbol: c.symbol, side: posSide === 'LONG' ? 'BUY' : 'SELL', positionSide: posSide, type: 'MARKET', quantity: qty.toFixed(info.quantityPrecision) });
-                        setTimeout(patrol, 2000); // Mở xong 2s sau kiểm tra TP/SL ngay
-                    } catch (err) { console.log(err); }
-                }
+                            addBotLog(`🚀 Mở ${posSide} ${c.symbol} (${lev}x) Qty: ${qty}`, "info");
+                            await callBinance('/fapi/v1/order', 'POST', { symbol: c.symbol, side: posSide === 'LONG' ? 'BUY' : 'SELL', positionSide: posSide, type: 'MARKET', quantity: qty.toFixed(info.quantityPrecision) });
+                            setTimeout(patrol, 2000); 
+                        } catch (err) { console.log(err); }
+                    }
+                } catch (e) {}
             });
         });
     } catch (e) {}
@@ -125,7 +130,9 @@ APP.get('/api/status', async (req, res) => {
         const pos = await callBinance('/fapi/v2/positionRisk');
         const active = pos.filter(p => parseFloat(p.positionAmt) !== 0).map(p => {
             let pnl = "0.00";
-            if (parseFloat(p.entryPrice) > 0) pnl = ((parseFloat(p.unrealizedProfit) / ((parseFloat(p.entryPrice) * Math.abs(p.positionAmt)) / p.leverage)) * 100).toFixed(2);
+            const entry = parseFloat(p.entryPrice);
+            const amt = Math.abs(parseFloat(p.positionAmt));
+            if (entry > 0 && amt > 0) pnl = ((parseFloat(p.unrealizedProfit) / ((entry * amt) / p.leverage)) * 100).toFixed(2);
             return { symbol: p.symbol, side: p.positionSide, leverage: p.leverage, entryPrice: p.entryPrice, markPrice: p.markPrice, pnlPercent: pnl };
         });
         res.json({ botSettings, status, activePositions: active });
@@ -144,8 +151,10 @@ async function init() {
             let d = ''; res.on('data', c => d += c);
             res.on('end', () => {
                 JSON.parse(d).symbols.forEach(s => {
-                    status.exchangeInfo[s.symbol] = { quantityPrecision: s.quantityPrecision, pricePrecision: s.pricePrecision, stepSize: parseFloat(s.filters.find(f => f.filterType === 'LOT_SIZE').stepSize) };
+                    const lot = s.filters.find(f => f.filterType === 'LOT_SIZE');
+                    status.exchangeInfo[s.symbol] = { quantityPrecision: s.quantityPrecision, pricePrecision: s.pricePrecision, stepSize: parseFloat(lot.stepSize) };
                 });
+                console.log("⚓ Hệ thống dữ liệu sàn đã sẵn sàng.");
             });
         });
     } catch (e) {}
