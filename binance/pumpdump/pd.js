@@ -1,3 +1,4 @@
+// --- BẢN SỬA BOT 03 (SERVER SIDE) ---
 import https from 'https';
 import http from 'http';
 import crypto from 'crypto';
@@ -8,54 +9,27 @@ import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-
-// Đảm bảo config.js nằm cùng thư mục
 import { API_KEY, SECRET_KEY } from './config.js';
 
-const HISTORY_FILE = path.join(__dirname, 'trade_history.json');
-
-// --- CẤU HÌNH HỆ THỐNG BẢN SỬA 01 ---
 let botSettings = {
     isRunning: false,
     maxPositions: 10,
     invValue: 1.5,
-    invType: 'fixed', // 'fixed' ($) hoặc 'percent' (%)
-    minVol: 5.0,      // % biến động người dùng nhập từ Web
-    accountSL: 30,
+    invType: 'fixed',
+    minVol: 5.0,
+    accountSLValue: 30, // SL Tổng vẫn giữ nguyên
 };
 
-let status = {
-    currentBalance: 0,
-    botLogs: [],      // Danh sách log gửi về Web
-    candidatesList: [], // Danh sách coin Radar
-    exchangeInfo: null
-};
+let status = { currentBalance: 0, botLogs: [], candidatesList: [], exchangeInfo: {} };
+let tempBlacklist = new Map();
 
-// --- QUẢN LÝ LOG & CHẶN SPAM ---
-let lastErrorMsg = "";
 function addBotLog(msg, type = 'info') {
-    // Nếu lỗi trùng với lỗi trước đó thì không đẩy vào mảng để tránh spam Web
-    if (type === 'error' && msg === lastErrorMsg) return;
-    if (type === 'error') lastErrorMsg = msg;
-    else lastErrorMsg = "";
-
     const entry = { time: new Date().toLocaleTimeString(), msg, type };
     status.botLogs.unshift(entry);
     if (status.botLogs.length > 50) status.botLogs.pop();
     console.log(`[${type.toUpperCase()}] ${msg}`);
 }
 
-// --- BẮT LỖI CHI TIẾT TỪ BINANCE ---
-function parseBinanceError(e) {
-    if (e.code === -2015) return "Lỗi: API Key hoặc Secret sai rồi thuyền trưởng ơi!";
-    if (e.code === -1021) return "Lỗi: Lệch thời gian hệ thống (Hãy đồng bộ lại Clock Windows)!";
-    if (e.code === -2019) return "Lỗi: Ví Futures không đủ tiền đánh lệnh này!";
-    if (e.code === -4003) return "Lỗi: Đòn bẩy (Leverage) quá cao, sàn không cho!";
-    if (e.code === -1013) return "Lỗi: Số lượng (Qty) quá nhỏ, không bõ dính răng!";
-    return `Lỗi từ sàn: ${e.msg || JSON.stringify(e)}`;
-}
-
-// --- HÀM API BINANCE (DÙNG HTTPS) ---
 async function callSignedAPI(endpoint, method = 'GET', params = {}) {
     const timestamp = Date.now();
     let queryString = Object.keys(params).map(k => `${k}=${encodeURIComponent(params[k])}`).join('&');
@@ -73,7 +47,7 @@ async function callSignedAPI(endpoint, method = 'GET', params = {}) {
                     const json = JSON.parse(data);
                     if (res.statusCode >= 200 && res.statusCode < 300) resolve(json);
                     else reject(json);
-                } catch (err) { reject({ msg: "Lỗi định dạng JSON từ sàn" }); }
+                } catch (e) { reject({ msg: "JSON Error" }); }
             });
         });
         req.on('error', e => reject({ msg: e.message }));
@@ -81,94 +55,133 @@ async function callSignedAPI(endpoint, method = 'GET', params = {}) {
     });
 }
 
-// --- VÒNG LẶP CHÍNH (MAIN LOOP) ---
+// Hàm tính % TP/SL theo đòn bẩy (Dựa trên vốn Margin)
+function getTPSLSettings(leverage) {
+    let multiplier = 1.11; // Mặc định < 26 là 111%
+    if (leverage >= 26 && leverage <= 49) multiplier = 2.22;
+    else if (leverage >= 50 && leverage <= 74) multiplier = 3.33;
+    else if (leverage >= 75) multiplier = 5.55;
+    
+    // SL vị thế tôi để mặc định bằng 1/2 TP hoặc ông có thể chỉnh tùy ý
+    // Ở đây tính % biến động giá thực tế = (Multiplier / Leverage)
+    return {
+        tpRate: multiplier / leverage,
+        slRate: (multiplier * 0.5) / leverage // Ví dụ SL bằng 1/2 TP
+    };
+}
+
 async function mainLoop() {
     if (!botSettings.isRunning) return;
-
     try {
-        // 1. Cập nhật số dư
         const acc = await callSignedAPI('/fapi/v2/account');
         status.currentBalance = parseFloat(acc.totalMarginBalance);
-
-        // 2. Lấy vị thế hiện tại
         const positions = await callSignedAPI('/fapi/v2/positionRisk');
         const activePos = positions.filter(p => parseFloat(p.positionAmt) !== 0);
 
-        // 3. Lấy tín hiệu từ SVPD 9000
         http.get('http://127.0.0.1:9000/api/live', (res) => {
-            let rawData = '';
-            res.on('data', d => rawData += d);
+            let data = ''; res.on('data', d => data += d);
             res.on('end', async () => {
                 try {
-                    const allData = JSON.parse(rawData);
-                    // Lọc coin theo % biến động từ người dùng nhập
-                    status.candidatesList = allData
-                        .filter(c => Math.abs(c.changePercent) >= botSettings.minVol)
-                        .sort((a, b) => Math.abs(b.changePercent) - Math.abs(a.changePercent))
-                        .slice(0, 8); // Chỉ lấy 8 con mạnh nhất cho Radar
-
-                    if (activePos.length >= botSettings.maxPositions) return;
-
-                    for (const cand of status.candidatesList) {
+                    const candidates = JSON.parse(data).filter(c => Math.abs(c.changePercent) >= botSettings.minVol);
+                    for (const cand of candidates) {
                         if (activePos.find(p => p.symbol === cand.symbol)) continue;
                         if (activePos.length >= botSettings.maxPositions) break;
+                        if (tempBlacklist.has(cand.symbol) && Date.now() < tempBlacklist.get(cand.symbol)) continue;
 
-                        // TIẾN HÀNH MỞ LỆNH
-                        addBotLog(`Đang thử săn con hàng ${cand.symbol}...`, "info");
-                        // (Logic mở lệnh, tính Qty và Set Leverage ở đây như bản trước...)
-                        // Ví dụ: addBotLog(`Mở lệnh ${cand.symbol} THÀNH CÔNG!`, "success");
+                        try {
+                            // BƯỚC 1: SET LEVERAGE
+                            const brackets = await callSignedAPI('/fapi/v1/leverageBracket', 'GET', { symbol: cand.symbol });
+                            const maxLev = brackets[0].brackets[0].initialLeverage;
+                            await callSignedAPI('/fapi/v1/leverage', 'POST', { symbol: cand.symbol, leverage: maxLev });
+                            addBotLog(`${cand.symbol}: Đã cài đòn bẩy ${maxLev}x`, "info");
+
+                            // BƯỚC 2: TÍNH TOÁN QTY
+                            const priceRes = await callSignedAPI('/fapi/v1/ticker/price', 'GET', { symbol: cand.symbol });
+                            const price = parseFloat(priceRes.price);
+                            let margin = botSettings.invType === 'fixed' ? botSettings.invValue : (status.currentBalance * botSettings.invValue / 100);
+                            
+                            // Lấy thông tin độ chính xác từ exchangeInfo
+                            const info = status.exchangeInfo[cand.symbol] || { stepSize: 0.001, quantityPrecision: 3, pricePrecision: 2 };
+                            let qty = (margin * maxLev) / price;
+                            qty = Math.floor(qty / info.stepSize) * info.stepSize;
+
+                            // BƯỚC 3: MỞ LỆNH MARKET
+                            const side = cand.changePercent > 0 ? 'BUY' : 'SELL';
+                            addBotLog(`${cand.symbol}: Đang cài lệnh Market ${side}...`, "info");
+                            const order = await callSignedAPI('/fapi/v1/order', 'POST', {
+                                symbol: cand.symbol, side: side, type: 'MARKET', quantity: qty.toFixed(info.quantityPrecision)
+                            });
+                            addBotLog(`✅ ${cand.symbol}: Mở lệnh THÀNH CÔNG tại giá ${order.avgPrice}`, "success");
+
+                            // BƯỚC 4: ĐỢI 5 GIÂY RỒI CÀI TP/SL
+                            setTimeout(async () => {
+                                try {
+                                    const entryPrice = parseFloat(order.avgPrice);
+                                    const { tpRate, slRate } = getTPSLSettings(maxLev);
+                                    
+                                    const tpPrice = side === 'BUY' ? entryPrice * (1 + tpRate) : entryPrice * (1 - tpRate);
+                                    const slPrice = side === 'BUY' ? entryPrice * (1 - slRate) : entryPrice * (1 + slRate);
+
+                                    // Đặt lệnh TP
+                                    await callSignedAPI('/fapi/v1/order', 'POST', {
+                                        symbol: cand.symbol, side: side === 'BUY' ? 'SELL' : 'BUY',
+                                        type: 'TAKE_PROFIT_MARKET', stopPrice: tpPrice.toFixed(info.pricePrecision), closePosition: 'true'
+                                    });
+                                    // Đặt lệnh SL
+                                    await callSignedAPI('/fapi/v1/order', 'POST', {
+                                        symbol: cand.symbol, side: side === 'BUY' ? 'SELL' : 'BUY',
+                                        type: 'STOP_MARKET', stopPrice: slPrice.toFixed(info.pricePrecision), closePosition: 'true'
+                                    });
+                                    addBotLog(`🎯 ${cand.symbol}: Đã cài TP/SL vị thế (${(tpRate*maxLev*100).toFixed(0)}% vốn)`, "success");
+                                } catch (e) { addBotLog(`Lỗi cài TP/SL cho ${cand.symbol}`, "error"); }
+                            }, 5000);
+
+                        } catch (err) {
+                            addBotLog(`❌ Lỗi ${cand.symbol}: ${err.msg || "API Error"}`, "error");
+                            tempBlacklist.set(cand.symbol, Date.now() + 60000); // Chặn 1 phút nếu lỗi
+                        }
                     }
-                } catch (e) { }
+                } catch (e) {}
             });
-        }).on('error', () => {
-            addBotLog("Lỗi: Không kết nối được app quét Coin (Cổng 9000)!", "error");
         });
-
-    } catch (e) {
-        addBotLog(parseBinanceError(e), "error");
-    }
+    } catch (e) {}
 }
 
-// --- WEB SERVER CỔNG 9001 ---
+// --- SERVER SETUP (9001) ---
 const APP = express();
 APP.use(express.json());
 APP.use(express.static(__dirname));
-
 APP.get('/api/status', async (req, res) => {
     try {
         const positions = await callSignedAPI('/fapi/v2/positionRisk');
-        const activePositions = positions.filter(p => parseFloat(p.positionAmt) !== 0).map(p => {
-            const entry = parseFloat(p.entryPrice);
-            const amt = Math.abs(parseFloat(p.positionAmt));
-            const pnl = parseFloat(p.unrealizedProfit);
-            const margin = (entry * amt) / parseFloat(p.leverage);
-            return {
-                symbol: p.symbol,
-                side: parseFloat(p.positionAmt) > 0 ? 'LONG' : 'SHORT',
-                leverage: p.leverage,
-                entryPrice: entry.toFixed(5),
-                markPrice: parseFloat(p.markPrice).toFixed(5),
-                pnlPercent: ((pnl / margin) * 100).toFixed(2)
+        const activePositions = positions.filter(p => parseFloat(p.positionAmt) !== 0).map(p => ({
+            symbol: p.symbol, side: parseFloat(p.positionAmt) > 0 ? 'LONG' : 'SHORT',
+            leverage: p.leverage, entryPrice: p.entryPrice, markPrice: p.markPrice,
+            pnlPercent: ((parseFloat(p.unrealizedProfit) / ((parseFloat(p.entryPrice) * Math.abs(parseFloat(p.positionAmt))) / parseFloat(p.leverage))) * 100).toFixed(2)
+        }));
+        res.json({ botSettings, status, activePositions, history: [] });
+    } catch (e) { res.status(500).send(); }
+});
+APP.post('/api/settings', (req, res) => { botSettings = { ...botSettings, ...req.body }; res.sendStatus(200); });
+
+// Khởi tạo Exchange Info
+async function init() {
+    try {
+        const res = await new Promise(resolve => https.get('https://fapi.binance.com/fapi/v1/exchangeInfo', r => {
+            let d = ''; r.on('data', c => d += c); r.on('end', () => resolve(JSON.parse(d)));
+        }));
+        res.symbols.forEach(s => {
+            const priceFilter = s.filters.find(f => f.filterType === 'PRICE_FILTER');
+            const lotFilter = s.filters.find(f => f.filterType === 'LOT_SIZE');
+            status.exchangeInfo[s.symbol] = {
+                pricePrecision: s.pricePrecision, quantityPrecision: s.quantityPrecision,
+                tickSize: parseFloat(priceFilter.tickSize), stepSize: parseFloat(lotFilter.stepSize)
             };
         });
+        console.log("⚓ Hệ thống dữ liệu sàn đã sẵn sàng");
+    } catch (e) { console.log("Lỗi khởi tạo"); }
+}
 
-        res.json({ 
-            botSettings, 
-            status, 
-            activePositions, 
-            history: fs.existsSync(HISTORY_FILE) ? JSON.parse(fs.readFileSync(HISTORY_FILE)) : [] 
-        });
-    } catch (e) { res.status(500).json({ error: "Lỗi API" }); }
-});
-
-APP.post('/api/settings', (req, res) => {
-    botSettings = { ...botSettings, ...req.body };
-    addBotLog("Đã cập nhật cấu hình hạm đội!", "success");
-    res.sendStatus(200);
-});
-
-// Chạy khởi động
-setInterval(mainLoop, 5000);
-APP.listen(9001, '0.0.0.0', () => {
-    console.log("⚓ Pirate King Bot Server [BẢN SỬA 01] đang chạy tại cổng 9001");
-});
+init();
+setInterval(mainLoop, 10000);
+APP.listen(9001, '0.0.0.0');
