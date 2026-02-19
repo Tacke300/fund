@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>LUFFY PIRATE KING BOT - FULL LOGS</title>
+    <title>LUFFY PIRATE BOT - BẢN SỬA 01</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
@@ -15,26 +15,25 @@
         }
         .luffy-font { font-family: 'Bangers', cursive; letter-spacing: 1.5px; }
         .mono { font-family: 'JetBrains Mono', monospace; }
-        .card { background: rgba(20, 20, 25, 0.9); backdrop-filter: blur(15px); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 12px; padding: 12px; }
+        .card { background: rgba(20, 20, 25, 0.9); backdrop-filter: blur(15px); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 12px; padding: 10px; }
         
-        /* Grid 6 ô ngang cho Web, 6 ô dọc cho Mobile */
-        .grid-main { display: grid; grid-template-columns: repeat(1, 1fr); gap: 10px; }
-        @media (min-width: 1024px) { .grid-main { grid-template-columns: repeat(6, 1fr); } }
+        /* Grid 6 ô ngang Web / 6 dọc Mobile */
+        .grid-6 { display: grid; grid-template-columns: repeat(1, 1fr); gap: 10px; }
+        @media (min-width: 1024px) { .grid-6 { grid-template-columns: repeat(6, 1fr); } }
 
-        /* Log Styling */
-        #botLogs::-webkit-scrollbar { width: 3px; }
-        .log-entry { border-left: 2px solid #444; padding-left: 8px; margin-bottom: 4px; font-size: 11px; animation: slideIn 0.2s ease-out; }
-        @keyframes slideIn { from { opacity: 0; transform: translateX(-10px); } to { opacity: 1; transform: translateX(0); } }
-        
-        .log-success { border-color: #22c55e; color: #4ade80; } /* Thành công */
-        .log-error { border-color: #ef4444; color: #f87171; }   /* Lỗi */
-        .log-info { border-color: #3b82f6; color: #60a5fa; }    /* Thông tin */
-        .log-warn { border-color: #eab308; color: #facc15; }    /* Cảnh báo */
+        /* Log Colors & Animation */
+        .log-entry { border-left: 3px solid #444; padding-left: 8px; margin-bottom: 4px; font-size: 11px; }
+        .log-success { border-color: #22c55e; color: #4ade80; }
+        .log-error { border-color: #ef4444; color: #f87171; }
+        .log-info { border-color: #3b82f6; color: #60a5fa; }
+        .log-warn { border-color: #eab308; color: #facc15; }
 
-        #runBtn { transition: all 0.3s; font-weight: 900; cursor: pointer; }
-        .btn-green { background: #22c55e; border-bottom: 4px solid #14532d; }
-        .btn-red { background: #ef4444; border-bottom: 4px solid #7f1d1d; animation: pulse 2s infinite; }
-        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.8; } }
+        #runBtn { transition: all 0.3s; font-weight: 900; cursor: pointer; border-radius: 10px; }
+        .btn-start { background: #22c55e; border-bottom: 4px solid #14532d; }
+        .btn-stop { background: #ef4444; border-bottom: 4px solid #7f1d1d; animation: pulse 2s infinite; }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.7; } }
+        ::-webkit-scrollbar { width: 3px; }
+        ::-webkit-scrollbar-thumb { background: #444; }
     </style>
 </head>
 <body class="p-2 md:p-4">
@@ -43,21 +42,21 @@
         <div class="flex items-center gap-3">
             <img src="https://i.ibb.co/vYm0Fm6/luffy-gear-5.png" class="w-12 h-12 rounded-lg border-2 border-yellow-500 object-cover">
             <div>
-                <h1 class="luffy-font text-2xl text-white">LUFFY <span class="text-red-500">PIRATE</span></h1>
-                <p id="botStatusText" class="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Đang tải dữ liệu...</p>
+                <h1 class="luffy-font text-2xl text-white">LUFFY <span class="text-red-500">PIRATE</span> <span class="text-xs bg-red-600 px-1 rounded ml-1">V.01</span></h1>
+                <p id="botStatusText" class="text-[10px] font-bold text-gray-500 uppercase italic">KẾT NỐI HỆ THỐNG...</p>
             </div>
         </div>
         <div class="text-right">
-            <p class="text-[10px] text-gray-400 font-bold uppercase">Số dư ví</p>
-            <p id="balance" class="text-2xl font-black text-yellow-400 mono">$0.00</p>
+            <p class="text-[9px] text-gray-400 font-bold uppercase">Số dư Futures</p>
+            <p id="balance" class="text-2xl font-black text-yellow-400 mono tracking-tighter">$0.00</p>
         </div>
     </header>
 
-    <div class="grid-main mb-4">
+    <div class="grid-6 mb-4">
         <div class="card flex flex-col justify-center">
-            <label class="text-[9px] text-gray-500 font-bold uppercase mb-1">Vốn mỗi lệnh</label>
+            <label class="text-[9px] text-gray-500 font-bold uppercase mb-1">Vốn & Loại</label>
             <div class="flex gap-1">
-                <input type="number" id="invValue" class="w-2/3 bg-black border border-white/10 p-1 rounded text-xs text-white" value="1.5">
+                <input type="number" id="invValue" class="w-2/3 bg-black border border-white/10 p-1 rounded text-xs text-white mono" value="1.5">
                 <select id="invType" class="w-1/3 bg-black border border-white/10 p-1 rounded text-[10px] text-yellow-500 font-bold">
                     <option value="fixed">$</option>
                     <option value="percent">%</option>
@@ -66,48 +65,49 @@
         </div>
 
         <div class="card flex flex-col justify-center">
-            <label class="text-[9px] text-gray-500 font-bold uppercase mb-1">Max hạm đội</label>
-            <input type="number" id="maxPositions" class="w-full bg-black border border-white/10 p-1 rounded text-xs text-white" value="10">
+            <label class="text-[9px] text-gray-500 font-bold uppercase mb-1">ĐK Biến động (%)</label>
+            <input type="number" id="minVol" class="w-full bg-black border border-white/10 p-1 rounded text-xs text-red-500 font-bold mono" value="5.0">
         </div>
 
         <div class="card flex flex-col justify-center">
-            <label class="text-[9px] text-gray-500 font-bold uppercase mb-1">SL Tài khoản (%)</label>
-            <input type="number" id="accountSL" class="w-full bg-black border border-white/10 p-1 rounded text-xs text-white" value="30">
+            <label class="text-[9px] text-gray-500 font-bold uppercase mb-1">Max Lệnh / SL TK (%)</label>
+            <div class="flex gap-1">
+                <input type="number" id="maxPositions" class="w-1/2 bg-black border border-white/10 p-1 rounded text-xs text-white mono" value="10">
+                <input type="number" id="accountSL" class="w-1/2 bg-black border border-white/10 p-1 rounded text-xs text-orange-500 mono" value="30">
+            </div>
         </div>
 
         <div class="card flex flex-col items-center justify-center">
-            <p class="text-[9px] text-gray-400 uppercase">Tỷ lệ thắng</p>
+            <p class="text-[9px] text-gray-400 uppercase">Winrate</p>
             <p id="winRate" class="luffy-font text-3xl text-green-400">0%</p>
         </div>
 
         <div class="card flex items-center justify-center">
-            <button id="runBtn" onclick="handleToggle()" class="btn-green w-full py-3 text-white text-xs uppercase rounded-lg">
-                🚢 START
-            </button>
+            <button id="runBtn" onclick="handleToggle()" class="btn-start w-full py-3 text-white text-xs uppercase shadow-lg">🚢 START</button>
         </div>
 
         <div class="card flex items-center justify-center">
-            <button onclick="handleUpdate()" class="w-full py-3 bg-blue-600 hover:bg-blue-500 text-white text-[10px] font-black uppercase rounded-lg shadow-lg">
-                CẬP NHẬT
-            </button>
+            <button onclick="handleUpdate()" class="w-full py-3 bg-blue-600 hover:bg-blue-500 text-white text-[10px] font-black uppercase rounded-lg">CẬP NHẬT</button>
         </div>
     </div>
 
     <div class="flex-grow grid grid-cols-1 md:grid-cols-12 gap-4 min-h-0 overflow-hidden">
         
-        <div class="md:col-span-4 card flex flex-col overflow-hidden border-t-2 border-blue-500">
-            <div class="flex justify-between items-center mb-2">
-                <h3 class="text-[10px] font-black text-blue-400 uppercase italic">Hệ thống Logs</h3>
-                <button onclick="document.getElementById('botLogs').innerHTML=''" class="text-[8px] text-gray-600 hover:text-white">XÓA LOG</button>
+        <div class="md:col-span-4 flex flex-col gap-4 overflow-hidden">
+            <div class="card flex-grow flex flex-col overflow-hidden border-t-2 border-blue-500">
+                <h3 class="text-[10px] font-black text-blue-400 uppercase mb-2 italic">Hệ thống Logs (Chặn Spam)</h3>
+                <div id="botLogs" class="flex-grow overflow-y-auto mono pr-1"></div>
             </div>
-            <div id="botLogs" class="flex-grow overflow-y-auto mono space-y-1">
-                </div>
+            <div class="card h-[150px] flex flex-col border-t-2 border-yellow-500">
+                <h3 class="text-[10px] font-black text-yellow-500 uppercase mb-1 italic">Radar Săn Coin (>= <span id="volShow">5</span>%)</h3>
+                <div id="radarList" class="flex-grow overflow-y-auto space-y-1"></div>
+            </div>
         </div>
 
         <div class="md:col-span-8 card flex flex-col overflow-hidden border-t-2 border-red-500 p-0">
-            <div class="p-3 border-b border-white/5 flex justify-between bg-white/5">
-                <span class="luffy-font text-lg text-white">LỆNH ĐANG ĐÁNH</span>
-                <span id="posCount" class="text-[10px] font-bold text-yellow-500 uppercase">0 Lệnh</span>
+            <div class="p-3 border-b border-white/5 flex justify-between bg-white/5 items-center">
+                <span class="luffy-font text-lg text-white">HẠM ĐỘI ĐANG CHIẾN ĐẤU</span>
+                <span id="posCount" class="text-[10px] font-bold text-yellow-500 bg-yellow-500/10 px-2 py-1 rounded">0 LỆNH</span>
             </div>
             <div class="flex-grow overflow-y-auto">
                 <table class="w-full text-left text-[11px] mono">
@@ -115,9 +115,8 @@
                         <tr>
                             <th class="p-3">Cặp tiền</th>
                             <th class="p-3">Vị thế/Lev</th>
-                            <th class="p-3">Giá Entry/Hiện tại</th>
-                            <th class="p-3">TP/SL</th>
-                            <th class="p-3 text-right">PnL%</th>
+                            <th class="p-3">Entry/Mark</th>
+                            <th class="p-3">PnL%</th>
                         </tr>
                     </thead>
                     <tbody id="positionTable" class="divide-y divide-white/5"></tbody>
@@ -127,149 +126,134 @@
     </div>
 
     <script>
-        /** * JAVASCRIPT LOGIC - THUYỀN TRƯỞNG KIỂM TRA TẠI ĐÂY
+        /** * JAVASCRIPT BẢN SỬA BOT 01 
          */
         let isRunning = false;
-        const btn = document.getElementById('runBtn');
+        let lastErrorMsg = "";
+        let errorRepeatCount = 0;
         const logs = document.getElementById('botLogs');
 
-        // 1. Hàm Log: Báo cáo mọi hành động thành công hay chưa
         function pushLog(msg, type = 'info') {
+            // Chặn spam log lỗi giống hệt nhau
+            if (msg === lastErrorMsg && type === 'error') {
+                errorRepeatCount++;
+                logs.firstChild.innerHTML = `<span class="opacity-50">[${new Date().toLocaleTimeString()}]</span> ${msg} (x${errorRepeatCount})`;
+                return;
+            }
+            lastErrorMsg = (type === 'error') ? msg : "";
+            errorRepeatCount = 1;
+
             const time = new Date().toLocaleTimeString();
             const div = document.createElement('div');
             div.className = `log-entry log-${type}`;
             div.innerHTML = `<span class="opacity-50">[${time}]</span> ${msg}`;
             logs.prepend(div);
-            // Giữ lại 50 log gần nhất
-            if(logs.children.length > 50) logs.lastChild.remove();
+            if(logs.children.length > 40) logs.lastChild.remove();
         }
 
-        // 2. Cập nhật giao diện nút bấm ngay lập tức
-        function setBtnState(state) {
+        function setUI(state) {
             isRunning = state;
+            const btn = document.getElementById('runBtn');
+            const statusText = document.getElementById('botStatusText');
             if(isRunning) {
                 btn.innerText = "🛑 STOP BOT";
-                btn.className = "btn-red w-full py-3 text-white text-xs uppercase rounded-lg";
-                document.getElementById('botStatusText').innerText = "BOT ĐANG TRUY QUÉT TÍN HIỆU...";
-                document.getElementById('botStatusText').className = "text-[10px] font-bold text-green-500 uppercase tracking-widest";
+                btn.className = "btn-stop w-full py-3 text-white text-xs uppercase";
+                statusText.innerText = "BOT ĐANG TRUY QUÉT TÍN HIỆU...";
+                statusText.className = "text-[10px] font-bold text-green-500 uppercase italic";
             } else {
                 btn.innerText = "🚢 START BOT";
-                btn.className = "btn-green w-full py-3 text-white text-xs uppercase rounded-lg";
-                document.getElementById('botStatusText').innerText = "Hệ thống đang tạm dừng";
-                document.getElementById('botStatusText').className = "text-[10px] font-bold text-gray-500 uppercase tracking-widest";
+                btn.className = "btn-start w-full py-3 text-white text-xs uppercase";
+                statusText.innerText = "HỆ THỐNG ĐANG TẠM DỪNG";
+                statusText.className = "text-[10px] font-bold text-gray-500 uppercase italic";
             }
         }
 
-        // 3. Đồng bộ dữ liệu từ Server
-        async function syncData() {
+        async function sync() {
             try {
                 const res = await fetch('/api/status');
-                if(!res.ok) throw new Error("Không thể kết nối Server");
                 const data = await res.json();
 
-                // Kiểm tra trạng thái chạy
-                if(data.botSettings.isRunning !== isRunning) {
-                    setBtnState(data.botSettings.isRunning);
-                    pushLog(`Đồng bộ trạng thái: Bot đang ${isRunning ? 'CHẠY' : 'DỪNG'}`, "info");
-                }
-
-                // Cập nhật số dư
-                const bal = data.status.currentBalance || 0;
-                document.getElementById('balance').innerText = `$${bal.toFixed(2)}`;
+                // Cập nhật Trạng thái & Nút
+                if(data.botSettings.isRunning !== isRunning) setUI(data.botSettings.isRunning);
                 
-                // Cập nhật Winrate
+                // Cập nhật Số dư & Winrate
+                document.getElementById('balance').innerText = `$${(data.status.currentBalance || 0).toFixed(2)}`;
+                document.getElementById('volShow').innerText = data.botSettings.minVol;
+                
                 let win = 0;
                 data.history.forEach(h => { if(parseFloat(h.pnl) > 0) win++; });
-                const wr = data.history.length > 0 ? Math.round((win/data.history.length)*100) : 0;
-                document.getElementById('winRate').innerText = wr + "%";
+                document.getElementById('winRate').innerText = data.history.length > 0 ? Math.round((win/data.history.length)*100) + "%" : "0%";
 
-                // Cập nhật Bảng lệnh (Max Lev, Entry, TP, SL)
-                document.getElementById('posCount').innerText = `${data.activePositions.length} Lệnh`;
+                // Cập nhật Bảng lệnh
+                document.getElementById('posCount').innerText = `${data.activePositions.length} LỆNH`;
                 document.getElementById('positionTable').innerHTML = data.activePositions.map(p => `
-                    <tr class="hover:bg-white/5 transition">
+                    <tr>
                         <td class="p-3 font-bold text-white">${p.symbol}</td>
-                        <td class="p-3">
-                            <span class="${p.side === 'LONG' ? 'text-green-400' : 'text-red-400'} font-black">${p.side}</span>
-                            <span class="text-gray-500 ml-1">MAXx</span>
-                        </td>
-                        <td class="p-3">
-                            <span class="text-gray-400">$${p.entryPrice || '0'}</span><br>
-                            <span class="text-white">$${p.markPrice || '0'}</span>
-                        </td>
-                        <td class="p-3 text-[9px]">
-                            <span class="text-green-500">TP: ${p.tp || '--'}</span><br>
-                            <span class="text-red-500">SL: ${p.sl || '--'}</span>
-                        </td>
-                        <td class="p-3 text-right font-black ${parseFloat(p.pnl) >= 0 ? 'text-green-400' : 'text-red-400'}">
-                            ${p.pnlPercent}%
-                        </td>
+                        <td class="p-3"><span class="${p.side === 'LONG' ? 'text-green-400' : 'text-red-400'}">${p.side}</span> <span class="text-gray-500 text-[9px]">${p.leverage}x</span></td>
+                        <td class="p-3 text-[10px]">$${p.entryPrice}<br><span class="text-white">$${p.markPrice}</span></td>
+                        <td class="p-3 text-right font-bold ${parseFloat(p.pnl) >= 0 ? 'text-green-400' : 'text-red-400'}">${p.pnlPercent}%</td>
                     </tr>
                 `).join('');
 
-            } catch (err) {
-                pushLog("Lỗi: Không lấy được dữ liệu từ Server!", "error");
+                // Cập nhật Radar Coin Tiềm Năng
+                if (data.candidatesList) {
+                    document.getElementById('radarList').innerHTML = data.candidatesList.map(c => `
+                        <div class="flex justify-between items-center bg-white/5 p-1 rounded text-[10px]">
+                            <span class="font-bold text-gray-300">${c.symbol}</span>
+                            <span class="${c.changePercent > 0 ? 'text-green-400' : 'text-red-400'} font-bold">${c.changePercent}%</span>
+                        </div>
+                    `).join('');
+                }
+
+                // Đưa log từ server về web (nếu có)
+                if (data.status.botLogs && data.status.botLogs.length > 0) {
+                    const latest = data.status.botLogs[0];
+                    if (latest.msg !== lastErrorMsg) pushLog(latest.msg, latest.type);
+                }
+
+            } catch (e) {
+                pushLog("Lỗi kết nối Server Bot (Cổng 9001)!", "error");
             }
         }
 
-        // 4. Xử lý bấm START/STOP
         async function handleToggle() {
             const target = !isRunning;
-            setBtnState(target); // Đổi UI ngay cho mượt
-            
+            setUI(target);
             try {
-                pushLog(`Đang gửi yêu cầu ${target ? 'START' : 'STOP'} tới server...`, "info");
-                const res = await fetch('/api/settings', {
+                await fetch('/api/settings', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({ isRunning: target })
                 });
-                
-                if(res.ok) {
-                    pushLog(`${target ? 'START' : 'STOP'} thành công!`, "success");
-                } else {
-                    throw new Error();
-                }
-            } catch (e) {
-                pushLog(`Lỗi: Không thể thực hiện lệnh ${target ? 'START' : 'STOP'}`, "error");
-                setBtnState(!target); // Trả lại trạng thái cũ nếu lỗi
-            }
+                pushLog(target ? "Gửi lệnh: GIƯƠNG BUỒM!" : "Gửi lệnh: HẠ BUỒM!", "warn");
+            } catch (e) { pushLog("Không thể gửi lệnh điều khiển!", "error"); }
         }
 
-        // 5. Xử lý bấm CẬP NHẬT (Lưu cài đặt)
         async function handleUpdate() {
             const body = {
                 invValue: parseFloat(document.getElementById('invValue').value),
                 invType: document.getElementById('invType').value,
+                minVol: parseFloat(document.getElementById('minVol').value),
                 maxPositions: parseInt(document.getElementById('maxPositions').value),
                 accountSL: parseFloat(document.getElementById('accountSL').value)
             };
-
-            pushLog("Đang gửi cấu hình mới cho hạm đội...", "info");
-            
             try {
                 const res = await fetch('/api/settings', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify(body)
                 });
-                
                 if(res.ok) {
-                    pushLog("Cập nhật cấu hình THÀNH CÔNG!", "success");
-                    alert("✅ Hạm đội đã nhận lệnh mới!");
-                } else {
-                    throw new Error();
+                    pushLog("Cập nhật thông số thành công!", "success");
+                    alert("Đã áp dụng cấu hình mới!");
                 }
-            } catch (e) {
-                pushLog("Lỗi: Cập nhật cấu hình THẤT BẠI!", "error");
-                alert("❌ Lỗi server!");
-            }
+            } catch (e) { pushLog("Lỗi cập nhật cấu hình!", "error"); }
         }
 
-        // Khởi động
-        pushLog("Hệ thống Pirate Bot v3.5 đã sẵn sàng.", "success");
-        pushLog("Đang kết nối API Binance...", "info");
-        syncData();
-        setInterval(syncData, 2000); // Cập nhật mỗi 2 giây
+        // Chạy lần đầu & Lặp lại mỗi 2 giây
+        pushLog("BẢN SỬA BOT 01 - SẴN SÀNG", "success");
+        sync();
+        setInterval(sync, 2000);
     </script>
 </body>
 </html>
