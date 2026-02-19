@@ -9,12 +9,10 @@ import { API_KEY, SECRET_KEY } from './config.js';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 let botSettings = { isRunning: false, maxPositions: 10, invValue: 0.06, invType: 'fixed', minVol: 5.0 };
-let status = { currentBalance: 0, botLogs: [], exchangeInfo: {}, candidatesList: [] }; // Thêm danh sách kèo vào status
-let isLoggedStop = true;
+let status = { currentBalance: 0, botLogs: [], exchangeInfo: {}, candidatesList: [] };
 let isInitializing = true;
 
 function addBotLog(msg, type = 'info') {
-    // Luôn cho phép log success/error/warn kể cả khi dừng bot
     if (!botSettings.isRunning && !['success', 'error', 'warn'].includes(type)) return;
     const entry = { time: new Date().toLocaleTimeString(), msg, type };
     status.botLogs.unshift(entry);
@@ -53,23 +51,26 @@ function calcTPSL(lev, side, entryPrice) {
     };
 }
 
-// LUÔN QUÉT KÈO TỪ MÁY QUÉT 9000 (CHẠY ĐỘC LẬP)
+// MẮT THẦN: LUÔN QUÉT KÈO DÙ START HAY STOP
 function fetchCandidates() {
     http.get('http://127.0.0.1:9000/api/live', res => {
         let d = ''; res.on('data', chunk => d += chunk);
         res.on('end', () => {
             try {
                 const allData = JSON.parse(d);
-                // Lọc kèo theo volume tối thiểu ngay từ lúc quét
-                status.candidatesList = allData
-                    .filter(c => Math.abs(c.changePercent) >= botSettings.minVol)
-                    .sort((a, b) => Math.abs(b.changePercent) - Math.abs(a.changePercent));
+                const filtered = allData.filter(c => Math.abs(c.changePercent) >= botSettings.minVol);
+                status.candidatesList = filtered.sort((a, b) => Math.abs(b.changePercent) - Math.abs(a.changePercent));
+                // Chỉ log khi có kèo mới và bot đang chạy để tránh spam
+                if (status.candidatesList.length > 0 && botSettings.isRunning) {
+                    console.log(`[SCAN] Tìm thấy ${status.candidatesList.length} kèo thỏa mãn.`);
+                }
             } catch (e) { status.candidatesList = []; }
         });
-    }).on('error', () => { status.candidatesList = []; });
+    }).on('error', () => { 
+        status.candidatesList = []; 
+    });
 }
 
-// TUẦN TRA LỆNH
 async function patrol() {
     if (!botSettings.isRunning) return;
     try {
@@ -80,7 +81,6 @@ async function patrol() {
         for (const o of orders) {
             if (!active.find(p => p.symbol === o.symbol && p.positionSide === o.positionSide)) {
                 await callBinance('/fapi/v1/order', 'DELETE', { symbol: o.symbol, orderId: o.orderId });
-                addBotLog(`🧹 Dọn rác: ${o.symbol}`, "warn");
             }
         }
         for (const p of active) {
@@ -93,13 +93,12 @@ async function patrol() {
                 const qty = Math.abs(parseFloat(p.positionAmt)).toFixed(info.quantityPrecision);
                 if (!hasTP) await callBinance('/fapi/v1/order', 'POST', { symbol: p.symbol, side, positionSide: p.positionSide, type: 'TAKE_PROFIT_MARKET', stopPrice: plan.tp.toFixed(info.pricePrecision), quantity: qty, workingType: 'MARK_PRICE' });
                 if (!hasSL) await callBinance('/fapi/v1/order', 'POST', { symbol: p.symbol, side, positionSide: p.positionSide, type: 'STOP_MARKET', stopPrice: plan.sl.toFixed(info.pricePrecision), quantity: qty, workingType: 'MARK_PRICE' });
-                addBotLog(`🛡️ Ghim bổ sung TP/SL cho ${p.symbol}`, "success");
+                addBotLog(`🛡️ Đã ghim TP/SL cho ${p.symbol}`, "success");
             }
         }
     } catch (e) {}
 }
 
-// ĐI SĂN (DỰA TRÊN DANH SÁCH KÈO ĐÃ QUÉT)
 async function hunt() {
     if (!botSettings.isRunning || isInitializing) return;
     try {
@@ -120,6 +119,7 @@ async function hunt() {
 
                 const ticker = await callBinance('/fapi/v1/ticker/price', 'GET', { symbol: c.symbol });
                 const price = parseFloat(ticker.price);
+                
                 let qty = Math.ceil(((botSettings.invValue * lev) / price) / info.stepSize) * info.stepSize;
                 if ((qty * price) < 5.0) qty = Math.ceil(5.1 / price / info.stepSize) * info.stepSize;
 
@@ -127,11 +127,11 @@ async function hunt() {
                 await callBinance('/fapi/v1/order', 'POST', { symbol: c.symbol, side: posSide === 'LONG' ? 'BUY' : 'SELL', positionSide: posSide, type: 'MARKET', quantity: qty.toFixed(info.quantityPrecision) });
                 setTimeout(patrol, 3000); 
             } catch (err) { 
-                if (['ENOTFOUND', 'ETIMEDOUT'].includes(err.code)) {
+                if (err.code === 'ENOTFOUND' || err.code === 'ETIMEDOUT') {
                     addBotLog("📡 Sóng yếu, bỏ qua kèo...", "warn");
                 } else {
                     botSettings.isRunning = false;
-                    addBotLog(`🚨 LỖI LỆNH: ${err.msg || JSON.stringify(err)}. DỪNG BOT!`, "error");
+                    addBotLog(`🚨 LỖI SÀN: ${err.msg || JSON.stringify(err)}. DỪNG BOT!`, "error");
                     break; 
                 }
             }
@@ -159,29 +159,40 @@ APP.get('/api/status', async (req, res) => {
 
 APP.post('/api/settings', (req, res) => {
     botSettings = { ...botSettings, ...req.body };
-    if (!botSettings.isRunning) { isLoggedStop = false; addBotLog("⚓ HẠ BUỒM!", "warn"); }
+    if (!botSettings.isRunning) addBotLog("⚓ HẠ BUỒM!", "warn");
     else addBotLog("🚢 GIƯƠNG BUỒM!", "success");
     res.sendStatus(200);
 });
 
+// SỬA LỖI RES IS NOT DEFINED TẠI ĐÂY
 async function init() {
-    try {
-        https.get('https://fapi.binance.com/fapi/v1/exchangeInfo', r => {
-            let d = ''; r.on('data', c => d += c);
-            res.on('end', () => {
-                JSON.parse(d).symbols.forEach(s => {
+    console.log("📡 Đang nạp dữ liệu sàn...");
+    https.get('https://fapi.binance.com/fapi/v1/exchangeInfo', (response) => {
+        let d = '';
+        response.on('data', c => d += c);
+        response.on('end', () => {
+            try {
+                const parsed = JSON.parse(d);
+                parsed.symbols.forEach(s => {
                     const lot = s.filters.find(f => f.filterType === 'LOT_SIZE');
-                    status.exchangeInfo[s.symbol] = { quantityPrecision: s.quantityPrecision, pricePrecision: s.pricePrecision, stepSize: parseFloat(lot.stepSize) };
+                    status.exchangeInfo[s.symbol] = { 
+                        quantityPrecision: s.quantityPrecision, 
+                        pricePrecision: s.pricePrecision, 
+                        stepSize: parseFloat(lot.stepSize) 
+                    };
                 });
                 isInitializing = false;
                 addBotLog("⚓ Hệ thống sẵn sàng!", "success");
-            });
+            } catch (e) { console.error("Lỗi parse dữ liệu sàn."); }
         });
-    } catch (e) { setTimeout(init, 5000); }
+    }).on('error', (e) => {
+        console.error("Lỗi kết nối sàn: " + e.message);
+        setTimeout(init, 5000);
+    });
 }
 
 init();
-setInterval(fetchCandidates, 5000); // Luôn quét kèo 5s/lần bất kể Start/Stop
-setInterval(hunt, 5000); // Kiểm tra đập kèo 5s/lần
-setInterval(patrol, 15000); // Tuần tra 15s/lần
+setInterval(fetchCandidates, 5000);
+setInterval(hunt, 5000);
+setInterval(patrol, 15000);
 APP.listen(9001, '0.0.0.0');
