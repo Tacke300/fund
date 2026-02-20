@@ -94,7 +94,7 @@ async function hunt() {
     if (isInitializing || !botSettings.isRunning || isProcessing) return;
 
     try {
-        isProcessing = true; // Khóa tiến trình
+        isProcessing = true; 
 
         const acc = await callBinance('/fapi/v2/account');
         status.currentBalance = parseFloat(acc.totalMarginBalance);
@@ -102,7 +102,6 @@ async function hunt() {
         const pos = await callBinance('/fapi/v2/positionRisk');
         const active = pos.filter(p => parseFloat(p.positionAmt) !== 0);
 
-        // Kiểm tra đúng cấu hình số vị thế tối đa
         if (active.length >= botSettings.maxPositions) {
             isProcessing = false;
             return;
@@ -121,38 +120,45 @@ async function hunt() {
                 const price = parseFloat(ticker.price);
                 const side = c.changePercent > 0 ? 'LONG' : 'SHORT';
 
-                // Giữ nguyên gốc cách tính của bạn
-                let rawQty = (botSettings.invValue * lev) / price;
+                // --- LOGIC TÍNH TOÁN THEO % HOẶC $ ---
+                let marginAmount = 0;
+                if (botSettings.invType === 'percent') {
+                    // Lấy % số dư tài khoản
+                    marginAmount = (status.currentBalance * botSettings.invValue) / 100;
+                } else {
+                    // Lấy số tiền cố định
+                    marginAmount = botSettings.invValue;
+                }
+
+                let rawQty = (marginAmount * lev) / price;
                 let qty = Math.floor(rawQty / info.stepSize) * info.stepSize;
                 
                 if ((qty * price) < 5.0) {
                     qty = Math.ceil(5.1 / price / info.stepSize) * info.stepSize;
                 }
                 const finalQty = qty.toFixed(info.quantityPrecision);
+                // -------------------------------------
 
-                // Mở lệnh Market
                 await callBinance('/fapi/v1/order', 'POST', { 
                     symbol: c.symbol, side: side === 'LONG' ? 'BUY' : 'SELL', 
                     positionSide: side, type: 'MARKET', quantity: finalQty 
                 });
-                addBotLog(`🚀 Mở ${side} ${c.symbol}`, "success");
+                addBotLog(`🚀 Mở ${side} ${c.symbol} (Margin: ${marginAmount.toFixed(2)}$)`, "success");
 
-                // Đợi đúng 5s rồi cài TP/SL xong mới làm việc khác
                 await new Promise(res => setTimeout(res, 5000));
                 await enforceTPSL();
 
-                // Sau khi xong 1 con thì thoát để vòng lặp sau check lại từ đầu
                 break;
 
             } catch (err) {
                 addBotLog(`❌ LỖI: ${err.msg || "Sàn từ chối"}. DỪNG BOT ĐỂ KIỂM TRA!`, "error");
-                botSettings.isRunning = false; // Dừng bot lập tức nếu có lỗi dồn dập
+                botSettings.isRunning = false; 
                 break;
             }
         }
     } catch (e) {
     } finally {
-        isProcessing = false; // Mở khóa tiến trình
+        isProcessing = false; 
     }
 }
 
@@ -216,6 +222,6 @@ async function init() {
 
 init();
 setInterval(fetchCandidates, 3000);
-setInterval(hunt, 2000); // Quét nhanh nhưng bị chặn bởi isProcessing
-setInterval(enforceTPSL, 10000); // Quét bù bảo vệ
+setInterval(hunt, 2000); 
+setInterval(enforceTPSL, 10000); 
 APP.listen(9001, '0.0.0.0');
