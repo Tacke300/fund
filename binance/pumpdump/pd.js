@@ -10,7 +10,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 let botSettings = { isRunning: false, maxPositions: 10, invValue: 1.5, invType: 'fixed', minVol: 5.0, accountSL: 30 };
 let status = { currentBalance: 0, botLogs: [], exchangeInfo: {}, candidatesList: [] };
 let isInitializing = true;
-let isProcessing = false; // Khóa chống dồn dập
+let isProcessing = false; 
 
 function addBotLog(msg, type = 'info') {
     const entry = { time: new Date().toLocaleTimeString(), msg, type };
@@ -96,21 +96,21 @@ async function hunt() {
     try {
         isProcessing = true; 
 
-        const acc = await callBinance('/fapi/v2/account');
-        status.currentBalance = parseFloat(acc.totalMarginBalance);
-
-        const pos = await callBinance('/fapi/v2/positionRisk');
-        const active = pos.filter(p => parseFloat(p.positionAmt) !== 0);
-
-        if (active.length >= botSettings.maxPositions) {
-            isProcessing = false;
-            return;
-        }
-
         for (const c of status.candidatesList) {
-            if (active.some(p => p.symbol === c.symbol)) continue;
+            // Kiểm tra số lượng vị thế TRƯỚC khi mở lệnh mới
+            const posCheck = await callBinance('/fapi/v2/positionRisk');
+            const activeCount = posCheck.filter(p => parseFloat(p.positionAmt) !== 0).length;
+            
+            if (activeCount >= botSettings.maxPositions) break; 
+
+            // Nếu đồng coin này đã có lệnh rồi thì bỏ qua
+            if (posCheck.some(p => p.symbol === c.symbol && parseFloat(p.positionAmt) !== 0)) continue;
             
             try {
+                // Cập nhật số dư mỗi lần mở để tính % chính xác
+                const acc = await callBinance('/fapi/v2/account');
+                status.currentBalance = parseFloat(acc.totalMarginBalance);
+
                 const info = status.exchangeInfo[c.symbol];
                 const brackets = await callBinance('/fapi/v1/leverageBracket', 'GET', { symbol: c.symbol });
                 const lev = brackets[0].brackets[0].initialLeverage;
@@ -120,15 +120,10 @@ async function hunt() {
                 const price = parseFloat(ticker.price);
                 const side = c.changePercent > 0 ? 'LONG' : 'SHORT';
 
-                // --- LOGIC TÍNH TOÁN THEO % HOẶC $ ---
-                let marginAmount = 0;
-                if (botSettings.invType === 'percent') {
-                    // Lấy % số dư tài khoản
-                    marginAmount = (status.currentBalance * botSettings.invValue) / 100;
-                } else {
-                    // Lấy số tiền cố định
-                    marginAmount = botSettings.invValue;
-                }
+                // Tính Margin theo % hoặc $
+                let marginAmount = botSettings.invType === 'percent' 
+                    ? (status.currentBalance * botSettings.invValue) / 100 
+                    : botSettings.invValue;
 
                 let rawQty = (marginAmount * lev) / price;
                 let qty = Math.floor(rawQty / info.stepSize) * info.stepSize;
@@ -137,21 +132,24 @@ async function hunt() {
                     qty = Math.ceil(5.1 / price / info.stepSize) * info.stepSize;
                 }
                 const finalQty = qty.toFixed(info.quantityPrecision);
-                // -------------------------------------
 
+                // Mở lệnh
                 await callBinance('/fapi/v1/order', 'POST', { 
                     symbol: c.symbol, side: side === 'LONG' ? 'BUY' : 'SELL', 
                     positionSide: side, type: 'MARKET', quantity: finalQty 
                 });
                 addBotLog(`🚀 Mở ${side} ${c.symbol} (Margin: ${marginAmount.toFixed(2)}$)`, "success");
 
-                await new Promise(res => setTimeout(res, 5000));
+                // Đợi 3 giây để lệnh khớp hoàn toàn trên hệ thống sàn
+                await new Promise(res => setTimeout(res, 3000));
+                
+                // Cài TP/SL ngay lập tức cho lệnh vừa mở
                 await enforceTPSL();
-
-                break;
+                
+                addBotLog(`✅ Đã xong chu trình cho ${c.symbol}. Đang check con tiếp theo...`);
 
             } catch (err) {
-                addBotLog(`❌ LỖI: ${err.msg || "Sàn từ chối"}. DỪNG BOT ĐỂ KIỂM TRA!`, "error");
+                addBotLog(`❌ LỖI: ${err.msg || "Sàn từ chối"}. DỪNG BOT!`, "error");
                 botSettings.isRunning = false; 
                 break;
             }
