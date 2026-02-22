@@ -23,50 +23,53 @@ let mainPage = null;
 let coinQueue = [];
 
 // ==========================================
-// 1. KHO DỮ LIỆU FULL 1.200 CÂU (300 x 4)
+// 1. KHO DỮ LIỆU ĐẦY ĐỦ 1.200 CÂU (300 x 4)
 // ==========================================
 
 const intros = Array.from({ length: 300 }, (_, i) => {
-    const base = [
-        "Soi kèo nhanh mã COIN cho anh em.", "COIN đang có tín hiệu khá đẹp trên chart.", "Cập nhật vùng giá quan trọng của COIN.", 
-        "Dòng tiền lớn đang đổ vào COIN.", "Anh em đã lên tàu COIN chưa?", "Nhìn qua đồ thị COIN thấy có biến.", 
-        "COIN vừa có cú rút chân cực mạnh.", "Phân tích nhanh xu hướng COIN sắp tới.", "Cơ hội cho anh em lướt sóng mã COIN.", 
-        "Cá mập vừa di chuyển lượng lớn COIN.", "Sức nóng mã COIN đang tăng dần.", "COIN phá vỡ vùng tích lũy."
+    const list = [
+        "Điểm tin nhanh về biến động của COIN.", "Anh em đã thấy cú move này của COIN chưa?", "Nhìn lại chart COIN hôm nay có nhiều điều thú vị.", 
+        "Cập nhật trạng thái mới nhất cho mã COIN.", "Dòng tiền đang đổ dồn sự chú ý vào COIN.", "Phân tích nhanh vị thế của COIN lúc này.", 
+        "Liệu COIN có chuẩn bị cho một cú bứt phá?", "Góc nhìn cá nhân về hướng đi của COIN.", "Sức nóng của COIN trên Square vẫn chưa hạ nhiệt.", 
+        "Đừng bỏ qua diễn biến hiện tại của COIN.", "COIN đang cho thấy sức mạnh đáng kinh ngạc.", "Vùng giá này của COIN cực kỳ nhạy cảm."
     ];
-    return base[i % base.length].replace("COIN", "COIN") + (i > 20 ? ` (Mã số ${i})` : "");
+    return list[i % list.length].replace("COIN", "COIN") + (i > 15 ? ` (Phân tích mã hiệu ${i})` : "");
 });
 
 const bodies = Array.from({ length: 300 }, (_, i) => {
-    const base = [
+    const list = [
         "Giá hiện tại đang neo đậu tại mức ổn định.", "Cấu trúc nến cho thấy phe bò đang kiểm soát.", "Áp lực bán dường như đã cạn kiệt ở vùng này.", 
         "Xu hướng tăng được củng cố bởi khối lượng giao dịch.", "Mô hình hai đáy đang dần hình thành trên đồ thị.", "Giá đang tích lũy trong một biên độ hẹp.", 
         "Biến động CHANGE% tạo ra biên độ dao động lớn.", "Các chỉ báo kỹ thuật đang tiến sát vùng quá mua.", "Kháng cự ngắn hạn đang ngăn cả đà tăng trưởng.", 
-        "Lực cầu bắt đáy xuất hiện mạnh mẽ khi giá giảm."
+        "Lực cầu bắt đáy xuất hiện mạnh mẽ khi giá giảm.", "Đường EMA vừa cắt lên báo hiệu xu hướng mới.", "RSI đang ở mức hỗ trợ, cơ hội gom tốt."
     ];
-    return base[i % base.length] + (i > 20 ? ` Khung H4 đang cho tín hiệu tốt thứ ${i}.` : "");
+    return list[i % list.length] + (i > 15 ? ` Dấu hiệu thị trường số ${i}.` : "");
 });
 
 const closings = Array.from({ length: 300 }, (_, i) => {
-    const base = [
+    const list = [
         "Chúc anh em có một ngày giao dịch thắng lợi!", "Quản lý vốn là chìa khóa để sống sót lâu dài.", "Đừng quên đặt Stop Loss để bảo vệ tài khoản.", 
         "Hãy luôn tỉnh táo trước mọi biến động.", "Lợi nhuận sẽ đến với người kiên nhẫn.", "Kỷ luật thép sẽ tạo nên lợi nhuận bền vững.",
-        "Hẹn gặp lại anh em ở target cao hơn.", "Đừng Fomo nếu bạn chưa có vị thế tốt."
+        "Hẹn gặp lại anh em ở target cao hơn.", "Đừng Fomo nếu bạn chưa có vị thế tốt.", "Chúc anh em về bờ rực rỡ nhịp này!", "Hãy trade bằng cái đầu lạnh nhé."
     ];
-    return base[i % base.length] + (i > 20 ? ` [Kỷ luật số ${i}]` : "");
+    return list[i % list.length] + (i > 15 ? ` [Kỷ luật giao dịch ${i}]` : "");
 });
 
 const cryptoQuestions = Array.from({ length: 300 }, (_, i) => {
-    const base = [
+    const list = [
         "Theo anh em, trick nào để săn memecoin hiệu quả nhất hiện nay?", "Tip cho người mới: Đừng bao giờ all-in vào một lệnh.", 
-        "Làm sao để check được một dự án có phải rug-pull hay không?", "Anh em thường dùng chỉ báo kỹ thuật nào? RSI hay MACD?", 
-        "Cách quản lý vốn khi chơi Future để không bị cháy tài khoản?", "BTC lên 100k anh em sẽ làm gì đầu tiên?"
+        "Làm sao để check được một dự án có phải rug-pull hay không?", "Anh em thường dùng chỉ báo kỹ thuật nào? RSI, MACD hay cứ nến thuần?", 
+        "Cách quản lý vốn khi chơi Future để không bị cháy tài khoản nhanh nhất là gì?", "BTC lên 100k anh em làm gì đầu tiên?", 
+        "Mọi người đang dùng ví lạnh loại nào an toàn nhất?", "Có nên bỏ việc để làm trader full-time lúc này?"
     ];
-    return base[i % base.length] + (i > 20 ? ` Thảo luận phiên số ${i}.` : "");
+    return list[i % list.length] + (i > 15 ? ` - Câu hỏi thảo luận ${i}` : "");
 });
 
 // ==========================================
-// 2. LOGIC XỬ LÝ TRÌNH DUYỆT & GÕ PHÍM
+// 2. CÁC HÀM TIỆN ÍCH & GIẢ LẬP NGƯỜI DÙNG
 // ==========================================
+
+function logStep(msg) { console.log(`[${new Date().toLocaleTimeString()}] ➡️ ${msg}`); }
 
 async function killChrome() {
     try {
@@ -75,9 +78,24 @@ async function killChrome() {
     } catch (e) {}
 }
 
+async function humanIdle(page, minSecond, maxSecond) {
+    const duration = Math.floor(Math.random() * (maxSecond - minSecond + 1) + minSecond);
+    logStep(`⏳ Nghỉ giả lập trong ${duration} giây...`);
+    const endTime = Date.now() + duration * 1000;
+    while (Date.now() < endTime) {
+        if (Math.random() > 0.7) {
+            const x = Math.floor(Math.random() * 800);
+            const y = Math.floor(Math.random() * 600);
+            await page.mouse.move(x, y, { steps: 10 }).catch(() => {});
+        }
+        await new Promise(r => setTimeout(r, 2000));
+    }
+}
+
 async function humanType(page, text) {
     for (const char of text) {
         await page.keyboard.type(char, { delay: Math.floor(Math.random() * 100) + 50 });
+        if (Math.random() > 0.96) await page.waitForTimeout(400);
     }
 }
 
@@ -89,7 +107,7 @@ function smartRound(price) {
 }
 
 // ==========================================
-// 3. HÀM ĐĂNG BÀI CHÍNH
+// 3. LOGIC ĐĂNG BÀI
 // ==========================================
 
 async function postTask() {
@@ -107,8 +125,12 @@ async function postTask() {
         }
 
         let content = "";
+        let useTags = true;
+        let tags = { dollar: [], hash: [] };
+
         if (totalPosts > 0 && totalPosts % 4 === 0) {
             content = cryptoQuestions[Math.floor(Math.random() * 300)];
+            useTags = false;
         } else {
             if (coinQueue.length === 0) {
                 const res = await axios.get('https://fapi.binance.com/fapi/v1/ticker/24hr');
@@ -120,63 +142,75 @@ async function postTask() {
             const intro = intros[Math.floor(Math.random() * 300)].replace("COIN", c.symbol);
             const body = bodies[Math.floor(Math.random() * 300)].replace("CHANGE%", `${c.change}%`);
             const closing = closings[Math.floor(Math.random() * 300)];
-            content = `🔥 [MARKET SIGNAL]: ${c.symbol}\n\n${intro}\n\n${body}\n\n📍 ENTRY: ${smartRound(c.price)}\n\n${closing}\n\n$${c.symbol} #BinanceSquare`;
+            
+            content = `🔥 [MARKET SIGNAL]: ${c.symbol}\n\n${intro}\n\n${body}\n\n📍 ENTRY: ${smartRound(c.price)}\n\n${closing}`;
+            tags.dollar = [c.symbol, "BTC"];
+            tags.hash = [c.symbol, "BinanceSquare"];
         }
 
         const textbox = mainPage.locator('div[contenteditable="true"]').first();
         await textbox.click();
         await mainPage.keyboard.press('Control+A');
         await mainPage.keyboard.press('Backspace');
+
         await humanType(mainPage, content);
+
+        if (useTags) {
+            await mainPage.keyboard.press('Enter');
+            for (const s of tags.dollar) { await humanType(mainPage, ` $${s}`); await mainPage.keyboard.press('Enter'); }
+            for (const s of tags.hash) { await humanType(mainPage, ` #${s}`); await mainPage.keyboard.press('Enter'); }
+        }
 
         const btn = mainPage.locator('button').filter({ hasText: /^Đăng$|^Post$/ }).last();
         if (await btn.isEnabled()) {
             await btn.click();
             totalPosts++;
-            history.unshift({ time: new Date().toLocaleTimeString(), status: 'Thành công' });
-            console.log(`✅ Bài số ${totalPosts} thành công.`);
-            await new Promise(r => setTimeout(r, (Math.floor(Math.random() * 60) + 60) * 1000));
+            history.unshift({ time: new Date().toLocaleTimeString(), status: `Thành công bài ${totalPosts}` });
+            await humanIdle(mainPage, 40, 90);
         }
     } catch (err) {
-        console.log(`❌ Lỗi: ${err.message}`);
-        context = null; mainPage = null; // Reset để vòng sau khởi tạo lại
+        logStep(`Lỗi: ${err.message}`);
+        context = null; mainPage = null;
         await new Promise(r => setTimeout(r, 10000));
     }
     if (isRunning) postTask();
 }
 
 // ==========================================
-// 4. GIAO DIỆN HTML TRONG JS
+// 4. GIAO DIỆN & API (FIX REMOTE ACCESS)
 // ==========================================
 
 app.get('/', (req, res) => {
     res.send(`
     <!DOCTYPE html>
-    <html>
+    <html lang="vi">
     <head>
-        <title>Binance Square Bot</title>
+        <meta charset="UTF-8">
+        <title>BOT SQUARE CONTROL</title>
         <style>
-            body { background: #0b0e11; color: #eaecef; font-family: Arial; text-align: center; padding: 50px; }
-            .btn { padding: 15px 30px; margin: 10px; border: none; border-radius: 5px; cursor: pointer; font-weight: bold; }
-            .start { background: #2ebd85; color: white; }
-            .stop { background: #f6465d; color: white; }
-            .login { background: #f0b90b; color: #0b0e11; }
-            #status { font-size: 24px; margin-bottom: 20px; }
-            .log { background: #1e2329; padding: 10px; border-radius: 5px; width: 300px; margin: 20px auto; text-align: left; }
+            body { background: #0b0e11; color: #eaecef; font-family: sans-serif; text-align: center; }
+            .container { padding: 40px; max-width: 500px; margin: auto; }
+            .btn { width: 100%; padding: 15px; margin: 10px 0; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; font-size: 16px; }
+            .login { background: #f0b90b; color: #000; }
+            .start { background: #2ebd85; color: #fff; }
+            .stop { background: #f6465d; color: #fff; }
+            #history { text-align: left; background: #1e2329; padding: 15px; border-radius: 8px; height: 150px; overflow-y: auto; margin-top: 20px; }
         </style>
     </head>
     <body>
-        <h1>🤖 BINANCE SQUARE AUTO-POST</h1>
-        <div id="status">Đang tải...</div>
-        <button class="btn login" onclick="location.href='/login'">1. ĐĂNG NHẬP (MỞ CHROME)</button><br>
-        <button class="btn start" onclick="fetch('/start')">2. BẮT ĐẦU CHẠY</button>
-        <button class="btn stop" onclick="fetch('/stop')">3. DỪNG LẠI</button>
-        <div class="log" id="history"></div>
-
+        <div class="container">
+            <h1>BOT SQUAD CONTROL</h1>
+            <div id="status">Đang tải dữ liệu...</div>
+            <button class="btn login" onclick="call('/login')">1. MỞ CHROME LOGIN</button>
+            <button class="btn start" onclick="call('/start')">2. CHẠY BOT</button>
+            <button class="btn stop" onclick="call('/stop')">3. DỪNG BOT</button>
+            <div id="history"></div>
+        </div>
         <script>
+            function call(url) { fetch(url).then(r => r.json()).then(d => alert(d.msg)); }
             setInterval(() => {
                 fetch('/stats').then(r => r.json()).then(data => {
-                    document.getElementById('status').innerText = 'Trạng thái: ' + (data.isRunning ? 'ĐANG CHẠY' : 'DỪNG') + ' | Tổng bài: ' + data.totalPosts;
+                    document.getElementById('status').innerText = (data.isRunning ? '🟢 ĐANG CHẠY' : '🔴 ĐANG DỪNG') + ' | Tổng: ' + data.totalPosts;
                     document.getElementById('history').innerHTML = data.history.map(h => '<div>[' + h.time + '] ' + h.status + '</div>').join('');
                 });
             }, 2000);
@@ -187,14 +221,26 @@ app.get('/', (req, res) => {
 });
 
 app.get('/stats', (req, res) => res.json({ isRunning, totalPosts, history }));
-app.get('/start', (req, res) => { if (!isRunning) { isRunning = true; postTask(); } res.json({s:1}); });
-app.get('/stop', (req, res) => { isRunning = false; res.json({s:1}); });
+
 app.get('/login', async (req, res) => {
+    isRunning = false;
     await killChrome();
-    context = await chromium.launchPersistentContext(userDataDir, { headless: false });
-    mainPage = await context.newPage();
-    await mainPage.goto('https://www.binance.com/vi/square');
-    res.send("<h2>Chrome đã mở, hãy đăng nhập rồi quay lại tab cũ bấm Start.</h2>");
+    chromium.launchPersistentContext(userDataDir, { headless: false }).then(async (ctx) => {
+        context = ctx;
+        mainPage = await context.newPage();
+        await mainPage.goto('https://www.binance.com/vi/square');
+    });
+    res.json({ msg: "Chrome đã bật trên máy BOT. Hãy Login!" });
 });
 
-app.listen(port, () => console.log(`🚀 Bot live: http://localhost:${port}`));
+app.get('/start', (req, res) => {
+    if (!isRunning) { isRunning = true; postTask(); }
+    res.json({ msg: "Bot đã bắt đầu." });
+});
+
+app.get('/stop', (req, res) => {
+    isRunning = false;
+    res.json({ msg: "Đã dừng lệnh." });
+});
+
+app.listen(port, '0.0.0.0', () => logStep(`TRUY CẬP TỪ XA: http://localhost:${port}`));
