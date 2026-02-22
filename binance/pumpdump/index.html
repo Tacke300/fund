@@ -8,54 +8,90 @@
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Bangers&family=JetBrains+Mono:wght@400;700&display=swap');
         :root { --luffy-red: #ff4d4d; --bg-dark: #0a0a0c; }
-        body { background: var(--bg-dark); color: #eee; font-family: 'Inter', sans-serif; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
-        .luffy-font { font-family: 'Bangers', cursive; }
+        body { background: var(--bg-dark); color: #eee; font-family: 'Inter', sans-serif; overflow: hidden; height: 100vh; display: flex; flex-direction: column; }
+        .luffy-font { font-family: 'Bangers', cursive; letter-spacing: 2px; }
         .mono { font-family: 'JetBrains Mono', monospace; }
         .card { background: rgba(15, 15, 20, 0.9); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 16px; }
         .btn-start { background: linear-gradient(135deg, #22c55e, #15803d); }
-        .btn-stop { background: linear-gradient(135deg, #ef4444, #b91c1c); }
+        .btn-stop { background: linear-gradient(135deg, #ef4444, #b91c1c); animation: pulse 2s infinite; }
+        @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.7; } 100% { opacity: 1; } }
         ::-webkit-scrollbar { width: 4px; }
         ::-webkit-scrollbar-thumb { background: var(--luffy-red); }
     </style>
 </head>
 <body class="p-4">
+
     <header class="card p-4 mb-4 flex justify-between items-center border-b-2 border-red-500">
         <div class="flex items-center gap-4">
-            <h1 class="luffy-font text-4xl text-white uppercase leading-none">Luffy Bot v9001</h1>
-            <span id="ipStatus" class="mono text-[10px] text-blue-400">IP: SCANNING...</span>
+            <h1 class="luffy-font text-5xl text-white uppercase leading-none italic">Moncey D. Luffy</h1>
+            <span id="ipStatus" class="mono text-blue-400 text-xs font-bold">IP: SCANNING...</span>
         </div>
-        <div class="flex gap-6 items-center">
-            <div class="text-right"><p class="text-[10px] text-gray-500 uppercase">USDT BALANCE</p><p id="balance" class="text-2xl font-black text-yellow-400 mono">$0.00</p></div>
-            <div id="botStatusText" class="px-3 py-1 bg-gray-800 rounded text-[10px] font-bold">OFFLINE</div>
+        <div class="flex gap-8 items-center">
+            <div class="text-right">
+                <p class="text-[10px] text-gray-500 uppercase font-bold">KHO BÁU USDT</p>
+                <p id="balance" class="text-3xl font-black text-yellow-400 mono">$0.00</p>
+            </div>
+            <div id="botStatusText" class="px-4 py-1 bg-gray-800 rounded font-black text-xs">OFFLINE</div>
         </div>
     </header>
 
     <div class="grid grid-cols-2 md:grid-cols-6 gap-3 mb-4">
-        <div class="card p-2"><label class="text-[9px] text-gray-500 block">VỐN LỆNH</label><input type="number" id="invValue" class="w-full bg-transparent border-none text-xs mono" value="1.5"></div>
-        <div class="card p-2"><label class="text-[9px] text-gray-500 block">LOẠI VỐN</label><select id="invType" class="w-full bg-transparent text-xs mono text-yellow-500"><option value="percent">% ACC</option><option value="fixed">$ FIX</option></select></div>
-        <div class="card p-2"><label class="text-[9px] text-gray-500 block">LỌC SÓNG %</label><input type="number" id="minVol" class="w-full bg-transparent text-xs mono text-red-500" value="5.0"></div>
-        <div class="card p-2"><label class="text-[9px] text-gray-500 block">MAX LỆNH</label><input type="number" id="maxPositions" class="w-full bg-transparent text-xs mono" value="5"></div>
-        <div class="card p-2"><button id="runBtn" onclick="handleToggle()" class="w-full h-full btn-start rounded font-black text-[10px] text-white py-2">GIƯƠNG BUỒM</button></div>
-        <div class="card p-2"><button onclick="handleUpdate()" class="w-full h-full bg-white/10 rounded font-bold text-[10px] text-white py-2">CẬP NHẬT</button></div>
+        <div class="card p-2">
+            <label class="text-[10px] text-gray-500 font-bold block mb-1 uppercase">Vốn Lệnh</label>
+            <div class="flex gap-1">
+                <input type="number" id="invValue" class="w-full bg-black/40 p-1 text-xs mono text-white" value="1.5">
+                <select id="invType" class="bg-black text-[10px] text-yellow-500 font-bold">
+                    <option value="percent">%</option>
+                    <option value="fixed">$</option>
+                </select>
+            </div>
+        </div>
+        <div class="card p-2">
+            <label class="text-[10px] text-gray-500 font-bold block mb-1 uppercase">Lọc Sóng %</label>
+            <input type="number" id="minVol" class="w-full bg-black/40 p-1 text-xs mono text-red-400 font-bold" value="5.0">
+        </div>
+        <div class="card p-2">
+            <label class="text-[10px] text-gray-500 font-bold block mb-1 uppercase">Max Slot</label>
+            <input type="number" id="maxPositions" class="w-full bg-black/40 p-1 text-xs mono" value="10">
+        </div>
+        <div class="card p-2">
+            <label class="text-[10px] text-gray-500 font-bold block mb-1 uppercase">Dừng Tổng %</label>
+            <input type="number" id="accountSL" class="w-full bg-black/40 p-1 text-xs mono" value="30">
+        </div>
+        <div class="card p-2 flex items-center">
+            <button id="runBtn" onclick="handleToggle()" class="btn-start w-full h-full rounded-xl text-[11px] font-black py-2">🚢 GIƯƠNG BUỒM</button>
+        </div>
+        <div class="card p-2 flex items-center">
+            <button onclick="handleUpdate()" class="bg-white/5 border border-white/10 w-full h-full rounded-xl text-[10px] font-bold py-2">CẬP NHẬT</button>
+        </div>
     </div>
 
-    <div class="flex-grow grid grid-cols-1 md:grid-cols-12 gap-4 overflow-hidden">
-        <div class="md:col-span-3 card flex flex-col overflow-hidden border-t-2 border-yellow-500">
-            <div class="p-3 border-b border-white/5 bg-yellow-500/5 text-[10px] font-black text-yellow-500">📡 BIẾN ĐỘNG LIVE</div>
-            <div id="signalList" class="flex-grow overflow-y-auto p-2 space-y-1"></div>
+    <div class="flex-grow grid grid-cols-12 gap-4 overflow-hidden">
+        <div class="col-span-3 flex flex-col gap-4 overflow-hidden">
+            <div class="card flex-grow flex flex-col overflow-hidden border-t-4 border-yellow-500">
+                <div class="p-3 border-b border-white/5 bg-yellow-500/10 font-black text-xs text-yellow-500 uppercase tracking-widest">📡 Sóng Dữ Live</div>
+                <div id="signalList" class="flex-grow overflow-y-auto p-2 space-y-2"></div>
+            </div>
         </div>
-        <div class="md:col-span-6 card flex flex-col overflow-hidden border-t-2 border-red-500">
-            <div class="p-3 border-b border-white/5 bg-red-500/5 flex justify-between"><span class="text-[10px] font-black text-red-500">🚢 CHIẾN TRƯỜNG</span><span id="posCount" class="text-[10px] font-bold">0 LỆNH</span></div>
+
+        <div class="col-span-6 card flex flex-col overflow-hidden border-t-4 border-red-500">
+            <div class="p-3 border-b border-white/5 bg-red-500/10 flex justify-between items-center">
+                <span class="luffy-font text-2xl text-red-500 italic uppercase">Hải Chiến</span>
+                <span id="posCount" class="bg-red-600 px-3 py-1 text-[10px] font-black rounded-lg">0 LỆNH</span>
+            </div>
             <div class="flex-grow overflow-y-auto">
                 <table class="w-full text-left text-[11px] mono">
-                    <thead class="sticky top-0 bg-black text-gray-500 text-[9px]"><tr><th class="p-3">SYMBOL</th><th class="p-3">SIDE</th><th class="p-3">ENTRY/MARK</th><th class="p-3 text-right">PNL%</th></tr></thead>
+                    <thead class="bg-black/80 sticky top-0 text-gray-500 uppercase text-[9px]">
+                        <tr><th class="p-4">Cặp Tiền</th><th class="p-4">Side/Lev</th><th class="p-4">Entry/Mark</th><th class="p-4 text-right">PnL %</th></tr>
+                    </thead>
                     <tbody id="positionTable"></tbody>
                 </table>
             </div>
         </div>
-        <div class="md:col-span-3 card flex flex-col overflow-hidden border-t-2 border-blue-500">
-            <div class="p-3 border-b border-white/5 bg-blue-500/5 text-[10px] font-black text-blue-400">📜 NHẬT KÝ</div>
-            <div id="botLogs" class="flex-grow overflow-y-auto p-3 mono text-[9px] space-y-1"></div>
+
+        <div class="col-span-3 card flex flex-col overflow-hidden border-t-4 border-blue-500">
+            <div class="p-3 border-b border-white/5 bg-blue-500/10 font-black text-xs text-blue-400 uppercase tracking-widest italic">Hải Trình Log</div>
+            <div id="botLogs" class="flex-grow overflow-y-auto p-3 mono text-[10px] space-y-1"></div>
         </div>
     </div>
 
@@ -65,31 +101,65 @@
             try {
                 const res = await fetch('/api/status');
                 const data = await res.json();
+                
                 isRunning = data.botSettings.isRunning;
-                document.getElementById('botStatusText').innerText = isRunning ? "ĐANG TUẦN TRA" : "OFFLINE";
-                document.getElementById('botStatusText').className = `px-3 py-1 rounded text-[10px] font-bold ${isRunning ? 'bg-green-500 text-white' : 'bg-gray-800 text-gray-400'}`;
-                document.getElementById('runBtn').innerText = isRunning ? "🛑 HẠ BUỒM" : "🚢 GIƯƠNG BUỒM";
-                document.getElementById('runBtn').className = `w-full h-full rounded font-black text-[10px] text-white py-2 ${isRunning ? 'btn-stop' : 'btn-start'}`;
-                document.getElementById('balance').innerText = `$${data.status.currentBalance.toFixed(2)}`;
+                document.getElementById('balance').innerText = `$${(data.status.currentBalance || 0).toFixed(2)}`;
                 document.getElementById('posCount').innerText = `${data.activePositions.length} LỆNH`;
                 
+                // Status Text
+                const txt = document.getElementById('botStatusText');
+                txt.innerText = isRunning ? "ĐANG TUẦN TRA" : "OFFLINE";
+                txt.className = `px-4 py-1 rounded font-black text-xs ${isRunning ? 'bg-green-600 text-white' : 'bg-gray-800 text-gray-400'}`;
+                
+                // Run Button
+                const btn = document.getElementById('runBtn');
+                btn.innerText = isRunning ? "🛑 HẠ BUỒM" : "🚢 GIƯƠNG BUỒM";
+                btn.className = isRunning ? "btn-stop w-full h-full rounded-xl text-[11px] font-black py-2" : "btn-start w-full h-full rounded-xl text-[11px] font-black py-2";
+
+                // Signal List
                 document.getElementById('signalList').innerHTML = data.status.candidatesList.map(c => `
-                    <div class="flex justify-between p-2 bg-white/5 rounded text-[10px]"><span class="font-bold text-white">${c.symbol}</span><span class="${c.changePercent >= 0 ? 'text-green-400' : 'text-red-400'} font-black">${c.changePercent}%</span></div>
+                    <div class="flex justify-between items-center p-2 bg-white/5 rounded-lg border border-white/5">
+                        <span class="font-bold text-white text-xs uppercase">${c.symbol}</span>
+                        <span class="${c.changePercent >= 0 ? 'text-green-400' : 'text-red-400'} font-black mono text-xs">${c.changePercent}%</span>
+                    </div>
                 `).join('');
 
+                // Position Table
                 document.getElementById('positionTable').innerHTML = data.activePositions.map(p => `
-                    <tr class="border-b border-white/5"><td class="p-3 font-bold">${p.symbol}</td><td class="p-3 ${p.side === 'LONG' ? 'text-green-400' : 'text-red-400'} font-black">${p.side} ${p.leverage}x</td><td class="p-3 text-[10px] text-gray-400">${p.entryPrice}<br>${p.markPrice}</td><td class="p-3 text-right font-black ${parseFloat(p.pnlPercent) >= 0 ? 'text-green-400' : 'text-red-400'}">${p.pnlPercent}%</td></tr>
+                    <tr class="hover:bg-white/5 border-b border-white/5">
+                        <td class="p-4 font-bold text-white uppercase">${p.symbol}</td>
+                        <td class="p-4"><span class="${p.side === 'LONG' ? 'text-green-400' : 'text-red-400'} font-black italic">${p.side} ${p.leverage}x</span></td>
+                        <td class="p-4 text-[10px] text-gray-400">${p.entryPrice}<br>${p.markPrice}</td>
+                        <td class="p-4 text-right font-black ${parseFloat(p.pnlPercent) >= 0 ? 'text-green-400' : 'text-red-400'}">${p.pnlPercent}%</td>
+                    </tr>
                 `).join('');
 
-                document.getElementById('botLogs').innerHTML = data.status.botLogs.slice(0, 50).map(l => `<div><span class="text-gray-500">[${l.time}]</span> ${l.msg}</div>`).join('');
+                // Logs
+                document.getElementById('botLogs').innerHTML = data.status.botLogs.map(l => `
+                    <div class="mb-1"><span class="text-gray-600">[${l.time}]</span> ${l.msg}</div>
+                `).join('');
+
             } catch (e) {}
         }
-        async function handleToggle() { isRunning = !isRunning; await fetch('/api/settings', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ isRunning }) }); sync(); }
+
+        async function handleToggle() {
+            isRunning = !isRunning;
+            await fetch('/api/settings', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ isRunning }) });
+        }
+
         async function handleUpdate() {
-            const body = { invValue: parseFloat(document.getElementById('invValue').value), invType: document.getElementById('invType').value, minVol: parseFloat(document.getElementById('minVol').value), maxPositions: parseInt(document.getElementById('maxPositions').value) };
+            const body = {
+                invValue: parseFloat(document.getElementById('invValue').value),
+                invType: document.getElementById('invType').value,
+                minVol: parseFloat(document.getElementById('minVol').value),
+                maxPositions: parseInt(document.getElementById('maxPositions').value),
+                accountSL: parseFloat(document.getElementById('accountSL').value)
+            };
             await fetch('/api/settings', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body) });
         }
+
         setInterval(sync, 2000);
+        sync();
     </script>
 </body>
 </html>
