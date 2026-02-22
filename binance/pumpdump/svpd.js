@@ -1,92 +1,114 @@
-import WebSocket from 'ws';
-import express from 'express';
-import fs from 'fs';
 import https from 'https';
+import http from 'http';
+import crypto from 'crypto';
+import express from 'express';
+import { API_KEY, SECRET_KEY } from './config.js';
 
 const app = express();
-const port = 9000;
-const HISTORY_FILE = './history_db.json';
+app.use(express.json());
 
-let coinData = {}; 
-let historyMap = new Map(); 
+let botSettings = { isRunning: false, maxPositions: 5, invValue: 1.5, minVol: 5.0 };
+let status = { currentBalance: 0, botLogs: [], candidatesList: [], activePositions: [], exchangeInfo: {} };
+let botManagedSymbols = new Set();
 
-async function callPublicAPI(path, params = {}) {
-    const qs = new URLSearchParams(params).toString();
-    return new Promise((res, rej) => {
-        https.get(`https://fapi.binance.com${path}${qs ? '?' + qs : ''}`, (r) => {
+// --- BINANCE API ---
+async function binanceReq(path, method = 'GET', params = {}) {
+    const ts = Date.now();
+    const query = new URLSearchParams({...params, timestamp: ts, recvWindow: 10000}).toString();
+    const sig = crypto.createHmac('sha256', SECRET_KEY).update(query).digest('hex');
+    const url = `https://fapi.binance.com${path}?${query}&signature=${sig}`;
+    return new Promise((res) => {
+        const req = https.request(url, { method, headers: { 'X-MBX-APIKEY': API_KEY } }, r => {
             let d = ''; r.on('data', chunk => d += chunk);
-            r.on('end', () => { try { res(JSON.parse(d)); } catch (e) { rej(e); } });
-        }).on('error', rej);
-    });
-}
-
-async function fetchInitialHistory() {
-    console.log("🔄 Đang nạp nến lịch sử nhanh...");
-    try {
-        const info = await callPublicAPI('/fapi/v1/exchangeInfo');
-        const symbols = info.symbols
-            .filter(s => s.quoteAsset === 'USDT' && s.status === 'TRADING')
-            .map(s => s.symbol).slice(0, 180); // Lấy top 180 cặp chính
-
-        for (const s of symbols) {
-            try {
-                // Lấy 20 nến 1m để tính đủ c1, c5, c15
-                const klines = await callPublicAPI('/fapi/v1/klines', { symbol: s, interval: '1m', limit: 20 });
-                const now = Date.now();
-                if (Array.isArray(klines)) {
-                    coinData[s] = {
-                        symbol: s,
-                        prices: klines.map((k, i) => ({ p: parseFloat(k[4]), t: now - (20 - i) * 60000 }))
-                    };
-                }
-            } catch (e) { continue; }
-        }
-        console.log(`✅ Đã sẵn sàng dữ liệu cho ${Object.keys(coinData).length} mã.`);
-    } catch (e) { console.log("❌ Lỗi nạp lịch sử."); }
-}
-
-function calculateChange(priceArray, minutes) {
-    if (!priceArray || priceArray.length < 2) return 0;
-    const now = priceArray[priceArray.length - 1].t;
-    const targetTime = now - minutes * 60 * 1000;
-    const startPriceObj = priceArray.find(item => item.t >= targetTime);
-    if (!startPriceObj) return 0;
-    return parseFloat(((priceArray[priceArray.length - 1].p - startPriceObj.p) / startPriceObj.p * 100).toFixed(2));
-}
-
-function initWS() {
-    const ws = new WebSocket('wss://fstream.binance.com/ws/!ticker@arr');
-    ws.on('message', (data) => {
-        const tickers = JSON.parse(data);
-        const now = Date.now();
-        tickers.forEach(t => {
-            const s = t.s; 
-            if (!coinData[s]) return;
-            const p = parseFloat(t.c);
-            coinData[s].prices.push({ p, t: now });
-            
-            // Giữ lại 30 phút dữ liệu để tính toán (tránh tràn RAM)
-            if (coinData[s].prices.length > 200) coinData[s].prices.shift();
-
-            const c1 = calculateChange(coinData[s].prices, 1);
-            const c5 = calculateChange(coinData[s].prices, 5);
-            const c15 = calculateChange(coinData[s].prices, 15);
-            coinData[s].live = { c1, c5, c15, currentPrice: p };
+            r.on('end', () => { try { res(JSON.parse(d)); } catch(e) { res({}); } });
         });
+        req.end();
     });
-    ws.on('close', () => setTimeout(initWS, 2000));
 }
 
-app.get('/api/live', (req, res) => {
-    const data = Object.values(coinData)
-        .filter(v => v.live)
-        .map(v => ({ symbol: v.symbol, ...v.live }))
-        .sort((a, b) => Math.max(Math.abs(b.c1), Math.abs(b.c5)) - Math.max(Math.abs(a.c1), Math.abs(a.c5)));
-    res.json(data);
-});
+function addLog(msg, type = 'info') {
+    const time = new Date().toLocaleTimeString();
+    status.botLogs.unshift({ time, msg, type });
+    if (status.botLogs.length > 50) status.botLogs.pop();
+}
 
-app.listen(port, '0.0.0.0', async () => {
-    console.log(`🚀 PIRATE SERVER RUNNING ON PORT ${port}`);
-    await fetchInitialHistory();
-    initWS();
+// --- CORE ENGINE (QUÉT LIÊN TỤC) ---
+async function patrol() {
+    // 1. Lấy dữ liệu từ Server 9000 (Local) cực nhanh
+    http.get('http://127.0.0.1:9000/api/live', (res) => {
+        let d = ''; res.on('data', c => d += c);
+        res.on('end', () => {
+            try { status.candidatesList = JSON.parse(d); } catch(e) {}
+        });
+    }).on('error', () => {});
+
+    if (!botSettings.isRunning) return;
+
+    // 2. Kiểm tra lệnh
+    for (const coin of status.candidatesList) {
+        if (botManagedSymbols.has(coin.symbol) || status.activePositions.length >= botSettings.maxPositions) continue;
+
+        const vol = Math.max(Math.abs(coin.c1), Math.abs(coin.c5), Math.abs(coin.c15));
+        if (vol >= botSettings.minVol) {
+            executeTrade(coin);
+            break; 
+        }
+    }
+}
+
+async function executeTrade(coin) {
+    const symbol = coin.symbol;
+    const side = coin.c1 > 0 ? 'BUY' : 'SELL';
+    const posSide = coin.c1 > 0 ? 'LONG' : 'SHORT';
+    
+    botManagedSymbols.add(symbol); 
+    addLog(`🎯 Phát hiện sóng: ${symbol} (${coin.c1}%)`, 'success');
+
+    try {
+        const info = status.exchangeInfo[symbol];
+        const qty = parseFloat(((botSettings.invValue * 20) / coin.currentPrice).toFixed(info?.quantityPrecision || 2));
+
+        await binanceReq('/fapi/v1/leverage', 'POST', { symbol, leverage: 20 });
+        const order = await binanceReq('/fapi/v1/order', 'POST', {
+            symbol, side, positionSide: posSide, type: 'MARKET', quantity: qty
+        });
+
+        if (order.orderId) addLog(`🚢 ĐÃ VÀO LỆNH: ${symbol}`, 'success');
+        else botManagedSymbols.delete(symbol);
+    } catch (e) {
+        botManagedSymbols.delete(symbol);
+    }
+}
+
+async function syncAccount() {
+    const acc = await binanceReq('/fapi/v2/account');
+    if (acc.totalMarginBalance) status.currentBalance = parseFloat(acc.totalMarginBalance);
+    
+    const pos = await binanceReq('/fapi/v2/positionRisk');
+    if (Array.isArray(pos)) {
+        status.activePositions = pos.filter(p => parseFloat(p.positionAmt) !== 0).map(p => ({
+            symbol: p.symbol,
+            side: parseFloat(p.positionAmt) > 0 ? 'LONG' : 'SHORT',
+            pnlPercent: ((parseFloat(p.unRealizedProfit) / (parseFloat(p.isolatedWallet) || 1)) * 100).toFixed(2)
+        }));
+        
+        // Giải phóng danh sách quản lý nếu lệnh đã đóng
+        botManagedSymbols.forEach(s => {
+            if (!status.activePositions.find(p => p.symbol === s)) botManagedSymbols.delete(s);
+        });
+    }
+}
+
+// --- INITIALIZE ---
+app.get('/api/status', (req, res) => res.json({ botSettings, status }));
+app.post('/api/settings', (req, res) => { botSettings = {...botSettings, ...req.body}; res.json({ok:true}); });
+app.get('/', (req, res) => res.sendFile('/index.html', { root: './' })); // Giao diện HTML của bạn
+
+app.listen(9001, async () => {
+    console.log("⚓ LUFFY BOT READY ON PORT 9001");
+    const info = await binanceReq('/fapi/v1/exchangeInfo');
+    info.symbols?.forEach(s => status.exchangeInfo[s.symbol] = { quantityPrecision: s.quantityPrecision });
+    
+    setInterval(patrol, 1000);   // Quét biến động 1 giây/lần
+    setInterval(syncAccount, 3000); // Đồng bộ ví 3 giây/lần
 });
