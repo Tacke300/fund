@@ -14,7 +14,6 @@
             --bg-dark: #0f172a;
             --card-bg: #1e293b;
         }
-
         body {
             background: var(--bg-dark);
             color: #f8fafc;
@@ -24,21 +23,16 @@
             flex-direction: column;
             overflow: hidden;
         }
-
         .card { 
             background: var(--card-bg);
             border: 1px solid rgba(255, 255, 255, 0.05);
             border-radius: 12px;
         }
-
         .btn-start { background: var(--success); }
         .btn-stop { background: var(--danger); }
-        
         .status-tag { font-size: 10px; padding: 3px 10px; border-radius: 99px; background: rgba(0,0,0,0.3); }
-        
         ::-webkit-scrollbar { width: 4px; }
         ::-webkit-scrollbar-thumb { background: #475569; border-radius: 10px; }
-
         .up { color: var(--success); }
         .down { color: var(--danger); }
     </style>
@@ -103,10 +97,10 @@
         
         <div class="md:col-span-4 flex flex-col gap-4 overflow-hidden">
             <div class="card p-3 border-l-4 border-yellow-500">
-                <h3 class="text-[11px] font-bold text-yellow-500 uppercase mb-2"><i class="fas fa-fire mr-1"></i> Top 5 Biến Động (1m-5m-15m)</h3>
+                <h3 class="text-[11px] font-bold text-yellow-500 uppercase mb-2"><i class="fas fa-fire mr-1"></i> TOP 5 SERVER (KHÔNG ĐIỀU KIỆN)</h3>
                 <table class="w-full text-[11px]">
                     <tbody id="topVolBody" class="divide-y divide-white/5">
-                        <tr class="text-gray-500"><td colspan="3" class="py-2 text-center">Đang lấy dữ liệu...</td></tr>
+                        <tr class="text-gray-500"><td colspan="3" class="py-2 text-center">Kết nối Server...</td></tr>
                     </tbody>
                 </table>
             </div>
@@ -153,12 +147,15 @@
             } catch (e) { document.getElementById('ipStatus').innerText = "IP: OFFLINE"; }
         }
 
-        // Cập nhật Top 5 Coin biến động từ Server 9000
         async function fetchTopVolatility() {
             try {
                 const res = await fetch('http://127.0.0.1:9000/api/data');
                 const data = await res.json();
-                const top5 = data.live.slice(0, 5);
+                if(!data.live) return;
+                
+                const raw = [...data.live];
+                raw.sort((a, b) => Math.max(Math.abs(b.c1), Math.abs(b.c5), Math.abs(b.c15)) - Math.max(Math.abs(a.c1), Math.abs(a.c5), Math.abs(a.c15)));
+                const top5 = raw.slice(0, 5);
                 
                 document.getElementById('topVolBody').innerHTML = top5.map(c => `
                     <tr class="border-b border-white/5">
@@ -174,7 +171,9 @@
                         </td>
                     </tr>
                 `).join('');
-            } catch (e) {}
+            } catch (e) {
+                document.getElementById('topVolBody').innerHTML = '<tr><td colspan="3" class="py-2 text-center text-red-500 text-[10px]">Lỗi kết nối Port 9000</td></tr>';
+            }
         }
 
         function updateUI(status_bool) {
@@ -205,13 +204,11 @@
                 document.getElementById('balance').innerText = `$${(data.status.currentBalance || 0).toFixed(2)}`;
                 document.getElementById('posCount').innerText = `${data.activePositions.length} LỆNH`;
                 
-                // Logs
                 const logBox = document.getElementById('botLogs');
                 logBox.innerHTML = data.status.botLogs.map(l => `
                     <div><span class="text-slate-500">[${l.time}]</span> <span class="${l.type === 'success' ? 'text-green-400' : (l.type === 'error' ? 'text-red-400' : 'text-blue-300')}">${l.msg}</span></div>
                 `).join('');
 
-                // Vị thế
                 document.getElementById('positionTable').innerHTML = data.activePositions.map(p => `
                     <tr class="hover:bg-white/5">
                         <td class="p-3 font-bold text-white">${p.symbol}</td>
@@ -224,8 +221,15 @@
         }
 
         async function handleToggle() {
-            isRunning = !isRunning; updateUI(isRunning);
-            try { await fetch('/api/settings', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ isRunning }) }); } catch (e) {}
+            const nextState = !isRunning;
+            try { 
+                await fetch('/api/settings', { 
+                    method: 'POST', 
+                    headers: {'Content-Type': 'application/json'}, 
+                    body: JSON.stringify({ isRunning: nextState }) 
+                });
+                updateUI(nextState);
+            } catch (e) {}
         }
 
         async function handleUpdate() {
@@ -238,15 +242,15 @@
             };
             try { 
                 await fetch('/api/settings', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body) }); 
-                alert("Đã cập nhật cấu hình!");
+                alert("Đã lưu!");
             } catch (e) {}
         }
 
         function clearLogs() { document.getElementById('botLogs').innerHTML = ''; }
         
         checkPublicIP();
-        setInterval(sync, 1000); // Đồng bộ trạng thái bot
-        setInterval(fetchTopVolatility, 3000); // Lấy top biến động từ cổng 9000
+        setInterval(sync, 1000);
+        setInterval(fetchTopVolatility, 2000);
     </script>
 </body>
 </html>
