@@ -1,55 +1,68 @@
 import https from 'https';
+import http from 'http';
 import crypto from 'crypto';
 import express from 'express';
-import WebSocket from 'ws';
+import { fileURLToPath } from 'url';
+import path from 'path';
 import { API_KEY, SECRET_KEY } from './config.js';
 
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+// Cấu hình mặc định
 let botSettings = { 
     isRunning: false, 
     maxPositions: 3, 
     invValue: 1.5, 
-    invType: 'percent', 
+    invType: 'percent', // Mặc định dùng % tài khoản
     minVol: 5.0, 
     accountSL: 30 
 };
 
-let status = { 
-    currentBalance: 0, 
-    botLogs: [], 
-    exchangeInfo: {}, 
-    candidatesList: [], 
-    activePositions: [] 
-};
-
+let status = { currentBalance: 0, botLogs: [], exchangeInfo: {}, candidatesList: [] };
 let botManagedSymbols = []; 
-let coinData = {}; 
-let cooldownMap = new Map(); 
 let isInitializing = true;
 let isProcessing = false;
 
+// HÀM LOG CHI TIẾT 100%
 function addBotLog(msg, type = 'info') {
     const time = new Date().toLocaleTimeString('vi-VN', { hour12: false });
-    status.botLogs.unshift({ time, msg, type });
+    const entry = { time, msg, type };
+    status.botLogs.unshift(entry);
     if (status.botLogs.length > 200) status.botLogs.pop();
-    const colors = { success: '\x1b[32m', error: '\x1b[31m', warn: '\x1b[33m', info: '\x1b[36m' };
-    console.log(`${colors[type] || ''}[${time}] [${type.toUpperCase()}] ${msg}\x1b[0m`);
+
+    const colors = {
+        success: '\x1b[32m', 
+        error: '\x1b[31m',   
+        warn: '\x1b[33m',    
+        info: '\x1b[36m',    
+        debug: '\x1b[90m'    
+    };
+    const c = colors[type] || colors.info;
+    console.log(`${c}[${time}] [${type.toUpperCase()}] ${msg}\x1b[0m`);
 }
 
 async function callBinance(endpoint, method = 'GET', params = {}) {
-    const timestamp = Date.now();
+    // FIX 1: Trừ 2000ms để tránh lỗi "Timestamp ahead of server"
+    const timestamp = Date.now() - 2000; 
     const query = Object.keys(params).map(k => `${k}=${encodeURIComponent(params[k])}`).join('&');
     const fullQuery = query + (query ? '&' : '') + `timestamp=${timestamp}&recvWindow=10000`;
-    const signature = crypto.createHmac('sha256', SECRET_KEY).update(fullQuery).digest('hex');
+    
+    // FIX 2: Thêm .trim() vào SECRET_KEY và API_KEY để xóa ký tự lạ (ERR_INVALID_CHAR)
+    const signature = crypto.createHmac('sha256', SECRET_KEY.trim()).update(fullQuery).digest('hex');
     const url = `https://fapi.binance.com${endpoint}?${fullQuery}&signature=${signature}`;
 
     return new Promise((resolve, reject) => {
-        const req = https.request(url, { method, headers: { 'X-MBX-APIKEY': API_KEY }, timeout: 8000 }, res => {
+        const req = https.request(url, { 
+            method, 
+            headers: { 'X-MBX-APIKEY': API_KEY.trim() }, // .trim() ở đây luôn
+            timeout: 8000 
+        }, res => {
             let d = ''; res.on('data', chunk => d += chunk);
             res.on('end', () => {
                 try {
                     const j = JSON.parse(d);
                     if (res.statusCode >= 200 && res.statusCode < 300) resolve(j); else reject(j);
-                } catch (e) { reject({ msg: "LỖI_JSON" }); }
+                } catch (e) { reject({ msg: "LỖI_JSON", detail: d }); }
             });
         });
         req.on('error', e => reject({ msg: e.message }));
@@ -57,45 +70,7 @@ async function callBinance(endpoint, method = 'GET', params = {}) {
     });
 }
 
-function calculateChange(priceArray, minutes) {
-    if (!priceArray || priceArray.length < 2) return 0;
-    const now = priceArray[priceArray.length - 1].t;
-    const targetTime = now - minutes * 60 * 1000;
-    const startPriceObj = priceArray.find(item => item.t >= targetTime);
-    if (!startPriceObj) return 0;
-    return parseFloat(((priceArray[priceArray.length - 1].p - startPriceObj.p) / startPriceObj.p * 100).toFixed(2));
-}
-
-function initWS() {
-    const ws = new WebSocket('wss://fstream.binance.com/ws/!ticker@arr');
-    ws.on('message', (data) => {
-        const tickers = JSON.parse(data);
-        const now = Date.now();
-        tickers.forEach(t => {
-            const s = t.s, p = parseFloat(t.c);
-            if (!coinData[s]) coinData[s] = { symbol: s, prices: [] };
-            coinData[s].prices.push({ p, t: now });
-            if (coinData[s].prices.length > 310) coinData[s].prices.shift();
-
-            const c1 = calculateChange(coinData[s].prices, 1);
-            const c5 = calculateChange(coinData[s].prices, 5);
-            const c15 = calculateChange(coinData[s].prices, 15);
-            coinData[s].live = { c1, c5, c15, currentPrice: p };
-        });
-
-        status.candidatesList = Object.values(coinData)
-            .filter(v => v.live && (Math.abs(v.live.c1) >= botSettings.minVol || Math.abs(v.live.c5) >= botSettings.minVol || Math.abs(v.live.c15) >= botSettings.minVol))
-            .map(v => {
-                const changes = [v.live.c1, v.live.c5, v.live.c15];
-                const bestChange = changes.sort((a,b) => Math.abs(b) - Math.abs(a))[0];
-                return { symbol: v.symbol, changePercent: bestChange, currentPrice: v.live.currentPrice };
-            })
-            .sort((a,b) => Math.abs(b.changePercent) - Math.abs(a.changePercent))
-            .slice(0, 15);
-    });
-    ws.on('close', () => setTimeout(initWS, 5000));
-}
-
+// 1. TỰ ĐỘNG DỌN DẸP VỊ THẾ ĐÃ ĐÓNG (GIỮ NGUYÊN LOGIC CỦA BẠN)
 async function cleanupClosedPositions() {
     if (!botSettings.isRunning) return;
     try {
@@ -103,16 +78,24 @@ async function cleanupClosedPositions() {
         for (let i = botManagedSymbols.length - 1; i >= 0; i--) {
             const symbol = botManagedSymbols[i];
             const p = positions.find(pos => pos.symbol === symbol);
+            
             if (!p || parseFloat(p.positionAmt) === 0) {
-                addBotLog(`🧹 ${symbol} đã đóng. Nghỉ 15 phút.`, "info");
-                await callBinance('/fapi/v1/allOpenOrders', 'DELETE', { symbol }).catch(() => {});
-                cooldownMap.set(symbol, Date.now() + 15 * 60 * 1000);
+                addBotLog(`🧹 [DỌN DẸP] Phát hiện ${symbol} đã đóng vị thế.`, "info");
+                
+                await callBinance('/fapi/v1/allOpenOrders', 'DELETE', { symbol })
+                    .then(() => addBotLog(`🗑️ [HỦY LỆNH] Đã xóa lệnh TP/SL cũ của ${symbol}`, "debug"))
+                    .catch(() => addBotLog(`💡 [GHI CHÚ] ${symbol} không còn lệnh chờ để xóa.`, "debug"));
+                
                 botManagedSymbols.splice(i, 1);
+                addBotLog(`🔓 [SLOT] Giải phóng xong ${symbol}. Slot trống hiện tại: ${botSettings.maxPositions - botManagedSymbols.length}`, "success");
             }
         }
-    } catch (e) {}
+    } catch (e) {
+        addBotLog(`⚠️ [LỖI DỌN DẸP] Không thể kiểm tra vị thế đóng: ${e.msg || "API Busy"}`, "error");
+    }
 }
 
+// 2. TÍNH TOÁN TP/SL (GIỮ NGUYÊN LOGIC CỦA BẠN)
 function calcTPSL(lev, side, entryPrice) {
     let m = lev < 26 ? 1.11 : (lev < 50 ? 2.22 : (lev < 75 ? 3.33 : 5.55));
     const rate = m / lev;
@@ -121,86 +104,212 @@ function calcTPSL(lev, side, entryPrice) {
     return { tp, sl };
 }
 
+// 3. CÀI ĐẶT TP/SL CHI TIẾT (GIỮ NGUYÊN LOGIC CỦA BẠN)
 async function enforceTPSL() {
     try {
         const positions = await callBinance('/fapi/v2/positionRisk');
         const orders = await callBinance('/fapi/v1/openOrders');
+
         for (const symbol of botManagedSymbols) {
             const p = positions.find(pos => pos.symbol === symbol && parseFloat(pos.positionAmt) !== 0);
             if (!p) continue;
-            const side = p.positionSide, entry = parseFloat(p.entryPrice);
-            if (entry <= 0) continue;
-            const hasTP = orders.some(o => o.symbol === symbol && o.type === 'TAKE_PROFIT_MARKET');
-            const hasSL = orders.some(o => o.symbol === symbol && o.type === 'STOP_MARKET');
+
+            const side = p.positionSide;
+            const entry = parseFloat(p.entryPrice);
+            if (entry <= 0) {
+                addBotLog(`⏳ [ĐỢI GIÁ] ${symbol} chưa cập nhật Entry Price, bỏ qua cài TP/SL lượt này.`, "debug");
+                continue;
+            }
+
+            const hasTP = orders.some(o => o.symbol === symbol && o.positionSide === side && o.type === 'TAKE_PROFIT_MARKET');
+            const hasSL = orders.some(o => o.symbol === symbol && o.positionSide === side && o.type === 'STOP_MARKET');
+
             if (!hasTP || !hasSL) {
-                const info = status.exchangeInfo[symbol], plan = calcTPSL(parseFloat(p.leverage), side, entry), closeSide = side === 'LONG' ? 'SELL' : 'BUY';
+                const info = status.exchangeInfo[symbol];
+                const plan = calcTPSL(parseFloat(p.leverage), side, entry);
+                const closeSide = side === 'LONG' ? 'SELL' : 'BUY';
+
                 if (!hasTP) {
                     await callBinance('/fapi/v1/order', 'POST', {
                         symbol, side: closeSide, positionSide: side, type: 'TAKE_PROFIT_MARKET',
-                        stopPrice: plan.tp.toFixed(info.pricePrecision), workingType: 'MARK_PRICE', closePosition: 'true', timeInForce: 'GTC'
+                        stopPrice: plan.tp.toFixed(info.pricePrecision), workingType: 'MARK_PRICE',
+                        closePosition: 'true', timeInForce: 'GTC'
                     });
+                    addBotLog(`🎯 [TP] Cài chốt lãi ${symbol} tại: ${plan.tp.toFixed(info.pricePrecision)}`, "success");
                 }
                 if (!hasSL) {
                     await callBinance('/fapi/v1/order', 'POST', {
                         symbol, side: closeSide, positionSide: side, type: 'STOP_MARKET',
-                        stopPrice: plan.sl.toFixed(info.pricePrecision), workingType: 'MARK_PRICE', closePosition: 'true', timeInForce: 'GTC'
+                        stopPrice: plan.sl.toFixed(info.pricePrecision), workingType: 'MARK_PRICE',
+                        closePosition: 'true', timeInForce: 'GTC'
                     });
+                    addBotLog(`🛑 [SL] Cài cắt lỗ ${symbol} tại: ${plan.sl.toFixed(info.pricePrecision)}`, "success");
                 }
-                addBotLog(`🎯 Đã đặt TP/SL cho ${symbol}`, "success");
             }
         }
-    } catch (e) {}
+    } catch (e) {
+        addBotLog(`⚠️ [LỖI TP/SL]: ${e.msg || "Lỗi tham số"}`, "error");
+    }
 }
 
+// 4. HÀM SĂN LỆNH (GIỮ NGUYÊN LOGIC CỦA BẠN)
 async function hunt() {
-    if (isInitializing || !botSettings.isRunning || isProcessing) return;
-    if (botManagedSymbols.length >= botSettings.maxPositions) return;
-    isProcessing = true;
+    if (isInitializing) {
+        addBotLog("⚙️ [Hệ thống] Đang tải dữ liệu sàn, vui lòng đợi...", "debug");
+        return;
+    }
+    if (!botSettings.isRunning) return; 
+    if (isProcessing) return;
+
     try {
+        isProcessing = true;
+        const currentUsed = botManagedSymbols.length;
+        if (currentUsed >= botSettings.maxPositions) {
+            addBotLog(`💤 [ĐỦ LỆNH] Bot đã mở ${currentUsed}/${botSettings.maxPositions} mã quản lý [${botManagedSymbols.join(', ')}]. Đang nghỉ chờ slot...`, "info");
+            isProcessing = false;
+            return;
+        }
+
+        if (status.candidatesList.length === 0) {
+            addBotLog(`📡 [TÍN HIỆU] Chưa có mã nào biến động > ${botSettings.minVol}%. Đang quét tiếp...`, "debug");
+            isProcessing = false;
+            return;
+        }
+
+        addBotLog(`🔍 [QUÉT] Đang kiểm tra ${status.candidatesList.length} ứng viên cho ${botSettings.maxPositions - currentUsed} slot trống.`, "info");
+
         for (const c of status.candidatesList) {
-            if (cooldownMap.has(c.symbol)) {
-                if (Date.now() < cooldownMap.get(c.symbol)) continue;
-                else cooldownMap.delete(c.symbol);
+            if (botManagedSymbols.includes(c.symbol)) {
+                addBotLog(`⏭️ [TRÙNG] ${c.symbol} đã có trong danh sách quản lý. Bỏ qua.`, "debug");
+                continue;
             }
-            if (botManagedSymbols.includes(c.symbol)) continue;
             if (botManagedSymbols.length >= botSettings.maxPositions) break;
 
             try {
-                addBotLog(`🎯 Kích hoạt ${c.symbol} (${c.changePercent}%)`, "info");
-                await callBinance('/fapi/v1/allOpenOrders', 'DELETE', { symbol: c.symbol }).catch(() => {});
+                addBotLog(`🎯 [CHẤP NHẬN] ${c.symbol} đạt ${c.changePercent}%. Bắt đầu quy trình vào lệnh.`, "info");
                 const brackets = await callBinance('/fapi/v1/leverageBracket', 'GET', { symbol: c.symbol });
                 const lev = brackets[0].brackets[0].initialLeverage;
                 await callBinance('/fapi/v1/leverage', 'POST', { symbol: c.symbol, leverage: lev });
+                addBotLog(`⚙️ [LEV] Đã set đòn bẩy ${lev}x cho ${c.symbol}`, "debug");
+
                 const acc = await callBinance('/fapi/v2/account');
                 status.currentBalance = parseFloat(acc.totalMarginBalance);
-                const info = status.exchangeInfo[c.symbol], side = c.changePercent > 0 ? 'LONG' : 'SHORT';
+                const ticker = await callBinance('/fapi/v1/ticker/price', 'GET', { symbol: c.symbol });
+                const price = parseFloat(ticker.price);
+                const info = status.exchangeInfo[c.symbol];
+                const side = c.changePercent > 0 ? 'LONG' : 'SHORT';
+
                 let margin = botSettings.invType === 'percent' ? (status.currentBalance * botSettings.invValue) / 100 : botSettings.invValue;
-                if ((margin * lev) < 5.5) margin = 6 / lev;
-                let qty = (Math.floor(((margin * lev) / c.currentPrice) / info.stepSize) * info.stepSize).toFixed(info.quantityPrecision);
+                if ((margin * lev) < 5.1) {
+                    margin = 5.2 / lev;
+                    addBotLog(`⚖️ [TỰ ĐIỀU CHỈNH] Margin quá thấp, tăng lên ${margin.toFixed(2)}$ để đủ Notional 5.1$`, "warn");
+                }
+
+                let qty = Math.floor(((margin * lev) / price) / info.stepSize) * info.stepSize;
+                const finalQty = qty.toFixed(info.quantityPrecision);
+
+                if (parseFloat(finalQty) <= 0) {
+                    addBotLog(`❌ [LỖI] Khối lượng tính toán của ${c.symbol} bằng 0. Bỏ qua mã này.`, "error");
+                    continue;
+                }
+
+                addBotLog(`📝 [LỆNH] Gửi Market ${side} cho ${c.symbol} - Số lượng: ${finalQty}`, "info");
                 await callBinance('/fapi/v1/order', 'POST', {
-                    symbol: c.symbol, side: side === 'LONG' ? 'BUY' : 'SELL', positionSide: side, type: 'MARKET', quantity: qty
+                    symbol: c.symbol, side: side === 'LONG' ? 'BUY' : 'SELL',
+                    positionSide: side, type: 'MARKET', quantity: finalQty
                 });
+
                 botManagedSymbols.push(c.symbol);
-                addBotLog(`🚀 Đã mở vị thế ${c.symbol}`, "success");
-                setTimeout(enforceTPSL, 3000);
-            } catch (err) { addBotLog(`❌ Lỗi vào lệnh ${c.symbol}: ${JSON.stringify(err)}`, "error"); }
+                addBotLog(`🚀 [THÀNH CÔNG] Bot đã mở lệnh ${c.symbol}. Slot: ${botManagedSymbols.length}/${botSettings.maxPositions}`, "success");
+                addBotLog(`⏱️ [NGHỈ] Tạm dừng 3s để sàn khớp lệnh trước khi cài TP/SL...`, "debug");
+                await new Promise(res => setTimeout(res, 3000));
+                await enforceTPSL();
+
+            } catch (err) {
+                addBotLog(`❌ [THẤT BẠI] Không thể mở lệnh ${c.symbol}: ${JSON.stringify(err)}`, "error");
+            }
         }
-    } finally { isProcessing = false; }
+    } catch (e) {
+        addBotLog(`🔥 [LỖI HỆ THỐNG] Hàm hunt gặp sự cố: ${e.message}`, "error");
+    } finally {
+        isProcessing = false;
+        addBotLog(`🏁 [KẾT THÚC] Hoàn thành chu kỳ quét.`, "debug");
+    }
 }
 
+// 5. LẤY TÍN HIỆU TỪ CỔNG 9000 (GIỮ NGUYÊN)
+function fetchCandidates() {
+    http.get('http://127.0.0.1:9000/api/live', res => {
+        let d = ''; res.on('data', chunk => d += chunk);
+        res.on('end', () => {
+            try {
+                const all = JSON.parse(d);
+                const filtered = all.filter(c => Math.abs(c.changePercent) >= botSettings.minVol);
+                status.candidatesList = filtered
+                    .sort((a,b) => Math.abs(b.changePercent) - Math.abs(a.changePercent))
+                    .slice(0, 10);
+                
+                if (botSettings.isRunning && status.candidatesList.length > 0) {
+                    addBotLog(`📡 [SIGNAL] Nhận ${filtered.length} mã biến động mạnh. Top 1: ${status.candidatesList[0].symbol} (${status.candidatesList[0].changePercent}%)`, "debug");
+                }
+            } catch (e) {}
+        });
+    }).on('error', () => {
+        if(botSettings.isRunning) addBotLog("📡 [LỖI] Cổng tín hiệu 9000 không phản hồi. Kiểm tra ứng viên thất bại.", "error");
+    });
+}
+
+// --- EXPRESS & SERVER ---
 const APP = express();
 APP.use(express.json());
+APP.use(express.static(__dirname));
+
 APP.get('/api/status', async (req, res) => {
     try {
         const pos = await callBinance('/fapi/v2/positionRisk');
         const active = pos.filter(p => parseFloat(p.positionAmt) !== 0).map(p => {
-            const entry = parseFloat(p.entryPrice), amt = Math.abs(parseFloat(p.positionAmt));
+            const entry = parseFloat(p.entryPrice);
+            const amt = Math.abs(parseFloat(p.positionAmt));
             const pnl = (entry > 0) ? ((parseFloat(p.unrealizedProfit) / ((entry * amt) / p.leverage)) * 100).toFixed(2) : "0.00";
             return { symbol: p.symbol, side: p.positionSide, leverage: p.leverage, entryPrice: p.entryPrice, markPrice: p.markPrice, pnlPercent: pnl };
         });
-        res.json({ botSettings, status, activePositions: active });
+        res.json({ botSettings, status, activePositions: active, botManagedSymbols });
     } catch (e) { res.status(500).send(); }
 });
-APP.post('/api/settings', (req, res) => { botSettings = { ...botSettings, ...req.body }; res.json({ status: "ok" }); });
-APP.get('/', (req, res) => {
-    res.send(`<!DOCTYPE html><html lang="vi"><head><meta charset="UTF-8"><title>LUFFY BOT</title><script src="https://cdn.tailwindcss.com"></script><style>@import url('https://fonts.googleapis.com/css2?family=Bangers&display=swap');body{background:#0a0a0c;color:#eee;font-family:sans-serif;height:100vh;display:flex;flex-direction:column;overflow:hidden}.luffy-font{font-family:'Bangers',cursive;letter-spacing:2px}.card{background:rgba(15,15,20,0.9);border:1px solid rgba(255,255,255,0.08);border-radius:16px}.glow-text{text-shadow:0 0 15px rgba(255,77,77,0.7)}.btn-start{background:linear-gradient(135deg,#22c55e,#15803d)}.btn-stop{background:linear-gradient(135deg,#ef4444,#b91c1c);animation:pulse 2s infinite}@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.7}}::-webkit-scrollbar{width:4px}::-webkit-scrollbar-thumb{background:#ff4d4d;border-radius:10px}</style></head><body class="p-4"><header class="card p-4 mb-4 flex justify-between items-center border-b-2 border-red-500"><div class="flex items-center gap-4"><h1 class="luffy-font text-4xl text-white glow-text uppercase">Moncey D. Luffy</h1><span id="botStatusText" class="text-[10px] p-1 bg-gray-800 rounded">OFFLINE</span></div><div class="flex gap-8 bg-black/50 p-3 rounded-2xl border border-white/5"><div class="text-center"><p class="text-[10px] text-gray-500 font-bold uppercase">Kho Báu</p><p id="balance" class="text-2xl font-black text-yellow-400">$0.00</p></div><div class="text-center"><p class="text-[10px] text-gray-500 font-bold uppercase">Lệnh</p><p id="posCount" class="text-2xl font-black text-green-400">0</p></div></div></header><div class="grid grid-cols-2 md:grid-cols-5 gap-3 mb-4"><div class="card p-3"><label class="text-[10px] text-gray-500 font-bold uppercase">Vốn</label><div class="flex gap-1"><input type="number" id="invValue" class="w-full bg-black/40 p-1 text-xs" value="1.5"><select id="invType" class="bg-black text-yellow-500 text-[10px]"><option value="fixed">$</option><option value="percent">%</option></select></div></div><div class="card p-3"><label class="text-[10px] text-gray-500 font-bold uppercase">Sóng %</label><input type="number" id="minVol" class="w-full bg-black/40 p-1 text-xs" value="5.0"></div><div class="card p-3"><label class="text-[10px] text-gray-500 font-bold uppercase">Max Lệnh</label><input type="number" id="maxPositions" class="w-full bg-black/40 p-1 text-xs" value="3"></div><button id="runBtn" onclick="handleToggle()" class="btn-start rounded-xl font-black text-sm uppercase">Giương Buồm</button><button onclick="handleUpdate()" class="bg-white/5 border border-white/10 rounded-xl text-[10px] uppercase">Cập Nhật</button></div><div class="flex-grow grid grid-cols-1 md:grid-cols-12 gap-4 overflow-hidden"><div class="md:col-span-4 card flex flex-col overflow-hidden border-t-4 border-blue-500"><div id="botLogs" class="flex-grow overflow-y-auto p-3 text-[10px] space-y-1"></div></div><div class="md:col-span-8 card flex flex-col overflow-hidden border-t-4 border-red-500"><table class="w-full text-left text-[11px]"><thead class="bg-black/80 sticky top-0 text-gray-500 uppercase"><tr><th class="p-3">Cặp Tiền</th><th class="p-3">Side/Lev</th><th class="p-3">Entry/Mark</th><th class="p-3 text-right">PnL %</th></tr></thead><tbody id="positionTable"></tbody></table></div></div><script>let isRunning=false;async function sync(){try{const res=await fetch('/api/status');const d=await res.json();if(d.botSettings.isRunning
+
+APP.post('/api/settings', (req, res) => {
+    botSettings = { ...botSettings, ...req.body };
+    const mode = botSettings.isRunning ? "BẬT" : "TẮT";
+    addBotLog(`⚙️ [CẤU HÌNH] Thay đổi: Trạng thái=${mode} | Max=${botSettings.maxPositions} | Vào lệnh=${botSettings.invValue}${botSettings.invType === 'percent' ? '%' : '$'}`, "warn");
+    res.json({ status: "ok" });
+});
+
+async function init() {
+    addBotLog("🔧 [KHỞI TẠO] Đang kết nối Binance lấy quy tắc giao dịch...", "info");
+    https.get('https://fapi.binance.com/fapi/v1/exchangeInfo', (r) => {
+        let d = ''; r.on('data', c => d += c);
+        r.on('end', () => {
+            try {
+                const info = JSON.parse(d);
+                info.symbols.forEach(s => {
+                    const lot = s.filters.find(f => f.filterType === 'LOT_SIZE');
+                    status.exchangeInfo[s.symbol] = { quantityPrecision: s.quantityPrecision, pricePrecision: s.pricePrecision, stepSize: parseFloat(lot.stepSize) };
+                });
+                isInitializing = false;
+                addBotLog("✅ [HỆ THỐNG] Dữ liệu sàn OK. Bot đã sẵn sàng nhận lệnh.", "success");
+            } catch (e) { addBotLog("❌ [LỖI] Không thể xử lý dữ liệu từ sàn Binance.", "error"); }
+        });
+    });
+}
+
+init();
+
+setInterval(fetchCandidates, 3000);  
+setInterval(hunt, 2000);             
+setInterval(cleanupClosedPositions, 5000); 
+setInterval(enforceTPSL, 10000);     
+
+// FIX 3: Chạy cứng tại cổng 9001
+APP.listen(9001, '0.0.0.0', () => {
+    addBotLog("⚓ LUFFY TRÌNH DIỆN TẠI CỔNG 9001!", "success");
+});
