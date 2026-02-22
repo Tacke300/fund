@@ -10,50 +10,47 @@ const HISTORY_FILE = './history_db.json';
 let coinData = {}; 
 let historyMap = new Map(); 
 
-// --- HÀM TRUY XUẤT API PUBLIC BINANCE ---
-async function callPublicAPI(path, params = {}) {
-    const qs = new URLSearchParams(params).toString();
-    return new Promise((res, rej) => {
-        https.get(`https://fapi.binance.com${path}${qs ? '?' + qs : ''}`, (r) => {
-            let d = ''; r.on('data', chunk => d += chunk);
-            r.on('end', () => { try { res(JSON.parse(d)); } catch (e) { rej(e); } });
-        }).on('error', rej);
+// Hàm gọi API Binance lấy nến lịch sử
+async function fetchKlines(symbol) {
+    return new Promise((resolve) => {
+        https.get(`https://fapi.binance.com/fapi/v1/klines?symbol=${symbol}&interval=1m&limit=16`, (res) => {
+            let data = '';
+            res.on('data', d => data += d);
+            res.on('end', () => {
+                try { resolve(JSON.parse(data)); } catch (e) { resolve([]); }
+            });
+        }).on('error', () => resolve([]));
     });
 }
 
-// --- TẢI 15 NẾN LỊCH SỬ ĐỂ KHỞI TẠO DỮ LIỆU ---
-async function fetchInitialHistory() {
-    console.log("🔄 Đang nạp 15 nến lịch sử cho toàn bộ các cặp giao dịch...");
+// Khởi tạo dữ liệu nến cho toàn sàn
+async function initData() {
+    console.log("🚀 Đang nạp dữ liệu nến 15 phút đầu tiên...");
     try {
-        const info = await callPublicAPI('/fapi/v1/exchangeInfo');
-        const symbols = info.symbols
-            .filter(s => s.quoteAsset === 'USDT' && s.status === 'TRADING')
-            .map(s => s.symbol);
-
-        // Lấy nến 1m cho từng symbol (Sử dụng giới hạn để tránh rate limit nếu cần)
-        // Ở đây chúng ta lấy nến gần nhất để lấp đầy mảng giá
-        for (const s of symbols.slice(0, 150)) { // Giới hạn 150 mã biến động nhất
-            try {
-                const klines = await callPublicAPI('/fapi/v1/klines', { symbol: s, interval: '1m', limit: 15 });
-                const now = Date.now();
-                if (Array.isArray(klines)) {
-                    coinData[s] = {
-                        symbol: s,
-                        prices: klines.map((k, index) => ({
-                            p: parseFloat(k[4]), // Giá Close
-                            t: now - (15 - index) * 60000 // Giả lập thời gian nến cũ
-                        }))
-                    };
+        https.get('https://fapi.binance.com/fapi/v1/exchangeInfo', (res) => {
+            let data = '';
+            res.on('data', d => data += d);
+            res.on('end', async () => {
+                const info = JSON.parse(data);
+                const symbols = info.symbols.filter(s => s.quoteAsset === 'USDT').map(s => s.symbol);
+                
+                // Lấy 100 mã đầu tiên để tránh bị ban IP do request quá nhiều
+                for (let s of symbols.slice(0, 150)) {
+                    const klines = await fetchKlines(s);
+                    if (Array.isArray(klines)) {
+                        coinData[s] = {
+                            symbol: s,
+                            prices: klines.map(k => ({ p: parseFloat(k[4]), t: parseInt(k[0]) }))
+                        };
+                    }
                 }
-            } catch (e) { continue; }
-        }
-        console.log(`✅ Đã nạp xong dữ liệu cho ${Object.keys(coinData).length} mã.`);
-    } catch (e) {
-        console.log("❌ Không thể nạp lịch sử: ", e.message);
-    }
+                console.log("✅ Đã sẵn sàng phục vụ Bot!");
+                initWS();
+            });
+        });
+    } catch (e) { console.log("Lỗi khởi tạo:", e); }
 }
 
-// Load dữ liệu cũ từ file
 if (fs.existsSync(HISTORY_FILE)) {
     try {
         const data = JSON.parse(fs.readFileSync(HISTORY_FILE));
@@ -61,7 +58,6 @@ if (fs.existsSync(HISTORY_FILE)) {
     } catch (e) { console.log("Khởi tạo database mới"); }
 }
 
-// Lưu file định kỳ
 setInterval(() => {
     const dataToSave = Array.from(historyMap.values());
     fs.writeFileSync(HISTORY_FILE, JSON.stringify(dataToSave.slice(-1000))); 
@@ -77,44 +73,28 @@ function calculateChange(priceArray, minutes) {
 }
 
 function initWS() {
-    // Sử dụng stream tổng hợp toàn sàn để tối ưu hiệu năng
     const ws = new WebSocket('wss://fstream.binance.com/ws/!ticker@arr');
-
     ws.on('message', (data) => {
         const tickers = JSON.parse(data);
         const now = Date.now();
-
         tickers.forEach(t => {
             const s = t.s; 
             const p = parseFloat(t.c);
-
             if (!coinData[s]) coinData[s] = { symbol: s, prices: [] };
             coinData[s].prices.push({ p, t: now });
             
-            // Giữ tối đa 15p dữ liệu (và dọn dẹp để tránh tràn ram)
             const limit = now - 16 * 60 * 1000;
-            if (coinData[s].prices.length > 50) { 
-                coinData[s].prices = coinData[s].prices.filter(item => item.t > limit);
-            }
+            coinData[s].prices = coinData[s].prices.filter(item => item.t > limit);
 
             const c1 = calculateChange(coinData[s].prices, 1);
             const c5 = calculateChange(coinData[s].prices, 5);
             const c15 = calculateChange(coinData[s].prices, 15);
+            coinData[s].live = { c1, c5, c15, p };
 
-            coinData[s].live = { c1, c5, c15, currentPrice: p };
-
-            // LOGIC LỊCH SỬ (Ghi nhận khi biến động >= 5%)
             if (Math.abs(c1) >= 5 || Math.abs(c5) >= 5 || Math.abs(c15) >= 5) {
                 let hist = historyMap.get(s);
                 if (!hist) {
-                    hist = {
-                        symbol: s,
-                        startTime: now,
-                        lastUpdate: now,
-                        max1: c1,
-                        max5: c5,
-                        max15: c15
-                    };
+                    hist = { symbol: s, startTime: now, lastUpdate: now, max1: c1, max5: c5, max15: c15 };
                 } else {
                     if (Math.abs(c1) > Math.abs(hist.max1)) hist.max1 = c1;
                     if (Math.abs(c5) > Math.abs(hist.max5)) hist.max5 = c5;
@@ -125,124 +105,30 @@ function initWS() {
             }
         });
     });
-
     ws.on('error', () => setTimeout(initWS, 5000));
     ws.on('close', () => setTimeout(initWS, 5000));
 }
 
+// API QUAN TRỌNG CHO BOT
 app.get('/api/live', (req, res) => {
-    const live = Object.entries(coinData)
-        .filter(([_, v]) => v.live)
-        .map(([s, v]) => ({ symbol: s, ...v.live }))
-        .sort((a, b) => {
-            const maxA = Math.max(Math.abs(a.c1), Math.abs(a.c5), Math.abs(a.c15));
-            const maxB = Math.max(Math.abs(b.c1), Math.abs(b.c5), Math.abs(b.c15));
-            return maxB - maxA;
-        })
-        .slice(0, 50);
-    res.json(live);
+    const data = Object.values(coinData)
+        .filter(v => v.live)
+        .map(v => ({ symbol: v.symbol, ...v.live }))
+        .sort((a, b) => Math.max(Math.abs(b.c1), Math.abs(b.c5)) - Math.max(Math.abs(a.c1), Math.abs(a.c5)));
+    res.json(data);
 });
 
 app.get('/api/data', (req, res) => {
-    const live = Object.entries(coinData)
-        .filter(([_, v]) => v.live)
-        .map(([s, v]) => ({ symbol: s, ...v.live }))
-        .sort((a, b) => {
-            const maxA = Math.max(Math.abs(a.c1), Math.abs(a.c5), Math.abs(a.c15));
-            const maxB = Math.max(Math.abs(b.c1), Math.abs(b.c5), Math.abs(b.c15));
-            return maxB - maxA;
-        })
+    const live = Object.values(coinData)
+        .filter(v => v.live)
+        .map(v => ({ symbol: v.symbol, ...v.live }))
+        .sort((a, b) => Math.max(Math.abs(b.c1), Math.abs(b.c5)) - Math.max(Math.abs(a.c1), Math.abs(a.c5)))
         .slice(0, 50);
-
-    const history = Array.from(historyMap.values())
-        .sort((a, b) => b.startTime - a.startTime) 
-        .slice(0, 50);
-
+    const history = Array.from(historyMap.values()).sort((a, b) => b.startTime - a.startTime).slice(0, 50);
     res.json({ live, history });
 });
 
-app.get('/gui', (req, res) => {
-    res.send(`
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <title>PIRATE ENGINE v4.2</title>
-        <script src="https://cdn.tailwindcss.com"></script>
-        <style>
-            body { background: #050505; color: #d4d4d8; font-family: monospace; }
-            .up { color: #22c55e; } .down { color: #ef4444; }
-            .bg-live { background: rgba(30, 58, 138, 0.1); border: 1px solid rgba(59, 130, 246, 0.2); }
-            .bg-hist { background: rgba(127, 29, 29, 0.1); border: 1px solid rgba(239, 68, 68, 0.2); }
-        </style>
-    </head>
-    <body class="p-6">
-        <div class="flex justify-between items-center mb-8 border-b border-zinc-800 pb-4">
-            <h1 class="text-3xl font-black text-yellow-500 italic">PIRATE ENGINE v4.2</h1>
-            <div id="clock" class="text-xl font-bold">00:00:00</div>
-        </div>
-        <div class="grid grid-cols-12 gap-6">
-            <div class="col-span-5">
-                <h2 class="text-blue-400 font-bold mb-4 text-sm">🚀 LIVE VOLATILITY</h2>
-                <div class="bg-live rounded-xl p-2">
-                    <table class="w-full text-[11px] text-left">
-                        <thead>
-                            <tr class="text-zinc-600 border-b border-zinc-800"><th class="p-2">SYMBOL</th><th class="p-2">1M</th><th class="p-2">5M</th><th class="p-2">15M</th></tr>
-                        </thead>
-                        <tbody id="liveBody"></tbody>
-                    </table>
-                </div>
-            </div>
-            <div class="col-span-7">
-                <h2 class="text-red-500 font-bold mb-4 text-sm">📊 RECENT HISTORY</h2>
-                <div class="bg-hist rounded-xl p-2">
-                    <table class="w-full text-[12px] text-left">
-                        <thead>
-                            <tr class="text-zinc-600 border-b border-zinc-800"><th class="p-2">TIME</th><th class="p-2">SYMBOL</th><th class="p-2 text-center">MAX 1M</th><th class="p-2 text-center">MAX 5M</th><th class="p-2 text-center">MAX 15M</th></tr>
-                        </thead>
-                        <tbody id="historyBody"></tbody>
-                    </table>
-                </div>
-            </div>
-        </div>
-        <script>
-            function updateClock() { document.getElementById('clock').innerText = new Date().toLocaleTimeString(); }
-            setInterval(updateClock, 1000);
-            async function refresh() {
-                try {
-                    const res = await fetch('/api/data');
-                    const d = await res.json();
-                    document.getElementById('liveBody').innerHTML = d.live.map(c => \`
-                        <tr class="border-b border-zinc-800/20">
-                            <td class="p-2 font-bold">\${c.symbol}</td>
-                            <td class="\${c.c1 >= 0 ? 'up':'down'}">\${c.c1}%</td>
-                            <td class="\${c.c5 >= 0 ? 'up':'down'} font-bold bg-white/5">\${c.c5}%</td>
-                            <td class="\${c.c15 >= 0 ? 'up':'down'}">\${c.c15}%</td>
-                        </tr>\`).join('');
-                    document.getElementById('historyBody').innerHTML = d.history.map(h => \`
-                        <tr class="border-b border-zinc-800 hover:bg-white/5">
-                            <td class="p-2 text-zinc-500 text-[10px]">\${new Date(h.startTime).toLocaleTimeString()}</td>
-                            <td class="p-2 font-black text-white">\${h.symbol}</td>
-                            <td class="p-2 text-center \${h.max1 >= 0 ? 'up':'down'}">\${h.max1}%</td>
-                            <td class="p-2 text-center \${h.max5 >= 0 ? 'up':'down'} font-bold">\${h.max5}%</td>
-                            <td class="p-2 text-center \${h.max15 >= 0 ? 'up':'down'}">\${h.max15}%</td>
-                        </tr>\`).join('');
-                } catch(e) {}
-            }
-            setInterval(refresh, 5000);
-            refresh();
-        </script>
-    </body>
-    </html>
-    `);
-});
-
-// Chạy quy trình
-async function start() {
-    await fetchInitialHistory();
-    initWS();
-}
-
 app.listen(port, '0.0.0.0', () => {
-    console.log(`Hệ thống khởi chạy tại port ${port}`);
-    start();
+    console.log(`Server chạy tại: http://192.168.1.3:${port}`);
+    initData();
 });
