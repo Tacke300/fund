@@ -2,36 +2,29 @@ import WebSocket from 'ws';
 import express from 'express';
 import fs from 'fs';
 import https from 'https';
-import http from 'http';
 import crypto from 'crypto';
-import { fileURLToPath } from 'url';
-import path from 'path';
 import { API_KEY, SECRET_KEY } from './config.js';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const CONFIG_FILE = './bot_settings.json';
 const HISTORY_FILE = './history_db.json';
 
-let botSettings = { 
-    isRunning: false, 
-    maxPositions: 3, 
-    invValue: 1.5, 
-    invType: 'percent', 
-    minVol: 5.0, 
-    accountSL: 30 
-};
+// Tải cấu hình cũ hoặc dùng mặc định
+let botSettings = { isRunning: false, maxPositions: 3, invValue: 1.5, invType: 'percent', minVol: 5.0, accountSL: 30 };
+if (fs.existsSync(CONFIG_FILE)) {
+    botSettings = JSON.parse(fs.readFileSync(CONFIG_FILE));
+}
 
 let status = { currentBalance: 0, botLogs: [], exchangeInfo: {}, candidatesList: [] };
 let botManagedSymbols = []; 
 let isInitializing = true;
 let isProcessing = false;
 let coinData = {}; 
-let historyMap = new Map();
 
 function addBotLog(msg, type = 'info') {
     const time = new Date().toLocaleTimeString('vi-VN', { hour12: false });
     status.botLogs.unshift({ time, msg, type });
-    if (status.botLogs.length > 200) status.botLogs.pop();
-    const colors = { success: '\x1b[32m', error: '\x1b[31m', warn: '\x1b[33m', info: '\x1b[36m', debug: '\x1b[90m' };
+    if (status.botLogs.length > 100) status.botLogs.pop();
+    const colors = { success: '\x1b[32m', error: '\x1b[31m', warn: '\x1b[33m', info: '\x1b[36m' };
     console.log(`${colors[type] || ''}[${time}] [${type.toUpperCase()}] ${msg}\x1b[0m`);
 }
 
@@ -52,15 +45,6 @@ async function callBinance(endpoint, method = 'GET', params = {}) {
     });
 }
 
-function calculateChange(priceArray, minutes) {
-    if (!priceArray || priceArray.length < 2) return 0;
-    const now = priceArray[priceArray.length - 1].t;
-    const targetTime = now - minutes * 60 * 1000;
-    const startPriceObj = priceArray.find(item => item.t >= targetTime);
-    if (!startPriceObj) return 0;
-    return parseFloat(((priceArray[priceArray.length - 1].p - startPriceObj.p) / startPriceObj.p * 100).toFixed(2));
-}
-
 function initWS() {
     const ws = new WebSocket('wss://fstream.binance.com/ws/!ticker@arr');
     ws.on('message', (data) => {
@@ -70,40 +54,48 @@ function initWS() {
             const s = t.s; const p = parseFloat(t.c);
             if (!coinData[s]) coinData[s] = { symbol: s, prices: [] };
             coinData[s].prices.push({ p, t: now });
-            if (coinData[s].prices.length > 100) coinData[s].prices = coinData[s].prices.slice(-100);
-            coinData[s].live = { c1: calculateChange(coinData[s].prices, 1), c5: calculateChange(coinData[s].prices, 5), currentPrice: p };
+            if (coinData[s].prices.length > 60) coinData[s].prices.shift();
+            
+            const pArr = coinData[s].prices;
+            if (pArr.length > 2) {
+                const startP = pArr[0].p;
+                const change = ((p - startP) / startP) * 100;
+                coinData[s].c1 = parseFloat(change.toFixed(2));
+            }
         });
         status.candidatesList = Object.entries(coinData)
-            .filter(([_, v]) => v.live && Math.abs(v.live.c1) >= botSettings.minVol)
-            .map(([s, v]) => ({ symbol: s, changePercent: v.live.c1 }))
+            .filter(([_, v]) => Math.abs(v.c1) >= botSettings.minVol)
+            .map(([s, v]) => ({ symbol: s, changePercent: v.c1 }))
             .sort((a, b) => Math.abs(b.changePercent) - Math.abs(a.changePercent)).slice(0, 10);
     });
     ws.on('error', () => setTimeout(initWS, 5000));
-    ws.on('close', () => setTimeout(initWS, 5000));
 }
 
 async function cleanupClosedPositions() {
     if (!botSettings.isRunning) return;
     try {
         const positions = await callBinance('/fapi/v2/positionRisk');
+        // Đồng bộ danh sách đang quản lý với thực tế sàn
+        const realActive = positions.filter(p => parseFloat(p.positionAmt) !== 0).map(p => p.symbol);
+        
         for (let i = botManagedSymbols.length - 1; i >= 0; i--) {
             const symbol = botManagedSymbols[i];
-            const p = positions.find(pos => pos.symbol === symbol);
-            if (!p || parseFloat(p.positionAmt) === 0) {
+            if (!realActive.includes(symbol)) {
+                addBotLog(`🧹 Giải phóng slot ${symbol} (Lệnh đã đóng)`, "info");
                 await callBinance('/fapi/v1/allOpenOrders', 'DELETE', { symbol }).catch(()=>{});
                 botManagedSymbols.splice(i, 1);
-                addBotLog(`Giải phóng ${symbol}`, "success");
             }
         }
     } catch (e) {}
 }
 
 function calcTPSL(lev, side, entryPrice) {
-    let m = lev < 26 ? 1.11 : (lev < 50 ? 2.22 : (lev < 75 ? 3.33 : 5.55));
+    let m = lev < 26 ? 1.2 : (lev < 50 ? 2.5 : 5.0);
     const rate = m / lev;
-    const tp = side === 'LONG' ? entryPrice * (1 + rate) : entryPrice * (1 - rate);
-    const sl = side === 'LONG' ? entryPrice * (1 - rate) : entryPrice * (1 + rate);
-    return { tp, sl };
+    return {
+        tp: side === 'LONG' ? entryPrice * (1 + rate) : entryPrice * (1 - rate),
+        sl: side === 'LONG' ? entryPrice * (1 - rate) : entryPrice * (1 + rate)
+    };
 }
 
 async function enforceTPSL() {
@@ -116,27 +108,32 @@ async function enforceTPSL() {
             const side = p.positionSide;
             const entry = parseFloat(p.entryPrice);
             if (entry <= 0) continue;
-            const hasTP = orders.some(o => o.symbol === symbol && o.positionSide === side && o.type === 'TAKE_PROFIT_MARKET');
-            const hasSL = orders.some(o => o.symbol === symbol && o.positionSide === side && o.type === 'STOP_MARKET');
+
+            const hasTP = orders.some(o => o.symbol === symbol && o.type === 'TAKE_PROFIT_MARKET');
+            const hasSL = orders.some(o => o.symbol === symbol && o.type === 'STOP_MARKET');
+
             if (!hasTP || !hasSL) {
                 const info = status.exchangeInfo[symbol];
                 const plan = calcTPSL(parseFloat(p.leverage), side, entry);
                 const closeSide = side === 'LONG' ? 'SELL' : 'BUY';
+                
                 if (!hasTP) {
                     await callBinance('/fapi/v1/order', 'POST', {
                         symbol, side: closeSide, positionSide: side, type: 'TAKE_PROFIT_MARKET',
                         stopPrice: plan.tp.toFixed(info.pricePrecision), workingType: 'MARK_PRICE', closePosition: 'true', timeInForce: 'GTC'
                     });
+                    addBotLog(`🎯 Cài TP ${symbol} tại ${plan.tp.toFixed(info.pricePrecision)}`, "success");
                 }
                 if (!hasSL) {
                     await callBinance('/fapi/v1/order', 'POST', {
                         symbol, side: closeSide, positionSide: side, type: 'STOP_MARKET',
                         stopPrice: plan.sl.toFixed(info.pricePrecision), workingType: 'MARK_PRICE', closePosition: 'true', timeInForce: 'GTC'
                     });
+                    addBotLog(`🛑 Cài SL ${symbol} tại ${plan.sl.toFixed(info.pricePrecision)}`, "warn");
                 }
             }
         }
-    } catch (e) {}
+    } catch (e) { addBotLog(`Lỗi TP/SL: ${e.message}`, "error"); }
 }
 
 async function hunt() {
@@ -145,25 +142,40 @@ async function hunt() {
     try {
         for (const c of status.candidatesList) {
             if (botManagedSymbols.includes(c.symbol)) continue;
+            
+            addBotLog(`🔍 Mục tiêu: ${c.symbol} biến động ${c.changePercent}%`, "info");
             const info = status.exchangeInfo[c.symbol];
             const brackets = await callBinance('/fapi/v1/leverageBracket', 'GET', { symbol: c.symbol });
             const lev = brackets[0].brackets[0].initialLeverage;
+            
             await callBinance('/fapi/v1/leverage', 'POST', { symbol: c.symbol, leverage: lev });
             const acc = await callBinance('/fapi/v2/account');
             status.currentBalance = parseFloat(acc.totalMarginBalance);
+            
             const side = c.changePercent > 0 ? 'LONG' : 'SHORT';
             let margin = botSettings.invType === 'percent' ? (status.currentBalance * botSettings.invValue) / 100 : botSettings.invValue;
             if ((margin * lev) < 5.1) margin = 5.2 / lev;
+            
             const ticker = await callBinance('/fapi/v1/ticker/price', 'GET', { symbol: c.symbol });
-            const qty = ((margin * lev) / parseFloat(ticker.price)).toFixed(info.quantityPrecision);
-            await callBinance('/fapi/v1/order', 'POST', { symbol: c.symbol, side: side === 'LONG' ? 'BUY' : 'SELL', positionSide: side, type: 'MARKET', quantity: qty });
-            botManagedSymbols.push(c.symbol);
-            addBotLog(`Mở ${c.symbol}`, "success");
-            await new Promise(r => setTimeout(r, 2000));
-            await enforceTPSL();
-            break;
+            const qty = (Math.floor(((margin * lev) / parseFloat(ticker.price)) / info.stepSize) * info.stepSize).toFixed(info.quantityPrecision);
+
+            const order = await callBinance('/fapi/v1/order', 'POST', { 
+                symbol: c.symbol, side: side === 'LONG' ? 'BUY' : 'SELL', 
+                positionSide: side, type: 'MARKET', quantity: qty 
+            });
+
+            if (order.orderId) {
+                botManagedSymbols.push(c.symbol);
+                addBotLog(`🚀 VÀO LỆNH THÀNH CÔNG: ${side} ${c.symbol} | Đòn bẩy: ${lev}x`, "success");
+                await new Promise(r => setTimeout(r, 2000));
+                await enforceTPSL();
+            } else {
+                addBotLog(`❌ Thất bại ${c.symbol}: ${order.msg}`, "error");
+            }
+            break; 
         }
-    } catch (e) {} finally { isProcessing = false; }
+    } catch (e) { addBotLog(`Lỗi hệ thống hunt: ${e.message}`, "error"); }
+    finally { isProcessing = false; }
 }
 
 const APP = express();
@@ -177,25 +189,30 @@ APP.get('/api/status', async (req, res) => {
             const pnl = (entry > 0) ? ((parseFloat(p.unrealizedProfit) / ((entry * amt) / p.leverage)) * 100).toFixed(2) : "0.00";
             return { symbol: p.symbol, side: p.positionSide, leverage: p.leverage, entryPrice: p.entryPrice, markPrice: p.markPrice, pnlPercent: pnl };
         });
-        res.json({ botSettings, status, activePositions: active, live: Object.entries(coinData).filter(([_,v])=>v.live).map(([s,v])=>({symbol:s,...v.live})).sort((a,b)=>Math.abs(b.c1)-Math.abs(a.c1)).slice(0,10) });
+        res.json({ botSettings, status, activePositions: active, live: status.candidatesList });
     } catch (e) { res.status(500).send(); }
 });
-APP.post('/api/settings', (req, res) => { botSettings = { ...botSettings, ...req.body }; res.json({ status: "ok" }); });
+APP.post('/api/settings', (req, res) => { 
+    botSettings = { ...botSettings, ...req.body }; 
+    fs.writeFileSync(CONFIG_FILE, JSON.stringify(botSettings)); // Lưu vào file
+    addBotLog("⚙️ Đã lưu cấu hình mới", "info");
+    res.json({ status: "ok" }); 
+});
 APP.get('/', (req, res) => {
-    res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><script src="https://cdn.tailwindcss.com"></script><style>@import url('https://fonts.googleapis.com/css2?family=Bangers&display=swap');body{background:#0a0a0c;color:#eee;font-family:monospace;} .luffy{font-family:'Bangers',cursive;}</style></head><body class="p-4">
-    <header class="flex justify-between items-center mb-4 border-b-2 border-red-500 pb-2"><h1 class="luffy text-4xl text-white">LUFFY BOT v5.1</h1><div class="text-right"><p class="text-xs text-gray-500">BALANCE</p><p id="balance" class="text-2xl text-yellow-400 font-bold">$0.00</p></div></header>
+    res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><script src="https://cdn.tailwindcss.com"></script><style>@import url('https://fonts.googleapis.com/css2?family=Bangers&display=swap');body{background:#050505;color:#eee;font-family:monospace;} .luffy{font-family:'Bangers',cursive;}</style></head><body class="p-4">
+    <header class="flex justify-between items-center mb-4 border-b border-red-600 pb-2"><h1 class="luffy text-5xl text-red-500 italic">LUFFY COMMANDER</h1><div class="text-right"><p id="balance" class="text-3xl text-yellow-400 font-bold">$0.00</p></div></header>
     <div class="grid grid-cols-6 gap-2 mb-4">
-        <input id="invValue" type="number" class="bg-gray-900 p-2 rounded text-center" value="1.5">
-        <select id="invType" class="bg-gray-900 p-2 rounded"><option value="percent">%</option><option value="fixed">$</option></select>
-        <input id="minVol" type="number" class="bg-gray-900 p-2 rounded text-center" value="5.0">
-        <input id="maxPositions" type="number" class="bg-gray-900 p-2 rounded text-center" value="3">
-        <button id="runBtn" onclick="toggle()" class="bg-green-600 rounded font-bold text-xs">START</button>
-        <button onclick="update()" class="bg-white/10 rounded font-bold text-xs">SAVE</button>
+        <div class="bg-white/5 p-2 rounded"><label class="text-[9px] text-gray-400 block">VỐN</label><input id="invValue" type="number" class="bg-transparent w-full outline-none" value="\${botSettings.invValue}"></div>
+        <div class="bg-white/5 p-2 rounded"><label class="text-[9px] text-gray-400 block">KIỂU</label><select id="invType" class="bg-transparent w-full outline-none text-yellow-500"><option value="percent" \${botSettings.invType==='percent'?'selected':''}>% Acc</option><option value="fixed" \${botSettings.invType==='fixed'?'selected':''}>$ Fix</option></select></div>
+        <div class="bg-white/5 p-2 rounded"><label class="text-[9px] text-gray-400 block">SÓNG %</label><input id="minVol" type="number" class="bg-transparent w-full outline-none text-red-500" value="\${botSettings.minVol}"></div>
+        <div class="bg-white/5 p-2 rounded"><label class="text-[9px] text-gray-400 block">MÃ TỐI ĐA</label><input id="maxPositions" type="number" class="bg-transparent w-full outline-none" value="\${botSettings.maxPositions}"></div>
+        <button id="runBtn" onclick="toggle()" class="bg-green-600 rounded font-black text-xs">START</button>
+        <button onclick="update()" class="bg-white/10 rounded font-bold text-xs">SAVE SETTINGS</button>
     </div>
-    <div class="grid grid-cols-12 gap-4 h-[70vh]">
-        <div class="col-span-3 bg-gray-900/50 rounded p-2 overflow-y-auto"><h2 class="text-blue-400 text-xs font-bold mb-2">LIVE WAVE</h2><div id="live"></div></div>
-        <div class="col-span-6 bg-gray-900/50 rounded p-2 overflow-y-auto"><h2 class="text-red-500 text-xs font-bold mb-2">POSITIONS</h2><table class="w-full text-[10px]"><thead><tr class="text-gray-500"><th>SYMBOL</th><th>SIDE</th><th>PNL%</th></tr></thead><tbody id="pos"></tbody></table></div>
-        <div class="col-span-3 bg-gray-900/50 rounded p-2 overflow-y-auto"><h2 class="text-yellow-500 text-xs font-bold mb-2">LOGS</h2><div id="logs" class="text-[9px]"></div></div>
+    <div class="grid grid-cols-12 gap-4 h-[75vh]">
+        <div class="col-span-3 bg-white/5 rounded p-3"><h2 class="text-blue-400 text-xs font-bold mb-3">📡 SIGNALS</h2><div id="live" class="space-y-2"></div></div>
+        <div class="col-span-6 bg-white/5 rounded p-0 overflow-hidden flex flex-col"><h2 class="p-3 text-red-500 text-xs font-bold bg-white/5">🚢 ACTIVE BATTLE</h2><div class="overflow-y-auto flex-grow"><table class="w-full text-[11px] text-left"><thead><tr class="text-gray-500 bg-black/50"><th class="p-3">COIN</th><th class="p-3">SIDE</th><th class="p-3">PNL%</th></tr></thead><tbody id="pos"></tbody></table></div></div>
+        <div class="col-span-3 bg-white/5 rounded p-3 flex flex-col"><h2 class="text-yellow-500 text-xs font-bold mb-3">📜 LOGS</h2><div id="logs" class="text-[10px] space-y-1 overflow-y-auto flex-grow"></div></div>
     </div>
     <script>
         let isRunning = false;
@@ -203,29 +220,36 @@ APP.get('/', (req, res) => {
             const r = await fetch('/api/status'); const d = await r.json();
             isRunning = d.botSettings.isRunning;
             document.getElementById('balance').innerText = '$'+d.status.currentBalance.toFixed(2);
-            document.getElementById('runBtn').innerText = isRunning ? 'STOP' : 'START';
-            document.getElementById('runBtn').className = isRunning ? 'bg-red-600 rounded font-bold' : 'bg-green-600 rounded font-bold';
-            document.getElementById('live').innerHTML = d.live.map(v=>\`<div class="flex justify-between border-b border-white/5 p-1 text-[10px]"><span>\${v.symbol}</span><span class="\${v.c1>=0?'text-green-400':'text-red-400'}">\${v.c1}%</span></div>\`).join('');
-            document.getElementById('pos').innerHTML = d.activePositions.map(p=>\`<tr class="text-center border-b border-white/5"><td class="p-1">\${p.symbol}</td><td class="\${p.side==='LONG'?'text-green-400':'text-red-400'}">\${p.side}</td><td class="\${parseFloat(p.pnlPercent)>=0?'text-green-400':'text-red-400'}">\${p.pnlPercent}%</td></tr>\`).join('');
-            document.getElementById('logs').innerHTML = d.status.botLogs.map(l=>\`<div class="mb-1 text-gray-400">[\${l.time}] \${l.msg}</div>\`).join('');
+            document.getElementById('runBtn').innerText = isRunning ? 'STOP BOT' : 'START BOT';
+            document.getElementById('runBtn').className = isRunning ? 'bg-red-600 rounded font-black' : 'bg-green-600 rounded font-black';
+            document.getElementById('live').innerHTML = d.live.map(v=>\`<div class="flex justify-between bg-black/40 p-2 rounded border-l-2 \${v.changePercent>=0?'border-green-500':'border-red-500'}"><span>\${v.symbol}</span><span class="\${v.changePercent>=0?'text-green-400':'text-red-400'}">\${v.changePercent}%</span></div>\`).join('');
+            document.getElementById('pos').innerHTML = d.activePositions.map(p=>\`<tr class="border-b border-white/5 hover:bg-white/5"><td class="p-3 font-bold">\${p.symbol}</td><td class="p-3 \${p.side==='LONG'?'text-green-400':'text-red-400'} font-black">\${p.side} \${p.leverage}x</td><td class="p-3 font-bold \${parseFloat(p.pnlPercent)>=0?'text-green-400':'text-red-400'}">\${p.pnlPercent}%</td></tr>\`).join('');
+            document.getElementById('logs').innerHTML = d.status.botLogs.map(l=>\`<div class="border-b border-white/5 pb-1"><span class="text-gray-500">[\${l.time}]</span> <span class="\${l.type==='success'?'text-green-400':(l.type==='error'?'text-red-500':'text-gray-300')}">\${l.msg}</span></div>\`).join('');
         }
         function toggle(){ isRunning = !isRunning; fetch('/api/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({isRunning})}); }
-        function update(){ const body={invValue:parseFloat(document.getElementById('invValue').value),invType:document.getElementById('invType').value,minVol:parseFloat(document.getElementById('minVol').value),maxPositions:parseInt(document.getElementById('maxPositions').value)}; fetch('/api/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); }
+        function update(){ 
+            const body={invValue:parseFloat(document.getElementById('invValue').value),invType:document.getElementById('invType').value,minVol:parseFloat(document.getElementById('minVol').value),maxPositions:parseInt(document.getElementById('maxPositions').value)}; 
+            fetch('/api/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); 
+            alert("Đã lưu!");
+        }
         setInterval(sync, 2000); sync();
     </script></body></html>`);
 });
 
 async function start() {
-    const info = await callBinance('/fapi/v1/exchangeInfo');
-    info.symbols.forEach(s => {
-        const lot = s.filters.find(f => f.filterType === 'LOT_SIZE');
-        status.exchangeInfo[s.symbol] = { quantityPrecision: s.quantityPrecision, pricePrecision: s.pricePrecision, stepSize: parseFloat(lot.stepSize) };
-    });
-    initWS();
-    isInitializing = false;
-    setInterval(hunt, 3000);
-    setInterval(cleanupClosedPositions, 5000);
-    setInterval(enforceTPSL, 10000);
+    try {
+        const info = await callBinance('/fapi/v1/exchangeInfo');
+        info.symbols.forEach(s => {
+            const lot = s.filters.find(f => f.filterType === 'LOT_SIZE');
+            status.exchangeInfo[s.symbol] = { quantityPrecision: s.quantityPrecision, pricePrecision: s.pricePrecision, stepSize: parseFloat(lot.stepSize) };
+        });
+        initWS();
+        isInitializing = false;
+        setInterval(hunt, 3000);
+        setInterval(cleanupClosedPositions, 5000);
+        setInterval(enforceTPSL, 10000);
+        addBotLog("⚓ LUFFY ĐÃ SẴN SÀNG RA KHƠI!", "success");
+    } catch (e) { addBotLog("Lỗi khởi tạo: " + e.message, "error"); }
 }
 
 APP.listen(9001, '0.0.0.0', start);
