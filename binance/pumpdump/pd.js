@@ -2,147 +2,185 @@ import https from 'https';
 import http from 'http';
 import crypto from 'crypto';
 import express from 'express';
+import { fileURLToPath } from 'url';
+import path from 'path';
 import { API_KEY, SECRET_KEY } from './config.js';
 
-const app = express();
-app.use(express.json());
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-let botSettings = { isRunning: false, maxPositions: 5, invValue: 1.5, minVol: 5.0 };
-let status = { currentBalance: 0, botLogs: [], candidatesList: [], activePositions: [], exchangeInfo: {} };
-let botManagedSymbols = new Set();
+// --- LOGIC GỐC 100% ---
+let botSettings = { isRunning: false, maxPositions: 3, invValue: 1.5, invType: 'percent', minVol: 5.0, accountSL: 30 };
+let status = { currentBalance: 0, botLogs: [], exchangeInfo: {}, candidatesList: [] };
+let botManagedSymbols = []; 
+let isInitializing = true;
+let isProcessing = false;
 
-async function binanceReq(path, method = 'GET', params = {}) {
-    const ts = Date.now();
-    const query = new URLSearchParams({...params, timestamp: ts, recvWindow: 10000}).toString();
-    const sig = crypto.createHmac('sha256', SECRET_KEY).update(query).digest('hex');
-    const url = `https://fapi.binance.com${path}?${query}&signature=${sig}`;
-    return new Promise((res) => {
-        const req = https.request(url, { method, headers: { 'X-MBX-APIKEY': API_KEY } }, r => {
-            let d = ''; r.on('data', chunk => d += chunk);
-            r.on('end', () => { try { res(JSON.parse(d)); } catch(e) { res({}); } });
+function addBotLog(msg, type = 'info') {
+    const time = new Date().toLocaleTimeString('vi-VN', { hour12: false });
+    status.botLogs.unshift({ time, msg, type });
+    if (status.botLogs.length > 100) status.botLogs.pop();
+}
+
+async function callBinance(endpoint, method = 'GET', params = {}) {
+    const timestamp = Date.now();
+    const query = Object.keys(params).map(k => `${k}=${encodeURIComponent(params[k])}`).join('&');
+    const fullQuery = query + (query ? '&' : '') + `timestamp=${timestamp}&recvWindow=10000`;
+    const signature = crypto.createHmac('sha256', SECRET_KEY).update(fullQuery).digest('hex');
+    const url = `https://fapi.binance.com${endpoint}?${fullQuery}&signature=${signature}`;
+    return new Promise((resolve, reject) => {
+        const req = https.request(url, { method, headers: { 'X-MBX-APIKEY': API_KEY } }, res => {
+            let d = ''; res.on('data', chunk => d += chunk);
+            res.on('end', () => { try { const j = JSON.parse(d); resolve(j); } catch (e) { reject(e); } });
         });
-        req.on('error', () => res({}));
         req.end();
     });
 }
 
-function addLog(msg, type = 'info') {
-    const time = new Date().toLocaleTimeString('vi-VN', { hour12: false });
-    status.botLogs.unshift({ time, msg, type });
-    if (status.botLogs.length > 50) status.botLogs.pop();
-}
-
-async function patrol() {
-    http.get('http://127.0.0.1:9000/api/live', (res) => {
-        let d = ''; res.on('data', c => d += c);
-        res.on('end', () => { try { status.candidatesList = JSON.parse(d); } catch(e) {} });
-    }).on('error', () => {});
-
+// Giữ nguyên các hàm cleanup, calcTPSL, enforceTPSL, hunt...
+async function cleanupClosedPositions() {
     if (!botSettings.isRunning) return;
-
-    for (const coin of status.candidatesList) {
-        if (botManagedSymbols.has(coin.symbol) || status.activePositions.length >= botSettings.maxPositions) continue;
-        const vol = Math.max(Math.abs(coin.c1), Math.abs(coin.c5), Math.abs(coin.c15));
-        if (vol >= botSettings.minVol) {
-            executeTrade(coin);
-            break;
-        }
-    }
-}
-
-async function executeTrade(coin) {
-    const symbol = coin.symbol;
-    const side = coin.c1 > 0 ? 'BUY' : 'SELL';
-    const posSide = coin.c1 > 0 ? 'LONG' : 'SHORT';
-    botManagedSymbols.add(symbol); 
     try {
-        const info = status.exchangeInfo[symbol];
-        const qty = parseFloat(((botSettings.invValue * 20) / coin.currentPrice).toFixed(info?.quantityPrecision || 2));
-        if (qty <= 0) { botManagedSymbols.delete(symbol); return; }
-        await binanceReq('/fapi/v1/leverage', 'POST', { symbol, leverage: 20 });
-        const order = await binanceReq('/fapi/v1/order', 'POST', { symbol, side, positionSide: posSide, type: 'MARKET', quantity: qty });
-        if (order.orderId) { 
-            addLog(`🚀 VÀO LỆNH: ${symbol} [${posSide}]`, 'success'); 
-        } else { 
-            botManagedSymbols.delete(symbol);
-            addLog(`❌ Lỗi ${symbol}: ${order.msg || 'Nghẽn'}`, 'error');
+        const positions = await callBinance('/fapi/v2/positionRisk');
+        for (let i = botManagedSymbols.length - 1; i >= 0; i--) {
+            const symbol = botManagedSymbols[i];
+            const p = positions.find(pos => pos.symbol === symbol);
+            if (!p || parseFloat(p.positionAmt) === 0) {
+                await callBinance('/fapi/v1/allOpenOrders', 'DELETE', { symbol }).catch(()=>{});
+                botManagedSymbols.splice(i, 1);
+            }
         }
-    } catch (e) { botManagedSymbols.delete(symbol); }
+    } catch (e) {}
 }
 
-async function syncAccount() {
-    const acc = await binanceReq('/fapi/v2/account');
-    if (acc.totalMarginBalance) status.currentBalance = parseFloat(acc.totalMarginBalance);
-    const pos = await binanceReq('/fapi/v2/positionRisk');
-    if (Array.isArray(pos)) {
-        status.activePositions = pos.filter(p => parseFloat(p.positionAmt) !== 0).map(p => ({
-            symbol: p.symbol, 
-            side: parseFloat(p.positionAmt) > 0 ? 'LONG' : 'SHORT',
-            pnlPercent: ((parseFloat(p.unRealizedProfit) / (parseFloat(p.isolatedWallet) || 1)) * 100).toFixed(2)
-        }));
-        botManagedSymbols.forEach(s => { 
-            if (!status.activePositions.find(p => p.symbol === s)) botManagedSymbols.delete(s); 
+function calcTPSL(lev, side, entryPrice) {
+    let m = lev < 26 ? 1.11 : (lev < 50 ? 2.22 : (lev < 75 ? 3.33 : 5.55));
+    const rate = m / lev;
+    const tp = side === 'LONG' ? entryPrice * (1 + rate) : entryPrice * (1 - rate);
+    const sl = side === 'LONG' ? entryPrice * (1 - rate) : entryPrice * (1 + rate);
+    return { tp, sl };
+}
+
+async function enforceTPSL() {
+    try {
+        const positions = await callBinance('/fapi/v2/positionRisk');
+        const orders = await callBinance('/fapi/v1/openOrders');
+        for (const symbol of botManagedSymbols) {
+            const p = positions.find(pos => pos.symbol === symbol && parseFloat(pos.positionAmt) !== 0);
+            if (!p) continue;
+            const side = p.positionSide;
+            const entry = parseFloat(p.entryPrice);
+            if (entry <= 0) continue;
+            const hasTP = orders.some(o => o.symbol === symbol && o.positionSide === side && o.type === 'TAKE_PROFIT_MARKET');
+            const hasSL = orders.some(o => o.symbol === symbol && o.positionSide === side && o.type === 'STOP_MARKET');
+            if (!hasTP || !hasSL) {
+                const info = status.exchangeInfo[symbol];
+                const plan = calcTPSL(parseFloat(p.leverage), side, entry);
+                const closeSide = side === 'LONG' ? 'SELL' : 'BUY';
+                if (!hasTP) await callBinance('/fapi/v1/order', 'POST', { symbol, side: closeSide, positionSide: side, type: 'TAKE_PROFIT_MARKET', stopPrice: plan.tp.toFixed(info.pricePrecision), closePosition: 'true' });
+                if (!hasSL) await callBinance('/fapi/v1/order', 'POST', { symbol, side: closeSide, positionSide: side, type: 'STOP_MARKET', stopPrice: plan.sl.toFixed(info.pricePrecision), closePosition: 'true' });
+            }
+        }
+    } catch (e) {}
+}
+
+async function hunt() {
+    if (isInitializing || !botSettings.isRunning || isProcessing) return;
+    try {
+        isProcessing = true;
+        if (botManagedSymbols.length >= botSettings.maxPositions) { isProcessing = false; return; }
+        for (const c of status.candidatesList) {
+            if (botManagedSymbols.includes(c.symbol) || botManagedSymbols.length >= botSettings.maxPositions) continue;
+            const brackets = await callBinance('/fapi/v1/leverageBracket', 'GET', { symbol: c.symbol });
+            const lev = brackets[0].brackets[0].initialLeverage;
+            await callBinance('/fapi/v1/leverage', 'POST', { symbol: c.symbol, leverage: lev });
+            const acc = await callBinance('/fapi/v2/account');
+            status.currentBalance = parseFloat(acc.totalMarginBalance);
+            const ticker = await callBinance('/fapi/v1/ticker/price', 'GET', { symbol: c.symbol });
+            const info = status.exchangeInfo[c.symbol];
+            const side = c.changePercent > 0 ? 'LONG' : 'SHORT';
+            let margin = botSettings.invType === 'percent' ? (status.currentBalance * botSettings.invValue) / 100 : botSettings.invValue;
+            if ((margin * lev) < 5.1) margin = 5.2 / lev;
+            let qty = (Math.floor(((margin * lev) / parseFloat(ticker.price)) / info.stepSize) * info.stepSize).toFixed(info.quantityPrecision);
+            await callBinance('/fapi/v1/order', 'POST', { symbol: c.symbol, side: side === 'LONG' ? 'BUY' : 'SELL', positionSide: side, type: 'MARKET', quantity: qty });
+            botManagedSymbols.push(c.symbol);
+            addBotLog(`🚀 Hunter: Mở lệnh ${c.symbol}`, "success");
+            setTimeout(enforceTPSL, 3000);
+        }
+    } finally { isProcessing = false; }
+}
+
+function fetchCandidates() {
+    http.get('http://127.0.0.1:9000/api/live', res => {
+        let d = ''; res.on('data', chunk => d += chunk);
+        res.on('end', () => {
+            try {
+                const all = JSON.parse(d);
+                status.candidatesList = all.filter(c => Math.abs(c.changePercent) >= botSettings.minVol)
+                    .sort((a,b) => Math.abs(b.changePercent) - Math.abs(a.changePercent)).slice(0, 10);
+            } catch (e) {}
         });
-    }
+    }).on('error', () => {});
 }
 
-app.get('/api/status', (req, res) => res.json({ botSettings, status }));
-app.post('/api/settings', (req, res) => { botSettings = {...botSettings, ...req.body}; res.json({ok:true}); });
-
-app.get('/', (req, res) => {
-    res.send(`
-<!DOCTYPE html>
-<html>
+// --- GIAO DIỆN HTML (CÓ BẢNG REVIEW BIẾN ĐỘNG) ---
+const APP = express();
+APP.use(express.json());
+APP.get('/', (req, res) => {
+    res.send(`<!DOCTYPE html>
+<html lang="vi">
 <head>
     <meta charset="UTF-8">
-    <title>LUFFY DASHBOARD</title>
+    <title>MONCEY D. LUFFY BOT</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=Bangers&family=JetBrains+Mono:wght@400;700&display=swap');
-        body { background: #0a0a0c; color: #eee; font-family: 'Inter', sans-serif; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+        @import url('https://fonts.googleapis.com/css2?family=Bangers&family=JetBrains+Mono&display=swap');
+        :root { --luffy-red: #ff4d4d; --bg-dark: #0a0a0c; }
+        body { background: var(--bg-dark); color: #eee; font-family: 'Inter', sans-serif; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
         .luffy-font { font-family: 'Bangers', cursive; letter-spacing: 2px; }
         .mono { font-family: 'JetBrains Mono', monospace; }
         .card { background: rgba(15, 15, 20, 0.9); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 12px; }
-        .up { color: #22c55e; } .down { color: #ef4444; }
+        .status-tag { font-size: 9px; padding: 2px 8px; border-radius: 4px; background: rgba(0,0,0,0.6); }
     </style>
 </head>
-<body class="p-4">
+<body class="p-2 md:p-4">
     <header class="card p-4 mb-3 flex justify-between items-center border-b-2 border-red-500">
-        <div>
-            <h1 class="luffy-font text-4xl text-white">MONCEY D. LUFFY</h1>
-            <div id="statusText" class="text-[10px] font-bold text-gray-500 uppercase">OFFLINE</div>
+        <div class="flex items-center gap-4">
+            <h1 class="luffy-font text-4xl text-white uppercase">Moncey D. Luffy</h1>
+            <span id="botStatusText" class="status-tag text-gray-500 font-black">OFFLINE</span>
         </div>
-        <div id="balance" class="text-3xl font-black text-yellow-400 mono">$0.00</div>
-        <button id="runBtn" onclick="toggleBot()" class="bg-green-600 px-8 py-3 rounded-xl font-black text-white uppercase">Giương Buồm</button>
+        <div class="text-center">
+            <p class="text-[10px] text-gray-500 uppercase">KHO BÁU USDT</p>
+            <p id="balance" class="text-2xl font-black text-yellow-400 mono">$0.00</p>
+        </div>
     </header>
 
-    <div class="grid grid-cols-4 gap-3 mb-3">
-        <div class="card p-3">
-            <label class="text-[10px] text-gray-500 block">VỐN ($)</label>
-            <input type="number" id="invValue" class="bg-transparent text-white font-bold w-full outline-none" value="1.5">
-        </div>
-        <div class="card p-3">
-            <label class="text-[10px] text-gray-500 block">LỌC SÓNG (%)</label>
-            <input type="number" id="minVol" class="bg-transparent text-red-500 font-bold w-full outline-none" value="5.0">
-        </div>
-        <div class="card p-3">
-            <label class="text-[10px] text-gray-500 block">MAX LỆNH</label>
-            <input type="number" id="maxPositions" class="bg-transparent text-white font-bold w-full outline-none" value="5">
-        </div>
-        <button onclick="updateSettings()" class="card bg-white/5 font-bold text-xs uppercase hover:bg-white/10">Cập Nhật</button>
+    <div class="grid grid-cols-2 md:grid-cols-6 gap-2 mb-3">
+        <div class="card p-2"><label class="text-[9px] text-gray-500 uppercase">Vốn (%)</label><input type="number" id="invValue" class="w-full bg-transparent text-white mono outline-none"></div>
+        <div class="card p-2"><label class="text-[9px] text-gray-500 uppercase">Sóng %</label><input type="number" id="minVol" class="w-full bg-transparent text-red-400 mono outline-none"></div>
+        <div class="card p-2"><label class="text-[9px] text-gray-500 uppercase">Max Lệnh</label><input type="number" id="maxPositions" class="w-full bg-transparent mono outline-none"></div>
+        <button id="runBtn" onclick="handleToggle()" class="bg-green-600 rounded-lg font-black text-white text-xs">🚢 RA KHƠI</button>
+        <button onclick="handleUpdate()" class="bg-white/10 rounded-lg text-xs font-bold text-gray-300">CẬP NHẬT</button>
     </div>
 
-    <div class="flex-grow grid grid-cols-12 gap-3 overflow-hidden">
-        <div class="col-span-3 card flex flex-col overflow-hidden">
-            <div id="logs" class="p-3 text-[10px] mono space-y-2 overflow-y-auto"></div>
+    <div class="flex-grow grid grid-cols-1 md:grid-cols-12 gap-3 overflow-hidden">
+        <div class="md:col-span-4 flex flex-col gap-3 overflow-hidden">
+            <div class="card flex-grow flex flex-col overflow-hidden">
+                <div class="p-2 border-b border-white/5 text-[10px] font-black text-blue-400 uppercase italic">Nhật ký hải trình</div>
+                <div id="botLogs" class="flex-grow overflow-y-auto p-2 mono text-[10px] space-y-1"></div>
+            </div>
+            <div class="card h-1/2 flex flex-col overflow-hidden border-t-2 border-yellow-500">
+                <div class="p-2 border-b border-white/5 text-[10px] font-black text-yellow-400 uppercase italic">Radar Ứng Viên</div>
+                <div id="candidateReview" class="flex-grow overflow-y-auto p-2 mono text-[10px]"></div>
+            </div>
         </div>
-        <div class="col-span-9 card overflow-hidden border-t-2 border-red-500">
-            <table class="w-full text-left text-[11px] mono">
-                <thead class="bg-black text-gray-500 uppercase text-[9px]">
-                    <tr><th class="p-3">Cặp Tiền</th><th class="p-3 text-center">1M</th><th class="p-3 text-center">5M</th><th class="p-3 text-center">15M</th><th class="p-3 text-right">PNL</th></tr>
-                </thead>
-                <tbody id="tableBody"></tbody>
-            </table>
+        <div class="md:col-span-8 card flex flex-col overflow-hidden border-t-2 border-red-500">
+            <div class="p-3 border-b border-white/5 flex justify-between items-center"><h3 class="luffy-font text-xl text-red-500 italic uppercase">Chiến trường Live</h3></div>
+            <div class="flex-grow overflow-y-auto">
+                <table class="w-full text-left text-[11px] mono">
+                    <thead class="bg-black/80 sticky top-0 text-gray-500 uppercase text-[9px]"><tr><th class="p-3">Cặp</th><th class="p-3">Side</th><th class="p-3">Giá</th><th class="p-3 text-right">PnL%</th></tr></thead>
+                    <tbody id="positionTable"></tbody>
+                </table>
+            </div>
         </div>
     </div>
 
@@ -153,41 +191,76 @@ app.get('/', (req, res) => {
                 const res = await fetch('/api/status');
                 const data = await res.json();
                 isRunning = data.botSettings.isRunning;
-                document.getElementById('runBtn').innerText = isRunning ? "🛑 HẠ BUỒM" : "🚢 GIƯƠNG BUỒM";
-                document.getElementById('runBtn').className = isRunning ? "bg-red-600 px-8 py-3 rounded-xl font-black text-white" : "bg-green-600 px-8 py-3 rounded-xl font-black text-white";
-                document.getElementById('statusText').innerText = isRunning ? "ĐANG TUẦN TRA" : "OFFLINE";
-                document.getElementById('balance').innerText = "$" + data.status.currentBalance.toFixed(2);
-                document.getElementById('logs').innerHTML = data.status.botLogs.map(l => \`<div class="border-l-2 border-white/10 pl-2">[\${l.time}] \${l.msg}</div>\`).join('');
+                document.getElementById('botStatusText').innerText = isRunning ? "ĐANG TUẦN TRA" : "OFFLINE";
+                document.getElementById('botStatusText').className = isRunning ? "status-tag text-green-500" : "status-tag text-gray-500";
+                document.getElementById('runBtn').innerText = isRunning ? "🛑 HẠ BUỒM" : "🚢 RA KHƠI";
+                document.getElementById('runBtn').className = isRunning ? "bg-red-600 rounded-lg font-black text-white text-xs" : "bg-green-600 rounded-lg font-black text-white text-xs";
+                document.getElementById('balance').innerText = "$" + (data.status.currentBalance || 0).toFixed(2);
+                document.getElementById('botLogs').innerHTML = data.status.botLogs.map(l => \`<div>[\${l.time}] \${l.msg}</div>\`).join('');
                 
-                const active = data.status.activePositions;
-                const candidates = data.status.candidatesList.slice(0, 15);
-                let html = active.map(p => \`<tr class="bg-red-500/10 font-bold border-l-4 border-red-500"><td class="p-3 text-white">\${p.symbol} [\${p.side}]</td><td colspan="3" class="text-center text-gray-600 italic">Position Active</td><td class="p-3 text-right \${p.pnlPercent >= 0 ? 'up' : 'down'}">\${p.pnlPercent}%</td></tr>\`).join('');
-                document.getElementById('tableBody').innerHTML = html + candidates.map(c => \`<tr class="opacity-50 border-b border-white/5"><td class="p-3">\${c.symbol}</td><td class="p-3 text-center \${c.c1 >= 0 ? 'up' : 'down'}">\${c.c1}%</td><td class="p-3 text-center \${c.c5 >= 0 ? 'up' : 'down'}">\${c.c5}%</td><td class="p-3 text-center \${c.c15 >= 0 ? 'up' : 'down'}">\${c.c15}%</td><td class="p-3 text-right text-gray-600 italic">Watching</td></tr>\`).join('');
-            } catch (e) {}
+                // Review ứng viên động
+                document.getElementById('candidateReview').innerHTML = data.status.candidatesList.map(c => \`
+                    <div class="flex justify-between border-b border-white/5 py-1">
+                        <span>\${c.symbol}</span>
+                        <span class="\${c.changePercent >= 0 ? 'text-green-400' : 'text-red-400'}">\${c.changePercent}%</span>
+                    </div>
+                \`).join('');
+
+                document.getElementById('positionTable').innerHTML = data.activePositions.map(p => \`
+                    <tr class="border-b border-white/5"><td class="p-3 font-bold">\${p.symbol}</td><td class="p-3 \${p.side === 'LONG' ? 'text-green-400' : 'text-red-400'}">\${p.side} \${p.leverage}x</td><td class="p-3 text-gray-500">\${p.entryPrice}</td><td class="p-3 text-right font-black \${parseFloat(p.pnlPercent) >= 0 ? 'text-green-400' : 'text-red-400'}">\${p.pnlPercent}%</td></tr>
+                \`).join('');
+                if(!document.activeElement.tagName.includes('INPUT')) {
+                    document.getElementById('invValue').value = data.botSettings.invValue;
+                    document.getElementById('minVol').value = data.botSettings.minVol;
+                    document.getElementById('maxPositions').value = data.botSettings.maxPositions;
+                }
+            } catch(e){}
         }
-        async function toggleBot() {
-            await fetch('/api/settings', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({isRunning: !isRunning}) });
-            sync();
+        async function handleToggle() { isRunning = !isRunning; await fetch('/api/settings', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ isRunning }) }); }
+        async function handleUpdate() {
+            const body = { invValue: parseFloat(document.getElementById('invValue').value), minVol: parseFloat(document.getElementById('minVol').value), maxPositions: parseInt(document.getElementById('maxPositions').value) };
+            await fetch('/api/settings', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body) });
         }
-        async function updateSettings() {
-            const body = {
-                invValue: parseFloat(document.getElementById('invValue').value),
-                minVol: parseFloat(document.getElementById('minVol').value),
-                maxPositions: parseInt(document.getElementById('maxPositions').value)
-            };
-            await fetch('/api/settings', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
-        }
-        setInterval(sync, 1000);
+        setInterval(sync, 2000);
     </script>
 </body>
-</html>
-    `);
+</html>`);
 });
 
-app.listen(9001, async () => {
-    console.log("⚓ LUFFY BOT READY ON PORT 9001");
-    const info = await binanceReq('/fapi/v1/exchangeInfo');
-    info.symbols?.forEach(s => status.exchangeInfo[s.symbol] = { quantityPrecision: s.quantityPrecision });
-    setInterval(patrol, 1000);
-    setInterval(syncAccount, 3000);
+// Các API và khởi tạo giữ nguyên như cũ
+APP.get('/api/status', async (req, res) => {
+    try {
+        const pos = await callBinance('/fapi/v2/positionRisk');
+        const active = pos.filter(p => parseFloat(p.positionAmt) !== 0).map(p => {
+            const entry = parseFloat(p.entryPrice);
+            const amt = Math.abs(parseFloat(p.positionAmt));
+            const pnl = (entry > 0) ? ((parseFloat(p.unrealizedProfit) / ((entry * amt) / p.leverage)) * 100).toFixed(2) : "0.00";
+            return { symbol: p.symbol, side: p.positionSide, leverage: p.leverage, entryPrice: p.entryPrice, markPrice: p.markPrice, pnlPercent: pnl };
+        });
+        res.json({ botSettings, status, activePositions: active });
+    } catch (e) { res.status(500).send(); }
 });
+APP.post('/api/settings', (req, res) => { botSettings = { ...botSettings, ...req.body }; res.json({ ok: true }); });
+
+function init() {
+    https.get('https://fapi.binance.com/fapi/v1/exchangeInfo', (r) => {
+        let d = ''; r.on('data', c => d += c);
+        r.on('end', () => {
+            try {
+                const info = JSON.parse(d);
+                info.symbols.forEach(s => {
+                    const lot = s.filters.find(f => f.filterType === 'LOT_SIZE');
+                    status.exchangeInfo[s.symbol] = { quantityPrecision: s.quantityPrecision, pricePrecision: s.pricePrecision, stepSize: parseFloat(lot.stepSize) };
+                });
+                isInitializing = false;
+            } catch (e) {}
+        });
+    });
+}
+
+init();
+setInterval(fetchCandidates, 3000);
+setInterval(hunt, 2000);
+setInterval(cleanupClosedPositions, 5000);
+setInterval(enforceTPSL, 10000);
+APP.listen(9001, '0.0.0.0');
