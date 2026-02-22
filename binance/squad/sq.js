@@ -22,51 +22,51 @@ let context = null;
 let mainPage = null;
 let coinQueue = [];
 
-// --- DỮ LIỆU 1200 CÂU ---
-const intros = Array.from({ length: 300 }, (_, i) => `Nhận định mã COIN phiên số ${i+1}. Sóng đang khá đẹp cho anh em.`.replace("COIN", "COIN"));
-const bodies = Array.from({ length: 300 }, (_, i) => `Phân tích kỹ thuật: Chỉ số CHANGE% cho thấy lực mua chủ động đang áp đảo.`.replace("CHANGE%", "CHANGE%"));
-const closings = Array.from({ length: 300 }, (_, i) => `Chúc anh em thắng lợi lớn ở kèo số ${i+1}! Luôn kỷ luật nhé.`);
-const cryptoQuestions = Array.from({ length: 300 }, (_, i) => `Câu hỏi thảo luận ${i+1}: Anh em nghĩ sao về xu hướng của BTC trong 24h tới?`);
+// --- DỮ LIỆU ĐẦY ĐỦ 1200 CÂU ---
+const intros = Array.from({ length: 300 }, (_, i) => `Nhận định mã COIN phiên số ${i+1}. Sóng đang đẹp.`.replace("COIN", "COIN"));
+const bodies = Array.from({ length: 300 }, (_, i) => `Phân tích: Biến động CHANGE% cho thấy lực mua đang áp đảo.`.replace("CHANGE%", "CHANGE%"));
+const closings = Array.from({ length: 300 }, (_, i) => `Chúc thắng lợi kèo số ${i+1}! Kỷ luật thép.`);
+const cryptoQuestions = Array.from({ length: 300 }, (_, i) => `Thảo luận ${i+1}: Anh em kỳ vọng gì ở nhịp này của BTC?`);
 
-// --- FIX LỖI WINDOWS/PM2 ---
 async function killChrome() {
-    try {
-        if (process.platform === 'win32') execSync('taskkill /F /IM chrome.exe /T 2>nul || exit 0');
-    } catch (e) {}
+    try { if (process.platform === 'win32') execSync('taskkill /F /IM chrome.exe /T 2>nul || exit 0'); } catch (e) {}
 }
 
 async function humanType(page, text) {
     for (const char of text) {
-        await page.keyboard.type(char, { delay: Math.floor(Math.random() * 60) + 40 });
+        await page.keyboard.type(char, { delay: Math.floor(Math.random() * 50) + 30 });
     }
 }
 
+// --- LUỒNG CHÍNH ---
 async function postTask() {
     if (!isRunning) return;
     try {
         if (!context) {
             context = await chromium.launchPersistentContext(userDataDir, {
                 headless: false,
-                // Thêm các args này để tránh lỗi "Target closed" trên Windows
                 args: [
                     '--disable-blink-features=AutomationControlled',
                     '--no-sandbox',
-                    '--disable-setuid-sandbox',
-                    '--disable-extensions',
-                    '--no-first-run',
-                    '--no-default-browser-check'
-                ],
-                viewport: { width: 1280, height: 720 }
+                    '--disable-gpu', // KHẮC PHỤC LỖI EXIT_CODE=34 TRONG LOG
+                    '--disable-software-rasterizer',
+                    '--disable-dev-shm-usage',
+                    '--password-store=basic' // TRÁNH LỖI TOKEN DECRYPT
+                ]
             });
-            
-            // Lắng nghe nếu trình duyệt bị đóng tay thì reset biến
             context.on('close', () => { context = null; mainPage = null; });
         }
 
         if (!mainPage || mainPage.isClosed()) {
             mainPage = await context.newPage();
-            await mainPage.goto('https://www.binance.com/vi/square', { waitUntil: 'networkidle', timeout: 60000 });
         }
+
+        // Truy cập Square
+        await mainPage.goto('https://www.binance.com/vi/square', { waitUntil: 'domcontentloaded', timeout: 60000 });
+        
+        // Chờ box nhập liệu xuất hiện
+        const textbox = mainPage.locator('div[contenteditable="true"]').first();
+        await textbox.waitFor({ state: 'visible', timeout: 15000 });
 
         let content = "";
         if (totalPosts > 0 && totalPosts % 4 === 0) {
@@ -82,8 +82,6 @@ async function postTask() {
             content = `🔥 $${c.symbol}\n\n${intros[Math.floor(Math.random()*300)].replace("COIN", c.symbol)}\n\n${bodies[Math.floor(Math.random()*300)].replace("CHANGE%", c.change)}\n\n📍 ENTRY: ${c.price}\n\n${closings[Math.floor(Math.random()*300)]}`;
         }
 
-        const textbox = mainPage.locator('div[contenteditable="true"]').first();
-        await textbox.waitFor({ state: 'visible', timeout: 30000 });
         await textbox.click();
         await mainPage.keyboard.press('Control+A');
         await mainPage.keyboard.press('Backspace');
@@ -93,13 +91,12 @@ async function postTask() {
         if (await btn.isEnabled()) {
             await btn.click();
             totalPosts++;
-            history.unshift({ time: new Date().toLocaleTimeString(), status: `Đã đăng bài số ${totalPosts}` });
+            history.unshift({ time: new Date().toLocaleTimeString(), status: `Đã đăng $${content.split(' ')[1] || 'bài'}` });
             await new Promise(r => setTimeout(r, (Math.floor(Math.random() * 60) + 60) * 1000));
         }
     } catch (err) {
-        console.log(`❌ Lỗi: ${err.message}`);
-        // Nếu lỗi do đóng trình duyệt, xóa sạch để khởi tạo lại
-        if (err.message.includes('closed')) {
+        console.log(`❌ Lỗi luồng: ${err.message}`);
+        if (err.message.includes('closed') || err.message.includes('navigation')) {
             context = null; mainPage = null;
         }
         await new Promise(r => setTimeout(r, 10000));
@@ -107,21 +104,22 @@ async function postTask() {
     if (isRunning) postTask();
 }
 
-// --- GIAO DIỆN ---
+// --- GIAO DIỆN ĐIỀU KHIỂN ---
 app.get('/', (req, res) => {
-    res.send(`
-    <html><body style="background:#0b0e11;color:#fff;text-align:center;padding:50px;font-family:sans-serif;">
-        <h2>BINANCE BOT PANEL</h2>
-        <div id="st">Đang kết nối...</div>
-        <button style="padding:15px;margin:10px;background:#f0b90b;font-weight:bold;" onclick="call('/login')">LOGIN (MỞ CHROME)</button>
-        <button style="padding:15px;margin:10px;background:#2ebd85;color:#fff;" onclick="call('/start')">CHẠY BOT</button>
-        <button style="padding:15px;margin:10px;background:#f6465d;color:#fff;" onclick="call('/stop')">DỪNG</button>
-        <div id="log" style="margin-top:20px;text-align:left;max-width:400px;margin-left:auto;margin-right:auto;"></div>
+    res.send(`<html><body style="background:#0b0e11;color:#fff;text-align:center;padding:50px;font-family:sans-serif;">
+        <h1>SQUARE BOT PRO</h1>
+        <div id="st">Kết nối...</div>
+        <hr style="border:0.5px solid #333; margin:20px;">
+        <button style="padding:15px 30px;background:#f0b90b;border:none;border-radius:5px;font-weight:bold;cursor:pointer;" onclick="call('/login')">1. LOGIN (MỞ CHROME)</button>
+        <br><br>
+        <button style="padding:15px 30px;background:#2ebd85;color:#fff;border:none;border-radius:5px;font-weight:bold;cursor:pointer;" onclick="call('/start')">2. CHẠY AUTO</button>
+        <button style="padding:15px 30px;background:#f6465d;color:#fff;border:none;border-radius:5px;font-weight:bold;cursor:pointer;" onclick="call('/stop')">DỪNG</button>
+        <div id="log" style="margin-top:20px;text-align:left;max-width:400px;margin:auto;font-size:13px;color:#aaa;"></div>
         <script>
             function call(u){ fetch(u).then(r=>r.json()).then(d=>alert(d.msg)); }
             setInterval(()=>{
                 fetch('/stats').then(r=>r.json()).then(d=>{
-                    document.getElementById('st').innerText = (d.isRunning?'RUNNING':'STOPPED') + ' | Tổng: ' + d.totalPosts;
+                    document.getElementById('st').innerText = (d.isRunning?'🟢 ĐANG CHẠY':'🔴 ĐÃ DỪNG') + ' | Tổng: ' + d.totalPosts;
                     document.getElementById('log').innerHTML = d.history.map(h=>'<div>['+h.time+'] '+h.status+'</div>').join('');
                 });
             },2000);
@@ -131,13 +129,23 @@ app.get('/', (req, res) => {
 
 app.get('/stats', (req, res) => res.json({ isRunning, totalPosts, history }));
 app.get('/login', async (req, res) => {
-    isRunning = false; await killChrome();
-    chromium.launchPersistentContext(userDataDir, { headless: false, args: ['--no-sandbox'] }).then(ctx => {
-        context = ctx; context.newPage().then(p => { mainPage = p; p.goto('https://www.binance.com/vi/square'); });
+    isRunning = false; 
+    await killChrome();
+    // Khởi tạo mới hoàn toàn
+    chromium.launchPersistentContext(userDataDir, { 
+        headless: false, 
+        args: ['--disable-gpu', '--no-sandbox', '--password-store=basic'] 
+    }).then(ctx => {
+        context = ctx;
+        context.newPage().then(p => { 
+            mainPage = p; 
+            p.goto('https://www.binance.com/vi/square'); 
+        });
     });
-    res.json({ msg: "Đang mở trình duyệt trên máy bot..." });
+    res.json({ msg: "Đang mở trình duyệt. Hãy login xong rồi bấm Chạy Auto!" });
 });
-app.get('/start', (req, res) => { isRunning = true; postTask(); res.json({ msg: "Bot bắt đầu!" }); });
-app.get('/stop', (req, res) => { isRunning = false; res.json({ msg: "Đã dừng." }); });
+
+app.get('/start', (req, res) => { isRunning = true; postTask(); res.json({ msg: "Bot đã kích hoạt!" }); });
+app.get('/stop', (req, res) => { isRunning = false; res.json({ msg: "Bot tạm dừng." }); });
 
 app.listen(port, '0.0.0.0', () => console.log(`Live: http://localhost:${port}`));
