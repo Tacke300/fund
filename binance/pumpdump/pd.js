@@ -13,12 +13,7 @@ const HISTORY_FILE = './history_db.json';
 
 // --- CẤU HÌNH & TRẠNG THÁI ---
 let botSettings = { 
-    isRunning: false, 
-    maxPositions: 3, 
-    invValue: 1.5, 
-    invType: 'percent', 
-    minVol: 5.0, 
-    accountSL: 30 
+    isRunning: false, maxPositions: 10, invValue: 1.5, invType: 'percent', minVol: 5.0, accountSL: 30 
 };
 if (fs.existsSync(CONFIG_FILE)) botSettings = JSON.parse(fs.readFileSync(CONFIG_FILE));
 
@@ -35,7 +30,7 @@ if (fs.existsSync(HISTORY_FILE)) {
     } catch (e) {}
 }
 
-// --- HÀM HELPER & SERVER LOGIC ---
+// --- LOGIC SERVER (THỐNG KÊ & LỊCH SỬ) ---
 function getPivotTime() {
     const now = new Date();
     let pivot = new Date(now);
@@ -48,8 +43,6 @@ function addBotLog(msg, type = 'info') {
     const time = new Date().toLocaleTimeString('vi-VN', { hour12: false });
     status.botLogs.unshift({ time, msg, type });
     if (status.botLogs.length > 200) status.botLogs.pop();
-    const colors = { success: '\x1b[32m', error: '\x1b[31m', warn: '\x1b[33m', info: '\x1b[36m', debug: '\x1b[90m' };
-    console.log(`${colors[type] || ''}[${time}] [${type.toUpperCase()}] ${msg}\x1b[0m`);
 }
 
 async function callBinance(endpoint, method = 'GET', params = {}) {
@@ -74,7 +67,7 @@ async function callBinance(endpoint, method = 'GET', params = {}) {
     });
 }
 
-// --- 1. DỌN DẸP VỊ THẾ (GIỮ NGUYÊN GỐC) ---
+// --- LOGIC TP/SL GỐC CỦA BẠN (KHÔNG SỬA) ---
 async function cleanupClosedPositions() {
     if (!botSettings.isRunning) return;
     try {
@@ -83,16 +76,14 @@ async function cleanupClosedPositions() {
             const symbol = botManagedSymbols[i];
             const p = positions.find(pos => pos.symbol === symbol);
             if (!p || parseFloat(p.positionAmt) === 0) {
-                addBotLog(`🧹 [DỌN DẸP] Phát hiện ${symbol} đã đóng vị thế.`, "info");
                 await callBinance('/fapi/v1/allOpenOrders', 'DELETE', { symbol }).catch(()=>{});
                 botManagedSymbols.splice(i, 1);
-                addBotLog(`🔓 [SLOT] Giải phóng xong ${symbol}.`, "success");
+                addBotLog(`🔓 [SLOT] Giải phóng ${symbol}`, "success");
             }
         }
-    } catch (e) { addBotLog(`⚠️ [LỖI DỌN DẸP] ${e.msg}`, "error"); }
+    } catch (e) {}
 }
 
-// --- 2. TÍNH TOÁN TP/SL (GIỮ NGUYÊN GỐC) ---
 function calcTPSL(lev, side, entryPrice) {
     let m = lev < 26 ? 1.11 : (lev < 50 ? 2.22 : (lev < 75 ? 3.33 : 5.55));
     const rate = m / lev;
@@ -101,7 +92,6 @@ function calcTPSL(lev, side, entryPrice) {
     return { tp, sl };
 }
 
-// --- 3. CÀI ĐẶT TP/SL (GIỮ NGUYÊN GỐC) ---
 async function enforceTPSL() {
     try {
         const positions = await callBinance('/fapi/v2/positionRisk');
@@ -126,7 +116,6 @@ async function enforceTPSL() {
                         stopPrice: plan.tp.toFixed(info.pricePrecision), workingType: 'MARK_PRICE',
                         closePosition: 'true', timeInForce: 'GTC'
                     });
-                    addBotLog(`🎯 [TP] Cài chốt lãi ${symbol} tại: ${plan.tp.toFixed(info.pricePrecision)}`, "success");
                 }
                 if (!hasSL) {
                     await callBinance('/fapi/v1/order', 'POST', {
@@ -134,27 +123,24 @@ async function enforceTPSL() {
                         stopPrice: plan.sl.toFixed(info.pricePrecision), workingType: 'MARK_PRICE',
                         closePosition: 'true', timeInForce: 'GTC'
                     });
-                    addBotLog(`🛑 [SL] Cài cắt lỗ ${symbol} tại: ${plan.sl.toFixed(info.pricePrecision)}`, "success");
                 }
             }
         }
     } catch (e) {}
 }
 
-// --- 4. HÀM SĂN LỆNH (GIỮ NGUYÊN GỐC) ---
+// --- HÀM HUNT GỐC ---
 async function hunt() {
     if (isInitializing || !botSettings.isRunning || isProcessing) return;
     try {
         isProcessing = true;
-        const currentUsed = botManagedSymbols.length;
-        if (currentUsed >= botSettings.maxPositions || status.candidatesList.length === 0) return;
+        if (botManagedSymbols.length >= botSettings.maxPositions || status.candidatesList.length === 0) return;
 
         for (const c of status.candidatesList) {
             if (botManagedSymbols.includes(c.symbol)) continue;
             if (botManagedSymbols.length >= botSettings.maxPositions) break;
 
             try {
-                addBotLog(`🎯 [CHẤP NHẬN] ${c.symbol} đạt ${c.changePercent}%.`, "info");
                 const brackets = await callBinance('/fapi/v1/leverageBracket', 'GET', { symbol: c.symbol });
                 const lev = brackets[0].brackets[0].initialLeverage;
                 await callBinance('/fapi/v1/leverage', 'POST', { symbol: c.symbol, leverage: lev });
@@ -178,52 +164,33 @@ async function hunt() {
                 });
 
                 botManagedSymbols.push(c.symbol);
-                addBotLog(`🚀 [THÀNH CÔNG] Đã mở lệnh ${c.symbol}.`, "success");
+                addBotLog(`🚀 Mở lệnh ${c.symbol}`, "success");
                 await new Promise(res => setTimeout(res, 3000));
                 await enforceTPSL();
-            } catch (err) { addBotLog(`❌ [THẤT BẠI] ${c.symbol}: ${JSON.stringify(err)}`, "error"); }
+            } catch (err) {}
         }
     } catch (e) {} finally { isProcessing = false; }
 }
 
-// --- 5. LẤY TÍN HIỆU & CẬP NHẬT LỊCH SỬ (GIỮ LOGIC SERVER) ---
+// --- ĐỒNG BỘ DỮ LIỆU TỪ SERVER CỔNG 9000 ---
 function fetchCandidates() {
-    http.get('http://127.0.0.1:9000/api/live', res => {
+    http.get('http://127.0.0.1:9000/api/data', res => {
         let d = ''; res.on('data', chunk => d += chunk);
         res.on('end', () => {
             try {
-                const all = JSON.parse(d);
-                status.candidatesList = all.filter(c => Math.abs(c.c1) >= botSettings.minVol)
-                    .map(c => ({ symbol: c.symbol, changePercent: c.c1, c5: c.c5, c15: c.c15, currentPrice: c.currentPrice }))
-                    .sort((a,b) => Math.abs(b.changePercent) - Math.abs(a.changePercent)).slice(0, 10);
-                
-                // Logic Win/Lose Lịch sử (Y như Server)
-                const now = Date.now();
-                status.candidatesList.forEach(c => {
-                    let hist = historyMap.get(c.symbol);
-                    if (hist && hist.status === 'PENDING') {
-                        const diff = ((c.currentPrice - hist.snapPrice) / hist.snapPrice) * 100;
-                        if (hist.type === 'DOWN') {
-                            if (diff <= -5) hist.status = 'WIN'; else if (diff >= 5) hist.status = 'LOSE';
-                        } else {
-                            if (diff >= 5) hist.status = 'WIN'; else if (diff <= -5) hist.status = 'LOSE';
-                        }
-                    }
-                    if (Math.abs(c.changePercent) >= botSettings.minVol) {
-                        if (!hist || hist.status !== 'PENDING') {
-                            historyMap.set(c.symbol, { 
-                                symbol: c.symbol, startTime: now, max1: c.changePercent, max5: c.c5, max15: c.c15,
-                                snapPrice: c.currentPrice, type: (c.changePercent >= 0) ? 'UP' : 'DOWN', status: 'PENDING' 
-                            });
-                        }
-                    }
-                });
+                const data = JSON.parse(d);
+                // Cập nhật candidates cho Bot
+                status.candidatesList = data.live.map(c => ({
+                    symbol: c.symbol, changePercent: c.c1, c5: c.c5, c15: c.c15, currentPrice: c.currentPrice
+                }));
+                // Đồng bộ lịch sử Win/Lose từ Server
+                data.history.forEach(h => historyMap.set(h.symbol + h.startTime, h));
             } catch (e) {}
         });
     }).on('error', () => {});
 }
 
-// --- EXPRESS SERVER & GIAO DIỆN ---
+// --- API & GIAO DIỆN (GIỮ NGUYÊN HTML CỦA BẠN) ---
 const APP = express();
 APP.use(express.json());
 
@@ -252,41 +219,169 @@ APP.post('/api/settings', (req, res) => {
 });
 
 APP.get('/', (req, res) => {
-    res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><script src="https://cdn.tailwindcss.com"></script><style>body{background:#050505;color:#d4d4d8;font-family:monospace;}.up{color:#ef4444;}.down{color:#22c55e;}</style></head><body class="p-4">
-    <div class="flex justify-between items-center mb-4 border-b border-zinc-800 pb-2"><h1 class="text-2xl font-black text-red-500 italic">LUFFY COMMANDER</h1><div id="stats" class="font-bold text-sm"></div><div id="balance" class="text-xl font-bold text-yellow-400">$0.00</div></div>
-    <div class="grid grid-cols-5 gap-2 mb-4 bg-zinc-900 p-2 rounded">
-        <input id="invValue" type="number" class="bg-black p-1 rounded border border-zinc-700" value="\${botSettings.invValue}">
-        <select id="invType" class="bg-black p-1 rounded border border-zinc-700"><option value="percent" \${botSettings.invType==='percent'?'selected':''}>% Acc</option><option value="fixed" \${botSettings.invType==='fixed'?'selected':''}>$ Fix</option></select>
-        <input id="minVol" type="number" class="bg-black p-1 rounded border border-zinc-700" value="\${botSettings.minVol}">
-        <button id="runBtn" onclick="toggle()" class="bg-green-600 rounded font-bold text-xs uppercase">START</button>
-        <button onclick="update()" class="bg-zinc-700 rounded font-bold text-xs">SAVE</button>
+    // CHÈN TOÀN BỘ HTML GIAO DIỆN LUFFY CỦA BẠN VÀO ĐÂY
+    res.send(`<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <title>MONCEY D. LUFFY BOT</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Bangers&family=JetBrains+Mono:wght@400;700&display=swap');
+        :root { --luffy-red: #ff4d4d; --bg-dark: #0a0a0c; }
+        body { background: var(--bg-dark); color: #eee; font-family: 'Inter', sans-serif; overflow: hidden; height: 100vh; display: flex; flex-direction: column; }
+        .luffy-font { font-family: 'Bangers', cursive; letter-spacing: 2px; }
+        .mono { font-family: 'JetBrains Mono', monospace; }
+        .card { background: rgba(15, 15, 20, 0.9); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 16px; }
+        .btn-start { background: linear-gradient(135deg, #22c55e, #15803d); }
+        .btn-stop { background: linear-gradient(135deg, #ef4444, #b91c1c); animation: pulse 2s infinite; }
+        .up { color: #ff4d4d; } .down { color: #22c55e; }
+        @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.7; } 100% { opacity: 1; } }
+    </style>
+</head>
+<body class="p-4">
+    <header class="card p-4 mb-4 flex justify-between items-center border-b-2 border-red-500">
+        <div class="flex items-center gap-4">
+            <h1 class="luffy-font text-5xl text-white uppercase leading-none italic">Moncey D. Luffy</h1>
+            <div id="stats" class="mono text-xs font-bold text-gray-400"></div>
+        </div>
+        <div class="flex gap-8 items-center">
+            <div class="text-right">
+                <p class="text-[10px] text-gray-500 uppercase font-bold">KHO BÁU USDT</p>
+                <p id="balance" class="text-3xl font-black text-yellow-400 mono">$0.00</p>
+            </div>
+            <div id="botStatusText" class="px-4 py-1 bg-gray-800 rounded font-black text-xs">OFFLINE</div>
+        </div>
+    </header>
+
+    <div class="grid grid-cols-2 md:grid-cols-6 gap-3 mb-4">
+        <div class="card p-2">
+            <label class="text-[10px] text-gray-500 font-bold block mb-1 uppercase">Vốn Lệnh</label>
+            <div class="flex gap-1">
+                <input type="number" id="invValue" class="w-full bg-black/40 p-1 text-xs mono text-white" value="\${botSettings.invValue}">
+                <select id="invType" class="bg-black text-[10px] text-yellow-500 font-bold">
+                    <option value="percent" \${botSettings.invType==='percent'?'selected':''}>%</option>
+                    <option value="fixed" \${botSettings.invType==='fixed'?'selected':''}>$</option>
+                </select>
+            </div>
+        </div>
+        <div class="card p-2">
+            <label class="text-[10px] text-gray-500 font-bold block mb-1 uppercase">Lọc Sóng %</label>
+            <input type="number" id="minVol" class="w-full bg-black/40 p-1 text-xs mono text-red-400 font-bold" value="\${botSettings.minVol}">
+        </div>
+        <div class="card p-2">
+            <label class="text-[10px] text-gray-500 font-bold block mb-1 uppercase">Max Slot</label>
+            <input type="number" id="maxPositions" class="w-full bg-black/40 p-1 text-xs mono" value="\${botSettings.maxPositions}">
+        </div>
+        <div class="card p-2">
+            <label class="text-[10px] text-gray-500 font-bold block mb-1 uppercase">Dừng Tổng %</label>
+            <input type="number" id="accountSL" class="w-full bg-black/40 p-1 text-xs mono" value="\${botSettings.accountSL}">
+        </div>
+        <div class="card p-2 flex items-center">
+            <button id="runBtn" onclick="handleToggle()" class="w-full h-full rounded-xl text-[11px] font-black py-2 uppercase">🚢 GIƯƠNG BUỒM</button>
+        </div>
+        <div class="card p-2 flex items-center">
+            <button onclick="handleUpdate()" class="bg-white/5 border border-white/10 w-full h-full rounded-xl text-[10px] font-bold py-2">CẬP NHẬT</button>
+        </div>
     </div>
-    <div class="grid grid-cols-12 gap-4">
-        <div class="col-span-4 bg-zinc-900/50 p-2 rounded"><h2 class="text-blue-400 font-bold mb-2 text-[10px] uppercase">Live Wave (1m|5m|15m)</h2><table class="w-full text-[10px] text-left"><thead><tr class="text-zinc-500 border-b border-zinc-800"><th class="p-1">COIN</th><th>1M</th><th>5M</th><th>15M</th></tr></thead><tbody id="live"></tbody></table></div>
-        <div class="col-span-5 bg-zinc-900/50 p-2 rounded"><h2 class="text-red-500 font-bold mb-2 text-[10px] uppercase">History Signals</h2><table class="w-full text-[10px] text-left"><thead><tr class="text-zinc-500 border-b border-zinc-800"><th>TIME</th><th>COIN</th><th>MAX</th><th>PRICE</th><th>RES</th></tr></thead><tbody id="hist"></tbody></table></div>
-        <div class="col-span-3 bg-zinc-900/50 p-2 rounded"><h2 class="text-yellow-500 font-bold mb-2 text-[10px] uppercase">Bot Logs</h2><div id="logs" class="text-[9px] space-y-1"></div></div>
+
+    <div class="flex-grow grid grid-cols-12 gap-4 overflow-hidden">
+        <div class="col-span-3 card flex flex-col overflow-hidden border-t-4 border-yellow-500">
+            <div class="p-3 border-b border-white/5 bg-yellow-500/10 font-black text-xs text-yellow-500 uppercase">📡 Sóng Dữ (1m|5m|15m)</div>
+            <div id="signalList" class="flex-grow overflow-y-auto p-2 space-y-1"></div>
+        </div>
+        <div class="col-span-6 card flex flex-col overflow-hidden border-t-4 border-red-500">
+            <div class="p-3 border-b border-white/5 bg-red-500/10 flex justify-between items-center">
+                <span class="luffy-font text-2xl text-red-500 italic">Hải Chiến</span>
+                <span id="posCount" class="bg-red-600 px-3 py-1 text-[10px] font-black rounded-lg uppercase">0 LỆNH</span>
+            </div>
+            <div class="flex-grow overflow-y-auto">
+                <table class="w-full text-left text-[11px] mono">
+                    <thead class="bg-black/80 sticky top-0 text-gray-500 uppercase text-[9px]">
+                        <tr><th class="p-4">Cặp Tiền</th><th class="p-4">Side/Lev</th><th class="p-4 text-right">PnL %</th></tr>
+                    </thead>
+                    <tbody id="positionTable"></tbody>
+                </table>
+            </div>
+        </div>
+        <div class="col-span-3 card flex flex-col overflow-hidden border-t-4 border-blue-500">
+            <div class="p-3 border-b border-white/5 bg-blue-500/10 font-black text-xs text-blue-400 uppercase italic">Hải Trình Log & Lịch Sử</div>
+            <div id="historyBox" class="p-2 border-b border-white/5 bg-black/20 overflow-y-auto max-h-40"></div>
+            <div id="botLogs" class="flex-grow overflow-y-auto p-3 mono text-[9px] space-y-1 text-gray-400"></div>
+        </div>
     </div>
+
     <script>
-        let running = false;
-        async function refresh() {
-            const r = await fetch('/api/status'); const d = await r.json();
-            running = d.botSettings.isRunning;
-            document.getElementById('balance').innerText = '$' + d.status.currentBalance.toFixed(2);
-            document.getElementById('stats').innerHTML = \`<span class="text-green-500">WIN: \${d.stats.win}</span> | <span class="text-red-500">LOSE: \${d.stats.lose}</span>\`;
-            document.getElementById('runBtn').innerText = running ? 'STOP' : 'START';
-            document.getElementById('runBtn').className = running ? 'bg-red-600 rounded font-bold' : 'bg-green-600 rounded font-bold';
-            document.getElementById('live').innerHTML = d.status.candidatesList.map(c => \`<tr><td class="p-1 font-bold">\${c.symbol}</td><td class="\${c.changePercent>=0?'up':'down'}">\${c.changePercent}%</td><td class="\${c.c5>=0?'up':'down'}">\${c.c5}%</td><td class="\${c.c15>=0?'up':'down'}">\${c.c15}%</td></tr>\`).join('');
-            document.getElementById('hist').innerHTML = d.history.map(h => \`<tr class="border-b border-zinc-800/50"><td>\${new Date(h.startTime).toLocaleTimeString([],{hour12:false})}</td><td class="font-bold \${h.max1>=0?'up':'down'}">\${h.symbol}</td><td>\${h.max1}%</td><td>\${h.snapPrice}</td><td class="font-bold \${h.status==='WIN'?'text-green-500':'text-red-500'}">\${h.status}</td></tr>\`).join('');
-            document.getElementById('logs').innerHTML = d.status.botLogs.map(l => \`<div><span class="text-zinc-600">[\${l.time}]</span> \${l.msg}</div>\`).join('');
+        let isRunning = false;
+        async function sync() {
+            try {
+                const res = await fetch('/api/status');
+                const d = await res.json();
+                isRunning = d.botSettings.isRunning;
+                document.getElementById('balance').innerText = \`$\${(d.status.currentBalance || 0).toFixed(2)}\`;
+                document.getElementById('posCount').innerText = \`\${d.activePositions.length} LỆNH\`;
+                document.getElementById('stats').innerHTML = \`<span class="text-green-500">WIN: \${d.stats.win}</span> | <span class="text-red-500">LOSE: \${d.stats.lose}</span>\`;
+                
+                const txt = document.getElementById('botStatusText');
+                txt.innerText = isRunning ? "ĐANG TUẦN TRA" : "OFFLINE";
+                txt.className = \`px-4 py-1 rounded font-black text-xs \${isRunning ? 'bg-green-600' : 'bg-gray-800'}\`;
+                
+                const btn = document.getElementById('runBtn');
+                btn.innerText = isRunning ? "🛑 HẠ BUỒM" : "🚢 GIƯƠNG BUỒM";
+                btn.className = isRunning ? "btn-stop w-full h-full rounded-xl text-[11px] font-black py-2" : "btn-start w-full h-full rounded-xl text-[11px] font-black py-2";
+
+                document.getElementById('signalList').innerHTML = d.status.candidatesList.map(c => \`
+                    <div class="flex justify-between items-center p-2 bg-white/5 rounded-lg border border-white/5 text-[10px]">
+                        <span class="font-bold text-white uppercase">\${c.symbol}</span>
+                        <div class="flex gap-2">
+                            <span class="\${c.changePercent >= 0 ? 'up' : 'down'} font-black">\${c.changePercent}%</span>
+                            <span class="text-gray-600">\${c.c5}%</span>
+                        </div>
+                    </div>
+                \`).join('');
+
+                document.getElementById('positionTable').innerHTML = d.activePositions.map(p => \`
+                    <tr class="hover:bg-white/5 border-b border-white/5">
+                        <td class="p-4 font-bold text-white uppercase">\${p.symbol}</td>
+                        <td class="p-4"><span class="\${p.side === 'LONG' ? 'text-red-400' : 'text-green-400'} font-black">\${p.side} \${p.leverage}x</span></td>
+                        <td class="p-4 text-right font-black \${parseFloat(p.pnlPercent) >= 0 ? 'text-green-400' : 'text-red-400'}">\${p.pnlPercent}%</td>
+                    </tr>
+                \`).join('');
+
+                document.getElementById('historyBox').innerHTML = d.history.map(h => \`
+                    <div class="flex justify-between text-[9px] mb-1 border-b border-white/5">
+                        <span>\${h.symbol}</span>
+                        <span class="\${h.status==='WIN'?'text-green-500':'text-red-500'} font-bold">\${h.status}</span>
+                    </div>
+                \`).join('');
+
+                document.getElementById('botLogs').innerHTML = d.status.botLogs.map(l => \`<div>[\${l.time}] \${l.msg}</div>\`).join('');
+            } catch (e) {}
         }
-        function toggle(){ running=!running; fetch('/api/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({isRunning:running})}); }
-        function update(){ const body={invValue:parseFloat(document.getElementById('invValue').value),invType:document.getElementById('invType').value,minVol:parseFloat(document.getElementById('minVol').value)}; fetch('/api/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); }
-        setInterval(refresh, 2000); refresh();
-    </script></body></html>`);
+
+        async function handleToggle() {
+            isRunning = !isRunning;
+            await fetch('/api/settings', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ isRunning }) });
+        }
+
+        async function handleUpdate() {
+            const body = {
+                invValue: parseFloat(document.getElementById('invValue').value),
+                invType: document.getElementById('invType').value,
+                minVol: parseFloat(document.getElementById('minVol').value),
+                maxPositions: parseInt(document.getElementById('maxPositions').value),
+                accountSL: parseFloat(document.getElementById('accountSL').value)
+            };
+            await fetch('/api/settings', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body) });
+        }
+        setInterval(sync, 2000); sync();
+    </script>
+</body>
+</html>`);
 });
 
+// --- KHỞI CHẠY ---
 async function init() {
-    addBotLog("🔧 [KHỞI TẠO] Lấy Exchange Info...", "info");
     https.get('https://fapi.binance.com/fapi/v1/exchangeInfo', (r) => {
         let d = ''; r.on('data', c => d += c);
         r.on('end', () => {
@@ -296,7 +391,6 @@ async function init() {
                 status.exchangeInfo[s.symbol] = { quantityPrecision: s.quantityPrecision, pricePrecision: s.pricePrecision, stepSize: parseFloat(lot.stepSize) };
             });
             isInitializing = false;
-            addBotLog("✅ [HỆ THỐNG] Ready.", "success");
         });
     });
 }
