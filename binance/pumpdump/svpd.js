@@ -49,7 +49,7 @@ function initWS() {
         tickers.forEach(t => {
             const s = t.s; 
             const p = parseFloat(t.c);
-            if (!coinData[s]) coinData[s] = { symbol: s, prices: [] };
+            if (!coinData[s]) coinData[s] = { symbol: s, prices: [], lastStatusTime: 0 }; // Thêm lastStatusTime
             coinData[s].prices.push({ p, t: now });
             if (coinData[s].prices.length > 100) coinData[s].prices = coinData[s].prices.slice(-100);
 
@@ -64,16 +64,18 @@ function initWS() {
             if (currentPending) {
                 const diff = ((p - currentPending.snapPrice) / currentPending.snapPrice) * 100;
                 if (currentPending.type === 'DOWN') {
-                    if (diff <= -5) { currentPending.status = 'WIN'; currentPending.finalPrice = p; currentPending.endTime = now; }
-                    else if (diff >= 5) { currentPending.status = 'LOSE'; currentPending.finalPrice = p; currentPending.endTime = now; }
+                    if (diff <= -5) { currentPending.status = 'WIN'; currentPending.finalPrice = p; currentPending.endTime = now; coinData[s].lastStatusTime = now; }
+                    else if (diff >= 5) { currentPending.status = 'LOSE'; currentPending.finalPrice = p; currentPending.endTime = now; coinData[s].lastStatusTime = now; }
                 } else {
-                    if (diff >= 5) { currentPending.status = 'WIN'; currentPending.finalPrice = p; currentPending.endTime = now; }
-                    else if (diff <= -5) { currentPending.status = 'LOSE'; currentPending.finalPrice = p; currentPending.endTime = now; }
+                    if (diff >= 5) { currentPending.status = 'WIN'; currentPending.finalPrice = p; currentPending.endTime = now; coinData[s].lastStatusTime = now; }
+                    else if (diff <= -5) { currentPending.status = 'LOSE'; currentPending.finalPrice = p; currentPending.endTime = now; coinData[s].lastStatusTime = now; }
                 }
             }
 
             if (Math.abs(c1) >= 5 || Math.abs(c5) >= 5 || Math.abs(c15) >= 5) {
-                if (!currentPending) {
+                // Kiểm tra điều kiện: Không có lệnh pending VÀ đã quá 15 phút kể từ lần Win/Lose trước đó
+                const cooldownMs = 15 * 60 * 1000;
+                if (!currentPending && (now - coinData[s].lastStatusTime >= cooldownMs)) {
                     const key = `${s}_${now}`;
                     historyMap.set(key, { 
                         symbol: s, startTime: now, lastUpdate: now, 
