@@ -11,27 +11,33 @@ let coinData = {};
 let historyMap = new Map(); 
 let symbolMaxLeverage = {}; 
 
-// --- FIX ĐÒN BẨY: LẤY ĐÚNG TỪ BINANCE (STRICT) ---
+// --- FIX ĐÒN BẨY (Thêm Header để tránh bị chặn) ---
 async function fetchActualLeverage() {
-    https.get('https://fapi.binance.com/fapi/v1/leverageBracket', (res) => {
+    const options = {
+        hostname: 'fapi.binance.com',
+        path: '/fapi/v1/leverageBracket',
+        headers: { 'User-Agent': 'Mozilla/5.0' }
+    };
+    https.get(options, (res) => {
         let data = '';
         res.on('data', chunk => data += chunk);
         res.on('end', () => {
             try {
                 const brackets = JSON.parse(data);
                 brackets.forEach(item => {
-                    if (item.brackets && item.brackets.length > 0) {
+                    if (item.brackets?.length > 0) {
                         symbolMaxLeverage[item.symbol] = item.brackets[0].initialLeverage;
                     }
                 });
+                console.log(`[SYSTEM] Đã lấy đòn bẩy cho \${Object.keys(symbolMaxLeverage).length} mã.`);
             } catch (e) { console.error("Lỗi parse Leverage"); }
         });
-    }).on('error', (e) => { console.error("Lỗi API Binance"); });
+    }).on('error', (e) => { console.error("Lỗi API Binance Leverage"); });
 }
 fetchActualLeverage();
 setInterval(fetchActualLeverage, 3600000);
 
-// --- LOGIC LƯU TRỮ ---
+// --- GIỮ NGUYÊN LOGIC LƯU TRỮ 30 NGÀY CỦA BẠN ---
 if (fs.existsSync(HISTORY_FILE)) {
     try {
         const savedData = JSON.parse(fs.readFileSync(HISTORY_FILE));
@@ -56,9 +62,9 @@ function initWS() {
             const s = t.s, p = parseFloat(t.c);
             if (!coinData[s]) coinData[s] = { symbol: s, prices: [], lastStatusTime: 0 };
             
-            // GIỮ NGUYÊN LOGIC GỐC CỦA BẠN
+            // KHUNG GỐC: Giữ nguyên mảng 100 điểm giá
             coinData[s].prices.push({ p, t: now });
-            if (coinData[s].prices.length > 300) coinData[s].prices.shift(); 
+            if (coinData[s].prices.length > 100) coinData[s].prices = coinData[s].prices.slice(-100);
 
             const c1 = calculateChange(coinData[s].prices, 1), 
                   c5 = calculateChange(coinData[s].prices, 5), 
@@ -78,12 +84,16 @@ function initWS() {
                 }
             }
 
+            // LOGIC VÀO LỆNH GỐC
             if (Math.abs(c1) >= 5 || Math.abs(c5) >= 5 || Math.abs(c15) >= 5) {
                 if (!pending && (now - coinData[s].lastStatusTime >= 900000)) {
                     historyMap.set(`${s}_${now}`, { 
                         symbol: s, startTime: now, snapVol: { c1, c5, c15 }, 
                         snapPrice: p, type: (c1+c5+c15 >= 0) ? 'UP' : 'DOWN', 
-                        status: 'PENDING', maxLev: symbolMaxLeverage[s] || 20 
+                        status: 'PENDING', 
+                        maxLev: symbolMaxLeverage[s] || 20,
+                        tp: (c1+c5+c15 >= 0) ? p * 1.05 : p * 0.95,
+                        sl: (c1+c5+c15 >= 0) ? p * 0.95 : p * 1.05
                     });
                 }
             }
@@ -99,42 +109,46 @@ app.get('/api/data', (req, res) => {
 });
 
 app.get('/gui', (req, res) => {
-    res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>BINANCE TERMINAL</title>
+    res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>BINANCE V2.5</title>
     <script src="https://cdn.tailwindcss.com"></script><script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
-        body { background: #0b0e11; color: #eaecef; font-family: sans-serif; }
-        .up { color: #02c076; } .down { color: #f84960; }
-        .bg-card { background: #161a1e; border: 1px solid #2b3139; }
-    </style></head>
-    <body class="p-4">
-    <div class="flex justify-between items-center mb-4">
-        <h1 class="text-2xl font-black italic text-yellow-400">BINANCE PRO <span class="text-white text-xs">V2.5</span></h1>
+        body { background: #000; color: #eee; font-family: sans-serif; }
+        .up { color: #22c55e; } .down { color: #f43f5e; }
+        .bg-card { background: #0a0a0a; border: 1px solid #27272a; }
+    </style></head><body class="p-4">
+    <div class="flex justify-between items-center mb-4 border-b border-zinc-800 pb-2">
+        <h1 class="text-xl font-bold text-yellow-500 italic">BINANCE PUMP & DUMP</h1>
         <div id="setup" class="flex gap-2">
-            <input id="balanceInp" type="number" value="1000" class="bg-zinc-800 p-2 rounded w-24 border border-zinc-700">
-            <input id="marginInp" type="text" value="10%" class="bg-zinc-800 p-2 rounded w-24 border border-zinc-700">
-            <button onclick="start()" class="bg-yellow-400 text-black px-6 py-2 rounded font-bold">START</button>
+            <input id="balanceInp" type="number" value="1000" class="bg-zinc-900 p-2 rounded w-24 border border-zinc-700">
+            <input id="marginInp" type="text" value="10%" class="bg-zinc-900 p-2 rounded w-24 border border-zinc-700">
+            <button onclick="start()" class="bg-yellow-500 text-black px-6 py-2 rounded font-bold">START</button>
         </div>
-        <div id="active" class="hidden text-right"><div id="displayBal" class="text-4xl font-bold text-yellow-400">$0.00</div></div>
+        <div id="active" class="hidden text-right">
+            <div id="displayBal" class="text-3xl font-black text-white">$0.00</div>
+        </div>
     </div>
 
     <div class="bg-card p-4 rounded mb-6">
-        <div class="flex justify-between mb-2 text-[10px]">
-            <div class="flex gap-2">
-                <button onclick="setTF(24)" class="bg-zinc-800 px-3 py-1 rounded">24H</button>
-                <button onclick="setTF(168)" class="bg-zinc-800 px-3 py-1 rounded">7D</button>
-                <button onclick="setTF(720)" class="bg-zinc-800 px-3 py-1 rounded">30D</button>
+        <div class="flex justify-between items-center mb-2">
+            <div class="flex gap-1">
+                <button onclick="setTF(24)" class="bg-zinc-800 text-[10px] px-3 py-1 rounded">24H</button>
+                <button onclick="setTF(168)" class="bg-zinc-800 text-[10px] px-3 py-1 rounded">7D</button>
+                <button onclick="setTF(720)" class="bg-zinc-800 text-[10px] px-3 py-1 rounded">30D</button>
             </div>
-            <div id="stats" class="flex gap-4 font-bold"></div>
+            <div id="stats" class="text-[10px] font-bold flex gap-4"></div>
         </div>
-        <div style="height: 200px;"><canvas id="mainChart"></canvas></div>
+        <div style="height: 180px;"><canvas id="mainChart"></canvas></div>
     </div>
 
     <div class="mb-6">
-        <div class="bg-zinc-800 p-2 text-xs font-bold mb-2">OPEN POSITIONS (<span id="posCount">0</span>)</div>
-        <div class="bg-card rounded overflow-hidden">
+        <div class="text-xs font-bold mb-2 flex items-center gap-2">
+            <span class="w-2 h-2 rounded-full bg-yellow-500 animate-pulse"></span> 
+            VỊ THẾ ĐANG MỞ: <span id="posCount" class="text-yellow-500">0</span>
+        </div>
+        <div class="bg-card rounded overflow-x-auto">
             <table class="w-full text-[11px] text-left">
-                <thead class="bg-zinc-900 text-zinc-500">
-                    <tr><th class="p-2">Symbol</th><th class="p-2">Side</th><th class="p-2">Entry/Mark</th><th class="p-2">Liq.Price</th><th class="p-2">Margin</th><th class="p-2 text-right">PNL (ROI%)</th></tr>
+                <thead class="bg-zinc-900 text-zinc-500 uppercase">
+                    <tr><th class="p-3">Hợp đồng</th><th class="p-3">Vị thế</th><th class="p-3">Giá vào</th><th class="p-3">Giá hiện tại</th><th class="p-3">TP / SL</th><th class="p-3">Ký quỹ</th><th class="p-3 text-right">PNL (ROI%)</th></tr>
                 </thead>
                 <tbody id="posBody"></tbody>
             </table>
@@ -142,39 +156,40 @@ app.get('/gui', (req, res) => {
     </div>
 
     <div class="grid grid-cols-12 gap-4">
-        <div class="col-span-4 bg-card rounded h-[400px] overflow-hidden flex flex-col text-[10px]">
-            <div class="p-2 bg-zinc-900 font-bold border-b border-zinc-800">MARKET DATA</div>
-            <div class="overflow-y-auto flex-1"><table class="w-full text-left"><tbody id="liveBody"></tbody></table></div>
+        <div class="col-span-4 bg-card rounded h-[400px] overflow-hidden flex flex-col">
+            <div class="p-2 bg-zinc-900 text-xs font-bold border-b border-zinc-800">BIẾN ĐỘNG</div>
+            <div class="overflow-y-auto flex-1"><table class="w-full text-[11px] text-left"><tbody id="liveBody"></tbody></table></div>
         </div>
-        <div class="col-span-8 bg-card rounded h-[400px] overflow-hidden flex flex-col text-[11px]">
-            <div class="p-2 bg-zinc-900 font-bold border-b border-zinc-800">HISTORY LOG</div>
-            <div class="overflow-y-auto flex-1"><table class="w-full text-left"><thead class="sticky top-0 bg-black"><tr><th class="p-2">Time (In/Out)</th><th class="p-2">Symbol</th><th class="p-2">Side</th><th class="p-2 text-right">Profit</th></tr></thead><tbody id="historyBody" class="font-mono"></tbody></table></div>
+        <div class="col-span-8 bg-card rounded h-[400px] overflow-hidden flex flex-col">
+            <div class="p-2 bg-zinc-900 text-xs font-bold border-b border-zinc-800 uppercase">Lịch sử giao dịch</div>
+            <div class="overflow-y-auto flex-1">
+                <table class="w-full text-[11px] text-left font-mono">
+                    <thead class="sticky top-0 bg-black text-zinc-500">
+                        <tr><th class="p-3">Thời gian (Vào/Ra)</th><th class="p-3">Coin</th><th class="p-3 text-right">PNL ($)</th><th class="p-3 text-right">Trạng thái</th></tr>
+                    </thead>
+                    <tbody id="historyBody"></tbody>
+                </table>
+            </div>
         </div>
     </div>
 
     <script>
-        let running = false, initialBal = 0, currentBal = 0, balLog = [], tf = 24;
+        let running = false, initialBal = 0, currentBal = 0, balHistory = [], tf = 24;
         const winSnd = new Audio('https://assets.mixkit.co/active_storage/sfx/2000/2000-preview.mp3');
 
         const chart = new Chart(document.getElementById('mainChart').getContext('2d'), {
-            type: 'line', data: { labels: [], datasets: [{ data: [], borderColor: '#f0b90b', tension: 0.1, pointRadius: 1, fill: true, backgroundColor: 'rgba(240,185,11,0.05)' }]},
-            options: { maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { display: false }, y: { grid: { color: '#2b3139' } } } }
+            type: 'line', data: { labels: [], datasets: [{ data: [], borderColor: '#f0b90b', tension: 0.1, pointRadius: 0, fill: true, backgroundColor: 'rgba(240,185,11,0.05)' }]},
+            options: { maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { display: false }, y: { grid: { color: '#1a1a1a' } } } }
         });
 
-        function start() { 
-            running = true; 
-            initialBal = parseFloat(document.getElementById('balanceInp').value); 
-            document.getElementById('setup').style.display='none'; 
-            document.getElementById('active').classList.remove('hidden'); 
-        }
-
+        function start() { running = true; initialBal = parseFloat(document.getElementById('balanceInp').value); document.getElementById('setup').style.display='none'; document.getElementById('active').classList.remove('hidden'); }
         function setTF(h) { tf = h; }
 
         async function update() {
             try {
                 const res = await fetch('/api/data'); const d = await res.json();
                 document.getElementById('liveBody').innerHTML = d.live.sort((a,b)=>Math.abs(b.c1)-Math.abs(a.c1)).slice(0,30).map(c => \`
-                    <tr class="border-b border-zinc-800"><td class="p-2 font-bold">\${c.symbol}</td><td class="\${c.c1>=0?'up':'down'} p-2">\${c.c1}%</td><td class="p-2 text-right opacity-50">\${c.currentPrice.toFixed(4)}</td></tr>
+                    <tr class="border-b border-zinc-900"><td class="p-2 font-bold">\${c.symbol}</td><td class="\${c.c1>=0?'up':'down'} p-2">\${c.c1}%</td><td class="\${c.c5>=0?'up':'down'} p-2 text-right">\${c.c5}%</td></tr>
                 \`).join('');
 
                 let closedPnl = 0, openPnl = 0, pendingCount = 0;
@@ -193,44 +208,8 @@ app.get('/gui', (req, res) => {
                         const pnl = margin * (roi / 100);
                         openPnl += pnl;
 
-                        posHtml += \`<tr class="border-b border-zinc-800">
-                            <td class="p-2 font-bold \${h.type==='UP'?'up':'down'}">\${h.symbol} \${h.maxLev}x</td>
-                            <td class="p-2 font-bold \${h.type==='UP'?'up':'down'}">\${h.type==='UP'?'LONG':'SHORT'}</td>
-                            <td class="p-2 opacity-70">\${h.snapPrice.toFixed(4)} / \${curP.toFixed(4)}</td>
-                            <td class="p-2 text-orange-400">\${(h.type==='UP'?h.snapPrice*0.8:h.snapPrice*1.2).toFixed(4)}</td>
-                            <td class="p-2">\${margin.toFixed(2)}</td>
-                            <td class="p-2 text-right font-bold \${pnl>=0?'up':'down'}">\${pnl.toFixed(2)}$ (\${roi.toFixed(1)}%)</td>
-                        </tr>\`;
-                    } else {
-                        const pnl = (h.status === 'WIN' ? 1 : -1) * (margin * (5 * h.maxLev) / 100);
-                        closedPnl += pnl;
-                        histHtml += \`<tr class="border-b border-zinc-800 opacity-60">
-                            <td class="p-2 text-[9px] text-zinc-500">\${new Date(h.startTime).toLocaleTimeString()} - \${new Date(h.endTime).toLocaleTimeString()}</td>
-                            <td class="p-2 font-bold \${h.type==='UP'?'up':'down'}">\${h.symbol}</td>
-                            <td class="p-2 \${h.type==='UP'?'up':'down'}">\${h.type}</td>
-                            <td class="p-2 text-right font-bold \${pnl>0?'up':'down'}">\${pnl.toFixed(2)}$</td>
-                        </tr>\`;
-                        if(h.needSound) { winSnd.play(); delete h.needSound; }
-                    }
-                });
-
-                document.getElementById('posBody').innerHTML = posHtml;
-                document.getElementById('historyBody').innerHTML = histHtml;
-                document.getElementById('posCount').innerText = pendingCount;
-
-                if (running) {
-                    currentBal = initialBal + closedPnl + openPnl;
-                    document.getElementById('displayBal').innerText = '$' + currentBal.toLocaleString(undefined, {minimumFractionDigits: 2});
-                    balLog.push({t: Date.now(), v: currentBal});
-                    const filtered = balLog.filter(x => x.t >= Date.now() - (tf * 3600000));
-                    chart.data.labels = filtered.map(x => '');
-                    chart.data.datasets[0].data = filtered.map(x => x.v);
-                    chart.update('none');
-                }
-            } catch(e) {}
-        }
-        setInterval(update, 2000);
-    </script></body></html>`);
-});
-
-app.listen(port, '0.0.0.0', () => { initWS(); });
+                        posHtml += \`<tr class="border-b border-zinc-900">
+                            <td class="p-3 font-bold">\${h.symbol} <span class="text-zinc-500">Cross \${h.maxLev}x</span></td>
+                            <td class="p-3 font-bold \${h.type==='UP'?'up':'down'}">\${h.type==='UP'?'LONG':'SHORT'}</td>
+                            <td class="p-3 font-bold">\${h.snapPrice.toFixed(4)}</td>
+                            <td class="p-3">\${cur
