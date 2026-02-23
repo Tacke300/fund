@@ -11,7 +11,7 @@ let coinData = {};
 let historyMap = new Map(); 
 let symbolMaxLeverage = {}; 
 
-// --- FETCH LEVERAGE FIX ---
+// --- FIX ĐÒN BẨY: LẤY ĐÚNG TỪ BINANCE ---
 async function fetchActualLeverage() {
     https.get('https://fapi.binance.com/fapi/v1/leverageBracket', (res) => {
         let data = '';
@@ -20,14 +20,14 @@ async function fetchActualLeverage() {
             try {
                 const brackets = JSON.parse(data);
                 brackets.forEach(item => {
-                    if (item.brackets?.length > 0) {
+                    if (item.brackets && item.brackets.length > 0) {
                         symbolMaxLeverage[item.symbol] = item.brackets[0].initialLeverage;
                     }
                 });
-                console.log(`[SYSTEM] Live Leverage Synced: ${Object.keys(symbolMaxLeverage).length} symbols.`);
-            } catch (e) { console.error("Leverage Parse Error"); }
+                console.log(`[SYSTEM] Đã đồng bộ đòn bẩy cho ${Object.keys(symbolMaxLeverage).length} mã.`);
+            } catch (e) { console.error("Lỗi parse Leverage"); }
         });
-    }).on('error', (e) => { console.error("Binance API Conn Error"); });
+    }).on('error', (e) => { console.error("Lỗi API Binance"); });
 }
 fetchActualLeverage();
 setInterval(fetchActualLeverage, 3600000);
@@ -56,10 +56,17 @@ function initWS() {
         tickers.forEach(t => {
             const s = t.s, p = parseFloat(t.c);
             if (!coinData[s]) coinData[s] = { symbol: s, prices: [], lastStatusTime: 0 };
-            coinData[s].prices.push({ p, t: now });
             
-            // Giữ lại 24h data (mỗi 5 phút 1 điểm => 288 điểm)
-            if (coinData[s].prices.length > 300) coinData[s].prices.shift();
+            // Lưu dữ liệu giá mỗi 5 phút cho biểu đồ 24h (288 điểm)
+            if (!coinData[s].lastChartPush || now - coinData[s].lastChartPush > 300000) {
+                coinData[s].prices.push({ p, t: now });
+                coinData[s].lastChartPush = now;
+                if (coinData[s].prices.length > 300) coinData[s].prices.shift();
+            } else {
+                // Vẫn cập nhật giá mới nhất để tính c1, c5
+                if (coinData[s].prices.length > 0) coinData[s].prices[coinData[s].prices.length-1] = {p, t: now};
+                else coinData[s].prices.push({p, t: now});
+            }
 
             const c1 = calculateChange(coinData[s].prices, 1), 
                   c5 = calculateChange(coinData[s].prices, 5), 
@@ -67,31 +74,25 @@ function initWS() {
             
             coinData[s].live = { c1, c5, c15, currentPrice: p };
 
-            const active = Array.from(historyMap.values()).find(h => h.symbol === s && h.status === 'PENDING');
-            if (active) {
-                const diff = ((p - active.snapPrice) / active.snapPrice) * 100;
-                const win = active.type === 'DOWN' ? diff <= -5 : diff >= 5;
-                const lose = active.type === 'DOWN' ? diff >= 5 : diff <= -5;
-                
+            const pending = Array.from(historyMap.values()).find(h => h.symbol === s && h.status === 'PENDING');
+            if (pending) {
+                const diff = ((p - pending.snapPrice) / pending.snapPrice) * 100;
+                const win = pending.type === 'DOWN' ? diff <= -5 : diff >= 5;
+                const lose = pending.type === 'DOWN' ? diff >= 5 : diff <= -5;
                 if (win || lose) {
-                    active.status = win ? 'WIN' : 'LOSE';
-                    active.finalPrice = p; 
-                    active.endTime = now; 
-                    active.needSound = active.status;
+                    pending.status = win ? 'WIN' : 'LOSE';
+                    pending.finalPrice = p; pending.endTime = now; pending.needSound = pending.status;
                     coinData[s].lastStatusTime = now;
-                    fs.writeFileSync(HISTORY_FILE, JSON.stringify(Array.from(historyMap.values())));
                 }
             }
 
-            if ((Math.abs(c1) >= 5 || Math.abs(c5) >= 5) && !active) {
-                if (now - coinData[s].lastStatusTime >= 600000) {
-                    const lev = symbolMaxLeverage[s] || 20;
+            // Logic vào lệnh gốc của bạn
+            if (Math.abs(c1) >= 5 || Math.abs(c5) >= 5 || Math.abs(c15) >= 5) {
+                if (!pending && (now - coinData[s].lastStatusTime >= 900000)) {
                     historyMap.set(`${s}_${now}`, { 
                         symbol: s, startTime: now, snapVol: { c1, c5, c15 }, 
-                        snapPrice: p, type: (c1+c5 >= 0) ? 'UP' : 'DOWN', 
-                        status: 'PENDING', maxLev: lev,
-                        sl: (c1+c5 >= 0) ? p * 0.95 : p * 1.05,
-                        tp: (c1+c5 >= 0) ? p * 1.05 : p * 0.95
+                        snapPrice: p, type: (c1+c5+c15 >= 0) ? 'UP' : 'DOWN', 
+                        status: 'PENDING', maxLev: symbolMaxLeverage[s] || 20 
                     });
                 }
             }
@@ -101,178 +102,170 @@ function initWS() {
 
 app.get('/api/data', (req, res) => {
     res.json({ 
-        live: Object.entries(coinData).map(([s,v])=>({symbol:s,...v.live})).filter(x=>x.currentPrice).slice(0,20),
+        live: Object.entries(coinData).filter(([_, v]) => v.live).map(([s,v])=>({symbol:s,...v.live})).sort((a,b)=>Math.abs(b.c1)-Math.abs(a.c1)).slice(0,50),
         history: Array.from(historyMap.values()).sort((a,b)=>b.startTime-a.startTime)
     });
 });
 
 app.get('/gui', (req, res) => {
-    res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8">
-    <title>BINANCE PRO DASHBOARD</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>BINANCE TERMINAL V2.5</title>
+    <script src="https://cdn.tailwindcss.com"></script><script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
-        body { background: #0b0e11; color: #eaecef; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
-        .up { color: #02c076; } .down { color: #f84960; }
-        .bg-card { background: #161a1e; }
-        .border-gray { border-color: #2b3139; }
-        ::-webkit-scrollbar { width: 4px; }
-        ::-webkit-scrollbar-thumb { background: #474d57; }
+        body { background: #000; color: #eee; font-family: sans-serif; }
+        .up { color: #22c55e; } .down { color: #f43f5e; }
+        .bg-card { background: #0a0a0a; border: 1px solid #27272a; }
     </style></head>
     <body class="p-4">
-        <div class="flex justify-between items-center mb-4">
-            <div class="flex items-center gap-4">
-                <img src="https://bin.bnbstatic.com/static/images/common/favicon.ico" width="32">
-                <h1 class="text-xl font-bold tracking-tight">FUTURES REAL-TIME <span class="text-yellow-400">V2.5</span></h1>
+    <div class="flex justify-between items-center mb-4">
+        <h1 class="text-2xl font-black italic text-yellow-500">BINANCE PRO <span class="text-white text-xs not-italic">V2.5.0</span></h1>
+        <div id="setup" class="flex gap-2">
+            <input id="balanceInp" type="number" value="1000" class="bg-zinc-900 p-2 rounded w-24 border border-zinc-700">
+            <input id="marginInp" type="text" value="10%" class="bg-zinc-900 p-2 rounded w-24 border border-zinc-700">
+            <button onclick="start()" class="bg-yellow-500 text-black px-6 py-2 rounded font-bold">START</button>
+        </div>
+        <div id="active" class="hidden text-right font-mono"><div id="displayBal" class="text-4xl font-bold">$0.00</div></div>
+    </div>
+
+    <div class="bg-card p-4 rounded mb-6">
+        <div class="flex justify-between items-center mb-2">
+            <div class="flex gap-2 text-[10px]">
+                <button onclick="setTF(24)" class="bg-zinc-800 px-3 py-1 rounded hover:bg-yellow-500 hover:text-black">24H</button>
+                <button onclick="setTF(168)" class="bg-zinc-800 px-3 py-1 rounded hover:bg-yellow-500 hover:text-black">7D</button>
+                <button onclick="setTF(720)" class="bg-zinc-800 px-3 py-1 rounded hover:bg-yellow-500 hover:text-black">30D</button>
             </div>
-            <div id="setup" class="flex gap-2">
-                <input id="balanceInp" type="number" value="1000" class="bg-zinc-800 border border-zinc-700 p-1 rounded w-24 text-sm">
-                <button onclick="start()" class="bg-yellow-400 text-black px-4 py-1 rounded font-bold text-sm">CONNECT</button>
-            </div>
-            <div id="active" class="hidden flex gap-6 items-center">
-                <div class="text-right">
-                    <p class="text-xs text-zinc-500 uppercase">Wallet Balance</p>
-                    <p id="displayBal" class="text-2xl font-bold text-yellow-400 leading-none">$0.00</p>
-                </div>
-                <button onclick="stop()" class="text-zinc-500 hover:text-red-500 text-xs">DISCONNECT</button>
+            <div class="flex gap-4 text-[10px] font-bold">
+                <div id="stat24">TODAY: --</div><div id="stat7">7 DAYS: --</div>
             </div>
         </div>
+        <div style="height: 200px;"><canvas id="mainChart"></canvas></div>
+    </div>
 
-        <div class="bg-card p-4 rounded-lg border border-gray mb-4">
-            <div class="flex justify-between mb-4">
-                <div class="flex gap-2" id="timeframes">
-                    <button onclick="setTimeframe(24)" class="px-3 py-1 bg-zinc-800 rounded text-xs hover:bg-zinc-700">24H</button>
-                    <button onclick="setTimeframe(168)" class="px-3 py-1 bg-zinc-800 rounded text-xs hover:bg-zinc-700">7D</button>
-                    <button onclick="setTimeframe(720)" class="px-3 py-1 bg-zinc-800 rounded text-xs hover:bg-zinc-700">30D</button>
-                </div>
-                <div class="flex gap-8 text-xs font-bold">
-                    <div id="stat24">24h PNL: --</div>
-                    <div id="stat7">7d PNL: --</div>
-                </div>
-            </div>
-            <div style="height: 180px;"><canvas id="mainChart"></canvas></div>
+    <div class="mb-6">
+        <div class="bg-zinc-900 p-2 text-xs font-bold border-l-4 border-yellow-500 mb-2 flex justify-between">
+            <span>OPEN POSITIONS (<span id="posCount">0</span>)</span>
         </div>
+        <div class="bg-card rounded overflow-hidden">
+            <table class="w-full text-[11px] text-left">
+                <thead class="bg-zinc-800 text-zinc-500">
+                    <tr><th class="p-2">Symbol</th><th class="p-2">Size</th><th class="p-2">Entry/Mark</th><th class="p-2">Liq.Price</th><th class="p-2">Margin</th><th class="p-2 text-right">PNL (ROI%)</th></tr>
+                </thead>
+                <tbody id="posBody"></tbody>
+            </table>
+        </div>
+    </div>
 
-        <div class="mb-4">
-            <div class="flex items-center gap-2 mb-2">
-                <span class="bg-yellow-400 text-black px-2 py-0.5 rounded text-[10px] font-bold">POSITIONS</span>
-                <span id="posCount" class="text-xs text-zinc-400">(0)</span>
-            </div>
-            <div class="bg-card rounded border border-gray overflow-hidden">
-                <table class="w-full text-left text-[11px]">
-                    <thead class="bg-zinc-800 text-zinc-400">
-                        <tr>
-                            <th class="p-2">Symbol</th><th class="p-2">Size</th><th class="p-2">Entry/Mark</th>
-                            <th class="p-2">Liq. Price</th><th class="p-2">Margin</th><th class="p-2">PNL (ROI%)</th>
-                        </tr>
+    <div class="grid grid-cols-12 gap-4">
+        <div class="col-span-4 bg-card rounded h-[400px] overflow-hidden flex flex-col">
+            <div class="p-2 bg-zinc-900 text-[10px] font-bold uppercase">Volatility Heatmap</div>
+            <div class="overflow-y-auto flex-1"><table class="w-full text-[10px] text-left"><tbody id="liveBody"></tbody></table></div>
+        </div>
+        <div class="col-span-8 bg-card rounded h-[400px] overflow-hidden flex flex-col">
+            <div class="p-2 bg-zinc-900 text-[10px] font-bold uppercase">Trade History</div>
+            <div class="overflow-y-auto flex-1">
+                <table class="w-full text-[11px] text-left">
+                    <thead class="sticky top-0 bg-black text-zinc-500 border-b border-zinc-800">
+                        <tr><th class="p-2">Time (Open/Close)</th><th class="p-2">Symbol</th><th class="p-2">Side</th><th class="p-2 text-right">Result</th></tr>
                     </thead>
-                    <tbody id="posBody"></tbody>
+                    <tbody id="historyBody" class="font-mono"></tbody>
                 </table>
             </div>
         </div>
-
-        <div class="grid grid-cols-12 gap-4">
-            <div class="col-span-12 bg-card rounded border border-gray">
-                <div class="p-2 border-b border-gray text-xs font-bold text-zinc-500 uppercase">Trade History</div>
-                <div class="max-h-60 overflow-y-auto">
-                    <table class="w-full text-[11px] text-left">
-                        <thead class="sticky top-0 bg-zinc-900">
-                            <tr><th class="p-2">Time (Start/End)</th><th class="p-2">Symbol</th><th class="p-2">Side</th><th class="p-2 text-right">Final PNL</th></tr>
-                        </thead>
-                        <tbody id="historyBody"></tbody>
-                    </table>
-                </div>
-            </div>
-        </div>
+    </div>
 
     <script>
-        let running = false, initialBal = 1000, currentBal = 1000, balanceHistory = [];
-        let timeframeHours = 24;
+        let running = false, initialBal = 0, currentBal = 0, historyLog = [], tf = 24;
         const winSnd = new Audio('https://assets.mixkit.co/active_storage/sfx/2000/2000-preview.mp3');
 
-        const ctx = document.getElementById('mainChart').getContext('2d');
-        const chart = new Chart(ctx, {
-            type: 'line',
-            data: { labels: [], datasets: [{ data: [], borderColor: '#f0b90b', borderWidth: 2, pointRadius: 0, fill: true, backgroundColor: 'rgba(240,185,11,0.05)', tension: 0.1 }]},
-            options: { maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { display: false }, y: { grid: { color: '#2b3139' }, ticks: { font: { size: 10 } } } } }
+        const chart = new Chart(document.getElementById('mainChart').getContext('2d'), {
+            type: 'line', data: { labels: [], datasets: [{ data: [], borderColor: '#F3BA2F', tension: 0.2, pointRadius: 2, pointBackgroundColor:'#F3BA2F', fill: true, backgroundColor: 'rgba(243,186,47,0.05)' }]},
+            options: { maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { display: false }, y: { grid: { color: '#1a1a1a' } } } }
         });
 
         function start() { 
             running = true; 
-            initialBal = parseFloat(document.getElementById('balanceInp').value);
-            document.getElementById('setup').classList.add('hidden');
-            document.getElementById('active').classList.remove('hidden');
+            initialBal = parseFloat(document.getElementById('balanceInp').value); 
+            currentBal = initialBal;
+            document.getElementById('setup').style.display='none'; 
+            document.getElementById('active').classList.remove('hidden'); 
         }
+
+        function setTF(h) { tf = h; }
 
         async function update() {
-            const res = await fetch('/api/data');
-            const d = await res.json();
-            
-            // 1. Xử lý Vị thế & History
-            let openPos = d.history.filter(h => h.status === 'PENDING');
-            let closedPos = d.history.filter(h => h.status !== 'PENDING');
-            
-            document.getElementById('posCount').innerText = \`(\${openPos.length})\`;
-            
-            let totalPnl = 0;
-            let posHtml = '';
-            
-            openPos.forEach(p => {
-                const coin = d.live.find(l => l.symbol === p.symbol);
-                const markPrice = coin ? coin.currentPrice : p.snapPrice;
-                const diff = ((markPrice - p.snapPrice) / p.snapPrice) * 100;
-                const roi = (p.type === 'UP' ? diff : -diff) * p.maxLev;
-                const margin = initialBal * 0.1; // Giả định margin 10%
-                const pnl = margin * (roi / 100);
-                const liq = p.type === 'UP' ? p.snapPrice * (1 - 0.8/p.maxLev) : p.snapPrice * (1 + 0.8/p.maxLev);
-
-                posHtml += \`<tr class="border-b border-gray">
-                    <td class="p-2"><span class="font-bold">\${p.symbol}</span> <span class="bg-zinc-700 px-1 rounded text-yellow-500">\${p.maxLev}x</span></td>
-                    <td class="p-2 \${p.type==='UP'?'up':'down'}">\${p.type==='UP'?'LONG':'SHORT'}</td>
-                    <td class="p-2">\${p.snapPrice.toFixed(4)} / <span class="text-zinc-400">\${markPrice.toFixed(4)}</span></td>
-                    <td class="p-2 text-orange-400">\${liq.toFixed(4)}</td>
-                    <td class="p-2">\${margin.toFixed(2)}</td>
-                    <td class="p-2 \${roi>=0?'up':'down'} font-bold">\${pnl.toFixed(2)}$ (\${roi.toFixed(2)}%)</td>
-                </tr>\`;
-                totalPnl += pnl;
-            });
-            document.getElementById('posBody').innerHTML = posHtml;
-
-            // 2. Lịch sử giao dịch
-            let histHtml = '';
-            let histPnlSum = 0;
-            closedPos.forEach(h => {
-                const margin = initialBal * 0.1;
-                const pnl = (h.status === 'WIN' ? 1 : -1) * (margin * (5 * h.maxLev) / 100);
-                histPnlSum += pnl;
-                histHtml += \`<tr class="border-b border-zinc-900 opacity-70">
-                    <td class="p-2 text-zinc-500">\${new Date(h.startTime).toLocaleTimeString()} -> \${new Date(h.endTime).toLocaleTimeString()}</td>
-                    <td class="p-2 font-bold \${h.type==='UP'?'up':'down'}">\${h.symbol}</td>
-                    <td class="p-2">\${h.type}</td>
-                    <td class="p-2 text-right font-bold \${pnl>0?'up':'down'}">\${pnl.toFixed(2)}$</td>
-                </tr>\`;
-            });
-            document.getElementById('historyBody').innerHTML = histHtml;
-
-            // 3. Cập nhật Balance & Chart
-            if(running) {
-                currentBal = initialBal + histPnlSum + totalPnl;
-                document.getElementById('displayBal').innerText = '$' + currentBal.toLocaleString(undefined, {minimumFractionDigits: 2});
+            try {
+                const res = await fetch('/api/data'); const d = await res.json();
                 
-                balanceHistory.push({t: Date.now(), v: currentBal});
-                const cutoff = Date.now() - (timeframeHours * 3600000);
-                const filteredHistory = balanceHistory.filter(h => h.t >= cutoff);
+                // 1. Cập nhật Volatility Heatmap
+                document.getElementById('liveBody').innerHTML = d.live.map(c => `
+                    <tr class="border-b border-zinc-900"><td class="p-2 font-bold">\${c.symbol}</td><td class="\${c.c1>=0?'up':'down'} p-2">\${c.c1}%</td><td class="\${c.c5>=0?'up':'down'} p-2">\${c.c5}%</td><td class="p-2 text-right font-mono">\${c.currentPrice.toFixed(4)}</td></tr>
+                `).join('');
+
+                let totalClosedPnl = 0, openPnl = 0, pendingCount = 0;
+                let dayPnl = 0, weekPnl = 0;
+                const now = Date.now();
+
+                // 2. Xử lý Lịch sử & Vị thế
+                let posHtml = '', histHtml = '';
                 
-                chart.data.labels = filteredHistory.map(h => '');
-                chart.data.datasets[0].data = filteredHistory.map(h => h.v);
-                chart.update('none');
-            }
+                d.history.forEach(h => {
+                    const mVal = document.getElementById('marginInp').value;
+                    const margin = mVal.includes('%') ? (initialBal * parseFloat(mVal) / 100) : parseFloat(mVal);
+                    
+                    if (h.status === 'PENDING') {
+                        pendingCount++;
+                        const coin = d.live.find(l => l.symbol === h.symbol);
+                        const curP = coin ? coin.currentPrice : h.snapPrice;
+                        const diff = ((curP - h.snapPrice) / h.snapPrice) * 100;
+                        const roi = (h.type === 'UP' ? diff : -diff) * h.maxLev;
+                        const pnl = margin * (roi / 100);
+                        openPnl += pnl;
+
+                        posHtml += `<tr class="border-b border-zinc-900">
+                            <td class="p-2 font-bold \${h.type==='UP'?'up':'down'}">\${h.symbol} <span class="text-zinc-500 font-normal">Cross \${h.maxLev}x</span></td>
+                            <td class="p-2 \${h.type==='UP'?'up':'down'} font-bold">\${h.type==='UP'?'LONG':'SHORT'}</td>
+                            <td class="p-2 text-zinc-400">\${h.snapPrice.toFixed(4)} / \${curP.toFixed(4)}</td>
+                            <td class="p-2 text-orange-400">\${(h.type==='UP'?h.snapPrice*0.8:h.snapPrice*1.2).toFixed(4)}</td>
+                            <td class="p-2">\${margin.toFixed(2)}</td>
+                            <td class="p-2 text-right font-bold \${pnl>=0?'up':'down'}">\${pnl.toFixed(2)}$ (\${roi.toFixed(1)}%)</td>
+                        </tr>`;
+                    } else {
+                        const pnl = (h.status === 'WIN' ? 1 : -1) * (margin * (5 * h.maxLev) / 100);
+                        totalClosedPnl += pnl;
+                        if (now - h.startTime < 86400000) dayPnl += pnl;
+                        if (now - h.startTime < 604800000) weekPnl += pnl;
+
+                        histHtml += `<tr class="border-b border-zinc-900 opacity-60">
+                            <td class="p-2 text-[10px] text-zinc-500">\${new Date(h.startTime).toLocaleTimeString()} / \${new Date(h.endTime).toLocaleTimeString()}</td>
+                            <td class="p-2 font-bold \${h.type==='UP'?'up':'down'}">\${h.symbol}</td>
+                            <td class="p-2 \${h.type==='UP'?'up':'down'}">\${h.type}</td>
+                            <td class="p-2 text-right font-bold \${pnl>0?'up':'down'}">\${pnl.toFixed(2)}$ (\${h.status})</td>
+                        </tr>`;
+                        if(h.needSound) { winSnd.play(); delete h.needSound; }
+                    }
+                });
+
+                document.getElementById('posBody').innerHTML = posHtml;
+                document.getElementById('historyBody').innerHTML = histHtml;
+                document.getElementById('posCount').innerText = pendingCount;
+
+                if (running) {
+                    currentBal = initialBal + totalClosedPnl + openPnl;
+                    document.getElementById('displayBal').innerText = '$' + currentBal.toLocaleString(undefined, {minimumFractionDigits: 2});
+                    document.getElementById('stat24').innerText = 'TODAY: ' + dayPnl.toFixed(2) + '$';
+                    document.getElementById('stat7').innerText = '7 DAYS: ' + weekPnl.toFixed(2) + '$';
+                    
+                    historyLog.push({t: now, v: currentBal});
+                    const cutoff = now - (tf * 3600000);
+                    const filtered = historyLog.filter(x => x.t >= cutoff);
+                    
+                    chart.data.labels = filtered.map(x => new Date(x.t).toLocaleTimeString());
+                    chart.data.datasets[0].data = filtered.map(x => x.v);
+                    chart.update('none');
+                }
+            } catch(e) {}
         }
-
-        function setTimeframe(h) { timeframeHours = h; }
-        setInterval(update, 1000);
-    </script>
-    </body></html>`);
+        setInterval(update, 2000);
+    </script></body></html>`);
 });
 
 app.listen(port, '0.0.0.0', () => { initWS(); });
