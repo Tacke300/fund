@@ -132,15 +132,17 @@ async function hunt() {
                 });
 
                 if (order.orderId) {
-                    addBotLog(`✅ Khớp lệnh ${c.symbol}. Đợi 5 giây để cài TP/SL...`, "success");
+                    addBotLog(`✅ Khớp lệnh ${c.symbol}. Đợi cài TP/SL...`, "success");
                     botManagedSymbols.push(c.symbol);
                     isSettingTPSL = true; 
                     
-                    setTimeout(async () => {
-                        await enforceTPSLForSymbol(c.symbol);
+                    // Cài TP sau 5s, sau đó SL sau 6.5s (cách nhau 1.5s)
+                    setTimeout(() => enforceTP(c.symbol), 5000);
+                    setTimeout(() => {
+                        enforceSL(c.symbol);
                         lastOrderTime = Date.now();
-                        isSettingTPSL = false; 
-                    }, 5000); 
+                        isSettingTPSL = false;
+                    }, 6500);
                     
                     break; 
                 }
@@ -151,62 +153,46 @@ async function hunt() {
     } finally { isProcessing = false; }
 }
 
-async function enforceTPSLForSymbol(symbol) {
+async function enforceTP(symbol) {
     try {
         const positions = await callBinance('/fapi/v2/positionRisk');
         const p = positions.find(pos => pos.symbol === symbol && parseFloat(pos.positionAmt) !== 0);
-        if (!p) return false;
+        if (!p) return;
 
         const info = status.exchangeInfo[symbol];
         const side = p.positionSide;
         const entry = parseFloat(p.entryPrice);
-        const tickSize = info.tickSize;
-
-        let rawTp = side === 'LONG' ? entry * (1 + tpPercent / 100) : entry * (1 - tpPercent / 100);
-        let rawSl = side === 'LONG' ? entry * (1 - slPercent / 100) : entry * (1 + slPercent / 100);
-
-        const tpPrice = (Math.round(rawTp / tickSize) * tickSize).toFixed(info.pricePrecision);
-        const slPrice = (Math.round(rawSl / tickSize) * tickSize).toFixed(info.pricePrecision);
+        const tpPrice = (Math.round((side === 'LONG' ? entry * (1 + tpPercent / 100) : entry * (1 - tpPercent / 100)) / info.tickSize) * info.tickSize).toFixed(info.pricePrecision);
         const closeSide = side === 'LONG' ? 'SELL' : 'BUY';
 
-        // PHƯƠNG ÁN CUỐI CÙNG: Dùng STOP_MARKET và TAKE_PROFIT_MARKET KHÔNG CÓ closePosition=true nếu lỗi
-        // Nhưng vẫn phải khai báo StopPrice. Binance yêu cầu Algo Order cho Stop.
-        // Thử Endpoint chuẩn nhất cho Algo:
-        
         await callBinance('/fapi/v1/order', 'POST', { 
-            symbol, 
-            side: closeSide, 
-            positionSide: side, 
-            type: 'TAKE_PROFIT_MARKET', 
-            stopPrice: tpPrice,
-            workingType: 'MARK_PRICE',
-            timeInForce: 'GTC',
-            quantity: Math.abs(parseFloat(p.positionAmt))
-        }).catch(async () => {
-            // Nếu vẫn lỗi, dùng lệnh LIMIT chốt lời thay thế
-            await callBinance('/fapi/v1/order', 'POST', { 
-                symbol, side: closeSide, positionSide: side, type: 'LIMIT', 
-                price: tpPrice, quantity: Math.abs(parseFloat(p.positionAmt)), timeInForce: 'GTC'
-            });
+            symbol, side: closeSide, positionSide: side, 
+            type: 'TAKE_PROFIT_MARKET', stopPrice: tpPrice, 
+            workingType: 'MARK_PRICE', closePosition: 'true' 
         });
+        addBotLog(`🛡️ Đã cài TP cho ${symbol}: ${tpPrice}`, "success");
+    } catch (e) { addBotLog(`⚠️ Lỗi cài TP ${symbol}: ${e.msg}`, "error"); }
+}
+
+async function enforceSL(symbol) {
+    try {
+        const positions = await callBinance('/fapi/v2/positionRisk');
+        const p = positions.find(pos => pos.symbol === symbol && parseFloat(pos.positionAmt) !== 0);
+        if (!p) return;
+
+        const info = status.exchangeInfo[symbol];
+        const side = p.positionSide;
+        const entry = parseFloat(p.entryPrice);
+        const slPrice = (Math.round((side === 'LONG' ? entry * (1 - slPercent / 100) : entry * (1 + slPercent / 100)) / info.tickSize) * info.tickSize).toFixed(info.pricePrecision);
+        const closeSide = side === 'LONG' ? 'SELL' : 'BUY';
 
         await callBinance('/fapi/v1/order', 'POST', { 
-            symbol, 
-            side: closeSide, 
-            positionSide: side, 
-            type: 'STOP_MARKET', 
-            stopPrice: slPrice,
-            workingType: 'MARK_PRICE',
-            timeInForce: 'GTC',
-            quantity: Math.abs(parseFloat(p.positionAmt))
+            symbol, side: closeSide, positionSide: side, 
+            type: 'STOP_MARKET', stopPrice: slPrice, 
+            workingType: 'MARK_PRICE', closePosition: 'true' 
         });
-        
-        addBotLog(`🛡️ Bảo vệ thành công ${symbol}: TP ${tpPrice} | SL ${slPrice}`, "success");
-        return true;
-    } catch (e) {
-        addBotLog(`⚠️ Lỗi cài bảo vệ ${symbol}: ${e.msg || ""}`, "error");
-        return false;
-    }
+        addBotLog(`🛡️ Đã cài SL cho ${symbol}: ${slPrice}`, "success");
+    } catch (e) { addBotLog(`⚠️ Lỗi cài SL ${symbol}: ${e.msg}`, "error"); }
 }
 
 async function cleanupClosedPositions() {
