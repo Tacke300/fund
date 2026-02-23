@@ -6,13 +6,13 @@ import https from 'https';
 const app = express();
 const port = 9000;
 const HISTORY_FILE = './history_db.json';
-const LEVERAGE_FILE = './leverage_cache.json'; // FILE CACHE ĐẦU NÃO
+const LEVERAGE_FILE = './leverage_cache.json';
 
 let coinData = {}; 
 let historyMap = new Map(); 
 let symbolMaxLeverage = {}; 
 
-// --- 1. HÀM GỌI BINANCE & GHI FILE JSON (FIX LỖI NAN) ---
+// --- FIX NAN: LẤY ĐÒN BẨY VÀ LƯU CACHE ---
 async function fetchActualLeverage() {
     const options = {
         hostname: 'fapi.binance.com',
@@ -30,36 +30,27 @@ async function fetchActualLeverage() {
                     if (item.brackets?.length > 0) newMap[item.symbol] = item.brackets[0].initialLeverage;
                 });
                 symbolMaxLeverage = newMap;
-                fs.writeFileSync(LEVERAGE_FILE, JSON.stringify(newMap, null, 2));
-                console.log(`[SYSTEM] Đã cập nhật & lưu cache \${Object.keys(symbolMaxLeverage).length} mã.`);
+                fs.writeFileSync(LEVERAGE_FILE, JSON.stringify(newMap));
+                console.log(`[SYSTEM] Đã cập nhật đòn bẩy cho ${Object.keys(symbolMaxLeverage).length} mã.`);
             } catch (e) { console.error("Lỗi parse Leverage"); }
         });
-    }).on('error', (e) => { console.error("Lỗi API Binance"); });
+    }).on('error', (e) => { console.error("Lỗi kết nối Binance"); });
 }
 
-// Khởi tạo: Ưu tiên đọc từ file JSON có sẵn để bot chạy là có đòn bẩy ngay
+// Đọc cache ngay khi khởi động để tránh NaN
 if (fs.existsSync(LEVERAGE_FILE)) {
     try { symbolMaxLeverage = JSON.parse(fs.readFileSync(LEVERAGE_FILE)); } catch (e) {}
 }
 fetchActualLeverage();
 setInterval(fetchActualLeverage, 3600000);
 
-// --- 2. LOGIC LƯU TRỮ 30 NGÀY (GỐC) ---
+// --- GIỮ NGUYÊN LOGIC GỐC ---
 if (fs.existsSync(HISTORY_FILE)) {
     try {
         const savedData = JSON.parse(fs.readFileSync(HISTORY_FILE));
         savedData.forEach(h => historyMap.set(`${h.symbol}_${h.startTime}`, h));
     } catch (e) {}
 }
-
-setInterval(() => {
-    const now = Date.now();
-    const thirtyDaysMs = 30 * 24 * 60 * 60 * 1000;
-    const filteredHistory = Array.from(historyMap.values()).filter(h => (now - h.startTime) < thirtyDaysMs);
-    historyMap.clear();
-    filteredHistory.forEach(h => historyMap.set(`${h.symbol}_${h.startTime}`, h));
-    fs.writeFileSync(HISTORY_FILE, JSON.stringify(filteredHistory));
-}, 60000);
 
 function calculateChange(priceArray, minutes) {
     if (!priceArray || priceArray.length < 2) return 0;
@@ -100,7 +91,8 @@ function initWS() {
                     historyMap.set(`${s}_${now}`, { 
                         symbol: s, startTime: now, snapVol: { c1, c5, c15 }, 
                         snapPrice: p, type: (c1+c5+c15 >= 0) ? 'UP' : 'DOWN', 
-                        status: 'PENDING', maxLev: symbolMaxLeverage[s] || null 
+                        status: 'PENDING', 
+                        maxLev: symbolMaxLeverage[s] || 20 // Nếu chưa kịp lấy thì mặc định 20 tránh NaN
                     });
                 }
             }
@@ -151,27 +143,13 @@ app.get('/gui', (req, res) => {
     </div>
 
     <div class="grid grid-cols-12 gap-6">
-        <div class="col-span-3 bg-card rounded flex flex-col h-[600px]">
-            <div class="p-3 bg-zinc-900 font-bold text-xs border-b border-zinc-800">VOLATILITY (1m|5m|15m)</div>
+        <div class="col-span-4 bg-card rounded flex flex-col h-[600px]">
+            <div class="p-3 bg-zinc-900 font-bold text-xs border-b border-zinc-800">VOLATILITY (1m | 5m | 15m)</div>
             <div class="overflow-y-auto flex-1"><table class="w-full text-[11px] text-left"><tbody id="liveBody"></tbody></table></div>
         </div>
-        <div class="col-span-9 bg-card rounded flex flex-col h-[600px]">
+        <div class="col-span-8 bg-card rounded flex flex-col h-[600px]">
             <div class="p-3 bg-zinc-900 font-bold text-xs border-b border-zinc-800 uppercase italic">Real History Log</div>
-            <div class="overflow-y-auto flex-1 text-[11px]">
-                <table class="w-full text-left font-mono">
-                    <thead class="text-zinc-500 sticky top-0 bg-black">
-                        <tr>
-                            <th class="p-3">TIME</th>
-                            <th class="p-3">COIN/LEV</th>
-                            <th class="p-3">ENTRY</th>
-                            <th class="p-3">TP / SL</th>
-                            <th class="p-3 text-right">PNL ($)</th>
-                            <th class="p-3 text-right">STATUS</th>
-                        </tr>
-                    </thead>
-                    <tbody id="historyBody"></tbody>
-                </table>
-            </div>
+            <div class="overflow-y-auto flex-1"><table class="w-full text-[11px] text-left"><thead class="text-zinc-500 sticky top-0 bg-black"><tr><th class="p-3">TIME</th><th class="p-3">COIN/MAXLEV</th><th class="p-3">SNAP VOL</th><th class="p-3 text-right">PNL ($)</th><th class="p-3 text-right">STATUS</th></tr></thead><tbody id="historyBody" class="font-mono"></tbody></table></div>
         </div>
     </div>
 
@@ -203,7 +181,7 @@ app.get('/gui', (req, res) => {
             const monthStart = Date.now() - (30 * 24 * 3600 * 1000);
             
             document.getElementById('liveBody').innerHTML = d.live.map(c => \`
-                <tr class="border-b border-zinc-900"><td class="p-3 font-bold text-white">\${c.symbol}</td><td class="\${c.c1>=0?'up':'down'} p-3">\${c.c1}%</td><td class="\${c.c5>=0?'up':'down'} p-3 text-right">\${c.c5}%</td></tr>\`).join('');
+                <tr class="border-b border-zinc-900"><td class="p-3 font-bold text-white">\${c.symbol}</td><td class="\${c.c1>=0?'up':'down'} p-3">\${c.c1}%</td><td class="\${c.c5>=0?'up':'down'} p-3">\${c.c5}%</td><td class="\${c.c15>=0?'up':'down'} p-3 text-right">\${c.c15}%</td></tr>\`).join('');
 
             let totalPnl = 0, wDay=0, lDay=0, pDay=0, wWeek=0, lWeek=0, pWeek=0, wMonth=0, lMonth=0, pMonth=0;
 
@@ -215,22 +193,26 @@ app.get('/gui', (req, res) => {
                 if(h.status !== 'PENDING' && h.maxLev !== null) {
                     pnl = (h.status === 'WIN' ? 1 : -1) * (margin * (5 * h.maxLev) / 100);
                     if(running) { 
-                        totalPnl += isNaN(pnl) ? 0 : pnl;
+                        totalPnl += pnl;
                         if(h.startTime >= dayStart) { h.status === 'WIN' ? wDay++ : lDay++; pDay += pnl; }
                         if(h.startTime >= weekStart) { h.status === 'WIN' ? wWeek++ : lWeek++; pWeek += pnl; }
                         if(h.startTime >= monthStart) { h.status === 'WIN' ? wMonth++ : lMonth++; pMonth += pnl; }
                         if(h.needSound) { (h.status === 'WIN' ? winSnd : loseSnd).play(); delete h.needSound; }
                     }
                 }
-                
-                const tp = h.type === 'UP' ? h.snapPrice * 1.05 : h.snapPrice * 0.95;
-                const sl = h.type === 'UP' ? h.snapPrice * 0.95 : h.snapPrice * 1.05;
+
+                // HIỂN THỊ ENTRY/TP/SL CHO VỊ THẾ ĐANG MỞ (PENDING)
+                let coinDisplay = \`\${h.symbol} <span class="text-yellow-500">\${h.maxLev || 'NaN'}x</span>\`;
+                if(h.status === 'PENDING') {
+                   const tp = h.type === 'UP' ? h.snapPrice * 1.05 : h.snapPrice * 0.95;
+                   const sl = h.type === 'UP' ? h.snapPrice * 0.95 : h.snapPrice * 1.05;
+                   coinDisplay += \`<br><span class="text-[9px] text-zinc-500 italic">E: \${h.snapPrice.toFixed(4)} | T: \${tp.toFixed(4)} | S: \${sl.toFixed(4)}</span>\`;
+                }
 
                 return \`<tr class="border-b border-zinc-900">
                     <td class="p-3 text-zinc-600 font-bold">\${new Date(h.startTime).toLocaleTimeString()}</td>
-                    <td class="p-3 font-bold text-white">\${h.symbol} <span class="text-yellow-500">\${h.maxLev || 'NaN'}x</span></td>
-                    <td class="p-3">\${h.snapPrice.toFixed(4)}</td>
-                    <td class="p-3 text-zinc-500 text-[10px]">\${tp.toFixed(4)} / \${sl.toFixed(4)}</td>
+                    <td class="p-3 font-bold text-white leading-tight">\${coinDisplay}</td>
+                    <td class="p-3 text-zinc-500">[\${h.snapVol.c1}/\${h.snapVol.c5}/\${h.snapVol.c15}]</td>
                     <td class="p-3 text-right font-bold \${pnl>=0?'up':'down'}">\${isNaN(pnl)?'NaN':(pnl>0?'+':'')+pnl.toFixed(2)+'$'}</td>
                     <td class="p-3 text-right font-black \${h.status==='WIN'?'up':(h.status==='LOSE'?'down':'text-zinc-700')}">\${h.status}</td>
                 </tr>\`;
@@ -242,7 +224,6 @@ app.get('/gui', (req, res) => {
                 document.getElementById('stat24').innerHTML = \`<span class="text-green-500">\${wDay}W</span>-<span class="text-red-500">\${lDay}L</span><br>\${pDay.toFixed(1)}$\`;
                 document.getElementById('stat7').innerHTML = \`<span class="text-green-500">\${wWeek}W</span>-<span class="text-red-500">\${lWeek}L</span><br>\${pWeek.toFixed(1)}$\`;
                 document.getElementById('stat30').innerHTML = \`<span class="text-green-500">\${wMonth}W</span>-<span class="text-red-500">\${lMonth}L</span><br>\${pMonth.toFixed(1)}$\`;
-                
                 historyLog.push(currentBal); if(historyLog.length > 60) historyLog.shift();
                 chart.data.labels = historyLog.map((_, i) => i); chart.data.datasets[0].data = historyLog; chart.update('none');
                 save();
