@@ -53,49 +53,39 @@ async function callBinance(endpoint, method = 'GET', params = {}) {
 
 async function tryOrder(params) {
     try { return await callBinance('/fapi/v1/order', 'POST', params); } 
-    catch (e) { return { error: e.msg || e.code || "UNKNOWN_ERR" }; }
+    catch (e) { return { error: e.msg || e.code || "ERR" }; }
 }
 
 async function enforceBaoVe(symbol, side, type, price, qty, info) {
     const closeSide = side === 'LONG' ? 'SELL' : 'BUY';
-    
     for (let attempt = 1; attempt <= 3; attempt++) {
-        addBotLog(`[${symbol}] Thử cài ${type} lần ${attempt}/3...`, "info");
-        
-        // CÁCH 1: THỬ LỆNH MARKET ALGO (STOP_MARKET / TAKE_PROFIT_MARKET)
+        // Thử 3 phương thức leo thang: Market Algo -> Limit Algo -> Limit thuần
         let res = await tryOrder({
             symbol, side: closeSide, positionSide: side,
             type: type === 'TP' ? 'TAKE_PROFIT_MARKET' : 'STOP_MARKET',
             stopPrice: price, workingType: 'MARK_PRICE', closePosition: 'true'
         });
-        if (!res.error) { addBotLog(`✅ [${symbol}] ${type} Market OK`, "success"); return true; }
-        addBotLog(`🔸 [${symbol}] ${type} Market Fail: ${res.error}. Chuyển Algo Limit...`, "debug");
-
-        // CÁCH 2: THỬ LỆNH ALGO LIMIT (STOP / TAKE_PROFIT)
-        res = await tryOrder({
-            symbol, side: closeSide, positionSide: side,
-            type: type === 'TP' ? 'TAKE_PROFIT' : 'STOP',
-            price: price, stopPrice: price, quantity: qty, timeInForce: 'GTC', workingType: 'MARK_PRICE'
-        });
-        if (!res.error) { addBotLog(`✅ [${symbol}] ${type} Algo Limit OK`, "success"); return true; }
-        addBotLog(`🔸 [${symbol}] ${type} Algo Limit Fail: ${res.error}. Chuyển Limit thuần...`, "debug");
-
-        // CÁCH 3: LỆNH LIMIT THUẦN (CHỈ DÀNH CHO TP HOẶC SL TREO)
-        res = await tryOrder({
-            symbol, side: closeSide, positionSide: side,
-            type: 'LIMIT', price: price, quantity: qty, timeInForce: 'GTC'
-        });
-        if (!res.error) { addBotLog(`✅ [${symbol}] ${type} Limit thuần OK`, "success"); return true; }
-
-        addBotLog(`❌ [${symbol}] Toàn bộ cách cài ${type} thất bại. Thử lại sau 15s...`, "error");
+        if (res.error) {
+            res = await tryOrder({
+                symbol, side: closeSide, positionSide: side,
+                type: type === 'TP' ? 'TAKE_PROFIT' : 'STOP',
+                price: price, stopPrice: price, quantity: qty, timeInForce: 'GTC', workingType: 'MARK_PRICE'
+            });
+        }
+        if (res.error) {
+            res = await tryOrder({
+                symbol, side: closeSide, positionSide: side,
+                type: 'LIMIT', price: price, quantity: qty, timeInForce: 'GTC'
+            });
+        }
+        if (!res.error) return { ok: true, price };
         if (attempt < 3) await new Promise(r => setTimeout(r, 15000));
     }
-    return false;
+    return { ok: false };
 }
 
 async function hunt() {
     if (isInitializing || !botSettings.isRunning || isProcessing || isSettingTPSL) return;
-    
     try {
         isProcessing = true;
         if (botManagedSymbols.length >= botSettings.maxPositions) return;
@@ -103,50 +93,65 @@ async function hunt() {
         const positions = await callBinance('/fapi/v2/positionRisk');
         const activeOnExchange = positions.filter(p => parseFloat(p.positionAmt) !== 0).map(p => p.symbol);
 
-        for (const c of status.candidatesList.filter(c => c.maxV >= botSettings.minVol)) {
+        for (const c of status.candidatesList) {
+            if (c.maxV < botSettings.minVol) continue;
+            // BỎ QUA USDC VÀ CẶP ĐÃ MỞ
+            if (c.symbol.endsWith('USDC')) continue; 
             if (activeOnExchange.includes(c.symbol) || botManagedSymbols.includes(c.symbol)) continue;
             if (blockedSymbols.has(c.symbol) && Date.now() < blockedSymbols.get(c.symbol)) continue;
 
             const info = status.exchangeInfo[c.symbol];
-            const ticker = await callBinance('/fapi/v1/ticker/price', 'GET', { symbol: c.symbol });
-            const currentPrice = parseFloat(ticker.price);
-            
-            let margin = botSettings.invType === 'percent' ? (status.currentBalance * botSettings.invValue) / 100 : botSettings.invValue;
-            let qty = (Math.floor(((margin * 50) / currentPrice) / info.stepSize) * info.stepSize).toFixed(info.quantityPrecision);
+            if (!info) continue;
 
-            await callBinance('/fapi/v1/allOpenOrders', 'DELETE', { symbol: c.symbol }).catch(()=>{});
+            // KIỂM TRA ĐÒN BẨY (Lấy bracket để check max leverage)
+            try {
+                const brackets = await callBinance('/fapi/v1/leverageBracket', 'GET', { symbol: c.symbol });
+                const maxLev = brackets[0].brackets[0].initialLeverage;
+                if (maxLev < 20) continue; 
 
-            const side = c.changePercent > 0 ? 'BUY' : 'SELL';
-            const posSide = c.changePercent > 0 ? 'LONG' : 'SHORT';
+                const ticker = await callBinance('/fapi/v1/ticker/price', 'GET', { symbol: c.symbol });
+                const currentPrice = parseFloat(ticker.price);
+                let margin = botSettings.invType === 'percent' ? (status.currentBalance * botSettings.invValue) / 100 : botSettings.invValue;
+                let qty = (Math.floor(((margin * 20) / currentPrice) / info.stepSize) * info.stepSize).toFixed(info.quantityPrecision);
 
-            addBotLog(`🎯 MỞ: ${c.symbol} (${posSide}) | Giá: ${currentPrice}`, "info");
-            const order = await tryOrder({ symbol: c.symbol, side, positionSide: posSide, type: 'MARKET', quantity: qty });
+                const side = c.changePercent > 0 ? 'BUY' : 'SELL';
+                const posSide = c.changePercent > 0 ? 'LONG' : 'SHORT';
 
-            if (order.orderId) {
-                botManagedSymbols.push(c.symbol);
-                isSettingTPSL = true;
-                addBotLog(`🔥 Chiếm slot ${botManagedSymbols.length}/${botSettings.maxPositions}. Đợi 5s...`, "success");
+                // LOG CHI TIẾT MỞ LỆNH
+                addBotLog(`⚡ MỞ LỆNH: ${c.symbol} | Side: ${posSide} | Vol: ${c.maxV}% | Khung: 1M | Giá: ${currentPrice} | Slot: ${botManagedSymbols.length + 1}/${botSettings.maxPositions}`, "info");
 
-                setTimeout(async () => {
-                    const postionsCheck = await callBinance('/fapi/v2/positionRisk');
-                    const p = postionsCheck.find(pos => pos.symbol === c.symbol && parseFloat(pos.positionAmt) !== 0);
-                    
-                    if (p) {
-                        const entry = parseFloat(p.entryPrice);
-                        const pQty = Math.abs(parseFloat(p.positionAmt));
-                        const tpP = (Math.round((posSide === 'LONG' ? entry * (1 + tpPercent / 100) : entry * (1 - tpPercent / 100)) / info.tickSize) * info.tickSize).toFixed(info.pricePrecision);
-                        const slP = (Math.round((posSide === 'LONG' ? entry * (1 - slPercent / 100) : entry * (1 + slPercent / 100)) / info.tickSize) * info.tickSize).toFixed(info.pricePrecision);
+                await callBinance('/fapi/v1/allOpenOrders', 'DELETE', { symbol: c.symbol }).catch(()=>{});
+                const order = await tryOrder({ symbol: c.symbol, side, positionSide: posSide, type: 'MARKET', quantity: qty });
 
-                        await enforceBaoVe(c.symbol, posSide, 'TP', tpP, pQty, info);
-                        await new Promise(r => setTimeout(r, 2000));
-                        await enforceBaoVe(c.symbol, posSide, 'SL', slP, pQty, info);
-                    }
-                    isSettingTPSL = false;
-                }, 5000);
-                break;
-            } else {
-                addBotLog(`❌ Lỗi mở ${c.symbol}: ${order.error}`, "error");
-            }
+                if (order.orderId) {
+                    botManagedSymbols.push(c.symbol);
+                    isSettingTPSL = true;
+
+                    setTimeout(async () => {
+                        const pCheck = await callBinance('/fapi/v2/positionRisk');
+                        const p = pCheck.find(pos => pos.symbol === c.symbol && parseFloat(pos.positionAmt) !== 0);
+                        if (p) {
+                            const entry = parseFloat(p.entryPrice);
+                            const pQty = Math.abs(parseFloat(p.positionAmt));
+                            const tpP = (Math.round((posSide === 'LONG' ? entry * (1 + tpPercent / 100) : entry * (1 - tpPercent / 100)) / info.tickSize) * info.tickSize).toFixed(info.pricePrecision);
+                            const slP = (Math.round((posSide === 'LONG' ? entry * (1 - slPercent / 100) : entry * (1 + slPercent / 100)) / info.tickSize) * info.tickSize).toFixed(info.pricePrecision);
+
+                            const resTP = await enforceBaoVe(c.symbol, posSide, 'TP', tpP, pQty, info);
+                            await new Promise(r => setTimeout(r, 1000));
+                            const resSL = await enforceBaoVe(c.symbol, posSide, 'SL', slP, pQty, info);
+
+                            // CHỈ LOG KẾT QUẢ CUỐI CÙNG
+                            if (resTP.ok && resSL.ok) {
+                                addBotLog(`🛡️ BẢO VỆ OK: ${c.symbol} [TP: ${resTP.price} | SL: ${resSL.price}]`, "success");
+                            } else {
+                                addBotLog(`⚠️ BẢO VỆ LỖI: ${c.symbol} [TP: ${resTP.ok ? 'OK' : 'FAIL'} | SL: ${resSL.ok ? 'OK' : 'FAIL'}]`, "error");
+                            }
+                        }
+                        isSettingTPSL = false;
+                    }, 5000);
+                    break;
+                }
+            } catch (e) { continue; }
         }
     } finally { isProcessing = false; }
 }
@@ -160,10 +165,10 @@ async function cleanup() {
         for (let i = botManagedSymbols.length - 1; i >= 0; i--) {
             const s = botManagedSymbols[i];
             if (!activeOnExchange.includes(s)) {
-                addBotLog(`🏁 [${s}] Đã đóng. Dọn dẹp lệnh...`, "warn");
                 await callBinance('/fapi/v1/allOpenOrders', 'DELETE', { symbol: s }).catch(()=>{});
                 botManagedSymbols.splice(i, 1);
-                blockedSymbols.set(s, Date.now() + 10 * 60 * 1000);
+                blockedSymbols.set(s, Date.now() + 5 * 60 * 1000);
+                addBotLog(`🏁 ĐÓNG VỊ THẾ: ${s} | Slot trống: ${botSettings.maxPositions - botManagedSymbols.length}`, "warn");
             }
         }
     } catch (e) {}
