@@ -136,7 +136,6 @@ async function hunt() {
                     botManagedSymbols.push(c.symbol);
                     isSettingTPSL = true; 
                     
-                    // Cài TP sau 5s, sau đó SL sau 6.5s (cách nhau 1.5s)
                     setTimeout(() => enforceTP(c.symbol), 5000);
                     setTimeout(() => {
                         enforceSL(c.symbol);
@@ -162,13 +161,14 @@ async function enforceTP(symbol) {
         const info = status.exchangeInfo[symbol];
         const side = p.positionSide;
         const entry = parseFloat(p.entryPrice);
+        const qty = Math.abs(parseFloat(p.positionAmt));
         const tpPrice = (Math.round((side === 'LONG' ? entry * (1 + tpPercent / 100) : entry * (1 - tpPercent / 100)) / info.tickSize) * info.tickSize).toFixed(info.pricePrecision);
         const closeSide = side === 'LONG' ? 'SELL' : 'BUY';
 
+        // SỬ DỤNG LỆNH LIMIT ĐỂ CHỐT LỜI (MỌI COIN ĐỀU HỖ TRỢ)
         await callBinance('/fapi/v1/order', 'POST', { 
             symbol, side: closeSide, positionSide: side, 
-            type: 'TAKE_PROFIT_MARKET', stopPrice: tpPrice, 
-            workingType: 'MARK_PRICE', closePosition: 'true' 
+            type: 'LIMIT', price: tpPrice, quantity: qty, timeInForce: 'GTC'
         });
         addBotLog(`🛡️ Đã cài TP cho ${symbol}: ${tpPrice}`, "success");
     } catch (e) { addBotLog(`⚠️ Lỗi cài TP ${symbol}: ${e.msg}`, "error"); }
@@ -183,13 +183,14 @@ async function enforceSL(symbol) {
         const info = status.exchangeInfo[symbol];
         const side = p.positionSide;
         const entry = parseFloat(p.entryPrice);
+        const qty = Math.abs(parseFloat(p.positionAmt));
         const slPrice = (Math.round((side === 'LONG' ? entry * (1 - slPercent / 100) : entry * (1 + slPercent / 100)) / info.tickSize) * info.tickSize).toFixed(info.pricePrecision);
         const closeSide = side === 'LONG' ? 'SELL' : 'BUY';
 
+        // SỬ DỤNG LỆNH STOP (DỪNG GIỚI HẠN) ĐỂ CẮT LỖ - AN TOÀN HƠN VÀ KHÔNG BỊ CHẶN
         await callBinance('/fapi/v1/order', 'POST', { 
             symbol, side: closeSide, positionSide: side, 
-            type: 'STOP_MARKET', stopPrice: slPrice, 
-            workingType: 'MARK_PRICE', closePosition: 'true' 
+            type: 'STOP', stopPrice: slPrice, price: slPrice, quantity: qty, workingType: 'MARK_PRICE', timeInForce: 'GTC'
         });
         addBotLog(`🛡️ Đã cài SL cho ${symbol}: ${slPrice}`, "success");
     } catch (e) { addBotLog(`⚠️ Lỗi cài SL ${symbol}: ${e.msg}`, "error"); }
