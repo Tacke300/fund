@@ -9,13 +9,12 @@ import { API_KEY, SECRET_KEY } from './config.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// --- CẤU HÌNH CỐ ĐỊNH TRÊN ĐẦU CODE ---
-let tpPercent = 5.0; // % Biến động giá để Chốt lời
-let slPercent = 5.0; // % Biến động giá để Cắt lỗ
+let tpPercent = 5.0; 
+let slPercent = 5.0; 
 
 let botSettings = { 
     isRunning: false, 
-    maxPositions: 10, // Số slot tối đa Bot được phép mở
+    maxPositions: 10, 
     invValue: 1.5, 
     invType: 'percent',
     minVol: 5.0, 
@@ -29,15 +28,14 @@ let status = {
     candidatesList: [] 
 };
 
-let botManagedSymbols = []; // Danh sách coin bot đang chiếm slot
-let blockedSymbols = new Map(); // Chặn coin vừa đóng để tránh vào lại ngay
+let botManagedSymbols = []; 
+let blockedSymbols = new Map(); 
 let isInitializing = true;
 let isProcessing = false;
 let marginErrorTime = 0;
 let lastOrderTime = 0;
 let isSettingTPSL = false;
 
-// --- HÀM LOG CHI TIẾT THEO YÊU CẦU ---
 function addBotLog(msg, type = 'info') {
     const time = new Date().toLocaleTimeString('vi-VN', { hour12: false });
     status.botLogs.unshift({ time, msg, type });
@@ -46,7 +44,6 @@ function addBotLog(msg, type = 'info') {
     console.log(`${colors[type] || ''}[${time}] ${msg}\x1b[0m`);
 }
 
-// --- GIAO TIẾP API BINANCE ---
 async function callBinance(endpoint, method = 'GET', params = {}) {
     const timestamp = Date.now() - 2500; 
     const query = Object.keys(params).map(k => `${k}=${encodeURIComponent(params[k])}`).join('&');
@@ -70,7 +67,6 @@ async function callBinance(endpoint, method = 'GET', params = {}) {
     });
 }
 
-// --- LẤY DỮ LIỆU TÍN HIỆU ---
 function fetchCandidates() {
     http.get('http://127.0.0.1:9000/api/data', res => {
         let d = ''; res.on('data', chunk => d += chunk);
@@ -81,7 +77,7 @@ function fetchCandidates() {
                 status.candidatesList = all.map(c => ({
                     symbol: c.symbol, 
                     changePercent: c.c1, 
-                    triggerFrame: "1M", // Khung giờ đủ điều kiện
+                    triggerFrame: "1M",
                     maxV: Math.max(Math.abs(c.c1), Math.abs(c.c5), Math.abs(c.c15)),
                     c1: c.c1, c5: c.c5, c15: c.c15
                 })).sort((a, b) => b.maxV - a.maxV);
@@ -90,7 +86,6 @@ function fetchCandidates() {
     }).on('error', () => {});
 }
 
-// --- CHIẾN THUẬT SĂN LỆNH ---
 async function hunt() {
     if (isInitializing || !botSettings.isRunning || isProcessing || isSettingTPSL) return;
     if (marginErrorTime > 0 && Date.now() < marginErrorTime) return;
@@ -98,11 +93,8 @@ async function hunt() {
 
     try {
         isProcessing = true;
-
-        // Kiểm tra slot nội bộ
         if (botManagedSymbols.length >= botSettings.maxPositions) return;
 
-        // Lấy vị thế thực tế trên sàn để chặn trùng
         const positions = await callBinance('/fapi/v2/positionRisk');
         const activeOnExchange = positions.filter(p => parseFloat(p.positionAmt) !== 0).map(p => p.symbol);
 
@@ -110,7 +102,6 @@ async function hunt() {
         const targets = status.candidatesList.filter(c => c.maxV >= botSettings.minVol);
 
         for (const c of targets) {
-            // CHẶN TUYỆT ĐỐI NẾU ĐANG CÓ VỊ THẾ TRÊN SÀN
             if (activeOnExchange.includes(c.symbol)) continue; 
             if (botManagedSymbols.includes(c.symbol)) continue;
             if (blockedSymbols.has(c.symbol) && now < blockedSymbols.get(c.symbol)) continue;
@@ -118,21 +109,20 @@ async function hunt() {
             try {
                 const brackets = await callBinance('/fapi/v1/leverageBracket', 'GET', { symbol: c.symbol });
                 const lev = brackets[0].brackets[0].initialLeverage;
-                if (lev <= 20) continue; // Bỏ qua đòn bẩy thấp
+                if (lev <= 20) continue; 
 
                 const ticker = await callBinance('/fapi/v1/ticker/price', 'GET', { symbol: c.symbol });
                 const currentPrice = parseFloat(ticker.price);
                 const info = status.exchangeInfo[c.symbol];
                 
                 let margin = botSettings.invType === 'percent' ? (status.currentBalance * botSettings.invValue) / 100 : botSettings.invValue;
-                if ((margin * lev) < 5.5) continue; // Chặn lỗi Notional < 5 USDT
+                if ((margin * lev) < 5.5) continue; 
 
                 const side = c.changePercent > 0 ? 'BUY' : 'SELL';
                 const posSide = c.changePercent > 0 ? 'LONG' : 'SHORT';
                 let qty = Math.floor(((margin * lev) / currentPrice) / info.stepSize) * info.stepSize;
                 const finalQty = qty.toFixed(info.quantityPrecision);
 
-                // LOG CHI TIẾT KHI MỞ LỆNH
                 addBotLog(`🚀 MỞ VỊ THẾ: ${c.symbol} | Khung: ${c.triggerFrame} | Biến động: ${c.maxV}% | Giá vào: ${currentPrice} | Đòn bẩy: x${lev} | Slot: ${botManagedSymbols.length + 1}/${botSettings.maxPositions}`, "info");
 
                 await callBinance('/fapi/v1/leverage', 'POST', { symbol: c.symbol, leverage: lev });
@@ -161,7 +151,6 @@ async function hunt() {
     } finally { isProcessing = false; }
 }
 
-// --- CÀI ĐẶT TP/SL (FIX LỖI ALGO) ---
 async function enforceTPSLForSymbol(symbol) {
     try {
         const positions = await callBinance('/fapi/v2/positionRisk');
@@ -171,24 +160,28 @@ async function enforceTPSLForSymbol(symbol) {
         const info = status.exchangeInfo[symbol];
         const side = p.positionSide;
         const entry = parseFloat(p.entryPrice);
-        const qty = Math.abs(parseFloat(p.positionAmt));
-        
-        const tpPrice = side === 'LONG' ? entry * (1 + tpPercent / 100) : entry * (1 - tpPercent / 100);
-        const slPrice = side === 'LONG' ? entry * (1 - slPercent / 100) : entry * (1 + slPercent / 100);
+        const tickSize = info.tickSize;
+
+        let rawTp = side === 'LONG' ? entry * (1 + tpPercent / 100) : entry * (1 - tpPercent / 100);
+        let rawSl = side === 'LONG' ? entry * (1 - slPercent / 100) : entry * (1 + slPercent / 100);
+
+        const tpPrice = (Math.round(rawTp / tickSize) * tickSize).toFixed(info.pricePrecision);
+        const slPrice = (Math.round(rawSl / tickSize) * tickSize).toFixed(info.pricePrecision);
         const closeSide = side === 'LONG' ? 'SELL' : 'BUY';
 
-        // TP dùng LIMIT, SL dùng STOP_MARKET để an toàn tuyệt đối
         await callBinance('/fapi/v1/order', 'POST', { 
-            symbol, side: closeSide, positionSide: side, type: 'LIMIT', 
-            price: tpPrice.toFixed(info.pricePrecision), quantity: qty, timeInForce: 'GTC'
+            symbol, side: closeSide, positionSide: side, 
+            type: 'TAKE_PROFIT_MARKET', stopPrice: tpPrice, 
+            workingType: 'MARK_PRICE', closePosition: 'true' 
         });
 
         await callBinance('/fapi/v1/order', 'POST', { 
-            symbol, side: closeSide, positionSide: side, type: 'STOP_MARKET', 
-            stopPrice: slPrice.toFixed(info.pricePrecision), closePosition: 'true', workingType: 'MARK_PRICE'
+            symbol, side: closeSide, positionSide: side, 
+            type: 'STOP_MARKET', stopPrice: slPrice, 
+            workingType: 'MARK_PRICE', closePosition: 'true' 
         });
         
-        addBotLog(`🛡️ Bảo vệ thành công ${symbol}: TP ${tpPrice.toFixed(info.pricePrecision)} | SL ${slPrice.toFixed(info.pricePrecision)}`, "success");
+        addBotLog(`🛡️ Bảo vệ thành công ${symbol}: TP ${tpPrice} | SL ${slPrice}`, "success");
         return true;
     } catch (e) {
         addBotLog(`⚠️ Lỗi cài bảo vệ ${symbol}: ${e.msg || ""}`, "error");
@@ -196,7 +189,6 @@ async function enforceTPSLForSymbol(symbol) {
     }
 }
 
-// --- QUẢN LÝ SLOT VÀ ĐÓNG VỊ THẾ ---
 async function cleanupClosedPositions() {
     try {
         const positions = await callBinance('/fapi/v2/positionRisk');
@@ -215,7 +207,6 @@ async function cleanupClosedPositions() {
     } catch (e) {}
 }
 
-// --- QUẢN LÝ SERVER ---
 const APP = express();
 APP.use(express.json());
 APP.use(express.static(__dirname));
@@ -242,10 +233,12 @@ async function init() {
             const info = JSON.parse(d);
             info.symbols.forEach(s => {
                 const lot = s.filters.find(f => f.filterType === 'LOT_SIZE');
+                const prc = s.filters.find(f => f.filterType === 'PRICE_FILTER');
                 status.exchangeInfo[s.symbol] = { 
                     quantityPrecision: s.quantityPrecision, 
                     pricePrecision: s.pricePrecision, 
-                    stepSize: parseFloat(lot.stepSize) 
+                    stepSize: parseFloat(lot.stepSize),
+                    tickSize: parseFloat(prc.tickSize)
                 };
             });
             isInitializing = false;
