@@ -169,16 +169,36 @@ async function enforceTPSLForSymbol(symbol) {
         const slPrice = (Math.round(rawSl / tickSize) * tickSize).toFixed(info.pricePrecision);
         const closeSide = side === 'LONG' ? 'SELL' : 'BUY';
 
+        // PHƯƠNG ÁN CUỐI CÙNG: Dùng STOP_MARKET và TAKE_PROFIT_MARKET KHÔNG CÓ closePosition=true nếu lỗi
+        // Nhưng vẫn phải khai báo StopPrice. Binance yêu cầu Algo Order cho Stop.
+        // Thử Endpoint chuẩn nhất cho Algo:
+        
         await callBinance('/fapi/v1/order', 'POST', { 
-            symbol, side: closeSide, positionSide: side, 
-            type: 'TAKE_PROFIT_MARKET', stopPrice: tpPrice, 
-            workingType: 'MARK_PRICE', closePosition: 'true' 
+            symbol, 
+            side: closeSide, 
+            positionSide: side, 
+            type: 'TAKE_PROFIT_MARKET', 
+            stopPrice: tpPrice,
+            workingType: 'MARK_PRICE',
+            timeInForce: 'GTC',
+            quantity: Math.abs(parseFloat(p.positionAmt))
+        }).catch(async () => {
+            // Nếu vẫn lỗi, dùng lệnh LIMIT chốt lời thay thế
+            await callBinance('/fapi/v1/order', 'POST', { 
+                symbol, side: closeSide, positionSide: side, type: 'LIMIT', 
+                price: tpPrice, quantity: Math.abs(parseFloat(p.positionAmt)), timeInForce: 'GTC'
+            });
         });
 
         await callBinance('/fapi/v1/order', 'POST', { 
-            symbol, side: closeSide, positionSide: side, 
-            type: 'STOP_MARKET', stopPrice: slPrice, 
-            workingType: 'MARK_PRICE', closePosition: 'true' 
+            symbol, 
+            side: closeSide, 
+            positionSide: side, 
+            type: 'STOP_MARKET', 
+            stopPrice: slPrice,
+            workingType: 'MARK_PRICE',
+            timeInForce: 'GTC',
+            quantity: Math.abs(parseFloat(p.positionAmt))
         });
         
         addBotLog(`🛡️ Bảo vệ thành công ${symbol}: TP ${tpPrice} | SL ${slPrice}`, "success");
