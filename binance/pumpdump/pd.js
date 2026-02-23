@@ -60,30 +60,34 @@ async function enforceBaoVe(symbol, side, type, price, qty, info) {
     const closeSide = side === 'LONG' ? 'SELL' : 'BUY';
     
     for (let attempt = 1; attempt <= 3; attempt++) {
-        addBotLog(`[${symbol}] Thử cài ${type} lần ${attempt}/3 (Giá: ${price})...`, "info");
+        addBotLog(`[${symbol}] Thử cài ${type} lần ${attempt}/3...`, "info");
         
-        // Cách 1: Algo Market
+        // CÁCH 1: THỬ LỆNH MARKET ALGO (STOP_MARKET / TAKE_PROFIT_MARKET)
         let res = await tryOrder({
             symbol, side: closeSide, positionSide: side,
             type: type === 'TP' ? 'TAKE_PROFIT_MARKET' : 'STOP_MARKET',
             stopPrice: price, workingType: 'MARK_PRICE', closePosition: 'true'
         });
-        
-        // Cách 2: Nếu Market lỗi, thử Algo Limit
-        if (res.error) {
-            res = await tryOrder({
-                symbol, side: closeSide, positionSide: side,
-                type: type === 'TP' ? 'LIMIT' : 'STOP',
-                price: price, stopPrice: price, quantity: qty, timeInForce: 'GTC', workingType: 'MARK_PRICE'
-            });
-        }
+        if (!res.error) { addBotLog(`✅ [${symbol}] ${type} Market OK`, "success"); return true; }
+        addBotLog(`🔸 [${symbol}] ${type} Market Fail: ${res.error}. Chuyển Algo Limit...`, "debug");
 
-        if (!res.error) {
-            addBotLog(`✅ [${symbol}] Cài ${type} THÀNH CÔNG tại giá ${price}`, "success");
-            return true;
-        }
+        // CÁCH 2: THỬ LỆNH ALGO LIMIT (STOP / TAKE_PROFIT)
+        res = await tryOrder({
+            symbol, side: closeSide, positionSide: side,
+            type: type === 'TP' ? 'TAKE_PROFIT' : 'STOP',
+            price: price, stopPrice: price, quantity: qty, timeInForce: 'GTC', workingType: 'MARK_PRICE'
+        });
+        if (!res.error) { addBotLog(`✅ [${symbol}] ${type} Algo Limit OK`, "success"); return true; }
+        addBotLog(`🔸 [${symbol}] ${type} Algo Limit Fail: ${res.error}. Chuyển Limit thuần...`, "debug");
 
-        addBotLog(`❌ [${symbol}] Cài ${type} THẤT BẠI: ${res.error}. Thử lại sau 15s...`, "error");
+        // CÁCH 3: LỆNH LIMIT THUẦN (CHỈ DÀNH CHO TP HOẶC SL TREO)
+        res = await tryOrder({
+            symbol, side: closeSide, positionSide: side,
+            type: 'LIMIT', price: price, quantity: qty, timeInForce: 'GTC'
+        });
+        if (!res.error) { addBotLog(`✅ [${symbol}] ${type} Limit thuần OK`, "success"); return true; }
+
+        addBotLog(`❌ [${symbol}] Toàn bộ cách cài ${type} thất bại. Thử lại sau 15s...`, "error");
         if (attempt < 3) await new Promise(r => setTimeout(r, 15000));
     }
     return false;
@@ -108,21 +112,20 @@ async function hunt() {
             const currentPrice = parseFloat(ticker.price);
             
             let margin = botSettings.invType === 'percent' ? (status.currentBalance * botSettings.invValue) / 100 : botSettings.invValue;
-            const lev = 50; 
-            let qty = (Math.floor(((margin * lev) / currentPrice) / info.stepSize) * info.stepSize).toFixed(info.quantityPrecision);
+            let qty = (Math.floor(((margin * 50) / currentPrice) / info.stepSize) * info.stepSize).toFixed(info.quantityPrecision);
 
             await callBinance('/fapi/v1/allOpenOrders', 'DELETE', { symbol: c.symbol }).catch(()=>{});
 
             const side = c.changePercent > 0 ? 'BUY' : 'SELL';
             const posSide = c.changePercent > 0 ? 'LONG' : 'SHORT';
 
-            addBotLog(`🎯 Đang mở vị thế: ${c.symbol} (${posSide}) | Giá: ${currentPrice} | Vol: ${qty}`, "info");
+            addBotLog(`🎯 MỞ: ${c.symbol} (${posSide}) | Giá: ${currentPrice}`, "info");
             const order = await tryOrder({ symbol: c.symbol, side, positionSide: posSide, type: 'MARKET', quantity: qty });
 
             if (order.orderId) {
                 botManagedSymbols.push(c.symbol);
                 isSettingTPSL = true;
-                addBotLog(`🔥 Khớp lệnh ${c.symbol}. Đang chiếm slot ${botManagedSymbols.length}/${botSettings.maxPositions}. Chờ 5s để xác nhận sàn...`, "success");
+                addBotLog(`🔥 Chiếm slot ${botManagedSymbols.length}/${botSettings.maxPositions}. Đợi 5s...`, "success");
 
                 setTimeout(async () => {
                     const postionsCheck = await callBinance('/fapi/v2/positionRisk');
@@ -134,15 +137,9 @@ async function hunt() {
                         const tpP = (Math.round((posSide === 'LONG' ? entry * (1 + tpPercent / 100) : entry * (1 - tpPercent / 100)) / info.tickSize) * info.tickSize).toFixed(info.pricePrecision);
                         const slP = (Math.round((posSide === 'LONG' ? entry * (1 - slPercent / 100) : entry * (1 + slPercent / 100)) / info.tickSize) * info.tickSize).toFixed(info.pricePrecision);
 
-                        const tpRes = await enforceBaoVe(c.symbol, posSide, 'TP', tpP, pQty, info);
+                        await enforceBaoVe(c.symbol, posSide, 'TP', tpP, pQty, info);
                         await new Promise(r => setTimeout(r, 2000));
-                        const slRes = await enforceBaoVe(c.symbol, posSide, 'SL', slP, pQty, info);
-
-                        if (!tpRes || !slRes) {
-                            addBotLog(`⚠️ CẢNH BÁO: ${c.symbol} cài bảo vệ không đủ bộ! Kiểm tra tay gấp.`, "error");
-                        }
-                    } else {
-                        addBotLog(`❓ Lỗi: Không tìm thấy vị thế ${c.symbol} trên sàn để cài TP/SL.`, "warn");
+                        await enforceBaoVe(c.symbol, posSide, 'SL', slP, pQty, info);
                     }
                     isSettingTPSL = false;
                 }, 5000);
@@ -163,7 +160,7 @@ async function cleanup() {
         for (let i = botManagedSymbols.length - 1; i >= 0; i--) {
             const s = botManagedSymbols[i];
             if (!activeOnExchange.includes(s)) {
-                addBotLog(`🏁 [${s}] Vị thế đã đóng. Đang dọn dẹp lệnh chờ...`, "warn");
+                addBotLog(`🏁 [${s}] Đã đóng. Dọn dẹp lệnh...`, "warn");
                 await callBinance('/fapi/v1/allOpenOrders', 'DELETE', { symbol: s }).catch(()=>{});
                 botManagedSymbols.splice(i, 1);
                 blockedSymbols.set(s, Date.now() + 10 * 60 * 1000);
