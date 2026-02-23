@@ -12,20 +12,17 @@ let coinData = {};
 let historyMap = new Map(); 
 let symbolMaxLeverage = {}; 
 
-// --- FIX TRIỆT ĐỂ LỖI PARSE & MAX LEV ---
+// --- KHÔI PHỤC LOGIC LẤY ĐÒN BẨY THỰC TẾ ---
 async function fetchActualLeverage() {
     const options = {
         hostname: 'fapi.binance.com',
         path: '/fapi/v1/leverageBracket',
-        headers: { 'User-Agent': 'Mozilla/5.0' },
-        timeout: 10000
+        headers: { 'User-Agent': 'Mozilla/5.0' }
     };
-
     https.get(options, (res) => {
         let data = '';
         res.on('data', chunk => data += chunk);
         res.on('end', () => {
-            if (!data) return; // Tránh parse dữ liệu rỗng
             try {
                 const brackets = JSON.parse(data);
                 const newMap = {};
@@ -38,19 +35,18 @@ async function fetchActualLeverage() {
                     symbolMaxLeverage = newMap;
                     fs.writeFileSync(LEVERAGE_FILE, JSON.stringify(newMap));
                 }
-            } catch (e) { console.error("[SYSTEM] Binance trả về data lỗi, không parse được."); }
+            } catch (e) {}
         });
-    }).on('error', (e) => { console.error("[SYSTEM] Lỗi kết nối API Binance."); });
+    });
 }
 
-// Khởi tạo nạp cache
 if (fs.existsSync(LEVERAGE_FILE)) {
-    try { symbolMaxLeverage = JSON.parse(fs.readFileSync(LEVERAGE_FILE)); } catch (e) { symbolMaxLeverage = {}; }
+    try { symbolMaxLeverage = JSON.parse(fs.readFileSync(LEVERAGE_FILE)); } catch (e) {}
 }
 fetchActualLeverage();
 setInterval(fetchActualLeverage, 3600000);
 
-// --- LOGIC LƯU TRỮ GỐC ---
+// --- LOGIC LƯU TRỮ ---
 if (fs.existsSync(HISTORY_FILE)) {
     try {
         const savedData = JSON.parse(fs.readFileSync(HISTORY_FILE));
@@ -123,49 +119,53 @@ app.get('/gui', (req, res) => {
     res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>BINANCE PRO V2.4.4</title>
     <script src="https://cdn.tailwindcss.com"></script><script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
-        body { background: #000; color: #e4e4e7; font-family: sans-serif; }
-        .up { color: #22c55e; } .down { color: #f43f5e; }
-        .bg-card { background: #0a0a0a; border: 1px solid #27272a; }
-        .btn-binance { background: #2b2f36; color: #ebedf0; font-size: 11px; padding: 6px; border-radius: 4px; text-align: center; cursor: pointer; }
+        body { background: #181a20; color: #eaecef; font-family: 'Inter', sans-serif; }
+        .up { color: #0ecb81; } .down { color: #f6465d; }
+        .bg-card { background: #1e2329; border: 1px solid #2b3139; }
+        .btn-binance { background: #2b3139; color: #eaecef; font-size: 11px; padding: 8px; border-radius: 4px; text-align: center; font-weight: 600; }
+        .tab-active { border-bottom: 2px solid #fcd535; color: #fcd535; }
     </style></head><body class="p-4">
-    <div class="flex justify-between items-center mb-4 border-b border-zinc-800 pb-4">
-        <div class="flex items-center gap-3"><h1 class="text-xl font-black italic uppercase">BINANCE <span class="text-yellow-500">PRO</span></h1></div>
-        <div id="setup" class="flex gap-2">
-            <input id="balanceInp" type="number" value="1000" class="bg-zinc-900 border border-zinc-700 p-1 rounded w-24 text-yellow-500">
-            <input id="marginInp" type="text" value="10%" class="bg-zinc-900 border border-zinc-700 p-1 rounded w-20 text-yellow-500">
-            <button onclick="start()" class="bg-yellow-500 text-black px-4 py-1 rounded font-bold uppercase text-xs">Start</button>
+    <div class="flex justify-between items-center mb-4">
+        <div class="flex items-center gap-2">
+            <img src="https://bin.bnbstatic.com/static/images/common/favicon.ico" width="24">
+            <h1 class="text-xl font-bold uppercase tracking-tight text-white">BINANCE <span class="text-[#fcd535]">PRO</span></h1>
+            <span class="ml-4 text-sm font-semibold text-zinc-400">Moncey_D_Luffy</span>
         </div>
-        <div id="active" class="hidden font-black text-yellow-500 text-xl uppercase italic">Moncey_D_Luffy</div>
+        <div id="setup" class="flex gap-2">
+            <input id="balanceInp" type="number" value="1000" class="bg-[#2b3139] p-1 rounded w-24 text-[#fcd535] outline-none">
+            <input id="marginInp" type="text" value="10%" class="bg-[#2b3139] p-1 rounded w-20 text-[#fcd535] outline-none">
+            <button onclick="start()" class="bg-[#fcd535] text-black px-4 py-1 rounded font-bold uppercase text-xs">Start</button>
+        </div>
     </div>
 
-    <div class="mb-4 bg-card p-3 rounded">
-        <div class="flex justify-between items-start mb-2">
-            <div><div class="text-yellow-500 font-bold text-[10px] uppercase">Equity (07:00 AM)</div><div id="displayBal" class="text-4xl font-black italic">$0.00</div></div>
-            <div class="grid grid-cols-3 gap-2 text-[9px] font-bold text-center">
-                <div class="bg-zinc-900 p-2 rounded border border-zinc-800 w-24"><div>TODAY</div><div id="stat24" class="text-zinc-400 mt-1">---</div></div>
-                <div class="bg-zinc-900 p-2 rounded border border-zinc-800 w-24"><div>7 DAYS</div><div id="stat7" class="text-zinc-400 mt-1">---</div></div>
-                <div class="bg-zinc-900 p-2 rounded border border-zinc-800 w-24"><div>30 DAYS</div><div id="stat30" class="text-zinc-400 mt-1">---</div></div>
+    <div class="grid grid-cols-12 gap-4 mb-4">
+        <div class="col-span-8 bg-card p-4 rounded-lg">
+            <div class="flex justify-between mb-4">
+                <div><div class="text-zinc-500 text-xs">Equity (07:00 AM Reset)</div><div id="displayBal" class="text-4xl font-bold text-white leading-tight">$0.00</div></div>
+                <div class="flex gap-4 text-xs font-bold text-center">
+                    <div class="bg-[#2b3139] p-3 rounded-md w-28"><div>TODAY</div><div id="stat24" class="mt-1 text-zinc-400">---</div></div>
+                    <div class="bg-[#2b3139] p-3 rounded-md w-28"><div>7 DAYS</div><div id="stat7" class="mt-1 text-zinc-400">---</div></div>
+                </div>
             </div>
+            <div style="height: 200px;"><canvas id="mainChart"></canvas></div>
         </div>
-        <div style="height: 180px;"><canvas id="mainChart"></canvas></div>
+        <div class="col-span-4 bg-card rounded-lg flex flex-col h-[320px]">
+            <div class="p-3 font-bold text-xs border-b border-[#2b3139] uppercase">Volatility (1m | 5m | 15m)</div>
+            <div class="overflow-y-auto flex-1"><table class="w-full text-xs"><tbody id="liveBody"></tbody></table></div>
+        </div>
     </div>
 
     <div class="mb-6">
-        <div class="flex items-center gap-2 mb-2 text-xs font-bold border-b border-zinc-800 pb-1 uppercase italic text-zinc-400">
-            <span>Vị thế đang mở</span><span id="posCount" class="bg-zinc-800 px-2 rounded text-[10px]">0</span>
+        <div class="flex gap-6 mb-2 text-sm font-bold border-b border-[#2b3139] pb-2">
+            <div class="tab-active cursor-pointer">Vị thế (<span id="posCount">0</span>)</div>
+            <div class="text-zinc-500 cursor-pointer">Lệnh chờ (0)</div>
         </div>
         <div id="pendingContainer" class="grid grid-cols-1 md:grid-cols-2 gap-4"></div>
     </div>
 
-    <div class="grid grid-cols-12 gap-4">
-        <div class="col-span-3 bg-card rounded flex flex-col h-[400px]">
-            <div class="p-2 bg-zinc-900 font-bold text-[10px] border-b border-zinc-800 italic uppercase">Volatility</div>
-            <div class="overflow-y-auto flex-1"><table class="w-full text-[10px]"><tbody id="liveBody"></tbody></table></div>
-        </div>
-        <div class="col-span-9 bg-card rounded flex flex-col h-[400px]">
-            <div class="p-2 bg-zinc-900 font-bold text-[10px] border-b border-zinc-800 italic uppercase">History Log</div>
-            <div class="overflow-y-auto flex-1 font-mono text-[10px]"><table class="w-full text-left"><thead class="text-zinc-500 sticky top-0 bg-black italic"><tr><th class="p-2">TIME</th><th class="p-2">COIN/MAXLEV</th><th class="p-2">SNAP VOL</th><th class="p-2 text-right">PNL</th><th class="p-2 text-right">STATUS</th></tr></thead><tbody id="historyBody"></tbody></table></div>
-        </div>
+    <div class="bg-card rounded-lg flex flex-col h-[400px]">
+        <div class="p-3 font-bold text-xs border-b border-[#2b3139] uppercase italic text-[#fcd535]">History Log (WIN/LOSE ONLY)</div>
+        <div class="overflow-y-auto flex-1 font-mono text-[11px]"><table class="w-full text-left"><thead class="text-zinc-500 sticky top-0 bg-[#1e2329] border-b border-[#2b3139]"><tr><th class="p-3">TIME</th><th class="p-3">COIN/MAXLEV</th><th class="p-3">SNAP VOL</th><th class="p-3 text-right">PNL ($)</th><th class="p-3 text-right">STATUS</th></tr></thead><tbody id="historyBody"></tbody></table></div>
     </div>
 
     <script>
@@ -175,15 +175,15 @@ app.get('/gui', (req, res) => {
     if(localStorage.getItem('bot_luffy_v3')) {
         const s = JSON.parse(localStorage.getItem('bot_luffy_v3'));
         running = s.running; initialBal = s.initialBal; currentBal = s.currentBal; historyLog = s.historyLog;
-        if(running) { document.getElementById('setup').style.display='none'; document.getElementById('active').classList.remove('hidden'); }
+        if(running) { document.getElementById('setup').style.display='none'; }
     }
 
     const chart = new Chart(document.getElementById('mainChart').getContext('2d'), {
-        type: 'line', data: { labels: historyLog.map((_,i)=>i), datasets: [{ data: historyLog, borderColor: '#F3BA2F', tension: 0.3, pointRadius: 0, fill: true, backgroundColor: 'rgba(243,186,47,0.05)' }]},
-        options: { maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { display: false }, y: { grid: { color: '#1a1a1a' } } } }
+        type: 'line', data: { labels: historyLog.map((_,i)=>i), datasets: [{ data: historyLog, borderColor: '#fcd535', tension: 0.3, pointRadius: 0, fill: true, backgroundColor: 'rgba(252,213,53,0.05)' }]},
+        options: { maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { display: false }, y: { grid: { color: '#2b3139' } } } }
     });
 
-    function start() { running = true; initialBal = parseFloat(document.getElementById('balanceInp').value); currentBal = initialBal; historyLog = [initialBal]; document.getElementById('setup').style.display='none'; document.getElementById('active').classList.remove('hidden'); save(); }
+    function start() { running = true; initialBal = parseFloat(document.getElementById('balanceInp').value); currentBal = initialBal; historyLog = [initialBal]; document.getElementById('setup').style.display='none'; save(); }
     function save() { localStorage.setItem('bot_luffy_v3', JSON.stringify({ running, initialBal, currentBal, historyLog })); }
 
     async function update() {
@@ -192,7 +192,7 @@ app.get('/gui', (req, res) => {
             const dayStart = new Date().setHours(7,0,0,0);
             
             document.getElementById('liveBody').innerHTML = d.live.map(c => \`
-                <tr class="border-b border-zinc-900 text-zinc-400"><td class="p-2 font-bold text-white">\${c.symbol}</td><td class="\${c.c1>=0?'up':'down'} p-2">\${c.c1}%</td><td class="\${c.c5>=0?'up':'down'} p-2 text-right">\${c.c5}%</td></tr>\`).join('');
+                <tr class="border-b border-[#2b3139]"><td class="p-2 font-bold">\${c.symbol}</td><td class="\${c.c1>=0?'up':'down'} p-2">\${c.c1}%</td><td class="\${c.c5>=0?'up':'down'} p-2">\${c.c5}%</td><td class="\${c.c15>=0?'up':'down'} p-2 text-right">\${c.c15}%</td></tr>\`).join('');
 
             document.getElementById('posCount').innerText = d.pending.length;
             document.getElementById('pendingContainer').innerHTML = d.pending.map(h => {
@@ -202,21 +202,25 @@ app.get('/gui', (req, res) => {
                 const diff = ((livePrice - h.snapPrice) / h.snapPrice) * 100;
                 const roi = (h.type === 'UP' ? diff : -diff) * h.maxLev;
                 const pnl = margin * roi / 100;
+                const size = margin * h.maxLev;
 
                 return \`
-                <div class="bg-card p-3 rounded border-l-4 \${h.type==='UP'?'border-green-500':'border-red-500'}">
-                    <div class="flex justify-between items-center mb-1">
-                        <div class="flex items-center gap-1 font-bold text-xs"><span class="\${h.type==='UP'?'up':'down'} bg-zinc-900 px-1 rounded">\${h.type==='UP'?'L':'S'}</span> \${h.symbol} <span class="text-[10px] font-normal text-zinc-500">Vĩnh cửu Cross \${h.maxLev || 'NaN'}X</span></div>
+                <div class="bg-card p-4 rounded-lg">
+                    <div class="flex justify-between items-center mb-3">
+                        <div class="flex items-center gap-1 font-bold text-sm"><span class="\${h.type==='UP'?'up':'down'}">\${h.type==='UP'?'L':'S'}</span> \${h.symbol} <span class="text-[11px] font-normal text-zinc-500">Vĩnh cửu Cross \${h.maxLev || 'NaN'}X</span></div>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="text-zinc-500"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8z"/></svg>
                     </div>
-                    <div class="flex justify-between mb-2">
-                        <div><div class="text-[9px] text-zinc-500">PNL (USDT)</div><div class="text-lg font-bold \${pnl>=0?'up':'down'}">\${isNaN(pnl)?'NaN':pnl.toFixed(2)}</div></div>
-                        <div class="text-right"><div class="text-[9px] text-zinc-500">ROI</div><div class="text-lg font-bold \${roi>=0?'up':'down'}">\${isNaN(roi)?'NaN':roi.toFixed(2)}%</div></div>
+                    <div class="flex justify-between mb-4">
+                        <div><div class="text-[11px] text-zinc-500">PNL (USDT)</div><div class="text-xl font-bold \${pnl>=0?'up':'down'}">\${isNaN(pnl)?'NaN':pnl.toFixed(2)}</div></div>
+                        <div class="text-right"><div class="text-[11px] text-zinc-500 text-right">ROI</div><div class="text-xl font-bold \${roi>=0?'up':'down'}">\${isNaN(roi)?'NaN':roi.toFixed(2)}%</div></div>
                     </div>
-                    <div class="grid grid-cols-2 text-[9px] gap-2 mb-3">
-                        <div><div class="text-zinc-500">Giá vào lệnh</div><div class="text-white">\${h.snapPrice.toFixed(4)}</div></div>
-                        <div class="text-right"><div class="text-zinc-500">Giá đánh dấu</div><div class="text-white">\${livePrice.toFixed(4)}</div></div>
+                    <div class="grid grid-cols-2 gap-4 text-[11px] mb-4">
+                        <div class="flex justify-between"><span class="text-zinc-500">Kích thước (USDT)</span> <span class="text-white font-medium">\${size.toFixed(2)}</span></div>
+                        <div class="flex justify-between"><span class="text-zinc-500 pl-4">Margin (USDT)</span> <span class="text-white font-medium">\${margin.toFixed(2)}</span></div>
+                        <div class="flex justify-between"><span class="text-zinc-500">Giá vào lệnh</span> <span class="text-white font-medium">\${h.snapPrice.toFixed(4)}</span></div>
+                        <div class="flex justify-between"><span class="text-zinc-500 pl-4">Giá đánh dấu</span> <span class="text-white font-medium">\${livePrice.toFixed(4)}</span></div>
                     </div>
-                    <div class="grid grid-cols-3 gap-2">
+                    <div class="grid grid-cols-3 gap-2 mt-4">
                         <div class="btn-binance">Đòn bẩy</div><div class="btn-binance">TP/SL</div><div class="btn-binance">Đóng</div>
                     </div>
                 </div>\`;
@@ -232,22 +236,21 @@ app.get('/gui', (req, res) => {
                     if(h.startTime >= dayStart) { h.status === 'WIN' ? wDay++ : lDay++; pDay += isNaN(pnl)?0:pnl; }
                     if(h.needSound) { winSnd.play(); delete h.needSound; }
                 }
-                return \`<tr class="border-b border-zinc-900 italic text-zinc-500">
-                    <td class="p-2">\${new Date(h.startTime).toLocaleTimeString()}</td>
-                    <td class="p-2 font-bold text-zinc-300">\${h.symbol} \${h.maxLev || 'NaN'}x</td>
-                    <td class="p-2 text-[8px]">[\${h.snapVol.c1}/\${h.snapVol.c5}/\${h.snapVol.c15}]</td>
-                    <td class="p-2 text-right font-bold \${pnl>=0?'up':'down'}">\${isNaN(pnl)?'NaN':pnl.toFixed(1)+'$'}</td>
-                    <td class="p-2 text-right font-black \${h.status==='WIN'?'up':'down'}">\${h.status}</td>
+                return \`<tr class="border-b border-[#2b3139] text-zinc-400">
+                    <td class="p-3">\${new Date(h.startTime).toLocaleTimeString()}</td>
+                    <td class="p-3 font-bold text-white">\${h.symbol} \${h.maxLev || 'NaN'}x</td>
+                    <td class="p-3">[\${h.snapVol.c1}/\${h.snapVol.c5}/\${h.snapVol.c15}]</td>
+                    <td class="p-3 text-right font-bold \${pnl>=0?'up':'down'}">\${isNaN(pnl)?'NaN':pnl.toFixed(1)+'$'}</td>
+                    <td class="p-3 text-right font-black \${h.status==='WIN'?'up':'down'}">\${h.status}</td>
                 </tr>\`;
             }).join('');
 
             if(running) {
                 currentBal = initialBal + totalPnl;
                 document.getElementById('displayBal').innerText = '$' + currentBal.toLocaleString(undefined, {minimumFractionDigits: 2});
-                document.getElementById('stat24').innerHTML = \`<span class="text-green-500">\${wDay}W</span>-<span class="text-red-500">\${lDay}L</span><br>\${pDay.toFixed(1)}$\`;
+                document.getElementById('stat24').innerHTML = \`<span class="text-[#0ecb81]">\${wDay}W</span>-<span class="text-[#f6465d]">\${lDay}L</span><br>\${pDay.toFixed(1)}$\`;
                 historyLog.push(currentBal); if(historyLog.length > 60) historyLog.shift();
-                chart.data.labels = historyLog.map((_, i) => i); chart.data.datasets[0].data = historyLog; chart.update('none');
-                save();
+                chart.update('none'); save();
             }
         } catch(e) {}
     }
