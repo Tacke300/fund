@@ -90,7 +90,7 @@ app.get('/api/data', (req, res) => {
     res.json({ 
         live: Object.entries(coinData).filter(([_, v]) => v.live).map(([s,v])=>({symbol:s,...v.live})).sort((a,b)=>Math.abs(b.c1)-Math.abs(a.c1)).slice(0,15),
         pending: all.filter(h => h.status === 'PENDING'),
-        history: all.filter(h => h.status !== 'PENDING').sort((a,b)=>b.endTime-a.endTime).slice(0,50)
+        history: all.filter(h => h.status !== 'PENDING').sort((a,b)=>b.endTime-a.endTime).slice(0,100)
     });
 });
 
@@ -171,8 +171,13 @@ app.get('/gui', (req, res) => {
                 <table class="w-full text-[9px] text-left">
                     <thead class="text-gray-custom uppercase border-b border-zinc-800">
                         <tr>
-                            <th class="pb-2">Time</th><th class="pb-2">Coin</th><th class="pb-2">Lev</th>
-                            <th class="pb-2">Entry</th><th class="pb-2">TP/SL</th><th class="pb-2">Margin</th><th class="pb-2 text-right">Result</th>
+                            <th class="pb-2">Time</th>
+                            <th class="pb-2">Coin</th>
+                            <th class="pb-2">Lev</th>
+                            <th class="pb-2">Entry</th>
+                            <th class="pb-2">Margin</th>
+                            <th class="pb-2 font-bold text-white">PnL</th>
+                            <th class="pb-2 text-right">Total PnL</th>
                         </tr>
                     </thead>
                     <tbody id="historyBody" class="text-zinc-300"></tbody>
@@ -244,23 +249,33 @@ app.get('/gui', (req, res) => {
                     '<div class="flex gap-2"><div class="binance-btn">Điều chỉnh đòn bẩy</div><div class="binance-btn">Đóng vị thế</div></div></div>';
             }).join('');
 
-            document.getElementById('historyBody').innerHTML = d.history.map(function(h){
-                var mInp = document.getElementById('marginInp').value;
-                var margin = mInp.includes('%') ? (initialBal * parseFloat(mInp)/100) : parseFloat(mInp);
-                var pnl = (h.status === 'WIN' ? 1 : -1) * (margin * (5 * (h.maxLev || 20)) / 100);
-                totalClosedP += pnl;
-                if(h.endTime >= dayStart) { h.status==='WIN'?wD++:lD++; pD+=pnl; }
-                if(h.endTime >= (now - 7*24*3600000)) { h.status==='WIN'?wW++:lW++; pW+=pnl; }
-                if(h.endTime >= (now - 30*24*3600000)) { h.status==='WIN'?wM++:lM++; pM+=pnl; }
+            // Xử lý lịch sử và cột PnL
+            let runningTotal = 0;
+            let mInpGlobal = document.getElementById('marginInp').value;
+            let marginVal = mInpGlobal.includes('%') ? (initialBal * parseFloat(mInpGlobal)/100) : parseFloat(mInpGlobal);
+            
+            // Tính toán tổng PnL lũy kế từ cũ tới mới
+            let processedHistory = [...d.history].reverse().map(h => {
+                let pnl = (h.status === 'WIN' ? 1 : -1) * (marginVal * (5 * (h.maxLev || 20)) / 100);
+                runningTotal += pnl;
+                return { ...h, pnl, cumulative: runningTotal, margin: marginVal };
+            });
+
+            // Sau khi tính xong thì đảo lại để hiện mới nhất ở trên
+            document.getElementById('historyBody').innerHTML = [...processedHistory].reverse().map(function(h){
+                totalClosedP += h.pnl;
+                if(h.endTime >= dayStart) { h.status==='WIN'?wD++:lD++; pD+=h.pnl; }
+                if(h.endTime >= (now - 7*24*3600000)) { h.status==='WIN'?wW++:lW++; pW+=h.pnl; }
+                if(h.endTime >= (now - 30*24*3600000)) { h.status==='WIN'?wM++:lM++; pM+=h.pnl; }
                 
                 return '<tr class="border-b border-zinc-800/30">' +
-                       '<td class="py-2 text-gray-custom">' + new Date(h.endTime).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) + '</td>' +
-                       '<td class="font-bold text-white">' + h.symbol + '</td>' +
-                       '<td class="text-gray-custom">' + h.maxLev + 'x</td>' +
-                       '<td class="text-zinc-400">' + h.snapPrice.toFixed(3) + '</td>' +
-                       '<td class="text-zinc-500">' + (h.snapPrice*1.05).toFixed(2) + '/' + (h.snapPrice*0.95).toFixed(2) + '</td>' +
-                       '<td class="text-zinc-400">' + margin.toFixed(1) + '</td>' +
-                       '<td class="text-right font-black ' + (h.status==='WIN'?'up':'down') + '">' + h.status + '</td></tr>';
+                        '<td class="py-2 text-gray-custom">' + new Date(h.endTime).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) + '</td>' +
+                        '<td class="font-bold text-white uppercase">' + h.symbol + '</td>' +
+                        '<td class="text-gray-custom">' + h.maxLev + 'x</td>' +
+                        '<td class="text-zinc-400">' + h.snapPrice.toFixed(3) + '</td>' +
+                        '<td class="text-zinc-400">' + h.margin.toFixed(1) + '</td>' +
+                        '<td class="font-bold ' + (h.pnl>=0?'up':'down') + '">' + (h.pnl>=0?'+':'') + h.pnl.toFixed(2) + '</td>' +
+                        '<td class="text-right font-black ' + (h.cumulative>=0?'up':'down') + '">' + (h.cumulative>=0?'+':'') + h.cumulative.toFixed(2) + '</td></tr>';
             }).join('');
 
             if(running) {
@@ -275,7 +290,7 @@ app.get('/gui', (req, res) => {
 
                 if (historyLog.length === 0 || now - historyLog[historyLog.length-1].t >= 60000) { 
                     historyLog.push({t: now, b: currentBal}); 
-                    if(historyLog.length > 1440) historyLog.shift(); // 1440 điểm = 24 giờ
+                    if(historyLog.length > 1440) historyLog.shift();
                     saveConfig(); 
                 }
                 chart.data.labels = historyLog.map((_,i)=>i); chart.data.datasets[0].data = historyLog.map(pt=>pt.b); chart.update('none');
