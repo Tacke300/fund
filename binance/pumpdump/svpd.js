@@ -1,4 +1,4 @@
-const MIN_VOLATILITY_TO_SAVE = 1.5; 
+const MIN_VOLATILITY_TO_SAVE = 4; 
 const PORT = 9000;
 const HISTORY_FILE = './history_db.json';
 const LEVERAGE_FILE = './leverage_cache.json';
@@ -72,14 +72,14 @@ function initWS() {
                 const lose = pending.type === 'DOWN' ? diff >= 5 : diff <= -5;
                 if (win || lose) { 
                     pending.status = win ? 'WIN' : 'LOSE'; 
-                    pending.finalPrice = p; pending.endTime = now; pending.needSound = true;
+                    pending.finalPrice = p; pending.endTime = now;
                     lastTradeClosed[s] = now; 
                     fs.writeFileSync(HISTORY_FILE, JSON.stringify(Array.from(historyMap.values()))); 
                 }
             }
             const isCooldown = lastTradeClosed[s] && (now - lastTradeClosed[s] < COOLDOWN_MINUTES * 60000);
             if (Math.max(Math.abs(c1), Math.abs(c5), Math.abs(c15)) >= MIN_VOLATILITY_TO_SAVE && !pending && !isCooldown) {
-                historyMap.set(`${s}_${now}`, { symbol: s, startTime: now, snapPrice: p, type: (c1+c5+c15 >= 0) ? 'UP' : 'DOWN', status: 'PENDING', maxLev: symbolMaxLeverage[s] || 20, isNew: true });
+                historyMap.set(`${s}_${now}`, { symbol: s, startTime: now, snapPrice: p, type: (c1+c5+c15 >= 0) ? 'UP' : 'DOWN', status: 'PENDING', maxLev: symbolMaxLeverage[s] || 20 });
             }
         });
     });
@@ -103,15 +103,16 @@ app.get('/gui', (req, res) => {
         body { background: #0b0e11; color: #eaecef; font-family: 'IBM Plex Sans', sans-serif; margin: 0; padding: 0; }
         .up { color: #0ecb81; } .down { color: #f6465d; }
         .bg-main { background: #0b0e11; } .bg-card { background: #1e2329; }
-        .dot-under { border-bottom: 1px dotted #5e6673; cursor: help; display: inline-block; line-height: 1; }
+        .dot-under { border-bottom: 1px dotted #5e6673; cursor: help; }
         .binance-btn { background: #2b3139; color: #eaecef; border-radius: 4px; padding: 8px 0; font-size: 13px; font-weight: 600; text-align: center; width: 100%; cursor: pointer; }
-        #user-id { color: #fcd535; font-size: 1.2rem; font-weight: 900; font-style: italic; cursor: pointer; }
+        #user-id { color: #fcd535; font-size: 1.2rem; font-weight: 900; font-style: italic; }
         .text-gray-custom { color: #848e9c; }
         .text-12 { font-size: 12px; } .text-10 { font-size: 10px; }
         @keyframes blink { 0% { opacity: 1; } 50% { opacity: 0.3; } 100% { opacity: 1; } }
         .warn-blink { animation: blink 0.8s infinite; color: #f6465d; font-weight: 900; }
         ::-webkit-scrollbar { width: 0px; }
     </style></head><body>
+    
     <div class="p-4 bg-main sticky top-0 z-50">
         <div id="setup" class="flex flex-col gap-2 mb-4 bg-card p-3 rounded-lg border border-zinc-800">
             <div class="flex gap-2">
@@ -120,107 +121,157 @@ app.get('/gui', (req, res) => {
             </div>
             <div class="flex gap-2">
                 <button onclick="start()" class="bg-[#0ecb81] text-black flex-1 py-2 rounded font-bold uppercase text-xs">Start Bot</button>
-                <button id="clearBtn" onclick="clearAllData()" class="bg-[#f6465d]/20 text-[#f6465d] px-4 py-2 rounded font-bold uppercase text-xs border border-[#f6465d]/50">Xóa lịch sử</button>
+                <button onclick="clearAllData()" class="bg-[#f6465d]/20 text-[#f6465d] px-4 py-2 rounded font-bold uppercase text-xs border border-[#f6465d]/50">Xóa lịch sử</button>
             </div>
         </div>
+
         <div id="active" class="hidden flex justify-between items-center mb-4">
              <div class="flex items-center gap-2"><img src="https://bin.bnbstatic.com/static/images/common/favicon.ico" class="w-5"><h1 class="font-bold italic text-white tracking-tighter">BINANCE <span class="text-[#fcd535]">FUTURES</span></h1></div>
              <div id="user-id" onclick="stop()">Monkey_D_Luffy</div>
         </div>
-        <div class="text-gray-custom text-12 flex items-center gap-1 mb-1 font-medium"><span class="dot-under">Số dư ký quỹ</span> (USDT) <i class="far fa-eye text-10"></i></div>
+
+        <div class="text-gray-custom text-12 mb-1"><span class="dot-under">Số dư ký quỹ</span> (USDT) <i class="far fa-eye text-10"></i></div>
         <div class="flex items-end gap-2 mb-4">
             <span id="displayBal" class="text-3xl font-bold tracking-tighter text-white">0.00</span>
             <span class="text-base font-medium text-white mb-1">USDT</span>
         </div>
-        <div class="grid grid-cols-3 gap-2 mb-4 text-center">
-            <div class="bg-card p-2 rounded"><div class="text-gray-custom text-10 uppercase font-bold mb-1">24h (7h)</div><div id="stat24" class="font-bold text-12">---</div></div>
-            <div class="bg-card p-2 rounded"><div class="text-gray-custom text-10 uppercase font-bold mb-1">7 Ngày qua</div><div id="stat7" class="font-bold text-12">---</div></div>
-            <div class="bg-card p-2 rounded"><div class="text-gray-custom text-10 uppercase font-bold mb-1">30 Ngày qua</div><div id="stat30" class="font-bold text-12">---</div></div>
-        </div>
-        <div class="grid grid-cols-2 gap-4 text-sm border-t border-zinc-800 pt-3">
-            <div><div class="text-gray-custom text-10 mb-1">Số dư ví</div><div id="walletBal" class="font-bold text-white">0.00</div></div>
-            <div class="text-right"><div class="text-gray-custom text-10 mb-1">PNL chưa thực hiện</div><div id="unPnl" class="font-bold">0.00</div></div>
+
+        <div class="grid grid-cols-3 gap-2 text-center">
+            <div class="bg-card p-2 rounded"><div class="text-gray-custom text-10 uppercase font-bold mb-1">24h PNL</div><div id="stat24" class="font-bold text-12">---</div></div>
+            <div class="bg-card p-2 rounded"><div class="text-gray-custom text-10 uppercase font-bold mb-1">Ví</div><div id="walletBal" class="font-bold text-12 text-white">---</div></div>
+            <div class="bg-card p-2 rounded"><div class="text-gray-custom text-10 uppercase font-bold mb-1">UnPnL</div><div id="unPnl" class="font-bold text-12">---</div></div>
         </div>
     </div>
-    <div class="px-4 py-2 bg-main"><div style="height: 100px;"><canvas id="mainChart"></canvas></div></div>
-    <div class="px-4 mt-4"><div class="flex gap-6 mb-4 border-b border-zinc-800 text-sm font-bold text-gray-custom uppercase"><span class="text-white border-b-2 border-[#fcd535] pb-2">Vị thế</span><span>Lệnh mở</span><span>Bot</span></div><div id="pendingContainer" class="space-y-8 pb-6"></div></div>
-    <div class="px-4 space-y-4 pb-32">
-        <div class="bg-card rounded-lg p-3">
-             <div class="text-10 font-bold text-gray-custom mb-3 uppercase italic border-b border-zinc-800 pb-1">Biến động (1m | 5m | 15m)</div>
-             <table class="w-full text-12 text-left"><tbody id="liveBody"></tbody></table>
+
+    <div class="px-4 py-2"><div style="height: 120px;"><canvas id="mainChart"></canvas></div></div>
+
+    <div class="px-4 mt-4">
+        <div class="flex gap-6 mb-4 border-b border-zinc-800 text-sm font-bold text-gray-custom uppercase">
+            <span class="text-white border-b-2 border-[#fcd535] pb-2">Vị thế</span>
+            <span>Lệnh mở</span>
+            <span>Bot</span>
         </div>
+        <div id="pendingContainer" class="space-y-6"></div>
+    </div>
+
+    <div class="px-4 mt-8 pb-32">
         <div class="bg-card rounded-lg p-3">
-            <div class="text-10 font-bold text-gray-custom mb-3 uppercase italic border-b border-zinc-800 pb-1">Lịch sử chốt lệnh</div>
-            <table class="w-full text-10 text-left"><tbody id="historyBody"></tbody></table>
+            <div class="text-10 font-bold text-gray-custom mb-3 uppercase border-b border-zinc-800 pb-1 italic">Lịch sử chốt lệnh chi tiết</div>
+            <div class="overflow-x-auto">
+                <table class="w-full text-[10px] text-left">
+                    <thead class="text-gray-custom">
+                        <tr class="border-b border-zinc-800">
+                            <th class="py-2">Time</th><th class="py-2">Symbol</th><th class="py-2">Lev</th>
+                            <th class="py-2">Entry</th><th class="py-2">TP/SL</th><th class="py-2">Margin</th><th class="py-2 text-right">Result</th>
+                        </tr>
+                    </thead>
+                    <tbody id="historyBody"></tbody>
+                </table>
+            </div>
         </div>
     </div>
+
     <script>
     let running = false, initialBal = 1000, historyLog = [];
-    const tingSnd = new Audio('https://assets.mixkit.co/active_storage/sfx/2354/2354-preview.mp3'); 
-    if(localStorage.getItem('bot_v4_final')) {
-        const saved = JSON.parse(localStorage.getItem('bot_v4_final'));
-        running = saved.running; initialBal = saved.initialBal; historyLog = saved.historyLog || [];
-        if(running) { document.getElementById('setup').classList.add('hidden'); document.getElementById('active').classList.remove('hidden'); }
+    
+    const saved = JSON.parse(localStorage.getItem('bot_config_v5') || '{}');
+    if(saved.running) {
+        running = true; initialBal = saved.initialBal; historyLog = saved.historyLog || [];
+        document.getElementById('setup').classList.add('hidden');
+        document.getElementById('active').classList.remove('hidden');
     }
-    function saveConfig() { localStorage.setItem('bot_v4_final', JSON.stringify({ running, initialBal, historyLog })); }
-    function clearAllData() { if(confirm("Xóa sạch lịch sử?")) { localStorage.removeItem('bot_v4_final'); location.reload(); } }
-    function speak(t) { const m = new SpeechSynthesisUtterance(t); m.lang = 'en-US'; m.rate = 1.2; window.speechSynthesis.speak(m); }
-    const chart = new Chart(document.getElementById('mainChart').getContext('2d'), {
-        type: 'line', data: { labels: historyLog.map((_,i)=>i), datasets: [{ data: historyLog.map(pt=>pt.b), borderColor: '#fcd535', borderWidth: 1.5, tension: 0.4, pointRadius: 0, fill: true, backgroundColor: 'rgba(252,213,53,0.05)' }] },
-        options: { maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { display: false }, y: { display: false } } }
+
+    function save() { localStorage.setItem('bot_config_v5', JSON.stringify({ running, initialBal, historyLog })); }
+    function clearAllData() { if(confirm("Xóa sạch toàn bộ?")) { localStorage.removeItem('bot_config_v5'); location.reload(); } }
+    function start() { running = true; initialBal = parseFloat(document.getElementById('balanceInp').value); document.getElementById('setup').classList.add('hidden'); document.getElementById('active').classList.remove('hidden'); save(); }
+    function stop() { running = false; document.getElementById('setup').classList.remove('hidden'); document.getElementById('active').classList.add('hidden'); save(); }
+
+    const ctx = document.getElementById('mainChart').getContext('2d');
+    const chart = new Chart(ctx, {
+        type: 'line', data: { labels: historyLog.map(p=>''), datasets: [{ data: historyLog.map(p=>p.b), borderColor: '#fcd535', borderWidth: 1.5, tension: 0.3, pointRadius: 0, fill: true, backgroundColor: 'rgba(252,213,53,0.05)' }] },
+        options: { maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { display: false }, y: { grid: { color: '#2b3139' }, ticks: { color: '#848e9c', font: { size: 9 } } } } }
     });
-    function start() { running = true; initialBal = parseFloat(document.getElementById('balanceInp').value); document.getElementById('setup').classList.add('hidden'); document.getElementById('active').classList.remove('hidden'); saveConfig(); }
-    function stop() { running = false; document.getElementById('setup').classList.remove('hidden'); document.getElementById('active').classList.add('hidden'); saveConfig(); }
+
     async function update() {
         try {
             const res = await fetch('/api/data'); const d = await res.json();
-            const now = Date.now(), dayStart = new Date().setHours(7,0,0,0);
-            document.getElementById('liveBody').innerHTML = d.live.map(c => \`<tr class="border-b border-zinc-800/50"><td class="py-2 font-bold text-white uppercase">\${c.symbol}</td><td class="\${c.c1>=0?'up':'down'} text-center">\${c.c1}%</td><td class="\${c.c5>=0?'up':'down'} text-center">\${c.c5}%</td><td class="\${c.c15>=0?'up':'down'} text-right">\${c.c15}%</td></tr>\`).join('');
-            let totalUnPnl = 0, totalClosedP = 0, wD=0, lD=0, pD=0, wW=0, lW=0, pW=0, wM=0, lM=0, pM=0;
+            const now = Date.now();
+            let totalUnPnl = 0, totalClosedP = 0, wD=0, lD=0, pD=0;
+
             document.getElementById('pendingContainer').innerHTML = d.pending.map(h => {
-                if(h.isNew) { tingSnd.play(); delete h.isNew; }
                 const live = d.live.find(c => c.symbol === h.symbol)?.currentPrice || h.snapPrice;
                 const mInp = document.getElementById('marginInp').value;
                 const margin = mInp.includes('%') ? (initialBal * parseFloat(mInp)/100) : parseFloat(mInp);
                 const roi = (h.type === 'UP' ? ((live - h.snapPrice)/h.snapPrice)*100 : ((h.snapPrice - live)/h.snapPrice)*100) * (h.maxLev || 20);
                 const pnl = margin * roi / 100; totalUnPnl += pnl;
+                
                 let excl = '<span class="text-gray-600 ml-1">!!!!</span>';
                 if(roi > 0) excl = '<span class="up ml-1 font-bold">!!!!</span>';
                 if(roi < -50) excl = '<span class="warn-blink ml-1">!!!!</span>';
-                return \`<div class="bg-main border-b border-zinc-800 pb-6">
-                    <div class="flex items-center gap-2 mb-3"><span class="px-1 rounded text-[10px] font-bold \${h.type==='UP'?'bg-[#0ecb81]/20 up':'bg-[#f6465d]/20 down'}">\${h.type==='UP'?'L':'S'}</span><span class="font-bold text-white text-base">\${h.symbol}</span><span class="text-gray-custom text-[11px]">Vĩnh cửu Cross \${h.maxLev || 20}x</span>\${excl}</div>
-                    <div class="grid grid-cols-2 mb-4"><div><div class="text-gray-custom text-12 mb-1"><span class="dot-under">PnL (USDT)</span></div><div class="text-2xl font-bold \${pnl>=0?'up':'down'}">\${pnl.toFixed(2)}</div></div><div class="text-right"><div class="text-gray-custom text-12 mb-1">ROI</div><div class="text-2xl font-bold \${roi>=0?'up':'down'}">\${roi.toFixed(2)}%</div></div></div>
-                    <div class="grid grid-cols-3 text-12 mb-3 text-gray-custom"><div><div class="dot-under">Kích thước (USDT)</div><div class="text-white font-medium">\${(margin*(h.maxLev||20)).toFixed(2)}</div></div><div><div class="dot-under">Margin (USDT)</div><div class="text-white font-medium">\${margin.toFixed(2)}</div></div><div class="text-right"><div class="dot-under">Tỉ lệ ký quỹ</div><div class="up font-medium">17.08%</div></div></div>
-                    <div class="grid grid-cols-3 text-12 mb-4 text-gray-custom"><div><div class="dot-under">Giá vào lệnh (USDT)</div><div class="text-white font-medium">\${h.snapPrice.toFixed(4)}</div></div><div><div class="dot-under">Giá đánh dấu (USDT)</div><div class="text-white font-medium">\${live.toFixed(4)}</div></div><div class="text-right"><div class="dot-under">Giá thanh lý (USDT)</div><div class="text-orange-300 font-medium">0.6081</div></div></div>
-                    <div class="text-11 mb-4 text-gray-custom">TP/SL vị thế <span class="up">\${(h.snapPrice*1.05).toFixed(4)}</span> / <span class="down">\${(h.snapPrice*0.95).toFixed(4)}</span> <i class="fas fa-pen ml-1 text-[9px]"></i></div>
-                    <div class="flex gap-2"><div class="binance-btn">Đòn bẩy</div><div class="binance-btn">TP/SL</div><div class="binance-btn">Đóng</div></div></div>\`;
+
+                return \`<div class="bg-main border-b border-zinc-800 pb-4">
+                    <div class="flex justify-between items-center mb-2">
+                        <div class="flex items-center gap-1">
+                            <span class="px-1 rounded text-[10px] font-bold \${h.type==='UP'?'bg-[#0ecb81]/20 up':'bg-[#f6465d]/20 down'}">\${h.type==='UP'?'Long':'Short'}</span>
+                            <span class="font-bold text-white text-sm uppercase">\${h.symbol}</span>
+                            <span class="text-gray-custom text-[10px]">Cross \${h.maxLev || 20}x</span>\${excl}
+                        </div>
+                        <i class="fas fa-share-alt text-gray-custom text-xs"></i>
+                    </div>
+                    <div class="grid grid-cols-2 mb-3">
+                        <div><div class="text-gray-custom text-10 mb-1 dot-under">PnL (USDT)</div><div class="text-xl font-bold \${pnl>=0?'up':'down'}">\${pnl.toFixed(2)}</div></div>
+                        <div class="text-right"><div class="text-gray-custom text-10 mb-1 dot-under">ROI</div><div class="text-xl font-bold \${roi>=0?'up':'down'}">\${roi.toFixed(2)}%</div></div>
+                    </div>
+                    <div class="grid grid-cols-3 text-[10px] text-gray-custom mb-4">
+                        <div><div class="dot-under">Size</div><div class="text-white">\${(margin*(h.maxLev||20)).toFixed(1)}</div></div>
+                        <div><div class="dot-under">Entry</div><div class="text-white">\${h.snapPrice.toFixed(4)}</div></div>
+                        <div class="text-right"><div class="dot-under">Mark</div><div class="text-white">\${live.toFixed(4)}</div></div>
+                    </div>
+                    <div class="flex gap-2">
+                        <div class="binance-btn py-1 text-10">TP/SL</div><div class="binance-btn py-1 text-10">Đóng</div>
+                    </div>
+                </div>\`;
             }).join('');
+
+            const dayStart = new Date().setHours(7,0,0,0);
             document.getElementById('historyBody').innerHTML = d.history.map(h => {
                 const mInp = document.getElementById('marginInp').value;
                 const margin = mInp.includes('%') ? (initialBal * parseFloat(mInp)/100) : parseFloat(mInp);
                 const pnl = (h.status === 'WIN' ? 1 : -1) * (margin * (5 * (h.maxLev || 20)) / 100);
                 totalClosedP += pnl;
                 if(h.endTime >= dayStart) { h.status==='WIN'?wD++:lD++; pD+=pnl; }
-                if(h.endTime >= (now - 7*24*3600000)) { h.status==='WIN'?wW++:lW++; pW+=pnl; }
-                if(h.endTime >= (now - 30*24*3600000)) { h.status==='WIN'?wM++:lM++; pM+=pnl; }
-                if(h.needSound) { speak(h.status); delete h.needSound; }
-                return \`<tr class="border-b border-zinc-800/50"><td class="py-2 text-gray-custom text-[9px]">\${new Date(h.endTime).toLocaleTimeString()}</td><td class="font-bold text-white uppercase">\${h.symbol}</td><td class="text-right font-bold \${pnl>=0?'up':'down'}">\${pnl.toFixed(1)}</td><td class="text-right font-black \${h.status==='WIN'?'up':'down'}">\${h.status}</td></tr>\`;
+                
+                return \`<tr class="border-b border-zinc-800/30">
+                    <td class="py-2 text-gray-custom">\${new Date(h.endTime).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</td>
+                    <td class="font-bold text-white">\${h.symbol}</td>
+                    <td class="text-gray-custom">\${h.maxLev}x</td>
+                    <td class="text-zinc-400">\${h.snapPrice.toFixed(3)}</td>
+                    <td class="text-zinc-500">\${(h.snapPrice*1.05).toFixed(2)}/\${(h.snapPrice*0.95).toFixed(2)}</td>
+                    <td class="text-zinc-400">\${margin.toFixed(1)}</td>
+                    <td class="text-right font-black \${h.status==='WIN'?'up':'down'}">\${h.status}</td>
+                </tr>\`;
             }).join('');
+
             if(running) {
                 const cB = initialBal + totalClosedP + totalUnPnl;
                 document.getElementById('displayBal').innerText = cB.toLocaleString(undefined, {minimumFractionDigits: 2});
-                document.getElementById('walletBal').innerText = (initialBal + totalClosedP).toFixed(2);
-                document.getElementById('unPnl').innerText = (totalUnPnl >= 0 ? '+' : '') + totalUnPnl.toFixed(2);
-                document.getElementById('unPnl').className = 'font-bold ' + (totalUnPnl >= 0 ? 'up' : 'down');
-                document.getElementById('stat24').innerHTML = \`<span class="up">\${wD}W</span>-<span class="down">\${lD}L</span> <span class="\${pD>=0?'up':'down'} ml-1">\${pD.toFixed(1)}</span>\`;
-                document.getElementById('stat7').innerHTML = \`<span class="up">\${wW}W</span>-<span class="down">\${lW}L</span> <span class="\${pW>=0?'up':'down'} ml-1">\${pW.toFixed(1)}</span>\`;
-                document.getElementById('stat30').innerHTML = \`<span class="up">\${wM}W</span>-<span class="down">\${lM}L</span> <span class="\${pM>=0?'up':'down'} ml-1">\${pM.toFixed(1)}</span>\`;
-                if (historyLog.length === 0 || now - historyLog[historyLog.length-1].t >= 60000) { historyLog.push({t: now, b: cB}); if(historyLog.length > 60) historyLog.shift(); saveConfig(); }
-                chart.data.labels = historyLog.map((_,i)=>i); chart.data.datasets[0].data = historyLog.map(pt=>pt.b); chart.update('none');
+                document.getElementById('walletBal').innerText = (initialBal + totalClosedP).toFixed(1);
+                document.getElementById('unPnl').innerText = totalUnPnl.toFixed(2);
+                document.getElementById('unPnl').className = 'font-bold text-12 ' + (totalUnPnl >= 0 ? 'up' : 'down');
+                document.getElementById('stat24').innerHTML = \`<span class="up">\${wD}W</span>-<span class="down">\${lD}L</span>\`;
+
+                if (historyLog.length === 0 || now - historyLog[historyLog.length-1].t >= 60000) { 
+                    historyLog.push({t: now, b: cB}); 
+                    if(historyLog.length > 1440) historyLog.shift(); // Biểu đồ 24h = 1440 phút
+                    save(); 
+                }
+                chart.data.labels = historyLog.map(p=>'');
+                chart.data.datasets[0].data = historyLog.map(p=>p.b);
+                chart.update('none');
             }
         } catch(e) {}
     }
-    setInterval(update, 2000); update();
+    setInterval(update, 3000); update();
     </script></body></html>`);
 });
 
