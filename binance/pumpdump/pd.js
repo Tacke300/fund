@@ -9,20 +9,19 @@ import { API_KEY, SECRET_KEY } from './config.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// --- CẤU HÌNH CƠ BẢN ---
-let tpPercent = 5.0; 
-let slPercent = 5.0; 
+// --- CẤU HÌNH ---
+let tpPercent = 5.0; // 5% Biến động giá trên đồ thị
+let slPercent = 5.0; // 5% Biến động giá trên đồ thị
 let botSettings = { 
     isRunning: false, 
     maxPositions: 10, 
     invValue: 1.5, 
     invType: 'percent', 
-    minVol: 5.0, 
-    accountSL: 30 
+    minVol: 5.0,
+    defaultLeverage: 75  // Đòn bẩy x75
 };
 
 let status = { currentBalance: 0, botLogs: [], exchangeInfo: {}, candidatesList: [] };
-// botManagedSymbols giờ sẽ lưu: { symbol, openedAt, isSettingUp }
 let botManagedSymbols = []; 
 let blockedSymbols = new Map(); 
 let isInitializing = true;
@@ -60,29 +59,24 @@ async function callBinance(endpoint, method = 'GET', params = {}) {
     });
 }
 
-async function tryOrder(params) {
-    try { return await callBinance('/fapi/v1/order', 'POST', params); } 
-    catch (e) { return { error: e.msg || e.code || "UNKNOWN_ERR" }; }
+async function setupAccount(symbol, leverage) {
+    try {
+        await callBinance('/fapi/v1/leverage', 'POST', { symbol, leverage }).catch(()=>{});
+        await callBinance('/fapi/v1/marginType', 'POST', { symbol, marginType: 'CROSSED' }).catch(()=>{});
+    } catch (e) {}
 }
 
 async function enforceBaoVe(symbol, side, type, price, qty, info) {
     const closeSide = side === 'LONG' ? 'SELL' : 'BUY';
-    const posSide = side; 
     for (let attempt = 1; attempt <= 3; attempt++) {
-        let res = await tryOrder({
-            symbol, side: closeSide, positionSide: posSide,
+        let res = await callBinance('/fapi/v1/order', 'POST', {
+            symbol, side: closeSide, positionSide: side,
             type: type === 'TP' ? 'TAKE_PROFIT_MARKET' : 'STOP_MARKET',
             stopPrice: price, workingType: 'MARK_PRICE', closePosition: 'true'
-        });
-        if (res.error) {
-            res = await tryOrder({
-                symbol, side: closeSide, positionSide: posSide,
-                type: type === 'TP' ? 'TAKE_PROFIT' : 'STOP',
-                price: price, stopPrice: price, quantity: qty, timeInForce: 'GTC', workingType: 'MARK_PRICE'
-            });
-        }
-        if (!res.error) {
-            addBotLog(`✅ [${symbol}] Cài ${type} tại ${price}`, "success");
+        }).catch(e => ({ error: e.msg || "ERR" }));
+
+        if (!res.error || !res.msg) {
+            addBotLog(`✅ [${symbol}] Cài ${type} (5% giá) tại: ${price}`, "success");
             return true;
         }
         await new Promise(r => setTimeout(r, 2000));
@@ -99,7 +93,7 @@ async function hunt() {
 
         const positions = await callBinance('/fapi/v2/positionRisk');
         const activeOnExchange = positions.filter(p => parseFloat(p.positionAmt) !== 0).map(p => p.symbol);
-        const managedNames = botManagedSymbols.map(item => item.symbol);
+        const managedNames = botManagedSymbols.map(i => i.symbol);
 
         for (const c of status.candidatesList.filter(c => c.maxV >= botSettings.minVol)) {
             if (activeOnExchange.includes(c.symbol) || managedNames.includes(c.symbol)) continue;
@@ -107,49 +101,61 @@ async function hunt() {
             if (c.symbol.toUpperCase().includes('USDC')) continue;
 
             const info = status.exchangeInfo[c.symbol];
-            if (!info || info.maxLeverage < 20) continue;
+            if (!info) continue;
+
+            // Thiết lập đòn bẩy
+            await setupAccount(c.symbol, botSettings.defaultLeverage);
 
             const ticker = await callBinance('/fapi/v1/ticker/price', 'GET', { symbol: c.symbol });
             const currentPrice = parseFloat(ticker.price);
-            let margin = botSettings.invType === 'percent' ? (status.currentBalance * botSettings.invValue) / 100 : botSettings.invValue;
             
-            let qty = (Math.floor(((margin * 40) / currentPrice) / info.stepSize) * info.stepSize).toFixed(info.quantityPrecision);
+            let margin = botSettings.invType === 'percent' ? (status.currentBalance * botSettings.invValue) / 100 : botSettings.invValue;
+            let qty = (Math.floor(((margin * botSettings.defaultLeverage) / currentPrice) / info.stepSize) * info.stepSize).toFixed(info.quantityPrecision);
+
             const side = c.changePercent > 0 ? 'BUY' : 'SELL';
             const posSide = c.changePercent > 0 ? 'LONG' : 'SHORT';
 
-            addBotLog(`🎯 MỞ LỆNH: ${c.symbol} | Side: ${posSide}`, "info");
+            addBotLog(`🚀 Đang vào lệnh ${c.symbol} (${posSide}) x${botSettings.defaultLeverage}`, "info");
             
-            // Xóa lệnh cũ nếu có trước khi mở mới
-            await callBinance('/fapi/v1/allOpenOrders', 'DELETE', { symbol: c.symbol }).catch(()=>{});
-            const order = await tryOrder({ symbol: c.symbol, side, positionSide: posSide, type: 'MARKET', quantity: qty });
+            const order = await callBinance('/fapi/v1/order', 'POST', { 
+                symbol: c.symbol, side, positionSide: posSide, type: 'MARKET', quantity: qty 
+            }).catch(e => ({ error: e.msg }));
 
             if (order.orderId) {
-                // Thêm vào danh sách quản lý kèm trạng thái "đang setup"
                 botManagedSymbols.push({ symbol: c.symbol, openedAt: Date.now(), isSettingUp: true });
                 
-                // Đợi 3 giây để sàn cập nhật Position rồi mới cài TP/SL
+                // Đợi sàn cập nhật Entry thực tế
                 setTimeout(async () => {
                     try {
-                        const postionsCheck = await callBinance('/fapi/v2/positionRisk');
-                        const p = postionsCheck.find(pos => pos.symbol === c.symbol && parseFloat(pos.positionAmt) !== 0);
+                        const pCheck = await callBinance('/fapi/v2/positionRisk', 'GET', { symbol: c.symbol });
+                        const p = pCheck.find(pos => pos.symbol === c.symbol && parseFloat(pos.positionAmt) !== 0);
+                        
                         if (p) {
                             const entry = parseFloat(p.entryPrice);
                             const pQty = Math.abs(parseFloat(p.positionAmt));
-                            const tpP = (Math.round((posSide === 'LONG' ? entry * (1 + tpPercent / 100) : entry * (1 - tpPercent / 100)) / info.tickSize) * info.tickSize).toFixed(info.pricePrecision);
-                            const slP = (Math.round((posSide === 'LONG' ? entry * (1 - slPercent / 100) : entry * (1 + slPercent / 100)) / info.tickSize) * info.tickSize).toFixed(info.pricePrecision);
                             
-                            await enforceBaoVe(c.symbol, posSide, 'TP', tpP, pQty, info);
-                            await enforceBaoVe(c.symbol, posSide, 'SL', slP, pQty, info);
+                            // LOGIC: TÍNH 5% TRÊN GIÁ (Bất kể đòn bẩy)
+                            const tpDiff = entry * (tpPercent / 100);
+                            const slDiff = entry * (slPercent / 100);
+
+                            let tpPrice = posSide === 'LONG' ? (entry + tpDiff) : (entry - tpDiff);
+                            let slPrice = posSide === 'LONG' ? (entry - slDiff) : (entry + slDiff);
+
+                            // Làm tròn chuẩn theo Tick Size
+                            const finalTP = (Math.round(tpPrice / info.tickSize) * info.tickSize).toFixed(info.pricePrecision);
+                            const finalSL = (Math.round(slPrice / info.tickSize) * info.tickSize).toFixed(info.pricePrecision);
+
+                            addBotLog(`🔹 [${c.symbol}] Entry thực: ${entry} -> TP (5% giá): ${finalTP} | SL (5% giá): ${finalSL}`);
+                            
+                            await enforceBaoVe(c.symbol, posSide, 'TP', finalTP, pQty, info);
+                            await enforceBaoVe(c.symbol, posSide, 'SL', finalSL, pQty, info);
                         }
                     } finally {
-                        // Cài xong (hoặc lỗi) thì gỡ trạng thái isSettingUp để Cleanup có thể làm việc
                         const target = botManagedSymbols.find(i => i.symbol === c.symbol);
                         if (target) target.isSettingUp = false;
                     }
-                }, 3500);
+                }, 4000); 
                 break; 
-            } else {
-                addBotLog(`❌ Lỗi mở ${c.symbol}: ${order.error}`, "error");
             }
         }
     } finally { isProcessing = false; }
@@ -158,25 +164,27 @@ async function hunt() {
 async function cleanup() {
     try {
         const positions = await callBinance('/fapi/v2/positionRisk');
-        const activeOnExchange = positions.filter(p => parseFloat(p.positionAmt) !== 0).map(p => p.symbol);
+        const activeSymbols = positions.filter(p => parseFloat(p.positionAmt) !== 0).map(p => p.symbol);
         
         for (let i = botManagedSymbols.length - 1; i >= 0; i--) {
             const item = botManagedSymbols[i];
-            
-            // CHỈ DỌN DẸP KHI:
-            // 1. Không có vị thế thực trên sàn
-            // 2. Lệnh đã mở hơn 15 giây (tránh lag API lúc mới mở)
-            // 3. Không ở trong quá trình đang gọi API cài TP/SL
-            const isFinished = !activeOnExchange.includes(item.symbol);
-            const isNotNew = (Date.now() - item.openedAt) > 15000;
+            const isFinished = !activeSymbols.includes(item.symbol);
+            const isNotNew = (Date.now() - item.openedAt) > 20000; 
 
             if (isFinished && isNotNew && !item.isSettingUp) {
-                addBotLog(`🏁 [${item.symbol}] Kết thúc. Clear lệnh chờ...`, "warn");
+                addBotLog(`🏁 [${item.symbol}] Đã đóng. Clear lệnh treo...`, "warn");
                 await callBinance('/fapi/v1/allOpenOrders', 'DELETE', { symbol: item.symbol }).catch(()=>{});
                 botManagedSymbols.splice(i, 1);
-                blockedSymbols.set(item.symbol, Date.now() + 5 * 60 * 1000); 
+                blockedSymbols.set(item.symbol, Date.now() + 3 * 60 * 1000); 
             }
         }
+    } catch (e) {}
+}
+
+async function updateBalance() {
+    try {
+        const acc = await callBinance('/fapi/v2/account');
+        status.currentBalance = parseFloat(acc.totalMarginBalance);
     } catch (e) {}
 }
 
@@ -197,12 +205,8 @@ function fetchCandidates() {
 const APP = express();
 APP.use(express.json());
 APP.use(express.static(__dirname));
-APP.get('/api/status', async (req, res) => {
-    try {
-        const acc = await callBinance('/fapi/v2/account');
-        status.currentBalance = parseFloat(acc.totalMarginBalance);
-        res.json({ botSettings, botRunningSlots: botManagedSymbols.map(i => i.symbol), status });
-    } catch (e) { res.status(500).send("ERR"); }
+APP.get('/api/status', (req, res) => {
+    res.json({ botSettings, botRunningSlots: botManagedSymbols.map(i => i.symbol), status });
 });
 APP.post('/api/settings', (req, res) => { botSettings = { ...botSettings, ...req.body }; res.json({ status: "ok" }); });
 
@@ -215,24 +219,23 @@ async function init() {
                 info.symbols.forEach(s => {
                     const lot = s.filters.find(f => f.filterType === 'LOT_SIZE');
                     const prc = s.filters.find(f => f.filterType === 'PRICE_FILTER');
-                    const lvr = s.filters.find(f => f.filterType === 'LEVERAGE_FILTER');
                     status.exchangeInfo[s.symbol] = { 
                         quantityPrecision: s.quantityPrecision, 
                         pricePrecision: s.pricePrecision, 
                         stepSize: parseFloat(lot.stepSize), 
-                        tickSize: parseFloat(prc.tickSize),
-                        maxLeverage: lvr ? parseInt(lvr.maxLeverage) : 20 
+                        tickSize: parseFloat(prc.tickSize)
                     };
                 });
                 isInitializing = false;
-                addBotLog("🚀 HỆ THỐNG ĐÃ SẴN SÀNG", "success");
-            } catch (e) { addBotLog("❌ Lỗi Init Data", "error"); }
+                addBotLog("🚀 BOT SẴN SÀNG - FIX LỖI TỰ ĐÓNG & TP/SL 5% GIÁ", "success");
+            } catch (e) {}
         });
     });
 }
 
 init();
+setInterval(updateBalance, 10000);
 setInterval(fetchCandidates, 2000);
 setInterval(hunt, 4000);
-setInterval(cleanup, 8000);
+setInterval(cleanup, 10000);
 APP.listen(9001, '0.0.0.0');
