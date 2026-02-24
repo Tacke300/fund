@@ -22,11 +22,11 @@ let botSettings = {
 };
 
 let status = { currentBalance: 0, botLogs: [], exchangeInfo: {}, candidatesList: [] };
+// botManagedSymbols giờ sẽ lưu: { symbol, openedAt, isSettingUp }
 let botManagedSymbols = []; 
 let blockedSymbols = new Map(); 
 let isInitializing = true;
 let isProcessing = false;
-let isSettingTPSL = false;
 
 // --- HÀM HỖ TRỢ ---
 function addBotLog(msg, type = 'info') {
@@ -38,7 +38,7 @@ function addBotLog(msg, type = 'info') {
 }
 
 async function callBinance(endpoint, method = 'GET', params = {}) {
-    const timestamp = Date.now() - 2000; 
+    const timestamp = Date.now() - 1000; 
     const query = Object.keys(params).map(k => `${k}=${encodeURIComponent(params[k])}`).join('&');
     const fullQuery = query + (query ? '&' : '') + `timestamp=${timestamp}&recvWindow=10000`;
     const signature = crypto.createHmac('sha256', SECRET_KEY).update(fullQuery).digest('hex');
@@ -67,94 +67,87 @@ async function tryOrder(params) {
 
 async function enforceBaoVe(symbol, side, type, price, qty, info) {
     const closeSide = side === 'LONG' ? 'SELL' : 'BUY';
+    const posSide = side; 
     for (let attempt = 1; attempt <= 3; attempt++) {
         let res = await tryOrder({
-            symbol, side: closeSide, positionSide: side,
+            symbol, side: closeSide, positionSide: posSide,
             type: type === 'TP' ? 'TAKE_PROFIT_MARKET' : 'STOP_MARKET',
             stopPrice: price, workingType: 'MARK_PRICE', closePosition: 'true'
         });
         if (res.error) {
             res = await tryOrder({
-                symbol, side: closeSide, positionSide: side,
+                symbol, side: closeSide, positionSide: posSide,
                 type: type === 'TP' ? 'TAKE_PROFIT' : 'STOP',
                 price: price, stopPrice: price, quantity: qty, timeInForce: 'GTC', workingType: 'MARK_PRICE'
             });
         }
         if (!res.error) {
-            addBotLog(`✅ [${symbol}] Cài ${type} thành công tại giá ${price}`, "success");
+            addBotLog(`✅ [${symbol}] Cài ${type} tại ${price}`, "success");
             return true;
         }
-        if (attempt === 3) {
-            addBotLog(`❌ [${symbol}] Cài ${type} thất bại: ${res.error}`, "error");
-        } else {
-            await new Promise(r => setTimeout(r, 2000));
-        }
+        await new Promise(r => setTimeout(r, 2000));
     }
     return false;
 }
 
 // --- LOGIC CHÍNH ---
 async function hunt() {
-    if (isInitializing || !botSettings.isRunning || isProcessing || isSettingTPSL) return;
+    if (isInitializing || !botSettings.isRunning || isProcessing) return;
     try {
         isProcessing = true;
         if (botManagedSymbols.length >= botSettings.maxPositions) return;
 
         const positions = await callBinance('/fapi/v2/positionRisk');
         const activeOnExchange = positions.filter(p => parseFloat(p.positionAmt) !== 0).map(p => p.symbol);
+        const managedNames = botManagedSymbols.map(item => item.symbol);
 
         for (const c of status.candidatesList.filter(c => c.maxV >= botSettings.minVol)) {
-            // 1. Kiểm tra sự tồn tại và chặn trùng
-            if (activeOnExchange.includes(c.symbol) || botManagedSymbols.includes(c.symbol)) continue;
+            if (activeOnExchange.includes(c.symbol) || managedNames.includes(c.symbol)) continue;
             if (blockedSymbols.has(c.symbol) && Date.now() < blockedSymbols.get(c.symbol)) continue;
-
-            // 2. LỌC USDC
             if (c.symbol.toUpperCase().includes('USDC')) continue;
 
-            // 3. LỌC ĐÒN BẨY (MAX LEVERAGE < 20 THÌ BỎ QUA)
             const info = status.exchangeInfo[c.symbol];
-            if (!info || info.maxLeverage < 20) {
-                // addBotLog(`⏩ Bỏ qua ${c.symbol}: Leverage tối đa quá thấp (x${info?.maxLeverage || '?'})`, "warn");
-                continue;
-            }
+            if (!info || info.maxLeverage < 20) continue;
 
             const ticker = await callBinance('/fapi/v1/ticker/price', 'GET', { symbol: c.symbol });
             const currentPrice = parseFloat(ticker.price);
             let margin = botSettings.invType === 'percent' ? (status.currentBalance * botSettings.invValue) / 100 : botSettings.invValue;
             
-            // Tính toán khối lượng (mặc định tính trên đòn bẩy x50 để an toàn)
-            let qty = (Math.floor(((margin * 50) / currentPrice) / info.stepSize) * info.stepSize).toFixed(info.quantityPrecision);
-            
+            let qty = (Math.floor(((margin * 40) / currentPrice) / info.stepSize) * info.stepSize).toFixed(info.quantityPrecision);
             const side = c.changePercent > 0 ? 'BUY' : 'SELL';
             const posSide = c.changePercent > 0 ? 'LONG' : 'SHORT';
-            const estTp = (posSide === 'LONG' ? currentPrice * (1 + tpPercent / 100) : currentPrice * (1 - tpPercent / 100)).toFixed(info.pricePrecision);
-            const estSl = (posSide === 'LONG' ? currentPrice * (1 - slPercent / 100) : currentPrice * (1 + slPercent / 100)).toFixed(info.pricePrecision);
 
-            addBotLog(`🎯 MỞ LỆNH: ${c.symbol} | Lev: x${info.maxLeverage} | Side: ${posSide} | Price: ${currentPrice}`, "info");
+            addBotLog(`🎯 MỞ LỆNH: ${c.symbol} | Side: ${posSide}`, "info");
             
+            // Xóa lệnh cũ nếu có trước khi mở mới
             await callBinance('/fapi/v1/allOpenOrders', 'DELETE', { symbol: c.symbol }).catch(()=>{});
             const order = await tryOrder({ symbol: c.symbol, side, positionSide: posSide, type: 'MARKET', quantity: qty });
 
             if (order.orderId) {
-                botManagedSymbols.push(c.symbol);
-                isSettingTPSL = true;
-                addBotLog(`🔥 Khớp ${c.symbol}. Slot: ${botManagedSymbols.length}/${botSettings.maxPositions}`, "success");
+                // Thêm vào danh sách quản lý kèm trạng thái "đang setup"
+                botManagedSymbols.push({ symbol: c.symbol, openedAt: Date.now(), isSettingUp: true });
                 
+                // Đợi 3 giây để sàn cập nhật Position rồi mới cài TP/SL
                 setTimeout(async () => {
-                    const postionsCheck = await callBinance('/fapi/v2/positionRisk');
-                    const p = postionsCheck.find(pos => pos.symbol === c.symbol && parseFloat(pos.positionAmt) !== 0);
-                    if (p) {
-                        const entry = parseFloat(p.entryPrice);
-                        const pQty = Math.abs(parseFloat(p.positionAmt));
-                        const tpP = (Math.round((posSide === 'LONG' ? entry * (1 + tpPercent / 100) : entry * (1 - tpPercent / 100)) / info.tickSize) * info.tickSize).toFixed(info.pricePrecision);
-                        const slP = (Math.round((posSide === 'LONG' ? entry * (1 - slPercent / 100) : entry * (1 + slPercent / 100)) / info.tickSize) * info.tickSize).toFixed(info.pricePrecision);
-                        
-                        await enforceBaoVe(c.symbol, posSide, 'TP', tpP, pQty, info);
-                        await enforceBaoVe(c.symbol, posSide, 'SL', slP, pQty, info);
+                    try {
+                        const postionsCheck = await callBinance('/fapi/v2/positionRisk');
+                        const p = postionsCheck.find(pos => pos.symbol === c.symbol && parseFloat(pos.positionAmt) !== 0);
+                        if (p) {
+                            const entry = parseFloat(p.entryPrice);
+                            const pQty = Math.abs(parseFloat(p.positionAmt));
+                            const tpP = (Math.round((posSide === 'LONG' ? entry * (1 + tpPercent / 100) : entry * (1 - tpPercent / 100)) / info.tickSize) * info.tickSize).toFixed(info.pricePrecision);
+                            const slP = (Math.round((posSide === 'LONG' ? entry * (1 - slPercent / 100) : entry * (1 + slPercent / 100)) / info.tickSize) * info.tickSize).toFixed(info.pricePrecision);
+                            
+                            await enforceBaoVe(c.symbol, posSide, 'TP', tpP, pQty, info);
+                            await enforceBaoVe(c.symbol, posSide, 'SL', slP, pQty, info);
+                        }
+                    } finally {
+                        // Cài xong (hoặc lỗi) thì gỡ trạng thái isSettingUp để Cleanup có thể làm việc
+                        const target = botManagedSymbols.find(i => i.symbol === c.symbol);
+                        if (target) target.isSettingUp = false;
                     }
-                    isSettingTPSL = false;
-                }, 3000);
-                break; // Chỉ mở 1 lệnh mỗi chu kỳ quét
+                }, 3500);
+                break; 
             } else {
                 addBotLog(`❌ Lỗi mở ${c.symbol}: ${order.error}`, "error");
             }
@@ -163,17 +156,25 @@ async function hunt() {
 }
 
 async function cleanup() {
-    if (isSettingTPSL) return;
     try {
         const positions = await callBinance('/fapi/v2/positionRisk');
         const activeOnExchange = positions.filter(p => parseFloat(p.positionAmt) !== 0).map(p => p.symbol);
+        
         for (let i = botManagedSymbols.length - 1; i >= 0; i--) {
-            const s = botManagedSymbols[i];
-            if (!activeOnExchange.includes(s)) {
-                addBotLog(`🏁 [${s}] Đã đóng. Clear lệnh chờ...`, "warn");
-                await callBinance('/fapi/v1/allOpenOrders', 'DELETE', { symbol: s }).catch(()=>{});
+            const item = botManagedSymbols[i];
+            
+            // CHỈ DỌN DẸP KHI:
+            // 1. Không có vị thế thực trên sàn
+            // 2. Lệnh đã mở hơn 15 giây (tránh lag API lúc mới mở)
+            // 3. Không ở trong quá trình đang gọi API cài TP/SL
+            const isFinished = !activeOnExchange.includes(item.symbol);
+            const isNotNew = (Date.now() - item.openedAt) > 15000;
+
+            if (isFinished && isNotNew && !item.isSettingUp) {
+                addBotLog(`🏁 [${item.symbol}] Kết thúc. Clear lệnh chờ...`, "warn");
+                await callBinance('/fapi/v1/allOpenOrders', 'DELETE', { symbol: item.symbol }).catch(()=>{});
                 botManagedSymbols.splice(i, 1);
-                blockedSymbols.set(s, Date.now() + 5 * 60 * 1000); // Chặn 5p sau khi đóng
+                blockedSymbols.set(item.symbol, Date.now() + 5 * 60 * 1000); 
             }
         }
     } catch (e) {}
@@ -200,7 +201,7 @@ APP.get('/api/status', async (req, res) => {
     try {
         const acc = await callBinance('/fapi/v2/account');
         status.currentBalance = parseFloat(acc.totalMarginBalance);
-        res.json({ botSettings, botRunningSlots: botManagedSymbols, status });
+        res.json({ botSettings, botRunningSlots: botManagedSymbols.map(i => i.symbol), status });
     } catch (e) { res.status(500).send("ERR"); }
 });
 APP.post('/api/settings', (req, res) => { botSettings = { ...botSettings, ...req.body }; res.json({ status: "ok" }); });
@@ -214,25 +215,22 @@ async function init() {
                 info.symbols.forEach(s => {
                     const lot = s.filters.find(f => f.filterType === 'LOT_SIZE');
                     const prc = s.filters.find(f => f.filterType === 'PRICE_FILTER');
-                    // Lấy Leverage tối đa từ filters
                     const lvr = s.filters.find(f => f.filterType === 'LEVERAGE_FILTER');
-                    
                     status.exchangeInfo[s.symbol] = { 
                         quantityPrecision: s.quantityPrecision, 
                         pricePrecision: s.pricePrecision, 
                         stepSize: parseFloat(lot.stepSize), 
                         tickSize: parseFloat(prc.tickSize),
-                        maxLeverage: lvr ? parseInt(lvr.maxLeverage) : 20 // Mặc định 20 nếu không tìm thấy filter
+                        maxLeverage: lvr ? parseInt(lvr.maxLeverage) : 20 
                     };
                 });
                 isInitializing = false;
-                addBotLog("🚀 HỆ THỐNG ĐÃ SẴN SÀNG (LỌC USDC & MAX LEV X20)", "success");
+                addBotLog("🚀 HỆ THỐNG ĐÃ SẴN SÀNG", "success");
             } catch (e) { addBotLog("❌ Lỗi Init Data", "error"); }
         });
     });
 }
 
-// --- KHỞI CHẠY ---
 init();
 setInterval(fetchCandidates, 2000);
 setInterval(hunt, 4000);
