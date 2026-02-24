@@ -1,5 +1,5 @@
 // ================= CONFIGURATION =================
-const MIN_VOLATILITY_TO_SAVE = 0.5; 
+const MIN_VOLATILITY_TO_SAVE = 1.5; 
 const PORT = 9000;
 const HISTORY_FILE = './history_db.json';
 const LEVERAGE_FILE = './leverage_cache.json';
@@ -168,6 +168,22 @@ app.get('/gui', (req, res) => {
     let running = false, initialBal = 1000, historyLog = [];
     const tingSnd = new Audio('https://assets.mixkit.co/active_storage/sfx/2354/2354-preview.mp3'); 
     
+    // --- KHÔI PHỤC LOGIC LƯU TRỮ ---
+    if(localStorage.getItem('bot_luffy_v3_config')) {
+        const saved = JSON.parse(localStorage.getItem('bot_luffy_v3_config'));
+        running = saved.running; 
+        initialBal = saved.initialBal; 
+        historyLog = saved.historyLog || [];
+        if(running) {
+            document.getElementById('setup').style.display='none'; 
+            document.getElementById('active').classList.remove('hidden');
+        }
+    }
+    function saveConfig() {
+        localStorage.setItem('bot_luffy_v3_config', JSON.stringify({ running, initialBal, historyLog }));
+    }
+    // --------------------------------
+
     function speak(text) {
         const msg = new SpeechSynthesisUtterance();
         msg.text = text; msg.lang = 'en-US'; msg.rate = 1.2;
@@ -175,13 +191,26 @@ app.get('/gui', (req, res) => {
     }
 
     const chart = new Chart(document.getElementById('mainChart').getContext('2d'), {
-        type: 'line', data: { labels: [], datasets: [{ data: [], borderColor: '#fcd535', borderWidth: 1.5, tension: 0.4, pointRadius: 0, fill: true, backgroundColor: 'rgba(252,213,53,0.05)' }] },
+        type: 'line', data: { labels: historyLog.map((_,i)=>i), datasets: [{ data: historyLog.map(pt=>pt.b), borderColor: '#fcd535', borderWidth: 1.5, tension: 0.4, pointRadius: 0, fill: true, backgroundColor: 'rgba(252,213,53,0.05)' }] },
         options: { maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { display: false }, y: { display: false } } }
     });
 
     function getTradeDayStart() { var d = new Date(); if(d.getHours() < 7) d.setDate(d.getDate() - 1); d.setHours(7,0,0,0); return d.getTime(); }
-    function start() { running = true; initialBal = parseFloat(document.getElementById('balanceInp').value); document.getElementById('setup').style.display='none'; document.getElementById('active').classList.remove('hidden'); }
-    function stop() { running = false; document.getElementById('setup').style.display='flex'; document.getElementById('active').classList.add('hidden'); }
+    
+    function start() { 
+        running = true; 
+        initialBal = parseFloat(document.getElementById('balanceInp').value); 
+        document.getElementById('setup').style.display='none'; 
+        document.getElementById('active').classList.remove('hidden'); 
+        saveConfig();
+    }
+    
+    function stop() { 
+        running = false; 
+        document.getElementById('setup').style.display='flex'; 
+        document.getElementById('active').classList.add('hidden'); 
+        saveConfig();
+    }
 
     async function update() {
         try {
@@ -247,7 +276,11 @@ app.get('/gui', (req, res) => {
                 document.getElementById('stat7').innerHTML = '<span class="up">' + wWeek + 'W</span>-<span class="down">' + lWeek + 'L</span> <span class="' + (pWeek>=0?'up':'down') + ' ml-1">' + pWeek.toFixed(1) + '</span>';
                 document.getElementById('stat30').innerHTML = '<span class="up">' + wMonth + 'W</span>-<span class="down">' + lMonth + 'L</span> <span class="' + (pMonth>=0?'up':'down') + ' ml-1">' + pMonth.toFixed(1) + '</span>';
 
-                if (historyLog.length === 0 || now - historyLog[historyLog.length-1].t >= 60000) { historyLog.push({t: now, b: currentBal}); if(historyLog.length > 60) historyLog.shift(); }
+                if (historyLog.length === 0 || now - historyLog[historyLog.length-1].t >= 60000) { 
+                    historyLog.push({t: now, b: currentBal}); 
+                    if(historyLog.length > 60) historyLog.shift(); 
+                    saveConfig(); // Lưu lịch sử biểu đồ mỗi phút
+                }
                 chart.data.labels = historyLog.map((_,i)=>i); chart.data.datasets[0].data = historyLog.map(pt=>pt.b); chart.update('none');
             }
         } catch(e) {}
