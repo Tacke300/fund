@@ -231,6 +231,16 @@ app.get('/gui', (req, res) => {
                 if(roi > 0) excl = '<span class="up ml-1 font-bold">!!!!</span>';
                 if(roi < -50) excl = '<span class="warn-blink ml-1">!!!!</span>';
 
+                // LOGIC SỬA TẠI ĐÂY: TP/SL cho Long vs Short
+                let tpPrice, slPrice;
+                if(h.type === 'UP') { // Long
+                    tpPrice = h.snapPrice * 1.05;
+                    slPrice = h.snapPrice * 0.95;
+                } else { // Short
+                    tpPrice = h.snapPrice * 0.95;
+                    slPrice = h.snapPrice * 1.05;
+                }
+
                 return '<div class="bg-main border-b border-zinc-800 pb-6">' +
                     '<div class="flex items-center gap-2 mb-3">' +
                         '<span class="px-1 rounded text-[10px] font-bold ' + (h.type==='UP'?'bg-[#0ecb81]/20 up':'bg-[#f6465d]/20 down') + '">' + (h.type==='UP'?'Long':'Short') + '</span>' +
@@ -244,24 +254,21 @@ app.get('/gui', (req, res) => {
                     '<div class="text-right"><div class="dot-under">Tỉ lệ</div><div class="up">0.82%</div></div></div>' +
                     '<div class="grid grid-cols-3 text-12 mb-4 text-gray-custom"><div><div class="dot-under">Giá vào</div><div class="text-white">' + h.snapPrice.toFixed(4) + '</div></div>' +
                     '<div><div class="dot-under">Giá đánh dấu</div><div class="text-white">' + live.toFixed(4) + '</div></div>' +
-                    '<div class="text-right"><div class="dot-under">Thanh lý</div><div class="text-orange-300">0.6081</div></div></div>' +
-                    '<div class="text-11 mb-4 text-gray-custom italic">TP/SL: <span class="up">' + (h.snapPrice*1.05).toFixed(4) + '</span> / <span class="down">' + (h.snapPrice*0.95).toFixed(4) + '</span></div>' +
+                    '<div class="text-right"><div class="dot-under">Thanh lý</div><div class="text-orange-300">---</div></div></div>' +
+                    '<div class="text-11 mb-4 text-gray-custom italic">TP/SL: <span class="up">' + tpPrice.toFixed(4) + '</span> / <span class="down">' + slPrice.toFixed(4) + '</span></div>' +
                     '<div class="flex gap-2"><div class="binance-btn">Điều chỉnh đòn bẩy</div><div class="binance-btn">Đóng vị thế</div></div></div>';
             }).join('');
 
-            // Xử lý lịch sử và cột PnL
             let runningTotal = 0;
             let mInpGlobal = document.getElementById('marginInp').value;
             let marginVal = mInpGlobal.includes('%') ? (initialBal * parseFloat(mInpGlobal)/100) : parseFloat(mInpGlobal);
             
-            // Tính toán tổng PnL lũy kế từ cũ tới mới
             let processedHistory = [...d.history].reverse().map(h => {
                 let pnl = (h.status === 'WIN' ? 1 : -1) * (marginVal * (5 * (h.maxLev || 20)) / 100);
                 runningTotal += pnl;
                 return { ...h, pnl, cumulative: runningTotal, margin: marginVal };
             });
 
-            // Sau khi tính xong thì đảo lại để hiện mới nhất ở trên
             document.getElementById('historyBody').innerHTML = [...processedHistory].reverse().map(function(h){
                 totalClosedP += h.pnl;
                 if(h.endTime >= dayStart) { h.status==='WIN'?wD++:lD++; pD+=h.pnl; }
