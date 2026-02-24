@@ -81,7 +81,7 @@ function initWS() {
             }
             const isCooldown = lastTradeClosed[s] && (now - lastTradeClosed[s] < COOLDOWN_MINUTES * 60000);
             if (Math.max(Math.abs(c1), Math.abs(c5), Math.abs(c15)) >= MIN_VOLATILITY_TO_SAVE && !pending && !isCooldown) {
-                historyMap.set(`${s}_${now}`, { symbol: s, startTime: now, snapPrice: p, type: (c1+c5+c15 >= 0) ? 'UP' : 'DOWN', status: 'PENDING', maxLev: symbolMaxLeverage[s] || 20 });
+                historyMap.set(`${s}_${now}`, { symbol: s, startTime: now, snapPrice: p, type: (c1+c5+c15 >= 0) ? 'UP' : 'DOWN', status: 'PENDING', maxLev: symbolMaxLeverage[s] || 20, isNew: true });
             }
         });
     });
@@ -90,7 +90,7 @@ function initWS() {
 app.get('/api/data', (req, res) => {
     const all = Array.from(historyMap.values());
     res.json({ 
-        live: Object.entries(coinData).filter(([_, v]) => v.live).map(([s,v])=>({symbol:s,...v.live})).sort((a,b)=>Math.abs(b.c1)-Math.abs(a.c1)).slice(0,10),
+        live: Object.entries(coinData).filter(([_, v]) => v.live).map(([s,v])=>({symbol:s,...v.live})).sort((a,b)=>Math.abs(b.c1)-Math.abs(a.c1)).slice(0,15),
         pending: all.filter(h => h.status === 'PENDING'),
         history: all.filter(h => h.status !== 'PENDING').sort((a,b)=>b.endTime-a.endTime).slice(0,50)
     });
@@ -101,151 +101,153 @@ app.get('/gui', (req, res) => {
     <title>Binance Luffy Pro</title><script src="https://cdn.tailwindcss.com"></script><script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <style>
-        body { background: #0b0e11; color: #eaecef; font-family: "IBM Plex Sans", sans-serif; }
+        @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&display=swap');
+        body { background: #0b0e11; color: #eaecef; font-family: 'IBM Plex Sans', sans-serif; margin: 0; padding: 0; }
         .up { color: #0ecb81; } .down { color: #f6465d; }
-        .bg-card { background: #1e2329; }
-        .binance-btn { background: #2b3139; color: #eaecef; border-radius: 4px; padding: 6px 0; font-size: 12px; font-weight: 500; text-align: center; width: 100%; }
-        #user-id { color: #fcd535; font-size: 1.4rem; font-weight: 900; font-style: italic; cursor: pointer; }
-        .text-gray-custom { color: #848e9c; } .text-10 { font-size: 10px; } .text-12 { font-size: 12px; }
+        .bg-main { background: #0b0e11; } .bg-card { background: #1e2329; }
+        .dot-border { border-bottom: 1px dotted #5e6673; }
+        .binance-btn { background: #2b3139; color: #eaecef; border-radius: 4px; padding: 8px 0; font-size: 13px; font-weight: 500; text-align: center; width: 100%; cursor: pointer; }
+        #user-id { color: #fcd535; font-size: 1.2rem; font-weight: 900; font-style: italic; cursor: pointer; }
+        .text-gray-custom { color: #848e9c; }
+        .text-12 { font-size: 12px; } .text-14 { font-size: 14px; } .text-10 { font-size: 10px; }
+        .border-gray-card { border-color: #2b3139; }
         ::-webkit-scrollbar { width: 0px; }
     </style></head><body>
     
-    <div class="p-4">
-        <div id="setup" class="flex gap-2 mb-4">
-            <input id="balanceInp" type="number" value="1000" class="bg-card border border-zinc-700 p-2 rounded w-full text-yellow-500 font-bold outline-none">
-            <input id="marginInp" type="text" value="10%" class="bg-card border border-zinc-700 p-2 rounded w-full text-yellow-500 font-bold outline-none">
+    <div class="p-4 bg-main sticky top-0 z-50">
+        <div id="setup" class="flex gap-2 mb-4 bg-card p-3 rounded-lg border border-zinc-800">
+            <input id="balanceInp" type="number" value="1000" class="bg-black border border-zinc-700 p-2 rounded w-full text-yellow-500 font-bold outline-none text-sm">
+            <input id="marginInp" type="text" value="10%" class="bg-black border border-zinc-700 p-2 rounded w-full text-yellow-500 font-bold outline-none text-sm">
             <button onclick="start()" class="bg-[#fcd535] text-black px-6 py-2 rounded font-bold uppercase text-xs">Start</button>
         </div>
 
-        <div class="grid grid-cols-3 gap-2 mb-6 text-center">
-            <div class="bg-card p-2 rounded"><div class="text-gray-custom text-10 uppercase font-bold">Hôm nay</div><div id="stat24" class="font-bold text-12 text-white">---</div></div>
-            <div class="bg-card p-2 rounded"><div class="text-gray-custom text-10 uppercase font-bold">7 Ngày</div><div id="stat7" class="font-bold text-12 text-white">---</div></div>
-            <div class="bg-card p-2 rounded"><div class="text-gray-custom text-10 uppercase font-bold">30 Ngày</div><div id="stat30" class="font-bold text-12 text-white">---</div></div>
-        </div>
-
         <div id="active" class="hidden flex justify-between items-center mb-4">
-             <div class="flex items-center gap-2"><img src="https://bin.bnbstatic.com/static/images/common/favicon.ico" class="w-5"><h1 class="font-bold italic text-white text-sm">BINANCE <span class="text-[#fcd535]">FUTURES</span></h1></div>
-             <div id="user-id" onclick="stop()">Moncey_D_Luffy</div>
+             <div class="flex items-center gap-2"><img src="https://bin.bnbstatic.com/static/images/common/favicon.ico" class="w-5"><h1 class="font-bold italic text-white tracking-tighter">BINANCE <span class="text-[#fcd535]">FUTURES</span></h1></div>
+             <div id="user-id" onclick="stop()">Monkey_D_Luffy</div>
         </div>
 
-        <div class="text-gray-custom text-12 mb-1">Số dư ký quỹ <i class="far fa-eye text-10"></i></div>
+        <div class="text-gray-custom text-12 flex items-center gap-1 mb-1 font-medium">Số dư ký quỹ (USDT) <i class="far fa-eye text-10"></i></div>
         <div class="flex items-end gap-2 mb-4">
-            <span id="displayBal" class="text-3xl font-bold text-white tracking-tighter">0.00</span>
-            <span class="text-sm font-medium text-white mb-1">USDT</span>
+            <span id="displayBal" class="text-3xl font-bold tracking-tighter text-white">0.00</span>
+            <span class="text-base font-medium text-white mb-1">USDT</span>
+        </div>
+
+        <div class="grid grid-cols-3 gap-2 mb-4 text-center">
+            <div class="bg-card p-2 rounded"><div class="text-gray-custom text-10 uppercase font-bold mb-1">24h (7h)</div><div id="stat24" class="font-bold text-12">---</div></div>
+            <div class="bg-card p-2 rounded"><div class="text-gray-custom text-10 uppercase font-bold mb-1">7 Ngày qua</div><div id="stat7" class="font-bold text-12">---</div></div>
+            <div class="bg-card p-2 rounded"><div class="text-gray-custom text-10 uppercase font-bold mb-1">30 Ngày qua</div><div id="stat30" class="font-bold text-12">---</div></div>
+        </div>
+
+        <div class="grid grid-cols-2 gap-4 text-sm border-t border-zinc-800 pt-3">
+            <div><div class="text-gray-custom text-10 mb-1">Số dư ví</div><div id="walletBal" class="font-bold text-white">0.00</div></div>
+            <div class="text-right"><div class="text-gray-custom text-10 mb-1">PNL chưa thực hiện</div><div id="unPnl" class="font-bold">0.00</div></div>
         </div>
     </div>
 
-    <div class="px-4 py-2"><div style="height: 140px;"><canvas id="mainChart"></canvas></div></div>
-
-    <div class="px-4 mb-4">
-        <div class="bg-card rounded p-3">
-            <div class="text-10 font-bold text-gray-custom mb-2 uppercase border-b border-zinc-800 pb-1 italic">Biến động thị trường</div>
-            <table class="w-full text-[11px] text-left">
-                <tbody id="liveTableBody"></tbody>
-            </table>
-        </div>
+    <div class="px-4 py-2 bg-main">
+        <div style="height: 120px;"><canvas id="mainChart"></canvas></div>
     </div>
 
-    <div class="px-4 mt-4">
-        <div class="flex gap-6 mb-6 border-b border-zinc-800 text-sm font-bold text-gray-custom uppercase tracking-tighter">
+    <div class="px-4 mt-6">
+        <div class="flex gap-6 mb-4 border-b border-gray-card text-sm font-bold text-gray-custom uppercase tracking-tight">
             <span class="text-white border-b-2 border-[#fcd535] pb-2">Vị thế</span>
-            <span>Lệnh chờ</span>
+            <span>Lệnh chờ(0)</span>
             <span>Lịch sử</span>
         </div>
-        <div id="pendingContainer" class="space-y-10 pb-10"></div>
+        <div id="pendingContainer" class="space-y-8 pb-6"></div>
     </div>
 
-    <div class="px-2 pb-24">
-        <div class="bg-card rounded p-3 mx-2">
-            <div class="text-10 font-bold text-gray-custom mb-3 uppercase border-b border-zinc-800 pb-1">Lịch sử chốt lệnh</div>
-            <div class="overflow-x-auto"><table class="w-full text-[10px] text-left min-w-[550px]">
-                <thead class="text-gray-custom uppercase"><tr><th class="pb-2">Time Close</th><th class="pb-2">Coin</th><th class="pb-2">Entry</th><th class="pb-2">TP/SL</th><th class="pb-2">Lev/Margin</th><th class="pb-2 text-right">PNL</th></tr></thead>
-                <tbody id="historyBody" class="text-zinc-300 font-mono"></tbody>
-            </table></div>
+    <div class="px-4 space-y-4 pb-24">
+        <div class="bg-card rounded-lg p-3">
+             <div class="text-10 font-bold text-gray-custom mb-3 uppercase italic border-b border-gray-card pb-1">Biến động (1m | 5m | 15m)</div>
+             <table class="w-full text-12 text-left"><tbody id="liveBody"></tbody></table>
         </div>
     </div>
 
     <script>
     let running = false, initialBal = 1000, historyLog = [];
-    const winSnd = new Audio('https://assets.mixkit.co/active_storage/sfx/2000/2000-preview.mp3'), loseSnd = new Audio('https://assets.mixkit.co/active_storage/sfx/2014/2014-preview.mp3');
+    const tingSnd = new Audio('https://assets.mixkit.co/active_storage/sfx/2354/2354-preview.mp3'); 
+    
+    function speak(text) {
+        const msg = new SpeechSynthesisUtterance();
+        msg.text = text; msg.lang = 'en-US'; msg.rate = 1.2;
+        window.speechSynthesis.speak(msg);
+    }
 
     const chart = new Chart(document.getElementById('mainChart').getContext('2d'), {
         type: 'line', data: { labels: [], datasets: [{ data: [], borderColor: '#fcd535', borderWidth: 1.5, tension: 0.4, pointRadius: 0, fill: true, backgroundColor: 'rgba(252,213,53,0.05)' }] },
         options: { maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { display: false }, y: { display: false } } }
     });
 
-    function fP(price) {
-        let p = parseFloat(price);
-        if (p < 0.001) return p.toFixed(8);
-        if (p < 1) return p.toFixed(4);
-        return p.toFixed(2);
-    }
-
-    function start() { 
-        running = true; 
-        initialBal = parseFloat(document.getElementById('balanceInp').value); 
-        document.getElementById('setup').style.display='none'; 
-        document.getElementById('active').classList.remove('hidden'); 
-    }
-    
-    function stop() { 
-        running = false; 
-        document.getElementById('setup').style.display='flex'; 
-        document.getElementById('active').classList.add('hidden'); 
-    }
+    function getTradeDayStart() { var d = new Date(); if(d.getHours() < 7) d.setDate(d.getDate() - 1); d.setHours(7,0,0,0); return d.getTime(); }
+    function start() { running = true; initialBal = parseFloat(document.getElementById('balanceInp').value); document.getElementById('setup').style.display='none'; document.getElementById('active').classList.remove('hidden'); }
+    function stop() { running = false; document.getElementById('setup').style.display='flex'; document.getElementById('active').classList.add('hidden'); }
 
     async function update() {
         try {
             const res = await fetch('/api/data'); const d = await res.json();
-            const now = Date.now();
+            const now = Date.now(), dayStart = getTradeDayStart();
             
-            // Render Biến động
-            document.getElementById('liveTableBody').innerHTML = d.live.map(c => 
-                \`<tr class="border-b border-zinc-800/50"><td class="py-1 font-bold text-white uppercase">\${c.symbol}</td>
-                <td class="text-center \${c.c1>=0?'up':'down'}">\${c.c1}%</td>
-                <td class="text-center \${c.c5>=0?'up':'down'}">\${c.c5}%</td>
-                <td class="text-center \${c.c15>=0?'up':'down'}">\${c.c15}%</td></tr>\`
+            document.getElementById('liveBody').innerHTML = d.live.map(c => 
+                \`<tr class="border-b border-zinc-800/50"><td class="py-2 font-bold text-white uppercase">\${c.symbol}</td>
+                <td class="\${c.c1>=0?'up':'down'} text-center">\${c.c1}%</td>
+                <td class="\${c.c5>=0?'up':'down'} text-center">\${c.c5}%</td>
+                <td class="\${c.c15>=0?'up':'down'} text-right">\${c.c15}%</td></tr>\`
             ).join('');
 
             let totalUnPnl = 0, totalClosedP = 0;
-            // Render Vị thế
+            let wDay=0, lDay=0, pDay=0, wWeek=0, lWeek=0, pWeek=0, wMonth=0, lMonth=0, pMonth=0;
+
             document.getElementById('pendingContainer').innerHTML = d.pending.map(function(h){
+                if(h.isNew) { tingSnd.play(); delete h.isNew; }
                 var livePrice = d.live.find(function(c){return c.symbol === h.symbol})?.currentPrice || h.snapPrice;
                 var mInp = document.getElementById('marginInp').value;
-                var marginVal = mInp.includes('%') ? (initialBal * parseFloat(mInp)/100) : parseFloat(mInp);
+                var margin = mInp.includes('%') ? (initialBal * parseFloat(mInp)/100) : parseFloat(mInp);
                 var roi = (h.type === 'UP' ? ((livePrice - h.snapPrice)/h.snapPrice)*100 : ((h.snapPrice - livePrice)/h.snapPrice)*100) * (h.maxLev || 20);
-                var pnl = marginVal * roi / 100; totalUnPnl += pnl;
+                var pnl = margin * roi / 100; totalUnPnl += pnl;
+                var pC = pnl >= 0 ? 'up' : 'down';
+                var liqPrice = h.type === 'UP' ? (h.snapPrice * (1 - 0.8/ (h.maxLev || 20))) : (h.snapPrice * (1 + 0.8/ (h.maxLev || 20)));
 
-                var dots = roi > 0 ? '<span class="up font-black text-sm ml-1">!!!!</span>' : '<span class="down font-black text-sm ml-1">!!!</span>';
-                var tp = h.type === 'UP' ? h.snapPrice * 1.05 : h.snapPrice * 0.95;
-                var sl = h.type === 'UP' ? h.snapPrice * 0.94 : h.snapPrice * 1.06;
-
-                return '<div class="relative">' +
-                    '<div class="flex items-center gap-1 mb-3">' +
-                        '<span class="w-4 h-4 flex items-center justify-center rounded-sm text-[10px] font-bold ' + (h.type==='UP'?'bg-[#0ecb81] text-black':'bg-[#f6465d] text-black') + '">' + (h.type==='UP'?'L':'S') + '</span>' +
+                return '<div class="bg-main border-b border-zinc-800 pb-6">' +
+                    '<div class="flex items-center gap-2 mb-3">' +
+                        '<span class="px-1 rounded text-[10px] font-bold ' + (h.type==='UP'?'bg-[#0ecb81]/20 up':'bg-[#f6465d]/20 down') + '">' + (h.type==='UP'?'Long':'Short') + '</span>' +
                         '<span class="font-bold text-white text-base">' + h.symbol + '</span>' +
-                        '<span class="bg-[#2b3139] px-1 rounded text-gray-custom text-[10px] ml-1">Cross ' + (h.maxLev || 20) + 'X</span>' + dots +
+                        '<span class="bg-[#2b3139] px-1 rounded text-gray-custom text-[10px] font-medium">Vĩnh cửu</span>' +
+                        '<span class="bg-[#2b3139] px-1 rounded text-gray-custom text-[10px] font-medium">Cross ' + (h.maxLev || 20) + 'X</span>' +
                     '</div>' +
-                    '<div class="grid grid-cols-2 mb-3"><div><div class="text-gray-custom text-12">PNL(USDT)</div><div class="text-2xl font-bold ' + (pnl>=0?'up':'down') + '">' + pnl.toFixed(2) + '</div></div>' +
-                    '<div class="text-right"><div class="text-gray-custom text-12">ROI</div><div class="text-2xl font-bold ' + (pnl>=0?'up':'down') + '">' + roi.toFixed(2) + '%</div></div></div>' +
-                    '<div class="grid grid-cols-3 text-12 text-gray-custom"><div>Kích thước<div class="text-white">' + (marginVal*20).toFixed(1) + '</div></div>' +
-                    '<div class="text-center">Giá vào<div class="text-white">' + fP(h.snapPrice) + '</div></div>' +
-                    '<div class="text-right">Giá dấu<div class="text-white">' + fP(livePrice) + '</div></div></div>' +
-                    '<div class="flex gap-1 text-11 mt-3">TP/SL: <span class="up">' + fP(tp) + '</span> / <span class="down">' + fP(sl) + '</span></div>' +
-                    '<div class="flex gap-2 mt-4"><div class="binance-btn">Đòn bẩy</div><div class="binance-btn">TP/SL</div><div class="binance-btn">Đóng</div></div></div>';
+                    '<div class="grid grid-cols-2 mb-4"><div><div class="text-gray-custom text-12 dot-border inline-block mb-1">PNL (USDT)</div><div class="text-2xl font-bold ' + pC + '">' + pnl.toFixed(2) + '</div></div>' +
+                    '<div class="text-right"><div class="text-gray-custom text-12 inline-block mb-1">ROI</div><div class="text-2xl font-bold ' + pC + '">' + roi.toFixed(2) + '%</div></div></div>' +
+                    '<div class="grid grid-cols-3 text-12 mb-3 text-gray-custom"><div><div>Kích thước (USDT)</div><div class="text-white font-medium">' + (margin*(h.maxLev || 20)).toFixed(1) + '</div></div>' +
+                    '<div class="text-left"><div>Ký quỹ (USDT)</div><div class="text-white font-medium">' + margin.toFixed(1) + '</div></div>' +
+                    '<div class="text-right"><div>Tỉ lệ ký quỹ</div><div class="up font-medium">0.82%</div></div></div>' +
+                    '<div class="grid grid-cols-3 text-12 mb-5 text-gray-custom"><div><div>Giá vào lệnh</div><div class="text-white font-medium">' + h.snapPrice.toFixed(4) + '</div></div>' +
+                    '<div class="text-left"><div>Giá đánh dấu</div><div class="text-white font-medium">' + livePrice.toFixed(4) + '</div></div>' +
+                    '<div class="text-right"><div>Giá thanh lý</div><div class="text-orange-300 font-medium">' + liqPrice.toFixed(4) + '</div></div></div>' +
+                    '<div class="flex gap-2"><div class="binance-btn">Điều chỉnh đòn bẩy</div><div class="binance-btn">Chốt lời/Dừng lỗ</div><div class="binance-btn">Đóng vị thế</div></div></div>';
             }).join('');
 
-            // Lịch sử & Thống kê
-            document.getElementById('historyBody').innerHTML = d.history.map(function(h){
-                var pnl = (h.status === 'WIN' ? 10 : -10); totalClosedP += pnl;
-                if(h.needSound) { (h.status === 'WIN' ? winSnd : loseSnd).play(); delete h.needSound; }
-                return '<tr><td>'+new Date(h.endTime).toLocaleTimeString()+'</td><td class="font-bold">'+h.symbol+'</td><td>'+fP(h.snapPrice)+'</td><td>--</td><td>'+h.maxLev+'x</td><td class="text-right '+(pnl>=0?'up':'down')+'">'+pnl+'</td></tr>';
-            }).join('');
+            d.history.forEach(h => {
+                var mInp = document.getElementById('marginInp').value;
+                var margin = mInp.includes('%') ? (initialBal * parseFloat(mInp)/100) : parseFloat(mInp);
+                var pnl = (h.status === 'WIN' ? 1 : -1) * (margin * (5 * (h.maxLev || 20)) / 100);
+                totalClosedP += pnl;
+                if(h.endTime >= dayStart) { h.status === 'WIN' ? wDay++ : lDay++; pDay += pnl; }
+                if(h.endTime >= (now - 7*24*3600*1000)) { h.status === 'WIN' ? wWeek++ : lWeek++; pWeek += pnl; }
+                if(h.endTime >= (now - 30*24*3600*1000)) { h.status === 'WIN' ? wMonth++ : lMonth++; pMonth += pnl; }
+                if(h.needSound) { speak(h.status); delete h.needSound; }
+            });
 
             if(running) {
                 var currentBal = initialBal + totalClosedP + totalUnPnl;
                 document.getElementById('displayBal').innerText = currentBal.toLocaleString(undefined, {minimumFractionDigits: 2});
-                if (historyLog.length === 0 || now - historyLog[historyLog.length-1].t >= 30000) { historyLog.push({t: now, b: currentBal}); if(historyLog.length > 60) historyLog.shift(); }
+                document.getElementById('walletBal').innerText = (initialBal + totalClosedP).toFixed(2);
+                document.getElementById('unPnl').innerText = (totalUnPnl >= 0 ? '+' : '') + totalUnPnl.toFixed(2);
+                document.getElementById('unPnl').className = 'font-bold ' + (totalUnPnl >= 0 ? 'up' : 'down');
+                document.getElementById('stat24').innerHTML = '<span class="up">' + wDay + 'W</span>-<span class="down">' + lDay + 'L</span> <span class="' + (pDay>=0?'up':'down') + ' ml-1">' + pDay.toFixed(1) + '</span>';
+                document.getElementById('stat7').innerHTML = '<span class="up">' + wWeek + 'W</span>-<span class="down">' + lWeek + 'L</span> <span class="' + (pWeek>=0?'up':'down') + ' ml-1">' + pWeek.toFixed(1) + '</span>';
+                document.getElementById('stat30').innerHTML = '<span class="up">' + wMonth + 'W</span>-<span class="down">' + lMonth + 'L</span> <span class="' + (pMonth>=0?'up':'down') + ' ml-1">' + pMonth.toFixed(1) + '</span>';
+
+                if (historyLog.length === 0 || now - historyLog[historyLog.length-1].t >= 60000) { historyLog.push({t: now, b: currentBal}); if(historyLog.length > 60) historyLog.shift(); }
                 chart.data.labels = historyLog.map((_,i)=>i); chart.data.datasets[0].data = historyLog.map(pt=>pt.b); chart.update('none');
             }
         } catch(e) {}
@@ -254,4 +256,4 @@ app.get('/gui', (req, res) => {
     </script></body></html>`);
 });
 
-app.listen(PORT, '0.0.0.0', () => { initWS(); });
+app.listen(PORT, '0.0.0.0', () => { initWS(); console.log(`Server: http://localhost:${PORT}/gui`); });
