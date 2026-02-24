@@ -1,4 +1,4 @@
-const MIN_VOLATILITY_TO_SAVE = 0.5; 
+const MIN_VOLATILITY_TO_SAVE = 5; 
 const PORT = 9000;
 const HISTORY_FILE = './history_db.json';
 const LEVERAGE_FILE = './leverage_cache.json';
