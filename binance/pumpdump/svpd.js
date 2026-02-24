@@ -3,7 +3,7 @@ const MIN_VOLATILITY_TO_SAVE = 0.5;
 const PORT = 9000;
 const HISTORY_FILE = './history_db.json';
 const LEVERAGE_FILE = './leverage_cache.json';
-const COOLDOWN_MINUTES = 15; 
+const COOLDOWN_MINUTES = 15; // Nghỉ 15 phút sau khi chốt
 // =================================================
 
 import WebSocket from 'ws';
@@ -74,11 +74,12 @@ function initWS() {
                 const lose = pending.type === 'DOWN' ? diff >= 5 : diff <= -5;
                 if (win || lose) { 
                     pending.status = win ? 'WIN' : 'LOSE'; 
-                    pending.finalPrice = p; pending.endTime = now; pending.needSound = true;
+                    pending.finalPrice = p; pending.endTime = now;
                     lastTradeClosed[s] = now; 
                     fs.writeFileSync(HISTORY_FILE, JSON.stringify(Array.from(historyMap.values()))); 
                 }
             }
+            // LOGIC NGHỈ 15 PHÚT
             const isCooldown = lastTradeClosed[s] && (now - lastTradeClosed[s] < COOLDOWN_MINUTES * 60000);
             if (Math.max(Math.abs(c1), Math.abs(c5), Math.abs(c15)) >= MIN_VOLATILITY_TO_SAVE && !pending && !isCooldown) {
                 historyMap.set(`${s}_${now}`, { symbol: s, startTime: now, snapPrice: p, type: (c1+c5+c15 >= 0) ? 'UP' : 'DOWN', status: 'PENDING', maxLev: symbolMaxLeverage[s] || 20 });
@@ -101,17 +102,16 @@ app.get('/gui', (req, res) => {
     <title>Binance Futures</title><script src="https://cdn.tailwindcss.com"></script><script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <style>
-        body { background-color: #0b0e11; color: #eaecef; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+        body { background-color: #0b0e11; color: #eaecef; font-family: "IBM Plex Sans", sans-serif; }
         .up { color: #0ecb81; } .down { color: #f6465d; }
         .text-gray-bn { color: #848e9c; }
-        .bg-card-bn { background-color: #1e2329; }
-        .dot-underline { border-bottom: 1px dotted #5e6673; display: inline-block; cursor: pointer; }
+        .dot-underline { border-bottom: 1px dotted #5e6673; display: inline-block; }
         .binance-btn { background-color: #2b3139; color: #eaecef; border-radius: 4px; padding: 8px 0; font-size: 13px; font-weight: 500; text-align: center; width: 100%; }
         ::-webkit-scrollbar { width: 0px; }
     </style></head><body>
     
-    <div class="p-4 bg-[#0b0e11]">
-        <div class="grid grid-cols-3 gap-2 mb-5 text-center">
+    <div class="p-4">
+        <div class="grid grid-cols-3 gap-2 mb-6 text-center">
             <div class="bg-[#1e2329] p-2 rounded"><div class="text-gray-bn text-[10px] uppercase">Hôm nay</div><div id="stat24" class="font-bold text-xs text-white">---</div></div>
             <div class="bg-[#1e2329] p-2 rounded"><div class="text-gray-bn text-[10px] uppercase">7 Ngày</div><div id="stat7" class="font-bold text-xs text-white">---</div></div>
             <div class="bg-[#1e2329] p-2 rounded"><div class="text-gray-bn text-[10px] uppercase">30 Ngày</div><div id="stat30" class="font-bold text-xs text-white">---</div></div>
@@ -126,29 +126,27 @@ app.get('/gui', (req, res) => {
 
     <div class="px-4 py-2"><div style="height: 140px;"><canvas id="mainChart"></canvas></div></div>
 
-    <div class="px-4 mt-2">
-        <div class="flex gap-6 mb-4 border-b border-zinc-800 text-sm font-bold text-gray-bn uppercase">
+    <div class="px-4 mt-4">
+        <div class="flex gap-6 mb-6 border-b border-zinc-800 text-sm font-bold text-gray-bn uppercase">
             <span class="text-white border-b-2 border-[#fcd535] pb-2">Vị thế</span>
-            <span>Lệnh mở(0)</span>
+            <span>Lệnh chờ(0)</span>
             <span>Lịch sử</span>
         </div>
-        <div id="pendingContainer" class="space-y-8 pb-10"></div>
+        <div id="pendingContainer" class="space-y-10 pb-10 border-b border-zinc-800"></div>
     </div>
 
-    <div class="px-2 pb-24">
+    <div class="px-2 mt-4 pb-24">
         <div class="bg-[#1e2329] rounded p-3 mx-2">
-            <div class="text-[10px] font-bold text-gray-bn mb-3 uppercase border-b border-zinc-800 pb-1">Lịch sử giao dịch</div>
+            <div class="text-[10px] font-bold text-gray-bn mb-3 uppercase border-b border-zinc-800 pb-1">Lịch sử chốt win lose</div>
             <div class="overflow-x-auto"><table class="w-full text-[10px] text-left min-w-[550px]">
-                <thead class="text-gray-bn uppercase"><tr><th class="pb-2">Time</th><th class="pb-2">Coin</th><th class="pb-2">Entry</th><th class="pb-2">TP/SL</th><th class="pb-2">Lev/Margin</th><th class="pb-2 text-right">PNL</th></tr></thead>
+                <thead class="text-gray-bn uppercase"><tr><th class="pb-2">Time Close</th><th class="pb-2">Coin</th><th class="pb-2">Entry</th><th class="pb-2">TP/SL</th><th class="pb-2">Max Lev/Margin</th><th class="pb-2 text-right">PNL</th></tr></thead>
                 <tbody id="historyBody" class="text-zinc-300 font-mono"></tbody>
             </table></div>
         </div>
     </div>
 
     <script>
-    let running = true, initialBal = 1000, historyLog = [];
-    const winSnd = new Audio('https://assets.mixkit.co/active_storage/sfx/2000/2000-preview.mp3'), loseSnd = new Audio('https://assets.mixkit.co/active_storage/sfx/2014/2014-preview.mp3');
-
+    let initialBal = 1000, historyLog = [];
     const chart = new Chart(document.getElementById('mainChart').getContext('2d'), {
         type: 'line', data: { labels: [], datasets: [{ data: [], borderColor: '#fcd535', borderWidth: 1.5, tension: 0.4, pointRadius: 0, fill: true, backgroundColor: 'rgba(252,213,53,0.05)' }] },
         options: { maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { display: false }, y: { display: false } } }
@@ -158,60 +156,62 @@ app.get('/gui', (req, res) => {
         try {
             const res = await fetch('/api/data'); const d = await res.json();
             const now = Date.now(); let totalUnPnl = 0, totalClosedP = 0;
+            let wD=0, lD=0, pD=0, wW=0, lW=0, pW=0, wM=0, lM=0, pM=0;
 
+            // RENDER VỊ THẾ ĐANG MỞ
             document.getElementById('pendingContainer').innerHTML = d.pending.map(function(h){
                 var livePrice = d.live.find(function(c){return c.symbol === h.symbol})?.currentPrice || h.snapPrice;
-                var marginPct = 35; // Ví dụ để hiển thị 3 chấm than đỏ
-                var marginVal = initialBal * (10 / 100); 
+                var marginPct = 35; // Ví dụ rủi ro cao để hiện 3 chấm đỏ
+                var marginVal = 100; 
                 var roi = (h.type === 'UP' ? ((livePrice - h.snapPrice)/h.snapPrice)*100 : ((h.snapPrice - livePrice)/h.snapPrice)*100) * (h.maxLev || 20);
                 var pnl = marginVal * roi / 100; totalUnPnl += pnl;
 
-                // CHÍNH XÁC DẤU CHẤM THAN
-                var dots = '';
-                if(marginPct >= 30) dots = '<span class="down font-black text-sm">!!!</span>';
-                else if(marginPct >= 20) dots = '<span class="up font-black text-sm">!!</span>';
-                else dots = '<span class="up font-black text-sm">!</span>';
-
+                // CHẤM THAN NẰM CẠNH CROSS
+                var dots = marginPct >= 30 ? '<span class="down ml-1 font-black text-xs">!!!</span>' : '<span class="up ml-1 font-black text-xs">!</span>';
                 var tp = h.type === 'UP' ? h.snapPrice * 1.05 : h.snapPrice * 0.95;
                 var sl = h.type === 'UP' ? h.snapPrice * 0.95 : h.snapPrice * 1.05;
 
                 return '<div class="relative">' +
-                    '<div class="flex items-center gap-1 mb-3">' +
+                    '<div class="flex items-center gap-1 mb-3 text-[14px]">' +
                         '<span class="w-4 h-4 flex items-center justify-center rounded-sm text-[10px] font-bold ' + (h.type==='UP'?'bg-[#0ecb81] text-black':'bg-[#f6465d] text-black') + '">' + (h.type==='UP'?'L':'S') + '</span>' +
-                        '<span class="font-bold text-white text-[15px] uppercase">' + h.symbol + '</span>' +
+                        '<span class="font-bold text-white uppercase">' + h.symbol + '</span>' +
                         '<span class="text-gray-bn text-[10px] ml-1">Vĩnh cửu</span>' +
-                        '<span class="text-gray-bn text-[10px] bg-[#2b3139] px-1 rounded">Cross ' + (h.maxLev || 20) + 'X</span>' +
-                        '<span class="ml-auto">' + dots + '</span>' +
+                        '<span class="text-gray-bn text-[10px] bg-[#2b3139] px-1 rounded">Cross ' + (h.maxLev || 20) + 'X' + dots + '</span>' + // DẤU !!! CẠNH CROSS
+                        '<i class="fas fa-share-alt text-gray-bn ml-auto text-xs"></i>' +
                     '</div>' +
                     '<div class="grid grid-cols-2 mb-4">' +
-                        '<div><div class="text-gray-bn text-xs dot-underline mb-1">PnL (USDT)</div><div class="text-xl font-bold ' + (pnl>=0?'up':'down') + '">' + (pnl>=0?'+':'') + pnl.toFixed(2) + '</div></div>' +
-                        '<div class="text-right"><div class="text-gray-bn text-xs dot-underline mb-1">ROI</div><div class="text-xl font-bold ' + (pnl>=0?'up':'down') + '">' + (roi>=0?'+':'') + roi.toFixed(2) + '%</div></div>' +
+                        '<div><div class="text-gray-bn text-xs dot-underline mb-1">PnL (USDT)</div><div class="text-xl font-bold ' + (pnl>=0?'up':'down') + '">' + pnl.toFixed(2) + '</div></div>' +
+                        '<div class="text-right"><div class="text-gray-bn text-xs dot-underline mb-1">ROI</div><div class="text-xl font-bold ' + (pnl>=0?'up':'down') + '">' + roi.toFixed(2) + '%</div></div>' +
                     '</div>' +
-                    '<div class="grid grid-cols-3 text-[12px] mb-3 text-gray-bn">' +
+                    '<div class="grid grid-cols-3 text-[11px] mb-3 text-gray-bn">' +
                         '<div><div class="dot-underline mb-1">Kích thước (USDT)</div><div class="text-white">' + (marginVal*20).toFixed(1) + '</div></div>' +
                         '<div class="text-center"><div class="dot-underline mb-1">Margin (USDT)</div><div class="text-white">' + marginVal.toFixed(2) + '</div></div>' +
-                        '<div class="text-right"><div class="dot-underline mb-1">Tỉ lệ ký quỹ</div><div class="up">' + marginPct.toFixed(2) + '%</div></div>' +
+                        '<div class="text-right"><div class="dot-underline mb-1">Tỉ lệ ký quỹ</div><div class="up">6.51%</div></div>' +
                     '</div>' +
-                    '<div class="grid grid-cols-3 text-[12px] mb-3 text-gray-bn">' +
+                    '<div class="grid grid-cols-3 text-[11px] mb-3 text-gray-bn">' +
                         '<div><div class="dot-underline mb-1">Giá vào lệnh (USDT)</div><div class="text-white">' + h.snapPrice.toFixed(4) + '</div></div>' +
                         '<div class="text-center"><div class="dot-underline mb-1">Giá đánh dấu (USDT)</div><div class="text-white">' + livePrice.toFixed(4) + '</div></div>' +
-                        '<div class="text-right"><div class="dot-underline mb-1">Giá thanh lý (USDT)</div><div class="text-orange-300">--</div></div>' +
+                        '<div class="text-right"><div class="dot-underline mb-1">Giá thanh lý (USDT)</div><div class="text-orange-300">1.1476</div></div>' +
                     '</div>' +
-                    '<div class="flex items-center gap-1 text-[11px] mb-5 font-medium">' +
-                        '<span class="text-gray-bn">TP/SL vị thế</span>' +
-                        '<span class="up">' + tp.toFixed(4) + '</span><span class="text-gray-bn">/</span><span class="down">' + sl.toFixed(4) + '</span>' +
-                        '<i class="fas fa-edit text-gray-bn ml-1 text-[10px]"></i>' +
+                    '<div class="flex items-center gap-1 text-[11px] mb-4 font-medium">' +
+                        '<span class="text-gray-bn">TP/SL vị thế</span><span class="up">' + tp.toFixed(4) + '</span><span class="text-gray-bn">/</span><span class="down">' + sl.toFixed(4) + '</span><i class="fas fa-edit text-gray-bn ml-1"></i>' +
                     '</div>' +
-                    '<div class="flex gap-2">' +
-                        '<div class="binance-btn">Đòn bẩy</div>' +
-                        '<div class="binance-btn">TP/SL</div>' +
-                        '<div class="binance-btn">Đóng</div>' +
-                    '</div>' +
-                '</div>';
+                    '<div class="flex gap-2"><div class="binance-btn">Đòn bẩy</div><div class="binance-btn">TP/SL</div><div class="binance-btn">Đóng</div></div></div>';
             }).join('');
 
-            // ... (Logic render Lịch sử và Stats giữ nguyên như bản trước) ...
+            // RENDER LỊCH SỬ ĐẦY ĐỦ THÔNG TIN
+            document.getElementById('historyBody').innerHTML = d.history.map(function(h){
+                var margin = 100; var pnl = (h.status === 'WIN' ? 25 : -25);
+                totalClosedP += pnl;
+                var tp = h.type === 'UP' ? h.snapPrice * 1.05 : h.snapPrice * 0.95;
+                var sl = h.type === 'UP' ? h.snapPrice * 0.95 : h.snapPrice * 1.05;
+                return '<tr class="border-b border-zinc-800"><td class="py-2 text-gray-bn">' + new Date(h.endTime).toLocaleTimeString() + '</td>' +
+                       '<td class="font-bold text-white">' + h.symbol + '</td><td>' + h.snapPrice.toFixed(3) + '</td>' +
+                       '<td><span class="up">' + tp.toFixed(2) + '</span>/<span class="down">' + sl.toFixed(2) + '</span></td>' +
+                       '<td>' + (h.maxLev||20) + 'x/' + margin + '</td><td class="text-right font-bold ' + (pnl>=0?'up':'down') + '">' + pnl.toFixed(1) + '</td></tr>';
+            }).join('');
 
+            document.getElementById('displayBal').innerText = (initialBal + totalClosedP + totalUnPnl).toLocaleString();
         } catch(e) {}
     }
     setInterval(update, 2000); update();
