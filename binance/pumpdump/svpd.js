@@ -108,9 +108,16 @@ app.get('/gui', (req, res) => {
         .bg-card { background: #1e2329; }
         .binance-btn { background: #2b3139; color: #eaecef; border-radius: 4px; padding: 7px 0; font-size: 13px; font-weight: 500; text-align: center; width: 100%; }
         #user-id { color: #fcd535; font-size: 1.4rem; font-weight: 900; font-style: italic; }
+        input { background: #2b3139; border: 1px solid #3b424d; color: white; padding: 2px 5px; border-radius: 4px; font-size: 12px; }
         ::-webkit-scrollbar { width: 0px; }
     </style></head><body>
     
+    <div class="p-3 bg-zinc-900 border-b border-zinc-800 flex gap-2 overflow-x-auto text-[10px]">
+        <div>Vốn: <input id="balInp" type="number" value="1000" class="w-16"></div>
+        <div>Ký quỹ %: <input id="marginInp" type="number" value="6.5" class="w-10"></div>
+        <div>Lev: <input id="levInp" type="number" value="20" class="w-10"></div>
+    </div>
+
     <div class="p-4">
         <div class="grid grid-cols-3 gap-2 mb-4 text-center">
             <div class="bg-card p-2 rounded"><div class="text-gray-bn text-[10px] uppercase">Hôm nay</div><div id="stat24" class="font-bold text-xs text-white">---</div></div>
@@ -131,8 +138,8 @@ app.get('/gui', (req, res) => {
     </div>
 
     <div class="px-4 mb-4">
-        <div class="bg-card rounded p-2 overflow-hidden">
-            <table class="w-full text-[10px] text-left">
+        <div class="bg-card rounded p-2 overflow-hidden border border-gray-800">
+            <table class="w-full text-[11px] text-left">
                 <thead class="text-gray-bn border-b border-gray-800"><tr><th>Symbol</th><th class="text-center">1m</th><th class="text-center">5m</th><th class="text-center">15m</th></tr></thead>
                 <tbody id="liveTableBody"></tbody>
             </table>
@@ -151,15 +158,12 @@ app.get('/gui', (req, res) => {
     </div>
 
     <script>
-    let initialBal = 1000;
     const winSnd = new Audio('https://assets.mixkit.co/active_storage/sfx/2000/2000-preview.mp3'), loseSnd = new Audio('https://assets.mixkit.co/active_storage/sfx/2014/2014-preview.mp3');
-
     const chart = new Chart(document.getElementById('mainChart').getContext('2d'), {
         type: 'line', data: { labels: [], datasets: [{ data: [], borderColor: '#fcd535', borderWidth: 1.5, tension: 0.4, pointRadius: 0, fill: true, backgroundColor: 'rgba(252,213,53,0.05)' }] },
         options: { maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { display: false }, y: { display: false } } }
     });
 
-    // HÀM HIỂN THỊ GIÁ THÔNG MINH (TRÁNH 0.0000)
     function formatPrice(p) {
         if (!p) return "0.00";
         if (p < 0.001) return p.toFixed(8);
@@ -170,10 +174,13 @@ app.get('/gui', (req, res) => {
     async function update() {
         try {
             const res = await fetch('/api/data'); const d = await res.json();
-            
+            const now = Date.now();
+            const configBal = parseFloat(document.getElementById('balInp').value) || 1000;
+            const configMarginPct = parseFloat(document.getElementById('marginInp').value) || 6.5;
+
             // RENDER BẢNG BIẾN ĐỘNG
             document.getElementById('liveTableBody').innerHTML = d.live.map(c => 
-                \`<tr class="border-b border-gray-900"><td class="py-1 font-bold">\${c.symbol}</td>
+                \`<tr class="border-b border-gray-900"><td class="py-1 font-bold text-white uppercase">\${c.symbol}</td>
                 <td class="text-center \${c.c1>=0?'up':'down'}">\${c.c1}%</td>
                 <td class="text-center \${c.c5>=0?'up':'down'}">\${c.c5}%</td>
                 <td class="text-center \${c.c15>=0?'up':'down'}">\${c.c15}%</td></tr>\`
@@ -181,16 +188,16 @@ app.get('/gui', (req, res) => {
 
             document.getElementById('pendingContainer').innerHTML = d.pending.map(function(h){
                 var livePrice = d.live.find(c => c.symbol === h.symbol)?.currentPrice || h.snapPrice;
-                var marginPct = 6.51; 
-                var marginVal = initialBal * 0.1; 
-                var roi = (h.type === 'UP' ? ((livePrice - h.snapPrice)/h.snapPrice)*100 : ((h.snapPrice - livePrice)/h.snapPrice)*100) * (h.maxLev || 20);
+                var marginVal = configBal * (configMarginPct / 100); 
+                var currentLev = parseFloat(document.getElementById('levInp').value) || 20;
+                var roi = (h.type === 'UP' ? ((livePrice - h.snapPrice)/h.snapPrice)*100 : ((h.snapPrice - livePrice)/h.snapPrice)*100) * currentLev;
                 
                 // LOGIC CHẤM THAN NẰM CẠNH CROSS
                 var dots = '';
-                if(marginPct > 30) dots = '<span class="down ml-1 font-black text-sm">!!!!</span>';
-                else if(marginPct < 5) dots = '<span class="up ml-1 font-black text-sm">!!!!</span>';
-                else if(marginPct < 10) dots = '<span class="up ml-1 font-black text-sm">!!!</span>';
-                else if(marginPct < 20) dots = '<span class="up ml-1 font-black text-sm">!!</span>';
+                if(configMarginPct >= 30) dots = '<span class="down ml-1 font-black text-sm">!!!!</span>';
+                else if(configMarginPct < 5) dots = '<span class="up ml-1 font-black text-sm">!!!!</span>';
+                else if(configMarginPct < 10) dots = '<span class="up ml-1 font-black text-sm">!!!</span>';
+                else if(configMarginPct < 20) dots = '<span class="up ml-1 font-black text-sm">!!</span>';
                 else dots = '<span class="up ml-1 font-black text-sm">!</span>';
 
                 return \`<div class="relative">
@@ -199,7 +206,7 @@ app.get('/gui', (req, res) => {
                         <span class="font-bold text-white text-[15px] uppercase">\${h.symbol}</span>
                         <span class="text-gray-bn text-[10px] ml-1">Vĩnh cửu</span>
                         <span class="flex items-center">
-                            <span class="text-gray-bn text-[10px] bg-[#2b3139] px-1 rounded ml-1 uppercase">Cross \${h.maxLev || 20}X</span>
+                            <span class="text-gray-bn text-[10px] bg-[#2b3139] px-1 rounded ml-1">Cross \${currentLev}X</span>
                             \${dots}
                         </span>
                         <i class="fas fa-share-alt text-gray-bn ml-auto text-xs"></i>
@@ -209,9 +216,9 @@ app.get('/gui', (req, res) => {
                         <div class="text-right"><div class="text-gray-bn text-xs dot-underline mb-1">ROI</div><div class="text-xl font-bold \${roi>=0?'up':'down'}">\${roi.toFixed(2)}%</div></div>
                     </div>
                     <div class="grid grid-cols-3 text-[11px] mb-3 text-gray-bn">
-                        <div><div class="dot-underline mb-1">Kích thước (USDT)</div><div class="text-white font-medium">\${(marginVal*20).toFixed(1)}</div></div>
+                        <div><div class="dot-underline mb-1">Kích thước (USDT)</div><div class="text-white font-medium">\${(marginVal*currentLev).toFixed(1)}</div></div>
                         <div class="text-center"><div class="dot-underline mb-1">Margin (USDT)</div><div class="text-white font-medium">\${marginVal.toFixed(2)}</div></div>
-                        <div class="text-right"><div class="dot-underline mb-1">Tỉ lệ ký quỹ</div><div class="up font-medium">\${marginPct}%</div></div>
+                        <div class="text-right"><div class="dot-underline mb-1">Tỉ lệ ký quỹ</div><div class="up font-medium">\${configMarginPct}%</div></div>
                     </div>
                     <div class="grid grid-cols-3 text-[11px] mb-4 text-gray-bn">
                         <div><div class="dot-underline mb-1">Giá vào lệnh</div><div class="text-white font-medium">\${formatPrice(h.snapPrice)}</div></div>
@@ -228,12 +235,11 @@ app.get('/gui', (req, res) => {
                 </div>\`;
             }).join('');
 
-            if(d.history[0]?.needSound) { (d.history[0].status==='WIN'?winSnd:loseSnd).play(); }
-            document.getElementById('displayBal').innerText = (initialBal).toLocaleString();
+            document.getElementById('displayBal').innerText = configBal.toLocaleString();
         } catch(e) {}
     }
     setInterval(update, 2000); update();
     </script></body></html>\`);
 });
 
-app.listen(PORT, '0.0.0.0', () => { initWS(); console.log(\`Running: http://localhost:\${PORT}/gui\`); });
+app.listen(PORT, '0.0.0.0', () => { initWS(); });
