@@ -1,17 +1,16 @@
-// ================= CONFIGURATION =================
-const MIN_VOLATILITY_TO_SAVE = 0.5; 
-const PORT = 9000;
-const HISTORY_FILE = './history_db.json';
-const LEVERAGE_FILE = './leverage_cache.json';
-const COOLDOWN_MINUTES = 15; 
-// =================================================
-
 import WebSocket from 'ws';
 import express from 'express';
 import fs from 'fs';
 import https from 'https';
 import crypto from 'crypto';
 import { API_KEY, SECRET_KEY } from './config.js';
+
+// ================= CONFIGURATION =================
+const MIN_VOLATILITY_TO_SAVE = 0.5; 
+const PORT = 9000;
+const HISTORY_FILE = './history_db.json';
+const LEVERAGE_FILE = './leverage_cache.json';
+const COOLDOWN_MINUTES = 15; 
 
 const app = express();
 let coinData = {}; 
@@ -101,71 +100,64 @@ app.get('/gui', (req, res) => {
     <title>Binance Luffy Pro</title><script src="https://cdn.tailwindcss.com"></script><script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <style>
-        body { background: #0b0e11; color: #eaecef; font-family: "IBM Plex Sans", sans-serif; }
+        body { background: #0b0e11; color: #eaecef; font-family: "IBM Plex Sans", sans-serif; margin:0; padding:0; }
         .up { color: #0ecb81; } .down { color: #f6465d; }
         .text-gray-bn { color: #848e9c; }
         .dot-underline { border-bottom: 1px dotted #5e6673; }
         .bg-card { background: #1e2329; }
         .binance-btn { background: #2b3139; color: #eaecef; border-radius: 4px; padding: 7px 0; font-size: 13px; font-weight: 500; text-align: center; width: 100%; }
         #user-id { color: #fcd535; font-size: 1.4rem; font-weight: 900; font-style: italic; }
-        input { background: #2b3139; border: 1px solid #3b424d; color: white; padding: 2px 5px; border-radius: 4px; font-size: 12px; }
+        input { background: #2b3139; border: 1px solid #3b424d; color: white; padding: 2px 5px; border-radius: 4px; font-size: 11px; outline: none; }
         ::-webkit-scrollbar { width: 0px; }
     </style></head><body>
     
-    <div class="p-3 bg-zinc-900 border-b border-zinc-800 flex gap-2 overflow-x-auto text-[10px]">
-        <div>Vốn: <input id="balInp" type="number" value="1000" class="w-16"></div>
-        <div>Ký quỹ %: <input id="marginInp" type="number" value="6.5" class="w-10"></div>
-        <div>Lev: <input id="levInp" type="number" value="20" class="w-10"></div>
+    <div class="p-3 bg-zinc-900 border-b border-zinc-800 flex items-center justify-around text-[10px] font-bold">
+        <div class="flex items-center gap-1">VỐN <input id="balInp" type="number" value="1000" class="w-16"></div>
+        <div class="flex items-center gap-1">MAR% <input id="marginInp" type="number" value="6.5" class="w-10"></div>
+        <div class="flex items-center gap-1">LEV <input id="levInp" type="number" value="20" class="w-10"></div>
     </div>
 
     <div class="p-4">
         <div class="grid grid-cols-3 gap-2 mb-4 text-center">
-            <div class="bg-card p-2 rounded"><div class="text-gray-bn text-[10px] uppercase">Hôm nay</div><div id="stat24" class="font-bold text-xs text-white">---</div></div>
-            <div class="bg-card p-2 rounded"><div class="text-gray-bn text-[10px] uppercase">7 Ngày</div><div id="stat7" class="font-bold text-xs text-white">---</div></div>
-            <div class="bg-card p-2 rounded"><div class="text-gray-bn text-[10px] uppercase">30 Ngày</div><div id="stat30" class="font-bold text-xs text-white">---</div></div>
+            <div class="bg-card p-2 rounded"><div class="text-gray-bn text-[9px] uppercase">Hôm nay</div><div class="font-bold text-xs">---</div></div>
+            <div class="bg-card p-2 rounded"><div class="text-gray-bn text-[9px] uppercase">7 Ngày</div><div class="font-bold text-xs">---</div></div>
+            <div class="bg-card p-2 rounded"><div class="text-gray-bn text-[9px] uppercase">30 Ngày</div><div class="font-bold text-xs">---</div></div>
         </div>
-
         <div class="flex justify-between items-center mb-4">
              <div class="flex items-center gap-2"><img src="https://bin.bnbstatic.com/static/images/common/favicon.ico" class="w-5"><h1 class="font-bold italic text-white text-sm uppercase">Binance <span class="text-[#fcd535]">Futures</span></h1></div>
              <div id="user-id">Luffy_v3</div>
         </div>
-
         <div class="text-gray-bn text-xs mb-1">Số dư ký quỹ <i class="far fa-eye text-[10px]"></i></div>
         <div class="flex items-end gap-1 mb-4">
-            <span id="displayBal" class="text-3xl font-bold text-white tracking-tighter">0.00</span>
-            <span class="text-sm font-medium text-white mb-1">USDT</span>
+            <span id="displayBal" class="text-3xl font-bold text-white tracking-tighter">1,000.00</span>
+            <span class="text-xs font-medium text-white mb-1">USDT</span>
         </div>
     </div>
 
     <div class="px-4 mb-4">
-        <div class="bg-card rounded p-2 overflow-hidden border border-gray-800">
-            <table class="w-full text-[11px] text-left">
+        <div class="bg-card rounded p-2 border border-gray-800">
+            <table class="w-full text-[10px] text-left">
                 <thead class="text-gray-bn border-b border-gray-800"><tr><th>Symbol</th><th class="text-center">1m</th><th class="text-center">5m</th><th class="text-center">15m</th></tr></thead>
                 <tbody id="liveTableBody"></tbody>
             </table>
         </div>
     </div>
 
-    <div class="px-4 py-2"><div style="height: 120px;"><canvas id="mainChart"></canvas></div></div>
+    <div class="px-4 py-2"><div style="height: 100px;"><canvas id="mainChart"></canvas></div></div>
 
     <div class="px-4 mt-4">
-        <div class="flex gap-6 mb-4 border-b border-zinc-800 text-sm font-bold text-gray-bn uppercase">
+        <div class="flex gap-6 mb-4 border-b border-zinc-800 text-xs font-bold text-gray-bn uppercase">
             <span class="text-white border-b-2 border-[#fcd535] pb-2">Vị thế</span>
             <span>Lệnh chờ</span>
             <span>Lịch sử</span>
         </div>
-        <div id="pendingContainer" class="space-y-10 pb-10"></div>
+        <div id="pendingContainer" class="space-y-10 pb-20"></div>
     </div>
 
     <script>
-    const winSnd = new Audio('https://assets.mixkit.co/active_storage/sfx/2000/2000-preview.mp3'), loseSnd = new Audio('https://assets.mixkit.co/active_storage/sfx/2014/2014-preview.mp3');
-    const chart = new Chart(document.getElementById('mainChart').getContext('2d'), {
-        type: 'line', data: { labels: [], datasets: [{ data: [], borderColor: '#fcd535', borderWidth: 1.5, tension: 0.4, pointRadius: 0, fill: true, backgroundColor: 'rgba(252,213,53,0.05)' }] },
-        options: { maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { display: false }, y: { display: false } } }
-    });
-
     function formatPrice(p) {
         if (!p) return "0.00";
+        let s = p.toString();
         if (p < 0.001) return p.toFixed(8);
         if (p < 1) return p.toFixed(6);
         return p.toFixed(4);
@@ -173,59 +165,57 @@ app.get('/gui', (req, res) => {
 
     async function update() {
         try {
-            const res = await fetch('/api/data'); const d = await res.json();
-            const now = Date.now();
+            const res = await fetch('/api/data');
+            const d = await res.json();
             const configBal = parseFloat(document.getElementById('balInp').value) || 1000;
             const configMarginPct = parseFloat(document.getElementById('marginInp').value) || 6.5;
+            const currentLev = parseFloat(document.getElementById('levInp').value) || 20;
 
-            // RENDER BẢNG BIẾN ĐỘNG
             document.getElementById('liveTableBody').innerHTML = d.live.map(c => 
-                \`<tr class="border-b border-gray-900"><td class="py-1 font-bold text-white uppercase">\${c.symbol}</td>
+                \`<tr class="border-b border-gray-900"><td class="py-1 font-bold text-white">\${c.symbol}</td>
                 <td class="text-center \${c.c1>=0?'up':'down'}">\${c.c1}%</td>
                 <td class="text-center \${c.c5>=0?'up':'down'}">\${c.c5}%</td>
                 <td class="text-center \${c.c15>=0?'up':'down'}">\${c.c15}%</td></tr>\`
             ).join('');
 
             document.getElementById('pendingContainer').innerHTML = d.pending.map(function(h){
-                var livePrice = d.live.find(c => c.symbol === h.symbol)?.currentPrice || h.snapPrice;
-                var marginVal = configBal * (configMarginPct / 100); 
-                var currentLev = parseFloat(document.getElementById('levInp').value) || 20;
-                var roi = (h.type === 'UP' ? ((livePrice - h.snapPrice)/h.snapPrice)*100 : ((h.snapPrice - livePrice)/h.snapPrice)*100) * currentLev;
+                let livePrice = d.live.find(c => c.symbol === h.symbol)?.currentPrice || h.snapPrice;
+                let marginVal = configBal * (configMarginPct / 100);
+                let roi = (h.type === 'UP' ? ((livePrice - h.snapPrice)/h.snapPrice)*100 : ((h.snapPrice - livePrice)/h.snapPrice)*100) * currentLev;
                 
-                // LOGIC CHẤM THAN NẰM CẠNH CROSS
-                var dots = '';
-                if(configMarginPct >= 30) dots = '<span class="down ml-1 font-black text-sm">!!!!</span>';
-                else if(configMarginPct < 5) dots = '<span class="up ml-1 font-black text-sm">!!!!</span>';
-                else if(configMarginPct < 10) dots = '<span class="up ml-1 font-black text-sm">!!!</span>';
-                else if(configMarginPct < 20) dots = '<span class="up ml-1 font-black text-sm">!!</span>';
-                else dots = '<span class="up ml-1 font-black text-sm">!</span>';
+                let dots = '';
+                if(configMarginPct >= 30) dots = '<span class="down ml-1 font-black">!!!!</span>';
+                else if(configMarginPct < 5) dots = '<span class="up ml-1 font-black">!!!!</span>';
+                else if(configMarginPct < 10) dots = '<span class="up ml-1 font-black">!!!</span>';
+                else if(configMarginPct < 20) dots = '<span class="up ml-1 font-black">!!</span>';
+                else dots = '<span class="up ml-1 font-black">!</span>';
 
                 return \`<div class="relative">
                     <div class="flex items-center gap-1 mb-3">
                         <span class="w-4 h-4 flex items-center justify-center rounded-sm text-[10px] font-bold \${h.type==='UP'?'bg-[#0ecb81] text-black':'bg-[#f6465d] text-black'}">\${h.type==='UP'?'L':'S'}</span>
                         <span class="font-bold text-white text-[15px] uppercase">\${h.symbol}</span>
-                        <span class="text-gray-bn text-[10px] ml-1">Vĩnh cửu</span>
+                        <span class="text-gray-bn text-[9px] ml-1">Vĩnh cửu</span>
                         <span class="flex items-center">
-                            <span class="text-gray-bn text-[10px] bg-[#2b3139] px-1 rounded ml-1">Cross \${currentLev}X</span>
+                            <span class="text-gray-bn text-[9px] bg-[#2b3139] px-1 rounded ml-1 uppercase">Cross \${currentLev}X</span>
                             \${dots}
                         </span>
                         <i class="fas fa-share-alt text-gray-bn ml-auto text-xs"></i>
                     </div>
                     <div class="grid grid-cols-2 mb-4">
-                        <div><div class="text-gray-bn text-xs dot-underline mb-1">PnL (USDT)</div><div class="text-xl font-bold \${roi>=0?'up':'down'}">\${(marginVal*roi/100).toFixed(2)}</div></div>
-                        <div class="text-right"><div class="text-gray-bn text-xs dot-underline mb-1">ROI</div><div class="text-xl font-bold \${roi>=0?'up':'down'}">\${roi.toFixed(2)}%</div></div>
+                        <div><div class="text-gray-bn text-[10px] dot-underline mb-1">PnL (USDT)</div><div class="text-xl font-bold \${roi>=0?'up':'down'}">\${(marginVal*roi/100).toFixed(2)}</div></div>
+                        <div class="text-right"><div class="text-gray-bn text-[10px] dot-underline mb-1">ROI</div><div class="text-xl font-bold \${roi>=0?'up':'down'}">\${roi.toFixed(2)}%</div></div>
                     </div>
-                    <div class="grid grid-cols-3 text-[11px] mb-3 text-gray-bn">
+                    <div class="grid grid-cols-3 text-[10px] mb-3 text-gray-bn">
                         <div><div class="dot-underline mb-1">Kích thước (USDT)</div><div class="text-white font-medium">\${(marginVal*currentLev).toFixed(1)}</div></div>
                         <div class="text-center"><div class="dot-underline mb-1">Margin (USDT)</div><div class="text-white font-medium">\${marginVal.toFixed(2)}</div></div>
                         <div class="text-right"><div class="dot-underline mb-1">Tỉ lệ ký quỹ</div><div class="up font-medium">\${configMarginPct}%</div></div>
                     </div>
-                    <div class="grid grid-cols-3 text-[11px] mb-4 text-gray-bn">
+                    <div class="grid grid-cols-3 text-[10px] mb-4 text-gray-bn">
                         <div><div class="dot-underline mb-1">Giá vào lệnh</div><div class="text-white font-medium">\${formatPrice(h.snapPrice)}</div></div>
                         <div class="text-center"><div class="dot-underline mb-1">Giá đánh dấu</div><div class="text-white font-medium">\${formatPrice(livePrice)}</div></div>
                         <div class="text-right"><div class="dot-underline mb-1">Giá thanh lý</div><div class="text-orange-300 font-medium">--</div></div>
                     </div>
-                    <div class="flex items-center gap-1 text-[11px] mb-5 font-medium">
+                    <div class="flex items-center gap-1 text-[10px] mb-5 font-medium">
                         <span class="text-gray-bn">TP/SL vị thế: </span>
                         <span class="up">\${formatPrice(h.type==='UP'?h.snapPrice*1.05:h.snapPrice*0.95)}</span>
                         <span class="text-gray-bn"> / </span>
@@ -234,12 +224,19 @@ app.get('/gui', (req, res) => {
                     <div class="flex gap-2"><div class="binance-btn">Đòn bẩy</div><div class="binance-btn">TP/SL</div><div class="binance-btn">Đóng</div></div>
                 </div>\`;
             }).join('');
-
             document.getElementById('displayBal').innerText = configBal.toLocaleString();
         } catch(e) {}
     }
     setInterval(update, 2000); update();
-    </script></body></html>\`);
+    const ctx = document.getElementById('mainChart').getContext('2d');
+    new Chart(ctx, {
+        type: 'line', data: { labels: [1,2,3,4,5], datasets: [{ data: [10,12,11,15,14], borderColor: '#fcd535', borderWidth: 1.5, tension: 0.4, pointRadius: 0 }] },
+        options: { maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { display: false }, y: { display: false } } }
+    });
+    </script></body></html>`);
 });
 
-app.listen(PORT, '0.0.0.0', () => { initWS(); });
+app.listen(PORT, '0.0.0.0', () => {
+    initWS();
+    console.log(`Server: http://localhost:${PORT}/gui`);
+});
