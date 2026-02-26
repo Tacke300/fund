@@ -1,3 +1,5 @@
+const TP_PERCENT = 5.0; // Chốt lời tại 1% (chưa tính đòn bẩy)
+const SL_PERCENT = 2.0; // Cắt lỗ tại 5% (chưa tính đòn bẩy)
 const MIN_VOLATILITY_TO_SAVE = 5; 
 const PORT = 9000;
 const HISTORY_FILE = './history_db.json';
@@ -68,14 +70,14 @@ function initWS() {
             const pending = Array.from(historyMap.values()).find(h => h.symbol === s && h.status === 'PENDING');
             if (pending) {
                 const diff = ((p - pending.snapPrice) / pending.snapPrice) * 100;
-                const win = pending.type === 'UP' ? diff >= 1 : diff <= -1; 
-                const lose = pending.type === 'UP' ? diff <= -5 : diff >= 5; 
+                const win = pending.type === 'UP' ? diff >= TP_PERCENT : diff <= -TP_PERCENT; 
+                const lose = pending.type === 'UP' ? diff <= -SL_PERCENT : diff >= SL_PERCENT; 
 
                 if (win || lose) { 
                     pending.status = win ? 'WIN' : 'LOSE'; 
                     pending.finalPrice = p; 
                     pending.endTime = now;
-                    pending.pnlPercent = win ? 1 : -5;
+                    pending.pnlPercent = win ? TP_PERCENT : -SL_PERCENT;
                     lastTradeClosed[s] = now; 
                     fs.writeFileSync(HISTORY_FILE, JSON.stringify(Array.from(historyMap.values()))); 
                 }
@@ -87,7 +89,9 @@ function initWS() {
                     symbol: s, startTime: now, snapPrice: p, 
                     type: (c1+c5+c15 >= 0) ? 'UP' : 'DOWN', status: 'PENDING', 
                     maxLev: symbolMaxLeverage[s] || 20,
-                    snapVol: { c1, c5, c15 }
+                    snapVol: { c1, c5, c15 },
+                    tpTarget: TP_PERCENT,
+                    slTarget: SL_PERCENT
                 });
             }
         });
@@ -99,7 +103,8 @@ app.get('/api/data', (req, res) => {
     res.json({ 
         live: Object.entries(coinData).filter(([_, v]) => v.live).map(([s,v])=>({symbol:s,...v.live})).sort((a,b)=>Math.abs(b.c1)-Math.abs(a.c1)).slice(0,15),
         pending: all.filter(h => h.status === 'PENDING'),
-        history: all.filter(h => h.status !== 'PENDING').sort((a,b)=>b.endTime-a.endTime).slice(0,100)
+        history: all.filter(h => h.status !== 'PENDING').sort((a,b)=>b.endTime-a.endTime).slice(0,100),
+        config: { tp: TP_PERCENT, sl: SL_PERCENT }
     });
 });
 
@@ -146,7 +151,7 @@ app.get('/gui', (req, res) => {
         <div class="flex gap-6 mb-4 border-b border-zinc-800 text-sm font-bold text-gray-custom uppercase">
             <span class="text-white border-b-2 border-[#fcd535] pb-2">Vị thế đang mở</span>
         </div>
-        <div id="pendingContainer" class="space-y-6 pb-6"></div>
+        <div id="pendingContainer" class="space-y-4 pb-6"></div>
     </div>
 
     <div class="px-4 mb-4">
@@ -220,7 +225,7 @@ app.get('/gui', (req, res) => {
                     <td class="py-2 text-zinc-500">\${new Date(h.startTime).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}<br>\${new Date(h.endTime).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}</td>
                     <td><b class="text-white">\${h.symbol}</b><br><span class="text-zinc-500">\${vol.c1}|\${vol.c5}|\${vol.c15}</span></td>
                     <td class="text-center">\${h.maxLev}x</td>
-                    <td>\${(h.snapPrice||0).toFixed(3)}<br>\${(h.finalPrice||0).toFixed(3)}</td>
+                    <td>\${(h.snapPrice||0).toFixed(4)}<br>\${(h.finalPrice||0).toFixed(4)}</td>
                     <td>\${margin.toFixed(1)}</td>
                     <td class="font-bold \${pnl>=0?'up':'down'}">\${pnl>=0?'+':''}\${pnl.toFixed(2)}</td>
                     <td class="text-right \${runningBal>=initialBal?'up':'down'}">\${runningBal.toFixed(1)}</td>
@@ -234,23 +239,42 @@ app.get('/gui', (req, res) => {
                 let livePrice = (d.live || []).find(c => c.symbol === h.symbol)?.currentPrice || h.snapPrice;
                 let margin = mVal.includes('%') ? (runningBal * mNum / 100) : mNum;
                 currentMarginUsed += margin;
+                
                 let diff = ((livePrice - h.snapPrice) / h.snapPrice) * 100;
                 let roi = (h.type === 'UP' ? diff : -diff) * (h.maxLev || 20);
                 let pnl = margin * roi / 100;
                 totalUnPnl += pnl;
-                let tpPrice = h.type === 'UP' ? h.snapPrice * 1.01 : h.snapPrice * 0.99;
-                let slPrice = h.type === 'UP' ? h.snapPrice * 0.95 : h.snapPrice * 1.05;
 
-                return \`<div class="bg-card p-3 rounded-lg border-l-4 \${h.type==='UP'?'border-green-500':'border-red-500'}">
-                    <div class="flex justify-between mb-2">
-                        <span class="font-bold text-white">\${h.symbol} <span class="text-xs text-gray-500 bg-zinc-800 px-1">\${h.maxLev}x</span></span>
-                        <span class="font-bold \${pnl>=0?'up':'down'}">\${pnl.toFixed(2)} USDT (\${roi.toFixed(2)}%)</span>
+                let tpPrice = h.type === 'UP' ? h.snapPrice * (1 + d.config.tp/100) : h.snapPrice * (1 - d.config.tp/100);
+                let slPrice = h.type === 'UP' ? h.snapPrice * (1 - d.config.sl/100) : h.snapPrice * (1 + d.config.sl/100);
+                let liqPrice = h.type === 'UP' ? h.snapPrice * (1 - 0.8 / h.maxLev) : h.snapPrice * (1 + 0.8 / h.maxLev);
+
+                return \`<div class="bg-card p-3 rounded-md border-l-4 \${h.type==='UP'?'border-green-500':'border-red-500'}">
+                    <div class="flex justify-between items-start mb-2">
+                        <div>
+                            <div class="flex items-center gap-2">
+                                <span class="text-lg font-bold text-white">\${h.symbol}</span>
+                                <span class="bg-zinc-800 text-[10px] px-1 rounded text-zinc-400">Vĩnh cửu</span>
+                                <span class="bg-zinc-800 text-[10px] px-1 rounded text-[#fcd535]">\${h.maxLev}x</span>
+                            </div>
+                            <div class="text-[10px] \${h.type==='UP'?'up':'down'} font-bold mt-1">\${h.type==='UP'?'Long':'Short'} | Isolated</div>
+                        </div>
+                        <div class="text-right">
+                            <div class="text-gray-custom text-[10px]">PnL chưa chốt (USDT)</div>
+                            <div class="text-lg font-bold \${pnl>=0?'up':'down'}">\${pnl>=0?'+':''}\${pnl.toFixed(2)}</div>
+                            <div class="text-[11px] font-medium \${roi>=0?'up':'down'}">ROI \${roi>=0?'+':''}\${roi.toFixed(2)}%</div>
+                        </div>
                     </div>
-                    <div class="grid grid-cols-2 text-[11px] text-gray-400">
-                        <div>Entry: \${h.snapPrice.toFixed(4)} → Mark: \${livePrice.toFixed(4)}</div>
-                        <div class="text-right">Margin: \${margin.toFixed(2)} | TP: \${tpPrice.toFixed(4)}</div>
+                    <div class="grid grid-cols-3 gap-2 mt-3 text-[11px]">
+                        <div><div class="text-gray-custom">Ký quỹ</div><div class="text-white font-medium">\${margin.toFixed(2)}</div></div>
+                        <div><div class="text-gray-custom">Giá vào lệnh</div><div class="text-white font-medium">\${h.snapPrice.toFixed(4)}</div></div>
+                        <div class="text-right"><div class="text-gray-custom">Giá đánh dấu</div><div class="text-white font-medium">\${livePrice.toFixed(4)}</div></div>
                     </div>
-                    <div class="text-[10px] text-gray-600 mt-1 text-right">SL: \${slPrice.toFixed(4)}</div>
+                    <div class="grid grid-cols-3 gap-2 mt-2 text-[11px] border-t border-zinc-800/50 pt-2">
+                         <div><div class="text-gray-custom">Giá thanh lý</div><div class="text-orange-400 font-medium">\${liqPrice.toFixed(4)}</div></div>
+                         <div><div class="text-gray-custom">TP (Target)</div><div class="up font-medium">\${tpPrice.toFixed(4)}</div></div>
+                         <div class="text-right"><div class="text-gray-custom">SL (Stop)</div><div class="down font-medium">\${slPrice.toFixed(4)}</div></div>
+                    </div>
                 </div>\`;
             }).join('');
 
