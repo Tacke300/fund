@@ -79,12 +79,7 @@ function initWS() {
             }
             const isCooldown = lastTradeClosed[s] && (now - lastTradeClosed[s] < COOLDOWN_MINUTES * 60000);
             if (Math.max(Math.abs(c1), Math.abs(c5), Math.abs(c15)) >= MIN_VOLATILITY_TO_SAVE && !pending && !isCooldown) {
-                historyMap.set(`${s}_${now}`, { 
-                    symbol: s, startTime: now, snapPrice: p, 
-                    type: (c1+c5+c15 >= 0) ? 'UP' : 'DOWN', status: 'PENDING', 
-                    maxLev: symbolMaxLeverage[s] || 20,
-                    snapVol: { c1, c5, c15 }
-                });
+                historyMap.set(`${s}_${now}`, { symbol: s, startTime: now, snapPrice: p, type: (c1+c5+c15 >= 0) ? 'UP' : 'DOWN', status: 'PENDING', maxLev: symbolMaxLeverage[s] || 20, snapVol: { c1, c5, c15 } });
             }
         });
     });
@@ -136,19 +131,13 @@ app.get('/gui', (req, res) => {
         <div class="flex gap-6 mb-4 border-b border-zinc-800 text-sm font-bold text-gray-custom uppercase"><span class="text-white border-b-2 border-[#fcd535] pb-2">Vị thế</span></div>
         <div id="pendingContainer" class="space-y-6 pb-6"></div>
     </div>
-    <div class="px-4 mb-4">
-        <div class="bg-card rounded-lg p-3">
-             <div class="text-10 font-bold text-gray-custom mb-3 uppercase italic border-b border-zinc-800 pb-1">Biến động</div>
-             <table class="w-full text-12 text-left"><tbody id="liveBody"></tbody></table>
-        </div>
-    </div>
     <div class="px-4 pb-32">
         <div class="bg-card rounded-lg p-3">
             <div class="text-10 font-bold text-gray-custom mb-3 uppercase italic border-b border-zinc-800 pb-1">Lịch sử</div>
             <div class="overflow-x-auto">
                 <table class="w-full text-[9px] text-left">
                     <thead class="text-gray-custom uppercase border-b border-zinc-800">
-                        <tr><th class="pb-2">Time</th><th class="pb-2">Coin/Snap</th><th class="pb-2">Vào/Ra</th><th class="pb-2">Margin</th><th class="pb-2 text-white">PnL</th><th class="pb-2 text-right">Balance</th></tr>
+                        <tr><th class="pb-2">Time</th><th class="pb-2">Coin/Snap</th><th class="pb-2">Vào/Ra</th><th class="pb-2 text-white">PnL</th><th class="pb-2 text-right">Balance</th></tr>
                     </thead>
                     <tbody id="historyBody" class="text-zinc-300"></tbody>
                 </table>
@@ -157,12 +146,12 @@ app.get('/gui', (req, res) => {
     </div>
     <script>
     let running = false, initialBal = 1000, historyLog = [];
-    if(localStorage.getItem('bot_v7')) {
-        const saved = JSON.parse(localStorage.getItem('bot_v7'));
+    if(localStorage.getItem('bot_v8')) {
+        const saved = JSON.parse(localStorage.getItem('bot_v8'));
         running = saved.running; initialBal = saved.initialBal; historyLog = saved.historyLog || [];
         if(running) { document.getElementById('setup').style.display='none'; document.getElementById('active').classList.remove('hidden'); }
     }
-    function saveConfig() { localStorage.setItem('bot_v7', JSON.stringify({ running, initialBal, historyLog })); }
+    function saveConfig() { localStorage.setItem('bot_v8', JSON.stringify({ running, initialBal, historyLog })); }
     const chart = new Chart(document.getElementById('mainChart').getContext('2d'), {
         type: 'line', data: { labels: historyLog.map((_,i)=>i), datasets: [{ data: historyLog.map(pt=>pt.b), borderColor: '#fcd535', borderWidth: 1.5, tension: 0.4, pointRadius: 0, fill: true, backgroundColor: 'rgba(252,213,53,0.05)' }] },
         options: { maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { display: false }, y: { display: false } } }
@@ -173,28 +162,33 @@ app.get('/gui', (req, res) => {
         try {
             const res = await fetch('/api/data'); const d = await res.json();
             const now = Date.now();
-            document.getElementById('liveBody').innerHTML = d.live.map(c => 
-                \`<tr class="border-b border-zinc-800/50"><td class="py-2 font-bold text-white">\${c.symbol}</td><td class="\${c.c1>=0?'up':'down'} text-center">\${c.c1}%</td><td class="\${c.c5>=0?'up':'down'} text-center">\${c.c5}%</td><td class="\${c.c15>=0?'up':'down'} text-right">\${c.c15}%</td></tr>\`
-            ).join('');
-            
-            let currentBalance = initialBal;
             let mInp = document.getElementById('marginInp').value;
-            let histRows = [];
+            
+            // 1. TÍNH TOÁN SỐ DƯ VÍ (WALLET BALANCE)
+            let walletBalance = initialBal;
+            let histItems = [];
             d.history.forEach(h => {
-                let m = mInp.includes('%') ? (currentBalance * parseFloat(mInp)/100) : parseFloat(mInp);
+                let m = mInp.includes('%') ? (walletBalance * parseFloat(mInp)/100) : parseFloat(mInp);
                 let pnl = h.status === 'WIN' ? (m * (h.maxLev || 20) * 0.01) : -(m * (h.maxLev || 20) * 0.05);
-                currentBalance += pnl;
-                histRows.unshift(\`<tr><td class="py-2 text-gray-500">\${new Date(h.startTime).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}<br>\${new Date(h.endTime).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}</td>
-                    <td><b class="text-white">\${h.symbol}</b><br><span class="text-[8px] text-gray-600">\${h.snapVol.c1}/\${h.snapVol.c5}/\${h.snapVol.c15}</span></td>
-                    <td>\${h.snapPrice.toFixed(4)}<br>\${h.finalPrice.toFixed(4)}</td><td>\${m.toFixed(1)}</td>
-                    <td class="font-bold \${pnl>=0?'up':'down'}">\${pnl>=0?'+':''}\${pnl.toFixed(2)}</td><td class="text-right font-bold">\${currentBalance.toFixed(1)}</td></tr>\`);
+                walletBalance += pnl;
+                histItems.unshift({ ...h, pnl, balanceAfter: walletBalance, marginUsed: m });
             });
-            document.getElementById('historyBody').innerHTML = histRows.join('');
 
+            // 2. RENDER LỊCH SỬ
+            document.getElementById('historyBody').innerHTML = histItems.map(h => \`
+                <tr class="border-b border-zinc-800/30">
+                    <td class="py-2 text-gray-500">\${new Date(h.startTime).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}<br>\${new Date(h.endTime).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}</td>
+                    <td><b class="text-white">\${h.symbol}</b><br><span class="text-[8px] text-gray-600">\${h.snapVol.c1}/\${h.snapVol.c5}/\${h.snapVol.c15}</span></td>
+                    <td>\${h.snapPrice.toFixed(4)}<br>\${h.finalPrice.toFixed(4)}</td>
+                    <td class="font-bold \${h.pnl>=0?'up':'down'}">\${h.pnl>=0?'+':''}\${h.pnl.toFixed(2)}</td>
+                    <td class="text-right font-bold">\${h.balanceAfter.toFixed(1)}</td>
+                </tr>\`).join('');
+
+            // 3. RENDER VỊ THẾ ĐANG MỞ
             let totalUnPnl = 0, currentMarginUsed = 0;
             document.getElementById('pendingContainer').innerHTML = d.pending.map(function(h){
                 let lp = d.live.find(c => c.symbol === h.symbol)?.currentPrice || h.snapPrice;
-                let margin = mInp.includes('%') ? (currentBalance * parseFloat(mInp)/100) : parseFloat(mInp);
+                let margin = mInp.includes('%') ? (walletBalance * parseFloat(mInp)/100) : parseFloat(mInp);
                 currentMarginUsed += margin;
                 let roi = (h.type === 'UP' ? (lp - h.snapPrice)/h.snapPrice : (h.snapPrice - lp)/h.snapPrice) * 100 * (h.maxLev || 20);
                 let pnl = margin * roi / 100; totalUnPnl += pnl;
@@ -207,13 +201,18 @@ app.get('/gui', (req, res) => {
                 </div>\`;
             }).join('');
 
+            // 4. CẬP NHẬT DASHBOARD
             if(running) {
-                let totalEquity = currentBalance + totalUnPnl;
-                document.getElementById('displayBal').innerText = totalEquity.toFixed(2);
-                document.getElementById('walletBal').innerText = (currentBalance - currentMarginUsed).toFixed(2);
+                let totalEquity = walletBalance + totalUnPnl;
+                document.getElementById('displayBal').innerText = totalEquity.toLocaleString(undefined, {minimumFractionDigits: 2});
+                document.getElementById('walletBal').innerText = (walletBalance - currentMarginUsed).toFixed(2);
                 document.getElementById('unPnl').innerText = (totalUnPnl >= 0 ? '+' : '') + totalUnPnl.toFixed(2);
                 document.getElementById('unPnl').className = 'font-bold ' + (totalUnPnl >= 0 ? 'up' : 'down');
-                if (historyLog.length === 0 || now - historyLog[historyLog.length-1].t >= 60000) { historyLog.push({t: now, b: totalEquity}); if(historyLog.length > 200) historyLog.shift(); saveConfig(); }
+                
+                if (historyLog.length === 0 || now - historyLog[historyLog.length-1].t >= 60000) { 
+                    historyLog.push({t: now, b: totalEquity}); 
+                    if(historyLog.length > 200) historyLog.shift(); saveConfig(); 
+                }
                 chart.data.labels = historyLog.map((_,i)=>i); chart.data.datasets[0].data = historyLog.map(pt=>pt.b); chart.update('none');
             }
         } catch(e) {}
