@@ -68,15 +68,14 @@ function initWS() {
             const pending = Array.from(historyMap.values()).find(h => h.symbol === s && h.status === 'PENDING');
             if (pending) {
                 const diff = ((p - pending.snapPrice) / pending.snapPrice) * 100;
-                // Tính toán Win/Lose dựa trên vị thế Long (UP) hoặc Short (DOWN)
-                const win = pending.type === 'UP' ? diff >= 1 : diff <= -1; // Chốt lời 1%
-                const lose = pending.type === 'UP' ? diff <= -5 : diff >= 5; // Cắt lỗ 5%
+                const win = pending.type === 'UP' ? diff >= 1 : diff <= -1; 
+                const lose = pending.type === 'UP' ? diff <= -5 : diff >= 5; 
 
                 if (win || lose) { 
                     pending.status = win ? 'WIN' : 'LOSE'; 
                     pending.finalPrice = p; 
                     pending.endTime = now;
-                    pending.pnlPercent = win ? 1 : -5; // Lưu lại biến động giá thực tế khi đóng
+                    pending.pnlPercent = win ? 1 : -5;
                     lastTradeClosed[s] = now; 
                     fs.writeFileSync(HISTORY_FILE, JSON.stringify(Array.from(historyMap.values()))); 
                 }
@@ -124,7 +123,7 @@ app.get('/gui', (req, res) => {
             <button onclick="start()" class="bg-[#fcd535] text-black px-4 py-2 rounded font-bold uppercase text-xs">Start</button>
         </div>
         <div id="active" class="hidden flex justify-between items-center mb-4">
-             <div class="flex items-center gap-2"><img src="https://bin.bnbstatic.com/static/images/common/favicon.ico" class="w-5"><h1 class="font-bold italic text-white">BINANCE <span class="text-[#fcd535]">FUTURES</span></h1></div>
+             <div class="flex items-center gap-2"><img src="https://bin.bnbstatic.com/static/images/common/favicon.ico" class="w-5"><h1 class="font-bold italic text-white tracking-tighter">BINANCE <span class="text-[#fcd535]">FUTURES</span></h1></div>
              <div id="user-id" onclick="stop()">Monkey_D_Luffy</div>
         </div>
         <div class="text-gray-custom text-12 mb-1">Số dư ký quỹ hiện tại (USDT)</div>
@@ -178,7 +177,9 @@ app.get('/gui', (req, res) => {
     
     if(localStorage.getItem('bot_v6')) {
         const saved = JSON.parse(localStorage.getItem('bot_v6'));
-        running = saved.running; initialBal = saved.initialBal; historyLog = saved.historyLog || [];
+        running = !!saved.running; 
+        initialBal = parseFloat(saved.initialBal) || 1000; 
+        historyLog = saved.historyLog || [];
         if(running) { document.getElementById('setup').style.display='none'; document.getElementById('active').classList.remove('hidden'); }
     }
     function saveConfig() { localStorage.setItem('bot_v6', JSON.stringify({ running, initialBal, historyLog })); }
@@ -188,33 +189,31 @@ app.get('/gui', (req, res) => {
         options: { maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { display: false }, y: { display: false } } }
     });
 
-    function start() { running = true; initialBal = parseFloat(document.getElementById('balanceInp').value); document.getElementById('setup').style.display='none'; document.getElementById('active').classList.remove('hidden'); saveConfig(); }
+    function start() { running = true; initialBal = parseFloat(document.getElementById('balanceInp').value) || 1000; document.getElementById('setup').style.display='none'; document.getElementById('active').classList.remove('hidden'); saveConfig(); }
     function stop() { running = false; document.getElementById('setup').style.display='flex'; document.getElementById('active').classList.add('hidden'); saveConfig(); }
 
     async function update() {
         try {
             const res = await fetch('/api/data'); const d = await res.json();
             const now = Date.now();
-            let mInp = document.getElementById('marginInp').value;
+            let mVal = document.getElementById('marginInp').value;
+            let mNum = parseFloat(mVal) || 0;
 
-            // 1. Live table
-            document.getElementById('liveBody').innerHTML = d.live.map(c => 
+            document.getElementById('liveBody').innerHTML = (d.live || []).map(c => 
                 \`<tr class="border-b border-zinc-800/50"><td class="py-2 font-bold text-white">\${c.symbol}</td>
                 <td class="\${c.c1>=0?'up':'down'} text-center">\${c.c1}%</td>
                 <td class="\${c.c5>=0?'up':'down'} text-center">\${c.c5}%</td>
                 <td class="\${c.c15>=0?'up':'down'} text-right">\${c.c15}%</td></tr>\`
             ).join('');
 
-            // 2. Lịch sử & Wallet balance
             let runningBal = initialBal;
-            let historyHTML = [...d.history].reverse().map(h => {
-                let margin = mInp.includes('%') ? (runningBal * parseFloat(mInp)/100) : parseFloat(mInp);
-                // PnL = Margin * Lev * % biến động giá thực tế (1% hoặc -5%)
-                let pnl = margin * (h.maxLev || 20) * (h.pnlPercent / 100);
+            let historyHTML = [...(d.history || [])].reverse().map(h => {
+                let margin = mVal.includes('%') ? (runningBal * mNum / 100) : mNum;
+                let pnl = margin * (h.maxLev || 20) * ((h.pnlPercent || 0) / 100);
                 runningBal += pnl;
                 return \`<tr>
                     <td class="py-2"><b>\${h.symbol}</b> <span class="\${h.type==='UP'?'up':'down'}">\${h.type}</span></td>
-                    <td>\${h.snapPrice.toFixed(3)}<br>\${h.finalPrice.toFixed(3)}</td>
+                    <td>\${(h.snapPrice||0).toFixed(3)}<br>\${(h.finalPrice||0).toFixed(3)}</td>
                     <td>\${margin.toFixed(1)}</td>
                     <td class="font-bold \${pnl>=0?'up':'down'}">\${pnl>=0?'+':''}\${pnl.toFixed(2)}</td>
                     <td class="text-right">\${runningBal.toFixed(1)}</td>
@@ -222,12 +221,11 @@ app.get('/gui', (req, res) => {
             }).reverse().join('');
             document.getElementById('historyBody').innerHTML = historyHTML;
 
-            // 3. Pending Positions
             let totalUnPnl = 0;
             let currentMarginUsed = 0;
-            document.getElementById('pendingContainer').innerHTML = d.pending.map(h => {
-                let livePrice = d.live.find(c => c.symbol === h.symbol)?.currentPrice || h.snapPrice;
-                let margin = mInp.includes('%') ? (runningBal * parseFloat(mInp)/100) : parseFloat(mInp);
+            document.getElementById('pendingContainer').innerHTML = (d.pending || []).map(h => {
+                let livePrice = (d.live || []).find(c => c.symbol === h.symbol)?.currentPrice || h.snapPrice;
+                let margin = mVal.includes('%') ? (runningBal * mNum / 100) : mNum;
                 currentMarginUsed += margin;
                 
                 let diff = ((livePrice - h.snapPrice) / h.snapPrice) * 100;
@@ -254,10 +252,9 @@ app.get('/gui', (req, res) => {
                 </div>\`;
             }).join('');
 
-            // 4. Dashboard
             if(running) {
                 let totalEquity = runningBal + totalUnPnl;
-                document.getElementById('displayBal').innerText = totalEquity.toLocaleString('en-US', {minimumFractionDigits: 2});
+                document.getElementById('displayBal').innerText = totalEquity.toFixed(2);
                 document.getElementById('walletBal').innerText = (runningBal - currentMarginUsed).toFixed(2);
                 document.getElementById('unPnl').innerText = (totalUnPnl >= 0 ? '+' : '') + totalUnPnl.toFixed(2);
                 document.getElementById('unPnl').className = 'font-bold ' + (totalUnPnl >= 0 ? 'up' : 'down');
