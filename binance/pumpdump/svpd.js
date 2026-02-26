@@ -108,7 +108,7 @@ app.get('/gui', (req, res) => {
     <title>Binance Luffy Pro v2</title><script src="https://cdn.tailwindcss.com"></script><script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&display=swap');
-        body { background: #0b0e11; color: #eaecef; font-family: 'IBM Plex Sans', sans-serif; margin: 0; }
+        body { background: #0b0e11; color: #eaecef; font-family: 'IBM Plex Sans', sans-serif; margin: 0; padding: 0; }
         .up { color: #0ecb81; } .down { color: #f6465d; }
         .bg-main { background: #0b0e11; } .bg-card { background: #1e2329; }
         #user-id { color: #fcd535; font-size: 1.2rem; font-weight: 900; font-style: italic; cursor: pointer; }
@@ -122,49 +122,54 @@ app.get('/gui', (req, res) => {
             <input id="marginInp" type="text" value="10%" class="bg-black border border-zinc-700 p-2 rounded w-full text-yellow-500 font-bold outline-none text-sm">
             <button onclick="start()" class="bg-[#fcd535] text-black px-4 py-2 rounded font-bold uppercase text-xs">Start</button>
         </div>
+
         <div id="active" class="hidden flex justify-between items-center mb-4">
              <div class="flex items-center gap-2"><img src="https://bin.bnbstatic.com/static/images/common/favicon.ico" class="w-5"><h1 class="font-bold italic text-white tracking-tighter">BINANCE <span class="text-[#fcd535]">FUTURES</span></h1></div>
              <div id="user-id" onclick="stop()">Monkey_D_Luffy</div>
         </div>
+
         <div class="text-gray-custom text-12 mb-1">Số dư ký quỹ hiện tại (USDT)</div>
         <div class="flex items-end gap-2 mb-4">
-            <span id="displayBal" class="text-3xl font-bold text-white">0.00</span>
-            <span class="text-base text-white mb-1">USDT</span>
+            <span id="displayBal" class="text-3xl font-bold tracking-tighter text-white">0.00</span>
+            <span class="text-base font-medium text-white mb-1">USDT</span>
         </div>
+
         <div class="grid grid-cols-2 gap-4 text-sm border-t border-zinc-800 pt-3">
-            <div><div class="text-gray-custom text-10 uppercase">Ví (Khả dụng)</div><div id="walletBal" class="font-bold text-white">0.00</div></div>
-            <div class="text-right"><div class="text-gray-custom text-10 uppercase">PnL chưa chốt</div><div id="unPnl" class="font-bold">0.00</div></div>
+            <div><div class="text-gray-custom text-10 uppercase">Số dư ví (Khả dụng)</div><div id="walletBal" class="font-bold text-white">0.00</div></div>
+            <div class="text-right"><div class="text-gray-custom text-10 uppercase">Tổng PnL chưa chốt</div><div id="unPnl" class="font-bold">0.00</div></div>
         </div>
     </div>
 
-    <div class="px-4 py-2 bg-main"><div style="height: 80px;"><canvas id="mainChart"></canvas></div></div>
+    <div class="px-4 py-2 bg-main"><div style="height: 100px;"><canvas id="mainChart"></canvas></div></div>
 
     <div class="px-4 mt-4">
         <div class="flex gap-6 mb-4 border-b border-zinc-800 text-sm font-bold text-gray-custom uppercase">
             <span class="text-white border-b-2 border-[#fcd535] pb-2">Vị thế đang mở</span>
         </div>
-        <div id="pendingContainer" class="space-y-4 pb-6"></div>
+        <div id="pendingContainer" class="space-y-6 pb-6"></div>
     </div>
 
     <div class="px-4 mb-4">
         <div class="bg-card rounded-lg p-3">
+             <div class="text-10 font-bold text-gray-custom mb-3 uppercase italic border-b border-zinc-800 pb-1">Biến động thị trường</div>
              <table class="w-full text-12 text-left"><tbody id="liveBody"></tbody></table>
         </div>
     </div>
 
     <div class="px-4 pb-32">
         <div class="bg-card rounded-lg p-3">
-            <div class="text-10 font-bold text-gray-custom mb-3 uppercase italic border-b border-zinc-800 pb-1">Lịch sử giao dịch</div>
+            <div class="text-10 font-bold text-gray-custom mb-3 uppercase italic border-b border-zinc-800 pb-1">Lịch sử giao dịch chi tiết</div>
             <div class="overflow-x-auto">
-                <table class="w-full text-[10px] text-left">
+                <table class="w-full text-[9px] text-left">
                     <thead class="text-gray-custom uppercase border-b border-zinc-800">
                         <tr>
-                            <th class="pb-2">Thời gian</th>
-                            <th class="pb-2">Coin/Type</th>
-                            <th class="pb-2">Snapshot (1|5|15)</th>
+                            <th class="pb-2">Mở/Đóng</th>
+                            <th class="pb-2">Coin/Snapshot</th>
                             <th class="pb-2 text-center">Lev</th>
                             <th class="pb-2">Vào/Ra</th>
-                            <th class="pb-2 text-white">PnL/Bal</th>
+                            <th class="pb-2">Margin</th>
+                            <th class="pb-2 text-white">PnL</th>
+                            <th class="pb-2 text-right">Balance</th>
                         </tr>
                     </thead>
                     <tbody id="historyBody" class="text-zinc-300"></tbody>
@@ -178,9 +183,7 @@ app.get('/gui', (req, res) => {
     
     if(localStorage.getItem('bot_v6')) {
         const saved = JSON.parse(localStorage.getItem('bot_v6'));
-        running = !!saved.running; 
-        initialBal = parseFloat(saved.initialBal) || 1000; 
-        historyLog = saved.historyLog || [];
+        running = !!saved.running; initialBal = parseFloat(saved.initialBal) || 1000; historyLog = saved.historyLog || [];
         if(running) { document.getElementById('setup').style.display='none'; document.getElementById('active').classList.remove('hidden'); }
     }
     function saveConfig() { localStorage.setItem('bot_v6', JSON.stringify({ running, initialBal, historyLog })); }
@@ -192,8 +195,6 @@ app.get('/gui', (req, res) => {
 
     function start() { running = true; initialBal = parseFloat(document.getElementById('balanceInp').value) || 1000; document.getElementById('setup').style.display='none'; document.getElementById('active').classList.remove('hidden'); saveConfig(); }
     function stop() { running = false; document.getElementById('setup').style.display='flex'; document.getElementById('active').classList.add('hidden'); saveConfig(); }
-
-    function fmtTime(t) { return new Date(t).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', second:'2-digit'}); }
 
     async function update() {
         try {
@@ -216,12 +217,13 @@ app.get('/gui', (req, res) => {
                 runningBal += pnl;
                 let vol = h.snapVol || {c1:0, c5:0, c15:0};
                 return \`<tr class="border-b border-zinc-800/30">
-                    <td class="py-2 text-zinc-500 text-[9px]">V: \${fmtTime(h.startTime)}<br>R: \${fmtTime(h.endTime)}</td>
-                    <td><b class="text-white">\${h.symbol}</b><br><span class="\${h.type==='UP'?'up':'down'}">\${h.type}</span></td>
-                    <td><span class="\${vol.c1>=0?'up':'down'}">\${vol.c1}</span>|<span class="\${vol.c5>=0?'up':'down'}">\${vol.c5}</span>|<span class="\${vol.c15>=0?'up':'down'}">\${vol.c15}</span></td>
+                    <td class="py-2 text-zinc-500">\${new Date(h.startTime).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}<br>\${new Date(h.endTime).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}</td>
+                    <td><b class="text-white">\${h.symbol}</b><br><span class="text-zinc-500">\${vol.c1}|\${vol.c5}|\${vol.c15}</span></td>
                     <td class="text-center">\${h.maxLev}x</td>
-                    <td class="text-zinc-400">\${(h.snapPrice||0).toFixed(3)}<br>\${(h.finalPrice||0).toFixed(3)}</td>
-                    <td class="text-right"><span class="font-bold \${pnl>=0?'up':'down'}">\${pnl>=0?'+':''}\${pnl.toFixed(2)}</span><br><span class="text-zinc-500">\${runningBal.toFixed(1)}</span></td>
+                    <td>\${(h.snapPrice||0).toFixed(3)}<br>\${(h.finalPrice||0).toFixed(3)}</td>
+                    <td>\${margin.toFixed(1)}</td>
+                    <td class="font-bold \${pnl>=0?'up':'down'}">\${pnl>=0?'+':''}\${pnl.toFixed(2)}</td>
+                    <td class="text-right \${runningBal>=initialBal?'up':'down'}">\${runningBal.toFixed(1)}</td>
                 </tr>\`;
             }).reverse().join('');
             document.getElementById('historyBody').innerHTML = historyHTML;
@@ -236,16 +238,19 @@ app.get('/gui', (req, res) => {
                 let roi = (h.type === 'UP' ? diff : -diff) * (h.maxLev || 20);
                 let pnl = margin * roi / 100;
                 totalUnPnl += pnl;
+                let tpPrice = h.type === 'UP' ? h.snapPrice * 1.01 : h.snapPrice * 0.99;
+                let slPrice = h.type === 'UP' ? h.snapPrice * 0.95 : h.snapPrice * 1.05;
 
                 return \`<div class="bg-card p-3 rounded-lg border-l-4 \${h.type==='UP'?'border-green-500':'border-red-500'}">
-                    <div class="flex justify-between mb-1">
-                        <span class="font-bold text-white">\${h.symbol} <span class="text-[10px] bg-zinc-700 px-1">\${h.maxLev}x</span></span>
-                        <span class="font-bold \${pnl>=0?'up':'down'}">\${roi.toFixed(2)}%</span>
+                    <div class="flex justify-between mb-2">
+                        <span class="font-bold text-white">\${h.symbol} <span class="text-xs text-gray-500 bg-zinc-800 px-1">\${h.maxLev}x</span></span>
+                        <span class="font-bold \${pnl>=0?'up':'down'}">\${pnl.toFixed(2)} USDT (\${roi.toFixed(2)}%)</span>
                     </div>
-                    <div class="flex justify-between text-[11px]">
-                        <span class="text-gray-400">Entry: \${h.snapPrice.toFixed(4)} → \${livePrice.toFixed(4)}</span>
-                        <span class="font-bold \${pnl>=0?'up':'down'}">\${pnl.toFixed(2)} USDT</span>
+                    <div class="grid grid-cols-2 text-[11px] text-gray-400">
+                        <div>Entry: \${h.snapPrice.toFixed(4)} → Mark: \${livePrice.toFixed(4)}</div>
+                        <div class="text-right">Margin: \${margin.toFixed(2)} | TP: \${tpPrice.toFixed(4)}</div>
                     </div>
+                    <div class="text-[10px] text-gray-600 mt-1 text-right">SL: \${slPrice.toFixed(4)}</div>
                 </div>\`;
             }).join('');
 
