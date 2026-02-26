@@ -70,7 +70,6 @@ function initWS() {
                 const diff = ((p - pending.snapPrice) / pending.snapPrice) * 100;
                 const win = pending.type === 'DOWN' ? diff <= -1 : diff >= 1; 
                 const lose = pending.type === 'DOWN' ? diff >= 5 : diff <= -5; 
-
                 if (win || lose) { 
                     pending.status = win ? 'WIN' : 'LOSE'; 
                     pending.finalPrice = p; pending.endTime = now;
@@ -96,21 +95,19 @@ app.get('/api/data', (req, res) => {
     res.json({ 
         live: Object.entries(coinData).filter(([_, v]) => v.live).map(([s,v])=>({symbol:s,...v.live})).sort((a,b)=>Math.abs(b.c1)-Math.abs(a.c1)).slice(0,15),
         pending: all.filter(h => h.status === 'PENDING'),
-        history: all.filter(h => h.status !== 'PENDING').sort((a,b)=>b.endTime-a.endTime).slice(0,100)
+        history: all.filter(h => h.status !== 'PENDING').sort((a,b)=>a.endTime-b.endTime)
     });
 });
 
 app.get('/gui', (req, res) => {
     res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Binance Luffy Pro</title><script src="https://cdn.tailwindcss.com"></script><script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <style>
         @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&display=swap');
         body { background: #0b0e11; color: #eaecef; font-family: 'IBM Plex Sans', sans-serif; margin: 0; padding: 0; }
         .up { color: #0ecb81; } .down { color: #f6465d; }
         .bg-main { background: #0b0e11; } .bg-card { background: #1e2329; }
-        .binance-btn { background: #2b3139; color: #eaecef; border-radius: 4px; padding: 8px 0; font-size: 13px; font-weight: 500; text-align: center; width: 100%; cursor: pointer; }
-        #user-id { color: #fcd535; font-size: 1.2rem; font-weight: 900; font-style: italic; cursor: pointer; }
+        #user-id { color: #fcd535; font-size: 1.2rem; font-weight: 900; font-style: italic; }
         .text-gray-custom { color: #848e9c; } .text-10 { font-size: 10px; } .text-12 { font-size: 12px; }
         ::-webkit-scrollbar { width: 0px; }
     </style></head><body>
@@ -124,14 +121,14 @@ app.get('/gui', (req, res) => {
              <div class="flex items-center gap-2"><img src="https://bin.bnbstatic.com/static/images/common/favicon.ico" class="w-5"><h1 class="font-bold italic text-white tracking-tighter">BINANCE <span class="text-[#fcd535]">FUTURES</span></h1></div>
              <div id="user-id" onclick="stop()">Monkey_D_Luffy</div>
         </div>
-        <div class="text-gray-custom text-12 mb-1 font-medium">Số dư ký quỹ hiện tại (USDT)</div>
+        <div class="text-gray-custom text-12 mb-1">Số dư ký quỹ (USDT)</div>
         <div class="flex items-end gap-2 mb-4">
             <span id="displayBal" class="text-3xl font-bold tracking-tighter text-white">0.00</span>
             <span class="text-base font-medium text-white mb-1">USDT</span>
         </div>
         <div class="grid grid-cols-2 gap-4 text-sm border-t border-zinc-800 pt-3">
             <div><div class="text-gray-custom text-10 mb-1 uppercase">Ví khả dụng</div><div id="walletBal" class="font-bold text-white">0.00</div></div>
-            <div class="text-right"><div class="text-gray-custom text-10 mb-1 uppercase">PnL chưa thực hiện</div><div id="unPnl" class="font-bold">0.00</div></div>
+            <div class="text-right"><div class="text-gray-custom text-10 mb-1 uppercase">PnL chưa chốt</div><div id="unPnl" class="font-bold">0.00</div></div>
         </div>
     </div>
     <div class="px-4 py-2 bg-main"><div style="height: 100px;"><canvas id="mainChart"></canvas></div></div>
@@ -141,17 +138,17 @@ app.get('/gui', (req, res) => {
     </div>
     <div class="px-4 mb-4">
         <div class="bg-card rounded-lg p-3">
-             <div class="text-10 font-bold text-gray-custom mb-3 uppercase italic border-b border-zinc-800 pb-1">Biến động thị trường</div>
+             <div class="text-10 font-bold text-gray-custom mb-3 uppercase italic border-b border-zinc-800 pb-1">Biến động</div>
              <table class="w-full text-12 text-left"><tbody id="liveBody"></tbody></table>
         </div>
     </div>
     <div class="px-4 pb-32">
         <div class="bg-card rounded-lg p-3">
-            <div class="text-10 font-bold text-gray-custom mb-3 uppercase italic border-b border-zinc-800 pb-1">Lịch sử giao dịch chi tiết</div>
+            <div class="text-10 font-bold text-gray-custom mb-3 uppercase italic border-b border-zinc-800 pb-1">Lịch sử</div>
             <div class="overflow-x-auto">
                 <table class="w-full text-[9px] text-left">
                     <thead class="text-gray-custom uppercase border-b border-zinc-800">
-                        <tr><th class="pb-2">Time Mở/Đóng</th><th class="pb-2">Coin/Snap</th><th class="pb-2">Vào/Ra</th><th class="pb-2">Margin</th><th class="pb-2 text-white">PnL</th><th class="pb-2 text-right">Balance</th></tr>
+                        <tr><th class="pb-2">Time</th><th class="pb-2">Coin/Snap</th><th class="pb-2">Vào/Ra</th><th class="pb-2">Margin</th><th class="pb-2 text-white">PnL</th><th class="pb-2 text-right">Balance</th></tr>
                     </thead>
                     <tbody id="historyBody" class="text-zinc-300"></tbody>
                 </table>
@@ -160,12 +157,12 @@ app.get('/gui', (req, res) => {
     </div>
     <script>
     let running = false, initialBal = 1000, historyLog = [];
-    if(localStorage.getItem('bot_v6_final')) {
-        const saved = JSON.parse(localStorage.getItem('bot_v6_final'));
+    if(localStorage.getItem('bot_v7')) {
+        const saved = JSON.parse(localStorage.getItem('bot_v7'));
         running = saved.running; initialBal = saved.initialBal; historyLog = saved.historyLog || [];
         if(running) { document.getElementById('setup').style.display='none'; document.getElementById('active').classList.remove('hidden'); }
     }
-    function saveConfig() { localStorage.setItem('bot_v6_final', JSON.stringify({ running, initialBal, historyLog })); }
+    function saveConfig() { localStorage.setItem('bot_v7', JSON.stringify({ running, initialBal, historyLog })); }
     const chart = new Chart(document.getElementById('mainChart').getContext('2d'), {
         type: 'line', data: { labels: historyLog.map((_,i)=>i), datasets: [{ data: historyLog.map(pt=>pt.b), borderColor: '#fcd535', borderWidth: 1.5, tension: 0.4, pointRadius: 0, fill: true, backgroundColor: 'rgba(252,213,53,0.05)' }] },
         options: { maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { display: false }, y: { display: false } } }
@@ -179,42 +176,44 @@ app.get('/gui', (req, res) => {
             document.getElementById('liveBody').innerHTML = d.live.map(c => 
                 \`<tr class="border-b border-zinc-800/50"><td class="py-2 font-bold text-white">\${c.symbol}</td><td class="\${c.c1>=0?'up':'down'} text-center">\${c.c1}%</td><td class="\${c.c5>=0?'up':'down'} text-center">\${c.c5}%</td><td class="\${c.c15>=0?'up':'down'} text-right">\${c.c15}%</td></tr>\`
             ).join('');
-            let totalUnPnl = 0, currentMarginUsed = 0, mInp = document.getElementById('marginInp').value;
-            let walletBalance = initialBal + d.history.reduce((acc, h) => {
-                let m = mInp.includes('%') ? (initialBal * parseFloat(mInp)/100) : parseFloat(mInp);
-                return acc + (h.status === 'WIN' ? (m * (h.maxLev || 20) * 0.01) : -(m * (h.maxLev || 20) * 0.05));
-            }, 0);
+            
+            let currentBalance = initialBal;
+            let mInp = document.getElementById('marginInp').value;
+            let histRows = [];
+            d.history.forEach(h => {
+                let m = mInp.includes('%') ? (currentBalance * parseFloat(mInp)/100) : parseFloat(mInp);
+                let pnl = h.status === 'WIN' ? (m * (h.maxLev || 20) * 0.01) : -(m * (h.maxLev || 20) * 0.05);
+                currentBalance += pnl;
+                histRows.unshift(\`<tr><td class="py-2 text-gray-500">\${new Date(h.startTime).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}<br>\${new Date(h.endTime).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}</td>
+                    <td><b class="text-white">\${h.symbol}</b><br><span class="text-[8px] text-gray-600">\${h.snapVol.c1}/\${h.snapVol.c5}/\${h.snapVol.c15}</span></td>
+                    <td>\${h.snapPrice.toFixed(4)}<br>\${h.finalPrice.toFixed(4)}</td><td>\${m.toFixed(1)}</td>
+                    <td class="font-bold \${pnl>=0?'up':'down'}">\${pnl>=0?'+':''}\${pnl.toFixed(2)}</td><td class="text-right font-bold">\${currentBalance.toFixed(1)}</td></tr>\`);
+            });
+            document.getElementById('historyBody').innerHTML = histRows.join('');
+
+            let totalUnPnl = 0, currentMarginUsed = 0;
             document.getElementById('pendingContainer').innerHTML = d.pending.map(function(h){
                 let lp = d.live.find(c => c.symbol === h.symbol)?.currentPrice || h.snapPrice;
-                let margin = mInp.includes('%') ? (walletBalance * parseFloat(mInp)/100) : parseFloat(mInp);
+                let margin = mInp.includes('%') ? (currentBalance * parseFloat(mInp)/100) : parseFloat(mInp);
                 currentMarginUsed += margin;
                 let roi = (h.type === 'UP' ? (lp - h.snapPrice)/h.snapPrice : (h.snapPrice - lp)/h.snapPrice) * 100 * (h.maxLev || 20);
                 let pnl = margin * roi / 100; totalUnPnl += pnl;
                 let tp = h.type === 'UP' ? h.snapPrice * 1.01 : h.snapPrice * 0.99;
                 let sl = h.type === 'UP' ? h.snapPrice * 0.95 : h.snapPrice * 1.05;
                 return \`<div class="bg-card p-3 rounded border-l-4 \${h.type==='UP'?'border-green-500':'border-red-500'}">
-                    <div class="flex justify-between mb-1"><span class="font-bold text-white">\${h.symbol} \${h.maxLev}x</span><span class="font-bold \${pnl>=0?'up':'down'}">\${pnl.toFixed(2)} (\${roi.toFixed(1)}%)</span></div>
+                    <div class="flex justify-between mb-1"><span class="font-bold text-white">\${h.symbol} <span class="\${h.type==='UP'?'up':'down'}">\${h.type==='UP'?'L':'S'}</span> \${h.maxLev}x</span><span class="font-bold \${pnl>=0?'up':'down'}">\${pnl.toFixed(2)} (\${roi.toFixed(1)}%)</span></div>
                     <div class="text-[10px] text-gray-500 flex justify-between"><span>Vào: \${h.snapPrice.toFixed(4)} → \${lp.toFixed(4)}</span><span>Ký quỹ: \${margin.toFixed(1)}</span></div>
                     <div class="text-[9px] mt-1 flex justify-between border-t border-zinc-800 pt-1"><span class="up">TP(1%): \${tp.toFixed(4)}</span><span class="down">SL(5%): \${sl.toFixed(4)}</span></div>
                 </div>\`;
             }).join('');
-            let curBal = walletBalance;
-            document.getElementById('historyBody').innerHTML = [...d.history].reverse().map(h => {
-                let m = mInp.includes('%') ? (curBal * parseFloat(mInp)/100) : parseFloat(mInp);
-                let pnl = h.status === 'WIN' ? (m * (h.maxLev || 20) * 0.01) : -(m * (h.maxLev || 20) * 0.05);
-                let row = \`<tr><td class="py-2 text-gray-500">\${new Date(h.startTime).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}<br>\${new Date(h.endTime).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}</td>
-                    <td><b class="text-white">\${h.symbol}</b><br><span class="text-[8px] text-gray-600">\${h.snapVol.c1}/\${h.snapVol.c5}/\${h.snapVol.c15}</span></td>
-                    <td>\${h.snapPrice.toFixed(3)}<br>\${h.finalPrice.toFixed(3)}</td><td>\${m.toFixed(1)}</td>
-                    <td class="font-bold \${pnl>=0?'up':'down'}">\${pnl>=0?'+':''}\${pnl.toFixed(2)}</td><td class="text-right">\${curBal.toFixed(1)}</td></tr>\`;
-                curBal -= pnl; return row;
-            }).join('');
+
             if(running) {
-                let totalEq = walletBalance + totalUnPnl;
-                document.getElementById('displayBal').innerText = totalEq.toFixed(2);
-                document.getElementById('walletBal').innerText = (walletBalance - currentMarginUsed).toFixed(2);
+                let totalEquity = currentBalance + totalUnPnl;
+                document.getElementById('displayBal').innerText = totalEquity.toFixed(2);
+                document.getElementById('walletBal').innerText = (currentBalance - currentMarginUsed).toFixed(2);
                 document.getElementById('unPnl').innerText = (totalUnPnl >= 0 ? '+' : '') + totalUnPnl.toFixed(2);
                 document.getElementById('unPnl').className = 'font-bold ' + (totalUnPnl >= 0 ? 'up' : 'down');
-                if (historyLog.length === 0 || now - historyLog[historyLog.length-1].t >= 60000) { historyLog.push({t: now, b: totalEq}); if(historyLog.length > 200) historyLog.shift(); saveConfig(); }
+                if (historyLog.length === 0 || now - historyLog[historyLog.length-1].t >= 60000) { historyLog.push({t: now, b: totalEquity}); if(historyLog.length > 200) historyLog.shift(); saveConfig(); }
                 chart.data.labels = historyLog.map((_,i)=>i); chart.data.datasets[0].data = historyLog.map(pt=>pt.b); chart.update('none');
             }
         } catch(e) {}
