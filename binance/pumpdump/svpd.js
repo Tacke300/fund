@@ -157,13 +157,14 @@ app.get('/gui', (req, res) => {
             <div class="text-10 font-bold text-gray-custom mb-3 uppercase italic border-b border-zinc-800 pb-1">Lịch sử giao dịch</div>
             <div class="overflow-x-auto">
                 <table class="w-full text-[10px] text-left">
-                    <thead class="text-gray-custom uppercase">
+                    <thead class="text-gray-custom uppercase border-b border-zinc-800">
                         <tr>
+                            <th class="pb-2">Thời gian</th>
                             <th class="pb-2">Coin/Type</th>
+                            <th class="pb-2">Snapshot (1|5|15)</th>
+                            <th class="pb-2 text-center">Lev</th>
                             <th class="pb-2">Vào/Ra</th>
-                            <th class="pb-2">Margin</th>
-                            <th class="pb-2 text-white">PnL</th>
-                            <th class="pb-2 text-right">Balance</th>
+                            <th class="pb-2 text-white">PnL/Bal</th>
                         </tr>
                     </thead>
                     <tbody id="historyBody" class="text-zinc-300"></tbody>
@@ -192,6 +193,8 @@ app.get('/gui', (req, res) => {
     function start() { running = true; initialBal = parseFloat(document.getElementById('balanceInp').value) || 1000; document.getElementById('setup').style.display='none'; document.getElementById('active').classList.remove('hidden'); saveConfig(); }
     function stop() { running = false; document.getElementById('setup').style.display='flex'; document.getElementById('active').classList.add('hidden'); saveConfig(); }
 
+    function fmtTime(t) { return new Date(t).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', second:'2-digit'}); }
+
     async function update() {
         try {
             const res = await fetch('/api/data'); const d = await res.json();
@@ -211,12 +214,14 @@ app.get('/gui', (req, res) => {
                 let margin = mVal.includes('%') ? (runningBal * mNum / 100) : mNum;
                 let pnl = margin * (h.maxLev || 20) * ((h.pnlPercent || 0) / 100);
                 runningBal += pnl;
-                return \`<tr>
-                    <td class="py-2"><b>\${h.symbol}</b> <span class="\${h.type==='UP'?'up':'down'}">\${h.type}</span></td>
-                    <td>\${(h.snapPrice||0).toFixed(3)}<br>\${(h.finalPrice||0).toFixed(3)}</td>
-                    <td>\${margin.toFixed(1)}</td>
-                    <td class="font-bold \${pnl>=0?'up':'down'}">\${pnl>=0?'+':''}\${pnl.toFixed(2)}</td>
-                    <td class="text-right">\${runningBal.toFixed(1)}</td>
+                let vol = h.snapVol || {c1:0, c5:0, c15:0};
+                return \`<tr class="border-b border-zinc-800/30">
+                    <td class="py-2 text-zinc-500 text-[9px]">V: \${fmtTime(h.startTime)}<br>R: \${fmtTime(h.endTime)}</td>
+                    <td><b class="text-white">\${h.symbol}</b><br><span class="\${h.type==='UP'?'up':'down'}">\${h.type}</span></td>
+                    <td><span class="\${vol.c1>=0?'up':'down'}">\${vol.c1}</span>|<span class="\${vol.c5>=0?'up':'down'}">\${vol.c5}</span>|<span class="\${vol.c15>=0?'up':'down'}">\${vol.c15}</span></td>
+                    <td class="text-center">\${h.maxLev}x</td>
+                    <td class="text-zinc-400">\${(h.snapPrice||0).toFixed(3)}<br>\${(h.finalPrice||0).toFixed(3)}</td>
+                    <td class="text-right"><span class="font-bold \${pnl>=0?'up':'down'}">\${pnl>=0?'+':''}\${pnl.toFixed(2)}</span><br><span class="text-zinc-500">\${runningBal.toFixed(1)}</span></td>
                 </tr>\`;
             }).reverse().join('');
             document.getElementById('historyBody').innerHTML = historyHTML;
@@ -227,27 +232,19 @@ app.get('/gui', (req, res) => {
                 let livePrice = (d.live || []).find(c => c.symbol === h.symbol)?.currentPrice || h.snapPrice;
                 let margin = mVal.includes('%') ? (runningBal * mNum / 100) : mNum;
                 currentMarginUsed += margin;
-                
                 let diff = ((livePrice - h.snapPrice) / h.snapPrice) * 100;
                 let roi = (h.type === 'UP' ? diff : -diff) * (h.maxLev || 20);
                 let pnl = margin * roi / 100;
                 totalUnPnl += pnl;
-
-                let tpPrice = h.type === 'UP' ? h.snapPrice * 1.01 : h.snapPrice * 0.99;
-                let slPrice = h.type === 'UP' ? h.snapPrice * 0.95 : h.snapPrice * 1.05;
 
                 return \`<div class="bg-card p-3 rounded-lg border-l-4 \${h.type==='UP'?'border-green-500':'border-red-500'}">
                     <div class="flex justify-between mb-1">
                         <span class="font-bold text-white">\${h.symbol} <span class="text-[10px] bg-zinc-700 px-1">\${h.maxLev}x</span></span>
                         <span class="font-bold \${pnl>=0?'up':'down'}">\${roi.toFixed(2)}%</span>
                     </div>
-                    <div class="flex justify-between text-[11px] mb-2">
-                        <span class="text-gray-400">Entry: \${h.snapPrice.toFixed(4)}</span>
+                    <div class="flex justify-between text-[11px]">
+                        <span class="text-gray-400">Entry: \${h.snapPrice.toFixed(4)} → \${livePrice.toFixed(4)}</span>
                         <span class="font-bold \${pnl>=0?'up':'down'}">\${pnl.toFixed(2)} USDT</span>
-                    </div>
-                    <div class="grid grid-cols-2 text-[10px] text-gray-500 border-t border-zinc-800 pt-1">
-                        <div>TP: <span class="up">\${tpPrice.toFixed(4)}</span></div>
-                        <div class="text-right">SL: <span class="down">\${slPrice.toFixed(4)}</span></div>
                     </div>
                 </div>\`;
             }).join('');
