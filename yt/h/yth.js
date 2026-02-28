@@ -11,8 +11,7 @@ const port = 1111;
 
 // --- CẤU HÌNH ---
 const PLAYLIST_URL = 'https://www.youtube.com/playlist?list=PLVhVhpOTVoO069xcj_lJH2A4pgUCI-4ov';
-const MAX_THREADS = 10; // Chạy 15 luồng
-const COOKIE_FILE = './youtube_cookies.json';
+const MAX_THREADS = 7; // Chạy 7 luồng cho ổn định IP và RAM
 const BASE_TEMP_DIR = path.join(__dirname, 'temp');
 
 let stats = {
@@ -20,7 +19,7 @@ let stats = {
     threadStatus: {}, history: []
 };
 
-// Dọn dẹp rác khi khởi động lại
+// Dọn dẹp rác khi khởi động
 if (fs.existsSync(BASE_TEMP_DIR)) fs.removeSync(BASE_TEMP_DIR);
 fs.ensureDirSync(BASE_TEMP_DIR);
 
@@ -30,53 +29,53 @@ function formatTime(s) {
     return `${h}h ${m}m ${s % 60}s`;
 }
 
-async function humanize(page) {
-    try {
-        await page.mouse.move(Math.random() * 500, Math.random() * 500);
-        await page.evaluate(() => window.scrollBy(0, Math.floor(Math.random() * 200)));
-    } catch (e) {}
-}
-
 async function runWorker(index) {
     stats.activeThreads++;
     const threadId = `THREAD-${index.toString().padStart(2, '0')}`;
     const userDataDir = path.join(BASE_TEMP_DIR, `profile_${index}`);
     
     stats.threadStatus[threadId] = { 
-        proxy: 'LOCAL_IP', title: '---', elapsed: 0, target: 0, 
+        title: '---', elapsed: 0, target: 0, 
         lastAction: '🚀 Khởi động', iteration: 0 
     };
 
     let browser;
     try {
         browser = await puppeteer.launch({
-            headless: false, // Hiện màn hình
+            headless: false,
             userDataDir: userDataDir,
             args: [
                 '--no-sandbox',
-                '--disable-setuid-sandbox',
-                '--window-size=800,600', // Thu nhỏ để chạy được 15 luồng
+                '--window-size=800,600',
                 '--mute-audio',
-                '--disable-blink-features=AutomationControlled'
+                '--disable-setuid-sandbox',
+                '--disable-dev-shm-usage',
+                '--disable-accelerated-2d-canvas',
+                '--disable-gpu'
             ],
             ignoreDefaultArgs: ['--enable-automation']
         });
 
         const page = (await browser.pages())[0];
-        await page.setViewport({ width: 800, height: 600 });
+        await page.setDefaultNavigationTimeout(90000); // Đợi 1.5 phút (Chống lỗi Timeout)
 
-        if (fs.existsSync(COOKIE_FILE)) {
-            const cookies = await fs.readJson(COOKIE_FILE);
-            await page.setCookie(...cookies);
-        }
+        // CHẾ ĐỘ SIÊU NHẸ: Chặn tải ảnh và CSS không cần thiết để máy không treo
+        await page.setRequestInterception(true);
+        page.on('request', (req) => {
+            if (['image', 'font', 'stylesheet'].includes(req.resourceType()) && !req.url().includes('youtube.com')) {
+                req.abort();
+            } else {
+                req.continue();
+            }
+        });
 
         await page.setUserAgent(new UserAgents({ deviceCategory: 'desktop' }).toString());
 
-        stats.threadStatus[threadId].lastAction = '🌍 Vào Playlist';
-        await page.goto(PLAYLIST_URL, { waitUntil: 'networkidle2', timeout: 60000 });
+        stats.threadStatus[threadId].lastAction = '🌍 Đang tải YouTube...';
+        await page.goto(PLAYLIST_URL, { waitUntil: 'networkidle2' });
 
-        // Tìm và Click video đầu tiên bằng JavaScript (Chống lỗi Not Clickable)
-        await page.waitForSelector('a#video-title, ytd-playlist-video-renderer a', { timeout: 20000 });
+        // Tìm và Click video đầu tiên
+        await page.waitForSelector('a#video-title, ytd-playlist-video-renderer a', { timeout: 30000 });
         await page.evaluate(() => {
             const vid = document.querySelector('a#video-title') || document.querySelector('ytd-playlist-video-renderer a');
             if (vid) vid.click();
@@ -86,7 +85,7 @@ async function runWorker(index) {
             await new Promise(r => setTimeout(r, 10000));
             let currentTitle = await page.title();
             
-            const watchSecs = Math.floor(Math.random() * 50) + 180; // 3 phút +
+            const watchSecs = Math.floor(Math.random() * 60) + 180; // Xem ít nhất 3 phút
             stats.threadStatus[threadId].title = currentTitle.replace("- YouTube", "");
             stats.threadStatus[threadId].iteration = i + 1;
             stats.threadStatus[threadId].target = watchSecs;
@@ -96,37 +95,40 @@ async function runWorker(index) {
                 await new Promise(r => setTimeout(r, 1000));
                 stats.threadStatus[threadId].elapsed = s;
                 stats.totalSeconds++;
-                if (s % 30 === 0) await humanize(page);
             }
 
             stats.totalViews++;
             stats.history.unshift({ title: currentTitle, time: new Date().toLocaleTimeString() });
-            if (stats.history.length > 15) stats.history.pop();
+            if (stats.history.length > 10) stats.history.pop();
 
-            // Next Video bằng phím tắt chuẩn YT
+            // Chuyển video bằng phím tắt (chuẩn xác nhất)
             await page.keyboard.down('Shift');
             await page.keyboard.press('N');
             await page.keyboard.up('Shift');
-            stats.threadStatus[threadId].lastAction = '⏭️ Chuyển video';
+            stats.threadStatus[threadId].lastAction = '⏭️ Đổi video';
         }
 
     } catch (err) {
-        console.log(`❌ [${threadId}] Lỗi: ${err.message}`);
+        let errorVn = "Lỗi hệ thống";
+        if (err.message.includes('timeout')) errorVn = "Mạng yếu hoặc máy treo (Timeout)";
+        else if (err.message.includes('not clickable')) errorVn = "Bị quảng cáo đè, không bấm được";
+        else if (err.message.includes('Target closed')) errorVn = "Trình duyệt bị sập (Hết RAM)";
+        
+        console.log(`❌ [${threadId}] ${errorVn}`);
     } finally {
         if (browser) await browser.close();
         delete stats.threadStatus[threadId];
         stats.activeThreads--;
-        // Đợi 10s rồi luồng này tự hồi sinh (vòng lặp vô hạn)
+        // Nghỉ 10 giây rồi luồng này tự chạy lại profile của nó
         setTimeout(() => runWorker(index), 10000);
     }
 }
 
-// Khởi chạy 15 luồng song song
 async function main() {
-    console.log(`🚀 ĐANG KHỞI CHẠY ${MAX_THREADS} LUỒNG...`);
+    console.log(`🚀 ĐANG KHỞI CHẠY 7 LUỒNG...`);
     for (let i = 1; i <= MAX_THREADS; i++) {
         runWorker(i);
-        await new Promise(r => setTimeout(r, 5000)); // Delay mở từng luồng để không treo máy
+        await new Promise(r => setTimeout(r, 10000)); // Mở luồng mới cách nhau 10 giây cho an toàn
     }
 }
 
@@ -134,7 +136,7 @@ async function main() {
 app.get('/', (req, res) => {
     res.send(`
         <body style="font-family:Segoe UI,sans-serif; background:#0d1117; color:#c9d1d9; padding:20px">
-            <h1 style="color:#58a6ff">🛰️ YT BOT V5 - 15 THREADS VISUAL</h1>
+            <h1 style="color:#58a6ff">🛰️ YT BOT PRO - 7 LUỒNG SIÊU NHẸ</h1>
             <div style="display:grid; grid-template-columns: repeat(3, 1fr); gap:10px; margin-bottom:20px">
                 <div style="background:#161b22; padding:15px; border-left:5px solid #3fb950">
                     <small>TỔNG VIEWS</small><br><b style="font-size:24px">${stats.totalViews}</b>
@@ -143,7 +145,7 @@ app.get('/', (req, res) => {
                     <small>TỔNG THỜI GIAN</small><br><b style="font-size:24px">${formatTime(stats.totalSeconds)}</b>
                 </div>
                 <div style="background:#161b22; padding:15px; border-left:5px solid #bc8cff">
-                    <small>LUỒNG HOẠT ĐỘNG</small><br><b style="font-size:24px">${stats.activeThreads}/${MAX_THREADS}</b>
+                    <small>LUỒNG CHẠY</small><br><b style="font-size:24px">${stats.activeThreads}/${MAX_THREADS}</b>
                 </div>
             </div>
             <table style="width:100%; border-collapse:collapse; background:#161b22">
@@ -158,7 +160,7 @@ app.get('/', (req, res) => {
                     <td style="color:#3fb950">${t.lastAction}</td>
                 </tr>`).join('')}
             </table>
-            <script>setTimeout(() => location.reload(), 2000)</script>
+            <script>setTimeout(() => location.reload(), 3000)</script>
         </body>
     `);
 });
