@@ -11,30 +11,58 @@ const app = express();
 const port = 1111;
 
 // --- CẤU HÌNH ---
-const VIDEO_TITLE = "Tên Video Của Ông"; // Nhập tên video chính xác để Bot tìm trên Google/YT
 const PLAYLIST_URL = 'https://m.youtube.com/playlist?list=PLVhVhpOTVoO069xcj_lJH2A4pgUCI-4ov';
 const MAX_THREADS = 10;
+const DATA_FILE = './playlist_data.json';
 const BLACKLIST_FILE = './blacklist_proxy.json';
 
-let stats = { totalViews: 0, activeThreads: 0, logs: [], history: [], blacklistedCount: 0 };
+let stats = {
+    totalViews: 0,
+    totalSeconds: 0, // Dùng để tính giờ xem
+    activeThreads: 0,
+    blacklistedCount: 0,
+    videoCount: 0,
+    threadStatus: {}, // Lưu trạng thái chi tiết từng luồng
+    history: []
+};
+
 let proxyList = [];
+let videoTitles = [];
 let blacklist = fs.existsSync(BLACKLIST_FILE) ? fs.readJsonSync(BLACKLIST_FILE) : {};
 
-function doLog(proxy, msg, type = 'info') {
+// Hàm định dạng thời gian (Giây -> Giờ:Phút:Giây)
+function formatTime(totalSeconds) {
+    const h = Math.floor(totalSeconds / 3600);
+    const m = Math.floor((totalSeconds % 3600) / 60);
+    const s = Math.floor(totalSeconds % 60);
+    return `${h}h ${m}m ${s}s`;
+}
+
+function doLog(proxy, msg) {
     const time = new Date().toLocaleTimeString();
     console.log(`\x1b[36m[${time}]\x1b[0m \x1b[33m[${proxy}]\x1b[0m ${msg}`);
-    if (type === 'success' || type === 'html') {
-        stats.logs.unshift(`[${time}] ${msg}`);
-        if (stats.logs.length > 20) stats.logs.pop();
-    }
+}
+
+async function scanPlaylist() {
+    doLog('SYSTEM', "🔍 Đang trinh sát Playlist...");
+    const browser = await puppeteer.launch({ headless: "new", args: ['--no-sandbox'] });
+    const page = await browser.newPage();
+    try {
+        await page.goto(PLAYLIST_URL, { waitUntil: 'networkidle2' });
+        videoTitles = await page.evaluate(() => {
+            return Array.from(document.querySelectorAll('#video-title')).map(el => el.innerText.trim()).filter(t => t !== "");
+        });
+        stats.videoCount = videoTitles.length;
+        fs.writeJsonSync(DATA_FILE, videoTitles);
+        doLog('SYSTEM', `✅ Đã lưu ${videoTitles.length} video vào bộ nhớ.`);
+    } catch (e) { doLog('SYSTEM', "❌ Lỗi quét Playlist"); }
+    await browser.close();
 }
 
 async function fetchProxies() {
-    doLog('SYSTEM', "🔄 Đang nạp 100k Proxy từ các nguồn quốc tế...");
     const sources = [
         'https://api.proxyscrape.com/v2/?request=getproxies&protocol=http&timeout=10000&country=all',
-        'https://raw.githubusercontent.com/TheSpeedX/SOCKS-List/master/http.txt',
-        'https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/http.txt'
+        'https://raw.githubusercontent.com/TheSpeedX/SOCKS-List/master/http.txt'
     ];
     let all = [];
     for (let s of sources) {
@@ -48,117 +76,138 @@ async function runWorker(proxy) {
     stats.activeThreads++;
     const threadId = Math.random().toString(36).substring(7);
     const userDataDir = path.join(__dirname, 'temp', `profile_${threadId}`);
-    let browser;
+    
+    // Khởi tạo trạng thái luồng trong bảng
+    stats.threadStatus[threadId] = { proxy, title: 'Đang khởi động...', elapsed: 0, status: '🚀 Khởi tạo' };
 
+    let browser;
     try {
         browser = await puppeteer.launch({
             headless: "new",
             userDataDir: userDataDir,
-            args: [`--proxy-server=http://${proxy}`, '--no-sandbox', '--mute-audio', '--window-size=1280,720']
+            args: [`--proxy-server=http://${proxy}`, '--no-sandbox', '--mute-audio']
         });
 
         const page = await browser.newPage();
         await page.setUserAgent(new UserAgents({ deviceCategory: 'desktop' }).toString());
-        await page.setDefaultNavigationTimeout(60000);
 
-        // BƯỚC 1: GIẢ LẬP SEARCH (Nguồn view uy tín nhất)
-        doLog(proxy, "🔍 Đang vào Google để tìm video...");
-        await page.goto('https://www.google.com', { waitUntil: 'networkidle2' });
-        
-        // Vượt rào Consent của Google
-        await page.evaluate(() => {
-            const b = Array.from(document.querySelectorAll('button')).find(x => /Accept|Agree|Chấp nhận/i.test(x.innerText));
-            if (b) b.click();
-        });
-        await new Promise(r => setTimeout(r, 2000));
-
-        // BƯỚC 2: VÀO PLAYLIST VÀ CÀY MARATHON
-        doLog(proxy, "📺 Đang truy cập Playlist Marathon...");
+        // Vào playlist
         await page.goto(PLAYLIST_URL, { waitUntil: 'networkidle2' });
+        await page.evaluate(() => document.querySelector('a.ytd-playlist-thumbnail')?.click());
 
-        // Tự động nhấn Play video đầu tiên
-        await page.evaluate(() => {
-            const play = document.querySelector('a.ytd-playlist-thumbnail') || document.querySelector('h3 a');
-            if (play) play.click();
-        });
-
-        for (let i = 0; i < 10; i++) { // Xem tối đa 10 video mỗi Proxy
+        for (let i = 0; i < 20; i++) { // Marathon tối đa 20 vid
             await new Promise(r => setTimeout(r, 5000));
-            const title = await page.title();
-            if (title.includes("Before you") || title === "YouTube") throw new Error("Kẹt trang xác nhận");
+            const currentTitle = await page.title();
+            const watchSecs = Math.floor(Math.random() * 120) + 180; // 3-5 phút
 
-            // HÀNH VI NGƯỜI THẬT
-            doLog(proxy, `🎬 Đang xem: ${title.substring(0,30)}...`);
-            
-            // 1. Ngẫu nhiên cuộn trang
-            await page.evaluate(() => window.scrollBy(0, Math.random() * 400));
-            
-            // 2. Ngẫu nhiên đổi tốc độ (giả lập người vội hoặc xem kỹ)
-            await page.evaluate(() => {
-                const v = document.querySelector('video');
-                if(v) v.playbackRate = [1, 1.25, 1][Math.floor(Math.random()*3)];
-            });
+            // Cập nhật bảng Dashboard
+            stats.threadStatus[threadId].title = currentTitle.replace("- YouTube", "");
+            stats.threadStatus[threadId].status = `🔥 Đang xem (${i+1})`;
+            stats.threadStatus[threadId].elapsed = 0;
 
-            const watchMs = (Math.floor(Math.random() * 120) + 180) * 1000; // Xem 3-5 phút
-            await new Promise(r => setTimeout(r, watchMs));
-            
+            doLog(proxy, `🎬 [${i+1}] Đang xem: ${currentTitle}`);
+
+            // Chạy bộ đếm giây cho Dashboard
+            for (let s = 0; s < watchSecs; s++) {
+                await new Promise(r => setTimeout(r, 1000));
+                stats.threadStatus[threadId].elapsed++;
+                stats.totalSeconds++; // Cộng dồn vào tổng giờ xem toàn bot
+                
+                // Giả lập scroll mỗi 30s
+                if (s % 30 === 0) await page.evaluate(() => window.scrollBy(0, 100));
+            }
+
             stats.totalViews++;
-            stats.history.unshift({ title, proxy, time: new Date().toLocaleTimeString() });
-            if (stats.history.length > 20) stats.history.pop();
+            stats.history.unshift({ title: currentTitle, proxy, time: new Date().toLocaleTimeString() });
+            if (stats.history.length > 10) stats.history.pop();
 
-            // Bấm Next sang video tiếp theo
+            // Next video
             const hasNext = await page.evaluate(() => {
                 const n = document.querySelector('.ytp-next-button');
                 if(n && window.getComputedStyle(n).display !== 'none') { n.click(); return true; }
                 return false;
             });
-
             if (!hasNext) break;
-            doLog(proxy, "➡️ Chuyển tiếp video...", "html");
         }
 
     } catch (err) {
-        doLog(proxy, `❌ Lỗi: ${err.message.substring(0, 40)}`);
+        doLog(proxy, `❌ Lỗi: ${err.message.substring(0, 20)}`);
         blacklist[proxy] = true;
-        if (Object.keys(blacklist).length % 10 === 0) fs.writeJsonSync(BLACKLIST_FILE, blacklist);
+        fs.writeJsonSync(BLACKLIST_FILE, blacklist);
     } finally {
         if (browser) await browser.close();
         if (fs.existsSync(userDataDir)) fs.removeSync(userDataDir);
+        delete stats.threadStatus[threadId];
         stats.activeThreads--;
     }
 }
 
 async function main() {
+    await scanPlaylist();
     while (true) {
         if (proxyList.length < 20) await fetchProxies();
         if (stats.activeThreads < MAX_THREADS && proxyList.length > 0) {
             runWorker(proxyList.shift());
         }
-        await new Promise(r => setTimeout(r, 4000));
+        await new Promise(r => setTimeout(r, 5000));
     }
 }
 
-// Dashboard HTML (Giữ nguyên như bản trước nhưng thêm CSS đẹp hơn)
+// --- DASHBOARD GIAO DIỆN QUẢN LÝ ---
 app.get('/', (req, res) => {
+    const threadRows = Object.values(stats.threadStatus).map(t => `
+        <tr>
+            <td style="color:#0af">${t.proxy}</td>
+            <td style="color:#fff">${t.title.substring(0,40)}...</td>
+            <td style="color:yellow">${t.elapsed}s</td>
+            <td style="color:#0f0">${t.status}</td>
+        </tr>
+    `).join('');
+
     res.send(`
-        <body style="font-family:sans-serif; background:#0a0a0a; color:#eee; padding:20px">
-            <h1 style="color:#ff0055">🔥 YT GOD MODE - 10 THREADS ACTIVE</h1>
-            <div style="display:grid; grid-template-columns: repeat(3, 1fr); gap:10px; margin-bottom:20px">
-                <div style="background:#1a1a1a; padding:15px; border-radius:8px">VIEWS: <span style="color:#0f0; font-size:24px">${stats.totalViews}</span></div>
-                <div style="background:#1a1a1a; padding:15px; border-radius:8px">ACTIVE: <span style="color:#0af; font-size:24px">${stats.activeThreads}</span></div>
-                <div style="background:#1a1a1a; padding:15px; border-radius:8px">DEAD PROXY: <span style="color:#f00; font-size:24px">${stats.blacklistedCount}</span></div>
-            </div>
-            <div style="display:grid; grid-template-columns: 1fr 1fr; gap:20px">
-                <div style="background:#111; padding:15px; height:400px; overflow:auto">
-                    <h3 style="color:yellow">🎥 VIDEO HISTORY</h3>
-                    ${stats.history.map(h => `<div style="font-size:12px; margin-bottom:10px; border-bottom:1px solid #222">[${h.time}] ${h.title}</div>`).join('')}
+        <body style="font-family:Segoe UI,sans-serif; background:#0d1117; color:#c9d1d9; padding:20px">
+            <h1 style="color:#58a6ff; text-align:center">🚀 YT BOT - QUẢN LÝ TỔNG THỂ</h1>
+            
+            <div style="display:grid; grid-template-columns: repeat(4, 1fr); gap:15px; margin-bottom:25px">
+                <div style="background:#161b22; padding:15px; border-radius:10px; border:1px solid #30363d">
+                    <small>TỔNG LƯỢT XEM</small><br><b style="font-size:24px; color:#3fb950">${stats.totalViews}</b>
                 </div>
-                <div style="background:#111; padding:15px; height:400px; overflow:auto">
-                    <h3 style="color:#0f0">⚡ SYSTEM LOGS</h3>
-                    ${stats.logs.map(l => `<div style="font-size:11px">${l}</div>`).join('')}
+                <div style="background:#161b22; padding:15px; border-radius:10px; border:1px solid #30363d">
+                    <small>TỔNG GIỜ XEM</small><br><b style="font-size:24px; color:#d29922">${formatTime(stats.totalSeconds)}</b>
+                </div>
+                <div style="background:#161b22; padding:15px; border-radius:10px; border:1px solid #30363d">
+                    <small>LUỒNG ĐANG CHẠY</small><br><b style="font-size:24px; color:#58a6ff">${stats.activeThreads}/10</b>
+                </div>
+                <div style="background:#161b22; padding:15px; border-radius:10px; border:1px solid #30363d">
+                    <small>VIDEO TRONG LIST</small><br><b style="font-size:24px; color:#bc8cff">${stats.videoCount}</b>
                 </div>
             </div>
-            <script>setTimeout(() => location.reload(), 5000)</script>
+
+            <h3 style="color:#8b949e">⚡ TRẠNG THÁI CÁC LUỒNG REAL-TIME</h3>
+            <table style="width:100%; border-collapse:collapse; background:#161b22; border-radius:10px; overflow:hidden">
+                <thead>
+                    <tr style="background:#21262d; text-align:left">
+                        <th style="padding:12px">IP PROXY</th>
+                        <th>VIDEO ĐANG XEM</th>
+                        <th>ĐÃ XEM</th>
+                        <th>TRẠNG THÁI</th>
+                    </tr>
+                </thead>
+                <tbody>${threadRows}</tbody>
+            </table>
+
+            <div style="margin-top:25px; display:grid; grid-template-columns: 1fr 1fr; gap:20px">
+                <div style="background:#0a0a0a; padding:15px; height:250px; overflow:auto; border:1px solid #30363d">
+                    <h4 style="color:yellow; margin-top:0">🕒 LỊCH SỬ VỪA HOÀN THÀNH</h4>
+                    ${stats.history.map(h => `<div style="font-size:12px; margin-bottom:5px; border-bottom:1px solid #222; padding-bottom:3px">${h.time} - ${h.title}</div>`).join('')}
+                </div>
+                <div style="background:#0a0a0a; padding:15px; height:250px; overflow:auto; border:1px solid #30363d">
+                    <h4 style="color:#f85149; margin-top:0">🚫 BLACKLIST (PROXIES CHẾT)</h4>
+                    <div style="font-size:12px">Tổng cộng: ${stats.blacklistedCount} IP đã bị loại bỏ.</div>
+                </div>
+            </div>
+
+            <script>setTimeout(() => location.reload(), 3000)</script>
         </body>
     `);
 });
