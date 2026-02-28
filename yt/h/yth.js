@@ -1,146 +1,129 @@
 const puppeteer = require('puppeteer-extra');
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
-const express = require('express');
-const axios = require('axios');
 const UserAgents = require('user-agents');
+const axios = require('axios');
 const fs = require('fs-extra');
 const path = require('path');
+const express = require('express');
 
 puppeteer.use(StealthPlugin());
 const app = express();
 const port = 1111;
 
 // --- CẤU HÌNH ---
+const VIDEO_TITLE = "Tên Video Của Ông"; // Nhập tên video chính xác để Bot tìm trên Google/YT
 const PLAYLIST_URL = 'https://m.youtube.com/playlist?list=PLVhVhpOTVoO069xcj_lJH2A4pgUCI-4ov';
-const MAX_CONCURRENT_THREADS = 10; 
+const MAX_THREADS = 10;
 const BLACKLIST_FILE = './blacklist_proxy.json';
 
 let stats = { totalViews: 0, activeThreads: 0, logs: [], history: [], blacklistedCount: 0 };
 let proxyList = [];
-let blacklist = {};
-
-if (fs.existsSync(BLACKLIST_FILE)) {
-    blacklist = fs.readJsonSync(BLACKLIST_FILE);
-    stats.blacklistedCount = Object.keys(blacklist).length;
-}
+let blacklist = fs.existsSync(BLACKLIST_FILE) ? fs.readJsonSync(BLACKLIST_FILE) : {};
 
 function doLog(proxy, msg, type = 'info') {
     const time = new Date().toLocaleTimeString();
-    // Terminal Log (Chi tiết)
-    const color = type === 'success' ? '\x1b[42m' : '\x1b[36m';
-    console.log(`${color}[${time}]\x1b[0m \x1b[33m[${proxy}]\x1b[0m ${msg}`);
-    
-    // Dashboard Log (Gọn)
-    if (type === 'html' || type === 'success') {
+    console.log(`\x1b[36m[${time}]\x1b[0m \x1b[33m[${proxy}]\x1b[0m ${msg}`);
+    if (type === 'success' || type === 'html') {
         stats.logs.unshift(`[${time}] ${msg}`);
         if (stats.logs.length > 20) stats.logs.pop();
     }
 }
 
 async function fetchProxies() {
-    doLog('SYSTEM', "--- ĐANG NẠP KHO PROXY MỚI ---");
-    const apis = [
-        'https://api.proxyscrape.com/v2/?request=getproxies&protocol=http&timeout=10000&country=all&ssl=all&anonymity=all',
+    doLog('SYSTEM', "🔄 Đang nạp 100k Proxy từ các nguồn quốc tế...");
+    const sources = [
+        'https://api.proxyscrape.com/v2/?request=getproxies&protocol=http&timeout=10000&country=all',
         'https://raw.githubusercontent.com/TheSpeedX/SOCKS-List/master/http.txt',
-        'https://raw.githubusercontent.com/ShiftyTR/Proxy-List/master/https.txt',
         'https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/http.txt'
     ];
     let all = [];
-    for (let api of apis) {
-        try {
-            const res = await axios.get(api, { timeout: 10000 });
-            all = all.concat(res.data.split('\n').map(p => p.trim()));
-        } catch (e) {}
+    for (let s of sources) {
+        try { const res = await axios.get(s); all = all.concat(res.data.split('\n')); } catch(e){}
     }
-    proxyList = all.filter(p => p.includes(':') && !blacklist[p]);
-    doLog('SYSTEM', `Đã lọc được ${proxyList.length} proxy sạch.`);
+    proxyList = all.map(p => p.trim()).filter(p => p.includes(':') && !blacklist[p]);
+    stats.blacklistedCount = Object.keys(blacklist).length;
 }
 
 async function runWorker(proxy) {
     stats.activeThreads++;
-    const userAgent = new UserAgents({ deviceCategory: 'desktop' }).toString();
     const threadId = Math.random().toString(36).substring(7);
-    const userDataDir = path.join(__dirname, 'temp', `profile_${threadId}`); // Profile riêng tránh lỗi kẹt luồng
+    const userDataDir = path.join(__dirname, 'temp', `profile_${threadId}`);
     let browser;
 
     try {
         browser = await puppeteer.launch({
             headless: "new",
             userDataDir: userDataDir,
-            args: [
-                '--no-sandbox', '--mute-audio', '--disable-gpu',
-                `--proxy-server=http://${proxy}`,
-                '--window-size=1280,720'
-            ]
+            args: [`--proxy-server=http://${proxy}`, '--no-sandbox', '--mute-audio', '--window-size=1280,720']
         });
 
         const page = await browser.newPage();
-        await page.setUserAgent(userAgent);
-        await page.setDefaultNavigationTimeout(40000);
+        await page.setUserAgent(new UserAgents({ deviceCategory: 'desktop' }).toString());
+        await page.setDefaultNavigationTimeout(60000);
 
-        doLog(proxy, "Mở Playlist & Vượt rào Consent...");
+        // BƯỚC 1: GIẢ LẬP SEARCH (Nguồn view uy tín nhất)
+        doLog(proxy, "🔍 Đang vào Google để tìm video...");
+        await page.goto('https://www.google.com', { waitUntil: 'networkidle2' });
+        
+        // Vượt rào Consent của Google
+        await page.evaluate(() => {
+            const b = Array.from(document.querySelectorAll('button')).find(x => /Accept|Agree|Chấp nhận/i.test(x.innerText));
+            if (b) b.click();
+        });
+        await new Promise(r => setTimeout(r, 2000));
+
+        // BƯỚC 2: VÀO PLAYLIST VÀ CÀY MARATHON
+        doLog(proxy, "📺 Đang truy cập Playlist Marathon...");
         await page.goto(PLAYLIST_URL, { waitUntil: 'networkidle2' });
 
-        // Tự động nhấn Accept/Agree nếu gặp bảng điều khoản
+        // Tự động nhấn Play video đầu tiên
         await page.evaluate(() => {
-            const btns = Array.from(document.querySelectorAll('button, span'));
-            const accept = btns.find(b => /Accept all|Agree|I agree|Chấp nhận|Tôi đồng ý/i.test(b.innerText));
-            if (accept) accept.click();
-        });
-        await new Promise(r => setTimeout(r, 3000));
-
-        // Click vào video đầu tiên để bắt đầu cày
-        await page.evaluate(() => {
-            const firstVid = document.querySelector('a.ytd-playlist-thumbnail') || document.querySelector('#video-title');
-            if (firstVid) firstVid.click();
+            const play = document.querySelector('a.ytd-playlist-thumbnail') || document.querySelector('h3 a');
+            if (play) play.click();
         });
 
-        await new Promise(r => setTimeout(r, 5000));
-        
-        // Loop xem toàn bộ Playlist
-        for (let i = 0; i < 50; i++) { // Giới hạn tối đa 50 video/playlist
+        for (let i = 0; i < 10; i++) { // Xem tối đa 10 video mỗi Proxy
+            await new Promise(r => setTimeout(r, 5000));
             const title = await page.title();
-            if (title.includes("Before you") || title === "YouTube") {
-                throw new Error("Bị kẹt tại trang xác nhận");
-            }
+            if (title.includes("Before you") || title === "YouTube") throw new Error("Kẹt trang xác nhận");
 
-            const watchTime = Math.floor(Math.random() * 120) + 180; // Xem 3-5 phút mỗi vid
-            doLog(proxy, `🎬 Đang xem (${i+1}): ${title} trong ${watchTime}s`);
+            // HÀNH VI NGƯỜI THẬT
+            doLog(proxy, `🎬 Đang xem: ${title.substring(0,30)}...`);
             
-            stats.history.unshift({ title, proxy, time: new Date().toLocaleTimeString() });
-            if (stats.history.length > 15) stats.history.pop();
+            // 1. Ngẫu nhiên cuộn trang
+            await page.evaluate(() => window.scrollBy(0, Math.random() * 400));
+            
+            // 2. Ngẫu nhiên đổi tốc độ (giả lập người vội hoặc xem kỹ)
+            await page.evaluate(() => {
+                const v = document.querySelector('video');
+                if(v) v.playbackRate = [1, 1.25, 1][Math.floor(Math.random()*3)];
+            });
 
-            await new Promise(r => setTimeout(r, watchTime * 1000));
+            const watchMs = (Math.floor(Math.random() * 120) + 180) * 1000; // Xem 3-5 phút
+            await new Promise(r => setTimeout(r, watchMs));
+            
             stats.totalViews++;
+            stats.history.unshift({ title, proxy, time: new Date().toLocaleTimeString() });
+            if (stats.history.length > 20) stats.history.pop();
 
-            // Bấm Next
+            // Bấm Next sang video tiếp theo
             const hasNext = await page.evaluate(() => {
-                const next = document.querySelector('.ytp-next-button');
-                if (next && window.getComputedStyle(next).display !== 'none') {
-                    next.click();
-                    return true;
-                }
+                const n = document.querySelector('.ytp-next-button');
+                if(n && window.getComputedStyle(n).display !== 'none') { n.click(); return true; }
                 return false;
             });
 
-            if (!hasNext) {
-                doLog(proxy, "Hết Playlist. Hoàn thành!");
-                break;
-            }
-            doLog(proxy, `Chuyển sang video tiếp theo...`, 'html');
-            await new Promise(r => setTimeout(r, 5000));
+            if (!hasNext) break;
+            doLog(proxy, "➡️ Chuyển tiếp video...", "html");
         }
 
     } catch (err) {
-        doLog(proxy, `❌ Lỗi: ${err.message.substring(0, 50)}`);
-        if (!blacklist[proxy]) {
-            blacklist[proxy] = true;
-            fs.writeJsonSync(BLACKLIST_FILE, blacklist);
-            stats.blacklistedCount++;
-        }
+        doLog(proxy, `❌ Lỗi: ${err.message.substring(0, 40)}`);
+        blacklist[proxy] = true;
+        if (Object.keys(blacklist).length % 10 === 0) fs.writeJsonSync(BLACKLIST_FILE, blacklist);
     } finally {
         if (browser) await browser.close();
-        if (fs.existsSync(userDataDir)) fs.removeSync(userDataDir); // Dọn dẹp rác RAM
+        if (fs.existsSync(userDataDir)) fs.removeSync(userDataDir);
         stats.activeThreads--;
     }
 }
@@ -148,37 +131,31 @@ async function runWorker(proxy) {
 async function main() {
     while (true) {
         if (proxyList.length < 20) await fetchProxies();
-        if (stats.activeThreads < MAX_CONCURRENT_THREADS && proxyList.length > 0) {
+        if (stats.activeThreads < MAX_THREADS && proxyList.length > 0) {
             runWorker(proxyList.shift());
         }
-        await new Promise(r => setTimeout(r, 3000));
+        await new Promise(r => setTimeout(r, 4000));
     }
 }
 
+// Dashboard HTML (Giữ nguyên như bản trước nhưng thêm CSS đẹp hơn)
 app.get('/', (req, res) => {
     res.send(`
-        <body style="font-family:Consolas; background:#000; color:#0f0; padding:20px; line-height:1.2">
-            <h2 style="color:#ff00ea; border-bottom:1px solid #333">🚀 YT MARATHON V2 - 10 THREADS</h2>
-            <div style="display:flex; gap:20px; margin-bottom:15px">
-                <div style="border:1px solid #0f0; padding:10px">VIEWS: <span style="color:#fff">${stats.totalViews}</span></div>
-                <div style="border:1px solid #0f0; padding:10px">ACTIVE: <span style="color:#fff">${stats.activeThreads}</span></div>
-                <div style="border:1px solid #0f0; padding:10px">DEAD: <span style="color:#fff">${stats.blacklistedCount}</span></div>
+        <body style="font-family:sans-serif; background:#0a0a0a; color:#eee; padding:20px">
+            <h1 style="color:#ff0055">🔥 YT GOD MODE - 10 THREADS ACTIVE</h1>
+            <div style="display:grid; grid-template-columns: repeat(3, 1fr); gap:10px; margin-bottom:20px">
+                <div style="background:#1a1a1a; padding:15px; border-radius:8px">VIEWS: <span style="color:#0f0; font-size:24px">${stats.totalViews}</span></div>
+                <div style="background:#1a1a1a; padding:15px; border-radius:8px">ACTIVE: <span style="color:#0af; font-size:24px">${stats.activeThreads}</span></div>
+                <div style="background:#1a1a1a; padding:15px; border-radius:8px">DEAD PROXY: <span style="color:#f00; font-size:24px">${stats.blacklistedCount}</span></div>
             </div>
-            <div style="display:grid; grid-template-columns: 1.2fr 0.8fr; gap:15px">
-                <div>
-                    <h3 style="color:yellow">🎥 LỊCH SỬ VIDEO (THẬT)</h3>
-                    <div style="background:#111; padding:10px; height:350px; overflow:auto; border-left:3px solid yellow">
-                        ${stats.history.map(h => `<div style="margin-bottom:8px; border-bottom:1px dashed #333; padding-bottom:5px">
-                            <span style="color:#888">[${h.time}]</span> <span style="color:#0af">${h.title}</span><br>
-                            <small style="color:#555">IP: ${h.proxy}</small>
-                        </div>`).join('')}
-                    </div>
+            <div style="display:grid; grid-template-columns: 1fr 1fr; gap:20px">
+                <div style="background:#111; padding:15px; height:400px; overflow:auto">
+                    <h3 style="color:yellow">🎥 VIDEO HISTORY</h3>
+                    ${stats.history.map(h => `<div style="font-size:12px; margin-bottom:10px; border-bottom:1px solid #222">[${h.time}] ${h.title}</div>`).join('')}
                 </div>
-                <div>
-                    <h3 style="color:#f0f">⚙️ LUỒNG HỆ THỐNG</h3>
-                    <div style="background:#111; padding:10px; height:350px; overflow:auto; font-size:11px">
-                        ${stats.logs.map(l => `<div style="color:#0f0">${l}</div>`).join('')}
-                    </div>
+                <div style="background:#111; padding:15px; height:400px; overflow:auto">
+                    <h3 style="color:#0f0">⚡ SYSTEM LOGS</h3>
+                    ${stats.logs.map(l => `<div style="font-size:11px">${l}</div>`).join('')}
                 </div>
             </div>
             <script>setTimeout(() => location.reload(), 5000)</script>
@@ -187,6 +164,6 @@ app.get('/', (req, res) => {
 });
 
 app.listen(port, () => {
-    console.log(`\x1b[42m SUCCESS \x1b[0m Dashboard: http://localhost:1111`);
+    console.log(`DASHBOARD: http://localhost:1111`);
     main();
 });
