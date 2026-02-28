@@ -1,60 +1,234 @@
-// Biến tạm để điều khiển trang login
-let loginPage = null;
+const puppeteer = require('puppeteer-extra');
+const StealthPlugin = require('puppeteer-extra-plugin-stealth');
+const UserAgents = require('user-agents');
+const axios = require('axios');
+const fs = require('fs-extra');
+const path = require('path');
+const express = require('express');
 
-app.get('/login', async (req, res) => {
-    if (!loginPage) {
-        const browser = await puppeteer.launch({ 
-            headless: "new", // Chạy ngầm trên VPS nhưng ta sẽ lấy ảnh
-            args: ['--no-sandbox', '--window-size=1280,720'] 
-        });
-        loginPage = await browser.newPage();
-        await loginPage.goto('https://accounts.google.com/ServiceLogin?service=youtube');
+puppeteer.use(StealthPlugin());
+const app = express();
+const port = 1111;
+
+const PLAYLIST_URL = 'https://m.youtube.com/playlist?list=PLVhVhpOTVoO069xcj_lJH2A4pgUCI-4ov';
+const MAX_THREADS = 15; 
+const BLACKLIST_FILE = './blacklist_proxy.json';
+const GOOD_PROXIES_FILE = './good_proxies.json';
+const COOKIE_FILE = './youtube_cookies.json'; // File cookie ông lấy từ route /login
+const ERROR_DIR = './errors';
+
+if (!fs.existsSync(ERROR_DIR)) fs.mkdirSync(ERROR_DIR);
+
+let stats = {
+    totalViews: 0, totalSeconds: 0, activeThreads: 0,
+    blacklistedCount: 0, goodCount: 0, proxyReady: 0, threadStatus: {}, history: []
+};
+
+let proxyList = [];
+let blacklist = fs.existsSync(BLACKLIST_FILE) ? fs.readJsonSync(BLACKLIST_FILE) : {};
+let goodProxies = fs.existsSync(GOOD_PROXIES_FILE) ? fs.readJsonSync(GOOD_PROXIES_FILE) : [];
+
+function formatTime(s) {
+    const h = Math.floor(s/3600);
+    const m = Math.floor((s%3600)/60);
+    return `${h}h ${m}m ${s%60}s`;
+}
+
+function saveGoodProxy(proxy) {
+    if (!goodProxies.includes(proxy)) {
+        goodProxies.push(proxy);
+        if (goodProxies.length > 2000) goodProxies.shift();
+        fs.writeJsonSync(GOOD_PROXIES_FILE, goodProxies);
+        stats.goodCount = goodProxies.length;
+    }
+}
+
+async function fetchProxies() {
+    console.log("🔄 Đang quét hàng loạt nguồn Proxy mới...");
+    const sources = [
+        'https://api.proxyscrape.com/v2/?request=getproxies&protocol=http&timeout=10000&country=all',
+        'https://raw.githubusercontent.com/TheSpeedX/SOCKS-List/master/http.txt',
+        'https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/http.txt',
+        'https://raw.githubusercontent.com/muhammadrizki16/proxy-list/main/http.txt',
+        'https://raw.githubusercontent.com/ShiftyTR/Proxy-List/master/http.txt',
+        'https://raw.githubusercontent.com/clarketm/proxy-list/master/proxy-list-raw.txt',
+        'https://raw.githubusercontent.com/sunny9577/proxy-scraper/master/proxies.txt',
+        'https://raw.githubusercontent.com/roosterkid/openproxylist/main/HTTPS_RAW.txt',
+        'https://raw.githubusercontent.com/opsxcq/proxy-list/master/list.txt',
+        'https://proxyspace.pro/http.txt',
+        'https://raw.githubusercontent.com/Zaeem20/proxy-list/master/http.txt'
+    ];
+
+    let all = [];
+    for (let s of sources) {
+        try { 
+            const res = await axios.get(s, { timeout: 5000 }); 
+            all = all.concat(res.data.split('\n')); 
+        } catch(e) { console.log(`⚠️ Nguồn lỗi: ${s.substring(0,30)}`); }
     }
 
-    // Nếu ông gửi lệnh bấm/nhập từ URL (ví dụ: /login?click=x,y hoặc /login?type=abc)
-    const { clickX, clickY, text } = req.query;
-    if (clickX && clickY) await loginPage.mouse.click(parseInt(clickX), parseInt(clickY));
-    if (text) await loginPage.keyboard.type(text);
-
-    // Chụp ảnh màn hình hiện tại của trang login
-    const screenshot = await loginPage.screenshot({ encoding: 'base64' });
+    proxyList = [...new Set(all.map(p => p.trim()).filter(p => p.includes(':') && !blacklist[p]))];
     
+    if (proxyList.length < 20 && goodProxies.length > 0) {
+        console.log("🚨 CHẾ ĐỘ CẤP CỨU: Tái sử dụng Proxy ngon từ quá khứ!");
+        proxyList = [...new Set([...proxyList, ...goodProxies])];
+    }
+
+    stats.proxyReady = proxyList.length;
+    stats.blacklistedCount = Object.keys(blacklist).length;
+    stats.goodCount = goodProxies.length;
+}
+
+async function runWorker(proxy) {
+    stats.activeThreads++;
+    const threadId = Math.random().toString(36).substring(7);
+    const userDataDir = path.join(__dirname, 'temp', `profile_${threadId}`);
+    stats.threadStatus[threadId] = { proxy, title: '---', elapsed: 0, target: 0, lastAction: '🚀 Khởi động', iteration: 0 };
+
+    let browser;
+    try {
+        browser = await puppeteer.launch({
+            headless: "new",
+            userDataDir: userDataDir,
+            args: [
+                `--proxy-server=http://${proxy}`, '--no-sandbox', '--disable-setuid-sandbox',
+                '--disable-dev-shm-usage', '--disable-gpu', '--mute-audio',
+                '--disable-blink-features=AutomationControlled'
+            ]
+        });
+
+        const page = await browser.newPage();
+        
+        // --- NẠP COOKIE VÀO LUỒNG ---
+        if (fs.existsSync(COOKIE_FILE)) {
+            const cookies = await fs.readJson(COOKIE_FILE);
+            await page.setCookie(...cookies);
+        }
+
+        await page.setUserAgent(new UserAgents({ deviceCategory: 'desktop' }).toString());
+        
+        // Anti-Fingerprint bổ sung (Dành cho 500k user)
+        await page.evaluateOnNewDocument(() => {
+            Object.defineProperty(navigator, 'deviceMemory', { get: () => 8 });
+            Object.defineProperty(navigator, 'hardwareConcurrency', { get: () => 8 });
+        });
+
+        await page.setDefaultNavigationTimeout(60000);
+
+        await page.setRequestInterception(true);
+        page.on('request', (req) => {
+            if (['image', 'font', 'stylesheet'].includes(req.resourceType()) && !req.url().includes('youtube')) req.abort();
+            else req.continue();
+        });
+
+        stats.threadStatus[threadId].lastAction = '🌍 Vào YT...';
+        await page.goto(PLAYLIST_URL, { waitUntil: 'networkidle2' });
+
+        await page.evaluate(async () => {
+            const keys = ['Accept', 'Agree', 'Chấp nhận', 'Đồng ý', 'Ich stimme', 'Tout accepter', 'Aceptar', 'Alle'];
+            const btns = Array.from(document.querySelectorAll('button, span, div'));
+            const t = btns.find(b => keys.some(k => b.innerText && b.innerText.includes(k)));
+            if (t) t.click();
+        });
+        await new Promise(r => setTimeout(r, 4000));
+
+        await page.evaluate(() => {
+            const btn = document.querySelector('a.ytd-playlist-thumbnail') || document.querySelector('#video-title');
+            if (btn) btn.click();
+        });
+
+        for (let i = 0; i < 10; i++) {
+            await new Promise(r => setTimeout(r, 6000));
+            let currentTitle = await page.title();
+
+            if (currentTitle.includes("Before you") || currentTitle === "YouTube") throw new Error("Kẹt màn hình chào");
+
+            if (i === 0) saveGoodProxy(proxy);
+
+            const watchSecs = Math.floor(Math.random() * 50) + 180; 
+            stats.threadStatus[threadId].title = currentTitle.replace("- YouTube", "");
+            stats.threadStatus[threadId].iteration = i + 1;
+            stats.threadStatus[threadId].target = watchSecs;
+            stats.threadStatus[threadId].elapsed = 0;
+            stats.threadStatus[threadId].lastAction = '👀 Cày view';
+
+            for (let s = 0; s < watchSecs; s++) {
+                await new Promise(r => setTimeout(r, 1000));
+                stats.threadStatus[threadId].elapsed++;
+                stats.totalSeconds++;
+            }
+
+            stats.totalViews++;
+            stats.history.unshift({ title: currentTitle, proxy, time: new Date().toLocaleTimeString() });
+            if (stats.history.length > 20) stats.history.pop();
+
+            const hasNext = await page.evaluate(() => {
+                const n = document.querySelector('.ytp-next-button');
+                if(n && window.getComputedStyle(n).display !== 'none') { n.click(); return true; }
+                return false;
+            });
+            if (!hasNext) break;
+        }
+
+    } catch (err) {
+        blacklist[proxy] = true;
+        fs.writeJsonSync(BLACKLIST_FILE, blacklist);
+    } finally {
+        if (browser) await browser.close();
+        if (fs.existsSync(userDataDir)) fs.removeSync(userDataDir);
+        delete stats.threadStatus[threadId];
+        stats.activeThreads--;
+    }
+}
+
+async function main() {
+    while (true) {
+        if (proxyList.length < 50) await fetchProxies();
+        if (stats.activeThreads < MAX_THREADS && proxyList.length > 0) {
+            runWorker(proxyList.shift());
+            await new Promise(r => setTimeout(r, 4000)); 
+        } else {
+            await new Promise(r => setTimeout(r, 5000));
+        }
+    }
+}
+
+app.get('/', (req, res) => {
     res.send(`
-        <body style="background:#000; color:#fff; text-align:center">
-            <h2>ĐĂNG NHẬP YOUTUBE TRỰC TUYẾN</h2>
-            <div style="position:relative; display:inline-block">
-                <img id="screen" src="data:image/png;base64,${screenshot}" style="border:2px solid #58a6ff; cursor:crosshair" onclick="clickScreen(event)">
+        <body style="font-family:Segoe UI,sans-serif; background:#0d1117; color:#c9d1d9; padding:20px">
+            <h1 style="color:#58a6ff">🛰️ YT BOT V5 - RESURRECTION</h1>
+            <div style="display:grid; grid-template-columns: repeat(4, 1fr); gap:10px; margin-bottom:20px">
+                <div style="background:#161b22; padding:15px; border-left:5px solid #3fb950">
+                    <small>VIEWS HOÀN TẤT</small><br><b style="font-size:24px">${stats.totalViews}</b>
+                </div>
+                <div style="background:#161b22; padding:15px; border-left:5px solid #d29922">
+                    <small>TỔNG THỜI GIAN</small><br><b style="font-size:24px">${formatTime(stats.totalSeconds)}</b>
+                </div>
+                <div style="background:#161b22; padding:15px; border-left:5px solid #0af">
+                    <small>PROXY SẴN SÀNG</small><br><b style="font-size:24px">${stats.proxyReady}</b>
+                </div>
+                <div style="background:#161b22; padding:15px; border-left:5px solid #bc8cff">
+                    <small>⭐ PROXY NGON (CẤP CỨU)</small><br><b style="font-size:24px">${stats.goodCount}</b>
+                </div>
             </div>
-            <div style="margin-top:20px">
-                <input type="text" id="kb" placeholder="Nhập chữ vào đây...">
-                <button onclick="sendText()">GỬI CHỮ</button>
-                <button onclick="saveCK()" style="background:green; color:white">LƯU COOKIE & ĐÓNG</button>
-            </div>
-            <script>
-                function clickScreen(e) {
-                    const rect = e.target.getBoundingClientRect();
-                    const x = e.clientX - rect.left;
-                    const y = e.clientY - rect.top;
-                    location.href = \`/login?clickX=\${x}&clickY=\${y}\`;
-                }
-                function sendText() {
-                    const txt = document.getElementById('kb').value;
-                    location.href = \`/login?text=\${encodeURIComponent(txt)}\`;
-                }
-                function saveCK() { location.href = '/save-cookie'; }
-            </script>
-            <p>Mẹo: Bấm chuột vào ảnh để Click, nhập chữ vào ô rồi bấm Gửi để điền Email/Pass.</p>
+            <table style="width:100%; border-collapse:collapse; background:#161b22">
+                <tr style="background:#21262d; text-align:left">
+                    <th style="padding:12px">PROXY</th><th>VIDEO</th><th>TIẾN ĐỘ</th><th>HÀNH ĐỘNG</th>
+                </tr>
+                ${Object.values(stats.threadStatus).map(t => `
+                <tr style="border-bottom:1px solid #333">
+                    <td style="padding:10px; color:#0af">${t.proxy}</td>
+                    <td><small>[${t.iteration}]</small> ${t.title}</td>
+                    <td>${t.elapsed}/${t.target}s</td>
+                    <td style="color:#3fb950">${t.lastAction}</td>
+                </tr>`).join('')}
+            </table>
+            <script>setTimeout(() => location.reload(), 3000)</script>
         </body>
     `);
 });
 
-// Route lưu lại sau khi ông xong việc
-app.get('/save-cookie', async (req, res) => {
-    if (loginPage) {
-        const cookies = await loginPage.cookies();
-        await fs.writeJson(COOKIE_FILE, cookies);
-        await loginPage.browser().close();
-        loginPage = null;
-        res.send("<h1>✅ ĐÃ LƯU COOKIE! Bot sẽ tự dùng từ luồng sau.</h1><a href='/'>Quay lại Dashboard</a>");
-    }
+app.listen(port, () => {
+    console.log(`DASHBOARD: http://localhost:1111`);
+    main();
 });
