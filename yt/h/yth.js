@@ -3,6 +3,7 @@ const StealthPlugin = require('puppeteer-extra-plugin-stealth');
 const express = require('express');
 const axios = require('axios');
 const UserAgents = require('user-agents');
+const fs = require('fs-extra');
 
 puppeteer.use(StealthPlugin());
 const app = express();
@@ -10,54 +11,61 @@ const port = 1111;
 
 // --- CẤU HÌNH ---
 const PLAYLIST_URL = 'https://m.youtube.com/playlist?list=PLVhVhpOTVoO069xcj_lJH2A4pgUCI-4ov';
-const MAX_CONCURRENT_THREADS = 3; // Chạy thử 3 luồng như ông muốn
+const MAX_CONCURRENT_THREADS = 10; 
+const BLACKLIST_FILE = './blacklist_proxy.json';
 
-let stats = { totalViews: 0, activeThreads: 0, proxyStatus: "Đang khởi động", logs: [] };
+let stats = { totalViews: 0, activeThreads: 0, proxyStatus: "Khởi động", logs: [], blacklistedCount: 0 };
 let proxyList = [];
+let blacklist = {};
+
+// Load danh sách đen từ file
+if (fs.existsSync(BLACKLIST_FILE)) {
+    blacklist = fs.readJsonSync(BLACKLIST_FILE);
+    stats.blacklistedCount = Object.keys(blacklist).length;
+}
 
 function addLog(msg) {
     const time = new Date().toLocaleTimeString();
-    const logEntry = `[${time}] ${msg}`;
-    console.log(logEntry);
-    stats.logs.unshift(logEntry);
+    stats.logs.unshift(`[${time}] ${msg}`);
     if (stats.logs.length > 50) stats.logs.pop();
+    console.log(`[${time}] ${msg}`);
 }
 
-// 1. Hàm lấy và lọc Proxy Port "ngon"
+async function saveBlacklist() {
+    await fs.writeJson(BLACKLIST_FILE, blacklist);
+    stats.blacklistedCount = Object.keys(blacklist).length;
+}
+
+// 1. Hàm nạp Proxy khổng lồ từ nhiều nguồn
 async function fetchProxies() {
-    addLog("--- Đang quét Proxy & Lọc Port chất lượng ---");
+    addLog("🚀 Đang càn quét hàng chục nghìn Proxy...");
     const apis = [
         'https://api.proxyscrape.com/v2/?request=getproxies&protocol=http&timeout=10000&country=all&ssl=all&anonymity=all',
         'https://raw.githubusercontent.com/TheSpeedX/SOCKS-List/master/http.txt',
-        'https://raw.githubusercontent.com/ShiftyTR/Proxy-List/master/https.txt'
+        'https://raw.githubusercontent.com/ShiftyTR/Proxy-List/master/http.txt',
+        'https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/http.txt',
+        'https://raw.githubusercontent.com/hookzof/socks5_list/master/proxy.txt'
     ];
 
     let allFound = [];
     for (let api of apis) {
         try {
-            const res = await axios.get(api, { timeout: 10000 });
-            if (res.data && typeof res.data === 'string') {
-                const lines = res.data.split('\n');
-                allFound = allFound.concat(lines);
-            }
+            const res = await axios.get(api, { timeout: 15000 });
+            const lines = res.data.split('\n').map(p => p.trim());
+            allFound = allFound.concat(lines);
         } catch (e) {}
     }
 
-    // Lọc: Chỉ lấy proxy có port tiềm năng, bỏ port 80, 8081 nếu thích
-    const goodPorts = ['8080', '3128', '8888', '999', '443', '1080', '8118'];
-    proxyList = allFound
-        .map(p => p.trim())
-        .filter(p => {
-            if (!p.includes(':')) return false;
-            const port = p.split(':')[1];
-            return goodPorts.includes(port) || port.length > 3; // Ưu tiên port dài
-        });
+    // Lọc bỏ proxy trong blacklist và định dạng sai
+    proxyList = allFound.filter(p => {
+        return p.includes(':') && !blacklist[p];
+    });
 
-    stats.proxyStatus = `Đã lọc được ${proxyList.length} Proxy xịn`;
-    addLog(`✅ Đã nạp ${proxyList.length} proxy chất lượng.`);
+    stats.proxyStatus = `Nạp mới ${proxyList.length} Proxy sạch.`;
+    addLog(`✅ Đã nạp ${proxyList.length} Proxy (Đã loại bỏ ${allFound.length - proxyList.length} cái lỗi).`);
 }
 
-// 2. Hàm Worker (Đã tối ưu kịch sàn)
+// 2. Worker 10 luồng (Tối ưu RAM kịch trần)
 async function runWorker(proxy) {
     stats.activeThreads++;
     const userAgent = new UserAgents({ deviceCategory: 'desktop' }).toString();
@@ -67,97 +75,84 @@ async function runWorker(proxy) {
         browser = await puppeteer.launch({
             headless: "new",
             args: [
-                '--no-sandbox',
-                '--disable-setuid-sandbox',
-                '--mute-audio',
-                '--disable-gpu',
-                '--disable-dev-shm-usage',
-                '--disable-accelerated-2d-canvas',
+                '--no-sandbox', '--disable-setuid-sandbox', '--mute-audio',
+                '--disable-gpu', '--disable-dev-shm-usage',
+                '--js-flags="--max-old-space-size=128"', // Giới hạn RAM cho mỗi tab
                 `--proxy-server=http://${proxy}`
             ]
         });
 
         const page = await browser.newPage();
         await page.setUserAgent(userAgent);
-        
-        // Timeout ngắn cho kết nối ban đầu
-        await page.setDefaultNavigationTimeout(25000); 
+        await page.setDefaultNavigationTimeout(20000); // 20s không xong là cook
 
-        // Chặn rác để nhẹ máy
+        // Chặn load mọi thứ trừ script cần để chạy video
         await page.setRequestInterception(true);
         page.on('request', (req) => {
-            if (['image', 'font', 'stylesheet'].includes(req.resourceType())) req.abort();
+            if (['image', 'font', 'stylesheet', 'other'].includes(req.resourceType())) req.abort();
             else req.continue();
         });
 
-        addLog(`[${proxy}] -> Thử kết nối...`);
         await page.goto(PLAYLIST_URL, { waitUntil: 'domcontentloaded' });
-
-        // Nếu vào được đến đây là Proxy sống -> Tăng timeout để xem
-        await page.setDefaultNavigationTimeout(60000);
         
-        addLog(`[${proxy}] -> Kết nối thành công! Đang Play...`);
-        
+        // Giả lập click Play
         await page.evaluate(() => {
             const btn = document.querySelector('a.ytd-playlist-thumbnail') || document.querySelector('video');
             if (btn) btn.click();
-            // Ép 144p ngầm
-            setTimeout(() => {
-                const s = document.querySelector('.ytp-settings-button');
-                if(s) s.click();
-            }, 2000);
         });
 
-        const watchTime = Math.floor(Math.random() * (120000)) + 90000; // Xem 1.5 - 3.5 phút
-        await new Promise(r => setTimeout(r, watchTime));
-
         stats.totalViews++;
-        addLog(`✨ THÀNH CÔNG [${proxy}]`);
+        addLog(`🔥 NGON! [${proxy}] đang cày view.`);
+        
+        // Xem ngẫu nhiên 1-2 phút (Xoay luồng nhanh để tận dụng Proxy)
+        await new Promise(r => setTimeout(r, Math.floor(Math.random() * 60000) + 60000));
 
     } catch (err) {
-        // Rút gọn log lỗi cho sạch dashboard
-        let msg = err.message.includes('timeout') ? "Quá chậm" : "Proxy chết";
-        addLog(`⚠️ Bỏ qua [${proxy}]: ${msg}`);
+        // Proxy lỗi -> Cho vào danh sách đen
+        if (!blacklist[proxy]) {
+            blacklist[proxy] = true;
+            if (stats.blacklistedCount % 50 === 0) saveBlacklist(); // Lưu file mỗi 50 Proxy lỗi
+        }
     } finally {
         if (browser) await browser.close();
         stats.activeThreads--;
     }
 }
 
-// 3. Vòng lặp chính (Không dùng await runWorker để chạy song song)
+// 3. Vòng lặp quản lý luồng
 async function main() {
     while (true) {
-        if (proxyList.length < 10) await fetchProxies();
+        if (proxyList.length < 50) await fetchProxies();
 
-        if (stats.activeThreads < MAX_CONCURRENT_THREADS && proxyList.length > 0) {
+        while (stats.activeThreads < MAX_CONCURRENT_THREADS && proxyList.length > 0) {
             const p = proxyList.shift();
-            runWorker(p); // Gọi hàm mà KHÔNG có await để tạo luồng mới ngay
+            runWorker(p);
+            await new Promise(r => setTimeout(r, 1000)); // Delay tránh nghẽn CPU khi mở trình duyệt
         }
-
-        // Nghỉ 5s giữa mỗi lần kiểm tra để không nghẽn CPU
-        await new Promise(r => setTimeout(r, 5000));
+        await new Promise(r => setTimeout(r, 3000));
     }
 }
 
-// 4. Dashboard
+// 4. Dashboard xịn
 app.get('/', (req, res) => {
     res.send(`
-        <body style="font-family:monospace; background:#000; color:#0f0; padding:20px">
-            <h2 style="color:red">YT BOT ULTIMATE - ACTIVE THREADS: ${stats.activeThreads}</h2>
-            <div style="background:#111; padding:10px; border:1px solid #0f0">
-                <b>Views:</b> ${stats.totalViews} | <b>Proxy còn lại:</b> ${proxyList.length}
+        <body style="font-family:Consolas; background:#000; color:#0f0; padding:20px">
+            <h2 style="color:red">☢️ YT BEAST MODE: 10 THREADS</h2>
+            <div style="background:#111; padding:15px; border:1px solid #0f0; display:flex; gap:30px">
+                <div><b>Views:</b> <span style="color:#fff">${stats.totalViews}</span></div>
+                <div><b>Active Threads:</b> <span style="color:#fff">${stats.activeThreads}/10</span></div>
+                <div><b>Blacklist:</b> <span style="color:#fff">${stats.blacklistedCount}</span></div>
             </div>
-            <p>${stats.proxyStatus}</p>
-            <hr>
-            <div style="height:400px; overflow-y:auto; font-size:12px">
+            <p style="color:yellow">${stats.proxyStatus}</p>
+            <div style="height:400px; overflow-y:auto; background:#000; padding:10px; font-size:11px; border:1px solid #333">
                 ${stats.logs.map(l => `<div>${l}</div>`).join('')}
             </div>
-            <script>setTimeout(() => location.reload(), 4000)</script>
+            <script>setTimeout(() => location.reload(), 3000)</script>
         </body>
     `);
 });
 
 app.listen(port, () => {
-    console.log(`Dashboard chạy tại: http://localhost:${port}`);
+    console.log(`DASHBOARD: http://localhost:1111`);
     main();
 });
