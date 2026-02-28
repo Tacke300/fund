@@ -10,14 +10,19 @@ const app = express();
 const port = 1111;
 
 // --- CẤU HÌNH ---
-const PLAYLIST_URL = 'https://m.youtube.com/playlist?list=PLVhVhpOTVoO069xcj_lJH2A4pgUCI-4ov';
-const MAX_THREADS = 15; // Chạy ít luồng bằng IP thật để tránh bị spam IP
+const PLAYLIST_URL = 'https://www.youtube.com/playlist?list=PLVhVhpOTVoO069xcj_lJH2A4pgUCI-4ov';
+const MAX_THREADS = 15; // Chạy 15 luồng
 const COOKIE_FILE = './youtube_cookies.json';
+const BASE_TEMP_DIR = path.join(__dirname, 'temp');
 
 let stats = {
     totalViews: 0, totalSeconds: 0, activeThreads: 0,
     threadStatus: {}, history: []
 };
+
+// Dọn dẹp rác khi khởi động lại
+if (fs.existsSync(BASE_TEMP_DIR)) fs.removeSync(BASE_TEMP_DIR);
+fs.ensureDirSync(BASE_TEMP_DIR);
 
 function formatTime(s) {
     const h = Math.floor(s / 3600);
@@ -27,35 +32,38 @@ function formatTime(s) {
 
 async function humanize(page) {
     try {
-        await page.mouse.move(Math.random() * 800, Math.random() * 600);
-        if (Math.random() > 0.5) {
-            await page.evaluate(() => window.scrollBy({ top: Math.random() * 300, behavior: 'smooth' }));
-        }
+        await page.mouse.move(Math.random() * 500, Math.random() * 500);
+        await page.evaluate(() => window.scrollBy(0, Math.floor(Math.random() * 200)));
     } catch (e) {}
 }
 
-async function runWorker() {
+async function runWorker(index) {
     stats.activeThreads++;
-    const threadId = Math.random().toString(36).substring(7);
-    const userDataDir = path.join(__dirname, 'temp', `profile_${threadId}`);
-    stats.threadStatus[threadId] = { proxy: 'IP THẬT', title: 'Đang khởi tạo...', elapsed: 0, target: 0, lastAction: '🚀 Khởi động', iteration: 0 };
+    const threadId = `THREAD-${index.toString().padStart(2, '0')}`;
+    const userDataDir = path.join(BASE_TEMP_DIR, `profile_${index}`);
+    
+    stats.threadStatus[threadId] = { 
+        proxy: 'LOCAL_IP', title: '---', elapsed: 0, target: 0, 
+        lastAction: '🚀 Khởi động', iteration: 0 
+    };
 
     let browser;
     try {
         browser = await puppeteer.launch({
-            headless: false,
+            headless: false, // Hiện màn hình
             userDataDir: userDataDir,
             args: [
                 '--no-sandbox',
-                '--start-maximized',
-                '--disable-blink-features=AutomationControlled',
-                '--use-gl=desktop'
+                '--disable-setuid-sandbox',
+                '--window-size=800,600', // Thu nhỏ để chạy được 15 luồng
+                '--mute-audio',
+                '--disable-blink-features=AutomationControlled'
             ],
             ignoreDefaultArgs: ['--enable-automation']
         });
 
         const page = (await browser.pages())[0];
-        await page.setViewport({ width: 1280, height: 720 });
+        await page.setViewport({ width: 800, height: 600 });
 
         if (fs.existsSync(COOKIE_FILE)) {
             const cookies = await fs.readJson(COOKIE_FILE);
@@ -64,98 +72,85 @@ async function runWorker() {
 
         await page.setUserAgent(new UserAgents({ deviceCategory: 'desktop' }).toString());
 
-        stats.threadStatus[threadId].lastAction = '🌍 Vào YT...';
+        stats.threadStatus[threadId].lastAction = '🌍 Vào Playlist';
         await page.goto(PLAYLIST_URL, { waitUntil: 'networkidle2', timeout: 60000 });
 
-        // Xử lý nút Chấp nhận/Đồng ý (nếu có)
+        // Tìm và Click video đầu tiên bằng JavaScript (Chống lỗi Not Clickable)
+        await page.waitForSelector('a#video-title, ytd-playlist-video-renderer a', { timeout: 20000 });
         await page.evaluate(() => {
-            const keys = ['Accept', 'Agree', 'Chấp nhận', 'Đồng ý', 'I agree'];
-            const btns = Array.from(document.querySelectorAll('button, span, div'));
-            const t = btns.find(b => keys.some(k => b.innerText && b.innerText.includes(k)));
-            if (t) t.click();
+            const vid = document.querySelector('a#video-title') || document.querySelector('ytd-playlist-video-renderer a');
+            if (vid) vid.click();
         });
 
-        // Đợi và click vào video đầu tiên (Sửa lỗi Not Clickable)
-        const videoSelector = 'a.ytd-playlist-thumbnail, #video-title, .ytd-playlist-video-renderer a';
-        await page.waitForSelector(videoSelector, { timeout: 15000 });
-        await page.evaluate((sel) => {
-            document.querySelector(sel).click();
-        }, videoSelector);
-
-        for (let i = 0; i < 5; i++) {
-            await new Promise(r => setTimeout(r, 8000));
+        for (let i = 0; i < 10; i++) {
+            await new Promise(r => setTimeout(r, 10000));
             let currentTitle = await page.title();
             
-            const watchSecs = Math.floor(Math.random() * 50) + 180; // Xem ~3 phút
+            const watchSecs = Math.floor(Math.random() * 50) + 180; // 3 phút +
             stats.threadStatus[threadId].title = currentTitle.replace("- YouTube", "");
             stats.threadStatus[threadId].iteration = i + 1;
             stats.threadStatus[threadId].target = watchSecs;
-            stats.threadStatus[threadId].elapsed = 0;
-            stats.threadStatus[threadId].lastAction = '👀 Cày view';
+            stats.threadStatus[threadId].lastAction = '👀 Đang xem';
 
             for (let s = 0; s < watchSecs; s++) {
                 await new Promise(r => setTimeout(r, 1000));
-                stats.threadStatus[threadId].elapsed++;
+                stats.threadStatus[threadId].elapsed = s;
                 stats.totalSeconds++;
                 if (s % 30 === 0) await humanize(page);
             }
 
             stats.totalViews++;
-            stats.history.unshift({ title: currentTitle, proxy: 'IP THẬT', time: new Date().toLocaleTimeString() });
-            if (stats.history.length > 10) stats.history.pop();
+            stats.history.unshift({ title: currentTitle, time: new Date().toLocaleTimeString() });
+            if (stats.history.length > 15) stats.history.pop();
 
-            // Click Next video
-            const hasNext = await page.evaluate(() => {
-                const n = document.querySelector('.ytp-next-button');
-                if(n && window.getComputedStyle(n).display !== 'none') { n.click(); return true; }
-                return false;
-            });
-            if (!hasNext) break;
+            // Next Video bằng phím tắt chuẩn YT
+            await page.keyboard.down('Shift');
+            await page.keyboard.press('N');
+            await page.keyboard.up('Shift');
+            stats.threadStatus[threadId].lastAction = '⏭️ Chuyển video';
         }
 
     } catch (err) {
-        console.log(`❌ Lỗi luồng ${threadId}: ${err.message}`);
+        console.log(`❌ [${threadId}] Lỗi: ${err.message}`);
     } finally {
         if (browser) await browser.close();
-        if (fs.existsSync(userDataDir)) fs.removeSync(userDataDir);
         delete stats.threadStatus[threadId];
         stats.activeThreads--;
+        // Đợi 10s rồi luồng này tự hồi sinh (vòng lặp vô hạn)
+        setTimeout(() => runWorker(index), 10000);
     }
 }
 
+// Khởi chạy 15 luồng song song
 async function main() {
-    console.log("🚀 BOT ĐÃ SẴN SÀNG - CHẾ ĐỘ IP THẬT");
-    while (true) {
-        if (stats.activeThreads < MAX_THREADS) {
-            runWorker();
-            await new Promise(r => setTimeout(r, 20000)); 
-        } else {
-            await new Promise(r => setTimeout(r, 5000));
-        }
+    console.log(`🚀 ĐANG KHỞI CHẠY ${MAX_THREADS} LUỒNG...`);
+    for (let i = 1; i <= MAX_THREADS; i++) {
+        runWorker(i);
+        await new Promise(r => setTimeout(r, 5000)); // Delay mở từng luồng để không treo máy
     }
 }
 
-// --- GIAO DIỆN DASHBOARD XỊN ---
+// --- GIAO DIỆN DASHBOARD ---
 app.get('/', (req, res) => {
     res.send(`
         <body style="font-family:Segoe UI,sans-serif; background:#0d1117; color:#c9d1d9; padding:20px">
-            <h1 style="color:#58a6ff">🛰️ YT BOT PRO - HOME NETWORK MODE</h1>
+            <h1 style="color:#58a6ff">🛰️ YT BOT V5 - 15 THREADS VISUAL</h1>
             <div style="display:grid; grid-template-columns: repeat(3, 1fr); gap:10px; margin-bottom:20px">
                 <div style="background:#161b22; padding:15px; border-left:5px solid #3fb950">
-                    <small>VIEWS HOÀN TẤT</small><br><b style="font-size:24px">${stats.totalViews}</b>
+                    <small>TỔNG VIEWS</small><br><b style="font-size:24px">${stats.totalViews}</b>
                 </div>
                 <div style="background:#161b22; padding:15px; border-left:5px solid #d29922">
                     <small>TỔNG THỜI GIAN</small><br><b style="font-size:24px">${formatTime(stats.totalSeconds)}</b>
                 </div>
-                <div style="background:#161b22; padding:15px; border-left:5px solid #0af">
-                    <small>LUỒNG ĐANG CHẠY</small><br><b style="font-size:24px">${stats.activeThreads}</b>
+                <div style="background:#161b22; padding:15px; border-left:5px solid #bc8cff">
+                    <small>LUỒNG HOẠT ĐỘNG</small><br><b style="font-size:24px">${stats.activeThreads}/${MAX_THREADS}</b>
                 </div>
             </div>
             <table style="width:100%; border-collapse:collapse; background:#161b22">
                 <tr style="background:#21262d; text-align:left">
                     <th style="padding:12px">LUỒNG</th><th>VIDEO</th><th>TIẾN ĐỘ</th><th>HÀNH ĐỘNG</th>
                 </tr>
-                ${Object.entries(stats.threadStatus).map(([id, t]) => `
+                ${Object.entries(stats.threadStatus).sort().map(([id, t]) => `
                 <tr style="border-bottom:1px solid #333">
                     <td style="padding:10px; color:#0af">${id}</td>
                     <td><small>[${t.iteration}]</small> ${t.title}</td>
@@ -163,11 +158,7 @@ app.get('/', (req, res) => {
                     <td style="color:#3fb950">${t.lastAction}</td>
                 </tr>`).join('')}
             </table>
-            <h3 style="margin-top:30px">LỊCH SỬ GẦN ĐÂY</h3>
-            <ul style="list-style:none; padding:0">
-                ${stats.history.map(h => `<li style="padding:5px 0; border-bottom:1px solid #21262d">⏰ ${h.time} - ${h.title}</li>`).join('')}
-            </ul>
-            <script>setTimeout(() => location.reload(), 3000)</script>
+            <script>setTimeout(() => location.reload(), 2000)</script>
         </body>
     `);
 });
