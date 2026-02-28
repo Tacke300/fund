@@ -40,7 +40,7 @@ async function startWorker(proxy) {
         await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36');
 
         console.log(`[+] Đang chạy Proxy: ${proxy || 'IP Gốc'}`);
-        await page.goto('LINK_PLAYLIST_CỦA_ÔNG', { waitUntil: 'networkidle2', timeout: 60000 });
+        await page.goto('https://m.youtube.com/playlist?list=PLVhVhpOTVoO069xcj_lJH2A4pgUCI-4ov', { waitUntil: 'networkidle2', timeout: 60000 });
 
         // Tự động bấm nút Play Playlist
         await page.click('a.ytd-playlist-thumbnail').catch(() => {});
