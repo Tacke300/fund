@@ -12,7 +12,7 @@ const port = 1111;
 
 // --- CẤU HÌNH ---
 const PLAYLIST_URL = 'https://m.youtube.com/playlist?list=PLVhVhpOTVoO069xcj_lJH2A4pgUCI-4ov';
-const MAX_THREADS = 20; // ĐÃ TĂNG LÊN 20 THEO Ý ÔNG
+const MAX_THREADS = 20; 
 const DATA_FILE = './playlist_data.json';
 const BLACKLIST_FILE = './blacklist_proxy.json';
 
@@ -22,7 +22,7 @@ let stats = {
     activeThreads: 0,
     blacklistedCount: 0,
     videoCount: 0,
-    threadStatus: {},
+    threadStatus: {}, // NƠI LƯU CHI TIẾT TỪNG LUỒNG
     history: []
 };
 
@@ -53,7 +53,7 @@ async function scanPlaylist() {
         });
         stats.videoCount = videoTitles.length;
         fs.writeJsonSync(DATA_FILE, videoTitles);
-        doLog('SYSTEM', `✅ Đã lưu ${videoTitles.length} video.`);
+        doLog('SYSTEM', `✅ Đã lưu ${videoTitles.length} video vào JSON.`);
     } catch (e) { doLog('SYSTEM', "❌ Lỗi quét Playlist"); }
     await browser.close();
 }
@@ -76,7 +76,16 @@ async function runWorker(proxy) {
     stats.activeThreads++;
     const threadId = Math.random().toString(36).substring(7);
     const userDataDir = path.join(__dirname, 'temp', `profile_${threadId}`);
-    stats.threadStatus[threadId] = { proxy, title: 'Khởi tạo...', elapsed: 0, status: '🚀 Kết nối' };
+    
+    // Khởi tạo trạng thái chi tiết
+    stats.threadStatus[threadId] = { 
+        proxy, 
+        title: '---', 
+        elapsed: 0, 
+        target: 0,
+        lastAction: '🚀 Đang kết nối...',
+        iteration: 0
+    };
 
     let browser;
     try {
@@ -90,21 +99,20 @@ async function runWorker(proxy) {
         await page.setUserAgent(new UserAgents({ deviceCategory: 'desktop' }).toString());
         await page.setDefaultNavigationTimeout(45000);
 
-        // Bước 1: Vào link Playlist
+        stats.threadStatus[threadId].lastAction = '🌍 Đang vào YouTube...';
         await page.goto(PLAYLIST_URL, { waitUntil: 'networkidle2' });
 
-        // --- HÀM VƯỢT RÀO CONSENT (THÊM LẠI) ---
+        // Vượt rào Consent
+        stats.threadStatus[threadId].lastAction = '🛡️ Vượt Before you...';
         await page.evaluate(async () => {
-            const clickBtn = (txt) => {
-                const btns = Array.from(document.querySelectorAll('button, span, div'));
-                const found = btns.find(b => new RegExp(txt, 'i').test(b.innerText));
-                if (found) found.click();
-            };
-            clickBtn('Accept all'); clickBtn('I agree'); clickBtn('Chấp nhận'); clickBtn('Tôi đồng ý');
+            const btns = Array.from(document.querySelectorAll('button, span, div'));
+            const found = btns.find(b => /Accept all|Agree|I agree|Chấp nhận|Tôi đồng ý/i.test(b.innerText));
+            if (found) found.click();
         });
         await new Promise(r => setTimeout(r, 3000));
 
-        // Click Play video đầu tiên
+        // Click Play
+        stats.threadStatus[threadId].lastAction = '▶️ Bấm Play Video';
         await page.evaluate(() => {
             const playBtn = document.querySelector('a.ytd-playlist-thumbnail') || document.querySelector('#video-title');
             if (playBtn) playBtn.click();
@@ -114,8 +122,8 @@ async function runWorker(proxy) {
             await new Promise(r => setTimeout(r, 5000));
             let currentTitle = await page.title();
             
-            // Nếu vẫn dính "Before you continue", thử ép click lần nữa
-            if (currentTitle.includes("Before you")) {
+            if (currentTitle.includes("Before you") || currentTitle === "YouTube") {
+                stats.threadStatus[threadId].lastAction = '🔄 Đang thử Click Accept lại...';
                 await page.evaluate(() => {
                     const b = Array.from(document.querySelectorAll('button')).find(x => /Accept|Agree|Chấp nhận/i.test(x.innerText));
                     if (b) b.click();
@@ -124,12 +132,14 @@ async function runWorker(proxy) {
                 currentTitle = await page.title();
             }
 
-            if (currentTitle.includes("Before you") || currentTitle === "YouTube") throw new Error("Kẹt Consent");
+            if (currentTitle.includes("Before you") || currentTitle === "YouTube") throw new Error("Kẹt Consent/Home");
 
             const watchSecs = Math.floor(Math.random() * 120) + 180; 
             stats.threadStatus[threadId].title = currentTitle.replace("- YouTube", "");
-            stats.threadStatus[threadId].status = `🔥 Đang xem (${i+1})`;
+            stats.threadStatus[threadId].iteration = i + 1;
+            stats.threadStatus[threadId].target = watchSecs;
             stats.threadStatus[threadId].elapsed = 0;
+            stats.threadStatus[threadId].lastAction = '👀 Đang xem video...';
 
             doLog(proxy, `🎬 [${i+1}] ${currentTitle}`);
 
@@ -137,14 +147,17 @@ async function runWorker(proxy) {
                 await new Promise(r => setTimeout(r, 1000));
                 stats.threadStatus[threadId].elapsed++;
                 stats.totalSeconds++;
-                if (s % 40 === 0) await page.evaluate(() => window.scrollBy(0, 150));
+                if (s % 50 === 0) {
+                    stats.threadStatus[threadId].lastAction = '🖱️ Đang Scroll trang...';
+                    await page.evaluate(() => window.scrollBy(0, 150));
+                }
             }
 
             stats.totalViews++;
             stats.history.unshift({ title: currentTitle, proxy, time: new Date().toLocaleTimeString() });
-            if (stats.history.length > 10) stats.history.pop();
+            if (stats.history.length > 20) stats.history.pop();
 
-            // Next video
+            stats.threadStatus[threadId].lastAction = '⏭️ Chuyển video tiếp...';
             const hasNext = await page.evaluate(() => {
                 const n = document.querySelector('.ytp-next-button');
                 if(n && window.getComputedStyle(n).display !== 'none') { n.click(); return true; }
@@ -169,48 +182,53 @@ async function main() {
     await scanPlaylist();
     while (true) {
         if (proxyList.length < 50) await fetchProxies();
-        // CHẠY TỐI ĐA 20 LUỒNG
         if (stats.activeThreads < MAX_THREADS && proxyList.length > 0) {
             runWorker(proxyList.shift());
         }
-        await new Promise(r => setTimeout(r, 2000)); // Giảm delay xuống 2s để nhồi luồng nhanh hơn
+        await new Promise(r => setTimeout(r, 2000));
     }
 }
 
-// DASHBOARD (Giữ nguyên giao diện Manager)
+// --- DASHBOARD CHI TIẾT ---
 app.get('/', (req, res) => {
     const threadRows = Object.values(stats.threadStatus).map(t => `
-        <tr>
-            <td style="color:#0af; font-size:12px">${t.proxy}</td>
-            <td style="color:#fff; font-size:12px">${t.title.substring(0,35)}...</td>
-            <td style="color:yellow">${t.elapsed}s</td>
-            <td style="color:#0f0; font-size:12px">${t.status}</td>
+        <tr style="border-bottom:1px solid #333">
+            <td style="color:#0af; padding:8px">${t.proxy}</td>
+            <td style="color:#fff"><b>[${t.iteration}]</b> ${t.title}</td>
+            <td style="color:yellow; text-align:center">${t.elapsed}/${t.target}s</td>
+            <td style="color:#0f0; font-size:12px">${t.lastAction}</td>
         </tr>
     `).join('');
 
     res.send(`
         <body style="font-family:Consolas,sans-serif; background:#0d1117; color:#c9d1d9; padding:20px">
-            <h1 style="color:#58a6ff; text-align:center">🚀 YT BOT - SUPER 20 THREADS</h1>
+            <div style="display:flex; justify-content:space-between; align-items:center">
+                <h1 style="color:#58a6ff; margin:0">🛰️ YT MONITOR CENTER (20 THREADS)</h1>
+                <div style="text-align:right">
+                    <b style="color:#3fb950; font-size:20px">Views: ${stats.totalViews}</b> | 
+                    <b style="color:#d29922; font-size:20px">Hours: ${formatTime(stats.totalSeconds)}</b>
+                </div>
+            </div>
             
-            <div style="display:grid; grid-template-columns: repeat(4, 1fr); gap:15px; margin-bottom:20px">
-                <div style="background:#161b22; padding:15px; border-radius:10px; border:1px solid #30363d">
-                    <small>TỔNG LƯỢT XEM</small><br><b style="font-size:24px; color:#3fb950">${stats.totalViews}</b>
-                </div>
-                <div style="background:#161b22; padding:15px; border-radius:10px; border:1px solid #30363d">
-                    <small>TỔNG GIỜ XEM</small><br><b style="font-size:24px; color:#d29922">${formatTime(stats.totalSeconds)}</b>
-                </div>
-                <div style="background:#161b22; padding:15px; border-radius:10px; border:1px solid #30363d">
-                    <small>LUỒNG ĐANG CHẠY</small><br><b style="font-size:24px; color:#58a6ff">${stats.activeThreads}/20</b>
-                </div>
-                <div style="background:#161b22; padding:15px; border-radius:10px; border:1px solid #30363d">
-                    <small>BLACKLIST</small><br><b style="font-size:24px; color:#f85149">${stats.blacklistedCount}</b>
-                </div>
+            <div style="display:flex; gap:10px; margin:20px 0">
+                <div style="background:#161b22; padding:10px; border:1px solid #30363d">Luồng: ${stats.activeThreads}/20</div>
+                <div style="background:#161b22; padding:10px; border:1px solid #30363d">Playlist: ${stats.videoCount} vid</div>
+                <div style="background:#161b22; padding:10px; border:1px solid #30363d; color:#f85149">Proxy Chết: ${stats.blacklistedCount}</div>
             </div>
 
             <table style="width:100%; border-collapse:collapse; background:#161b22; border-radius:10px">
-                <thead><tr style="background:#21262d; text-align:left"><th style="padding:10px">PROXY</th><th>VIDEO</th><th>TIME</th><th>STATUS</th></tr></thead>
+                <thead><tr style="background:#21262d; text-align:left"><th style="padding:10px">PROXY IP</th><th>VIDEO TITLE (REAL-TIME)</th><th style="text-align:center">PROGRESS</th><th>LAST ACTION</th></tr></thead>
                 <tbody>${threadRows}</tbody>
             </table>
+
+            <div style="margin-top:20px; display:grid; grid-template-columns: 1fr; gap:20px">
+                <div style="background:#0a0a0a; padding:15px; border:1px solid #30363d; height:200px; overflow:auto">
+                    <h4 style="color:#bc8cff; margin:0 0 10px 0">📜 LỊCH SỬ XEM CHI TIẾT (VỪA XONG)</h4>
+                    <table style="width:100%; font-size:12px">
+                        ${stats.history.map(h => `<tr><td style="color:#888">${h.time}</td><td style="color:#0af">${h.proxy}</td><td>${h.title}</td></tr>`).join('')}
+                    </table>
+                </div>
+            </div>
             <script>setTimeout(() => location.reload(), 3000)</script>
         </body>
     `);
