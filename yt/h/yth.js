@@ -10,23 +10,23 @@ puppeteer.use(StealthPlugin());
 const app = express();
 const port = 1111;
 
-// --- CẤU HÌNH ---
+// --- FILE LƯU TRỮ ---
 const PLAYLIST_URL = 'https://m.youtube.com/playlist?list=PLVhVhpOTVoO069xcj_lJH2A4pgUCI-4ov';
 const MAX_THREADS = 15; 
-const DATA_FILE = './playlist_data.json';
 const BLACKLIST_FILE = './blacklist_proxy.json';
+const GOOD_PROXIES_FILE = './good_proxies.json'; // File "Cấp cứu"
 const ERROR_DIR = './errors';
 
 if (!fs.existsSync(ERROR_DIR)) fs.mkdirSync(ERROR_DIR);
 
 let stats = {
     totalViews: 0, totalSeconds: 0, activeThreads: 0,
-    blacklistedCount: 0, videoCount: 0, threadStatus: {}, history: []
+    blacklistedCount: 0, goodCount: 0, proxyReady: 0, threadStatus: {}, history: []
 };
 
 let proxyList = [];
-let videoTitles = [];
 let blacklist = fs.existsSync(BLACKLIST_FILE) ? fs.readJsonSync(BLACKLIST_FILE) : {};
+let goodProxies = fs.existsSync(GOOD_PROXIES_FILE) ? fs.readJsonSync(GOOD_PROXIES_FILE) : [];
 
 function formatTime(s) {
     const h = Math.floor(s/3600);
@@ -34,38 +34,52 @@ function formatTime(s) {
     return `${h}h ${m}m ${s%60}s`;
 }
 
-function doLog(proxy, msg) {
-    console.log(`\x1b[36m[${new Date().toLocaleTimeString()}]\x1b[0m \x1b[33m[${proxy}]\x1b[0m ${msg}`);
+function saveGoodProxy(proxy) {
+    if (!goodProxies.includes(proxy)) {
+        goodProxies.push(proxy);
+        if (goodProxies.length > 2000) goodProxies.shift(); // Giữ tối đa 2k con ngon nhất
+        fs.writeJsonSync(GOOD_PROXIES_FILE, goodProxies);
+        stats.goodCount = goodProxies.length;
+    }
 }
 
-async function scanPlaylist() {
-    doLog('SYSTEM', "🔍 Đang trinh sát Playlist...");
-    const browser = await puppeteer.launch({ headless: "new", args: ['--no-sandbox'] });
-    const page = await browser.newPage();
-    try {
-        await page.goto(PLAYLIST_URL, { waitUntil: 'networkidle2', timeout: 60000 });
-        videoTitles = await page.evaluate(() => {
-            return Array.from(document.querySelectorAll('#video-title')).map(el => el.innerText.trim()).filter(t => t !== "");
-        });
-        stats.videoCount = videoTitles.length;
-        fs.writeJsonSync(DATA_FILE, videoTitles);
-        doLog('SYSTEM', `✅ Đã lưu ${videoTitles.length} video.`);
-    } catch (e) { doLog('SYSTEM', "❌ Lỗi quét Playlist."); }
-    await browser.close();
-}
-
+// 1. TĂNG CƯỜNG NGUỒN PROXY (12+ NGUỒN)
 async function fetchProxies() {
+    console.log("🔄 Đang quét hàng loạt nguồn Proxy mới...");
     const sources = [
         'https://api.proxyscrape.com/v2/?request=getproxies&protocol=http&timeout=10000&country=all',
         'https://raw.githubusercontent.com/TheSpeedX/SOCKS-List/master/http.txt',
-        'https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/http.txt'
+        'https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/http.txt',
+        'https://raw.githubusercontent.com/muhammadrizki16/proxy-list/main/http.txt',
+        'https://raw.githubusercontent.com/ShiftyTR/Proxy-List/master/http.txt',
+        'https://raw.githubusercontent.com/clarketm/proxy-list/master/proxy-list-raw.txt',
+        'https://raw.githubusercontent.com/sunny9577/proxy-scraper/master/proxies.txt',
+        'https://raw.githubusercontent.com/roosterkid/openproxylist/main/HTTPS_RAW.txt',
+        'https://raw.githubusercontent.com/opsxcq/proxy-list/master/list.txt',
+        'https://proxyspace.pro/http.txt',
+        'https://raw.githubusercontent.com/Zaeem20/proxy-list/master/http.txt'
     ];
+
     let all = [];
     for (let s of sources) {
-        try { const res = await axios.get(s); all = all.concat(res.data.split('\n')); } catch(e){}
+        try { 
+            const res = await axios.get(s, { timeout: 5000 }); 
+            all = all.concat(res.data.split('\n')); 
+        } catch(e) { console.log(`⚠️ Nguồn lỗi: ${s.substring(0,30)}`); }
     }
+
+    // Lọc sạch rác
     proxyList = [...new Set(all.map(p => p.trim()).filter(p => p.includes(':') && !blacklist[p]))];
+    
+    // CƠ CHẾ CẤP CỨU: Nếu quét xong mà vẫn hẻo, lấy hàng "Good" ra dùng lại
+    if (proxyList.length < 20 && goodProxies.length > 0) {
+        console.log("🚨 CHẾ ĐỘ CẤP CỨU: Tái sử dụng Proxy ngon từ quá khứ!");
+        proxyList = [...new Set([...proxyList, ...goodProxies])];
+    }
+
+    stats.proxyReady = proxyList.length;
     stats.blacklistedCount = Object.keys(blacklist).length;
+    stats.goodCount = goodProxies.length;
 }
 
 async function runWorker(proxy) {
@@ -81,82 +95,66 @@ async function runWorker(proxy) {
             userDataDir: userDataDir,
             args: [
                 `--proxy-server=http://${proxy}`, '--no-sandbox', '--disable-setuid-sandbox',
-                '--disable-dev-shm-usage', '--disable-gpu', '--mute-audio', '--window-size=1280,720'
+                '--disable-dev-shm-usage', '--disable-gpu', '--mute-audio'
             ]
         });
 
         const page = await browser.newPage();
         await page.setUserAgent(new UserAgents({ deviceCategory: 'desktop' }).toString());
-        await page.setDefaultNavigationTimeout(45000);
+        await page.setDefaultNavigationTimeout(50000);
 
-        // TỐI ƯU: Chặn rác để nhẹ máy
+        // Chặn rác tối ưu RAM
         await page.setRequestInterception(true);
         page.on('request', (req) => {
-            if (['image', 'font'].includes(req.resourceType())) req.abort();
+            if (['image', 'font', 'stylesheet'].includes(req.resourceType()) && !req.url().includes('youtube')) req.abort();
             else req.continue();
         });
 
-        stats.threadStatus[threadId].lastAction = '🌍 Vào YouTube...';
+        stats.threadStatus[threadId].lastAction = '🌍 Vào YT...';
         await page.goto(PLAYLIST_URL, { waitUntil: 'networkidle2' });
 
-        // --- BỘ DIỆT CONSENT ĐA NGÔN NGỮ ---
-        stats.threadStatus[threadId].lastAction = '🛡️ Diệt màn hình Chào';
+        // Vượt rào đa ngôn ngữ
         await page.evaluate(async () => {
-            const keywords = ['Accept all', 'I agree', 'Chấp nhận', 'Tôi đồng ý', 'Agree', 'Ich stimme zu', 'Tout accepter', 'Aceptar todo', 'Alle chấp nhận'];
-            const btns = Array.from(document.querySelectorAll('button, span, div, yt-formatted-string'));
-            const target = btns.find(b => keywords.some(k => b.innerText && b.innerText.includes(k)));
-            if (target) target.click();
+            const keys = ['Accept', 'Agree', 'Chấp nhận', 'Đồng ý', 'Ich stimme', 'Tout accepter', 'Aceptar', 'Alle'];
+            const btns = Array.from(document.querySelectorAll('button, span, div'));
+            const t = btns.find(b => keys.some(k => b.innerText && b.innerText.includes(k)));
+            if (t) t.click();
         });
-        await new Promise(r => setTimeout(r, 5000));
+        await new Promise(r => setTimeout(r, 4000));
 
-        // Bấm Play
+        // Click Play
         await page.evaluate(() => {
-            const playBtn = document.querySelector('a.ytd-playlist-thumbnail') || document.querySelector('#video-title');
-            if (playBtn) playBtn.click();
+            const btn = document.querySelector('a.ytd-playlist-thumbnail') || document.querySelector('#video-title');
+            if (btn) btn.click();
         });
 
-        for (let i = 0; i < 15; i++) {
+        for (let i = 0; i < 10; i++) {
             await new Promise(r => setTimeout(r, 6000));
             let currentTitle = await page.title();
 
-            // Nếu kẹt, thử diệt Consent lần 2
-            if (currentTitle.includes("Before you") || currentTitle === "YouTube") {
-                await page.evaluate(() => {
-                    const b = Array.from(document.querySelectorAll('button')).find(x => /Accept|Agree|Chấp nhận|I agree/i.test(x.innerText));
-                    if (b) b.click();
-                });
-                await new Promise(r => setTimeout(r, 4000));
-                currentTitle = await page.title();
-            }
+            if (currentTitle.includes("Before you") || currentTitle === "YouTube") throw new Error("Kẹt màn hình chào");
 
-            if (currentTitle.includes("Before you") || currentTitle === "YouTube") {
-                // Chụp ảnh lỗi để soi
-                await page.screenshot({ path: `${ERROR_DIR}/${proxy.replace(/:/g, '_')}.png` });
-                throw new Error("Kẹt màn hình chào (Đã chụp ảnh)");
-            }
+            // LƯU PROXY NGON: Vì đã vào được video đầu tiên
+            if (i === 0) saveGoodProxy(proxy);
 
-            const watchSecs = Math.floor(Math.random() * 60) + 180; 
+            const watchSecs = Math.floor(Math.random() * 50) + 180; 
             stats.threadStatus[threadId].title = currentTitle.replace("- YouTube", "");
             stats.threadStatus[threadId].iteration = i + 1;
             stats.threadStatus[threadId].target = watchSecs;
             stats.threadStatus[threadId].elapsed = 0;
-            stats.threadStatus[threadId].lastAction = '👀 Đang xem';
+            stats.threadStatus[threadId].lastAction = '👀 Cày view';
 
             for (let s = 0; s < watchSecs; s++) {
                 await new Promise(r => setTimeout(r, 1000));
                 stats.threadStatus[threadId].elapsed++;
                 stats.totalSeconds++;
-                if (s % 60 === 0) {
-                    stats.threadStatus[threadId].lastAction = '🖱️ Scroll';
-                    await page.evaluate(() => window.scrollBy(0, 100));
-                }
             }
 
             stats.totalViews++;
             stats.history.unshift({ title: currentTitle, proxy, time: new Date().toLocaleTimeString() });
             if (stats.history.length > 20) stats.history.pop();
 
-            stats.threadStatus[threadId].lastAction = '⏭️ Next Video';
+            // Next
             const hasNext = await page.evaluate(() => {
                 const n = document.querySelector('.ytp-next-button');
                 if(n && window.getComputedStyle(n).display !== 'none') { n.click(); return true; }
@@ -166,7 +164,6 @@ async function runWorker(proxy) {
         }
 
     } catch (err) {
-        doLog(proxy, `❌ Lỗi: ${err.message.substring(0, 35)}`);
         blacklist[proxy] = true;
         fs.writeJsonSync(BLACKLIST_FILE, blacklist);
     } finally {
@@ -178,12 +175,10 @@ async function runWorker(proxy) {
 }
 
 async function main() {
-    await scanPlaylist();
     while (true) {
         if (proxyList.length < 50) await fetchProxies();
         if (stats.activeThreads < MAX_THREADS && proxyList.length > 0) {
             runWorker(proxyList.shift());
-            // Delay 4s để tránh "Requesting main frame too early"
             await new Promise(r => setTimeout(r, 4000)); 
         } else {
             await new Promise(r => setTimeout(r, 5000));
@@ -191,38 +186,37 @@ async function main() {
     }
 }
 
+// DASHBOARD GIAO DIỆN MỚI
 app.get('/', (req, res) => {
-    const threadRows = Object.values(stats.threadStatus).map(t => `
-        <tr style="border-bottom:1px solid #333">
-            <td style="color:#0af; padding:10px">${t.proxy}</td>
-            <td style="color:#fff"><b>[${t.iteration}]</b> ${t.title}</td>
-            <td style="color:yellow; text-align:center">${t.elapsed}/${t.target}s</td>
-            <td style="color:#0f0">${t.lastAction}</td>
-        </tr>
-    `).join('');
-
     res.send(`
-        <body style="font-family:Consolas,sans-serif; background:#0d1117; color:#c9d1d9; padding:20px">
-            <div style="display:flex; justify-content:space-between; align-items:center">
-                <h1 style="color:#58a6ff; margin:0">🛰️ YT ULTIMATE V4</h1>
-                <div style="text-align:right">
-                    <b style="color:#3fb950; font-size:22px">VIEWS: ${stats.totalViews}</b> | 
-                    <b style="color:#d29922; font-size:22px">WATCH: ${formatTime(stats.totalSeconds)}</b>
+        <body style="font-family:Segoe UI,sans-serif; background:#0d1117; color:#c9d1d9; padding:20px">
+            <h1 style="color:#58a6ff">🛰️ YT BOT V5 - RESURRECTION</h1>
+            <div style="display:grid; grid-template-columns: repeat(4, 1fr); gap:10px; margin-bottom:20px">
+                <div style="background:#161b22; padding:15px; border-left:5px solid #3fb950">
+                    <small>VIEWS HOÀN TẤT</small><br><b style="font-size:24px">${stats.totalViews}</b>
+                </div>
+                <div style="background:#161b22; padding:15px; border-left:5px solid #d29922">
+                    <small>TỔNG THỜI GIAN</small><br><b style="font-size:24px">${formatTime(stats.totalSeconds)}</b>
+                </div>
+                <div style="background:#161b22; padding:15px; border-left:5px solid #0af">
+                    <small>PROXY SẴN SÀNG</small><br><b style="font-size:24px">${stats.proxyReady}</b>
+                </div>
+                <div style="background:#161b22; padding:15px; border-left:5px solid #bc8cff">
+                    <small>⭐ PROXY NGON (CẤP CỨU)</small><br><b style="font-size:24px">${stats.goodCount}</b>
                 </div>
             </div>
-            <div style="display:flex; gap:10px; margin:20px 0">
-                <div style="background:#161b22; padding:10px; border:1px solid #30363d">🔥 Luồng: ${stats.activeThreads}/${MAX_THREADS}</div>
-                <div style="background:#161b22; padding:10px; border:1px solid #30363d">📦 Proxy: ${proxyList.length}</div>
-                <div style="background:#161b22; padding:10px; border:1px solid #30363d; color:#f85149">💀 Blacklist: ${stats.blacklistedCount}</div>
-            </div>
             <table style="width:100%; border-collapse:collapse; background:#161b22">
-                <thead><tr style="background:#21262d; text-align:left"><th style="padding:15px">PROXY</th><th>VIDEO</th><th style="text-align:center">PROGRESS</th><th>ACTION</th></tr></thead>
-                <tbody>${threadRows}</tbody>
+                <tr style="background:#21262d; text-align:left">
+                    <th style="padding:12px">PROXY</th><th>VIDEO</th><th>TIẾN ĐỘ</th><th>HÀNH ĐỘNG</th>
+                </tr>
+                ${Object.values(stats.threadStatus).map(t => `
+                <tr style="border-bottom:1px solid #333">
+                    <td style="padding:10px; color:#0af">${t.proxy}</td>
+                    <td><small>[${t.iteration}]</small> ${t.title}</td>
+                    <td>${t.elapsed}/${t.target}s</td>
+                    <td style="color:#3fb950">${t.lastAction}</td>
+                </tr>`).join('')}
             </table>
-            <div style="margin-top:20px; background:#000; padding:15px; border:1px solid #30363d; height:150px; overflow:auto">
-                <h4 style="color:#bc8cff; margin:0">📜 LỊCH SỬ</h4>
-                <table style="width:100%; font-size:11px">${stats.history.map(h => `<tr><td style="color:#888">${h.time}</td><td style="color:#0af">${h.proxy}</td><td>${h.title}</td></tr>`).join('')}</table>
-            </div>
             <script>setTimeout(() => location.reload(), 3000)</script>
         </body>
     `);
