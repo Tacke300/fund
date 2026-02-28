@@ -11,7 +11,7 @@ const port = 1111;
 
 // --- CẤU HÌNH ---
 const PLAYLIST_URL = 'https://www.youtube.com/playlist?list=PLVhVhpOTVoO069xcj_lJH2A4pgUCI-4ov';
-const MAX_THREADS = 7; // Chạy 7 luồng cho ổn định IP và RAM
+const MAX_THREADS = 4; // Chạy 7 luồng cho ổn định IP và RAM
 const BASE_TEMP_DIR = path.join(__dirname, 'temp');
 
 let stats = {
