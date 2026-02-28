@@ -12,7 +12,7 @@ const port = 1111;
 
 // --- CẤU HÌNH ---
 const PLAYLIST_URL = 'https://m.youtube.com/playlist?list=PLVhVhpOTVoO069xcj_lJH2A4pgUCI-4ov';
-const MAX_THREADS = 10;
+const MAX_THREADS = 20;
 const DATA_FILE = './playlist_data.json';
 const BLACKLIST_FILE = './blacklist_proxy.json';
 
