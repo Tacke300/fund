@@ -11,16 +11,16 @@ const port = 1111;
 // --- CẤU HÌNH ---
 const CHROME_PATH = 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe'; 
 const PLAYLIST_URL = 'https://www.youtube.com/playlist?list=PLVhVhpOTVoO069xcj_lJH2A4pgUCI-4ov';
-const MAX_THREADS = 4; // Chỉnh về 4 luồng theo yêu cầu
+const MAX_THREADS = 4;
 const BASE_TEMP_DIR = path.resolve(__dirname, 'profiles');
 
-let stats = { totalViews: 0, activeThreads: 0, threadStatus: {} };
+let stats = { totalViews: 0, totalSeconds: 0, activeThreads: 0, threadStatus: {}, history: [] };
 
-// Hàm log có màu và thời gian
-function logThread(id, message, isError = false) {
+// Hàm Log chi tiết để ông soi lỗi
+function logSystem(id, msg, type = 'info') {
     const time = new Date().toLocaleTimeString();
-    const icon = isError ? '❌' : '🔹';
-    console.log(`[${time}] [${id}] ${icon} ${message}`);
+    const icon = type === 'error' ? '❌' : (type === 'success' ? '✅' : '🔹');
+    console.log(`[${time}] [${id}] ${icon} ${msg}`);
 }
 
 async function runWorker(index) {
@@ -28,18 +28,24 @@ async function runWorker(index) {
     const userDataDir = path.join(BASE_TEMP_DIR, `data_${index}`);
     
     fs.ensureDirSync(userDataDir);
-    logThread(threadId, `Khởi động luồng với Profile: ${userDataDir}`);
+    logSystem(threadId, `Bắt đầu khởi tạo Profile tại: ${userDataDir}`);
 
     let browser;
     try {
+        // KIỂM TRA FILE CHROME TRƯỚC KHI CHẠY
+        if (!fs.existsSync(CHROME_PATH)) {
+            throw new Error(`Đường dẫn Chrome sai! Không tìm thấy file tại ${CHROME_PATH}`);
+        }
+
+        logSystem(threadId, `Đang gọi Chrome thật (Cửa sổ hiện hình)...`);
+        
         browser = await puppeteer.launch({
             executablePath: CHROME_PATH,
-            headless: false, 
+            headless: false, // Ép hiện màn hình
             userDataDir: userDataDir,
             args: [
                 '--start-maximized',
                 `--window-position=${(index-1)*200},${(index-1)*100}`,
-                '--window-size=1000,700',
                 `--remote-debugging-port=${9220 + index}`,
                 '--no-first-run',
                 '--no-default-browser-check',
@@ -52,70 +58,75 @@ async function runWorker(index) {
 
         const page = (await browser.pages())[0];
         stats.activeThreads++;
-        
-        logThread(threadId, `Đang kết nối tới YouTube...`);
+        stats.threadStatus[threadId] = { title: '---', elapsed: 0, target: 0, lastAction: '🚀 Khởi động' };
+
+        logSystem(threadId, `Đang truy cập Playlist YouTube...`);
         await page.goto(PLAYLIST_URL, { waitUntil: 'networkidle2', timeout: 60000 });
 
-        logThread(threadId, `Đang tìm video trong Playlist...`);
+        logSystem(threadId, `Đang tìm nút Play trong danh sách...`);
         const videoSelector = 'a#video-title, ytd-playlist-video-renderer a';
         await page.waitForSelector(videoSelector, { timeout: 30000 });
         
-        // Click bằng JavaScript để chắc chắn ăn
+        // Click bằng JS để tránh bị lỗi "Node not clickable"
         await page.evaluate((sel) => {
             const el = document.querySelector(sel);
             if (el) el.click();
         }, videoSelector);
 
-        logThread(threadId, `Đã nhấn Play video.`);
+        logSystem(threadId, `Đã nhấn Play! Bắt đầu chu kỳ xem.`);
 
         while (true) {
             await new Promise(r => setTimeout(r, 10000));
-            const videoTitle = (await page.title()).replace('- YouTube', '').trim();
+            let currentTitle = await page.title();
+            let watchSecs = Math.floor(Math.random() * 60) + 180; // Xem 3-4 phút
             
-            // Random thời gian xem từ 3 - 5 phút
-            const watchSecs = Math.floor(Math.random() * 120) + 180;
-            logThread(threadId, `Đang xem: "${videoTitle}" trong ${watchSecs} giây...`);
+            stats.threadStatus[threadId].title = currentTitle.replace("- YouTube", "");
+            stats.threadStatus[threadId].target = watchSecs;
+            stats.threadStatus[threadId].lastAction = '👀 Đang xem';
 
-            // Đợi xem hết thời gian
-            await new Promise(r => setTimeout(r, watchSecs * 1000));
+            logSystem(threadId, `Đang xem video: ${currentTitle} (${watchSecs}s)`);
+
+            for (let s = 0; s < watchSecs; s++) {
+                await new Promise(r => setTimeout(r, 1000));
+                stats.threadStatus[threadId].elapsed = s;
+                stats.totalSeconds++;
+            }
 
             stats.totalViews++;
-            logThread(threadId, `✅ Đã hoàn thành 1 view. Tổng view máy: ${stats.totalViews}`);
+            logSystem(threadId, `✅ Đã xong 1 View! Đang chuyển video tiếp theo...`, 'success');
 
-            logThread(threadId, `Đang chuyển sang video tiếp theo (Shift + N)...`);
+            // Phím tắt Next video (Shift + N)
             await page.keyboard.down('Shift');
             await page.keyboard.press('N');
             await page.keyboard.up('Shift');
         }
 
     } catch (err) {
-        logThread(threadId, `LỖI: ${err.message}`, true);
-    } finally {
-        if (browser) {
-            logThread(threadId, `Đang đóng trình duyệt để khởi động lại...`);
-            await browser.close();
+        logSystem(threadId, `LỖI CHÍ MẠNG: ${err.message}`, 'error');
+        if (err.message.includes('user_data')) {
+            logSystem(threadId, `LƯU Ý: Có thể Profile đang bị chiếm dụng. Hãy tắt hết Chrome thủ công!`, 'error');
         }
+    } finally {
+        if (browser) await browser.close();
         stats.activeThreads--;
-        // Nghỉ 15 giây rồi chạy lại chính nó (vòng lặp vô hạn)
+        logSystem(threadId, `Luồng tạm nghỉ 15s trước khi hồi sinh...`);
         setTimeout(() => runWorker(index), 15000);
     }
 }
 
 async function main() {
-    console.log("==========================================");
-    console.log("   YOUTUBE BOT PRO - 4 LUỒNG CHROME THẬT  ");
-    console.log("==========================================");
-    
+    console.log("------------------------------------------");
+    console.log("🔥 BOT ĐÃ SẴN SÀNG - CHẾ ĐỘ HIỆN MÀN HÌNH 🔥");
+    console.log("------------------------------------------");
     for (let i = 1; i <= MAX_THREADS; i++) {
         runWorker(i);
-        // Delay mở các luồng để tránh sốc CPU
         await new Promise(r => setTimeout(r, 10000)); 
     }
 }
 
-// Web Server để xem thống kê nhanh qua trình duyệt
+// Giữ lại cái Dashboard cho ông check qua Web
 app.get('/', (req, res) => {
-    res.send(`<h1>BOT ĐANG CHẠY</h1><p>Tổng View: ${stats.totalViews}</p><p>Luồng đang mở: ${stats.activeThreads}</p>`);
+    res.send(`<h1>VIEW: ${stats.totalViews}</h1><p>THREADS: ${stats.activeThreads}</p>`);
 });
 
 app.listen(port, () => main());
