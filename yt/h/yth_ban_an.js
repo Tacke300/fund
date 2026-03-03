@@ -12,7 +12,7 @@ const port = 1111;
 // --- CẤU HÌNH ---
 const PLAYLIST_URL = 'https://m.youtube.com/playlist?list=PLVhVhpOTVoO069xcj_lJH2A4pgUCI-4ov';
 const MAX_THREADS = 15;
-const BLACKLIST_FILE = path.join(__dirname, 'blacklist_proxy.json');
+const BLACKLIST_FILE = path.join(__dirname, 'blacklist_proxy2.json');
 const startTime = Date.now();
 
 // --- FIX LỖI: XÓA BLACKLIST KHI RESTART PM2 ---
