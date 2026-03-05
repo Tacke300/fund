@@ -9,28 +9,37 @@ puppeteer.use(StealthPlugin());
 const app = express();
 const port = 1111;
 
-// --- CẤU HÌNH SIÊU CẤP ---
+// --- CẤU HÌNH HỆ THỐNG ---
 const PLAYLIST_URL = 'https://m.youtube.com/playlist?list=PLVhVhpOTVoO069xcj_lJH2A4pgUCI-4ov';
 const MAX_THREADS = 15;
-const ROTATION_TIME = 1800000; // 30 phút (tự đổi proxy nếu luồng quá cũ)
+const ROTATION_TIME = 1800000; 
 const startTime = Date.now();
 
 let stats = {
-    totalViews: 0, totalWatchSeconds: 0, activeThreads: 0,
-    proxiesFailed: 0, proxyReady: 0, threadStatus: {}, logs: []
+    totalViews: 0,
+    totalWatchSeconds: 0,
+    activeThreads: 0,
+    proxiesFailed: 0,
+    proxyReady: 0,
+    blacklistSize: 0,
+    successRate: 0,
+    threadStatus: {}, 
+    logs: [],
+    blacklistSample: [] // Lưu 10 IP bị cấm gần nhất
 };
 
 let blacklist = new Set();
 let proxyList = [];
 
-// Xóa rác profile cũ
 if (fs.existsSync(path.join(__dirname, 'temp'))) fs.removeSync(path.join(__dirname, 'temp'));
 
 function fullLog(msg, type = 'INFO') {
     const time = new Date().toLocaleTimeString();
-    const logMsg = `<span class="log-time">[${time}]</span> <span class="log-type-${type}">[${type}]</span> ${msg}`;
+    const colorMap = { 'SUCCESS': '#00ff41', 'FAILED': '#ff4757', 'SCRAPER': '#00ffff', 'SYSTEM': '#eccc68' };
+    const color = colorMap[type] || '#fff';
+    const logMsg = `<div style="margin-bottom:2px"><span style="color:#666">[${time}]</span> <span style="color:${color}">[${type}]</span> ${msg}</div>`;
     stats.logs.unshift(logMsg);
-    if (stats.logs.length > 150) stats.logs.pop();
+    if (stats.logs.length > 200) stats.logs.pop();
     console.log(`[${time}] [${type}] ${msg}`);
 }
 
@@ -41,9 +50,9 @@ function formatTime(seconds) {
     return `${h}h ${m}m ${s}s`;
 }
 
-// --- 1. SIÊU CÔNG CỤ QUÉT 100K PROXY ---
+// --- 1. ENGINE QUÉT PROXY VÔ TẬN ---
 async function fetchProxies() {
-    fullLog('Kích hoạt quét 100+ nguồn Proxy...', 'SCRAPER');
+    fullLog('🌀 Đang thâm nhập các kho Proxy tổng...', 'SCRAPER');
     const sources = [
         'https://api.proxyscrape.com/v2/?request=getproxies&protocol=http&timeout=10000&country=all',
         'https://api.openproxylist.xyz/http.txt',
@@ -56,28 +65,35 @@ async function fetchProxies() {
         'https://raw.githubusercontent.com/Zaeem20/free-proxy-list/master/http.txt',
         'https://raw.githubusercontent.com/officialputuid/Free-Proxy-List/main/http.txt',
         'https://raw.githubusercontent.com/rdavydov/proxy-list/main/proxies/http.txt',
-        'https://raw.githubusercontent.com/sunny9577/proxy-scraper/master/proxies.txt'
+        'https://raw.githubusercontent.com/sunny9577/proxy-scraper/master/proxies.txt',
+        'https://raw.githubusercontent.com/roosterkid/openproxylist/main/HTTPS_RAW.txt',
+        'https://raw.githubusercontent.com/mmpx12/proxy-list/master/http.txt',
+        'https://raw.githubusercontent.com/B4RC0DE-7/proxy-list/main/HTTP.txt',
+        'https://raw.githubusercontent.com/MuRongPIG/Proxy-Master/main/http.txt'
     ];
-    let allData = "";
-    const res = await Promise.allSettled(sources.map(u => axios.get(u, { timeout: 10000 })));
-    res.forEach(r => { if (r.status === 'fulfilled') allData += r.value.data; });
-    
-    const found = allData.match(/\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}:\d{2,5}/g);
-    if (found) {
-        proxyList = [...new Set(found)].filter(p => !blacklist.has(p));
-        stats.proxyReady = proxyList.length;
-        fullLog(`Hệ thống đã nạp ${proxyList.length} Proxy vào kho đạn!`, 'SYSTEM');
-    }
+
+    try {
+        const responses = await Promise.allSettled(sources.map(url => axios.get(url, { timeout: 15000 })));
+        let allData = "";
+        responses.forEach(res => { if (res.status === 'fulfilled') allData += res.value.data; });
+        const found = allData.match(/\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}:\d{2,5}/g);
+        if (found) {
+            const unique = [...new Set(found)].filter(p => !blacklist.has(p));
+            proxyList = unique;
+            stats.proxyReady = proxyList.length;
+            fullLog(`Đã đồng bộ ${proxyList.length} Proxy mới.`, 'SYSTEM');
+        }
+    } catch (e) { fullLog('Lỗi truy xuất kho dữ liệu Proxy', 'FAILED'); }
 }
 
-// --- 2. WORKER LỲ ĐÒN ---
+// --- 2. CORE WORKER (INFINITE LOOP) ---
 async function runWorker(proxy) {
     stats.activeThreads++;
     const id = Math.random().toString(36).substring(7).toUpperCase();
     const userDataDir = path.join(__dirname, 'temp', `profile_${id}`);
     const birth = Date.now();
     
-    stats.threadStatus[id] = { proxy, title: 'Initializing...', iteration: 1, elapsed: 0, target: 0, status: 'STARTING', birth };
+    stats.threadStatus[id] = { proxy, title: 'Connecting...', iteration: 1, elapsed: 0, target: 0, status: 'INITIALIZING', birth };
 
     let browser;
     try {
@@ -88,64 +104,61 @@ async function runWorker(proxy) {
         });
 
         const page = await browser.newPage();
-        await page.setDefaultNavigationTimeout(120000);
+        await page.setDefaultNavigationTimeout(90000);
+        await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36');
 
-        fullLog(`[${id}] Đang nạp Playlist...`, 'NETWORK');
+        fullLog(`[${id}] Tìm nạp Playlist...`, 'SYSTEM');
         await page.goto(PLAYLIST_URL, { waitUntil: 'networkidle2' });
         const vids = await page.evaluate(() => {
-            const links = Array.from(document.querySelectorAll('a[href*="/watch?v="]'));
-            return [...new Set(links.map(a => a.href.split('&')[0]))];
+            return Array.from(document.querySelectorAll('a[href*="/watch?v="]'))
+                        .map(a => a.href.split('&')[0])
+                        .filter((v, i, a) => a.indexOf(v) === i);
         });
 
-        if (!vids.length) throw new Error("Proxy lag/Playlist lỗi");
+        if (!vids.length) throw new Error("Blocked by YouTube");
 
         while (true) {
-            // Tự đổi luồng nếu quá già (Rotation)
-            if (Date.now() - birth > ROTATION_TIME && stats.activeThreads >= MAX_THREADS) {
-                fullLog(`[${id}] Luồng đã cũ (30p), đổi Proxy mới...`, 'ROTATION');
-                break;
-            }
+            if (Date.now() - birth > ROTATION_TIME) break; // Đổi luồng sau 30p
 
             for (let i = 0; i < vids.length; i++) {
                 let success = false, retry = 0;
-                while (!success && retry < 5) {
+                while (!success && retry < 3) {
                     try {
-                        stats.threadStatus[id].iteration = i + 1;
-                        stats.threadStatus[id].status = `LOADING VID ${i+1}`;
-                        await page.goto(vids[i], { waitUntil: 'networkidle2', timeout: 90000 });
-                        await page.waitForSelector('.video-stream', { timeout: 30000 });
+                        stats.threadStatus[id].status = `NAVIGATING V${i+1}`;
+                        await page.goto(vids[i], { waitUntil: 'networkidle2', timeout: 60000 });
+                        await page.waitForSelector('.video-stream', { timeout: 20000 });
                         
                         stats.threadStatus[id].title = (await page.title()).replace('- YouTube', '');
-                        stats.threadStatus[id].status = 'WATCHING';
+                        stats.threadStatus[id].status = 'PLAYING';
                         
-                        const time = Math.floor(Math.random() * 61) + 150; // Xem 2.5 - 3.5 phút
-                        stats.threadStatus[id].target = time;
+                        const watchTime = Math.floor(Math.random() * 60) + 180;
+                        stats.threadStatus[id].target = watchTime;
 
-                        for (let s = 1; s <= time; s++) {
+                        for (let s = 1; s <= watchTime; s++) {
                             await new Promise(r => setTimeout(r, 1000));
                             stats.threadStatus[id].elapsed = s;
                             stats.totalWatchSeconds++;
                         }
                         stats.totalViews++;
                         success = true;
-
-                        // Nghỉ giữa các video (15-25s)
-                        const rest = Math.floor(Math.random() * 11) + 15;
-                        stats.threadStatus[id].status = `SLEEPING ${rest}s`;
+                        
+                        // Nghỉ giữa video
+                        const rest = 15;
+                        stats.threadStatus[id].status = `RESTING`;
                         await new Promise(r => setTimeout(r, rest * 1000));
-
                     } catch (e) {
                         retry++;
-                        stats.threadStatus[id].status = `RETRYING ${retry}/5`;
-                        await new Promise(r => setTimeout(r, 15000));
+                        await new Promise(r => setTimeout(r, 5000));
                     }
                 }
                 if (!success) break;
             }
-            fullLog(`[${id}] Replay Playlist...`, 'LOOP');
         }
     } catch (err) {
         blacklist.add(proxy);
+        stats.blacklistSize = blacklist.size;
+        stats.blacklistSample.unshift(proxy);
+        if (stats.blacklistSample.length > 10) stats.blacklistSample.pop();
         stats.proxiesFailed++;
     } finally {
         if (browser) await browser.close();
@@ -155,85 +168,114 @@ async function runWorker(proxy) {
     }
 }
 
-// --- 3. QUẢN LÝ ---
+// --- 3. MAIN ---
 async function main() {
     await fetchProxies();
-    setInterval(() => { if (proxyList.length < 200) fetchProxies(); }, 180000);
-
+    setInterval(fetchProxies, 300000);
     while (true) {
         if (stats.activeThreads < MAX_THREADS && proxyList.length > 0) {
             runWorker(proxyList.shift());
-            await new Promise(r => setTimeout(r, 6000)); 
-        } else {
-            await new Promise(r => setTimeout(r, 10000));
+            await new Promise(r => setTimeout(r, 5000)); 
         }
+        await new Promise(r => setTimeout(r, 2000));
     }
 }
 
-// --- 4. GIAO DIỆN GALAXY TERMINAL ---
+// --- 4. GIAO DIỆN GALAXY V10 ---
 app.get('/', (req, res) => {
+    const successRate = ((stats.totalViews / (stats.totalViews + stats.proxiesFailed || 1)) * 100).toFixed(1);
     res.send(`
     <html>
     <head>
-        <title>GALAXY YT BOT PRO</title>
+        <title>GALAXY CORE V10</title>
         <style>
-            body { background: #050505; color: #00ff41; font-family: 'Courier New', monospace; margin: 0; padding: 20px; overflow-x: hidden; }
-            .header { border: 1px solid #00ff41; padding: 20px; box-shadow: 0 0 15px #00ff41; margin-bottom: 20px; background: rgba(0, 50, 0, 0.2); }
-            .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 15px; }
-            .card { border: 1px solid #333; padding: 15px; background: #0a0a0a; position: relative; overflow: hidden; }
-            .card.active { border-color: #00ff41; box-shadow: inset 0 0 10px rgba(0, 255, 65, 0.1); }
-            .progress-bg { background: #111; height: 4px; margin: 10px 0; border-radius: 2px; }
-            .progress-bar { background: #00ff41; height: 100%; width: 0%; transition: 0.3s; box-shadow: 0 0 10px #00ff41; }
-            .log-box { background: #000; border: 1px solid #333; height: 350px; overflow-y: auto; padding: 15px; margin-top: 20px; font-size: 12px; line-height: 1.5; }
-            .stat-val { color: #fff; font-weight: bold; text-shadow: 0 0 5px #fff; }
-            .log-time { color: #888; }
-            .log-type-SCRAPER { color: #ff00ff; }
-            .log-type-ACTION { color: #00ffff; }
-            .log-type-SUCCESS { color: #00ff41; }
-            .log-type-FAILED { color: #ff4757; }
-            .log-type-ROTATION { color: #eccc68; }
-            h2 { margin: 0; text-transform: uppercase; letter-spacing: 5px; }
-            .blink { animation: blink 1s infinite; }
-            @keyframes blink { 0% { opacity: 1; } 50% { opacity: 0; } 100% { opacity: 1; } }
+            :root { --neon: #00ff41; --danger: #ff4757; --bg: #050505; --glass: rgba(20, 20, 20, 0.85); }
+            body { background: var(--bg); color: #ccc; font-family: 'Segoe UI', sans-serif; margin: 0; padding: 20px; display: grid; grid-template-columns: 350px 1fr; gap: 20px; height: 100vh; overflow: hidden; }
+            
+            /* Sidebar Thống kê */
+            .sidebar { background: var(--glass); border-right: 1px solid #222; padding: 20px; overflow-y: auto; border: 1px solid #333; border-radius: 15px; }
+            .stat-box { margin-bottom: 25px; border-bottom: 1px solid #222; padding-bottom: 15px; }
+            .stat-box h4 { color: var(--neon); text-transform: uppercase; font-size: 12px; margin-bottom: 10px; letter-spacing: 2px; }
+            .stat-box big { font-size: 28px; color: #fff; font-family: monospace; }
+            
+            /* Main Content */
+            .main-panel { display: flex; flex-direction: column; gap: 20px; overflow-y: auto; padding-right: 10px; }
+            .header-nav { display: flex; justify-content: space-between; align-items: center; background: linear-gradient(90deg, #000, #111); padding: 15px 25px; border-radius: 10px; border: 1px solid #333; }
+            
+            /* Grid luồng */
+            .thread-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 15px; }
+            .thread-card { background: rgba(255,255,255,0.03); border: 1px solid #222; border-radius: 8px; padding: 12px; transition: 0.3s; position: relative; }
+            .thread-card:hover { border-color: var(--neon); background: rgba(0, 255, 65, 0.05); }
+            .progress-bar { height: 3px; background: #111; margin: 10px 0; border-radius: 2px; overflow: hidden; }
+            .progress-fill { height: 100%; background: var(--neon); box-shadow: 0 0 10px var(--neon); transition: 0.5s; }
+            
+            /* Logs & Blacklist */
+            .bottom-section { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; min-height: 300px; }
+            .panel-box { background: #000; border: 1px solid #222; border-radius: 10px; padding: 15px; font-family: monospace; font-size: 11px; }
+            .blacklist-item { color: var(--danger); border-bottom: 1px solid #111; padding: 2px 0; }
+            
+            ::-webkit-scrollbar { width: 5px; }
+            ::-webkit-scrollbar-thumb { background: #333; border-radius: 10px; }
         </style>
     </head>
     <body>
-        <div class="header">
-            <h2>Galaxy YT Bot <span class="blink">_</span></h2>
-            <p>Uptime: <span class="stat-val">${Math.floor((Date.now()-startTime)/60000)}m</span> | 
-               Views: <span class="stat-val">${stats.totalViews}</span> | 
-               Total Watchtime: <span class="stat-val">${formatTime(stats.totalWatchSeconds)}</span> | 
-               Threads: <span class="stat-val">${stats.activeThreads}/${MAX_THREADS}</span> | 
-               Proxy Pool: <span class="stat-val">${proxyList.length}</span></p>
+        <div class="sidebar">
+            <h2 style="color:var(--neon); letter-spacing:-1px;">GALAXY CORE <small style="font-size:10px; vertical-align:middle; color:#666;">V10</small></h2>
+            <div class="stat-box"><h4>Total Views</h4><big>${stats.totalViews}</big></div>
+            <div class="stat-box"><h4>Total Watchtime</h4><big>${formatTime(stats.totalWatchSeconds)}</big></div>
+            <div class="stat-box"><h4>Active Threads</h4><big>${stats.activeThreads}/${MAX_THREADS}</big></div>
+            <div class="stat-box"><h4>Proxy Pool</h4><big style="color:#00ffff">${stats.proxyReady}</big></div>
+            <div class="stat-box"><h4>Success Rate</h4><big style="color:${successRate > 50 ? 'var(--neon)' : 'var(--danger)'}">${successRate}%</big></div>
+            <div class="stat-box" style="border:none">
+                <h4>Blacklist (${stats.blacklistSize})</h4>
+                <div style="font-size:10px; opacity:0.6">
+                    ${stats.blacklistSample.map(ip => `<div class="blacklist-item">✖ ${ip}</div>`).join('')}
+                </div>
+            </div>
         </div>
 
-        <div class="grid">
-            ${Object.entries(stats.threadStatus).map(([id, t]) => `
-                <div class="card active">
-                    <div style="display:flex; justify-content:space-between; font-size:11px; color:#888;">
-                        <span>ID: ${id}</span> <span>${t.proxy.split(':')[0]}</span>
+        <div class="main-panel">
+            <div class="header-nav">
+                <span style="font-size:12px; color:#888;">TARGET: <b style="color:#fff">${PLAYLIST_URL.substring(0,50)}...</b></span>
+                <span style="font-size:12px; color:#888;">UPTIME: <b style="color:#fff">${Math.floor((Date.now()-startTime)/60000)}m</b></span>
+            </div>
+
+            <div class="thread-grid">
+                ${Object.entries(stats.threadStatus).map(([id, t]) => `
+                    <div class="thread-card">
+                        <div style="display:flex; justify-content:space-between; font-size:10px; margin-bottom:8px;">
+                            <b style="color:var(--neon)">[${id}]</b>
+                            <span style="color:#666">${t.proxy.split(':')[0]}</span>
+                        </div>
+                        <div style="font-size:12px; color:#eee; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${t.title}</div>
+                        <div class="progress-bar"><div class="progress-fill" style="width:${(t.elapsed/t.target)*100}%"></div></div>
+                        <div style="display:flex; justify-content:space-between; font-size:10px;">
+                            <span style="color:#eccc68">${t.status}</span>
+                            <span>${t.elapsed}/${t.target}s</span>
+                        </div>
                     </div>
-                    <div style="margin: 10px 0; color: #fff; height: 35px; overflow: hidden; font-size: 13px;">
-                        ${t.iteration}. ${t.title}
-                    </div>
-                    <div class="progress-bg"><div class="progress-bar" style="width: ${(t.elapsed/t.target)*100}%"></div></div>
-                    <div style="display:flex; justify-content:space-between; font-size:11px;">
-                        <span style="color:#00ff41">${t.status}</span>
-                        <span>${t.elapsed}/${t.target}s</span>
+                `).join('')}
+            </div>
+
+            <div class="bottom-section">
+                <div class="panel-box" style="border-top: 2px solid var(--neon)">
+                    <div style="color:var(--neon); margin-bottom:10px; font-weight:bold">SYSTEM REAL-TIME LOGS</div>
+                    <div style="height:230px; overflow-y:auto;">${stats.logs.join('')}</div>
+                </div>
+                <div class="panel-box" style="border-top: 2px solid var(--danger)">
+                    <div style="color:var(--danger); margin-bottom:10px; font-weight:bold">BOT ARCHITECTURE INFO</div>
+                    <div style="color:#888">
+                        - Headless Mode: <span style="color:#fff">ENABLED</span><br>
+                        - Stealth Plugin: <span style="color:#fff">ACTIVE</span><br>
+                        - Rotation Cycle: <span style="color:#fff">30 MINUTES</span><br>
+                        - Fingerprint: <span style="color:#fff">RANDOMIZED</span><br>
+                        - Thread Sync: <span style="color:#fff">ASYNCHRONOUS</span><br><br>
+                        <div style="text-align:center; margin-top:20px; color:var(--neon); opacity:0.3; font-size:40px;">❖</div>
                     </div>
                 </div>
-            `).join('')}
+            </div>
         </div>
-
-        <div class="log-box" id="logs">
-            ${stats.logs.map(l => `<div>${l}</div>`).join('')}
-        </div>
-
-        <script>
-            setTimeout(() => location.reload(), 5000);
-            const objDiv = document.getElementById("logs");
-            objDiv.scrollTop = objDiv.scrollHeight;
-        </script>
+        <script>setTimeout(() => location.reload(), 4000)</script>
     </body>
     </html>
     `);
