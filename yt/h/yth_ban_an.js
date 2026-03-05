@@ -9,14 +9,19 @@ puppeteer.use(StealthPlugin());
 const app = express();
 const port = 1111;
 
-// --- CẤU HÌNH CHIẾN THUẬT VẮT KIỆT ---
+// --- CẤU HÌNH ---
 const PLAYLIST_URL = 'https://m.youtube.com/playlist?list=PLVhVhpOTVoO069xcj_lJH2A4pgUCI-4ov';
-const MAX_THREADS = 30; 
+const MAX_THREADS = 30;
 const startTime = Date.now();
 
 let stats = {
-    totalViews: 0, totalWatchSeconds: 0, activeThreads: 0,
-    proxiesFailed: 0, proxyReady: 0, threadStatus: {}, logs: []
+    totalViews: 0,
+    totalWatchSeconds: 0,
+    activeThreads: 0,
+    proxiesFailed: 0,
+    proxyReady: 0,
+    threadStatus: {}, 
+    logs: [] 
 };
 
 let blacklist = new Set();
@@ -26,81 +31,110 @@ if (fs.existsSync(path.join(__dirname, 'temp'))) fs.removeSync(path.join(__dirna
 
 function fullLog(msg, type = 'INFO') {
     const time = new Date().toLocaleTimeString();
-    stats.logs.unshift(`<div class="l-item"><span class="l-time">${time}</span> <b class="${type}">[${type}]</b> ${msg}</div>`);
-    if (stats.logs.length > 25) stats.logs.pop();
+    const logMsg = `[${time}] [${type}] ${msg}`;
+    console.log(logMsg); 
+    stats.logs.unshift(logMsg);
+    if (stats.logs.length > 100) stats.logs.pop();
 }
 
-// --- SIÊU CÔNG CỤ QUÉT PROXY (X1000 SOURCES) ---
+function formatTime(seconds) {
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    const s = seconds % 60;
+    return `${h}h ${m}m ${s}s`;
+}
+
+// --- 1. LẤY THÔNG TIN PROXY (PING & LOCATION) ---
+async function getProxyInfo(proxy) {
+    const start = Date.now();
+    try {
+        // Sử dụng axios qua proxy để check location và ping
+        const res = await axios.get('http://ip-api.com/json', {
+            proxy: { host: proxy.split(':')[0], port: parseInt(proxy.split(':')[1]) },
+            timeout: 5000
+        });
+        return {
+            location: `${res.data.countryCode} - ${res.data.city}`,
+            ping: Date.now() - start
+        };
+    } catch (e) {
+        return { location: 'Unknown', ping: '>5000ms' };
+    }
+}
+
+// --- 2. CÀO PROXY ---
 async function fetchProxies() {
-    fullLog('📡 Đang quét nguồn Proxy VIP...', 'SCRAPER');
+    fullLog('📡 Đang quét Proxy mới...', 'SCRAPER');
     const sources = [
         'https://api.proxyscrape.com/v2/?request=getproxies&protocol=http&timeout=10000&country=all',
-        'https://api.openproxylist.xyz/http.txt',
-        'https://proxyspace.pro/http.txt',
-        'https://www.proxy-list.download/api/v1/get?type=http',
         'https://raw.githubusercontent.com/TheSpeedX/SOCKS-List/master/http.txt',
         'https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/http.txt',
-        'https://raw.githubusercontent.com/hookzof/socks5_list/master/proxy.txt',
-        'https://raw.githubusercontent.com/ShiftyTR/Proxy-List/master/http.txt',
-        'https://raw.githubusercontent.com/officialputuid/Free-Proxy-List/main/http.txt',
-        'https://raw.githubusercontent.com/rdavydov/proxy-list/main/proxies/http.txt',
-        'https://raw.githubusercontent.com/MuRongPIG/Proxy-Master/main/http.txt'
+        'https://proxyspace.pro/http.txt'
     ];
 
-    try {
-        const responses = await Promise.allSettled(sources.map(url => axios.get(url, { timeout: 10000 })));
-        let allRaw = "";
-        responses.forEach(res => { if (res.status === 'fulfilled') allRaw += res.value.data; });
-        const found = allRaw.match(/\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}:\d{2,5}/g);
-        if (found) {
-            proxyList = [...new Set(found)].filter(p => !blacklist.has(p));
-            stats.proxyReady = proxyList.length;
-            fullLog(`Đã nạp ${proxyList.length.toLocaleString()} Proxy vào kho.`, 'SUCCESS');
-        }
-    } catch (e) { fullLog('Lỗi nạp Proxy!', 'ERROR'); }
+    let allRawData = "";
+    const responses = await Promise.allSettled(sources.map(url => axios.get(url, { timeout: 8000 })));
+    responses.forEach(res => { if (res.status === 'fulfilled') allRawData += res.value.data; });
+    
+    const found = allRawData.match(/\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}:\d{2,5}/g);
+    if (found) {
+        proxyList = [...new Set(found)].filter(p => !blacklist.has(p));
+        stats.proxyReady = proxyList.length;
+    }
 }
 
-async function runWorker() {
-    if (proxyList.length === 0) return;
-    const proxy = proxyList.shift();
-    const id = Math.random().toString(36).substring(7).toUpperCase();
-    const userDataDir = path.join(__dirname, 'temp', `bot_${id}`);
-    
-    const geos = ['🇺🇸 US', '🇻🇳 VN', '🇯🇵 JP', '🇰🇷 KR', '🇩🇪 DE', '🇸🇬 SG', '🇷🇺 RU', '🇧🇷 BR'];
-    const geo = geos[Math.floor(Math.random() * geos.length)];
-    const ping = Math.floor(Math.random() * 200) + 30;
-
+// --- 3. LUỒNG XỬ LÝ (REPLAY VÔ CỰC CHO 1 IP) ---
+async function runWorker(proxy) {
     stats.activeThreads++;
-    stats.threadStatus[id] = { proxy, status: 'INIT', geo, ping, elapsed: 0, target: 0, videoTitle: '---' };
+    const id = Math.random().toString(36).substring(7).toUpperCase();
+    const userDataDir = path.join(__dirname, 'temp', `profile_${id}`);
+    
+    // Lấy thông tin vị trí và ping ban đầu
+    const info = await getProxyInfo(proxy);
+
+    stats.threadStatus[id] = { 
+        proxy, location: info.location, ping: info.ping,
+        videoTitle: 'Đang khởi động...', iteration: 0, 
+        elapsed: 0, target: 0, status: '🚀 LIVE' 
+    };
 
     let browser;
     try {
         browser = await puppeteer.launch({
             headless: "new",
-            userDataDir: userDataDir,
+            userDataDir,
             args: [`--proxy-server=http://${proxy}`, '--no-sandbox', '--disable-gpu', '--mute-audio']
         });
 
         const page = await browser.newPage();
         await page.setDefaultNavigationTimeout(60000);
+        await page.setRequestInterception(true);
+        page.on('request', (req) => {
+            if (['image', 'font'].includes(req.resourceType())) req.abort();
+            else req.continue();
+        });
 
-        // VÒNG LẶP VÔ TẬN: Xem playlist liên tục cho đến khi Proxy chết
+        // VÒNG LẶP VÔ CỰC CHO 1 IP
         while (true) {
-            stats.threadStatus[id].status = '📂 LOAD';
+            fullLog(`[ID:${id}] [${proxy}] Bắt đầu chu kỳ Playlist mới`, 'LOOP');
             await page.goto(PLAYLIST_URL, { waitUntil: 'networkidle2' });
             
-            const videoLinks = await page.evaluate(() => 
-                Array.from(document.querySelectorAll('a[href*="/watch?v="]')).map(a => a.href.split('&')[0])
-            );
+            const videoLinks = await page.evaluate(() => {
+                const links = Array.from(document.querySelectorAll('a[href*="/watch?v="]'));
+                return [...new Set(links.map(a => a.href.split('&')[0]))]; 
+            });
 
-            if (!videoLinks || videoLinks.length === 0) break; // Proxy không load được web -> Thoát vòng lặp để đổi IP
+            if (!videoLinks || videoLinks.length === 0) throw new Error("Proxy chết hoặc không load được playlist");
 
-            for (let vid of videoLinks) {
-                stats.threadStatus[id].status = '📺 PLAY';
-                await page.goto(vid, { waitUntil: 'networkidle2' });
+            for (let i = 0; i < videoLinks.length; i++) {
+                stats.threadStatus[id].iteration++;
+                await page.goto(videoLinks[i], { waitUntil: 'networkidle2' });
                 
-                stats.threadStatus[id].videoTitle = (await page.title()).substring(0, 15);
-                const watchSeconds = Math.floor(Math.random() * 60) + 120;
+                const title = await page.title();
+                stats.threadStatus[id].videoTitle = title.replace('- YouTube', '').trim();
+                stats.threadStatus[id].status = '📺 Đang xem';
+                
+                const watchSeconds = Math.floor(Math.random() * 40) + 60; // Xem 60-100s để test nhanh, bạn có thể tăng lên
                 stats.threadStatus[id].target = watchSeconds;
 
                 for (let s = 1; s <= watchSeconds; s++) {
@@ -110,86 +144,103 @@ async function runWorker() {
                 }
                 stats.totalViews++;
             }
-            fullLog(`Bot ${id} đã cày xong 1 lượt Playlist. Tiếp tục lượt mới...`, 'STAMINA');
         }
     } catch (err) {
         blacklist.add(proxy);
         stats.proxiesFailed++;
-        fullLog(`Bot ${id} đã 'tử trận' (Proxy Die) -> Đang thay quân.`, 'DEAD');
+        fullLog(`[ID:${id}] IP Chết: ${err.message}`, 'FAILED');
     } finally {
         if (browser) await browser.close();
         if (fs.existsSync(userDataDir)) fs.removeSync(userDataDir);
         delete stats.threadStatus[id];
         stats.activeThreads--;
-        runWorker(); // Chỉ nạp Proxy mới khi Proxy cũ đã chết hẳn
     }
 }
 
+// --- 4. QUẢN LÝ ---
 async function main() {
     await fetchProxies();
-    for(let i=0; i<MAX_THREADS; i++) { runWorker(); await new Promise(r => setTimeout(r, 300)); }
-    setInterval(async () => { if (proxyList.length < 500) await fetchProxies(); }, 300000);
+    setInterval(async () => { if (proxyList.length < 50) await fetchProxies(); }, 60000);
+
+    while (true) {
+        if (stats.activeThreads < MAX_THREADS && proxyList.length > 0) {
+            runWorker(proxyList.shift());
+            await new Promise(r => setTimeout(r, 3000)); 
+        } else {
+            await new Promise(r => setTimeout(r, 2000));
+        }
+    }
 }
 
-// --- GIAO DIỆN MONITOR OMNI HORIZON ---
+// --- 5. GIAO DIỆN MONITOR ---
 app.get('/', (req, res) => {
     res.send(`
-    <html>
-    <head>
-        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-        <style>
-            :root { --neon: #00ffcc; --danger: #ff3e3e; --bg: #000000; --card: #0a0a0a; --warn: #ffd700; --text: #ffffff; }
-            body { background: var(--bg); color: var(--text); font-family: 'Inter', sans-serif; margin: 0; overflow: hidden; display: flex; flex-direction: column; height: 100vh; }
-            header { background: #050505; border-bottom: 2px solid var(--neon); padding: 10px 30px; display: flex; align-items: center; justify-content: space-between; }
-            .logo { font-weight: 900; color: var(--neon); letter-spacing: 1px; font-size: 18px; }
-            .h-stats { display: flex; gap: 40px; }
-            .s-box { display: flex; flex-direction: column; }
-            .s-label { font-size: 9px; color: #444; text-transform: uppercase; font-weight: 800; }
-            .s-val { font-size: 18px; font-family: 'Consolas', monospace; font-weight: bold; }
-            .c-neon { color: var(--neon); } .c-danger { color: var(--danger); }
-            main { flex: 1; display: grid; grid-template-columns: repeat(auto-fill, minmax(115px, 1fr)); gap: 6px; padding: 15px; overflow-y: auto; align-content: start; }
-            .tile { background: var(--card); border: 1px solid #111; padding: 6px; border-radius: 3px; position: relative; }
-            .tile.PLAY { border-color: var(--neon); box-shadow: 0 0 10px rgba(0,255,204,0.1); }
-            .t-id { font-size: 8px; color: #333; }
-            .t-ping { font-size: 8px; color: var(--neon); position: absolute; right: 5px; top: 5px; }
-            .t-geo { font-size: 11px; margin: 4px 0; font-weight: bold; }
-            .t-status { font-size: 9px; display: flex; justify-content: space-between; font-weight: 800; }
-            .prog { height: 2px; background: #111; margin-top: 4px; }
-            .fill { height: 100%; background: var(--danger); }
-            footer { height: 120px; background: #000; border-top: 1px solid #111; padding: 10px 30px; font-family: monospace; font-size: 11px; overflow-y: auto; color: #444; }
-            .SUCCESS { color: var(--neon); } .DEAD { color: var(--danger); font-weight: bold; } .STAMINA { color: #0088ff; }
-        </style>
-    </head>
-    <body>
-        <header>
-            <div class="logo"><i class="fas fa-skull"></i> INFINITE DRAIN MODE</div>
-            <div class="h-stats">
-                <div class="s-box"><span class="s-label">Proxy Pool</span><span class="s-val c-neon">${stats.proxyReady.toLocaleString()}</span></div>
-                <div class="s-box"><span class="s-label">Proxies Dead</span><span class="s-val c-danger">${blacklist.size.toLocaleString()}</span></div>
-                <div class="s-box"><span class="s-label">Active Bots</span><span class="s-val">${stats.activeThreads}/${MAX_THREADS}</span></div>
-                <div class="s-box"><span class="s-label">Total Views</span><span class="s-val c-neon">${stats.totalViews}</span></div>
-                <div class="s-box"><span class="s-label">Watchtime</span><span class="s-val">${Math.floor(stats.totalWatchSeconds/3600)}H</span></div>
-            </div>
-        </header>
-        <main>
-            ${Object.entries(stats.threadStatus).map(([id, t]) => `
-                <div class="tile ${t.status}">
-                    <div class="t-id">#${id}</div>
-                    <div class="t-ping">${t.ping}ms</div>
-                    <div class="t-geo">${t.geo}</div>
-                    <div class="t-status">
-                        <span style="color:${t.status==='PLAY'?'var(--neon)':'#444'}">${t.status}</span>
-                        <span>${t.elapsed}s</span>
+        <body style="font-family:sans-serif; background:#0a0a0a; color:#eee; padding:20px; margin:0;">
+            <div style="background:#111; padding:20px; border-bottom:3px solid #ff0000; position:sticky; top:0; z-index:100;">
+                <h1 style="margin:0; color:#ff0000; display:flex; justify-content:space-between; align-items:center;">
+                    YT INFINITE REPLAY
+                    <span style="font-size:14px; color:#aaa;">Uptime: ${Math.floor((Date.now()-startTime)/60000)}m</span>
+                </h1>
+                <div style="display:grid; grid-template-columns: repeat(5, 1fr); gap:10px; margin-top:15px;">
+                    <div style="background:#222; padding:10px; border-radius:5px; text-align:center; border: 1px solid #333;">
+                        <div style="font-size:11px; color:#888;">TỔNG VIEWS</div>
+                        <b style="font-size:18px; color:#2ed573;">${stats.totalViews}</b>
                     </div>
-                    <div class="prog"><div class="fill" style="width:${(t.elapsed/t.target)*100}%"></div></div>
+                    <div style="background:#222; padding:10px; border-radius:5px; text-align:center; border: 1px solid #333;">
+                        <div style="font-size:11px; color:#888;">WATCH TIME</div>
+                        <b style="font-size:18px; color:#70a1ff;">${formatTime(stats.totalWatchSeconds)}</b>
+                    </div>
+                    <div style="background:#222; padding:10px; border-radius:5px; text-align:center; border: 1px solid #333;">
+                        <div style="font-size:11px; color:#888;">KHO PROXY</div>
+                        <b style="font-size:18px; color:#eccc68;">${proxyList.length}</b>
+                    </div>
+                    <div style="background:#222; padding:10px; border-radius:5px; text-align:center; border: 1px solid #333;">
+                        <div style="font-size:11px; color:#888;">LUỒNG</div>
+                        <b style="font-size:18px; color:#ff7f50;">${stats.activeThreads}/${MAX_THREADS}</b>
+                    </div>
+                    <div style="background:#222; padding:10px; border-radius:5px; text-align:center; border: 1px solid #333;">
+                        <div style="font-size:11px; color:#888;">IP ĐÃ DIE</div>
+                        <b style="font-size:18px; color:#ff4757;">${stats.proxiesFailed}</b>
+                    </div>
                 </div>
-            `).join('')}
-        </main>
-        <footer>${stats.logs.join('')}</footer>
-        <script>setTimeout(() => location.reload(), 3500)</script>
-    </body>
-    </html>
+            </div>
+
+            <div style="padding:20px;">
+                <div style="display:grid; grid-template-columns: repeat(auto-fill, minmax(350px, 1fr)); gap:15px;">
+                    ${Object.entries(stats.threadStatus).map(([id, t]) => `
+                        <div style="background:#1a1a1a; border:1px solid #333; padding:15px; border-radius:8px; position:relative;">
+                            <div style="position:absolute; top:10px; right:10px; font-size:10px; color:#2ed573; background:#000; padding:2px 5px; border-radius:3px;">
+                                📶 ${t.ping}ms
+                            </div>
+                            <div style="display:flex; flex-direction:column; margin-bottom:10px;">
+                                <b style="color:#2ed573; font-size:14px;">🆔 ${id} - ${t.location}</b>
+                                <span style="font-size:11px; color:#777;">IP: ${t.proxy}</span>
+                            </div>
+                            <div style="font-size:13px; height:35px; overflow:hidden; color:#fff; border-left: 2px solid #ff0000; padding-left:10px;">
+                                🎬 <b>[#${t.iteration}]</b> ${t.videoTitle}
+                            </div>
+                            <div style="background:#000; height:6px; border-radius:3px; margin:12px 0;">
+                                <div style="width:${(t.elapsed/t.target)*100}%; background:linear-gradient(to right, #ff4757, #2ed573); height:100%; border-radius:3px;"></div>
+                            </div>
+                            <div style="display:flex; justify-content:space-between; font-size:11px;">
+                                <span style="color:#eccc68; font-weight:bold;">${t.status}</span>
+                                <span>${t.elapsed}/${t.target}s</span>
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+
+                <h3 style="color:#eccc68; margin-top:30px;">📜 LOG HỆ THỐNG:</h3>
+                <div style="background:#000; border:1px solid #333; padding:15px; border-radius:8px; height:300px; overflow-y:auto; font-family:monospace; color:#00ff41; font-size:12px; line-height:1.6;">
+                    ${stats.logs.map(line => `<div>${line}</div>`).join('')}
+                </div>
+            </div>
+            <script>setTimeout(() => location.reload(), 3000)</script>
+        </body>
     `);
 });
 
-app.listen(port, () => { main(); });
+app.listen(port, () => { 
+    console.log(`🚀 Monitor đang chạy tại http://localhost:${port}`);
+    main(); 
+});
