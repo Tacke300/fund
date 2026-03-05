@@ -154,7 +154,7 @@ async function fetchProxies() {
     if (found) {
         const unique = [...new Set(found)].filter(p => !blacklist.has(p));
         rawProxyList = unique.sort(() => Math.random() - 0.5);
-        fullLog(`🔥 Đã thu thập ${rawProxyList.length} Proxy thô.`, 'SYSTEM');
+        fullLog(`🔥 Đã nạp ${rawProxyList.length} Proxy thô vào hàng chờ.`, 'SYSTEM');
     }
 }
 
@@ -208,57 +208,92 @@ async function runWorker(proxy) {
         browser = await puppeteer.launch({
             headless: "new",
             userDataDir,
-            args: [`--proxy-server=http://${proxy}`, '--no-sandbox', '--disable-gpu', '--mute-audio']
+            args: [`--proxy-server=http://${proxy}`, '--no-sandbox', '--disable-gpu', '--mute-audio', '--disable-web-security']
         });
 
         const page = await browser.newPage();
         await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/122.0.0.0');
-        await page.setDefaultNavigationTimeout(45000);
+        await page.setDefaultNavigationTimeout(60000);
+        await page.setCacheEnabled(false);
         
         while (true) {
             stats.threadStatus[id].status = '📂 Nạp Playlist';
-            await page.goto(PLAYLIST_URL, { waitUntil: 'networkidle2' });
+            try {
+                await page.goto(PLAYLIST_URL, { waitUntil: 'networkidle2' });
+            } catch (e) {
+                throw new Error("Proxy không tải được Playlist (Chặn/Lag)");
+            }
             
             const videoLinks = await page.evaluate(() => {
                 const links = Array.from(document.querySelectorAll('a[href*="/watch?v="]'));
                 return [...new Set(links.map(a => a.href.split('&')[0]))]; 
             });
 
-            if (!videoLinks || videoLinks.length === 0) throw new Error("Proxy không tải được nội dung");
+            if (!videoLinks || videoLinks.length === 0) throw new Error("YouTube chặn nội dung Proxy này");
 
             for (let link of videoLinks) {
                 stats.threadStatus[id].iteration++;
                 const pStart = Date.now();
-                await page.goto(link, { waitUntil: 'networkidle2' });
+                
+                try {
+                    await page.goto(link, { waitUntil: 'networkidle2' });
+                } catch (e) {
+                    throw new Error("Không thể nạp trang Video (Proxy Die giữa chừng)");
+                }
                 
                 stats.threadStatus[id].ping = Date.now() - pStart;
                 stats.threadStatus[id].videoTitle = (await page.title()).replace('- YouTube', '').trim();
                 stats.threadStatus[id].status = '📺 Đang Buff';
                 
+                // --- ÉP PLAY VIDEO ---
+                await page.evaluate(() => {
+                    const video = document.querySelector('video');
+                    if (video) { video.play(); video.muted = true; }
+                    const btn = document.querySelector('.ytp-play-button');
+                    if (btn && btn.getAttribute('title')?.includes('Play')) btn.click();
+                }).catch(() => {});
+
                 const watchSeconds = Math.floor(Math.random() * 60) + 120;
                 stats.threadStatus[id].target = watchSeconds;
 
                 let actualWatchStart = 0;
                 let lastCurrentTime = 0;
+                let idleCount = 0;
 
-                for (let s = 1; s <= watchSeconds + 60; s++) {
+                for (let s = 1; s <= watchSeconds + 120; s++) {
                     await new Promise(r => setTimeout(r, 1000));
                     
-                    const currentTime = await page.evaluate(() => {
+                    const videoData = await page.evaluate(() => {
                         const video = document.querySelector('video');
-                        return video ? video.currentTime : 0;
-                    }).catch(() => 0);
+                        if (!video) return { err: 'Không tìm thấy Player' };
+                        return { 
+                            currentTime: video.currentTime, 
+                            readyState: video.readyState,
+                            paused: video.paused,
+                            networkState: video.networkState
+                        };
+                    }).catch(() => ({ err: 'Trình duyệt bị đơ (Freeze)' }));
 
-                    if (currentTime > lastCurrentTime) {
+                    if (videoData.err) throw new Error(videoData.err);
+
+                    if (videoData.currentTime > lastCurrentTime) {
                         actualWatchStart++;
-                        lastCurrentTime = currentTime;
+                        lastCurrentTime = videoData.currentTime;
+                        idleCount = 0;
+                    } else {
+                        idleCount++;
                     }
 
                     stats.threadStatus[id].elapsed = actualWatchStart;
                     stats.totalWatchSeconds++;
 
                     if (actualWatchStart >= watchSeconds) break;
-                    if (s > 45 && actualWatchStart === 0) throw new Error("Video không thể Play (Ping quá cao)");
+                    
+                    // --- KILL SWITCH: CHỐNG TREO 1 PHÚT ---
+                    if (idleCount >= 60 && actualWatchStart === 0) {
+                        if (videoData.networkState === 3) throw new Error("YouTube chặn luồng Media (IP Shadowban)");
+                        throw new Error("Video bị treo 1p không chạy (Mạng quá yếu)");
+                    }
                 }
                 stats.totalViews++;
             }
@@ -266,7 +301,7 @@ async function runWorker(proxy) {
     } catch (err) {
         blacklist.add(proxy);
         stats.proxiesFailed++;
-        fullLog(`[ID:${id}] Ngừng: ${err.message}`, 'FAILED');
+        fullLog(`[ID:${id}] [PROXY:${proxy}] Lỗi: ${err.message}`, 'FAILED');
     } finally {
         if (browser) await browser.close();
         if (fs.existsSync(userDataDir)) fs.removeSync(userDataDir);
@@ -280,7 +315,7 @@ app.get('/', (req, res) => {
         <body style="font-family:'Segoe UI', Tahoma, sans-serif; background:#050505; color:#eee; padding:20px; margin:0;">
             <div style="background:#111; padding:20px; border-bottom:5px solid #ff0000; position:sticky; top:0; z-index:100;">
                 <h1 style="margin:0; color:#ff0000; display:flex; justify-content:space-between; align-items:center; text-shadow: 0 0 10px rgba(255,0,0,0.5);">
-                    YOUTUBE REAL-TIME VIEW BOT
+                    YOUTUBE ANTI-FREEZE BOT
                     <span style="font-size:14px; color:#aaa; font-weight:normal;">Uptime: ${Math.floor((Date.now()-startTime)/60000)}m</span>
                 </h1>
                 <div style="display:grid; grid-template-columns: repeat(6, 1fr); gap:15px; margin-top:20px;">
