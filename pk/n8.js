@@ -2,8 +2,8 @@ const { execSync } = require("child_process")
 const fs = require("fs")
 const Tesseract = require("node-tesseract-ocr")
 
-let Jimp = require("jimp")
-if (Jimp.default) Jimp = Jimp.default
+const Jimp = require("jimp").default
+
 
 const RISH="/data/data/com.termux/files/home/fund/pk/rish"
 const SCREEN="/sdcard/poker.png"
