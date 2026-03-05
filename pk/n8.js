@@ -2,7 +2,7 @@ const { execSync } = require("child_process")
 const fs = require("fs")
 const Tesseract = require("node-tesseract-ocr")
 
-const Jimp = require("jimp").default
+const Jimp = require("jimp")
 
 
 const RISH="/data/data/com.termux/files/home/fund/pk/rish"
