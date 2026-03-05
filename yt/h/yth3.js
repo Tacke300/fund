@@ -9,7 +9,7 @@ const app = express();
 const port = 1111;
 
 const PLAYLIST_URL = 'https://m.youtube.com/playlist?list=PLVhVhpOTVoO069xcj_lJH2A4pgUCI-4ov';
-const MAX_THREADS = 12; 
+const MAX_THREADS = 6; 
 const startTime = Date.now();
 
 let stats = {
