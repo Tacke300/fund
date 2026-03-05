@@ -9,9 +9,9 @@ puppeteer.use(StealthPlugin());
 const app = express();
 const port = 1111;
 
-// --- CẤU HÌNH HỆ THỐNG ---
+// --- CẤU HÌNH CHIẾN THUẬT VẮT KIỆT ---
 const PLAYLIST_URL = 'https://m.youtube.com/playlist?list=PLVhVhpOTVoO069xcj_lJH2A4pgUCI-4ov';
-const MAX_THREADS = 30; // Tăng luồng để lấp đầy màn hình
+const MAX_THREADS = 100; 
 const startTime = Date.now();
 
 let stats = {
@@ -27,29 +27,23 @@ if (fs.existsSync(path.join(__dirname, 'temp'))) fs.removeSync(path.join(__dirna
 function fullLog(msg, type = 'INFO') {
     const time = new Date().toLocaleTimeString();
     stats.logs.unshift(`<div class="l-item"><span class="l-time">${time}</span> <b class="${type}">[${type}]</b> ${msg}</div>`);
-    if (stats.logs.length > 30) stats.logs.pop();
+    if (stats.logs.length > 25) stats.logs.pop();
 }
 
 // --- SIÊU CÔNG CỤ QUÉT PROXY (X1000 SOURCES) ---
 async function fetchProxies() {
-    fullLog('📡 Đang truy quét dải IP toàn cầu (Target: Triệu tỷ)...', 'SCRAPER');
+    fullLog('📡 Đang quét nguồn Proxy VIP...', 'SCRAPER');
     const sources = [
         'https://api.proxyscrape.com/v2/?request=getproxies&protocol=http&timeout=10000&country=all',
         'https://api.openproxylist.xyz/http.txt',
         'https://proxyspace.pro/http.txt',
-        'https://spys.me/proxy.txt',
         'https://www.proxy-list.download/api/v1/get?type=http',
         'https://raw.githubusercontent.com/TheSpeedX/SOCKS-List/master/http.txt',
         'https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/http.txt',
         'https://raw.githubusercontent.com/hookzof/socks5_list/master/proxy.txt',
         'https://raw.githubusercontent.com/ShiftyTR/Proxy-List/master/http.txt',
-        'https://raw.githubusercontent.com/Zaeem20/free-proxy-list/master/http.txt',
         'https://raw.githubusercontent.com/officialputuid/Free-Proxy-List/main/http.txt',
         'https://raw.githubusercontent.com/rdavydov/proxy-list/main/proxies/http.txt',
-        'https://raw.githubusercontent.com/roosterkid/openproxylist/main/HTTPS_RAW.txt',
-        'https://raw.githubusercontent.com/sunny9577/proxy-scraper/master/proxies.txt',
-        'https://raw.githubusercontent.com/mmpx12/proxy-list/master/http.txt',
-        'https://raw.githubusercontent.com/B4RC0DE-7/proxy-list/main/HTTP.txt',
         'https://raw.githubusercontent.com/MuRongPIG/Proxy-Master/main/http.txt'
     ];
 
@@ -61,9 +55,9 @@ async function fetchProxies() {
         if (found) {
             proxyList = [...new Set(found)].filter(p => !blacklist.has(p));
             stats.proxyReady = proxyList.length;
-            fullLog(`Đã nạp thành công ${proxyList.length.toLocaleString()} Proxy.`, 'SUCCESS');
+            fullLog(`Đã nạp ${proxyList.length.toLocaleString()} Proxy vào kho.`, 'SUCCESS');
         }
-    } catch (e) { fullLog('Lỗi nạp Proxy nguồn', 'ERROR'); }
+    } catch (e) { fullLog('Lỗi nạp Proxy!', 'ERROR'); }
 }
 
 async function runWorker() {
@@ -72,13 +66,12 @@ async function runWorker() {
     const id = Math.random().toString(36).substring(7).toUpperCase();
     const userDataDir = path.join(__dirname, 'temp', `bot_${id}`);
     
-    // Giả lập thông tin Geo và Ping để hiển thị chuyên nghiệp
     const geos = ['🇺🇸 US', '🇻🇳 VN', '🇯🇵 JP', '🇰🇷 KR', '🇩🇪 DE', '🇸🇬 SG', '🇷🇺 RU', '🇧🇷 BR'];
     const geo = geos[Math.floor(Math.random() * geos.length)];
-    const ping = Math.floor(Math.random() * 250) + 40;
+    const ping = Math.floor(Math.random() * 200) + 30;
 
     stats.activeThreads++;
-    stats.threadStatus[id] = { proxy, status: 'INIT', geo, ping, elapsed: 0, target: 0 };
+    stats.threadStatus[id] = { proxy, status: 'INIT', geo, ping, elapsed: 0, target: 0, videoTitle: '---' };
 
     let browser;
     try {
@@ -89,43 +82,53 @@ async function runWorker() {
         });
 
         const page = await browser.newPage();
-        await page.setDefaultNavigationTimeout(45000); // 45s là chết -> đổi proxy ngay
+        await page.setDefaultNavigationTimeout(60000);
 
-        await page.goto(PLAYLIST_URL, { waitUntil: 'networkidle2' });
-        const videoLinks = await page.evaluate(() => Array.from(document.querySelectorAll('a[href*="/watch?v="]')).map(a => a.href.split('&')[0]));
-
-        for (let vid of videoLinks.slice(0, 3)) {
-            stats.threadStatus[id].status = 'LOAD';
-            await page.goto(vid, { waitUntil: 'networkidle2' });
-            stats.threadStatus[id].status = 'PLAY';
+        // VÒNG LẶP VÔ TẬN: Xem playlist liên tục cho đến khi Proxy chết
+        while (true) {
+            stats.threadStatus[id].status = '📂 LOAD';
+            await page.goto(PLAYLIST_URL, { waitUntil: 'networkidle2' });
             
-            const watchSeconds = Math.floor(Math.random() * 60) + 120;
-            stats.threadStatus[id].target = watchSeconds;
+            const videoLinks = await page.evaluate(() => 
+                Array.from(document.querySelectorAll('a[href*="/watch?v="]')).map(a => a.href.split('&')[0])
+            );
 
-            for (let s = 1; s <= watchSeconds; s++) {
-                await new Promise(r => setTimeout(r, 1000));
-                stats.threadStatus[id].elapsed = s;
-                stats.totalWatchSeconds++;
+            if (!videoLinks || videoLinks.length === 0) break; // Proxy không load được web -> Thoát vòng lặp để đổi IP
+
+            for (let vid of videoLinks) {
+                stats.threadStatus[id].status = '📺 PLAY';
+                await page.goto(vid, { waitUntil: 'networkidle2' });
+                
+                stats.threadStatus[id].videoTitle = (await page.title()).substring(0, 15);
+                const watchSeconds = Math.floor(Math.random() * 60) + 120;
+                stats.threadStatus[id].target = watchSeconds;
+
+                for (let s = 1; s <= watchSeconds; s++) {
+                    await new Promise(r => setTimeout(r, 1000));
+                    stats.threadStatus[id].elapsed = s;
+                    stats.totalWatchSeconds++;
+                }
+                stats.totalViews++;
             }
-            stats.totalViews++;
+            fullLog(`Bot ${id} đã cày xong 1 lượt Playlist. Tiếp tục lượt mới...`, 'STAMINA');
         }
     } catch (err) {
         blacklist.add(proxy);
         stats.proxiesFailed++;
-        fullLog(`Bot ${id} - Proxy đơ -> Blacklist.`, 'RETRY');
+        fullLog(`Bot ${id} đã 'tử trận' (Proxy Die) -> Đang thay quân.`, 'DEAD');
     } finally {
         if (browser) await browser.close();
         if (fs.existsSync(userDataDir)) fs.removeSync(userDataDir);
         delete stats.threadStatus[id];
         stats.activeThreads--;
-        runWorker(); // Chạy ngay luồng mới với Proxy mới
+        runWorker(); // Chỉ nạp Proxy mới khi Proxy cũ đã chết hẳn
     }
 }
 
 async function main() {
     await fetchProxies();
-    for(let i=0; i<MAX_THREADS; i++) { runWorker(); await new Promise(r => setTimeout(r, 400)); }
-    setInterval(async () => { if (proxyList.length < 500) await fetchProxies(); }, 180000);
+    for(let i=0; i<MAX_THREADS; i++) { runWorker(); await new Promise(r => setTimeout(r, 300)); }
+    setInterval(async () => { if (proxyList.length < 500) await fetchProxies(); }, 300000);
 }
 
 // --- GIAO DIỆN MONITOR OMNI HORIZON ---
@@ -135,10 +138,8 @@ app.get('/', (req, res) => {
     <head>
         <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
         <style>
-            :root { --neon: #00ffcc; --danger: #ff3e3e; --bg: #000000; --card: #0a0a0a; --warn: #ffd700; }
-            body { background: var(--bg); color: #fff; font-family: 'Inter', sans-serif; margin: 0; overflow: hidden; display: flex; flex-direction: column; height: 100vh; }
-            
-            /* Banner Ngang */
+            :root { --neon: #00ffcc; --danger: #ff3e3e; --bg: #000000; --card: #0a0a0a; --warn: #ffd700; --text: #ffffff; }
+            body { background: var(--bg); color: var(--text); font-family: 'Inter', sans-serif; margin: 0; overflow: hidden; display: flex; flex-direction: column; height: 100vh; }
             header { background: #050505; border-bottom: 2px solid var(--neon); padding: 10px 30px; display: flex; align-items: center; justify-content: space-between; }
             .logo { font-weight: 900; color: var(--neon); letter-spacing: 1px; font-size: 18px; }
             .h-stats { display: flex; gap: 40px; }
@@ -146,31 +147,26 @@ app.get('/', (req, res) => {
             .s-label { font-size: 9px; color: #444; text-transform: uppercase; font-weight: 800; }
             .s-val { font-size: 18px; font-family: 'Consolas', monospace; font-weight: bold; }
             .c-neon { color: var(--neon); } .c-danger { color: var(--danger); }
-
-            /* Grid Nano Tiles */
             main { flex: 1; display: grid; grid-template-columns: repeat(auto-fill, minmax(115px, 1fr)); gap: 6px; padding: 15px; overflow-y: auto; align-content: start; }
-            .tile { background: var(--card); border: 1px solid #111; padding: 6px; border-radius: 3px; position: relative; transition: 0.3s; }
+            .tile { background: var(--card); border: 1px solid #111; padding: 6px; border-radius: 3px; position: relative; }
             .tile.PLAY { border-color: var(--neon); box-shadow: 0 0 10px rgba(0,255,204,0.1); }
-            .tile.LOAD { border-color: var(--warn); }
             .t-id { font-size: 8px; color: #333; }
             .t-ping { font-size: 8px; color: var(--neon); position: absolute; right: 5px; top: 5px; }
             .t-geo { font-size: 11px; margin: 4px 0; font-weight: bold; }
             .t-status { font-size: 9px; display: flex; justify-content: space-between; font-weight: 800; }
             .prog { height: 2px; background: #111; margin-top: 4px; }
             .fill { height: 100%; background: var(--danger); }
-
-            /* Footer Log */
             footer { height: 120px; background: #000; border-top: 1px solid #111; padding: 10px 30px; font-family: monospace; font-size: 11px; overflow-y: auto; color: #444; }
-            .SUCCESS { color: var(--neon); } .RETRY { color: var(--warn); } .ERROR { color: var(--danger); }
+            .SUCCESS { color: var(--neon); } .DEAD { color: var(--danger); font-weight: bold; } .STAMINA { color: #0088ff; }
         </style>
     </head>
     <body>
         <header>
-            <div class="logo"><i class="fas fa-microchip"></i> YT OMNI HORIZON</div>
+            <div class="logo"><i class="fas fa-skull"></i> INFINITE DRAIN MODE</div>
             <div class="h-stats">
                 <div class="s-box"><span class="s-label">Proxy Pool</span><span class="s-val c-neon">${stats.proxyReady.toLocaleString()}</span></div>
-                <div class="s-box"><span class="s-label">Blacklisted</span><span class="s-val c-danger">${blacklist.size.toLocaleString()}</span></div>
-                <div class="s-box"><span class="s-label">Active Threads</span><span class="s-val">${stats.activeThreads}/${MAX_THREADS}</span></div>
+                <div class="s-box"><span class="s-label">Proxies Dead</span><span class="s-val c-danger">${blacklist.size.toLocaleString()}</span></div>
+                <div class="s-box"><span class="s-label">Active Bots</span><span class="s-val">${stats.activeThreads}/${MAX_THREADS}</span></div>
                 <div class="s-box"><span class="s-label">Total Views</span><span class="s-val c-neon">${stats.totalViews}</span></div>
                 <div class="s-box"><span class="s-label">Watchtime</span><span class="s-val">${Math.floor(stats.totalWatchSeconds/3600)}H</span></div>
             </div>
@@ -182,7 +178,7 @@ app.get('/', (req, res) => {
                     <div class="t-ping">${t.ping}ms</div>
                     <div class="t-geo">${t.geo}</div>
                     <div class="t-status">
-                        <span style="color:${t.status==='PLAY'?'var(--neon)':t.status==='LOAD'?'var(--warn)':'#333'}">${t.status}</span>
+                        <span style="color:${t.status==='PLAY'?'var(--neon)':'#444'}">${t.status}</span>
                         <span>${t.elapsed}s</span>
                     </div>
                     <div class="prog"><div class="fill" style="width:${(t.elapsed/t.target)*100}%"></div></div>
