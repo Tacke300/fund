@@ -3,98 +3,90 @@ const tesseract = require("node-tesseract-ocr");
 const Jimp = require("jimp");
 const chalk = require("chalk");
 
-// --- CẤU HÌNH TỌA ĐỘ TỪ ẢNH CỦA BẠN ---
+// --- CẤU HÌNH TỌA ĐỘ VÀ ĐƯỜNG DẪN ---
+const RISH_PATH = "/data/data/com.termux/files/home/fund/pk/rish.sh";
+const IMG_PATH = "/sdcard/poker.png";
+
 const CONFIG = {
     regions: {
-        pot: { x: 450, y: 440, w: 120, h: 40 },        // Tổng Pot (512)
-        callAmt: { x: 440, y: 940, w: 130, h: 40 },    // Số trên nút Theo bài (160)
+        pot: { x: 450, y: 440, w: 120, h: 40 },        // Vùng hiển thị tổng Pot
+        callAmt: { x: 440, y: 940, w: 130, h: 40 }     // Số tiền trên nút Call
     },
     buttons: {
         fold: "250 950",
         call: "500 950",
-        raise_pot: "830 750",  // Nút Pot (832)
-        raise_2bb: "830 950"   // Nút 2BB (320)
+        raise: "830 950"
     },
-    // Giả định bài AJ có Equity khoảng 55%
-    myEquity: 0.55 
+    myEquity: 0.55 // Giả định bài AJ có 55% thắng
 };
 
 const ocrConfig = { lang: "eng", oem: 1, psm: 7 };
 
-// --- HÀM HIỂN THỊ LOG KIỂU DASHBOARD ---
-function renderLog(data) {
+// --- HÀM LOG GIAO DIỆN CHUYÊN NGHIỆP ---
+function renderDashboard(data) {
     console.clear();
-    console.log(chalk.bold.yellow("========================================"));
-    console.log(chalk.bold.red("   N8 POKER BOT - PM2 MONITORING   "));
-    console.log(chalk.bold.yellow("========================================"));
-    console.log(`${chalk.cyan("💰 TỔNG POT:")}      ${chalk.white(data.pot)}`);
-    console.log(`${chalk.cyan("⚠️ MỨC THEO (CALL):")} ${chalk.white(data.call)}`);
-    console.log(`${chalk.cyan("📊 POT ODDS:")}      ${chalk.magenta(data.potOdds + "%")}`);
+    console.log(chalk.yellow("========================================"));
+    console.log(chalk.bold.red("   N8 MONITORING (SHIZUKU MODE)   "));
+    console.log(chalk.yellow("========================================"));
+    console.log(`${chalk.cyan("💰 TỔNG POT:")}      ${chalk.white(data.pot || "---")}`);
+    console.log(`${chalk.cyan("⚠️ MỨC THEO:")}      ${chalk.white(data.call || "---")}`);
+    console.log(`${chalk.cyan("📊 POT ODDS:")}      ${chalk.magenta(data.potOdds ? data.potOdds + "%" : "---")}`);
     console.log(`${chalk.cyan("🧬 EQUITY (AJ):")}  ${chalk.green((CONFIG.myEquity * 100).toFixed(0) + "%")}`);
     console.log(chalk.yellow("----------------------------------------"));
     
     if (data.decision) {
         const color = data.decision === "CALL" ? chalk.bgGreen : (data.decision === "RAISE" ? chalk.bgYellow : chalk.bgRed);
-        console.log(color.black.bold(` >>> HÀNH ĐỘNG: ${data.decision} <<< `));
+        console.log(color.black.bold(` >>> QUYẾT ĐỊNH: ${data.decision} <<< `));
     } else {
-        console.log(chalk.blue("⏳ ĐANG CHỜ ĐẾN LƯỢT..."));
+        console.log(chalk.blue("⏳ ĐANG QUÉT MÀN HÌNH..."));
     }
-    console.log(chalk.bold.yellow("========================================"));
+    console.log(chalk.yellow("========================================"));
+}
+
+// Hàm đọc số từ ảnh
+async function readNumber(image, region) {
+    try {
+        const cropped = image.clone().crop(region.x, region.y, region.w, region.h);
+        await cropped.greyscale().contrast(1).writeAsync("./temp_ocr.png");
+        const text = await tesseract.recognize("./temp_ocr.png", ocrConfig);
+        return parseInt(text.replace(/[^0-9]/g, "")) || 0;
+    } catch (e) { return 0; }
 }
 
 async function startBot() {
     while (true) {
         try {
-            // 1. Chụp ảnh màn hình
-            execSync("screencap -p /sdcard/poker.png");
-            const image = await Jimp.read("/sdcard/poker.png");
+            // 1. Chụp ảnh màn hình qua Shizuku
+            execSync(`${RISH_PATH} -c 'screencap -p ${IMG_PATH}'`);
+            
+            const image = await Jimp.read(IMG_PATH);
+            const potVal = await readNumber(image, CONFIG.regions.pot);
+            const callVal = await readNumber(image, CONFIG.regions.callAmt);
 
-            // 2. OCR Đọc số (Pot và mức Call)
-            const potVal = await readOCR(image, CONFIG.regions.pot);
-            const callVal = await readOCR(image, CONFIG.regions.callAmt);
-
-            if (potVal > 0) {
+            if (potVal > 0 || callVal > 0) {
                 const potOdds = ((callVal / (potVal + callVal)) * 100).toFixed(1);
                 let decision = "FOLD";
 
-                // 3. LOGIC QUYẾT ĐỊNH
-                // A. Nếu bài cực mạnh (>70%) -> RAISE/BET
-                if (CONFIG.myEquity > 0.70) {
-                    decision = "RAISE";
-                    execSync(`input tap ${CONFIG.buttons.raise_pot}`);
-                }
-                // B. Nếu bài đủ mạnh để Call theo xác suất
-                else if (CONFIG.myEquity > (potOdds / 100)) {
-                    decision = "CALL";
-                    execSync(`input tap ${CONFIG.buttons.call}`);
-                }
-                // C. Nếu không ai bet (Call=0), bài trung bình -> CHECK/BET NHẸ
-                else if (callVal === 0 && CONFIG.myEquity > 0.50) {
-                    decision = "RAISE"; // Bet nhẹ 2BB
-                    execSync(`input tap ${CONFIG.buttons.raise_2bb}`);
-                }
-                else {
-                    decision = "FOLD";
-                    execSync(`input tap ${CONFIG.buttons.fold}`);
-                }
+                // Logic quyết định đơn giản
+                if (CONFIG.myEquity > (potOdds / 100)) decision = "CALL";
+                if (CONFIG.myEquity > 0.75) decision = "RAISE";
 
-                renderLog({ pot: potVal, call: callVal, potOdds, decision });
+                renderDashboard({ pot: potVal, call: callVal, potOdds, decision });
+
+                // Thực thi bấm nút qua Shizuku
+                const coords = CONFIG.buttons[decision.toLowerCase()];
+                execSync(`${RISH_PATH} -c 'input tap ${coords}'`);
+                
+                // Nghỉ sau khi thao tác để tránh bị soi
+                await new Promise(r => setTimeout(r, 4000));
+            } else {
+                renderDashboard({ status: "WAITING" });
             }
         } catch (err) {
-            // Lỗi thường do chưa đến lượt hoặc app bị che
-            renderLog({ pot: "---", call: "---", potOdds: "---", decision: null });
+            console.log(chalk.red("Lỗi kết nối Shizuku hoặc OCR..."));
         }
-        
-        // Nghỉ 5 giây để tránh bị quét hành vi bot
-        await new Promise(r => setTimeout(r, 5000));
+        await new Promise(r => setTimeout(r, 2000)); // Quét lại sau 2 giây
     }
-}
-
-async function readOCR(image, region) {
-    const cropped = image.clone().crop(region.x, region.y, region.w, region.h);
-    await cropped.greyscale().contrast(1).writeAsync("./temp_ocr.png");
-    const text = await tesseract.recognize("./temp_ocr.png", ocrConfig);
-    return parseInt(text.replace(/[^0-9]/g, "")) || 0;
 }
 
 startBot();
