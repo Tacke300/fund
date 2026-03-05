@@ -9,7 +9,6 @@ puppeteer.use(StealthPlugin());
 const app = express();
 const port = 1111;
 
-// --- DANH MỤC VIỆT HÓA QUỐC GIA & LÁ CỜ ---
 const countryMap = {
     'VN': { name: 'Việt Nam', flag: '🇻🇳' },
     'US': { name: 'Mỹ', flag: '🇺🇸' },
@@ -38,7 +37,6 @@ const countryMap = {
     'UA': { name: 'Ukraine', flag: '🇺🇦' }
 };
 
-// --- CẤU HÌNH HỆ THỐNG ---
 const PLAYLIST_URL = 'https://m.youtube.com/playlist?list=PLVhVhpOTVoO069xcj_lJH2A4pgUCI-4ov';
 const MAX_THREADS = 24; 
 const startTime = Date.now();
@@ -49,12 +47,14 @@ let stats = {
     activeThreads: 0,
     proxiesFailed: 0,
     proxyReady: 0,
+    checkingQueue: 0,
     threadStatus: {}, 
     logs: [] 
 };
 
 let blacklist = new Set();
-let proxyList = [];
+let rawProxyList = [];
+let verifiedProxyList = [];
 
 if (fs.existsSync(path.join(__dirname, 'temp'))) fs.removeSync(path.join(__dirname, 'temp'));
 
@@ -64,7 +64,6 @@ function fullLog(msg, type = 'INFO') {
     if (stats.logs.length > 100) stats.logs.pop();
 }
 
-// --- 1. LẤY CHI TIẾT PROXY (LÁ CỜ + VIỆT HÓA + PING) ---
 async function getProxyDetails(proxy) {
     const start = Date.now();
     try {
@@ -74,14 +73,13 @@ async function getProxyDetails(proxy) {
             timeout: 5000 
         });
         const code = res.data.countryCode;
-        const info = countryMap[code] || { name: res.data.country || 'Nước Khác', flag: '🏳️' };
+        const info = countryMap[code] || { name: res.data.country || 'Nước Khác', flag: '🌐' };
         return { displayName: `${info.flag} ${info.name}`, ping: Date.now() - start };
     } catch (e) {
         return { displayName: '🌐 Quốc Tế', ping: '>999' };
     }
 }
 
-// --- 2. QUÉT TOÀN BỘ 500+ NGUỒN PROXY ---
 async function fetchProxies() {
     fullLog('📡 Đang quét toàn bộ 500+ nguồn Proxy...', 'SYSTEM');
     const sources = [
@@ -154,13 +152,38 @@ async function fetchProxies() {
 
     const found = combinedData.match(/\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}:\d{2,5}\b/g);
     if (found) {
-        proxyList = [...new Set(found)].filter(p => !blacklist.has(p)).sort(() => Math.random() - 0.5);
-        stats.proxyReady = proxyList.length;
-        fullLog(`🔥 Đã nạp ${proxyList.length} Proxy vào băng đạn!`, 'SUCCESS');
+        const unique = [...new Set(found)].filter(p => !blacklist.has(p));
+        rawProxyList = unique.sort(() => Math.random() - 0.5);
+        fullLog(`🔥 Đã thu thập ${rawProxyList.length} Proxy thô. Bắt đầu lọc...`, 'SYSTEM');
     }
 }
 
-// --- 3. LUỒNG XỬ LÝ CHÍNH ---
+async function fastCheckProxy() {
+    while (true) {
+        if (rawProxyList.length > 0 && verifiedProxyList.length < 500) {
+            const batch = rawProxyList.splice(0, 50);
+            stats.checkingQueue = rawProxyList.length;
+            
+            await Promise.all(batch.map(async (proxy) => {
+                const parts = proxy.split(':');
+                try {
+                    await axios.get('http://www.google.com', {
+                        proxy: { host: parts[0], port: parseInt(parts[1]) },
+                        timeout: 3500
+                    });
+                    if (!verifiedProxyList.includes(proxy)) {
+                        verifiedProxyList.push(proxy);
+                        stats.proxyReady = verifiedProxyList.length;
+                    }
+                } catch (e) {
+                    blacklist.add(proxy);
+                }
+            }));
+        }
+        await new Promise(r => setTimeout(r, 1000));
+    }
+}
+
 async function runWorker(proxy) {
     stats.activeThreads++;
     const id = Math.random().toString(36).substring(7).toUpperCase();
@@ -192,7 +215,7 @@ async function runWorker(proxy) {
         
         while (true) {
             stats.threadStatus[id].status = '📂 Nạp Playlist';
-            await page.goto(PLAYLIST_URL, { waitUntil: 'networkidle2', timeout: 60000 });
+            await page.goto(PLAYLIST_URL, { waitUntil: 'networkidle2', timeout: 45000 });
             
             const videoLinks = await page.evaluate(() => {
                 const links = Array.from(document.querySelectorAll('a[href*="/watch?v="]'));
@@ -204,7 +227,7 @@ async function runWorker(proxy) {
             for (let link of videoLinks) {
                 stats.threadStatus[id].iteration++;
                 const pStart = Date.now();
-                await page.goto(link, { waitUntil: 'networkidle2', timeout: 60000 });
+                await page.goto(link, { waitUntil: 'networkidle2', timeout: 45000 });
                 
                 stats.threadStatus[id].ping = Date.now() - pStart;
                 stats.threadStatus[id].videoTitle = (await page.title()).replace('- YouTube', '').trim();
@@ -233,16 +256,15 @@ async function runWorker(proxy) {
     }
 }
 
-// --- 4. GIAO DIỆN MONITOR CHUẨN ---
 app.get('/', (req, res) => {
     res.send(`
         <body style="font-family:'Segoe UI', Tahoma, sans-serif; background:#050505; color:#eee; padding:20px; margin:0;">
             <div style="background:#111; padding:20px; border-bottom:5px solid #ff0000; position:sticky; top:0; z-index:100;">
                 <h1 style="margin:0; color:#ff0000; display:flex; justify-content:space-between; align-items:center; text-shadow: 0 0 10px rgba(255,0,0,0.5);">
-                    YOUTUBE BOT BUFF VIEW
+                    YOUTUBE BOT BUFF VIEW (OPTIMIZED)
                     <span style="font-size:14px; color:#aaa; font-weight:normal;">Uptime: ${Math.floor((Date.now()-startTime)/60000)}m</span>
                 </h1>
-                <div style="display:grid; grid-template-columns: repeat(5, 1fr); gap:15px; margin-top:20px;">
+                <div style="display:grid; grid-template-columns: repeat(6, 1fr); gap:15px; margin-top:20px;">
                     <div style="background:#1a1a1a; padding:15px; border-radius:10px; text-align:center; border:1px solid #333;">
                         <div style="font-size:11px; color:#888; margin-bottom:5px;">TỔNG VIEWS</div>
                         <b style="font-size:24px; color:#2ed573;">${stats.totalViews}</b>
@@ -252,8 +274,12 @@ app.get('/', (req, res) => {
                         <b style="font-size:24px; color:#70a1ff;">${Math.floor(stats.totalWatchSeconds/60)}m</b>
                     </div>
                     <div style="background:#1a1a1a; padding:15px; border-radius:10px; text-align:center; border:1px solid #333;">
-                        <div style="font-size:11px; color:#888; margin-bottom:5px;">KHO PROXY</div>
-                        <b style="font-size:24px; color:#eccc68;">${proxyList.length}</b>
+                        <div style="font-size:11px; color:#888; margin-bottom:5px;">PROXY SỐNG</div>
+                        <b style="font-size:24px; color:#eccc68;">${verifiedProxyList.length}</b>
+                    </div>
+                    <div style="background:#1a1a1a; padding:15px; border-radius:10px; text-align:center; border:1px solid #333;">
+                        <div style="font-size:11px; color:#888; margin-bottom:5px;">ĐANG LỌC</div>
+                        <b style="font-size:24px; color:#a29bfe;">${stats.checkingQueue}</b>
                     </div>
                     <div style="background:#1a1a1a; padding:15px; border-radius:10px; text-align:center; border:1px solid #333;">
                         <div style="font-size:11px; color:#888; margin-bottom:5px;">LUỒNG CHẠY</div>
@@ -265,7 +291,6 @@ app.get('/', (req, res) => {
                     </div>
                 </div>
             </div>
-
             <div style="padding:20px;">
                 <div style="display:grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap:15px;">
                     ${Object.entries(stats.threadStatus).map(([id, t]) => `
@@ -290,7 +315,6 @@ app.get('/', (req, res) => {
                         </div>
                     `).join('')}
                 </div>
-
                 <h3 style="color:#eccc68; margin-top:30px; border-bottom: 2px solid #333; padding-bottom:10px;">📜 NHẬT KÝ CHIẾN TRƯỜNG</h3>
                 <div style="background:#000; border:1px solid #222; padding:15px; border-radius:10px; height:300px; overflow-y:auto; font-family:monospace; color:#00ff41; font-size:12px; line-height:1.5;">
                     ${stats.logs.map(line => `<div>${line}</div>`).join('')}
@@ -301,19 +325,19 @@ app.get('/', (req, res) => {
     `);
 });
 
-// --- 5. KHỞI CHẠY ---
 app.listen(port, () => { 
     console.log(`Monitor: http://localhost:${port}`); 
-    fetchProxies().then(main); 
+    fetchProxies();
+    fastCheckProxy();
+    main();
 });
 
 async function main() {
-    setInterval(async () => { if (proxyList.length < 3000) await fetchProxies(); }, 300000);
+    setInterval(async () => { await fetchProxies(); }, 600000);
     while (true) {
-        if (stats.activeThreads < MAX_THREADS && proxyList.length > 0) {
-            runWorker(proxyList.shift());
-            // Bung luồng cực nhanh (0.4s mỗi luồng)
-            await new Promise(r => setTimeout(r, 4000 / MAX_THREADS)); 
+        if (stats.activeThreads < MAX_THREADS && verifiedProxyList.length > 0) {
+            runWorker(verifiedProxyList.shift());
+            await new Promise(r => setTimeout(r, 1000)); 
         } else {
             await new Promise(r => setTimeout(r, 2000));
         }
