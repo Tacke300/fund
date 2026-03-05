@@ -20,7 +20,6 @@ let stats = {
     logs: [] 
 };
 
-// Xóa rác temp cũ khi khởi động lại
 if (fs.existsSync(path.join(__dirname, 'temp'))) fs.removeSync(path.join(__dirname, 'temp'));
 
 function fullLog(msg, type = 'INFO') {
@@ -30,10 +29,11 @@ function fullLog(msg, type = 'INFO') {
     console.log(logMsg);
 }
 
-async function runWorker() {
+async function runWorker(onStarted) {
     stats.activeThreads++;
     const id = Math.random().toString(36).substring(7).toUpperCase();
     const userDataDir = path.join(__dirname, 'temp', `profile_${id}`);
+    let hasTriggeredNext = false;
     
     stats.threadStatus[id] = { 
         videoTitle: 'Đang khởi tạo...', 
@@ -73,6 +73,7 @@ async function runWorker() {
 
             if (!videoLinks || videoLinks.length === 0) {
                 fullLog(`[ID:${id}] Không tìm thấy video. Thử lại sau 5s...`, 'WARN');
+                if(!hasTriggeredNext) { hasTriggeredNext = true; onStarted(); }
                 await new Promise(r => setTimeout(r, 5000));
                 continue;
             }
@@ -88,17 +89,15 @@ async function runWorker() {
                 const rawTitle = await page.title();
                 stats.threadStatus[id].videoTitle = rawTitle.replace('- YouTube', '').trim();
                 
-                // Kích hoạt Player
                 fullLog(`[ID:${id}] Đang kích hoạt Player (144p)...`, 'ACTION');
                 await page.evaluate(async () => {
                     const v = document.querySelector('video');
                     if (v) { v.play(); v.muted = true; }
-                    // Ép chất lượng thấp nhất để tiết kiệm băng thông
                     const player = document.getElementById('movie_player');
                     if (player && player.setPlaybackQualityRange) player.setPlaybackQualityRange('tiny');
                 }).catch(() => {});
 
-                const watchSeconds = Math.floor(Math.random() * 40) + 100; // Xem khoảng 100-140s
+                const watchSeconds = Math.floor(Math.random() * 40) + 100;
                 stats.threadStatus[id].target = watchSeconds;
                 stats.threadStatus[id].status = '⏳ Đang chờ Play...';
 
@@ -106,7 +105,6 @@ async function runWorker() {
                 let lastTime = -1;
                 let idleCount = 0;
 
-                // Vòng lặp đếm giây thực tế
                 for (let s = 1; s <= watchSeconds + 60; s++) {
                     await new Promise(r => setTimeout(r, 1000));
                     
@@ -116,10 +114,10 @@ async function runWorker() {
                     }).catch(() => -2);
 
                     if (curTime > lastTime && curTime > 0) {
-                        // VIDEO ĐANG CHẠY THẬT
                         if (actualWatchStart === 0) {
                             fullLog(`[ID:${id}] Video bắt đầu chạy! Đang đếm giây...`, 'START');
                             stats.threadStatus[id].status = '📺 Đang Buff';
+                            if(!hasTriggeredNext) { hasTriggeredNext = true; onStarted(); }
                         }
                         actualWatchStart++;
                         lastTime = curTime;
@@ -128,7 +126,6 @@ async function runWorker() {
                         stats.threadStatus[id].elapsed = actualWatchStart;
                         stats.totalWatchSeconds++;
                     } else {
-                        // VIDEO ĐANG ĐỨNG (LOADING HOẶC LỖI)
                         idleCount++;
                         stats.threadStatus[id].status = '⏳ Đang Loading...';
                     }
@@ -137,6 +134,7 @@ async function runWorker() {
                     
                     if (idleCount >= 45) {
                         fullLog(`[ID:${id}] Video đứng hình quá lâu. Bỏ qua video này.`, 'FAIL');
+                        if(!hasTriggeredNext) { hasTriggeredNext = true; onStarted(); }
                         break; 
                     }
                 }
@@ -146,16 +144,15 @@ async function runWorker() {
         }
     } catch (err) {
         fullLog(`[ID:${id}] Lỗi hệ thống: ${err.message}`, 'FATAL');
+        if(!hasTriggeredNext) { hasTriggeredNext = true; onStarted(); }
     } finally {
         if (browser) await browser.close();
         if (fs.existsSync(userDataDir)) fs.removeSync(userDataDir);
         delete stats.threadStatus[id];
         stats.activeThreads--;
-        setTimeout(() => main(), 3000); 
     }
 }
 
-// GIAO DIỆN MONITOR RED-BLACK
 app.get('/', (req, res) => {
     res.send(`
         <body style="font-family:sans-serif; background:#050505; color:#eee; padding:20px; margin:0;">
@@ -209,7 +206,13 @@ app.listen(port, () => {
 
 async function main() {
     if (stats.activeThreads < MAX_THREADS) {
-        runWorker();
+        await new Promise((resolve) => {
+            runWorker(() => {
+                resolve();
+            });
+        });
         setTimeout(main, 2000); 
+    } else {
+        setTimeout(main, 10000);
     }
 }
