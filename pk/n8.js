@@ -1,100 +1,100 @@
 const { execSync } = require('child_process');
 const tesseract = require("node-tesseract-ocr");
 const Jimp = require("jimp");
+const chalk = require("chalk");
 
-// --- CẤU HÌNH TỌA ĐỘ (CẦN CHỈNH THEO MÀN HÌNH N8 CỦA BẠN) ---
+// --- CẤU HÌNH TỌA ĐỘ TỪ ẢNH CỦA BẠN ---
 const CONFIG = {
     regions: {
-        pot: { x: 400, y: 750, w: 250, h: 60 },    // Vùng số tiền tổng Pot
-        bet: { x: 450, y: 1450, w: 200, h: 60 },  // Vùng số tiền đối thủ đang Bet
+        pot: { x: 450, y: 440, w: 120, h: 40 },        // Tổng Pot (512)
+        callAmt: { x: 440, y: 940, w: 130, h: 40 },    // Số trên nút Theo bài (160)
     },
     buttons: {
-        fold: "250 1850",
-        call: "540 1850",
-        raise: "830 1850"
+        fold: "250 950",
+        call: "500 950",
+        raise_pot: "830 750",  // Nút Pot (832)
+        raise_2bb: "830 950"   // Nút 2BB (320)
     },
-    // Sức mạnh bài AJ ước tính (0.0 -> 1.0)
-    // Bạn có thể nâng cấp phần này bằng cách đọc lá bài thật
+    // Giả định bài AJ có Equity khoảng 55%
     myEquity: 0.55 
 };
 
-const ocrConfig = {
-    lang: "eng",
-    oem: 1,
-    psm: 7, // Chế độ đọc 1 dòng chữ/số
-};
+const ocrConfig = { lang: "eng", oem: 1, psm: 7 };
 
-// Hàm giả lập suy nghĩ (Tránh bị N8 quét hành vi Bot)
-const sleep = (ms) => new Promise(res => setTimeout(res, ms));
-
-async function runBot() {
-    console.log("🚀 Bot N8 đang khởi động...");
+// --- HÀM HIỂN THỊ LOG KIỂU DASHBOARD ---
+function renderLog(data) {
+    console.clear();
+    console.log(chalk.bold.yellow("========================================"));
+    console.log(chalk.bold.red("   N8 POKER BOT - PM2 MONITORING   "));
+    console.log(chalk.bold.yellow("========================================"));
+    console.log(`${chalk.cyan("💰 TỔNG POT:")}      ${chalk.white(data.pot)}`);
+    console.log(`${chalk.cyan("⚠️ MỨC THEO (CALL):")} ${chalk.white(data.call)}`);
+    console.log(`${chalk.cyan("📊 POT ODDS:")}      ${chalk.magenta(data.potOdds + "%")}`);
+    console.log(`${chalk.cyan("🧬 EQUITY (AJ):")}  ${chalk.green((CONFIG.myEquity * 100).toFixed(0) + "%")}`);
+    console.log(chalk.yellow("----------------------------------------"));
     
+    if (data.decision) {
+        const color = data.decision === "CALL" ? chalk.bgGreen : (data.decision === "RAISE" ? chalk.bgYellow : chalk.bgRed);
+        console.log(color.black.bold(` >>> HÀNH ĐỘNG: ${data.decision} <<< `));
+    } else {
+        console.log(chalk.blue("⏳ ĐANG CHỜ ĐẾN LƯỢT..."));
+    }
+    console.log(chalk.bold.yellow("========================================"));
+}
+
+async function startBot() {
     while (true) {
         try {
-            console.log("\n--- [QUÉT LƯỢT MỚI] ---");
-            
-            // 1. Chụp màn hình
-            execSync("screencap -p /sdcard/poker_frame.png");
-            const image = await Jimp.read("/sdcard/poker_frame.png");
+            // 1. Chụp ảnh màn hình
+            execSync("screencap -p /sdcard/poker.png");
+            const image = await Jimp.read("/sdcard/poker.png");
 
-            // 2. Nhận diện số tiền đối thủ Bet (ví dụ 3642)
-            const betImg = image.clone().crop(CONFIG.regions.bet.x, CONFIG.regions.bet.y, CONFIG.regions.bet.w, CONFIG.regions.bet.h);
-            await betImg.greyscale().contrast(1).writeAsync("./bet_ocr.png");
-            const betRaw = await tesseract.recognize("./bet_ocr.png", ocrConfig);
-            const betAmount = parseInt(betRaw.replace(/[^0-9]/g, "")) || 0;
+            // 2. OCR Đọc số (Pot và mức Call)
+            const potVal = await readOCR(image, CONFIG.regions.pot);
+            const callVal = await readOCR(image, CONFIG.regions.callAmt);
 
-            // 3. Nhận diện tổng Pot
-            const potImg = image.clone().crop(CONFIG.regions.pot.x, CONFIG.regions.pot.y, CONFIG.regions.pot.w, CONFIG.regions.pot.h);
-            await potImg.greyscale().contrast(1).writeAsync("./pot_ocr.png");
-            const potRaw = await tesseract.recognize("./pot_ocr.png", ocrConfig);
-            const potTotal = parseInt(potRaw.replace(/[^0-9]/g, "")) || 0;
+            if (potVal > 0) {
+                const potOdds = ((callVal / (potVal + callVal)) * 100).toFixed(1);
+                let decision = "FOLD";
 
-            console.log(`🔍 Dữ liệu: Bet=${betAmount} | Pot=${potTotal}`);
+                // 3. LOGIC QUYẾT ĐỊNH
+                // A. Nếu bài cực mạnh (>70%) -> RAISE/BET
+                if (CONFIG.myEquity > 0.70) {
+                    decision = "RAISE";
+                    execSync(`input tap ${CONFIG.buttons.raise_pot}`);
+                }
+                // B. Nếu bài đủ mạnh để Call theo xác suất
+                else if (CONFIG.myEquity > (potOdds / 100)) {
+                    decision = "CALL";
+                    execSync(`input tap ${CONFIG.buttons.call}`);
+                }
+                // C. Nếu không ai bet (Call=0), bài trung bình -> CHECK/BET NHẸ
+                else if (callVal === 0 && CONFIG.myEquity > 0.50) {
+                    decision = "RAISE"; // Bet nhẹ 2BB
+                    execSync(`input tap ${CONFIG.buttons.raise_2bb}`);
+                }
+                else {
+                    decision = "FOLD";
+                    execSync(`input tap ${CONFIG.buttons.fold}`);
+                }
 
-            // 4. Logic Quyết Định
-            await makeDecision(betAmount, potTotal);
-
+                renderLog({ pot: potVal, call: callVal, potOdds, decision });
+            }
         } catch (err) {
-            console.log("⚠️ Đang đợi đến lượt hoặc lỗi OCR...");
+            // Lỗi thường do chưa đến lượt hoặc app bị che
+            renderLog({ pot: "---", call: "---", potOdds: "---", decision: null });
         }
         
-        // Nghỉ 4-7 giây mỗi lượt quét để giống người thật
-        await sleep(Math.floor(Math.random() * 3000) + 4000);
+        // Nghỉ 5 giây để tránh bị quét hành vi bot
+        await new Promise(r => setTimeout(r, 5000));
     }
 }
 
-async function makeDecision(bet, pot) {
-    // Nếu không có ai bet (bet = 0), pot odds = 0
-    const potOdds = bet > 0 ? (bet / (pot + bet)) : 0;
-    const equity = CONFIG.myEquity;
-
-    console.log(`📊 Phân tích: Equity(${(equity*100).toFixed(0)}%) vs PotOdds(${(potOdds*100).toFixed(0)}%)`);
-
-    // Trì hoãn bấm nút 2-4 giây để đánh lừa hệ thống bảo mật
-    await sleep(Math.floor(Math.random() * 2000) + 2000);
-
-    // CHIẾN THUẬT:
-    // A. Nếu bài cực mạnh (Equity > 70%) -> RERAISE
-    if (equity > 0.70) {
-        console.log("🔥 CHIẾN THUẬT: RERAISE (TẤN CÔNG)");
-        execSync(`input tap ${CONFIG.buttons.raise}`);
-    }
-    // B. Nếu đối thủ Check (bet=0) và bài khá (Equity > 50%) -> BET lượm tiền
-    else if (bet === 0 && equity > 0.50) {
-        console.log("🎯 CHIẾN THUẬT: BET VALUE");
-        execSync(`input tap ${CONFIG.buttons.raise}`);
-    }
-    // C. Nếu bài đủ mạnh để theo (Equity > PotOdds) -> CALL
-    else if (equity > potOdds) {
-        console.log("✅ CHIẾN THUẬT: CALL (HÒA VỐN)");
-        execSync(`input tap ${CONFIG.buttons.call}`);
-    }
-    // D. Bài yếu hoặc lỗ vốn -> FOLD
-    else {
-        console.log("❌ CHIẾN THUẬT: FOLD (BỎ BÀI)");
-        execSync(`input tap ${CONFIG.buttons.fold}`);
-    }
+async function readOCR(image, region) {
+    const cropped = image.clone().crop(region.x, region.y, region.w, region.h);
+    await cropped.greyscale().contrast(1).writeAsync("./temp_ocr.png");
+    const text = await tesseract.recognize("./temp_ocr.png", ocrConfig);
+    return parseInt(text.replace(/[^0-9]/g, "")) || 0;
 }
 
-runBot();
+startBot();
