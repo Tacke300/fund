@@ -161,7 +161,7 @@ async function fetchProxies() {
 async function fastCheckProxy() {
     while (true) {
         if (rawProxyList.length > 0 && verifiedProxyList.length < 500) {
-            const batch = rawProxyList.splice(0, 50);
+            const batch = rawProxyList.splice(0, 300);
             stats.checkingQueue = rawProxyList.length;
             
             await Promise.all(batch.map(async (proxy) => {
