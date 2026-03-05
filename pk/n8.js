@@ -1,168 +1,135 @@
-process.env.RISH_APPLICATION_ID = "com.termux";
+const { execSync } = require("child_process")
+const fs = require("fs")
+const Tesseract = require("node-tesseract-ocr")
 
-const { execSync } = require("child_process");
-const tesseract = require("node-tesseract-ocr");
-const Jimp = require("jimp");
-const chalk = require("chalk");
+let Jimp = require("jimp")
+if (Jimp.default) Jimp = Jimp.default
 
-// ===== PATH =====
-const RISH_PATH = "/data/data/com.termux/files/home/fund/pk/rish";
-const IMG_PATH = "/data/data/com.termux/files/home/poker.png";
+const RISH="/data/data/com.termux/files/home/fund/pk/rish"
+const SCREEN="/sdcard/poker.png"
+const LOCAL="/data/data/com.termux/files/home/fund/pk/poker.png"
 
-// ===== CONFIG =====
-const CONFIG = {
+function screenshot(){
 
-  regions: {
-    pot: { x: 450, y: 440, w: 120, h: 40 },
-    callAmt: { x: 440, y: 940, w: 130, h: 40 }
-  },
+    try{
 
-  buttons: {
-    fold: "250 950",
-    call: "500 950",
-    raise: "830 950"
-  },
+        execSync(`RISH_APPLICATION_ID=com.termux ${RISH} -c "screencap -p ${SCREEN}"`)
 
-  myEquity: 0.55
-};
+        execSync(`cp ${SCREEN} ${LOCAL}`)
 
-const ocrConfig = {
-  lang: "eng",
-  oem: 1,
-  psm: 7
-};
+        console.log("Screenshot OK")
 
-// ===== DASHBOARD =====
-function renderDashboard(data) {
+    }catch(e){
 
-  console.clear();
-
-  console.log(chalk.yellow("================================"));
-  console.log(chalk.red.bold("      N8 SHIZUKU BOT"));
-  console.log(chalk.yellow("================================"));
-
-  console.log("POT:", data.pot || "---");
-  console.log("CALL:", data.call || "---");
-  console.log("POT ODDS:", data.potOdds || "---");
-  console.log("EQUITY:", (CONFIG.myEquity * 100).toFixed(0) + "%");
-
-  console.log("--------------------------------");
-
-  if (data.decision)
-    console.log("DECISION:", data.decision);
-  else
-    console.log("Scanning...");
-
-  console.log("================================");
-}
-
-// ===== OCR =====
-async function readNumber(image, region) {
-
-  try {
-
-    const crop = image.clone().crop(region.x, region.y, region.w, region.h);
-
-    await crop
-      .greyscale()
-      .contrast(1)
-      .writeAsync("temp.png");
-
-    const text = await tesseract.recognize("temp.png", ocrConfig);
-
-    return parseInt(text.replace(/[^0-9]/g, "")) || 0;
-
-  } catch (e) {
-
-    console.log("OCR lỗi:", e.message);
-    return 0;
-
-  }
-}
-
-// ===== SCREENSHOT =====
-function captureScreen() {
-
-  try {
-
-    execSync(`${RISH_PATH} -c "screencap -p ${IMG_PATH}"`);
-
-  } catch (e) {
-
-    console.log("Shizuku lỗi:", e.message);
-
-  }
-
-}
-
-// ===== TAP =====
-function tap(coords) {
-
-  try {
-
-    execSync(`${RISH_PATH} -c "input tap ${coords}"`);
-
-  } catch (e) {
-
-    console.log("Tap lỗi:", e.message);
-
-  }
-
-}
-
-// ===== BOT LOOP =====
-async function startBot() {
-
-  while (true) {
-
-    try {
-
-      captureScreen();
-
-      const image = await Jimp.read(IMG_PATH);
-
-      const potVal = await readNumber(image, CONFIG.regions.pot);
-      const callVal = await readNumber(image, CONFIG.regions.callAmt);
-
-      if (potVal > 0 || callVal > 0) {
-
-        const potOdds = ((callVal / (potVal + callVal)) * 100).toFixed(1);
-
-        let decision = "FOLD";
-
-        if (CONFIG.myEquity > potOdds / 100)
-          decision = "CALL";
-
-        if (CONFIG.myEquity > 0.75)
-          decision = "RAISE";
-
-        renderDashboard({
-          pot: potVal,
-          call: callVal,
-          potOdds,
-          decision
-        });
-
-        tap(CONFIG.buttons[decision.toLowerCase()]);
-
-        await new Promise(r => setTimeout(r, 4000));
-
-      } else {
-
-        renderDashboard({});
-
-      }
-
-    } catch (err) {
-
-      console.log("BOT lỗi:", err.message);
+        console.log("Shizuku lỗi:",e.message)
 
     }
 
-    await new Promise(r => setTimeout(r, 2000));
+}
 
-  }
+async function crop(){
+
+    const img=await Jimp.read(LOCAL)
+
+    // vùng pot
+    const pot=img.clone().crop(900,250,400,120)
+    await pot.writeAsync("pot.png")
+
+    // vùng action
+    const action=img.clone().crop(900,700,500,200)
+    await action.writeAsync("action.png")
 
 }
 
-startBot();
+async function ocr(file){
+
+    try{
+
+        const text=await Tesseract.recognize(file)
+
+        return text.toLowerCase()
+
+    }catch(e){
+
+        return ""
+    }
+
+}
+
+function analyze(text){
+
+    if(text.includes("raise")) return "RAISE"
+
+    if(text.includes("bet")) return "BET"
+
+    if(text.includes("call")) return "CALL"
+
+    if(text.includes("check")) return "CHECK"
+
+    if(text.includes("fold")) return "FOLD"
+
+    return "UNKNOWN"
+
+}
+
+function decision(action,pot,bet){
+
+    if(action==="BET" || action==="RAISE"){
+
+        if(bet < pot*0.3){
+
+            return "CALL"
+
+        }else{
+
+            return "FOLD"
+
+        }
+
+    }
+
+    if(action==="CHECK"){
+
+        return "BET"
+
+    }
+
+    return "WAIT"
+
+}
+
+async function run(){
+
+    try{
+
+        screenshot()
+
+        await crop()
+
+        const actionText=await ocr("action.png")
+        const potText=await ocr("pot.png")
+
+        console.log("OCR action:",actionText)
+        console.log("OCR pot:",potText)
+
+        const action=analyze(actionText)
+
+        const pot=parseFloat(potText.replace(/[^0-9.]/g,"")) || 0
+        const bet=pot*0.2
+
+        const move=decision(action,pot,bet)
+
+        console.log("Action:",action)
+        console.log("Bot move:",move)
+
+    }catch(e){
+
+        console.log("BOT lỗi:",e.message)
+
+    }
+
+}
+
+setInterval(run,3000)
+
+console.log("POKER BOT START")
