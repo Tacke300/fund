@@ -154,14 +154,14 @@ async function fetchProxies() {
     if (found) {
         const unique = [...new Set(found)].filter(p => !blacklist.has(p));
         rawProxyList = unique.sort(() => Math.random() - 0.5);
-        fullLog(`🔥 Đã thu thập ${rawProxyList.length} Proxy thô. Bắt đầu lọc...`, 'SYSTEM');
+        fullLog(`🔥 Đã thu thập ${rawProxyList.length} Proxy thô.`, 'SYSTEM');
     }
 }
 
 async function fastCheckProxy() {
     while (true) {
-        if (rawProxyList.length > 0 && verifiedProxyList.length < 500) {
-            const batch = rawProxyList.splice(0, 300);
+        if (rawProxyList.length > 0 && verifiedProxyList.length < 1000) {
+            const batch = rawProxyList.splice(0, 500);
             stats.checkingQueue = rawProxyList.length;
             
             await Promise.all(batch.map(async (proxy) => {
@@ -169,7 +169,8 @@ async function fastCheckProxy() {
                 try {
                     await axios.get('http://www.google.com', {
                         proxy: { host: parts[0], port: parseInt(parts[1]) },
-                        timeout: 3500
+                        timeout: 3000,
+                        headers: { 'User-Agent': 'Mozilla/5.0' }
                     });
                     if (!verifiedProxyList.includes(proxy)) {
                         verifiedProxyList.push(proxy);
@@ -180,7 +181,7 @@ async function fastCheckProxy() {
                 }
             }));
         }
-        await new Promise(r => setTimeout(r, 1000));
+        await new Promise(r => setTimeout(r, 2000));
     }
 }
 
@@ -212,10 +213,11 @@ async function runWorker(proxy) {
 
         const page = await browser.newPage();
         await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/122.0.0.0');
+        await page.setDefaultNavigationTimeout(45000);
         
         while (true) {
             stats.threadStatus[id].status = '📂 Nạp Playlist';
-            await page.goto(PLAYLIST_URL, { waitUntil: 'networkidle2', timeout: 45000 });
+            await page.goto(PLAYLIST_URL, { waitUntil: 'networkidle2' });
             
             const videoLinks = await page.evaluate(() => {
                 const links = Array.from(document.querySelectorAll('a[href*="/watch?v="]'));
@@ -227,7 +229,7 @@ async function runWorker(proxy) {
             for (let link of videoLinks) {
                 stats.threadStatus[id].iteration++;
                 const pStart = Date.now();
-                await page.goto(link, { waitUntil: 'networkidle2', timeout: 45000 });
+                await page.goto(link, { waitUntil: 'networkidle2' });
                 
                 stats.threadStatus[id].ping = Date.now() - pStart;
                 stats.threadStatus[id].videoTitle = (await page.title()).replace('- YouTube', '').trim();
@@ -236,10 +238,27 @@ async function runWorker(proxy) {
                 const watchSeconds = Math.floor(Math.random() * 60) + 120;
                 stats.threadStatus[id].target = watchSeconds;
 
-                for (let s = 1; s <= watchSeconds; s++) {
+                let actualWatchStart = 0;
+                let lastCurrentTime = 0;
+
+                for (let s = 1; s <= watchSeconds + 60; s++) {
                     await new Promise(r => setTimeout(r, 1000));
-                    stats.threadStatus[id].elapsed = s;
+                    
+                    const currentTime = await page.evaluate(() => {
+                        const video = document.querySelector('video');
+                        return video ? video.currentTime : 0;
+                    }).catch(() => 0);
+
+                    if (currentTime > lastCurrentTime) {
+                        actualWatchStart++;
+                        lastCurrentTime = currentTime;
+                    }
+
+                    stats.threadStatus[id].elapsed = actualWatchStart;
                     stats.totalWatchSeconds++;
+
+                    if (actualWatchStart >= watchSeconds) break;
+                    if (s > 45 && actualWatchStart === 0) throw new Error("Video không thể Play (Ping quá cao)");
                 }
                 stats.totalViews++;
             }
@@ -261,7 +280,7 @@ app.get('/', (req, res) => {
         <body style="font-family:'Segoe UI', Tahoma, sans-serif; background:#050505; color:#eee; padding:20px; margin:0;">
             <div style="background:#111; padding:20px; border-bottom:5px solid #ff0000; position:sticky; top:0; z-index:100;">
                 <h1 style="margin:0; color:#ff0000; display:flex; justify-content:space-between; align-items:center; text-shadow: 0 0 10px rgba(255,0,0,0.5);">
-                    YOUTUBE BOT BUFF VIEW (OPTIMIZED)
+                    YOUTUBE REAL-TIME VIEW BOT
                     <span style="font-size:14px; color:#aaa; font-weight:normal;">Uptime: ${Math.floor((Date.now()-startTime)/60000)}m</span>
                 </h1>
                 <div style="display:grid; grid-template-columns: repeat(6, 1fr); gap:15px; margin-top:20px;">
@@ -310,7 +329,7 @@ app.get('/', (req, res) => {
                             </div>
                             <div style="display:flex; justify-content:space-between; font-size:11px; font-weight:bold;">
                                 <span style="color:#2ed573;">${t.status}</span>
-                                <span style="color:#aaa;">${t.elapsed}/${t.target}s</span>
+                                <span style="color:#aaa;">Real: ${t.elapsed}/${t.target}s</span>
                             </div>
                         </div>
                     `).join('')}
@@ -337,7 +356,7 @@ async function main() {
     while (true) {
         if (stats.activeThreads < MAX_THREADS && verifiedProxyList.length > 0) {
             runWorker(verifiedProxyList.shift());
-            await new Promise(r => setTimeout(r, 1000)); 
+            await new Promise(r => setTimeout(r, 1500)); 
         } else {
             await new Promise(r => setTimeout(r, 2000));
         }
