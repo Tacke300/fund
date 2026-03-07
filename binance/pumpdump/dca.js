@@ -32,6 +32,7 @@ function logger(msg, type = 'INFO') {
     if (logs.length > 50) logs.pop();
 }
 
+// Load Data
 try {
     if (fs.existsSync(STATE_FILE)) Object.assign(botState, JSON.parse(fs.readFileSync(STATE_FILE)));
     if (fs.existsSync(LEVERAGE_FILE)) symbolMaxLeverage = JSON.parse(fs.readFileSync(LEVERAGE_FILE));
@@ -42,6 +43,22 @@ const saveAll = () => {
     fs.writeFileSync(STATE_FILE, JSON.stringify(botState));
     fs.writeFileSync(HISTORY_FILE, JSON.stringify(pnlHistory));
 };
+
+// Hàm tính PnL theo thời gian (7h sáng Reset)
+function getFilteredPnL(days) {
+    if (!pnlHistory.length) return 0;
+    const now = new Date();
+    let startTs;
+    if (days === 0) {
+        let d = new Date();
+        if (d.getHours() < 7) d.setDate(d.getDate() - 1);
+        d.setHours(7, 0, 0, 0);
+        startTs = d.getTime();
+    } else {
+        startTs = Date.now() - (days * 86400000);
+    }
+    return pnlHistory.filter(h => h.ts >= startTs).reduce((sum, h) => sum + h.pnl, 0);
+}
 
 function processTick(symbol, price) {
     if (!botState.running) return;
@@ -66,7 +83,7 @@ function processTick(symbol, price) {
             botState.closedPnl += pnl;
             botState.totalClosedGrids++;
             pnlHistory.push({ ts: Date.now(), pnl: pnl });
-            logger(`WIN: ${symbol} | +${pnl.toFixed(2)}$ | Bal: ${pos.coinBalance.toFixed(2)}$`, "WIN");
+            logger(`WIN: ${symbol} | +${pnl.toFixed(2)}$`, "WIN");
             pos.status = 'WAITING';
             pos.grids = []; 
             saveAll();
@@ -112,7 +129,7 @@ app.get('/api/data', (req, res) => {
         }
         return { ...p, avgPrice, totalMargin, currentGrid: p.grids.length, roi, pnl, currentPrice: currentP };
     });
-    res.json({ state: botState, active: activeData, logs, stats: { all: botState.closedPnl } });
+    res.json({ state: botState, active: activeData, logs, stats: { today: getFilteredPnL(0), d7: getFilteredPnL(7), d30: getFilteredPnL(30), all: botState.closedPnl } });
 });
 
 app.post('/api/control', (req, res) => {
@@ -121,7 +138,6 @@ app.post('/api/control', (req, res) => {
         botState.running = req.body.running;
         if (botState.running && !wasRunning) {
             botState.startTime = Date.now();
-            logger("HỆ THỐNG START", "INFO");
             Object.keys(marketPrices).forEach(s => processTick(s, marketPrices[s]));
         }
     }
@@ -132,7 +148,7 @@ app.post('/api/control', (req, res) => {
 app.post('/api/reset', (req, res) => { activePositions = {}; botState.closedPnl = 0; logs = []; pnlHistory = []; saveAll(); res.json({ status: 'ok' }); });
 
 app.get('/gui', (req, res) => {
-    res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Luffy Matrix v27</title><script src="https://cdn.tailwindcss.com"></script>
+    res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Luffy Matrix v28</title><script src="https://cdn.tailwindcss.com"></script>
     <style>
         body{background:#0b0e11;color:#eaecef;font-family:monospace}
         .neon-glow { color: #4ade80; text-shadow: 0 0 8px rgba(74,222,128,0.5); }
@@ -149,15 +165,18 @@ app.get('/gui', (req, res) => {
             <div class="w-[60px]">TP%<input id="tpPercent" type="number" step="0.1" class="w-full bg-black text-yellow-500 p-2 rounded border border-gray-700 mt-1"></div>
             <div class="w-[90px]">MODE<select id="mode" class="w-full bg-black p-2 rounded border border-gray-700 mt-1 text-yellow-500"><option value="LONG">LONG</option><option value="SHORT">SHORT</option></select></div>
             <div class="flex gap-1 ml-auto">
-                <button onclick="sendCtrl(true)" class="bg-green-600 px-6 py-2 rounded font-bold">START</button>
-                <button onclick="sendCtrl(false)" class="bg-red-600 px-6 py-2 rounded font-bold">STOP</button>
+                <button onclick="sendCtrl(true)" class="bg-green-600 px-5 py-2 rounded font-bold hover:bg-green-500">START</button>
+                <button onclick="sendCtrl(false)" class="bg-red-600 px-5 py-2 rounded font-bold hover:bg-red-500">STOP</button>
                 <button onclick="resetBot()" class="bg-gray-700 px-3 py-2 rounded font-bold text-[9px]">RESET</button>
             </div>
-            <div class="border-l border-gray-700 pl-4 ml-2">
-                <div class="text-gray-500 text-[9px]">UPTIME / STATUS</div>
-                <div id="uptime" class="text-yellow-500 font-bold text-sm">0d 00:00:00</div>
-                <div id="botStatus" class="font-bold text-[9px] italic">OFFLINE</div>
-            </div>
+            <div class="border-l border-gray-700 pl-4 ml-2"><div class="text-gray-500 text-[9px]">UPTIME</div><div id="uptime" class="text-yellow-500 font-bold text-sm">0d 00:00:00</div><div id="botStatus" class="font-bold text-[9px] italic text-red-500">OFFLINE</div></div>
+        </div>
+
+        <div class="bg-[#1e2329] p-3 rounded-lg mb-4 flex justify-between gap-2 shadow-inner border border-gray-800">
+            <div class="text-center flex-1">HÔM NAY<div id="pnlToday" class="text-lg font-bold text-green-400">0.00$</div></div>
+            <div class="text-center flex-1 border-x border-gray-800">7 NGÀY<div id="pnl7d" class="text-lg font-bold text-green-500">0.00$</div></div>
+            <div class="text-center flex-1 border-r border-gray-800">30 NGÀY<div id="pnl30d" class="text-lg font-bold text-emerald-500">0.00$</div></div>
+            <div class="text-center flex-1">TỔNG LÃI<div id="pnlAll" class="text-lg font-bold text-yellow-500">0.00$</div></div>
         </div>
 
         <div class="bg-[#1e2329] rounded-lg border border-gray-800 mb-4 overflow-hidden">
@@ -180,10 +199,10 @@ app.get('/gui', (req, res) => {
                 const base = Number(document.getElementById('totalBalance').value);
                 const sorted = [...rawData].sort((a,b)=> (a[sortKey]>b[sortKey]?1:-1)*sortDir);
                 document.getElementById('activeBody').innerHTML = sorted.map(p=> {
-                    const balClass = p.coinBalance < base ? 'neon-red font-bold' : (p.coinBalance > base ? 'neon-glow font-bold' : 'text-blue-400');
+                    const balClass = p.coinBalance < base ? 'neon-red' : (p.coinBalance > base ? 'neon-glow' : 'text-blue-400');
                     return \`<tr class="border-b border-gray-800 hover:bg-[#2b3139] \${p.status==='WAITING'?'opacity-40':''}">
                         <td class="p-2 font-bold text-yellow-500 font-mono">\${p.symbol}</td>
-                        <td class="text-right \${balClass}">\${p.coinBalance.toFixed(2)}$</td>
+                        <td class="text-right font-bold \${balClass}">\${p.coinBalance.toFixed(2)}$</td>
                         <td class="text-center font-bold text-yellow-400">\${p.currentGrid}/\${window.maxG}</td>
                         <td class="text-right \${p.roi>=0?'text-green-500':'text-red-500'} font-bold">\${p.roi.toFixed(2)}%</td>
                         <td class="text-right pr-2 font-bold \${p.pnl>=0?'text-green-500':'text-red-500'} font-mono">\${p.pnl.toFixed(2)}$</td>
@@ -195,6 +214,10 @@ app.get('/gui', (req, res) => {
                     const res = await fetch('/api/data'); const d = await res.json();
                     if(firstLoad) { ['totalBalance','marginValue','marginType','maxGrids','stepSize','tpPercent','mode'].forEach(id => { const el = document.getElementById(id); if(el) el.value = d.state[id]; }); firstLoad = false; }
                     rawData = d.active; window.maxG = d.state.maxGrids; render();
+                    document.getElementById('pnlToday').innerText = d.stats.today.toFixed(2) + '$';
+                    document.getElementById('pnl7d').innerText = d.stats.d7.toFixed(2) + '$';
+                    document.getElementById('pnl30d').innerText = d.stats.d30.toFixed(2) + '$';
+                    document.getElementById('pnlAll').innerText = d.stats.all.toFixed(2) + '$';
                     document.getElementById('logBox').innerHTML = d.logs.join('<br>');
                     document.getElementById('botStatus').innerText = d.state.running ? "RUNNING" : "STOPPED";
                     document.getElementById('botStatus').className = "font-bold text-[9px] italic " + (d.state.running ? "text-green-500" : "text-red-500");
@@ -217,9 +240,7 @@ async function main() {
                 try {
                     const info = JSON.parse(data);
                     info.symbols.forEach(s => { if(s.status === 'TRADING' && s.quoteAsset === 'USDT') allSymbols.push(s.symbol); });
-                    logger(`Đã tải ${allSymbols.length} coin.`);
-                } catch(e){}
-                resolve();
+                } catch(e){} resolve();
             });
         }).on('error', () => resolve());
     });
