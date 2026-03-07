@@ -15,9 +15,33 @@ let allSymbols = [];
 let symbolMaxLeverage = {}; 
 let crawlStatus = { isCrawling: false, totalDownloaded: 0, totalNeeded: 0 };
 
-if (fs.existsSync(LEVERAGE_FILE)) try { symbolMaxLeverage = JSON.parse(fs.readFileSync(LEVERAGE_FILE)); } catch(e){}
+// Tải cache đòn bẩy nếu có
+if (fs.existsSync(LEVERAGE_FILE)) {
+    try { symbolMaxLeverage = JSON.parse(fs.readFileSync(LEVERAGE_FILE)); } catch(e){}
+}
 
-// --- CRAWLER ROUND-ROBIN (MỚI -> CŨ) ---
+// --- LẤY TỐI ĐA ĐÒN BẨY TỪ BINANCE (CHỈ CHẠY 1 LẦN) ---
+async function fetchActualLeverage() {
+    return new Promise((resolve) => {
+        https.get('https://fapi.binance.com/fapi/v1/leverageBracket', (res) => {
+            let data = '';
+            res.on('data', chunk => data += chunk);
+            res.on('end', () => {
+                try {
+                    const brackets = JSON.parse(data);
+                    if (Array.isArray(brackets)) {
+                        brackets.forEach(item => {
+                            symbolMaxLeverage[item.symbol] = item.brackets[0].initialLeverage;
+                        });
+                        fs.writeFileSync(LEVERAGE_FILE, JSON.stringify(symbolMaxLeverage));
+                        console.log("✅ Đã cập nhật Leverage Cache từ Binance.");
+                    }
+                } catch (e) {} resolve();
+            });
+        }).on('error', () => resolve());
+    });
+}
+
 async function fetchKlines(symbol, endTime) {
     return new Promise((resolve) => {
         const url = `https://fapi.binance.com/fapi/v1/klines?symbol=${symbol}&interval=1m&endTime=${endTime}&limit=1000`;
@@ -32,9 +56,8 @@ async function fetchKlines(symbol, endTime) {
 async function startCrawler() {
     if (crawlStatus.isCrawling) return;
     crawlStatus.isCrawling = true;
-    const TWO_YEARS_MS = 2 * 365 * 24 * 60 * 60 * 1000;
-    const stopTs = Date.now() - TWO_YEARS_MS;
-    crawlStatus.totalNeeded = allSymbols.length * 1051200;
+    const stopTs = Date.now() - (2 * 365 * 24 * 60 * 60 * 1000);
+    crawlStatus.totalNeeded = allSymbols.length * 1000000;
 
     while (crawlStatus.isCrawling) {
         let hasData = false;
@@ -51,26 +74,25 @@ async function startCrawler() {
                     crawlStatus.totalDownloaded += klines.length;
                     hasData = true;
                 }
-                await new Promise(r => setTimeout(r, 100));
+                await new Promise(r => setTimeout(r, 50));
             }
         }
         if (!hasData) break;
     }
 }
 
-// --- LOGIC PHÂN TÍCH (BACKTEST) ---
+// --- ANALYZE VỚI LOGIC CHỌN ĐÒN BẨY ---
 app.post('/api/analyze', (req, res) => {
-    const { range, month, year, marginValue, maxGrids, stepSize, tpPercent, mode } = req.body;
-    let startTs, endTs = Date.now();
-    if (range === 'custom') {
-        startTs = new Date(year, month - 1, 1).getTime();
-        endTs = new Date(year, month, 1).getTime();
-    } else {
-        startTs = endTs - (parseInt(range) * 24 * 60 * 60 * 1000);
-    }
-
+    const { range, month, year, marginValue, maxGrids, stepSize, tpPercent, mode, userLeverage } = req.body;
+    let endTs = Date.now();
+    let startTs = range === 'custom' ? new Date(year, month - 1, 1).getTime() : endTs - (parseInt(range) * 24 * 60 * 60 * 1000);
+    
     let results = [];
+    let historyAll = [];
     let levStats = {};
+    let pnlToday = 0, pnl7d = 0;
+    const cutoffToday = new Date().setHours(7,0,0,0);
+    const cutoff7d = Date.now() - (7 * 24 * 60 * 60 * 1000);
 
     allSymbols.forEach(item => {
         const filePath = path.join(DATA_DIR, `${item.symbol}.json`);
@@ -78,21 +100,27 @@ app.post('/api/analyze', (req, res) => {
         const data = JSON.parse(fs.readFileSync(filePath)).filter(k => k[0] >= startTs && k[0] <= endTs);
         if (data.length === 0) return;
 
-        const maxLev = symbolMaxLeverage[item.symbol] || 20;
-        let pos = null, sPnl = 0, sWin = 0, totalGridsMatched = 0, history = [];
+        // Logic Leverage: Lấy Min(User chọn, Sàn cho phép)
+        const exchangeMax = symbolMaxLeverage[item.symbol] || 20;
+        const finalLev = Math.min(userLeverage, exchangeMax);
+
+        let pos = null, sClosedPnl = 0, sWinCount = 0, sHistory = [];
 
         for (const k of data) {
             const high = parseFloat(k[2]), low = parseFloat(k[3]), close = parseFloat(k[4]), time = k[0];
             if (!pos) {
-                pos = { entry: close, qty: marginValue, grids: [{price: close, time}], tsOpen: time };
+                pos = { entry: close, grids: [{price: close, time}], tsOpen: time };
             } else {
                 const avg = pos.entry;
                 const pnlFactor = mode === 'LONG' ? (high - avg) / avg : (avg - low) / avg;
                 if (pnlFactor * 100 >= tpPercent) {
-                    const winPnl = (avg * (tpPercent/100)) * (pos.grids.length * marginValue * maxLev / avg);
-                    sPnl += winPnl; sWin++; 
-                    totalGridsMatched += pos.grids.length;
-                    history.push({ pnl: winPnl, gridsCount: pos.grids.length, tsClose: time, avgPrice: avg, details: [...pos.grids] });
+                    const winPnl = (avg * (tpPercent/100)) * (pos.grids.length * marginValue * finalLev / avg);
+                    sClosedPnl += winPnl; sWinCount++;
+                    const round = { symbol: item.symbol, pnl: winPnl, gridsCount: pos.grids.length, tsClose: time, avgPrice: avg, closePrice: close, details: [...pos.grids], lev: finalLev, totalMargin: pos.grids.length * marginValue };
+                    sHistory.push(round);
+                    historyAll.push(round);
+                    if (time >= cutoffToday) pnlToday += winPnl;
+                    if (time >= cutoff7d) pnl7d += winPnl;
                     pos = null;
                 } else if (pos.grids.length < maxGrids) {
                     const lastP = pos.grids[pos.grids.length-1].price;
@@ -103,156 +131,141 @@ app.post('/api/analyze', (req, res) => {
                 }
             }
         }
-        if (sWin > 0) {
+
+        if (sWinCount > 0) {
             const capital = marginValue * maxGrids;
-            const roi = (sPnl / capital) * 100;
-            results.push({ symbol: item.symbol, maxLev, sWin, totalGridsMatched, sPnl, roi, history });
+            results.push({ symbol: item.symbol, closedCount: sWinCount, maxLev: finalLev, grids: { length: 0 }, totalClosedPnl: sClosedPnl, totalRoi: (sClosedPnl / capital) * 100 });
             
-            if (!levStats[maxLev]) levStats[maxLev] = { pnl: 0, count: 0 };
-            levStats[maxLev].pnl += sPnl;
-            levStats[maxLev].count++;
+            if (!levStats[finalLev]) levStats[finalLev] = { totalPnl: 0, count: 0 };
+            levStats[finalLev].totalPnl += sClosedPnl;
+            levStats[finalLev].count++;
         }
     });
 
-    res.json({ results, levStats, totalPnl: results.reduce((a,b)=>a+b.sPnl,0) });
+    res.json({ active: results, history: historyAll, levStats, stats: { today: pnlToday, d7: pnl7d, closedPnl: historyAll.reduce((a,b)=>a+b.pnl,0), totalGridsMatched: historyAll.reduce((a,b)=>a+b.gridsCount,0) } });
 });
 
 app.get('/api/status', (req, res) => res.json(crawlStatus));
 
 app.get('/gui', (req, res) => {
-    res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Luffy Matrix Offline Pro</title><script src="https://cdn.tailwindcss.com"></script>
+    res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Luffy Matrix 8888</title><script src="https://cdn.tailwindcss.com"></script>
     <style>
-        body{background:#0b0e11;color:#eaecef;font-family:monospace;padding:15px}
+        body{background:#0b0e11;color:#eaecef;font-family:monospace;padding:10px}
         .matrix-card { background: #1e2329; border: 1px solid #333; border-radius: 4px; }
-        .luffy-input { background: #000; border: 1px solid #333; color: #f0b90b; padding: 5px; border-radius: 4px; font-size: 11px; }
+        .luffy-input { background: #000; border: 1px solid #444; color: #f0b90b; padding: 6px; border-radius: 4px; font-size: 11px; }
         .modal { display: none; position: fixed; z-index: 100; left: 0; top: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.9); }
-        .modal-content { background: #1e2329; margin: 2% auto; padding: 20px; border: 1px solid #f0b90b; width: 90%; max-width: 1000px; border-radius: 8px; }
-        .round-card { background: #161a1e; border: 1px solid #333; padding: 10px; border-radius: 4px; cursor: pointer; }
-        .progress-container { width: 100%; background: #000; height: 6px; border-radius: 3px; margin-bottom: 15px; border: 1px solid #333; }
-        .progress-bar { height: 100%; background: linear-gradient(90deg, #f0b90b, #ff8c00); width: 0%; transition: 0.5s; box-shadow: 0 0 10px #f0b90b; }
+        .modal-content { background: #1e2329; margin: 2% auto; padding: 20px; border: 1px solid #f0b90b; width: 95%; max-width: 1100px; border-radius: 8px; }
+        .progress-bar { height: 4px; background: #f0b90b; width: 0%; transition: 0.5s; position: fixed; top: 0; left: 0; }
     </style></head><body>
-
-        <div class="progress-container"><div id="mainProgress" class="progress-bar"></div></div>
-
+        <div id="mainProgress" class="progress-bar"></div>
+        
         <div id="gridModal" class="modal" onclick="this.style.display='none'"><div class="modal-content" onclick="event.stopPropagation()">
-            <div class="flex justify-between items-center mb-4"><h2 id="modalTitle" class="text-xl font-black text-yellow-500 uppercase italic"></h2><button onclick="document.getElementById('gridModal').style.display='none'" class="text-2xl">✕</button></div>
+            <div class="flex justify-between items-center mb-4"><h2 id="modalTitle" class="text-xl font-black text-yellow-500"></h2><button onclick="document.getElementById('gridModal').style.display='none'" class="text-2xl">✕</button></div>
             <div id="roundsList" class="grid grid-cols-1 md:grid-cols-3 gap-3 max-h-[70vh] overflow-y-auto"></div>
         </div></div>
 
-        <div class="matrix-card p-4 mb-4 flex flex-wrap items-end gap-3 border-yellow-500/30">
-            <div class="flex items-center gap-3 mr-auto">
-                <img src="https://i.imgur.com/8m5Tj6L.png" class="w-10 h-10 rounded-full border border-yellow-500">
-                <h1 class="text-lg font-black text-yellow-500 italic">LUFFY OFFLINE <span class="text-white">PRO</span></h1>
-            </div>
-            <div class="flex gap-2">
+        <div class="matrix-card p-4 mb-2 flex flex-wrap items-end gap-3 border-yellow-500/20">
+            <div class="flex items-center gap-3 mr-auto"><h1 class="text-lg font-black text-yellow-500 italic uppercase">Luffy Matrix <span class="text-white">8888</span></h1></div>
+            <div class="flex gap-1">
                 <button class="luffy-input px-3" onclick="setRange('1',this)">1D</button>
-                <button class="luffy-input px-3" onclick="setRange('7',this)">7D</button>
-                <button class="luffy-input px-3 bg-yellow-500/10 border-yellow-500" onclick="setRange('30',this)">30D</button>
-                <button class="luffy-input px-3" onclick="setRange('custom',this)">MONTH</button>
-            </div>
-            <div id="customTime" class="flex gap-2 opacity-30 pointer-events-none">
+                <button class="luffy-input px-3 border-yellow-500 text-yellow-500" onclick="setRange('30',this)">30D</button>
                 <select id="m" class="luffy-input"><option value="3">Tháng 3</option><option value="2">Tháng 2</option></select>
-                <select id="y" class="luffy-input"><option>2026</option><option>2025</option></select>
+                <select id="userLev" class="luffy-input font-bold text-white bg-blue-900">
+                    <option value="10">Set Lev x10</option><option value="20" selected>Set Lev x20</option><option value="25">Set Lev x25</option>
+                    <option value="50">Set Lev x50</option><option value="75">Set Lev x75</option><option value="100">Set Lev x100</option><option value="150">Set Lev x150</option>
+                </select>
             </div>
-            <div class="flex gap-2">
-                <input id="mg" value="10" class="luffy-input w-16 text-center" placeholder="Margin">
-                <input id="gr" value="5" class="luffy-input w-12 text-center" placeholder="DCA">
-                <input id="ss" value="1.5" class="luffy-input w-12 text-center" placeholder="Gap%">
-                <input id="tp" value="1.0" class="luffy-input w-12 text-center" placeholder="TP%">
+            <div class="flex gap-1">
+                <input id="mg" value="10" class="luffy-input w-16 text-center">
+                <input id="gr" value="5" class="luffy-input w-12 text-center">
+                <input id="ss" value="1.5" class="luffy-input w-12 text-center">
+                <input id="tp" value="1.0" class="luffy-input w-12 text-center">
             </div>
-            <button onclick="runAnalyze()" class="bg-yellow-500 text-black font-black px-6 py-2 rounded hover:scale-105 transition-all">PHÂN TÍCH</button>
+            <button onclick="run()" class="bg-yellow-500 text-black font-black px-8 py-2 rounded hover:scale-105 transition-all">PHÂN TÍCH</button>
         </div>
 
-        <div id="levStats" class="flex gap-2 mb-4 overflow-x-auto pb-2"></div>
+        <div id="levStats" class="grid grid-cols-4 md:grid-cols-10 gap-1 mb-2"></div>
 
-        <div class="matrix-card overflow-hidden shadow-2xl">
+        <div class="grid grid-cols-4 gap-1 mb-2">
+            <div class="matrix-card p-2 text-center"><div class="text-gray-500 text-[8px]">HÔM NAY</div><div id="pnlToday" class="font-bold text-green-400 text-lg">0$</div></div>
+            <div class="matrix-card p-2 text-center"><div class="text-gray-500 text-[8px]">7 NGÀY</div><div id="pnl7d" class="font-bold text-green-500 text-lg">0$</div></div>
+            <div class="matrix-card p-2 text-center"><div class="text-gray-500 text-[8px]">ĐÃ CHỐT TỔNG</div><div id="statClosedPnl" class="font-bold text-yellow-500 text-lg">0$</div></div>
+            <div class="matrix-card p-2 text-center"><div class="text-gray-500 text-[8px]">DỮ LIỆU TẢI</div><div id="loadPct" class="font-bold text-white text-lg">0%</div></div>
+        </div>
+
+        <div class="matrix-card overflow-hidden">
             <table class="w-full text-left text-[11px]">
-                <thead class="bg-black text-gray-500 uppercase"><tr>
-                    <th class="p-3 text-center">STT</th>
-                    <th class="p-3">SYMBOL</th>
-                    <th class="text-center">MAX LEV</th>
-                    <th class="text-center">SỐ WIN</th>
-                    <th class="text-center">KHỚP TỔNG</th>
-                    <th class="text-right">PNL ($)</th>
-                    <th class="text-center pr-4">ROI TỔNG</th>
+                <thead class="bg-black"><tr>
+                    <th class="p-2 text-center">STT</th>
+                    <th>COIN</th>
+                    <th class="text-center">VÒNG WIN</th>
+                    <th class="text-center">LEV SỬ DỤNG</th>
+                    <th class="text-right">TỔNG PNL ($)</th>
+                    <th class="text-center pr-4">ROI %</th>
                 </tr></thead>
-                <tbody id="resultBody" class="divide-y divide-gray-800"></tbody>
+                <tbody id="activeBody" class="divide-y divide-gray-800"></tbody>
             </table>
         </div>
 
         <script>
-            let range = '30', currentData = [];
-            function setRange(v, b){
-                range = v; 
-                document.querySelectorAll('button').forEach(x => x.classList.remove('border-yellow-500'));
-                b.classList.add('border-yellow-500');
-                document.getElementById('customTime').style.opacity = v==='custom'?'1':'0.3';
-                document.getElementById('customTime').style.pointerEvents = v==='custom'?'auto':'none';
-            }
-
-            async function runAnalyze(){
-                const btn = event.target; btn.innerText = "RUNNING...";
+            let rawData = [], historyData = [];
+            async function run(){
                 const res = await fetch('/api/analyze', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({
-                        range, month: document.getElementById('m').value, year: document.getElementById('y').value,
+                        range: '30', month: document.getElementById('m').value, year: '2026',
                         marginValue: Number(document.getElementById('mg').value), maxGrids: Number(document.getElementById('gr').value),
-                        stepSize: Number(document.getElementById('ss').value), tpPercent: Number(document.getElementById('tp').value), mode: 'LONG'
+                        stepSize: Number(document.getElementById('ss').value), tpPercent: Number(document.getElementById('tp').value), 
+                        mode: 'LONG', userLeverage: Number(document.getElementById('userLev').value)
                     })
                 });
                 const d = await res.json();
-                currentData = d.results.sort((a,b)=>b.sPnl - a.sPnl);
+                rawData = d.active.sort((a,b)=>b.totalClosedPnl - a.totalClosedPnl);
+                historyData = d.history;
+                document.getElementById('pnlToday').innerText = d.stats.today.toFixed(2) + '$';
+                document.getElementById('pnl7d').innerText = d.stats.d7.toFixed(2) + '$';
+                document.getElementById('statClosedPnl').innerText = d.stats.closedPnl.toFixed(2) + '$';
                 
-                document.getElementById('resultBody').innerHTML = currentData.map((r, i) => \`
-                    <tr class="hover:bg-white/5 cursor-pointer" onclick="showHistory('\${r.symbol}')">
-                        <td class="p-3 text-gray-500 text-center">\${i+1}</td>
-                        <td class="font-bold text-yellow-500">\${r.symbol}</td>
-                        <td class="text-center text-purple-400 font-bold">x\${r.maxLev}</td>
-                        <td class="text-center text-blue-400 font-bold">\${r.sWin}</td>
-                        <td class="text-center text-orange-400 font-bold">\${r.totalGridsMatched}</td>
-                        <td class="text-right font-bold text-green-400">\${r.sPnl.toFixed(2)}$</td>
-                        <td class="text-center pr-4 font-bold text-emerald-400">\${r.roi.toFixed(1)}%</td>
+                document.getElementById('activeBody').innerHTML = rawData.map((p, i) => \`
+                    <tr class="hover:bg-white/5 cursor-pointer" onclick="showHistory('\${p.symbol}')">
+                        <td class="p-2 text-center text-gray-500">\${i+1}</td>
+                        <td class="font-bold text-yellow-500">\${p.symbol}</td>
+                        <td class="text-center text-blue-400">\${p.closedCount}</td>
+                        <td class="text-center text-purple-400">x\${p.maxLev}</td>
+                        <td class="text-right font-bold text-green-400">\${p.totalClosedPnl.toFixed(2)}$</td>
+                        <td class="text-center font-bold text-emerald-400">\${p.totalRoi.toFixed(1)}%</td>
                     </tr>\`).join('');
-
-                document.getElementById('levStats').innerHTML = Object.entries(d.levStats).map(([lev, val]) => \`
-                    <div class="bg-[#1e2329] p-2 border border-gray-800 rounded min-w-[100px] text-center">
-                        <div class="text-[8px] text-gray-500 font-black uppercase">LEV x\${lev}</div>
-                        <div class="text-yellow-500 font-bold text-sm">\${val.pnl.toFixed(1)}$</div>
-                        <div class="text-[9px] text-gray-400">\${val.count} Coins</div>
-                    </div>\`).join('');
-                btn.innerText = "PHÂN TÍCH";
             }
 
             function showHistory(symbol){
-                const coin = currentData.find(c => c.symbol === symbol);
-                document.getElementById('modalTitle').innerText = symbol + " - Lịch sử vòng đánh";
-                document.getElementById('roundsList').innerHTML = coin.history.reverse().map((h, i) => \`
-                    <div class="round-card border-l-4 border-l-green-500">
-                        <div class="flex justify-between font-black text-xs text-white mb-2">
-                            <span>VÒNG #\${coin.history.length - i}</span>
-                            <span class="text-green-400">+\${h.pnl.toFixed(2)}$</span>
-                        </div>
-                        <div class="text-[9px] text-gray-500 flex justify-between mb-2">
-                            <span>ENTRY: \${h.avgPrice.toFixed(4)}</span>
-                            <span>\${new Date(h.tsClose).toLocaleTimeString()}</span>
-                        </div>
-                        <div class="flex gap-1 flex-wrap">
-                            \${h.details.map((g, idx) => \`<span class="bg-black text-[8px] px-1 text-gray-400">#\${idx+1}: \${g.price.toFixed(4)}</span>\`).join('')}
-                        </div>
+                const rounds = historyData.filter(h => h.symbol === symbol).reverse();
+                document.getElementById('modalTitle').innerText = symbol + " HISTORY";
+                document.getElementById('roundsList').innerHTML = rounds.map((r, i) => \`
+                    <div class="matrix-card p-2 border-l-2 border-green-500 text-[10px]">
+                        <div class="flex justify-between mb-1"><span class="font-bold text-yellow-500">VÒNG #\${rounds.length - i}</span><span class="text-green-400">+\${r.pnl.toFixed(2)}$</span></div>
+                        <div class="text-gray-500">LEV: x\${r.lev} | DCA: \${r.gridsCount}</div>
                     </div>\`).join('');
-                document.getElementById('gridModal').style.display = 'block';
+                document.getElementById('gridModal').style.display = "block";
             }
 
-            async function updateProgress(){
-                const res = await fetch('/api/status');
-                const d = await res.json();
-                const pct = (d.totalDownloaded / d.totalNeeded * 100).toFixed(2);
+            async function updateStatus(){
+                const res = await fetch('/api/status'); const d = await res.json();
+                const pct = (d.totalDownloaded / d.totalNeeded * 100).toFixed(1);
                 document.getElementById('mainProgress').style.width = pct + '%';
+                document.getElementById('loadPct').innerText = pct + '%';
             }
-            setInterval(updateProgress, 2000);
+            setInterval(updateStatus, 2000);
         </script>
     </body></html>`);
+});
+
+initSymbols().then(async () => {
+    await fetchActualLeverage(); // Lấy max lev từ sàn trước khi chạy
+    app.listen(PORT, '0.0.0.0', () => {
+        console.log(`Luffy 8888 Live: http://localhost:8888/gui`);
+        startCrawler();
+    });
 });
 
 async function initSymbols() {
@@ -263,16 +276,9 @@ async function initSymbols() {
             res.on('end', () => {
                 try {
                     const prices = JSON.parse(data);
-                    allSymbols = prices.filter(p => p.symbol.endsWith('USDT')).map(p => ({ symbol: p.symbol, price: parseFloat(p.price) })).sort((a,b)=>b.price - a.price);
+                    allSymbols = prices.filter(p => p.symbol.endsWith('USDT')).map(p => ({ symbol: p.symbol }));
                 } catch(e) {} resolve();
             });
         }).on('error', () => resolve());
     });
 }
-
-initSymbols().then(() => {
-    app.listen(PORT, '0.0.0.0', () => {
-        console.log(`PRO Analytics: http://localhost:${PORT}/gui`);
-        startCrawler();
-    });
-});
