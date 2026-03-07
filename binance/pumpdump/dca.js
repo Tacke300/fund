@@ -57,12 +57,9 @@ async function fetchActualLeverage() {
                             if (!allSymbols.includes(item.symbol)) allSymbols.push(item.symbol);
                         });
                         fs.writeFileSync(LEVERAGE_FILE, JSON.stringify(symbolMaxLeverage));
-                        logger(`Nạp ${allSymbols.length} coin. Max Lev OK.`, "INFO");
-                    } else throw new Error();
+                    }
                     resolve();
-                } catch (e) {
-                    fallbackSymbols().then(resolve);
-                }
+                } catch (e) { fallbackSymbols().then(resolve); }
             });
         }).on('error', () => fallbackSymbols().then(resolve));
     });
@@ -92,9 +89,7 @@ async function fallbackSymbols() {
 function initWS() {
     const ws = new WebSocket('wss://fstream.binance.com/ws/!ticker@arr');
     ws.on('message', (data) => {
-        // KHÓA CHẶT: Bot tắt thì không làm gì cả
         if (!botState.running) return;
-
         const tickers = JSON.parse(data);
         tickers.forEach(t => {
             marketPrices[t.s] = parseFloat(t.c);
@@ -114,8 +109,8 @@ function initWS() {
                     delete activePositions[t.s];
                     saveState();
                 } else if (pos.grids.length < botState.maxGrids) {
-                    const lastEntry = pos.grids[pos.grids.length - 1].price;
-                    const gap = pos.side === 'LONG' ? (lastEntry - price) / lastEntry : (price - lastEntry) / lastEntry;
+                    const lastPrice = pos.grids[pos.grids.length - 1].price;
+                    const gap = pos.side === 'LONG' ? (lastPrice - price) / lastPrice : (price - lastPrice) / lastPrice;
                     if (gap * 100 >= botState.stepSize) {
                         pos.grids.push({ price, qty: pos.grids[pos.grids.length-1].qty * botState.multiplier });
                         logger(`DCA: ${t.s} Lưới ${pos.grids.length}`, "DCA");
@@ -139,69 +134,69 @@ app.get('/api/data', (req, res) => {
         const avgPrice = p.grids.reduce((sum, g) => sum + (g.price * g.qty), 0) / totalMargin;
         const currentP = marketPrices[p.symbol] || 0;
         const diff = p.side === 'LONG' ? (currentP - avgPrice) / avgPrice : (avgPrice - currentP) / avgPrice;
-        
-        // ROI CHUẨN: Lãi trên số vốn thực tế bỏ vào (Margin * Leverage)
         const pnl = totalMargin * diff * p.maxLev;
-        const roi = (pnl / totalMargin) * 100; 
-
+        const roi = (pnl / botState.totalBalance) * 100; 
         return { ...p, avgPrice, totalMargin, currentGrid: p.grids.length, roi, pnl, currentPrice: currentP };
     });
     res.json({ state: botState, active: activeData, logs });
 });
 
 app.post('/api/control', (req, res) => { 
-    if (req.body.running && !botState.running) {
-        botState.startTime = Date.now();
-        logger(">>> BOT STARTED", "INFO");
-    } else if (!req.body.running && botState.running) {
-        logger(">>> BOT STOPPED", "ERR");
-    }
+    if (req.body.running && !botState.running) botState.startTime = Date.now();
     Object.assign(botState, req.body);
     saveState(); res.json({ status: 'ok' }); 
 });
 
 app.post('/api/reset', (req, res) => { 
     activePositions = {}; botState.closedPnl = 0; botState.totalClosedGrids = 0; logs = [];
-    logger("!!! ĐÃ RESET TOÀN BỘ DỮ LIỆU", "ERR");
     saveState(); res.json({ status: 'ok' }); 
 });
 
 app.get('/gui', (req, res) => {
-    res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Luffy Matrix v13</title><script src="https://cdn.tailwindcss.com"></script>
-    <style>body{background:#0b0e11;color:#eaecef;font-family:monospace} th{cursor:pointer;background:#161a1e;padding:12px 8px;border-bottom:1px solid #333} th:hover{color:#f0b90b} #logBox{background:#000;color:#0ecb81;padding:10px;height:220px;overflow-y:auto;font-size:11px;border:1px solid #333;line-height:1.5}</style>
+    res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Luffy Matrix v15</title><script src="https://cdn.tailwindcss.com"></script>
+    <style>body{background:#0b0e11;color:#eaecef;font-family:monospace} th{cursor:pointer;background:#161a1e;padding:12px 8px;border-bottom:1px solid #333;white-space:nowrap} th:hover{color:#f0b90b} #logBox{background:#000;color:#0ecb81;padding:10px;height:220px;overflow-y:auto;font-size:11px;border:1px solid #333;line-height:1.5}</style>
     </head><body class="p-4 text-[11px]">
-        <div class="grid grid-cols-2 md:grid-cols-6 gap-3 mb-4 text-center">
-            <div class="bg-[#1e2329] p-3 rounded">UPTIME<div id="uptime" class="text-yellow-500 font-bold">0s</div></div>
+        <div class="flex flex-col md:flex-row gap-4 mb-4 items-center justify-between bg-[#1e2329] p-4 rounded-lg border border-gray-800">
+            <div class="flex gap-2"><button onclick="sendCtrl(true)" class="bg-green-600 px-6 py-2 rounded font-bold hover:bg-green-500">START</button><button onclick="sendCtrl(false)" class="bg-red-600 px-6 py-2 rounded font-bold hover:bg-red-500">STOP</button><button onclick="resetBot()" class="bg-gray-700 px-4 py-2 rounded font-bold text-[10px]">RESET</button></div>
+            <div class="text-center"><div class="text-gray-500 text-[10px] uppercase">Hệ thống hoạt động</div><div id="uptime" class="text-yellow-500 font-bold text-lg">0 ngày, 0:0:0</div></div>
+            <div class="stat-box text-right"><div class="text-gray-500 text-[10px] uppercase">Trạng thái</div><div id="botStatus" class="font-bold text-lg italic text-red-500">OFFLINE</div></div>
+        </div>
+
+        <div class="grid grid-cols-2 md:grid-cols-5 gap-3 mb-4 text-center">
             <div class="bg-[#1e2329] p-3 rounded text-blue-400">COINS<div id="statCoins" class="text-xl font-bold">0</div></div>
-            <div class="bg-[#1e2329] p-3 rounded">CHỐT LỜI<div id="statGrids" class="text-purple-400 font-bold">0</div></div>
+            <div class="bg-[#1e2329] p-3 rounded">LƯỚI CHỐT<div id="statGrids" class="text-purple-400 font-bold">0</div></div>
             <div class="bg-[#1e2329] p-3 rounded text-green-500">PNL CHỐT<div id="statClosedPnl" class="font-bold">0.00$</div></div>
             <div class="bg-[#1e2329] p-3 rounded text-gray-400">PNL TẠM<div id="statUnrealized" class="font-bold text-white">0.00$</div></div>
             <div class="bg-[#1e2329] p-3 rounded border-t-2 border-yellow-500">ROI TỔNG<div id="statTotalRoi" class="text-xl font-bold text-green-500">0.00%</div></div>
         </div>
-        <div class="bg-[#1e2329] p-4 rounded-lg mb-4 border border-gray-800 grid grid-cols-2 md:grid-cols-7 gap-3">
+
+        <div class="bg-[#1e2329] p-4 rounded-lg mb-4 border border-gray-800 grid grid-cols-2 md:grid-cols-6 gap-3">
             <div>VỐN/COIN ($)<input id="totalBalance" type="number" value="\${botState.totalBalance}" class="w-full bg-black text-yellow-500 p-1 rounded"></div>
             <div>MARGIN<div class="flex"><input id="marginValue" type="number" value="\${botState.marginValue}" class="w-full bg-black text-yellow-500 p-1 rounded"><select id="marginType" class="bg-black text-white"><option value="$" \${botState.marginType==='$'?'selected':''}>$</option><option value="%" \${botState.marginType==='%'?'selected':''}>%</option></select></div></div>
             <div>DCA MAX<input id="maxGrids" type="number" value="\${botState.maxGrids}" class="w-full bg-black text-yellow-500 p-1 rounded"></div>
             <div>GAP (%)<input id="stepSize" type="number" value="\${botState.stepSize}" class="w-full bg-black text-yellow-500 p-1 rounded"></div>
             <div>TP (%)<input id="tpPercent" type="number" value="\${botState.tpPercent}" class="w-full bg-black text-yellow-500 p-1 rounded"></div>
             <div>MODE<select id="mode" class="w-full bg-black p-1 rounded"><option value="LONG" \${botState.mode==='LONG'?'selected':''}>LONG</option><option value="SHORT" \${botState.mode==='SHORT'?'selected':''}>SHORT</option></select></div>
-            <div class="flex gap-1 items-end"><button onclick="sendCtrl(true)" class="bg-green-600 p-2 rounded font-bold flex-1">START</button><button onclick="sendCtrl(false)" class="bg-red-600 p-2 rounded font-bold flex-1">STOP</button><button onclick="resetBot()" class="bg-gray-700 p-2 rounded font-bold text-[9px]">RESET</button></div>
         </div>
-        <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
-            <div class="md:col-span-3 bg-[#1e2329] rounded-lg border border-gray-800 h-[500px] overflow-y-auto">
-                <table class="w-full text-left">
-                    <thead class="sticky top-0 bg-[#161a1e]"><tr>
-                        <th onclick="setSort('symbol')">SYMBOL ↕</th>
-                        <th class="text-right">PRICE</th>
-                        <th class="text-right">GRID</th>
-                        <th class="text-right" onclick="setSort('roi')">ROI (%) ↕</th>
-                        <th class="text-right pr-2" onclick="setSort('pnl')">PNL ($) ↕</th>
-                    </tr></thead>
-                    <tbody id="activeBody"></tbody>
-                </table>
-            </div>
+
+        <div class="bg-[#1e2329] rounded-lg border border-gray-800 mb-4 overflow-hidden">
+            <table class="w-full text-left">
+                <thead class="bg-[#161a1e]"><tr>
+                    <th onclick="setSort('symbol')">SYMBOL ↕</th>
+                    <th class="text-right" onclick="setSort('currentPrice')">PRICE ↕</th>
+                    <th class="text-right" onclick="setSort('currentGrid')">GRID ↕</th>
+                    <th class="text-right" onclick="setSort('roi')">ROI (%) ↕</th>
+                    <th class="text-right pr-2" onclick="setSort('pnl')">PNL ($) ↕</th>
+                </tr></thead>
+                <tbody id="activeBody"></tbody>
+            </table>
+        </div>
+
+        <div class="bg-[#1e2329] p-3 rounded-lg border border-gray-800">
+            <div class="text-gray-500 text-[10px] font-bold uppercase mb-2">Hệ thống Logs</div>
             <div id="logBox"></div>
         </div>
+
         <script>
             let sortKey = 'pnl', sortDir = -1, rawData = [];
             function setSort(k){ if(sortKey===k) sortDir*=-1; else {sortKey=k; sortDir=-1;} render(); }
@@ -209,16 +204,24 @@ app.get('/gui', (req, res) => {
                 const body = { running:run, totalBalance:Number(document.getElementById('totalBalance').value), marginValue:Number(document.getElementById('marginValue').value), marginType:document.getElementById('marginType').value, maxGrids:Number(document.getElementById('maxGrids').value), stepSize:Number(document.getElementById('stepSize').value), tpPercent:Number(document.getElementById('tpPercent').value), mode:document.getElementById('mode').value, multiplier: 2.0 };
                 await fetch('/api/control',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
             }
-            async function resetBot(){ if(confirm('Bạn muốn XÓA HẾT lệnh đang chạy và PnL?')) await fetch('/api/reset',{method:'POST'}); }
+            async function resetBot(){ if(confirm('RESET TOÀN BỘ?')) await fetch('/api/reset',{method:'POST'}); }
             function render(){
                 const sorted = [...rawData].sort((a,b)=> (a[sortKey]>b[sortKey]?1:-1)*sortDir);
-                document.getElementById('activeBody').innerHTML = sorted.map(p=>\`<tr class="border-b border-gray-800">
+                document.getElementById('activeBody').innerHTML = sorted.map(p=>\`<tr class="border-b border-gray-800 hover:bg-[#2b3139]">
                     <td class="p-2 font-bold text-yellow-500">\${p.symbol} <span class="text-gray-500 text-[9px]">\${p.maxLev}x</span></td>
                     <td class="text-right font-mono text-gray-400">\${p.currentPrice.toFixed(4)}</td>
-                    <td class="text-right">\${p.currentGrid}/\${window.maxG}</td>
-                    <td class="text-right \${p.roi>=0?'text-green-500':'text-red-500'}">\${p.roi.toFixed(1)}%</td>
+                    <td class="text-right font-bold">\${p.currentGrid}/\${window.maxG}</td>
+                    <td class="text-right \${p.roi>=0?'text-green-500':'text-red-500'} font-bold">\${p.roi.toFixed(2)}%</td>
                     <td class="text-right pr-2 font-bold \${p.pnl>=0?'text-green-500':'text-red-500'}">\${p.pnl.toFixed(2)}$</td>
                 </tr>\`).join('');
+            }
+            function formatUptime(ms) {
+                const s = Math.floor(ms / 1000);
+                const days = Math.floor(s / 86400);
+                const hrs = Math.floor((s % 86400) / 3600);
+                const mins = Math.floor((s % 3600) / 60);
+                const secs = s % 60;
+                return \`\${days} ngày, \${hrs}:\${mins}:\${secs}\`;
             }
             async function update(){
                 try {
@@ -232,12 +235,11 @@ app.get('/gui', (req, res) => {
                     document.getElementById('statUnrealized').innerText = unreal.toFixed(2) + '$';
                     document.getElementById('statTotalRoi').innerText = (totalInv > 0 ? ((d.state.closedPnl+unreal)/totalInv)*100 : 0).toFixed(2) + '%';
                     document.getElementById('logBox').innerHTML = d.logs.join('<br>');
+                    document.getElementById('botStatus').innerText = d.state.running ? "RUNNING" : "STOPPED";
+                    document.getElementById('botStatus').className = "font-bold text-lg italic " + (d.state.running ? "text-green-500" : "text-red-500");
                     if(d.state.startTime && d.state.running){
-                        const s = Math.floor((Date.now()-d.state.startTime)/1000);
-                        document.getElementById('uptime').innerText = s + "s";
-                    } else if (!d.state.running) {
-                        document.getElementById('uptime').innerText = "STOPPED";
-                    }
+                        document.getElementById('uptime').innerText = formatUptime(Date.now() - d.state.startTime);
+                    } else if (!d.state.running) { document.getElementById('uptime').innerText = "0 ngày, 0:0:0"; }
                 } catch(e){}
             }
             setInterval(update, 1000);
@@ -247,5 +249,5 @@ app.get('/gui', (req, res) => {
 
 fetchActualLeverage().then(() => {
     initWS();
-    app.listen(PORT, '0.0.0.0', () => logger(`BOT READY: http://localhost:${PORT}/gui`, "INFO"));
+    app.listen(PORT, '0.0.0.0', () => logger(`BOT MATRIX READY: http://localhost:${PORT}/gui`, "INFO"));
 });
