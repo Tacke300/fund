@@ -1,9 +1,9 @@
 // ==========================================
 // CẤU HÌNH LOGIC (DỄ CHỈNH)
 // ==========================================
-const TP_ROI_BASE = 1;            
-const SL_ROI_BASE = 0.5;          
-const MIN_VOLATILITY = 5; 
+const TP_ROI_BASE = 2;            
+const SL_ROI_BASE = 2;          
+const MIN_VOLATILITY = 4; 
 const COOLDOWN_MINUTES = 10;      
 const PORT = 9000;
 const MAX_REVENGE_STEPS = 3;      
@@ -35,8 +35,9 @@ if (fs.existsSync(STATE_FILE)) {
 }
 
 function saveState() { fs.writeFileSync(STATE_FILE, JSON.stringify(botState)); }
-function fP(n) { return (!n) ? "0.00" : (n < 1 ? n.toFixed(8) : n.toFixed(4)); }
+function f(n) { return (!n) ? "0.00" : (n < 1 ? n.toFixed(8) : n.toFixed(4)); }
 
+// Lấy Leverage tối đa từ Binance
 async function fetchActualLeverage() {
     const timestamp = Date.now();
     const query = `timestamp=${timestamp}`;
@@ -103,7 +104,8 @@ function initWS() {
                         historyMap.set(`${s}_${now + 1}`, {
                             symbol: s, startTime: now + 1, snapPrice: p, type: pending.type === 'UP' ? 'DOWN' : 'UP',
                             status: 'PENDING', maxLev: lev, revengeStep: (pending.revengeStep || 0) + 1,
-                            dynamicROI_TP: TP_ROI_BASE * Math.pow(2, (pending.revengeStep || 0) + 1)
+                            dynamicROI_TP: TP_ROI_BASE * Math.pow(2, (pending.revengeStep || 0) + 1),
+                            snapVol: { c1, c5, c15 }
                         });
                     }
                     fs.writeFileSync(HISTORY_FILE, JSON.stringify(Array.from(historyMap.values()))); 
@@ -111,7 +113,11 @@ function initWS() {
             }
             const activeSlots = allHistory.filter(h => h.status === 'PENDING').length;
             if (!pending && activeSlots < botState.maxSlots && (!lastTradeClosed[s] || now - lastTradeClosed[s] > COOLDOWN_MINUTES * 60000) && Math.max(Math.abs(c1), Math.abs(c5), Math.abs(c15)) >= MIN_VOLATILITY) {
-                historyMap.set(`${s}_${now}`, { symbol: s, startTime: now, snapPrice: p, type: (c1+c5+c15 >= 0) ? 'UP' : 'DOWN', status: 'PENDING', maxLev: symbolMaxLeverage[s] || 20, revengeStep: 0, dynamicROI_TP: TP_ROI_BASE });
+                historyMap.set(`${s}_${now}`, { 
+                    symbol: s, startTime: now, snapPrice: p, type: (c1+c5+c15 >= 0) ? 'UP' : 'DOWN', 
+                    status: 'PENDING', maxLev: symbolMaxLeverage[s] || 20, revengeStep: 0, 
+                    dynamicROI_TP: TP_ROI_BASE, snapVol: { c1, c5, c15 } 
+                });
             }
         });
     });
@@ -122,51 +128,67 @@ app.get('/api/data', (req, res) => { res.json({ state: botState, live: Object.en
 
 app.get('/gui', (req, res) => {
     res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=0">
-    <title>Luffy Mobile Bot</title><script src="https://cdn.tailwindcss.com"></script>
+    <title>Luffy Fixed Dashboard</title><script src="https://cdn.tailwindcss.com"></script>
     <style>
-        body { background: #0b0e11; color: #eaecef; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
-        .bg-card { background: #1e2329; } .up { color: #0ecb81; } .down { color: #f6465d; }
-        input { background: #000; border: 1px solid #333; color: #f0b90b; padding: 8px; border-radius: 4px; outline: none; font-size: 14px; }
-        th { color: #848e9c; font-size: 10px; text-transform: uppercase; padding: 10px 5px; border-bottom: 1px solid #2b3139; white-space: nowrap; }
-        td { padding: 10px 5px; font-size: 12px; border-bottom: 1px solid #2b3139; }
+        @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap');
+        body { background: #0b0e11; color: #eaecef; font-family: 'JetBrains Mono', monospace; overflow-x: hidden; }
+        .bg-card { background: #1e2329; border: 1px solid #2b3139; }
+        .up { color: #0ecb81; } .down { color: #f6465d; }
+        input { background: #000; border: 1px solid #333; color: #f0b90b; padding: 10px; border-radius: 4px; outline: none; font-size: 14px; width: 100%; }
+        th { color: #848e9c; font-size: 9px; text-transform: uppercase; padding: 12px 8px; border-bottom: 1px solid #2b3139; white-space: nowrap; }
+        td { padding: 10px 8px; font-size: 11px; border-bottom: 1px solid #2b3139; white-space: nowrap; }
         .sticky-header { position: sticky; top: 0; background: #0b0e11; z-index: 100; border-bottom: 1px solid #2b3139; }
+        .btn-green { background: #0ecb81; color: #000; font-weight: bold; padding: 12px; border-radius: 4px; text-transform: uppercase; font-size: 12px; transition: 0.3s; }
+        .btn-red { background: #f6465d; color: #fff; font-weight: bold; padding: 12px; border-radius: 4px; text-transform: uppercase; font-size: 12px; }
     </style></head><body>
 
     <div class="sticky-header p-3">
-        <div id="setup" class="grid grid-cols-3 gap-2 mb-3">
-            <div><label class="block text-[10px] text-gray-400 uppercase">Vốn</label><input id="balanceInp" type="number" class="w-full"></div>
-            <div><label class="block text-[10px] text-gray-400 uppercase">Margin</label><input id="marginInp" type="text" class="w-full"></div>
-            <div><label class="block text-[10px] text-gray-400 uppercase">Slot</label><input id="maxSlotsInp" type="number" class="w-full"></div>
+        <div class="grid grid-cols-3 gap-2 mb-3">
+            <div><label class="block text-[9px] text-gray-500 uppercase mb-1">Balance</label><input id="balanceInp" type="number"></div>
+            <div><label class="block text-[9px] text-gray-500 uppercase mb-1">Margin %</label><input id="marginInp" type="text"></div>
+            <div><label class="block text-[9px] text-gray-500 uppercase mb-1">Max Slots</label><input id="maxSlotsInp" type="number"></div>
         </div>
-        <div class="flex gap-2 mb-3">
-            <button id="btnStart" onclick="updateBot(true)" class="flex-1 bg-green-600 py-2 rounded font-bold text-xs uppercase">START BOT</button>
-            <button id="btnStop" onclick="updateBot(false)" class="flex-1 bg-red-600 py-2 rounded font-bold text-xs uppercase hidden">STOP BOT</button>
+        <div class="flex gap-2">
+            <button id="btnStart" onclick="updateBot(true)" class="btn-green flex-1">Start Engine</button>
+            <button id="btnStop" onclick="updateBot(false)" class="btn-red flex-1 hidden">Stop Engine</button>
         </div>
-        <div class="flex justify-between items-end">
-            <div><div class="text-[10px] text-gray-500 font-bold uppercase">Tài sản (Equity)</div><div id="displayBal" class="text-2xl font-bold text-white">0.00</div></div>
-            <div id="statusBadge" class="text-[9px] font-bold px-2 py-1 rounded border border-zinc-700 text-gray-500 uppercase">Offline</div>
+        <div class="flex justify-between items-end mt-4">
+            <div><div id="displayBal" class="text-3xl font-bold text-white tracking-tighter">0.00</div><div class="text-[9px] text-gray-500 uppercase">Tài sản (Equity)</div></div>
+            <div id="statusBadge" class="text-[9px] font-bold px-2 py-1 rounded border border-zinc-800 text-gray-500 uppercase tracking-widest">OFFLINE</div>
         </div>
     </div>
 
     <div class="p-3 space-y-6">
         <section>
-            <div class="text-[10px] font-bold text-gray-500 uppercase mb-2 flex justify-between"><span>Vị thế đang chạy</span> <span id="slotCount" class="text-yellow-500">0</span></div>
+            <div class="text-[10px] font-bold text-gray-500 uppercase mb-3 flex justify-between px-1 tracking-widest"><span>Vị thế đang mở</span> <span id="slotCount">0/0</span></div>
             <div id="pendingContainer" class="space-y-3"></div>
         </section>
 
-        <section class="bg-card rounded-lg overflow-hidden border border-zinc-800">
-            <div class="p-2 text-[10px] font-bold text-gray-400 uppercase bg-black/20">Biến động thị trường</div>
+        <section class="bg-card rounded-lg overflow-hidden">
+            <div class="p-2 text-[10px] font-bold text-gray-400 uppercase bg-black/40">Market Heatmap</div>
             <table class="w-full text-left">
-                <thead><tr><th>Symbol</th><th class="text-right">1M</th><th class="text-right">5M</th><th class="text-right">15M</th></tr></thead>
+                <thead><tr><th class="pl-3">Symbol</th><th class="text-right">1M</th><th class="text-right">5M</th><th class="text-right pr-3">15M</th></tr></thead>
                 <tbody id="liveBody"></tbody>
             </table>
         </section>
 
-        <section class="bg-card rounded-lg overflow-hidden border border-zinc-800">
-            <div class="p-2 text-[10px] font-bold text-gray-400 uppercase bg-black/20">Lịch sử vị thế</div>
+        <section class="bg-card rounded-lg overflow-hidden shadow-2xl">
+            <div class="p-2 text-[10px] font-bold text-gray-400 uppercase bg-black/40">Chi tiết lịch sử vị thế</div>
             <div class="overflow-x-auto">
-                <table class="w-full text-left min-w-[550px]">
-                    <thead><tr><th>Thời gian</th><th>Cặp/Bẩy</th><th>Side</th><th>Margin</th><th>Vào/Ra</th><th>PnL/ROI</th></tr></thead>
+                <table class="w-full text-left">
+                    <thead>
+                        <tr>
+                            <th>Time</th>
+                            <th>Symbol</th>
+                            <th>Side/Lev</th>
+                            <th>Margin</th>
+                            <th>Entry Price</th>
+                            <th>Exit Price</th>
+                            <th>TP/SL Cài</th>
+                            <th>Biến Động</th>
+                            <th>PnL/ROI</th>
+                        </tr>
+                    </thead>
                     <tbody id="historyBody"></tbody>
                 </table>
             </div>
@@ -174,9 +196,23 @@ app.get('/gui', (req, res) => {
     </div>
 
     <script>
+    let isEditing = false; // Biến kiểm tra nếu đang gõ thì không cập nhật input
+
+    // Lắng nghe sự kiện người dùng bắt đầu gõ
+    ['balanceInp', 'marginInp', 'maxSlotsInp'].forEach(id => {
+        document.getElementById(id).addEventListener('focus', () => { isEditing = true; });
+        document.getElementById(id).addEventListener('blur', () => { isEditing = false; });
+    });
+
     async function updateBot(run) {
-        const data = { running: run, initialBal: parseFloat(document.getElementById('balanceInp').value), marginStr: document.getElementById('marginInp').value, maxSlots: parseInt(document.getElementById('maxSlotsInp').value) };
+        const data = { 
+            running: run, 
+            initialBal: parseFloat(document.getElementById('balanceInp').value), 
+            marginStr: document.getElementById('marginInp').value, 
+            maxSlots: parseInt(document.getElementById('maxSlotsInp').value) 
+        };
         await fetch('/api/control', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(data) });
+        isEditing = false;
     }
 
     function f(n) { return (!n) ? "0.00" : (n < 1 ? n.toFixed(8) : n.toFixed(4)); }
@@ -184,41 +220,52 @@ app.get('/gui', (req, res) => {
     async function update() {
         try {
             const res = await fetch('/api/data'); const d = await res.json();
-            document.getElementById('balanceInp').value = d.state.initialBal;
-            document.getElementById('marginInp').value = d.state.marginStr;
-            document.getElementById('maxSlotsInp').value = d.state.maxSlots;
+            
+            // CHỈ CẬP NHẬT INPUT KHI NGƯỜI DÙNG KHÔNG ĐANG GÕ
+            if (!isEditing) {
+                document.getElementById('balanceInp').value = d.state.initialBal;
+                document.getElementById('marginInp').value = d.state.marginStr;
+                document.getElementById('maxSlotsInp').value = d.state.maxSlots;
+            }
             
             if (d.state.running) {
                 document.getElementById('btnStart').classList.add('hidden'); document.getElementById('btnStop').classList.remove('hidden');
                 document.getElementById('statusBadge').className = "text-[9px] font-bold px-2 py-1 rounded border border-yellow-500/50 text-yellow-500 bg-yellow-500/10";
-                document.getElementById('statusBadge').innerText = "Running Cross";
+                document.getElementById('statusBadge').innerText = "LIVE ENGINE";
             } else {
                 document.getElementById('btnStart').classList.remove('hidden'); document.getElementById('btnStop').classList.add('hidden');
                 document.getElementById('statusBadge').className = "text-[9px] font-bold px-2 py-1 rounded border border-zinc-700 text-gray-500";
-                document.getElementById('statusBadge').innerText = "Stopped";
+                document.getElementById('statusBadge').innerText = "STOPPED";
             }
 
             let runningBal = d.state.initialBal;
             let mVal = d.state.marginStr;
             let mNum = parseFloat(mVal);
 
-            // History
+            // Bảng Lịch Sử
             let hRows = d.history.sort((a,b)=>a.endTime-b.endTime).map(h => {
                 let mBase = mVal.includes('%') ? (runningBal * mNum / 100) : mNum;
                 let mUsed = Math.min(mBase * Math.pow(2, h.revengeStep || 0), runningBal * 0.5);
                 let pnl = mUsed * (h.pnlPercentROI || 0); runningBal += pnl;
+                let tpP = h.type === 'UP' ? h.snapPrice*(1+((h.dynamicROI_TP||1)/h.maxLev)) : h.snapPrice*(1-((h.dynamicROI_TP||1)/h.maxLev));
+                let slP = h.type === 'UP' ? h.snapPrice*(1-(${SL_ROI_BASE}/h.maxLev)) : h.snapPrice*(1+(${SL_ROI_BASE}/h.maxLev));
+                let vol = h.snapVol ? \`\${h.snapVol.c1}/\${h.snapVol.c5}/\${h.snapVol.c15}\` : '--';
+
                 return \`<tr>
-                    <td class="text-gray-500 text-[10px] font-mono">\${new Date(h.endTime).toLocaleTimeString([],{hour12:false,hour:'2-digit',minute:'2-digit'})}</td>
-                    <td class="font-bold text-white">\${h.symbol}<br><span class="text-[9px] text-gray-500">\${h.maxLev}x Cross</span></td>
-                    <td class="\${h.type==='UP'?'up':'down'} font-bold">\${h.type==='UP'?'LONG':'SHORT'}</td>
+                    <td class="text-gray-500 text-[10px] font-mono">\${new Date(h.endTime).toLocaleTimeString([],{hour12:false})}</td>
+                    <td class="font-bold text-white">\${h.symbol}</td>
+                    <td class="\${h.type==='UP'?'up':'down'} font-bold text-[9px] uppercase">\${h.type} \${h.maxLev}x</td>
                     <td class="text-yellow-500 font-bold">\${mUsed.toFixed(2)}</td>
-                    <td class="text-gray-400 text-[10px] font-mono">\${f(h.snapPrice)}<br>\${f(h.finalPrice)}</td>
+                    <td class="text-gray-400 font-mono">\${f(h.snapPrice)}</td>
+                    <td class="text-white font-bold font-mono">\${f(h.finalPrice)}</td>
+                    <td class="text-[9px] text-gray-500 font-mono">T:\${f(tpP)}<br>S:\${f(slP)}</td>
+                    <td class="text-gray-500 text-[9px]">\${vol}</td>
                     <td class="\${pnl>=0?'up':'down'} font-bold">\${pnl.toFixed(2)}<br>\${((h.pnlPercentROI||0)*100).toFixed(0)}%</td>
                 </tr>\`;
             });
             document.getElementById('historyBody').innerHTML = hRows.reverse().join('');
 
-            // Pending
+            // Vị Thế Đang Mở
             let totalUnPnl = 0, pHTML = "";
             d.pending.forEach(h => {
                 let mBase = mVal.includes('%') ? (runningBal * mNum / 100) : mNum;
@@ -229,25 +276,25 @@ app.get('/gui', (req, res) => {
                 let tpP = h.type === 'UP' ? h.snapPrice*(1+(h.dynamicROI_TP/h.maxLev)) : h.snapPrice*(1-(h.dynamicROI_TP/h.maxLev));
                 let slP = h.type === 'UP' ? h.snapPrice*(1-(${SL_ROI_BASE}/h.maxLev)) : h.snapPrice*(1+(${SL_ROI_BASE}/h.maxLev));
 
-                pHTML += \`<div class="bg-card p-3 rounded-lg border-l-4 \${h.type==='UP'?'border-green-500':'border-red-500'} shadow-lg">
-                    <div class="flex justify-between items-center mb-1"><b class="text-white text-sm">\${h.symbol}</b><b class="\${pnl>=0?'up':'down'}">\${pnl.toFixed(2)} (\${(roi*100).toFixed(1)}%)</b></div>
-                    <div class="grid grid-cols-2 text-[10px] font-mono gap-y-1">
-                        <div class="text-gray-400">Margin: <span class="text-yellow-500">\${mUsed.toFixed(2)}</span> | <span class="\${h.type==='UP'?'up':'down'}">\${h.type}</span></div>
-                        <div class="text-right text-gray-500">Mark: \${f(liveP)}</div>
-                        <div class="text-green-500 font-bold">TP: \${f(tpP)}</div><div class="text-red-500 text-right font-bold">SL: \${f(slP)}</div>
+                pHTML += \`<div class="bg-card p-4 rounded border-l-4 \${h.type==='UP'?'border-green-500':'border-red-500'}">
+                    <div class="flex justify-between items-center mb-2"><b class="text-white">\${h.symbol} \${h.revengeStep>0?'[GỠ X'+Math.pow(2,h.revengeStep)+']':''}</b><b class="\${pnl>=0?'up':'down'} text-lg">\${pnl.toFixed(2)}</b></div>
+                    <div class="grid grid-cols-2 text-[10px] gap-y-2 font-mono">
+                        <div>Margin: <span class="text-yellow-500 font-bold">\${mUsed.toFixed(2)}</span></div><div class="text-right">ROI: <span class="\${roi>=0?'up':'down'}">\${(roi*100).toFixed(1)}%</span></div>
+                        <div class="text-green-500">TP: \${f(tpP)}</div><div class="text-red-500 text-right">SL: \${f(slP)}</div>
+                        <div class="text-gray-500">Entry: \${f(h.snapPrice)}</div><div class="text-right text-yellow-400">Mark: \${f(liveP)}</div>
                     </div>
                 </div>\`;
             });
-            document.getElementById('pendingContainer').innerHTML = pHTML || '<div class="text-center py-4 text-gray-700 italic text-xs uppercase">No active positions</div>';
+            document.getElementById('pendingContainer').innerHTML = pHTML || '<div class="text-center py-6 text-gray-700 italic text-[10px] border border-zinc-800 rounded">WAITING FOR SIGNAL...</div>';
             document.getElementById('slotCount').innerText = d.pending.length + ' / ' + d.state.maxSlots;
             document.getElementById('displayBal').innerText = (runningBal + totalUnPnl).toFixed(2);
 
-            // Live
+            // Live Table
             document.getElementById('liveBody').innerHTML = d.live.map(c => 
-                \`<tr><td class="font-bold py-1 text-white">\${c.symbol}</td>
+                \`<tr><td class="font-bold py-2 pl-3 text-white">\${c.symbol}</td>
                 <td class="text-right \${c.c1>=0?'up':'down'}">\${c.c1}%</td>
                 <td class="text-right \${c.c5>=0?'up':'down'}">\${c.c5}%</td>
-                <td class="text-right \${c.c15>=0?'up':'down'}">\${c.c15}%</td></tr>\`
+                <td class="text-right \${c.c15>=0?'up':'down'} pr-3">\${c.c15}%</td></tr>\`
             ).join('');
         } catch(e) {}
     }
