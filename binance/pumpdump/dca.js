@@ -54,7 +54,6 @@ function getFilteredPnL(days) {
 }
 
 async function fetchActualLeverage() {
-    logger("Đang lấy dữ liệu đòn bẩy từ Binance...");
     return new Promise((resolve) => {
         const timestamp = Date.now();
         const query = `timestamp=${timestamp}`;
@@ -63,7 +62,7 @@ async function fetchActualLeverage() {
             hostname: 'fapi.binance.com', path: `/fapi/v1/leverageBracket?${query}&signature=${signature}`,
             headers: { 'X-MBX-APIKEY': API_KEY }, timeout: 10000
         };
-        const req = https.get(options, (res) => {
+        https.get(options, (res) => {
             let data = '';
             res.on('data', chunk => data += chunk);
             res.on('end', () => {
@@ -76,20 +75,12 @@ async function fetchActualLeverage() {
                             allSymbols.push(item.symbol);
                         });
                         fs.writeFileSync(LEVERAGE_FILE, JSON.stringify(symbolMaxLeverage));
-                        logger(`Nạp ${allSymbols.length} coin thành công.`, "INFO");
-                    } else { throw new Error("Data format error"); }
+                        logger(`Nạp ${allSymbols.length} coin thành công.`);
+                    }
                     resolve();
-                } catch (e) { 
-                    logger("Lỗi API đòn bẩy, đang dùng dự phòng...", "ERR");
-                    fallbackSymbols().then(resolve); 
-                }
+                } catch (e) { fallbackSymbols().then(resolve); }
             });
-        });
-        req.on('error', () => {
-            logger("Kết nối Binance thất bại, dùng dữ liệu cũ...", "ERR");
-            fallbackSymbols().then(resolve);
-        });
-        req.end();
+        }).on('error', () => fallbackSymbols().then(resolve));
     });
 }
 
@@ -107,8 +98,7 @@ async function fallbackSymbols() {
                             if(!symbolMaxLeverage[s.symbol]) symbolMaxLeverage[s.symbol] = 20;
                         }
                     });
-                    logger(`Đã nạp ${allSymbols.length} coin (Dự phòng).`);
-                } catch(e) { logger("Không thể lấy danh sách coin!", "ERR"); }
+                } catch(e) {}
                 resolve();
             });
         }).on('error', () => resolve());
@@ -117,7 +107,6 @@ async function fallbackSymbols() {
 
 function initWS() {
     const ws = new WebSocket('wss://fstream.binance.com/ws/!ticker@arr');
-    ws.on('open', () => logger("Kết nối WebSocket thành công. Đang đợi tín hiệu...", "INFO"));
     ws.on('message', (data) => {
         if (!botState.running) return;
         try {
@@ -144,7 +133,7 @@ function initWS() {
                         botState.closedPnl += pnl;
                         botState.totalClosedGrids++;
                         pnlHistory.push({ ts: Date.now(), pnl: pnl, lev: pos.maxLev });
-                        logger(`CHỐT LỜI: ${t.s} | +${pnl.toFixed(2)}$ | DCA: ${pos.grids.length}`, "WIN");
+                        logger(`WIN: ${t.s} | +${pnl.toFixed(2)}$ | DCA: ${pos.grids.length}`, "WIN");
                         pos.status = 'WAITING';
                         pos.grids = []; 
                         saveAll();
@@ -167,11 +156,7 @@ function initWS() {
             });
         } catch(e) {}
     });
-    ws.on('error', (e) => logger("Lỗi WebSocket: " + e.message, "ERR"));
-    ws.on('close', () => {
-        logger("Mất kết nối WebSocket, đang thử lại...", "ERR");
-        setTimeout(initWS, 3000);
-    });
+    ws.on('close', () => setTimeout(initWS, 3000));
 }
 
 app.get('/api/data', (req, res) => {
@@ -204,20 +189,19 @@ app.get('/api/data', (req, res) => {
         if (closed !== 0 || unreal !== 0) levStats[l] = { closed, unreal, roi: cap > 0 ? ((closed + unreal) / cap * 100) : 0 };
     });
 
-    res.json({ state: botState, active: activeData, logs, levStats, stats: { today: getFilteredPnL(0), closedPnl: botState.closedPnl, totalClosedGrids: botState.totalClosedGrids, unrealizedPnl, runningCoins: activeData.filter(x => x.status !== 'WAITING').length, gridsGong } });
+    res.json({ 
+        state: botState, active: activeData, logs, levStats, 
+        stats: { 
+            today: getFilteredPnL(0), d7: getFilteredPnL(7), d30: getFilteredPnL(30),
+            closedPnl: botState.closedPnl, totalClosedGrids: botState.totalClosedGrids, 
+            unrealizedPnl, runningCoins: activeData.filter(x => x.status !== 'WAITING').length, gridsGong 
+        } 
+    });
 });
 
 app.post('/api/control', (req, res) => { 
     if (req.body.running !== undefined) { 
-        if (req.body.running) {
-            if (!botState.running) {
-                botState.startTime = Date.now();
-                activePositions = {}; // Clear để quét lại lệnh mới khi bấm Start
-                logger("BOT BẮT ĐẦU CHẠY...", "WIN");
-            }
-        } else {
-            logger("BOT ĐÃ DỪNG.", "ERR");
-        }
+        if (req.body.running && !botState.running) botState.startTime = Date.now();
         botState.running = req.body.running; 
     }
     ['marginValue', 'maxGrids', 'stepSize', 'tpPercent', 'mode'].forEach(f => { if(req.body[f] !== undefined) botState[f] = req.body[f]; });
@@ -227,14 +211,14 @@ app.post('/api/control', (req, res) => {
 app.post('/api/reset', (req, res) => { activePositions = {}; botState.closedPnl = 0; botState.totalClosedGrids = 0; logs = []; pnlHistory = []; saveAll(); res.json({ status: 'ok' }); });
 
 app.get('/gui', (req, res) => {
-    res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Luffy Matrix DCA</title><script src="https://cdn.tailwindcss.com"></script>
-    <style>body{background:#0b0e11;color:#eaecef;font-family:monospace} th{cursor:pointer;background:#161a1e;padding:12px 8px;border-bottom:1px solid #333;font-size:10px} th:hover{color:#f0b90b} #logBox{background:#000;padding:10px;height:220px;overflow-y:auto;font-size:11px;border:1px solid #333}
+    res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Luffy Matrix v45</title><script src="https://cdn.tailwindcss.com"></script>
+    <style>body{background:#0b0e11;color:#eaecef;font-family:monospace} th{cursor:pointer;background:#161a1e;padding:12px 8px;border-bottom:1px solid #333;text-transform:uppercase;font-size:10px} th:hover{color:#f0b90b} #logBox{background:#000;padding:10px;height:250px;overflow-y:auto;font-size:11px;border:1px solid #333}
     .modal { display: none; position: fixed; z-index: 100; left: 0; top: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); }
     .modal-content { background: #1e2329; margin: 10% auto; padding: 20px; border: 1px solid #f0b90b; width: 400px; border-radius: 8px; text-align:center; }</style>
     </head><body class="p-4 text-[11px]">
         <div id="gridModal" class="modal" onclick="closeModal()"><div class="modal-content" onclick="event.stopPropagation()">
             <h2 id="modalTitle" class="text-xl font-bold text-yellow-500 mb-4"></h2>
-            <div class="text-gray-400 mb-2">SỐ LƯỚI DCA ĐANG GỒNG</div>
+            <div class="text-gray-400 mb-2">LƯỚI DCA HIỆN TẠI</div>
             <div id="modalGrids" class="text-6xl font-black text-white mb-4">0</div>
             <div id="modalInfo" class="text-left bg-black p-4 rounded border border-gray-800 space-y-2"></div>
         </div></div>
@@ -250,7 +234,21 @@ app.get('/gui', (req, res) => {
                 <button onclick="sendCtrl(false)" class="bg-red-600 px-6 py-2 rounded font-bold hover:bg-red-500 text-sm">STOP</button>
                 <button onclick="resetBot()" class="bg-gray-700 px-3 py-2 rounded font-bold text-[9px]">RESET</button>
             </div>
-            <div id="statusIndicator" class="ml-4 px-3 py-1 rounded-full font-bold text-[10px]">OFFLINE</div>
+            <div class="border-l border-gray-700 pl-4 ml-2 text-right"><div class="text-gray-500 text-[9px]">UPTIME</div><div id="uptime" class="text-yellow-500 font-bold text-sm">0d 00:00:00</div><div id="statusIndicator" class="font-bold text-[10px] text-red-500">OFFLINE</div></div>
+        </div>
+
+        <div class="bg-[#1e2329] p-3 rounded-t-lg border-x border-t border-gray-800 flex justify-between gap-2 shadow-inner">
+            <div class="text-center flex-1 text-gray-400">HÔM NAY (7AM)<div id="pnlToday" class="text-lg font-bold text-green-400">0.00$</div></div>
+            <div class="text-center flex-1 border-x border-gray-800 text-gray-400">7 NGÀY QUA<div id="pnl7d" class="text-lg font-bold text-green-500">0.00$</div></div>
+            <div class="text-center flex-1 border-r border-gray-800 text-gray-400">30 NGÀY QUA<div id="pnl30d" class="text-lg font-bold text-emerald-500">0.00$</div></div>
+            <div class="text-center flex-1 text-yellow-500 font-bold border-r border-gray-800">PNL ĐÃ CHỐT<div id="statClosedPnl" class="text-2xl font-black">0.00$</div></div>
+            <div class="text-center flex-1 text-white font-bold">PNL TẠM TÍNH<div id="statUnreal" class="text-2xl font-black">0.00$</div></div>
+        </div>
+
+        <div class="bg-[#161a1e] p-2 flex justify-around border-x border-b border-gray-800 text-[10px] font-bold mb-2 text-gray-300">
+            <div>COINS: <span id="statCoins" class="text-blue-400">0</span></div>
+            <div>LƯỚI GỒNG: <span id="statGrids" class="text-orange-400">0</span></div>
+            <div>LƯỚI CHỐT: <span id="statClosedGrids" class="text-purple-400">0</span></div>
         </div>
 
         <div id="levStats" class="grid grid-cols-3 md:grid-cols-9 gap-1 mb-2 text-[10px]"></div>
@@ -258,11 +256,11 @@ app.get('/gui', (req, res) => {
         <div class="bg-[#1e2329] rounded-lg border border-gray-800 mb-2 overflow-hidden shadow-xl">
             <table class="w-full text-left">
                 <thead class="bg-[#161a1e]"><tr>
-                    <th onclick="setSort('symbol')">SYMBOL (XẾP THEO LEV) ↕</th>
+                    <th onclick="setSort('symbol')">SYMBOL ↕</th>
                     <th class="text-center" onclick="setSort('maxLev')">MAX LEV ↕</th>
-                    <th class="text-right" onclick="setSort('autoCapital')">VỐN TỰ ĐỘNG ↕</th>
+                    <th class="text-right" onclick="setSort('autoCapital')">BALANCE (AUTO) ↕</th>
                     <th class="text-center" onclick="setSort('currentGrid')">LƯỚI DCA ↕</th>
-                    <th class="text-right pr-4" onclick="setSort('pnl')">PNL TẠM TÍNH ↕</th>
+                    <th class="text-right pr-4" onclick="setSort('pnl')">PNL ($) ↕</th>
                 </tr></thead>
                 <tbody id="activeBody"></tbody>
             </table>
@@ -273,13 +271,13 @@ app.get('/gui', (req, res) => {
             let sortKey = 'maxLev', sortDir = -1, rawData = [], firstLoad = true;
             function setSort(k){ if(sortKey===k) sortDir*=-1; else {sortKey=k; sortDir=-1;} render(); }
             async function sendCtrl(run){ const body = { running: run, marginValue: Number(document.getElementById('marginValue').value), maxGrids: Number(document.getElementById('maxGrids').value), stepSize: Number(document.getElementById('stepSize').value), tpPercent: Number(document.getElementById('tpPercent').value), mode: document.getElementById('mode').value }; await fetch('/api/control',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); }
-            async function resetBot(){ if(confirm('XOÁ HẾT DỮ LIỆU?')) await fetch('/api/reset',{method:'POST'}); }
+            async function resetBot(){ if(confirm('RESET ALL?')) await fetch('/api/reset',{method:'POST'}); }
             
             function openDetail(symbol){
                 const p = rawData.find(x => x.symbol === symbol); if(!p || p.status === 'WAITING') return;
-                document.getElementById('modalTitle').innerText = symbol;
+                document.getElementById('modalTitle').innerText = symbol + ' (' + p.side + ' x' + p.maxLev + ')';
                 document.getElementById('modalGrids').innerText = p.currentGrid;
-                document.getElementById('modalInfo').innerHTML = \`<div>Giá entry TB: <span class="text-yellow-500 font-bold">\${p.avgPrice.toFixed(5)}</span></div><div>Giá hiện tại: <span class="text-white font-bold">\${p.currentPrice.toFixed(5)}</span></div><div>PNL: <span class="\${p.pnl>=0?'text-green-400':'text-red-500'} font-bold">\${p.pnl.toFixed(2)}$</span></div>\`;
+                document.getElementById('modalInfo').innerHTML = \`<div>Vào lệnh trung bình: <span class="text-yellow-500 font-bold">\${p.avgPrice.toFixed(5)}</span></div><div>Giá thị trường: <span class="text-white font-bold">\${p.currentPrice.toFixed(5)}</span></div><div>PNL hiện tại: <span class="\${p.pnl>=0?'text-green-400':'text-red-500'} font-bold">\${p.pnl.toFixed(4)}$</span></div>\`;
                 document.getElementById('gridModal').style.display = "block";
             }
             function closeModal(){ document.getElementById('gridModal').style.display = "none"; }
@@ -290,9 +288,9 @@ app.get('/gui', (req, res) => {
                     return \`<tr class="border-b border-gray-800 hover:bg-[#2b3139] \${p.status==='WAITING'?'opacity-20':''}"> 
                         <td onclick="openDetail('\${p.symbol}')" class="p-2 font-bold text-yellow-500 cursor-pointer underline">\${p.symbol}</td> 
                         <td class="text-center font-bold text-purple-400">x\${p.maxLev}</td>
-                        <td class="text-right font-mono text-gray-400">\${p.autoCapital.toFixed(0)}$</td> 
+                        <td class="text-right font-mono text-gray-400">\${p.displayBalance.toFixed(2)}$</td> 
                         <td class="text-center font-bold text-orange-400">\${p.currentGrid}</td> 
-                        <td class="text-right pr-4 font-bold \${p.pnl>=0?'text-green-500':'text-red-500'}">\${p.pnl.toFixed(2)}$</td> </tr>\`
+                        <td class="text-right pr-4 font-bold \${p.pnl>=0?'text-green-500':'text-red-500'} font-mono">\${p.pnl.toFixed(2)}$</td> </tr>\`
                 }).join(''); 
             }
 
@@ -302,9 +300,23 @@ app.get('/gui', (req, res) => {
                     if(firstLoad) { ['marginValue','maxGrids','stepSize','tpPercent','mode'].forEach(id => document.getElementById(id).value = d.state[id]); firstLoad = false; }
                     rawData = d.active; render();
                     
+                    document.getElementById('pnlToday').innerText = d.stats.today.toFixed(2) + '$';
+                    document.getElementById('pnl7d').innerText = d.stats.d7.toFixed(2) + '$';
+                    document.getElementById('pnl30d').innerText = d.stats.d30.toFixed(2) + '$';
+                    document.getElementById('statClosedPnl').innerText = d.stats.closedPnl.toFixed(2) + '$';
+                    document.getElementById('statUnreal').innerText = d.stats.unrealizedPnl.toFixed(2) + '$';
+                    document.getElementById('statCoins').innerText = d.stats.runningCoins;
+                    document.getElementById('statGrids').innerText = d.stats.gridsGong;
+                    document.getElementById('statClosedGrids').innerText = d.stats.totalClosedGrids;
+
                     const si = document.getElementById('statusIndicator');
                     si.innerText = d.state.running ? "RUNNING" : "STOPPED";
-                    si.className = "ml-4 px-3 py-1 rounded-full font-bold text-[10px] " + (d.state.running ? "bg-green-900 text-green-400" : "bg-red-900 text-red-400");
+                    si.className = "font-bold text-[10px] " + (d.state.running ? "text-green-500" : "text-red-500");
+
+                    if(d.state.startTime && d.state.running) {
+                        const s = Math.floor((Date.now() - d.state.startTime)/1000);
+                        document.getElementById('uptime').innerText = \`\${Math.floor(s/86400)}d \${String(Math.floor((s%86400)/3600)).padStart(2,'0')}:\${String(Math.floor((s%3600)/60)).padStart(2,'0')}:\${String(s%60).padStart(2,'0')}\`;
+                    }
 
                     document.getElementById('levStats').innerHTML = Object.entries(d.levStats).map(([lev, val]) => \`
                         <div class="bg-[#1e2329] p-1 border border-gray-800 rounded text-center">
@@ -320,7 +332,6 @@ app.get('/gui', (req, res) => {
     </body></html>`);
 });
 
-// Chạy khởi tạo
 fetchActualLeverage().then(() => { 
     initWS(); 
     app.listen(PORT, '0.0.0.0', () => logger(`BOT READY: http://localhost:${PORT}/gui`)); 
