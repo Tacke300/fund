@@ -28,7 +28,7 @@ function logger(msg, type = 'INFO') {
     const logEntry = `[${new Date().toLocaleTimeString()}] [${type}] ${msg}`;
     console.log(logEntry);
     logs.unshift(logEntry);
-    if (logs.length > 50) logs.pop();
+    if (logs.length > 40) logs.pop();
 }
 
 if (fs.existsSync(STATE_FILE)) try { Object.assign(botState, JSON.parse(fs.readFileSync(STATE_FILE))); } catch(e){}
@@ -56,7 +56,7 @@ async function fetchActualLeverage() {
                             if (!allSymbols.includes(item.symbol)) allSymbols.push(item.symbol);
                         });
                         fs.writeFileSync(LEVERAGE_FILE, JSON.stringify(symbolMaxLeverage));
-                        logger(`Đã nạp ${allSymbols.length} coin chuẩn Binance.`, "INFO");
+                        logger(`Nạp ${allSymbols.length} coin.`, "INFO");
                     }
                 } catch (e) {}
                 resolve();
@@ -65,118 +65,112 @@ async function fetchActualLeverage() {
     });
 }
 
-// STOP KHÔNG CHO MỞ LỆNH MỚI
-function startNewGrid(symbol, price) {
-    if (!botState.running) return; // FIX: Bấm Stop là không mở thêm bất cứ gì
-    if (activePositions[symbol]) return;
-    
-    const margin = botState.marginType === '$' ? botState.marginValue : (botState.totalBalance * botState.marginValue / 100);
-    const maxL = symbolMaxLeverage[symbol] || 20;
-
-    activePositions[symbol] = {
-        symbol, side: botState.mode, maxLev: maxL,
-        grids: [{ price, qty: margin, time: Date.now() }],
-    };
-    logger(`MỞ LỆNH: ${symbol} giá ${price}`, "INFO");
-}
-
-// STOP KHÔNG CHO DCA TIẾP
-function processGridLogic(symbol, currentPrice) {
-    if (!botState.running) return; // FIX: Bấm Stop là ngừng quét DCA cho các lệnh cũ
-    const pos = activePositions[symbol];
-    if (!pos || !currentPrice) return;
-
-    const totalMargin = pos.grids.reduce((sum, g) => sum + g.qty, 0);
-    const avgPrice = pos.grids.reduce((sum, g) => sum + (g.price * g.qty), 0) / totalMargin;
-    const diffPct = pos.side === 'LONG' ? (currentPrice - avgPrice) / avgPrice : (avgPrice - currentPrice) / avgPrice;
-
-    // Chốt lời
-    if (diffPct * 100 >= botState.tpPercent) {
-        const pnl = totalMargin * (diffPct * pos.maxLev);
-        botState.closedPnl += pnl; // Cộng dồn vào biến cố định
-        botState.totalClosedGrids += 1;
-        logger(`CHỐT LỜI: ${symbol} +${pnl.toFixed(2)}$`, "WIN");
-        delete activePositions[symbol];
-        saveState();
-        return;
-    }
-
-    // DCA
-    if (pos.grids.length < botState.maxGrids) {
-        const lastEntry = pos.grids[pos.grids.length - 1].price;
-        const gap = pos.side === 'LONG' ? (lastEntry - currentPrice) / lastEntry : (currentPrice - lastEntry) / lastEntry;
-        if (gap * 100 >= botState.stepSize) {
-            pos.grids.push({ price: currentPrice, qty: pos.grids[pos.grids.length-1].qty * botState.multiplier, time: Date.now() });
-            logger(`DCA: ${symbol} tầng ${pos.grids.length}`, "DCA");
-        }
-    }
-}
-
 function initWS() {
     const ws = new WebSocket('wss://fstream.binance.com/ws/!ticker@arr');
     ws.on('message', (data) => {
+        if (!botState.running) return; // DỪNG TUYỆT ĐỐI KHI STOP
+        
         const tickers = JSON.parse(data);
         tickers.forEach(t => {
             marketPrices[t.s] = parseFloat(t.c);
-            if (activePositions[t.s]) processGridLogic(t.s, marketPrices[t.s]);
-            else if (allSymbols.includes(t.s)) startNewGrid(t.s, marketPrices[t.s]);
+            const price = marketPrices[t.s];
+            
+            if (activePositions[t.s]) {
+                // Xử lý DCA & TP
+                const pos = activePositions[t.s];
+                const totalMargin = pos.grids.reduce((sum, g) => sum + g.qty, 0);
+                const avgPrice = pos.grids.reduce((sum, g) => sum + (g.price * g.qty), 0) / totalMargin;
+                const diffPct = pos.side === 'LONG' ? (price - avgPrice) / avgPrice : (avgPrice - price) / avgPrice;
+
+                if (diffPct * 100 >= botState.tpPercent) {
+                    const pnl = totalMargin * diffPct * pos.maxLev;
+                    botState.closedPnl += pnl;
+                    botState.totalClosedGrids++;
+                    logger(`CHỐT LỜI: ${t.s} +${pnl.toFixed(2)}$`, "WIN");
+                    delete activePositions[t.s];
+                    saveState();
+                } else if (pos.grids.length < botState.maxGrids) {
+                    const lastPrice = pos.grids[pos.grids.length - 1].price;
+                    const gap = pos.side === 'LONG' ? (lastPrice - price) / lastPrice : (price - lastPrice) / lastPrice;
+                    if (gap * 100 >= botState.stepSize) {
+                        pos.grids.push({ price, qty: pos.grids[pos.grids.length-1].qty * botState.multiplier });
+                        logger(`DCA: ${t.s} Lưới ${pos.grids.length}`, "DCA");
+                    }
+                }
+            } else if (allSymbols.includes(t.s)) {
+                // Mở lệnh mới
+                const margin = botState.marginType === '$' ? botState.marginValue : (botState.totalBalance * botState.marginValue / 100);
+                activePositions[t.s] = {
+                    symbol: t.s, side: botState.mode, maxLev: symbolMaxLeverage[t.s] || 20,
+                    grids: [{ price, qty: margin }]
+                };
+            }
         });
     });
 }
 
 app.get('/api/data', (req, res) => {
-    // Vốn phân bổ cho 1 coin
-    const capitalPerCoin = botState.totalBalance; 
-    
     const activeData = Object.values(activePositions).map(p => {
         const totalMargin = p.grids.reduce((sum, g) => sum + g.qty, 0);
-        const avgPrice = p.grids.reduce((sum, g) => sum + (g.price * g.qty), 0) / totalMargin;
+        const avgPrice = p.grids.reduce((sum, g) => sum + (p.price * p.qty), 0) / totalMargin; // Logic cũ bị nhầm p.price
+        const realAvg = p.grids.reduce((sum, g) => sum + (g.price * g.qty), 0) / totalMargin;
         const currentP = marketPrices[p.symbol] || 0;
-        const diff = p.side === 'LONG' ? (currentP - avgPrice) / avgPrice : (avgPrice - currentP) / avgPrice;
-        
+        const diff = p.side === 'LONG' ? (currentP - realAvg) / realAvg : (realAvg - currentP) / realAvg;
         const pnl = totalMargin * diff * p.maxLev;
-        // ROI của Symbol = (PnL / Vốn gốc của coin đó) * 100
-        const symbolRoi = (pnl / capitalPerCoin) * 100;
-
-        return { ...p, avgPrice, totalMargin, currentGrid: p.grids.length, roi: symbolRoi, pnl, currentPrice: currentP };
+        const roi = (pnl / botState.totalBalance) * 100; // ROI trên vốn phân bổ cho coin đó
+        return { ...p, avgPrice: realAvg, totalMargin, currentGrid: p.grids.length, roi, pnl, currentPrice: currentP };
     });
-
     res.json({ state: botState, active: activeData, logs });
 });
 
 app.post('/api/control', (req, res) => { 
-    if (req.body.running && !botState.running) botState.startTime = Date.now();
+    if (req.body.running && !botState.running) {
+        botState.startTime = Date.now();
+        logger("BOT STARTED", "INFO");
+    } else if (!req.body.running) {
+        logger("BOT STOPPED", "ERR");
+    }
     Object.assign(botState, req.body);
     saveState(); res.json({ status: 'ok' }); 
 });
 
 app.post('/api/reset', (req, res) => { 
     activePositions = {}; botState.closedPnl = 0; botState.totalClosedGrids = 0; logs = [];
+    logger("RESTART - CLEARED ALL", "ERR");
     saveState(); res.json({ status: 'ok' }); 
 });
 
 app.get('/gui', (req, res) => {
-    res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Luffy Matrix v6</title><script src="https://cdn.tailwindcss.com"></script>
-    <style>body{background:#0b0e11;color:#eaecef;font-family:monospace}th{cursor:pointer;background:#161a1e;padding:10px}#logConsole{background:#000;color:#0ecb81;padding:10px;height:180px;overflow-y:auto;font-size:10px;border:1px solid #333}</style>
+    res.send(fs.readFileSync('./gui.html', 'utf8')); // Bạn nên để code HTML vào file gui.html cho gọn
+});
+
+// Tích hợp HTML trực tiếp vào nếu bạn không muốn dùng file riêng
+app.get('/gui', (req, res) => {
+    res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Luffy Matrix v7</title><script src="https://cdn.tailwindcss.com"></script>
+    <style>body{background:#0b0e11;color:#eaecef;font-family:monospace} th{cursor:pointer;background:#161a1e;padding:12px} #logBox{background:#000;color:#0ecb81;padding:10px;height:200px;overflow-y:auto;font-size:10px;border:1px solid #333}</style>
     </head><body class="p-4 text-[11px]">
         
         <div class="grid grid-cols-2 md:grid-cols-6 gap-3 mb-4 text-center">
-            <div class="stat-box bg-[#1e2329] p-3 rounded text-yellow-500 font-bold"><div class="text-gray-500 text-[9px] uppercase">Uptime</div><div id="uptime">0s</div></div>
-            <div class="stat-box bg-[#1e2329] p-3 rounded"><div class="text-blue-400 uppercase text-[9px]">Coin Chạy</div><div id="statCoins" class="text-xl font-bold">0</div></div>
-            <div class="stat-box bg-[#1e2329] p-3 rounded"><div class="text-gray-500 uppercase text-[9px]">Lưới Chốt</div><div id="statGrids" class="text-purple-400 font-bold">0</div></div>
-            <div class="stat-box bg-[#1e2329] p-3 rounded"><div class="text-gray-500 uppercase text-[9px]">PnL Chốt</div><div id="statClosedPnl" class="text-green-500 font-bold">0.00$</div></div>
-            <div class="stat-box bg-[#1e2329] p-3 rounded"><div class="text-gray-500 uppercase text-[9px]">PnL Tạm tính</div><div id="statUnrealized" class="font-bold">0.00$</div></div>
-            <div class="stat-box bg-[#1e2329] p-3 rounded border-t-2 border-yellow-500"><div class="text-gray-500 uppercase text-[9px]">ROI Tổng</div><div id="statTotalRoi" class="text-xl font-bold">0.00%</div></div>
+            <div class="bg-[#1e2329] p-3 rounded">UPTIME<div id="uptime" class="text-yellow-500 font-bold">0s</div></div>
+            <div class="bg-[#1e2329] p-3 rounded text-blue-400">COINS<div id="statCoins" class="text-xl font-bold">0</div></div>
+            <div class="bg-[#1e2329] p-3 rounded">LƯỚI CHỐT<div id="statGrids" class="text-purple-400 font-bold">0</div></div>
+            <div class="bg-[#1e2329] p-3 rounded">PNL CHỐT<div id="statClosedPnl" class="text-green-500 font-bold">0.00$</div></div>
+            <div class="bg-[#1e2329] p-3 rounded text-gray-400">PNL TẠM TÍNH<div id="statUnrealized" class="font-bold text-white">0.00$</div></div>
+            <div class="bg-[#1e2329] p-3 rounded border-t-2 border-yellow-500">ROI TỔNG<div id="statTotalRoi" class="text-xl font-bold text-green-500">0.00%</div></div>
         </div>
 
         <div class="bg-[#1e2329] p-4 rounded-lg mb-4 border border-gray-800 grid grid-cols-2 md:grid-cols-7 gap-3">
             <div>VỐN/COIN ($)<input id="totalBalance" type="number" value="\${botState.totalBalance}" class="w-full bg-black text-yellow-500 p-1 rounded"></div>
-            <div>MARGIN<div class="flex"><input id="marginValue" type="number" value="\${botState.marginValue}" class="w-full bg-black text-yellow-500 p-1 rounded"><select id="marginType" class="bg-black text-white"><option value="$">$</option><option value="%">%</option></select></div></div>
+            <div>MARGIN<div class="flex"><input id="marginValue" type="number" value="\${botState.marginValue}" class="w-full bg-black text-yellow-500 p-1 rounded"><select id="marginType" class="bg-black"><option value="$">$</option><option value="%">%</option></select></div></div>
             <div>DCA MAX<input id="maxGrids" type="number" value="\${botState.maxGrids}" class="w-full bg-black text-yellow-500 p-1 rounded"></div>
             <div>GAP (%)<input id="stepSize" type="number" value="\${botState.stepSize}" class="w-full bg-black text-yellow-500 p-1 rounded"></div>
             <div>TP (%)<input id="tpPercent" type="number" value="\${botState.tpPercent}" class="w-full bg-black text-yellow-500 p-1 rounded"></div>
             <div>MODE<select id="mode" class="w-full bg-black p-1 rounded"><option value="LONG">LONG</option><option value="SHORT">SHORT</option></select></div>
-            <div class="flex gap-1 items-end"><button onclick="sendCtrl(true)" class="bg-green-600 p-1 rounded font-bold flex-1 h-8">START</button><button onclick="sendCtrl(false)" class="bg-red-600 p-1 rounded font-bold flex-1 h-8">STOP</button></div>
+            <div class="flex gap-1 items-end">
+                <button onclick="sendCtrl(true)" class="bg-green-600 p-2 rounded font-bold flex-1">START</button>
+                <button onclick="sendCtrl(false)" class="bg-red-600 p-2 rounded font-bold flex-1">STOP</button>
+                <button onclick="resetBot()" class="bg-yellow-700 p-2 rounded font-bold text-[9px]">RESTART</button>
+            </div>
         </div>
 
         <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
@@ -186,33 +180,33 @@ app.get('/gui', (req, res) => {
                         <th onclick="setSort('symbol')">SYMBOL ↕</th>
                         <th class="text-right" onclick="setSort('currentPrice')">PRICE ↕</th>
                         <th class="text-right" onclick="setSort('currentGrid')">GRID ↕</th>
-                        <th class="text-right" onclick="setSort('roi')">ROI Symbol ↕</th>
-                        <th class="text-right pr-2" onclick="setSort('pnl')">PnL Tạm ↕</th>
+                        <th class="text-right" onclick="setSort('roi')">ROI ↕</th>
+                        <th class="text-right pr-2" onclick="setSort('pnl')">PNL ↕</th>
                     </tr></thead>
                     <tbody id="activeBody"></tbody>
                 </table>
             </div>
-            <div id="logConsole"></div>
+            <div id="logBox"></div>
         </div>
 
         <script>
             let sortKey = 'pnl', sortDir = -1, rawData = [];
-            function setSort(k) { if(sortKey === k) sortDir *= -1; else { sortKey = k; sortDir = -1; } render(); }
-
+            function setSort(k){ if(sortKey===k) sortDir*=-1; else {sortKey=k; sortDir=-1;} render(); }
+            
             async function sendCtrl(run){
                 const body = { running:run, totalBalance:Number(document.getElementById('totalBalance').value), marginValue:Number(document.getElementById('marginValue').value), marginType:document.getElementById('marginType').value, maxGrids:Number(document.getElementById('maxGrids').value), stepSize:Number(document.getElementById('stepSize').value), tpPercent:Number(document.getElementById('tpPercent').value), mode:document.getElementById('mode').value, multiplier: 2.0 };
                 await fetch('/api/control',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
             }
-            
-            function render() {
-                const sorted = [...rawData].sort((a,b) => (a[sortKey] > b[sortKey] ? 1 : -1) * sortDir);
-                document.getElementById('activeBody').innerHTML = sorted.map(p => \`
-                <tr class="border-b border-gray-800">
+            async function resetBot(){ if(confirm('RESTART sẽ xóa sạch lệnh đang chạy và PnL. Tiếp tục?')) await fetch('/api/reset',{method:'POST'}); }
+
+            function render(){
+                const sorted = [...rawData].sort((a,b)=> (a[sortKey]>b[sortKey]?1:-1)*sortDir);
+                document.getElementById('activeBody').innerHTML = sorted.map(p=>\`<tr class="border-b border-gray-800">
                     <td class="p-2 font-bold text-yellow-500">\${p.symbol} <span class="text-gray-500">\${p.maxLev}x</span></td>
                     <td class="text-right font-mono">\${p.currentPrice.toFixed(4)}</td>
                     <td class="text-right">\${p.currentGrid}/\${window.maxG}</td>
-                    <td class="text-right \${p.roi>=0?'text-green-500':'text-red-500'} font-bold">\${p.roi.toFixed(2)}%</td>
-                    <td class="text-right pr-2 \${p.pnl>=0?'text-green-500':'text-red-500'} font-bold">\${p.pnl.toFixed(2)}$</td>
+                    <td class="text-right \${p.roi>=0?'text-green-500':'text-red-500'}">\${p.roi.toFixed(2)}%</td>
+                    <td class="text-right pr-2 font-bold \${p.pnl>=0?'text-green-500':'text-red-500'}">\${p.pnl.toFixed(2)}$</td>
                 </tr>\`).join('');
             }
 
@@ -221,22 +215,20 @@ app.get('/gui', (req, res) => {
                     const res = await fetch('/api/data'); const d = await res.json();
                     rawData = d.active; window.maxG = d.state.maxGrids;
                     render();
-                    
                     const unreal = d.active.reduce((s,p)=>s+p.pnl,0);
-                    // ROI Tổng = (PnL Chốt + PnL Tạm) / (Số coin chạy * Vốn mỗi coin) * 100
                     const totalInvested = d.active.length * d.state.totalBalance;
                     const totalRoi = totalInvested > 0 ? ((d.state.closedPnl + unreal) / totalInvested) * 100 : 0;
-
+                    
                     document.getElementById('statCoins').innerText = d.active.length;
                     document.getElementById('statGrids').innerText = d.state.totalClosedGrids;
                     document.getElementById('statClosedPnl').innerText = d.state.closedPnl.toFixed(2) + '$';
                     document.getElementById('statUnrealized').innerText = unreal.toFixed(2) + '$';
                     document.getElementById('statTotalRoi').innerText = totalRoi.toFixed(2) + '%';
-                    document.getElementById('logConsole').innerHTML = d.logs.join('<br>');
-
-                    if(d.state.startTime) {
-                        const s = Math.floor((Date.now() - d.state.startTime)/1000);
-                        document.getElementById('uptime').innerText = Math.floor(s/3600) + "h " + Math.floor((s%3600)/60) + "m " + (s%60) + "s";
+                    document.getElementById('logBox').innerHTML = d.logs.join('<br>');
+                    
+                    if(d.state.startTime){
+                        const s = Math.floor((Date.now()-d.state.startTime)/1000);
+                        document.getElementById('uptime').innerText = s + "s";
                     }
                 } catch(e){}
             }
@@ -247,5 +239,5 @@ app.get('/gui', (req, res) => {
 
 fetchActualLeverage().then(() => {
     initWS();
-    app.listen(PORT, '0.0.0.0', () => logger(`Bot Matrix Live tại http://localhost:${PORT}/gui`, "INFO"));
+    app.listen(PORT, '0.0.0.0', () => logger(`BOT READY: PORT ${PORT}`, "INFO"));
 });
