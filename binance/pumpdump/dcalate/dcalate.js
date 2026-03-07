@@ -6,7 +6,7 @@ import path from 'path';
 const app = express();
 app.use(express.json());
 
-const PORT = 9008;
+const PORT = 8888;
 const DATA_DIR = './candle_data';
 const LEVERAGE_FILE = './leverage_cache.json';
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR);
