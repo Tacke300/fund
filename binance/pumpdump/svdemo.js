@@ -1,15 +1,14 @@
 // ==========================================
-// CẤU HÌNH THÔNG SỐ CHIẾN THUẬT (DỄ CHỈNH)
+// CẤU HÌNH THÔNG SỐ (DỄ CHỈNH)
 // ==========================================
-const TP_PERCENT = 0.3;           
-const SL_PERCENT = 5.0;           
-const MIN_VOLATILITY_TO_SAVE = 5; 
-const COOLDOWN_MINUTES = 15;      
-
-// --- LOGIC CHIẾN THUẬT LUFFY ---
-const MAX_LOSE_STREAK = 5;        // Thua liên tiếp 5 lần thì Reset
-const MAX_EQUITY_PERCENT = 0.6;   // Lệnh chạm 50% tổng vốn (Equity) thì Reset
+const TP_BASE = 0.3;              // Chốt lời cơ bản (%)
+const SL_BASE = 0.9;              // Cắt lỗ giữ nguyên (%)
+const MIN_VOLATILITY = 5; 
+const COOLDOWN_MINUTES = 10;      
 const PORT = 9000;
+
+// Cơ chế Gỡ (Revenge Trade)
+const MAX_REVENGE_STEPS = 3;      // Tối đa 3 lần gỡ x2
 // ==========================================
 
 import WebSocket from 'ws';
@@ -68,42 +67,63 @@ function initWS() {
     ws.on('message', (data) => {
         const tickers = JSON.parse(data);
         const now = Date.now();
+        
         tickers.forEach(t => {
             const s = t.s, p = parseFloat(t.c);
             if (!coinData[s]) coinData[s] = { symbol: s, prices: [] };
             coinData[s].prices.push({ p, t: now });
             if (coinData[s].prices.length > 100) coinData[s].prices.shift();
+            
             const c1 = calculateChange(coinData[s].prices, 1), c5 = calculateChange(coinData[s].prices, 5), c15 = calculateChange(coinData[s].prices, 15);
             coinData[s].live = { c1, c5, c15, currentPrice: p };
             
             const allHistory = Array.from(historyMap.values());
-            const hasPendingOverall = allHistory.some(h => h.status === 'PENDING');
-
-            const pending = allHistory.find(h => h.symbol === s && h.status === 'PENDING');
+            const pendingOrders = allHistory.filter(h => h.status === 'PENDING');
+            
+            const pending = pendingOrders.find(h => h.symbol === s);
             if (pending) {
                 const diff = ((p - pending.snapPrice) / pending.snapPrice) * 100;
-                const win = pending.type === 'UP' ? diff >= TP_PERCENT : diff <= -TP_PERCENT; 
-                const lose = pending.type === 'UP' ? diff <= -SL_PERCENT : diff >= SL_PERCENT; 
+                const currentTP = pending.dynamicTP || TP_BASE; // Lấy TP riêng của lệnh đó
+                
+                const win = pending.type === 'UP' ? diff >= currentTP : diff <= -currentTP; 
+                const lose = pending.type === 'UP' ? diff <= -SL_BASE : diff >= SL_BASE; 
 
                 if (win || lose) { 
                     pending.status = win ? 'WIN' : 'LOSE'; 
                     pending.finalPrice = p; 
                     pending.endTime = now;
-                    pending.pnlPercent = win ? TP_PERCENT : -SL_PERCENT;
-                    lastTradeClosed[s] = now; 
+                    pending.pnlPercent = win ? currentTP : -SL_BASE;
+                    lastTradeClosed[s] = now;
+
+                    if (pending.status === 'LOSE') {
+                        let step = (pending.revengeStep || 0) + 1;
+                        if (step <= MAX_REVENGE_STEPS) {
+                            const revType = pending.type === 'UP' ? 'DOWN' : 'UP';
+                            historyMap.set(`${s}_${now + 1}`, {
+                                symbol: s, startTime: now + 1, snapPrice: p,
+                                type: revType, status: 'PENDING',
+                                maxLev: symbolMaxLeverage[s] || 20,
+                                revengeStep: step,
+                                dynamicTP: TP_BASE * Math.pow(2, step), // X2 TP theo mỗi lần x2 Margin
+                                snapVol: { c1, c5, c15 }
+                            });
+                        }
+                    }
                     fs.writeFileSync(HISTORY_FILE, JSON.stringify(Array.from(historyMap.values()))); 
                 }
             }
             
             const isCooldown = lastTradeClosed[s] && (now - lastTradeClosed[s] < COOLDOWN_MINUTES * 60000);
-            if (Math.max(Math.abs(c1), Math.abs(c5), Math.abs(c15)) >= MIN_VOLATILITY_TO_SAVE && !hasPendingOverall && !isCooldown) {
+            const isOccupied = pendingOrders.some(h => h.symbol === s);
+            
+            if (!isOccupied && !isCooldown && Math.max(Math.abs(c1), Math.abs(c5), Math.abs(c15)) >= MIN_VOLATILITY) {
                 historyMap.set(`${s}_${now}`, { 
                     symbol: s, startTime: now, snapPrice: p, 
                     type: (c1+c5+c15 >= 0) ? 'UP' : 'DOWN', status: 'PENDING', 
                     maxLev: symbolMaxLeverage[s] || 20,
-                    snapVol: { c1, c5, c15 },
-                    tpTarget: TP_PERCENT,
-                    slTarget: SL_PERCENT
+                    revengeStep: 0,
+                    dynamicTP: TP_BASE, // Lệnh đầu tiên TP chuẩn
+                    snapVol: { c1, c5, c15 }
                 });
             }
         });
@@ -115,218 +135,142 @@ app.get('/api/data', (req, res) => {
     res.json({ 
         live: Object.entries(coinData).filter(([_, v]) => v.live).map(([s,v])=>({symbol:s,...v.live})).sort((a,b)=>Math.abs(b.c1)-Math.abs(a.c1)).slice(0,15),
         pending: all.filter(h => h.status === 'PENDING'),
-        history: all.filter(h => h.status !== 'PENDING').sort((a,b)=>a.endTime-b.endTime),
-        config: { tp: TP_PERCENT, sl: SL_PERCENT, maxLose: MAX_LOSE_STREAK, maxEquity: MAX_EQUITY_PERCENT }
+        history: all.filter(h => h.status !== 'PENDING').sort((a,b)=>a.endTime-b.endTime)
     });
 });
 
 app.get('/gui', (req, res) => {
-    res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Binance Luffy Pro v2</title><script src="https://cdn.tailwindcss.com"></script><script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Luffy Revenge Pro</title><script src="https://cdn.tailwindcss.com"></script><script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&display=swap');
-        body { background: #0b0e11; color: #eaecef; font-family: 'IBM Plex Sans', sans-serif; margin: 0; padding: 0; }
+        body { background: #0b0e11; color: #eaecef; font-family: sans-serif; }
         .up { color: #0ecb81; } .down { color: #f6465d; }
-        .bg-main { background: #0b0e11; } .bg-card { background: #1e2329; }
-        #user-id { color: #fcd535; font-size: 1.2rem; font-weight: 900; font-style: italic; cursor: pointer; }
-        .text-gray-custom { color: #848e9c; } .text-10 { font-size: 10px; } .text-12 { font-size: 12px; }
-        ::-webkit-scrollbar { width: 0px; }
+        .bg-card { background: #1e2329; }
     </style></head><body>
     
-    <div class="p-4 bg-main sticky top-0 z-50 shadow-xl border-b border-zinc-800">
-        <div id="setup" class="grid grid-cols-2 gap-2 mb-4 bg-card p-3 rounded-lg border border-zinc-700">
-            <input id="balanceInp" type="number" value="1000" class="bg-black border border-zinc-700 p-2 rounded w-full text-yellow-500 font-bold outline-none text-sm">
-            <input id="marginInp" type="text" value="10%" class="bg-black border border-zinc-700 p-2 rounded w-full text-yellow-500 font-bold outline-none text-sm">
-            <div class="flex items-center gap-2 bg-black border border-zinc-700 p-2 rounded w-full">
-                <input id="luffyMode" type="checkbox" class="w-4 h-4 accent-yellow-500">
-                <label class="text-[10px] font-bold text-gray-custom uppercase">Luffy Strategy</label>
-            </div>
-            <button onclick="start()" class="bg-[#fcd535] text-black px-4 py-2 rounded font-bold uppercase text-xs">Start Bot</button>
+    <div class="p-4 sticky top-0 bg-[#0b0e11] z-50 border-b border-zinc-800">
+        <div id="setup" class="grid grid-cols-3 gap-2 mb-4 bg-card p-3 rounded-lg border border-zinc-700">
+            <div><label class="text-[10px] text-gray-400">VỐN</label><input id="balanceInp" type="number" value="1000" class="bg-black border border-zinc-700 p-1 rounded w-full text-yellow-500 font-bold"></div>
+            <div><label class="text-[10px] text-gray-400">MARGIN %</label><input id="marginInp" type="text" value="10%" class="bg-black border border-zinc-700 p-1 rounded w-full text-yellow-500 font-bold"></div>
+            <div><label class="text-[10px] text-gray-400">MAX SLOTS</label><input id="maxSlots" type="number" value="3" class="bg-black border border-zinc-700 p-1 rounded w-full text-white font-bold"></div>
+            <button onclick="start()" class="col-span-3 bg-yellow-500 text-black py-2 rounded font-bold uppercase text-xs mt-2">Kích hoạt</button>
         </div>
 
         <div id="active" class="hidden flex justify-between items-center mb-4">
-             <div class="flex items-center gap-2"><img src="https://bin.bnbstatic.com/static/images/common/favicon.ico" class="w-5"><h1 class="font-bold italic text-white tracking-tighter">BINANCE <span class="text-[#fcd535]">FUTURES</span></h1></div>
-             <div id="user-id" onclick="stop()">Monkey_D_Luffy</div>
+             <h1 class="font-bold italic text-white uppercase text-sm">BINANCE <span class="text-yellow-500">REVENGE</span></h1>
+             <button onclick="stop()" class="text-xs bg-red-500/20 text-red-500 px-2 py-1 rounded">STOP</button>
         </div>
 
-        <div class="text-gray-custom text-12 mb-1 uppercase font-bold">Số dư ký quỹ dồn (Equity)</div>
-        <div class="flex items-end gap-2 mb-4">
-            <span id="displayBal" class="text-3xl font-bold tracking-tighter text-white">0.00</span>
-            <span class="text-base font-medium text-white mb-1">USDT</span>
-        </div>
-
-        <div class="grid grid-cols-2 gap-4 text-sm border-t border-zinc-800 pt-3">
-            <div><div class="text-gray-custom text-10 uppercase">Số dư ví</div><div id="walletBal" class="font-bold text-white">0.00</div></div>
-            <div class="text-right"><div class="text-gray-custom text-10 uppercase">PnL chưa chốt</div><div id="unPnl" class="font-bold">0.00</div></div>
+        <div class="flex justify-between items-end">
+            <div><div class="text-[10px] text-gray-400 uppercase">Equity (Vốn + Lãi)</div><div id="displayBal" class="text-2xl font-bold text-white">0.00</div></div>
+            <div class="text-right"><div class="text-[10px] text-gray-400 uppercase">PnL</div><div id="unPnl" class="font-bold text-lg">0.00</div></div>
         </div>
     </div>
 
-    <div class="px-4 py-2 bg-main"><div style="height: 100px;"><canvas id="mainChart"></canvas></div></div>
+    <div class="p-4">
+        <div class="text-xs font-bold text-gray-400 uppercase mb-3 tracking-widest">Đang thực thi (<span id="slotCount">0</span> Slots)</div>
+        <div id="pendingContainer" class="space-y-3 mb-6"></div>
 
-    <div class="px-4 mt-4">
-        <div class="flex gap-6 mb-4 border-b border-zinc-800 text-sm font-bold text-gray-custom uppercase">
-            <span class="text-white border-b-2 border-[#fcd535] pb-2">Vị thế đang mở</span>
-        </div>
-        <div id="pendingContainer" class="space-y-4 pb-6"></div>
-    </div>
-
-    <div class="px-4 mb-4">
-        <div class="bg-card rounded-lg p-3">
-             <div class="text-10 font-bold text-gray-custom mb-3 uppercase italic border-b border-zinc-800 pb-1">Biến động thị trường</div>
-             <table class="w-full text-12 text-left">
-                <thead><tr class="text-gray-custom text-[10px] uppercase"><th class="pb-2">Coin</th><th class="text-center">1m</th><th class="text-center">5m</th><th class="text-right">15m</th></tr></thead>
+        <div class="bg-card rounded-lg p-3 mb-6 border border-zinc-800">
+            <div class="text-[10px] font-bold text-gray-400 mb-2 uppercase border-b border-zinc-800 pb-1">Thị trường</div>
+            <table class="w-full text-[11px] text-left">
                 <tbody id="liveBody"></tbody>
-             </table>
+            </table>
         </div>
-    </div>
 
-    <div class="px-4 pb-32">
         <div class="bg-card rounded-lg p-3">
-            <div class="text-10 font-bold text-gray-custom mb-3 uppercase italic border-b border-zinc-800 pb-1">Lịch sử giao dịch & Quản lý vốn</div>
+            <div class="text-[10px] font-bold text-gray-400 mb-2 uppercase border-b border-zinc-800 pb-1">Lịch sử dồn vốn</div>
             <div class="overflow-x-auto">
                 <table class="w-full text-[9px] text-left">
-                    <thead class="text-gray-custom uppercase border-b border-zinc-800">
-                        <tr>
-                            <th class="pb-2">Mở/Đóng</th>
-                            <th class="pb-2">Coin/Snap</th>
-                            <th class="pb-2 text-center">Lev</th>
-                            <th class="pb-2">Vào/Ra</th>
-                            <th class="pb-2">Margin</th>
-                            <th class="pb-2 text-white">PnL</th>
-                            <th class="pb-2 text-right">Balance</th>
-                        </tr>
-                    </thead>
-                    <tbody id="historyBody" class="text-zinc-300"></tbody>
+                    <thead><tr class="text-gray-500 uppercase"><th>Coin</th><th>Gỡ</th><th>Margin</th><th>TP (%)</th><th>PnL</th><th>Equity</th></tr></thead>
+                    <tbody id="historyBody"></tbody>
                 </table>
             </div>
         </div>
     </div>
 
     <script>
-    let running = false, initialBal = 1000, historyLog = [], luffyActive = false;
+    let running = false, initialBal = 1000, slots = 3;
     
-    if(localStorage.getItem('bot_v6')) {
-        const saved = JSON.parse(localStorage.getItem('bot_v6'));
-        running = !!saved.running; initialBal = parseFloat(saved.initialBal) || 1000; historyLog = saved.historyLog || [];
-        luffyActive = !!saved.luffyActive;
-        document.getElementById('luffyMode').checked = luffyActive;
-        if(running) { document.getElementById('setup').style.display='none'; document.getElementById('active').classList.remove('hidden'); }
-    }
-    function saveConfig() { localStorage.setItem('bot_v6', JSON.stringify({ running, initialBal, historyLog, luffyActive })); }
-
-    const chart = new Chart(document.getElementById('mainChart').getContext('2d'), {
-        type: 'line', data: { labels: historyLog.map((_,i)=>i), datasets: [{ data: historyLog.map(pt=>pt.b), borderColor: '#fcd535', borderWidth: 1.5, tension: 0.4, pointRadius: 0, fill: true, backgroundColor: 'rgba(252,213,53,0.05)' }] },
-        options: { maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { display: false }, y: { display: false } } }
-    });
-
     function start() { 
-        running = true; initialBal = parseFloat(document.getElementById('balanceInp').value) || 1000; 
-        luffyActive = document.getElementById('luffyMode').checked;
-        document.getElementById('setup').style.display='none'; document.getElementById('active').classList.remove('hidden'); saveConfig(); 
+        running = true; 
+        initialBal = parseFloat(document.getElementById('balanceInp').value);
+        slots = parseInt(document.getElementById('maxSlots').value);
+        document.getElementById('setup').classList.add('hidden');
+        document.getElementById('active').classList.remove('hidden');
     }
-    function stop() { running = false; document.getElementById('setup').style.display='grid'; document.getElementById('active').classList.add('hidden'); saveConfig(); }
+    function stop() { running = false; document.getElementById('setup').classList.remove('hidden'); document.getElementById('active').classList.add('hidden'); }
 
     async function update() {
+        if(!running) return;
         try {
             const res = await fetch('/api/data'); const d = await res.json();
-            const now = Date.now();
             let mVal = document.getElementById('marginInp').value;
-            let mNum = parseFloat(mVal) || 0;
-
-            document.getElementById('liveBody').innerHTML = (d.live || []).map(c => 
-                \`<tr class="border-b border-zinc-800/50"><td class="py-2 font-bold text-white">\${c.symbol}</td>
-                <td class="\${c.c1>=0?'up':'down'} text-center">\${c.c1}%</td>
-                <td class="\${c.c5>=0?'up':'down'} text-center">\${c.c5}%</td>
-                <td class="\${c.c15>=0?'up':'down'} text-right">\${c.c15}%</td></tr>\`
-            ).join('');
-
+            let mNum = parseFloat(mVal);
             let runningBal = initialBal;
-            let loseStreak = 0;
-            let lastMargin = 0;
+            
+            let historyRows = (d.history || []).map((h) => {
+                let mBase = mVal.includes('%') ? (runningBal * mNum / 100) : mNum;
+                let mUsed = mBase * Math.pow(2, h.revengeStep || 0);
+                if (mUsed > runningBal * 0.5) mUsed = runningBal * 0.5;
 
-            let historyRows = (d.history || []).map((h, index) => {
-                let currentEquity = runningBal; 
-                if (index === 0 || lastMargin === 0) {
-                    lastMargin = mVal.includes('%') ? (currentEquity * mNum / 100) : mNum;
-                }
-
-                let marginToUse = lastMargin;
-                let pnl = marginToUse * (h.maxLev || 20) * ((h.pnlPercent || 0) / 100);
+                let pnl = mUsed * (h.maxLev || 20) * (h.pnlPercent / 100);
                 runningBal += pnl;
 
-                let row = \`<tr class="border-b border-zinc-800/30">
-                    <td class="py-2 text-zinc-500">\${new Date(h.startTime).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}<br>\${new Date(h.endTime).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}</td>
-                    <td><b class="text-white">\${h.symbol}</b><br><span class="text-zinc-500">\${h.snapVol.c1}|\${h.snapVol.c5}</span></td>
-                    <td class="text-center">\${h.maxLev}x</td>
-                    <td>\${(h.snapPrice||0).toFixed(4)}<br>\${(h.finalPrice||0).toFixed(4)}</td>
-                    <td class="font-bold text-yellow-500">\${marginToUse.toFixed(1)}</td>
-                    <td class="font-bold \${pnl>=0?'up':'down'}">\${pnl>=0?'+':''}\${pnl.toFixed(2)}</td>
-                    <td class="text-right font-bold">\${runningBal.toFixed(1)}</td>
+                return \`<tr class="border-b border-zinc-800/50">
+                    <td class="py-2 text-white font-bold">\${h.symbol}</td>
+                    <td>\${h.revengeStep > 0 ? 'X'+Math.pow(2,h.revengeStep) : '-'}</td>
+                    <td class="text-yellow-500">\${mUsed.toFixed(1)}</td>
+                    <td class="text-zinc-400">\${(h.dynamicTP || 0).toFixed(2)}%</td>
+                    <td class="\${pnl>=0?'up':'down'} font-bold">\${pnl.toFixed(2)}</td>
+                    <td class="text-right">\${runningBal.toFixed(1)}</td>
                 </tr>\`;
-
-                if (luffyActive) {
-                    if (h.status === 'WIN') { loseStreak = 0; lastMargin = marginToUse * 2; } 
-                    else { loseStreak++; lastMargin = marginToUse / 2; }
-                    if (loseStreak >= d.config.maxLose || marginToUse >= (currentEquity * d.config.maxEquity)) {
-                        lastMargin = mVal.includes('%') ? (runningBal * mNum / 100) : mNum;
-                        loseStreak = 0;
-                    }
-                } else {
-                    lastMargin = mVal.includes('%') ? (runningBal * mNum / 100) : mNum;
-                }
-                return row;
             });
-
             document.getElementById('historyBody').innerHTML = historyRows.reverse().join('');
 
-            let marginForPending = lastMargin || (mVal.includes('%') ? (runningBal * mNum / 100) : mNum);
-            let totalUnPnl = 0;
-            document.getElementById('pendingContainer').innerHTML = (d.pending || []).map(h => {
-                let livePrice = (d.live || []).find(c => c.symbol === h.symbol)?.currentPrice || h.snapPrice;
-                let diff = ((livePrice - h.snapPrice) / h.snapPrice) * 100;
-                let roi = (h.type === 'UP' ? diff : -diff) * (h.maxLev || 20);
-                let pnl = marginForPending * roi / 100;
-                totalUnPnl += pnl;
+            let totalUnPnl = 0, activeSlots = 0, pendingHTML = "";
+            let displayOrders = d.pending.sort((a,b) => (b.revengeStep || 0) - (a.revengeStep || 0));
 
-                let tpPrice = h.type === 'UP' ? h.snapPrice * (1 + d.config.tp/100) : h.snapPrice * (1 - d.config.tp/100);
-                let slPrice = h.type === 'UP' ? h.snapPrice * (1 - d.config.sl/100) : h.snapPrice * (1 + d.config.sl/100);
-                let liqPrice = h.type === 'UP' ? h.snapPrice * (1 - 0.8 / h.maxLev) : h.snapPrice * (1 + 0.8 / h.maxLev);
+            displayOrders.forEach(h => {
+                if (activeSlots < slots || h.revengeStep > 0) {
+                    activeSlots++;
+                    let mBase = mVal.includes('%') ? (runningBal * mNum / 100) : mNum;
+                    let mUsed = mBase * Math.pow(2, h.revengeStep || 0);
+                    if (mUsed > runningBal * 0.5) mUsed = runningBal * 0.5;
 
-                return \`<div class="bg-card p-3 rounded-md border-l-4 \${h.type==='UP'?'border-green-500':'border-red-500'}">
-                    <div class="flex justify-between items-start mb-2">
-                        <div><div class="text-lg font-bold text-white">\${h.symbol} <span class="text-[10px] text-yellow-500">\${h.maxLev}x</span></div><div class="text-[10px] \${h.type==='UP'?'up':'down'} font-bold">\${h.type} | ISOLATED</div></div>
-                        <div class="text-right"><div class="text-lg font-bold \${pnl>=0?'up':'down'}">\${pnl>=0?'+':''}\${pnl.toFixed(2)}</div><div class="text-[11px]">ROI \${roi.toFixed(2)}%</div></div>
-                    </div>
-                    <div class="grid grid-cols-3 gap-2 mt-3 text-[10px] border-t border-zinc-800 pt-2">
-                        <div><div class="text-gray-custom uppercase">Ký quỹ</div><div class="text-white font-bold">\${marginForPending.toFixed(2)}</div></div>
-                        <div><div class="text-gray-custom uppercase">Giá vào</div><div class="text-white">\${h.snapPrice.toFixed(4)}</div></div>
-                        <div class="text-right"><div class="text-gray-custom uppercase">Giá hiện tại</div><div class="text-white">\${livePrice.toFixed(4)}</div></div>
-                    </div>
-                    <div class="grid grid-cols-3 gap-2 mt-2 text-[10px]">
-                        <div><div class="text-gray-custom uppercase">Thanh lý</div><div class="text-orange-400">\${liqPrice.toFixed(4)}</div></div>
-                        <div><div class="text-gray-custom uppercase">TP Target</div><div class="up">\${tpPrice.toFixed(4)}</div></div>
-                        <div class="text-right"><div class="text-gray-custom uppercase">SL Target</div><div class="down">\${slPrice.toFixed(4)}</div></div>
-                    </div>
-                </div>\`;
-            }).join('');
+                    let liveP = (d.live.find(c => c.symbol === h.symbol)?.currentPrice) || h.snapPrice;
+                    let roi = (h.type === 'UP' ? (liveP - h.snapPrice)/h.snapPrice : (h.snapPrice - liveP)/h.snapPrice) * (h.maxLev || 20) * 100;
+                    let pnl = mUsed * roi / 100;
+                    totalUnPnl += pnl;
 
-            if(running) {
-                let totalEquity = runningBal + totalUnPnl;
-                document.getElementById('displayBal').innerText = totalEquity.toFixed(2);
-                document.getElementById('walletBal').innerText = runningBal.toFixed(2);
-                document.getElementById('unPnl').innerText = (totalUnPnl >= 0 ? '+' : '') + totalUnPnl.toFixed(2);
-                document.getElementById('unPnl').className = 'font-bold ' + (totalUnPnl >= 0 ? 'up' : 'down');
-
-                if (historyLog.length === 0 || now - historyLog[historyLog.length-1].t >= 60000) { 
-                    historyLog.push({t: now, b: totalEquity}); 
-                    if(historyLog.length > 100) historyLog.shift();
-                    saveConfig(); 
+                    pendingHTML += \`<div class="bg-card p-3 rounded border-l-4 \${h.revengeStep>0?'border-yellow-500':'border-zinc-500'}">
+                        <div class="flex justify-between items-center">
+                            <b class="text-white">\${h.symbol} \${h.revengeStep>0?'(GỠ '+h.revengeStep+')':''}</b>
+                            <b class="\${pnl>=0?'up':'down'}">\${pnl.toFixed(2)}</b>
+                        </div>
+                        <div class="grid grid-cols-2 text-[10px] mt-2 text-gray-400">
+                            <div>Margin: <span class="text-yellow-500">\${mUsed.toFixed(1)}</span> (\${h.type})</div>
+                            <div class="text-right">TP Target: <span class="text-green-500">\${(h.dynamicTP).toFixed(2)}%</span></div>
+                            <div>ROI: <span class="\${roi>=0?'up':'down'}">\${roi.toFixed(2)}%</span></div>
+                            <div class="text-right">SL: <span class="text-red-500">\${SL_BASE}%</span></div>
+                        </div>
+                    </div>\`;
                 }
-                chart.data.labels = historyLog.map((_,i)=>i); chart.data.datasets[0].data = historyLog.map(pt=>pt.b); chart.update('none');
-            }
+            });
+
+            document.getElementById('pendingContainer').innerHTML = pendingHTML;
+            document.getElementById('slotCount').innerText = activeSlots;
+            document.getElementById('displayBal').innerText = (runningBal + totalUnPnl).toFixed(2);
+            document.getElementById('unPnl').innerText = (totalUnPnl >= 0 ? '+' : '') + totalUnPnl.toFixed(2);
+            document.getElementById('unPnl').className = totalUnPnl >= 0 ? 'up font-bold' : 'down font-bold';
+
+            document.getElementById('liveBody').innerHTML = d.live.slice(0,10).map(c => 
+                \`<tr class="border-b border-zinc-800/30"><td class="py-1 font-bold">\${c.symbol}</td><td class="up text-center">\${c.c1}%</td><td class="down text-center">\${c.c5}%</td><td class="text-right">\${c.c15}%</td></tr>\`
+            ).join('');
+
         } catch(e) {}
     }
-    setInterval(update, 2000); update();
+    setInterval(update, 2000);
     </script></body></html>`);
 });
 
