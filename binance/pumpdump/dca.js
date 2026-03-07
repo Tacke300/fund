@@ -32,6 +32,7 @@ function logger(msg, type = 'INFO') {
     if (logs.length > 100) logs.pop();
 }
 
+// Khôi phục dữ liệu từ file
 if (fs.existsSync(STATE_FILE)) try { Object.assign(botState, JSON.parse(fs.readFileSync(STATE_FILE))); } catch(e){}
 if (fs.existsSync(LEVERAGE_FILE)) try { symbolMaxLeverage = JSON.parse(fs.readFileSync(LEVERAGE_FILE)); } catch(e){}
 if (fs.existsSync(HISTORY_FILE)) try { pnlHistory = JSON.parse(fs.readFileSync(HISTORY_FILE)); } catch(e){}
@@ -112,8 +113,7 @@ function initWS() {
 
                 if (activePositions[t.s]) {
                     const pos = activePositions[t.s];
-                    if (pos.status === 'WAITING') return;
-
+                    
                     let totalSize = 0, totalCost = 0;
                     pos.grids.forEach(g => {
                         const size = (g.qty * pos.maxLev) / g.price;
@@ -126,24 +126,20 @@ function initWS() {
 
                     if (diffPct * 100 >= botState.tpPercent) {
                         const closedRound = {
-                            tsOpen: pos.tsOpen,
-                            tsClose: Date.now(),
-                            symbol: t.s,
-                            side: pos.side,
-                            lev: pos.maxLev,
-                            pnl: pnl,
-                            avgPrice: avgPrice,
-                            closePrice: price,
-                            gridsCount: pos.grids.length,
-                            totalMargin: pos.grids.length * botState.marginValue,
+                            tsOpen: pos.tsOpen, tsClose: Date.now(),
+                            symbol: t.s, side: pos.side, lev: pos.maxLev,
+                            pnl: pnl, avgPrice: avgPrice, closePrice: price,
+                            gridsCount: pos.grids.length, totalMargin: pos.grids.length * botState.marginValue,
                             details: [...pos.grids]
                         };
+                        // LƯU VÀO LỊCH SỬ VĨNH VIỄN
                         pnlHistory.push(closedRound);
                         botState.closedPnl += pnl;
                         botState.totalClosedGrids++;
                         logger(`WIN: ${t.s} | +${pnl.toFixed(2)}$`, "WIN");
-                        pos.status = 'WAITING';
-                        pos.grids = []; 
+                        
+                        // Xóa vị thế đang gồng để bot tự động mở vòng mới ngay sau đó
+                        delete activePositions[t.s];
                         saveAll();
                     } else if (pos.grids.length < botState.maxGrids) {
                         const lastEntry = pos.grids[pos.grids.length - 1].price;
@@ -158,8 +154,7 @@ function initWS() {
                     activePositions[t.s] = {
                         symbol: t.s, side: botState.mode, maxLev: maxLev,
                         tsOpen: Date.now(),
-                        grids: [{ price, qty: botState.marginValue, time: Date.now() }], 
-                        status: 'TRADING'
+                        grids: [{ price, qty: botState.marginValue, time: Date.now() }]
                     };
                 }
             });
@@ -173,7 +168,7 @@ app.get('/api/data', (req, res) => {
     const activeData = Object.values(activePositions).map(p => {
         const currentP = marketPrices[p.symbol] || 0;
         let pnl = 0;
-        if (p.status !== 'WAITING' && currentP > 0) {
+        if (currentP > 0) {
             let totalSize = 0, totalCost = 0;
             p.grids.forEach(g => {
                 const size = (g.qty * p.maxLev) / g.price;
@@ -199,7 +194,7 @@ app.get('/api/data', (req, res) => {
 
     res.json({ 
         state: botState, active: activeData, logs, levStats, history: pnlHistory,
-        stats: { today: getFilteredPnL(0), d7: getFilteredPnL(7), d30: getFilteredPnL(30), closedPnl: botState.closedPnl, unrealizedPnl, totalGridsMatched, totalGridsPossible: activeData.filter(x => x.status !== 'WAITING').length * botState.maxGrids } 
+        stats: { today: getFilteredPnL(0), d7: getFilteredPnL(7), d30: getFilteredPnL(30), closedPnl: botState.closedPnl, unrealizedPnl, totalGridsMatched, totalGridsPossible: activeData.length * botState.maxGrids } 
     });
 });
 
@@ -212,7 +207,7 @@ app.post('/api/control', (req, res) => {
 app.post('/api/reset', (req, res) => { activePositions = {}; botState.closedPnl = 0; botState.totalClosedGrids = 0; logs = []; pnlHistory = []; saveAll(); res.json({ status: 'ok' }); });
 
 app.get('/gui', (req, res) => {
-    res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Luffy Matrix Pro</title><script src="https://cdn.tailwindcss.com"></script>
+    res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Luffy Matrix Matrix</title><script src="https://cdn.tailwindcss.com"></script>
     <style>body{background:#0b0e11;color:#eaecef;font-family:monospace} th{cursor:pointer;background:#161a1e;padding:10px 8px;border-bottom:1px solid #333;font-size:10px}
     #logBox{background:#000;padding:10px;height:150px;overflow-y:auto;font-size:11px;border:1px solid #333}
     .modal { display: none; position: fixed; z-index: 100; left: 0; top: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.9); }
@@ -234,8 +229,8 @@ app.get('/gui', (req, res) => {
             <div class="w-[70px]">TP %<input id="tpPercent" type="number" step="0.1" class="w-full bg-black text-yellow-500 p-2 rounded border border-gray-700 mt-1"></div>
             <div class="w-[90px]">HƯỚNG<select id="mode" class="w-full bg-black p-2 rounded border border-gray-700 mt-1 text-yellow-500"><option value="LONG">LONG</option><option value="SHORT">SHORT</option></select></div>
             <div class="flex gap-2 ml-auto">
-                <button onclick="sendCtrl(true)" class="bg-green-600 px-10 py-3 rounded font-black text-sm hover:scale-105 transition-all shadow-[0_0_15px_rgba(22,163,74,0.4)]">START</button>
-                <button onclick="sendCtrl(false)" class="bg-red-600 px-10 py-3 rounded font-black text-sm hover:scale-105 transition-all shadow-[0_0_15px_rgba(220,38,38,0.4)]">STOP</button>
+                <button onclick="sendCtrl(true)" class="bg-green-600 px-10 py-3 rounded font-black text-sm hover:scale-105 shadow-[0_0_15px_rgba(22,163,74,0.4)]">START</button>
+                <button onclick="sendCtrl(false)" class="bg-red-600 px-10 py-3 rounded font-black text-sm hover:scale-105 shadow-[0_0_15px_rgba(220,38,38,0.4)]">STOP</button>
                 <button onclick="resetBot()" class="bg-gray-800 px-4 py-3 rounded text-[9px] hover:bg-black transition-all">RESET</button>
             </div>
         </div>
@@ -268,13 +263,14 @@ app.get('/gui', (req, res) => {
             async function resetBot(){ if(confirm('RESET ALL?')) await fetch('/api/reset',{method:'POST'}); }
             
             function openDetail(symbol){
+                // Lọc lịch sử của duy nhất coin này từ kho historyData chung
                 const rounds = historyData.filter(h => h.symbol === symbol).reverse();
-                document.getElementById('modalTitle').innerText = symbol + " - LỊCH SỬ VÒNG LỆNH";
+                document.getElementById('modalTitle').innerText = symbol + " - LỊCH SỬ TẤT CẢ CÁC VÒNG";
                 document.getElementById('roundDetail').classList.add('hidden');
                 document.getElementById('roundsList').innerHTML = rounds.map((r, i) => \`
                     <div class="round-card" onclick="showRoundDetail('\${r.tsClose}')">
                         <div class="flex justify-between items-center mb-1"><span class="font-black text-yellow-500 text-sm">VÒNG #\${rounds.length - i}</span><span class="\${r.pnl>=0?'text-green-400':'text-red-500'} font-bold">+\${r.pnl.toFixed(2)}$</span></div>
-                        <div class="text-[9px] text-gray-400 flex justify-between"><span>DCA: \${r.gridsCount} | x\${r.lev}</span><span>\${new Date(r.tsClose).toLocaleTimeString()}</span></div>
+                        <div class="text-[9px] text-gray-400 flex justify-between"><span>DCA: \${r.gridsCount} | x\${r.lev}</span><span>\${new Date(r.tsClose).toLocaleString()}</span></div>
                     </div>\`).join('');
                 document.getElementById('gridModal').style.display = "block";
             }
@@ -288,12 +284,12 @@ app.get('/gui', (req, res) => {
                         <div><div class="text-gray-500">ENTRY TRUNG BÌNH</div><div class="text-yellow-500 font-bold text-sm">\${r.avgPrice.toFixed(5)}</div></div>
                         <div><div class="text-gray-500">GIÁ ĐÓNG (EXIT)</div><div class="text-green-400 font-bold text-sm">\${r.closePrice.toFixed(5)}</div></div>
                         <div><div class="text-gray-500">TỔNG MARGIN</div><div class="text-white font-bold text-sm">\${r.totalMargin.toFixed(2)}$</div></div>
-                        <div><div class="text-gray-500">THỜI GIAN GỒNG</div><div class="text-gray-400 font-bold text-sm">\${Math.round((r.tsClose - r.tsOpen)/1000)}s</div></div>
+                        <div><div class="text-gray-500">KẾT THÚC LÚC</div><div class="text-gray-400 font-bold text-sm">\${new Date(r.tsClose).toLocaleTimeString()}</div></div>
                     </div>
                     <div class="border-t border-gray-800 pt-2"><table class="w-full text-left text-[9px]">
-                        <thead><tr class="text-gray-500 border-b border-gray-800"><th>LƯỚI</th><th>GIÁ VÀO LỆNH (DCA)</th><th class="text-right">THỜI GIAN</th></tr></thead>
+                        <thead><tr class="text-gray-500 border-b border-gray-800"><th>LƯỚI</th><th>GIÁ VÀO (DCA)</th><th class="text-right">THỜI GIAN</th></tr></thead>
                         <tbody>\${r.details.map((g,i) => \`<tr class="border-b border-gray-800/50">
-                            <td class="py-1">#\${i+1} \${i===0?'(MỞ)':'(DCA)'}</td>
+                            <td class="py-1">#\${i+1}</td>
                             <td class="py-1 font-bold text-white">\${g.price.toFixed(5)}</td>
                             <td class="py-1 text-right text-gray-500">\${new Date(g.time).toLocaleTimeString()}</td>
                         </tr>\`).join('')}</tbody>
@@ -305,7 +301,7 @@ app.get('/gui', (req, res) => {
             function render(){ 
                 const sorted = [...rawData].sort((a,b)=> (a[sortKey]>b[sortKey]?1:-1)*sortDir); 
                 document.getElementById('activeBody').innerHTML = sorted.map((p, i)=>{
-                    return \`<tr class="border-b border-gray-800 hover:bg-[#2b3139] \${p.status==='WAITING'?'opacity-20':''}"> 
+                    return \`<tr class="border-b border-gray-800 hover:bg-[#2b3139]"> 
                         <td class="p-2 text-gray-500">\${i+1}</td>
                         <td onclick="openDetail('\${p.symbol}')" class="p-2 font-bold text-yellow-500 cursor-pointer underline hover:text-white">\${p.symbol}</td> 
                         <td class="text-center text-blue-400 font-bold">\${p.closedCount}</td>
@@ -344,6 +340,6 @@ app.get('/gui', (req, res) => {
 
 initSymbols().then(() => { 
     initWS(); 
-    app.listen(PORT, '0.0.0.0', () => logger(`SYSTEM LIVE: http://localhost:${PORT}/gui`)); 
+    app.listen(PORT, '0.0.0.0', () => logger(`BOT READY: http://localhost:${PORT}/gui`)); 
     fetchActualLeverage(); 
 });
