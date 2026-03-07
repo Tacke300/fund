@@ -142,44 +142,59 @@ app.get('/api/data', (req, res) => {
 });
 
 app.post('/api/control', (req, res) => { 
-    if (req.body.running && !botState.running) botState.startTime = Date.now();
-    Object.assign(botState, req.body);
+    if (req.body.running !== undefined) {
+        if (req.body.running && !botState.running) {
+            botState.startTime = Date.now();
+            logger(">>> START", "INFO");
+        }
+        botState.running = req.body.running;
+    }
+    const fields = ['totalBalance', 'marginValue', 'marginType', 'maxGrids', 'stepSize', 'tpPercent', 'mode'];
+    fields.forEach(f => { if(req.body[f] !== undefined) botState[f] = req.body[f]; });
     saveState(); res.json({ status: 'ok' }); 
 });
 
 app.post('/api/reset', (req, res) => { 
     activePositions = {}; botState.closedPnl = 0; botState.totalClosedGrids = 0; logs = [];
+    logger("!!! RESET DATA", "ERR");
     saveState(); res.json({ status: 'ok' }); 
 });
 
 app.get('/gui', (req, res) => {
-    res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Luffy Matrix v15</title><script src="https://cdn.tailwindcss.com"></script>
-    <style>body{background:#0b0e11;color:#eaecef;font-family:monospace} th{cursor:pointer;background:#161a1e;padding:12px 8px;border-bottom:1px solid #333;white-space:nowrap} th:hover{color:#f0b90b} #logBox{background:#000;color:#0ecb81;padding:10px;height:220px;overflow-y:auto;font-size:11px;border:1px solid #333;line-height:1.5}</style>
+    res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Luffy Matrix v17</title><script src="https://cdn.tailwindcss.com"></script>
+    <style>body{background:#0b0e11;color:#eaecef;font-family:monospace} th{cursor:pointer;background:#161a1e;padding:10px 8px;border-bottom:1px solid #333} th:hover{color:#f0b90b} #logBox{background:#000;color:#0ecb81;padding:10px;height:250px;overflow-y:auto;font-size:11px;border:1px solid #333;line-height:1.5}</style>
     </head><body class="p-4 text-[11px]">
-        <div class="flex flex-col md:flex-row gap-4 mb-4 items-center justify-between bg-[#1e2329] p-4 rounded-lg border border-gray-800">
-            <div class="flex gap-2"><button onclick="sendCtrl(true)" class="bg-green-600 px-6 py-2 rounded font-bold hover:bg-green-500">START</button><button onclick="sendCtrl(false)" class="bg-red-600 px-6 py-2 rounded font-bold hover:bg-red-500">STOP</button><button onclick="resetBot()" class="bg-gray-700 px-4 py-2 rounded font-bold text-[10px]">RESET</button></div>
-            <div class="text-center"><div class="text-gray-500 text-[10px] uppercase">Hệ thống hoạt động</div><div id="uptime" class="text-yellow-500 font-bold text-lg">0 ngày, 0:0:0</div></div>
-            <div class="stat-box text-right"><div class="text-gray-500 text-[10px] uppercase">Trạng thái</div><div id="botStatus" class="font-bold text-lg italic text-red-500">OFFLINE</div></div>
+        
+        <div class="bg-[#1e2329] p-4 rounded-lg mb-4 border border-gray-800 flex flex-wrap items-end gap-3 shadow-lg">
+            <div class="w-[120px]">VỐN/COIN<input id="totalBalance" type="number" class="w-full bg-black text-yellow-500 p-2 rounded border border-gray-700 mt-1"></div>
+            <div class="w-[130px]">MARGIN<div class="flex mt-1"><input id="marginValue" type="number" class="w-full bg-black text-yellow-500 p-2 rounded-l border border-gray-700"><select id="marginType" class="bg-gray-800 text-white rounded-r border-y border-r border-gray-700"><option value="$">$</option><option value="%">%</option></select></div></div>
+            <div class="w-[80px]">DCA MAX<input id="maxGrids" type="number" class="w-full bg-black text-yellow-500 p-2 rounded border border-gray-700 mt-1"></div>
+            <div class="w-[80px]">GAP (%)<input id="stepSize" type="number" step="0.1" class="w-full bg-black text-yellow-500 p-2 rounded border border-gray-700 mt-1"></div>
+            <div class="w-[80px]">TP (%)<input id="tpPercent" type="number" step="0.1" class="w-full bg-black text-yellow-500 p-2 rounded border border-gray-700 mt-1"></div>
+            <div class="w-[100px]">MODE<select id="mode" class="w-full bg-black p-2 rounded border border-gray-700 mt-1 text-yellow-500"><option value="LONG">LONG</option><option value="SHORT">SHORT</option></select></div>
+            
+            <div class="flex gap-1 ml-auto">
+                <button onclick="sendCtrl(true)" class="bg-green-600 px-6 py-2 rounded font-bold hover:bg-green-500 text-sm">START</button>
+                <button onclick="sendCtrl(false)" class="bg-red-600 px-6 py-2 rounded font-bold hover:bg-red-500 text-sm">STOP</button>
+                <button onclick="resetBot()" class="bg-gray-700 px-4 py-2 rounded font-bold text-[10px] hover:bg-gray-600">RESET</button>
+            </div>
+
+            <div class="border-l border-gray-700 pl-4 ml-2">
+                <div class="text-gray-500 text-[9px] uppercase">Hệ thống</div>
+                <div id="uptime" class="text-yellow-500 font-bold text-sm leading-tight">0 ngày, 0:0:0</div>
+                <div id="botStatus" class="font-bold text-[10px] italic text-red-500 leading-none">OFFLINE</div>
+            </div>
         </div>
 
         <div class="grid grid-cols-2 md:grid-cols-5 gap-3 mb-4 text-center">
-            <div class="bg-[#1e2329] p-3 rounded text-blue-400">COINS<div id="statCoins" class="text-xl font-bold">0</div></div>
-            <div class="bg-[#1e2329] p-3 rounded">LƯỚI CHỐT<div id="statGrids" class="text-purple-400 font-bold">0</div></div>
-            <div class="bg-[#1e2329] p-3 rounded text-green-500">PNL CHỐT<div id="statClosedPnl" class="font-bold">0.00$</div></div>
-            <div class="bg-[#1e2329] p-3 rounded text-gray-400">PNL TẠM<div id="statUnrealized" class="font-bold text-white">0.00$</div></div>
-            <div class="bg-[#1e2329] p-3 rounded border-t-2 border-yellow-500">ROI TỔNG<div id="statTotalRoi" class="text-xl font-bold text-green-500">0.00%</div></div>
+            <div class="bg-[#1e2329] p-3 rounded-lg border border-gray-800 text-blue-400">COINS<div id="statCoins" class="text-xl font-bold">0</div></div>
+            <div class="bg-[#1e2329] p-3 rounded-lg border border-gray-800">LƯỚI CHỐT<div id="statGrids" class="text-purple-400 font-bold">0</div></div>
+            <div class="bg-[#1e2329] p-3 rounded-lg border border-gray-800 text-green-500">PNL CHỐT<div id="statClosedPnl" class="font-bold">0.00$</div></div>
+            <div class="bg-[#1e2329] p-3 rounded-lg border border-gray-800 text-gray-400">PNL TẠM<div id="statUnrealized" class="font-bold text-white">0.00$</div></div>
+            <div class="bg-[#1e2329] p-3 rounded-lg border-t-2 border-yellow-500 text-green-500">ROI TỔNG<div id="statTotalRoi" class="text-xl font-bold">0.00%</div></div>
         </div>
 
-        <div class="bg-[#1e2329] p-4 rounded-lg mb-4 border border-gray-800 grid grid-cols-2 md:grid-cols-6 gap-3">
-            <div>VỐN/COIN ($)<input id="totalBalance" type="number" value="\${botState.totalBalance}" class="w-full bg-black text-yellow-500 p-1 rounded"></div>
-            <div>MARGIN<div class="flex"><input id="marginValue" type="number" value="\${botState.marginValue}" class="w-full bg-black text-yellow-500 p-1 rounded"><select id="marginType" class="bg-black text-white"><option value="$" \${botState.marginType==='$'?'selected':''}>$</option><option value="%" \${botState.marginType==='%'?'selected':''}>%</option></select></div></div>
-            <div>DCA MAX<input id="maxGrids" type="number" value="\${botState.maxGrids}" class="w-full bg-black text-yellow-500 p-1 rounded"></div>
-            <div>GAP (%)<input id="stepSize" type="number" value="\${botState.stepSize}" class="w-full bg-black text-yellow-500 p-1 rounded"></div>
-            <div>TP (%)<input id="tpPercent" type="number" value="\${botState.tpPercent}" class="w-full bg-black text-yellow-500 p-1 rounded"></div>
-            <div>MODE<select id="mode" class="w-full bg-black p-1 rounded"><option value="LONG" \${botState.mode==='LONG'?'selected':''}>LONG</option><option value="SHORT" \${botState.mode==='SHORT'?'selected':''}>SHORT</option></select></div>
-        </div>
-
-        <div class="bg-[#1e2329] rounded-lg border border-gray-800 mb-4 overflow-hidden">
+        <div class="bg-[#1e2329] rounded-lg border border-gray-800 mb-4 overflow-hidden shadow-md">
             <table class="w-full text-left">
                 <thead class="bg-[#161a1e]"><tr>
                     <th onclick="setSort('symbol')">SYMBOL ↕</th>
@@ -192,40 +207,60 @@ app.get('/gui', (req, res) => {
             </table>
         </div>
 
-        <div class="bg-[#1e2329] p-3 rounded-lg border border-gray-800">
-            <div class="text-gray-500 text-[10px] font-bold uppercase mb-2">Hệ thống Logs</div>
+        <div class="bg-[#1e2329] p-3 rounded-lg border border-gray-800 shadow-inner">
+            <div class="text-gray-500 text-[10px] font-bold uppercase mb-2">Live System Logs</div>
             <div id="logBox"></div>
         </div>
 
         <script>
-            let sortKey = 'pnl', sortDir = -1, rawData = [];
+            let sortKey = 'pnl', sortDir = -1, rawData = [], firstLoad = true;
             function setSort(k){ if(sortKey===k) sortDir*=-1; else {sortKey=k; sortDir=-1;} render(); }
+            
             async function sendCtrl(run){
-                const body = { running:run, totalBalance:Number(document.getElementById('totalBalance').value), marginValue:Number(document.getElementById('marginValue').value), marginType:document.getElementById('marginType').value, maxGrids:Number(document.getElementById('maxGrids').value), stepSize:Number(document.getElementById('stepSize').value), tpPercent:Number(document.getElementById('tpPercent').value), mode:document.getElementById('mode').value, multiplier: 2.0 };
+                const body = { 
+                    running: run, 
+                    totalBalance: Number(document.getElementById('totalBalance').value), 
+                    marginValue: Number(document.getElementById('marginValue').value), 
+                    marginType: document.getElementById('marginType').value, 
+                    maxGrids: Number(document.getElementById('maxGrids').value), 
+                    stepSize: Number(document.getElementById('stepSize').value), 
+                    tpPercent: Number(document.getElementById('tpPercent').value), 
+                    mode: document.getElementById('mode').value 
+                };
                 await fetch('/api/control',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
             }
-            async function resetBot(){ if(confirm('RESET TOÀN BỘ?')) await fetch('/api/reset',{method:'POST'}); }
+
+            async function resetBot(){ if(confirm('RESET DATA (GIỮ CẤU HÌNH)?')) await fetch('/api/reset',{method:'POST'}); }
+            
             function render(){
                 const sorted = [...rawData].sort((a,b)=> (a[sortKey]>b[sortKey]?1:-1)*sortDir);
                 document.getElementById('activeBody').innerHTML = sorted.map(p=>\`<tr class="border-b border-gray-800 hover:bg-[#2b3139]">
-                    <td class="p-2 font-bold text-yellow-500">\${p.symbol} <span class="text-gray-500 text-[9px]">\${p.maxLev}x</span></td>
+                    <td class="p-2 font-bold text-yellow-500 font-mono">\${p.symbol} <span class="text-gray-500 text-[9px] font-normal">\${p.maxLev}x</span></td>
                     <td class="text-right font-mono text-gray-400">\${p.currentPrice.toFixed(4)}</td>
                     <td class="text-right font-bold">\${p.currentGrid}/\${window.maxG}</td>
                     <td class="text-right \${p.roi>=0?'text-green-500':'text-red-500'} font-bold">\${p.roi.toFixed(2)}%</td>
-                    <td class="text-right pr-2 font-bold \${p.pnl>=0?'text-green-500':'text-red-500'}">\${p.pnl.toFixed(2)}$</td>
+                    <td class="text-right pr-2 font-bold \${p.pnl>=0?'text-green-500':'text-red-500'} font-mono">\${p.pnl.toFixed(2)}$</td>
                 </tr>\`).join('');
             }
+
             function formatUptime(ms) {
                 const s = Math.floor(ms / 1000);
-                const days = Math.floor(s / 86400);
-                const hrs = Math.floor((s % 86400) / 3600);
-                const mins = Math.floor((s % 3600) / 60);
-                const secs = s % 60;
-                return \`\${days} ngày, \${hrs}:\${mins}:\${secs}\`;
+                const d = Math.floor(s / 86400);
+                const h = Math.floor((s % 86400) / 3600);
+                const m = Math.floor((s % 3600) / 60);
+                const sec = s % 60;
+                return \`\${d} ngày, \${h}:\${m}:\${sec}\`;
             }
+
             async function update(){
                 try {
                     const res = await fetch('/api/data'); const d = await res.json();
+                    if(firstLoad) {
+                        ['totalBalance','marginValue','marginType','maxGrids','stepSize','tpPercent','mode'].forEach(id => {
+                            document.getElementById(id).value = d.state[id];
+                        });
+                        firstLoad = false;
+                    }
                     rawData = d.active; window.maxG = d.state.maxGrids; render();
                     const unreal = d.active.reduce((s,p)=>s+p.pnl,0);
                     const totalInv = d.active.length * d.state.totalBalance;
@@ -236,7 +271,7 @@ app.get('/gui', (req, res) => {
                     document.getElementById('statTotalRoi').innerText = (totalInv > 0 ? ((d.state.closedPnl+unreal)/totalInv)*100 : 0).toFixed(2) + '%';
                     document.getElementById('logBox').innerHTML = d.logs.join('<br>');
                     document.getElementById('botStatus').innerText = d.state.running ? "RUNNING" : "STOPPED";
-                    document.getElementById('botStatus').className = "font-bold text-lg italic " + (d.state.running ? "text-green-500" : "text-red-500");
+                    document.getElementById('botStatus').className = "font-bold text-[10px] italic " + (d.state.running ? "text-green-500" : "text-red-500");
                     if(d.state.startTime && d.state.running){
                         document.getElementById('uptime').innerText = formatUptime(Date.now() - d.state.startTime);
                     } else if (!d.state.running) { document.getElementById('uptime').innerText = "0 ngày, 0:0:0"; }
