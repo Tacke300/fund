@@ -132,9 +132,10 @@ function initWS() {
                             side: pos.side,
                             lev: pos.maxLev,
                             pnl: pnl,
+                            avgPrice: avgPrice,
+                            closePrice: price,
                             gridsCount: pos.grids.length,
                             totalMargin: pos.grids.length * botState.marginValue,
-                            tpPercent: botState.tpPercent,
                             details: [...pos.grids]
                         };
                         pnlHistory.push(closedRound);
@@ -168,11 +169,12 @@ function initWS() {
 }
 
 app.get('/api/data', (req, res) => {
-    let unrealizedPnl = 0;
+    let unrealizedPnl = 0, totalGridsMatched = 0;
     const activeData = Object.values(activePositions).map(p => {
         const currentP = marketPrices[p.symbol] || 0;
-        let pnl = 0, totalSize = 0, totalCost = 0;
+        let pnl = 0;
         if (p.status !== 'WAITING' && currentP > 0) {
+            let totalSize = 0, totalCost = 0;
             p.grids.forEach(g => {
                 const size = (g.qty * p.maxLev) / g.price;
                 totalSize += size;
@@ -181,14 +183,11 @@ app.get('/api/data', (req, res) => {
             const avgPrice = totalCost / totalSize;
             pnl = p.side === 'LONG' ? (currentP - avgPrice) * totalSize : (avgPrice - currentP) * totalSize;
             unrealizedPnl += pnl;
+            totalGridsMatched += p.grids.length;
         }
-        
         const closedCount = pnlHistory.filter(h => h.symbol === p.symbol).length;
-        // Vốn gốc = Margin * MaxLev * số lưới cài đặt tối đa
         const capitalGoc = botState.marginValue * p.maxLev * botState.maxGrids;
-        const capitalHienTai = capitalGoc + pnl;
-
-        return { ...p, pnl, currentPrice: currentP, capitalGoc, capitalHienTai, closedCount };
+        return { ...p, pnl, currentPrice: currentP, capitalGoc, capitalHienTai: capitalGoc + pnl, closedCount };
     });
 
     let levStats = {};
@@ -199,17 +198,13 @@ app.get('/api/data', (req, res) => {
     });
 
     res.json({ 
-        state: botState, active: activeData, logs, levStats, 
-        history: pnlHistory,
-        stats: { today: getFilteredPnL(0), d7: getFilteredPnL(7), d30: getFilteredPnL(30), closedPnl: botState.closedPnl, unrealizedPnl } 
+        state: botState, active: activeData, logs, levStats, history: pnlHistory,
+        stats: { today: getFilteredPnL(0), d7: getFilteredPnL(7), d30: getFilteredPnL(30), closedPnl: botState.closedPnl, unrealizedPnl, totalGridsMatched, totalGridsPossible: activeData.filter(x => x.status !== 'WAITING').length * botState.maxGrids } 
     });
 });
 
 app.post('/api/control', (req, res) => { 
-    if (req.body.running !== undefined) { 
-        if (req.body.running && !botState.running) botState.startTime = Date.now();
-        botState.running = req.body.running; 
-    }
+    if (req.body.running !== undefined) { if (req.body.running && !botState.running) botState.startTime = Date.now(); botState.running = req.body.running; }
     ['marginValue', 'maxGrids', 'stepSize', 'tpPercent', 'mode'].forEach(f => { if(req.body[f] !== undefined) botState[f] = req.body[f]; });
     saveAll(); res.json({ status: 'ok' }); 
 });
@@ -217,53 +212,49 @@ app.post('/api/control', (req, res) => {
 app.post('/api/reset', (req, res) => { activePositions = {}; botState.closedPnl = 0; botState.totalClosedGrids = 0; logs = []; pnlHistory = []; saveAll(); res.json({ status: 'ok' }); });
 
 app.get('/gui', (req, res) => {
-    res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Luffy Matrix Final</title><script src="https://cdn.tailwindcss.com"></script>
-    <style>body{background:#0b0e11;color:#eaecef;font-family:monospace} th{cursor:pointer;background:#161a1e;padding:12px 8px;border-bottom:1px solid #333;font-size:10px}
-    #logBox{background:#000;padding:10px;height:180px;overflow-y:auto;font-size:11px;border:1px solid #333}
+    res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Luffy Matrix Pro</title><script src="https://cdn.tailwindcss.com"></script>
+    <style>body{background:#0b0e11;color:#eaecef;font-family:monospace} th{cursor:pointer;background:#161a1e;padding:10px 8px;border-bottom:1px solid #333;font-size:10px}
+    #logBox{background:#000;padding:10px;height:150px;overflow-y:auto;font-size:11px;border:1px solid #333}
     .modal { display: none; position: fixed; z-index: 100; left: 0; top: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.9); }
-    .modal-content { background: #1e2329; margin: 2% auto; padding: 20px; border: 1px solid #f0b90b; width: 90%; max-width: 1000px; border-radius: 8px; }
-    .round-card { background: #161a1e; border: 1px solid #333; padding: 10px; border-radius: 4px; cursor: pointer; }
-    .round-card:hover { border-color: #f0b90b; }</style>
+    .modal-content { background: #1e2329; margin: 2% auto; padding: 20px; border: 1px solid #f0b90b; width: 95%; max-width: 1100px; border-radius: 8px; }
+    .round-card { background: #161a1e; border: 1px solid #333; padding: 10px; border-radius: 4px; cursor: pointer; transition: 0.2s; }
+    .round-card:hover { border-color: #f0b90b; background: #2b3139; }</style>
     </head><body class="p-4 text-[11px]">
         
         <div id="gridModal" class="modal" onclick="closeModal()"><div class="modal-content" onclick="event.stopPropagation()">
-            <div class="flex justify-between items-center mb-4"><h2 id="modalTitle" class="text-2xl font-black text-yellow-500"></h2><button onclick="closeModal()" class="text-2xl text-gray-500 hover:text-white">✕</button></div>
-            <div id="roundDetail" class="hidden bg-black p-4 rounded border border-yellow-500 mb-4 animate-pulse"></div>
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 h-[60vh] overflow-y-auto" id="roundsList"></div>
+            <div class="flex justify-between items-center mb-4"><h2 id="modalTitle" class="text-xl font-black text-yellow-500"></h2><button onclick="closeModal()" class="text-2xl hover:text-red-500">✕</button></div>
+            <div id="roundDetail" class="hidden bg-black p-4 rounded border border-yellow-500/50 mb-4 shadow-inner"></div>
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 h-[60vh] overflow-y-auto" id="roundsList"></div>
         </div></div>
 
-        <div id="levStats" class="grid grid-cols-5 md:grid-cols-10 gap-1 mb-2"></div>
-
-        <div class="grid grid-cols-5 gap-1 mb-2">
-            <div class="bg-[#1e2329] p-2 rounded border border-gray-800 text-center"><div class="text-gray-500 text-[9px]">HÔM NAY (7AM)</div><div id="pnlToday" class="font-bold text-green-400">0.00$</div></div>
-            <div class="bg-[#1e2329] p-2 rounded border border-gray-800 text-center"><div class="text-gray-500 text-[9px]">7 NGÀY QUA</div><div id="pnl7d" class="font-bold text-green-500">0.00$</div></div>
-            <div class="bg-[#1e2329] p-2 rounded border border-gray-800 text-center"><div class="text-gray-500 text-[9px]">30 NGÀY QUA</div><div id="pnl30d" class="font-bold text-emerald-500">0.00$</div></div>
-            <div class="bg-[#1e2329] p-2 rounded border border-gray-800 text-center"><div class="text-gray-500 text-[9px]">ĐÃ CHỐT TỔNG</div><div id="statClosedPnl" class="font-bold text-yellow-500">0.00$</div></div>
-            <div class="bg-[#1e2329] p-2 rounded border border-gray-800 text-center"><div class="text-gray-500 text-[9px]">GỒNG PNL</div><div id="statUnreal" class="font-bold text-white">0.00$</div></div>
-        </div>
-
-        <div class="bg-[#1e2329] p-4 rounded-lg mb-2 border border-gray-800 flex flex-wrap items-end gap-3">
+        <div class="bg-[#1e2329] p-4 rounded-lg mb-2 border border-yellow-500/20 flex flex-wrap items-end gap-3 shadow-xl">
             <div class="w-[100px]">MARGIN ($)<input id="marginValue" type="number" class="w-full bg-black text-yellow-500 p-2 rounded border border-gray-700 mt-1"></div>
             <div class="w-[70px]">MAX DCA<input id="maxGrids" type="number" class="w-full bg-black text-yellow-500 p-2 rounded border border-gray-700 mt-1"></div>
             <div class="w-[70px]">GAP %<input id="stepSize" type="number" step="0.1" class="w-full bg-black text-yellow-500 p-2 rounded border border-gray-700 mt-1"></div>
             <div class="w-[70px]">TP %<input id="tpPercent" type="number" step="0.1" class="w-full bg-black text-yellow-500 p-2 rounded border border-gray-700 mt-1"></div>
             <div class="w-[90px]">HƯỚNG<select id="mode" class="w-full bg-black p-2 rounded border border-gray-700 mt-1 text-yellow-500"><option value="LONG">LONG</option><option value="SHORT">SHORT</option></select></div>
-            <button onclick="sendCtrl(true)" class="bg-green-600 px-6 py-2 rounded font-bold ml-auto hover:bg-green-500">START</button>
-            <button onclick="sendCtrl(false)" class="bg-red-600 px-6 py-2 rounded font-bold hover:bg-red-500">STOP</button>
-            <button onclick="resetBot()" class="bg-gray-700 px-2 py-2 rounded text-[9px]">RESET</button>
+            <div class="flex gap-2 ml-auto">
+                <button onclick="sendCtrl(true)" class="bg-green-600 px-10 py-3 rounded font-black text-sm hover:scale-105 transition-all shadow-[0_0_15px_rgba(22,163,74,0.4)]">START</button>
+                <button onclick="sendCtrl(false)" class="bg-red-600 px-10 py-3 rounded font-black text-sm hover:scale-105 transition-all shadow-[0_0_15px_rgba(220,38,38,0.4)]">STOP</button>
+                <button onclick="resetBot()" class="bg-gray-800 px-4 py-3 rounded text-[9px] hover:bg-black transition-all">RESET</button>
+            </div>
+        </div>
+
+        <div id="levStats" class="grid grid-cols-5 md:grid-cols-10 gap-1 mb-2"></div>
+
+        <div class="grid grid-cols-6 gap-1 mb-2">
+            <div class="bg-[#1e2329] p-2 rounded border border-gray-800 text-center"><div class="text-gray-500 text-[8px]">LƯỚI KHỚP</div><div id="statGridsMatched" class="font-bold text-orange-400 text-lg">0</div></div>
+            <div class="bg-[#1e2329] p-2 rounded border border-gray-800 text-center"><div class="text-gray-500 text-[8px]">LƯỚI CHỜ</div><div id="statGridsWaiting" class="font-bold text-gray-400 text-lg">0</div></div>
+            <div class="bg-[#1e2329] p-2 rounded border border-gray-800 text-center"><div class="text-gray-500 text-[8px]">HÔM NAY</div><div id="pnlToday" class="font-bold text-green-400 text-lg">0.00$</div></div>
+            <div class="bg-[#1e2329] p-2 rounded border border-gray-800 text-center"><div class="text-gray-500 text-[8px]">7 NGÀY</div><div id="pnl7d" class="font-bold text-green-500 text-lg">0.00$</div></div>
+            <div class="bg-[#1e2329] p-2 rounded border border-gray-800 text-center"><div class="text-gray-500 text-[8px]">ĐÃ CHỐT</div><div id="statClosedPnl" class="font-bold text-yellow-500 text-lg">0.00$</div></div>
+            <div class="bg-[#1e2329] p-2 rounded border border-gray-800 text-center"><div class="text-gray-500 text-[8px]">GỒNG PNL</div><div id="statUnreal" class="font-bold text-white text-lg">0.00$</div></div>
         </div>
 
         <div class="bg-[#1e2329] rounded border border-gray-800 mb-2 overflow-hidden shadow-2xl">
             <table class="w-full text-left">
                 <thead class="bg-[#161a1e]"><tr>
-                    <th class="p-2 w-10">STT</th>
-                    <th onclick="setSort('symbol')">COIN ↕</th>
-                    <th onclick="setSort('closedCount')" class="text-center">CHỐT ↕</th>
-                    <th onclick="setSort('maxLev')" class="text-center">LEV ↕</th>
-                    <th onclick="setSort('capitalGoc')" class="text-right">VỐN GỐC (MAX) ↕</th>
-                    <th onclick="setSort('capitalHienTai')" class="text-right">VỐN HIỆN TẠI ↕</th>
-                    <th onclick="setSort('currentGrid')" class="text-center">GỒNG ↕</th>
-                    <th onclick="setSort('pnl')" class="text-right pr-4">PNL ($) ↕</th>
+                    <th class="p-2 w-10">STT</th><th onclick="setSort('symbol')">COIN ↕</th><th onclick="setSort('closedCount')" class="text-center">CHỐT ↕</th><th onclick="setSort('maxLev')" class="text-center">LEV ↕</th><th onclick="setSort('capitalGoc')" class="text-right">VỐN GỐC ↕</th><th onclick="setSort('capitalHienTai')" class="text-right">VỐN HIỆN TẠI ↕</th><th onclick="setSort('grids.length')" class="text-center">GỒNG ↕</th><th onclick="setSort('pnl')" class="text-right pr-4">PNL ($) ↕</th>
                 </tr></thead>
                 <tbody id="activeBody"></tbody>
             </table>
@@ -278,18 +269,12 @@ app.get('/gui', (req, res) => {
             
             function openDetail(symbol){
                 const rounds = historyData.filter(h => h.symbol === symbol).reverse();
-                document.getElementById('modalTitle').innerText = symbol + " - Lịch sử vòng chốt";
+                document.getElementById('modalTitle').innerText = symbol + " - LỊCH SỬ VÒNG LỆNH";
                 document.getElementById('roundDetail').classList.add('hidden');
                 document.getElementById('roundsList').innerHTML = rounds.map((r, i) => \`
                     <div class="round-card" onclick="showRoundDetail('\${r.tsClose}')">
-                        <div class="flex justify-between font-bold text-yellow-500">
-                            <span>Vòng #\${rounds.length - i}</span> 
-                            <span class="\${r.pnl>=0?'text-green-400':'text-red-500'}">\${r.pnl.toFixed(2)}$</span>
-                        </div>
-                        <div class="text-[9px] text-gray-500 mt-1 flex justify-between">
-                            <span>DCA: \${r.gridsCount} | Lev: x\${r.lev}</span>
-                            <span>\${new Date(r.tsClose).toLocaleString()}</span>
-                        </div>
+                        <div class="flex justify-between items-center mb-1"><span class="font-black text-yellow-500 text-sm">VÒNG #\${rounds.length - i}</span><span class="\${r.pnl>=0?'text-green-400':'text-red-500'} font-bold">+\${r.pnl.toFixed(2)}$</span></div>
+                        <div class="text-[9px] text-gray-400 flex justify-between"><span>DCA: \${r.gridsCount} | x\${r.lev}</span><span>\${new Date(r.tsClose).toLocaleTimeString()}</span></div>
                     </div>\`).join('');
                 document.getElementById('gridModal').style.display = "block";
             }
@@ -299,19 +284,19 @@ app.get('/gui', (req, res) => {
                 const div = document.getElementById('roundDetail');
                 div.classList.remove('hidden');
                 div.innerHTML = \`
-                    <div class="grid grid-cols-4 gap-4 text-[10px] mb-4">
-                        <div><div class="text-gray-500">TỔNG VỐN (MARGIN)</div><div class="text-white font-bold">\${r.totalMargin.toFixed(2)}$</div></div>
-                        <div><div class="text-gray-500">ĐÒN BẨY</div><div class="text-white font-bold">x\${r.lev}</div></div>
-                        <div><div class="text-gray-500">MỐC TP</div><div class="text-white font-bold">\${r.tpPercent}%</div></div>
-                        <div><div class="text-gray-500">PNL THỰC</div><div class="text-green-400 font-bold text-lg">\${r.pnl.toFixed(4)}$</div></div>
+                    <div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-[10px] mb-4">
+                        <div><div class="text-gray-500">ENTRY TRUNG BÌNH</div><div class="text-yellow-500 font-bold text-sm">\${r.avgPrice.toFixed(5)}</div></div>
+                        <div><div class="text-gray-500">GIÁ ĐÓNG (EXIT)</div><div class="text-green-400 font-bold text-sm">\${r.closePrice.toFixed(5)}</div></div>
+                        <div><div class="text-gray-500">TỔNG MARGIN</div><div class="text-white font-bold text-sm">\${r.totalMargin.toFixed(2)}$</div></div>
+                        <div><div class="text-gray-500">THỜI GIAN GỒNG</div><div class="text-gray-400 font-bold text-sm">\${Math.round((r.tsClose - r.tsOpen)/1000)}s</div></div>
                     </div>
-                    <div class="flex gap-4 text-[9px] text-gray-400 mb-2">
-                        <span>Thời gian mở: \${new Date(r.tsOpen).toLocaleString()}</span>
-                        <span>Thời gian chốt: \${new Date(r.tsClose).toLocaleString()}</span>
-                    </div>
-                    <div class="border-t border-gray-800 pt-2"><table class="w-full text-left">
-                        <thead><tr class="text-gray-500"><th class="pb-1">Lưới</th><th class="pb-1">Giá vào</th><th class="pb-1 text-right">Margin gốc</th></tr></thead>
-                        <tbody>\${r.details.map((g,i) => \`<tr class="border-b border-gray-800/50"><td>#\${i+1}</td><td class="text-yellow-500 font-bold">\${g.price.toFixed(5)}</td><td class="text-right">\${g.qty}$</td></tr>\`).join('')}</tbody>
+                    <div class="border-t border-gray-800 pt-2"><table class="w-full text-left text-[9px]">
+                        <thead><tr class="text-gray-500 border-b border-gray-800"><th>LƯỚI</th><th>GIÁ VÀO LỆNH (DCA)</th><th class="text-right">THỜI GIAN</th></tr></thead>
+                        <tbody>\${r.details.map((g,i) => \`<tr class="border-b border-gray-800/50">
+                            <td class="py-1">#\${i+1} \${i===0?'(MỞ)':'(DCA)'}</td>
+                            <td class="py-1 font-bold text-white">\${g.price.toFixed(5)}</td>
+                            <td class="py-1 text-right text-gray-500">\${new Date(g.time).toLocaleTimeString()}</td>
+                        </tr>\`).join('')}</tbody>
                     </table></div>\`;
             }
 
@@ -322,8 +307,8 @@ app.get('/gui', (req, res) => {
                 document.getElementById('activeBody').innerHTML = sorted.map((p, i)=>{
                     return \`<tr class="border-b border-gray-800 hover:bg-[#2b3139] \${p.status==='WAITING'?'opacity-20':''}"> 
                         <td class="p-2 text-gray-500">\${i+1}</td>
-                        <td onclick="openDetail('\${p.symbol}')" class="p-2 font-bold text-yellow-500 cursor-pointer underline">\${p.symbol}</td> 
-                        <td class="text-center text-blue-400">\${p.closedCount}</td>
+                        <td onclick="openDetail('\${p.symbol}')" class="p-2 font-bold text-yellow-500 cursor-pointer underline hover:text-white">\${p.symbol}</td> 
+                        <td class="text-center text-blue-400 font-bold">\${p.closedCount}</td>
                         <td class="text-center text-purple-400">x\${p.maxLev}</td>
                         <td class="text-right text-gray-400">\${p.capitalGoc.toFixed(1)}$</td> 
                         <td class="text-right font-bold text-white">\${p.capitalHienTai.toFixed(1)}$</td> 
@@ -339,12 +324,13 @@ app.get('/gui', (req, res) => {
                     rawData = d.active; historyData = d.history; render();
                     document.getElementById('pnlToday').innerText = d.stats.today.toFixed(2) + '$';
                     document.getElementById('pnl7d').innerText = d.stats.d7.toFixed(2) + '$';
-                    document.getElementById('pnl30d').innerText = d.stats.d30.toFixed(2) + '$';
                     document.getElementById('statClosedPnl').innerText = d.stats.closedPnl.toFixed(2) + '$';
                     document.getElementById('statUnreal').innerText = d.stats.unrealizedPnl.toFixed(2) + '$';
+                    document.getElementById('statGridsMatched').innerText = d.stats.totalGridsMatched;
+                    document.getElementById('statGridsWaiting').innerText = d.stats.totalGridsPossible - d.stats.totalGridsMatched;
                     document.getElementById('levStats').innerHTML = Object.entries(d.levStats).map(([lev, val]) => \`
                         <div class="bg-[#1e2329] p-1 border border-gray-800 rounded text-center">
-                            <div class="text-[8px] text-gray-500">X\${lev}</div>
+                            <div class="text-[7px] text-gray-500 uppercase">X\${lev}</div>
                             <div class="text-green-400 font-bold">\${val.closed.toFixed(1)}</div>
                             <div class="text-gray-400 text-[8px]">\${val.unreal.toFixed(1)}</div>
                         </div>\`).join('');
@@ -358,6 +344,6 @@ app.get('/gui', (req, res) => {
 
 initSymbols().then(() => { 
     initWS(); 
-    app.listen(PORT, '0.0.0.0', () => logger(`SYSTEM ONLINE: http://localhost:${PORT}/gui`)); 
+    app.listen(PORT, '0.0.0.0', () => logger(`SYSTEM LIVE: http://localhost:${PORT}/gui`)); 
     fetchActualLeverage(); 
 });
