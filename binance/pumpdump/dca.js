@@ -53,38 +53,36 @@ function getFilteredPnL(days) {
     return pnlHistory.filter(h => h.ts >= startTime.getTime()).reduce((sum, h) => sum + h.pnl, 0);
 }
 
+// Hàm lấy đòn bẩy chạy ngầm, không chặn bot khởi động
 async function fetchActualLeverage() {
-    return new Promise((resolve) => {
-        const timestamp = Date.now();
-        const query = `timestamp=${timestamp}`;
-        const signature = crypto.createHmac('sha256', SECRET_KEY).update(query).digest('hex');
-        const options = {
-            hostname: 'fapi.binance.com', path: `/fapi/v1/leverageBracket?${query}&signature=${signature}`,
-            headers: { 'X-MBX-APIKEY': API_KEY }, timeout: 10000
-        };
-        https.get(options, (res) => {
-            let data = '';
-            res.on('data', chunk => data += chunk);
-            res.on('end', () => {
-                try {
-                    const brackets = JSON.parse(data);
-                    if (Array.isArray(brackets)) {
-                        allSymbols = [];
-                        brackets.forEach(item => {
-                            symbolMaxLeverage[item.symbol] = item.brackets[0].initialLeverage;
-                            allSymbols.push(item.symbol);
-                        });
-                        fs.writeFileSync(LEVERAGE_FILE, JSON.stringify(symbolMaxLeverage));
-                        logger(`Nạp ${allSymbols.length} coin thành công.`);
-                    }
-                    resolve();
-                } catch (e) { fallbackSymbols().then(resolve); }
-            });
-        }).on('error', () => fallbackSymbols().then(resolve));
-    });
+    const timestamp = Date.now();
+    const query = `timestamp=${timestamp}`;
+    const signature = crypto.createHmac('sha256', SECRET_KEY).update(query).digest('hex');
+    const options = {
+        hostname: 'fapi.binance.com', path: `/fapi/v1/leverageBracket?${query}&signature=${signature}`,
+        headers: { 'X-MBX-APIKEY': API_KEY }, timeout: 5000
+    };
+    https.get(options, (res) => {
+        let data = '';
+        res.on('data', chunk => data += chunk);
+        res.on('end', () => {
+            try {
+                const brackets = JSON.parse(data);
+                if (Array.isArray(brackets)) {
+                    brackets.forEach(item => {
+                        symbolMaxLeverage[item.symbol] = item.brackets[0].initialLeverage;
+                        if (!allSymbols.includes(item.symbol)) allSymbols.push(item.symbol);
+                    });
+                    fs.writeFileSync(LEVERAGE_FILE, JSON.stringify(symbolMaxLeverage));
+                    logger(`Đã cập nhật đòn bẩy chuẩn từ Binance.`);
+                }
+            } catch (e) {}
+        });
+    }).on('error', () => {});
 }
 
-async function fallbackSymbols() {
+// Lấy danh sách coin cơ bản để chạy ngay
+async function initSymbols() {
     return new Promise((resolve) => {
         https.get('https://fapi.binance.com/fapi/v1/exchangeInfo', (res) => {
             let data = '';
@@ -95,13 +93,14 @@ async function fallbackSymbols() {
                     info.symbols.forEach(s => {
                         if (s.status === 'TRADING' && s.quoteAsset === 'USDT') {
                             if (!allSymbols.includes(s.symbol)) allSymbols.push(s.symbol);
-                            if(!symbolMaxLeverage[s.symbol]) symbolMaxLeverage[s.symbol] = 20;
+                            if (!symbolMaxLeverage[s.symbol]) symbolMaxLeverage[s.symbol] = 20;
                         }
                     });
-                } catch(e) {}
+                    logger(`Nạp ${allSymbols.length} coin. Hệ thống sẵn sàng.`);
+                } catch(e) { logger("Lỗi nạp danh sách coin!", "ERR"); }
                 resolve();
             });
-        }).on('error', () => resolve());
+        }).on('error', () => { logger("Mất kết nối API Binance!", "ERR"); resolve(); });
     });
 }
 
@@ -133,7 +132,7 @@ function initWS() {
                         botState.closedPnl += pnl;
                         botState.totalClosedGrids++;
                         pnlHistory.push({ ts: Date.now(), pnl: pnl, lev: pos.maxLev });
-                        logger(`WIN: ${t.s} | +${pnl.toFixed(2)}$ | DCA: ${pos.grids.length}`, "WIN");
+                        logger(`WIN: ${t.s} | +${pnl.toFixed(2)}$`, "WIN");
                         pos.status = 'WAITING';
                         pos.grids = []; 
                         saveAll();
@@ -234,18 +233,17 @@ app.get('/gui', (req, res) => {
                 <button onclick="sendCtrl(false)" class="bg-red-600 px-6 py-2 rounded font-bold hover:bg-red-500 text-sm">STOP</button>
                 <button onclick="resetBot()" class="bg-gray-700 px-3 py-2 rounded font-bold text-[9px]">RESET</button>
             </div>
-            <div class="border-l border-gray-700 pl-4 ml-2 text-right"><div class="text-gray-500 text-[9px]">UPTIME</div><div id="uptime" class="text-yellow-500 font-bold text-sm">0d 00:00:00</div><div id="statusIndicator" class="font-bold text-[10px] text-red-500">OFFLINE</div></div>
+            <div class="border-l border-gray-700 pl-4 ml-2 text-right"><div class="text-gray-500 text-[9px]">UPTIME</div><div id="uptime" class="text-yellow-500 font-bold text-sm">0d 00:00:00</div><div id="statusIndicator" class="font-bold text-[10px]">OFFLINE</div></div>
         </div>
 
-        <div class="bg-[#1e2329] p-3 rounded-t-lg border-x border-t border-gray-800 flex justify-between gap-2 shadow-inner">
-            <div class="text-center flex-1 text-gray-400">HÔM NAY (7AM)<div id="pnlToday" class="text-lg font-bold text-green-400">0.00$</div></div>
-            <div class="text-center flex-1 border-x border-gray-800 text-gray-400">7 NGÀY QUA<div id="pnl7d" class="text-lg font-bold text-green-500">0.00$</div></div>
-            <div class="text-center flex-1 border-r border-gray-800 text-gray-400">30 NGÀY QUA<div id="pnl30d" class="text-lg font-bold text-emerald-500">0.00$</div></div>
-            <div class="text-center flex-1 text-yellow-500 font-bold border-r border-gray-800">PNL ĐÃ CHỐT<div id="statClosedPnl" class="text-2xl font-black">0.00$</div></div>
-            <div class="text-center flex-1 text-white font-bold">PNL TẠM TÍNH<div id="statUnreal" class="text-2xl font-black">0.00$</div></div>
+        <div class="bg-[#1e2329] p-3 rounded-t-lg border-x border-t border-gray-800 flex justify-between gap-2">
+            <div class="text-center flex-1 text-gray-400">HÔM NAY<div id="pnlToday" class="text-lg font-bold text-green-400">0.00$</div></div>
+            <div class="text-center flex-1 border-x border-gray-800 text-gray-400">7 NGÀY<div id="pnl7d" class="text-lg font-bold text-green-500">0.00$</div></div>
+            <div class="text-center flex-1 text-yellow-500 font-bold border-r border-gray-800">ĐÃ CHỐT<div id="statClosedPnl" class="text-2xl font-black">0.00$</div></div>
+            <div class="text-center flex-1 text-white font-bold">GỒNG PNL<div id="statUnreal" class="text-2xl font-black">0.00$</div></div>
         </div>
 
-        <div class="bg-[#161a1e] p-2 flex justify-around border-x border-b border-gray-800 text-[10px] font-bold mb-2 text-gray-300">
+        <div class="bg-[#161a1e] p-2 flex justify-around border-x border-b border-gray-800 text-[10px] font-bold mb-2">
             <div>COINS: <span id="statCoins" class="text-blue-400">0</span></div>
             <div>LƯỚI GỒNG: <span id="statGrids" class="text-orange-400">0</span></div>
             <div>LƯỚI CHỐT: <span id="statClosedGrids" class="text-purple-400">0</span></div>
@@ -257,10 +255,10 @@ app.get('/gui', (req, res) => {
             <table class="w-full text-left">
                 <thead class="bg-[#161a1e]"><tr>
                     <th onclick="setSort('symbol')">SYMBOL ↕</th>
-                    <th class="text-center" onclick="setSort('maxLev')">MAX LEV ↕</th>
-                    <th class="text-right" onclick="setSort('autoCapital')">BALANCE (AUTO) ↕</th>
-                    <th class="text-center" onclick="setSort('currentGrid')">LƯỚI DCA ↕</th>
-                    <th class="text-right pr-4" onclick="setSort('pnl')">PNL ($) ↕</th>
+                    <th class="text-center" onclick="setSort('maxLev')">LEV ↕</th>
+                    <th class="text-right" onclick="setSort('displayBalance')">BALANCE ↕</th>
+                    <th class="text-center" onclick="setSort('currentGrid')">LƯỚI ↕</th>
+                    <th class="text-right pr-4" onclick="setSort('pnl')">PNL ↕</th>
                 </tr></thead>
                 <tbody id="activeBody"></tbody>
             </table>
@@ -275,9 +273,9 @@ app.get('/gui', (req, res) => {
             
             function openDetail(symbol){
                 const p = rawData.find(x => x.symbol === symbol); if(!p || p.status === 'WAITING') return;
-                document.getElementById('modalTitle').innerText = symbol + ' (' + p.side + ' x' + p.maxLev + ')';
+                document.getElementById('modalTitle').innerText = symbol;
                 document.getElementById('modalGrids').innerText = p.currentGrid;
-                document.getElementById('modalInfo').innerHTML = \`<div>Vào lệnh trung bình: <span class="text-yellow-500 font-bold">\${p.avgPrice.toFixed(5)}</span></div><div>Giá thị trường: <span class="text-white font-bold">\${p.currentPrice.toFixed(5)}</span></div><div>PNL hiện tại: <span class="\${p.pnl>=0?'text-green-400':'text-red-500'} font-bold">\${p.pnl.toFixed(4)}$</span></div>\`;
+                document.getElementById('modalInfo').innerHTML = \`<div>Avg: \${p.avgPrice.toFixed(5)}</div><div>Price: \${p.currentPrice.toFixed(5)}</div>\`;
                 document.getElementById('gridModal').style.display = "block";
             }
             function closeModal(){ document.getElementById('gridModal').style.display = "none"; }
@@ -286,11 +284,11 @@ app.get('/gui', (req, res) => {
                 const sorted = [...rawData].sort((a,b)=> (a[sortKey]>b[sortKey]?1:-1)*sortDir); 
                 document.getElementById('activeBody').innerHTML = sorted.map(p=>{
                     return \`<tr class="border-b border-gray-800 hover:bg-[#2b3139] \${p.status==='WAITING'?'opacity-20':''}"> 
-                        <td onclick="openDetail('\${p.symbol}')" class="p-2 font-bold text-yellow-500 cursor-pointer underline">\${p.symbol}</td> 
-                        <td class="text-center font-bold text-purple-400">x\${p.maxLev}</td>
-                        <td class="text-right font-mono text-gray-400">\${p.displayBalance.toFixed(2)}$</td> 
-                        <td class="text-center font-bold text-orange-400">\${p.currentGrid}</td> 
-                        <td class="text-right pr-4 font-bold \${p.pnl>=0?'text-green-500':'text-red-500'} font-mono">\${p.pnl.toFixed(2)}$</td> </tr>\`
+                        <td onclick="openDetail('\${p.symbol}')" class="p-2 font-bold text-yellow-500 cursor-pointer">\${p.symbol}</td> 
+                        <td class="text-center text-purple-400">x\${p.maxLev}</td>
+                        <td class="text-right font-mono">\${p.displayBalance.toFixed(2)}$</td> 
+                        <td class="text-center text-orange-400">\${p.currentGrid}</td> 
+                        <td class="text-right pr-4 font-bold \${p.pnl>=0?'text-green-500':'text-red-500'}">\${p.pnl.toFixed(2)}$</td> </tr>\`
                 }).join(''); 
             }
 
@@ -299,25 +297,20 @@ app.get('/gui', (req, res) => {
                     const res = await fetch('/api/data'); const d = await res.json();
                     if(firstLoad) { ['marginValue','maxGrids','stepSize','tpPercent','mode'].forEach(id => document.getElementById(id).value = d.state[id]); firstLoad = false; }
                     rawData = d.active; render();
-                    
                     document.getElementById('pnlToday').innerText = d.stats.today.toFixed(2) + '$';
                     document.getElementById('pnl7d').innerText = d.stats.d7.toFixed(2) + '$';
-                    document.getElementById('pnl30d').innerText = d.stats.d30.toFixed(2) + '$';
                     document.getElementById('statClosedPnl').innerText = d.stats.closedPnl.toFixed(2) + '$';
                     document.getElementById('statUnreal').innerText = d.stats.unrealizedPnl.toFixed(2) + '$';
                     document.getElementById('statCoins').innerText = d.stats.runningCoins;
                     document.getElementById('statGrids').innerText = d.stats.gridsGong;
                     document.getElementById('statClosedGrids').innerText = d.stats.totalClosedGrids;
-
                     const si = document.getElementById('statusIndicator');
                     si.innerText = d.state.running ? "RUNNING" : "STOPPED";
                     si.className = "font-bold text-[10px] " + (d.state.running ? "text-green-500" : "text-red-500");
-
                     if(d.state.startTime && d.state.running) {
                         const s = Math.floor((Date.now() - d.state.startTime)/1000);
                         document.getElementById('uptime').innerText = \`\${Math.floor(s/86400)}d \${String(Math.floor((s%86400)/3600)).padStart(2,'0')}:\${String(Math.floor((s%3600)/60)).padStart(2,'0')}:\${String(s%60).padStart(2,'0')}\`;
                     }
-
                     document.getElementById('levStats').innerHTML = Object.entries(d.levStats).map(([lev, val]) => \`
                         <div class="bg-[#1e2329] p-1 border border-gray-800 rounded text-center">
                             <div class="text-gray-500">X\${lev}</div>
@@ -332,7 +325,9 @@ app.get('/gui', (req, res) => {
     </body></html>`);
 });
 
-fetchActualLeverage().then(() => { 
+// Chạy khởi tạo song song
+initSymbols().then(() => { 
     initWS(); 
     app.listen(PORT, '0.0.0.0', () => logger(`BOT READY: http://localhost:${PORT}/gui`)); 
+    fetchActualLeverage(); // Lấy đòn bẩy chuẩn sau khi bot đã chạy
 });
