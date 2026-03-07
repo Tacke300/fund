@@ -177,7 +177,7 @@ app.get('/api/data', (req, res) => {
             pnl = totalMargin * diff * p.maxLev;
             roi = (pnl / p.coinBalance) * 100;
             
-            gridsGong += (p.grids.length > 0 ? p.grids.length : 0);
+            gridsGong += p.grids.length;
             unrealizedPnl += pnl;
         }
 
@@ -189,7 +189,7 @@ app.get('/api/data', (req, res) => {
             roi, 
             pnl, 
             currentPrice: currentP,
-            displayBalance: p.coinBalance + pnl // Vốn thực tế = Vốn gốc coin + PnL đang chạy
+            displayBalance: p.coinBalance + pnl
         };
     });
 
@@ -198,6 +198,7 @@ app.get('/api/data', (req, res) => {
         stats: { 
             today: getFilteredPnL(0), d7: getFilteredPnL(7), d30: getFilteredPnL(30),
             closedPnl: botState.closedPnl,
+            totalClosedGrids: botState.totalClosedGrids,
             unrealizedPnl: unrealizedPnl,
             runningCoins: activeData.filter(x => x.status !== 'WAITING').length,
             gridsGong,
@@ -221,7 +222,7 @@ app.post('/api/reset', (req, res) => {
 });
 
 app.get('/gui', (req, res) => {
-    res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Luffy Matrix v33</title><script src="https://cdn.tailwindcss.com"></script>
+    res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Luffy Matrix v34</title><script src="https://cdn.tailwindcss.com"></script>
     <style>body{background:#0b0e11;color:#eaecef;font-family:monospace} th{cursor:pointer;background:#161a1e;padding:12px 8px;border-bottom:1px solid #333;text-transform:uppercase;font-size:10px} th:hover{color:#f0b90b} #logBox{background:#000;padding:10px;height:250px;overflow-y:auto;font-size:11px;border:1px solid #333}</style>
     </head><body class="p-4 text-[11px]">
         <div class="bg-[#1e2329] p-4 rounded-lg mb-2 border border-gray-800 flex flex-wrap items-end gap-3 shadow-lg">
@@ -232,26 +233,28 @@ app.get('/gui', (req, res) => {
             <div class="w-[60px]">TP%<input id="tpPercent" type="number" step="0.1" class="w-full bg-black text-yellow-500 p-2 rounded border border-gray-700 mt-1"></div>
             <div class="w-[90px]">MODE<select id="mode" class="w-full bg-black p-2 rounded border border-gray-700 mt-1 text-yellow-500"><option value="LONG">LONG</option><option value="SHORT">SHORT</option></select></div>
             <div class="flex gap-1 ml-auto">
-                <button onclick="sendCtrl(true)" class="bg-green-600 px-5 py-2 rounded font-bold">START</button>
-                <button onclick="sendCtrl(false)" class="bg-red-600 px-5 py-2 rounded font-bold">STOP</button>
+                <button onclick="sendCtrl(true)" class="bg-green-600 px-5 py-2 rounded font-bold hover:bg-green-500">START</button>
+                <button onclick="sendCtrl(false)" class="bg-red-600 px-5 py-2 rounded font-bold hover:bg-red-500">STOP</button>
                 <button onclick="resetBot()" class="bg-gray-700 px-3 py-2 rounded font-bold text-[9px]">RESET</button>
             </div>
             <div class="border-l border-gray-700 pl-4 ml-2"><div class="text-gray-500 text-[9px]">UPTIME</div><div id="uptime" class="text-yellow-500 font-bold text-sm">0d 00:00:00</div><div id="botStatus" class="font-bold text-[9px] italic text-red-500">OFFLINE</div></div>
         </div>
 
         <div class="bg-[#1e2329] p-3 rounded-t-lg border-x border-t border-gray-800 flex justify-between gap-2 shadow-inner">
-            <div class="text-center flex-1">HÔM NAY (7AM)<div id="pnlToday" class="text-lg font-bold text-green-400">0.00$</div></div>
-            <div class="text-center flex-1 border-x border-gray-800">7 NGÀY QUA<div id="pnl7d" class="text-lg font-bold text-green-500">0.00$</div></div>
-            <div class="text-center flex-1 border-r border-gray-800">30 NGÀY QUA<div id="pnl30d" class="text-lg font-bold text-emerald-500">0.00$</div></div>
-            <div class="text-center flex-1">PNL ĐÃ CHỐT<div id="closedPnlHeader" class="text-lg font-bold text-yellow-500">0.00$</div></div>
+            <div class="text-center flex-1 text-gray-400">HÔM NAY (7AM)<div id="pnlToday" class="text-lg font-bold text-green-400">0.00$</div></div>
+            <div class="text-center flex-1 border-x border-gray-800 text-gray-400">7 NGÀY QUA<div id="pnl7d" class="text-lg font-bold text-green-500">0.00$</div></div>
+            <div class="text-center flex-1 border-r border-gray-800 text-gray-400">30 NGÀY QUA<div id="pnl30d" class="text-lg font-bold text-emerald-500">0.00$</div></div>
+            <div class="text-center flex-1 text-yellow-500 font-bold">TỔNG PNL TOÀN BOT<div id="pnlAll" class="text-2xl font-black">0.00$</div></div>
+            <div class="text-center flex-1 border-l border-gray-800 text-green-400 font-bold">ROI HỆ THỐNG<div id="statTotalRoi" class="text-2xl font-black">0.00%</div></div>
         </div>
 
-        <div class="bg-[#161a1e] p-2 flex justify-around border-x border-b border-gray-800 text-[9px] font-bold mb-4 shadow-md">
+        <div class="bg-[#161a1e] p-2 flex justify-around border-x border-b border-gray-800 text-[10px] font-bold mb-4 shadow-md text-gray-300">
             <div>COINS: <span id="statCoins" class="text-blue-400">0</span></div>
             <div>LƯỚI ĐANG GỒNG: <span id="statGrids" class="text-orange-400">0</span></div>
+            <div>LƯỚI ĐÃ CHỐT: <span id="statClosedGrids" class="text-purple-400">0</span></div>
+            <div class="border-l border-gray-700 pl-4">PNL ĐÃ CHỐT: <span id="statClosedPnl" class="text-yellow-500">0.00$</span></div>
             <div>PNL TẠM TÍNH: <span id="statUnreal" class="text-white">0.00$</span></div>
-            <div>ROI HỆ THỐNG: <span id="statTotalRoi" class="text-green-400">0.00%</span></div>
-            <div>TỔNG PNL HỆ THỐNG: <span id="statSysPnl" class="text-yellow-500 text-sm">0.00$</span></div>
+            <div class="border-l border-gray-700 pl-4">TỔNG PNL HỆ THỐNG: <span id="statSysPnl" class="text-emerald-400 text-sm">0.00$</span></div>
         </div>
 
         <div class="bg-[#1e2329] rounded-lg border border-gray-800 mb-4 overflow-hidden"><table class="w-full text-left">
@@ -294,17 +297,19 @@ app.get('/gui', (req, res) => {
                     document.getElementById('pnlToday').innerText = d.stats.today.toFixed(2) + '$';
                     document.getElementById('pnl7d').innerText = d.stats.d7.toFixed(2) + '$';
                     document.getElementById('pnl30d').innerText = d.stats.d30.toFixed(2) + '$';
-                    document.getElementById('closedPnlHeader').innerText = d.stats.closedPnl.toFixed(2) + '$';
+                    document.getElementById('pnlAll').innerText = d.stats.totalSystemPnl.toFixed(2) + '$';
                     
                     document.getElementById('statCoins').innerText = d.stats.runningCoins;
                     document.getElementById('statGrids').innerText = d.stats.gridsGong;
+                    document.getElementById('statClosedGrids').innerText = d.stats.totalClosedGrids;
+                    document.getElementById('statClosedPnl').innerText = d.stats.closedPnl.toFixed(2) + '$';
                     document.getElementById('statUnreal').innerText = d.stats.unrealizedPnl.toFixed(2) + '$';
                     document.getElementById('statSysPnl').innerText = d.stats.totalSystemPnl.toFixed(2) + '$';
                     
                     const totalInv = d.stats.runningCoins * d.state.totalBalance;
                     const sysRoi = totalInv > 0 ? (d.stats.totalSystemPnl / totalInv) * 100 : 0;
                     document.getElementById('statTotalRoi').innerText = sysRoi.toFixed(2) + '%';
-                    document.getElementById('statTotalRoi').className = sysRoi >= 0 ? 'text-green-400' : 'text-red-500';
+                    document.getElementById('statTotalRoi').className = "text-2xl font-black " + (sysRoi >= 0 ? 'text-green-400' : 'text-red-500');
 
                     document.getElementById('logBox').innerHTML = d.logs.join('<br>');
                     document.getElementById('botStatus').innerText = d.state.running ? "RUNNING" : "STOPPED";
