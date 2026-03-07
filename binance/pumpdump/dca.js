@@ -42,7 +42,7 @@ const saveAll = () => {
 };
 
 async function fallbackSymbols() {
-    return new Promise((resolve) => {
+    return new Promise((res_ok) => {
         https.get('https://fapi.binance.com/fapi/v1/exchangeInfo', (res) => {
             let data = '';
             res.on('data', chunk => data += chunk);
@@ -56,14 +56,14 @@ async function fallbackSymbols() {
                         }
                     });
                 } catch(e) {}
-                resolve();
+                res_ok();
             });
-        }).on('error', () => resolve());
+        }).on('error', () => res_ok());
     });
 }
 
 async function fetchActualLeverage() {
-    return new Promise((resolve) => {
+    return new Promise((res_main) => {
         const timestamp = Date.now();
         const query = `timestamp=${timestamp}`;
         const signature = crypto.createHmac('sha256', SECRET_KEY).update(query).digest('hex');
@@ -84,12 +84,12 @@ async function fetchActualLeverage() {
                             allSymbols.push(item.symbol);
                         });
                         fs.writeFileSync(LEVERAGE_FILE, JSON.stringify(symbolMaxLeverage));
-                        logger(`Nạp ${allSymbols.length} coin thành công.`);
+                        logger(`Đã tải ${allSymbols.length} cặp coin.`);
                     }
-                    resolve();
-                } catch (e) { fallbackSymbols().then(resolve); }
+                    res_main();
+                } catch (e) { fallbackSymbols().then(() => res_main()); }
             });
-        }).on('error', () => fallbackSymbols().then(resolve));
+        }).on('error', () => fallbackSymbols().then(() => res_main()));
     });
 }
 
@@ -183,8 +183,8 @@ app.post('/api/reset', (req, res) => {
 });
 
 app.get('/gui', (req, res) => {
-    res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Luffy DCA v45</title><script src="https://cdn.tailwindcss.com"></script>
-    <style>body{background:#0b0e11;color:#eaecef;font-family:monospace} th{cursor:pointer;background:#161a1e;padding:12px 8px;border-bottom:1px solid #333;text-transform:uppercase;font-size:10px}
+    res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Luffy DCA v46</title><script src="https://cdn.tailwindcss.com"></script>
+    <style>body{background:#0b0e11;color:#eaecef;font-family:monospace} th{background:#161a1e;padding:12px 8px;border-bottom:1px solid #333;font-size:10px}
     #logBox{background:#000;padding:10px;height:220px;overflow-y:auto;font-size:11px;border:1px solid #333}
     .modal { display: none; position: fixed; z-index: 100; left: 0; top: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.95); }
     .modal-content { background: #1e2329; margin: 10% auto; padding: 20px; border: 1px solid #f0b90b; width: 70%; border-radius: 4px; }</style></head>
@@ -213,43 +213,60 @@ app.get('/gui', (req, res) => {
         </div>
         <div class="bg-[#1e2329] rounded-lg border border-gray-800 mb-4 overflow-hidden"><table class="w-full text-left">
             <thead class="bg-[#161a1e]"><tr>
-                <th onclick="setSort('maxLev')">SYMBOL (xLEV) ↕</th>
-                <th class="text-right" onclick="setSort('pnl')">PNL HIỆN TẠI ↕</th>
+                <th>SYMBOL (xLEV)</th>
+                <th class="text-right">PNL HIỆN TẠI</th>
                 <th class="text-center">TẦNG DCA</th>
                 <th class="text-right">VỐN COIN ($)</th>
                 <th class="text-right pr-2">GIÁ TRUNG BÌNH</th>
             </tr></thead><tbody id="activeBody"></tbody></table></div>
         <div id="logBox"></div>
         <script>
-            let sortKey = 'maxLev', sortDir = -1, rawData = [], firstLoad = true;
-            function setSort(k){ if(sortKey===k) sortDir*=-1; else {sortKey=k; sortDir=-1;} render(); }
+            let rawData = [], firstLoad = true;
             async function sendCtrl(run){
-                const body = { running: run, marginValue: Number(document.getElementById('marginValue').value), maxGrids: Number(document.getElementById('maxGrids').value), stepSize: Number(document.getElementById('stepSize').value), tpPercent: Number(document.getElementById('tpPercent').value), mode: document.getElementById('mode').value };
+                const body = { 
+                    running: run, 
+                    marginValue: Number(document.getElementById('marginValue').value), 
+                    maxGrids: Number(document.getElementById('maxGrids').value), 
+                    stepSize: Number(document.getElementById('stepSize').value), 
+                    tpPercent: Number(document.getElementById('tpPercent').value), 
+                    mode: document.getElementById('mode').value 
+                };
                 await fetch('/api/control',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
             }
             async function resetData(){ if(confirm('RESET ALL?')) await fetch('/api/reset',{method:'POST'}); }
             function openDetail(s){
                 const p = rawData.find(x => x.symbol === s); if(!p) return;
                 document.getElementById('mTitle').innerText = s + " - Tầng DCA";
-                document.getElementById('mBody').innerHTML = p.gridDetails.map(g => {
-                    const c = g.pnl >= 0 ? 'text-green-500' : 'text-red-500';
-                    return '<tr class="border-b border-gray-800"><td class="p-2 text-yellow-500">Tầng '+g.index+'</td><td>'+g.entry.toFixed(5)+'</td><td>'+g.margin.toFixed(2)+'</td><td class="'+c+' font-bold">'+g.pnl.toFixed(4)+'</td></tr>';
-                }).join('');
-                document.getElementById('gridModal').style.display = 'block';
+                let html = "";
+                p.gridDetails.forEach(g => {
+                    const c = g.pnl >= 0 ? "text-green-500" : "text-red-500";
+                    html += '<tr class="border-b border-gray-800"><td class="p-2 text-yellow-500">Tầng '+g.index+'</td><td>'+g.entry.toFixed(5)+'</td><td>'+g.margin.toFixed(2)+'</td><td class="'+c+' font-bold">'+g.pnl.toFixed(4)+'</td></tr>';
+                });
+                document.getElementById('mBody').innerHTML = html;
+                document.getElementById('gridModal').style.display = "block";
             }
-            function closeM(){ document.getElementById('gridModal').style.display = 'none'; }
+            function closeM(){ document.getElementById('gridModal').style.display = "none"; }
             function render(){ 
-                const s = [...rawData].sort((a,b)=> (a[sortKey]>b[sortKey]?1:-1)*sortDir); 
-                document.getElementById('activeBody').innerHTML = s.map(p=>{
-                    const c = p.pnl>=0?'text-green-400':'text-red-500';
-                    const op = p.status==='WAITING'?'opacity-30':'';
-                    return '<tr class="border-b border-gray-800 hover:bg-[#2b3139] '+op+'"><td onclick="openDetail(\\''+p.symbol+'\\')" class="p-3 font-bold text-yellow-500 cursor-pointer underline">'+p.symbol+' (x'+p.maxLev+')</td><td class="text-right font-bold '+c+'">'+p.pnl.toFixed(2)+'$</td><td class="text-center font-bold text-yellow-400">'+p.currentGrid+'/'+window.maxG+'</td><td class="text-right font-bold text-blue-400">'+p.coinVốn.toFixed(1)+'$</td><td class="text-right pr-2 font-bold text-white">'+(p.avgPrice||0).toFixed(5)+'</td></tr>';
-                }).join(''); 
+                let html = "";
+                rawData.sort((a,b) => b.pnl - a.pnl).forEach(p => {
+                    const c = p.pnl >= 0 ? "text-green-400" : "text-red-500";
+                    const op = p.status === "WAITING" ? "opacity-30" : "";
+                    html += '<tr class="border-b border-gray-800 hover:bg-[#2b3139] '+op+'"><td onclick="openDetail(\\''+p.symbol+'\\')" class="p-3 font-bold text-yellow-500 cursor-pointer underline">'+p.symbol+' (x'+p.maxLev+')</td><td class="text-right font-bold '+c+'">'+p.pnl.toFixed(2)+'$</td><td class="text-center font-bold text-yellow-400">'+p.currentGrid+'/'+window.maxG+'</td><td class="text-right font-bold text-blue-400">'+p.coinVốn.toFixed(1)+'$</td><td class="text-right pr-2 font-bold text-white">'+(p.avgPrice||0).toFixed(5)+'</td></tr>';
+                });
+                document.getElementById('activeBody').innerHTML = html;
             }
             async function update(){
                 try {
-                    const r = await fetch('/api/data'); const d = await r.json();
-                    if(firstLoad) { ['marginValue','maxGrids','stepSize','tpPercent','mode'].forEach(id => { document.getElementById(id).value = d.state[id]; }); firstLoad = false; }
+                    const r = await fetch('/api/data'); 
+                    const d = await r.json();
+                    if(firstLoad) { 
+                        document.getElementById('marginValue').value = d.state.marginValue;
+                        document.getElementById('maxGrids').value = d.state.maxGrids;
+                        document.getElementById('stepSize').value = d.state.stepSize;
+                        document.getElementById('tpPercent').value = d.state.tpPercent;
+                        document.getElementById('mode').value = d.state.mode;
+                        firstLoad = false; 
+                    }
                     rawData = d.active; window.maxG = d.state.maxGrids; render();
                     document.getElementById('pnlAll').innerText = d.stats.totalSystemPnl.toFixed(2) + '$';
                     document.getElementById('statClosedPnl').innerText = d.stats.closedPnl.toFixed(2) + '$';
@@ -266,5 +283,5 @@ app.get('/gui', (req, res) => {
 
 fetchActualLeverage().then(() => {
     initWS();
-    app.listen(PORT, '0.0.0.0', () => logger(`BOT READY: http://localhost:${PORT}/gui`));
+    app.listen(PORT, '0.0.0.0', () => logger(`DCA BOT READY: http://localhost:${PORT}/gui`));
 });
