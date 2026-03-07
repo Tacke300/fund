@@ -76,8 +76,7 @@ async function fetchActualLeverage() {
                             allSymbols.push(item.symbol);
                         });
                         fs.writeFileSync(LEVERAGE_FILE, JSON.stringify(symbolMaxLeverage));
-                        logger(`Nạp ${allSymbols.length} coin. Leverage OK.`);
-                    } else { throw new Error("Data error"); }
+                    }
                     resolve();
                 } catch (e) { fallbackSymbols().then(resolve); }
             });
@@ -129,19 +128,21 @@ function initWS() {
                     const avgPrice = pos.grids.reduce((sum, g) => sum + (g.price * g.qty), 0) / totalMargin;
                     const diffPct = pos.side === 'LONG' ? (price - avgPrice) / avgPrice : (avgPrice - price) / avgPrice;
 
+                    // CHỐT LỜI
                     if (diffPct * 100 >= botState.tpPercent) {
                         const pnl = totalMargin * (diffPct * pos.maxLev);
                         pos.coinBalance += pnl; 
-                        pos.closedCount = (pos.closedCount || 0) + 1; // Đếm số lần chốt của từng coin
+                        pos.closedCount = (pos.closedCount || 0) + 1;
                         botState.closedPnl += pnl;
                         botState.totalClosedGrids++;
                         pnlHistory.push({ ts: Date.now(), pnl: pnl });
-                        if(pnlHistory.length > 10000) pnlHistory.shift(); 
                         logger(`WIN: ${t.s} | +${pnl.toFixed(2)}$`, "WIN");
                         pos.status = 'WAITING';
                         pos.grids = []; 
                         saveAll();
-                    } else if (pos.grids.length < botState.maxGrids) {
+                    } 
+                    // DCA (GIỮ NGUYÊN LOGIC CŨ)
+                    else if (pos.grids.length < botState.maxGrids) {
                         const lastPrice = pos.grids[pos.grids.length - 1].price;
                         const gap = pos.side === 'LONG' ? (lastPrice - price) / lastPrice : (price - lastPrice) / lastPrice;
                         if (gap * 100 >= botState.stepSize) {
@@ -175,18 +176,19 @@ app.get('/api/data', (req, res) => {
             totalMargin = p.grids.reduce((sum, g) => sum + g.qty, 0);
             avgPrice = p.grids.reduce((sum, g) => sum + (g.price * g.qty), 0) / totalMargin;
             const diff = p.side === 'LONG' ? (currentP - avgPrice) / avgPrice : (avgPrice - currentP) / avgPrice;
+            
+            // TÍNH PNL THẬT (ÂM BAO NHIÊU CŨNG ĐƯỢC)
             pnl = totalMargin * diff * p.maxLev;
             gridsGong += p.grids.length;
             unrealizedPnl += pnl;
         }
 
-        // Tạo chi tiết cho từng tầng grid để popup
         const gridDetails = p.grids.map((g, i) => {
             const d = p.side === 'LONG' ? (currentP - g.price) / g.price : (g.price - currentP) / g.price;
-            const tpPrice = p.side === 'LONG' ? g.price * (1 + botState.tpPercent/100) : g.price * (1 - botState.tpPercent/100);
             return {
                 index: i + 1, entry: g.price, margin: g.qty, time: g.time, 
-                pnl: g.qty * d * p.maxLev, roi: d * p.maxLev * 100, tp: tpPrice
+                pnl: g.qty * d * p.maxLev, roi: d * p.maxLev * 100, 
+                tp: p.side === 'LONG' ? g.price * (1 + botState.tpPercent/100) : g.price * (1 - botState.tpPercent/100)
             };
         });
 
@@ -225,20 +227,21 @@ app.post('/api/reset', (req, res) => {
 });
 
 app.get('/gui', (req, res) => {
-    res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Luffy Matrix v36</title><script src="https://cdn.tailwindcss.com"></script>
-    <style>body{background:#0b0e11;color:#eaecef;font-family:monospace} th{cursor:pointer;background:#161a1e;padding:12px 8px;border-bottom:1px solid #333;text-transform:uppercase;font-size:10px} th:hover{color:#f0b90b} #logBox{background:#000;padding:10px;height:250px;overflow-y:auto;font-size:11px;border:1px solid #333}
+    res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Luffy Matrix v38</title><script src="https://cdn.tailwindcss.com"></script>
+    <style>body{background:#0b0e11;color:#eaecef;font-family:monospace} th{cursor:pointer;background:#161a1e;padding:12px 8px;border-bottom:1px solid #333;text-transform:uppercase;font-size:10px} 
     .modal { display: none; position: fixed; z-index: 100; left: 0; top: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); }
-    .modal-content { background: #1e2329; margin: 10% auto; padding: 20px; border: 1px solid #f0b90b; width: 80%; border-radius: 8px; }</style>
+    .modal-content { background: #1e2329; margin: 10% auto; padding: 20px; border: 1px solid #f0b90b; width: 85%; border-radius: 8px; }
+    #logBox{background:#000;padding:10px;height:250px;overflow-y:auto;font-size:11px;border:1px solid #333}</style>
     </head><body class="p-4 text-[11px]">
         <div id="gridModal" class="modal"><div class="modal-content shadow-2xl">
-            <div class="flex justify-between border-b border-gray-700 pb-2 mb-4"><h2 id="modalTitle" class="text-xl font-bold text-yellow-500"></h2><button onclick="closeModal()" class="text-2xl text-red-500">&times;</button></div>
+            <div class="flex justify-between border-b border-gray-700 pb-2 mb-4"><h2 id="modalTitle" class="text-xl font-bold text-yellow-500 italic"></h2><button onclick="closeModal()" class="text-2xl text-red-500">&times;</button></div>
             <table class="w-full text-center text-[10px]">
-                <thead class="bg-black"><tr><th>TẦNG</th><th>VỊ THẾ</th><th>MARGIN ($)</th><th>ENTRY</th><th>DỰ KIẾN TP</th><th>PNL ($)</th><th>ROI (%)</th><th>TIME</th></tr></thead>
+                <thead class="bg-black"><tr><th>TẦNG</th><th>SIDE</th><th>MARGIN ($)</th><th>ENTRY</th><th>DỰ KIẾN TP</th><th>PNL ($)</th><th>ROI (%)</th><th>TIME</th></tr></thead>
                 <tbody id="modalBody"></tbody>
             </table>
         </div></div>
 
-        <div class="bg-[#1e2329] p-4 rounded-lg mb-2 border border-gray-800 flex flex-wrap items-end gap-3 shadow-lg">
+        <div class="bg-[#1e2329] p-4 rounded-lg mb-2 border border-gray-800 flex flex-wrap items-end gap-3">
             <div class="w-[110px]">VỐN GỐC/COIN<input id="totalBalance" type="number" class="w-full bg-black text-yellow-500 p-2 rounded border border-gray-700 mt-1"></div>
             <div class="w-[110px]">MARGIN<div class="flex mt-1"><input id="marginValue" type="number" class="w-full bg-black text-yellow-500 p-2 rounded-l border border-gray-700"><select id="marginType" class="bg-gray-800 text-white rounded-r border-y border-r border-gray-700"><option value="$">$</option><option value="%">%</option></select></div></div>
             <div class="w-[60px]">DCA<input id="maxGrids" type="number" class="w-full bg-black text-yellow-500 p-2 rounded border border-gray-700 mt-1"></div>
@@ -271,8 +274,8 @@ app.get('/gui', (req, res) => {
 
         <div class="bg-[#1e2329] rounded-lg border border-gray-800 mb-4 overflow-hidden shadow-xl"><table class="w-full text-left">
             <thead class="bg-[#161a1e]"><tr>
-                <th onclick="setSort('symbol')">SYMBOL (XEM CHI TIẾT) ↕</th>
-                <th class="text-right" onclick="setSort('displayBalance')">CURRENT BALANCE ↕</th>
+                <th onclick="setSort('symbol')">SYMBOL ↕</th>
+                <th class="text-right" onclick="setSort('displayBalance')">BALANCE ↕</th>
                 <th class="text-center" onclick="setSort('currentGrid')">DCA ↕</th>
                 <th class="text-right" onclick="setSort('closedCount')">LƯỚI CHỐT ↕</th>
                 <th class="text-right pr-2" onclick="setSort('pnl')">PNL ($) ↕</th>
@@ -290,14 +293,14 @@ app.get('/gui', (req, res) => {
             function openDetail(symbol){
                 const p = rawData.find(x => x.symbol === symbol);
                 if(!p || p.status === 'WAITING') return;
-                document.getElementById('modalTitle').innerText = symbol + ' - ' + p.side + ' (LEV x' + p.maxLev + ')';
+                document.getElementById('modalTitle').innerText = symbol + ' DETAIL';
                 document.getElementById('modalBody').innerHTML = p.gridDetails.map(g => \`
                     <tr class="border-b border-gray-800 py-2">
-                        <td class="p-2 text-yellow-400">#\${g.index}</td>
+                        <td class="p-2 text-yellow-400 font-bold">#\${g.index}</td>
                         <td class="\${p.side==='LONG'?'text-green-500':'text-red-500'} font-bold">\${p.side}</td>
                         <td>\${g.margin.toFixed(2)}$</td>
-                        <td class="text-white">\${g.entry.toFixed(4)}</td>
-                        <td class="text-green-400 font-bold">\${g.tp.toFixed(4)}</td>
+                        <td>\${g.entry.toFixed(5)}</td>
+                        <td class="text-green-400">\${g.tp.toFixed(5)}</td>
                         <td class="\${g.pnl>=0?'text-green-500':'text-red-500'} font-bold">\${g.pnl.toFixed(4)}$</td>
                         <td class="\${g.roi>=0?'text-green-500':'text-red-500'}">\${g.roi.toFixed(2)}%</td>
                         <td class="text-gray-500 text-[9px]">\${new Date(g.time).toLocaleTimeString()}</td>
@@ -310,8 +313,8 @@ app.get('/gui', (req, res) => {
                 const sorted = [...rawData].sort((a,b)=> (a[sortKey]>b[sortKey]?1:-1)*sortDir); 
                 document.getElementById('activeBody').innerHTML = sorted.map(p=>{
                     const balColor = p.pnl >= 0 ? 'text-green-400' : 'text-red-500';
-                    return \`<tr class="border-b border-gray-800 hover:bg-[#2b3139] \${p.status==='WAITING'?'opacity-40':''}"> 
-                        <td onclick="openDetail('\${p.symbol}')" class="p-2 font-bold text-yellow-500 font-mono cursor-pointer underline decoration-dotted">\${p.symbol}</td> 
+                    return \`<tr class="border-b border-gray-800 hover:bg-[#2b3139] cursor-pointer \${p.status==='WAITING'?'opacity-40':''}" onclick="openDetail('\${p.symbol}')"> 
+                        <td class="p-2 font-bold text-yellow-500 font-mono underline">\${p.symbol}</td> 
                         <td class="text-right font-bold \${balColor}">\${p.displayBalance.toFixed(2)}$</td> 
                         <td class="text-center font-bold text-yellow-400">\${p.currentGrid}/\${window.maxG}</td> 
                         <td class="text-right font-bold text-purple-400">\${p.closedCount || 0}</td> 
