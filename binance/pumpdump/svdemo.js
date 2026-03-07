@@ -2,13 +2,13 @@
 // CẤU HÌNH THÔNG SỐ CHIẾN THUẬT (DỄ CHỈNH)
 // ==========================================
 const TP_PERCENT = 0.1;           
-const SL_PERCENT = 0.5;           
+const SL_PERCENT = 5.0;           
 const MIN_VOLATILITY_TO_SAVE = 5; 
 const COOLDOWN_MINUTES = 15;      
 
 // --- LOGIC CHIẾN THUẬT LUFFY ---
 const MAX_LOSE_STREAK = 5;        // Thua liên tiếp 5 lần thì Reset
-const MAX_EQUITY_PERCENT = 0.5;   // Lệnh chạm 50% tổng vốn (Equity) thì Reset
+const MAX_EQUITY_PERCENT = 0.6;   // Lệnh chạm 50% tổng vốn (Equity) thì Reset
 const PORT = 9000;
 // ==========================================
 
