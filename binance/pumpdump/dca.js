@@ -32,29 +32,34 @@ function logger(msg, type = 'INFO') {
     if (logs.length > 100) logs.pop();
 }
 
-if (fs.existsSync(STATE_FILE)) try { Object.assign(botState, JSON.parse(fs.readFileSync(STATE_FILE))); } catch(e){}
-if (fs.existsSync(LEVERAGE_FILE)) try { symbolMaxLeverage = JSON.parse(fs.readFileSync(LEVERAGE_FILE)); } catch(e){}
-if (fs.existsSync(HISTORY_FILE)) try { pnlHistory = JSON.parse(fs.readFileSync(HISTORY_FILE)); } catch(e){}
+// Tải dữ liệu an toàn
+try {
+    if (fs.existsSync(STATE_FILE)) Object.assign(botState, JSON.parse(fs.readFileSync(STATE_FILE)));
+    if (fs.existsSync(LEVERAGE_FILE)) symbolMaxLeverage = JSON.parse(fs.readFileSync(LEVERAGE_FILE));
+    if (fs.existsSync(HISTORY_FILE)) pnlHistory = JSON.parse(fs.readFileSync(HISTORY_FILE));
+} catch(e) { logger("Lỗi đọc file lưu trữ, khởi tạo lại", "ERR"); }
 
 const saveAll = () => {
-    fs.writeFileSync(STATE_FILE, JSON.stringify(botState));
-    fs.writeFileSync(HISTORY_FILE, JSON.stringify(pnlHistory));
+    try {
+        fs.writeFileSync(STATE_FILE, JSON.stringify(botState));
+        fs.writeFileSync(HISTORY_FILE, JSON.stringify(pnlHistory));
+    } catch(e) { console.error("Save error"); }
 };
 
 function getFilteredPnL(days) {
-    const now = new Date();
-    let startTime;
+    const now = Date.now();
+    let startTs;
     if (days === 0) {
-        startTime = new Date();
-        if (now.getHours() < 7) startTime.setDate(now.getDate() - 1);
-        startTime.setHours(7, 0, 0, 0);
+        const d = new Date();
+        if (d.getHours() < 7) d.setDate(d.getDate() - 1);
+        d.setHours(7, 0, 0, 0);
+        startTs = d.getTime();
     } else {
-        startTime = new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
+        startTs = now - days * 86400000;
     }
-    return pnlHistory.filter(h => h.ts >= startTime.getTime()).reduce((sum, h) => sum + h.pnl, 0);
+    return pnlHistory.filter(h => h.ts >= startTs).reduce((sum, h) => sum + h.pnl, 0);
 }
 
-// Logic fetch Leverage (Giữ nguyên từ v23)
 async function fetchActualLeverage() {
     return new Promise((resolve) => {
         const timestamp = Date.now();
@@ -63,7 +68,7 @@ async function fetchActualLeverage() {
         const options = { hostname: 'fapi.binance.com', path: `/fapi/v1/leverageBracket?${query}&signature=${signature}`, headers: { 'X-MBX-APIKEY': API_KEY }, timeout: 15000 };
         https.get(options, (res) => {
             let data = '';
-            res.on('data', chunk => data += chunk);
+            res.on('data', c => data += c);
             res.on('end', () => {
                 try {
                     const brackets = JSON.parse(data);
@@ -74,6 +79,7 @@ async function fetchActualLeverage() {
                             allSymbols.push(item.symbol);
                         });
                         fs.writeFileSync(LEVERAGE_FILE, JSON.stringify(symbolMaxLeverage));
+                        logger(`Nạp ${allSymbols.length} coin thành công.`);
                     }
                     resolve();
                 } catch (e) { fallbackSymbols().then(resolve); }
@@ -86,7 +92,7 @@ async function fallbackSymbols() {
     return new Promise((resolve) => {
         https.get('https://fapi.binance.com/fapi/v1/exchangeInfo', (res) => {
             let data = '';
-            res.on('data', chunk => data += chunk);
+            res.on('data', c => data += c);
             res.on('end', () => {
                 try {
                     const info = JSON.parse(data);
@@ -121,7 +127,6 @@ function initWS() {
                         pos.status = 'TRADING';
                         return;
                     }
-
                     const totalMargin = pos.grids.reduce((sum, g) => sum + g.qty, 0);
                     const avgPrice = pos.grids.reduce((sum, g) => sum + (g.price * g.qty), 0) / totalMargin;
                     const diffPct = pos.side === 'LONG' ? (price - avgPrice) / avgPrice : (avgPrice - price) / avgPrice;
@@ -132,8 +137,7 @@ function initWS() {
                         botState.closedPnl += pnl;
                         botState.totalClosedGrids++;
                         pnlHistory.push({ ts: Date.now(), pnl: pnl });
-                        if(pnlHistory.length > 5000) pnlHistory.shift(); 
-                        logger(`WIN: ${t.s} | +${pnl.toFixed(2)}$ | Bal: ${pos.coinBalance.toFixed(2)}$`, "WIN");
+                        logger(`WIN: ${t.s} | +${pnl.toFixed(2)}$`, "WIN");
                         pos.status = 'WAITING';
                         pos.grids = []; 
                         saveAll();
@@ -142,15 +146,14 @@ function initWS() {
                         const gap = pos.side === 'LONG' ? (lastPrice - price) / lastPrice : (price - lastPrice) / lastPrice;
                         if (gap * 100 >= botState.stepSize) {
                             pos.grids.push({ price, qty: pos.grids[pos.grids.length-1].qty * botState.multiplier });
-                            logger(`DCA: ${t.s} (${pos.grids.length})`, "DCA");
+                            logger(`DCA: ${t.s} (#${pos.grids.length})`, "DCA");
                         }
                     }
-                } else if (allSymbols.includes(t.s)) {
-                    const initialCap = botState.totalBalance;
-                    const margin = botState.marginType === '$' ? botState.marginValue : (initialCap * botState.marginValue / 100);
+                } else if (allSymbols.includes(t.s) && botState.running) {
+                    const margin = botState.marginType === '$' ? botState.marginValue : (botState.totalBalance * botState.marginValue / 100);
                     activePositions[t.s] = {
                         symbol: t.s, side: botState.mode, maxLev: symbolMaxLeverage[t.s] || 20,
-                        coinBalance: initialCap, 
+                        coinBalance: botState.totalBalance, 
                         grids: [{ price, qty: margin }], status: 'TRADING'
                     };
                 }
@@ -158,6 +161,7 @@ function initWS() {
         } catch(e) {}
     });
     ws.on('close', () => setTimeout(initWS, 3000));
+    ws.on('error', () => ws.close());
 }
 
 app.get('/api/data', (req, res) => {
@@ -179,14 +183,15 @@ app.post('/api/control', (req, res) => {
         botState.running = req.body.running;
     }
     ['totalBalance', 'marginValue', 'marginType', 'maxGrids', 'stepSize', 'tpPercent', 'mode'].forEach(f => { if(req.body[f] !== undefined) botState[f] = req.body[f]; });
-    saveAll(); res.json({ status: 'ok' }); 
+    saveAll(); 
+    res.json({ status: 'ok' }); 
 });
 
 app.post('/api/reset', (req, res) => { activePositions = {}; botState.closedPnl = 0; botState.totalClosedGrids = 0; logs = []; pnlHistory = []; saveAll(); res.json({ status: 'ok' }); });
 
 app.get('/gui', (req, res) => {
-    res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Luffy Matrix v24</title><script src="https://cdn.tailwindcss.com"></script>
-    <style>body{background:#0b0e11;color:#eaecef;font-family:monospace} th{cursor:pointer;background:#161a1e;padding:12px 8px;border-bottom:1px solid #333;text-transform:uppercase;font-size:10px} th:hover{color:#f0b90b} #logBox{background:#000;padding:10px;height:220px;overflow-y:auto;font-size:11px;border:1px solid #333}</style>
+    res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Luffy Matrix v25</title><script src="https://cdn.tailwindcss.com"></script>
+    <style>body{background:#0b0e11;color:#eaecef;font-family:monospace} th{cursor:pointer;background:#161a1e;padding:12px 8px;border-bottom:1px solid #333;text-transform:uppercase;font-size:10px} #logBox{background:#000;padding:10px;height:200px;overflow-y:auto;font-size:11px;border:1px solid #333}</style>
     </head><body class="p-4 text-[11px]">
         <div class="bg-[#1e2329] p-4 rounded-lg mb-2 border border-gray-800 flex flex-wrap items-end gap-3 shadow-lg">
             <div class="w-[110px]">VỐN GỐC/COIN<input id="totalBalance" type="number" class="w-full bg-black text-yellow-500 p-2 rounded border border-gray-700 mt-1"></div>
@@ -226,23 +231,35 @@ app.get('/gui', (req, res) => {
 
         <script>
             let sortKey = 'pnl', sortDir = -1, rawData = [], firstLoad = true;
+            let currentBaseBalance = 100;
             function setSort(k){ if(sortKey===k) sortDir*=-1; else {sortKey=k; sortDir=-1;} render(); }
-            async function sendCtrl(run){ const body = { running: run, totalBalance: Number(document.getElementById('totalBalance').value), marginValue: Number(document.getElementById('marginValue').value), marginType: document.getElementById('marginType').value, maxGrids: Number(document.getElementById('maxGrids').value), stepSize: Number(document.getElementById('stepSize').value), tpPercent: Number(document.getElementById('tpPercent').value), mode: document.getElementById('mode').value }; await fetch('/api/control',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); }
+            async function sendCtrl(run){ 
+                currentBaseBalance = Number(document.getElementById('totalBalance').value);
+                const body = { running: run, totalBalance: currentBaseBalance, marginValue: Number(document.getElementById('marginValue').value), marginType: document.getElementById('marginType').value, maxGrids: Number(document.getElementById('maxGrids').value), stepSize: Number(document.getElementById('stepSize').value), tpPercent: Number(document.getElementById('tpPercent').value), mode: document.getElementById('mode').value }; 
+                await fetch('/api/control',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); 
+            }
             async function resetBot(){ if(confirm('RESET DATA?')) await fetch('/api/reset',{method:'POST'}); }
             function render(){
                 const sorted = [...rawData].sort((a,b)=> (a[sortKey]>b[sortKey]?1:-1)*sortDir);
-                document.getElementById('activeBody').innerHTML = sorted.map(p=>\`<tr class="border-b border-gray-800 hover:bg-[#2b3139] \${p.status==='WAITING'?'opacity-40':''}">
-                    <td class="p-2 font-bold text-yellow-500 font-mono">\${p.symbol} \${p.status==='WAITING'?'(W)':''}</td>
-                    <td class="text-right text-blue-400 font-bold">\${p.coinBalance.toFixed(2)}$</td>
-                    <td class="text-center font-bold text-yellow-400">\${p.currentGrid}/\${window.maxG}</td>
-                    <td class="text-right \${p.roi>=0?'text-green-500':'text-red-500'} font-bold">\${p.roi.toFixed(2)}%</td>
-                    <td class="text-right pr-2 font-bold \${p.pnl>=0?'text-green-500':'text-red-500'} font-mono">\${p.pnl.toFixed(2)}$</td>
-                </tr>\`).join('');
+                document.getElementById('activeBody').innerHTML = sorted.map(p=> {
+                    const balColor = p.coinBalance < currentBaseBalance ? 'text-red-500' : (p.coinBalance > currentBaseBalance ? 'text-green-400' : 'text-blue-400');
+                    return \`<tr class="border-b border-gray-800 hover:bg-[#2b3139] \${p.status==='WAITING'?'opacity-40':''}">
+                        <td class="p-2 font-bold text-yellow-500 font-mono">\${p.symbol} \${p.status==='WAITING'?'(W)':''}</td>
+                        <td class="text-right font-bold \${balColor}">\${p.coinBalance.toFixed(2)}$</td>
+                        <td class="text-center font-bold text-yellow-400">\${p.currentGrid}/\${window.maxG}</td>
+                        <td class="text-right \${p.roi>=0?'text-green-500':'text-red-500'} font-bold">\${p.roi.toFixed(2)}%</td>
+                        <td class="text-right pr-2 font-bold \${p.pnl>=0?'text-green-500':'text-red-500'} font-mono">\${p.pnl.toFixed(2)}$</td>
+                    </tr>\`;
+                }).join('');
             }
             async function update(){
                 try {
                     const res = await fetch('/api/data'); const d = await res.json();
-                    if(firstLoad) { ['totalBalance','marginValue','marginType','maxGrids','stepSize','tpPercent','mode'].forEach(id => document.getElementById(id).value = d.state[id]); firstLoad = false; }
+                    if(firstLoad) { 
+                        ['totalBalance','marginValue','marginType','maxGrids','stepSize','tpPercent','mode'].forEach(id => document.getElementById(id).value = d.state[id]); 
+                        currentBaseBalance = d.state.totalBalance;
+                        firstLoad = false; 
+                    }
                     rawData = d.active; window.maxG = d.state.maxGrids; render();
                     document.getElementById('pnlToday').innerText = d.stats.today.toFixed(2) + '$';
                     document.getElementById('pnl7d').innerText = d.stats.d7.toFixed(2) + '$';
@@ -251,8 +268,10 @@ app.get('/gui', (req, res) => {
                     document.getElementById('logBox').innerHTML = d.logs.join('<br>');
                     document.getElementById('botStatus').innerText = d.state.running ? "RUNNING" : "STOPPED";
                     document.getElementById('botStatus').className = "font-bold text-[9px] italic " + (d.state.running ? "text-green-500" : "text-red-500");
-                    const s = Math.floor((Date.now() - d.state.startTime)/1000);
-                    if(d.state.startTime && d.state.running) document.getElementById('uptime').innerText = \`\${Math.floor(s/86400)}d \${String(Math.floor((s%86400)/3600)).padStart(2,'0')}:\${String(Math.floor((s%3600)/60)).padStart(2,'0')}:\${String(s%60).padStart(2,'0')}\`;
+                    if(d.state.startTime && d.state.running) {
+                        const s = Math.floor((Date.now() - d.state.startTime)/1000);
+                        document.getElementById('uptime').innerText = \`\${Math.floor(s/86400)}d \${String(Math.floor((s%86400)/3600)).padStart(2,'0')}:\${String(Math.floor((s%3600)/60)).padStart(2,'0')}:\${String(s%60).padStart(2,'0')}\`;
+                    }
                 } catch(e){}
             }
             setInterval(update, 1000);
