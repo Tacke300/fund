@@ -44,12 +44,9 @@ const saveAll = () => {
 function getFilteredPnL(days) {
     const now = new Date();
     let startTime = new Date();
-    if (days === 0) {
-        if (now.getHours() < 7) startTime.setDate(now.getDate() - 1);
-        startTime.setHours(7, 0, 0, 0);
-    } else {
-        startTime = new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
-    }
+    if (now.getHours() < 7) startTime.setDate(now.getDate() - 1);
+    startTime.setHours(7, 0, 0, 0);
+    if (days > 0) startTime = new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
     return pnlHistory.filter(h => h.tsClose >= startTime.getTime()).reduce((sum, h) => sum + h.pnl, 0);
 }
 
@@ -123,14 +120,13 @@ function initWS() {
                     const diffPct = pos.side === 'LONG' ? (price - avgPrice) / avgPrice : (avgPrice - price) / avgPrice;
 
                     if (diffPct * 100 >= botState.tpPercent) {
-                        const closedRound = {
+                        pnlHistory.push({
                             tsOpen: pos.tsOpen, tsClose: Date.now(),
                             symbol: t.s, side: pos.side, lev: pos.maxLev,
                             pnl: pnl, avgPrice: avgPrice, closePrice: price,
                             gridsCount: pos.grids.length, totalMargin: pos.grids.length * botState.marginValue,
                             details: [...pos.grids]
-                        };
-                        pnlHistory.push(closedRound);
+                        });
                         botState.closedPnl += pnl;
                         botState.totalClosedGrids++;
                         logger(`WIN: ${t.s} | +${pnl.toFixed(2)}$`, "WIN");
@@ -178,26 +174,24 @@ app.get('/api/data', (req, res) => {
 
         const coinHistory = pnlHistory.filter(h => h.symbol === p.symbol);
         const totalClosedPnl = coinHistory.reduce((sum, h) => sum + h.pnl, 0);
-        const totalMarginUsed = p.grids.length * botState.marginValue;
-        const roi = totalMarginUsed > 0 ? (pnl / totalMarginUsed) * 100 : 0;
-        const capitalGoc = botState.marginValue * p.maxLev * botState.maxGrids;
+        // ROI TỔNG = (Tổng PNL chốt + PNL đang gồng) / (Tổng vốn dự kiến ban đầu cho 1 coin)
+        const capitalGoc = botState.marginValue * botState.maxGrids; 
+        const totalRoi = capitalGoc > 0 ? ((totalClosedPnl + pnl) / capitalGoc) * 100 : 0;
 
-        return { ...p, pnl, roi, totalClosedPnl, currentPrice: currentP, capitalGoc, capitalHienTai: capitalGoc + pnl, closedCount: coinHistory.length };
+        return { ...p, pnl, totalRoi, totalClosedPnl, currentPrice: currentP, capitalGoc, capitalHienTai: capitalGoc + pnl + totalClosedPnl, closedCount: coinHistory.length };
     });
 
     let levStats = {};
     [10, 20, 25, 30, 40, 50, 75, 100, 125, 150].forEach(l => {
         const historyLev = pnlHistory.filter(h => h.lev === l);
-        const closed = historyLev.reduce((sum, h) => sum + h.pnl, 0);
-        const marginClosed = historyLev.reduce((sum, h) => sum + h.totalMargin, 0);
-        
         const activeLev = activeData.filter(p => p.maxLev === l);
+        const closed = historyLev.reduce((sum, h) => sum + h.pnl, 0);
         const unreal = activeLev.reduce((sum, p) => sum + p.pnl, 0);
-        const marginActive = activeLev.reduce((sum, p) => sum + (p.grids.length * botState.marginValue), 0);
-
         const totalPnl = closed + unreal;
-        const totalMargin = marginClosed + marginActive;
-        const totalRoi = totalMargin > 0 ? (totalPnl / totalMargin) * 100 : 0;
+        // ROI của Levelage tính dựa trên số lượng coin đang chạy ở Lev đó
+        const totalCoinsAtLev = (activeLev.length || 1);
+        const baseMarginAtLev = totalCoinsAtLev * botState.marginValue * botState.maxGrids;
+        const totalRoi = baseMarginAtLev > 0 ? (totalPnl / baseMarginAtLev) * 100 : 0;
 
         if (closed !== 0 || unreal !== 0) levStats[l] = { totalPnl, totalRoi };
     });
@@ -262,10 +256,10 @@ app.get('/gui', (req, res) => {
                     <th onclick="setSort('symbol')">COIN ↕</th>
                     <th onclick="setSort('closedCount')" class="text-center">VÒNG ↕</th>
                     <th onclick="setSort('maxLev')" class="text-center">LEV ↕</th>
-                    <th onclick="setSort('totalClosedPnl')" class="text-right">TỔNG PNL ↕</th>
-                    <th onclick="setSort('roi')" class="text-center">ROI % ↕</th>
-                    <th onclick="setSort('grids.length')" class="text-center">GỒNG ↕</th>
-                    <th onclick="setSort('pnl')" class="text-right pr-4">GỒNG PNL ($) ↕</th>
+                    <th onclick="setSort('grids.length')" class="text-center">TẦNG ↕</th>
+                    <th onclick="setSort('pnl')" class="text-right">GỒNG PNL ($) ↕</th>
+                    <th onclick="setSort('totalClosedPnl')" class="text-right">TỔNG PNL ($) ↕</th>
+                    <th onclick="setSort('totalRoi')" class="text-center pr-4">ROI TỔNG % ↕</th>
                 </tr></thead>
                 <tbody id="activeBody"></tbody>
             </table>
@@ -281,11 +275,10 @@ app.get('/gui', (req, res) => {
             function openDetail(symbol){
                 const rounds = historyData.filter(h => h.symbol === symbol).reverse();
                 document.getElementById('modalTitle').innerText = symbol + " - LỊCH SỬ GIAO DỊCH";
-                document.getElementById('roundDetail').classList.add('hidden');
                 document.getElementById('roundsList').innerHTML = rounds.map((r, i) => \`
                     <div class="round-card" onclick="showRoundDetail('\${r.tsClose}')">
                         <div class="flex justify-between items-center mb-1"><span class="font-black text-yellow-500 text-sm">VÒNG #\${rounds.length - i}</span><span class="\${r.pnl>=0?'text-green-400':'text-red-500'} font-bold">+\${r.pnl.toFixed(2)}$</span></div>
-                        <div class="text-[9px] text-gray-400 flex justify-between"><span>DCA: \${r.gridsCount} | x\${r.lev}</span><span>\${new Date(r.tsClose).toLocaleString()}</span></div>
+                        <div class="text-[9px] text-gray-400 flex justify-between"><span>TẦNG: \${r.gridsCount} | x\${r.lev}</span><span>\${new Date(r.tsClose).toLocaleString()}</span></div>
                     </div>\`).join('');
                 document.getElementById('gridModal').style.display = "block";
             }
@@ -299,7 +292,7 @@ app.get('/gui', (req, res) => {
                         <div><div class="text-gray-500">ENTRY TB</div><div class="text-yellow-500 font-bold text-sm">\${r.avgPrice.toFixed(5)}</div></div>
                         <div><div class="text-gray-500">GIÁ ĐÓNG</div><div class="text-green-400 font-bold text-sm">\${r.closePrice.toFixed(5)}</div></div>
                         <div><div class="text-gray-500">VỐN MARGIN</div><div class="text-white font-bold text-sm">\${r.totalMargin.toFixed(2)}$</div></div>
-                        <div><div class="text-gray-500">THỜI ĐIỂM</div><div class="text-gray-400 font-bold text-sm">\${new Date(r.tsClose).toLocaleTimeString()}</div></div>
+                        <div><div class="text-gray-500">GIỜ CHỐT</div><div class="text-gray-400 font-bold text-sm">\${new Date(r.tsClose).toLocaleTimeString()}</div></div>
                     </div>
                     <table class="w-full text-left text-[9px] border-t border-gray-800 pt-2">
                         <thead><tr class="text-gray-500 border-b border-gray-800"><th>LƯỚI</th><th>GIÁ DCA</th><th class="text-right">GIỜ</th></tr></thead>
@@ -317,10 +310,10 @@ app.get('/gui', (req, res) => {
                         <td onclick="openDetail('\${p.symbol}')" class="p-2 font-bold text-yellow-500 cursor-pointer underline hover:text-white">\${p.symbol}</td> 
                         <td class="text-center text-blue-400 font-bold">\${p.closedCount}</td>
                         <td class="text-center text-purple-400">x\${p.maxLev}</td>
-                        <td class="text-right font-bold text-emerald-400">\${p.totalClosedPnl.toFixed(2)}$</td>
-                        <td class="text-center font-bold \${p.roi>=0?'text-green-400':'text-red-400'}">\${p.roi.toFixed(1)}%</td>
                         <td class="text-center font-bold text-orange-400">\${p.grids.length}</td> 
-                        <td class="text-right pr-4 font-bold \${p.pnl>=0?'text-green-500':'text-red-500'}">\${p.pnl.toFixed(2)}$</td> </tr>\`
+                        <td class="text-right font-bold \${p.pnl>=0?'text-green-500':'text-red-500'}">\${p.pnl.toFixed(2)}$</td>
+                        <td class="text-right font-bold text-emerald-400">\${p.totalClosedPnl.toFixed(2)}$</td>
+                        <td class="text-center pr-4 font-bold \${p.totalRoi>=0?'text-green-400':'text-red-400'}">\${p.totalRoi.toFixed(1)}%</td> </tr>\`
                 }).join(''); 
             }
 
