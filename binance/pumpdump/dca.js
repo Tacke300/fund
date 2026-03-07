@@ -163,34 +163,44 @@ function initWS() {
 }
 
 app.get('/api/data', (req, res) => {
-    let totalGridsFilled = 0;
-    let totalGridsRemaining = 0;
+    let gridsGong = 0;
     let unrealizedPnl = 0;
 
     const activeData = Object.values(activePositions).map(p => {
         const currentP = marketPrices[p.symbol] || 0;
-        if (p.status === 'WAITING') return { ...p, avgPrice: 0, totalMargin: 0, currentGrid: 0, roi: 0, pnl: 0, currentPrice: currentP };
+        let pnl = 0, roi = 0, avgPrice = 0, totalMargin = 0;
         
-        const totalMargin = p.grids.reduce((sum, g) => sum + g.qty, 0);
-        const avgPrice = p.grids.reduce((sum, g) => sum + (g.price * g.qty), 0) / totalMargin;
-        const diff = p.side === 'LONG' ? (currentP - avgPrice) / avgPrice : (avgPrice - currentP) / avgPrice;
-        const pnl = totalMargin * diff * p.maxLev;
-        
-        totalGridsFilled += p.grids.length;
-        totalGridsRemaining += (botState.maxGrids - p.grids.length);
-        unrealizedPnl += pnl;
+        if (p.status !== 'WAITING') {
+            totalMargin = p.grids.reduce((sum, g) => sum + g.qty, 0);
+            avgPrice = p.grids.reduce((sum, g) => sum + (g.price * g.qty), 0) / totalMargin;
+            const diff = p.side === 'LONG' ? (currentP - avgPrice) / avgPrice : (avgPrice - currentP) / avgPrice;
+            pnl = totalMargin * diff * p.maxLev;
+            roi = (pnl / p.coinBalance) * 100;
+            
+            gridsGong += (p.grids.length > 0 ? p.grids.length : 0);
+            unrealizedPnl += pnl;
+        }
 
-        return { ...p, avgPrice, totalMargin, currentGrid: p.grids.length, roi: (pnl/p.coinBalance)*100, pnl, currentPrice: currentP };
+        return { 
+            ...p, 
+            avgPrice, 
+            totalMargin, 
+            currentGrid: p.grids.length, 
+            roi, 
+            pnl, 
+            currentPrice: currentP,
+            displayBalance: p.coinBalance + pnl // Vốn thực tế = Vốn gốc coin + PnL đang chạy
+        };
     });
 
     res.json({ 
         state: botState, active: activeData, logs,
         stats: { 
-            today: getFilteredPnL(0), d7: getFilteredPnL(7), d30: getFilteredPnL(30), all: botState.closedPnl,
-            runningCoins: activeData.length,
-            totalGridsFilled,
-            totalGridsRemaining,
-            unrealizedPnl,
+            today: getFilteredPnL(0), d7: getFilteredPnL(7), d30: getFilteredPnL(30),
+            closedPnl: botState.closedPnl,
+            unrealizedPnl: unrealizedPnl,
+            runningCoins: activeData.filter(x => x.status !== 'WAITING').length,
+            gridsGong,
             totalSystemPnl: botState.closedPnl + unrealizedPnl
         }
     });
@@ -211,11 +221,11 @@ app.post('/api/reset', (req, res) => {
 });
 
 app.get('/gui', (req, res) => {
-    res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Luffy Matrix v32</title><script src="https://cdn.tailwindcss.com"></script>
+    res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Luffy Matrix v33</title><script src="https://cdn.tailwindcss.com"></script>
     <style>body{background:#0b0e11;color:#eaecef;font-family:monospace} th{cursor:pointer;background:#161a1e;padding:12px 8px;border-bottom:1px solid #333;text-transform:uppercase;font-size:10px} th:hover{color:#f0b90b} #logBox{background:#000;padding:10px;height:250px;overflow-y:auto;font-size:11px;border:1px solid #333}</style>
     </head><body class="p-4 text-[11px]">
         <div class="bg-[#1e2329] p-4 rounded-lg mb-2 border border-gray-800 flex flex-wrap items-end gap-3 shadow-lg">
-            <div class="w-[110px]">VỐN BAN ĐẦU<input id="totalBalance" type="number" class="w-full bg-black text-yellow-500 p-2 rounded border border-gray-700 mt-1"></div>
+            <div class="w-[110px]">VỐN GỐC/COIN<input id="totalBalance" type="number" class="w-full bg-black text-yellow-500 p-2 rounded border border-gray-700 mt-1"></div>
             <div class="w-[110px]">MARGIN<div class="flex mt-1"><input id="marginValue" type="number" class="w-full bg-black text-yellow-500 p-2 rounded-l border border-gray-700"><select id="marginType" class="bg-gray-800 text-white rounded-r border-y border-r border-gray-700"><option value="$">$</option><option value="%">%</option></select></div></div>
             <div class="w-[60px]">DCA<input id="maxGrids" type="number" class="w-full bg-black text-yellow-500 p-2 rounded border border-gray-700 mt-1"></div>
             <div class="w-[60px]">GAP%<input id="stepSize" type="number" step="0.1" class="w-full bg-black text-yellow-500 p-2 rounded border border-gray-700 mt-1"></div>
@@ -233,22 +243,21 @@ app.get('/gui', (req, res) => {
             <div class="text-center flex-1">HÔM NAY (7AM)<div id="pnlToday" class="text-lg font-bold text-green-400">0.00$</div></div>
             <div class="text-center flex-1 border-x border-gray-800">7 NGÀY QUA<div id="pnl7d" class="text-lg font-bold text-green-500">0.00$</div></div>
             <div class="text-center flex-1 border-r border-gray-800">30 NGÀY QUA<div id="pnl30d" class="text-lg font-bold text-emerald-500">0.00$</div></div>
-            <div class="text-center flex-1">TỔNG PNL CHỐT<div id="pnlAll" class="text-lg font-bold text-yellow-500">0.00$</div></div>
+            <div class="text-center flex-1">PNL ĐÃ CHỐT<div id="closedPnlHeader" class="text-lg font-bold text-yellow-500">0.00$</div></div>
         </div>
 
-        <div class="bg-[#161a1e] p-2 flex justify-around border-x border-b border-gray-800 text-[9px] font-bold mb-4">
+        <div class="bg-[#161a1e] p-2 flex justify-around border-x border-b border-gray-800 text-[9px] font-bold mb-4 shadow-md">
             <div>COINS: <span id="statCoins" class="text-blue-400">0</span></div>
-            <div>LƯỚI ĐÃ KHỚP: <span id="statGrids" class="text-purple-400">0</span></div>
-            <div>LƯỚI CÒN LẠI: <span id="statRem" class="text-orange-400">0</span></div>
-            <div>PNL TẠM: <span id="statUnreal" class="text-white">0.00$</span></div>
-            <div>ROI TỔNG: <span id="statTotalRoi" class="text-green-400">0.00%</span></div>
+            <div>LƯỚI ĐANG GỒNG: <span id="statGrids" class="text-orange-400">0</span></div>
+            <div>PNL TẠM TÍNH: <span id="statUnreal" class="text-white">0.00$</span></div>
+            <div>ROI HỆ THỐNG: <span id="statTotalRoi" class="text-green-400">0.00%</span></div>
             <div>TỔNG PNL HỆ THỐNG: <span id="statSysPnl" class="text-yellow-500 text-sm">0.00$</span></div>
         </div>
 
         <div class="bg-[#1e2329] rounded-lg border border-gray-800 mb-4 overflow-hidden"><table class="w-full text-left">
             <thead class="bg-[#161a1e]"><tr>
                 <th onclick="setSort('symbol')">SYMBOL ↕</th>
-                <th class="text-right" onclick="setSort('coinBalance')">CURRENT BALANCE ↕</th>
+                <th class="text-right" onclick="setSort('displayBalance')">CURRENT BALANCE ↕</th>
                 <th class="text-center" onclick="setSort('currentGrid')">DCA ↕</th>
                 <th class="text-right" onclick="setSort('roi')">ROI (%) ↕</th>
                 <th class="text-right pr-2" onclick="setSort('pnl')">PNL ($) ↕</th>
@@ -269,7 +278,7 @@ app.get('/gui', (req, res) => {
                     const balColor = p.pnl >= 0 ? 'text-green-400' : 'text-red-500';
                     return \`<tr class="border-b border-gray-800 hover:bg-[#2b3139] \${p.status==='WAITING'?'opacity-40':''}"> 
                         <td class="p-2 font-bold text-yellow-500 font-mono">\${p.symbol}</td> 
-                        <td class="text-right font-bold \${balColor}">\${p.coinBalance.toFixed(2)}$</td> 
+                        <td class="text-right font-bold \${balColor}">\${p.displayBalance.toFixed(2)}$</td> 
                         <td class="text-center font-bold text-yellow-400">\${p.currentGrid}/\${window.maxG}</td> 
                         <td class="text-right \${p.roi>=0?'text-green-500':'text-red-500'} font-bold">\${p.roi.toFixed(2)}%</td> 
                         <td class="text-right pr-2 font-bold \${p.pnl>=0?'text-green-500':'text-red-500'} font-mono">\${p.pnl.toFixed(2)}$</td> </tr>\`
@@ -285,18 +294,17 @@ app.get('/gui', (req, res) => {
                     document.getElementById('pnlToday').innerText = d.stats.today.toFixed(2) + '$';
                     document.getElementById('pnl7d').innerText = d.stats.d7.toFixed(2) + '$';
                     document.getElementById('pnl30d').innerText = d.stats.d30.toFixed(2) + '$';
-                    document.getElementById('pnlAll').innerText = d.stats.all.toFixed(2) + '$';
+                    document.getElementById('closedPnlHeader').innerText = d.stats.closedPnl.toFixed(2) + '$';
                     
                     document.getElementById('statCoins').innerText = d.stats.runningCoins;
-                    document.getElementById('statGrids').innerText = d.stats.totalGridsFilled;
-                    document.getElementById('statRem').innerText = d.stats.totalGridsRemaining;
+                    document.getElementById('statGrids').innerText = d.stats.gridsGong;
                     document.getElementById('statUnreal').innerText = d.stats.unrealizedPnl.toFixed(2) + '$';
                     document.getElementById('statSysPnl').innerText = d.stats.totalSystemPnl.toFixed(2) + '$';
                     
                     const totalInv = d.stats.runningCoins * d.state.totalBalance;
-                    const roi = totalInv > 0 ? (d.stats.totalSystemPnl / totalInv) * 100 : 0;
-                    document.getElementById('statTotalRoi').innerText = roi.toFixed(2) + '%';
-                    document.getElementById('statTotalRoi').className = roi >= 0 ? 'text-green-400' : 'text-red-500';
+                    const sysRoi = totalInv > 0 ? (d.stats.totalSystemPnl / totalInv) * 100 : 0;
+                    document.getElementById('statTotalRoi').innerText = sysRoi.toFixed(2) + '%';
+                    document.getElementById('statTotalRoi').className = sysRoi >= 0 ? 'text-green-400' : 'text-red-500';
 
                     document.getElementById('logBox').innerHTML = d.logs.join('<br>');
                     document.getElementById('botStatus').innerText = d.state.running ? "RUNNING" : "STOPPED";
