@@ -32,7 +32,6 @@ function logger(msg, type = 'INFO') {
     if (logs.length > 100) logs.pop();
 }
 
-// Load dữ liệu cũ
 if (fs.existsSync(STATE_FILE)) try { Object.assign(botState, JSON.parse(fs.readFileSync(STATE_FILE))); } catch(e){}
 if (fs.existsSync(LEVERAGE_FILE)) try { symbolMaxLeverage = JSON.parse(fs.readFileSync(LEVERAGE_FILE)); } catch(e){}
 if (fs.existsSync(HISTORY_FILE)) try { pnlHistory = JSON.parse(fs.readFileSync(HISTORY_FILE)); } catch(e){}
@@ -121,7 +120,7 @@ function initWS() {
                     const pos = activePositions[t.s];
                     if (pos.status === 'WAITING') {
                         const margin = botState.marginType === '$' ? botState.marginValue : (pos.coinBalance * botState.marginValue / 100);
-                        pos.grids = [{ price, qty: margin }];
+                        pos.grids = [{ price, qty: margin, time: Date.now() }];
                         pos.status = 'TRADING';
                         return;
                     }
@@ -130,27 +129,23 @@ function initWS() {
                     const avgPrice = pos.grids.reduce((sum, g) => sum + (g.price * g.qty), 0) / totalMargin;
                     const diffPct = pos.side === 'LONG' ? (price - avgPrice) / avgPrice : (avgPrice - price) / avgPrice;
 
-                    // CHECK TAKE PROFIT
                     if (diffPct * 100 >= botState.tpPercent) {
                         const pnl = totalMargin * (diffPct * pos.maxLev);
                         pos.coinBalance += pnl; 
-                        botState.closedPnl += pnl; // Cập nhật state
-                        botState.totalClosedGrids++; // Tăng số lưới chốt
-                        
+                        pos.closedCount = (pos.closedCount || 0) + 1; // Đếm số lần chốt của từng coin
+                        botState.closedPnl += pnl;
+                        botState.totalClosedGrids++;
                         pnlHistory.push({ ts: Date.now(), pnl: pnl });
                         if(pnlHistory.length > 10000) pnlHistory.shift(); 
-                        
                         logger(`WIN: ${t.s} | +${pnl.toFixed(2)}$`, "WIN");
                         pos.status = 'WAITING';
                         pos.grids = []; 
-                        saveAll(); // Lưu ngay lập tức để GUI cập nhật
-                    } 
-                    // CHECK DCA
-                    else if (pos.grids.length < botState.maxGrids) {
+                        saveAll();
+                    } else if (pos.grids.length < botState.maxGrids) {
                         const lastPrice = pos.grids[pos.grids.length - 1].price;
                         const gap = pos.side === 'LONG' ? (lastPrice - price) / lastPrice : (price - lastPrice) / lastPrice;
                         if (gap * 100 >= botState.stepSize) {
-                            pos.grids.push({ price, qty: pos.grids[pos.grids.length-1].qty * botState.multiplier });
+                            pos.grids.push({ price, qty: pos.grids[pos.grids.length-1].qty * botState.multiplier, time: Date.now() });
                             logger(`DCA: ${t.s} (${pos.grids.length})`, "DCA");
                         }
                     }
@@ -158,8 +153,8 @@ function initWS() {
                     const margin = botState.marginType === '$' ? botState.marginValue : (botState.totalBalance * botState.marginValue / 100);
                     activePositions[t.s] = {
                         symbol: t.s, side: botState.mode, maxLev: symbolMaxLeverage[t.s] || 20,
-                        coinBalance: botState.totalBalance,
-                        grids: [{ price, qty: margin }], status: 'TRADING'
+                        coinBalance: botState.totalBalance, closedCount: 0,
+                        grids: [{ price, qty: margin, time: Date.now() }], status: 'TRADING'
                     };
                 }
             });
@@ -174,43 +169,43 @@ app.get('/api/data', (req, res) => {
 
     const activeData = Object.values(activePositions).map(p => {
         const currentP = marketPrices[p.symbol] || 0;
-        let pnl = 0, roi = 0, avgPrice = 0;
+        let pnl = 0, avgPrice = 0, totalMargin = 0;
         
         if (p.status !== 'WAITING' && currentP > 0) {
-            const totalMargin = p.grids.reduce((sum, g) => sum + g.qty, 0);
+            totalMargin = p.grids.reduce((sum, g) => sum + g.qty, 0);
             avgPrice = p.grids.reduce((sum, g) => sum + (g.price * g.qty), 0) / totalMargin;
             const diff = p.side === 'LONG' ? (currentP - avgPrice) / avgPrice : (avgPrice - currentP) / avgPrice;
             pnl = totalMargin * diff * p.maxLev;
-            roi = (pnl / p.coinBalance) * 100;
-            
             gridsGong += p.grids.length;
             unrealizedPnl += pnl;
         }
 
+        // Tạo chi tiết cho từng tầng grid để popup
+        const gridDetails = p.grids.map((g, i) => {
+            const d = p.side === 'LONG' ? (currentP - g.price) / g.price : (g.price - currentP) / g.price;
+            const tpPrice = p.side === 'LONG' ? g.price * (1 + botState.tpPercent/100) : g.price * (1 - botState.tpPercent/100);
+            return {
+                index: i + 1, entry: g.price, margin: g.qty, time: g.time, 
+                pnl: g.qty * d * p.maxLev, roi: d * p.maxLev * 100, tp: tpPrice
+            };
+        });
+
         return { 
-            ...p, 
-            avgPrice, 
-            currentGrid: p.grids.length, 
-            roi, 
-            pnl, 
-            currentPrice: currentP,
-            displayBalance: p.coinBalance + pnl
+            ...p, avgPrice, totalMargin, currentGrid: p.grids.length, 
+            pnl, currentPrice: currentP, displayBalance: p.coinBalance + pnl,
+            gridDetails
         };
     });
-
-    // Tính toán tổng PnL từ history để đảm bảo chính xác tuyệt đối
-    const totalClosedPnlFromHistory = pnlHistory.reduce((sum, h) => sum + h.pnl, 0);
 
     res.json({ 
         state: botState, active: activeData, logs,
         stats: { 
             today: getFilteredPnL(0), d7: getFilteredPnL(7), d30: getFilteredPnL(30),
-            closedPnl: totalClosedPnlFromHistory || botState.closedPnl,
-            totalClosedGrids: botState.totalClosedGrids,
+            closedPnl: botState.closedPnl, totalClosedGrids: botState.totalClosedGrids,
             unrealizedPnl: unrealizedPnl,
             runningCoins: activeData.filter(x => x.status !== 'WAITING').length,
             gridsGong,
-            totalSystemPnl: (totalClosedPnlFromHistory || botState.closedPnl) + unrealizedPnl
+            totalSystemPnl: botState.closedPnl + unrealizedPnl
         }
     });
 });
@@ -230,9 +225,19 @@ app.post('/api/reset', (req, res) => {
 });
 
 app.get('/gui', (req, res) => {
-    res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Luffy Matrix v35</title><script src="https://cdn.tailwindcss.com"></script>
-    <style>body{background:#0b0e11;color:#eaecef;font-family:monospace} th{cursor:pointer;background:#161a1e;padding:12px 8px;border-bottom:1px solid #333;text-transform:uppercase;font-size:10px} th:hover{color:#f0b90b} #logBox{background:#000;padding:10px;height:250px;overflow-y:auto;font-size:11px;border:1px solid #333}</style>
+    res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Luffy Matrix v36</title><script src="https://cdn.tailwindcss.com"></script>
+    <style>body{background:#0b0e11;color:#eaecef;font-family:monospace} th{cursor:pointer;background:#161a1e;padding:12px 8px;border-bottom:1px solid #333;text-transform:uppercase;font-size:10px} th:hover{color:#f0b90b} #logBox{background:#000;padding:10px;height:250px;overflow-y:auto;font-size:11px;border:1px solid #333}
+    .modal { display: none; position: fixed; z-index: 100; left: 0; top: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); }
+    .modal-content { background: #1e2329; margin: 10% auto; padding: 20px; border: 1px solid #f0b90b; width: 80%; border-radius: 8px; }</style>
     </head><body class="p-4 text-[11px]">
+        <div id="gridModal" class="modal"><div class="modal-content shadow-2xl">
+            <div class="flex justify-between border-b border-gray-700 pb-2 mb-4"><h2 id="modalTitle" class="text-xl font-bold text-yellow-500"></h2><button onclick="closeModal()" class="text-2xl text-red-500">&times;</button></div>
+            <table class="w-full text-center text-[10px]">
+                <thead class="bg-black"><tr><th>TẦNG</th><th>VỊ THẾ</th><th>MARGIN ($)</th><th>ENTRY</th><th>DỰ KIẾN TP</th><th>PNL ($)</th><th>ROI (%)</th><th>TIME</th></tr></thead>
+                <tbody id="modalBody"></tbody>
+            </table>
+        </div></div>
+
         <div class="bg-[#1e2329] p-4 rounded-lg mb-2 border border-gray-800 flex flex-wrap items-end gap-3 shadow-lg">
             <div class="w-[110px]">VỐN GỐC/COIN<input id="totalBalance" type="number" class="w-full bg-black text-yellow-500 p-2 rounded border border-gray-700 mt-1"></div>
             <div class="w-[110px]">MARGIN<div class="flex mt-1"><input id="marginValue" type="number" class="w-full bg-black text-yellow-500 p-2 rounded-l border border-gray-700"><select id="marginType" class="bg-gray-800 text-white rounded-r border-y border-r border-gray-700"><option value="$">$</option><option value="%">%</option></select></div></div>
@@ -258,24 +263,23 @@ app.get('/gui', (req, res) => {
 
         <div class="bg-[#161a1e] p-2 flex justify-around border-x border-b border-gray-800 text-[10px] font-bold mb-4 shadow-md text-gray-300">
             <div>COINS: <span id="statCoins" class="text-blue-400">0</span></div>
-            <div>LƯỚI ĐANG GỒNG: <span id="statGrids" class="text-orange-400">0</span></div>
-            <div>LƯỚI ĐÃ CHỐT: <span id="statClosedGrids" class="text-purple-400">0</span></div>
+            <div>LƯỚI GỒNG: <span id="statGrids" class="text-orange-400">0</span></div>
+            <div>LƯỚI CHỐT: <span id="statClosedGrids" class="text-purple-400">0</span></div>
             <div class="border-l border-gray-700 pl-4">PNL ĐÃ CHỐT: <span id="statClosedPnl" class="text-yellow-500">0.00$</span></div>
             <div>PNL TẠM TÍNH: <span id="statUnreal" class="text-white">0.00$</span></div>
-            <div class="border-l border-gray-700 pl-4">TỔNG PNL HỆ THỐNG: <span id="statSysPnl" class="text-emerald-400 text-sm">0.00$</span></div>
         </div>
 
         <div class="bg-[#1e2329] rounded-lg border border-gray-800 mb-4 overflow-hidden shadow-xl"><table class="w-full text-left">
             <thead class="bg-[#161a1e]"><tr>
-                <th onclick="setSort('symbol')">SYMBOL ↕</th>
+                <th onclick="setSort('symbol')">SYMBOL (XEM CHI TIẾT) ↕</th>
                 <th class="text-right" onclick="setSort('displayBalance')">CURRENT BALANCE ↕</th>
                 <th class="text-center" onclick="setSort('currentGrid')">DCA ↕</th>
-                <th class="text-right" onclick="setSort('roi')">ROI (%) ↕</th>
+                <th class="text-right" onclick="setSort('closedCount')">LƯỚI CHỐT ↕</th>
                 <th class="text-right pr-2" onclick="setSort('pnl')">PNL ($) ↕</th>
             </tr></thead>
             <tbody id="activeBody"></tbody>
         </table></div>
-        <div id="logBox" class="border border-gray-800 rounded-lg"></div>
+        <div id="logBox"></div>
 
         <script>
             let sortKey = 'pnl', sortDir = -1, rawData = [], firstLoad = true;
@@ -283,15 +287,34 @@ app.get('/gui', (req, res) => {
             async function sendCtrl(run){ const body = { running: run, totalBalance: Number(document.getElementById('totalBalance').value), marginValue: Number(document.getElementById('marginValue').value), marginType: document.getElementById('marginType').value, maxGrids: Number(document.getElementById('maxGrids').value), stepSize: Number(document.getElementById('stepSize').value), tpPercent: Number(document.getElementById('tpPercent').value), mode: document.getElementById('mode').value }; await fetch('/api/control',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); }
             async function resetBot(){ if(confirm('RESET DATA?')) await fetch('/api/reset',{method:'POST'}); }
             
+            function openDetail(symbol){
+                const p = rawData.find(x => x.symbol === symbol);
+                if(!p || p.status === 'WAITING') return;
+                document.getElementById('modalTitle').innerText = symbol + ' - ' + p.side + ' (LEV x' + p.maxLev + ')';
+                document.getElementById('modalBody').innerHTML = p.gridDetails.map(g => \`
+                    <tr class="border-b border-gray-800 py-2">
+                        <td class="p-2 text-yellow-400">#\${g.index}</td>
+                        <td class="\${p.side==='LONG'?'text-green-500':'text-red-500'} font-bold">\${p.side}</td>
+                        <td>\${g.margin.toFixed(2)}$</td>
+                        <td class="text-white">\${g.entry.toFixed(4)}</td>
+                        <td class="text-green-400 font-bold">\${g.tp.toFixed(4)}</td>
+                        <td class="\${g.pnl>=0?'text-green-500':'text-red-500'} font-bold">\${g.pnl.toFixed(4)}$</td>
+                        <td class="\${g.roi>=0?'text-green-500':'text-red-500'}">\${g.roi.toFixed(2)}%</td>
+                        <td class="text-gray-500 text-[9px]">\${new Date(g.time).toLocaleTimeString()}</td>
+                    </tr>\`).join('');
+                document.getElementById('gridModal').style.display = "block";
+            }
+            function closeModal(){ document.getElementById('gridModal').style.display = "none"; }
+
             function render(){ 
                 const sorted = [...rawData].sort((a,b)=> (a[sortKey]>b[sortKey]?1:-1)*sortDir); 
                 document.getElementById('activeBody').innerHTML = sorted.map(p=>{
                     const balColor = p.pnl >= 0 ? 'text-green-400' : 'text-red-500';
                     return \`<tr class="border-b border-gray-800 hover:bg-[#2b3139] \${p.status==='WAITING'?'opacity-40':''}"> 
-                        <td class="p-2 font-bold text-yellow-500 font-mono">\${p.symbol}</td> 
+                        <td onclick="openDetail('\${p.symbol}')" class="p-2 font-bold text-yellow-500 font-mono cursor-pointer underline decoration-dotted">\${p.symbol}</td> 
                         <td class="text-right font-bold \${balColor}">\${p.displayBalance.toFixed(2)}$</td> 
                         <td class="text-center font-bold text-yellow-400">\${p.currentGrid}/\${window.maxG}</td> 
-                        <td class="text-right \${p.roi>=0?'text-green-500':'text-red-500'} font-bold">\${p.roi.toFixed(2)}%</td> 
+                        <td class="text-right font-bold text-purple-400">\${p.closedCount || 0}</td> 
                         <td class="text-right pr-2 font-bold \${p.pnl>=0?'text-green-500':'text-red-500'} font-mono">\${p.pnl.toFixed(2)}$</td> </tr>\`
                 }).join(''); 
             }
@@ -312,9 +335,7 @@ app.get('/gui', (req, res) => {
                     document.getElementById('statClosedGrids').innerText = d.stats.totalClosedGrids;
                     document.getElementById('statClosedPnl').innerText = d.stats.closedPnl.toFixed(2) + '$';
                     document.getElementById('statUnreal').innerText = d.stats.unrealizedPnl.toFixed(2) + '$';
-                    document.getElementById('statSysPnl').innerText = d.stats.totalSystemPnl.toFixed(2) + '$';
                     
-                    // ROI dựa trên Vốn ban đầu x Số coin đang chạy
                     const totalInv = d.stats.runningCoins * d.state.totalBalance;
                     const sysRoi = totalInv > 0 ? (d.stats.totalSystemPnl / totalInv) * 100 : 0;
                     document.getElementById('statTotalRoi').innerText = sysRoi.toFixed(2) + '%';
