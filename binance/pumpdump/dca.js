@@ -27,7 +27,6 @@ let logs = [];
 function logger(msg, type = 'INFO') {
     const color = type === 'ERR' ? 'text-red-500' : (type === 'WIN' ? 'text-green-400' : 'text-emerald-400');
     const logEntry = `<span class="${color}">[${new Date().toLocaleTimeString()}] [${type}] ${msg}</span>`;
-    console.log(`[${type}] ${msg}`);
     logs.unshift(logEntry);
     if (logs.length > 100) logs.pop();
 }
@@ -44,7 +43,7 @@ async function fetchActualLeverage() {
         const signature = crypto.createHmac('sha256', SECRET_KEY).update(query).digest('hex');
         const options = {
             hostname: 'fapi.binance.com', path: `/fapi/v1/leverageBracket?${query}&signature=${signature}`,
-            headers: { 'X-MBX-APIKEY': API_KEY }, timeout: 15000 // Tăng timeout để tránh lỗi mạng
+            headers: { 'X-MBX-APIKEY': API_KEY }, timeout: 15000
         };
         https.get(options, (res) => {
             let data = '';
@@ -59,18 +58,12 @@ async function fetchActualLeverage() {
                             allSymbols.push(item.symbol);
                         });
                         fs.writeFileSync(LEVERAGE_FILE, JSON.stringify(symbolMaxLeverage));
-                        logger(`Đã đồng bộ ${allSymbols.length} cặp tiền & Leverage từ Binance.`);
-                    } else { throw new Error("Binance trả về dữ liệu trống"); }
+                        logger(`Đã nạp ${allSymbols.length} coin. Leverage OK.`);
+                    } else { throw new Error("Data error"); }
                     resolve();
-                } catch (e) { 
-                    logger("Lỗi API Leverage: " + e.message + ". Dùng dự phòng.", "ERR");
-                    fallbackSymbols().then(resolve); 
-                }
+                } catch (e) { fallbackSymbols().then(resolve); }
             });
-        }).on('error', (err) => {
-            logger("Kết nối Binance lỗi: " + err.message, "ERR");
-            fallbackSymbols().then(resolve);
-        });
+        }).on('error', () => fallbackSymbols().then(resolve));
     });
 }
 
@@ -98,7 +91,7 @@ async function fallbackSymbols() {
 function initWS() {
     const ws = new WebSocket('wss://fstream.binance.com/ws/!ticker@arr');
     ws.on('message', (data) => {
-        if (!botState.running) return; // CHỈ CHẠY KHI BẤM START
+        if (!botState.running) return;
         try {
             const tickers = JSON.parse(data);
             tickers.forEach(t => {
@@ -107,33 +100,42 @@ function initWS() {
 
                 if (activePositions[t.s]) {
                     const pos = activePositions[t.s];
+                    if (pos.status === 'WAITING') {
+                        // Tự động vào lại vòng mới khi coin đang ở trạng thái chờ
+                        const margin = botState.marginType === '$' ? botState.marginValue : (botState.totalBalance * botState.marginValue / 100);
+                        pos.grids = [{ price, qty: margin }];
+                        pos.status = 'TRADING';
+                        return;
+                    }
+
                     const totalMargin = pos.grids.reduce((sum, g) => sum + g.qty, 0);
                     const avgPrice = pos.grids.reduce((sum, g) => sum + (g.price * g.qty), 0) / totalMargin;
                     const diffPct = pos.side === 'LONG' ? (price - avgPrice) / avgPrice : (avgPrice - price) / avgPrice;
 
                     if (diffPct * 100 >= botState.tpPercent) {
                         const pnl = totalMargin * (diffPct * pos.maxLev);
-                        // --- LOGIC LÃI KÉP: CỘNG LÃI VÀO VỐN TỔNG ---
                         botState.totalBalance += pnl; 
                         botState.closedPnl += pnl;
                         botState.totalClosedGrids++;
-                        logger(`CHỐT LỜI: ${t.s} | +${pnl.toFixed(2)}$ | Vốn mới: ${botState.totalBalance.toFixed(2)}$`, "WIN");
-                        delete activePositions[t.s];
+                        logger(`WIN: ${t.s} | +${pnl.toFixed(2)}$`, "WIN");
+                        
+                        // GIỮ LẠI COIN - CHUYỂN TRẠNG THÁI CHỜ
+                        pos.status = 'WAITING';
+                        pos.grids = []; 
                         saveState();
                     } else if (pos.grids.length < botState.maxGrids) {
                         const lastPrice = pos.grids[pos.grids.length - 1].price;
                         const gap = pos.side === 'LONG' ? (lastPrice - price) / lastPrice : (price - lastPrice) / lastPrice;
                         if (gap * 100 >= botState.stepSize) {
                             pos.grids.push({ price, qty: pos.grids[pos.grids.length-1].qty * botState.multiplier });
-                            logger(`DCA: ${t.s} Lưới ${pos.grids.length}`, "DCA");
+                            logger(`DCA: ${t.s} (${pos.grids.length})`, "DCA");
                         }
                     }
                 } else if (allSymbols.includes(t.s)) {
-                    // Margin tính theo vốn hiện tại đã cộng dồn lãi
                     const margin = botState.marginType === '$' ? botState.marginValue : (botState.totalBalance * botState.marginValue / 100);
                     activePositions[t.s] = {
                         symbol: t.s, side: botState.mode, maxLev: symbolMaxLeverage[t.s] || 20,
-                        grids: [{ price, qty: margin }]
+                        grids: [{ price, qty: margin }], status: 'TRADING'
                     };
                 }
             });
@@ -144,6 +146,7 @@ function initWS() {
 
 app.get('/api/data', (req, res) => {
     const activeData = Object.values(activePositions).map(p => {
+        if (p.status === 'WAITING') return { ...p, avgPrice: 0, totalMargin: 0, currentGrid: 0, roi: 0, pnl: 0, currentPrice: marketPrices[p.symbol] || 0 };
         const totalMargin = p.grids.reduce((sum, g) => sum + g.qty, 0);
         const avgPrice = p.grids.reduce((sum, g) => sum + (g.price * g.qty), 0) / totalMargin;
         const currentP = marketPrices[p.symbol] || 0;
@@ -157,10 +160,7 @@ app.get('/api/data', (req, res) => {
 
 app.post('/api/control', (req, res) => { 
     if (req.body.running !== undefined) {
-        if (req.body.running && !botState.running) {
-            botState.startTime = Date.now();
-            logger(">>> BOT STARTED", "INFO");
-        }
+        if (req.body.running && !botState.running) botState.startTime = Date.now();
         botState.running = req.body.running;
     }
     const fields = ['totalBalance', 'marginValue', 'marginType', 'maxGrids', 'stepSize', 'tpPercent', 'mode'];
@@ -170,13 +170,12 @@ app.post('/api/control', (req, res) => {
 
 app.post('/api/reset', (req, res) => { 
     activePositions = {}; botState.closedPnl = 0; botState.totalClosedGrids = 0; logs = [];
-    logger("!!! DATA RESET", "ERR");
     saveState(); res.json({ status: 'ok' }); 
 });
 
 app.get('/gui', (req, res) => {
-    res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Luffy Matrix v19</title><script src="https://cdn.tailwindcss.com"></script>
-    <style>body{background:#0b0e11;color:#eaecef;font-family:monospace} th{cursor:pointer;background:#161a1e;padding:10px 8px;border-bottom:1px solid #333} th:hover{color:#f0b90b} #logBox{background:#000;padding:10px;height:300px;overflow-y:auto;font-size:11px;border:1px solid #333}</style>
+    res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Luffy Matrix v20</title><script src="https://cdn.tailwindcss.com"></script>
+    <style>body{background:#0b0e11;color:#eaecef;font-family:monospace} th{cursor:pointer;background:#161a1e;padding:12px 8px;border-bottom:1px solid #333;text-transform:uppercase;font-size:10px} th:hover{color:#f0b90b} #logBox{background:#000;padding:10px;height:250px;overflow-y:auto;font-size:11px;border:1px solid #333}</style>
     </head><body class="p-4 text-[11px]">
         
         <div class="bg-[#1e2329] p-4 rounded-lg mb-4 border border-gray-800 flex flex-wrap items-end gap-3 shadow-lg">
@@ -186,13 +185,11 @@ app.get('/gui', (req, res) => {
             <div class="w-[60px]">GAP%<input id="stepSize" type="number" step="0.1" class="w-full bg-black text-yellow-500 p-2 rounded border border-gray-700 mt-1"></div>
             <div class="w-[60px]">TP%<input id="tpPercent" type="number" step="0.1" class="w-full bg-black text-yellow-500 p-2 rounded border border-gray-700 mt-1"></div>
             <div class="w-[90px]">MODE<select id="mode" class="w-full bg-black p-2 rounded border border-gray-700 mt-1 text-yellow-500"><option value="LONG">LONG</option><option value="SHORT">SHORT</option></select></div>
-            
             <div class="flex gap-1 ml-auto">
-                <button onclick="sendCtrl(true)" class="bg-green-600 px-5 py-2 rounded font-bold hover:bg-green-500 text-xs">START</button>
-                <button onclick="sendCtrl(false)" class="bg-red-600 px-5 py-2 rounded font-bold hover:bg-red-500 text-xs">STOP</button>
+                <button onclick="sendCtrl(true)" class="bg-green-600 px-5 py-2 rounded font-bold hover:bg-green-500">START</button>
+                <button onclick="sendCtrl(false)" class="bg-red-600 px-5 py-2 rounded font-bold hover:bg-red-500">STOP</button>
                 <button onclick="resetBot()" class="bg-gray-700 px-3 py-2 rounded font-bold text-[9px]">RESET</button>
             </div>
-
             <div class="border-l border-gray-700 pl-4 ml-2">
                 <div class="text-gray-500 text-[9px]">UPTIME</div>
                 <div id="uptime" class="text-yellow-500 font-bold text-sm">0d 00:00:00</div>
@@ -201,72 +198,58 @@ app.get('/gui', (req, res) => {
         </div>
 
         <div class="grid grid-cols-2 md:grid-cols-5 gap-3 mb-4 text-center">
-            <div class="bg-[#1e2329] p-3 rounded-lg border border-gray-800 text-blue-400 font-bold uppercase">COINS<div id="statCoins" class="text-xl">0</div></div>
-            <div class="bg-[#1e2329] p-3 rounded-lg border border-gray-800 uppercase">LƯỚI CHỐT<div id="statGrids" class="text-purple-400 font-bold">0</div></div>
-            <div class="bg-[#1e2329] p-3 rounded-lg border border-gray-800 text-green-500 uppercase">PNL CHỐT<div id="statClosedPnl" class="font-bold">0.00$</div></div>
-            <div class="bg-[#1e2329] p-3 rounded-lg border border-gray-800 text-gray-400 uppercase">PNL TẠM<div id="statUnrealized" class="font-bold text-white">0.00$</div></div>
-            <div class="bg-[#1e2329] p-3 rounded-lg border-t-2 border-yellow-500 text-green-500 uppercase">ROI TỔNG<div id="statTotalRoi" class="text-xl font-bold">0.00%</div></div>
+            <div class="bg-[#1e2329] p-3 rounded-lg border border-gray-800 text-blue-400 font-bold">COINS<div id="statCoins" class="text-xl">0</div></div>
+            <div class="bg-[#1e2329] p-3 rounded-lg border border-gray-800">LƯỚI CHỐT<div id="statGrids" class="text-purple-400 font-bold">0</div></div>
+            <div class="bg-[#1e2329] p-3 rounded-lg border border-gray-800 text-green-500 font-bold">PNL CHỐT<div id="statClosedPnl" class="font-bold">0.00$</div></div>
+            <div class="bg-[#1e2329] p-3 rounded-lg border border-gray-800 text-gray-400 font-bold">PNL TẠM<div id="statUnrealized" class="font-bold text-white">0.00$</div></div>
+            <div class="bg-[#1e2329] p-3 rounded-lg border-t-2 border-yellow-500 text-green-500 font-bold">ROI TỔNG<div id="statTotalRoi" class="text-xl font-bold">0.00%</div></div>
         </div>
 
         <div class="bg-[#1e2329] rounded-lg border border-gray-800 mb-4 overflow-hidden shadow-md">
             <table class="w-full text-left">
                 <thead class="bg-[#161a1e]"><tr>
-                    <th>SYMBOL</th>
-                    <th class="text-right">PRICE</th>
-                    <th class="text-center">DCA COUNT</th>
-                    <th class="text-right">ROI (%)</th>
-                    <th class="text-right pr-2">PNL ($)</th>
+                    <th onclick="setSort('symbol')">SYMBOL ↕</th>
+                    <th class="text-right" onclick="setSort('currentPrice')">PRICE ↕</th>
+                    <th class="text-center" onclick="setSort('currentGrid')">DCA COUNT ↕</th>
+                    <th class="text-right" onclick="setSort('roi')">ROI (%) ↕</th>
+                    <th class="text-right pr-2" onclick="setSort('pnl')">PNL ($) ↕</th>
                 </tr></thead>
                 <tbody id="activeBody"></tbody>
             </table>
         </div>
 
         <div class="bg-[#1e2329] p-3 rounded-lg border border-gray-800 shadow-inner">
-            <div class="text-gray-500 text-[10px] font-bold uppercase mb-2">System Console Logs</div>
             <div id="logBox"></div>
         </div>
 
         <script>
             let sortKey = 'pnl', sortDir = -1, rawData = [], firstLoad = true;
+            function setSort(k){ if(sortKey===k) sortDir*=-1; else {sortKey=k; sortDir=-1;} render(); }
             async function sendCtrl(run){
-                const body = { 
-                    running: run, 
-                    totalBalance: Number(document.getElementById('totalBalance').value), 
-                    marginValue: Number(document.getElementById('marginValue').value), 
-                    marginType: document.getElementById('marginType').value, 
-                    maxGrids: Number(document.getElementById('maxGrids').value), 
-                    stepSize: Number(document.getElementById('stepSize').value), 
-                    tpPercent: Number(document.getElementById('tpPercent').value), 
-                    mode: document.getElementById('mode').value 
-                };
+                const body = { running: run, totalBalance: Number(document.getElementById('totalBalance').value), marginValue: Number(document.getElementById('marginValue').value), marginType: document.getElementById('marginType').value, maxGrids: Number(document.getElementById('maxGrids').value), stepSize: Number(document.getElementById('stepSize').value), tpPercent: Number(document.getElementById('tpPercent').value), mode: document.getElementById('mode').value };
                 await fetch('/api/control',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
             }
             async function resetBot(){ if(confirm('RESET DATA?')) await fetch('/api/reset',{method:'POST'}); }
             function render(){
-                document.getElementById('activeBody').innerHTML = rawData.map(p=>\`<tr class="border-b border-gray-800 hover:bg-[#2b3139]">
-                    <td class="p-2 font-bold text-yellow-500 font-mono">\${p.symbol} <span class="text-gray-500 text-[9px] font-normal">\${p.maxLev}x</span></td>
+                const sorted = [...rawData].sort((a,b)=> (a[sortKey]>b[sortKey]?1:-1)*sortDir);
+                document.getElementById('activeBody').innerHTML = sorted.map(p=>\`<tr class="border-b border-gray-800 hover:bg-[#2b3139] \${p.status==='WAITING'?'opacity-40':''}">
+                    <td class="p-2 font-bold text-yellow-500 font-mono">\${p.symbol} \${p.status==='WAITING'?'(WAIT)':''}</td>
                     <td class="text-right font-mono text-gray-400">\${p.currentPrice.toFixed(4)}</td>
-                    <td class="text-center"><span class="bg-gray-800 px-2 py-0.5 rounded text-yellow-400 font-bold">\${p.currentGrid}/\${window.maxG}</span></td>
+                    <td class="text-center font-bold text-yellow-400">\${p.currentGrid}/\${window.maxG}</td>
                     <td class="text-right \${p.roi>=0?'text-green-500':'text-red-500'} font-bold">\${p.roi.toFixed(2)}%</td>
                     <td class="text-right pr-2 font-bold \${p.pnl>=0?'text-green-500':'text-red-500'} font-mono">\${p.pnl.toFixed(2)}$</td>
                 </tr>\`).join('');
             }
             function formatUptime(ms) {
                 const s = Math.floor(ms / 1000);
-                const d = Math.floor(s / 86400);
-                const h = String(Math.floor((s % 86400) / 3600)).padStart(2,'0');
-                const m = String(Math.floor((s % 3600) / 60)).padStart(2,'0');
-                const sec = String(s % 60).padStart(2,'0');
-                return \`\${d}d \${h}:\${m}:\${sec}\`;
+                return \`\${Math.floor(s/86400)}d \${String(Math.floor((s%86400)/3600)).padStart(2,'0')}:\${String(Math.floor((s%3600)/60)).padStart(2,'0')}:\${String(s%60).padStart(2,'0')}\`;
             }
             async function update(){
                 try {
                     const res = await fetch('/api/data'); const d = await res.json();
-                    if(firstLoad || !d.state.running) {
-                        ['totalBalance','marginValue','marginType','maxGrids','stepSize','tpPercent','mode'].forEach(id => {
-                            document.getElementById(id).value = d.state[id];
-                        });
-                        if(d.active.length > 0) firstLoad = false;
+                    if(firstLoad) {
+                        ['totalBalance','marginValue','marginType','maxGrids','stepSize','tpPercent','mode'].forEach(id => document.getElementById(id).value = d.state[id]);
+                        firstLoad = false;
                     }
                     rawData = d.active; window.maxG = d.state.maxGrids; render();
                     const unreal = d.active.reduce((s,p)=>s+p.pnl,0);
@@ -279,9 +262,8 @@ app.get('/gui', (req, res) => {
                     document.getElementById('logBox').innerHTML = d.logs.join('<br>');
                     document.getElementById('botStatus').innerText = d.state.running ? "RUNNING" : "STOPPED";
                     document.getElementById('botStatus').className = "font-bold text-[9px] italic " + (d.state.running ? "text-green-500" : "text-red-500");
-                    if(d.state.startTime && d.state.running){
-                        document.getElementById('uptime').innerText = formatUptime(Date.now() - d.state.startTime);
-                    } else { document.getElementById('uptime').innerText = "0d 00:00:00"; }
+                    if(d.state.startTime && d.state.running) document.getElementById('uptime').innerText = formatUptime(Date.now() - d.state.startTime);
+                    else document.getElementById('uptime').innerText = "0d 00:00:00";
                 } catch(e){}
             }
             setInterval(update, 1000);
