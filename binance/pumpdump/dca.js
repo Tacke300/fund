@@ -32,6 +32,7 @@ function logger(msg, type = 'INFO') {
     if (logs.length > 100) logs.pop();
 }
 
+// Load dữ liệu cũ
 if (fs.existsSync(STATE_FILE)) try { Object.assign(botState, JSON.parse(fs.readFileSync(STATE_FILE))); } catch(e){}
 if (fs.existsSync(LEVERAGE_FILE)) try { symbolMaxLeverage = JSON.parse(fs.readFileSync(LEVERAGE_FILE)); } catch(e){}
 if (fs.existsSync(HISTORY_FILE)) try { pnlHistory = JSON.parse(fs.readFileSync(HISTORY_FILE)); } catch(e){}
@@ -129,18 +130,23 @@ function initWS() {
                     const avgPrice = pos.grids.reduce((sum, g) => sum + (g.price * g.qty), 0) / totalMargin;
                     const diffPct = pos.side === 'LONG' ? (price - avgPrice) / avgPrice : (avgPrice - price) / avgPrice;
 
+                    // CHECK TAKE PROFIT
                     if (diffPct * 100 >= botState.tpPercent) {
                         const pnl = totalMargin * (diffPct * pos.maxLev);
                         pos.coinBalance += pnl; 
-                        botState.closedPnl += pnl;
-                        botState.totalClosedGrids++;
+                        botState.closedPnl += pnl; // Cập nhật state
+                        botState.totalClosedGrids++; // Tăng số lưới chốt
+                        
                         pnlHistory.push({ ts: Date.now(), pnl: pnl });
-                        if(pnlHistory.length > 5000) pnlHistory.shift(); 
+                        if(pnlHistory.length > 10000) pnlHistory.shift(); 
+                        
                         logger(`WIN: ${t.s} | +${pnl.toFixed(2)}$`, "WIN");
                         pos.status = 'WAITING';
                         pos.grids = []; 
-                        saveAll();
-                    } else if (pos.grids.length < botState.maxGrids) {
+                        saveAll(); // Lưu ngay lập tức để GUI cập nhật
+                    } 
+                    // CHECK DCA
+                    else if (pos.grids.length < botState.maxGrids) {
                         const lastPrice = pos.grids[pos.grids.length - 1].price;
                         const gap = pos.side === 'LONG' ? (lastPrice - price) / lastPrice : (price - lastPrice) / lastPrice;
                         if (gap * 100 >= botState.stepSize) {
@@ -168,10 +174,10 @@ app.get('/api/data', (req, res) => {
 
     const activeData = Object.values(activePositions).map(p => {
         const currentP = marketPrices[p.symbol] || 0;
-        let pnl = 0, roi = 0, avgPrice = 0, totalMargin = 0;
+        let pnl = 0, roi = 0, avgPrice = 0;
         
-        if (p.status !== 'WAITING') {
-            totalMargin = p.grids.reduce((sum, g) => sum + g.qty, 0);
+        if (p.status !== 'WAITING' && currentP > 0) {
+            const totalMargin = p.grids.reduce((sum, g) => sum + g.qty, 0);
             avgPrice = p.grids.reduce((sum, g) => sum + (g.price * g.qty), 0) / totalMargin;
             const diff = p.side === 'LONG' ? (currentP - avgPrice) / avgPrice : (avgPrice - currentP) / avgPrice;
             pnl = totalMargin * diff * p.maxLev;
@@ -184,7 +190,6 @@ app.get('/api/data', (req, res) => {
         return { 
             ...p, 
             avgPrice, 
-            totalMargin, 
             currentGrid: p.grids.length, 
             roi, 
             pnl, 
@@ -193,16 +198,19 @@ app.get('/api/data', (req, res) => {
         };
     });
 
+    // Tính toán tổng PnL từ history để đảm bảo chính xác tuyệt đối
+    const totalClosedPnlFromHistory = pnlHistory.reduce((sum, h) => sum + h.pnl, 0);
+
     res.json({ 
         state: botState, active: activeData, logs,
         stats: { 
             today: getFilteredPnL(0), d7: getFilteredPnL(7), d30: getFilteredPnL(30),
-            closedPnl: botState.closedPnl,
+            closedPnl: totalClosedPnlFromHistory || botState.closedPnl,
             totalClosedGrids: botState.totalClosedGrids,
             unrealizedPnl: unrealizedPnl,
             runningCoins: activeData.filter(x => x.status !== 'WAITING').length,
             gridsGong,
-            totalSystemPnl: botState.closedPnl + unrealizedPnl
+            totalSystemPnl: (totalClosedPnlFromHistory || botState.closedPnl) + unrealizedPnl
         }
     });
 });
@@ -222,7 +230,7 @@ app.post('/api/reset', (req, res) => {
 });
 
 app.get('/gui', (req, res) => {
-    res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Luffy Matrix v34</title><script src="https://cdn.tailwindcss.com"></script>
+    res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Luffy Matrix v35</title><script src="https://cdn.tailwindcss.com"></script>
     <style>body{background:#0b0e11;color:#eaecef;font-family:monospace} th{cursor:pointer;background:#161a1e;padding:12px 8px;border-bottom:1px solid #333;text-transform:uppercase;font-size:10px} th:hover{color:#f0b90b} #logBox{background:#000;padding:10px;height:250px;overflow-y:auto;font-size:11px;border:1px solid #333}</style>
     </head><body class="p-4 text-[11px]">
         <div class="bg-[#1e2329] p-4 rounded-lg mb-2 border border-gray-800 flex flex-wrap items-end gap-3 shadow-lg">
@@ -237,15 +245,15 @@ app.get('/gui', (req, res) => {
                 <button onclick="sendCtrl(false)" class="bg-red-600 px-5 py-2 rounded font-bold hover:bg-red-500">STOP</button>
                 <button onclick="resetBot()" class="bg-gray-700 px-3 py-2 rounded font-bold text-[9px]">RESET</button>
             </div>
-            <div class="border-l border-gray-700 pl-4 ml-2"><div class="text-gray-500 text-[9px]">UPTIME</div><div id="uptime" class="text-yellow-500 font-bold text-sm">0d 00:00:00</div><div id="botStatus" class="font-bold text-[9px] italic text-red-500">OFFLINE</div></div>
+            <div class="border-l border-gray-700 pl-4 ml-2 text-right"><div class="text-gray-500 text-[9px]">UPTIME</div><div id="uptime" class="text-yellow-500 font-bold text-sm">0d 00:00:00</div><div id="botStatus" class="font-bold text-[9px] italic text-red-500">OFFLINE</div></div>
         </div>
 
         <div class="bg-[#1e2329] p-3 rounded-t-lg border-x border-t border-gray-800 flex justify-between gap-2 shadow-inner">
             <div class="text-center flex-1 text-gray-400">HÔM NAY (7AM)<div id="pnlToday" class="text-lg font-bold text-green-400">0.00$</div></div>
             <div class="text-center flex-1 border-x border-gray-800 text-gray-400">7 NGÀY QUA<div id="pnl7d" class="text-lg font-bold text-green-500">0.00$</div></div>
             <div class="text-center flex-1 border-r border-gray-800 text-gray-400">30 NGÀY QUA<div id="pnl30d" class="text-lg font-bold text-emerald-500">0.00$</div></div>
-            <div class="text-center flex-1 text-yellow-500 font-bold">TỔNG PNL TOÀN BOT<div id="pnlAll" class="text-2xl font-black">0.00$</div></div>
-            <div class="text-center flex-1 border-l border-gray-800 text-green-400 font-bold">ROI HỆ THỐNG<div id="statTotalRoi" class="text-2xl font-black">0.00%</div></div>
+            <div class="text-center flex-1 text-yellow-500 font-bold border-r border-gray-800">TỔNG PNL TOÀN BOT<div id="pnlAll" class="text-2xl font-black">0.00$</div></div>
+            <div class="text-center flex-1 text-green-400 font-bold">ROI HỆ THỐNG<div id="statTotalRoi" class="text-2xl font-black">0.00%</div></div>
         </div>
 
         <div class="bg-[#161a1e] p-2 flex justify-around border-x border-b border-gray-800 text-[10px] font-bold mb-4 shadow-md text-gray-300">
@@ -257,7 +265,7 @@ app.get('/gui', (req, res) => {
             <div class="border-l border-gray-700 pl-4">TỔNG PNL HỆ THỐNG: <span id="statSysPnl" class="text-emerald-400 text-sm">0.00$</span></div>
         </div>
 
-        <div class="bg-[#1e2329] rounded-lg border border-gray-800 mb-4 overflow-hidden"><table class="w-full text-left">
+        <div class="bg-[#1e2329] rounded-lg border border-gray-800 mb-4 overflow-hidden shadow-xl"><table class="w-full text-left">
             <thead class="bg-[#161a1e]"><tr>
                 <th onclick="setSort('symbol')">SYMBOL ↕</th>
                 <th class="text-right" onclick="setSort('displayBalance')">CURRENT BALANCE ↕</th>
@@ -267,7 +275,7 @@ app.get('/gui', (req, res) => {
             </tr></thead>
             <tbody id="activeBody"></tbody>
         </table></div>
-        <div id="logBox"></div>
+        <div id="logBox" class="border border-gray-800 rounded-lg"></div>
 
         <script>
             let sortKey = 'pnl', sortDir = -1, rawData = [], firstLoad = true;
@@ -306,6 +314,7 @@ app.get('/gui', (req, res) => {
                     document.getElementById('statUnreal').innerText = d.stats.unrealizedPnl.toFixed(2) + '$';
                     document.getElementById('statSysPnl').innerText = d.stats.totalSystemPnl.toFixed(2) + '$';
                     
+                    // ROI dựa trên Vốn ban đầu x Số coin đang chạy
                     const totalInv = d.stats.runningCoins * d.state.totalBalance;
                     const sysRoi = totalInv > 0 ? (d.stats.totalSystemPnl / totalInv) * 100 : 0;
                     document.getElementById('statTotalRoi').innerText = sysRoi.toFixed(2) + '%';
