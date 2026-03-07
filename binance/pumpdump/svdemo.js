@@ -1,7 +1,7 @@
 // ==========================================
 // CẤU HÌNH THÔNG SỐ CHIẾN THUẬT (DỄ CHỈNH)
 // ==========================================
-const TP_PERCENT = 0.1;           
+const TP_PERCENT = 0.3;           
 const SL_PERCENT = 5.0;           
 const MIN_VOLATILITY_TO_SAVE = 5; 
 const COOLDOWN_MINUTES = 15;      
