@@ -114,30 +114,38 @@ function initWS() {
 }
 
 app.get('/api/data', (req, res) => {
+    let totalGridsFilled = 0;
+    let runningCoins = 0;
+
     const activeData = Object.values(activePositions).map(p => {
         const totalMargin = p.grids.length ? p.grids.reduce((sum, g) => sum + g.qty, 0) : 0;
         const avgPrice = p.grids.length ? p.grids.reduce((sum, g) => sum + (g.price * g.qty), 0) / totalMargin : 0;
         const currentP = marketPrices[p.symbol] || 0;
         let pnl = 0, roi = 0;
-        if (p.status !== 'WAITING' && avgPrice > 0) {
-            const diff = p.side === 'LONG' ? (currentP - avgPrice) / avgPrice : (avgPrice - currentP) / avgPrice;
-            pnl = totalMargin * diff * p.maxLev;
-            roi = (pnl / p.coinBalance) * 100;
+        
+        if (p.status !== 'WAITING') {
+            runningCoins++;
+            totalGridsFilled += p.grids.length;
+            if (avgPrice > 0) {
+                const diff = p.side === 'LONG' ? (currentP - avgPrice) / avgPrice : (avgPrice - currentP) / avgPrice;
+                pnl = totalMargin * diff * p.maxLev;
+                roi = (pnl / p.coinBalance) * 100;
+            }
         }
         return { ...p, avgPrice, totalMargin, currentGrid: p.grids.length, roi, pnl, currentPrice: currentP };
     });
-
-    const coinStats = pnlHistory.reduce((acc, curr) => {
-        acc[curr.symbol] = (acc[curr.symbol] || 0) + curr.pnl;
-        return acc;
-    }, {});
 
     res.json({ 
         state: botState, 
         active: activeData, 
         logs, 
-        stats: { today: getFilteredPnL(0), d7: getFilteredPnL(7), all: botState.closedPnl, totalWins: botState.totalClosedGrids },
-        coinStats: Object.entries(coinStats).sort((a,b) => b[1] - a[1]).slice(0, 10)
+        stats: { 
+            today: getFilteredPnL(0), 
+            d7: getFilteredPnL(7), 
+            all: botState.closedPnl,
+            runningCoins,
+            totalGridsFilled
+        }
     });
 });
 
@@ -150,19 +158,19 @@ app.post('/api/control', (req, res) => {
     saveAll(); res.json({ status: 'ok' });
 });
 
-app.post('/api/reset', (req, res) => { activePositions = {}; botState.closedPnl = 0; botState.totalClosedGrids = 0; logs = []; pnlHistory = []; saveAll(); res.json({ status: 'ok' }); });
+app.post('/api/reset', (req, res) => { activePositions = {}; botState.closedPnl = 0; logs = []; pnlHistory = []; saveAll(); res.json({ status: 'ok' }); });
 
 app.get('/gui', (req, res) => {
-    res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Luffy Matrix v29</title><script src="https://cdn.tailwindcss.com"></script>
+    res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Luffy Matrix v30</title><script src="https://cdn.tailwindcss.com"></script>
     <style>
         body{background:#0b0e11;color:#eaecef;font-family:monospace}
         .neon-glow { color: #4ade80; text-shadow: 0 0 8px rgba(74,222,128,0.5); }
         .neon-red { color: #f87171; text-shadow: 0 0 8px rgba(248,113,113,0.5); }
-        th{background:#161a1e;padding:12px 8px;border-bottom:1px solid #333;font-size:10px}
-        .tab-btn.active{border-bottom: 2px solid #f0b90b; color: #f0b90b;}
+        th{background:#161a1e;padding:12px 8px;border-bottom:1px solid #333;font-size:10px;cursor:pointer}
+        #logBox{background:#000;padding:10px;height:180px;overflow-y:auto;font-size:11px;border:1px solid #333}
     </style>
     </head><body class="p-4 text-[11px]">
-        <div class="bg-[#1e2329] p-4 rounded-t-lg border-x border-t border-gray-800 flex flex-wrap items-end gap-3 shadow-lg">
+        <div class="bg-[#1e2329] p-4 rounded-lg mb-2 border border-gray-800 flex flex-wrap items-end gap-3 shadow-lg">
             <div class="w-[110px]">VỐN GỐC/COIN<input id="totalBalance" type="number" class="w-full bg-black text-yellow-500 p-2 rounded border border-gray-700 mt-1"></div>
             <div class="w-[110px]">MARGIN<div class="flex mt-1"><input id="marginValue" type="number" class="w-full bg-black text-yellow-500 p-2 rounded-l border border-gray-700"><select id="marginType" class="bg-gray-800 text-white rounded-r border-y border-r border-gray-700"><option value="$">$</option><option value="%">%</option></select></div></div>
             <div class="w-[60px]">DCA<input id="maxGrids" type="number" class="w-full bg-black text-yellow-500 p-2 rounded border border-gray-700 mt-1"></div>
@@ -177,65 +185,60 @@ app.get('/gui', (req, res) => {
             <div class="border-l border-gray-700 pl-4 ml-2 text-right"><div id="uptime" class="text-yellow-500 font-bold text-sm">0d 00:00:00</div><div id="botStatus" class="font-bold text-[9px] italic">OFFLINE</div></div>
         </div>
 
-        <div class="bg-[#1e2329] p-3 border-x border-gray-800 flex justify-between gap-2 shadow-inner">
+        <div class="bg-[#1e2329] p-3 rounded-t-lg flex justify-between gap-2 shadow-inner border-x border-t border-gray-800">
             <div class="text-center flex-1">HÔM NAY<div id="pnlToday" class="text-lg font-bold text-green-400">0.00$</div></div>
             <div class="text-center flex-1 border-x border-gray-800">7 NGÀY<div id="pnl7d" class="text-lg font-bold text-green-500">0.00$</div></div>
             <div class="text-center flex-1">TỔNG LÃI<div id="pnlAll" class="text-lg font-bold text-yellow-500">0.00$</div></div>
-            <div class="text-center flex-1 border-l border-gray-800">WINS<div id="totalWins" class="text-lg font-bold text-blue-400">0</div></div>
         </div>
 
-        <div class="bg-[#161a1e] flex border-x border-gray-800">
-            <button onclick="showTab('trading')" id="btn-trading" class="tab-btn active px-6 py-2 font-bold">TRADING WINDOW</button>
-            <button onclick="showTab('stats')" id="btn-stats" class="tab-btn px-6 py-2 font-bold">ANALYTICS</button>
+        <div class="bg-[#161a1e] p-2 flex justify-around border-x border-b border-gray-800 text-[10px] font-bold text-gray-400 mb-2">
+            <div>COIN ĐANG CHẠY: <span id="runCoins" class="text-blue-400">0</span></div>
+            <div>TỔNG LƯỚI ĐÃ KHỚP: <span id="totalGrids" class="text-orange-400">0</span></div>
         </div>
 
-        <div id="tab-trading" class="tab-content bg-[#1e2329] rounded-b-lg border border-gray-800 overflow-hidden">
-            <table class="w-full text-left"><thead><tr>
-                <th class="p-2">SYMBOL</th><th class="text-right">VỐN</th><th class="text-center">DCA</th><th class="text-right">ROI (%)</th><th class="text-right pr-2">PNL ($)</th>
+        <div class="bg-[#1e2329] rounded-lg border border-gray-800 mb-2 overflow-hidden">
+            <table class="w-full text-left"><thead class="bg-[#161a1e]"><tr>
+                <th class="p-2" onclick="setSort('symbol')">SYMBOL ↕</th>
+                <th class="text-right" onclick="setSort('coinBalance')">VỐN HIỆN TẠI ↕</th>
+                <th class="text-center" onclick="setSort('currentGrid')">DCA ↕</th>
+                <th class="text-right" onclick="setSort('roi')">ROI (%) ↕</th>
+                <th class="text-right pr-2" onclick="setSort('pnl')">PNL ($) ↕</th>
             </tr></thead><tbody id="activeBody"></tbody></table>
         </div>
-
-        <div id="tab-stats" class="tab-content hidden bg-[#1e2329] rounded-b-lg border border-gray-800 p-4">
-            <h3 class="text-yellow-500 font-bold mb-2">TOP COIN PROFIT (ALL TIME)</h3>
-            <div id="topCoins" class="grid grid-cols-2 gap-2"></div>
-        </div>
-
-        <div id="logBox" class="mt-2 rounded bg-black text-[#00ff00] p-2 h-[150px] overflow-y-auto border border-gray-800"></div>
+        <div id="logBox"></div>
 
         <script>
-            let rawData = [], firstLoad = true;
-            function showTab(id){
-                document.querySelectorAll('.tab-content').forEach(t => t.classList.add('hidden'));
-                document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-                document.getElementById('tab-'+id).classList.remove('hidden');
-                document.getElementById('btn-'+id).classList.add('active');
-            }
+            let sortKey = 'pnl', sortDir = -1, rawData = [], firstLoad = true;
+            function setSort(k){ if(sortKey===k) sortDir*=-1; else {sortKey=k; sortDir=-1;} render(); }
             async function sendCtrl(run){
                 const body = { running: run, totalBalance: Number(document.getElementById('totalBalance').value), marginValue: Number(document.getElementById('marginValue').value), marginType: document.getElementById('marginType').value, maxGrids: Number(document.getElementById('maxGrids').value), stepSize: Number(document.getElementById('stepSize').value), tpPercent: Number(document.getElementById('tpPercent').value), mode: document.getElementById('mode').value };
                 await fetch('/api/control',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
             }
             async function resetBot(){ if(confirm('RESET ALL DATA?')) await fetch('/api/reset',{method:'POST'}); }
-            
+            function render(){
+                const base = Number(document.getElementById('totalBalance').value);
+                const sorted = [...rawData].sort((a,b)=> (a[sortKey]>b[sortKey]?1:-1)*sortDir);
+                document.getElementById('activeBody').innerHTML = sorted.map(p=> {
+                    const balClass = p.coinBalance < base ? 'neon-red' : (p.coinBalance > base ? 'neon-glow' : 'text-blue-400');
+                    return \`<tr class="border-b border-gray-800 hover:bg-[#2b3139] \${p.status==='WAITING'?'opacity-40':''}">
+                        <td class="p-2 font-bold text-yellow-500 font-mono">\${p.symbol}</td>
+                        <td class="text-right font-bold \${balClass}">\${p.coinBalance.toFixed(2)}$</td>
+                        <td class="text-center font-bold text-yellow-400">\${p.currentGrid}/\${window.maxG}</td>
+                        <td class="text-right \${p.roi>=0?'text-green-500':'text-red-500'} font-bold">\${p.roi.toFixed(2)}%</td>
+                        <td class="text-right pr-2 font-bold \${p.pnl>=0?'text-green-500':'text-red-500'} font-mono">\${p.pnl.toFixed(2)}$</td>
+                    </tr>\`;
+                }).join('');
+            }
             async function update(){
                 try {
                     const res = await fetch('/api/data'); const d = await res.json();
                     if(firstLoad) { ['totalBalance','marginValue','marginType','maxGrids','stepSize','tpPercent','mode'].forEach(id => { document.getElementById(id).value = d.state[id]; }); firstLoad = false; }
-                    
-                    const base = Number(document.getElementById('totalBalance').value);
-                    document.getElementById('activeBody').innerHTML = d.active.sort((a,b)=>b.pnl-a.pnl).map(p=> {
-                        const balClass = p.coinBalance < base ? 'neon-red' : (p.coinBalance > base ? 'neon-glow' : 'text-blue-400');
-                        return \`<tr class="border-b border-gray-800 hover:bg-[#2b3139] \${p.status==='WAITING'?'opacity-40':''}">
-                            <td class="p-2 font-bold text-yellow-500">\${p.symbol}</td>
-                            <td class="text-right \${balClass}">\${p.coinBalance.toFixed(2)}$</td>
-                            <td class="text-center font-bold text-yellow-400">\${p.currentGrid}/\${d.state.maxGrids}</td>
-                            <td class="text-right \${p.roi>=0?'text-green-500':'text-red-500'}">\${p.roi.toFixed(2)}%</td>
-                            <td class="text-right pr-2 \${p.pnl>=0?'text-green-500':'text-red-500'}">\${p.pnl.toFixed(2)}$</td>
-                        </tr>\`;
-                    }).join('');
-
-                    document.getElementById('topCoins').innerHTML = d.coinStats.map(c => \`<div class="flex justify-between border-b border-gray-800 p-1"><span>\${c[0]}</span><span class="text-green-400 font-bold">+\${c[1].toFixed(2)}$</span></div>\`).join('');
-                    ['pnlToday','pnl7d','pnlAll'].forEach(id => document.getElementById(id).innerText = d.stats[id.replace('pnl','') === 'Today' ? 'today' : (id.replace('pnl','') === '7d' ? 'd7' : 'all')].toFixed(2) + '$');
-                    document.getElementById('totalWins').innerText = d.stats.totalWins;
+                    rawData = d.active; window.maxG = d.state.maxGrids; render();
+                    document.getElementById('pnlToday').innerText = d.stats.today.toFixed(2) + '$';
+                    document.getElementById('pnl7d').innerText = d.stats.d7.toFixed(2) + '$';
+                    document.getElementById('pnlAll').innerText = d.stats.all.toFixed(2) + '$';
+                    document.getElementById('runCoins').innerText = d.stats.runningCoins;
+                    document.getElementById('totalGrids').innerText = d.stats.totalGridsFilled;
                     document.getElementById('logBox').innerHTML = d.logs.join('<br>');
                     document.getElementById('botStatus').innerText = d.state.running ? "RUNNING" : "STOPPED";
                     document.getElementById('botStatus').className = "font-bold text-[9px] italic " + (d.state.running ? "text-green-500" : "text-red-500");
