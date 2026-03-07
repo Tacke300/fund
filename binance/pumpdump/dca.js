@@ -28,7 +28,7 @@ function logger(msg, type = 'INFO') {
     const logEntry = `[${new Date().toLocaleTimeString()}] [${type}] ${msg}`;
     console.log(logEntry);
     logs.unshift(logEntry);
-    if (logs.length > 50) logs.pop();
+    if (logs.length > 60) logs.pop();
 }
 
 if (fs.existsSync(STATE_FILE)) try { Object.assign(botState, JSON.parse(fs.readFileSync(STATE_FILE))); } catch(e){}
@@ -36,15 +36,22 @@ if (fs.existsSync(LEVERAGE_FILE)) try { symbolMaxLeverage = JSON.parse(fs.readFi
 
 const saveState = () => fs.writeFileSync(STATE_FILE, JSON.stringify(botState));
 
+// LẤY DANH SÁCH COIN & ĐÒN BẨY
 async function fetchActualLeverage() {
+    logger("Đang kết nối Binance lấy danh sách Coin...", "INFO");
     return new Promise((resolve) => {
         const timestamp = Date.now();
         const query = `timestamp=${timestamp}`;
         const signature = crypto.createHmac('sha256', SECRET_KEY).update(query).digest('hex');
-        https.get({
-            hostname: 'fapi.binance.com', path: `/fapi/v1/leverageBracket?${query}&signature=${signature}`,
-            headers: { 'X-MBX-APIKEY': API_KEY }, timeout: 5000
-        }, (res) => {
+        
+        const options = {
+            hostname: 'fapi.binance.com',
+            path: `/fapi/v1/leverageBracket?${query}&signature=${signature}`,
+            headers: { 'X-MBX-APIKEY': API_KEY },
+            timeout: 5000
+        };
+
+        const req = https.get(options, (res) => {
             let data = '';
             res.on('data', chunk => data += chunk);
             res.on('end', () => {
@@ -56,52 +63,90 @@ async function fetchActualLeverage() {
                             if (!allSymbols.includes(item.symbol)) allSymbols.push(item.symbol);
                         });
                         fs.writeFileSync(LEVERAGE_FILE, JSON.stringify(symbolMaxLeverage));
-                        logger(`Nạp ${allSymbols.length} coin thành công.`, "INFO");
+                        logger(`Thành công: Đã nạp ${allSymbols.length} Coin. Max Lev chuẩn.`, "INFO");
+                    } else {
+                        throw new Error("API Trả về lỗi");
                     }
-                } catch (e) {}
+                } catch (e) {
+                    logger("Lỗi API Key hoặc Quyền hạn. Sử dụng danh sách mặc định (x20).", "ERR");
+                    fallbackSymbols();
+                }
                 resolve();
             });
-        }).on('error', () => resolve());
+        });
+        
+        req.on('error', (e) => {
+            logger("Không kết nối được Binance. Kiểm tra mạng.", "ERR");
+            fallbackSymbols();
+            resolve();
+        });
     });
 }
 
+function fallbackSymbols() {
+    // Dự phòng nếu API Key lỗi
+    allSymbols = ["BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT", "XRPUSDT", "ADAUSDT", "AVAXUSDT", "DOGEUSDT", "DOTUSDT", "LINKUSDT"];
+    allSymbols.forEach(s => { if(!symbolMaxLeverage[s]) symbolMaxLeverage[s] = 20; });
+    logger("Đã nạp 10 Coin cơ bản để chạy tạm.", "INFO");
+}
+
 function initWS() {
+    logger("Đang khởi tạo WebSocket...", "INFO");
     const ws = new WebSocket('wss://fstream.binance.com/ws/!ticker@arr');
+    
+    ws.on('open', () => logger("WebSocket đã kết nối. Đang đợi tín hiệu giá...", "INFO"));
+    
     ws.on('message', (data) => {
         if (!botState.running) return;
+
         const tickers = JSON.parse(data);
         tickers.forEach(t => {
             marketPrices[t.s] = parseFloat(t.c);
             const price = marketPrices[t.s];
+
             if (activePositions[t.s]) {
                 const pos = activePositions[t.s];
                 const totalMargin = pos.grids.reduce((sum, g) => sum + g.qty, 0);
                 const avgPrice = pos.grids.reduce((sum, g) => sum + (g.price * g.qty), 0) / totalMargin;
                 const diffPct = pos.side === 'LONG' ? (price - avgPrice) / avgPrice : (avgPrice - price) / avgPrice;
 
+                // CHỐT LỜI
                 if (diffPct * 100 >= botState.tpPercent) {
                     const pnl = totalMargin * diffPct * pos.maxLev;
                     botState.closedPnl += pnl;
                     botState.totalClosedGrids++;
-                    logger(`CHỐT LỜI: ${t.s} +${pnl.toFixed(2)}$`, "WIN");
+                    logger(`[${t.s}] CHỐT LỜI +${pnl.toFixed(2)}$`, "WIN");
                     delete activePositions[t.s];
                     saveState();
-                } else if (pos.grids.length < botState.maxGrids) {
+                } 
+                // DCA
+                else if (pos.grids.length < botState.maxGrids) {
                     const lastPrice = pos.grids[pos.grids.length - 1].price;
                     const gap = pos.side === 'LONG' ? (lastPrice - price) / lastPrice : (price - lastPrice) / lastPrice;
                     if (gap * 100 >= botState.stepSize) {
                         pos.grids.push({ price, qty: pos.grids[pos.grids.length-1].qty * botState.multiplier });
-                        logger(`DCA: ${t.s} Lưới ${pos.grids.length}`, "DCA");
+                        logger(`[${t.s}] DCA Lưới ${pos.grids.length} tại ${price}`, "DCA");
                     }
                 }
             } else if (allSymbols.includes(t.s)) {
+                // MỞ LỆNH MỚI
                 const margin = botState.marginType === '$' ? botState.marginValue : (botState.totalBalance * botState.marginValue / 100);
                 activePositions[t.s] = {
                     symbol: t.s, side: botState.mode, maxLev: symbolMaxLeverage[t.s] || 20,
                     grids: [{ price, qty: margin }]
                 };
+                // Log 1 lần khi mở
+                if (Object.keys(activePositions).length <= 5) {
+                    logger(`Mở lệnh đầu tiên: ${t.s} | Giá: ${price}`, "INFO");
+                }
             }
         });
+    });
+
+    ws.on('error', (e) => logger("WebSocket Lỗi: " + e.message, "ERR"));
+    ws.on('close', () => {
+        logger("WebSocket bị đóng. Đang thử kết nối lại...", "ERR");
+        setTimeout(initWS, 3000);
     });
 }
 
@@ -119,27 +164,31 @@ app.get('/api/data', (req, res) => {
 });
 
 app.post('/api/control', (req, res) => { 
-    if (req.body.running && !botState.running) botState.startTime = Date.now();
+    if (req.body.running && !botState.running) {
+        botState.startTime = Date.now();
+        logger(">>> BẤM START: Đang quét " + allSymbols.length + " coin...", "INFO");
+    }
     Object.assign(botState, req.body);
     saveState(); res.json({ status: 'ok' }); 
 });
 
 app.post('/api/reset', (req, res) => { 
     activePositions = {}; botState.closedPnl = 0; botState.totalClosedGrids = 0; logs = [];
+    logger("!!! RESTART: Đã dọn sạch dữ liệu", "ERR");
     saveState(); res.json({ status: 'ok' }); 
 });
 
 app.get('/gui', (req, res) => {
-    res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Luffy Matrix v8</title><script src="https://cdn.tailwindcss.com"></script>
-    <style>body{background:#0b0e11;color:#eaecef;font-family:monospace} th{cursor:pointer;background:#161a1e;padding:12px;border-bottom:1px solid #333}#logBox{background:#000;color:#0ecb81;padding:10px;height:220px;overflow-y:auto;font-size:11px;border:1px solid #333;line-height:1.5}</style>
+    res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Luffy Matrix v10</title><script src="https://cdn.tailwindcss.com"></script>
+    <style>body{background:#0b0e11;color:#eaecef;font-family:monospace} th{cursor:pointer;background:#161a1e;padding:12px;border-bottom:1px solid #333}#logBox{background:#000;color:#0ecb81;padding:10px;height:240px;overflow-y:auto;font-size:11px;border:1px solid #333;line-height:1.5}</style>
     </head><body class="p-4 text-[12px]">
         <div class="grid grid-cols-2 md:grid-cols-6 gap-3 mb-4 text-center">
             <div class="bg-[#1e2329] p-3 rounded">UPTIME<div id="uptime" class="text-yellow-500 font-bold">0s</div></div>
-            <div class="bg-[#1e2329] p-3 rounded text-blue-400">COINS<div id="statCoins" class="text-xl font-bold">0</div></div>
-            <div class="bg-[#1e2329] p-3 rounded">LƯỚI CHỐT<div id="statGrids" class="text-purple-400 font-bold">0</div></div>
-            <div class="bg-[#1e2329] p-3 rounded">PNL CHỐT<div id="statClosedPnl" class="text-green-500 font-bold">0.00$</div></div>
-            <div class="bg-[#1e2329] p-3 rounded">PNL TẠM TÍNH<div id="statUnrealized" class="font-bold text-white">0.00$</div></div>
-            <div class="bg-[#1e2329] p-3 rounded border-t-2 border-yellow-500">ROI TỔNG<div id="statTotalRoi" class="text-xl font-bold text-green-500">0.00%</div></div>
+            <div class="bg-[#1e2329] p-3 rounded text-blue-400">COINS RUNNING<div id="statCoins" class="text-xl font-bold">0</div></div>
+            <div class="bg-[#1e2329] p-3 rounded">GRIDS CLOSED<div id="statGrids" class="text-purple-400 font-bold">0</div></div>
+            <div class="bg-[#1e2329] p-3 rounded text-green-500">CLOSED PNL<div id="statClosedPnl" class="font-bold">0.00$</div></div>
+            <div class="bg-[#1e2329] p-3 rounded text-gray-400">UNREALIZED PNL<div id="statUnrealized" class="font-bold text-white">0.00$</div></div>
+            <div class="bg-[#1e2329] p-3 rounded border-t-2 border-yellow-500">TOTAL ROI<div id="statTotalRoi" class="text-xl font-bold text-green-500">0.00%</div></div>
         </div>
         <div class="bg-[#1e2329] p-4 rounded-lg mb-4 border border-gray-800 grid grid-cols-2 md:grid-cols-7 gap-3">
             <div>VỐN/COIN ($)<input id="totalBalance" type="number" value="\${botState.totalBalance}" class="w-full bg-black text-yellow-500 p-1 rounded"></div>
@@ -151,7 +200,7 @@ app.get('/gui', (req, res) => {
             <div class="flex gap-1 items-end"><button onclick="sendCtrl(true)" class="bg-green-600 p-2 rounded font-bold flex-1">START</button><button onclick="sendCtrl(false)" class="bg-red-600 p-2 rounded font-bold flex-1">STOP</button><button onclick="resetBot()" class="bg-yellow-700 p-2 rounded font-bold text-[9px]">RESET</button></div>
         </div>
         <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
-            <div class="md:col-span-3 bg-[#1e2329] rounded-lg border border-gray-800 h-[500px] overflow-y-auto">
+            <div class="md:col-span-3 bg-[#1e2329] rounded-lg border border-gray-800 h-[520px] overflow-y-auto">
                 <table class="w-full text-left">
                     <thead class="sticky top-0 bg-[#161a1e]"><tr>
                         <th onclick="setSort('symbol')">SYMBOL ↕</th>
@@ -172,16 +221,16 @@ app.get('/gui', (req, res) => {
                 const body = { running:run, totalBalance:Number(document.getElementById('totalBalance').value), marginValue:Number(document.getElementById('marginValue').value), marginType:document.getElementById('marginType').value, maxGrids:Number(document.getElementById('maxGrids').value), stepSize:Number(document.getElementById('stepSize').value), tpPercent:Number(document.getElementById('tpPercent').value), mode:document.getElementById('mode').value, multiplier: 2.0 };
                 await fetch('/api/control',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
             }
-            async function resetBot(){ if(confirm('RESET toàn bộ thông số?')) await fetch('/api/reset',{method:'POST'}); }
+            async function resetBot(){ if(confirm('RESET?')) await fetch('/api/reset',{method:'POST'}); }
             function render(){
                 const sorted = [...rawData].sort((a,b)=> (a[sortKey]>b[sortKey]?1:-1)*sortDir);
-                document.getElementById('activeBody').innerHTML = sorted.map(p=>\`<tr class="border-b border-gray-800">
+                document.getElementById('activeBody').innerHTML = sorted.length ? sorted.map(p=>\`<tr class="border-b border-gray-800">
                     <td class="p-2 font-bold text-yellow-500">\${p.symbol} <span class="text-gray-500">\${p.maxLev}x</span></td>
-                    <td class="text-right font-mono">\${p.currentPrice.toFixed(4)}</td>
+                    <td class="text-right font-mono text-gray-400">\${p.currentPrice.toFixed(4)}</td>
                     <td class="text-right">\${p.currentGrid}/\${window.maxG}</td>
-                    <td class="text-right \${p.roi>=0?'text-green-500':'text-red-500'}">\${p.roi.toFixed(2)}%</td>
+                    <td class="text-right \${p.roi>=0?'text-green-500':'text-red-500'} font-bold">\${p.roi.toFixed(2)}%</td>
                     <td class="text-right pr-2 font-bold \${p.pnl>=0?'text-green-500':'text-red-500'}">\${p.pnl.toFixed(2)}$</td>
-                </tr>\`).join('');
+                </tr>\`).join('') : '<tr><td colspan="5" class="p-10 text-center text-gray-500 italic">Đang quét tín hiệu thị trường... Hãy đảm bảo bạn đã bấm START.</td></tr>';
             }
             async function update(){
                 try {
@@ -209,5 +258,5 @@ app.get('/gui', (req, res) => {
 
 fetchActualLeverage().then(() => {
     initWS();
-    app.listen(PORT, '0.0.0.0', () => logger(`BOT READY: http://localhost:${PORT}/gui`, "INFO"));
+    app.listen(PORT, '0.0.0.0', () => logger(`BOT MATRIX READY: http://localhost:${PORT}/gui`, "INFO"));
 });
