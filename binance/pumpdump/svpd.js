@@ -1,6 +1,6 @@
-const TP_PERCENT = 0.5; // Chốt lời tại 1% (chưa tính đòn bẩy)
-const SL_PERCENT = 3.0; // Cắt lỗ tại 5% (chưa tính đòn bẩy)
-const MIN_VOLATILITY_TO_SAVE = 3; 
+const TP_PERCENT = 0.3; // Chốt lời tại 1% (chưa tính đòn bẩy)
+const SL_PERCENT = 1.0; // Cắt lỗ tại 5% (chưa tính đòn bẩy)
+const MIN_VOLATILITY_TO_SAVE = 5; 
 const PORT = 9000;
 const HISTORY_FILE = './history_db.json';
 const LEVERAGE_FILE = './leverage_cache.json';
