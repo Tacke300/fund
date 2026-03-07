@@ -1,6 +1,7 @@
 import WebSocket from 'ws';
 import express from 'express';
 import fs from 'fs';
+import https from 'https';
 
 const app = express();
 app.use(express.json());
@@ -10,35 +11,41 @@ const HISTORY_FILE = './bot_history.json';
 const PORT = 9009;
 
 let botState = { 
-    running: false, 
-    totalBalance: 1000,     // Tổng vốn để tính %
-    marginValue: 10,        // Giá trị nhập vào
-    marginType: '$',        // $ hoặc %
-    maxGrids: 5, 
-    stepSize: 1.0, 
-    multiplier: 2.0, 
-    tpPercent: 1.0,         // Chốt lời theo % giá
-    mode: 'LONG' 
+    running: false, totalBalance: 1000, marginValue: 10, marginType: '$',
+    maxGrids: 5, stepSize: 1.0, multiplier: 2.0, tpPercent: 1.0, mode: 'LONG' 
 };
 
 let activePositions = {}; 
 let history = [];
 let marketPrices = {};
+let allSymbols = []; // Danh sách coin lấy từ Binance
 
+// Load dữ liệu
 if (fs.existsSync(STATE_FILE)) botState = JSON.parse(fs.readFileSync(STATE_FILE));
 if (fs.existsSync(HISTORY_FILE)) history = JSON.parse(fs.readFileSync(HISTORY_FILE));
 
 const saveState = () => fs.writeFileSync(STATE_FILE, JSON.stringify(botState));
 const saveHistory = () => fs.writeFileSync(HISTORY_FILE, JSON.stringify(history));
 
-// Tính toán số tiền Margin thực tế cho mỗi coin
-const getActualMargin = () => {
-    if (botState.marginType === '$') return botState.marginValue;
-    return (botState.totalBalance * botState.marginValue) / 100;
-};
+// Lấy danh sách toàn bộ coin Future từ Binance
+async function fetchSymbols() {
+    return new Promise((resolve) => {
+        https.get('https://fapi.binance.com/fapi/v1/exchangeInfo', (res) => {
+            let data = '';
+            res.on('data', chunk => data += chunk);
+            res.on('end', () => {
+                const info = JSON.parse(data);
+                allSymbols = info.symbols.filter(s => s.status === 'TRADING').map(s => s.symbol);
+                console.log(`Đã tải ${allSymbols.length} cặp coin Future.`);
+                resolve();
+            });
+        });
+    });
+}
 
 function startNewGrid(symbol, price) {
-    const margin = getActualMargin();
+    if (!botState.running) return;
+    const margin = botState.marginType === '$' ? botState.marginValue : (botState.totalBalance * botState.marginValue / 100);
     activePositions[symbol] = {
         symbol, side: botState.mode,
         grids: [{ price, qty: margin, time: Date.now() }],
@@ -50,27 +57,23 @@ function processGridLogic(symbol, currentPrice) {
     const pos = activePositions[symbol];
     const totalMargin = pos.grids.reduce((sum, g) => sum + g.qty, 0);
     const avgPrice = pos.grids.reduce((sum, g) => sum + (g.price * g.qty), 0) / totalMargin;
-    
-    // 1. TÍNH TOÁN CHỐT LỜI THEO % GIÁ TRUNG BÌNH
-    const priceDiffPct = pos.side === 'LONG' 
-        ? (currentPrice - avgPrice) / avgPrice 
-        : (avgPrice - currentPrice) / avgPrice;
+    const priceDiffPct = pos.side === 'LONG' ? (currentPrice - avgPrice) / avgPrice : (avgPrice - currentPrice) / avgPrice;
 
+    // Chốt lời
     if (priceDiffPct * 100 >= botState.tpPercent) {
-        const pnl = totalMargin * priceDiffPct * 20; // Giả định đòn bẩy 20x để tính PnL ước tính
+        const pnl = totalMargin * priceDiffPct * 20; // PnL ước tính x20
         history.push({ ...pos, endTime: Date.now(), finalPrice: currentPrice, avgPrice, totalMargin, pnl, roi: priceDiffPct * 100 * 20, gridCount: pos.grids.length });
         delete activePositions[symbol];
         saveHistory();
         return;
     }
 
-    // 2. THỰC HIỆN DCA THEO KHOẢNG CÁCH GIÁ
+    // DCA
     if (pos.grids.length < botState.maxGrids) {
         const lastEntry = pos.grids[pos.grids.length - 1].price;
         const gap = pos.side === 'LONG' ? (lastEntry - currentPrice) / lastEntry : (currentPrice - lastEntry) / lastEntry;
         if (gap * 100 >= botState.stepSize) {
-            const nextMargin = pos.grids[pos.grids.length - 1].qty * botState.multiplier;
-            pos.grids.push({ price: currentPrice, qty: nextMargin, time: Date.now() });
+            pos.grids.push({ price: currentPrice, qty: pos.grids[pos.grids.length - 1].qty * botState.multiplier, time: Date.now() });
         }
     }
 }
@@ -83,7 +86,7 @@ function initWS() {
             marketPrices[t.s] = parseFloat(t.c);
             if (botState.running) {
                 if (activePositions[t.s]) processGridLogic(t.s, marketPrices[t.s]);
-                else startNewGrid(t.s, marketPrices[t.s]);
+                else if (allSymbols.includes(t.s)) startNewGrid(t.s, marketPrices[t.s]);
             }
         });
     });
@@ -94,74 +97,86 @@ app.get('/api/data', (req, res) => {
     const activeData = Object.values(activePositions).map(p => {
         const totalMargin = p.grids.reduce((sum, g) => sum + g.qty, 0);
         const avgPrice = p.grids.reduce((sum, g) => sum + (g.price * g.qty), 0) / totalMargin;
-        const roi = posSideROI(p.side, avgPrice, marketPrices[p.symbol]);
-        return { ...p, avgPrice, totalMargin, currentGrid: p.grids.length, roi: roi };
+        const roi = p.side === 'LONG' ? ((marketPrices[p.symbol] - avgPrice) / avgPrice) * 100 : ((avgPrice - marketPrices[p.symbol]) / avgPrice) * 100;
+        return { ...p, avgPrice, totalMargin, currentGrid: p.grids.length, roi: roi * 20 };
     });
-    res.json({ state: botState, active: activeData, history: history.slice(-30).reverse(), marketPrices });
+    res.json({ state: botState, active: activeData, history, marketPrices });
 });
-
-function posSideROI(side, avg, current) {
-    if (!current) return 0;
-    return side === 'LONG' ? ((current - avg) / avg) * 100 : ((avg - current) / avg) * 100;
-}
 
 app.post('/api/control', (req, res) => { botState = { ...botState, ...req.body }; saveState(); res.json({ status: 'ok' }); });
 app.post('/api/reset', (req, res) => { activePositions = {}; history = []; saveHistory(); res.json({ status: 'ok' }); });
 
-// --- GIAO DIỆN ---
+// GIAO DIỆN
 app.get('/gui', (req, res) => {
-    res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>DCA Grid All Coins</title><script src="https://cdn.tailwindcss.com"></script>
-    <style>body{background:#0b0e11;color:#eaecef;font-family:monospace}.bg-card{background:#1e2329;border:1px solid #2b3139}input,select{background:#000;border:1px solid #333;color:#f0b90b;padding:4px;border-radius:4px;width:100%}</style>
-    </head><body class="p-4">
-        <div class="bg-card p-4 rounded-lg mb-6">
-            <h2 class="text-yellow-500 font-bold mb-4 uppercase text-xs">Cấu Hình Lưới Toàn Sàn</h2>
-            <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3">
-                <div><label class="text-[10px] text-gray-400">TỔNG VỐN ($)</label><input id="totalBalance" type="number" value="${botState.totalBalance}"></div>
-                <div><label class="text-[10px] text-gray-400">MARGIN MỖI COIN</label>
-                    <div class="flex gap-1"><input id="marginValue" type="number" value="${botState.marginValue}"><select id="marginType" class="w-16"><option value="$" ${botState.marginType==='$'?'selected':''}>$</option><option value="%" ${botState.marginType==='%'?'selected':''}>%</option></select></div>
-                </div>
-                <div><label class="text-[10px] text-gray-400">MAX DCA LƯỚI</label><input id="maxGrids" type="number" value="${botState.maxGrids}"></div>
-                <div><label class="text-[10px] text-gray-400">KHOẢNG CÁCH (%)</label><input id="stepSize" type="number" value="${botState.stepSize}"></div>
-                <div><label class="text-[10px] text-gray-400">NHÂN VỐN (X)</label><input id="multiplier" type="number" value="${botState.multiplier}"></div>
-                <div><label class="text-[10px] text-gray-400">TP (%) GIÁ TB</label><input id="tpPercent" type="number" value="${botState.tpPercent}"></div>
-                <div><label class="text-[10px] text-gray-400">CHẾ ĐỘ</label><select id="mode"><option value="LONG" ${botState.mode==='LONG'?'selected':''}>LONG</option><option value="SHORT" ${botState.mode==='SHORT'?'selected':''}>SHORT</option></select></div>
+    res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Luffy DCA 9009</title><script src="https://cdn.tailwindcss.com"></script>
+    <style>body{background:#0b0e11;color:#eaecef;font-family:monospace}input,select{background:#000;border:1px solid #333;color:#f0b90b;padding:4px;border-radius:4px}</style>
+    </head><body class="p-4 text-xs">
+        <div class="bg-[#1e2329] p-4 rounded-lg mb-4 border border-gray-800">
+            <div class="grid grid-cols-2 md:grid-cols-6 gap-3">
+                <div>VỐN ($)<input id="totalBalance" type="number" value="${botState.totalBalance}" class="w-full"></div>
+                <div>MARGIN<div class="flex"><input id="marginValue" type="number" value="${botState.marginValue}" class="w-full"><select id="marginType"><option value="$" ${botState.marginType==='$'?'selected':''}>$</option><option value="%" ${botState.marginType==='%'?'selected':''}>%</option></select></div></div>
+                <div>DCA MAX<input id="maxGrids" type="number" value="${botState.maxGrids}" class="w-full"></div>
+                <div>GAP (%)<input id="stepSize" type="number" value="${botState.stepSize}" class="w-full"></div>
+                <div>TP (%) GIÁ<input id="tpPercent" type="number" value="${botState.tpPercent}" class="w-full"></div>
+                <div>MODE<select id="mode" class="w-full"><option value="LONG" ${botState.mode==='LONG'?'selected':''}>LONG</option><option value="SHORT" ${botState.mode==='SHORT'?'selected':''}>SHORT</option></select></div>
             </div>
-            <div class="flex gap-2 mt-4"><button onclick="sendCtrl(true)" class="bg-green-600 p-2 rounded font-bold flex-1">START ENGINE</button><button onclick="sendCtrl(false)" class="bg-red-600 p-2 rounded font-bold flex-1">STOP</button><button onclick="resetAll()" class="bg-gray-700 p-2 rounded font-bold px-6">RESET</button></div>
+            <div class="flex gap-2 mt-4"><button onclick="sendCtrl(true)" class="bg-green-600 p-2 rounded font-bold flex-1">START</button><button onclick="sendCtrl(false)" class="bg-red-600 p-2 rounded font-bold flex-1">STOP</button><button onclick="resetAll()" class="bg-gray-700 p-2 rounded px-4">RESET</button></div>
         </div>
 
-        <div class="grid grid-cols-3 gap-4 mb-6">
-            <div class="bg-card p-3 rounded text-center"><div class="text-[10px] text-gray-500">BTC</div><div id="p-BTCUSDT" class="text-xl font-bold">---</div></div>
-            <div class="bg-card p-3 rounded text-center"><div class="text-[10px] text-gray-500">ETH</div><div id="p-ETHUSDT" class="text-xl font-bold">---</div></div>
-            <div class="bg-card p-3 rounded text-center"><div class="text-[10px] text-gray-500">BNB</div><div id="p-BNBUSDT" class="text-xl font-bold">---</div></div>
+        <div class="grid grid-cols-3 gap-2 mb-4">
+            <div class="bg-[#1e2329] p-2 rounded text-center border-b-2 border-yellow-500">BTC: <span id="p-BTCUSDT">0</span></div>
+            <div class="bg-[#1e2329] p-2 rounded text-center border-b-2 border-blue-500">ETH: <span id="p-ETHUSDT">0</span></div>
+            <div class="bg-[#1e2329] p-2 rounded text-center border-b-2 border-orange-500">BNB: <span id="p-BNBUSDT">0</span></div>
         </div>
 
-        <section class="bg-card rounded-lg overflow-hidden mb-6">
-            <table class="w-full text-[11px] text-left">
-                <thead class="bg-black/40"><tr><th class="p-2">Symbol</th><th>Side</th><th>Grids</th><th>Entry Avg</th><th>Price</th><th>ROI %</th></tr></thead>
+        <div class="bg-[#1e2329] rounded-lg mb-4 h-64 overflow-y-auto">
+            <table class="w-full text-left">
+                <thead class="sticky top-0 bg-black"><tr><th class="p-2">Symbol</th><th>Grids</th><th>Price Avg</th><th>ROI (20x)</th></tr></thead>
                 <tbody id="activeBody"></tbody>
             </table>
-        </section>
+        </div>
 
-        <section class="bg-card rounded-lg overflow-hidden">
-            <div class="p-2 bg-black/40 text-[10px] font-bold uppercase">Lịch sử chốt lời</div>
-            <div id="historyList" class="p-2 space-y-1 max-h-60 overflow-y-auto"></div>
-        </section>
+        <div class="bg-[#1e2329] rounded-lg p-2">
+            <div class="flex justify-between items-center mb-2">
+                <span class="font-bold">LỊCH SỬ CHỐT LỜI</span>
+                <div class="flex gap-1">
+                    <button onclick="setSort('pnl')" class="bg-blue-900 px-2 py-1 rounded">Sort PnL</button>
+                    <button onclick="setSort('grid')" class="bg-blue-900 px-2 py-1 rounded">Sort Lưới</button>
+                </div>
+            </div>
+            <div id="historyList" class="space-y-1 h-40 overflow-y-auto"></div>
+        </div>
 
         <script>
+            let currentSort = 'time';
             async function sendCtrl(run){
-                const body = { running:run, totalBalance:Number(document.getElementById('totalBalance').value), marginValue:Number(document.getElementById('marginValue').value), marginType:document.getElementById('marginType').value, maxGrids:Number(document.getElementById('maxGrids').value), stepSize:Number(document.getElementById('stepSize').value), multiplier:Number(document.getElementById('multiplier').value), tpPercent:Number(document.getElementById('tpPercent').value), mode:document.getElementById('mode').value };
+                const body = { running:run, totalBalance:Number(document.getElementById('totalBalance').value), marginValue:Number(document.getElementById('marginValue').value), marginType:document.getElementById('marginType').value, maxGrids:Number(document.getElementById('maxGrids').value), stepSize:Number(document.getElementById('stepSize').value), tpPercent:Number(document.getElementById('tpPercent').value), mode:document.getElementById('mode').value, multiplier: 2.0 };
                 await fetch('/api/control',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
             }
             async function resetAll(){ if(confirm('Reset?')) await fetch('/api/reset',{method:'POST'}); }
+            function setSort(type){ currentSort = type; }
+
             async function update(){
-                const res = await fetch('/api/data'); const d = await res.json();
-                ['BTCUSDT','ETHUSDT','BNBUSDT'].forEach(s => { const p = d.marketPrices[s]; const el = document.getElementById('p-'+s); if(p) el.innerText = p.toFixed(2); });
-                document.getElementById('activeBody').innerHTML = d.active.map(p => \`<tr class="border-b border-gray-800"><td class="p-2 font-bold">\${p.symbol}</td><td class="\${p.side==='LONG'?'text-green-500':'text-red-500'}">\${p.side}</td><td>\${p.currentGrid}/\${d.state.maxGrids}</td><td>\${p.avgPrice.toFixed(4)}</td><td>\${(d.marketPrices[p.symbol]||0).toFixed(4)}</td><td class="\${p.roi>=0?'text-green-500':'text-red-500'} font-bold">\${p.roi.toFixed(2)}%</td></tr>\`).join('');
-                document.getElementById('historyList').innerHTML = d.history.map(h => \`<div class="flex justify-between text-[10px] border-b border-gray-800 pb-1"><span>\${h.symbol} (\${h.gridCount} Lưới)</span><span class="text-green-500">+\${h.pnl.toFixed(2)}$ (\${h.roi.toFixed(1)}%)</span></div>\`).join('');
+                try {
+                    const res = await fetch('/api/data'); const d = await res.json();
+                    ['BTCUSDT','ETHUSDT','BNBUSDT'].forEach(s => { document.getElementById('p-'+s).innerText = d.marketPrices[s]?.toFixed(1); });
+                    document.getElementById('activeBody').innerHTML = d.active.map(p => \`<tr><td class="p-2 font-bold">\${p.symbol}</td><td>\${p.currentGrid}/\${d.state.maxGrids}</td><td>\${p.avgPrice.toFixed(4)}</td><td class="\${p.roi>=0?'text-green-500':'text-red-500'}">\${p.roi.toFixed(1)}%</td></tr>\`).join('');
+                    
+                    let sortedHistory = [...d.history];
+                    if(currentSort === 'pnl') sortedHistory.sort((a,b) => b.pnl - a.pnl);
+                    else if(currentSort === 'grid') sortedHistory.sort((a,b) => b.gridCount - a.gridCount);
+                    else sortedHistory.reverse();
+
+                    document.getElementById('historyList').innerHTML = sortedHistory.map(h => \`<div class="flex justify-between border-b border-gray-800 py-1"><span>\${h.symbol} [\${h.gridCount} lưới]</span><span class="\${h.pnl>=0?'text-green-500':'text-red-500'}">+\${h.pnl.toFixed(2)}$ (\${h.roi.toFixed(1)}%)</span></div>\`).join('');
+                } catch(e){}
             }
             setInterval(update, 1000);
         </script>
     </body></html>`);
 });
 
-app.listen(PORT, '0.0.0.0', () => { initWS(); console.log(`http://localhost:${PORT}/gui`); });
+// Chạy bot
+fetchSymbols().then(() => {
+    initWS();
+    app.listen(PORT, '0.0.0.0', () => console.log(`Cổng: ${PORT}`));
+});
