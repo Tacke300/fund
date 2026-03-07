@@ -41,6 +41,27 @@ const saveAll = () => {
     fs.writeFileSync(HISTORY_FILE, JSON.stringify(pnlHistory));
 };
 
+async function fallbackSymbols() {
+    return new Promise((resolve) => {
+        https.get('https://fapi.binance.com/fapi/v1/exchangeInfo', (res) => {
+            let data = '';
+            res.on('data', chunk => data += chunk);
+            res.on('end', () => {
+                try {
+                    const info = JSON.parse(data);
+                    info.symbols.forEach(s => {
+                        if (s.status === 'TRADING' && s.quoteAsset === 'USDT') {
+                            if (!allSymbols.includes(s.symbol)) allSymbols.push(s.symbol);
+                            if (!symbolMaxLeverage[s.symbol]) symbolMaxLeverage[s.symbol] = 20;
+                        }
+                    });
+                } catch(e) {}
+                resolve();
+            });
+        }).on('error', () => resolve());
+    });
+}
+
 async function fetchActualLeverage() {
     return new Promise((resolve) => {
         const timestamp = Date.now();
@@ -63,33 +84,12 @@ async function fetchActualLeverage() {
                             allSymbols.push(item.symbol);
                         });
                         fs.writeFileSync(LEVERAGE_FILE, JSON.stringify(symbolMaxLeverage));
-                        logger(`Đã tải ${allSymbols.length} coin. Leverage OK.`);
+                        logger(`Nạp ${allSymbols.length} coin thành công.`);
                     }
                     resolve();
                 } catch (e) { fallbackSymbols().then(resolve); }
             });
         }).on('error', () => fallbackSymbols().then(resolve));
-    });
-}
-
-async function fallbackSymbols() {
-    return new Promise((resolve) => {
-        https.get('https://fapi.binance.com/fapi/v1/exchangeInfo', (res) => {
-            let data = '';
-            res.on('data', chunk => data += chunk);
-            res.on('end', () => {
-                try {
-                    const info = JSON.parse(data);
-                    info.symbols.forEach(s => {
-                        if (s.status === 'TRADING' && s.quoteAsset === 'USDT') {
-                            if (!allSymbols.includes(s.symbol)) allSymbols.push(s.symbol);
-                            if (!symbolMaxLeverage[s.symbol]) symbolMaxLeverage[s.symbol] = 20;
-                        }
-                    });
-                } catch(e) {}
-                resolve();
-            });
-        }).on('error', () => resolve());
     });
 }
 
@@ -102,22 +102,26 @@ function initWS() {
             tickers.forEach(t => {
                 marketPrices[t.s] = parseFloat(t.c);
                 const price = marketPrices[t.s];
-                const maxLev = symbolMaxLeverage[t.s] || 20;
+                if (!allSymbols.includes(t.s)) return;
 
-                if (activePositions[t.s]) {
+                if (!activePositions[t.s]) {
+                    activePositions[t.s] = {
+                        symbol: t.s, side: botState.mode, maxLev: symbolMaxLeverage[t.s] || 20,
+                        grids: [{ price, qty: botState.marginValue, time: Date.now() }], status: 'TRADING'
+                    };
+                } else {
                     const pos = activePositions[t.s];
                     if (pos.status === 'WAITING') {
                         pos.grids = [{ price, qty: botState.marginValue, time: Date.now() }];
                         pos.status = 'TRADING';
                         return;
                     }
-
                     const totalMargin = pos.grids.reduce((sum, g) => sum + g.qty, 0);
                     const avgPrice = pos.grids.reduce((sum, g) => sum + (g.price * g.qty), 0) / totalMargin;
                     const diffPct = pos.side === 'LONG' ? (price - avgPrice) / avgPrice : (avgPrice - price) / avgPrice;
 
                     if (diffPct * 100 >= botState.tpPercent) {
-                        const pnl = totalMargin * (diffPct * maxLev);
+                        const pnl = totalMargin * (diffPct * pos.maxLev);
                         botState.closedPnl += pnl;
                         botState.totalClosedGrids++;
                         pnlHistory.push({ ts: Date.now(), pnl: pnl });
@@ -133,11 +137,6 @@ function initWS() {
                             logger(`DCA: ${t.s} tầng ${pos.grids.length}`, "DCA");
                         }
                     }
-                } else if (allSymbols.includes(t.s)) {
-                    activePositions[t.s] = {
-                        symbol: t.s, side: botState.mode, maxLev: maxLev,
-                        grids: [{ price, qty: botState.marginValue, time: Date.now() }], status: 'TRADING'
-                    };
                 }
             });
         } catch(e) {}
@@ -150,20 +149,19 @@ app.get('/api/data', (req, res) => {
     const activeData = Object.values(activePositions).map(p => {
         const currentP = marketPrices[p.symbol] || 0;
         let pnl = 0, avgPrice = 0, totalMargin = 0;
-        const lev = p.maxLev || 20;
         if (p.status !== 'WAITING' && currentP > 0) {
             totalMargin = p.grids.reduce((sum, g) => sum + g.qty, 0);
             avgPrice = p.grids.reduce((sum, g) => sum + (g.price * g.qty), 0) / totalMargin;
             const diff = p.side === 'LONG' ? (currentP - avgPrice) / avgPrice : (avgPrice - currentP) / avgPrice;
-            pnl = totalMargin * diff * lev;
+            pnl = totalMargin * diff * p.maxLev;
             unrealizedPnl += pnl;
         }
-        const coinVốn = botState.marginValue * lev * botState.maxGrids;
         return { 
             ...p, avgPrice, totalMargin, currentGrid: p.grids.length, 
-            pnl, currentPrice: currentP, coinVốn,
+            pnl, currentPrice: currentP, coinVốn: botState.marginValue * p.maxLev * botState.maxGrids,
             gridDetails: p.grids.map((g, i) => ({
-                index: i + 1, entry: g.price, margin: g.qty, pnl: g.qty * (p.side === 'LONG' ? (currentP - g.price)/g.price : (g.price - currentP)/g.price) * lev
+                index: i + 1, entry: g.price, margin: g.qty, 
+                pnl: g.qty * (p.side === 'LONG' ? (currentP - g.price)/g.price : (g.price - currentP)/g.price) * p.maxLev
             }))
         };
     });
@@ -185,9 +183,10 @@ app.post('/api/reset', (req, res) => {
 });
 
 app.get('/gui', (req, res) => {
-    res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Luffy DCA Bot v44</title><script src="https://cdn.tailwindcss.com"></script>
-    <style>body{background:#0b0e11;color:#eaecef;font-family:monospace} th{cursor:pointer;background:#161a1e;padding:12px 8px;border-bottom:1px solid #333;text-transform:uppercase;font-size:10px} th:hover{color:#f0b90b} #logBox{background:#000;padding:10px;height:220px;overflow-y:auto;font-size:11px;border:1px solid #333}
-    .modal { display: none; position: fixed; z-index: 100; left: 0; top: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.9); }
+    res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Luffy DCA v45</title><script src="https://cdn.tailwindcss.com"></script>
+    <style>body{background:#0b0e11;color:#eaecef;font-family:monospace} th{cursor:pointer;background:#161a1e;padding:12px 8px;border-bottom:1px solid #333;text-transform:uppercase;font-size:10px}
+    #logBox{background:#000;padding:10px;height:220px;overflow-y:auto;font-size:11px;border:1px solid #333}
+    .modal { display: none; position: fixed; z-index: 100; left: 0; top: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.95); }
     .modal-content { background: #1e2329; margin: 10% auto; padding: 20px; border: 1px solid #f0b90b; width: 70%; border-radius: 4px; }</style></head>
     <body class="p-4 text-[11px]">
         <div id="gridModal" class="modal"><div class="modal-content shadow-2xl">
@@ -229,25 +228,27 @@ app.get('/gui', (req, res) => {
                 await fetch('/api/control',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
             }
             async function resetData(){ if(confirm('RESET ALL?')) await fetch('/api/reset',{method:'POST'}); }
-            function openDetail(symbol){
-                const p = rawData.find(x => x.symbol === symbol); if(!p || p.status === 'WAITING') return;
-                document.getElementById('mTitle').innerText = symbol + " - Chi Tiết Lưới Nhồi";
-                document.getElementById('mBody').innerHTML = p.gridDetails.map(g => \`<tr class="border-b border-gray-800"><td class="p-2 font-bold text-yellow-500">Tầng \${g.index}</td><td>\${g.entry.toFixed(5)}</td><td>\${g.margin.toFixed(2)}$</td><td class="\${g.pnl>=0?'text-green-500':'text-red-500'} font-bold">\${g.pnl.toFixed(4)}$</td></tr>\`).join('');
+            function openDetail(s){
+                const p = rawData.find(x => x.symbol === s); if(!p) return;
+                document.getElementById('mTitle').innerText = s + " - Tầng DCA";
+                document.getElementById('mBody').innerHTML = p.gridDetails.map(g => {
+                    const c = g.pnl >= 0 ? 'text-green-500' : 'text-red-500';
+                    return '<tr class="border-b border-gray-800"><td class="p-2 text-yellow-500">Tầng '+g.index+'</td><td>'+g.entry.toFixed(5)+'</td><td>'+g.margin.toFixed(2)+'</td><td class="'+c+' font-bold">'+g.pnl.toFixed(4)+'</td></tr>';
+                }).join('');
                 document.getElementById('gridModal').style.display = 'block';
             }
             function closeM(){ document.getElementById('gridModal').style.display = 'none'; }
             function render(){ 
-                const sorted = [...rawData].sort((a,b)=> (a[sortKey]>b[sortKey]?1:-1)*sortDir); 
-                document.getElementById('activeBody').innerHTML = sorted.map(p=>\`<tr class="border-b border-gray-800 hover:bg-[#2b3139] \${p.status==='WAITING'?'opacity-30':''}"> 
-                    <td onclick="openDetail('\${p.symbol}')" class="p-3 font-bold text-yellow-500 cursor-pointer underline">\${p.symbol} (x\${p.maxLev})</td> 
-                    <td class="text-right font-bold \${p.pnl>=0?'text-green-400':'text-red-500'}">\${p.pnl.toFixed(2)}$</td> 
-                    <td class="text-center font-bold text-yellow-400">\${p.currentGrid}/\${window.maxG}</td> 
-                    <td class="text-right font-bold text-blue-400">\${p.coinVốn.toFixed(1)}$</td> 
-                    <td class="text-right pr-2 font-bold text-white">\${p.avgPrice.toFixed(5)}</td> </tr>\`).join(''); 
+                const s = [...rawData].sort((a,b)=> (a[sortKey]>b[sortKey]?1:-1)*sortDir); 
+                document.getElementById('activeBody').innerHTML = s.map(p=>{
+                    const c = p.pnl>=0?'text-green-400':'text-red-500';
+                    const op = p.status==='WAITING'?'opacity-30':'';
+                    return '<tr class="border-b border-gray-800 hover:bg-[#2b3139] '+op+'"><td onclick="openDetail(\\''+p.symbol+'\\')" class="p-3 font-bold text-yellow-500 cursor-pointer underline">'+p.symbol+' (x'+p.maxLev+')</td><td class="text-right font-bold '+c+'">'+p.pnl.toFixed(2)+'$</td><td class="text-center font-bold text-yellow-400">'+p.currentGrid+'/'+window.maxG+'</td><td class="text-right font-bold text-blue-400">'+p.coinVốn.toFixed(1)+'$</td><td class="text-right pr-2 font-bold text-white">'+(p.avgPrice||0).toFixed(5)+'</td></tr>';
+                }).join(''); 
             }
             async function update(){
                 try {
-                    const res = await fetch('/api/data'); const d = await res.json();
+                    const r = await fetch('/api/data'); const d = await r.json();
                     if(firstLoad) { ['marginValue','maxGrids','stepSize','tpPercent','mode'].forEach(id => { document.getElementById(id).value = d.state[id]; }); firstLoad = false; }
                     rawData = d.active; window.maxG = d.state.maxGrids; render();
                     document.getElementById('pnlAll').innerText = d.stats.totalSystemPnl.toFixed(2) + '$';
