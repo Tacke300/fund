@@ -1,14 +1,14 @@
 // ==========================================
 // CẤU HÌNH THÔNG SỐ CHIẾN THUẬT (DỄ CHỈNH)
 // ==========================================
-const TP_PERCENT = 0.1;           // Chốt lời 0.1% (giá chưa đòn bẩy)
-const SL_PERCENT = 0.5;           // Cắt lỗ 0.5% (giá chưa đòn bẩy)
-const MIN_VOLATILITY_TO_SAVE = 5; // Biến động tối thiểu để vào lệnh
-const COOLDOWN_MINUTES = 15;      // Thời gian nghỉ giữa các lệnh cùng 1 coin
+const TP_PERCENT = 0.1;           
+const SL_PERCENT = 0.5;           
+const MIN_VOLATILITY_TO_SAVE = 5; 
+const COOLDOWN_MINUTES = 15;      
 
 // --- LOGIC CHIẾN THUẬT LUFFY ---
-const MAX_LOSE_STREAK = 5;        // Thua liên tiếp 5 lần thì Reset vốn
-const MAX_EQUITY_PERCENT = 0.5;   // Lệnh chạm 50% tổng vốn thì Reset bảo toàn lãi
+const MAX_LOSE_STREAK = 5;        // Thua liên tiếp 5 lần thì Reset
+const MAX_EQUITY_PERCENT = 0.5;   // Lệnh chạm 50% tổng vốn (Equity) thì Reset
 const PORT = 9000;
 // ==========================================
 
@@ -130,58 +130,70 @@ app.get('/gui', (req, res) => {
         .bg-main { background: #0b0e11; } .bg-card { background: #1e2329; }
         #user-id { color: #fcd535; font-size: 1.2rem; font-weight: 900; font-style: italic; cursor: pointer; }
         .text-gray-custom { color: #848e9c; } .text-10 { font-size: 10px; } .text-12 { font-size: 12px; }
+        ::-webkit-scrollbar { width: 0px; }
     </style></head><body>
     
     <div class="p-4 bg-main sticky top-0 z-50 shadow-xl border-b border-zinc-800">
         <div id="setup" class="grid grid-cols-2 gap-2 mb-4 bg-card p-3 rounded-lg border border-zinc-700">
-            <input id="balanceInp" type="number" value="1000" class="bg-black border border-zinc-700 p-2 rounded w-full text-yellow-500 font-bold outline-none text-sm" placeholder="Vốn">
-            <input id="marginInp" type="text" value="10%" class="bg-black border border-zinc-700 p-2 rounded w-full text-yellow-500 font-bold outline-none text-sm" placeholder="Margin">
+            <input id="balanceInp" type="number" value="1000" class="bg-black border border-zinc-700 p-2 rounded w-full text-yellow-500 font-bold outline-none text-sm">
+            <input id="marginInp" type="text" value="10%" class="bg-black border border-zinc-700 p-2 rounded w-full text-yellow-500 font-bold outline-none text-sm">
             <div class="flex items-center gap-2 bg-black border border-zinc-700 p-2 rounded w-full">
                 <input id="luffyMode" type="checkbox" class="w-4 h-4 accent-yellow-500">
-                <label class="text-[9px] font-bold text-gray-custom uppercase">Chiến thuật Luffy</label>
+                <label class="text-[10px] font-bold text-gray-custom uppercase">Luffy Strategy</label>
             </div>
-            <button onclick="start()" class="bg-[#fcd535] text-black px-4 py-2 rounded font-bold uppercase text-xs">Kích hoạt Bot</button>
+            <button onclick="start()" class="bg-[#fcd535] text-black px-4 py-2 rounded font-bold uppercase text-xs">Start Bot</button>
         </div>
 
         <div id="active" class="hidden flex justify-between items-center mb-4">
-             <div class="flex items-center gap-2"><img src="https://bin.bnbstatic.com/static/images/common/favicon.ico" class="w-5"><h1 class="font-bold italic text-white">BINANCE <span class="text-[#fcd535]">PRO</span></h1></div>
-             <div id="user-id" onclick="stop()">Stop Bot</div>
+             <div class="flex items-center gap-2"><img src="https://bin.bnbstatic.com/static/images/common/favicon.ico" class="w-5"><h1 class="font-bold italic text-white tracking-tighter">BINANCE <span class="text-[#fcd535]">FUTURES</span></h1></div>
+             <div id="user-id" onclick="stop()">Monkey_D_Luffy</div>
         </div>
 
-        <div class="flex justify-between items-end">
-            <div>
-                <div class="text-gray-custom text-10 uppercase font-bold">Vốn + Lãi dồn (Equity)</div>
-                <div class="flex items-end gap-1">
-                    <span id="displayBal" class="text-3xl font-bold tracking-tighter text-white">0.00</span>
-                    <span class="text-xs font-medium text-gray-custom mb-1">USDT</span>
-                </div>
-            </div>
-            <div class="text-right">
-                <div class="text-gray-custom text-10 uppercase font-bold">PnL Phiên</div>
-                <div id="unPnl" class="text-lg font-bold">0.00</div>
-            </div>
+        <div class="text-gray-custom text-12 mb-1 uppercase font-bold">Số dư ký quỹ dồn (Equity)</div>
+        <div class="flex items-end gap-2 mb-4">
+            <span id="displayBal" class="text-3xl font-bold tracking-tighter text-white">0.00</span>
+            <span class="text-base font-medium text-white mb-1">USDT</span>
+        </div>
+
+        <div class="grid grid-cols-2 gap-4 text-sm border-t border-zinc-800 pt-3">
+            <div><div class="text-gray-custom text-10 uppercase">Số dư ví</div><div id="walletBal" class="font-bold text-white">0.00</div></div>
+            <div class="text-right"><div class="text-gray-custom text-10 uppercase">PnL chưa chốt</div><div id="unPnl" class="font-bold">0.00</div></div>
         </div>
     </div>
 
     <div class="px-4 py-2 bg-main"><div style="height: 100px;"><canvas id="mainChart"></canvas></div></div>
 
     <div class="px-4 mt-4">
-        <div class="text-xs font-bold text-white uppercase border-l-4 border-yellow-500 pl-2 mb-4">Vị thế đang chạy</div>
-        <div id="pendingContainer" class="space-y-4"></div>
+        <div class="flex gap-6 mb-4 border-b border-zinc-800 text-sm font-bold text-gray-custom uppercase">
+            <span class="text-white border-b-2 border-[#fcd535] pb-2">Vị thế đang mở</span>
+        </div>
+        <div id="pendingContainer" class="space-y-4 pb-6"></div>
     </div>
 
-    <div class="px-4 mt-6 pb-32">
-        <div class="bg-card rounded-lg p-3 border border-zinc-800">
-            <div class="text-10 font-bold text-gray-custom mb-3 uppercase italic border-b border-zinc-800 pb-1">Lịch sử dồn vốn</div>
+    <div class="px-4 mb-4">
+        <div class="bg-card rounded-lg p-3">
+             <div class="text-10 font-bold text-gray-custom mb-3 uppercase italic border-b border-zinc-800 pb-1">Biến động thị trường</div>
+             <table class="w-full text-12 text-left">
+                <thead><tr class="text-gray-custom text-[10px] uppercase"><th class="pb-2">Coin</th><th class="text-center">1m</th><th class="text-center">5m</th><th class="text-right">15m</th></tr></thead>
+                <tbody id="liveBody"></tbody>
+             </table>
+        </div>
+    </div>
+
+    <div class="px-4 pb-32">
+        <div class="bg-card rounded-lg p-3">
+            <div class="text-10 font-bold text-gray-custom mb-3 uppercase italic border-b border-zinc-800 pb-1">Lịch sử giao dịch & Quản lý vốn</div>
             <div class="overflow-x-auto">
                 <table class="w-full text-[9px] text-left">
                     <thead class="text-gray-custom uppercase border-b border-zinc-800">
                         <tr>
-                            <th class="pb-2">Cặp</th>
-                            <th class="pb-2 text-center">Đòn bẩy</th>
+                            <th class="pb-2">Mở/Đóng</th>
+                            <th class="pb-2">Coin/Snap</th>
+                            <th class="pb-2 text-center">Lev</th>
+                            <th class="pb-2">Vào/Ra</th>
                             <th class="pb-2">Margin</th>
-                            <th class="pb-2">PnL</th>
-                            <th class="pb-2 text-right">Tổng Vốn</th>
+                            <th class="pb-2 text-white">PnL</th>
+                            <th class="pb-2 text-right">Balance</th>
                         </tr>
                     </thead>
                     <tbody id="historyBody" class="text-zinc-300"></tbody>
@@ -208,12 +220,9 @@ app.get('/gui', (req, res) => {
     });
 
     function start() { 
-        running = true; 
-        initialBal = parseFloat(document.getElementById('balanceInp').value) || 1000; 
+        running = true; initialBal = parseFloat(document.getElementById('balanceInp').value) || 1000; 
         luffyActive = document.getElementById('luffyMode').checked;
-        document.getElementById('setup').style.display='none'; 
-        document.getElementById('active').classList.remove('hidden'); 
-        saveConfig(); 
+        document.getElementById('setup').style.display='none'; document.getElementById('active').classList.remove('hidden'); saveConfig(); 
     }
     function stop() { running = false; document.getElementById('setup').style.display='grid'; document.getElementById('active').classList.add('hidden'); saveConfig(); }
 
@@ -224,46 +233,48 @@ app.get('/gui', (req, res) => {
             let mVal = document.getElementById('marginInp').value;
             let mNum = parseFloat(mVal) || 0;
 
+            document.getElementById('liveBody').innerHTML = (d.live || []).map(c => 
+                \`<tr class="border-b border-zinc-800/50"><td class="py-2 font-bold text-white">\${c.symbol}</td>
+                <td class="\${c.c1>=0?'up':'down'} text-center">\${c.c1}%</td>
+                <td class="\${c.c5>=0?'up':'down'} text-center">\${c.c5}%</td>
+                <td class="\${c.c15>=0?'up':'down'} text-right">\${c.c15}%</td></tr>\`
+            ).join('');
+
             let runningBal = initialBal;
             let loseStreak = 0;
             let lastMargin = 0;
 
             let historyRows = (d.history || []).map((h, index) => {
                 let currentEquity = runningBal; 
-                // Tính margin cho lệnh này
                 if (index === 0 || lastMargin === 0) {
                     lastMargin = mVal.includes('%') ? (currentEquity * mNum / 100) : mNum;
                 }
 
-                let marginUsedThisTrade = lastMargin;
-                let pnl = marginUsedThisTrade * (h.maxLev || 20) * ((h.pnlPercent || 0) / 100);
+                let marginToUse = lastMargin;
+                let pnl = marginToUse * (h.maxLev || 20) * ((h.pnlPercent || 0) / 100);
                 runningBal += pnl;
 
-                // Chuẩn bị cho lệnh tiếp theo
+                let row = \`<tr class="border-b border-zinc-800/30">
+                    <td class="py-2 text-zinc-500">\${new Date(h.startTime).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}<br>\${new Date(h.endTime).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}</td>
+                    <td><b class="text-white">\${h.symbol}</b><br><span class="text-zinc-500">\${h.snapVol.c1}|\${h.snapVol.c5}</span></td>
+                    <td class="text-center">\${h.maxLev}x</td>
+                    <td>\${(h.snapPrice||0).toFixed(4)}<br>\${(h.finalPrice||0).toFixed(4)}</td>
+                    <td class="font-bold text-yellow-500">\${marginToUse.toFixed(1)}</td>
+                    <td class="font-bold \${pnl>=0?'up':'down'}">\${pnl>=0?'+':''}\${pnl.toFixed(2)}</td>
+                    <td class="text-right font-bold">\${runningBal.toFixed(1)}</td>
+                </tr>\`;
+
                 if (luffyActive) {
-                    if (h.status === 'WIN') {
-                        loseStreak = 0;
-                        lastMargin = marginUsedThisTrade * 2;
-                    } else {
-                        loseStreak++;
-                        lastMargin = marginUsedThisTrade / 2;
-                    }
-                    // Reset nếu thua 5 lần hoặc lệnh vừa rồi đã ngốn >= 50% tổng vốn (Equity)
-                    if (loseStreak >= d.config.maxLose || marginUsedThisTrade >= (currentEquity * d.config.maxEquity)) {
+                    if (h.status === 'WIN') { loseStreak = 0; lastMargin = marginToUse * 2; } 
+                    else { loseStreak++; lastMargin = marginToUse / 2; }
+                    if (loseStreak >= d.config.maxLose || marginToUse >= (currentEquity * d.config.maxEquity)) {
                         lastMargin = mVal.includes('%') ? (runningBal * mNum / 100) : mNum;
                         loseStreak = 0;
                     }
                 } else {
                     lastMargin = mVal.includes('%') ? (runningBal * mNum / 100) : mNum;
                 }
-
-                return \`<tr class="border-b border-zinc-800/30">
-                    <td class="py-2"><b class="text-white">\${h.symbol}</b><br><span class="text-zinc-500">\${new Date(h.endTime).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}</span></td>
-                    <td class="text-center">\${h.maxLev}x</td>
-                    <td class="font-bold text-yellow-500">\${marginUsedThisTrade.toFixed(1)}</td>
-                    <td class="font-bold \${pnl>=0?'up':'down'}">\${pnl>=0?'+':''}\${pnl.toFixed(2)}</td>
-                    <td class="text-right font-bold">\${runningBal.toFixed(1)}</td>
-                </tr>\`;
+                return row;
             });
 
             document.getElementById('historyBody').innerHTML = historyRows.reverse().join('');
@@ -277,14 +288,24 @@ app.get('/gui', (req, res) => {
                 let pnl = marginForPending * roi / 100;
                 totalUnPnl += pnl;
 
+                let tpPrice = h.type === 'UP' ? h.snapPrice * (1 + d.config.tp/100) : h.snapPrice * (1 - d.config.tp/100);
+                let slPrice = h.type === 'UP' ? h.snapPrice * (1 - d.config.sl/100) : h.snapPrice * (1 + d.config.sl/100);
+                let liqPrice = h.type === 'UP' ? h.snapPrice * (1 - 0.8 / h.maxLev) : h.snapPrice * (1 + 0.8 / h.maxLev);
+
                 return \`<div class="bg-card p-3 rounded-md border-l-4 \${h.type==='UP'?'border-green-500':'border-red-500'}">
-                    <div class="flex justify-between items-center">
-                        <div><div class="text-lg font-bold text-white">\${h.symbol}</div><div class="text-[10px] \${h.type==='UP'?'up':'down'} font-bold">\${h.type} \${h.maxLev}x</div></div>
-                        <div class="text-right"><div class="text-lg font-bold \${pnl>=0?'up':'down'}">\${pnl>=0?'+':''}\${pnl.toFixed(2)}</div><div class="text-[10px] font-medium text-gray-custom">ROI \${roi.toFixed(2)}%</div></div>
+                    <div class="flex justify-between items-start mb-2">
+                        <div><div class="text-lg font-bold text-white">\${h.symbol} <span class="text-[10px] text-yellow-500">\${h.maxLev}x</span></div><div class="text-[10px] \${h.type==='UP'?'up':'down'} font-bold">\${h.type} | ISOLATED</div></div>
+                        <div class="text-right"><div class="text-lg font-bold \${pnl>=0?'up':'down'}">\${pnl>=0?'+':''}\${pnl.toFixed(2)}</div><div class="text-[11px]">ROI \${roi.toFixed(2)}%</div></div>
                     </div>
-                    <div class="mt-2 text-[11px] flex justify-between border-t border-zinc-800 pt-2">
-                        <span>Ký quỹ: <b class="text-yellow-500">\${marginForPending.toFixed(1)}</b></span>
-                        <span>Giá vào: <b class="text-white">\${h.snapPrice.toFixed(4)}</b></span>
+                    <div class="grid grid-cols-3 gap-2 mt-3 text-[10px] border-t border-zinc-800 pt-2">
+                        <div><div class="text-gray-custom uppercase">Ký quỹ</div><div class="text-white font-bold">\${marginForPending.toFixed(2)}</div></div>
+                        <div><div class="text-gray-custom uppercase">Giá vào</div><div class="text-white">\${h.snapPrice.toFixed(4)}</div></div>
+                        <div class="text-right"><div class="text-gray-custom uppercase">Giá hiện tại</div><div class="text-white">\${livePrice.toFixed(4)}</div></div>
+                    </div>
+                    <div class="grid grid-cols-3 gap-2 mt-2 text-[10px]">
+                        <div><div class="text-gray-custom uppercase">Thanh lý</div><div class="text-orange-400">\${liqPrice.toFixed(4)}</div></div>
+                        <div><div class="text-gray-custom uppercase">TP Target</div><div class="up">\${tpPrice.toFixed(4)}</div></div>
+                        <div class="text-right"><div class="text-gray-custom uppercase">SL Target</div><div class="down">\${slPrice.toFixed(4)}</div></div>
                     </div>
                 </div>\`;
             }).join('');
@@ -294,7 +315,7 @@ app.get('/gui', (req, res) => {
                 document.getElementById('displayBal').innerText = totalEquity.toFixed(2);
                 document.getElementById('walletBal').innerText = runningBal.toFixed(2);
                 document.getElementById('unPnl').innerText = (totalUnPnl >= 0 ? '+' : '') + totalUnPnl.toFixed(2);
-                document.getElementById('unPnl').className = 'text-lg font-bold ' + (totalUnPnl >= 0 ? 'up' : 'down');
+                document.getElementById('unPnl').className = 'font-bold ' + (totalUnPnl >= 0 ? 'up' : 'down');
 
                 if (historyLog.length === 0 || now - historyLog[historyLog.length-1].t >= 60000) { 
                     historyLog.push({t: now, b: totalEquity}); 
