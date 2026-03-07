@@ -6,14 +6,22 @@ import path from 'path';
 const app = express();
 app.use(express.json({ limit: '50mb' }));
 
-const PORT = 8888;
+const PORT = 8889;
 const DATA_DIR = './candle_data';
 const LEVERAGE_FILE = './leverage_cache.json';
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR);
 
 let allSymbols = [];
 let symbolMaxLeverage = {}; 
-let crawlStatus = { isCrawling: false, totalDownloaded: 0, totalNeeded: 0, startTime: Date.now() };
+let logs = []; // Lưu log tạm thời để đẩy lên giao diện
+let crawlStatus = { isCrawling: false, totalDownloaded: 0, totalNeeded: 0, currentSymbol: 'Idle' };
+
+function addLog(msg) {
+    const time = new Date().toLocaleTimeString();
+    logs.push(`[${time}] ${msg}`);
+    if (logs.length > 50) logs.shift();
+    console.log(`[${time}] ${msg}`);
+}
 
 if (fs.existsSync(LEVERAGE_FILE)) {
     try { symbolMaxLeverage = JSON.parse(fs.readFileSync(LEVERAGE_FILE)); } catch(e){}
@@ -28,10 +36,9 @@ async function fetchActualLeverage() {
                 try {
                     const brackets = JSON.parse(data);
                     if (Array.isArray(brackets)) {
-                        brackets.forEach(item => {
-                            symbolMaxLeverage[item.symbol] = item.brackets[0].initialLeverage;
-                        });
+                        brackets.forEach(item => { symbolMaxLeverage[item.symbol] = item.brackets[0].initialLeverage; });
                         fs.writeFileSync(LEVERAGE_FILE, JSON.stringify(symbolMaxLeverage));
+                        addLog("Đã cập nhật bộ nhớ đệm Leverage từ Binance.");
                     }
                 } catch (e) {} resolve();
             });
@@ -42,47 +49,44 @@ async function fetchActualLeverage() {
 async function startCrawler() {
     if (crawlStatus.isCrawling) return;
     crawlStatus.isCrawling = true;
-    crawlStatus.startTime = Date.now();
     const stopTs = Date.now() - (2 * 365 * 24 * 60 * 60 * 1000);
     crawlStatus.totalNeeded = allSymbols.length * 1051200; 
 
     for (const s of allSymbols) {
+        crawlStatus.currentSymbol = s.symbol;
         const filePath = path.join(DATA_DIR, `${s.symbol}.json`);
         let existing = fs.existsSync(filePath) ? JSON.parse(fs.readFileSync(filePath)) : [];
         let lastTs = existing.length > 0 ? existing[0][0] - 1 : Date.now();
 
-        while (lastTs > stopTs) {
+        if (lastTs > stopTs) {
+            addLog(`Đang tải dữ liệu: ${s.symbol}...`);
             const url = `https://fapi.binance.com/fapi/v1/klines?symbol=${s.symbol}&interval=1m&endTime=${lastTs}&limit=1000`;
             const klines = await new Promise(r => {
                 https.get(url, res => {
                     let d = ''; res.on('data', c => d += c); res.on('end', () => { try { r(JSON.parse(d)); } catch(e){ r([]); } });
                 }).on('error', () => r([]));
             });
-            if (!klines || klines.length === 0) break;
-            existing = [...klines, ...existing];
-            lastTs = klines[0][0] - 1;
-            crawlStatus.totalDownloaded += klines.length;
-            fs.writeFileSync(filePath, JSON.stringify(existing));
-            await new Promise(r => setTimeout(r, 20));
+            if (klines && klines.length > 0) {
+                existing = [...klines, ...existing];
+                crawlStatus.totalDownloaded += klines.length;
+                fs.writeFileSync(filePath, JSON.stringify(existing));
+            }
         }
+        await new Promise(r => setTimeout(r, 10));
     }
+    crawlStatus.isCrawling = false;
+    addLog("Hoàn tất chu kỳ quét dữ liệu.");
 }
 
-// --- XỬ LÝ TÍNH TOÁN (TỐI ƯU CHỐNG LAG) ---
 app.post('/api/analyze', async (req, res) => {
-    const { range, month, year, marginValue, maxGrids, stepSize, tpPercent, mode, userLeverage } = req.body;
-    const endTs = Date.now();
-    let startTs;
-    if (range === 'custom') {
-        startTs = new Date(year, month - 1, 1).getTime();
-    } else {
-        startTs = endTs - (parseInt(range) * 24 * 60 * 60 * 1000);
-    }
+    const { range, marginValue, maxGrids, stepSize, tpPercent, mode, userLeverage } = req.body;
+    addLog(`Bắt đầu phân tích: ${range} ngày, Lev x${userLeverage}, DCA ${maxGrids}...`);
     
+    const endTs = Date.now();
+    const startTs = endTs - (parseInt(range) * 24 * 60 * 60 * 1000);
     let results = [];
     let historyAll = [];
 
-    // Sử dụng for...of và await để giải phóng Event Loop giúp bot không bị lag
     for (const item of allSymbols) {
         const filePath = path.join(DATA_DIR, `${item.symbol}.json`);
         if (!fs.existsSync(filePath)) continue;
@@ -101,174 +105,137 @@ app.post('/api/analyze', async (req, res) => {
             const high = parseFloat(k[2]), low = parseFloat(k[3]), close = parseFloat(k[4]), time = k[0];
             
             if (!pos) {
-                pos = { entry: close, gridsCount: 1, tsOpen: time };
+                pos = { entry: close, grids: [{p: close, t: time}], tsOpen: time };
             } else {
                 const avg = pos.entry;
                 const pnlFactor = mode === 'LONG' ? (high - avg) / avg : (avg - low) / avg;
                 
                 if (pnlFactor * 100 >= tpPercent) {
-                    const winPnl = (pos.gridsCount * marginValue * finalLev) * (tpPercent / 100);
-                    sClosedPnl += winPnl;
-                    sWinCount++;
-                    const round = { symbol: item.symbol, pnl: winPnl, grids: pos.gridsCount, tsClose: time, lev: finalLev };
-                    sHistory.push(round);
-                    historyAll.push(round);
+                    const winPnl = (pos.grids.length * marginValue * finalLev) * (tpPercent / 100);
+                    sClosedPnl += winPnl; sWinCount++;
+                    sHistory.push({ pnl: winPnl, grids: pos.grids.length, time: new Date(time).toLocaleString('vi-VN'), entry: avg.toFixed(4) });
                     pos = null;
-                } else if (pos.gridsCount < maxGrids) {
-                    const gap = mode === 'LONG' ? (avg - low) / avg : (high - avg) / avg;
+                } else if (pos.grids.length < maxGrids) {
+                    const lastP = pos.grids[pos.grids.length-1].p;
+                    const gap = mode === 'LONG' ? (lastP - low) / lastP : (high - lastP) / lastP;
                     if (gap * 100 >= stepSize) {
-                        const newEntry = avg * (mode === 'LONG' ? 1-(stepSize/100) : 1+(stepSize/100));
-                        pos.gridsCount++;
-                        pos.entry = ((avg * (pos.gridsCount - 1)) + newEntry) / pos.gridsCount;
+                        const newP = lastP * (mode === 'LONG' ? 1-(stepSize/100) : 1+(stepSize/100));
+                        pos.grids.push({p: newP, t: time});
+                        pos.entry = pos.grids.reduce((a,b)=>a+b.p, 0) / pos.grids.length;
                     }
                 }
             }
         }
 
         if (sWinCount > 0) {
-            results.push({ 
-                symbol: item.symbol, 
-                closedCount: sWinCount, 
-                maxLev: finalLev, 
-                totalClosedPnl: sClosedPnl, 
-                capitalGoc: capitalGoc,
-                totalAsset: capitalGoc + sClosedPnl,
-                totalRoi: (sClosedPnl / capitalGoc) * 100,
-                history: sHistory
-            });
+            results.push({ symbol: item.symbol, win: sWinCount, lev: finalLev, pnl: sClosedPnl, cap: capitalGoc, roi: (sClosedPnl/capitalGoc)*100, history: sHistory });
         }
-        // Cho phép Node.js xử lý các request khác giữa chừng (Chống Lag)
-        await new Promise(resolve => setImmediate(resolve));
+        await new Promise(r => setImmediate(r));
     }
-
-    res.json({ active: results.sort((a,b)=>b.totalClosedPnl - a.totalClosedPnl), stats: { totalPnl: historyAll.reduce((a,b)=>a+b.pnl,0), totalWins: historyAll.length } });
+    addLog(`Phân tích xong ${results.length} cặp tiền.`);
+    res.json(results.sort((a,b)=>b.pnl - a.pnl));
 });
 
-app.get('/api/status', (req, res) => {
-    const elapsed = (Date.now() - crawlStatus.startTime) / 1000;
-    const rate = crawlStatus.totalDownloaded / (elapsed || 1);
-    const remain = Math.max(0, crawlStatus.totalNeeded - crawlStatus.totalDownloaded);
-    res.json({ ...crawlStatus, remainNen: remain, remainMin: Math.ceil(remain / rate / 60) || 0 });
-});
+app.get('/api/status', (req, res) => res.json({ ...crawlStatus, logs }));
 
 app.get('/gui', (req, res) => {
-    res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Luffy Ultra 9888</title><script src="https://cdn.tailwindcss.com"></script>
+    res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Luffy Matrix 9888</title><script src="https://cdn.tailwindcss.com"></script>
     <style>
-        body{background:#0b0e11;color:#eaecef;font-family:monospace;padding:10px}
+        body{background:#0b0e11;color:#eaecef;font-family:monospace;padding:15px; font-size: 13px;}
         .matrix-card { background: #181c20; border: 1px solid #2b3139; border-radius: 8px; }
-        .luffy-input { background: #000; border: 1px solid #333; color: #f0b90b; padding: 6px 10px; border-radius: 4px; font-size: 12px; }
-        .modal { display: none; position: fixed; z-index: 100; left: 0; top: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.85); backdrop-filter: blur(4px); }
-        .modal-content { background: #1e2329; margin: 5% auto; padding: 20px; border: 1px solid #f0b90b; width: 80%; max-height: 80vh; overflow-y: auto; border-radius: 8px; }
-        th { background: #1e2329; color: #848e9c; font-size: 10px; padding: 12px 8px; border-bottom: 2px solid #0b0e11; }
-        .p-fill { height: 100%; background: #f0b90b; transition: 0.5s; box-shadow: 0 0 10px #f0b90b; }
+        .luffy-input { background: #000; border: 1px solid #333; color: #f0b90b; padding: 8px; border-radius: 4px; }
+        .log-box { background: #000; color: #00ff00; font-size: 10px; height: 120px; overflow-y: auto; padding: 10px; border: 1px solid #333; }
+        .modal { display: none; position: fixed; z-index: 100; left: 0; top: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.9); }
+        .modal-content { background: #1e2329; margin: 2% auto; padding: 20px; width: 90%; max-height: 90vh; overflow-y: auto; border: 1px solid #f0b90b; }
     </style></head><body>
         
-        <div class="fixed top-0 left-0 w-full h-1 bg-gray-900 z-50"><div id="pBar" class="p-fill w-0"></div></div>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+            <div class="md:col-span-2 matrix-card p-4">
+                <div class="flex items-center gap-4 mb-4">
+                    <h1 class="text-2xl font-black text-yellow-500 italic">LUFFY <span class="text-white">ULTRA 9888</span></h1>
+                    <div id="statusHead" class="text-[10px] text-gray-500 uppercase font-bold">Bot: Idle</div>
+                </div>
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+                    <div class="flex flex-col"><label class="text-[9px]">RANGE</label><select id="range" class="luffy-input"><option value="1">1 DAY</option><option value="7">7 DAYS</option><option value="30" selected>30 DAYS</option></select></div>
+                    <div class="flex flex-col"><label class="text-[9px]">USER LEV</label><select id="userLev" class="luffy-input"><option value="20">x20</option><option value="50">x50</option><option value="125" selected>x125</option></select></div>
+                    <div class="flex flex-col"><label class="text-[9px]">MARGIN ($)</label><input id="mg" value="10" class="luffy-input"></div>
+                    <div class="flex flex-col"><label class="text-[9px]">MAX DCA</label><input id="gr" value="5" class="luffy-input"></div>
+                </div>
+                <button onclick="run()" id="btnRun" class="w-full bg-yellow-500 text-black font-black py-3 mt-4 rounded hover:bg-yellow-400">PHÂN TÍCH HỆ THỐNG</button>
+            </div>
+            <div class="matrix-card p-4">
+                <div class="text-yellow-500 font-bold mb-2 text-[10px]">SYSTEM LOGS</div>
+                <div id="logConsole" class="log-box"></div>
+            </div>
+        </div>
 
         <div id="gridModal" class="modal" onclick="this.style.display='none'"><div class="modal-content" onclick="event.stopPropagation()">
-            <div class="flex justify-between mb-4"><h2 id="modalTitle" class="text-xl font-bold text-yellow-500"></h2><button onclick="document.getElementById('gridModal').style.display='none'">✕</button></div>
-            <div id="roundsList" class="grid grid-cols-1 md:grid-cols-4 gap-3"></div>
+            <div class="flex justify-between items-center mb-4"><h2 id="modalTitle" class="text-xl font-bold text-yellow-500"></h2><button onclick="document.getElementById('gridModal').style.display='none'" class="text-2xl">✕</button></div>
+            <table class="w-full text-left text-xs">
+                <thead class="bg-black text-gray-400"><tr><th class="p-2">THỜI GIAN</th><th class="p-2">GIÁ ENTRY TB</th><th class="p-2 text-center">LƯỚI DCA</th><th class="p-2 text-right">PNL</th></tr></thead>
+                <tbody id="roundsList" class="divide-y divide-gray-800"></tbody>
+            </table>
         </div></div>
-
-        <div class="matrix-card p-4 mb-3 border-b-2 border-yellow-500/20">
-            <div class="flex flex-wrap items-center gap-3 mb-4">
-                <h1 class="text-xl font-black text-yellow-500 italic mr-auto tracking-tighter">LUFFY 9888 <span class="text-white">ULTRA MAX</span></h1>
-                <div class="flex gap-2">
-                    <select id="range" class="luffy-input"><option value="1">1 DAY</option><option value="7">7 DAYS</option><option value="30" selected>30 DAYS</option><option value="custom">CUSTOM</option></select>
-                    <select id="m" class="luffy-input"><option value="3">THÁNG 3</option><option value="2">THÁNG 2</option></select>
-                    <select id="y" class="luffy-input"><option value="2026">2026</option><option value="2025">2025</option></select>
-                    <select id="mode" class="luffy-input text-green-500"><option value="LONG">LONG MODE</option><option value="SHORT">SHORT MODE</option></select>
-                </div>
-            </div>
-            <div class="flex flex-wrap gap-3 items-center bg-black/30 p-3 rounded-lg">
-                <div class="flex flex-col"><label class="text-[9px] text-gray-500">USER LEV</label><select id="userLev" class="luffy-input"><option value="20">x20</option><option value="50">x50</option><option value="100">x100</option><option value="125" selected>x125</option><option value="150">x150</option></select></div>
-                <div class="flex flex-col"><label class="text-[9px] text-gray-500">MARGIN ($)</label><input id="mg" value="10" class="luffy-input w-20"></div>
-                <div class="flex flex-col"><label class="text-[9px] text-gray-500">MAX DCA</label><input id="gr" value="5" class="luffy-input w-16"></div>
-                <div class="flex flex-col"><label class="text-[9px] text-gray-500">STEP (%)</label><input id="ss" value="1.5" class="luffy-input w-16"></div>
-                <div class="flex flex-col"><label class="text-[9px] text-gray-500">TP (%)</label><input id="tp" value="1.0" class="luffy-input w-16"></div>
-                <button onclick="run()" id="btnRun" class="bg-yellow-500 hover:bg-yellow-400 text-black font-black px-10 py-2 rounded mt-auto h-[35px]">ANALYZE</button>
-            </div>
-        </div>
-
-        <div class="grid grid-cols-4 gap-2 mb-3">
-            <div class="matrix-card p-3"><div class="text-gray-500 text-[9px]">TIẾN TRÌNH</div><div id="loadPct" class="font-bold text-lg">0%</div></div>
-            <div class="matrix-card p-3"><div class="text-gray-500 text-[9px]">CÒN LẠI</div><div id="statRem" class="font-bold text-lg text-blue-400">0 NẾN</div></div>
-            <div class="matrix-card p-3"><div class="text-gray-500 text-[9px]">TỔNG PNL</div><div id="statPnl" class="font-bold text-lg text-green-400">0$</div></div>
-            <div class="matrix-card p-3"><div class="text-gray-500 text-[9px]">THỜI GIAN</div><div id="statTime" class="font-bold text-lg text-purple-400">0 Mins</div></div>
-        </div>
 
         <div class="matrix-card overflow-hidden">
             <table class="w-full text-left text-[11px]">
-                <thead><tr>
-                    <th class="text-center w-10">#</th>
-                    <th>COIN</th>
-                    <th class="text-center">WINS</th>
-                    <th class="text-center">LEV</th>
-                    <th class="text-right">VỐN GỐC (POS)</th>
-                    <th class="text-right">PNL TỔNG</th>
-                    <th class="text-right">VỐN + PNL</th>
-                    <th class="text-center pr-4">ROI %</th>
+                <thead class="bg-black text-gray-500 uppercase"><tr>
+                    <th class="p-3 text-center">#</th><th>SYMBOL</th><th class="text-center">WIN ROUNDS</th><th class="text-center">MAX LEV</th><th class="text-right">VỐN GỐC (POS)</th><th class="text-right">PNL TỔNG</th><th class="text-center pr-4">ROI %</th>
                 </tr></thead>
-                <tbody id="activeBody" class="divide-y divide-gray-800"></tbody>
+                <tbody id="activeBody" class="divide-y divide-gray-800/50"></tbody>
             </table>
         </div>
 
         <script>
-            let detailData = {};
+            let fullData = [];
             async function run(){
-                const btn = document.getElementById('btnRun'); btn.innerText = 'WAIT...'; btn.disabled = true;
+                const btn = document.getElementById('btnRun'); btn.innerText = 'ĐANG TÍNH TOÁN...'; btn.disabled = true;
                 const res = await fetch('/api/analyze', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({
-                        range: document.getElementById('range').value, month: document.getElementById('m').value, year: document.getElementById('y').value,
-                        marginValue: Number(document.getElementById('mg').value), maxGrids: Number(document.getElementById('gr').value),
-                        stepSize: Number(document.getElementById('ss').value), tpPercent: Number(document.getElementById('tp').value), 
-                        mode: document.getElementById('mode').value, userLeverage: Number(document.getElementById('userLev').value)
+                        range: document.getElementById('range').value,
+                        marginValue: Number(document.getElementById('mg').value),
+                        maxGrids: Number(document.getElementById('gr').value),
+                        stepSize: 1.5, tpPercent: 1.0, mode: 'LONG',
+                        userLeverage: Number(document.getElementById('userLev').value)
                     })
                 });
-                const d = await res.json();
-                document.getElementById('statPnl').innerText = d.stats.totalPnl.toFixed(2) + '$';
-                
-                document.getElementById('activeBody').innerHTML = d.active.map((p, i) => {
-                    detailData[p.symbol] = p.history;
-                    return \`
-                    <tr class="hover:bg-white/5 cursor-pointer" onclick="showHistory('\${p.symbol}')">
+                fullData = await res.json();
+                document.getElementById('activeBody').innerHTML = fullData.map((p, i) => \`
+                    <tr class="hover:bg-white/5 cursor-pointer" onclick="showDetail(\${i})">
                         <td class="p-3 text-center text-gray-600">\${i+1}</td>
-                        <td class="font-bold text-yellow-500">\${p.symbol}</td>
-                        <td class="text-center text-blue-400 font-bold">\${p.closedCount}</td>
-                        <td class="text-center text-purple-400">x\${p.maxLev}</td>
-                        <td class="text-right text-gray-400">\${p.capitalGoc.toLocaleString()}$</td>
-                        <td class="text-right font-bold text-green-400">\${p.totalClosedPnl.toFixed(2)}$</td>
-                        <td class="text-right font-bold text-white">\${p.totalAsset.toFixed(2)}$</td>
-                        <td class="text-center pr-4 font-black \${p.totalRoi>=0?'text-emerald-400':'text-red-400'}">\${p.totalRoi.toFixed(2)}%</td>
-                    </tr>\`;
-                }).join('');
-                btn.innerText = 'ANALYZE'; btn.disabled = false;
+                        <td class="font-bold text-yellow-500 uppercase">\${p.symbol}</td>
+                        <td class="text-center font-bold text-blue-400">\${p.win}</td>
+                        <td class="text-center text-purple-400 font-bold">x\${p.lev}</td>
+                        <td class="text-right text-gray-400">\${p.cap.toLocaleString()}$</td>
+                        <td class="text-right font-bold text-green-400">\${p.pnl.toFixed(2)}$</td>
+                        <td class="text-center pr-4 font-black text-emerald-400">\${p.roi.toFixed(2)}%</td>
+                    </tr>\`).join('');
+                btn.innerText = 'PHÂN TÍCH HỆ THỐNG'; btn.disabled = false;
             }
 
-            function showHistory(symbol){
-                const h = detailData[symbol];
-                document.getElementById('modalTitle').innerText = symbol + " HISTORY";
-                document.getElementById('roundsList').innerHTML = h.map((r, i) => \`
-                    <div class="matrix-card p-2 border-l-2 border-green-500 text-[10px]">
-                        <div class="flex justify-between font-bold text-yellow-500 mb-1"><span>#\${i+1}</span><span>+\${r.pnl.toFixed(2)}$</span></div>
-                        <div class="text-gray-500">DCA: \${r.grids} | LEV: x\${r.lev}</div>
-                    </div>\`).join('');
+            function showDetail(index){
+                const p = fullData[index];
+                document.getElementById('modalTitle').innerText = p.symbol + " - BẢNG KÊ CHI TIẾT LỆNH";
+                document.getElementById('roundsList').innerHTML = p.history.map(h => \`
+                    <tr class="hover:bg-black/20">
+                        <td class="p-2 text-gray-500">\${h.time}</td>
+                        <td class="p-2 font-bold text-white">\${h.entry}</td>
+                        <td class="p-2 text-center text-blue-400">\${h.grids}</td>
+                        <td class="p-2 text-right text-green-400">+\${h.pnl.toFixed(2)}$</td>
+                    </tr>\`).join('');
                 document.getElementById('gridModal').style.display = 'block';
             }
 
             async function updateStatus(){
                 try {
                     const res = await fetch('/api/status'); const d = await res.json();
-                    const pct = (d.totalDownloaded / d.totalNeeded * 100).toFixed(2);
-                    document.getElementById('pBar').style.width = pct + '%';
-                    document.getElementById('loadPct').innerText = pct + '%';
-                    document.getElementById('statRem').innerText = d.remainNen.toLocaleString() + ' NẾN';
-                    document.getElementById('statTime').innerText = d.remainMin + ' MINS';
+                    document.getElementById('statusHead').innerText = "Bot: Loading " + d.currentSymbol;
+                    document.getElementById('logConsole').innerHTML = d.logs.map(l => \`<div>\${l}</div>\`).reverse().join('');
                 } catch(e){}
             }
-            setInterval(updateStatus, 3000);
+            setInterval(updateStatus, 2000);
         </script>
     </body></html>`);
 });
@@ -276,7 +243,7 @@ app.get('/gui', (req, res) => {
 initSymbols().then(async () => {
     await fetchActualLeverage();
     app.listen(PORT, '0.0.0.0', () => {
-        console.log(`LUFFY ULTRA MAX 9888 LIVE: http://localhost:9888/gui`);
+        console.log(`LUFFY SYSTEM LIVE: http://localhost:9888/gui`);
         startCrawler();
     });
 });
