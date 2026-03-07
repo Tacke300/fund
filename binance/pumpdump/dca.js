@@ -10,11 +10,10 @@ app.use(express.json());
 
 const STATE_FILE = './bot_state.json';
 const LEVERAGE_FILE = './leverage_cache.json';
-const HISTORY_FILE = './pnl_history.json';
 const PORT = 9009;
 
 let botState = { 
-    running: false, startTime: null, marginValue: 1, 
+    running: false, marginValue: 1, 
     maxGrids: 10, stepSize: 1.0, tpPercent: 1.0, mode: 'LONG', 
     closedPnl: 0, totalClosedGrids: 0 
 };
@@ -27,31 +26,37 @@ let logs = [];
 
 function logger(msg, type = 'INFO') {
     const color = type === 'ERR' ? 'text-red-500' : (type === 'WIN' ? 'text-green-400' : (type === 'DCA' ? 'text-orange-400' : 'text-emerald-400'));
-    logs.unshift(`<span class="${color}">[${new Date().toLocaleTimeString()}] [${type}] ${msg}</span>`);
+    logs.unshift('<span class="' + color + '">[' + new Date().toLocaleTimeString() + '] [' + type + '] ' + msg + '</span>');
     if (logs.length > 100) logs.pop();
 }
 
-// Load dữ liệu cũ
-if (fs.existsSync(STATE_FILE)) try { Object.assign(botState, JSON.parse(fs.readFileSync(STATE_FILE))); } catch(e){}
-if (fs.existsSync(LEVERAGE_FILE)) try { symbolMaxLeverage = JSON.parse(fs.readFileSync(LEVERAGE_FILE)); } catch(e){}
+// Khởi tạo file nếu chưa có
+if (!fs.existsSync(STATE_FILE)) fs.writeFileSync(STATE_FILE, JSON.stringify(botState));
+try { 
+    const saved = JSON.parse(fs.readFileSync(STATE_FILE));
+    Object.assign(botState, saved);
+} catch(e) { logger("Lỗi file state, khởi tạo lại", "ERR"); }
 
-const saveAll = () => {
-    fs.writeFileSync(STATE_FILE, JSON.stringify(botState));
-};
+if (fs.existsSync(LEVERAGE_FILE)) {
+    try { symbolMaxLeverage = JSON.parse(fs.readFileSync(LEVERAGE_FILE)); } catch(e){}
+}
 
-// Hàm lấy leverage chuẩn - Fix triệt để lỗi resolve
+const saveState = () => fs.writeFileSync(STATE_FILE, JSON.stringify(botState));
+
 async function fetchActualLeverage() {
     return new Promise((resolve) => {
         const timestamp = Date.now();
-        const query = `timestamp=${timestamp}`;
+        const query = 'timestamp=' + timestamp;
         const signature = crypto.createHmac('sha256', SECRET_KEY).update(query).digest('hex');
         
-        const req = https.get({
+        const options = {
             hostname: 'fapi.binance.com',
-            path: `/fapi/v1/leverageBracket?${query}&signature=${signature}`,
+            path: '/fapi/v1/leverageBracket?' + query + '&signature=' + signature,
             headers: { 'X-MBX-APIKEY': API_KEY },
             timeout: 10000
-        }, (res) => {
+        };
+
+        https.get(options, (res) => {
             let data = '';
             res.on('data', chunk => data += chunk);
             res.on('end', () => {
@@ -64,19 +69,12 @@ async function fetchActualLeverage() {
                             allSymbols.push(item.symbol);
                         });
                         fs.writeFileSync(LEVERAGE_FILE, JSON.stringify(symbolMaxLeverage));
-                        logger(`Nạp ${allSymbols.length} cặp coin.`);
+                        logger("Đã nạp " + allSymbols.length + " coin.");
                     }
-                } catch (e) {
-                    logger("Lỗi parse leverage, sử dụng dữ liệu cũ.", "ERR");
-                }
-                resolve(); // Kết thúc promise ở đây
+                } catch (e) {}
+                resolve();
             });
-        });
-
-        req.on('error', (e) => {
-            logger("Lỗi kết nối Binance: " + e.message, "ERR");
-            resolve(); // Vẫn resolve để bot tiếp tục chạy
-        });
+        }).on('error', () => resolve());
     });
 }
 
@@ -94,7 +92,7 @@ function initWS() {
                 if (!activePositions[t.s]) {
                     activePositions[t.s] = {
                         symbol: t.s, side: botState.mode, maxLev: symbolMaxLeverage[t.s] || 20,
-                        grids: [{ price, qty: botState.marginValue, time: Date.now() }], status: 'TRADING'
+                        grids: [{ price: price, qty: botState.marginValue }], status: 'TRADING'
                     };
                 } else {
                     const pos = activePositions[t.s];
@@ -104,25 +102,21 @@ function initWS() {
                     const avgPrice = pos.grids.reduce((sum, g) => sum + (g.price * g.qty), 0) / totalMargin;
                     const diffPct = pos.side === 'LONG' ? (price - avgPrice) / avgPrice : (avgPrice - price) / avgPrice;
 
-                    // Check Chốt lời
                     if (diffPct * 100 >= botState.tpPercent) {
                         const pnl = totalMargin * (diffPct * pos.maxLev);
                         botState.closedPnl += pnl;
                         botState.totalClosedGrids++;
-                        logger(`WIN: ${t.s} | +${pnl.toFixed(2)}$`, "WIN");
+                        logger("WIN: " + t.s + " | +" + pnl.toFixed(2) + "$", "WIN");
                         pos.status = 'WAITING';
                         pos.grids = []; 
-                        saveAll();
-                        // Chờ 5s sau mới cho vào lại lệnh mới
-                        setTimeout(() => { delete activePositions[t.s]; }, 5000);
-                    } 
-                    // Check DCA Nhồi lệnh
-                    else if (pos.grids.length < botState.maxGrids) {
+                        saveState();
+                        setTimeout(() => { delete activePositions[t.s]; }, 3000);
+                    } else if (pos.grids.length < botState.maxGrids) {
                         const lastEntry = pos.grids[pos.grids.length - 1].price;
                         const gap = pos.side === 'LONG' ? (lastEntry - price) / lastEntry : (price - lastEntry) / lastEntry;
                         if (gap * 100 >= botState.stepSize) {
-                            pos.grids.push({ price, qty: botState.marginValue, time: Date.now() });
-                            logger(`DCA: ${t.s} tầng ${pos.grids.length}`, "DCA");
+                            pos.grids.push({ price: price, qty: botState.marginValue });
+                            logger("DCA: " + t.s + " tầng " + pos.grids.length, "DCA");
                         }
                     }
                 }
@@ -136,98 +130,91 @@ app.get('/api/data', (req, res) => {
     let unrealizedPnl = 0;
     const activeData = Object.values(activePositions).map(p => {
         const currentP = marketPrices[p.symbol] || 0;
-        let pnl = 0, avgPrice = 0, totalMargin = 0;
+        let pnl = 0, avgPrice = 0;
         if (p.status !== 'WAITING' && currentP > 0) {
-            totalMargin = p.grids.reduce((sum, g) => sum + g.qty, 0);
-            avgPrice = p.grids.reduce((sum, g) => sum + (p.grids.reduce((acc, grid) => acc + (grid.price * grid.qty), 0) / totalMargin)); // Fix logic avg
+            const totalMargin = p.grids.reduce((sum, g) => sum + g.qty, 0);
             avgPrice = p.grids.reduce((sum, g) => sum + (g.price * g.qty), 0) / totalMargin;
             const diff = p.side === 'LONG' ? (currentP - avgPrice) / avgPrice : (avgPrice - currentP) / avgPrice;
             pnl = totalMargin * diff * p.maxLev;
             unrealizedPnl += pnl;
         }
-        return { 
-            ...p, avgPrice, totalMargin, currentGrid: p.grids.length, 
-            pnl, currentPrice: currentP, 
-            coinVốn: botState.marginValue * p.maxLev * botState.maxGrids
-        };
+        return { ...p, avgPrice, pnl, coinVốn: botState.marginValue * p.maxLev * botState.maxGrids };
     });
-    res.json({ state: botState, active: activeData, logs, stats: { closedPnl: botState.closedPnl, totalClosedGrids: botState.totalClosedGrids, unrealizedPnl, totalSystemPnl: botState.closedPnl + unrealizedPnl } });
+    res.json({ state: botState, active: activeData, logs, stats: { closedPnl: botState.closedPnl, unrealizedPnl: unrealizedPnl } });
 });
 
 app.post('/api/control', (req, res) => { 
-    if (req.body.running !== undefined) botState.running = req.body.running;
-    ['marginValue', 'maxGrids', 'stepSize', 'tpPercent', 'mode'].forEach(f => { if(req.body[f] !== undefined) botState[f] = req.body[f]; });
-    saveAll(); res.json({ status: 'ok' }); 
-});
-
-app.post('/api/reset', (req, res) => { 
-    activePositions = {}; botState.closedPnl = 0; botState.totalClosedGrids = 0; logs = [];
-    saveAll(); res.json({ status: 'ok' }); 
+    const d = req.body;
+    if (d.running !== undefined) botState.running = d.running;
+    if (d.marginValue) botState.marginValue = parseFloat(d.marginValue);
+    if (d.maxGrids) botState.maxGrids = parseInt(d.maxGrids);
+    if (d.stepSize) botState.stepSize = parseFloat(d.stepSize);
+    if (d.tpPercent) botState.tpPercent = parseFloat(d.tpPercent);
+    if (d.mode) botState.mode = d.mode;
+    
+    saveState();
+    logger("Hệ thống: " + (botState.running ? "BẮT ĐẦU" : "DỪNG"), botState.running ? "INFO" : "ERR");
+    res.json({ status: 'ok', running: botState.running }); 
 });
 
 app.get('/gui', (req, res) => {
-    res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Luffy DCA v47</title><script src="https://cdn.tailwindcss.com"></script>
-    <style>body{background:#0b0e11;color:#eaecef;font-family:monospace} th{background:#161a1e;padding:12px 8px;border-bottom:1px solid #333;font-size:10px}
-    #logBox{background:#000;padding:10px;height:250px;overflow-y:auto;font-size:11px;border:1px solid #333}</style></head>
+    res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Luffy DCA v48</title><script src="https://cdn.tailwindcss.com"></script>
+    <style>body{background:#0b0e11;color:#eaecef;font-family:monospace} #logBox{background:#000;padding:10px;height:250px;overflow-y:auto;font-size:11px;border:1px solid #333}</style></head>
     <body class="p-4 text-[11px]">
         <div class="bg-[#1e2329] p-4 rounded-lg mb-4 flex flex-wrap items-end gap-3 shadow-lg border border-gray-800">
-            <div>VỐN ($)<input id="marginValue" type="number" class="w-20 bg-black text-yellow-500 p-2 rounded border border-gray-700 block mt-1"></div>
-            <div>DCA<input id="maxGrids" type="number" class="w-16 bg-black text-yellow-500 p-2 rounded border border-gray-700 block mt-1"></div>
-            <div>GAP%<input id="stepSize" type="number" step="0.1" class="w-16 bg-black text-yellow-500 p-2 rounded border border-gray-700 block mt-1"></div>
-            <div>TP%<input id="tpPercent" type="number" step="0.1" class="w-16 bg-black text-yellow-500 p-2 rounded border border-gray-700 block mt-1"></div>
-            <div>MODE<select id="mode" class="w-24 bg-black p-2 rounded border border-gray-700 block mt-1 text-yellow-500"><option value="LONG">LONG</option><option value="SHORT">SHORT</option></select></div>
-            <button onclick="sendCtrl(true)" class="bg-green-600 px-4 py-2 rounded font-bold">START</button>
-            <button onclick="sendCtrl(false)" class="bg-red-600 px-4 py-2 rounded font-bold">STOP</button>
-            <button onclick="resetBot()" class="bg-gray-700 px-4 py-2 rounded font-bold">RESET</button>
-            <div id="status" class="ml-auto font-bold uppercase">OFFLINE</div>
+            <div>VỐN ($)<input id="mv" type="number" class="w-20 bg-black text-yellow-500 p-2 rounded border border-gray-700 block mt-1"></div>
+            <div>DCA<input id="mg" type="number" class="w-16 bg-black text-yellow-500 p-2 rounded border border-gray-700 block mt-1"></div>
+            <div>GAP%<input id="ss" type="number" step="0.1" class="w-16 bg-black text-yellow-500 p-2 rounded border border-gray-700 block mt-1"></div>
+            <div>TP%<input id="tp" type="number" step="0.1" class="w-16 bg-black text-yellow-500 p-2 rounded border border-gray-700 block mt-1"></div>
+            <div>MODE<select id="md" class="w-24 bg-black p-2 rounded border border-gray-700 block mt-1 text-yellow-500"><option value="LONG">LONG</option><option value="SHORT">SHORT</option></select></div>
+            <button onclick="ctrl(true)" class="bg-green-600 px-6 py-2 rounded font-bold hover:bg-green-500">START</button>
+            <button onclick="ctrl(false)" class="bg-red-600 px-6 py-2 rounded font-bold hover:bg-red-500">STOP</button>
+            <div id="stt" class="ml-auto font-bold uppercase">OFFLINE</div>
         </div>
-        <div class="grid grid-cols-3 gap-4 mb-4">
-            <div class="bg-[#1e2329] p-3 rounded border border-gray-800 text-center"><div class="text-gray-400">ĐÃ CHỐT</div><div id="closedPnl" class="text-xl font-bold text-green-400">0.00$</div></div>
-            <div class="bg-[#1e2329] p-3 rounded border border-gray-800 text-center"><div class="text-gray-400">ĐANG GỒNG</div><div id="unPnl" class="text-xl font-bold text-red-500">0.00$</div></div>
-            <div class="bg-[#1e2329] p-3 rounded border border-gray-800 text-center"><div class="text-gray-400">TỔNG PNL</div><div id="totalPnl" class="text-xl font-bold text-yellow-500">0.00$</div></div>
+        <div class="grid grid-cols-2 gap-4 mb-4">
+            <div class="bg-[#1e2329] p-3 rounded border border-gray-800 text-center"><div class="text-gray-400">ĐÃ CHỐT</div><div id="cPnl" class="text-2xl font-bold text-green-400">0.00$</div></div>
+            <div class="bg-[#1e2329] p-3 rounded border border-gray-800 text-center"><div class="text-gray-400">ĐANG GỒNG</div><div id="uPnl" class="text-2xl font-bold text-red-500">0.00$</div></div>
         </div>
-        <div class="bg-[#1e2329] rounded border border-gray-800 overflow-hidden mb-4">
-            <table class="w-full text-left">
-                <thead><tr><th>SYMBOL</th><th class="text-right">PNL</th><th class="text-center">DCA</th><th class="text-right">VỐN COIN</th><th class="text-right pr-2">AVG PRICE</th></tr></thead>
-                <tbody id="list"></tbody>
-            </table>
-        </div>
+        <div class="bg-[#1e2329] rounded border border-gray-800 overflow-hidden mb-4"><table class="w-full text-left">
+            <thead class="bg-[#161a1e]"><tr><th class="p-2">SYMBOL</th><th class="text-right">PNL</th><th class="text-center">DCA</th><th class="text-right pr-2">AVG PRICE</th></tr></thead>
+            <tbody id="list"></tbody></table></div>
         <div id="logBox"></div>
         <script>
             let first = true;
-            async function sendCtrl(run){
-                const data = {
+            async function ctrl(run){
+                const payload = {
                     running: run,
-                    marginValue: Number(document.getElementById('marginValue').value),
-                    maxGrids: Number(document.getElementById('maxGrids').value),
-                    stepSize: Number(document.getElementById('stepSize').value),
-                    tpPercent: Number(document.getElementById('tpPercent').value),
-                    mode: document.getElementById('mode').value
+                    marginValue: document.getElementById('mv').value,
+                    maxGrids: document.getElementById('mg').value,
+                    stepSize: document.getElementById('ss').value,
+                    tpPercent: document.getElementById('tp').value,
+                    mode: document.getElementById('md').value
                 };
-                await fetch('/api/control', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data)});
+                await fetch('/api/control', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(payload)
+                });
             }
-            async function resetBot(){ if(confirm('Reset?')) await fetch('/api/reset', {method:'POST'}); }
             async function update(){
                 try {
                     const r = await fetch('/api/data'); const d = await r.json();
                     if(first){
-                        document.getElementById('marginValue').value = d.state.marginValue;
-                        document.getElementById('maxGrids').value = d.state.maxGrids;
-                        document.getElementById('stepSize').value = d.state.stepSize;
-                        document.getElementById('tpPercent').value = d.state.tpPercent;
-                        document.getElementById('mode').value = d.state.mode;
+                        document.getElementById('mv').value = d.state.marginValue;
+                        document.getElementById('mg').value = d.state.maxGrids;
+                        document.getElementById('ss').value = d.state.stepSize;
+                        document.getElementById('tp').value = d.state.tpPercent;
+                        document.getElementById('md').value = d.state.mode;
                         first = false;
                     }
-                    document.getElementById('status').innerText = d.state.running ? "RUNNING" : "STOPPED";
-                    document.getElementById('status').style.color = d.state.running ? "#10b981" : "#ef4444";
-                    document.getElementById('closedPnl').innerText = d.stats.closedPnl.toFixed(2) + '$';
-                    document.getElementById('unPnl').innerText = d.stats.unrealizedPnl.toFixed(2) + '$';
-                    document.getElementById('totalPnl').innerText = d.stats.totalSystemPnl.toFixed(2) + '$';
+                    document.getElementById('stt').innerText = d.state.running ? "RUNNING" : "STOPPED";
+                    document.getElementById('stt').style.color = d.state.running ? "#10b981" : "#ef4444";
+                    document.getElementById('cPnl').innerText = d.stats.closedPnl.toFixed(2) + '$';
+                    document.getElementById('uPnl').innerText = d.stats.unrealizedPnl.toFixed(2) + '$';
                     let h = "";
-                    d.active.sort((a,b)=>b.pnl - a.pnl).forEach(p => {
+                    d.active.forEach(p => {
                         if(p.status === 'WAITING') return;
-                        const c = p.pnl >= 0 ? 'text-green-400' : 'text-red-500';
-                        h += '<tr class="border-b border-gray-800"><td class="p-2 font-bold text-yellow-500">'+p.symbol+' (x'+p.maxLev+')</td><td class="text-right font-bold '+c+'">'+p.pnl.toFixed(2)+'$</td><td class="text-center text-yellow-400">'+p.currentGrid+'/'+d.state.maxGrids+'</td><td class="text-right text-blue-400">'+p.coinVốn.toFixed(1)+'$</td><td class="text-right pr-2">'+p.avgPrice.toFixed(5)+'</td></tr>';
+                        h += '<tr class="border-b border-gray-800"><td class="p-2 font-bold text-yellow-500">'+p.symbol+'</td><td class="text-right '+(p.pnl>=0?'text-green-400':'text-red-500')+'">'+p.pnl.toFixed(2)+'$</td><td class="text-center">'+p.grids.length+'/'+d.state.maxGrids+'</td><td class="text-right pr-2">'+p.avgPrice.toFixed(5)+'</td></tr>';
                     });
                     document.getElementById('list').innerHTML = h;
                     document.getElementById('logBox').innerHTML = d.logs.join('<br>');
@@ -238,11 +225,7 @@ app.get('/gui', (req, res) => {
     </body></html>`);
 });
 
-// Chạy khởi động
 fetchActualLeverage().then(() => {
     initWS();
-    app.listen(PORT, '0.0.0.0', () => {
-        console.log(`Bot running at http://localhost:${PORT}/gui`);
-        logger("Hệ thống đã sẵn sàng.");
-    });
+    app.listen(PORT, '0.0.0.0', () => console.log('Bot OK tại Port ' + PORT));
 });
