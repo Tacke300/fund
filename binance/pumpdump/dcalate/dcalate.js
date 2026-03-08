@@ -11,7 +11,7 @@ app.use(express.json());
 const STATE_FILE = './bot_state.json';
 const LEVERAGE_FILE = './leverage_cache.json';
 const HISTORY_FILE = './pnl_history.json';
-const PORT = 9017;
+const PORT = 9018;
 
 let botState = { 
     running: false, startTime: null, marginValue: 10,
@@ -32,6 +32,7 @@ function logger(msg, type = 'INFO') {
     if (logs.length > 100) logs.pop();
 }
 
+// Load dữ liệu cũ
 if (fs.existsSync(STATE_FILE)) try { Object.assign(botState, JSON.parse(fs.readFileSync(STATE_FILE))); } catch(e){}
 if (fs.existsSync(LEVERAGE_FILE)) try { symbolMaxLeverage = JSON.parse(fs.readFileSync(LEVERAGE_FILE)); } catch(e){}
 if (fs.existsSync(HISTORY_FILE)) try { pnlHistory = JSON.parse(fs.readFileSync(HISTORY_FILE)); } catch(e){}
@@ -50,21 +51,16 @@ function getFilteredPnL(days) {
     return pnlHistory.filter(h => h.tsClose >= startTime.getTime()).reduce((sum, h) => sum + h.pnl, 0);
 }
 
-// FIX: Lấy Leverage chuẩn bằng cách quét toàn bộ symbols
+// Lấy Leverage chuẩn (Ép bot phải lấy xong mới trade)
 async function fetchActualLeverage() {
     return new Promise((resolve) => {
         const timestamp = Date.now();
-        // Không truyền symbol để lấy toàn bộ danh sách brackets của account
         const query = `timestamp=${timestamp}`;
         const signature = crypto.createHmac('sha256', SECRET_KEY).update(query).digest('hex');
-        
         const options = {
-            hostname: 'fapi.binance.com',
-            path: `/fapi/v1/leverageBracket?${query}&signature=${signature}`,
-            headers: { 'X-MBX-APIKEY': API_KEY },
-            timeout: 10000
+            hostname: 'fapi.binance.com', path: `/fapi/v1/leverageBracket?${query}&signature=${signature}`,
+            headers: { 'X-MBX-APIKEY': API_KEY }, timeout: 10000
         };
-
         https.get(options, (res) => {
             let data = '';
             res.on('data', chunk => data += chunk);
@@ -73,23 +69,14 @@ async function fetchActualLeverage() {
                     const brackets = JSON.parse(data);
                     if (Array.isArray(brackets)) {
                         brackets.forEach(item => {
-                            // Lấy initialLeverage cao nhất của bracket đầu tiên cho symbol đó
-                            if (item.brackets && item.brackets.length > 0) {
-                                symbolMaxLeverage[item.symbol] = item.brackets[0].initialLeverage;
-                            }
+                            symbolMaxLeverage[item.symbol] = item.brackets[0].initialLeverage;
                         });
                         fs.writeFileSync(LEVERAGE_FILE, JSON.stringify(symbolMaxLeverage));
-                        logger(`Đã đồng bộ Max Leverage chuẩn từ Binance API`, "INFO");
                     }
-                } catch (e) {
-                    logger("Lỗi parse dữ liệu Leverage: " + e.message, "ERR");
-                }
+                } catch (e) {}
                 resolve();
             });
-        }).on('error', (e) => {
-            logger("Lỗi kết nối Binance API: " + e.message, "ERR");
-            resolve();
-        });
+        }).on('error', () => resolve());
     });
 }
 
@@ -125,10 +112,22 @@ function initWS() {
 
                 if (activePositions[t.s]) {
                     const pos = activePositions[t.s];
-                    const lastGrid = pos.grids[pos.grids.length - 1];
-                    const diffPct = pos.side === 'LONG' ? (price - lastGrid.price) / lastGrid.price : (lastGrid.price - price) / lastGrid.price;
+                    const currentGridIndex = pos.grids.length - 1;
+                    const lastGrid = pos.grids[currentGridIndex];
 
-                    if (diffPct * 100 >= botState.tpPercent) {
+                    // --- LOGIC TP THEO MỐC LƯỚI TRÊN ---
+                    let targetTP;
+                    if (pos.grids.length > 1) {
+                        // Nếu đang ở tầng > 1, giá TP là giá của tầng ngay phía trên nó
+                        targetTP = pos.grids[currentGridIndex - 1].price;
+                    } else {
+                        // Nếu ở tầng 1 (tầng gốc), TP theo % setup
+                        targetTP = pos.side === 'LONG' ? lastGrid.price * (1 + botState.tpPercent / 100) : lastGrid.price * (1 - botState.tpPercent / 100);
+                    }
+
+                    const isTP = pos.side === 'LONG' ? (price >= targetTP) : (price <= targetTP);
+
+                    if (isTP) {
                         const size = (lastGrid.qty * pos.maxLev) / lastGrid.price;
                         const pnl = pos.side === 'LONG' ? (price - lastGrid.price) * size : (lastGrid.price - price) * size;
                         
@@ -146,7 +145,9 @@ function initWS() {
                         pos.grids.pop();
                         if (pos.grids.length === 0) delete activePositions[t.s];
                         saveAll();
-                    } else if (pos.grids.length < botState.maxGrids) {
+                    } 
+                    // --- LOGIC DCA ---
+                    else if (pos.grids.length < botState.maxGrids) {
                         const lastEntry = lastGrid.price;
                         const gap = pos.side === 'LONG' ? (lastEntry - price) / lastEntry : (price - lastEntry) / lastEntry;
                         if (gap * 100 >= botState.stepSize) {
@@ -155,7 +156,6 @@ function initWS() {
                         }
                     }
                 } else if (allSymbols.includes(t.s) && botState.running) {
-                    // Lấy Leverage chuẩn đã fetch
                     const maxLev = symbolMaxLeverage[t.s] || 20;
                     activePositions[t.s] = {
                         symbol: t.s, side: botState.mode, maxLev: maxLev,
@@ -168,6 +168,8 @@ function initWS() {
     });
     ws.on('close', () => setTimeout(initWS, 3000));
 }
+
+// ... (Các API /api/data, /api/control, /api/reset và /gui giữ nguyên như bản cũ của ông)
 
 app.get('/api/data', (req, res) => {
     let unrealizedPnl = 0, totalGridsMatched = 0;
@@ -304,13 +306,15 @@ app.get('/gui', (req, res) => {
     </body></html>`);
 });
 
-// KHỞI ĐỘNG TUẦN TỰ
+// KHỞI CHẠY TUẦN TỰ: ĐỢI NẠP LEV XONG MỚI BẬT BOT
 async function startApp() {
-    logger("Đang khởi động bot...", "INFO");
+    logger("Đang nạp danh sách coin...", "INFO");
     await initSymbols();
-    await fetchActualLeverage(); // Chạy sau initSymbols để có list cặp
-    initWS();
-    app.listen(PORT, '0.0.0.0', () => logger(`DASHBOARD: http://localhost:${PORT}/gui`));
+    logger("Đang đồng bộ Leverage xịn từ Binance...", "INFO");
+    await fetchActualLeverage();
+    
+    initWS(); 
+    app.listen(PORT, '0.0.0.0', () => logger(`DASHBOARD: http://localhost:${PORT}/gui`)); 
 }
 
 startApp();
