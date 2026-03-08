@@ -11,7 +11,7 @@ app.use(express.json());
 const STATE_FILE = './bot_state.json';
 const LEVERAGE_FILE = './leverage_cache.json';
 const HISTORY_FILE = './pnl_history.json';
-const PORT = 9015;
+const PORT = 9016;
 
 let botState = { 
     running: false, startTime: null, marginValue: 10,
@@ -50,32 +50,34 @@ function getFilteredPnL(days) {
     return pnlHistory.filter(h => h.tsClose >= startTime.getTime()).reduce((sum, h) => sum + h.pnl, 0);
 }
 
+// Hàm này phải xong trước khi trade để có Max Lev chuẩn
 async function fetchActualLeverage() {
-    const timestamp = Date.now();
-    const query = `timestamp=${timestamp}`;
-    const signature = crypto.createHmac('sha256', SECRET_KEY).update(query).digest('hex');
-    const options = {
-        hostname: 'fapi.binance.com', path: `/fapi/v1/leverageBracket?${query}&signature=${signature}`,
-        headers: { 'X-MBX-APIKEY': API_KEY }, timeout: 5000
-    };
-    https.get(options, (res) => {
-        let data = '';
-        res.on('data', chunk => data += chunk);
-        res.on('end', () => {
-            try {
-                const brackets = JSON.parse(data);
-                if (Array.isArray(brackets)) {
-                    brackets.forEach(item => {
-                        // Cập nhật leverage chuẩn từ Binance
-                        symbolMaxLeverage[item.symbol] = item.brackets[0].initialLeverage;
-                        if (!allSymbols.includes(item.symbol)) allSymbols.push(item.symbol);
-                    });
-                    fs.writeFileSync(LEVERAGE_FILE, JSON.stringify(symbolMaxLeverage));
-                    logger("Đã cập nhật Leverage chuẩn từ Binance API", "INFO");
-                }
-            } catch (e) {}
-        });
-    }).on('error', () => {});
+    return new Promise((resolve) => {
+        const timestamp = Date.now();
+        const query = `timestamp=${timestamp}`;
+        const signature = crypto.createHmac('sha256', SECRET_KEY).update(query).digest('hex');
+        const options = {
+            hostname: 'fapi.binance.com', path: `/fapi/v1/leverageBracket?${query}&signature=${signature}`,
+            headers: { 'X-MBX-APIKEY': API_KEY }, timeout: 10000
+        };
+        https.get(options, (res) => {
+            let data = '';
+            res.on('data', chunk => data += chunk);
+            res.on('end', () => {
+                try {
+                    const brackets = JSON.parse(data);
+                    if (Array.isArray(brackets)) {
+                        brackets.forEach(item => {
+                            symbolMaxLeverage[item.symbol] = item.brackets[0].initialLeverage;
+                        });
+                        fs.writeFileSync(LEVERAGE_FILE, JSON.stringify(symbolMaxLeverage));
+                        logger(`Đã nạp Leverage chuẩn cho ${brackets.length} cặp tiền`, "INFO");
+                    }
+                } catch (e) {}
+                resolve();
+            });
+        }).on('error', () => resolve());
+    });
 }
 
 async function initSymbols() {
@@ -89,10 +91,6 @@ async function initSymbols() {
                     info.symbols.forEach(s => {
                         if (s.status === 'TRADING' && s.quoteAsset === 'USDT') {
                             if (!allSymbols.includes(s.symbol)) allSymbols.push(s.symbol);
-                            // Chỉ set 20 nếu trong cache hoàn toàn không có data
-                            if (symbolMaxLeverage[s.symbol] === undefined) {
-                                symbolMaxLeverage[s.symbol] = 20;
-                            }
                         }
                     });
                 } catch(e) {}
@@ -144,7 +142,7 @@ function initWS() {
                         }
                     }
                 } else if (allSymbols.includes(t.s) && botState.running) {
-                    // Lấy maxLev từ dữ liệu đã fetch hoặc cache
+                    // Ưu tiên lấy Lev từ API, nếu không có mới lấy cache, cuối cùng mới là 20
                     const maxLev = symbolMaxLeverage[t.s] || 20;
                     activePositions[t.s] = {
                         symbol: t.s, side: botState.mode, maxLev: maxLev,
@@ -293,8 +291,12 @@ app.get('/gui', (req, res) => {
     </body></html>`);
 });
 
-initSymbols().then(() => { 
-    initWS(); 
-    app.listen(PORT, '0.0.0.0', () => logger(`DASHBOARD: http://localhost:${PORT}/gui`)); 
-    fetchActualLeverage(); 
-});
+// THỨ TỰ CHẠY CHUẨN: FETCH LEV -> INIT SYMBOLS -> START WS
+async function startApp() {
+    await fetchActualLeverage();
+    await initSymbols();
+    initWS();
+    app.listen(PORT, '0.0.0.0', () => logger(`DASHBOARD: http://localhost:${PORT}/gui`));
+}
+
+startApp();
