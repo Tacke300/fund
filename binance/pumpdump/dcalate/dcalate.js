@@ -11,7 +11,7 @@ app.use(express.json());
 const STATE_FILE = './bot_state.json';
 const LEVERAGE_FILE = './leverage_cache.json';
 const HISTORY_FILE = './pnl_history.json';
-const PORT = 9012;
+const PORT = 9013;
 
 let botState = { 
     running: false, startTime: null, marginValue: 10,
@@ -109,27 +109,30 @@ function initWS() {
 
                 if (activePositions[t.s]) {
                     const pos = activePositions[t.s];
-                    // CHỐT THEO MỐC LƯỚI GẦN NHẤT (LAST GRID)
+                    
+                    // CHỈ SỬA ĐÚNG PHẦN LOGIC CHỐT LỜI Ở ĐÂY
                     const lastGrid = pos.grids[pos.grids.length - 1];
                     const diffPct = pos.side === 'LONG' ? (price - lastGrid.price) / lastGrid.price : (lastGrid.price - price) / lastGrid.price;
 
                     if (diffPct * 100 >= botState.tpPercent) {
                         const size = (lastGrid.qty * pos.maxLev) / lastGrid.price;
-                        const pnl = pos.side === 'LONG' ? (price - lastGrid.price) * size : (lastGrid.price - price) * size;
+                        const gridPnl = pos.side === 'LONG' ? (price - lastGrid.price) * size : (lastGrid.price - price) * size;
                         
                         pnlHistory.push({
                             tsOpen: lastGrid.time, tsClose: Date.now(),
                             symbol: t.s, side: pos.side, lev: pos.maxLev,
-                            pnl: pnl, avgPrice: lastGrid.price, closePrice: price,
+                            pnl: gridPnl, avgPrice: lastGrid.price, closePrice: price,
                             gridsCount: pos.grids.length, totalMargin: lastGrid.qty,
                             details: [lastGrid]
                         });
-                        botState.closedPnl += pnl;
+                        botState.closedPnl += gridPnl;
                         botState.totalClosedGrids++;
-                        logger(`WIN GRID: ${t.s} Tầng ${pos.grids.length} | +${pnl.toFixed(2)}$`, "WIN");
+                        logger(`WIN GRID: ${t.s} tầng ${pos.grids.length} | +${gridPnl.toFixed(2)}$`, "WIN");
                         
                         pos.grids.pop(); // Xóa tầng vừa chốt
-                        if (pos.grids.length === 0) delete activePositions[t.s];
+                        if (pos.grids.length === 0) {
+                            delete activePositions[t.s];
+                        }
                         saveAll();
                     } else if (pos.grids.length < botState.maxGrids) {
                         const lastEntry = pos.grids[pos.grids.length - 1].price;
@@ -189,6 +192,7 @@ app.get('/api/data', (req, res) => {
         const totalCoinsAtLev = (activeLev.length || 1);
         const baseMarginAtLev = totalCoinsAtLev * botState.marginValue * botState.maxGrids;
         const totalRoi = baseMarginAtLev > 0 ? (totalPnl / baseMarginAtLev) * 100 : 0;
+
         if (closed !== 0 || unreal !== 0) levStats[l] = { totalPnl, totalRoi };
     });
 
@@ -215,7 +219,6 @@ app.get('/gui', (req, res) => {
     .round-card { background: #161a1e; border: 1px solid #333; padding: 10px; border-radius: 4px; cursor: pointer; transition: 0.2s; }
     .round-card:hover { border-color: #f0b90b; background: #2b3139; }</style>
     </head><body class="p-4 text-[11px]">
-        
         <div id="gridModal" class="modal" onclick="closeModal()"><div class="modal-content" onclick="event.stopPropagation()">
             <div class="flex justify-between items-center mb-4"><h2 id="modalTitle" class="text-xl font-black text-yellow-500"></h2><button onclick="closeModal()" class="text-2xl hover:text-red-500">✕</button></div>
             <div id="roundDetail" class="hidden bg-black p-4 rounded border border-yellow-500/50 mb-4 shadow-inner"></div>
@@ -285,11 +288,15 @@ app.get('/gui', (req, res) => {
                 div.classList.remove('hidden');
                 div.innerHTML = \`
                     <div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-[10px] mb-4">
-                        <div><div class="text-gray-500">ENTRY GẦN NHẤT</div><div class="text-yellow-500 font-bold text-sm">\${r.avgPrice.toFixed(5)}</div></div>
+                        <div><div class="text-gray-500">ENTRY TB</div><div class="text-yellow-500 font-bold text-sm">\${r.avgPrice.toFixed(5)}</div></div>
                         <div><div class="text-gray-500">GIÁ ĐÓNG</div><div class="text-green-400 font-bold text-sm">\${r.closePrice.toFixed(5)}</div></div>
                         <div><div class="text-gray-500">VỐN MARGIN</div><div class="text-white font-bold text-sm">\${r.totalMargin.toFixed(2)}$</div></div>
                         <div><div class="text-gray-500">GIỜ CHỐT</div><div class="text-gray-400 font-bold text-sm">\${new Date(r.tsClose).toLocaleTimeString()}</div></div>
-                    </div>\`;
+                    </div>
+                    <table class="w-full text-left text-[9px] border-t border-gray-800 pt-2">
+                        <thead><tr class="text-gray-500 border-b border-gray-800"><th>LƯỚI</th><th>GIÁ DCA</th><th class="text-right">GIỜ</th></tr></thead>
+                        <tbody>\${r.details ? r.details.map((g,i) => \`<tr class="border-b border-gray-800/50"><td class="py-1">#\${i+1}</td><td class="py-1 font-bold text-white">\${g.price.toFixed(5)}</td><td class="py-1 text-right text-gray-500">\${new Date(g.time).toLocaleTimeString()}</td></tr>\`).join('') : ''}</tbody>
+                    </table>\`;
             }
 
             function closeModal(){ document.getElementById('gridModal').style.display = "none"; }
