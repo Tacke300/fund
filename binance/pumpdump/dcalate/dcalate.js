@@ -11,7 +11,7 @@ app.use(express.json());
 const STATE_FILE = './bot_state_9022.json';
 const LEVERAGE_FILE = './leverage_cache.json';
 const HISTORY_FILE = './pnl_history.json';
-const PORT = 9022; // Đã đổi sang 9022 theo ý ông
+const PORT = 9022;
 
 let botState = { 
     running: false, startTime: null, marginValue: 10,
@@ -32,7 +32,6 @@ function logger(msg, type = 'INFO') {
     if (logs.length > 100) logs.pop();
 }
 
-// Load dữ liệu cũ
 if (fs.existsSync(STATE_FILE)) try { Object.assign(botState, JSON.parse(fs.readFileSync(STATE_FILE))); } catch(e){}
 if (fs.existsSync(LEVERAGE_FILE)) try { symbolMaxLeverage = JSON.parse(fs.readFileSync(LEVERAGE_FILE)); } catch(e){}
 if (fs.existsSync(HISTORY_FILE)) try { pnlHistory = JSON.parse(fs.readFileSync(HISTORY_FILE)); } catch(e){}
@@ -51,7 +50,6 @@ function getFilteredPnL(days) {
     return pnlHistory.filter(h => h.tsClose >= startTime.getTime()).reduce((sum, h) => sum + h.pnl, 0);
 }
 
-// LẤY LEVERAGE TỪ BINANCE - KHÔNG TỰ GÁN X20
 async function fetchActualLeverage() {
     const timestamp = Date.now();
     const query = `timestamp=${timestamp}`;
@@ -60,7 +58,6 @@ async function fetchActualLeverage() {
         hostname: 'fapi.binance.com', path: `/fapi/v1/leverageBracket?${query}&signature=${signature}`,
         headers: { 'X-MBX-APIKEY': API_KEY }, timeout: 10000 
     };
-    
     https.get(options, (res) => {
         let data = '';
         res.on('data', chunk => data += chunk);
@@ -73,12 +70,10 @@ async function fetchActualLeverage() {
                     });
                     fs.writeFileSync(LEVERAGE_FILE, JSON.stringify(symbolMaxLeverage));
                     logger(`Nạp Max Lev thành công cho ${brackets.length} cặp`, "WIN");
-                } else if (brackets.code) {
-                    logger(`Binance Reject: ${brackets.msg}`, "ERR");
                 }
-            } catch (e) { logger("Lỗi giải mã dữ liệu đòn bẩy", "ERR"); }
+            } catch (e) {}
         });
-    }).on('error', (err) => { logger("Kết nối Binance lấy Lev thất bại: " + err.message, "ERR"); });
+    }).on('error', () => {});
 }
 
 async function initSymbols() {
@@ -116,7 +111,7 @@ function initWS() {
                     const currentIdx = pos.grids.length - 1;
                     const lastGrid = pos.grids[currentIdx];
 
-                    // TP THEO MỐC LƯỚI TRÊN (Chuẩn lưới sàn)
+                    // LOGIC CHỐT THEO MỐC LƯỚI TRÊN (Fix lỗi chốt non)
                     let targetTP;
                     if (pos.grids.length > 1) {
                         targetTP = pos.grids[currentIdx - 1].price;
@@ -153,7 +148,6 @@ function initWS() {
                         }
                     }
                 } else if (allSymbols.includes(t.s) && botState.running) {
-                    // CHỈ VÀO LỆNH NẾU CÓ LEV TRONG CACHE (KHÔNG TỰ GÁN 20)
                     const mLev = symbolMaxLeverage[t.s];
                     if (mLev) {
                         activePositions[t.s] = {
@@ -169,7 +163,6 @@ function initWS() {
     ws.on('close', () => setTimeout(initWS, 3000));
 }
 
-// API VÀ GUI (GIỮ NGUYÊN GIAO DIỆN LUFFY CỦA ÔNG)
 app.get('/api/data', (req, res) => {
     let unrealizedPnl = 0, totalGridsMatched = 0;
     const activeData = Object.values(activePositions).map(p => {
@@ -187,11 +180,24 @@ app.get('/api/data', (req, res) => {
             totalGridsMatched += p.grids.length;
         }
         const coinHistory = pnlHistory.filter(h => h.symbol === p.symbol);
-        return { ...p, pnl, totalClosedPnl: coinHistory.reduce((s, h) => s + h.pnl, 0), currentPrice: currentP, closedCount: coinHistory.length };
+        const totalClosedPnl = coinHistory.reduce((sum, h) => sum + h.pnl, 0);
+        const capitalGoc = botState.marginValue * botState.maxGrids; 
+        const totalRoi = capitalGoc > 0 ? ((totalClosedPnl + pnl) / capitalGoc) * 100 : 0;
+        return { ...p, pnl, totalRoi, totalClosedPnl, currentPrice: currentP, closedCount: coinHistory.length };
+    });
+
+    let levStats = {};
+    [10, 20, 25, 30, 40, 50, 75, 100, 125, 150].forEach(l => {
+        const historyLev = pnlHistory.filter(h => h.lev === l);
+        const activeLev = activeData.filter(p => p.maxLev === l);
+        const closed = historyLev.reduce((sum, h) => sum + h.pnl, 0);
+        const unreal = activeLev.reduce((sum, p) => sum + p.pnl, 0);
+        const totalPnl = closed + unreal;
+        if (closed !== 0 || unreal !== 0) levStats[l] = { totalPnl };
     });
 
     res.json({ 
-        state: botState, active: activeData, logs, history: pnlHistory,
+        state: botState, active: activeData, logs, levStats, history: pnlHistory,
         stats: { today: getFilteredPnL(0), d7: getFilteredPnL(7), closedPnl: botState.closedPnl, unrealizedPnl, totalGridsMatched } 
     });
 });
@@ -206,7 +212,8 @@ app.post('/api/reset', (req, res) => { activePositions = {}; botState.closedPnl 
 
 app.get('/gui', (req, res) => {
     res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Luffy Matrix 9022</title><script src="https://cdn.tailwindcss.com"></script>
-    <style>body{background:#0b0e11;color:#eaecef;font-family:monospace} #logBox{background:#000;padding:10px;height:180px;overflow-y:auto;font-size:11px;border:1px solid #333;color:#00ff41}</style>
+    <style>body{background:#0b0e11;color:#eaecef;font-family:monospace} th{cursor:pointer;background:#161a1e;padding:10px 8px;border-bottom:1px solid #333;font-size:10px}
+    #logBox{background:#000;padding:10px;height:150px;overflow-y:auto;font-size:11px;border:1px solid #333;color:#00ff41}</style>
     </head><body class="p-4 text-[11px]">
         <div class="bg-[#1e2329] p-4 rounded-lg mb-2 border border-yellow-500/20 flex flex-wrap items-end gap-3 shadow-xl">
             <div class="w-[100px]">MARGIN ($)<input id="marginValue" type="number" class="w-full bg-black text-yellow-500 p-2 rounded border border-gray-700 mt-1"></div>
@@ -215,33 +222,53 @@ app.get('/gui', (req, res) => {
             <div class="w-[70px]">TP %<input id="tpPercent" type="number" step="0.1" class="w-full bg-black text-yellow-500 p-2 rounded border border-gray-700 mt-1"></div>
             <div class="w-[90px]">HƯỚNG<select id="mode" class="w-full bg-black p-2 rounded border border-gray-700 mt-1 text-yellow-500"><option value="LONG">LONG</option><option value="SHORT">SHORT</option></select></div>
             <div class="flex gap-2 ml-auto">
-                <button onclick="sendCtrl(true)" class="bg-green-600 px-10 py-3 rounded font-black text-sm hover:scale-105 transition-all">START</button>
-                <button onclick="sendCtrl(false)" class="bg-red-600 px-10 py-3 rounded font-black text-sm hover:scale-105 transition-all">STOP</button>
+                <button onclick="sendCtrl(true)" class="bg-green-600 px-10 py-3 rounded font-black text-sm hover:scale-105">START</button>
+                <button onclick="sendCtrl(false)" class="bg-red-600 px-10 py-3 rounded font-black text-sm hover:scale-105">STOP</button>
+                <button onclick="resetBot()" class="bg-gray-800 px-4 py-3 rounded text-[9px]">RESET</button>
             </div>
         </div>
-        <div class="grid grid-cols-4 gap-1 mb-2 text-center font-bold">
-            <div class="bg-[#1e2329] p-2 rounded border border-gray-800"><div class="text-gray-500 text-[8px]">HÔM NAY</div><div id="pnlToday" class="text-green-400 text-lg">0.00$</div></div>
-            <div class="bg-[#1e2329] p-2 rounded border border-gray-800"><div class="text-gray-500 text-[8px]">TỔNG CHỐT</div><div id="statClosedPnl" class="text-yellow-500 text-lg">0.00$</div></div>
-            <div class="bg-[#1e2329] p-2 rounded border border-gray-800"><div class="text-gray-500 text-[8px]">ĐANG GỒNG</div><div id="statUnreal" class="text-white text-lg">0.00$</div></div>
-            <div class="bg-[#1e2329] p-2 rounded border border-gray-800"><div class="text-gray-500 text-[8px]">LƯỚI KHỚP</div><div id="statGridsMatched" class="text-orange-400 text-lg">0</div></div>
+        <div id="levStats" class="flex gap-1 mb-2 overflow-x-auto"></div>
+        <div class="grid grid-cols-4 gap-1 mb-2">
+            <div class="bg-[#1e2329] p-2 rounded border border-gray-800 text-center"><div class="text-gray-500 text-[8px]">HÔM NAY</div><div id="pnlToday" class="font-bold text-green-400 text-lg">0.00$</div></div>
+            <div class="bg-[#1e2329] p-2 rounded border border-gray-800 text-center"><div class="text-gray-500 text-[8px]">ĐÃ CHỐT TỔNG</div><div id="statClosedPnl" class="font-bold text-yellow-500 text-lg">0.00$</div></div>
+            <div class="bg-[#1e2329] p-2 rounded border border-gray-800 text-center"><div class="text-gray-500 text-[8px]">ĐANG GỒNG PNL</div><div id="statUnreal" class="font-bold text-white text-lg">0.00$</div></div>
+            <div class="bg-[#1e2329] p-2 rounded border border-gray-800 text-center"><div class="text-gray-500 text-[8px]">LƯỚI KHỚP</div><div id="statGridsMatched" class="font-bold text-orange-400 text-lg">0</div></div>
         </div>
         <div class="bg-[#1e2329] rounded border border-gray-800 mb-2 overflow-hidden shadow-2xl">
-            <table class="w-full text-left"><thead class="bg-[#161a1e]"><tr><th class="p-2">COIN</th><th class="text-center">VÒNG</th><th class="text-center">LEV</th><th class="text-center">TẦNG</th><th class="text-right">GỒNG PNL</th><th class="text-right pr-4">TỔNG PNL</th></tr></thead>
-            <tbody id="activeBody"></tbody></table>
+            <table class="w-full text-left">
+                <thead class="bg-[#161a1e]"><tr>
+                    <th class="p-2 w-10 text-center">STT</th>
+                    <th onclick="setSort('symbol')">COIN ↕</th>
+                    <th onclick="setSort('closedCount')" class="text-center">VÒNG ↕</th>
+                    <th onclick="setSort('maxLev')" class="text-center">LEV ↕</th>
+                    <th onclick="setSort('grids.length')" class="text-center">TẦNG ↕</th>
+                    <th onclick="setSort('pnl')" class="text-right">GỒNG PNL ↕</th>
+                    <th onclick="setSort('totalClosedPnl')" class="text-right">TỔNG PNL ↕</th>
+                    <th onclick="setSort('totalRoi')" class="text-center pr-4">ROI TỔNG ↕</th>
+                </tr></thead>
+                <tbody id="activeBody"></tbody>
+            </table>
         </div>
         <div id="logBox"></div>
         <script>
-            let firstLoad = true;
+            let sortKey = 'maxLev', sortDir = -1, rawData = [], firstLoad = true;
+            function setSort(k){ if(sortKey===k) sortDir*=-1; else {sortKey=k; sortDir=-1;} render(); }
             async function sendCtrl(run){ const body = { running: run, marginValue: Number(document.getElementById('marginValue').value), maxGrids: Number(document.getElementById('maxGrids').value), stepSize: Number(document.getElementById('stepSize').value), tpPercent: Number(document.getElementById('tpPercent').value), mode: document.getElementById('mode').value }; await fetch('/api/control',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); }
+            async function resetBot(){ if(confirm('RESET TẤT CẢ?')) await fetch('/api/reset',{method:'POST'}); }
+            function render(){ 
+                const sorted = [...rawData].sort((a,b)=> (a[sortKey]>b[sortKey]?1:-1)*sortDir); 
+                document.getElementById('activeBody').innerHTML = sorted.map((p, i)=> \`<tr class="border-b border-gray-800 hover:bg-[#2b3139]"><td class="p-2 text-gray-500 text-center">\${i+1}</td><td class="p-2 font-bold text-yellow-500">\${p.symbol}</td><td class="text-center text-blue-400">\${p.closedCount}</td><td class="text-center text-purple-400">x\${p.maxLev}</td><td class="text-center text-orange-400">\${p.grids.length}</td><td class="text-right font-bold \${p.pnl>=0?'text-green-500':'text-red-500'}">\${p.pnl.toFixed(2)}$</td><td class="text-right font-bold text-emerald-400">\${p.totalClosedPnl.toFixed(2)}$</td><td class="text-center pr-4 font-bold \${p.totalRoi>=0?'text-green-400':'text-red-400'}">\${p.totalRoi.toFixed(1)}%</td></tr>\`).join(''); 
+            }
             async function update(){
                 try {
                     const res = await fetch('/api/data'); const d = await res.json();
                     if(firstLoad) { ['marginValue','maxGrids','stepSize','tpPercent','mode'].forEach(id => document.getElementById(id).value = d.state[id]); firstLoad = false; }
-                    document.getElementById('activeBody').innerHTML = d.active.map(p => \`<tr class="border-b border-gray-800"><td class="p-2 font-bold text-yellow-500">\${p.symbol}</td><td class="text-center text-blue-400">\${p.closedCount}</td><td class="text-center text-purple-400">x\${p.maxLev}</td><td class="text-center text-orange-400">\${p.grids.length}</td><td class="text-right font-bold \${p.pnl>=0?'text-green-500':'text-red-500'}">\${p.pnl.toFixed(2)}$</td><td class="text-right pr-4 text-emerald-400">\${p.totalClosedPnl.toFixed(2)}$</td></tr>\`).join('');
+                    rawData = d.active; render();
                     document.getElementById('pnlToday').innerText = d.stats.today.toFixed(2) + '$';
                     document.getElementById('statClosedPnl').innerText = d.stats.closedPnl.toFixed(2) + '$';
                     document.getElementById('statUnreal').innerText = d.stats.unrealizedPnl.toFixed(2) + '$';
                     document.getElementById('statGridsMatched').innerText = d.stats.totalGridsMatched;
+                    document.getElementById('levStats').innerHTML = Object.entries(d.levStats).map(([lev, val]) => \`<div class="bg-[#1e2329] p-1 px-3 border border-gray-800 rounded text-center whitespace-nowrap"><div class="text-[7px] text-gray-500">x\${lev}</div><div class="text-yellow-500 font-bold">\${val.totalPnl.toFixed(1)}$</div></div>\`).join('');
                     document.getElementById('logBox').innerHTML = d.logs.join('<br>');
                 } catch(e){}
             }
@@ -250,10 +277,9 @@ app.get('/gui', (req, res) => {
     </body></html>`);
 });
 
-// Khởi động
 initSymbols().then(() => { 
     initWS(); 
-    app.listen(PORT, '0.0.0.0', () => logger(`DASHBOARD 9022: http://localhost:${PORT}/gui`)); 
+    app.listen(PORT, '0.0.0.0', () => logger(`DASHBOARD 9022 READY`)); 
     fetchActualLeverage(); 
     setInterval(fetchActualLeverage, 600000); 
 });
