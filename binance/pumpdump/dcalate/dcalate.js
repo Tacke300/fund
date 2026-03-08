@@ -11,7 +11,7 @@ app.use(express.json());
 const STATE_FILE = './bot_state.json';
 const LEVERAGE_FILE = './leverage_cache.json';
 const HISTORY_FILE = './pnl_history.json';
-const PORT = 9006;
+const PORT = 9009;
 
 let botState = { 
     running: false, startTime: null, marginValue: 10,
@@ -110,37 +110,37 @@ function initWS() {
                 if (activePositions[t.s]) {
                     const pos = activePositions[t.s];
                     const lastGrid = pos.grids[pos.grids.length - 1];
-                    const isLong = pos.side === 'LONG';
-                    
-                    const diffTp = isLong ? (price - lastGrid.price) / lastGrid.price : (lastGrid.price - price) / lastGrid.price;
-                    
-                    if (diffTp * 100 >= botState.tpPercent) {
+                    const diffPct = pos.side === 'LONG' ? (price - lastGrid.price) / lastGrid.price : (lastGrid.price - price) / lastGrid.price;
+
+                    if (diffPct * 100 >= botState.tpPercent) {
+                        // Logic chốt lời tầng cuối (Partial TP)
                         const size = (lastGrid.qty * pos.maxLev) / lastGrid.price;
-                        const pnlGrid = isLong ? (price - lastGrid.price) * size : (lastGrid.price - price) * size;
+                        const pnl = pos.side === 'LONG' ? (price - lastGrid.price) * size : (lastGrid.price - price) * size;
                         
                         pnlHistory.push({
                             tsOpen: lastGrid.time, tsClose: Date.now(),
                             symbol: t.s, side: pos.side, lev: pos.maxLev,
-                            pnl: pnlGrid, avgPrice: lastGrid.price, closePrice: price,
+                            pnl: pnl, avgPrice: lastGrid.price, closePrice: price,
                             gridsCount: pos.grids.length, totalMargin: lastGrid.qty
                         });
-
-                        botState.closedPnl += pnlGrid;
+                        
+                        botState.closedPnl += pnl;
                         botState.totalClosedGrids++;
-                        logger(`WIN GRID: ${t.s} Tầng \${pos.grids.length} | +\${pnlGrid.toFixed(2)}$`, "WIN");
+                        logger(`WIN GRID: ${t.s} Tầng ${pos.grids.length} | +${pnl.toFixed(2)}$`, "WIN");
                         
                         pos.grids.pop();
                         if (pos.grids.length === 0) delete activePositions[t.s];
                         saveAll();
                     } else if (pos.grids.length < botState.maxGrids) {
-                        const lastEntry = pos.grids[pos.grids.length - 1].price;
-                        const gap = isLong ? (lastEntry - price) / lastEntry : (price - lastEntry) / lastEntry;
+                        const lastEntry = lastGrid.price;
+                        const gap = pos.side === 'LONG' ? (lastEntry - price) / lastEntry : (price - lastEntry) / lastEntry;
                         if (gap * 100 >= botState.stepSize) {
                             pos.grids.push({ price, qty: botState.marginValue, time: Date.now() });
-                            logger(`DCA: ${t.s} tầng \${pos.grids.length}`, "DCA");
+                            logger(`DCA: ${t.s} tầng ${pos.grids.length}`, "DCA");
                         }
                     }
                 } else if (allSymbols.includes(t.s) && botState.running) {
+                    // Trả lại nguyên gốc logic khởi tạo Lev của bạn
                     const maxLev = symbolMaxLeverage[t.s] || 20;
                     activePositions[t.s] = {
                         symbol: t.s, side: botState.mode, maxLev: maxLev,
@@ -158,8 +158,7 @@ app.get('/api/data', (req, res) => {
     let unrealizedPnl = 0, totalGridsMatched = 0;
     const activeData = Object.values(activePositions).map(p => {
         const currentP = marketPrices[p.symbol] || 0;
-        let pnl = 0;
-        let totalSize = 0, totalCost = 0;
+        let pnl = 0, totalSize = 0, totalCost = 0;
         p.grids.forEach(g => {
             const size = (g.qty * p.maxLev) / g.price;
             totalSize += size;
@@ -171,12 +170,10 @@ app.get('/api/data', (req, res) => {
             unrealizedPnl += pnl;
             totalGridsMatched += p.grids.length;
         }
-
         const coinHistory = pnlHistory.filter(h => h.symbol === p.symbol);
         const totalClosedPnl = coinHistory.reduce((sum, h) => sum + h.pnl, 0);
         const capitalGoc = botState.marginValue * botState.maxGrids; 
         const totalRoi = capitalGoc > 0 ? ((totalClosedPnl + pnl) / capitalGoc) * 100 : 0;
-
         return { ...p, pnl, totalRoi, totalClosedPnl, currentPrice: currentP, capitalGoc, capitalHienTai: capitalGoc + pnl + totalClosedPnl, closedCount: coinHistory.length };
     });
 
@@ -208,6 +205,7 @@ app.post('/api/control', (req, res) => {
 app.post('/api/reset', (req, res) => { activePositions = {}; botState.closedPnl = 0; botState.totalClosedGrids = 0; logs = []; pnlHistory = []; saveAll(); res.json({ status: 'ok' }); });
 
 app.get('/gui', (req, res) => {
+    // UI giữ nguyên giao diện Luffy Matrix của bạn
     res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Luffy Matrix Dashboard</title><script src="https://cdn.tailwindcss.com"></script>
     <style>body{background:#0b0e11;color:#eaecef;font-family:monospace} th{cursor:pointer;background:#161a1e;padding:10px 8px;border-bottom:1px solid #333;font-size:10px}
     #logBox{background:#000;padding:10px;height:150px;overflow-y:auto;font-size:11px;border:1px solid #333}
