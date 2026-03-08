@@ -11,7 +11,7 @@ app.use(express.json());
 const STATE_FILE = './bot_state.json';
 const LEVERAGE_FILE = './leverage_cache.json';
 const HISTORY_FILE = './pnl_history.json';
-const PORT = 9019;
+const PORT = 9020;
 
 let botState = { 
     running: false, startTime: null, marginValue: 10,
@@ -50,7 +50,7 @@ function getFilteredPnL(days) {
     return pnlHistory.filter(h => h.tsClose >= startTime.getTime()).reduce((sum, h) => sum + h.pnl, 0);
 }
 
-// TRIỆT TIÊU X20: LỖI LÀ BÁO, KHÔNG TỰ GÁN
+// HÀM LẤY LEV XỊN - LỖI LÀ BÁO, ĐÉO TỰ GÁN
 async function fetchActualLeverage() {
     return new Promise((resolve) => {
         const timestamp = Date.now();
@@ -69,15 +69,14 @@ async function fetchActualLeverage() {
                     if (Array.isArray(brackets) && brackets.length > 0) {
                         brackets.forEach(item => {
                             symbolMaxLeverage[item.symbol] = item.brackets[0].initialLeverage;
+                            if (!allSymbols.includes(item.symbol)) allSymbols.push(item.symbol);
                         });
                         fs.writeFileSync(LEVERAGE_FILE, JSON.stringify(symbolMaxLeverage));
-                        logger(`Đã nạp thành công Max Leverage cho ${brackets.length} coin`, "WIN");
+                        logger(`Nạp Lev thành công cho ${brackets.length} cặp`, "WIN");
                     } else {
-                        logger("CẢNH BÁO: Binance trả về danh sách Leverage rỗng!", "ERR");
+                        logger("LỖI: Binance trả về Lev rỗng. Check API Key!", "ERR");
                     }
-                } catch (e) {
-                    logger("LỖI PHÂN TÍCH LEVERAGE: Check API Key/Secret", "ERR");
-                }
+                } catch (e) { logger("LỖI: Không đọc được dữ liệu Leverage!", "ERR"); }
                 resolve();
             });
         }).on('error', (err) => {
@@ -119,15 +118,17 @@ function initWS() {
 
                 if (activePositions[t.s]) {
                     const pos = activePositions[t.s];
-                    const currentGridIndex = pos.grids.length - 1;
-                    const lastGrid = pos.grids[currentGridIndex];
+                    const currentIdx = pos.grids.length - 1;
+                    const lastGrid = pos.grids[currentIdx];
 
-                    // TP THEO MỐC LƯỚI TRÊN
+                    // --- LOGIC CHỐT THEO MỐC LƯỚI TRÊN (BIT FUTURE) ---
                     let targetTP;
                     if (pos.grids.length > 1) {
-                        targetTP = pos.grids[currentGridIndex - 1].price;
+                        // TP của tầng N là giá vào của tầng N-1
+                        targetTP = pos.grids[currentIdx - 1].price;
                     } else {
-                        targetTP = pos.side === 'LONG' ? lastGrid.price * (1 + botState.tpPercent / 100) : lastGrid.price * (1 - botState.tpPercent / 100);
+                        // Tầng 1 thì chốt theo % cài đặt
+                        targetTP = pos.side === 'LONG' ? lastGrid.price * (1 + botState.tpPercent/100) : lastGrid.price * (1 - botState.tpPercent/100);
                     }
 
                     const isTP = pos.side === 'LONG' ? (price >= targetTP) : (price <= targetTP);
@@ -159,7 +160,7 @@ function initWS() {
                         }
                     }
                 } else if (allSymbols.includes(t.s) && botState.running) {
-                    // CHỈ VÀO LỆNH NẾU ĐÃ CÓ LEVERAGE XỊN TRONG CACHE
+                    // CHỈ VÀO LỆNH NẾU CÓ LEV TRONG CACHE (KHÔNG TỰ GÁN 20)
                     const maxLev = symbolMaxLeverage[t.s];
                     if (maxLev) {
                         activePositions[t.s] = {
@@ -167,9 +168,6 @@ function initWS() {
                             tsOpen: Date.now(),
                             grids: [{ price, qty: botState.marginValue, time: Date.now() }]
                         };
-                    } else {
-                        // Log lỗi để ông biết con này đang thiếu Lev
-                        if (Math.random() < 0.01) logger(`Bỏ qua ${t.s}: Không lấy được Max Leverage`, "ERR");
                     }
                 }
             });
@@ -178,7 +176,8 @@ function initWS() {
     ws.on('close', () => setTimeout(initWS, 3000));
 }
 
-// --- GIỮ NGUYÊN CÁC API VÀ GUI CỦA ÔNG ---
+// ... [Toàn bộ đoạn API /gui, /api/data giữ nguyên như của ông]
+
 app.get('/api/data', (req, res) => {
     let unrealizedPnl = 0, totalGridsMatched = 0;
     const activeData = Object.values(activePositions).map(p => {
@@ -283,7 +282,7 @@ app.get('/gui', (req, res) => {
             let sortKey = 'maxLev', sortDir = -1, rawData = [], historyData = [], firstLoad = true;
             function setSort(k){ if(sortKey===k) sortDir*=-1; else {sortKey=k; sortDir=-1;} render(); }
             async function sendCtrl(run){ const body = { running: run, marginValue: Number(document.getElementById('marginValue').value), maxGrids: Number(document.getElementById('maxGrids').value), stepSize: Number(document.getElementById('stepSize').value), tpPercent: Number(document.getElementById('tpPercent').value), mode: document.getElementById('mode').value }; await fetch('/api/control',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); }
-            async function resetBot()){ if(confirm('RESET TẤT CẢ DỮ LIỆU?')) await fetch('/api/reset',{method:'POST'}); }
+            async function resetBot(){ if(confirm('RESET TẤT CẢ DỮ LIỆU?')) await fetch('/api/reset',{method:'POST'}); }
             function openDetail(symbol){
                 const rounds = historyData.filter(h => h.symbol === symbol).reverse();
                 document.getElementById('modalTitle').innerText = symbol + " - LỊCH SỬ";
@@ -314,9 +313,9 @@ app.get('/gui', (req, res) => {
     </body></html>`);
 });
 
-// KHỞI CHẠY KHÔNG CÓ SAI SỐ
-async function startApp() {
-    logger("BOT ĐANG KHỞI ĐỘNG...", "INFO");
+// KHỞI CHẠY CHUẨN: ĐỢI LẤY LEV XONG MỚI BẬT BOT
+async function run() {
+    logger("Bot đang nạp dữ liệu từ Binance...", "INFO");
     await initSymbols();
     await fetchActualLeverage(); 
     
@@ -324,4 +323,4 @@ async function startApp() {
     app.listen(PORT, '0.0.0.0', () => logger(`DASHBOARD: http://localhost:${PORT}/gui`)); 
 }
 
-startApp();
+run();
