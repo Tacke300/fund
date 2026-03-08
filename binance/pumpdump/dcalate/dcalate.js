@@ -11,7 +11,7 @@ app.use(express.json());
 const STATE_FILE = './bot_state.json';
 const LEVERAGE_FILE = './leverage_cache.json';
 const HISTORY_FILE = './pnl_history.json';
-const PORT = 9009;
+const PORT = 9011;
 
 let botState = { 
     running: false, startTime: null, marginValue: 10,
