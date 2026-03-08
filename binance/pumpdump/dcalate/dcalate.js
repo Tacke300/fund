@@ -11,7 +11,7 @@ app.use(express.json());
 const STATE_FILE = './bot_state.json';
 const LEVERAGE_FILE = './leverage_cache.json';
 const HISTORY_FILE = './pnl_history.json';
-const PORT = 9014;
+const PORT = 9015;
 
 let botState = { 
     running: false, startTime: null, marginValue: 10,
@@ -66,10 +66,12 @@ async function fetchActualLeverage() {
                 const brackets = JSON.parse(data);
                 if (Array.isArray(brackets)) {
                     brackets.forEach(item => {
+                        // Cập nhật leverage chuẩn từ Binance
                         symbolMaxLeverage[item.symbol] = item.brackets[0].initialLeverage;
                         if (!allSymbols.includes(item.symbol)) allSymbols.push(item.symbol);
                     });
                     fs.writeFileSync(LEVERAGE_FILE, JSON.stringify(symbolMaxLeverage));
+                    logger("Đã cập nhật Leverage chuẩn từ Binance API", "INFO");
                 }
             } catch (e) {}
         });
@@ -87,7 +89,10 @@ async function initSymbols() {
                     info.symbols.forEach(s => {
                         if (s.status === 'TRADING' && s.quoteAsset === 'USDT') {
                             if (!allSymbols.includes(s.symbol)) allSymbols.push(s.symbol);
-                            if (!symbolMaxLeverage[s.symbol]) symbolMaxLeverage[s.symbol] = 20;
+                            // Chỉ set 20 nếu trong cache hoàn toàn không có data
+                            if (symbolMaxLeverage[s.symbol] === undefined) {
+                                symbolMaxLeverage[s.symbol] = 20;
+                            }
                         }
                     });
                 } catch(e) {}
@@ -112,7 +117,6 @@ function initWS() {
                     const lastGrid = pos.grids[pos.grids.length - 1];
                     const diffPct = pos.side === 'LONG' ? (price - lastGrid.price) / lastGrid.price : (lastGrid.price - price) / lastGrid.price;
 
-                    // LOGIC LƯỚI FUTU: CHỐT THEO TẦNG (PARTIAL TP)
                     if (diffPct * 100 >= botState.tpPercent) {
                         const size = (lastGrid.qty * pos.maxLev) / lastGrid.price;
                         const pnl = pos.side === 'LONG' ? (price - lastGrid.price) * size : (lastGrid.price - price) * size;
@@ -128,7 +132,7 @@ function initWS() {
                         botState.totalClosedGrids++;
                         logger(`WIN GRID: ${t.s} Tầng ${pos.grids.length} | +${pnl.toFixed(2)}$`, "WIN");
                         
-                        pos.grids.pop(); // Chỉ xóa tầng cuối cùng
+                        pos.grids.pop();
                         if (pos.grids.length === 0) delete activePositions[t.s];
                         saveAll();
                     } else if (pos.grids.length < botState.maxGrids) {
@@ -140,6 +144,7 @@ function initWS() {
                         }
                     }
                 } else if (allSymbols.includes(t.s) && botState.running) {
+                    // Lấy maxLev từ dữ liệu đã fetch hoặc cache
                     const maxLev = symbolMaxLeverage[t.s] || 20;
                     activePositions[t.s] = {
                         symbol: t.s, side: botState.mode, maxLev: maxLev,
