@@ -11,7 +11,7 @@ app.use(express.json());
 const STATE_FILE = './bot_state.json';
 const LEVERAGE_FILE = './leverage_cache.json';
 const HISTORY_FILE = './pnl_history.json';
-const PORT = 9018;
+const PORT = 9009;
 
 let botState = { 
     running: false, startTime: null, marginValue: 10,
@@ -32,7 +32,6 @@ function logger(msg, type = 'INFO') {
     if (logs.length > 100) logs.pop();
 }
 
-// Load dữ liệu cũ
 if (fs.existsSync(STATE_FILE)) try { Object.assign(botState, JSON.parse(fs.readFileSync(STATE_FILE))); } catch(e){}
 if (fs.existsSync(LEVERAGE_FILE)) try { symbolMaxLeverage = JSON.parse(fs.readFileSync(LEVERAGE_FILE)); } catch(e){}
 if (fs.existsSync(HISTORY_FILE)) try { pnlHistory = JSON.parse(fs.readFileSync(HISTORY_FILE)); } catch(e){}
@@ -51,7 +50,7 @@ function getFilteredPnL(days) {
     return pnlHistory.filter(h => h.tsClose >= startTime.getTime()).reduce((sum, h) => sum + h.pnl, 0);
 }
 
-// Lấy Leverage chuẩn (Ép bot phải lấy xong mới trade)
+// TRIỆT TIÊU X20: LỖI LÀ BÁO, KHÔNG TỰ GÁN
 async function fetchActualLeverage() {
     return new Promise((resolve) => {
         const timestamp = Date.now();
@@ -67,16 +66,24 @@ async function fetchActualLeverage() {
             res.on('end', () => {
                 try {
                     const brackets = JSON.parse(data);
-                    if (Array.isArray(brackets)) {
+                    if (Array.isArray(brackets) && brackets.length > 0) {
                         brackets.forEach(item => {
                             symbolMaxLeverage[item.symbol] = item.brackets[0].initialLeverage;
                         });
                         fs.writeFileSync(LEVERAGE_FILE, JSON.stringify(symbolMaxLeverage));
+                        logger(`Đã nạp thành công Max Leverage cho ${brackets.length} coin`, "WIN");
+                    } else {
+                        logger("CẢNH BÁO: Binance trả về danh sách Leverage rỗng!", "ERR");
                     }
-                } catch (e) {}
+                } catch (e) {
+                    logger("LỖI PHÂN TÍCH LEVERAGE: Check API Key/Secret", "ERR");
+                }
                 resolve();
             });
-        }).on('error', () => resolve());
+        }).on('error', (err) => {
+            logger("LỖI KẾT NỐI BINANCE: " + err.message, "ERR");
+            resolve();
+        });
     });
 }
 
@@ -115,13 +122,11 @@ function initWS() {
                     const currentGridIndex = pos.grids.length - 1;
                     const lastGrid = pos.grids[currentGridIndex];
 
-                    // --- LOGIC TP THEO MỐC LƯỚI TRÊN ---
+                    // TP THEO MỐC LƯỚI TRÊN
                     let targetTP;
                     if (pos.grids.length > 1) {
-                        // Nếu đang ở tầng > 1, giá TP là giá của tầng ngay phía trên nó
                         targetTP = pos.grids[currentGridIndex - 1].price;
                     } else {
-                        // Nếu ở tầng 1 (tầng gốc), TP theo % setup
                         targetTP = pos.side === 'LONG' ? lastGrid.price * (1 + botState.tpPercent / 100) : lastGrid.price * (1 - botState.tpPercent / 100);
                     }
 
@@ -145,9 +150,7 @@ function initWS() {
                         pos.grids.pop();
                         if (pos.grids.length === 0) delete activePositions[t.s];
                         saveAll();
-                    } 
-                    // --- LOGIC DCA ---
-                    else if (pos.grids.length < botState.maxGrids) {
+                    } else if (pos.grids.length < botState.maxGrids) {
                         const lastEntry = lastGrid.price;
                         const gap = pos.side === 'LONG' ? (lastEntry - price) / lastEntry : (price - lastEntry) / lastEntry;
                         if (gap * 100 >= botState.stepSize) {
@@ -156,12 +159,18 @@ function initWS() {
                         }
                     }
                 } else if (allSymbols.includes(t.s) && botState.running) {
-                    const maxLev = symbolMaxLeverage[t.s] || 20;
-                    activePositions[t.s] = {
-                        symbol: t.s, side: botState.mode, maxLev: maxLev,
-                        tsOpen: Date.now(),
-                        grids: [{ price, qty: botState.marginValue, time: Date.now() }]
-                    };
+                    // CHỈ VÀO LỆNH NẾU ĐÃ CÓ LEVERAGE XỊN TRONG CACHE
+                    const maxLev = symbolMaxLeverage[t.s];
+                    if (maxLev) {
+                        activePositions[t.s] = {
+                            symbol: t.s, side: botState.mode, maxLev: maxLev,
+                            tsOpen: Date.now(),
+                            grids: [{ price, qty: botState.marginValue, time: Date.now() }]
+                        };
+                    } else {
+                        // Log lỗi để ông biết con này đang thiếu Lev
+                        if (Math.random() < 0.01) logger(`Bỏ qua ${t.s}: Không lấy được Max Leverage`, "ERR");
+                    }
                 }
             });
         } catch(e) {}
@@ -169,8 +178,7 @@ function initWS() {
     ws.on('close', () => setTimeout(initWS, 3000));
 }
 
-// ... (Các API /api/data, /api/control, /api/reset và /gui giữ nguyên như bản cũ của ông)
-
+// --- GIỮ NGUYÊN CÁC API VÀ GUI CỦA ÔNG ---
 app.get('/api/data', (req, res) => {
     let unrealizedPnl = 0, totalGridsMatched = 0;
     const activeData = Object.values(activePositions).map(p => {
@@ -275,7 +283,7 @@ app.get('/gui', (req, res) => {
             let sortKey = 'maxLev', sortDir = -1, rawData = [], historyData = [], firstLoad = true;
             function setSort(k){ if(sortKey===k) sortDir*=-1; else {sortKey=k; sortDir=-1;} render(); }
             async function sendCtrl(run){ const body = { running: run, marginValue: Number(document.getElementById('marginValue').value), maxGrids: Number(document.getElementById('maxGrids').value), stepSize: Number(document.getElementById('stepSize').value), tpPercent: Number(document.getElementById('tpPercent').value), mode: document.getElementById('mode').value }; await fetch('/api/control',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); }
-            async function resetBot(){ if(confirm('RESET TẤT CẢ DỮ LIỆU?')) await fetch('/api/reset',{method:'POST'}); }
+            async function resetBot()){ if(confirm('RESET TẤT CẢ DỮ LIỆU?')) await fetch('/api/reset',{method:'POST'}); }
             function openDetail(symbol){
                 const rounds = historyData.filter(h => h.symbol === symbol).reverse();
                 document.getElementById('modalTitle').innerText = symbol + " - LỊCH SỬ";
@@ -306,12 +314,11 @@ app.get('/gui', (req, res) => {
     </body></html>`);
 });
 
-// KHỞI CHẠY TUẦN TỰ: ĐỢI NẠP LEV XONG MỚI BẬT BOT
+// KHỞI CHẠY KHÔNG CÓ SAI SỐ
 async function startApp() {
-    logger("Đang nạp danh sách coin...", "INFO");
+    logger("BOT ĐANG KHỞI ĐỘNG...", "INFO");
     await initSymbols();
-    logger("Đang đồng bộ Leverage xịn từ Binance...", "INFO");
-    await fetchActualLeverage();
+    await fetchActualLeverage(); 
     
     initWS(); 
     app.listen(PORT, '0.0.0.0', () => logger(`DASHBOARD: http://localhost:${PORT}/gui`)); 
