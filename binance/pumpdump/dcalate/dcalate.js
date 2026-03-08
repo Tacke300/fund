@@ -11,7 +11,7 @@ app.use(express.json());
 const STATE_FILE = './bot_state.json';
 const LEVERAGE_FILE = './leverage_cache.json';
 const HISTORY_FILE = './pnl_history.json';
-const PORT = 9007;
+const PORT = 9006;
 
 let botState = { 
     running: false, startTime: null, marginValue: 10,
@@ -27,7 +27,7 @@ let logs = [];
 let pnlHistory = [];
 
 function logger(msg, type = 'INFO') {
-    const color = type === 'ERR' ? 'text-red-500' : (type === 'WIN' ? 'text-green-400' : (type === 'DCA' ? 'text-orange-400' : 'text-emerald-400'));
+    const color = type === 'ERR' ? 'text-red-500' : (type === 'WIN' ? 'text-green-400' : 'text-emerald-400');
     logs.unshift(`<span class="${color}">[${new Date().toLocaleTimeString()}] [${type}] ${msg}</span>`);
     if (logs.length > 100) logs.pop();
 }
@@ -127,7 +127,7 @@ function initWS() {
 
                         botState.closedPnl += pnlGrid;
                         botState.totalClosedGrids++;
-                        logger(`PARTIAL WIN: ${t.s} Tầng ${pos.grids.length} | +${pnlGrid.toFixed(2)}$`, "WIN");
+                        logger(`WIN GRID: ${t.s} Tầng \${pos.grids.length} | +\${pnlGrid.toFixed(2)}$`, "WIN");
                         
                         pos.grids.pop();
                         if (pos.grids.length === 0) delete activePositions[t.s];
@@ -137,7 +137,7 @@ function initWS() {
                         const gap = isLong ? (lastEntry - price) / lastEntry : (price - lastEntry) / lastEntry;
                         if (gap * 100 >= botState.stepSize) {
                             pos.grids.push({ price, qty: botState.marginValue, time: Date.now() });
-                            logger(`DCA: ${t.s} tầng ${pos.grids.length}`, "DCA");
+                            logger(`DCA: ${t.s} tầng \${pos.grids.length}`, "DCA");
                         }
                     }
                 } else if (allSymbols.includes(t.s) && botState.running) {
@@ -155,7 +155,7 @@ function initWS() {
 }
 
 app.get('/api/data', (req, res) => {
-    let totalUnrealized = 0, totalGridsMatched = 0;
+    let unrealizedPnl = 0, totalGridsMatched = 0;
     const activeData = Object.values(activePositions).map(p => {
         const currentP = marketPrices[p.symbol] || 0;
         let pnl = 0;
@@ -168,7 +168,7 @@ app.get('/api/data', (req, res) => {
         const avgPrice = totalCost / totalSize;
         if (currentP > 0) {
             pnl = p.side === 'LONG' ? (currentP - avgPrice) * totalSize : (avgPrice - currentP) * totalSize;
-            totalUnrealized += pnl;
+            unrealizedPnl += pnl;
             totalGridsMatched += p.grids.length;
         }
 
@@ -195,7 +195,7 @@ app.get('/api/data', (req, res) => {
 
     res.json({ 
         state: botState, active: activeData, logs, levStats, history: pnlHistory,
-        stats: { today: getFilteredPnL(0), d7: getFilteredPnL(7), d30: getFilteredPnL(30), closedPnl: botState.closedPnl, unrealizedPnl: totalUnrealized, totalGridsMatched } 
+        stats: { today: getFilteredPnL(0), d7: getFilteredPnL(7), d30: getFilteredPnL(30), closedPnl: botState.closedPnl, unrealizedPnl, totalGridsMatched } 
     });
 });
 
