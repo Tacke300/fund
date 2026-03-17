@@ -1,5 +1,5 @@
-const TP_PERCENT = 0.1; // Chốt lời tại 1% (chưa tính đòn bẩy)
-const SL_PERCENT = 0.5; // Cắt lỗ tại 5% (chưa tính đòn bẩy)
+const TP_PERCENT = 0.1; 
+const SL_PERCENT = 0.3; 
 const MIN_VOLATILITY_TO_SAVE = 5; 
 const PORT = 9000;
 const HISTORY_FILE = './history_db.json';
@@ -11,19 +11,29 @@ import express from 'express';
 import fs from 'fs';
 import https from 'https';
 import crypto from 'crypto';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import { API_KEY, SECRET_KEY } from './config.js';
 
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 const app = express();
+
 let coinData = {}; 
 let historyMap = new Map(); 
 let symbolMaxLeverage = {}; 
 let lastTradeClosed = {}; 
 
+// --- FETCH LEVERAGE ---
 async function fetchActualLeverage() {
     const timestamp = Date.now();
     const query = `timestamp=${timestamp}`;
     const signature = crypto.createHmac('sha256', SECRET_KEY).update(query).digest('hex');
-    const options = { hostname: 'fapi.binance.com', path: `/fapi/v1/leverageBracket?${query}&signature=${signature}`, headers: { 'X-MBX-APIKEY': API_KEY } };
+    const options = { 
+        hostname: 'fapi.binance.com', 
+        path: `/fapi/v1/leverageBracket?${query}&signature=${signature}`, 
+        headers: { 'X-MBX-APIKEY': API_KEY } 
+    };
     https.get(options, (res) => {
         let data = '';
         res.on('data', chunk => data += chunk);
@@ -39,6 +49,7 @@ async function fetchActualLeverage() {
     });
 }
 
+// Load cache
 if (fs.existsSync(LEVERAGE_FILE)) { try { symbolMaxLeverage = JSON.parse(fs.readFileSync(LEVERAGE_FILE)); } catch(e){} }
 if (fs.existsSync(HISTORY_FILE)) {
     try {
@@ -47,12 +58,21 @@ if (fs.existsSync(HISTORY_FILE)) {
     } catch (e) {}
 }
 
+// --- LOGIC TÍNH BIẾN ĐỘNG (ĐÃ FIX ĐỂ HIỆN NGAY) ---
 function calculateChange(pArr, min) {
     if (!pArr || pArr.length < 2) return 0;
-    const start = pArr.find(i => i.t >= (pArr[pArr.length-1].t - min*60000));
-    return start ? parseFloat(((pArr[pArr.length-1].p - start.p) / start.p * 100).toFixed(2)) : 0;
+    const now = pArr[pArr.length - 1].t;
+    // Tìm giá gần nhất với mốc thời gian (hiện tại - min phút)
+    let start = pArr.find(i => i.t >= (now - min * 60000));
+    
+    // Nếu chưa đủ thời gian, lấy phần tử đầu tiên trong mảng để tính biến động tạm thời
+    if (!start) start = pArr[0]; 
+    
+    const diff = ((pArr[pArr.length - 1].p - start.p) / start.p) * 100;
+    return parseFloat(diff.toFixed(2));
 }
 
+// --- WEBSOCKET ---
 function initWS() {
     fetchActualLeverage();
     const ws = new WebSocket('wss://fstream.binance.com/ws/!ticker@arr');
@@ -62,11 +82,18 @@ function initWS() {
         tickers.forEach(t => {
             const s = t.s, p = parseFloat(t.c);
             if (!coinData[s]) coinData[s] = { symbol: s, prices: [] };
+            
             coinData[s].prices.push({ p, t: now });
-            if (coinData[s].prices.length > 100) coinData[s].prices.shift();
-            const c1 = calculateChange(coinData[s].prices, 1), c5 = calculateChange(coinData[s].prices, 5), c15 = calculateChange(coinData[s].prices, 15);
+            // Giữ lại 300 điểm giá để tính được cả khung 15p (15 * 20 ticks/p)
+            if (coinData[s].prices.length > 300) coinData[s].prices.shift();
+
+            const c1 = calculateChange(coinData[s].prices, 1);
+            const c5 = calculateChange(coinData[s].prices, 5);
+            const c15 = calculateChange(coinData[s].prices, 15);
+            
             coinData[s].live = { c1, c5, c15, currentPrice: p };
             
+            // Logic quét lệnh ảo (Pending)
             const pending = Array.from(historyMap.values()).find(h => h.symbol === s && h.status === 'PENDING');
             if (pending) {
                 const diff = ((p - pending.snapPrice) / pending.snapPrice) * 100;
@@ -96,18 +123,30 @@ function initWS() {
             }
         });
     });
+    ws.on('error', () => setTimeout(initWS, 5000));
+    ws.on('close', () => setTimeout(initWS, 5000));
 }
 
+// --- API DATA (FIXED TOP 5) ---
 app.get('/api/data', (req, res) => {
     const all = Array.from(historyMap.values());
+    
+    // Lọc và lấy Top 5 biến động mạnh nhất (tính theo c1)
+    const topLive = Object.entries(coinData)
+        .filter(([_, v]) => v.live)
+        .map(([s, v]) => ({ symbol: s, ...v.live }))
+        .sort((a, b) => Math.abs(b.c1) - Math.abs(a.c1))
+        .slice(0, 5); // CHỈ LẤY TOP 5
+
     res.json({ 
-        live: Object.entries(coinData).filter(([_, v]) => v.live).map(([s,v])=>({symbol:s,...v.live})).sort((a,b)=>Math.abs(b.c1)-Math.abs(a.c1)).slice(0,15),
+        live: topLive,
         pending: all.filter(h => h.status === 'PENDING'),
         history: all.filter(h => h.status !== 'PENDING').sort((a,b)=>b.endTime-a.endTime).slice(0,100),
         config: { tp: TP_PERCENT, sl: SL_PERCENT }
     });
 });
 
+// --- GUI ROUTE ---
 app.get('/gui', (req, res) => {
     res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Binance Luffy Pro v2</title><script src="https://cdn.tailwindcss.com"></script><script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -156,8 +195,11 @@ app.get('/gui', (req, res) => {
 
     <div class="px-4 mb-4">
         <div class="bg-card rounded-lg p-3">
-             <div class="text-10 font-bold text-gray-custom mb-3 uppercase italic border-b border-zinc-800 pb-1">Biến động thị trường</div>
-             <table class="w-full text-12 text-left"><tbody id="liveBody"></tbody></table>
+             <div class="text-10 font-bold text-gray-custom mb-3 uppercase italic border-b border-zinc-800 pb-1">Top 5 Biến động thị trường</div>
+             <table class="w-full text-12 text-left">
+                <thead><tr class="text-gray-custom text-[10px]"><th>COIN</th><th class="text-center">1M</th><th class="text-center">5M</th><th class="text-right">15M</th></tr></thead>
+                <tbody id="liveBody"></tbody>
+             </table>
         </div>
     </div>
 
@@ -172,7 +214,6 @@ app.get('/gui', (req, res) => {
                             <th class="pb-2">Coin/Snapshot</th>
                             <th class="pb-2 text-center">Lev</th>
                             <th class="pb-2">Vào/Ra</th>
-                            <th class="pb-2">Margin</th>
                             <th class="pb-2 text-white">PnL</th>
                             <th class="pb-2 text-right">Balance</th>
                         </tr>
@@ -210,9 +251,9 @@ app.get('/gui', (req, res) => {
 
             document.getElementById('liveBody').innerHTML = (d.live || []).map(c => 
                 \`<tr class="border-b border-zinc-800/50"><td class="py-2 font-bold text-white">\${c.symbol}</td>
-                <td class="\${c.c1>=0?'up':'down'} text-center">\${c.c1}%</td>
-                <td class="\${c.c5>=0?'up':'down'} text-center">\${c.c5}%</td>
-                <td class="\${c.c15>=0?'up':'down'} text-right">\${c.c15}%</td></tr>\`
+                <td class="\${c.c1>=0?'up':'down'} text-center font-medium">\${c.c1}%</td>
+                <td class="\${c.c5>=0?'up':'down'} text-center font-medium">\${c.c5}%</td>
+                <td class="\${c.c15>=0?'up':'down'} text-right font-medium">\${c.c15}%</td></tr>\`
             ).join('');
 
             let runningBal = initialBal;
@@ -226,7 +267,6 @@ app.get('/gui', (req, res) => {
                     <td><b class="text-white">\${h.symbol}</b><br><span class="text-zinc-500">\${vol.c1}|\${vol.c5}|\${vol.c15}</span></td>
                     <td class="text-center">\${h.maxLev}x</td>
                     <td>\${(h.snapPrice||0).toFixed(4)}<br>\${(h.finalPrice||0).toFixed(4)}</td>
-                    <td>\${margin.toFixed(1)}</td>
                     <td class="font-bold \${pnl>=0?'up':'down'}">\${pnl>=0?'+':''}\${pnl.toFixed(2)}</td>
                     <td class="text-right \${runningBal>=initialBal?'up':'down'}">\${runningBal.toFixed(1)}</td>
                 </tr>\`;
@@ -245,35 +285,17 @@ app.get('/gui', (req, res) => {
                 let pnl = margin * roi / 100;
                 totalUnPnl += pnl;
 
-                let tpPrice = h.type === 'UP' ? h.snapPrice * (1 + d.config.tp/100) : h.snapPrice * (1 - d.config.tp/100);
-                let slPrice = h.type === 'UP' ? h.snapPrice * (1 - d.config.sl/100) : h.snapPrice * (1 + d.config.sl/100);
-                let liqPrice = h.type === 'UP' ? h.snapPrice * (1 - 0.8 / h.maxLev) : h.snapPrice * (1 + 0.8 / h.maxLev);
-
                 return \`<div class="bg-card p-3 rounded-md border-l-4 \${h.type==='UP'?'border-green-500':'border-red-500'}">
-                    <div class="flex justify-between items-start mb-2">
+                    <div class="flex justify-between items-start">
                         <div>
-                            <div class="flex items-center gap-2">
-                                <span class="text-lg font-bold text-white">\${h.symbol}</span>
-                                <span class="bg-zinc-800 text-[10px] px-1 rounded text-zinc-400">Vĩnh cửu</span>
-                                <span class="bg-zinc-800 text-[10px] px-1 rounded text-[#fcd535]">\${h.maxLev}x</span>
-                            </div>
-                            <div class="text-[10px] \${h.type==='UP'?'up':'down'} font-bold mt-1">\${h.type==='UP'?'Long':'Short'} | Isolated</div>
+                            <span class="text-lg font-bold text-white">\${h.symbol}</span>
+                            <span class="bg-zinc-800 text-[10px] px-1 rounded text-[#fcd535]">\${h.maxLev}x</span>
+                            <div class="text-[10px] \${h.type==='UP'?'up':'down'} font-bold">\${h.type==='UP'?'Long':'Short'}</div>
                         </div>
                         <div class="text-right">
-                            <div class="text-gray-custom text-[10px]">PnL chưa chốt (USDT)</div>
                             <div class="text-lg font-bold \${pnl>=0?'up':'down'}">\${pnl>=0?'+':''}\${pnl.toFixed(2)}</div>
                             <div class="text-[11px] font-medium \${roi>=0?'up':'down'}">ROI \${roi>=0?'+':''}\${roi.toFixed(2)}%</div>
                         </div>
-                    </div>
-                    <div class="grid grid-cols-3 gap-2 mt-3 text-[11px]">
-                        <div><div class="text-gray-custom">Ký quỹ</div><div class="text-white font-medium">\${margin.toFixed(2)}</div></div>
-                        <div><div class="text-gray-custom">Giá vào lệnh</div><div class="text-white font-medium">\${h.snapPrice.toFixed(4)}</div></div>
-                        <div class="text-right"><div class="text-gray-custom">Giá đánh dấu</div><div class="text-white font-medium">\${livePrice.toFixed(4)}</div></div>
-                    </div>
-                    <div class="grid grid-cols-3 gap-2 mt-2 text-[11px] border-t border-zinc-800/50 pt-2">
-                         <div><div class="text-gray-custom">Giá thanh lý</div><div class="text-orange-400 font-medium">\${liqPrice.toFixed(4)}</div></div>
-                         <div><div class="text-gray-custom">TP (Target)</div><div class="up font-medium">\${tpPrice.toFixed(4)}</div></div>
-                         <div class="text-right"><div class="text-gray-custom">SL (Stop)</div><div class="down font-medium">\${slPrice.toFixed(4)}</div></div>
                     </div>
                 </div>\`;
             }).join('');
@@ -298,4 +320,4 @@ app.get('/gui', (req, res) => {
     </script></body></html>`);
 });
 
-app.listen(PORT, '0.0.0.0', () => { initWS(); console.log(`Server: http://localhost:${PORT}/gui`); });
+app.listen(PORT, '0.0.0.0', () => { initWS(); console.log(`\n\x1b[32m[SERVER RUNNING] http://localhost:${PORT}/gui\x1b[0m\n`); });
