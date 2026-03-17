@@ -16,8 +16,8 @@ let botSettings = { isRunning: false, maxPositions: 10, invValue: 1.5, invType: 
 let status = { currentBalance: 0, botLogs: [], exchangeInfo: {}, candidatesList: [] };
 
 let botManagedSymbols = []; 
-let pendingSymbols = new Set(); // Chặn cleanup khi đang xử lý lệnh
-let missingCount = new Map();   // Xác nhận vị thế đóng thực sự (tránh lag API)
+let pendingSymbols = new Set();
+let missingCount = new Map();
 
 // --- HELPER FUNCTIONS ---
 function addBotLog(msg, type = 'info') {
@@ -56,20 +56,19 @@ async function tryOrder(params) {
     catch (e) { return { error: e.msg || e.code || "UNKNOWN_ERR" }; }
 }
 
-// --- HÀM BẢO VỆ (FIXED) ---
+// --- HÀM BẢO VỆ ---
 async function enforceBaoVe(symbol, side, type, price) {
     const closeSide = side === 'LONG' ? 'SELL' : 'BUY';
     const orderType = type === 'TP' ? 'TAKE_PROFIT_MARKET' : 'STOP_MARKET';
     
-    // Tuyệt đối không dùng LIMIT thuần ở đây để tránh tự đóng lệnh
     let res = await tryOrder({
         symbol,
         side: closeSide,
         positionSide: side,
         type: orderType,
         stopPrice: price,
-        workingType: 'LAST_PRICE', // Khớp theo giá nến thực tế
-        closePosition: 'true'      // Tự đóng hết khối lượng, không lo lỗi qty=0
+        workingType: 'LAST_PRICE',
+        closePosition: 'true'
     });
 
     if (!res.error) {
@@ -80,7 +79,7 @@ async function enforceBaoVe(symbol, side, type, price) {
     return false;
 }
 
-// --- HÀM HUNT (FIXED LOGIC) ---
+// --- HÀM HUNT ---
 async function hunt() {
     if (status.candidatesList.length === 0 || !botSettings.isRunning) return;
     if (botManagedSymbols.length >= botSettings.maxPositions) return;
@@ -113,7 +112,6 @@ async function hunt() {
 
             if (order.orderId) {
                 botManagedSymbols.push(c.symbol);
-                // Đợi sàn cập nhật vị thế
                 await new Promise(r => setTimeout(r, 2000));
                 
                 const pCheck = await callBinance('/fapi/v2/positionRisk');
@@ -134,7 +132,7 @@ async function hunt() {
     } catch (e) { pendingSymbols.clear(); }
 }
 
-// --- HÀM CLEANUP (XÁC NHẬN 3 LẦN) ---
+// --- HÀM CLEANUP ---
 async function cleanup() {
     try {
         const positions = await callBinance('/fapi/v2/positionRisk');
@@ -148,7 +146,7 @@ async function cleanup() {
                 let count = (missingCount.get(s) || 0) + 1;
                 missingCount.set(s, count);
 
-                if (count >= 3) { // Phải mất tích 3 lần kiểm tra mới dọn dẹp
+                if (count >= 3) {
                     addBotLog(`🏁 [${s}] Đã đóng. Dọn dẹp...`, "warn");
                     await callBinance('/fapi/v1/allOpenOrders', 'DELETE', { symbol: s }).catch(()=>{});
                     botManagedSymbols.splice(i, 1);
@@ -161,15 +159,34 @@ async function cleanup() {
     } catch (e) {}
 }
 
-// --- SERVER & INIT ---
+// --- SERVER & ROUTES (FIXED) ---
 const APP = express();
 APP.use(express.json());
+
+// Phục vụ các file tĩnh (CSS, JS) cùng thư mục
+APP.use(express.static(__dirname));
+
+// Route chính trả về index.html
+APP.get('/', (req, res) => {
+    res.sendFile(path.join(__dirname, 'index.html'));
+});
+
+// API cập nhật trạng thái
 APP.get('/api/status', async (req, res) => {
     try {
         const acc = await callBinance('/fapi/v2/account');
         status.currentBalance = parseFloat(acc.totalMarginBalance);
         res.json({ botSettings, botRunningSlots: botManagedSymbols, status });
-    } catch (e) { res.status(500).send("ERR"); }
+    } catch (e) { 
+        res.status(500).json({ error: "ERR_API" }); 
+    }
+});
+
+// API nhận lệnh update setting từ UI
+APP.post('/api/settings', (req, res) => {
+    botSettings = { ...botSettings, ...req.body };
+    addBotLog("⚙️ Đã cập nhật cài đặt từ UI", "warn");
+    res.json({ success: true });
 });
 
 async function init() {
@@ -205,4 +222,9 @@ init();
 setInterval(fetchCandidates, 2000);
 setInterval(hunt, 4000);
 setInterval(cleanup, 8000);
-APP.listen(9001, '0.0.0.0');
+
+// Chạy server tại port 9001
+const PORT = 9001;
+APP.listen(PORT, '0.0.0.0', () => {
+    console.log(`\n\x1b[32m[SERVER] Dashboard: http://localhost:${PORT}\x1b[0m\n`);
+});
