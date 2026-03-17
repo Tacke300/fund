@@ -12,7 +12,7 @@ chromium.use(stealthPlugin());
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const app = express();
-const port = 8888; 
+const port = 8887; 
 const userDataDir = path.join(__dirname, 'bot_session_final');
 
 let isRunning = false;
