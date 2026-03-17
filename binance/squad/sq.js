@@ -4,7 +4,6 @@ import express from 'express';
 import path from 'path';
 import axios from 'axios';
 import { fileURLToPath } from 'url';
-import { execSync } from 'child_process';
 
 const chromium = playwrightChromium;
 chromium.use(stealthPlugin());
@@ -22,27 +21,11 @@ let context = null;
 let mainPage = null;
 let coinQueue = [];
 
-// --- TỰ ĐỘNG CÀI ĐẶT DRIVER NẾU THIẾU ---
-try {
-    console.log("Checking browser drivers...");
-    execSync('npx playwright install chromium');
-} catch (e) {
-    console.log("Sử dụng driver hiện có...");
-}
-
+// --- DỮ LIỆU NỘI DUNG ---
 const intros = Array.from({ length: 300 }, (_, i) => `Nhận định mã COIN phiên số ${i+1}. Sóng đang đẹp.`.replace("COIN", "COIN"));
 const bodies = Array.from({ length: 300 }, (_, i) => `Phân tích: Biến động CHANGE% cho thấy lực mua đang áp đảo.`.replace("CHANGE%", "CHANGE%"));
 const closings = Array.from({ length: 300 }, (_, i) => `Chúc thắng lợi kèo số ${i+1}! Kỷ luật thép.`);
 const cryptoQuestions = Array.from({ length: 300 }, (_, i) => `Thảo luận ${i+1}: Anh em kỳ vọng gì ở nhịp này của BTC?`);
-
-async function killChrome() {
-    try { 
-        if (process.platform === 'win32') {
-            execSync('taskkill /F /IM chrome.exe /T 2>nul || exit 0');
-            execSync('taskkill /F /IM chromium.exe /T 2>nul || exit 0');
-        } 
-    } catch (e) {}
-}
 
 async function humanType(page, text) {
     for (const char of text) {
@@ -58,13 +41,9 @@ async function postTask() {
             console.log("Đang khởi tạo trình duyệt...");
             context = await chromium.launchPersistentContext(userDataDir, {
                 headless: false,
-                viewport: null, // Mở full màn hình
-                args: [
-                    '--start-maximized',
-                    '--disable-blink-features=AutomationControlled',
-                    '--no-sandbox',
-                    '--password-store=basic'
-                ]
+                channel: 'chrome', // Chạy bằng Chrome thật trên máy
+                viewport: null,
+                args: ['--start-maximized', '--no-sandbox', '--disable-blink-features=AutomationControlled']
             });
             context.on('close', () => { context = null; mainPage = null; });
         }
@@ -73,7 +52,7 @@ async function postTask() {
             mainPage = await context.newPage();
         }
 
-        await mainPage.bringToFront(); // Ép cửa sổ ra phía trước
+        await mainPage.bringToFront();
         await mainPage.goto('https://www.binance.com/vi/square', { waitUntil: 'domcontentloaded', timeout: 60000 });
         
         const textbox = mainPage.locator('div[contenteditable="true"]').first();
@@ -106,32 +85,30 @@ async function postTask() {
             await new Promise(r => setTimeout(r, (Math.floor(Math.random() * 60) + 60) * 1000));
         }
     } catch (err) {
-        let msg = err.message.substring(0, 100);
-        console.error(`❌ Lỗi: ${msg}`);
-        history.unshift({ time: new Date().toLocaleTimeString(), status: `Lỗi: ${msg}` });
-
-        if (err.message.includes('closed') || err.message.includes('Target closed')) {
+        console.error(`❌ Lỗi luồng: ${err.message}`);
+        history.unshift({ time: new Date().toLocaleTimeString(), status: `Lỗi: ${err.message.substring(0, 50)}...` });
+        
+        if (err.message.includes('closed')) {
             context = null; mainPage = null;
-            await killChrome();
         }
         await new Promise(r => setTimeout(r, 10000));
     }
     if (isRunning) postTask();
 }
 
-// --- GIAO DIỆN ĐIỀU KHIỂN ---
+// --- GIAO DIỆN ---
 app.get('/', (req, res) => {
     res.send(`<html><body style="background:#0b0e11;color:#fff;text-align:center;padding:50px;font-family:sans-serif;">
-        <h1 style="color:#f0b90b;">SQUARE BOT PRO</h1>
+        <h1 style="color:#f0b90b;">SQUARE BOT FIX-SELF-KILL</h1>
         <div id="st" style="font-size:20px;margin-bottom:20px;">Kết nối...</div>
         <div style="border:1px dashed #444; padding:20px; max-width:400px; margin:auto; background:#181a20; border-radius:10px;">
-            <button style="width:100%;padding:15px;background:#f0b90b;border:none;border-radius:5px;font-weight:bold;cursor:pointer;margin-bottom:10px;" onclick="call('/login')">1. LOGIN (HIỆN CHROME)</button>
+            <button style="width:100%;padding:15px;background:#f0b90b;border:none;border-radius:5px;font-weight:bold;cursor:pointer;margin-bottom:10px;" onclick="call('/login')">1. LOGIN (MỞ CHROME ĐỨNG YÊN)</button>
             <button style="width:48%;padding:15px;background:#2ebd85;color:#fff;border:none;border-radius:5px;font-weight:bold;cursor:pointer;" onclick="call('/start')">2. CHẠY AUTO</button>
             <button style="width:48%;padding:15px;background:#f6465d;color:#fff;border:none;border-radius:5px;font-weight:bold;cursor:pointer;" onclick="call('/stop')">DỪNG</button>
         </div>
         <div id="log" style="margin-top:20px;text-align:left;max-width:400px;margin:20px auto;font-size:12px;color:#848e9c;background:#1e2329;padding:15px;border-radius:5px;height:150px;overflow-y:auto;"></div>
         <script>
-            function call(u){ fetch(u).then(r=>r.json()).then(d=> d.error ? alert(d.error) : alert(d.msg)); }
+            function call(u){ fetch(u).then(r=>r.json()).then(d=> alert(d.msg || d.error)); }
             setInterval(()=>{
                 fetch('/stats').then(r=>r.json()).then(d=>{
                     document.getElementById('st').innerHTML = (d.isRunning?'<span style="color:#2ebd85;">🟢 ĐANG CHẠY</span>':'<span style="color:#f6465d;">🔴 ĐÃ DỪNG</span>') + ' | Tổng: ' + d.totalPosts;
@@ -147,19 +124,25 @@ app.get('/stats', (req, res) => res.json({ isRunning, totalPosts, history }));
 app.get('/login', async (req, res) => {
     isRunning = false; 
     try {
-        await killChrome();
+        // Chỉ đóng context cũ nếu có, không kill chrome toàn hệ thống
+        if (context) {
+            await context.close().catch(() => {});
+            context = null;
+        }
+
         context = await chromium.launchPersistentContext(userDataDir, { 
             headless: false, 
+            channel: 'chrome',
             viewport: null,
-            args: ['--start-maximized', '--no-sandbox', '--password-store=basic'] 
+            args: ['--start-maximized', '--no-sandbox'] 
         });
+
         mainPage = await context.newPage();
         await mainPage.bringToFront();
         await mainPage.goto('https://www.binance.com/vi/square');
-        res.json({ msg: "Chrome đã mở! Hãy đăng nhập bằng tay rồi bấm Chạy Auto." });
+        res.json({ msg: "Chrome đã mở và sẽ đứng yên để ông login!" });
     } catch (err) {
-        console.error("Lỗi login:", err);
-        res.json({ error: "Không mở được Chrome: " + err.message });
+        res.json({ error: "Lỗi mở Chrome: " + err.message });
     }
 });
 
@@ -173,8 +156,5 @@ app.get('/start', (req, res) => {
 app.get('/stop', (req, res) => { isRunning = false; res.json({ msg: "Đã dừng bot." }); });
 
 app.listen(port, '0.0.0.0', () => {
-    console.log(`=============================================`);
-    console.log(`BOT LIVE TẠI: http://localhost:${port}`);
-    console.log(`LƯU Ý: CHẠY BẰNG LỆNH 'node file.js' ĐỂ HIỆN CHROME`);
-    console.log(`=============================================`);
+    console.log(`Bot live tại: http://localhost:${port}`);
 });
