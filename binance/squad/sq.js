@@ -22,7 +22,7 @@ let context = null;
 let mainPage = null;
 let coinQueue = [];
 
-// --- TỰ ĐỘNG CÀI ĐẶT DRIVER NẾU THIẾU (PHƯƠNG ÁN DỰ PHÒNG 1) ---
+// --- TỰ ĐỘNG CÀI ĐẶT DRIVER NẾU THIẾU ---
 try {
     console.log("Checking browser drivers...");
     execSync('npx playwright install chromium');
@@ -50,7 +50,7 @@ async function humanType(page, text) {
     }
 }
 
-// --- LUỒNG CHÍNH VỚI LOG LỖI CHI TIẾT ---
+// --- LUỒNG CHÍNH ---
 async function postTask() {
     if (!isRunning) return;
     try {
@@ -58,11 +58,11 @@ async function postTask() {
             console.log("Đang khởi tạo trình duyệt...");
             context = await chromium.launchPersistentContext(userDataDir, {
                 headless: false,
+                viewport: null, // Mở full màn hình
                 args: [
+                    '--start-maximized',
                     '--disable-blink-features=AutomationControlled',
                     '--no-sandbox',
-                    '--disable-gpu',
-                    '--disable-dev-shm-usage',
                     '--password-store=basic'
                 ]
             });
@@ -73,10 +73,11 @@ async function postTask() {
             mainPage = await context.newPage();
         }
 
+        await mainPage.bringToFront(); // Ép cửa sổ ra phía trước
         await mainPage.goto('https://www.binance.com/vi/square', { waitUntil: 'domcontentloaded', timeout: 60000 });
         
         const textbox = mainPage.locator('div[contenteditable="true"]').first();
-        await textbox.waitFor({ state: 'visible', timeout: 15000 });
+        await textbox.waitFor({ state: 'visible', timeout: 20000 });
 
         let content = "";
         if (totalPosts > 0 && totalPosts % 4 === 0) {
@@ -101,19 +102,16 @@ async function postTask() {
         if (await btn.isEnabled()) {
             await btn.click();
             totalPosts++;
-            history.unshift({ time: new Date().toLocaleTimeString(), status: `Thành công: $${c?.symbol || 'bài viết'}` });
+            history.unshift({ time: new Date().toLocaleTimeString(), status: `Đã đăng: $${content.split(' ')[1] || 'bài'}` });
             await new Promise(r => setTimeout(r, (Math.floor(Math.random() * 60) + 60) * 1000));
         }
     } catch (err) {
-        let errMsg = err.message.substring(0, 100);
-        console.error(`❌ LỖI HỆ THỐNG: ${errMsg}`);
-        history.unshift({ time: new Date().toLocaleTimeString(), status: `Lỗi: ${errMsg}` });
+        let msg = err.message.substring(0, 100);
+        console.error(`❌ Lỗi: ${msg}`);
+        history.unshift({ time: new Date().toLocaleTimeString(), status: `Lỗi: ${msg}` });
 
-        // PHƯƠNG ÁN DỰ PHÒNG: Reset session nếu lỗi nặng
-        if (err.message.includes('closed') || err.message.includes('Target closed') || err.message.includes('launch')) {
-            console.log("Đang thực hiện phương án dự phòng: Khởi động lại trình duyệt...");
-            context = null; 
-            mainPage = null;
+        if (err.message.includes('closed') || err.message.includes('Target closed')) {
+            context = null; mainPage = null;
             await killChrome();
         }
         await new Promise(r => setTimeout(r, 10000));
@@ -121,26 +119,23 @@ async function postTask() {
     if (isRunning) postTask();
 }
 
+// --- GIAO DIỆN ĐIỀU KHIỂN ---
 app.get('/', (req, res) => {
     res.send(`<html><body style="background:#0b0e11;color:#fff;text-align:center;padding:50px;font-family:sans-serif;">
-        <h1 style="color:#f0b90b;">SQUARE BOT PRO - DEBUG MODE</h1>
+        <h1 style="color:#f0b90b;">SQUARE BOT PRO</h1>
         <div id="st" style="font-size:20px;margin-bottom:20px;">Kết nối...</div>
-        <div style="border:1px dashed #444; padding:15px; max-width:500px; margin:auto; background:#181a20;">
-            <button style="width:100%;padding:15px;background:#f0b90b;border:none;border-radius:5px;font-weight:bold;cursor:pointer;margin-bottom:10px;" onclick="call('/login')">1. LOGIN (MỞ TRÌNH DUYỆT)</button>
+        <div style="border:1px dashed #444; padding:20px; max-width:400px; margin:auto; background:#181a20; border-radius:10px;">
+            <button style="width:100%;padding:15px;background:#f0b90b;border:none;border-radius:5px;font-weight:bold;cursor:pointer;margin-bottom:10px;" onclick="call('/login')">1. LOGIN (HIỆN CHROME)</button>
             <button style="width:48%;padding:15px;background:#2ebd85;color:#fff;border:none;border-radius:5px;font-weight:bold;cursor:pointer;" onclick="call('/start')">2. CHẠY AUTO</button>
             <button style="width:48%;padding:15px;background:#f6465d;color:#fff;border:none;border-radius:5px;font-weight:bold;cursor:pointer;" onclick="call('/stop')">DỪNG</button>
         </div>
-        <div id="log" style="margin-top:20px;text-align:left;max-width:500px;margin:20px auto;font-size:12px;color:#848e9c;background:#1e2329;padding:15px;border-radius:5px;height:200px;overflow-y:auto;"></div>
+        <div id="log" style="margin-top:20px;text-align:left;max-width:400px;margin:20px auto;font-size:12px;color:#848e9c;background:#1e2329;padding:15px;border-radius:5px;height:150px;overflow-y:auto;"></div>
         <script>
-            function call(u){ 
-                fetch(u).then(r=>r.json())
-                .then(d=> { if(d.error) alert('LỖI: ' + d.error); else alert(d.msg); })
-                .catch(e=> alert('Không kết nối được tới Server bot')); 
-            }
+            function call(u){ fetch(u).then(r=>r.json()).then(d=> d.error ? alert(d.error) : alert(d.msg)); }
             setInterval(()=>{
                 fetch('/stats').then(r=>r.json()).then(d=>{
-                    document.getElementById('st').innerHTML = (d.isRunning?'<span style="color:#2ebd85;">🟢 ĐANG CHẠY</span>':'<span style="color:#f6465d;">🔴 ĐÃ DỪNG</span>') + ' | Tổng bài: ' + d.totalPosts;
-                    document.getElementById('log').innerHTML = d.history.map(h=>\`<div style="margin-bottom:5px;border-bottom:1px solid #333;">[\${h.time}] \${h.status}</div>\`).join('');
+                    document.getElementById('st').innerHTML = (d.isRunning?'<span style="color:#2ebd85;">🟢 ĐANG CHẠY</span>':'<span style="color:#f6465d;">🔴 ĐÃ DỪNG</span>') + ' | Tổng: ' + d.totalPosts;
+                    document.getElementById('log').innerHTML = d.history.map(h=>'<div>['+h.time+'] '+h.status+'</div>').join('');
                 });
             },2000);
         </script>
@@ -153,42 +148,33 @@ app.get('/login', async (req, res) => {
     isRunning = false; 
     try {
         await killChrome();
-        // Xử lý lỗi thư mục bị lock (Dự phòng 2)
-        try {
-            context = await chromium.launchPersistentContext(userDataDir, { 
-                headless: false, 
-                args: ['--disable-gpu', '--no-sandbox', '--password-store=basic'] 
-            });
-        } catch (lockErr) {
-            console.log("Thư mục session bị khóa, đang thử khởi tạo lại...");
-            await killChrome();
-            await new Promise(r => setTimeout(r, 2000));
-            context = await chromium.launchPersistentContext(userDataDir, { headless: false });
-        }
-
+        context = await chromium.launchPersistentContext(userDataDir, { 
+            headless: false, 
+            viewport: null,
+            args: ['--start-maximized', '--no-sandbox', '--password-store=basic'] 
+        });
         mainPage = await context.newPage();
+        await mainPage.bringToFront();
         await mainPage.goto('https://www.binance.com/vi/square');
-        res.json({ msg: "Trình duyệt đã mở. Hãy đăng nhập ngay!" });
+        res.json({ msg: "Chrome đã mở! Hãy đăng nhập bằng tay rồi bấm Chạy Auto." });
     } catch (err) {
-        console.error("LỖI KHÔNG MỞ ĐƯỢC CHROME:", err);
-        res.json({ error: err.message });
+        console.error("Lỗi login:", err);
+        res.json({ error: "Không mở được Chrome: " + err.message });
     }
 });
 
 app.get('/start', (req, res) => { 
-    if(!context) return res.json({ error: "Chưa mở trình duyệt. Bấm Login trước!" });
+    if(!context) return res.json({ error: "Phải bấm LOGIN trước!" });
     isRunning = true; 
     postTask(); 
-    res.json({ msg: "Bot đã kích hoạt!" }); 
+    res.json({ msg: "Bot bắt đầu chạy!" }); 
 });
 
-app.get('/stop', (req, res) => { isRunning = false; res.json({ msg: "Bot tạm dừng." }); });
+app.get('/stop', (req, res) => { isRunning = false; res.json({ msg: "Đã dừng bot." }); });
 
 app.listen(port, '0.0.0.0', () => {
-    console.log(`
-    =============================================
-    BOT ĐANG CHẠY TẠI: http://localhost:${port}
-    Nếu Chrome không hiện, hãy kiểm tra log Terminal này.
-    =============================================
-    `);
+    console.log(`=============================================`);
+    console.log(`BOT LIVE TẠI: http://localhost:${port}`);
+    console.log(`LƯU Ý: CHẠY BẰNG LỆNH 'node file.js' ĐỂ HIỆN CHROME`);
+    console.log(`=============================================`);
 });
