@@ -21,7 +21,15 @@ let context = null;
 let mainPage = null;
 let coinQueue = [];
 
-// --- DỮ LIỆU NỘI DUNG ---
+// --- TERMINAL LOG SYSTEM ---
+function logBot(type, message, data = "") {
+    const time = new Date().toLocaleTimeString();
+    const icon = type === 'error' ? '❌' : type === 'warn' ? '⚠️' : 'ℹ️';
+    console.log(`${icon} [${time}] ${message}`);
+    if (data) console.error(data);
+}
+
+// --- DỮ LIỆU ĐẦY ĐỦ 1200 CÂU ---
 const intros = Array.from({ length: 300 }, (_, i) => `Nhận định mã COIN phiên số ${i+1}. Sóng đang đẹp.`.replace("COIN", "COIN"));
 const bodies = Array.from({ length: 300 }, (_, i) => `Phân tích: Biến động CHANGE% cho thấy lực mua đang áp đảo.`.replace("CHANGE%", "CHANGE%"));
 const closings = Array.from({ length: 300 }, (_, i) => `Chúc thắng lợi kèo số ${i+1}! Kỷ luật thép.`);
@@ -38,11 +46,9 @@ async function postTask() {
     if (!isRunning) return;
     try {
         if (!context) {
-            console.log("Đang khởi tạo trình duyệt...");
+            logBot('info', "Đang khởi tạo trình duyệt từ Auto...");
             context = await chromium.launchPersistentContext(userDataDir, {
                 headless: false,
-                channel: 'chrome', // Chạy bằng Chrome thật trên máy
-                viewport: null,
                 args: ['--start-maximized', '--no-sandbox', '--disable-blink-features=AutomationControlled']
             });
             context.on('close', () => { context = null; mainPage = null; });
@@ -52,7 +58,7 @@ async function postTask() {
             mainPage = await context.newPage();
         }
 
-        await mainPage.bringToFront();
+        logBot('info', "Đang vào Binance Square...");
         await mainPage.goto('https://www.binance.com/vi/square', { waitUntil: 'domcontentloaded', timeout: 60000 });
         
         const textbox = mainPage.locator('div[contenteditable="true"]').first();
@@ -63,6 +69,7 @@ async function postTask() {
             content = cryptoQuestions[Math.floor(Math.random() * 300)];
         } else {
             if (coinQueue.length === 0) {
+                logBot('info', "Đang lấy giá coin từ API Binance...");
                 const res = await axios.get('https://fapi.binance.com/fapi/v1/ticker/24hr');
                 coinQueue = res.data.filter(c => c.symbol.endsWith('USDT')).map(c => ({
                     symbol: c.symbol.replace('USDT', ''), price: c.lastPrice, change: c.priceChangePercent
@@ -81,13 +88,12 @@ async function postTask() {
         if (await btn.isEnabled()) {
             await btn.click();
             totalPosts++;
-            history.unshift({ time: new Date().toLocaleTimeString(), status: `Đã đăng: $${content.split(' ')[1] || 'bài'}` });
+            logBot('info', `Đã đăng bài cho $${content.split(' ')[1] || 'bài'}. Tổng: ${totalPosts}`);
+            history.unshift({ time: new Date().toLocaleTimeString(), status: `Đã đăng $${content.split(' ')[1] || 'bài'}` });
             await new Promise(r => setTimeout(r, (Math.floor(Math.random() * 60) + 60) * 1000));
         }
     } catch (err) {
-        console.error(`❌ Lỗi luồng: ${err.message}`);
-        history.unshift({ time: new Date().toLocaleTimeString(), status: `Lỗi: ${err.message.substring(0, 50)}...` });
-        
+        logBot('error', "LỖI TRONG LUỒNG AUTO:", err.message);
         if (err.message.includes('closed')) {
             context = null; mainPage = null;
         }
@@ -96,13 +102,13 @@ async function postTask() {
     if (isRunning) postTask();
 }
 
-// --- GIAO DIỆN ---
+// --- GIAO DIỆN & API ---
 app.get('/', (req, res) => {
     res.send(`<html><body style="background:#0b0e11;color:#fff;text-align:center;padding:50px;font-family:sans-serif;">
-        <h1 style="color:#f0b90b;">SQUARE BOT FIX-SELF-KILL</h1>
-        <div id="st" style="font-size:20px;margin-bottom:20px;">Kết nối...</div>
+        <h1 style="color:#f0b90b;">SQUARE BOT FULL - DEBUG MODE</h1>
+        <div id="st" style="font-size:18px;margin-bottom:20px;">Kết nối...</div>
         <div style="border:1px dashed #444; padding:20px; max-width:400px; margin:auto; background:#181a20; border-radius:10px;">
-            <button style="width:100%;padding:15px;background:#f0b90b;border:none;border-radius:5px;font-weight:bold;cursor:pointer;margin-bottom:10px;" onclick="call('/login')">1. LOGIN (MỞ CHROME ĐỨNG YÊN)</button>
+            <button style="width:100%;padding:15px;background:#f0b90b;border:none;border-radius:5px;font-weight:bold;cursor:pointer;margin-bottom:10px;" onclick="call('/login')">1. LOGIN (HIỆN CHROME)</button>
             <button style="width:48%;padding:15px;background:#2ebd85;color:#fff;border:none;border-radius:5px;font-weight:bold;cursor:pointer;" onclick="call('/start')">2. CHẠY AUTO</button>
             <button style="width:48%;padding:15px;background:#f6465d;color:#fff;border:none;border-radius:5px;font-weight:bold;cursor:pointer;" onclick="call('/stop')">DỪNG</button>
         </div>
@@ -123,38 +129,45 @@ app.get('/stats', (req, res) => res.json({ isRunning, totalPosts, history }));
 
 app.get('/login', async (req, res) => {
     isRunning = false; 
+    logBot('warn', "Yêu cầu mở trình duyệt để Login tay.");
     try {
-        // Chỉ đóng context cũ nếu có, không kill chrome toàn hệ thống
         if (context) {
             await context.close().catch(() => {});
             context = null;
         }
-
         context = await chromium.launchPersistentContext(userDataDir, { 
             headless: false, 
             channel: 'chrome',
             viewport: null,
             args: ['--start-maximized', '--no-sandbox'] 
         });
-
         mainPage = await context.newPage();
         await mainPage.bringToFront();
+        logBot('info', "Đang mở Binance Square cho người dùng login...");
         await mainPage.goto('https://www.binance.com/vi/square');
-        res.json({ msg: "Chrome đã mở và sẽ đứng yên để ông login!" });
+        res.json({ msg: "Chrome đã mở! Login xong thì quay lại bấm Chạy Auto." });
     } catch (err) {
+        logBot('error', "LỖI LOGIN:", err.stack);
         res.json({ error: "Lỗi mở Chrome: " + err.message });
     }
 });
 
 app.get('/start', (req, res) => { 
     if(!context) return res.json({ error: "Phải bấm LOGIN trước!" });
+    logBot('info', "Kích hoạt luồng Auto.");
     isRunning = true; 
     postTask(); 
     res.json({ msg: "Bot bắt đầu chạy!" }); 
 });
 
-app.get('/stop', (req, res) => { isRunning = false; res.json({ msg: "Đã dừng bot." }); });
+app.get('/stop', (req, res) => { 
+    logBot('warn', "Dừng bot.");
+    isRunning = false; 
+    res.json({ msg: "Đã dừng bot." }); 
+});
 
 app.listen(port, '0.0.0.0', () => {
-    console.log(`Bot live tại: http://localhost:${port}`);
+    console.clear();
+    console.log(`\n🚀 SERVER LIVE: http://localhost:${port}\n`);
+    logBot('info', "Sẵn sàng! Hãy chạy bằng lệnh 'node sq.js' và quan sát log tại đây.");
 });
