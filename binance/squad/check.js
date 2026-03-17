@@ -3,77 +3,84 @@ import express from 'express';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { execSync } from 'child_process';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const app = express();
-const port = 8886;
-const userDataDir = path.join(__dirname, 'test_session');
+const port = 8885;
+const userDataDir = path.join(__dirname, 'test_session_auto');
 
-// Hàm Log chi tiết
-function logTest(message, data = "") {
-    const time = new Date().toLocaleTimeString();
-    console.log(`[${time}] ${message}`);
-    if (data) console.error(data);
+// --- HÀM TỰ DỌN DẸP HỆ THỐNG ---
+function autoCleanup() {
+    console.log("🧹 ĐANG TỰ ĐỘNG DỌN DẸP HỆ THỐNG...");
+    try {
+        // 1. Giết các tiến trình Chrome/Node đang chạy ngầm để giải phóng file/cổng
+        if (process.platform === 'win32') {
+            try { execSync('taskkill /F /IM chrome.exe /T 2>nul || exit 0'); } catch (e) {}
+            // Không kill chính node.exe đang chạy bản thân nó, chỉ kill các bản cũ nếu cần
+        }
+
+        // 2. Xóa sạch folder session cũ
+        if (fs.existsSync(userDataDir)) {
+            fs.rmSync(userDataDir, { recursive: true, force: true });
+            console.log(`✅ Đã xóa folder cũ: ${userDataDir}`);
+        }
+    } catch (err) {
+        console.log("⚠️ Lỗi khi dọn dẹp (có thể file đang bị khóa):", err.message);
+    }
 }
+
+// Chạy dọn dẹp ngay khi khởi động
+autoCleanup();
 
 app.get('/', (req, res) => {
     res.send(`
-        <body style="background:#222;color:#fff;text-align:center;padding:50px;">
-            <h1>TEST HIỆN CHROME</h1>
-            <button style="padding:20px;background:orange;cursor:pointer;" onclick="location.href='/open'">BẤM ĐỂ MỞ CHROME</button>
-            <p id="msg"></p>
+        <body style="background:#111;color:#00ff00;text-align:center;padding:50px;font-family:monospace;">
+            <h1>SYSTEM AUTO-CLEAN READY</h1>
+            <p>Trạng thái: Đã dọn sạch session cũ</p>
+            <button style="padding:20px;background:#00ff00;color:#000;font-weight:bold;cursor:pointer;" 
+                    onclick="location.href='/open'">BẤM ĐỂ MỞ CHROME THẬT</button>
         </body>
     `);
 });
 
 app.get('/open', async (req, res) => {
-    logTest("--- BẮT ĐẦU TEST MỞ CHROME ---");
+    console.log("\n--- [BẮT ĐẦU MỞ CHROME] ---");
     
-    // Kiểm tra đường dẫn Chrome xịn
     const chromePath = "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe";
-    const exists = fs.existsSync(chromePath);
-    logTest(`Kiểm tra file exe: ${exists ? "TÌM THẤY" : "KHÔNG THẤY"}`);
-
+    
     try {
-        logTest("Đang gọi lệnh chromium.launchPersistentContext...");
         const context = await chromium.launchPersistentContext(userDataDir, {
-            headless: false, // Ép hiện
-            executablePath: exists ? chromePath : undefined,
+            headless: false, // ÉP HIỆN
+            executablePath: fs.existsSync(chromePath) ? chromePath : undefined,
             args: [
                 '--start-maximized',
                 '--no-sandbox',
-                '--disable-setuid-sandbox'
+                '--disable-blink-features=AutomationControlled'
             ]
         });
 
-        // Kiểm tra xem thực tế có phải đang chạy ẩn không (Playwright nội bộ)
-        const isHeadless = context.browser() ? false : true; 
-        if (isHeadless) {
-            logTest("⚠️ CẢNH BÁO: Bot đang bị ép chạy ẩn (Headless Mode) bởi hệ thống!");
-        } else {
-            logTest("✅ Lệnh Headless: false đã được gửi thành công.");
-        }
-
         const page = await context.newPage();
-        logTest("Đang điều hướng tới Google.com...");
-        await page.goto('https://www.google.com');
+        console.log("🚀 Đang truy cập Google.com...");
+        await page.goto('https://www.google.com', { timeout: 60000 });
         
-        res.json({ msg: "Đã thực hiện xong lệnh mở! Kiểm tra màn hình của ông." });
+        console.log("✅ Chrome đã mở thành công và hiện trên màn hình.");
+        res.json({ msg: "Chrome đã mở thành công!" });
+
     } catch (err) {
-        logTest("❌ LỖI KHI MỞ CHROME:", err.message);
-        // Kiểm tra các lỗi phổ biến
-        if (err.message.includes("used by another process")) {
-            logTest("👉 Nguyên nhân: Folder 'test_session' đang bị một Chrome khác chiếm dụng.");
-        }
-        res.status(500).json({ error: err.message });
+        console.log("\n❌ LỖI LOG CHI TIẾT ĐÂY ÔNG GIÁO:");
+        console.error(err); // In toàn bộ cục lỗi (stack trace) ra terminal
+        res.status(500).json({ 
+            error: err.message,
+            stack: err.stack 
+        });
     }
 });
 
 app.listen(port, '0.0.0.0', () => {
-    console.clear();
-    console.log("========================================");
-    console.log(`BOT TEST PORT: ${port}`);
-    console.log(`Truy cập: http://localhost:${port}`);
-    console.log("========================================");
+    console.log(`\n========================================`);
+    console.log(`SERVER LIVE: http://localhost:${port}`);
+    console.log(`FOLDER SESSION: ${userDataDir}`);
+    console.log(`========================================\n`);
 });
