@@ -10,8 +10,8 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // --- CẤU HÌNH ---
-let tpPercent = 5.0; 
-let slPercent = 5.0; 
+let tpPercent = 1.0; 
+let slPercent = 3.0; 
 let botSettings = { isRunning: false, maxPositions: 10, invValue: 1.5, invType: 'percent', minVol: 5.0 };
 let status = { currentBalance: 0, botLogs: [], exchangeInfo: {}, candidatesList: [] };
 
