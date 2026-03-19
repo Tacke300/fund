@@ -1,6 +1,6 @@
-const TP_PERCENT = 0.5; 
-const SL_PERCENT = 10; 
-const MIN_VOLATILITY_TO_SAVE = 5; 
+const TP_PERCENT = 0.15; 
+const SL_PERCENT = 3; 
+const MIN_VOLATILITY_TO_SAVE = 6; 
 const PORT = 9000;
 const HISTORY_FILE = './history_db.json';
 const LEVERAGE_FILE = './leverage_cache.json';
@@ -127,7 +127,8 @@ app.get('/api/data', (req, res) => {
     res.json({ 
         live: topLive,
         pending: all.filter(h => h.status === 'PENDING'),
-        history: all.filter(h => h.status !== 'PENDING').sort((a,b)=>b.endTime-a.endTime).slice(0,100),
+        // Bỏ slice(0,100) để hiện toàn bộ lịch sử
+        history: all.filter(h => h.status !== 'PENDING').sort((a,b)=>b.endTime-a.endTime),
         config: { tp: TP_PERCENT, sl: SL_PERCENT }
     });
 });
@@ -158,9 +159,26 @@ app.get('/gui', (req, res) => {
         </div>
 
         <div class="text-gray-custom text-12 mb-1">Số dư ký quỹ hiện tại (USDT)</div>
-        <div class="flex items-end gap-2 mb-4">
+        <div class="flex items-end gap-2 mb-2">
             <span id="displayBal" class="text-3xl font-bold tracking-tighter text-white">0.00</span>
             <span class="text-base font-medium text-white mb-1">USDT</span>
+        </div>
+
+        <div class="grid grid-cols-2 gap-2 mb-4 bg-zinc-900/50 p-2 rounded border border-zinc-800">
+            <div class="border-r border-zinc-800 pr-2">
+                <div class="text-[10px] text-gray-custom uppercase font-bold">Total Win</div>
+                <div class="flex justify-between items-center">
+                    <span id="winCount" class="text-xs font-bold up">0</span>
+                    <span id="winSum" class="text-xs font-bold up">+0.00</span>
+                </div>
+            </div>
+            <div class="pl-2">
+                <div class="text-[10px] text-gray-custom uppercase font-bold">Total Lose</div>
+                <div class="flex justify-between items-center">
+                    <span id="loseCount" class="text-xs font-bold down">0</span>
+                    <span id="loseSum" class="text-xs font-bold down">-0.00</span>
+                </div>
+            </div>
         </div>
 
         <div class="grid grid-cols-2 gap-4 text-sm border-t border-zinc-800 pt-3">
@@ -235,21 +253,27 @@ app.get('/gui', (req, res) => {
             ).join('');
 
             let runningBal = initialBal;
+            let stats = { winCount: 0, winSum: 0, loseCount: 0, loseSum: 0 };
+
             let historyHTML = [...(d.history || [])].reverse().map(h => {
                 let margin = mVal.includes('%') ? (runningBal * mNum / 100) : mNum;
                 let leverage = h.maxLev || 20;
                 
-                // Tính PnL thô (ROI)
                 let grossPnl = margin * leverage * ((h.pnlPercent || 0) / 100);
-                // Tính Fee (0.1% tổng volume: entry + exit = margin * leverage * 0.001)
                 let tradingFee = (margin * leverage) * 0.001;
-                // PnL thực nhận
                 let netPnl = grossPnl - tradingFee;
                 
+                // Cập nhật thống kê Win/Lose
+                if(netPnl >= 0) {
+                    stats.winCount++;
+                    stats.winSum += netPnl;
+                } else {
+                    stats.loseCount++;
+                    stats.loseSum += netPnl;
+                }
+
                 runningBal += netPnl;
                 let vol = h.snapVol || {c1:0, c5:0, c15:0};
-
-                // Tính giá TP/SL hiển thị
                 let tpPrice = h.type === 'UP' ? h.snapPrice * (1 + (h.tpTarget/100)) : h.snapPrice * (1 - (h.tpTarget/100));
                 let slPrice = h.type === 'UP' ? h.snapPrice * (1 - (h.slTarget/100)) : h.snapPrice * (1 + (h.slTarget/100));
 
@@ -262,7 +286,14 @@ app.get('/gui', (req, res) => {
                     <td class="text-right \${runningBal>=initialBal?'up':'down'}">\${runningBal.toFixed(1)}</td>
                 </tr>\`;
             }).reverse().join('');
+            
             document.getElementById('historyBody').innerHTML = historyHTML;
+            
+            // Cập nhật giao diện thống kê
+            document.getElementById('winCount').innerText = stats.winCount;
+            document.getElementById('winSum').innerText = '+' + stats.winSum.toFixed(2);
+            document.getElementById('loseCount').innerText = stats.loseCount;
+            document.getElementById('loseSum').innerText = stats.loseSum.toFixed(2);
 
             let totalUnPnl = 0;
             let currentMarginUsed = 0;
