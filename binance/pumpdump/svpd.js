@@ -1,5 +1,5 @@
-const TP_PERCENT = 0.5; 
-const SL_PERCENT = 10; 
+const TP_PERCENT = 0.5; // 0.15%
+const SL_PERCENT = 10.0;  // 3.0%
 const MIN_VOLATILITY_TO_SAVE = 5; 
 const PORT = 9000;
 const HISTORY_FILE = './history_db.json';
@@ -83,9 +83,11 @@ function initWS() {
             const c15 = calculateChange(coinData[s].prices, 15);
             coinData[s].live = { c1, c5, c15, currentPrice: p };
             
+            // --- FIX LOGIC CHỐT LỆNH ---
             const pending = Array.from(historyMap.values()).find(h => h.symbol === s && h.status === 'PENDING');
             if (pending) {
                 const diff = ((p - pending.snapPrice) / pending.snapPrice) * 100;
+                // Chốt lời/lỗ dựa trên biến động giá gốc (chưa nhân leverage)
                 const win = pending.type === 'UP' ? diff >= TP_PERCENT : diff <= -TP_PERCENT; 
                 const lose = pending.type === 'UP' ? diff <= -SL_PERCENT : diff >= SL_PERCENT; 
 
@@ -118,14 +120,8 @@ function initWS() {
 
 app.get('/api/data', (req, res) => {
     const all = Array.from(historyMap.values());
-    const topLive = Object.entries(coinData)
-        .filter(([_, v]) => v.live)
-        .map(([s, v]) => ({ symbol: s, ...v.live }))
-        .sort((a, b) => Math.abs(b.c1) - Math.abs(a.c1))
-        .slice(0, 5);
-
     res.json({ 
-        live: topLive,
+        live: Object.entries(coinData).filter(([_, v]) => v.live).map(([s, v]) => ({ symbol: s, ...v.live })).sort((a,b)=>Math.abs(b.c1)-Math.abs(a.c1)).slice(0,5),
         pending: all.filter(h => h.status === 'PENDING').sort((a,b)=>b.startTime-a.startTime),
         history: all.filter(h => h.status !== 'PENDING').sort((a,b)=>b.endTime-a.endTime),
         config: { tp: TP_PERCENT, sl: SL_PERCENT }
@@ -134,7 +130,7 @@ app.get('/api/data', (req, res) => {
 
 app.get('/gui', (req, res) => {
     res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Binance Luffy Pro v2</title><script src="https://cdn.tailwindcss.com"></script>
+    <title>Binance Luffy Pro v2 - FIXED</title><script src="https://cdn.tailwindcss.com"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&display=swap');
         body { background: #0b0e11; color: #eaecef; font-family: 'IBM Plex Sans', sans-serif; margin: 0; padding: 0; }
@@ -182,7 +178,7 @@ app.get('/gui', (req, res) => {
 
     <div class="px-4 mt-4">
         <div class="bg-card rounded-lg p-3">
-            <div class="text-10 font-bold text-white mb-3 uppercase italic border-b border-green-500/50 pb-1">Vị thế đang mở (Live Positions)</div>
+            <div class="text-10 font-bold text-white mb-3 uppercase italic border-b border-green-500/50 pb-1">Vị thế đang mở</div>
             <div class="overflow-x-auto">
                 <table class="w-full text-[9px] text-left">
                     <thead class="text-gray-custom uppercase border-b border-zinc-800">
@@ -213,7 +209,7 @@ app.get('/gui', (req, res) => {
 
     <div class="px-4 pb-32">
         <div class="bg-card rounded-lg p-3">
-            <div class="text-10 font-bold text-gray-custom mb-3 uppercase italic border-b border-zinc-800 pb-1">Toàn bộ lịch sử giao dịch</div>
+            <div class="text-10 font-bold text-gray-custom mb-3 uppercase italic border-b border-zinc-800 pb-1">Toàn bộ lịch sử</div>
             <div class="overflow-x-auto">
                 <table class="w-full text-[9px] text-left">
                     <thead class="text-gray-custom uppercase border-b border-zinc-800">
@@ -241,14 +237,12 @@ app.get('/gui', (req, res) => {
         if(running) { document.getElementById('setup').style.display='none'; document.getElementById('active').classList.remove('hidden'); }
     }
     function saveConfig() { localStorage.setItem('bot_v6', JSON.stringify({ running, initialBal })); }
-
     function start() { running = true; initialBal = parseFloat(document.getElementById('balanceInp').value) || 1000; document.getElementById('setup').style.display='none'; document.getElementById('active').classList.remove('hidden'); saveConfig(); }
     function stop() { running = false; document.getElementById('setup').style.display='flex'; document.getElementById('active').classList.add('hidden'); saveConfig(); }
 
     async function update() {
         try {
             const res = await fetch('/api/data'); const d = await res.json();
-            const now = Date.now();
             let mVal = document.getElementById('marginInp').value;
             let mNum = parseFloat(mVal) || 0;
 
@@ -267,13 +261,12 @@ app.get('/gui', (req, res) => {
                 let margin = mVal.includes('%') ? (runningBal * mNum / 100) : mNum;
                 let leverage = h.maxLev || 20;
                 let grossPnl = margin * leverage * ((h.pnlPercent || 0) / 100);
-                let tradingFee = (margin * leverage) * 0.001;
-                let netPnl = grossPnl - tradingFee;
+                let netPnl = grossPnl - (margin * leverage * 0.001);
                 
                 if(netPnl >= 0) { stats.winCount++; stats.winSum += netPnl; } else { stats.loseCount++; stats.loseSum += netPnl; }
-
                 runningBal += netPnl;
-                let vol = h.snapVol || {c1:0, c5:0, c15:0};
+
+                // --- FIX CÔNG THỨC HIỂN THỊ TP/SL (%) ---
                 let tpPrice = h.type === 'UP' ? h.snapPrice * (1 + (h.tpTarget/100)) : h.snapPrice * (1 - (h.tpTarget/100));
                 let slPrice = h.type === 'UP' ? h.snapPrice * (1 - (h.slTarget/100)) : h.snapPrice * (1 + (h.slTarget/100));
 
@@ -289,14 +282,12 @@ app.get('/gui', (req, res) => {
             }).reverse().join('');
             document.getElementById('historyBody').innerHTML = historyHTML;
 
-            // Render Vị thế đang mở (Pending)
-            let totalUnPnl = 0;
-            let currentMarginUsed = 0;
+            // Render Pending
+            let totalUnPnl = 0; let currentMarginUsed = 0;
             document.getElementById('pendingBody').innerHTML = (d.pending || []).map(h => {
                 let livePrice = (d.live || []).find(c => c.symbol === h.symbol)?.currentPrice || h.snapPrice;
                 let margin = mVal.includes('%') ? (runningBal * mNum / 100) : mNum;
                 currentMarginUsed += margin;
-                
                 let diff = ((livePrice - h.snapPrice) / h.snapPrice) * 100;
                 let roi = (h.type === 'UP' ? diff : -diff) * (h.maxLev || 20);
                 let pnl = margin * roi / 100;
@@ -311,14 +302,10 @@ app.get('/gui', (req, res) => {
                     <td class="text-zinc-400">\${margin.toFixed(1)}</td>
                     <td class="text-center">\${h.maxLev}x<br><span class="text-[#fcd535]">\${tpPrice.toFixed(4)} / \${slPrice.toFixed(4)}</span></td>
                     <td>\${(h.snapPrice||0).toFixed(4)}<br><span class="text-white font-bold">\${livePrice.toFixed(4)}</span></td>
-                    <td class="text-right font-bold \${pnl>=0?'up':'down'}">
-                        \${pnl>=0?'+':''}\${pnl.toFixed(2)}<br>
-                        <span class="text-[8px] italic">(\${roi>=0?'+':''}\${roi.toFixed(1)}%)</span>
-                    </td>
+                    <td class="text-right font-bold \${pnl>=0?'up':'down'}">\${pnl>=0?'+':''}\${pnl.toFixed(2)}<br><span class="text-[8px]">(\${roi>=0?'+':''}\${roi.toFixed(1)}%)</span></td>
                 </tr>\`;
             }).join('');
 
-            // Cập nhật thống kê & Dashboard
             document.getElementById('winCount').innerText = stats.winCount;
             document.getElementById('winSum').innerText = '+' + stats.winSum.toFixed(2);
             document.getElementById('loseCount').innerText = stats.loseCount;
