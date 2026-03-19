@@ -1,5 +1,5 @@
-const TP_PERCENT = 0.15; 
-const SL_PERCENT = 3; 
+const TP_PERCENT = 0.5; 
+const SL_PERCENT = 10; 
 const MIN_VOLATILITY_TO_SAVE = 6; 
 const PORT = 9000;
 const HISTORY_FILE = './history_db.json';
