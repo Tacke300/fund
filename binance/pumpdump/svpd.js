@@ -1,5 +1,5 @@
-const TP_PERCENT = 0.5; 
-const SL_PERCENT = 10; 
+const TP_PERCENT = 0.15; 
+const SL_PERCENT = 3; 
 const MIN_VOLATILITY_TO_SAVE = 6; 
 const PORT = 9000;
 const HISTORY_FILE = './history_db.json';
@@ -126,8 +126,7 @@ app.get('/api/data', (req, res) => {
 
     res.json({ 
         live: topLive,
-        pending: all.filter(h => h.status === 'PENDING'),
-        // Bỏ slice(0,100) để hiện toàn bộ lịch sử
+        pending: all.filter(h => h.status === 'PENDING').sort((a,b)=>b.startTime-a.startTime),
         history: all.filter(h => h.status !== 'PENDING').sort((a,b)=>b.endTime-a.endTime),
         config: { tp: TP_PERCENT, sl: SL_PERCENT }
     });
@@ -167,17 +166,11 @@ app.get('/gui', (req, res) => {
         <div class="grid grid-cols-2 gap-2 mb-4 bg-zinc-900/50 p-2 rounded border border-zinc-800">
             <div class="border-r border-zinc-800 pr-2">
                 <div class="text-[10px] text-gray-custom uppercase font-bold">Total Win</div>
-                <div class="flex justify-between items-center">
-                    <span id="winCount" class="text-xs font-bold up">0</span>
-                    <span id="winSum" class="text-xs font-bold up">+0.00</span>
-                </div>
+                <div class="flex justify-between items-center"><span id="winCount" class="text-xs font-bold up">0</span><span id="winSum" class="text-xs font-bold up">+0.00</span></div>
             </div>
             <div class="pl-2">
                 <div class="text-[10px] text-gray-custom uppercase font-bold">Total Lose</div>
-                <div class="flex justify-between items-center">
-                    <span id="loseCount" class="text-xs font-bold down">0</span>
-                    <span id="loseSum" class="text-xs font-bold down">-0.00</span>
-                </div>
+                <div class="flex justify-between items-center"><span id="loseCount" class="text-xs font-bold down">0</span><span id="loseSum" class="text-xs font-bold down">-0.00</span></div>
             </div>
         </div>
 
@@ -188,13 +181,27 @@ app.get('/gui', (req, res) => {
     </div>
 
     <div class="px-4 mt-4">
-        <div class="flex gap-6 mb-4 border-b border-zinc-800 text-sm font-bold text-gray-custom uppercase">
-            <span class="text-white border-b-2 border-[#fcd535] pb-2">Vị thế đang mở</span>
+        <div class="bg-card rounded-lg p-3">
+            <div class="text-10 font-bold text-white mb-3 uppercase italic border-b border-green-500/50 pb-1">Vị thế đang mở (Live Positions)</div>
+            <div class="overflow-x-auto">
+                <table class="w-full text-[9px] text-left">
+                    <thead class="text-gray-custom uppercase border-b border-zinc-800">
+                        <tr>
+                            <th class="pb-2">Time</th>
+                            <th class="pb-2">Coin</th>
+                            <th class="pb-2">Margin</th>
+                            <th class="pb-2 text-center">Lev/Target</th>
+                            <th class="pb-2">Entry/Live</th>
+                            <th class="pb-2 text-right">PnL (ROI%)</th>
+                        </tr>
+                    </thead>
+                    <tbody id="pendingBody" class="text-zinc-300"></tbody>
+                </table>
+            </div>
         </div>
-        <div id="pendingContainer" class="space-y-4 pb-6"></div>
     </div>
 
-    <div class="px-4 mb-4">
+    <div class="px-4 mt-4 mb-4">
         <div class="bg-card rounded-lg p-3">
              <div class="text-10 font-bold text-gray-custom mb-3 uppercase italic border-b border-zinc-800 pb-1">Top 5 Biến động thị trường</div>
              <table class="w-full text-12 text-left">
@@ -206,15 +213,16 @@ app.get('/gui', (req, res) => {
 
     <div class="px-4 pb-32">
         <div class="bg-card rounded-lg p-3">
-            <div class="text-10 font-bold text-gray-custom mb-3 uppercase italic border-b border-zinc-800 pb-1">Lịch sử giao dịch chi tiết</div>
+            <div class="text-10 font-bold text-gray-custom mb-3 uppercase italic border-b border-zinc-800 pb-1">Toàn bộ lịch sử giao dịch</div>
             <div class="overflow-x-auto">
                 <table class="w-full text-[9px] text-left">
                     <thead class="text-gray-custom uppercase border-b border-zinc-800">
                         <tr>
-                            <th class="pb-2">Mở/Đóng</th>
-                            <th class="pb-2">Coin/Snapshot</th>
+                            <th class="pb-2">Time</th>
+                            <th class="pb-2">Coin</th>
+                            <th class="pb-2">Margin</th>
                             <th class="pb-2 text-center">Lev/Target</th>
-                            <th class="pb-2">Vào/Ra</th>
+                            <th class="pb-2">Entry/Exit</th>
                             <th class="pb-2 text-white">PnL Net</th>
                             <th class="pb-2 text-right">Balance</th>
                         </tr>
@@ -227,7 +235,6 @@ app.get('/gui', (req, res) => {
 
     <script>
     let running = false, initialBal = 1000;
-    
     if(localStorage.getItem('bot_v6')) {
         const saved = JSON.parse(localStorage.getItem('bot_v6'));
         running = !!saved.running; initialBal = parseFloat(saved.initialBal) || 1000;
@@ -255,22 +262,15 @@ app.get('/gui', (req, res) => {
             let runningBal = initialBal;
             let stats = { winCount: 0, winSum: 0, loseCount: 0, loseSum: 0 };
 
+            // Render Lịch sử
             let historyHTML = [...(d.history || [])].reverse().map(h => {
                 let margin = mVal.includes('%') ? (runningBal * mNum / 100) : mNum;
                 let leverage = h.maxLev || 20;
-                
                 let grossPnl = margin * leverage * ((h.pnlPercent || 0) / 100);
                 let tradingFee = (margin * leverage) * 0.001;
                 let netPnl = grossPnl - tradingFee;
                 
-                // Cập nhật thống kê Win/Lose
-                if(netPnl >= 0) {
-                    stats.winCount++;
-                    stats.winSum += netPnl;
-                } else {
-                    stats.loseCount++;
-                    stats.loseSum += netPnl;
-                }
+                if(netPnl >= 0) { stats.winCount++; stats.winSum += netPnl; } else { stats.loseCount++; stats.loseSum += netPnl; }
 
                 runningBal += netPnl;
                 let vol = h.snapVol || {c1:0, c5:0, c15:0};
@@ -279,25 +279,20 @@ app.get('/gui', (req, res) => {
 
                 return \`<tr class="border-b border-zinc-800/30">
                     <td class="py-2 text-zinc-500">\${new Date(h.startTime).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}<br>\${new Date(h.endTime).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}</td>
-                    <td><b class="text-white">\${h.symbol}</b><br><span class="text-zinc-500">\${vol.c1}|\${vol.c5}|\${vol.c15}</span></td>
+                    <td><b class="text-white">\${h.symbol}</b><br><span class="\${h.type==='UP'?'up':'down'}">\${h.type}</span></td>
+                    <td class="text-zinc-400">\${margin.toFixed(1)}</td>
                     <td class="text-center">\${leverage}x<br><span class="text-[#fcd535]">\${tpPrice.toFixed(4)} / \${slPrice.toFixed(4)}</span></td>
                     <td>\${(h.snapPrice||0).toFixed(4)}<br>\${(h.finalPrice||0).toFixed(4)}</td>
                     <td class="font-bold \${netPnl>=0?'up':'down'}">\${netPnl>=0?'+':''}\${netPnl.toFixed(2)}</td>
                     <td class="text-right \${runningBal>=initialBal?'up':'down'}">\${runningBal.toFixed(1)}</td>
                 </tr>\`;
             }).reverse().join('');
-            
             document.getElementById('historyBody').innerHTML = historyHTML;
-            
-            // Cập nhật giao diện thống kê
-            document.getElementById('winCount').innerText = stats.winCount;
-            document.getElementById('winSum').innerText = '+' + stats.winSum.toFixed(2);
-            document.getElementById('loseCount').innerText = stats.loseCount;
-            document.getElementById('loseSum').innerText = stats.loseSum.toFixed(2);
 
+            // Render Vị thế đang mở (Pending)
             let totalUnPnl = 0;
             let currentMarginUsed = 0;
-            document.getElementById('pendingContainer').innerHTML = (d.pending || []).map(h => {
+            document.getElementById('pendingBody').innerHTML = (d.pending || []).map(h => {
                 let livePrice = (d.live || []).find(c => c.symbol === h.symbol)?.currentPrice || h.snapPrice;
                 let margin = mVal.includes('%') ? (runningBal * mNum / 100) : mNum;
                 currentMarginUsed += margin;
@@ -307,20 +302,27 @@ app.get('/gui', (req, res) => {
                 let pnl = margin * roi / 100;
                 totalUnPnl += pnl;
 
-                return \`<div class="bg-card p-3 rounded-md border-l-4 \${h.type==='UP'?'border-green-500':'border-red-500'}">
-                    <div class="flex justify-between items-start">
-                        <div>
-                            <span class="text-lg font-bold text-white">\${h.symbol}</span>
-                            <span class="bg-zinc-800 text-[10px] px-1 rounded text-[#fcd535]">\${h.maxLev}x</span>
-                            <div class="text-[10px] \${h.type==='UP'?'up':'down'} font-bold">\${h.type==='UP'?'Long':'Short'}</div>
-                        </div>
-                        <div class="text-right">
-                            <div class="text-lg font-bold \${pnl>=0?'up':'down'}">\${pnl>=0?'+':''}\${pnl.toFixed(2)}</div>
-                            <div class="text-[11px] font-medium \${roi>=0?'up':'down'}">ROI \${roi>=0?'+':''}\${roi.toFixed(2)}%</div>
-                        </div>
-                    </div>
-                </div>\`;
+                let tpPrice = h.type === 'UP' ? h.snapPrice * (1 + (h.tpTarget/100)) : h.snapPrice * (1 - (h.tpTarget/100));
+                let slPrice = h.type === 'UP' ? h.snapPrice * (1 - (h.slTarget/100)) : h.snapPrice * (1 + (h.slTarget/100));
+
+                return \`<tr class="border-b border-zinc-800/30 bg-green-500/5">
+                    <td class="py-2 text-zinc-500">\${new Date(h.startTime).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}</td>
+                    <td><b class="text-white">\${h.symbol}</b><br><span class="\${h.type==='UP'?'up':'down'}">\${h.type}</span></td>
+                    <td class="text-zinc-400">\${margin.toFixed(1)}</td>
+                    <td class="text-center">\${h.maxLev}x<br><span class="text-[#fcd535]">\${tpPrice.toFixed(4)} / \${slPrice.toFixed(4)}</span></td>
+                    <td>\${(h.snapPrice||0).toFixed(4)}<br><span class="text-white font-bold">\${livePrice.toFixed(4)}</span></td>
+                    <td class="text-right font-bold \${pnl>=0?'up':'down'}">
+                        \${pnl>=0?'+':''}\${pnl.toFixed(2)}<br>
+                        <span class="text-[8px] italic">(\${roi>=0?'+':''}\${roi.toFixed(1)}%)</span>
+                    </td>
+                </tr>\`;
             }).join('');
+
+            // Cập nhật thống kê & Dashboard
+            document.getElementById('winCount').innerText = stats.winCount;
+            document.getElementById('winSum').innerText = '+' + stats.winSum.toFixed(2);
+            document.getElementById('loseCount').innerText = stats.loseCount;
+            document.getElementById('loseSum').innerText = stats.loseSum.toFixed(2);
 
             if(running) {
                 let totalEquity = runningBal + totalUnPnl;
