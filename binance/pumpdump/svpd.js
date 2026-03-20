@@ -1,4 +1,4 @@
-const TP_PERCENT = 0.3; 
+const TP_PERCENT = 0.2; 
 const SL_PERCENT = 10.0;  
 const MIN_VOLATILITY_TO_SAVE = 5; 
 const PORT = 9000;
