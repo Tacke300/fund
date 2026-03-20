@@ -19,6 +19,7 @@ let historyMap = new Map();
 let symbolMaxLeverage = {}; 
 let lastTradeClosed = {}; 
 
+// Hàm bổ trợ hiển thị giá chuẩn 4 số có nghĩa
 function fPrice(p) {
     if (!p || p === 0) return "0.0000";
     let s = p.toFixed(12);
@@ -26,7 +27,7 @@ function fPrice(p) {
     return match ? match[0] : p.toFixed(4);
 }
 
-// --- CORE LOGIC ---
+// Khởi tạo dữ liệu từ file gốc của ông
 if (fs.existsSync(LEVERAGE_FILE)) { try { symbolMaxLeverage = JSON.parse(fs.readFileSync(LEVERAGE_FILE)); } catch(e){} }
 if (fs.existsSync(HISTORY_FILE)) {
     try {
@@ -52,6 +53,7 @@ function initWS() {
             if (!coinData[s]) coinData[s] = { symbol: s, prices: [] };
             coinData[s].prices.push({ p, t: now });
             if (coinData[s].prices.length > 300) coinData[s].prices.shift();
+            
             const c1 = calculateChange(coinData[s].prices, 1), c5 = calculateChange(coinData[s].prices, 5), c15 = calculateChange(coinData[s].prices, 15);
             coinData[s].live = { c1, c5, c15, currentPrice: p };
             
@@ -85,36 +87,35 @@ app.get('/api/data', (req, res) => {
 });
 
 app.get('/gui', (req, res) => {
-    res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Binance Luffy Pro</title><script src="https://cdn.tailwindcss.com"></script>
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;600;700&display=swap');
         body { background: #0b0e11; color: #eaecef; font-family: 'IBM Plex Sans', sans-serif; margin: 0; }
         .up { color: #0ecb81; } .down { color: #f6465d; }
         .bg-card { background: #1e2329; } .text-gray-custom { color: #848e9c; }
-        ::-webkit-scrollbar { width: 0px; }
     </style></head><body>
     
-    <div class="p-4 bg-[#0b0e11] sticky top-0 z-50 shadow-xl border-b border-zinc-800">
+    <div class="p-4 bg-[#0b0e11] sticky top-0 z-50 shadow-xl">
         <div id="setup" class="flex gap-2 mb-4 bg-card p-2 rounded">
             <input id="balanceInp" type="number" class="bg-black border border-zinc-700 p-2 rounded w-full text-yellow-500 font-bold outline-none text-sm">
             <input id="marginInp" type="text" class="bg-black border border-zinc-700 p-2 rounded w-full text-yellow-500 font-bold outline-none text-sm">
             <button onclick="start()" class="bg-[#fcd535] text-black px-4 py-2 rounded font-bold uppercase text-xs">Start</button>
         </div>
         <div id="active" class="hidden flex justify-between items-center mb-4">
-             <div class="flex items-center gap-2"><h1 class="font-bold italic text-white tracking-tighter">BINANCE <span class="text-[#fcd535]">FUTURES</span></h1></div>
-             <div id="user-id" class="text-[#fcd535] font-black italic text-lg" onclick="stop()">Monkey_D_Luffy</div>
+             <div class="flex items-center gap-2 font-bold italic text-white">BINANCE <span class="text-[#fcd535]">FUTURES</span></div>
+             <div id="user-id" class="text-[#fcd535] font-black italic" onclick="stop()">Monkey_D_Luffy</div>
         </div>
-        <div class="text-gray-custom text-[10px] mb-1 uppercase font-bold tracking-tight">Số dư ký quỹ hiện tại</div>
-        <div class="flex items-end gap-2 mb-2"><span id="displayBal" class="text-3xl font-bold tracking-tighter text-white">0.00</span><span class="text-xs text-white mb-1">USDT</span></div>
+        <div class="text-gray-custom text-[10px] uppercase font-bold">Số dư ký quỹ hiện tại</div>
+        <div class="flex items-end gap-2 mb-2"><span id="displayBal" class="text-3xl font-bold text-white">0.00</span><span class="text-xs text-white mb-1">USDT</span></div>
         <div class="grid grid-cols-2 gap-2 mb-4 bg-zinc-900/50 p-2 rounded border border-zinc-800">
-            <div class="border-r border-zinc-800 pr-2">
-                <div class="text-[9px] text-gray-custom uppercase font-bold">Total Win</div>
-                <div class="flex justify-between items-center"><span id="winCount" class="text-xs font-bold up">0</span><span id="winSum" class="text-xs font-bold up">+0.00</span></div>
+            <div class="border-r border-zinc-800">
+                <div class="text-[9px] text-gray-custom uppercase">Total Win</div>
+                <div class="flex justify-between items-center px-1"><span id="winCount" class="text-xs font-bold up">0</span><span id="winSum" class="text-xs font-bold up">+0.00</span></div>
             </div>
             <div class="pl-2">
-                <div class="text-[9px] text-gray-custom uppercase font-bold">Total Lose</div>
-                <div class="flex justify-between items-center"><span id="loseCount" class="text-xs font-bold down">0</span><span id="loseSum" class="text-xs font-bold down">-0.00</span></div>
+                <div class="text-[9px] text-gray-custom uppercase">Total Lose</div>
+                <div class="flex justify-between items-center px-1"><span id="loseCount" class="text-xs font-bold down">0</span><span id="loseSum" class="text-xs font-bold down">-0.00</span></div>
             </div>
         </div>
         <div class="grid grid-cols-2 gap-4 text-[10px] border-t border-zinc-800 pt-2 uppercase font-bold">
@@ -143,15 +144,14 @@ app.get('/gui', (req, res) => {
     </div></div>
 
     <script>
-    let running = false, initialBal = 1000, marginVal = "10%";
+    let running = false, initialBal = 1000;
     
-    // --- KHÔI PHỤC KHI F5 ---
-    const saved = localStorage.getItem('luffy_state');
-    if(saved) {
-        const data = JSON.parse(saved);
-        running = data.running; initialBal = data.initialBal; marginVal = data.marginVal;
+    // Load trạng thái
+    const saved = JSON.parse(localStorage.getItem('luffy_state') || '{}');
+    if(saved.running !== undefined) {
+        running = saved.running; initialBal = saved.initialBal;
         document.getElementById('balanceInp').value = initialBal;
-        document.getElementById('marginInp').value = marginVal;
+        document.getElementById('marginInp').value = saved.marginVal || "10%";
         if(running) { document.getElementById('setup').style.display='none'; document.getElementById('active').classList.remove('hidden'); }
     } else {
         document.getElementById('balanceInp').value = 1000; document.getElementById('marginInp').value = "10%";
@@ -164,50 +164,36 @@ app.get('/gui', (req, res) => {
         return match ? match[0] : p.toFixed(4);
     }
     function save() { localStorage.setItem('luffy_state', JSON.stringify({ running, initialBal, marginVal: document.getElementById('marginInp').value })); }
-    function start() { running = true; initialBal = parseFloat(document.getElementById('balanceInp').value); save(); document.getElementById('setup').style.display='none'; document.getElementById('active').classList.remove('hidden'); }
-    function stop() { running = false; save(); document.getElementById('setup').style.display='flex'; document.getElementById('active').classList.add('hidden'); }
+    function start() { running = true; initialBal = parseFloat(document.getElementById('balanceInp').value); save(); location.reload(); }
+    function stop() { running = false; save(); location.reload(); }
 
     async function update() {
         try {
             const res = await fetch('/api/data'); const d = await res.json();
             let mVal = document.getElementById('marginInp').value, mNum = parseFloat(mVal);
 
-            // Bảng Biến động
+            // 1. Biến động
             document.getElementById('liveBody').innerHTML = d.top5.map(c => \`<tr class="border-b border-zinc-800/50"><td class="py-2 font-bold">\${c.symbol}</td><td class="text-center \${c.c1>=0?'up':'down'}">\${c.c1}%</td><td class="text-center \${c.c5>=0?'up':'down'}">\${c.c5}%</td><td class="text-right \${c.c15>=0?'up':'down'}">\${c.c15}%</td></tr>\`).join('');
 
+            // 2. Lịch sử & Balance
             let runningBal = initialBal, winSum = 0, loseSum = 0, winCount = 0, loseCount = 0;
-            // Xử lý Lịch sử chuẩn bố cục
-            let historyHTML = [...d.history].reverse().map(h => {
+            let histHTML = [...d.history].reverse().map(h => {
                 let margin = mVal.includes('%') ? (runningBal * mNum / 100) : mNum;
                 let netPnl = (margin * (h.maxLev || 20) * (h.pnlPercent/100)) - (margin * (h.maxLev || 20) * 0.001);
                 runningBal += netPnl;
                 if(netPnl >= 0) { winSum += netPnl; winCount++; } else { loseSum += netPnl; loseCount++; }
-                let tp = h.type==='UP' ? h.snapPrice*(1+h.tpTarget/100) : h.snapPrice*(1-h.tpTarget/100);
-                let sl = h.type==='UP' ? h.snapPrice*(1-h.slTarget/100) : h.snapPrice*(1+h.slTarget/100);
-                return \`<tr class="border-b border-zinc-800/30 text-zinc-400">
-                    <td class="py-2 text-[7px]">\${new Date(h.startTime).toLocaleTimeString([],{hour12:false})}</td>
-                    <td><b class="text-white">\${h.symbol}</b><br><span class="\${h.type==='UP'?'up':'down'}">\${h.type}</span></td>
-                    <td>\${margin.toFixed(1)}</td><td class="text-center text-[7px]">\${h.maxLev}x<br>\${fPrice(tp)}/\${fPrice(sl)}</td>
-                    <td>\${fPrice(h.snapPrice)}<br>\${fPrice(h.finalPrice)}</td><td class="font-bold \${netPnl>=0?'up':'down'}">\${netPnl.toFixed(2)}</td>
-                    <td class="text-right text-white">\${runningBal.toFixed(1)}</td></tr>\`;
+                return \`<tr class="border-b border-zinc-800/30"><td>\${new Date(h.startTime).toLocaleTimeString([],{hour12:false})}</td><td>\${h.symbol}</td><td>\${margin.toFixed(1)}</td><td class="text-center">\${h.maxLev}x</td><td>\${fPrice(h.snapPrice)}/\${fPrice(h.finalPrice)}</td><td class="\${netPnl>=0?'up':'down'} font-bold">\${netPnl.toFixed(2)}</td><td class="text-right">\${runningBal.toFixed(1)}</td></tr>\`;
             }).reverse().join('');
-            document.getElementById('historyBody').innerHTML = historyHTML;
+            document.getElementById('historyBody').innerHTML = histHTML;
 
-            // Bảng Vị thế nhảy Realtime
+            // 3. Vị thế (Realtime)
             let unPnl = 0, marginUsed = 0;
             document.getElementById('pendingBody').innerHTML = d.pending.map(h => {
                 let lp = d.allPrices[h.symbol] || h.snapPrice;
                 let margin = mVal.includes('%') ? (runningBal * mNum / 100) : mNum; marginUsed += margin;
                 let roi = (h.type === 'UP' ? (lp-h.snapPrice)/h.snapPrice : (h.snapPrice-lp)/h.snapPrice) * 100 * (h.maxLev || 20);
                 let pnl = margin * roi / 100; unPnl += pnl;
-                let tp = h.type==='UP' ? h.snapPrice*(1+h.tpTarget/100) : h.snapPrice*(1-h.tpTarget/100);
-                let sl = h.type==='UP' ? h.snapPrice*(1-h.slTarget/100) : h.snapPrice*(1+h.slTarget/100);
-                return \`<tr class="bg-green-500/5 border-b border-zinc-800/50 font-medium">
-                    <td class="py-2 text-zinc-500 text-[8px]">\${new Date(h.startTime).toLocaleTimeString([],{hour12:false})}</td>
-                    <td class="text-white">\${h.symbol}</td><td>\${margin.toFixed(1)}</td>
-                    <td class="text-center text-[7px]">\${h.maxLev}x<br>\${fPrice(tp)}/\${fPrice(sl)}</td>
-                    <td>\${fPrice(h.snapPrice)}<br><b class="text-white">\${fPrice(lp)}</b></td>
-                    <td class="text-right font-bold \${pnl>=0?'up':'down'}">\${pnl.toFixed(2)}<br>\${roi.toFixed(1)}%</td></tr>\`;
+                return \`<tr class="bg-green-500/5"><td>\${new Date(h.startTime).toLocaleTimeString([],{hour12:false})}</td><td class="font-bold">\${h.symbol}</td><td>\${margin.toFixed(1)}</td><td class="text-center">\${h.maxLev}x</td><td>\${fPrice(h.snapPrice)}<br><b class="text-white">\${fPrice(lp)}</b></td><td class="text-right font-bold \${pnl>=0?'up':'down'}">\${pnl.toFixed(2)}<br>\${roi.toFixed(1)}%</td></tr>\`;
             }).join('');
 
             if(running) {
@@ -224,4 +210,4 @@ app.get('/gui', (req, res) => {
     </script></body></html>`);
 });
 
-app.listen(PORT, '0.0.0.0', () => { initWS(); console.log(\`http://localhost:\${PORT}/gui\`); });
+app.listen(PORT, '0.0.0.0', () => { initWS(); console.log(`http://localhost:${PORT}/gui`); });
