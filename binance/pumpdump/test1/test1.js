@@ -16,7 +16,7 @@ let historyMap = new Map();
 let symbolMaxLeverage = {}; 
 let lastTradeClosed = {}; 
 
-// Thông số động từ UI
+// Thông số động nhận từ UI
 let currentTP = 0.5, currentSL = 10.0, currentMinVol = 5;
 
 function fPrice(p) {
@@ -69,12 +69,8 @@ function initWS() {
             }
             if (Math.max(Math.abs(c1), Math.abs(c5), Math.abs(c15)) >= currentMinVol && !pending && !(lastTradeClosed[s] && (now - lastTradeClosed[s] < COOLDOWN_MINUTES * 60000))) {
                 historyMap.set(`${s}_${now}`, { 
-                    symbol: s, startTime: now, snapPrice: p, 
-                    type: (c1+c5+c15 >= 0) ? 'UP' : 'DOWN', 
-                    status: 'PENDING', 
-                    maxLev: symbolMaxLeverage[s] || 20, 
-                    tpTarget: currentTP, slTarget: currentSL,
-                    snapVol: { c1, c5, c15 }
+                    symbol: s, startTime: now, snapPrice: p, type: (c1+c5+c15 >= 0) ? 'UP' : 'DOWN', status: 'PENDING', 
+                    maxLev: symbolMaxLeverage[s] || 20, tpTarget: currentTP, slTarget: currentSL, snapVol: { c1, c5, c15 }
                 });
             }
         });
@@ -83,9 +79,7 @@ function initWS() {
 }
 
 app.get('/api/config', (req, res) => {
-    currentTP = parseFloat(req.query.tp) || 0.5;
-    currentSL = parseFloat(req.query.sl) || 10.0;
-    currentMinVol = parseFloat(req.query.vol) || 5;
+    currentTP = parseFloat(req.query.tp) || 0.5; currentSL = parseFloat(req.query.sl) || 10.0; currentMinVol = parseFloat(req.query.vol) || 5;
     res.sendStatus(200);
 });
 
@@ -119,27 +113,23 @@ app.get('/gui', (req, res) => {
                 <div><label class="text-[9px] text-gray-custom ml-1 uppercase">SL (%)</label><input id="slInp" type="number" step="0.1" class="bg-black border border-zinc-700 p-1.5 rounded w-full text-white outline-none text-xs"></div>
                 <div><label class="text-[9px] text-gray-custom ml-1 uppercase">Vol (%)</label><input id="volInp" type="number" step="0.1" class="bg-black border border-zinc-700 p-1.5 rounded w-full text-white outline-none text-xs"></div>
             </div>
-            <button onclick="start()" class="col-span-2 bg-[#fcd535] text-black py-2 rounded font-bold uppercase text-xs mt-1">Lưu & Chạy Bot</button>
+            <button onclick="start()" class="col-span-2 bg-[#fcd535] text-black py-2 rounded font-bold uppercase text-xs mt-1">Lưu cấu hình & Chạy</button>
         </div>
 
-        <div id="active" class="hidden">
-             <div class="flex justify-between items-center mb-4">
-                <div class="font-bold italic text-white text-lg">BINANCE <span class="text-[#fcd535]">LUFFY</span></div>
-                <div id="user-id" class="text-[#fcd535] font-black italic text-xl" onclick="stop()">Monkey_D_Luffy</div>
-             </div>
+        <div id="active" class="hidden flex justify-between items-center mb-4">
+            <div class="font-bold italic text-white text-lg">BINANCE <span class="text-[#fcd535]">LUFFY</span></div>
+            <div id="user-id" class="text-[#fcd535] font-black italic text-xl" onclick="stop()">Monkey_D_Luffy</div>
         </div>
 
         <div class="flex justify-between items-end mb-2">
-            <div><div class="text-gray-custom text-[10px] uppercase font-bold tracking-widest">Số dư ký quỹ</div><span id="displayBal" class="text-3xl font-bold text-white tracking-tighter">0.00</span><span class="text-xs text-white ml-1">USDT</span></div>
-            <div class="text-right"><div class="text-gray-custom text-[10px] uppercase font-bold">PnL chưa chốt</div><div id="unPnl" class="text-lg font-bold">0.00</div></div>
+            <div><div class="text-gray-custom text-[10px] uppercase font-bold tracking-widest leading-none">Số dư ký quỹ</div><span id="displayBal" class="text-3xl font-bold text-white tracking-tighter">0.00</span><span class="text-xs text-white ml-1">USDT</span></div>
+            <div class="text-right"><div class="text-gray-custom text-[10px] uppercase font-bold leading-none">PnL chưa chốt</div><div id="unPnl" class="text-lg font-bold">0.00</div></div>
         </div>
 
-        <div class="grid grid-cols-2 gap-4 text-[10px] border-t border-zinc-800 pt-2 mb-2 uppercase font-bold italic">
-            <div><span class="text-gray-custom tracking-tighter">Khả dụng: </span><span id="walletBal" class="text-white">0.00</span></div>
-            <div class="text-right text-[9px] text-yellow-500/80">
-                TP: <span id="tpShow" class="text-white">0</span>% | 
-                SL: <span id="slShow" class="text-white">0</span>% | 
-                Vol: <span id="volShow" class="text-white">0</span>%
+        <div class="grid grid-cols-2 gap-4 text-[10px] border-t border-zinc-800 pt-2 mb-2 uppercase font-bold">
+            <div><span class="text-gray-custom">Khả dụng: </span><span id="walletBal" class="text-white">0.00</span></div>
+            <div class="text-right text-[9px] text-yellow-500/80 italic">
+                TP: <span id="tpShow" class="text-white">0</span>% | SL: <span id="slShow" class="text-white">0</span>% | VOL: <span id="volShow" class="text-white">0</span>%
             </div>
         </div>
 
@@ -150,10 +140,15 @@ app.get('/gui', (req, res) => {
     </div>
 
     <div class="px-4 mt-4"><div class="bg-card rounded-lg p-3">
-        <div class="text-[10px] font-bold text-white mb-2 uppercase italic border-b border-green-500/30 pb-1 flex justify-between">Vị thế đang mở</div>
+        <div class="text-[10px] font-bold text-white mb-2 uppercase italic border-b border-green-500/30 pb-1">Vị thế đang mở</div>
         <table class="w-full text-[9px] text-left"><thead class="text-gray-custom uppercase border-b border-zinc-800">
             <tr><th>Time</th><th>Coin</th><th>Margin</th><th class="text-center">Lev/Target</th><th>Entry/Live</th><th class="text-right">PnL (ROI%)</th></tr>
         </thead><tbody id="pendingBody"></tbody></table>
+    </div></div>
+
+    <div class="px-4 mt-4"><div class="bg-card rounded-lg p-3">
+         <div class="text-[10px] font-bold text-gray-custom mb-2 uppercase border-b border-zinc-800 pb-1">Biến động thị trường</div>
+         <table class="w-full text-[10px] text-left"><thead><tr class="text-gray-custom text-[9px]"><th>COIN</th><th class="text-center">1M</th><th class="text-center">5M</th><th class="text-right">15M</th></tr></thead><tbody id="liveBody"></tbody></table>
     </div></div>
 
     <div class="px-4 mt-4 pb-32"><div class="bg-card rounded-lg p-3">
@@ -165,7 +160,6 @@ app.get('/gui', (req, res) => {
 
     <script>
     let running = false, initialBal = 1000;
-    
     const saved = JSON.parse(localStorage.getItem('luffy_state') || '{}');
     document.getElementById('balanceInp').value = saved.initialBal || 1000;
     document.getElementById('marginInp').value = saved.marginVal || "10%";
@@ -175,47 +169,35 @@ app.get('/gui', (req, res) => {
 
     if(saved.running) {
         running = true; initialBal = saved.initialBal;
-        document.getElementById('setup').classList.add('hidden');
-        document.getElementById('active').classList.remove('hidden');
+        document.getElementById('setup').classList.add('hidden'); document.getElementById('active').classList.remove('hidden');
         syncConfig();
     }
 
     function fPrice(p) {
         if (!p || p === 0) return "0.0000";
-        let s = p.toFixed(20);
-        let match = s.match(/^-?\\d+\\.0*[1-9]/);
+        let s = p.toFixed(20); let match = s.match(/^-?\\d+\\.0*[1-9]/);
         if (!match) return p.toFixed(4);
-        let index = match[0].length;
-        return parseFloat(p).toFixed(index - match[0].indexOf('.') + 3);
+        let index = match[0].length; return parseFloat(p).toFixed(index - match[0].indexOf('.') + 3);
     }
-
     function syncConfig() {
-        const tp = document.getElementById('tpInp').value;
-        const sl = document.getElementById('slInp').value;
-        const vol = document.getElementById('volInp').value;
+        const tp = document.getElementById('tpInp').value, sl = document.getElementById('slInp').value, vol = document.getElementById('volInp').value;
         fetch(\`/api/config?tp=\${tp}&sl=\${sl}&vol=\${vol}\`);
-        document.getElementById('tpShow').innerText = tp;
-        document.getElementById('slShow').innerText = sl;
-        document.getElementById('volShow').innerText = vol;
+        document.getElementById('tpShow').innerText = tp; document.getElementById('slShow').innerText = sl; document.getElementById('volShow').innerText = vol;
     }
-
     function start() {
         running = true; initialBal = parseFloat(document.getElementById('balanceInp').value);
-        localStorage.setItem('luffy_state', JSON.stringify({
-            running: true, initialBal, marginVal: document.getElementById('marginInp').value,
-            tp: document.getElementById('tpInp').value, sl: document.getElementById('slInp').value, vol: document.getElementById('volInp').value
-        }));
+        localStorage.setItem('luffy_state', JSON.stringify({ running: true, initialBal, marginVal: document.getElementById('marginInp').value, tp: document.getElementById('tpInp').value, sl: document.getElementById('slInp').value, vol: document.getElementById('volInp').value }));
         syncConfig(); location.reload();
     }
-    function stop() {
-        let s = JSON.parse(localStorage.getItem('luffy_state')); s.running = false;
-        localStorage.setItem('luffy_state', JSON.stringify(s)); location.reload();
-    }
+    function stop() { let s = JSON.parse(localStorage.getItem('luffy_state')); s.running = false; localStorage.setItem('luffy_state', JSON.stringify(s)); location.reload(); }
 
     async function update() {
         try {
             const res = await fetch('/api/data'); const d = await res.json();
             let mVal = document.getElementById('marginInp').value, mNum = parseFloat(mVal);
+
+            // Update bảng biến động
+            document.getElementById('liveBody').innerHTML = d.top5.map(c => \`<tr class="border-b border-zinc-800/50"><td class="py-2 font-bold">\${c.symbol}</td><td class="text-center \${c.c1>=0?'up':'down'}">\${c.c1}%</td><td class="text-center \${c.c5>=0?'up':'down'}">\${c.c5}%</td><td class="text-right \${c.c15>=0?'up':'down'}">\${c.c15}%</td></tr>\`).join('');
 
             let runningBal = initialBal, winSum = 0, loseSum = 0, winCount = 0, loseCount = 0;
             let histHTML = [...d.history].reverse().map(h => {
@@ -226,7 +208,6 @@ app.get('/gui', (req, res) => {
                 let tpP = h.type==='UP' ? h.snapPrice*(1+h.tpTarget/100) : h.snapPrice*(1-h.tpTarget/100);
                 let slP = h.type==='UP' ? h.snapPrice*(1-h.slTarget/100) : h.snapPrice*(1+h.slTarget/100);
                 let v = h.snapVol || {c1:0,c5:0,c15:0};
-
                 return \`<tr class="border-b border-zinc-800/30 text-zinc-400">
                     <td class="py-2 text-[7px]">\${new Date(h.startTime).toLocaleTimeString([],{hour12:false})}<br>\${new Date(h.endTime).toLocaleTimeString([],{hour12:false})}</td>
                     <td><b class="text-white">\${h.symbol}</b><br><span class="text-[7px]">\${v.c1}/\${v.c5}/\${v.c15}</span></td>
@@ -234,7 +215,7 @@ app.get('/gui', (req, res) => {
                     <td class="text-center text-[7px] font-bold">\${h.maxLev}x<br>\${fPrice(tpP)}/\${fPrice(slP)}</td>
                     <td>\${fPrice(h.snapPrice)}<br>\${fPrice(h.finalPrice)}</td>
                     <td class="\${netPnl>=0?'up':'down'} font-bold text-[9px]">\${netPnl.toFixed(2)}</td>
-                    <td class="text-right text-white">\${runningBal.toFixed(1)}</td></tr>\`;
+                    <td class="text-right text-white font-medium">\${runningBal.toFixed(1)}</td></tr>\`;
             }).reverse().join('');
             document.getElementById('historyBody').innerHTML = histHTML;
 
