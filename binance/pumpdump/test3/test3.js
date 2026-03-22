@@ -2,13 +2,11 @@ const PORT = 9057;
 const HISTORY_FILE = './history_db.json';
 const LEVERAGE_FILE = './leverage_cache.json';
 const COOLDOWN_MINUTES = 15; 
-const FORCE_CLOSE_MINUTES = 10; // Thêm cấu hình 10 phút đóng lệnh
+const FORCE_CLOSE_MS = 10 * 60000; // 10 phút
 
 import WebSocket from 'ws';
 import express from 'express';
 import fs from 'fs';
-import https from 'https';
-import crypto from 'crypto';
 import { API_KEY, SECRET_KEY } from './config.js';
 
 const app = express();
@@ -17,7 +15,6 @@ let historyMap = new Map();
 let symbolMaxLeverage = {}; 
 let lastTradeClosed = {}; 
 
-// Thông số động nhận từ UI
 let currentTP = 0.5, currentSL = 10.0, currentMinVol = 5;
 
 function fPrice(p) {
@@ -54,25 +51,25 @@ function initWS() {
             if (!coinData[s]) coinData[s] = { symbol: s, prices: [] };
             coinData[s].prices.push({ p, t: now });
             if (coinData[s].prices.length > 300) coinData[s].prices.shift();
+            
             const c1 = calculateChange(coinData[s].prices, 1), c5 = calculateChange(coinData[s].prices, 5), c15 = calculateChange(coinData[s].prices, 15);
             coinData[s].live = { c1, c5, c15, currentPrice: p };
             
             const pending = Array.from(historyMap.values()).find(h => h.symbol === s && h.status === 'PENDING');
             if (pending) {
                 const diff = ((p - pending.snapPrice) / pending.snapPrice) * 100;
+                const timeElapsed = now - pending.startTime;
+                
                 const win = pending.type === 'UP' ? diff >= pending.tpTarget : diff <= -pending.tpTarget; 
                 const lose = pending.type === 'UP' ? diff <= -pending.slTarget : diff >= pending.slTarget; 
-                
-                // Kiểm tra điều kiện đóng lệnh: TP/SL hoặc Quá 10 phút
-                const isExpired = (now - pending.startTime) >= FORCE_CLOSE_MINUTES * 60000;
+                const timeout = timeElapsed >= FORCE_CLOSE_MS;
 
-                if (win || lose || isExpired) { 
-                    pending.status = win ? 'WIN' : (lose ? 'LOSE' : 'EXPIRED'); 
+                if (win || lose || timeout) { 
+                    pending.status = win ? 'WIN' : (lose ? 'LOSE' : 'TIMEOUT'); 
                     pending.finalPrice = p; 
                     pending.endTime = now;
-                    // Tính PnL dựa trên giá thực tế khi đóng (quan trọng cho trường hợp EXPIRED)
-                    const realRoi = (pending.type === 'UP' ? (p - pending.snapPrice) / pending.snapPrice : (pending.snapPrice - p) / pending.snapPrice) * 100;
-                    pending.pnlPercent = realRoi; 
+                    // Tính PnL thực tế theo giá đóng
+                    pending.pnlPercent = (pending.type === 'UP' ? (p - pending.snapPrice)/pending.snapPrice : (pending.snapPrice - p)/pending.snapPrice) * 100;
                     
                     lastTradeClosed[s] = now; 
                     fs.writeFileSync(HISTORY_FILE, JSON.stringify(Array.from(historyMap.values()))); 
@@ -89,15 +86,8 @@ function initWS() {
     ws.on('close', () => setTimeout(initWS, 5000));
 }
 
-// Giữ nguyên các phần app.get và UI phía dưới...
-// Trong phần script UI tại hàm update():
-// Logic hiển thị đã tự động dùng walletBal cho margin nếu bạn nhập %, 
-// lệnh "margin = mVal.includes('%') ? (runningBal * mNum / 100) : mNum" 
-// trong mã gốc thực tế đang dùng runningBal (tổng dư). 
-// Để đúng ý bạn "Margin tính bằng số dư khả dụng", tôi đã chỉnh nhẹ logic tính toán hiển thị bên dưới.
-
 app.get('/api/config', (req, res) => {
-    currentTP = parseFloat(req.query.tp) || 0.5; currentSL = parseFloat(req.query.sl) || 10.0; currentMinVol = parseFloat(req.query.vol) || 5;
+    currentTP = parseFloat(req.query.tp); currentSL = parseFloat(req.query.sl); currentMinVol = parseFloat(req.query.vol);
     res.sendStatus(200);
 });
 
@@ -119,7 +109,6 @@ app.get('/gui', (req, res) => {
         body { background: #0b0e11; color: #eaecef; font-family: 'IBM Plex Sans', sans-serif; margin: 0; }
         .up { color: #0ecb81; } .down { color: #f6465d; }
         .bg-card { background: #1e2329; } .text-gray-custom { color: #848e9c; }
-        input::-webkit-outer-spin-button, input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
     </style></head><body>
     
     <div class="p-4 bg-[#0b0e11] sticky top-0 z-50 shadow-xl border-b border-zinc-800">
@@ -164,15 +153,10 @@ app.get('/gui', (req, res) => {
         </thead><tbody id="pendingBody"></tbody></table>
     </div></div>
 
-    <div class="px-4 mt-4"><div class="bg-card rounded-lg p-3">
-         <div class="text-[10px] font-bold text-gray-custom mb-2 uppercase border-b border-zinc-800 pb-1">Biến động thị trường</div>
-         <table class="w-full text-[10px] text-left"><thead><tr class="text-gray-custom text-[9px]"><th>COIN</th><th class="text-center">1M</th><th class="text-center">5M</th><th class="text-right">15M</th></tr></thead><tbody id="liveBody"></tbody></table>
-    </div></div>
-
     <div class="px-4 mt-4 pb-32"><div class="bg-card rounded-lg p-3">
-        <div class="text-[10px] font-bold text-gray-custom mb-2 uppercase italic border-b border-zinc-800 pb-1">Lịch sử (Chụp biến động)</div>
+        <div class="text-[10px] font-bold text-gray-custom mb-2 uppercase italic border-b border-zinc-800 pb-1">Lịch sử</div>
         <table class="w-full text-[8px] text-left"><thead class="text-gray-custom border-b border-zinc-800 uppercase">
-            <tr><th>Time In-Out</th><th>Coin/Vol</th><th>Margin</th><th class="text-center">Lev/Target</th><th>Entry/Exit</th><th>PnL Net</th><th class="text-right">Balance</th></tr>
+            <tr><th>Time In-Out</th><th>Coin</th><th>Margin</th><th class="text-center">Lev/Target</th><th>Entry/Exit</th><th>PnL Net</th><th class="text-right">Balance</th></tr>
         </thead><tbody id="historyBody"></tbody></table>
     </div></div>
 
@@ -186,7 +170,7 @@ app.get('/gui', (req, res) => {
     document.getElementById('volInp').value = saved.vol || 5.0;
 
     if(saved.running) {
-        running = true; initialBal = saved.initialBal;
+        running = true; initialBal = parseFloat(saved.initialBal);
         document.getElementById('setup').classList.add('hidden'); document.getElementById('active').classList.remove('hidden');
         syncConfig();
     }
@@ -197,14 +181,20 @@ app.get('/gui', (req, res) => {
         if (!match) return p.toFixed(4);
         let index = match[0].length; return parseFloat(p).toFixed(index - match[0].indexOf('.') + 3);
     }
+
     function syncConfig() {
         const tp = document.getElementById('tpInp').value, sl = document.getElementById('slInp').value, vol = document.getElementById('volInp').value;
         fetch(\`/api/config?tp=\${tp}&sl=\${sl}&vol=\${vol}\`);
         document.getElementById('tpShow').innerText = tp; document.getElementById('slShow').innerText = sl; document.getElementById('volShow').innerText = vol;
     }
+
     function start() {
-        running = true; initialBal = parseFloat(document.getElementById('balanceInp').value);
-        localStorage.setItem('luffy_state', JSON.stringify({ running: true, initialBal, marginVal: document.getElementById('marginInp').value, tp: document.getElementById('tpInp').value, sl: document.getElementById('slInp').value, vol: document.getElementById('volInp').value }));
+        running = true;
+        localStorage.setItem('luffy_state', JSON.stringify({ 
+            running: true, initialBal: document.getElementById('balanceInp').value, 
+            marginVal: document.getElementById('marginInp').value, 
+            tp: document.getElementById('tpInp').value, sl: document.getElementById('slInp').value, vol: document.getElementById('volInp').value 
+        }));
         syncConfig(); location.reload();
     }
     function stop() { let s = JSON.parse(localStorage.getItem('luffy_state')); s.running = false; localStorage.setItem('luffy_state', JSON.stringify(s)); location.reload(); }
@@ -214,59 +204,51 @@ app.get('/gui', (req, res) => {
             const res = await fetch('/api/data'); const d = await res.json();
             let mVal = document.getElementById('marginInp').value, mNum = parseFloat(mVal);
 
-            document.getElementById('liveBody').innerHTML = d.top5.map(c => \`<tr class="border-b border-zinc-800/50"><td class="py-2 font-bold">\${c.symbol}</td><td class="text-center \${c.c1>=0?'up':'down'}">\${c.c1}%</td><td class="text-center \${c.c5>=0?'up':'down'}">\${c.c5}%</td><td class="text-right \${c.c15>=0?'up':'down'}">\${c.c15}%</td></tr>\`).join('');
+            let currentBal = initialBal;
+            let winSum = 0, loseSum = 0, winCount = 0, loseCount = 0;
 
-            let runningBal = initialBal, winSum = 0, loseSum = 0, winCount = 0, loseCount = 0;
-            let currentAvailable = initialBal; 
-
-            // Tính toán lịch sử trước để có số dư khả dụng thực tế hiện tại
+            // 1. Duyệt lịch sử để tính Số dư khả dụng thực tế
             let histHTML = [...d.history].reverse().map(h => {
-                // Thay đổi: Margin tính trên số dư khả dụng (currentAvailable) thay vì runningBal (tổng)
-                let margin = mVal.includes('%') ? (currentAvailable * mNum / 100) : mNum;
+                let margin = mVal.includes('%') ? (currentBal * mNum / 100) : mNum;
                 let netPnl = (margin * (h.maxLev || 20) * (h.pnlPercent/100)) - (margin * (h.maxLev || 20) * 0.001);
-                
-                runningBal += netPnl;
-                currentAvailable += netPnl; // Khả dụng thay đổi theo PnL thực tế đã chốt
-
+                currentBal += netPnl;
                 if(netPnl >= 0) { winSum += netPnl; winCount++; } else { loseSum += netPnl; loseCount++; }
-                let tpP = h.type==='UP' ? h.snapPrice*(1+h.tpTarget/100) : h.snapPrice*(1-h.tpTarget/100);
-                let slP = h.type==='UP' ? h.snapPrice*(1-h.slTarget/100) : h.snapPrice*(1+h.slTarget/100);
-                let v = h.snapVol || {c1:0,c5:0,c15:0};
                 return \`<tr class="border-b border-zinc-800/30 text-zinc-400">
-                    <td class="py-2 text-[7px]">\${new Date(h.startTime).toLocaleTimeString([],{hour12:false})}<br>\${new Date(h.endTime).toLocaleTimeString([],{hour12:false})}</td>
-                    <td><b class="text-white">\${h.symbol}</b><br><span class="text-[7px]">\${v.c1}/\${v.c5}/\${v.c15}</span></td>
+                    <td class="py-2 text-[7px]">\${new Date(h.startTime).toLocaleTimeString()}<br>\${new Date(h.endTime).toLocaleTimeString()}</td>
+                    <td><b class="text-white">\${h.symbol}</b></td>
                     <td>\${margin.toFixed(1)}</td>
-                    <td class="text-center text-[7px] font-bold">\${h.maxLev}x<br>\${fPrice(tpP)}/\${fPrice(slP)}</td>
+                    <td class="text-center">\${h.maxLev}x</td>
                     <td>\${fPrice(h.snapPrice)}<br>\${fPrice(h.finalPrice)}</td>
-                    <td class="\${netPnl>=0?'up':'down'} font-bold text-[9px]">\${netPnl.toFixed(2)}</td>
-                    <td class="text-right text-white font-medium">\${runningBal.toFixed(1)}</td></tr>\`;
+                    <td class="\${netPnl>=0?'up':'down'} font-bold">\${netPnl.toFixed(2)}</td>
+                    <td class="text-right text-white">\${currentBal.toFixed(1)}</td></tr>\`;
             }).reverse().join('');
             document.getElementById('historyBody').innerHTML = histHTML;
 
+            // 2. Tính cho các lệnh đang mở (Pending) dựa trên số dư khả dụng
             let unPnl = 0, marginUsed = 0;
+            let availableAtOpen = currentBal; // Số dư khả dụng trước khi mở các lệnh pending
+
             document.getElementById('pendingBody').innerHTML = d.pending.map(h => {
                 let lp = d.allPrices[h.symbol] || h.snapPrice;
-                // Thay đổi: Margin lệnh đang mở được tính từ số dư khả dụng lúc đó
-                let margin = mVal.includes('%') ? (currentAvailable * mNum / 100) : mNum; 
+                // Margin tính dựa trên khả dụng
+                let margin = mVal.includes('%') ? (availableAtOpen * mNum / 100) : mNum; 
                 marginUsed += margin;
                 let roi = (h.type === 'UP' ? (lp-h.snapPrice)/h.snapPrice : (h.snapPrice-lp)/h.snapPrice) * 100 * (h.maxLev || 20);
                 let pnl = margin * roi / 100; unPnl += pnl;
-                let tpP = h.type==='UP' ? h.snapPrice*(1+h.tpTarget/100) : h.snapPrice*(1-h.tpTarget/100);
-                let slP = h.type==='UP' ? h.snapPrice*(1-h.slTarget/100) : h.snapPrice*(1+h.slTarget/100);
-                return \`<tr class="bg-green-500/5"><td>\${new Date(h.startTime).toLocaleTimeString([],{hour12:false})}</td><td class="text-white font-bold">\${h.symbol}</td><td>\${margin.toFixed(1)}</td><td class="text-center text-[7px] font-bold">\${h.maxLev}x<br>\${fPrice(tpP)}/\${fPrice(slP)}</td><td>\${fPrice(h.snapPrice)}<br><b class="text-white">\${fPrice(lp)}</b></td><td class="text-right font-bold \${pnl>=0?'up':'down'} text-[10px]">\${pnl.toFixed(2)}<br>\${roi.toFixed(1)}%</td></tr>\`;
+                return \`<tr class="bg-green-500/5"><td class="text-[7px]">\${new Date(h.startTime).toLocaleTimeString()}</td><td class="text-white font-bold">\${h.symbol}</td><td>\${margin.toFixed(1)}</td><td class="text-center">\${h.maxLev}x</td><td>\${fPrice(h.snapPrice)}<br><b>\${fPrice(lp)}</b></td><td class="text-right font-bold \${pnl>=0?'up':'down'}">\${pnl.toFixed(2)} (\${roi.toFixed(1)}%)</td></tr>\`;
             }).join('');
 
             if(running) {
-                document.getElementById('displayBal').innerText = (runningBal + unPnl).toFixed(2);
-                document.getElementById('walletBal').innerText = (currentAvailable - marginUsed).toFixed(2);
-                document.getElementById('unPnl').innerText = (unPnl >= 0 ? '+' : '') + unPnl.toFixed(2);
-                document.getElementById('unPnl').className = 'font-bold ' + (unPnl >= 0 ? 'up' : 'down');
+                document.getElementById('displayBal').innerText = (currentBal + unPnl).toFixed(2);
+                document.getElementById('walletBal').innerText = (currentBal - marginUsed).toFixed(2);
+                document.getElementById('unPnl').innerText = unPnl.toFixed(2);
+                document.getElementById('unPnl').className = 'text-lg font-bold ' + (unPnl >= 0 ? 'up' : 'down');
                 document.getElementById('winSum').innerText = '+' + winSum.toFixed(2); document.getElementById('loseSum').innerText = loseSum.toFixed(2);
                 document.getElementById('winCount').innerText = winCount + 'W'; document.getElementById('loseCount').innerText = loseCount + 'L';
             }
         } catch(e) {}
     }
-    setInterval(update, 100);
+    setInterval(update, 500);
     </script></body></html>`);
 });
 
