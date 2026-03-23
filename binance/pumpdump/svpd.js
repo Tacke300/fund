@@ -16,7 +16,7 @@ let lastTradeClosed = {};
 
 let currentTP = 0.5, currentSL = 10.0, currentMinVol = 5;
 
-// Hàm fix giá thông minh cho coin rác/nhiều số 0
+// Hàm hiện giá thông minh (giữ lại 4 số sau dãy số 0)
 function fPrice(p) {
     if (!p || p === 0) return "0.0000";
     let s = p.toFixed(20);
@@ -90,7 +90,7 @@ app.get('/api/data', (req, res) => {
     const all = Array.from(historyMap.values());
     res.json({ 
         allPrices: Object.fromEntries(Object.entries(coinData).map(([s, v]) => [s, v.live.currentPrice])),
-        top5: Object.entries(coinData).filter(([_, v]) => v.live).map(([s, v]) => ({ symbol: s, ...v.live })).sort((a,b)=>Math.abs(b.c1)-Math.abs(a.c1)).slice(0,5),
+        top5: Object.entries(coinData).filter(([_, v]) => v.live).map(([s, v]) => ({ symbol: s, ...v.live })).sort((a,b)=>Math.max(Math.abs(b.c1), Math.abs(b.c5), Math.abs(b.c15)) - Math.max(Math.abs(a.c1), Math.abs(a.c5), Math.abs(a.c15))).slice(0,5),
         pending: all.filter(h => h.status === 'PENDING').sort((a,b)=>b.startTime-a.startTime),
         history: all.filter(h => h.status !== 'PENDING').sort((a,b)=>b.endTime-a.endTime)
     });
@@ -129,13 +129,25 @@ app.get('/gui', (req, res) => {
             <div><div class="text-gray-custom text-[10px] uppercase font-bold leading-none">Số dư ký quỹ</div><span id="displayBal" class="text-4xl font-black text-white tracking-tighter">0.00</span></div>
             <div class="text-right"><div id="unPnl" class="text-xl font-bold">0.00</div></div>
         </div>
+
+        <div class="grid grid-cols-2 gap-4 text-[10px] border-t border-zinc-800 pt-2 mb-2 uppercase font-black">
+            <div><span class="text-gray-custom">Khả dụng: </span><span id="walletBal" class="text-white">0.00</span></div>
+            <div class="text-right text-yellow-500 italic">
+                TP: <span id="tpShow" class="text-white">0</span>% | SL: <span id="slShow" class="text-white">0</span>% | VOL: <span id="volShow" class="text-white">0</span>%
+            </div>
+        </div>
     </div>
 
     <div class="px-4 mt-4"><div class="bg-card rounded-xl p-3 shadow-lg">
-        <div class="text-[11px] font-black text-white mb-2 uppercase italic border-l-4 border-green-500 pl-2">Vị thế đang mở (Live Data)</div>
+        <div class="text-[11px] font-black text-white mb-2 uppercase italic border-l-4 border-green-500 pl-2">Vị thế đang mở</div>
         <table class="w-full text-[10px] text-left"><thead class="text-gray-custom uppercase border-b border-zinc-800">
-            <tr><th>Time</th><th>Coin/Vol</th><th>Margin</th><th class="text-center">Target TP/SL</th><th class="text-right">PnL (ROI%)</th></tr>
+            <tr><th>Time</th><th>Coin/Vol</th><th>Margin</th><th class="text-center">Target (TP/SL)</th><th class="text-right">PnL (ROI%)</th></tr>
         </thead><tbody id="pendingBody"></tbody></table>
+    </div></div>
+
+    <div class="px-4 mt-4"><div class="bg-card rounded-xl p-3 shadow-lg">
+         <div class="text-[11px] font-black text-[#fcd535] mb-2 uppercase italic border-l-4 border-[#fcd535] pl-2">Biến động thị trường (Top 5)</div>
+         <table class="w-full text-[10px] text-left"><thead><tr class="text-gray-custom text-[9px] uppercase font-bold"><th>COIN</th><th class="text-center">1M</th><th class="text-center">5M</th><th class="text-right">15M</th></tr></thead><tbody id="liveBody"></tbody></table>
     </div></div>
 
     <div class="px-4 mt-4 pb-32"><div class="bg-card rounded-xl p-3 shadow-lg">
@@ -157,6 +169,9 @@ app.get('/gui', (req, res) => {
     if(saved.running) {
         running = true; initialBal = parseFloat(saved.initialBal);
         document.getElementById('setup').classList.add('hidden'); document.getElementById('active').classList.remove('hidden');
+        document.getElementById('tpShow').innerText = saved.tp; 
+        document.getElementById('slShow').innerText = saved.sl; 
+        document.getElementById('volShow').innerText = saved.vol;
         syncConfig();
     }
 
@@ -188,6 +203,10 @@ app.get('/gui', (req, res) => {
         try {
             const res = await fetch('/api/data'); const d = await res.json();
             let mVal = document.getElementById('marginInp').value, mNum = parseFloat(mVal);
+
+            // Cập nhật bảng Biến động thị trường (MỚI KHÔI PHỤC)
+            document.getElementById('liveBody').innerHTML = d.top5.map(c => \`<tr class="border-b border-zinc-800/50"><td class="py-2 font-bold text-white">\${c.symbol}</td><td class="text-center \${c.c1>=0?'up':'down'} font-bold">\${c.c1}%</td><td class="text-center \${c.c5>=0?'up':'down'} font-bold">\${c.c5}%</td><td class="text-right \${c.c15>=0?'up':'down'} font-bold">\${c.c15}%</td></tr>\`).join('');
+
             let currentBal = initialBal;
             
             // LỊCH SỬ
@@ -209,7 +228,7 @@ app.get('/gui', (req, res) => {
             }).reverse().join('');
             document.getElementById('historyBody').innerHTML = histHTML;
 
-            // VỊ THẾ ĐANG MỞ (ĐÃ THÊM BIẾN ĐỘNG + TARGET)
+            // VỊ THẾ ĐANG MỞ
             let unPnl = 0, marginUsed = 0;
             let availableAtOpen = currentBal; 
 
@@ -219,13 +238,11 @@ app.get('/gui', (req, res) => {
                 marginUsed += margin;
                 let roi = (h.type === 'UP' ? (lp-h.snapPrice)/h.snapPrice : (h.snapPrice-lp)/h.snapPrice) * 100 * (h.maxLev || 20);
                 let pnl = margin * roi / 100; unPnl += pnl;
-                
-                // Tính giá TP/SL live dựa trên target lúc mở
                 let tpP = h.type==='UP' ? h.snapPrice*(1+h.tpTarget/100) : h.snapPrice*(1-h.tpTarget/100);
                 let slP = h.type==='UP' ? h.snapPrice*(1-h.slTarget/100) : h.snapPrice*(1+h.slTarget/100);
 
                 return \`<tr class="bg-white/5 border-b border-zinc-800">
-                    <td class="py-2">\${new Date(h.startTime).toLocaleTimeString([],{hour12:false})}</td>
+                    <td class="py-2 text-[9px]">\${new Date(h.startTime).toLocaleTimeString([],{hour12:false})}</td>
                     <td><b class="text-white">\${h.symbol}</b><br><span class="text-[8px] text-[#fcd535] font-bold">\${h.snapVol.c1}/\${h.snapVol.c5}/\${h.snapVol.c15}</span></td>
                     <td>\${margin.toFixed(2)}</td>
                     <td class="text-center text-[8px] font-bold text-zinc-400">T: <span class="text-green-500">\${fPrice(tpP)}</span><br>S: <span class="text-red-500">\${fPrice(slP)}</span></td>
@@ -235,6 +252,7 @@ app.get('/gui', (req, res) => {
 
             if(running) {
                 document.getElementById('displayBal').innerText = (currentBal + unPnl).toFixed(2);
+                document.getElementById('walletBal').innerText = (currentBal - marginUsed).toFixed(2);
                 document.getElementById('unPnl').innerText = (unPnl >= 0 ? '+' : '') + unPnl.toFixed(2);
                 document.getElementById('unPnl').className = 'text-xl font-bold ' + (unPnl >= 0 ? 'up' : 'down');
             }
