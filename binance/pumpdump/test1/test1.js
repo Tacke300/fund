@@ -14,7 +14,7 @@ let historyMap = new Map();
 let symbolMaxLeverage = {}; 
 let lastTradeClosed = {}; 
 
-let currentTP = 0.5, currentSL = 10.0, currentMinVol = 5;
+let currentTP = 0.5, currentSL = 100.0, currentMinVol = 6.8;
 
 // Hàm fix giá thông minh (Hiện ít nhất 4 số sau dãy số 0)
 function fPrice(p) {
