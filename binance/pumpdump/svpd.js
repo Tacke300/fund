@@ -94,7 +94,7 @@ app.get('/api/data', (req, res) => {
 
 app.get('/gui', (req, res) => {
     res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Binance Luffy Pro</title><script src="https://cdn.tailwindcss.com"></script>
+    <title>Binance</title><script src="https://cdn.tailwindcss.com"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;600;700&display=swap');
         body { background: #0b0e11; color: #eaecef; font-family: 'IBM Plex Sans', sans-serif; margin: 0; }
@@ -102,7 +102,6 @@ app.get('/gui', (req, res) => {
         .bg-card { background: #1e2329; border: 1px solid #2b3139; }
         .text-gray-custom { color: #848e9c; }
         .glow-yellow { text-shadow: 0 0 15px rgba(252, 213, 53, 0.5); }
-        .binance-logo { width: 32px; height: 32px; margin-right: 12px; }
     </style></head><body>
     
     <div class="p-4 bg-[#0b0e11] sticky top-0 z-50 shadow-2xl border-b border-zinc-800">
@@ -119,8 +118,7 @@ app.get('/gui', (req, res) => {
 
         <div id="active" class="hidden flex justify-between items-center mb-4">
             <div class="flex items-center">
-                <img src="https://cryptologos.cc/logos/binance-coin-bnb-logo.png?v=032" class="binance-logo" alt="Binance Logo">
-                <div class="font-bold italic text-white text-xl glow-yellow uppercase tracking-tighter leading-none">BINANCE <span class="text-[#fcd535]">LUFFY</span> Pro</div>
+                <div class="font-bold italic text-white text-xl glow-yellow uppercase tracking-tighter leading-none">BINANCE</div>
             </div>
             <div id="user-id" class="text-[#fcd535] font-black italic text-xl cursor-pointer" onclick="stop()">Monkey_D_Luffy</div>
         </div>
