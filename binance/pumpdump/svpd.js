@@ -16,7 +16,6 @@ let lastTradeClosed = {};
 
 let currentTP = 0.5, currentSL = 10.0, currentMinVol = 5;
 
-// Hàm fix giá thông minh
 function fPrice(p) {
     if (!p || p === 0) return "0.0000";
     let s = p.toFixed(20);
@@ -59,7 +58,6 @@ function initWS() {
 
             const pending = Array.from(historyMap.values()).find(h => h.symbol === s && h.status === 'PENDING');
             
-            // LOGIC ĐÓNG LỆNH & CẬP NHẬT BLACKLIST
             if (pending) {
                 const diff = ((p - pending.snapPrice) / pending.snapPrice) * 100;
                 const win = pending.type === 'UP' ? diff >= pending.tpTarget : diff <= -pending.tpTarget; 
@@ -71,13 +69,11 @@ function initWS() {
                     pending.endTime = now;
                     pending.pnlPercent = (pending.type === 'UP' ? (p - pending.snapPrice)/pending.snapPrice : (pending.snapPrice - p)/pending.snapPrice) * 100;
                     
-                    // CHẶN 15 PHÚT SAU KHI ĐÓNG
                     lastTradeClosed[s] = now; 
                     fs.writeFileSync(HISTORY_FILE, JSON.stringify(Array.from(historyMap.values()))); 
                 }
             }
 
-            // LOGIC MỞ LỆNH: CHECK BIẾN ĐỘNG + TRẠNG THÁI + BLACKLIST
             if (Math.max(Math.abs(c1), Math.abs(c5), Math.abs(c15)) >= currentMinVol && 
                 !pending && 
                 !(lastTradeClosed[s] && (now - lastTradeClosed[s] < COOLDOWN_MINUTES * 60000))) {
@@ -109,7 +105,7 @@ app.get('/api/data', (req, res) => {
 
 app.get('/gui', (req, res) => {
     res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Binance Luffy</title><script src="https://cdn.tailwindcss.com"></script>
+    <title>Binance</title><script src="https://cdn.tailwindcss.com"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;600;700&display=swap');
         body { background: #0b0e11; color: #eaecef; font-family: 'IBM Plex Sans', sans-serif; margin: 0; }
@@ -117,7 +113,6 @@ app.get('/gui', (req, res) => {
         .bg-card { background: #1e2329; border: 1px solid #2b3139; }
         .text-gray-custom { color: #848e9c; }
         .glow-yellow { text-shadow: 0 0 15px rgba(252, 213, 53, 0.5); }
-        .binance-logo { width: 32px; height: 32px; margin-right: 12px; }
     </style></head><body>
     
     <div class="p-4 bg-[#0b0e11] sticky top-0 z-50 shadow-2xl border-b border-zinc-800">
@@ -134,7 +129,7 @@ app.get('/gui', (req, res) => {
 
         <div id="active" class="hidden flex justify-between items-center mb-4">
             <div class="flex items-center">
-                <img src="https://cryptologos.cc/logos/binance-coin-bnb-logo.png?v=032" class="binance-logo">
+                <img src="https://cryptologos.cc/logos/binance-coin-bnb-logo.png?v=032" style="width:24px; margin-right:8px;">
                 <div class="font-bold italic text-white text-xl glow-yellow uppercase tracking-tighter leading-none">BINANCE</div>
             </div>
             <div id="user-id" class="text-[#fcd535] font-black italic text-xl cursor-pointer" onclick="stop()">Monkey_D_Luffy</div>
@@ -142,8 +137,8 @@ app.get('/gui', (req, res) => {
 
         <div class="grid grid-cols-3 gap-2 mb-4 text-center">
             <div class="bg-card p-2 rounded-lg border border-zinc-800"><div class="text-[8px] text-gray-custom uppercase font-bold">Win / Lose</div><div class="text-xs font-black"><span class="up" id="totalWin">0</span> / <span class="down" id="totalLose">0</span></div></div>
-            <div class="bg-card p-2 rounded-lg border border-zinc-800"><div class="text-[8px] text-gray-custom uppercase font-bold">PnL Win ($)</div><div class="text-xs font-black up" id="pnlWinSum">+0.00</div></div>
-            <div class="bg-card p-2 rounded-lg border border-zinc-800"><div class="text-[8px] text-gray-custom uppercase font-bold">PnL Lose ($)</div><div class="text-xs font-black down" id="pnlLoseSum">-0.00</div></div>
+            <div class="bg-card p-2 rounded-lg border border-zinc-800"><div class="text-[8px] text-gray-custom uppercase font-bold">Tổng PnL Win</div><div class="text-xs font-black up" id="pnlWinSum">+0.00</div></div>
+            <div class="bg-card p-2 rounded-lg border border-zinc-800"><div class="text-[8px] text-gray-custom uppercase font-bold">Tổng PnL Lose</div><div class="text-xs font-black down" id="pnlLoseSum">-0.00</div></div>
         </div>
 
         <div class="flex justify-between items-center mb-2 px-1">
@@ -231,7 +226,7 @@ app.get('/gui', (req, res) => {
                 let slP = h.type==='UP' ? h.snapPrice*(1-h.slTarget/100) : h.snapPrice*(1+h.slTarget/100);
                 return \`<tr class="border-b border-zinc-800/30 text-zinc-400">
                     <td class="py-1 text-[7px]">\${new Date(h.startTime).toLocaleTimeString([],{hour12:false})}<br>\${new Date(h.endTime).toLocaleTimeString([],{hour12:false})}</td>
-                    <td><b class="text-white">\${h.symbol}</b><br><span class="text-[7px] text-[#fcd535] font-bold">Lev: \${h.maxLev}x</span></td>
+                    <td><b class="text-white">\${h.symbol}</b><br><span class="text-[7px] text-[#fcd535] font-bold">\${h.snapVol.c1}/\${h.snapVol.c5}/\${h.snapVol.c15}</span></td>
                     <td>\${fPrice(h.snapPrice)}<br>\${fPrice(h.finalPrice)}</td>
                     <td class="text-center text-[7px] font-bold">T: \${fPrice(tpP)}<br>S: \${fPrice(slP)}</td>
                     <td class="\${netPnl>=0?'up':'down'} font-black text-[10px]">\${netPnl.toFixed(2)}</td>
@@ -252,9 +247,9 @@ app.get('/gui', (req, res) => {
                 let slP = h.type==='UP' ? h.snapPrice*(1-h.slTarget/100) : h.snapPrice*(1+h.slTarget/100);
                 return \`<tr class="bg-white/5 border-b border-zinc-800">
                     <td class="py-2 text-[8px]">\${new Date(h.startTime).toLocaleTimeString([],{hour12:false})}</td>
-                    <td><b class="text-white">\${h.symbol}</b><br><span class="text-[8px] text-[#fcd535] font-bold">Lev: \${h.maxLev}x</span></td>
+                    <td><b class="text-white">\${h.symbol}</b><br><span class="text-[8px] text-[#fcd535] font-bold">\${h.snapVol.c1}/\${h.snapVol.c5}/\${h.snapVol.c15}</span></td>
                     <td class="font-bold text-zinc-300">\${fPrice(h.snapPrice)}<br><span class="text-white font-black">\${fPrice(lp)}</span></td>
-                    <td class="text-center text-[8px] font-bold text-zinc-400italic">T: <span class="text-green-500">\${fPrice(tpP)}</span><br>S: <span class="text-red-500">\${fPrice(slP)}</span></td>
+                    <td class="text-center text-[8px] font-bold text-zinc-400">T: <span class="text-green-500">\${fPrice(tpP)}</span><br>S: <span class="text-red-500">\${fPrice(slP)}</span></td>
                     <td class="text-right font-black \${pnl>=0?'up':'down'} text-[11px]">\${pnl.toFixed(2)}<br>\${roi.toFixed(1)}%</td>
                 </tr>\`;
             }).join('');
