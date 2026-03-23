@@ -16,7 +16,6 @@ let lastTradeClosed = {};
 
 let currentTP = 0.5, currentSL = 10.0, currentMinVol = 5;
 
-// Hàm fix giá hiển thị ít nhất 4 số sau dãy số 0
 function fPrice(p) {
     if (!p || p === 0) return "0.0000";
     let s = p.toFixed(20);
@@ -141,7 +140,7 @@ app.get('/gui', (req, res) => {
     <div class="px-4 mt-4"><div class="bg-card rounded-xl p-3 shadow-lg border border-green-500/20">
         <div class="text-[11px] font-black text-white mb-2 uppercase italic border-l-4 border-green-500 pl-2">Vị thế đang mở</div>
         <table class="w-full text-[10px] text-left"><thead class="text-gray-custom uppercase border-b border-zinc-800 text-[8px]">
-            <tr><th>Time</th><th>Coin/Vol</th><th>Entry/Live</th><th class="text-center">Target</th><th class="text-right">PnL (ROI%)</th></tr>
+            <tr><th>Time In</th><th>Coin/Vol</th><th>Entry/Live</th><th class="text-center">Target</th><th class="text-right">PnL (ROI%)</th></tr>
         </thead><tbody id="pendingBody"></tbody></table>
     </div></div>
 
@@ -153,7 +152,7 @@ app.get('/gui', (req, res) => {
     <div class="px-4 mt-4 pb-32"><div class="bg-card rounded-xl p-3 shadow-lg">
         <div class="text-[11px] font-black text-gray-custom mb-2 uppercase italic border-l-4 border-zinc-600 pl-2">Lịch sử giao dịch</div>
         <table class="w-full text-[8px] text-left"><thead class="text-gray-custom border-b border-zinc-800 uppercase">
-            <tr><th>Time</th><th>Coin/Vol</th><th>Entry/Exit</th><th class="text-center">Target</th><th>PnL Net</th><th class="text-right font-bold text-white">Balance</th></tr>
+            <tr><th>Time Out</th><th>Coin/Vol</th><th>Entry/Exit</th><th class="text-center">Target</th><th>PnL Net</th><th class="text-right font-bold text-white">Balance</th></tr>
         </thead><tbody id="historyBody"></tbody></table>
     </div></div>
 
@@ -199,12 +198,11 @@ app.get('/gui', (req, res) => {
             const res = await fetch('/api/data'); const d = await res.json();
             let mVal = document.getElementById('marginInp').value, mNum = parseFloat(mVal);
 
-            // CẬP NHẬT BIẾN ĐỘNG
             document.getElementById('liveBody').innerHTML = d.top5.map(c => \`<tr class="border-b border-zinc-800/50"><td class="py-2 font-bold text-white">\${c.symbol}</td><td class="text-center \${c.c1>=0?'up':'down'} font-bold">\${c.c1}%</td><td class="text-center \${c.c5>=0?'up':'down'} font-bold">\${c.c5}%</td><td class="text-right \${c.c15>=0?'up':'down'} font-bold">\${c.c15}%</td></tr>\`).join('');
 
             let currentBal = initialBal, winCount = 0, loseCount = 0, pnlWinSum = 0, pnlLoseSum = 0;
             
-            // CẬP NHẬT LỊCH SỬ
+            // LỊCH SỬ CÓ TIME OUT
             let histHTML = [...d.history].reverse().map(h => {
                 let margin = mVal.includes('%') ? (currentBal * mNum / 100) : mNum;
                 let netPnl = (margin * (h.maxLev || 20) * (h.pnlPercent/100)) - (margin * (h.maxLev || 20) * 0.001);
@@ -224,7 +222,7 @@ app.get('/gui', (req, res) => {
             document.getElementById('totalWin').innerText = winCount; document.getElementById('totalLose').innerText = loseCount;
             document.getElementById('pnlWinSum').innerText = '+' + pnlWinSum.toFixed(2); document.getElementById('pnlLoseSum').innerText = pnlLoseSum.toFixed(2);
 
-            // CẬP NHẬT VỊ THẾ (ENTRY/LIVE ĐÃ QUAY LẠI)
+            // VỊ THẾ ĐANG MỞ
             let unPnl = 0;
             document.getElementById('pendingBody').innerHTML = d.pending.map(h => {
                 let lp = d.allPrices[h.symbol] || h.snapPrice;
