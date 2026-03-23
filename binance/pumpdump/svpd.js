@@ -52,7 +52,6 @@ function initWS() {
             if (coinData[s].prices.length > 300) coinData[s].prices.shift();
             const c1 = calculateChange(coinData[s].prices, 1), c5 = calculateChange(coinData[s].prices, 5), c15 = calculateChange(coinData[s].prices, 15);
             coinData[s].live = { c1, c5, c15, currentPrice: p };
-            
             const pending = Array.from(historyMap.values()).find(h => h.symbol === s && h.status === 'PENDING');
             if (pending) {
                 const diff = ((p - pending.snapPrice) / pending.snapPrice) * 100;
@@ -126,14 +125,20 @@ app.get('/gui', (req, res) => {
         </div>
 
         <div class="grid grid-cols-3 gap-2 mb-4 text-center">
-            <div class="bg-card p-2 rounded-lg border border-zinc-800"><div class="text-[8px] text-gray-custom uppercase font-bold">Win/Lose</div><div class="text-xs font-black"><span class="up" id="totalWin">0</span> / <span class="down" id="totalLose">0</span></div></div>
-            <div class="bg-card p-2 rounded-lg border border-zinc-800"><div class="text-[8px] text-gray-custom uppercase font-bold">PnL Win</div><div class="text-xs font-black up" id="pnlWinSum">+0.00</div></div>
-            <div class="bg-card p-2 rounded-lg border border-zinc-800"><div class="text-[8px] text-gray-custom uppercase font-bold">PnL Lose</div><div class="text-xs font-black down" id="pnlLoseSum">-0.00</div></div>
+            <div class="bg-card p-2 rounded-lg border border-zinc-800"><div class="text-[8px] text-gray-custom uppercase font-bold">Win / Lose</div><div class="text-xs font-black"><span class="up" id="totalWin">0</span> / <span class="down" id="totalLose">0</span></div></div>
+            <div class="bg-card p-2 rounded-lg border border-zinc-800"><div class="text-[8px] text-gray-custom uppercase font-bold">PnL Win ($)</div><div class="text-xs font-black up" id="pnlWinSum">+0.00</div></div>
+            <div class="bg-card p-2 rounded-lg border border-zinc-800"><div class="text-[8px] text-gray-custom uppercase font-bold">PnL Lose ($)</div><div class="text-xs font-black down" id="pnlLoseSum">-0.00</div></div>
         </div>
 
-        <div class="flex justify-between items-end mb-2">
-            <div><div class="text-gray-custom text-[10px] uppercase font-bold leading-none">Số dư ký quỹ</div><span id="displayBal" class="text-4xl font-black text-white tracking-tighter">0.00</span></div>
-            <div class="text-right"><div id="unPnl" class="text-xl font-bold">0.00</div></div>
+        <div class="flex justify-between items-center mb-2 px-1">
+            <div class="flex gap-4">
+                <div><div class="text-gray-custom text-[9px] uppercase font-bold mb-1">Số dư khả dụng</div><span id="displayBal" class="text-3xl font-black text-white tracking-tighter">0.00</span></div>
+                <div><div class="text-gray-custom text-[9px] uppercase font-bold mb-1">Số dư ký quỹ</div><span id="marginUsed" class="text-xl font-bold text-yellow-500">0.00</span></div>
+            </div>
+            <div class="text-right">
+                <div class="text-gray-custom text-[9px] uppercase font-bold mb-1">PnL Tạm tính</div>
+                <div id="unPnl" class="text-xl font-black">0.00</div>
+            </div>
         </div>
     </div>
 
@@ -144,15 +149,10 @@ app.get('/gui', (req, res) => {
         </thead><tbody id="pendingBody"></tbody></table>
     </div></div>
 
-    <div class="px-4 mt-4"><div class="bg-card rounded-xl p-3 shadow-lg border border-[#fcd535]/10">
-         <div class="text-[11px] font-black text-[#fcd535] mb-2 uppercase italic border-l-4 border-[#fcd535] pl-2">Biến động (Top 5)</div>
-         <table class="w-full text-[10px] text-left"><thead><tr class="text-gray-custom text-[9px] uppercase font-bold"><th>COIN</th><th class="text-center">1M</th><th class="text-center">5M</th><th class="text-right">15M</th></tr></thead><tbody id="liveBody"></tbody></table>
-    </div></div>
-
     <div class="px-4 mt-4 pb-32"><div class="bg-card rounded-xl p-3 shadow-lg">
         <div class="text-[11px] font-black text-gray-custom mb-2 uppercase italic border-l-4 border-zinc-600 pl-2">Lịch sử giao dịch</div>
         <table class="w-full text-[8px] text-left"><thead class="text-gray-custom border-b border-zinc-800 uppercase">
-            <tr><th>Time Out</th><th>Coin/Vol</th><th>Entry/Exit</th><th class="text-center">Target</th><th>PnL Net</th><th class="text-right font-bold text-white">Balance</th></tr>
+            <tr><th>In / Out</th><th>Coin/Vol</th><th>Entry/Exit</th><th class="text-center">Target</th><th>PnL Net</th><th class="text-right font-bold text-white">Balance</th></tr>
         </thead><tbody id="historyBody"></tbody></table>
     </div></div>
 
@@ -198,11 +198,8 @@ app.get('/gui', (req, res) => {
             const res = await fetch('/api/data'); const d = await res.json();
             let mVal = document.getElementById('marginInp').value, mNum = parseFloat(mVal);
 
-            document.getElementById('liveBody').innerHTML = d.top5.map(c => \`<tr class="border-b border-zinc-800/50"><td class="py-2 font-bold text-white">\${c.symbol}</td><td class="text-center \${c.c1>=0?'up':'down'} font-bold">\${c.c1}%</td><td class="text-center \${c.c5>=0?'up':'down'} font-bold">\${c.c5}%</td><td class="text-right \${c.c15>=0?'up':'down'} font-bold">\${c.c15}%</td></tr>\`).join('');
-
             let currentBal = initialBal, winCount = 0, loseCount = 0, pnlWinSum = 0, pnlLoseSum = 0;
             
-            // LỊCH SỬ CÓ TIME OUT
             let histHTML = [...d.history].reverse().map(h => {
                 let margin = mVal.includes('%') ? (currentBal * mNum / 100) : mNum;
                 let netPnl = (margin * (h.maxLev || 20) * (h.pnlPercent/100)) - (margin * (h.maxLev || 20) * 0.001);
@@ -211,7 +208,7 @@ app.get('/gui', (req, res) => {
                 let tpP = h.type==='UP' ? h.snapPrice*(1+h.tpTarget/100) : h.snapPrice*(1-h.tpTarget/100);
                 let slP = h.type==='UP' ? h.snapPrice*(1-h.slTarget/100) : h.snapPrice*(1+h.slTarget/100);
                 return \`<tr class="border-b border-zinc-800/30 text-zinc-400">
-                    <td class="py-1 text-[7px]">\${new Date(h.endTime).toLocaleTimeString([],{hour12:false})}</td>
+                    <td class="py-1 text-[7px]">\${new Date(h.startTime).toLocaleTimeString([],{hour12:false})}<br>\${new Date(h.endTime).toLocaleTimeString([],{hour12:false})}</td>
                     <td><b class="text-white">\${h.symbol}</b><br><span class="text-[7px] text-[#fcd535] font-bold">\${h.snapVol.c1}/\${h.snapVol.c5}/\${h.snapVol.c15}</span></td>
                     <td>\${fPrice(h.snapPrice)}<br>\${fPrice(h.finalPrice)}</td>
                     <td class="text-center text-[7px] font-bold">T: \${fPrice(tpP)}<br>S: \${fPrice(slP)}</td>
@@ -222,11 +219,11 @@ app.get('/gui', (req, res) => {
             document.getElementById('totalWin').innerText = winCount; document.getElementById('totalLose').innerText = loseCount;
             document.getElementById('pnlWinSum').innerText = '+' + pnlWinSum.toFixed(2); document.getElementById('pnlLoseSum').innerText = pnlLoseSum.toFixed(2);
 
-            // VỊ THẾ ĐANG MỞ
-            let unPnl = 0;
+            let unPnl = 0, marginUsed = 0;
             document.getElementById('pendingBody').innerHTML = d.pending.map(h => {
                 let lp = d.allPrices[h.symbol] || h.snapPrice;
                 let margin = mVal.includes('%') ? (currentBal * mNum / 100) : mNum; 
+                marginUsed += margin;
                 let roi = (h.type === 'UP' ? (lp-h.snapPrice)/h.snapPrice : (h.snapPrice-lp)/h.snapPrice) * 100 * (h.maxLev || 20);
                 let pnl = margin * roi / 100; unPnl += pnl;
                 let tpP = h.type==='UP' ? h.snapPrice*(1+h.tpTarget/100) : h.snapPrice*(1-h.tpTarget/100);
@@ -235,15 +232,16 @@ app.get('/gui', (req, res) => {
                     <td class="py-2 text-[8px]">\${new Date(h.startTime).toLocaleTimeString([],{hour12:false})}</td>
                     <td><b class="text-white">\${h.symbol}</b><br><span class="text-[8px] text-[#fcd535] font-bold">\${h.snapVol.c1}/\${h.snapVol.c5}/\${h.snapVol.c15}</span></td>
                     <td class="font-bold text-zinc-300">\${fPrice(h.snapPrice)}<br><span class="text-white font-black">\${fPrice(lp)}</span></td>
-                    <td class="text-center text-[8px] font-bold text-zinc-400 italic">T: <span class="text-green-500">\${fPrice(tpP)}</span><br>S: <span class="text-red-500">\${fPrice(slP)}</span></td>
+                    <td class="text-center text-[8px] font-bold text-zinc-400">T: <span class="text-green-500">\${fPrice(tpP)}</span><br>S: <span class="text-red-500">\${fPrice(slP)}</span></td>
                     <td class="text-right font-black \${pnl>=0?'up':'down'} text-[11px]">\${pnl.toFixed(2)}<br>\${roi.toFixed(1)}%</td>
                 </tr>\`;
             }).join('');
 
             if(running) {
-                document.getElementById('displayBal').innerText = (currentBal + unPnl).toFixed(2);
+                document.getElementById('displayBal').innerText = (currentBal - marginUsed).toFixed(2);
+                document.getElementById('marginUsed').innerText = marginUsed.toFixed(2);
                 document.getElementById('unPnl').innerText = (unPnl >= 0 ? '+' : '') + unPnl.toFixed(2);
-                document.getElementById('unPnl').className = 'text-xl font-bold ' + (unPnl >= 0 ? 'up' : 'down');
+                document.getElementById('unPnl').className = 'text-xl font-black ' + (unPnl >= 0 ? 'up' : 'down');
             }
         } catch(e) {}
     }
