@@ -15,7 +15,7 @@ let historyMap = new Map();
 let symbolMaxLeverage = {}; 
 let lastTradeClosed = {}; 
 
-let currentTP = 0.5, currentSL = 10.0, currentMinVol = 5;
+let currentTP = 0.5, currentSL = 20.0, currentMinVol = 6.8;
 
 function fPrice(p) {
     if (!p || p === 0) return "0.0000";
