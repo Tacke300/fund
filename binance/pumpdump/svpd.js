@@ -16,6 +16,7 @@ let lastTradeClosed = {};
 
 let currentTP = 0.5, currentSL = 10.0, currentMinVol = 5;
 
+// Hàm fix giá thông minh (Hiện ít nhất 4 số sau dãy số 0)
 function fPrice(p) {
     if (!p || p === 0) return "0.0000";
     let s = p.toFixed(20);
@@ -101,7 +102,7 @@ app.get('/gui', (req, res) => {
         .bg-card { background: #1e2329; border: 1px solid #2b3139; }
         .text-gray-custom { color: #848e9c; }
         .glow-yellow { text-shadow: 0 0 15px rgba(252, 213, 53, 0.5); }
-        .binance-logo { width: 24px; height: 24px; background: #fcd535; clip-path: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%); margin-right: 8px; }
+        .binance-logo { width: 32px; height: 32px; margin-right: 12px; }
     </style></head><body>
     
     <div class="p-4 bg-[#0b0e11] sticky top-0 z-50 shadow-2xl border-b border-zinc-800">
@@ -118,16 +119,16 @@ app.get('/gui', (req, res) => {
 
         <div id="active" class="hidden flex justify-between items-center mb-4">
             <div class="flex items-center">
-                <div class="binance-logo"></div>
-                <div class="font-bold italic text-white text-xl glow-yellow uppercase tracking-tighter leading-none">BINANCE <span class="text-[#fcd535]">LUFFY</span></div>
+                <img src="https://cryptologos.cc/logos/binance-coin-bnb-logo.png?v=032" class="binance-logo" alt="Binance Logo">
+                <div class="font-bold italic text-white text-xl glow-yellow uppercase tracking-tighter leading-none">BINANCE <span class="text-[#fcd535]">LUFFY</span> Pro</div>
             </div>
             <div id="user-id" class="text-[#fcd535] font-black italic text-xl cursor-pointer" onclick="stop()">Monkey_D_Luffy</div>
         </div>
 
         <div class="grid grid-cols-3 gap-2 mb-4 text-center">
             <div class="bg-card p-2 rounded-lg border border-zinc-800"><div class="text-[8px] text-gray-custom uppercase font-bold">Win / Lose</div><div class="text-xs font-black"><span class="up" id="totalWin">0</span> / <span class="down" id="totalLose">0</span></div></div>
-            <div class="bg-card p-2 rounded-lg border border-zinc-800"><div class="text-[8px] text-gray-custom uppercase font-bold">PnL Win ($)</div><div class="text-xs font-black up" id="pnlWinSum">+0.00</div></div>
-            <div class="bg-card p-2 rounded-lg border border-zinc-800"><div class="text-[8px] text-gray-custom uppercase font-bold">PnL Lose ($)</div><div class="text-xs font-black down" id="pnlLoseSum">-0.00</div></div>
+            <div class="bg-card p-2 rounded-lg border border-zinc-800"><div class="text-[8px] text-gray-custom uppercase font-bold">Tổng PnL Win</div><div class="text-xs font-black up" id="pnlWinSum">+0.00</div></div>
+            <div class="bg-card p-2 rounded-lg border border-zinc-800"><div class="text-[8px] text-gray-custom uppercase font-bold">Tổng PnL Lose</div><div class="text-xs font-black down" id="pnlLoseSum">-0.00</div></div>
         </div>
 
         <div class="flex justify-between items-center mb-2 px-1">
@@ -143,16 +144,21 @@ app.get('/gui', (req, res) => {
     </div>
 
     <div class="px-4 mt-4"><div class="bg-card rounded-xl p-3 shadow-lg border border-green-500/20">
-        <div class="text-[11px] font-black text-white mb-2 uppercase italic border-l-4 border-green-500 pl-2">Vị thế đang mở</div>
+        <div class="text-[11px] font-black text-white mb-2 uppercase italic border-l-4 border-green-500 pl-2">Vị thế đang mở (Live)</div>
         <table class="w-full text-[10px] text-left"><thead class="text-gray-custom uppercase border-b border-zinc-800 text-[8px]">
             <tr><th>Time In</th><th>Coin/Vol</th><th>Entry/Live</th><th class="text-center">Target</th><th class="text-right">PnL (ROI%)</th></tr>
         </thead><tbody id="pendingBody"></tbody></table>
     </div></div>
 
+    <div class="px-4 mt-4"><div class="bg-card rounded-xl p-3 shadow-lg border border-[#fcd535]/10">
+         <div class="text-[11px] font-black text-[#fcd535] mb-2 uppercase italic border-l-4 border-[#fcd535] pl-2">Biến động (Top 5)</div>
+         <table class="w-full text-[10px] text-left"><thead><tr class="text-gray-custom text-[9px] uppercase font-bold"><th>COIN</th><th class="text-center">1M</th><th class="text-center">5M</th><th class="text-right">15M</th></tr></thead><tbody id="liveBody"></tbody></table>
+    </div></div>
+
     <div class="px-4 mt-4 pb-32"><div class="bg-card rounded-xl p-3 shadow-lg">
         <div class="text-[11px] font-black text-gray-custom mb-2 uppercase italic border-l-4 border-zinc-600 pl-2">Lịch sử giao dịch</div>
         <table class="w-full text-[8px] text-left"><thead class="text-gray-custom border-b border-zinc-800 uppercase">
-            <tr><th>In / Out</th><th>Coin/Vol</th><th>Entry/Exit</th><th class="text-center">Target</th><th>PnL Net</th><th class="text-right font-bold text-white">Balance</th></tr>
+            <tr><th>Time Out</th><th>Coin/Vol</th><th>Entry/Exit</th><th class="text-center">Target</th><th>PnL Net</th><th class="text-right font-bold text-white">Balance</th></tr>
         </thead><tbody id="historyBody"></tbody></table>
     </div></div>
 
@@ -198,8 +204,9 @@ app.get('/gui', (req, res) => {
             const res = await fetch('/api/data'); const d = await res.json();
             let mVal = document.getElementById('marginInp').value, mNum = parseFloat(mVal);
 
+            document.getElementById('liveBody').innerHTML = d.top5.map(c => \`<tr class="border-b border-zinc-800/50"><td class="py-2 font-bold text-white">\${c.symbol}</td><td class="text-center \${c.c1>=0?'up':'down'} font-bold">\${c.c1}%</td><td class="text-center \${c.c5>=0?'up':'down'} font-bold">\${c.c5}%</td><td class="text-right \${c.c15>=0?'up':'down'} font-bold">\${c.c15}%</td></tr>\`).join('');
+
             let currentBal = initialBal, winCount = 0, loseCount = 0, pnlWinSum = 0, pnlLoseSum = 0;
-            
             let histHTML = [...d.history].reverse().map(h => {
                 let margin = mVal.includes('%') ? (currentBal * mNum / 100) : mNum;
                 let netPnl = (margin * (h.maxLev || 20) * (h.pnlPercent/100)) - (margin * (h.maxLev || 20) * 0.001);
@@ -232,7 +239,7 @@ app.get('/gui', (req, res) => {
                     <td class="py-2 text-[8px]">\${new Date(h.startTime).toLocaleTimeString([],{hour12:false})}</td>
                     <td><b class="text-white">\${h.symbol}</b><br><span class="text-[8px] text-[#fcd535] font-bold">\${h.snapVol.c1}/\${h.snapVol.c5}/\${h.snapVol.c15}</span></td>
                     <td class="font-bold text-zinc-300">\${fPrice(h.snapPrice)}<br><span class="text-white font-black">\${fPrice(lp)}</span></td>
-                    <td class="text-center text-[8px] font-bold text-zinc-400">T: <span class="text-green-500">\${fPrice(tpP)}</span><br>S: <span class="text-red-500">\${fPrice(slP)}</span></td>
+                    <td class="text-center text-[8px] font-bold text-zinc-400italic">T: <span class="text-green-500">\${fPrice(tpP)}</span><br>S: <span class="text-red-500">\${fPrice(slP)}</span></td>
                     <td class="text-right font-black \${pnl>=0?'up':'down'} text-[11px]">\${pnl.toFixed(2)}<br>\${roi.toFixed(1)}%</td>
                 </tr>\`;
             }).join('');
