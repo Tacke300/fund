@@ -19,7 +19,7 @@ let symbolMaxLeverage = {}; 
 let lastTradeClosed = {}; 
 
 // Thông số động nhận từ UI
-let currentTP = 0.2, currentSL = 100.0, currentMinVol = ;
+let currentTP = 0.2, currentSL = 100.0, currentMinVol = 6.5;
 
 function fPrice(p) {
     if (!p || p === 0) return "0.0000";
