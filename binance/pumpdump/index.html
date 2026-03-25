@@ -14,6 +14,7 @@
         .status-tag { font-size: 10px; padding: 3px 10px; border-radius: 99px; background: rgba(0,0,0,0.3); }
         ::-webkit-scrollbar { width: 4px; } ::-webkit-scrollbar-thumb { background: #475569; border-radius: 10px; }
         .up { color: var(--success); } .down { color: var(--danger); }
+        input::-webkit-outer-spin-button, input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
     </style>
 </head>
 <body class="p-4">
@@ -36,7 +37,7 @@
         </div>
     </header>
 
-    <div class="grid grid-cols-2 md:grid-cols-6 gap-3 mb-4">
+    <div class="grid grid-cols-2 md:grid-cols-8 gap-3 mb-4">
         <div class="card p-3">
             <label class="text-[10px] text-slate-400 font-bold uppercase block mb-1">Vốn Lệnh</label>
             <div class="flex gap-1">
@@ -55,9 +56,17 @@
             <label class="text-[10px] text-slate-400 font-bold uppercase block mb-1">Số Lệnh Max</label>
             <input type="number" id="maxPositions" class="w-full bg-slate-900 border border-white/10 p-2 rounded text-sm" value="3">
         </div>
-        <div class="card p-3">
+        <div class="card p-3 border-b-2 border-green-500/50">
+            <label class="text-[10px] text-green-400 font-bold uppercase block mb-1">TP Vị Thế %</label>
+            <input type="number" id="posTP" step="0.1" class="w-full bg-slate-900 border border-white/10 p-2 rounded text-sm text-green-400 font-bold" value="1.0">
+        </div>
+        <div class="card p-3 border-b-2 border-red-500/50">
+            <label class="text-[10px] text-red-400 font-bold uppercase block mb-1">SL Vị Thế %</label>
+            <input type="number" id="posSL" step="0.1" class="w-full bg-slate-900 border border-white/10 p-2 rounded text-sm text-red-400 font-bold" value="3.0">
+        </div>
+        <div class="card p-3 text-orange-400">
             <label class="text-[10px] text-slate-400 font-bold uppercase block mb-1">Cắt lỗ ví %</label>
-            <input type="number" id="accountSL" class="w-full bg-slate-900 border border-white/10 p-2 rounded text-sm text-orange-400" value="30">
+            <input type="number" id="accountSL" class="w-full bg-slate-900 border border-white/10 p-2 rounded text-sm text-orange-400 font-bold" value="30">
         </div>
         <div class="card p-2">
             <button id="runBtn" onclick="handleToggle()" class="btn-start w-full h-full rounded-lg text-xs font-bold transition-all hover:opacity-80">BẮT ĐẦU BOT</button>
@@ -127,11 +136,17 @@
             try {
                 const res = await fetch('/api/status');
                 const data = await res.json();
-                if(data.botSettings.isRunning !== isRunning) updateUI(data.botSettings.isRunning);
+                
+                // Đồng bộ cài đặt từ Bot lên UI (để đảm bảo Input khớp với Bot đang chạy)
+                if(data.botSettings) {
+                    if(data.botSettings.isRunning !== isRunning) updateUI(data.botSettings.isRunning);
+                    document.getElementById('posTP').value = data.botSettings.posTP || 1.0;
+                    document.getElementById('posSL').value = data.botSettings.posSL || 3.0;
+                }
+
                 document.getElementById('balance').innerText = `$${(data.status.currentBalance || 0).toFixed(2)}`;
                 document.getElementById('posCount').innerText = `${data.activePositions.length} LỆNH`;
                 
-                // Render Top 5 chi tiết 3 khung
                 const top5 = data.topVolatility || [];
                 document.getElementById('topVolBody').innerHTML = top5.map(c => `
                     <tr class="border-b border-white/5">
@@ -163,7 +178,18 @@
 
         async function handleToggle() {
             isRunning = !isRunning; updateUI(isRunning);
-            await fetch('/api/settings', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ isRunning }) });
+            // Gửi trạng thái cùng với dữ liệu hiện tại để không bị reset cài đặt
+            const body = { 
+                isRunning,
+                invValue: parseFloat(document.getElementById('invValue').value),
+                invType: document.getElementById('invType').value,
+                minVol: parseFloat(document.getElementById('minVol').value),
+                maxPositions: parseInt(document.getElementById('maxPositions').value),
+                accountSL: parseFloat(document.getElementById('accountSL').value),
+                posTP: parseFloat(document.getElementById('posTP').value),
+                posSL: parseFloat(document.getElementById('posSL').value)
+            };
+            await fetch('/api/settings', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body) });
         }
 
         async function handleUpdate() {
@@ -172,10 +198,12 @@
                 invType: document.getElementById('invType').value,
                 minVol: parseFloat(document.getElementById('minVol').value),
                 maxPositions: parseInt(document.getElementById('maxPositions').value),
-                accountSL: parseFloat(document.getElementById('accountSL').value)
+                accountSL: parseFloat(document.getElementById('accountSL').value),
+                posTP: parseFloat(document.getElementById('posTP').value),
+                posSL: parseFloat(document.getElementById('posSL').value)
             };
             await fetch('/api/settings', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body) });
-            alert("Đã lưu!");
+            alert("Đã lưu cài đặt TP/SL mới!");
         }
 
         function clearLogs() { document.getElementById('botLogs').innerHTML = ''; }
