@@ -1,155 +1,188 @@
-<!DOCTYPE html>
-<html lang="vi">
-<head>
-    <meta charset="UTF-8">
-    <title>Hạm Đội Luffy v6.8 - FULL DASHBOARD</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <style>
-        body { background: #050505; color: #e4e4e7; font-family: 'JetBrains Mono', monospace; font-size: 11px; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
-        .glass { background: #111111; border: 1px solid #222; border-radius: 4px; }
-        .input-dark { background: #000; border: 1px solid #333; color: #fff; padding: 4px; border-radius: 2px; outline: none; width: 100%; }
-        .up { color: #10b981; } .down { color: #ef4444; }
-        #logs-box { height: 180px; overflow-y: auto; background: #080808; border: 1px solid #222; margin-bottom: 8px; flex-shrink: 0; padding: 8px; }
-        .log-line { border-bottom: 1px solid #111; padding: 2px 0; font-size: 10px; }
-        .tab-btn { padding: 10px 20px; cursor: pointer; border-right: 1px solid #222; font-weight: bold; }
-        .tab-active { background: #1a1a1a; color: #3b82f6; border-bottom: 2px solid #3b82f6; }
-        th { font-size: 9px; color: #555; text-transform: uppercase; padding: 10px 4px; border-bottom: 1px solid #222; }
-        td { padding: 8px 4px; border-bottom: 1px solid #111; }
-        .luffy-glow { text-shadow: 0 0 10px rgba(59, 130, 246, 0.5); }
-    </style>
-</head>
-<body class="p-2 space-y-2">
-    <div class="grid grid-cols-12 gap-2 flex-shrink-0">
-        <div class="col-span-10 glass p-3 grid grid-cols-8 gap-2 items-end">
-            <div><label class="text-[9px] text-zinc-500 block uppercase font-bold">Vốn Lệnh</label><input id="invValue" type="number" class="input-dark"></div>
-            <div><label class="text-[9px] text-zinc-500 block uppercase">Loại</label><select id="invType" class="input-dark"><option value="percent">% Ví</option><option value="fixed">USDT</option></select></div>
-            <div><label class="text-[9px] text-blue-500 block uppercase font-bold">minVol (%)</label><input id="minVol" type="number" step="0.1" class="input-dark border-blue-900/50"></div>
-            <div><label class="text-[9px] text-green-600 block uppercase font-bold">TP (%)</label><input id="posTP" type="number" class="input-dark"></div>
-            <div><label class="text-[9px] text-red-600 block uppercase font-bold">SL (%)</label><input id="posSL" type="number" class="input-dark"></div>
-            <div><label class="text-[9px] text-zinc-500 block uppercase">Max Pos</label><input id="maxPos" type="number" class="input-dark"></div>
-            <div class="col-span-2 flex gap-1">
-                <button onclick="save()" class="bg-blue-600 hover:bg-blue-500 w-1/2 h-[26px] rounded font-bold text-[9px]">LƯU</button>
-                <button id="runBtn" onclick="toggleBot()" class="w-1/2 h-[26px] rounded font-bold text-[9px]"></button>
-            </div>
-        </div>
-        <div class="col-span-2 glass p-3 text-center flex flex-col justify-center">
-            <p id="runtime" class="text-zinc-500 text-[10px] font-bold">00:00:00</p>
-            <div class="flex gap-1 mt-1">
-                <input id="botSLValue" type="number" class="input-dark border-red-900/50 text-red-400 font-bold" placeholder="SL Bot">
-                <select id="botSLType" class="input-dark w-12"><option value="fixed">$</option><option value="percent">%</option></select>
-            </div>
-        </div>
-    </div>
+import https from 'https';
+import http from 'http';
+import crypto from 'crypto';
+import express from 'express';
+import { fileURLToPath } from 'url';
+import path from 'path';
+import { API_KEY, SECRET_KEY } from './config.js';
 
-    <div class="grid grid-cols-12 gap-2 flex-shrink-0">
-        <div class="col-span-12 glass p-2 flex gap-8 items-center overflow-x-auto">
-            <div class="flex gap-6 border-r border-zinc-800 pr-6 shrink-0">
-                <div><p class="text-[9px] text-zinc-500 uppercase font-bold">Số dư Ví</p><p id="balance" class="text-base font-black text-green-500 luffy-glow">0.00$</p></div>
-                <div><p class="text-[9px] text-zinc-500 uppercase font-bold">Trạng thái</p><p id="bot-status" class="text-[11px] font-bold uppercase">Ready</p></div>
-            </div>
-            <div class="flex gap-2 flex-nowrap" id="top5"></div>
-        </div>
-    </div>
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
-    <div id="logs-box" class="font-mono text-[10px]">
-        <div id="logs-list"></div>
-    </div>
+let botSettings = { 
+    isRunning: false, maxPositions: 3, invValue: 1.5, invType: 'percent', 
+    minVol: 0.5, posTP: 1.0, posSL: 3.0 
+};
 
-    <div class="flex-grow glass flex flex-col overflow-hidden">
-        <div class="flex bg-zinc-900/50 border-b border-zinc-800 shrink-0">
-            <div class="tab-btn tab-active uppercase">Vị thế hiện tại</div>
-        </div>
-        <div id="display-area" class="overflow-auto flex-grow p-2">
-            <table class="w-full text-left">
-                <thead>
-                    <tr>
-                        <th>Cặp</th>
-                        <th>Side</th>
-                        <th>Ký quỹ</th>
-                        <th>Entry ➔ Mark</th>
-                        <th>TP / SL</th>
-                        <th>PnL ($)</th>
-                        <th>Snapshot</th>
-                    </tr>
-                </thead>
-                <tbody id="pos-table"></tbody>
-            </table>
-        </div>
-    </div>
+let status = { currentBalance: 0, botLogs: [], exchangeInfo: {}, candidatesList: [] };
+let activeOrdersTracker = new Map(); 
+let pendingSymbols = new Set();
+let serverTimeOffset = 0;
 
-    <script>
-        function val15(c) { return c?.c15 !== undefined ? c.c15 : (c?.m15 !== undefined ? c.m15 : '0'); }
+function addBotLog(msg, type = 'info') {
+    const time = new Date().toLocaleTimeString('vi-VN', { hour12: false });
+    status.botLogs.unshift({ time, msg, type });
+    if (status.botLogs.length > 200) status.botLogs.pop();
+    // LOG RA CONSOLE ĐỂ XEM TRONG PM2
+    const color = type === 'success' ? '\x1b[32m' : (type === 'error' ? '\x1b[31m' : '\x1b[36m');
+    console.log(`${color}[${time}] ${msg}\x1b[0m`);
+}
 
-        async function sync() {
-            try {
-                const res = await fetch('/api/status'); 
-                const d = await res.json();
+async function syncServerTime() {
+    try {
+        const res = await new Promise((resolve, reject) => {
+            https.get('https://fapi.binance.com/fapi/v1/time', r => {
+                let d = ''; r.on('data', c => d += c);
+                r.on('end', () => resolve(JSON.parse(d)));
+            }).on('error', reject);
+        });
+        serverTimeOffset = res.serverTime - Date.now();
+    } catch (e) { console.log("Lỗi sync time:", e.message); }
+}
+
+async function callBinance(endpoint, method = 'GET', params = {}) {
+    await syncServerTime();
+    const timestamp = Date.now() + serverTimeOffset;
+    const query = Object.keys(params).map(k => `${k}=${encodeURIComponent(params[k])}`).join('&');
+    const fullQuery = query + (query ? '&' : '') + `timestamp=${timestamp}&recvWindow=10000`;
+    const signature = crypto.createHmac('sha256', SECRET_KEY).update(fullQuery).digest('hex');
+    const url = `https://fapi.binance.com${endpoint}?${fullQuery}&signature=${signature}`;
+
+    return new Promise((resolve, reject) => {
+        const req = https.request(url, { method, headers: { 'X-MBX-APIKEY': API_KEY } }, res => {
+            let d = ''; res.on('data', c => d += c);
+            res.on('end', () => { 
+                try { 
+                    const j = JSON.parse(d);
+                    if (res.statusCode >= 400) reject(j);
+                    else resolve(j); 
+                } catch (e) { reject(e); } 
+            });
+        });
+        req.on('error', reject);
+        req.end();
+    });
+}
+
+async function openPosition(symbol, side, price, info, scan) {
+    try {
+        const acc = await callBinance('/fapi/v2/account');
+        status.currentBalance = parseFloat(acc.totalMarginBalance);
+        
+        const brackets = await callBinance('/fapi/v1/leverageBracket', 'GET', { symbol });
+        const leverage = brackets[0]?.brackets[0]?.initialLeverage || 20;
+        await callBinance('/fapi/v1/leverage', 'POST', { symbol, leverage });
+
+        let margin = botSettings.invType === 'percent' ? (status.currentBalance * botSettings.invValue) / 100 : botSettings.invValue;
+        let qty = (Math.floor(((margin * leverage) / price) / info.stepSize) * info.stepSize).toFixed(info.quantityPrecision);
+
+        if (parseFloat(qty) * price < 5.0) return addBotLog(`⚠️ Vốn lệnh ${symbol} quá thấp (<5$), bỏ qua.`, "warn");
+
+        const posSide = side === 'BUY' ? 'LONG' : 'SHORT';
+        const order = await callBinance('/fapi/v1/order', 'POST', { symbol, side, positionSide: posSide, type: 'MARKET', quantity: qty });
+
+        if (order.orderId) {
+            const tp = (side === 'BUY' ? price * (1 + botSettings.posTP/100) : price * (1 - botSettings.posTP/100)).toFixed(info.pricePrecision);
+            const sl = (side === 'BUY' ? price * (1 - botSettings.posSL/100) : price * (1 + botSettings.posSL/100)).toFixed(info.pricePrecision);
+
+            // Cài TP/SL lên sàn ngay lập tức
+            await callBinance('/fapi/v1/order', 'POST', { symbol, side: side === 'BUY' ? 'SELL' : 'BUY', positionSide: posSide, type: 'TAKE_PROFIT_MARKET', stopPrice: tp, closePosition: 'true', workingType: 'MARK_PRICE' });
+            await callBinance('/fapi/v1/order', 'POST', { symbol, side: side === 'BUY' ? 'SELL' : 'BUY', positionSide: posSide, type: 'STOP_MARKET', stopPrice: sl, closePosition: 'true', workingType: 'MARK_PRICE' });
+            
+            activeOrdersTracker.set(symbol, { symbol, entryPrice: price, margin: margin.toFixed(2), side: posSide, tpPrice: tp, slPrice: sl, snapshot: scan });
+            addBotLog(`🚀 Đã mở ${symbol} [${posSide}] - Entry: ${price} - TP: ${tp} - SL: ${sl}`, "success");
+        }
+    } catch (e) { addBotLog(`❌ Lỗi đặt lệnh ${symbol}: ${e.msg || e.message}`, "error"); }
+}
+
+async function mainLoop() {
+    if (!botSettings.isRunning) return;
+    try {
+        const posRisk = await callBinance('/fapi/v2/positionRisk');
+        // CHỐNG LỖI .filter is not a function
+        if (!Array.isArray(posRisk)) {
+            console.log("⚠️ Binance trả về lỗi:", posRisk);
+            return;
+        }
+
+        const activePositions = posRisk.filter(p => parseFloat(p.positionAmt) !== 0);
+        
+        // Cập nhật giá Mark & PnL cho UI
+        for (const [sym, data] of activeOrdersTracker) {
+            const p = activePositions.find(pos => pos.symbol === sym);
+            if (!p) activeOrdersTracker.delete(sym);
+            else {
+                data.markPrice = parseFloat(p.markPrice).toFixed(status.exchangeInfo[sym]?.pricePrecision || 4);
+                data.pnlUsdt = parseFloat(p.unRealizedProfit).toFixed(2);
+            }
+        }
+
+        if (activePositions.length >= botSettings.maxPositions) return;
+
+        // LOG TRẠNG THÁI QUÉT COIN
+        if (status.candidatesList.length > 0) {
+            const best = status.candidatesList[0];
+            console.log(`[SCAN] Đang soi: ${best.symbol} | 1m: ${best.c1}% | 5m: ${best.c5}% | 15m: ${best.c15}% | maxV: ${best.maxV}% (Target: ${botSettings.minVol}%)`);
+        }
+
+        for (const coin of status.candidatesList) {
+            if (activePositions.some(p => p.symbol === coin.symbol) || pendingSymbols.has(coin.symbol)) continue;
+            
+            // LOGIC VÀO LỆNH
+            if (coin.maxV >= botSettings.minVol) {
+                const info = status.exchangeInfo[coin.symbol];
+                if (!info) continue;
+
+                pendingSymbols.add(coin.symbol);
+                addBotLog(`🎯 Kèo thơm: ${coin.symbol} (Biến động: ${coin.maxV}%)`, "info");
                 
-                document.getElementById('balance').innerText = d.status.currentBalance.toFixed(2) + '$';
-                document.getElementById('bot-status').innerText = d.botSettings.isRunning ? "Running" : "Stopped";
-                document.getElementById('bot-status').className = d.botSettings.isRunning ? "text-green-500" : "text-red-500";
+                const side = coin.c1 >= 0 ? 'BUY' : 'SELL';
+                const ticker = await callBinance('/fapi/v1/ticker/price', 'GET', { symbol: coin.symbol });
+                await openPosition(coin.symbol, side, parseFloat(ticker.price), info, coin);
+                
+                pendingSymbols.add(coin.symbol);
+                setTimeout(() => pendingSymbols.delete(coin.symbol), 10000); // Chống spam lệnh 10s
+                break; 
+            }
+        }
+    } catch (e) { console.log("Lỗi MainLoop:", e.message); }
+}
 
-                document.getElementById('top5').innerHTML = (d.status.candidatesList || []).slice(0, 10).map(c => `
-                    <div class="bg-black p-1 px-2 border border-zinc-800 rounded text-[9px] whitespace-nowrap">
-                        <b class="text-zinc-400">${c.symbol.replace('USDT','')}</b> 
-                        <span class="${c.c1>=0?'up':'down'} font-bold">${c.c1}/${c.c5}/${val15(c)}%</span>
-                    </div>
-                `).join('');
-
-                document.getElementById('logs-list').innerHTML = d.status.botLogs.map(l => `
-                    <div class="log-line"><span class="text-zinc-600">[${l.time}]</span> <span class="${l.type==='success'?'up':(l.type==='error'?'down':'text-blue-400')}">${l.msg}</span></div>
-                `).join('');
-
-                document.getElementById('pos-table').innerHTML = d.activePositions.map(p => `
-                    <tr>
-                        <td class="font-black text-blue-400">${p.symbol}</td>
-                        <td class="${p.side==='LONG'?'up':'down'} font-bold">${p.side} ${p.leverage}x</td>
-                        <td>${p.margin}$</td>
-                        <td>${p.entryPrice} ➔ ${p.markPrice || '---'}</td>
-                        <td><span class="up">TP: ${p.tpPrice}</span><br><span class="down">SL: ${p.slPrice}</span></td>
-                        <td class="font-bold ${parseFloat(p.pnlUsdt)>=0?'up':'down'}">${p.pnlUsdt || '0.00'}$</td>
-                        <td class="text-zinc-500">${p.snapshot?.c1 || 0}/${p.snapshot?.c5 || 0}/${val15(p.snapshot)}%</td>
-                    </tr>`).join('');
-
-                const btn = document.getElementById('runBtn');
-                btn.innerText = d.botSettings.isRunning ? "DỪNG" : "CHẠY";
-                btn.className = d.botSettings.isRunning ? "bg-red-600 w-1/2 h-[26px] rounded font-bold" : "bg-green-600 w-1/2 h-[26px] rounded font-bold";
+// FETCH DATA TỪ SCANNER PORT 9000
+setInterval(() => {
+    http.get('http://127.0.0.1:9000/api/data', res => {
+        let d = ''; res.on('data', chunk => d += chunk);
+        res.on('end', () => {
+            try {
+                const response = JSON.parse(d);
+                status.candidatesList = (response.live || []).map(c => ({
+                    symbol: c.symbol, c1: c.c1, c5: c.c5, c15: c.c15 || c.m15 || 0,
+                    maxV: Math.max(Math.abs(c.c1), Math.abs(c.c5), Math.abs(c.c15 || c.m15 || 0))
+                })).sort((a, b) => b.maxV - a.maxV);
             } catch (e) {}
-        }
+        });
+    }).on('error', () => {});
+}, 2000);
 
-        async function save() {
-            const body = { 
-                invValue: parseFloat(document.getElementById('invValue').value), 
-                invType: document.getElementById('invType').value,
-                minVol: parseFloat(document.getElementById('minVol').value),
-                posTP: parseFloat(document.getElementById('posTP').value), 
-                posSL: parseFloat(document.getElementById('posSL').value),
-                maxPositions: parseInt(document.getElementById('maxPos').value),
-                botSLValue: parseFloat(document.getElementById('botSLValue').value), 
-                botSLType: document.getElementById('botSLType').value
+const init = async () => {
+    try {
+        const info = await callBinance('/fapi/v1/exchangeInfo');
+        info.symbols.forEach(s => {
+            const lot = s.filters.find(f => f.filterType === 'LOT_SIZE');
+            status.exchangeInfo[s.symbol] = { 
+                quantityPrecision: s.quantityPrecision, 
+                pricePrecision: s.pricePrecision, 
+                stepSize: parseFloat(lot.stepSize) 
             };
-            await fetch('/api/settings', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body) });
-            alert("Đã lưu!");
-        }
+        });
+        addBotLog("✅ Hạm đội Luffy v6.8 khởi tạo thành công!", "success");
+    } catch (e) { console.log("Lỗi Init:", e); }
+}
 
-        async function toggleBot() {
-            const res = await fetch('/api/status'); const d = await res.json();
-            await fetch('/api/settings', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ isRunning: !d.botSettings.isRunning }) });
-        }
+init();
+setInterval(mainLoop, 3000);
 
-        setInterval(sync, 1500);
-        window.onload = () => {
-             fetch('/api/status').then(r => r.json()).then(d => {
-                document.getElementById('invValue').value = d.botSettings.invValue;
-                document.getElementById('invType').value = d.botSettings.invType;
-                document.getElementById('minVol').value = d.botSettings.minVol;
-                document.getElementById('posTP').value = d.botSettings.posTP;
-                document.getElementById('posSL').value = d.botSettings.posSL;
-                document.getElementById('maxPos').value = d.botSettings.maxPositions;
-                document.getElementById('botSLValue').value = d.botSettings.botSLValue;
-                document.getElementById('botSLType').value = d.botSettings.botSLType;
-             });
-        }
-    </script>
-</body>
-</html>
+const APP = express(); APP.use(express.json()); APP.use(express.static(__dirname));
+APP.get('/api/status', (req, res) => res.json({ botSettings, activePositions: Array.from(activeOrdersTracker.values()), status }));
+APP.post('/api/settings', (req, res) => { botSettings = { ...botSettings, ...req.body }; res.json({ success: true }); });
+APP.listen(9001);
