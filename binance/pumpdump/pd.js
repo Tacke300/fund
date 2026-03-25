@@ -11,7 +11,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const HISTORY_FILE = path.join(__dirname, 'trade_history.json');
 
-// --- DỮ LIỆU ---
+// --- KHỞI TẠO DỮ LIỆU ---
 let tradeHistory = { 
     win: 0, loss: 0, pnlWin: 0, pnlLoss: 0, totalPnl: 0, 
     startTime: Date.now(), orders: [] 
@@ -21,7 +21,7 @@ if (fs.existsSync(HISTORY_FILE)) {
     try { 
         const saved = JSON.parse(fs.readFileSync(HISTORY_FILE, 'utf8'));
         tradeHistory = { ...tradeHistory, ...saved };
-    } catch (e) { console.log("New history initialized."); }
+    } catch (e) { console.log("Khởi tạo history mới."); }
 }
 
 const saveHistory = () => fs.writeFileSync(HISTORY_FILE, JSON.stringify(tradeHistory, null, 2));
@@ -35,7 +35,7 @@ let botSettings = {
     posSL: 3.0, 
     botSLValue: 50.0, 
     botSLType: 'fixed',
-    entryDiff: 0.5 // <--- ĐÂY: Biến động bao nhiêu % thì mở lệnh
+    entryDiff: 0.5 // Cài đặt biến động % để mở lệnh
 };
 
 let status = { currentBalance: 0, botLogs: [], exchangeInfo: {}, candidatesList: [] };
@@ -83,7 +83,7 @@ async function forceCloseMarket(symbol, posSide, amount) {
                 snapshot: data.snapshot
             });
             saveHistory();
-            addBotLog(`✅ ĐÓNG ${symbol} | PnL: ${pnl.toFixed(2)}$ | Giá: ${exitPrice}`, pnl > 0 ? "success" : "error");
+            addBotLog(`✅ ĐÓNG ${symbol} | PnL: ${pnl.toFixed(2)}$ | Exit: ${exitPrice}`, pnl > 0 ? "success" : "error");
         }
         activeOrdersTracker.delete(symbol);
     } catch (e) { addBotLog(`❌ Lỗi đóng ${symbol}: ${e.message}`, "error"); }
@@ -106,7 +106,7 @@ async function openPosition(symbol, side, price, info, scan) {
             const sl = side === 'BUY' ? price * (1 - botSettings.posSL/100) : price * (1 + botSettings.posSL/100);
             activeOrdersTracker.set(symbol, {
                 entryPrice: price, margin: margin.toFixed(2), leverage: maxLev, side: posSide,
-                tpPrice: tp.toFixed(info.pricePrecision), slPrice: sl.toFixed(info.pricePrecision),
+                tpPrice: tp.toFixed(info.pricePrecision || 4), slPrice: sl.toFixed(info.pricePrecision || 4),
                 openTime: new Date().toLocaleString('vi-VN'), snapshot: { m1: scan.c1, m5: scan.c5, m15: scan.c15 }
             });
             addBotLog(`🚀 MỞ ${symbol} | ${posSide} | Margin: ${margin.toFixed(2)}$ | Biến động: ${scan.c1}%`, "success");
@@ -131,7 +131,7 @@ async function mainLoop() {
         if (activeInAcc.length < botSettings.maxPositions) {
             for (const coin of status.candidatesList) {
                 if (activeOrdersTracker.has(coin.symbol)) continue;
-                // KIỂM TRA ĐIỀU KIỆN BIẾN ĐỘNG (%)
+                // LOGIC BIẾN ĐỘNG (%)
                 if (Math.abs(coin.c1) >= botSettings.entryDiff) {
                     const info = status.exchangeInfo[coin.symbol];
                     if (info) { await openPosition(coin.symbol, coin.c1 >= 0 ? 'BUY' : 'SELL', coin.price, info, coin); break; }
@@ -149,14 +149,15 @@ setInterval(() => {
 }, 2000);
 
 setInterval(mainLoop, 2500);
-const info = await callBinance('/fapi/v1/exchangeInfo');
-if (info.symbols) {
-    info.symbols.forEach(s => {
+
+const infoEx = await callBinance('/fapi/v1/exchangeInfo');
+if (infoEx.symbols) {
+    infoEx.symbols.forEach(s => {
         const f = s.filters.find(f => f.filterType === 'LOT_SIZE');
-        const p = s.filters.find(f => f.filterType === 'PRICE_FILTER');
         status.exchangeInfo[s.symbol] = { stepSize: parseFloat(f.stepSize), quantityPrecision: s.quantityPrecision, pricePrecision: s.pricePrecision };
     });
 }
+
 const APP = express(); APP.use(express.json()); APP.use(express.static(__dirname));
 APP.get('/api/status', (req, res) => res.json({ botSettings, activePositions: Array.from(activeOrdersTracker.values()), tradeHistory, status }));
 APP.post('/api/settings', (req, res) => { botSettings = { ...botSettings, ...req.body }; res.json({ success: true }); });
