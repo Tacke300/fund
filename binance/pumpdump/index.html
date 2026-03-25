@@ -2,71 +2,76 @@
 <html lang="vi">
 <head>
     <meta charset="UTF-8">
-    <title>Luffy Fleet Ultimate Control</title>
+    <title>Luffy Fleet Control Center v3</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
         body { background: #09090b; color: #fafafa; font-family: 'Inter', sans-serif; height: 100vh; overflow: hidden; display: flex; flex-direction: column; }
-        .glass { background: #18181b; border: 1px solid #27272a; border-radius: 12px; }
-        .input-dark { background: #09090b; border: 1px solid #3f3f46; color: white; padding: 8px; border-radius: 6px; font-size: 13px; width: 100%; }
-        .tab-btn { padding: 12px 24px; font-size: 11px; font-weight: 900; color: #52525b; border-bottom: 2px solid transparent; transition: 0.3s; }
-        .tab-active { color: #3b82f6; border-bottom-color: #3b82f6; background: #1e1e22; }
+        .glass { background: #18181b; border: 1px solid #27272a; border-radius: 8px; }
+        .input-dark { background: #09090b; border: 1px solid #3f3f46; color: white; padding: 6px; border-radius: 4px; font-size: 12px; width: 100%; }
         .up { color: #22c55e; } .down { color: #ef4444; }
-        .vol-bar { height: 4px; background: #27272a; border-radius: 2px; overflow: hidden; margin-top: 4px; }
+        .tab-btn { padding: 12px; font-size: 11px; font-weight: 900; color: #52525b; border-bottom: 2px solid transparent; }
+        .tab-active { color: #3b82f6; border-bottom-color: #3b82f6; background: #1e1e22; }
         ::-webkit-scrollbar { width: 4px; } ::-webkit-scrollbar-thumb { background: #3f3f46; }
     </style>
 </head>
 <body class="p-4 space-y-4">
     <div class="grid grid-cols-12 gap-4">
-        <div class="col-span-12 lg:col-span-8 grid grid-cols-2 md:grid-cols-4 gap-4">
-            <div class="glass p-4 border-l-4 border-blue-500 shadow-lg">
-                <p class="text-[10px] text-zinc-500 font-bold uppercase">PnL Tổng Tích Lũy</p>
-                <p id="totalPnl" class="text-2xl font-black text-blue-400">$0.00</p>
-            </div>
-            <div class="glass p-4 border-l-4 border-green-500 shadow-lg">
-                <p class="text-[10px] text-zinc-500 font-bold uppercase">Lệnh Win / Loss</p>
-                <p class="text-2xl font-black"><span id="winCount" class="up">0</span> / <span id="lossCount" class="down">0</span></p>
-            </div>
-            <div class="glass p-4 border-l-4 border-orange-500 shadow-lg">
-                <p class="text-[10px] text-zinc-500 font-bold uppercase">Sóng Biến Động Top 5</p>
-                <div id="top5" class="flex gap-2 mt-1"></div>
-            </div>
-            <div class="glass p-4 flex items-center"><button id="runBtn" onclick="handleToggle()" class="w-full h-full font-black uppercase text-xs rounded shadow-md"></button></div>
+        <div class="col-span-12 lg:col-span-9 grid grid-cols-4 gap-4">
+            <div class="glass p-3 border-l-4 border-blue-500"><p class="text-[10px] text-zinc-500 uppercase font-bold">Tổng PnL</p><p id="totalPnl" class="text-xl font-black text-blue-400">$0.00</p></div>
+            <div class="glass p-3 border-l-4 border-green-500"><p class="text-[10px] text-zinc-500 uppercase font-bold">Win / Loss</p><p class="text-xl font-black"><span id="winCount" class="up">0</span> / <span id="lossCount" class="down">0</span></p></div>
+            <div class="glass p-3 border-l-4 border-orange-500"><p class="text-[10px] text-zinc-500 uppercase font-bold">Balance</p><p id="balance" class="text-xl font-black">$0.00</p></div>
+            <div class="glass p-3 flex items-center"><button id="runBtn" onclick="handleToggle()" class="w-full h-full font-black uppercase text-xs rounded shadow-md transition-all"></button></div>
+        </div>
+        <div class="col-span-12 lg:col-span-3 glass p-2">
+            <p class="text-[9px] font-black text-zinc-500 uppercase mb-1">Top 5 Biến động (Scanner)</p>
+            <div id="top5" class="flex flex-wrap gap-1"></div>
         </div>
     </div>
 
     <div class="grid grid-cols-12 gap-4 flex-grow overflow-hidden">
         <div class="col-span-12 md:col-span-3 flex flex-col gap-4">
             <div class="glass p-4 space-y-4">
-                <div class="grid grid-cols-2 gap-2">
-                    <div><label class="text-[10px] text-zinc-500">Vốn vào lệnh</label><input id="invValue" type="number" class="input-dark"></div>
-                    <div><label class="text-[10px] text-zinc-500">Loại</label><select id="invType" class="input-dark"><option value="percent">% Ví</option><option value="fixed">USDT</option></select></div>
-                </div>
-                <div class="grid grid-cols-2 gap-2">
-                    <div><label class="text-[10px] text-green-500 font-bold">Chốt lời %</label><input id="posTP" type="number" class="input-dark border-green-900/40"></div>
-                    <div><label class="text-[10px] text-red-500 font-bold">Cắt lỗ %</label><input id="posSL" type="number" class="input-dark border-red-900/40"></div>
+                <h3 class="text-[11px] font-black uppercase text-blue-500"><i class="fas fa-sliders-h mr-2"></i>Cấu hình hạm đội</h3>
+                <div class="space-y-3">
+                    <div class="grid grid-cols-2 gap-2">
+                        <div><label class="text-[10px] text-zinc-500">Ký quỹ (Inv)</label><input id="invValue" type="number" class="input-dark"></div>
+                        <div><label class="text-[10px] text-zinc-500">Loại</label><select id="invType" class="input-dark"><option value="percent">% Ví</option><option value="fixed">USDT</option></select></div>
+                    </div>
+                    <div class="grid grid-cols-2 gap-2">
+                        <div><label class="text-[10px] text-zinc-500">Leverage</label><input id="leverage" type="number" class="input-dark"></div>
+                        <div><label class="text-[10px] text-zinc-500">Số lệnh tối đa</label><input id="maxPositions" type="number" class="input-dark"></div>
+                    </div>
+                    <div class="grid grid-cols-2 gap-2">
+                        <div><label class="text-[10px] text-green-500 font-bold">Take Profit %</label><input id="posTP" type="number" class="input-dark border-green-900/50"></div>
+                        <div><label class="text-[10px] text-red-500 font-bold">Stop Loss %</label><input id="posSL" type="number" class="input-dark border-red-900/50"></div>
+                    </div>
+                    <button onclick="saveSettings()" class="w-full py-2 bg-zinc-800 text-[10px] font-bold rounded hover:bg-zinc-700">CẬP NHẬT CẤU HÌNH</button>
                 </div>
             </div>
-            <div class="glass flex-grow flex flex-col overflow-hidden">
-                <div class="p-3 border-b border-zinc-800 font-black text-[11px] uppercase text-zinc-500 italic">Nhật ký vận hành</div>
-                <div id="logs" class="p-4 overflow-y-auto font-mono text-[10px] space-y-2"></div>
+            <div class="glass flex-grow flex flex-col overflow-hidden font-mono text-[10px]">
+                <div class="p-2 border-b border-zinc-800 uppercase text-zinc-600 font-bold">Logs</div>
+                <div id="logs" class="p-3 overflow-y-auto space-y-1"></div>
             </div>
         </div>
 
         <div class="col-span-12 md:col-span-9 glass flex flex-col overflow-hidden">
-            <div class="flex border-b border-zinc-800 bg-zinc-900/20">
+            <div class="flex border-b border-zinc-800 bg-zinc-900/40">
                 <button onclick="switchTab('pos')" id="btn-pos" class="tab-btn tab-active">VỊ THẾ ĐANG MỞ</button>
-                <button onclick="switchTab('his')" id="btn-his" class="tab-btn">LỊCH SỬ TOÀN BỘ</button>
+                <button onclick="switchTab('his')" id="btn-his" class="tab-btn">LỊCH SỬ CHI TIẾT</button>
             </div>
 
             <div id="panel-pos" class="p-4 overflow-y-auto grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4"></div>
 
-            <div id="panel-his" class="hidden p-4 overflow-y-auto">
-                <table class="w-full text-[12px] border-separate border-spacing-y-2">
-                    <thead class="text-zinc-500 uppercase text-[10px]">
-                        <tr><th class="text-left pb-2">Thời gian</th><th class="text-left pb-2">Cặp tiền</th><th class="text-left pb-2">Entry/Exit</th><th class="text-right pb-2">PnL Thực (USDT)</th></tr>
+            <div id="panel-his" class="hidden overflow-x-auto">
+                <table class="w-full text-[11px] text-left">
+                    <thead class="bg-zinc-900/80 sticky top-0 text-zinc-500 uppercase text-[9px]">
+                        <tr class="border-b border-zinc-800">
+                            <th class="p-3">Mở / Đóng</th><th class="p-3">Coin / Lev</th><th class="p-3">Entry / Exit</th>
+                            <th class="p-3">TP / SL</th><th class="p-3">Snapshot (1/5/15)</th><th class="p-3 text-right">PnL</th>
+                        </tr>
                     </thead>
-                    <tbody id="historyBody"></tbody>
+                    <tbody id="historyBody" class="divide-y divide-zinc-800/40"></tbody>
                 </table>
             </div>
         </div>
@@ -82,43 +87,52 @@
                 document.getElementById('totalPnl').innerText = `${d.tradeHistory.totalPnl.toFixed(2)}$`;
                 document.getElementById('winCount').innerText = d.tradeHistory.win;
                 document.getElementById('lossCount').innerText = d.tradeHistory.loss;
+                document.getElementById('balance').innerText = `$${(d.status.currentBalance || 0).toFixed(2)}`;
                 
-                document.getElementById('top5').innerHTML = d.top5.map(c => `
-                    <div class="px-2 py-0.5 bg-zinc-800 rounded text-[10px] font-bold ${c.c1 >= 0 ? 'up' : 'down'}">
-                        ${c.symbol.replace('USDT','')} ${c.c1}%
-                    </div>
-                `).join('');
+                document.getElementById('top5').innerHTML = d.candidates.map(c => `<span class="px-2 py-0.5 bg-zinc-900 border border-zinc-800 rounded text-[10px] font-bold ${c.c1>=0?'up':'down'}">${c.symbol.replace('USDT','')} ${c.c1}%</span>`).join('');
 
                 document.getElementById('panel-pos').innerHTML = d.activePositions.map(p => `
-                    <div class="glass p-4 bg-zinc-900/20 border-t-2 ${p.side === 'LONG' ? 'border-green-500' : 'border-red-500'}">
-                        <div class="flex justify-between font-black mb-3"><span>${p.symbol}</span><span class="${p.pnlPercent >= 0 ? 'up' : 'down'}">${p.pnlPercent}%</span></div>
-                        <div class="vol-bar"><div style="width:${Math.min(Math.abs(p.priceChange)*15, 100)}%; background:${p.priceChange>=0?'#22c55e':'#ef4444'}; height:100%; transition: 0.5s"></div></div>
-                        <p class="text-[9px] text-zinc-600 mt-1 uppercase font-bold">Biến động: ${p.priceChange}%</p>
-                        <div class="grid grid-cols-2 text-[10px] mt-4 gap-2 text-zinc-400">
-                            <div class="flex justify-between border-b border-zinc-800/50 pb-1"><span>Entry:</span><span class="text-white font-bold">${p.entryPrice}</span></div>
-                            <div class="flex justify-between border-b border-zinc-800/50 pb-1"><span>Mark:</span><span class="text-white font-bold">${p.markPrice}</span></div>
-                            <div class="flex justify-between border-b border-zinc-800/50 pb-1"><span>Margin:</span><span class="text-blue-400 font-bold">${p.margin}$</span></div>
-                            <div class="flex justify-between border-b border-zinc-800/50 pb-1"><span>Liq:</span><span class="text-orange-500 font-bold">${p.liqPrice}</span></div>
+                    <div class="glass p-4 border-t-2 ${p.side === 'LONG' ? 'border-green-500' : 'border-red-500'}">
+                        <div class="flex justify-between font-black mb-1"><span>${p.symbol} ${p.leverage}x</span><span class="${p.pnlUsdt>=0?'up':'down'}">${p.pnlUsdt}$ (${p.pnlPer}%)</span></div>
+                        <div class="flex gap-2 text-[9px] mb-3"><span class="up">${p.snapshot.m1}%</span><span class="text-zinc-600">${p.snapshot.m5}%</span><span class="down">${p.snapshot.m15}%</span></div>
+                        <div class="grid grid-cols-2 text-[10px] gap-1 text-zinc-500 border-t border-zinc-800/50 pt-2">
+                            <span>Entry: ${p.entry}</span><span>TP: <b class="up">${p.tp}</b></span>
+                            <span>Mark: ${p.mark}</span><span>SL: <b class="down">${p.sl}</b></span>
                         </div>
                     </div>
                 `).join('');
 
                 document.getElementById('historyBody').innerHTML = d.tradeHistory.orders.map(o => `
-                    <tr class="bg-zinc-900/30">
-                        <td class="p-3 rounded-l-lg text-zinc-500">${o.time}</td>
-                        <td class="p-3 font-black">${o.symbol} <span class="text-[9px] px-1 bg-zinc-800 rounded">${o.side}</span></td>
-                        <td class="p-3 text-zinc-400">${o.entry} ➔ ${o.exit}</td>
-                        <td class="p-3 text-right rounded-r-lg font-black ${o.pnl >= 0 ? 'up' : 'down'}">${o.pnl >= 0 ? '+' : ''}${o.pnl}$</td>
+                    <tr class="hover:bg-zinc-900/40">
+                        <td class="p-3 text-zinc-500">O: ${o.openTime}<br>C: ${o.closeTime}</td>
+                        <td class="p-3 font-black">${o.symbol}<br><span class="text-zinc-600">${o.side} ${o.lev}x</span></td>
+                        <td class="p-3">${o.entry} ➔ ${o.exit}</td>
+                        <td class="p-3 text-[10px]"><span class="up">${o.tp}</span> / <span class="down">${o.sl}</span></td>
+                        <td class="p-3 font-mono"><span class="up">${o.snapshot.m1}</span> | ${o.snapshot.m5} | <span class="down">${o.snapshot.m15}</span></td>
+                        <td class="p-3 text-right font-black ${o.pnl>=0?'up':'down'}">${o.pnl>=0?'+':''}${o.pnl}$</td>
                     </tr>
                 `).join('');
 
-                document.getElementById('logs').innerHTML = d.status.botLogs.map(l => `<div><span class="text-zinc-600">[${l.time}]</span> <span class="${l.type === 'success' ? 'up' : (l.type === 'error' ? 'down' : '')}">${l.msg}</span></div>`).join('');
+                document.getElementById('logs').innerHTML = d.status.botLogs.map(l => `<div><span class="text-zinc-600">[${l.time}]</span> <span class="${l.type==='success'?'up':(l.type==='error'?'down':'')}">${l.msg}</span></div>`).join('');
 
                 isRunning = d.botSettings.isRunning;
                 const btn = document.getElementById('runBtn');
-                btn.innerText = isRunning ? "Dừng hạm đội" : "Ra khơi (Start)";
-                btn.className = isRunning ? "w-full h-full bg-red-600/10 text-red-500 border border-red-500/50 rounded font-black uppercase text-xs" : "w-full h-full bg-blue-600 text-white rounded font-black uppercase text-xs";
-            } catch(e) {}
+                btn.innerText = isRunning ? "DỪNG CHIẾN DỊCH" : "KHỞI CHẠY HẠM ĐỘI";
+                btn.className = isRunning ? "w-full h-full bg-red-600/10 text-red-500 border border-red-500/50 rounded font-black" : "w-full h-full bg-blue-600 text-white rounded font-black";
+            } catch(e){}
+        }
+
+        async function saveSettings() {
+            const body = {
+                invValue: parseFloat(document.getElementById('invValue').value),
+                invType: document.getElementById('invType').value,
+                leverage: parseInt(document.getElementById('leverage').value),
+                maxPositions: parseInt(document.getElementById('maxPositions').value),
+                posTP: parseFloat(document.getElementById('posTP').value),
+                posSL: parseFloat(document.getElementById('posSL').value)
+            };
+            await fetch('/api/settings', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body) });
+            alert("Đã cập nhật cấu hình!");
         }
 
         function switchTab(t) {
@@ -138,6 +152,8 @@
              fetch('/api/status').then(r => r.json()).then(d => {
                 document.getElementById('invValue').value = d.botSettings.invValue;
                 document.getElementById('invType').value = d.botSettings.invType;
+                document.getElementById('leverage').value = d.botSettings.leverage;
+                document.getElementById('maxPositions').value = d.botSettings.maxPositions;
                 document.getElementById('posTP').value = d.botSettings.posTP;
                 document.getElementById('posSL').value = d.botSettings.posSL;
                 sync();
