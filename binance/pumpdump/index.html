@@ -2,79 +2,71 @@
 <html lang="vi">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Dashboard | Luffy Fleet</title>
+    <title>Luffy Fleet Ultimate Control</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
-        body { background: #09090b; color: #e4e4e7; font-family: 'Inter', sans-serif; overflow: hidden; height: 100vh; }
-        .glass { background: rgba(24, 24, 27, 0.8); border: 1px solid rgba(63, 63, 70, 0.5); border-radius: 12px; }
-        .input-dark { background: #18181b; border: 1px solid #3f3f46; color: white; padding: 6px 10px; border-radius: 6px; font-size: 13px; outline: none; }
-        .input-dark:focus { border-color: #3b82f6; }
-        ::-webkit-scrollbar { width: 3px; } ::-webkit-scrollbar-thumb { background: #3f3f46; }
+        body { background: #09090b; color: #fafafa; font-family: 'Inter', sans-serif; height: 100vh; overflow: hidden; display: flex; flex-direction: column; }
+        .glass { background: #18181b; border: 1px solid #27272a; border-radius: 12px; }
+        .input-dark { background: #09090b; border: 1px solid #3f3f46; color: white; padding: 8px; border-radius: 6px; font-size: 13px; width: 100%; }
+        .tab-btn { padding: 12px 24px; font-size: 11px; font-weight: 900; color: #52525b; border-bottom: 2px solid transparent; transition: 0.3s; }
+        .tab-active { color: #3b82f6; border-bottom-color: #3b82f6; background: #1e1e22; }
         .up { color: #22c55e; } .down { color: #ef4444; }
+        .vol-bar { height: 4px; background: #27272a; border-radius: 2px; overflow: hidden; margin-top: 4px; }
+        ::-webkit-scrollbar { width: 4px; } ::-webkit-scrollbar-thumb { background: #3f3f46; }
     </style>
 </head>
-<body class="p-3 flex flex-col gap-3">
-    <div class="glass p-3 flex justify-between items-center">
-        <div class="flex items-center gap-4">
-            <h1 class="text-lg font-black tracking-tighter text-white"><i class="fas fa-anchor mr-2 text-blue-500"></i>HẠM ĐỘI LUFFY</h1>
-            <span id="botStatusText" class="text-[10px] px-2 py-0.5 rounded bg-zinc-800 border border-zinc-700 font-bold uppercase">DỪNG</span>
-        </div>
-        <div class="text-right">
-            <p class="text-[10px] text-zinc-500 font-bold uppercase">Tài sản</p>
-            <p id="balance" class="text-xl font-black text-blue-400 tracking-tight">$0.00</p>
+<body class="p-4 space-y-4">
+    <div class="grid grid-cols-12 gap-4">
+        <div class="col-span-12 lg:col-span-8 grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div class="glass p-4 border-l-4 border-blue-500 shadow-lg">
+                <p class="text-[10px] text-zinc-500 font-bold uppercase">PnL Tổng Tích Lũy</p>
+                <p id="totalPnl" class="text-2xl font-black text-blue-400">$0.00</p>
+            </div>
+            <div class="glass p-4 border-l-4 border-green-500 shadow-lg">
+                <p class="text-[10px] text-zinc-500 font-bold uppercase">Lệnh Win / Loss</p>
+                <p class="text-2xl font-black"><span id="winCount" class="up">0</span> / <span id="lossCount" class="down">0</span></p>
+            </div>
+            <div class="glass p-4 border-l-4 border-orange-500 shadow-lg">
+                <p class="text-[10px] text-zinc-500 font-bold uppercase">Sóng Biến Động Top 5</p>
+                <div id="top5" class="flex gap-2 mt-1"></div>
+            </div>
+            <div class="glass p-4 flex items-center"><button id="runBtn" onclick="handleToggle()" class="w-full h-full font-black uppercase text-xs rounded shadow-md"></button></div>
         </div>
     </div>
 
-    <div class="grid grid-cols-2 md:grid-cols-7 gap-2">
-        <div class="glass p-2">
-            <label class="text-[9px] text-zinc-500 uppercase font-bold block mb-1">Vốn Lệnh</label>
-            <div class="flex gap-1">
-                <input id="invValue" type="number" class="input-dark w-full" value="1.5">
-                <select id="invType" class="input-dark text-[10px]"><option value="fixed">$</option><option value="percent">%</option></select>
+    <div class="grid grid-cols-12 gap-4 flex-grow overflow-hidden">
+        <div class="col-span-12 md:col-span-3 flex flex-col gap-4">
+            <div class="glass p-4 space-y-4">
+                <div class="grid grid-cols-2 gap-2">
+                    <div><label class="text-[10px] text-zinc-500">Vốn vào lệnh</label><input id="invValue" type="number" class="input-dark"></div>
+                    <div><label class="text-[10px] text-zinc-500">Loại</label><select id="invType" class="input-dark"><option value="percent">% Ví</option><option value="fixed">USDT</option></select></div>
+                </div>
+                <div class="grid grid-cols-2 gap-2">
+                    <div><label class="text-[10px] text-green-500 font-bold">Chốt lời %</label><input id="posTP" type="number" class="input-dark border-green-900/40"></div>
+                    <div><label class="text-[10px] text-red-500 font-bold">Cắt lỗ %</label><input id="posSL" type="number" class="input-dark border-red-900/40"></div>
+                </div>
             </div>
-        </div>
-        <div class="glass p-2">
-            <label class="text-[9px] text-zinc-500 uppercase font-bold block mb-1">Vol Min %</label>
-            <input id="minVol" type="number" class="input-dark w-full" value="5.0">
-        </div>
-        <div class="glass p-2">
-            <label class="text-[9px] text-zinc-500 uppercase font-bold block mb-1">Max Lệnh</label>
-            <input id="maxPositions" type="number" class="input-dark w-full" value="3">
-        </div>
-        <div class="glass p-2">
-            <label class="text-[9px] text-green-500 uppercase font-bold block mb-1">TP Vị Thế %</label>
-            <input id="posTP" type="number" class="input-dark w-full text-green-400" value="1.0">
-        </div>
-        <div class="glass p-2">
-            <label class="text-[9px] text-red-500 uppercase font-bold block mb-1">SL Vị Thế %</label>
-            <input id="posSL" type="number" class="input-dark w-full text-red-400" value="3.0">
-        </div>
-        <div class="p-1 flex items-center"><button id="runBtn" onclick="handleToggle()" class="w-full py-3 rounded-lg font-bold text-xs bg-green-600 hover:bg-green-500 transition-all uppercase">BẮT ĐẦU</button></div>
-        <div class="p-1 flex items-center"><button onclick="handleUpdate()" class="w-full py-3 rounded-lg font-bold text-xs bg-zinc-800 border border-zinc-700 hover:bg-zinc-700 transition-all uppercase text-zinc-400">Lưu</button></div>
-    </div>
-
-    <div class="flex-grow grid grid-cols-12 gap-3 overflow-hidden">
-        <div class="col-span-12 md:col-span-4 glass flex flex-col overflow-hidden">
-            <div class="p-2 border-b border-zinc-800 flex justify-between items-center bg-zinc-900/50">
-                <span class="text-[10px] font-black uppercase text-zinc-400">Log Hệ Thống</span>
-                <button onclick="document.getElementById('botLogs').innerHTML=''" class="text-[9px] text-zinc-600 hover:text-white">Xóa</button>
+            <div class="glass flex-grow flex flex-col overflow-hidden">
+                <div class="p-3 border-b border-zinc-800 font-black text-[11px] uppercase text-zinc-500 italic">Nhật ký vận hành</div>
+                <div id="logs" class="p-4 overflow-y-auto font-mono text-[10px] space-y-2"></div>
             </div>
-            <div id="botLogs" class="p-2 overflow-y-auto font-mono text-[10px] space-y-1.5 flex-grow"></div>
         </div>
 
-        <div class="col-span-12 md:col-span-8 glass flex flex-col overflow-hidden">
-            <div class="p-2 border-b border-zinc-800 flex justify-between bg-zinc-900/50">
-                <span class="text-[10px] font-black uppercase text-zinc-400">Vị thế hoạt động</span>
-                <span id="posCount" class="text-[10px] text-blue-400 font-bold">0 LỆNH</span>
+        <div class="col-span-12 md:col-span-9 glass flex flex-col overflow-hidden">
+            <div class="flex border-b border-zinc-800 bg-zinc-900/20">
+                <button onclick="switchTab('pos')" id="btn-pos" class="tab-btn tab-active">VỊ THẾ ĐANG MỞ</button>
+                <button onclick="switchTab('his')" id="btn-his" class="tab-btn">LỊCH SỬ TOÀN BỘ</button>
             </div>
-            <div class="overflow-y-auto flex-grow">
-                <table class="w-full text-left text-[12px]">
-                    <thead class="bg-zinc-900 sticky top-0 text-zinc-500 text-[9px] uppercase">
-                        <tr><th class="p-2">Coin</th><th class="p-2">Side</th><th class="p-2">Price</th><th class="p-2 text-right">PnL%</th></tr>
+
+            <div id="panel-pos" class="p-4 overflow-y-auto grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4"></div>
+
+            <div id="panel-his" class="hidden p-4 overflow-y-auto">
+                <table class="w-full text-[12px] border-separate border-spacing-y-2">
+                    <thead class="text-zinc-500 uppercase text-[10px]">
+                        <tr><th class="text-left pb-2">Thời gian</th><th class="text-left pb-2">Cặp tiền</th><th class="text-left pb-2">Entry/Exit</th><th class="text-right pb-2">PnL Thực (USDT)</th></tr>
                     </thead>
-                    <tbody id="positionTable" class="divide-y divide-zinc-800"></tbody>
+                    <tbody id="historyBody"></tbody>
                 </table>
             </div>
         </div>
@@ -82,60 +74,75 @@
 
     <script>
         let isRunning = false;
-        function updateUI(status_bool) {
-            isRunning = status_bool;
-            const btn = document.getElementById('runBtn');
-            const txt = document.getElementById('botStatusText');
-            btn.innerText = isRunning ? "DỪNG BOT" : "BẮT ĐẦU";
-            btn.className = isRunning ? "w-full py-3 rounded-lg font-bold text-xs bg-red-600 hover:bg-red-500 uppercase" : "w-full py-3 rounded-lg font-bold text-xs bg-green-600 hover:bg-green-500 uppercase";
-            txt.innerText = isRunning ? "ĐANG CHẠY" : "DỪNG";
-            txt.className = isRunning ? "text-[10px] px-2 py-0.5 rounded bg-green-900/20 border border-green-500/50 text-green-500 font-bold uppercase" : "text-[10px] px-2 py-0.5 rounded bg-zinc-800 border border-zinc-700 text-zinc-500 font-bold uppercase";
-        }
-
         async function sync() {
             try {
                 const res = await fetch('/api/status');
-                const data = await res.json();
-                if(data.botSettings.isRunning !== isRunning) updateUI(data.botSettings.isRunning);
-                document.getElementById('balance').innerText = `$${(data.status.currentBalance || 0).toFixed(2)}`;
-                document.getElementById('posCount').innerText = `${data.activePositions.length} LỆNH`;
+                const d = await res.json();
                 
-                document.getElementById('positionTable').innerHTML = data.activePositions.map(p => `
-                    <tr class="hover:bg-zinc-800/30">
-                        <td class="p-2 font-bold">${p.symbol}</td>
-                        <td class="p-2"><span class="${p.side === 'LONG' ? 'up' : 'down'} text-[10px] font-bold">${p.side} ${p.leverage}x</span></td>
-                        <td class="p-2 text-[10px] text-zinc-500">${p.entryPrice} → ${p.markPrice}</td>
-                        <td class="p-2 text-right font-black ${parseFloat(p.pnlPercent) >= 0 ? 'up' : 'down'}">${p.pnlPercent}%</td>
+                document.getElementById('totalPnl').innerText = `${d.tradeHistory.totalPnl.toFixed(2)}$`;
+                document.getElementById('winCount').innerText = d.tradeHistory.win;
+                document.getElementById('lossCount').innerText = d.tradeHistory.loss;
+                
+                document.getElementById('top5').innerHTML = d.top5.map(c => `
+                    <div class="px-2 py-0.5 bg-zinc-800 rounded text-[10px] font-bold ${c.c1 >= 0 ? 'up' : 'down'}">
+                        ${c.symbol.replace('USDT','')} ${c.c1}%
+                    </div>
+                `).join('');
+
+                document.getElementById('panel-pos').innerHTML = d.activePositions.map(p => `
+                    <div class="glass p-4 bg-zinc-900/20 border-t-2 ${p.side === 'LONG' ? 'border-green-500' : 'border-red-500'}">
+                        <div class="flex justify-between font-black mb-3"><span>${p.symbol}</span><span class="${p.pnlPercent >= 0 ? 'up' : 'down'}">${p.pnlPercent}%</span></div>
+                        <div class="vol-bar"><div style="width:${Math.min(Math.abs(p.priceChange)*15, 100)}%; background:${p.priceChange>=0?'#22c55e':'#ef4444'}; height:100%; transition: 0.5s"></div></div>
+                        <p class="text-[9px] text-zinc-600 mt-1 uppercase font-bold">Biến động: ${p.priceChange}%</p>
+                        <div class="grid grid-cols-2 text-[10px] mt-4 gap-2 text-zinc-400">
+                            <div class="flex justify-between border-b border-zinc-800/50 pb-1"><span>Entry:</span><span class="text-white font-bold">${p.entryPrice}</span></div>
+                            <div class="flex justify-between border-b border-zinc-800/50 pb-1"><span>Mark:</span><span class="text-white font-bold">${p.markPrice}</span></div>
+                            <div class="flex justify-between border-b border-zinc-800/50 pb-1"><span>Margin:</span><span class="text-blue-400 font-bold">${p.margin}$</span></div>
+                            <div class="flex justify-between border-b border-zinc-800/50 pb-1"><span>Liq:</span><span class="text-orange-500 font-bold">${p.liqPrice}</span></div>
+                        </div>
+                    </div>
+                `).join('');
+
+                document.getElementById('historyBody').innerHTML = d.tradeHistory.orders.map(o => `
+                    <tr class="bg-zinc-900/30">
+                        <td class="p-3 rounded-l-lg text-zinc-500">${o.time}</td>
+                        <td class="p-3 font-black">${o.symbol} <span class="text-[9px] px-1 bg-zinc-800 rounded">${o.side}</span></td>
+                        <td class="p-3 text-zinc-400">${o.entry} ➔ ${o.exit}</td>
+                        <td class="p-3 text-right rounded-r-lg font-black ${o.pnl >= 0 ? 'up' : 'down'}">${o.pnl >= 0 ? '+' : ''}${o.pnl}$</td>
                     </tr>
                 `).join('');
 
-                document.getElementById('botLogs').innerHTML = data.status.botLogs.map(l => `
-                    <div class="leading-relaxed border-l-2 ${l.type === 'success' ? 'border-green-500 bg-green-500/5' : (l.type === 'error' ? 'border-red-500 bg-red-500/5' : 'border-blue-500 bg-blue-500/5')} px-2">
-                        <span class="text-zinc-600 mr-1">${l.time}</span> <span class="text-zinc-200">${l.msg}</span>
-                    </div>
-                `).join('');
-            } catch (e) {}
+                document.getElementById('logs').innerHTML = d.status.botLogs.map(l => `<div><span class="text-zinc-600">[${l.time}]</span> <span class="${l.type === 'success' ? 'up' : (l.type === 'error' ? 'down' : '')}">${l.msg}</span></div>`).join('');
+
+                isRunning = d.botSettings.isRunning;
+                const btn = document.getElementById('runBtn');
+                btn.innerText = isRunning ? "Dừng hạm đội" : "Ra khơi (Start)";
+                btn.className = isRunning ? "w-full h-full bg-red-600/10 text-red-500 border border-red-500/50 rounded font-black uppercase text-xs" : "w-full h-full bg-blue-600 text-white rounded font-black uppercase text-xs";
+            } catch(e) {}
+        }
+
+        function switchTab(t) {
+            document.getElementById('panel-pos').classList.toggle('hidden', t !== 'pos');
+            document.getElementById('panel-his').classList.toggle('hidden', t !== 'his');
+            document.getElementById('btn-pos').className = t === 'pos' ? 'tab-btn tab-active' : 'tab-btn';
+            document.getElementById('btn-his').className = t === 'his' ? 'tab-btn tab-active' : 'tab-btn';
         }
 
         async function handleToggle() {
-            isRunning = !isRunning; updateUI(isRunning);
-            await fetch('/api/settings', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ isRunning }) });
+            await fetch('/api/settings', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ isRunning: !isRunning }) });
+            sync();
         }
 
-        async function handleUpdate() {
-            const body = {
-                invValue: parseFloat(document.getElementById('invValue').value),
-                invType: document.getElementById('invType').value,
-                minVol: parseFloat(document.getElementById('minVol').value),
-                maxPositions: parseInt(document.getElementById('maxPositions').value),
-                posTP: parseFloat(document.getElementById('posTP').value),
-                posSL: parseFloat(document.getElementById('posSL').value)
-            };
-            await fetch('/api/settings', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body) });
-            alert("Đã lưu!");
+        setInterval(sync, 1500);
+        window.onload = () => {
+             fetch('/api/status').then(r => r.json()).then(d => {
+                document.getElementById('invValue').value = d.botSettings.invValue;
+                document.getElementById('invType').value = d.botSettings.invType;
+                document.getElementById('posTP').value = d.botSettings.posTP;
+                document.getElementById('posSL').value = d.botSettings.posSL;
+                sync();
+             });
         }
-
-        setInterval(sync, 1000);
     </script>
 </body>
 </html>
