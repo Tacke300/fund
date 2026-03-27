@@ -2,6 +2,7 @@ const PORT = 9000;
 const HISTORY_FILE = './history_db.json';
 const LEVERAGE_FILE = './leverage_cache.json';
 const COOLDOWN_MINUTES = 15; 
+const MAX_HOLD_MINUTES = 15; // <--- SỬA SỐ PHÚT CHỐT LỆNH TẠI ĐÂY
 
 import WebSocket from 'ws';
 import express from 'express';
@@ -16,7 +17,7 @@ let historyMap = new Map();
 let symbolMaxLeverage = {}; 
 let lastTradeClosed = {}; 
 
-let currentTP = 0.2, currentSL = 100.0, currentMinVol = 6.5;
+let currentTP = 0.5, currentSL = 100.0, currentMinVol = 6.5;
 
 function fPrice(p) {
     if (!p || p === 0) return "0.0000";
@@ -60,10 +61,19 @@ function initWS() {
                 const diff = ((p - pending.snapPrice) / pending.snapPrice) * 100;
                 const win = pending.type === 'UP' ? diff >= pending.tpTarget : diff <= -pending.tpTarget; 
                 const lose = pending.type === 'UP' ? diff <= -pending.slTarget : diff >= pending.slTarget; 
-                if (win || lose) { 
-                    pending.status = win ? 'WIN' : 'LOSE'; pending.finalPrice = p; pending.endTime = now;
-                    pending.pnlPercent = win ? pending.tpTarget : -pending.slTarget;
-                    lastTradeClosed[s] = now; fs.writeFileSync(HISTORY_FILE, JSON.stringify(Array.from(historyMap.values()))); 
+                
+                // KIỂM TRA THỜI GIAN GIỮ LỆNH
+                const isTimeout = (now - pending.startTime) >= (MAX_HOLD_MINUTES * 60000);
+
+                if (win || lose || isTimeout) { 
+                    pending.status = win ? 'WIN' : (lose ? 'LOSE' : 'TIMEOUT'); 
+                    pending.finalPrice = p; 
+                    pending.endTime = now;
+                    // Tính PnL dựa trên giá đóng thực tế (quan trọng khi bị timeout)
+                    pending.pnlPercent = (pending.type === 'UP' ? diff : -diff);
+                    
+                    lastTradeClosed[s] = now; 
+                    fs.writeFileSync(HISTORY_FILE, JSON.stringify(Array.from(historyMap.values()))); 
                 }
             }
             if (Math.max(Math.abs(c1), Math.abs(c5), Math.abs(c15)) >= currentMinVol && !pending && !(lastTradeClosed[s] && (now - lastTradeClosed[s] < COOLDOWN_MINUTES * 60000))) {
@@ -82,7 +92,6 @@ app.get('/api/config', (req, res) => {
     res.sendStatus(200);
 });
 
-// FIX: Trả về thêm mảng "live" để Bot 9001 nhận được Top biến động
 app.get('/api/data', (req, res) => {
     const all = Array.from(historyMap.values());
     const topData = Object.entries(coinData)
@@ -93,7 +102,7 @@ app.get('/api/data', (req, res) => {
     res.json({ 
         allPrices: Object.fromEntries(Object.entries(coinData).map(([s, v]) => [s, v.live.currentPrice])),
         top5: topData.slice(0, 5),
-        live: topData, // Thêm dòng này để Bot 9001 đọc được
+        live: topData, 
         pending: all.filter(h => h.status === 'PENDING').sort((a,b)=>b.startTime-a.startTime),
         history: all.filter(h => h.status !== 'PENDING').sort((a,b)=>b.endTime-a.endTime)
     });
