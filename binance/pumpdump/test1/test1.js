@@ -2,7 +2,7 @@ const PORT = 9055;
 const HISTORY_FILE = './history_db.json';
 const LEVERAGE_FILE = './leverage_cache.json';
 const COOLDOWN_MINUTES = 15; 
-const MAX_HOLD_MINUTES = 5; // <--- SỬA SỐ PHÚT CHỐT LỆNH TẠI ĐÂY
+const MAX_HOLD_MINUTES = 1; // <--- SỬA SỐ PHÚT CHỐT LỆNH TẠI ĐÂY
 
 import WebSocket from 'ws';
 import express from 'express';
@@ -17,7 +17,7 @@ let historyMap = new Map();
 let symbolMaxLeverage = {}; 
 let lastTradeClosed = {}; 
 
-let currentTP = 0.5, currentSL = 100.0, currentMinVol = 10;
+let currentTP = 0.5, currentSL = 100.0, currentMinVol = 6.5;
 
 function fPrice(p) {
     if (!p || p === 0) return "0.0000";
