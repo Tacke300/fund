@@ -14,24 +14,24 @@ const __dirname = path.dirname(__filename);
 let botSettings = { 
     isRunning: false,           // Trạng thái chạy của bot (True/False)
     maxPositions: 3,            // Số lệnh tối đa mở cùng lúc (Tránh phân tán vốn)
-    invValue: 1.5,              // Số tiền vào mỗi lệnh (% hoặc USD tùy invType)
+    invValue: 1,              // Số tiền vào mỗi lệnh (% hoặc USD tùy invType)
     invType: 'percent',         // Cách tính tiền vào lệnh: 'percent' hoặc 'fixed'
     
     // --- [ CHIẾN THUẬT ENTRY ] ---
-    minVol: 2.2,                // Biến động tối thiểu (%) của nến để kích hoạt vào lệnh
+    minVol: 6.5,                // Biến động tối thiểu (%) của nến để kích hoạt vào lệnh
     maxSpread: 0.12,            // Khoảng cách Bid/Ask tối đa (%) để chấp nhận (Tránh coin rác)
-    minLiquidity: 10000,        // Thanh khoản tối thiểu trong Top 10 lệnh (USD) để vào lệnh an toàn
+    minLiquidity: 100,        // Thanh khoản tối thiểu trong Top 10 lệnh (USD) để vào lệnh an toàn
     entryCooldown: 15000,       // Thời gian nghỉ giữa các lần vào lệnh (ms)
     
     // --- [ GIÁP BẢO VỆ (TP/SL) ] ---
-    posTP: 1.2,                 // Chốt lời (%) tính từ điểm khớp lệnh thật
-    posSL: 3.0,                 // Cắt lỗ (%) tính từ điểm khớp lệnh thật
+    posTP: 0.5,                 // Chốt lời (%) tính từ điểm khớp lệnh thật
+    posSL: 5,                 // Cắt lỗ (%) tính từ điểm khớp lệnh thật
     enableBE: true,             // Bật/Tắt dời SL về điểm hòa vốn (Break-Even)
     beTrigger: 0.85,            // Lãi đạt mức này (%) thì dời SL về Entry + 0.05% phí
-    maxHoldTime: 5,             // Thời gian ôm lệnh tối đa (Phút). Hết giờ tự đóng Market bất kể lời lỗ.
+    maxHoldTime: 1,             // Thời gian ôm lệnh tối đa (Phút). Hết giờ tự đóng Market bất kể lời lỗ.
     
     // --- [ QUẢN TRỊ RỦI RO CHIẾN TRƯỜNG ] ---
-    dailyLossLimit: 5.0,        // Giới hạn lỗ trong ngày (%). Chạm mức này bot nghỉ đến 00:00 VN
+    dailyLossLimit: 50.0,        // Giới hạn lỗ trong ngày (%). Chạm mức này bot nghỉ đến 00:00 VN
     maxConsecutiveLosses: 3,    // "Kill Switch": Thua liên tiếp n lệnh thì tự tắt Bot để check lại
     riskLoopSpeed: 700,         // Tốc độ quét rủi ro (ms). 700ms là mức an toàn cho API Rate Limit
 };
