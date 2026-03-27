@@ -1,5 +1,4 @@
 import https from 'https';
-import http from 'http';
 import crypto from 'crypto';
 import express from 'express';
 import { fileURLToPath } from 'url';
@@ -9,23 +8,50 @@ import { API_KEY, SECRET_KEY } from './config.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// --- HỆ THỐNG QUẢN TRỊ RỦI RO (HEDGE FUND LAYER) ---
+// ============================================================================
+// ⚙️ CẤU HÌNH HỆ THỐNG (SETTINGS) - CHỈNH TẠI ĐÂY
+// ============================================================================
 let botSettings = { 
-    isRunning: false, maxPositions: 3, invValue: 1.5, invType: 'percent', 
-    minVol: 2.2, posTP: 1.2, posSL: 3.0,
-    maxDrawdown: 10.0,
-    enableBE: true, // ✅ Break-Even
-    beTrigger: 0.8, // Lãi 0.8% thì dời SL về Entry
-    emergencyRetry: 3 // Số lần thử lại TP/SL trước khi panic close
+    isRunning: false,           // Trạng thái chạy của bot (True/False)
+    maxPositions: 3,            // Số lệnh tối đa mở cùng lúc (Tránh phân tán vốn)
+    invValue: 1.5,              // Số tiền vào mỗi lệnh (% hoặc USD tùy invType)
+    invType: 'percent',         // Cách tính tiền vào lệnh: 'percent' hoặc 'fixed'
+    
+    // --- [ CHIẾN THUẬT ENTRY ] ---
+    minVol: 2.2,                // Biến động tối thiểu (%) của nến để kích hoạt vào lệnh
+    maxSpread: 0.12,            // Khoảng cách Bid/Ask tối đa (%) để chấp nhận (Tránh coin rác)
+    minLiquidity: 10000,        // Thanh khoản tối thiểu trong Top 10 lệnh (USD) để vào lệnh an toàn
+    entryCooldown: 15000,       // Thời gian nghỉ giữa các lần vào lệnh (ms)
+    
+    // --- [ GIÁP BẢO VỆ (TP/SL) ] ---
+    posTP: 1.2,                 // Chốt lời (%) tính từ điểm khớp lệnh thật
+    posSL: 3.0,                 // Cắt lỗ (%) tính từ điểm khớp lệnh thật
+    enableBE: true,             // Bật/Tắt dời SL về điểm hòa vốn (Break-Even)
+    beTrigger: 0.85,            // Lãi đạt mức này (%) thì dời SL về Entry + 0.05% phí
+    maxHoldTime: 5,             // Thời gian ôm lệnh tối đa (Phút). Hết giờ tự đóng Market bất kể lời lỗ.
+    
+    // --- [ QUẢN TRỊ RỦI RO CHIẾN TRƯỜNG ] ---
+    dailyLossLimit: 5.0,        // Giới hạn lỗ trong ngày (%). Chạm mức này bot nghỉ đến 00:00 VN
+    maxConsecutiveLosses: 3,    // "Kill Switch": Thua liên tiếp n lệnh thì tự tắt Bot để check lại
+    riskLoopSpeed: 700,         // Tốc độ quét rủi ro (ms). 700ms là mức an toàn cho API Rate Limit
 };
 
-let status = { initialBalance: 0, currentBalance: 0, botLogs: [], exchangeInfo: {}, candidatesList: [], globalCooldown: 0 };
-let activeOrdersTracker = new Map(); 
-let pendingSymbols = new Set();
-let serverTimeOffset = 0;
+// ============================================================================
+// 📊 TRẠNG THÁI HỆ THỐNG (SYSTEM STATUS)
+// ============================================================================
+let status = { 
+    initialBalance: 0, dayStartBalance: 0, currentBalance: 0, 
+    botLogs: [], exchangeInfo: {}, candidatesList: [], 
+    globalCooldown: 0, consecutiveLosses: 0 
+};
+
+let activeOrdersTracker = new Map(); // Theo dõi lệnh đang chạy
+let pendingSymbols = new Set();      // Chống vào lệnh lặp khi đang xử lý
+let serverTimeOffset = 0;            // Lệch múi giờ với Binance
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
+// Hàm ghi Log hiển thị lên Dashboard và Terminal
 function addBotLog(msg, type = 'info') {
     const time = new Date().toLocaleTimeString('vi-VN', { hour12: false });
     status.botLogs.unshift({ time, msg, type });
@@ -34,7 +60,7 @@ function addBotLog(msg, type = 'info') {
     console.log(`${color}[${time}] ${msg}\x1b[0m`);
 }
 
-// 🛡️ API CORE (Fixed 100% Logic)
+// 🛡️ API CORE - Xử lý gọi sàn, ký tên và chống lỗi Timeout
 async function callBinance(endpoint, method = 'GET', params = {}, retries = 3) {
     for (let i = 0; i < retries; i++) {
         try {
@@ -45,143 +71,182 @@ async function callBinance(endpoint, method = 'GET', params = {}, retries = 3) {
             const url = `https://fapi.binance.com${endpoint}?${fullQuery}&signature=${signature}`;
 
             const res = await new Promise((resolve, reject) => {
-                const req = https.request(url, { method, headers: { 'X-MBX-APIKEY': API_KEY } }, res => {
+                const req = https.request(url, { method, timeout: 3500, headers: { 'X-MBX-APIKEY': API_KEY } }, res => {
                     let d = ''; res.on('data', c => d += c);
                     res.on('end', () => { try { resolve(JSON.parse(d)); } catch (e) { reject(e); } });
                 });
+                req.on('timeout', () => { req.destroy(); reject(new Error('Timeout API')); });
                 req.on('error', reject);
                 req.end();
             });
 
-            if (res.code === -1021) { 
+            if (res.code === -1021) { // Lỗi lệch thời gian hệ thống
                 const t = await new Promise(r => https.get('https://fapi.binance.com/fapi/v1/time', res => { let d=''; res.on('data', c=>d+=c); res.on('end', ()=>r(JSON.parse(d))); }));
-                serverTimeOffset = t.serverTime - Date.now(); // FIX: t là object, không parse lại
+                serverTimeOffset = t.serverTime - Date.now();
                 continue;
             }
             return res;
-        } catch (e) { if (i === retries - 1) throw e; await sleep(300); }
+        } catch (e) { if (i === retries - 1) throw e; await sleep(400); }
     }
 }
 
-// 🚀 HÀM MỞ VỊ THẾ v11.0 "QUỸ PHÒNG HỘ"
-async function openPosition(symbol, side, info, scan) {
+// ⚡ RISK MANAGER - Vòng lặp quét giá Mark liên tục để xử lý SL/BE siêu tốc
+async function riskManager() {
+    if (!botSettings.isRunning || activeOrdersTracker.size === 0) return;
+    try {
+        const posRisk = await callBinance('/fapi/v2/positionRisk');
+        const activePositions = posRisk.filter(p => parseFloat(p.positionAmt) !== 0);
+
+        for (let p of activePositions) {
+            const data = activeOrdersTracker.get(p.symbol);
+            if (!data) continue;
+
+            const markP = parseFloat(p.markPrice);
+            const profit = data.side === 'LONG' ? (markP - data.entry)/data.entry*100 : (data.entry - markP)/data.entry*100;
+
+            // 1. AUTO-KILL SL: Đóng bằng lệnh Market nếu giá chạm SL mà lệnh SL của sàn chưa khớp
+            if (profit <= -botSettings.posSL) {
+                addBotLog(`🚨 [AUTO-KILL] ${p.symbol} âm ${profit.toFixed(2)}%`, "error");
+                await callBinance('/fapi/v1/order', 'POST', { symbol: p.symbol, side: data.side === 'LONG' ? 'SELL' : 'BUY', positionSide: data.side, type: 'MARKET', closePosition: 'true' });
+                activeOrdersTracker.delete(p.symbol);
+                status.consecutiveLosses++;
+                continue;
+            }
+
+            // 2. ATOMIC BREAK-EVEN: Đặt SL mới xong mới xóa SL cũ (Chống Race Condition)
+            if (botSettings.enableBE && !data.isBE && profit >= botSettings.beTrigger) {
+                const beP = data.side === 'LONG' ? (data.entry * 1.0005).toFixed(status.exchangeInfo[p.symbol].pricePrecision) : (data.entry * 0.9995).toFixed(status.exchangeInfo[p.symbol].pricePrecision);
+                const newSL = await callBinance('/fapi/v1/order', 'POST', { symbol: p.symbol, side: data.side === 'LONG' ? 'SELL' : 'BUY', positionSide: data.side, type: 'STOP_MARKET', stopPrice: beP, closePosition: 'true', workingType: 'MARK_PRICE' });
+                if (newSL.orderId) {
+                    if (data.slId) await callBinance('/fapi/v1/order', 'DELETE', { symbol: p.symbol, orderId: data.slId }).catch(()=>{});
+                    data.isBE = true; data.slId = newSL.orderId;
+                    addBotLog(`🛡️ BE SECURED: ${p.symbol}`, "success");
+                }
+            }
+        }
+        
+        // Kiểm tra Kill Switch (Dừng bot nếu thua quá nhiều lệnh liên tiếp)
+        if (status.consecutiveLosses >= botSettings.maxConsecutiveLosses) {
+            botSettings.isRunning = false;
+            addBotLog(`💀 KILL SWITCH: Tắt Bot do dính chuỗi ${status.consecutiveLosses} lệnh lỗ`, "error");
+        }
+    } catch (e) {}
+}
+
+// 🚀 HÀM MỞ VỊ THẾ - Xử lý lọc Spread, Thanh khoản và khớp lệnh chuẩn
+async function openPosition(symbol, side, info) {
     const posSide = side === 'BUY' ? 'LONG' : 'SHORT';
     const closeSide = side === 'BUY' ? 'SELL' : 'BUY';
-    
-    pendingSymbols.add(symbol);
-    const lockTimer = setTimeout(() => pendingSymbols.delete(symbol), 15 * 60 * 1000);
 
     try {
-        const ticker = await callBinance('/fapi/v1/ticker/price', 'GET', { symbol });
-        const entryPrice = parseFloat(ticker.price);
-        
-        // 1. CHECK MARGIN & DRAWDOWN
-        const acc = await callBinance('/fapi/v2/account');
-        status.currentBalance = parseFloat(acc.totalWalletBalance);
-        const availableBalance = parseFloat(acc.availableBalance);
-        
-        const drawdown = ((status.initialBalance - status.currentBalance) / status.initialBalance) * 100;
-        if (drawdown > botSettings.maxDrawdown) {
-            botSettings.isRunning = false;
-            addBotLog(`🚨 [SHUTDOWN] Drawdown ${drawdown.toFixed(2)}%`, "error");
+        // 1. LẤY CHI TIẾT SỔ LỆNH (Check Spread & Thanh khoản thực)
+        const depth = await callBinance('/fapi/v1/depth', 'GET', { symbol, limit: 10 });
+        const ask = parseFloat(depth.asks[0][0]);
+        const bid = parseFloat(depth.bids[0][0]);
+        const spread = ((ask - bid) / bid) * 100;
+        const volDepth = depth.bids.slice(0,5).reduce((a,b)=>a+(parseFloat(b[0])*parseFloat(b[1])), 0);
+
+        if (spread > botSettings.maxSpread || volDepth < botSettings.minLiquidity) {
+            addBotLog(`⚠️ Bỏ qua ${symbol}: Spread ${spread.toFixed(3)}% | Thanh khoản: ${Math.round(volDepth)}$`, "error");
             return;
         }
 
-        let marginNeeded = botSettings.invType === 'percent' ? (status.currentBalance * botSettings.invValue) / 100 : botSettings.invValue;
-        if (marginNeeded > availableBalance) {
-            addBotLog(`❌ Thiếu vốn cho ${symbol} (Cần: ${marginNeeded}$, Có: ${availableBalance.toFixed(2)}$)`, "error");
+        // 2. KIỂM TRA SỐ DƯ & LEVERAGE
+        const acc = await callBinance('/fapi/v2/account');
+        const available = parseFloat(acc.availableBalance);
+        const dailyLoss = ((status.dayStartBalance - parseFloat(acc.totalWalletBalance)) / status.dayStartBalance) * 100;
+
+        if (dailyLoss >= botSettings.dailyLossLimit) {
+            botSettings.isRunning = false;
+            addBotLog(`🛑 DỪNG: Chạm giới hạn lỗ ngày (${dailyLoss.toFixed(2)}%)`, "error");
             return;
         }
-        
+
         const brackets = await callBinance('/fapi/v1/leverageBracket', 'GET', { symbol });
         const lev = brackets[0]?.brackets[0]?.initialLeverage || 20;
+
+        let margin = botSettings.invType === 'percent' ? (parseFloat(acc.totalWalletBalance) * botSettings.invValue) / 100 : botSettings.invValue;
+        
+        if (margin > available) {
+            addBotLog(`❌ Thiếu vốn: Cần ${margin.toFixed(2)}$, Hiện có ${available.toFixed(2)}$`, "error");
+            return;
+        }
+
+        // 3. TÍNH QTY CHUẨN (Fix lỗi Min Notional)
+        let rawQty = (margin * lev) / ask;
+        let minQty = (info.minNotional * 1.1) / ask; // Thêm 10% buffer cho an toàn
+        let finalQty = (Math.floor(Math.max(rawQty, minQty) / info.stepSize) * info.stepSize).toFixed(info.quantityPrecision);
+
         await callBinance('/fapi/v1/leverage', 'POST', { symbol, leverage: lev });
 
-        let minQty = (info.minNotional * 1.1) / entryPrice; 
-        let qtyStr = (Math.floor(Math.max((marginNeeded * lev) / entryPrice, minQty) / info.stepSize) * info.stepSize).toFixed(info.quantityPrecision);
-
-        // 2. ENTRY (Bỏ priceProtect để khớp nhanh nhất)
-        const order = await callBinance('/fapi/v1/order', 'POST', { symbol, side, positionSide: posSide, type: 'MARKET', quantity: qtyStr });
+        // 4. ENTRY MARKET
+        pendingSymbols.add(symbol);
+        const order = await callBinance('/fapi/v1/order', 'POST', { symbol, side, positionSide: posSide, type: 'MARKET', quantity: finalQty });
 
         if (order.orderId) {
-            status.globalCooldown = Date.now() + 30000; // Chỉ cooldown khi khớp lệnh
-            addBotLog(`🚀 ENTRY OK: ${symbol} | Qty:${qtyStr}`, "info");
-            activeOrdersTracker.set(symbol, { symbol, side: posSide, qty: qtyStr, entry: entryPrice, isBE: false, tpId: null, slId: null });
+            status.globalCooldown = Date.now() + (status.consecutiveLosses > 0 ? 30000 : botSettings.entryCooldown);
+            
+            // Lấy AvgPrice thực tế từ Order Detail (Tránh lỗi Split Fill)
+            await sleep(1000);
+            const detail = await callBinance('/fapi/v1/order', 'GET', { symbol, orderId: order.orderId });
+            const realEntry = parseFloat(detail.avgPrice || ask);
+            
+            addBotLog(`🚀 ENTRY OK: ${symbol} @ ${realEntry} (Size: ${finalQty})`, "info");
+            activeOrdersTracker.set(symbol, { symbol, side: posSide, entry: realEntry, isBE: false, tpId: null, slId: null });
 
-            // 3. ĐẶT TP/SL VỚI CƠ CHẾ RETRY
+            // 5. ĐẶT GIÁP (TP/SL) & VERIFY CHUYÊN SÂU
             setTimeout(async () => {
-                const tp = (side === 'BUY' ? entryPrice * (1 + botSettings.posTP/100) : entryPrice * (1 - botSettings.posTP/100)).toFixed(info.pricePrecision);
-                const sl = (side === 'BUY' ? entryPrice * (1 - botSettings.posSL/100) : entryPrice * (1 + botSettings.posSL/100)).toFixed(info.pricePrecision);
+                const tp = (side === 'BUY' ? realEntry * (1 + botSettings.posTP/100) : realEntry * (1 - botSettings.posTP/100)).toFixed(info.pricePrecision);
+                const sl = (side === 'BUY' ? realEntry * (1 - botSettings.posSL/100) : realEntry * (1 + botSettings.posSL/100)).toFixed(info.pricePrecision);
 
-                let tpId = null, slId = null;
+                const rTP = await callBinance('/fapi/v1/order', 'POST', { symbol, side: closeSide, positionSide: posSide, type: 'TAKE_PROFIT_MARKET', stopPrice: tp, closePosition: 'true', workingType: 'MARK_PRICE' });
+                const rSL = await callBinance('/fapi/v1/order', 'POST', { symbol, side: closeSide, positionSide: posSide, type: 'STOP_MARKET', stopPrice: sl, closePosition: 'true', workingType: 'MARK_PRICE' });
 
-                for (let attempt = 1; attempt <= botSettings.emergencyRetry; attempt++) {
-                    if (!tpId) {
-                        const r = await callBinance('/fapi/v1/order', 'POST', { symbol, side: closeSide, positionSide: posSide, type: 'TAKE_PROFIT_MARKET', stopPrice: tp, closePosition: 'true', workingType: 'MARK_PRICE', priceProtect: 'true' });
-                        if (r.orderId) tpId = r.orderId;
-                    }
-                    if (!slId) {
-                        const r = await callBinance('/fapi/v1/order', 'POST', { symbol, side: closeSide, positionSide: posSide, type: 'STOP_MARKET', stopPrice: sl, closePosition: 'true', workingType: 'MARK_PRICE', priceProtect: 'true' });
-                        if (r.orderId) slId = r.orderId;
-                    }
-                    if (tpId && slId) break;
-                    await sleep(500 * attempt);
-                }
+                await sleep(2500); // Chờ sàn đồng bộ
+                const openOrders = await callBinance('/fapi/v1/openOrders', 'GET', { symbol });
+                const myOrders = openOrders.filter(o => o.symbol === symbol);
+                const hasTP = myOrders.some(o => o.type === 'TAKE_PROFIT_MARKET');
+                const hasSL = myOrders.some(o => o.type === 'STOP_MARKET');
 
-                if (!tpId || !slId) {
-                    addBotLog(`🛡️ [EMERGENCY] ${symbol} Fail TP/SL sau ${botSettings.emergencyRetry} lần. Đóng lệnh!`, "error");
+                if (!hasTP || !hasSL) {
+                    addBotLog(`🛡️ LỖI GIÁP: ${symbol} thiếu bảo vệ. Đóng Market khẩn cấp!`, "error");
                     await callBinance('/fapi/v1/order', 'POST', { symbol, side: closeSide, positionSide: posSide, type: 'MARKET', closePosition: 'true' });
                     activeOrdersTracker.delete(symbol);
                 } else {
-                    const data = activeOrdersTracker.get(symbol);
-                    if (data) { data.tpId = tpId; data.slId = slId; }
-                    addBotLog(`🎯 Giáp OK: ${symbol}`, "success");
+                    const d = activeOrdersTracker.get(symbol);
+                    if(d) { d.tpId = rTP.orderId; d.slId = rSL.orderId; }
+                    addBotLog(`🎯 Giáp Verify OK: ${symbol}`, "success");
                 }
-            }, 800);
+            }, 1500);
 
-            // TIMEOUT 5P
+            // 6. THỜI GIAN ÔM LỆNH TỐI ĐA (Timeout Close)
             setTimeout(async () => {
-                const pos = await callBinance('/fapi/v2/positionRisk', 'GET', { symbol });
-                if (pos.some(p => p.symbol === symbol && parseFloat(p.positionAmt) !== 0)) {
-                    addBotLog(`⏱ TIMEOUT: Đóng ${symbol}`, "info");
+                if (activeOrdersTracker.has(symbol)) {
+                    addBotLog(`⏱ HẾT GIỜ (${botSettings.maxHoldTime}P): Đóng lệnh ${symbol}`, "info");
                     await callBinance('/fapi/v1/order', 'POST', { symbol, side: closeSide, positionSide: posSide, type: 'MARKET', closePosition: 'true' });
-                    await callBinance('/fapi/v1/allOpenOrders', 'DELETE', { symbol });
+                    activeOrdersTracker.delete(symbol);
                 }
-                activeOrdersTracker.delete(symbol);
-            }, 5 * 60 * 1000);
-
-        } else {
-            addBotLog(`❌ Mở lệnh fail ${symbol}: ${order.msg}`, "error");
-            clearTimeout(lockTimer); pendingSymbols.delete(symbol);
+            }, botSettings.maxHoldTime * 60 * 1000);
         }
-    } catch (e) { addBotLog(`❌ Error ${symbol}: ${e.message}`, "error"); pendingSymbols.delete(symbol); }
+    } catch (e) { addBotLog(`❌ Lỗi Mở Vị Thế: ${e.message}`, "error"); }
+    finally { setTimeout(()=>pendingSymbols.delete(symbol), 10 * 60 * 1000); }
 }
 
+// Hàm vòng lặp chính để quét tín hiệu và kiểm tra trạng thái
 async function mainLoop() {
     if (!botSettings.isRunning) return;
     try {
         const posRisk = await callBinance('/fapi/v2/positionRisk');
         const activePositions = posRisk.filter(p => parseFloat(p.positionAmt) !== 0);
-        
-        // 🛠️ BREAK-EVEN THỰC THỤ (Không phá TP)
-        for (let p of activePositions) {
-            const data = activeOrdersTracker.get(p.symbol);
-            if (data && !data.isBE) {
-                const profit = data.side === 'LONG' ? (parseFloat(p.markPrice) - data.entry)/data.entry*100 : (data.entry - parseFloat(p.markPrice))/data.entry*100;
-                if (profit >= botSettings.beTrigger) {
-                    const bePrice = data.side === 'LONG' ? (data.entry * 1.0005).toFixed(status.exchangeInfo[p.symbol].pricePrecision) : (data.entry * 0.9995).toFixed(status.exchangeInfo[p.symbol].pricePrecision);
-                    // Chỉ hủy SL cũ, giữ TP
-                    if (data.slId) await callBinance('/fapi/v1/order', 'DELETE', { symbol: p.symbol, orderId: data.slId }).catch(()=>{});
-                    const r = await callBinance('/fapi/v1/order', 'POST', { symbol: p.symbol, side: data.side === 'LONG' ? 'SELL' : 'BUY', positionSide: data.side, type: 'STOP_MARKET', stopPrice: bePrice, closePosition: 'true', workingType: 'MARK_PRICE', priceProtect: 'true' });
-                    if (r.orderId) { data.isBE = true; data.slId = r.orderId; addBotLog(`🛡️ BE: ${p.symbol} dời SL về entry`, "success"); }
-                }
-            }
-        }
 
-        // SYNC TRACKER
+        // Đồng bộ tracker và reset chuỗi thua nếu thắng
         for (let [symbol, data] of activeOrdersTracker) {
             if (!activePositions.some(p => p.symbol === symbol)) {
-                addBotLog(`✨ ${symbol} hoàn tất`, "success");
+                const trades = await callBinance('/fapi/v1/userTrades', 'GET', { symbol, limit: 5 });
+                const lastPnl = parseFloat(trades[0]?.realizedPnl || 0);
+                if (lastPnl > 0) status.consecutiveLosses = 0;
+                
+                addBotLog(`✨ ${symbol} HOÀN TẤT | PnL: ${lastPnl}$`, "success");
                 await callBinance('/fapi/v1/allOpenOrders', 'DELETE', { symbol }).catch(()=>{});
                 activeOrdersTracker.delete(symbol);
             }
@@ -191,45 +256,43 @@ async function mainLoop() {
 
         for (const coin of status.candidatesList) {
             if (activePositions.some(p => p.symbol === coin.symbol) || pendingSymbols.has(coin.symbol)) continue;
+            
+            // Kiểm tra biến động để vào lệnh
             if (coin.maxV >= botSettings.minVol) {
-                openPosition(coin.symbol, coin.c1 >= 0 ? 'BUY' : 'SELL', status.exchangeInfo[coin.symbol], coin);
+                openPosition(coin.symbol, coin.c1 >= 0 ? 'BUY' : 'SELL', status.exchangeInfo[coin.symbol]);
                 break; 
             }
         }
-    } catch (e) { console.log("Loop Error:", e.message); }
+    } catch (e) {}
 }
 
 async function init() {
     try {
-        await callBinance('/fapi/v1/positionSide/dual', 'POST', { dualSidePosition: 'true' }).catch(()=>{});
-        const info = await callBinance('/fapi/v1/exchangeInfo');
         const acc = await callBinance('/fapi/v2/account');
-        status.initialBalance = parseFloat(acc.totalWalletBalance);
+        status.initialBalance = status.dayStartBalance = parseFloat(acc.totalWalletBalance);
+        const info = await callBinance('/fapi/v1/exchangeInfo');
         info.symbols.forEach(s => {
             const lot = s.filters.find(f => f.filterType === 'LOT_SIZE');
             const notional = s.filters.find(f => f.filterType === 'MIN_NOTIONAL');
             status.exchangeInfo[s.symbol] = { quantityPrecision: s.quantityPrecision, pricePrecision: s.pricePrecision, stepSize: parseFloat(lot.stepSize), minNotional: parseFloat(notional?.notional || 5) };
         });
-        addBotLog("⚓ LUFFY v11.0 HEDGE FUND - GEAR 5 ACTIVATED!", "success");
+        addBotLog("👿 LUFFY v15.0 HEDGE FUND ELITE - Gear 5 Ready!", "success");
+
+        // RESET Tiền vốn ngày vào đúng 00:00 giờ VN
+        setInterval(() => {
+            const now = new Date();
+            if (now.getHours() === 0 && now.getMinutes() === 0) {
+                status.dayStartBalance = status.currentBalance;
+                addBotLog("📅 Daily Balance Reset!", "info");
+            }
+        }, 60000);
     } catch (e) { console.log("Init Error:", e.message); }
 }
 
-setInterval(() => {
-    http.get('http://127.0.0.1:9000/api/data', res => {
-        let d = ''; res.on('data', c => d += c);
-        res.on('end', () => {
-            try {
-                const r = JSON.parse(d);
-                status.candidatesList = (r.live || []).map(c => ({
-                    symbol: c.symbol, c1: c.c1, c5: c.c5, c15: c.c15 || c.m15 || 0,
-                    maxV: Math.max(Math.abs(c.c1), Math.abs(c.c5), Math.abs(c.c15 || c.m15 || 0))
-                })).sort((a, b) => b.maxV - a.maxV);
-            } catch (e) {}
-        });
-    }).on('error', () => {});
-}, 2000);
+init(); 
+setInterval(mainLoop, 3500); // Vòng lặp quét tín hiệu
+setInterval(riskManager, botSettings.riskLoopSpeed); // Vòng lặp bảo vệ tài khoản
 
-init(); setInterval(mainLoop, 3000);
 const APP = express(); APP.use(express.json()); APP.use(express.static(__dirname));
 APP.get('/api/status', (req, res) => res.json({ botSettings, activePositions: Array.from(activeOrdersTracker.values()), status }));
 APP.post('/api/settings', (req, res) => { botSettings = { ...botSettings, ...req.body }; res.json({ success: true }); });
