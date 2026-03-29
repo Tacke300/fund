@@ -60,13 +60,13 @@ function initWS() {
             if (pending) {
                 const diff = ((p - pending.snapPrice) / pending.snapPrice) * 100;
                 
-                // --- Cập nhật ROI & PnL âm nhất khi đang mở vị thế ---
+                // --- Cập nhật ROI âm nhất & Thời điểm âm nhất ---
                 const currentRoi = (pending.type === 'UP' ? diff : -diff) * (pending.maxLev || 20);
-                // Giả định margin tạm thời để tính Max PnL âm (sẽ cập nhật chính xác hơn ở GUI)
                 if (!pending.maxNegativeRoi || currentRoi < pending.maxNegativeRoi) {
                     pending.maxNegativeRoi = currentRoi;
+                    pending.maxNegativeTime = now; // Lưu lại thời điểm âm nhất
                 }
-                // ----------------------------------------------------
+                // -------------------------------------------------
 
                 const win = pending.type === 'UP' ? diff >= pending.tpTarget : diff <= -pending.tpTarget; 
                 const lose = pending.type === 'UP' ? diff <= -pending.slTarget : diff >= pending.slTarget; 
@@ -87,7 +87,8 @@ function initWS() {
                 historyMap.set(`${s}_${now}`, { 
                     symbol: s, startTime: now, snapPrice: p, type: (c1+c5+c15 >= 0) ? 'UP' : 'DOWN', status: 'PENDING', 
                     maxLev: symbolMaxLeverage[s] || 20, tpTarget: currentTP, slTarget: currentSL, snapVol: { c1, c5, c15 },
-                    maxNegativeRoi: 0 
+                    maxNegativeRoi: 0,
+                    maxNegativeTime: now
                 });
             }
         });
@@ -176,7 +177,7 @@ app.get('/gui', (req, res) => {
 
     <div class="px-4 mt-5 pb-32"><div class="bg-card rounded-xl p-4 shadow-lg">
         <div class="text-[11px] font-bold text-gray-custom mb-3 uppercase tracking-wider italic">Nhật ký giao dịch</div>
-        <div class="overflow-x-auto"><table class="w-full text-[9px] text-left"><thead class="text-gray-custom border-b border-zinc-800 uppercase"><tr><th>Time In-Out</th><th>Pair/Vol</th><th>Margin</th><th class="text-center">Target</th><th>Price Info</th><th class="text-center">Max Negative (PnL/ROI)</th><th>PnL Net</th><th class="text-right">Balance</th></tr></thead><tbody id="historyBody"></tbody></table></div>
+        <div class="overflow-x-auto"><table class="w-full text-[9px] text-left"><thead class="text-gray-custom border-b border-zinc-800 uppercase"><tr><th>Time In-Out</th><th>Pair/Vol</th><th>Margin</th><th class="text-center">Target</th><th>Price Info</th><th class="text-center">Max Drawdown</th><th>PnL Net</th><th class="text-right">Balance</th></tr></thead><tbody id="historyBody"></tbody></table></div>
     </div></div>
 
     <script>
@@ -229,9 +230,10 @@ app.get('/gui', (req, res) => {
                 let slP = h.type==='UP' ? h.snapPrice*(1-h.slTarget/100) : h.snapPrice*(1+h.slTarget/100);
                 let v = h.snapVol || {c1:0,c5:0,c15:0};
                 
-                // Tính PnL âm nhất dựa trên ROI âm nhất đã lưu
+                // Hiển thị Max Negative (PnL / ROI / Time)
                 let maxNegRoi = h.maxNegativeRoi || 0;
                 let maxNegPnl = (margin * maxNegRoi / 100);
+                let maxNegTimeStr = h.maxNegativeTime ? new Date(h.maxNegativeTime).toLocaleTimeString([], {hour12:false}) : '--';
 
                 return \`<tr class="border-b border-zinc-800/30 text-zinc-400 hover:bg-white/5">
                     <td class="py-2 text-[7px] font-medium">\${new Date(h.startTime).toLocaleTimeString([],{hour12:false})}<br>\${new Date(h.endTime).toLocaleTimeString([],{hour12:false})}</td>
@@ -239,7 +241,10 @@ app.get('/gui', (req, res) => {
                     <td>\${margin.toFixed(1)}</td>
                     <td class="text-center text-[7px] font-bold text-yellow-500/70">\${h.maxLev}x<br>\${fPrice(tpP)} / \${fPrice(slP)}</td>
                     <td>\${fPrice(h.snapPrice)}<br>\${fPrice(h.finalPrice)}</td>
-                    <td class="text-center font-bold down text-[9px]">\${maxNegPnl.toFixed(2)}$ / \${maxNegRoi.toFixed(1)}%</td>
+                    <td class="text-center down font-bold">
+                        <span class="text-[9px]">\${maxNegPnl.toFixed(2)}$ / \${maxNegRoi.toFixed(1)}%</span><br>
+                        <span class="text-[7px] text-zinc-500 italic">at \${maxNegTimeStr}</span>
+                    </td>
                     <td class="\${netPnl>=0?'up':'down'} font-bold text-[10px]">\${netPnl >= 0 ? '+' : ''}\${netPnl.toFixed(2)}</td>
                     <td class="text-right text-white font-medium">\${runningBal.toFixed(1)}</td></tr>\`;
             }).reverse().join('');
