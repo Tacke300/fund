@@ -2,7 +2,7 @@ const PORT = 9000;
 const HISTORY_FILE = './history_db.json';
 const LEVERAGE_FILE = './leverage_cache.json';
 const COOLDOWN_MINUTES = 15; 
-const MAX_HOLD_MINUTES = 15; // <--- SỬA SỐ PHÚT CHỐT LỆNH TẠI ĐÂY
+const MAX_HOLD_MINUTES = 1440; // <--- SỬA SỐ PHÚT CHỐT LỆNH TẠI ĐÂY
 
 import WebSocket from 'ws';
 import express from 'express';
