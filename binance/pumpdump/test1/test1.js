@@ -2,7 +2,7 @@ const PORT = 9055;
 const HISTORY_FILE = './history_db.json';
 const LEVERAGE_FILE = './leverage_cache.json';
 const COOLDOWN_MINUTES = 15; 
-const MAX_HOLD_MINUTES = 1; // <--- SỬA SỐ PHÚT CHỐT LỆNH TẠI ĐÂY
+const MAX_HOLD_MINUTES = 1440; // <--- SỬA SỐ PHÚT CHỐT LỆNH TẠI ĐÂY
 
 import WebSocket from 'ws';
 import express from 'express';
@@ -59,17 +59,24 @@ function initWS() {
             const pending = Array.from(historyMap.values()).find(h => h.symbol === s && h.status === 'PENDING');
             if (pending) {
                 const diff = ((p - pending.snapPrice) / pending.snapPrice) * 100;
+                
+                // --- Cập nhật ROI & PnL âm nhất khi đang mở vị thế ---
+                const currentRoi = (pending.type === 'UP' ? diff : -diff) * (pending.maxLev || 20);
+                // Giả định margin tạm thời để tính Max PnL âm (sẽ cập nhật chính xác hơn ở GUI)
+                if (!pending.maxNegativeRoi || currentRoi < pending.maxNegativeRoi) {
+                    pending.maxNegativeRoi = currentRoi;
+                }
+                // ----------------------------------------------------
+
                 const win = pending.type === 'UP' ? diff >= pending.tpTarget : diff <= -pending.tpTarget; 
                 const lose = pending.type === 'UP' ? diff <= -pending.slTarget : diff >= pending.slTarget; 
                 
-                // KIỂM TRA THỜI GIAN GIỮ LỆNH
                 const isTimeout = (now - pending.startTime) >= (MAX_HOLD_MINUTES * 60000);
 
                 if (win || lose || isTimeout) { 
                     pending.status = win ? 'WIN' : (lose ? 'LOSE' : 'TIMEOUT'); 
                     pending.finalPrice = p; 
                     pending.endTime = now;
-                    // Tính PnL dựa trên giá đóng thực tế (quan trọng khi bị timeout)
                     pending.pnlPercent = (pending.type === 'UP' ? diff : -diff);
                     
                     lastTradeClosed[s] = now; 
@@ -79,7 +86,8 @@ function initWS() {
             if (Math.max(Math.abs(c1), Math.abs(c5), Math.abs(c15)) >= currentMinVol && !pending && !(lastTradeClosed[s] && (now - lastTradeClosed[s] < COOLDOWN_MINUTES * 60000))) {
                 historyMap.set(`${s}_${now}`, { 
                     symbol: s, startTime: now, snapPrice: p, type: (c1+c5+c15 >= 0) ? 'UP' : 'DOWN', status: 'PENDING', 
-                    maxLev: symbolMaxLeverage[s] || 20, tpTarget: currentTP, slTarget: currentSL, snapVol: { c1, c5, c15 }
+                    maxLev: symbolMaxLeverage[s] || 20, tpTarget: currentTP, slTarget: currentSL, snapVol: { c1, c5, c15 },
+                    maxNegativeRoi: 0 
                 });
             }
         });
@@ -168,7 +176,7 @@ app.get('/gui', (req, res) => {
 
     <div class="px-4 mt-5 pb-32"><div class="bg-card rounded-xl p-4 shadow-lg">
         <div class="text-[11px] font-bold text-gray-custom mb-3 uppercase tracking-wider italic">Nhật ký giao dịch</div>
-        <div class="overflow-x-auto"><table class="w-full text-[9px] text-left"><thead class="text-gray-custom border-b border-zinc-800 uppercase"><tr><th>Time In-Out</th><th>Pair/Vol</th><th>Margin</th><th class="text-center">Target</th><th>Price Info</th><th>PnL Net</th><th class="text-right">Balance</th></tr></thead><tbody id="historyBody"></tbody></table></div>
+        <div class="overflow-x-auto"><table class="w-full text-[9px] text-left"><thead class="text-gray-custom border-b border-zinc-800 uppercase"><tr><th>Time In-Out</th><th>Pair/Vol</th><th>Margin</th><th class="text-center">Target</th><th>Price Info</th><th class="text-center">Max Negative (PnL/ROI)</th><th>PnL Net</th><th class="text-right">Balance</th></tr></thead><tbody id="historyBody"></tbody></table></div>
     </div></div>
 
     <script>
@@ -220,12 +228,18 @@ app.get('/gui', (req, res) => {
                 let tpP = h.type==='UP' ? h.snapPrice*(1+h.tpTarget/100) : h.snapPrice*(1-h.tpTarget/100);
                 let slP = h.type==='UP' ? h.snapPrice*(1-h.slTarget/100) : h.snapPrice*(1+h.slTarget/100);
                 let v = h.snapVol || {c1:0,c5:0,c15:0};
+                
+                // Tính PnL âm nhất dựa trên ROI âm nhất đã lưu
+                let maxNegRoi = h.maxNegativeRoi || 0;
+                let maxNegPnl = (margin * maxNegRoi / 100);
+
                 return \`<tr class="border-b border-zinc-800/30 text-zinc-400 hover:bg-white/5">
                     <td class="py-2 text-[7px] font-medium">\${new Date(h.startTime).toLocaleTimeString([],{hour12:false})}<br>\${new Date(h.endTime).toLocaleTimeString([],{hour12:false})}</td>
                     <td><b class="text-white">\${h.symbol}</b><br><span class="text-[7px] text-zinc-500">\${v.c1} / \${v.c5} / \${v.c15}</span></td>
                     <td>\${margin.toFixed(1)}</td>
                     <td class="text-center text-[7px] font-bold text-yellow-500/70">\${h.maxLev}x<br>\${fPrice(tpP)} / \${fPrice(slP)}</td>
                     <td>\${fPrice(h.snapPrice)}<br>\${fPrice(h.finalPrice)}</td>
+                    <td class="text-center font-bold down text-[9px]">\${maxNegPnl.toFixed(2)}$ / \${maxNegRoi.toFixed(1)}%</td>
                     <td class="\${netPnl>=0?'up':'down'} font-bold text-[10px]">\${netPnl >= 0 ? '+' : ''}\${netPnl.toFixed(2)}</td>
                     <td class="text-right text-white font-medium">\${runningBal.toFixed(1)}</td></tr>\`;
             }).reverse().join('');
