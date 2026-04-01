@@ -7,8 +7,6 @@ const MAX_HOLD_MINUTES = 1440;
 import WebSocket from 'ws';
 import express from 'express';
 import fs from 'fs';
-import https from 'https';
-import crypto from 'crypto';
 import { API_KEY, SECRET_KEY } from './config.js';
 
 const app = express();
@@ -18,6 +16,21 @@ let symbolMaxLeverage = {};
 let lastTradeClosed = {}; 
 
 let currentTP = 0.5, currentSL = 100.0, currentMinVol = 6.5;
+
+// --- LOGIC HÀNG CHỜ ƯU TIÊN & FAKE DELAY ---
+let actionQueue = [];
+async function processQueue() {
+    if (actionQueue.length === 0) return;
+    
+    // Ưu tiên: DCA (1) > NEW (2)
+    actionQueue.sort((a, b) => a.priority - b.priority);
+    const task = actionQueue.shift();
+    task.action();
+    
+    // Delay giữa các hành động để chống rate limit và fake người dùng
+    setTimeout(processQueue, 350); 
+}
+setInterval(processQueue, 50);
 
 function fPrice(p) {
     if (!p || p === 0) return "0.0000";
@@ -38,7 +51,7 @@ if (fs.existsSync(HISTORY_FILE)) {
 
 function calculateChange(pArr, min) {
     if (!pArr || pArr.length < 2) return 0;
-    const now = pArr[pArr.length - 1].t;
+    const now = Date.now();
     let start = pArr.find(i => i.t >= (now - min * 60000)) || pArr[0]; 
     return parseFloat((((pArr[pArr.length - 1].p - start.p) / start.p) * 100).toFixed(2));
 }
@@ -62,34 +75,50 @@ function initWS() {
                 const currentRoi = (pending.type === 'UP' ? diffAvg : -diffAvg) * (pending.maxLev || 20);
                 if (!pending.maxNegativeRoi || currentRoi < pending.maxNegativeRoi) {
                     pending.maxNegativeRoi = currentRoi;
-                    pending.maxNegativeTime = now;
                 }
-                const lastPrice = pending.dcaHistory[pending.dcaHistory.length - 1].p;
-                const diffFromLast = ((p - lastPrice) / lastPrice) * 100;
-                const triggerDCA = pending.type === 'UP' ? diffFromLast <= -pending.slTarget : diffFromLast >= pending.slTarget;
-                if (triggerDCA) {
-                    const newCount = pending.dcaCount + 1;
-                    pending.avgPrice = ((pending.avgPrice * (pending.dcaCount + 1)) + p) / (newCount + 1);
-                    pending.dcaCount = newCount;
-                    pending.dcaHistory.push({ t: now, p: p, avg: pending.avgPrice });
-                }
+
+                // 1. CHỐT LỜI (TP) - BỎ RATE LIMIT ĐỂ KHỚP GIÁ TỐT NHẤT
                 const win = pending.type === 'UP' ? diffAvg >= pending.tpTarget : diffAvg <= -pending.tpTarget; 
                 const isTimeout = (now - pending.startTime) >= (MAX_HOLD_MINUTES * 60000);
-                if (win || isTimeout) { 
+                if (win || isTimeout) {
                     pending.status = win ? 'WIN' : 'TIMEOUT'; 
-                    pending.finalPrice = p; 
-                    pending.endTime = now;
+                    pending.finalPrice = p; pending.endTime = now;
                     pending.pnlPercent = (pending.type === 'UP' ? diffAvg : -diffAvg);
                     lastTradeClosed[s] = now; 
                     fs.writeFileSync(HISTORY_FILE, JSON.stringify(Array.from(historyMap.values()))); 
+                    return;
                 }
-            }
-            if (Math.max(Math.abs(c1), Math.abs(c5), Math.abs(c15)) >= currentMinVol && !pending && !(lastTradeClosed[s] && (now - lastTradeClosed[s] < COOLDOWN_MINUTES * 60000))) {
-                historyMap.set(`${s}_${now}`, { 
-                    symbol: s, startTime: now, snapPrice: p, avgPrice: p, type: (c1+c5+c15 >= 0) ? 'UP' : 'DOWN', status: 'PENDING', 
-                    maxLev: symbolMaxLeverage[s] || 20, tpTarget: currentTP, slTarget: currentSL, snapVol: { c1, c5, c15 },
-                    maxNegativeRoi: 0, maxNegativeTime: now, dcaCount: 0, dcaHistory: [{ t: now, p: p, avg: p }]
-                });
+
+                // 2. DCA (ƯU TIÊN 1 TRONG HÀNG CHỜ)
+                const lastPrice = pending.dcaHistory[pending.dcaHistory.length - 1].p;
+                const diffFromLast = ((p - lastPrice) / lastPrice) * 100;
+                const triggerDCA = pending.type === 'UP' ? diffFromLast <= -pending.slTarget : diffFromLast >= pending.slTarget;
+                
+                if (triggerDCA && !actionQueue.find(q => q.id === s)) {
+                    actionQueue.push({ id: s, priority: 1, action: () => {
+                        const newCount = pending.dcaCount + 1;
+                        const newAvg = ((pending.avgPrice * (pending.dcaCount + 1)) + p) / (newCount + 1);
+                        // Thêm lịch sử DCA
+                        pending.dcaHistory.push({ t: Date.now(), p: p, avg: newAvg });
+                        
+                        // Fake độ trễ tính toán lại giá TP
+                        setTimeout(() => {
+                            pending.avgPrice = newAvg;
+                            pending.dcaCount = newCount;
+                        }, 200); 
+                    }});
+                }
+            } else if (Math.max(Math.abs(c1), Math.abs(c5), Math.abs(c15)) >= currentMinVol && !(lastTradeClosed[s] && (now - lastTradeClosed[s] < COOLDOWN_MINUTES * 60000))) {
+                // 3. MỞ LỆNH MỚI (ƯU TIÊN 2)
+                if (!actionQueue.find(q => q.id === s)) {
+                    actionQueue.push({ id: s, priority: 2, action: () => {
+                        historyMap.set(`${s}_${now}`, { 
+                            symbol: s, startTime: Date.now(), snapPrice: p, avgPrice: p, type: (c1+c5+c15 >= 0) ? 'UP' : 'DOWN', status: 'PENDING', 
+                            maxLev: symbolMaxLeverage[s] || 20, tpTarget: currentTP, slTarget: currentSL, snapVol: { c1, c5, c15 },
+                            maxNegativeRoi: 0, dcaCount: 0, dcaHistory: [{ t: Date.now(), p: p, avg: p }]
+                        });
+                    }});
+                }
             }
         });
     });
@@ -125,7 +154,6 @@ app.get('/gui', (req, res) => {
         .bg-card { background: #1e2329; border: 1px solid #30363d; } .text-gray-custom { color: #848e9c; }
         input { border: 1px solid #30363d !important; }
         .modal { display:none; position:fixed; z-index:1000; left:0; top:0; width:100%; height:100%; background:rgba(0,0,0,0.8); align-items:center; justify-content:center; }
-        /* Modal DCA phải đè lên Modal History */
         #detailModal { z-index: 2000 !important; }
     </style></head><body>
     
@@ -176,10 +204,11 @@ app.get('/gui', (req, res) => {
     <div class="px-4 mt-5">
         <div class="bg-card rounded-xl p-4">
             <div class="flex justify-between items-center mb-2">
-                <div class="text-[11px] font-bold text-yellow-500 uppercase tracking-widest italic">Biến động tổng tài sản</div>
+                <div class="text-[11px] font-bold text-yellow-500 uppercase tracking-widest italic">Biến động tài sản</div>
                 <div class="text-[10px] space-x-2">
-                    <span class="up">Lãi: <b id="sumW">0</b></span>
-                    <span class="down">Lỗ: <b id="sumL">0</b></span>
+                    <span class="up">Win: <b id="sumW">0</b></span>
+                    <span class="text-yellow-500">DCA: <b id="sumDCA">0</b></span>
+                    <span class="text-gray-custom">Tạm tính: <b id="sumLive">0</b></span>
                     <span class="text-white">Net: <b id="sumNet">0</b></span>
                 </div>
             </div>
@@ -271,10 +300,25 @@ app.get('/gui', (req, res) => {
     function initChart() {
         const ctx = document.getElementById('balanceChart').getContext('2d');
         myChart = new Chart(ctx, {
-            type: 'line', data: { labels: [], datasets: [{ label: 'Balance', data: [], borderColor: '#fcd535', borderWidth: 2, fill: true, backgroundColor: 'rgba(252, 213, 53, 0.05)', tension: 0.3, pointRadius: 0 }] },
+            type: 'line', data: { labels: [], datasets: [{ label: 'Balance', data: [], extra: [], borderColor: '#fcd535', borderWidth: 2, fill: true, backgroundColor: 'rgba(252, 213, 53, 0.05)', tension: 0.3, pointRadius: 0 }] },
             options: { 
                 responsive: true, maintainAspectRatio: false, 
-                plugins: { legend: { display: false }, tooltip: { mode: 'index', intersect: false } },
+                plugins: { 
+                    legend: { display: false }, 
+                    tooltip: { 
+                        mode: 'index', intersect: false,
+                        callbacks: {
+                            label: function(ctx) {
+                                const data = ctx.dataset.extra[ctx.dataIndex];
+                                return [
+                                    \`Balance: \${ctx.raw.toFixed(2)} USDT\`,
+                                    \`Tổng Win chốt: \${data.win.toFixed(2)} USDT\`,
+                                    \`PnL Tạm tính: \${data.live.toFixed(2)} USDT\`
+                                ];
+                            }
+                        }
+                    } 
+                },
                 scales: { x: { display: false }, y: { grid: { color: '#30363d' }, ticks: { color: '#848e9c', font: { size: 9 } } } }
             }
         });
@@ -285,20 +329,21 @@ app.get('/gui', (req, res) => {
             const res = await fetch('/api/data'); const d = await res.json(); lastRawData = d;
             let mVal = document.getElementById('marginInp').value, mNum = parseFloat(mVal);
 
-            let runningBal = initialBal, winSum = 0, loseSum = 0, coinStats = {};
-            let chartLabels = ['Start'], chartData = [initialBal];
+            let runningBal = initialBal, winSum = 0, totalDCA = 0, coinStats = {};
+            let chartLabels = ['Start'], chartData = [initialBal], chartExtra = [{win: 0, live: 0}];
 
-            // Xử lý Lịch sử & Số dư chốt
             let histHTML = [...d.history].reverse().map((h, index) => {
                 let marginBase = mVal.includes('%') ? (runningBal * mNum / 100) : mNum;
                 let totalMargin = marginBase * (h.dcaCount + 1);
                 let netPnl = (totalMargin * (h.maxLev || 20) * (h.pnlPercent/100)) - (totalMargin * (h.maxLev || 20) * 0.001);
                 runningBal += netPnl;
+                totalDCA += h.dcaCount;
                 
                 chartLabels.push(new Date(h.endTime).toLocaleTimeString());
                 chartData.push(runningBal);
+                chartExtra.push({win: runningBal - initialBal, live: 0});
 
-                if(netPnl >= 0) winSum += netPnl; else loseSum += netPnl;
+                if(netPnl >= 0) winSum += netPnl;
                 if(!coinStats[h.symbol]) coinStats[h.symbol] = { lev: h.maxLev, count: 0, dcas: 0, pnlW: 0, pnlL: 0 };
                 coinStats[h.symbol].count++; coinStats[h.symbol].dcas += h.dcaCount;
                 if(netPnl >= 0) coinStats[h.symbol].pnlW += netPnl; else coinStats[h.symbol].pnlL += netPnl;
@@ -306,7 +351,6 @@ app.get('/gui', (req, res) => {
                 return \`<tr class="border-b border-zinc-800/30 text-zinc-400"><td>\${d.history.length - index}</td><td class="py-2 text-[7px]">\${new Date(h.startTime).toLocaleTimeString([],{hour12:false})}<br>\${new Date(h.endTime).toLocaleTimeString([],{hour12:false})}</td><td><b class="text-white cursor-pointer underline decoration-zinc-600" onclick="showDetail('\${h.symbol}', \${h.startTime})">\${h.symbol}</b><br><span class="text-[7px] text-zinc-500">\${h.snapVol.c1}/\${h.snapVol.c5}/\${h.snapVol.c15}</span></td><td class="text-yellow-500 font-bold">\${h.dcaCount}</td><td>\${totalMargin.toFixed(1)}</td><td class="text-center text-[7px] font-bold text-yellow-500/70">\${h.maxLev}x<br>T: \${fPrice(h.type==='UP'?h.avgPrice*(1+h.tpTarget/100):h.avgPrice*(1-h.tpTarget/100))}</td><td>\${fPrice(h.snapPrice)}<br><b class="text-white">\${fPrice(h.finalPrice)}</b></td><td class="text-yellow-500 font-bold">\${fPrice(h.avgPrice)}</td><td class="text-center down font-bold">\${h.maxNegativeRoi.toFixed(1)}%</td><td class="\${netPnl>=0?'up':'down'} font-bold">\${netPnl.toFixed(2)}</td><td class="text-right text-white font-medium">\${runningBal.toFixed(1)}</td></tr>\`;
             }).reverse().join('');
             
-            // Xử lý Vị thế & PnL Tạm tính
             let unPnl = 0, marginUsed = 0;
             let pendingHTML = (d.pending || []).map((h, idx) => {
                 let lp = d.allPrices[h.symbol] || h.avgPrice;
@@ -317,24 +361,26 @@ app.get('/gui', (req, res) => {
                 return \`<tr class="bg-white/5 border-b border-zinc-800"><td>\${idx+1}</td><td class="text-[9px]">\${new Date(h.startTime).toLocaleTimeString([],{hour12:false})}</td><td class="text-white font-bold cursor-pointer underline decoration-zinc-600" onclick="showDetail('\${h.symbol}', \${h.startTime})">\${h.symbol} <span class="text-[8px] px-1 bg-zinc-700 rounded">\${h.type}</span></td><td class="text-yellow-500 font-bold">\${h.dcaCount}</td><td>\${totalMargin.toFixed(1)}</td><td class="text-center text-[7px] text-yellow-500/70">\${h.maxLev}x<br>T: \${fPrice(h.type==='UP'?h.avgPrice*(1+h.tpTarget/100):h.avgPrice*(1-h.tpTarget/100))}</td><td>\${fPrice(h.snapPrice)}<br><b class="text-green-400">\${fPrice(lp)}</b></td><td class="text-yellow-500 font-bold">\${fPrice(h.avgPrice)}</td><td class="text-right font-bold \${pnl>=0?'up':'down'} text-[11px]">\${pnl.toFixed(2)}<br>\${roi.toFixed(1)}%</td></tr>\`;
             }).join('');
 
-            // Cập nhật biểu đồ với PnL tạm tính (Số dư thực tế chạy theo thị trường)
             if(myChart) {
                 let chartFinalData = [...chartData];
+                let chartFinalExtra = [...chartExtra];
                 if(unPnl !== 0) {
                     chartLabels.push("LIVE");
                     chartFinalData.push(runningBal + unPnl);
+                    chartFinalExtra.push({win: runningBal - initialBal, live: unPnl});
                 }
                 myChart.data.labels = chartLabels;
                 myChart.data.datasets[0].data = chartFinalData;
+                myChart.data.datasets[0].extra = chartFinalExtra;
                 myChart.update('none');
             }
 
             document.getElementById('sumW').innerText = winSum.toFixed(2);
-            document.getElementById('sumL').innerText = loseSum.toFixed(2);
-            document.getElementById('sumNet').innerText = (winSum + loseSum).toFixed(2);
+            document.getElementById('sumDCA').innerText = totalDCA;
+            document.getElementById('sumLive').innerText = unPnl.toFixed(2);
+            document.getElementById('sumNet').innerText = (runningBal - initialBal + unPnl).toFixed(2);
             document.getElementById('historyBody').innerHTML = histHTML;
             document.getElementById('pendingBody').innerHTML = pendingHTML;
-            
             document.getElementById('statsBody').innerHTML = Object.entries(coinStats).map(([sym, s], i) => \`
                 <tr class="border-b border-zinc-800/50"><td>\${i+1}</td><td class="text-white font-bold cursor-pointer underline hover:text-yellow-500" onclick="showCoinHistory('\${sym}')">\${sym}</td><td>\${s.lev}x</td><td>\${s.count}</td><td class="text-yellow-500">\${s.dcas}</td><td class="up">\${s.pnlW.toFixed(2)}</td><td class="down">\${s.pnlL.toFixed(2)}</td><td class="text-right font-bold \${(s.pnlW+s.pnlL)>=0?'up':'down'}">\${(s.pnlW+s.pnlL).toFixed(2)}</td></tr>\`).join('');
 
