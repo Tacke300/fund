@@ -21,13 +21,9 @@ let currentTP = 0.5, currentSL = 100.0, currentMinVol = 6.5;
 let actionQueue = [];
 async function processQueue() {
     if (actionQueue.length === 0) return;
-    
-    // Ưu tiên: DCA (1) > NEW (2)
     actionQueue.sort((a, b) => a.priority - b.priority);
     const task = actionQueue.shift();
     task.action();
-    
-    // Delay giữa các hành động để chống rate limit và fake người dùng
     setTimeout(processQueue, 350); 
 }
 setInterval(processQueue, 50);
@@ -77,7 +73,6 @@ function initWS() {
                     pending.maxNegativeRoi = currentRoi;
                 }
 
-                // 1. CHỐT LỜI (TP) - BỎ RATE LIMIT ĐỂ KHỚP GIÁ TỐT NHẤT
                 const win = pending.type === 'UP' ? diffAvg >= pending.tpTarget : diffAvg <= -pending.tpTarget; 
                 const isTimeout = (now - pending.startTime) >= (MAX_HOLD_MINUTES * 60000);
                 if (win || isTimeout) {
@@ -89,7 +84,6 @@ function initWS() {
                     return;
                 }
 
-                // 2. DCA (ƯU TIÊN 1 TRONG HÀNG CHỜ)
                 const lastPrice = pending.dcaHistory[pending.dcaHistory.length - 1].p;
                 const diffFromLast = ((p - lastPrice) / lastPrice) * 100;
                 const triggerDCA = pending.type === 'UP' ? diffFromLast <= -pending.slTarget : diffFromLast >= pending.slTarget;
@@ -98,10 +92,7 @@ function initWS() {
                     actionQueue.push({ id: s, priority: 1, action: () => {
                         const newCount = pending.dcaCount + 1;
                         const newAvg = ((pending.avgPrice * (pending.dcaCount + 1)) + p) / (newCount + 1);
-                        // Thêm lịch sử DCA
                         pending.dcaHistory.push({ t: Date.now(), p: p, avg: newAvg });
-                        
-                        // Fake độ trễ tính toán lại giá TP
                         setTimeout(() => {
                             pending.avgPrice = newAvg;
                             pending.dcaCount = newCount;
@@ -109,7 +100,6 @@ function initWS() {
                     }});
                 }
             } else if (Math.max(Math.abs(c1), Math.abs(c5), Math.abs(c15)) >= currentMinVol && !(lastTradeClosed[s] && (now - lastTradeClosed[s] < COOLDOWN_MINUTES * 60000))) {
-                // 3. MỞ LỆNH MỚI (ƯU TIÊN 2)
                 if (!actionQueue.find(q => q.id === s)) {
                     actionQueue.push({ id: s, priority: 2, action: () => {
                         historyMap.set(`${s}_${now}`, { 
@@ -195,23 +185,25 @@ app.get('/gui', (req, res) => {
             <div class="text-right"><div class="text-gray-custom text-[11px] uppercase font-bold mb-1">PnL Tạm tính</div><div id="unPnl" class="text-xl font-bold">0.00</div></div>
         </div>
 
-        <div class="grid grid-cols-2 gap-4 text-[11px] border-t border-zinc-800 pt-3 mb-3 uppercase font-bold">
-            <div><span class="text-gray-custom">Ký quỹ: </span><span id="walletBal" class="text-white">0.00</span></div>
-            <div class="text-right text-yellow-500/90 italic">TP: <span id="tpShow" class="text-white">0</span>% | DCA: <span id="slShow" class="text-white">0</span>% | VOL: <span id="volShow" class="text-white">0</span>%</div>
+        <div class="grid grid-cols-3 gap-2 mt-4">
+            <div class="bg-card p-2 rounded border border-zinc-800 text-center">
+                <div class="text-[9px] text-gray-custom uppercase font-bold">Lệnh Win</div>
+                <div id="sumWinCount" class="text-lg font-bold text-green-400">0</div>
+            </div>
+            <div class="bg-card p-2 rounded border border-zinc-800 text-center">
+                <div class="text-[9px] text-gray-custom uppercase font-bold">PnL Win ($)</div>
+                <div id="sumWinPnl" class="text-lg font-bold text-white">0.00</div>
+            </div>
+            <div class="bg-card p-2 rounded border border-zinc-800 text-center">
+                <div class="text-[9px] text-gray-custom uppercase font-bold">Tổng DCA</div>
+                <div id="sumDCACount" class="text-lg font-bold text-yellow-500">0</div>
+            </div>
         </div>
     </div>
 
     <div class="px-4 mt-5">
         <div class="bg-card rounded-xl p-4">
-            <div class="flex justify-between items-center mb-2">
-                <div class="text-[11px] font-bold text-yellow-500 uppercase tracking-widest italic">Biến động tài sản</div>
-                <div class="text-[10px] space-x-2">
-                    <span class="up">Win: <b id="sumW">0</b></span>
-                    <span class="text-yellow-500">DCA: <b id="sumDCA">0</b></span>
-                    <span class="text-gray-custom">Tạm tính: <b id="sumLive">0</b></span>
-                    <span class="text-white">Net: <b id="sumNet">0</b></span>
-                </div>
-            </div>
+            <div class="text-[11px] font-bold text-yellow-500 uppercase tracking-widest italic mb-2">Biến động tài sản</div>
             <div style="height: 220px;"><canvas id="balanceChart"></canvas></div>
         </div>
     </div>
@@ -228,7 +220,7 @@ app.get('/gui', (req, res) => {
 
     <div class="px-4 mt-5 pb-32"><div class="bg-card rounded-xl p-4 shadow-lg border border-yellow-500/20">
         <div class="text-[11px] font-bold text-yellow-500 mb-3 uppercase italic">Thống kê hiệu suất theo Coin</div>
-        <div class="overflow-x-auto"><table class="w-full text-[10px] text-left"><thead class="text-gray-custom border-b border-zinc-800 uppercase"><tr><th>STT</th><th>Tên Coin</th><th>Lev</th><th>Lệnh</th><th>DCA</th><th>PnL Lãi</th><th>PnL Lỗ</th><th class="text-right">Tổng PnL</th></tr></thead><tbody id="statsBody"></tbody></table></div>
+        <div class="overflow-x-auto"><table class="w-full text-[10px] text-left"><thead class="text-gray-custom border-b border-zinc-800 uppercase"><tr><th>STT</th><th>Tên Coin</th><th>Lev</th><th>Lệnh</th><th>DCA</th><th>PnL Lãi</th><th>PnL Tạm tính</th><th class="text-right">Tổng PnL</th></tr></thead><tbody id="statsBody"></tbody></table></div>
     </div></div>
 
     <script>
@@ -288,7 +280,6 @@ app.get('/gui', (req, res) => {
     function syncConfig() {
         const tp = document.getElementById('tpInp').value, sl = document.getElementById('slInp').value, vol = document.getElementById('volInp').value;
         fetch(\`/api/config?tp=\${tp}&sl=\${sl}&vol=\${vol}\`);
-        document.getElementById('tpShow').innerText = tp; document.getElementById('slShow').innerText = sl; document.getElementById('volShow').innerText = vol;
     }
     function start() {
         running = true; initialBal = parseFloat(document.getElementById('balanceInp').value);
@@ -300,26 +291,43 @@ app.get('/gui', (req, res) => {
     function initChart() {
         const ctx = document.getElementById('balanceChart').getContext('2d');
         myChart = new Chart(ctx, {
-            type: 'line', data: { labels: [], datasets: [{ label: 'Balance', data: [], extra: [], borderColor: '#fcd535', borderWidth: 2, fill: true, backgroundColor: 'rgba(252, 213, 53, 0.05)', tension: 0.3, pointRadius: 0 }] },
+            type: 'line', 
+            data: { 
+                labels: [], 
+                datasets: [{ 
+                    label: 'Balance', 
+                    data: [], 
+                    borderWidth: 2, 
+                    fill: true, 
+                    tension: 0.3, 
+                    pointRadius: 0,
+                    // Thay đổi màu sắc dựa trên vốn ban đầu
+                    borderColor: function(context) {
+                        const val = context.raw;
+                        return val >= initialBal ? '#0ecb81' : '#f6465d';
+                    },
+                    backgroundColor: function(context) {
+                        const val = context.raw;
+                        return val >= initialBal ? 'rgba(14, 203, 129, 0.05)' : 'rgba(246, 70, 93, 0.05)';
+                    },
+                    segment: {
+                        borderColor: ctx => ctx.p1.raw >= initialBal ? '#0ecb81' : '#f6465d'
+                    }
+                }] 
+            },
             options: { 
                 responsive: true, maintainAspectRatio: false, 
                 plugins: { 
                     legend: { display: false }, 
-                    tooltip: { 
-                        mode: 'index', intersect: false,
-                        callbacks: {
-                            label: function(ctx) {
-                                const data = ctx.dataset.extra[ctx.dataIndex];
-                                return [
-                                    \`Balance: \${ctx.raw.toFixed(2)} USDT\`,
-                                    \`Tổng Win chốt: \${data.win.toFixed(2)} USDT\`,
-                                    \`PnL Tạm tính: \${data.live.toFixed(2)} USDT\`
-                                ];
-                            }
-                        }
-                    } 
+                    tooltip: { mode: 'index', intersect: false } 
                 },
-                scales: { x: { display: false }, y: { grid: { color: '#30363d' }, ticks: { color: '#848e9c', font: { size: 9 } } } }
+                scales: { 
+                    x: { display: false }, 
+                    y: { 
+                        grid: { color: '#30363d' }, 
+                        ticks: { color: '#848e9c', font: { size: 9 } } 
+                    } 
+                }
             }
         });
     }
@@ -329,8 +337,8 @@ app.get('/gui', (req, res) => {
             const res = await fetch('/api/data'); const d = await res.json(); lastRawData = d;
             let mVal = document.getElementById('marginInp').value, mNum = parseFloat(mVal);
 
-            let runningBal = initialBal, winSum = 0, totalDCA = 0, coinStats = {};
-            let chartLabels = ['Start'], chartData = [initialBal], chartExtra = [{win: 0, live: 0}];
+            let runningBal = initialBal, winSum = 0, totalDCA = 0, winCount = 0, coinStats = {};
+            let chartLabels = ['Start'], chartData = [initialBal];
 
             let histHTML = [...d.history].reverse().map((h, index) => {
                 let marginBase = mVal.includes('%') ? (runningBal * mNum / 100) : mNum;
@@ -338,17 +346,16 @@ app.get('/gui', (req, res) => {
                 let netPnl = (totalMargin * (h.maxLev || 20) * (h.pnlPercent/100)) - (totalMargin * (h.maxLev || 20) * 0.001);
                 runningBal += netPnl;
                 totalDCA += h.dcaCount;
+                if(netPnl >= 0) { winSum += netPnl; winCount++; }
                 
                 chartLabels.push(new Date(h.endTime).toLocaleTimeString());
                 chartData.push(runningBal);
-                chartExtra.push({win: runningBal - initialBal, live: 0});
 
-                if(netPnl >= 0) winSum += netPnl;
-                if(!coinStats[h.symbol]) coinStats[h.symbol] = { lev: h.maxLev, count: 0, dcas: 0, pnlW: 0, pnlL: 0 };
+                if(!coinStats[h.symbol]) coinStats[h.symbol] = { lev: h.maxLev, count: 0, dcas: 0, pnlW: 0, livePnl: 0 };
                 coinStats[h.symbol].count++; coinStats[h.symbol].dcas += h.dcaCount;
-                if(netPnl >= 0) coinStats[h.symbol].pnlW += netPnl; else coinStats[h.symbol].pnlL += netPnl;
+                if(netPnl >= 0) coinStats[h.symbol].pnlW += netPnl;
 
-                return \`<tr class="border-b border-zinc-800/30 text-zinc-400"><td>\${d.history.length - index}</td><td class="py-2 text-[7px]">\${new Date(h.startTime).toLocaleTimeString([],{hour12:false})}<br>\${new Date(h.endTime).toLocaleTimeString([],{hour12:false})}</td><td><b class="text-white cursor-pointer underline decoration-zinc-600" onclick="showDetail('\${h.symbol}', \${h.startTime})">\${h.symbol}</b><br><span class="text-[7px] text-zinc-500">\${h.snapVol.c1}/\${h.snapVol.c5}/\${h.snapVol.c15}</span></td><td class="text-yellow-500 font-bold">\${h.dcaCount}</td><td>\${totalMargin.toFixed(1)}</td><td class="text-center text-[7px] font-bold text-yellow-500/70">\${h.maxLev}x<br>T: \${fPrice(h.type==='UP'?h.avgPrice*(1+h.tpTarget/100):h.avgPrice*(1-h.tpTarget/100))}</td><td>\${fPrice(h.snapPrice)}<br><b class="text-white">\${fPrice(h.finalPrice)}</b></td><td class="text-yellow-500 font-bold">\${fPrice(h.avgPrice)}</td><td class="text-center down font-bold">\${h.maxNegativeRoi.toFixed(1)}%</td><td class="\${netPnl>=0?'up':'down'} font-bold">\${netPnl.toFixed(2)}</td><td class="text-right text-white font-medium">\${runningBal.toFixed(1)}</td></tr>\`;
+                return \`<tr class="border-b border-zinc-800/30 text-zinc-400"><td>\${d.history.length - index}</td><td class="py-2 text-[7px]">\${new Date(h.startTime).toLocaleTimeString([],{hour12:false})}<br>\${new Date(h.endTime).toLocaleTimeString([],{hour12:false})}</td><td><b class="text-white cursor-pointer underline decoration-zinc-600" onclick="showDetail('\${h.symbol}', \${h.startTime})">\${h.symbol}</b></td><td class="text-yellow-500 font-bold">\${h.dcaCount}</td><td>\${totalMargin.toFixed(1)}</td><td class="text-center text-[7px] font-bold text-yellow-500/70">\${h.maxLev}x<br>T: \${fPrice(h.type==='UP'?h.avgPrice*(1+h.tpTarget/100):h.avgPrice*(1-h.tpTarget/100))}</td><td>\${fPrice(h.snapPrice)}<br><b class="text-white">\${fPrice(h.finalPrice)}</b></td><td class="text-yellow-500 font-bold">\${fPrice(h.avgPrice)}</td><td class="text-center down font-bold">\${h.maxNegativeRoi.toFixed(1)}%</td><td class="\${netPnl>=0?'up':'down'} font-bold">\${netPnl.toFixed(2)}</td><td class="text-right text-white font-medium">\${runningBal.toFixed(1)}</td></tr>\`;
             }).reverse().join('');
             
             let unPnl = 0, marginUsed = 0;
@@ -358,31 +365,29 @@ app.get('/gui', (req, res) => {
                 let totalMargin = marginBase * (h.dcaCount + 1); marginUsed += totalMargin;
                 let roi = (h.type === 'UP' ? (lp-h.avgPrice)/h.avgPrice : (h.avgPrice-lp)/h.avgPrice) * 100 * (h.maxLev || 20);
                 let pnl = totalMargin * roi / 100; unPnl += pnl;
+
+                if(!coinStats[h.symbol]) coinStats[h.symbol] = { lev: h.maxLev, count: 0, dcas: 0, pnlW: 0, livePnl: 0 };
+                coinStats[h.symbol].livePnl += pnl;
+
                 return \`<tr class="bg-white/5 border-b border-zinc-800"><td>\${idx+1}</td><td class="text-[9px]">\${new Date(h.startTime).toLocaleTimeString([],{hour12:false})}</td><td class="text-white font-bold cursor-pointer underline decoration-zinc-600" onclick="showDetail('\${h.symbol}', \${h.startTime})">\${h.symbol} <span class="text-[8px] px-1 bg-zinc-700 rounded">\${h.type}</span></td><td class="text-yellow-500 font-bold">\${h.dcaCount}</td><td>\${totalMargin.toFixed(1)}</td><td class="text-center text-[7px] text-yellow-500/70">\${h.maxLev}x<br>T: \${fPrice(h.type==='UP'?h.avgPrice*(1+h.tpTarget/100):h.avgPrice*(1-h.tpTarget/100))}</td><td>\${fPrice(h.snapPrice)}<br><b class="text-green-400">\${fPrice(lp)}</b></td><td class="text-yellow-500 font-bold">\${fPrice(h.avgPrice)}</td><td class="text-right font-bold \${pnl>=0?'up':'down'} text-[11px]">\${pnl.toFixed(2)}<br>\${roi.toFixed(1)}%</td></tr>\`;
             }).join('');
 
             if(myChart) {
                 let chartFinalData = [...chartData];
-                let chartFinalExtra = [...chartExtra];
-                if(unPnl !== 0) {
-                    chartLabels.push("LIVE");
-                    chartFinalData.push(runningBal + unPnl);
-                    chartFinalExtra.push({win: runningBal - initialBal, live: unPnl});
-                }
+                if(unPnl !== 0) { chartLabels.push("LIVE"); chartFinalData.push(runningBal + unPnl); }
                 myChart.data.labels = chartLabels;
                 myChart.data.datasets[0].data = chartFinalData;
-                myChart.data.datasets[0].extra = chartFinalExtra;
                 myChart.update('none');
             }
 
-            document.getElementById('sumW').innerText = winSum.toFixed(2);
-            document.getElementById('sumDCA').innerText = totalDCA;
-            document.getElementById('sumLive').innerText = unPnl.toFixed(2);
-            document.getElementById('sumNet').innerText = (runningBal - initialBal + unPnl).toFixed(2);
+            document.getElementById('sumWinCount').innerText = winCount;
+            document.getElementById('sumWinPnl').innerText = winSum.toFixed(2);
+            document.getElementById('sumDCACount').innerText = totalDCA;
+            
             document.getElementById('historyBody').innerHTML = histHTML;
             document.getElementById('pendingBody').innerHTML = pendingHTML;
             document.getElementById('statsBody').innerHTML = Object.entries(coinStats).map(([sym, s], i) => \`
-                <tr class="border-b border-zinc-800/50"><td>\${i+1}</td><td class="text-white font-bold cursor-pointer underline hover:text-yellow-500" onclick="showCoinHistory('\${sym}')">\${sym}</td><td>\${s.lev}x</td><td>\${s.count}</td><td class="text-yellow-500">\${s.dcas}</td><td class="up">\${s.pnlW.toFixed(2)}</td><td class="down">\${s.pnlL.toFixed(2)}</td><td class="text-right font-bold \${(s.pnlW+s.pnlL)>=0?'up':'down'}">\${(s.pnlW+s.pnlL).toFixed(2)}</td></tr>\`).join('');
+                <tr class="border-b border-zinc-800/50"><td>\${i+1}</td><td class="text-white font-bold cursor-pointer underline hover:text-yellow-500" onclick="showCoinHistory('\${sym}')">\${sym}</td><td>\${s.lev}x</td><td>\${s.count}</td><td class="text-yellow-500">\${s.dcas}</td><td class="up">\${s.pnlW.toFixed(2)}</td><td class="\${s.livePnl>=0?'up':'down'}">\${s.livePnl.toFixed(2)}</td><td class="text-right font-bold \${(s.pnlW+s.livePnl)>=0?'up':'down'}">\${(s.pnlW+s.livePnl).toFixed(2)}</td></tr>\`).join('');
 
             if(running) {
                 document.getElementById('displayBal').innerText = (runningBal + unPnl).toFixed(2);
