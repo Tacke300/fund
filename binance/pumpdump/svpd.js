@@ -72,6 +72,7 @@ function initWS() {
                 if (!pending.maxNegativeRoi || currentRoi < pending.maxNegativeRoi) {
                     pending.maxNegativeRoi = currentRoi;
                 }
+
                 const win = pending.type === 'UP' ? diffAvg >= pending.tpTarget : diffAvg <= -pending.tpTarget; 
                 const isTimeout = (now - pending.startTime) >= (MAX_HOLD_MINUTES * 60000);
                 if (win || isTimeout) {
@@ -82,15 +83,20 @@ function initWS() {
                     fs.writeFileSync(HISTORY_FILE, JSON.stringify(Array.from(historyMap.values()))); 
                     return;
                 }
+
                 const lastPrice = pending.dcaHistory[pending.dcaHistory.length - 1].p;
                 const diffFromLast = ((p - lastPrice) / lastPrice) * 100;
                 const triggerDCA = pending.type === 'UP' ? diffFromLast <= -pending.slTarget : diffFromLast >= pending.slTarget;
+                
                 if (triggerDCA && !actionQueue.find(q => q.id === s)) {
                     actionQueue.push({ id: s, priority: 1, action: () => {
                         const newCount = pending.dcaCount + 1;
                         const newAvg = ((pending.avgPrice * (pending.dcaCount + 1)) + p) / (newCount + 1);
                         pending.dcaHistory.push({ t: Date.now(), p: p, avg: newAvg });
-                        setTimeout(() => { pending.avgPrice = newAvg; pending.dcaCount = newCount; }, 200); 
+                        setTimeout(() => {
+                            pending.avgPrice = newAvg;
+                            pending.dcaCount = newCount;
+                        }, 200); 
                     }});
                 }
             } else if (Math.max(Math.abs(c1), Math.abs(c5), Math.abs(c15)) >= currentMinVol && !(lastTradeClosed[s] && (now - lastTradeClosed[s] < COOLDOWN_MINUTES * 60000))) {
@@ -116,9 +122,10 @@ app.get('/api/config', (req, res) => {
 
 app.get('/api/data', (req, res) => {
     const all = Array.from(historyMap.values());
+    const topData = Object.entries(coinData).filter(([_, v]) => v.live).map(([s, v]) => ({ symbol: s, ...v.live })).sort((a,b) => Math.abs(b.c1) - Math.abs(a.c1));
     res.json({ 
         allPrices: Object.fromEntries(Object.entries(coinData).map(([s, v]) => [s, v.live.currentPrice])),
-        live: Object.entries(coinData).filter(([_, v]) => v.live).map(([s, v]) => ({ symbol: s, ...v.live })).sort((a,b) => Math.abs(b.c1) - Math.abs(a.c1)), 
+        live: topData, 
         pending: all.filter(h => h.status === 'PENDING').sort((a,b)=>b.startTime-a.startTime),
         history: all.filter(h => h.status !== 'PENDING').sort((a,b)=>b.endTime-a.endTime)
     });
@@ -134,199 +141,246 @@ app.get('/gui', (req, res) => {
         body { background: #0b0e11; color: #eaecef; font-family: 'IBM Plex Sans', sans-serif; margin: 0; }
         .up { color: #0ecb81; } .down { color: #f6465d; }
         .bg-card { background: #1e2329; border: 1px solid #30363d; } .text-gray-custom { color: #848e9c; }
-        .modal { display:none; position:fixed; z-index:1000; left:0; top:0; width:100%; height:100%; background:rgba(0,0,0,0.9); align-items:center; justify-content:center; }
-        .scroll-custom::-webkit-scrollbar { width: 4px; } .scroll-custom::-webkit-scrollbar-thumb { background: #30363d; }
+        input { border: 1px solid #30363d !important; }
+        .modal { display:none; position:fixed; z-index:1000; left:0; top:0; width:100%; height:100%; background:rgba(0,0,0,0.8); align-items:center; justify-content:center; }
     </style></head><body>
     
-    <div id="statsModal" class="modal">
-        <div class="bg-card p-4 rounded-lg w-full max-w-2xl border border-zinc-700 flex flex-col max-h-[85vh]">
-            <div class="flex justify-between items-center mb-4">
-                <h2 id="statsModalTitle" class="text-yellow-500 font-bold uppercase italic"></h2>
-                <button onclick="closeModal('statsModal')" class="text-2xl text-gray-custom hover:text-white">&times;</button>
-            </div>
-            <div class="overflow-y-auto scroll-custom flex-1">
-                <table class="w-full text-[10px] text-left">
-                    <thead class="text-gray-custom border-b border-zinc-800"><tr><th>STT</th><th>Thời gian</th><th>Entry/Out</th><th>DCA</th><th>PnL Net</th></tr></thead>
-                    <tbody id="statsModalBody"></tbody>
-                </table>
-            </div>
-        </div>
-    </div>
-
     <div id="detailModal" class="modal">
-        <div class="bg-card p-6 rounded-lg w-11/12 max-w-xl border border-zinc-700 relative">
+        <div class="bg-card p-6 rounded-lg w-11/12 max-w-2xl border border-zinc-700 relative">
             <button onclick="closeModal('detailModal')" class="absolute top-2 right-4 text-2xl text-gray-custom hover:text-white">&times;</button>
             <h2 id="modalTitle" class="text-yellow-500 font-bold mb-4 uppercase"></h2>
-            <div class="overflow-x-auto"><table class="w-full text-[10px] text-left"><thead class="text-gray-custom border-b border-zinc-800"><tr><th>Lần</th><th>Thời gian</th><th>Giá DCA</th><th>Giá TB</th><th>Margin</th></tr></thead><tbody id="modalBody"></tbody></table></div>
+            <div class="overflow-x-auto"><table class="w-full text-[10px] text-left"><thead class="text-gray-custom border-b border-zinc-800"><tr><th>Lần</th><th>Thời gian</th><th>Giá DCA</th><th>Giá TB</th><th>Margin</th><th>Lev</th><th>TP sau DCA</th></tr></thead><tbody id="modalBody"></tbody></table></div>
         </div>
     </div>
 
     <div class="p-4 bg-[#0b0e11] sticky top-0 z-50 border-b border-zinc-800">
         <div id="setup" class="grid grid-cols-2 gap-3 mb-4 bg-card p-3 rounded-lg">
-            <input id="balanceInp" type="number" placeholder="Vốn khởi tạo" class="bg-[#0b0e11] p-2 rounded text-yellow-500 font-bold outline-none border border-zinc-800">
-            <input id="marginInp" type="text" placeholder="Margin (10% hoặc 50)" class="bg-[#0b0e11] p-2 rounded text-white outline-none border border-zinc-800">
-            <input id="tpInp" type="number" step="0.1" placeholder="TP %" class="bg-[#0b0e11] p-2 rounded text-white outline-none border border-zinc-800">
-            <input id="slInp" type="number" step="0.1" placeholder="DCA %" class="bg-[#0b0e11] p-2 rounded text-white outline-none border border-zinc-800">
-            <button onclick="start()" class="col-span-2 bg-[#fcd535] text-black py-2 rounded font-bold uppercase text-xs">KHỞI CHẠY</button>
+            <div><label class="text-[10px] text-gray-custom ml-1 uppercase font-bold">Vốn khởi tạo ($)</label><input id="balanceInp" type="number" class="bg-[#0b0e11] p-2 rounded w-full text-yellow-500 font-bold outline-none text-sm"></div>
+            <div><label class="text-[10px] text-gray-custom ml-1 uppercase font-bold">Margin per Trade</label><input id="marginInp" type="text" class="bg-[#0b0e11] p-2 rounded w-full text-yellow-500 font-bold outline-none text-sm"></div>
+            <div class="col-span-2 grid grid-cols-3 gap-2 border-t border-zinc-800 pt-3 mt-1">
+                <div><label class="text-[10px] text-gray-custom ml-1 uppercase">TP (%)</label><input id="tpInp" type="number" step="0.1" class="bg-[#0b0e11] p-2 rounded w-full text-white outline-none text-sm"></div>
+                <div><label class="text-[10px] text-gray-custom ml-1 uppercase">DCA (%)</label><input id="slInp" type="number" step="0.1" class="bg-[#0b0e11] p-2 rounded w-full text-white outline-none text-sm"></div>
+                <div><label class="text-[10px] text-gray-custom ml-1 uppercase">Min Vol (%)</label><input id="volInp" type="number" step="0.1" class="bg-[#0b0e11] p-2 rounded w-full text-white outline-none text-sm"></div>
+            </div>
+            <button onclick="start()" class="col-span-2 bg-[#fcd535] hover:bg-[#ffe066] text-black py-2.5 rounded-md font-bold uppercase text-xs mt-2">Lưu cấu hình & Khởi chạy hệ thống</button>
+        </div>
+
+        <div id="active" class="hidden flex justify-between items-center mb-4">
+            <div class="font-bold italic text-white text-xl tracking-tighter">BINANCE <span class="text-[#fcd535]">LUFFY PRO</span></div>
+            <div class="text-[#fcd535] font-black italic text-sm border border-[#fcd535] px-2 py-1 rounded cursor-pointer" onclick="stop()">STOP ENGINE</div>
         </div>
 
         <div class="flex justify-between items-end mb-3">
-            <div><div class="text-gray-custom text-[11px] uppercase font-bold tracking-widest mb-1">Tổng tài sản thực tế</div><span id="displayBal" class="text-4xl font-bold tracking-tighter">0.00</span></div>
+            <div><div class="text-gray-custom text-[11px] uppercase font-bold tracking-widest mb-1">Tổng tài sản thực tế</div><span id="displayBal" class="text-4xl font-bold text-white tracking-tighter">0.00</span><span class="text-sm text-gray-custom ml-1">USDT</span></div>
             <div class="text-right"><div class="text-gray-custom text-[11px] uppercase font-bold mb-1">PnL Tạm tính</div><div id="unPnl" class="text-xl font-bold">0.00</div></div>
         </div>
-    </div>
 
-    <div class="px-4 mt-5"><div class="bg-card rounded-xl p-4"><div style="height: 220px;"><canvas id="balanceChart"></canvas></div></div></div>
-
-    <div class="p-4 space-y-6">
-        <div><div class="text-[10px] font-bold text-green-500 uppercase mb-2">Vị thế đang mở</div>
-            <div class="bg-card rounded-lg overflow-x-auto"><table class="w-full text-[10px] text-left">
-                <thead class="text-gray-custom border-b border-zinc-800 uppercase"><tr><th class="p-2">Time</th><th>Pair</th><th>DCA</th><th>Entry/Live</th><th>Avg Price</th><th class="text-right p-2">PnL (ROI%)</th></tr></thead>
-                <tbody id="pendingBody"></tbody>
-            </table></div>
-        </div>
-
-        <div><div class="text-[10px] font-bold text-gray-custom uppercase mb-2">Nhật ký giao dịch</div>
-            <div class="bg-card rounded-lg overflow-x-auto"><table class="w-full text-[9px] text-left">
-                <thead class="text-gray-custom border-b border-zinc-800 uppercase"><tr><th class="p-2">Time In-Out</th><th>Pair</th><th>DCA</th><th>Entry/Out</th><th>ROI%</th><th class="text-right p-2">PnL Net</th></tr></thead>
-                <tbody id="historyBody"></tbody>
-            </table></div>
-        </div>
-
-        <div><div class="text-[10px] font-bold text-yellow-500 uppercase mb-2">Hiệu suất Coin</div>
-            <div class="bg-card rounded-lg overflow-x-auto"><table class="w-full text-[10px] text-left">
-                <thead class="text-gray-custom border-b border-zinc-800 uppercase"><tr><th class="p-2">Tên Coin</th><th>Lệnh</th><th>DCA</th><th>PnL Chốt</th><th>Tạm tính</th><th class="text-right p-2">Tổng PnL</th></tr></thead>
-                <tbody id="statsBody"></tbody>
-            </table></div>
+        <div class="grid grid-cols-3 gap-2 mt-4">
+            <div class="bg-card p-2 rounded border border-zinc-800 text-center">
+                <div class="text-[9px] text-gray-custom uppercase font-bold">Lệnh Win</div>
+                <div id="sumWinCount" class="text-lg font-bold text-green-400">0</div>
+            </div>
+            <div class="bg-card p-2 rounded border border-zinc-800 text-center">
+                <div class="text-[9px] text-gray-custom uppercase font-bold">PnL Win ($)</div>
+                <div id="sumWinPnl" class="text-lg font-bold text-white">0.00</div>
+            </div>
+            <div class="bg-card p-2 rounded border border-zinc-800 text-center">
+                <div class="text-[9px] text-gray-custom uppercase font-bold">Tổng DCA</div>
+                <div id="sumDCACount" class="text-lg font-bold text-yellow-500">0</div>
+            </div>
         </div>
     </div>
+
+    <div class="px-4 mt-5">
+        <div class="bg-card rounded-xl p-4">
+            <div class="text-[11px] font-bold text-yellow-500 uppercase tracking-widest italic mb-2">Biến động tài sản (Pnl thực tế)</div>
+            <div style="height: 220px;"><canvas id="balanceChart"></canvas></div>
+        </div>
+    </div>
+
+    <div class="px-4 mt-5"><div class="bg-card rounded-xl p-4 shadow-lg border border-yellow-500/20">
+        <div class="text-[11px] font-bold text-yellow-500 mb-3 uppercase italic tracking-widest">Biến động Market (3 khung)</div>
+        <div class="overflow-x-auto"><table class="w-full text-[10px] text-left"><thead class="text-gray-custom border-b border-zinc-800 uppercase"><tr><th>Coin</th><th>Giá Hiện Tại</th><th class="text-center">1M (%)</th><th class="text-center">5M (%)</th><th class="text-center">15M (%)</th></tr></thead><tbody id="marketBody"></tbody></table></div>
+    </div></div>
+
+    <div class="px-4 mt-5"><div class="bg-card rounded-xl p-4 shadow-lg">
+        <div class="text-[11px] font-bold text-white mb-3 uppercase tracking-wider flex items-center"><span class="w-2 h-2 bg-green-500 rounded-full mr-2 animate-pulse"></span> Vị thế đang mở</div>
+        <div class="overflow-x-auto"><table class="w-full text-[10px] text-left"><thead class="text-gray-custom uppercase border-b border-zinc-800"><tr class="pb-2"><th>STT</th><th>Time</th><th>Pair</th><th>DCA</th><th>Margin</th><th class="text-center">Lev/Target</th><th>Entry/Live</th><th>Avg Price</th><th class="text-right">PnL (ROI%)</th></tr></thead><tbody id="pendingBody"></tbody></table></div>
+    </div></div>
+
+    <div class="px-4 mt-5"><div class="bg-card rounded-xl p-4 shadow-lg">
+         <div class="text-[11px] font-bold text-gray-custom mb-3 uppercase tracking-wider italic">Nhật ký giao dịch</div>
+        <div class="overflow-x-auto"><table class="w-full text-[9px] text-left"><thead class="text-gray-custom border-b border-zinc-800 uppercase"><tr><th>STT</th><th>Time In-Out</th><th>Pair/Vol</th><th>DCA</th><th>Margin</th><th class="text-center">Target</th><th>Entry/Out</th><th>Avg Price</th><th class="text-center">MaxDD</th><th>PnL Net</th><th class="text-right">Balance</th></tr></thead><tbody id="historyBody"></tbody></table></div>
+    </div></div>
+
+    <div class="px-4 mt-5 pb-32"><div class="bg-card rounded-xl p-4 shadow-lg border border-yellow-500/20">
+        <div class="text-[11px] font-bold text-yellow-500 mb-3 uppercase italic">Thống kê hiệu suất theo Coin</div>
+        <div class="overflow-x-auto"><table class="w-full text-[10px] text-left"><thead class="text-gray-custom border-b border-zinc-800 uppercase"><tr><th>STT</th><th>Tên Coin</th><th>Lev</th><th>Lệnh</th><th>DCA</th><th>PnL Lãi</th><th>PnL Tạm tính</th><th class="text-right">Tổng PnL</th></tr></thead><tbody id="statsBody"></tbody></table></div>
+    </div></div>
 
     <script>
     let running = false, initialBal = 1000, lastRawData = null, myChart = null;
-    let balanceHistory = JSON.parse(localStorage.getItem('luffy_history_long') || '[]');
-
     const saved = JSON.parse(localStorage.getItem('luffy_state') || '{}');
-    if(saved.initialBal) {
-        document.getElementById('balanceInp').value = saved.initialBal;
-        document.getElementById('marginInp').value = saved.marginVal;
-        document.getElementById('tpInp').value = saved.tp;
-        document.getElementById('slInp').value = saved.sl;
-        if(saved.running) { running = true; initialBal = saved.initialBal; document.getElementById('setup').classList.add('hidden'); syncConfig(); }
+    document.getElementById('balanceInp').value = saved.initialBal || 1000;
+    document.getElementById('marginInp').value = saved.marginVal || "10%";
+    document.getElementById('tpInp').value = saved.tp || 0.5;
+    document.getElementById('slInp').value = saved.sl || 10.0;
+    document.getElementById('volInp').value = saved.vol || 5.0;
+
+    if(saved.running) {
+        running = true; initialBal = saved.initialBal;
+        document.getElementById('setup').classList.add('hidden'); document.getElementById('active').classList.remove('hidden');
+        syncConfig();
     }
 
-    function fDate(t) {
-        const d = new Date(t);
-        return d.getHours().toString().padStart(2,'0') + ':' + d.getMinutes().toString().padStart(2,'0') + ':' + d.getSeconds().toString().padStart(2,'0') + ' - ' + d.getDate() + '/' + (d.getMonth()+1);
+    function fPrice(p) {
+        if (!p || p === 0) return "0.0000";
+        let s = p.toFixed(20); let match = s.match(/^-?\\d+\\.0*[1-9]/);
+        if (!match) return p.toFixed(4);
+        let index = match[0].length; return parseFloat(p).toFixed(index - match[0].indexOf('.') + 3);
     }
-
-    function closeModal(id) { document.getElementById(id).style.display = 'none'; }
-
-    function showStatsModal(sym) {
-        const history = lastRawData.history.filter(h => h.symbol === sym);
-        document.getElementById('statsModalTitle').innerText = 'LỊCH SỬ: ' + sym;
-        document.getElementById('statsModalBody').innerHTML = history.map((h, i) => {
-            let mVal = document.getElementById('marginInp').value;
-            let mBase = mVal.includes('%') ? (initialBal * parseFloat(mVal) / 100) : parseFloat(mVal);
-            let net = (mBase * (h.dcaCount + 1) * (h.maxLev || 20) * (h.pnlPercent/100)) - (mBase * (h.dcaCount + 1) * (h.maxLev || 20) * 0.001);
-            return \`<tr class="border-b border-zinc-800/30 cursor-pointer hover:bg-white/5" onclick="showDetail('\${h.symbol}', \${h.startTime})">
-                <td class="py-3 text-gray-custom">\${i+1}</td><td>\${fDate(h.startTime)}</td><td>\${fPrice(h.snapPrice)} → \${fPrice(h.finalPrice)}</td><td class="text-yellow-500 font-bold">\${h.dcaCount}</td><td class="font-bold \${net>=0?'up':'down'}">\${net.toFixed(2)}</td></tr>\`;
-        }).join('');
-        document.getElementById('statsModal').style.display = 'flex';
-    }
-
+    
     function showDetail(symbol, startTime) {
         const item = [...lastRawData.pending, ...lastRawData.history].find(h => h.symbol === symbol && h.startTime == startTime);
         if(!item) return;
-        document.getElementById('modalTitle').innerText = 'Chi tiết: ' + symbol;
+        document.getElementById('modalTitle').innerText = \`Chi tiết DCA: \${symbol}\`;
         let mVal = document.getElementById('marginInp').value;
-        let mBase = mVal.includes('%') ? (initialBal * parseFloat(mVal) / 100) : parseFloat(mVal);
+        let marginBase = mVal.includes('%') ? (initialBal * parseFloat(mVal) / 100) : parseFloat(mVal);
         document.getElementById('modalBody').innerHTML = item.dcaHistory.map((d, i) => \`
-            <tr class="border-b border-zinc-800/50"><td class="py-2">\${i}</td><td>\${fDate(d.t)}</td><td>\${fPrice(d.p)}</td><td>\${fPrice(d.avg)}</td><td>\${mBase.toFixed(2)}</td></tr>\`).join('');
+            <tr class="border-b border-zinc-800/50"><td class="py-2">\${i}</td><td>\${new Date(d.t).toLocaleTimeString()}</td><td>\${fPrice(d.p)}</td><td>\${fPrice(d.avg)}</td><td>\${marginBase.toFixed(2)}</td><td>\${item.maxLev}x</td><td class="up font-bold">\${fPrice(item.type==='UP'? d.avg*(1+item.tpTarget/100) : d.avg*(1-item.tpTarget/100))}</td></tr>\`).join('');
         document.getElementById('detailModal').style.display = 'flex';
     }
 
-    function syncConfig() { fetch(\`/api/config?tp=\${document.getElementById('tpInp').value}&sl=\${document.getElementById('slInp').value}\`); }
-    function start() { localStorage.setItem('luffy_state', JSON.stringify({ running: true, initialBal: parseFloat(document.getElementById('balanceInp').value), marginVal: document.getElementById('marginInp').value, tp: document.getElementById('tpInp').value, sl: document.getElementById('slInp').value })); location.reload(); }
+    function closeModal(id) { document.getElementById(id).style.display = 'none'; }
+    function syncConfig() {
+        const tp = document.getElementById('tpInp').value, sl = document.getElementById('slInp').value, vol = document.getElementById('volInp').value;
+        fetch(\`/api/config?tp=\${tp}&sl=\${sl}&vol=\${vol}\`);
+    }
+    function start() {
+        running = true; initialBal = parseFloat(document.getElementById('balanceInp').value);
+        localStorage.setItem('luffy_state', JSON.stringify({ running: true, initialBal, marginVal: document.getElementById('marginInp').value, tp: document.getElementById('tpInp').value, sl: document.getElementById('slInp').value, vol: document.getElementById('volInp').value }));
+        syncConfig(); location.reload();
+    }
+    function stop() { let s = JSON.parse(localStorage.getItem('luffy_state')); s.running = false; localStorage.setItem('luffy_state', JSON.stringify(s)); location.reload(); }
 
     function initChart() {
         const ctx = document.getElementById('balanceChart').getContext('2d');
         myChart = new Chart(ctx, {
-            type: 'line', data: { labels: [], datasets: [{ data: [], borderWidth: 3, fill: true, tension: 0.4, pointRadius: 0, segment: { borderColor: ctx => ctx.p0.parsed.y < initialBal ? '#f6465d' : '#0ecb81' }, backgroundColor: 'rgba(255,255,255,0.01)' }] },
+            type: 'line', 
+            data: { labels: [], datasets: [{ 
+                label: 'Balance', data: [], borderWidth: 3, fill: true, tension: 0.4, pointRadius: 0,
+                borderColor: (context) => {
+                    const chart = context.chart;
+                    const {ctx, chartArea} = chart;
+                    if (!chartArea) return '#0ecb81';
+                    // Tối ưu đổi màu theo giá trị so với vốn khởi tạo
+                    return '#0ecb81'; 
+                },
+                backgroundColor: (context) => {
+                    const chart = context.chart;
+                    const {ctx, chartArea} = chart;
+                    if (!chartArea) return 'transparent';
+                    const gradient = ctx.createLinearGradient(0, chartArea.bottom, 0, chartArea.top);
+                    gradient.addColorStop(0, 'rgba(246, 70, 93, 0.1)');
+                    gradient.addColorStop(0.5, 'rgba(252, 213, 53, 0.05)');
+                    gradient.addColorStop(1, 'rgba(14, 203, 129, 0.2)');
+                    return gradient;
+                },
+                // Rule đổi màu Xanh/Đỏ chi tiết từng đoạn
+                segment: {
+                    borderColor: ctx => ctx.p0.parsed.y < initialBal ? '#f6465d' : '#0ecb81',
+                }
+            }] },
             options: { 
                 responsive: true, maintainAspectRatio: false, 
-                plugins: { legend: { display: false }, tooltip: { 
-                    callbacks: { label: function(ctx) { 
-                        let v = ctx.raw; 
-                        return [\`Balance: \${v.toFixed(2)}\`, \`Win Sum: \${document.getElementById('sumWinPnl').innerText}\`, \`Win Count: \${document.getElementById('sumWinCount').innerText}\`]; 
-                    }}
-                }},
-                scales: { x: { display: false }, y: { grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#848e9c', font: { size: 10 } } } }
+                plugins: { legend: { display: false }, tooltip: { mode: 'index', intersect: false } },
+                scales: { 
+                    x: { display: false }, 
+                    y: { 
+                        grid: { color: 'rgba(255,255,255,0.05)' }, 
+                        ticks: { color: '#848e9c', font: { size: 10 } } 
+                    } 
+                }
             }
         });
     }
 
-    // Logic lưu điểm biểu đồ mỗi 10 phút
-    setInterval(() => {
-        if(running && lastRawData) {
-            let currentTotal = parseFloat(document.getElementById('displayBal').innerText);
-            balanceHistory.push({ t: Date.now(), v: currentTotal });
-            if(balanceHistory.length > 500) balanceHistory.shift();
-            localStorage.setItem('luffy_history_long', JSON.stringify(balanceHistory));
-        }
-    }, 600000);
-
     async function update() {
         try {
             const res = await fetch('/api/data'); const d = await res.json(); lastRawData = d;
-            let mVal = document.getElementById('marginInp').value, runningBal = initialBal, winSum = 0, winCount = 0, coinStats = {};
-            let chartLabels = [], chartData = [];
+            let mVal = document.getElementById('marginInp').value, mNum = parseFloat(mVal);
 
-            document.getElementById('historyBody').innerHTML = [...d.history].reverse().map(h => {
-                let mBase = mVal.includes('%') ? (runningBal * parseFloat(mVal) / 100) : parseFloat(mVal);
-                let net = (mBase * (h.dcaCount + 1) * (h.maxLev || 20) * (h.pnlPercent/100)) - (mBase * (h.dcaCount + 1) * (h.maxLev || 20) * 0.001);
-                runningBal += net; if(net > 0) { winSum += net; winCount++; }
-                if(!coinStats[h.symbol]) coinStats[h.symbol] = { count:0, dca:0, chot:0, tam:0 };
-                coinStats[h.symbol].count++; coinStats[h.symbol].dca += h.dcaCount; coinStats[h.symbol].chot += net;
-                return \`<tr class="border-b border-zinc-800/30 text-zinc-400"><td class="p-2 text-[7px]">\${fDate(h.startTime)}<br>\${fDate(h.endTime)}</td><td><b class="text-white cursor-pointer underline decoration-zinc-600" onclick="showDetail('\${h.symbol}', \${h.startTime})">\${h.symbol}</b></td><td class="text-yellow-500 font-bold">\${h.dcaCount}</td><td>\${fPrice(h.snapPrice)}/\${fPrice(h.finalPrice)}</td><td class="\${h.pnlPercent>=0?'up':'down'}">\${h.pnlPercent.toFixed(2)}%</td><td class="text-right p-2 font-bold \${net>=0?'up':'down'}">\${net.toFixed(2)}</td></tr>\`;
-            }).join('');
+            let runningBal = initialBal, winSum = 0, totalDCA = 0, winCount = 0, coinStats = {};
+            let chartLabels = ['Start'], chartData = [initialBal];
 
-            let unPnl = 0;
-            document.getElementById('pendingBody').innerHTML = d.pending.map(h => {
+            document.getElementById('marketBody').innerHTML = (d.live || []).slice(0, 15).map(m => \`
+                <tr class="border-b border-zinc-800/30 text-[11px]">
+                    <td class="font-bold text-white py-2">\${m.symbol}</td>
+                    <td class="text-yellow-500">\${fPrice(m.currentPrice)}</td>
+                    <td class="text-center font-bold \${m.c1>=0?'up':'down'}">\${m.c1}%</td>
+                    <td class="text-center font-bold \${m.c5>=0?'up':'down'}">\${m.c5}%</td>
+                    <td class="text-center font-bold \${m.c15>=0?'up':'down'}">\${m.c15}%</td>
+                </tr>\`).join('');
+
+            let histHTML = [...d.history].reverse().map((h, index) => {
+                let marginBase = mVal.includes('%') ? (runningBal * mNum / 100) : mNum;
+                let totalMargin = marginBase * (h.dcaCount + 1);
+                let netPnl = (totalMargin * (h.maxLev || 20) * (h.pnlPercent/100)) - (totalMargin * (h.maxLev || 20) * 0.001);
+                runningBal += netPnl; totalDCA += h.dcaCount;
+                if(netPnl >= 0) { winSum += netPnl; winCount++; }
+                chartLabels.push(new Date(h.endTime).toLocaleTimeString()); chartData.push(runningBal);
+
+                if(!coinStats[h.symbol]) coinStats[h.symbol] = { lev: h.maxLev, count: 0, dcas: 0, pnlW: 0, livePnl: 0 };
+                coinStats[h.symbol].count++; coinStats[h.symbol].dcas += h.dcaCount;
+                if(netPnl >= 0) coinStats[h.symbol].pnlW += netPnl;
+
+                return \`<tr class="border-b border-zinc-800/30 text-zinc-400"><td>\${d.history.length - index}</td><td class="py-2 text-[7px]">\${new Date(h.startTime).toLocaleTimeString([],{hour12:false})}<br>\${new Date(h.endTime).toLocaleTimeString([],{hour12:false})}</td><td><b class="text-white cursor-pointer underline decoration-zinc-600" onclick="showDetail('\${h.symbol}', \${h.startTime})">\${h.symbol}</b></td><td class="text-yellow-500 font-bold">\${h.dcaCount}</td><td>\${totalMargin.toFixed(1)}</td><td class="text-center text-[7px] text-yellow-500/70">\${h.maxLev}x<br>T: \${fPrice(h.type==='UP'?h.avgPrice*(1+h.tpTarget/100):h.avgPrice*(1-h.tpTarget/100))}</td><td>\${fPrice(h.snapPrice)}<br><b class="text-white">\${fPrice(h.finalPrice)}</b></td><td class="text-yellow-500 font-bold">\${fPrice(h.avgPrice)}</td><td class="text-center down font-bold">\${h.maxNegativeRoi.toFixed(1)}%</td><td class="\${netPnl>=0?'up':'down'} font-bold">\${netPnl.toFixed(2)}</td><td class="text-right text-white font-medium">\${runningBal.toFixed(1)}</td></tr>\`;
+            }).reverse().join('');
+            
+            let unPnl = 0, marginUsed = 0;
+            let pendingHTML = (d.pending || []).map((h, idx) => {
                 let lp = d.allPrices[h.symbol] || h.avgPrice;
-                let mBase = mVal.includes('%') ? (runningBal * parseFloat(mVal) / 100) : parseFloat(mVal);
+                let marginBase = mVal.includes('%') ? (runningBal * mNum / 100) : mNum; 
+                let totalMargin = marginBase * (h.dcaCount + 1); marginUsed += totalMargin;
                 let roi = (h.type === 'UP' ? (lp-h.avgPrice)/h.avgPrice : (h.avgPrice-lp)/h.avgPrice) * 100 * (h.maxLev || 20);
-                let pnl = (mBase * (h.dcaCount + 1)) * roi / 100; unPnl += pnl;
-                if(!coinStats[h.symbol]) coinStats[h.symbol] = { count:0, dca:0, chot:0, tam:0 };
-                coinStats[h.symbol].tam += pnl;
-                return \`<tr class="bg-white/5 border-b border-zinc-800"><td class="p-2 text-[8px]">\${fDate(h.startTime)}</td><td class="font-bold text-yellow-500 cursor-pointer underline decoration-zinc-600" onclick="showDetail('\${h.symbol}', \${h.startTime})">\${h.symbol}</td><td>\${h.dcaCount}</td><td>\${fPrice(h.avgPrice)}→\${fPrice(lp)}</td><td>\${fPrice(h.avgPrice)}</td><td class="text-right p-2 font-bold \${pnl>=0?'up':'down'}">\${pnl.toFixed(2)} (\${roi.toFixed(1)}%)</td></tr>\`;
+                let pnl = totalMargin * roi / 100; unPnl += pnl;
+
+                if(!coinStats[h.symbol]) coinStats[h.symbol] = { lev: h.maxLev, count: 0, dcas: 0, pnlW: 0, livePnl: 0 };
+                coinStats[h.symbol].livePnl += pnl;
+
+                return \`<tr class="bg-white/5 border-b border-zinc-800"><td>\${idx+1}</td><td class="text-[9px]">\${new Date(h.startTime).toLocaleTimeString([],{hour12:false})}</td><td class="text-white font-bold cursor-pointer underline decoration-zinc-600" onclick="showDetail('\${h.symbol}', \${h.startTime})">\${h.symbol} <span class="text-[8px] px-1 bg-zinc-700 rounded">\${h.type}</span></td><td class="text-yellow-500 font-bold">\${h.dcaCount}</td><td>\${totalMargin.toFixed(1)}</td><td class="text-center text-[7px] text-yellow-500/70">\${h.maxLev}x<br>T: \${fPrice(h.type==='UP'?h.avgPrice*(1+h.tpTarget/100):h.avgPrice*(1-h.tpTarget/100))}</td><td>\${fPrice(h.snapPrice)}<br><b class="text-green-400">\${fPrice(lp)}</b></td><td class="text-yellow-500 font-bold">\${fPrice(h.avgPrice)}</td><td class="text-right font-bold \${pnl>=0?'up':'down'} text-[11px]">\${pnl.toFixed(2)}<br>\${roi.toFixed(1)}%</td></tr>\`;
             }).join('');
 
-            document.getElementById('statsBody').innerHTML = Object.entries(coinStats).map(([sym, s]) => \`
-                <tr class="border-b border-zinc-800/50"><td class="p-2 font-bold text-white cursor-pointer underline decoration-zinc-600" onclick="showStatsModal('\${sym}')">\${sym}</td><td>\${s.count}</td><td>\${s.dca}</td><td class="up">\${s.chot.toFixed(2)}</td><td class="\${s.tam>=0?'up':'down'}">\${s.tam.toFixed(2)}</td><td class="text-right p-2 font-bold \${(s.chot+s.tam)>=0?'up':'down'}">\${(s.chot+s.tam).toFixed(2)}</td></tr>\`).join('');
+            if(myChart) {
+                let chartFinalData = [...chartData];
+                // Tối ưu: Nếu có lệnh đang mở, thêm một điểm "Live" vào biểu đồ để thấy PnL nhảy thời gian thực
+                if(unPnl !== 0) { 
+                    chartLabels.push("LIVE"); 
+                    chartFinalData.push(runningBal + unPnl); 
+                }
+                myChart.data.labels = chartLabels; 
+                myChart.data.datasets[0].data = chartFinalData; 
+                myChart.update('none'); // Update không animation để mượt hơn
+            }
 
             document.getElementById('sumWinCount').innerText = winCount;
             document.getElementById('sumWinPnl').innerText = winSum.toFixed(2);
-            let currentTotal = runningBal + unPnl;
-
-            if(myChart) {
-                chartLabels = [...balanceHistory.map(i => fDate(i.t)), fDate(Date.now())];
-                chartData = [...balanceHistory.map(i => i.v), currentTotal];
-                myChart.data.labels = chartLabels; myChart.data.datasets[0].data = chartData; myChart.update('none');
-            }
+            document.getElementById('sumDCACount').innerText = totalDCA;
+            document.getElementById('historyBody').innerHTML = histHTML;
+            document.getElementById('pendingBody').innerHTML = pendingHTML;
+            document.getElementById('statsBody').innerHTML = Object.entries(coinStats).map(([sym, s], i) => \`
+                <tr class="border-b border-zinc-800/50"><td>\${i+1}</td><td class="text-white font-bold">\${sym}</td><td>\${s.lev}x</td><td>\${s.count}</td><td class="text-yellow-500">\${s.dcas}</td><td class="up">\${s.pnlW.toFixed(2)}</td><td class="\${s.livePnl>=0?'up':'down'}">\${s.livePnl.toFixed(2)}</td><td class="text-right font-bold \${(s.pnlW+s.livePnl)>=0?'up':'down'}">\${(s.pnlW+s.livePnl).toFixed(2)}</td></tr>\`).join('');
 
             if(running) {
-                document.getElementById('displayBal').innerText = currentTotal.toFixed(2);
-                document.getElementById('displayBal').className = 'text-4xl font-bold ' + (currentTotal >= initialBal ? 'up' : 'down');
+                document.getElementById('displayBal').innerText = (runningBal + unPnl).toFixed(2);
                 document.getElementById('unPnl').innerText = (unPnl >= 0 ? '+' : '') + unPnl.toFixed(2);
                 document.getElementById('unPnl').className = 'text-xl font-bold ' + (unPnl >= 0 ? 'up' : 'down');
             }
         } catch(e) {}
     }
-    initChart(); setInterval(update, 1000);
-    </script>
-    
-    <div class="hidden"><span id="sumWinCount">0</span><span id="sumWinPnl">0</span></div>
-    </body></html>`);
+    initChart();
+    setInterval(update, 500); // Tăng lên 500ms để tối ưu CPU cho biểu đồ
+    </script></body></html>`);
 });
 
 app.listen(PORT, '0.0.0.0', () => { initWS(); console.log(`http://localhost:${PORT}/gui`); });
