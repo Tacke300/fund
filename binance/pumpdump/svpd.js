@@ -273,7 +273,6 @@ app.get('/gui', (req, res) => {
                     const chart = context.chart;
                     const {ctx, chartArea} = chart;
                     if (!chartArea) return '#0ecb81';
-                    // Tối ưu đổi màu theo giá trị so với vốn khởi tạo
                     return '#0ecb81'; 
                 },
                 backgroundColor: (context) => {
@@ -286,7 +285,6 @@ app.get('/gui', (req, res) => {
                     gradient.addColorStop(1, 'rgba(14, 203, 129, 0.2)');
                     return gradient;
                 },
-                // Rule đổi màu Xanh/Đỏ chi tiết từng đoạn
                 segment: {
                     borderColor: ctx => ctx.p0.parsed.y < initialBal ? '#f6465d' : '#0ecb81',
                 }
@@ -353,14 +351,13 @@ app.get('/gui', (req, res) => {
 
             if(myChart) {
                 let chartFinalData = [...chartData];
-                // Tối ưu: Nếu có lệnh đang mở, thêm một điểm "Live" vào biểu đồ để thấy PnL nhảy thời gian thực
                 if(unPnl !== 0) { 
                     chartLabels.push("LIVE"); 
                     chartFinalData.push(runningBal + unPnl); 
                 }
                 myChart.data.labels = chartLabels; 
                 myChart.data.datasets[0].data = chartFinalData; 
-                myChart.update('none'); // Update không animation để mượt hơn
+                myChart.update('none');
             }
 
             document.getElementById('sumWinCount').innerText = winCount;
@@ -379,7 +376,7 @@ app.get('/gui', (req, res) => {
         } catch(e) {}
     }
     initChart();
-    setInterval(update, 500); // Tăng lên 500ms để tối ưu CPU cho biểu đồ
+    setInterval(update, 500); 
     </script></body></html>`);
 });
 
