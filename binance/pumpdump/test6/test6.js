@@ -85,7 +85,10 @@ function initWS() {
             }
             if (Math.max(Math.abs(c1), Math.abs(c5), Math.abs(c15)) >= currentMinVol && !pending && !(lastTradeClosed[s] && (now - lastTradeClosed[s] < COOLDOWN_MINUTES * 60000))) {
                 historyMap.set(`${s}_${now}`, { 
-                    symbol: s, startTime: now, snapPrice: p, type: (c1+c5+c15 >= 0) ? 'UP' : 'DOWN', status: 'PENDING', 
+                    symbol: s, startTime: now, snapPrice: p, 
+                    // SỬA TẠI ĐÂY: Đảo ngược logic UP/DOWN
+                    type: (c1 + c5 + c15 >= 0) ? 'DOWN' : 'UP', 
+                    status: 'PENDING', 
                     maxLev: symbolMaxLeverage[s] || 20, tpTarget: currentTP, slTarget: currentSL, snapVol: { c1, c5, c15 },
                     maxNegativeRoi: 0,
                     maxNegativeTime: now
