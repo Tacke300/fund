@@ -1,8 +1,8 @@
-const PORT = 9059;
+const PORT = 7005;
 const HISTORY_FILE = './history_db.json';
 const LEVERAGE_FILE = './leverage_cache.json';
 const COOLDOWN_MINUTES = 15; 
-const MAX_HOLD_MINUTES = 1440; 
+const MAX_HOLD_MINUTES = 555550; 
 
 import WebSocket from 'ws';
 import express from 'express';
