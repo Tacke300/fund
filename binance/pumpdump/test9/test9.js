@@ -2,7 +2,7 @@ const PORT = 9063;
 const HISTORY_FILE = './history_db.json';
 const LEVERAGE_FILE = './leverage_cache.json';
 const COOLDOWN_MINUTES = 15; 
-const MAX_HOLD_MINUTES = 34400; 
+const MAX_HOLD_MINUTES = 500000; 
 
 import WebSocket from 'ws';
 import express from 'express';
