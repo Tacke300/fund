@@ -2,7 +2,7 @@ const PORT = 9063;
 const HISTORY_FILE = './history_db.json';
 const LEVERAGE_FILE = './leverage_cache.json';
 const COOLDOWN_MINUTES = 15; 
-const MAX_HOLD_MINUTES = 1440; 
+const MAX_HOLD_MINUTES = 34400; 
 
 import WebSocket from 'ws';
 import express from 'express';
@@ -83,7 +83,6 @@ function initWS() {
                     return;
                 }
 
-                // Sửa logic DCA tính theo khoảng cách cố định từ SnapPrice (Entry đầu)
                 const totalDiffFromEntry = ((p - pending.snapPrice) / pending.snapPrice) * 100;
                 const nextDcaThreshold = (pending.dcaCount + 1) * pending.slTarget;
                 const triggerDCA = pending.type === 'LONG' ? totalDiffFromEntry <= -nextDcaThreshold : totalDiffFromEntry >= nextDcaThreshold;
@@ -102,9 +101,8 @@ function initWS() {
             } else if (Math.max(Math.abs(c1), Math.abs(c5), Math.abs(c15)) >= currentMinVol && !(lastTradeClosed[s] && (now - lastTradeClosed[s] < COOLDOWN_MINUTES * 60000))) {
                 if (!actionQueue.find(q => q.id === s)) {
                     actionQueue.push({ id: s, priority: 2, action: () => {
-                        const sumVol = c1 + c5 + c15;
-                        let type = sumVol >= 0 ? 'LONG' : 'SHORT';
-                        if (tradeMode === 'REVERSE') type = (type === 'LONG' ? 'SHORT' : 'LONG');
+                        // Sửa tại đây: Ép kiểu type luôn là 'LONG'
+                        let type = 'LONG';
 
                         historyMap.set(`${s}_${now}`, { 
                             symbol: s, startTime: Date.now(), snapPrice: p, avgPrice: p, type: type, status: 'PENDING', 
@@ -377,4 +375,4 @@ app.get('/gui', (req, res) => {
     </script></body></html>`);
 });
 
-app.listen(PORT, '0.0.0.0', () => { initWS(); console.log(`http://localhost:${PORT}/gui`); }); 
+app.listen(PORT, '0.0.0.0', () => { initWS(); console.log(`http://localhost:${PORT}/gui`); });
