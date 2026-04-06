@@ -13,33 +13,25 @@ const app = express();
 let coinData = {}; 
 let symbolMaxLeverage = {}; 
 
-// KHỞI TẠO 40 BOT - MỖI BOT LÀ MỘT THỂ THỐNG NHẤT NHƯ BẢN GỐC
+// KHỞI TẠO 40 BOT VỚI THÔNG SỐ RIÊNG BIỆT
 let bots = [];
 for (let i = 0; i < 40; i++) {
     bots.push({
         id: i,
         config: {
-            vol: (i % 10) + 1, // Biến động từ 1 tới 10
+            vol: (i % 10) + 1, // Biến động 1% -> 10%
             tp: 0.3,
             dca: 10,
             marginPercent: 1,
-            balance: 100,
+            balance: 100, // Vốn gốc 100$
             mode: ['FOLLOW', 'REVERSE', 'LONG', 'SHORT'][i % 4]
         },
         pendingTrade: null,
         history: [],
         totalWin: 0,
-        pnlWin: 0,
+        pnlWin: 0, // Tổng lãi lỗ đã chốt
         lastTradeTime: 0
     });
-}
-
-function fPrice(p) {
-    if (!p || p === 0) return "0.0000";
-    let s = p.toFixed(20);
-    let match = s.match(/^-?\d+\.0*[1-9]/);
-    if (!match) return p.toFixed(4);
-    return parseFloat(p).toFixed(match[0].length - match[0].indexOf('.') + 3);
 }
 
 function calculateChange(pArr, min) {
@@ -49,7 +41,6 @@ function calculateChange(pArr, min) {
     return parseFloat((((pArr[pArr.length - 1].p - start.p) / start.p) * 100).toFixed(2));
 }
 
-// WS CẬP NHẬT CHUNG CHO TẤT CẢ BOT
 function initWS() {
     const ws = new WebSocket('wss://fstream.binance.com/ws/!ticker@arr');
     ws.on('message', (data) => {
@@ -66,14 +57,12 @@ function initWS() {
             const c15 = calculateChange(coinData[s].prices, 15);
             coinData[s].live = { c1, c5, c15, currentPrice: p };
 
-            // CHẠY LOGIC CHO 40 BOT
             bots.forEach(bot => {
                 const pending = bot.pendingTrade;
                 if (pending && pending.symbol === s) {
                     const diffAvg = ((p - pending.avgPrice) / pending.avgPrice) * 100;
                     const currentRoi = (pending.type === 'LONG' ? diffAvg : -diffAvg) * (pending.maxLev || 20);
-                    if (!pending.maxNegativeRoi || currentRoi < pending.maxNegativeRoi) pending.maxNegativeRoi = currentRoi;
-
+                    
                     const win = pending.type === 'LONG' ? diffAvg >= pending.tpTarget : diffAvg <= -pending.tpTarget;
                     if (win || (now - pending.startTime) >= (MAX_HOLD_MINUTES * 60000)) {
                         const marginBase = (bot.config.balance + bot.pnlWin) * (bot.config.marginPercent / 100);
@@ -83,12 +72,13 @@ function initWS() {
                         pending.status = win ? 'WIN' : 'TIMEOUT';
                         pending.finalPrice = p; pending.endTime = now; pending.pnlReal = finalPnl;
                         if (finalPnl > 0) { bot.totalWin++; bot.pnlWin += finalPnl; }
+                        else { bot.pnlWin += finalPnl; } // Cộng cả pnl âm nếu cháy/cắt
+                        
                         bot.history.push({...pending});
                         bot.pendingTrade = null; bot.lastTradeTime = now;
                         return;
                     }
 
-                    // LOGIC DCA LẦN 9+ (CỨ 1% NHỒI 1 LẦN)
                     const totalDiff = Math.abs(((p - pending.snapPrice) / pending.snapPrice) * 100);
                     let triggerDCA = false;
                     if (pending.dcaCount < 9) {
@@ -125,38 +115,40 @@ function initWS() {
 app.get('/api/data', (req, res) => {
     const data = bots.map(b => {
         let unPnl = 0;
-        let availBal = b.config.balance + b.pnlWin;
+        let pnlTong = b.config.balance + b.pnlWin;
+        let openMargin = 0;
         if (b.pendingTrade) {
             const lp = coinData[b.pendingTrade.symbol]?.live?.currentPrice || b.pendingTrade.avgPrice;
             const roi = (b.pendingTrade.type === 'LONG' ? (lp - b.pendingTrade.avgPrice)/b.pendingTrade.avgPrice : (b.pendingTrade.avgPrice - lp)/b.pendingTrade.avgPrice) * 100 * (b.pendingTrade.maxLev || 20);
-            const marginBase = availBal * (b.config.marginPercent / 100);
-            const totalMargin = marginBase * (b.pendingTrade.dcaCount + 1);
-            unPnl = totalMargin * roi / 100;
-            availBal = availBal - totalMargin + unPnl;
+            const marginBase = pnlTong * (b.config.marginPercent / 100);
+            openMargin = marginBase * (b.pendingTrade.dcaCount + 1);
+            unPnl = openMargin * roi / 100;
         }
-        return { ...b, unPnl, availBal, marketAll: Object.entries(coinData).slice(0,10).map(([s,v])=>({s, ...v.live})) };
+        let availBal = pnlTong - openMargin + unPnl;
+        return { ...b, unPnl, pnlTong, availBal, marketAll: Object.entries(coinData).slice(0,10).map(([s,v])=>({s, ...v.live})) };
     });
     res.json(data);
 });
 
 app.get('/gui', (req, res) => {
-    res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Binance Luffy 40-Core</title>
-    <script src="https://cdn.tailwindcss.com"></script><script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Luffy Multi-40</title>
+    <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        body { background: #0b0e11; color: #eaecef; font-family: 'IBM Plex Sans', sans-serif; font-size: 11px; }
+        body { background: #0b0e11; color: #eaecef; font-family: 'IBM Plex Sans', sans-serif; font-size: 11px; margin:0; }
         .bg-card { background: #1e2329; border: 1px solid #30363d; }
         .up { color: #0ecb81; } .down { color: #f6465d; }
         .modal { display:none; position:fixed; z-index:1000; left:0; top:0; width:100%; height:100%; background:#0b0e11; overflow-y:auto; }
+        .bot-status-active { border-left: 4px solid #fcd535 !important; }
     </style></head><body>
-        <div class="p-2 flex justify-between items-center bg-card mb-2 sticky top-0 z-40">
-            <h1 class="text-yellow-500 font-bold italic">LUFFY MULTI-CORE 40</h1>
-            <div id="globalStats" class="flex gap-4 font-bold text-[10px]"></div>
+        <div class="p-3 flex justify-between items-center bg-card mb-2 border-b border-zinc-800 sticky top-0 z-50">
+            <h1 class="text-[#fcd535] font-black italic text-lg tracking-tighter">BINANCE LUFFY MULTI-40</h1>
+            <div id="globalStats" class="flex gap-6 font-bold text-[10px] uppercase"></div>
         </div>
         
-        <div id="botGrid" class="grid grid-cols-4 gap-2 px-2"></div>
+        <div id="botGrid" class="grid grid-cols-4 gap-2 px-2 pb-10"></div>
 
         <div id="detailModal" class="modal">
-            <div class="p-4"><button onclick="closeModal()" class="fixed top-2 right-6 text-4xl text-yellow-500 z-50">×</button>
+            <div class="p-4"><button onclick="closeModal()" class="fixed top-2 right-6 text-4xl text-yellow-500 z-50 hover:scale-110">×</button>
             <div id="modalContent"></div></div>
         </div>
 
@@ -164,80 +156,83 @@ app.get('/gui', (req, res) => {
         let lastData = [];
         async function update() {
             const res = await fetch('/api/data'); const data = await res.json(); lastData = data;
-            let totalWin = 0, totalPnl = 0;
+            let sumWin = 0, sumPnlWin = 0, sumOpen = 0;
             document.getElementById('botGrid').innerHTML = data.map(b => {
-                totalWin += b.totalWin; totalPnl += b.pnlWin;
-                const v = b.pendingTrade ? b.pendingTrade.snapVol : {c1:0,c5:0,c15:0};
+                sumWin += b.totalWin; sumPnlWin += b.pnlWin; if(b.pendingTrade) sumOpen++;
                 return \`
-                <div onclick="showDetail(\${b.id})" class="bg-card p-2 rounded cursor-pointer border-\${b.pendingTrade?'yellow-500/50':'zinc-800'}">
-                    <div class="flex justify-between border-b border-zinc-800 pb-1 mb-1 font-bold">
-                        <span class="text-yellow-500">BOT #\${b.id+1}</span>
-                        <span class="text-zinc-500 uppercase">\${b.config.mode}</span>
+                <div onclick="showDetail(\${b.id})" class="bg-card p-2 rounded cursor-pointer hover:border-yellow-500/50 transition-all \${b.pendingTrade?'bot-status-active':''}">
+                    <div class="flex justify-between border-b border-zinc-800 pb-1 mb-2">
+                        <span class="text-yellow-500 font-bold italic">BOT #\${b.id+1}</span>
+                        <span class="text-zinc-500 font-bold">\${b.config.mode} | VOL \${b.config.vol}%</span>
                     </div>
-                    <div class="grid grid-cols-2 gap-y-1">
-                        <span class="text-zinc-500">Cặp/Vị thế:</span><span class="text-right \${b.pendingTrade?'text-white font-bold':''}">\${b.pendingTrade?b.pendingTrade.symbol+' '+b.pendingTrade.type:'IDLE'}</span>
-                        <span class="text-zinc-500">Biến động:</span><span class="text-right text-yellow-500">\${v.c1}/\${v.c5}/\${v.c15}</span>
-                        <span class="text-zinc-500">Win/PnL:</span><span class="text-right up font-bold">\${b.totalWin} (\${b.pnlWin.toFixed(1)})</span>
-                        <span class="text-zinc-500">Khả dụng:</span><span class="text-right text-white font-bold">\${b.availBal.toFixed(2)}</span>
-                        <span class="text-zinc-500">PnL Live:</span><span class="text-right font-bold \${b.unPnl>=0?'up':'down'}">\${b.unPnl.toFixed(2)}</span>
+                    <div class="grid grid-cols-2 gap-y-1 text-[10px]">
+                        <span class="text-zinc-500 uppercase">PnL Tổng:</span><span class="text-right text-white font-bold">\${b.pnlTong.toFixed(2)}</span>
+                        <span class="text-zinc-500 uppercase">Khả dụng:</span><span class="text-right text-yellow-500 font-bold">\${b.availBal.toFixed(2)}</span>
+                        <span class="text-zinc-500 uppercase">Tổng Win:</span><span class="text-right up">\${b.totalWin}</span>
+                        <span class="text-zinc-500 uppercase">PnL Win:</span><span class="text-right up">\${b.pnlWin.toFixed(2)}</span>
+                        <span class="text-zinc-500 uppercase font-bold">PnL Tạm tính:</span><span class="text-right font-bold \${b.unPnl>=0?'up':'down'}">\${b.unPnl.toFixed(2)}</span>
+                    </div>
+                    <div class="mt-2 pt-1 border-t border-zinc-800/50 text-center text-[9px] text-zinc-500 uppercase">
+                        \${b.pendingTrade ? '<span class="up animate-pulse font-bold">Đang mở: '+b.pendingTrade.symbol+'</span>' : 'Đang đợi tín hiệu...'}
                     </div>
                 </div>\`;
             }).join('');
-            document.getElementById('globalStats').innerHTML = \`WIN: <span class="up">\${totalWin}</span> | PNL: <span class="up">\${totalPnl.toFixed(2)}</span>\`;
+            document.getElementById('globalStats').innerHTML = \`
+                <span>TỔNG WIN: <span class="up">\${sumWin}</span></span>
+                <span>PNL WIN: <span class="up">\${sumPnlWin.toFixed(2)} $</span></span>
+                <span>ĐANG MỞ: <span class="text-yellow-500">\${sumOpen} LỆNH</span></span>\`;
         }
 
         function showDetail(id) {
             const b = lastData.find(x => x.id == id);
             document.getElementById('modalContent').innerHTML = \`
                 <div class="max-w-6xl mx-auto">
-                    <div class="flex justify-between items-end mb-6">
-                        <div><div class="text-zinc-500 text-[11px] uppercase font-bold mb-1">Bot #\${b.id+1} - Equity (Vốn + PnL Live)</div>
-                        <span class="text-5xl font-bold text-white">\${(b.availBal + (b.pendingTrade?0:0)).toFixed(2)}</span><span class="text-zinc-500 ml-2">USDT</span></div>
+                    <div class="flex justify-between items-end mb-6 bg-card p-4 rounded-xl border-l-4 border-yellow-500">
+                        <div><div class="text-zinc-500 text-[11px] uppercase font-bold mb-1">Cấu hình #\${b.id+1} - \${b.config.mode} / VOL \${b.config.vol}%</div>
+                        <span class="text-5xl font-bold text-white">\${b.availBal.toFixed(2)}</span><span class="text-zinc-500 ml-2 text-xl font-bold uppercase tracking-tighter">USDT (Available)</span></div>
                         <div class="text-right"><div class="text-zinc-500 text-[11px] uppercase font-bold mb-1">PnL Tạm tính</div>
-                        <div class="text-3xl font-bold \${b.unPnl>=0?'up':'down'}">\${b.unPnl.toFixed(2)}</div></div>
+                        <div class="text-4xl font-bold \${b.unPnl>=0?'up':'down'}">\${b.unPnl.toFixed(2)}</div></div>
                     </div>
 
-                    <div class="grid grid-cols-4 gap-3 mb-6">
-                        <div class="bg-card p-3 rounded text-center"><div class="text-zinc-500 uppercase text-[9px]">Lệnh Win</div><div class="text-xl font-bold up">\${b.totalWin}</div></div>
-                        <div class="bg-card p-3 rounded text-center"><div class="text-zinc-500 uppercase text-[9px]">PnL Win ($)</div><div class="text-xl font-bold text-white">\${b.pnlWin.toFixed(2)}</div></div>
-                        <div class="bg-card p-3 rounded text-center"><div class="text-zinc-500 uppercase text-[9px]">DCA Config</div><div class="text-xl font-bold text-yellow-500">\${b.config.dca}%</div></div>
-                        <div class="bg-card p-3 rounded text-center"><div class="text-zinc-500 uppercase text-[9px]">Vol Signal</div><div class="text-xl font-bold text-yellow-500">\${b.config.vol}%</div></div>
+                    <div class="grid grid-cols-4 gap-4 mb-6">
+                        <div class="bg-card p-4 rounded-xl text-center"><div class="text-zinc-500 uppercase text-[10px] mb-1 font-bold">Vốn Tổng</div><div class="text-2xl font-bold text-white">\${b.pnlTong.toFixed(2)}</div></div>
+                        <div class="bg-card p-4 rounded-xl text-center"><div class="text-zinc-500 uppercase text-[10px] mb-1 font-bold">PnL Win (Đã chốt)</div><div class="text-2xl font-bold up">\${b.pnlWin.toFixed(2)}</div></div>
+                        <div class="bg-card p-4 rounded-xl text-center"><div class="text-zinc-500 uppercase text-[10px] mb-1 font-bold">Target TP</div><div class="text-2xl font-bold text-yellow-500">\${b.config.tp}%</div></div>
+                        <div class="bg-card p-4 rounded-xl text-center"><div class="text-zinc-500 uppercase text-[10px] mb-1 font-bold">Bước DCA</div><div class="text-2xl font-bold text-yellow-500">\${b.config.dca}%</div></div>
                     </div>
 
-                    <div class="bg-card p-4 rounded-xl mb-6 shadow-lg">
-                        <div class="text-yellow-500 font-bold mb-4 uppercase italic">Biến động Market (3 khung thời gian)</div>
+                    <div class="bg-card p-5 rounded-xl mb-6">
+                        <div class="text-yellow-500 font-bold mb-4 uppercase italic flex items-center"><span class="mr-2">⚡</span> Biến động Market (3 khung)</div>
                         <table class="w-full text-left text-[12px]">
-                            <thead class="text-zinc-500 border-b border-zinc-800"><tr><th>Coin</th><th>1M (%)</th><th>5M (%)</th><th>15M (%)</th></tr></thead>
-                            <tbody>\${b.marketAll.map(m=>\`<tr class="border-b border-zinc-800/30"><td class="py-2 text-white font-bold">\${m.s}</td><td class="\${m.c1>=0?'up':'down'} font-bold">\${m.c1}%</td><td class="\${m.c5>=0?'up':'down'} font-bold">\${m.c5}%</td><td class="\${m.c15>=0?'up':'down'} font-bold">\${m.c15}%</td></tr>\`).join('')}</tbody>
+                            <tr class="text-zinc-500 border-b border-zinc-800 uppercase text-[10px] font-bold"><th class="pb-2">Coin</th><th>1M (%)</th><th>5M (%)</th><th>15M (%)</th></tr>
+                            \${b.marketAll.map(m=>\`<tr class="border-b border-zinc-800/30 font-medium"><td class="py-2 text-white font-bold">\${m.s}</td><td class="\${m.c1>=0?'up':'down'}">\${m.c1}%</td><td class="\${m.c5>=0?'up':'down'}">\${m.c5}%</td><td class="\${m.c15>=0?'up':'down'}">\${m.c15}%</td></tr>\`).join('')}
                         </table>
                     </div>
 
-                    <div class="bg-card p-4 rounded-xl mb-6 shadow-lg">
-                        <div class="text-white font-bold mb-4 uppercase tracking-widest flex items-center"><span class="w-2 h-2 bg-green-500 rounded-full mr-2 animate-pulse"></span> Vị thế đang mở</div>
+                    <div class="bg-card p-5 rounded-xl mb-6 border border-zinc-700">
+                        <div class="text-white font-bold mb-4 uppercase tracking-widest flex items-center"><span class="w-2 h-2 bg-green-500 rounded-full mr-2 animate-pulse"></span> Vị thế đang mở chi tiết</div>
                         <table class="w-full text-left text-[12px]">
-                            <thead class="text-zinc-500 border-b border-zinc-800"><tr><th>Time</th><th>Pair</th><th>DCA</th><th>Entry</th><th>Avg Price</th><th>PnL (Live)</th></tr></thead>
+                            <tr class="text-zinc-500 border-b border-zinc-800 uppercase text-[10px] font-bold"><th>Time</th><th>Pair</th><th>DCA</th><th>Entry/Avg</th><th>PnL (Live)</th></tr>
                             <tbody>\${b.pendingTrade ? \`
                                 <tr>
-                                    <td class="py-3 text-zinc-400">\${new Date(b.pendingTrade.startTime).toLocaleTimeString()}</td>
-                                    <td class="font-bold text-white">\${b.pendingTrade.symbol} <span class="bg-zinc-700 px-1 text-[10px]">\${b.pendingTrade.type}</span></td>
-                                    <td class="text-yellow-500 font-bold">\${b.pendingTrade.dcaCount}</td>
-                                    <td>\${b.pendingTrade.snapPrice.toFixed(4)}</td>
-                                    <td class="text-yellow-500 font-bold">\${b.pendingTrade.avgPrice.toFixed(4)}</td>
-                                    <td class="\${b.unPnl>=0?'up':'down'} font-bold">\${b.unPnl.toFixed(2)}</td>
+                                    <td class="py-4 text-zinc-400">\${new Date(b.pendingTrade.startTime).toLocaleTimeString()}</td>
+                                    <td class="font-bold text-white">\${b.pendingTrade.symbol} <span class="bg-zinc-700 px-2 py-0.5 rounded text-[10px] ml-1">\${b.pendingTrade.type}</span></td>
+                                    <td class="text-yellow-500 font-bold text-lg">\${b.pendingTrade.dcaCount}</td>
+                                    <td>\${b.pendingTrade.snapPrice.toFixed(4)} <br> <span class="text-yellow-500 font-bold">\${b.pendingTrade.avgPrice.toFixed(4)}</span></td>
+                                    <td class="\${b.unPnl>=0?'up':'down'} font-black text-lg">\${b.unPnl.toFixed(2)}</td>
                                 </tr>
-                            \` : '<tr><td colspan="6" class="text-center py-6 text-zinc-600 italic">Hệ thống đang quét tín hiệu Market...</td></tr>'}</tbody>
+                            \` : '<tr><td colspan="5" class="text-center py-10 text-zinc-600 italic font-bold">CHƯA CÓ VỊ THẾ ĐANG MỞ</td></tr>'}</tbody>
                         </table>
                     </div>
 
-                    <div class="bg-card p-4 rounded-xl shadow-lg border border-yellow-500/10">
-                        <div class="text-zinc-500 font-bold mb-4 uppercase italic">Nhật ký giao dịch chi tiết</div>
-                        <table class="w-full text-left text-[10px]">
-                            <thead class="text-zinc-500 border-b border-zinc-800"><tr><th>Time Out</th><th>Pair</th><th>Type</th><th>DCA</th><th>PnL Net</th><th>Result</th></tr></thead>
-                            <tbody>\${b.history.reverse().map(h=>\`<tr class="border-b border-zinc-800/30"><td class="py-2 text-zinc-500">\${new Date(h.endTime).toLocaleTimeString()}</td><td class="text-white font-bold">\${h.symbol}</td><td class="\${h.type==='LONG'?'up':'down'}">\${h.type}</td><td class="text-yellow-500 font-bold">\${h.dcaCount}</td><td class="\${h.pnlReal>=0?'up':'down'} font-bold">\${h.pnlReal.toFixed(2)}</td><td>\${h.status}</td></tr>\`).join('')}</tbody>
+                    <div class="bg-card p-5 rounded-xl">
+                        <div class="text-zinc-500 font-bold mb-4 uppercase italic">Nhật ký & Hiệu suất 100%</div>
+                        <table class="w-full text-left text-[11px]">
+                            <tr class="text-zinc-500 border-b border-zinc-800 uppercase text-[10px] font-bold"><th>Time Out</th><th>Pair</th><th>Type</th><th>DCA</th><th>PnL Net</th><th>Status</th></tr>
+                            \${b.history.reverse().map(h=>\`<tr class="border-b border-zinc-800/30 text-zinc-400"><td class="py-2">\${new Date(h.endTime).toLocaleTimeString()}</td><td class="text-white font-bold">\${h.symbol}</td><td class="\${h.type==='LONG'?'up':'down'} font-bold">\${h.type}</td><td class="text-yellow-500 font-bold text-center">\${h.dcaCount}</td><td class="\${h.pnlReal>=0?'up':'down'} font-bold">\${h.pnlReal.toFixed(2)}</td><td>\${h.status}</td></tr>\`).join('')}
                         </table>
                     </div>
-                </div>
-            \`;
+                </div>\`;
             document.getElementById('detailModal').style.display = 'block';
         }
 
@@ -246,4 +241,4 @@ app.get('/gui', (req, res) => {
     </script></body></html>`);
 });
 
-app.listen(PORT, '0.0.0.0', () => { initWS(); console.log(`Engine 40-Core started: http://localhost:${PORT}/gui`); });
+app.listen(PORT, '0.0.0.0', () => { initWS(); console.log(`http://localhost:${PORT}/gui`); });
