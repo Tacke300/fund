@@ -1,6 +1,6 @@
 const PORT = 9063;
 const HISTORY_FILE = './history_db.json';
-const STATS_FILE = './72h_stats.json';
+const LEVERAGE_FILE = './leverage_cache.json';
 const COOLDOWN_MINUTES = 15; 
 
 import WebSocket from 'ws';
@@ -9,247 +9,68 @@ import fs from 'fs';
 
 const app = express();
 let coinData = {}; 
-let statsHistory = [];
+let symbolMaxLeverage = {};
+if (fs.existsSync(LEVERAGE_FILE)) { try { symbolMaxLeverage = JSON.parse(fs.readFileSync(LEVERAGE_FILE)); } catch(e){} }
 
-// KHỞI TẠO 40 BOT - CHIA 4 CỘT (FOLLOW, REVERSE, LONG, SHORT)
-const MODES = ['FOLLOW', 'REVERSE', 'LONG', 'SHORT'];
+// --- KHỞI TẠO 40 BOT: CHIA THEO 4 CỘT CHẾ ĐỘ ---
+const MODES = ['LONG', 'SHORT', 'REVERSE', 'FOLLOW'];
 let bots = [];
-for (let m = 0; m < 4; m++) {
-    for (let v = 1; v <= 10; v++) {
-        bots.push({
-            id: bots.length,
-            config: { vol: v, tp: 0.5, sl: 10.0, mode: MODES[m], balance: 1000, margin: "10%" },
-            pendingTrade: null,
-            history: [],
-            totalWin: 0,
-            pnlWin: 0,
-            totalDca: 0
-        });
+
+class LuffyBot {
+    constructor(id, mode, minVol) {
+        this.id = id;
+        this.mode = mode;
+        this.minVol = minVol;
+        this.tpTarget = 0.3; // TP 0.3%
+        this.dcaStep = 10.0; // DCA 10%
+        this.capital = 100.0; 
+        this.history = [];
+        this.pending = null; 
+        this.lastTradeTime = 0;
     }
-}
 
-// LOG THỐNG KÊ 72 GIỜ
-if (fs.existsSync(STATS_FILE)) { try { statsHistory = JSON.parse(fs.readFileSync(STATS_FILE)); } catch(e){} }
-setInterval(() => {
-    const snap = { t: Date.now(), data: bots.map(b => ({ id: b.id, pnl: b.pnlWin })) };
-    statsHistory.push(snap);
-    if (statsHistory.length > 72) statsHistory.shift();
-    fs.writeFileSync(STATS_FILE, JSON.stringify(statsHistory));
-}, 3600000);
-
-// API TRẢ VỀ DATA TỔNG CHO DASHBOARD VÀ DATA RIÊNG CHO TỪNG BOT
-app.get('/api/data', (req, res) => {
-    const botId = req.query.id;
-    if (botId !== undefined) {
-        // Trả về data đúng cấu trúc code gốc của ông cho 1 bot cụ thể
-        const b = bots[botId];
-        res.json({
-            allPrices: Object.fromEntries(Object.entries(coinData).map(([s, v]) => [s, v.live.currentPrice])),
-            live: Object.entries(coinData).map(([s, v]) => ({ symbol: s, ...v.live })).sort((a,b) => Math.abs(b.c1) - Math.abs(a.c1)),
-            pending: b.pendingTrade ? [b.pendingTrade] : [],
-            history: b.history
-        });
-    } else {
-        // Trả về data tổng hợp cho Dashboard 40 cột
-        res.json({
-            bots: bots.map(b => ({
-                id: b.id,
-                mode: b.config.mode,
-                vol: b.config.vol,
-                pnlWin: b.pnlWin,
-                isLive: !!b.pendingTrade,
-                dcaCount: b.pendingTrade ? b.pendingTrade.dcaCount : 0
-            })),
-            summary: {
-                totalOpen: bots.filter(b => b.pendingTrade).length,
-                totalDca: bots.reduce((sum, b) => sum + (b.pendingTrade ? b.pendingTrade.dcaCount : 0), 0),
-                totalWinPnl: bots.reduce((sum, b) => sum + b.pnlWin, 0)
-            }
-        });
+    getAvailableBalance() {
+        let pnlWin = this.history.reduce((s, h) => s + h.netPnl, 0);
+        let openMargin = this.pending ? ( (this.capital + pnlWin) * 0.01 * (this.pending.dcaCount + 1) ) : 0;
+        let livePnl = 0;
+        if (this.pending) {
+            let lp = coinData[this.pending.symbol]?.live?.currentPrice || this.pending.avgPrice;
+            let roi = (this.pending.type === 'LONG' ? (lp - this.pending.avgPrice) / this.pending.avgPrice : (this.pending.avgPrice - lp) / this.pending.avgPrice) * 100 * (this.pending.maxLev || 20);
+            livePnl = openMargin * roi / 100;
+        }
+        return (this.capital + pnlWin + livePnl) - openMargin;
     }
-});
 
-app.get('/gui', (req, res) => {
-    res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8">
-    <title>Binance Luffy Multi-40</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <style>
-        @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;600;700&display=swap');
-        body { background: #0b0e11; color: #eaecef; font-family: 'IBM Plex Sans', sans-serif; margin: 0; overflow-x: hidden; }
-        .up { color: #0ecb81; } .down { color: #f6465d; }
-        .bg-card { background: #1e2329; border: 1px solid #30363d; }
-        .grid-container { display: grid; grid-template-columns: repeat(4, 1fr); grid-auto-flow: column; grid-template-rows: repeat(10, auto); gap: 8px; padding: 15px; }
-        .bot-item { background: #1e2329; border: 1px solid #30363d; padding: 10px; border-radius: 6px; cursor: pointer; transition: 0.2s; }
-        .bot-item:hover { border-color: #fcd535; transform: translateY(-2px); }
-        #dashView { display: block; }
-        #detailView { display: none; }
-    </style></head><body>
-
-    <div id="dashView">
-        <div class="p-4 bg-[#1e2329] border-b border-zinc-800 sticky top-0 z-50 flex justify-between items-center shadow-xl">
-            <div class="flex items-center gap-8">
-                <h1 class="text-2xl font-black italic text-[#fcd535] tracking-tighter">LUFFY ENGINE <span class="text-white text-sm">v4.0</span></h1>
-                <div class="flex gap-6 border-l border-zinc-700 pl-6">
-                    <div><p class="text-[10px] text-zinc-500 font-bold uppercase">Vị thế mở</p><p id="sumOpen" class="text-xl font-black text-white">0</p></div>
-                    <div><p class="text-[10px] text-zinc-500 font-bold uppercase">Tổng DCA</p><p id="sumDca" class="text-xl font-black text-yellow-500">0</p></div>
-                    <div><p class="text-[10px] text-zinc-500 font-bold uppercase">PnL Win Tổng</p><p id="sumPnl" class="text-xl font-black up">0.00</p></div>
-                </div>
-            </div>
-            <div class="text-right">
-                <p class="text-zinc-500 text-[10px] font-bold uppercase">Hệ thống 40 cấu hình</p>
-                <p class="text-white font-bold">UTC+7 Active</p>
-            </div>
-        </div>
-        <div id="botGrid" class="grid-container"></div>
-    </div>
-
-    <div id="detailView">
-        <div class="p-2 bg-red-600 text-white font-bold text-center cursor-pointer uppercase tracking-widest" onclick="closeDetail()">
-            --- CLICK VÀO ĐÂY ĐỂ QUAY LẠI DASHBOARD TỔNG ---
-        </div>
-        <div id="originalContent">
-            </div>
-    </div>
-
-    <script>
-        let currentBotId = null;
-        let isViewDetail = false;
-
-        async function updateDash() {
-            if (isViewDetail) return;
-            const res = await fetch('/api/data');
-            const d = await res.json();
-            
-            document.getElementById('sumOpen').innerText = d.summary.totalOpen;
-            document.getElementById('sumDca').innerText = d.summary.totalDca;
-            document.getElementById('sumPnl').innerText = d.summary.totalWinPnl.toFixed(2);
-
-            document.getElementById('botGrid').innerHTML = d.bots.map(b => \`
-                <div class="bot-item \${b.isLive ? 'border-l-4 border-l-yellow-500 shadow-lg shadow-yellow-500/10' : ''}" onclick="openDetail(\${b.id})">
-                    <div class="flex justify-between items-center border-b border-zinc-800 pb-2 mb-2">
-                        <span class="text-[#fcd535] font-black italic">#\${b.id+1} \${b.mode}</span>
-                        <span class="bg-zinc-800 px-2 py-0.5 rounded text-white font-bold">\${b.vol}%</span>
-                    </div>
-                    <div class="space-y-1">
-                        <div class="flex justify-between text-[10px]"><span class="text-zinc-500">PnL Win:</span><span class="up font-bold">\${b.pnlWin.toFixed(1)}</span></div>
-                        <div class="flex justify-between text-[10px]"><span class="text-zinc-500">DCA:</span><span class="text-yellow-500 font-bold">\${b.dcaCount}</span></div>
-                    </div>
-                </div>
-            \`).join('');
-        }
-
-        function openDetail(id) {
-            currentBotId = id;
-            isViewDetail = true;
-            document.getElementById('dashView').style.display = 'none';
-            document.getElementById('detailView').style.display = 'block';
-            
-            // Phệt 100% ruột bản gốc của ông vào đây
-            document.getElementById('originalContent').innerHTML = \`
-                <div class="p-4 bg-[#0b0e11] sticky top-0 z-50 border-b border-zinc-800">
-                    <div id="setup" class="grid grid-cols-2 gap-3 mb-4 bg-card p-3 rounded-lg">
-                        <div><label class="text-[10px] text-gray-custom ml-1 uppercase font-bold">Vốn khởi tạo ($)</label><input id="balanceInp" type="number" class="p-2 rounded w-full text-yellow-500 font-bold outline-none text-sm bg-[#0b0e11] border border-zinc-700"></div>
-                        <div><label class="text-[10px] text-gray-custom ml-1 uppercase font-bold">Margin per Trade</label><input id="marginInp" type="text" class="p-2 rounded w-full text-yellow-500 font-bold outline-none text-sm bg-[#0b0e11] border border-zinc-700"></div>
-                        <div class="col-span-2 grid grid-cols-4 gap-2 border-t border-zinc-800 pt-3 mt-1">
-                            <div><label class="text-[10px] text-gray-custom ml-1 uppercase">TP (%)</label><input id="tpInp" type="number" step="0.1" class="p-2 rounded w-full outline-none text-sm bg-[#0b0e11] border border-zinc-700 text-white"></div>
-                            <div><label class="text-[10px] text-gray-custom ml-1 uppercase">DCA (%)</label><input id="slInp" type="number" step="0.1" class="p-2 rounded w-full outline-none text-sm bg-[#0b0e11] border border-zinc-700 text-white"></div>
-                            <div><label class="text-[10px] text-gray-custom ml-1 uppercase">Min Vol (%)</label><input id="volInp" type="number" step="0.1" class="p-2 rounded w-full outline-none text-sm bg-[#0b0e11] border border-zinc-700 text-white"></div>
-                            <div><label class="text-[10px] text-gray-custom ml-1 uppercase">Chế độ</label><select id="modeInp" class="p-2 rounded w-full outline-none text-sm bg-[#0b0e11] border border-zinc-700 text-white"><option value="FOLLOW">THUẬN (FOLLOW)</option><option value="REVERSE">NGƯỢC (REVERSE)</option></select></div>
-                        </div>
-                    </div>
-                    <div id="active" class="hidden flex justify-between items-center mb-4">
-                        <div class="font-bold italic text-white text-xl tracking-tighter uppercase">BOT #\${id+1} | BINANCE <span class="text-[#fcd535]">LUFFY PRO</span></div>
-                        <div class="text-[#fcd535] font-black italic text-sm border border-[#fcd535] px-2 py-1 rounded cursor-pointer">ENGINE RUNNING</div>
-                    </div>
-                    <div class="flex justify-between items-end mb-3">
-                        <div><div class="text-gray-custom text-[11px] uppercase font-bold tracking-widest mb-1 text-zinc-500">Equity (Bot #\${id+1})</div><span id="displayBal" class="text-4xl font-bold text-white tracking-tighter">0.00</span><span class="text-sm text-gray-custom ml-1 text-zinc-500">USDT</span></div>
-                        <div class="text-right"><div class="text-gray-custom text-[11px] uppercase font-bold mb-1 text-zinc-500">PnL Tạm tính</div><div id="unPnl" class="text-xl font-bold">0.00</div></div>
-                    </div>
-                    <div class="grid grid-cols-3 gap-2 mt-4">
-                        <div class="bg-card p-2 rounded border border-zinc-800 text-center"><div class="text-[9px] text-gray-custom uppercase font-bold text-zinc-500">Lệnh Win</div><div id="sumWinCount" class="text-lg font-bold text-green-400">0</div></div>
-                        <div class="bg-card p-2 rounded border border-zinc-800 text-center"><div class="text-[9px] text-gray-custom uppercase font-bold text-zinc-500">PnL Win ($)</div><div id="sumWinPnl" class="text-lg font-bold text-white">0.00</div></div>
-                        <div class="bg-card p-2 rounded border border-zinc-800 text-center"><div class="text-[9px] text-gray-custom uppercase font-bold text-zinc-500">Tổng DCA</div><div id="sumDCACount" class="text-lg font-bold text-yellow-500">0</div></div>
-                    </div>
-                </div>
-                <div class="px-4 mt-5"><div class="bg-card rounded-xl p-4 border border-zinc-800"><div style="height: 220px;"><canvas id="balanceChart"></canvas></div></div></div>
-                <div class="px-4 mt-5"><div class="bg-card rounded-xl p-4 shadow-lg"><div class="text-[11px] font-bold text-yellow-500 mb-3 uppercase italic tracking-widest">Biến động Market (Bot #\${id+1})</div><table class="w-full text-[10px] text-left"><thead class="text-gray-custom border-b border-zinc-800 uppercase text-zinc-500"><tr><th>Coin</th><th>Giá Hiện Tại</th><th class="text-center">1M (%)</th><th class="text-center">5M (%)</th><th class="text-center">15M (%)</th></tr></thead><tbody id="marketBody"></tbody></table></div></div>
-                <div class="px-4 mt-5"><div class="bg-card rounded-xl p-4 shadow-lg"><div class="text-[11px] font-bold text-white mb-3 uppercase tracking-wider flex items-center"><span class="w-2 h-2 bg-green-500 rounded-full mr-2 animate-pulse"></span> Vị thế đang mở</div><table class="w-full text-[10px] text-left"><thead class="text-gray-custom uppercase border-b border-zinc-800 text-zinc-500"><tr><th>STT</th><th>Pair</th><th>DCA</th><th>Margin</th><th class="text-center">Entry/Live</th><th class="text-right">PnL (ROI%)</th></tr></thead><tbody id="pendingBody"></tbody></table></div></div>
-                <div class="px-4 mt-5 pb-20"><div class="bg-card rounded-xl p-4 shadow-lg"><div class="text-[11px] font-bold text-gray-custom mb-3 uppercase tracking-wider italic text-zinc-500">Nhật ký giao dịch bot #\${id+1}</div><table class="w-full text-[9px] text-left"><thead class="text-gray-custom border-b border-zinc-800 uppercase text-zinc-500"><tr><th>Time</th><th>Pair/Vol</th><th>DCA</th><th>Margin</th><th>Avg Price</th><th class="text-right">PnL Net</th></tr></thead><tbody id="historyBody"></tbody></table></div></div>
-            \`;
-
-            // Khởi chạy lại Chart.js của code gốc
-            initOriginalChart();
-            document.getElementById('setup').classList.add('hidden');
-            document.getElementById('active').classList.remove('hidden');
-        }
-
-        function closeDetail() {
-            isViewDetail = false;
-            document.getElementById('dashView').style.display = 'block';
-            document.getElementById('detailView').style.display = 'none';
-        }
-
-        // BÊ NGUYÊN LOGIC UPDATE CỦA CODE GỐC VÀO ĐÂY (CHỈ THAY ĐỔI FETCH API ĐỂ LẤY THEO ID)
-        async function updateOriginal() {
-            if (!isViewDetail) return;
-            const res = await fetch(\`/api/data?id=\${currentBotId}\`);
-            const d = await res.json();
-            
-            // TỪ ĐÂY LÀ CODE GỐC 100% CỦA ÔNG
-            document.getElementById('marketBody').innerHTML = (d.live || []).slice(0, 10).map(m => \`
-                <tr class="border-b border-zinc-800/30 text-[11px]"><td class="font-bold text-white py-2">\${m.symbol}</td><td class="text-yellow-500">\${m.currentPrice.toFixed(4)}</td><td class="text-center font-bold \${m.c1>=0?'up':'down'}">\${m.c1}%</td><td class="text-center font-bold \${m.c5>=0?'up':'down'}">\${m.c5}%</td><td class="text-center font-bold \${m.c15>=0?'up':'down'}">\${m.c15}%</td></tr>\`).join('');
-
-            document.getElementById('pendingBody').innerHTML = (d.pending || []).map((h, idx) => {
-                let lp = d.allPrices[h.symbol] || h.avgPrice;
-                let roi = (h.type === 'LONG' ? (lp-h.avgPrice)/h.avgPrice : (h.avgPrice-lp)/h.avgPrice) * 100 * (h.maxLev || 20);
-                return \`<tr class="bg-white/5 border-b border-zinc-800"><td>\${idx+1}</td><td class="text-white font-bold">\${h.symbol} [\${h.type}]</td><td class="text-yellow-500 font-bold">\${h.dcaCount}</td><td>\${h.snapPrice}</td><td>\${lp}</td><td class="text-right font-bold \${roi>=0?'up':'down'}">\${roi.toFixed(2)}%</td></tr>\`;
-            }).join('');
-            
-            // ... (Các phần update winCount, pnlWin bê nguyên xi code gốc vào đây)
-        }
-
-        let myChart = null;
-        function initOriginalChart() {
-            const ctx = document.getElementById('balanceChart').getContext('2d');
-            if(myChart) myChart.destroy();
-            myChart = new Chart(ctx, {
-                type: 'line', 
-                data: { labels: [], datasets: [{ label: 'Equity', data: [], borderWidth: 2, fill: true, tension: 0.1, borderColor: '#0ecb81', backgroundColor: 'rgba(14, 203, 129, 0.1)' }] },
-                options: { responsive: true, maintainAspectRatio: false, animation: { duration: 0 }, plugins: { legend: { display: false } } }
-            });
-        }
-
-        setInterval(updateDash, 1000);
-        setInterval(updateOriginal, 1000);
-    </script></body></html>`);
-});
-
-// LOGIC WS GIỮ NGUYÊN 100% NHƯ CODE GỐC CỦA ÔNG
-function initWS() {
-    const ws = new WebSocket('wss://fstream.binance.com/ws/!ticker@arr');
-    ws.on('message', (data) => {
-        const tickers = JSON.parse(data);
+    checkTrade(s, p, c1, c5, c15) {
         const now = Date.now();
-        tickers.forEach(t => {
-            const s = t.s, p = parseFloat(t.c);
-            if (!coinData[s]) coinData[s] = { symbol: s, prices: [] };
-            coinData[s].prices.push({ p, t: now });
-            if (coinData[s].prices.length > 300) coinData[s].prices.shift();
-            coinData[s].live = { 
-                c1: calculateChange(coinData[s].prices, 1), 
-                c5: calculateChange(coinData[s].prices, 5), 
-                c15: calculateChange(coinData[s].prices, 15), 
-                currentPrice: p 
-            };
-            
-            // Xử lý logic 40 bot dựa trên code gốc
-            bots.forEach(bot => {
-                // Logic PENDING, DCA, WIN... bê nguyên 100% từ code của ông vào vòng lặp này
-            });
-        });
-    });
+        if (this.pending) {
+            const h = this.pending;
+            const diffAvg = ((p - h.avgPrice) / h.avgPrice) * 100;
+            const win = h.type === 'LONG' ? diffAvg >= this.tpTarget : diffAvg <= -this.tpTarget;
+            if (win) {
+                h.status = 'WIN'; h.endTime = now; h.finalPrice = p;
+                let margin = ( (this.capital + this.history.reduce((s, h) => s + h.netPnl, 0)) * 0.01 ) * (h.dcaCount + 1);
+                h.netPnl = margin * (h.type === 'LONG' ? diffAvg : -diffAvg) / 100 * (h.maxLev || 20);
+                this.history.push(h); this.pending = null; this.lastTradeTime = now;
+                return;
+            }
+            // Logic DCA: Sau lần 9 cứ mỗi 1% DCA thêm 1 lần
+            const totalDiff = ((p - h.snapPrice) / h.snapPrice) * 100;
+            let nextThreshold = h.dcaCount < 9 ? (h.dcaCount + 1) * this.dcaStep : (9 * this.dcaStep) + (h.dcaCount - 8);
+            if (h.type === 'LONG' ? totalDiff <= -nextThreshold : totalDiff >= nextThreshold) {
+                h.dcaCount++; h.avgPrice = ((h.avgPrice * h.dcaCount) + p) / (h.dcaCount + 1);
+                h.dcaHistory.push({ t: now, p: p, avg: h.avgPrice });
+            }
+        } else if (Math.max(Math.abs(c1), Math.abs(c5), Math.abs(c15)) >= this.minVol && (now - this.lastTradeTime > COOLDOWN_MINUTES * 60000)) {
+            let type = this.mode;
+            if (this.mode === 'FOLLOW') type = c1 > 0 ? 'LONG' : 'SHORT';
+            if (this.mode === 'REVERSE') type = c1 > 0 ? 'SHORT' : 'LONG';
+            this.pending = { symbol: s, startTime: now, snapPrice: p, avgPrice: p, type, dcaCount: 0, maxLev: symbolMaxLeverage[s] || 20, dcaHistory: [{ t: now, p: p, avg: p }], tpTarget: this.tpTarget, snapPrice: p };
+        }
+    }
 }
+
+MODES.forEach(m => { for (let v = 1; v <= 10; v++) { bots.push(new LuffyBot(bots.length, m, v)); } });
 
 function calculateChange(pArr, min) {
     if (!pArr || pArr.length < 2) return 0;
@@ -258,4 +79,176 @@ function calculateChange(pArr, min) {
     return parseFloat((((pArr[pArr.length - 1].p - start.p) / start.p) * 100).toFixed(2));
 }
 
-app.listen(PORT, '0.0.0.0', () => { initWS(); console.log(`http://localhost:${PORT}/gui`); });
+function initWS() {
+    const ws = new WebSocket('wss://fstream.binance.com/ws/!ticker@arr');
+    ws.on('message', (data) => {
+        const tickers = JSON.parse(data); const now = Date.now();
+        tickers.forEach(t => {
+            const s = t.s, p = parseFloat(t.c);
+            if (!coinData[s]) coinData[s] = { symbol: s, prices: [] };
+            coinData[s].prices.push({ p, t: now });
+            if (coinData[s].prices.length > 200) coinData[s].prices.shift();
+            const c1 = calculateChange(coinData[s].prices, 1), c5 = calculateChange(coinData[s].prices, 5), c15 = calculateChange(coinData[s].prices, 15);
+            coinData[s].live = { c1, c5, c15, currentPrice: p };
+            bots.forEach(bot => bot.checkTrade(s, p, c1, c5, c15));
+        });
+    });
+    ws.on('close', () => setTimeout(initWS, 5000));
+}
+
+app.get('/api/data', (req, res) => {
+    res.json({
+        bots: bots.map(b => ({
+            id: b.id, mode: b.mode, vol: b.minVol,
+            balance: (b.capital + b.history.reduce((s, h) => s + h.netPnl, 0)).toFixed(2),
+            available: b.getAvailableBalance().toFixed(2),
+            winCount: b.history.length,
+            pnlWin: b.history.reduce((s, h) => s + h.netPnl, 0).toFixed(2),
+            isTrading: !!b.pending, pair: b.pending?.symbol || null,
+            pending: b.pending, history: b.history.slice(-15)
+        }))
+    });
+});
+
+app.get('/gui', (req, res) => {
+    res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8">
+    <title>Luffy Multi-40 Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;600;700&display=swap');
+        body { background: #0b0e11; color: #eaecef; font-family: 'IBM Plex Sans', sans-serif; overflow-x: hidden; }
+        .grid-container { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; padding: 15px; }
+        .bot-card { background: #1e2329; border: 1px solid #30363d; padding: 12px; border-radius: 4px; cursor: pointer; transition: 0.1s; }
+        .bot-card:hover { border-color: #fcd535; transform: translateY(-2px); }
+        .active { border-left: 4px solid #fcd535; background: #2b3139; }
+        .up { color: #0ecb81; } .down { color: #f6465d; }
+        #detailView { display:none; position:fixed; top:0; left:0; width:100%; height:100vh; background:#0b0e11; z-index:1000; overflow-y:auto; }
+        .col-header { text-align: center; font-weight: 900; color: #fcd535; padding: 10px; border-bottom: 2px solid #30363d; margin-bottom: 10px; text-transform: uppercase; letter-spacing: 2px; font-style: italic; }
+    </style></head><body>
+
+    <div id="dashView">
+        <div class="p-4 bg-[#1e2329] border-b border-[#fcd535] flex justify-between items-center sticky top-0 z-50 shadow-xl">
+            <h1 class="text-2xl font-black italic text-[#fcd535] tracking-tighter">LUFFY MULTI-40</h1>
+            <div class="text-[10px] text-zinc-500 font-bold uppercase tracking-widest text-right">© 2026 TunggBeoo | UTC+7 | 1% Margin</div>
+        </div>
+        
+        <div class="grid grid-cols-4 px-[15px] pt-4">
+            <div class="col-header border-green-500/50">LONG ONLY</div>
+            <div class="col-header border-red-500/50">SHORT ONLY</div>
+            <div class="col-header border-orange-500/50">REVERSE</div>
+            <div class="col-header border-blue-500/50">FOLLOW</div>
+        </div>
+
+        <div id="grid40" class="grid-container"></div>
+    </div>
+
+    <div id="detailView">
+        <div class="p-4 bg-[#fcd535] text-black font-black text-center cursor-pointer hover:bg-yellow-400 transition-all uppercase italic" onclick="closeDetail()">
+             <<< QUAY LẠI DASHBOARD TỔNG QUAN >>>
+        </div>
+        <div id="detailContent" class="p-6"></div>
+    </div>
+
+    <script>
+        let allBots = [];
+        async function update() {
+            try {
+                const res = await fetch('/api/data');
+                const d = await res.json(); allBots = d.bots;
+                
+                // Sắp xếp 40 bot vào 4 cột: Cột 1 (0-9), Cột 2 (10-19), Cột 3 (20-29), Cột 4 (30-39)
+                // Grid grid-cols-4 sẽ tự động đổ theo hàng ngang, nên ta phải sắp xếp mảng hiển thị
+                let gridHTML = "";
+                for(let row=0; row<10; row++) {
+                    for(let col=0; col<4; col++) {
+                        const b = allBots[col * 10 + row];
+                        gridHTML += \`
+                            <div class="bot-card \${b.isTrading ? 'active' : ''}" onclick="openDetail(\${b.id})">
+                                <div class="flex justify-between text-[10px] font-bold mb-1">
+                                    <span class="text-zinc-500">ID#\${b.id+1}</span>
+                                    <span class="text-yellow-500">Vol \${b.vol}%</span>
+                                </div>
+                                <div class="text-sm font-black text-white">\${b.available} <span class="text-[9px] text-zinc-500">USD</span></div>
+                                <div class="flex justify-between mt-2 text-[10px]">
+                                    <span class="text-zinc-500 font-bold">W: \${b.winCount}</span>
+                                    <span class="up font-black">+\${b.pnlWin}</span>
+                                </div>
+                                \${b.isTrading ? \`<div class="mt-2 text-[10px] font-black text-[#fcd535] animate-pulse border-t border-zinc-800 pt-1 text-center italic uppercase">\${b.pair}</div>\` : ''}
+                            </div>\`;
+                    }
+                }
+                document.getElementById('grid40').innerHTML = gridHTML;
+            } catch(e) {}
+        }
+
+        function openDetail(id) {
+            const b = allBots[id];
+            document.getElementById('dashView').style.display = 'none';
+            document.getElementById('detailView').style.display = 'block';
+            
+            document.getElementById('detailContent').innerHTML = \`
+                <div class="bg-card p-6 rounded-xl border-l-8 border-[#fcd535] mb-6 shadow-2xl">
+                    <div class="flex justify-between items-center mb-4">
+                        <h2 class="text-4xl font-black italic text-white uppercase tracking-tighter">BOT #\${b.id+1} <span class="text-[#fcd535]">| \${b.mode} \${b.vol}%</span></h2>
+                        <div class="text-right"><p class="text-xs text-zinc-500 font-bold uppercase">Trạng thái</p><p class="font-black \${b.isTrading ? 'up animate-pulse' : 'text-zinc-600'}">\${b.isTrading ? 'ĐANG CHIẾN ĐẤU' : 'ĐANG QUÉT SÓNG'}</p></div>
+                    </div>
+                    <div class="grid grid-cols-4 gap-4">
+                        <div class="bg-[#0b0e11] p-4 rounded border border-zinc-800">
+                            <p class="text-[10px] text-zinc-500 font-bold uppercase">Khả dụng (Equity)</p>
+                            <p class="text-2xl font-black text-white">\${b.available} <span class="text-xs font-normal">USDT</span></p>
+                        </div>
+                        <div class="bg-[#0b0e11] p-4 rounded border border-zinc-800 text-center">
+                            <p class="text-[10px] text-zinc-500 font-bold uppercase">PnL Lãi ròng</p>
+                            <p class="text-2xl font-black up">+\${b.pnlWin}</p>
+                        </div>
+                        <div class="bg-[#0b0e11] p-4 rounded border border-zinc-800 text-center">
+                            <p class="text-[10px] text-zinc-500 font-bold uppercase">Lệnh Win</p>
+                            <p class="text-2xl font-black text-white">\${b.winCount}</p>
+                        </div>
+                        <div class="bg-[#0b0e11] p-4 rounded border border-zinc-800 text-center">
+                            <p class="text-[10px] text-zinc-500 font-bold uppercase">DCA Level</p>
+                            <p class="text-2xl font-black text-yellow-500">\${b.pending ? b.pending.dcaCount : 0}</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="bg-card rounded-xl p-4 shadow-lg mb-6 border border-zinc-800">
+                    <div class="text-[11px] font-bold text-white mb-4 uppercase tracking-widest flex items-center"><span class="w-2 h-2 bg-green-500 rounded-full mr-2 animate-pulse"></span> Vị thế đang gồng</div>
+                    <div class="overflow-x-auto"><table class="w-full text-[11px] text-left">
+                        <thead class="text-zinc-500 uppercase border-b border-zinc-800"><tr><th>Pair</th><th>Side</th><th>DCA</th><th>Entry</th><th>Avg Price</th><th class="text-right">Live ROI</th></tr></thead>
+                        <tbody>\${b.pending ? \`
+                            <tr class="bg-white/5"><td class="py-4 font-black text-white text-lg">\${b.pending.symbol}</td>
+                            <td><span class="px-2 py-1 \${b.pending.type==='LONG'?'bg-green-600':'bg-red-600'} rounded text-[10px] font-black">\${b.pending.type}</span></td>
+                            <td class="text-yellow-500 font-black text-lg">\${b.pending.dcaCount}</td>
+                            <td class="text-zinc-400 font-bold">\${b.pending.snapPrice}</td>
+                            <td class="text-yellow-500 font-bold">\${b.pending.avgPrice}</td>
+                            <td class="text-right font-black up text-lg animate-pulse">ROI LIVE %</td></tr>\` : '<tr><td colspan="6" class="text-center py-10 text-zinc-700 italic font-bold">CHƯA CÓ LỆNH</td></tr>'}
+                        </tbody>
+                    </table></div>
+                </div>
+
+                <div class="bg-card rounded-xl p-4 border border-zinc-800 shadow-2xl">
+                    <div class="text-[11px] font-bold text-zinc-500 mb-4 uppercase tracking-widest italic">Lịch sử 15 trận đánh gần nhất</div>
+                    <div class="overflow-x-auto"><table class="w-full text-[10px] text-left">
+                        <thead class="text-zinc-600 border-b border-zinc-800 uppercase"><tr><th>Thời gian</th><th>Pair</th><th>DCA</th><th>Vào/Ra</th><th>PnL Net</th><th class="text-right text-white">Số dư cuối</th></tr></thead>
+                        <tbody>\${b.history.reverse().map(h => \`
+                            <tr class="border-b border-zinc-800/30 hover:bg-white/5 transition-colors">
+                                <td class="py-3 text-zinc-500 text-[8px]">\${new Date(h.endTime).toLocaleString()}</td>
+                                <td><b class="text-white text-sm">\${h.symbol}</b> <span class="\${h.type==='LONG'?'up':'down'} font-black">[\${h.type}]</span></td>
+                                <td class="text-yellow-500 font-black">\${h.dcaCount}</td>
+                                <td class="text-zinc-400">\${h.snapPrice} <span class="mx-1">→</span> <b class="text-white">\${h.finalPrice}</b></td>
+                                <td class="up font-black text-sm">+\${h.netPnl.toFixed(2)}</td>
+                                <td class="text-right text-white font-bold text-sm">\${(100 + b.history.filter((_,i)=>i<=b.history.indexOf(h)).reduce((s,x)=>s+x.netPnl,0)).toFixed(2)}</td>
+                            </tr>\`).join('')}
+                        </tbody>
+                    </table></div>
+                </div>
+            \`;
+        }
+
+        function closeDetail() { document.getElementById('dashView').style.display = 'block'; document.getElementById('detailView').style.display = 'none'; }
+        setInterval(update, 1000); update();
+    </script></body></html>`);
+});
+
+app.listen(PORT, '0.0.0.0', () => { initWS(); console.log(`Hệ thống Multi-40 Luffy sẵn sàng: http://localhost:${PORT}/gui`); });
