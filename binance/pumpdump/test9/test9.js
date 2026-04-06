@@ -9,59 +9,53 @@ import fs from 'fs';
 
 const app = express();
 let coinData = {}; 
-let symbolMaxLeverage = {};
+let symbolMaxLeverage = {}; 
 
-// Load cache đòn bẩy nếu có
-if (fs.existsSync(LEVERAGE_FILE)) { 
-    try { symbolMaxLeverage = JSON.parse(fs.readFileSync(LEVERAGE_FILE)); } catch(e){} 
-}
+if (fs.existsSync(LEVERAGE_FILE)) { try { symbolMaxLeverage = JSON.parse(fs.readFileSync(LEVERAGE_FILE)); } catch(e){} }
 
-// --- HÀNG ĐỢI LỆNH (CHỐNG BAN IP) ---
+// --- HÀNG ĐỢI LỆNH ---
 let actionQueue = [];
 async function processQueue() {
     if (actionQueue.length === 0) return;
     actionQueue.sort((a, b) => a.priority - b.priority);
-    const task = actionQueue.shift();
-    task.action();
+    const task = actionQueue.shift(); task.action();
     setTimeout(processQueue, 300); 
 }
 setInterval(processQueue, 50);
 
-// --- CLASS BOT NHÂN BẢN 40 CẤU HÌNH (CÔ LẬP VỐN) ---
-class LuffyBot {
+// --- CLASS LUFFY CORE 40 ---
+class LuffyCore {
     constructor(id, mode, minVol) {
         this.id = id;
         this.mode = mode; 
         this.minVol = minVol;
-        this.capital = 100.0; // Vốn gốc mỗi bot là 100$
+        this.initialCapital = 100.0; // Vốn gốc mỗi cấu hình
         this.history = [];
         this.pending = null;
         this.lastTradeTime = 0;
-        this.tpTarget = 0.3; // Chốt lời 0.3% giá
-        this.dcaStep = 10.0; // Bước DCA 10%
+        this.tpTarget = 0.3; 
+        this.dcaStep = 10.0; 
     }
 
     getStats() {
-        // TÍNH TOÁN CHUẨN: Không lấy lãi tổng, chỉ lấy lãi của riêng bot này
         let pnlWin = this.history.reduce((s, h) => s + (h.netPnl || 0), 0);
-        let openMargin = 0; 
-        let livePnl = 0; 
-        let roi = 0;
-
+        let openMargin = 0; let livePnl = 0; let roi = 0;
+        
         if (this.pending) {
             openMargin = this.pending.totalMargin;
             let lp = coinData[this.pending.symbol]?.live?.currentPrice || this.pending.avgPrice;
             let diff = ((lp - this.pending.avgPrice) / this.pending.avgPrice) * 100;
-            // ROI Margin = % giá * đòn bẩy
             roi = diff * (this.pending.type === 'LONG' ? 1 : -1) * (this.pending.maxLev || 20);
             livePnl = openMargin * roi / 100;
         }
 
-        let currentEquity = this.capital + pnlWin + livePnl;
-        let available = (this.capital + pnlWin) - openMargin; // Tiền mặt thực tế còn lại để DCA
+        // Vốn thực tế = Vốn gốc + Lãi chốt + Lãi chạy
+        let equity = this.initialCapital + pnlWin + livePnl;
+        // Vốn khả dụng = (Vốn gốc + Lãi chốt) - Margin đang giam + Lãi chạy
+        let available = (this.initialCapital + pnlWin - openMargin) + livePnl;
 
         return { 
-            total: currentEquity, 
+            equity, 
             available: Math.max(0, available), 
             pnlWin, 
             livePnl, 
@@ -85,44 +79,30 @@ class LuffyBot {
                 this.history.push(h); this.pending = null; this.lastTradeTime = now; return;
             }
 
-            // LOGIC DCA TỬ THẦN: Sau 9 lần, mỗi 1% nhồi 1 lệnh
             const totalDiffFromEntry = ((p - h.snapPrice) / h.snapPrice) * 100;
             let nextThreshold = h.dcaCount < 9 ? (h.dcaCount + 1) * this.dcaStep : (90 + (h.dcaCount - 8));
             const triggerDCA = h.type === 'LONG' ? totalDiffFromEntry <= -nextThreshold : totalDiffFromEntry >= nextThreshold;
 
-            if (triggerDCA && !actionQueue.find(q => q.id === `${this.id}_${s}`)) {
-                actionQueue.push({ id: `${this.id}_${s}`, priority: 1, action: () => {
-                    const newMargin = stats.available * 0.01; // Lấy 1% của khả dụng thực tế
-                    h.totalMargin += newMargin; h.dcaCount++;
+            if (triggerDCA && !actionQueue.find(q => q.id === `b\${this.id}_\${s}`)) {
+                actionQueue.push({ id: `b\${this.id}_\${s}`, priority: 1, action: () => {
+                    const m = stats.available * 0.01; // Margin 1% khả dụng
+                    h.totalMargin += m; h.dcaCount++;
                     h.avgPrice = ((h.avgPrice * h.dcaCount) + p) / (h.dcaCount + 1);
                 }});
             }
         } else if (Math.max(Math.abs(c1), Math.abs(c5), Math.abs(c15)) >= this.minVol && (now - this.lastTradeTime > COOLDOWN_MINUTES * 60000)) {
-            // VÀO LỆNH MỚI
-            if (!actionQueue.find(q => q.id === `${this.id}_${s}`)) {
-                actionQueue.push({ id: `${this.id}_${s}`, priority: 2, action: () => {
+            if (!actionQueue.find(q => q.id === `b\${this.id}_\${s}`)) {
+                actionQueue.push({ id: `b\${this.id}_\${s}`, priority: 2, action: () => {
                     let type = this.mode === 'FOLLOW' ? (c1 > 0 ? 'LONG' : 'SHORT') : (this.mode === 'REVERSE' ? (c1 > 0 ? 'SHORT' : 'LONG') : this.mode);
-                    this.pending = { 
-                        symbol: s, startTime: now, snapPrice: p, avgPrice: p, type, 
-                        dcaCount: 0, totalMargin: stats.available * 0.01, 
-                        maxLev: symbolMaxLeverage[s] || 20, snapVol: { c1, c5, c15 } 
-                    };
+                    this.pending = { symbol: s, startTime: now, snapPrice: p, avgPrice: p, type, dcaCount: 0, totalMargin: stats.available * 0.01, maxLev: symbolMaxLeverage[s] || 20, snapVol: { c1, c5, c15 } };
                 }});
             }
         }
     }
 }
 
-let bots = [];
-['FOLLOW', 'REVERSE', 'LONG', 'SHORT'].forEach(m => { for (let v = 1; v <= 10; v++) bots.push(new LuffyBot(bots.length, m, v)); });
-
-// --- XỬ LÝ DATA BINANCE ---
-function calculateChange(pArr, min) {
-    if (!pArr || pArr.length < 2) return 0;
-    const now = Date.now();
-    let start = pArr.find(i => i.t >= (now - min * 60000)) || pArr[0]; 
-    return parseFloat((((pArr[pArr.length - 1].p - start.p) / start.p) * 100).toFixed(2));
-}
+let botCores = [];
+['FOLLOW', 'REVERSE', 'LONG', 'SHORT'].forEach(m => { for (let v = 1; v <= 10; v++) botCores.push(new LuffyCore(botCores.length, m, v)); });
 
 function initWS() {
     const ws = new WebSocket('wss://fstream.binance.com/ws/!ticker@arr');
@@ -135,150 +115,138 @@ function initWS() {
             if (coinData[s].prices.length > 300) coinData[s].prices.shift();
             const c1 = calculateChange(coinData[s].prices, 1), c5 = calculateChange(coinData[s].prices, 5), c15 = calculateChange(coinData[s].prices, 15);
             coinData[s].live = { c1, c5, c15, currentPrice: p };
-            bots.forEach(b => b.update(s, p, c1, c5, c15));
+            botCores.forEach(b => b.update(s, p, c1, c5, c15));
         });
     });
     ws.on('close', () => setTimeout(initWS, 5000));
 }
+function calculateChange(pArr, min) {
+    if (!pArr || pArr.length < 2) return 0;
+    const now = Date.now();
+    let start = pArr.find(i => i.t >= (now - min * 60000)) || pArr[0]; 
+    return parseFloat((((pArr[pArr.length - 1].p - start.p) / start.p) * 100).toFixed(2));
+}
 
-// --- SERVER HTTP & GUI ---
+// --- GUI ---
 app.get('/api/data', (req, res) => {
-    const bData = bots.map(b => ({ ...b, stats: b.getStats() }));
-    const sumPnlWin = bData.reduce((s, b) => s + b.stats.pnlWin, 0);
-    const sumLivePnl = bData.reduce((s, b) => s + b.stats.livePnl, 0);
-    res.json({ 
-        bots: bData, 
-        summary: { 
-            totalPnlWin: sumPnlWin, 
-            totalLivePnl: sumLivePnl, 
-            totalEquity: 4000 + sumPnlWin + sumLivePnl, 
-            totalWin: bData.reduce((s, b) => s + b.stats.winCount, 0) 
-        }, 
-        topMarket: Object.entries(coinData).filter(([_,v])=>v.live).map(([s,v])=>({symbol:s, ...v.live})).sort((a,b)=>Math.abs(b.c1)-Math.abs(a.c1)).slice(0,10) 
+    const data = botCores.map(b => ({ ...b, stats: b.getStats() }));
+    res.json({
+        bots: data,
+        summary: {
+            totalEquity: data.reduce((s, b) => s + b.stats.equity, 0),
+            totalPnlWin: data.reduce((s, b) => s + b.stats.pnlWin, 0),
+            totalLivePnl: data.reduce((s, b) => s + b.stats.livePnl, 0),
+            totalWin: data.reduce((s, b) => s + b.stats.winCount, 0),
+            active: data.filter(b => b.pending).length
+        },
+        topMarket: Object.entries(coinData).filter(([_,v])=>v.live).map(([s,v])=>({symbol:s, ...v.live})).sort((a,b)=>Math.abs(b.c1)-Math.abs(a.c1)).slice(0,10)
     });
 });
 
 app.get('/gui', (req, res) => {
-    res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>LUFFY 40-CORE ULTRA</title>
+    res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>LUFFY 40-CORE FULL INFO</title>
     <script src="https://cdn.tailwindcss.com"></script><script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
         body { background: #0b0e11; color: #eaecef; font-family: 'IBM Plex Sans', sans-serif; }
         .up { color: #0ecb81; } .down { color: #f6465d; }
         .bg-card { background: #1e2329; border: 1px solid #30363d; }
-        .bot-card { background: #1e2329; border: 1px solid #30363d; border-radius: 4px; padding: 8px; cursor: pointer; transition: 0.2s; position:relative; }
+        .bot-card { background: #1e2329; border: 1px solid #30363d; padding: 6px; cursor: pointer; border-radius: 4px; position: relative; }
         .bot-card:hover { border-color: #fcd535; }
-        .bot-card.active { border-left: 4px solid #fcd535; background: #2b3139; }
-        #fullModal { display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:#0b0e11; z-index:9999; overflow-y:auto; }
+        .bot-card.active { border-left: 3px solid #fcd535; background: #2b3139; }
+        #detailModal { display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:#0b0e11; z-index:9999; overflow-y:auto; }
     </style></head><body>
 
     <div id="dash">
         <div class="p-4 bg-[#1e2329] border-b border-zinc-800 sticky top-0 z-50">
             <div class="flex justify-between items-center mb-4">
-                <div class="font-black italic text-2xl text-white">LUFFY <span class="text-[#fcd535]">40-CORE</span> DASHBOARD</div>
-                <div class="text-[10px] font-bold text-zinc-500">REALTIME PNL CALCULATION</div>
+                <div class="font-black italic text-xl text-white">LUFFY <span class="text-[#fcd535]">40-CORE</span> PRO</div>
+                <div class="flex gap-4">
+                   <div class="text-right"><div class="text-[9px] text-zinc-500 uppercase font-bold">Tổng Equity</div><div id="sumEq" class="text-lg font-bold text-white">0.00</div></div>
+                   <div class="text-right"><div class="text-[9px] text-zinc-500 uppercase font-bold">Tổng PnL Win</div><div id="sumWin" class="text-lg font-bold text-green-400">0.00</div></div>
+                   <div class="text-right"><div class="text-[9px] text-zinc-500 uppercase font-bold">Vị thế mở</div><div id="sumOpen" class="text-lg font-bold text-blue-400">0</div></div>
+                </div>
             </div>
-            <div class="grid grid-cols-4 gap-4">
-                <div><div class="text-[10px] text-zinc-500 uppercase font-bold">Hạm đội Equity</div><div id="sumEquity" class="text-2xl font-bold text-white">4000.00</div></div>
-                <div><div class="text-[10px] text-zinc-500 uppercase font-bold">Tổng lãi chốt</div><div id="sumPnlWin" class="text-2xl font-bold text-green-400">0.00</div></div>
-                <div><div class="text-[10px] text-zinc-500 uppercase font-bold">Lãi đang chạy</div><div id="sumLivePnl" class="text-2xl font-bold">0.00</div></div>
-                <div><div class="text-[10px] text-zinc-500 uppercase font-bold">Lệnh Win</div><div id="sumWinCount" class="text-2xl font-bold text-yellow-500">0</div></div>
+            <div class="grid grid-cols-4 gap-2 text-center text-[10px] font-black text-zinc-600 uppercase tracking-widest">
+                <div>Follow (1-10%)</div><div>Reverse (1-10%)</div><div>Long Only</div><div>Short Only</div>
             </div>
         </div>
 
-        <div class="grid grid-cols-4 gap-2 px-2 mt-4 text-center text-[10px] font-black text-zinc-600 uppercase">
-            <div>Follow</div><div>Reverse</div><div>Long Only</div><div>Short Only</div>
-        </div>
         <div id="gridBots" class="grid grid-cols-4 gap-2 p-2"></div>
     </div>
 
-    <div id="fullModal">
-        <div class="p-3 bg-[#fcd535] text-black font-black text-center cursor-pointer sticky top-0 z-[10000]" onclick="closeModal()">ĐÓNG CHI TIẾT</div>
+    <div id="detailModal">
+        <div class="p-3 bg-[#fcd535] text-black font-black text-center cursor-pointer sticky top-0" onclick="closeModal()">ĐÓNG CHI TIẾT</div>
         <div id="modalBody" class="p-4"></div>
     </div>
 
     <script>
-        let botsData = []; let myChart = null; let activeId = null;
-        function fPrice(p) { return p ? parseFloat(p).toFixed(4) : "0.0000"; }
-
+        let bots = []; let myChart = null; let activeId = null;
         async function update() {
-            const res = await fetch('/api/data'); const d = await res.json(); botsData = d.bots;
-            document.getElementById('sumEquity').innerText = d.summary.totalEquity.toFixed(2);
-            document.getElementById('sumPnlWin').innerText = d.summary.totalPnlWin.toFixed(2);
-            document.getElementById('sumLivePnl').innerText = d.summary.totalLivePnl.toFixed(2);
-            document.getElementById('sumLivePnl').className = 'text-2xl font-bold ' + (d.summary.totalLivePnl >= 0 ? 'up' : 'down');
-            document.getElementById('sumWinCount').innerText = d.summary.totalWin;
+            const res = await fetch('/api/data'); const d = await res.json(); bots = d.bots;
+            document.getElementById('sumEq').innerText = d.summary.totalEquity.toFixed(2);
+            document.getElementById('sumWin').innerText = d.summary.totalPnlWin.toFixed(2);
+            document.getElementById('sumOpen').innerText = d.summary.active;
 
             let html = "";
-            for(let row=0; row<10; row++) {
-                [0, 10, 20, 30].forEach(col => {
-                    const b = botsData[col + row]; const s = b.stats;
-                    html += \`
-                    <div class="bot-card \${b.pending?'active':''}" onclick="openModal(\${b.id})">
-                        <div class="flex justify-between text-[8px] font-bold text-zinc-500 mb-1">
-                            <span>#\${b.id+1} | VOL \${b.minVol}%</span>
-                            <span class="\${b.pending?'up':'text-zinc-700'}">\${b.pending?'TRADING':'WAITING'}</span>
-                        </div>
-                        <div class="flex justify-between items-center">
-                            <div class="text-[12px] font-black text-white">\${b.pending?b.pending.symbol:'---'}</div>
-                            <div class="text-[9px] font-bold \${s.livePnl>=0?'up':'down'}">\${s.livePnl.toFixed(2)}$</div>
-                        </div>
-                        <div class="flex justify-between text-[8px] mt-1 text-zinc-500">
-                            <span>ROI: <b class="\${s.roi>=0?'up':'down'}">\${s.roi.toFixed(1)}%</b></span>
-                            <span>DCA: \${b.pending?b.pending.dcaCount:0}</span>
-                        </div>
-                    </div>\`;
-                });
-            }
+            bots.forEach(b => {
+                const s = b.stats;
+                html += \`
+                <div class="bot-card \${b.pending?'active':''}" onclick="openModal(\${b.id})">
+                    <div class="flex justify-between text-[8px] font-bold text-zinc-500 mb-1">
+                        <span>#\${b.id+1} | \${b.mode} | \${b.minVol}%</span>
+                        <span class="\${b.pending?'up':'text-zinc-700'} font-black uppercase">\${b.pending?b.pending.symbol:'IDLE'}</span>
+                    </div>
+                    <div class="grid grid-cols-2 gap-x-2 gap-y-1 text-[9px]">
+                        <div class="text-zinc-500">Equity: <b class="text-white">\${s.equity.toFixed(1)}</b></div>
+                        <div class="text-zinc-500">Profit: <b class="text-green-400">\${s.pnlWin.toFixed(1)}</b></div>
+                        <div class="text-zinc-500">Avail: <b class="text-yellow-500">\${s.available.toFixed(1)}</b></div>
+                        <div class="text-zinc-500 text-right">Win: <b class="text-white">\${s.winCount}</b></div>
+                    </div>
+                    <div class="flex justify-between mt-1 pt-1 border-t border-zinc-800/50">
+                        <div class="text-[10px] font-black \${s.livePnl>=0?'up':'down'}">\${s.livePnl>=0?'+':''}\${s.livePnl.toFixed(2)}$</div>
+                        <div class="text-[10px] font-black \${s.roi>=0?'up':'down'}">\${s.roi.toFixed(1)}%</div>
+                    </div>
+                </div>\`;
+            });
             document.getElementById('gridBots').innerHTML = html;
-            if(activeId !== null) renderModalContent(activeId, d.topMarket);
+            if(activeId !== null) renderModal(activeId, d.topMarket);
         }
 
-        function openModal(id) { activeId = id; document.getElementById('fullModal').style.display = 'block'; document.getElementById('dash').style.display = 'none'; }
-        function closeModal() { activeId = null; document.getElementById('fullModal').style.display = 'none'; document.getElementById('dash').style.display = 'block'; if(myChart) { myChart.destroy(); myChart = null; } }
+        function openModal(id) { activeId = id; document.getElementById('detailModal').style.display = 'block'; document.getElementById('dash').style.display = 'none'; }
+        function closeModal() { activeId = null; document.getElementById('detailModal').style.display = 'none'; document.getElementById('dash').style.display = 'block'; if(myChart) { myChart.destroy(); myChart = null; } }
 
-        function renderModalContent(id, topMarket) {
-            const b = botsData[id]; const s = b.stats;
+        function renderModal(id, topMarket) {
+            const b = bots[id]; const s = b.stats;
             const content = \`
                 <div class="flex justify-between items-end mb-4">
-                    <div><div class="text-zinc-500 text-[10px] font-bold uppercase">Equity Bot #\${id+1}</div><div class="text-4xl font-black text-white">\${s.total.toFixed(2)} <span class="text-sm">USDT</span></div></div>
+                    <div><div class="text-zinc-500 text-[10px] font-bold uppercase tracking-widest">Detail Bot #\${id+1}</div><div class="text-4xl font-black text-white">\${s.equity.toFixed(2)}</div></div>
                     <div class="text-right text-[10px] font-bold text-zinc-500 uppercase">Mode: \${b.mode} | Vol: \${b.minVol}%</div>
                 </div>
-                <div class="grid grid-cols-3 gap-2 mb-4">
-                    <div class="bg-card p-3 rounded text-center"><div class="text-[10px] text-zinc-500 uppercase font-bold">Khả dụng DCA</div><div class="text-xl font-bold text-green-400">\${s.available.toFixed(2)}</div></div>
-                    <div class="bg-card p-3 rounded text-center"><div class="text-[10px] text-zinc-500 uppercase font-bold">Lợi nhuận chốt</div><div class="text-xl font-bold text-white">\${s.pnlWin.toFixed(2)}</div></div>
-                    <div class="bg-card p-3 rounded text-center"><div class="text-[10px] text-zinc-500 uppercase font-bold">Lệnh Win</div><div class="text-xl font-bold text-yellow-500">\${s.winCount}</div></div>
+                <div class="bg-card rounded p-4 mb-4"><div style="height: 180px;"><canvas id="botChart"></canvas></div></div>
+                <div class="bg-card rounded p-3 mb-4">
+                    <div class="text-[10px] font-black text-yellow-500 mb-2 uppercase italic tracking-widest">Market Status (3 Khung)</div>
+                    <table class="w-full text-[10px] text-left"><thead><tr class="text-zinc-600 border-b border-zinc-800 uppercase"><th>Coin</th><th>Giá</th><th>1M</th><th>5M</th><th>15M</th></tr></thead>
+                    <tbody>\${topMarket.map(m=>\`<tr class="border-b border-zinc-800/30"><td class="py-1 font-bold text-white">\${m.symbol}</td><td class="text-yellow-500 font-bold">\${parseFloat(m.currentPrice).toFixed(4)}</td><td class="font-black \${m.c1>=0?'up':'down'}">\${m.c1}%</td><td class="font-black \${m.c5>=0?'up':'down'}">\${m.c5}%</td><td class="font-black \${m.c15>=0?'up':'down'}">\${m.c15}%</td></tr>\`).join('')}</tbody></table>
                 </div>
-                <div class="bg-card rounded-lg p-4 mb-4"><div style="height: 180px;"><canvas id="balanceChart"></canvas></div></div>
-                <div class="bg-card rounded-lg p-4 mb-4">
-                    <div class="text-[10px] font-bold text-yellow-500 mb-2 uppercase">Market 3 Khung</div>
-                    <table class="w-full text-[10px] text-left"><thead><tr class="text-zinc-600 border-b border-zinc-800"><th>Coin</th><th>Giá</th><th class="text-center">1M</th><th class="text-center">5M</th><th class="text-center">15M</th></tr></thead>
-                    <tbody>\${topMarket.map(m=>\`<tr class="border-b border-zinc-800/30 font-bold"><td class="py-1 text-white">\${m.symbol}</td><td class="text-yellow-500">\${fPrice(m.currentPrice)}</td><td class="text-center \${m.c1>=0?'up':'down'}">\${m.c1}%</td><td class="text-center \${m.c5>=0?'up':'down'}">\${m.c5}%</td><td class="text-center \${m.c15>=0?'up':'down'}">\${m.c15}%</td></tr>\`).join('')}</tbody></table>
+                <div class="bg-card rounded p-3 mb-4">
+                    <div class="text-[10px] font-black text-white mb-2 uppercase tracking-widest">Vị thế hiện tại</div>
+                    \${b.pending ? \`<div class="flex justify-between items-center p-3 bg-zinc-800/50 rounded"><div class="text-xl font-black text-white">\${b.pending.symbol} <span class="text-[10px] px-1 \${b.pending.type==='LONG'?'bg-green-600':'bg-red-600'}">\${b.pending.type}</span></div><div class="text-right"><div class="text-2xl font-black \${s.livePnl>=0?'up':'down'}">\${s.livePnl.toFixed(2)}$</div><div class="text-[10px] font-black \${s.roi>=0?'up':'down'}">\${s.roi.toFixed(1)}%</div></div></div>\` : '<div class="text-center py-4 text-zinc-700 font-bold italic uppercase tracking-tighter">Bot đang quét tín hiệu...</div>'}
                 </div>
-                <div class="bg-card rounded-lg p-4 mb-4">
-                    <div class="text-[10px] font-bold text-white mb-2 uppercase">Vị thế hiện tại</div>
-                    \${b.pending ? \`
-                    <div class="flex justify-between items-center p-2 bg-zinc-800/50 rounded border border-zinc-700">
-                        <div><div class="text-xl font-black text-white">\${b.pending.symbol} <span class="text-[10px] px-1 \${b.pending.type==='LONG'?'bg-green-600':'bg-red-600'}">\${b.pending.type}</span></div><div class="text-[10px] text-zinc-500 font-bold">AVG: \${fPrice(b.pending.avgPrice)}</div></div>
-                        <div class="text-right"><div class="text-2xl font-black \${s.livePnl>=0?'up':'down'}">\${s.livePnl.toFixed(2)}$</div><div class="text-[10px] font-bold \${s.roi>=0?'up':'down'}">\${s.roi.toFixed(1)}%</div></div>
-                    </div>\` : '<div class="text-center py-4 text-zinc-700 font-bold">KHÔNG CÓ VỊ THẾ</div>'}
-                </div>
-                <div class="bg-card rounded-lg p-4 text-[10px]">
-                    <div class="text-zinc-500 mb-2 uppercase font-bold">Lịch sử 5 lệnh gần nhất</div>
-                    \${b.history.slice(-5).reverse().map(h=>\`<div class="flex justify-between border-b border-zinc-800 py-1 font-bold"><span>\${h.symbol} (\${h.type})</span><span class="up">+\${h.netPnl.toFixed(2)}$</span></div>\`).join('')}
-                </div>
-            \`;
+                <div class="bg-card rounded p-3 text-[10px]">
+                    <div class="text-zinc-500 mb-2 uppercase font-bold tracking-widest">Lịch sử giao dịch</div>
+                    \${b.history.slice(-5).reverse().map(h=>\`<div class="flex justify-between border-b border-zinc-800 py-1.5 font-bold"><span class="text-white">\${h.symbol} (\${h.type})</span><span class="up">+\${h.netPnl.toFixed(2)}$</span></div>\`).join('')}
+                </div>\`;
             document.getElementById('modalBody').innerHTML = content;
             if(!myChart) initChart(b);
         }
 
         function initChart(b) {
-            const ctx = document.getElementById('balanceChart').getContext('2d');
+            const ctx = document.getElementById('botChart').getContext('2d');
             const data = b.history.map((h, i) => 100 + b.history.slice(0, i+1).reduce((s,x)=>s+x.netPnl, 0));
             myChart = new Chart(ctx, { type: 'line', data: { labels: b.history.map((_,i)=>i), datasets: [{ data: [100, ...data], borderColor: '#0ecb81', borderWidth: 2, fill: true, tension: 0.1, pointRadius: 0, backgroundColor: 'rgba(14, 203, 129, 0.05)' }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { display: false }, y: { grid: { color: 'rgba(255,255,255,0.02)' }, ticks: { color: '#848e9c', font: { size: 9 } } } }, animation: false } });
         }
-
         setInterval(update, 1000); update();
     </script></body></html>`);
 });
 
-app.listen(PORT, '0.0.0.0', () => { initWS(); console.log(`🚀 LUFFY 40-CORE READY: http://localhost:${PORT}/gui`); });
+app.listen(PORT, '0.0.0.0', () => { initWS(); console.log(`http://localhost:${PORT}/gui`); });
