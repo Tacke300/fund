@@ -1,4 +1,4 @@
-const PORT = 7001;
+const PORT = 7007;
 const HISTORY_FILE = './history_db.json';
 const LEVERAGE_FILE = './leverage_cache.json';
 const COOLDOWN_MINUTES = 15; 
