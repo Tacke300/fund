@@ -15,7 +15,7 @@ let historyMap = new Map();
 let symbolMaxLeverage = {}; 
 let lastTradeClosed = {}; 
 
-let currentTP = 0.5, currentSL = 10.0, currentMinVol = 6.5, tradeMode = 'FOLLOW';
+let currentTP = 0.5, currentSL = 10.0, currentMinVol = 6.5, tradeMode = 'FOLLOW', orderSideMode = 'BOTH';
 
 let actionQueue = [];
 async function processQueue() {
@@ -83,7 +83,6 @@ function initWS() {
                     return;
                 }
 
-                // Sửa logic DCA tính theo khoảng cách cố định từ SnapPrice (Entry đầu)
                 const totalDiffFromEntry = ((p - pending.snapPrice) / pending.snapPrice) * 100;
                 const nextDcaThreshold = (pending.dcaCount + 1) * pending.slTarget;
                 const triggerDCA = pending.type === 'LONG' ? totalDiffFromEntry <= -nextDcaThreshold : totalDiffFromEntry >= nextDcaThreshold;
@@ -104,7 +103,13 @@ function initWS() {
                     actionQueue.push({ id: s, priority: 2, action: () => {
                         const sumVol = c1 + c5 + c15;
                         let type = sumVol >= 0 ? 'LONG' : 'SHORT';
+                        
+                        // Chế độ Thuận/Ngược biến động
                         if (tradeMode === 'REVERSE') type = (type === 'LONG' ? 'SHORT' : 'LONG');
+
+                        // Lọc theo chiều lệnh Long/Short
+                        if (orderSideMode === 'LONG_ONLY' && type !== 'LONG') return;
+                        if (orderSideMode === 'SHORT_ONLY' && type !== 'SHORT') return;
 
                         historyMap.set(`${s}_${now}`, { 
                             symbol: s, startTime: Date.now(), snapPrice: p, avgPrice: p, type: type, status: 'PENDING', 
@@ -120,7 +125,11 @@ function initWS() {
 }
 
 app.get('/api/config', (req, res) => {
-    currentTP = parseFloat(req.query.tp); currentSL = parseFloat(req.query.sl); currentMinVol = parseFloat(req.query.vol); tradeMode = req.query.mode || 'FOLLOW';
+    currentTP = parseFloat(req.query.tp); 
+    currentSL = parseFloat(req.query.sl); 
+    currentMinVol = parseFloat(req.query.vol); 
+    tradeMode = req.query.mode || 'FOLLOW';
+    orderSideMode = req.query.side || 'BOTH';
     res.sendStatus(200);
 });
 
@@ -162,14 +171,23 @@ app.get('/gui', (req, res) => {
             <div><label class="text-[10px] text-gray-custom ml-1 uppercase font-bold">Vốn khởi tạo ($)</label><input id="balanceInp" type="number" class="p-2 rounded w-full text-yellow-500 font-bold outline-none text-sm"></div>
             <div><label class="text-[10px] text-gray-custom ml-1 uppercase font-bold">Margin per Trade</label><input id="marginInp" type="text" class="p-2 rounded w-full text-yellow-500 font-bold outline-none text-sm"></div>
             
-            <div class="col-span-2 grid grid-cols-4 gap-2 border-t border-zinc-800 pt-3 mt-1">
+            <div class="col-span-2 grid grid-cols-3 gap-2 border-t border-zinc-800 pt-3 mt-1">
                 <div><label class="text-[10px] text-gray-custom ml-1 uppercase">TP (%)</label><input id="tpInp" type="number" step="0.1" class="p-2 rounded w-full outline-none text-sm"></div>
                 <div><label class="text-[10px] text-gray-custom ml-1 uppercase">DCA (%)</label><input id="slInp" type="number" step="0.1" class="p-2 rounded w-full outline-none text-sm"></div>
                 <div><label class="text-[10px] text-gray-custom ml-1 uppercase">Min Vol (%)</label><input id="volInp" type="number" step="0.1" class="p-2 rounded w-full outline-none text-sm"></div>
-                <div><label class="text-[10px] text-gray-custom ml-1 uppercase">Chế độ</label>
+            </div>
+            <div class="col-span-2 grid grid-cols-2 gap-2 mt-1">
+                <div><label class="text-[10px] text-gray-custom ml-1 uppercase">Biến động</label>
                     <select id="modeInp" class="p-2 rounded w-full outline-none text-sm">
                         <option value="FOLLOW">THUẬN (FOLLOW)</option>
                         <option value="REVERSE">NGƯỢC (REVERSE)</option>
+                    </select>
+                </div>
+                <div><label class="text-[10px] text-gray-custom ml-1 uppercase">Chiều lệnh</label>
+                    <select id="sideInp" class="p-2 rounded w-full outline-none text-sm">
+                        <option value="BOTH">LONG & SHORT</option>
+                        <option value="LONG_ONLY">CHỈ LONG</option>
+                        <option value="SHORT_ONLY">CHỈ SHORT</option>
                     </select>
                 </div>
             </div>
@@ -241,6 +259,7 @@ app.get('/gui', (req, res) => {
     document.getElementById('slInp').value = saved.sl || 10.0;
     document.getElementById('volInp').value = saved.vol || 5.0;
     document.getElementById('modeInp').value = saved.mode || "FOLLOW";
+    document.getElementById('sideInp').value = saved.side || "BOTH";
 
     if(saved.running) {
         running = true; initialBal = saved.initialBal;
@@ -276,12 +295,24 @@ app.get('/gui', (req, res) => {
 
     function closeModal(id) { document.getElementById(id).style.display = 'none'; }
     function syncConfig() {
-        const tp = document.getElementById('tpInp').value, sl = document.getElementById('slInp').value, vol = document.getElementById('volInp').value, mode = document.getElementById('modeInp').value;
-        fetch(\`/api/config?tp=\${tp}&sl=\${sl}&vol=\${vol}&mode=\${mode}\`);
+        const tp = document.getElementById('tpInp').value, 
+              sl = document.getElementById('slInp').value, 
+              vol = document.getElementById('volInp').value, 
+              mode = document.getElementById('modeInp').value,
+              side = document.getElementById('sideInp').value;
+        fetch(\`/api/config?tp=\${tp}&sl=\${sl}&vol=\${vol}&mode=\${mode}&side=\${side}\`);
     }
     function start() {
         running = true; initialBal = parseFloat(document.getElementById('balanceInp').value);
-        localStorage.setItem('luffy_state', JSON.stringify({ running: true, initialBal, marginVal: document.getElementById('marginInp').value, tp: document.getElementById('tpInp').value, sl: document.getElementById('slInp').value, vol: document.getElementById('volInp').value, mode: document.getElementById('modeInp').value }));
+        localStorage.setItem('luffy_state', JSON.stringify({ 
+            running: true, initialBal, 
+            marginVal: document.getElementById('marginInp').value, 
+            tp: document.getElementById('tpInp').value, 
+            sl: document.getElementById('slInp').value, 
+            vol: document.getElementById('volInp').value, 
+            mode: document.getElementById('modeInp').value,
+            side: document.getElementById('sideInp').value
+        }));
         syncConfig(); location.reload();
     }
     function stop() { let s = JSON.parse(localStorage.getItem('luffy_state')); s.running = false; localStorage.setItem('luffy_state', JSON.stringify(s)); location.reload(); }
@@ -377,4 +408,4 @@ app.get('/gui', (req, res) => {
     </script></body></html>`);
 });
 
-app.listen(PORT, '0.0.0.0', () => { initWS(); console.log(`http://localhost:${PORT}/gui`); });  
+app.listen(PORT, '0.0.0.0', () => { initWS(); console.log(`http://localhost:${PORT}/gui`); });
