@@ -11,11 +11,12 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // ============================================================================
-// ⚙️ CẤU HÌNH CCXT - FIX LỖI -4061 (HEDGE MODE)
+// ⚙️ CẤU HÌNH CCXT - FIX TIMEOUT & HEDGE MODE
 // ============================================================================
 const exchange = new ccxt.binance({
     apiKey: API_KEY,
     secret: SECRET_KEY,
+    timeout: 30000, 
     options: { 
         defaultType: 'future', 
         dualSidePosition: true 
@@ -23,7 +24,7 @@ const exchange = new ccxt.binance({
 });
 
 // ============================================================================
-// ⚙️ CẤU HÌNH HỆ THỐNG (GIỮ NGUYÊN 100%)
+// ⚙️ CẤU HÌNH HỆ THỐNG
 // ============================================================================
 let botSettings = { 
     isRunning: false,
@@ -91,7 +92,6 @@ async function callBinance(endpoint, method = 'GET', params = {}, retries = 3) {
     }
 }
 
-// 🛡️ HÀM CẬP NHẬT GIÁP SÀN (TP/SL) - DÙNG CCXT CHO PHÒNG HỘ
 async function updateSànGiáp(symbol, side, posSide, tp, sl) {
     try {
         await exchange.cancelAllOrders(symbol);
@@ -115,7 +115,6 @@ async function updateSànGiáp(symbol, side, posSide, tp, sl) {
     }
 }
 
-// 🚀 MỞ VỊ THẾ (GIỮ NGUYÊN LOGIC GỐC)
 async function openPosition(symbol, side, info, isReverse = false) {
     const posSide = side === 'BUY' ? 'LONG' : 'SHORT';
     try {
@@ -235,22 +234,15 @@ async function mainLoop() {
             }
         }
 
-        // --- TÌM KÈO MỚI + ĐIỀU KIỆN LEVERAGE >= 20 ---
         if (activeOrdersTracker.size < botSettings.maxPositions) {
             for (const coin of status.candidatesList) {
                 const info = status.exchangeInfo[coin.symbol];
-                
-                // Kiểm tra: Chưa có lệnh, vol đạt chuẩn VÀ max leverage phải >= 20
                 if (!activeOrdersTracker.has(coin.symbol) && !pendingSymbols.has(coin.symbol) && coin.maxV >= botSettings.minVol) {
-                    
                     if (info && info.maxLeverage >= 20) {
                         pendingSymbols.add(coin.symbol);
                         await openPosition(coin.symbol, coin.c1 >= 0 ? 'BUY' : 'SELL', info);
                         setTimeout(() => pendingSymbols.delete(coin.symbol), 5000);
                         break;
-                    } else {
-                        // Log nhẹ để biết là bỏ qua do lev thấp (có thể xóa dòng này nếu muốn sạch log)
-                        // console.log(`⏭️ Bỏ qua ${coin.symbol} do Max Lev chỉ x${info?.maxLeverage || '?'}`);
                     }
                 }
             }
@@ -258,7 +250,6 @@ async function mainLoop() {
     } catch (e) {}
 }
 
-// --- CÁC HÀM CƠ BẢN ---
 setInterval(() => {
     http.get('http://127.0.0.1:9000/api/data', res => {
         let d = ''; res.on('data', c => d += c);
@@ -275,8 +266,6 @@ async function init() {
     try {
         const acc = await callBinance('/fapi/v2/account');
         status.initialBalance = status.dayStartBalance = status.currentBalance = parseFloat(acc.totalWalletBalance);
-        
-        // Lấy exchangeInfo bao gồm cả bracket (leverage)
         const info = await callBinance('/fapi/v1/exchangeInfo');
         const brackets = await callBinance('/fapi/v1/leverageBracket');
 
@@ -284,7 +273,6 @@ async function init() {
             const lot = s.filters.find(f => f.filterType === 'LOT_SIZE');
             const bracket = brackets.find(b => b.symbol === s.symbol);
             const maxLev = bracket ? bracket.brackets[0].initialLeverage : 0;
-
             status.exchangeInfo[s.symbol] = { 
                 quantityPrecision: s.quantityPrecision, 
                 pricePrecision: s.pricePrecision, 
@@ -292,7 +280,11 @@ async function init() {
                 maxLeverage: maxLev 
             };
         });
-        addBotLog("👿 LUFFY v15.8 - READY (FIXED CCXT & LEV FILTER)", "success");
+
+        // Nạp dữ liệu vào CCXT để tránh nó tự fetch Markets lần nữa
+        await exchange.loadMarkets(); 
+
+        addBotLog("👿 LUFFY v15.8 - READY (FIXED TIMEOUT & HEDGE)", "success");
     } catch (e) { console.log(e); }
 }
 
