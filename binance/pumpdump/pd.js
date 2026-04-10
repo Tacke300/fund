@@ -122,25 +122,27 @@ async function openPosition(symbol, side, info, isReverse = false) {
         const ticker = await callBinance('/fapi/v1/ticker/price', 'GET', { symbol });
         const currentPrice = parseFloat(ticker.price);
         
+        // SỬ DỤNG MAX LEVERAGE ĐÃ LƯU TRONG INFO
+        const targetLev = info.maxLeverage || 20;
+        
         let margin = botSettings.invType === 'percent' ? (parseFloat(acc.totalWalletBalance) * botSettings.invValue) / 100 : botSettings.invValue;
         if (isReverse) margin *= 10; 
 
-        let finalQty = (Math.floor(((margin * 20) / currentPrice) / info.stepSize) * info.stepSize).toFixed(info.quantityPrecision);
-        await callBinance('/fapi/v1/leverage', 'POST', { symbol, leverage: 20 });
+        // Tính Qty dựa trên Max Leverage của từng coin
+        let finalQty = (Math.floor(((margin * targetLev) / currentPrice) / info.stepSize) * info.stepSize).toFixed(info.quantityPrecision);
+        
+        // Sét đòn bẩy tối đa cho coin này
+        await callBinance('/fapi/v1/leverage', 'POST', { symbol, leverage: targetLev });
         
         const order = await callBinance('/fapi/v1/order', 'POST', { symbol, side, positionSide: posSide, type: 'MARKET', quantity: finalQty });
 
         if (order.orderId) {
-            // FIX: Giảm thời gian chờ xuống 1s trước khi đặt TP/SL
             await sleep(1000); 
             
             const posRisk = await callBinance('/fapi/v2/positionRisk');
             const myPos = posRisk.find(p => p.symbol === symbol && p.positionSide === posSide && parseFloat(p.positionAmt) !== 0);
             
-            if (!myPos) {
-                addBotLog(`⚠️ Cảnh báo: Chưa tìm thấy vị thế ${symbol} để đặt TP/SL.`, "warning");
-                return;
-            }
+            if (!myPos) return;
 
             const entry = parseFloat(myPos.entryPrice);
             const qtyOnFloor = Math.abs(parseFloat(myPos.positionAmt));
@@ -149,11 +151,11 @@ async function openPosition(symbol, side, info, isReverse = false) {
             if (isReverse) {
                 tp = (posSide === 'LONG' ? entry * 1.5 : entry * 0.5).toFixed(info.pricePrecision);
                 sl = (posSide === 'LONG' ? entry * 0.5 : entry * 1.5).toFixed(info.pricePrecision);
-                addBotLog(`🔥 REVERSE x10 ${symbol} @${entry}. Giáp 50% giá: TP ${tp} | SL ${sl}`, "warning");
+                addBotLog(`🔥 REVERSE x${targetLev} ${symbol} @${entry}. TP ${tp} | SL ${sl}`, "warning");
             } else {
                 tp = (posSide === 'LONG' ? entry * (1 + botSettings.posTP/100) : entry * (1 - botSettings.posTP/100)).toFixed(info.pricePrecision);
                 sl = (posSide === 'LONG' ? entry * (1 - botSettings.posSL/100) : entry * (1 + botSettings.posSL/100)).toFixed(info.pricePrecision);
-                addBotLog(`✅ OPEN ${symbol} @${entry}. TP: ${tp} | SL: ${sl}`, "success");
+                addBotLog(`✅ OPEN x${targetLev} ${symbol} @${entry}. TP: ${tp} | SL: ${sl}`, "success");
             }
 
             activeOrdersTracker.set(symbol, { 
@@ -232,7 +234,7 @@ async function mainLoop() {
                     await updateSànGiáp(symbol, data.side === 'LONG' ? 'BUY' : 'SELL', data.side, data.tp, data.sl);
                 } else {
                     data.isClosing = true;
-                    addBotLog(`💀 DCA CHÁY TẦNG 8. KILL & REVERSE x10 ${symbol}!`, "error");
+                    addBotLog(`💀 DCA CHÁY TẦNG 8. KILL & REVERSE MAX LEV ${symbol}!`, "error");
                     await exchange.createMarketOrder(symbol, data.side === 'LONG' ? 'sell' : 'buy', data.qty, { positionSide: data.side, reduceOnly: true });
                     await sleep(3000);
                     await openPosition(symbol, data.side === 'LONG' ? 'SELL' : 'BUY', status.exchangeInfo[symbol], true);
@@ -289,7 +291,7 @@ async function init() {
 
         await exchange.loadMarkets(); 
 
-        addBotLog("👿 LUFFY v15.8 - READY (FAST TP/SL 1s)", "success");
+        addBotLog("👿 LUFFY v15.8 - READY (MAX LEVERAGE MODE)", "success");
     } catch (e) { console.log(e); }
 }
 
