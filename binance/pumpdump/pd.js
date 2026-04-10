@@ -11,7 +11,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // ============================================================================
-// ⚙️ CẤU HÌNH CCXT - FIX TIMEOUT & HEDGE MODE
+// ⚙️ CẤU HÌNH CCXT - FIX TRIỆT ĐỂ LỖI 4061 & TIMEOUT
 // ============================================================================
 const exchange = new ccxt.binance({
     apiKey: API_KEY,
@@ -19,7 +19,8 @@ const exchange = new ccxt.binance({
     timeout: 30000, 
     options: { 
         defaultType: 'future', 
-        dualSidePosition: true 
+        dualSidePosition: true, // Bật Hedge Mode
+        createMarketBuyOrderRequiresPrice: false
     }
 });
 
@@ -92,11 +93,13 @@ async function callBinance(endpoint, method = 'GET', params = {}, retries = 3) {
     }
 }
 
+// 🛡️ FIX LỖI ĐẶT TP/SL - THÊM POSITION SIDE TƯỜNG MINH
 async function updateSànGiáp(symbol, side, posSide, tp, sl) {
     try {
         await exchange.cancelAllOrders(symbol);
-        const closeSide = side === 'BUY' ? 'sell' : 'buy';
+        const closeSide = posSide === 'LONG' ? 'sell' : 'buy';
         
+        // Lệnh Take Profit
         await exchange.createOrder(symbol, 'TAKE_PROFIT_MARKET', closeSide, 0, undefined, {
             positionSide: posSide,
             stopPrice: tp,
@@ -104,6 +107,7 @@ async function updateSànGiáp(symbol, side, posSide, tp, sl) {
             workingType: 'MARK_PRICE'
         });
 
+        // Lệnh Stop Loss
         await exchange.createOrder(symbol, 'STOP_MARKET', closeSide, 0, undefined, {
             positionSide: posSide,
             stopPrice: sl,
@@ -111,7 +115,7 @@ async function updateSànGiáp(symbol, side, posSide, tp, sl) {
             workingType: 'MARK_PRICE'
         });
     } catch (e) {
-        addBotLog(`❌ Lỗi đặt TP/SL CCXT: ${e.message}`, "error");
+        addBotLog(`❌ Lỗi đặt TP/SL CCXT ${symbol}: ${e.message}`, "error");
     }
 }
 
@@ -122,26 +126,19 @@ async function openPosition(symbol, side, info, isReverse = false) {
         const ticker = await callBinance('/fapi/v1/ticker/price', 'GET', { symbol });
         const currentPrice = parseFloat(ticker.price);
         
-        // SỬ DỤNG MAX LEVERAGE ĐÃ LƯU TRONG INFO
         const targetLev = info.maxLeverage || 20;
-        
         let margin = botSettings.invType === 'percent' ? (parseFloat(acc.totalWalletBalance) * botSettings.invValue) / 100 : botSettings.invValue;
         if (isReverse) margin *= 10; 
 
-        // Tính Qty dựa trên Max Leverage của từng coin
         let finalQty = (Math.floor(((margin * targetLev) / currentPrice) / info.stepSize) * info.stepSize).toFixed(info.quantityPrecision);
-        
-        // Sét đòn bẩy tối đa cho coin này
         await callBinance('/fapi/v1/leverage', 'POST', { symbol, leverage: targetLev });
         
         const order = await callBinance('/fapi/v1/order', 'POST', { symbol, side, positionSide: posSide, type: 'MARKET', quantity: finalQty });
 
         if (order.orderId) {
             await sleep(1000); 
-            
             const posRisk = await callBinance('/fapi/v2/positionRisk');
             const myPos = posRisk.find(p => p.symbol === symbol && p.positionSide === posSide && parseFloat(p.positionAmt) !== 0);
-            
             if (!myPos) return;
 
             const entry = parseFloat(myPos.entryPrice);
@@ -201,14 +198,15 @@ async function mainLoop() {
                 addBotLog(`🚨 FAILSAFE ${symbol} @${price}. Vã Market...`, "warning");
                 
                 try {
+                    // FIX LỖI 4061: Truyền positionSide vào params của createMarketOrder
                     const closeSide = data.side === 'LONG' ? 'sell' : 'buy';
-                    const res = await exchange.createMarketOrder(symbol, closeSide, data.qty, {
+                    const res = await exchange.createOrder(symbol, 'MARKET', closeSide, data.qty, undefined, {
                         positionSide: data.side,
                         reduceOnly: true
                     });
                     if (res.id) addBotLog(`✅ Gửi lệnh đóng ${symbol} thành công.`, "success");
                 } catch (err) {
-                    addBotLog(`❌ Lỗi vã Market CCXT: ${err.message}`, "error");
+                    addBotLog(`❌ Lỗi vã Market CCXT ${symbol}: ${err.message}`, "error");
                 }
                 continue;
             }
@@ -235,7 +233,10 @@ async function mainLoop() {
                 } else {
                     data.isClosing = true;
                     addBotLog(`💀 DCA CHÁY TẦNG 8. KILL & REVERSE MAX LEV ${symbol}!`, "error");
-                    await exchange.createMarketOrder(symbol, data.side === 'LONG' ? 'sell' : 'buy', data.qty, { positionSide: data.side, reduceOnly: true });
+                    await exchange.createOrder(symbol, 'MARKET', data.side === 'LONG' ? 'sell' : 'buy', data.qty, undefined, { 
+                        positionSide: data.side, 
+                        reduceOnly: true 
+                    });
                     await sleep(3000);
                     await openPosition(symbol, data.side === 'LONG' ? 'SELL' : 'BUY', status.exchangeInfo[symbol], true);
                 }
@@ -291,7 +292,7 @@ async function init() {
 
         await exchange.loadMarkets(); 
 
-        addBotLog("👿 LUFFY v15.8 - READY (MAX LEVERAGE MODE)", "success");
+        addBotLog("👿 LUFFY v15.8 - FIXED 4061 & 2021", "success");
     } catch (e) { console.log(e); }
 }
 
