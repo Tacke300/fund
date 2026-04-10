@@ -131,10 +131,16 @@ async function openPosition(symbol, side, info, isReverse = false) {
         const order = await callBinance('/fapi/v1/order', 'POST', { symbol, side, positionSide: posSide, type: 'MARKET', quantity: finalQty });
 
         if (order.orderId) {
-            await sleep(2500); 
+            // FIX: Giảm thời gian chờ xuống 1s trước khi đặt TP/SL
+            await sleep(1000); 
+            
             const posRisk = await callBinance('/fapi/v2/positionRisk');
             const myPos = posRisk.find(p => p.symbol === symbol && p.positionSide === posSide && parseFloat(p.positionAmt) !== 0);
-            if (!myPos) return;
+            
+            if (!myPos) {
+                addBotLog(`⚠️ Cảnh báo: Chưa tìm thấy vị thế ${symbol} để đặt TP/SL.`, "warning");
+                return;
+            }
 
             const entry = parseFloat(myPos.entryPrice);
             const qtyOnFloor = Math.abs(parseFloat(myPos.positionAmt));
@@ -281,10 +287,9 @@ async function init() {
             };
         });
 
-        // Nạp dữ liệu vào CCXT để tránh nó tự fetch Markets lần nữa
         await exchange.loadMarkets(); 
 
-        addBotLog("👿 LUFFY v15.8 - READY (FIXED TIMEOUT & HEDGE)", "success");
+        addBotLog("👿 LUFFY v15.8 - READY (FAST TP/SL 1s)", "success");
     } catch (e) { console.log(e); }
 }
 
