@@ -1,285 +1,223 @@
-import https from 'https';
-import crypto from 'crypto';
-import express from 'express';
-import http from 'http';
-import { fileURLToPath } from 'url';
-import path from 'path';
-import { API_KEY, SECRET_KEY } from './config.js';
+const http = require('http');
+const fs = require('fs');
+const path = require('path');
+const ccxt = require('ccxt');
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-// ============================================================================
-// ⚙️ CẤU HÌNH HỆ THỐNG (FULL ANTI-FAIL)
-// ============================================================================
-let botSettings = { 
-    isRunning: false, maxPositions: 3, invValue: 1, invType: 'percent', 
-    minVol: 6.5, posTP: 0.5, posSL: 5.0, dcaStep: 10.0, maxDCA: 8 
-};
-
-let status = { 
-    initialBalance: 0, currentBalance: 0, botLogs: [], 
-    exchangeInfo: {}, candidatesList: [] 
-};
-
-let activeOrdersTracker = new Map(); 
-let pendingSymbols = new Set();
-let serverTimeOffset = 0;
-
-const sleep = (ms) => new Promise(r => setTimeout(r, ms));
-
-function addBotLog(msg, type = 'info') {
-    const time = new Date().toLocaleTimeString('vi-VN', { hour12: false });
-    if (status.botLogs.length > 0 && status.botLogs[0].msg === msg) return;
-    status.botLogs.unshift({ time, msg, type });
-    if (status.botLogs.length > 500) status.botLogs.pop();
-    
+// --- Giữ nguyên các hàm bổ trợ của ông ---
+const safeLog = (type, ...args) => {
+    const now = new Date();
+    const timestamp = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
     let color = '\x1b[36m'; 
     if (type === 'success') color = '\x1b[32m'; 
-    if (type === 'error') color = '\x1b[31m';   
-    if (type === 'warning') color = '\x1b[33m'; 
-    console.log(`${color}[${time}] ${msg}\x1b[0m`);
-}
+    if (type === 'error' || type === 'warn') color = '\x1b[31m';
+    console.log(`${color}[${timestamp} ${type.toUpperCase()}]\x1b[0m`, ...args);
+};
 
-async function callBinance(endpoint, method = 'GET', params = {}, retries = 3) {
-    for (let i = 0; i < retries; i++) {
-        try {
-            const timestamp = Date.now() + serverTimeOffset;
-            const query = Object.keys(params).map(k => `${k}=${encodeURIComponent(params[k])}`).join('&');
-            const fullQuery = query + (query ? '&' : '') + `timestamp=${timestamp}&recvWindow=10000`;
-            const signature = crypto.createHmac('sha256', SECRET_KEY).update(fullQuery).digest('hex');
-            const url = `https://fapi.binance.com${endpoint}?${fullQuery}&signature=${signature}`;
-            const res = await new Promise((resolve, reject) => {
-                const req = https.request(url, { method, timeout: 5000, headers: { 'X-MBX-APIKEY': API_KEY } }, res => {
-                    let d = ''; res.on('data', c => d += c);
-                    res.on('end', () => { 
-                        try { resolve(JSON.parse(d)); } catch (e) { reject(e); } 
-                    });
-                });
-                req.on('error', reject); req.end();
-            });
-            if (res.code === -1021) { 
-                const t = await new Promise(r => https.get('https://fapi.binance.com/fapi/v1/time', res => { let d=''; res.on('data', c=>d+=c); res.on('end', ()=>r(JSON.parse(d))); }));
-                serverTimeOffset = t.serverTime - Date.now(); continue;
-            }
-            return res;
-        } catch (e) { if (i === retries - 1) throw e; await sleep(500); }
-    }
-}
+const {
+    binanceApiKey, binanceApiSecret, bingxApiKey, bingxApiSecret
+} = require('../config.js');
+
+const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 // ============================================================================
-// 🛡️ CHIẾN THUẬT 5 LỚP BẢO VỆ & VERIFY
+// 🛡️ HỆ THỐNG QUẢN TRỊ RỦI RO 5 LỚP (VERSION CCXT)
 // ============================================================================
 
-// 1. Check vị thế thực tế (Verify 1)
-async function getActualPosition(symbol, side) {
-    try {
-        const res = await callBinance('/fapi/v2/positionRisk', 'GET', { symbol });
-        return res.find(p => p.symbol === symbol && p.positionSide === side && Math.abs(parseFloat(p.positionAmt)) > 0);
-    } catch { return null; }
-}
-
-// 2. Check lệnh treo thực tế (Verify 2)
-async function verifyTPSLOnExchange(symbol) {
-    try {
-        const orders = await callBinance('/fapi/v1/openOrders', 'GET', { symbol });
-        return {
-            hasTP: orders.some(o => o.type === 'TAKE_PROFIT' || o.type === 'TAKE_PROFIT_MARKET'),
-            hasSL: orders.some(o => o.type === 'STOP_MARKET')
-        };
-    } catch { return { hasTP: false, hasSL: false }; }
-}
-
-// 3. Đặt giáp 3 lớp (TP Limit, SL Market, Bot Monitor)
-async function updateSànGiáp(symbol, side, posSide, tp, sl, qty) {
-    try {
-        const closeSide = side === 'BUY' ? 'SELL' : 'BUY';
-        await callBinance('/fapi/v1/allOpenOrders', 'DELETE', { symbol });
-
-        // Cách 1: TP LIMIT (Khớp giá mục tiêu)
-        await callBinance('/fapi/v1/order', 'POST', {
-            symbol, side: closeSide, positionSide: posSide, type: 'TAKE_PROFIT',
-            stopPrice: tp, price: tp, quantity: qty, reduceOnly: 'true', workingType: 'MARK_PRICE'
-        });
-
-        // Cách 2: SL MARKET (Giáp sàn - closePosition tự clear)
-        await callBinance('/fapi/v1/order', 'POST', {
-            symbol, side: closeSide, positionSide: posSide, type: 'STOP_MARKET',
-            stopPrice: sl, closePosition: 'true', workingType: 'MARK_PRICE'
-        });
-
-        await sleep(1000);
-        const check = await verifyTPSLOnExchange(symbol);
-        if (check.hasTP && check.hasSL) {
-            addBotLog(`✅ [${symbol}] GIÁP OK: TP @${tp} | SL @${sl}`, "success");
-        } else {
-            addBotLog(`⚠️ [${symbol}] Thiếu giáp sàn! Bot Layer 3 (Monitor) đang cầm lái.`, "warning");
-        }
-    } catch (e) { addBotLog(`❌ Lỗi giáp ${symbol}: ${e.message}`, "error"); }
-}
-
-// 4. Đóng lệnh cưỡng chế (Loop 5 lần - Anti-Log-Ảo)
-async function smartClose(symbol, posSide, reason) {
-    let cleared = false;
-    for (let i = 1; i <= 5; i++) {
-        const pos = await getActualPosition(symbol, posSide);
-        if (!pos) { cleared = true; break; }
-
-        const qty = Math.abs(parseFloat(pos.positionAmt));
-        const side = posSide === 'LONG' ? 'SELL' : 'BUY';
-
-        addBotLog(`🔄 [${symbol}] Đóng Market lần ${i} (${reason})`, "info");
-        await callBinance('/fapi/v1/order', 'POST', {
-            symbol, side, positionSide: posSide, type: 'MARKET', quantity: qty, reduceOnly: 'true'
-        });
-        
-        await sleep(1500);
-    }
+/**
+ * LAYER 1 & 2: ĐẶT GIÁP SÀN (TP/SL) + VERIFY
+ * Mục tiêu: Đảm bảo lệnh đã lên sàn, không bị lag/hủy ngầm
+ */
+async function updateSànGiápCCXT(exchange, symbol, positionSide, amount, tpPrice, slPrice) {
+    const closeSide = positionSide.toUpperCase() === 'LONG' ? 'sell' : 'buy';
     
-    if (cleared) {
-        addBotLog(`✅ [${symbol}] Đóng & Verify thành công.`, "success");
-        await callBinance('/fapi/v1/allOpenOrders', 'DELETE', { symbol });
-        return true;
-    } else {
-        addBotLog(`💀 [${symbol}] KHÔNG THỂ ĐÓNG! Kiểm tra ngay số dư/lệnh kẹt.`, "error");
-        return false;
+    try {
+        // Xóa lệnh cũ để cập nhật giáp mới (Dành cho DCA hoặc update giá)
+        safeLog('log', `[${exchange.id}] Đang dọn dẹp lệnh treo cũ cho ${symbol}...`);
+        await exchange.cancelAllOrders(symbol, { positionSide });
+
+        // Cách 1: TP Market (Chắc chắn khớp khi chạm giá)
+        await exchange.createOrder(symbol, 'TAKE_PROFIT_MARKET', closeSide, amount, undefined, {
+            'stopPrice': exchange.priceToPrecision(symbol, tpPrice),
+            'positionSide': positionSide,
+            'reduceOnly': true,
+            'workingType': 'MARK_PRICE'
+        });
+
+        // Cách 2: SL Market (Giáp bảo hiểm cuối cùng)
+        await exchange.createOrder(symbol, 'STOP_MARKET', closeSide, amount, undefined, {
+            'stopPrice': exchange.priceToPrecision(symbol, slPrice),
+            'positionSide': positionSide,
+            'reduceOnly': true,
+            'workingType': 'MARK_PRICE'
+        });
+
+        await sleep(2000);
+
+        // VERIFY: Kiểm tra thực tế trên sàn
+        const openOrders = await exchange.fetchOpenOrders(symbol);
+        const hasTP = openOrders.some(o => o.info.type?.includes('TAKE_PROFIT') || o.type?.includes('take_profit'));
+        const hasSL = openOrders.some(o => o.info.type?.includes('STOP') || o.type?.includes('stop'));
+
+        if (hasTP && hasSL) {
+            safeLog('success', `✅ [${exchange.id}] GIÁP confirmed: TP @${tpPrice} | SL @${slPrice}`);
+        } else {
+            safeLog('warn', `⚠️ [${exchange.id}] Sàn thiếu lệnh giáp. Chuyển sang Layer 3 (Bot Monitor).`);
+        }
+    } catch (e) {
+        safeLog('error', `❌ Lỗi setup giáp ${exchange.id}: ${e.message}`);
     }
 }
 
-// ============================================================================
-// 🚀 CORE LOGIC
-// ============================================================================
-
-async function openPosition(symbol, side, info, isReverse = false) {
-    const posSide = side === 'BUY' ? 'LONG' : 'SHORT';
-    try {
-        const acc = await callBinance('/fapi/v2/account');
-        const ticker = await callBinance('/fapi/v1/ticker/price', 'GET', { symbol });
-        let margin = botSettings.invType === 'percent' ? (parseFloat(acc.totalWalletBalance) * botSettings.invValue) / 100 : botSettings.invValue;
-        if (isReverse) margin *= 10;
-
-        let qty = (Math.floor(((margin * 20) / parseFloat(ticker.price)) / info.stepSize) * info.stepSize).toFixed(info.quantityPrecision);
-        const res = await callBinance('/fapi/v1/order', 'POST', { symbol, side, positionSide: posSide, type: 'MARKET', quantity: qty });
-
-        if (res.orderId) {
-            await sleep(2000);
-            const pos = await getActualPosition(symbol, posSide);
-            if (pos) {
-                const entry = parseFloat(pos.entryPrice);
-                const qtyFloor = Math.abs(parseFloat(pos.positionAmt));
-                const tp = (posSide === 'LONG' ? entry * (1 + botSettings.posTP/100) : entry * (1 - botSettings.posTP/100)).toFixed(info.pricePrecision);
-                const sl = (posSide === 'LONG' ? entry * (1 - botSettings.posSL/100) : entry * (1 + botSettings.posSL/100)).toFixed(info.pricePrecision);
-
-                activeOrdersTracker.set(symbol, { symbol, side: posSide, entry, qty: qtyFloor, tp, sl, dcaCount: 0, isClosing: false });
-                await updateSànGiáp(symbol, side, posSide, tp, sl, qtyFloor);
+/**
+ * LAYER 4 & 5: ĐÓNG LỆNH CƯỠNG CHẾ (LOOP 5 LẦN)
+ * Mục tiêu: Tuyệt đối không để sót vị thế (Anti-Log-Ảo)
+ */
+async function smartCloseCCXT(exchange, symbol, positionSide, reason) {
+    safeLog('warn', `🚨 [${exchange.id}] Close Position: ${symbol} | Lý do: ${reason}`);
+    
+    let isCleared = false;
+    for (let i = 1; i <= 5; i++) {
+        try {
+            // Kiểm tra vị thế thực tế
+            const positions = await exchange.fetchPositions([symbol]);
+            const pos = positions.find(p => p.symbol === symbol && p.side.toUpperCase() === positionSide.toUpperCase());
+            
+            // Nếu không còn vị thế hoặc size = 0
+            if (!pos || Math.abs(parseFloat(pos.contracts || pos.info.positionAmt || 0)) === 0) {
+                isCleared = true;
+                break;
             }
+
+            const amount = Math.abs(parseFloat(pos.contracts || pos.info.positionAmt));
+            const side = positionSide.toUpperCase() === 'LONG' ? 'sell' : 'buy';
+
+            safeLog('log', `🔄 [${exchange.id}] Thử đóng Market lần ${i} (Size: ${amount})...`);
+            await exchange.createOrder(symbol, 'MARKET', side, amount, undefined, {
+                'positionSide': positionSide.toUpperCase(),
+                'reduceOnly': true
+            });
+
+            await sleep(2000); 
+        } catch (e) {
+            safeLog('error', `❌ [${exchange.id}] Lỗi đóng lệnh: ${e.message}`);
+            await exchange.cancelAllOrders(symbol, { positionSide }); // Xóa lệnh kẹt
         }
-    } catch (e) { addBotLog(`❌ Lỗi Open ${symbol}: ${e.message}`, "error"); }
+    }
+
+    if (isCleared) {
+        safeLog('success', `✅ [${exchange.id}] Verified: Vị thế đã sạch.`);
+        await exchange.cancelAllOrders(symbol, { positionSide });
+    } else {
+        safeLog('error', `💀 [${exchange.id}] CRITICAL: Không thể đóng vị thế sau 5 lần thử!`);
+    }
+    return isCleared;
 }
 
-async function mainLoop() {
-    if (!botSettings.isRunning) return;
+/**
+ * LAYER 3: MONITOR (BOT TỰ VÃ KHI GIÁ CHẠM ĐIỂM)
+ * Chạy trong vòng lặp chính để dự phòng cho lệnh TP/SL của sàn bị lag
+ */
+async function monitorAndFailsafe() {
+    if (!currentTradeDetails || currentTradeDetails.status !== 'OPEN') return;
+
     try {
-        const acc = await callBinance('/fapi/v2/account');
-        status.currentBalance = parseFloat(acc.totalWalletBalance);
+        const { shortExchange, longExchange, shortOriginalSymbol, longOriginalSymbol, 
+                shortTpPrice, shortSlPrice, longTpPrice, longSlPrice } = currentTradeDetails;
 
-        for (let [symbol, data] of activeOrdersTracker) {
-            if (data.isClosing) continue;
+        const [tShort, tLong] = await Promise.all([
+            exchanges[shortExchange].fetchTicker(shortOriginalSymbol),
+            exchanges[longExchange].fetchTicker(longOriginalSymbol)
+        ]);
 
-            const ticker = await callBinance('/fapi/v1/ticker/price', 'GET', { symbol });
-            const price = parseFloat(ticker.price);
-            const pos = await getActualPosition(symbol, data.side);
+        const pS = tShort.last;
+        const pL = tLong.last;
 
-            // Check sàn tự khớp
-            if (!pos) {
-                data.isClosing = true;
-                const trades = await callBinance('/fapi/v1/userTrades', 'GET', { symbol, limit: 5 });
-                const pnl = trades.filter(t => t.positionSide === data.side).reduce((s, t) => s + parseFloat(t.realizedPnl), 0);
-                addBotLog(`💰 [${symbol}] Sàn khớp. PnL: ${pnl.toFixed(2)}$`, "success");
-                activeOrdersTracker.delete(symbol);
-                await callBinance('/fapi/v1/allOpenOrders', 'DELETE', { symbol });
-                continue;
-            }
+        const hitShort = (pS <= shortTpPrice) || (pS >= shortSlPrice);
+        const hitLong = (pL >= longTpPrice) || (pL <= longSlPrice);
 
-            // Layer 3: Bot Monitor (Failsafe)
-            let hitTP = (data.side === 'LONG' && price >= data.tp) || (data.side === 'SHORT' && price <= data.tp);
-            let hitSL = (data.side === 'LONG' && price <= data.sl) || (data.side === 'SHORT' && price >= data.sl);
-
-            if (hitTP || hitSL) {
-                data.isClosing = true;
-                const ok = await smartClose(symbol, data.side, hitTP ? "BOT_TP" : "BOT_SL");
-                if (ok) activeOrdersTracker.delete(symbol);
-                continue;
-            }
-
-            // DCA Logic
-            const diff = ((price - data.entry) / data.entry) * 100;
-            const isAgainst = (data.side === 'LONG' && diff <= -botSettings.dcaStep) || (data.side === 'SHORT' && diff >= botSettings.dcaStep);
-
-            if (isAgainst && data.dcaCount < botSettings.maxDCA) {
-                data.dcaCount++;
-                addBotLog(`📉 [${symbol}] DCA Tầng ${data.dcaCount}`, "warning");
-                await callBinance('/fapi/v1/order', 'POST', { symbol, side: data.side === 'LONG' ? 'BUY' : 'SELL', positionSide: data.side, type: 'MARKET', quantity: data.qty });
-                await sleep(3000);
-                const nPos = await getActualPosition(symbol, data.side);
-                if (nPos) {
-                    data.entry = parseFloat(nPos.entryPrice);
-                    data.qty = Math.abs(parseFloat(nPos.positionAmt));
-                    await updateSànGiáp(symbol, data.side === 'LONG' ? 'BUY' : 'SELL', data.side, data.tp, data.sl, data.qty);
-                }
-            }
-        }
-
-        // Tìm kèo mới
-        if (activeOrdersTracker.size < botSettings.maxPositions) {
-            for (const coin of status.candidatesList) {
-                if (!activeOrdersTracker.has(coin.symbol) && !pendingSymbols.has(coin.symbol) && coin.maxV >= botSettings.minVol) {
-                    pendingSymbols.add(coin.symbol);
-                    await openPosition(coin.symbol, coin.c1 >= 0 ? 'BUY' : 'SELL', status.exchangeInfo[coin.symbol]);
-                    setTimeout(() => pendingSymbols.delete(coin.symbol), 5000);
-                    break;
-                }
-            }
+        if (hitShort || hitLong) {
+            const reason = hitShort ? "FAILSAFE_SHORT_TRIGGER" : "FAILSAFE_LONG_TRIGGER";
+            safeLog('warn', `🎯 [LAYER 3] Phát hiện giá chạm điểm thoát. Thực thi SmartClose...`);
+            
+            currentTradeDetails.status = 'CLOSING';
+            await Promise.all([
+                smartCloseCCXT(exchanges[shortExchange], shortOriginalSymbol, 'SHORT', reason),
+                smartCloseCCXT(exchanges[longExchange], longOriginalSymbol, 'LONG', reason)
+            ]);
+            
+            // Xử lý sau khi đóng
+            tradeHistory.push({...currentTradeDetails, closeTime: Date.now()});
+            currentTradeDetails = null;
         }
     } catch (e) { }
 }
 
 // ============================================================================
-// 🔌 INIT & SERVER
+// 🚀 CẬP NHẬT HÀM EXECUTE TRADES (SỬA LẠI PHẦN MỞ LỆNH)
 // ============================================================================
 
-setInterval(() => {
-    http.get('http://127.0.0.1:9000/api/data', res => {
-        let d = ''; res.on('data', c => d += c);
-        res.on('end', () => {
-            try {
-                const r = JSON.parse(d);
-                status.candidatesList = (r.live || []).map(c => ({ 
-                    symbol: c.symbol, c1: c.c1, maxV: Math.max(Math.abs(c.c1), Math.abs(c.c5 || 0)) 
-                })).sort((a, b) => b.maxV - a.maxV);
-            } catch (e) {}
-        });
-    }).on('error', () => {});
-}, 2000);
+async function executeTrades(opportunity, percentageToUse) {
+    // ... (Giữ nguyên phần validate opportunity và balance của ông) ...
 
-async function init() {
     try {
-        const info = await callBinance('/fapi/v1/exchangeInfo');
-        info.symbols.forEach(s => {
-            const lot = s.filters.find(f => f.filterType === 'LOT_SIZE');
-            status.exchangeInfo[s.symbol] = { quantityPrecision: s.quantityPrecision, pricePrecision: s.pricePrecision, stepSize: parseFloat(lot.stepSize) };
-        });
-        const acc = await callBinance('/fapi/v2/account');
-        status.initialBalance = parseFloat(acc.totalWalletBalance);
-        botSettings.isRunning = true;
-        addBotLog("👿 LUFFY v15.8 FULL - ANTI-FAIL SYSTEM ACTIVE", "success");
-    } catch (e) { console.log(e); }
+        // --- BƯỚC 1: MỞ LỆNH MARKET ---
+        safeLog('log', `[TRADE] Đang mở vị thế đối ứng cho ${cleanedCoin}...`);
+        
+        // (Giữ nguyên logic tính amountToOrder của ông)
+        shortOrder = await shortExchange.createMarketSellOrder(shortOriginalSymbol, parseFloat(shortAmountToOrder), { 'positionSide': 'SHORT' });
+        longOrder = await longExchange.createMarketBuyOrder(longOriginalSymbol, parseFloat(longAmountToOrder), { 'positionSide': 'LONG' });
+
+        // --- BƯỚC 2: TÍNH TOÁN TP/SL (THEO ROI/COLLATERAL) ---
+        const shortTpPrice = shortEntryPrice * (1 - (TP_PERCENT_OF_COLLATERAL / (actualShortLeverage * 100)));
+        const shortSlPrice = shortEntryPrice * (1 + (SL_PERCENT_OF_COLLATERAL / (actualShortLeverage * 100)));
+        const longTpPrice = longEntryPrice * (1 + (TP_PERCENT_OF_COLLATERAL / (actualLongLeverage * 100)));
+        const longSlPrice = longEntryPrice * (1 - (SL_PERCENT_OF_COLLATERAL / (actualLongLeverage * 100)));
+
+        currentTradeDetails = {
+            coin: cleanedCoin, shortExchange: shortExchangeId, longExchange: longExchangeId,
+            shortOriginalSymbol, longOriginalSymbol,
+            shortTpPrice, shortSlPrice, longTpPrice, longSlPrice,
+            status: 'OPEN', openTime: Date.now()
+        };
+
+        // --- BƯỚC 3: ÁP DỤNG HỆ THỐNG GIÁP 5 LỚP ---
+        await Promise.all([
+            updateSànGiápCCXT(shortExchange, shortOriginalSymbol, 'SHORT', shortOrder.amount, shortTpPrice, shortSlPrice),
+            updateSànGiápCCXT(longExchange, longOriginalSymbol, 'LONG', longOrder.amount, longTpPrice, longSlPrice)
+        ]);
+
+        return true;
+    } catch (e) {
+        safeLog('error', `❌ Lỗi thực thi: ${e.message}`);
+        // Failsafe: Nếu mở 1 bên lỗi, đóng sạch bên còn lại
+        await Promise.all([
+            smartCloseCCXT(shortExchange, shortOriginalSymbol, 'SHORT', 'CLEANUP_FAIL'),
+            smartCloseCCXT(longExchange, longOriginalSymbol, 'LONG', 'CLEANUP_FAIL')
+        ]);
+        currentTradeDetails = null;
+        return false;
+    }
 }
 
-init(); 
-setInterval(mainLoop, 3500);
+// ============================================================================
+// 🔄 MAIN LOOP (TÍCH HỢP MONITOR)
+// ============================================================================
 
-const APP = express(); APP.use(express.json()); APP.use(express.static(__dirname));
-APP.get('/api/status', (req, res) => res.json({ botSettings, activePositions: Array.from(activeOrdersTracker.values()), status }));
-APP.post('/api/settings', (req, res) => { botSettings = { ...botSettings, ...req.body }; res.json({ success: true }); });
-APP.listen(9001);
+async function mainBotLoop() {
+    if (botState !== 'RUNNING') return;
+
+    // 1. Monitor Layer 3 (Luôn ưu tiên kiểm tra lệnh đang mở)
+    if (currentTradeDetails) {
+        await monitorAndFailsafe();
+    }
+
+    // 2. Fetch data & Tìm cơ hội (Logic cũ của ông)
+    const serverData = await fetchDataFromServer();
+    if (serverData) {
+        await processServerData(serverData);
+        // ... Logic mở lệnh mới nếu chưa có lệnh ...
+    }
+}
+
+// Chạy vòng lặp
+setInterval(mainBotLoop, DATA_FETCH_INTERVAL_SECONDS * 1000);
