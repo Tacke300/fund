@@ -5,9 +5,17 @@ import http from 'http';
 import { fileURLToPath } from 'url';
 import path from 'path';
 import { API_KEY, SECRET_KEY } from './config.js';
+import ccxt from 'ccxt'; // Thêm CCXT
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+// Khởi tạo CCXT cho Binance Futures
+const exchange = new ccxt.binance({
+    apiKey: API_KEY,
+    secret: SECRET_KEY,
+    options: { defaultType: 'future', positionMode: true }
+});
 
 // ============================================================================
 // ⚙️ CẤU HÌNH HỆ THỐNG
@@ -15,7 +23,7 @@ const __dirname = path.dirname(__filename);
 let botSettings = { 
     isRunning: false,
     maxPositions: 3,            
-    invValue: 1,               
+    invValue: 1,                
     invType: 'percent',          
     minVol: 6.5,                
     posTP: 0.5,                 
@@ -78,12 +86,30 @@ async function callBinance(endpoint, method = 'GET', params = {}, retries = 3) {
     }
 }
 
-// 🛡️ HÀM CẬP NHẬT GIÁP SÀN (TP/SL)
+// 🛡️ HÀM CẬP NHẬT GIÁP SÀN (TP/SL) - SỬ DỤNG CCXT CHO CHẾ ĐỘ PHÒNG HỘ
 async function updateSànGiáp(symbol, side, posSide, tp, sl) {
-    await callBinance('/fapi/v1/allOpenOrders', 'DELETE', { symbol });
-    const closeSide = side === 'BUY' ? 'SELL' : 'BUY';
-    await callBinance('/fapi/v1/order', 'POST', { symbol, side: closeSide, positionSide: posSide, type: 'TAKE_PROFIT_MARKET', stopPrice: tp, closePosition: 'true', workingType: 'MARK_PRICE', priceProtect: 'true' });
-    await callBinance('/fapi/v1/order', 'POST', { symbol, side: closeSide, positionSide: posSide, type: 'STOP_MARKET', stopPrice: sl, closePosition: 'true', workingType: 'MARK_PRICE', priceProtect: 'true' });
+    try {
+        await exchange.cancelAllOrders(symbol);
+        const closeSide = side === 'BUY' ? 'sell' : 'buy';
+        
+        // Lệnh Take Profit Market
+        await exchange.createOrder(symbol, 'TAKE_PROFIT_MARKET', closeSide, 0, undefined, {
+            positionSide: posSide,
+            stopPrice: tp,
+            closePosition: true,
+            workingType: 'MARK_PRICE'
+        });
+
+        // Lệnh Stop Loss Market
+        await exchange.createOrder(symbol, 'STOP_MARKET', closeSide, 0, undefined, {
+            positionSide: posSide,
+            stopPrice: sl,
+            closePosition: true,
+            workingType: 'MARK_PRICE'
+        });
+    } catch (e) {
+        addBotLog(`❌ Lỗi đặt TP/SL CCXT: ${e.message}`, "error");
+    }
 }
 
 // 🚀 MỞ VỊ THẾ - HỖ TRỢ DCA & REVERSE x10
@@ -113,7 +139,6 @@ async function openPosition(symbol, side, info, isReverse = false) {
             
             let tp, sl;
             if (isReverse) {
-                // CHUẨN 50% GIÁ COIN (KHÔNG PHẢI ROI)
                 tp = (posSide === 'LONG' ? entry * 1.5 : entry * 0.5).toFixed(info.pricePrecision);
                 sl = (posSide === 'LONG' ? entry * 0.5 : entry * 1.5).toFixed(info.pricePrecision);
                 addBotLog(`🔥 REVERSE x10 ${symbol} @${entry}. Giáp 50% giá: TP ${tp} | SL ${sl}`, "warning");
@@ -159,15 +184,25 @@ async function mainLoop() {
                 continue;
             }
 
-            // 2. LỚP 3: BOT MONITOR (FAILSAFE - CHỐNG SPAM)
+            // 2. LỚP 3: BOT MONITOR (FAILSAFE - ĐÓNG MARKET QUA CCXT)
             let hitLocal = (data.side === 'LONG' && (price >= data.tp || price <= data.sl)) || 
                            (data.side === 'SHORT' && (price <= data.tp || price >= data.sl));
 
             if (hitLocal) {
                 data.isClosing = true; 
                 addBotLog(`🚨 FAILSAFE ${symbol} @${price}. Vã Market...`, "warning");
-                const res = await callBinance('/fapi/v1/order', 'POST', { symbol, side: data.side === 'LONG' ? 'SELL' : 'BUY', positionSide: data.side, type: 'MARKET', closePosition: 'true' });
-                if (res.orderId) addBotLog(`✅ Gửi lệnh đóng ${symbol} thành công.`, "success");
+                
+                try {
+                    const closeSide = data.side === 'LONG' ? 'sell' : 'buy';
+                    // Sử dụng CCXT để đảm bảo đóng Market chuẩn xác trong Hedge Mode
+                    const res = await exchange.createMarketOrder(symbol, closeSide, data.qty, {
+                        positionSide: data.side,
+                        reduceOnly: true
+                    });
+                    if (res.id) addBotLog(`✅ Gửi lệnh đóng ${symbol} thành công.`, "success");
+                } catch (err) {
+                    addBotLog(`❌ Lỗi vã Market CCXT: ${err.message}`, "error");
+                }
                 continue;
             }
 
@@ -192,10 +227,10 @@ async function mainLoop() {
                     data.sl = (data.side === 'LONG' ? data.entry * (1 - botSettings.posSL/100) : data.entry * (1 + botSettings.posSL/100)).toFixed(status.exchangeInfo[symbol].pricePrecision);
                     await updateSànGiáp(symbol, data.side === 'LONG' ? 'BUY' : 'SELL', data.side, data.tp, data.sl);
                 } else {
-                    // MỐC 9: KILL & REVERSE x10
                     data.isClosing = true;
                     addBotLog(`💀 DCA CHÁY TẦNG 8. KILL & REVERSE x10 ${symbol}!`, "error");
-                    await callBinance('/fapi/v1/order', 'POST', { symbol, side: data.side === 'LONG' ? 'SELL' : 'BUY', positionSide: data.side, type: 'MARKET', closePosition: 'true' });
+                    // Đóng Market qua CCXT để Reverse
+                    await exchange.createMarketOrder(symbol, data.side === 'LONG' ? 'sell' : 'buy', data.qty, { positionSide: data.side, reduceOnly: true });
                     await sleep(3000);
                     await openPosition(symbol, data.side === 'LONG' ? 'SELL' : 'BUY', status.exchangeInfo[symbol], true);
                 }
@@ -238,7 +273,7 @@ async function init() {
             const lot = s.filters.find(f => f.filterType === 'LOT_SIZE');
             status.exchangeInfo[s.symbol] = { quantityPrecision: s.quantityPrecision, pricePrecision: s.pricePrecision, stepSize: parseFloat(lot.stepSize) };
         });
-        addBotLog("👿 LUFFY v15.8 - FULL DCA & REVERSE x10 READY", "success");
+        addBotLog("👿 LUFFY v15.8 - FULL DCA & REVERSE x10 READY (CCXT SL/TP)", "success");
     } catch (e) { console.log(e); }
 }
 
