@@ -10,7 +10,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // ============================================================================
-// ⚙️ CONFIG & STATUS
+// ⚙️ CONFIG & STATUS (GIỮ NGUYÊN GỐC)
 // ============================================================================
 let botSettings = { isRunning: false, maxPositions: 3, invValue: 1, invType: 'percent', minVol: 6.5, posTP: 0.5, posSL: 5.0, dcaStep: 10, maxDCA: 8 };
 let status = { initialBalance: 0, currentBalance: 0, botLogs: [], exchangeInfo: {}, candidatesList: [] };
@@ -51,7 +51,7 @@ async function callBinance(endpoint, method = 'GET', params = {}, retries = 3) {
     }
 }
 
-// 🎯 LỚP 2: HÀM ĐÓNG VỊ THẾ BẰNG CALLBINANCE (THAY THẾ CCXT)
+// 🎯 HÀM ĐÓNG VỊ THẾ (LỚP 2 - DỨT ĐIỂM LỆNH)
 async function forceClosePosition(symbol, posSide) {
     try {
         const risk = await callBinance('/fapi/v2/positionRisk');
@@ -60,22 +60,22 @@ async function forceClosePosition(symbol, posSide) {
 
         if (qty > 0) {
             const side = posSide === 'LONG' ? 'SELL' : 'BUY';
-            addBotLog(`🔄 [LỚP 2] Đang vã Market đóng ${symbol} (${posSide}) - Qty: ${qty}`, "warning");
+            addBotLog(`🔄 [LỚP 2] Đóng Market ${symbol} (${posSide}) - Qty: ${qty}`, "warning");
             
             const res = await callBinance('/fapi/v1/order', 'POST', {
                 symbol, side, positionSide: posSide, type: 'MARKET', quantity: qty, reduceOnly: 'true'
             });
 
             if (res.orderId) {
-                addBotLog(`✅ [LỚP 2] Đã đóng thành công ${symbol}`, "success");
+                addBotLog(`✅ [LỚP 2] Đã thoát lệnh ${symbol} thành công.`, "success");
                 return true;
             }
         }
-    } catch (e) { addBotLog(`Lỗi đóng lệnh: ${e.message}`, "error"); }
+    } catch (e) { addBotLog(`Lỗi đóng lệnh ${symbol}: ${e.message}`, "error"); }
     return false;
 }
 
-// 🚀 LỚP 1: MỞ VÀ CÀI GIÁP SÀN (ALGO)
+// 🚀 MỞ VÀ CÀI GIÁP SÀN (LỚP 1)
 async function openPosition(symbol, side, info, isReverse = false) {
     const posSide = side === 'BUY' ? 'LONG' : 'SHORT';
     const closeSide = side === 'BUY' ? 'SELL' : 'BUY';
@@ -92,7 +92,7 @@ async function openPosition(symbol, side, info, isReverse = false) {
         
         const order = await callBinance('/fapi/v1/order', 'POST', { symbol, side, positionSide: posSide, type: 'MARKET', quantity: qty });
         if (order.orderId) {
-            await sleep(2000);
+            await sleep(2000); // Đợi sàn cập nhật Risk
             const posRisk = await callBinance('/fapi/v2/positionRisk');
             const pos = posRisk.find(p => p.symbol === symbol && p.positionSide === posSide);
             
@@ -107,8 +107,8 @@ async function openPosition(symbol, side, info, isReverse = false) {
                 qty: qtyOnFloor, tp, sl, dcaCount: 0, isClosing: false, orderIds: [order.orderId] 
             });
 
-            // LỚP 1: CÀI ALGO
-            addBotLog(`🛡️ [LỚP 1] Cài giáp ${symbol} - TP: ${tp} | SL: ${sl}`, "info");
+            // LỚP 1: CÀI ALGO TRÊN SÀN
+            addBotLog(`🛡️ [LỚP 1] Đặt TP: ${tp} | SL: ${sl} cho ${symbol}`, "info");
             await callBinance('/fapi/v1/order', 'POST', { symbol, side: closeSide, positionSide: posSide, type: 'TAKE_PROFIT_MARKET', stopPrice: tp, closePosition: 'true', workingType: 'MARK_PRICE' });
             await callBinance('/fapi/v1/order', 'POST', { symbol, side: closeSide, positionSide: posSide, type: 'STOP_MARKET', stopPrice: sl, closePosition: 'true', workingType: 'MARK_PRICE' });
             
@@ -120,8 +120,9 @@ async function openPosition(symbol, side, info, isReverse = false) {
 async function mainLoop() {
     if (!botSettings.isRunning) return;
     try {
+        // CẬP NHẬT SỐ DƯ REALTIME
         const acc = await callBinance('/fapi/v2/account');
-        status.currentBalance = parseFloat(acc.totalWalletBalance); // Cập nhật số dư realtime
+        status.currentBalance = parseFloat(acc.totalWalletBalance);
 
         const posRisk = await callBinance('/fapi/v2/positionRisk');
 
@@ -132,63 +133,68 @@ async function mainLoop() {
             const price = parseFloat(ticker.price);
             const floorPos = posRisk.find(p => p.symbol === symbol && p.positionSide === data.side && Math.abs(parseFloat(p.positionAmt)) > 0);
 
-            // KIỂM TRA CHỐT SÀN (LỚP 1 KHỚP)
+            // 1. KIỂM TRA CHỐT SÀN (KHI LỚP 1 TỰ KHỚP)
             if (!floorPos) {
                 data.isClosing = true;
-                addBotLog(`💰 [CHỐT SÀN] ${symbol} đã thoát vị thế.`, "info");
+                addBotLog(`💰 [CHỐT] ${symbol} đã dứt điểm trên sàn.`, "info");
                 await sleep(2000);
                 const trades = await callBinance('/fapi/v1/userTrades', 'GET', { symbol, limit: 10 });
                 const totalPnl = trades.filter(t => t.positionSide === data.side).reduce((s, t) => s + parseFloat(t.realizedPnl), 0);
                 
-                addBotLog(`💵 KẾT QUẢ ${symbol}: PnL ${totalPnl.toFixed(2)}$`, totalPnl >= 0 ? "success" : "error");
+                addBotLog(`💵 KẾT QUẢ ${symbol}: PnL thực nhận ${totalPnl.toFixed(2)}$`, totalPnl >= 0 ? "success" : "error");
                 activeOrdersTracker.delete(symbol);
                 await callBinance('/fapi/v1/allOpenOrders', 'DELETE', { symbol });
                 continue;
             }
 
-            // LỚP 3: BOT THEO DÕI (MONITORING)
+            // 2. LỚP 3: BOT THEO DÕI GIÁ (FAILSAFE MONITOR)
             let hit = (data.side === 'LONG' && (price >= data.tp || price <= data.sl)) || (data.side === 'SHORT' && (price <= data.tp || price >= data.sl));
             if (hit) {
                 data.isClosing = true;
-                addBotLog(`🚨 [LỚP 3] Bot kích hoạt Failsafe tại ${price} cho ${symbol}`, "warning");
+                addBotLog(`🚨 [LỚP 3] Kích hoạt Failsafe cho ${symbol} tại giá ${price}`, "warning");
                 await forceClosePosition(symbol, data.side);
                 continue;
             }
 
-            // DCA LOGIC (Giữ nguyên gốc)
+            // 3. DCA LOGIC (GIỮ NGUYÊN GỐC)
             const diff = ((price - data.entry) / data.entry) * 100;
             const isAgainst = (data.side === 'LONG' && diff <= -botSettings.dcaStep) || (data.side === 'SHORT' && diff >= botSettings.dcaStep);
 
-            if (isAgainst && !data.isClosing) {
-                if (data.dcaCount < botSettings.maxDCA) {
-                    data.dcaCount++;
-                    addBotLog(`📉 [DCA ${data.dcaCount}] ${symbol} @${price}`, "info");
+            if (isAgainst && !data.isClosing && data.dcaCount < botSettings.maxDCA) {
+                data.dcaCount++;
+                addBotLog(`📉 [DCA ${data.dcaCount}] ${symbol} tại ${price}`, "info");
+                
+                const dcaOrder = await callBinance('/fapi/v1/order', 'POST', { 
+                    symbol, side: data.side === 'LONG' ? 'BUY' : 'SELL', 
+                    positionSide: data.side, type: 'MARKET', 
+                    quantity: (data.qty).toFixed(status.exchangeInfo[symbol].quantityPrecision) 
+                });
+                
+                if (dcaOrder.orderId) {
+                    await sleep(2500);
+                    const posRiskNew = await callBinance('/fapi/v2/positionRisk');
+                    const newPos = posRiskNew.find(p => p.symbol === symbol && p.positionSide === data.side);
+                    data.entry = parseFloat(newPos.entryPrice);
+                    data.qty = Math.abs(parseFloat(newPos.positionAmt));
                     
-                    const dcaOrder = await callBinance('/fapi/v1/order', 'POST', { symbol, side: data.side === 'LONG' ? 'BUY' : 'SELL', positionSide: data.side, type: 'MARKET', quantity: (data.qty).toFixed(status.exchangeInfo[symbol].quantityPrecision) });
+                    // Reset TP/SL Lớp 1
+                    data.tp = (data.side === 'LONG' ? data.entry * (1 + botSettings.posTP/100) : data.entry * (1 - botSettings.posTP/100)).toFixed(status.exchangeInfo[symbol].pricePrecision);
+                    data.sl = (data.side === 'LONG' ? data.entry * (1 - botSettings.posSL/100) : data.entry * (1 + botSettings.posSL/100)).toFixed(status.exchangeInfo[symbol].pricePrecision);
                     
-                    if (dcaOrder.orderId) {
-                        await sleep(2500);
-                        const posRiskNew = await callBinance('/fapi/v2/positionRisk');
-                        const newPos = posRiskNew.find(p => p.symbol === symbol && p.positionSide === data.side);
-                        data.entry = parseFloat(newPos.entryPrice);
-                        data.qty = Math.abs(parseFloat(newPos.positionAmt));
-                        
-                        data.tp = (data.side === 'LONG' ? data.entry * (1 + botSettings.posTP/100) : data.entry * (1 - botSettings.posTP/100)).toFixed(status.exchangeInfo[symbol].pricePrecision);
-                        data.sl = (data.side === 'LONG' ? data.entry * (1 - botSettings.posSL/100) : data.entry * (1 + botSettings.posSL/100)).toFixed(status.exchangeInfo[symbol].pricePrecision);
-                        
-                        await callBinance('/fapi/v1/allOpenOrders', 'DELETE', { symbol });
-                        const closeSide = data.side === 'LONG' ? 'SELL' : 'BUY';
-                        await callBinance('/fapi/v1/order', 'POST', { symbol, side: closeSide, positionSide: data.side, type: 'TAKE_PROFIT_MARKET', stopPrice: data.tp, closePosition: 'true', workingType: 'MARK_PRICE' });
-                        await callBinance('/fapi/v1/order', 'POST', { symbol, side: closeSide, positionSide: data.side, type: 'STOP_MARKET', stopPrice: data.sl, closePosition: 'true', workingType: 'MARK_PRICE' });
-                        addBotLog(`♻️ Đã reset Giáp Lớp 1 cho ${symbol}`, "info");
-                    }
+                    await callBinance('/fapi/v1/allOpenOrders', 'DELETE', { symbol });
+                    const closeSide = data.side === 'LONG' ? 'SELL' : 'BUY';
+                    await callBinance('/fapi/v1/order', 'POST', { symbol, side: closeSide, positionSide: data.side, type: 'TAKE_PROFIT_MARKET', stopPrice: data.tp, closePosition: 'true', workingType: 'MARK_PRICE' });
+                    await callBinance('/fapi/v1/order', 'POST', { symbol, side: closeSide, positionSide: data.side, type: 'STOP_MARKET', stopPrice: data.sl, closePosition: 'true', workingType: 'MARK_PRICE' });
+                    addBotLog(`♻️ Đã cập nhật Giáp Lớp 1 mới cho ${symbol}`, "info");
                 }
             }
         }
-    } catch (e) { if (!e.message.includes('token')) console.log(e.message); }
+    } catch (e) { if (!e.message.includes('token')) console.log("MainLoop Error: " + e.message); }
 }
 
-// --- INIT & APP ---
+// ============================================================================
+// 🖥️ INIT & SERVER (GIỮ NGUYÊN GỐC)
+// ============================================================================
 async function init() {
     try {
         const t = await new Promise(r => https.get('https://fapi.binance.com/fapi/v1/time', res => { let d=''; res.on('data', c=>d+=c); res.on('end', ()=>r(JSON.parse(d))); }));
@@ -204,7 +210,7 @@ async function init() {
         status.initialBalance = parseFloat(acc.totalWalletBalance);
         status.currentBalance = status.initialBalance;
         addBotLog("✅ Bot khởi tạo thành công.", "success");
-    } catch (e) { console.log(e.message); }
+    } catch (e) { console.log("Init Error: " + e.message); }
 }
 
 init(); 
@@ -213,4 +219,4 @@ setInterval(mainLoop, 3500);
 const APP = express();
 APP.use(express.json());
 APP.get('/status', (req, res) => res.json(status));
-APP.listen(9001);
+APP.listen(9001, () => console.log("🚀 Server PNL tại port 9001"));
