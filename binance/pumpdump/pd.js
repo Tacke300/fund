@@ -15,7 +15,7 @@ const __dirname = path.dirname(__filename);
 let botSettings = { 
     isRunning: false,
     maxPositions: 3,            // Số lệnh tối đa mở cùng lúc
-    invValue: 1,               // Số tiền mỗi lệnh (% hoặc USD) - LƯU Ý: NÊN ĐỂ > 5$ ĐỂ TRÁNH LỖI NOTIONAL
+    invValue: 1,               // Số tiền mỗi lệnh (% hoặc USD)
     invType: 'percent',          
     
     minVol: 6.5,                // % biến động nến để vào lệnh
@@ -51,11 +51,11 @@ function addBotLog(msg, type = 'info') {
     status.botLogs.unshift({ time, msg, type });
     if (status.botLogs.length > 500) status.botLogs.pop();
 
-    let color = '\x1b[36m'; // Cyan (Info)
-    if (type === 'success') color = '\x1b[32m'; // Green (Thắng/Thành công)
-    if (type === 'error') color = '\x1b[31m';   // Red (Lỗi/Lỗ)
-    if (type === 'warning') color = '\x1b[33m'; // Yellow (Cảnh báo)
-    if (type === 'entry') color = '\x1b[35m';   // Magenta (Vào lệnh)
+    let color = '\x1b[36m'; 
+    if (type === 'success') color = '\x1b[32m'; 
+    if (type === 'error') color = '\x1b[31m';   
+    if (type === 'warning') color = '\x1b[33m'; 
+    if (type === 'entry') color = '\x1b[35m';   
     
     console.log(`${color}[${time}] ${msg}\x1b[0m`);
 }
@@ -88,15 +88,12 @@ async function callBinance(endpoint, method = 'GET', params = {}, retries = 3) {
                 serverTimeOffset = t.serverTime - Date.now();
                 continue;
             }
-            if (res.code && res.code !== 200 && res.code !== 200) {
-                // Không log lỗi nếu là lệnh đóng position khi không có position
-            }
             return res;
         } catch (e) { if (i === retries - 1) throw e; await sleep(400); }
     }
 }
 
-// 🚀 MỞ VỊ THẾ - ĐÃ FIX TP SL VÀ LOGIC TỰ ĐÓNG SAU 3S
+// 🚀 MỞ VỊ THẾ - FIX LỖI TP SL THỰC TẾ
 async function openPosition(symbol, side, info, signals) {
     const posSide = side === 'BUY' ? 'LONG' : 'SHORT';
     const closeSide = side === 'BUY' ? 'SELL' : 'BUY';
@@ -104,7 +101,6 @@ async function openPosition(symbol, side, info, signals) {
     try {
         addBotLog(`🚀 [TÍN HIỆU] ${symbol} đạt ${signals.maxV.toFixed(2)}%. VÃ MARKET!`, "entry");
 
-        // 1. Kiểm tra vốn & tính Qty
         const acc = await callBinance('/fapi/v2/account');
         const available = parseFloat(acc.availableBalance);
         let margin = botSettings.invType === 'percent' ? (parseFloat(acc.totalWalletBalance) * botSettings.invValue) / 100 : botSettings.invValue;
@@ -121,7 +117,6 @@ async function openPosition(symbol, side, info, signals) {
         
         let finalQty = (Math.floor(((margin * lev) / currentPrice) / info.stepSize) * info.stepSize).toFixed(info.quantityPrecision);
 
-        // 2. Vã Market
         await callBinance('/fapi/v1/leverage', 'POST', { symbol, leverage: lev });
         pendingSymbols.add(symbol);
         
@@ -130,10 +125,9 @@ async function openPosition(symbol, side, info, signals) {
         });
 
         if (order.orderId) {
-            addBotLog(`⚡ Khớp Market ${symbol}. Đợi 3s xác nhận entry...`, "info");
+            addBotLog(`⚡ Khớp Market ${symbol}. Đợi 3s lấy entry thật...`, "info");
             await sleep(3000); 
 
-            // 3. Lấy giá khớp thực tế và kiểm tra giá hiện tại
             const detail = await callBinance('/fapi/v1/order', 'GET', { symbol, orderId: order.orderId });
             const realEntry = parseFloat(detail.avgPrice || currentPrice);
             
@@ -143,50 +137,65 @@ async function openPosition(symbol, side, info, signals) {
             addBotLog(`✅ XÁC NHẬN: ${symbol} khớp @ ${realEntry}`, "success");
             activeOrdersTracker.set(symbol, { symbol, side: posSide, entry: realEntry, openTime: Date.now() });
 
-            // 4. Cài đặt TP/SL
             const tp = (side === 'BUY' ? realEntry * (1 + botSettings.posTP/100) : realEntry * (1 - botSettings.posTP/100)).toFixed(info.pricePrecision);
             const sl = (side === 'BUY' ? realEntry * (1 - botSettings.posSL/100) : realEntry * (1 + botSettings.posSL/100)).toFixed(info.pricePrecision);
 
-            // KIỂM TRA NẾU GIÁ ĐÃ VƯỢT TP/SL TRONG 3S QUA
             let isPassed = (side === 'BUY' && (nowPrice >= tp || nowPrice <= sl)) || (side === 'SELL' && (nowPrice <= tp || nowPrice >= sl));
 
             if (isPassed) {
-                addBotLog(`⚠️ Giá hiện tại (${nowPrice}) đã vượt ngưỡng TP/SL. BOT TỰ ĐÓNG MARKET!`, "warning");
+                addBotLog(`⚠️ Giá (${nowPrice}) vượt TP/SL. Đóng MARKET ngay!`, "warning");
                 await callBinance('/fapi/v1/order', 'POST', { 
                     symbol, side: closeSide, positionSide: posSide, type: 'MARKET', quantity: finalQty, reduceOnly: 'true' 
                 });
             } else {
                 addBotLog(`🛡️ Đang cài Giáp ${symbol}: TP ${tp} | SL ${sl}`, "info");
                 
-                // Fix lỗi: Sử dụng đúng tham số Algo Order cho TP/SL Market
-                await callBinance('/fapi/v1/order', 'POST', { 
+                // Cài TP
+                const resTP = await callBinance('/fapi/v1/order', 'POST', { 
                     symbol, side: closeSide, positionSide: posSide, type: 'TAKE_PROFIT_MARKET', stopPrice: tp, closePosition: 'true', workingType: 'MARK_PRICE' 
                 });
-                await callBinance('/fapi/v1/order', 'POST', { 
+                // Cài SL
+                const resSL = await callBinance('/fapi/v1/order', 'POST', { 
                     symbol, side: closeSide, positionSide: posSide, type: 'STOP_MARKET', stopPrice: sl, closePosition: 'true', workingType: 'MARK_PRICE' 
                 });
 
-                addBotLog(`🎯 Giáp Verify OK cho ${symbol}`, "success");
+                if (resTP.orderId && resSL.orderId) {
+                    addBotLog(`🎯 Giáp Verify OK cho ${symbol}`, "success");
+                } else {
+                    addBotLog(`❌ Lỗi đặt TP/SL trên sàn cho ${symbol}`, "error");
+                }
             }
         }
     } catch (e) {
-        addBotLog(`❌ LỖI KHI VÀO LỆNH ${symbol}: ${e.message}`, "error");
+        addBotLog(`❌ LỖI VÀO LỆNH ${symbol}: ${e.message}`, "error");
     } finally {
         setTimeout(() => pendingSymbols.delete(symbol), 3000);
     }
 }
 
-// ⚡ VÒNG LẶP CHÍNH (THEO DÕI VỊ THẾ & DỌN DẸP)
+// ⚡ VÒNG LẶP CHÍNH - QUẢN LÝ VỊ THẾ THỰC TẾ
 async function mainLoop() {
     if (!botSettings.isRunning) return;
     try {
         const posRisk = await callBinance('/fapi/v2/positionRisk');
         const activePositions = posRisk.filter(p => parseFloat(p.positionAmt) !== 0);
 
-        // KIỂM TRA ĐÓNG LỆNH & DỌN DẸP
+        // Đưa các vị thế mở tay/mở ngoài vào tracker để quản lý
+        activePositions.forEach(p => {
+            if (!activeOrdersTracker.has(p.symbol)) {
+                activeOrdersTracker.set(p.symbol, { 
+                    symbol: p.symbol, 
+                    side: parseFloat(p.positionAmt) > 0 ? 'LONG' : 'SHORT', 
+                    entry: parseFloat(p.entryPrice), 
+                    openTime: Date.now() 
+                });
+                addBotLog(`👁️ Đồng bộ vị thế sàn: ${p.symbol}`, "warning");
+            }
+        });
+
+        // Kiểm tra dọn dẹp lệnh đã đóng
         for (let [symbol, data] of activeOrdersTracker) {
             if (!activePositions.some(p => p.symbol === symbol)) {
-                
                 const trades = await callBinance('/fapi/v1/userTrades', 'GET', { symbol, limit: 5 });
                 const lastTrade = trades.find(t => t.symbol === symbol);
                 const pnl = parseFloat(lastTrade?.realizedPnl || 0);
@@ -194,15 +203,12 @@ async function mainLoop() {
                 if (pnl > 0) addBotLog(`💰 CHỐT LỜI: ${symbol} | Lãi: +${pnl}$`, "success");
                 else addBotLog(`📉 CẮT LỖ/ĐÓNG: ${symbol} | PnL: ${pnl}$`, "error");
 
-                // XÓA LỆNH CHỜ (TP/SL) CÒN DƯ
                 await callBinance('/fapi/v1/allOpenOrders', 'DELETE', { symbol });
-                addBotLog(`🧹 Đã dọn dẹp sạch lệnh chờ cho ${symbol}`, "info");
-
                 activeOrdersTracker.delete(symbol);
             }
         }
 
-        // QUÉT TÍN HIỆU MỚI
+        // Chốt chặn Max Positions theo sàn
         if (activePositions.length >= botSettings.maxPositions) return;
 
         for (const coin of status.candidatesList) {
@@ -242,15 +248,6 @@ async function init() {
             status.exchangeInfo[s.symbol] = { quantityPrecision: s.quantityPrecision, pricePrecision: s.pricePrecision, stepSize: parseFloat(lot.stepSize), minNotional: parseFloat(notional?.notional || 5) };
         });
         addBotLog("👿 LUFFY v15.7 FINAL - HỆ THỐNG ĐÃ KÍCH HOẠT!", "success");
-
-        // RESET VỐN NGÀY LÚC 00:00 VN
-        setInterval(() => {
-            const now = new Date();
-            if (now.getHours() === 0 && now.getMinutes() === 0) {
-                status.dayStartBalance = parseFloat(acc.totalWalletBalance);
-                addBotLog("📅 [HỆ THỐNG] Đã reset mốc vốn ngày mới!", "warning");
-            }
-        }, 60000);
     } catch (e) { console.log("Lỗi khởi tạo:", e.message); }
 }
 
