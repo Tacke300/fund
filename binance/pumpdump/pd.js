@@ -11,7 +11,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // ============================================================================
-// ⚙️ CONFIG & STATUS
+// ⚙️ CẤU HÌNH HỆ THỐNG - LUFFY v16.2
 // ============================================================================
 let botSettings = { 
     isRunning: false, maxPositions: 3, invValue: 1, invType: 'percent', 
@@ -32,7 +32,11 @@ function addBotLog(msg, type = 'info') {
     const time = new Date().toLocaleTimeString('vi-VN', { hour12: false });
     status.botLogs.unshift({ time, msg, type });
     if (status.botLogs.length > 500) status.botLogs.pop();
-    console.log(`[${time}] ${msg}`);
+    let color = '\x1b[36m'; 
+    if (type === 'success') color = '\x1b[32m'; 
+    if (type === 'error') color = '\x1b[31m';   
+    if (type === 'warning') color = '\x1b[33m'; 
+    console.log(`${color}[${time}] ${msg}\x1b[0m`);
 }
 
 async function callBinance(endpoint, method = 'GET', params = {}, retries = 3) {
@@ -43,7 +47,6 @@ async function callBinance(endpoint, method = 'GET', params = {}, retries = 3) {
             const fullQuery = query + (query ? '&' : '') + `timestamp=${timestamp}&recvWindow=10000`;
             const signature = crypto.createHmac('sha256', SECRET_KEY).update(fullQuery).digest('hex');
             const url = `https://fapi.binance.com${endpoint}?${fullQuery}&signature=${signature}`;
-            
             const res = await new Promise((resolve, reject) => {
                 const req = https.request(url, { method, timeout: 5000, headers: { 'X-MBX-APIKEY': API_KEY } }, res => {
                     let d = ''; res.on('data', c => d += c);
@@ -51,7 +54,6 @@ async function callBinance(endpoint, method = 'GET', params = {}, retries = 3) {
                 });
                 req.on('error', reject); req.end();
             });
-
             if (res.code === -1021) {
                 const t = await new Promise(r => https.get('https://fapi.binance.com/fapi/v1/time', res => { let d=''; res.on('data', c=>d+=c); res.on('end', ()=>r(JSON.parse(d))); }));
                 serverTimeOffset = t.serverTime - Date.now();
@@ -63,7 +65,7 @@ async function callBinance(endpoint, method = 'GET', params = {}, retries = 3) {
 }
 
 // ============================================================================
-// 🛡️ TRIPLE SHIELD (AXIOS -> FAPI -> MONITOR)
+// 🛡️ GIÁP 3 LỚP (AXIOS -> FAPI -> MONITOR) CÁCH NHAU 1.5S
 // ============================================================================
 async function setupShield(symbol, side, posSide, tp, sl) {
     const closeSide = side === 'BUY' ? 'SELL' : 'BUY';
@@ -73,11 +75,11 @@ async function setupShield(symbol, side, posSide, tp, sl) {
         const ts = Date.now() + serverTimeOffset;
         const q = `symbol=${symbol}&side=${closeSide}&positionSide=${posSide}&type=TAKE_PROFIT_MARKET&stopPrice=${tp}&closePosition=true&timestamp=${ts}`;
         const sig = crypto.createHmac('sha256', SECRET_KEY).update(q).digest('hex');
-        await axios.post(`https://fapi.binance.com/fapi/v1/order?${q}&signature=${sig}`, null, { headers: { 'X-MBX-APIKEY': API_KEY } });
-        addBotLog(`🛡️ [LỚP 1] Axios TP OK: ${symbol}`, "success");
+        const res = await axios.post(`https://fapi.binance.com/fapi/v1/order?${q}&signature=${sig}`, null, { headers: { 'X-MBX-APIKEY': API_KEY } });
+        if (res.data.orderId) addBotLog(`🛡️ [LỚP 1] Axios TP OK: ${symbol}`, "success");
     } catch (e) { addBotLog(`⚠️ [LỚP 1] Lỗi: ${symbol}`, "error"); }
 
-    await sleep(1500);
+    await sleep(1500); // Cách 1.5s
 
     // Lớp 2: FAPI SL
     try {
@@ -98,14 +100,14 @@ async function smartClose(symbol, posSide) {
             const res = await callBinance('/fapi/v1/order', 'POST', {
                 symbol, side, positionSide: posSide, type: 'MARKET', quantity: qty, reduceOnly: 'true'
             });
-            if (res.orderId) return true;
+            return !!res.orderId;
         }
     } catch (e) {}
     return false;
 }
 
 // ============================================================================
-// 🚀 CORE LOGIC (OPEN/DCA/REVERSE)
+// 🚀 MỞ LỆNH & QUẢN LÝ
 // ============================================================================
 async function openPosition(symbol, side, info, isReverse = false) {
     const posSide = side === 'BUY' ? 'LONG' : 'SHORT';
@@ -125,8 +127,11 @@ async function openPosition(symbol, side, info, isReverse = false) {
             if (!pos) return;
 
             const entry = parseFloat(pos.entryPrice);
-            const tp = (posSide === 'LONG' ? entry * (1 + (isReverse?50:botSettings.posTP)/100) : entry * (1 - (isReverse?50:botSettings.posTP)/100)).toFixed(info.pricePrecision);
-            const sl = (posSide === 'LONG' ? entry * (1 - (isReverse?50:botSettings.posSL)/100) : entry * (1 + (isReverse?50:botSettings.posSL)/100)).toFixed(info.pricePrecision);
+            const tpRate = isReverse ? 50 : botSettings.posTP;
+            const slRate = isReverse ? 50 : botSettings.posSL;
+
+            const tp = (posSide === 'LONG' ? entry * (1 + tpRate/100) : entry * (1 - tpRate/100)).toFixed(info.pricePrecision);
+            const sl = (posSide === 'LONG' ? entry * (1 - slRate/100) : entry * (1 + slRate/100)).toFixed(info.pricePrecision);
 
             activeOrdersTracker.set(symbol, { 
                 symbol, side: posSide, entry, initialEntry: entry, 
@@ -155,7 +160,7 @@ async function mainLoop() {
 
             if (!floorPos) {
                 data.isClosing = true;
-                addBotLog(`💰 [DONE] ${symbol} đã đóng.`, "success");
+                addBotLog(`💰 [DONE] ${symbol} đã chốt.`, "success");
                 activeOrdersTracker.delete(symbol);
                 setTimeout(() => callBinance('/fapi/v1/allOpenOrders', 'DELETE', { symbol }), 3000);
                 continue;
@@ -167,7 +172,7 @@ async function mainLoop() {
 
             if (hit) {
                 data.isClosing = true;
-                addBotLog(`🚨 [LỚP 3] Chốt Market ${symbol} @${price}`, "warning");
+                addBotLog(`🚨 [LỚP 3] Monitor chốt ${symbol} @${price}`, "warning");
                 await smartClose(symbol, data.side);
                 continue;
             }
@@ -180,7 +185,7 @@ async function mainLoop() {
             if (isAgainst && !data.isClosing) {
                 if (data.dcaCount < botSettings.maxDCA) {
                     data.dcaCount++;
-                    addBotLog(`📉 DCA ${data.dcaCount}: ${symbol}`, "warning");
+                    addBotLog(`📉 DCA TẦNG ${data.dcaCount}: ${symbol}`, "warning");
                     const res = await callBinance('/fapi/v1/order', 'POST', { 
                         symbol, side: data.side === 'LONG' ? 'BUY' : 'SELL', 
                         positionSide: data.side, type: 'MARKET', quantity: (data.qty / data.dcaCount).toFixed(status.exchangeInfo[symbol].quantityPrecision) 
@@ -196,7 +201,7 @@ async function mainLoop() {
                     await setupShield(symbol, data.side === 'LONG' ? 'BUY' : 'SELL', data.side, data.tp, data.sl);
                 } else {
                     data.isClosing = true;
-                    addBotLog(`💀 REVERSE x10 ${symbol}!`, "error");
+                    addBotLog(`💀 PHÁ GIÁP TẦNG 8. REVERSE x10 ${symbol}!`, "error");
                     await smartClose(symbol, data.side);
                     await sleep(3000);
                     await openPosition(symbol, data.side === 'LONG' ? 'SELL' : 'BUY', status.exchangeInfo[symbol], true);
@@ -204,13 +209,13 @@ async function mainLoop() {
             }
         }
 
-        // MỞ LỆNH MỚI
+        // MỞ LỆNH MỚI - TỐI ƯU ĐỘ NHẠY
         if (currentOpenCount < botSettings.maxPositions) {
             for (const coin of status.candidatesList) {
                 if (!activeOrdersTracker.has(coin.symbol) && !pendingSymbols.has(coin.symbol)) {
                     if (coin.maxV >= botSettings.minVol) {
                         pendingSymbols.add(coin.symbol);
-                        addBotLog(`🎯 Kèo thơm: ${coin.symbol} (${coin.maxV.toFixed(2)}%)`, "entry");
+                        addBotLog(`🎯 PHÁT HIỆN KÈO: ${coin.symbol} (${coin.maxV.toFixed(2)}%)`, "success");
                         openPosition(coin.symbol, coin.c1 >= 0 ? 'BUY' : 'SELL', status.exchangeInfo[coin.symbol])
                             .finally(() => setTimeout(() => pendingSymbols.delete(coin.symbol), 5000));
                         break; 
@@ -221,17 +226,23 @@ async function mainLoop() {
     } catch (e) {}
 }
 
-// --- SYSTEM INIT ---
+// ============================================================================
+// 📡 SYNC BIẾN ĐỘNG TỪ SERVER (FIX KHÔNG LẤY ĐƯỢC DATA)
+// ============================================================================
 setInterval(() => {
     http.get('http://127.0.0.1:9000/api/data', res => {
         let d = ''; res.on('data', c => d += c);
         res.on('end', () => {
             try {
                 const r = JSON.parse(d);
-                status.candidatesList = (r.live || []).map(c => ({ 
-                    symbol: c.symbol, c1: c.c1, 
-                    maxV: Math.max(Math.abs(c.c1||0), Math.abs(c.c5||0), Math.abs(c.c15||0)) 
-                })).sort((a, b) => b.maxV - a.maxV);
+                const source = r.live || r.data || []; // Hỗ trợ cả 2 định dạng
+                status.candidatesList = source.map(c => ({ 
+                    symbol: c.symbol, 
+                    c1: parseFloat(c.c1) || 0, 
+                    maxV: Math.max(Math.abs(parseFloat(c.c1)||0), Math.abs(parseFloat(c.c5)||0), Math.abs(parseFloat(c.c15)||0)) 
+                }))
+                .filter(c => c.symbol && c.symbol.endsWith('USDT'))
+                .sort((a, b) => b.maxV - a.maxV);
             } catch (e) {}
         });
     }).on('error', () => {});
@@ -244,12 +255,11 @@ async function init() {
             const lot = s.filters.find(f => f.filterType === 'LOT_SIZE');
             status.exchangeInfo[s.symbol] = { quantityPrecision: s.quantityPrecision, pricePrecision: s.pricePrecision, stepSize: parseFloat(lot.stepSize) };
         });
-        addBotLog("👿 LUFFY v16.0 ULTIMATE - READY TO FIGHT", "success");
+        addBotLog("👿 LUFFY v16.2 GOLD - MƯỢT NHƯ SUNSILK", "success");
     } catch (e) {}
 }
 
-init(); 
-setInterval(mainLoop, 3500);
+init(); setInterval(mainLoop, 3500);
 
 const APP = express(); APP.use(express.json()); APP.use(express.static(__dirname));
 APP.get('/api/status', (req, res) => res.json({ botSettings, activePositions: Array.from(activeOrdersTracker.values()), status }));
