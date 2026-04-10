@@ -30,16 +30,13 @@ let botSettings = {
     riskLoopSpeed: 500          
 };
 
-// ============================================================================
-// 📊 TRẠNG THÁI HỆ THỐNG
-// ============================================================================
 let status = { 
     initialBalance: 0, dayStartBalance: 0, currentBalance: 0, 
     botLogs: [], exchangeInfo: {}, candidatesList: [], 
     globalCooldown: 0, consecutiveLosses: 0 
 };
 
-let activeOrdersTracker = new Map(); // Chỉ lưu những gì bot mở
+let activeOrdersTracker = new Map(); 
 let pendingSymbols = new Set();
 let serverTimeOffset = 0;
 
@@ -87,7 +84,7 @@ async function callBinance(endpoint, method = 'GET', params = {}, retries = 3) {
     }
 }
 
-// 🚀 MỞ VỊ THẾ - CHUẨN HEDGE MODE & KIỂM TRA LỖI THẬT
+// 🚀 MỞ VỊ THẾ - FIX: XÓA REDUCEONLY KHỎI TP/SL
 async function openPosition(symbol, side, info, signals) {
     const posSide = side === 'BUY' ? 'LONG' : 'SHORT';
     const closeSide = side === 'BUY' ? 'SELL' : 'BUY';
@@ -115,12 +112,11 @@ async function openPosition(symbol, side, info, signals) {
             addBotLog(`⚡ Khớp Market ${symbol}. Đợi 3s cài giáp...`, "info");
             await sleep(3000); 
 
-            // Kiểm tra vị thế thực tế của chính Bot vừa mở
             const posRisk = await callBinance('/fapi/v2/positionRisk');
             const myPos = posRisk.find(p => p.symbol === symbol && p.positionSide === posSide && parseFloat(p.positionAmt) !== 0);
 
             if (!myPos) {
-                addBotLog(`❌ Không tìm thấy vị thế bot vừa mở cho ${symbol}`, "error");
+                addBotLog(`❌ Không thấy vị thế bot mở cho ${symbol}`, "error");
                 return;
             }
 
@@ -128,26 +124,28 @@ async function openPosition(symbol, side, info, signals) {
             const qtyOnFloor = Math.abs(parseFloat(myPos.positionAmt));
             
             addBotLog(`✅ XÁC NHẬN: ${symbol} khớp @ ${realEntry}`, "success");
-            
-            // LƯU VÀO TRACKER (Chỉ những gì bot mở mới nằm ở đây)
             activeOrdersTracker.set(symbol, { symbol, side: posSide, entry: realEntry, openTime: Date.now(), qty: qtyOnFloor });
 
             const tp = (side === 'BUY' ? realEntry * (1 + botSettings.posTP/100) : realEntry * (1 - botSettings.posTP/100)).toFixed(info.pricePrecision);
             const sl = (side === 'BUY' ? realEntry * (1 - botSettings.posSL/100) : realEntry * (1 + botSettings.posSL/100)).toFixed(info.pricePrecision);
 
-            // CÀI TP/SL CHUẨN HEDGE (ReduceOnly + Qty)
+            // Log soi giá SL/TP tránh lỗi precision
+            console.log(`DEBUG ${symbol}: Entry ${realEntry} | TP ${tp} | SL ${sl}`);
+
+            // CÀI TP - ĐÃ XÓA REDUCEONLY
             const resTP = await callBinance('/fapi/v1/order', 'POST', { 
                 symbol, side: closeSide, positionSide: posSide, type: 'TAKE_PROFIT_MARKET', 
-                stopPrice: parseFloat(tp), quantity: qtyOnFloor, reduceOnly: 'true', workingType: 'MARK_PRICE' 
+                stopPrice: parseFloat(tp), quantity: qtyOnFloor, workingType: 'MARK_PRICE' 
             });
 
+            // CÀI SL - ĐÃ XÓA REDUCEONLY
             const resSL = await callBinance('/fapi/v1/order', 'POST', { 
                 symbol, side: closeSide, positionSide: posSide, type: 'STOP_MARKET', 
-                stopPrice: parseFloat(sl), quantity: qtyOnFloor, reduceOnly: 'true', workingType: 'MARK_PRICE' 
+                stopPrice: parseFloat(sl), quantity: qtyOnFloor, workingType: 'MARK_PRICE' 
             });
 
             if (resTP.orderId && resSL.orderId) {
-                addBotLog(`🎯 TP/SL ĐÃ LÊN SÀN THẬT (${symbol})`, "success");
+                addBotLog(`🎯 GIÁP ĐÃ LÊN SÀN: ${symbol}`, "success");
             } else {
                 if (resTP.code) addBotLog(`❌ TP lỗi: ${resTP.msg}`, "error");
                 if (resSL.code) addBotLog(`❌ SL lỗi: ${resSL.msg}`, "error");
@@ -160,37 +158,30 @@ async function openPosition(symbol, side, info, signals) {
     }
 }
 
-// ⚡ VÒNG LẶP CHÍNH - CHỈ QUẢN LÝ NHỮNG GÌ BOT MỞ
+// ⚡ VÒNG LẶP CHÍNH
 async function mainLoop() {
     if (!botSettings.isRunning) return;
     try {
         const posRisk = await callBinance('/fapi/v2/positionRisk');
         const activePositionsOnFloor = posRisk.filter(p => parseFloat(p.positionAmt) !== 0);
 
-        // Kiểm tra dọn dẹp lệnh bot đã đóng
         for (let [symbol, data] of activeOrdersTracker) {
             const stillOpen = activePositionsOnFloor.some(p => p.symbol === symbol && p.positionSide === data.side);
-            
             if (!stillOpen) {
                 const trades = await callBinance('/fapi/v1/userTrades', 'GET', { symbol, limit: 5 });
                 const lastTrade = trades.find(t => t.symbol === symbol && t.positionSide === data.side);
                 const pnl = parseFloat(lastTrade?.realizedPnl || 0);
-
                 if (pnl > 0) addBotLog(`💰 BOT CHỐT LỜI: ${symbol} | +${pnl}$`, "success");
                 else addBotLog(`📉 BOT CẮT LỖ: ${symbol} | ${pnl}$`, "error");
-
                 await callBinance('/fapi/v1/allOpenOrders', 'DELETE', { symbol });
-                activeOrdersTracker.delete(symbol); // Xóa khỏi tracker của bot
+                activeOrdersTracker.delete(symbol);
             }
         }
 
-        // CHỈ TÍNH MAX POS DỰA TRÊN TRACKER CỦA BOT (Mở tay kệ nó)
         if (activeOrdersTracker.size >= botSettings.maxPositions) return;
 
         for (const coin of status.candidatesList) {
-            // Nếu bot đang giữ symbol này rồi thì thôi, còn mở tay symbol này bot vẫn có thể mở thêm 1 lệnh của nó
             if (activeOrdersTracker.has(coin.symbol) || pendingSymbols.has(coin.symbol)) continue;
-            
             if (coin.maxV >= botSettings.minVol) {
                 openPosition(coin.symbol, coin.c1 >= 0 ? 'BUY' : 'SELL', status.exchangeInfo[coin.symbol], coin);
                 break; 
@@ -199,7 +190,6 @@ async function mainLoop() {
     } catch (e) {}
 }
 
-// 📡 FETCH DATA
 setInterval(() => {
     http.get('http://127.0.0.1:9000/api/data', res => {
         let d = ''; res.on('data', c => d += c);
@@ -225,7 +215,7 @@ async function init() {
             const notional = s.filters.find(f => f.filterType === 'MIN_NOTIONAL');
             status.exchangeInfo[s.symbol] = { quantityPrecision: s.quantityPrecision, pricePrecision: s.pricePrecision, stepSize: parseFloat(lot.stepSize), minNotional: parseFloat(notional?.notional || 5) };
         });
-        addBotLog("👿 LUFFY v15.7 - BOT CHỈ QUẢN LÝ LỆNH TỰ MỞ", "success");
+        addBotLog("👿 LUFFY v15.7 - FIX REDUCEONLY & HEDGE", "success");
     } catch (e) { console.log("Init Error:", e.message); }
 }
 
