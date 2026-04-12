@@ -3,20 +3,21 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>LUFFY DASHBOARD v16.2</title>
+    <title>LUFFY DASHBOARD v16.3</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         body { background: #050505; color: #e4e4e7; font-family: 'JetBrains Mono', monospace; font-size: 11px; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
         .glass { background: #111111; border: 1px solid #222; border-radius: 4px; }
         .input-dark { background: #000; border: 1px solid #333; color: #fff; padding: 6px; border-radius: 2px; outline: none; width: 100%; font-size: 12px; }
         .up { color: #10b981; } .down { color: #ef4444; }
-        #logs-box { height: 150px; overflow-y: auto; background: #080808; border: 1px solid #222; padding: 8px; flex-shrink: 0; }
+        #logs-box { height: 140px; overflow-y: auto; background: #080808; border: 1px solid #222; padding: 8px; flex-shrink: 0; }
         .log-line { border-bottom: 1px solid #111; padding: 2px 0; font-size: 10px; }
         .tab-btn { flex: 1; padding: 12px; text-align: center; cursor: pointer; border-bottom: 2px solid transparent; font-weight: bold; transition: 0.3s; }
         .tab-active { background: #1a1a1a; color: #3b82f6; border-bottom: 2px solid #3b82f6; }
         .luffy-glow { text-shadow: 0 0 10px rgba(59, 130, 246, 0.5); }
-        /* Table mobile fix */
         .pos-card { background: #0d0d0d; border: 1px solid #222; margin-bottom: 6px; padding: 8px; border-radius: 4px; }
+        ::-webkit-scrollbar { width: 4px; height: 4px; }
+        ::-webkit-scrollbar-thumb { background: #333; border-radius: 10px; }
     </style>
 </head>
 <body class="p-2 space-y-2">
@@ -35,15 +36,26 @@
         </div>
     </div>
 
-    <div class="glass p-2 flex justify-between items-center flex-shrink-0">
-        <div class="flex gap-4">
-            <div><p class="text-[9px] text-zinc-500 uppercase font-bold">Số dư khả dụng</p><p id="balance" class="text-sm font-black text-green-500 luffy-glow">0.00$</p></div>
-            <div><p class="text-[9px] text-zinc-500 uppercase font-bold">Bot PnL</p><p id="totalPnl" class="text-sm font-black text-blue-500">0.00$</p></div>
-            <div><p class="text-[9px] text-zinc-500 uppercase font-bold">Vị thế đã đóng</p><p id="closedCount" class="text-sm font-black text-orange-500">0</p></div>
+    <div class="glass p-2 grid grid-cols-2 gap-2 flex-shrink-0">
+        <div class="border-r border-zinc-800 pr-2">
+            <p class="text-[9px] text-zinc-500 uppercase font-bold">Tổng số dư ví</p>
+            <p id="walletBalance" class="text-sm font-black text-white">0.00$</p>
+        </div>
+        <div class="pl-1">
+            <p class="text-[9px] text-yellow-500 uppercase font-bold">Số dư khả dụng</p>
+            <p id="availBalance" class="text-sm font-black text-green-500 luffy-glow">0.00$</p>
+        </div>
+        <div class="border-t border-zinc-800 pt-1 border-r pr-2">
+            <p class="text-[9px] text-zinc-500 uppercase font-bold">Bot PnL</p>
+            <p id="totalPnl" class="text-sm font-black text-blue-500">0.00$</p>
+        </div>
+        <div class="border-t border-zinc-800 pt-1 pl-1">
+            <p class="text-[9px] text-zinc-500 uppercase font-bold">Đã đóng</p>
+            <p id="closedCount" class="text-sm font-black text-orange-500">0</p>
         </div>
     </div>
 
-    <div class="flex gap-2 overflow-x-auto py-1 no-scrollbar shrink-0" id="top5"></div>
+    <div class="flex gap-2 overflow-x-auto py-1 shrink-0" id="top5"></div>
 
     <div id="logs-box" class="font-mono text-[10px] glass">
         <div id="logs-list"></div>
@@ -65,16 +77,17 @@
                 const res = await fetch('/api/status'); 
                 const d = await res.json();
                 
-                // Update stats
-                document.getElementById('balance').innerText = d.status.availableBalance.toFixed(2) + '$';
+                // Hiển thị cả 2 loại số dư
+                document.getElementById('walletBalance').innerText = d.status.currentBalance.toFixed(2) + '$';
+                document.getElementById('availBalance').innerText = d.status.availableBalance.toFixed(2) + '$';
                 
-                // Tính PnL của Bot từ history
+                // Tính toán PnL
                 let pnlSum = d.status.history.reduce((sum, item) => sum + parseFloat(item.pnl), 0);
                 document.getElementById('totalPnl').innerText = (pnlSum >= 0 ? '+' : '') + pnlSum.toFixed(2) + '$';
                 document.getElementById('totalPnl').className = `text-sm font-black ${pnlSum >= 0 ? 'text-blue-500' : 'text-red-500'}`;
                 document.getElementById('closedCount').innerText = d.status.history.length;
 
-                // Update Candidates
+                // Candidates
                 document.getElementById('top5').innerHTML = (d.status.candidatesList || []).slice(0, 8).map(c => `
                     <div class="bg-zinc-900 px-2 py-1 border border-zinc-800 rounded text-[10px] whitespace-nowrap">
                         <b class="text-zinc-400">${c.symbol.replace('USDT','')}</b> 
@@ -82,29 +95,29 @@
                     </div>
                 `).join('');
 
-                // Update Logs
+                // Logs
                 document.getElementById('logs-list').innerHTML = d.status.botLogs.map(l => `
                     <div class="log-line"><span class="text-zinc-600">[${l.time}]</span> <span class="${l.type==='success'?'up':(l.type==='error'?'down':'text-blue-400')}">${l.msg}</span></div>
                 `).join('');
 
-                // Update Main Area (Card based for mobile)
+                // Area Display
                 const area = document.getElementById('display-area');
                 if(currentTab === 'pos') {
                     if (d.activePositions.length === 0) {
-                        area.innerHTML = `<p class="text-center text-zinc-600 py-10">KHÔNG CÓ VỊ THẾ ĐANG CHẠY</p>`;
+                        area.innerHTML = `<p class="text-center text-zinc-600 py-10 uppercase">Không có vị thế</p>`;
                     } else {
                         area.innerHTML = d.activePositions.map(p => `
                             <div class="pos-card">
                                 <div class="flex justify-between items-start border-b border-zinc-800 pb-1 mb-1">
                                     <b class="text-blue-400 text-xs">${p.symbol} <span class="${p.side==='LONG'?'up':'down'}">(${p.side})</span></b>
-                                    <span class="text-zinc-400">DCA: ${p.dcaCount}</span>
+                                    <span class="text-zinc-400">Layer: ${p.dcaCount}</span>
                                 </div>
                                 <div class="grid grid-cols-2 gap-y-1 text-[10px]">
                                     <div>Margin: <b class="text-white">${p.margin}$</b></div>
                                     <div>Lev: <b class="text-white">x${p.lev}</b></div>
                                     <div class="col-span-2">Entry ➔ Mark: <b class="text-zinc-300">${p.entryPrice} ➔ ${p.markPrice}</b></div>
-                                    <div class="up font-bold">Target TP: ${p.tpPrice}</div>
-                                    <div class="down font-bold">Target SL: ${p.slPrice}</div>
+                                    <div class="up font-bold">TP: ${p.tpPrice}</div>
+                                    <div class="down font-bold">SL: ${p.slPrice}</div>
                                 </div>
                             </div>
                         `).join('');
@@ -125,7 +138,7 @@
                 }
 
                 const btn = document.getElementById('runBtn');
-                btn.innerText = d.botSettings.isRunning ? "DỪNG BOT" : "CHẠY BOT";
+                btn.innerText = d.botSettings.isRunning ? "STOP BOT" : "START BOT";
                 btn.className = d.botSettings.isRunning ? "bg-red-900/50 text-red-500 border border-red-500 flex-1 h-9 rounded font-bold" : "bg-green-900/50 text-green-500 border border-green-500 flex-1 h-9 rounded font-bold";
             } catch (e) {}
         }
@@ -140,7 +153,7 @@
                 maxPositions: parseInt(document.getElementById('maxPos').value)
             };
             await fetch('/api/settings', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body) });
-            alert("Đã lưu!");
+            alert("Đã lưu cấu hình!");
         }
 
         async function toggleBot() {
