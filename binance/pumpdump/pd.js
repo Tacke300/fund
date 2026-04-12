@@ -29,7 +29,7 @@ let botSettings = {
     posTP: 0.5,                 
     posSL: 5.0,                 
     dcaStep: 10.0, 
-    maxDCA: 9, // Mặc định cho Long
+    maxDCA: 9,
     botSLValue: 0,
     botSLType: 'fixed'
 };
@@ -38,6 +38,7 @@ let status = {
     initialBalance: 0, 
     dayStartBalance: 0, 
     currentBalance: 0, 
+    availableBalance: 0, // Thêm thông số số dư khả dụng
     botLogs: [], 
     exchangeInfo: {}, 
     candidatesList: [], 
@@ -123,11 +124,21 @@ async function openPosition(symbol, side, info) {
 
     try {
         const acc = await callBinance('/fapi/v2/account');
+        // Lấy SỐ DƯ KHẢ DỤNG thay vì Tổng số dư ví
+        const availableBal = parseFloat(acc.availableBalance);
+        status.availableBalance = availableBal;
+
         const ticker = await callBinance('/fapi/v1/ticker/price', 'GET', { symbol });
         const currentPrice = parseFloat(ticker.price);
         const targetLev = info.maxLeverage || 20;
         
-        let marginReq = botSettings.invType === 'percent' ? (parseFloat(acc.totalWalletBalance) * botSettings.invValue) / 100 : botSettings.invValue;
+        // Logic Margin dựa trên Số dư khả dụng
+        let marginReq = botSettings.invType === 'percent' ? (availableBal * botSettings.invValue) / 100 : botSettings.invValue;
+        
+        // Kiểm tra an toàn: nếu margin yêu cầu lớn hơn khả dụng, lấy 95% khả dụng để tránh lỗi
+        if (marginReq > availableBal) marginReq = availableBal * 0.95;
+        if (marginReq <= 0) return;
+
         let finalQty = (Math.floor(((marginReq * targetLev) / currentPrice) / info.stepSize) * info.stepSize).toFixed(info.quantityPrecision);
         
         await callBinance('/fapi/v1/leverage', 'POST', { symbol, leverage: targetLev });
@@ -146,14 +157,14 @@ async function openPosition(symbol, side, info) {
 
             activeOrdersTracker.set(symbol, { 
                 symbol, side: posSide, entryPrice: formatSmart(entry), initialEntry: entry, 
-                initialQty: parseFloat(finalQty), // Lưu qty gốc để DCA
+                initialQty: parseFloat(finalQty), 
                 margin: formatSmart(actualMargin), qty: Math.abs(parseFloat(myPos.positionAmt)), 
                 tpPrice: formatSmart(parseFloat(tp)), slPrice: formatSmart(parseFloat(sl)), 
                 tpRaw: parseFloat(tp), slRaw: parseFloat(sl), dcaCount: 0, isClosing: false, lev: targetLev
             });
 
             await updateSànGiáp(symbol, side, posSide, tp, sl);
-            addBotLog(`✅ Mở ${symbol} ${posSide} | Margin: ${formatSmart(actualMargin)}$ | Lev: x${targetLev}`, "success");
+            addBotLog(`✅ Mở ${symbol} | Margin: ${formatSmart(actualMargin)}$ (từ ${formatSmart(availableBal)}$ khả dụng) | Lev: x${targetLev}`, "success");
         }
     } catch (e) { addBotLog(`❌ Lỗi mở: ${e.message}`, "error"); }
 }
@@ -163,6 +174,7 @@ async function mainLoop() {
     try {
         const acc = await callBinance('/fapi/v2/account');
         status.currentBalance = parseFloat(acc.totalWalletBalance);
+        status.availableBalance = parseFloat(acc.availableBalance);
         const posRisk = await callBinance('/fapi/v2/positionRisk');
 
         for (let [symbol, data] of activeOrdersTracker) {
@@ -189,23 +201,18 @@ async function mainLoop() {
                 continue;
             }
 
-            // LOGIC DCA MỚI
             const diff = ((price - data.initialEntry) / data.initialEntry) * 100;
             const isAgainst = (data.side === 'LONG' && diff <= -botSettings.dcaStep * (data.dcaCount + 1)) || 
                               (data.side === 'SHORT' && diff >= botSettings.dcaStep * (data.dcaCount + 1));
 
             if (isAgainst) {
                 let canDCA = false;
-                let dcaQty = data.initialQty; // Mặc định DCA bằng qty lần đầu
+                let dcaQty = data.initialQty;
 
-                if (data.side === 'LONG' && data.dcaCount < 9) {
+                if (data.side === 'LONG' && data.dcaCount < 9) canDCA = true;
+                else if (data.side === 'SHORT') {
                     canDCA = true;
-                } else if (data.side === 'SHORT') {
-                    canDCA = true;
-                    if (data.dcaCount >= 9) {
-                        // Sau tầng 9, Short DCA 25% tổng volume hiện tại
-                        dcaQty = data.qty * 0.25;
-                    }
+                    if (data.dcaCount >= 9) dcaQty = data.qty * 0.25;
                 }
 
                 if (canDCA) {
@@ -214,11 +221,7 @@ async function mainLoop() {
                     const finalDcaQty = (Math.floor(dcaQty / info.stepSize) * info.stepSize).toFixed(info.quantityPrecision);
                     
                     addBotLog(`📉 DCA ${symbol} Tầng ${data.dcaCount} | Đang nhồi...`, "warning");
-                    
-                    const res = await callBinance('/fapi/v1/order', 'POST', { 
-                        symbol, side: data.side === 'LONG' ? 'BUY' : 'SELL', 
-                        positionSide: data.side, type: 'MARKET', quantity: finalDcaQty 
-                    });
+                    const res = await callBinance('/fapi/v1/order', 'POST', { symbol, side: data.side === 'LONG' ? 'BUY' : 'SELL', positionSide: data.side, type: 'MARKET', quantity: finalDcaQty });
 
                     if (res.orderId) {
                         await sleep(3000);
@@ -235,8 +238,7 @@ async function mainLoop() {
                             data.margin = formatSmart(newTotalMargin);
                             data.tpRaw = data.side === 'LONG' ? newEntry * (1 + botSettings.posTP/100) : newEntry * (1 - botSettings.posTP/100);
                             data.slRaw = data.side === 'LONG' ? newEntry * (1 - botSettings.posSL/100) : newEntry * (1 + botSettings.posSL/100);
-                            data.tpPrice = formatSmart(data.tpRaw); 
-                            data.slPrice = formatSmart(data.slRaw);
+                            data.tpPrice = formatSmart(data.tpRaw); data.slPrice = formatSmart(data.slRaw);
 
                             addBotLog(`📊 ${symbol} DCA ${data.dcaCount}: Gốc ${oldMargin}$ + Nhồi ${formatSmart(dcaMargin)}$ = Tổng ${data.margin}$ | Giá DCA: ${formatSmart(price)}`, "success");
                             await updateSànGiáp(symbol, data.side === 'LONG' ? 'BUY' : 'SELL', data.side, data.tpRaw.toFixed(info.pricePrecision), data.slRaw.toFixed(info.pricePrecision));
@@ -275,6 +277,7 @@ async function init() {
     try {
         const acc = await callBinance('/fapi/v2/account');
         status.initialBalance = status.currentBalance = parseFloat(acc.totalWalletBalance);
+        status.availableBalance = parseFloat(acc.availableBalance);
         const info = await callBinance('/fapi/v1/exchangeInfo');
         const brackets = await callBinance('/fapi/v1/leverageBracket');
         info.symbols.forEach(s => {
@@ -283,12 +286,12 @@ async function init() {
             status.exchangeInfo[s.symbol] = { quantityPrecision: s.quantityPrecision, pricePrecision: s.pricePrecision, stepSize: parseFloat(lot.stepSize), maxLeverage: bracket ? bracket.brackets[0].initialLeverage : 20 };
         });
         await exchange.loadMarkets(); 
-        addBotLog("👿 LUFFY v16.0 - INFINITY DCA SHORT READY", "success");
+        addBotLog("👿 LUFFY v16.1 - AVAILABLE BALANCE LOGIC READY", "success");
     } catch (e) {}
 }
 
 init(); 
-setInterval(mainLoop, 3000);
+setInterval(mainLoop, 3500);
 
 const APP = express(); APP.use(express.json()); APP.use(express.static(__dirname));
 APP.get('/api/status', (req, res) => res.json({ botSettings, activePositions: Array.from(activeOrdersTracker.values()), status }));
