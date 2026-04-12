@@ -2,106 +2,131 @@
 <html lang="vi">
 <head>
     <meta charset="UTF-8">
-    <title>Hạm Đội Luffy v6.7 - FULL TRADING DASHBOARD</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LUFFY DASHBOARD v16.2</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         body { background: #050505; color: #e4e4e7; font-family: 'JetBrains Mono', monospace; font-size: 11px; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
         .glass { background: #111111; border: 1px solid #222; border-radius: 4px; }
-        .input-dark { background: #000; border: 1px solid #333; color: #fff; padding: 4px; border-radius: 2px; outline: none; width: 100%; }
+        .input-dark { background: #000; border: 1px solid #333; color: #fff; padding: 6px; border-radius: 2px; outline: none; width: 100%; font-size: 12px; }
         .up { color: #10b981; } .down { color: #ef4444; }
-        #logs-box { height: 180px; overflow-y: auto; background: #080808; border: 1px solid #222; margin-bottom: 8px; flex-shrink: 0; padding: 8px; }
+        #logs-box { height: 150px; overflow-y: auto; background: #080808; border: 1px solid #222; padding: 8px; flex-shrink: 0; }
         .log-line { border-bottom: 1px solid #111; padding: 2px 0; font-size: 10px; }
-        .tab-btn { padding: 10px 20px; cursor: pointer; border-right: 1px solid #222; font-weight: bold; }
+        .tab-btn { flex: 1; padding: 12px; text-align: center; cursor: pointer; border-bottom: 2px solid transparent; font-weight: bold; transition: 0.3s; }
         .tab-active { background: #1a1a1a; color: #3b82f6; border-bottom: 2px solid #3b82f6; }
-        th { font-size: 9px; color: #555; text-transform: uppercase; padding: 10px 4px; border-bottom: 1px solid #222; }
-        td { padding: 8px 4px; border-bottom: 1px solid #111; }
         .luffy-glow { text-shadow: 0 0 10px rgba(59, 130, 246, 0.5); }
+        /* Table mobile fix */
+        .pos-card { background: #0d0d0d; border: 1px solid #222; margin-bottom: 6px; padding: 8px; border-radius: 4px; }
     </style>
 </head>
 <body class="p-2 space-y-2">
-    <div class="grid grid-cols-12 gap-2 flex-shrink-0">
-        <div class="col-span-10 glass p-3 grid grid-cols-8 gap-2 items-end">
-            <div><label class="text-[9px] text-zinc-500 block uppercase font-bold">Vốn Lệnh</label><input id="invValue" type="number" class="input-dark"></div>
-            <div><label class="text-[9px] text-zinc-500 block uppercase">Loại</label><select id="invType" class="input-dark"><option value="percent">% Ví</option><option value="fixed">USDT</option></select></div>
-            <div><label class="text-[9px] text-blue-500 block uppercase font-bold">Biến động (%)</label><input id="minVol" type="number" step="0.1" class="input-dark border-blue-900/50"></div>
-            <div><label class="text-[9px] text-green-600 block uppercase font-bold">TP (%)</label><input id="posTP" type="number" class="input-dark"></div>
-            <div><label class="text-[9px] text-red-600 block uppercase font-bold">SL (%)</label><input id="posSL" type="number" class="input-dark"></div>
-            <div><label class="text-[9px] text-zinc-500 block uppercase">Max Pos</label><input id="maxPos" type="number" class="input-dark"></div>
-            <div class="col-span-2 flex gap-1">
-                <button onclick="save()" class="bg-blue-600 hover:bg-blue-500 w-1/2 h-[26px] rounded font-bold text-[9px]">LƯU</button>
-                <button id="runBtn" onclick="toggleBot()" class="w-1/2 h-[26px] rounded font-bold text-[9px]"></button>
-            </div>
+    <div class="glass p-3 space-y-3 flex-shrink-0">
+        <div class="grid grid-cols-3 gap-2">
+            <div><label class="text-[9px] text-zinc-500 uppercase font-bold">Vốn</label><input id="invValue" type="number" class="input-dark"></div>
+            <div><label class="text-[9px] text-zinc-500 uppercase">Loại</label><select id="invType" class="input-dark"><option value="percent">% Ví</option><option value="fixed">$</option></select></div>
+            <div><label class="text-[9px] text-blue-500 uppercase font-bold">Vol%</label><input id="minVol" type="number" step="0.1" class="input-dark"></div>
+            <div><label class="text-[9px] text-green-600 uppercase font-bold">TP%</label><input id="posTP" type="number" class="input-dark"></div>
+            <div><label class="text-[9px] text-red-600 uppercase font-bold">SL%</label><input id="posSL" type="number" class="input-dark"></div>
+            <div><label class="text-[9px] text-zinc-500 uppercase">Max</label><input id="maxPos" type="number" class="input-dark"></div>
         </div>
-        <div class="col-span-2 glass p-3 text-center flex flex-col justify-center">
-            <p id="runtime" class="text-zinc-500 text-[10px] font-bold">00:00:00</p>
-            <div class="flex gap-1 mt-1">
-                <input id="botSLValue" type="number" class="input-dark border-red-900/50 text-red-400 font-bold" placeholder="SL Bot">
-                <select id="botSLType" class="input-dark w-12"><option value="fixed">$</option><option value="percent">%</option></select>
-            </div>
+        <div class="flex gap-2">
+            <button onclick="save()" class="bg-zinc-800 hover:bg-zinc-700 flex-1 h-9 rounded font-bold">LƯU CONFIG</button>
+            <button id="runBtn" onclick="toggleBot()" class="flex-1 h-9 rounded font-bold"></button>
         </div>
     </div>
 
-    <div class="grid grid-cols-12 gap-2 flex-shrink-0">
-        <div class="col-span-12 glass p-2 flex gap-8 items-center overflow-x-auto">
-            <div class="flex gap-6 border-r border-zinc-800 pr-6 shrink-0">
-                <div><p class="text-[9px] text-zinc-500 uppercase font-bold">Số dư Ví</p><p id="balance" class="text-base font-black text-green-500 luffy-glow">0.00$</p></div>
-                <div><p class="text-[9px] text-zinc-500 uppercase font-bold">Tổng PnL</p><p id="totalPnl" class="text-base font-black text-blue-500">0.00$</p></div>
-            </div>
-            <div class="flex gap-2 flex-nowrap" id="top5"></div>
+    <div class="glass p-2 flex justify-between items-center flex-shrink-0">
+        <div class="flex gap-4">
+            <div><p class="text-[9px] text-zinc-500 uppercase font-bold">Số dư khả dụng</p><p id="balance" class="text-sm font-black text-green-500 luffy-glow">0.00$</p></div>
+            <div><p class="text-[9px] text-zinc-500 uppercase font-bold">Bot PnL</p><p id="totalPnl" class="text-sm font-black text-blue-500">0.00$</p></div>
+            <div><p class="text-[9px] text-zinc-500 uppercase font-bold">Vị thế đã đóng</p><p id="closedCount" class="text-sm font-black text-orange-500">0</p></div>
         </div>
     </div>
 
-    <div id="logs-box" class="font-mono text-[10px]">
+    <div class="flex gap-2 overflow-x-auto py-1 no-scrollbar shrink-0" id="top5"></div>
+
+    <div id="logs-box" class="font-mono text-[10px] glass">
         <div id="logs-list"></div>
     </div>
 
     <div class="flex-grow glass flex flex-col overflow-hidden">
-        <div class="flex bg-zinc-900/50 border-b border-zinc-800 shrink-0">
-            <div id="tab-pos" onclick="setTab('pos')" class="tab-btn tab-active uppercase">Vị thế đang chạy</div>
-            <div id="tab-his" onclick="setTab('his')" class="tab-btn text-zinc-500 uppercase">Lịch sử giao dịch</div>
+        <div class="flex bg-zinc-900 shrink-0">
+            <div id="tab-pos" onclick="setTab('pos')" class="tab-btn tab-active uppercase">Running</div>
+            <div id="tab-his" onclick="setTab('his')" class="tab-btn text-zinc-500 uppercase">History</div>
         </div>
         <div id="display-area" class="overflow-auto flex-grow p-2"></div>
     </div>
 
     <script>
         let currentTab = 'pos';
-        function val15(c) { return c.c15 !== undefined ? c.c15 : (c.m15 !== undefined ? c.m15 : '0'); }
 
         async function sync() {
             try {
                 const res = await fetch('/api/status'); 
                 const d = await res.json();
                 
-                document.getElementById('balance').innerText = d.status.currentBalance.toFixed(2) + '$';
-                document.getElementById('top5').innerHTML = (d.status.candidatesList || []).slice(0, 10).map(c => `
-                    <div class="bg-black p-1 px-2 border border-zinc-800 rounded text-[9px] whitespace-nowrap">
+                // Update stats
+                document.getElementById('balance').innerText = d.status.availableBalance.toFixed(2) + '$';
+                
+                // Tính PnL của Bot từ history
+                let pnlSum = d.status.history.reduce((sum, item) => sum + parseFloat(item.pnl), 0);
+                document.getElementById('totalPnl').innerText = (pnlSum >= 0 ? '+' : '') + pnlSum.toFixed(2) + '$';
+                document.getElementById('totalPnl').className = `text-sm font-black ${pnlSum >= 0 ? 'text-blue-500' : 'text-red-500'}`;
+                document.getElementById('closedCount').innerText = d.status.history.length;
+
+                // Update Candidates
+                document.getElementById('top5').innerHTML = (d.status.candidatesList || []).slice(0, 8).map(c => `
+                    <div class="bg-zinc-900 px-2 py-1 border border-zinc-800 rounded text-[10px] whitespace-nowrap">
                         <b class="text-zinc-400">${c.symbol.replace('USDT','')}</b> 
-                        <span class="${c.c1>=0?'up':'down'} font-bold">${c.c1}/${c.c5}/${val15(c)}%</span>
+                        <span class="${c.c1>=0?'up':'down'} font-bold">${c.c1}%</span>
                     </div>
                 `).join('');
 
+                // Update Logs
                 document.getElementById('logs-list').innerHTML = d.status.botLogs.map(l => `
                     <div class="log-line"><span class="text-zinc-600">[${l.time}]</span> <span class="${l.type==='success'?'up':(l.type==='error'?'down':'text-blue-400')}">${l.msg}</span></div>
                 `).join('');
 
+                // Update Main Area (Card based for mobile)
                 const area = document.getElementById('display-area');
                 if(currentTab === 'pos') {
-                    area.innerHTML = `<table class="w-full text-left"><thead><tr><th>Coin</th><th>Side</th><th>Margin</th><th>Entry ➔ Mark</th><th>TP / SL Target</th><th>Snapshot (1/5/15)</th></tr></thead>
-                        <tbody>${d.activePositions.map(p => `<tr>
-                            <td class="font-black text-blue-400">${p.symbol}</td>
-                            <td><b class="${p.side==='LONG'?'up':'down'}">${p.side}</b></td>
-                            <td>${p.margin}$</td>
-                            <td>${p.entryPrice} ➔ ${p.markPrice || '---'}</td>
-                            <td><span class="up">TP: ${p.tpPrice}</span> <br> <span class="down">SL: ${p.slPrice}</span></td>
-                            <td class="text-zinc-500">${p.snapshot?.c1 || 0}/${p.snapshot?.c5 || 0}/${val15(p.snapshot || {})} %</td>
-                        </tr>`).join('')}</tbody></table>`;
+                    if (d.activePositions.length === 0) {
+                        area.innerHTML = `<p class="text-center text-zinc-600 py-10">KHÔNG CÓ VỊ THẾ ĐANG CHẠY</p>`;
+                    } else {
+                        area.innerHTML = d.activePositions.map(p => `
+                            <div class="pos-card">
+                                <div class="flex justify-between items-start border-b border-zinc-800 pb-1 mb-1">
+                                    <b class="text-blue-400 text-xs">${p.symbol} <span class="${p.side==='LONG'?'up':'down'}">(${p.side})</span></b>
+                                    <span class="text-zinc-400">DCA: ${p.dcaCount}</span>
+                                </div>
+                                <div class="grid grid-cols-2 gap-y-1 text-[10px]">
+                                    <div>Margin: <b class="text-white">${p.margin}$</b></div>
+                                    <div>Lev: <b class="text-white">x${p.lev}</b></div>
+                                    <div class="col-span-2">Entry ➔ Mark: <b class="text-zinc-300">${p.entryPrice} ➔ ${p.markPrice}</b></div>
+                                    <div class="up font-bold">Target TP: ${p.tpPrice}</div>
+                                    <div class="down font-bold">Target SL: ${p.slPrice}</div>
+                                </div>
+                            </div>
+                        `).join('');
+                    }
                 } else {
-                    area.innerHTML = `<p class="text-center text-zinc-600 py-10 uppercase">Dữ liệu lịch sử đang được tải từ sàn...</p>`;
+                    area.innerHTML = d.status.history.map(h => `
+                        <div class="pos-card border-l-2 ${parseFloat(h.pnl)>=0?'border-l-green-500':'border-l-red-500'}">
+                            <div class="flex justify-between font-bold">
+                                <span>${h.symbol}</span>
+                                <span class="${parseFloat(h.pnl)>=0?'up':'down'}">${parseFloat(h.pnl) >= 0 ? '+' : ''}${h.pnl}$</span>
+                            </div>
+                            <div class="flex justify-between text-zinc-500 text-[9px]">
+                                <span>${h.time}</span>
+                                <span>Entry: ${h.entry}</span>
+                            </div>
+                        </div>
+                    `).join('');
                 }
 
                 const btn = document.getElementById('runBtn');
                 btn.innerText = d.botSettings.isRunning ? "DỪNG BOT" : "CHẠY BOT";
-                btn.className = d.botSettings.isRunning ? "bg-red-600 hover:bg-red-500 w-1/2 h-[26px] rounded font-bold text-[9px]" : "bg-green-600 hover:bg-green-500 w-1/2 h-[26px] rounded font-bold text-[9px]";
+                btn.className = d.botSettings.isRunning ? "bg-red-900/50 text-red-500 border border-red-500 flex-1 h-9 rounded font-bold" : "bg-green-900/50 text-green-500 border border-green-500 flex-1 h-9 rounded font-bold";
             } catch (e) {}
         }
 
@@ -112,12 +137,10 @@
                 minVol: parseFloat(document.getElementById('minVol').value),
                 posTP: parseFloat(document.getElementById('posTP').value), 
                 posSL: parseFloat(document.getElementById('posSL').value),
-                maxPositions: parseInt(document.getElementById('maxPos').value),
-                botSLValue: parseFloat(document.getElementById('botSLValue').value), 
-                botSLType: document.getElementById('botSLType').value
+                maxPositions: parseInt(document.getElementById('maxPos').value)
             };
             await fetch('/api/settings', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body) });
-            alert("Lưu thành công!");
+            alert("Đã lưu!");
         }
 
         async function toggleBot() {
@@ -132,15 +155,15 @@
             sync(); 
         }
 
-        setInterval(sync, 1500);
+        setInterval(sync, 2000);
         window.onload = () => {
              fetch('/api/status').then(r => r.json()).then(d => {
                 document.getElementById('invValue').value = d.botSettings.invValue;
+                document.getElementById('invType').value = d.botSettings.invType;
                 document.getElementById('minVol').value = d.botSettings.minVol || 0.5;
                 document.getElementById('posTP').value = d.botSettings.posTP;
                 document.getElementById('posSL').value = d.botSettings.posSL;
                 document.getElementById('maxPos').value = d.botSettings.maxPositions;
-                document.getElementById('botSLValue').value = d.botSettings.botSLValue || 0;
              });
         }
     </script>
