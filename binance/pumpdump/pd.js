@@ -31,7 +31,7 @@ let status = {
 let activeOrdersTracker = new Map(); 
 let pendingSymbols = new Set();
 let blackListPool = new Map();
-let isReady = false; // Cờ kiểm tra dữ liệu sàn đã sẵn sàng chưa
+let isReady = false; 
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
@@ -81,6 +81,7 @@ async function finalizePnL(symbol, side, entryPrice) {
             symbol, side, pnl: totalRealized.toFixed(4), entry: entryPrice 
         });
         if (status.history.length > 200) status.history.pop();
+        addBotLog(`💰 Chốt ${symbol}: ${totalRealized.toFixed(4)}$ (Real PnL)`, "info");
     } catch (e) {}
 }
 
@@ -95,13 +96,12 @@ async function updateSànGiáp(symbol, side, posSide, tp, sl) {
 
 async function openPosition(symbol, side) {
     const info = status.exchangeInfo[symbol];
-    if (!info) return; // Bảo vệ nếu chưa load xong thông số sàn
+    if (!info) return; 
 
     const posSide = side === 'BUY' ? 'LONG' : 'SHORT';
     try {
         const acc = await callBinance('/fapi/v2/account');
         const availableBal = parseFloat(acc.availableBalance);
-        
         const coinData = status.candidatesList.find(c => c.symbol === symbol);
         const snapshot = coinData ? `${coinData.c1}/${coinData.c5}/${coinData.c15}%` : "0/0/0%";
 
@@ -150,7 +150,6 @@ async function mainLoop() {
         status.availableBalance = parseFloat(acc.availableBalance);
         const posRisk = await callBinance('/fapi/v2/positionRisk');
 
-        // Check & Clear Ghost Positions
         for (let [symbol, data] of activeOrdersTracker) {
             const floorPos = posRisk.find(p => p.symbol === symbol && p.positionSide === data.side && parseFloat(p.positionAmt) !== 0);
             if (!floorPos && !data.isClosing) {
@@ -165,7 +164,6 @@ async function mainLoop() {
             data.markPrice = formatSmart(ticker.price);
         }
 
-        // Auto Open
         if (activeOrdersTracker.size < botSettings.maxPositions) {
             for (const coin of status.candidatesList) {
                 if (!activeOrdersTracker.has(coin.symbol) && !pendingSymbols.has(coin.symbol) && !blackListPool.has(coin.symbol) && coin.maxV >= botSettings.minVol) {
@@ -179,7 +177,6 @@ async function mainLoop() {
     } catch (e) {}
 }
 
-// Sync Candidates from Port 9000
 setInterval(() => {
     http.get('http://127.0.0.1:9000/api/data', res => {
         let d = ''; res.on('data', c => d += c);
@@ -195,12 +192,16 @@ setInterval(() => {
     }).on('error', () => {});
 }, 2000);
 
-// Khởi tạo thông số sàn
 async function init() {
     try {
         addBotLog("🔄 Đang tải thông số sàn...", "info");
         const info = await callBinance('/fapi/v1/exchangeInfo');
-        const brackets = await callBinance('/fapi/v1/leverageBracket');
+        let brackets = await callBinance('/fapi/v1/leverageBracket');
+        
+        if (!Array.isArray(brackets)) {
+            brackets = Array.isArray(brackets.brackets) ? brackets.brackets : [];
+        }
+
         info.symbols.forEach(s => {
             const lot = s.filters.find(f => f.filterType === 'LOT_SIZE');
             const bracket = brackets.find(b => b.symbol === s.symbol);
@@ -208,12 +209,12 @@ async function init() {
                 quantityPrecision: s.quantityPrecision, 
                 pricePrecision: s.pricePrecision, 
                 stepSize: parseFloat(lot.stepSize), 
-                maxLeverage: bracket ? bracket.brackets[0].initialLeverage : 20 
+                maxLeverage: (bracket && bracket.brackets && bracket.brackets[0]) ? bracket.brackets[0].initialLeverage : 20 
             };
         });
         await exchange.loadMarkets(); 
         isReady = true;
-        addBotLog("👿 LUFFY v16.8 - SẴN SÀNG", "success");
+        addBotLog("👿 LUFFY v16.9 - READY", "success");
     } catch (e) {
         addBotLog("❌ Init lỗi: " + e.message, "error");
         setTimeout(init, 5000);
