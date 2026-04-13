@@ -2,8 +2,8 @@
 <html lang="vi">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>LUFFY DASHBOARD v16.6</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>LUFFY DASHBOARD v16.7</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         body { background: #050505; color: #e4e4e7; font-family: 'JetBrains Mono', monospace; font-size: 11px; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
@@ -11,10 +11,11 @@
         .input-dark { background: #000; border: 1px solid #333; color: #fff; padding: 6px; border-radius: 2px; outline: none; width: 100%; font-size: 12px; }
         .up { color: #10b981; } .down { color: #ef4444; }
         #logs-box { height: 130px; overflow-y: auto; background: #080808; border: 1px solid #222; padding: 8px; flex-shrink: 0; }
-        .log-line { border-bottom: 1px solid #111; padding: 2px 0; font-size: 10px; }
         .tab-btn { flex: 1; padding: 12px; text-align: center; cursor: pointer; border-bottom: 2px solid transparent; font-weight: bold; }
         .tab-active { background: #1a1a1a; color: #3b82f6; border-bottom: 2px solid #3b82f6; }
         .pos-card { background: #0d0d0d; border: 1px solid #222; margin-bottom: 6px; padding: 8px; border-radius: 4px; }
+        /* Hiệu ứng bấm nút */
+        button:active { transform: scale(0.95); opacity: 0.8; }
     </style>
 </head>
 <body class="p-2 space-y-2">
@@ -25,28 +26,28 @@
             <div><label class="text-[9px] text-blue-500 uppercase font-bold">Vol%</label><input id="minVol" type="number" step="0.1" class="input-dark"></div>
             <div><label class="text-[9px] text-green-600 uppercase font-bold">TP%</label><input id="posTP" type="number" class="input-dark"></div>
             <div><label class="text-[9px] text-red-600 uppercase font-bold">SL%</label><input id="posSL" type="number" class="input-dark"></div>
-            <div><label class="text-[9px] text-zinc-500 uppercase">Max</label><input id="maxPos" type="number" class="input-dark"></div>
+            <div><label class="text-[9px] text-zinc-500 uppercase">MaxPos</label><input id="maxPos" type="number" class="input-dark"></div>
         </div>
         
         <div class="flex gap-2 items-end">
             <div class="flex-grow">
-                <label class="text-[9px] text-red-500 uppercase font-bold">Cắt lỗ toàn Bot (SL Bot)</label>
+                <label class="text-[9px] text-red-500 uppercase font-bold">Cắt lỗ Bot</label>
                 <div class="flex gap-1">
                     <input id="botSLValue" type="number" class="input-dark border-red-900/50" placeholder="0">
                     <select id="botSLType" class="input-dark w-16"><option value="fixed">$</option><option value="percent">%</option></select>
                 </div>
             </div>
-            <button onclick="save()" class="bg-blue-600 hover:bg-blue-500 px-6 h-9 rounded font-bold text-white shadow-lg shadow-blue-900/20">LƯU CONFIG</button>
+            <button onclick="save()" class="bg-zinc-800 w-24 h-9 rounded font-bold uppercase text-[10px]">Lưu Config</button>
         </div>
 
-        <button id="runBtn" onclick="toggleBot()" class="w-full h-11 rounded font-black text-sm tracking-widest border-2 transition-all duration-300"></button>
+        <button id="runBtn" onclick="toggleBot()" class="w-full h-12 rounded font-black text-xs tracking-tighter border-2 uppercase transition-all"></button>
     </div>
 
     <div class="glass p-2 grid grid-cols-2 gap-2 shrink-0 text-center">
         <div class="border-r border-zinc-800"><p class="text-[9px] text-zinc-500 uppercase font-bold">Tổng Ví</p><p id="walletBalance" class="text-sm font-black">0.00$</p></div>
         <div><p class="text-[9px] text-yellow-500 uppercase font-bold">Khả Dụng</p><p id="availBalance" class="text-sm font-black text-green-500">0.00$</p></div>
         <div class="border-t border-zinc-800 pt-1 border-r"><p class="text-[9px] text-blue-500 uppercase font-bold">Bot PnL (Real)</p><p id="totalPnl" class="text-sm font-black">0.00$</p></div>
-        <div class="border-t border-zinc-800 pt-1"><p class="text-[9px] text-zinc-500 uppercase font-bold">Lệnh Đã Đóng</p><p id="closedCount" class="text-sm font-black text-orange-500">0</p></div>
+        <div class="border-t border-zinc-800 pt-1"><p class="text-[9px] text-zinc-500 uppercase font-bold">Đã Đóng</p><p id="closedCount" class="text-sm font-black text-orange-500">0</p></div>
     </div>
 
     <div class="flex gap-2 overflow-x-auto py-1 shrink-0 no-scrollbar" id="top5"></div>
@@ -63,15 +64,20 @@
 
     <script>
         let currentTab = 'pos';
+        let isRunningLocal = false;
+
         async function sync() {
             try {
-                const res = await fetch('/api/status'); const d = await res.json();
+                const res = await fetch('/api/status'); 
+                const d = await res.json();
+                
+                isRunningLocal = d.botSettings.isRunning;
                 document.getElementById('walletBalance').innerText = d.status.currentBalance.toFixed(2) + '$';
                 document.getElementById('availBalance').innerText = d.status.availableBalance.toFixed(2) + '$';
                 
                 let pnlSum = d.status.history.reduce((sum, item) => sum + parseFloat(item.pnl), 0);
                 document.getElementById('totalPnl').innerText = (pnlSum >= 0 ? '+' : '') + pnlSum.toFixed(2) + '$';
-                document.getElementById('totalPnl').className = `text-sm font-black ${pnlSum >= 0 ? 'text-blue-400' : 'text-red-500'}`;
+                document.getElementById('totalPnl').className = `text-sm font-black ${pnlSum >= 0 ? 'text-blue-500' : 'text-red-500'}`;
                 document.getElementById('closedCount').innerText = d.status.history.length;
 
                 document.getElementById('top5').innerHTML = (d.status.candidatesList || []).slice(0, 8).map(c => `
@@ -85,16 +91,16 @@
 
                 const area = document.getElementById('display-area');
                 if(currentTab === 'pos') {
-                    area.innerHTML = d.activePositions.length === 0 ? `<p class="text-center text-zinc-600 py-10 uppercase font-bold opacity-30 italic">No Active Positions</p>` : d.activePositions.map(p => `
+                    area.innerHTML = d.activePositions.length === 0 ? `<p class="text-center text-zinc-600 py-10">TRỐNG</p>` : d.activePositions.map(p => `
                         <div class="pos-card">
                             <div class="flex justify-between items-center border-b border-zinc-800 pb-1 mb-1">
                                 <b class="text-blue-400 text-xs">${p.symbol} <span class="${p.side==='LONG'?'up':'down'}">(${p.side})</span></b>
-                                <span class="text-yellow-500 text-[10px] font-bold bg-yellow-900/20 px-1 rounded">Snp: ${p.snap}</span>
+                                <span class="text-yellow-500 text-[9px] font-bold">Snp: ${p.snap}</span>
                             </div>
                             <div class="grid grid-cols-2 gap-1 text-[10px]">
                                 <div>Margin: <b class="text-white">${p.margin}$</b></div>
                                 <div class="text-right">DCA: ${p.dcaCount} | x${p.lev}</div>
-                                <div class="col-span-2 py-1 border-y border-zinc-900 text-zinc-400">Entry: ${p.entryPrice} ➔ <span class="text-white">${p.markPrice}</span></div>
+                                <div class="col-span-2 py-1 text-zinc-400">Entry: ${p.entryPrice} ➔ <span class="text-white">${p.markPrice}</span></div>
                                 <div class="up font-bold">TP: ${p.tpPrice}</div>
                                 <div class="down font-bold text-right">SL: ${p.slPrice}</div>
                             </div>
@@ -103,43 +109,54 @@
                     area.innerHTML = d.status.history.map(h => `<div class="pos-card border-l-2 ${parseFloat(h.pnl)>=0?'border-l-green-500':'border-l-red-500'}"><div class="flex justify-between font-bold"><span>${h.symbol}</span><span class="${parseFloat(h.pnl)>=0?'up':'down'}">${parseFloat(h.pnl)>=0?'+':''}${h.pnl}$</span></div><div class="flex justify-between text-zinc-500 text-[9px]"><span>${h.time}</span><span>Entry: ${h.entry}</span></div></div>`).join('');
                 }
 
-                // CẬP NHẬT TRẠNG THÁI NÚT RUN
-                const btn = document.getElementById('runBtn');
-                if (d.botSettings.isRunning) {
-                    btn.innerText = "DỪNG HẠM ĐỘI (STOP)";
-                    btn.className = "w-full h-11 rounded font-black text-sm tracking-widest border-2 bg-red-950/20 border-red-500 text-red-500 hover:bg-red-500 hover:text-white";
-                } else {
-                    btn.innerText = "KÍCH HOẠT HẠM ĐỘI (START)";
-                    btn.className = "w-full h-11 rounded font-black text-sm tracking-widest border-2 bg-green-950/20 border-green-500 text-green-500 hover:bg-green-500 hover:text-white";
-                }
+                updateRunButton();
             } catch (e) {}
+        }
+
+        function updateRunButton() {
+            const btn = document.getElementById('runBtn');
+            if (isRunningLocal) {
+                btn.innerText = "DỪNG BOT (STOP)";
+                btn.className = "w-full h-12 rounded font-black text-xs tracking-widest border-2 bg-red-950/30 border-red-500 text-red-500 shadow-[0_0_15px_rgba(239,68,68,0.2)]";
+            } else {
+                btn.innerText = "KÍCH HOẠT BOT (START)";
+                btn.className = "w-full h-12 rounded font-black text-xs tracking-widest border-2 bg-green-950/30 border-green-500 text-green-500 shadow-[0_0_15px_rgba(16,185,129,0.2)]";
+            }
+        }
+
+        async function toggleBot() {
+            // Đảo trạng thái ngay lập tức trên giao diện để tránh cảm giác bị đơ
+            isRunningLocal = !isRunningLocal;
+            updateRunButton();
+            
+            try {
+                await fetch('/api/settings', { 
+                    method: 'POST', 
+                    headers: {'Content-Type': 'application/json'}, 
+                    body: JSON.stringify({ isRunning: isRunningLocal }) 
+                });
+            } catch (e) {
+                alert("Lỗi kết nối server!");
+            }
         }
 
         async function save() {
             const body = { 
-                invValue: parseFloat(document.getElementById('invValue').value), invType: document.getElementById('invType').value,
-                minVol: parseFloat(document.getElementById('minVol').value), posTP: parseFloat(document.getElementById('posTP').value), 
-                posSL: parseFloat(document.getElementById('posSL').value), maxPositions: parseInt(document.getElementById('maxPos').value),
-                botSLValue: parseFloat(document.getElementById('botSLValue').value), botSLType: document.getElementById('botSLType').value
+                invValue: parseFloat(document.getElementById('invValue').value), 
+                invType: document.getElementById('invType').value,
+                minVol: parseFloat(document.getElementById('minVol').value), 
+                posTP: parseFloat(document.getElementById('posTP').value), 
+                posSL: parseFloat(document.getElementById('posSL').value), 
+                maxPositions: parseInt(document.getElementById('maxPos').value),
+                botSLValue: parseFloat(document.getElementById('botSLValue').value), 
+                botSLType: document.getElementById('botSLType').value
             };
             await fetch('/api/settings', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body) });
-            alert("✅ Đã lưu cấu hình mới!");
+            alert("Đã lưu!");
         }
 
-        async function toggleBot() {
-            const res = await fetch('/api/status'); const d = await res.json();
-            await fetch('/api/settings', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ isRunning: !d.botSettings.isRunning }) });
-            sync();
-        }
-
-        function setTab(t) { 
-            currentTab = t; 
-            document.getElementById('tab-pos').className = t==='pos'?'tab-btn tab-active uppercase':'tab-btn text-zinc-500 uppercase';
-            document.getElementById('tab-his').className = t==='his'?'tab-btn tab-active uppercase':'tab-btn text-zinc-500 uppercase';
-            sync(); 
-        }
-
-        setInterval(sync, 1500);
+        function setTab(t) { currentTab = t; sync(); }
+        setInterval(sync, 2000);
         window.onload = () => {
              fetch('/api/status').then(r => r.json()).then(d => {
                 document.getElementById('invValue').value = d.botSettings.invValue;
@@ -150,6 +167,8 @@
                 document.getElementById('maxPos').value = d.botSettings.maxPositions;
                 document.getElementById('botSLValue').value = d.botSettings.botSLValue || 0;
                 document.getElementById('botSLType').value = d.botSettings.botSLType || 'fixed';
+                isRunningLocal = d.botSettings.isRunning;
+                updateRunButton();
              });
         }
     </script>
