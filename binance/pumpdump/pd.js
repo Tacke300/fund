@@ -10,10 +10,10 @@ import ccxt from 'ccxt';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Cấu hình AXIOS để giữ kết nối cực bền
+// Cấu hình Axios tối ưu chống Timeout
 const binanceApi = axios.create({
     baseURL: 'https://fapi.binance.com',
-    timeout: 15000,
+    timeout: 20000,
     headers: { 'X-MBX-APIKEY': API_KEY }
 });
 
@@ -30,7 +30,7 @@ let botSettings = {
 
 let status = { 
     currentBalance: 0, availableBalance: 0, 
-    botLogs: [], exchangeInfo: {}, candidatesList: [], history: [] 
+    botLogs: [], exchangeInfo: null, candidatesList: [], history: [] 
 };
 
 let activeOrdersTracker = new Map();
@@ -43,25 +43,25 @@ function addBotLog(msg, type = 'info') {
     console.log(`[${time}] ${msg}`);
 }
 
-// Hàm ký tên bảo mật dùng Axios
 async function binancePrivate(endpoint, method = 'GET', data = {}) {
     const timestamp = Date.now();
     const query = new URLSearchParams({ ...data, timestamp, recvWindow: 10000 }).toString();
     const signature = crypto.createHmac('sha256', SECRET_KEY).update(query).digest('hex');
-    const url = `${endpoint}?${query}&signature=${signature}`;
-
     try {
-        const response = await binanceApi({ method, url });
+        const response = await binanceApi({ method, url: `${endpoint}?${query}&signature=${signature}` });
         return response.data;
     } catch (error) {
-        const errorMsg = error.response?.data?.msg || error.message;
-        throw new Error(errorMsg);
+        throw new Error(error.response?.data?.msg || error.message);
     }
 }
 
 async function openPosition(symbol, side) {
+    // CHỐT CHẶN 1: Nếu chưa có exchangeInfo thì tuyệt đối không chạy tiếp
+    if (!status.exchangeInfo || !status.exchangeInfo[symbol]) {
+        return console.log(`⚠️ Đợi init ${symbol}...`);
+    }
+
     const info = status.exchangeInfo[symbol];
-    if (!info) return;
     const posSide = side === 'BUY' ? 'LONG' : 'SHORT';
 
     try {
@@ -73,9 +73,6 @@ async function openPosition(symbol, side) {
         let margin = botSettings.invType === 'percent' ? (avail * botSettings.invValue) / 100 : botSettings.invValue;
         let qty = ((margin * info.maxLeverage / price) / info.stepSize * info.stepSize).toFixed(info.quantityPrecision);
 
-        addBotLog(`🚀 Đang vào lệnh: ${symbol}...`);
-        
-        // Dùng CCXT cho các lệnh thực thi quan trọng để đảm bảo khớp thông số
         await exchange.setLeverage(info.maxLeverage, symbol);
         const order = await exchange.createMarketOrder(symbol, side.toLowerCase(), qty, { positionSide: posSide });
 
@@ -84,12 +81,10 @@ async function openPosition(symbol, side) {
             const tp = (posSide === 'LONG' ? entry * (1 + botSettings.posTP/100) : entry * (1 - botSettings.posTP/100)).toFixed(info.pricePrecision);
             const sl = (posSide === 'LONG' ? entry * (1 - botSettings.posSL/100) : entry * (1 + botSettings.posSL/100)).toFixed(info.pricePrecision);
             
-            // Đặt TP/SL - Chạy song song để nhanh nhất
             const sideClose = posSide === 'LONG' ? 'sell' : 'buy';
-            Promise.all([
-                exchange.createOrder(symbol, 'TAKE_PROFIT_MARKET', sideClose, qty, undefined, { positionSide: posSide, stopPrice: tp, closePosition: true }),
-                exchange.createOrder(symbol, 'STOP_MARKET', sideClose, qty, undefined, { positionSide: posSide, stopPrice: sl, closePosition: true })
-            ]).catch(e => addBotLog(`⚠️ Lỗi đặt TP/SL sàn: ${e.message}`, "error"));
+            // Đặt giáp sàn
+            await exchange.createOrder(symbol, 'TAKE_PROFIT_MARKET', sideClose, qty, undefined, { positionSide: posSide, stopPrice: tp, closePosition: true }).catch(()=>{});
+            await exchange.createOrder(symbol, 'STOP_MARKET', sideClose, qty, undefined, { positionSide: posSide, stopPrice: sl, closePosition: true }).catch(()=>{});
 
             activeOrdersTracker.set(symbol, { 
                 symbol, side: posSide, entryPrice: entry.toFixed(info.pricePrecision), 
@@ -99,7 +94,7 @@ async function openPosition(symbol, side) {
             addBotLog(`✅ Khớp ${symbol} ${posSide}`, "success");
         }
     } catch (e) {
-        addBotLog(`❌ Lỗi mở lệnh ${symbol}: ${e.message}`, "error");
+        addBotLog(`❌ Lỗi vào lệnh ${symbol}: ${e.message}`, "error");
     }
 }
 
@@ -111,48 +106,50 @@ async function mainLoop() {
         for (let [symbol, data] of activeOrdersTracker) {
             const p = posRisk.find(x => x.symbol === symbol && x.positionSide === data.side);
             if (!p || parseFloat(p.positionAmt) === 0) {
-                addBotLog(`🔔 ${symbol} đã đóng (TP/SL)`, "info");
                 activeOrdersTracker.delete(symbol);
                 continue;
             }
-            data.markPrice = parseFloat(p.markPrice).toFixed(status.exchangeInfo[symbol].pricePrecision);
+            data.markPrice = parseFloat(p.markPrice).toFixed(status.exchangeInfo[symbol]?.pricePrecision || 4);
         }
 
         if (activeOrdersTracker.size < botSettings.maxPositions) {
-            const list = status.candidatesList.filter(c => !activeOrdersTracker.has(c.symbol));
-            const keo = list.find(c => Math.abs(c.c1) >= botSettings.minVol);
-            if (keo) {
-                await openPosition(keo.symbol, keo.c1 >= 0 ? 'BUY' : 'SELL');
-            }
+            const keo = status.candidatesList.find(c => !activeOrdersTracker.has(c.symbol) && Math.abs(c.c1) >= botSettings.minVol);
+            if (keo) await openPosition(keo.symbol, keo.c1 >= 0 ? 'BUY' : 'SELL');
         }
-    } catch (e) {
-        if (e.message.includes('429')) addBotLog("⚠️ Sàn cảnh báo Spam, đang chậm lại...", "error");
-    }
+    } catch (e) {}
 }
 
 async function init() {
     try {
+        addBotLog("🔄 Đang kết nối sàn...");
         const [infoRes, brkRes] = await Promise.all([
             binanceApi.get('/fapi/v1/exchangeInfo'),
             binancePrivate('/fapi/v1/leverageBracket')
         ]);
 
-        const brackets = Array.isArray(brkRes) ? brkRes : (brkRes.brackets || []);
+        // FIX LỖI brackets.find: Kiểm tra dữ liệu Binance trả về cực kỹ
+        let brackets = [];
+        if (Array.isArray(brkRes)) brackets = brkRes;
+        else if (brkRes && Array.isArray(brkRes.brackets)) brackets = brkRes.brackets;
+        else if (typeof brkRes === 'object') brackets = Object.values(brkRes);
 
+        const tempInfo = {};
         infoRes.data.symbols.forEach(s => {
             const lot = s.filters.find(f => f.filterType === 'LOT_SIZE');
-            const brk = brackets.find(b => b.symbol === s.symbol);
-            status.exchangeInfo[s.symbol] = { 
+            const brk = Array.isArray(brackets) ? brackets.find(b => b.symbol === s.symbol) : null;
+            tempInfo[s.symbol] = { 
                 quantityPrecision: s.quantityPrecision, 
                 pricePrecision: s.pricePrecision, 
                 stepSize: parseFloat(lot.stepSize), 
-                maxLeverage: (brk && brk.brackets) ? brk.brackets[0].initialLeverage : 20 
+                maxLeverage: (brk && brk.brackets && brk.brackets[0]) ? brk.brackets[0].initialLeverage : 20 
             };
         });
+
+        status.exchangeInfo = tempInfo;
         isReady = true;
-        addBotLog("👿 LUFFY v17.2 - KẾT NỐI AXIOS SIÊU BỀN", "success");
+        addBotLog("👿 LUFFY v17.3 - KẾT NỐI THÀNH CÔNG", "success");
     } catch (e) {
-        addBotLog("🔄 Lỗi kết nối khởi tạo, thử lại sau 5s...", "error");
+        addBotLog("🔄 Sàn phản hồi lỗi, thử lại sau 5s...", "error");
         setTimeout(init, 5000);
     }
 }
@@ -160,13 +157,10 @@ async function init() {
 init();
 setInterval(mainLoop, 4000);
 
-// Sync candidates từ cổng 9000
 setInterval(() => {
     http.get('http://127.0.0.1:9000/api/data', res => {
         let d = ''; res.on('data', c => d += c);
-        res.on('end', () => {
-            try { status.candidatesList = JSON.parse(d).live || []; } catch (e) {}
-        });
+        res.on('end', () => { try { status.candidatesList = JSON.parse(d).live || []; } catch (e) {} });
     }).on('error', () => {});
 }, 2000);
 
