@@ -28,12 +28,10 @@ let botSettings = {
 };
 
 let status = { 
-    currentBalance: 0, availableBalance: 0, 
-    botLogs: [], exchangeInfo: null, candidatesList: [], history: [] 
+    botLogs: [], exchangeInfo: null, candidatesList: [], isReady: false 
 };
 
 let activeOrdersTracker = new Map();
-let isReady = false;
 
 function addBotLog(msg, type = 'info') {
     const time = new Date().toLocaleTimeString('vi-VN', { hour12: false });
@@ -57,7 +55,7 @@ async function binancePrivate(endpoint, method = 'GET', data = {}) {
 async function openPosition(symbol, side) {
     if (!status.exchangeInfo || !status.exchangeInfo[symbol]) return;
     const info = status.exchangeInfo[symbol];
-    const posSide = side === 'BUY' ? 'LONG' : 'SHORT';
+    const posSide = side === 'BUY' ? 'LONG' : 'SHORT'; // Viết hoa chuẩn sàn
 
     try {
         const acc = await binancePrivate('/fapi/v2/account');
@@ -65,19 +63,24 @@ async function openPosition(symbol, side) {
         const ticker = await binanceApi.get(`/fapi/v1/ticker/price?symbol=${symbol}`);
         const price = parseFloat(ticker.data.price);
         
-        // --- FIX LỖI -4164: ĐẢM BẢO NOTIONAL >= 5 USDT ---
         let margin = botSettings.invType === 'percent' ? (avail * botSettings.invValue) / 100 : botSettings.invValue;
         let notional = margin * info.maxLeverage;
         
-        if (notional < 5.1) {
-            addBotLog(`⚠️ ${symbol}: Vốn quá nhỏ (${notional.toFixed(2)} USDT), không đủ 5$ tối thiểu.`, "error");
-            return;
+        // Tự động nâng notional lên 5.2$ nếu cài đặt quá nhỏ
+        if (notional < 5.2) {
+            notional = 5.2;
+            addBotLog(`💡 ${symbol}: Tự tăng quy mô lệnh lên 5.2$ để khớp min sàn.`);
         }
 
         let qty = ((notional / price) / info.stepSize * info.stepSize).toFixed(info.quantityPrecision);
 
+        // Đặt Leverage trước
         await exchange.setLeverage(info.maxLeverage, symbol);
-        const order = await exchange.createMarketOrder(symbol, side.toLowerCase(), qty, { positionSide: posSide });
+        
+        // Mở vị thế (Market Order)
+        const order = await exchange.createOrder(symbol, 'market', side.toLowerCase(), qty, undefined, {
+            positionSide: posSide // Gửi chính xác LONG/SHORT
+        });
 
         if (order) {
             const entry = order.price || price;
@@ -85,15 +88,22 @@ async function openPosition(symbol, side) {
             const sl = (posSide === 'LONG' ? entry * (1 - botSettings.posSL/100) : entry * (1 + botSettings.posSL/100)).toFixed(info.pricePrecision);
             
             const sideClose = posSide === 'LONG' ? 'sell' : 'buy';
-            await exchange.createOrder(symbol, 'TAKE_PROFIT_MARKET', sideClose, qty, undefined, { positionSide: posSide, stopPrice: tp, closePosition: true }).catch(()=>{});
-            await exchange.createOrder(symbol, 'STOP_MARKET', sideClose, qty, undefined, { positionSide: posSide, stopPrice: sl, closePosition: true }).catch(()=>{});
+            
+            // Đặt TP/SL - Dùng tham số chuẩn positionSide
+            await exchange.createOrder(symbol, 'TAKE_PROFIT_MARKET', sideClose, qty, undefined, { 
+                positionSide: posSide, stopPrice: tp, closePosition: true 
+            }).catch(e => console.log("Lỗi đặt TP:", e.message));
+            
+            await exchange.createOrder(symbol, 'STOP_MARKET', sideClose, qty, undefined, { 
+                positionSide: posSide, stopPrice: sl, closePosition: true 
+            }).catch(e => console.log("Lỗi đặt SL:", e.message));
 
             activeOrdersTracker.set(symbol, { 
-                symbol, side: posSide, entryPrice: entry.toFixed(info.pricePrecision), 
-                margin: margin.toFixed(2), markPrice: entry.toFixed(info.pricePrecision),
+                symbol, side: posSide, entryPrice: entry, 
+                margin: (qty * entry / info.maxLeverage).toFixed(2), markPrice: entry,
                 tpPrice: tp, slPrice: sl
             });
-            addBotLog(`🚀 Khớp ${symbol} ${posSide} (${notional.toFixed(1)}$ )`, "success");
+            addBotLog(`🚀 Khớp: ${symbol} ${posSide}`, "success");
         }
     } catch (e) {
         addBotLog(`❌ Lỗi ${symbol}: ${e.message}`, "error");
@@ -101,7 +111,7 @@ async function openPosition(symbol, side) {
 }
 
 async function mainLoop() {
-    if (!botSettings.isRunning || !isReady) return;
+    if (!botSettings.isRunning || !status.isReady) return;
     try {
         const posRisk = await binancePrivate('/fapi/v2/positionRisk');
         for (let [symbol, data] of activeOrdersTracker) {
@@ -121,10 +131,15 @@ async function mainLoop() {
 
 async function init() {
     try {
+        addBotLog("🔄 Khởi tạo hệ thống...");
+        // Đảm bảo bật Hedge Mode trên API
+        await exchange.setPositionMode(true).catch(() => {});
+        
         const [infoRes, brkRes] = await Promise.all([
             binanceApi.get('/fapi/v1/exchangeInfo'),
             binancePrivate('/fapi/v1/leverageBracket')
         ]);
+
         let brackets = Array.isArray(brkRes) ? brkRes : (brkRes.brackets || []);
         const tempInfo = {};
         infoRes.data.symbols.forEach(s => {
@@ -138,10 +153,10 @@ async function init() {
             };
         });
         status.exchangeInfo = tempInfo;
-        isReady = true;
-        addBotLog("👿 LUFFY v17.6 - KẾT NỐI OK", "success");
+        status.isReady = true;
+        addBotLog("👿 LUFFY v17.8 - ONLINE", "success");
     } catch (e) {
-        addBotLog(`❌ Lỗi init: ${e.message}`, "error");
+        addBotLog(`❌ Lỗi: ${e.message}`, "error");
         setTimeout(init, 5000);
     }
 }
