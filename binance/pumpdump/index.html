@@ -2,15 +2,13 @@
 <html lang="vi">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>LUFFY v17.6</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LUFFY v18.0</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        body { background: #000; color: #fff; font-family: monospace; font-size: 12px; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
-        .card { background: #111; border: 1px solid #222; border-radius: 4px; padding: 10px; }
-        .up { color: #10b981; } .down { color: #ef4444; }
-        #logs { height: 100px; overflow-y: auto; background: #050505; font-size: 10px; padding: 5px; }
-        .grid-cand { display: grid; grid-template-cols: 1fr 1fr 1fr; gap: 5px; text-align: center; font-size: 11px; }
+        body { background: #000; color: #eee; font-family: monospace; font-size: 12px; }
+        .card { background: #111; border: 1px solid #222; padding: 10px; border-radius: 4px; }
+        .up { color: #00ff88; } .down { color: #ff4444; }
     </style>
 </head>
 <body class="p-2 space-y-2">
@@ -18,88 +16,71 @@
         <input id="invValue" type="number" class="bg-black border border-zinc-700 p-2 text-center" placeholder="Vốn">
         <select id="invType" class="bg-black border border-zinc-700 p-2"><option value="percent">%</option><option value="fixed">$</option></select>
         <input id="minVol" type="number" class="bg-black border border-zinc-700 p-2 text-center" placeholder="Vol%">
-        <input id="posTP" type="number" class="bg-black border border-zinc-700 p-2 text-center" placeholder="TP%">
-        <input id="posSL" type="number" class="bg-black border border-zinc-700 p-2 text-center" placeholder="SL%">
-        <button onclick="save()" class="bg-zinc-800 font-bold">LƯU</button>
     </div>
-    <button id="runBtn" onclick="toggle()" class="w-full py-3 rounded font-black"></button>
+    <button id="runBtn" onclick="toggle()" class="w-full py-3 rounded font-black border"></button>
 
     <div class="card">
-        <p class="text-[10px] text-zinc-500 mb-1">🔥 BIẾN ĐỘNG (TOP KÈO)</p>
-        <div id="candidates-list" class="space-y-1 max-h-[120px] overflow-y-auto"></div>
+        <div class="text-[10px] text-red-500 mb-2 font-bold uppercase">🔒 Blacklist 15m</div>
+        <div id="blacklist-display" class="flex flex-wrap gap-1"></div>
     </div>
 
-    <div id="logs" class="card"></div>
+    <div class="card">
+        <div class="text-[10px] text-blue-500 mb-2 font-bold uppercase">🔥 Market Live</div>
+        <div id="candidates-list" class="grid grid-cols-2 gap-2"></div>
+    </div>
 
-    <div id="pos-list" class="flex-grow overflow-auto space-y-2"></div>
+    <div id="logs" class="card h-[100px] overflow-y-auto text-[10px]"></div>
+    <div id="pos-list" class="space-y-2"></div>
 
     <script>
-        let running = false;
         async function sync() {
             try {
                 const r = await fetch('/api/status'); const d = await r.json();
-                running = d.botSettings.isRunning;
                 
-                // Cập nhật Logs
-                document.getElementById('logs').innerHTML = d.status.botLogs.map(l => `<div>[${l.time}] ${l.msg}</div>`).join('');
+                // Logs
+                document.getElementById('logs').innerHTML = d.status.botLogs.map(l => `<div>${l.msg}</div>`).join('');
                 
-                // Cập nhật Candidates (Bảng biến động)
-                const candDiv = document.getElementById('candidates-list');
-                const topKeo = d.status.candidatesList.sort((a,b) => Math.abs(b.c1) - Math.abs(a.c1)).slice(0, 6);
-                candDiv.innerHTML = topKeo.map(c => `
-                    <div class="grid-cand border-b border-zinc-800 pb-1">
-                        <b class="text-blue-400">${c.symbol}</b>
-                        <span class="${c.c1>=0?'up':'down'}">1m: ${c.c1}%</span>
-                        <span class="${c.c5>=0?'up':'down'}">5m: ${c.c5}%</span>
+                // Blacklist
+                const now = Date.now();
+                document.getElementById('blacklist-display').innerHTML = Object.entries(d.status.blackList)
+                    .filter(([_, exp]) => exp > now)
+                    .map(([sym]) => `<span class="bg-zinc-800 px-1 rounded text-[10px] text-zinc-400">${sym}</span>`).join('');
+
+                // Candidates
+                const top = d.status.candidatesList.sort((a,b) => Math.abs(b.c1) - Math.abs(a.c1)).slice(0, 6);
+                document.getElementById('candidates-list').innerHTML = top.map(c => `
+                    <div class="flex justify-between border-b border-zinc-900 pb-1">
+                        <span class="text-zinc-400">${c.symbol.replace('USDT','')}</span>
+                        <span class="${c.c1>=0?'up':'down'}">${c.c1}%</span>
                     </div>`).join('');
 
-                // Cập nhật Positions
+                // VỊ THẾ THỰC TẾ (Sẽ mất ngay khi lệnh đóng trên sàn)
                 document.getElementById('pos-list').innerHTML = d.activePositions.map(p => `
-                    <div class="card border-l-2 ${p.side==='LONG'?'border-l-green-500':'border-l-red-500'}">
-                        <div class="flex justify-between font-bold">
-                            <span>${p.symbol}</span> <span class="${p.side==='LONG'?'up':'down'}">${p.side}</span>
+                    <div class="card border-l-4 ${p.side==='LONG'?'border-l-green-500':'border-l-red-500'} flex justify-between items-center">
+                        <div>
+                            <div class="font-bold">${p.symbol} <span class="text-[10px] text-zinc-500">${p.side}</span></div>
+                            <div class="text-[10px] text-zinc-400">Entry: ${p.entryPrice}</div>
                         </div>
-                        <div class="flex justify-between text-zinc-500">
-                            <span>${p.entryPrice} ➔ ${p.markPrice}</span>
-                            <span class="up">${p.tpPrice}</span>
+                        <div class="text-right">
+                            <div class="font-bold up">${p.markPrice}</div>
+                            <div class="text-[10px] ${parseFloat(p.pnl)>=0?'up':'down'}">${p.pnl}$</div>
                         </div>
                     </div>`).join('');
 
                 const btn = document.getElementById('runBtn');
-                btn.innerText = running ? "STOP BOT" : "START BOT";
-                btn.className = running ? "w-full py-3 rounded font-black bg-red-900 text-red-200" : "w-full py-3 rounded font-black bg-green-900 text-green-200";
+                btn.innerText = d.botSettings.isRunning ? "STOP BOT" : "START BOT";
+                btn.className = d.botSettings.isRunning ? "w-full py-3 rounded bg-red-900/20 border-red-500 text-red-500" : "w-full py-3 rounded bg-green-900/20 border-green-500 text-green-500";
             } catch (e) {}
         }
 
         async function toggle() {
-            running = !running;
-            await fetch('/api/settings', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ isRunning: running }) });
+            const r = await fetch('/api/status'); const d = await r.json();
+            await fetch('/api/settings', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ isRunning: !d.botSettings.isRunning }) });
             sync();
         }
 
-        async function save() {
-            const body = { 
-                invValue: parseFloat(document.getElementById('invValue').value),
-                invType: document.getElementById('invType').value,
-                minVol: parseFloat(document.getElementById('minVol').value),
-                posTP: parseFloat(document.getElementById('posTP').value),
-                posSL: parseFloat(document.getElementById('posSL').value),
-                maxPositions: 3
-            };
-            await fetch('/api/settings', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body) });
-            alert("OK!");
-        }
-
         setInterval(sync, 2000);
-        window.onload = () => {
-            fetch('/api/status').then(r => r.json()).then(d => {
-                document.getElementById('invValue').value = d.botSettings.invValue;
-                document.getElementById('minVol').value = d.botSettings.minVol;
-                document.getElementById('posTP').value = d.botSettings.posTP;
-                document.getElementById('posSL').value = d.botSettings.posSL;
-                sync();
-            });
-        }
+        sync();
     </script>
 </body>
 </html>
