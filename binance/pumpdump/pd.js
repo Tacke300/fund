@@ -10,7 +10,6 @@ import ccxt from 'ccxt';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Cấu hình Axios tối ưu giữ kết nối
 const binanceApi = axios.create({
     baseURL: 'https://fapi.binance.com',
     timeout: 20000,
@@ -57,7 +56,6 @@ async function binancePrivate(endpoint, method = 'GET', data = {}) {
 
 async function openPosition(symbol, side) {
     if (!status.exchangeInfo || !status.exchangeInfo[symbol]) return;
-
     const info = status.exchangeInfo[symbol];
     const posSide = side === 'BUY' ? 'LONG' : 'SHORT';
 
@@ -67,8 +65,16 @@ async function openPosition(symbol, side) {
         const ticker = await binanceApi.get(`/fapi/v1/ticker/price?symbol=${symbol}`);
         const price = parseFloat(ticker.data.price);
         
+        // --- FIX LỖI -4164: ĐẢM BẢO NOTIONAL >= 5 USDT ---
         let margin = botSettings.invType === 'percent' ? (avail * botSettings.invValue) / 100 : botSettings.invValue;
-        let qty = ((margin * info.maxLeverage / price) / info.stepSize * info.stepSize).toFixed(info.quantityPrecision);
+        let notional = margin * info.maxLeverage;
+        
+        if (notional < 5.1) {
+            addBotLog(`⚠️ ${symbol}: Vốn quá nhỏ (${notional.toFixed(2)} USDT), không đủ 5$ tối thiểu.`, "error");
+            return;
+        }
+
+        let qty = ((notional / price) / info.stepSize * info.stepSize).toFixed(info.quantityPrecision);
 
         await exchange.setLeverage(info.maxLeverage, symbol);
         const order = await exchange.createMarketOrder(symbol, side.toLowerCase(), qty, { positionSide: posSide });
@@ -87,10 +93,10 @@ async function openPosition(symbol, side) {
                 margin: margin.toFixed(2), markPrice: entry.toFixed(info.pricePrecision),
                 tpPrice: tp, slPrice: sl
             });
-            addBotLog(`✅ Khớp ${symbol} ${posSide}`, "success");
+            addBotLog(`🚀 Khớp ${symbol} ${posSide} (${notional.toFixed(1)}$ )`, "success");
         }
     } catch (e) {
-        addBotLog(`❌ Lỗi vào lệnh ${symbol}: ${e.message}`, "error");
+        addBotLog(`❌ Lỗi ${symbol}: ${e.message}`, "error");
     }
 }
 
@@ -115,12 +121,10 @@ async function mainLoop() {
 
 async function init() {
     try {
-        addBotLog("🔄 Đang kết nối sàn...");
         const [infoRes, brkRes] = await Promise.all([
             binanceApi.get('/fapi/v1/exchangeInfo'),
             binancePrivate('/fapi/v1/leverageBracket')
         ]);
-
         let brackets = Array.isArray(brkRes) ? brkRes : (brkRes.brackets || []);
         const tempInfo = {};
         infoRes.data.symbols.forEach(s => {
@@ -135,9 +139,9 @@ async function init() {
         });
         status.exchangeInfo = tempInfo;
         isReady = true;
-        addBotLog("👿 LUFFY v17.5 - ONLINE", "success");
+        addBotLog("👿 LUFFY v17.6 - KẾT NỐI OK", "success");
     } catch (e) {
-        addBotLog(`❌ Lỗi kết nối: ${e.message}`, "error");
+        addBotLog(`❌ Lỗi init: ${e.message}`, "error");
         setTimeout(init, 5000);
     }
 }
@@ -154,9 +158,7 @@ setInterval(() => {
 const APP = express();
 APP.use(express.json());
 APP.use(express.static(__dirname));
-
 APP.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
 APP.get('/api/status', (req, res) => res.json({ botSettings, activePositions: Array.from(activeOrdersTracker.values()), status }));
 APP.post('/api/settings', (req, res) => { botSettings = { ...botSettings, ...req.body }; res.json({ success: true }); });
-
-APP.listen(9001, () => console.log("🌐 Server running on port 9001"));
+APP.listen(9001);
