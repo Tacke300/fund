@@ -22,19 +22,31 @@ const exchange = new ccxt.binance({
     options: { defaultType: 'future', dualSidePosition: true }
 });
 
+// KHÔI PHỤC ĐẦY ĐỦ THÔNG SỐ CŨ
 let botSettings = { 
-    isRunning: false, maxPositions: 3, invValue: 1, invType: 'percent', 
-    minVol: 6.5, posTP: 0.5, posSL: 5.0 
+    isRunning: false, 
+    maxPositions: 3, 
+    invValue: 1, 
+    invType: 'percent', 
+    minVol: 6.5, 
+    posTP: 0.5, 
+    posSL: 5.0 
 };
 
 let status = { 
-    botLogs: [], exchangeInfo: null, candidatesList: [], isReady: false,
+    botLogs: [], 
+    exchangeInfo: null, 
+    candidatesList: [], 
+    isReady: false,
     blackList: {},
-    activePositions: [] // Sẽ chứa dữ liệu thật từ sàn
+    activePositions: [] 
 };
 
 function addBotLog(msg, type = 'info') {
     const time = new Date().toLocaleTimeString('vi-VN', { hour12: false });
+    // Chỉ log nếu thông điệp khác với cái gần nhất để chống spam
+    if (status.botLogs.length > 0 && status.botLogs[0].msg === msg) return;
+    
     status.botLogs.unshift({ time, msg, type });
     if (status.botLogs.length > 50) status.botLogs.pop();
     console.log(`[${time}] ${msg}`);
@@ -74,6 +86,7 @@ async function openPosition(symbol, side) {
 
         if (order) {
             const entry = order.price || price;
+            // TÍNH TOÁN TP/SL THEO SETTINGS
             const tp = (posSide === 'LONG' ? entry * (1 + botSettings.posTP/100) : entry * (1 - botSettings.posTP/100)).toFixed(info.pricePrecision);
             const sl = (posSide === 'LONG' ? entry * (1 - botSettings.posSL/100) : entry * (1 + botSettings.posSL/100)).toFixed(info.pricePrecision);
             
@@ -83,7 +96,7 @@ async function openPosition(symbol, side) {
                 exchange.createOrder(symbol, 'STOP_MARKET', sideClose, qty, undefined, { positionSide: posSide, stopPrice: sl, closePosition: true })
             ]).catch(() => {});
 
-            addBotLog(`🚀 Mở lệnh: ${symbol} ${posSide}`, "success");
+            addBotLog(`🚀 Mở lệnh: ${symbol} ${posSide} | TP: ${botSettings.posTP}% SL: ${botSettings.posSL}%`, "success");
         }
     } catch (e) { addBotLog(`❌ Lỗi ${symbol}: ${e.message}`, "error"); }
 }
@@ -94,19 +107,19 @@ async function syncAndTrade() {
         const posRisk = await binancePrivate('/fapi/v2/positionRisk');
         const now = Date.now();
         
-        // 1. Lấy danh sách vị thế THẬT đang mở (Amt != 0)
         const livePositions = posRisk.filter(p => parseFloat(p.positionAmt) !== 0);
         
-        // 2. Kiểm tra những con vừa mới đóng để cho vào Blacklist
+        // CHỈ ĐƯA VÀO BLACKLIST KHI THỰC SỰ BIẾN MẤT KHỎI SÀN
         status.activePositions.forEach(oldPos => {
-            const stillOpen = livePositions.find(p => p.symbol === oldPos.symbol && p.positionSide === oldPos.positionSide);
-            if (!stillOpen) {
-                status.blackList[oldPos.symbol] = now + (15 * 60 * 1000);
-                addBotLog(`🔒 ${oldPos.symbol} đã đóng. Khóa 15p.`, "info");
+            const exists = livePositions.find(p => p.symbol === oldPos.symbol && p.positionSide === oldPos.side);
+            if (!exists) {
+                if (!status.blackList[oldPos.symbol] || now > status.blackList[oldPos.symbol]) {
+                    status.blackList[oldPos.symbol] = now + (15 * 60 * 1000);
+                    addBotLog(`🔒 ${oldPos.symbol} đã đóng. Khóa 15p.`, "info");
+                }
             }
         });
 
-        // 3. Cập nhật lại status để hiển thị lên HTML
         status.activePositions = livePositions.map(p => ({
             symbol: p.symbol,
             side: p.positionSide,
@@ -116,16 +129,15 @@ async function syncAndTrade() {
             margin: (Math.abs(p.positionAmt) * p.entryPrice / p.leverage).toFixed(2)
         }));
 
-        // 4. Tìm kèo mới nếu còn slot
         if (botSettings.isRunning && status.activePositions.length < botSettings.maxPositions) {
             const keo = status.candidatesList.find(c => {
-                const inBlacklist = status.blackList[c.symbol] && now < status.blackList[c.symbol];
-                const inActive = status.activePositions.find(p => p.symbol === c.symbol);
-                return !inActive && !inBlacklist && Math.abs(c.c1) >= botSettings.minVol;
+                const isBlack = status.blackList[c.symbol] && now < status.blackList[c.symbol];
+                const isOpen = status.activePositions.find(p => p.symbol === c.symbol);
+                return !isOpen && !isBlack && Math.abs(c.c1) >= botSettings.minVol;
             });
             if (keo) await openPosition(keo.symbol, keo.c1 >= 0 ? 'BUY' : 'SELL');
         }
-    } catch (e) { console.error("Sync Error:", e.message); }
+    } catch (e) { console.error("Sync Error"); }
 }
 
 async function init() {
@@ -147,7 +159,7 @@ async function init() {
         });
         status.exchangeInfo = tempInfo;
         status.isReady = true;
-        addBotLog("👿 LUFFY v18.0 - SYNC ACTIVE", "success");
+        addBotLog("👿 LUFFY v18.1 - STABLE", "success");
     } catch (e) { setTimeout(init, 5000); }
 }
 
@@ -164,6 +176,9 @@ const APP = express();
 APP.use(express.json());
 APP.use(express.static(__dirname));
 APP.get('/api/status', (req, res) => res.json({ botSettings, activePositions: status.activePositions, status }));
-APP.post('/api/settings', (req, res) => { botSettings = { ...botSettings, ...req.body }; res.json({ success: true }); });
+APP.post('/api/settings', (req, res) => { 
+    botSettings = { ...botSettings, ...req.body }; 
+    res.json({ success: true }); 
+});
 APP.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
 APP.listen(9001);
