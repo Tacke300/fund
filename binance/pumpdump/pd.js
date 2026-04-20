@@ -38,7 +38,8 @@ async function binancePrivate(endpoint, method = 'GET', data = {}) {
 async function openPosition(symbol, side) {
     if (status.blackList[symbol] && Date.now() < status.blackList[symbol]) return;
     const info = status.exchangeInfo[symbol];
-    const posSide = side === 'BUY' ? 'LONG' : 'SHORT';
+    // Ép buộc luôn là SHORT
+    const posSide = 'SHORT'; 
 
     try {
         const acc = await binancePrivate('/fapi/v2/account');
@@ -48,23 +49,25 @@ async function openPosition(symbol, side) {
         let qty = ((notional / price) / info.stepSize * info.stepSize).toFixed(info.quantityPrecision);
 
         await exchange.setLeverage(info.maxLeverage, symbol);
-        const order = await exchange.createOrder(symbol, 'market', side.toLowerCase(), qty, undefined, { positionSide: posSide });
+        // Luôn gửi lệnh 'sell' cho vị thế SHORT
+        const order = await exchange.createOrder(symbol, 'market', 'sell', qty, undefined, { positionSide: 'SHORT' });
 
         if (order) {
             const entry = order.price || price;
-            const tp = (posSide === 'LONG' ? entry * (1 + botSettings.posTP/100) : entry * (1 - botSettings.posTP/100)).toFixed(info.pricePrecision);
-            const sl = (posSide === 'LONG' ? entry * (1 - botSettings.posSL/100) : entry * (1 + botSettings.posSL/100)).toFixed(info.pricePrecision);
-            const sideClose = posSide === 'LONG' ? 'sell' : 'buy';
+            // Tính TP/SL cho riêng SHORT: TP thấp hơn entry, SL cao hơn entry
+            const tp = (entry * (1 - botSettings.posTP/100)).toFixed(info.pricePrecision);
+            const sl = (entry * (1 + botSettings.posSL/100)).toFixed(info.pricePrecision);
+            const sideClose = 'buy'; // Đóng Short bằng lệnh Buy
 
             await Promise.all([
-                exchange.createOrder(symbol, 'TAKE_PROFIT_MARKET', sideClose, qty, undefined, { positionSide: posSide, stopPrice: tp, closePosition: true }),
-                exchange.createOrder(symbol, 'STOP_MARKET', sideClose, qty, undefined, { positionSide: posSide, stopPrice: sl, closePosition: true })
+                exchange.createOrder(symbol, 'TAKE_PROFIT_MARKET', sideClose, qty, undefined, { positionSide: 'SHORT', stopPrice: tp, closePosition: true }),
+                exchange.createOrder(symbol, 'STOP_MARKET', sideClose, qty, undefined, { positionSide: 'SHORT', stopPrice: sl, closePosition: true })
             ]).catch(() => {});
 
-            botActivePositions.set(`${symbol}_${posSide}`, { symbol, side: posSide, entryPrice: entry, qty, tp, sl });
-            addBotLog(`🚀 Bot mở: ${symbol} ${posSide} | SL: ${botSettings.posSL}%`, "success");
+            botActivePositions.set(`${symbol}_SHORT`, { symbol, side: 'SHORT', entryPrice: entry, qty, tp, sl });
+            addBotLog(`🚀 Bot mở SHORT: ${symbol} | SL: ${botSettings.posSL}%`, "success");
         }
-    } catch (e) { addBotLog(`❌ Lỗi mở lệnh: ${e.message}`, "error"); }
+    } catch (e) { addBotLog(`❌ Lỗi mở lệnh SHORT ${symbol}: ${e.message}`, "error"); }
 }
 
 async function mainLoop() {
@@ -87,12 +90,16 @@ async function mainLoop() {
 
         Object.keys(status.blackList).forEach(sym => { if (now > status.blackList[sym]) delete status.blackList[sym]; });
 
+        // Logic lọc kèo: Chỉ tìm và mở lệnh SHORT
         if (botSettings.isRunning && botActivePositions.size < botSettings.maxPositions) {
             const keo = status.candidatesList.find(c => {
                 const isBlack = status.blackList[c.symbol] && now < status.blackList[c.symbol];
-                return !botActivePositions.has(`${c.symbol}_LONG`) && !botActivePositions.has(`${c.symbol}_SHORT`) && !isBlack && Math.abs(c.c1) >= botSettings.minVol;
+                // Chỉ quan tâm xem đồng coin này đã có vị thế SHORT chưa
+                return !botActivePositions.has(`${c.symbol}_SHORT`) && !isBlack && Math.abs(c.c1) >= botSettings.minVol;
             });
-            if (keo) await openPosition(keo.symbol, keo.c1 >= 0 ? 'BUY' : 'SELL');
+            
+            // Nếu có kèo thỏa mãn volume, ép buộc gọi hàm mở lệnh SELL
+            if (keo) await openPosition(keo.symbol, 'SELL');
         }
     } catch (e) {}
 }
@@ -109,7 +116,7 @@ async function init() {
         });
         status.exchangeInfo = tempInfo;
         status.isReady = true;
-        addBotLog("👿 LUFFY v18.3 - READY", "success");
+        addBotLog("👿 LUFFY v18.3 (ONLY SHORT MODE) - READY", "success");
     } catch (e) { setTimeout(init, 5000); }
 }
 
