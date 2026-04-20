@@ -50,8 +50,6 @@ function calculateChange(pArr, min) {
     return parseFloat((((pArr[pArr.length - 1].p - start.p) / start.p) * 100).toFixed(2));
 }
 
-let currentStopLog = null;
-
 function initWS() {
     const ws = new WebSocket('wss://fstream.binance.com/ws/!ticker@arr');
     ws.on('message', (data) => {
@@ -122,19 +120,12 @@ app.get('/api/config', (req, res) => {
     botConfig.tp = parseFloat(botConfig.tp); botConfig.sl = parseFloat(botConfig.sl);
     botConfig.vol = parseFloat(botConfig.vol); botConfig.initialBal = parseFloat(botConfig.initialBal);
     botConfig.running = req.query.running === 'true';
-    
-    const guiStopByMargin = req.query.isStoppedByMargin === 'true';
-    if (guiStopByMargin && !botConfig.isStoppedByMargin) {
-        botConfig.isStoppedByMargin = true;
-        currentStopLog = { start: Date.now(), end: null, data: JSON.parse(req.query.stopData || '{}') };
-    } else if (!guiStopByMargin && botConfig.isStoppedByMargin) {
-        botConfig.isStoppedByMargin = false;
-        if (currentStopLog) {
-            currentStopLog.end = Date.now();
-            stopLogs.unshift(currentStopLog);
-            if (stopLogs.length > 50) stopLogs.pop();
-            fs.writeFileSync(STOP_LOGS_FILE, JSON.stringify(stopLogs));
-        }
+    botConfig.isStoppedByMargin = req.query.isStoppedByMargin === 'true';
+    if (req.query.stopData) {
+        let log = { start: Date.now(), end: null, data: JSON.parse(req.query.stopData) };
+        if (botConfig.isStoppedByMargin) { stopLogs.unshift(log); if (stopLogs.length > 50) stopLogs.pop(); }
+        else if (stopLogs[0] && !stopLogs[0].end) { stopLogs[0].end = Date.now(); }
+        fs.writeFileSync(STOP_LOGS_FILE, JSON.stringify(stopLogs));
     }
     fs.writeFileSync(CONFIG_FILE, JSON.stringify(botConfig));
     res.sendStatus(200);
@@ -229,7 +220,7 @@ app.get('/gui', (req, res) => {
 
     <script>
     let myChart = null, isStoppedByMarginLocal = false, isRunningLocal = false, firstLoad = true;
-    function fPrice(p) { if (!p || p === 0) return "0.0000"; let s = p.toFixed(20); let match = s.match(/^-?\\d+\\.0*[1-9]/); if (!match) return p.toFixed(4); let index = match[0].length; return parseFloat(p).toFixed(index - match[0].indexOf('.') + 3); }
+    function fPrice(p) { if (!p || p === 0) return "0.0000"; let s = p.toFixed(20); let match = s.match(/^-?\\d+\\.0*[1-9]/); if (!match) return parseFloat(p).toFixed(4); let index = match[0].length; return parseFloat(p).toFixed(index - match[0].indexOf('.') + 3); }
 
     function toggleBot(status) {
         const query = new URLSearchParams({
@@ -245,34 +236,27 @@ app.get('/gui', (req, res) => {
             const res = await fetch('/api/data'); const d = await res.json();
             isRunningLocal = d.botConfig.running;
             
-            const setup = document.getElementById('setupPanel');
-            const btnStop = document.getElementById('btnStopContainer');
-            const badge = document.getElementById('botStatusBadge');
-            
-            if(isRunningLocal) { setup.classList.add('hidden'); btnStop.classList.remove('hidden'); badge.innerText = "RUNNING"; badge.className = "mt-1 px-2 py-0.5 rounded inline-block text-black bg-green-500 font-bold text-[10px]"; }
-            else { setup.classList.remove('hidden'); btnStop.classList.add('hidden'); badge.innerText = "STOPPED"; badge.className = "mt-1 px-2 py-0.5 rounded inline-block text-black bg-gray-500 font-bold text-[10px]"; }
+            if(isRunningLocal) { document.getElementById('setupPanel').classList.add('hidden'); document.getElementById('btnStopContainer').classList.remove('hidden'); document.getElementById('botStatusBadge').innerText = "RUNNING"; document.getElementById('botStatusBadge').className = "mt-1 px-2 py-0.5 rounded inline-block text-black bg-green-500 font-bold text-[10px]"; }
+            else { document.getElementById('setupPanel').classList.remove('hidden'); document.getElementById('btnStopContainer').classList.add('hidden'); document.getElementById('botStatusBadge').innerText = "STOPPED"; document.getElementById('botStatusBadge').className = "mt-1 px-2 py-0.5 rounded inline-block text-black bg-gray-500 font-bold text-[10px]"; }
 
             if(firstLoad) {
-                document.getElementById('balanceInp').value = d.botConfig.initialBal;
-                document.getElementById('marginInp').value = d.botConfig.marginVal;
-                document.getElementById('tpInp').value = d.botConfig.tp;
-                document.getElementById('slInp').value = d.botConfig.sl;
-                document.getElementById('volInp').value = d.botConfig.vol;
-                document.getElementById('modeInp').value = d.botConfig.mode;
+                document.getElementById('balanceInp').value = d.botConfig.initialBal; document.getElementById('marginInp').value = d.botConfig.marginVal;
+                document.getElementById('tpInp').value = d.botConfig.tp; document.getElementById('slInp').value = d.botConfig.sl;
+                document.getElementById('volInp').value = d.botConfig.vol; document.getElementById('modeInp').value = d.botConfig.mode;
                 firstLoad = false;
             }
 
             document.getElementById('configSummary').innerText = \`Mode: \${d.botConfig.mode} | Margin: \${d.botConfig.marginVal} | TP: \${d.botConfig.tp}% | DCA: \${d.botConfig.sl}% | Vol: \${d.botConfig.vol}%\`;
 
-            let runningBal = d.botConfig.initialBal, unPnlTotal = 0, usedMarginTotal = 0, countWin = 0, sumWinPnl = 0;
-            let chartLabels = ['Start'], chartData = [runningBal];
+            let histRunning = d.botConfig.initialBal, unPnlTotal = 0, usedMarginTotal = 0, countWin = 0, sumWinPnl = 0;
+            let chartLabels = ['Start'], chartData = [histRunning];
 
             document.getElementById('liveBody').innerHTML = d.live.sort((a,b)=>Math.abs(b.c1)-Math.abs(a.c1)).slice(0,10).map(l => \`
                 <tr class="border-b border-zinc-800/50"><td>\${l.symbol}</td><td class="text-center \${l.c1>=0?'up':'down'} font-bold">\${l.c1}%</td><td class="text-center \${l.c5>=0?'up':'down'}">\${l.c5}%</td><td class="text-center \${l.c15>=0?'up':'down'}">\${l.c15}%</td><td class="text-right text-gray-400">\${fPrice(l.currentPrice)}</td></tr>\`).join('');
 
-            // 1. TÍNH EQUITY TỪ LỊCH SỬ
-            let histRunning = d.botConfig.initialBal;
-            let histHTML = [...d.history].sort((a,b)=>a.endTime-b.endTime).map((h, idx) => {
+            // TÍNH LỊCH SỬ
+            let sortedHistory = [...d.history].sort((a,b)=>a.endTime-b.endTime);
+            let historyHTML = sortedHistory.map((h, idx) => {
                 let mBase = d.botConfig.marginVal.includes('%') ? (histRunning * parseFloat(d.botConfig.marginVal) / 100) : parseFloat(d.botConfig.marginVal);
                 let totalMargin = mBase * (h.dcaCount + 1);
                 let pnl = (totalMargin * (h.maxLev || 20) * (h.pnlPercent/100)) - (totalMargin * (h.maxLev || 20) * 0.001);
@@ -281,11 +265,10 @@ app.get('/gui', (req, res) => {
                 return \`<tr class="border-b border-zinc-800/30"><td>\${idx+1}</td><td>\${new Date(h.endTime).toLocaleTimeString([],{hour12:false})}</td><td><b class="text-white">\${h.symbol}</b></td><td class="text-yellow-500 font-bold">\${h.dcaCount}</td><td>\${totalMargin.toFixed(1)}</td><td>\${h.maxLev}x</td><td>\${fPrice(h.snapPrice)}<br>\${fPrice(h.finalPrice)}</td><td class="text-center down">\${h.maxNegativeRoi.toFixed(1)}%</td><td class="\${pnl>=0?'up':'down'} font-bold">\${pnl.toFixed(2)}</td><td class="text-right">\${histRunning.toFixed(1)}</td></tr>\`;
             }).reverse().join('');
 
-            // 2. TÍNH VỊ THẾ ĐANG MỞ VÀ AVAIL DỰA TRÊN SỐ DƯ SAU LỊCH SỬ
+            // TÍNH VỊ THẾ ĐANG MỞ VÀ AVAIL
             let currentAvail = histRunning;
             let pendingHTML = d.pending.map((h, idx) => {
                 let lp = d.allPrices[h.symbol] || h.avgPrice;
-                // QUAN TRỌNG: LẤY MARGIN THEO AVAIL HIỆN TẠI
                 let mBase = d.botConfig.marginVal.includes('%') ? (currentAvail * parseFloat(d.botConfig.marginVal) / 100) : parseFloat(d.botConfig.marginVal);
                 let totalM = mBase * (h.dcaCount + 1);
                 let roi = (h.type === 'LONG' ? (lp-h.avgPrice)/h.avgPrice : (h.avgPrice-lp)/h.avgPrice) * 100 * (h.maxLev || 20);
@@ -305,11 +288,9 @@ app.get('/gui', (req, res) => {
 
             document.getElementById('displayBal').innerText = (histRunning + unPnlTotal).toFixed(2);
             document.getElementById('displayAvail').innerText = currentAvail.toFixed(2);
-            document.getElementById('winCount').innerText = countWin;
-            document.getElementById('winPnl').innerText = sumWinPnl.toFixed(2);
             document.getElementById('unPnl').innerText = unPnlTotal.toFixed(2);
             document.getElementById('unPnl').className = 'text-xl font-bold ' + (unPnlTotal >= 0 ? 'up' : 'down');
-            document.getElementById('historyBody').innerHTML = histHTML;
+            document.getElementById('historyBody').innerHTML = historyHTML;
             document.getElementById('pendingBody').innerHTML = pendingHTML;
             document.getElementById('stopLogBody').innerHTML = d.stopLogs.map(l => \`
                 <div class="p-2 border-l-2 border-red-500 bg-red-500/5 mb-1">
