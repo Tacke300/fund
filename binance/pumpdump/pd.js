@@ -16,11 +16,11 @@ const exchange = new ccxt.binance({ apiKey: API_KEY, secret: SECRET_KEY, options
 let botSettings = { 
     isRunning: false, maxPositions: 3, invValue: 1, invType: 'percent', 
     minVol: 6.5, posTP: 0.5, posSL: 5.0,
-    dcaStep: 2.0, // % âm để DCA
-    maxDCA: 4     // Tối đa 4 lần DCA (Lần 5 sẽ là SL và đảo lệnh)
+    dcaStep: 2.0, 
+    maxDCA: 4     
 };
 
-let status = { botLogs: [], exchangeInfo: null, candidatesList: [], isReady: false, blackList: {} };
+let status = { botLogs: [], exchangeInfo: null, candidatesList: [], isReady: false, blackList: {}, canOpenNew: true };
 let botActivePositions = new Map(); 
 
 function addBotLog(msg, type = 'info') {
@@ -40,7 +40,6 @@ async function binancePrivate(endpoint, method = 'GET', data = {}) {
     } catch (error) { throw new Error(error.response?.data?.msg || error.message); }
 }
 
-// Hàm mở lệnh đảo chiều LONG khi SHORT bị SL ở mốc 5
 async function openHedgeLong(symbol, info, oldMargin) {
     try {
         const price = parseFloat((await binanceApi.get(`/fapi/v1/ticker/price?symbol=${symbol}`)).data.price);
@@ -56,7 +55,6 @@ async function openHedgeLong(symbol, info, oldMargin) {
         const order = await exchange.createOrder(symbol, 'market', 'buy', qty, undefined, { positionSide: 'LONG' });
         if (order) {
             const entry = order.price || price;
-            // TP = mốc dca 6 (tương đương 2 mốc dcaStep), SL = mốc dca 4 (lùi lại 1 mốc dcaStep)
             const tp = (entry * (1 + (botSettings.dcaStep * 2) / 100)).toFixed(info.pricePrecision);
             const sl = (entry * (1 - botSettings.dcaStep / 100)).toFixed(info.pricePrecision);
 
@@ -66,7 +64,7 @@ async function openHedgeLong(symbol, info, oldMargin) {
             ]).catch(() => {});
 
             botActivePositions.set(`${symbol}_LONG`, { symbol, side: 'LONG', entryPrice: entry, qty, tp, sl, margin: newMargin, dcaCount: 99 });
-            addBotLog(`🛡️ LONG PHÒNG HỘ | ${symbol} | Margin: ${newMargin}$ (x${multiplier}) | Entry: ${entry} | TP: ${tp} | SL: ${sl}`, "success");
+            addBotLog(`🛡️ LONG PHÒNG HỘ | ${symbol} | Margin: ${newMargin.toFixed(2)}$ (x${multiplier}) | Entry: ${entry} | TP: ${tp} | SL: ${sl}`, "success");
         }
     } catch (e) { addBotLog(`❌ Lỗi mở Long phòng hộ: ${e.message}`, "error"); }
 }
@@ -83,9 +81,8 @@ async function openPosition(symbol, isDCA = false) {
         const acc = await binancePrivate('/fapi/v2/account');
         const price = parseFloat((await binanceApi.get(`/fapi/v1/ticker/price?symbol=${symbol}`)).data.price);
         
-        // Quản lý vốn
         let baseInv = botSettings.invType === 'percent' ? (parseFloat(acc.availableBalance) * botSettings.invValue) / 100 : botSettings.invValue;
-        let margin = isDCA ? baseInv * Math.pow(1.5, dcaCount) : baseInv;
+        let margin = isDCA ? (currentPos.margin * 1.5) : baseInv;
 
         let notional = Math.max(margin * info.maxLeverage, 5.5);
         let qty = ((notional / price) / info.stepSize * info.stepSize).toFixed(info.quantityPrecision);
@@ -96,14 +93,7 @@ async function openPosition(symbol, isDCA = false) {
         if (order) {
             const entry = order.price || price;
             const tp = (entry * (1 - botSettings.posTP / 100)).toFixed(info.pricePrecision);
-            
-            // LOGIC SL ĐẶC BIỆT: Nếu là DCA lần 4, SL đặt tại mốc DCA số 5
-            let sl;
-            if (dcaCount === 4) {
-                sl = (entry * (1 + botSettings.dcaStep / 100)).toFixed(info.pricePrecision);
-            } else {
-                sl = (entry * (1 + botSettings.posSL / 100)).toFixed(info.pricePrecision);
-            }
+            let sl = (dcaCount === 4) ? (entry * (1 + botSettings.dcaStep / 100)).toFixed(info.pricePrecision) : (entry * (1 + botSettings.posSL / 100)).toFixed(info.pricePrecision);
 
             if (isDCA) await exchange.cancelAllOrders(symbol).catch(() => {});
 
@@ -112,8 +102,8 @@ async function openPosition(symbol, isDCA = false) {
                 exchange.createOrder(symbol, 'STOP_MARKET', 'buy', qty, undefined, { positionSide: 'SHORT', stopPrice: sl, closePosition: true })
             ]).catch(() => {});
 
-            botActivePositions.set(posKey, { symbol, side: 'SHORT', entryPrice: entry, qty, tp, sl, margin, dcaCount, baseInv });
-            addBotLog(`${isDCA ? `⚠️ DCA LẦN ${dcaCount}` : '🚀 MỞ SHORT'} | ${symbol} | Margin: ${margin.toFixed(2)}$ | Lev: x${info.maxLeverage} | Entry: ${entry} | TP: ${tp} | SL: ${sl}`, isDCA ? "warning" : "success");
+            botActivePositions.set(posKey, { symbol, side: 'SHORT', entryPrice: entry, qty, tp, sl, margin, dcaCount, baseInv: isDCA ? currentPos.baseInv : baseInv });
+            addBotLog(`${isDCA ? `⚠️ DCA LẦN ${dcaCount}` : '🚀 MỞ SHORT'} | ${symbol} | Margin: ${margin.toFixed(2)}$ | Entry: ${entry} | TP: ${tp} | SL: ${sl}`, isDCA ? "warning" : "success");
         }
     } catch (e) { addBotLog(`❌ Lỗi mở/DCA: ${e.message}`, "error"); }
 }
@@ -125,48 +115,50 @@ async function mainLoop() {
         const posRisk = await binancePrivate('/fapi/v2/positionRisk');
         const now = Date.now();
 
-        // 1. Kiểm tra điều kiện Margin Safety
+        // LOGIC MARGIN SAFETY (40% - 50%)
         const totalUsedMargin = parseFloat(acc.totalInitialMargin);
-        const availableBalance = parseFloat(acc.availableBalance);
-        const totalWallet = totalUsedMargin + availableBalance;
+        const totalWallet = parseFloat(acc.totalWalletBalance);
         const marginRatio = (totalUsedMargin / totalWallet) * 100;
 
-        let canOpenNew = marginRatio < 50; 
-        // Nếu đã ngưng, cần hồi về trên 60% (tức là used margin < 40% wallet) mới mở lại
-        // Tuy nhiên theo ý bạn: Hồi lại "trên 60% số dư khả dụng" -> hiểu là available > 60% wallet
-        if (!canOpenNew && (availableBalance / totalWallet) > 0.6) canOpenNew = true;
+        if (marginRatio > 50) {
+            if (status.canOpenNew) {
+                status.canOpenNew = false;
+                addBotLog(`⛔ Vượt 50% Margin (${marginRatio.toFixed(1)}%). Dừng mở lệnh mới.`, "error");
+            }
+        } else if (marginRatio < 40) {
+            if (!status.canOpenNew) {
+                status.canOpenNew = true;
+                addBotLog(`✅ Margin an toàn (${marginRatio.toFixed(1)}%). Kích hoạt mở lệnh mới.`, "success");
+            }
+        }
 
         for (let [key, botPos] of botActivePositions) {
             const realPos = posRisk.find(p => p.symbol === botPos.symbol && p.positionSide === botPos.side);
             
             if (!realPos || parseFloat(realPos.positionAmt) === 0) {
-                // KIỂM TRA NẾU VỪA BỊ SL Ở LẦN DCA 4 -> MỞ LONG PHÒNG HỘ
                 if (botPos.side === 'SHORT' && botPos.dcaCount === 4) {
-                    addBotLog(`🔥 Chạm mốc DCA 5! Đóng Short và kích hoạt LONG PHÒNG HỘ cho ${botPos.symbol}`, "error");
+                    addBotLog(`🔥 Chạm mốc DCA 5! Đảo lệnh LONG PHÒNG HỘ cho ${botPos.symbol}`, "error");
                     await openHedgeLong(botPos.symbol, status.exchangeInfo[botPos.symbol], botPos.baseInv);
                 }
-                
                 status.blackList[botPos.symbol] = now + (15 * 60 * 1000);
                 botActivePositions.delete(key);
             } else {
-                botPos.pnlPercent = parseFloat(realPos.unRealizedProfit) / (parseFloat(realPos.positionInitialMargin)) * 100;
-                // DCA không bị chặn bởi luật 50% margin
+                // Tính PNL thực tế dựa trên margin
+                botPos.pnlPercent = (parseFloat(realPos.unRealizedProfit) / parseFloat(realPos.positionInitialMargin)) * 100;
+                
                 if (botPos.side === 'SHORT' && botPos.pnlPercent <= -botSettings.dcaStep && botPos.dcaCount < botSettings.maxDCA) {
                     await openPosition(botPos.symbol, true);
                 }
             }
         }
 
-        // 2. Lọc kèo mới (Bị chặn bởi luật Margin Safety)
-        if (botSettings.isRunning && canOpenNew && botActivePositions.size < botSettings.maxPositions) {
+        if (botSettings.isRunning && status.canOpenNew && botActivePositions.size < botSettings.maxPositions) {
             const keo = status.candidatesList.find(c => {
                 const isBlack = status.blackList[c.symbol] && now < status.blackList[c.symbol];
                 const satisfiesVol = Math.abs(c.c1) >= botSettings.minVol || Math.abs(c.c5) >= botSettings.minVol || Math.abs(c.c15) >= botSettings.minVol;
                 return !botActivePositions.has(`${c.symbol}_SHORT`) && !isBlack && satisfiesVol;
             });
             if (keo) await openPosition(keo.symbol, false);
-        } else if (!canOpenNew && botSettings.isRunning) {
-            // Log cảnh báo margin nếu cần
         }
 
         Object.keys(status.blackList).forEach(sym => { if (now > status.blackList[sym]) delete status.blackList[sym]; });
@@ -185,7 +177,7 @@ async function init() {
         });
         status.exchangeInfo = tempInfo;
         status.isReady = true;
-        addBotLog("👿 LUFFY v19.0 - HEDGE & SAFETY MODE - READY", "success");
+        addBotLog("👿 LUFFY v19.1 - HYSTERESIS MARGIN MODE - READY", "success");
     } catch (e) { setTimeout(init, 5000); }
 }
 
