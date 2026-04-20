@@ -69,14 +69,10 @@ function initWS() {
                 const diffAvg = ((p - pending.avgPrice) / pending.avgPrice) * 100;
                 const currentRoi = (pending.type === 'LONG' ? diffAvg : -diffAvg) * (pending.maxLev || 20);
                 
-                // --- CHỖ THÊM: Cập nhật Max Negative PnL và Time ---
                 if (!pending.maxNegativeRoi || currentRoi < pending.maxNegativeRoi) { 
                     pending.maxNegativeRoi = currentRoi;
                     pending.maxNegativeTime = now;
-                    // Tính sơ bộ pnl âm nhất dựa trên Roi (Sẽ chuẩn hóa khi render ở GUI)
-                    pending.maxNegativePnl = currentRoi; 
                 }
-                // --------------------------------------------------
 
                 const win = pending.type === 'LONG' ? diffAvg >= pending.tpTarget : diffAvg <= -pending.tpTarget; 
                 const isTimeout = (now - pending.startTime) >= (MAX_HOLD_MINUTES * 60000);
@@ -108,7 +104,7 @@ function initWS() {
                         let type = (tradeMode === 'REVERSE') ? (sumVol >= 0 ? 'SHORT' : 'LONG') : (sumVol >= 0 ? 'LONG' : 'SHORT');
                         if (tradeMode === 'LONG_ONLY') type = 'LONG';
                         if (tradeMode === 'SHORT_ONLY') type = 'SHORT';
-                        historyMap.set(`${s}_${now}`, { symbol: s, startTime: Date.now(), snapPrice: p, avgPrice: p, type: type, status: 'PENDING', maxLev: symbolMaxLeverage[s] || 20, tpTarget: currentTP, slTarget: currentSL, snapVol: { c1, c5, c15 }, maxNegativeRoi: 0, maxNegativePnl: 0, maxNegativeTime: null, dcaCount: 0, dcaHistory: [{ t: Date.now(), p: p, avg: p }] });
+                        historyMap.set(`${s}_${now}`, { symbol: s, startTime: Date.now(), snapPrice: p, avgPrice: p, type: type, status: 'PENDING', maxLev: symbolMaxLeverage[s] || 20, tpTarget: currentTP, slTarget: currentSL, snapVol: { c1, c5, c15 }, maxNegativeRoi: 0, maxNegativeTime: null, dcaCount: 0, dcaHistory: [{ t: Date.now(), p: p, avg: p }] });
                     }});
                 }
             }
@@ -234,16 +230,19 @@ app.get('/gui', (req, res) => {
                 let totalMargin = mBase * (h.dcaCount + 1);
                 let pnl = (totalMargin * (h.maxLev || 20) * (h.pnlPercent/100)) - (totalMargin * (h.maxLev || 20) * 0.001);
                 
+                // Snap Vol lúc mở lệnh (Lịch sử)
+                let sv = h.snapVol || {c1:0, c5:0, c15:0};
+                let snapStr = \`<div class="text-[7px] text-gray-500 mt-0.5">V: \${sv.c1}/\${sv.c5}/\${sv.c15}</div>\`;
+
                 // Tính MaxDD âm nhất ra tiền $
                 let maxNegPnl = (totalMargin * (h.maxLev || 20) * (h.maxNegativeRoi / 100)) / (h.maxLev || 20);
 
                 runningBal += pnl; if(pnl > 0) { countWin++; sumWinPnl += pnl; }
                 chartLabels.push(""); chartData.push(runningBal);
                 
-                // Nội dung cho cột MaxDD (ROI% | $ âm nhất | Giờ)
                 let maxDDContent = \`<span class="down font-bold">\${h.maxNegativeRoi.toFixed(1)}%</span><br><span class="text-[7px] text-gray-500">\${maxNegPnl.toFixed(1)}$ | \${h.maxNegativeTime ? new Date(h.maxNegativeTime).toLocaleTimeString([],{hour12:false}) : '--'}</span>\`;
 
-                return \`<tr class="border-b border-zinc-800/30 \${h.dcaCount >= 5 ? 'recovery-row' : ''}"><td>\${d.history.length - idx}</td><td class="py-2 text-[7px]">\${new Date(h.startTime).toLocaleTimeString([],{hour12:false})}<br>\${new Date(h.endTime).toLocaleTimeString([],{hour12:false})}</td><td><b class="text-white">\${h.symbol}</b> <br> <span class="\${h.type==='LONG'?'up':'down'} font-bold">\${h.type}</span></td><td class="text-yellow-500 font-bold">\${h.dcaCount}</td><td>\${totalMargin.toFixed(1)}</td><td class="text-center text-[7px] text-yellow-500/70">\${h.maxLev}x</td><td>\${fPrice(h.snapPrice)}<br>\${fPrice(h.finalPrice)}</td><td class="text-yellow-500 font-bold">\${fPrice(h.avgPrice)}</td><td class="text-center">\${maxDDContent}</td><td class="\${pnl>=0?'up':'down'} font-bold">\${pnl.toFixed(2)}</td><td class="text-right text-white">\${runningBal.toFixed(1)}</td></tr>\`;
+                return \`<tr class="border-b border-zinc-800/30 \${h.dcaCount >= 5 ? 'recovery-row' : ''}"><td>\${d.history.length - idx}</td><td class="py-2 text-[7px]">\${new Date(h.startTime).toLocaleTimeString([],{hour12:false})}<br>\${new Date(h.endTime).toLocaleTimeString([],{hour12:false})}</td><td><b class="text-white">\${h.symbol}</b> <br> <span class="\${h.type==='LONG'?'up':'down'} font-bold">\${h.type}</span>\${snapStr}</td><td class="text-yellow-500 font-bold">\${h.dcaCount}</td><td>\${totalMargin.toFixed(1)}</td><td class="text-center text-[7px] text-yellow-500/70">\${h.maxLev}x</td><td>\${fPrice(h.snapPrice)}<br>\${fPrice(h.finalPrice)}</td><td class="text-yellow-500 font-bold">\${fPrice(h.avgPrice)}</td><td class="text-center">\${maxDDContent}</td><td class="\${pnl>=0?'up':'down'} font-bold">\${pnl.toFixed(2)}</td><td class="text-right text-white">\${runningBal.toFixed(1)}</td></tr>\`;
             }).reverse().join('');
 
             let pendingHTML = d.pending.map((h, idx) => {
@@ -252,7 +251,12 @@ app.get('/gui', (req, res) => {
                 let totalM = mBase * (h.dcaCount + 1);
                 let roi = (h.type === 'LONG' ? (lp-h.avgPrice)/h.avgPrice : (h.avgPrice-lp)/h.avgPrice) * 100 * (h.maxLev || 20);
                 let pnl = totalM * roi / 100; unPnlTotal += pnl; usedMarginTotal += totalM;
-                return \`<tr class="bg-white/5 border-b border-zinc-800 \${h.dcaCount >= 5 ? 'recovery-row' : ''}"><td>\${idx+1}</td><td class="text-[8px]">\${new Date(h.startTime).toLocaleTimeString([],{hour12:false})}</td><td class="text-white font-bold">\${h.symbol} <span class="text-[8px] px-1 \${h.type==='LONG'?'bg-green-600':'bg-red-600'} rounded">\${h.type}</span></td><td class="text-yellow-500 font-bold">\${h.dcaCount}</td><td>\${totalM.toFixed(1)}</td><td class="text-center text-[7px] text-yellow-500/70">\${h.maxLev}x</td><td>\${fPrice(h.snapPrice)}<br><b class="text-green-400">\${fPrice(lp)}</b></td><td class="text-yellow-500 font-bold">\${fPrice(h.avgPrice)}</td><td class="text-right font-bold \${pnl>=0?'up':'down'}">\${pnl.toFixed(2)}<br>\${roi.toFixed(1)}%</td></tr>\`;
+                
+                // Snap Vol lúc mở lệnh (Vị thế đang mở)
+                let sv = h.snapVol || {c1:0, c5:0, c15:0};
+                let snapStr = \`<div class="text-[7px] text-gray-400">V: \${sv.c1}/\${sv.c5}/\${sv.c15}</div>\`;
+
+                return \`<tr class="bg-white/5 border-b border-zinc-800 \${h.dcaCount >= 5 ? 'recovery-row' : ''}"><td>\${idx+1}</td><td class="text-[8px]">\${new Date(h.startTime).toLocaleTimeString([],{hour12:false})}</td><td class="text-white font-bold">\${h.symbol} <span class="text-[8px] px-1 \${h.type==='LONG'?'bg-green-600':'bg-red-600'} rounded">\${h.type}</span>\${snapStr}</td><td class="text-yellow-500 font-bold">\${h.dcaCount}</td><td>\${totalM.toFixed(1)}</td><td class="text-center text-[7px] text-yellow-500/70">\${h.maxLev}x</td><td>\${fPrice(h.snapPrice)}<br><b class="text-green-400">\${fPrice(lp)}</b></td><td class="text-yellow-500 font-bold">\${fPrice(h.avgPrice)}</td><td class="text-right font-bold \${pnl>=0?'up':'down'}">\${pnl.toFixed(2)}<br>\${roi.toFixed(1)}%</td></tr>\`;
             }).join('');
 
             let avail = runningBal - usedMarginTotal + (unPnlTotal < 0 ? unPnlTotal : 0);
