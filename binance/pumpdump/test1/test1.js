@@ -12,7 +12,6 @@ const app = express();
 let coinData = {}; 
 let historyMap = new Map(); 
 let symbolMaxLeverage = {}; 
-let lastTradeClosed = {}; 
 let statusLogs = []; 
 
 let botConfig = {
@@ -50,17 +49,21 @@ function calculateCurrentState() {
         walletBal += pnl;
     });
 
-    let usedMargin = 0; let unPnl = 0;
+    let usedMargin = 0; let unPnlAm = 0; let unPnlTotal = 0;
     pending.forEach(h => {
         let lp = coinData[h.symbol]?.live?.currentPrice || h.avgPrice;
         let mBase = botConfig.marginVal.includes('%') ? (walletBal * parseFloat(botConfig.marginVal) / 100) : parseFloat(botConfig.marginVal);
         let tM = mBase * (h.dcaCount + 1);
         let roi = (h.type === 'LONG' ? (lp - h.avgPrice) / h.avgPrice : (h.avgPrice - lp) / h.avgPrice) * 100 * (h.maxLev || 20);
-        usedMargin += tM; unPnl += (tM * roi / 100);
+        let pnl = (tM * roi / 100);
+        usedMargin += tM;
+        unPnlTotal += pnl;
+        if (pnl < 0) unPnlAm += Math.abs(pnl);
     });
 
-    let avail = walletBal - usedMargin + (unPnl < 0 ? unPnl : 0);
-    let ratio = usedMargin > 0 ? (usedMargin / (walletBal + (unPnl < 0 ? unPnl : 0))) * 100 : 0;
+    // Avail = Wallet - Margin đang giữ - PnL đang âm
+    let avail = walletBal - usedMargin - unPnlAm;
+    let ratio = usedMargin > 0 ? (usedMargin / walletBal) * 100 : 0;
 
     if (!botConfig.isPausedByMargin && ratio > 50) {
         botConfig.isPausedByMargin = true;
@@ -69,10 +72,9 @@ function calculateCurrentState() {
         botConfig.isPausedByMargin = false;
         saveStatusLog('START', `Margin ${ratio.toFixed(1)}% < 40%. Tiếp tục chạy.`);
     }
-    return { walletBal, avail, equity: walletBal + unPnl, ratio };
+    return { walletBal, avail, equity: walletBal + unPnlTotal, ratio };
 }
 
-// --- WebSocket & Logic ---
 function initWS() {
     const ws = new WebSocket('wss://fstream.binance.com/ws/!ticker@arr');
     ws.on('message', (data) => {
@@ -149,12 +151,13 @@ app.get('/gui', (req, res) => {
         body { background: #0b0e11; color: #eaecef; font-family: 'IBM Plex Sans'; margin: 0; }
         .up { color: #0ecb81; } .down { color: #f6465d; } .bg-card { background: #1e2329; border: 1px solid #30363d; }
         input, select { background: #0b0e11; border: 1px solid #30363d; color: white; padding: 6px; border-radius: 4px; font-size: 12px; }
-        .recovery-row { background-color: rgba(75, 0, 130, 0.3) !important; color: #e0b0ff !important; }
+        .recovery-row { background-color: rgba(75, 0, 130, 0.3) !important; }
+        .scrollbar-hide::-webkit-scrollbar { display: none; }
     </style></head><body>
     
     <div class="p-4 bg-[#0b0e11] sticky top-0 z-50 border-b border-zinc-800">
         <div id="setup" class="grid grid-cols-2 gap-3 mb-4 bg-card p-3 rounded-lg">
-            <div><label class="text-[10px] text-gray-500 font-bold ml-1">VỐN KHỞI TẠO ($)</label><input id="balanceInp" type="number" class="w-full text-yellow-500 font-bold outline-none"></div>
+            <div><label class="text-[10px] text-gray-500 font-bold ml-1">VỐN ($)</label><input id="balanceInp" type="number" class="w-full text-yellow-500 font-bold outline-none"></div>
             <div><label class="text-[10px] text-gray-500 font-bold ml-1">MARGIN (%)</label><input id="marginInp" type="text" class="w-full text-yellow-500 font-bold outline-none"></div>
             <div class="col-span-2 grid grid-cols-4 gap-2 border-t border-zinc-800 pt-2 mt-1">
                 <div><label class="text-[10px] text-gray-500 ml-1">TP (%)</label><input id="tpInp" type="number" step="0.1" class="w-full"></div>
@@ -162,13 +165,13 @@ app.get('/gui', (req, res) => {
                 <div><label class="text-[10px] text-gray-500 ml-1">VOL (%)</label><input id="volInp" type="number" step="0.1" class="w-full"></div>
                 <div><label class="text-[10px] text-gray-500 ml-1">MODE</label><select id="modeInp" class="w-full"><option value="FOLLOW">FOLLOW</option><option value="REVERSE">REVERSE</option></select></div>
             </div>
-            <button onclick="save(true)" class="col-span-2 bg-[#fcd535] text-black font-bold py-2 rounded uppercase text-xs mt-1">START ENGINE</button>
+            <button onclick="save(true)" class="col-span-2 bg-[#fcd535] text-black font-bold py-2 rounded uppercase text-xs mt-1">START BOT</button>
         </div>
 
         <div id="active" class="hidden flex justify-between items-center mb-2">
-            <div class="font-bold italic text-xl tracking-tighter">BINANCE <span class="text-[#fcd535]">LUFFY PRO</span></div>
-            <div id="configInfo" class="text-[9px] bg-zinc-800 px-3 py-1 rounded-full text-gray-400 font-bold"></div>
-            <button onclick="save(false)" class="text-[#fcd535] font-bold border border-[#fcd535] px-3 py-1 rounded text-[10px] uppercase">STOP ENGINE</button>
+            <div class="font-bold italic text-xl">BINANCE <span class="text-[#fcd535]">LUFFY PRO</span></div>
+            <div id="configInfo" class="text-[10px] bg-zinc-800 px-3 py-1 rounded-full text-gray-300 font-bold"></div>
+            <button onclick="save(false)" class="text-[#fcd535] font-bold border border-[#fcd535] px-3 py-1 rounded text-[10px] uppercase">STOP</button>
         </div>
 
         <div class="flex justify-between items-end mb-1">
@@ -185,48 +188,72 @@ app.get('/gui', (req, res) => {
         </div>
     </div>
 
-    <div class="px-4 mt-4"><div class="bg-card p-4 rounded-xl h-[200px] border border-zinc-800 shadow-lg">
-        <div class="flex justify-between text-[10px] font-bold text-gray-500 uppercase mb-2">
-            <span>Growth Performance</span>
-            <div class="flex gap-4">
+    <div class="px-4 mt-4">
+        <div class="bg-card p-4 rounded-xl h-[200px] border border-zinc-800 shadow-lg relative">
+            <div class="absolute top-2 right-4 flex gap-4 text-[10px] font-bold">
                 <span class="flex items-center"><span class="w-2 h-2 bg-[#fcd535] rounded-full mr-1"></span> Wallet</span>
                 <span class="flex items-center"><span class="w-2 h-2 bg-blue-500 rounded-full mr-1"></span> Avail</span>
             </div>
+            <canvas id="balanceChart"></canvas>
         </div>
-        <canvas id="balanceChart"></canvas>
-    </div></div>
+    </div>
 
-    <div class="px-4 mt-4"><div class="bg-card p-4 rounded-xl border border-zinc-800 shadow-sm">
-        <div class="text-[11px] font-bold mb-2 uppercase italic flex justify-between items-center">
-            <span class="flex items-center"><span class="w-2 h-2 bg-red-500 rounded-full mr-2 animate-pulse"></span> Lịch sử dừng bot (Margin 50/40)</span>
-            <span id="marginPercent" class="text-yellow-500 font-black">MARGIN: 0%</span>
+    <div class="px-4 mt-4">
+        <div class="bg-card p-4 rounded-xl border border-zinc-800">
+            <div class="text-[11px] font-bold mb-2 uppercase italic flex justify-between items-center">
+                <span>⚠️ Lịch sử dừng bot (Margin 50/40)</span>
+                <span id="marginPercent" class="text-yellow-500 font-black">MARGIN: 0%</span>
+            </div>
+            <div id="logBody" class="text-[9px] space-y-1 h-20 overflow-y-auto scrollbar-hide border-t border-zinc-800 pt-2"></div>
         </div>
-        <div id="logBody" class="text-[9px] space-y-1 h-20 overflow-y-auto scrollbar-hide border-t border-zinc-800 pt-2"></div>
-    </div></div>
+    </div>
 
-    <div class="px-4 mt-4"><div class="bg-card p-4 rounded-xl border border-zinc-800 shadow-sm">
-        <div class="text-[11px] font-bold mb-3 uppercase italic text-white flex items-center">
-            <span class="w-1 h-3 bg-[#fcd535] mr-2"></span> Vị thế đang mở
+    <div class="px-4 mt-4">
+        <div class="bg-card p-4 rounded-xl border border-zinc-800">
+            <div class="text-[11px] font-bold mb-3 uppercase italic flex items-center">
+                <span class="w-1 h-3 bg-[#fcd535] mr-2"></span> Vị thế đang mở
+            </div>
+            <div class="overflow-x-auto">
+                <table class="w-full text-[10px] text-left">
+                    <thead class="text-gray-500 border-b border-zinc-800 uppercase">
+                        <tr>
+                            <th>Pair/SnapVol</th>
+                            <th>DCA</th>
+                            <th>Margin</th>
+                            <th>Snap/Live</th>
+                            <th>Avg Price</th>
+                            <th class="text-right">PnL (ROI%)</th>
+                        </tr>
+                    </thead>
+                    <tbody id="pendingBody"></tbody>
+                </table>
+            </div>
         </div>
-        <div class="overflow-x-auto"><table class="w-full text-[10px] text-left">
-            <thead class="text-gray-500 border-b border-zinc-800 uppercase">
-                <tr><th>Pair</th><th>DCA</th><th>Margin</th><th>Entry/Live</th><th>Avg Price</th><th class="text-right">PnL (ROI%)</th></tr>
-            </thead>
-            <tbody id="pendingBody"></tbody>
-        </table></div>
-    </div></div>
+    </div>
 
-    <div class="px-4 mt-4 mb-10"><div class="bg-card p-4 rounded-xl border border-zinc-800 shadow-sm">
-        <div class="text-[11px] font-bold mb-3 uppercase italic text-gray-400 flex items-center">
-            <span class="w-1 h-3 bg-gray-600 mr-2"></span> Nhật ký giao dịch
+    <div class="px-4 mt-4 mb-10">
+        <div class="bg-card p-4 rounded-xl border border-zinc-800">
+            <div class="text-[11px] font-bold mb-3 uppercase italic text-gray-400">
+                Nhật ký giao dịch
+            </div>
+            <div class="overflow-x-auto">
+                <table class="w-full text-[9px] text-left">
+                    <thead class="text-gray-500 border-b border-zinc-800 uppercase">
+                        <tr>
+                            <th>Time In-Out</th>
+                            <th>Pair</th>
+                            <th>DCA</th>
+                            <th>Margin</th>
+                            <th>MaxDD</th>
+                            <th>PnL Net</th>
+                            <th class="text-right">Wallet | Avail</th>
+                        </tr>
+                    </thead>
+                    <tbody id="historyBody"></tbody>
+                </table>
+            </div>
         </div>
-        <div class="overflow-x-auto"><table class="w-full text-[9px] text-left">
-            <thead class="text-gray-500 border-b border-zinc-800 uppercase">
-                <tr><th>Time In-Out</th><th>Pair</th><th>DCA</th><th>Margin</th><th>MaxDD</th><th>PnL Net</th><th class="text-right">Wallet | Avail</th></tr>
-            </thead>
-            <tbody id="historyBody"></tbody>
-        </table></div>
-    </div></div>
+    </div>
 
     <script>
     let myChart = null, isFirst = true;
@@ -249,24 +276,26 @@ app.get('/gui', (req, res) => {
             }
 
             document.getElementById('displayBal').innerText = st.equity.toFixed(2);
-            document.getElementById('displayAvail').innerText = 'Số dư khả dụng (Avail): ' + st.avail.toFixed(2) + ' USDT';
+            document.getElementById('displayAvail').innerText = 'Avail: ' + st.avail.toFixed(2) + ' USDT';
             document.getElementById('unPnl').innerText = (st.equity - st.walletBal).toFixed(2);
             document.getElementById('unPnl').className = 'text-2xl font-bold ' + (st.equity >= st.walletBal ? 'up':'down');
             document.getElementById('marginPercent').innerText = 'MARGIN: ' + st.ratio.toFixed(1) + '%';
             
             const bSt = document.getElementById('botStatus');
-            if(config.isPausedByMargin){ bSt.innerText = 'PAUSED (MARGIN > 50%)'; bSt.className = 'text-[9px] font-bold px-2 py-0.5 rounded bg-red-900 text-red-200 animate-pulse'; }
-            else { bSt.innerText = 'RUNNING'; bSt.className = 'text-[9px] font-bold px-2 py-0.5 rounded bg-green-900 text-green-200'; }
+            if(config.isPausedByMargin){ bSt.innerText = 'PAUSED (>50%)'; bSt.className = 'bg-red-900 text-red-200 px-2 py-0.5 rounded'; }
+            else { bSt.innerText = 'RUNNING'; bSt.className = 'bg-green-900 text-green-200 px-2 py-0.5 rounded'; }
 
-            document.getElementById('logBody').innerHTML = d.statusLogs.map(l => \`<div class="flex justify-between border-b border-zinc-800 pb-1"><span class="\${l.type==='STOP'?'text-red-400':'text-green-400'} font-bold">[\${l.type}] \${new Date(l.time).toLocaleTimeString()}</span><span class="text-gray-500 font-medium">\${l.msg}</span></div>\`).join('');
+            document.getElementById('logBody').innerHTML = d.statusLogs.map(l => \`<div class="flex justify-between border-b border-zinc-800 pb-1"><span class="\${l.type==='STOP'?'text-red-400':'text-green-400'}">[\${l.type}] \${new Date(l.time).toLocaleTimeString()}</span><span class="text-gray-500">\${l.msg}</span></div>\`).join('');
 
             let rB = config.initialBal, cW = [rB], cA = [rB], cL = ['Start'];
-            document.getElementById('historyBody').innerHTML = d.history.sort((a,b)=>a.endTime-b.endTime).map(h => {
+            let sortedHist = [...d.history].sort((a,b)=>a.endTime-b.endTime);
+
+            document.getElementById('historyBody').innerHTML = sortedHist.map(h => {
                 let m = config.marginVal.includes('%') ? (rB * parseFloat(config.marginVal)/100) : parseFloat(config.marginVal);
                 let tM = m * (h.dcaCount + 1);
                 let pnl = (tM * (h.maxLev||20) * (h.pnlPercent/100)) - (tM * (h.maxLev||20) * 0.001);
                 rB += pnl; cW.push(rB); cA.push(rB); cL.push("");
-                return \`<tr class="border-b border-zinc-800/30 \${h.dcaCount >= 5 ? 'recovery-row' : ''}">
+                return \`<tr class="border-b border-zinc-800/30">
                     <td class="text-[8px]">\${new Date(h.startTime).toLocaleTimeString()}<br>\${new Date(h.endTime).toLocaleTimeString()}</td>
                     <td><b>\${h.symbol}</b> <span class="\${h.type==='LONG'?'up':'down'}">\${h.type}</span></td>
                     <td>\${h.dcaCount}</td><td>\${tM.toFixed(1)}</td>
@@ -283,7 +312,7 @@ app.get('/gui', (req, res) => {
                 let roi = (h.type==='LONG'?(lp-h.avgPrice)/h.avgPrice:(h.avgPrice-lp)/h.avgPrice)*100*(h.maxLev||20);
                 let sv = h.snapVol || {c1:0,c5:0,c15:0};
                 return \`<tr class="border-b border-zinc-800 \${h.dcaCount >= 5 ? 'recovery-row' : ''}">
-                    <td><b>\${h.symbol}</b> <span class="px-1 \${h.type==='LONG'?'bg-green-600':'bg-red-600'} rounded text-[8px]">\${h.type}</span><div class="text-[7px] text-gray-500">V: \${sv.c1}/\${sv.c5}/\${sv.c15}</div></td>
+                    <td><b>\${h.symbol}</b> <span class="px-1 \${h.type==='LONG'?'bg-green-600':'bg-red-600'} rounded text-[8px]">\${h.type}</span><div class="text-[8px] text-gray-500">\${sv.c1}/\${sv.c5}/\${sv.c15}</div></td>
                     <td>\${h.dcaCount}</td><td>\${tM.toFixed(1)}</td>
                     <td>\${fPrice(h.snapPrice)}<br><b class="text-white">\${fPrice(lp)}</b></td>
                     <td class="text-yellow-500 font-bold">\${fPrice(h.avgPrice)}</td>
@@ -297,13 +326,13 @@ app.get('/gui', (req, res) => {
 
     const ctx = document.getElementById('balanceChart').getContext('2d');
     myChart = new Chart(ctx, { type: 'line', data: { labels: [], datasets: [
-        { label: 'Wallet', data: [], borderColor: '#fcd535', borderWidth: 2, pointRadius: 0, fill: true, backgroundColor: 'rgba(252, 213, 53, 0.05)' },
+        { label: 'Wallet', data: [], borderColor: '#fcd535', borderWidth: 2, pointRadius: 0, fill: false },
         { label: 'Avail', data: [], borderColor: '#3b82f6', borderWidth: 1.5, pointRadius: 0, fill: false, borderDash: [5,5] }
     ]}, options: { maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { display: false }, y: { grid: { color: '#30363d' } } } } });
     
     setInterval(update, 1000);
+    initWS(); 
     </script></body></html>`);
 });
 
-initWS();
 app.listen(PORT, '0.0.0.0', () => console.log(`http://localhost:${PORT}/gui`));
