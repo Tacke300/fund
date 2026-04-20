@@ -161,6 +161,7 @@ app.get('/gui', (req, res) => {
         .up { color: #0ecb81; } .down { color: #f6465d; }
         .bg-card { background: #1e2329; border: 1px solid #30363d; } .text-gray-custom { color: #848e9c; }
         input, select { border: 1px solid #30363d !important; background: #0b0e11; color: white; padding: 8px; border-radius: 4px; }
+        .recovery-row { background-color: rgba(75, 0, 130, 0.3) !important; color: #e0b0ff !important; }
     </style></head><body>
     
     <div class="p-4 bg-[#0b0e11] sticky top-0 z-50 border-b border-zinc-800">
@@ -201,30 +202,32 @@ app.get('/gui', (req, res) => {
         </div>
     </div>
 
-    <div class="px-4 mt-5"><div class="bg-card rounded-xl p-4">
-        <div class="text-[11px] font-bold text-gray-custom mb-3 uppercase tracking-wider italic">Biến động (Real-time)</div>
-        <div class="overflow-x-auto"><table class="w-full text-[10px] text-left"><thead class="text-gray-custom border-b border-zinc-800"><tr><th>Pair</th><th class="text-center">1m %</th><th class="text-center">5m %</th><th class="text-center">15m %</th><th class="text-right">Price</th></tr></thead><tbody id="liveBody"></tbody></table></div>
+    <div class="px-4 mt-5"><div class="bg-card rounded-xl p-4 shadow-lg">
+        <div class="text-[11px] font-bold text-gray-custom mb-3 uppercase tracking-wider italic">Biến động thị trường (Real-time)</div>
+        <div class="overflow-x-auto"><table class="w-full text-[10px] text-left"><thead class="text-gray-custom border-b border-zinc-800 uppercase"><tr><th>Pair</th><th class="text-center">1m %</th><th class="text-center">5m %</th><th class="text-center">15m %</th><th class="text-right">Price</th></tr></thead><tbody id="liveBody"></tbody></table></div>
     </div></div>
 
     <div class="px-4 mt-5 grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div class="md:col-span-2 bg-card rounded-xl p-4"><div style="height: 180px;"><canvas id="balanceChart"></canvas></div></div>
-        <div class="bg-card rounded-xl p-4 overflow-y-auto" style="max-height: 220px;">
+        <div class="md:col-span-2 bg-card rounded-xl p-4 border border-zinc-800">
+             <div style="height: 180px;"><canvas id="balanceChart"></canvas></div>
+        </div>
+        <div class="bg-card rounded-xl p-4 border border-zinc-800 overflow-y-auto" style="max-height: 220px;">
              <div class="text-[11px] font-bold text-red-500 uppercase tracking-widest italic mb-2">Lịch sử Ngưng Mở Lệnh</div>
              <div id="stopLogBody" class="text-[9px] space-y-2"></div>
         </div>
     </div>
 
-    <div class="px-4 mt-5"><div class="bg-card rounded-xl p-4">
+    <div class="px-4 mt-5"><div class="bg-card rounded-xl p-4 shadow-lg">
         <div class="flex justify-between items-center mb-3">
-            <div class="text-[11px] font-bold text-white uppercase tracking-wider">Vị thế đang mở</div>
-            <div id="noAvailMsg" class="hidden text-red-500 font-bold text-[10px] animate-pulse uppercase italic">⚠️ Margin > 50% Avail - Ngưng quét lệnh</div>
+            <div class="text-[11px] font-bold text-white uppercase tracking-wider flex items-center"><span class="w-2 h-2 bg-green-500 rounded-full mr-2 animate-pulse"></span> Vị thế đang mở</div>
+            <div id="noAvailMsg" class="hidden text-red-500 font-bold text-[10px] animate-pulse italic uppercase">⚠️ Margin > 50% Avail - Đã ngưng quét lệnh mới</div>
         </div>
-        <div class="overflow-x-auto"><table class="w-full text-[10px] text-left"><thead class="text-gray-custom uppercase border-b border-zinc-800"><tr><th>STT</th><th>Pair</th><th>DCA</th><th>Margin</th><th class="text-center">Lev/Target</th><th>Entry/Live</th><th class="text-right">PnL (ROI%)</th></tr></thead><tbody id="pendingBody"></tbody></table></div>
+        <div class="overflow-x-auto"><table class="w-full text-[10px] text-left"><thead class="text-gray-custom uppercase border-b border-zinc-800"><tr class="pb-2"><th>STT</th><th>Time</th><th>Pair</th><th>DCA</th><th>Margin</th><th class="text-center">Lev/Target</th><th>Entry/Live</th><th class="text-right">PnL (ROI%)</th></tr></thead><tbody id="pendingBody"></tbody></table></div>
     </div></div>
 
     <div class="px-4 mt-5 mb-10"><div class="bg-card rounded-xl p-4 shadow-lg">
         <div class="text-[11px] font-bold text-gray-custom mb-3 uppercase tracking-wider italic">Nhật ký giao dịch</div>
-        <div class="overflow-x-auto"><table class="w-full text-[9px] text-left"><thead class="text-gray-custom border-b border-zinc-800 uppercase"><tr><th>STT</th><th>Time</th><th>Pair</th><th>DCA</th><th>Margin</th><th>Target</th><th>PnL Net</th><th class="text-right">Balance</th></tr></thead><tbody id="historyBody"></tbody></table></div>
+        <div class="overflow-x-auto"><table class="w-full text-[9px] text-left"><thead class="text-gray-custom border-b border-zinc-800 uppercase"><tr><th>STT</th><th>Time</th><th>Pair</th><th>DCA</th><th>Margin</th><th>Target</th><th>Entry/Out</th><th class="text-center">MaxDD</th><th>PnL Net</th><th class="text-right">Balance</th></tr></thead><tbody id="historyBody"></tbody></table></div>
     </div></div>
 
     <script>
@@ -250,7 +253,6 @@ app.get('/gui', (req, res) => {
             const res = await fetch('/api/data'); const d = await res.json();
             isRunningLocal = d.botConfig.running;
             
-            // Ẩn hiện cấu hình và nút Stop
             const setup = document.getElementById('setupPanel');
             const btnStop = document.getElementById('btnStopContainer');
             const badge = document.getElementById('botStatusBadge');
@@ -279,49 +281,60 @@ app.get('/gui', (req, res) => {
             let chartLabels = ['Start'], chartData = [runningBal];
 
             document.getElementById('liveBody').innerHTML = d.live.sort((a,b)=>Math.abs(b.c1)-Math.abs(a.c1)).slice(0,10).map(l => \`
-                <tr class="border-b border-zinc-800/50"><td>\${l.symbol}</td><td class="text-center \${l.c1>=0?'up':'down'} font-bold">\${l.c1}%</td><td class="text-center \${l.c5>=0?'up':'down'}">\${l.c5}%</td><td class="text-center \${l.c15>=0?'up':'down'}">\${l.c15}%</td><td class="text-right text-gray-400">\${fPrice(l.currentPrice)}</td></tr>\`).join('');
+                <tr class="border-b border-zinc-800/50"><td>\${l.symbol}</td><td class="text-center \${l.c1>=0?'up':'down'} font-bold">\${l.c1}%</td><td class="text-center \${l.c5>=0?'up':'down'}">\${l.c5}%</td><td class="text-center \${l.c15>=0?'up':'down'}">\${l.c15}%</td><td class="text-right text-gray-400">\text{\${fPrice(l.currentPrice)}}</td></tr>\`).join('');
 
+            // TÍNH TOÁN PN KHÁ DỤNG (AVAIL) TRƯỚC KHI RENDER LỆNH ĐANG MỞ
+            let tempRunningBal = d.botConfig.initialBal;
+            d.history.sort((a,b)=>a.endTime-b.endTime).forEach(h => {
+                let mBase = d.botConfig.marginVal.includes('%') ? (tempRunningBal * parseFloat(d.botConfig.marginVal) / 100) : parseFloat(d.botConfig.marginVal);
+                let pnl = (mBase * (h.dcaCount + 1) * (h.maxLev || 20) * (h.pnlPercent/100)) - (mBase * (h.dcaCount + 1) * (h.maxLev || 20) * 0.001);
+                tempRunningBal += pnl;
+            });
+            
+            // Render History
+            let historyRunning = d.botConfig.initialBal;
             let histHTML = [...d.history].sort((a,b)=>a.endTime-b.endTime).map((h, idx) => {
-                let mBase = d.botConfig.marginVal.includes('%') ? (runningBal * parseFloat(d.botConfig.marginVal) / 100) : parseFloat(d.botConfig.marginVal);
+                let mBase = d.botConfig.marginVal.includes('%') ? (historyRunning * parseFloat(d.botConfig.marginVal) / 100) : parseFloat(d.botConfig.marginVal);
                 let totalMargin = mBase * (h.dcaCount + 1);
                 let pnl = (totalMargin * (h.maxLev || 20) * (h.pnlPercent/100)) - (totalMargin * (h.maxLev || 20) * 0.001);
-                runningBal += pnl; if(pnl > 0) { countWin++; sumWinPnl += pnl; }
-                chartLabels.push(""); chartData.push(runningBal);
-                return \`<tr class="border-b border-zinc-800/30"><td>\${idx+1}</td><td>\${new Date(h.endTime).toLocaleTimeString([],{hour12:false})}</td><td><b class="text-white">\${h.symbol}</b></td><td class="text-yellow-500 font-bold">\${h.dcaCount}</td><td>\${totalMargin.toFixed(1)}</td><td>\${h.maxLev}x</td><td class="\${pnl>=0?'up':'down'} font-bold">\${pnl.toFixed(2)}</td><td class="text-right">\${runningBal.toFixed(1)}</td></tr>\`;
+                historyRunning += pnl; if(pnl > 0) { countWin++; sumWinPnl += pnl; }
+                chartLabels.push(""); chartData.push(historyRunning);
+                return \`<tr class="border-b border-zinc-800/30"><td>\${idx+1}</td><td>\${new Date(h.endTime).toLocaleTimeString([],{hour12:false})}</td><td><b class="text-white">\${h.symbol}</b></td><td class="text-yellow-500 font-bold">\${h.dcaCount}</td><td>\${totalMargin.toFixed(1)}</td><td>\${h.maxLev}x</td><td>\${fPrice(h.snapPrice)}<br>\${fPrice(h.finalPrice)}</td><td class="text-center down">\${h.maxNegativeRoi.toFixed(1)}%</td><td class="\${pnl>=0?'up':'down'} font-bold">\${pnl.toFixed(2)}</td><td class="text-right">\${historyRunning.toFixed(1)}</td></tr>\`;
             }).reverse().join('');
 
-            let avail = runningBal; // Khởi tạo Avail ban đầu từ Equity (Wallet)
-
+            // TÍNH AVAIL DỰA TRÊN PN ĐANG CÓ
+            let currentAvail = historyRunning; 
             let pendingHTML = d.pending.map((h, idx) => {
                 let lp = d.allPrices[h.symbol] || h.avgPrice;
-                // QUAN TRỌNG: MỞ LỆNH THEO % CỦA SỐ DƯ KHẢ DỤNG (AVAIL)
-                let mBase = d.botConfig.marginVal.includes('%') ? (avail * parseFloat(d.botConfig.marginVal) / 100) : parseFloat(d.botConfig.marginVal);
+                // MARGIN MỞ THEO AVAIL
+                let mBase = d.botConfig.marginVal.includes('%') ? (currentAvail * parseFloat(d.botConfig.marginVal) / 100) : parseFloat(d.botConfig.marginVal);
                 let totalM = mBase * (h.dcaCount + 1);
                 let roi = (h.type === 'LONG' ? (lp-h.avgPrice)/h.avgPrice : (h.avgPrice-lp)/h.avgPrice) * 100 * (h.maxLev || 20);
                 let pnl = totalM * roi / 100;
                 unPnlTotal += pnl; usedMarginTotal += totalM;
-                return \`<tr class="bg-white/5 border-b border-zinc-800"><td>\${idx+1}</td><td class="text-white font-bold">\${h.symbol} <span class="text-[8px] \${h.type==='LONG'?'bg-green-600':'bg-red-600'} px-1 rounded">\${h.type}</span></td><td class="text-yellow-500 font-bold">\${h.dcaCount}</td><td>\${totalM.toFixed(1)}</td><td class="text-center">\${h.maxLev}x</td><td>\${fPrice(h.snapPrice)}<br><b class="text-green-400">\${fPrice(lp)}</b></td><td class="text-right font-bold \${pnl>=0?'up':'down'}">\${pnl.toFixed(2)}<br>\${roi.toFixed(1)}%</td></tr>\`;
+                return \`<tr class="bg-white/5 border-b border-zinc-800"><td>\${idx+1}</td><td>\${new Date(h.startTime).toLocaleTimeString([],{hour12:false})}</td><td class="text-white font-bold">\${h.symbol} <span class="text-[8px] \${h.type==='LONG'?'bg-green-600':'bg-red-600'} px-1 rounded">\${h.type}</span></td><td class="text-yellow-500 font-bold">\${h.dcaCount}</td><td>\${totalM.toFixed(1)}</td><td class="text-center">\${h.maxLev}x</td><td>\${fPrice(h.snapPrice)}<br><b class="text-green-400">\${fPrice(lp)}</b></td><td class="text-right font-bold \${pnl>=0?'up':'down'}">\${pnl.toFixed(2)}<br>\${roi.toFixed(1)}%</td></tr>\`;
             }).join('');
 
-            // Tính Avail thực tế: Wallet - Margin đã dùng + PnL đang có (nếu âm thì trừ vào khả dụng)
-            avail = runningBal - usedMarginTotal + (unPnlTotal < 0 ? unPnlTotal : 0);
+            currentAvail = historyRunning - usedMarginTotal + (unPnlTotal < 0 ? unPnlTotal : 0);
             
-            let shouldStop = (usedMarginTotal / (runningBal + (unPnlTotal < 0 ? unPnlTotal : 0))) * 100 > 50;
+            let shouldStop = (usedMarginTotal / (historyRunning + (unPnlTotal < 0 ? unPnlTotal : 0))) * 100 > 50;
             if(shouldStop !== isStoppedByMarginLocal && isRunningLocal) {
                 isStoppedByMarginLocal = shouldStop;
-                let stopData = { winPnl: sumWinPnl, unPnl: unPnlTotal, posCount: d.pending.length, totalMargin: usedMarginTotal, avail: avail, wallet: runningBal };
+                let stopData = { winPnl: sumWinPnl, unPnl: unPnlTotal, posCount: d.pending.length, totalMargin: usedMarginTotal, avail: currentAvail, wallet: historyRunning };
                 fetch(\`/api/config?isStoppedByMargin=\${shouldStop}&stopData=\${JSON.stringify(stopData)}\`);
             }
 
-            document.getElementById('displayBal').innerText = (runningBal + unPnlTotal).toFixed(2);
-            document.getElementById('displayAvail').innerText = avail.toFixed(2);
+            document.getElementById('displayBal').innerText = (historyRunning + unPnlTotal).toFixed(2);
+            document.getElementById('displayAvail').innerText = currentAvail.toFixed(2);
+            document.getElementById('winCount').innerText = countWin;
+            document.getElementById('winPnl').innerText = sumWinPnl.toFixed(2);
             document.getElementById('unPnl').innerText = unPnlTotal.toFixed(2);
             document.getElementById('unPnl').className = 'text-xl font-bold ' + (unPnlTotal >= 0 ? 'up' : 'down');
             document.getElementById('historyBody').innerHTML = histHTML;
             document.getElementById('pendingBody').innerHTML = pendingHTML;
             document.getElementById('stopLogBody').innerHTML = d.stopLogs.map(l => \`
                 <div class="p-2 border-l-2 border-red-500 bg-red-500/5 mb-1">
-                    <div class="font-bold">\${new Date(l.start).toLocaleTimeString()} - \${l.end ? new Date(l.end).toLocaleTimeString() : 'Đang ngưng'}</div>
+                    <div class="font-bold text-white">\${new Date(l.start).toLocaleTimeString()} - \${l.end ? new Date(l.end).toLocaleTimeString() : 'STOPPED'}</div>
                     Avail: \${l.data.avail.toFixed(1)} | Margin: \${l.data.totalMargin.toFixed(1)}
                 </div>\`).join('');
 
