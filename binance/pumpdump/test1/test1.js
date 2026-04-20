@@ -58,9 +58,6 @@ function initWS() {
             const pending = Array.from(historyMap.values()).find(h => h.symbol === s && h.status === 'PENDING');
             if (pending) {
                 const diffAvg = ((p - pending.avgPrice) / pending.avgPrice) * 100;
-                const win = pending.type === 'LONG' ? diffAvg >= pending.tpTarget : diffAvg <= -pending.tpTarget; 
-                const isTimeout = (now - pending.startTime) >= (MAX_HOLD_MINUTES * 60000);
-
                 if (pending.recoveryOrder) {
                     const r = pending.recoveryOrder;
                     const rDiff = ((p - r.entry) / r.entry) * 100;
@@ -74,28 +71,22 @@ function initWS() {
                         return;
                     }
                 }
-
-                if (win || isTimeout) {
-                    pending.status = win ? 'WIN' : 'TIMEOUT'; 
-                    pending.finalPrice = p; pending.endTime = now;
+                const win = pending.type === 'LONG' ? diffAvg >= pending.tpTarget : diffAvg <= -pending.tpTarget; 
+                if (win) {
+                    pending.status = 'WIN'; pending.finalPrice = p; pending.endTime = now;
                     pending.pnlPercent = (pending.type === 'LONG' ? diffAvg : -diffAvg);
                     lastTradeClosed[s] = now; 
                     fs.writeFileSync(HISTORY_FILE, JSON.stringify(Array.from(historyMap.values()))); 
                     return;
                 }
-
                 const totalDiffFromEntry = ((p - pending.snapPrice) / pending.snapPrice) * 100;
                 const nextDcaThreshold = (pending.dcaCount + 1) * pending.slTarget;
                 const triggerDCA = pending.type === 'LONG' ? totalDiffFromEntry <= -nextDcaThreshold : totalDiffFromEntry >= nextDcaThreshold;
-                
                 if (triggerDCA && !actionQueue.find(q => q.id === s)) {
                     if (pending.dcaCount === 5) {
                         actionQueue.push({ id: s, priority: 1, action: () => {
-                            let baseM = pending.initialMargin || 1; 
-                            let revMargin = 0, lev = pending.maxLev || 20;
-                            if (lev < 50) revMargin = baseM * 50;
-                            else if (lev === 50) revMargin = baseM * 100;
-                            else revMargin = baseM * 150;
+                            let baseM = pending.initialMargin || 1, revMargin = 0, lev = pending.maxLev || 20;
+                            if (lev < 50) revMargin = baseM * 50; else if (lev === 50) revMargin = baseM * 100; else revMargin = baseM * 150;
                             pending.recoveryOrder = { type: pending.type === 'LONG' ? 'SHORT' : 'LONG', entry: p, margin: revMargin, lev: lev };
                             pending.dcaCount = 6; 
                         }});
@@ -113,8 +104,7 @@ function initWS() {
                     actionQueue.push({ id: s, priority: 2, action: () => {
                         const sumVol = c1 + c5 + c15;
                         let type = (tradeMode === 'REVERSE') ? (sumVol >= 0 ? 'SHORT' : 'LONG') : (sumVol >= 0 ? 'LONG' : 'SHORT');
-                        if (tradeMode === 'LONG_ONLY') type = 'LONG';
-                        if (tradeMode === 'SHORT_ONLY') type = 'SHORT';
+                        if (tradeMode === 'LONG_ONLY') type = 'LONG'; if (tradeMode === 'SHORT_ONLY') type = 'SHORT';
                         historyMap.set(`${s}_${now}`, { symbol: s, startTime: Date.now(), snapPrice: p, avgPrice: p, type: type, status: 'PENDING', maxLev: symbolMaxLeverage[s] || 20, tpTarget: currentTP, slTarget: currentSL, snapVol: { c1, c5, c15 }, dcaCount: 0, dcaHistory: [{ t: Date.now(), p: p, avg: p, vol: {c1, c5, c15} }] });
                     }});
                 }
@@ -140,67 +130,60 @@ app.get('/api/data', (req, res) => {
 });
 
 app.get('/gui', (req, res) => {
-    res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8">
-    <title>Binance Luffy Pro</title>
+    res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Binance Luffy Pro</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         body { background: #0b0e11; color: #eaecef; font-family: sans-serif; }
         .up { color: #0ecb81; } .down { color: #f6465d; }
         .recovery-row { background-color: #4b0082 !important; color: #e0b0ff !important; font-weight: bold; }
-        .bg-card { background: #1e2329; }
+        .bg-card { background: #1e2329; border: 1px solid #30363d; }
+        label { display: block; font-size: 10px; color: #848e9c; text-transform: uppercase; margin-bottom: 2px; margin-left: 4px; }
+        input, select { background: #0b0e11; border: 1px solid #30363d; padding: 8px; border-radius: 4px; color: white; outline: none; width: 100%; }
     </style></head><body>
-    <div class="p-4">
-        <div id="setup" class="grid grid-cols-4 gap-2 mb-4 bg-card p-4 rounded">
-            <input id="balanceInp" type="number" placeholder="Vốn đầu" class="p-2 rounded bg-gray-800 text-white">
-            <input id="marginInp" type="text" placeholder="Margin (10% / 10)" class="p-2 rounded bg-gray-800 text-white">
-            <input id="tpInp" type="number" step="0.1" placeholder="TP %" class="p-2 rounded bg-gray-800 text-white">
-            <input id="slInp" type="number" step="0.1" placeholder="DCA %" class="p-2 rounded bg-gray-800 text-white">
-            <input id="volInp" type="number" step="0.1" placeholder="Min Vol" class="p-2 rounded bg-gray-800 text-white">
-            <select id="modeInp" class="p-2 rounded bg-gray-800 text-white">
-                <option value="FOLLOW">FOLLOW</option><option value="REVERSE">REVERSE</option><option value="LONG_ONLY">LONG ONLY</option><option value="SHORT_ONLY">SHORT ONLY</option>
-            </select>
-            <button onclick="start()" class="col-span-2 bg-yellow-500 text-black font-bold p-2 rounded">START ENGINE</button>
+    <div class="p-4 max-w-6xl mx-auto">
+        <div id="setup" class="grid grid-cols-4 gap-4 mb-6 bg-card p-4 rounded-lg">
+            <div><label>Số dư vốn ($)</label><input id="balanceInp" type="number"></div>
+            <div><label>Margin mỗi lệnh (10% / 10$)</label><input id="marginInp" type="text"></div>
+            <div><label>Chốt lời (TP %)</label><input id="tpInp" type="number" step="0.1"></div>
+            <div><label>Khoảng cách DCA (SL %)</label><input id="slInp" type="number" step="0.1"></div>
+            <div><label>Vol nến kích hoạt (%)</label><input id="volInp" type="number" step="0.1"></div>
+            <div><label>Chế độ đánh</label>
+                <select id="modeInp">
+                    <option value="FOLLOW">THUẬN (FOLLOW)</option><option value="REVERSE">NGƯỢC (REVERSE)</option><option value="LONG_ONLY">CHỈ LONG</option><option value="SHORT_ONLY">CHỈ SHORT</option>
+                </select>
+            </div>
+            <div class="col-span-2 flex items-end"><button onclick="start()" class="w-full bg-yellow-500 hover:bg-yellow-600 text-black font-bold p-2 rounded h-[42px]">BẮT ĐẦU BOT</button></div>
         </div>
-        <div class="grid grid-cols-4 gap-3 mb-4">
-            <div class="bg-card p-4 rounded border-l-4 border-yellow-500">
-                <div class="text-xs text-gray-400 uppercase">Số dư ví (Wallet)</div>
-                <div id="displayWallet" class="text-xl font-bold text-white">0.00</div>
-            </div>
-            <div class="bg-card p-4 rounded border-l-4 border-blue-500">
-                <div class="text-xs text-gray-400 uppercase">Khả dụng (Available)</div>
-                <div id="displayAvail" class="text-xl font-bold text-blue-400">0.00</div>
-            </div>
-            <div class="bg-card p-4 rounded border-l-4 border-green-500">
-                <div class="text-xs text-gray-400 uppercase">Tổng Win / PnL Win</div>
-                <div class="text-xl font-bold text-green-400"><span id="winCount">0</span> / <span id="winPnl">0.00</span></div>
-            </div>
-            <div class="bg-card p-4 rounded border-l-4 border-red-500">
-                <div class="text-xs text-gray-400 uppercase">UnPnL (Tạm tính)</div>
-                <div id="unPnl" class="text-xl font-bold">0.00</div>
-            </div>
+
+        <div class="grid grid-cols-4 gap-4 mb-6 text-center">
+            <div class="bg-card p-4 rounded-lg"><div class="text-[10px] text-gray-400 uppercase">Số dư ví (Wallet)</div><div id="displayWallet" class="text-2xl font-bold">0.00</div></div>
+            <div class="bg-card p-4 rounded-lg"><div class="text-[10px] text-gray-400 uppercase">Số dư khả dụng (Avail)</div><div id="displayAvail" class="text-2xl font-bold text-blue-400">0.00</div></div>
+            <div class="bg-card p-4 rounded-lg"><div class="text-[10px] text-gray-400 uppercase">Tổng Win / PnL Win</div><div class="text-2xl font-bold text-green-500"><span id="winCount">0</span> / <span id="winPnl">0.00</span></div></div>
+            <div class="bg-card p-4 rounded-lg"><div class="text-[10px] text-gray-400 uppercase">PnL Tạm tính (UnPnL)</div><div id="unPnl" class="text-2xl font-bold">0.00</div></div>
         </div>
-        <div class="grid grid-cols-1 gap-4">
-            <div class="bg-card p-4 rounded">
-                <h3 class="font-bold mb-2 uppercase text-purple-400">Vị thế đang mở</h3>
-                <table class="w-full text-left text-sm">
-                    <thead><tr class="border-b border-gray-700"><th>Pair</th><th>Type</th><th>DCA</th><th>Margin</th><th>Entry/Live</th><th>PnL Net</th></tr></thead>
-                    <tbody id="pendingBody"></tbody>
-                </table>
+
+        <div class="bg-card p-4 rounded-lg mb-6">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="font-bold uppercase text-purple-400 italic">Vị thế đang mở</h3>
+                <div id="noBalanceMsg" class="hidden text-red-500 font-bold animate-pulse">⚠️ BOT HẾT SỐ DƯ KHẢ DỤNG LÚC: <span id="outTime"></span></div>
             </div>
-            <div class="bg-card p-4 rounded">
-                <h3 class="font-bold mb-2 uppercase text-gray-400">Nhật ký (History)</h3>
-                <table class="w-full text-left text-xs">
-                    <thead><tr class="border-b border-gray-700"><th>Pair</th><th>DCA</th><th>Margin</th><th>PnL</th><th>Balance</th></tr></thead>
-                    <tbody id="historyBody"></tbody>
-                </table>
-            </div>
+            <table class="w-full text-left text-sm">
+                <thead><tr class="text-gray-500 border-b border-gray-800"><th>Cặp tiền</th><th>Loại</th><th>DCA</th><th>Margin</th><th>Entry / Live</th><th>PnL Net</th></tr></thead>
+                <tbody id="pendingBody"></tbody>
+            </table>
+        </div>
+
+        <div class="bg-card p-4 rounded-lg">
+            <h3 class="font-bold mb-4 uppercase text-gray-500 italic">Lịch sử giao dịch</h3>
+            <table class="w-full text-left text-xs">
+                <thead><tr class="text-gray-600 border-b border-gray-800"><th>Cặp tiền</th><th>Số DCA</th><th>Tổng Margin</th><th>PnL Cuối</th><th>Số dư sau lệnh</th></tr></thead>
+                <tbody id="historyBody"></tbody>
+            </table>
         </div>
     </div>
     <script>
-    let running = false;
     const saved = JSON.parse(localStorage.getItem('luffy_state') || '{}');
     if(saved.running) { 
-        running = true;
         document.getElementById('balanceInp').value = saved.initialBal;
         document.getElementById('marginInp').value = saved.marginVal;
         document.getElementById('tpInp').value = saved.tp;
@@ -209,12 +192,10 @@ app.get('/gui', (req, res) => {
         document.getElementById('modeInp').value = saved.mode;
         fetch(\`/api/config?tp=\${saved.tp}&sl=\${saved.sl}&vol=\${saved.vol}&mode=\${saved.mode}\`); 
     }
-
     function start() {
         const state = { running: true, initialBal: parseFloat(document.getElementById('balanceInp').value), marginVal: document.getElementById('marginInp').value, tp: document.getElementById('tpInp').value, sl: document.getElementById('slInp').value, vol: document.getElementById('volInp').value, mode: document.getElementById('modeInp').value };
         localStorage.setItem('luffy_state', JSON.stringify(state)); location.reload();
     }
-
     async function update() {
         const res = await fetch('/api/data'); const d = await res.json();
         const state = JSON.parse(localStorage.getItem('luffy_state') || '{}');
@@ -224,15 +205,14 @@ app.get('/gui', (req, res) => {
             let mBase = state.marginVal.includes('%') ? (walletBal * parseFloat(state.marginVal)/100) : parseFloat(state.marginVal);
             let totalM = mBase * (h.dcaCount >= 6 ? 6 : h.dcaCount + 1);
             let pnl = (totalM * (h.maxLev || 20) * (h.pnlPercent/100));
-            walletBal += pnl;
-            if (pnl > 0) { countWin++; sumWinPnl += pnl; }
-            const isRec = h.dcaCount >= 6;
-            return \`<tr class="\${isRec ? 'recovery-row' : ''}"><td>\${h.symbol}</td><td>\${h.dcaCount}</td><td>\${totalM.toFixed(1)}</td><td class="\${pnl>=0?'up':'down'}">\${pnl.toFixed(2)}</td><td>\${walletBal.toFixed(1)}</td></tr>\`;
+            walletBal += pnl; if (pnl > 0) { countWin++; sumWinPnl += pnl; }
+            return \`<tr class="\${h.dcaCount >= 6 ? 'recovery-row' : ''} border-b border-gray-800"><td class="py-2">\${h.symbol}</td><td>\${h.dcaCount}</td><td>\${totalM.toFixed(1)}</td><td class="\${pnl>=0?'up':'down'}">\${pnl.toFixed(2)}</td><td>\${walletBal.toFixed(1)}</td></tr>\`;
         }).reverse().join('');
 
         let pendingHTML = d.pending.map(h => {
             let lp = d.allPrices[h.symbol] || h.avgPrice;
             let mBase = state.marginVal.includes('%') ? (walletBal * parseFloat(state.marginVal)/100) : parseFloat(state.marginVal);
+            if(!h.initialMargin) h.initialMargin = mBase;
             let totalM = mBase * (h.dcaCount >= 6 ? 6 : h.dcaCount + 1);
             let roi = (h.type === 'LONG' ? (lp-h.avgPrice)/h.avgPrice : (h.avgPrice-lp)/h.avgPrice) * 100 * (h.maxLev || 20);
             let pnl = totalM * roi / 100;
@@ -242,21 +222,29 @@ app.get('/gui', (req, res) => {
                 pnl += (h.recoveryOrder.margin * (h.recoveryOrder.type === 'LONG' ? rDiff : -rDiff) / 100 * h.recoveryOrder.lev);
             }
             unPnlTotal += pnl; usedMarginTotal += totalM;
-            const isRec = h.dcaCount >= 6;
-            return \`<tr class="\${isRec ? 'recovery-row' : ''}"><td>\${h.symbol}</td><td>\${h.type}</td><td>\${h.dcaCount}</td><td>\${totalM.toFixed(1)}</td><td>\${h.avgPrice.toFixed(4)}/\${lp.toFixed(4)}</td><td class="\${pnl>=0?'up':'down'}">\${pnl.toFixed(2)}</td></tr>\`;
+            return \`<tr class="\${h.dcaCount >= 6 ? 'recovery-row' : ''} border-b border-gray-800"><td class="py-3">\${h.symbol}</td><td>\${h.type}</td><td>\${h.dcaCount}</td><td>\${totalM.toFixed(1)}</td><td>\${h.avgPrice.toFixed(4)} / \${lp.toFixed(4)}</td><td class="\${pnl>=0?'up':'down'}">\${pnl.toFixed(2)}</td></tr>\`;
         }).join('');
 
+        let avail = walletBal - usedMarginTotal + (unPnlTotal < 0 ? unPnlTotal : 0);
         document.getElementById('displayWallet').innerText = walletBal.toFixed(2);
-        document.getElementById('displayAvail').innerText = (walletBal - usedMarginTotal + (unPnlTotal < 0 ? unPnlTotal : 0)).toFixed(2);
+        document.getElementById('displayAvail').innerText = avail.toFixed(2);
         document.getElementById('winCount').innerText = countWin;
         document.getElementById('winPnl').innerText = sumWinPnl.toFixed(2);
-        document.getElementById('unPnl').innerText = (unPnlTotal >= 0 ? '+' : '') + unPnlTotal.toFixed(2);
-        document.getElementById('unPnl').className = 'text-xl font-bold ' + (unPnlTotal >= 0 ? 'up' : 'down');
+        document.getElementById('unPnl').innerText = unPnlTotal.toFixed(2);
+        document.getElementById('unPnl').className = 'text-2xl font-bold ' + (unPnlTotal >= 0 ? 'up' : 'down');
         document.getElementById('historyBody').innerHTML = histHTML;
         document.getElementById('pendingBody').innerHTML = pendingHTML;
+
+        const msg = document.getElementById('noBalanceMsg');
+        if (avail <= 0 && d.pending.length > 0) {
+            if (msg.classList.contains('hidden')) {
+                msg.classList.remove('hidden');
+                document.getElementById('outTime').innerText = new Date().toLocaleTimeString();
+            }
+        } else { msg.classList.add('hidden'); }
     }
     setInterval(update, 1000);
     </script></body></html>`);
 });
 
-app.listen(PORT, '0.0.0.0', () => { initWS(); console.log(`Running on http://localhost:${PORT}/gui`); });
+app.listen(PORT, '0.0.0.0', () => { initWS(); console.log(`Bot running on port ${PORT}`); });
