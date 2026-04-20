@@ -2,7 +2,8 @@ const PORT = 7001;
 const HISTORY_FILE = './history_db.json';
 const LEVERAGE_FILE = './leverage_cache.json';
 const CONFIG_FILE = './bot_config.json';
-const STATUS_LOG_FILE = './status_logs.json';
+const COOLDOWN_MINUTES = 15; 
+const MAX_HOLD_MINUTES = 555555; 
 
 import WebSocket from 'ws';
 import express from 'express';
@@ -12,16 +13,19 @@ const app = express();
 let coinData = {}; 
 let historyMap = new Map(); 
 let symbolMaxLeverage = {}; 
-let statusLogs = []; 
+let lastTradeClosed = {}; 
 
 let botConfig = {
-    initialBal: 1000, marginVal: "10%", tp: 0.5, sl: 10.0, vol: 6.5, mode: 'FOLLOW', running: false,
-    isPausedByMargin: false
+    initialBal: 1000,
+    marginVal: "10%",
+    tp: 0.5,
+    sl: 10.0,
+    vol: 6.5,
+    mode: 'FOLLOW',
+    running: false
 };
 
-// --- LOAD DATA ---
 if (fs.existsSync(CONFIG_FILE)) { try { botConfig = { ...botConfig, ...JSON.parse(fs.readFileSync(CONFIG_FILE)) }; } catch(e){} }
-if (fs.existsSync(STATUS_LOG_FILE)) { try { statusLogs = JSON.parse(fs.readFileSync(STATUS_LOG_FILE)); } catch(e){} }
 if (fs.existsSync(LEVERAGE_FILE)) { try { symbolMaxLeverage = JSON.parse(fs.readFileSync(LEVERAGE_FILE)); } catch(e){} }
 if (fs.existsSync(HISTORY_FILE)) {
     try {
@@ -30,49 +34,48 @@ if (fs.existsSync(HISTORY_FILE)) {
     } catch (e) {}
 }
 
-function saveStatusLog(type, msg) {
-    statusLogs.unshift({ time: Date.now(), type, msg });
-    if (statusLogs.length > 50) statusLogs.pop();
-    fs.writeFileSync(STATUS_LOG_FILE, JSON.stringify(statusLogs));
-}
-
-function calculateCurrentState() {
+// --- LOGIC TÍNH TOÁN CORE ---
+function calculateState() {
     let walletBal = botConfig.initialBal;
     const all = Array.from(historyMap.values());
     const hist = all.filter(h => h.status !== 'PENDING').sort((a,b) => a.endTime - b.endTime);
     const pending = all.filter(h => h.status === 'PENDING');
 
+    // 1. Tính Wallet Balance thực tế từ lịch sử
     hist.forEach(h => {
-        let mBase = botConfig.marginVal.includes('%') ? (walletBal * parseFloat(botConfig.marginVal) / 100) : parseFloat(botConfig.marginVal);
+        let mBase = botConfig.marginVal.includes('%') ? (h.walletAtStart * parseFloat(botConfig.marginVal) / 100) : parseFloat(botConfig.marginVal);
         let tM = mBase * (h.dcaCount + 1);
         let pnl = (tM * (h.maxLev || 20) * (h.pnlPercent/100)) - (tM * (h.maxLev || 20) * 0.001);
         walletBal += pnl;
     });
 
-    let usedMargin = 0; let unPnlAm = 0; let unPnlTotal = 0;
+    // 2. Tính Margin và PnL đang treo
+    let usedMargin = 0;
+    let unPnlAm = 0;
+    let totalUnPnl = 0;
+
     pending.forEach(h => {
         let lp = coinData[h.symbol]?.live?.currentPrice || h.avgPrice;
-        let mBase = botConfig.marginVal.includes('%') ? (walletBal * parseFloat(botConfig.marginVal) / 100) : parseFloat(botConfig.marginVal);
+        let mBase = botConfig.marginVal.includes('%') ? (h.walletAtStart * parseFloat(botConfig.marginVal) / 100) : parseFloat(botConfig.marginVal);
         let tM = mBase * (h.dcaCount + 1);
         let roi = (h.type === 'LONG' ? (lp - h.avgPrice) / h.avgPrice : (h.avgPrice - lp) / h.avgPrice) * 100 * (h.maxLev || 20);
         let pnl = (tM * roi / 100);
+        
         usedMargin += tM;
-        unPnlTotal += pnl;
+        totalUnPnl += pnl;
         if (pnl < 0) unPnlAm += Math.abs(pnl);
     });
 
-    // Avail = Wallet - Margin đang giữ - PnL đang âm
+    // Avail = Ví - Margin đang giữ - PnL đang lỗ
     let avail = walletBal - usedMargin - unPnlAm;
-    let ratio = usedMargin > 0 ? (usedMargin / walletBal) * 100 : 0;
+    return { walletBal, avail, equity: walletBal + totalUnPnl, usedMargin };
+}
 
-    if (!botConfig.isPausedByMargin && ratio > 50) {
-        botConfig.isPausedByMargin = true;
-        saveStatusLog('STOP', `Margin ${ratio.toFixed(1)}% > 50%. Tạm dừng mở lệnh.`);
-    } else if (botConfig.isPausedByMargin && ratio < 40) {
-        botConfig.isPausedByMargin = false;
-        saveStatusLog('START', `Margin ${ratio.toFixed(1)}% < 40%. Tiếp tục chạy.`);
-    }
-    return { walletBal, avail, equity: walletBal + unPnlTotal, ratio };
+function calculateChange(pArr, min) {
+    if (!pArr || pArr.length < 2) return 0;
+    const now = Date.now();
+    let start = pArr.find(i => i.t >= (now - min * 60000)) || pArr[0]; 
+    return parseFloat((((pArr[pArr.length - 1].p - start.p) / start.p) * 100).toFixed(2));
 }
 
 function initWS() {
@@ -81,7 +84,7 @@ function initWS() {
         if (!botConfig.running) return;
         const tickers = JSON.parse(data);
         const now = Date.now();
-        const allPending = Array.from(historyMap.values()).filter(h => h.status === 'PENDING');
+        const allPositions = Array.from(historyMap.values()).filter(h => h.status === 'PENDING');
 
         tickers.forEach(t => {
             const s = t.s, p = parseFloat(t.c);
@@ -92,39 +95,35 @@ function initWS() {
             const c1 = calculateChange(coinData[s].prices, 1), c5 = calculateChange(coinData[s].prices, 5), c15 = calculateChange(coinData[s].prices, 15);
             coinData[s].live = { c1, c5, c15, currentPrice: p };
             
-            const pending = allPending.find(h => h.symbol === s);
+            const pending = allPositions.find(h => h.symbol === s);
             if (pending) {
                 const diffAvg = ((p - pending.avgPrice) / pending.avgPrice) * 100;
                 const roi = (pending.type === 'LONG' ? diffAvg : -diffAvg) * (pending.maxLev || 20);
                 if (!pending.maxNegativeRoi || roi < pending.maxNegativeRoi) pending.maxNegativeRoi = roi;
-                
-                const win = pending.type === 'LONG' ? diffAvg >= pending.tpTarget : diffAvg <= -pending.tpTarget; 
-                if (win) {
+
+                if ((pending.type === 'LONG' ? diffAvg >= pending.tpTarget : diffAvg <= -pending.tpTarget) || (now - pending.startTime) >= (MAX_HOLD_MINUTES * 60000)) {
                     pending.status = 'WIN'; pending.finalPrice = p; pending.endTime = now;
                     pending.pnlPercent = (pending.type === 'LONG' ? diffAvg : -diffAvg);
-                    fs.writeFileSync(HISTORY_FILE, JSON.stringify(Array.from(historyMap.values()))); 
+                    lastTradeClosed[s] = now;
+                    fs.writeFileSync(HISTORY_FILE, JSON.stringify(Array.from(historyMap.values())));
                 }
-            } else if (!botConfig.isPausedByMargin && Math.max(Math.abs(c1), Math.abs(c5), Math.abs(c15)) >= botConfig.vol) {
-                const state = calculateCurrentState();
-                if (state.avail > 0) {
+            } else if (Math.max(Math.abs(c1), Math.abs(c5), Math.abs(c15)) >= botConfig.vol && !(lastTradeClosed[s] && (now - lastTradeClosed[s] < COOLDOWN_MINUTES * 60000))) {
+                const state = calculateState();
+                // CHỈ MỞ LỆNH NẾU AVAIL > 0
+                if (state.avail > (state.walletBal * 0.01)) { 
                     let type = (c1+c5+c15) >= 0 ? 'LONG' : 'SHORT';
-                    if(botConfig.mode === 'REVERSE') type = type === 'LONG' ? 'SHORT' : 'LONG';
+                    if (botConfig.mode === 'REVERSE') type = type === 'LONG' ? 'SHORT' : 'LONG';
+                    
                     historyMap.set(`${s}_${now}`, { 
-                        symbol: s, startTime: now, snapPrice: p, avgPrice: p, type: type, status: 'PENDING', 
-                        maxLev: symbolMaxLeverage[s] || 20, tpTarget: botConfig.tp, slTarget: botConfig.sl, 
-                        snapVol: {c1,c5,c15}, dcaCount: 0, maxNegativeRoi: 0 
+                        symbol: s, startTime: now, snapPrice: p, avgPrice: p, type, status: 'PENDING',
+                        maxLev: symbolMaxLeverage[s] || 20, tpTarget: botConfig.tp, slTarget: botConfig.sl,
+                        snapVol: { c1, c5, c15 }, maxNegativeRoi: 0, dcaCount: 0,
+                        walletAtStart: state.walletBal, availAtStart: state.avail // Lưu lại để tính margin chính xác
                     });
                 }
             }
         });
     });
-}
-
-function calculateChange(pArr, min) {
-    if (!pArr || pArr.length < 2) return 0;
-    const now = Date.now();
-    let start = pArr.find(i => i.t >= (now - min * 60000)) || pArr[0]; 
-    return parseFloat((((pArr[pArr.length - 1].p - start.p) / start.p) * 100).toFixed(2));
 }
 
 app.get('/api/config', (req, res) => {
@@ -134,12 +133,12 @@ app.get('/api/config', (req, res) => {
 });
 
 app.get('/api/data', (req, res) => {
-    const state = calculateCurrentState();
+    const state = calculateState();
     res.json({ 
         allPrices: Object.fromEntries(Object.entries(coinData).map(([s, v]) => [s, v.live.currentPrice])),
         pending: Array.from(historyMap.values()).filter(h => h.status === 'PENDING'),
         history: Array.from(historyMap.values()).filter(h => h.status !== 'PENDING'),
-        statusLogs, botConfig, state
+        botConfig, state
     });
 });
 
@@ -151,37 +150,37 @@ app.get('/gui', (req, res) => {
         body { background: #0b0e11; color: #eaecef; font-family: 'IBM Plex Sans'; margin: 0; }
         .up { color: #0ecb81; } .down { color: #f6465d; } .bg-card { background: #1e2329; border: 1px solid #30363d; }
         input, select { background: #0b0e11; border: 1px solid #30363d; color: white; padding: 6px; border-radius: 4px; font-size: 12px; }
-        .recovery-row { background-color: rgba(75, 0, 130, 0.3) !important; }
         .scrollbar-hide::-webkit-scrollbar { display: none; }
     </style></head><body>
     
     <div class="p-4 bg-[#0b0e11] sticky top-0 z-50 border-b border-zinc-800">
         <div id="setup" class="grid grid-cols-2 gap-3 mb-4 bg-card p-3 rounded-lg">
-            <div><label class="text-[10px] text-gray-500 font-bold ml-1">VỐN ($)</label><input id="balanceInp" type="number" class="w-full text-yellow-500 font-bold outline-none"></div>
-            <div><label class="text-[10px] text-gray-500 font-bold ml-1">MARGIN (%)</label><input id="marginInp" type="text" class="w-full text-yellow-500 font-bold outline-none"></div>
+            <div><label class="text-[10px] text-gray-500 font-bold">VỐN KHỞI TẠO ($)</label><input id="balanceInp" type="number" class="w-full text-yellow-500 font-bold outline-none"></div>
+            <div><label class="text-[10px] text-gray-500 font-bold">MARGIN (DÙNG % AVAIL)</label><input id="marginInp" type="text" class="w-full text-yellow-500 font-bold outline-none"></div>
             <div class="col-span-2 grid grid-cols-4 gap-2 border-t border-zinc-800 pt-2 mt-1">
-                <div><label class="text-[10px] text-gray-500 ml-1">TP (%)</label><input id="tpInp" type="number" step="0.1" class="w-full"></div>
-                <div><label class="text-[10px] text-gray-500 ml-1">DCA (%)</label><input id="slInp" type="number" step="0.1" class="w-full"></div>
-                <div><label class="text-[10px] text-gray-500 ml-1">VOL (%)</label><input id="volInp" type="number" step="0.1" class="w-full"></div>
-                <div><label class="text-[10px] text-gray-500 ml-1">MODE</label><select id="modeInp" class="w-full"><option value="FOLLOW">FOLLOW</option><option value="REVERSE">REVERSE</option></select></div>
+                <div><label class="text-[10px] text-gray-500">TP (%)</label><input id="tpInp" type="number" step="0.1" class="w-full"></div>
+                <div><label class="text-[10px] text-gray-500">DCA (%)</label><input id="slInp" type="number" step="0.1" class="w-full"></div>
+                <div><label class="text-[10px] text-gray-500">VOL (%)</label><input id="volInp" type="number" step="0.1" class="w-full"></div>
+                <div><label class="text-[10px] text-gray-500">MODE</label><select id="modeInp" class="w-full"><option value="FOLLOW">FOLLOW</option><option value="REVERSE">REVERSE</option></select></div>
             </div>
-            <button onclick="save(true)" class="col-span-2 bg-[#fcd535] text-black font-bold py-2 rounded uppercase text-xs mt-1">START BOT</button>
+            <button onclick="save(true)" class="col-span-2 bg-[#fcd535] text-black font-bold py-2 rounded uppercase text-xs mt-1">START ENGINE</button>
         </div>
 
         <div id="active" class="hidden flex justify-between items-center mb-2">
-            <div class="font-bold italic text-xl">BINANCE <span class="text-[#fcd535]">LUFFY PRO</span></div>
-            <div id="configInfo" class="text-[10px] bg-zinc-800 px-3 py-1 rounded-full text-gray-300 font-bold"></div>
-            <button onclick="save(false)" class="text-[#fcd535] font-bold border border-[#fcd535] px-3 py-1 rounded text-[10px] uppercase">STOP</button>
+            <div>
+                <div class="font-bold italic text-xl">BINANCE <span class="text-[#fcd535]">LUFFY PRO</span></div>
+                <div id="configDisplay" class="text-[10px] text-gray-400 font-bold mt-1 uppercase tracking-tighter"></div>
+            </div>
+            <button onclick="save(false)" class="text-[#fcd535] font-bold border border-[#fcd535] px-3 py-1 rounded text-[10px] uppercase">STOP ENGINE</button>
         </div>
 
         <div class="flex justify-between items-end mb-1">
             <div>
-                <div class="text-[10px] text-gray-500 font-bold uppercase tracking-widest">Equity (Balance + UnPnL)</div>
+                <div class="text-[10px] text-gray-500 font-bold uppercase tracking-widest">Equity (Wallet + UnPnL)</div>
                 <div id="displayBal" class="text-4xl font-bold tracking-tighter">0.00</div>
-                <div id="displayAvail" class="text-blue-400 text-[11px] font-bold uppercase mt-1"></div>
+                <div id="displayAvail" class="text-blue-400 text-[11px] font-bold uppercase mt-1 tracking-wider"></div>
             </div>
             <div class="text-right">
-                <div id="botStatus" class="text-[9px] font-bold px-2 py-0.5 rounded mb-1 inline-block">RUNNING</div>
                 <div class="text-[10px] text-gray-500 font-bold uppercase">PnL Live</div>
                 <div id="unPnl" class="text-2xl font-bold">0.00</div>
             </div>
@@ -189,8 +188,8 @@ app.get('/gui', (req, res) => {
     </div>
 
     <div class="px-4 mt-4">
-        <div class="bg-card p-4 rounded-xl h-[200px] border border-zinc-800 shadow-lg relative">
-            <div class="absolute top-2 right-4 flex gap-4 text-[10px] font-bold">
+        <div class="bg-card p-4 rounded-xl h-[220px] border border-zinc-800 shadow-lg relative">
+            <div class="absolute top-2 right-4 flex gap-4 text-[10px] font-bold uppercase">
                 <span class="flex items-center"><span class="w-2 h-2 bg-[#fcd535] rounded-full mr-1"></span> Wallet</span>
                 <span class="flex items-center"><span class="w-2 h-2 bg-blue-500 rounded-full mr-1"></span> Avail</span>
             </div>
@@ -199,59 +198,28 @@ app.get('/gui', (req, res) => {
     </div>
 
     <div class="px-4 mt-4">
-        <div class="bg-card p-4 rounded-xl border border-zinc-800">
-            <div class="text-[11px] font-bold mb-2 uppercase italic flex justify-between items-center">
-                <span>⚠️ Lịch sử dừng bot (Margin 50/40)</span>
-                <span id="marginPercent" class="text-yellow-500 font-black">MARGIN: 0%</span>
-            </div>
-            <div id="logBody" class="text-[9px] space-y-1 h-20 overflow-y-auto scrollbar-hide border-t border-zinc-800 pt-2"></div>
-        </div>
-    </div>
-
-    <div class="px-4 mt-4">
-        <div class="bg-card p-4 rounded-xl border border-zinc-800">
-            <div class="text-[11px] font-bold mb-3 uppercase italic flex items-center">
+        <div class="bg-card p-4 rounded-xl border border-zinc-800 shadow-sm">
+            <div class="text-[11px] font-bold mb-3 uppercase italic text-white flex items-center">
                 <span class="w-1 h-3 bg-[#fcd535] mr-2"></span> Vị thế đang mở
             </div>
-            <div class="overflow-x-auto">
-                <table class="w-full text-[10px] text-left">
-                    <thead class="text-gray-500 border-b border-zinc-800 uppercase">
-                        <tr>
-                            <th>Pair/SnapVol</th>
-                            <th>DCA</th>
-                            <th>Margin</th>
-                            <th>Snap/Live</th>
-                            <th>Avg Price</th>
-                            <th class="text-right">PnL (ROI%)</th>
-                        </tr>
-                    </thead>
-                    <tbody id="pendingBody"></tbody>
-                </table>
-            </div>
+            <div class="overflow-x-auto"><table class="w-full text-[10px] text-left">
+                <thead class="text-gray-500 border-b border-zinc-800 uppercase">
+                    <tr><th>Pair/SnapVol</th><th>DCA</th><th>Margin</th><th>Snap/Live</th><th>Avg Price</th><th class="text-right">PnL (ROI%)</th></tr>
+                </thead>
+                <tbody id="pendingBody"></tbody>
+            </table></div>
         </div>
     </div>
 
     <div class="px-4 mt-4 mb-10">
-        <div class="bg-card p-4 rounded-xl border border-zinc-800">
-            <div class="text-[11px] font-bold mb-3 uppercase italic text-gray-400">
-                Nhật ký giao dịch
-            </div>
-            <div class="overflow-x-auto">
-                <table class="w-full text-[9px] text-left">
-                    <thead class="text-gray-500 border-b border-zinc-800 uppercase">
-                        <tr>
-                            <th>Time In-Out</th>
-                            <th>Pair</th>
-                            <th>DCA</th>
-                            <th>Margin</th>
-                            <th>MaxDD</th>
-                            <th>PnL Net</th>
-                            <th class="text-right">Wallet | Avail</th>
-                        </tr>
-                    </thead>
-                    <tbody id="historyBody"></tbody>
-                </table>
-            </div>
+        <div class="bg-card p-4 rounded-xl border border-zinc-800 shadow-sm">
+            <div class="text-[11px] font-bold mb-3 uppercase italic text-gray-400">Nhật ký giao dịch</div>
+            <div class="overflow-x-auto"><table class="w-full text-[9px] text-left">
+                <thead class="text-gray-500 border-b border-zinc-800 uppercase">
+                    <tr><th>Time In-Out</th><th>Pair</th><th>DCA</th><th>Margin</th><th>MaxDD</th><th>PnL Net</th><th class="text-right">Wallet | Avail</th></tr>
+                </thead>
+                <tbody id="historyBody"></tbody>
+            </table></div>
         </div>
     </div>
 
@@ -270,31 +238,24 @@ app.get('/gui', (req, res) => {
                 document.getElementById('balanceInp').value = config.initialBal; document.getElementById('marginInp').value = config.marginVal;
                 document.getElementById('tpInp').value = config.tp; document.getElementById('slInp').value = config.sl;
                 document.getElementById('volInp').value = config.vol; document.getElementById('modeInp').value = config.mode;
-                document.getElementById('configInfo').innerText = \`TP: \${config.tp}% | DCA: \${config.sl}% | VOL: \${config.vol}% | MODE: \${config.mode}\`;
+                document.getElementById('configDisplay').innerText = \`TP: \${config.tp}% | DCA: \${config.sl}% | VOL: \${config.vol}% | MODE: \${config.mode} | MARGIN: \${config.marginVal}\`;
                 if(config.running){ document.getElementById('setup').classList.add('hidden'); document.getElementById('active').classList.remove('hidden'); }
                 isFirst = false;
             }
 
             document.getElementById('displayBal').innerText = st.equity.toFixed(2);
-            document.getElementById('displayAvail').innerText = 'Avail: ' + st.avail.toFixed(2) + ' USDT';
+            document.getElementById('displayAvail').innerText = 'Số dư khả dụng (Avail): ' + st.avail.toFixed(2) + ' USDT';
             document.getElementById('unPnl').innerText = (st.equity - st.walletBal).toFixed(2);
             document.getElementById('unPnl').className = 'text-2xl font-bold ' + (st.equity >= st.walletBal ? 'up':'down');
-            document.getElementById('marginPercent').innerText = 'MARGIN: ' + st.ratio.toFixed(1) + '%';
-            
-            const bSt = document.getElementById('botStatus');
-            if(config.isPausedByMargin){ bSt.innerText = 'PAUSED (>50%)'; bSt.className = 'bg-red-900 text-red-200 px-2 py-0.5 rounded'; }
-            else { bSt.innerText = 'RUNNING'; bSt.className = 'bg-green-900 text-green-200 px-2 py-0.5 rounded'; }
-
-            document.getElementById('logBody').innerHTML = d.statusLogs.map(l => \`<div class="flex justify-between border-b border-zinc-800 pb-1"><span class="\${l.type==='STOP'?'text-red-400':'text-green-400'}">[\${l.type}] \${new Date(l.time).toLocaleTimeString()}</span><span class="text-gray-500">\${l.msg}</span></div>\`).join('');
 
             let rB = config.initialBal, cW = [rB], cA = [rB], cL = ['Start'];
-            let sortedHist = [...d.history].sort((a,b)=>a.endTime-b.endTime);
-
-            document.getElementById('historyBody').innerHTML = sortedHist.map(h => {
-                let m = config.marginVal.includes('%') ? (rB * parseFloat(config.marginVal)/100) : parseFloat(config.marginVal);
+            let histHTML = d.history.sort((a,b)=>a.endTime-b.endTime).map(h => {
+                let m = config.marginVal.includes('%') ? (h.walletAtStart * parseFloat(config.marginVal)/100) : parseFloat(config.marginVal);
                 let tM = m * (h.dcaCount + 1);
                 let pnl = (tM * (h.maxLev||20) * (h.pnlPercent/100)) - (tM * (h.maxLev||20) * 0.001);
-                rB += pnl; cW.push(rB); cA.push(rB); cL.push("");
+                rB += pnl; 
+                // Avail lịch sử: tạm tính = wallet (vì lúc đó ko có lệnh treo khác)
+                cW.push(rB); cA.push(rB); cL.push("");
                 return \`<tr class="border-b border-zinc-800/30">
                     <td class="text-[8px]">\${new Date(h.startTime).toLocaleTimeString()}<br>\${new Date(h.endTime).toLocaleTimeString()}</td>
                     <td><b>\${h.symbol}</b> <span class="\${h.type==='LONG'?'up':'down'}">\${h.type}</span></td>
@@ -304,10 +265,11 @@ app.get('/gui', (req, res) => {
                     <td class="text-right font-bold text-white">\${rB.toFixed(1)} | <span class="text-blue-400">\${rB.toFixed(1)}</span></td>
                 </tr>\`;
             }).reverse().join('');
+            document.getElementById('historyBody').innerHTML = histHTML;
 
             document.getElementById('pendingBody').innerHTML = d.pending.map(h => {
                 let lp = d.allPrices[h.symbol] || h.avgPrice;
-                let m = config.marginVal.includes('%') ? (st.walletBal * parseFloat(config.marginVal)/100) : parseFloat(config.marginVal);
+                let m = config.marginVal.includes('%') ? (h.walletAtStart * parseFloat(config.marginVal)/100) : parseFloat(config.marginVal);
                 let tM = m * (h.dcaCount + 1);
                 let roi = (h.type==='LONG'?(lp-h.avgPrice)/h.avgPrice:(h.avgPrice-lp)/h.avgPrice)*100*(h.maxLev||20);
                 let sv = h.snapVol || {c1:0,c5:0,c15:0};
@@ -320,7 +282,14 @@ app.get('/gui', (req, res) => {
                 </tr>\`;
             }).join('');
 
-            if(myChart){ myChart.data.labels = cL; myChart.data.datasets[0].data = cW; myChart.data.datasets[1].data = cA; myChart.update('none'); }
+            if(myChart){ 
+                // Điểm cuối cùng là realtime
+                cW.push(st.walletBal); cA.push(st.avail); cL.push("Now");
+                myChart.data.labels = cL; 
+                myChart.data.datasets[0].data = cW; 
+                myChart.data.datasets[1].data = cA; 
+                myChart.update('none'); 
+            }
         } catch(e) {}
     }
 
@@ -331,8 +300,8 @@ app.get('/gui', (req, res) => {
     ]}, options: { maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { display: false }, y: { grid: { color: '#30363d' } } } } });
     
     setInterval(update, 1000);
-    initWS(); 
+    initWS();
     </script></body></html>`);
 });
 
-app.listen(PORT, '0.0.0.0', () => console.log(`http://localhost:${PORT}/gui`));
+app.listen(PORT, '0.0.0.0', () => console.log(`Bot running: http://localhost:${PORT}/gui`));
