@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>LUFFY v18.3</title>
+    <title>LUFFY v19.3</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         body { background: #000; color: #eee; font-family: monospace; font-size: 11px; }
@@ -16,7 +16,7 @@
 <body class="p-2 space-y-2">
     <div class="card space-y-2">
         <div class="grid grid-cols-3 gap-2">
-            <div><p class="text-[9px] text-zinc-500 uppercase">Vốn $</p><input id="invValue" type="number"></div>
+            <div><p class="text-[9px] text-zinc-500 uppercase">Vốn ($ hoặc %)</p><input id="invValue" type="text"></div>
             <div><p class="text-[9px] text-zinc-500 uppercase">Max Pos</p><input id="maxPositions" type="number"></div>
             <div><p class="text-[9px] text-zinc-500 uppercase">Vol %</p><input id="minVol" type="number"></div>
         </div>
@@ -32,45 +32,27 @@
         <div class="text-[10px] text-red-500 mb-2 font-bold uppercase">🔒 Blacklist (Đếm ngược)</div>
         <div id="blacklist-display" class="flex flex-wrap gap-2"></div>
     </div>
-
     <div class="card">
         <div class="text-[10px] text-blue-500 mb-2 font-bold uppercase">🔥 Biến động (1m | 5m | 15m)</div>
         <div id="candidates-list" class="space-y-1"></div>
     </div>
-
     <div id="logs" class="card h-[70px] overflow-y-auto text-[9px] text-zinc-500"></div>
     <div id="pos-list" class="space-y-2"></div>
 
     <script>
-        function formatTime(ms) {
-            const s = Math.ceil(ms / 1000);
-            return `${Math.floor(s/60)}:${(s%60).toString().padStart(2,'0')}`;
-        }
+        // ... Các hàm formatTime, sync, toggle giữ nguyên ...
+        function formatTime(ms) { const s = Math.ceil(ms / 1000); return `${Math.floor(s/60)}:${(s%60).toString().padStart(2,'0')}`; }
 
         async function sync() {
             try {
                 const r = await fetch('/api/status'); const d = await r.json();
                 const now = Date.now();
-
                 const blDiv = document.getElementById('blacklist-display');
                 const bl = Object.entries(d.status.blackList).filter(([_, exp]) => exp > now);
                 blDiv.innerHTML = bl.map(([sym, exp]) => `<div class="bl-tag">${sym.replace('USDT','')} <b>${formatTime(exp-now)}</b></div>`).join('') || '<span class="text-zinc-700">Trống</span>';
-
                 const top = d.status.candidatesList.sort((a,b) => Math.abs(b.c1) - Math.abs(a.c1)).slice(0, 5);
-                document.getElementById('candidates-list').innerHTML = top.map(c => `
-                    <div class="flex justify-between border-b border-zinc-900 pb-1">
-                        <span class="font-bold text-blue-400 w-12">${c.symbol.replace('USDT','')}</span>
-                        <span class="${c.c1>=0?'up':'down'}">1m:${c.c1}%</span>
-                        <span class="${c.c5>=0?'up':'down'}">5m:${c.c5}%</span>
-                        <span class="${c.c15>=0?'up':'down'}">15m:${c.c15}%</span>
-                    </div>`).join('');
-
-                document.getElementById('pos-list').innerHTML = d.activePositions.map(p => `
-                    <div class="card border-l-4 ${p.side==='LONG'?'border-l-green-500':'border-l-red-500'} flex justify-between items-center">
-                        <div><b>${p.symbol}</b> <span class="text-zinc-500 text-[9px]">${p.side}</span></div>
-                        <div class="text-right"><div class="font-bold up">${p.markPrice}</div><div class="${parseFloat(p.pnl)>=0?'up':'down'} font-bold">${p.pnl}$</div></div>
-                    </div>`).join('');
-
+                document.getElementById('candidates-list').innerHTML = top.map(c => `<div class="flex justify-between border-b border-zinc-900 pb-1"><span class="font-bold text-blue-400 w-12">${c.symbol.replace('USDT','')}</span><span class="${c.c1>=0?'up':'down'}">1m:${c.c1}%</span><span class="${c.c5>=0?'up':'down'}">5m:${c.c5}%</span><span class="${c.c15>=0?'up':'down'}">15m:${c.c15}%</span></div>`).join('');
+                document.getElementById('pos-list').innerHTML = d.activePositions.map(p => `<div class="card border-l-4 ${p.side==='LONG'?'border-l-green-500':'border-l-red-500'} flex justify-between items-center"><div><b>${p.symbol}</b> <span class="text-zinc-500 text-[9px]">${p.side}</span></div><div class="text-right"><div class="font-bold up">${p.markPrice}</div><div class="${parseFloat(p.pnl)>=0?'up':'down'} font-bold">${p.pnl}$</div></div></div>`).join('');
                 document.getElementById('logs').innerHTML = d.status.botLogs.map(l => `<div>[${l.time}] ${l.msg}</div>`).join('');
                 const btn = document.getElementById('runBtn');
                 btn.innerText = d.botSettings.isRunning ? "STOP BOT" : "START BOT";
@@ -84,16 +66,17 @@
             sync();
         }
 
+        // ĐÃ SỬA: Bỏ parseFloat ở invValue để giữ nguyên chuỗi "2%"
         async function save() {
             const body = { 
-                invValue: parseFloat(document.getElementById('invValue').value),
+                invValue: document.getElementById('invValue').value, // Giữ nguyên dạng text
                 maxPositions: parseInt(document.getElementById('maxPositions').value),
                 minVol: parseFloat(document.getElementById('minVol').value),
                 posTP: parseFloat(document.getElementById('posTP').value),
                 posSL: parseFloat(document.getElementById('posSL').value)
             };
             await fetch('/api/settings', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body) });
-            alert("Đã lưu!");
+            alert("Đã lưu cấu hình!");
         }
 
         setInterval(sync, 1000);
