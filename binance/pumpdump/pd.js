@@ -111,7 +111,8 @@ async function openPosition(symbol, isDCA = false, candidateData = null) {
                 addBotLog(`🚀 OPEN | ${symbol} | Entry:${avgEntry} | TP:${sync.tp} | SL:${sync.sl} | Vol:${vol}`, "success");
             }
             
-            botActivePositions.set(posKey, { symbol, side: 'SHORT', entryPrice: avgEntry, qty: totalQty, tp: parseFloat(sync.tp), sl: parseFloat(sync.sl), margin, dcaCount, baseInv: isDCA ? currentPos.baseInv : baseMargin, lastUpdate: Date.now(), isProcessing: false });
+            // QUAN TRỌNG: Ép kiểu Number cho tp và sl để so sánh chính xác
+            botActivePositions.set(posKey, { symbol, side: 'SHORT', entryPrice: avgEntry, qty: totalQty, tp: Number(sync.tp), sl: Number(sync.sl), margin, dcaCount, baseInv: isDCA ? currentPos.baseInv : baseMargin, lastUpdate: Date.now(), isProcessing: false });
         }
     } catch (e) {
         if (lastErrorLog !== e.message) { addBotLog(`❌ Lỗi ${symbol}: ${e.message}`, "error"); lastErrorLog = e.message; }
@@ -120,63 +121,78 @@ async function openPosition(symbol, isDCA = false, candidateData = null) {
     }
 }
 
+// HÀM THEO DÕI GIÁ VÀ XỬ LÝ TP/SL TỪNG GIÂY
+async function priceMonitorLoop() {
+    if (!status.isReady) { setTimeout(priceMonitorLoop, 1000); return; }
+    try {
+        const posRisk = await binancePrivate('/fapi/v2/positionRisk');
+        const now = Date.now();
+
+        for (let [key, botPos] of botActivePositions) {
+            if (botPos.isProcessing) continue;
+            const realPos = posRisk.find(p => p.symbol === botPos.symbol && p.positionSide === botPos.side);
+            
+            // 1. Kiểm tra nếu vị thế đã đóng bởi lệnh sàn (TP/SL sàn khớp)
+            if (!realPos || Math.abs(parseFloat(realPos.positionAmt)) === 0) {
+                addBotLog(`✅ ĐÃ ĐÓNG | ${botPos.symbol} | Đóng bởi lệnh TP/SL trên sàn`, "success");
+                const orders = await binancePrivate('/fapi/v1/openOrders', 'GET', { symbol: botPos.symbol });
+                for (const o of orders.filter(o => o.positionSide === botPos.side)) { await exchange.cancelOrder(o.orderId, botPos.symbol).catch(() => {}); }
+                status.blackList[botPos.symbol] = now + (15 * 60 * 1000);
+                botActivePositions.delete(key);
+                continue;
+            }
+
+            const markPrice = parseFloat(realPos.markPrice);
+            const isTPHit = botPos.tp > 0 && markPrice <= botPos.tp; 
+            const isSLHit = botPos.sl > 0 && markPrice >= botPos.sl; 
+
+            // 2. Nếu giá vượt TP/SL mà sàn chưa đóng -> Bot tự đóng Market
+            if (isTPHit || isSLHit) {
+                botPos.isProcessing = true;
+                const type = isTPHit ? "TP" : "SL";
+                const targetPrice = isTPHit ? botPos.tp : botPos.sl;
+                addBotLog(`🚨 GIÁ CHẠM ${type} (${targetPrice}) | ${botPos.symbol} | Mark:${markPrice} | Bot đang đóng Market...`, "warning");
+
+                const totalQty = Math.abs(parseFloat(realPos.positionAmt));
+                const sideClose = botPos.side === 'SHORT' ? 'buy' : 'sell';
+                
+                try {
+                    await exchange.createOrder(botPos.symbol, 'market', sideClose, totalQty, undefined, { positionSide: botPos.side });
+                    addBotLog(`🔥 ĐÃ ĐÓNG THÀNH CÔNG | ${botPos.symbol} | Đóng bởi Bot (Emergency)`, "success");
+                    botActivePositions.delete(key);
+                    status.blackList[botPos.symbol] = now + (15 * 60 * 1000);
+                } catch (err) {
+                    addBotLog(`❌ LỖI KHÔNG THỂ ĐÓNG ${botPos.symbol}: ${err.message}`, "error");
+                    botPos.isProcessing = false;
+                }
+            }
+        }
+    } catch (e) { /* Giảm log rác khi mất mạng */ }
+    setTimeout(priceMonitorLoop, 1000); // Lặp lại đúng 1 giây
+}
+
 async function mainLoop() {
     if (!status.isReady) return;
     try {
         const posRisk = await binancePrivate('/fapi/v2/positionRisk');
         const now = Date.now();
 
-        // LOG HEDGE LONG
-        posRisk.forEach(p => {
-            if (p.positionSide === 'LONG' && Math.abs(parseFloat(p.positionAmt)) > 0) {
-                const symbol = p.symbol;
-                if (!status.blackList[`log_${symbol}_LONG`] || now > status.blackList[`log_${symbol}_LONG`]) {
-                    addBotLog(`🛡️ HEDGE | ${symbol} | Entry:${p.entryPrice} | TP:${p.takeProfit} | SL:${p.stopLoss}`, "info");
-                    status.blackList[`log_${symbol}_LONG`] = now + 60000;
-                }
-            }
-        });
-
         for (let [key, botPos] of botActivePositions) {
             if (botPos.isProcessing) continue;
             const realPos = posRisk.find(p => p.symbol === botPos.symbol && p.positionSide === botPos.side);
-            
-            if (!realPos || Math.abs(parseFloat(realPos.positionAmt)) === 0) {
-                const orders = await binancePrivate('/fapi/v1/openOrders', 'GET', { symbol: botPos.symbol });
-                for (const o of orders.filter(o => o.positionSide === botPos.side)) { await exchange.cancelOrder(o.orderId, botPos.symbol).catch(() => {}); }
-                status.blackList[botPos.symbol] = now + (15 * 60 * 1000);
-                botActivePositions.delete(key);
-                addBotLog(`✅ CLOSE | ${botPos.symbol}`, "info");
-                continue;
-            }
+            if (!realPos || Math.abs(parseFloat(realPos.positionAmt)) === 0) continue; // Loop 1s xử lý đóng lệnh rồi
 
-            const markPrice = parseFloat(realPos.markPrice);
-            const totalQty = Math.abs(parseFloat(realPos.positionAmt));
-
-            // 🔥 CHỨC NĂNG PHÒNG HỘ: TỰ ĐỘNG ĐÓNG MARKET NẾU CHẠM TP/SL MÀ SÀN CHƯA XỬ LÝ
-            const isTPHit = botPos.tp > 0 && markPrice <= botPos.tp; // Đối với SHORT, giá giảm là TP
-            const isSLHit = botPos.sl > 0 && markPrice >= botPos.sl; // Đối với SHORT, giá tăng là SL
-
-            if (isTPHit || isSLHit) {
-                botPos.isProcessing = true;
-                addBotLog(`🚨 EMERGENCY CLOSE | ${botPos.symbol} | Price:${markPrice} | Target:${isTPHit ? 'TP' : 'SL'}`, "warning");
-                const sideClose = botPos.side === 'SHORT' ? 'buy' : 'sell';
-                await exchange.createOrder(botPos.symbol, 'market', sideClose, totalQty, undefined, { positionSide: botPos.side })
-                    .then(() => botActivePositions.delete(key))
-                    .catch(e => { botPos.isProcessing = false; console.error("Emergency Fail:", e.message); });
-                continue;
-            }
-
+            // Cập nhật TP/SL định kỳ mỗi 30s
             if (now - botPos.lastUpdate > 30000) {
-                await syncTPSL(botPos.symbol, botPos.side, totalQty, parseFloat(realPos.entryPrice), botPos.dcaCount, status.exchangeInfo[botPos.symbol]);
+                await syncTPSL(botPos.symbol, botPos.side, Math.abs(parseFloat(realPos.positionAmt)), parseFloat(realPos.entryPrice), botPos.dcaCount, status.exchangeInfo[botPos.symbol]);
                 botPos.lastUpdate = now;
             }
 
-            const priceDev = ((markPrice - parseFloat(realPos.entryPrice)) / parseFloat(realPos.entryPrice)) * 100;
+            const priceDev = ((parseFloat(realPos.markPrice) - parseFloat(realPos.entryPrice)) / parseFloat(realPos.entryPrice)) * 100;
             if (botPos.side === 'SHORT' && priceDev >= botSettings.dcaStep && botPos.dcaCount < botSettings.maxDCA) await openPosition(botPos.symbol, true);
         }
 
-        // QUÉT KÈO
+        // QUÉT KÈO MỚI
         if (botSettings.isRunning && botActivePositions.size < botSettings.maxPositions) {
             const keo = status.candidatesList.find(c => {
                 const v1 = parseFloat(c.c1) || 0;
@@ -203,7 +219,8 @@ async function init() {
             tempInfo[s.symbol] = { quantityPrecision: s.quantityPrecision, pricePrecision: s.pricePrecision, stepSize: parseFloat(lot.stepSize), maxLeverage: brk ? brk.brackets[0].initialLeverage : 20 };
         });
         status.exchangeInfo = tempInfo; status.isReady = true;
-        addBotLog("👿 LUFFY v21.11 - EMERGENCY PROTECTION - READY", "success");
+        addBotLog("👿 LUFFY v21.12 - 1s MONITORING - READY", "success");
+        priceMonitorLoop(); // Chạy loop monitor giá 1s
     } catch (e) { setTimeout(init, 5000); }
 }
 
