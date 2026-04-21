@@ -94,7 +94,7 @@ async function openPosition(symbol, isDCA = false, candidateData = null) {
         const price = parseFloat((await binanceApi.get(`/fapi/v1/ticker/price?symbol=${symbol}`)).data.price);
         
         let baseMargin = (parseFloat(acc.availableBalance) * parseFloat(botSettings.invValue)) / 100;
-        let margin = isDCA ? (currentPos.margin * 1.5) : baseMargin;
+        let margin = isDCA ? (currentPos.margin * 1.03) : baseMargin;
         let qty = ((margin * info.maxLeverage / price) / info.stepSize * info.stepSize).toFixed(info.quantityPrecision);
 
         await exchange.setLeverage(info.maxLeverage, symbol);
