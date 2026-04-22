@@ -51,7 +51,7 @@ async function syncTPSL(symbol, side, qty, entry, dcaCount, info, force = false)
 
         if (needUpdate) {
             for (const old of targetOrders) { await exchange.cancelOrder(old.orderId, symbol).catch(() => {}); }
-            if (force) await new Promise(r => setTimeout(r, 1500));
+            if (force) await new Promise(r => setTimeout(r, 2000));
 
             const sideClose = side === 'SHORT' ? 'buy' : 'sell';
             await Promise.all([
@@ -120,8 +120,7 @@ async function openPosition(symbol, isDCA = false, candidateData = null) {
     }
 }
 
-// THEO DÕI VỊ THẾ TỪNG GIÂY
-async function monitorPositions() {
+async function mainLoop() {
     if (!status.isReady) return;
     try {
         const posRisk = await binancePrivate('/fapi/v2/positionRisk');
@@ -129,24 +128,22 @@ async function monitorPositions() {
 
         for (let [key, botPos] of botActivePositions) {
             if (botPos.isProcessing) continue;
-
             const realPos = posRisk.find(p => p.symbol === botPos.symbol && p.positionSide === botPos.side);
-            const markPrice = realPos ? parseFloat(realPos.markPrice) : 0;
-            const totalQty = realPos ? Math.abs(parseFloat(realPos.positionAmt)) : 0;
-
-            // 1. KIỂM TRA ĐÃ ĐÓNG TRÊN SÀN (TP/SL KHỚP)
-            if (!realPos || totalQty === 0) {
+            
+            // KIỂM TRA ĐÃ ĐÓNG TRÊN SÀN (TP/SL KHỚP TRƯỚC)
+            if (!realPos || Math.abs(parseFloat(realPos.positionAmt)) === 0) {
                 const orders = await binancePrivate('/fapi/v1/openOrders', 'GET', { symbol: botPos.symbol });
-                for (const o of orders.filter(o => o.positionSide === botPos.side)) { 
-                    await exchange.cancelOrder(o.orderId, botPos.symbol).catch(() => {}); 
-                }
+                for (const o of orders.filter(o => o.positionSide === botPos.side)) { await exchange.cancelOrder(o.orderId, botPos.symbol).catch(() => {}); }
                 status.blackList[botPos.symbol] = now + (15 * 60 * 1000);
                 botActivePositions.delete(key);
-                addBotLog(`✅ CLOSE | ${botPos.symbol} | Đóng bởi lệnh TP/SL trên sàn`, "info");
+                addBotLog(`✅ CLOSE | ${botPos.symbol} | Khớp lệnh TP/SL sàn thành công`, "info");
                 continue;
             }
 
-            // 2. EMERGENCY PROTECTION: GIÁ VƯỢT TP/SL MÀ SÀN CHƯA ĐÓNG
+            const markPrice = parseFloat(realPos.markPrice);
+            const totalQty = Math.abs(parseFloat(realPos.positionAmt));
+
+            // CHỨC NĂNG PHÒNG HỘ: TỰ ĐỘNG ĐÓNG MARKET NẾU CHẠM TP/SL MÀ SÀN CHƯA XỬ LÝ
             const isTPHit = botPos.tp > 0 && markPrice <= botPos.tp; 
             const isSLHit = botPos.sl > 0 && markPrice >= botPos.sl; 
 
@@ -155,39 +152,30 @@ async function monitorPositions() {
                 const targetType = isTPHit ? 'TP' : 'SL';
                 const targetPrice = isTPHit ? botPos.tp : botPos.sl;
                 
-                addBotLog(`🚨 EMERGENCY | ${botPos.symbol} | Giá:${markPrice} vượt ${targetType}:${targetPrice} | Bot tự đóng...`, "warning");
+                addBotLog(`🚨 EMERGENCY | ${botPos.symbol} | Giá:${markPrice} vượt ${targetType}:${targetPrice} | Bot ép đóng Market...`, "warning");
                 
                 const sideClose = botPos.side === 'SHORT' ? 'buy' : 'sell';
-                try {
-                    await exchange.createOrder(botPos.symbol, 'market', sideClose, totalQty, undefined, { positionSide: botPos.side });
-                    addBotLog(`🎯 EMERGENCY SUCCESS | ${botPos.symbol} | Đã đóng Market thành công`, "success");
-                    botActivePositions.delete(key);
-                } catch (e) {
-                    botPos.isProcessing = false;
-                    addBotLog(`❌ EMERGENCY FAIL | ${botPos.symbol} | Lỗi: ${e.message}`, "error");
-                }
+                await exchange.createOrder(botPos.symbol, 'market', sideClose, totalQty, undefined, { positionSide: botPos.side })
+                    .then(() => {
+                        addBotLog(`🎯 EMERGENCY DONE | ${botPos.symbol} | Bot đã đóng lệnh thành công`, "success");
+                        botActivePositions.delete(key);
+                    })
+                    .catch(e => { 
+                        botPos.isProcessing = false; 
+                        addBotLog(`❌ EMERGENCY FAIL | ${botPos.symbol} | Lỗi: ${e.message}`, "error");
+                    });
                 continue;
             }
 
-            // 3. ĐỒNG BỘ TP/SL ĐỊNH KỲ (30s)
             if (now - botPos.lastUpdate > 30000) {
                 await syncTPSL(botPos.symbol, botPos.side, totalQty, parseFloat(realPos.entryPrice), botPos.dcaCount, status.exchangeInfo[botPos.symbol]);
                 botPos.lastUpdate = now;
             }
 
-            // 4. KIỂM TRA DCA
             const priceDev = ((markPrice - parseFloat(realPos.entryPrice)) / parseFloat(realPos.entryPrice)) * 100;
-            if (botPos.side === 'SHORT' && priceDev >= botSettings.dcaStep && botPos.dcaCount < botSettings.maxDCA) {
-                await openPosition(botPos.symbol, true);
-            }
+            if (botPos.side === 'SHORT' && priceDev >= botSettings.dcaStep && botPos.dcaCount < botSettings.maxDCA) await openPosition(botPos.symbol, true);
         }
-    } catch (e) { console.error("Monitor Error:", e.message); }
-}
 
-async function mainLoop() {
-    if (!status.isReady) return;
-    try {
-        const now = Date.now();
         // QUÉT KÈO
         if (botSettings.isRunning && botActivePositions.size < botSettings.maxPositions) {
             const keo = status.candidatesList.find(c => {
@@ -199,7 +187,7 @@ async function mainLoop() {
                 const isBlacklisted = status.blackList[c.symbol] && now < status.blackList[c.symbol];
                 return !botActivePositions.has(`${c.symbol}_SHORT`) && !isBlacklisted && satisfiesVol;
             });
-            if (keo) { await openPosition(keo.symbol, false, keo); }
+            if (keo) { await openPosition(keo.symbol, false, keo); return; }
         }
     } catch (e) { if (lastErrorLog !== e.message) { console.error(e); lastErrorLog = e.message; } }
 }
@@ -215,13 +203,13 @@ async function init() {
             tempInfo[s.symbol] = { quantityPrecision: s.quantityPrecision, pricePrecision: s.pricePrecision, stepSize: parseFloat(lot.stepSize), maxLeverage: brk ? brk.brackets[0].initialLeverage : 20 };
         });
         status.exchangeInfo = tempInfo; status.isReady = true;
-        addBotLog("👿 LUFFY v21.11 - PROTECTION ACTIVE", "success");
+        addBotLog("👿 LUFFY v21.11 - READY (1s MONITOR)", "success");
     } catch (e) { setTimeout(init, 5000); }
 }
 
 init();
-setInterval(monitorPositions, 1000); // GIÁM SÁT GIÁ VÀ TP/SL MỖI 1 GIÂY
-setInterval(mainLoop, 3500);         // QUÉT KÈO MỖI 3.5 GIÂY
+// THEO DÕI GIÁ MỖI GIÂY ĐỂ ĐÓNG LỆNH CHÍNH XÁC
+setInterval(mainLoop, 1000); 
 
 setInterval(() => {
     http.get('http://127.0.0.1:9000/api/data', res => {
