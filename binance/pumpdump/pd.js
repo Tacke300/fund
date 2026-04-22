@@ -90,12 +90,10 @@ async function openPosition(symbol, isDCA = false, candidateData = null) {
         const available = parseFloat(acc.availableBalance);
         const price = parseFloat((await binanceApi.get(`/fapi/v1/ticker/price?symbol=${symbol}`)).data.price);
         
-        // Tính Margin mục tiêu (Xử lý chuỗi % hoặc số thuần)
         let inputVal = botSettings.invValue.toString();
         let targetMargin = inputVal.includes('%') ? (available * parseFloat(inputVal) / 100) : parseFloat(inputVal);
         if (isDCA) targetMargin = botActivePositions.get(posKey).margin * 1.03;
 
-        // Tính toán Qty và ép lên tối thiểu 5.1 USDT (Tránh lỗi Notional)
         let qtyNum = Math.ceil((targetMargin * info.maxLeverage / price) / info.stepSize) * info.stepSize;
         while ((qtyNum * price) < 5.1) {
             qtyNum += info.stepSize;
@@ -104,7 +102,7 @@ async function openPosition(symbol, isDCA = false, candidateData = null) {
         let actualNotional = qtyNum * price;
         let finalMargin = actualNotional / info.maxLeverage;
 
-        if (finalMargin > available) return; // Im lặng bỏ qua nếu không đủ vốn thực tế
+        if (finalMargin > available) return;
 
         let qty = qtyNum.toFixed(info.quantityPrecision);
 
@@ -122,12 +120,19 @@ async function openPosition(symbol, isDCA = false, candidateData = null) {
             const dcaCount = isDCA ? botActivePositions.get(posKey).dcaCount + 1 : 0;
 
             const sync = await syncTPSL(symbol, 'SHORT', totalQty, avgEntry, dcaCount, info, true);
-            addBotLog(`${isDCA ? '⚠️ DCA' : '🚀 OPEN'} | ${symbol} | Vol: ${actualNotional.toFixed(1)} USDT | Lev: x${info.maxLeverage}`, isDCA ? "warning" : "success");
             
-            botActivePositions.set(posKey, { symbol, side: 'SHORT', entryPrice: avgEntry, qty: totalQty, tp: sync.tp, sl: sync.sl, margin: finalMargin, dcaCount, lastUpdate: Date.now(), isProcessing: false });
+            // LOG CHI TIẾT ĐẦY ĐỦ THÔNG SỐ
+            const logMsg = `${isDCA ? '⚠️ DCA' : '🚀 OPEN'} | ${symbol} | Qty:${totalQty} | Entry:${avgEntry} | TP:${sync.tp} | SL:${sync.sl} | Vol:${(totalQty * avgEntry).toFixed(1)}$ | DCA:${dcaCount}`;
+            addBotLog(logMsg, isDCA ? "warning" : "success");
+            
+            botActivePositions.set(posKey, { 
+                symbol, side: 'SHORT', entryPrice: avgEntry, qty: totalQty, 
+                tp: sync.tp, sl: sync.sl, margin: finalMargin, dcaCount, 
+                lastUpdate: Date.now(), isProcessing: false 
+            });
         }
     } catch (e) {
-        addBotLog(`❌ ${symbol}: ${e.message}`, "error");
+        addBotLog(`❌ Lỗi ${symbol}: ${e.message}`, "error");
         status.blackList[symbol] = Date.now() + (10 * 60 * 1000);
         if (!isDCA) botActivePositions.delete(posKey);
         else if (botActivePositions.has(posKey)) botActivePositions.get(posKey).isProcessing = false;
@@ -159,7 +164,7 @@ async function priceMonitorLoop() {
                 botPos.isProcessing = true;
                 try {
                     await exchange.createOrder(botPos.symbol, 'market', 'buy', Math.abs(parseFloat(realPos.positionAmt)), undefined, { positionSide: 'SHORT' });
-                    addBotLog(`🔥 EMERGENCY | ${botPos.symbol} (${hitTP ? 'TP' : 'SL'})`, "success");
+                    addBotLog(`🔥 EMERGENCY | ${botPos.symbol} (Chạm ${hitTP ? 'TP' : 'SL'})`, "success");
                     botActivePositions.delete(key);
                 } catch (err) { botPos.isProcessing = false; }
             }
@@ -191,7 +196,7 @@ async function mainLoop() {
         if (botSettings.isRunning && botActivePositions.size < botSettings.maxPositions) {
             const keo = status.candidatesList.find(c => {
                 const info = status.exchangeInfo[c.symbol];
-                if (!info || info.maxLeverage < 20) return false; // CHẶN COIN LEVERAGE THẤP
+                if (!info || info.maxLeverage < 20) return false;
 
                 const v = [c.c1, c.c5, c.c15].map(x => Math.abs(parseFloat(x)));
                 return !botActivePositions.has(`${c.symbol}_SHORT`) && 
@@ -225,7 +230,7 @@ async function init() {
 
         status.exchangeInfo = tempInfo; 
         status.isReady = true;
-        addBotLog("👿 LUFFY v21.22 - FIXED LEV 20+ - READY", "success");
+        addBotLog("👿 LUFFY v21.23 - FULL LOGS & LEV FILTER - READY", "success");
         priceMonitorLoop();
     } catch (e) { setTimeout(init, 5000); }
 }
