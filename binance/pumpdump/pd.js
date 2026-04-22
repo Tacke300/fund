@@ -55,10 +55,8 @@ async function binancePrivate(endpoint, method = 'GET', data = {}) {
     }
 }
 
-// FIX LỖI -4130: Xóa triệt để lệnh cũ trước khi đặt mới
 async function syncTPSL(symbol, side, qty, entry, dcaCount, info, force = false) {
     try {
-        // Lấy tất cả lệnh chờ của symbol này
         const orders = await binancePrivate('/fapi/v1/openOrders', 'GET', { symbol });
         const targetOrders = orders.filter(o => o.positionSide === side && (o.type === 'TAKE_PROFIT_MARKET' || o.type === 'STOP_MARKET'));
         
@@ -68,11 +66,8 @@ async function syncTPSL(symbol, side, qty, entry, dcaCount, info, force = false)
         slPrice = parseFloat(slPrice).toFixed(info.pricePrecision);
 
         if (force || targetOrders.length < 2) {
-            // Xóa TẤT CẢ lệnh chờ cùng side để tránh lỗi -4130
-            if (targetOrders.length > 0) {
-                await binancePrivate('/fapi/v1/allOpenOrders', 'DELETE', { symbol }).catch(() => {});
-                await new Promise(r => setTimeout(r, 1000)); // Đợi sàn hủy lệnh
-            }
+            await binancePrivate('/fapi/v1/allOpenOrders', 'DELETE', { symbol }).catch(() => {});
+            await new Promise(r => setTimeout(r, 1200));
 
             const sideClose = side === 'SHORT' ? 'buy' : 'sell';
             await exchange.createOrder(symbol, 'TAKE_PROFIT_MARKET', sideClose, qty, undefined, { positionSide: side, stopPrice: tpPrice, closePosition: true });
@@ -95,19 +90,31 @@ async function openPosition(symbol, isDCA = false, candidateData = null) {
         const available = parseFloat(acc.availableBalance);
         const price = parseFloat((await binanceApi.get(`/fapi/v1/ticker/price?symbol=${symbol}`)).data.price);
         
-        let margin = isDCA ? (botActivePositions.get(posKey).margin * 1.03) : (available * parseFloat(botSettings.invValue) / 100);
+        // Tính toán margin thực tế
+        let marginSetting = parseFloat(botSettings.invValue) / 100;
+        let margin = isDCA ? (botActivePositions.get(posKey).margin * 1.03) : (available * marginSetting);
+
+        // LOGIC LÀM TRÒN THÔNG MINH CHO VỐN NHỎ
+        let rawQty = (margin * info.maxLeverage) / price;
+        // Sử dụng Math.ceil để làm tròn lên, tránh việc vốn nhỏ bị về 0 đơn vị
+        let qtyNum = Math.ceil(rawQty / info.stepSize) * info.stepSize;
+        let qty = qtyNum.toFixed(info.quantityPrecision);
+        
+        let actualNotional = qty * price;
+
+        if (actualNotional < 5.05) {
+            // Nếu làm tròn lên rồi mà vẫn không đủ 5$, thử ép lên 1 đơn vị stepSize nữa
+            qtyNum += info.stepSize;
+            qty = qtyNum.toFixed(info.quantityPrecision);
+            actualNotional = qty * price;
+            
+            if (actualNotional < 5.05) {
+                throw new Error(`Coin này giá quá cao hoặc đơn vị lô quá lớn. Cần tối thiểu ~${(5.1/info.maxLeverage).toFixed(2)}$ vốn.`);
+            }
+        }
 
         if (isDCA) botActivePositions.get(posKey).isProcessing = true;
         else botActivePositions.set(posKey, { symbol, isProcessing: true });
-
-        // FIX LỖI PRECISION: Làm tròn qty theo đúng stepSize của sàn
-        let rawQty = (margin * info.maxLeverage) / price;
-        let qty = (Math.floor(rawQty / info.stepSize) * info.stepSize).toFixed(info.quantityPrecision);
-        
-        // Check Notional (tổng giá trị lệnh phải > 5 USDT)
-        if (qty * price < 5.1) {
-            throw new Error(`Giá trị lệnh quá nhỏ (${(qty * price).toFixed(2)} USDT). Tăng % Margin hoặc Leverage.`);
-        }
 
         await exchange.setLeverage(info.maxLeverage, symbol);
         const order = await exchange.createOrder(symbol, 'market', 'sell', qty, undefined, { positionSide: 'SHORT' });
@@ -120,16 +127,13 @@ async function openPosition(symbol, isDCA = false, candidateData = null) {
             const dcaCount = isDCA ? botActivePositions.get(posKey).dcaCount + 1 : 0;
 
             const sync = await syncTPSL(symbol, 'SHORT', totalQty, avgEntry, dcaCount, info, true);
-            addBotLog(`${isDCA ? '⚠️ DCA' : '🚀 OPEN'} | ${symbol} | Entry:${avgEntry} | TP:${sync.tp}`, isDCA ? "warning" : "success");
+            addBotLog(`${isDCA ? '⚠️ DCA' : '🚀 OPEN'} | ${symbol} | Qty:${qty} | Entry:${avgEntry}`, isDCA ? "warning" : "success");
             
             botActivePositions.set(posKey, { symbol, side: 'SHORT', entryPrice: avgEntry, qty: totalQty, tp: sync.tp, sl: sync.sl, margin, dcaCount, lastUpdate: Date.now(), isProcessing: false });
         }
     } catch (e) {
-        addBotLog(`❌ Lỗi ${symbol}: ${e.message}`, "error");
-        // Nếu lỗi do margin, blacklist coin đó 15p
-        if (e.message.toLowerCase().includes("margin") || e.message.includes("Order's notional")) {
-            status.blackList[symbol] = Date.now() + (15 * 60 * 1000);
-        }
+        addBotLog(`❌ ${symbol}: ${e.message}`, "error");
+        status.blackList[symbol] = Date.now() + (10 * 60 * 1000); // Chặn 10p để đỡ rác log
         if (!isDCA) botActivePositions.delete(posKey);
         else if (botActivePositions.has(posKey)) botActivePositions.get(posKey).isProcessing = false;
     }
@@ -157,7 +161,7 @@ async function priceMonitorLoop() {
                 botPos.isProcessing = true;
                 try {
                     await exchange.createOrder(botPos.symbol, 'market', 'buy', Math.abs(parseFloat(realPos.positionAmt)), undefined, { positionSide: 'SHORT' });
-                    addBotLog(`🔥 EMERGENCY CLOSE | ${botPos.symbol}`, "success");
+                    addBotLog(`🔥 EMERGENCY | ${botPos.symbol}`, "success");
                     botActivePositions.delete(key);
                 } catch (err) { botPos.isProcessing = false; }
             }
@@ -210,7 +214,7 @@ async function init() {
             tempInfo[s.symbol] = { quantityPrecision: s.quantityPrecision, pricePrecision: s.pricePrecision, stepSize: parseFloat(lot.stepSize), maxLeverage: brk ? brk.brackets[0].initialLeverage : 20 };
         });
         status.exchangeInfo = tempInfo; status.isReady = true;
-        addBotLog("👿 LUFFY v21.17 - PRECISION FIXED - READY", "success");
+        addBotLog("👿 LUFFY v21.18 - MICRO CAP FIX - READY", "success");
         priceMonitorLoop();
     } catch (e) { setTimeout(init, 5000); }
 }
