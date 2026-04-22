@@ -26,7 +26,7 @@ function addBotLog(msg, type = 'info') {
 
 async function binancePrivate(endpoint, method = 'GET', data = {}) {
     const timestamp = Date.now();
-    const query = new URLSearchParams({ ...data, timestamp, recvWindow: 10000 }).toString();
+    const query = new URLSearchParams({ ...data, timestamp, recvWindow: 100000 }).toString();
     const signature = crypto.createHmac('sha256', SECRET_KEY).update(query).digest('hex');
     try {
         const response = await binanceApi({ method, url: `${endpoint}?${query}&signature=${signature}` });
