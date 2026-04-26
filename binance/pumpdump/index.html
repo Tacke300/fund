@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>LUFFY v19.3</title>
+    <title>LUFFY v21.24</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         body { background: #000; color: #eee; font-family: monospace; font-size: 11px; }
@@ -29,35 +29,67 @@
     </div>
 
     <div class="card">
-        <div class="text-[10px] text-red-500 mb-2 font-bold uppercase">🔒 Blacklist (Đếm ngược)</div>
+        <div class="text-[10px] text-red-500 mb-2 font-bold uppercase">🔒 Blacklist (15m Rest)</div>
         <div id="blacklist-display" class="flex flex-wrap gap-2"></div>
     </div>
+    
     <div class="card">
         <div class="text-[10px] text-blue-500 mb-2 font-bold uppercase">🔥 Biến động (1m | 5m | 15m)</div>
         <div id="candidates-list" class="space-y-1"></div>
     </div>
-    <div id="logs" class="card h-[70px] overflow-y-auto text-[9px] text-zinc-500"></div>
+
+    <div id="logs" class="card h-[80px] overflow-y-auto text-[9px] text-zinc-500"></div>
+    
+    <div class="text-[10px] text-zinc-400 font-bold uppercase px-1">Positions</div>
     <div id="pos-list" class="space-y-2"></div>
 
     <script>
-        // ... Các hàm formatTime, sync, toggle giữ nguyên ...
         function formatTime(ms) { const s = Math.ceil(ms / 1000); return `${Math.floor(s/60)}:${(s%60).toString().padStart(2,'0')}`; }
 
         async function sync() {
             try {
-                const r = await fetch('/api/status'); const d = await r.json();
+                const r = await fetch('/api/status'); 
+                const d = await r.json();
                 const now = Date.now();
+
+                // Blacklist
                 const blDiv = document.getElementById('blacklist-display');
                 const bl = Object.entries(d.status.blackList).filter(([_, exp]) => exp > now);
                 blDiv.innerHTML = bl.map(([sym, exp]) => `<div class="bl-tag">${sym.replace('USDT','')} <b>${formatTime(exp-now)}</b></div>`).join('') || '<span class="text-zinc-700">Trống</span>';
+
+                // Candidates
                 const top = d.status.candidatesList.sort((a,b) => Math.abs(b.c1) - Math.abs(a.c1)).slice(0, 5);
-                document.getElementById('candidates-list').innerHTML = top.map(c => `<div class="flex justify-between border-b border-zinc-900 pb-1"><span class="font-bold text-blue-400 w-12">${c.symbol.replace('USDT','')}</span><span class="${c.c1>=0?'up':'down'}">1m:${c.c1}%</span><span class="${c.c5>=0?'up':'down'}">5m:${c.c5}%</span><span class="${c.c15>=0?'up':'down'}">15m:${c.c15}%</span></div>`).join('');
-                document.getElementById('pos-list').innerHTML = d.activePositions.map(p => `<div class="card border-l-4 ${p.side==='LONG'?'border-l-green-500':'border-l-red-500'} flex justify-between items-center"><div><b>${p.symbol}</b> <span class="text-zinc-500 text-[9px]">${p.side}</span></div><div class="text-right"><div class="font-bold up">${p.markPrice}</div><div class="${parseFloat(p.pnl)>=0?'up':'down'} font-bold">${p.pnl}$</div></div></div>`).join('');
+                document.getElementById('candidates-list').innerHTML = top.map(c => `
+                    <div class="flex justify-between border-b border-zinc-900 pb-1">
+                        <span class="font-bold text-blue-400 w-12">${c.symbol.replace('USDT','')}</span>
+                        <span class="${c.c1>=0?'up':'down'}">1m:${c.c1}%</span>
+                        <span class="${c.c5>=0?'up':'down'}">5m:${c.c5}%</span>
+                        <span class="${c.c15>=0?'up':'down'}">15m:${c.c15}%</span>
+                    </div>`).join('');
+
+                // Positions - ĐÃ FIX UNDEFINED VÀ THÊM GIÁ LIVE
+                document.getElementById('pos-list').innerHTML = d.activePositions.map(p => {
+                    const pnlVal = parseFloat(p.unrealizedProfit || 0);
+                    const markPrice = p.markPrice || '0.00';
+                    return `
+                    <div class="card border-l-4 ${p.side==='LONG'?'border-l-green-500':'border-l-red-500'} flex justify-between items-center">
+                        <div>
+                            <div class="font-bold text-[12px]">${p.symbol} <span class="text-zinc-500 text-[9px]">x${p.dcaCount}</span></div>
+                            <div class="text-[9px] text-zinc-400">Entry: ${parseFloat(p.entryPrice).toFixed(4)}</div>
+                        </div>
+                        <div class="text-right">
+                            <div class="font-bold text-white">${markPrice}</div>
+                            <div class="${pnlVal >= 0 ? 'up' : 'down'} font-black text-[11px]">${pnlVal.toFixed(2)} USDT</div>
+                        </div>
+                    </div>`;
+                }).join('') || '<div class="text-center text-zinc-700 py-4">No active positions</div>';
+
                 document.getElementById('logs').innerHTML = d.status.botLogs.map(l => `<div>[${l.time}] ${l.msg}</div>`).join('');
+                
                 const btn = document.getElementById('runBtn');
                 btn.innerText = d.botSettings.isRunning ? "STOP BOT" : "START BOT";
                 btn.className = d.botSettings.isRunning ? "w-full py-2 rounded bg-red-900/20 border-red-500 text-red-500 font-bold" : "w-full py-2 rounded bg-green-900/20 border-green-500 text-green-500 font-bold";
-            } catch (e) {}
+            } catch (e) { console.error(e) }
         }
 
         async function toggle() {
@@ -66,10 +98,9 @@
             sync();
         }
 
-        // ĐÃ SỬA: Bỏ parseFloat ở invValue để giữ nguyên chuỗi "2%"
         async function save() {
             const body = { 
-                invValue: document.getElementById('invValue').value, // Giữ nguyên dạng text
+                invValue: document.getElementById('invValue').value,
                 maxPositions: parseInt(document.getElementById('maxPositions').value),
                 minVol: parseFloat(document.getElementById('minVol').value),
                 posTP: parseFloat(document.getElementById('posTP').value),
