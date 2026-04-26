@@ -2,51 +2,59 @@
 <html lang="vi">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>LUFFY v21.26</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        body { background: #000; color: #eee; font-family: monospace; font-size: 11px; }
-        .card { background: #111; border: 1px solid #222; padding: 10px; border-radius: 4px; }
+        body { background: #000; color: #eee; font-family: 'Courier New', Courier, monospace; font-size: 12px; }
+        .card { background: #111; border: 1px solid #222; padding: 10px; border-radius: 5px; }
         .up { color: #00ff88; } .down { color: #ff4444; }
-        input { background: #000; border: 1px solid #333; color: #fff; padding: 4px; text-align: center; border-radius: 3px; width: 100%; outline: none; }
-        .bl-tag { background: rgba(239, 68, 68, 0.1); border: 1px solid #ef4444; padding: 2px 4px; border-radius: 3px; color: #ef4444; }
+        input { background: #000; border: 1px solid #333; color: #fff; padding: 6px; text-align: center; border-radius: 4px; width: 100%; outline: none; font-size: 13px; }
+        .bl-tag { background: rgba(239, 68, 68, 0.1); border: 1px solid #ef4444; padding: 2px 5px; border-radius: 3px; color: #ef4444; font-size: 10px; }
+        button:active { transform: scale(0.98); }
     </style>
 </head>
-<body class="p-2 space-y-2">
-    <div class="card space-y-2">
+<body class="p-2 space-y-3">
+    <div class="card space-y-3">
         <div class="grid grid-cols-3 gap-2 text-center border-b border-zinc-800 pb-2">
-            <div><p class="text-[8px] text-zinc-500">VÍ FUTURE</p><b id="totalWallet">0.00</b></div>
-            <div><p class="text-[8px] text-zinc-500">KHẢ DỤNG</p><b id="availBalance" class="text-blue-400">0.00</b></div>
-            <div><p class="text-[8px] text-zinc-500">PNL CHƯA CHỐT</p><b id="unrealizedPnL">0.00</b></div>
+            <div><p class="text-[9px] text-zinc-500">VÍ FUTURE</p><b id="totalWallet" class="text-sm">0.00</b></div>
+            <div><p class="text-[9px] text-zinc-500">KHẢ DỤNG</p><b id="availBalance" class="text-blue-400 text-sm">0.00</b></div>
+            <div><p class="text-[9px] text-zinc-500">PNL CHƯA CHỐT</p><b id="unrealizedPnL" class="text-sm">0.00</b></div>
         </div>
         <div class="grid grid-cols-3 gap-2 text-center">
-            <div><p class="text-[8px] text-zinc-500">ĐANG MỞ</p><b id="openCount" class="text-yellow-500">0</b></div>
-            <div><p class="text-[8px] text-zinc-500">ĐÃ CHỐT</p><b id="closedCount">0</b></div>
-            <div><p class="text-[8px] text-zinc-500">PNL ĐÃ CHỐT</p><b id="closedPnL">0.00</b></div>
+            <div><p class="text-[9px] text-zinc-500 uppercase">Đang mở</p><b id="openCount" class="text-yellow-500 text-sm">0</b></div>
+            <div><p class="text-[9px] text-zinc-500 uppercase">Đã chốt</p><b id="closedCount" class="text-sm">0</b></div>
+            <div><p class="text-[9px] text-zinc-500 uppercase">PnL BOT chốt</p><b id="closedPnL" class="text-sm">0.00</b></div>
         </div>
     </div>
 
-    <div class="card grid grid-cols-3 gap-2">
-        <div><p class="text-[9px] text-zinc-500 uppercase">Vốn ($/%)</p><input id="invValue" type="text"></div>
-        <div><p class="text-[9px] text-zinc-500 uppercase">Max Pos</p><input id="maxPositions" type="number"></div>
-        <div><p class="text-[9px] text-zinc-500 uppercase">Vol %</p><input id="minVol" type="number"></div>
-        <div><p class="text-[9px] text-green-500 uppercase">TP %</p><input id="posTP" type="number"></div>
-        <div><p class="text-[9px] text-red-500 uppercase">SL %</p><input id="posSL" type="number"></div>
-        <div class="flex items-end"><button id="runBtn" onclick="toggle()" class="w-full py-1 font-black border rounded"></button></div>
+    <div class="card space-y-3">
+        <div class="grid grid-cols-3 gap-2">
+            <div><p class="text-[10px] text-zinc-500 mb-1">VỐN ($/%)</p><input id="invValue" type="text"></div>
+            <div><p class="text-[10px] text-zinc-500 mb-1">MAX POS</p><input id="maxPositions" type="number"></div>
+            <div><p class="text-[10px] text-zinc-500 mb-1">MIN VOL%</p><input id="minVol" type="number"></div>
+            <div><p class="text-[10px] text-green-500 mb-1">TP %</p><input id="posTP" type="number"></div>
+            <div><p class="text-[10px] text-red-500 mb-1">SL %</p><input id="posSL" type="number"></div>
+            <div><p class="text-[10px] text-zinc-500 mb-1">DCA %</p><input id="dcaStep" type="number"></div>
+        </div>
+        <div class="grid grid-cols-2 gap-2">
+            <button id="runBtn" onclick="toggle()" class="py-3 font-black border rounded text-sm"></button>
+            <button onclick="save()" class="py-3 bg-zinc-800 text-zinc-200 font-bold rounded text-sm border border-zinc-700">LƯU CẤU HÌNH</button>
+        </div>
     </div>
 
-    <div class="card flex flex-wrap gap-1" id="blacklist-display"></div>
+    <div class="card flex flex-wrap gap-2 min-h-[30px]" id="blacklist-display"></div>
 
     <div class="card">
-        <table class="w-full text-left text-[10px]">
-            <thead class="text-zinc-500">
-                <tr><th>SYMBOL</th><th class="text-right">1M%</th><th class="text-right">5M%</th><th class="text-right">15M%</th></tr>
+        <table class="w-full text-left text-[11px]">
+            <thead class="text-zinc-500 border-b border-zinc-800">
+                <tr><th class="pb-1">SYMBOL</th><th class="text-right">1M%</th><th class="text-right">5M%</th><th class="text-right">15M%</th></tr>
             </thead>
             <tbody id="candidate-list"></tbody>
         </table>
     </div>
 
-    <div id="logs" class="card h-[80px] overflow-y-auto text-[9px] text-zinc-500 italic"></div>
+    <div id="logs" class="card h-[100px] overflow-y-auto text-[10px] text-zinc-500 italic space-y-1"></div>
 
     <div id="pos-list" class="space-y-2"></div>
 
@@ -61,48 +69,61 @@
                     document.getElementById('totalWallet').innerText = d.wallet.totalWalletBalance;
                     document.getElementById('availBalance').innerText = d.wallet.availableBalance;
                     document.getElementById('unrealizedPnL').innerText = d.wallet.totalUnrealizedProfit;
-                    document.getElementById('unrealizedPnL').className = parseFloat(d.wallet.totalUnrealizedProfit) >= 0 ? 'up font-bold' : 'down font-bold';
+                    document.getElementById('unrealizedPnL').className = parseFloat(d.wallet.totalUnrealizedProfit) >= 0 ? 'up text-sm' : 'down text-sm';
                 }
                 document.getElementById('openCount').innerText = d.activePositions.length;
-                document.getElementById('closedCount').innerText = d.status.closedCount;
-                document.getElementById('closedPnL').innerText = d.status.closedPnL.toFixed(2);
-                document.getElementById('closedPnL').className = d.status.closedPnL >= 0 ? 'up font-bold' : 'down font-bold';
+                document.getElementById('closedCount').innerText = d.status.botClosedCount;
+                document.getElementById('closedPnL').innerText = d.status.botPnLClosed.toFixed(2);
+                document.getElementById('closedPnL').className = d.status.botPnLClosed >= 0 ? 'up text-sm' : 'down text-sm';
 
                 // Blacklist
                 const bl = Object.entries(d.status.blackList).filter(([_, exp]) => exp > now);
-                document.getElementById('blacklist-display').innerHTML = bl.map(([s]) => `<span class="bl-tag">${s.replace('USDT','')}</span>`).join('');
+                document.getElementById('blacklist-display').innerHTML = bl.map(([s]) => `<span class="bl-tag">${s.replace('USDT','')}</span>`).join('') || '<span class="text-zinc-800">Chưa có blacklist</span>';
 
                 // Bảng biến động
-                document.getElementById('candidate-list').innerHTML = d.status.candidatesList.slice(0,10).map(c => `
-                    <tr>
-                        <td class="font-bold">${c.symbol.replace('USDT','')}</td>
+                document.getElementById('candidate-list').innerHTML = d.status.candidatesList.slice(0,12).map(c => `
+                    <tr class="border-b border-zinc-900/50">
+                        <td class="py-1.5 font-bold">${c.symbol.replace('USDT','')}</td>
                         <td class="text-right ${parseFloat(c.c1)>=0?'up':'down'}">${c.c1}%</td>
                         <td class="text-right ${parseFloat(c.c5)>=0?'up':'down'}">${c.c5}%</td>
                         <td class="text-right ${parseFloat(c.c15)>=0?'up':'down'}">${c.c15}%</td>
                     </tr>`).join('');
 
-                // Vị thế (Thêm TP, SL, DCA, LEV)
+                // Vị thế
                 document.getElementById('pos-list').innerHTML = d.activePositions.map(p => `
-                    <div class="card border-l-4 border-l-red-500 flex justify-between items-center">
+                    <div class="card border-l-4 border-l-red-500 flex justify-between items-center bg-zinc-950">
                         <div>
-                            <div class="font-black">${p.symbol} <span class="text-[8px] bg-zinc-800 px-1 ml-1 font-normal">x${p.leverage}</span></div>
-                            <div class="text-[9px] text-zinc-500">TP: ${p.tp} | SL: ${p.sl} | DCA: ${p.dcaCount}</div>
+                            <div class="font-black text-sm text-white">${p.symbol} <span class="text-[9px] bg-red-900 px-1 ml-1 font-normal">SHORT x${p.leverage}</span></div>
+                            <div class="text-[10px] text-zinc-400 mt-1">TP: ${p.tp} | SL: ${p.sl} | DCA: ${p.dcaCount}</div>
                         </div>
                         <div class="text-right">
-                            <div class="text-white font-bold">${p.markPrice || '0.0'}</div>
-                            <div class="${parseFloat(p.pnl)>=0?'up':'down'} font-black">${parseFloat(p.pnl||0).toFixed(2)}$</div>
+                            <div class="text-white font-bold">${parseFloat(p.markPrice || 0).toFixed(4)}</div>
+                            <div class="${parseFloat(p.pnl)>=0?'up':'down'} font-black text-sm">${parseFloat(p.pnl||0).toFixed(2)}$</div>
                         </div>
                     </div>`).join('');
 
                 document.getElementById('logs').innerHTML = d.status.botLogs.map(l => `<div>[${l.time}] ${l.msg}</div>`).join('');
-                document.getElementById('runBtn').innerText = d.botSettings.isRunning ? "STOP" : "START";
-                document.getElementById('runBtn').className = d.botSettings.isRunning ? "w-full py-1 rounded bg-red-900 border-red-500 text-red-500" : "w-full py-1 rounded bg-green-900 border-green-500 text-green-500";
+                document.getElementById('runBtn').innerText = d.botSettings.isRunning ? "STOP BOT" : "START BOT";
+                document.getElementById('runBtn').className = d.botSettings.isRunning ? "py-3 rounded bg-red-900/20 border border-red-500 text-red-500 font-bold" : "py-3 rounded bg-green-900/20 border border-green-500 text-green-500 font-bold";
             } catch (e) {}
         }
 
         async function toggle() {
             const r = await fetch('/api/status'); const d = await r.json();
             await fetch('/api/settings', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ isRunning: !d.botSettings.isRunning }) });
+        }
+
+        async function save() {
+            const body = { 
+                invValue: document.getElementById('invValue').value,
+                maxPositions: parseInt(document.getElementById('maxPositions').value),
+                minVol: parseFloat(document.getElementById('minVol').value),
+                posTP: parseFloat(document.getElementById('posTP').value),
+                posSL: parseFloat(document.getElementById('posSL').value),
+                dcaStep: parseFloat(document.getElementById('dcaStep').value)
+            };
+            await fetch('/api/settings', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body) });
+            alert("ĐÃ LƯU CẤU HÌNH!");
         }
 
         setInterval(sync, 1000);
@@ -113,6 +134,7 @@
                 document.getElementById('minVol').value = d.botSettings.minVol;
                 document.getElementById('posTP').value = d.botSettings.posTP;
                 document.getElementById('posSL').value = d.botSettings.posSL;
+                document.getElementById('dcaStep').value = d.botSettings.dcaStep;
             });
         }
     </script>
