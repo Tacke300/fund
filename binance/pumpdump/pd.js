@@ -19,6 +19,7 @@ const exchange = new ccxt.binance({
 });
 
 let botSettings = { isRunning: false, maxPositions: 3, invValue: "1%", minVol: 6.5, posTP: 0.5, posSL: 50.0, dcaStep: 10.0, maxDCA: 4 };
+// Thêm closedCount và closedPnL vào status
 let status = { botLogs: [], exchangeInfo: null, candidatesList: [], isReady: false, blackList: {}, closedCount: 0, closedPnL: 0 };
 let botActivePositions = new Map();
 let timestampOffset = 0; 
@@ -52,6 +53,7 @@ async function binancePrivate(endpoint, method = 'GET', data = {}) {
 
 async function syncTPSL(symbol, side, qty, entry, info) {
     try {
+        // XÓA CHÍNH XÁC TP/SL CŨ CỦA SYMBOL TRƯỚC KHI ĐẶT MỚI
         const openOrders = await binancePrivate('/fapi/v1/openOrders', 'GET', { symbol });
         const oldOrders = openOrders.filter(o => ['TAKE_PROFIT_MARKET', 'STOP_MARKET'].includes(o.type));
         for (const o of oldOrders) { await binancePrivate('/fapi/v1/order', 'DELETE', { symbol, orderId: o.orderId }).catch(()=>{}); }
@@ -75,10 +77,7 @@ async function openPosition(symbol, isDCA = false) {
         const info = status.exchangeInfo[symbol];
         const acc = await binancePrivate('/fapi/v2/account');
         const price = parseFloat((await binanceApi.get(`/fapi/v1/ticker/price?symbol=${symbol}`)).data.price);
-        
-        let targetMargin = botSettings.invValue.toString().includes('%') 
-            ? (parseFloat(acc.availableBalance) * parseFloat(botSettings.invValue) / 100) 
-            : parseFloat(botSettings.invValue);
+        let targetMargin = botSettings.invValue.toString().includes('%') ? (parseFloat(acc.availableBalance) * parseFloat(botSettings.invValue) / 100) : parseFloat(botSettings.invValue);
         
         if (isDCA) {
             const current = botActivePositions.get(posKey);
@@ -102,7 +101,8 @@ async function openPosition(symbol, isDCA = false) {
             const dcaCount = isDCA ? botActivePositions.get(posKey).dcaCount + 1 : 0;
             const sync = await syncTPSL(symbol, 'SHORT', totalQty, avgEntry, info);
 
-            addBotLog(`${isDCA ? '⚠️ DCA' : '🚀 OPEN'} | ${symbol} | Qty:${(totalQty * avgEntry).toFixed(1)}$ | Entry:${avgEntry} | TP:${sync.tp} | SL:${sync.sl} | DCA:${dcaCount}`, isDCA ? "warning" : "success");
+            // LOG QTY BẰNG USDT ($)
+            addBotLog(`${isDCA ? '⚠️ DCA' : '🚀 OPEN'} | ${symbol} | Qty:${(totalQty * avgEntry).toFixed(1)}$ | AvgEntry:${avgEntry} | TP:${sync.tp} | SL:${sync.sl} | DCA:${dcaCount}`, isDCA ? "warning" : "success");
 
             botActivePositions.set(posKey, { 
                 symbol, side: 'SHORT', entryPrice: avgEntry, qty: totalQty, tp: sync.tp, sl: sync.sl, 
@@ -120,6 +120,7 @@ async function priceMonitorLoop() {
         for (let [key, botPos] of botActivePositions) {
             const realPos = posRisk.find(p => p.symbol === botPos.symbol && p.positionSide === botPos.side);
             if (!realPos || Math.abs(parseFloat(realPos.positionAmt)) < (status.exchangeInfo[botPos.symbol].stepSize)) {
+                // CẬP NHẬT THỐNG KÊ KHI ĐÓNG
                 status.closedCount++;
                 status.closedPnL += parseFloat(botPos.pnl || 0);
                 status.blackList[botPos.symbol] = now + (15 * 60 * 1000);
