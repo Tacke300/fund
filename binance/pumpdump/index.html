@@ -2,135 +2,145 @@
 <html lang="vi">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>LUFFY BOT</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LUFFY BOT TERMINAL</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        body { background: #000; color: #eee; font-family: monospace; font-size: 12px; }
-        .card { background: #111; border: 1px solid #222; padding: 10px; border-radius: 4px; }
-        .up { color: #00ff88; } .down { color: #ff4444; }
-        input { background: #000; border: 1px solid #333; color: #fff; padding: 5px; text-align: center; border-radius: 3px; width: 100%; outline: none; }
-        .bl-tag { background: rgba(239, 68, 68, 0.1); border: 1px solid #ef4444; padding: 2px 5px; border-radius: 3px; color: #ef4444; font-size: 10px; }
+        body { background: #0a0a0a; color: #00ff00; font-family: 'Courier New', Courier, monospace; }
+        .panel { border: 1px solid #333; background: #111; border-radius: 4px; }
+        .log-success { color: #00ff00; }
+        .log-error { color: #ff3333; }
+        .log-warning { color: #ffcc00; }
+        .log-info { color: #00ccff; }
+        ::-webkit-scrollbar { width: 5px; }
+        ::-webkit-scrollbar-thumb { background: #333; }
     </style>
 </head>
-<body class="p-2 space-y-3">
-    <div class="card grid grid-cols-2 gap-4">
-        <div class="space-y-1">
-            <p class="text-[9px] text-zinc-500 uppercase">Tài khoản</p>
-            <div class="flex justify-between"><span>Ví:</span> <b id="totalWallet">0.00</b></div>
-            <div class="flex justify-between"><span>Unl PnL:</span> <b id="unrealizedPnL">0.00</b></div>
+<body class="p-4">
+    <div class="grid grid-cols-12 gap-4">
+        <div class="col-span-12 md:col-span-4 space-y-4">
+            <div class="panel p-4">
+                <h2 class="text-xl font-bold mb-4 border-b border-gray-700 pb-2">WALLET</h2>
+                <div id="walletInfo" class="grid grid-cols-2 gap-2 text-sm">
+                    <span>Available:</span> <span id="availBal" class="text-white text-right">0.00$</span>
+                    <span>Total PnL:</span> <span id="totalPnL" class="text-white text-right">0.00$</span>
+                </div>
+            </div>
+
+            <div class="panel p-4">
+                <h2 class="text-xl font-bold mb-4 border-b border-gray-700 pb-2">BLACKLIST (LOCK 15P)</h2>
+                <div id="blackListContainer" class="space-y-2 text-sm">
+                    </div>
+            </div>
         </div>
-        <div class="space-y-1 border-l border-zinc-800 pl-4">
-            <p class="text-[9px] text-zinc-500 uppercase">Bot Stats</p>
-            <div class="flex justify-between"><span>Đang mở:</span> <b id="openCount" class="text-yellow-500">0</b></div>
-            <div class="flex justify-between"><span>Đã chốt:</span> <b id="closedCount">0</b></div>
-            <div class="flex justify-between"><span>PnL chốt:</span> <b id="closedPnL">0.00</b></div>
+
+        <div class="col-span-12 md:col-span-8 panel p-4">
+            <h2 class="text-xl font-bold mb-4 border-b border-gray-700 pb-2">ACTIVE POSITIONS</h2>
+            <div class="overflow-x-auto">
+                <table class="w-full text-left text-sm">
+                    <thead>
+                        <tr class="text-gray-500 border-b border-gray-800">
+                            <th class="p-2">SYMBOL</th>
+                            <th class="p-2">SIDE</th>
+                            <th class="p-2">ENTRY</th>
+                            <th class="p-2">MARK</th>
+                            <th class="p-2">DCA</th>
+                            <th class="p-2">PNL (%)</th>
+                        </tr>
+                    </thead>
+                    <tbody id="posTableBody"></tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="col-span-12 panel p-4 mt-4">
+            <h2 class="text-xl font-bold mb-2 border-b border-gray-700 pb-2 text-blue-400">DETAILED TRANSACTION LOGS</h2>
+            <div id="logContainer" class="h-64 overflow-y-auto text-xs space-y-1"></div>
         </div>
     </div>
-
-    <div class="card grid grid-cols-3 gap-2">
-        <div><p class="text-[9px] text-zinc-500">VỐN</p><input id="invValue"></div>
-        <div><p class="text-[9px] text-zinc-500">MAX POS</p><input id="maxPositions"></div>
-        <div><p class="text-[9px] text-zinc-500">VOL%</p><input id="minVol"></div>
-        <div><p class="text-[9px] text-green-500">TP%</p><input id="posTP"></div>
-        <div><p class="text-[9px] text-red-500">SL%</p><input id="posSL"></div>
-        <div><p class="text-[9px] text-yellow-500">DCA%</p><input id="dcaStep"></div>
-        <div class="col-span-3 grid grid-cols-2 gap-2 mt-1">
-            <button id="runBtn" onclick="toggle()" class="py-2 font-bold border rounded"></button>
-            <button onclick="save()" class="py-2 bg-zinc-800 text-white font-bold rounded border border-zinc-600">LƯU CẤU HÌNH</button>
-        </div>
-    </div>
-
-    <div class="card flex flex-wrap gap-2 min-h-[25px]" id="blacklist-display"></div>
-
-    <div class="card">
-        <table class="w-full text-left text-[11px]">
-            <tr class="text-zinc-500 border-b border-zinc-800">
-                <th>SYMBOL</th><th align="right">1M</th><th align="right">5M</th><th align="right">15M</th>
-            </tr>
-            <tbody id="candidate-list"></tbody>
-        </table>
-    </div>
-
-    <div id="logs" class="card h-[100px] overflow-y-auto text-[10px] text-zinc-400 space-y-1 font-mono"></div>
-
-    <div id="pos-list" class="space-y-2"></div>
 
     <script>
-        async function sync() {
+        let localBlackList = {};
+
+        async function updateStatus() {
             try {
-                const r = await fetch('/api/status'); const d = await r.json();
-                const now = Date.now();
-                
-                if(d.wallet) {
-                    document.getElementById('totalWallet').innerText = d.wallet.totalWalletBalance;
-                    document.getElementById('unrealizedPnL').innerText = d.wallet.totalUnrealizedProfit;
-                    document.getElementById('unrealizedPnL').className = parseFloat(d.wallet.totalUnrealizedProfit) >= 0 ? 'up' : 'down';
+                const res = await fetch('/api/status');
+                const data = await res.json();
+
+                // 1. Cập nhật Wallet
+                document.getElementById('availBal').innerText = data.wallet.availableBalance + '$';
+                document.getElementById('totalPnL').innerText = data.status.botPnLClosed.toFixed(2) + '$';
+
+                // 2. Cập nhật Blacklist từ Server
+                localBlackList = data.status.blackList || {};
+                renderBlackList();
+
+                // 3. Cập nhật Vị thế
+                const posBody = document.getElementById('posTableBody');
+                posBody.innerHTML = data.activePositions.map(p => `
+                    <tr class="border-b border-gray-900 hover:bg-gray-800">
+                        <td class="p-2 font-bold">${p.symbol}</td>
+                        <td class="p-2 ${p.side === 'SHORT' ? 'text-red-500' : 'text-green-500'}">${p.side}</td>
+                        <td class="p-2">${p.entryPrice.toFixed(4)}</td>
+                        <td class="p-2 text-gray-400">${p.markPrice || '0.00'}</td>
+                        <td class="p-2 text-yellow-500">${p.dcaCount}/${data.botSettings.maxDCA}</td>
+                        <td class="p-2 ${p.pnl >= 0 ? 'text-green-400' : 'text-red-400'}">
+                            ${p.pnl.toFixed(2)}$ (${((p.pnl / (p.margin * p.leverage)) * 100).toFixed(2)}%)
+                        </td>
+                    </tr>
+                `).join('');
+
+                // 4. Cập nhật Logs
+                const logBox = document.getElementById('logContainer');
+                logBox.innerHTML = data.status.botLogs.map(l => 
+                    `<div class="log-${l.type}">[${l.time}] ${l.msg}</div>`
+                ).join('');
+
+            } catch (e) {
+                console.error("Fetch error:", e);
+            }
+        }
+
+        function renderBlackList() {
+            const container = document.getElementById('blackListContainer');
+            const keys = Object.keys(localBlackList);
+            
+            if (keys.length === 0) {
+                container.innerHTML = '<div class="text-gray-600 italic">No symbols locked</div>';
+                return;
+            }
+
+            container.innerHTML = keys.map(sym => {
+                const sec = localBlackList[sym];
+                const min = Math.floor(sec / 60);
+                const s = sec % 60;
+                return `
+                    <div class="flex justify-between items-center bg-gray-900 p-2 border-l-2 border-red-500">
+                        <span class="font-bold">${sym}</span>
+                        <span class="text-red-400 font-mono">${min}:${s < 10 ? '0' : ''}${s}</span>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        // Vòng lặp đếm ngược giây tại máy khách (Client-side countdown)
+        setInterval(() => {
+            let changed = false;
+            for (let sym in localBlackList) {
+                if (localBlackList[sym] > 0) {
+                    localBlackList[sym]--;
+                    changed = true;
+                } else {
+                    delete localBlackList[sym];
+                    changed = true;
                 }
-                document.getElementById('openCount').innerText = d.activePositions.length;
-                document.getElementById('closedCount').innerText = d.status.botClosedCount;
-                document.getElementById('closedPnL').innerText = d.status.botPnLClosed.toFixed(2);
-                document.getElementById('closedPnL').className = d.status.botPnLClosed >= 0 ? 'up' : 'down';
+            }
+            if (changed) renderBlackList();
+        }, 1000);
 
-                const bl = Object.entries(d.status.blackList).filter(([_, exp]) => exp > now);
-                document.getElementById('blacklist-display').innerHTML = bl.map(([s]) => `<span class="bl-tag">${s.replace('USDT','')}</span>`).join('');
-
-                document.getElementById('candidate-list').innerHTML = d.status.candidatesList.slice(0,10).map(c => `
-                    <tr class="border-b border-zinc-900">
-                        <td class="py-1 font-bold">${c.symbol.replace('USDT','')}</td>
-                        <td align="right" class="${parseFloat(c.c1)>=0?'up':'down'}">${c.c1}%</td>
-                        <td align="right" class="${parseFloat(c.c5)>=0?'up':'down'}">${c.c5}%</td>
-                        <td align="right" class="${parseFloat(c.c15)>=0?'up':'down'}">${c.c15}%</td>
-                    </tr>`).join('');
-
-                document.getElementById('pos-list').innerHTML = d.activePositions.map(p => `
-                    <div class="card border-l-2 border-red-500 flex justify-between items-center bg-zinc-950">
-                        <div>
-                            <div class="font-bold text-white uppercase">${p.symbol} <span class="text-[9px] text-zinc-500 italic">x${p.leverage}</span></div>
-                            <div class="text-[9px] text-zinc-400">Entry: ${p.entryPrice} | DCA: ${p.dcaCount}</div>
-                            <div class="text-[9px] text-zinc-500">TP: ${p.tp} | SL: ${p.sl}</div>
-                        </div>
-                        <div class="text-right">
-                            <div class="text-white font-bold">${parseFloat(p.markPrice || 0).toFixed(4)}</div>
-                            <div class="${p.pnl>=0?'up':'down'} font-black text-sm">${p.pnl.toFixed(2)}$</div>
-                        </div>
-                    </div>`).join('');
-
-                document.getElementById('logs').innerHTML = d.status.botLogs.map(l => `<div>[${l.time}] ${l.msg}</div>`).join('');
-                document.getElementById('runBtn').innerText = d.botSettings.isRunning ? "STOP BOT" : "START BOT";
-                document.getElementById('runBtn').className = d.botSettings.isRunning ? "py-2 rounded border-red-500 text-red-500 bg-red-950/20" : "py-2 rounded border-green-500 text-green-500 bg-green-950/20";
-            } catch (e) {}
-        }
-
-        async function toggle() {
-            const r = await fetch('/api/status'); const d = await r.json();
-            await fetch('/api/settings', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ isRunning: !d.botSettings.isRunning }) });
-        }
-
-        async function save() {
-            const body = { 
-                invValue: document.getElementById('invValue').value,
-                maxPositions: parseInt(document.getElementById('maxPositions').value),
-                minVol: parseFloat(document.getElementById('minVol').value),
-                posTP: parseFloat(document.getElementById('posTP').value),
-                posSL: parseFloat(document.getElementById('posSL').value),
-                dcaStep: parseFloat(document.getElementById('dcaStep').value)
-            };
-            await fetch('/api/settings', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body) });
-            alert("ĐÃ LƯU");
-        }
-
-        setInterval(sync, 1000);
-        window.onload = () => {
-            fetch('/api/status').then(r => r.json()).then(d => {
-                document.getElementById('invValue').value = d.botSettings.invValue;
-                document.getElementById('maxPositions').value = d.botSettings.maxPositions;
-                document.getElementById('minVol').value = d.botSettings.minVol;
-                document.getElementById('posTP').value = d.botSettings.posTP;
-                document.getElementById('posSL').value = d.botSettings.posSL;
-                document.getElementById('dcaStep').value = d.botSettings.dcaStep;
-            });
-        }
+        // Cập nhật dữ liệu từ Bot mỗi 2 giây
+        setInterval(updateStatus, 2000);
+        updateStatus();
     </script>
 </body>
-</html>
+</html> 
