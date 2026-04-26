@@ -50,7 +50,6 @@ async function binancePrivate(endpoint, method = 'GET', data = {}) {
     }
 }
 
-// LUỒNG RIÊNG: Lấy PnL thực tế từ sàn sau khi đóng
 async function trackClosedPnL(symbol, closedTime) {
     try {
         await new Promise(r => setTimeout(r, 4000));
@@ -58,29 +57,46 @@ async function trackClosedPnL(symbol, closedTime) {
         const realized = trades
             .filter(t => Math.abs(t.time - closedTime) < 15000)
             .reduce((sum, t) => sum + parseFloat(t.realizedPnl), 0);
-
         status.botClosedCount++;
         status.botPnLClosed += realized;
-        addBotLog(`✅ FINAL PNL ${symbol}: ${realized.toFixed(2)}$`, realized >= 0 ? "success" : "error");
-    } catch (e) {
-        addBotLog(`❌ CANNOT GET PNL ${symbol}: ${e.message}`);
-    }
+        addBotLog(`✅ CHỐT DEAL ${symbol} | PnL: ${realized.toFixed(2)}$ | Đợi 15p Blacklist`, realized >= 0 ? "success" : "error");
+    } catch (e) { addBotLog(`❌ LỖI PNL ${symbol}: ${e.message}`); }
 }
 
-async function syncTPSL(symbol, side, qty, entry, info) {
+async function syncTPSL(symbol, side, qty, entry, info, customTP = null, customSL = null) {
     try {
         await binancePrivate('/fapi/v1/allOpenOrders', 'DELETE', { symbol });
         await new Promise(r => setTimeout(r, 1000));
-        const tpPrice = (entry * (side === 'SHORT' ? (1 - botSettings.posTP / 100) : (1 + botSettings.posTP / 100))).toFixed(info.pricePrecision);
-        const slPrice = (entry * (side === 'SHORT' ? (1 + botSettings.posSL / 100) : (1 - botSettings.posSL / 100))).toFixed(info.pricePrecision);
+        
+        const tpPct = customTP || botSettings.posTP;
+        const slPct = customSL || botSettings.posSL;
+
+        const tpPrice = (entry * (side === 'SHORT' ? (1 - tpPct / 100) : (1 + tpPct / 100))).toFixed(info.pricePrecision);
+        const slPrice = (entry * (side === 'SHORT' ? (1 + slPct / 100) : (1 - slPct / 100))).toFixed(info.pricePrecision);
         const sideClose = side === 'SHORT' ? 'buy' : 'sell';
+
         await Promise.all([
             exchange.createOrder(symbol, 'TAKE_PROFIT_MARKET', sideClose, qty, undefined, { positionSide: side, stopPrice: tpPrice, closePosition: true }),
             exchange.createOrder(symbol, 'STOP_MARKET', sideClose, qty, undefined, { positionSide: side, stopPrice: slPrice, closePosition: true })
         ]);
-        addBotLog(`RE-SET TP/SL: ${symbol} (TP: ${tpPrice} - SL: ${slPrice}) SUCCESS`);
         return { tp: Number(tpPrice), sl: Number(slPrice) };
-    } catch (e) { addBotLog(`ERR SYNC ${symbol}: ${e.message}`); return { tp: 0, sl: 0 }; }
+    } catch (e) { addBotLog(`⚠️ LỖI SYNC TPSL ${symbol}: ${e.message}`); return { tp: 0, sl: 0 }; }
+}
+
+async function openLongHedge(symbol, baseMargin, info) {
+    try {
+        addBotLog(`🔥 KÍCH HOẠT HEDGE LONG x50 CHO ${symbol}`, "warning");
+        const price = parseFloat((await binanceApi.get(`/fapi/v1/ticker/price?symbol=${symbol}`)).data.price);
+        const hedgeMargin = baseMargin * 50;
+        let qtyNum = Math.ceil(((hedgeMargin * info.maxLeverage) / price) / info.stepSize) * info.stepSize;
+        
+        await exchange.createOrder(symbol, 'market', 'buy', qtyNum.toFixed(info.quantityPrecision), undefined, { positionSide: 'LONG' });
+        await new Promise(r => setTimeout(r, 1500));
+        
+        // TP/SL 10% cho lệnh Long này
+        await syncTPSL(symbol, 'LONG', qtyNum, price, info, 10, 10);
+        addBotLog(`🚀 ĐÃ MỞ LONG HEDGE ${symbol} | Margin: ${hedgeMargin.toFixed(2)}$`, "success");
+    } catch (e) { addBotLog(`❌ LỖI MỞ LONG HEDGE: ${e.message}`, "error"); }
 }
 
 async function openPosition(symbol, isDCA = false) {
@@ -88,7 +104,6 @@ async function openPosition(symbol, isDCA = false) {
     if (!isDCA && botActivePositions.has(posKey)) return;
     try {
         const info = status.exchangeInfo[symbol];
-        if (!info) return;
         const acc = await binancePrivate('/fapi/v2/account');
         const price = parseFloat((await binanceApi.get(`/fapi/v1/ticker/price?symbol=${symbol}`)).data.price);
         
@@ -96,13 +111,14 @@ async function openPosition(symbol, isDCA = false) {
             ? (parseFloat(acc.availableBalance) * parseFloat(botSettings.invValue) / 100) 
             : parseFloat(botSettings.invValue);
         
+        let currentDCA = 0;
         if (isDCA) {
             const current = botActivePositions.get(posKey);
             amountUSDT = (current.margin * info.maxLeverage) * 1.05; 
             current.isProcessing = true;
-        } else { botActivePositions.set(posKey, { isProcessing: true }); }
+            currentDCA = current.dcaCount + 1;
+        } else { botActivePositions.set(posKey, { isProcessing: true, baseMargin: amountUSDT }); }
 
-        // CÔNG THỨC CHUẨN: (Vốn * Đòn bẩy) / Giá
         let qtyNum = Math.ceil(((amountUSDT * info.maxLeverage) / price) / info.stepSize) * info.stepSize;
         while ((qtyNum * price) < 5.5) qtyNum += info.stepSize;
 
@@ -114,15 +130,16 @@ async function openPosition(symbol, isDCA = false) {
             const upPos = (await binancePrivate('/fapi/v2/positionRisk', 'GET', { symbol })).find(p => p.positionSide === 'SHORT');
             const avgEntry = parseFloat(upPos.entryPrice);
             const totalQty = Math.abs(parseFloat(upPos.positionAmt));
-            
-            addBotLog(`${isDCA ? 'DCA' : 'OPEN'} ${symbol} - Qty: ${(totalQty * avgEntry).toFixed(1)}$ - Entry: ${avgEntry}`);
-            
+            const currentMargin = (totalQty * avgEntry / info.maxLeverage);
+
+            // LOG CHI TIẾT TOÀN BỘ THÔNG SỐ
+            addBotLog(`[${isDCA ? 'DCA_'+currentDCA : 'OPEN'}] ${symbol} | Qty: ${totalQty} | Value: ${(totalQty * avgEntry).toFixed(2)}$ | Margin: ${currentMargin.toFixed(2)}$ | Entry: ${avgEntry} | Lev: x${info.maxLeverage}`, isDCA ? "warning" : "success");
+
             const sync = await syncTPSL(symbol, 'SHORT', totalQty, avgEntry, info);
             botActivePositions.set(posKey, { 
                 symbol, side: 'SHORT', entryPrice: avgEntry, qty: totalQty, tp: sync.tp, sl: sync.sl, 
-                margin: (totalQty * avgEntry / info.maxLeverage), 
-                dcaCount: isDCA ? botActivePositions.get(posKey).dcaCount + 1 : 0, 
-                leverage: info.maxLeverage, isProcessing: false, pnl: 0 
+                margin: currentMargin, baseMargin: isDCA ? botActivePositions.get(posKey).baseMargin : amountUSDT,
+                dcaCount: currentDCA, leverage: info.maxLeverage, isProcessing: false, pnl: 0 
             });
         }
     } catch (e) { 
@@ -130,7 +147,7 @@ async function openPosition(symbol, isDCA = false) {
             const p = botActivePositions.get(posKey);
             if (p.qty) p.isProcessing = false; else botActivePositions.delete(posKey);
         }
-        addBotLog(`ERR OPEN ${symbol}: ${e.message}`);
+        addBotLog(`❌ LỖI VÀO LỆNH ${symbol}: ${e.message}`);
     }
 }
 
@@ -147,6 +164,14 @@ async function priceMonitorLoop() {
                 botPos.markPrice = realPos.markPrice;
                 botPos.pnl = parseFloat(realPos.unRealizedProfit);
                 const markPrice = parseFloat(realPos.markPrice);
+
+                // Kiểm tra mốc DCA 5 (Giá tăng 50% so với entry)
+                const priceDev = ((markPrice - botPos.entryPrice) / botPos.entryPrice) * 100;
+                if (priceDev >= 50 && !botPos.hedged) {
+                    botPos.hedged = true;
+                    openLongHedge(botPos.symbol, botPos.baseMargin, status.exchangeInfo[botPos.symbol]);
+                }
+
                 if ((botPos.tp > 0 && markPrice <= botPos.tp) || (botPos.sl > 0 && markPrice >= botPos.sl)) {
                     if (!botPos.isProcessing) {
                         botPos.isProcessing = true;
@@ -154,9 +179,8 @@ async function priceMonitorLoop() {
                     }
                 }
             } else {
-                addBotLog(`CLOSE ${botPos.symbol} - SYNCING PNL...`);
                 status.blackList[botPos.symbol] = now + (15 * 60 * 1000);
-                trackClosedPnL(botPos.symbol, now); // Luồng ngầm
+                trackClosedPnL(botPos.symbol, now);
                 botActivePositions.delete(key);
             }
         }
@@ -179,7 +203,8 @@ async function mainLoop() {
         if (botSettings.isRunning && botActivePositions.size < botSettings.maxPositions) {
             const keo = status.candidatesList.find(c => {
                 const info = status.exchangeInfo[c.symbol];
-                const isBL = status.blackList[c.symbol] && (status.blackList[c.symbol] > now);
+                const blTime = status.blackList[c.symbol] || 0;
+                const isBL = blTime > now;
                 return info && info.maxLeverage >= 20 && !isBL && !botActivePositions.has(`${c.symbol}_SHORT`) && [c.c1, c.c5, c.c15].some(v => Math.abs(parseFloat(v)) >= parseFloat(botSettings.minVol));
             });
             if (keo) await openPosition(keo.symbol, false);
@@ -218,7 +243,14 @@ const APP = express(); APP.use(express.json()); APP.use(express.static(__dirname
 APP.get('/api/status', async (req, res) => {
     try {
         const acc = await binancePrivate('/fapi/v2/account');
-        res.json({ botSettings, activePositions: Array.from(botActivePositions.values()).filter(p => p.qty), status, wallet: { totalWalletBalance: parseFloat(acc.totalWalletBalance).toFixed(2), availableBalance: parseFloat(acc.availableBalance).toFixed(2), totalUnrealizedProfit: parseFloat(acc.totalUnrealizedProfit).toFixed(2) } });
+        const now = Date.now();
+        // Xử lý đếm ngược Blacklist gửi về Front-end
+        const blFormatted = {};
+        for (const sym in status.blackList) {
+            const diff = Math.ceil((status.blackList[sym] - now) / 1000);
+            if (diff > 0) blFormatted[sym] = diff; else delete status.blackList[sym];
+        }
+        res.json({ botSettings, activePositions: Array.from(botActivePositions.values()).filter(p => p.qty), status: { ...status, blackList: blFormatted }, wallet: { totalWalletBalance: parseFloat(acc.totalWalletBalance).toFixed(2), availableBalance: parseFloat(acc.availableBalance).toFixed(2), totalUnrealizedProfit: parseFloat(acc.totalUnrealizedProfit).toFixed(2) } });
     } catch (e) { res.json({ botSettings, activePositions: [], status }); }
 });
 APP.post('/api/settings', (req, res) => { botSettings = { ...botSettings, ...req.body }; res.json({ success: true }); });
