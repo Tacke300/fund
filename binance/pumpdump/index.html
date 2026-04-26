@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>LUFFY v21.24</title>
+    <title>LUFFY v21.26</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         body { background: #000; color: #eee; font-family: monospace; font-size: 11px; }
@@ -11,9 +11,30 @@
         .up { color: #00ff88; } .down { color: #ff4444; }
         input { background: #000; border: 1px solid #333; color: #fff; padding: 4px; text-align: center; border-radius: 3px; width: 100%; outline: none; }
         .bl-tag { background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.3); padding: 2px 6px; border-radius: 3px; color: #ef4444; }
+        .stat-box { text-align: center; border-right: 1px solid #222; }
+        .stat-box:last-child { border-right: none; }
     </style>
 </head>
 <body class="p-2 space-y-2">
+    <div class="card grid grid-cols-4 gap-1 py-2">
+        <div class="stat-box">
+            <p class="text-[8px] text-zinc-500 uppercase">Ví Future</p>
+            <p id="totalWallet" class="font-bold text-white">0.00</p>
+        </div>
+        <div class="stat-box">
+            <p class="text-[8px] text-zinc-500 uppercase">Khả dụng</p>
+            <p id="availBalance" class="font-bold text-blue-400">0.00</p>
+        </div>
+        <div class="stat-box">
+            <p class="text-[8px] text-zinc-500 uppercase">Đang mở</p>
+            <p id="openCount" class="font-bold text-yellow-500">0</p>
+        </div>
+        <div class="stat-box">
+            <p class="text-[8px] text-zinc-500 uppercase">Tổng PnL</p>
+            <p id="totalPnL" class="font-bold">0.00</p>
+        </div>
+    </div>
+
     <div class="card space-y-2">
         <div class="grid grid-cols-3 gap-2">
             <div><p class="text-[9px] text-zinc-500 uppercase">Vốn ($ hoặc %)</p><input id="invValue" type="text"></div>
@@ -29,18 +50,12 @@
     </div>
 
     <div class="card">
-        <div class="text-[10px] text-red-500 mb-2 font-bold uppercase">🔒 Blacklist (15m Rest)</div>
-        <div id="blacklist-display" class="flex flex-wrap gap-2"></div>
+        <div class="text-[10px] text-red-500 mb-1 font-bold uppercase">🔒 Blacklist</div>
+        <div id="blacklist-display" class="flex flex-wrap gap-2 text-[9px]"></div>
     </div>
     
-    <div class="card">
-        <div class="text-[10px] text-blue-500 mb-2 font-bold uppercase">🔥 Biến động (1m | 5m | 15m)</div>
-        <div id="candidates-list" class="space-y-1"></div>
-    </div>
-
     <div id="logs" class="card h-[80px] overflow-y-auto text-[9px] text-zinc-500"></div>
-    
-    <div class="text-[10px] text-zinc-400 font-bold uppercase px-1">Positions</div>
+
     <div id="pos-list" class="space-y-2"></div>
 
     <script>
@@ -48,48 +63,44 @@
 
         async function sync() {
             try {
-                const r = await fetch('/api/status'); 
-                const d = await r.json();
+                const r = await fetch('/api/status'); const d = await r.json();
                 const now = Date.now();
+                
+                // Dashboard
+                if(d.wallet) {
+                    document.getElementById('totalWallet').innerText = d.wallet.totalWalletBalance;
+                    document.getElementById('availBalance').innerText = d.wallet.availableBalance;
+                    document.getElementById('totalPnL').innerText = d.wallet.totalUnrealizedProfit;
+                    document.getElementById('totalPnL').className = `font-bold ${parseFloat(d.wallet.totalUnrealizedProfit) >= 0 ? 'up' : 'down'}`;
+                    document.getElementById('openCount').innerText = d.activePositions.length;
+                }
 
                 // Blacklist
-                const blDiv = document.getElementById('blacklist-display');
                 const bl = Object.entries(d.status.blackList).filter(([_, exp]) => exp > now);
-                blDiv.innerHTML = bl.map(([sym, exp]) => `<div class="bl-tag">${sym.replace('USDT','')} <b>${formatTime(exp-now)}</b></div>`).join('') || '<span class="text-zinc-700">Trống</span>';
+                document.getElementById('blacklist-display').innerHTML = bl.map(([sym, exp]) => `<div class="bl-tag">${sym.replace('USDT','')} <b>${formatTime(exp-now)}</b></div>`).join('') || 'Trống';
 
-                // Candidates
-                const top = d.status.candidatesList.sort((a,b) => Math.abs(b.c1) - Math.abs(a.c1)).slice(0, 5);
-                document.getElementById('candidates-list').innerHTML = top.map(c => `
-                    <div class="flex justify-between border-b border-zinc-900 pb-1">
-                        <span class="font-bold text-blue-400 w-12">${c.symbol.replace('USDT','')}</span>
-                        <span class="${c.c1>=0?'up':'down'}">1m:${c.c1}%</span>
-                        <span class="${c.c5>=0?'up':'down'}">5m:${c.c5}%</span>
-                        <span class="${c.c15>=0?'up':'down'}">15m:${c.c15}%</span>
-                    </div>`).join('');
-
-                // Positions - ĐÃ FIX UNDEFINED VÀ THÊM GIÁ LIVE
+                // Positions
                 document.getElementById('pos-list').innerHTML = d.activePositions.map(p => {
-                    const pnlVal = parseFloat(p.unrealizedProfit || 0);
-                    const markPrice = p.markPrice || '0.00';
+                    const pnl = parseFloat(p.pnl || 0).toFixed(2);
                     return `
-                    <div class="card border-l-4 ${p.side==='LONG'?'border-l-green-500':'border-l-red-500'} flex justify-between items-center">
-                        <div>
-                            <div class="font-bold text-[12px]">${p.symbol} <span class="text-zinc-500 text-[9px]">x${p.dcaCount}</span></div>
-                            <div class="text-[9px] text-zinc-400">Entry: ${parseFloat(p.entryPrice).toFixed(4)}</div>
+                    <div class="card border-l-4 border-l-red-500 space-y-1">
+                        <div class="flex justify-between items-center">
+                            <div><b class="text-[12px]">${p.symbol}</b> <span class="bg-red-900 text-red-200 px-1 text-[8px] ml-1">SHORT x${p.leverage}</span></div>
+                            <div class="${parseFloat(pnl)>=0?'up':'down'} font-black text-[12px]">${pnl} USDT</div>
                         </div>
-                        <div class="text-right">
-                            <div class="font-bold text-white">${markPrice}</div>
-                            <div class="${pnlVal >= 0 ? 'up' : 'down'} font-black text-[11px]">${pnlVal.toFixed(2)} USDT</div>
+                        <div class="grid grid-cols-2 text-[9px] text-zinc-400">
+                            <div>Entry: <span class="text-white">${parseFloat(p.entryPrice).toFixed(4)}</span></div>
+                            <div class="text-right">Live: <span class="text-white">${parseFloat(p.markPrice || 0).toFixed(4)}</span></div>
+                            <div>TP: <span class="text-green-500">${p.tp}</span> | SL: <span class="text-red-500">${p.sl}</span></div>
+                            <div class="text-right uppercase">DCA: <span class="text-yellow-500">${p.dcaCount}</span></div>
                         </div>
                     </div>`;
-                }).join('') || '<div class="text-center text-zinc-700 py-4">No active positions</div>';
+                }).join('');
 
                 document.getElementById('logs').innerHTML = d.status.botLogs.map(l => `<div>[${l.time}] ${l.msg}</div>`).join('');
-                
-                const btn = document.getElementById('runBtn');
-                btn.innerText = d.botSettings.isRunning ? "STOP BOT" : "START BOT";
-                btn.className = d.botSettings.isRunning ? "w-full py-2 rounded bg-red-900/20 border-red-500 text-red-500 font-bold" : "w-full py-2 rounded bg-green-900/20 border-green-500 text-green-500 font-bold";
-            } catch (e) { console.error(e) }
+                document.getElementById('runBtn').innerText = d.botSettings.isRunning ? "STOP BOT" : "START BOT";
+                document.getElementById('runBtn').className = d.botSettings.isRunning ? "w-full py-2 rounded bg-red-900/20 border-red-500 text-red-500 font-bold" : "w-full py-2 rounded bg-green-900/20 border-green-500 text-green-500 font-bold";
+            } catch (e) {}
         }
 
         async function toggle() {
@@ -107,20 +118,10 @@
                 posSL: parseFloat(document.getElementById('posSL').value)
             };
             await fetch('/api/settings', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body) });
-            alert("Đã lưu cấu hình!");
+            alert("Đã lưu!");
         }
 
         setInterval(sync, 1000);
-        window.onload = () => {
-            fetch('/api/status').then(r => r.json()).then(d => {
-                document.getElementById('invValue').value = d.botSettings.invValue;
-                document.getElementById('maxPositions').value = d.botSettings.maxPositions;
-                document.getElementById('minVol').value = d.botSettings.minVol;
-                document.getElementById('posTP').value = d.botSettings.posTP;
-                document.getElementById('posSL').value = d.botSettings.posSL;
-                sync();
-            });
-        }
     </script>
 </body>
 </html>
