@@ -22,7 +22,7 @@ let botSettings = { isRunning: false, maxPositions: 3, invValue: "1%", minVol: 6
 let status = { botLogs: [], exchangeInfo: null, candidatesList: [], isReady: false, blackList: {}, botClosedCount: 0, botPnLClosed: 0 };
 let botActivePositions = new Map();
 let timestampOffset = 0; 
-let openingSymbols = new Set(); // Biến tạm chặn spam lệnh đang trong quá trình mở
+let openingSymbols = new Set(); 
 
 function addBotLog(msg, type = 'info') {
     const time = new Date().toLocaleTimeString('vi-VN', { hour12: false });
@@ -51,12 +51,13 @@ async function binancePrivate(endpoint, method = 'GET', data = {}) {
     }
 }
 
+// LUỒNG RIÊNG: Lấy PnL sau khi đóng
 async function trackClosedPnL(symbol, closedTime) {
     try {
-        await new Promise(r => setTimeout(r, 4000));
+        await new Promise(r => setTimeout(r, 4500));
         const trades = await binancePrivate('/fapi/v1/userTrades', 'GET', { symbol, limit: 10 });
         const realized = trades
-            .filter(t => Math.abs(t.time - closedTime) < 15000)
+            .filter(t => Math.abs(t.time - closedTime) < 20000)
             .reduce((sum, t) => sum + parseFloat(t.realizedPnl), 0);
         status.botClosedCount++;
         status.botPnLClosed += realized;
@@ -67,7 +68,7 @@ async function trackClosedPnL(symbol, closedTime) {
 async function syncTPSL(symbol, side, qty, entry, info, customTP = null, customSL = null) {
     try {
         await binancePrivate('/fapi/v1/allOpenOrders', 'DELETE', { symbol });
-        await new Promise(r => setTimeout(r, 1000));
+        await new Promise(r => setTimeout(r, 1200));
         const tpPct = customTP || botSettings.posTP;
         const slPct = customSL || botSettings.posSL;
         const tpPrice = (entry * (side === 'SHORT' ? (1 - tpPct / 100) : (1 + tpPct / 100))).toFixed(info.pricePrecision);
@@ -81,11 +82,25 @@ async function syncTPSL(symbol, side, qty, entry, info, customTP = null, customS
     } catch (e) { addBotLog(`⚠️ LỖI SYNC TPSL ${symbol}: ${e.message}`); return { tp: 0, sl: 0 }; }
 }
 
+async function openLongHedge(symbol, baseMargin, info) {
+    try {
+        addBotLog(`🔥 KÍCH HOẠT HEDGE LONG x50 CHO ${symbol}`, "warning");
+        const price = parseFloat((await binanceApi.get(`/fapi/v1/ticker/price?symbol=${symbol}`)).data.price);
+        const hedgeMargin = baseMargin * 50;
+        let qtyNum = Math.ceil(((hedgeMargin * info.maxLeverage) / price) / info.stepSize) * info.stepSize;
+        await exchange.setLeverage(info.maxLeverage, symbol);
+        await exchange.createOrder(symbol, 'market', 'buy', qtyNum.toFixed(info.quantityPrecision), undefined, { positionSide: 'LONG' });
+        await new Promise(r => setTimeout(r, 1500));
+        await syncTPSL(symbol, 'LONG', qtyNum, price, info, 10, 10);
+        addBotLog(`🚀 ĐÃ MỞ LONG HEDGE ${symbol} | Margin: ${hedgeMargin.toFixed(2)}$`, "success");
+    } catch (e) { addBotLog(`❌ LỖI MỞ LONG HEDGE ${symbol}: ${e.message}`, "error"); }
+}
+
 async function openPosition(symbol, isDCA = false) {
     const posKey = `${symbol}_SHORT`;
     if (!isDCA && (botActivePositions.has(posKey) || openingSymbols.has(symbol))) return;
     
-    openingSymbols.add(symbol); // Khóa symbol ngay lập tức
+    openingSymbols.add(symbol); 
     try {
         const info = status.exchangeInfo[symbol];
         const acc = await binancePrivate('/fapi/v2/account');
@@ -98,7 +113,7 @@ async function openPosition(symbol, isDCA = false) {
         let currentDCA = 0;
         if (isDCA) {
             const current = botActivePositions.get(posKey);
-            if (!current) throw new Error("Vị thế gốc đã mất dấu, không thể DCA");
+            if (!current) throw new Error("Vị thế gốc đã mất dấu");
             amountUSDT = (current.margin * info.maxLeverage) * 1.05; 
             current.isProcessing = true;
             currentDCA = current.dcaCount + 1;
@@ -117,26 +132,22 @@ async function openPosition(symbol, isDCA = false) {
             const totalQty = Math.abs(parseFloat(upPos.positionAmt));
             const currentMargin = (totalQty * avgEntry / info.maxLeverage);
 
-            addBotLog(`[${isDCA ? 'DCA_'+currentDCA : 'OPEN'}] ${symbol} | Value: ${(totalQty * avgEntry).toFixed(2)}$ | Entry: ${avgEntry}`, isDCA ? "warning" : "success");
+            addBotLog(`[${isDCA ? 'DCA_'+currentDCA : 'OPEN'}] ${symbol} | Margin: ${currentMargin.toFixed(2)}$ | Entry: ${avgEntry}`, isDCA ? "warning" : "success");
 
             const sync = await syncTPSL(symbol, 'SHORT', totalQty, avgEntry, info);
             botActivePositions.set(posKey, { 
                 symbol, side: 'SHORT', entryPrice: avgEntry, qty: totalQty, tp: sync.tp, sl: sync.sl, 
                 margin: currentMargin, baseMargin: isDCA ? botActivePositions.get(posKey).baseMargin : amountUSDT,
-                dcaCount: currentDCA, leverage: info.maxLeverage, isProcessing: false, pnl: 0 
+                dcaCount: currentDCA, leverage: info.maxLeverage, isProcessing: false, pnl: 0, hedged: isDCA ? botActivePositions.get(posKey).hedged : false
             });
         }
     } catch (e) { 
         if (e.message.includes("Margin is insufficient")) {
-            addBotLog(`⛔ THIẾU TIỀN: Ngưng quét ${symbol} trong 2 phút`, "error");
+            addBotLog(`⛔ THIẾU TIỀN: Chặn ${symbol} trong 2 phút`, "error");
             status.blackList[symbol] = Date.now() + (2 * 60 * 1000);
-        } else {
-            addBotLog(`❌ LỖI VÀO LỆNH ${symbol}: ${e.message}`);
-        }
+        } else { addBotLog(`❌ LỖI VÀO LỆNH ${symbol}: ${e.message}`); }
         if (isDCA && botActivePositions.has(posKey)) botActivePositions.get(posKey).isProcessing = false;
-    } finally {
-        openingSymbols.delete(symbol); // Giải tỏa symbol
-    }
+    } finally { openingSymbols.delete(symbol); }
 }
 
 async function priceMonitorLoop() {
@@ -150,6 +161,14 @@ async function priceMonitorLoop() {
                 botPos.markPrice = realPos.markPrice;
                 botPos.pnl = parseFloat(realPos.unRealizedProfit);
                 const markPrice = parseFloat(realPos.markPrice);
+
+                // Hedge Long x50 khi giá tăng 50%
+                const priceDev = ((markPrice - botPos.entryPrice) / botPos.entryPrice) * 100;
+                if (priceDev >= 50 && !botPos.hedged) {
+                    botPos.hedged = true;
+                    openLongHedge(botPos.symbol, botPos.baseMargin, status.exchangeInfo[botPos.symbol]);
+                }
+
                 if ((botPos.tp > 0 && markPrice <= botPos.tp) || (botPos.sl > 0 && markPrice >= botPos.sl)) {
                     if (!botPos.isProcessing) {
                         botPos.isProcessing = true;
@@ -173,7 +192,6 @@ async function mainLoop() {
         const activeRealPos = posRisk.filter(p => Math.abs(parseFloat(p.positionAmt)) > 0);
         const now = Date.now();
 
-        // 1. Kiểm tra DCA (Luôn ưu tiên xử lý lệnh đang mở)
         for (let [key, botPos] of botActivePositions) {
             if (botPos.isProcessing) continue;
             const realPos = activeRealPos.find(p => p.symbol === botPos.symbol && p.positionSide === botPos.side);
@@ -182,13 +200,12 @@ async function mainLoop() {
             if (priceDev >= botSettings.dcaStep && botPos.dcaCount < botSettings.maxDCA) await openPosition(botPos.symbol, true);
         }
 
-        // 2. Mở lệnh mới (Kiểm tra thực tế sàn + Biến tạm chặn spam)
         if (activeRealPos.length < botSettings.maxPositions && openingSymbols.size === 0) {
             const keo = status.candidatesList.find(c => {
                 const info = status.exchangeInfo[c.symbol];
                 const isBL = (status.blackList[c.symbol] || 0) > now;
                 const isOpened = activeRealPos.some(p => p.symbol === c.symbol);
-                return info && !isBL && !isOpened && !openingSymbols.has(c.symbol) && [c.c1, c.c5, c.c15].some(v => Math.abs(parseFloat(v)) >= parseFloat(botSettings.minVol));
+                return info && info.maxLeverage >= 20 && !isBL && !isOpened && !openingSymbols.has(c.symbol) && [c.c1, c.c5, c.c15].some(v => Math.abs(parseFloat(v)) >= parseFloat(botSettings.minVol));
             });
             if (keo) await openPosition(keo.symbol, false);
         }
