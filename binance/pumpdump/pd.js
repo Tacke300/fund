@@ -51,7 +51,6 @@ async function binancePrivate(endpoint, method = 'GET', data = {}) {
     }
 }
 
-// LUỒNG RIÊNG: Lấy PnL sau khi đóng
 async function trackClosedPnL(symbol, closedTime) {
     try {
         await new Promise(r => setTimeout(r, 4500));
@@ -106,20 +105,23 @@ async function openPosition(symbol, isDCA = false) {
         const acc = await binancePrivate('/fapi/v2/account');
         const price = parseFloat((await binanceApi.get(`/fapi/v1/ticker/price?symbol=${symbol}`)).data.price);
         
-        let amountUSDT = botSettings.invValue.toString().includes('%') 
-            ? (parseFloat(acc.availableBalance) * parseFloat(botSettings.invValue) / 100) 
-            : parseFloat(botSettings.invValue);
-        
+        let marginToUse = 0;
         let currentDCA = 0;
+
         if (isDCA) {
             const current = botActivePositions.get(posKey);
             if (!current) throw new Error("Vị thế gốc đã mất dấu");
-            amountUSDT = (current.margin * info.maxLeverage) * 1.05; 
+            // Fix: Chỉ lấy Margin hiện tại * 1.05 để tính khối lượng cứu
+            marginToUse = current.margin * 1.05; 
             current.isProcessing = true;
             currentDCA = current.dcaCount + 1;
+        } else {
+            marginToUse = botSettings.invValue.toString().includes('%') 
+                ? (parseFloat(acc.availableBalance) * parseFloat(botSettings.invValue) / 100) 
+                : parseFloat(botSettings.invValue);
         }
 
-        let qtyNum = Math.ceil(((amountUSDT * info.maxLeverage) / price) / info.stepSize) * info.stepSize;
+        let qtyNum = Math.ceil(((marginToUse * info.maxLeverage) / price) / info.stepSize) * info.stepSize;
         while ((qtyNum * price) < 5.5) qtyNum += info.stepSize;
 
         await exchange.setLeverage(info.maxLeverage, symbol);
@@ -132,12 +134,12 @@ async function openPosition(symbol, isDCA = false) {
             const totalQty = Math.abs(parseFloat(upPos.positionAmt));
             const currentMargin = (totalQty * avgEntry / info.maxLeverage);
 
-            addBotLog(`[${isDCA ? 'DCA_'+currentDCA : 'OPEN'}] ${symbol} | Margin: ${currentMargin.toFixed(2)}$ | Entry: ${avgEntry}`, isDCA ? "warning" : "success");
+            addBotLog(`[${isDCA ? 'DCA_'+currentDCA : 'OPEN'}] ${symbol} | Qty: ${qtyNum.toFixed(info.quantityPrecision)} | Margin: ${marginToUse.toFixed(2)}$`, isDCA ? "warning" : "success");
 
             const sync = await syncTPSL(symbol, 'SHORT', totalQty, avgEntry, info);
             botActivePositions.set(posKey, { 
                 symbol, side: 'SHORT', entryPrice: avgEntry, qty: totalQty, tp: sync.tp, sl: sync.sl, 
-                margin: currentMargin, baseMargin: isDCA ? botActivePositions.get(posKey).baseMargin : amountUSDT,
+                margin: currentMargin, baseMargin: isDCA ? botActivePositions.get(posKey).baseMargin : marginToUse,
                 dcaCount: currentDCA, leverage: info.maxLeverage, isProcessing: false, pnl: 0, hedged: isDCA ? botActivePositions.get(posKey).hedged : false
             });
         }
@@ -162,7 +164,6 @@ async function priceMonitorLoop() {
                 botPos.pnl = parseFloat(realPos.unRealizedProfit);
                 const markPrice = parseFloat(realPos.markPrice);
 
-                // Hedge Long x50 khi giá tăng 50%
                 const priceDev = ((markPrice - botPos.entryPrice) / botPos.entryPrice) * 100;
                 if (priceDev >= 50 && !botPos.hedged) {
                     botPos.hedged = true;
@@ -205,6 +206,7 @@ async function mainLoop() {
                 const info = status.exchangeInfo[c.symbol];
                 const isBL = (status.blackList[c.symbol] || 0) > now;
                 const isOpened = activeRealPos.some(p => p.symbol === c.symbol);
+                // Khôi phục chặn coin có Max Leverage < 20
                 return info && info.maxLeverage >= 20 && !isBL && !isOpened && !openingSymbols.has(c.symbol) && [c.c1, c.c5, c.c15].some(v => Math.abs(parseFloat(v)) >= parseFloat(botSettings.minVol));
             });
             if (keo) await openPosition(keo.symbol, false);
