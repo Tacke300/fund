@@ -19,8 +19,8 @@ const exchange = new ccxt.binance({
 });
 
 let botSettings = { isRunning: false, maxPositions: 3, invValue: "1%", minVol: 6.5, posTP: 0.5, posSL: 50.0, dcaStep: 10.0, maxDCA: 4 };
-// Thêm closedCount và closedPnL vào status
-let status = { botLogs: [], exchangeInfo: null, candidatesList: [], isReady: false, blackList: {}, closedCount: 0, closedPnL: 0 };
+// Chỉ số thống kê riêng của BOT
+let status = { botLogs: [], exchangeInfo: null, candidatesList: [], isReady: false, blackList: {}, botClosedCount: 0, botPnLClosed: 0 };
 let botActivePositions = new Map();
 let timestampOffset = 0; 
 
@@ -53,7 +53,6 @@ async function binancePrivate(endpoint, method = 'GET', data = {}) {
 
 async function syncTPSL(symbol, side, qty, entry, info) {
     try {
-        // XÓA CHÍNH XÁC TP/SL CŨ CỦA SYMBOL TRƯỚC KHI ĐẶT MỚI
         const openOrders = await binancePrivate('/fapi/v1/openOrders', 'GET', { symbol });
         const oldOrders = openOrders.filter(o => ['TAKE_PROFIT_MARKET', 'STOP_MARKET'].includes(o.type));
         for (const o of oldOrders) { await binancePrivate('/fapi/v1/order', 'DELETE', { symbol, orderId: o.orderId }).catch(()=>{}); }
@@ -98,15 +97,14 @@ async function openPosition(symbol, isDCA = false) {
             const upPos = (await binancePrivate('/fapi/v2/positionRisk', 'GET', { symbol })).find(p => p.positionSide === 'SHORT');
             const avgEntry = parseFloat(upPos.entryPrice);
             const totalQty = Math.abs(parseFloat(upPos.positionAmt));
-            const dcaCount = isDCA ? botActivePositions.get(posKey).dcaCount + 1 : 0;
             const sync = await syncTPSL(symbol, 'SHORT', totalQty, avgEntry, info);
 
-            // LOG QTY BẰNG USDT ($)
-            addBotLog(`${isDCA ? '⚠️ DCA' : '🚀 OPEN'} | ${symbol} | Qty:${(totalQty * avgEntry).toFixed(1)}$ | AvgEntry:${avgEntry} | TP:${sync.tp} | SL:${sync.sl} | DCA:${dcaCount}`, isDCA ? "warning" : "success");
+            addBotLog(`${isDCA ? '⚠️ DCA' : '🚀 OPEN'} | ${symbol} | Qty:${(totalQty * avgEntry).toFixed(1)}$ | Entry:${avgEntry} | TP:${sync.tp} | SL:${sync.sl}`, isDCA ? "warning" : "success");
 
             botActivePositions.set(posKey, { 
                 symbol, side: 'SHORT', entryPrice: avgEntry, qty: totalQty, tp: sync.tp, sl: sync.sl, 
-                margin: (totalQty * avgEntry / info.maxLeverage), dcaCount, leverage: info.maxLeverage, isProcessing: false 
+                margin: (totalQty * avgEntry / info.maxLeverage), dcaCount: isDCA ? botActivePositions.get(posKey).dcaCount + 1 : 0, 
+                leverage: info.maxLeverage, isProcessing: false, pnl: 0 
             });
         }
     } catch (e) { if (botActivePositions.has(posKey)) botActivePositions.get(posKey).isProcessing = false; }
@@ -119,18 +117,25 @@ async function priceMonitorLoop() {
         const now = Date.now();
         for (let [key, botPos] of botActivePositions) {
             const realPos = posRisk.find(p => p.symbol === botPos.symbol && p.positionSide === botPos.side);
+            
+            // Cập nhật PnL tạm thời để hiển thị
+            if (realPos) {
+                botPos.markPrice = realPos.markPrice;
+                botPos.pnl = parseFloat(realPos.unRealizedProfit);
+            }
+
+            // Khi lệnh đã đóng
             if (!realPos || Math.abs(parseFloat(realPos.positionAmt)) < (status.exchangeInfo[botPos.symbol].stepSize)) {
-                // CẬP NHẬT THỐNG KÊ KHI ĐÓNG
-                status.closedCount++;
-                status.closedPnL += parseFloat(botPos.pnl || 0);
+                status.botClosedCount++;
+                status.botPnLClosed += botPos.pnl; // Chỉ cộng PnL của chính con Bot này
                 status.blackList[botPos.symbol] = now + (15 * 60 * 1000);
-                addBotLog(`✅ CLOSE | ${botPos.symbol}`, "success");
+                addBotLog(`✅ CLOSE | ${botPos.symbol} | PnL: ${botPos.pnl.toFixed(2)}$`, "success");
                 botActivePositions.delete(key);
                 continue;
             }
-            botPos.markPrice = realPos.markPrice;
-            botPos.pnl = realPos.unRealizedProfit;
-            if ((botPos.tp > 0 && parseFloat(realPos.markPrice) <= botPos.tp) || (botPos.sl > 0 && parseFloat(realPos.markPrice) >= botPos.sl)) {
+
+            const markPrice = parseFloat(realPos.markPrice);
+            if ((botPos.tp > 0 && markPrice <= botPos.tp) || (botPos.sl > 0 && markPrice >= botPos.sl)) {
                 botPos.isProcessing = true;
                 await exchange.createOrder(botPos.symbol, 'market', 'buy', Math.abs(parseFloat(realPos.positionAmt)), undefined, { positionSide: 'SHORT' });
             }
