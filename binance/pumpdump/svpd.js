@@ -53,13 +53,20 @@ function calculateChange(pArr, min) {
 
 function initWS() {
     console.log('Đang kết nối tới Binance WebSocket...');
-    const ws = new WebSocket('wss://fstream.binance.com/ws/!ticker@arr');
+    
+    // Đã thêm { family: 4 } để ép dùng IPv4, sửa lỗi ENETUNREACH/Tailscale
+    const ws = new WebSocket('wss://fstream.binance.com/ws/!ticker@arr', {
+        family: 4
+    });
 
-    // Tự động kiểm tra kết nối sau 30s nếu không nhận được dữ liệu
     let pingTimeout = setTimeout(() => {
         console.log('Quá thời gian chờ dữ liệu, đang khởi động lại WebSocket...');
         ws.terminate();
     }, 30000);
+
+    ws.on('open', () => {
+        console.log('✅ WebSocket Connected!');
+    });
 
     ws.on('message', (data) => {
         clearTimeout(pingTimeout);
@@ -159,7 +166,6 @@ app.get('/api/data', (req, res) => {
 });
 
 app.get('/gui', (req, res) => {
-    // Phần HTML giữ nguyên 100% giao diện Luffy cũ của bạn
     res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Binance Luffy Pro</title>
     <script src="https://cdn.tailwindcss.com"></script>
