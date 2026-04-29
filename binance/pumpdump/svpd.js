@@ -1,147 +1,101 @@
-/**
- * LUFFY ENGINE - BẢN FULL FIX ĐỨNG HÌNH & LAG
- * TRẠNG THÁI: NHẢY SỐ REALTIME - CHỐNG TRÀN RAM - BỎ CHỚP
- */
-
-const PORT = 9000;
-const HISTORY_FILE = './history_db.json';
-
 import WebSocket from 'ws';
 import express from 'express';
-import fs from 'fs';
 import fetch from 'node-fetch';
 
+const PORT = 9000;
 const app = express();
-let coinData = {}; 
-let historyMap = new Map(); 
-let pendingMap = new Map(); 
 
-// --- DATABASE INIT ---
-if (fs.existsSync(HISTORY_FILE)) {
-    try {
-        const savedData = JSON.parse(fs.readFileSync(HISTORY_FILE));
-        savedData.forEach(h => {
-            historyMap.set(`${h.symbol}_${h.startTime}`, h);
-            if (h.status === 'PENDING') pendingMap.set(h.symbol, h);
-        });
-    } catch (e) {}
-}
+// Bộ nhớ đệm siêu tốc
+let priceCache = new Map();
+let lastUpdate = Date.now();
 
 /**
- * 1. TÍNH TOÁN BIẾN ĐỘNG - FIX LỖI ĐỨNG SỐ
+ * 1. KHỞI TẠO DỮ LIỆU BAN ĐẦU
  */
-function calculateChange(symbol, min) {
-    const data = coinData[symbol];
-    if (!data || data.prices.length < 2) return "0.00";
-    
-    const now = Date.now();
-    const targetTime = now - (min * 60000);
-    
-    let startPrice = data.prices[0].p;
-    for (let i = data.prices.length - 1; i >= 0; i--) {
-        if (data.prices[i].t <= targetTime) {
-            startPrice = data.prices[i].p;
-            break;
-        }
-    }
-    const currentPrice = data.prices[data.prices.length - 1].p;
-    return (((currentPrice - startPrice) / startPrice) * 100).toFixed(2);
-}
-
-/**
- * 2. PRELOAD DỮ LIỆU (TẮT LOG CHI TIẾT)
- */
-async function preloadHistory(symbol) {
-    try {
-        const res = await fetch(`https://fapi.binance.com/fapi/v1/klines?symbol=${symbol}&interval=1m&limit=31`);
-        const data = await res.json();
-        coinData[symbol] = {
-            symbol,
-            prices: data.map(k => ({ p: parseFloat(k[4]), t: parseInt(k[0]) }))
-        };
-        return true;
-    } catch (e) { return false; }
-}
-
-async function preloadAll() {
-    console.log('⏳ Khởi động hệ thống...');
-    const res = await fetch('https://fapi.binance.com/fapi/v1/exchangeInfo');
-    const info = await res.json();
-    const allFutures = info.symbols.filter(s => s.quoteAsset === 'USDT' && s.status === 'TRADING').map(s => s.symbol);
-    
-    let success = 0;
-    const batchSize = 50;
-    for (let i = 0; i < allFutures.length; i += batchSize) {
-        await Promise.all(allFutures.slice(i, i + batchSize).map(sym => preloadHistory(sym)));
-        success += Math.min(batchSize, allFutures.length - i);
-        process.stdout.write(`\r🚀 Nạp data: ${Math.round((success/allFutures.length)*100)}%`);
-    }
-    console.log('\n✅ Sẵn sàng!');
-}
-
-/**
- * 3. WEBSOCKET - NHẬN GIÁ & TÍNH PNL GỐC
- */
-function initWS() {
-    const ws = new WebSocket('wss://fstream.binance.com/ws/!miniTicker@arr');
-    ws.on('message', (data) => {
-        try {
-            const tickers = JSON.parse(data);
-            const now = Date.now();
-            tickers.forEach(t => {
-                const s = t.s; const p = parseFloat(t.c);
-                if (!coinData[s]) return;
-
-                coinData[s].prices.push({ p, t: now });
-                if (coinData[s].prices.length > 1000) coinData[s].prices.shift(); // Giới hạn bộ nhớ
-
-                // Logic PNL gốc của mày
-                const pending = pendingMap.get(s);
-                if (pending && pending.status === 'PENDING') {
-                    const diff = ((p - pending.avgPrice) / pending.avgPrice) * 100;
-                    const roi = (pending.type === 'LONG' ? diff : -diff) * 20;
-                    // ... (Mày có thể thêm logic chốt lời ở đây nếu cần)
-                }
+async function initData() {
+    console.log('⏳ Đang kết nối sàn Binance...');
+    const res = await fetch('https://fapi.binance.com/fapi/v1/ticker/price');
+    const data = await res.json();
+    data.forEach(item => {
+        if (item.symbol.endsWith('USDT')) {
+            priceCache.set(item.symbol, {
+                s: item.symbol,
+                p: parseFloat(item.price),
+                h: [{ p: parseFloat(item.price), t: Date.now() }],
+                c: "0.00"
             });
-        } catch (e) {}
+        }
     });
-    ws.on('close', () => setTimeout(initWS, 5000));
+    console.log(`✅ Đã nạp ${priceCache.size} cặp tiền.`);
 }
 
-// --- API SIÊU NHẸ ---
-app.get('/api/data', (req, res) => {
-    const live = Object.values(coinData).map(c => ({
-        s: c.symbol,
-        p: c.prices[c.prices.length - 1].p,
-        c1: calculateChange(c.symbol, 1),
-        c5: calculateChange(c.symbol, 5),
-        c15: calculateChange(c.symbol, 15)
-    })).sort((a,b) => Math.abs(b.c1) - Math.abs(a.c1)).slice(0, 25);
+/**
+ * 2. WEBSOCKET STREAM - GIÁ NHẢY TỪNG MILI GIÂY
+ */
+function startStream() {
+    // Stream toàn bộ miniTicker của Binance Future
+    const ws = new WebSocket('wss://fstream.binance.com/ws/!miniTicker@arr');
 
-    res.json({ live, pending: Array.from(historyMap.values()).filter(h => h.status === 'PENDING') });
+    ws.on('message', (data) => {
+        const tickers = JSON.parse(data);
+        const now = Date.now();
+        
+        tickers.forEach(t => {
+            let coin = priceCache.get(t.s);
+            if (coin) {
+                const newPrice = parseFloat(t.c);
+                coin.p = newPrice;
+                coin.h.push({ p: newPrice, t: now });
+
+                // Giữ lịch sử ngắn (2 phút) để tính biến động nhanh, tránh nặng RAM
+                if (coin.h.length > 200) coin.h.shift();
+
+                // Tính % biến động ngay lập tức (Realtime Calculation)
+                const startPoint = coin.h[0];
+                coin.c = (((newPrice - startPoint.p) / startPoint.p) * 100).toFixed(2);
+            }
+        });
+    });
+
+    ws.on('error', () => setTimeout(startStream, 3000));
+    ws.on('close', () => setTimeout(startStream, 3000));
+}
+
+/**
+ * 3. API TỐC ĐỘ CAO
+ */
+app.get('/api/live', (req, res) => {
+    // Lấy Top 30 con đang biến động mạnh nhất để hiển thị
+    const sorted = Array.from(priceCache.values())
+        .sort((a, b) => Math.abs(b.c) - Math.abs(a.c))
+        .slice(0, 30);
+    res.json(sorted);
 });
 
-// --- GUI: REALTIME KHÔNG LAG ---
+/**
+ * 4. GIAO DIỆN "GAME ENGINE" - NHẢY GIÁ LIÊN TỤC
+ */
 app.get('/gui', (req, res) => {
-    res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8">
-    <title>Luffy Engine V4</title>
+    res.send(`<!DOCTYPE html><html><head>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        body { background: #0b0e11; color: #eaecef; font-family: monospace; }
+        body { background: #0b0e11; color: white; font-family: 'Consolas', monospace; overflow: hidden; }
         .up { color: #0ecb81; } .down { color: #f6465d; }
-        .bg-card { background: #1e2329; border: 1px solid #30363d; }
+        .price-cell { transition: color 0.1s ease-in; }
+        tr { border-bottom: 1px solid #1e2329; }
     </style></head>
     <body class="p-4">
-        <div class="max-w-4xl mx-auto bg-card rounded p-4">
-            <div class="flex justify-between border-b border-gray-700 pb-2 mb-4">
-                <span class="text-yellow-500 font-bold font-sans italic">LUFFY BABY ENGINE</span>
-                <span id="timer" class="text-gray-500"></span>
+        <div class="max-w-4xl mx-auto bg-[#1e2329] rounded-lg p-4 shadow-2xl border border-gray-800">
+            <div class="flex justify-between items-center mb-4 border-b border-gray-700 pb-2">
+                <h1 class="text-yellow-500 font-black italic">LUFFY 1S-ENGINE</h1>
+                <div id="fps" class="text-[10px] text-gray-500">SYNCING...</div>
             </div>
-            <table class="w-full text-[13px]">
+            <table class="w-full text-left">
                 <thead>
-                    <tr class="text-gray-500 text-left uppercase border-b border-gray-800">
-                        <th class="p-2">Cặp</th><th>Giá Live</th>
-                        <th class="text-center">1M%</th><th class="text-center">5M%</th><th class="text-center">15M%</th>
+                    <tr class="text-gray-500 text-[10px] uppercase">
+                        <th class="p-2">Cặp Tiền</th>
+                        <th>Giá Hiện Tại</th>
+                        <th class="text-right">Biến Động (Realtime)</th>
                     </tr>
                 </thead>
                 <tbody id="list"></tbody>
@@ -149,36 +103,43 @@ app.get('/gui', (req, res) => {
         </div>
 
         <script>
-            async function update() {
+            let lastPrices = {};
+
+            async function render() {
                 try {
-                    const res = await fetch('/api/data');
-                    const d = await res.json();
-                    document.getElementById('timer').innerText = new Date().toLocaleTimeString();
+                    const r = await fetch('/api/live');
+                    const data = await r.json();
+                    const container = document.getElementById('list');
+                    const fps = document.getElementById('fps');
                     
-                    const list = document.getElementById('list');
-                    // Sử dụng phương pháp cộng dồn chuỗi rồi gán một lần để tránh lag DOM
                     let html = '';
-                    d.live.forEach(m => {
-                        html += \`
-                        <tr class="border-b border-gray-800/40">
-                            <td class="p-2 font-bold font-sans">\${m.s}</td>
-                            <td class="text-yellow-400 font-bold">\${m.p.toFixed(4)}</td>
-                            <td class="text-center font-bold \${m.c1>=0?'up':'down'}">\${m.c1}%</td>
-                            <td class="text-center font-bold \${m.c5>=0?'up':'down'}">\${m.c5}%</td>
-                            <td class="text-center font-bold \${m.c15>=0?'up':'down'}">\${m.c15}%</td>
+                    data.forEach(c => {
+                        const oldP = lastPrices[c.s] || c.p;
+                        const pClass = c.p > oldP ? 'text-green-400' : (c.p < oldP ? 'text-red-400' : 'text-yellow-400');
+                        lastPrices[c.s] = c.p;
+
+                        html += \`<tr>
+                            <td class="p-2 font-bold">\${c.s}</td>
+                            <td class="font-mono font-bold \${pClass}">\${c.p.toFixed(4)}</td>
+                            <td class="text-right font-black \${c.c >= 0 ? 'up' : 'down'}">\${c.c}%</td>
                         </tr>\`;
                     });
-                    list.innerHTML = html;
+                    container.innerHTML = html;
+                    fps.innerText = 'LAST UPDATE: ' + new Date().toLocaleTimeString();
                 } catch(e) {}
             }
-            // Chạy 1 giây/lần. Đừng đặt nhanh hơn sẽ bị lag trình duyệt
-            setInterval(update, 1000);
+
+            // ĐẶT 800ms ĐỂ GIÁ NHẢY LIÊN TỤC MÀ KHÔNG TREO CHROME
+            setInterval(render, 800);
         </script>
     </body></html>`);
 });
 
-app.listen(PORT, '0.0.0.0', async () => { 
-    await preloadAll(); 
-    initWS(); 
-    console.log(\`🚀 Link: http://localhost:\${PORT}/gui\`); 
-});
+// CHẠY HỆ THỐNG
+(async () => {
+    await initData();
+    startStream();
+    app.listen(PORT, '0.0.0.0', () => {
+        console.log(`\n🚀 LUFFY ENGINE LIVE TẠI: http://localhost:${PORT}/gui`);
+    });
+})();
