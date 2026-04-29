@@ -52,11 +52,14 @@ function calculateChange(pArr, min) {
 }
 
 function initWS() {
-    console.log('Đang kết nối tới Binance WebSocket...');
+    console.log('Đang kết nối tới Binance WebSocket (Optimize for Tailscale)...');
     
-    // Đã thêm { family: 4 } để ép dùng IPv4, sửa lỗi ENETUNREACH/Tailscale
-    const ws = new WebSocket('wss://fstream.binance.com/ws/!ticker@arr', {
-        family: 4
+    // Sử dụng fapi và ép IPv4 + Header để tránh bị Tailscale làm rớt gói tin
+    const ws = new WebSocket('wss://fapi.binance.com/ws/!ticker@arr', {
+        family: 4,
+        headers: {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        }
     });
 
     let pingTimeout = setTimeout(() => {
@@ -65,7 +68,7 @@ function initWS() {
     }, 30000);
 
     ws.on('open', () => {
-        console.log('✅ WebSocket Connected!');
+        console.log('✅ WebSocket Connected! Đang nhận luồng dữ liệu...');
     });
 
     ws.on('message', (data) => {
@@ -138,7 +141,7 @@ function initWS() {
     });
 
     ws.on('error', (err) => {
-        console.error('Lỗi kết nối (ENETUNREACH hoặc Timeout):', err.message);
+        console.error('Lỗi WebSocket:', err.message);
         ws.terminate(); 
     });
 
