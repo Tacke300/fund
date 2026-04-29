@@ -48,35 +48,51 @@ if (fs.existsSync(HISTORY_FILE)) {
     } catch (e) {}
 }
 
+/**
+ * FIX CHUẨN: Tính biến động dựa trên mảng đã chuẩn hóa 1s/điểm
+ */
 function calculateChange(pArr, min) {
     if (!pArr || pArr.length < 2) return 0;
+
     const now = Date.now();
-    // Tìm nến gần nhất với mốc phút yêu cầu
-    let start = pArr.find(i => i.t >= (now - min * 60000)) || pArr[0]; 
-    let change = ((pArr[pArr.length - 1].p - start.p) / start.p) * 100;
+    const targetTime = now - min * 60000;
+
+    // FIX: Nếu chưa đủ dữ liệu cho khung thời gian này -> Trả về 0 để tránh fake vol
+    if (now - pArr[0].t < min * 60000) return 0;
+
+    let start = pArr[0];
+
+    // Duyệt ngược tìm điểm chuẩn xác nhất gần mốc targetTime
+    for (let i = pArr.length - 1; i >= 0; i--) {
+        if (pArr[i].t <= targetTime) {
+            start = pArr[i];
+            break;
+        }
+    }
+
+    const latest = pArr[pArr.length - 1];
+    let change = ((latest.p - start.p) / start.p) * 100;
     return parseFloat(change.toFixed(2));
 }
 
 function initWS() {
-    console.log('🚀 Luffy Engine: Đang kết nối và tính toán biến động...');
+    console.log('🚀 Luffy Engine: Đang lấy dữ liệu miniTicker & Chuẩn hóa 1s/sampling...');
     
-    // Quay lại dùng ticker@arr để lấy giá khớp lệnh thực tế (Last Price) 
-    // và đảm bảo tính toán biến động chuẩn nhất cho 3 khung
-    const ws = new WebSocket('wss://fstream.binance.com/ws/!ticker@arr', {
+    const ws = new WebSocket('wss://fstream.binance.com/ws/!miniTicker@arr', {
         family: 4 
     });
 
     let lastMessageTime = Date.now();
 
     const watchdog = setInterval(() => {
-        if (Date.now() - lastMessageTime > 60000) {
+        if (Date.now() - lastMessageTime > 120000) {
             console.log('Watchdog: Reconnecting...');
             ws.terminate();
         }
     }, 10000);
 
     ws.on('open', () => {
-        console.log('✅ Kết nối thành công!');
+        console.log('✅ WebSocket kết nối thành công!');
         lastMessageTime = Date.now();
     });
 
@@ -91,19 +107,29 @@ function initWS() {
         } catch (e) { return; }
 
         const now = Date.now();
+        const currentSecond = Math.floor(now / 1000);
+
         tickers.forEach(t => {
             const s = t.s;
-            const p = parseFloat(t.c); // t.c là giá đóng cửa gần nhất (Last Price) cho Ticker
+            const p = parseFloat(t.c); 
             
-            if (!coinData[s]) coinData[s] = { symbol: s, prices: [] };
+            if (!coinData[s]) coinData[s] = { symbol: s, prices: [], lastUpdateSecond: 0 };
             
-            // Lưu giá vào mảng để tính biến động
-            coinData[s].prices.push({ p, t: now });
+            /**
+             * FIX CHỦ CHỐT: Chỉ lưu 1 điểm dữ liệu duy nhất cho mỗi giây
+             * Giúp mảng prices đồng nhất về mặt thời gian
+             */
+            if (coinData[s].lastUpdateSecond !== currentSecond) {
+                coinData[s].lastUpdateSecond = currentSecond;
+                coinData[s].prices.push({ p, t: now });
+
+                // Buffer 1200 điểm ~ 20 phút (thoải mái cho khung 15m)
+                if (coinData[s].prices.length > 1200) {
+                    coinData[s].prices.shift();
+                }
+            }
             
-            // Giữ lại tối đa 20 phút dữ liệu (300 nến nếu nhận mỗi 4s)
-            if (coinData[s].prices.length > 500) coinData[s].prices.shift();
-            
-            // Cập nhật biến động 3 khung cho GUI
+            // Tính toán dựa trên mảng đã chuẩn hóa
             const c1 = calculateChange(coinData[s].prices, 1);
             const c5 = calculateChange(coinData[s].prices, 5);
             const c15 = calculateChange(coinData[s].prices, 15);
@@ -142,33 +168,35 @@ function initWS() {
                         setTimeout(() => { pending.avgPrice = newAvg; pending.dcaCount = newCount; }, 200); 
                     }});
                 }
-            } else if (Math.max(Math.abs(c1), Math.abs(c5), Math.abs(c15)) >= currentMinVol) {
-                if (lastTradeClosed[s] && (now - lastTradeClosed[s] < COOLDOWN_MINUTES * 60000)) return;
-                if (!actionQueue.find(q => q.id === s)) {
-                    actionQueue.push({ id: s, priority: 2, action: () => {
-                        const sumVol = c1 + c5 + c15;
-                        let type = sumVol >= 0 ? 'LONG' : 'SHORT';
-                        if (tradeMode === 'REVERSE') type = (type === 'LONG' ? 'SHORT' : 'LONG');
-                        const newT = { 
-                            symbol: s, startTime: Date.now(), snapPrice: p, avgPrice: p, type: type, status: 'PENDING', 
-                            maxLev: symbolMaxLeverage[s] || 20, tpTarget: currentTP, slTarget: currentSL, snapVol: { c1, c5, c15 },
-                            maxNegativeRoi: 0, dcaCount: 0, dcaHistory: [{ t: Date.now(), p: p, avg: p }]
-                        };
-                        historyMap.set(`${s}_${newT.startTime}`, newT);
-                        pendingMap.set(s, newT);
-                    }});
+            } else {
+                // Chỉ xét vào lệnh khi đã tích lũy đủ 1 phút dữ liệu tối thiểu
+                const maxVol = Math.max(Math.abs(c1), Math.abs(c5), Math.abs(c15));
+                if (maxVol >= currentMinVol) {
+                    if (lastTradeClosed[s] && (now - lastTradeClosed[s] < COOLDOWN_MINUTES * 60000)) return;
+                    if (!actionQueue.find(q => q.id === s)) {
+                        actionQueue.push({ id: s, priority: 2, action: () => {
+                            const sumVol = c1 + c5 + c15;
+                            let type = sumVol >= 0 ? 'LONG' : 'SHORT';
+                            if (tradeMode === 'REVERSE') type = (type === 'LONG' ? 'SHORT' : 'LONG');
+                            const newT = { 
+                                symbol: s, startTime: Date.now(), snapPrice: p, avgPrice: p, type: type, status: 'PENDING', 
+                                maxLev: symbolMaxLeverage[s] || 20, tpTarget: currentTP, slTarget: currentSL, snapVol: { c1, c5, c15 },
+                                maxNegativeRoi: 0, dcaCount: 0, dcaHistory: [{ t: Date.now(), p: p, avg: p }]
+                            };
+                            historyMap.set(`${s}_${newT.startTime}`, newT);
+                            pendingMap.set(s, newT);
+                        }});
+                    }
                 }
             }
         });
     });
 
-    ws.on('close', () => {
-        clearInterval(watchdog);
-        setTimeout(initWS, 5000);
-    });
+    ws.on('close', () => { clearInterval(watchdog); setTimeout(initWS, 5000); });
     ws.on('error', () => ws.terminate());
 }
 
+// --- EXPRESS & GUI LOGIC (GIỮ NGUYÊN BẢN GỐC CỦA BẠN) ---
 app.get('/api/config', (req, res) => {
     currentTP = parseFloat(req.query.tp) || currentTP;
     currentSL = parseFloat(req.query.sl) || currentSL;
