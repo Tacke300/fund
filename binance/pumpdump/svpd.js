@@ -52,8 +52,22 @@ function calculateChange(pArr, min) {
 }
 
 function initWS() {
+    console.log('Đang kết nối tới Binance WebSocket...');
     const ws = new WebSocket('wss://fstream.binance.com/ws/!ticker@arr');
+
+    // Tự động kiểm tra kết nối sau 30s nếu không nhận được dữ liệu
+    let pingTimeout = setTimeout(() => {
+        console.log('Quá thời gian chờ dữ liệu, đang khởi động lại WebSocket...');
+        ws.terminate();
+    }, 30000);
+
     ws.on('message', (data) => {
+        clearTimeout(pingTimeout);
+        pingTimeout = setTimeout(() => {
+            console.log('Mất tín hiệu dữ liệu, đang reconnect...');
+            ws.terminate();
+        }, 30000);
+
         const tickers = JSON.parse(data);
         const now = Date.now();
         tickers.forEach(t => {
@@ -83,7 +97,6 @@ function initWS() {
                     return;
                 }
 
-                // Sửa logic DCA tính theo khoảng cách cố định từ SnapPrice (Entry đầu)
                 const totalDiffFromEntry = ((p - pending.snapPrice) / pending.snapPrice) * 100;
                 const nextDcaThreshold = (pending.dcaCount + 1) * pending.slTarget;
                 const triggerDCA = pending.type === 'LONG' ? totalDiffFromEntry <= -nextDcaThreshold : totalDiffFromEntry >= nextDcaThreshold;
@@ -116,7 +129,17 @@ function initWS() {
             }
         });
     });
-    ws.on('close', () => setTimeout(initWS, 5000));
+
+    ws.on('error', (err) => {
+        console.error('Lỗi kết nối (ENETUNREACH hoặc Timeout):', err.message);
+        ws.terminate(); 
+    });
+
+    ws.on('close', () => {
+        clearTimeout(pingTimeout);
+        console.log('WebSocket đóng. Đang kết nối lại sau 5 giây...');
+        setTimeout(initWS, 5000);
+    });
 }
 
 app.get('/api/config', (req, res) => {
@@ -128,7 +151,7 @@ app.get('/api/data', (req, res) => {
     const all = Array.from(historyMap.values());
     const topData = Object.entries(coinData).filter(([_, v]) => v.live).map(([s, v]) => ({ symbol: s, ...v.live })).sort((a,b) => Math.abs(b.c1) - Math.abs(a.c1));
     res.json({ 
-        allPrices: Object.fromEntries(Object.entries(coinData).map(([s, v]) => [s, v.live.currentPrice])),
+        allPrices: Object.fromEntries(Object.entries(coinData).map(([s, v]) => [s, v.live ? v.live.currentPrice : 0])),
         live: topData, 
         pending: all.filter(h => h.status === 'PENDING').sort((a,b)=>b.startTime-a.startTime),
         history: all.filter(h => h.status !== 'PENDING').sort((a,b)=>b.endTime-a.endTime)
@@ -136,6 +159,7 @@ app.get('/api/data', (req, res) => {
 });
 
 app.get('/gui', (req, res) => {
+    // Phần HTML giữ nguyên 100% giao diện Luffy cũ của bạn
     res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Binance Luffy Pro</title>
     <script src="https://cdn.tailwindcss.com"></script>
@@ -377,4 +401,7 @@ app.get('/gui', (req, res) => {
     </script></body></html>`);
 });
 
-app.listen(PORT, '0.0.0.0', () => { initWS(); console.log(`http://localhost:${PORT}/gui`); }); 
+app.listen(PORT, '0.0.0.0', () => { 
+    initWS(); 
+    console.log(`Server running at http://localhost:${PORT}/gui`); 
+});
