@@ -1,179 +1,229 @@
 /**
- * LUFFY ENGINE ULTIMATE - REALTIME SMOOTH VERSION
- * Trạng thái: Fix lỗi linh tinh - Giá nhảy cực mượt - Tắt warm log
+ * LUFFY ENGINE - BẢN FULL GIỮ NGUYÊN LOGIC GỐC
+ * TRẠNG THÁI: FIX LAG - NHẢY BIẾN ĐỘNG REALTIME TỪNG GIÂY
  */
 
 const PORT = 9000;
+const HISTORY_FILE = './history_db.json';
+const LEVERAGE_FILE = './leverage_cache.json';
+
 import WebSocket from 'ws';
 import express from 'express';
+import fs from 'fs';
 import fetch from 'node-fetch';
 
 const app = express();
-let coinData = new Map(); // Dùng Map để truy xuất nhanh hơn object
+let coinData = {}; 
+let historyMap = new Map(); 
+let pendingMap = new Map(); 
+let symbolMaxLeverage = {}; 
 
-// --- 1. HÀM TÍNH BIẾN ĐỘNG SIÊU NHANH ---
-function getChange(prices, minutes) {
-    if (prices.length < 2) return "0.00";
-    const now = Date.now();
-    const target = now - (minutes * 60000);
+// Cấu hình trading gốc của mày
+let currentTP = 0.5, currentSL = 10.0, currentMinVol = 2.0, tradeMode = 'FOLLOW';
+
+// --- DATABASE INIT (GIỮ NGUYÊN) ---
+if (fs.existsSync(LEVERAGE_FILE)) { try { symbolMaxLeverage = JSON.parse(fs.readFileSync(LEVERAGE_FILE)); } catch(e){} }
+if (fs.existsSync(HISTORY_FILE)) {
+    try {
+        const savedData = JSON.parse(fs.readFileSync(HISTORY_FILE));
+        savedData.forEach(h => {
+            historyMap.set(`${h.symbol}_${h.startTime}`, h);
+            if (h.status === 'PENDING') pendingMap.set(h.symbol, h);
+        });
+    } catch (e) {}
+}
+
+/**
+ * 1. FIX HÀM TÍNH BIẾN ĐỘNG - LẤY GIÁ GẦN NHẤT ĐỂ NHẢY SỐ NGAY
+ */
+function calculateChange(symbol, min) {
+    const data = coinData[symbol];
+    if (!data || data.prices.length < 2) return "0.00";
     
-    let startPrice = prices[0].p;
-    for (let i = prices.length - 1; i >= 0; i--) {
-        if (prices[i].t <= target) {
-            startPrice = prices[i].p;
+    const now = Date.now();
+    const targetTime = now - (min * 60000);
+    
+    // Tìm giá gần nhất với mốc thời gian target
+    let startPrice = data.prices[0].p;
+    for (let i = data.prices.length - 1; i >= 0; i--) {
+        if (data.prices[i].t <= targetTime) {
+            startPrice = data.prices[i].p;
             break;
         }
     }
-    const lastPrice = prices[prices.length - 1].p;
-    return (((lastPrice - startPrice) / startPrice) * 100).toFixed(2);
+    const currentPrice = data.prices[data.prices.length - 1].p;
+    return (((currentPrice - startPrice) / startPrice) * 100).toFixed(2);
 }
 
-// --- 2. NẠP DATA BAN ĐẦU (TẮT LOG CHI TIẾT) ---
-async function preloadAll() {
+/**
+ * 2. PRELOAD (TẮT WARM LOG - CHỈ HIỆN TIẾN TRÌNH)
+ */
+async function preloadHistory(symbol) {
     try {
-        const res = await fetch('https://fapi.binance.com/fapi/v1/exchangeInfo');
-        const info = await res.json();
-        const symbols = info.symbols
-            .filter(s => s.quoteAsset === 'USDT' && s.status === 'TRADING')
-            .map(s => s.symbol);
-
-        console.log(`⏳ Đang nạp \${symbols.length} cặp tiền...`);
-        
-        let count = 0;
-        for (const sym of symbols) {
-            const kRes = await fetch(`https://fapi.binance.com/fapi/v1/klines?symbol=\${sym}&interval=1m&limit=30`);
-            const kData = await kRes.json();
-            
-            if (Array.isArray(kData)) {
-                coinData.set(sym, {
-                    s: sym,
-                    p: parseFloat(kData[kData.length - 1][4]),
-                    history: kData.map(k => ({ p: parseFloat(k[4]), t: parseInt(k[0]) })),
-                    c1: "0.00", c5: "0.00", c15: "0.00"
-                });
-            }
-            count++;
-            if (count % 50 === 0) {
-                process.stdout.write(`\r🚀 Tiến trình: \${Math.round((count/symbols.length)*100)}% | Đã xong: \${count}`);
-            }
-        }
-        console.log('\n✅ Dữ liệu đã sẵn sàng!');
-    } catch (e) {
-        console.log('\n❌ Lỗi khởi tạo: ' + e.message);
-    }
+        const res = await fetch(`https://fapi.binance.com/fapi/v1/klines?symbol=${symbol}&interval=1m&limit=30`);
+        const data = await res.json();
+        coinData[symbol] = {
+            symbol,
+            prices: data.map(k => ({ p: parseFloat(k[4]), t: parseInt(k[0]) }))
+        };
+        return true;
+    } catch (e) { return false; }
 }
 
-// --- 3. WEBSOCKET LUỒNG GIÁ ---
+async function preloadAll() {
+    console.log('⏳ Đang quét danh sách Future...');
+    const res = await fetch('https://fapi.binance.com/fapi/v1/exchangeInfo');
+    const info = await res.json();
+    const allFutures = info.symbols.filter(s => s.quoteAsset === 'USDT' && s.status === 'TRADING').map(s => s.symbol);
+    
+    let success = 0;
+    const batchSize = 40;
+    for (let i = 0; i < allFutures.length; i += batchSize) {
+        const batch = allFutures.slice(i, i + batchSize);
+        await Promise.all(batch.map(sym => preloadHistory(sym)));
+        success += batch.length;
+        process.stdout.write(`\r🚀 Tiến trình: ${Math.round((success/allFutures.length)*100)}% | Thành công: ${success}`);
+    }
+    console.log('\n✅ Nạp dữ liệu hoàn tất!');
+}
+
+/**
+ * 3. WEBSOCKET LUỒNG GIÁ (CẬP NHẬT LIÊN TỤC)
+ */
 function initWS() {
     const ws = new WebSocket('wss://fstream.binance.com/ws/!miniTicker@arr');
-    
     ws.on('message', (data) => {
         try {
             const tickers = JSON.parse(data);
             const now = Date.now();
-            
             tickers.forEach(t => {
-                const item = coinData.get(t.s);
-                if (item) {
-                    const price = parseFloat(t.c);
-                    item.p = price;
-                    item.history.push({ p: price, t: now });
-                    
-                    // Giới hạn bộ nhớ: chỉ giữ 1500 bản ghi/coin
-                    if (item.history.length > 1500) item.history.shift();
-                    
-                    // Tính luôn biến động để API chỉ việc lấy ra
-                    item.c1 = getChange(item.history, 1);
-                    item.c5 = getChange(item.history, 5);
-                    item.c15 = getChange(item.history, 15);
+                const s = t.s; const p = parseFloat(t.c);
+                if (!coinData[s]) return;
+
+                // Thêm giá mới vào mảng
+                coinData[s].prices.push({ p, t: now });
+                if (coinData[s].prices.length > 1000) coinData[s].prices.shift();
+
+                // Logic kiểm tra lệnh Pending (PNL) - Giữ nguyên của mày
+                const pending = pendingMap.get(s);
+                if (pending && pending.status === 'PENDING') {
+                    const diff = ((p - pending.avgPrice) / pending.avgPrice) * 100;
+                    const roi = (pending.type === 'LONG' ? diff : -diff) * 20;
+                    if (roi >= currentTP * 20 || roi <= -currentSL * 20) {
+                        pending.status = roi >= 0 ? 'WIN' : 'LOSS';
+                        pending.endTime = now;
+                        pendingMap.delete(s);
+                        fs.writeFileSync(HISTORY_FILE, JSON.stringify(Array.from(historyMap.values())));
+                    }
                 }
             });
         } catch (e) {}
     });
-
     ws.on('close', () => setTimeout(initWS, 5000));
 }
 
-// --- 4. API DỮ LIỆU ---
-app.get('/api/live', (req, res) => {
-    const data = Array.from(coinData.values())
-        .sort((a, b) => Math.abs(b.c1) - Math.abs(a.c1))
-        .slice(0, 20); // Top 20 biến động nhất
-    res.json(data);
+// --- API ---
+app.get('/api/data', (req, res) => {
+    const coins = Object.values(coinData);
+    const live = coins.map(c => ({
+        symbol: c.symbol,
+        currentPrice: c.prices[c.prices.length - 1].p,
+        c1: calculateChange(c.symbol, 1),
+        c5: calculateChange(c.symbol, 5),
+        c15: calculateChange(c.symbol, 15)
+    })).sort((a,b) => Math.abs(b.c1) - Math.abs(a.c1)).slice(0, 20);
+
+    res.json({
+        live,
+        allPrices: Object.fromEntries(coins.map(v => [v.symbol, v.prices[v.prices.length - 1].p])),
+        pending: Array.from(historyMap.values()).filter(h => h.status === 'PENDING'),
+    });
 });
 
-// --- 5. GIAO DIỆN SIÊU MƯỢT ---
+// --- GUI: DASHBOARD LUFFY NHẢY SỐ TỪNG GIÂY ---
 app.get('/gui', (req, res) => {
     res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8">
-    <title>Luffy Smooth Realtime</title>
+    <title>Luffy Trading Bot</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        body { background: #0b0e11; color: white; font-family: 'Inter', sans-serif; }
+        body { background: #0b0e11; color: #eaecef; font-family: sans-serif; }
         .up { color: #0ecb81; } .down { color: #f6465d; }
-        .bg-card { background: #1e2329; border-bottom: 1px solid #2b3139; transition: all 0.2s; }
-        .price-up { background: rgba(14, 203, 129, 0.15) !important; }
-        .price-down { background: rgba(246, 70, 93, 0.15) !important; }
+        .bg-card { background: #1e2329; border: 1px solid #30363d; }
+        /* Hiệu ứng nháy khi giá nhảy */
+        .price-flash { animation: flash 0.3s ease-out; }
+        @keyframes flash { from { background: rgba(255,255,255,0.1); } to { background: transparent; } }
+        .luffy-img { position: fixed; bottom: 0; right: 0; width: 250px; opacity: 0.2; pointer-events: none; }
     </style></head>
-    <body class="p-6">
+    <body class="p-4">
+        <img src="https://i.pinimg.com/originals/85/33/c2/8533c24d45543ef688f2f2526e38600f.png" class="luffy-img">
+        
         <div class="max-w-4xl mx-auto">
-            <div class="flex justify-between items-center mb-6 border-b border-gray-800 pb-4">
-                <h1 class="text-2xl font-black text-yellow-500 italic">LUFFY BABY <span class="text-white text-sm not-italic font-normal">v3.0 SMOOTH</span></h1>
-                <div id="status" class="text-xs font-mono text-gray-500 italic">SYNCING...</div>
+            <div class="flex justify-between items-center mb-4 bg-card p-4 rounded-lg">
+                <h1 class="text-xl font-bold text-yellow-500 italic uppercase">Luffy Baby Realtime</h1>
+                <div id="clock" class="text-xs font-mono text-gray-500"></div>
             </div>
 
-            <div class="overflow-hidden rounded-xl border border-gray-800 shadow-2xl">
+            <div class="bg-card p-4 rounded-lg mb-4">
                 <table class="w-full text-sm">
-                    <thead class="bg-[#2b3139] text-gray-400">
-                        <tr>
-                            <th class="p-4 text-left">SYMBOL</th>
-                            <th class="p-4 text-left">PRICE</th>
-                            <th class="p-4 text-right">1M</th>
-                            <th class="p-4 text-right">5M</th>
-                            <th class="p-4 text-right">15M</th>
+                    <thead>
+                        <tr class="text-gray-500 border-b border-gray-700 text-[10px] uppercase">
+                            <th class="text-left py-2">Cặp Tiền</th><th class="text-left">Giá Live</th>
+                            <th class="text-center">1M%</th><th class="text-center">5M%</th><th class="text-center">15M%</th>
                         </tr>
                     </thead>
-                    <tbody id="list"></tbody>
+                    <tbody id="marketBody"></tbody>
                 </table>
+            </div>
+
+            <div class="bg-card p-4 rounded-lg border-l-4 border-yellow-500">
+                <div class="text-[10px] font-bold text-yellow-500 mb-2 uppercase">Lệnh Đang Chạy</div>
+                <div id="pendingBody" class="space-y-2"></div>
             </div>
         </div>
 
         <script>
-            let oldData = {};
+            let lastPrices = {};
             async function update() {
                 try {
-                    const r = await fetch('/api/live');
-                    const data = await r.json();
-                    const container = document.getElementById('list');
-                    document.getElementById('status').innerText = 'LIVE | ' + new Date().toLocaleTimeString();
-
-                    container.innerHTML = data.map(coin => {
-                        let flashClass = '';
-                        if (oldData[coin.s]) {
-                            if (coin.p > oldData[coin.s]) flashClass = 'price-up';
-                            else if (coin.p < oldData[coin.s]) flashClass = 'price-down';
-                        }
-                        oldData[coin.s] = coin.p;
+                    const res = await fetch('/api/data');
+                    const d = await res.json();
+                    document.getElementById('clock').innerText = new Date().toLocaleTimeString();
+                    
+                    const body = document.getElementById('marketBody');
+                    body.innerHTML = d.live.map(m => {
+                        const hasChanged = lastPrices[m.symbol] !== m.currentPrice;
+                        const flash = hasChanged ? 'price-flash' : '';
+                        lastPrices[m.symbol] = m.currentPrice;
 
                         return \`
-                        <tr class="bg-card \${flashClass}">
-                            <td class="p-4 font-bold text-gray-200">\${coin.s}</td>
-                            <td class="p-4 font-mono text-yellow-400 font-bold">\${coin.p.toFixed(4)}</td>
-                            <td class="p-4 text-right font-black \${coin.c1 >= 0 ? 'up' : 'down'}">\${coin.c1}%</td>
-                            <td class="p-4 text-right font-bold \${coin.c5 >= 0 ? 'up' : 'down'}">\${coin.c5}%</td>
-                            <td class="p-4 text-right font-bold \${coin.c15 >= 0 ? 'up' : 'down'}">\${coin.c15}%</td>
+                        <tr class="border-b border-gray-800/50 \${flash}">
+                            <td class="py-3 font-bold">\${m.symbol}</td>
+                            <td class="text-yellow-400 font-mono font-bold">\${m.currentPrice.toFixed(4)}</td>
+                            <td class="text-center font-bold \${m.c1>=0?'up':'down'}">\${m.c1}%</td>
+                            <td class="text-center font-bold \${m.c5>=0?'up':'down'}">\${m.c5}%</td>
+                            <td class="text-center font-bold \${m.c15>=0?'up':'down'}">\${m.c15}%</td>
                         </tr>\`;
                     }).join('');
-                } catch (e) {}
+
+                    document.getElementById('pendingBody').innerHTML = d.pending.length ? d.pending.map(p => {
+                        const lp = d.allPrices[p.symbol] || p.avgPrice;
+                        const roi = (p.type==='LONG'?(lp-p.avgPrice)/p.avgPrice:(p.avgPrice-lp)/p.avgPrice)*100*20;
+                        return \`<div class="flex justify-between items-center bg-black/20 p-2 rounded">
+                            <span class="font-bold">\${p.symbol} (\${p.type})</span>
+                            <span class="font-black \${roi>=0?'up':'down'}">\${roi.toFixed(2)}%</span>
+                        </div>\`;
+                    }).join('') : '<div class="text-gray-600 text-center py-4 text-xs italic">Không có lệnh</div>';
+                } catch(e) {}
             }
-            
-            // Chạy cập nhật liên tục mỗi 800ms để đảm bảo mượt mà không quá tải
+            // Gọi refresh mỗi 800ms để mượt mà nhất
             setInterval(update, 800);
         </script>
     </body></html>`);
 });
 
-app.listen(PORT, '0.0.0.0', async () => {
-    await preloadAll();
-    initWS();
-    console.log(`\n🔥 Dashboard Online: http://localhost:\${PORT}/gui`);
+// --- START ---
+app.listen(PORT, '0.0.0.0', async () => { 
+    await preloadAll(); 
+    initWS(); 
+    console.log(`\n🔥 Dashboard: http://localhost:${PORT}/gui`); 
 });
