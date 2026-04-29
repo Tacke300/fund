@@ -1,253 +1,160 @@
 /**
- * LUFFY ENGINE ULTRA PRO - VERSION: 100% REALTIME TICKER
- * Trạng thái: Bản đầy đủ - Fix lỗi đứng im - Nhảy số liên tục từng giây
+ * LUFFY ENGINE SUPER FAST - 100% REALTIME TICKER
+ * Trạng thái: Bản FULL - Nhảy số từng giây - Chống đứng hình
  */
 
 const PORT = 9000;
-const HISTORY_FILE = './history_db.json';
 import WebSocket from 'ws';
 import express from 'express';
-import fs from 'fs';
 import fetch from 'node-fetch';
+import compression from 'compression';
 
 const app = express();
+app.use(compression()); // Nén dữ liệu để truyền tải siêu tốc
+
 let coinData = {}; 
-let historyMap = new Map(); 
-let pendingMap = new Map();
 
-// Cấu hình mặc định
-let currentTP = 0.5, currentSL = 10.0, currentMinVol = 2.0, tradeMode = 'FOLLOW';
-
-// --- DATABASE INIT ---
-if (fs.existsSync(HISTORY_FILE)) {
+// --- 1. PRELOAD DỮ LIỆU BAN ĐẦU ---
+async function preloadHistory(symbol) {
     try {
-        const savedData = JSON.parse(fs.readFileSync(HISTORY_FILE));
-        savedData.forEach(h => {
-            historyMap.set(`${h.symbol}_${h.startTime}`, h);
-            if (h.status === 'PENDING') pendingMap.set(h.symbol, h);
-        });
+        const res = await fetch(`https://fapi.binance.com/fapi/v1/klines?symbol=${symbol}&interval=1m&limit=20`);
+        const data = await res.json();
+        if (!Array.isArray(data)) return;
+        
+        coinData[symbol] = {
+            s: symbol,
+            p: parseFloat(data[data.length-1][4]), // Giá hiện tại
+            h: data.map(k => ({ p: parseFloat(k[4]), t: parseInt(k[0]) })), // Lịch sử
+            c1: "0.00", c5: "0.00", c15: "0.00"
+        };
     } catch (e) {}
 }
 
-/**
- * 1. TÍNH TOÁN BIẾN ĐỘNG (ÉP NHẢY SỐ)
- */
-function calculateChange(symbol, min) {
-    const data = coinData[symbol];
-    if (!data || data.prices.length < 2) return 0;
-    
-    const now = Date.now();
-    const targetTime = now - (min * 60000);
-    
-    // Tìm giá cũ nhất khớp với mốc thời gian, nếu không thấy lấy giá đầu tiên của mảng
-    let startPrice = data.prices[0].p;
-    for (let i = data.prices.length - 1; i >= 0; i--) {
-        if (data.prices[i].t <= targetTime) {
-            startPrice = data.prices[i].p;
-            break;
-        }
-    }
-    
-    const currentPrice = data.prices[data.prices.length - 1].p;
-    return parseFloat((((currentPrice - startPrice) / startPrice) * 100).toFixed(2));
-}
-
-/**
- * 2. PRELOAD DỮ LIỆU TỐC ĐỘ CAO (TẮT WARM LOG RÁC)
- */
-async function preloadHistory(symbol) {
-    try {
-        const res = await fetch(`https://fapi.binance.com/fapi/v1/klines?symbol=${symbol}&interval=1m&limit=30`);
-        const data = await res.json();
-        if (!Array.isArray(data)) return false;
-        
-        coinData[symbol] = {
-            symbol,
-            prices: data.map(k => ({ p: parseFloat(k[4]), t: parseInt(k[0]) })),
-            snapPrice: parseFloat(data[data.length - 1][4])
-        };
-        return true;
-    } catch (e) { return false; }
-}
-
 async function preloadAll() {
-    console.log('⏳ [1/2] Đang quét danh sách Future...');
+    console.log('⏳ Đang nạp danh sách Future...');
     const res = await fetch('https://fapi.binance.com/fapi/v1/exchangeInfo');
     const info = await res.json();
-    const allFutures = info.symbols.filter(s => s.quoteAsset === 'USDT' && s.status === 'TRADING').map(s => s.symbol);
+    const symbols = info.symbols.filter(s => s.quoteAsset === 'USDT' && s.status === 'TRADING').map(s => s.symbol);
     
-    let success = 0;
     const batchSize = 50;
-    for (let i = 0; i < allFutures.length; i += batchSize) {
-        const batch = allFutures.slice(i, i + batchSize);
-        await Promise.all(batch.map(sym => preloadHistory(sym)));
-        success += batch.length;
-        process.stdout.write(`\r🚀 Tiến trình nạp data: ${Math.round((success/allFutures.length)*100)}% | Thành công: ${success}/${allFutures.length}`);
+    for (let i = 0; i < symbols.length; i += batchSize) {
+        await Promise.all(symbols.slice(i, i + batchSize).map(s => preloadHistory(s)));
+        process.stdout.write(`\r🚀 Loading: \${Math.round((i/symbols.length)*100)}%`);
     }
-    console.log('\n✅ Nạp dữ liệu hoàn tất!');
+    console.log('\n✅ Data Ready!');
 }
 
-/**
- * 3. WEBSOCKET - NHẬN TIN LÀ CẬP NHẬT NGAY
- */
+// --- 2. TÍNH BIẾN ĐỘNG TRỰC TIẾP ---
+function updateChanges(s) {
+    const data = coinData[s];
+    if (!data || data.h.length < 2) return;
+    const now = Date.now();
+    const calc = (min) => {
+        const target = now - (min * 60000);
+        let startP = data.h[0].p;
+        for (let i = data.h.length - 1; i >= 0; i--) {
+            if (data.h[i].t <= target) { startP = data.h[i].p; break; }
+        }
+        return (((data.p - startP) / startP) * 100).toFixed(2);
+    };
+    data.c1 = calc(1); data.c5 = calc(5); data.c15 = calc(15);
+}
+
+// --- 3. WEBSOCKET - NHẬN LÀ NHẢY ---
 function initWS() {
     const ws = new WebSocket('wss://fstream.binance.com/ws/!miniTicker@arr');
-    ws.on('open', () => console.log('🔥 [WS] Đã kết nối luồng dữ liệu toàn sàn.'));
-    ws.on('message', (data) => {
-        try {
-            const tickers = JSON.parse(data);
-            const now = Date.now();
-            tickers.forEach(t => {
-                const s = t.s; const p = parseFloat(t.c);
-                if (!coinData[s]) return;
-
-                coinData[s].prices.push({ p, t: now });
-                if (coinData[s].prices.length > 1200) coinData[s].prices.shift();
-
-                // Quét lệnh Pending để tính PnL real-time
-                const pending = pendingMap.get(s);
-                if (pending && pending.status === 'PENDING') {
-                    const diff = ((p - pending.avgPrice) / pending.avgPrice) * 100;
-                    const roi = (pending.type === 'LONG' ? diff : -diff) * 20;
-                    if (roi >= currentTP * 20 || roi <= -currentSL * 20) {
-                        pending.status = roi >= 0 ? 'WIN' : 'LOSS';
-                        pending.endTime = now;
-                        pendingMap.delete(s);
-                        fs.writeFileSync(HISTORY_FILE, JSON.stringify(Array.from(historyMap.values())));
-                    }
-                }
-            });
-        } catch (e) {}
+    ws.on('message', (msg) => {
+        const tickers = JSON.parse(msg);
+        const now = Date.now();
+        tickers.forEach(t => {
+            if (coinData[t.s]) {
+                coinData[t.s].p = parseFloat(t.c);
+                coinData[t.s].h.push({ p: coinData[t.s].p, t: now });
+                if (coinData[t.s].h.length > 1000) coinData[s].h.shift();
+                updateChanges(t.s); // Tính toán ngay tại luồng WS
+            }
+        });
     });
-    ws.on('close', () => setTimeout(initWS, 5000));
+    ws.on('close', () => setTimeout(initWS, 3000));
 }
 
-// --- API ---
-app.get('/api/data', (req, res) => {
-    const coins = Object.values(coinData);
-    const live = coins.map(c => ({
-        symbol: c.symbol,
-        currentPrice: c.prices[c.prices.length - 1].p,
-        c1: calculateChange(c.symbol, 1),
-        c5: calculateChange(c.symbol, 5),
-        c15: calculateChange(c.symbol, 15)
-    })).sort((a,b) => Math.abs(b.c1) - Math.abs(a.c1)).slice(0, 20);
-
-    res.json({
-        live,
-        allPrices: Object.fromEntries(coins.map(v => [v.symbol, v.prices[v.prices.length - 1].p])),
-        pending: Array.from(historyMap.values()).filter(h => h.status === 'PENDING'),
-        status: { total: coins.length, ready: coins.filter(c => c.prices.length > 5).length }
-    });
+// --- 4. API SIÊU NHẸ ---
+app.get('/api/fast', (req, res) => {
+    // Chỉ gửi top 20 biến động để giảm tải băng thông
+    const fastData = Object.values(coinData)
+        .sort((a, b) => Math.abs(b.c1) - Math.abs(a.c1))
+        .slice(0, 20)
+        .map(c => ({ s: c.s, p: c.p, c1: c.c1, c5: c.c5, c15: c.c15 }));
+    res.json(fastData);
 });
 
-// --- GUI: HOÀN CHỈNH VÀ NHẢY REAL-TIME ---
+// --- 5. GUI REALTIME CỰC MẠNH ---
 app.get('/gui', (req, res) => {
-    res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8">
-    <title>Luffy Engine Realtime</title>
+    res.send(`<!DOCTYPE html><html><head>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;700&display=swap');
-        body { background: #0b0e11; color: #eaecef; font-family: 'Chakra Petch', sans-serif; }
+        body { background: #0b0e11; color: white; font-family: 'Segoe UI', sans-serif; overflow-x: hidden; }
         .up { color: #0ecb81; } .down { color: #f6465d; }
-        .bg-card { background: #1e2329; border: 1px solid #30363d; }
-        .glow-up { text-shadow: 0 0 10px #0ecb81; }
-        .glow-down { text-shadow: 0 0 10px #f6465d; }
-        .luffy-watermark { position: fixed; bottom: -20px; right: -20px; opacity: 0.1; width: 300px; pointer-events: none; }
+        .row-update { animation: flash 0.4s ease-out; }
+        @keyframes flash { from { background: rgba(255,255,255,0.1); } to { background: transparent; } }
     </style></head>
     <body class="p-4">
-        <img src="https://i.pinimg.com/originals/85/33/c2/8533c24d45543ef688f2f2526e38600f.png" class="luffy-watermark">
-        
-        <div class="max-w-5xl mx-auto">
-            <div class="flex justify-between items-center mb-6 bg-card p-4 rounded-xl shadow-2xl">
-                <div>
-                    <h1 class="text-2xl font-black text-yellow-500 italic">LUFFY <span class="text-white">ENGINE</span></h1>
-                    <p id="sysStatus" class="text-[10px] text-gray-500 font-mono uppercase tracking-widest"></p>
-                </div>
-                <div class="text-right">
-                    <div id="clock" class="text-xl font-bold">00:00:00</div>
-                    <div class="text-[10px] text-green-500">WS CONNECTED</div>
-                </div>
+        <div class="max-w-4xl mx-auto">
+            <div class="flex justify-between mb-4 border-b border-gray-800 pb-2">
+                <h1 class="text-yellow-500 font-bold italic">LUFFY REALTIME V3</h1>
+                <div id="delay" class="text-[10px] text-gray-500 font-mono">MS: --</div>
             </div>
-
-            <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                <div class="lg:col-span-2 bg-card rounded-xl p-4">
-                    <h2 class="text-xs font-bold text-gray-400 mb-4 border-b border-gray-700 pb-2 uppercase italic">Top Volatility (Real-time)</h2>
-                    <table class="w-full text-sm">
-                        <thead>
-                            <tr class="text-gray-500 text-[10px] uppercase">
-                                <th class="text-left pb-2">Pair</th>
-                                <th class="text-left pb-2">Live Price</th>
-                                <th class="text-center pb-2">1M%</th>
-                                <th class="text-center pb-2">5M%</th>
-                                <th class="text-center pb-2">15M%</th>
-                            </tr>
-                        </thead>
-                        <tbody id="marketBody"></tbody>
-                    </table>
-                </div>
-
-                <div class="bg-card rounded-xl p-4 border-t-4 border-yellow-500">
-                    <h2 class="text-xs font-bold text-yellow-500 mb-4 border-b border-gray-700 pb-2 uppercase">Active Positions</h2>
-                    <div id="pendingBody" class="space-y-3"></div>
-                </div>
+            <div class="bg-[#1e2329] rounded shadow-xl overflow-hidden">
+                <table class="w-full text-sm">
+                    <thead class="bg-[#2b3139] text-gray-400">
+                        <tr>
+                            <th class="text-left p-3">PAIR</th>
+                            <th class="text-left p-3">PRICE</th>
+                            <th class="text-center p-3">1M%</th>
+                            <th class="text-center p-3">5M%</th>
+                            <th class="text-center p-3">15M%</th>
+                        </tr>
+                    </thead>
+                    <tbody id="mainList"></tbody>
+                </table>
             </div>
         </div>
-
         <script>
-            let prevPrices = {};
-            async function update() {
+            let lastPrices = {};
+            async function tick() {
+                const start = Date.now();
                 try {
-                    const res = await fetch('/api/data');
-                    const d = await res.json();
+                    const res = await fetch('/api/fast');
+                    const data = await res.json();
+                    const container = document.getElementById('mainList');
                     
-                    document.getElementById('sysStatus').innerText = "Nodes: " + d.status.total + " | Ready: " + d.status.ready;
-                    document.getElementById('clock').innerText = new Date().toLocaleTimeString();
-                    
-                    // Render Market
-                    document.getElementById('marketBody').innerHTML = d.live.map(m => {
-                        const pDiff = prevPrices[m.symbol] ? m.currentPrice - prevPrices[m.symbol] : 0;
-                        const glowClass = pDiff > 0 ? 'glow-up' : (pDiff < 0 ? 'glow-down' : '');
-                        prevPrices[m.symbol] = m.currentPrice;
-                        
-                        return \`
-                        <tr class="border-b border-gray-800/50 hover:bg-gray-800/30 transition">
-                            <td class="py-3 font-bold text-white">\${m.symbol}</td>
-                            <td class="font-mono \${glowClass} transition-all duration-300">\${m.currentPrice.toFixed(4)}</td>
-                            <td class="text-center font-bold \${m.c1>=0?'up':'down'}">\${m.c1}%</td>
-                            <td class="text-center font-bold \${m.c5>=0?'up':'down'}">\${m.c5}%</td>
-                            <td class="text-center font-bold \${m.c15>=0?'up':'down'}">\${m.c15}%</td>
+                    let html = '';
+                    data.forEach(item => {
+                        const hasChanged = lastPrices[item.s] !== item.p;
+                        const flashClass = hasChanged ? 'row-update' : '';
+                        lastPrices[item.s] = item.p;
+
+                        html += \`
+                        <tr class="border-b border-gray-800 \${flashClass}">
+                            <td class="p-3 font-bold">\${item.s}</td>
+                            <td class="p-3 font-mono text-yellow-400">\${item.p.toFixed(4)}</td>
+                            <td class="p-3 text-center font-bold \${item.c1>=0?'up':'down'}">\${item.c1}%</td>
+                            <td class="p-3 text-center font-bold \${item.c5>=0?'up':'down'}">\${item.c5}%</td>
+                            <td class="p-3 text-center font-bold \${item.c15>=0?'up':'down'}">\${item.c15}%</td>
                         </tr>\`;
-                    }).join('');
-
-                    // Render Pending
-                    document.getElementById('pendingBody').innerHTML = d.pending.length ? d.pending.map(p => {
-                        const lp = d.allPrices[p.symbol] || p.avgPrice;
-                        const roi = (p.type==='LONG'?(lp-p.avgPrice)/p.avgPrice:(p.avgPrice-lp)/p.avgPrice)*100*20;
-                        return \`
-                        <div class="bg-[#0b0e11] p-3 rounded-lg border border-gray-800">
-                            <div class="flex justify-between text-[11px] font-bold">
-                                <span>\${p.symbol}</span>
-                                <span class="\${p.type==='LONG'?'up':'down'}">\${p.type} x20</span>
-                            </div>
-                            <div class="flex justify-between items-end mt-1">
-                                <span class="text-[10px] text-gray-500">ROI%</span>
-                                <span class="text-lg font-black \${roi>=0?'up':'down'}">\${roi.toFixed(2)}%</span>
-                            </div>
-                        </div>\`;
-                    }).join('') : '<div class="text-center py-10 text-gray-600 text-xs italic">Waiting for signal...</div>';
-
+                    });
+                    container.innerHTML = html;
+                    document.getElementById('delay').innerText = "DELAY: " + (Date.now() - start) + "ms";
                 } catch(e) {}
             }
-            // Update tốc độ cao để cảm nhận real-time
-            setInterval(update, 800);
+            // Chạy vòng lặp cực nhanh 500ms (0.5 giây/lần)
+            setInterval(tick, 500);
         </script>
     </body></html>`);
 });
 
-// --- KHỞI CHẠY ---
-app.listen(PORT, '0.0.0.0', async () => { 
-    await preloadAll(); 
-    initWS(); 
-    console.log(`\n🔥 Dashboard Online: http://localhost:${PORT}/gui`); 
+app.listen(PORT, '0.0.0.0', async () => {
+    await preloadAll();
+    initWS();
+    console.log(`\n🚀 Luffy Engine Live: http://localhost:\${PORT}/gui`);
 });
