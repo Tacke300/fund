@@ -12,7 +12,7 @@ import { API_KEY, SECRET_KEY } from './config.js';
 const app = express();
 let coinData = {}; 
 let historyMap = new Map(); 
-let pendingMap = new Map(); // Index để xử lý 300+ coin siêu tốc
+let pendingMap = new Map(); 
 let symbolMaxLeverage = {}; 
 let lastTradeClosed = {}; 
 
@@ -51,30 +51,32 @@ if (fs.existsSync(HISTORY_FILE)) {
 function calculateChange(pArr, min) {
     if (!pArr || pArr.length < 2) return 0;
     const now = Date.now();
+    // Tìm nến gần nhất với mốc phút yêu cầu
     let start = pArr.find(i => i.t >= (now - min * 60000)) || pArr[0]; 
-    return parseFloat((((pArr[pArr.length - 1].p - start.p) / start.p) * 100).toFixed(2));
+    let change = ((pArr[pArr.length - 1].p - start.p) / start.p) * 100;
+    return parseFloat(change.toFixed(2));
 }
 
 function initWS() {
-    console.log('Đang kết nối tới Binance WebSocket (Luffy Pro - All Coins Mode)...');
+    console.log('🚀 Luffy Engine: Đang kết nối và tính toán biến động...');
     
-    // Sử dụng markPrice@arr để nhẹ nhất và đủ toàn bộ coin
-    const ws = new WebSocket('wss://fstream.binance.com/ws/!markPrice@arr', {
+    // Quay lại dùng ticker@arr để lấy giá khớp lệnh thực tế (Last Price) 
+    // và đảm bảo tính toán biến động chuẩn nhất cho 3 khung
+    const ws = new WebSocket('wss://fstream.binance.com/ws/!ticker@arr', {
         family: 4 
     });
 
     let lastMessageTime = Date.now();
 
-    // Watchdog thay thế cho timeout cũ để chống loop disconnect
     const watchdog = setInterval(() => {
         if (Date.now() - lastMessageTime > 60000) {
-            console.log('Quá 60s không có data, đang khởi động lại WebSocket...');
+            console.log('Watchdog: Reconnecting...');
             ws.terminate();
         }
     }, 10000);
 
     ws.on('open', () => {
-        console.log('✅ WebSocket Connected!');
+        console.log('✅ Kết nối thành công!');
         lastMessageTime = Date.now();
     });
 
@@ -90,34 +92,40 @@ function initWS() {
 
         const now = Date.now();
         tickers.forEach(t => {
-            const s = t.s, p = parseFloat(t.p); 
-            if (!coinData[s]) coinData[s] = { symbol: s, prices: [] };
-            coinData[s].prices.push({ p, t: now });
-            if (coinData[s].prices.length > 300) coinData[s].prices.shift();
+            const s = t.s;
+            const p = parseFloat(t.c); // t.c là giá đóng cửa gần nhất (Last Price) cho Ticker
             
-            const c1 = calculateChange(coinData[s].prices, 1), 
-                  c5 = calculateChange(coinData[s].prices, 5), 
-                  c15 = calculateChange(coinData[s].prices, 15);
+            if (!coinData[s]) coinData[s] = { symbol: s, prices: [] };
+            
+            // Lưu giá vào mảng để tính biến động
+            coinData[s].prices.push({ p, t: now });
+            
+            // Giữ lại tối đa 20 phút dữ liệu (300 nến nếu nhận mỗi 4s)
+            if (coinData[s].prices.length > 500) coinData[s].prices.shift();
+            
+            // Cập nhật biến động 3 khung cho GUI
+            const c1 = calculateChange(coinData[s].prices, 1);
+            const c5 = calculateChange(coinData[s].prices, 5);
+            const c15 = calculateChange(coinData[s].prices, 15);
+            
             coinData[s].live = { c1, c5, c15, currentPrice: p };
             
-            // TÌM LỆNH O(1) - FIX TREO CPU KHI QUÉT 300 COIN
             const pending = pendingMap.get(s);
 
             if (pending && pending.status === 'PENDING') {
                 const diffAvg = ((p - pending.avgPrice) / pending.avgPrice) * 100;
                 const currentRoi = (pending.type === 'LONG' ? diffAvg : -diffAvg) * (pending.maxLev || 20);
-                if (!pending.maxNegativeRoi || currentRoi < pending.maxNegativeRoi) {
-                    pending.maxNegativeRoi = currentRoi;
-                }
+                if (!pending.maxNegativeRoi || currentRoi < pending.maxNegativeRoi) pending.maxNegativeRoi = currentRoi;
 
                 const win = pending.type === 'LONG' ? diffAvg >= pending.tpTarget : diffAvg <= -pending.tpTarget; 
                 const isTimeout = (now - pending.startTime) >= (MAX_HOLD_MINUTES * 60000);
+                
                 if (win || isTimeout) {
                     pending.status = win ? 'WIN' : 'TIMEOUT'; 
                     pending.finalPrice = p; pending.endTime = now;
                     pending.pnlPercent = (pending.type === 'LONG' ? diffAvg : -diffAvg);
                     lastTradeClosed[s] = now; 
-                    pendingMap.delete(s); // Xóa khỏi index nhanh
+                    pendingMap.delete(s);
                     fs.writeFileSync(HISTORY_FILE, JSON.stringify(Array.from(historyMap.values()))); 
                     return;
                 }
@@ -131,52 +139,50 @@ function initWS() {
                         const newCount = pending.dcaCount + 1;
                         const newAvg = ((pending.avgPrice * (pending.dcaCount + 1)) + p) / (newCount + 1);
                         pending.dcaHistory.push({ t: Date.now(), p: p, avg: newAvg });
-                        setTimeout(() => {
-                            pending.avgPrice = newAvg;
-                            pending.dcaCount = newCount;
-                        }, 200); 
+                        setTimeout(() => { pending.avgPrice = newAvg; pending.dcaCount = newCount; }, 200); 
                     }});
                 }
-            } else if (Math.max(Math.abs(c1), Math.abs(c5), Math.abs(c15)) >= currentMinVol && !(lastTradeClosed[s] && (now - lastTradeClosed[s] < COOLDOWN_MINUTES * 60000))) {
+            } else if (Math.max(Math.abs(c1), Math.abs(c5), Math.abs(c15)) >= currentMinVol) {
+                if (lastTradeClosed[s] && (now - lastTradeClosed[s] < COOLDOWN_MINUTES * 60000)) return;
                 if (!actionQueue.find(q => q.id === s)) {
                     actionQueue.push({ id: s, priority: 2, action: () => {
                         const sumVol = c1 + c5 + c15;
                         let type = sumVol >= 0 ? 'LONG' : 'SHORT';
                         if (tradeMode === 'REVERSE') type = (type === 'LONG' ? 'SHORT' : 'LONG');
-
-                        const newTrade = { 
+                        const newT = { 
                             symbol: s, startTime: Date.now(), snapPrice: p, avgPrice: p, type: type, status: 'PENDING', 
                             maxLev: symbolMaxLeverage[s] || 20, tpTarget: currentTP, slTarget: currentSL, snapVol: { c1, c5, c15 },
                             maxNegativeRoi: 0, dcaCount: 0, dcaHistory: [{ t: Date.now(), p: p, avg: p }]
                         };
-                        historyMap.set(`${s}_${newTrade.startTime}`, newTrade);
-                        pendingMap.set(s, newTrade); // Đưa vào index nhanh
+                        historyMap.set(`${s}_${newT.startTime}`, newT);
+                        pendingMap.set(s, newT);
                     }});
                 }
             }
         });
     });
 
-    ws.on('error', (err) => {
-        console.error('Lỗi WebSocket:', err.message);
-        ws.terminate(); 
-    });
-
     ws.on('close', () => {
         clearInterval(watchdog);
-        console.log('WebSocket đóng. Đang kết nối lại sau 5 giây...');
         setTimeout(initWS, 5000);
     });
+    ws.on('error', () => ws.terminate());
 }
 
 app.get('/api/config', (req, res) => {
-    currentTP = parseFloat(req.query.tp); currentSL = parseFloat(req.query.sl); currentMinVol = parseFloat(req.query.vol); tradeMode = req.query.mode || 'FOLLOW';
+    currentTP = parseFloat(req.query.tp) || currentTP;
+    currentSL = parseFloat(req.query.sl) || currentSL;
+    currentMinVol = parseFloat(req.query.vol) || currentMinVol;
+    tradeMode = req.query.mode || 'FOLLOW';
     res.sendStatus(200);
 });
 
 app.get('/api/data', (req, res) => {
     const all = Array.from(historyMap.values());
-    const topData = Object.entries(coinData).filter(([_, v]) => v.live).map(([s, v]) => ({ symbol: s, ...v.live })).sort((a,b) => Math.abs(b.c1) - Math.abs(a.c1));
+    const topData = Object.entries(coinData)
+        .filter(([_, v]) => v.live)
+        .map(([s, v]) => ({ symbol: s, ...v.live }))
+        .sort((a,b) => Math.abs(b.c1) - Math.abs(a.c1));
     res.json({ 
         allPrices: Object.fromEntries(Object.entries(coinData).map(([s, v]) => [s, v.live ? v.live.currentPrice : 0])),
         live: topData, 
