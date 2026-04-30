@@ -62,7 +62,6 @@ async function trackClosedPnL(symbol, closedTime, lastBotPos) {
         status.botClosedCount++;
         status.botPnLClosed += realized;
         
-        // LOG CHI TIẾT KHI CHỐT DEAL
         const dcaInfo = lastBotPos.dcaCount > 0 ? ` | DCA: ${lastBotPos.dcaCount} lần` : ` | Ko DCA`;
         const tpslInfo = ` | TP: ${lastBotPos.tp} - SL: ${lastBotPos.sl}`;
         addBotLog(`✅ CHỐT DEAL ${symbol}${dcaInfo}${tpslInfo} | PnL: ${realized.toFixed(2)}$`, realized >= 0 ? "success" : "error");
@@ -80,15 +79,12 @@ async function syncTPSL(symbol, side, qty, entry, info, customTP = null, customS
         const slPrice = (entry * (side === 'SHORT' ? (1 + slPct / 100) : (1 - slPct / 100))).toFixed(info.pricePrecision);
         const sideClose = side === 'SHORT' ? 'buy' : 'sell';
 
-        // Gửi lệnh chờ lên sàn
         await Promise.all([
             exchange.createOrder(symbol, 'TAKE_PROFIT_MARKET', sideClose, qty, undefined, { positionSide: side, stopPrice: tpPrice, closePosition: true }),
             exchange.createOrder(symbol, 'STOP_MARKET', sideClose, qty, undefined, { positionSide: side, stopPrice: slPrice, closePosition: true })
         ]);
 
-        // LOG GIÁ TP/SL KHI ĐƯỢC THIẾT LẬP
         addBotLog(`📍 SYNC TPSL ${symbol}: TP @${tpPrice} | SL @${slPrice}`);
-
         return { tp: Number(tpPrice), sl: Number(slPrice) };
     } catch (e) { 
         addBotLog(`⚠️ LỖI SYNC TPSL ${symbol}: ${e.message}`); 
@@ -114,7 +110,7 @@ async function openLongHedge(symbol, baseMargin, info) {
     } catch (e) { addBotLog(`❌ LỖI MỞ LONG HEDGE ${symbol}: ${e.message}`, "error"); }
 }
 
-async function openPosition(symbol, isDCA = false) {
+async function openPosition(symbol, isDCA = false, candidateData = null) {
     const posKey = `${symbol}_SHORT`;
     if (!isDCA && (botActivePositions.has(posKey) || openingSymbols.has(symbol))) return;
     
@@ -154,7 +150,13 @@ async function openPosition(symbol, isDCA = false) {
             const totalQty = Math.abs(parseFloat(upPos.positionAmt));
             const currentMargin = (totalQty * avgEntry / info.maxLeverage);
 
-            addBotLog(`[${isDCA ? 'DCA_'+currentDCA : 'OPEN'}] ${symbol} | Qty: ${qtyNum.toFixed(info.quantityPrecision)} | Margin: ${marginToUse.toFixed(2)}$`, isDCA ? "warning" : "success");
+            // LOG KÈM BIẾN ĐỘNG 3 KHUNG KHI MỞ LỆNH MỚI
+            let volInfo = "";
+            if (!isDCA && candidateData) {
+                volInfo = ` | C1:${candidateData.c1}% C5:${candidateData.c5}% C15:${candidateData.c15}%`;
+            }
+
+            addBotLog(`[${isDCA ? 'DCA_'+currentDCA : 'OPEN'}] ${symbol}${volInfo} | Qty: ${qtyNum.toFixed(info.quantityPrecision)} | Margin: ${marginToUse.toFixed(2)}$`, isDCA ? "warning" : "success");
 
             const sync = await syncTPSL(symbol, 'SHORT', totalQty, avgEntry, info);
             
@@ -188,13 +190,11 @@ async function priceMonitorLoop() {
 
                 const priceDev = ((markPrice - botPos.entryPrice) / botPos.entryPrice) * 100;
                 
-                // Hedge bảo vệ khi giá âm nặng
                 if (priceDev >= 50 && !botPos.hedged) {
                     botPos.hedged = true;
                     openLongHedge(botPos.symbol, botPos.baseMargin, status.exchangeInfo[botPos.symbol]);
                 }
 
-                // KIỂM TRA ĐÓNG MARKET KHI GIÁ VƯỢT TP HOẶC SL
                 const isShort = botPos.side === 'SHORT';
                 const hitTP = isShort ? (markPrice <= botPos.tp) : (markPrice >= botPos.tp);
                 const hitSL = isShort ? (markPrice >= botPos.sl) : (markPrice <= botPos.sl);
@@ -209,7 +209,6 @@ async function priceMonitorLoop() {
                     }
                 }
             } else {
-                // Vị thế đã đóng trên sàn
                 status.blackList[botPos.symbol] = now + (15 * 60 * 1000);
                 trackClosedPnL(botPos.symbol, now, botPos);
                 botActivePositions.delete(key);
@@ -241,7 +240,8 @@ async function mainLoop() {
                 const isOpened = activeRealPos.some(p => p.symbol === c.symbol);
                 return info && info.maxLeverage >= 20 && !isBL && !isOpened && !openingSymbols.has(c.symbol) && [c.c1, c.c5, c.c15].some(v => Math.abs(parseFloat(v)) >= parseFloat(botSettings.minVol));
             });
-            if (keo) await openPosition(keo.symbol, false);
+            // TRUYỀN DỮ LIỆU KÈO VÀO ĐỂ LOG BIẾN ĐỘNG
+            if (keo) await openPosition(keo.symbol, false, keo);
         }
     } catch (e) {}
 }
