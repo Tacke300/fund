@@ -47,7 +47,7 @@ async function binancePrivate(endpoint, method = 'GET', data = {}) {
 }
 
 /**
- * SYNC TPSL - KHÔNG ICON - FIX LỖI -4130
+ * HÀM ĐỒNG BỘ: CHỈ FIX LỖI -4130, KHÔNG ICON, KHÔNG ĐỔI LOGIC KHÁC
  */
 async function syncTPSL(symbol, side, qty, entry, info) {
     let success = false;
@@ -63,6 +63,7 @@ async function syncTPSL(symbol, side, qty, entry, info) {
         try {
             addBotLog(`[${symbol}] Dang don dep TPSL cu (Lan ${attempt})...`);
             const openOrders = await binancePrivate('/fapi/v1/openOrders', 'GET', { symbol });
+            // Chỉ lọc và xóa những lệnh TP/SL/ClosePosition để tránh lỗi -4130
             const tpslOrders = openOrders.filter(o => 
                 o.positionSide === side && 
                 (o.type.includes("STOP") || o.type.includes("TAKE_PROFIT") || o.closePosition === true)
@@ -149,7 +150,7 @@ async function openPosition(symbol, isDCA = false) {
             const sync = await syncTPSL(symbol, 'SHORT', totalQty, avgEntry, info);
             botActivePositions.set(posKey, { 
                 symbol, side: 'SHORT', entryPrice: avgEntry, historyEntries, qty: totalQty, tp: sync.tp, sl: sync.sl, 
-                margin: (totalQty * avgEntry / info.maxLeverage), firstMargin, dcaCount: currentDCA, isProcessing: false, priceDev: 0
+                margin: (totalQty * avgEntry / info.maxLeverage), firstMargin, dcaCount: currentDCA, isProcessing: false
             });
         }
     } catch (e) { 
@@ -159,6 +160,7 @@ async function openPosition(symbol, isDCA = false) {
     finally { openingSymbols.delete(symbol); }
 }
 
+// TRẢ LẠI LOGIC PNL TẠM TÍNH GỐC
 async function priceMonitorLoop() {
     if (!status.isReady) { setTimeout(priceMonitorLoop, 1000); return; }
     try {
@@ -167,17 +169,10 @@ async function priceMonitorLoop() {
         for (let [key, botPos] of botActivePositions) {
             const realPos = posRisk.find(p => p.symbol === botPos.symbol && p.positionSide === botPos.side);
             if (realPos && Math.abs(parseFloat(realPos.positionAmt)) > 0) {
-                const mPrice = parseFloat(realPos.markPrice);
-                const ePrice = parseFloat(realPos.entryPrice);
-                botPos.markPrice = mPrice;
+                botPos.markPrice = parseFloat(realPos.markPrice);
                 botPos.pnl = parseFloat(realPos.unRealizedProfit);
-                
-                // FIX NaN% : Tính toán biến động để gửi cho HTML
-                if (ePrice && ePrice !== 0) {
-                    botPos.priceDev = ((mPrice - ePrice) / ePrice) * 100;
-                } else {
-                    botPos.priceDev = 0;
-                }
+                // Giữ nguyên công thức tính priceDev gốc của m
+                botPos.priceDev = ((botPos.markPrice - botPos.entryPrice) / botPos.entryPrice) * 100;
             } else {
                 status.blackList[botPos.symbol] = now + (15 * 60 * 1000);
                 botActivePositions.delete(key);
@@ -196,7 +191,6 @@ async function mainLoop() {
         
         for (let [key, botPos] of botActivePositions) {
             if (botPos.isProcessing) continue;
-            // Dựa vào priceDev đã được tính ở MonitorLoop
             if (botPos.priceDev >= botSettings.dcaStep && botPos.dcaCount < botSettings.maxDCA) {
                 await openPosition(botPos.symbol, true);
             }
@@ -225,7 +219,7 @@ async function init() {
             tempInfo[s.symbol] = { quantityPrecision: s.quantityPrecision, pricePrecision: s.pricePrecision, stepSize: parseFloat(lot.stepSize), maxLeverage: brk ? brk.brackets[0].initialLeverage : 20 };
         });
         status.exchangeInfo = tempInfo; status.isReady = true;
-        addBotLog("✨ BOT READY - LUFFY MODE", "success"); priceMonitorLoop();
+        addBotLog("✨ BOT READY - BACK TO ORIGINAL PNL", "success"); priceMonitorLoop();
     } catch (e) { setTimeout(init, 5000); }
 }
 
@@ -242,7 +236,6 @@ APP.get('/api/status', async (req, res) => {
     try {
         const acc = await binancePrivate('/fapi/v2/account');
         const bl = {}; Object.entries(status.blackList).forEach(([s, t]) => { if(t > Date.now()) bl[s] = Math.ceil((t-Date.now())/1000); });
-        // Dữ liệu activePositions gửi đi sẽ chứa priceDev đã được xử lý NaN
         res.json({ botSettings, activePositions: Array.from(botActivePositions.values()), status: { ...status, blackList: bl }, wallet: { totalWalletBalance: parseFloat(acc.totalWalletBalance).toFixed(2), availableBalance: parseFloat(acc.availableBalance).toFixed(2) } });
     } catch (e) { res.json({ status }); }
 });
