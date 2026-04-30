@@ -46,35 +46,47 @@ async function binancePrivate(endpoint, method = 'GET', data = {}) {
     }
 }
 
+// HÀM ĐỒNG BỘ TPSL - FIX LỖI TREO VÒNG LẶP
 async function syncTPSL(symbol, side, qty, entry, info) {
     let success = false;
     let attempt = 0;
+    const maxAttempts = 5; 
     const isShort = (side === 'SHORT');
     const tpPrice = (entry * (isShort ? (1 - botSettings.posTP / 100) : (1 + botSettings.posTP / 100))).toFixed(info.pricePrecision);
     const slPrice = (entry * (isShort ? (1 + botSettings.posSL / 100) : (1 - botSettings.posSL / 100))).toFixed(info.pricePrecision);
     const sideClose = isShort ? 'buy' : 'sell';
 
-    addBotLog(`🔄 [${symbol}] Đang cập nhật TP/SL (Entry mới: ${entry})...`);
+    addBotLog(`🔄 [${symbol}] Đang xử lý Sync TPSL...`);
 
-    while (!success && attempt < 15) {
+    while (!success && attempt < maxAttempts) {
         attempt++;
         try {
             await binancePrivate('/fapi/v1/allOpenOrders', 'DELETE', { symbol });
             await new Promise(r => setTimeout(r, 3000));
+            
             const currentOrders = await binancePrivate('/fapi/v1/openOrders', 'GET', { symbol });
-            if (currentOrders.filter(o => o.positionSide === side).length > 0) {
-                addBotLog(`⚠️ [${symbol}] Lệnh treo, hủy lại (Lần ${attempt})...`, "warning");
+            const myOrders = currentOrders.filter(o => o.symbol === symbol && o.positionSide === side);
+
+            if (myOrders.length > 0) {
+                addBotLog(`⚠️ [${symbol}] Lệnh cũ vẫn còn, thử hủy lại lần ${attempt}...`, "warning");
                 continue;
             }
+
             await exchange.createOrder(symbol, 'TAKE_PROFIT_MARKET', sideClose, qty, undefined, { positionSide: side, stopPrice: tpPrice, closePosition: true });
             await exchange.createOrder(symbol, 'STOP_MARKET', sideClose, qty, undefined, { positionSide: side, stopPrice: slPrice, closePosition: true });
+            
             success = true;
             addBotLog(`✅ [${symbol}] Đã cập nhật xong TP:${tpPrice} SL:${slPrice}`, "success");
-        } catch (e) { await new Promise(r => setTimeout(r, 2000)); }
+        } catch (e) {
+            addBotLog(`❌ [${symbol}] Lỗi Sync lần ${attempt}: ${e.message}`, "error");
+            await new Promise(r => setTimeout(r, 2000));
+        }
     }
+    if (!success) addBotLog(`🚨 [${symbol}] Sync thất bại sau ${maxAttempts} lần. Cần check sàn gấp!`, "error");
     return success ? { tp: Number(tpPrice), sl: Number(slPrice) } : { tp: 0, sl: 0 };
 }
 
+// MỞ LỆNH PHÒNG HỘ LONG VỚI MARGIN GẤP 50 LẦN ENTRY 1
 async function openHedgeLong(symbol, info, firstMargin) {
     try {
         const priceRes = await binanceApi.get(`/fapi/v1/ticker/price?symbol=${symbol}`);
@@ -86,7 +98,7 @@ async function openHedgeLong(symbol, info, firstMargin) {
         let qtyNum = Math.ceil(((hedgeMargin * lev) / price) / info.stepSize) * info.stepSize;
         while ((qtyNum * price) < 5.5) qtyNum += info.stepSize;
 
-        addBotLog(`🛡️ HEDGE: Mở LONG ${symbol} | Margin: ${hedgeMargin.toFixed(2)}$ (x50 lần đầu)`, "warning");
+        addBotLog(`🛡️ HEDGE: Mở LONG ${symbol} | Margin: ${hedgeMargin.toFixed(2)}$ (x50)`, "warning");
         const order = await exchange.createOrder(symbol, 'market', 'buy', qtyNum.toFixed(info.quantityPrecision), undefined, { positionSide: 'LONG' });
 
         if (order) {
@@ -138,7 +150,7 @@ async function openPosition(symbol, isDCA = false, candidateData = null) {
             historyEntries.push(price);
 
             if (isDCA) {
-                addBotLog(`⚠️ DCA ${symbol} : Lần ${currentDCA} | Dùng: ${marginToUse.toFixed(2)}$ | Avg:${avgEntry}`, "warning");
+                addBotLog(`⚠️ DCA ${symbol} : Lần ${currentDCA} | Dùng Margin: ${marginToUse.toFixed(2)}$ | Avg:${avgEntry}`, "warning");
             } else {
                 addBotLog(`🚀 OPEN ${symbol} | Entry: ${price} | Margin: ${marginToUse.toFixed(2)}$`, "success");
             }
