@@ -47,7 +47,7 @@ async function binancePrivate(endpoint, method = 'GET', data = {}) {
 }
 
 /**
- * HÀM SYNC TPSL - PURE MODE (FIX -4130 & -1106)
+ * HÀM SYNC TPSL - ĐÃ FIX LỖI WORKING_TYPE (-4031) VÀ XUNG ĐỘT (-4130, -1106)
  */
 async function syncTPSL(symbol, side, qty, entry, info) {
     const isShort = (side === 'SHORT');
@@ -56,16 +56,16 @@ async function syncTPSL(symbol, side, qty, entry, info) {
     const sideClose = isShort ? 'buy' : 'sell';
 
     try {
-        // BƯỚC 1: Hủy toàn bộ lệnh chờ của symbol để dọn sàn
+        // 1. Hủy sạch các lệnh chờ cũ để tránh lỗi chồng chéo
         await exchange.cancelAllOrders(symbol);
         await new Promise(r => setTimeout(r, 1000));
 
         addBotLog(`✨ [${symbol}] Đặt TP:${tpPrice} SL:${slPrice} (Qty:${qty})`);
         
-        // BƯỚC 2: Đặt lệnh - KHÔNG dùng closePosition hay reduceOnly để tránh đá nhau
+        // 2. Cấu hình chuẩn: Không dùng closePosition/reduceOnly để tránh lỗi tham số
         const params = { 
             positionSide: side, 
-            workingType: 'MARKET_PRICE' 
+            workingType: 'MARK_PRICE' // Đã sửa từ MARKET_PRICE thành MARK_PRICE
         };
 
         // Đặt Take Profit
@@ -73,7 +73,7 @@ async function syncTPSL(symbol, side, qty, entry, info) {
             ...params, stopPrice: tpPrice 
         });
         
-        await new Promise(r => setTimeout(r, 600)); // Delay nhẹ để sàn xử lý kịp
+        await new Promise(r => setTimeout(r, 600)); 
         
         // Đặt Stop Loss
         await exchange.createOrder(symbol, 'STOP_MARKET', sideClose, qty, undefined, { 
@@ -89,7 +89,7 @@ async function syncTPSL(symbol, side, qty, entry, info) {
 }
 
 /**
- * TRACK PNL - TRỪ 0.1% TỔNG VOLUME (PHÍ GIAO DỊCH)
+ * TRACK PNL - TRỪ 0.1% TỔNG VOLUME (PHÍ)
  */
 async function trackClosedPnL(symbol, closedTime, lastBotPos) {
     try {
@@ -99,15 +99,14 @@ async function trackClosedPnL(symbol, closedTime, lastBotPos) {
         
         const rawPnL = relevantTrades.reduce((sum, t) => sum + parseFloat(t.realizedPnl), 0);
         
-        // Tính phí: 0.1% tổng Vol (Tổng số lượng * Giá vào)
+        // Phí sàn tính trên tổng Volume vị thế
         const totalVolume = lastBotPos.qty * lastBotPos.entryPrice;
         const fee = totalVolume * 0.001; 
-        
         const finalPnL = rawPnL - fee;
         
         status.botClosedCount++; 
         status.botPnLClosed += finalPnL;
-        addBotLog(`💰 CHỐT ${symbol} | PnL: ${finalPnL.toFixed(2)}$ (Đã trừ phí: ${fee.toFixed(2)}$)`, "success");
+        addBotLog(`💰 CHỐT ${symbol} | PnL Net: ${finalPnL.toFixed(2)}$ (Phí: ${fee.toFixed(2)}$)`, "success");
     } catch (e) {}
 }
 
@@ -125,9 +124,9 @@ async function openHedgeLong(symbol, info, firstMargin) {
         if (order) {
             const tpP = (price * 1.10).toFixed(info.pricePrecision);
             const slP = (price * 0.90).toFixed(info.pricePrecision);
-            // Hedge cũng đặt TP/SL theo kiểu an toàn
-            await exchange.createOrder(symbol, 'TAKE_PROFIT_MARKET', 'sell', qtyNum.toFixed(info.quantityPrecision), undefined, { positionSide: 'LONG', stopPrice: tpP });
-            await exchange.createOrder(symbol, 'STOP_MARKET', 'sell', qtyNum.toFixed(info.quantityPrecision), undefined, { positionSide: 'LONG', stopPrice: slP });
+            // Hedge cũng đặt TP/SL theo kiểu an toàn nhất
+            await exchange.createOrder(symbol, 'TAKE_PROFIT_MARKET', 'sell', qtyNum.toFixed(info.quantityPrecision), undefined, { positionSide: 'LONG', stopPrice: tpP, workingType: 'MARK_PRICE' });
+            await exchange.createOrder(symbol, 'STOP_MARKET', 'sell', qtyNum.toFixed(info.quantityPrecision), undefined, { positionSide: 'LONG', stopPrice: slP, workingType: 'MARK_PRICE' });
         }
     } catch (e) { addBotLog(`❌ Lỗi Hedge: ${e.message}`, "error"); }
 }
@@ -255,7 +254,7 @@ async function init() {
             tempInfo[s.symbol] = { quantityPrecision: s.quantityPrecision, pricePrecision: s.pricePrecision, stepSize: parseFloat(lot.stepSize), maxLeverage: brk ? brk.brackets[0].initialLeverage : 20 };
         });
         status.exchangeInfo = tempInfo; status.isReady = true;
-        addBotLog("👿 LUFFY READY - PURE SYNC MODE", "success"); priceMonitorLoop();
+        addBotLog("👿 LUFFY READY - FIXED MARK_PRICE MODE", "success"); priceMonitorLoop();
     } catch (e) { setTimeout(init, 5000); }
 }
 
