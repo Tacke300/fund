@@ -51,6 +51,7 @@ async function binancePrivate(endpoint, method = 'GET', data = {}) {
     }
 }
 
+// THEO DÕI PNL VÀ TRỪ PHÍ 0.1% VOLUME
 async function trackClosedPnL(symbol, closedTime, lastBotPos) {
     try {
         await new Promise(r => setTimeout(r, 4500));
@@ -68,10 +69,12 @@ async function trackClosedPnL(symbol, closedTime, lastBotPos) {
     } catch (e) { addBotLog(`❌ LỖI PNL ${symbol}: ${e.message}`); }
 }
 
+// ĐẶT LẠI TP/SL (XÓA CŨ - ĐẶT MỚI THEO AVG)
 async function syncTPSL(symbol, side, qty, entry, info) {
     try {
         await binancePrivate('/fapi/v1/allOpenOrders', 'DELETE', { symbol });
-        await new Promise(r => setTimeout(r, 1200));
+        await new Promise(r => setTimeout(r, 1500));
+        
         const tpPrice = (entry * (side === 'SHORT' ? (1 - botSettings.posTP / 100) : (1 + botSettings.posTP / 100))).toFixed(info.pricePrecision);
         const slPrice = (entry * (side === 'SHORT' ? (1 + botSettings.posSL / 100) : (1 - botSettings.posSL / 100))).toFixed(info.pricePrecision);
         const sideClose = side === 'SHORT' ? 'buy' : 'sell';
@@ -116,7 +119,7 @@ async function openPosition(symbol, isDCA = false, candidateData = null) {
         const order = await exchange.createOrder(symbol, 'market', 'sell', qtyNum.toFixed(info.quantityPrecision), undefined, { positionSide: 'SHORT' });
 
         if (order) {
-            await new Promise(r => setTimeout(r, 2000));
+            await new Promise(r => setTimeout(r, 2500)); // Chờ sàn khớp và cập nhật giá trung bình
             const posRisk = await binancePrivate('/fapi/v2/positionRisk', 'GET', { symbol });
             const upPos = posRisk.find(p => p.positionSide === 'SHORT');
             const avgEntry = parseFloat(upPos.entryPrice);
@@ -130,6 +133,8 @@ async function openPosition(symbol, isDCA = false, candidateData = null) {
             addBotLog(`[${isDCA ? 'DCA_'+currentDCA : 'OPEN'}] ${symbol}${volMsg} | Margin: ${marginToUse.toFixed(2)}$`, isDCA ? "warning" : "success");
 
             const sync = await syncTPSL(symbol, 'SHORT', totalQty, avgEntry, info);
+            if(sync.tp > 0) addBotLog(`📍 RESET TPSL ${symbol}: TP @${sync.tp} | SL @${sync.sl} (Avg: ${avgEntry})`);
+
             botActivePositions.set(posKey, { 
                 symbol, side: 'SHORT', entryPrice: avgEntry, qty: totalQty, tp: sync.tp, sl: sync.sl, 
                 margin: (totalQty * avgEntry / info.maxLeverage), dcaCount: currentDCA, leverage: info.maxLeverage, isProcessing: false, markPrice: price
@@ -176,11 +181,9 @@ async function mainLoop() {
 
         if (activeRealPos.length < botSettings.maxPositions && openingSymbols.size === 0) {
             const keo = status.candidatesList.find(c => {
-                const info = status.exchangeInfo[c.symbol]; // Lấy thông tin đòn bẩy sàn cho phép
+                const info = status.exchangeInfo[c.symbol];
                 const isBL = (status.blackList[c.symbol] || 0) > Date.now();
                 const isOpened = activeRealPos.some(p => p.symbol === c.symbol);
-                
-                // CẬP NHẬT LẠI CHẶN LEVERAGE < 20
                 return info && info.maxLeverage >= 20 && !isBL && !isOpened && !openingSymbols.has(c.symbol) && [c.c1, c.c5, c.c15].some(v => Math.abs(parseFloat(v)) >= parseFloat(botSettings.minVol));
             });
             if (keo) await openPosition(keo.symbol, false, keo);
