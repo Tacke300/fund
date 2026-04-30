@@ -46,18 +46,16 @@ async function binancePrivate(endpoint, method = 'GET', data = {}) {
     }
 }
 
+// FIX TRIỆT ĐỂ LỖI 4130: ĐỢI XÁC NHẬN HỦY RỒI MỚI CÀI
 async function syncTPSL(symbol, side, qty, entry, info) {
     try {
-        // 1. Gửi lệnh hủy tất cả
         await binancePrivate('/fapi/v1/allOpenOrders', 'DELETE', { symbol });
         
-        // 2. Chờ xác nhận đã hủy sạch lệnh (Vòng lặp kiểm tra)
         let isClean = false;
         let retry = 0;
         while (!isClean && retry < 5) {
-            await new Promise(r => setTimeout(r, 1000)); // Đợi 1s mỗi lần check
+            await new Promise(r => setTimeout(r, 1200)); 
             const openOrders = await binancePrivate('/fapi/v1/openOrders', 'GET', { symbol });
-            // Lọc những lệnh cùng side (SHORT) và có closePosition
             const remaining = openOrders.filter(o => o.positionSide === side);
             if (remaining.length === 0) {
                 isClean = true;
@@ -71,7 +69,6 @@ async function syncTPSL(symbol, side, qty, entry, info) {
         const slPrice = (entry * (side === 'SHORT' ? (1 + botSettings.posSL / 100) : (1 - botSettings.posSL / 100))).toFixed(info.pricePrecision);
         const sideClose = side === 'SHORT' ? 'buy' : 'sell';
 
-        // 3. Đặt lệnh mới (Tách riêng để tránh lỗi nghẽn)
         await exchange.createOrder(symbol, 'TAKE_PROFIT_MARKET', sideClose, qty, undefined, { positionSide: side, stopPrice: tpPrice, closePosition: true });
         await exchange.createOrder(symbol, 'STOP_MARKET', sideClose, qty, undefined, { positionSide: side, stopPrice: slPrice, closePosition: true });
         
@@ -99,12 +96,11 @@ async function openPosition(symbol, isDCA = false, candidateData = null) {
             marginToUse = current.margin * 1.05; 
             current.isProcessing = true;
             currentDCA = current.dcaCount + 1;
-            historyEntries = [...(current.historyEntries || [current.entryPrice])];
+            historyEntries = [...(current.historyEntries || [])];
         } else {
             marginToUse = botSettings.invValue.toString().includes('%') 
                 ? (parseFloat(acc.availableBalance) * parseFloat(botSettings.invValue) / 100) 
                 : parseFloat(botSettings.invValue);
-            historyEntries = [];
         }
 
         let qtyNum = Math.ceil(((marginToUse * info.maxLeverage) / price) / info.stepSize) * info.stepSize;
@@ -123,18 +119,15 @@ async function openPosition(symbol, isDCA = false, candidateData = null) {
             historyEntries.push(price);
 
             if (isDCA) {
-                // LOG ĐÚNG YÊU CẦU: DCA lần mấy | e-d1-d2 | avg - margin
                 const pathMsg = historyEntries.map((p, i) => i === 0 ? `e:${p}` : `d${i}:${p}`).join(' - ');
                 addBotLog(`⚠️ dca : dca lần ${currentDCA}, ${pathMsg} | avg:${avgEntry} - margin:${((totalQty * avgEntry) / info.maxLeverage).toFixed(2)}$`, "warning");
             } else {
-                let volMsg = candidateData ? ` | C1:${candidateData.c1}% C5:${candidateData.c5}% C15:${candidateData.c15}%` : "";
+                let volMsg = candidateData ? ` | C1:${candidateData.c1}% C5:${candidateData.c5}%` : "";
                 addBotLog(`🚀 OPEN ${symbol}${volMsg} | Entry: ${price} | Margin: ${marginToUse.toFixed(2)}$`, "success");
             }
 
             const sync = await syncTPSL(symbol, 'SHORT', totalQty, avgEntry, info);
-            if (sync.tp > 0) {
-                addBotLog(`✅ Đã set lại TP:${sync.tp} SL:${sync.sl} cho ${symbol} theo giá TB:${avgEntry}`);
-            }
+            if (sync.tp > 0) addBotLog(`✅ Đã set lại TP:${sync.tp} SL:${sync.sl} cho ${symbol} theo giá TB:${avgEntry}`);
 
             botActivePositions.set(posKey, { 
                 symbol, side: 'SHORT', entryPrice: avgEntry, historyEntries: historyEntries, qty: totalQty, tp: sync.tp, sl: sync.sl, 
@@ -145,14 +138,11 @@ async function openPosition(symbol, isDCA = false, candidateData = null) {
     finally { openingSymbols.delete(symbol); }
 }
 
-// Giữ nguyên các hàm trackClosedPnL, priceMonitorLoop, mainLoop, init, và API Router từ code gốc của bạn...
-// (Vì phần đó không thay đổi logic core)
-
 async function trackClosedPnL(symbol, closedTime, lastBotPos) {
     try {
-        await new Promise(r => setTimeout(r, 4500));
+        await new Promise(r => setTimeout(r, 5000));
         const trades = await binancePrivate('/fapi/v1/userTrades', 'GET', { symbol, limit: 10 });
-        const relevantTrades = trades.filter(t => Math.abs(t.time - closedTime) < 25000);
+        const relevantTrades = trades.filter(t => Math.abs(t.time - closedTime) < 30000);
         const rawPnL = relevantTrades.reduce((sum, t) => sum + parseFloat(t.realizedPnl), 0);
         const approxFee = (lastBotPos.qty * lastBotPos.entryPrice * 0.001); 
         const finalPnL = rawPnL - approxFee;
@@ -191,11 +181,13 @@ async function mainLoop() {
             const priceDev = ((parseFloat(realPos.markPrice) - parseFloat(realPos.entryPrice)) / parseFloat(realPos.entryPrice)) * 100;
             if (priceDev >= botSettings.dcaStep && botPos.dcaCount < botSettings.maxDCA) await openPosition(botPos.symbol, true);
         }
+        // ĐIỀU KIỆN MỞ LỆNH: CHỈ C1 HOẶC C5
         if (activeRealPos.length < botSettings.maxPositions && openingSymbols.size === 0) {
             const keo = status.candidatesList.find(c => {
                 const info = status.exchangeInfo[c.symbol];
                 const isBL = (status.blackList[c.symbol] || 0) > Date.now();
-                return info && info.maxLeverage >= 20 && !isBL && !activeRealPos.some(p => p.symbol === c.symbol) && [c.c1, c.c5, c.c15].some(v => Math.abs(parseFloat(v)) >= parseFloat(botSettings.minVol));
+                const hasVol = [c.c1, c.c5].some(v => Math.abs(parseFloat(v)) >= parseFloat(botSettings.minVol));
+                return info && info.maxLeverage >= 20 && !isBL && !activeRealPos.some(p => p.symbol === c.symbol) && hasVol;
             });
             if (keo) await openPosition(keo.symbol, false, keo);
         }
@@ -214,7 +206,7 @@ async function init() {
             tempInfo[s.symbol] = { quantityPrecision: s.quantityPrecision, pricePrecision: s.pricePrecision, stepSize: parseFloat(lot.stepSize), maxLeverage: brk ? brk.brackets[0].initialLeverage : 20 };
         });
         status.exchangeInfo = tempInfo; status.isReady = true;
-        addBotLog("👿 LUFFY READY - MIN LEV X20 ACTIVE", "success"); priceMonitorLoop();
+        addBotLog("👿 LUFFY READY - C1/C5 MODE ACTIVE", "success"); priceMonitorLoop();
     } catch (e) { setTimeout(init, 5000); }
 }
 
