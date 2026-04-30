@@ -47,7 +47,7 @@ async function binancePrivate(endpoint, method = 'GET', data = {}) {
 }
 
 /**
- * HÀM SYNC TPSL - FIX TRIỆT ĐỂ LỖI -4130 DÙNG REDUCE_ONLY
+ * HÀM SYNC TPSL - PURE MODE (FIX -4130 & -1106)
  */
 async function syncTPSL(symbol, side, qty, entry, info) {
     const isShort = (side === 'SHORT');
@@ -56,25 +56,31 @@ async function syncTPSL(symbol, side, qty, entry, info) {
     const sideClose = isShort ? 'buy' : 'sell';
 
     try {
-        // 1. Hủy sạch các lệnh chờ cũ của Symbol này để tránh xung đột
+        // BƯỚC 1: Hủy toàn bộ lệnh chờ của symbol để dọn sàn
         await exchange.cancelAllOrders(symbol);
         await new Promise(r => setTimeout(r, 1000));
 
-        // 2. Đặt TP và SL dùng reduceOnly thay vì closePosition để không bị sàn chặn lệnh thứ 2
-        // Dùng qty chính xác của vị thế để đóng lệnh chuẩn 100%
-        addBotLog(`✨ [${symbol}] Đang đặt TP:${tpPrice} SL:${slPrice} (ReduceOnly)...`);
+        addBotLog(`✨ [${symbol}] Đặt TP:${tpPrice} SL:${slPrice} (Qty:${qty})`);
         
+        // BƯỚC 2: Đặt lệnh - KHÔNG dùng closePosition hay reduceOnly để tránh đá nhau
         const params = { 
             positionSide: side, 
-            reduceOnly: true, 
             workingType: 'MARKET_PRICE' 
         };
 
-        await exchange.createOrder(symbol, 'TAKE_PROFIT_MARKET', sideClose, qty, undefined, { ...params, stopPrice: tpPrice });
-        await new Promise(r => setTimeout(r, 500));
-        await exchange.createOrder(symbol, 'STOP_MARKET', sideClose, qty, undefined, { ...params, stopPrice: slPrice });
+        // Đặt Take Profit
+        await exchange.createOrder(symbol, 'TAKE_PROFIT_MARKET', sideClose, qty, undefined, { 
+            ...params, stopPrice: tpPrice 
+        });
+        
+        await new Promise(r => setTimeout(r, 600)); // Delay nhẹ để sàn xử lý kịp
+        
+        // Đặt Stop Loss
+        await exchange.createOrder(symbol, 'STOP_MARKET', sideClose, qty, undefined, { 
+            ...params, stopPrice: slPrice 
+        });
 
-        addBotLog(`✅ [${symbol}] Sync thành công (No more -4130)`, "success");
+        addBotLog(`✅ [${symbol}] Sync thành công.`, "success");
         return { tp: Number(tpPrice), sl: Number(slPrice) };
     } catch (e) {
         addBotLog(`❌ [${symbol}] Lỗi Sync: ${e.message}`, "error");
@@ -83,22 +89,25 @@ async function syncTPSL(symbol, side, qty, entry, info) {
 }
 
 /**
- * TRACK PNL - TRỪ 0.1% TỔNG VOLUME (PHÍ SÀN)
+ * TRACK PNL - TRỪ 0.1% TỔNG VOLUME (PHÍ GIAO DỊCH)
  */
 async function trackClosedPnL(symbol, closedTime, lastBotPos) {
     try {
-        await new Promise(r => setTimeout(r, 4000));
-        const trades = await binancePrivate('/fapi/v1/userTrades', 'GET', { symbol, limit: 10 });
-        const relevantTrades = trades.filter(t => Math.abs(t.time - closedTime) < 30000 && t.positionSide === lastBotPos.side);
+        await new Promise(r => setTimeout(r, 5000));
+        const trades = await binancePrivate('/fapi/v1/userTrades', 'GET', { symbol, limit: 15 });
+        const relevantTrades = trades.filter(t => Math.abs(t.time - closedTime) < 60000 && t.positionSide === lastBotPos.side);
+        
         const rawPnL = relevantTrades.reduce((sum, t) => sum + parseFloat(t.realizedPnl), 0);
         
-        // Phí = 0.1% tổng Volume (qty * entryPrice)
-        const fee = (lastBotPos.qty * lastBotPos.entryPrice) * 0.001;
+        // Tính phí: 0.1% tổng Vol (Tổng số lượng * Giá vào)
+        const totalVolume = lastBotPos.qty * lastBotPos.entryPrice;
+        const fee = totalVolume * 0.001; 
+        
         const finalPnL = rawPnL - fee;
         
         status.botClosedCount++; 
         status.botPnLClosed += finalPnL;
-        addBotLog(`✅ CHỐT ${symbol} | PnL: ${finalPnL.toFixed(2)}$ (Phí: ${fee.toFixed(2)}$)`, "success");
+        addBotLog(`💰 CHỐT ${symbol} | PnL: ${finalPnL.toFixed(2)}$ (Đã trừ phí: ${fee.toFixed(2)}$)`, "success");
     } catch (e) {}
 }
 
@@ -111,14 +120,14 @@ async function openHedgeLong(symbol, info, firstMargin) {
         let qtyNum = Math.ceil(((hedgeMargin * info.maxLeverage) / price) / info.stepSize) * info.stepSize;
         while ((qtyNum * price) < 5.5) qtyNum += info.stepSize;
 
-        addBotLog(`⚠️ HEDGE: Mở LONG ${symbol} | Margin: ${hedgeMargin.toFixed(2)}$ (x50)`, "warning");
+        addBotLog(`⚠️ HEDGE: Mở LONG ${symbol} | Margin: ${hedgeMargin.toFixed(2)}$`, "warning");
         const order = await exchange.createOrder(symbol, 'market', 'buy', qtyNum.toFixed(info.quantityPrecision), undefined, { positionSide: 'LONG' });
         if (order) {
             const tpP = (price * 1.10).toFixed(info.pricePrecision);
             const slP = (price * 0.90).toFixed(info.pricePrecision);
-            // Hedge cũng dùng reduceOnly cho đồng bộ
-            await exchange.createOrder(symbol, 'TAKE_PROFIT_MARKET', 'sell', qtyNum.toFixed(info.quantityPrecision), undefined, { positionSide: 'LONG', stopPrice: tpP, reduceOnly: true });
-            await exchange.createOrder(symbol, 'STOP_MARKET', 'sell', qtyNum.toFixed(info.quantityPrecision), undefined, { positionSide: 'LONG', stopPrice: slP, reduceOnly: true });
+            // Hedge cũng đặt TP/SL theo kiểu an toàn
+            await exchange.createOrder(symbol, 'TAKE_PROFIT_MARKET', 'sell', qtyNum.toFixed(info.quantityPrecision), undefined, { positionSide: 'LONG', stopPrice: tpP });
+            await exchange.createOrder(symbol, 'STOP_MARKET', 'sell', qtyNum.toFixed(info.quantityPrecision), undefined, { positionSide: 'LONG', stopPrice: slP });
         }
     } catch (e) { addBotLog(`❌ Lỗi Hedge: ${e.message}`, "error"); }
 }
@@ -162,12 +171,9 @@ async function openPosition(symbol, isDCA = false, candidateData = null) {
             historyEntries.push(price);
 
             if (isDCA) {
-                addBotLog(`⚠️ DCA ${symbol} : Lần ${currentDCA} | Margin: ${marginToUse.toFixed(2)}$ | Avg:${avgEntry}`, "warning");
+                addBotLog(`⚠️ DCA ${symbol} : Lần ${currentDCA} | Entry: ${price} | Avg:${avgEntry}`, "warning");
             } else {
-                const c1 = candidateData?.c1 || "0";
-                const c5 = candidateData?.c5 || "0";
-                const c15 = candidateData?.c15 || "0";
-                addBotLog(`✅ OPEN ${symbol} | [1m:${c1}% 5m:${c5}% 15m:${c15}%] | Entry: ${price} | Margin: ${marginToUse.toFixed(2)}$`, "success");
+                addBotLog(`✅ OPEN ${symbol} | Entry: ${price} | Margin: ${marginToUse.toFixed(2)}$`, "success");
             }
 
             const sync = await syncTPSL(symbol, 'SHORT', totalQty, avgEntry, info);
@@ -193,9 +199,7 @@ async function priceMonitorLoop() {
             if (realPos && Math.abs(parseFloat(realPos.positionAmt)) > 0) {
                 botPos.markPrice = parseFloat(realPos.markPrice); 
                 botPos.pnl = parseFloat(realPos.unRealizedProfit);
-                if (botPos.entryPrice && botPos.markPrice) {
-                    botPos.priceDev = ((botPos.markPrice - botPos.entryPrice) / botPos.entryPrice) * 100;
-                } else { botPos.priceDev = 0; }
+                botPos.priceDev = botPos.entryPrice ? (((botPos.markPrice - botPos.entryPrice) / botPos.entryPrice) * 100) : 0;
             } else {
                 status.blackList[botPos.symbol] = now + (15 * 60 * 1000);
                 trackClosedPnL(botPos.symbol, now, botPos); botActivePositions.delete(key);
@@ -251,7 +255,7 @@ async function init() {
             tempInfo[s.symbol] = { quantityPrecision: s.quantityPrecision, pricePrecision: s.pricePrecision, stepSize: parseFloat(lot.stepSize), maxLeverage: brk ? brk.brackets[0].initialLeverage : 20 };
         });
         status.exchangeInfo = tempInfo; status.isReady = true;
-        addBotLog("👿 LUFFY READY - REDUCE_ONLY MODE ACTIVE", "success"); priceMonitorLoop();
+        addBotLog("👿 LUFFY READY - PURE SYNC MODE", "success"); priceMonitorLoop();
     } catch (e) { setTimeout(init, 5000); }
 }
 
