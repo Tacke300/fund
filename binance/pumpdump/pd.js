@@ -100,7 +100,7 @@ async function openPosition(symbol, isDCA = false, candidateData = null) {
             historyEntries.push(currentPrice);
 
             if (isDCA) {
-                // LOG ĐÚNG YÊU CẦU: dca lần mấy, entry - các giá dca | avg - margin
+                // LOG DCA: dca lần mấy, e - d1 d2 d3 d4 | avg - margin
                 const pathMsg = historyEntries.map((p, i) => i === 0 ? `e:${p}` : `d${i}:${p}`).join(' - ');
                 const marginPos = ((totalQty * avgEntry) / info.maxLeverage).toFixed(2);
                 addBotLog(`dca : dca lần ${currentDCA}, ${pathMsg} | avg:${avgEntry} - ${marginPos}$`, "warning");
@@ -191,7 +191,18 @@ APP.get('/api/status', async (req, res) => {
     try {
         const acc = await binancePrivate('/fapi/v2/account');
         const bl = {}; Object.entries(status.blackList).forEach(([s, t]) => { if(t > Date.now()) bl[s] = Math.ceil((t-Date.now())/1000); });
-        res.json({ botSettings, activePositions: Array.from(botActivePositions.values()), status: { ...status, blackList: bl }, wallet: { total: parseFloat(acc.totalWalletBalance).toFixed(2), avail: parseFloat(acc.availableBalance).toFixed(2), pnl: parseFloat(acc.totalUnrealizedProfit).toFixed(2) } });
+        
+        // Fix số dư ở đây: Binance v2/account trả về totalWalletBalance và availableBalance là string
+        res.json({ 
+            botSettings, 
+            activePositions: Array.from(botActivePositions.values()), 
+            status: { ...status, blackList: bl }, 
+            wallet: { 
+                total: parseFloat(acc.totalWalletBalance || 0).toFixed(2), 
+                avail: parseFloat(acc.availableBalance || 0).toFixed(2), 
+                pnl: parseFloat(acc.totalUnrealizedProfit || 0).toFixed(2) 
+            } 
+        });
     } catch (e) { res.json({ status }); }
 });
 APP.post('/api/settings', (req, res) => { botSettings = { ...botSettings, ...req.body }; res.json({ success: true }); });
