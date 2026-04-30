@@ -47,7 +47,7 @@ async function binancePrivate(endpoint, method = 'GET', data = {}) {
 }
 
 /**
- * HÀM SYNC TPSL - DỌN DẸP 3 LỚP (TRIPLE CLEAN)
+ * HÀM SYNC TPSL - FIX TRIỆT ĐỂ LỖI -4130 DÙNG REDUCE_ONLY
  */
 async function syncTPSL(symbol, side, qty, entry, info) {
     const isShort = (side === 'SHORT');
@@ -56,46 +56,25 @@ async function syncTPSL(symbol, side, qty, entry, info) {
     const sideClose = isShort ? 'buy' : 'sell';
 
     try {
-        addBotLog(`🧹 [${symbol}] Bắt đầu dọn dẹp sàn 3 lớp...`);
+        // 1. Hủy sạch các lệnh chờ cũ của Symbol này để tránh xung đột
+        await exchange.cancelAllOrders(symbol);
+        await new Promise(r => setTimeout(r, 1000));
 
-        // PHƯƠNG PHÁP 1: Hủy toàn bộ lệnh chờ của symbol (Xử lý diện rộng)
-        await binancePrivate('/fapi/v1/allOpenOrders', 'DELETE', { symbol });
+        // 2. Đặt TP và SL dùng reduceOnly thay vì closePosition để không bị sàn chặn lệnh thứ 2
+        // Dùng qty chính xác của vị thế để đóng lệnh chuẩn 100%
+        addBotLog(`✨ [${symbol}] Đang đặt TP:${tpPrice} SL:${slPrice} (ReduceOnly)...`);
+        
+        const params = { 
+            positionSide: side, 
+            reduceOnly: true, 
+            workingType: 'MARKET_PRICE' 
+        };
+
+        await exchange.createOrder(symbol, 'TAKE_PROFIT_MARKET', sideClose, qty, undefined, { ...params, stopPrice: tpPrice });
         await new Promise(r => setTimeout(r, 500));
+        await exchange.createOrder(symbol, 'STOP_MARKET', sideClose, qty, undefined, { ...params, stopPrice: slPrice });
 
-        // PHƯƠNG PHÁP 2: Quét đích danh và xóa lệnh theo loại (ReduceOnly/Stop/TP)
-        let openOrders = await binancePrivate('/fapi/v1/openOrders', 'GET', { symbol });
-        let conflictOrders = openOrders.filter(o => 
-            o.positionSide === side && 
-            (o.reduceOnly === true || o.closePosition === true || o.type.includes('STOP') || o.type.includes('TAKE_PROFIT'))
-        );
-        for (const o of conflictOrders) {
-            await binancePrivate('/fapi/v1/order', 'DELETE', { symbol, orderId: o.orderId });
-        }
-        if(conflictOrders.length > 0) await new Promise(r => setTimeout(r, 500));
-
-        // PHƯƠNG PHÁP 3: Kiểm tra trạng thái rỗng trước khi đặt (Verify & Wait)
-        let isClean = false;
-        for (let i = 0; i < 3; i++) {
-            let check = await binancePrivate('/fapi/v1/openOrders', 'GET', { symbol });
-            if (!check.some(o => o.positionSide === side && (o.closePosition === true || o.type.includes('STOP')))) {
-                isClean = true;
-                break;
-            }
-            await new Promise(r => setTimeout(r, 800));
-        }
-
-        if (!isClean) {
-            addBotLog(`⚠️ [${symbol}] Sàn chưa sạch sau 3 lớp dọn dẹp, hủy sync đợt này.`, "warning");
-            return { tp: 0, sl: 0 };
-        }
-
-        // ĐẶT LỆNH MỚI
-        addBotLog(`✨ [${symbol}] Sàn sạch. Đặt TP:${tpPrice} SL:${slPrice}`);
-        await exchange.createOrder(symbol, 'TAKE_PROFIT_MARKET', sideClose, qty, undefined, { positionSide: side, stopPrice: tpPrice, closePosition: true });
-        await new Promise(r => setTimeout(r, 500));
-        await exchange.createOrder(symbol, 'STOP_MARKET', sideClose, qty, undefined, { positionSide: side, stopPrice: slPrice, closePosition: true });
-
-        addBotLog(`✅ [${symbol}] Sync thành công.`, "success");
+        addBotLog(`✅ [${symbol}] Sync thành công (No more -4130)`, "success");
         return { tp: Number(tpPrice), sl: Number(slPrice) };
     } catch (e) {
         addBotLog(`❌ [${symbol}] Lỗi Sync: ${e.message}`, "error");
@@ -104,26 +83,22 @@ async function syncTPSL(symbol, side, qty, entry, info) {
 }
 
 /**
- * TRACK PNL - TRỪ 0.1% TỔNG VOLUME (PHÍ)
+ * TRACK PNL - TRỪ 0.1% TỔNG VOLUME (PHÍ SÀN)
  */
 async function trackClosedPnL(symbol, closedTime, lastBotPos) {
     try {
         await new Promise(r => setTimeout(r, 4000));
         const trades = await binancePrivate('/fapi/v1/userTrades', 'GET', { symbol, limit: 10 });
         const relevantTrades = trades.filter(t => Math.abs(t.time - closedTime) < 30000 && t.positionSide === lastBotPos.side);
-        
         const rawPnL = relevantTrades.reduce((sum, t) => sum + parseFloat(t.realizedPnl), 0);
         
-        // Tính tổng Volume: Số lượng * Giá entry (Giá trị vị thế)
-        const totalVolume = lastBotPos.qty * lastBotPos.entryPrice;
-        // Phí = 0.1% tổng Volume (Tính cho cả lượt vào và lượt ra)
-        const fee = totalVolume * 0.001; 
-        
+        // Phí = 0.1% tổng Volume (qty * entryPrice)
+        const fee = (lastBotPos.qty * lastBotPos.entryPrice) * 0.001;
         const finalPnL = rawPnL - fee;
         
         status.botClosedCount++; 
         status.botPnLClosed += finalPnL;
-        addBotLog(`✅ CHỐT ${symbol} | PnL: ${finalPnL.toFixed(2)}$ (Đã trừ phí ${fee.toFixed(2)}$)`, "success");
+        addBotLog(`✅ CHỐT ${symbol} | PnL: ${finalPnL.toFixed(2)}$ (Phí: ${fee.toFixed(2)}$)`, "success");
     } catch (e) {}
 }
 
@@ -141,8 +116,9 @@ async function openHedgeLong(symbol, info, firstMargin) {
         if (order) {
             const tpP = (price * 1.10).toFixed(info.pricePrecision);
             const slP = (price * 0.90).toFixed(info.pricePrecision);
-            await exchange.createOrder(symbol, 'TAKE_PROFIT_MARKET', 'sell', qtyNum.toFixed(info.quantityPrecision), undefined, { positionSide: 'LONG', stopPrice: tpP, closePosition: true });
-            await exchange.createOrder(symbol, 'STOP_MARKET', 'sell', qtyNum.toFixed(info.quantityPrecision), undefined, { positionSide: 'LONG', stopPrice: slP, closePosition: true });
+            // Hedge cũng dùng reduceOnly cho đồng bộ
+            await exchange.createOrder(symbol, 'TAKE_PROFIT_MARKET', 'sell', qtyNum.toFixed(info.quantityPrecision), undefined, { positionSide: 'LONG', stopPrice: tpP, reduceOnly: true });
+            await exchange.createOrder(symbol, 'STOP_MARKET', 'sell', qtyNum.toFixed(info.quantityPrecision), undefined, { positionSide: 'LONG', stopPrice: slP, reduceOnly: true });
         }
     } catch (e) { addBotLog(`❌ Lỗi Hedge: ${e.message}`, "error"); }
 }
@@ -275,7 +251,7 @@ async function init() {
             tempInfo[s.symbol] = { quantityPrecision: s.quantityPrecision, pricePrecision: s.pricePrecision, stepSize: parseFloat(lot.stepSize), maxLeverage: brk ? brk.brackets[0].initialLeverage : 20 };
         });
         status.exchangeInfo = tempInfo; status.isReady = true;
-        addBotLog("👿 LUFFY READY - 3-LAYER CLEAN & PNL FEE FIXED", "success"); priceMonitorLoop();
+        addBotLog("👿 LUFFY READY - REDUCE_ONLY MODE ACTIVE", "success"); priceMonitorLoop();
     } catch (e) { setTimeout(init, 5000); }
 }
 
