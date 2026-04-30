@@ -61,16 +61,9 @@ async function syncTPSL(symbol, side, qty, entry, info) {
             addBotLog(`🔄 [${symbol}] Lọc & Xóa sạch TP/SL cũ (Lần ${attempt})...`);
             
             let openOrders = await binancePrivate('/fapi/v1/openOrders', 'GET', { symbol });
-
             let targetOrders = openOrders.filter(o => 
                 o.positionSide === side && 
-                (
-                    o.closePosition == true ||
-                    o.type === 'STOP_MARKET' ||
-                    o.type === 'TAKE_PROFIT_MARKET' ||
-                    o.origType === 'STOP_MARKET' ||
-                    o.origType === 'TAKE_PROFIT_MARKET'
-                )
+                (o.closePosition === true || o.reduceOnly === true || o.type.includes('STOP') || o.type.includes('TAKE_PROFIT'))
             );
 
             for (const o of targetOrders) {
@@ -78,16 +71,12 @@ async function syncTPSL(symbol, side, qty, entry, info) {
                 await new Promise(r => setTimeout(r, 500)); 
             }
 
-            await new Promise(r => setTimeout(r, 1000));
+            await new Promise(r => setTimeout(r, 2000));
 
             let finalCheck = await binancePrivate('/fapi/v1/openOrders', 'GET', { symbol });
             let remains = finalCheck.filter(o => 
                 o.positionSide === side && 
-                (
-                    o.closePosition == true ||
-                    o.type === 'STOP_MARKET' ||
-                    o.type === 'TAKE_PROFIT_MARKET'
-                )
+                (o.closePosition === true || o.type.includes('STOP') || o.type.includes('TAKE_PROFIT'))
             );
             
             if (remains.length > 0) {
@@ -96,9 +85,20 @@ async function syncTPSL(symbol, side, qty, entry, info) {
             }
 
             addBotLog(`✨ [${symbol}] Sàn sạch. Đặt TP:${tpPrice} SL:${slPrice}`);
-            await exchange.createOrder(symbol, 'TAKE_PROFIT_MARKET', sideClose, qty, undefined, { positionSide: side, stopPrice: tpPrice, closePosition: true });
-            await new Promise(r => setTimeout(r, 800)); 
-            await exchange.createOrder(symbol, 'STOP_MARKET', sideClose, qty, undefined, { positionSide: side, stopPrice: slPrice, closePosition: true });
+
+            await exchange.createOrder(symbol, 'TAKE_PROFIT_MARKET', sideClose, undefined, undefined, {
+                positionSide: side,
+                stopPrice: tpPrice,
+                closePosition: true
+            });
+
+            await new Promise(r => setTimeout(r, 1200));
+
+            await exchange.createOrder(symbol, 'STOP_MARKET', sideClose, undefined, undefined, {
+                positionSide: side,
+                stopPrice: slPrice,
+                closePosition: true
+            });
             
             success = true;
             addBotLog(`✅ [${symbol}] Sync thành công.`, "success");
