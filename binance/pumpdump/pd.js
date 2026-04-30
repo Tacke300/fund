@@ -51,7 +51,6 @@ async function binancePrivate(endpoint, method = 'GET', data = {}) {
     }
 }
 
-// HÀM TÍNH PNL VÀ TRỪ PHÍ 0.1% VOL
 async function trackClosedPnL(symbol, closedTime, lastBotPos) {
     try {
         await new Promise(r => setTimeout(r, 4500));
@@ -59,14 +58,13 @@ async function trackClosedPnL(symbol, closedTime, lastBotPos) {
         const relevantTrades = trades.filter(t => Math.abs(t.time - closedTime) < 25000);
         
         const rawPnL = relevantTrades.reduce((sum, t) => sum + parseFloat(t.realizedPnl), 0);
-        // Phí 0.1% trên tổng Volume vị thế (Qty * Entry * 2 - tính cả lượt mở và đóng)
         const approxFee = (lastBotPos.qty * lastBotPos.entryPrice * 0.001); 
         const finalPnL = rawPnL - approxFee;
         
         status.botClosedCount++;
         status.botPnLClosed += finalPnL;
         
-        addBotLog(`✅ CHỐT ${symbol} | PnL: ${rawPnL.toFixed(2)}$ - Fee: ${approxFee.toFixed(2)}$ = ${finalPnL.toFixed(2)}$`, finalPnL >= 0 ? "success" : "error");
+        addBotLog(`✅ CHỐT ${symbol} | Log: ${rawPnL.toFixed(2)}$ - Fee: ${approxFee.toFixed(2)}$ = ${finalPnL.toFixed(2)}$`, finalPnL >= 0 ? "success" : "error");
     } catch (e) { addBotLog(`❌ LỖI PNL ${symbol}: ${e.message}`); }
 }
 
@@ -124,7 +122,6 @@ async function openPosition(symbol, isDCA = false, candidateData = null) {
             const avgEntry = parseFloat(upPos.entryPrice);
             const totalQty = Math.abs(parseFloat(upPos.positionAmt));
 
-            // LOG BIẾN ĐỘNG 3 KHUNG
             let volMsg = "";
             if (!isDCA && candidateData) {
                 volMsg = ` | C1:${candidateData.c1}% C5:${candidateData.c5}% C15:${candidateData.c15}%`;
@@ -179,9 +176,12 @@ async function mainLoop() {
 
         if (activeRealPos.length < botSettings.maxPositions && openingSymbols.size === 0) {
             const keo = status.candidatesList.find(c => {
+                const info = status.exchangeInfo[c.symbol]; // Lấy thông tin đòn bẩy sàn cho phép
                 const isBL = (status.blackList[c.symbol] || 0) > Date.now();
                 const isOpened = activeRealPos.some(p => p.symbol === c.symbol);
-                return !isBL && !isOpened && !openingSymbols.has(c.symbol) && [c.c1, c.c5, c.c15].some(v => Math.abs(parseFloat(v)) >= parseFloat(botSettings.minVol));
+                
+                // CẬP NHẬT LẠI CHẶN LEVERAGE < 20
+                return info && info.maxLeverage >= 20 && !isBL && !isOpened && !openingSymbols.has(c.symbol) && [c.c1, c.c5, c.c15].some(v => Math.abs(parseFloat(v)) >= parseFloat(botSettings.minVol));
             });
             if (keo) await openPosition(keo.symbol, false, keo);
         }
@@ -202,6 +202,7 @@ async function init() {
         });
         status.exchangeInfo = tempInfo; 
         status.isReady = true;
+        addBotLog("👿 LUFFY READY - MIN LEV X20 ACTIVE", "success");
         priceMonitorLoop();
     } catch (e) { setTimeout(init, 5000); }
 }
