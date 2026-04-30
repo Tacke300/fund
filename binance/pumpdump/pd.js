@@ -59,54 +59,70 @@ async function syncTPSL(symbol, side, qty, entry, info) {
         attempt++;
         try {
             addBotLog(`🔄 [${symbol}] Lọc & Xóa sạch TP/SL cũ (Lần ${attempt})...`);
-            
-            let openOrders = await binancePrivate('/fapi/v1/openOrders', 'GET', { symbol });
-            let targetOrders = openOrders.filter(o => 
-                o.positionSide === side && 
-                (o.closePosition === true || o.reduceOnly === true || o.type.includes('STOP') || o.type.includes('TAKE_PROFIT'))
-            );
 
-            for (const o of targetOrders) {
-                await binancePrivate('/fapi/v1/order', 'DELETE', { symbol, orderId: o.orderId });
-                await new Promise(r => setTimeout(r, 500)); 
+            try {
+                await binancePrivate('/fapi/v1/allOpenOrders', 'DELETE', { symbol });
+            } catch (e) {}
+
+            await new Promise(r => setTimeout(r, 500));
+
+            let openOrders = [];
+            try {
+                openOrders = await binancePrivate('/fapi/v1/openOrders', 'GET', { symbol });
+            } catch (e) {}
+
+            for (const o of openOrders) {
+                if (o.positionSide === side) {
+                    try {
+                        await binancePrivate('/fapi/v1/order', 'DELETE', { symbol, orderId: o.orderId });
+                        await new Promise(r => setTimeout(r, 200));
+                    } catch (e) {}
+                }
             }
 
-            await new Promise(r => setTimeout(r, 2000));
+            try {
+                await binancePrivate('/fapi/v1/allOpenOrders', 'DELETE', { symbol });
+            } catch (e) {}
 
-            let finalCheck = await binancePrivate('/fapi/v1/openOrders', 'GET', { symbol });
-            let remains = finalCheck.filter(o => 
-                o.positionSide === side && 
-                (o.closePosition === true || o.type.includes('STOP') || o.type.includes('TAKE_PROFIT'))
-            );
-            
+            await new Promise(r => setTimeout(r, 1200));
+
+            let finalCheck = [];
+            try {
+                finalCheck = await binancePrivate('/fapi/v1/openOrders', 'GET', { symbol });
+            } catch (e) {}
+
+            const remains = finalCheck.filter(o => o.positionSide === side);
+
             if (remains.length > 0) {
-                addBotLog(`⚠️ [${symbol}] Vẫn còn lệnh treo, thử lại...`, "warning");
-                continue; 
+                continue;
             }
 
-            addBotLog(`✨ [${symbol}] Sàn sạch. Đặt TP:${tpPrice} SL:${slPrice}`);
+            addBotLog(`✨  [${symbol}] Sàn sạch. Đặt TP:${tpPrice} SL:${slPrice}`);
 
             await exchange.createOrder(symbol, 'TAKE_PROFIT_MARKET', sideClose, undefined, undefined, {
                 positionSide: side,
                 stopPrice: tpPrice,
-                closePosition: true
+                closePosition: true,
+                workingType: 'MARK_PRICE'
             });
 
-            await new Promise(r => setTimeout(r, 1200));
+            await new Promise(r => setTimeout(r, 500));
 
             await exchange.createOrder(symbol, 'STOP_MARKET', sideClose, undefined, undefined, {
                 positionSide: side,
                 stopPrice: slPrice,
-                closePosition: true
+                closePosition: true,
+                workingType: 'MARK_PRICE'
             });
-            
+
             success = true;
-            addBotLog(`✅ [${symbol}] Sync thành công.`, "success");
+            addBotLog(`✅  [${symbol}] Sync thành công.`);
         } catch (e) {
-            addBotLog(`❌ [${symbol}] Lỗi Sync lần ${attempt}: ${e.message}`, "error");
-            await new Promise(r => setTimeout(r, 2000));
+            addBotLog(`❌  [${symbol}] Lỗi Sync lần ${attempt}: ${e.message}`);
+            await new Promise(r => setTimeout(r, 1500));
         }
     }
+
     return success ? { tp: Number(tpPrice), sl: Number(slPrice) } : { tp: 0, sl: 0 };
 }
 
@@ -196,7 +212,8 @@ async function trackClosedPnL(symbol, closedTime, lastBotPos) {
         const trades = await binancePrivate('/fapi/v1/userTrades', 'GET', { symbol, limit: 10 });
         const relevantTrades = trades.filter(t => Math.abs(t.time - closedTime) < 30000 && t.positionSide === lastBotPos.side);
         const rawPnL = relevantTrades.reduce((sum, t) => sum + parseFloat(t.realizedPnl), 0);
-        const finalPnL = rawPnL - (lastBotPos.qty * lastBotPos.entryPrice * 0.001);
+        const fee = (lastBotPos.qty * lastBotPos.entryPrice) * 0.001;
+        const finalPnL = rawPnL - fee;
         status.botClosedCount++; status.botPnLClosed += finalPnL;
         addBotLog(`✅ CHỐT ${symbol} | PnL: ${finalPnL.toFixed(2)}$`, "success");
     } catch (e) {}
