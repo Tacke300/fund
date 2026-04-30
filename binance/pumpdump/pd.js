@@ -46,37 +46,34 @@ async function binancePrivate(endpoint, method = 'GET', data = {}) {
     }
 }
 
-// FIX TRIỆT ĐỂ LỖI 4130: ĐỢI XÁC NHẬN HỦY RỒI MỚI CÀI
+// HÀM ĐỒNG BỘ TPSL CƯỠNG BỨC - CHỈ LOG KẾT QUẢ CUỐI
 async function syncTPSL(symbol, side, qty, entry, info) {
-    try {
-        await binancePrivate('/fapi/v1/allOpenOrders', 'DELETE', { symbol });
-        
-        let isClean = false;
-        let retry = 0;
-        while (!isClean && retry < 5) {
-            await new Promise(r => setTimeout(r, 1200)); 
-            const openOrders = await binancePrivate('/fapi/v1/openOrders', 'GET', { symbol });
-            const remaining = openOrders.filter(o => o.positionSide === side);
-            if (remaining.length === 0) {
-                isClean = true;
-            } else {
-                retry++;
-                console.log(`[${symbol}] Đang đợi dọn lệnh cũ... lần ${retry}`);
+    let success = false;
+    let attempt = 0;
+    const tpPrice = (entry * (side === 'SHORT' ? (1 - botSettings.posTP / 100) : (1 + botSettings.posTP / 100))).toFixed(info.pricePrecision);
+    const slPrice = (entry * (side === 'SHORT' ? (1 + botSettings.posSL / 100) : (1 - botSettings.posSL / 100))).toFixed(info.pricePrecision);
+    const sideClose = side === 'SHORT' ? 'buy' : 'sell';
+
+    while (!success && attempt < 5) { // Thử tối đa 5 lần
+        attempt++;
+        try {
+            await binancePrivate('/fapi/v1/allOpenOrders', 'DELETE', { symbol });
+            await new Promise(r => setTimeout(r, 1500)); // Chờ hệ thống dọn dẹp
+
+            // Thử đặt lệnh
+            await exchange.createOrder(symbol, 'TAKE_PROFIT_MARKET', sideClose, qty, undefined, { positionSide: side, stopPrice: tpPrice, closePosition: true });
+            await exchange.createOrder(symbol, 'STOP_MARKET', sideClose, qty, undefined, { positionSide: side, stopPrice: slPrice, closePosition: true });
+            
+            success = true; // Nếu đến đây không lỗi tức là thành công
+        } catch (e) {
+            if (attempt >= 5) {
+                addBotLog(`❌ Thất bại set TPSL ${symbol} sau ${attempt} lần thử: ${e.message}`, "error");
             }
+            // Nếu lỗi 4130, lặp lại mà không log ra màn hình
+            await new Promise(r => setTimeout(r, 1000));
         }
-
-        const tpPrice = (entry * (side === 'SHORT' ? (1 - botSettings.posTP / 100) : (1 + botSettings.posTP / 100))).toFixed(info.pricePrecision);
-        const slPrice = (entry * (side === 'SHORT' ? (1 + botSettings.posSL / 100) : (1 - botSettings.posSL / 100))).toFixed(info.pricePrecision);
-        const sideClose = side === 'SHORT' ? 'buy' : 'sell';
-
-        await exchange.createOrder(symbol, 'TAKE_PROFIT_MARKET', sideClose, qty, undefined, { positionSide: side, stopPrice: tpPrice, closePosition: true });
-        await exchange.createOrder(symbol, 'STOP_MARKET', sideClose, qty, undefined, { positionSide: side, stopPrice: slPrice, closePosition: true });
-        
-        return { tp: Number(tpPrice), sl: Number(slPrice) };
-    } catch (e) {
-        addBotLog(`❌ LỖI ĐỒNG BỘ TPSL ${symbol}: ${e.message}`, "error");
-        return { tp: 0, sl: 0 };
     }
+    return success ? { tp: Number(tpPrice), sl: Number(slPrice) } : { tp: 0, sl: 0 };
 }
 
 async function openPosition(symbol, isDCA = false, candidateData = null) {
@@ -127,7 +124,9 @@ async function openPosition(symbol, isDCA = false, candidateData = null) {
             }
 
             const sync = await syncTPSL(symbol, 'SHORT', totalQty, avgEntry, info);
-            if (sync.tp > 0) addBotLog(`✅ Đã set lại TP:${sync.tp} SL:${sync.sl} cho ${symbol} theo giá TB:${avgEntry}`);
+            if (sync.tp > 0) {
+                addBotLog(`✅ Đã set xong TP:${sync.tp} SL:${sync.sl} cho ${symbol}`);
+            }
 
             botActivePositions.set(posKey, { 
                 symbol, side: 'SHORT', entryPrice: avgEntry, historyEntries: historyEntries, qty: totalQty, tp: sync.tp, sl: sync.sl, 
@@ -181,7 +180,7 @@ async function mainLoop() {
             const priceDev = ((parseFloat(realPos.markPrice) - parseFloat(realPos.entryPrice)) / parseFloat(realPos.entryPrice)) * 100;
             if (priceDev >= botSettings.dcaStep && botPos.dcaCount < botSettings.maxDCA) await openPosition(botPos.symbol, true);
         }
-        // ĐIỀU KIỆN MỞ LỆNH: CHỈ C1 HOẶC C5
+        // ĐIỀU KIỆN MỞ LỆNH: CHỈ C1 HOẶC C5 ĐẠT MINVOL
         if (activeRealPos.length < botSettings.maxPositions && openingSymbols.size === 0) {
             const keo = status.candidatesList.find(c => {
                 const info = status.exchangeInfo[c.symbol];
@@ -206,7 +205,7 @@ async function init() {
             tempInfo[s.symbol] = { quantityPrecision: s.quantityPrecision, pricePrecision: s.pricePrecision, stepSize: parseFloat(lot.stepSize), maxLeverage: brk ? brk.brackets[0].initialLeverage : 20 };
         });
         status.exchangeInfo = tempInfo; status.isReady = true;
-        addBotLog("👿 LUFFY READY - C1/C5 MODE ACTIVE", "success"); priceMonitorLoop();
+        addBotLog("👿 LUFFY READY - MODE C1/C5 ONLY", "success"); priceMonitorLoop();
     } catch (e) { setTimeout(init, 5000); }
 }
 
