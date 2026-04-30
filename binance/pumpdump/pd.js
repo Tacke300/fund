@@ -47,7 +47,7 @@ async function binancePrivate(endpoint, method = 'GET', data = {}) {
 }
 
 /**
- * HÀM SYNC TPSL - GIỮ NGUYÊN GỐC, FIX CHỖ XÓA LỆNH ĐỂ KHÔNG LỖI -4130
+ * HÀM SYNC TPSL CHIẾN THUẬT HỦY DIỆT - ĐÃ FIX LỖI -4130
  */
 async function syncTPSL(symbol, side, qty, entry, info) {
     let success = false;
@@ -61,36 +61,38 @@ async function syncTPSL(symbol, side, qty, entry, info) {
     while (!success && attempt < maxAttempts) {
         attempt++;
         try {
-            // 1. Lấy tất cả lệnh đang mở của symbol
-            let openOrders = await binancePrivate('/fapi/v1/openOrders', 'GET', { symbol });
-            // Lọc các lệnh cùng PositionSide (SHORT/LONG) để xóa
-            let conflictOrders = openOrders.filter(o => o.positionSide === side);
+            addBotLog(`🔄 [${symbol}] Lọc & Xóa sạch TP/SL cũ (Lần ${attempt})...`);
             
-            if (conflictOrders.length > 0) {
-                addBotLog(`🔄 [${symbol}] Xóa ${conflictOrders.length} lệnh cũ (Lần ${attempt})...`);
-                for (const o of conflictOrders) {
-                    await binancePrivate('/fapi/v1/order', 'DELETE', { symbol, orderId: o.orderId });
-                }
-                // Delay cực kỳ quan trọng để Binance xóa xong hoàn toàn trên hệ thống
-                await new Promise(r => setTimeout(r, 1000));
+            // 1. Lấy danh sách lệnh mở và lọc chính xác các lệnh đóng vị thế gây lỗi -4130
+            let openOrders = await binancePrivate('/fapi/v1/openOrders', 'GET', { symbol });
+            let targetOrders = openOrders.filter(o => 
+                o.positionSide === side && 
+                (o.closePosition === true || o.reduceOnly === true || o.type.includes('STOP') || o.type.includes('TAKE_PROFIT'))
+            );
+
+            // 2. Xóa từng lệnh một cách triệt để
+            for (const o of targetOrders) {
+                await binancePrivate('/fapi/v1/order', 'DELETE', { symbol, orderId: o.orderId });
+                await new Promise(r => setTimeout(r, 500)); 
             }
 
-            // 2. Đặt lệnh mới - Dùng lại closePosition: true như code cũ của m
-            addBotLog(`✨ [${symbol}] Đặt TP:${tpPrice} SL:${slPrice}`);
-            
-            await exchange.createOrder(symbol, 'TAKE_PROFIT_MARKET', sideClose, qty, undefined, { 
-                positionSide: side, 
-                stopPrice: tpPrice, 
-                closePosition: true 
-            });
-            
-            await new Promise(r => setTimeout(r, 500)); 
+            // 3. Nghỉ để API Binance đồng bộ trạng thái trống
+            await new Promise(r => setTimeout(r, 1000));
 
-            await exchange.createOrder(symbol, 'STOP_MARKET', sideClose, qty, undefined, { 
-                positionSide: side, 
-                stopPrice: slPrice, 
-                closePosition: true 
-            });
+            // 4. Kiểm tra lại lần cuối
+            let finalCheck = await binancePrivate('/fapi/v1/openOrders', 'GET', { symbol });
+            let remains = finalCheck.filter(o => o.positionSide === side && (o.closePosition === true || o.type.includes('STOP')));
+            
+            if (remains.length > 0) {
+                addBotLog(`⚠️ [${symbol}] Vẫn còn lệnh treo, thử lại...`, "warning");
+                continue; 
+            }
+
+            // 5. Đặt lệnh mới khi sàn đã thực sự sạch
+            addBotLog(`✨ [${symbol}] Sàn sạch. Đặt TP:${tpPrice} SL:${slPrice}`);
+            await exchange.createOrder(symbol, 'TAKE_PROFIT_MARKET', sideClose, qty, undefined, { positionSide: side, stopPrice: tpPrice, closePosition: true });
+            await new Promise(r => setTimeout(r, 800)); 
+            await exchange.createOrder(symbol, 'STOP_MARKET', sideClose, qty, undefined, { positionSide: side, stopPrice: slPrice, closePosition: true });
             
             success = true;
             addBotLog(`✅ [${symbol}] Sync thành công.`, "success");
