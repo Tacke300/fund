@@ -46,7 +46,7 @@ async function binancePrivate(endpoint, method = 'GET', data = {}) {
     }
 }
 
-// HÀM ĐỒNG BỘ TPSL CƯỠNG BỨC - CHỈ LOG KẾT QUẢ CUỐI
+// HÀM ĐỒNG BỘ TPSL - KIỂM TRA SẠCH ORDER TRƯỚC KHI ĐẶT
 async function syncTPSL(symbol, side, qty, entry, info) {
     let success = false;
     let attempt = 0;
@@ -54,22 +54,30 @@ async function syncTPSL(symbol, side, qty, entry, info) {
     const slPrice = (entry * (side === 'SHORT' ? (1 + botSettings.posSL / 100) : (1 - botSettings.posSL / 100))).toFixed(info.pricePrecision);
     const sideClose = side === 'SHORT' ? 'buy' : 'sell';
 
-    while (!success && attempt < 5) { // Thử tối đa 5 lần
+    while (!success && attempt < 5) {
         attempt++;
         try {
             await binancePrivate('/fapi/v1/allOpenOrders', 'DELETE', { symbol });
-            await new Promise(r => setTimeout(r, 1500)); // Chờ hệ thống dọn dẹp
+            
+            // Chờ xác nhận sàn đã xóa sạch order
+            let isClean = false;
+            for (let i = 0; i < 4; i++) {
+                await new Promise(r => setTimeout(r, 1000));
+                const currentOrders = await binancePrivate('/fapi/v1/openOrders', 'GET', { symbol });
+                if (currentOrders.filter(o => o.positionSide === side).length === 0) {
+                    isClean = true; break;
+                }
+                await binancePrivate('/fapi/v1/allOpenOrders', 'DELETE', { symbol });
+            }
 
-            // Thử đặt lệnh
+            if (!isClean) throw new Error("Order cũ vẫn treo");
+
             await exchange.createOrder(symbol, 'TAKE_PROFIT_MARKET', sideClose, qty, undefined, { positionSide: side, stopPrice: tpPrice, closePosition: true });
             await exchange.createOrder(symbol, 'STOP_MARKET', sideClose, qty, undefined, { positionSide: side, stopPrice: slPrice, closePosition: true });
             
-            success = true; // Nếu đến đây không lỗi tức là thành công
+            success = true;
         } catch (e) {
-            if (attempt >= 5) {
-                addBotLog(`❌ Thất bại set TPSL ${symbol} sau ${attempt} lần thử: ${e.message}`, "error");
-            }
-            // Nếu lỗi 4130, lặp lại mà không log ra màn hình
+            if (attempt >= 5) addBotLog(`❌ Lỗi TPSL ${symbol}: ${e.message}`, "error");
             await new Promise(r => setTimeout(r, 1000));
         }
     }
@@ -117,16 +125,15 @@ async function openPosition(symbol, isDCA = false, candidateData = null) {
 
             if (isDCA) {
                 const pathMsg = historyEntries.map((p, i) => i === 0 ? `e:${p}` : `d${i}:${p}`).join(' - ');
-                addBotLog(`⚠️ dca : dca lần ${currentDCA}, ${pathMsg} | avg:${avgEntry} - margin:${((totalQty * avgEntry) / info.maxLeverage).toFixed(2)}$`, "warning");
+                // LOG DCA HIỂN THỊ RÕ COIN
+                addBotLog(`⚠️ DCA ${symbol} : Lần ${currentDCA}, ${pathMsg} | Avg:${avgEntry} - Margin:${((totalQty * avgEntry) / info.maxLeverage).toFixed(2)}$`, "warning");
             } else {
                 let volMsg = candidateData ? ` | C1:${candidateData.c1}% C5:${candidateData.c5}%` : "";
                 addBotLog(`🚀 OPEN ${symbol}${volMsg} | Entry: ${price} | Margin: ${marginToUse.toFixed(2)}$`, "success");
             }
 
             const sync = await syncTPSL(symbol, 'SHORT', totalQty, avgEntry, info);
-            if (sync.tp > 0) {
-                addBotLog(`✅ Đã set xong TP:${sync.tp} SL:${sync.sl} cho ${symbol}`);
-            }
+            if (sync.tp > 0) addBotLog(`✅ Đã set xong TP:${sync.tp} SL:${sync.sl} cho ${symbol}`);
 
             botActivePositions.set(posKey, { 
                 symbol, side: 'SHORT', entryPrice: avgEntry, historyEntries: historyEntries, qty: totalQty, tp: sync.tp, sl: sync.sl, 
@@ -180,7 +187,6 @@ async function mainLoop() {
             const priceDev = ((parseFloat(realPos.markPrice) - parseFloat(realPos.entryPrice)) / parseFloat(realPos.entryPrice)) * 100;
             if (priceDev >= botSettings.dcaStep && botPos.dcaCount < botSettings.maxDCA) await openPosition(botPos.symbol, true);
         }
-        // ĐIỀU KIỆN MỞ LỆNH: CHỈ C1 HOẶC C5 ĐẠT MINVOL
         if (activeRealPos.length < botSettings.maxPositions && openingSymbols.size === 0) {
             const keo = status.candidatesList.find(c => {
                 const info = status.exchangeInfo[c.symbol];
