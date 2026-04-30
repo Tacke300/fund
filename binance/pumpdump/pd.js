@@ -22,7 +22,6 @@ function addBotLog(msg, type = 'info') {
     const time = new Date().toLocaleTimeString('vi-VN', { hour12: false });
     status.botLogs.unshift({ time, msg, type });
     if (status.botLogs.length > 50) status.botLogs.pop();
-    console.log(`[${time}] ${msg}`);
 }
 
 async function syncTime() { try { const res = await axios.get('https://fapi.binance.com/fapi/v1/time'); timestampOffset = res.data.serverTime - Date.now(); } catch (e) {} }
@@ -72,13 +71,14 @@ async function openPosition(symbol, isDCA = false, candidateData = null) {
         const acc = await binancePrivate('/fapi/v2/account');
         const priceRes = await binanceApi.get(`/fapi/v1/ticker/price?symbol=${symbol}`);
         const currentPrice = parseFloat(priceRes.data.price);
+        
         let marginToUse = 0, currentDCA = 0, historyEntries = [];
 
         if (isDCA) {
             const current = botActivePositions.get(posKey);
             marginToUse = current.margin * 1.05; 
             current.isProcessing = true;
-            currentDCA = current.dcaCount + 1; 
+            currentDCA = current.dcaCount + 1;
             historyEntries = [...current.historyEntries];
         } else {
             marginToUse = botSettings.invValue.toString().includes('%') ? (parseFloat(acc.availableBalance) * parseFloat(botSettings.invValue) / 100) : parseFloat(botSettings.invValue);
@@ -96,20 +96,20 @@ async function openPosition(symbol, isDCA = false, candidateData = null) {
             const upPos = posRisk.find(p => p.positionSide === 'SHORT');
             const avgEntry = parseFloat(upPos.entryPrice);
             const totalQty = Math.abs(parseFloat(upPos.positionAmt));
+            
             historyEntries.push(currentPrice);
 
             if (isDCA) {
-                // LOG DCA NGẮN GỌN THEO YÊU CẦU: DCA Lần | Lộ trình | Avg - Mag
-                const pathMsg = historyEntries.map((p, i) => i === 0 ? `E:${p}` : `D${i}:${p}`).join(' - ');
+                // LOG ĐÚNG YÊU CẦU: dca lần mấy, entry - các giá dca | avg - margin
+                const pathMsg = historyEntries.map((p, i) => i === 0 ? `e:${p}` : `d${i}:${p}`).join(' - ');
                 const marginPos = ((totalQty * avgEntry) / info.maxLeverage).toFixed(2);
-                addBotLog(`⚠️ DCA : Lần ${currentDCA} | ${pathMsg} | Avg:${avgEntry} - Mag:${marginPos}$`, "warning");
+                addBotLog(`dca : dca lần ${currentDCA}, ${pathMsg} | avg:${avgEntry} - ${marginPos}$`, "warning");
             } else {
                 addBotLog(`🚀 OPEN ${symbol} | Price: ${currentPrice}`, "success");
             }
 
             const sync = await syncTPSL(symbol, 'SHORT', totalQty, avgEntry, info);
-            addBotLog(`📍 RESET ${symbol} -> TP:${sync.tp} | SL:${sync.sl}`);
-
+            
             botActivePositions.set(posKey, { 
                 symbol, side: 'SHORT', entryPrice: avgEntry, historyEntries, qty: totalQty, 
                 tp: sync.tp, sl: sync.sl, margin: (totalQty * avgEntry / info.maxLeverage), 
@@ -173,7 +173,7 @@ async function init() {
             tempInfo[s.symbol] = { quantityPrecision: s.quantityPrecision, pricePrecision: s.pricePrecision, stepSize: parseFloat(lot.stepSize), maxLeverage: brk ? brk.brackets[0].initialLeverage : 20 };
         });
         status.exchangeInfo = tempInfo; status.isReady = true;
-        addBotLog("👿 LUFFY READY - MIN x20", "success"); priceMonitorLoop();
+        addBotLog("👿 LUFFY READY", "success"); priceMonitorLoop();
     } catch (e) { setTimeout(init, 5000); }
 }
 
