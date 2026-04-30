@@ -47,7 +47,7 @@ async function binancePrivate(endpoint, method = 'GET', data = {}) {
 }
 
 /**
- * HÀM SYNC TPSL VỚI 3 PHƯƠNG PHÁP HỦY LỆNH DỰ PHÒNG
+ * HÀM SYNC TPSL CHIẾN THUẬT HỦY DIỆT - CÓ DELAY AN TOÀN
  */
 async function syncTPSL(symbol, side, qty, entry, info) {
     let success = false;
@@ -58,39 +58,40 @@ async function syncTPSL(symbol, side, qty, entry, info) {
     const slPrice = (entry * (isShort ? (1 + botSettings.posSL / 100) : (1 - botSettings.posSL / 100))).toFixed(info.pricePrecision);
     const sideClose = isShort ? 'buy' : 'sell';
 
-    addBotLog(`🔄 [${symbol}] Đang xử lý Sync TPSL...`);
+    addBotLog(`🔄 [${symbol}] Dọn sàn để Sync TPSL (Lần ${attempt + 1})...`);
 
     while (!success && attempt < maxAttempts) {
         attempt++;
         try {
-            // PHƯƠNG PHÁP 1: Xóa toàn bộ lệnh bằng API Binance (Thường chỉ xóa Limit)
-            await binancePrivate('/fapi/v1/allOpenOrders', 'DELETE', { symbol });
-
-            // PHƯƠNG PHÁP 2: Xóa bằng CCXT (Mạnh hơn, quét được cả Conditional Orders)
+            // 1. Hủy diện rộng
             await exchange.cancelAllOrders(symbol);
-            await new Promise(r => setTimeout(r, 1500));
+            await new Promise(r => setTimeout(r, 3000)); 
+
+            // 2. Kiểm tra và hủy đích danh ID nếu còn sót
+            let openOrders = await binancePrivate('/fapi/v1/openOrders', 'GET', { symbol });
+            let conflictOrders = openOrders.filter(o => o.positionSide === side);
             
-            // PHƯƠNG PHÁP 3: Quét danh sách lệnh thực tế, nếu còn cái nào thì xóa đích danh cái đó theo ID
-            const currentOrders = await binancePrivate('/fapi/v1/openOrders', 'GET', { symbol });
-            if (currentOrders.length > 0) {
-                for (const o of currentOrders) {
+            if (conflictOrders.length > 0) {
+                for (const o of conflictOrders) {
                     await binancePrivate('/fapi/v1/order', 'DELETE', { symbol, orderId: o.orderId });
+                    await new Promise(r => setTimeout(r, 800)); 
                 }
-                await new Promise(r => setTimeout(r, 1000));
+                await new Promise(r => setTimeout(r, 2000));
             }
 
-            // Đặt lệnh mới sau khi đã "làm sạch" sàn
+            // 3. Đặt lệnh mới
+            addBotLog(`✨ [${symbol}] Sàn sạch. Đặt TP:${tpPrice} SL:${slPrice}`);
             await exchange.createOrder(symbol, 'TAKE_PROFIT_MARKET', sideClose, qty, undefined, { positionSide: side, stopPrice: tpPrice, closePosition: true });
+            await new Promise(r => setTimeout(r, 1000)); 
             await exchange.createOrder(symbol, 'STOP_MARKET', sideClose, qty, undefined, { positionSide: side, stopPrice: slPrice, closePosition: true });
             
             success = true;
-            addBotLog(`✅ [${symbol}] Đã cập nhật xong TP:${tpPrice} SL:${slPrice}`, "success");
+            addBotLog(`✅ [${symbol}] Sync thành công.`, "success");
         } catch (e) {
             addBotLog(`❌ [${symbol}] Lỗi Sync lần ${attempt}: ${e.message}`, "error");
-            await new Promise(r => setTimeout(r, 2000));
+            await new Promise(r => setTimeout(r, 3000));
         }
     }
-    if (!success) addBotLog(`❌ [${symbol}] Sync thất bại sau ${maxAttempts} lần!`, "error");
     return success ? { tp: Number(tpPrice), sl: Number(slPrice) } : { tp: 0, sl: 0 };
 }
 
@@ -182,7 +183,7 @@ async function trackClosedPnL(symbol, closedTime, lastBotPos) {
         const rawPnL = relevantTrades.reduce((sum, t) => sum + parseFloat(t.realizedPnl), 0);
         const finalPnL = rawPnL - (lastBotPos.qty * lastBotPos.entryPrice * 0.001);
         status.botClosedCount++; status.botPnLClosed += finalPnL;
-        addBotLog(`✅ CHỐT ${symbol} (${lastBotPos.side}) | PnL: ${finalPnL.toFixed(2)}$`, "success");
+        addBotLog(`✅ CHỐT ${symbol} | PnL: ${finalPnL.toFixed(2)}$`, "success");
     } catch (e) {}
 }
 
@@ -194,7 +195,12 @@ async function priceMonitorLoop() {
         for (let [key, botPos] of botActivePositions) {
             const realPos = posRisk.find(p => p.symbol === botPos.symbol && p.positionSide === botPos.side);
             if (realPos && Math.abs(parseFloat(realPos.positionAmt)) > 0) {
-                botPos.markPrice = parseFloat(realPos.markPrice); botPos.pnl = parseFloat(realPos.unRealizedProfit);
+                botPos.markPrice = parseFloat(realPos.markPrice); 
+                botPos.pnl = parseFloat(realPos.unRealizedProfit);
+                // FIXED NaN%: Kiểm tra giá trị trước khi tính
+                if (botPos.entryPrice && botPos.markPrice) {
+                    botPos.priceDev = ((botPos.markPrice - botPos.entryPrice) / botPos.entryPrice) * 100;
+                } else { botPos.priceDev = 0; }
             } else {
                 status.blackList[botPos.symbol] = now + (15 * 60 * 1000);
                 trackClosedPnL(botPos.symbol, now, botPos); botActivePositions.delete(key);
@@ -213,7 +219,12 @@ async function mainLoop() {
             if (botPos.isProcessing || botPos.side !== 'SHORT') continue;
             const realPos = activeRealPos.find(p => p.symbol === botPos.symbol && p.positionSide === 'SHORT');
             if (!realPos) continue;
-            const priceDev = ((parseFloat(realPos.markPrice) - parseFloat(realPos.entryPrice)) / parseFloat(realPos.entryPrice)) * 100;
+            
+            const pEntry = parseFloat(realPos.entryPrice);
+            const pMark = parseFloat(realPos.markPrice);
+            if (!pEntry || !pMark) continue;
+
+            const priceDev = ((pMark - pEntry) / pEntry) * 100;
             if (priceDev >= botSettings.dcaStep) {
                 if (botPos.dcaCount < botSettings.maxDCA) { await openPosition(botPos.symbol, true); } 
                 else if (botPos.dcaCount === botSettings.maxDCA && !botPos.hedgeOpened) {
@@ -245,7 +256,7 @@ async function init() {
             tempInfo[s.symbol] = { quantityPrecision: s.quantityPrecision, pricePrecision: s.pricePrecision, stepSize: parseFloat(lot.stepSize), maxLeverage: brk ? brk.brackets[0].initialLeverage : 20 };
         });
         status.exchangeInfo = tempInfo; status.isReady = true;
-        addBotLog("👿 LUFFY READY - TRIPLE CANCEL MODE", "success"); priceMonitorLoop();
+        addBotLog("👿 LUFFY READY - TRIPLE CANCEL & NAN FIX", "success"); priceMonitorLoop();
     } catch (e) { setTimeout(init, 5000); }
 }
 
