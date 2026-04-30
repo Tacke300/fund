@@ -47,7 +47,7 @@ async function binancePrivate(endpoint, method = 'GET', data = {}) {
 }
 
 /**
- * HÀM ĐỒNG BỘ: CHỈ FIX LỖI -4130, KHÔNG ICON, KHÔNG ĐỔI LOGIC KHÁC
+ * SYNC TPSL - BỎ ICON - FIX 4130
  */
 async function syncTPSL(symbol, side, qty, entry, info) {
     let success = false;
@@ -63,7 +63,6 @@ async function syncTPSL(symbol, side, qty, entry, info) {
         try {
             addBotLog(`[${symbol}] Dang don dep TPSL cu (Lan ${attempt})...`);
             const openOrders = await binancePrivate('/fapi/v1/openOrders', 'GET', { symbol });
-            // Chỉ lọc và xóa những lệnh TP/SL/ClosePosition để tránh lỗi -4130
             const tpslOrders = openOrders.filter(o => 
                 o.positionSide === side && 
                 (o.type.includes("STOP") || o.type.includes("TAKE_PROFIT") || o.closePosition === true)
@@ -150,7 +149,8 @@ async function openPosition(symbol, isDCA = false) {
             const sync = await syncTPSL(symbol, 'SHORT', totalQty, avgEntry, info);
             botActivePositions.set(posKey, { 
                 symbol, side: 'SHORT', entryPrice: avgEntry, historyEntries, qty: totalQty, tp: sync.tp, sl: sync.sl, 
-                margin: (totalQty * avgEntry / info.maxLeverage), firstMargin, dcaCount: currentDCA, isProcessing: false
+                margin: (totalQty * avgEntry / info.maxLeverage), firstMargin, dcaCount: currentDCA, isProcessing: false,
+                markPrice: price, pnl: 0, priceDev: 0 // Gán mặc định để ko bị undefined
             });
         }
     } catch (e) { 
@@ -160,7 +160,9 @@ async function openPosition(symbol, isDCA = false) {
     finally { openingSymbols.delete(symbol); }
 }
 
-// TRẢ LẠI LOGIC PNL TẠM TÍNH GỐC
+/**
+ * TRẢ LẠI 100% LOGIC GỐC - KHÔNG SỬA ĐỔI
+ */
 async function priceMonitorLoop() {
     if (!status.isReady) { setTimeout(priceMonitorLoop, 1000); return; }
     try {
@@ -171,7 +173,6 @@ async function priceMonitorLoop() {
             if (realPos && Math.abs(parseFloat(realPos.positionAmt)) > 0) {
                 botPos.markPrice = parseFloat(realPos.markPrice);
                 botPos.pnl = parseFloat(realPos.unRealizedProfit);
-                // Giữ nguyên công thức tính priceDev gốc của m
                 botPos.priceDev = ((botPos.markPrice - botPos.entryPrice) / botPos.entryPrice) * 100;
             } else {
                 status.blackList[botPos.symbol] = now + (15 * 60 * 1000);
@@ -219,7 +220,7 @@ async function init() {
             tempInfo[s.symbol] = { quantityPrecision: s.quantityPrecision, pricePrecision: s.pricePrecision, stepSize: parseFloat(lot.stepSize), maxLeverage: brk ? brk.brackets[0].initialLeverage : 20 };
         });
         status.exchangeInfo = tempInfo; status.isReady = true;
-        addBotLog("✨ BOT READY - BACK TO ORIGINAL PNL", "success"); priceMonitorLoop();
+        addBotLog("✨ BOT READY - LUFFY BACK", "success"); priceMonitorLoop();
     } catch (e) { setTimeout(init, 5000); }
 }
 
