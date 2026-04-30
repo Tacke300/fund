@@ -10,13 +10,7 @@ import ccxt from 'ccxt';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const binanceApi = axios.create({ baseURL: 'https://fapi.binance.com', timeout: 20000, headers: { 'X-MBX-APIKEY': API_KEY } });
-
-const exchange = new ccxt.binance({ 
-    apiKey: API_KEY, 
-    secret: SECRET_KEY, 
-    enableRateLimit: true,
-    options: { defaultType: 'future', dualSidePosition: true, adjustForTimeDifference: true, recvWindow: 60000 } 
-});
+const exchange = new ccxt.binance({ apiKey: API_KEY, secret: SECRET_KEY, enableRateLimit: true, options: { defaultType: 'future', dualSidePosition: true, adjustForTimeDifference: true, recvWindow: 60000 } });
 
 let botSettings = { isRunning: false, maxPositions: 3, invValue: "1%", minVol: 6.5, posTP: 0.5, posSL: 50.0, dcaStep: 10.0, maxDCA: 4 };
 let status = { botLogs: [], exchangeInfo: null, candidatesList: [], isReady: false, blackList: {}, botClosedCount: 0, botPnLClosed: 0 };
@@ -31,54 +25,36 @@ function addBotLog(msg, type = 'info') {
     console.log(`[${time}] ${msg}`);
 }
 
-async function syncTime() {
-    try {
-        const res = await axios.get('https://fapi.binance.com/fapi/v1/time');
-        timestampOffset = res.data.serverTime - Date.now();
-    } catch (e) {}
-}
+async function syncTime() { try { const res = await axios.get('https://fapi.binance.com/fapi/v1/time'); timestampOffset = res.data.serverTime - Date.now(); } catch (e) {} }
 
 async function binancePrivate(endpoint, method = 'GET', data = {}) {
     const timestamp = Date.now() + timestampOffset;
     const query = new URLSearchParams({ ...data, timestamp, recvWindow: 60000 }).toString();
     const signature = crypto.createHmac('sha256', SECRET_KEY).update(query).digest('hex');
-    try {
-        const response = await binanceApi({ method, url: `${endpoint}?${query}&signature=${signature}` });
-        return response.data;
-    } catch (error) {
-        if (error.response?.data?.code === -1021) await syncTime();
-        throw new Error(error.response?.data?.msg || error.message);
-    }
+    const response = await binanceApi({ method, url: `${endpoint}?${query}&signature=${signature}` });
+    return response.data;
 }
 
-// THEO DÕI PNL VÀ TRỪ PHÍ 0.1% VOLUME
 async function trackClosedPnL(symbol, closedTime, lastBotPos) {
     try {
         await new Promise(r => setTimeout(r, 4500));
         const trades = await binancePrivate('/fapi/v1/userTrades', 'GET', { symbol, limit: 10 });
         const relevantTrades = trades.filter(t => Math.abs(t.time - closedTime) < 25000);
-        
         const rawPnL = relevantTrades.reduce((sum, t) => sum + parseFloat(t.realizedPnl), 0);
         const approxFee = (lastBotPos.qty * lastBotPos.entryPrice * 0.001); 
         const finalPnL = rawPnL - approxFee;
-        
-        status.botClosedCount++;
-        status.botPnLClosed += finalPnL;
-        
-        addBotLog(`✅ CHỐT ${symbol} | Log: ${rawPnL.toFixed(2)}$ - Fee: ${approxFee.toFixed(2)}$ = ${finalPnL.toFixed(2)}$`, finalPnL >= 0 ? "success" : "error");
-    } catch (e) { addBotLog(`❌ LỖI PNL ${symbol}: ${e.message}`); }
+        status.botClosedCount++; status.botPnLClosed += finalPnL;
+        addBotLog(`✅ CHỐT ${symbol} | PnL: ${finalPnL.toFixed(2)}$`, finalPnL >= 0 ? "success" : "error");
+    } catch (e) {}
 }
 
-// ĐẶT LẠI TP/SL (XÓA CŨ - ĐẶT MỚI THEO AVG)
 async function syncTPSL(symbol, side, qty, entry, info) {
     try {
         await binancePrivate('/fapi/v1/allOpenOrders', 'DELETE', { symbol });
         await new Promise(r => setTimeout(r, 1500));
-        
         const tpPrice = (entry * (side === 'SHORT' ? (1 - botSettings.posTP / 100) : (1 + botSettings.posTP / 100))).toFixed(info.pricePrecision);
         const slPrice = (entry * (side === 'SHORT' ? (1 + botSettings.posSL / 100) : (1 - botSettings.posSL / 100))).toFixed(info.pricePrecision);
         const sideClose = side === 'SHORT' ? 'buy' : 'sell';
-
         await Promise.all([
             exchange.createOrder(symbol, 'TAKE_PROFIT_MARKET', sideClose, qty, undefined, { positionSide: side, stopPrice: tpPrice, closePosition: true }),
             exchange.createOrder(symbol, 'STOP_MARKET', sideClose, qty, undefined, { positionSide: side, stopPrice: slPrice, closePosition: true })
@@ -90,59 +66,58 @@ async function syncTPSL(symbol, side, qty, entry, info) {
 async function openPosition(symbol, isDCA = false, candidateData = null) {
     const posKey = `${symbol}_SHORT`;
     if (!isDCA && (botActivePositions.has(posKey) || openingSymbols.has(symbol))) return;
-    
     openingSymbols.add(symbol); 
     try {
         const info = status.exchangeInfo[symbol];
         const acc = await binancePrivate('/fapi/v2/account');
         const priceRes = await binanceApi.get(`/fapi/v1/ticker/price?symbol=${symbol}`);
-        const price = parseFloat(priceRes.data.price);
-        
-        let marginToUse = 0;
-        let currentDCA = 0;
+        const currentPrice = parseFloat(priceRes.data.price);
+        let marginToUse = 0, currentDCA = 0, historyEntries = [];
 
         if (isDCA) {
             const current = botActivePositions.get(posKey);
             marginToUse = current.margin * 1.05; 
             current.isProcessing = true;
-            currentDCA = current.dcaCount + 1;
+            currentDCA = current.dcaCount + 1; 
+            historyEntries = [...current.historyEntries];
         } else {
-            marginToUse = botSettings.invValue.toString().includes('%') 
-                ? (parseFloat(acc.availableBalance) * parseFloat(botSettings.invValue) / 100) 
-                : parseFloat(botSettings.invValue);
+            marginToUse = botSettings.invValue.toString().includes('%') ? (parseFloat(acc.availableBalance) * parseFloat(botSettings.invValue) / 100) : parseFloat(botSettings.invValue);
         }
 
-        let qtyNum = Math.ceil(((marginToUse * info.maxLeverage) / price) / info.stepSize) * info.stepSize;
-        while ((qtyNum * price) < 5.5) qtyNum += info.stepSize;
+        let qtyNum = Math.ceil(((marginToUse * info.maxLeverage) / currentPrice) / info.stepSize) * info.stepSize;
+        while ((qtyNum * currentPrice) < 5.5) qtyNum += info.stepSize;
 
         await exchange.setLeverage(info.maxLeverage, symbol);
         const order = await exchange.createOrder(symbol, 'market', 'sell', qtyNum.toFixed(info.quantityPrecision), undefined, { positionSide: 'SHORT' });
 
         if (order) {
-            await new Promise(r => setTimeout(r, 2500)); // Chờ sàn khớp và cập nhật giá trung bình
+            await new Promise(r => setTimeout(r, 2500));
             const posRisk = await binancePrivate('/fapi/v2/positionRisk', 'GET', { symbol });
             const upPos = posRisk.find(p => p.positionSide === 'SHORT');
             const avgEntry = parseFloat(upPos.entryPrice);
             const totalQty = Math.abs(parseFloat(upPos.positionAmt));
+            historyEntries.push(currentPrice);
 
-            let volMsg = "";
-            if (!isDCA && candidateData) {
-                volMsg = ` | C1:${candidateData.c1}% C5:${candidateData.c5}% C15:${candidateData.c15}%`;
+            if (isDCA) {
+                // LOG DCA NGẮN GỌN THEO YÊU CẦU: DCA Lần | Lộ trình | Avg - Mag
+                const pathMsg = historyEntries.map((p, i) => i === 0 ? `E:${p}` : `D${i}:${p}`).join(' - ');
+                const marginPos = ((totalQty * avgEntry) / info.maxLeverage).toFixed(2);
+                addBotLog(`⚠️ DCA : Lần ${currentDCA} | ${pathMsg} | Avg:${avgEntry} - Mag:${marginPos}$`, "warning");
+            } else {
+                addBotLog(`🚀 OPEN ${symbol} | Price: ${currentPrice}`, "success");
             }
 
-            addBotLog(`[${isDCA ? 'DCA_'+currentDCA : 'OPEN'}] ${symbol}${volMsg} | Margin: ${marginToUse.toFixed(2)}$`, isDCA ? "warning" : "success");
-
             const sync = await syncTPSL(symbol, 'SHORT', totalQty, avgEntry, info);
-            if(sync.tp > 0) addBotLog(`📍 RESET TPSL ${symbol}: TP @${sync.tp} | SL @${sync.sl} (Avg: ${avgEntry})`);
+            addBotLog(`📍 RESET ${symbol} -> TP:${sync.tp} | SL:${sync.sl}`);
 
             botActivePositions.set(posKey, { 
-                symbol, side: 'SHORT', entryPrice: avgEntry, qty: totalQty, tp: sync.tp, sl: sync.sl, 
-                margin: (totalQty * avgEntry / info.maxLeverage), dcaCount: currentDCA, leverage: info.maxLeverage, isProcessing: false, markPrice: price
+                symbol, side: 'SHORT', entryPrice: avgEntry, historyEntries, qty: totalQty, 
+                tp: sync.tp, sl: sync.sl, margin: (totalQty * avgEntry / info.maxLeverage), 
+                dcaCount: currentDCA, leverage: info.maxLeverage, isProcessing: false 
             });
         }
-    } catch (e) { 
-        if (isDCA && botActivePositions.has(posKey)) botActivePositions.get(posKey).isProcessing = false;
-    } finally { openingSymbols.delete(symbol); }
+    } catch (e) { if (isDCA && botActivePositions.has(posKey)) botActivePositions.get(posKey).isProcessing = false; }
+    finally { openingSymbols.delete(symbol); }
 }
 
 async function priceMonitorLoop() {
@@ -153,12 +128,10 @@ async function priceMonitorLoop() {
         for (let [key, botPos] of botActivePositions) {
             const realPos = posRisk.find(p => p.symbol === botPos.symbol && p.positionSide === botPos.side);
             if (realPos && Math.abs(parseFloat(realPos.positionAmt)) > 0) {
-                botPos.markPrice = parseFloat(realPos.markPrice);
-                botPos.pnl = parseFloat(realPos.unRealizedProfit);
+                botPos.markPrice = parseFloat(realPos.markPrice); botPos.pnl = parseFloat(realPos.unRealizedProfit);
             } else {
                 status.blackList[botPos.symbol] = now + (15 * 60 * 1000);
-                trackClosedPnL(botPos.symbol, now, botPos);
-                botActivePositions.delete(key);
+                trackClosedPnL(botPos.symbol, now, botPos); botActivePositions.delete(key);
             }
         }
     } catch (e) {}
@@ -170,7 +143,6 @@ async function mainLoop() {
     try {
         const posRisk = await binancePrivate('/fapi/v2/positionRisk');
         const activeRealPos = posRisk.filter(p => Math.abs(parseFloat(p.positionAmt)) > 0);
-        
         for (let [key, botPos] of botActivePositions) {
             if (botPos.isProcessing) continue;
             const realPos = activeRealPos.find(p => p.symbol === botPos.symbol && p.positionSide === botPos.side);
@@ -178,13 +150,11 @@ async function mainLoop() {
             const priceDev = ((parseFloat(realPos.markPrice) - parseFloat(realPos.entryPrice)) / parseFloat(realPos.entryPrice)) * 100;
             if (priceDev >= botSettings.dcaStep && botPos.dcaCount < botSettings.maxDCA) await openPosition(botPos.symbol, true);
         }
-
         if (activeRealPos.length < botSettings.maxPositions && openingSymbols.size === 0) {
             const keo = status.candidatesList.find(c => {
                 const info = status.exchangeInfo[c.symbol];
                 const isBL = (status.blackList[c.symbol] || 0) > Date.now();
-                const isOpened = activeRealPos.some(p => p.symbol === c.symbol);
-                return info && info.maxLeverage >= 20 && !isBL && !isOpened && !openingSymbols.has(c.symbol) && [c.c1, c.c5, c.c15].some(v => Math.abs(parseFloat(v)) >= parseFloat(botSettings.minVol));
+                return info && info.maxLeverage >= 20 && !isBL && !activeRealPos.some(p => p.symbol === c.symbol) && [c.c1, c.c5, c.c15].some(v => Math.abs(v) >= botSettings.minVol);
             });
             if (keo) await openPosition(keo.symbol, false, keo);
         }
@@ -193,8 +163,7 @@ async function mainLoop() {
 
 async function init() {
     try {
-        await syncTime(); 
-        await exchange.loadMarkets();
+        await syncTime(); await exchange.loadMarkets();
         const infoRes = await binanceApi.get('/fapi/v1/exchangeInfo');
         const brkRes = await binancePrivate('/fapi/v1/leverageBracket');
         const tempInfo = {};
@@ -203,10 +172,8 @@ async function init() {
             const brk = (Array.isArray(brkRes) ? brkRes : brkRes.brackets || []).find(b => b.symbol === s.symbol);
             tempInfo[s.symbol] = { quantityPrecision: s.quantityPrecision, pricePrecision: s.pricePrecision, stepSize: parseFloat(lot.stepSize), maxLeverage: brk ? brk.brackets[0].initialLeverage : 20 };
         });
-        status.exchangeInfo = tempInfo; 
-        status.isReady = true;
-        addBotLog("👿 LUFFY READY - MIN LEV X20 ACTIVE", "success");
-        priceMonitorLoop();
+        status.exchangeInfo = tempInfo; status.isReady = true;
+        addBotLog("👿 LUFFY READY - MIN x20", "success"); priceMonitorLoop();
     } catch (e) { setTimeout(init, 5000); }
 }
 
@@ -219,27 +186,12 @@ setInterval(() => {
     }).on('error', () => {});
 }, 2000);
 
-const APP = express(); 
-APP.use(express.json()); 
-APP.use(express.static(__dirname));
+const APP = express(); APP.use(express.json()); APP.use(express.static(__dirname));
 APP.get('/api/status', async (req, res) => {
     try {
         const acc = await binancePrivate('/fapi/v2/account');
-        const blFormatted = {};
-        for (const sym in status.blackList) {
-            const diff = Math.ceil((status.blackList[sym] - Date.now()) / 1000);
-            if (diff > 0) blFormatted[sym] = diff; else delete status.blackList[sym];
-        }
-        res.json({ 
-            botSettings, 
-            activePositions: Array.from(botActivePositions.values()), 
-            status: { ...status, blackList: blFormatted }, 
-            wallet: { 
-                totalWalletBalance: parseFloat(acc.totalWalletBalance).toFixed(2), 
-                availableBalance: parseFloat(acc.availableBalance).toFixed(2), 
-                totalUnrealizedProfit: parseFloat(acc.totalUnrealizedProfit).toFixed(2) 
-            } 
-        });
+        const bl = {}; Object.entries(status.blackList).forEach(([s, t]) => { if(t > Date.now()) bl[s] = Math.ceil((t-Date.now())/1000); });
+        res.json({ botSettings, activePositions: Array.from(botActivePositions.values()), status: { ...status, blackList: bl }, wallet: { total: parseFloat(acc.totalWalletBalance).toFixed(2), avail: parseFloat(acc.availableBalance).toFixed(2), pnl: parseFloat(acc.totalUnrealizedProfit).toFixed(2) } });
     } catch (e) { res.json({ status }); }
 });
 APP.post('/api/settings', (req, res) => { botSettings = { ...botSettings, ...req.body }; res.json({ success: true }); });
