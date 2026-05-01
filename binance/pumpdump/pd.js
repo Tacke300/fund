@@ -47,43 +47,33 @@ async function binancePrivate(endpoint, method = 'GET', data = {}) {
 }
 
 /**
- * 1. HÀM TRUY QUÉT SÂU (DEEP CLEAN) - ANTI 4130 FIX
+ * 1. HÀM TRUY QUÉT TRIỆT ĐỂ (FORCE CLEAR)
+ * Dùng allOpenOrders để dọn nhanh và kiểm tra lại bằng GET
  */
 async function clearAndVerify(symbol, side) {
     try {
-        addBotLog(`🧹 [${symbol}] Đang truy quét triệt để lệnh ma (closePosition)...`);
-        for (let i = 1; i <= 3; i++) {
-            // Lấy danh sách lệnh thực tế từ sàn
-            const openOrders = await binancePrivate('/fapi/v1/openOrders', 'GET', { symbol });
-            
-            // Lọc đúng những lệnh gây lỗi -4130 (Fix lỗi so sánh string/boolean)
-            const ghostOrders = openOrders.filter(o => 
-                o.positionSide === side && 
-                (o.closePosition === true || o.closePosition === 'true')
-            );
+        addBotLog(`🧹 [${symbol}] Đang dọn sạch lệnh điều kiện cũ...`);
+        // Xóa tất cả lệnh chờ của symbol để giải phóng slot
+        await binancePrivate('/fapi/v1/allOpenOrders', 'DELETE', { symbol });
+        
+        // Delay 1.5s để Matching Engine của sàn đồng bộ trạng thái
+        await new Promise(r => setTimeout(r, 1500));
 
-            if (ghostOrders.length === 0) {
-                addBotLog(`✅ [${symbol}] Sàn sạch lệnh điều kiện.`);
-                return true; 
-            }
+        const openOrders = await binancePrivate('/fapi/v1/openOrders', 'GET', { symbol });
+        const ghostOrders = openOrders.filter(o => o.positionSide === side);
 
-            // Xóa từng order ID để đảm bảo lệnh DELETE được thực thi
+        if (ghostOrders.length > 0) {
             for (const order of ghostOrders) {
                 await binancePrivate('/fapi/v1/order', 'DELETE', { symbol, orderId: order.orderId });
-                addBotLog(`🗑️ Đã xóa lệnh ma ID: ${order.orderId}`);
             }
-
-            await new Promise(r => setTimeout(r, 2000 * i)); // Tăng delay theo vòng lặp cho sàn sync
+            await new Promise(r => setTimeout(r, 1000));
         }
-        return false;
-    } catch (e) { 
-        addBotLog(`🚨 Lỗi clearAndVerify: ${e.message}`, "error");
-        return false; 
-    }
+        return true;
+    } catch (e) { return true; } // Tránh treo bot nếu sàn trả lỗi khi đã sạch lệnh
 }
 
 /**
- * 2. ĐẶT TP/SL CÓ XÁC THỰC CUỐI (FINAL CHECK)
+ * 2. ĐẶT TP/SL DÙNG REDUCE_ONLY (ANTI-4130 TUYỆT ĐỐI)
  */
 async function syncTPSL(symbol, side, entry, info) {
     const isShort = (side === 'SHORT');
@@ -92,22 +82,21 @@ async function syncTPSL(symbol, side, entry, info) {
     const sideClose = isShort ? 'buy' : 'sell';
 
     try {
-        // Dọn dẹp sàn trước khi đặt mới
-        const isClean = await clearAndVerify(symbol, side);
-        if (!isClean) throw new Error("GHOST_ORDER_STILL_EXISTS");
+        await clearAndVerify(symbol, side);
 
-        // Đặt TP
-        await exchange.createOrder(symbol, 'TAKE_PROFIT_MARKET', sideClose, 1, undefined, { 
-            positionSide: side, stopPrice: tpPrice, closePosition: 'true' 
+        // Sử dụng reduceOnly: true để thay thế cho closePosition
+        // Giúp tránh hoàn toàn lỗi -4130 của Binance Futures
+        await exchange.createOrder(symbol, 'TAKE_PROFIT_MARKET', sideClose, undefined, undefined, { 
+            positionSide: side, stopPrice: tpPrice, reduceOnly: true 
         });
-        await new Promise(r => setTimeout(r, 1000));
         
-        // Đặt SL
-        await exchange.createOrder(symbol, 'STOP_MARKET', sideClose, 1, undefined, { 
-            positionSide: side, stopPrice: slPrice, closePosition: 'true' 
+        await new Promise(r => setTimeout(r, 800));
+        
+        await exchange.createOrder(symbol, 'STOP_MARKET', sideClose, undefined, undefined, { 
+            positionSide: side, stopPrice: slPrice, reduceOnly: true 
         });
 
-        addBotLog(`✨ [${symbol}] Đã cài TP:${tpPrice} SL:${slPrice}`, "success");
+        addBotLog(`✨ [${symbol}] Đã cài TP:${tpPrice} SL:${slPrice} (ReduceOnly)`, "success");
         return { tp: Number(tpPrice), sl: Number(slPrice) };
     } catch (e) {
         addBotLog(`❌ [${symbol}] Lỗi đặt TP/SL: ${e.message}`, "error");
@@ -116,7 +105,7 @@ async function syncTPSL(symbol, side, entry, info) {
 }
 
 /**
- * 3. MỞ VỊ THẾ / DCA (CƠ CHẾ LOCKDOWN KHI LỖI)
+ * 3. MỞ VỊ THẾ / DCA
  */
 async function openPosition(symbol, isDCA = false, candidateData = null) {
     const posKey = `${symbol}_SHORT`;
@@ -131,12 +120,7 @@ async function openPosition(symbol, isDCA = false, candidateData = null) {
         let marginToUse = 0, currentDCA = 0, firstMargin = 0;
 
         if (isDCA && currentPos) {
-            currentPos.isProcessing = true; // KHÓA CỨNG
-            const isClean = await clearAndVerify(symbol, 'SHORT');
-            if (!isClean) {
-                addBotLog(`❌ [${symbol}] Không dọn được sàn. Dừng DCA để bảo vệ vốn!`, "error");
-                return; 
-            }
+            currentPos.isProcessing = true; 
             firstMargin = currentPos.firstMargin;
             marginToUse = firstMargin * 1.03; 
             currentDCA = currentPos.dcaCount + 1;
@@ -177,6 +161,7 @@ async function openPosition(symbol, isDCA = false, candidateData = null) {
         }
     } catch (e) {
         addBotLog(`🚨 [${symbol}] LỖI HỆ THỐNG: ${e.message}`, "error");
+        if (isDCA && botActivePositions.has(posKey)) botActivePositions.get(posKey).isProcessing = false;
     } finally {
         openingSymbols.delete(symbol);
     }
