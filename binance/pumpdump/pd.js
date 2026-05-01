@@ -47,12 +47,11 @@ async function binancePrivate(endpoint, method = 'GET', data = {}) {
 }
 
 /**
- * PROTOCOL 1: ĐỢI VỊ THẾ ỔN ĐỊNH (WAIT STABLE)
- * Đảm bảo Binance đã cập nhật xong Size sau khi khớp DCA
+ * PROTOCOL 1: WAIT STABLE ENGINE
+ * Chống việc đặt TPSL khi Binance chưa cập nhật xong size sau khi lệnh Market khớp
  */
 async function waitPositionStable(symbol, side) {
     let lastSize = 0, stableCount = 0;
-    addBotLog(`⏳ [${symbol}] Đợi vị thế ổn định...`);
     for (let i = 0; i < 15; i++) {
         try {
             const pos = await binancePrivate('/fapi/v2/positionRisk', 'GET', { symbol });
@@ -69,8 +68,8 @@ async function waitPositionStable(symbol, side) {
 }
 
 /**
- * PROTOCOL 2: TPSL ENGINE - REDUCE_ONLY (ANTI-4130)
- * Dùng size thực tế, không dùng closePosition để tránh kẹt slot engine của Binance
+ * PROTOCOL 2: HYBRID TPSL (VÁ LỖI -1106 & -4130)
+ * TP dùng LIMIT + reduceOnly | SL dùng STOP_MARKET + closePosition
  */
 async function syncTPSL(symbol, side, entry, info, actualQty) {
     const isShort = (side === 'SHORT');
@@ -80,34 +79,31 @@ async function syncTPSL(symbol, side, entry, info, actualQty) {
 
     for (let i = 0; i < 3; i++) {
         try {
-            // Xóa sạch lệnh cũ trước khi đặt mới
+            // Xóa sạch lệnh cũ để làm trống slot
             await binancePrivate('/fapi/v1/allOpenOrders', 'DELETE', { symbol });
             await new Promise(r => setTimeout(r, 2000));
 
-            // Đặt Take Profit
-            await exchange.createOrder(symbol, 'TAKE_PROFIT_MARKET', sideClose, actualQty, undefined, { 
-                positionSide: side, stopPrice: tpPrice, reduceOnly: true 
+            // 1. Đặt Take Profit (Dạng LIMIT để dùng được reduceOnly -> Né 4130)
+            await exchange.createOrder(symbol, 'LIMIT', sideClose, actualQty, tpPrice, { 
+                positionSide: side, reduceOnly: true, timeInForce: 'GTC' 
             });
             await new Promise(r => setTimeout(r, 800));
 
-            // Đặt Stop Loss
-            await exchange.createOrder(symbol, 'STOP_MARKET', sideClose, actualQty, undefined, { 
-                positionSide: side, stopPrice: slPrice, reduceOnly: true 
+            // 2. Đặt Stop Loss (Dạng STOP_MARKET -> Bắt buộc dùng closePosition theo chuẩn sàn)
+            await exchange.createOrder(symbol, 'STOP_MARKET', sideClose, undefined, undefined, { 
+                positionSide: side, stopPrice: slPrice, closePosition: true 
             });
 
-            addBotLog(`✨ [${symbol}] Cài TP:${tpPrice} SL:${slPrice} (Size:${actualQty})`, "success");
+            addBotLog(`✨ [${symbol}] Đã cài TP Limit:${tpPrice} và SL Market:${slPrice}`, "success");
             return { tp: Number(tpPrice), sl: Number(slPrice) };
         } catch (e) {
-            addBotLog(`⚠️ [${symbol}] Thử lại TPSL lần ${i+1}: ${e.message}`, "warning");
+            addBotLog(`⚠️ [${symbol}] Retry TPSL lần ${i+1}: ${e.message}`, "warning");
             await new Promise(r => setTimeout(r, 3000));
         }
     }
-    throw new Error("TPSL_FAILED");
+    throw new Error("FAILED_SYNC_TPSL");
 }
 
-/**
- * PROTOCOL 3: MỞ LỆNH & DCA (LOCKDOWN LOGIC)
- */
 async function openPosition(symbol, isDCA = false) {
     const posKey = `${symbol}_SHORT`;
     if (!isDCA && (botActivePositions.has(posKey) || openingSymbols.has(symbol))) return;
@@ -119,21 +115,18 @@ async function openPosition(symbol, isDCA = false) {
         const currentPrice = parseFloat(priceRes.data.price);
         
         let currentPos = botActivePositions.get(posKey);
-        if (isDCA && currentPos) currentPos.isProcessing = true; // Khóa coin chống loop
+        if (isDCA && currentPos) currentPos.isProcessing = true; 
 
-        // 1. Tính toán Margin & Qty
         let marginToUse = isDCA ? currentPos.firstMargin * 1.03 : (botSettings.invValue.toString().includes('%') ? (parseFloat((await binancePrivate('/fapi/v2/account')).availableBalance) * parseFloat(botSettings.invValue.replace('%','')) / 100) : parseFloat(botSettings.invValue));
         let qtyNum = Math.ceil(((marginToUse * info.maxLeverage) / currentPrice) / info.stepSize) * info.stepSize;
         while ((qtyNum * currentPrice) < 5.5) qtyNum += info.stepSize;
 
-        // 2. Vào lệnh Market
         await exchange.setLeverage(info.maxLeverage, symbol);
         const order = await exchange.createOrder(symbol, 'market', 'sell', qtyNum.toFixed(info.quantityPrecision), undefined, { positionSide: 'SHORT' });
 
         if (order) {
-            // 3. Đợi vị thế ổn định rồi mới đặt TPSL
             const stableQty = await waitPositionStable(symbol, 'SHORT');
-            await new Promise(r => setTimeout(r, 2000)); // Nghỉ 2s cho engine sàn nhả cache
+            await new Promise(r => setTimeout(r, 2000)); 
 
             const posRisk = await binancePrivate('/fapi/v2/positionRisk', 'GET', { symbol });
             const upPos = posRisk.find(p => p.positionSide === 'SHORT');
@@ -146,14 +139,13 @@ async function openPosition(symbol, isDCA = false) {
                     symbol, side: 'SHORT', entryPrice: finalEntry, qty: stableQty, tp: sync.tp, sl: sync.sl, 
                     firstMargin: isDCA ? currentPos.firstMargin : marginToUse, 
                     dcaCount: isDCA ? currentPos.dcaCount + 1 : 0, 
-                    isProcessing: false, // Mở khóa khi thành công
+                    isProcessing: false,
                     hedgeOpened: false
                 });
             }
         }
     } catch (e) {
-        addBotLog(`🚨 [${symbol}] LỖI: ${e.message}`, "error");
-        // Giữ isProcessing = true nếu lỗi để tránh bot DCA liên tục
+        addBotLog(`🚨 [${symbol}] Lệnh thất bại: ${e.message}`, "error");
     } finally {
         openingSymbols.delete(symbol);
     }
@@ -168,7 +160,7 @@ async function trackClosedPnL(symbol, closedTime, lastBotPos) {
         const fee = (lastBotPos.qty * lastBotPos.entryPrice) * 0.0008; 
         status.botClosedCount++; 
         status.botPnLClosed += (rawPnL - fee);
-        addBotLog(`✅ CHỐT ${symbol} | Net PnL: ${(rawPnL - fee).toFixed(2)}$`, "success");
+        addBotLog(`✅ CHỐT ${symbol} | Lời/Lỗ Net: ${(rawPnL - fee).toFixed(2)}$`, "success");
     } catch (e) {}
 }
 
@@ -206,6 +198,7 @@ async function mainLoop() {
             
             const priceDev = ((parseFloat(realPos.markPrice) - parseFloat(realPos.entryPrice)) / parseFloat(realPos.entryPrice)) * 100;
             if (priceDev >= botSettings.dcaStep && botPos.dcaCount < botSettings.maxDCA) { 
+                addBotLog(`⚠️ [${botPos.symbol}] DCA lần ${botPos.dcaCount + 1}...`);
                 await openPosition(botPos.symbol, true); 
             }
         }
@@ -233,7 +226,7 @@ async function init() {
             tempInfo[s.symbol] = { quantityPrecision: s.quantityPrecision, pricePrecision: s.pricePrecision, stepSize: parseFloat(lot.stepSize), maxLeverage: brk ? brk.brackets[0].initialLeverage : 20 };
         });
         status.exchangeInfo = tempInfo; status.isReady = true;
-        addBotLog("👿 LUFFY ANTI-4130 READY", "success"); priceMonitorLoop();
+        addBotLog("👿 LUFFY HYBRID ENGINE ONLINE", "success"); priceMonitorLoop();
     } catch (e) { setTimeout(init, 5000); }
 }
 
@@ -246,7 +239,7 @@ APP.get('/api/status', async (req, res) => {
         const walletBalance = parseFloat(acc.totalWalletBalance);
         const unrealizedPnL = parseFloat(acc.totalUnrealizedProfit);
         
-        // Equity = Số dư ví +- PnL chưa ghi nhận
+        // Equity = Tổng tài sản (Ví + PnL đang chạy)
         const equity = (walletBalance + unrealizedPnL).toFixed(2);
 
         const bl = {}; 
@@ -260,7 +253,7 @@ APP.get('/api/status', async (req, res) => {
                 totalWalletBalance: walletBalance.toFixed(2), 
                 availableBalance: parseFloat(acc.availableBalance).toFixed(2), 
                 totalUnrealizedProfit: unrealizedPnL.toFixed(2),
-                equity: equity 
+                equity: equity // Đây là thông số bạn cần hiển thị chính
             } 
         });
     } catch (e) { res.json({ status }); }
@@ -270,7 +263,6 @@ APP.post('/api/settings', (req, res) => { botSettings = { ...botSettings, ...req
 APP.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
 APP.listen(9001);
 
-// Sync candidate data
 setInterval(() => {
     http.get('http://127.0.0.1:9000/api/data', res => {
         let d = ''; res.on('data', c => d += c);
