@@ -14,7 +14,7 @@ const binanceApi = axios.create({ baseURL: 'https://fapi.binance.com', timeout: 
 const exchange = new ccxt.binance({ 
     apiKey: API_KEY, 
     secret: SECRET_KEY, 
-    enableRateLimit: true, 
+    enableRateLimit: true,
     options: { defaultType: 'future', dualSidePosition: true, adjustForTimeDifference: true, recvWindow: 60000 } 
 });
 
@@ -47,8 +47,8 @@ async function binancePrivate(endpoint, method = 'GET', data = {}) {
 }
 
 /**
- * 1. HÀM CẬP NHẬT LỆNH (AMEND) THAY VÌ XOÁ
- * Tìm lệnh cũ và dùng PUT để sửa stopPrice
+ * HÀM ĐỒNG BỘ TP/SL - XỬ LÝ TRIỆT ĐỂ LỖI -4130
+ * Dọn sạch bảng lệnh chờ trước khi đặt lệnh TP/SL mới sau khi DCA hoặc Mở vị thế
  */
 async function syncTPSL(symbol, side, entry, info) {
     const isShort = (side === 'SHORT');
@@ -57,24 +57,27 @@ async function syncTPSL(symbol, side, entry, info) {
     const sideClose = isShort ? 'buy' : 'sell';
 
     try {
-        // Lấy danh sách lệnh để tìm ID
-        const openOrders = await binancePrivate('/fapi/v1/openOrders', 'GET', { symbol });
-        const oldTP = openOrders.find(o => o.type === 'TAKE_PROFIT_MARKET' && o.positionSide === side);
-        const oldSL = openOrders.find(o => o.type === 'STOP_MARKET' && o.positionSide === side);
-
-        // Cập nhật hoặc Tạo mới TP
-        if (oldTP) {
-            await binancePrivate('/fapi/v1/order', 'PUT', { symbol, side: sideClose.toUpperCase(), orderId: oldTP.orderId, stopPrice: tpPrice, positionSide: side });
-        } else {
-            await exchange.createOrder(symbol, 'TAKE_PROFIT_MARKET', sideClose, undefined, undefined, { positionSide: side, stopPrice: tpPrice, closePosition: true });
+        // Bước 1: Hủy tất cả lệnh chờ để tránh xung đột closePosition
+        try {
+            await binancePrivate('/fapi/v1/allOpenOrders', 'DELETE', { symbol: symbol });
+        } catch (e) {
+            // Bỏ qua nếu không có lệnh để xóa
         }
 
-        // Cập nhật hoặc Tạo mới SL
-        if (oldSL) {
-            await binancePrivate('/fapi/v1/order', 'PUT', { symbol, side: sideClose.toUpperCase(), orderId: oldSL.orderId, stopPrice: slPrice, positionSide: side });
-        } else {
-            await exchange.createOrder(symbol, 'STOP_MARKET', sideClose, undefined, undefined, { positionSide: side, stopPrice: slPrice, closePosition: true });
-        }
+        // Bước 2: Nghỉ 1 giây để sàn cập nhật trạng thái trống
+        await new Promise(r => setTimeout(r, 1000));
+
+        // Bước 3: Đặt lệnh Take Profit mới
+        await exchange.createOrder(symbol, 'TAKE_PROFIT_MARKET', sideClose, undefined, undefined, { 
+            positionSide: side, stopPrice: tpPrice, closePosition: true 
+        });
+
+        await new Promise(r => setTimeout(r, 500));
+
+        // Bước 4: Đặt lệnh Stop Loss mới
+        await exchange.createOrder(symbol, 'STOP_MARKET', sideClose, undefined, undefined, { 
+            positionSide: side, stopPrice: slPrice, closePosition: true 
+        });
 
         addBotLog(`✨ [${symbol}] Đã cập nhật TP:${tpPrice} SL:${slPrice}`, "success");
         return { tp: Number(tpPrice), sl: Number(slPrice) };
@@ -84,9 +87,6 @@ async function syncTPSL(symbol, side, entry, info) {
     }
 }
 
-/**
- * 2. MỞ VỊ THẾ / DCA (BỎ QUA CLEAR_AND_VERIFY VÌ ĐÃ DÙNG PUT)
- */
 async function openPosition(symbol, isDCA = false, candidateData = null) {
     const posKey = `${symbol}_SHORT`;
     if (!isDCA && (botActivePositions.has(posKey) || openingSymbols.has(symbol))) return;
@@ -141,6 +141,7 @@ async function openPosition(symbol, isDCA = false, candidateData = null) {
         }
     } catch (e) {
         addBotLog(`🚨 [${symbol}] LỖI HỆ THỐNG: ${e.message}`, "error");
+        if (isDCA && botActivePositions.has(posKey)) botActivePositions.get(posKey).isProcessing = false;
     } finally {
         openingSymbols.delete(symbol);
     }
@@ -170,8 +171,6 @@ async function priceMonitorLoop() {
             if (!realPos || Math.abs(parseFloat(realPos.positionAmt)) === 0) {
                 status.blackList[botPos.symbol] = now + (15 * 60 * 1000);
                 trackClosedPnL(botPos.symbol, now, botPos); botActivePositions.delete(key);
-                // Sau khi chốt, hủy hết lệnh treo
-                binancePrivate('/fapi/v1/allOpenOrders', 'DELETE', { symbol: botPos.symbol }).catch(()=>{});
             } else {
                 botPos.markPrice = parseFloat(realPos.markPrice); 
                 botPos.pnl = parseFloat(realPos.unRealizedProfit);
@@ -221,7 +220,7 @@ async function init() {
             tempInfo[s.symbol] = { quantityPrecision: s.quantityPrecision, pricePrecision: s.pricePrecision, stepSize: parseFloat(lot.stepSize), maxLeverage: brk ? brk.brackets[0].initialLeverage : 20 };
         });
         status.exchangeInfo = tempInfo; status.isReady = true;
-        addBotLog("👿 LUFFY READY - AMEND MODE", "success"); priceMonitorLoop();
+        addBotLog("👿 LUFFY READY - ANTI-4130 PROTOCOL", "success"); priceMonitorLoop();
     } catch (e) { setTimeout(init, 5000); }
 }
 
