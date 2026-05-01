@@ -47,48 +47,38 @@ async function binancePrivate(endpoint, method = 'GET', data = {}) {
 }
 
 /**
- * FIX CHUẨN: XÓA TỪNG ORDER ID ĐỂ DIỆT TẬN GỐC TP/SL HEDGE MODE
+ * HÀM DỌN LỆNH CHUẨN: XÓA TỪNG ID VÀ ĐỐI CHIẾU DANH SÁCH THỰC TẾ
  */
 async function clearAllOrders(symbol) {
     try {
         let attempt = 0;
         while (attempt < 5) {
             attempt++;
-            // Lấy danh sách lệnh thực tế đang treo (Gồm cả Limit, TP, SL, Trailing...)
             const orders = await binancePrivate('/fapi/v1/openOrders', 'GET', { symbol });
 
             if (orders.length === 0) {
-                addBotLog(`🧹 [${symbol}] Sạch hoàn toàn lệnh chờ.`);
+                addBotLog(`🧹 [${symbol}] Đã dọn sạch 100% lệnh chờ.`);
                 return true;
             }
 
-            // Debug xem lệnh gì còn sót
-            const types = orders.map(o => `${o.type}(${o.positionSide})`).join(', ');
-            addBotLog(`⚠️ [${symbol}] Còn sót: ${types}. Đang dọn lần ${attempt}...`, "warning");
+            // Log rõ loại lệnh đang treo để ông check
+            const details = orders.map(o => `${o.type}:${o.positionSide}`).join(', ');
+            addBotLog(`⚠️ [${symbol}] Còn treo: ${details}. Đang ép xóa lần ${attempt}...`, "warning");
 
-            // Xóa từng orderId một để ép sàn thực thi 100%
             for (const o of orders) {
                 try {
-                    await binancePrivate('/fapi/v1/order', 'DELETE', { 
-                        symbol, 
-                        orderId: o.orderId 
-                    });
-                } catch (e) {
-                    // Nếu lệnh đã khớp hoặc bị xóa trước đó thì bỏ qua lỗi này
-                }
+                    await binancePrivate('/fapi/v1/order', 'DELETE', { symbol, orderId: o.orderId });
+                } catch (e) {}
             }
-
-            // Nghỉ 2 giây chờ sàn cập nhật trạng thái
-            await new Promise(r => setTimeout(r, 2000));
+            await new Promise(r => setTimeout(r, 2000)); // Đợi sàn cập nhật
         }
-        addBotLog(`❌ [${symbol}] Dọn KHÔNG sạch sau 5 lần thử!`, "error");
         return false;
-    } catch (e) {
-        addBotLog(`❌ [${symbol}] Lỗi clear: ${e.message}`, "error");
-        return false;
-    }
+    } catch (e) { return false; }
 }
 
+/**
+ * ĐỒNG BỘ TP/SL VÀ CẬP NHẬT TRỰC TIẾP VÀO VỊ THẾ ĐỂ HIỂN THỊ
+ */
 async function syncTPSL(symbol, side, qty, entry, info) {
     const isShort = (side === 'SHORT');
     const tpPrice = (entry * (isShort ? (1 - botSettings.posTP / 100) : (1 + botSettings.posTP / 100))).toFixed(info.pricePrecision);
@@ -96,15 +86,10 @@ async function syncTPSL(symbol, side, qty, entry, info) {
     const sideClose = isShort ? 'buy' : 'sell';
 
     try {
-        // Chỉ đặt lệnh mới khi dọn sạch 100% lệnh cũ
         const cleaned = await clearAllOrders(symbol);
-        
-        if (!cleaned) {
-            addBotLog(`❌ [${symbol}] Dọn dẹp thất bại, hủy bỏ Sync TP/SL để an toàn.`, "error");
-            return { tp: 0, sl: 0 };
-        }
+        if (!cleaned) addBotLog(`❌ [${symbol}] Dọn sàn thất bại, lệnh cũ có thể vẫn còn!`, "error");
 
-        addBotLog(`✨ [${symbol}] Đặt mới TP:${tpPrice} SL:${slPrice} (Qty:${qty})`);
+        addBotLog(`✨ [${symbol}] Đặt mới TP:${tpPrice} SL:${slPrice}`);
         const params = { positionSide: side, workingType: 'MARK_PRICE' };
 
         await exchange.createOrder(symbol, 'TAKE_PROFIT_MARKET', sideClose, qty, undefined, { ...params, stopPrice: tpPrice });
@@ -119,21 +104,6 @@ async function syncTPSL(symbol, side, qty, entry, info) {
     }
 }
 
-async function trackClosedPnL(symbol, closedTime, lastBotPos) {
-    try {
-        await new Promise(r => setTimeout(r, 5000));
-        const trades = await binancePrivate('/fapi/v1/userTrades', 'GET', { symbol, limit: 15 });
-        const relevantTrades = trades.filter(t => Math.abs(t.time - closedTime) < 60000 && t.positionSide === lastBotPos.side);
-        const rawPnL = relevantTrades.reduce((sum, t) => sum + parseFloat(t.realizedPnl), 0);
-        const totalVolume = lastBotPos.qty * lastBotPos.entryPrice;
-        const fee = totalVolume * 0.001; 
-        const finalPnL = rawPnL - fee;
-        status.botClosedCount++; 
-        status.botPnLClosed += finalPnL;
-        addBotLog(`💰 CHỐT ${symbol} | PnL Net: ${finalPnL.toFixed(2)}$`, "success");
-    } catch (e) {}
-}
-
 async function openPosition(symbol, isDCA = false) {
     const posKey = `${symbol}_SHORT`;
     if (!isDCA && (botActivePositions.has(posKey) || openingSymbols.has(symbol))) return;
@@ -144,13 +114,12 @@ async function openPosition(symbol, isDCA = false) {
         const priceRes = await binanceApi.get(`/fapi/v1/ticker/price?symbol=${symbol}`);
         const price = parseFloat(priceRes.data.price);
         
-        let marginToUse = 0, currentDCA = 0, historyEntries = [], firstMargin = 0;
+        let marginToUse = 0, currentDCA = 0, firstMargin = 0;
         if (isDCA) {
             const current = botActivePositions.get(posKey);
             firstMargin = current.firstMargin;
             marginToUse = firstMargin * 1.03; 
             current.isProcessing = true; currentDCA = current.dcaCount + 1;
-            historyEntries = [...(current.historyEntries || [])];
         } else {
             marginToUse = botSettings.invValue.toString().includes('%') 
                 ? (parseFloat(acc.availableBalance) * parseFloat(botSettings.invValue.replace('%','')) / 100) 
@@ -170,15 +139,18 @@ async function openPosition(symbol, isDCA = false) {
             const upPos = posRisk.find(p => p.positionSide === 'SHORT');
             const avgEntry = parseFloat(upPos.entryPrice);
             const totalQty = Math.abs(parseFloat(upPos.positionAmt));
-            historyEntries.push(price);
 
-            if (isDCA) addBotLog(`⚠️ DCA ${symbol} : Lần ${currentDCA} | Avg:${avgEntry}`, "warning");
+            if (isDCA) addBotLog(`⚠️ DCA ${symbol} Lần ${currentDCA}`, "warning");
             else addBotLog(`✅ OPEN ${symbol} | Entry: ${price}`, "success");
 
             const sync = await syncTPSL(symbol, 'SHORT', totalQty, avgEntry, info);
+            
+            // LƯU TRỰC TIẾP TP/SL VÀO VỊ THẾ ĐỂ XEM TRÊN DASHBOARD
             botActivePositions.set(posKey, { 
-                symbol, side: 'SHORT', entryPrice: avgEntry, historyEntries, qty: totalQty, tp: sync.tp, sl: sync.sl, 
-                margin: (totalQty * avgEntry / info.maxLeverage), firstMargin, dcaCount: currentDCA, isProcessing: false, hedgeOpened: false
+                symbol, side: 'SHORT', entryPrice: avgEntry, qty: totalQty, 
+                tp: sync.tp, sl: sync.sl, // Hiển thị ngay tại vị thế
+                margin: (totalQty * avgEntry / info.maxLeverage), 
+                firstMargin, dcaCount: currentDCA, isProcessing: false 
             });
         }
     } catch (e) { 
@@ -195,22 +167,16 @@ async function priceMonitorLoop() {
         for (let [key, botPos] of botActivePositions) {
             const realPos = posRisk.find(p => p.symbol === botPos.symbol && p.positionSide === botPos.side);
             
-            // FIX RACE CONDITION: Position đóng -> Phải xóa lệnh -> Thành công mới xóa khỏi Map
             if (!realPos || Math.abs(parseFloat(realPos.positionAmt)) <= 0) {
-                addBotLog(`✅ [${botPos.symbol}] Đã đóng vị thế.`);
-                
-                const cleaned = await clearAllOrders(botPos.symbol);
-                if (!cleaned) {
-                    addBotLog(`❌ [${botPos.symbol}] Vị thế đã đóng nhưng lệnh chờ vẫn treo!`, "error");
-                }
-
+                addBotLog(`✅ [${botPos.symbol}] Đã đóng. Đang dọn sàn...`);
+                await clearAllOrders(botPos.symbol);
                 status.blackList[botPos.symbol] = now + (15 * 60 * 1000);
-                trackClosedPnL(botPos.symbol, now, botPos); 
                 botActivePositions.delete(key);
             } else {
                 botPos.markPrice = parseFloat(realPos.markPrice); 
                 botPos.pnl = parseFloat(realPos.unRealizedProfit);
                 botPos.priceDev = botPos.entryPrice ? (((botPos.markPrice - botPos.entryPrice) / botPos.entryPrice) * 100) : 0;
+                // Cập nhật lại TP/SL nếu có thay đổi từ sàn (Option)
             }
         }
     } catch (e) {}
@@ -223,7 +189,7 @@ async function mainLoop() {
         const posRisk = await binancePrivate('/fapi/v2/positionRisk');
         const activeRealPos = posRisk.filter(p => Math.abs(parseFloat(p.positionAmt)) > 0);
         for (let [key, botPos] of botActivePositions) {
-            if (botPos.isProcessing || botPos.side !== 'SHORT') continue;
+            if (botPos.isProcessing) continue;
             const realPos = activeRealPos.find(p => p.symbol === botPos.symbol && p.positionSide === 'SHORT');
             if (realPos && ((parseFloat(realPos.markPrice) - parseFloat(realPos.entryPrice)) / parseFloat(realPos.entryPrice) * 100) >= botSettings.dcaStep) {
                 if (botPos.dcaCount < botSettings.maxDCA) await openPosition(botPos.symbol, true);
@@ -251,7 +217,7 @@ async function init() {
             tempInfo[s.symbol] = { quantityPrecision: s.quantityPrecision, pricePrecision: s.pricePrecision, stepSize: parseFloat(lot.stepSize), maxLeverage: brk ? brk.brackets[0].initialLeverage : 20 };
         });
         status.exchangeInfo = tempInfo; status.isReady = true;
-        addBotLog("👿 LUFFY READY - PRO DRAIN SYSTEM", "success"); priceMonitorLoop();
+        addBotLog("👿 LUFFY READY - TOTAL BALANCE MODE", "success"); priceMonitorLoop();
     } catch (e) { setTimeout(init, 5000); }
 }
 
@@ -268,11 +234,13 @@ APP.get('/api/status', async (req, res) => {
     try {
         const acc = await binancePrivate('/fapi/v2/account');
         res.json({ 
-            botSettings, activePositions: Array.from(botActivePositions.values()), status,
+            botSettings, 
+            activePositions: Array.from(botActivePositions.values()), 
+            status,
             wallet: { 
-                totalWalletBalance: parseFloat(acc.totalWalletBalance).toFixed(2), 
-                availableBalance: parseFloat(acc.availableBalance).toFixed(2), 
-                totalUnrealizedProfit: parseFloat(acc.totalUnrealizedProfit).toFixed(2) 
+                totalWalletBalance: parseFloat(acc.totalWalletBalance).toFixed(2), // TỔNG TÀI SẢN (Gồm cả PnL chưa chốt)
+                availableBalance: parseFloat(acc.availableBalance).toFixed(2), // TIỀN CÓ THỂ XÀI
+                totalUnrealizedProfit: parseFloat(acc.totalUnrealizedProfit).toFixed(2) // PNL TẠM TÍNH
             } 
         });
     } catch (e) { res.json({ status }); }
