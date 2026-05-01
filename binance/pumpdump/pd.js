@@ -47,7 +47,7 @@ async function binancePrivate(endpoint, method = 'GET', data = {}) {
 }
 
 /**
- * HÀM SYNC TPSL - CƠ CHẾ HỦY -> CHECK -> ĐỢI -> ĐẶT
+ * HÀM SYNC TPSL - FIX LỖI -1106 VÀ XUNG ĐỘT HEDGE MODE
  */
 async function syncTPSL(symbol, side, qty, entry, info) {
     const isShort = (side === 'SHORT');
@@ -56,52 +56,48 @@ async function syncTPSL(symbol, side, qty, entry, info) {
     const sideClose = isShort ? 'buy' : 'sell';
 
     try {
-        addBotLog(`🧹 [${symbol}] BƯỚC 1: Phát lệnh hủy toàn bộ TP/SL cũ...`);
-        // Hủy diện rộng trên symbol
+        addBotLog(`🧹 [${symbol}] BƯỚC 1: Hủy toàn bộ lệnh cũ...`);
         await binancePrivate('/fapi/v1/allOpenOrders', 'DELETE', { symbol });
         
-        // Đợi 1 giây để sàn xử lý lệnh hủy
         await new Promise(r => setTimeout(r, 1000));
 
-        addBotLog(`🔍 [${symbol}] BƯỚC 2: Kiểm tra trạng thái dọn dẹp...`);
+        addBotLog(`🔍 [${symbol}] BƯỚC 2: Kiểm tra sàn sạch...`);
         let isClean = false;
         for (let i = 0; i < 3; i++) {
             let openOrders = await binancePrivate('/fapi/v1/openOrders', 'GET', { symbol });
-            // Lọc các lệnh còn sót thuộc positionSide này
             let remaining = openOrders.filter(o => o.positionSide === side);
             
             if (remaining.length === 0) {
                 isClean = true;
                 break;
             }
-            addBotLog(`⏳ [${symbol}] Vẫn còn ${remaining.length} lệnh treo, đang thử hủy lại...`);
             await binancePrivate('/fapi/v1/allOpenOrders', 'DELETE', { symbol });
             await new Promise(r => setTimeout(r, 1000));
         }
 
         if (!isClean) {
-            addBotLog(`⚠️ [${symbol}] KHÔNG THỂ DỌN SẠCH sàn, hủy cài TP/SL đợt này.`, "warning");
+            addBotLog(`⚠️ [${symbol}] Sàn chưa sạch, bỏ qua đặt TP/SL.`, "warning");
             return { tp: 0, sl: 0 };
         }
 
-        // Đợi thêm 1 giây cuối sau khi đã sạch để ổn định Matching Engine
+        // Đợi 1s ổn định trước khi đặt lệnh điều kiện
         await new Promise(r => setTimeout(r, 1000));
 
-        addBotLog(`✨ [${symbol}] Sàn sạch. BƯỚC 3: Đặt TP:${tpPrice} SL:${slPrice}`);
+        addBotLog(`🚀 [${symbol}] BƯỚC 3: Đặt TP:${tpPrice} SL:${slPrice}`);
         
-        // Sử dụng reduceOnly thay vì closePosition để tránh xung đột logic "Multiple Close Orders"
-        await exchange.createOrder(symbol, 'TAKE_PROFIT_MARKET', sideClose, qty, undefined, { 
+        // TRONG HEDGE MODE: Phải dùng closePosition: true và KHÔNG gửi qty
+        await exchange.createOrder(symbol, 'TAKE_PROFIT_MARKET', sideClose, undefined, undefined, { 
             positionSide: side, 
             stopPrice: tpPrice, 
-            reduceOnly: true 
+            closePosition: true 
         });
         
         await new Promise(r => setTimeout(r, 500));
         
-        await exchange.createOrder(symbol, 'STOP_MARKET', sideClose, qty, undefined, { 
+        await exchange.createOrder(symbol, 'STOP_MARKET', sideClose, undefined, undefined, { 
             positionSide: side, 
             stopPrice: slPrice, 
-            reduceOnly: true 
+            closePosition: true 
         });
 
         addBotLog(`✅ [${symbol}] Sync hoàn tất.`, "success");
@@ -135,13 +131,13 @@ async function openHedgeLong(symbol, info, firstMargin) {
         const hedgeMargin = firstMargin * 50; 
         let qtyNum = Math.ceil(((hedgeMargin * info.maxLeverage) / price) / info.stepSize) * info.stepSize;
         while ((qtyNum * price) < 5.5) qtyNum += info.stepSize;
-        addBotLog(`⚠️ HEDGE: Mở LONG ${symbol} | Margin: ${hedgeMargin.toFixed(2)}$ (x50)`, "warning");
+        addBotLog(`⚠️ HEDGE: Mở LONG ${symbol} | Margin: ${hedgeMargin.toFixed(2)}$`, "warning");
         const order = await exchange.createOrder(symbol, 'market', 'buy', qtyNum.toFixed(info.quantityPrecision), undefined, { positionSide: 'LONG' });
         if (order) {
             const tpP = (price * 1.10).toFixed(info.pricePrecision);
             const slP = (price * 0.90).toFixed(info.pricePrecision);
-            await exchange.createOrder(symbol, 'TAKE_PROFIT_MARKET', 'sell', qtyNum.toFixed(info.quantityPrecision), undefined, { positionSide: 'LONG', stopPrice: tpP, reduceOnly: true });
-            await exchange.createOrder(symbol, 'STOP_MARKET', 'sell', qtyNum.toFixed(info.quantityPrecision), undefined, { positionSide: 'LONG', stopPrice: slP, reduceOnly: true });
+            await exchange.createOrder(symbol, 'TAKE_PROFIT_MARKET', 'sell', undefined, undefined, { positionSide: 'LONG', stopPrice: tpP, closePosition: true });
+            await exchange.createOrder(symbol, 'STOP_MARKET', 'sell', undefined, undefined, { positionSide: 'LONG', stopPrice: slP, closePosition: true });
         }
     } catch (e) { addBotLog(`❌ Lỗi Hedge: ${e.message}`, "error"); }
 }
@@ -159,6 +155,7 @@ async function openPosition(symbol, isDCA = false, candidateData = null) {
         let marginToUse = 0, currentDCA = 0, historyEntries = [], firstMargin = 0;
         if (isDCA) {
             const current = botActivePositions.get(posKey);
+            if (!current) return;
             firstMargin = current.firstMargin;
             marginToUse = firstMargin * 1.03; 
             current.isProcessing = true; currentDCA = current.dcaCount + 1;
@@ -185,11 +182,9 @@ async function openPosition(symbol, isDCA = false, candidateData = null) {
             historyEntries.push(price);
 
             if (isDCA) {
-                addBotLog(`⚠️ DCA ${symbol} : Lần ${currentDCA} | Margin: ${marginToUse.toFixed(2)}$ | Avg:${avgEntry}`, "warning");
+                addBotLog(`⚠️ DCA ${symbol} : Lần ${currentDCA} | Entry Avg:${avgEntry}`, "warning");
             } else {
-                const c1 = candidateData?.c1 || "0";
-                const c5 = candidateData?.c5 || "0";
-                addBotLog(`✅ OPEN ${symbol} | [1m:${c1}% 5m:${c5}%] | Entry: ${price} | Margin: ${marginToUse.toFixed(2)}$`, "success");
+                addBotLog(`✅ OPEN ${symbol} | Entry: ${price} | Margin: ${marginToUse.toFixed(2)}$`, "success");
             }
 
             const sync = await syncTPSL(symbol, 'SHORT', totalQty, avgEntry, info);
@@ -269,7 +264,7 @@ async function init() {
             tempInfo[s.symbol] = { quantityPrecision: s.quantityPrecision, pricePrecision: s.pricePrecision, stepSize: parseFloat(lot.stepSize), maxLeverage: brk ? brk.brackets[0].initialLeverage : 20 };
         });
         status.exchangeInfo = tempInfo; status.isReady = true;
-        addBotLog("👿 LUFFY READY - SYNC TPSL FIXED", "success"); priceMonitorLoop();
+        addBotLog("👿 LUFFY READY - HEDGE MODE SYNC FIXED", "success"); priceMonitorLoop();
     } catch (e) { setTimeout(init, 5000); }
 }
 
