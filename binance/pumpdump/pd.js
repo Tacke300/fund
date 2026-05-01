@@ -47,56 +47,49 @@ async function binancePrivate(endpoint, method = 'GET', data = {}) {
 }
 
 /**
- * 1. HÀM TRUY QUÉT TRIỆT ĐỂ (FORCE CLEAR)
- * Dùng allOpenOrders để dọn nhanh và kiểm tra lại bằng GET
+ * 1. HÀM DỌN LỆNH CƠ BẢN
  */
 async function clearAndVerify(symbol, side) {
     try {
-        addBotLog(`🧹 [${symbol}] Đang dọn sạch lệnh điều kiện cũ...`);
-        // Xóa tất cả lệnh chờ của symbol để giải phóng slot
+        addBotLog(`🧹 [${symbol}] Đang dọn sạch lệnh chờ...`);
         await binancePrivate('/fapi/v1/allOpenOrders', 'DELETE', { symbol });
-        
-        // Delay 1.5s để Matching Engine của sàn đồng bộ trạng thái
-        await new Promise(r => setTimeout(r, 1500));
-
-        const openOrders = await binancePrivate('/fapi/v1/openOrders', 'GET', { symbol });
-        const ghostOrders = openOrders.filter(o => o.positionSide === side);
-
-        if (ghostOrders.length > 0) {
-            for (const order of ghostOrders) {
-                await binancePrivate('/fapi/v1/order', 'DELETE', { symbol, orderId: order.orderId });
-            }
-            await new Promise(r => setTimeout(r, 1000));
-        }
+        await new Promise(r => setTimeout(r, 1000));
         return true;
-    } catch (e) { return true; } // Tránh treo bot nếu sàn trả lỗi khi đã sạch lệnh
+    } catch (e) { return true; }
 }
 
 /**
- * 2. ĐẶT TP/SL DÙNG REDUCE_ONLY (ANTI-4130 TUYỆT ĐỐI)
+ * 2. ĐẶT TP/SL BẰNG QUANTITY (FIX TRIỆT ĐỂ 4130 & 1106)
  */
-async function syncTPSL(symbol, side, entry, info) {
+async function syncTPSL(symbol, side, entry, info, currentQty) {
     const isShort = (side === 'SHORT');
     const tpPrice = (entry * (isShort ? (1 - botSettings.posTP / 100) : (1 + botSettings.posTP / 100))).toFixed(info.pricePrecision);
     const slPrice = (entry * (isShort ? (1 + botSettings.posSL / 100) : (1 - botSettings.posSL / 100))).toFixed(info.pricePrecision);
     const sideClose = isShort ? 'buy' : 'sell';
 
     try {
+        // Dọn sạch trước khi đặt
         await clearAndVerify(symbol, side);
 
-        // Sử dụng reduceOnly: true để thay thế cho closePosition
-        // Giúp tránh hoàn toàn lỗi -4130 của Binance Futures
-        await exchange.createOrder(symbol, 'TAKE_PROFIT_MARKET', sideClose, undefined, undefined, { 
-            positionSide: side, stopPrice: tpPrice, reduceOnly: true 
+        // CHIẾN THUẬT MỚI: Không dùng closePosition, không dùng reduceOnly.
+        // Chỉ dùng số lượng (Quantity) khớp 100% với vị thế để đóng lệnh.
+        const qtyStr = Math.abs(currentQty).toFixed(info.quantityPrecision);
+
+        // Đặt TP
+        await exchange.createOrder(symbol, 'TAKE_PROFIT_MARKET', sideClose, qtyStr, undefined, { 
+            positionSide: side, 
+            stopPrice: tpPrice 
         });
         
         await new Promise(r => setTimeout(r, 800));
         
-        await exchange.createOrder(symbol, 'STOP_MARKET', sideClose, undefined, undefined, { 
-            positionSide: side, stopPrice: slPrice, reduceOnly: true 
+        // Đặt SL
+        await exchange.createOrder(symbol, 'STOP_MARKET', sideClose, qtyStr, undefined, { 
+            positionSide: side, 
+            stopPrice: slPrice 
         });
 
-        addBotLog(`✨ [${symbol}] Đã cài TP:${tpPrice} SL:${slPrice} (ReduceOnly)`, "success");
+        addBotLog(`✨ [${symbol}] Đã cài TP:${tpPrice} SL:${slPrice} | Qty: ${qtyStr}`, "success");
         return { tp: Number(tpPrice), sl: Number(slPrice) };
     } catch (e) {
         addBotLog(`❌ [${symbol}] Lỗi đặt TP/SL: ${e.message}`, "error");
@@ -149,7 +142,8 @@ async function openPosition(symbol, isDCA = false, candidateData = null) {
                 const finalEntry = parseFloat(upPos.entryPrice);
                 const finalQty = Math.abs(parseFloat(upPos.positionAmt));
 
-                const sync = await syncTPSL(symbol, 'SHORT', finalEntry, info);
+                // TRUYỀN THÊM finalQty VÀO ĐỂ ĐẶT LỆNH ĐÓNG CHÍNH XÁC
+                const sync = await syncTPSL(symbol, 'SHORT', finalEntry, info, finalQty);
                 
                 botActivePositions.set(posKey, { 
                     symbol, side: 'SHORT', entryPrice: finalEntry, qty: finalQty, tp: sync.tp, sl: sync.sl, 
@@ -240,7 +234,7 @@ async function init() {
             tempInfo[s.symbol] = { quantityPrecision: s.quantityPrecision, pricePrecision: s.pricePrecision, stepSize: parseFloat(lot.stepSize), maxLeverage: brk ? brk.brackets[0].initialLeverage : 20 };
         });
         status.exchangeInfo = tempInfo; status.isReady = true;
-        addBotLog("👿 LUFFY READY - ANTI-4130 PROTOCOL", "success"); priceMonitorLoop();
+        addBotLog("👿 LUFFY READY - FINAL STABLE VERSION", "success"); priceMonitorLoop();
     } catch (e) { setTimeout(init, 5000); }
 }
 
