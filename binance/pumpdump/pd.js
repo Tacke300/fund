@@ -8,16 +8,16 @@ import ccxt from 'ccxt';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// KHỞI TẠO CCXT
+// 1. CẤU HÌNH CCXT HOÀN CHỈNH
 const exchange = new ccxt.binance({ 
     apiKey: API_KEY, 
     secret: SECRET_KEY, 
     enableRateLimit: true,
     options: { 
         defaultType: 'future', 
-        dualSidePosition: true, // Chế độ Hedge Mode
-        adjustForTimeDifference: true, 
-        recvWindow: 60000 
+        dualSidePosition: true, // Hedge Mode
+        adjustForTimeDifference: true,
+        recvWindow: 60000
     } 
 });
 
@@ -34,21 +34,18 @@ function addBotLog(msg, type = 'info') {
 }
 
 /**
- * 1. TRUY QUÉT LỆNH DÙNG CCXT
+ * 2. HÀM DỌN DẸP LỆNH (TRIỆT TIÊU LỖI -4130)
  */
 async function clearAndVerify(symbol, side) {
     try {
-        addBotLog(`🧹 [${symbol}] Đang dọn dẹp lệnh chờ bằng CCXT...`);
-        
+        addBotLog(`🧹 [${symbol}] Đang dọn dẹp lệnh chờ...`);
         for (let i = 1; i <= 3; i++) {
-            // Xóa tất cả lệnh chờ của symbol này
+            // Xóa tất cả lệnh chờ của symbol này qua CCXT
             await exchange.cancelAllOrders(symbol);
-            await new Promise(r => setTimeout(r, 2000)); // Nghỉ cho sàn đồng bộ
+            await new Promise(r => setTimeout(r, 2000)); 
 
-            // Lấy danh sách lệnh đang mở
             const openOrders = await exchange.fetchOpenOrders(symbol);
-            
-            // Lọc đúng các lệnh đóng vị thế (Close Position) đang bị kẹt
+            // Lọc đúng các lệnh đóng vị thế đang bị kẹt
             const ghostOrders = openOrders.filter(o => 
                 o.info.positionSide === side && 
                 (o.info.closePosition === 'true' || o.info.reduceOnly === 'true')
@@ -59,11 +56,9 @@ async function clearAndVerify(symbol, side) {
                 return true; 
             }
 
-            // Ép xóa từng lệnh theo ID nếu cancelAllOrders sót
             for (const order of ghostOrders) {
                 await exchange.cancelOrder(order.id, symbol);
             }
-            addBotLog(`⚠️ [${symbol}] Lần ${i}: Đã ép xóa ${ghostOrders.length} lệnh ma.`, "warning");
             await new Promise(r => setTimeout(r, 1000));
         }
         return false;
@@ -74,43 +69,39 @@ async function clearAndVerify(symbol, side) {
 }
 
 /**
- * 2. ĐẶT TP/SL DÙNG CCXT
+ * 3. ĐẶT TP/SL CHUẨN PRECISION
  */
-async function syncTPSL(symbol, side, entry, info) {
+async function syncTPSL(symbol, side, entry) {
     const isShort = (side === 'SHORT');
-    const tpPrice = (entry * (isShort ? (1 - botSettings.posTP / 100) : (1 + botSettings.posTP / 100))).toFixed(info.pricePrecision);
-    const slPrice = (entry * (isShort ? (1 + botSettings.posSL / 100) : (1 - botSettings.posSL / 100))).toFixed(info.pricePrecision);
+    const tpPrice = isShort ? (entry * (1 - botSettings.posTP / 100)) : (entry * (1 + botSettings.posTP / 100));
+    const slPrice = isShort ? (entry * (1 + botSettings.posSL / 100)) : (entry * (1 - botSettings.posSL / 100));
     const sideClose = isShort ? 'buy' : 'sell';
 
     try {
-        // Kiểm tra lệnh ma lần cuối qua CCXT
-        const openOrders = await exchange.fetchOpenOrders(symbol);
-        if (openOrders.some(o => o.info.positionSide === side && o.info.closePosition === 'true')) {
-            throw new Error("Vẫn còn lệnh Close cũ chưa dọn sạch!");
-        }
+        // Dùng hàm của CCXT để format giá đúng quy định sàn
+        const finalTP = exchange.priceToPrecision(symbol, tpPrice);
+        const finalSL = exchange.priceToPrecision(symbol, slPrice);
 
-        // Đặt lệnh TP
         await exchange.createOrder(symbol, 'TAKE_PROFIT_MARKET', sideClose, undefined, undefined, { 
-            positionSide: side, stopPrice: tpPrice, closePosition: true, workingType: 'MARK_PRICE'
+            positionSide: side, stopPrice: finalTP, closePosition: true, workingType: 'MARK_PRICE'
         });
         
         await new Promise(r => setTimeout(r, 500));
 
-        // Đặt lệnh SL
         await exchange.createOrder(symbol, 'STOP_MARKET', sideClose, undefined, undefined, { 
-            positionSide: side, stopPrice: slPrice, closePosition: true, workingType: 'MARK_PRICE'
+            positionSide: side, stopPrice: finalSL, closePosition: true, workingType: 'MARK_PRICE'
         });
 
-        addBotLog(`✨ [${symbol}] Đã cài TP:${tpPrice} SL:${slPrice}`, "success");
-        return { tp: Number(tpPrice), sl: Number(slPrice) };
+        addBotLog(`✨ [${symbol}] TP: ${finalTP} | SL: ${finalSL}`, "success");
+        return { tp: finalTP, sl: finalSL };
     } catch (e) {
-        addBotLog(`❌ [${symbol}] Lỗi đặt TP/SL: ${e.message}`, "error");
+        addBotLog(`❌ [${symbol}] Lỗi TP/SL: ${e.message}`, "error");
         throw e;
     }
 }
 
 /**
- * 3. MỞ VỊ THẾ / DCA
+ * 4. MỞ VỊ THẾ / DCA
  */
 async function openPosition(symbol, isDCA = false) {
     const posKey = `${symbol}_SHORT`;
@@ -118,90 +109,58 @@ async function openPosition(symbol, isDCA = false) {
     openingSymbols.add(symbol); 
 
     try {
-        const info = status.exchangeInfo[symbol];
-        const ticker = await exchange.fetchTicker(symbol);
-        const currentPrice = ticker.last;
-        
         let currentPos = botActivePositions.get(posKey);
-        let marginToUse = 0, currentDCA = 0, firstMargin = 0;
-
+        
         if (isDCA && currentPos) {
             currentPos.isProcessing = true;
             const isClean = await clearAndVerify(symbol, 'SHORT');
-            if (!isClean) {
-                addBotLog(`❌ [${symbol}] Không thể dọn sàn. Hủy DCA!`, "error");
-                return; 
-            }
-            firstMargin = currentPos.firstMargin;
-            marginToUse = firstMargin * 1.03; 
-            currentDCA = currentPos.dcaCount + 1;
-        } else {
-            const balance = await exchange.fetchBalance();
-            marginToUse = botSettings.invValue.toString().includes('%') 
-                ? (balance.free.USDT * parseFloat(botSettings.invValue.replace('%','')) / 100) 
-                : parseFloat(botSettings.invValue);
-            firstMargin = marginToUse;
+            if (!isClean) return; // Không dọn được thì dừng để bảo vệ vốn
         }
 
-        let qtyNum = (marginToUse * info.maxLeverage) / currentPrice;
-        qtyNum = exchange.amountToPrecision(symbol, qtyNum);
+        const ticker = await exchange.fetchTicker(symbol);
+        const balance = await exchange.fetchBalance();
+        const available = balance.free.USDT;
 
-        await exchange.setLeverage(info.maxLeverage, symbol);
+        let marginToUse = botSettings.invValue.toString().includes('%') 
+            ? (available * parseFloat(botSettings.invValue) / 100) 
+            : parseFloat(botSettings.invValue);
+
+        const leverage = 20; // Có thể lấy động từ exchangeInfo nếu muốn
+        let qty = (marginToUse * leverage) / ticker.last;
+        const finalQty = exchange.amountToPrecision(symbol, qty);
+
+        await exchange.setLeverage(leverage, symbol);
         
-        // Đặt lệnh Market Open
-        const order = await exchange.createOrder(symbol, 'market', 'sell', qtyNum, undefined, { positionSide: 'SHORT' });
+        const order = await exchange.createOrder(symbol, 'market', 'sell', finalQty, undefined, { positionSide: 'SHORT' });
 
         if (order) {
-            addBotLog(`🚀 [${symbol}] Khớp ${isDCA ? 'DCA' : 'OPEN'}. Đang đồng bộ...`);
-            await new Promise(r => setTimeout(r, 3000)); 
+            addBotLog(`🚀 [${symbol}] Khớp ${isDCA ? 'DCA' : 'OPEN'}. Đang sync...`);
+            await new Promise(r => setTimeout(r, 3500)); 
 
             const positions = await exchange.fetchPositions([symbol]);
             const upPos = positions.find(p => p.symbol === symbol && p.side === 'short');
             
             if (upPos && upPos.contracts > 0) {
-                const finalEntry = upPos.entryPrice;
-                const finalQty = upPos.contracts;
-
-                const sync = await syncTPSL(symbol, 'SHORT', finalEntry, info);
-                
+                const sync = await syncTPSL(symbol, 'SHORT', upPos.entryPrice);
                 botActivePositions.set(posKey, { 
-                    symbol, side: 'SHORT', entryPrice: finalEntry, qty: finalQty, tp: sync.tp, sl: sync.sl, 
-                    margin: (finalQty * finalEntry / info.maxLeverage), firstMargin, dcaCount: currentDCA, 
-                    isProcessing: false,
-                    hedgeOpened: false
+                    symbol, side: 'SHORT', entryPrice: upPos.entryPrice, qty: upPos.contracts, 
+                    tp: sync.tp, sl: sync.sl, dcaCount: isDCA ? (currentPos.dcaCount + 1) : 0, 
+                    isProcessing: false, firstMargin: isDCA ? currentPos.firstMargin : marginToUse
                 });
             }
         }
     } catch (e) {
-        addBotLog(`🚨 [${symbol}] LỖI: ${e.message}`, "error");
+        addBotLog(`🚨 [${symbol}] Lỗi hệ thống: ${e.message}`, "error");
     } finally {
         openingSymbols.delete(symbol);
     }
 }
 
 /**
- * 4. THEO DÕI PNL (CCXT)
+ * 5. LOOP THEO DÕI GIÁ & ĐÓNG LỆNH
  */
-async function trackClosedPnL(symbol, lastBotPos) {
-    try {
-        await new Promise(r => setTimeout(r, 5000));
-        const trades = await exchange.fetchMyTrades(symbol, undefined, 5);
-        const relevantTrades = trades.filter(t => t.info.positionSide === lastBotPos.side);
-        
-        // Lấy PnL từ trade cuối cùng
-        const lastTrade = relevantTrades[relevantTrades.length - 1];
-        const pnl = parseFloat(lastTrade.info.realizedPnl || 0);
-        
-        status.botClosedCount++; 
-        status.botPnLClosed += pnl;
-        addBotLog(`✅ CHỐT ${symbol} | PnL net: ${pnl.toFixed(2)}$`, "success");
-    } catch (e) {
-        addBotLog(`⚠️ Không lấy được PnL chốt cho ${symbol}`);
-    }
-}
-
 async function priceMonitorLoop() {
-    if (!status.isReady) { setTimeout(priceMonitorLoop, 1000); return; }
+    if (!status.isReady) return setTimeout(priceMonitorLoop, 1000);
     try {
         const positions = await exchange.fetchPositions();
         const now = Date.now();
@@ -211,18 +170,25 @@ async function priceMonitorLoop() {
             
             if (!realPos || realPos.contracts === 0) {
                 status.blackList[botPos.symbol] = now + (15 * 60 * 1000);
-                trackClosedPnL(botPos.symbol, botPos); 
+                // Track PnL đơn giản từ realPos nếu có hỗ trợ
+                const pnl = realPos ? realPos.info.realizedPnl : 0;
+                status.botClosedCount++;
+                status.botPnLClosed += parseFloat(pnl || 0);
+                addBotLog(`✅ CHỐT ${botPos.symbol}`, "success");
                 botActivePositions.delete(key);
             } else {
                 botPos.markPrice = realPos.markPrice; 
                 botPos.pnl = realPos.unrealizedPnl;
-                botPos.priceDev = ((botPos.markPrice - botPos.entryPrice) / botPos.entryPrice) * 100;
+                botPos.priceDev = ((realPos.markPrice - botPos.entryPrice) / botPos.entryPrice) * 100;
             }
         }
     } catch (e) {}
     setTimeout(priceMonitorLoop, 2000);
 }
 
+/**
+ * 6. VÒNG LẶP CHÍNH (QUÉT KÈO & DCA)
+ */
 async function mainLoop() {
     if (!status.isReady || !botSettings.isRunning) return;
     try {
@@ -231,18 +197,14 @@ async function mainLoop() {
 
         for (let [key, botPos] of botActivePositions) {
             if (botPos.isProcessing) continue; 
-            const realPos = activeShorts.find(p => p.symbol === botPos.symbol);
-            if (!realPos) continue;
-
             if (botPos.priceDev >= botSettings.dcaStep && botPos.dcaCount < botSettings.maxDCA) { 
                 await openPosition(botPos.symbol, true); 
             }
         }
 
-        // Mở vị thế mới
         if (activeShorts.length < botSettings.maxPositions && openingSymbols.size === 0) {
             const keo = status.candidatesList.find(c => {
-                const info = status.exchangeInfo[c.symbol];
+                const info = exchange.market(c.symbol);
                 const hasVol = [c.c1, c.c5].some(v => Math.abs(parseFloat(v)) >= parseFloat(botSettings.minVol));
                 return info && (status.blackList[c.symbol] || 0) < Date.now() && !activeShorts.some(p => p.symbol === c.symbol) && hasVol;
             });
@@ -251,32 +213,17 @@ async function mainLoop() {
     } catch (e) {}
 }
 
+/**
+ * 7. KHỞI TẠO & EXPRESS
+ */
 async function init() {
     try {
-        addBotLog("🔄 Đang khởi tạo hệ thống CCXT...");
         await exchange.loadMarkets();
-        
-        // Lấy thông tin đòn bẩy và bước giá
-        const markets = exchange.markets;
-        const tempInfo = {};
-        for (const symbol in markets) {
-            const m = markets[symbol];
-            if (m.linear) {
-                tempInfo[symbol] = {
-                    quantityPrecision: m.precision.amount,
-                    pricePrecision: m.precision.price,
-                    stepSize: m.limits.amount.min,
-                    maxLeverage: 20 // Mặc định hoặc fetch từ fetchLeverageBrackets nếu cần
-                };
-            }
-        }
-        
-        status.exchangeInfo = tempInfo; 
         status.isReady = true;
-        addBotLog("👿 LUFFY CCXT READY", "success"); 
+        addBotLog("👿 LUFFY CCXT ENGINE READY", "success"); 
         priceMonitorLoop();
     } catch (e) { 
-        addBotLog("❌ Init lỗi: " + e.message);
+        addBotLog("❌ Lỗi khởi tạo: " + e.message);
         setTimeout(init, 5000); 
     }
 }
@@ -284,7 +231,7 @@ async function init() {
 init(); 
 setInterval(mainLoop, 3000);
 
-// Giữ nguyên phần Express và API CANDIDATES
+// Fetch Candidates từ Bot Data
 setInterval(() => {
     http.get('http://127.0.0.1:9000/api/data', res => {
         let d = ''; res.on('data', c => d += c);
@@ -303,8 +250,8 @@ APP.get('/api/status', async (req, res) => {
             activePositions: Array.from(botActivePositions.values()), 
             status: { ...status, blackList: bl },
             wallet: { 
-                totalWalletBalance: balance.total.USDT, 
-                availableBalance: balance.free.USDT 
+                totalWalletBalance: balance.total.USDT.toFixed(2), 
+                availableBalance: balance.free.USDT.toFixed(2) 
             } 
         });
     } catch (e) { res.json({ status }); }
