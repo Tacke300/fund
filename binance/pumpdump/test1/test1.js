@@ -7,7 +7,6 @@ const MAX_HOLD_MINUTES = 555555;
 import WebSocket from 'ws';
 import express from 'express';
 import fs from 'fs';
-import fetch from 'node-fetch'; // Thêm fetch để lấy data API
 import { API_KEY, SECRET_KEY } from './config.js';
 
 const app = express();
@@ -27,40 +26,6 @@ async function processQueue() {
     setTimeout(processQueue, 350); 
 }
 setInterval(processQueue, 50);
-
-// --- TÍNH NĂNG MỚI 1: BOOTSTRAP (LẤY DỮ LIỆU MỒI) ---
-async function bootstrapData() {
-    console.log("LOG: [BOOTSTRAP] Đang nạp nến 1m từ Binance...");
-    try {
-        const res = await fetch('https://fapi.binance.com/fapi/v1/ticker/price');
-        const tickers = await res.json();
-        // Lấy top 100 cặp USDT để mồi dữ liệu
-        const usdtPairs = tickers.filter(t => t.symbol.endsWith('USDT')).slice(0, 100); 
-        for (let t of usdtPairs) {
-            const kRes = await fetch(`https://fapi.binance.com/fapi/v1/klines?symbol=${t.symbol}&interval=1m&limit=30`);
-            const kData = await kRes.json();
-            if(!coinData[t.symbol]) coinData[t.symbol] = { symbol: t.symbol, prices: [] };
-            coinData[t.symbol].prices = kData.map(k => ({ p: parseFloat(k[4]), t: parseInt(k[0]) }));
-        }
-        console.log("LOG: [BOOTSTRAP] Đã nạp xong nến mồi.");
-    } catch (e) { console.log("LOG: [BOOTSTRAP] Lỗi: " + e.message); }
-}
-
-// --- TÍNH NĂNG MỚI 2: FALLBACK API (CHỐNG LAG WS) ---
-async function fallbackAPI() {
-    try {
-        const res = await fetch('https://fapi.binance.com/fapi/v1/ticker/price');
-        const data = await res.json();
-        const now = Date.now();
-        data.forEach(t => { 
-            if(t.symbol.endsWith('USDT')) {
-                // Tận dụng hàm updatePriceLogic (tách ra từ WS bên dưới)
-                handlePriceUpdate(t.symbol, parseFloat(t.price), now);
-            }
-        });
-    } catch (e) {}
-    setTimeout(fallbackAPI, 3000); // 3 giây check 1 lần
-}
 
 function fPrice(p) {
     if (!p || p === 0) return "0.0000";
@@ -86,77 +51,68 @@ function calculateChange(pArr, min) {
     return parseFloat((((pArr[pArr.length - 1].p - start.p) / start.p) * 100).toFixed(2));
 }
 
-// Tách logic xử lý giá ra để dùng chung cho cả WS và API
-function handlePriceUpdate(s, p, now) {
-    if (!coinData[s]) coinData[s] = { symbol: s, prices: [] };
-    coinData[s].prices.push({ p, t: now });
-    if (coinData[s].prices.length > 1000) coinData[s].prices.shift(); // Tăng limit để chứa đủ data nến mồi
-
-    const c1 = calculateChange(coinData[s].prices, 1), 
-          c5 = calculateChange(coinData[s].prices, 5), 
-          c15 = calculateChange(coinData[s].prices, 15);
-    coinData[s].live = { c1, c5, c15, currentPrice: p };
-    
-    const pending = Array.from(historyMap.values()).find(h => h.symbol === s && h.status === 'PENDING');
-    if (pending) {
-        const diffAvg = ((p - pending.avgPrice) / pending.avgPrice) * 100;
-        const currentRoi = (pending.type === 'LONG' ? diffAvg : -diffAvg) * (pending.maxLev || 20);
-        
-        if (!pending.maxNegativeRoi || currentRoi < pending.maxNegativeRoi) { 
-            pending.maxNegativeRoi = currentRoi;
-            pending.maxNegativeTime = now;
-        }
-
-        const win = pending.type === 'LONG' ? diffAvg >= pending.tpTarget : diffAvg <= -pending.tpTarget; 
-        const isTimeout = (now - pending.startTime) >= (MAX_HOLD_MINUTES * 60000);
-        if (win || isTimeout) {
-            pending.status = win ? 'WIN' : 'TIMEOUT'; 
-            pending.finalPrice = p; pending.endTime = now;
-            pending.pnlPercent = (pending.type === 'LONG' ? diffAvg : -diffAvg);
-            lastTradeClosed[s] = now; 
-            fs.writeFileSync(HISTORY_FILE, JSON.stringify(Array.from(historyMap.values()))); 
-            return;
-        }
-
-        const totalDiffFromEntry = ((p - pending.snapPrice) / pending.snapPrice) * 100;
-        const nextDcaThreshold = (pending.dcaCount + 1) * pending.slTarget;
-        const triggerDCA = pending.type === 'LONG' ? totalDiffFromEntry <= -nextDcaThreshold : totalDiffFromEntry >= nextDcaThreshold;
-        
-        if (triggerDCA && !actionQueue.find(q => q.id === s)) {
-            actionQueue.push({ id: s, priority: 1, action: () => {
-                const newCount = pending.dcaCount + 1;
-                const newAvg = ((pending.avgPrice * (pending.dcaCount + 1)) + p) / (newCount + 1);
-                pending.dcaHistory.push({ t: Date.now(), p: p, avg: newAvg });
-                setTimeout(() => { pending.avgPrice = newAvg; pending.dcaCount = newCount; }, 200); 
-            }});
-        }
-    } else if (Math.max(Math.abs(c1), Math.abs(c5), Math.abs(c15)) >= currentMinVol && !(lastTradeClosed[s] && (now - lastTradeClosed[s] < COOLDOWN_MINUTES * 60000))) {
-        if (!actionQueue.find(q => q.id === s)) {
-            actionQueue.push({ id: s, priority: 2, action: () => {
-                const sumVol = c1 + c5 + c15;
-                let type = (tradeMode === 'REVERSE') ? (sumVol >= 0 ? 'SHORT' : 'LONG') : (sumVol >= 0 ? 'LONG' : 'SHORT');
-                if (tradeMode === 'LONG_ONLY') type = 'LONG';
-                if (tradeMode === 'SHORT_ONLY') type = 'SHORT';
-                historyMap.set(`${s}_${now}`, { symbol: s, startTime: Date.now(), snapPrice: p, avgPrice: p, type: type, status: 'PENDING', maxLev: symbolMaxLeverage[s] || 20, tpTarget: currentTP, slTarget: currentSL, snapVol: { c1, c5, c15 }, maxNegativeRoi: 0, maxNegativeTime: null, dcaCount: 0, dcaHistory: [{ t: Date.now(), p: p, avg: p }] });
-            }});
-        }
-    }
-}
-
 function initWS() {
-    // Chuyển sang !miniTicker@arr để tiết kiệm băng thông giống bản 9000
-    const ws = new WebSocket('wss://fstream.binance.com/ws/!miniTicker@arr');
+    const ws = new WebSocket('wss://fstream.binance.com/ws/!ticker@arr');
     ws.on('message', (data) => {
         const tickers = JSON.parse(data);
         const now = Date.now();
         tickers.forEach(t => {
-            handlePriceUpdate(t.s, parseFloat(t.c), now);
+            const s = t.s, p = parseFloat(t.c);
+            if (!coinData[s]) coinData[s] = { symbol: s, prices: [] };
+            coinData[s].prices.push({ p, t: now });
+            if (coinData[s].prices.length > 300) coinData[s].prices.shift();
+            const c1 = calculateChange(coinData[s].prices, 1), c5 = calculateChange(coinData[s].prices, 5), c15 = calculateChange(coinData[s].prices, 15);
+            coinData[s].live = { c1, c5, c15, currentPrice: p };
+            
+            const pending = Array.from(historyMap.values()).find(h => h.symbol === s && h.status === 'PENDING');
+            if (pending) {
+                const diffAvg = ((p - pending.avgPrice) / pending.avgPrice) * 100;
+                const currentRoi = (pending.type === 'LONG' ? diffAvg : -diffAvg) * (pending.maxLev || 20);
+                
+                if (!pending.maxNegativeRoi || currentRoi < pending.maxNegativeRoi) { 
+                    pending.maxNegativeRoi = currentRoi;
+                    pending.maxNegativeTime = now;
+                }
+
+                const win = pending.type === 'LONG' ? diffAvg >= pending.tpTarget : diffAvg <= -pending.tpTarget; 
+                const isTimeout = (now - pending.startTime) >= (MAX_HOLD_MINUTES * 60000);
+                if (win || isTimeout) {
+                    pending.status = win ? 'WIN' : 'TIMEOUT'; 
+                    pending.finalPrice = p; pending.endTime = now;
+                    pending.pnlPercent = (pending.type === 'LONG' ? diffAvg : -diffAvg);
+                    lastTradeClosed[s] = now; 
+                    fs.writeFileSync(HISTORY_FILE, JSON.stringify(Array.from(historyMap.values()))); 
+                    return;
+                }
+
+                const totalDiffFromEntry = ((p - pending.snapPrice) / pending.snapPrice) * 100;
+                const nextDcaThreshold = (pending.dcaCount + 1) * pending.slTarget;
+                const triggerDCA = pending.type === 'LONG' ? totalDiffFromEntry <= -nextDcaThreshold : totalDiffFromEntry >= nextDcaThreshold;
+                
+                if (triggerDCA && !actionQueue.find(q => q.id === s)) {
+                    actionQueue.push({ id: s, priority: 1, action: () => {
+                        const newCount = pending.dcaCount + 1;
+                        const newAvg = ((pending.avgPrice * (pending.dcaCount + 1)) + p) / (newCount + 1);
+                        pending.dcaHistory.push({ t: Date.now(), p: p, avg: newAvg });
+                        setTimeout(() => { pending.avgPrice = newAvg; pending.dcaCount = newCount; }, 200); 
+                    }});
+                }
+            } else if (Math.max(Math.abs(c1), Math.abs(c5), Math.abs(c15)) >= currentMinVol && !(lastTradeClosed[s] && (now - lastTradeClosed[s] < COOLDOWN_MINUTES * 60000))) {
+                if (!actionQueue.find(q => q.id === s)) {
+                    actionQueue.push({ id: s, priority: 2, action: () => {
+                        const sumVol = c1 + c5 + c15;
+                        let type = (tradeMode === 'REVERSE') ? (sumVol >= 0 ? 'SHORT' : 'LONG') : (sumVol >= 0 ? 'LONG' : 'SHORT');
+                        if (tradeMode === 'LONG_ONLY') type = 'LONG';
+                        if (tradeMode === 'SHORT_ONLY') type = 'SHORT';
+                        historyMap.set(`${s}_${now}`, { symbol: s, startTime: Date.now(), snapPrice: p, avgPrice: p, type: type, status: 'PENDING', maxLev: symbolMaxLeverage[s] || 20, tpTarget: currentTP, slTarget: currentSL, snapVol: { c1, c5, c15 }, maxNegativeRoi: 0, maxNegativeTime: null, dcaCount: 0, dcaHistory: [{ t: Date.now(), p: p, avg: p }] });
+                    }});
+                }
+            }
         });
     });
     ws.on('close', () => setTimeout(initWS, 5000));
 }
 
-// --- GIỮ NGUYÊN TOÀN BỘ PHẦN API VÀ GUI CỦA BẠN BÊN DƯỚI ---
 app.get('/api/config', (req, res) => {
     currentTP = parseFloat(req.query.tp); currentSL = parseFloat(req.query.sl); currentMinVol = parseFloat(req.query.vol); tradeMode = req.query.mode || 'FOLLOW';
     res.sendStatus(200);
@@ -165,7 +121,7 @@ app.get('/api/config', (req, res) => {
 app.get('/api/data', (req, res) => {
     const all = Array.from(historyMap.values());
     res.json({ 
-        allPrices: Object.fromEntries(Object.entries(coinData).filter(([s,v])=>v.live).map(([s, v]) => [s, v.live.currentPrice])),
+        allPrices: Object.fromEntries(Object.entries(coinData).map(([s, v]) => [s, v.live.currentPrice])),
         live: Object.entries(coinData).filter(([_, v]) => v.live).map(([s, v]) => ({ symbol: s, ...v.live })).sort((a,b) => Math.abs(b.c1) - Math.abs(a.c1)), 
         pending: all.filter(h => h.status === 'PENDING').sort((a,b)=>b.startTime-a.startTime),
         history: all.filter(h => h.status !== 'PENDING').sort((a,b)=>b.endTime-a.endTime)
@@ -173,7 +129,6 @@ app.get('/api/data', (req, res) => {
 });
 
 app.get('/gui', (req, res) => {
-    // ... Phần mã HTML GUI của bạn (Giữ nguyên không đổi 1 chữ nào) ...
     res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Binance Luffy Pro</title>
     <script src="https://cdn.tailwindcss.com"></script>
@@ -323,10 +278,4 @@ app.get('/gui', (req, res) => {
     </script></body></html>`);
 });
 
-app.listen(PORT, '0.0.0.0', async () => { 
-    // Chạy các tác vụ mới trước khi mở server
-    await bootstrapData(); 
-    initWS(); 
-    fallbackAPI();
-    console.log(`Bot running: http://localhost:${PORT}/gui`); 
-});
+app.listen(PORT, '0.0.0.0', () => { initWS(); console.log(`Bot running: http://localhost:${PORT}/gui`); });
