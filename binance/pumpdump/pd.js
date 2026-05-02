@@ -46,18 +46,22 @@ async function binancePrivate(endpoint, method = 'GET', data = {}) {
     }
 }
 
-// 1. DỌN SÀN TRƯỚC KHI ĐẶT LỆNH MỚI (CHỐNG 4130)
-async function clearAndVerify(symbol, side) {
+// 1. DỌN SÀN TRƯỚC KHI ĐẶT LỆNH MỚI
+async function clearAndVerify(symbol) {
     try {
-        addBotLog(`🧹 [${symbol}] Đang dọn lệnh cũ...`);
-        // Xóa tất cả lệnh của symbol này cho chắc
+        addBotLog(`🧹 [${symbol}] Đang dọn dẹp lệnh chờ cũ...`);
+        // Xóa tất cả lệnh treo của symbol này
         await binancePrivate('/fapi/v1/allOpenOrders', 'DELETE', { symbol });
-        await new Promise(r => setTimeout(r, 1000));
+        // Chờ 1.5 giây để server Binance cập nhật trạng thái "sạch"
+        await new Promise(r => setTimeout(r, 1500));
         return true;
-    } catch (e) { return true; }
+    } catch (e) { 
+        // Nếu lỗi do không có lệnh nào để xóa thì vẫn tiếp tục
+        return true; 
+    }
 }
 
-// 2. SYNC TP/SL - TRẢ VỀ ĐÚNG ĐỊNH DẠNG ĐỂ GÁN VÀO BOTPOS
+// 2. SYNC TP/SL - ĐÃ FIX DELAY CHỐNG RACE CONDITION
 async function syncTPSL(symbol, side, entry, info) {
     const isShort = (side === 'SHORT');
     const tpPrice = (entry * (isShort ? (1 - botSettings.posTP / 100) : (1 + botSettings.posTP / 100))).toFixed(info.pricePrecision);
@@ -65,17 +69,23 @@ async function syncTPSL(symbol, side, entry, info) {
     const sideClose = isShort ? 'buy' : 'sell';
 
     try {
-        await clearAndVerify(symbol, side);
+        // Thực hiện dọn dẹp
+        await clearAndVerify(symbol);
 
+        // Đặt TP
         await exchange.createOrder(symbol, 'TAKE_PROFIT_MARKET', sideClose, undefined, undefined, { 
             positionSide: side, stopPrice: tpPrice, closePosition: true 
         });
-        await new Promise(r => setTimeout(r, 500));
+        
+        // Nghỉ ngắn giữa 2 lệnh để tránh rate limit
+        await new Promise(r => setTimeout(r, 800));
+
+        // Đặt SL
         await exchange.createOrder(symbol, 'STOP_MARKET', sideClose, undefined, undefined, { 
             positionSide: side, stopPrice: slPrice, closePosition: true 
         });
 
-        addBotLog(`✨ [${symbol}] Đã cài TP:${tpPrice} SL:${slPrice}`, "success");
+        addBotLog(`✨ [${symbol}] TP:${tpPrice} SL:${slPrice} (Cập nhật thành công)`, "success");
         return { tp: parseFloat(tpPrice), sl: parseFloat(slPrice) };
     } catch (e) {
         addBotLog(`❌ [${symbol}] Lỗi đặt TP/SL: ${e.message}`, "error");
@@ -83,7 +93,6 @@ async function syncTPSL(symbol, side, entry, info) {
     }
 }
 
-// 3. MỞ VỊ THẾ - FIX LẠI ĐOẠN GÁN DỮ LIỆU VÀO MAP
 async function openPosition(symbol, isDCA = false) {
     const posKey = `${symbol}_SHORT`;
     if (!isDCA && (botActivePositions.has(posKey) || openingSymbols.has(symbol))) return;
@@ -100,7 +109,7 @@ async function openPosition(symbol, isDCA = false) {
         if (isDCA && currentPos) {
             currentPos.isProcessing = true;
             firstMargin = currentPos.firstMargin;
-            marginToUse = firstMargin * 1.05; // Tăng margin DCA chút
+            marginToUse = firstMargin * 1.05; 
             currentDCA = currentPos.dcaCount + 1;
         } else {
             const acc = await binancePrivate('/fapi/v2/account');
@@ -129,7 +138,6 @@ async function openPosition(symbol, isDCA = false) {
 
                 const sync = await syncTPSL(symbol, 'SHORT', finalEntry, info);
                 
-                // CẬP NHẬT LẠI MAP VỚI ĐỦ CÁC BIẾN ĐỂ priceMonitorLoop KHÔNG LỖI
                 botActivePositions.set(posKey, { 
                     symbol, side: 'SHORT', 
                     entryPrice: finalEntry, 
@@ -153,7 +161,6 @@ async function openPosition(symbol, isDCA = false) {
     }
 }
 
-// GIỮ NGUYÊN CÁC HÀM CÒN LẠI CỦA M... (trackClosedPnL, priceMonitorLoop, mainLoop, init, v.v.)
 async function trackClosedPnL(symbol, closedTime, lastBotPos) {
     try {
         await new Promise(r => setTimeout(r, 4000));
