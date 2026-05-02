@@ -114,7 +114,10 @@ function initWS() {
 }
 
 app.get('/api/config', (req, res) => {
-    currentTP = parseFloat(req.query.tp); currentSL = parseFloat(req.query.sl); currentMinVol = parseFloat(req.query.vol); tradeMode = req.query.mode || 'FOLLOW';
+    currentTP = parseFloat(req.query.tp); 
+    currentSL = parseFloat(req.query.sl); 
+    currentMinVol = parseFloat(req.query.vol); 
+    tradeMode = req.query.mode || 'FOLLOW';
     res.sendStatus(200);
 });
 
@@ -161,7 +164,12 @@ app.get('/gui', (req, res) => {
 
         <div id="active" class="hidden flex justify-between items-center mb-4">
             <div class="font-bold italic text-white text-xl tracking-tighter">BINANCE <span class="text-[#fcd535]">LUFFY PRO</span></div>
-            <div class="text-right text-[10px] uppercase font-bold text-green-500">WIN: <span id="winCount">0</span> | PNL: <span id="winPnl">0.00</span></div>
+            <div class="text-right text-[10px] uppercase font-bold text-gray-custom">
+                PENDING: <span id="pendingCount" class="text-white">0</span> | 
+                WIN: <span id="winCount" class="text-green-500">0</span> | 
+                LOSE: <span id="loseCount" class="text-red-500">0</span> | 
+                PNL: <span id="winPnl" class="text-green-500">0.00</span>
+            </div>
             <div class="text-[#fcd535] font-black italic text-sm border border-[#fcd535] px-2 py-1 rounded cursor-pointer" onclick="stop()">STOP ENGINE</div>
         </div>
 
@@ -196,33 +204,57 @@ app.get('/gui', (req, res) => {
     </div></div>
 
     <script>
-    let running = false, initialBal = 1000, myChart = null;
+    let running = false, myChart = null;
     const saved = JSON.parse(localStorage.getItem('luffy_state') || '{}');
+    
+    // Nạp cấu hình từ localStorage nếu có
+    if (saved.initialBal) document.getElementById('balanceInp').value = saved.initialBal;
+    if (saved.marginVal) document.getElementById('marginInp').value = saved.marginVal;
+    if (saved.tp) document.getElementById('tpInp').value = saved.tp;
+    if (saved.sl) document.getElementById('slInp').value = saved.sl;
+    if (saved.vol) document.getElementById('volInp').value = saved.vol;
+    if (saved.mode) document.getElementById('modeInp').value = saved.mode;
+
     if(saved.running) {
-        running = true; initialBal = saved.initialBal;
-        document.getElementById('balanceInp').value = saved.initialBal;
-        document.getElementById('marginInp').value = saved.marginVal;
-        document.getElementById('tpInp').value = saved.tp;
-        document.getElementById('slInp').value = saved.sl;
-        document.getElementById('volInp').value = saved.vol;
-        document.getElementById('modeInp').value = saved.mode;
-        document.getElementById('setup').classList.add('hidden'); document.getElementById('active').classList.remove('hidden');
+        running = true;
+        document.getElementById('setup').classList.add('hidden'); 
+        document.getElementById('active').classList.remove('hidden');
+        // Gửi cấu hình xuống Backend khi khởi động
         fetch(\`/api/config?tp=\${saved.tp}&sl=\${saved.sl}&vol=\${saved.vol}&mode=\${saved.mode}\`);
     }
 
     function start() {
-        const state = { running: true, initialBal: parseFloat(document.getElementById('balanceInp').value), marginVal: document.getElementById('marginInp').value, tp: document.getElementById('tpInp').value, sl: document.getElementById('slInp').value, vol: document.getElementById('volInp').value, mode: document.getElementById('modeInp').value };
-        localStorage.setItem('luffy_state', JSON.stringify(state)); location.reload();
+        const state = { 
+            running: true, 
+            initialBal: parseFloat(document.getElementById('balanceInp').value) || 1000, 
+            marginVal: document.getElementById('marginInp').value || "10%", 
+            tp: document.getElementById('tpInp').value || 0.5, 
+            sl: document.getElementById('slInp').value || 10.0, 
+            vol: document.getElementById('volInp').value || 6.5, 
+            mode: document.getElementById('modeInp').value || 'FOLLOW' 
+        };
+        localStorage.setItem('luffy_state', JSON.stringify(state)); 
+        location.reload();
     }
-    function stop() { let s = JSON.parse(localStorage.getItem('luffy_state')); s.running = false; localStorage.setItem('luffy_state', JSON.stringify(s)); location.reload(); }
+    
+    function stop() { 
+        let s = JSON.parse(localStorage.getItem('luffy_state') || '{}'); 
+        s.running = false; 
+        localStorage.setItem('luffy_state', JSON.stringify(s)); 
+        location.reload(); 
+    }
+
     function fPrice(p) { if (!p || p === 0) return "0.0000"; let s = p.toFixed(20); let match = s.match(/^-?\\d+\\.0*[1-9]/); if (!match) return p.toFixed(4); let index = match[0].length; return parseFloat(p).toFixed(index - match[0].indexOf('.') + 3); }
 
     async function update() {
         try {
-            const res = await fetch('/api/data'); const d = await res.json();
+            const res = await fetch('/api/data'); 
+            const d = await res.json();
             const state = JSON.parse(localStorage.getItem('luffy_state') || '{}');
+            
             let mVal = state.marginVal || "10%", mNum = parseFloat(mVal);
-            let runningBal = state.initialBal || 0, unPnlTotal = 0, usedMarginTotal = 0, countWin = 0, sumWinPnl = 0;
+            let runningBal = state.initialBal || 0, unPnlTotal = 0, usedMarginTotal = 0;
+            let countWin = 0, countLose = 0, sumWinPnl = 0;
             let chartLabels = ['Start'], chartData = [runningBal];
 
             let histHTML = [...d.history].reverse().map((h, idx) => {
@@ -232,12 +264,12 @@ app.get('/gui', (req, res) => {
                 
                 let sv = h.snapVol || {c1:0, c5:0, c15:0};
                 let snapStr = \`<div class="text-[7px] text-gray-500 mt-0.5">V: \${sv.c1}/\${sv.c5}/\${sv.c15}</div>\`;
-
                 let maxNegPnl = (totalMargin * (h.maxLev || 20) * (h.maxNegativeRoi / 100)) / (h.maxLev || 20);
 
-                runningBal += pnl; if(pnl > 0) { countWin++; sumWinPnl += pnl; }
-                chartLabels.push(""); chartData.push(runningBal);
+                runningBal += pnl; 
+                if(pnl > 0) { countWin++; sumWinPnl += pnl; } else { countLose++; }
                 
+                chartLabels.push(""); chartData.push(runningBal);
                 let maxDDContent = \`<span class="down font-bold">\${h.maxNegativeRoi.toFixed(1)}%</span><br><span class="text-[7px] text-gray-500">\${maxNegPnl.toFixed(1)}$ | \${h.maxNegativeTime ? new Date(h.maxNegativeTime).toLocaleTimeString([],{hour12:false}) : '--'}</span>\`;
 
                 return \`<tr class="border-b border-zinc-800/30 \${h.dcaCount >= 5 ? 'recovery-row' : ''}"><td>\${d.history.length - idx}</td><td class="py-2 text-[7px]">\${new Date(h.startTime).toLocaleTimeString([],{hour12:false})}<br>\${new Date(h.endTime).toLocaleTimeString([],{hour12:false})}</td><td><b class="text-white">\${h.symbol}</b> <br> <span class="\${h.type==='LONG'?'up':'down'} font-bold">\${h.type}</span>\${snapStr}</td><td class="text-yellow-500 font-bold">\${h.dcaCount}</td><td>\${totalMargin.toFixed(1)}</td><td class="text-center text-[7px] text-yellow-500/70">\${h.maxLev}x</td><td>\${fPrice(h.snapPrice)}<br>\${fPrice(h.finalPrice)}</td><td class="text-yellow-500 font-bold">\${fPrice(h.avgPrice)}</td><td class="text-center">\${maxDDContent}</td><td class="\${pnl>=0?'up':'down'} font-bold">\${pnl.toFixed(2)}</td><td class="text-right text-white">\${runningBal.toFixed(1)}</td></tr>\`;
@@ -256,25 +288,35 @@ app.get('/gui', (req, res) => {
                 return \`<tr class="bg-white/5 border-b border-zinc-800 \${h.dcaCount >= 5 ? 'recovery-row' : ''}"><td>\${idx+1}</td><td class="text-[8px]">\${new Date(h.startTime).toLocaleTimeString([],{hour12:false})}</td><td class="text-white font-bold">\${h.symbol} <span class="text-[8px] px-1 \${h.type==='LONG'?'bg-green-600':'bg-red-600'} rounded">\${h.type}</span>\${snapStr}</td><td class="text-yellow-500 font-bold">\${h.dcaCount}</td><td>\${totalM.toFixed(1)}</td><td class="text-center text-[7px] text-yellow-500/70">\${h.maxLev}x</td><td>\${fPrice(h.snapPrice)}<br><b class="text-green-400">\${fPrice(lp)}</b></td><td class="text-yellow-500 font-bold">\${fPrice(h.avgPrice)}</td><td class="text-right font-bold \${pnl>=0?'up':'down'}">\${pnl.toFixed(2)}<br>\${roi.toFixed(1)}%</td></tr>\`;
             }).join('');
 
+            // Cập nhật giao diện
             let avail = runningBal - usedMarginTotal + (unPnlTotal < 0 ? unPnlTotal : 0);
             document.getElementById('displayBal').innerText = (runningBal + unPnlTotal).toFixed(2);
             document.getElementById('displayAvail').innerText = avail.toFixed(2);
+            
+            document.getElementById('pendingCount').innerText = d.pending.length;
             document.getElementById('winCount').innerText = countWin;
+            document.getElementById('loseCount').innerText = countLose;
             document.getElementById('winPnl').innerText = sumWinPnl.toFixed(2);
+            
             document.getElementById('unPnl').innerText = unPnlTotal.toFixed(2);
             document.getElementById('unPnl').className = 'text-xl font-bold ' + (unPnlTotal >= 0 ? 'up' : 'down');
+            
             document.getElementById('historyBody').innerHTML = histHTML;
             document.getElementById('pendingBody').innerHTML = pendingHTML;
 
             const msg = document.getElementById('noAvailMsg');
-            if(avail <= 0 && d.pending.length > 0) { if(msg.classList.contains('hidden')) { msg.classList.remove('hidden'); document.getElementById('outTime').innerText = new Date().toLocaleTimeString(); } } else { msg.classList.add('hidden'); }
+            if(avail <= 0 && d.pending.length > 0) { 
+                if(msg.classList.contains('hidden')) { msg.classList.remove('hidden'); document.getElementById('outTime').innerText = new Date().toLocaleTimeString(); } 
+            } else { msg.classList.add('hidden'); }
+            
             if(myChart) { myChart.data.labels = chartLabels; myChart.data.datasets[0].data = chartData; myChart.update('none'); }
         } catch(e) { console.error(e); }
     }
 
     const ctx = document.getElementById('balanceChart').getContext('2d');
     myChart = new Chart(ctx, { type: 'line', data: { labels: [], datasets: [{ data: [], borderColor: '#fcd535', borderWidth: 2, pointRadius: 0, fill: true, backgroundColor: 'rgba(252, 213, 53, 0.05)' }] }, options: { maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { display: false }, y: { grid: { color: '#30363d' } } } } });
-    setInterval(update, 1000);
+    
+    if(running) setInterval(update, 1000);
     </script></body></html>`);
 });
 
