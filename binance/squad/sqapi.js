@@ -231,7 +231,7 @@ const BANK = {
 let state = {
     isRunning: false,
     postsToday: 0,
-    stats: { m1: 0, m5: 0, day: 0, vol: 0 },
+    stats: { biendong: 0, day: 0, vol: 0 },
     lastPostTime: 0,
     lastVolPost: 0,
     postedSymbols: new Set(),
@@ -245,23 +245,21 @@ const addLog = (m) => {
     if (state.logs.length > 50) state.logs.pop();
 };
 
-addLog("🚀 HỆ THỐNG KHỞI ĐỘNG. Đang ở chế độ CHỜ. Vui lòng nhấn START để chạy.");
-
 async function post(symbol, reason, typeKey) {
     if (!state.isRunning) return;
     if (state.postsToday >= SETTINGS.MAX_POSTS_PER_DAY) {
-        addLog(`⚠️ Đã chạm mốc ${SETTINGS.MAX_POSTS_PER_DAY} bài/ngày. Hệ thống tạm dừng đăng.`);
+        addLog(`⚠️ Đạt giới hạn 100 bài/ngày. Ngưng đăng.`);
         return;
     }
     if (state.postedSymbols.has(symbol)) return;
 
     const now = Date.now();
     if (now - state.lastPostTime < SETTINGS.MIN_GAP) {
-        addLog(`⏳ Đang đợi giãn cách bài đăng cho ${symbol}...`);
+        addLog(`⏳ Đang chờ giãn cách 60s giữa các bài...`);
         return;
     }
 
-    addLog(`📢 Đang xử lý đăng bài cho ${symbol} (Loại: ${reason})...`);
+    addLog(`📢 Đang chuẩn bị nội dung bài đăng cho ${symbol} (${reason})...`);
 
     const content = `${BANK.P1[Math.floor(Math.random() * 50)]}\n\n${BANK.P2[Math.floor(Math.random() * 50)]}\n\n${BANK.P3[Math.floor(Math.random() * 50)]}\n\n${BANK.P4[Math.floor(Math.random() * 50)]}\n\n#${symbol} $${symbol}`;
 
@@ -276,27 +274,29 @@ async function post(symbol, reason, typeKey) {
         state.postedSymbols.add(symbol);
         if (typeKey === 'vol') state.lastVolPost = now;
         
-        addLog(`✅ THÀNH CÔNG: Đã đăng ${symbol}. Tổng bài: ${state.postsToday}. Chờ tín hiệu tiếp theo...`);
+        addLog(`✅ ĐĂNG THÀNH CÔNG: ${symbol} (${reason}). Tổng: ${state.postsToday}.`);
     } catch (e) { 
-        addLog(`❌ THẤT BẠI: Lỗi API khi đăng ${symbol}: ${e.response?.data?.message || e.message}`); 
+        addLog(`❌ API ERROR (${symbol}): ${e.message}`); 
     }
 }
 
 function initWS() {
-    addLog("🌐 Đang kết nối luồng dữ liệu WebSocket Binance...");
+    addLog("🌐 Đang khởi tạo luồng dữ liệu WebSocket...");
     const ws = new WebSocket('wss://fstream.binance.com/ws/!miniTicker@arr');
     ws.on('message', (msg) => {
         const tickers = JSON.parse(msg);
         const now = Date.now();
         tickers.forEach(t => {
             if (!t.s.endsWith('USDT')) return;
-            if (!state.marketData[t.s]) state.marketData[t.s] = { history: [], d1: 0 };
+            if (!state.marketData[t.s]) state.marketData[t.s] = { history: [], d1: 0, m1: 0, m5: 0 };
             let d = state.marketData[t.s];
             d.history.push({ p: parseFloat(t.c), t: now });
             if (d.history.length > 900) d.history.shift();
 
             const getChg = (min) => {
-                let old = d.history.find(i => i.t >= (now - min * 60000)) || d.history[0];
+                let targetTime = now - (min * 60000);
+                let old = d.history.find(i => i.t >= targetTime) || d.history[0];
+                if (!old) return 0;
                 return ((parseFloat(t.c) - old.p) / old.p * 100);
             };
 
@@ -304,17 +304,18 @@ function initWS() {
             d.m5 = getChg(5);
 
             if (state.isRunning) {
-                if (Math.abs(d.m1) >= SETTINGS.VOL_LIMIT) post(t.s, `M1 Change ${d.m1.toFixed(2)}%`, 'm1');
-                else if (Math.abs(d.m5) >= SETTINGS.VOL_LIMIT) post(t.s, `M5 Change ${d.m5.toFixed(2)}%`, 'm5');
+                if (Math.abs(d.m1) >= SETTINGS.VOL_LIMIT || Math.abs(d.m5) >= SETTINGS.VOL_LIMIT) {
+                    const maxChg = Math.max(Math.abs(d.m1), Math.abs(d.m5));
+                    post(t.s, `BIẾN ĐỘNG ${maxChg.toFixed(2)}%`, 'biendong');
+                }
             }
         });
     });
-    ws.on('close', () => { addLog("🔴 WebSocket đóng. Đang tái kết nối..."); setTimeout(initWS, 3000); });
+    ws.on('close', () => { addLog("🔴 WebSocket ngắt. Đang thử kết nối lại..."); setTimeout(initWS, 3000); });
 }
 
 setInterval(async () => {
     if (!state.isRunning) return;
-    addLog("🔍 Bot đang quét dữ liệu thị trường 24h và Volume...");
     try {
         const res = await fetch('https://fapi.binance.com/fapi/v1/ticker/24hr');
         const data = await res.json();
@@ -323,35 +324,31 @@ setInterval(async () => {
         const now = Date.now();
         const topDay = data.sort((a,b) => Math.abs(b.priceChangePercent) - Math.abs(a.priceChangePercent))[0];
         if (topDay && Math.abs(topDay.priceChangePercent) >= SETTINGS.DAY_LIMIT) {
-            await post(topDay.symbol, `Day Change ${topDay.priceChangePercent}%`, 'day');
+            await post(topDay.symbol, `TĂNG TRƯỞNG NGÀY ${topDay.priceChangePercent}%`, 'day');
         }
 
         if (now - state.lastVolPost >= SETTINGS.VOL_INTERVAL) {
             const topVol = data.sort((a,b) => b.quoteVolume - a.quoteVolume).find(i => !state.postedSymbols.has(i.symbol));
-            if (topVol) await post(topVol.symbol, "Top Volume Market", 'vol');
+            if (topVol) await post(topVol.symbol, "TOP VOLUME THỊ TRƯỜNG", 'vol');
         }
-    } catch (e) { addLog(`❌ Lỗi hệ thống quét sàn: ${e.message}`); }
+    } catch (e) { addLog(`❌ Lỗi Fetch Data: ${e.message}`); }
 }, 30000);
 
 cron.schedule('0 0 0 * * *', () => { 
-    state.postsToday = 0; 
-    state.stats = { m1: 0, m5: 0, day: 0, vol: 0 };
-    state.postedSymbols.clear(); 
-    addLog("📅 RESET NGÀY MỚI 00:00. Làm mới bộ đếm."); 
+    state.postsToday = 0; state.stats = { biendong: 0, day: 0, vol: 0 }; state.postedSymbols.clear(); 
+    addLog("📅 Đã sang ngày mới. Reset bộ đếm."); 
 });
 
 const app = express();
 app.get('/api/status', (req, res) => {
-    const table = Object.entries(state.marketData).sort((a,b) => Math.abs(b[1].d1||0) - Math.abs(a[1].d1||0)).slice(0, 15);
+    const table = Object.entries(state.marketData)
+        .sort((a,b) => Math.abs(b[1].d1||0) - Math.abs(a[1].d1||0))
+        .slice(0, 15);
     res.json({ ...state, table });
 });
 app.get('/api/toggle', (req, res) => { 
     state.isRunning = !state.isRunning; 
-    if(state.isRunning) {
-        addLog("▶️ BẮT ĐẦU CHẠY: Bot đã kích hoạt và đang tìm tín hiệu...");
-    } else {
-        addLog("⏸️ TẠM DỪNG: Bot đã dừng mọi hoạt động quét và đăng bài.");
-    }
+    addLog(state.isRunning ? "▶️ BOT BẮT ĐẦU CHẠY..." : "⏸️ BOT ĐÃ DỪNG LẠI.");
     res.json({ s: state.isRunning }); 
 });
 
@@ -359,53 +356,56 @@ app.get('/', (req, res) => {
     res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><script src="https://cdn.tailwindcss.com"></script><style>@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;900&display=swap'); .font-neon { font-family: 'Orbitron', sans-serif; }</style></head><body class="bg-[#0b0e11] text-white p-3 font-sans">
         <div class="max-w-md mx-auto">
             <div class="bg-[#1e2329] p-5 rounded-2xl mb-4 border-b-4 border-yellow-500 shadow-2xl">
-                <h1 class="text-2xl font-black font-neon italic text-yellow-500 tracking-tighter">LUFFY PRO V2</h1>
-                <div class="grid grid-cols-4 gap-2 mt-4 text-center">
-                    <div class="bg-black/40 p-2 rounded-lg border border-zinc-800"><div class="text-[9px] text-zinc-500">M1</div><div id="sm1" class="text-sm font-bold text-red-400">0</div></div>
-                    <div class="bg-black/40 p-2 rounded-lg border border-zinc-800"><div class="text-[9px] text-zinc-500">M5</div><div id="sm5" class="text-sm font-bold text-orange-400">0</div></div>
-                    <div class="bg-black/40 p-2 rounded-lg border border-zinc-800"><div class="text-[9px] text-zinc-500">Day</div><div id="sday" class="text-sm font-bold text-yellow-500">0</div></div>
-                    <div class="bg-black/40 p-2 rounded-lg border border-zinc-800"><div class="text-[9px] text-zinc-500">Vol</div><div id="svol" class="text-sm font-bold text-blue-400">0</div></div>
+                <h1 class="text-2xl font-black font-neon italic text-yellow-500 italic">LUFFY MOBILE PRO</h1>
+                <div class="grid grid-cols-3 gap-2 mt-4 text-center">
+                    <div class="bg-black/40 p-2 rounded-lg border border-zinc-800"><div class="text-[9px] text-zinc-500">BIẾN ĐỘNG</div><div id="sbd" class="text-sm font-bold text-red-500">0</div></div>
+                    <div class="bg-black/40 p-2 rounded-lg border border-zinc-800"><div class="text-[9px] text-zinc-500">NGÀY</div><div id="sday" class="text-sm font-bold text-yellow-500">0</div></div>
+                    <div class="bg-black/40 p-2 rounded-lg border border-zinc-800"><div class="text-[9px] text-zinc-500">VOLUME</div><div id="svol" class="text-sm font-bold text-blue-500">0</div></div>
                 </div>
                 <div class="flex justify-between items-center mt-4 pt-4 border-t border-zinc-800">
-                    <div class="text-xs font-black">TOTAL: <span id="total" class="text-green-500 text-lg">0</span>/100</div>
-                    <button onclick="toggleBot()" id="btnPower" class="px-10 py-3 rounded-xl font-black bg-yellow-500 text-black shadow-[0_0_15px_rgba(234,179,8,0.4)]">START</button>
+                    <div class="text-xs font-bold">TỔNG ĐĂNG: <span id="total" class="text-green-500 text-lg">0</span></div>
+                    <button onclick="toggleBot()" id="btnPower" class="px-10 py-3 rounded-xl font-black bg-yellow-500 text-black">START</button>
                 </div>
             </div>
-            <div class="bg-[#1e2329] p-4 rounded-2xl mb-4 border border-zinc-800 shadow-lg">
+            <div class="bg-[#1e2329] p-4 rounded-2xl mb-4 border border-zinc-800 overflow-hidden shadow-lg">
+                <h3 class="text-[10px] text-zinc-500 mb-3 font-bold uppercase italic">Bảng Theo Dõi Biến Động</h3>
                 <table class="w-full text-[11px] text-left">
-                    <thead class="text-zinc-600 font-bold uppercase italic"><tr><th class="pb-2">Coin</th><th class="pb-2 text-right">M1</th><th class="pb-2 text-right">M5</th><th class="pb-2 text-right text-yellow-500">24H</th></tr></thead>
+                    <thead class="text-zinc-600 font-bold border-b border-zinc-800"><tr><th class="pb-2">COIN</th><th class="pb-2 text-right">M1</th><th class="pb-2 text-right">M5</th><th class="pb-2 text-right text-yellow-500">24H</th></tr></thead>
                     <tbody id="tb"></tbody>
                 </table>
             </div>
-            <div class="bg-black p-4 rounded-2xl border border-zinc-800 h-[280px] overflow-y-auto text-[10px] text-green-400 font-mono shadow-inner leading-relaxed" id="lb"></div>
+            <div class="bg-black p-4 rounded-2xl border border-zinc-800 h-[250px] overflow-y-auto text-[10px] text-green-400 font-mono shadow-inner" id="lb"></div>
         </div>
         <script>
             async function toggleBot() { const res = await fetch('/api/toggle'); const d = await res.json(); updateBtn(d.s); }
             function updateBtn(r) {
                 const b = document.getElementById('btnPower');
                 b.innerText = r ? "STOP BOT" : "START BOT";
-                b.className = r ? "px-10 py-3 rounded-xl font-black bg-zinc-800 text-red-500 border border-red-500/30" : "px-10 py-3 rounded-xl font-black bg-yellow-500 text-black";
+                b.className = r ? "px-10 py-3 rounded-xl font-black bg-zinc-800 text-red-500" : "px-10 py-3 rounded-xl font-black bg-yellow-500 text-black";
             }
             async function refresh() {
                 try {
                     const res = await fetch('/api/status'); const d = await res.json();
                     document.getElementById('total').innerText = d.postsToday;
-                    document.getElementById('sm1').innerText = d.stats.m1;
-                    document.getElementById('sm5').innerText = d.stats.m5;
+                    document.getElementById('sbd').innerText = d.stats.biendong;
                     document.getElementById('sday').innerText = d.stats.day;
                     document.getElementById('svol').innerText = d.stats.vol;
                     updateBtn(d.isRunning);
-                    document.getElementById('lb').innerHTML = d.logs.map(l => \`<div class="mb-1 border-b border-zinc-900 pb-1">\${l}</div>\`).join('');
-                    document.getElementById('tb').innerHTML = d.table.map(([s, v]) => \`
-                        <tr class="border-b border-zinc-900/50"><td class="py-2 font-bold text-zinc-300">\${s.replace('USDT','')}</td>
-                        <td class="text-right \${Math.abs(v.m1)>=7 ? 'text-red-500 font-black animate-pulse':'text-zinc-500'}">\${(v.m1||0).toFixed(2)}%</td>
+                    document.getElementById('lb').innerHTML = d.logs.map(l => \`<div class="mb-1 border-b border-zinc-900/50 pb-1">\${l}</div>\`).join('');
+                    if (d.table && d.table.length > 0) {
+                        document.getElementById('tb').innerHTML = d.table.map(([s, v]) => \`
+                        <tr class="border-b border-zinc-900"><td class="py-2 font-bold text-zinc-300">\${s.replace('USDT','')}</td>
+                        <td class="text-right \${Math.abs(v.m1)>=7 ? 'text-red-500 font-black':'text-zinc-500'}">\${(v.m1||0).toFixed(2)}%</td>
                         <td class="text-right \${Math.abs(v.m5)>=7 ? 'text-orange-500 font-black':'text-zinc-500'}">\${(v.m5||0).toFixed(2)}%</td>
                         <td class="text-right text-yellow-500 font-bold">\${(parseFloat(v.d1)||0).toFixed(2)}%</td></tr>\`).join('');
+                    } else {
+                        document.getElementById('tb').innerHTML = "<tr><td colspan='4' class='py-4 text-center text-zinc-600 italic'>Đang kết nối dữ liệu sàn...</td></tr>";
+                    }
                 } catch(e) {}
             }
-            setInterval(refresh, 2500); refresh();
+            setInterval(refresh, 2000); refresh();
         </script>
     </body></html>`);
 });
 
-app.listen(PORT, '0.0.0.0', () => { initWS(); console.log('Luffy Server Started'); });
+app.listen(PORT, '0.0.0.0', () => { initWS(); console.log('Luffy Server Ready'); });
