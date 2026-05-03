@@ -16,14 +16,12 @@ const binance = new Binance().options({
 
 const SETTINGS = {
     SQUARE_URL: "https://www.binance.com/bapi/composite/v1/public/pgc/openApi/content/add",
-    VOL_LIMIT: 7.0,    
-    DAY_LIMIT: 10.0,   
-    MAX_TOTAL: 100,
-    TYPE_LIMIT: 33, 
-    MIN_GAP: 20000, 
+    VOL_LIMIT: 7.0,    // Ngưỡng biến động M1 hoặc M5
+    MAX_TOTAL: 50,     // Max 50 bài 1 ngày
+    MIN_GAP: 60000,    // Khoảng cách tối thiểu giữa 2 bài đăng (1 phút)
 };
 
-// --- NGÂN HÀNG DỮ LIỆU: 4 PHẦN x 100 CÂU ---
+// --- NGÂN HÀNG DỮ LIỆU: 4 PHẦN x 100 CÂU (GIỮ NGUYÊN BẢN GỐC) ---
 const BANK = {
     P1: [
         "🔥 Dòng tiền thông minh đang đổ mạnh vào hệ sinh thái này.", "🐳 Dữ liệu on-chain cho thấy cá voi đang gom hàng.", "💎 Áp lực bán đã cạn kiệt tại vùng hỗ trợ tâm lý.", "📊 Sự gia tăng đột biến về khối lượng giao dịch ngắn hạn.", "🔎 Các địa chỉ ví lớn đang có dấu hiệu tích lũy âm thầm.", "📰 Thị trường đang phản ứng tích cực với tin vĩ mô.", "⚡ Lực mua chủ động đang áp đảo hoàn toàn trên bảng điện.", "📈 Chỉ số tâm lý thị trường đang chuyển sang hưng phấn.", "🏛️ Sự bứt phá này mang đậm dấu ấn của các quỹ lớn.", "🚀 Nhu cầu sở hữu đang tăng cao bất chấp biến động chung.",
@@ -77,7 +75,7 @@ const BANK = {
 let state = {
     isRunning: false,
     postsToday: 0,
-    stats: { biendong: 0, day: 0, vol: 0 },
+    stats: { biendong: 0, vol: 0 },
     lastPostTime: 0,
     postedTodaySymbols: new Set(),
     logs: [],
@@ -90,16 +88,6 @@ function addLog(msg) {
     if (state.logs.length > 50) state.logs.pop();
 }
 
-async function getPriceAt7AM(symbol) {
-    try {
-        const sevenAM = new Date();
-        sevenAM.setHours(7, 0, 0, 0);
-        if (Date.now() < sevenAM.getTime()) return null; 
-        const ticks = await binance.futuresCandles(symbol, "1m", { startTime: sevenAM.getTime(), limit: 1 });
-        return ticks.length > 0 ? parseFloat(ticks[0][1]) : null;
-    } catch (e) { return null; }
-}
-
 function calculateChange(pArr, min) {
     if (!pArr || pArr.length < 2) return 0;
     const now = Date.now();
@@ -109,34 +97,29 @@ function calculateChange(pArr, min) {
 
 async function updatePriceLogic(s, p, now) {
     if (!state.coinData[s]) {
-        const p7am = await getPriceAt7AM(s) || p;
-        state.coinData[s] = { symbol: s, prices: [{p, t: now}], p7am };
+        state.coinData[s] = { symbol: s, prices: [{p, t: now}] };
     }
     
     let d = state.coinData[s];
     d.prices.push({ p, t: now });
-    if (d.prices.length > 600) d.prices.shift();
-
-    const changeDay = d.p7am ? ((p - d.p7am) / d.p7am * 100).toFixed(2) : 0;
+    if (d.prices.length > 350) d.prices.shift(); // Giữ khoảng 5-6 phút dữ liệu
 
     d.live = {
         c1: calculateChange(d.prices, 1),
         c5: calculateChange(d.prices, 5),
-        cd: parseFloat(changeDay),
         cp: p
     };
 
-    if (state.isRunning) {
-        if (state.stats.biendong < SETTINGS.TYPE_LIMIT && (Math.abs(d.live.c1) >= SETTINGS.VOL_LIMIT || Math.abs(d.live.c5) >= SETTINGS.VOL_LIMIT)) {
-            postToSquare(s, d.live.c5, 'biendong');
-        } 
-        else if (state.stats.day < SETTINGS.TYPE_LIMIT && Math.abs(d.live.cd) >= SETTINGS.DAY_LIMIT) {
-            postToSquare(s, d.live.cd, 'day');
+    // CHỈ CẦN M1 HOẶC M5 ĐỦ ĐIỀU KIỆN LÀ ĐĂNG
+    if (state.isRunning && state.postsToday < SETTINGS.MAX_TOTAL) {
+        if (Math.abs(d.live.c1) >= SETTINGS.VOL_LIMIT || Math.abs(d.live.c5) >= SETTINGS.VOL_LIMIT) {
+            const reason = Math.abs(d.live.c1) >= SETTINGS.VOL_LIMIT ? `M1(${d.live.c1}%)` : `M5(${d.live.c5}%)`;
+            postToSquare(s, reason, 'biendong');
         }
     }
 }
 
-async function postToSquare(symbol, change, type) {
+async function postToSquare(symbol, changeText, type) {
     if (state.postsToday >= SETTINGS.MAX_TOTAL || state.postedTodaySymbols.has(symbol)) return;
     if (Date.now() - state.lastPostTime < SETTINGS.MIN_GAP) return;
 
@@ -150,31 +133,46 @@ async function postToSquare(symbol, change, type) {
         state.stats[type]++;
         state.lastPostTime = Date.now();
         state.postedTodaySymbols.add(symbol);
-        addLog(`✅ ĐĂNG ${type.toUpperCase()}: ${symbol} (${change}%)`);
+        addLog(`✅ [SQUARE] ${symbol} | Lý do: ${changeText} | Tổng: ${state.postsToday}`);
     } catch (e) { addLog(`❌ Lỗi Square: ${e.message}`); }
 }
 
-async function postTypeVol() {
-    if (state.stats.vol >= SETTINGS.TYPE_LIMIT) return;
-    try {
-        const tickers = await binance.futures24hrTicker();
-        const topVol = tickers
-            .filter(t => t.symbol.endsWith('USDT') && !state.postedTodaySymbols.has(t.symbol))
-            .sort((a, b) => parseFloat(b.quoteVolume) - parseFloat(a.quoteVolume))
-            .slice(0, 1);
+// LOGIC ĐĂNG BÙ VOLUME VÀO LÚC 23H
+async function checkNightFill() {
+    if (!state.isRunning) return;
+    const now = new Date();
+    // Nếu là 23 giờ và chưa đủ 50 bài
+    if (now.getHours() === 23 && state.postsToday < SETTINGS.MAX_TOTAL) {
+        addLog(`🌙 Đang là 23h, chưa đủ 50 bài (Hiện có ${state.postsToday}). Bắt đầu quét Vol lớn...`);
+        try {
+            const tickers = await binance.futures24hrTicker();
+            const topVol = tickers
+                .filter(t => t.symbol.endsWith('USDT') && !state.postedTodaySymbols.has(t.symbol))
+                .sort((a, b) => parseFloat(b.quoteVolume) - parseFloat(a.quoteVolume));
 
-        if (topVol.length > 0) {
-            addLog(`🚀 Đăng TOP VOL: ${topVol[0].symbol}`);
-            await postToSquare(topVol[0].symbol, 0, 'vol');
-        }
-    } catch (e) { addLog("❌ Lỗi lấy Vol từ Binance"); }
+            for (let coin of topVol) {
+                if (state.postsToday >= SETTINGS.MAX_TOTAL) break;
+                await postToSquare(coin.symbol, "Top Vol 23h", 'vol');
+                // Nghỉ 2 giây giữa các bài đăng bù để tránh spam
+                await new Promise(r => setTimeout(r, 2000));
+            }
+        } catch (e) { addLog("❌ Lỗi quét Vol đêm"); }
+    }
+    
+    // Reset chỉ số vào lúc 0h sáng
+    if (now.getHours() === 0 && now.getMinutes() === 0) {
+        state.postsToday = 0;
+        state.stats = { biendong: 0, vol: 0 };
+        state.postedTodaySymbols.clear();
+        addLog("🧹 Đã reset dữ liệu ngày mới.");
+    }
 }
 
-setInterval(() => { if (state.isRunning) postTypeVol(); }, 600000);
+// Kiểm tra giờ mỗi phút
+setInterval(checkNightFill, 60000);
 
-// FIX TRIỆT ĐỂ LỖI toLowerCase: Sử dụng futuresAllTickerStream 
 function initWS() {
-    addLog("⚡ Engine Luffy Pro v2 Starting...");
+    addLog("⚡ Engine Luffy Pro v3 (M1/M5 Only) Starting...");
     binance.futuresAllTickerStream((tickers) => {
         if (Array.isArray(tickers)) {
             tickers.forEach(t => {
@@ -190,9 +188,9 @@ const app = express();
 app.get('/api/status', (req, res) => {
     const table = Object.values(state.coinData)
         .filter(v => v.live)
-        .sort((a, b) => Math.max(Math.abs(b.live.c5), Math.abs(b.live.cd)) - Math.max(Math.abs(a.live.c5), Math.abs(a.live.cd)))
+        .sort((a, b) => Math.abs(b.live.c5) - Math.abs(a.live.c5))
         .slice(0, 25)
-        .map(v => ({ s: v.symbol, c1: v.live.c1, c5: v.live.c5, cd: v.live.cd }));
+        .map(v => ({ s: v.symbol, c1: v.live.c1, c5: v.live.c5 }));
     res.json({ ...state, table });
 });
 
@@ -200,35 +198,34 @@ app.get('/api/toggle', (req, res) => { state.isRunning = !state.isRunning; res.j
 
 app.get('/', (req, res) => {
     res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><script src="https://cdn.tailwindcss.com"></script><style>@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;900&display=swap');body{background:#0b0e11;color:#d4d4d8;font-family:sans-serif;}</style></head>
-    <body class="p-2 overflow-hidden h-screen flex flex-col items-center">
+    <body class="p-2 h-screen flex flex-col items-center overflow-hidden">
         <div class="w-full max-w-md h-full flex flex-col">
             <div class="bg-[#1e2329] p-4 rounded-2xl border-b-4 border-yellow-500 mb-3 shadow-2xl">
                 <div class="flex justify-between items-center mb-4">
-                    <h1 style="font-family:'Orbitron'" class="text-xl font-black text-yellow-500 italic">LUFFY PRO V2</h1>
+                    <h1 style="font-family:'Orbitron'" class="text-xl font-black text-yellow-500 italic">LUFFY V3 (50/DAY)</h1>
                     <button onclick="fetch('/api/toggle')" id="btn" class="px-6 py-2 rounded-xl font-bold transition-all text-sm shadow-lg">START</button>
                 </div>
-                <div class="grid grid-cols-4 gap-1 text-center font-mono">
-                    <div class="bg-black/40 p-2 rounded-xl"><div class="text-[8px] text-zinc-500 uppercase">M1/M5</div><div id="s1" class="text-xs font-bold text-red-500">0</div></div>
-                    <div class="bg-black/40 p-2 rounded-xl"><div class="text-[8px] text-zinc-500 uppercase">D1 (NOW)</div><div id="s2" class="text-xs font-bold text-yellow-500">0</div></div>
-                    <div class="bg-black/40 p-2 rounded-xl"><div class="text-[8px] text-zinc-500 uppercase">VOL</div><div id="s3" class="text-xs font-bold text-green-500">0</div></div>
-                    <div class="bg-black/40 p-2 rounded-xl"><div class="text-[8px] text-zinc-500 uppercase">TOTAL</div><div id="st" class="text-xs font-bold text-blue-500">0</div></div>
+                <div class="grid grid-cols-3 gap-2 text-center font-mono">
+                    <div class="bg-black/40 p-2 rounded-xl"><div class="text-[8px] text-zinc-500 uppercase">BIẾN ĐỘNG</div><div id="s1" class="text-xs font-bold text-red-500">0</div></div>
+                    <div class="bg-black/40 p-2 rounded-xl"><div class="text-[8px] text-zinc-500 uppercase">VOL 23H</div><div id="s2" class="text-xs font-bold text-green-500">0</div></div>
+                    <div class="bg-black/40 p-2 rounded-xl"><div class="text-[8px] text-zinc-500 uppercase">TỔNG ĐÃ ĐĂNG</div><div id="st" class="text-xs font-bold text-blue-500">0 / 50</div></div>
                 </div>
             </div>
             <div class="bg-[#1e2329] rounded-2xl flex-1 overflow-hidden flex flex-col mb-3 border border-white/5 shadow-xl">
                 <div class="p-3 bg-white/5 text-[10px] font-bold text-yellow-500 flex justify-between uppercase">
-                    <span>Thị trường Realtime</span>
-                    <span id="conn-status" class="text-green-500">● Live</span>
+                    <span>Biến động nhanh (M1/M5)</span>
+                    <span class="text-green-500">● Live Active</span>
                 </div>
                 <div class="overflow-y-auto flex-1 scrollbar-hide">
-                    <table class="w-full text-[11px] border-collapse">
-                        <thead class="sticky top-0 bg-[#1e2329] text-zinc-500 shadow-sm z-10">
-                            <tr class="border-b border-white/5"><th class="p-3 text-left">COIN</th><th class="p-3 text-right">M1%</th><th class="p-3 text-right">M5%</th><th class="p-3 text-right">DAY%</th></tr>
+                    <table class="w-full text-[11px]">
+                        <thead class="sticky top-0 bg-[#1e2329] text-zinc-500 z-10 border-b border-white/5">
+                            <tr><th class="p-3 text-left">COIN</th><th class="p-3 text-right">M1%</th><th class="p-3 text-right">M5%</th></tr>
                         </thead>
                         <tbody id="tb"></tbody>
                     </table>
                 </div>
             </div>
-            <div id="lb" class="h-28 bg-black/80 rounded-xl p-3 text-[9px] font-mono overflow-y-auto text-zinc-400 border border-white/5"></div>
+            <div id="lb" class="h-32 bg-black/80 rounded-xl p-3 text-[9px] font-mono overflow-y-auto text-zinc-400 border border-white/5"></div>
         </div>
         <script>
             async function refresh() {
@@ -236,29 +233,27 @@ app.get('/', (req, res) => {
                     const res = await fetch('/api/status'); 
                     const d = await res.json();
                     const btn = document.getElementById('btn');
-                    btn.innerText = d.isRunning ? "STOP ENGINE" : "START ENGINE";
+                    btn.innerText = d.isRunning ? "STOP BOT" : "START BOT";
                     btn.className = d.isRunning ? "px-6 py-2 rounded-xl font-bold bg-red-500/20 text-red-500 border border-red-500/50" : "px-6 py-2 rounded-xl font-bold bg-yellow-500 text-black";
                     document.getElementById('s1').innerText = d.stats.biendong;
-                    document.getElementById('s2').innerText = d.stats.day;
-                    document.getElementById('s3').innerText = d.stats.vol;
-                    document.getElementById('st').innerText = d.postsToday;
+                    document.getElementById('s2').innerText = d.stats.vol;
+                    document.getElementById('st').innerText = d.postsToday + " / 50";
                     if (d.logs.length > 0) document.getElementById('lb').innerHTML = d.logs.map(l => \`<div>\${l}</div>\`).join('');
                     const tbody = document.getElementById('tb');
                     tbody.innerHTML = d.table.map(v => \`
-                        <tr class="border-b border-white/5 hover:bg-white/5">
+                        <tr class="border-b border-white/5">
                             <td class="p-3 font-bold text-zinc-100">\${v.s.replace('USDT','')}</td>
-                            <td class="text-right p-3 \${Math.abs(v.c1)>=3?'text-red-500 font-bold':'text-zinc-400'}">\${v.c1}%</td>
-                            <td class="text-right p-3 \${Math.abs(v.c5)>=5?'text-red-400 font-bold':'text-zinc-400'}">\${v.c5}%</td>
-                            <td class="text-right p-3 \${Math.abs(v.cd)>=7?'text-yellow-500 font-bold':'text-zinc-400'}">\${v.cd}%</td>
+                            <td class="text-right p-3 \${Math.abs(v.c1)>=7?'text-red-500 font-bold':'text-zinc-400'}">\${v.c1}%</td>
+                            <td class="text-right p-3 \${Math.abs(v.c5)>=7?'text-red-400 font-bold':'text-zinc-400'}">\${v.c5}%</td>
                         </tr>\`).join('');
                 } catch(e) {}
             }
-            setInterval(refresh, 800);
+            setInterval(refresh, 1000);
         </script>
     </body></html>`);
 });
 
 app.listen(PORT, '0.0.0.0', () => {
     initWS();
-    console.log(`Luffy Bot Ready: http://localhost:${PORT}`);
+    console.log(`Luffy V3 Ready: http://localhost:${PORT}`);
 });
