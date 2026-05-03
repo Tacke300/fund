@@ -2,13 +2,11 @@ import WebSocket from 'ws';
 import express from 'express';
 import axios from 'axios';
 import Binance from 'node-binance-api';
-// Nhập trực tiếp tên biến từ config.js của ní
 import { API_KEY, SECRET_KEY } from './config.js'; 
 
 const PORT = 8888;
 const SQUAD_API_KEY = "8d794c11cc794c958c2c65924c54f2dd"; 
 
-// Khởi tạo Binance với đúng tên biến từ file config.js
 const binance = new Binance().options({
     APIKEY: API_KEY,
     APISECRET: SECRET_KEY,
@@ -22,7 +20,7 @@ const SETTINGS = {
     DAY_LIMIT: 10.0,   
     MAX_TOTAL: 100,
     TYPE_LIMIT: 33, 
-    MIN_GAP: 60000, 
+    MIN_GAP: 20000, 
 };
 
 // --- NGÂN HÀNG DỮ LIỆU: 4 PHẦN x 100 CÂU ---
@@ -48,7 +46,7 @@ const BANK = {
         "🚥 Chỉ báo Parabolic SAR đã nhảy xuống dưới giá.", "🎭 Mô hình vai đầu vai ngược đã chính thức xác nhận.", "🌬️ Áp lực cung cạn kiệt tại vùng biên dưới dải băng.", "🎢 Giá đang chạy trong một kênh tăng giá hoàn hảo.", "🚀 Sự đột phá về giá khỏi vùng giá trị quan trọng.", "⛲ Chỉ báo MFI cho thấy dòng tiền nạp vào mạnh.", "📐 Mô hình cái nêm giảm đã bị phá vỡ hướng lên.", "🧪 Giá đang test lại đường cổ của mô hình đảo chiều.", "🟢 Cấu trúc nến Heikin Ashi đã chuyển sang màu xanh.", "🕳️ Sự ổn định của giá phía trên vùng gap tăng.",
         "🪜 Chỉ báo Keltner Channel đang bị đẩy lên phía trên.", "📅 Giá đã vượt qua mốc cao nhất của tuần trước.", "📍 Tín hiệu tăng trưởng mạnh mẽ từ vùng pivot.", "⛸️ Mô hình 2 đáy đã hoàn thành nhịp kiểm định.", "📢 Sự cộng hưởng của nhiều khung thời gian cùng tăng.", "🧱 Giá đang giữ vững trên ngưỡng hỗ trợ Fib 0.5.", "📈 Chỉ báo OBV đang tăng vọt cùng với đường giá.", "📌 Mô hình nến Pin bar từ chối giảm tại hỗ trợ.", "🌊 Giá đang chuẩn bị cho một nhịp sóng đẩy mới.", "🔨 Sự bứt phá khỏi vùng cản kỹ thuật cứng nhất.",
         "📡 Tín hiệu mua từ hệ thống giao dịch theo xu hướng.", "🏔️ Giá đang tiệm cận vùng kháng cự quan trọng.", "🤏 Sự thu hẹp biên độ nến tại vùng giá đỉnh.", "🌑 Mô hình nến Marubozu xác nhận lực mua áp đảo.", "🔓 Giá đã thoát khỏi trạng thái tích lũy đi ngang.", "🚀 Chỉ báo Trix cho thấy đà tăng đang đẩy mạnh.", "🌊 Cấu trúc sóng tăng đang được mở rộng liên tục.", "🧱 Sự ổn định của giá tại các ngưỡng chặn kỹ thuật.", "🏁 Tín hiệu xác nhận xu hướng từ chỉ báo Donchian.", "🎯 Giá đang hướng về vùng mục tiêu của mô hình.",
-        "🤝 Sự bứt phá của giá đi kèm với sự đồng thuận.", "📈 Chỉ báo Aroon Up đang nằm trên ngưỡng 70.", "📦 Mô hình nến Inside bar breakout theo hướng tăng.", "☁️ Giá đã vượt qua vùng cản mây trên khung H4.", "⚓ Sự vững chắc của nền tảng giá hiện tại.", "🔄 Tín hiệu đảo chiều từ các chỉ báo động lượng.", "🚀 Giá đang thực hiện nhịp tăng tốc thoát khỏi nền.", "📈 Sự cải thiện rõ rệt của cấu trúc giá ngắn hạn.", "🎻 Mô hình sóng Harmonic đang hướng tới mục tiêu.", "💥 Giá đã phá vỡ mọi đường kháng cự gần nhất.",
+        "🤝 Sự bứt phá của giá đi kèm with sự đồng thuận.", "📈 Chỉ báo Aroon Up đang nằm trên ngưỡng 70.", "📦 Mô hình nến Inside bar breakout theo hướng tăng.", "☁️ Giá đã vượt qua vùng cản mây trên khung H4.", "⚓ Sự vững chắc của nền tảng giá hiện tại.", "🔄 Tín hiệu đảo chiều từ các chỉ báo động lượng.", "🚀 Giá đang thực hiện nhịp tăng tốc thoát khỏi nền.", "📈 Sự cải thiện rõ rệt của cấu trúc giá ngắn hạn.", "🎻 Mô hình sóng Harmonic đang hướng tới mục tiêu.", "💥 Giá đã phá vỡ mọi đường kháng cự gần nhất.",
         "💪 Sự tự tin từ biểu đồ kỹ thuật đang rất lớn.", "🧠 Chỉ báo tâm lý kỹ thuật nghiêng hẳn về mua.", "📈 Giá đang duy trì đà tăng trưởng cực kỳ ấn tượng.", "✅ Tín hiệu breakout thành công từ nền giá tốt.", "🎯 Chinh phục các cột mốc kỹ thuật cao hơn.", "🔥 Sức mạnh kỹ thuật đang ở trạng thái tối ưu.", "🧩 Sự phối hợp hoàn hảo của các chỉ báo sớm.", "⚡ Tốc độ thay đổi giá đang ở mức báo động tăng.", "🏰 Xây dựng cấu trúc tăng giá vững như bàn thạch.", "👑 Vị thế kỹ thuật dẫn đầu thị trường lúc này."
     ],
     P3: [
@@ -105,20 +103,21 @@ async function getPriceAt7AM(symbol) {
 function calculateChange(pArr, min) {
     if (!pArr || pArr.length < 2) return 0;
     const now = Date.now();
+    // Logic thực tại: Nếu chưa có đủ nến quá khứ, lấy giá xa nhất hiện có để tính luôn
     let start = pArr.find(i => i.t >= (now - min * 60000)) || pArr[0]; 
     return parseFloat((((pArr[pArr.length - 1].p - start.p) / start.p) * 100).toFixed(2));
 }
 
-async function updatePriceLogic(s, p, now, vol) {
+async function updatePriceLogic(s, p, now) {
     if (!state.coinData[s]) {
-        const p7am = await getPriceAt7AM(s);
-        state.coinData[s] = { symbol: s, prices: [], p7am, vol: 0 };
+        // Khởi tạo ngay lập tức bằng giá hiện tại nếu k lấy đc giá 7h
+        const p7am = await getPriceAt7AM(s) || p;
+        state.coinData[s] = { symbol: s, prices: [{p, t: now}], p7am };
     }
     
     let d = state.coinData[s];
     d.prices.push({ p, t: now });
     if (d.prices.length > 600) d.prices.shift();
-    d.vol = parseFloat(vol);
 
     const changeDay = d.p7am ? ((p - d.p7am) / d.p7am * 100).toFixed(2) : 0;
 
@@ -143,7 +142,6 @@ async function postToSquare(symbol, change, type) {
     if (state.postsToday >= SETTINGS.MAX_TOTAL || state.postedTodaySymbols.has(symbol)) return;
     if (Date.now() - state.lastPostTime < SETTINGS.MIN_GAP) return;
 
-    // Giữ nguyên CoinUSDT ở cuối bài theo yêu cầu
     const content = `${BANK.P1[Math.floor(Math.random()*100)]}\n\n${BANK.P2[Math.floor(Math.random()*100)]}\n\n${BANK.P3[Math.floor(Math.random()*100)]}\n\n${BANK.P4[Math.floor(Math.random()*100)]}\n\n#${symbol} $${symbol}`;
 
     try {
@@ -168,7 +166,7 @@ async function postTypeVol() {
             .slice(0, 1);
 
         if (topVol.length > 0) {
-            addLog(`🚀 Tìm thấy TOP VOL: ${topVol[0].symbol}`);
+            addLog(`🚀 Đăng TOP VOL: ${topVol[0].symbol}`);
             await postToSquare(topVol[0].symbol, 0, 'vol');
         }
     } catch (e) { addLog("❌ Lỗi lấy Vol từ Binance"); }
@@ -177,81 +175,91 @@ async function postTypeVol() {
 setInterval(() => { if (state.isRunning) postTypeVol(); }, 600000);
 
 function initWS() {
-    addLog("⚡ Engine Luffy Pro Starting...");
+    addLog("⚡ Engine Luffy Pro v2 Starting...");
     binance.futuresTickerStream((tickers) => {
         if (Array.isArray(tickers)) {
             tickers.forEach(t => {
                 if (t.symbol && t.symbol.endsWith('USDT')) {
-                    updatePriceLogic(t.symbol, parseFloat(t.close), Date.now(), t.quoteVolume);
+                    updatePriceLogic(t.symbol, parseFloat(t.close), Date.now());
                 }
             });
         } else if (tickers && tickers.symbol) {
-            updatePriceLogic(tickers.symbol, parseFloat(tickers.close), Date.now(), tickers.quoteVolume);
+            updatePriceLogic(tickers.symbol, parseFloat(tickers.close), Date.now());
         }
     });
 }
 
 const app = express();
 app.get('/api/status', (req, res) => {
+    // Chỉ lấy top 20 coin biến động nhất để bảng mượt
     const table = Object.values(state.coinData)
         .filter(v => v.live)
-        .map(v => ({ s: v.symbol, c1: v.live.c1, c5: v.live.c5, cd: v.live.cd }))
-        .sort((a, b) => Math.abs(b.c5) - Math.abs(a.c5))
-        .slice(0, 15);
+        .sort((a, b) => Math.max(Math.abs(b.live.c5), Math.abs(b.live.cd)) - Math.max(Math.abs(a.live.c5), Math.abs(a.live.cd)))
+        .slice(0, 20)
+        .map(v => ({ s: v.symbol, c1: v.live.c1, c5: v.live.c5, cd: v.live.cd }));
     res.json({ ...state, table });
 });
 
 app.get('/api/toggle', (req, res) => { state.isRunning = !state.isRunning; res.json({ s: state.isRunning }); });
 
 app.get('/', (req, res) => {
-    res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><script src="https://cdn.tailwindcss.com"></script><style>@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;900&display=swap');</style></head>
-    <body class="bg-[#0b0e11] text-zinc-300 p-2 font-sans overflow-hidden">
-        <div class="max-w-md mx-auto h-screen flex flex-col">
+    res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><script src="https://cdn.tailwindcss.com"></script><style>@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;900&display=swap');body{background:#0b0e11;color:#d4d4d8;font-family:sans-serif;}</style></head>
+    <body class="p-2 overflow-hidden h-screen flex flex-col items-center">
+        <div class="w-full max-w-md h-full flex flex-col">
             <div class="bg-[#1e2329] p-4 rounded-2xl border-b-4 border-yellow-500 mb-3 shadow-2xl">
                 <div class="flex justify-between items-center mb-4">
-                    <h1 style="font-family:'Orbitron'" class="text-xl font-black text-yellow-500 italic">LUFFY PRO</h1>
-                    <button onclick="fetch('/api/toggle')" id="btn" class="px-6 py-2 rounded-xl font-bold bg-yellow-500 text-black shadow-lg transition-all text-sm">START</button>
+                    <h1 style="font-family:'Orbitron'" class="text-xl font-black text-yellow-500 italic">LUFFY PRO V2</h1>
+                    <button onclick="fetch('/api/toggle')" id="btn" class="px-6 py-2 rounded-xl font-bold transition-all text-sm shadow-lg">START</button>
                 </div>
                 <div class="grid grid-cols-4 gap-1 text-center">
-                    <div class="bg-black/40 p-2 rounded-xl"><div class="text-[8px] text-zinc-500">M1/M5</div><div id="s1" class="text-xs font-bold text-red-500">0</div></div>
-                    <div class="bg-black/40 p-2 rounded-xl"><div class="text-[8px] text-zinc-500">D1 (7H)</div><div id="s2" class="text-xs font-bold text-yellow-500">0</div></div>
-                    <div class="bg-black/40 p-2 rounded-xl"><div class="text-[8px] text-zinc-500">VOL</div><div id="s3" class="text-xs font-bold text-green-500">0</div></div>
-                    <div class="bg-black/40 p-2 rounded-xl"><div class="text-[8px] text-zinc-500">TOTAL</div><div id="st" class="text-xs font-bold text-blue-500">0</div></div>
+                    <div class="bg-black/40 p-2 rounded-xl"><div class="text-[8px] text-zinc-500 uppercase">M1/M5</div><div id="s1" class="text-xs font-bold text-red-500">0</div></div>
+                    <div class="bg-black/40 p-2 rounded-xl"><div class="text-[8px] text-zinc-500 uppercase">D1 (7H)</div><div id="s2" class="text-xs font-bold text-yellow-500">0</div></div>
+                    <div class="bg-black/40 p-2 rounded-xl"><div class="text-[8px] text-zinc-500 uppercase">VOL</div><div id="s3" class="text-xs font-bold text-green-500">0</div></div>
+                    <div class="bg-black/40 p-2 rounded-xl"><div class="text-[8px] text-zinc-500 uppercase">TOTAL</div><div id="st" class="text-xs font-bold text-blue-500">0</div></div>
                 </div>
             </div>
 
-            <div class="bg-[#1e2329] rounded-2xl flex-1 overflow-hidden flex flex-col mb-3">
-                <div class="p-3 bg-white/5 text-[10px] font-bold uppercase tracking-widest text-yellow-500">Bảng biến động M1-M5-Day</div>
-                <div class="overflow-y-auto flex-1">
-                    <table class="w-full text-[11px]">
-                        <thead class="sticky top-0 bg-[#1e2329] text-zinc-500 border-b border-white/5">
-                            <tr><th class="p-2 text-left">COIN</th><th class="p-2 text-right">M1%</th><th class="p-2 text-right">M5%</th><th class="p-2 text-right">DAY%</th></tr>
+            <div class="bg-[#1e2329] rounded-2xl flex-1 overflow-hidden flex flex-col mb-3 border border-white/5 shadow-xl">
+                <div class="p-3 bg-white/5 text-[10px] font-bold text-yellow-500 flex justify-between">
+                    <span>TOP BIẾN ĐỘNG</span>
+                    <span class="text-zinc-500 uppercase">Update: Realtime</span>
+                </div>
+                <div class="overflow-y-auto flex-1 scrollbar-hide">
+                    <table class="w-full text-[11px] border-collapse">
+                        <thead class="sticky top-0 bg-[#1e2329] text-zinc-500 shadow-sm">
+                            <tr class="border-b border-white/5"><th class="p-3 text-left">COIN</th><th class="p-3 text-right">M1%</th><th class="p-3 text-right">M5%</th><th class="p-3 text-right">D%</th></tr>
                         </thead>
                         <tbody id="tb"></tbody>
                     </table>
                 </div>
             </div>
 
-            <div id="lb" class="h-32 bg-black rounded-xl p-2 text-[9px] font-mono overflow-y-auto text-zinc-500 border border-white/5"></div>
+            <div id="lb" class="h-28 bg-black/80 rounded-xl p-3 text-[9px] font-mono overflow-y-auto text-zinc-500 border border-white/5"></div>
         </div>
         <script>
+            let lastUpdate = 0;
             async function refresh() {
                 try {
                     const res = await fetch('/api/status'); 
                     const d = await res.json();
-                    document.getElementById('btn').innerText = d.isRunning ? "STOP" : "START";
-                    document.getElementById('btn').className = d.isRunning ? "px-6 py-2 rounded-xl font-bold bg-red-500 text-white shadow-lg" : "px-6 py-2 rounded-xl font-bold bg-yellow-500 text-black shadow-lg";
+                    const btn = document.getElementById('btn');
+                    btn.innerText = d.isRunning ? "STOP ENGINE" : "START ENGINE";
+                    btn.className = d.isRunning ? "px-6 py-2 rounded-xl font-bold bg-red-500/20 text-red-500 border border-red-500/50 shadow-[0_0_15px_rgba(239,68,68,0.3)]" : "px-6 py-2 rounded-xl font-bold bg-yellow-500 text-black shadow-lg";
+                    
                     document.getElementById('s1').innerText = d.stats.biendong;
                     document.getElementById('s2').innerText = d.stats.day;
                     document.getElementById('s3').innerText = d.stats.vol;
                     document.getElementById('st').innerText = d.postsToday;
-                    document.getElementById('lb').innerHTML = d.logs.map(l => \`<div>\${l}</div>\`).join('');
-                    document.getElementById('tb').innerHTML = d.table.map(v => \`
-                        <tr class="border-b border-white/5">
-                            <td class="p-2 font-bold">\${v.s.replace('USDT','')}</td>
-                            <td class="text-right p-2 \${Math.abs(v.c1)>=7?'text-red-500':'text-zinc-400'}">\${v.c1}%</td>
-                            <td class="text-right p-2 \${Math.abs(v.c5)>=7?'text-red-400':'text-zinc-400'}">\${v.c5}%</td>
-                            <td class="text-right p-2 \${Math.abs(v.cd)>=10?'text-yellow-500':'text-zinc-400'}">\${v.cd}%</td>
+                    
+                    if (d.logs.length > 0) document.getElementById('lb').innerHTML = d.logs.map(l => \`<div>\${l}</div>\`).join('');
+                    
+                    const tbody = document.getElementById('tb');
+                    tbody.innerHTML = d.table.map(v => \`
+                        <tr class="border-b border-white/5 hover:bg-white/5 transition-colors">
+                            <td class="p-3 font-bold text-zinc-100">\${v.s.replace('USDT','')}</td>
+                            <td class="text-right p-3 \${Math.abs(v.c1)>=7?'text-red-500 font-bold':'text-zinc-400'}">\${v.c1}%</td>
+                            <td class="text-right p-3 \${Math.abs(v.c5)>=7?'text-red-400 font-bold':'text-zinc-400'}">\${v.c5}%</td>
+                            <td class="text-right p-3 \${Math.abs(v.cd)>=10?'text-yellow-500 font-bold':'text-zinc-400'}">\${v.cd}%</td>
                         </tr>\`).join('');
                 } catch(e) {}
             }
@@ -262,5 +270,5 @@ app.get('/', (req, res) => {
 
 app.listen(PORT, '0.0.0.0', () => {
     initWS();
-    console.log(`Luffy Pro Ready: http://localhost:${PORT}`);
+    console.log(`Luffy Pro V2 Ready: http://localhost:${PORT}`);
 });
