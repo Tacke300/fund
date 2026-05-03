@@ -11,7 +11,7 @@ const SETTINGS = {
     VOL_LIMIT: 7.0,   
     MAX_POSTS_PER_DAY: 100,
     MIN_GAP: 60000,
-    RESUME_HOURS: [0, 15, 7, 19]
+    RESUME_HOURS: [0, 3, 7, 11] // 4 khung giờ tự động mở lại nếu bị limit
 };
 
 const BANK = {
@@ -66,30 +66,31 @@ const BANK = {
 
 let state = {
     isRunning: false,
-    isPaused: false,
+    isPaused: false, // Trạng thái tạm dừng khi bị limit
     postsToday: 0,
     stats: { biendong: 0, day: 0, vol: 0 },
     lastPostTime: 0,
     postedSymbols: new Set(),
-    logs: [`[${new Date().toLocaleTimeString()}] LUFFY PRO READY. Waiting start...`],
+    logs: [`[${new Date().toLocaleTimeString()}] 🟢 Hệ thống LUFFY PRO sẵn sàng.`],
     coinData: {} 
 };
 
+// Hàm thêm log vào state
 function addLog(msg) {
     state.logs.unshift(`[${new Date().toLocaleTimeString()}] ${msg}`);
-    if (state.logs.length > 100) state.logs.pop();
+    if (state.logs.length > 50) state.logs.pop(); // Giữ tối đa 50 log gần nhất
 }
 
+// Kiểm tra giờ tự động Resume
 setInterval(() => {
-    if (state.isPaused) {
-        const hour = new Date().getHours();
-        if (SETTINGS.RESUME_HOURS.includes(hour)) {
-            state.isPaused = false;
-            state.postsToday = 0; 
-            addLog("⏰ Tới khung giờ Resume. Reset giới hạn & tiếp tục quét bài!");
-        }
+    const now = new Date();
+    const currentHour = now.getHours();
+    if (state.isPaused && SETTINGS.RESUME_HOURS.includes(currentHour)) {
+        state.isPaused = false;
+        state.postsToday = 0; // Reset số lượng bài đăng ngày mới
+        addLog(`⏰ Đã đến ${currentHour}h. Tự động Resume và Reset giới hạn đăng bài!`);
     }
-}, 60000);
+}, 60000); // Check mỗi phút
 
 function calculateChange(pArr, min) {
     if (!pArr || pArr.length < 2) return 0;
@@ -102,7 +103,7 @@ function updatePriceLogic(s, p, now, change24h = 0) {
     if (!state.coinData[s]) state.coinData[s] = { symbol: s, prices: [], d1: 0 };
     let d = state.coinData[s];
     d.prices.push({ p, t: now });
-    if (d.prices.length > 200) d.prices.shift();
+    if (d.prices.length > 120) d.prices.shift();
     if (change24h !== 0) d.d1 = parseFloat(change24h).toFixed(2);
 
     d.live = {
@@ -112,22 +113,36 @@ function updatePriceLogic(s, p, now, change24h = 0) {
         currentPrice: p
     };
 
-    if (state.isRunning && !state.isPaused && Math.abs(d.live.c1) >= SETTINGS.VOL_LIMIT) {
-        postToSquare(s, d.live.c1, 'biendong');
+    // LOG QUÉT CHI TIẾT
+    if (state.isRunning && !state.isPaused) {
+        if (Math.abs(d.live.c1) >= SETTINGS.VOL_LIMIT) {
+            postToSquare(s, d.live.c1, 'biendong');
+        } else if (Math.abs(d.live.c1) >= 1.0 && now % 30000 < 2000) { 
+            // In log nhè nhẹ cho các coin biến động > 1% để bạn biết bot vẫn đang scan
+            // addLog(`🔍 Quét ${s}: ${d.live.c1}% (Chưa đủ ${SETTINGS.VOL_LIMIT}%)`);
+        }
     }
 }
 
 async function postToSquare(symbol, change, type) {
     const now = Date.now();
+    
+    // Kiểm tra các điều kiện chặn trước khi gọi API
+    if (state.isPaused) return;
+    if (state.postsToday >= SETTINGS.MAX_POSTS_PER_DAY) {
+        state.isPaused = true;
+        addLog("🛑 Chạm giới hạn 100 bài/ngày. Tạm dừng tới khung giờ Resume kế tiếp.");
+        return;
+    }
     if (now - state.lastPostTime < SETTINGS.MIN_GAP) return;
     if (state.postedSymbols.has(symbol)) return;
 
-    addLog(`🚀 ĐANG ĐĂNG: ${symbol} đột biến ${change}%...`);
+    addLog(`🚀 PHÁT HIỆN: ${symbol} đột biến ${change}%. Đang đăng bài...`);
 
     const content = `${BANK.P1[Math.floor(Math.random() * 100)]}\n\n${BANK.P2[Math.floor(Math.random() * 100)]}\n\n${BANK.P3[Math.floor(Math.random() * 100)]}\n\n${BANK.P4[Math.floor(Math.random() * 100)]}\n\n#${symbol} $${symbol}`;
 
     try {
-        await axios.post(SETTINGS.SQUARE_URL, { bodyTextOnly: content }, {
+        const response = await axios.post(SETTINGS.SQUARE_URL, { bodyTextOnly: content }, {
             headers: { "X-Square-OpenAPI-Key": SQUAD_API_KEY, "Content-Type": "application/json" }
         });
         
@@ -135,25 +150,144 @@ async function postToSquare(symbol, change, type) {
         state.stats[type]++;
         state.lastPostTime = now;
         state.postedSymbols.add(symbol);
-        addLog(`✅ THÀNH CÔNG: #${state.postsToday} [${symbol}]`);
+        addLog(`✅ THÀNH CÔNG: Đã đăng bài cho ${symbol}. (Số lượng: ${state.postsToday}/100)`);
 
     } catch (e) {
-        const errMsg = e.response?.data?.message || "";
-        if (errMsg.includes("limit") || state.postsToday >= SETTINGS.MAX_POSTS_PER_DAY) {
+        const errMsg = e.response?.data?.message || e.message;
+        addLog(`⚠️ THẤT BẠI: ${symbol} - Lỗi: ${errMsg}`);
+        
+        // Nếu Binance trả về lỗi limit hoặc cấm đăng
+        if (errMsg.toLowerCase().includes("limit") || errMsg.toLowerCase().includes("forbidden")) {
             state.isPaused = true;
-            addLog("🛑 BINANCE LIMIT: Tạm dừng đăng tới khung giờ Resume kế tiếp.");
-        } else {
-            addLog(`⚠️ LỖI API: ${symbol} - ${errMsg}`);
+            addLog("⏸️ BINANCE BLOCK: Tự động chuyển sang chế độ Chờ Resume.");
         }
     }
 }
 
+const app = express();
+app.get('/api/status', (req, res) => {
+    const table = Object.entries(state.coinData)
+        .filter(([_, v]) => v.live)
+        .map(([s, v]) => ({ symbol: s, ...v.live, d1: v.d1 }))
+        .sort((a,b) => Math.abs(b.c1) - Math.abs(a.c1))
+        .slice(0, 15);
+    res.json({ ...state, table });
+});
+
+app.get('/api/toggle', (req, res) => { 
+    state.isRunning = !state.isRunning; 
+    addLog(state.isRunning ? "▶️ BOT BẮT ĐẦU CHẠY" : "⏹️ BOT ĐÃ DỪNG");
+    res.json({ s: state.isRunning }); 
+});
+
+app.get('/', (req, res) => {
+    res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><script src="https://cdn.tailwindcss.com"></script><style>@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;900&display=swap'); body{background:#0b0e11; color:#d1d5db;}</style></head>
+    <body class="p-2 font-sans">
+        <div class="max-w-md mx-auto space-y-4">
+            <!-- Header Group -->
+            <div class="bg-[#1e2329] p-5 rounded-[2.5rem] border-b-4 border-yellow-500 shadow-2xl">
+                <div class="flex justify-between items-center mb-6">
+                    <div>
+                        <h1 style="font-family:'Orbitron'" class="text-2xl font-black text-yellow-500 italic">LUFFY PRO</h1>
+                        <p class="text-[9px] text-zinc-500 font-bold uppercase tracking-widest">Binance Square Bot</p>
+                    </div>
+                    <button onclick="toggleBot()" id="btn" class="bg-yellow-500 text-black font-black px-8 py-4 rounded-2xl text-sm transition-all active:scale-95">START</button>
+                </div>
+                
+                <!-- Stats Grid -->
+                <div class="grid grid-cols-3 gap-3">
+                    <div class="bg-black/40 p-3 rounded-2xl border border-zinc-800 text-center">
+                        <p class="text-[9px] text-zinc-500 uppercase font-bold mb-1">BIẾN ĐỘNG</p>
+                        <p id="s1" class="text-lg font-black text-red-500">0</p>
+                    </div>
+                    <div class="bg-black/40 p-3 rounded-2xl border border-zinc-800 text-center">
+                        <p class="text-[9px] text-zinc-500 uppercase font-bold mb-1">NGÀY</p>
+                        <p id="s2" class="text-lg font-black text-green-500">0/100</p>
+                    </div>
+                    <div class="bg-black/40 p-3 rounded-2xl border border-zinc-800 text-center">
+                        <p class="text-[9px] text-zinc-500 uppercase font-bold mb-1">STATUS</p>
+                        <p id="sttText" class="text-[9px] font-black mt-2 italic text-zinc-500">OFFLINE</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Table Section -->
+            <div class="bg-[#1e2329] rounded-[2rem] p-4 border border-zinc-800">
+                <div class="flex items-center gap-2 mb-4">
+                    <div class="w-2 h-2 bg-yellow-500 rounded-full animate-ping"></div>
+                    <h2 class="text-[11px] font-black text-zinc-400 italic">TOP BIẾN ĐỘNG (REALTIME)</h2>
+                </div>
+                <div class="overflow-hidden">
+                    <table class="w-full text-left text-[11px]">
+                        <thead>
+                            <tr class="text-zinc-600 border-b border-zinc-800">
+                                <th class="pb-2">SYMBOL</th>
+                                <th class="pb-2">1M</th>
+                                <th class="pb-2">5M</th>
+                                <th class="pb-2 text-right">24H</th>
+                            </tr>
+                        </thead>
+                        <tbody id="tb"></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Log Section -->
+            <div class="bg-black rounded-[2rem] p-5 border border-zinc-800">
+                <div class="flex justify-between items-center mb-3">
+                    <h2 class="text-[10px] font-black text-zinc-600 uppercase tracking-widest">Nhật ký hoạt động</h2>
+                    <span id="pCount" class="text-[9px] bg-zinc-900 px-2 py-1 rounded-lg border border-zinc-800">Post: 0</span>
+                </div>
+                <div id="lb" class="h-56 overflow-y-auto text-[10px] font-mono space-y-2 text-zinc-500 custom-scroll"></div>
+            </div>
+        </div>
+
+        <script>
+            async function toggleBot() { await fetch('/api/toggle'); }
+            async function update() {
+                const res = await fetch('/api/status'); 
+                const d = await res.json();
+                
+                const btn = document.getElementById('btn');
+                btn.innerText = d.isRunning ? "STOP" : "START";
+                btn.className = d.isRunning ? "bg-red-500 text-white font-black px-8 py-4 rounded-2xl text-sm" : "bg-yellow-500 text-black font-black px-8 py-4 rounded-2xl text-sm";
+                
+                document.getElementById('s1').innerText = d.stats.biendong;
+                document.getElementById('s2').innerText = d.postsToday + "/100";
+                document.getElementById('pCount').innerText = "Đã đăng: " + d.postsToday;
+
+                const stt = document.getElementById('sttText');
+                if(!d.isRunning) { stt.innerText = "OFFLINE"; stt.className="text-[9px] font-black text-zinc-500"; }
+                else if(d.isPaused) { stt.innerText = "PAUSED (LIMIT)"; stt.className="text-[9px] font-black text-orange-500 animate-pulse"; }
+                else { stt.innerText = "RUNNING"; stt.className="text-[9px] font-black text-green-500"; }
+
+                document.getElementById('lb').innerHTML = d.logs.map(l => \`<div class="border-l-2 border-zinc-800 pl-2">\${l}</div>\`).join('');
+                
+                document.getElementById('tb').innerHTML = d.table.map(v => \`
+                    <tr class="border-b border-zinc-900/50">
+                        <td class="py-3 font-black text-zinc-100 italic">\${v.symbol.replace('USDT','')}</td>
+                        <td class="font-bold \${v.c1>=0?'text-green-500':'text-red-500'}">\${v.c1}%</td>
+                        <td class="text-zinc-500 font-medium">\${v.c5}%</td>
+                        <td class="text-right font-bold text-zinc-400">\${v.d1}%</td>
+                    </tr>\`).join('');
+            }
+            setInterval(update, 2000);
+        </script>
+        <style>.custom-scroll::-webkit-scrollbar{width:3px}.custom-scroll::-webkit-scrollbar-thumb{background:#333}</style>
+    </body></html>`);
+});
+
+// Khởi tạo hệ thống
 async function init() {
     try {
         const res = await fetch('https://fapi.binance.com/fapi/v1/ticker/24hr');
         const tickers = await res.json();
         tickers.filter(t => t.symbol.endsWith('USDT')).slice(0, 100).forEach(t => {
-            state.coinData[t.symbol] = { symbol: t.symbol, prices: [{p: parseFloat(t.lastPrice), t: Date.now()}], d1: t.priceChangePercent };
+            state.coinData[t.symbol] = { 
+                symbol: t.symbol, 
+                prices: [{p: parseFloat(t.lastPrice), t: Date.now()}], 
+                d1: t.priceChangePercent 
+            };
         });
         
         const ws = new WebSocket('wss://fstream.binance.com/ws/!ticker@arr');
@@ -162,81 +296,8 @@ async function init() {
             const now = Date.now();
             data.forEach(t => { if(t.s.endsWith('USDT')) updatePriceLogic(t.s, parseFloat(t.c), now, t.P); });
         });
-        addLog("📡 WebSocket kết nối thành công.");
-    } catch (e) { addLog("❌ Khởi tạo dữ liệu thất bại."); }
+        addLog("📡 Kết nối Binance WebSocket thành công.");
+    } catch (e) { addLog("❌ Lỗi khởi tạo dữ liệu."); }
 }
-
-const app = express();
-app.get('/api/status', (req, res) => {
-    const table = Object.entries(state.coinData).filter(v => v[1].live).map(v => ({ s: v[0], ...v[1].live, d1: v[1].d1 })).sort((a,b)=>Math.abs(b.c1)-Math.abs(a.c1)).slice(0, 15);
-    res.json({ ...state, table });
-});
-app.get('/api/toggle', (req, res) => { state.isRunning = !state.isRunning; addLog(state.isRunning ? "▶️ BOT START" : "⏹️ BOT STOP"); res.json({ s: state.isRunning }); });
-
-app.get('/', (req, res) => {
-    res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><script src="https://cdn.tailwindcss.com"></script><style>@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;900&display=swap'); body{background:#0b0e11; color:#d1d5db;}</style></head>
-    <body class="p-2 font-sans">
-        <div class="max-w-md mx-auto space-y-4">
-            <div class="bg-[#1e2329] p-5 rounded-[2.5rem] border-b-4 border-yellow-500 shadow-2xl">
-                <div class="flex justify-between items-center mb-6">
-                    <div>
-                        <h1 style="font-family:'Orbitron'" class="text-2xl font-black text-yellow-500 italic">LUFFY PRO</h1>
-                        <p class="text-[9px] text-zinc-500 font-bold uppercase tracking-widest">Square Bot Automation</p>
-                    </div>
-                    <button onclick="toggle()" id="btn" class="bg-yellow-500 text-black font-black px-8 py-4 rounded-2xl text-sm transition-all active:scale-90">START</button>
-                </div>
-                <div class="grid grid-cols-3 gap-3">
-                    <div class="bg-black/40 p-3 rounded-2xl border border-zinc-800 text-center">
-                        <p class="text-[9px] text-zinc-500 uppercase">Biến Động</p>
-                        <p id="stat-bd" class="text-lg font-black text-red-500">0</p>
-                    </div>
-                    <div class="bg-black/40 p-3 rounded-2xl border border-zinc-800 text-center">
-                        <p class="text-[9px] text-zinc-500 uppercase">Ngày</p>
-                        <p id="stat-day" class="text-lg font-black text-green-500">0/100</p>
-                    </div>
-                    <div class="bg-black/40 p-3 rounded-2xl border border-zinc-800 text-center">
-                        <p class="text-[9px] text-zinc-500 uppercase">Trạng Thái</p>
-                        <p id="sttText" class="text-[10px] font-black text-zinc-400 mt-2 italic">OFFLINE</p>
-                    </div>
-                </div>
-            </div>
-
-            <div class="bg-[#1e2329] rounded-[2rem] p-4 border border-zinc-800">
-                <h2 class="text-[11px] font-black text-zinc-500 mb-4 flex gap-2 items-center italic">📊 BẢNG BIẾN ĐỘNG CHI TIẾT</h2>
-                <div class="overflow-x-auto">
-                    <table class="w-full text-left text-[11px]">
-                        <thead><tr class="text-zinc-600 border-b border-zinc-800"><th class="pb-2">COIN</th><th class="pb-2">1M</th><th class="pb-2">5M</th><th class="pb-2 text-right">24H</th></tr></thead>
-                        <tbody id="tb-body"></tbody>
-                    </table>
-                </div>
-            </div>
-
-            <div class="bg-black rounded-[2rem] p-5 border border-zinc-800">
-                <h2 class="text-[11px] font-black text-zinc-600 uppercase mb-3 tracking-widest">Log Chi Tiết</h2>
-                <div id="lb" class="h-60 overflow-y-auto text-[10px] font-mono space-y-2 text-zinc-400"></div>
-            </div>
-        </div>
-        <script>
-            async function toggle() { await fetch('/api/toggle'); }
-            async function update() {
-                const res = await fetch('/api/status'); const d = await res.json();
-                document.getElementById('btn').innerText = d.isRunning ? "STOP" : "START";
-                document.getElementById('btn').className = d.isRunning ? "bg-red-500 text-white font-black px-8 py-4 rounded-2xl text-sm" : "bg-yellow-500 text-black font-black px-8 py-4 rounded-2xl text-sm";
-                document.getElementById('stat-bd').innerText = d.stats.biendong;
-                document.getElementById('stat-day').innerText = d.postsToday + "/100";
-                const stt = document.getElementById('sttText');
-                if(!d.isRunning) { stt.innerText = "OFFLINE"; stt.className="text-[10px] font-black text-zinc-500 uppercase"; }
-                else if(d.isPaused) { stt.innerText = "PAUSED (LIMIT)"; stt.className="text-[10px] font-black text-orange-500 animate-pulse"; }
-                else { stt.innerText = "RUNNING"; stt.className="text-[10px] font-black text-green-500"; }
-                document.getElementById('lb').innerHTML = d.logs.map(l => \`<div class="border-l-2 border-zinc-800 pl-2 opacity-80">\${l}</div>\`).join('');
-                document.getElementById('tb-body').innerHTML = d.table.map(v => \`
-                    <tr class="border-b border-zinc-800/30"><td class="py-3 font-black text-white italic">\${v.s.replace('USDT','')}</td>
-                    <td class="font-bold \${v.c1>=0?'text-green-500':'text-red-500'}">\${v.c1}%</td>
-                    <td class="text-zinc-500">\${v.c5}%</td><td class="text-right text-zinc-400 font-bold">\${v.d1}%</td></tr>\`).join('');
-            }
-            setInterval(update, 2000);
-        </script>
-    </body></html>`);
-});
 
 app.listen(PORT, '0.0.0.0', init);
