@@ -8,10 +8,10 @@ const SQUAD_API_KEY = "8d794c11cc794c958c2c65924c54f2dd";
 
 const SETTINGS = {
     SQUARE_URL: "https://www.binance.com/bapi/composite/v1/public/pgc/openApi/content/add",
-    VOL_LIMIT: 7.0,   
+    VOL_LIMIT: 7.0,    
+    DAY_LIMIT: 10.0,
     MAX_POSTS_PER_DAY: 100,
-    MIN_GAP: 60000,
-    RESUME_HOURS: [0, 3, 7, 11] 
+    MIN_GAP: 60000, // 1 phút giữa mỗi bài đăng
 };
 
 const BANK = {
@@ -31,7 +31,7 @@ const BANK = {
         "📐 Về kỹ thuật giá đã bứt phá khỏi kênh giảm giá.", "🪄 Đường EMA đang thực hiện cú cắt vàng báo hiệu tăng.", "🌊 RSI đang tiến vào vùng mạnh mẽ nhưng chưa quá mua.", "🕯️ Mô hình nến nhấn chìm đã xác nhận xu hướng tăng.", "🎈 Bollinger Band mở rộng cho thấy biến động lớn.", "🛤️ Giá đang nằm trên các đường MA quan trọng.", "🧱 Kháng cự cũ đã trở thành hỗ trợ mới vững chắc.", "🏹 Phân kỳ dương H1 hỗ trợ đà tăng bền vững.", "🏔️ Cấu trúc đỉnh sau cao hơn đỉnh trước duy trì.", "☁️ Ichimoku cho thấy mây xanh nâng đỡ rất tốt.",
         "🔓 Giá đã vượt qua vùng mây Kumo dày đặc.", "📉 MACD đã chính thức giao cắt lên trên đường tín hiệu.", "💥 Khối lượng xác nhận cú bứt phá khỏi vùng tích lũy.", "☕ Mô hình cốc tay cầm đang dần hoàn thiện.", "🔭 Giá đang test lại vùng đỉnh cũ với lực cầu tốt.", "🛡️ Vùng hỗ trợ tâm lý đang được bảo vệ nghiêm ngặt.", "🔄 Stochastic đang quay trở lại vùng tăng trưởng.", "🌊 Cấu trúc sóng Elliott đang đi vào sóng 3 đẩy.", "🌅 Giá đã thoát khỏi vùng quá bán trên khung D1.", "🧬 Sự hội tụ của các chỉ báo kỹ thuật quan trọng.",
         "🔺 Mô hình tam giác tăng đã bị phá vỡ hướng lên.", "🛤️ Giá đang duy trì trên đường trendline tăng dài hạn.", "🌬️ Cú điều chỉnh vừa qua chỉ là nhịp retest kỹ thuật.", "🍃 Áp lực bán suy giảm rõ rệt trên biểu đồ nến.", "🧱 Sự bùng nổ từ mô hình nền giá phẳng dài ngày.", "💎 Tín hiệu đảo chiều mạnh mẽ từ vùng hỗ trợ cứng.", "🗼 Dải lăng trụ đang hướng lên cho thấy lực cầu mạnh.", "📏 Giá đang chinh phục các mốc Fibonacci quan trọng.", "⚡ ADX cho thấy xu hướng đang mạnh dần lên.", "🤝 Sự đồng thuận tuyệt vời giữa giá và khối lượng.",
-        "🚩 Mô hình cờ tăng đang tích lũy tại vùng giá cao.", "🎯 Giá đã phá vỡ ngưỡng cản Fib 0.618 thần thánh.", "🧨 Tín hiệu Breakout đi kèm with volume cực đại.", "🐂 Cấu trúc nến cho thấy phe bò đang làm chủ.", "⚖️ Sự ổn định tại vùng giá cân bằng mới.", "📊 Volume Profile cho thấy sự tích lũy rất lớn.", "🌅 Mô hình nến Morning Star báo hiệu đảo chiều.", "🚀 Giá đã vượt qua kháng cự dải siêu xu hướng.", "🏗️ Market Structure đang chuyển dịch sang tăng.", "📽️ Tín hiệu xác nhận từ khung thời gian lớn hơn.",
+        "🚩 Mô hình cờ tăng đang tích lũy tại vùng giá cao.", "🎯 Giá đã phá vỡ ngưỡng cản Fib 0.618 thần thánh.", "🧨 Tín hiệu Breakout đi kèm với volume cực đại.", "🐂 Cấu trúc nến cho thấy phe bò đang làm chủ.", "⚖️ Sự ổn định tại vùng giá cân bằng mới.", "📊 Volume Profile cho thấy sự tích lũy rất lớn.", "🌅 Mô hình nến Morning Star báo hiệu đảo chiều.", "🚀 Giá đã vượt qua kháng cự dải siêu xu hướng.", "🏗️ Market Structure đang chuyển dịch sang tăng.", "📽️ Tín hiệu xác nhận từ khung thời gian lớn hơn.",
         "🌪️ Vùng cung đã bị hấp thụ hoàn toàn bởi lực mua.", "🏁 Giá đang tiến sát mục tiêu chốt lời đầu tiên.", "📦 Sự bứt phá khỏi vùng tích lũy hình hộp Darvas.", "🏎️ Chỉ báo CCI đang tăng vọt lên vùng tích cực.", "💂 Mô hình 3 chàng lính trắng đang hình thành.", "⚓ Giá đã tìm thấy điểm tựa tại đường MA200.", "🤏 Sự thu hẹp của độ biến động trước cú bứt phá.", "👻 Tín hiệu phân kỳ ẩn báo hiệu tiếp diễn xu hướng.", "🏔️ Giá đang hình thành mô hình đáy sau cao hơn.", "🧬 Sự hội tụ của các đường trung bình động ngắn.",
         "🚥 Chỉ báo Parabolic SAR đã nhảy xuống dưới giá.", "🎭 Mô hình vai đầu vai ngược đã chính thức xác nhận.", "🌬️ Áp lực cung cạn kiệt tại vùng biên dưới dải băng.", "🎢 Giá đang chạy trong một kênh tăng giá hoàn hảo.", "🚀 Sự đột phá về giá khỏi vùng giá trị quan trọng.", "⛲ Chỉ báo MFI cho thấy dòng tiền nạp vào mạnh.", "📐 Mô hình cái nêm giảm đã bị phá vỡ hướng lên.", "🧪 Giá đang test lại đường cổ của mô hình đảo chiều.", "🟢 Cấu trúc nến Heikin Ashi đã chuyển sang màu xanh.", "🕳️ Sự ổn định của giá phía trên vùng gap tăng.",
         "🪜 Chỉ báo Keltner Channel đang bị đẩy lên phía trên.", "📅 Giá đã vượt qua mốc cao nhất của tuần trước.", "📍 Tín hiệu tăng trưởng mạnh mẽ từ vùng pivot.", "⛸️ Mô hình 2 đáy đã hoàn thành nhịp kiểm định.", "📢 Sự cộng hưởng của nhiều khung thời gian cùng tăng.", "🧱 Giá đang giữ vững trên ngưỡng hỗ trợ Fib 0.5.", "📈 Chỉ báo OBV đang tăng vọt cùng với đường giá.", "📌 Mô hình nến Pin bar từ chối giảm tại hỗ trợ.", "🌊 Giá đang chuẩn bị cho một nhịp sóng đẩy mới.", "🔨 Sự bứt phá khỏi vùng cản kỹ thuật cứng nhất.",
@@ -43,7 +43,7 @@ const BANK = {
         "📝 Kế hoạch tối ưu là kiên nhẫn chờ điểm vào lệnh đẹp.", "🛡️ Quản trị rủi ro bằng cách đặt dừng lỗ tuyệt đối.", "🎯 Chiến lược mua khi điều chỉnh vẫn tỏ ra hiệu quả.", "🛑 Đừng FOMO tại vùng giá này, hãy đợi nhịp test lại.", "💰 Chia vốn ra vào lệnh để tối ưu hóa giá vị thế.", "🧊 Luôn giữ cái đầu lạnh trước những biến động.", "🎁 Mục tiêu chốt lời ngắn hạn đã được xác định rõ.", "🎢 Gồng lãi là nghệ thuật, hãy nâng trailing stop.", "🔒 Bảo vệ lợi nhuận luôn là ưu tiên hàng đầu.", "📏 Hãy tuân thủ kỷ luật giao dịch để đi đường dài.",
         "🔑 Kỷ luật là chìa khóa để tồn tại trên thị trường.", "🚪 Luôn có kế hoạch thoát lệnh trước khi tham gia.", "🧺 Đừng đặt tất cả trứng vào một giỏ duy nhất.", "⏳ Kiên nhẫn là đức tính quý giá nhất của trader.", "💸 Hãy giao dịch với số vốn bạn có thể mất.", "🛡️ Không có gì chắc chắn, hãy luôn phòng vệ.", "📅 Theo dõi sát sao các tin tức quan trọng.", "🤕 Học cách chấp nhận thua lỗ như một phần cuộc chơi.", "🧘 Đừng để cảm xúc chi phối các quyết định.", "📔 Luôn ghi lại nhật ký để rút kinh nghiệm.",
         "🤝 Tin tưởng vào hệ thống và phương pháp của mình.", "🧨 Sự chuẩn bị kỹ lưỡng sẽ giảm bớt sự sợ hãi.", "✅ Chỉ vào lệnh khi các điều kiện đã hội tụ đủ.", "👁️ Quan sát phản ứng của giá tại các vùng then chốt.", "🌊 Hãy là người đi theo xu hướng, đừng chặn đầu.", "📉 Lợi nhuận bền vững đến từ sự nhất quán.", "⏲️ Đừng cố giao dịch quá nhiều trong một ngày.", "🪑 Biết khi nào nên đứng ngoài là một kỹ năng.", "🤝 Tôn trọng xu hướng thị trường, xu hướng là bạn.", "📚 Cập nhật kiến thức thường xuyên để thích nghi.",
-        "🦁 Tự tin nhưng không được chủ quan trước thị trường.", "⚖️ Xác định tỷ lệ rủi ro/lợi nhuận phù hợp.", "💼 Hãy coi trading là một công việc kinh doanh.", "🛠️ Tận dụng các công cụ hỗ trợ để tăng hiệu quả.", "🙅 Đừng bị ảnh hưởng bởi đám đông xung quanh.", "💎 Tập trung vào chất lượng lệnh thay vì số lượng.", "🛋️ Giữ tâm thế thoải mái nhất khi giữ vị thế.", "🔍 Hiểu rõ đặc tính của từng cặp giao dịch.", "🛡️ Hãy luôn đặt sự an toàn của tài khoản lên trước.", "🎓 Học hỏi từ những người đi trước có kinh nghiệm.",
+        "🦁 Tự tin nhưng không được chủ quan trước thị trường.", "⚖️ Xác định tỷ lệ rủi ro/lợi nhuận phù hợp.", "💼 Hãy coi trading là một công việc kinh doanh.", "🛠️ Tận dụng các công cụ hỗ trợ để tăng hiệu quả.", "🙅 Đừng bị ảnh hưởng bởi đám đông quanh.", "💎 Tập trung vào chất lượng lệnh thay vì số lượng.", "🛋️ Giữ tâm thế thoải mái nhất khi giữ vị thế.", "🔍 Hiểu rõ đặc tính của từng cặp giao dịch.", "🛡️ Hãy luôn đặt sự an toàn của tài khoản lên trước.", "🎓 Học hỏi từ những người đi trước có kinh nghiệm.",
         "🧊 Sự bình tĩnh giúp bạn nhìn nhận thị trường đúng.", "🥊 Đừng cố gỡ gạc sau một lệnh thua đau.", "🎁 Thị trường luôn có cơ hội, đừng lo bỏ lỡ.", "🏔️ Hãy kiên định với mục tiêu dài hạn đã đề ra.", "⚙️ Tối ưu lợi nhuận bằng cách quản lý lệnh thông minh.", "🔄 Sẵn sàng thay đổi quan điểm nếu giá thay đổi.", "🕹️ Luôn giữ mức đòn bẩy ở mức an toàn nhất.", "🖼️ Phân tích đa khung thời gian để có cái nhìn tổng.", "🧘 Cân bằng giữa giao dịch và cuộc sống cá nhân.", "🎈 Đừng kỳ vọng quá cao vào một lệnh duy nhất.",
         "🗣️ Hãy để thị trường trả lời thay vì dự đoán mò.", "📏 Luyện tập thói quen kiểm soát rủi ro hàng ngày.", "🧪 Khám phá các phương pháp mới có chọn lọc.", "🧹 Giữ cho biểu đồ giao dịch sạch sẽ và dễ nhìn.", "⚙️ Hiểu rõ cơ chế hoạt động của sàn giao dịch.", "⚠️ Hãy luôn cảnh giác với các bẫy giá thị trường.", "📝 Tự đánh giá bản thân sau mỗi tuần giao dịch.", "🧠 Nâng cao khả năng chịu đựng tâm lý bản thân.", "🍀 Giao dịch đơn giản thường mang lại hiệu quả cao.", "🍬 Hãy biết hài lòng với những gì mình đạt được.",
         "👂 Lắng nghe phản hồi từ thị trường thay vì ý kiến.", "🔔 Cẩn trọng với biến động trước giờ ra tin mạnh.", "📍 Tìm kiếm những vùng giá có xác suất thắng cao.", "🛡️ Luôn có phương án dự phòng cho mọi tình huống.", "🚫 Đừng bao giờ giao dịch dựa trên sự trả thù.", "⛓️ Sự kỷ luật sẽ mang lại tự do tài chính.", "📜 Hãy tôn trọng những quy tắc do chính mình đặt ra.", "🤏 Kiểm soát lòng tham khi thị trường hưng phấn.", "⚓ Giữ vững niềm tin vào con đường đã chọn.", "🎓 Mỗi sai lầm đều là một bài học vô giá.",
@@ -55,7 +55,7 @@ const BANK = {
         "🍻 Chúc anh em có ngày giao dịch bùng nổ lợi nhuận.", "🍀 Hy vọng may mắn mỉm cười với mọi quyết định.", "🌳 Chúc danh mục của anh em luôn xanh rực rỡ.", "👋 Hẹn gặp lại anh em ở những vùng giá cao hơn.", "🤝 Cùng nhau chinh phục thị trường đầy tiềm năng.", "✨ Tận hưởng niềm vui khi phân tích đúng hướng.", "🏆 Thắng không kiêu bại không nản, chúc thành công.", "🔑 Thị trường luôn có cơ hội cho người chuẩn bị.", "🎖️ Chào thân ái và quyết thắng cho toàn cộng đồng.", "🌈 Chúc anh em gặt hái được nhiều thành quả.",
         "☀️ Hy vọng một ngày giao dịch suôn sẻ và thuận lợi.", "🛶 Chúc anh em vững tay chèo trên con sóng này.", "⏳ Thành công sẽ đến với những người kiên trì nhất.", "🎯 Chúc các vị thế của bạn sớm chạm mục tiêu.", "🚀 Hy vọng danh mục của bạn sẽ thăng hoa hôm nay.", "🧠 Chúc mọi người có những quyết định sáng suốt.", "🎈 Niềm vui từ trading sẽ lan tỏa đến cuộc sống.", "🌙 Chúc anh em có một buổi tối chốt lời rực rỡ.", "📍 Hẹn gặp lại tại những cột mốc thành công mới.", "🌍 Chúc cộng đồng chúng ta ngày càng lớn mạnh.",
         "🎁 Mọi nỗ lực sẽ sớm được đền đáp xứng đáng thôi.", "🧊 Chúc bạn luôn giữ được sự bình tĩnh và tự tin.", "🛡️ Thị trường sẽ trả thưởng cho sự kỷ luật của bạn.", "⚡ Chúc một ngày tràn đầy năng lượng và lợi nhuận.", "🔮 Hy vọng các dự báo của bạn đều trở thành sự thật.", "💎 Chúc anh em tìm thấy những viên ngọc quý.", "🥳 Cùng nhau chia sẻ niềm vui chiến thắng hôm nay.", "🗺️ Chúc bạn có một hành trình trading thú vị.", "🤝 Hy vọng may mắn sẽ là người bạn đồng hành.", "📍 Chúc anh em chốt được lệnh tại điểm đẹp nhất.",
-        "🆙 Thành công không chỉ là tiền, đó là sự trưởng thành.", "😊 Chúc mọi người luôn vui vẻ dù thị trường ra sao.", "🔓 Hy vọng bạn sẽ đạt được tự do tài chính sớm.", "🧠 Chúc anh em luôn tỉnh táo trong mọi thông huống.", "🏖️ Hãy tận hưởng ngày nghỉ sau những lệnh thắng.", "📈 Chúc danh mục của bạn tăng trưởng bền vững.", "🟢 Hy vọng bạn sẽ thấy những con số xanh mướt.", "🔥 Chúc anh em luôn giữ được lửa đam mê.", "🏆 Thành công rực rỡ sẽ sớm gọi tên bạn thôi.", "🎬 Chúc bạn có những trải nghiệm tuyệt vời hôm nay.",
+        "🆙 Thành công không chỉ là tiền, đó là sự trưởng thành.", "😊 Chúc mọi người luôn vui vẻ dù thị trường ra sao.", "🔓 Hy vọng bạn sẽ đạt được tự do tài chính sớm.", "🧠 Chúc anh em luôn tỉnh táo trong mọi tình huống.", "🏖️ Hãy tận hưởng ngày nghỉ sau những lệnh thắng.", "📈 Chúc danh mục của bạn tăng trưởng bền vững.", "🟢 Hy vọng bạn sẽ thấy những con số xanh mướt.", "🔥 Chúc anh em luôn giữ được lửa đam mê.", "🏆 Thành công rực rỡ sẽ sớm gọi tên bạn thôi.", "🎬 Chúc bạn có những trải nghiệm tuyệt vời hôm nay.",
         "🪜 Hy vọng mỗi ngày là một bước tiến mới của bạn.", "🛡️ Chúc anh em luôn là những chiến binh dũng cảm.", "🏔️ Hẹn gặp lại ở đỉnh vinh quang của thị trường.", "🛡️ Chúc mọi người có một tinh thần thép khi trade.", "🎓 Hy vọng bạn sẽ gặt hái được nhiều kinh nghiệm.", "🔭 Chúc anh em luôn có cái nhìn sắc bén nhất.", "🥇 Thắng lợi hôm nay là động lực cho ngày mai.", "❤️ Chúc bạn luôn hạnh phúc với lựa chọn của mình.", "💰 Hy vọng tài khoản của bạn sẽ không ngừng tăng.", "⚡ Chúc anh em có những cú breakout thành công.",
         "📊 Cùng nhau tạo nên những kỷ lục mới cho bản thân.", "🧘 Chúc bạn luôn khỏe mạnh để tận hưởng thành quả.", "🤝 Hy vọng thị trường sẽ ưu ái các vị thế của bạn.", "💼 Chúc anh em có một ngày làm việc hiệu quả.", "🔑 Niềm tin vào bản thân là chìa khóa thành công.", "⏳ Chúc mọi người luôn có đủ sự kiên nhẫn.", "🌅 Hy vọng bạn sẽ không bao giờ phải hối tiếc.", "🕊️ Chúc anh em tìm thấy sự bình yên trong tâm hồn.", "🥇 Thành quả xứng đáng đang chờ bạn ở phía trước.", "👑 Chúc bạn luôn là người dẫn đầu trong mọi cuộc chơi.",
         "📚 Hy vọng mỗi lệnh trade đều mang lại bài học.", "🔭 Chúc anh em luôn có một tầm nhìn xa trông rộng.", "🎉 Thắng lợi của bạn là niềm vui của cộng đồng.", "🌈 Chúc bạn luôn giữ được sự lạc quan.", "🚀 Hy vọng một tương lai tươi sáng đang chờ đón.", "👥 Chúc anh em luôn có những đồng đội tuyệt vời.", "🏔️ Cùng nhau hướng tới những mục tiêu cao cả hơn.", "🧱 Chúc bạn luôn biết cách vượt qua giới hạn.", "💰 Hy vọng bạn sẽ có ngày chốt lời không nghỉ tay.", "🧊 Chúc anh em luôn có trái tim nóng và đầu lạnh.",
@@ -66,30 +66,38 @@ const BANK = {
 
 let state = {
     isRunning: false,
-    isPaused: false, // Trạng thái tạm dừng khi bị limit
+    isSleeping: false,
+    sleepUntil: null,
     postsToday: 0,
     stats: { biendong: 0, day: 0, vol: 0 },
     lastPostTime: 0,
     postedSymbols: new Set(),
-    logs: [`[${new Date().toLocaleTimeString()}] 🟢 Hệ thống LUFFY READY.`],
+    logs: [],
     coinData: {} 
 };
 
 function addLog(msg) {
-    state.logs.unshift(`[${new Date().toLocaleTimeString()}] ${msg}`);
-    if (state.logs.length > 50) state.logs.pop(); 
+    const time = new Date().toLocaleTimeString();
+    state.logs.unshift(`[${time}] ${msg}`);
+    if (state.logs.length > 50) state.logs.pop();
+    console.log(`[${time}] ${msg}`);
 }
 
-// Kiểm tra khung giờ Resume
-setInterval(() => {
+function checkSleepTime() {
+    if (!state.isSleeping) return false;
     const now = new Date();
-    const h = now.getHours();
-    if (state.isPaused && SETTINGS.RESUME_HOURS.includes(h)) {
-        state.isPaused = false;
-        state.postsToday = 0; // Reset số lượng bài đăng ngày mới
-        addLog(`⏰ Đã đến ${h}h. Tự động mở lại và Reset giới hạn đăng bài!`);
+    const currentHour = now.getHours();
+    // Các khung giờ mở lại: 0h, 7h, 11h, 15h (3h chiều)
+    const wakeHours = [0, 7, 11, 15];
+    
+    if (wakeHours.includes(currentHour)) {
+        state.isSleeping = false;
+        state.postsToday = 0; // Reset số bài đăng khi qua khung giờ mới hoặc sang ngày mới
+        addLog("⏰ Đã đến khung giờ vàng, bot hoạt động trở lại!");
+        return false;
     }
-}, 60000); 
+    return true;
+}
 
 function calculateChange(pArr, min) {
     if (!pArr || pArr.length < 2) return 0;
@@ -98,28 +106,26 @@ function calculateChange(pArr, min) {
     return parseFloat((((pArr[pArr.length - 1].p - start.p) / start.p) * 100).toFixed(2));
 }
 
-function updatePriceLogic(s, p, now, change24h = 0) {
-    if (!state.coinData[s]) state.coinData[s] = { symbol: s, prices: [], d1: 0 };
+function updatePriceLogic(s, p, now, change24h = 0, volume = 0) {
+    if (!state.coinData[s]) state.coinData[s] = { symbol: s, prices: [], d1: 0, vol: 0 };
     let d = state.coinData[s];
     d.prices.push({ p, t: now });
-    if (d.prices.length > 200) d.prices.shift();
+    if (d.prices.length > 1000) d.prices.shift();
     if (change24h !== 0) d.d1 = parseFloat(change24h).toFixed(2);
+    if (volume !== 0) d.vol = parseFloat(volume).toFixed(0);
 
     d.live = {
         c1: calculateChange(d.prices, 1),
         c5: calculateChange(d.prices, 5),
-        c15: calculateChange(d.prices, 15),
         currentPrice: p
     };
 
-    if (state.isRunning && !state.isPaused) {
-        // Chỉ in log quét các coin có biến động đáng kể (>1%) để tránh rác log
-        if (Math.abs(d.live.c1) >= 1.0 && now % 10000 < 1000) { 
-             // Log scan nhè nhẹ mỗi 10s một lần
-        }
-
-        if (Math.abs(d.live.c1) >= SETTINGS.VOL_LIMIT) {
+    // Logic kiểm tra để đăng bài
+    if (state.isRunning && !state.isSleeping) {
+        if (Math.abs(d.live.c1) >= SETTINGS.VOL_LIMIT || Math.abs(d.live.c5) >= SETTINGS.VOL_LIMIT) {
             postToSquare(s, d.live.c1, 'biendong');
+        } else if (Math.abs(d.d1) >= SETTINGS.DAY_LIMIT) {
+            postToSquare(s, d.d1, 'day');
         }
     }
 }
@@ -127,144 +133,204 @@ function updatePriceLogic(s, p, now, change24h = 0) {
 async function postToSquare(symbol, change, type) {
     const now = Date.now();
     
-    if (state.isPaused) return;
+    // Kiểm tra limit 100 bài
     if (state.postsToday >= SETTINGS.MAX_POSTS_PER_DAY) {
-        state.isPaused = true;
-        addLog("🛑 Chạm giới hạn 100 bài/ngày. Tự động tạm dừng chờ Resume.");
+        if (!state.isSleeping) {
+            state.isSleeping = true;
+            addLog("⚠️ Đạt giới hạn 100 bài/ngày. Bot tạm nghỉ tới khung giờ tiếp theo (0h, 7h, 11h, 15h).");
+        }
         return;
     }
-    if (now - state.lastPostTime < SETTINGS.MIN_GAP) return;
-    if (state.postedSymbols.has(symbol)) return;
 
-    addLog(`🚀 PHÁT HIỆN: ${symbol} biến động ${change}%. Đang đăng bài...`);
+    if (now - state.lastPostTime < SETTINGS.MIN_GAP || state.postedSymbols.has(symbol)) return;
 
-    const content = `${BANK.P1[Math.floor(Math.random() * 100)]}\n\n${BANK.P2[Math.floor(Math.random() * 100)]}\n\n${BANK.P3[Math.floor(Math.random() * 100)]}\n\n${BANK.P4[Math.floor(Math.random() * 100)]}\n\n#${symbol} $${symbol}`;
+    const content = `${BANK.P1[Math.floor(Math.random() * BANK.P1.length)]}\n\n${BANK.P2[Math.floor(Math.random() * BANK.P2.length)]}\n\n${BANK.P3[Math.floor(Math.random() * BANK.P3.length)]}\n\n${BANK.P4[Math.floor(Math.random() * BANK.P4.length)]}\n\n#${symbol} $${symbol}`;
 
     try {
         const response = await axios.post(SETTINGS.SQUARE_URL, { bodyTextOnly: content }, {
             headers: { "X-Square-OpenAPI-Key": SQUAD_API_KEY, "Content-Type": "application/json" }
         });
-        
+
         state.postsToday++;
         state.stats[type]++;
         state.lastPostTime = now;
         state.postedSymbols.add(symbol);
-        addLog(`✅ THÀNH CÔNG: ${symbol} đã đăng (${state.postsToday}/100)`);
-
-    } catch (e) {
-        const msg = e.response?.data?.message || e.message;
-        addLog(`⚠️ LỖI API: ${symbol} - ${msg}`);
+        addLog(`✅ Đăng bài thành công: ${symbol} (Biến động: ${change}%, Loại: ${type})`);
         
-        if (msg.toLowerCase().includes("limit") || msg.toLowerCase().includes("forbidden")) {
-            state.isPaused = true;
-            addLog("⏸️ BINANCE BLOCK: Tự chuyển sang chế độ tạm dừng tới khung giờ Resume.");
+    } catch (e) {
+        if (e.response && (e.response.status === 429 || e.response.data.code === -4130)) {
+            state.isSleeping = true;
+            addLog("❌ Lỗi Binance: Quá giới hạn bài đăng (Limit 100). Bot tạm dừng.");
+        } else {
+            addLog(`❌ Lỗi API khi đăng ${symbol}: ${e.message}`);
         }
     }
+}
+
+async function bootstrapData() {
+    try {
+        const res = await fetch('https://fapi.binance.com/fapi/v1/ticker/24hr');
+        const tickers = await res.json();
+        const usdtPairs = tickers.filter(t => t.symbol.endsWith('USDT'));
+        for (let t of usdtPairs) {
+            state.coinData[t.symbol] = { 
+                symbol: t.symbol, 
+                prices: [{p: parseFloat(t.lastPrice), t: Date.now()}],
+                d1: parseFloat(t.priceChangePercent).toFixed(2),
+                vol: parseFloat(t.quoteVolume).toFixed(0)
+            };
+        }
+        addLog("📊 Đã khởi tạo dữ liệu thị trường.");
+    } catch (e) { addLog("❌ Lỗi khởi tạo dữ liệu."); }
+}
+
+function initWS() {
+    const ws = new WebSocket('wss://fstream.binance.com/ws/!ticker@arr');
+    ws.on('message', (msg) => {
+        const tickers = JSON.parse(msg);
+        const now = Date.now();
+        checkSleepTime();
+        tickers.forEach(t => { 
+            if (t.s.endsWith('USDT')) {
+                updatePriceLogic(t.s, parseFloat(t.c), now, t.P, t.q); 
+            }
+        });
+    });
+    ws.on('close', () => {
+        addLog("🔄 Mất kết nối WS, đang thử lại...");
+        setTimeout(initWS, 3000);
+    });
 }
 
 const app = express();
 app.get('/api/status', (req, res) => {
     const table = Object.entries(state.coinData)
         .filter(([_, v]) => v.live)
-        .map(([s, v]) => ({ symbol: s, ...v.live, d1: v.d1 }))
-        .sort((a,b) => Math.abs(b.c1) - Math.abs(a.c1))
-        .slice(0, 15);
+        .map(([s, v]) => ({ symbol: s, ...v.live, d1: v.d1, vol: parseFloat(v.vol) }))
+        .sort((a,b) => b.vol - a.vol) // Sắp xếp Vol từ cao tới thấp
+        .slice(0, 20);
     res.json({ ...state, table });
 });
 
 app.get('/api/toggle', (req, res) => { 
     state.isRunning = !state.isRunning; 
-    addLog(state.isRunning ? "▶️ BOT BẮT ĐẦU CHẠY" : "⏹️ BOT ĐÃ DỪNG");
+    addLog(state.isRunning ? "🚀 BOT BẮT ĐẦU CHẠY" : "🛑 BOT ĐÃ DỪNG");
     res.json({ s: state.isRunning }); 
 });
 
 app.get('/', (req, res) => {
-    res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><script src="https://cdn.tailwindcss.com"></script><style>@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;900&display=swap');</style></head>
-    <body class="bg-[#0b0e11] text-white p-2 font-sans">
-        <div class="max-w-md mx-auto space-y-3">
-            <div class="bg-[#1e2329] p-4 rounded-3xl border-b-4 border-yellow-500 shadow-2xl">
+    res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><script src="https://cdn.tailwindcss.com"></script><style>@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;900&display=swap'); .glow { text-shadow: 0 0 10px rgba(234,179,8,0.5); }</style></head>
+    <body class="bg-[#0b0e11] text-zinc-300 p-2 font-sans select-none">
+        <div class="max-w-md mx-auto">
+            <!-- Header & Control -->
+            <div class="bg-[#1e2329] p-4 rounded-2xl border-b-4 border-yellow-500 shadow-2xl mb-3">
                 <div class="flex justify-between items-center mb-4">
-                    <h1 style="font-family:'Orbitron'" class="text-xl font-black text-yellow-500 italic">LUFFY SQUAD</h1>
-                    <button onclick="toggleBot()" id="btn" class="bg-yellow-500 text-black font-black px-6 py-2 rounded-xl text-xs active:scale-95 transition-all">START</button>
+                    <div>
+                        <h1 style="font-family:'Orbitron'" class="text-xl font-black text-yellow-500 italic glow">LUFFY SQUAD</h1>
+                        <div id="status-text" class="text-[10px] text-zinc-500">HỆ THỐNG ĐANG CHỜ...</div>
+                    </div>
+                    <button onclick="toggleBot()" id="btn" class="px-6 py-2 rounded-xl font-bold bg-yellow-500 text-black shadow-lg active:scale-95 transition-all text-sm">START</button>
                 </div>
-                <div class="grid grid-cols-3 gap-2 text-center">
-                    <div class="bg-black/30 p-2 rounded-xl border border-zinc-800">
-                        <div class="text-[9px] text-zinc-500 uppercase font-bold">BIẾN ĐỘNG</div>
-                        <div id="s1" class="text-sm font-black text-red-500">0</div>
+                <!-- Thanh Tab Thống Kê -->
+                <div class="grid grid-cols-3 gap-2 text-center border-t border-white/5 pt-3">
+                    <div class="bg-black/40 p-2 rounded-xl border border-white/5">
+                        <div class="text-[9px] text-zinc-500 mb-1">M1/M5 >7%</div>
+                        <div id="s1" class="text-sm font-bold text-red-500">0/100</div>
                     </div>
-                    <div class="bg-black/30 p-2 rounded-xl border border-zinc-800">
-                        <div class="text-[9px] text-zinc-500 uppercase font-bold">NGÀY</div>
-                        <div id="s2" class="text-sm font-black text-yellow-500">0</div>
+                    <div class="bg-black/40 p-2 rounded-xl border border-white/5">
+                        <div class="text-[9px] text-zinc-500 mb-1">NGÀY >10%</div>
+                        <div id="s2" class="text-sm font-bold text-yellow-500">0/100</div>
                     </div>
-                    <div class="bg-black/30 p-2 rounded-xl border border-zinc-800">
-                        <div class="text-[9px] text-zinc-500 uppercase font-bold">STATUS</div>
-                        <div id="sttText" class="text-[9px] font-black mt-1 italic text-zinc-500 uppercase">OFFLINE</div>
+                    <div class="bg-black/40 p-2 rounded-xl border border-white/5">
+                        <div class="text-[9px] text-zinc-500 mb-1">TỔNG ĐĂNG</div>
+                        <div id="total-stats" class="text-sm font-bold text-blue-500">0/100</div>
                     </div>
                 </div>
             </div>
 
-            <div class="bg-[#1e2329] p-3 rounded-2xl border border-zinc-800">
-                <table class="w-full text-[11px] text-left">
-                    <thead class="text-zinc-600 border-b border-zinc-800">
-                        <tr><th class="pb-2">COIN</th><th class="pb-2 text-right">1M%</th><th class="pb-2 text-right">15M%</th><th class="pb-2 text-right">24H%</th></tr>
-                    </thead>
-                    <tbody id="tb"></tbody>
-                </table>
+            <!-- Table Data -->
+            <div class="bg-[#1e2329] rounded-2xl border border-white/5 shadow-lg overflow-hidden mb-3">
+                <div class="p-3 bg-white/5 text-[10px] font-bold flex justify-between">
+                    <span>DANH SÁCH BIẾN ĐỘNG (VOL CAO)</span>
+                    <span class="text-yellow-500">LIVE DATA</span>
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-[11px] text-left">
+                        <thead class="text-zinc-500 bg-black/20">
+                            <tr>
+                                <th class="p-2">COIN</th>
+                                <th class="text-right p-2">1M%</th>
+                                <th class="text-right p-2">24H%</th>
+                                <th class="text-right p-2">VOL</th>
+                            </tr>
+                        </thead>
+                        <tbody id="tb"></tbody>
+                    </table>
+                </div>
             </div>
 
-            <div id="lb" class="bg-black p-3 rounded-2xl h-48 overflow-y-auto text-[10px] font-mono text-zinc-400 border border-zinc-800 space-y-1"></div>
+            <!-- Log Console -->
+            <div class="bg-black rounded-2xl border border-white/5 p-3 shadow-inner">
+                <div class="text-[9px] text-zinc-600 mb-2 font-bold flex justify-between">
+                    <span>DETAILED LOGS</span>
+                    <span id="bot-mode" class="text-green-500">IDLE</span>
+                </div>
+                <div id="lb" class="h-48 overflow-y-auto text-[10px] font-mono text-zinc-400 space-y-1">
+                    <div class="text-green-600">>>> Hệ thống đã sẵn sàng. Nhấn START để bắt đầu.</div>
+                </div>
+            </div>
         </div>
 
         <script>
-            async function toggleBot() { await fetch('/api/toggle'); }
-            async function refresh() {
-                const res = await fetch('/api/status'); const d = await res.json();
+            async function toggleBot() { 
+                const res = await fetch('/api/toggle'); 
+                const d = await res.json(); 
+                updateBtn(d.s);
+            }
+
+            function updateBtn(running) {
                 const btn = document.getElementById('btn');
-                btn.innerText = d.isRunning ? "STOP" : "START";
-                btn.className = d.isRunning ? "bg-red-500 text-white font-black px-6 py-2 rounded-xl text-xs" : "bg-yellow-500 text-black font-black px-6 py-2 rounded-xl text-xs";
-                
-                document.getElementById('s1').innerText = d.stats.biendong;
-                document.getElementById('s2').innerText = d.postsToday + "/100";
+                btn.innerText = running ? "STOP" : "START";
+                btn.className = running ? "px-6 py-2 rounded-xl font-bold bg-red-500 text-white shadow-lg text-sm" : "px-6 py-2 rounded-xl font-bold bg-yellow-500 text-black shadow-lg text-sm";
+                document.getElementById('status-text').innerText = running ? "BOT ĐANG QUÉT THỊ TRƯỜNG..." : "BOT ĐANG TẠM DỪNG.";
+                document.getElementById('bot-mode').innerText = running ? "RUNNING" : "IDLE";
+            }
 
-                const stt = document.getElementById('sttText');
-                if(!d.isRunning) { stt.innerText = "OFFLINE"; stt.style.color="#71717a"; }
-                else if(d.isPaused) { stt.innerText = "WAITING..."; stt.style.color="#f97316"; }
-                else { stt.innerText = "SCANNING"; stt.style.color="#22c55e"; }
+            async function refresh() {
+                try {
+                    const res = await fetch('/api/status'); 
+                    const d = await res.json();
+                    
+                    document.getElementById('s1').innerText = d.stats.biendong + "/100";
+                    document.getElementById('s2').innerText = d.stats.day + "/100";
+                    document.getElementById('total-stats').innerText = d.postsToday + "/100";
+                    
+                    if(d.isSleeping) {
+                        document.getElementById('bot-mode').innerText = "SLEEPING";
+                        document.getElementById('bot-mode').className = "text-yellow-500";
+                    }
 
-                document.getElementById('lb').innerHTML = d.logs.map(l => \`<div class="border-l border-zinc-800 pl-2">\${l}</div>\`).join('');
-                document.getElementById('tb').innerHTML = d.table.map(v => \`
-                    <tr class="border-b border-zinc-900/50">
-                        <td class="py-2 font-black text-zinc-200 italic">\${v.symbol.replace('USDT','')}</td>
-                        <td class="text-right font-bold \${v.c1>=0?'text-green-500':'text-red-500'}">\${v.c1}%</td>
-                        <td class="text-right text-zinc-500 font-bold">\${v.c15}%</td>
-                        <td class="text-right \${v.d1>=0?'text-green-500':'text-red-500'}">\${v.d1}%</td>
-                    </tr>\`).join('');
+                    document.getElementById('lb').innerHTML = d.logs.map(l => {
+                        let color = l.includes('✅') ? 'text-green-400' : (l.includes('❌') ? 'text-red-400' : 'text-zinc-500');
+                        return \`<div class="\${color}">\${l}</div>\`;
+                    }).join('');
+
+                    document.getElementById('tb').innerHTML = d.table.map(v => \`
+                        <tr class="border-b border-white/5 hover:bg-white/5 transition-colors">
+                            <td class="p-2 font-bold text-zinc-200">\${v.symbol.replace('USDT','')}</td>
+                            <td class="text-right p-2 \${v.c1>=0?'text-green-500':'text-red-500'} font-mono">\${v.c1 > 0 ? '+' : ''}\${v.c1}%</td>
+                            <td class="text-right p-2 \${v.d1>=0?'text-green-500':'text-red-500'} font-bold font-mono">\${v.d1}%</td>
+                            <td class="text-right p-2 text-zinc-500">\${(v.vol/1000000).toFixed(1)}M</td>
+                        </tr>\`).join('');
+                } catch(e) {}
             }
             setInterval(refresh, 2000);
         </script>
     </body></html>`);
 });
 
-async function init() {
-    try {
-        const res = await fetch('https://fapi.binance.com/fapi/v1/ticker/24hr');
-        const tickers = await res.json();
-        tickers.filter(t => t.symbol.endsWith('USDT')).slice(0, 100).forEach(t => {
-            state.coinData[t.symbol] = { 
-                symbol: t.symbol, 
-                prices: [{p: parseFloat(t.lastPrice), t: Date.now()}], 
-                d1: t.priceChangePercent 
-            };
-        });
-        
-        const ws = new WebSocket('wss://fstream.binance.com/ws/!ticker@arr');
-        ws.on('message', (m) => {
-            const data = JSON.parse(m);
-            const now = Date.now();
-            data.forEach(t => { if(t.s.endsWith('USDT')) updatePriceLogic(t.s, parseFloat(t.c), now, t.P); });
-        });
-        addLog("📡 Đã kết nối WebSocket Binance.");
-    } catch (e) { addLog("❌ Lỗi khởi tạo."); }
-}
-
-app.listen(PORT, '0.0.0.0', init);
+app.listen(PORT, '0.0.0.0', async () => {
+    await bootstrapData();
+    initWS();
+    console.log(`Luffy Square Bot chạy tại http://localhost:${PORT}`);
+});
