@@ -1,8 +1,6 @@
 const PORT = 7001;
 const HISTORY_FILE = './history_db.json';
 const LEVERAGE_FILE = './leverage_cache.json';
-const COOLDOWN_MINUTES = 15; 
-const MAX_HOLD_MINUTES = 555555; 
 
 import WebSocket from 'ws';
 import express from 'express';
@@ -13,60 +11,26 @@ const app = express();
 let coinData = {}; 
 let historyMap = new Map(); 
 let symbolMaxLeverage = {}; 
-let lastTradeClosed = {}; 
 
-let currentTP = 0.5, currentSL = 10.0, currentMinVol = 6.5, tradeMode = 'FOLLOW';
+// Cấu hình mặc định (Sẽ được ghi đè bởi giao diện)
+let currentTP = 0.5, currentSL = 2.0, currentMinVol = 6.5;
 
-let actionQueue = [];
-async function processQueue() {
-    if (actionQueue.length === 0) return;
-    actionQueue.sort((a, b) => a.priority - b.priority);
-    const task = actionQueue.shift();
-    task.action();
-    setTimeout(processQueue, 350); 
+// Khởi tạo dữ liệu
+if (fs.existsSync(HISTORY_FILE)) {
+    try {
+        const savedData = JSON.parse(fs.readFileSync(HISTORY_FILE));
+        savedData.forEach(h => historyMap.set(`${h.symbol}_${h.startTime}`, h));
+    } catch (e) {}
 }
-setInterval(processQueue, 50);
 
 async function bootstrapData() {
     try {
         const res = await fetch('https://fapi.binance.com/fapi/v1/ticker/price');
         const tickers = await res.json();
-        const usdtPairs = tickers.filter(t => t.symbol.endsWith('USDT')).slice(0, 100); 
+        const usdtPairs = tickers.filter(t => t.symbol.endsWith('USDT')).slice(0, 50); 
         for (let t of usdtPairs) {
-            const kRes = await fetch(`https://fapi.binance.com/fapi/v1/klines?symbol=${t.symbol}&interval=1m&limit=30`);
-            const kData = await kRes.json();
             if(!coinData[t.symbol]) coinData[t.symbol] = { symbol: t.symbol, prices: [] };
-            coinData[t.symbol].prices = kData.map(k => ({ p: parseFloat(k[4]), t: parseInt(k[0]) }));
         }
-    } catch (e) { console.log("LOG: [BOOTSTRAP] Lỗi: " + e.message); }
-}
-
-async function fallbackAPI() {
-    try {
-        const res = await fetch('https://fapi.binance.com/fapi/v1/ticker/price');
-        const data = await res.json();
-        const now = Date.now();
-        data.forEach(t => { 
-            if(t.symbol.endsWith('USDT')) handlePriceUpdate(t.symbol, parseFloat(t.price), now);
-        });
-    } catch (e) {}
-    setTimeout(fallbackAPI, 3000);
-}
-
-function fPrice(p) {
-    if (!p || p === 0) return "0.0000";
-    let s = p.toFixed(20);
-    let match = s.match(/^-?\d+\.0*[1-9]/);
-    if (!match) return p.toFixed(4);
-    let index = match[0].length;
-    return parseFloat(p).toFixed(index - match[0].indexOf('.') + 3);
-}
-
-if (fs.existsSync(LEVERAGE_FILE)) { try { symbolMaxLeverage = JSON.parse(fs.readFileSync(LEVERAGE_FILE)); } catch(e){} }
-if (fs.existsSync(HISTORY_FILE)) {
-    try {
-        const savedData = JSON.parse(fs.readFileSync(HISTORY_FILE));
-        savedData.forEach(h => historyMap.set(`${h.symbol}_${h.startTime}`, h));
     } catch (e) {}
 }
 
@@ -78,9 +42,9 @@ function calculateChange(pArr, min) {
 }
 
 function handlePriceUpdate(s, p, now) {
-    if (!coinData[s]) coinData[s] = { symbol: s, prices: [] };
+    if (!coinData[s]) return;
     coinData[s].prices.push({ p, t: now });
-    if (coinData[s].prices.length > 1000) coinData[s].prices.shift(); 
+    if (coinData[s].prices.length > 500) coinData[s].prices.shift(); 
 
     const c1 = calculateChange(coinData[s].prices, 1), 
           c5 = calculateChange(coinData[s].prices, 5), 
@@ -88,53 +52,53 @@ function handlePriceUpdate(s, p, now) {
     coinData[s].live = { c1, c5, c15, currentPrice: p };
     
     const pending = Array.from(historyMap.values()).find(h => h.symbol === s && h.status === 'PENDING');
+    
     if (pending) {
         const diffAvg = ((p - pending.avgPrice) / pending.avgPrice) * 100;
-        const currentRoi = (pending.type === 'LONG' ? diffAvg : -diffAvg) * (pending.maxLev || 20);
+        const currentRoi = (pending.type === 'LONG' ? diffAvg : -diffAvg) * 20;
         
-        if (!pending.maxNegativeRoi || currentRoi < pending.maxNegativeRoi) { 
-            pending.maxNegativeRoi = currentRoi;
-            pending.maxNegativeTime = now;
-        }
+        if (currentRoi < pending.maxNegativeRoi) pending.maxNegativeRoi = currentRoi;
 
-        const win = pending.type === 'LONG' ? diffAvg >= pending.tpTarget : diffAvg <= -pending.tpTarget; 
-        const isTimeout = (now - pending.startTime) >= (MAX_HOLD_MINUTES * 60000);
-        if (win || isTimeout) {
-            pending.status = win ? 'WIN' : 'TIMEOUT'; 
+        // Check Win/Loss
+        const isWin = pending.type === 'LONG' ? diffAvg >= pending.tpTarget : diffAvg <= -pending.tpTarget;
+        const isLoss = pending.type === 'LONG' ? diffAvg <= -pending.slTarget : diffAvg >= pending.slTarget;
+
+        if (isWin || (isLoss && pending.isRecovery)) {
+            pending.status = isWin ? 'WIN' : 'LOSS';
             pending.finalPrice = p; pending.endTime = now;
             pending.pnlPercent = (pending.type === 'LONG' ? diffAvg : -diffAvg);
-            lastTradeClosed[s] = now; 
-            fs.writeFileSync(HISTORY_FILE, JSON.stringify(Array.from(historyMap.values()))); 
+            fs.writeFileSync(HISTORY_FILE, JSON.stringify(Array.from(historyMap.values())));
             return;
         }
 
-        const totalDiffFromEntry = ((p - pending.snapPrice) / pending.snapPrice) * 100;
-        const nextDcaThreshold = (pending.dcaCount + 1) * pending.slTarget;
-        const triggerDCA = pending.type === 'LONG' ? totalDiffFromEntry <= -nextDcaThreshold : totalDiffFromEntry >= nextDcaThreshold;
-        
-        if (triggerDCA && !actionQueue.find(q => q.id === s)) {
-            actionQueue.push({ id: s, priority: 1, action: () => {
-                const newCount = pending.dcaCount + 1;
-                const newAvg = ((pending.avgPrice * (pending.dcaCount + 1)) + p) / (newCount + 1);
-                if(!pending.dcaHistory) pending.dcaHistory = [];
-                pending.dcaHistory.push({ t: Date.now(), p: p, avg: newAvg });
-                pending.avgPrice = newAvg; pending.dcaCount = newCount;
-                if(pending.dcaCount >= 5) pending.maxLev = 50; // Ví dụ: DCA nhiều tự bật mode 50x
-            }});
-        }
-    } else if (Math.max(Math.abs(c1), Math.abs(c5), Math.abs(c15)) >= currentMinVol && !(lastTradeClosed[s] && (now - lastTradeClosed[s] < COOLDOWN_MINUTES * 60000))) {
-        if (!actionQueue.find(q => q.id === s)) {
-            actionQueue.push({ id: s, priority: 2, action: () => {
-                const sumVol = c1 + c5 + c15;
-                let type = (tradeMode === 'REVERSE') ? (sumVol >= 0 ? 'SHORT' : 'LONG') : (sumVol >= 0 ? 'LONG' : 'SHORT');
-                if (tradeMode === 'LONG_ONLY') type = 'LONG';
-                if (tradeMode === 'SHORT_ONLY') type = 'SHORT';
-                historyMap.set(`${s}_${now}`, { 
-                    symbol: s, startTime: now, snapPrice: p, avgPrice: p, type: type, status: 'PENDING', 
-                    maxLev: symbolMaxLeverage[s] || 20, tpTarget: currentTP, slTarget: currentSL, 
-                    snapVol: { c1, c5, c15 }, maxNegativeRoi: 0, maxNegativeTime: null, dcaCount: 0, dcaHistory: [{ t: now, p: p, avg: p }] 
+        // Logic DCA & RECOVERY (Mở ngược x50 Margin)
+        const triggerDCA = pending.type === 'LONG' ? diffAvg <= -pending.slTarget : diffAvg >= pending.slTarget;
+        if (triggerDCA && !pending.isRecovery) {
+            if (pending.dcaCount < 3) {
+                pending.dcaCount++;
+                pending.avgPrice = ((pending.avgPrice * pending.dcaCount) + p) / (pending.dcaCount + 1);
+            } else {
+                // CHẠM MAX DCA -> MỞ NGƯỢC X50 MARGIN
+                pending.status = 'HEDGED';
+                pending.endTime = now;
+                // Tạo lệnh mới ngược chiều
+                const recoveryType = pending.type === 'LONG' ? 'SHORT' : 'LONG';
+                historyMap.set(`${s}_${now}_REC`, {
+                    symbol: s, startTime: now, snapPrice: p, avgPrice: p, 
+                    type: recoveryType, status: 'PENDING', isRecovery: true, // Đánh dấu lệnh tím
+                    dcaCount: 0, tpTarget: pending.tpTarget, slTarget: 1.0,
+                    snapVol: { c1, c5, c15 }, maxNegativeRoi: 0
                 });
-            }});
+            }
+        }
+    } else {
+        if (Math.max(Math.abs(c1), Math.abs(c5)) >= currentMinVol) {
+            historyMap.set(`${s}_${now}`, { 
+                symbol: s, startTime: now, snapPrice: p, avgPrice: p, 
+                type: c1 > 0 ? 'LONG' : 'SHORT', status: 'PENDING', isRecovery: false,
+                dcaCount: 0, tpTarget: currentTP, slTarget: currentSL,
+                snapVol: { c1, c5, c15 }, maxNegativeRoi: 0 
+            });
         }
     }
 }
@@ -144,195 +108,154 @@ function initWS() {
     ws.on('message', (data) => {
         const tickers = JSON.parse(data);
         const now = Date.now();
-        tickers.forEach(t => { if(t.s.endsWith('USDT')) handlePriceUpdate(t.s, parseFloat(t.c), now); });
+        tickers.forEach(t => handlePriceUpdate(t.s, parseFloat(t.c), now));
     });
-    ws.on('close', () => setTimeout(initWS, 5000));
 }
-
-app.get('/api/config', (req, res) => {
-    currentTP = parseFloat(req.query.tp); currentSL = parseFloat(req.query.sl); currentMinVol = parseFloat(req.query.vol); tradeMode = req.query.mode || 'FOLLOW';
-    res.sendStatus(200);
-});
 
 app.get('/api/data', (req, res) => {
     const all = Array.from(historyMap.values());
     res.json({ 
         allPrices: Object.fromEntries(Object.entries(coinData).filter(([s,v])=>v.live).map(([s, v]) => [s, v.live.currentPrice])),
-        live: Object.entries(coinData).filter(([_, v]) => v.live).map(([s, v]) => ({ symbol: s, ...v.live })).sort((a,b) => Math.abs(b.c1) - Math.abs(a.c1)), 
-        pending: all.filter(h => h.status === 'PENDING').sort((a,b)=>b.startTime-a.startTime),
-        history: all.filter(h => h.status !== 'PENDING').sort((a,b)=>b.endTime-a.endTime)
+        pending: all.filter(h => h.status === 'PENDING'),
+        history: all.filter(h => h.status !== 'PENDING').slice(-50)
     });
 });
 
 app.get('/gui', (req, res) => {
-    res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Binance Luffy Pro</title>
+    res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8">
+    <title>LUFFY PRO x50</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;600;700&display=swap');
-        body { background: #0b0e11; color: #eaecef; font-family: 'IBM Plex Sans', sans-serif; margin: 0; }
+        @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@700&display=swap');
+        body { background: #0b0e11; color: #eaecef; }
+        .bg-card { background: #1e2329; border: 1px solid #30363d; }
         .up { color: #0ecb81; } .down { color: #f6465d; }
-        .bg-card { background: #1e2329; border: 1px solid #30363d; } .text-gray-custom { color: #848e9c; }
-        input, select { border: 1px solid #30363d !important; background: #0b0e11; color: white; }
-        .recovery-row { background: rgba(160, 32, 240, 0.25) !important; color: #e0b0ff !important; border-left: 4px solid #a020f0 !important; }
-        .long-bg { background: rgba(14, 203, 129, 0.15); color: #0ecb81; }
-        .short-bg { background: rgba(246, 70, 93, 0.15); color: #f6465d; }
-    </style></head><body>
+        .recovery-row { background: rgba(160, 32, 240, 0.25) !important; border-left: 4px solid #a020f0 !important; }
+        .recovery-text { color: #e0b0ff; font-weight: bold; }
+        .orbitron { font-family: 'Orbitron', sans-serif; }
+        input { background: #0b0e11 !important; border: 1px solid #474d57 !important; color: white; padding: 4px; border-radius: 4px; }
+    </style></head><body class="p-4">
     
-    <div class="p-4 bg-[#0b0e11] sticky top-0 z-50 border-b border-zinc-800">
-        <div id="setup" class="grid grid-cols-2 gap-3 mb-4 bg-card p-3 rounded-lg">
-            <div><label class="text-[10px] text-gray-custom ml-1 uppercase font-bold">Vốn khởi tạo ($)</label><input id="balanceInp" type="number" class="p-2 rounded w-full text-yellow-500 font-bold outline-none text-sm"></div>
-            <div><label class="text-[10px] text-gray-custom ml-1 uppercase font-bold">Margin per Trade</label><input id="marginInp" type="text" class="p-2 rounded w-full text-yellow-500 font-bold outline-none text-sm"></div>
-            <div class="col-span-2 grid grid-cols-4 gap-2 border-t border-zinc-800 pt-3 mt-1">
-                <div><label class="text-[10px] text-gray-custom ml-1 uppercase">TP (%)</label><input id="tpInp" type="number" step="0.1" class="p-2 rounded w-full outline-none text-sm"></div>
-                <div><label class="text-[10px] text-gray-custom ml-1 uppercase">DCA (%)</label><input id="slInp" type="number" step="0.1" class="p-2 rounded w-full outline-none text-sm"></div>
-                <div><label class="text-[10px] text-gray-custom ml-1 uppercase">Min Vol (%)</label><input id="volInp" type="number" step="0.1" class="p-2 rounded w-full outline-none text-sm"></div>
-                <div><label class="text-[10px] text-gray-custom ml-1 uppercase">Chế độ</label>
-                    <select id="modeInp" class="p-2 rounded w-full outline-none text-sm">
-                        <option value="FOLLOW">FOLLOW</option><option value="REVERSE">REVERSE</option><option value="LONG_ONLY">CHỈ LONG</option><option value="SHORT_ONLY">CHỈ SHORT</option>
-                    </select>
-                </div>
-            </div>
-            <button onclick="start()" class="col-span-2 bg-[#fcd535] hover:bg-[#ffe066] text-black py-2.5 rounded-md font-bold uppercase text-xs mt-2">Kích chạy hệ thống</button>
-        </div>
+    <div id="setup" class="bg-card p-4 rounded-lg mb-6 grid grid-cols-2 md:grid-cols-5 gap-4">
+        <div><label class="block text-[10px] text-gray-400">VỐN ($)</label><input id="initBal" type="number" class="w-full"></div>
+        <div><label class="block text-[10px] text-gray-400">MARGIN (%)</label><input id="marginPct" type="text" class="w-full"></div>
+        <div><label class="block text-[10px] text-gray-400">TP (%)</label><input id="tp" type="number" step="0.1" class="w-full"></div>
+        <div><label class="block text-[10px] text-gray-400">VOL (%)</label><input id="vol" type="number" step="0.1" class="w-full"></div>
+        <button onclick="run()" id="btn" class="bg-yellow-500 text-black font-bold rounded">START</button>
+    </div>
 
-        <div id="active" class="hidden flex justify-between items-center mb-4">
-            <div class="font-bold italic text-white text-xl tracking-tighter">BINANCE <span class="text-[#fcd535]">LUFFY PRO</span></div>
-            <div class="text-right text-[10px] uppercase font-bold text-gray-custom">
-                PENDING: <span id="pendingCount" class="text-white">0</span> | WIN: <span id="winCount" class="text-green-500">0</span> | LOSE: <span id="loseCount" class="text-red-500">0</span>
-            </div>
-            <div class="text-[#fcd535] font-black italic text-sm border border-[#fcd535] px-2 py-1 rounded cursor-pointer" onclick="stop()">STOP</div>
+    <div class="flex justify-between items-end mb-8">
+        <div>
+            <div class="text-gray-400 text-xs orbitron uppercase">Equity Balance</div>
+            <div id="bal" class="text-5xl font-black orbitron text-white">0.00</div>
+            <div class="text-blue-400 font-bold text-sm mt-1 italic">Available: <span id="avail" class="underline">0.00</span> USDT</div>
         </div>
-
-        <div class="flex justify-between items-end mb-3">
-            <div>
-                <div class="text-gray-custom text-[11px] uppercase font-bold tracking-widest mb-1">Equity (Vốn + Lãi chốt)</div>
-                <span id="displayBal" class="text-4xl font-bold text-white tracking-tighter">0.00</span>
-                <div class="text-[12px] text-blue-400 font-bold uppercase mt-1 italic">Available (Sẵn sàng): <span id="displayAvail" class="underline">0.00</span> USDT</div>
-            </div>
-            <div class="text-right"><div class="text-gray-custom text-[11px] uppercase font-bold mb-1">PnL Vị thế</div><div id="unPnl" class="text-xl font-bold">0.00</div></div>
+        <div class="text-right">
+            <div class="text-gray-400 text-[10px] uppercase font-bold">Unrealized PnL</div>
+            <div id="pnl" class="text-2xl font-bold orbitron">0.00</div>
         </div>
     </div>
 
-    <div class="px-4 mt-4">
-        <div class="bg-card rounded-lg p-3 shadow-lg">
-            <div class="text-[11px] font-bold text-yellow-500 mb-2 uppercase italic tracking-wider">● Market Live</div>
-            <table class="w-full text-[10px] text-left">
-                <thead class="text-gray-custom border-b border-zinc-800 uppercase"><tr><th>Pair</th><th>Price</th><th>M1</th><th>M5</th><th>M15</th></tr></thead>
-                <tbody id="liveBody"></tbody>
-            </table>
-        </div>
+    <div class="bg-card p-4 rounded-xl mb-6">
+        <div class="text-yellow-500 font-bold text-xs mb-3 italic">⚡ VỊ THẾ ĐANG CHẠY</div>
+        <table class="w-full text-[11px]">
+            <thead class="text-gray-500 border-b border-zinc-700 uppercase">
+                <tr><th class="text-left">Pair</th><th>Side</th><th>Margin</th><th>Entry/Live</th><th>Vol Snap</th><th class="text-right">PnL (ROI%)</th></tr>
+            </thead>
+            <tbody id="pBody"></tbody>
+        </table>
     </div>
 
-    <div class="px-4 mt-5"><div class="bg-card rounded-lg p-3">
-        <div class="text-[11px] font-bold text-white mb-2 uppercase flex items-center italic tracking-wider"><span class="w-2 h-2 bg-green-500 rounded-full mr-2"></span> Vị thế đang mở</div>
-        <div class="overflow-x-auto"><table class="w-full text-[10px] text-left"><thead class="text-gray-custom border-b border-zinc-800 uppercase"><tr><th>Pair</th><th>Side</th><th>DCA</th><th>Margin</th><th>Entry/Live</th><th class="text-right">PnL (%)</th></tr></thead><tbody id="pendingBody"></tbody></table></div>
-    </div></div>
-
-    <div class="px-4 mt-5 mb-10"><div class="bg-card rounded-lg p-3">
-         <div class="text-[11px] font-bold text-gray-custom mb-2 uppercase italic tracking-wider">● Nhật ký giao dịch</div>
-        <div class="overflow-x-auto"><table class="w-full text-[10px] text-left"><thead class="text-gray-custom border-b border-zinc-800 uppercase"><tr><th>Time</th><th>Pair</th><th>Side</th><th>DCA</th><th>Margin</th><th>PnL ($)</th><th class="text-right">Available</th></tr></thead><tbody id="historyBody"></tbody></table></div>
-    </div></div>
+    <div class="bg-card p-4 rounded-xl">
+        <div class="text-gray-400 font-bold text-xs mb-3 italic">● NHẬT KÝ GIAO DỊCH</div>
+        <table class="w-full text-[10px]">
+            <thead class="text-gray-500 border-b border-zinc-700 uppercase">
+                <tr><th class="text-left">Time</th><th>Pair</th><th>Side</th><th>DCA</th><th>Margin</th><th>Entry/Out</th><th>MaxDD</th><th class="text-right">Balance</th></tr>
+            </thead>
+            <tbody id="hBody"></tbody>
+        </table>
+    </div>
 
     <script>
-    let running = false;
-    const saved = JSON.parse(localStorage.getItem('luffy_state') || '{}');
-    if(saved.running) {
-        running = true;
-        document.getElementById('setup').classList.add('hidden'); document.getElementById('active').classList.remove('hidden');
-        fetch(\`/api/config?tp=\${saved.tp}&sl=\${saved.sl}&vol=\${saved.vol}&mode=\${saved.mode}\`);
-    }
+        let running = false;
+        const cfg = JSON.parse(localStorage.getItem('luffy_pro_v2') || '{}');
+        if(cfg.active) {
+            running = true; document.getElementById('btn').innerText = "STOP";
+            ['initBal','marginPct','tp','vol'].forEach(k => document.getElementById(k).value = cfg[k]);
+        }
 
-    function start() {
-        const state = { running: true, initialBal: parseFloat(document.getElementById('balanceInp').value), marginVal: document.getElementById('marginInp').value, tp: document.getElementById('tpInp').value, sl: document.getElementById('slInp').value, vol: document.getElementById('volInp').value, mode: document.getElementById('modeInp').value };
-        localStorage.setItem('luffy_state', JSON.stringify(state)); location.reload();
-    }
-    function stop() { let s = JSON.parse(localStorage.getItem('luffy_state')); s.running = false; localStorage.setItem('luffy_state', JSON.stringify(s)); location.reload(); }
-    function fPrice(p) { if (!p || p === 0) return "0.0000"; let s = p.toFixed(20); let match = s.match(/^-?\\d+\\.0*[1-9]/); if (!match) return p.toFixed(4); let index = match[0].length; return parseFloat(p).toFixed(index - match[0].indexOf('.') + 3); }
+        function run() {
+            const newCfg = { 
+                active: !running,
+                initBal: document.getElementById('initBal').value,
+                marginPct: document.getElementById('marginPct').value,
+                tp: document.getElementById('tp').value,
+                vol: document.getElementById('vol').value
+            };
+            localStorage.setItem('luffy_pro_v2', JSON.stringify(newCfg));
+            location.reload();
+        }
 
-    async function update() {
-        try {
+        async function update() {
+            if(!running) return;
             const res = await fetch('/api/data'); const d = await res.json();
-            const state = JSON.parse(localStorage.getItem('luffy_state') || '{}');
-            let mVal = state.marginVal || "10%", mNum = parseFloat(mVal);
-            let runningBal = state.initialBal || 0, unPnlTotal = 0, usedMarginTotal = 0;
-            let countWin = 0, countLose = 0;
+            const config = JSON.parse(localStorage.getItem('luffy_pro_v2'));
+            
+            let currentBal = parseFloat(config.initBal);
+            let usedM = 0, unPnl = 0;
 
-            // 1. Live Market
-            document.getElementById('liveBody').innerHTML = d.live.slice(0, 8).map(i => \`
-                <tr class="border-b border-zinc-800/30">
-                    <td class="py-1.5 text-white font-bold">\${i.symbol}</td>
-                    <td class="text-yellow-500">\${i.currentPrice}</td>
-                    <td class="\ Melville.c1>=0?'up':'down'} font-bold">\${i.c1}%</td>
-                    <td class="\ Melville.c5>=0?'up':'down'} font-bold">\ Melville.c5}%</td>
-                    <td class="text-gray-600">\ Melville.c15}%</td>
-                </tr>\`).join('');
-
-            // 2. Nhật Ký (Tính Balance chốt)
-            let histHTML = [...d.history].reverse().map((h, idx) => {
-                let mBase = mVal.includes('%') ? (runningBal * mNum / 100) : mNum;
-                let totalMargin = mBase * (h.dcaCount + 1);
-                let pnl = (totalMargin * (h.maxLev || 20) * (h.pnlPercent/100)) - (totalMargin * (h.maxLev || 20) * 0.001);
-                runningBal += pnl; 
-                if(pnl > 0) countWin++; else countLose++;
-                
-                let rowClass = (h.maxLev === 50) ? 'recovery-row' : 'border-b border-zinc-800/30';
-                return \`<tr class="\${rowClass}">
+            // Xử lý lịch sử
+            const hHtml = [...d.history].map(h => {
+                let mBase = config.marginPct.includes('%') ? (currentBal * parseFloat(config.marginPct)/100) : parseFloat(config.marginPct);
+                let finalM = h.isRecovery ? mBase * 50 : mBase * (h.dcaCount + 1);
+                let pnl = (finalM * 20 * h.pnlPercent/100) - (finalM * 20 * 0.001);
+                currentBal += pnl;
+                return \`<tr class="border-b border-zinc-800/50 \${h.isRecovery?'recovery-row':''}">
                     <td class="py-2 opacity-50">\${new Date(h.endTime).toLocaleTimeString()}</td>
-                    <td class="font-bold text-white">\${h.symbol}</td>
-                    <td><span class="px-1.5 rounded \${h.type==='LONG'?'long-bg':'short-bg'}">\${h.type}</span></td>
+                    <td class="font-bold">\${h.symbol}</td>
+                    <td><span class="\${h.type==='LONG'?'up':'down'}">\${h.type} \${h.isRecovery?'(REC)':''}</span></td>
                     <td>\${h.dcaCount}</td>
-                    <td>\${totalMargin.toFixed(1)}</td>
-                    <td class="font-bold \${pnl>=0?'up':'down'}">\${pnl.toFixed(2)}</td>
-                    <td class="text-right text-white font-bold opacity-70">\${runningBal.toFixed(1)}</td>
+                    <td>\${finalM.toFixed(1)}</td>
+                    <td>\${h.snapPrice.toFixed(4)}/\${h.finalPrice.toFixed(4)}</td>
+                    <td class="text-red-500">\${h.maxNegativeRoi.toFixed(1)}%</td>
+                    <td class="text-right font-bold">\${currentBal.toFixed(2)}</td>
                 </tr>\`;
             }).reverse().join('');
 
-            // 3. Vị Thế (Logic Available Balance quan trọng)
-            let pendingHTML = d.pending.map((h, idx) => {
+            // Xử lý vị thế đang mở
+            const pHtml = d.pending.map(h => {
                 let lp = d.allPrices[h.symbol] || h.avgPrice;
+                let curAvail = currentBal - usedM + (unPnl < 0 ? unPnl : 0);
+                let mBase = config.marginPct.includes('%') ? (curAvail * parseFloat(config.marginPct)/100) : parseFloat(config.marginPct);
+                let finalM = h.isRecovery ? mBase * 50 : mBase * (h.dcaCount + 1);
                 
-                // Lấy Available hiện tại = Balance đã chốt - Margin đang treo - Lỗ đang gồng (nếu có)
-                let currentAvail = runningBal - usedMarginTotal + (unPnlTotal < 0 ? unPnlTotal : 0);
-                
-                // Lệnh mở tiếp theo tính theo Available này
-                let mBase = mVal.includes('%') ? (currentAvail * mNum / 100) : mNum;
-                let totalM = mBase * (h.dcaCount + 1);
-                
-                let roi = (h.type === 'LONG' ? (lp-h.avgPrice)/h.avgPrice : (h.avgPrice-lp)/h.avgPrice) * 100 * (h.maxLev || 20);
-                let pnl = totalM * roi / 100; 
-                
-                unPnlTotal += pnl; 
-                usedMarginTotal += totalM;
+                let roi = (h.type === 'LONG' ? (lp-h.avgPrice)/h.avgPrice : (h.avgPrice-lp)/h.avgPrice) * 100 * 20;
+                let p = finalM * roi / 100;
+                usedM += finalM; unPnl += p;
 
-                return \`<tr class="border-b border-zinc-800 \${h.maxLev===50?'recovery-row':''}">
-                    <td class="py-2.5 font-bold text-white">\${h.symbol}</td>
-                    <td><span class="px-1.5 rounded \${h.type==='LONG'?'long-bg':'short-bg'} font-bold">\${h.type}</span></td>
-                    <td>\${h.dcaCount}</td>
-                    <td>\${totalM.toFixed(1)}</td>
-                    <td class="opacity-70">\${fPrice(h.avgPrice)}/\${fPrice(lp)}</td>
-                    <td class="text-right font-bold \${pnl>=0?'up':'down'}">\${pnl.toFixed(2)} (\${roi.toFixed(1)}%)</td>
+                return \`<tr class="border-b border-zinc-800 \${h.isRecovery?'recovery-row':''}">
+                    <td class="py-3 font-bold">\${h.symbol}</td>
+                    <td class="\${h.type==='LONG'?'up':'down'} font-bold">\${h.type}</td>
+                    <td>\${finalM.toFixed(1)} \${h.isRecovery?'(x50 Margin)':''}</td>
+                    <td>\${h.avgPrice.toFixed(4)} → \${lp.toFixed(4)}</td>
+                    <td class="opacity-50">\${h.snapVol.c1}/\${h.snapVol.c5}</td>
+                    <td class="text-right font-bold \${p>=0?'up':'down'}">\${p.toFixed(2)} (\${roi.toFixed(1)}%)</td>
                 </tr>\`;
-            });
+            }).join('');
 
-            // Available Balance cuối cùng
-            const finalAvail = runningBal - usedMarginTotal + (unPnlTotal < 0 ? unPnlTotal : 0);
-            
-            document.getElementById('displayBal').innerText = runningBal.toFixed(2);
-            document.getElementById('displayAvail').innerText = Math.max(0, finalAvail).toFixed(2);
-            document.getElementById('pendingCount').innerText = d.pending.length;
-            document.getElementById('unPnl').innerText = unPnlTotal.toFixed(2);
-            document.getElementById('unPnl').className = 'text-xl font-bold ' + (unPnlTotal >= 0 ? 'up' : 'down');
-            document.getElementById('historyBody').innerHTML = histHTML;
-            document.getElementById('pendingBody').innerHTML = pendingHTML;
-        } catch(e) {}
-    }
-
-    if(running) setInterval(update, 1000);
-    </script></body></html>`);
+            document.getElementById('bal').innerText = currentBal.toFixed(2);
+            document.getElementById('avail').innerText = Math.max(0, currentBal - usedM + (unPnl < 0 ? unPnl : 0)).toFixed(2);
+            document.getElementById('pnl').innerText = unPnl.toFixed(2);
+            document.getElementById('pnl').className = 'text-2xl font-bold orbitron ' + (unPnl>=0?'up':'down');
+            document.getElementById('hBody').innerHTML = hHtml;
+            document.getElementById('pBody').innerHTML = pHtml;
+        }
+        setInterval(update, 1000);
+    </script>
+    </body></html>`);
 });
 
 app.listen(PORT, '0.0.0.0', async () => { 
-    await bootstrapData(); initWS(); fallbackAPI();
-    console.log(`Luffy Engine Start: http://localhost:${PORT}/gui`); 
+    await bootstrapData(); initWS();
+    console.log(`Luffy Pro x50: http://localhost:${PORT}/gui`); 
 });
