@@ -2,17 +2,16 @@ import WebSocket from 'ws';
 import express from 'express';
 import axios from 'axios';
 import Binance from 'node-binance-api';
-// Giả sử file config.js của ní nằm cùng thư mục
-import config from './config.js'; 
+import { API_KEY, SECRET_KEY } from './config.js'; 
 
 const PORT = 8888;
 const SQUAD_API_KEY = "8d794c11cc794c958c2c65924c54f2dd"; 
 
-// Khởi tạo Binance với API từ config
 const binance = new Binance().options({
-    APIKEY: config.binance.key,
-    SECRET: config.binance.secret,
-    family: 4
+    APIKEY: API_KEY,
+    APISECRET: SECRET_KEY,
+    family: 4,
+    useServerTime: true 
 });
 
 const SETTINGS = {
@@ -24,19 +23,18 @@ const SETTINGS = {
     MIN_GAP: 60000, 
 };
 
-// --- NGÂN HÀNG DỮ LIỆU: 4 PHẦN x 100 CÂU ---
 const BANK = {
     P1: [
         "🔥 Dòng tiền thông minh đang đổ mạnh vào hệ sinh thái này.", "🐳 Dữ liệu on-chain cho thấy cá voi đang gom hàng.", "💎 Áp lực bán đã cạn kiệt tại vùng hỗ trợ tâm lý.", "📊 Sự gia tăng đột biến về khối lượng giao dịch ngắn hạn.", "🔎 Các địa chỉ ví lớn đang có dấu hiệu tích lũy âm thầm.", "📰 Thị trường đang phản ứng tích cực với tin vĩ mô.", "⚡ Lực mua chủ động đang áp đảo hoàn toàn trên bảng điện.", "📈 Chỉ số tâm lý thị trường đang chuyển sang hưng phấn.", "🏛️ Sự bứt phá này mang đậm dấu ấn của các quỹ lớn.", "🚀 Nhu cầu sở hữu đang tăng cao bất chấp biến động chung.",
-        "💰 Cấu trúc dòng tiền đang tập trung vào nhóm dẫn dắt này.", "🌍 Dòng vốn ngoại đang quay trở lại vị thế mua ròng.", "🛒 Các lệnh mua lớn liên tục xuất hiện trên sổ lệnh.", "⏳ Sự khan hiếm nguồn cung tạm thời đang đẩy giá đi lên.", "💸 Dòng tiền đầu cơ bắt đầu chuyển dịch sang khu vực này.", "✅ Tín hiệu dòng tiền xác nhận sự tham gia của tổ chức.", "💪 Sức mạnh tương đối so với phần còn lại đang rất tốt.", "🛡️ Dòng vốn đang tìm nơi trú ẩn tại các mã tiềm năng.", "🌋 Thanh khoản tăng vọt đi kèm with sự bứt phá về giá.", "🤝 Sự đồng thuận của dòng tiền đang ở mức cao nhất.",
+        "💰 Cấu trúc dòng tiền đang tập trung vào nhóm dẫn dắt này.", "🌍 Dòng vốn ngoại đang quay trở lại vị thế mua ròng.", "🛒 Các lệnh mua lớn liên tục xuất hiện trên sổ lệnh.", "⏳ Sự khan hiếm nguồn cung tạm thời đang đẩy giá đi lên.", "💸 Dòng tiền đầu cơ bắt đầu chuyển dịch sang khu vực này.", "✅ Tín hiệu dòng tiền xác nhận sự tham gia của tổ chức.", "💪 Sức mạnh tương đối so với phần còn lại đang rất tốt.", "🛡️ Dòng vốn đang tìm nơi trú ẩn tại các mã tiềm năng.", "🌋 Thanh khoản tăng vọt đi kèm với sự bứt phá về giá.", "🤝 Sự đồng thuận của dòng tiền đang ở mức cao nhất.",
         "🧲 Lực cầu tiềm năng đang chờ đợi tại các vùng giá thấp.", "🏗️ Các tay chơi lớn đang thiết lập vị thế dài hạn mới.", "🌀 Dòng tiền xoay vòng đã tìm đến điểm dừng chân này.", "🏎️ Tốc độ khớp lệnh mua đang nhanh hơn rõ rệt.", "🔄 Sự dịch chuyển của dòng vốn từ các nhóm ngành khác.", "🌟 Tín hiệu tích cực từ hành động giá của nhóm dẫn dắt.", "🚧 Dòng tiền lớn đã vượt qua các ngưỡng kháng cự tâm lý.", "💥 Khối lượng giao dịch bùng nổ xác nhận xu hướng mới.", "🛌 Dòng tiền nhàn rỗi đang quay trở lại thị trường.", "🎯 Sự tập trung của dòng vốn vào các tài sản chất lượng.",
         "⚓ Cấu trúc dòng vốn đang trở nên bền vững hơn bao giờ hết.", "🥊 Lực mua tại các vùng hỗ trợ đang rất quyết liệt.", "🔭 Dòng tiền đang kỳ vọng vào một nhịp tăng trưởng dài.", "📈 Sự gia tăng vị thế mua từ các nhà đầu tư chuyên nghiệp.", "🧠 Dòng vốn thông minh đang đi trước một bước.", "🎲 Tín hiệu từ thị trường phái sinh đang hỗ trợ dòng tiền.", "🌈 Dòng tiền đang lan tỏa đều khắp các nhóm vốn hóa lớn.", "🧘 Sự ổn định của dòng vốn trong các nhịp điều chỉnh.", "🚩 Dòng tiền đang nhắm tới các mục tiêu trung hạn mới.", "🧽 Khả năng hấp thụ lực bán của dòng tiền đang rất tốt.",
         "🧗 Sự kiên trì của dòng vốn tại các vùng giá quan trọng.", "🧱 Dòng tiền đang tạo ra những nền tảng giá vững chắc.", "🔥 Sức nóng từ dòng tiền đang lan tỏa sang các mã lân cận.", "🥇 Sự ưu tiên của dòng vốn dành cho các mã có nền tảng tốt.", "⛏️ Dòng tiền đang khai thác các cơ hội bị định giá thấp.", "📷 Tín hiệu gom hàng rõ nét từ biểu đồ khối lượng.", "🔙 Dòng tiền đang quay trở lại sau thời gian quan sát.", "🦁 Sự tự tin của dòng tiền đang được củng cố mạnh mẽ.", "🧬 Cơ cấu dòng vốn đang hướng tới sự tăng trưởng đột phá.", "📍 Dòng tiền đang tạo ra những cột mốc thanh khoản mới.",
         "🔔 Lực cầu đang tăng dần theo thời gian giao dịch.", "🏠 Sự hỗ trợ mạnh mẽ từ dòng tiền nội khối.", "🔨 Dòng tiền đang tìm cách phá vỡ các rào cản kỹ thuật.", "🔉 Sự gia tăng khối lượng giao dịch một cách có chủ đích.", "⏲️ Dòng tiền đang chờ đợi những tín hiệu bùng nổ tiếp theo.", "👑 Sự dẫn dắt của dòng tiền tại các mã đầu ngành.", "🎋 Dòng tiền đang tạo ra một xu hướng tăng trưởng mới.", "🔋 Sức mua đang được duy trì ở mức cao và ổn định.", "🪄 Dòng tiền đang thể hiện ý chí đẩy giá rất rõ ràng.", "🌊 Sự lan tỏa của dòng tiền vào các nhóm chưa tăng giá.",
         "☄️ Dòng tiền đang tạo ra sự đột phá từ các mô hình tích lũy.", "🐜 Lực mua đang len lỏi vào từng lệnh giao dịch nhỏ.", "🎖️ Dòng tiền đang khẳng định vị thế dẫn dắt thị trường.", "🎢 Sự quay lại của dòng vốn sau nhịp rũ bỏ mạnh mẽ.", "⚖️ Dòng tiền đang tìm kiếm sự cân bằng tại vùng giá cao.", "🛡️ Sự ổn định của dòng vốn trong bối cảnh vĩ mô mới.", "🎰 Dòng tiền đang đặt cược vào kịch bản tăng trưởng mạnh.", "🛸 Sự dịch chuyển thông minh giữa các lớp tài sản.", "⚡ Dòng tiền đang tạo ra những cú hích quan trọng.", "🏹 Lực cầu đang chờ đợi sự xác nhận từ các khung giờ lớn.",
-        "📚 Dòng tiền đang tập trung vào các mã có câu chuyện riêng.", "💎 Sự tăng trưởng thanh khoản đi kèm with chất lượng dòng vốn.", "🎮 Dòng tiền đang kiểm soát hoàn toàn diễn biến giá.", "🔓 Sự bứt phá của dòng tiền khỏi vùng trung lập.", "🏔️ Dòng tiền đang hướng tới các đỉnh cao mới của năm.", "🧹 Lực mua chủ động đang quét sạch các lệnh bán treo.", "🏃 Dòng tiền đang thể hiện sự bền bỉ trong từng nhịp tăng.", "📣 Sự hưng phấn của dòng tiền đang lan rộng toàn sàn.", "💡 Dòng tiền đang tìm thấy động lực tăng trưởng mới.", "🐣 Sự đột phá về khối lượng từ các vùng giá đáy.",
+        "📚 Dòng tiền đang tập trung vào các mã có câu chuyện riêng.", "💎 Sự tăng trưởng thanh khoản đi kèm với chất lượng dòng vốn.", "🎮 Dòng tiền đang kiểm soát hoàn toàn diễn biến giá.", "🔓 Sự bứt phá của dòng tiền khỏi vùng trung lập.", "🏔️ Dòng tiền đang hướng tới các đỉnh cao mới của năm.", "🧹 Lực mua chủ động đang quét sạch các lệnh bán treo.", "🏃 Dòng tiền đang thể hiện sự bền bỉ trong từng nhịp tăng.", "📣 Sự hưng phấn của dòng tiền đang lan rộng toàn sàn.", "💡 Dòng tiền đang tìm thấy động lực tăng trưởng mới.", "🐣 Sự đột phá về khối lượng từ các vùng giá đáy.",
         "🪜 Dòng tiền đang xác lập một nền tảng giá cao hơn.", "🏋️ Sức mạnh của dòng tiền đang được thử thách và khẳng định.", "📉 Dòng tiền đang tận dụng các nhịp giảm để gia tăng vị thế.", "🤝 Sự nhất quán của dòng vốn trong các quyết định mua.", "🌅 Dòng tiền đang mở ra những triển vọng tươi sáng.", "🌋 Lực cầu đang bùng nổ tại các điểm xoay chiều.", "🎨 Dòng tiền đang định hình lại xu hướng của thị trường.", "💂 Sự trỗi dậy mạnh mẽ của dòng tiền từ các quỹ chỉ số.", "🌗 Dòng tiền đang tạo ra sự khác biệt lớn về hiệu suất.", "⭐ Sự tập trung dòng vốn vào các mã có dòng tiền tốt.",
-        "🧨 Dòng tiền đang tạo đà cho một cú breakout lịch sử.", "🌇 Lực mua đang gia tăng mạnh mẽ vào cuối phiên.", "🌃 Dòng tiền đang duy trì sự hưng phấn cho đến khi đóng cửa.", "🏅 Sự xuất sắc của dòng tiền trong việc giữ nhịp thị trường.", "🎁 Dòng tiền đang tạo ra những cơ hội vàng cho người nắm giữ.", "🔥 Sự quyết đoán của dòng vốn trong việc đẩy giá bứt phá.", "🌠 Dòng tiền lớn đang tìm cách phá vỡ các kỷ lục cũ.", "🧩 Sự phối hợp của các dòng vốn đang rất nhịp nhàng.", "🔗 Mối liên kết giữa dòng tiền và giá đang rất chặtẽ.", "🥇 Dẫn đầu xu hướng với sự hậu thuẫn của dòng tiền cực lớn."
+        "🧨 Dòng tiền đang tạo đà cho một cú breakout lịch sử.", "🌇 Lực mua đang gia tăng mạnh mẽ vào cuối phiên.", "🌃 Dòng tiền đang duy trì sự hưng phấn cho đến khi đóng cửa.", "🏅 Sự xuất sắc của dòng tiền trong việc giữ nhịp thị trường.", "🎁 Dòng tiền đang tạo ra những cơ hội vàng cho người nắm giữ.", "🔥 Sự quyết đoán của dòng vốn trong việc đẩy giá bứt phá.", "🌠 Dòng tiền lớn đang tìm cách phá vỡ các kỷ lục cũ.", "🧩 Sự phối hợp của các dòng vốn đang rất nhịp nhàng.", "🔗 Mối liên kết giữa dòng tiền và giá đang rất chặt chẽ.", "🥇 Dẫn đầu xu hướng với sự hậu thuẫn của dòng tiền cực lớn."
     ],
     P2: [
         "📐 Về kỹ thuật giá đã bứt phá khỏi kênh giảm giá.", "🪄 Đường EMA đang thực hiện cú cắt vàng báo hiệu tăng.", "🌊 RSI đang tiến vào vùng mạnh mẽ nhưng chưa quá mua.", "🕯️ Mô hình nến nhấn chìm đã xác nhận xu hướng tăng.", "🎈 Bollinger Band mở rộng cho thấy biến động lớn.", "🛤️ Giá đang nằm trên các đường MA quan trọng.", "🧱 Kháng cự cũ đã trở thành hỗ trợ mới vững chắc.", "🏹 Phân kỳ dương H1 hỗ trợ đà tăng bền vững.", "🏔️ Cấu trúc đỉnh sau cao hơn đỉnh trước duy trì.", "☁️ Ichimoku cho thấy mây xanh nâng đỡ rất tốt.",
@@ -91,60 +89,86 @@ function addLog(msg) {
     if (state.logs.length > 50) state.logs.pop();
 }
 
-// Logic lấy mốc giá 7h sáng
-async function getPriceAt7AM(symbol) {
+async function getBasePrice(symbol, currentPrice) {
     try {
+        const now = new Date();
         const sevenAM = new Date();
         sevenAM.setHours(7, 0, 0, 0);
-        const startTime = sevenAM.getTime();
-        // Dùng binance.futuresCandles thay vì axios để tận dụng config
-        const ticks = await binance.futuresCandles(symbol, "1m", { startTime, limit: 1 });
-        return ticks.length > 0 ? parseFloat(ticks[0][1]) : null;
-    } catch (e) { return null; }
+        if (now.getTime() > sevenAM.getTime()) {
+            const ticks = await binance.futuresCandles(symbol, "1m", { startTime: sevenAM.getTime(), limit: 1 });
+            if (ticks.length > 0) return parseFloat(ticks[0][1]);
+        }
+        return currentPrice;
+    } catch (e) { 
+        return currentPrice; 
+    }
 }
 
 function calculateChange(pArr, min) {
     if (!pArr || pArr.length < 2) return 0;
     const now = Date.now();
-    let start = pArr.find(i => i.t >= (now - min * 60000)) || pArr[0]; 
-    return parseFloat((((pArr[pArr.length - 1].p - start.p) / start.p) * 100).toFixed(2));
+    const startTime = now - min * 60000;
+    let startPoint = pArr.find(i => i.t >= startTime) || pArr[0];
+    const currentPrice = pArr[pArr.length - 1].p;
+    return parseFloat((((currentPrice - startPoint.p) / startPoint.p) * 100).toFixed(2));
 }
 
 async function updatePriceLogic(s, p, now, vol) {
+    if (!s.endsWith('USDT')) return;
+
     if (!state.coinData[s]) {
-        const p7am = await getPriceAt7AM(s);
-        state.coinData[s] = { symbol: s, prices: [], p7am, vol: 0 };
+        state.coinData[s] = { 
+            symbol: s, 
+            prices: [], 
+            p7am: null, 
+            vol: 0, 
+            live: { c1: 0, c5: 0, cd: 0, cp: p } 
+        };
+        getBasePrice(s, p).then(val => { 
+            if(state.coinData[s]) state.coinData[s].p7am = val; 
+        });
     }
     
     let d = state.coinData[s];
     d.prices.push({ p, t: now });
-    if (d.prices.length > 600) d.prices.shift();
+    const limitTime = now - 360000;
+    d.prices = d.prices.filter(i => i.t > limitTime);
+    
     d.vol = parseFloat(vol);
+    const c1 = calculateChange(d.prices, 1);
+    const c5 = calculateChange(d.prices, 5);
+    const cd = d.p7am ? parseFloat((((p - d.p7am) / d.p7am) * 100).toFixed(2)) : 0;
 
-    const changeDay = d.p7am ? ((p - d.p7am) / d.p7am * 100).toFixed(2) : 0;
-
-    d.live = {
-        c1: calculateChange(d.prices, 1),
-        c5: calculateChange(d.prices, 5),
-        cd: parseFloat(changeDay),
-        cp: p
-    };
+    d.live = { c1, c5, cd, cp: p };
 
     if (state.isRunning) {
-        if (state.stats.biendong < SETTINGS.TYPE_LIMIT && (Math.abs(d.live.c1) >= SETTINGS.VOL_LIMIT || Math.abs(d.live.c5) >= SETTINGS.VOL_LIMIT)) {
-            postToSquare(s, d.live.c5, 'biendong');
+        if (state.stats.biendong < SETTINGS.TYPE_LIMIT && (Math.abs(c1) >= SETTINGS.VOL_LIMIT || Math.abs(c5) >= SETTINGS.VOL_LIMIT)) {
+            postToSquare(s, c5, 'biendong');
         } 
-        else if (state.stats.day < SETTINGS.TYPE_LIMIT && Math.abs(d.live.cd) >= SETTINGS.DAY_LIMIT) {
-            postToSquare(s, d.live.cd, 'day');
+        else if (state.stats.day < SETTINGS.TYPE_LIMIT && Math.abs(cd) >= SETTINGS.DAY_LIMIT) {
+            postToSquare(s, cd, 'day');
         }
     }
 }
+
+setInterval(() => {
+    const now = new Date();
+    if (now.getHours() === 7 && now.getMinutes() === 0) {
+        addLog("🌅 Reset mốc giá 7h sáng & dữ liệu ngày mới...");
+        Object.keys(state.coinData).forEach(s => {
+            state.coinData[s].p7am = state.coinData[s].live.cp;
+        });
+        state.postedTodaySymbols.clear();
+        state.postsToday = 0;
+        state.stats = { biendong: 0, day: 0, vol: 0 };
+    }
+}, 60000);
 
 async function postToSquare(symbol, change, type) {
     if (state.postsToday >= SETTINGS.MAX_TOTAL || state.postedTodaySymbols.has(symbol)) return;
     if (Date.now() - state.lastPostTime < SETTINGS.MIN_GAP) return;
 
-    const content = `${BANK.P1[Math.floor(Math.random()*100)]}\n\n${BANK.P2[Math.floor(Math.random()*100)]}\n\n${BANK.P3[Math.floor(Math.random()*100)]}\n\n${BANK.P4[Math.floor(Math.random()*100)]}\n\n#${symbol} $${symbol}`;
+    const content = `${BANK.P1[Math.floor(Math.random()*BANK.P1.length)]}\n\n${BANK.P2[Math.floor(Math.random()*BANK.P2.length)]}\n\n${BANK.P3[Math.floor(Math.random()*BANK.P3.length)]}\n\n${BANK.P4[Math.floor(Math.random()*BANK.P4.length)]}\n\n#${symbol} $${symbol}`;
 
     try {
         await axios.post(SETTINGS.SQUARE_URL, { bodyTextOnly: content }, {
@@ -158,47 +182,40 @@ async function postToSquare(symbol, change, type) {
     } catch (e) { addLog(`❌ Lỗi Square: ${e.message}`); }
 }
 
-// Loại 3: Lấy danh sách Vol cao nhất từ API
 async function postTypeVol() {
-    if (state.stats.vol >= SETTINGS.TYPE_LIMIT) return;
+    if (!state.isRunning || state.stats.vol >= SETTINGS.TYPE_LIMIT) return;
     try {
         const tickers = await binance.futures24hrTicker();
         const topVol = tickers
             .filter(t => t.symbol.endsWith('USDT') && !state.postedTodaySymbols.has(t.symbol))
-            .sort((a, b) => parseFloat(b.quoteVolume) - parseFloat(a.quoteVolume)) // Cao đến thấp
+            .sort((a, b) => parseFloat(b.quoteVolume) - parseFloat(a.quoteVolume))
             .slice(0, 1);
-
-        if (topVol.length > 0) {
-            addLog(`🚀 Tìm thấy TOP VOL: ${topVol[0].symbol}`);
-            await postToSquare(topVol[0].symbol, 0, 'vol');
-        }
-    } catch (e) { addLog("❌ Lỗi lấy Vol từ Binance"); }
+        if (topVol.length > 0) await postToSquare(topVol[0].symbol, 0, 'vol');
+    } catch (e) { addLog("❌ Lỗi API Volume"); }
 }
 
-// Tự động quét Vol sau mỗi 10 phút
-setInterval(() => {
-    if (state.isRunning) postTypeVol();
-}, 600000);
+setInterval(postTypeVol, 600000);
 
 function initWS() {
-    // Dùng stream của node-binance-api để ổn định hơn
-    binance.futuresTickerStream( (tickers) => {
-        tickers.forEach(t => {
-            updatePriceLogic(t.symbol, parseFloat(t.close), Date.now(), t.quoteVolume);
-        });
+    addLog("⚡ Engine Luffy Pro Ready...");
+    binance.futuresTickerStream((tickers) => {
+        const now = Date.now();
+        if (Array.isArray(tickers)) {
+            tickers.forEach(t => updatePriceLogic(t.symbol, parseFloat(t.close), now, t.quoteVolume));
+        } else {
+            updatePriceLogic(tickers.symbol, parseFloat(tickers.close), now, tickers.quoteVolume);
+        }
     });
 }
 
 const app = express();
 app.get('/api/status', (req, res) => {
     const table = Object.values(state.coinData)
-        .filter(v => v.live)
         .map(v => ({ s: v.symbol, c1: v.live.c1, c5: v.live.c5, cd: v.live.cd }))
         .sort((a, b) => Math.abs(b.c5) - Math.abs(a.c5))
         .slice(0, 15);
     res.json({ ...state, table });
 });
-
 app.get('/api/toggle', (req, res) => { state.isRunning = !state.isRunning; res.json({ s: state.isRunning }); });
 
 app.get('/', (req, res) => {
@@ -207,19 +224,21 @@ app.get('/', (req, res) => {
         <div class="max-w-md mx-auto h-screen flex flex-col">
             <div class="bg-[#1e2329] p-4 rounded-2xl border-b-4 border-yellow-500 mb-3 shadow-2xl">
                 <div class="flex justify-between items-center mb-4">
-                    <h1 style="font-family:'Orbitron'" class="text-xl font-black text-yellow-500 italic">LUFFY PRO</h1>
-                    <button onclick="fetch('/api/toggle')" id="btn" class="px-6 py-2 rounded-xl font-bold bg-yellow-500 text-black shadow-lg transition-all text-sm">START</button>
+                    <h1 style="font-family:'Orbitron'" class="text-xl font-black text-yellow-500 italic uppercase tracking-tighter">Luffy Pro V2</h1>
+                    <button onclick="fetch('/api/toggle')" id="btn" class="px-6 py-2 rounded-xl font-bold bg-yellow-500 text-black shadow-lg text-sm">START</button>
                 </div>
-                <div class="grid grid-cols-4 gap-1 text-center">
-                    <div class="bg-black/40 p-2 rounded-xl"><div class="text-[8px] text-zinc-500">M1/M5</div><div id="s1" class="text-xs font-bold text-red-500">0</div></div>
-                    <div class="bg-black/40 p-2 rounded-xl"><div class="text-[8px] text-zinc-500">D1 (7H)</div><div id="s2" class="text-xs font-bold text-yellow-500">0</div></div>
-                    <div class="bg-black/40 p-2 rounded-xl"><div class="text-[8px] text-zinc-500">VOL</div><div id="s3" class="text-xs font-bold text-green-500">0</div></div>
-                    <div class="bg-black/40 p-2 rounded-xl"><div class="text-[8px] text-zinc-500">TOTAL</div><div id="st" class="text-xs font-bold text-blue-500">0</div></div>
+                <div class="grid grid-cols-4 gap-1 text-center font-bold">
+                    <div class="bg-black/40 p-2 rounded-xl"><div class="text-[8px] text-zinc-500 uppercase">Biến động</div><div id="s1" class="text-xs text-red-500">0</div></div>
+                    <div class="bg-black/40 p-2 rounded-xl"><div class="text-[8px] text-zinc-500 uppercase">Day 7H</div><div id="s2" class="text-xs text-yellow-500">0</div></div>
+                    <div class="bg-black/40 p-2 rounded-xl"><div class="text-[8px] text-zinc-500 uppercase">Volume</div><div id="s3" class="text-xs text-green-500">0</div></div>
+                    <div class="bg-black/40 p-2 rounded-xl"><div class="text-[8px] text-zinc-500 uppercase">Đã đăng</div><div id="st" class="text-xs text-blue-500">0</div></div>
                 </div>
             </div>
-
-            <div class="bg-[#1e2329] rounded-2xl flex-1 overflow-hidden flex flex-col mb-3">
-                <div class="p-3 bg-white/5 text-[10px] font-bold uppercase tracking-widest text-yellow-500">Bảng biến động M1-M5-Day</div>
+            <div class="bg-[#1e2329] rounded-2xl flex-1 overflow-hidden flex flex-col mb-3 border border-white/5">
+                <div class="p-3 bg-white/5 text-[10px] font-bold uppercase tracking-widest text-yellow-500 flex justify-between">
+                    <span>Thị trường Real-time</span>
+                    <span class="animate-pulse text-red-500">● LIVE</span>
+                </div>
                 <div class="overflow-y-auto flex-1">
                     <table class="w-full text-[11px]">
                         <thead class="sticky top-0 bg-[#1e2329] text-zinc-500 border-b border-white/5">
@@ -229,26 +248,26 @@ app.get('/', (req, res) => {
                     </table>
                 </div>
             </div>
-
-            <div id="lb" class="h-32 bg-black rounded-xl p-2 text-[9px] font-mono overflow-y-auto text-zinc-500 border border-white/5"></div>
+            <div id="lb" class="h-32 bg-black/50 rounded-xl p-2 text-[9px] font-mono overflow-y-auto text-zinc-400 border border-white/5"></div>
         </div>
         <script>
             async function refresh() {
                 try {
                     const res = await fetch('/api/status'); 
                     const d = await res.json();
-                    document.getElementById('btn').innerText = d.isRunning ? "STOP" : "START";
-                    document.getElementById('btn').className = d.isRunning ? "px-6 py-2 rounded-xl font-bold bg-red-500 text-white shadow-lg" : "px-6 py-2 rounded-xl font-bold bg-yellow-500 text-black shadow-lg";
+                    const btn = document.getElementById('btn');
+                    btn.innerText = d.isRunning ? "STOP" : "START";
+                    btn.className = d.isRunning ? "px-6 py-2 rounded-xl font-bold bg-red-600 text-white shadow-lg" : "px-6 py-2 rounded-xl font-bold bg-yellow-500 text-black shadow-lg";
                     document.getElementById('s1').innerText = d.stats.biendong;
                     document.getElementById('s2').innerText = d.stats.day;
                     document.getElementById('s3').innerText = d.stats.vol;
                     document.getElementById('st').innerText = d.postsToday;
-                    document.getElementById('lb').innerHTML = d.logs.map(l => \`<div>\${l}</div>\`).join('');
+                    document.getElementById('lb').innerHTML = d.logs.map(l => \`<div class="border-b border-white/5 mb-1 pb-1">\${l}</div>\`).join('');
                     document.getElementById('tb').innerHTML = d.table.map(v => \`
-                        <tr class="border-b border-white/5">
-                            <td class="p-2 font-bold">\${v.s.replace('USDT','')}</td>
-                            <td class="text-right p-2 \${Math.abs(v.c1)>=7?'text-red-500':'text-zinc-400'}">\${v.c1}%</td>
-                            <td class="text-right p-2 \${Math.abs(v.c5)>=7?'text-red-400':'text-zinc-400'}">\${v.c5}%</td>
+                        <tr class="border-b border-white/5 hover:bg-white/5 transition-colors">
+                            <td class="p-2 font-bold text-zinc-100">\${v.s.replace('USDT','')}</td>
+                            <td class="text-right p-2 \${Math.abs(v.c1)>=5?'text-red-500':'text-zinc-400'}">\${v.c1}%</td>
+                            <td class="text-right p-2 \${Math.abs(v.c5)>=7?'text-orange-400':'text-zinc-400'}">\${v.c5}%</td>
                             <td class="text-right p-2 \${Math.abs(v.cd)>=10?'text-yellow-500':'text-zinc-400'}">\${v.cd}%</td>
                         </tr>\`).join('');
                 } catch(e) {}
