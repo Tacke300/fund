@@ -11,7 +11,7 @@ const SETTINGS = {
     VOL_LIMIT: 7.0,   
     MAX_POSTS_PER_DAY: 100,
     MIN_GAP: 60000,
-    RESUME_HOURS: [0, 15, 7, 23]
+    RESUME_HOURS: [0, 15, 7, 19]
 };
 
 const BANK = {
