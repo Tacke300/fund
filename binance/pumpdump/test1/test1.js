@@ -15,7 +15,6 @@ let historyMap = new Map();
 let symbolMaxLeverage = {}; 
 let lastTradeClosed = {}; 
 
-// Cấu hình mặc định
 let currentTP = 0.5, currentSL = 10.0, currentMinVol = 6.5, tradeMode = 'FOLLOW', maxDcaCount = 5;
 
 let actionQueue = [];
@@ -96,7 +95,6 @@ function handlePriceUpdate(s, p, now) {
         
         if (!pending.maxNegativeRoi || currentRoi < pending.maxNegativeRoi) { 
             pending.maxNegativeRoi = currentRoi;
-            pending.maxNegativeTime = now;
         }
 
         const win = pending.type === 'LONG' ? diffAvg >= pending.tpTarget : diffAvg <= -pending.tpTarget; 
@@ -112,7 +110,6 @@ function handlePriceUpdate(s, p, now) {
             return;
         }
 
-        // Logic DCA và Hedge
         if (!pending.isHedge && pending.dcaCount < maxDcaCount) {
             const totalDiffFromEntry = ((p - pending.snapPrice) / pending.snapPrice) * 100;
             const nextDcaThreshold = (pending.dcaCount + 1) * pending.slTarget;
@@ -126,13 +123,12 @@ function handlePriceUpdate(s, p, now) {
                     pending.dcaHistory.push({ t: Date.now(), p: p, avg: newAvg });
                     pending.avgPrice = newAvg;
 
-                    // Nếu đây là lần DCA cuối cùng, mở lệnh Hedge ngược chiều x50 Margin
-                    if (pending.dcaCount === maxDcaCount) {
+                    if (pending.dcaCount === parseInt(maxDcaCount)) {
                         const hedgeType = pending.type === 'LONG' ? 'SHORT' : 'LONG';
                         const hedgeId = `${s}_HEDGE_${now}`;
                         historyMap.set(hedgeId, {
                             symbol: s, startTime: now, snapPrice: p, avgPrice: p, type: hedgeType, status: 'PENDING',
-                            maxLev: symbolMaxLeverage[s] || 20, tpTarget: 10, slTarget: 10, // TP SL 10% cho lệnh Hedge
+                            maxLev: symbolMaxLeverage[s] || 20, tpTarget: 10, slTarget: 10, 
                             isHedge: true, hedgeMultiplier: 50,
                             snapVol: { c1, c5, c15 }, maxNegativeRoi: 0, dcaCount: 0
                         });
@@ -142,7 +138,6 @@ function handlePriceUpdate(s, p, now) {
         }
     });
 
-    // Mở vị thế mới
     if (pendingTrades.filter(t => !t.isHedge).length === 0 && Math.max(Math.abs(c1), Math.abs(c5), Math.abs(c15)) >= currentMinVol && !(lastTradeClosed[s] && (now - lastTradeClosed[s] < COOLDOWN_MINUTES * 60000))) {
         if (!actionQueue.find(q => q.id === s)) {
             actionQueue.push({ id: s, priority: 2, action: () => {
@@ -153,7 +148,7 @@ function handlePriceUpdate(s, p, now) {
                 historyMap.set(`${s}_${now}`, { 
                     symbol: s, startTime: now, snapPrice: p, avgPrice: p, type: type, status: 'PENDING', 
                     maxLev: symbolMaxLeverage[s] || 20, tpTarget: currentTP, slTarget: currentSL, 
-                    snapVol: { c1, c5, c15 }, maxNegativeRoi: 0, maxNegativeTime: null, dcaCount: 0, dcaHistory: [{ t: now, p: p, avg: p }] 
+                    snapVol: { c1, c5, c15 }, maxNegativeRoi: 0, dcaCount: 0, dcaHistory: [{ t: now, p: p, avg: p }] 
                 });
             }});
         }
@@ -192,73 +187,85 @@ app.get('/gui', (req, res) => {
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;600;700&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=IBM+Plex+Sans:wght@400;600&display=swap');
         body { background: #0b0e11; color: #eaecef; font-family: 'IBM Plex Sans', sans-serif; margin: 0; }
+        .orbitron { font-family: 'Orbitron', sans-serif; }
         .up { color: #0ecb81; } .down { color: #f6465d; }
-        .bg-card { background: #1e2329; border: 1px solid #30363d; } .text-gray-custom { color: #848e9c; }
-        input, select { border: 1px solid #30363d !important; background: #0b0e11; color: white; }
+        .bg-card { background: #1e2329; border: 1px solid #30363d; box-shadow: 0 4px 20px rgba(0,0,0,0.5); }
+        .glow { text-shadow: 0 0 10px rgba(252, 213, 53, 0.5); }
+        .glow-border { border: 1px solid rgba(252, 213, 53, 0.3); box-shadow: 0 0 15px rgba(252, 213, 53, 0.1); }
+        input, select { border: 1px solid #30363d !important; background: #0b0e11; color: white; transition: all 0.2s; }
+        input:focus { border-color: #fcd535 !important; box-shadow: 0 0 5px rgba(252, 213, 53, 0.2); }
     </style></head><body>
     
     <div class="p-4 bg-[#0b0e11] sticky top-0 z-50 border-b border-zinc-800">
-        <div id="setup" class="grid grid-cols-2 gap-3 mb-4 bg-card p-3 rounded-lg">
-            <div><label class="text-[10px] text-gray-custom ml-1 uppercase font-bold">Vốn khởi tạo ($)</label><input id="balanceInp" type="number" class="p-2 rounded w-full text-yellow-500 font-bold outline-none text-sm"></div>
-            <div><label class="text-[10px] text-gray-custom ml-1 uppercase font-bold">Margin per Trade</label><input id="marginInp" type="text" class="p-2 rounded w-full text-yellow-500 font-bold outline-none text-sm"></div>
+        <div id="setup" class="grid grid-cols-2 gap-3 mb-4 bg-card p-4 rounded-xl glow-border">
+            <div><label class="text-[10px] text-gray-400 ml-1 uppercase font-bold orbitron">Vốn khởi tạo ($)</label><input id="balanceInp" type="number" class="p-2 rounded w-full text-yellow-500 font-bold outline-none text-sm"></div>
+            <div><label class="text-[10px] text-gray-400 ml-1 uppercase font-bold orbitron">Margin per Trade</label><input id="marginInp" type="text" class="p-2 rounded w-full text-yellow-500 font-bold outline-none text-sm"></div>
             <div class="col-span-2 grid grid-cols-5 gap-2 border-t border-zinc-800 pt-3 mt-1">
-                <div><label class="text-[10px] text-gray-custom ml-1 uppercase">TP (%)</label><input id="tpInp" type="number" step="0.1" class="p-1 rounded w-full outline-none text-xs"></div>
-                <div><label class="text-[10px] text-gray-custom ml-1 uppercase">DCA (%)</label><input id="slInp" type="number" step="0.1" class="p-1 rounded w-full outline-none text-xs"></div>
-                <div><label class="text-[10px] text-gray-custom ml-1 uppercase">Max DCA</label><input id="maxDcaInp" type="number" class="p-1 rounded w-full outline-none text-xs" value="5"></div>
-                <div><label class="text-[10px] text-gray-custom ml-1 uppercase">Min Vol</label><input id="volInp" type="number" step="0.1" class="p-1 rounded w-full outline-none text-xs"></div>
-                <div><label class="text-[10px] text-gray-custom ml-1 uppercase">Chế độ</label>
-                    <select id="modeInp" class="p-1 rounded w-full outline-none text-[10px]">
-                        <option value="FOLLOW">FOLLOW</option><option value="REVERSE">REVERSE</option>
+                <div><label class="text-[10px] text-gray-400 ml-1 uppercase">TP (%)</label><input id="tpInp" type="number" step="0.1" class="p-2 rounded w-full outline-none text-sm"></div>
+                <div><label class="text-[10px] text-gray-400 ml-1 uppercase">DCA (%)</label><input id="slInp" type="number" step="0.1" class="p-2 rounded w-full outline-none text-sm"></div>
+                <div><label class="text-[10px] text-gray-400 ml-1 uppercase">Max DCA</label><input id="maxDcaInp" type="number" class="p-2 rounded w-full outline-none text-sm" value="5"></div>
+                <div><label class="text-[10px] text-gray-400 ml-1 uppercase">Min Vol (%)</label><input id="volInp" type="number" step="0.1" class="p-2 rounded w-full outline-none text-sm"></div>
+                <div><label class="text-[10px] text-gray-400 ml-1 uppercase">Chế độ</label>
+                    <select id="modeInp" class="p-2 rounded w-full outline-none text-sm">
+                        <option value="FOLLOW">FOLLOW</option><option value="REVERSE">REVERSE</option><option value="LONG_ONLY">LONG ONLY</option><option value="SHORT_ONLY">SHORT ONLY</option>
                     </select>
                 </div>
             </div>
-            <button onclick="start()" class="col-span-2 bg-[#fcd535] text-black py-2 rounded font-bold text-xs mt-1">START BOT</button>
+            <button onclick="start()" class="col-span-2 bg-[#fcd535] hover:bg-[#ffe066] text-black py-3 rounded-lg font-bold orbitron uppercase text-xs mt-2 transition-all">LUFFY ENGINE START</button>
         </div>
 
         <div id="active" class="hidden flex justify-between items-center mb-4">
-            <div class="font-bold italic text-white text-xl">BINANCE <span class="text-[#fcd535]">LUFFY PRO</span></div>
-            <div class="text-[#fcd535] font-black text-xs border border-[#fcd535] px-2 py-1 rounded cursor-pointer" onclick="stop()">STOP</div>
+            <div class="font-bold italic text-white text-2xl orbitron tracking-tighter glow">BINANCE <span class="text-[#fcd535]">LUFFY PRO</span></div>
+            <div class="text-right text-[10px] uppercase font-bold text-gray-400">
+                PENDING: <span id="pendingCount" class="text-white">0</span> | WIN: <span id="winCount" class="text-green-500">0</span> | LOSE: <span id="loseCount" class="text-red-500">0</span> | PNL: <span id="winPnl" class="text-green-500">0.00</span>
+            </div>
+            <div class="text-[#fcd535] font-black orbitron italic text-sm border border-[#fcd535] px-4 py-1.5 rounded-lg cursor-pointer hover:bg-[#fcd535]/10" onclick="stop()">STOP</div>
         </div>
 
-        <div class="flex justify-between items-end mb-2">
+        <div class="flex justify-between items-end mb-3">
             <div>
-                <div class="text-gray-custom text-[10px] uppercase font-bold">Equity</div>
-                <span id="displayBal" class="text-3xl font-bold text-white tracking-tighter">0.00</span>
+                <div class="text-gray-400 text-[11px] uppercase font-bold orbitron tracking-widest mb-1">Equity (Vốn + PnL Live)</div>
+                <span id="displayBal" class="text-5xl font-bold text-white tracking-tighter orbitron">0.00</span>
             </div>
-            <div class="text-right"><div class="text-gray-custom text-[10px] uppercase font-bold">PnL Live</div><div id="unPnl" class="text-lg font-bold">0.00</div></div>
+            <div class="text-right"><div class="text-gray-400 text-[11px] uppercase font-bold orbitron mb-1">PnL Tạm tính</div><div id="unPnl" class="text-2xl font-bold orbitron">0.00</div></div>
         </div>
     </div>
 
-    <div class="px-4 mt-2">
-        <div class="bg-card rounded p-3 border border-zinc-800">
-            <div class="text-[10px] font-bold text-yellow-500 mb-2 uppercase italic">⚡ Market Movement</div>
-            <table class="w-full text-[10px] text-left">
-                <thead class="text-gray-custom border-b border-zinc-800"><tr><th>Pair</th><th>Price</th><th>M1</th><th>M5</th><th>M15</th></tr></thead>
+    <!-- MARKET -->
+    <div class="px-4 mt-6">
+        <div class="bg-card rounded-xl p-4 border border-zinc-800">
+            <div class="text-[11px] font-bold text-yellow-500 mb-3 orbitron uppercase tracking-wider italic">⚡ Market Movement (M1-M5-M15)</div>
+            <table class="w-full text-[11px] text-left">
+                <thead class="text-gray-400 border-b border-zinc-800 uppercase"><tr><th class="pb-2">Pair</th><th class="pb-2">Price</th><th class="pb-2">M1</th><th class="pb-2">M5</th><th class="pb-2">M15</th></tr></thead>
                 <tbody id="liveBody"></tbody>
             </table>
         </div>
     </div>
 
-    <div class="px-4 mt-4"><div class="bg-card rounded p-3">
-        <div class="text-[10px] font-bold text-white mb-2 uppercase">Vị thế đang mở</div>
-        <div class="overflow-x-auto"><table class="w-full text-[10px] text-left">
-            <thead class="text-gray-custom border-b border-zinc-800"><tr><th>Pair</th><th>DCA</th><th>Margin</th><th>Lev</th><th>Entry/Live</th><th class="text-right">PnL</th></tr></thead>
-            <tbody id="pendingBody"></tbody>
-        </table></div>
+    <!-- CHART -->
+    <div class="px-4 mt-6">
+        <div class="bg-card rounded-xl p-4 border border-zinc-800">
+            <div class="text-[11px] font-bold text-gray-400 orbitron uppercase tracking-widest italic mb-2">Growth Curve</div>
+            <div style="height: 180px;"><canvas id="balanceChart"></canvas></div>
+        </div>
+    </div>
+
+    <!-- PENDING -->
+    <div class="px-4 mt-6"><div class="bg-card rounded-xl p-4">
+        <div class="text-[11px] font-bold text-white mb-3 orbitron uppercase tracking-wider flex items-center"><span class="w-2 h-2 bg-green-500 rounded-full mr-2 animate-pulse"></span> Vị thế đang mở</div>
+        <div class="overflow-x-auto"><table class="w-full text-[11px] text-left"><thead class="text-gray-400 uppercase border-b border-zinc-800"><tr><th>STT</th><th>Pair</th><th>DCA</th><th>Margin</th><th class="text-center">Lev</th><th>Entry/Live</th><th>Vol Snap</th><th class="text-right">ROI%</th></tr></thead><tbody id="pendingBody"></tbody></table></div>
     </div></div>
 
-    <div class="px-4 mt-4"><div class="bg-card rounded p-3">
-        <div class="text-[10px] font-bold text-gray-custom mb-2 uppercase">Nhật ký</div>
-        <div class="overflow-x-auto"><table class="w-full text-[9px] text-left">
-            <thead class="text-gray-custom border-b border-zinc-800"><tr><th>Time</th><th>Pair</th><th>DCA</th><th>Margin</th><th>Entry/Out</th><th class="text-right">Balance</th></tr></thead>
-            <tbody id="historyBody"></tbody>
-        </table></div>
+    <!-- HISTORY -->
+    <div class="px-4 mt-6 mb-10"><div class="bg-card rounded-xl p-4">
+         <div class="text-[11px] font-bold text-gray-400 mb-3 orbitron uppercase tracking-wider italic">Nhật ký giao dịch</div>
+        <div class="overflow-x-auto"><table class="w-full text-[10px] text-left"><thead class="text-gray-400 border-b border-zinc-800 uppercase"><tr><th>Time Out</th><th>Pair</th><th>DCA</th><th>Margin</th><th>Entry/Out</th><th>Vol Snap</th><th>MaxDD</th><th class="text-right">Balance</th></tr></thead><tbody id="historyBody"></tbody></table></div>
     </div></div>
 
     <script>
-    let running = false;
+    let running = false, myChart = null;
     const saved = JSON.parse(localStorage.getItem('luffy_state') || '{}');
     if(saved.initialBal) {
         document.getElementById('balanceInp').value = saved.initialBal;
@@ -280,6 +287,7 @@ app.get('/gui', (req, res) => {
         localStorage.setItem('luffy_state', JSON.stringify(state)); location.reload();
     }
     function stop() { let s = JSON.parse(localStorage.getItem('luffy_state')); s.running = false; localStorage.setItem('luffy_state', JSON.stringify(s)); location.reload(); }
+    function fPrice(p) { if (!p || p === 0) return "0.0000"; let s = p.toFixed(20); let match = s.match(/^-?\\d+\\.0*[1-9]/); if (!match) return p.toFixed(4); let index = match[0].length; return parseFloat(p).toFixed(index - match[0].indexOf('.') + 3); }
 
     async function update() {
         try {
@@ -287,34 +295,54 @@ app.get('/gui', (req, res) => {
             const state = JSON.parse(localStorage.getItem('luffy_state') || '{}');
             let mVal = state.marginVal || "10%", mNum = parseFloat(mVal);
             let runningBal = state.initialBal || 0, unPnlTotal = 0;
+            let countWin = 0, countLose = 0, sumWinPnl = 0;
+            let chartLabels = ['Start'], chartData = [runningBal];
 
             document.getElementById('liveBody').innerHTML = d.live.slice(0, 8).map(i => \`
-                <tr class="border-b border-zinc-800/30"><td class="py-1 text-white font-bold">\${i.symbol}</td><td>\${i.currentPrice}</td><td class="\${i.c1>=0?'up':'down'}">\${i.c1}%</td><td class="\${i.c5>=0?'up':'down'}">\${i.c5}%</td><td class="text-gray-600">\${i.c15}%</td></tr>\`).join('');
+                <tr class="border-b border-zinc-800/30">
+                    <td class="py-2 text-white font-bold orbitron">\${i.symbol}</td>
+                    <td class="text-yellow-500">\${i.currentPrice}</td>
+                    <td class="\${i.c1>=0?'up':'down'} font-bold">\${i.c1}%</td>
+                    <td class="\${i.c5>=0?'up':'down'} font-bold">\${i.c5}%</td>
+                    <td class="text-gray-500">\${i.c15}%</td>
+                </tr>\`).join('');
 
-            let histHTML = [...d.history].reverse().map(h => {
+            let histHTML = [...d.history].reverse().map((h, idx) => {
                 let mBase = mVal.includes('%') ? (runningBal * mNum / 100) : mNum;
                 let actualMargin = h.isHedge ? (mBase * h.hedgeMultiplier) : (mBase * (h.dcaCount + 1));
                 let pnl = (actualMargin * (h.maxLev || 20) * (h.pnlPercent/100)) - (actualMargin * (h.maxLev || 20) * 0.001);
-                runningBal += pnl;
-                return \`<tr><td>\${new Date(h.endTime).toLocaleTimeString()}</td><td><b class="\${h.isHedge?'text-purple-400':'text-white'}">\${h.symbol}</b></td><td>\${h.dcaCount}</td><td>\${actualMargin.toFixed(1)}</td><td>\${h.snapPrice.toFixed(4)}/\${h.finalPrice.toFixed(4)}</td><td class="text-right text-white">\${runningBal.toFixed(1)}</td></tr>\`;
+                runningBal += pnl; 
+                if(pnl > 0) { countWin++; sumWinPnl += pnl; } else { countLose++; }
+                chartLabels.push(""); chartData.push(runningBal);
+                let sv = h.snapVol || {c1:0,c5:0,c15:0};
+                return \`<tr class="border-b border-zinc-800/30"><td>\${new Date(h.endTime).toLocaleTimeString()}</td><td><b class="\${h.isHedge?'text-purple-400':'text-white'} orbitron">\${h.symbol}</b></td><td>\${h.dcaCount}</td><td>\${actualMargin.toFixed(1)}</td><td>\${fPrice(h.snapPrice)}/\${fPrice(h.finalPrice)}</td><td>\${sv.c1}/\${sv.c5}/\${sv.c15}</td><td class="down font-bold">\${h.maxNegativeRoi ? h.maxNegativeRoi.toFixed(1) : 0}%</td><td class="text-right text-white font-bold orbitron">\${runningBal.toFixed(1)}</td></tr>\`;
             }).reverse().join('');
 
-            let pendingHTML = d.pending.map(h => {
+            let pendingHTML = d.pending.map((h, idx) => {
                 let lp = d.allPrices[h.symbol] || h.avgPrice;
                 let mBase = mVal.includes('%') ? (runningBal * mNum / 100) : mNum;
                 let totalM = h.isHedge ? (mBase * h.hedgeMultiplier) : (mBase * (h.dcaCount + 1));
                 let roi = (h.type === 'LONG' ? (lp-h.avgPrice)/h.avgPrice : (h.avgPrice-lp)/h.avgPrice) * 100 * (h.maxLev || 20);
                 let pnl = totalM * roi / 100; unPnlTotal += pnl;
-                return \`<tr class="\${h.isHedge?'bg-purple-900/20':''}"><td><b class="text-white">\${h.symbol}</b> <span class="text-[8px] \${h.type==='LONG'?'up':'down'}">\${h.type}</span></td><td>\${h.dcaCount}</td><td>\${totalM.toFixed(1)}</td><td>\${h.maxLev}x</td><td>\${h.avgPrice.toFixed(4)}/\${lp.toFixed(4)}</td><td class="text-right font-bold \${roi>=0?'up':'down'}">\${roi.toFixed(1)}%</td></tr>\`;
+                let sv = h.snapVol || {c1:0,c5:0,c15:0};
+                return \`<tr class="border-b border-zinc-800 \${h.isHedge?'bg-purple-900/10':''}"><td>\${idx+1}</td><td class="text-white font-bold orbitron">\${h.symbol} <span class="text-[9px] px-1 \${h.type==='LONG'?'bg-green-600':'bg-red-600'} rounded">\${h.type}</span></td><td>\${h.dcaCount}</td><td>\${totalM.toFixed(1)}</td><td class="text-center text-yellow-500/70 font-bold">\${h.maxLev}x</td><td>\${fPrice(h.avgPrice)}/<b class="text-green-400">\${fPrice(lp)}</b></td><td>\${sv.c1}/\${sv.c5}/\${sv.c15}</td><td class="text-right font-bold \${roi>=0?'up':'down'}">\${roi.toFixed(1)}%</td></tr>\`;
             }).join('');
 
             document.getElementById('displayBal').innerText = (runningBal + unPnlTotal).toFixed(2);
+            document.getElementById('pendingCount').innerText = d.pending.length;
+            document.getElementById('winCount').innerText = countWin;
+            document.getElementById('loseCount').innerText = countLose;
+            document.getElementById('winPnl').innerText = sumWinPnl.toFixed(2);
             document.getElementById('unPnl').innerText = unPnlTotal.toFixed(2);
-            document.getElementById('unPnl').className = 'text-lg font-bold ' + (unPnlTotal >= 0 ? 'up' : 'down');
+            document.getElementById('unPnl').className = 'text-2xl font-bold orbitron ' + (unPnlTotal >= 0 ? 'up' : 'down');
             document.getElementById('historyBody').innerHTML = histHTML;
             document.getElementById('pendingBody').innerHTML = pendingHTML;
+            if(myChart) { myChart.data.labels = chartLabels; myChart.data.datasets[0].data = chartData; myChart.update('none'); }
         } catch(e) {}
     }
+
+    const ctx = document.getElementById('balanceChart').getContext('2d');
+    myChart = new Chart(ctx, { type: 'line', data: { labels: [], datasets: [{ data: [], borderColor: '#fcd535', borderWidth: 2, pointRadius: 0, fill: true, backgroundColor: 'rgba(252, 213, 53, 0.05)' }] }, options: { maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { display: false }, y: { grid: { color: '#30363d' } } } } });
     if(running) setInterval(update, 1000);
     </script></body></html>`);
 });
