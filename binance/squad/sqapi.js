@@ -1,257 +1,175 @@
-import WebSocket from 'ws';
 import express from 'express';
 import axios from 'axios';
-import Binance from 'node-binance-api';
-import { API_KEY, SECRET_KEY } from './config.js'; 
 
 const PORT = 8888;
 const SQUAD_API_KEY = "8d794c11cc794c958c2c65924c54f2dd"; 
 
-const binance = new Binance().options({
-    APIKEY: API_KEY, APISECRET: SECRET_KEY, family: 4, recvWindow: 60000
-});
-
-const SETTINGS = {
-    SQUARE_URL: "https://www.binance.com/bapi/composite/v1/public/pgc/openApi/content/add",
-    M1_LIMIT: 3.5,
-    M5_LIMIT: 7.0,
-    MAX_BIENDONG: 50,      
-    MAX_VOLUME: 50,        
-    MAX_TOTAL: 100,       
-    VOL_INTERVAL: 15 * 60000, 
-    NIGHT_SPEED: 6000,    
-};
-
-// --- NGÂN HÀNG 400 CÂU (MỖI PHẦN 100 CÂU - KHÔNG RÚT GỌN) ---
 const BANK = {
-    P1: Array.from({length: 100}, (_, i) => [
-        "🔥 Dòng tiền thông minh đang đổ mạnh vào hệ sinh thái này.", "🐳 Dữ liệu on-chain cho thấy cá voi đang gom hàng.", "💎 Áp lực bán đã cạn kiệt tại vùng hỗ trợ tâm lý.", "📊 Sự gia tăng đột biến về khối lượng giao dịch ngắn hạn.", "🔎 Các địa chỉ ví lớn đang có dấu hiệu tích lũy âm thầm.", "📰 Thị trường đang phản ứng tích cực với tin vĩ mô.", "⚡ Lực mua chủ động đang áp đảo hoàn toàn trên bảng điện.", "📈 Chỉ số tâm lý thị trường đang chuyển sang hưng phấn.", "🏛️ Sự bứt phá này mang đậm dấu ấn của các quỹ lớn.", "🚀 Nhu cầu sở hữu đang tăng cao bất chấp biến động chung."
-    ][i % 10] + ` (P1-ID:${i+1})`),
-    
-    P2: Array.from({length: 100}, (_, i) => [
-        "📐 Về kỹ thuật giá đã bứt phá khỏi kênh giảm giá.", "🪄 Đường EMA đang thực hiện cú cắt vàng báo hiệu tăng.", "🌊 RSI đang tiến vào vùng mạnh mẽ nhưng chưa quá mua.", "🕯️ Mô hình nến nhấn chìm đã xác nhận xu hướng tăng.", "🎈 Bollinger Band mở rộng cho thấy biến động lớn.", "🛤️ Giá đang nằm trên các đường MA quan trọng.", "🧱 Kháng cự cũ đã trở thành hỗ trợ mới vững chắc.", "🏹 Phân kỳ dương H1 hỗ trợ đà tăng bền vững.", "🏔️ Cấu trúc đỉnh sau cao hơn đỉnh trước duy trì.", "☁️ Ichimoku cho thấy mây xanh nâng đỡ rất tốt."
-    ][i % 10] + ` (P2-ID:${i+1})`),
-    
-    P3: Array.from({length: 100}, (_, i) => [
-        "📝 Kế hoạch tối ưu là kiên nhẫn chờ điểm vào lệnh đẹp.", "🛡️ Quản trị rủi ro bằng cách đặt dừng lỗ tuyệt đối.", "🎯 Chiến lược mua khi điều chỉnh vẫn tỏ ra hiệu quả.", "🛑 Đừng FOMO tại vùng giá này, hãy đợi nhịp test lại.", "💰 Chia vốn ra vào lệnh để tối ưu hóa giá vị thế.", "🧊 Luôn giữ cái đầu lạnh trước những biến động.", "🎁 Mục tiêu chốt lời ngắn hạn đã được xác định rõ.", "🎢 Gồng lãi là nghệ thuật, hãy nâng trailing stop.", "🔒 Bảo vệ lợi nhuận luôn là ưu tiên hàng đầu.", "📏 Hãy tuân thủ kỷ luật giao dịch để đi đường dài."
-    ][i % 10] + ` (P3-ID:${i+1})`),
-    
-    P4: Array.from({length: 100}, (_, i) => [
-        "🍻 Chúc anh em có ngày giao dịch bùng nổ lợi nhuận.", "🍀 Hy vọng may mắn mỉm cười với mọi quyết định.", "🌳 Chúc danh mục của anh em luôn xanh rực rỡ.", "👋 Hẹn gặp lại anh em ở những vùng giá cao hơn.", "🤝 Cùng nhau chinh phục thị trường đầy tiềm năng.", "✨ Tận hưởng niềm vui khi phân tích đúng hướng.", "🏆 Thắng không kiêu bại không nản, chúc thành công.", "🔑 Thị trường luôn có cơ hội cho người chuẩn bị.", "🎖️ Chào thân ái và quyết thắng cho toàn cộng đồng.", "🌈 Chúc anh em gặt hái được nhiều thành quả."
-    ][i % 10] + ` (P4-ID:${i+1})`)
+    P1: [
+        "Dòng tiền thông minh đang đổ mạnh vào hệ sinh thái này.", "Dữ liệu on-chain cho thấy cá voi đang gom hàng rất mạnh.", "Áp lực bán đã hoàn toàn cạn kiệt tại vùng hỗ trợ này.", "Sự gia tăng đột biến về khối lượng giao dịch trong ngắn hạn.", "Các địa chỉ ví lớn đang có dấu hiệu tích lũy âm thầm.", "Thị trường đang phản ứng cực kỳ tích cực với tin tức mới.", "Lực mua chủ động đang áp đảo hoàn toàn trên bảng điện.", "Chỉ số tâm lý thị trường đang chuyển sang trạng thái hưng phấn.", "Sự bứt phá này mang đậm dấu ấn của các quỹ đầu tư lớn.", "Nhu cầu sở hữu đang tăng cao bất chấp những biến động chung.",
+        "Cộng đồng đang thảo luận sôi nổi về tiềm năng tăng trưởng.", "Mục tiêu giá ngắn hạn đang được các chuyên gia kỳ vọng cao.", "Lượng cung trên các sàn giao dịch đang giảm xuống mức thấp.", "Nến ngày đóng cửa rất đẹp tạo tiền đề cho cú nổ tiếp theo.", "Dòng vốn từ các stablecoin đang trực chờ để đổ vào tài sản.", "Nền tảng cơ bản của dự án đang ngày càng được củng cố vững.", "Các mối quan hệ đối tác chiến lược vừa được công bố rộng rãi.", "Đội ngũ phát triển đang làm việc tích cực để ra mắt tính năng.", "Công nghệ đột phá giúp dự án chiếm ưu thế trên thị trường.", "Vùng giá này được bảo vệ cực tốt bởi các lệnh mua lớn.",
+        "Bất chấp nhịp điều chỉnh của BTC, coin này vẫn giữ giá tốt.", "Chu kỳ tăng trưởng mới dường như đã bắt đầu được xác lập.", "Một ngòi nổ tin tức có thể kích hoạt cú pump cực mạnh.", "Đồ thị trình bày các tín hiệu đảo chiều rõ nét trên khung lớn.", "Gen tăng trưởng của đồng coin này đang mạnh hơn bao giờ hết.", "Tầm nhìn dài hạn cho thấy dư địa tăng còn rất đáng kể.", "Năng lượng tích lũy trong vùng giá đi ngang đã đủ lớn.", "Chỉ cần một cú hích từ thị trường chung là giá sẽ bay.", "Kim cương thường được tìm thấy ở những vùng sợ hãi nhất.", "Vị thế hiện tại đang cực kỳ thuận lợi cho việc nắm giữ.",
+        "Sức nóng từ mạng xã hội đang đẩy giá trị thương hiệu lên.", "Các kênh truyền thông lớn bắt đầu đưa tin về sự bứt phá.", "Sự kiên nhẫn của những người nắm giữ đang được đền đáp.", "Giá đang chinh phục những cột mốc cao mới trong năm nay.", "Dẫn đầu danh sách tăng trưởng trong nhóm ngành liên quan.", "Đồ thị được vẽ một cách rất bài bản và có ý đồ rõ ràng.", "Mọi nút thắt của sự giảm giá đã được tháo gỡ hoàn toàn.", "Bản giao hưởng tăng giá đang bắt đầu những nốt nhạc đầu.", "Tỷ lệ thắng cho vị thế mua đang nghiêng về phía chúng ta.", "Phe bò đã giành lại quyền kiểm soát hoàn toàn cuộc chơi.",
+        "Những tín hiệu sớm từ AI cho thấy xu hướng tăng rất bền.", "Tần suất giao dịch tăng vọt trên các sàn lớn toàn cầu.", "Liều thuốc giải cho sự ảm đạm chính là cú tăng này.", "Tường mua dày đặc được thiết lập ngay phía dưới giá hiện tại.", "Sự chú ý của giới đầu tư đang đổ dồn về phía đồng coin.", "Ánh sáng cuối đường hầm đã xuất hiện sau chuỗi ngày giảm.", "Giá đang bay cao như diều gặp gió lớn từ thị trường.", "Mũi tên xanh đã xuất hiện trên hệ thống chỉ báo sớm.", "Điểm đến tiếp theo đã được xác định rõ ràng trên bản đồ.", "Công cuộc canh tác lợi nhuận đang diễn ra rất thuận lợi.",
+        "Vị thế của kẻ dẫn đầu đang được khẳng định qua hành động giá.", "Những nhà đầu tư thông minh đang bắt đầu giải ngân dần.", "Quản lý vốn chặt chẽ là chìa khóa để tận hưởng cú pump.", "Che chắn cho tài khoản bằng cách chọn đúng coin mạnh.", "Cầu vồng tăng giá xuất hiện sau cơn mưa điều chỉnh.", "Làn sóng FOMO đang bắt đầu lan tỏa rộng rãi khắp nơi.", "Núi lửa tăng trưởng đang trực chờ phun trào mạnh mẽ.", "Tín hiệu từ vũ trụ đang gửi đến những thông điệp tích cực.", "Sự đổ bộ của các nhà đầu tư tổ chức đang ngày một gần.", "Cuộc chơi chỉ mới bắt đầu và chúng ta đang ở chân sóng.",
+        "Không có gì có thể ngăn cản được đà tăng hiện tại.", "Đấu trường giá đang nghiêng hẳn về phía những người mua.", "Sự liên kết giữa các chỉ báo tạo nên một bức tranh đẹp.", "Những phím đàn tăng giá đang vang lên rộn rã trên chart.", "Tiếng vang của sự thành công đang lan tỏa tới mọi nhà.", "Pin năng lượng của phe mua đã được sạc đầy 100 phần trăm.", "Ánh đèn sân khấu đang chiếu rọi vào đồng coin tiềm năng.", "Một cây nến Marubozu tăng mạnh xác nhận xu hướng rõ rệt.", "Những công cụ phân tích đều cho kết quả đồng nhất về giá.", "Khả năng bứt tốc trong vài giờ tới là cực kỳ khả thi.",
+        "Kết nối nguồn lực tài chính để không bỏ lỡ cơ hội này.", "Ý tưởng đầu tư tuyệt vời thường xuất phát từ sự quan sát.", "Nhật ký giao dịch hôm nay sẽ ghi lại một cột mốc mới.", "Viết nên câu chuyện thành công từ chính sự quyết đoán.", "Chìa khóa vạn năng để mở cánh cửa lợi nhuận đã ở đây.", "Thu hoạch thành quả từ những hạt giống đã gieo từ trước.", "Sức hút của đồng coin này đang cực lớn đối với cộng đồng.", "Mọi vết thương của đợt giảm giá trước đã được chữa lành.", "Thử nghiệm các kịch bản cho thấy giá tăng là xác suất cao.", "Nhìn xa trông rộng để thấy được giá trị thực của tài sản.",
+        "Sự sạch sẽ trong cấu trúc giá giúp việc phân tích dễ dàng.", "Cánh cửa cơ hội đang mở rộng cho tất cả những ai biết tới.", "Giỏ hàng hôm nay không thể thiếu được đồng coin chất lượng.", "Phản chiếu sự hưng phấn của thị trường qua từng nhịp nến.", "Loại bỏ những nghi ngờ để tiến tới mục tiêu lợi nhuận.", "Quét sạch các lệnh bán treo phía trên một cách nhanh chóng.", "Gom đủ hàng để chuẩn bị cho một hành trình dài phía trước.", "Giỏ hàng của các quỹ lớn đang chứa đầy đồng coin này.", "Mua sắm tài sản giá rẻ khi người khác còn đang sợ hãi.", "Sự nhẹ nhàng trong cách di chuyển giá báo hiệu còn tăng.",
+        "Chúc mừng những ai đã kiên trì nắm giữ tới thời điểm này.", "Sự tăng trưởng bền vững là đặc điểm nổi bật nhất hiện nay.", "Bức tranh thị trường đang trở nên sáng sủa hơn bao giờ hết.", "Sự đồng thuận giữa các khung thời gian là điều tuyệt vời.", "Tiếng chuông báo hiệu cơ hội đã điểm rõ ràng trên hệ thống.", "May mắn sẽ đến với những ai có sự chuẩn bị kỹ lưỡng nhất.", "Gói quà lợi nhuận đang chờ bạn mở ra trong thời gian tới.", "Giá trị cốt lõi luôn là nền tảng cho sự tăng giá bền bỉ.", "Thời điểm vàng để hành động đã chính thức được xác lập.", "Bản đồ lợi nhuận đã vẽ sẵn đường đi cho chúng ta rồi.",
+        "Khám phá tiềm năng ẩn giấu sau những con số tài chính.", "Cơ hội không đợi một ai khi thị trường bắt đầu nóng lên.", "Sự trỗi dậy mạnh mẽ từ vùng đáy tích lũy dài hạn.", "Cấu trúc thị trường đang ủng hộ phe nắm giữ tài sản.", "Niềm tin của giới đầu tư đang được củng cố qua từng phiên.", "Sự dịch chuyển của dòng tiền xuyên biên giới vào crypto.", "Hành trình vạn dặm bắt đầu từ những bước đi đúng đắn này.", "Không gì là không thể khi công nghệ được ứng dụng thực tế.", "Dự án đang chứng minh được sức hút mãnh liệt của mình.", "Sự bùng nổ là điều tất yếu sau chuỗi ngày nén chặt giá.",
+        "Sự kỳ diệu của lãi kép bắt đầu từ những lựa chọn này.", "Tương lai của ngành tài chính đang nằm trong tay bạn.", "Sự khác biệt giữa người thắng và người thua là tầm nhìn.", "Mọi sự chờ đợi đều xứng đáng khi nhìn vào biểu đồ này.", "Sự tự tin đến từ việc nắm giữ những tài sản chất lượng.", "Đừng để nỗi sợ lấn át đi cơ hội làm giàu chính đáng.", "Hệ sinh thái đang mở rộng quy mô một cách chóng mặt.", "Sự kết nối toàn cầu tạo nên sức mạnh vô song cho dự án.", "Đỉnh cao mới đang chờ đợi những người dám đương đầu.", "Tận hưởng cảm giác chiến thắng cùng đồng coin tiềm năng.",
+        "Mỗi nhịp đập của thị trường đều mang theo một cơ hội.", "Sự nhạy bén sẽ giúp bạn đi trước đám đông một bước.", "Tài sản số đang khẳng định vị thế trong danh mục đầu tư.", "Sự an toàn được đặt lên hàng đầu với cấu trúc nến này.", "Làn gió mới đang thổi bùng ngọn lửa tăng trưởng hôm nay.", "Sự tinh tế trong cách vận hành dòng tiền của nhà tạo lập.", "Mọi rào cản tâm lý đã được gỡ bỏ sau cây nến xác nhận.", "Sự hội tụ của các yếu tố thuận lợi nhất ngay lúc này.", "Đừng đứng ngoài cuộc khi lịch sử đang được viết lại.", "Sự bứt phá ngoạn mục làm nức lòng tất cả những ai tin tưởng.",
+        "Vững tin vào lựa chọn của bản thân dù thị trường rung lắc.", "Chiến thắng dành cho người có bản lĩnh và kiến thức.", "Sự thay đổi về chất sẽ dẫn đến sự thay đổi về lượng.", "Mỗi đồng vốn bỏ ra đều mang lại kỳ vọng sinh lời cao.", "Sự minh bạch trong công nghệ tạo nên niềm tin vững chắc.", "Sự ủng hộ từ cộng đồng quốc tế là động lực tăng trưởng.", "Hành động giá đang phản ánh đúng thực tế của dự án.", "Sự phối hợp nhịp nhàng giữa các yếu tố kỹ thuật và cơ bản.", "Khả năng tăng trưởng đột phá không còn là điều xa vời.", "Sự chuẩn bị kỹ càng luôn mang lại những kết quả mỹ mãn.",
+        "Thị trường luôn có cách riêng để phần thưởng người giỏi.", "Sự tập trung vào giá trị cốt lõi sẽ mang lại thành công.", "Đừng bỏ qua những tín hiệu nhỏ nhất từ bảng giao dịch.", "Sự đột phá về volume là lời khẳng định đanh thép nhất.", "Sự vận động không ngừng của tài chính mang lại cơ hội.", "Hãy nhìn vào những gì đang diễn ra thực tế trên đồ thị.", "Sự bùng nổ của mạng xã hội là chất xúc tác cực mạnh.", "Vị thế hiện tại là một món quà dành cho người kiên trì.", "Sự tăng trưởng bền bỉ là chìa khóa của sự tự do tài chính.", "Chào đón một kỷ nguyên mới của sự thịnh vượng bền vững.",
+        "Sức mạnh của sự đoàn kết trong cộng đồng đẩy giá lên.", "Tương lai tươi sáng đang mở rộng phía trước mắt chúng ta.", "Sự kết hợp giữa trí tuệ nhân tạo và blockchain hiện nay.", "Mọi con đường đều dẫn tới lợi nhuận nếu chọn đúng coin.", "Sự tin tưởng tuyệt đối vào khả năng bứt phá của dự án.", "Hành trình chinh phục những đỉnh cao mới bắt đầu từ đây.", "Sự phát triển không ngừng nghỉ của đội ngũ sáng lập.", "Vốn hóa thị trường đang tăng trưởng một cách lành mạnh.", "Sự lan tỏa mạnh mẽ của công nghệ mới đến người dùng.", "Chúc mừng bạn đã sở hữu một trong những coin tốt nhất.",
+        "Sự rực rỡ của biểu đồ là phần thưởng cho sự kiên nhẫn.", "Mỗi cây nến xanh đều mang theo một thông điệp tích cực.", "Sự vận hành trơn chu của hệ thống giao dịch toàn cầu.", "Cơ hội đổi đời nằm trong tầm tay của những người dám nghĩ.", "Sự biến động là bạn của những nhà đầu tư có kinh nghiệm.", "Nền móng vững chắc tạo nên một cú nhảy vọt thần kỳ.", "Sự quan tâm của các tổ chức tài chính lớn đang tăng vọt.", "Hệ thống chỉ báo đang cho thấy một mùa úp bô đã qua.", "Sự trở lại mạnh mẽ của niềm tin vào thị trường tài sản.", "Tận dụng mọi nhịp điều chỉnh để gia tăng vị thế tốt hơn.",
+        "Sự chuyển mình của dự án sang một giai đoạn phát triển mới.", "Cơ hội vàng cho những ai biết nắm bắt đúng thời điểm.", "Sự thăng hoa của hành động giá làm kinh ngạc giới phân tích.", "Mọi dự báo giảm giá đều bị đập tan bởi lực mua mạnh.", "Sự kiêu hãnh của một dự án dẫn đầu xu hướng thị trường.", "Hãy tin vào trực giác đã được tôi luyện qua thời gian.", "Sự bứt phá khỏi vùng an toàn để tiến tới sự giàu có.", "Sự đa dạng trong ứng dụng thực tế của đồng coin này.", "Mọi người đang nói về nó như một hiện tượng của năm nay.", "Sự tăng trưởng không giới hạn là mục tiêu của chúng ta.",
+        "Chào đón những kỷ lục mới sắp được thiết lập trên sàn.", "Sự vững vàng của tâm lý giúp bạn chiến thắng đám đông.", "Hành trình đi đến thành công luôn có dấu chân người tài.", "Sự tinh khôi trong cấu trúc giá tạo nên sự hấp dẫn lớn.", "Sự cộng hưởng của nhiều yếu tố tạo nên cú pump lịch sử.", "Không có đỉnh nào là không thể chinh phục được hôm nay.", "Sự quyết đoán mang lại lợi thế cạnh tranh cho nhà đầu tư.", "Hãy để thành công của bạn lên tiếng thay cho mọi lời nói.", "Sự thịnh vượng đang đến gần hơn bao giờ hết với bạn.", "Cảm ơn thị trường đã mang lại những cơ hội tuyệt vời này.",
+        "Sự thấu hiểu thị trường là chìa khóa mở cánh cửa lợi nhuận.", "Tầm vóc của dự án đang ngày càng được khẳng định rõ.", "Sự kiên định với mục tiêu đề ra sẽ mang lại trái ngọt.", "Mỗi ngày trôi qua là một bước tiến gần hơn tới mục tiêu.", "Sự hài hòa giữa phân tích và thực tiễn mang lại kết quả.", "Chào đón mùa tăng trưởng rực rỡ nhất trong lịch sử crypto.", "Sự lan tỏa giá trị cốt lõi đến từng nhà đầu tư cá nhân.", "Hành trình này sẽ được ghi nhớ như một sự thành công lớn.", "Sự chuẩn xác trong dự báo mang lại lợi nhuận tối đa.", "Hãy cùng nhau tận hưởng mùa quả ngọt sắp tới anh em nhé."
+    ],
+    P2: [
+        "Về mặt kỹ thuật giá đã bứt phá hoàn toàn khỏi kênh giảm giá.", "Các đường trung bình trượt EMA đang thực hiện cú cắt vàng.", "Chỉ báo RSI đang tiến vào vùng mạnh mẽ nhưng chưa quá mua.", "Mô hình nến nhấn chìm tăng trưởng đã xác nhận xu hướng mới.", "Dải Bollinger Band đang mở rộng cho thấy biến động cực lớn.", "Giá hiện đang nằm trên tất cả các đường MA quan trọng nhất.", "Vùng kháng cự cũ giờ đây đã trở thành hỗ trợ mới vững chắc.", "Tín hiệu phân kỳ dương trên khung H1 hỗ trợ đà tăng bền bỉ.", "Cấu trúc đỉnh sau cao hơn đỉnh trước đang được duy trì tốt.", "Đám mây Ichimoku cho thấy sự nâng đỡ rất tốt của mây xanh.",
+        "Volume giao dịch tăng mạnh xác nhận lực mua là hoàn toàn thực.", "Sự hội tụ của các chỉ báo kỹ thuật tại một điểm duy nhất.", "Cú rũ bỏ cuối cùng đã kết thúc trước khi bắt đầu nhịp tăng.", "Fibonacci thoái lui cho thấy giá đang ở vùng mua cực đẹp.", "Nến búa ngược xuất hiện tại đáy báo hiệu sự đảo chiều mạnh.", "Tốc độ khớp lệnh mua đang nhanh hơn gấp nhiều lần lệnh bán.", "Sóng Elliott đang đi vào con sóng thứ 3 tăng trưởng mạnh.", "Một bức tường mua vững chắc đã được thiết lập ở vùng giá này.", "Điểm xoay Pivot đang nằm dưới giá hỗ trợ cực kỳ đắc lực.", "Khung đồ thị tuần cho thấy một chu kỳ tăng giá dài hạn mới.",
+        "Các chỉ báo sớm cho thấy một cú pump sắp xảy ra trong đêm.", "Cặp nến mẹ bồng con xuất hiện xác nhận lực mua đang vào.", "Giá đang di chuyển trong một mô hình cái nêm hướng xuống.", "Khoảng cách giữa các đường MA đang rộng dần ra báo xu hướng.", "Chỉ báo MACD đã cắt lên trên đường tín hiệu một cách dứt khoát.", "Dòng tiền đang luân chuyển từ các coin lớn sang đồng coin này.", "Sự bứt phá khỏi vùng tích lũy 3 tháng là tín hiệu rất mạnh.", "Mục tiêu Fibonacci 1.618 là đích đến tiếp theo của giá.", "Sự ổn định trong cấu trúc giá là điểm cộng lớn cho lúc này.", "Không có áp lực bán đáng kể nào ở phía trên vùng giá hiện tại.",
+        "Chỉ số sức mạnh tương đối đang duy trì ở mức cực kỳ lý tưởng.", "Mức độ biến động đang thu hẹp dần báo hiệu sự bùng nổ sắp tới.", "Quan sát khung H4 ta thấy rõ lực gom hàng của các tay to.", "Một đường trendline tăng giá dài hạn vẫn đang được giữ vững.", "Ba chàng lính trắng xuất hiện trên khung ngày cực kỳ uy tín.", "Các thông số kỹ thuật đều đạt trạng thái sẵn sàng để bay cao.", "Mối tương quan nghịch với BTC đang giúp coin này tăng mạnh.", "Cấu trúc thị trường đã chuyển dịch từ giảm sang tăng hoàn toàn.", "Vùng cung đã bị hấp thụ hết bởi những lệnh mua chủ động lớn.", "Nhìn vào sổ lệnh ta thấy sự chênh lệch rõ rệt nghiêng về phe mua.",
+        "Mũi tên chỉ hướng tăng đã xuất hiện trên đồ thị kỹ thuật.", "Dữ liệu cho thấy sự gia tăng đột biến của các lệnh Long.", "Mô hình hai đáy đã hoàn thành và đang trong giai đoạn tăng.", "Nến Doji chuồn chuồn xuất hiện cho thấy phe bán đã kiệt sức.", "Sự bứt phá kèm khối lượng lớn là xác nhận vàng cho xu hướng.", "Lực đẩy từ thị trường phái sinh đang hỗ trợ rất tốt cho giá.", "Hỗ trợ cứng tại vùng giá tròn số tạo tâm lý an tâm cho nhà đầu tư.", "Các ngưỡng cản tâm lý đã bị phá vỡ một cách dễ dàng nhất.", "Sự kỳ diệu của toán học đang hiển thị rõ trên từng đường kẻ.", "Tương lai của hành động giá đang rộng mở hơn bao giờ hết.",
+        "Biểu đồ giá đang vẽ nên một kịch bản tăng trưởng trong mơ.", "Sự kết hợp giữa các nến Pinbar tạo nên một vùng cầu mạnh.", "Lực cầu tiềm năng vẫn còn rất lớn chưa được tung ra hết.", "Biên độ dao động đang tạo ra những cơ hội lướt sóng tuyệt vời.", "Mục tiêu dài hạn vẫn còn rất xa so với giá trị hiện tại.", "Phân tích đa khung thời gian cho kết quả đồng thuận cực cao.", "Sự tỉ mỉ trong việc giữ cấu trúc giá của tạo lập thị trường.", "Góc tăng trưởng của đường giá đang ngày càng dốc đứng hơn.", "Những phép màu kỹ thuật đang dần hiện rõ trên bảng điện.", "Sự quý giá của điểm vào lệnh hiện tại là không thể phủ nhận.",
+        "Nền móng cho cú tăng này đã được xây dựng từ rất lâu rồi.", "Xu hướng là bạn và xu hướng hiện tại đang là tăng mạnh.", "Sự phân tích khách quan cho thấy tỷ lệ tăng là vượt trội.", "Các mốc thời gian quan trọng đang hội tụ vào thời điểm này.", "Sự nhắm bắn chính xác của phe mua vào các vùng giá then chốt.", "Tốc độ tăng trưởng đang nhanh dần đều qua từng phiên giao dịch.", "Làn sóng tăng giá này sẽ còn kéo dài và mang lại lợi nhuận.", "Quan sát kỹ ta thấy sự cạn kiệt của các lệnh bán tháo.", "Một chu kỳ mới rực rỡ đang chào đón chúng ta phía trước.", "Sự tăng trưởng không ngừng nghỉ của vốn hóa đồng coin này.",
+        "Hình thái của mô hình lá cờ tăng trưởng đang cực kỳ chuẩn.", "Sự uy tín của cây nến rút chân tại hỗ trợ khung thời gian lớn.", "Sự truyền dẫn của dòng tiền đang diễn ra một cách mạch lạc.", "Độ dốc của đường giá phản ánh niềm tin của các nhà đầu tư.", "Nhắm tới các mục tiêu cao hơn một cách tự tin và quyết đoán.", "Thống kê cho thấy tỷ suất sinh lời đang ở mức cực kỳ hấp dẫn.", "Tầm nhìn xuyên thấu qua các biến động nhiễu của thị trường.", "Sự cân bằng giữa cung và cầu đã bị phá vỡ theo hướng có lợi.", "Ma trận giá đang vận hành đúng theo những gì chúng ta dự tính.", "Sự huyền bí của thị trường luôn dành phần thưởng cho người giỏi.",
+        "Biểu đồ nến đang kể một câu chuyện về sự hồi sinh mạnh mẽ.", "Sự vững chãi của phe mua khi đối diện với các đợt tin xấu.", "Sức mạnh nội tại của đồng coin đang được bộc lộ rõ trên chart.", "Từng pixel trên màn hình đều nhuộm một màu xanh hy vọng.", "Mũi tên xanh vươn cao như biểu tượng của sự thành công.", "Những con số không biết nói dối và chúng đang báo hiệu tăng.", "Sự tập trung cao độ vào những chuyển động nhỏ nhất của giá.", "Cấu trúc hình học của đồ thị đang đạt tới độ hoàn hảo tuyệt đối.", "Những tín hiệu kỹ thuật như được sắp đặt bởi những bàn tay bậc thầy.", "Phép màu của lãi suất kép sẽ bắt đầu từ những cú tăng như thế này.",
+        "Sự vươn mình của một gã khổng lồ đang thức giấc sau giấc ngủ.", "Ánh sáng từ những cây nến xanh rực rỡ soi sáng con đường.", "Sự xung kích mạnh mẽ của phe mua vào các vị trí chiến lược.", "Sự đo lường chính xác các nhịp đập của thị trường tài chính.", "Mục tiêu đã ở ngay trước mắt và chúng ta đang tiến về phía đó.", "Sự phân bổ dòng tiền đang tối ưu hóa cho đà tăng trưởng này.", "Một cái nhìn sâu sắc vào bản chất của các lệnh giao dịch lớn.", "Sự hài hòa giữa thời gian và giá cả tạo nên cơ hội vàng.", "Những đường kẻ trên chart như đang dẫn lối tới sự giàu có.", "Sự hội tụ của thiên thời địa lợi nhân hòa ngay tại mức giá này.",
+        "Vùng tích lũy này chính là lò xo nén lại để bật cao hơn.", "Mọi rào cản kỹ thuật đã được dọn sạch cho một đợt sóng.", "Sự bứt phá qua đường trung bình 200 ngày là tín hiệu lớn.", "Mật độ các lệnh mua đang dày đặc hơn bao giờ hết.", "Sự hưng phấn đang lan tỏa qua từng chỉ báo kỹ thuật nhỏ.", "Đây là lúc các thuật toán giao dịch bắt đầu kích hoạt.", "Sự chính xác của các đường Fibonacci trong đợt sóng này.", "Một chuỗi các nến xanh liên tiếp tạo đà tâm lý rất tốt.", "Chỉ báo ADX cho thấy sức mạnh của xu hướng tăng cực lớn.", "Vùng cầu tiềm tàng đã chính thức được kích hoạt hôm nay.",
+        "Nhịp đập của biểu đồ đang cộng hưởng với dòng tiền lớn.", "Không còn nghi ngờ gì về sức mạnh của đà tăng lần này.", "Mục tiêu ngắn hạn đã bị chinh phục một cách dễ dàng nhất.", "Cấu trúc vi mô của các lệnh giao dịch rất tích cực.", "Sự thăng hoa của chỉ số sức mạnh tương đối trên biểu đồ.", "Hành động giá đang tôn trọng các ngưỡng kỹ thuật quan trọng.", "Một kịch bản tăng trưởng kinh điển đang được viết tiếp.", "Sự trơn tru trong cách giá vượt qua các ngưỡng kháng cự.", "Niềm vui lan tỏa khi nhìn vào sự sắp xếp của các nến.", "Đây chính là thời điểm của những nhà đầu tư kỹ thuật.",
+        "Sự phân kỳ kín đang ủng hộ việc tiếp tục xu hướng tăng.", "Các cụm nến tích lũy đang tạo ra một bệ phóng vững chắc.", "Mô hình cốc tay cầm đang dần hình thành trên khung lớn.", "Sự hồi phục từ đáy chữ V mang lại niềm tin cực lớn.", "Chỉ báo mây xanh đang dày lên hỗ trợ giá cực kỳ đắc lực.", "Lượng lệnh mua thị trường đang tăng vọt trong vài phút qua.", "Sự ổn định của giá phía trên đường EMA 20 là điểm then chốt.", "Dòng vốn nội bộ đang có dấu hiệu luân chuyển tích cực.", "Từng nến đóng cửa đều nằm ở mức cao nhất của phiên.", "Sự xác nhận từ các công cụ phân tích kỹ thuật hiện đại nhất.",
+        "Khám phá sự cân bằng hoàn hảo trong biểu đồ giá hôm nay.", "Sự vững vàng của xu hướng tăng bất chấp mọi biến động.", "Đo lường biên độ cho thấy dư địa tăng còn ít nhất 30%.", "Sự tinh tế của nhà tạo lập trong việc giữ nhịp cho giá.", "Các tín hiệu nhiễu đã bị lọc sạch qua bộ lọc kỹ thuật.", "Sự tự tin của phe mua được thể hiện qua khối lượng khớp.", "Một kỷ nguyên mới của hành động giá đang bắt đầu ở đây.", "Sự đồng bộ của các sàn giao dịch lớn về tín hiệu tăng.", "Nhìn thấy cơ hội qua những đường kẻ song song trên chart.", "Sự kết nối giữa các vùng giá tạo nên một hành trình đẹp.",
+        "Đồ thị đang tỏa sáng như một viên ngọc giữa thị trường.", "Sự phản ứng tuyệt vời tại các vùng giá Fibonacci then chốt.", "Cú lội ngược dòng ngoạn mục của phe bò trong phiên nay.", "Sự kiên định của cấu trúc giá tăng trưởng bền vững nhất.", "Vùng kháng cự cũ đã bị san phẳng bởi lực mua thần tốc.", "Tương lai rực rỡ đã được dự báo qua các mô hình nến.", "Sự bùng nổ của các lệnh giao dịch tự động theo xu hướng.", "Cánh cửa dẫn tới các đỉnh cao mới đã mở rộng hoàn toàn.", "Sự sắc nét của từng chỉ báo trên màn hình giao dịch.", "Một bản giao hưởng của các con số đang hướng về phía trên.",
+        "Sự trỗi dậy của một thế lực mới trên bảng xếp hạng tăng.", "Giá đang khiêu vũ trên các đường trung bình động lớn.", "Sự cộng hưởng của toàn bộ hệ sinh thái chỉ báo kỹ thuật.", "Cái nhìn tổng quan cho thấy một chu kỳ tăng giá mạnh.", "Sự uyển chuyển của đường giá khi vượt qua các mốc cản.", "Niềm tin được củng cố khi giá đóng cửa trên mức quan trọng.", "Khả năng tăng tốc mạnh mẽ trong giai đoạn tiếp theo.", "Sự thấu thị qua các lớp dữ liệu kỹ thuật phức tạp nhất.", "Một dấu mốc quan trọng trên biểu đồ đã chính thức bị phá.", "Cảm hứng đầu tư dâng trào khi nhìn vào đồ thị nến này.",
+        "Sự cân đối giữa khối lượng và biên độ giá là hoàn hảo.", "Tường bán đang mỏng dần báo hiệu cú bứt phá sắp tới.", "Sự chuyển động của dòng tiền thông minh rất rõ ràng.", "Hành trình vạn dặm khởi đầu bằng những tín hiệu đẹp.", "Sự tích cực lan tỏa từ các khung giờ nhỏ lên khung lớn.", "Dòng chảy tài chính đang hướng về phía đồng coin này.", "Sự bứt phá không chỉ là giá mà còn là ở niềm tin.", "Các thuật toán đang cho thấy một màu xanh bao phủ sàn.", "Sự ổn định trong tâm thế của những người đang nắm giữ.", "Cú nhảy vọt về giá trị đang được chuẩn bị một cách kỹ lưỡng.",
+        "Sự phản chiếu của thành công qua từng cây nến xanh.", "Cấu trúc sóng đang đi vào giai đoạn thăng hoa nhất.", "Sự đồng thuận của các nhà giao dịch chuyên nghiệp nhất.", "Những đường kẻ xu hướng đang bảo vệ lợi nhuận của bạn.", "Sự tập trung cao độ của thị trường vào vùng giá hiện tại.", "Một bước tiến dài trong việc xác lập xu hướng tăng giá.", "Sự nhạy bén của các chỉ báo xung lượng ngay lúc này.", "Vùng trời phía trước đang rộng mở cho những sải cánh.", "Sự kỳ diệu của toán học trong việc dự báo đường đi.", "Chào đón một phiên giao dịch lịch sử với mức tăng lớn.",
+        "Sự bứt phá khỏi đám mây đỏ là tín hiệu không thể chối từ.", "Mô hình nến Morning Star đã hoàn thành một cách mỹ mãn.", "Lực đẩy từ phe mua vẫn đang rất dồi dào và mạnh mẽ.", "Giá đang tìm về những giá trị thực sự xứng đáng hơn.", "Sự chuẩn xác trong việc xác định vùng đáy của hệ thống.", "Từng nhịp thở của thị trường đều mang sắc thái tích cực.", "Sự lan tỏa niềm vui khi mục tiêu kỹ thuật đã đạt được.", "Cấu trúc giá tăng dần đều cho thấy sự bền bỉ của xu hướng.", "Sự ủng hộ nhiệt thành từ các chỉ báo khối lượng giao dịch.", "Mọi thứ đã sẵn sàng cho một cú bay cực mạnh vào mây.",
+        "Sự giao thoa giữa các khung thời gian tạo nên sức mạnh.", "Đồ thị nến đang vẽ nên một tương lai tươi sáng nhất.", "Sự chắc chắn của xu hướng tăng đã được kiểm chứng lại.", "Dòng vốn ngoại đang đổ vào một cách âm thầm và bền bỉ.", "Sự trỗi dậy mạnh mẽ từ những vùng giá bị lãng quên.", "Cơ hội đang gõ cửa với những tín hiệu kỹ thuật vàng.", "Sự hồi sinh của niềm tin qua từng nhịp tăng trưởng giá.", "Mọi rào cản tâm lý đã bị đập tan bởi cây nến xác nhận.", "Sự bứt phá ngoạn mục của các chỉ số kỹ thuật hiện nay.", "Chào mừng bạn đến với kỷ nguyên tăng trưởng của đồng coin này."
+    ],
+    P3: [
+        "Kế hoạch tối ưu nhất lúc này là kiên nhẫn chờ điểm vào lệnh.", "Luôn quản trị rủi ro bằng cách đặt mức dừng lỗ tuyệt đối.", "Chiến lược mua khi có nhịp điều chỉnh đang rất hiệu quả.", "Tuyệt đối đừng FOMO tại vùng giá này, hãy đợi test lại.", "Hãy chia vốn ra để vào lệnh nhiều lần nhằm tối ưu giá.", "Luôn giữ một cái đầu lạnh trước những biến động ngắn hạn.", "Mục tiêu chốt lời ngắn hạn đã được xác định rất rõ ràng.", "Gồng lãi là một nghệ thuật, hãy học cách nâng trailing stop.", "Việc bảo vệ lợi nhuận đã có luôn là ưu tiên hàng đầu.", "Hãy tuân thủ kỷ luật giao dịch một cách nghiêm ngặt.",
+        "Sự tĩnh tâm trong đầu tư sẽ giúp bạn tránh được sai lầm.", "Thời gian là người bạn đồng hành tốt nhất của nhà đầu tư.", "Ghi chép lại mọi giao dịch để rút ra bài học kinh nghiệm.", "Quyết đoán khi cơ hội đến và quyết liệt khi cần cắt lỗ.", "Sự hiểu biết là chìa khóa mở ra kho báu trong crypto.", "Đừng bỏ tất cả trứng vào một giỏ, hãy đa dạng danh mục.", "Sự tập trung cao độ giúp bạn nhận ra những tín hiệu nhiễu.", "Chữa lành tâm lý sau mỗi lần thua lỗ để chuẩn bị trận mới.", "Thử nghiệm phương pháp mới với số vốn nhỏ để kiểm chứng.", "Luôn nhìn vào bức tranh lớn thay vì chỉ quan tâm nến 1 phút.",
+        "Hãy làm sạch tâm trí khỏi những lời đồn thổi vô căn cứ.", "Cơ hội luôn có sẵn, quan trọng là bạn có sẵn sàng hay không.", "Tích lũy tài sản đều đặn theo phương pháp trung bình giá.", "Tự soi lại bản thân sau mỗi ngày giao dịch để tiến bộ hơn.", "Loại bỏ những cảm xúc cá nhân khi thực hiện quyết định.", "Dọn dẹp danh mục bằng cách loại bỏ coin không tiềm năng.", "Tích trữ những đồng coin có nền tảng tốt cho tương lai dài.", "Mua vào khi thị trường sợ hãi là cách làm của người giàu.", "Hãy coi việc mua coin như đang mua sắm những món đồ giá trị.", "Sự kiên nhẫn sẽ mang lại thành quả ngọt ngào cho bạn.",
+        "Đừng bao giờ giao dịch dựa trên cảm xúc nhất thời nhé.", "Học cách chấp nhận những đợt rung lắc của thị trường.", "Vốn là máu, hãy giữ gìn nó thật cẩn thận trong mọi kèo.", "Sự thành công bền vững đến từ việc quản lý vốn tốt.", "Hãy dành thời gian nghiên cứu kỹ trước khi nhấn nút mua.", "Kiến thức là nền tảng vững chắc nhất để kiếm lợi nhuận.", "Hành trình đầu tư là một cuộc marathon, không phải chạy nước rút.", "Sự tự tin phải đi kèm với sự chuẩn bị kỹ lưỡng nhất.", "Luôn có phương án dự phòng cho mọi tình huống xấu nhất.", "Chốt lời không bao giờ sai, hãy học cách hài lòng nhé.",
+        "Hãy là một nhà đầu tư có trách nhiệm với túi tiền của mình.", "Sự khác biệt của chuyên gia là khả năng chờ đợi cơ hội.", "Đừng để đám đông chi phối những phân tích của cá nhân.", "Cập nhật kiến thức mỗi ngày để không bị tụt lại phía sau.", "Thị trường luôn đúng, hãy học cách thích nghi với nó.", "Tận dụng lãi kép để gia tăng tài sản một cách thần kỳ.", "Kỷ luật thép là chìa khóa để tồn tại lâu dài trong crypto.", "Đừng quá tham lam khi thị trường đang ở vùng hưng phấn.", "Giữ sức khỏe và tinh thần tốt để đưa ra quyết định sáng suốt.", "Mỗi sai lầm là một bài học quý giá trên con đường làm giàu.",
+        "Hãy tin vào phương pháp mà bạn đã dày công xây dựng.", "Quan sát kỹ các chuyển động nhỏ để thấy được xu hướng lớn.", "Đừng bao giờ all-in vào một lệnh duy nhất dù có tin tốt.", "Sự an toàn của vốn là ưu tiên số một trong mọi hoàn cảnh.", "Học cách cắt lỗ nhanh chóng để tìm kiếm cơ hội tốt hơn.", "Tự do tài chính bắt đầu từ những đồng vốn nhỏ nhất này.", "Hãy luôn khiêm tốn và học hỏi từ những người thành công.", "Sự nhạy bén sẽ tăng lên theo thời gian giao dịch của bạn.", "Hãy yêu quá trình đầu tư hơn là chỉ nhìn vào kết quả.", "Chào đón mọi thử thách với tâm thế của một người thắng.",
+        "Sự kiên định với mục tiêu dài hạn sẽ giúp bạn đi xa.", "Hãy lọc sạch danh sách theo dõi để tập trung vào coin mạnh.", "Lợi nhuận cao luôn đi kèm với rủi ro, hãy cân nhắc kỹ.", "Học cách đọc biểu đồ như đọc một cuốn sách thú vị nhất.", "Sự bình tĩnh là vũ khí tối thượng của nhà đầu tư giỏi.", "Đừng để những thua lỗ ngắn hạn làm nản chí của bạn nhé.", "Hãy xây dựng một hệ thống giao dịch phù hợp với tính cách.", "Sự ổn định trong tâm lý giúp bạn chốt lời đúng thời điểm.", "Giao dịch ít nhưng chất lượng là cách để giảm thiểu rủi ro.", "Hãy luôn giữ một phần tiền mặt để bắt đáy khi có biến.",
+        "Sự thấu hiểu bản thân là bước đầu tiên để thắng thị trường.", "Hãy coi crypto là một công cụ để thay đổi cuộc sống tốt hơn.", "Hành động theo kế hoạch, đừng hành động theo nỗi sợ hãi.", "Sự chuẩn bị hôm nay là thành công của ngày mai anh em ơi.", "Hãy biết ơn những đợt sóng để chúng ta có thể lướt đi.", "Sự tử tế trong cộng đồng sẽ giúp chúng ta cùng nhau đi xa.", "Học cách quản lý cảm xúc khi tài khoản xanh hoặc đỏ.", "Đừng quá tự mãn khi thắng và đừng quá bi quan khi thua.", "Sự cân bằng giữa cuộc sống và đầu tư là rất quan trọng.", "Hãy luôn giữ cho mình một niềm đam mê cháy bỏng với nghề.",
+        "Mỗi ngày trôi qua hãy cố gắng giỏi hơn phiên bản hôm qua.", "Sự minh bạch trong phân tích giúp bạn có cái nhìn khách quan.", "Hãy tôn trọng thị trường và thị trường sẽ trả ơn cho bạn.", "Sự bền bỉ là yếu tố quyết định ai sẽ ở lại cuối cùng.", "Học cách nhìn ra cơ hội trong những lúc khó khăn nhất.", "Đừng để những con số làm mờ mắt đi tầm nhìn chiến lược.", "Sự tự lập trong suy nghĩ tạo nên một nhà đầu tư bản lĩnh.", "Hãy luôn trau dồi kỹ năng phân tích kỹ thuật của bản thân.", "Sự tỉnh táo là điều cần thiết nhất trong những lúc biến động.", "Chúc bạn luôn giữ được lửa nghề trên con đường tài chính.",
+        "Hãy coi mỗi giao dịch là một khoản đầu tư cho tương lai.", "Sự kiên nhẫn là đức tính quý nhất của người cầm coin.", "Đừng vội vàng khi chưa thấy tín hiệu xác nhận từ thị trường.", "Hãy bảo vệ thành quả của mình bằng mọi giá anh em nhé.", "Sự khác biệt tạo nên lợi nhuận đột phá cho người dẫn đầu.", "Hãy luôn lắng nghe thị trường thay vì ép thị trường nghe mình.", "Hành trình vạn dặm khởi đầu từ việc chọn đúng đồng coin.", "Sự tinh tế trong việc chọn điểm dừng là một tài năng lớn.", "Hãy luôn giữ nụ cười dù thị trường có đi theo hướng nào.", "Tận hưởng cuộc hành trình tài chính đầy thú vị này nhé.",
+        "Chiến lược giao dịch số 101: Luôn giữ kỷ luật để thắng.", "Kế hoạch là bản đồ dẫn lối tới kho báu lợi nhuận to lớn.", "Sự hài hòa giữa tư duy và hành động mang lại kết quả tốt.", "Hãy là một người chơi thông minh trong bàn cờ tài chính.", "Sự quyết đoán giúp bạn nắm bắt những cơ hội ngàn vàng.", "Đừng nhìn lại quá khứ, hãy tập trung vào hiện tại và tương lai.", "Sự thấu đáo trong mọi phân tích sẽ giảm bớt được rủi ro.", "Hãy để lợi nhuận chạy và cắt lỗ thật nhanh anh em nhé.", "Sự trung thực với bản thân giúp bạn nhận ra những sai lầm.", "Mục tiêu tài chính rõ ràng là động lực để phấn đấu mỗi ngày.",
+        "Hãy luôn nhớ rằng an toàn vốn là điều quan trọng nhất.", "Sự thăng hoa trong giao dịch đến từ sự chuẩn bị kỹ càng.", "Đừng để những lời chỉ trích làm lung lay niềm tin của bạn.", "Hãy tự hào về những gì bạn đã đạt được trên thị trường.", "Sự nhạy bén với tin tức giúp bạn có lợi thế cạnh tranh.", "Hãy luôn duy trì một phong cách giao dịch chuyên nghiệp.", "Sự kiên trì sẽ mở ra những cánh cửa mà bạn không ngờ tới.", "Hãy học cách tận hưởng những niềm vui nhỏ từ việc trading.", "Sự sáng tạo trong chiến thuật giúp bạn đi trước một bước.", "Chúc anh em luôn giữ được cái đầu lạnh và trái tim nóng.",
+        "Giao dịch là một nghề cần sự tỉ mỉ và kiên nhẫn cực độ.", "Hãy tạo ra một không gian làm việc thoải mái để trading.", "Sự tập trung vào mục tiêu sẽ giúp bạn vượt qua mọi khó khăn.", "Đừng bao giờ ngừng học hỏi từ những biến động của giá.", "Sự linh hoạt trong chiến lược giúp bạn sống sót qua bão.", "Hãy trân trọng từng đồng vốn mà bạn đang nắm giữ hiện tại.", "Sự thấu hiểu dòng tiền là chìa khóa của sự giàu có bền vững.", "Hãy luôn lạc quan vào tương lai của thị trường crypto này.", "Sự gắn kết với cộng đồng mang lại nhiều thông tin giá trị.", "Hãy cùng nhau xây dựng một môi trường đầu tư lành mạnh.",
+        "Sự tự tin đến từ những kiến thức đã được kiểm chứng lại.", "Hãy luôn đặt câu hỏi tại sao trước khi đưa ra quyết định.", "Sự thấu cảm với thị trường giúp bạn dự báo được tương lai.", "Đừng để áp lực kiếm tiền làm ảnh hưởng tới tâm lý trading.", "Hãy học cách nghỉ ngơi khi thị trường đi ngang nhàm chán.", "Sự tích lũy kiến thức mỗi ngày sẽ tạo nên sự đột phá lớn.", "Hãy luôn giữ một tinh thần cầu tiến trong công việc đầu tư.", "Sự cân bằng cảm xúc là chìa khóa của sự thành công dài hạn.", "Hãy luôn kiểm soát rủi ro trước khi nghĩ đến lợi nhuận cao.", "Chào đón một ngày giao dịch mới với đầy năng lượng tích cực.",
+        "Mỗi lệnh giao dịch là một bước tiến gần hơn tới tự do.", "Sự am hiểu về công nghệ giúp bạn chọn được dự án tốt.", "Hãy luôn dành sự tôn trọng cho những nhà đầu tư đi trước.", "Sự trung thành với kế hoạch đề ra mang lại sự an tâm.", "Đừng để sự mệt mỏi làm lu mờ đi những cơ hội hiện hữu.", "Hãy luôn giữ một cuốn sổ tay bên mình khi đang giao dịch.", "Sự tinh tế trong việc đọc sổ lệnh giúp bạn thấy được ý đồ.", "Hãy luôn duy trì một lối sống lành mạnh để trading tốt hơn.", "Sự bền bỉ trong việc rèn luyện kỹ năng là yếu tố then chốt.", "Chúc bạn gặt hái được nhiều thành công vang dội trên sàn.",
+        "Sự tập trung vào giá trị dài hạn giúp bạn vượt qua sóng gió.", "Hãy luôn tin tưởng vào khả năng phân tích của chính mình.", "Sự sáng suốt trong những lúc hỗn loạn là một đức tính tốt.", "Đừng vội vàng đánh giá một dự án chỉ qua vài cây nến đỏ.", "Hãy luôn nhìn nhận mọi việc dưới góc nhìn đa chiều nhất.", "Sự tỉ mỉ trong việc thiết lập hệ thống giúp giảm sai sót.", "Hãy luôn giữ sự khiêm tốn khi bạn đang ở trên đỉnh thắng lợi.", "Sự chuẩn xác trong việc quản lý thời gian trading mỗi ngày.", "Hãy tìm cho mình một người thầy hoặc một cộng sự tốt nhất.", "Tương lai thuộc về những người biết nắm bắt xu hướng mới.",
+        "Sự đam mê với những con số sẽ dẫn lối bạn tới thành công.", "Hãy luôn tự nhắc nhở bản thân về mục tiêu ban đầu đề ra.", "Sự nhẫn nại là liều thuốc tốt nhất cho những ngày đỏ lửa.", "Hãy luôn duy trì một tâm thế sẵn sàng đón nhận cơ hội mới.", "Sự nhạy cảm với các chu kỳ kinh tế giúp bạn tối ưu hóa vốn.", "Đừng để những thất bại nhỏ làm cản bước hành trình của bạn.", "Hãy luôn trân trọng những người bạn đồng hành trong crypto.", "Sự tinh khôi trong tư duy giúp bạn nhận ra những kèo thơm.", "Hãy luôn duy trì sự kỷ luật dù trong hoàn cảnh thuận lợi nhất.", "Chào đón một tương lai tài chính rực rỡ và thịnh vượng.",
+        "Sự bứt phá của tư duy dẫn tới sự bứt phá của tài khoản.", "Hãy luôn đặt mình vào vị thế của người quan sát khách quan.", "Sự thấu đáo trong việc đánh giá rủi ro mang lại sự an toàn.", "Đừng để lòng tham làm lu mờ đi những chỉ báo kỹ thuật rõ.", "Hãy luôn giữ vững bản sắc riêng trong cách thức giao dịch.", "Sự kiên cường là vũ khí giúp bạn vượt qua mọi mùa downtrend.", "Hãy luôn duy trì một thái độ tích cực với mọi biến động giá.", "Sự thăng hoa của trí tuệ trong việc chinh phục các đỉnh cao.", "Hãy luôn trân quý những kiến thức mà thị trường đã dạy bạn.", "Chúc anh em luôn vững tay chèo trên con đường làm giàu này.",
+        "Sự đột phá về lợi nhuận là kết quả của một quá trình dài.", "Hãy luôn chuẩn bị cho những kịch bản không ngờ tới nhất.", "Sự sắc bén của tư duy giúp bạn đi tắt đón đầu xu hướng.", "Đừng bao giờ từ bỏ ước mơ tự do tài chính của bản thân.", "Hãy luôn làm chủ cuộc chơi của chính mình trên sàn đấu.", "Sự kiên trì trong việc theo đuổi một phương pháp duy nhất.", "Hãy luôn giữ một tâm hồn đẹp để đón nhận những điều tốt.", "Sự cân bằng giữa phân tích cơ bản và phân tích kỹ thuật.", "Hãy luôn dành thời gian để tái tạo năng lượng sau mỗi kèo.", "Mọi sự nỗ lực của bạn chắc chắn sẽ được đền đáp xứng đáng.",
+        "Chào đón một kỷ nguyên mới của sự thịnh vượng và giàu có.", "Sự vững tâm trước những cơn sóng dữ của thị trường tài chính.", "Hãy luôn tin rằng điều tốt đẹp nhất vẫn còn đang ở phía trước.", "Sự tinh tế trong từng quyết định mua bán mang lại lợi thế.", "Chúc cho hành trình crypto của bạn luôn tràn đầy niềm vui.", "Sự hội tụ của kiến thức và kinh nghiệm tạo nên sự thành công.", "Hãy luôn là phiên bản tốt nhất của chính mình trong trading.", "Sự bền bỉ và quyết tâm sẽ đưa bạn tới đích đến cuối cùng.", "Chào tạm biệt nỗi sợ hãi và đón chào sự tự tin chiến thắng.", "Hãy cùng nhau hướng tới một tương lai tài chính huy hoàng."
+    ],
+    P4: [
+        "Chúc anh em có một ngày giao dịch bùng nổ lợi nhuận rực rỡ.", "Hy vọng sự may mắn sẽ luôn mỉm cười với mọi quyết định.", "Chúc cho danh mục đầu tư của anh em luôn xanh mướt tươi tốt.", "Hẹn gặp lại tất cả anh em ở những vùng giá cao hơn và xa hơn.", "Chúng ta hãy cùng nhau chinh phục thị trường đầy tiềm năng.", "Tận hưởng niềm vui khi thấy phân tích của mình đi đúng hướng.", "Thắng không kiêu bại không nản, chúc anh em sớm thành công.", "Thị trường luôn có cơ hội cho người có sự chuẩn bị tốt nhất.", "Chào thân ái và quyết thắng tới toàn thể cộng đồng chúng ta.", "Chúc anh em sớm gặt hái được nhiều thành quả ngọt ngào nhất.",
+        "Hãy chuẩn bị hành lý cho chuyến bay tới mặt trăng của chúng ta.", "Sự tỏa sáng của bạn chính là niềm cảm hứng cho người khác.", "Luôn giữ vững niềm tin vào con đường mà bạn đã chọn lựa.", "Bạn là người chiến thắng nếu biết kiểm soát bản thân mình.", "Hãy để thành công của bạn vang xa như tiếng pháo hoa rực rỡ.", "Một bữa tiệc ăn mừng chiến thắng đang chờ đón tất cả chúng ta.", "Chúc cho sự nghiệp đầu tư của bạn vững bền như bàn thạch.", "Tận hưởng những khoảnh khắc tuyệt vời nhất cùng gia đình.", "Chúc cho các mối quan hệ trong cộng đồng ngày càng bền chặt.", "Hãy để tâm hồn bạn thanh thản sau những giờ giao dịch.",
+        "Mùa quả ngọt đã đến gần, hãy sẵn sàng để thu hoạch lợi nhuận.", "Sự kiên trì của bạn chính là chìa khóa mở cánh cửa giàu sang.", "Chúc cho mỗi quyết định của bạn đều mang lại sự thịnh vượng.", "Hãy cùng nhau lan tỏa những giá trị tích cực tới mọi người.", "Thành công không chỉ là con số, nó là sự trưởng thành của bạn.", "Hãy luôn giữ vững ngọn lửa đam mê trong trái tim mình nhé.", "Chúc anh em có những giấc ngủ ngon sau những phiên thắng lớn.", "Mọi nỗ lực hôm nay sẽ là nền tảng cho sự giàu có ngày mai.", "Hãy tự hào vì bạn đã dũng cảm dấn thân vào con đường này.", "Chào đón một tuần mới với nhiều thắng lợi rực rỡ trên sàn.",
+        "Sự giàu có bền vững đang chờ đợi những người biết kiên nhẫn.", "Chúc cho tài khoản của bạn luôn tăng trưởng theo cấp số nhân.", "Hãy là người dẫn đầu xu hướng thay vì chỉ đi theo sau nó.", "Niềm tin chiến thắng sẽ giúp chúng ta vượt qua mọi rào cản.", "Chào tạm biệt những ngày đỏ lửa và đón chào sắc xanh hy vọng.", "Chúc cho mỗi cây nến bạn chọn đều mang sắc xanh tươi mới.", "Sự thăng hoa trong tâm hồn mang lại sự sáng suốt trong đầu tư.", "Hãy tận hưởng hành trình này như một cuộc phiêu lưu thú vị.", "Chúc cho cộng đồng chúng ta ngày càng lớn mạnh và đoàn kết.", "Thành công vĩ đại bắt đầu từ những bước đi nhỏ đúng đắn nhất.",
+        "Hãy để nụ cười luôn nở trên môi dù thị trường có biến động.", "Chúc cho gia đình bạn luôn hạnh phúc và an khang thịnh vượng.", "Sự tự do tài chính là món quà tuyệt vời nhất dành cho bạn.", "Hãy luôn trân trọng những gì mình đang có và phấn đấu thêm.", "Chúc cho trí tuệ của bạn ngày càng sắc sảo và nhạy bén hơn.", "Mọi con đường đều dẫn tới thành công nếu bạn không bỏ cuộc.", "Chào đón một kỷ nguyên mới của sự sung túc và đầy đủ nhất.", "Chúc cho bạn luôn tìm thấy niềm vui trong mỗi giao dịch nhỏ.", "Hãy để sự thành công của bạn là câu chuyện truyền cảm hứng.", "Tận hưởng mùa tăng trưởng rực rỡ nhất trong năm nay anh em.",
+        "Chúc anh em chốt lời mỏi tay và rút tiền đầy túi mỗi ngày.", "Sự bình an trong tâm trí là nền tảng của mọi thắng lợi lớn.", "Hãy luôn tin rằng bạn xứng đáng với những điều tốt đẹp nhất.", "Chúc cho dự án bạn chọn sẽ bay cao như diều gặp gió lớn nhé.", "Niềm vui từ việc đầu tư sẽ giúp cuộc sống thêm phần thú vị.", "Hãy luôn giữ vững bản lĩnh của một nhà đầu tư chuyên nghiệp.", "Chúc cho danh tiếng của bạn ngày càng vang xa trong giới tài chính.", "Mỗi ngày mới là một cơ hội mới để thay đổi vị thế của mình.", "Hãy cùng nhau xây dựng một tương lai rạng rỡ và tươi sáng.", "Chào đón những vận may bất ngờ sẽ đến với bạn trong hôm nay.",
+        "Sự kiên định sẽ đưa bạn tới những đỉnh cao mà bạn mơ ước.", "Chúc cho bạn luôn có những cộng sự tuyệt vời sát cánh đồng hành.", "Hãy để lòng biết ơn dẫn lối cho mọi thành công của bạn nhé.", "Chúc cho hành trình này của bạn luôn đầy ắp những trải nghiệm.", "Sự thành đạt của bạn là niềm tự hào của cả gia đình và bạn bè.", "Hãy luôn duy trì một lối sống tích cực và tràn đầy năng lượng.", "Chúc cho mỗi đồng vốn bạn bỏ ra đều sinh sôi nảy nở mạnh mẽ.", "Chào đón một mùa Giáng sinh và năm mới đầy thắng lợi tài chính.", "Hãy luôn tự tin vào bản thân vì bạn là duy nhất và đặc biệt.", "Chúc cho cuộc đời bạn luôn rực rỡ như những biểu đồ nến xanh.",
+        "Sự nhạy bén với cơ hội sẽ giúp bạn đổi đời một cách thần kỳ.", "Chúc cho mỗi sáng thức dậy bạn đều thấy tài khoản xanh mướt.", "Hãy luôn giữ cho mình một tâm thế sẵn sàng đón nhận vinh quang.", "Chúc cho mọi ước mơ tài chính của bạn sớm trở thành hiện thực.", "Sự thấu hiểu thị trường sẽ mang lại cho bạn sự an tâm tuyệt đối.", "Hãy cùng nhau tận hưởng những thành quả lao động xứng đáng nhất.", "Chúc cho sức khỏe của bạn luôn dồi dào để tiếp tục chiến đấu.", "Chào đón những cột mốc kỷ lục mới trong sự nghiệp trading của bạn.", "Hãy để trái tim dẫn lối và trí tuệ soi đường cho mọi kèo nhé.", "Chúc anh em luôn là những người chiến thắng cuối cùng trên sàn.",
+        "Sự thăng tiến trong kiến thức sẽ dẫn tới sự thăng tiến tài sản.", "Chúc cho bạn luôn có những quyết định sáng suốt và nhanh nhạy.", "Hãy luôn nhớ rằng sau cơn mưa trời lại sáng và giá lại tăng.", "Chúc cho tình bạn trong crypto của chúng ta mãi mãi bền vững.", "Sự giàu sang không chỉ là tiền bạc mà còn là sự tự do tâm trí.", "Hãy luôn khao khát và hãy luôn dại khờ để tiếp tục học hỏi.", "Chúc cho bạn luôn tìm thấy những viên kim cương giữa thị trường.", "Chào đón một tương lai nơi mà mọi nỗ lực của bạn được đền đáp.", "Hãy để thành công nói lên tất cả thay vì những lời phân bua.", "Chúc anh em có một buổi tối thật thư giãn bên người thân yêu.",
+        "Sự kiên cường của bạn là tấm gương cho những nhà đầu tư mới.", "Chúc cho mọi giao dịch của bạn đều diễn ra thuận buồm xuôi gió.", "Hãy luôn giữ vững niềm tin vào tương lai của công nghệ blockchain.", "Chúc cho bạn luôn là người cầm lái tài ba trong con tàu tài chính.", "Sự thấu đạt về quy luật thị trường sẽ mang lại lợi nhuận bền.", "Hãy cùng nhau tạo nên những kỳ tích mới trong mùa uptrend này.", "Chúc cho mỗi ngày của bạn đều tràn ngập niềm cảm hứng sáng tạo.", "Chào đón những cơ hội vàng đang chờ đợi bạn ở phía trước mắt.", "Hãy để bản thân được tỏa sáng theo cách riêng của mình nhé.", "Chúc cho bạn luôn gặt hái được nhiều quả ngọt từ sự kiên trì.",
+        "Sự tinh tế trong cuộc sống sẽ mang lại sự tinh tế trong trading.", "Chúc cho tâm hồn bạn luôn thanh tịnh giữa những biến động lớn.", "Hãy luôn trân trọng từng bài học mà thị trường đã ban tặng bạn.", "Chúc cho sự nghiệp của bạn luôn thăng hoa như những cây nến.", "Sự an lạc từ bên trong sẽ tạo ra sự thịnh vượng ở bên ngoài.", "Hãy cùng nhau hướng về mục tiêu tự do tài chính vĩ đại nhất.", "Chúc cho bạn luôn có đủ dũng khí để vượt qua mọi khó khăn.", "Chào đón một chương mới đầy hứa hẹn trong cuốn sách cuộc đời.", "Hãy để niềm đam mê dẫn lối bạn tới những vùng đất hứa mới.", "Chúc anh em luôn giữ được nụ cười chiến thắng trên môi nhé.",
+        "Sự đoàn kết của cộng đồng là sức mạnh giúp chúng ta đi xa.", "Chúc cho mỗi bước chân bạn đi đều dẫn tới sự giàu có và an vui.", "Hãy luôn giữ vững lập trường của một người đầu tư có tầm nhìn.", "Chúc cho bạn luôn nhận được những tín hiệu chính xác từ vũ trụ.", "Sự hài lòng với hiện tại là gốc rễ của một hạnh phúc lâu bền.", "Hãy cùng nhau chia sẻ những kinh nghiệm quý báu cho mọi người.", "Chúc cho tài năng của bạn ngày càng được tỏa sáng rực rỡ hơn.", "Chào đón những niềm vui bất ngờ và những khoản lợi nhuận lớn.", "Hãy để mỗi ngày trôi qua là một kỷ niệm đẹp trong sự nghiệp.", "Chúc cho bạn luôn vững vàng trước mọi thử thách của cuộc sống.",
+        "Sự nhẫn nại là đức tính tốt nhất của một triệu phú tương lai.", "Chúc cho bạn luôn tìm thấy sự cân bằng hoàn hảo trong mọi việc.", "Hãy luôn biết ơn thị trường vì đã mang lại cho chúng ta cơ hội.", "Chúc cho dự án tâm huyết của bạn sớm đạt được những thành công.", "Sự sáng suốt trong đầu tư sẽ giúp bạn bảo vệ được gia đình.", "Hãy cùng nhau viết tiếp những câu chuyện thành công rực rỡ nhất.", "Chúc cho ánh sáng của sự giàu có luôn soi rọi con đường bạn đi.", "Chào đón một kỷ nguyên mà crypto trở thành một phần của cuộc sống.", "Hãy để sự tử tế của bạn lan tỏa khắp cộng đồng nhà đầu tư.", "Chúc anh em luôn tràn đầy năng lượng để chinh phục mọi đỉnh cao.",
+        "Sự tập trung tuyệt đối sẽ giúp bạn đạt được những mục tiêu lớn.", "Chúc cho mọi nỗ lực của bạn đều được thị trường ghi nhận xứng đáng.", "Hãy luôn tin vào phép màu của lãi suất kép và sự kiên trì nhé.", "Chúc cho cuộc sống của bạn luôn đầy ắp những tiếng cười và niềm vui.", "Sự thấu cảm với những người xung quanh sẽ giúp bạn đi xa hơn.", "Hãy cùng nhau xây dựng một cộng đồng crypto văn minh và vững mạnh.", "Chúc cho mỗi ngày bạn đều học thêm được một điều bổ ích mới.", "Chào đón những vận hội mới đang mở ra trước mắt chúng ta hôm nay.", "Hãy để trí tuệ của bạn là vũ khí mạnh nhất trong mọi cuộc chơi.", "Chúc cho bạn luôn giữ được lửa nhiệt huyết với con đường tài chính.",
+        "Sự bền bỉ của ý chí sẽ giúp bạn vượt qua mọi giới hạn bản thân.", "Chúc cho gia đình bạn luôn là điểm tựa vững chắc nhất cho bạn.", "Hãy luôn duy trì một phong độ đỉnh cao trong mọi phiên giao dịch.", "Chúc cho bạn luôn gặp được những quý nhân phù trợ trên con đường.", "Sự thịnh vượng bền vững bắt đầu từ một tư duy đúng đắn nhất.", "Hãy cùng nhau hái những trái ngọt từ sự nỗ lực không ngừng nghỉ.", "Chúc cho mỗi khoảnh khắc bạn đầu tư đều mang lại giá trị lớn.", "Chào đón những thành quả tuyệt vời mà bạn hằng mong đợi bấy lâu.", "Hãy để sự quyết đoán của bạn tạo nên những bứt phá thần kỳ nhất.", "Chúc anh em có một hành trình crypto thật rực rỡ và đáng nhớ.",
+        "Sự am tường về dòng tiền sẽ mang lại cho bạn sự giàu sang tột đỉnh.", "Chúc cho bạn luôn giữ được sự tỉnh táo trong mọi quyết định đầu tư.", "Hãy luôn khát khao chinh phục những cột mốc tài chính mới nhé.", "Chúc cho tâm trí bạn luôn mở rộng để đón nhận những kiến thức mới.", "Sự an tâm trong cuộc sống là kết quả của một kế hoạch tài chính tốt.", "Hãy cùng nhau tỏa sáng và mang lại những giá trị tốt đẹp cho đời.", "Chúc cho mỗi ngày trôi qua bạn đều thấy mình trưởng thành hơn.", "Chào đón một tương lai nơi mà sự thịnh vượng dành cho tất cả mọi người.", "Hãy để niềm tin chiến thắng luôn thôi thúc bạn tiến về phía trước.", "Chúc cho sự nghiệp trading của bạn ngày càng phát triển bền vững.",
+        "Sự kiên định với phương pháp đúng sẽ mang lại thành công chắc chắn.", "Chúc cho bạn luôn sở hữu những đồng coin tiềm năng nhất thị trường.", "Hãy luôn giữ một trái tim ấm nóng và một cái đầu lạnh khi giao dịch.", "Chúc cho bạn luôn gặp nhiều may mắn và thuận lợi trong mọi kèo nhé.", "Sự tự do thực sự đến khi bạn làm chủ được tài chính của mình.", "Hãy cùng nhau sẻ chia những niềm vui chiến thắng tới mọi nhà.", "Chúc cho bạn luôn tìm thấy nguồn cảm hứng bất tận trong công việc.", "Chào đón những đỉnh cao mới mà chúng ta sẽ cùng nhau chinh phục.", "Hãy để cuộc hành trình này là một minh chứng cho sự nỗ lực của bạn.", "Chúc anh em luôn vững tin và thành công trên con đường đã chọn.",
+        "Sự nhạy bén với những thay đổi nhỏ nhất sẽ mang lại lợi thế lớn.", "Chúc cho bạn luôn có một trực giác nhạy bén trong việc chọn coin.", "Hãy luôn giữ vững ngọn lửa hy vọng dù trong bất kỳ hoàn cảnh nào.", "Chúc cho mọi ước nguyện của bạn đều sớm trở thành hiện thực mỹ mãn.", "Sự thấu đạt về quy luật nhân quả trong tài chính sẽ giúp bạn đi xa.", "Hãy cùng nhau lan tỏa tinh thần lạc quan tới toàn thể cộng đồng.", "Chúc cho mỗi ngày của bạn đều là một phiên giao dịch thắng lợi.", "Chào đón những điều kỳ diệu sẽ đến với bạn trong một ngày gần nhất.", "Hãy để mỗi quyết định của bạn đều mang dấu ấn của sự thông thái.", "Chúc cho bạn luôn gặt hái được nhiều thắng lợi vang dội trên sàn.",
+        "Sự thăng hoa trong tư duy sẽ dẫn dắt bạn tới những bến bờ giàu sang.", "Chúc cho cuộc sống của bạn luôn tràn ngập sắc màu xanh tươi của hy vọng.", "Hãy luôn tự hào về con người mà bạn đang trở thành mỗi ngày nhé.", "Chúc cho bạn luôn giữ được sự điềm tĩnh trước mọi sóng gió thị trường.", "Sự thành công của bạn chính là món quà lớn nhất dành cho chính mình.", "Hãy cùng nhau hướng tới một tương lai tốt đẹp và sung túc hơn nữa.", "Chúc cho mỗi nỗ lực nhỏ của bạn đều tạo nên những kết quả vĩ đại.", "Chào đón những cơ hội làm giàu đang hiện hữu xung quanh chúng ta.", "Hãy để trí tuệ soi sáng con đường đi tới tự do tài chính của bạn.", "Chúc cho hành trình đầu tư của bạn luôn đầy ắp những niềm vui mới.",
+        "Sự hài hòa giữa cái tôi và thị trường sẽ mang lại kết quả tối ưu.", "Chúc cho bạn luôn là một nhà đầu tư thông thái và bản lĩnh nhất.", "Hãy luôn tin rằng mọi sự chờ đợi đều sẽ được đền đáp xứng đáng.", "Chúc cho sự thịnh vượng luôn hiện hữu trong ngôi nhà của bạn nhé.", "Sự an lạc trong tâm hồn là chìa khóa mở ra mọi kho báu trên đời.", "Hãy cùng nhau chung tay xây dựng một thế giới crypto tốt đẹp hơn.", "Chúc cho bạn luôn giữ được phong độ ổn định và phát triển không ngừng.", "Chào đón những thắng lợi mới đang chờ đợi chúng ta ở phía cuối con đường.", "Hãy để mỗi ngày là một bước tiến dài tới mục tiêu tự do tài chính.", "Chúc anh em luôn vạn sự như ý và đại thắng trên mọi mặt trận nhé."
+    ]
 };
 
-let state = {
-    isRunning: false,
-    postsBiendong: 0,
-    postsVolume: 0,
-    totalPosts: 0,
-    lastPostTime: 0,
-    lastVolTime: 0,
-    postedTodaySymbols: new Set(),
-    logs: [],
-    coinData: {}
-};
+let state = { isRunning: false, totalPosts: 0, lastPostTime: 0, postedSymbols: new Set(), logs: [] };
 
 function addLog(msg) {
     const time = new Date().toLocaleString('vi-VN');
-    console.log(`[${time}] ${msg}`);
     state.logs.unshift(`[${time}] ${msg}`);
     if (state.logs.length > 50) state.logs.pop();
 }
 
-function calculateChange(pArr, minutes) {
-    if (!pArr || pArr.length < 2) return 0;
-    const now = Date.now();
-    const thresholdTime = now - (minutes * 60000);
-    let startPoint = pArr[0];
-    for (let i = pArr.length - 1; i >= 0; i--) {
-        if (pArr[i].t <= thresholdTime) { startPoint = pArr[i]; break; }
-    }
-    return parseFloat((((pArr[pArr.length - 1].p - startPoint.p) / startPoint.p) * 100).toFixed(2));
-}
-
-// --- LOGIC DỮ LIỆU: LUÔN CHẠY ĐỂ CẬP NHẬT UI ---
-async function updatePriceLogic(s, p, now) {
-    if (!state.coinData[s]) state.coinData[s] = { symbol: s, prices: [] };
-    let d = state.coinData[s];
-    d.prices.push({ p, t: now });
-    if (d.prices.length > 600) d.prices.shift(); 
-
-    // Cập nhật biến động liên tục cho UI
-    d.live = {
-        c1: calculateChange(d.prices, 1),
-        c5: calculateChange(d.prices, 5),
-        cp: p
-    };
-
-    // Chỉ thực hiện đăng bài nếu bot đang START
-    if (!state.isRunning) return; 
-
-    // 1. Check Biến Động (Max 50 bài)
-    if (state.postsBiendong < SETTINGS.MAX_BIENDONG) {
-        let trigger = null;
-        if (Math.abs(d.live.c1) >= SETTINGS.M1_LIMIT) trigger = `M1:${d.live.c1}%`;
-        else if (Math.abs(d.live.c5) >= SETTINGS.M5_LIMIT) trigger = `M5:${d.live.c5}%`;
-
-        if (trigger && (now - state.lastPostTime >= 10000)) {
-            postToSquare(s, trigger, 'biendong');
-        }
-    }
-
-    // 2. Check Volume định kỳ (15p/bài - Max 50 bài)
-    if (state.postsVolume < SETTINGS.MAX_VOLUME && (now - state.lastVolTime >= SETTINGS.VOL_INTERVAL)) {
-        postToSquare(s, "15P-VOL", 'vol');
-        state.lastVolTime = now;
-    }
-}
-
-async function postToSquare(symbol, reason, type) {
-    if (state.totalPosts >= SETTINGS.MAX_TOTAL) return;
-    if (state.postedTodaySymbols.has(symbol) && type !== 'night') return;
-
+async function postToSquare(symbol, top10Symbols) {
+    if (state.totalPosts >= 100) return false;
     const coin = symbol.replace('USDT', '');
-    const futuresLink = `https://www.binance.com/vi/futures/${coin}USDT`;
-    
-    // Nội dung bài đăng: Có hashtag, có $coin ép Futures, có link dự phòng
-    const content = `${BANK.P1[Math.floor(Math.random()*100)]}\n\n${BANK.P2[Math.floor(Math.random()*100)]}\n\n${BANK.P3[Math.floor(Math.random()*100)]}\n\n${BANK.P4[Math.floor(Math.random()*100)]}\n\n#${coin} $$$$${coin}\nBiểu đồ Futures: ${futuresLink}`;
+    const c1 = BANK.P1[Math.floor(Math.random() * 200)];
+    const c2 = BANK.P2[Math.floor(Math.random() * 200)];
+    const c3 = BANK.P3[Math.floor(Math.random() * 200)];
+    const c4 = BANK.P4[Math.floor(Math.random() * 200)];
+
+    const others = top10Symbols.filter(s => s !== symbol).sort(() => 0.5 - Math.random());
+    const tags = others.slice(0, 2).map(s => `#${s.replace('USDT', '')}`).join(' ');
+    const dollars = others.slice(0, 2).map(s => `$${s.replace('USDT', '')}`).join(' ');
+
+    const content = `$${coin}\n\n${c1}\n\n${c2}\n\n${c3}\n\n${c4}\n\n#${coin} ${tags}\n$${coin} ${dollars}`;
 
     try {
-        // Gửi bài đăng kèm tham số ép biểu đồ Futures
-        await axios.post(SETTINGS.SQUARE_URL, { 
+        await axios.post("https://www.binance.com/bapi/composite/v1/public/pgc/openApi/content/add", {
             bodyTextOnly: content,
-            symbolList: [{ symbol: symbol, type: "FUTURES" }] // Ép render biểu đồ Futures
-        }, {
-            headers: { "X-Square-OpenAPI-Key": SQUAD_API_KEY, "Content-Type": "application/json" }
-        });
+            symbolList: [{ symbol, type: "FUTURES" }]
+        }, { headers: { "X-Square-OpenAPI-Key": SQUAD_API_KEY, "Content-Type": "application/json" } });
         
         state.totalPosts++;
-        if (type === 'biendong') state.postsBiendong++;
-        else state.postsVolume++;
-        
         state.lastPostTime = Date.now();
-        state.postedTodaySymbols.add(symbol);
-        addLog(`✅ [${type.toUpperCase()}] ${symbol} | Lý do: ${reason} | [${state.totalPosts}/100]`);
+        state.postedSymbols.add(symbol);
+        addLog(`✅ Đã đăng: ${symbol} (${state.totalPosts}/100)`);
+        return true;
     } catch (e) {
-        addLog(`❌ Lỗi Post ${symbol}: ${e.response?.data?.message || e.message}`);
+        addLog(`❌ Lỗi ${symbol}: ${e.response?.data?.message || e.message}`);
+        return false;
     }
 }
 
-// --- CRON JOB: RESET & ÉP TIẾN ĐỘ 23H ---
-async function cronJob() {
-    const now = new Date();
-    if (now.getHours() === 0 && now.getMinutes() === 0) {
-        state.totalPosts = 0; state.postsBiendong = 0; state.postsVolume = 0;
-        state.postedTodaySymbols.clear();
-        addLog("🧹 Reset data ngày mới.");
-    }
-
-    if (!state.isRunning) return;
-
-    if (now.getHours() === 23 && state.totalPosts < SETTINGS.MAX_TOTAL) {
-        addLog(`🚀 [PHASE 23H] Bắt đầu ép tiến độ (6s/bài)...`);
-        try {
-            const res = await axios.get('https://fapi.binance.com/fapi/v1/ticker/24hr');
-            const topCoins = res.data
-                .filter(t => t.symbol.endsWith('USDT') && !state.postedTodaySymbols.has(t.symbol))
-                .sort((a, b) => parseFloat(b.quoteVolume) - parseFloat(a.quoteVolume));
-
-            for (let coin of topCoins) {
-                if (state.totalPosts >= SETTINGS.MAX_TOTAL || !state.isRunning) break;
-                await postToSquare(coin.symbol, "NIGHT-FILL", 'vol');
-                await new Promise(r => setTimeout(r, SETTINGS.NIGHT_SPEED)); 
-            }
-        } catch (e) { addLog("❌ Lỗi quét Vol đêm: " + e.message); }
-    }
+async function runAutoPost() {
+    if (!state.isRunning || state.totalPosts >= 100) return;
+    if (Date.now() - state.lastPostTime < 15 * 60000) return;
+    try {
+        const res = await axios.get('https://fapi.binance.com/fapi/v1/ticker/24hr');
+        const sorted = res.data.filter(t => t.symbol.endsWith('USDT')).sort((a, b) => parseFloat(b.quoteVolume) - parseFloat(a.quoteVolume));
+        const next = sorted.slice(0, 100).find(c => !state.postedSymbols.has(c.symbol));
+        if (next) await postToSquare(next.symbol, sorted.slice(0, 10).map(c => c.symbol));
+    } catch (e) { addLog("❌ Lỗi quét: " + e.message); }
 }
-setInterval(cronJob, 60000);
-
-function initWS() {
-    const ws = new WebSocket('wss://fstream.binance.com/ws/!ticker@arr');
-    ws.on('message', (data) => {
-        try {
-            const raw = JSON.parse(data);
-            const now = Date.now();
-            raw.forEach(t => { if (t.s.endsWith('USDT')) updatePriceLogic(t.s, parseFloat(t.c), now); });
-        } catch(e) {}
-    });
-    ws.on('close', () => setTimeout(initWS, 5000));
-}
+setInterval(runAutoPost, 10000);
 
 const app = express();
-app.get('/api/status', (req, res) => {
-    const table = Object.values(state.coinData)
-        .filter(v => v.live)
-        .sort((a, b) => Math.abs(b.live.c5) - Math.abs(a.live.c5))
-        .slice(0, 15)
-        .map(v => ({ s: v.symbol, c1: v.live.c1, c5: v.live.c5 }));
-    res.json({ ...state, table });
-});
-
-app.get('/api/toggle', (req, res) => { state.isRunning = !state.isRunning; addLog(`Bot: ${state.isRunning ? 'START' : 'STOP'}`); res.json({ s: state.isRunning }); });
-
+app.get('/api/status', (req, res) => res.json(state));
+app.get('/api/toggle', (req, res) => { state.isRunning = !state.isRunning; res.json({ s: state.isRunning }); });
 app.get('/', (req, res) => {
-    res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"><script src="https://cdn.tailwindcss.com"></script><style>@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@700&display=swap');body{background:#0b0e11;color:#eceff1;font-family:sans-serif;}.luffy{font-family:'Orbitron';}::-webkit-scrollbar{width:0;}</style></head>
-    <body class="p-4 h-screen flex flex-col overflow-hidden max-w-md mx-auto">
-        <div class="bg-[#1e2329] p-6 rounded-3xl border-b-4 border-yellow-500 shadow-2xl mb-4">
-            <div class="flex justify-between items-center mb-6">
-                <h1 class="luffy text-2xl text-yellow-500 italic uppercase">Luffy V4 VIP</h1>
-                <button onclick="fetch('/api/toggle')" id="btn" class="px-6 py-3 rounded-2xl font-bold text-xs uppercase shadow-lg transition-all active:scale-90">---</button>
-            </div>
-            <div class="grid grid-cols-2 gap-4">
-                <div class="bg-black/40 p-4 rounded-2xl text-center border border-white/5">
-                    <div class="text-[10px] text-zinc-500 uppercase">Biến Động</div>
-                    <div id="s1" class="text-xl font-bold text-red-500">0/50</div>
-                </div>
-                <div class="bg-black/40 p-4 rounded-2xl text-center border border-white/5">
-                    <div class="text-[10px] text-zinc-500 uppercase">Volume</div>
-                    <div id="s2" class="text-xl font-bold text-blue-500">0/50</div>
-                </div>
-            </div>
-            <div class="mt-4 bg-yellow-500/10 p-3 rounded-xl text-center border border-yellow-500/20">
-                <span id="st" class="text-2xl font-black text-yellow-500">0</span><span class="text-yellow-500/50 text-sm"> / 100 POSTS</span>
-            </div>
+    res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><script src="https://cdn.tailwindcss.com"></script><style>@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@700&display=swap');body{background:#0b0e11;color:#eceff1;}.luffy{font-family:'Orbitron';}</style></head>
+    <body class="p-4 max-w-md mx-auto flex flex-col h-screen">
+        <div class="bg-[#1e2329] p-6 rounded-3xl border-b-4 border-yellow-500 mb-4 text-center shadow-2xl">
+            <h1 class="luffy text-2xl text-yellow-500 mb-4">LUFFY V5 FULL</h1>
+            <div class="text-6xl font-black text-white mb-2" id="st">0</div>
+            <div class="text-[10px] text-zinc-500 uppercase tracking-widest mb-6">Total Posts / 100</div>
+            <button onclick="fetch('/api/toggle')" id="btn" class="w-full py-4 rounded-2xl font-bold uppercase text-xs transition-all active:scale-95">---</button>
         </div>
-
-        <div class="bg-[#1e2329] rounded-3xl flex-1 flex flex-col mb-4 overflow-hidden border border-white/5">
-            <div class="p-3 bg-white/5 text-center luffy text-[10px] text-yellow-500 tracking-widest uppercase border-b border-white/5">Live Tracking (Always On)</div>
-            <div id="tk" class="flex-1 overflow-y-auto p-3 space-y-2"></div>
-        </div>
-
-        <div id="lb" class="h-32 bg-black/60 rounded-3xl p-4 text-[10px] font-mono overflow-y-auto text-zinc-500 border border-white/5"></div>
-
+        <div id="lb" class="flex-1 bg-black/40 rounded-3xl p-4 text-[10px] font-mono overflow-y-auto border border-white/5 text-zinc-500"></div>
         <script>
             async function refresh() {
-                try {
-                    const res = await fetch('/api/status'); const d = await res.json();
-                    const btn = document.getElementById('btn');
-                    btn.innerText = d.isRunning ? "STOP BOT" : "START BOT";
-                    btn.className = d.isRunning ? "bg-red-500 text-white px-6 py-3 rounded-2xl" : "bg-yellow-500 text-black px-6 py-3 rounded-2xl";
-                    document.getElementById('s1').innerText = d.postsBiendong + "/50";
-                    document.getElementById('s2').innerText = d.postsVolume + "/50";
-                    document.getElementById('st').innerText = d.totalPosts;
-                    
-                    document.getElementById('tk').innerHTML = d.table.map(v => \`
-                        <div class="bg-black/20 p-3 rounded-xl flex justify-between items-center border border-white/5">
-                            <span class="font-bold text-sm text-white">\${v.s.replace('USDT','')}</span>
-                            <div class="flex gap-4 text-[11px]">
-                                <span class="\${Math.abs(v.c1) >= 3.5 ? 'text-red-500 font-bold' : 'text-zinc-500'}">1m: \${v.c1}%</span>
-                                <span class="\${Math.abs(v.c5) >= 7 ? 'text-green-500 font-bold' : 'text-zinc-500'}">5m: \${v.c5}%</span>
-                            </div>
-                        </div>\`).join('');
-
-                    if (d.logs.length > 0) document.getElementById('lb').innerHTML = d.logs.map(l => \`<div class="mb-1 border-b border-white/5 pb-1">\${l}</div>\`).join('');
-                } catch(e){}
+                const res = await fetch('/api/status'); const d = await res.json();
+                document.getElementById('st').innerText = d.totalPosts;
+                const btn = document.getElementById('btn');
+                btn.innerText = d.isRunning ? "STOP BOT" : "START BOT";
+                btn.className = d.isRunning ? "w-full bg-red-500 text-white py-4 rounded-2xl font-bold" : "w-full bg-yellow-500 text-black py-4 rounded-2xl font-bold";
+                document.getElementById('lb').innerHTML = d.logs.map(l => \`<div class="mb-2">\${l}</div>\`).join('');
             }
-            setInterval(refresh, 1000);
+            setInterval(refresh, 2000);
         </script>
     </body></html>`);
 });
-
-app.listen(PORT, '0.0.0.0', () => { 
-    console.clear();
-    console.log("=========================================");
-    console.log("   🏴‍☠️ LUFFY V4 VIP - DATA STREAM ON 🏴‍☠️");
-    console.log("=========================================");
-    initWS(); 
-});
+app.listen(PORT, '0.0.0.0');
