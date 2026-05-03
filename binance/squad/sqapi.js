@@ -8,11 +8,11 @@ const SQUAD_API_KEY = "8d794c11cc794c958c2c65924c54f2dd";
 
 const SETTINGS = {
     SQUARE_URL: "https://www.binance.com/bapi/composite/v1/public/pgc/openApi/content/add",
-    VOL_LIMIT: 7.0,    
-    DAY_LIMIT: 10.0,
+    VOL_LIMIT: 7.0,    // Ngưỡng biến động cho Loại 1 (M1 hoặc M5)
+    DAY_LIMIT: 10.0,   // Ngưỡng biến động cho Loại 2 (24h)
     MAX_TOTAL: 100,
-    TYPE_LIMIT: 33, // Giới hạn cho Loại 1 và Loại 2
-    MIN_GAP: 30000, 
+    TYPE_LIMIT: 33, 
+    MIN_GAP: 60000, 
 };
 
 const BANK = {
@@ -26,7 +26,7 @@ const BANK = {
         "☄️ Dòng tiền đang tạo ra sự đột phá từ các mô hình tích lũy.", "🐜 Lực mua đang len lỏi vào từng lệnh giao dịch nhỏ.", "🎖️ Dòng tiền đang khẳng định vị thế dẫn dắt thị trường.", "🎢 Sự quay lại của dòng vốn sau nhịp rũ bỏ mạnh mẽ.", "⚖️ Dòng tiền đang tìm kiếm sự cân bằng tại vùng giá cao.", "🛡️ Sự ổn định của dòng vốn trong bối cảnh vĩ mô mới.", "🎰 Dòng tiền đang đặt cược vào kịch bản tăng trưởng mạnh.", "🛸 Sự dịch chuyển thông minh giữa các lớp tài sản.", "⚡ Dòng tiền đang tạo ra những cú hích quan trọng.", "🏹 Lực cầu đang chờ đợi sự xác nhận từ các khung giờ lớn.",
         "📚 Dòng tiền đang tập trung vào các mã có câu chuyện riêng.", "💎 Sự tăng trưởng thanh khoản đi kèm với chất lượng dòng vốn.", "🎮 Dòng tiền đang kiểm soát hoàn toàn diễn biến giá.", "🔓 Sự bứt phá của dòng tiền khỏi vùng trung lập.", "🏔️ Dòng tiền đang hướng tới các đỉnh cao mới của năm.", "🧹 Lực mua chủ động đang quét sạch các lệnh bán treo.", "🏃 Dòng tiền đang thể hiện sự bền bỉ trong từng nhịp tăng.", "📣 Sự hưng phấn của dòng tiền đang lan rộng toàn sàn.", "💡 Dòng tiền đang tìm thấy động lực tăng trưởng mới.", "🐣 Sự đột phá về khối lượng từ các vùng giá đáy.",
         "🪜 Dòng tiền đang xác lập một nền tảng giá cao hơn.", "🏋️ Sức mạnh của dòng tiền đang được thử thách và khẳng định.", "📉 Dòng tiền đang tận dụng các nhịp giảm để gia tăng vị thế.", "🤝 Sự nhất quán của dòng vốn trong các quyết định mua.", "🌅 Dòng tiền đang mở ra những triển vọng tươi sáng.", "🌋 Lực cầu đang bùng nổ tại các điểm xoay chiều.", "🎨 Dòng tiền đang định hình lại xu hướng của thị trường.", "💂 Sự trỗi dậy mạnh mẽ của dòng tiền từ các quỹ chỉ số.", "🌗 Dòng tiền đang tạo ra sự khác biệt lớn về hiệu suất.", "⭐ Sự tập trung dòng vốn vào các mã có dòng tiền tốt.",
-        "🧨 Dòng tiền đang tạo đà cho một cú breakout lịch sử.", "🌇 Lực mua đang gia tăng mạnh mẽ vào cuối phiên.", "🌃 Dòng tiền đang duy trì sự hưng phấn cho đến khi đóng cửa.", "🏅 Sự xuất sắc của dòng tiền trong việc giữ nhịp thị trường.", "🎁 Dòng tiền đang tạo ra những cơ hội vàng cho người nắm giữ.", "🔥 Sự quyết đoán của dòng vốn trong việc đẩy giá bứt phá.", "🌠 Dòng tiền lớn đang tìm cách phá vỡ các kỷ lục cũ.", "🧩 Sự phối hợp của các dòng vốn đang rất nhịp nhàng.", "🔗 Mối liên kết giữa dòng tiền và giá đang rất chặt chẽ.", "🥇 Dẫn đầu xu hướng với sự hậu thuẫn của dòng tiền cực lớn."
+        "🧨 Dòng tiền đang tạo đà cho một cú breakout lịch sử.", "🌇 Lực mua đang gia tăng mạnh mẽ vào cuối phiên.", "🌃 Dòng tiền đang duy trì sự hưng phấn cho đến khi đóng cửa.", "🏅 Sự xuất sắc của dòng tiền trong việc giữ nhịp thị trường.", "🎁 Dòng tiền đang tạo ra những cơ hội vàng cho người nắm giữ.", "🔥 Sự quyết đoán của dòng vốn trong việc đẩy giá bứt phá.", "🌠 Dòng tiền lớn đang tìm cách phá vỡ các kỷ lục cũ.", "🧩 Sự phối hợp của các dòng vốn đang rất nhịp nhàng.", "🔗 Mối liên kết giữa dòng tiền và giá đang rất chặtẽ.", "🥇 Dẫn đầu xu hướng với sự hậu thuẫn của dòng tiền cực lớn."
     ],
     P2: [
         "📐 Về kỹ thuật giá đã bứt phá khỏi kênh giảm giá.", "🪄 Đường EMA đang thực hiện cú cắt vàng báo hiệu tăng.", "🌊 RSI đang tiến vào vùng mạnh mẽ nhưng chưa quá mua.", "🕯️ Mô hình nến nhấn chìm đã xác nhận xu hướng tăng.", "🎈 Bollinger Band mở rộng cho thấy biến động lớn.", "🛤️ Giá đang nằm trên các đường MA quan trọng.", "🧱 Kháng cự cũ đã trở thành hỗ trợ mới vững chắc.", "🏹 Phân kỳ dương H1 hỗ trợ đà tăng bền vững.", "🏔️ Cấu trúc đỉnh sau cao hơn đỉnh trước duy trì.", "☁️ Ichimoku cho thấy mây xanh nâng đỡ rất tốt.",
@@ -37,15 +37,15 @@ const BANK = {
         "🚥 Chỉ báo Parabolic SAR đã nhảy xuống dưới giá.", "🎭 Mô hình vai đầu vai ngược đã chính thức xác nhận.", "🌬️ Áp lực cung cạn kiệt tại vùng biên dưới dải băng.", "🎢 Giá đang chạy trong một kênh tăng giá hoàn hảo.", "🚀 Sự đột phá về giá khỏi vùng giá trị quan trọng.", "⛲ Chỉ báo MFI cho thấy dòng tiền nạp vào mạnh.", "📐 Mô hình cái nêm giảm đã bị phá vỡ hướng lên.", "🧪 Giá đang test lại đường cổ của mô hình đảo chiều.", "🟢 Cấu trúc nến Heikin Ashi đã chuyển sang màu xanh.", "🕳️ Sự ổn định của giá phía trên vùng gap tăng.",
         "🪜 Chỉ báo Keltner Channel đang bị đẩy lên phía trên.", "📅 Giá đã vượt qua mốc cao nhất của tuần trước.", "📍 Tín hiệu tăng trưởng mạnh mẽ từ vùng pivot.", "⛸️ Mô hình 2 đáy đã hoàn thành nhịp kiểm định.", "📢 Sự cộng hưởng của nhiều khung thời gian cùng tăng.", "🧱 Giá đang giữ vững trên ngưỡng hỗ trợ Fib 0.5.", "📈 Chỉ báo OBV đang tăng vọt cùng với đường giá.", "📌 Mô hình nến Pin bar từ chối giảm tại hỗ trợ.", "🌊 Giá đang chuẩn bị cho một nhịp sóng đẩy mới.", "🔨 Sự bứt phá khỏi vùng cản kỹ thuật cứng nhất.",
         "📡 Tín hiệu mua từ hệ thống giao dịch theo xu hướng.", "🏔️ Giá đang tiệm cận vùng kháng cự quan trọng.", "🤏 Sự thu hẹp biên độ nến tại vùng giá đỉnh.", "🌑 Mô hình nến Marubozu xác nhận lực mua áp đảo.", "🔓 Giá đã thoát khỏi trạng thái tích lũy đi ngang.", "🚀 Chỉ báo Trix cho thấy đà tăng đang đẩy mạnh.", "🌊 Cấu trúc sóng tăng đang được mở rộng liên tục.", "🧱 Sự ổn định của giá tại các ngưỡng chặn kỹ thuật.", "🏁 Tín hiệu xác nhận xu hướng từ chỉ báo Donchian.", "🎯 Giá đang hướng về vùng mục tiêu của mô hình.",
-        "🤝 Sự bứt phá của giá đi kèm with sự đồng thuận.", "📈 Chỉ báo Aroon Up đang nằm trên ngưỡng 70.", "📦 Mô hình nến Inside bar breakout theo hướng tăng.", "☁️ Giá đã vượt qua vùng cản mây trên khung H4.", "⚓ Sự vững chắc của nền tảng giá hiện tại.", "🔄 Tín hiệu đảo chiều từ các chỉ báo động lượng.", "🚀 Giá đang thực hiện nhịp tăng tốc thoát khỏi nền.", "📈 Sự cải thiện rõ rệt của cấu trúc giá ngắn hạn.", "🎻 Mô hình sóng Harmonic đang hướng tới mục tiêu.", "💥 Giá đã phá vỡ mọi đường kháng cự gần nhất.",
+        "🤝 Sự bứt phá của giá đi kèm với sự đồng thuận.", "📈 Chỉ báo Aroon Up đang nằm trên ngưỡng 70.", "📦 Mô hình nến Inside bar breakout theo hướng tăng.", "☁️ Giá đã vượt qua vùng cản mây trên khung H4.", "⚓ Sự vững chắc của nền tảng giá hiện tại.", "🔄 Tín hiệu đảo chiều từ các chỉ báo động lượng.", "🚀 Giá đang thực hiện nhịp tăng tốc thoát khỏi nền.", "📈 Sự cải thiện rõ rệt của cấu trúc giá ngắn hạn.", "🎻 Mô hình sóng Harmonic đang hướng tới mục tiêu.", "💥 Giá đã phá vỡ mọi đường kháng cự gần nhất.",
         "💪 Sự tự tin từ biểu đồ kỹ thuật đang rất lớn.", "🧠 Chỉ báo tâm lý kỹ thuật nghiêng hẳn về mua.", "📈 Giá đang duy trì đà tăng trưởng cực kỳ ấn tượng.", "✅ Tín hiệu breakout thành công từ nền giá tốt.", "🎯 Chinh phục các cột mốc kỹ thuật cao hơn.", "🔥 Sức mạnh kỹ thuật đang ở trạng thái tối ưu.", "🧩 Sự phối hợp hoàn hảo của các chỉ báo sớm.", "⚡ Tốc độ thay đổi giá đang ở mức báo động tăng.", "🏰 Xây dựng cấu trúc tăng giá vững như bàn thạch.", "👑 Vị thế kỹ thuật dẫn đầu thị trường lúc này."
     ],
     P3: [
         "📝 Kế hoạch tối ưu là kiên nhẫn chờ điểm vào lệnh đẹp.", "🛡️ Quản trị rủi ro bằng cách đặt dừng lỗ tuyệt đối.", "🎯 Chiến lược mua khi điều chỉnh vẫn tỏ ra hiệu quả.", "🛑 Đừng FOMO tại vùng giá này, hãy đợi nhịp test lại.", "💰 Chia vốn ra vào lệnh để tối ưu hóa giá vị thế.", "🧊 Luôn giữ cái đầu lạnh trước những biến động.", "🎁 Mục tiêu chốt lời ngắn hạn đã được xác định rõ.", "🎢 Gồng lãi là nghệ thuật, hãy nâng trailing stop.", "🔒 Bảo vệ lợi nhuận luôn là ưu tiên hàng đầu.", "📏 Hãy tuân thủ kỷ luật giao dịch để đi đường dài.",
         "🔑 Kỷ luật là chìa khóa để tồn tại trên thị trường.", "🚪 Luôn có kế hoạch thoát lệnh trước khi tham gia.", "🧺 Đừng đặt tất cả trứng vào một giỏ duy nhất.", "⏳ Kiên nhận là đức tính quý giá nhất của trader.", "💸 Hãy giao dịch với số vốn bạn có thể mất.", "🛡️ Không có gì chắc chắn, hãy luôn phòng vệ.", "📅 Theo dõi sát sao các tin tức quan trọng.", "🤕 Học cách chấp nhận thua lỗ như một phần cuộc chơi.", "🧘 Đừng để cảm xúc chi phối các quyết định.", "📔 Luôn ghi lại nhật ký để rút kinh nghiệm.",
         "🤝 Tin tưởng vào hệ thống và phương pháp của mình.", "🧨 Sự chuẩn bị kỹ lưỡng sẽ giảm bớt sự sợ hãi.", "✅ Chỉ vào lệnh khi các điều kiện đã hội tụ đủ.", "👁️ Quan sát phản ứng của giá tại các vùng then chốt.", "🌊 Hãy là người đi theo xu hướng, đừng chặn đầu.", "📉 Lợi nhuận bền vững đến từ sự nhất quán.", "⏲️ Đừng cố giao dịch quá nhiều trong một ngày.", "🪑 Biết khi nào nên đứng ngoài là một kỹ năng.", "🤝 Tôn trọng xu hướng thị trường, xu hướng là bạn.", "📚 Cập nhật kiến thức thường xuyên để thích nghi.",
-        "🦁 Tự tin nhưng không được chủ quan trước thị trường.", "⚖️ Xác định tỷ lệ rủi ro/lợi nhuận phù hợp.", "💼 Hãy coi trading là một công việc kinh doanh.", "🛠️ Tận dụng các công cụ hỗ trợ để tăng hiệu quả.", "🙅 Đừng bị ảnh hưởng bởi đám đông quanh.", "💎 Tập trung vào chất lượng lệnh thay vì số lượng.", "🛋️ Giữ tâm thế thoải mái nhất khi giữ vị thế.", "🔍 Hiểu rõ đặc tính của từng cặp giao dịch.", "🛡️ Hãy luôn đặt sự an toàn của tài khoản lên trước.", "🎓 Học hỏi từ những người đi trước có kinh nghiệm.",
-        "🧊 Sự bình tĩnh giúp bạn nhìn nhận thị trường đúng.", "🥊 Đừng cố gỡ gạc sau một lệnh thua đau.", "🎁 Thị trường luôn có cơ hội, đừng lo bỏ lỡ.", "🏔️ Hãy kiên định với mục tiêu dài hạn đã đề ra.", "⚙️ Tối ưu lợi nhuận bằng cách quản lý lệnh thông minh.", "🔄 Sẵn sàng thay đổi quan điểm nếu giá thay đổi.", "🕹️ Luôn giữ mức đòn bẩy ở mức an toàn nhất.", "🖼️ Phân tích đa khung thời gian để có cái nhìn tổng.", "🧘 Cân bằng giữa giao dịch và cuộc sống cá nhân.", "🎈 Đừng kỳ vọng quá cao vào một lệnh duy nhất.",
+        "🦁 Tự tin nhưng không được chủ quan trước thị trường.", "⚖️ Xác định tỷ lệ rủi ro/lợi nhuận phù hợp.", "💼 Hãy coi trading là một công việc kinh doanh.", "🛠️ Tận dụng các công cụ hỗ trợ để tăng hiệu quả.", "🙅 Đừng bị ảnh hưởng bởi đám đông xung quanh.", "💎 Tập trung vào chất lượng lệnh thay vì số lượng.", "🛋️ Giữ tâm thế thoải mái nhất khi giữ vị thế.", "🔍 Hiểu rõ đặc tính của từng cặp giao dịch.", "🛡️ Hãy luôn đặt sự an toàn của tài khoản lên trước.", "🎓 Học hỏi từ những người đi trước có kinh nghiệm.",
+        "🧊 Sự bình tĩnh giúp bạn nhìn nhận thị trường đúng.", "🥊 Đừng cố gỡ gạc sau một lệnh thua đau.", "🎁 Thị trường luôn có cơ hội, đừng lo bỏ lỡ.", "🏔️ Hãy kiên định với mục tiêu dài hạn đã đề ra.", "⚙️ Tối ưu lợi nhuận bằng cách quản lý lệnh thông minh.", "🔄 Sẵn sàng thay đổi quan điểm nếu giá thay đổi.", "🕹️ Luôn giữ mức đòn bẩy ở mức an toàn nhất.", "🖼️ Phân tích đa khung thời gian để có cái nhìn tổng quát.", "🧘 Cân bằng giữa giao dịch và cuộc sống cá nhân.", "🎈 Đừng kỳ vọng quá cao vào một lệnh duy nhất.",
         "🗣️ Hãy để thị trường trả lời thay vì dự đoán mò.", "📏 Luyện tập thói quen kiểm soát rủi ro hàng ngày.", "🧪 Khám phá các phương pháp mới có chọn lọc.", "🧹 Giữ cho biểu đồ giao dịch sạch sẽ và dễ nhìn.", "⚙️ Hiểu rõ cơ chế hoạt động của sàn giao dịch.", "⚠️ Hãy luôn cảnh giác với các bẫy giá thị trường.", "📝 Tự đánh giá bản thân sau mỗi tuần giao dịch.", "🧠 Nâng cao khả năng chịu đựng tâm lý bản thân.", "🍀 Giao dịch đơn giản thường mang lại hiệu quả cao.", "🍬 Hãy biết hài lòng với những gì mình đạt được.",
         "👂 Lắng nghe phản hồi từ thị trường thay vì ý kiến.", "🔔 Cẩn trọng với biến động trước giờ ra tin mạnh.", "📍 Tìm kiếm những vùng giá có xác suất thắng cao.", "🛡️ Luôn có phương án dự phòng cho mọi tình huống.", "🚫 Đừng bao giờ giao dịch dựa trên sự trả thù.", "⛓️ Sự kỷ luật sẽ mang lại tự do tài chính.", "📜 Hãy tôn trọng những quy tắc do chính mình đặt ra.", "🤏 Kiểm soát lòng tham khi thị trường hưng phấn.", "⚓ Giữ vững niềm tin vào con đường đã chọn.", "🎓 Mỗi sai lầm đều là một bài học vô giá.",
         "🧠 Hãy là một nhà đầu tư thông thái và bình tĩnh.", "🕯️ Học cách đọc hiểu ngôn ngữ của những cây nến.", "✂️ Sẵn sàng cắt lỗ khi phân tích ban đầu đã sai.", "🏗️ Xây dựng hệ thống phù hợp với tính cách mình.", "🐢 Thành công không đến sau một đêm, hãy kiên trì.", "🔍 Sự tinh tế trong việc nhận diện cơ hội.", "🌈 Hãy tận hưởng hành trình trở thành một trader.", "❓ Luôn đặt câu hỏi tại sao trước mỗi quyết định.", "⚖️ Tìm kiếm sự cân bằng giữa kỹ thuật và tâm lý.", "🏃 Trading là marathon, không phải chạy nước rút.",
@@ -83,7 +83,6 @@ function addLog(msg) {
     console.log(`[${time}] ${msg}`);
 }
 
-// Reset mỗi ngày lúc 00:00
 function checkNewDay() {
     const now = new Date();
     if (now.getHours() === 0 && now.getMinutes() === 0) {
@@ -91,7 +90,7 @@ function checkNewDay() {
         state.stats = { biendong: 0, day: 0, vol: 0 };
         state.postedTodaySymbols.clear();
         state.isSleeping = false;
-        addLog("📅 Bắt đầu ngày mới. Reset toàn bộ chỉ số.");
+        addLog("📅 Bắt đầu ngày mới. Reset chỉ số.");
     }
 }
 
@@ -119,16 +118,17 @@ function updatePriceLogic(s, p, now, change24h = 0, volume = 0) {
     if (state.isRunning && !state.isSleeping) {
         const hour = new Date().getHours();
         
-        // Loại 1: Biến động nhanh (Max 33)
+        // LOẠI 1: Check cả M1 HOẶC M5 (Chỉ cần 1 trong 2 đủ đk)
         if (state.stats.biendong < SETTINGS.TYPE_LIMIT && (Math.abs(d.live.c1) >= SETTINGS.VOL_LIMIT || Math.abs(d.live.c5) >= SETTINGS.VOL_LIMIT)) {
-            postToSquare(s, d.live.c1, 'biendong');
+            const maxChange = Math.abs(d.live.c1) > Math.abs(d.live.c5) ? d.live.c1 : d.live.c5;
+            postToSquare(s, maxChange, 'biendong');
         } 
-        // Loại 2: Biến động ngày (Max 33)
+        // LOẠI 2: Biến động ngày
         else if (state.stats.day < SETTINGS.TYPE_LIMIT && Math.abs(d.d1) >= SETTINGS.DAY_LIMIT) {
             postToSquare(s, d.d1, 'day');
         }
-        // Loại 3: Vét máng sau 23h hoặc khi rảnh (Đánh theo Vol thấp lên cao)
-        else if (hour === 23 && state.postsToday < SETTINGS.MAX_TOTAL) {
+        // LOẠI 3: Vét máng Vol thấp sau 23h
+        else if (hour >= 23 && state.postsToday < SETTINGS.MAX_TOTAL) {
             autoFillVolLowToHigh();
         }
     }
@@ -137,7 +137,7 @@ function updatePriceLogic(s, p, now, change24h = 0, volume = 0) {
 async function autoFillVolLowToHigh() {
     const list = Object.values(state.coinData)
         .filter(c => !state.postedTodaySymbols.has(c.symbol))
-        .sort((a, b) => a.vol - b.vol); // Thấp tới cao
+        .sort((a, b) => a.vol - b.vol); 
 
     if (list.length > 0) {
         await postToSquare(list[0].symbol, list[0].d1, 'vol');
@@ -149,11 +149,7 @@ async function postToSquare(symbol, change, type) {
         state.isSleeping = true;
         return;
     }
-    
-    // Lọc mỗi coin chỉ 1 bài từ 00h
     if (state.postedTodaySymbols.has(symbol)) return;
-
-    // Giới hạn thời gian giữa các bài
     const now = Date.now();
     if (now - state.lastPostTime < SETTINGS.MIN_GAP) return;
 
@@ -163,13 +159,11 @@ async function postToSquare(symbol, change, type) {
         await axios.post(SETTINGS.SQUARE_URL, { bodyTextOnly: content }, {
             headers: { "X-Square-OpenAPI-Key": SQUAD_API_KEY, "Content-Type": "application/json" }
         });
-
         state.postsToday++;
         state.stats[type]++;
         state.lastPostTime = now;
         state.postedTodaySymbols.add(symbol);
-        addLog(`✅ [${type.toUpperCase()}] Đăng: ${symbol} (${change}%) - Tổng: ${state.postsToday}/100`);
-        
+        addLog(`✅ [${type.toUpperCase()}] Đăng: ${symbol} (${change}%) - Tổng: ${state.postsToday}`);
     } catch (e) {
         addLog(`❌ Lỗi API: ${e.message}`);
     }
@@ -184,10 +178,11 @@ async function bootstrapData() {
                 symbol: t.symbol, 
                 prices: [{p: parseFloat(t.lastPrice), t: Date.now()}],
                 d1: parseFloat(t.priceChangePercent).toFixed(2),
-                vol: parseFloat(t.quoteVolume).toFixed(0)
+                vol: parseFloat(t.quoteVolume).toFixed(0),
+                live: { c1: 0, c5: 0, currentPrice: parseFloat(t.lastPrice) }
             };
         });
-        addLog("📊 Khởi tạo dữ liệu thành công.");
+        addLog("📊 Khởi tạo dữ liệu xong. Sẵn sàng biến động!");
     } catch (e) { addLog("❌ Lỗi khởi tạo."); }
 }
 
@@ -208,7 +203,7 @@ app.get('/api/status', (req, res) => {
     const table = Object.entries(state.coinData)
         .filter(([_, v]) => v.live)
         .map(([s, v]) => ({ symbol: s, ...v.live, d1: v.d1, vol: parseFloat(v.vol) }))
-        .sort((a,b) => a.vol - b.vol) // UI hiện thấp lên cao theo yêu cầu
+        .sort((a,b) => a.vol - b.vol)
         .slice(0, 20);
     res.json({ ...state, table });
 });
@@ -231,33 +226,32 @@ app.get('/', (req, res) => {
                     </div>
                     <button onclick="toggleBot()" id="btn" class="px-6 py-2 rounded-xl font-bold bg-yellow-500 text-black shadow-lg active:scale-95 transition-all text-sm">START</button>
                 </div>
-                <div class="grid grid-cols-3 gap-2 text-center border-t border-white/5 pt-3">
+                <div class="grid grid-cols-4 gap-1 text-center border-t border-white/5 pt-3">
                     <div class="bg-black/40 p-2 rounded-xl border border-white/5">
-                        <div class="text-[8px] text-zinc-500 mb-1">LOẠI 1 (M1)</div>
-                        <div id="s1" class="text-xs font-bold text-red-500">0/33</div>
+                        <div class="text-[8px] text-zinc-500 mb-1">M1 / M5</div>
+                        <div id="s1" class="text-xs font-bold text-red-500">0</div>
                     </div>
                     <div class="bg-black/40 p-2 rounded-xl border border-white/5">
-                        <div class="text-[8px] text-zinc-500 mb-1">LOẠI 2 (D1)</div>
-                        <div id="s2" class="text-xs font-bold text-yellow-500">0/33</div>
+                        <div class="text-[8px] text-zinc-500 mb-1">D1 (24H)</div>
+                        <div id="s2" class="text-xs font-bold text-yellow-500">0</div>
+                    </div>
+                    <div class="bg-black/40 p-2 rounded-xl border border-white/5">
+                        <div class="text-[8px] text-zinc-500 mb-1">LOẠI 3 (VOL)</div>
+                        <div id="s3" class="text-xs font-bold text-green-500">0</div>
                     </div>
                     <div class="bg-black/40 p-2 rounded-xl border border-white/5">
                         <div class="text-[8px] text-zinc-500 mb-1">TỔNG NGÀY</div>
-                        <div id="total-stats" class="text-xs font-bold text-blue-500">0/100</div>
+                        <div id="total-stats" class="text-xs font-bold text-blue-500">0</div>
                     </div>
                 </div>
             </div>
 
             <div class="bg-[#1e2329] rounded-2xl border border-white/5 shadow-lg overflow-hidden mb-3">
-                <div class="p-3 bg-white/5 text-[10px] font-bold">DANH SÁCH COIN (VOL LOW TO HIGH)</div>
+                <div class="p-3 bg-white/5 text-[10px] font-bold uppercase">Top Vol thấp nhất (Vét máng 23h)</div>
                 <div class="overflow-x-auto">
                     <table class="w-full text-[11px] text-left">
                         <thead class="text-zinc-500 bg-black/20">
-                            <tr>
-                                <th class="p-2">COIN</th>
-                                <th class="text-right p-2">M1%</th>
-                                <th class="text-right p-2">D1%</th>
-                                <th class="text-right p-2">VOL</th>
-                            </tr>
+                            <tr><th class="p-2">COIN</th><th class="text-right p-2">M1%</th><th class="text-right p-2">D1%</th><th class="text-right p-2">VOL</th></tr>
                         </thead>
                         <tbody id="tb"></tbody>
                     </table>
@@ -279,15 +273,16 @@ app.get('/', (req, res) => {
                 try {
                     const res = await fetch('/api/status'); 
                     const d = await res.json();
-                    document.getElementById('s1').innerText = d.stats.biendong + "/33";
-                    document.getElementById('s2').innerText = d.stats.day + "/33";
-                    document.getElementById('total-stats').innerText = d.postsToday + "/100";
+                    document.getElementById('s1').innerText = d.stats.biendong;
+                    document.getElementById('s2').innerText = d.stats.day;
+                    document.getElementById('s3').innerText = d.stats.vol;
+                    document.getElementById('total-stats').innerText = d.postsToday;
                     document.getElementById('lb').innerHTML = d.logs.map(l => \`<div>\${l}</div>\`).join('');
                     document.getElementById('tb').innerHTML = d.table.map(v => \`
                         <tr class="border-b border-white/5">
                             <td class="p-2 font-bold">\${v.symbol.replace('USDT','')}</td>
-                            <td class="text-right p-2 \${v.c1>=0?'text-green-500':'text-red-500'}">\${v.c1}%</td>
-                            <td class="text-right p-2 \${v.d1>=0?'text-green-500':'text-red-500'}">\${v.d1}%</td>
+                            <td class="text-right p-2 \${Math.abs(v.c1)>=7.0?'text-red-500':'text-zinc-400'}">\${v.c1}%</td>
+                            <td class="text-right p-2 \${Math.abs(v.d1)>=10.0?'text-yellow-500':'text-zinc-400'}">\${v.d1}%</td>
                             <td class="text-right p-2 text-zinc-500">\${(v.vol/1000).toFixed(0)}K</td>
                         </tr>\`).join('');
                 } catch(e) {}
