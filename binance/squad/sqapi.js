@@ -18,7 +18,7 @@ const SETTINGS = {
     SQUARE_URL: "https://www.binance.com/bapi/composite/v1/public/pgc/openApi/content/add",
     VOL_LIMIT: 7.0,    
     MAX_TOTAL: 50,     
-    MIN_GAP: 15000,    
+    MIN_GAP: 10000,    
 };
 
 // --- NGÂN HÀNG DỮ LIỆU: 4 PHẦN x 100 CÂU ---
@@ -140,7 +140,7 @@ async function checkNightFill() {
     if (!state.isRunning) return;
     const now = new Date();
     if (now.getHours() === 23 && state.postsToday < SETTINGS.MAX_TOTAL) {
-        addLog(`🌙 Đang là 23h, chưa đủ 50 bài (Hiện có ${state.postsToday}). Đang quét Top Vol...`);
+        addLog(`🌙 Đang là 23h, chưa đủ 50 bài. Đang quét Top Vol...`);
         try {
             const tickers = await binance.futures24hrTicker();
             const topVol = tickers
@@ -165,16 +165,27 @@ async function checkNightFill() {
 
 setInterval(checkNightFill, 60000);
 
-// FIX TRIỆT ĐỂ: Dùng websockets.futuresTickers để tương thích với các bản Node Binance cũ
+// PHƯƠNG PHÁP FIX LỖI CUỐI CÙNG: Dùng WebSocket thô kết nối trực tiếp vào Binance Stream
 function initWS() {
-    addLog("⚡ Engine Luffy V3 (Stable Mode) Starting...");
-    binance.websockets.futuresTickers(tickers => {
-        for ( let symbol in tickers ) {
-            if (symbol.endsWith('USDT')) {
-                let price = parseFloat(tickers[symbol].close);
-                updatePriceLogic(symbol, price, Date.now());
+    addLog("⚡ Engine Luffy V3 (Direct WS Mode) Starting...");
+    
+    // Kết nối trực tiếp vào stream giá toàn bộ thị trường Futures của Binance
+    const ws = new WebSocket('wss://fstream.binance.com/ws/!ticker@arr');
+
+    ws.on('open', () => addLog("🔗 Đã kết nối WebSocket Binance thành công!"));
+    ws.on('message', (data) => {
+        const tickers = JSON.parse(data);
+        tickers.forEach(t => {
+            if (t.s.endsWith('USDT')) {
+                updatePriceLogic(t.s, parseFloat(t.c), Date.now());
             }
-        }
+        });
+    });
+
+    ws.on('error', (e) => addLog(`⚠️ Lỗi WS: ${e.message}`));
+    ws.on('close', () => {
+        addLog("🔄 Mất kết nối WS. Đang thử lại sau 5s...");
+        setTimeout(initWS, 5000);
     });
 }
 
