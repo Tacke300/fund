@@ -27,7 +27,6 @@ async function processQueue() {
 }
 setInterval(processQueue, 50);
 
-// --- TÍNH NĂNG BIẾN ĐỘNG MẠNH: BOOTSTRAP ---
 async function bootstrapData() {
     try {
         const res = await fetch('https://fapi.binance.com/fapi/v1/ticker/price');
@@ -168,20 +167,21 @@ app.get('/gui', (req, res) => {
     res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Binance Luffy Pro</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;600;700&display=swap');
         body { background: #0b0e11; color: #eaecef; font-family: 'IBM Plex Sans', sans-serif; margin: 0; }
         .up { color: #0ecb81; } .down { color: #f6465d; }
         .bg-card { background: #1e2329; border: 1px solid #30363d; } .text-gray-custom { color: #848e9c; }
         input, select { border: 1px solid #30363d !important; background: #0b0e11; color: white; }
-        .recovery-row { background-color: rgba(75, 0, 130, 0.3) !important; color: #e0b0ff !important; }
+        .row-x50 { background: rgba(138, 43, 226, 0.2) !important; color: #bf7fff !important; border-left: 4px solid #8a2be2; }
+        .win-glow { color: #0ecb81; text-shadow: 0 0 5px #0ecb81; }
+        .lose-glow { color: #f6465d; text-shadow: 0 0 5px #f6465d; }
     </style></head><body>
     
     <div class="p-4 bg-[#0b0e11] sticky top-0 z-50 border-b border-zinc-800">
         <div id="setup" class="grid grid-cols-2 gap-3 mb-4 bg-card p-3 rounded-lg">
             <div><label class="text-[10px] text-gray-custom ml-1 uppercase font-bold">Vốn khởi tạo ($)</label><input id="balanceInp" type="number" class="p-2 rounded w-full text-yellow-500 font-bold outline-none text-sm"></div>
-            <div><label class="text-[10px] text-gray-custom ml-1 uppercase font-bold">Margin per Trade</label><input id="marginInp" type="text" class="p-2 rounded w-full text-yellow-500 font-bold outline-none text-sm"></div>
+            <div><label class="text-[10px] text-gray-custom ml-1 uppercase font-bold">Margin per Trade</label><input id="marginInp" type="text" placeholder="Ví dụ: 10% hoặc 50" class="p-2 rounded w-full text-yellow-500 font-bold outline-none text-sm"></div>
             <div class="col-span-2 grid grid-cols-4 gap-2 border-t border-zinc-800 pt-3 mt-1">
                 <div><label class="text-[10px] text-gray-custom ml-1 uppercase">TP (%)</label><input id="tpInp" type="number" step="0.1" class="p-2 rounded w-full outline-none text-sm"></div>
                 <div><label class="text-[10px] text-gray-custom ml-1 uppercase">DCA (%)</label><input id="slInp" type="number" step="0.1" class="p-2 rounded w-full outline-none text-sm"></div>
@@ -207,13 +207,12 @@ app.get('/gui', (req, res) => {
             <div>
                 <div class="text-gray-custom text-[11px] uppercase font-bold tracking-widest mb-1">Equity (Vốn + PnL Live)</div>
                 <span id="displayBal" class="text-4xl font-bold text-white tracking-tighter">0.00</span>
-                <div class="text-[11px] text-blue-400 font-bold uppercase mt-1 italic underline">Available (Sẵn sàng): <span id="displayAvail">0.00</span> USDT</div>
+                <div class="text-[11px] text-blue-400 font-bold uppercase mt-1 italic underline">Available (Khả dụng): <span id="displayAvail">0.00</span> USDT</div>
             </div>
             <div class="text-right"><div class="text-gray-custom text-[11px] uppercase font-bold mb-1">PnL Tạm tính</div><div id="unPnl" class="text-xl font-bold">0.00</div></div>
         </div>
     </div>
 
-    <!-- BẢNG BIẾN ĐỘNG MARKET (M1, M5, M15) -->
     <div class="px-4 mt-5">
         <div class="bg-card rounded-xl p-4 shadow-lg border border-zinc-800">
             <div class="text-[11px] font-bold text-yellow-500 mb-3 uppercase tracking-wider italic">⚡ Market Movement (M1-M5-M15)</div>
@@ -226,25 +225,18 @@ app.get('/gui', (req, res) => {
         </div>
     </div>
 
-    <div class="px-4 mt-5">
-        <div class="bg-card rounded-xl p-4 border border-zinc-800">
-            <div class="text-[11px] font-bold text-gray-custom uppercase tracking-widest italic mb-2">Growth Curve (Real-time)</div>
-            <div style="height: 180px;"><canvas id="balanceChart"></canvas></div>
-        </div>
-    </div>
-
     <div class="px-4 mt-5"><div class="bg-card rounded-xl p-4 shadow-lg">
         <div class="text-[11px] font-bold text-white mb-3 uppercase tracking-wider flex items-center"><span class="w-2 h-2 bg-green-500 rounded-full mr-2 animate-pulse"></span> Vị thế đang mở</div>
         <div class="overflow-x-auto"><table class="w-full text-[10px] text-left"><thead class="text-gray-custom uppercase border-b border-zinc-800"><tr><th>STT</th><th>Time</th><th>Pair</th><th>DCA</th><th>Margin</th><th class="text-center">Lev</th><th>Entry/Live</th><th>Vol Snap</th><th class="text-right">PnL (ROI%)</th></tr></thead><tbody id="pendingBody"></tbody></table></div>
     </div></div>
 
     <div class="px-4 mt-5"><div class="bg-card rounded-xl p-4 shadow-lg">
-         <div class="text-[11px] font-bold text-gray-custom mb-3 uppercase tracking-wider italic">Nhật ký giao dịch</div>
+         <div class="text-[11px] font-bold text-gray-custom mb-3 uppercase tracking-wider italic">Nhật ký giao dịch (Glow Effect)</div>
         <div class="overflow-x-auto"><table class="w-full text-[9px] text-left"><thead class="text-gray-custom border-b border-zinc-800 uppercase"><tr><th>STT</th><th>Time Out</th><th>Pair</th><th>DCA</th><th>Margin</th><th>Entry/Out</th><th>Vol Snap</th><th>MaxDD</th><th class="text-right">Balance</th></tr></thead><tbody id="historyBody"></tbody></table></div>
     </div></div>
 
     <script>
-    let running = false, myChart = null;
+    let running = false;
     const saved = JSON.parse(localStorage.getItem('luffy_state') || '{}');
     if(saved.initialBal) {
         document.getElementById('balanceInp').value = saved.initialBal;
@@ -272,11 +264,71 @@ app.get('/gui', (req, res) => {
             const res = await fetch('/api/data'); const d = await res.json();
             const state = JSON.parse(localStorage.getItem('luffy_state') || '{}');
             let mVal = state.marginVal || "10%", mNum = parseFloat(mVal);
+            
             let runningBal = state.initialBal || 0, unPnlTotal = 0, usedMarginTotal = 0;
             let countWin = 0, countLose = 0, sumWinPnl = 0;
-            let chartLabels = ['Start'], chartData = [runningBal];
 
-            // 1. Render Bảng Biến Động
+            // --- XỬ LÝ LỊCH SỬ (RENDER TRƯỚC ĐỂ TÍNH BALANCE HIỆN TẠI) ---
+            let histHTML = [...d.history].reverse().map((h, idx) => {
+                // TÍNH TOÁN DỰA TRÊN SỐ DƯ TẠI THỜI ĐIỂM ĐÓ (GIẢ LẬP)
+                // LƯU Ý: Margin % ở đây tính trên Available (runningBal - usedMargin đang treo)
+                let mBase = mVal.includes('%') ? (runningBal * mNum / 100) : mNum;
+                let totalMargin = mBase * (h.dcaCount + 1);
+                let pnl = (totalMargin * (h.maxLev || 20) * (h.pnlPercent/100)) - (totalMargin * (h.maxLev || 20) * 0.001);
+                runningBal += pnl; 
+                if(pnl > 0) { countWin++; sumWinPnl += pnl; } else { countLose++; }
+                
+                let sv = h.snapVol || {c1:0,c5:0,c15:0};
+                let specialClass = (h.maxLev >= 50) ? 'row-x50' : '';
+                let pnlClass = pnl >= 0 ? 'win-glow' : 'lose-glow';
+
+                return \`<tr class="border-b border-zinc-800/30 \${specialClass}">
+                    <td>\${d.history.length - idx}</td>
+                    <td>\${new Date(h.endTime).toLocaleTimeString()}</td>
+                    <td><b class="text-white">\${h.symbol}</b> <span class="text-[8px] opacity-50">\${h.maxLev}x</span></td>
+                    <td>\${h.dcaCount}</td>
+                    <td>\${totalMargin.toFixed(1)}</td>
+                    <td>\${fPrice(h.snapPrice)}/\${fPrice(h.finalPrice)}</td>
+                    <td>\${sv.c1}/\${sv.c5}/\${sv.c15}</td>
+                    <td class="down font-bold">\${h.maxNegativeRoi ? h.maxNegativeRoi.toFixed(1) : 0}%</td>
+                    <td class="text-right font-bold \${pnlClass}">\${runningBal.toFixed(1)}</td>
+                </tr>\`;
+            }).reverse().join('');
+
+            // --- XỬ LÝ VỊ THẾ ĐANG TREO (DÙNG AVAILABLE ĐỂ TÍNH MARGIN) ---
+            let pendingHTML = d.pending.map((h, idx) => {
+                let lp = d.allPrices[h.symbol] || h.avgPrice;
+                
+                // QUAN TRỌNG: SỐ DƯ KHẢ DỤNG = Tổng ví hiện tại - Margin đã khóa - PnL âm (nếu có)
+                let currentAvail = runningBal - usedMarginTotal + (unPnlTotal < 0 ? unPnlTotal : 0);
+                
+                // Nếu là lệnh mới (dcaCount == 0), tính % trên Available. 
+                // Nếu đã mở rồi, dùng giá trị margin đã chốt từ lúc mở (ở đây giả lập mBase trên Available lúc đó)
+                let mBase = mVal.includes('%') ? (currentAvail * mNum / 100) : mNum;
+                let totalM = mBase * (h.dcaCount + 1);
+                
+                let roi = (h.type === 'LONG' ? (lp-h.avgPrice)/h.avgPrice : (h.avgPrice-lp)/h.avgPrice) * 100 * (h.maxLev || 20);
+                let pnl = totalM * roi / 100; 
+                unPnlTotal += pnl; 
+                usedMarginTotal += totalM;
+
+                let sv = h.snapVol || {c1:0,c5:0,c15:0};
+                let rowColor = (h.maxLev >= 50) ? 'row-x50' : 'bg-white/5';
+
+                return \`<tr class="\${rowColor} border-b border-zinc-800">
+                    <td>\${idx+1}</td>
+                    <td class="text-[8px]">\${new Date(h.startTime).toLocaleTimeString()}</td>
+                    <td class="text-white font-bold">\${h.symbol} <span class="text-[8px] px-1 \${h.type==='LONG'?'bg-green-600':'bg-red-600'} rounded">\${h.type}</span></td>
+                    <td>\${h.dcaCount}</td>
+                    <td>\${totalM.toFixed(1)}</td>
+                    <td class="text-center text-yellow-500/70">\${h.maxLev}x</td>
+                    <td>\${fPrice(h.avgPrice)}/<b class="text-green-400">\${fPrice(lp)}</b></td>
+                    <td>\${sv.c1}/\${sv.c5}/\${sv.c15}</td>
+                    <td class="text-right font-bold \${pnl>=0?'up':'down'}">\${roi.toFixed(1)}%</td>
+                </tr>\`;
+            }).join('');
+
+            // CẬP NHẬT UI
             document.getElementById('liveBody').innerHTML = d.live.slice(0, 10).map(i => \`
                 <tr class="border-b border-zinc-800/30">
                     <td class="py-2 text-white font-bold">\${i.symbol}</td>
@@ -285,29 +337,6 @@ app.get('/gui', (req, res) => {
                     <td class="\${i.c5>=0?'up':'down'} font-bold">\${i.c5}%</td>
                     <td class="text-gray-600">\${i.c15}%</td>
                 </tr>\`).join('');
-
-            // 2. Render Nhật Ký & Tính Balance
-            let histHTML = [...d.history].reverse().map((h, idx) => {
-                let mBase = mVal.includes('%') ? (runningBal * mNum / 100) : mNum;
-                let totalMargin = mBase * (h.dcaCount + 1);
-                let pnl = (totalMargin * (h.maxLev || 20) * (h.pnlPercent/100)) - (totalMargin * (h.maxLev || 20) * 0.001);
-                runningBal += pnl; 
-                if(pnl > 0) { countWin++; sumWinPnl += pnl; } else { countLose++; }
-                chartLabels.push(""); chartData.push(runningBal);
-                let sv = h.snapVol || {c1:0,c5:0,c15:0};
-                return \`<tr class="border-b border-zinc-800/30"><td>\${d.history.length - idx}</td><td>\${new Date(h.endTime).toLocaleTimeString()}</td><td><b class="text-white">\${h.symbol}</b></td><td>\${h.dcaCount}</td><td>\${totalMargin.toFixed(1)}</td><td>\${fPrice(h.snapPrice)}/\${fPrice(h.finalPrice)}</td><td>\${sv.c1}/\${sv.c5}/\${sv.c15}</td><td class="down font-bold">\${h.maxNegativeRoi ? h.maxNegativeRoi.toFixed(1) : 0}%</td><td class="text-right text-white">\${runningBal.toFixed(1)}</td></tr>\`;
-            }).reverse().join('');
-
-            // 3. Render Vị Thế & Tính Available
-            let pendingHTML = d.pending.map((h, idx) => {
-                let lp = d.allPrices[h.symbol] || h.avgPrice;
-                let mBase = mVal.includes('%') ? (runningBal * mNum / 100) : mNum;
-                let totalM = mBase * (h.dcaCount + 1);
-                let roi = (h.type === 'LONG' ? (lp-h.avgPrice)/h.avgPrice : (h.avgPrice-lp)/h.avgPrice) * 100 * (h.maxLev || 20);
-                let pnl = totalM * roi / 100; unPnlTotal += pnl; usedMarginTotal += totalM;
-                let sv = h.snapVol || {c1:0,c5:0,c15:0};
-                return \`<tr class="bg-white/5 border-b border-zinc-800"><td>\${idx+1}</td><td class="text-[8px]">\${new Date(h.startTime).toLocaleTimeString()}</td><td class="text-white font-bold">\${h.symbol} <span class="text-[8px] px-1 \${h.type==='LONG'?'bg-green-600':'bg-red-600'} rounded">\${h.type}</span></td><td>\${h.dcaCount}</td><td>\${totalM.toFixed(1)}</td><td class="text-center text-yellow-500/70">\${h.maxLev}x</td><td>\${fPrice(h.avgPrice)}/<b class="text-green-400">\${fPrice(lp)}</b></td><td>\${sv.c1}/\${sv.c5}/\${sv.c15}</td><td class="text-right font-bold \${pnl>=0?'up':'down'}">\${roi.toFixed(1)}%</td></tr>\`;
-            }).join('');
 
             document.getElementById('displayBal').innerText = (runningBal + unPnlTotal).toFixed(2);
             document.getElementById('displayAvail').innerText = Math.max(0, (runningBal - usedMarginTotal + (unPnlTotal < 0 ? unPnlTotal : 0))).toFixed(2);
@@ -319,12 +348,10 @@ app.get('/gui', (req, res) => {
             document.getElementById('unPnl').className = 'text-xl font-bold ' + (unPnlTotal >= 0 ? 'up' : 'down');
             document.getElementById('historyBody').innerHTML = histHTML;
             document.getElementById('pendingBody').innerHTML = pendingHTML;
-            if(myChart) { myChart.data.labels = chartLabels; myChart.data.datasets[0].data = chartData; myChart.update('none'); }
+            
         } catch(e) {}
     }
 
-    const ctx = document.getElementById('balanceChart').getContext('2d');
-    myChart = new Chart(ctx, { type: 'line', data: { labels: [], datasets: [{ data: [], borderColor: '#fcd535', borderWidth: 2, pointRadius: 0, fill: true, backgroundColor: 'rgba(252, 213, 53, 0.05)' }] }, options: { maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { display: false }, y: { grid: { color: '#30363d' } } } } });
     if(running) setInterval(update, 1000);
     </script></body></html>`);
 });
