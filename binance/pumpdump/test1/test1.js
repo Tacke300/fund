@@ -91,7 +91,7 @@ function handlePriceUpdate(s, p, now) {
         const diffAvg = ((p - pending.avgPrice) / pending.avgPrice) * 100;
         const originalType = pending.isRecovery ? (pending.type === 'LONG' ? 'SHORT' : 'LONG') : pending.type;
 
-        // 1. LOGIC RECOVERY (TP/SL 10% GIÁ)
+        // --- CẬP NHẬT LOGIC RECOVERY ---
         if (pending.isRecovery) {
             const recoDiff = ((p - pending.recoPrice) / pending.recoPrice) * 100;
             const recoRoi = (pending.type === 'LONG' ? recoDiff : -recoDiff);
@@ -105,7 +105,6 @@ function handlePriceUpdate(s, p, now) {
             }
         }
 
-        // 2. LOGIC LỆNH CŨ (TP THEO SETUP / SL TUYỆT ĐỐI 55%)
         const originalRoi = (originalType === 'LONG' ? diffAvg : -diffAvg);
         const slThreshold = (currentMaxDCA * pending.slTarget) + 5;
         const isSlOriginal = (originalType === 'LONG' ? diffFromSnap <= -slThreshold : diffFromSnap >= slThreshold);
@@ -119,7 +118,6 @@ function handlePriceUpdate(s, p, now) {
             return;
         }
 
-        // 3. KÍCH HOẠT DCA HOẶC RECOVERY
         const nextDcaStep = pending.dcaCount + 1;
         const nextDcaPricePercent = nextDcaStep * pending.slTarget;
         const triggerAction = (originalType === 'LONG' ? diffFromSnap <= -nextDcaPricePercent : diffFromSnap >= nextDcaPricePercent);
@@ -180,7 +178,7 @@ app.get('/api/data', (req, res) => {
 
 app.get('/gui', (req, res) => {
     res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Binance Luffy Pro - Recovery Edition</title>
+    <title>Binance Luffy Pro</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
@@ -220,7 +218,6 @@ app.get('/gui', (req, res) => {
         </div>
     </div>
 
-    <!-- BẢNG BIẾN ĐỘNG MARKET -->
     <div class="px-4 mt-5"><div class="bg-card rounded-xl p-4 border border-zinc-800">
         <div class="text-[11px] font-bold text-yellow-500 mb-3 uppercase italic">⚡ Market Movement (M1-M5-M15)</div>
         <div class="overflow-x-auto"><table class="w-full text-[10px] text-left"><thead class="text-gray-500 border-b border-zinc-800 uppercase"><tr><th>Pair</th><th>Price</th><th>M1</th><th>M5</th><th>M15</th></tr></thead><tbody id="liveBody"></tbody></table></div>
