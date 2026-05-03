@@ -2,17 +2,18 @@ import WebSocket from 'ws';
 import express from 'express';
 import axios from 'axios';
 import Binance from 'node-binance-api';
-// Giả sử file config.js của ní nằm cùng thư mục
-import config from './config.js'; 
+// Nhập trực tiếp tên biến từ config.js của ní
+import { API_KEY, SECRET_KEY } from './config.js'; 
 
 const PORT = 8888;
 const SQUAD_API_KEY = "8d794c11cc794c958c2c65924c54f2dd"; 
 
-// Khởi tạo Binance với API từ config
+// Khởi tạo Binance với đúng tên biến từ file config.js
 const binance = new Binance().options({
-    APIKEY: config.binance.key,
-    APISECRET: config.binance.secret,
-    family: 4
+    APIKEY: API_KEY,
+    APISECRET: SECRET_KEY,
+    family: 4,
+    recvWindow: 60000
 });
 
 const SETTINGS = {
@@ -36,7 +37,7 @@ const BANK = {
         "☄️ Dòng tiền đang tạo ra sự đột phá từ các mô hình tích lũy.", "🐜 Lực mua đang len lỏi vào từng lệnh giao dịch nhỏ.", "🎖️ Dòng tiền đang khẳng định vị thế dẫn dắt thị trường.", "🎢 Sự quay lại của dòng vốn sau nhịp rũ bỏ mạnh mẽ.", "⚖️ Dòng tiền đang tìm kiếm sự cân bằng tại vùng giá cao.", "🛡️ Sự ổn định của dòng vốn trong bối cảnh vĩ mô mới.", "🎰 Dòng tiền đang đặt cược vào kịch bản tăng trưởng mạnh.", "🛸 Sự dịch chuyển thông minh giữa các lớp tài sản.", "⚡ Dòng tiền đang tạo ra những cú hích quan trọng.", "🏹 Lực cầu đang chờ đợi sự xác nhận từ các khung giờ lớn.",
         "📚 Dòng tiền đang tập trung vào các mã có câu chuyện riêng.", "💎 Sự tăng trưởng thanh khoản đi kèm with chất lượng dòng vốn.", "🎮 Dòng tiền đang kiểm soát hoàn toàn diễn biến giá.", "🔓 Sự bứt phá của dòng tiền khỏi vùng trung lập.", "🏔️ Dòng tiền đang hướng tới các đỉnh cao mới của năm.", "🧹 Lực mua chủ động đang quét sạch các lệnh bán treo.", "🏃 Dòng tiền đang thể hiện sự bền bỉ trong từng nhịp tăng.", "📣 Sự hưng phấn của dòng tiền đang lan rộng toàn sàn.", "💡 Dòng tiền đang tìm thấy động lực tăng trưởng mới.", "🐣 Sự đột phá về khối lượng từ các vùng giá đáy.",
         "🪜 Dòng tiền đang xác lập một nền tảng giá cao hơn.", "🏋️ Sức mạnh của dòng tiền đang được thử thách và khẳng định.", "📉 Dòng tiền đang tận dụng các nhịp giảm để gia tăng vị thế.", "🤝 Sự nhất quán của dòng vốn trong các quyết định mua.", "🌅 Dòng tiền đang mở ra những triển vọng tươi sáng.", "🌋 Lực cầu đang bùng nổ tại các điểm xoay chiều.", "🎨 Dòng tiền đang định hình lại xu hướng của thị trường.", "💂 Sự trỗi dậy mạnh mẽ của dòng tiền từ các quỹ chỉ số.", "🌗 Dòng tiền đang tạo ra sự khác biệt lớn về hiệu suất.", "⭐ Sự tập trung dòng vốn vào các mã có dòng tiền tốt.",
-        "🧨 Dòng tiền đang tạo đà cho một cú breakout lịch sử.", "🌇 Lực mua đang gia tăng mạnh mẽ vào cuối phiên.", "🌃 Dòng tiền đang duy trì sự hưng phấn cho đến khi đóng cửa.", "🏅 Sự xuất sắc của dòng tiền trong việc giữ nhịp thị trường.", "🎁 Dòng tiền đang tạo ra những cơ hội vàng cho người nắm giữ.", "🔥 Sự quyết đoán của dòng vốn trong việc đẩy giá bứt phá.", "🌠 Dòng tiền lớn đang tìm cách phá vỡ các kỷ lục cũ.", "🧩 Sự phối hợp của các dòng vốn đang rất nhịp nhàng.", "🔗 Mối liên kết giữa dòng tiền và giá đang rất chặtẽ.", "🥇 Dẫn đầu xu hướng với sự hậu thuẫn của dòng tiền cực lớn."
+        "🧨 Dòng tiền đang tạo đà cho một cú breakout lịch sử.", "🌇 Lực mua đang gia tăng mạnh mẽ vào cuối phiên.", "🌃 Dòng tiền đang duy trì sự hưng phấn cho đến khi đóng cửa.", "🏅 Sự xuất sắc của dòng tiền trong việc giữ nhịp thị trường.", "🎁 Dòng tiền đang tạo ra những cơ hội vàng cho người nắm giữ.", "🔥 Sự quyết đoán của dòng vốn trong việc đẩy giá bứt phá.", "🌠 Dòng tiền lớn đang tìm cách phá vỡ các kỷ lục cũ.", "🧩 Sự phối hợp của các dòng vốn đang rất nhịp nhàng.", "🔗 Mối liên kết giữa dòng tiền và giá đang rất chặẽ.", "🥇 Dẫn đầu xu hướng với sự hậu thuẫn của dòng tiền cực lớn."
     ],
     P2: [
         "📐 Về kỹ thuật giá đã bứt phá khỏi kênh giảm giá.", "🪄 Đường EMA đang thực hiện cú cắt vàng báo hiệu tăng.", "🌊 RSI đang tiến vào vùng mạnh mẽ nhưng chưa quá mua.", "🕯️ Mô hình nến nhấn chìm đã xác nhận xu hướng tăng.", "🎈 Bollinger Band mở rộng cho thấy biến động lớn.", "🛤️ Giá đang nằm trên các đường MA quan trọng.", "🧱 Kháng cự cũ đã trở thành hỗ trợ mới vững chắc.", "🏹 Phân kỳ dương H1 hỗ trợ đà tăng bền vững.", "🏔️ Cấu trúc đỉnh sau cao hơn đỉnh trước duy trì.", "☁️ Ichimoku cho thấy mây xanh nâng đỡ rất tốt.",
@@ -54,7 +55,7 @@ const BANK = {
         "📝 Kế hoạch tối ưu là kiên nhẫn chờ điểm vào lệnh đẹp.", "🛡️ Quản trị rủi ro bằng cách đặt dừng lỗ tuyệt đối.", "🎯 Chiến lược mua khi điều chỉnh vẫn tỏ ra hiệu quả.", "🛑 Đừng FOMO tại vùng giá này, hãy đợi nhịp test lại.", "💰 Chia vốn ra vào lệnh để tối ưu hóa giá vị thế.", "🧊 Luôn giữ cái đầu lạnh trước những biến động.", "🎁 Mục tiêu chốt lời ngắn hạn đã được xác định rõ.", "🎢 Gồng lãi là nghệ thuật, hãy nâng trailing stop.", "🔒 Bảo vệ lợi nhuận luôn là ưu tiên hàng đầu.", "📏 Hãy tuân thủ kỷ luật giao dịch để đi đường dài.",
         "🔑 Kỷ luật là chìa khóa để tồn tại trên thị trường.", "🚪 Luôn có kế hoạch thoát lệnh trước khi tham gia.", "🧺 Đừng đặt tất cả trứng vào một giỏ duy nhất.", "⏳ Kiên nhận là đức tính quý giá nhất của trader.", "💸 Hãy giao dịch với số vốn bạn có thể mất.", "🛡️ Không có gì chắc chắn, hãy luôn phòng vệ.", "📅 Theo dõi sát sao các tin tức quan trọng.", "🤕 Học cách chấp nhận thua lỗ như một phần cuộc chơi.", "🧘 Đừng để cảm xúc chi phối các quyết định.", "📔 Luôn ghi lại nhật ký để rút kinh nghiệm.",
         "🤝 Tin tưởng vào hệ thống và phương pháp của mình.", "🧨 Sự chuẩn bị kỹ lưỡng sẽ giảm bớt sự sợ hãi.", "✅ Chỉ vào lệnh khi các điều kiện đã hội tụ đủ.", "👁️ Quan sát phản ứng của giá tại các vùng then chốt.", "🌊 Hãy là người đi theo xu hướng, đừng chặn đầu.", "📉 Lợi nhuận bền vững đến từ sự nhất quán.", "⏲️ Đừng cố giao dịch quá nhiều trong một ngày.", "🪑 Biết khi nào nên đứng ngoài là một kỹ năng.", "🤝 Tôn trọng xu hướng thị trường, xu hướng là bạn.", "📚 Cập nhật kiến thức thường xuyên để thích nghi.",
-        "🦁 Tự tin nhưng không được chủ quan trước thị trường.", "⚖️ Xác định tỷ lệ rủi ro/lợi nhuận phù hợp.", "💼 Hãy coi trading là một công việc kinh doanh.", "🛠️ Tận dụng các công cụ hỗ trợ để tăng hiệu quả.", "🙅 Đừng bị ảnh hưởng bởi đám đông xung quanh.", "💎 Tập trung vào chất lượng lệnh thay vì số lượng.", "🛋️ Giữ tâm thế thoải mái nhất khi giữ vị thế.", "🔍 Hiểu rõ đặc tính của từng cặp giao dịch.", "🛡️ Hãy luôn đặt sự an toàn của tài khoản lên trước.", "🎓 Học hỏi từ những người đi trước có kinh nghiệm.",
+        "🦁 Tự tin nhưng không được chủ quan trước thị trường.", "⚖️ Xác định tỷ lệ rủi ro/lợi nhuận phù hợp.", "💼 Hãy coi trading là một công việc kinh doanh.", "🛠️ Tận dụng các công cụ hỗ trợ để tăng hiệu quả.", "🙅 Đừng bị ảnh hưởng bởi đám đông quanh.", "💎 Tập trung vào chất lượng lệnh thay vì số lượng.", "🛋️ Giữ tâm thế thoải mái nhất khi giữ vị thế.", "🔍 Hiểu rõ đặc tính của từng cặp giao dịch.", "🛡️ Hãy luôn đặt sự an toàn của tài khoản lên trước.", "🎓 Học hỏi từ những người đi trước có kinh nghiệm.",
         "🧊 Sự bình tĩnh giúp bạn nhìn nhận thị trường đúng.", "🥊 Đừng cố gỡ gạc sau một lệnh thua đau.", "🎁 Thị trường luôn có cơ hội, đừng lo bỏ lỡ.", "🏔️ Hãy kiên định với mục tiêu dài hạn đã đề ra.", "⚙️ Tối ưu lợi nhuận bằng cách quản lý lệnh thông minh.", "🔄 Sẵn sàng thay đổi quan điểm nếu giá thay đổi.", "🕹️ Luôn giữ mức đòn bẩy ở mức an toàn nhất.", "🖼️ Phân tích đa khung thời gian để có cái nhìn tổng quát.", "🧘 Cân bằng giữa giao dịch và cuộc sống cá nhân.", "🎈 Đừng kỳ vọng quá cao vào một lệnh duy nhất.",
         "🗣️ Hãy để thị trường trả lời thay lời dự đoán mò.", "📏 Luyện tập thói quen kiểm soát rủi ro hàng ngày.", "🧪 Khám phá các phương pháp mới có chọn lọc.", "🧹 Giữ cho biểu đồ giao dịch sạch sẽ và dễ nhìn.", "⚙️ Hiểu rõ cơ chế hoạt động của sàn giao dịch.", "⚠️ Hãy luôn cảnh giác với các bẫy giá thị trường.", "📝 Tự đánh giá bản thân sau mỗi tuần giao dịch.", "🧠 Nâng cao khả năng chịu đựng tâm lý bản thân.", "🍀 Giao dịch đơn giản thường mang lại hiệu quả cao.", "🍬 Hãy biết hài lòng với những gì mình đạt được.",
         "👂 Lắng nghe phản hồi từ thị trường thay vì ý kiến.", "🔔 Cẩn trọng với biến động trước giờ ra tin mạnh.", "📍 Tìm kiếm những vùng giá có xác suất thắng cao.", "🛡️ Luôn có phương án dự phòng cho mọi tình huống.", "🚫 Đừng bao giờ giao dịch dựa trên sự trả thù.", "⛓️ Sự kỷ luật sẽ mang lại tự do tài chính.", "📜 Hãy tôn trọng những quy tắc do chính mình đặt ra.", "🤏 Kiểm soát lòng tham khi thị trường hưng phấn.", "⚓ Giữ vững niềm tin vào con đường đã chọn.", "🎓 Mỗi sai lầm đều là một bài học vô giá.",
@@ -91,13 +92,11 @@ function addLog(msg) {
     if (state.logs.length > 50) state.logs.pop();
 }
 
-// Logic lấy mốc giá 7h sáng
 async function getPriceAt7AM(symbol) {
     try {
         const sevenAM = new Date();
         sevenAM.setHours(7, 0, 0, 0);
         const startTime = sevenAM.getTime();
-        // Dùng binance.futuresCandles thay vì axios để tận dụng config
         const ticks = await binance.futuresCandles(symbol, "1m", { startTime, limit: 1 });
         return ticks.length > 0 ? parseFloat(ticks[0][1]) : null;
     } catch (e) { return null; }
@@ -144,6 +143,7 @@ async function postToSquare(symbol, change, type) {
     if (state.postsToday >= SETTINGS.MAX_TOTAL || state.postedTodaySymbols.has(symbol)) return;
     if (Date.now() - state.lastPostTime < SETTINGS.MIN_GAP) return;
 
+    // Giữ nguyên CoinUSDT ở cuối bài theo yêu cầu
     const content = `${BANK.P1[Math.floor(Math.random()*100)]}\n\n${BANK.P2[Math.floor(Math.random()*100)]}\n\n${BANK.P3[Math.floor(Math.random()*100)]}\n\n${BANK.P4[Math.floor(Math.random()*100)]}\n\n#${symbol} $${symbol}`;
 
     try {
@@ -158,14 +158,13 @@ async function postToSquare(symbol, change, type) {
     } catch (e) { addLog(`❌ Lỗi Square: ${e.message}`); }
 }
 
-// Loại 3: Lấy danh sách Vol cao nhất từ API
 async function postTypeVol() {
     if (state.stats.vol >= SETTINGS.TYPE_LIMIT) return;
     try {
         const tickers = await binance.futures24hrTicker();
         const topVol = tickers
             .filter(t => t.symbol.endsWith('USDT') && !state.postedTodaySymbols.has(t.symbol))
-            .sort((a, b) => parseFloat(b.quoteVolume) - parseFloat(a.quoteVolume)) // Cao đến thấp
+            .sort((a, b) => parseFloat(b.quoteVolume) - parseFloat(a.quoteVolume))
             .slice(0, 1);
 
         if (topVol.length > 0) {
@@ -175,21 +174,14 @@ async function postTypeVol() {
     } catch (e) { addLog("❌ Lỗi lấy Vol từ Binance"); }
 }
 
-// Tự động quét Vol sau mỗi 10 phút
-setInterval(() => {
-    if (state.isRunning) postTypeVol();
-}, 600000);
+setInterval(() => { if (state.isRunning) postTypeVol(); }, 600000);
 
-// --- ĐÂY LÀ PHẦN SỬA LỖI QUAN TRỌNG NHẤT ---
 function initWS() {
     addLog("⚡ Engine Luffy Pro Starting...");
-    // node-binance-api yêu cầu callback phải nhận 1 tham số duy nhất là data (object/array)
-    // Nếu truyền symbol.toLowerCase() trực tiếp nó sẽ báo lỗi như log của bạn
     binance.futuresTickerStream((tickers) => {
-        // Kiểm tra xem tickers là mảng hay object (Binance thỉnh thoảng trả về khác nhau tùy phiên bản)
         if (Array.isArray(tickers)) {
             tickers.forEach(t => {
-                if (t.symbol) {
+                if (t.symbol && t.symbol.endsWith('USDT')) {
                     updatePriceLogic(t.symbol, parseFloat(t.close), Date.now(), t.quoteVolume);
                 }
             });
