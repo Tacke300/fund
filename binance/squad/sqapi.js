@@ -15,7 +15,7 @@ const BANK = {
         "Không có gì có thể ngăn cản được đà tăng hiện tại.", "Đấu trường giá đang nghiêng hẳn về phía những người mua.", "Sự liên kết giữa các chỉ báo tạo nên một bức tranh đẹp.", "Những phím đàn tăng giá đang vang lên rộn rã trên chart.", "Tiếng vang của sự thành công đang lan tỏa tới mọi nhà.", "Pin năng lượng của phe mua đã được sạc đầy 100 phần trăm.", "Ánh đèn sân khấu đang chiếu rọi vào đồng coin tiềm năng.", "Một cây nến Marubozu tăng mạnh xác nhận xu hướng rõ rệt.", "Những công cụ phân tích đều cho kết quả đồng nhất về giá.", "Khả năng bứt tốc trong vài giờ tới là cực kỳ khả thi.",
         "Kết nối nguồn lực tài chính để không bỏ lỡ cơ hội này.", "Ý tưởng đầu tư tuyệt vời thường xuất phát từ sự quan sát.", "Nhật ký giao dịch hôm nay sẽ ghi lại một cột mốc mới.", "Viết nên câu chuyện thành công từ chính sự quyết đoán.", "Chìa khóa vạn năng để mở cánh cửa lợi nhuận đã ở đây.", "Thu hoạch thành quả từ những hạt giống đã gieo từ trước.", "Sức hút của đồng coin này đang cực lớn đối với cộng đồng.", "Mọi vết thương của đợt giảm giá trước đã được chữa lành.", "Thử nghiệm các kịch bản cho thấy giá tăng là xác suất cao.", "Nhìn xa trông rộng để thấy được giá trị thực của tài sản.",
         "Sự sạch sẽ trong cấu trúc giá giúp việc phân tích dễ dàng.", "Cánh cửa cơ hội đang mở rộng cho tất cả những ai biết tới.", "Giỏ hàng hôm nay không thể thiếu được đồng coin chất lượng.", "Phản chiếu sự hưng phấn của thị trường qua từng nhịp nến.", "Loại bỏ những nghi ngờ để tiến tới mục tiêu lợi nhuận.", "Quét sạch các lệnh bán treo phía trên một cách nhanh chóng.", "Gom đủ hàng để chuẩn bị cho một hành trình dài phía trước.", "Giỏ hàng của các quỹ lớn đang chứa đầy đồng coin này.", "Mua sắm tài sản giá rẻ khi người khác còn đang sợ hãi.", "Sự nhẹ nhàng trong cách di chuyển giá báo hiệu còn tăng.",
-        "Chúc mừng những ai đã kiên trì nắm giữ tới thời điểm này.", "Sự tăng trưởng bền vững là đặc điểm nổi bật nhất hiện nay.", "Bức tranh thị trường đang trở nên sáng sủa hơn bao giờ hết.", "Sự đồng thuận giữa các khung thời gian là điều tuyệt vời.", "Tiếng chuông báo hiệu cơ hội đã điểm rõ ràng trên hệ thống.", "May mắn sẽ đến với những ai có sự chuẩn bị kỹ lưỡng nhất.", "Gói quà lợi nhuận đang chờ bạn mở ra trong thời gian tới.", "Giá trị cốt lõi luôn là nền tảng cho sự tăng giá bền bỉ.", "Thời điểm vàng để hành động đã chính thức được xác lập.", "Bản đồ lợi nhuận đã vẽ sẵn đường đi cho chúng ta rồi.",
+        "Chúc mừng những ai đã kiên trì nắm giữ tới thời điểm này.", "Sự tăng trưởng bền vững là đặc điểm nổi bật nhất hiện nay.", "Bức tranh thị trường đang trở nên sáng sủa hơn bao giờ hết.", "Sự đồng thuận giữa các khung thời gian là điều tuyệt vời.", "Tiếng chuông báo hiệu cơ hội đã điểm rõ ràng trên hệ thống.", "May mắn sẽ đến with những ai có sự chuẩn bị kỹ lưỡng nhất.", "Gói quà lợi nhuận đang chờ bạn mở ra trong thời gian tới.", "Giá trị cốt lõi luôn là nền tảng cho sự tăng giá bền bỉ.", "Thời điểm vàng để hành động đã chính thức được xác lập.", "Bản đồ lợi nhuận đã vẽ sẵn đường đi cho chúng ta rồi.",
         "Khám phá tiềm năng ẩn giấu sau những con số tài chính.", "Cơ hội không đợi một ai khi thị trường bắt đầu nóng lên.", "Sự trỗi dậy mạnh mẽ từ vùng đáy tích lũy dài hạn.", "Cấu trúc thị trường đang ủng hộ phe nắm giữ tài sản.", "Niềm tin của giới đầu tư đang được củng cố qua từng phiên.", "Sự dịch chuyển của dòng tiền xuyên biên giới vào crypto.", "Hành trình vạn dặm bắt đầu từ những bước đi đúng đắn này.", "Không gì là không thể khi công nghệ được ứng dụng thực tế.", "Dự án đang chứng minh được sức hút mãnh liệt của mình.", "Sự bùng nổ là điều tất yếu sau chuỗi ngày nén chặt giá.",
         "Sự kỳ diệu của lãi kép bắt đầu từ những lựa chọn này.", "Tương lai của ngành tài chính đang nằm trong tay bạn.", "Sự khác biệt giữa người thắng và người thua là tầm nhìn.", "Mọi sự chờ đợi đều xứng đáng khi nhìn vào biểu đồ này.", "Sự tự tin đến từ việc nắm giữ những tài sản chất lượng.", "Đừng để nỗi sợ lấn át đi cơ hội làm giàu chính đáng.", "Hệ sinh thái đang mở rộng quy mô một cách chóng mặt.", "Sự kết nối toàn cầu tạo nên sức mạnh vô song cho dự án.", "Đỉnh cao mới đang chờ đợi những người dám đương đầu.", "Tận hưởng cảm giác chiến thắng cùng đồng coin tiềm năng.",
         "Mỗi nhịp đập của thị trường đều mang theo một cơ hội.", "Sự nhạy bén sẽ giúp bạn đi trước đám đông một bước.", "Tài sản số đang khẳng định vị thế trong danh mục đầu tư.", "Sự an toàn được đặt lên hàng đầu với cấu trúc nến này.", "Làn gió mới đang thổi bùng ngọn lửa tăng trưởng hôm nay.", "Sự tinh tế trong cách vận hành dòng tiền của nhà tạo lập.", "Mọi rào cản tâm lý đã được gỡ bỏ sau cây nến xác nhận.", "Sự hội tụ của các yếu tố thuận lợi nhất ngay lúc này.", "Đừng đứng ngoài cuộc khi lịch sử đang được viết lại.", "Sự bứt phá ngoạn mục làm nức lòng tất cả những ai tin tưởng.",
@@ -64,7 +64,7 @@ const BANK = {
         "Hãy luôn nhớ rằng an toàn vốn là điều quan trọng nhất.", "Sự thăng hoa trong giao dịch đến từ sự chuẩn bị kỹ càng.", "Đừng để những lời chỉ trích làm lung lay niềm tin của bạn.", "Hãy tự hào về những gì bạn đã đạt được trên thị trường.", "Sự nhạy bén với tin tức giúp bạn có lợi thế cạnh tranh.", "Hãy luôn duy trì một phong cách giao dịch chuyên nghiệp.", "Sự kiên trì sẽ mở ra những cánh cửa mà bạn không ngờ tới.", "Hãy học cách tận hưởng những niềm vui nhỏ từ việc trading.", "Sự sáng tạo trong chiến thuật giúp bạn đi trước một bước.", "Chúc anh em luôn giữ được cái đầu lạnh và trái tim nóng.",
         "Giao dịch là một nghề cần sự tỉ mỉ và kiên nhẫn cực độ.", "Hãy tạo ra một không gian làm việc thoải mái để trading.", "Sự tập trung vào mục tiêu sẽ giúp bạn vượt qua mọi khó khăn.", "Đừng bao giờ ngừng học hỏi từ những biến động của giá.", "Sự linh hoạt trong chiến lược giúp bạn sống sót qua bão.", "Hãy trân trọng từng đồng vốn mà bạn đang nắm giữ hiện tại.", "Sự thấu hiểu dòng tiền là chìa khóa của sự giàu có bền vững.", "Hãy luôn lạc quan vào tương lai của thị trường crypto này.", "Sự gắn kết với cộng đồng mang lại nhiều thông tin giá trị.", "Hãy cùng nhau xây dựng một môi trường đầu tư lành mạnh.",
         "Sự tự tin đến từ những kiến thức đã được kiểm chứng lại.", "Hãy luôn đặt câu hỏi tại sao trước khi đưa ra quyết định.", "Sự thấu cảm với thị trường giúp bạn dự báo được tương lai.", "Đừng để áp lực kiếm tiền làm ảnh hưởng tới tâm lý trading.", "Hãy học cách nghỉ ngơi khi thị trường đi ngang nhàm chán.", "Sự tích lũy kiến thức mỗi ngày sẽ tạo nên sự đột phá lớn.", "Hãy luôn giữ một tinh thần cầu tiến trong công việc đầu tư.", "Sự cân bằng cảm xúc là chìa khóa của sự thành công dài hạn.", "Hãy luôn kiểm soát rủi ro trước khi nghĩ đến lợi nhuận cao.", "Chào đón một ngày giao dịch mới với đầy năng lượng tích cực.",
-        "Mỗi lệnh giao dịch là một bước tiến gần hơn tới tự do.", "Sự am hiểu về công nghệ giúp bạn chọn được dự án tốt.", "Hãy luôn dành sự tôn trọng cho những nhà đầu tư đi trước.", "Sự trung thành với kế hoạch đề ra mang lại sự an tâm.", "Đừng để sự mệt mỏi làm lu mờ đi những cơ hội hiện hữu.", "Hãy luôn giữ một cuốn sổ tay bên mình khi đang giao dịch.", "Sự tinh tế trong việc đọc sổ lệnh giúp bạn thấy được ý đồ.", "Hãy luôn duy trì một lối sống lành mạnh để trading tốt hơn.", "Sự bền bỉ trong việc rèn luyện kỹ năng là yếu tố then chốt.", "Chúc bạn gặt hái được nhiều thành công vang dội trên sàn.",
+        "Mỗi lệnh giao dịch là một bước tiến gần hơn tới tự do.", "Sự am hiểu về công nghệ giúp bạn chọn được dự án tốt.", "Hãy luôn dành sự tôn trọng cho những nhà đầu tư đi trước.", "Sự trung thực với kế hoạch đề ra mang lại sự an tâm.", "Đừng để sự mệt mỏi làm lu mờ đi những cơ hội hiện hữu.", "Hãy luôn giữ một cuốn sổ tay bên mình khi đang giao dịch.", "Sự tinh tế trong việc đọc sổ lệnh giúp bạn thấy được ý đồ.", "Hãy luôn duy trì một lối sống lành mạnh để trading tốt hơn.", "Sự bền bỉ trong việc rèn luyện kỹ năng là yếu tố then chốt.", "Chúc bạn gặt hái được nhiều thành công vang dội trên sàn.",
         "Sự tập trung vào giá trị dài hạn giúp bạn vượt qua sóng gió.", "Hãy luôn tin tưởng vào khả năng phân tích của chính mình.", "Sự sáng suốt trong những lúc hỗn loạn là một đức tính tốt.", "Đừng vội vàng đánh giá một dự án chỉ qua vài cây nến đỏ.", "Hãy luôn nhìn nhận mọi việc dưới góc nhìn đa chiều nhất.", "Sự tỉ mỉ trong việc thiết lập hệ thống giúp giảm sai sót.", "Hãy luôn giữ sự khiêm tốn khi bạn đang ở trên đỉnh thắng lợi.", "Sự chuẩn xác trong việc quản lý thời gian trading mỗi ngày.", "Hãy tìm cho mình một người thầy hoặc một cộng sự tốt nhất.", "Tương lai thuộc về những người biết nắm bắt xu hướng mới.",
         "Sự đam mê với những con số sẽ dẫn lối bạn tới thành công.", "Hãy luôn tự nhắc nhở bản thân về mục tiêu ban đầu đề ra.", "Sự nhẫn nại là liều thuốc tốt nhất cho những ngày đỏ lửa.", "Hãy luôn duy trì một tâm thế sẵn sàng đón nhận cơ hội mới.", "Sự nhạy cảm với các chu kỳ kinh tế giúp bạn tối ưu hóa vốn.", "Đừng để những thất bại nhỏ làm cản bước hành trình của bạn.", "Hãy luôn trân trọng những người bạn đồng hành trong crypto.", "Sự tinh khôi trong tư duy giúp bạn nhận ra những kèo thơm.", "Hãy luôn duy trì sự kỷ luật dù trong hoàn cảnh thuận lợi nhất.", "Chào đón một tương lai tài chính rực rỡ và thịnh vượng.",
         "Sự bứt phá của tư duy dẫn tới sự bứt phá của tài khoản.", "Hãy luôn đặt mình vào vị thế của người quan sát khách quan.", "Sự thấu đáo trong việc đánh giá rủi ro mang lại sự an toàn.", "Đừng để lòng tham làm lu mờ đi những chỉ báo kỹ thuật rõ.", "Hãy luôn giữ vững bản sắc riêng trong cách thức giao dịch.", "Sự kiên cường là vũ khí giúp bạn vượt qua mọi mùa downtrend.", "Hãy luôn duy trì một thái độ tích cực với mọi biến động giá.", "Sự thăng hoa của trí tuệ trong việc chinh phục các đỉnh cao.", "Hãy luôn trân quý những kiến thức mà thị trường đã dạy bạn.", "Chúc anh em luôn vững tay chèo trên con đường làm giàu này.",
@@ -98,24 +98,15 @@ const BANK = {
 let state = { isRunning: false, totalPosts: 0, lastPostTime: 0, postedSymbols: new Set(), logs: [] };
 
 function addLog(msg) {
-    const time = new Date().toLocaleString('vi-VN');
+    const time = new Date().toLocaleTimeString('vi-VN');
     state.logs.unshift(`[${time}] ${msg}`);
     if (state.logs.length > 50) state.logs.pop();
 }
 
-async function postToSquare(symbol, top10Symbols) {
+async function postToSquare(symbol, top10Symbols = []) {
     if (state.totalPosts >= 100) return false;
     const coin = symbol.replace('USDT', '');
-    const c1 = BANK.P1[Math.floor(Math.random() * 200)];
-    const c2 = BANK.P2[Math.floor(Math.random() * 200)];
-    const c3 = BANK.P3[Math.floor(Math.random() * 200)];
-    const c4 = BANK.P4[Math.floor(Math.random() * 200)];
-
-    const others = top10Symbols.filter(s => s !== symbol).sort(() => 0.5 - Math.random());
-    const tags = others.slice(0, 2).map(s => `#${s.replace('USDT', '')}`).join(' ');
-    const dollars = others.slice(0, 2).map(s => `$${s.replace('USDT', '')}`).join(' ');
-
-    const content = `$${coin}\n\n${c1}\n\n${c2}\n\n${c3}\n\n${c4}\n\n#${coin} ${tags}\n$${coin} ${dollars}`;
+    const content = `$${coin}\n\n${BANK.P1[Math.floor(Math.random() * 200)]}\n\n${BANK.P2[Math.floor(Math.random() * 200)]}\n\n${BANK.P3[Math.floor(Math.random() * 200)]}\n\n${BANK.P4[Math.floor(Math.random() * 200)]}\n\n#${coin}`;
 
     try {
         await axios.post("https://www.binance.com/bapi/composite/v1/public/pgc/openApi/content/add", {
@@ -141,35 +132,64 @@ async function runAutoPost() {
         const res = await axios.get('https://fapi.binance.com/fapi/v1/ticker/24hr');
         const sorted = res.data.filter(t => t.symbol.endsWith('USDT')).sort((a, b) => parseFloat(b.quoteVolume) - parseFloat(a.quoteVolume));
         const next = sorted.slice(0, 100).find(c => !state.postedSymbols.has(c.symbol));
-        if (next) await postToSquare(next.symbol, sorted.slice(0, 10).map(c => c.symbol));
+        if (next) await postToSquare(next.symbol);
     } catch (e) { addLog("❌ Lỗi quét: " + e.message); }
 }
 setInterval(runAutoPost, 10000);
 
 const app = express();
-app.get('/api/status', (req, res) => res.json(state));
+app.use(express.json());
+app.get('/api/status', (req, res) => res.json({ ...state, postedSymbols: Array.from(state.postedSymbols) }));
 app.get('/api/toggle', (req, res) => { state.isRunning = !state.isRunning; res.json({ s: state.isRunning }); });
+app.get('/api/test', async (req, res) => {
+    addLog("⚡ Đang gửi bài test...");
+    const ok = await postToSquare("BTCUSDT");
+    res.json({ success: ok });
+});
+
 app.get('/', (req, res) => {
-    res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><script src="https://cdn.tailwindcss.com"></script><style>@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@700&display=swap');body{background:#0b0e11;color:#eceff1;}.luffy{font-family:'Orbitron';}</style></head>
-    <body class="p-4 max-w-md mx-auto flex flex-col h-screen">
-        <div class="bg-[#1e2329] p-6 rounded-3xl border-b-4 border-yellow-500 mb-4 text-center shadow-2xl">
-            <h1 class="luffy text-2xl text-yellow-500 mb-4">LUFFY V5 FULL</h1>
-            <div class="text-6xl font-black text-white mb-2" id="st">0</div>
-            <div class="text-[10px] text-zinc-500 uppercase tracking-widest mb-6">Total Posts / 100</div>
-            <button onclick="fetch('/api/toggle')" id="btn" class="w-full py-4 rounded-2xl font-bold uppercase text-xs transition-all active:scale-95">---</button>
+    res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><script src="https://cdn.tailwindcss.com"></script><style>@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@700&display=swap');body{background:#0b0e11;color:#eceff1;}.luffy{font-family:'Orbitron';text-shadow: 0 0 10px #eab308;}.glow{box-shadow: 0 0 15px rgba(234,179,8,0.3);}</style></head>
+    <body class="p-3 max-w-lg mx-auto flex flex-col h-screen overflow-hidden">
+        <div class="bg-[#1e2329] p-4 rounded-3xl border-b-2 border-yellow-500 mb-3 text-center glow">
+            <h1 class="luffy text-lg text-yellow-500 mb-2">LUFFY V5 MOBILE</h1>
+            <div class="flex justify-around items-center bg-black/30 rounded-2xl py-3">
+                <div>
+                    <div class="text-3xl font-black text-white" id="st">0</div>
+                    <div class="text-[8px] text-zinc-500 uppercase tracking-widest">Total Posts</div>
+                </div>
+                <div>
+                    <div class="text-3xl font-black text-yellow-500" id="tm">--:--</div>
+                    <div class="text-[8px] text-zinc-500 uppercase tracking-widest">Next Post</div>
+                </div>
+            </div>
+            <div class="grid grid-cols-2 gap-2 mt-4">
+                <button onclick="fetch('/api/toggle')" id="btn" class="py-3 rounded-xl font-bold text-xs uppercase transition-all active:scale-95">---</button>
+                <button onclick="fetch('/api/test')" class="bg-blue-600 text-white py-3 rounded-xl font-bold text-xs uppercase active:scale-95">Test Post</button>
+            </div>
         </div>
-        <div id="lb" class="flex-1 bg-black/40 rounded-3xl p-4 text-[10px] font-mono overflow-y-auto border border-white/5 text-zinc-500"></div>
+        <div id="lb" class="flex-1 bg-black/40 rounded-2xl p-3 text-[9px] font-mono overflow-y-auto border border-white/5 text-zinc-400"></div>
         <script>
+            function updateTimer(lastTime) {
+                if (!lastTime) return "--:--";
+                const next = lastTime + (15 * 60000);
+                const diff = next - Date.now();
+                if (diff <= 0) return "READY";
+                const m = Math.floor(diff / 60000);
+                const s = Math.floor((diff % 60000) / 1000);
+                return \`\${m}:\${s < 10 ? '0' : ''}\${s}\`;
+            }
             async function refresh() {
                 const res = await fetch('/api/status'); const d = await res.json();
                 document.getElementById('st').innerText = d.totalPosts;
+                document.getElementById('tm').innerText = d.isRunning ? updateTimer(d.lastPostTime) : "OFF";
                 const btn = document.getElementById('btn');
                 btn.innerText = d.isRunning ? "STOP BOT" : "START BOT";
-                btn.className = d.isRunning ? "w-full bg-red-500 text-white py-4 rounded-2xl font-bold" : "w-full bg-yellow-500 text-black py-4 rounded-2xl font-bold";
-                document.getElementById('lb').innerHTML = d.logs.map(l => \`<div class="mb-2">\${l}</div>\`).join('');
+                btn.className = d.isRunning ? "bg-red-500/80 text-white py-3 rounded-xl font-bold" : "bg-yellow-500 text-black py-3 rounded-xl font-bold";
+                document.getElementById('lb').innerHTML = d.logs.map(l => \`<div class="mb-1 pb-1 border-b border-white/5">\${l}</div>\`).join('');
             }
-            setInterval(refresh, 2000);
+            setInterval(refresh, 1000);
         </script>
     </body></html>`);
 });
-app.listen(PORT, '0.0.0.0');
+
+app.listen(PORT, '0.0.0.0', () => console.log(`Bot Running on Port ${PORT}`));
