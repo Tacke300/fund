@@ -6,11 +6,12 @@ import axios from 'axios';
 import cron from 'node-cron';
 
 const PORT = 8888;
-const SQUAD_API_KEY = "YOUR_SQUAD_API_KEY"; 
+const SQUAD_API_KEY = "8d794c11cc794c958c2c65924c54f2dd"; 
 
 const SETTINGS = {
     SQUARE_URL: "https://www.binance.com/bapi/composite/v1/public/pgc/openApi/content/add",
-    LIMIT_VOLATILITY: 7, 
+    VOL_LIMIT: 7.0,   
+    DAY_LIMIT: 10.0,  
     MAX_POSTS_PER_DAY: 100,
     MIN_GAP: 60000,        
     VOL_INTERVAL: 15 * 60000 
@@ -230,6 +231,7 @@ const BANK = {
 let state = {
     isRunning: false,
     postsToday: 0,
+    stats: { m1: 0, m5: 0, day: 0, vol: 0 },
     lastPostTime: 0,
     lastVolPost: 0,
     postedSymbols: new Set(),
@@ -243,105 +245,167 @@ const addLog = (m) => {
     if (state.logs.length > 50) state.logs.pop();
 };
 
-async function post(symbol, reason) {
-    if (!state.isRunning || state.postsToday >= SETTINGS.MAX_POSTS_PER_DAY) return;
+addLog("🚀 HỆ THỐNG KHỞI ĐỘNG. Đang ở chế độ CHỜ. Vui lòng nhấn START để chạy.");
+
+async function post(symbol, reason, typeKey) {
+    if (!state.isRunning) return;
+    if (state.postsToday >= SETTINGS.MAX_POSTS_PER_DAY) {
+        addLog(`⚠️ Đã chạm mốc ${SETTINGS.MAX_POSTS_PER_DAY} bài/ngày. Hệ thống tạm dừng đăng.`);
+        return;
+    }
     if (state.postedSymbols.has(symbol)) return;
 
     const now = Date.now();
-    if (now - state.lastPostTime < SETTINGS.MIN_GAP) return;
+    if (now - state.lastPostTime < SETTINGS.MIN_GAP) {
+        addLog(`⏳ Đang đợi giãn cách bài đăng cho ${symbol}...`);
+        return;
+    }
 
-    const p1 = BANK.P1[Math.floor(Math.random() * 50)];
-    const p2 = BANK.P2[Math.floor(Math.random() * 50)];
-    const p3 = BANK.P3[Math.floor(Math.random() * 50)];
-    const p4 = BANK.P4[Math.floor(Math.random() * 50)];
+    addLog(`📢 Đang xử lý đăng bài cho ${symbol} (Loại: ${reason})...`);
 
-    const content = `🔥 [${reason}] PHÂN TÍCH CHIẾN LƯỢC: #${symbol}\n\n${p1}\n\n${p2}\n\n${p3}\n\n${p4}\n\n#${symbol} $${symbol}`;
+    const content = `${BANK.P1[Math.floor(Math.random() * 50)]}\n\n${BANK.P2[Math.floor(Math.random() * 50)]}\n\n${BANK.P3[Math.floor(Math.random() * 50)]}\n\n${BANK.P4[Math.floor(Math.random() * 50)]}\n\n#${symbol} $${symbol}`;
 
     try {
         await axios.post(SETTINGS.SQUARE_URL, { bodyTextOnly: content }, {
             headers: { "X-Square-OpenAPI-Key": SQUAD_API_KEY, "Content-Type": "application/json" }
         });
+        
         state.postsToday++;
+        state.stats[typeKey]++;
         state.lastPostTime = now;
         state.postedSymbols.add(symbol);
-        if (reason === "TOP VOLUME") state.lastVolPost = now;
-        addLog(`✅ [${state.postsToday}/100] Đã đăng: ${symbol}`);
-    } catch (e) { addLog(`❌ API Error: ${e.message}`); }
+        if (typeKey === 'vol') state.lastVolPost = now;
+        
+        addLog(`✅ THÀNH CÔNG: Đã đăng ${symbol}. Tổng bài: ${state.postsToday}. Chờ tín hiệu tiếp theo...`);
+    } catch (e) { 
+        addLog(`❌ THẤT BẠI: Lỗi API khi đăng ${symbol}: ${e.response?.data?.message || e.message}`); 
+    }
 }
 
 function initWS() {
+    addLog("🌐 Đang kết nối luồng dữ liệu WebSocket Binance...");
     const ws = new WebSocket('wss://fstream.binance.com/ws/!miniTicker@arr');
     ws.on('message', (msg) => {
         const tickers = JSON.parse(msg);
         const now = Date.now();
         tickers.forEach(t => {
             if (!t.s.endsWith('USDT')) return;
-            if (!state.marketData[t.s]) state.marketData[t.s] = { history: [] };
+            if (!state.marketData[t.s]) state.marketData[t.s] = { history: [], d1: 0 };
             let d = state.marketData[t.s];
             d.history.push({ p: parseFloat(t.c), t: now });
-            if (d.history.length > 800) d.history.shift();
+            if (d.history.length > 900) d.history.shift();
+
             const getChg = (min) => {
                 let old = d.history.find(i => i.t >= (now - min * 60000)) || d.history[0];
                 return ((parseFloat(t.c) - old.p) / old.p * 100);
             };
-            d.m1 = getChg(1); d.m5 = getChg(5);
-            if (state.isRunning && Math.abs(d.m1) >= SETTINGS.LIMIT_VOLATILITY) post(t.s, "BIẾN ĐỘNG");
+
+            d.m1 = getChg(1);
+            d.m5 = getChg(5);
+
+            if (state.isRunning) {
+                if (Math.abs(d.m1) >= SETTINGS.VOL_LIMIT) post(t.s, `M1 Change ${d.m1.toFixed(2)}%`, 'm1');
+                else if (Math.abs(d.m5) >= SETTINGS.VOL_LIMIT) post(t.s, `M5 Change ${d.m5.toFixed(2)}%`, 'm5');
+            }
         });
     });
-    ws.on('close', () => setTimeout(initWS, 3000));
+    ws.on('close', () => { addLog("🔴 WebSocket đóng. Đang tái kết nối..."); setTimeout(initWS, 3000); });
 }
 
 setInterval(async () => {
     if (!state.isRunning) return;
-    const now = Date.now();
+    addLog("🔍 Bot đang quét dữ liệu thị trường 24h và Volume...");
     try {
-        const res = await fetch('https://fapi.binance.com/fapi/v1/ticker/24hr', { headers: { 'X-MBX-APIKEY': API_KEY } });
+        const res = await fetch('https://fapi.binance.com/fapi/v1/ticker/24hr');
         const data = await res.json();
         data.forEach(i => { if(state.marketData[i.symbol]) state.marketData[i.symbol].d1 = i.priceChangePercent; });
-        const gainer = data.sort((a,b) => Math.abs(b.priceChangePercent) - Math.abs(a.priceChangePercent))[0];
-        if (gainer && Math.abs(gainer.priceChangePercent) >= 10) await post(gainer.symbol, "BIÊN ĐỘ CAO");
+        
+        const now = Date.now();
+        const topDay = data.sort((a,b) => Math.abs(b.priceChangePercent) - Math.abs(a.priceChangePercent))[0];
+        if (topDay && Math.abs(topDay.priceChangePercent) >= SETTINGS.DAY_LIMIT) {
+            await post(topDay.symbol, `Day Change ${topDay.priceChangePercent}%`, 'day');
+        }
+
         if (now - state.lastVolPost >= SETTINGS.VOL_INTERVAL) {
             const topVol = data.sort((a,b) => b.quoteVolume - a.quoteVolume).find(i => !state.postedSymbols.has(i.symbol));
-            if (topVol) await post(topVol.symbol, "TOP VOLUME");
+            if (topVol) await post(topVol.symbol, "Top Volume Market", 'vol');
         }
-    } catch (e) {}
-}, 60000);
+    } catch (e) { addLog(`❌ Lỗi hệ thống quét sàn: ${e.message}`); }
+}, 30000);
 
 cron.schedule('0 0 0 * * *', () => { 
     state.postsToday = 0; 
+    state.stats = { m1: 0, m5: 0, day: 0, vol: 0 };
     state.postedSymbols.clear(); 
-    addLog("🔄 RESET 00:00 - LÀM MỚI DANH SÁCH COIN."); 
+    addLog("📅 RESET NGÀY MỚI 00:00. Làm mới bộ đếm."); 
 });
 
 const app = express();
 app.get('/api/status', (req, res) => {
     const table = Object.entries(state.marketData).sort((a,b) => Math.abs(b[1].d1||0) - Math.abs(a[1].d1||0)).slice(0, 15);
-    res.json({ ...state, postedCount: state.postedSymbols.size, table });
+    res.json({ ...state, table });
 });
-app.get('/api/toggle', (req, res) => { state.isRunning = !state.isRunning; res.json({ s: state.isRunning }); });
+app.get('/api/toggle', (req, res) => { 
+    state.isRunning = !state.isRunning; 
+    if(state.isRunning) {
+        addLog("▶️ BẮT ĐẦU CHẠY: Bot đã kích hoạt và đang tìm tín hiệu...");
+    } else {
+        addLog("⏸️ TẠM DỪNG: Bot đã dừng mọi hoạt động quét và đăng bài.");
+    }
+    res.json({ s: state.isRunning }); 
+});
+
 app.get('/', (req, res) => {
-    res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><script src="https://cdn.tailwindcss.com"></script></head><body class="bg-[#0b0e11] text-white p-6 font-mono">
-        <div class="max-w-5xl mx-auto">
-            <div class="bg-[#1e2329] p-6 rounded-2xl flex justify-between items-center mb-6 border-l-8 border-yellow-500">
-                <div><h1 class="text-3xl font-black italic uppercase">LUFFY PRO <span class="text-yellow-500">SQUAD</span></h1><p class="text-xs text-zinc-500">Reset 00:00 | 200 Analysis Lines | Max 100 Post/Day</p></div>
-                <button onclick="fetch('/api/toggle')" class="bg-yellow-500 text-black px-10 py-4 rounded-xl font-black hover:bg-yellow-400 transition">POWER</button>
+    res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><script src="https://cdn.tailwindcss.com"></script><style>@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;900&display=swap'); .font-neon { font-family: 'Orbitron', sans-serif; }</style></head><body class="bg-[#0b0e11] text-white p-3 font-sans">
+        <div class="max-w-md mx-auto">
+            <div class="bg-[#1e2329] p-5 rounded-2xl mb-4 border-b-4 border-yellow-500 shadow-2xl">
+                <h1 class="text-2xl font-black font-neon italic text-yellow-500 tracking-tighter">LUFFY PRO V2</h1>
+                <div class="grid grid-cols-4 gap-2 mt-4 text-center">
+                    <div class="bg-black/40 p-2 rounded-lg border border-zinc-800"><div class="text-[9px] text-zinc-500">M1</div><div id="sm1" class="text-sm font-bold text-red-400">0</div></div>
+                    <div class="bg-black/40 p-2 rounded-lg border border-zinc-800"><div class="text-[9px] text-zinc-500">M5</div><div id="sm5" class="text-sm font-bold text-orange-400">0</div></div>
+                    <div class="bg-black/40 p-2 rounded-lg border border-zinc-800"><div class="text-[9px] text-zinc-500">Day</div><div id="sday" class="text-sm font-bold text-yellow-500">0</div></div>
+                    <div class="bg-black/40 p-2 rounded-lg border border-zinc-800"><div class="text-[9px] text-zinc-500">Vol</div><div id="svol" class="text-sm font-bold text-blue-400">0</div></div>
+                </div>
+                <div class="flex justify-between items-center mt-4 pt-4 border-t border-zinc-800">
+                    <div class="text-xs font-black">TOTAL: <span id="total" class="text-green-500 text-lg">0</span>/100</div>
+                    <button onclick="toggleBot()" id="btnPower" class="px-10 py-3 rounded-xl font-black bg-yellow-500 text-black shadow-[0_0_15px_rgba(234,179,8,0.4)]">START</button>
+                </div>
             </div>
-            <div class="grid grid-cols-3 gap-6">
-                <div class="col-span-2 bg-[#1e2329] p-5 rounded-2xl h-[500px] overflow-auto border border-zinc-800"><table class="w-full text-xs text-left"><thead class="text-zinc-500 border-b border-zinc-800"><tr><th class="pb-3">COIN</th><th class="pb-3 text-right">M1 (%)</th><th class="pb-3 text-right">24H (%)</th></tr></thead><tbody id="tb"></tbody></table></div>
-                <div class="bg-black p-5 rounded-2xl border border-zinc-800 h-[500px] overflow-y-auto text-[10px] text-green-400" id="lb"></div>
+            <div class="bg-[#1e2329] p-4 rounded-2xl mb-4 border border-zinc-800 shadow-lg">
+                <table class="w-full text-[11px] text-left">
+                    <thead class="text-zinc-600 font-bold uppercase italic"><tr><th class="pb-2">Coin</th><th class="pb-2 text-right">M1</th><th class="pb-2 text-right">M5</th><th class="pb-2 text-right text-yellow-500">24H</th></tr></thead>
+                    <tbody id="tb"></tbody>
+                </table>
             </div>
+            <div class="bg-black p-4 rounded-2xl border border-zinc-800 h-[280px] overflow-y-auto text-[10px] text-green-400 font-mono shadow-inner leading-relaxed" id="lb"></div>
         </div>
         <script>
-            async function refresh() {
-                const res = await fetch('/api/status'); const d = await res.json();
-                document.getElementById('lb').innerHTML = d.logs.map(l => \`<div>\${l}</div>\`).join('');
-                document.getElementById('tb').innerHTML = d.table.map(([s, v]) => \`
-                    <tr class="border-b border-zinc-900"><td class="py-3 font-bold">\${s}</td>
-                    <td class="text-right \${v.m1 >=0 ? 'text-green-500':'text-red-500'}">\${(v.m1||0).toFixed(2)}%</td>
-                    <td class="text-right text-yellow-500">\${(parseFloat(v.d1)||0).toFixed(2)}%</td></tr>\`).join('');
+            async function toggleBot() { const res = await fetch('/api/toggle'); const d = await res.json(); updateBtn(d.s); }
+            function updateBtn(r) {
+                const b = document.getElementById('btnPower');
+                b.innerText = r ? "STOP BOT" : "START BOT";
+                b.className = r ? "px-10 py-3 rounded-xl font-black bg-zinc-800 text-red-500 border border-red-500/30" : "px-10 py-3 rounded-xl font-black bg-yellow-500 text-black";
             }
-            setInterval(refresh, 2000);
+            async function refresh() {
+                try {
+                    const res = await fetch('/api/status'); const d = await res.json();
+                    document.getElementById('total').innerText = d.postsToday;
+                    document.getElementById('sm1').innerText = d.stats.m1;
+                    document.getElementById('sm5').innerText = d.stats.m5;
+                    document.getElementById('sday').innerText = d.stats.day;
+                    document.getElementById('svol').innerText = d.stats.vol;
+                    updateBtn(d.isRunning);
+                    document.getElementById('lb').innerHTML = d.logs.map(l => \`<div class="mb-1 border-b border-zinc-900 pb-1">\${l}</div>\`).join('');
+                    document.getElementById('tb').innerHTML = d.table.map(([s, v]) => \`
+                        <tr class="border-b border-zinc-900/50"><td class="py-2 font-bold text-zinc-300">\${s.replace('USDT','')}</td>
+                        <td class="text-right \${Math.abs(v.m1)>=7 ? 'text-red-500 font-black animate-pulse':'text-zinc-500'}">\${(v.m1||0).toFixed(2)}%</td>
+                        <td class="text-right \${Math.abs(v.m5)>=7 ? 'text-orange-500 font-black':'text-zinc-500'}">\${(v.m5||0).toFixed(2)}%</td>
+                        <td class="text-right text-yellow-500 font-bold">\${(parseFloat(v.d1)||0).toFixed(2)}%</td></tr>\`).join('');
+                } catch(e) {}
+            }
+            setInterval(refresh, 2500); refresh();
         </script>
     </body></html>`);
 });
-app.listen(PORT, '0.0.0.0', () => { initWS(); console.log('Luffy Ready!'); });
+
+app.listen(PORT, '0.0.0.0', () => { initWS(); console.log('Luffy Server Started'); });
