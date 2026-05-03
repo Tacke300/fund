@@ -146,7 +146,7 @@ async function postToSquare(symbol) {
 
 async function runAutoPost() {
     if (!state.isRunning || state.totalPosts >= 100) return;
-    if (Date.now() - state.lastPostTime < 15 * 60000) return;
+    if (Date.now() - state.lastPostTime < 10 * 60000) return;
     try {
         const res = await axios.get('https://fapi.binance.com/fapi/v1/ticker/24hr');
         const sorted = res.data.filter(t => t.symbol.endsWith('USDT')).sort((a, b) => parseFloat(b.quoteVolume) - parseFloat(a.quoteVolume));
