@@ -25,51 +25,213 @@ const SETTINGS = {
 
 const BANK = {
     P1: [
-        "🔥 Dòng tiền thông minh đang đổ mạnh vào hệ sinh thái này.", "🐳 Dữ liệu on-chain cho thấy cá voi đang gom hàng.", "💎 Áp lực bán đã cạn kiệt tại vùng hỗ trợ tâm lý.", "📊 Sự gia tăng đột biến về khối lượng giao dịch ngắn hạn.", "🔎 Các địa chỉ ví lớn đang có dấu hiệu tích lũy âm thầm.", "📰 Thị trường đang phản ứng tích cực với tin vĩ mô.", "⚡ Lực mua chủ động đang áp đảo hoàn toàn trên bảng điện.", "📈 Chỉ số tâm lý thị trường đang chuyển sang hưng phấn.", "🏛️ Sự bứt phá này mang đậm dấu ấn của các quỹ lớn.", "🚀 Nhu cầu sở hữu đang tăng cao bất chấp biến động chung.",
-        "💰 Cấu trúc dòng tiền đang tập trung vào nhóm dẫn dắt này.", "🌍 Dòng vốn ngoại đang quay trở lại vị thế mua ròng.", "🛒 Các lệnh mua lớn liên tục xuất hiện trên sổ lệnh.", "⏳ Sự khan hiếm nguồn cung tạm thời đang đẩy giá đi lên.", "💸 Dòng tiền đầu cơ bắt đầu chuyển dịch sang khu vực này.", "✅ Tín hiệu dòng tiền xác nhận sự tham gia của tổ chức.", "💪 Sức mạnh tương đối so với phần còn lại đang rất tốt.", "🛡️ Dòng vốn đang tìm nơi trú ẩn tại các mã tiềm năng.", "🌋 Thanh khoản tăng vọt đi kèm với sự bứt phá về giá.", "🤝 Sự đồng thuận của dòng tiền đang ở mức cao nhất.",
-        "🧲 Lực cầu tiềm năng đang chờ đợi tại các vùng giá thấp.", "🏗️ Các tay chơi lớn đang thiết lập vị thế dài hạn mới.", "🌀 Dòng tiền xoay vòng đã tìm đến điểm dừng chân này.", "🏎️ Tốc độ khớp lệnh mua đang nhanh hơn rõ rệt.", "🔄 Sự dịch chuyển của dòng vốn từ các nhóm ngành khác.", "🌟 Tín hiệu tích cực từ hành động giá của nhóm dẫn dắt.", "🚧 Dòng tiền lớn đã vượt qua các ngưỡng kháng cự tâm lý.", "💥 Khối lượng giao dịch bùng nổ xác nhận xu hướng mới.", "🛌 Dòng tiền nhàn rỗi đang quay trở lại thị trường.", "🎯 Sự tập trung của dòng vốn vào các tài sản chất lượng.",
-        "⚓ Cấu trúc dòng vốn đang trở nên bền vững hơn bao giờ hết.", "🥊 Lực mua tại các vùng hỗ trợ đang rất quyết liệt.", "🔭 Dòng tiền đang kỳ vọng vào một nhịp tăng trưởng dài.", "📈 Sự gia tăng vị thế mua từ các nhà đầu tư chuyên nghiệp.", "🧠 Dòng vốn thông minh đang đi trước một bước.", "🎲 Tín hiệu từ thị trường phái sinh đang hỗ trợ dòng tiền.", "🌈 Dòng tiền đang lan tỏa đều khắp các nhóm vốn hóa lớn.", "🧘 Sự ổn định của dòng vốn trong các nhịp điều chỉnh.", "🚩 Dòng tiền đang nhắm tới các mục tiêu trung hạn mới.", "🧽 Khả năng hấp thụ lực bán của dòng tiền đang rất tốt.",
-        "🧗 Sự kiên trì của dòng vốn tại các vùng giá quan trọng.", "🧱 Dòng tiền đang tạo ra những nền tảng giá vững chắc.", "🔥 Sức nóng từ dòng tiền đang lan tỏa sang các mã lân cận.", "🥇 Sự ưu tiên của dòng vốn dành cho các mã có nền tảng tốt.", "⛏️ Dòng tiền đang khai thác các cơ hội bị định giá thấp.", "📷 Tín hiệu gom hàng rõ nét từ biểu đồ khối lượng.", "🔙 Dòng tiền đang quay trở lại sau thời gian quan sát.", "🦁 Sự tự tin của dòng tiền đang được củng cố mạnh mẽ.", "🧬 Cơ cấu dòng vốn đang hướng tới sự tăng trưởng đột phá.", "📍 Dòng tiền đang tạo ra những cột mốc thanh khoản mới.",
-        "🔔 Lực cầu đang tăng dần theo thời gian giao dịch.", "🏠 Sự hỗ trợ mạnh mẽ từ dòng tiền nội khối.", "🔨 Dòng tiền đang tìm cách phá vỡ các rào cản kỹ thuật.", "🔉 Sự gia tăng khối lượng giao dịch một cách có chủ đích.", "⏲️ Dòng tiền đang chờ đợi những tín hiệu bùng nổ tiếp theo.", "👑 Sự dẫn dắt của dòng tiền tại các mã đầu ngành.", "🎋 Dòng tiền đang tạo ra một xu hướng tăng trưởng mới.", "🔋 Sức mua đang được duy trì ở mức cao và ổn định.", "🪄 Dòng tiền đang thể hiện ý chí đẩy giá rất rõ ràng.", "🌊 Sự lan tỏa của dòng tiền vào các nhóm chưa tăng giá.",
-        "☄️ Dòng tiền đang tạo ra sự đột phá từ các mô hình tích lũy.", "🐜 Lực mua đang len lỏi vào từng lệnh giao dịch nhỏ.", "🎖️ Dòng tiền đang khẳng định vị thế dẫn dắt thị trường.", "🎢 Sự quay lại của dòng vốn sau nhịp rũ bỏ mạnh mẽ.", "⚖️ Dòng tiền đang tìm kiếm sự cân bằng tại vùng giá cao.", "🛡️ Sự ổn định của dòng vốn trong bối cảnh vĩ mô mới.", "🎰 Dòng tiền đang đặt cược vào kịch bản tăng trưởng mạnh.", "🛸 Sự dịch chuyển thông minh giữa các lớp tài sản.", "⚡ Dòng tiền đang tạo ra những cú hích quan trọng.", "🏹 Lực cầu đang chờ đợi sự xác nhận từ các khung giờ lớn.",
-        "📚 Dòng tiền đang tập trung vào các mã có câu chuyện riêng.", "💎 Sự tăng trưởng thanh khoản đi kèm với chất lượng dòng vốn.", "🎮 Dòng tiền đang kiểm soát hoàn toàn diễn biến giá.", "🔓 Sự bứt phá của dòng tiền khỏi vùng trung lập.", "🏔️ Dòng tiền đang hướng tới các đỉnh cao mới của năm.", "🧹 Lực mua chủ động đang quét sạch các lệnh bán treo.", "🏃 Dòng tiền đang thể hiện sự bền bỉ trong từng nhịp tăng.", "📣 Sự hưng phấn của dòng tiền đang lan rộng toàn sàn.", "💡 Dòng tiền đang tìm thấy động lực tăng trưởng mới.", "🐣 Sự đột phá về khối lượng từ các vùng giá đáy.",
-        "🪜 Dòng tiền đang xác lập một nền tảng giá cao hơn.", "🏋️ Sức mạnh của dòng tiền đang được thử thách và khẳng định.", "📉 Dòng tiền đang tận dụng các nhịp giảm để gia tăng vị thế.", "🤝 Sự nhất quán của dòng vốn trong các quyết định mua.", "🌅 Dòng tiền đang mở ra những triển vọng tươi sáng.", "🌋 Lực cầu đang bùng nổ tại các điểm xoay chiều.", "🎨 Dòng tiền đang định hình lại xu hướng của thị trường.", "💂 Sự trỗi dậy mạnh mẽ của dòng tiền từ các quỹ chỉ số.", "🌗 Dòng tiền đang tạo ra sự khác biệt lớn về hiệu suất.", "⭐ Sự tập trung dòng vốn vào các mã có dòng tiền tốt.",
-        "🧨 Dòng tiền đang tạo đà cho một cú breakout lịch sử.", "🌇 Lực mua đang gia tăng mạnh mẽ vào cuối phiên.", "🌃 Dòng tiền đang duy trì sự hưng phấn cho đến khi đóng cửa.", "🏅 Sự xuất sắc của dòng tiền trong việc giữ nhịp thị trường.", "🎁 Dòng tiền đang tạo ra những cơ hội vàng cho người nắm giữ.", "🔥 Sự quyết đoán của dòng vốn trong việc đẩy giá bứt phá.", "🌠 Dòng tiền lớn đang tìm cách phá vỡ các kỷ lục cũ.", "🧩 Sự phối hợp của các dòng vốn đang rất nhịp nhàng.", "🔗 Mối liên kết giữa dòng tiền và giá đang rất chặt chẽ.", "🥇 Dẫn đầu xu hướng với sự hậu thuẫn của dòng tiền cực lớn."
+        "🔥 Dòng tiền thông minh đang đổ mạnh vào hệ sinh thái này.", "🐳 Dữ liệu on-chain cho thấy cá voi đang gom hàng.",
+        "🚀 Một đợt bùng nổ khối lượng giao dịch vừa được ghi nhận.", "📊 Chỉ số tích lũy đang ở mức cao nhất trong nhiều tuần.",
+        "⚡ Tín hiệu dòng tiền đang tập trung vào nhóm dẫn dắt thị trường.", "💎 Đây là thời điểm vàng để quan sát các vị thế tiềm năng.",
+        "📈 Xu hướng tăng trưởng dài hạn đang được củng cố vững chắc.", "🌟 Một dự án tiềm năng đang nhận được sự chú ý đặc biệt.",
+        "🔍 Phân tích dòng tiền cho thấy áp lực mua đang áp đảo.", "💡 Cơ hội đang mở ra cho những ai nắm bắt được xu hướng.",
+        "🔥 Sức nóng của thị trường đang tập trung vào khu vực này.", "🦾 Lực mua chủ động tăng vọt tại các vùng hỗ trợ quan trọng.",
+        "📡 Hệ thống cảnh báo sớm vừa kích hoạt tín hiệu gom hàng.", "🏦 Các tổ chức lớn dường như đang bắt đầu giải ngân.",
+        "💸 Khối lượng giao dịch đột biến so với trung bình 24 giờ.", "🛰️ Quỹ đạo giá đang di chuyển vào vùng tích lũy tích cực.",
+        "🔋 Năng lượng tăng trưởng đang được nạp đầy cho chu kỳ tới.", "🧩 Các mảnh ghép của một đợt tăng giá đang dần hoàn thiện.",
+        "🥇 Top những đồng coin dẫn đầu về tỉ lệ thu hút vốn.", "🎯 Mục tiêu tăng trưởng đang được các trader chuyên nghiệp hướng tới.",
+        "🕯️ Nến ngày đóng đẹp cho thấy tâm lý lạc quan đang quay lại.", "🎢 Bất chấp biến động, dòng tiền vẫn giữ vững vị thế.",
+        "⚔️ Cuộc chiến giữa phe bò và phe gấu đang dần ngã ngũ.", "🛡️ Vùng hỗ trợ cứng đã được kiểm chứng thành công.",
+        "🔭 Tầm nhìn trung hạn đang mở rộng với nhiều triển vọng.", "🌈 Thị trường đang chuyển mình sang giai đoạn khởi sắc.",
+        "📢 Tin tức tích cực đang hỗ trợ mạnh cho đà tăng giá.", "🔔 Chuông báo động cho một đợt sóng mới đã vang lên.",
+        "🧱 Nền tảng giá vững chắc đang được xây dựng rất bài bản.", "🏗️ Quá trình tích lũy đã diễn ra đủ lâu để bứt phá.",
+        "🏎️ Tốc độ giao dịch đang được đẩy lên mức cực cao.", "🔋 Pin của phe mua đang cực khỏe ở thời điểm hiện tại.",
+        "⛈️ Sau cơn mưa trời lại sáng, cơ hội đang trở lại.", "⚓ Neo đậu tại vùng giá thấp, phe mua bắt đầu hành động.",
+        "🧠 Tư duy cá mập đang dẫn dắt cuộc chơi này.", "👣 Theo dấu chân người khổng lồ để tìm kiếm lợi nhuận.",
+        "🧪 Công thức thành công đang nằm ở việc theo sát dòng tiền.", "🧬 Mã gen của một siêu phẩm đang dần lộ diện.",
+        "🌋 Núi lửa dòng tiền chuẩn bị phun trào mạnh mẽ.", "🌌 Một bầu trời cơ hội đang mở rộng trước mắt chúng ta.",
+        "🧭 Kim chỉ nam cho giao dịch hôm nay chính là đây.", "🗝️ Chìa khóa mở ra cánh cửa lợi nhuận đã xuất hiện.",
+        "🪄 Phép màu của lãi suất kép bắt đầu từ những cơ hội này.", "🛸 Phi thuyền tăng trưởng đã sẵn sàng rời bệ phóng.",
+        "🌊 Làn sóng mua vào đang lan tỏa khắp thị trường.", "🌋 Sức ép tăng giá đang tích tụ dưới lòng đất.",
+        "🦾 Sự kiên cường của phe mua đang mang lại thành quả.", "🎨 Bức tranh thị trường đang được tô điểm bởi sắc xanh.",
+        "🎼 Bản giao hưởng tăng giá đang bắt đầu những nốt đầu tiên.", "🎭 Mặt nạ của phe bán đã bị gỡ bỏ, phe mua làm chủ.",
+        "🔮 Tương lai của đợt sóng này đang rất rộng mở.", "🧿 Tầm nhìn xuyên thấu thị trường giúp ta thấy rõ cơ hội.",
+        "🧿 Sự hội tụ của các chỉ báo đang ủng hộ phe tăng.", "🕯️ Thắp sáng hy vọng với những tín hiệu tích cực nhất.",
+        "🛠️ Công cụ phân tích đang chỉ về hướng tăng trưởng.", "🧪 Phản ứng hóa học giữa cung và cầu đang tạo ra đột phá.",
+        "🧬 Cấu trúc thị trường đang thay đổi theo hướng tích cực.", "📈 Biểu đồ đang vẽ nên một câu chuyện đầy hứa hẹn.",
+        "📉 Kháng cự cũ đang dần trở thành hỗ trợ mới.", "🚩 Lá cờ chiến thắng đang vẫy gọi phe mua.",
+        "🏰 Lâu đài giá đang được xây dựng trên nền móng tốt.", "⛲ Nguồn vốn đang chảy vào như suối nguồn không tận.",
+        "💎 Viên kim cương thô này đang chờ ngày tỏa sáng.", "🪵 Củi đã sẵn, chỉ chờ mồi lửa của dòng tiền lớn.",
+        "🌬️ Làn gió mới đang thổi bùng ngọn lửa thị trường.", "🚜 Sự lầm lũi của phe gom hàng sẽ sớm được đền đáp.",
+        "🚲 Khởi động chậm nhưng sẽ tăng tốc rất nhanh.", "🚆 Con tàu cao tốc lợi nhuận đang vào ga đón khách.",
+        "🚁 Góc nhìn từ trên cao cho thấy toàn cảnh đà tăng.", "🛰️ Kết nối với những tín hiệu mạnh mẽ nhất từ sàn.",
+        "📱 Thông báo về một đợt sóng lớn đang được gửi đi.", "💻 Thuật toán đang ưu tiên các vị thế mua vào.",
+        "🧬 Hệ sinh thái đang phát triển cực kỳ mạnh mẽ.", "🍀 Sự may mắn luôn đến với người chuẩn bị kỹ càng.",
+        "🌠 Một ngôi sao mới đang trỗi dậy trên bảng điện tử.", "🌅 Bình minh của một chu kỳ mới đang bắt đầu.",
+        "🏙️ Thành phố giá đang nhộn nhịp trở lại sau kỳ nghỉ.", "🏖️ Tận hưởng cảm giác chiến thắng cùng thị trường.",
+        "🎆 Pháo hoa lợi nhuận chuẩn bị thắp sáng màn đêm.", "🧨 Mồi lửa đã cháy, chuẩn bị cho cú nổ lớn.",
+        "📦 Hàng hóa đang được đóng gói chuẩn bị vận chuyển.", "🚛 Những lô hàng lớn đang được di chuyển về ví cá voi.",
+        "🏢 Tòa nhà lợi nhuận đang được xây thêm tầng mới.", "🏟️ Sân vận động giao dịch đang nóng hơn bao giờ hết.",
+        "🏛️ Giá trị cốt lõi đang được thị trường định giá lại.", "🛖 Sự đơn giản trong chiến lược mang lại hiệu quả cao.",
+        "⛰️ Đỉnh cao mới đang chờ đợi chúng ta chinh phục.", "🌋 Sức mạnh nội tại của dự án là không thể phủ nhận.",
+        "🕹️ Cuộc chơi đang nằm trong tầm kiểm soát của chúng ta.", "🎮 Game này phe mua đang nắm lợi thế tuyệt đối.",
+        "🎲 Xúc xắc đã đổ, và phần thắng nghiêng về phe bò.", "🃏 Lá bài tẩy của thị trường vừa mới được lật lên.",
+        "🎈 Bong bóng nỗi sợ đã vỡ, nhường chỗ cho sự tự tin.", "🪄 Mọi thứ đang diễn ra đúng như kịch bản dự tính.",
+        "🧘 Bình thản trước biến động để gặt hái thành công.", "🥇 Vị thế dẫn đầu đang được khẳng định mạnh mẽ.",
+        "🥈 Sự bám đuổi quyết liệt tạo nên động lực tăng.", "🥉 Nền tảng vững chắc từ vị trí thấp nhất.",
+        "🏁 Về đích với lợi nhuận tối ưu là mục tiêu cuối.", "🚩 Lá cờ dẫn đầu đang thuộc về nhóm ngành này."
     ],
     P2: [
-        "📐 Về kỹ thuật giá đã bứt phá khỏi kênh giảm giá.", "🪄 Đường EMA đang thực hiện cú cắt vàng báo hiệu tăng.", "🌊 RSI đang tiến vào vùng mạnh mẽ nhưng chưa quá mua.", "🕯️ Mô hình nến nhấn chìm đã xác nhận xu hướng tăng.", "🎈 Bollinger Band mở rộng cho thấy biến động lớn.", "🛤️ Giá đang nằm trên các đường MA quan trọng.", "🧱 Kháng cự cũ đã trở thành hỗ trợ mới vững chắc.", "🏹 Phân kỳ dương H1 hỗ trợ đà tăng bền vững.", "🏔️ Cấu trúc đỉnh sau cao hơn đỉnh trước duy trì.", "☁️ Ichimoku cho thấy mây xanh nâng đỡ rất tốt.",
-        "🔓 Giá đã vượt qua vùng mây Kumo dày đặc.", "📉 MACD đã chính thức giao cắt lên trên đường tín hiệu.", "💥 Khối lượng xác nhận cú bứt phá khỏi vùng tích lũy.", "☕ Mô hình cốc tay cầm đang dần hoàn thiện.", "🔭 Giá đang test lại vùng đỉnh cũ với lực cầu tốt.", "🛡️ Vùng hỗ trợ tâm lý đang được bảo vệ nghiêm ngặt.", "🔄 Stochastic đang quay trở lại vùng tăng trưởng.", "🌊 Cấu trúc sóng Elliott đang đi vào sóng 3 đẩy.", "🌅 Giá đã thoát khỏi vùng quá bán trên khung D1.", "🧬 Sự hội tụ của các chỉ báo kỹ thuật quan trọng.",
-        "🔺 Mô hình tam giác tăng đã bị phá vỡ hướng lên.", "🛤️ Giá đang duy trì trên đường trendline tăng dài hạn.", "🌬️ Cú điều chỉnh vừa qua chỉ là nhịp retest kỹ thuật.", "🍃 Áp lực bán suy giảm rõ rệt trên biểu đồ nến.", "🧱 Sự bùng nổ từ mô hình nền giá phẳng dài ngày.", "💎 Tín hiệu đảo chiều mạnh mẽ từ vùng hỗ trợ cứng.", "🗼 Dải lăng trụ đang hướng lên cho thấy lực cầu mạnh.", "📏 Giá đang chinh phục các mốc Fibonacci quan trọng.", "⚡ ADX cho thấy xu hướng đang mạnh dần lên.", "🤝 Sự đồng thuận tuyệt vời giữa giá và khối lượng.",
-        "🚩 Mô hình cờ tăng đang tích lũy tại vùng giá cao.", "🎯 Giá đã phá vỡ ngưỡng cản Fib 0.618 thần thánh.", "🧨 Tín hiệu Breakout đi kèm với volume cực đại.", "🐂 Cấu trúc nến cho thấy phe bò đang làm chủ.", "⚖️ Sự ổn định tại vùng giá cân bằng mới.", "📊 Volume Profile cho thấy sự tích lũy rất lớn.", "🌅 Mô hình nến Morning Star báo hiệu đảo chiều.", "🚀 Giá đã vượt qua kháng cự dải siêu xu hướng.", "🏗️ Market Structure đang chuyển dịch sang tăng.", "📽️ Tín hiệu xác nhận từ khung thời gian lớn hơn.",
-        "🌪️ Vùng cung đã bị hấp thụ hoàn toàn bởi lực mua.", "🏁 Giá đang tiến sát mục tiêu chốt lời đầu tiên.", "📦 Sự bứt phá khỏi vùng tích lũy hình hộp Darvas.", "🏎️ Chỉ báo CCI đang tăng vọt lên vùng tích cực.", "💂 Mô hình 3 chàng lính trắng đang hình thành.", "⚓ Giá đã tìm thấy điểm tựa tại đường MA200.", "🤏 Sự thu hẹp của độ biến động trước cú bứt phá.", "👻 Tín hiệu phân kỳ ẩn báo hiệu tiếp diễn xu hướng.", "🏔️ Giá đang hình thành mô hình đáy sau cao hơn.", "🧬 Sự hội tụ của các đường trung bình động ngắn.",
-        "🚥 Chỉ báo Parabolic SAR đã nhảy xuống dưới giá.", "🎭 Mô hình vai đầu vai ngược đã chính thức xác nhận.", "🌬️ Áp lực cung cạn kiệt tại vùng biên dưới dải băng.", "🎢 Giá đang chạy trong một kênh tăng giá hoàn hảo.", "🚀 Sự đột phá về giá khỏi vùng giá trị quan trọng.", "⛲ Chỉ báo MFI cho thấy dòng tiền nạp vào mạnh.", "📐 Mô hình cái nêm giảm đã bị phá vỡ hướng lên.", "🧪 Giá đang test lại đường cổ của mô hình đảo chiều.", "🟢 Cấu trúc nến Heikin Ashi đã chuyển sang màu xanh.", "🕳️ Sự ổn định của giá phía trên vùng gap tăng.",
-        "🪜 Chỉ báo Keltner Channel đang bị đẩy lên phía trên.", "📅 Giá đã vượt qua mốc cao nhất của tuần trước.", "📍 Tín hiệu tăng trưởng mạnh mẽ từ vùng pivot.", "⛸️ Mô hình 2 đáy đã hoàn thành nhịp kiểm định.", "📢 Sự cộng hưởng của nhiều khung thời gian cùng tăng.", "🧱 Giá đang giữ vững trên ngưỡng hỗ trợ Fib 0.5.", "📈 Chỉ báo OBV đang tăng vọt cùng với đường giá.", "📌 Mô hình nến Pin bar từ chối giảm tại hỗ trợ.", "🌊 Giá đang chuẩn bị cho một nhịp sóng đẩy mới.", "🔨 Sự bứt phá khỏi vùng cản kỹ thuật cứng nhất.",
-        "📡 Tín hiệu mua từ hệ thống giao dịch theo xu hướng.", "🏔️ Giá đang tiệm cận vùng kháng cự quan trọng.", "🤏 Sự thu hẹp biên độ nến tại vùng giá đỉnh.", "🌑 Mô hình nến Marubozu xác nhận lực mua áp đảo.", "🔓 Giá đã thoát khỏi trạng thái tích lũy đi ngang.", "🚀 Chỉ báo Trix cho thấy đà tăng đang đẩy mạnh.", "🌊 Cấu trúc sóng tăng đang được mở rộng liên tục.", "🧱 Sự ổn định của giá tại các ngưỡng chặn kỹ thuật.", "🏁 Tín hiệu xác nhận xu hướng từ chỉ báo Donchian.", "🎯 Giá đang hướng về vùng mục tiêu của mô hình.",
-        "🤝 Sự bứt phá của giá đi kèm với sự đồng thuận.", "📈 Chỉ báo Aroon Up đang nằm trên ngưỡng 70.", "📦 Mô hình nến Inside bar breakout theo hướng tăng.", "☁️ Giá đã vượt qua vùng cản mây trên khung H4.", "⚓ Sự vững chắc của nền tảng giá hiện tại.", "🔄 Tín hiệu đảo chiều từ các chỉ báo động lượng.", "🚀 Giá đang thực hiện nhịp tăng tốc thoát khỏi nền.", "📈 Sự cải thiện rõ rệt của cấu trúc giá ngắn hạn.", "🎻 Mô hình sóng Harmonic đang hướng tới mục tiêu.", "💥 Giá đã phá vỡ mọi đường kháng cự gần nhất.",
-        "💪 Sự tự tin từ biểu đồ kỹ thuật đang rất lớn.", "🧠 Chỉ báo tâm lý kỹ thuật nghiêng hẳn về mua.", "📈 Giá đang duy trì đà tăng trưởng cực kỳ ấn tượng.", "✅ Tín hiệu breakout thành công từ nền giá tốt.", "🎯 Chinh phục các cột mốc kỹ thuật cao hơn.", "🔥 Sức mạnh kỹ thuật đang ở trạng thái tối ưu.", "🧩 Sự phối hợp hoàn hảo của các chỉ báo sớm.", "⚡ Tốc độ thay đổi giá đang ở mức báo động tăng.", "🏰 Xây dựng cấu trúc tăng giá vững như bàn thạch.", "👑 Vị thế kỹ thuật dẫn đầu thị trường lúc này."
+        "📐 Về kỹ thuật giá đã bứt phá khỏi kênh giảm giá.", "🪄 Đường EMA đang thực hiện cú cắt vàng báo hiệu tăng.",
+        "📊 RSI đang thoát khỏi vùng quá bán một cách mạnh mẽ.", "🕯️ Mô hình nến nhấn chìm tăng trưởng vừa xuất hiện.",
+        "🌀 Bollinger Bands đang co thắt chuẩn bị cho biến động.", "📐 Fibonacci đang hỗ trợ cực tốt tại vùng 0.618.",
+        "📈 Khối lượng xác nhận đà tăng (Volume Confirmation).", "📉 Phân kỳ kín (Hidden Divergence) báo hiệu tiếp diễn.",
+        "🧱 Vùng cung (Supply zone) đã bị hấp thụ hoàn toàn.", "🧱 Vùng cầu (Demand zone) đang giữ giá cực kỳ tốt.",
+        "📊 MACD vừa cắt lên trên đường tín hiệu (Signal line).", "🏹 Giá đang bám sát dải trên của hệ thống xu hướng.",
+        "🏔️ Mô hình hai đáy (Double Bottom) đã hoàn thiện.", "⛰️ Mô hình vai đầu vai ngược đang hình thành rõ nét.",
+        "🎢 Sóng Elliot đang đi vào giai đoạn sóng 3 đẩy mạnh.", "🛑 Lệnh bán giải chấp đã cạn kiệt trên bảng điện.",
+        "🔋 Chỉ số sức mạnh tương đối đang hướng về vùng 70.", "🕯️ Pinbar rút chân cho thấy lực mua cực mạnh tại hỗ trợ.",
+        "📏 Khoảng cách giữa các đường trung bình đang mở rộng.", "🎯 Target ngắn hạn đang nằm trong tầm tay.",
+        "🏹 Mũi tên xu hướng đang chỉ thẳng lên phía trên.", "🧪 Các chỉ báo dao động đều cho tín hiệu đồng thuận.",
+        "🔗 Sự liên kết giữa các khung thời gian rất chặt chẽ.", "📍 Điểm xoay Pivot đang nằm dưới mức giá hiện tại.",
+        "🚥 Đèn xanh cho một đợt tăng giá dài hạn đã bật.", "🏁 Sự bứt phá (Breakout) kèm khối lượng lớn.",
+        "💎 Cấu trúc thị trường Bullish Structure rất rõ ràng.", "🌊 Dòng tiền đang luân chuyển đúng theo chu kỳ.",
+        "🧬 Hệ thống Ichimoku cho thấy giá đã vượt mây Kumo.", "🔭 Các khung giờ lớn đang ủng hộ cho đà tăng.",
+        "🏗️ Nền giá phẳng (Flat Base) là bệ phóng cho cú nhảy.", "🧗 Giá đang leo dốc một cách bền vững và ổn định.",
+        "🥊 Phe bò đã giành lại quyền kiểm soát hoàn toàn.", "🛡️ Hàng rào bảo vệ giá tại vùng tâm lý rất kiên cố.",
+        "🧱 Tường mua lớn đang chặn đứng mọi đợt điều chỉnh.", "🛰️ Tín hiệu từ vệ tinh phân tích đang ở mức tích cực.",
+        " toán học đang chứng minh đây là vùng giá rẻ.", "📉 Độ dốc của đường xu hướng đang tăng dần lên.",
+        "🔋 Năng lượng tích lũy đủ để phá vỡ mọi kháng cự.", "🌪️ Cơn lốc tăng trưởng đang cuốn phăng phe bán.",
+        "⚓ Neo giữ tâm lý ổn định để không mất hàng sớm.", "🧩 Mọi chỉ báo kỹ thuật đang khớp nhau như tranh vẽ.",
+        "🕯️ Cụm nến Morning Star báo hiệu bình minh rạng rỡ.", "🌋 Sự bùng nổ vượt ra ngoài mọi dự đoán thông thường.",
+        "💎 Tỉ lệ Risk/Reward đang ở mức cực kỳ hấp dẫn.", "📏 Thước đo kỹ thuật cho thấy tiềm năng x2 là có thể.",
+        "🥊 Knock-out phe bán chỉ trong một vài nhịp đẩy.", "🏃 Tốc độ di chuyển giá đang nhanh hơn trung bình.",
+        "🧗 Đỉnh sau cao hơn đỉnh trước, đáy sau cao hơn đáy.", "🧘 Sự kiên nhẫn đang được đền đáp bằng phân tích đúng.",
+        "🧬 Gen tăng trưởng đang lan tỏa mạnh mẽ trong chart.", "🏹 Mục tiêu dài hạn vẫn chưa thay đổi dù có rung lắc.",
+        "🎢 Những đợt điều chỉnh nhẹ là cơ hội để gia tăng.", "🔭 Nhìn rộng ra để thấy chúng ta đang ở chân sóng.",
+        "📊 Bảng thông số đang hiện màu xanh hy vọng.", "🕯️ Nến Marubozu xác nhận sức mạnh tuyệt đối.",
+        "🔩 Vặn chặt các ốc vít quản trị để chuẩn bị bay.", "⚖️ Sự cân bằng đã bị phá vỡ theo hướng có lợi.",
+        "🏹 Cung tên đã kéo căng, chỉ chờ thời điểm bung.", "🛠️ Bộ công cụ của trader chuyên nghiệp báo Buy.",
+        "🔬 Phân tích chi tiết cho thấy cấu trúc rất bền.", "🧬 Sự tương quan giữa các cặp tiền đang ủng hộ.",
+        "📈 Biểu đồ giá đang di chuyển theo mô hình cái nêm.", "📉 Thoát ra khỏi cái nêm giảm là một cú bùng nổ.",
+        "🚩 Mô hình lá cờ (Flag Pattern) đang tiếp diễn xu hướng.", "🏗️ Những viên gạch đầu tiên của sóng tăng đã đặt xong.",
+        "🏛️ Nền tảng phân tích kỹ thuật là chỗ dựa vững chắc.", "🏔️ Chinh phục các mốc cao hơn một cách thuyết phục.",
+        "⛰️ Kháng cự tâm lý đã trở thành bàn đạp cho giá.", "🌋 Dòng dung nham giá đang chảy về vùng cao hơn.",
+        "🔌 Kết nối với nguồn năng lượng tăng trưởng mạnh.", "💡 Ánh sáng cuối đường hầm cho những ai nắm giữ.",
+        "🔦 Soi rọi vào những góc tối của bảng lệnh để thấy.", "🔍 Chi tiết nhỏ tạo nên sự khác biệt lớn trong trade.",
+        "📏 Đo lường dòng tiền thông qua khối lượng cân bằng.", "🧪 Phản ứng tại vùng Flipzone cực kỳ ấn tượng.",
+        "🧪 Sự kết hợp giữa Price Action và Volume rất tốt.", "📈 Đường trung bình động 200 ngày đã bị chinh phục.",
+        "📉 Áp lực bán tại vùng đỉnh cũ đã biến mất.", "🏗️ Tái cấu trúc danh mục theo hướng tập trung vốn.",
+        "🏢 Tòa tháp lợi nhuận đang cao dần theo thời gian.", "🏛️ Sự uy tín của các mô hình giá kinh điển.",
+        "🥇 Top 1 các đồng coin có cấu trúc đẹp nhất hiện nay.", "🥈 Duy trì phong độ ổn định qua các khung giờ.",
+        "🥉 Nỗ lực không ngừng của phe mua đã có kết quả.", "🥊 Cú đấm quyết định vào vùng kháng cự quan trọng.",
+        "🏁 Cán mốc mục tiêu đầu tiên của hành trình.", "🚩 Vẫy cờ chào đón những kỷ lục giá mới.",
+        "🧱 Sự kiên cố của vùng hỗ trợ là không thể phá vỡ.", "🧱 Hấp thụ toàn bộ áp lực chốt lời trong ngắn hạn.",
+        "💎 Độ lấp lánh của biểu đồ đang thu hút mọi ánh nhìn.", "💎 Tài sản của bạn đang được bảo vệ bởi xu hướng.",
+        "🔋 Sạc đầy năng lượng cho những đợt bứt tốc tiếp theo.", "🔋 Không có dấu hiệu suy yếu trong lực đẩy hiện tại.",
+        "🚀 Động cơ phản lực của giá đang hoạt động hết công suất.", "🛫 Cất cánh khỏi vùng giá thấp một cách dứt khoát.",
+        "🛰️ Theo dõi sát sao từng biến động nhỏ nhất.", "🧭 Không bao giờ lạc lối khi có kế hoạch kỹ thuật."
     ],
     P3: [
-        "📝 Kế hoạch tối ưu là kiên nhẫn chờ điểm vào lệnh đẹp.", "🛡️ Quản trị rủi ro bằng cách đặt dừng lỗ tuyệt đối.", "🎯 Chiến lược mua khi điều chỉnh vẫn tỏ ra hiệu quả.", "🛑 Đừng FOMO tại vùng giá này, hãy đợi nhịp test lại.", "💰 Chia vốn ra vào lệnh để tối ưu hóa giá vị thế.", "🧊 Luôn giữ cái đầu lạnh trước những biến động.", "🎁 Mục tiêu chốt lời ngắn hạn đã được xác định rõ.", "🎢 Gồng lãi là nghệ thuật, hãy nâng trailing stop.", "🔒 Bảo vệ lợi nhuận luôn là ưu tiên hàng đầu.", "📏 Hãy tuân thủ kỷ luật giao dịch để đi đường dài.",
-        "🔑 Kỷ luật là chìa khóa để tồn tại trên thị trường.", "🚪 Luôn có kế hoạch thoát lệnh trước khi tham gia.", "🧺 Đừng đặt tất cả trứng vào một giỏ duy nhất.", "⏳ Kiên nhận là đức tính quý giá nhất của trader.", "💸 Hãy giao dịch với số vốn bạn có thể mất.", "🛡️ Không có gì chắc chắn, hãy luôn phòng vệ.", "📅 Theo dõi sát sao các tin tức quan trọng.", "🤕 Học cách chấp nhận thua lỗ như một phần cuộc chơi.", "🧘 Đừng để cảm xúc chi phối các quyết định.", "📔 Luôn ghi lại nhật ký để rút kinh nghiệm.",
-        "🤝 Tin tưởng vào hệ thống và phương pháp của mình.", "🧨 Sự chuẩn bị kỹ lưỡng sẽ giảm bớt sự sợ hãi.", "✅ Chỉ vào lệnh khi các điều kiện đã hội tụ đủ.", "👁️ Quan sát phản ứng của giá tại các vùng then chốt.", "🌊 Hãy là người đi theo xu hướng, đừng chặn đầu.", "📉 Lợi nhuận bền vững đến từ sự nhất quán.", "⏲️ Đừng cố giao dịch quá nhiều trong một ngày.", "🪑 Biết khi nào nên đứng ngoài là một kỹ năng.", "🤝 Tôn trọng xu hướng thị trường, xu hướng là bạn.", "📚 Cập nhật kiến thức thường xuyên để thích nghi.",
-        "🦁 Tự tin nhưng không được chủ quan trước thị trường.", "⚖️ Xác định tỷ lệ rủi ro/lợi nhuận phù hợp.", "💼 Hãy coi trading là một công việc kinh doanh.", "🛠️ Tận dụng các công cụ hỗ trợ để tăng hiệu quả.", "🙅 Đừng bị ảnh hưởng bởi đám đông xung quanh.", "💎 Tập trung vào chất lượng lệnh thay vì số lượng.", "🛋️ Giữ tâm thế thoải mái nhất khi giữ vị thế.", "🔍 Hiểu rõ đặc tính của từng cặp giao dịch.", "🛡️ Hãy luôn đặt sự an toàn của tài khoản lên trước.", "🎓 Học hỏi từ những người đi trước có kinh nghiệm.",
-        "🧊 Sự bình tĩnh giúp bạn nhìn nhận thị trường đúng.", "🥊 Đừng cố gỡ gạc sau một lệnh thua đau.", "🎁 Thị trường luôn có cơ hội, đừng lo bỏ lỡ.", "🏔️ Hãy kiên định với mục tiêu dài hạn đã đề ra.", "⚙️ Tối ưu lợi nhuận bằng cách quản lý lệnh thông minh.", "🔄 Sẵn sàng thay đổi quan điểm nếu giá thay đổi.", "🕹️ Luôn giữ mức đòn bẩy ở mức an toàn nhất.", "🖼️ Phân tích đa khung thời gian để có cái nhìn tổng quát.", "🧘 Cân bằng giữa giao dịch và cuộc sống cá nhân.", "🎈 Đừng kỳ vọng quá cao vào một lệnh duy nhất.",
-        "🗣️ Hãy để thị trường trả lời thay lời dự đoán mò.", "📏 Luyện tập thói quen kiểm soát rủi ro hàng ngày.", "🧪 Khám phá các phương pháp mới có chọn lọc.", "🧹 Giữ cho biểu đồ giao dịch sạch sẽ và dễ nhìn.", "⚙️ Hiểu rõ cơ chế hoạt động của sàn giao dịch.", "⚠️ Hãy luôn cảnh giác với các bẫy giá thị trường.", "📝 Tự đánh giá bản thân sau mỗi tuần giao dịch.", "🧠 Nâng cao khả năng chịu đựng tâm lý bản thân.", "🍀 Giao dịch đơn giản thường mang lại hiệu quả cao.", "🍬 Hãy biết hài lòng với những gì mình đạt được.",
-        "👂 Lắng nghe phản hồi từ thị trường thay vì ý kiến.", "🔔 Cẩn trọng với biến động trước giờ ra tin mạnh.", "📍 Tìm kiếm những vùng giá có xác suất thắng cao.", "🛡️ Luôn có phương án dự phòng cho mọi tình huống.", "🚫 Đừng bao giờ giao dịch dựa trên sự trả thù.", "⛓️ Sự kỷ luật sẽ mang lại tự do tài chính.", "📜 Hãy tôn trọng những quy tắc do chính mình đặt ra.", "🤏 Kiểm soát lòng tham khi thị trường hưng phấn.", "⚓ Giữ vững niềm tin vào con đường đã chọn.", "🎓 Mỗi sai lầm đều là một bài học vô giá.",
-        "🧠 Hãy là một nhà đầu tư thông thái và bình tĩnh.", "🕯️ Học cách đọc hiểu ngôn ngữ của những cây nến.", "✂️ Sẵn sàng cắt lỗ khi phân tích ban đầu đã sai.", "🏗️ Xây dựng hệ thống phù hợp với tính cách mình.", "🐢 Thành công không đến sau một đêm, hãy kiên trì.", "🔍 Sự tinh tế trong việc nhận diện cơ hội.", "🌈 Hãy tận hưởng hành trình trở thành một trader.", "❓ Luôn đặt câu hỏi tại sao trước mỗi quyết định.", "⚖️ Tìm kiếm sự cân bằng giữa kỹ thuật và tâm lý.", "🏃 Trading là marathon, không phải chạy nước rút.",
-        "⚡ Sự tỉnh táo là vũ khí mạnh nhất của bạn.", "📚 Hãy luôn học hỏi và không ngừng hoàn thiện.", "🌱 Bắt đầu từ những mục tiêu nhỏ và thực tế.", "📑 Hành động theo kế hoạch, không theo bản năng.", "👨‍🏫 Thị trường là người thầy nghiêm khắc nhất.", "💰 Hãy luôn trân trọng số vốn của mình.", "🎯 Sự tập trung cao độ khi thị trường vào sóng.", "🛡️ Luôn nhớ rằng bảo toàn vốn là trên hết.", "🆙 Hãy trở thành phiên bản tốt hơn của mình.", "👤 Giao dịch có trách nhiệm với bản thân.",
-        "🎉 Hạnh phúc với quá trình thay vì chỉ kết quả.", "🧘 Giữ tâm trí tĩnh lặng giữa muôn vàn biến động.", "🗝️ Mở khóa tiềm năng của bạn bằng sự nhẫn nại.", "🔭 Tầm nhìn xa giúp bạn vượt qua những nhịp rung.", "💎 Giá trị của một trader nằm ở sự bền bỉ.", "🌟 Luôn hướng tới sự chuyên nghiệp trong từng lệnh.", "🛡️ Phòng thủ tốt là cách tấn công hiệu quả nhất.", "🛤️ Đi đúng đường quan trọng hơn đi nhanh.", "🏆 Đích đến cuối cùng là sự tự chủ tài chính.", "🌈 Chào mừng bạn đến với thế giới trading kỷ luật."
+        "📝 Kế hoạch tối ưu là kiên nhẫn chờ điểm vào lệnh đẹp.", "🛡️ Quản trị rủi ro bằng cách đặt dừng lỗ tuyệt đối.",
+        "💰 Chia vốn vào lệnh theo chiến lược DCA thông minh.", "🔒 Bảo vệ lợi nhuận bằng cách dời SL về điểm hòa vốn.",
+        "🧘 Tâm lý vững vàng là chìa khóa của mọi thành công.", "⏳ Đừng vội vàng, cơ hội luôn còn đó trên thị trường.",
+        "📊 Luôn tuân thủ kỷ luật giao dịch dù có chuyện gì.", "🚀 Mục tiêu là lợi nhuận bền vững chứ không phải nhất thời.",
+        "💡 Hãy nhớ: 'Lợi nhuận đi đôi với sự kiên nhẫn'.", "💎 Giữ chặt vị thế để không bị rớt hàng giữa sóng.",
+        "🔍 Quan sát kỹ phản ứng giá tại các vùng quan trọng.", "📈 Tận dụng lãi suất kép để tối đa hóa tài sản.",
+        "📉 Không bao giờ 'all-in' vào một vị thế duy nhất.", "🧠 Luôn giữ một cái đầu lạnh trước mọi biến động.",
+        "⚖️ Cân bằng giữa lòng tham và nỗi sợ hãi cá nhân.", "🎯 Chỉ vào lệnh khi tất cả các điều kiện đã thỏa mãn.",
+        "🛠️ Sử dụng các công cụ hỗ trợ để kiểm tra lại tín hiệu.", "📝 Ghi chép nhật ký giao dịch để học từ sai lầm.",
+        "🌟 Thành công đến từ việc lặp đi lặp lại những việc đúng.", "🛡️ Ưu tiên hàng đầu là bảo vệ vốn của chính mình.",
+        "💰 Tiền chỉ chuyển từ túi người vội vàng sang người kiên nhẫn.", "🧘 Ngồi yên cũng là một loại kỹ năng trong trading.",
+        "🚪 Biết lúc nào nên vào và khi nào nên rút lui.", "🗺️ Bản đồ lợi nhuận đã có, chỉ cần đi đúng hướng.",
+        "🌊 Thuận theo xu hướng là cách dễ nhất để kiếm tiền.", "🌪️ Tránh xa những lúc thị trường đang hỗn loạn.",
+        "🧩 Ghép các mảnh ghép thông tin để có bức tranh tổng quát.", "📡 Lắng nghe nhịp đập của thị trường mỗi giây.",
+        "🔌 Ngắt kết nối khi tâm lý không còn được ổn định.", "💡 Một ý tưởng tốt cần thời gian để đơm hoa kết trái.",
+        "🏗️ Xây dựng danh mục đầu tư đa dạng và an toàn.", "🏛️ Đầu tư vào kiến thức là khoản đầu tư sinh lời nhất.",
+        "🏢 Mở rộng quy mô khi chiến thắng đang đứng về phía bạn.", "🥊 Sẵn sàng chiến đấu nhưng không bao giờ liều lĩnh.",
+        "🥇 Hãy là người chiến thắng trong cuộc đua dài hạn.", "🏁 Đích đến còn xa, hãy bảo trọng sức lực và vốn.",
+        "🏔️ Leo lên đỉnh cao cần sự bền bỉ hơn là tốc độ.", "⛰️ Mỗi bước chân đều phải vững chãi trên nền tảng quản trị.",
+        "🌋 Đừng để cảm xúc bùng nổ làm hỏng kế hoạch ban đầu.", "🎢 Thị trường là trò chơi của những con số và xác suất.",
+        "🎲 Đặt cược vào những nơi có tỉ lệ thắng cao nhất.", "🃏 Đừng bao giờ để lộ bài khi chưa đến lúc quyết định.",
+        "🎈 Giữ cho tâm hồn nhẹ nhàng trước những cú sụt giảm.", "🪄 Phép màu sẽ đến với những ai tin vào hệ thống của mình.",
+        "🧿 Nhìn thấu bản chất của những đợt rung rũ hàng.", "🕯️ Thắp sáng con đường bằng sự hiểu biết sâu sắc.",
+        "🔭 Phóng tầm mắt ra xa để không bị rối bởi nến ngắn hạn.", "🔬 Tập trung vào tiểu tiết để lọc ra những nhiễu loạn.",
+        "🧬 Mã hóa thành công bằng kỷ luật thép mỗi ngày.", "📈 Xu hướng là bạn, đừng bao giờ chống lại bạn mình.",
+        "📉 Chấp nhận thua lỗ nhỏ để tránh những cú sập lớn.", "🔩 Siết chặt kỷ luật như siết chặt một con ốc vít.",
+        "⚖️ Cân nhắc kỹ lưỡng trước khi nhấn nút đặt lệnh.", "🏹 Bắn trúng mục tiêu nhờ sự chuẩn bị kỹ càng.",
+        "🛠️ Công cụ tốt giúp trader làm việc nhàn hạ hơn.", "🧪 Thử nghiệm chiến lược trên vốn nhỏ trước khi đánh lớn.",
+        "🧬 Sự ổn định là yếu tố quyết định sự tồn tại.", "📉 Đừng bao giờ trung bình giá xuống trong một xu hướng giảm.",
+        "📈 Hãy để lợi nhuận chạy và cắt lỗ thật nhanh chóng.", "🚩 Luôn có phương án dự phòng cho mọi tình huống xấu.",
+        "🏗️ Nền tảng tốt sẽ giúp bạn vượt qua mọi cơn bão.", "🏛️ Sự chuyên nghiệp thể hiện qua cách bạn quản lý rủi ro.",
+        "🏢 Từng bước xây dựng đế chế tài chính của riêng bạn.", "🏟️ Hãy tỏa sáng như một ngôi sao trên sàn giao dịch.",
+        "💎 Giá trị của sự chờ đợi đôi khi là vô giá.", "🪵 Đốt cháy nỗi sợ bằng ngọn lửa của tri thức.",
+        "🌬️ Đón nhận những thay đổi của thị trường một cách chủ động.", "🚜 Cần mẫn tích lũy lợi nhuận mỗi ngày một ít.",
+        "🚲 Đi chậm mà chắc còn hơn chạy nhanh mà ngã.", "🚆 Đừng bỏ lỡ chuyến tàu của cuộc đời mình.",
+        "🚁 Bay cao cùng những giấc mơ về tự do tài chính.", "🛰️ Kết nối với cộng đồng để cùng nhau phát triển.",
+        "📱 Cập nhật thông tin nhưng lọc bỏ những tin rác.", "💻 Công nghệ là trợ thủ đắc lực trong kỷ nguyên số.",
+        "🧬 Hiểu rõ luật chơi trước khi tham gia đặt cược.", "🍀 May mắn chỉ dành cho người có sự chuẩn bị tốt nhất.",
+        "🌠 Hướng về những vì sao để chạm tới những đỉnh cao.", "🌅 Mỗi ngày mới là một cơ hội mới để bắt đầu lại.",
+        "🏙️ Nhìn vào thành công của người khác để làm động lực.", "🏖️ Phần thưởng cuối cùng là sự tự do và thảnh thơi.",
+        "🎆 Thành công không dành cho số đông lười biếng.", "🧨 Đừng để sự nôn nóng phá hủy mọi công sức tích lũy.",
+        "📦 Đóng gói lợi nhuận và rút về tài khoản định kỳ.", "🚛 Vận chuyển thành quả về cho gia đình và người thân.",
+        "🏢 Đầu tư vào tương lai bằng những quyết định hôm nay.", "🏟️ Sân chơi này công bằng cho tất cả mọi người.",
+        "🏛️ Uy tín cá nhân được xây dựng trên sự trung thực.", "🛖 Tìm kiếm sự bình yên trong chính tâm hồn mình.",
+        "⛰️ Khó khăn chỉ là thuốc thử cho lòng kiên nhẫn.", "🌋 Sức mạnh thực sự nằm ở khả năng tự kiểm soát.",
+        "🕹️ Làm chủ cuộc chơi, làm chủ vận mệnh chính mình.", "🎮 Trò chơi này bạn là người viết nên luật cho bản thân.",
+        "🎲 Xác suất thắng nằm ở sự phân tích kỹ lưỡng.", "🃏 Quân bài cuối cùng luôn là sự bất ngờ thú vị.",
+        "🎈 Hãy để nỗi buồn trôi đi như những quả bóng bay.", "🪄 Mọi giấc mơ đều có thể trở thành hiện thực.",
+        "🧘 Thiền định để giữ sự tập trung cao độ nhất.", "🥇 Hãy luôn tin rằng mình là người giỏi nhất.",
+        "🥈 Khiêm tốn để học hỏi được nhiều hơn mỗi ngày.", "🥉 Trân trọng những bước đi đầu tiên đầy khó khăn.",
+        "🏁 Cán đích thành công trong sự ngưỡng mộ của mọi người.", "🚩 Cắm cờ chiến thắng trên mọi thị trường bạn tham gia."
     ],
     P4: [
-        "🍻 Chúc anh em có ngày giao dịch bùng nổ lợi nhuận.", "🍀 Hy vọng may mắn mỉm cười với mọi quyết định.", "🌳 Chúc danh mục của anh em luôn xanh rực rỡ.", "👋 Hẹn gặp lại anh em ở những vùng giá cao hơn.", "🤝 Cùng nhau chinh phục thị trường đầy tiềm năng.", "✨ Tận hưởng niềm vui khi phân tích đúng hướng.", "🏆 Thắng không kiêu bại không nản, chúc thành công.", "🔑 Thị trường luôn có cơ hội cho người chuẩn bị.", "🎖️ Chào thân ái và quyết thắng cho toàn cộng đồng.", "🌈 Chúc anh em gặt hái được nhiều thành quả.",
-        "☀️ Hy vọng một ngày giao dịch suôn sẻ và thuận lợi.", "🛶 Chúc anh em vững tay chèo trên con sóng này.", "⏳ Thành công sẽ đến với những người kiên trì nhất.", "🎯 Chúc các vị thế của bạn sớm chạm mục tiêu.", "🚀 Hy vọng danh mục của bạn sẽ thăng hoa hôm nay.", "🧠 Chúc mọi người có những quyết định sáng suốt.", "🎈 Niềm vui từ trading sẽ lan tỏa đến cuộc sống.", "🌙 Chúc anh em có một buổi tối chốt lời rực rỡ.", "📍 Hẹn gặp lại tại những cột mốc thành công mới.", "🌍 Chúc cộng đồng chúng ta ngày càng lớn mạnh.",
-        "🎁 Mọi nỗ lực sẽ sớm được đền đáp xứng đáng thôi.", "🧊 Chúc bạn luôn giữ được sự bình tĩnh và tự tin.", "🛡️ Thị trường sẽ trả thưởng cho sự kỷ luật của bạn.", "⚡ Chúc một ngày tràn đầy năng lượng và lợi nhuận.", "🔮 Hy vọng các dự báo của bạn đều trở thành sự thật.", "💎 Chúc anh em tìm thấy những viên ngọc quý.", "🥳 Cùng nhau chia sẻ niềm vui chiến thắng hôm nay.", "🗺️ Chúc bạn có một hành trình trading thú vị.", "🤝 Hy vọng may mắn sẽ là người bạn đồng hành.", "📍 Chúc anh em chốt được lệnh tại điểm đẹp nhất.",
-        "🆙 Thành công không chỉ là tiền, đó là sự trưởng thành.", "😊 Chúc mọi người luôn vui vẻ dù thị trường ra sao.", "🔓 Hy vọng bạn sẽ đạt được tự do tài chính sớm.", "🧠 Chúc anh em luôn tỉnh táo trong mọi tình huống.", "🏖️ Hãy tận hưởng ngày nghỉ sau những lệnh thắng.", "📈 Chúc danh mục của bạn tăng trưởng bền vững.", "🟢 Hy vọng bạn sẽ thấy những con số xanh mướt.", "🔥 Chúc anh em luôn giữ được lửa đam mê.", "🏆 Thành công rực rỡ sẽ sớm gọi tên bạn thôi.", "🎬 Chúc bạn có những trải nghiệm tuyệt vời hôm nay.",
-        "🪜 Hy vọng mỗi ngày là một bước tiến mới của bạn.", "🛡️ Chúc anh em luôn là những chiến binh dũng cảm.", "🏔️ Hẹn gặp lại ở đỉnh vinh quang của thị trường.", "🛡️ Chúc mọi người có một tinh thần thép khi trade.", "🎓 Hy vọng bạn sẽ gặt hái được nhiều kinh nghiệm.", "🔭 Chúc anh em luôn có cái nhìn sắc bén nhất.", "🥇 Thắng lợi hôm nay là động lực cho ngày mai.", "❤️ Chúc bạn luôn hạnh phúc với lựa chọn của mình.", "💰 Hy vọng tài khoản của bạn sẽ không ngừng tăng.", "⚡ Chúc anh em có những cú breakout thành công.",
-        "📊 Cùng nhau tạo nên những kỷ lục mới cho bản thân.", "🧘 Chúc bạn luôn khỏe mạnh để tận hưởng thành quả.", "🤝 Hy vọng thị trường sẽ ưu ái các vị thế của bạn.", "💼 Chúc anh em có một ngày làm việc hiệu quả.", "🔑 Niềm tin vào bản thân là chìa khóa thành công.", "⏳ Chúc mọi người luôn có đủ sự kiên nhẫn.", "🌅 Hy vọng bạn sẽ không bao giờ phải hối tiếc.", "🕊️ Chúc anh em tìm thấy sự bình yên trong tâm hồn.", "🥇 Thành quả xứng đáng đang chờ bạn ở phía trước.", "👑 Chúc bạn luôn là người dẫn đầu trong mọi cuộc chơi.",
-        "📚 Hy vọng mỗi lệnh trade đều mang lại bài học.", "🔭 Chúc anh em luôn có một tầm nhìn xa trông rộng.", "🎉 Thắng lợi của bạn là niềm vui của cộng đồng.", "🌈 Chúc bạn luôn giữ được sự lạc quan.", "🚀 Hy vọng một tương lai tươi sáng đang chờ đón.", "👥 Chúc anh em luôn có những đồng đội tuyệt vời.", "🏔️ Cùng nhau hướng tới những mục tiêu cao cả hơn.", "🧱 Chúc bạn luôn biết cách vượt qua giới hạn.", "💰 Hy vọng bạn sẽ có ngày chốt lời không nghỉ tay.", "🧊 Chúc anh em luôn có trái tim nóng và đầu lạnh.",
-        "🏆 Thành công sẽ là minh chứng cho sự nỗ lực.", "🛡️ Chúc mọi người luôn bình an trên mọi nẻo đường.", "✍️ Hy vọng bạn sẽ là người viết nên câu chuyện.", "💥 Chúc anh em luôn có những cú trade để đời.", "🔔 Hẹn gặp lại anh em với những tin vui mới.", "🎁 Chúc bạn luôn gặp được những cơ hội tốt nhất.", "🌟 Hy vọng mỗi ngày trôi qua đều có ý nghĩa.", "👑 Chúc anh em luôn giữ vững phong độ đỉnh cao.", "🧗 Thành công đang ở rất gần, đừng bỏ cuộc nhé.", "🎭 Chúc bạn có một đời sống tinh thần phong phú.",
-        "🌈 Hy vọng bạn sẽ sớm đạt được những ước mơ lớn.", "💡 Chúc anh em luôn là nguồn cảm hứng cho người khác.", "🎖️ Thị trường sẽ ghi nhận sự đóng góp của bạn.", "✨ Chúc bạn luôn tỏa sáng theo cách của riêng mình.", "🌅 Hy vọng một ngày rực rỡ đang chờ đón tất cả.", "🍀 Chúc anh em luôn gặt hái được những điều tốt đẹp.", "👋 Tạm biệt và chúc mọi người có kết quả tốt nhất.", "🎊 Chúc mừng những nỗ lực không ngừng nghỉ của bạn.", "🦁 Hãy luôn mạnh mẽ như những chú sư tử trên sàn.", "🏁 Hẹn gặp lại ở vạch đích của sự thành công rực rỡ."
+        "🍻 Chúc anh em có ngày giao dịch bùng nổ lợi nhuận.", "🍀 Hy vọng may mắn mỉm cười với mọi quyết định.",
+        "🚀 Hẹn gặp lại các bạn tại những đỉnh cao mới của giá.", "🌟 Chúc cộng đồng chúng ta ngày càng lớn mạnh và giàu có.",
+        "🤝 Cảm ơn mọi người đã luôn đồng hành và ủng hộ.", "🔥 Hãy cùng nhau chinh phục thị trường đầy tiềm năng này.",
+        "🌈 Một ngày xanh tươi đang chờ đón tất cả chúng ta.", "💪 Mạnh mẽ và quyết đoán để gặt hái thành công lớn.",
+        "🎯 Chúc các bạn sớm đạt được mục tiêu tự do tài chính.", "📣 Hãy chia sẻ niềm vui chiến thắng cùng bạn bè nhé.",
+        "🔔 Đừng quên theo dõi kênh để nhận thông tin sớm nhất.", "🔋 Chúc anh em luôn tràn đầy năng lượng tích cực.",
+        "⚓ Chúc mọi người luôn giữ vững tay lái trên biển lớn.", "🚜 Chăm chỉ gieo hạt để chờ ngày thu hoạch bội thu.",
+        "🏗️ Chúc dự án của chúng ta thành công ngoài mong đợi.", "🏢 Chúc sự nghiệp trading của bạn thăng tiến không ngừng.",
+        "🏟️ Chúc bạn luôn là người tỏa sáng nhất trên bảng điện.", "🏛️ Chúc gia đình bạn luôn bình an và hạnh phúc.",
+        "🥇 Chúc bạn luôn đứng đầu trong mọi cuộc đua tài chính.", "🏁 Chúc mừng những ai đã kiên trì đến tận cuối cùng.",
+        "🚩 Chúc lá cờ chiến thắng luôn vẫy chào bạn mỗi ngày.", "💎 Chúc cuộc đời bạn tỏa sáng như những viên kim cương.",
+        "🪵 Chúc ngọn lửa đam mê trong bạn không bao giờ tắt.", "🌬️ Chúc bạn luôn thuận buồm xuôi gió trong mọi việc.",
+        "🚲 Chúc bạn có một hành trình thú vị và đáng nhớ.", "🚆 Chúc con tàu tài chính của bạn luôn đi đúng hướng.",
+        "🚁 Chúc bạn luôn có cái nhìn bao quát và sáng suốt.", "🛰️ Chúc bạn kết nối được với nhiều vận may bất ngờ.",
+        "📱 Chúc bạn luôn nhận được những tin vui từ thị trường.", "💻 Chúc hệ thống của bạn vận hành trơn tru và hiệu quả.",
+        "🧬 Chúc bạn có một tư duy của nhà đầu tư lỗi lạc.", "🍀 Chúc sự may mắn luôn là người bạn đồng hành của bạn.",
+        "🌠 Chúc mọi ước mơ của bạn sớm trở thành hiện thực.", "🌅 Chúc bạn có một khởi đầu mới đầy thuận lợi.",
+        "🏙️ Chúc cuộc sống của bạn luôn nhộn nhịp và tươi vui.", "🏖️ Chúc bạn có những kỳ nghỉ dưỡng tuyệt vời sau khi thắng.",
+        "🎆 Chúc pháo hoa thành công thắp sáng cuộc đời bạn.", "🧨 Chúc bạn bùng nổ mạnh mẽ như những cú pump của coin.",
+        "📦 Chúc bạn thu hoạch được thật nhiều 'quà' từ sàn.", "🚛 Chúc những chuyến hàng lợi nhuận luôn đầy ắp ví.",
+        "🏢 Chúc bạn xây dựng được một tương lai vững chắc.", "🏟️ Chúc bạn luôn giữ vững phong độ đỉnh cao của mình.",
+        "🏛️ Chúc bạn có được sự tôn trọng từ cộng đồng trader.", "🛖 Chúc bạn luôn tìm thấy niềm vui trong những điều nhỏ bé.",
+        "⛰️ Chúc bạn vượt qua mọi thử thách để chạm tới đỉnh.", "🌋 Chúc sức mạnh nội tại giúp bạn chiến thắng tất cả.",
+        "🕹️ Chúc bạn làm chủ được mọi tình huống trong trade.", "🎮 Chúc bạn tận hưởng cuộc chơi này một cách trọn vẹn.",
+        "🎲 Chúc những con số may mắn luôn thuộc về phía bạn.", "🃏 Chúc bạn luôn nắm trong tay những quân bài chiến thắng.",
+        "🎈 Chúc mọi phiền muộn của bạn tan biến vào hư không.", "🪄 Chúc điều kỳ diệu sẽ đến với tài khoản của bạn.",
+        "🧘 Chúc bạn có được sự tĩnh lặng trong tâm hồn.", "🥇 Chúc bạn đạt được những kỷ lục cá nhân mới.",
+        "🥈 Chúc bạn luôn có sự tiến bộ vượt bậc mỗi ngày.", "🥉 Chúc bạn không bao giờ bỏ cuộc trước khó khăn.",
+        "🏁 Chúc bạn về đích với nụ cười mãn nguyện trên môi.", "🚩 Chúc hành trình của bạn là một thiên anh hùng ca.",
+        "🧱 Chúc bạn xây dựng được một nền móng tài chính thép.", "🧱 Chúc mọi rào cản chỉ là bàn đạp cho bạn tiến xa hơn.",
+        "💎 Chúc bạn luôn nhìn thấy cơ hội trong mọi biến động.", "💎 Chúc tài sản của bạn tăng trưởng theo cấp số nhân.",
+        "🔋 Chúc bạn luôn dồi dào sức khỏe để chiến đấu dài hạn.", "🔋 Chúc tinh thần của bạn luôn ở trạng thái tốt nhất.",
+        "🚀 Chúc bạn bay cao và xa hơn những gì mình mong đợi.", "🛫 Chúc chuyến bay đến giàu sang của bạn thật êm ái.",
+        "🛰️ Chúc bạn luôn đi trước thị trường một bước chân.", "🧭 Chúc bạn luôn tìm thấy hướng đi đúng trong bóng tối.",
+        "📡 Chúc bạn luôn nhận được những tín hiệu tích cực nhất.", "💡 Chúc trí tuệ của bạn luôn tỏa sáng rạng ngời.",
+        "🔦 Chúc bạn soi sáng được con đường dẫn đến thành công.", "🔍 Chúc bạn khám phá ra những bí mật của sự giàu có.",
+        "📏 Chúc mọi dự tính của bạn đều chính xác đến từng li.", "🧪 Chúc các chiến lược của bạn đều mang lại kết quả tốt.",
+        "🧬 Chúc bạn có một tinh thần thép không thể lay chuyển.", "📈 Chúc biểu đồ cuộc đời bạn luôn là một đường thẳng lên.",
+        "📉 Chúc bạn biết cách biến rủi ro thành cơ hội lớn.", "🔩 Chúc bạn luôn kiểm soát tốt mọi mắt xích trong trade.",
+        "⚖️ Chúc bạn luôn có sự công bằng và sáng suốt.", "🏹 Chúc bạn bắn trúng mọi mục tiêu đã đề ra.",
+        "🛠️ Chúc bạn có đủ công cụ để chinh phục thế giới.", "🧪 Chúc mọi thử nghiệm của bạn đều dẫn tới thành công.",
+        "🧬 Chúc bạn có một cuộc sống thịnh vượng bền lâu.", "📉 Chúc bạn luôn bình tĩnh trước những pha sập giá.",
+        "📈 Chúc bạn luôn hưng phấn trong những đợt sóng tăng.", "🚩 Chúc bạn luôn là người truyền cảm hứng cho người khác.",
+        "🏗️ Chúc sự kiên trì của bạn sớm đơm hoa kết trái.", "🏛️ Chúc bạn để lại một di sản tài chính lẫy lừng.",
+        "🏢 Chúc bạn luôn có những quyết định đầu tư đúng đắn.", "🏟️ Chúc bạn luôn là nhà vô địch trong mắt người thân.",
+        "💎 Chúc bạn tìm thấy viên ngọc quý trong đống cát thị trường.", "🪵 Chúc ngọn lửa thành công lan tỏa tới mọi người quanh bạn.",
+        "🌬️ Chúc bạn có được sự tự do mà bạn hằng khao khát.", "🚜 Chúc mỗi ngày của bạn đều là một ngày hạnh phúc.",
+        "🚲 Chúc bạn luôn tận hưởng hành trình, không chỉ là đích đến.", "🚆 Chúc cuộc đời bạn là một hành trình đầy màu sắc.",
+        "🚁 Chúc bạn luôn ở trên cao để thấy rõ mọi cơ hội.", "🛰️ Chúc bạn kết nối được với những người thầy giỏi.",
+        "📱 Chúc điện thoại của bạn luôn hiện thông báo Ting Ting.", "💻 Chúc bạn làm chủ được công nghệ và thị trường.",
+        "🧬 Chúc bạn có một cuộc sống viên mãn về mọi mặt.", "🍀 Chúc tất cả những gì tốt đẹp nhất sẽ đến với bạn."
     ]
 };
 
@@ -99,9 +261,7 @@ async function getBasePrice(symbol, currentPrice) {
             if (ticks.length > 0) return parseFloat(ticks[0][1]);
         }
         return currentPrice;
-    } catch (e) { 
-        return currentPrice; 
-    }
+    } catch (e) { return currentPrice; }
 }
 
 function calculateChange(pArr, min) {
@@ -115,61 +275,43 @@ function calculateChange(pArr, min) {
 
 async function updatePriceLogic(s, p, now, vol) {
     if (!s.endsWith('USDT')) return;
-
     if (!state.coinData[s]) {
-        state.coinData[s] = { 
-            symbol: s, 
-            prices: [], 
-            p7am: null, 
-            vol: 0, 
-            live: { c1: 0, c5: 0, cd: 0, cp: p } 
-        };
-        getBasePrice(s, p).then(val => { 
-            if(state.coinData[s]) state.coinData[s].p7am = val; 
-        });
+        state.coinData[s] = { symbol: s, prices: [], p7am: null, vol: 0, live: { c1: 0, c5: 0, cd: 0, cp: p } };
+        getBasePrice(s, p).then(val => { if(state.coinData[s]) state.coinData[s].p7am = val; });
     }
-    
     let d = state.coinData[s];
     d.prices.push({ p, t: now });
-    const limitTime = now - 360000;
-    d.prices = d.prices.filter(i => i.t > limitTime);
-    
+    d.prices = d.prices.filter(i => i.t > now - 360000);
     d.vol = parseFloat(vol);
     const c1 = calculateChange(d.prices, 1);
     const c5 = calculateChange(d.prices, 5);
     const cd = d.p7am ? parseFloat((((p - d.p7am) / d.p7am) * 100).toFixed(2)) : 0;
-
     d.live = { c1, c5, cd, cp: p };
-
     if (state.isRunning) {
         if (state.stats.biendong < SETTINGS.TYPE_LIMIT && (Math.abs(c1) >= SETTINGS.VOL_LIMIT || Math.abs(c5) >= SETTINGS.VOL_LIMIT)) {
             postToSquare(s, c5, 'biendong');
-        } 
-        else if (state.stats.day < SETTINGS.TYPE_LIMIT && Math.abs(cd) >= SETTINGS.DAY_LIMIT) {
+        } else if (state.stats.day < SETTINGS.TYPE_LIMIT && Math.abs(cd) >= SETTINGS.DAY_LIMIT) {
             postToSquare(s, cd, 'day');
         }
     }
 }
 
-setInterval(() => {
-    const now = new Date();
-    if (now.getHours() === 7 && now.getMinutes() === 0) {
-        addLog("🌅 Reset mốc giá 7h sáng & dữ liệu ngày mới...");
-        Object.keys(state.coinData).forEach(s => {
-            state.coinData[s].p7am = state.coinData[s].live.cp;
-        });
-        state.postedTodaySymbols.clear();
-        state.postsToday = 0;
-        state.stats = { biendong: 0, day: 0, vol: 0 };
-    }
-}, 60000);
+function initWS() {
+    addLog("⚡ Engine Luffy Pro V2 Starting...");
+    binance.futuresTickerStream((tickers) => {
+        const now = Date.now();
+        if (Array.isArray(tickers)) {
+            tickers.forEach(t => updatePriceLogic(t.symbol, parseFloat(t.close), now, t.quoteVolume));
+        } else {
+            updatePriceLogic(tickers.symbol, parseFloat(tickers.close), now, tickers.quoteVolume);
+        }
+    });
+}
 
 async function postToSquare(symbol, change, type) {
     if (state.postsToday >= SETTINGS.MAX_TOTAL || state.postedTodaySymbols.has(symbol)) return;
     if (Date.now() - state.lastPostTime < SETTINGS.MIN_GAP) return;
-
-    const content = `${BANK.P1[Math.floor(Math.random()*BANK.P1.length)]}\n\n${BANK.P2[Math.floor(Math.random()*BANK.P2.length)]}\n\n${BANK.P3[Math.floor(Math.random()*BANK.P3.length)]}\n\n${BANK.P4[Math.floor(Math.random()*BANK.P4.length)]}\n\n#${symbol} $${symbol}`;
-
+    const content = `${BANK.P1[Math.floor(Math.random()*100)]}\n\n${BANK.P2[Math.floor(Math.random()*100)]}\n\n${BANK.P3[Math.floor(Math.random()*100)]}\n\n${BANK.P4[Math.floor(Math.random()*100)]}\n\n#${symbol} $${symbol}`;
     try {
         await axios.post(SETTINGS.SQUARE_URL, { bodyTextOnly: content }, {
             headers: { "X-Square-OpenAPI-Key": SQUAD_API_KEY, "Content-Type": "application/json" }
@@ -186,95 +328,57 @@ async function postTypeVol() {
     if (!state.isRunning || state.stats.vol >= SETTINGS.TYPE_LIMIT) return;
     try {
         const tickers = await binance.futures24hrTicker();
-        const topVol = tickers
-            .filter(t => t.symbol.endsWith('USDT') && !state.postedTodaySymbols.has(t.symbol))
-            .sort((a, b) => parseFloat(b.quoteVolume) - parseFloat(a.quoteVolume))
-            .slice(0, 1);
+        const topVol = tickers.filter(t => t.symbol.endsWith('USDT') && !state.postedTodaySymbols.has(t.symbol)).sort((a, b) => parseFloat(b.quoteVolume) - parseFloat(a.quoteVolume)).slice(0, 1);
         if (topVol.length > 0) await postToSquare(topVol[0].symbol, 0, 'vol');
     } catch (e) { addLog("❌ Lỗi API Volume"); }
 }
-
 setInterval(postTypeVol, 600000);
-
-function initWS() {
-    addLog("⚡ Engine Luffy Pro Ready...");
-    binance.futuresTickerStream((tickers) => {
-        const now = Date.now();
-        if (Array.isArray(tickers)) {
-            tickers.forEach(t => updatePriceLogic(t.symbol, parseFloat(t.close), now, t.quoteVolume));
-        } else {
-            updatePriceLogic(tickers.symbol, parseFloat(tickers.close), now, tickers.quoteVolume);
-        }
-    });
-}
 
 const app = express();
 app.get('/api/status', (req, res) => {
-    const table = Object.values(state.coinData)
-        .map(v => ({ s: v.symbol, c1: v.live.c1, c5: v.live.c5, cd: v.live.cd }))
-        .sort((a, b) => Math.abs(b.c5) - Math.abs(a.c5))
-        .slice(0, 15);
-    res.json({ ...state, table });
+    const table = Object.values(state.coinData).map(v => ({ s: v.symbol, c1: v.live.c1, c5: v.live.c5, cd: v.live.cd })).sort((a, b) => Math.abs(b.c5) - Math.abs(a.c5)).slice(0, 15);
+    res.json({ ...state, table, postedTodaySymbols: Array.from(state.postedTodaySymbols) });
 });
 app.get('/api/toggle', (req, res) => { state.isRunning = !state.isRunning; res.json({ s: state.isRunning }); });
-
 app.get('/', (req, res) => {
-    res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><script src="https://cdn.tailwindcss.com"></script><style>@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;900&display=swap');</style></head>
-    <body class="bg-[#0b0e11] text-zinc-300 p-2 font-sans overflow-hidden">
-        <div class="max-w-md mx-auto h-screen flex flex-col">
-            <div class="bg-[#1e2329] p-4 rounded-2xl border-b-4 border-yellow-500 mb-3 shadow-2xl">
-                <div class="flex justify-between items-center mb-4">
-                    <h1 style="font-family:'Orbitron'" class="text-xl font-black text-yellow-500 italic uppercase tracking-tighter">Luffy Pro V2</h1>
-                    <button onclick="fetch('/api/toggle')" id="btn" class="px-6 py-2 rounded-xl font-bold bg-yellow-500 text-black shadow-lg text-sm">START</button>
-                </div>
-                <div class="grid grid-cols-4 gap-1 text-center font-bold">
-                    <div class="bg-black/40 p-2 rounded-xl"><div class="text-[8px] text-zinc-500 uppercase">Biến động</div><div id="s1" class="text-xs text-red-500">0</div></div>
-                    <div class="bg-black/40 p-2 rounded-xl"><div class="text-[8px] text-zinc-500 uppercase">Day 7H</div><div id="s2" class="text-xs text-yellow-500">0</div></div>
-                    <div class="bg-black/40 p-2 rounded-xl"><div class="text-[8px] text-zinc-500 uppercase">Volume</div><div id="s3" class="text-xs text-green-500">0</div></div>
-                    <div class="bg-black/40 p-2 rounded-xl"><div class="text-[8px] text-zinc-500 uppercase">Đã đăng</div><div id="st" class="text-xs text-blue-500">0</div></div>
-                </div>
-            </div>
-            <div class="bg-[#1e2329] rounded-2xl flex-1 overflow-hidden flex flex-col mb-3 border border-white/5">
-                <div class="p-3 bg-white/5 text-[10px] font-bold uppercase tracking-widest text-yellow-500 flex justify-between">
-                    <span>Thị trường Real-time</span>
-                    <span class="animate-pulse text-red-500">● LIVE</span>
-                </div>
-                <div class="overflow-y-auto flex-1">
-                    <table class="w-full text-[11px]">
-                        <thead class="sticky top-0 bg-[#1e2329] text-zinc-500 border-b border-white/5">
-                            <tr><th class="p-2 text-left">COIN</th><th class="p-2 text-right">M1%</th><th class="p-2 text-right">M5%</th><th class="p-2 text-right">DAY%</th></tr>
-                        </thead>
-                        <tbody id="tb"></tbody>
-                    </table>
-                </div>
-            </div>
-            <div id="lb" class="h-32 bg-black/50 rounded-xl p-2 text-[9px] font-mono overflow-y-auto text-zinc-400 border border-white/5"></div>
-        </div>
-        <script>
-            async function refresh() {
-                try {
-                    const res = await fetch('/api/status'); 
-                    const d = await res.json();
-                    const btn = document.getElementById('btn');
-                    btn.innerText = d.isRunning ? "STOP" : "START";
-                    btn.className = d.isRunning ? "px-6 py-2 rounded-xl font-bold bg-red-600 text-white shadow-lg" : "px-6 py-2 rounded-xl font-bold bg-yellow-500 text-black shadow-lg";
-                    document.getElementById('s1').innerText = d.stats.biendong;
-                    document.getElementById('s2').innerText = d.stats.day;
-                    document.getElementById('s3').innerText = d.stats.vol;
-                    document.getElementById('st').innerText = d.postsToday;
-                    document.getElementById('lb').innerHTML = d.logs.map(l => \`<div class="border-b border-white/5 mb-1 pb-1">\${l}</div>\`).join('');
-                    document.getElementById('tb').innerHTML = d.table.map(v => \`
-                        <tr class="border-b border-white/5 hover:bg-white/5 transition-colors">
-                            <td class="p-2 font-bold text-zinc-100">\${v.s.replace('USDT','')}</td>
-                            <td class="text-right p-2 \${Math.abs(v.c1)>=5?'text-red-500':'text-zinc-400'}">\${v.c1}%</td>
-                            <td class="text-right p-2 \${Math.abs(v.c5)>=7?'text-orange-400':'text-zinc-400'}">\${v.c5}%</td>
-                            <td class="text-right p-2 \${Math.abs(v.cd)>=10?'text-yellow-500':'text-zinc-400'}">\${v.cd}%</td>
-                        </tr>\`).join('');
-                } catch(e) {}
-            }
-            setInterval(refresh, 1000);
-        </script>
-    </body></html>`);
+    res.send(`
+    <!DOCTYPE html><html><head><title>LUFFY SQUAD PRO</title><link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&display=swap" rel="stylesheet"><style>
+    body{background:#000;color:#0f0;font-family:'Orbitron',sans-serif;margin:0;padding:20px;display:flex;flex-direction:column;align-items:center}
+    .card{background:#111;border:1px solid #0f0;box-shadow:0 0 15px #0f0;padding:20px;border-radius:10px;width:90%;max-width:1000px;margin-bottom:20px}
+    h1{text-align:center;text-shadow:0 0 10px #0f0;margin-top:0}
+    .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:20px;margin-bottom:20px}
+    .stat{text-align:center;padding:15px;background:#051a05;border:1px solid #0f0}
+    .btn{width:100%;padding:15px;font-size:1.2em;cursor:pointer;background:#0f0;color:#000;border:none;font-weight:bold;box-shadow:0 0 10px #0f0}
+    .btn.off{background:#f00;color:#fff;box-shadow:0 0 10px #f00}
+    table{width:100%;border-collapse:collapse;margin-top:20px}
+    th,td{border:1px solid #0f0;padding:10px;text-align:center}
+    .log-box{height:200px;overflow-y:scroll;background:#000;border:1px solid #0f0;padding:10px;font-family:monospace;font-size:0.9em}
+    </style></head><body>
+    <div class="card"><h1>🏴‍☠️ LUFFY SQUARE SQUAD BOT</h1><div class="grid">
+    <div class="stat">POSTS TODAY<br><span id="postsToday">0</span>/100</div>
+    <div class="stat">BIẾN ĐỘNG<br><span id="st-bd">0</span>/33</div>
+    <div class="stat">DAILY GAIN<br><span id="st-day">0</span>/33</div>
+    <div class="stat">TOP VOLUME<br><span id="st-vol">0</span>/33</div></div>
+    <button id="btn" class="btn off" onclick="toggle()">ENGINE: STOPPED</button></div>
+    <div class="card"><h3>📊 TOP BIẾN ĐỘNG (5M)</h3><table><thead><tr><th>SYMBOL</th><th>1M %</th><th>5M %</th><th>DAILY %</th></tr></thead><tbody id="table"></tbody></table></div>
+    <div class="card"><h3>📜 SYSTEM LOGS</h3><div id="logs" class="log-box"></div></div>
+    <script>
+    async function update(){
+        const r=await fetch('/api/status').then(res=>res.json());
+        document.getElementById('postsToday').innerText=r.postsToday;
+        document.getElementById('st-bd').innerText=r.stats.biendong;
+        document.getElementById('st-day').innerText=r.stats.day;
+        document.getElementById('st-vol').innerText=r.stats.vol;
+        const b=document.getElementById('btn');
+        b.innerText=r.isRunning?"ENGINE: RUNNING":"ENGINE: STOPPED";
+        b.className=r.isRunning?"btn":"btn off";
+        document.getElementById('logs').innerHTML=r.logs.join('<br>');
+        document.getElementById('table').innerHTML=r.table.map(t=>\`<tr><td>\${t.s}</td><td>\${t.c1}%</td><td style="color:\${t.c5>=0?'#0f0':'#f00'}">\${t.c5}%</td><td>\${t.cd}%</td></tr>\`).join('');
+    }
+    async function toggle(){await fetch('/api/toggle');update();}
+    setInterval(update,2000);update();
+    </script></body></html>
+    `);
 });
 
 app.listen(PORT, '0.0.0.0', () => {
