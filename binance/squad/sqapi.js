@@ -94,8 +94,10 @@ async function getPriceAt7AM(symbol) {
     try {
         const sevenAM = new Date();
         sevenAM.setHours(7, 0, 0, 0);
-        const startTime = sevenAM.getTime();
-        const ticks = await binance.futuresCandles(symbol, "1m", { startTime, limit: 1 });
+        // Nếu hiện tại chưa tới 7h sáng của ngày mới, lấy giá lúc bot khởi chạy (now)
+        if (Date.now() < sevenAM.getTime()) return null; 
+
+        const ticks = await binance.futuresCandles(symbol, "1m", { startTime: sevenAM.getTime(), limit: 1 });
         return ticks.length > 0 ? parseFloat(ticks[0][1]) : null;
     } catch (e) { return null; }
 }
@@ -103,15 +105,13 @@ async function getPriceAt7AM(symbol) {
 function calculateChange(pArr, min) {
     if (!pArr || pArr.length < 2) return 0;
     const now = Date.now();
-    // Logic thực tại: Nếu chưa có đủ nến quá khứ, lấy giá xa nhất hiện có để tính luôn
     let start = pArr.find(i => i.t >= (now - min * 60000)) || pArr[0]; 
     return parseFloat((((pArr[pArr.length - 1].p - start.p) / start.p) * 100).toFixed(2));
 }
 
 async function updatePriceLogic(s, p, now) {
     if (!state.coinData[s]) {
-        // Khởi tạo ngay lập tức bằng giá hiện tại nếu k lấy đc giá 7h
-        const p7am = await getPriceAt7AM(s) || p;
+        const p7am = await getPriceAt7AM(s) || p; // Nếu không có 7AM, dùng giá lúc bot chạy
         state.coinData[s] = { symbol: s, prices: [{p, t: now}], p7am };
     }
     
@@ -176,7 +176,9 @@ setInterval(() => { if (state.isRunning) postTypeVol(); }, 600000);
 
 function initWS() {
     addLog("⚡ Engine Luffy Pro v2 Starting...");
-    binance.futuresTickerStream((tickers) => {
+    // FIX TRIỆT ĐỂ LỖI: binance.futuresTickerStream(false, (tickers) => { ... })
+    // Tham số đầu tiên phải là false nếu muốn stream toàn bộ thị trường
+    binance.futuresTickerStream(false, (tickers) => {
         if (Array.isArray(tickers)) {
             tickers.forEach(t => {
                 if (t.symbol && t.symbol.endsWith('USDT')) {
@@ -191,11 +193,10 @@ function initWS() {
 
 const app = express();
 app.get('/api/status', (req, res) => {
-    // Chỉ lấy top 20 coin biến động nhất để bảng mượt
     const table = Object.values(state.coinData)
         .filter(v => v.live)
         .sort((a, b) => Math.max(Math.abs(b.live.c5), Math.abs(b.live.cd)) - Math.max(Math.abs(a.live.c5), Math.abs(a.live.cd)))
-        .slice(0, 20)
+        .slice(0, 25)
         .map(v => ({ s: v.symbol, c1: v.live.c1, c5: v.live.c5, cd: v.live.cd }));
     res.json({ ...state, table });
 });
@@ -211,33 +212,32 @@ app.get('/', (req, res) => {
                     <h1 style="font-family:'Orbitron'" class="text-xl font-black text-yellow-500 italic">LUFFY PRO V2</h1>
                     <button onclick="fetch('/api/toggle')" id="btn" class="px-6 py-2 rounded-xl font-bold transition-all text-sm shadow-lg">START</button>
                 </div>
-                <div class="grid grid-cols-4 gap-1 text-center">
+                <div class="grid grid-cols-4 gap-1 text-center font-mono">
                     <div class="bg-black/40 p-2 rounded-xl"><div class="text-[8px] text-zinc-500 uppercase">M1/M5</div><div id="s1" class="text-xs font-bold text-red-500">0</div></div>
-                    <div class="bg-black/40 p-2 rounded-xl"><div class="text-[8px] text-zinc-500 uppercase">D1 (7H)</div><div id="s2" class="text-xs font-bold text-yellow-500">0</div></div>
+                    <div class="bg-black/40 p-2 rounded-xl"><div class="text-[8px] text-zinc-500 uppercase">D1 (NOW)</div><div id="s2" class="text-xs font-bold text-yellow-500">0</div></div>
                     <div class="bg-black/40 p-2 rounded-xl"><div class="text-[8px] text-zinc-500 uppercase">VOL</div><div id="s3" class="text-xs font-bold text-green-500">0</div></div>
                     <div class="bg-black/40 p-2 rounded-xl"><div class="text-[8px] text-zinc-500 uppercase">TOTAL</div><div id="st" class="text-xs font-bold text-blue-500">0</div></div>
                 </div>
             </div>
 
             <div class="bg-[#1e2329] rounded-2xl flex-1 overflow-hidden flex flex-col mb-3 border border-white/5 shadow-xl">
-                <div class="p-3 bg-white/5 text-[10px] font-bold text-yellow-500 flex justify-between">
-                    <span>TOP BIẾN ĐỘNG</span>
-                    <span class="text-zinc-500 uppercase">Update: Realtime</span>
+                <div class="p-3 bg-white/5 text-[10px] font-bold text-yellow-500 flex justify-between uppercase">
+                    <span>Thị trường Realtime</span>
+                    <span id="conn-status" class="text-green-500">● Live</span>
                 </div>
                 <div class="overflow-y-auto flex-1 scrollbar-hide">
                     <table class="w-full text-[11px] border-collapse">
-                        <thead class="sticky top-0 bg-[#1e2329] text-zinc-500 shadow-sm">
-                            <tr class="border-b border-white/5"><th class="p-3 text-left">COIN</th><th class="p-3 text-right">M1%</th><th class="p-3 text-right">M5%</th><th class="p-3 text-right">D%</th></tr>
+                        <thead class="sticky top-0 bg-[#1e2329] text-zinc-500 shadow-sm z-10">
+                            <tr class="border-b border-white/5"><th class="p-3 text-left">COIN</th><th class="p-3 text-right">M1%</th><th class="p-3 text-right">M5%</th><th class="p-3 text-right">DAY%</th></tr>
                         </thead>
                         <tbody id="tb"></tbody>
                     </table>
                 </div>
             </div>
 
-            <div id="lb" class="h-28 bg-black/80 rounded-xl p-3 text-[9px] font-mono overflow-y-auto text-zinc-500 border border-white/5"></div>
+            <div id="lb" class="h-28 bg-black/80 rounded-xl p-3 text-[9px] font-mono overflow-y-auto text-zinc-400 border border-white/5"></div>
         </div>
         <script>
-            let lastUpdate = 0;
             async function refresh() {
                 try {
                     const res = await fetch('/api/status'); 
@@ -257,18 +257,18 @@ app.get('/', (req, res) => {
                     tbody.innerHTML = d.table.map(v => \`
                         <tr class="border-b border-white/5 hover:bg-white/5 transition-colors">
                             <td class="p-3 font-bold text-zinc-100">\${v.s.replace('USDT','')}</td>
-                            <td class="text-right p-3 \${Math.abs(v.c1)>=7?'text-red-500 font-bold':'text-zinc-400'}">\${v.c1}%</td>
-                            <td class="text-right p-3 \${Math.abs(v.c5)>=7?'text-red-400 font-bold':'text-zinc-400'}">\${v.c5}%</td>
-                            <td class="text-right p-3 \${Math.abs(v.cd)>=10?'text-yellow-500 font-bold':'text-zinc-400'}">\${v.cd}%</td>
+                            <td class="text-right p-3 \${Math.abs(v.c1)>=3?'text-red-500 font-bold':'text-zinc-400'}">\${v.c1}%</td>
+                            <td class="text-right p-3 \${Math.abs(v.c5)>=5?'text-red-400 font-bold':'text-zinc-400'}">\${v.c5}%</td>
+                            <td class="text-right p-3 \${Math.abs(v.cd)>=7?'text-yellow-500 font-bold':'text-zinc-400'}">\${v.cd}%</td>
                         </tr>\`).join('');
                 } catch(e) {}
             }
-            setInterval(refresh, 1000);
+            setInterval(refresh, 800);
         </script>
     </body></html>`);
 });
 
 app.listen(PORT, '0.0.0.0', () => {
     initWS();
-    console.log(`Luffy Pro V2 Ready: http://localhost:${PORT}`);
+    console.log(`Luffy Bot Ready: http://localhost:${PORT}`);
 });
