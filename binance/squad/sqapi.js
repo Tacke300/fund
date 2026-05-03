@@ -18,7 +18,7 @@ const SETTINGS = {
     SQUARE_URL: "https://www.binance.com/bapi/composite/v1/public/pgc/openApi/content/add",
     VOL_LIMIT: 7.0,    // Ngưỡng biến động M1 hoặc M5
     MAX_TOTAL: 50,     // Max 50 bài 1 ngày
-    MIN_GAP: 60000,    // Khoảng cách tối thiểu giữa 2 bài đăng (1 phút)
+    MIN_GAP: 15000,    // Khoảng cách tối thiểu giữa 2 bài đăng (1 phút)
 };
 
 // --- NGÂN HÀNG DỮ LIỆU: 4 PHẦN x 100 CÂU (GIỮ NGUYÊN BẢN GỐC) ---
