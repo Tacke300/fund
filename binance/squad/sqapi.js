@@ -11,7 +11,7 @@ const SETTINGS = {
     VOL_LIMIT: 7.0,   
     MAX_POSTS_PER_DAY: 100,
     MIN_GAP: 60000,
-    RESUME_HOURS: [0, 3, 7, 11] // Các khung giờ tự động chạy lại nếu bị limit
+    RESUME_HOURS: [0, 15, 7, 23]
 };
 
 const BANK = {
@@ -25,14 +25,14 @@ const BANK = {
         "☄️ Dòng tiền đang tạo ra sự đột phá từ các mô hình tích lũy.", "🐜 Lực mua đang len lỏi vào từng lệnh giao dịch nhỏ.", "🎖️ Dòng tiền đang khẳng định vị thế dẫn dắt thị trường.", "🎢 Sự quay lại của dòng vốn sau nhịp rũ bỏ mạnh mẽ.", "⚖️ Dòng tiền đang tìm kiếm sự cân bằng tại vùng giá cao.", "🛡️ Sự ổn định của dòng vốn trong bối cảnh vĩ mô mới.", "🎰 Dòng tiền đang đặt cược vào kịch bản tăng trưởng mạnh.", "🛸 Sự dịch chuyển thông minh giữa các lớp tài sản.", "⚡ Dòng tiền đang tạo ra những cú hích quan trọng.", "🏹 Lực cầu đang chờ đợi sự xác nhận từ các khung giờ lớn.",
         "📚 Dòng tiền đang tập trung vào các mã có câu chuyện riêng.", "💎 Sự tăng trưởng thanh khoản đi kèm với chất lượng dòng vốn.", "🎮 Dòng tiền đang kiểm soát hoàn toàn diễn biến giá.", "🔓 Sự bứt phá của dòng tiền khỏi vùng trung lập.", "🏔️ Dòng tiền đang hướng tới các đỉnh cao mới của năm.", "🧹 Lực mua chủ động đang quét sạch các lệnh bán treo.", "🏃 Dòng tiền đang thể hiện sự bền bỉ trong từng nhịp tăng.", "📣 Sự hưng phấn của dòng tiền đang lan rộng toàn sàn.", "💡 Dòng tiền đang tìm thấy động lực tăng trưởng mới.", "🐣 Sự đột phá về khối lượng từ các vùng giá đáy.",
         "🪜 Dòng tiền đang xác lập một nền tảng giá cao hơn.", "🏋️ Sức mạnh của dòng tiền đang được thử thách và khẳng định.", "📉 Dòng tiền đang tận dụng các nhịp giảm để gia tăng vị thế.", "🤝 Sự nhất quán của dòng vốn trong các quyết định mua.", "🌅 Dòng tiền đang mở ra những triển vọng tươi sáng.", "🌋 Lực cầu đang bùng nổ tại các điểm xoay chiều.", "🎨 Dòng tiền đang định hình lại xu hướng của thị trường.", "💂 Sự trỗi dậy mạnh mẽ của dòng tiền từ các quỹ chỉ số.", "🌗 Dòng tiền đang tạo ra sự khác biệt lớn về hiệu suất.", "⭐ Sự tập trung dòng vốn vào các mã có dòng tiền tốt.",
-        "🧨 Dòng tiền đang tạo đà cho một cú breakout lịch sử.", "🌇 Lực mua đang gia tăng mạnh mẽ vào cuối phiên.", "🌃 Dòng tiền đang duy trì sự hưng phấn cho đến khi đóng cửa.", "🏅 Sự xuất sắc của dòng tiền trong việc giữ nhịp thị trường.", "🎁 Dòng tiền đang tạo ra những cơ hội vàng cho người nắm giữ.", "🔥 Sự quyết đoán của dòng vốn trong việc đẩy giá bứt phá.", "🌠 Dòng tiền lớn đang tìm cách phá vỡ các kỷ lục cũ.", "🧩 Sự phối hợp của các dòng vốn đang rất nhịp nhàng.", "🔗 Mối liên kết giữa dòng tiền và giá đang rất chặtẽ.", "🥇 Dẫn đầu xu hướng với sự hậu thuẫn của dòng tiền cực lớn."
+        "🧨 Dòng tiền đang tạo đà cho một cú breakout lịch sử.", "🌇 Lực mua đang gia tăng mạnh mẽ vào cuối phiên.", "🌃 Dòng tiền đang duy trì sự hưng phấn cho đến khi đóng cửa.", "🏅 Sự xuất sắc của dòng tiền trong việc giữ nhịp thị trường.", "🎁 Dòng tiền đang tạo ra những cơ hội vàng cho người nắm giữ.", "🔥 Sự quyết đoán của dòng vốn trong việc đẩy giá bứt phá.", "🌠 Dòng tiền lớn đang tìm cách phá vỡ các kỷ lục cũ.", "🧩 Sự phối hợp của các dòng vốn đang rất nhịp nhàng.", "🔗 Mối liên kết giữa dòng tiền và giá đang rất chặt chẽ.", "🥇 Dẫn đầu xu hướng với sự hậu thuẫn của dòng tiền cực lớn."
     ],
     P2: [
         "📐 Về kỹ thuật giá đã bứt phá khỏi kênh giảm giá.", "🪄 Đường EMA đang thực hiện cú cắt vàng báo hiệu tăng.", "🌊 RSI đang tiến vào vùng mạnh mẽ nhưng chưa quá mua.", "🕯️ Mô hình nến nhấn chìm đã xác nhận xu hướng tăng.", "🎈 Bollinger Band mở rộng cho thấy biến động lớn.", "🛤️ Giá đang nằm trên các đường MA quan trọng.", "🧱 Kháng cự cũ đã trở thành hỗ trợ mới vững chắc.", "🏹 Phân kỳ dương H1 hỗ trợ đà tăng bền vững.", "🏔️ Cấu trúc đỉnh sau cao hơn đỉnh trước duy trì.", "☁️ Ichimoku cho thấy mây xanh nâng đỡ rất tốt.",
         "🔓 Giá đã vượt qua vùng mây Kumo dày đặc.", "📉 MACD đã chính thức giao cắt lên trên đường tín hiệu.", "💥 Khối lượng xác nhận cú bứt phá khỏi vùng tích lũy.", "☕ Mô hình cốc tay cầm đang dần hoàn thiện.", "🔭 Giá đang test lại vùng đỉnh cũ với lực cầu tốt.", "🛡️ Vùng hỗ trợ tâm lý đang được bảo vệ nghiêm ngặt.", "🔄 Stochastic đang quay trở lại vùng tăng trưởng.", "🌊 Cấu trúc sóng Elliott đang đi vào sóng 3 đẩy.", "🌅 Giá đã thoát khỏi vùng quá bán trên khung D1.", "🧬 Sự hội tụ của các chỉ báo kỹ thuật quan trọng.",
         "🔺 Mô hình tam giác tăng đã bị phá vỡ hướng lên.", "🛤️ Giá đang duy trì trên đường trendline tăng dài hạn.", "🌬️ Cú điều chỉnh vừa qua chỉ là nhịp retest kỹ thuật.", "🍃 Áp lực bán suy giảm rõ rệt trên biểu đồ nến.", "🧱 Sự bùng nổ từ mô hình nền giá phẳng dài ngày.", "💎 Tín hiệu đảo chiều mạnh mẽ từ vùng hỗ trợ cứng.", "🗼 Dải lăng trụ đang hướng lên cho thấy lực cầu mạnh.", "📏 Giá đang chinh phục các mốc Fibonacci quan trọng.", "⚡ ADX cho thấy xu hướng đang mạnh dần lên.", "🤝 Sự đồng thuận tuyệt vời giữa giá và khối lượng.",
         "🚩 Mô hình cờ tăng đang tích lũy tại vùng giá cao.", "🎯 Giá đã phá vỡ ngưỡng cản Fib 0.618 thần thánh.", "🧨 Tín hiệu Breakout đi kèm với volume cực đại.", "🐂 Cấu trúc nến cho thấy phe bò đang làm chủ.", "⚖️ Sự ổn định tại vùng giá cân bằng mới.", "📊 Volume Profile cho thấy sự tích lũy rất lớn.", "🌅 Mô hình nến Morning Star báo hiệu đảo chiều.", "🚀 Giá đã vượt qua kháng cự dải siêu xu hướng.", "🏗️ Market Structure đang chuyển dịch sang tăng.", "📽️ Tín hiệu xác nhận từ khung thời gian lớn hơn.",
-        "🌪️ Vùng cung đã bị hấphtu hoàn toàn bởi lực mua.", "🏁 Giá đang tiến sát mục tiêu chốt lời đầu tiên.", "📦 Sự bứt phá khỏi vùng tích lũy hình hộp Darvas.", "🏎️ Chỉ báo CCI đang tăng vọt lên vùng tích cực.", "💂 Mô hình 3 chàng lính trắng đang hình thành.", "⚓ Giá đã tìm thấy điểm tựa tại đường MA200.", "🤏 Sự thu hẹp của độ biến động trước cú bứt phá.", "👻 Tín hiệu phân kỳ ẩn báo hiệu tiếp diễn xu hướng.", "🏔️ Giá đang hình thành mô hình đáy sau cao hơn.", "🧬 Sự hội tụ của các đường trung bình động ngắn.",
+        "🌪️ Vùng cung đã bị hấp thụ hoàn toàn bởi lực mua.", "🏁 Giá đang tiến sát mục tiêu chốt lời đầu tiên.", "📦 Sự bứt phá khỏi vùng tích lũy hình hộp Darvas.", "🏎️ Chỉ báo CCI đang tăng vọt lên vùng tích cực.", "💂 Mô hình 3 chàng lính trắng đang hình thành.", "⚓ Giá đã tìm thấy điểm tựa tại đường MA200.", "🤏 Sự thu hẹp của độ biến động trước cú bứt phá.", "👻 Tín hiệu phân kỳ ẩn báo hiệu tiếp diễn xu hướng.", "🏔️ Giá đang hình thành mô hình đáy sau cao hơn.", "🧬 Sự hội tụ của các đường trung bình động ngắn.",
         "🚥 Chỉ báo Parabolic SAR đã nhảy xuống dưới giá.", "🎭 Mô hình vai đầu vai ngược đã chính thức xác nhận.", "🌬️ Áp lực cung cạn kiệt tại vùng biên dưới dải băng.", "🎢 Giá đang chạy trong một kênh tăng giá hoàn hảo.", "🚀 Sự đột phá về giá khỏi vùng giá trị quan trọng.", "⛲ Chỉ báo MFI cho thấy dòng tiền nạp vào mạnh.", "📐 Mô hình cái nêm giảm đã bị phá vỡ hướng lên.", "🧪 Giá đang test lại đường cổ của mô hình đảo chiều.", "🟢 Cấu trúc nến Heikin Ashi đã chuyển sang màu xanh.", "🕳️ Sự ổn định của giá phía trên vùng gap tăng.",
         "🪜 Chỉ báo Keltner Channel đang bị đẩy lên phía trên.", "📅 Giá đã vượt qua mốc cao nhất của tuần trước.", "📍 Tín hiệu tăng trưởng mạnh mẽ từ vùng pivot.", "⛸️ Mô hình 2 đáy đã hoàn thành nhịp kiểm định.", "📢 Sự cộng hưởng của nhiều khung thời gian cùng tăng.", "🧱 Giá đang giữ vững trên ngưỡng hỗ trợ Fib 0.5.", "📈 Chỉ báo OBV đang tăng vọt cùng với đường giá.", "📌 Mô hình nến Pin bar từ chối giảm tại hỗ trợ.", "🌊 Giá đang chuẩn bị cho một nhịp sóng đẩy mới.", "🔨 Sự bứt phá khỏi vùng cản kỹ thuật cứng nhất.",
         "📡 Tín hiệu mua từ hệ thống giao dịch theo xu hướng.", "🏔️ Giá đang tiệm cận vùng kháng cự quan trọng.", "🤏 Sự thu hẹp biên độ nến tại vùng giá đỉnh.", "🌑 Mô hình nến Marubozu xác nhận lực mua áp đảo.", "🔓 Giá đã thoát khỏi trạng thái tích lũy đi ngang.", "🚀 Chỉ báo Trix cho thấy đà tăng đang đẩy mạnh.", "🌊 Cấu trúc sóng tăng đang được mở rộng liên tục.", "🧱 Sự ổn định của giá tại các ngưỡng chặn kỹ thuật.", "🏁 Tín hiệu xác nhận xu hướng từ chỉ báo Donchian.", "🎯 Giá đang hướng về vùng mục tiêu của mô hình.",
@@ -66,28 +66,27 @@ const BANK = {
 
 let state = {
     isRunning: false,
-    isPaused: false, // Trạng thái chờ hồi phục khung giờ
+    isPaused: false,
     postsToday: 0,
     stats: { biendong: 0, day: 0, vol: 0 },
     lastPostTime: 0,
     postedSymbols: new Set(),
-    logs: [`[${new Date().toLocaleTimeString()}] Bot Ready. Waiting Start...`],
+    logs: [`[${new Date().toLocaleTimeString()}] LUFFY PRO READY. Waiting start...`],
     coinData: {} 
 };
 
 function addLog(msg) {
     state.logs.unshift(`[${new Date().toLocaleTimeString()}] ${msg}`);
-    if (state.logs.length > 50) state.logs.pop();
+    if (state.logs.length > 100) state.logs.pop();
 }
 
-// Kiểm tra khung giờ để Resume
 setInterval(() => {
     if (state.isPaused) {
         const hour = new Date().getHours();
         if (SETTINGS.RESUME_HOURS.includes(hour)) {
             state.isPaused = false;
-            state.postsToday = 0; // Reset số bài khi sang khung giờ mới
-            addLog("⏰ Tới khung giờ hồi phục. Bot tiếp tục hoạt động!");
+            state.postsToday = 0; 
+            addLog("⏰ Tới khung giờ Resume. Reset giới hạn & tiếp tục quét bài!");
         }
     }
 }, 60000);
@@ -103,12 +102,13 @@ function updatePriceLogic(s, p, now, change24h = 0) {
     if (!state.coinData[s]) state.coinData[s] = { symbol: s, prices: [], d1: 0 };
     let d = state.coinData[s];
     d.prices.push({ p, t: now });
-    if (d.prices.length > 100) d.prices.shift();
+    if (d.prices.length > 200) d.prices.shift();
     if (change24h !== 0) d.d1 = parseFloat(change24h).toFixed(2);
 
     d.live = {
         c1: calculateChange(d.prices, 1),
         c5: calculateChange(d.prices, 5),
+        c15: calculateChange(d.prices, 15),
         currentPrice: p
     };
 
@@ -122,12 +122,12 @@ async function postToSquare(symbol, change, type) {
     if (now - state.lastPostTime < SETTINGS.MIN_GAP) return;
     if (state.postedSymbols.has(symbol)) return;
 
-    addLog(`🔍 Phát hiện ${symbol} biến động ${change}%. Đang đăng...`);
+    addLog(`🚀 ĐANG ĐĂNG: ${symbol} đột biến ${change}%...`);
 
     const content = `${BANK.P1[Math.floor(Math.random() * 100)]}\n\n${BANK.P2[Math.floor(Math.random() * 100)]}\n\n${BANK.P3[Math.floor(Math.random() * 100)]}\n\n${BANK.P4[Math.floor(Math.random() * 100)]}\n\n#${symbol} $${symbol}`;
 
     try {
-        const response = await axios.post(SETTINGS.SQUARE_URL, { bodyTextOnly: content }, {
+        await axios.post(SETTINGS.SQUARE_URL, { bodyTextOnly: content }, {
             headers: { "X-Square-OpenAPI-Key": SQUAD_API_KEY, "Content-Type": "application/json" }
         });
         
@@ -135,26 +135,24 @@ async function postToSquare(symbol, change, type) {
         state.stats[type]++;
         state.lastPostTime = now;
         state.postedSymbols.add(symbol);
-        addLog(`✅ Đăng thành công #${state.postsToday}: ${symbol}`);
+        addLog(`✅ THÀNH CÔNG: #${state.postsToday} [${symbol}]`);
 
     } catch (e) {
         const errMsg = e.response?.data?.message || "";
         if (errMsg.includes("limit") || state.postsToday >= SETTINGS.MAX_POSTS_PER_DAY) {
             state.isPaused = true;
-            addLog("🚨 Binance Limit (100 bài/ngày). Tạm dừng đăng bài.");
-            addLog("⏳ Chờ tới 0h, 3h, 7h hoặc 11h để tiếp tục...");
+            addLog("🛑 BINANCE LIMIT: Tạm dừng đăng tới khung giờ Resume kế tiếp.");
         } else {
-            addLog(`❌ Lỗi API: ${errMsg}`);
+            addLog(`⚠️ LỖI API: ${symbol} - ${errMsg}`);
         }
     }
 }
 
-// Khởi tạo dữ liệu và Socket
 async function init() {
     try {
         const res = await fetch('https://fapi.binance.com/fapi/v1/ticker/24hr');
         const tickers = await res.json();
-        tickers.filter(t => t.symbol.endsWith('USDT')).slice(0, 50).forEach(t => {
+        tickers.filter(t => t.symbol.endsWith('USDT')).slice(0, 100).forEach(t => {
             state.coinData[t.symbol] = { symbol: t.symbol, prices: [{p: parseFloat(t.lastPrice), t: Date.now()}], d1: t.priceChangePercent };
         });
         
@@ -164,78 +162,77 @@ async function init() {
             const now = Date.now();
             data.forEach(t => { if(t.s.endsWith('USDT')) updatePriceLogic(t.s, parseFloat(t.c), now, t.P); });
         });
-    } catch (e) { addLog("Lỗi khởi tạo WS."); }
+        addLog("📡 WebSocket kết nối thành công.");
+    } catch (e) { addLog("❌ Khởi tạo dữ liệu thất bại."); }
 }
 
 const app = express();
 app.get('/api/status', (req, res) => {
-    const table = Object.entries(state.coinData).filter(v => v[1].live).map(v => ({ s: v[0], ...v[1].live, d1: v[1].d1 })).sort((a,b)=>Math.abs(b.c1)-Math.abs(a.c1)).slice(0, 10);
+    const table = Object.entries(state.coinData).filter(v => v[1].live).map(v => ({ s: v[0], ...v[1].live, d1: v[1].d1 })).sort((a,b)=>Math.abs(b.c1)-Math.abs(a.c1)).slice(0, 15);
     res.json({ ...state, table });
 });
-app.get('/api/toggle', (req, res) => { state.isRunning = !state.isRunning; addLog(state.isRunning ? "▶️ Bot Started" : "⏹️ Bot Stopped"); res.json({ s: state.isRunning }); });
+app.get('/api/toggle', (req, res) => { state.isRunning = !state.isRunning; addLog(state.isRunning ? "▶️ BOT START" : "⏹️ BOT STOP"); res.json({ s: state.isRunning }); });
 
 app.get('/', (req, res) => {
-    res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><script src="https://cdn.tailwindcss.com"></script><style>@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;900&display=swap'); body{background:#0b0e11; user-select:none;}</style></head>
-    <body class="p-2 text-zinc-300">
-        <div class="max-w-md mx-auto space-y-3">
-            <div class="bg-[#1e2329] p-4 rounded-3xl border-b-4 border-yellow-500 shadow-2xl">
-                <div class="flex justify-between items-center mb-4">
+    res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><script src="https://cdn.tailwindcss.com"></script><style>@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;900&display=swap'); body{background:#0b0e11; color:#d1d5db;}</style></head>
+    <body class="p-2 font-sans">
+        <div class="max-w-md mx-auto space-y-4">
+            <div class="bg-[#1e2329] p-5 rounded-[2.5rem] border-b-4 border-yellow-500 shadow-2xl">
+                <div class="flex justify-between items-center mb-6">
                     <div>
-                        <h1 style="font-family:'Orbitron'" class="text-xl font-black text-yellow-500 italic leading-none">LUFFY PRO</h1>
-                        <p class="text-[10px] text-zinc-500 font-bold mt-1">SQUAD AUTOMATION</p>
+                        <h1 style="font-family:'Orbitron'" class="text-2xl font-black text-yellow-500 italic">LUFFY PRO</h1>
+                        <p class="text-[9px] text-zinc-500 font-bold uppercase tracking-widest">Square Bot Automation</p>
                     </div>
-                    <button onclick="toggle()" id="btn" class="bg-yellow-500 text-black font-black px-6 py-3 rounded-2xl text-sm shadow-[0_0_15px_rgba(234,179,8,0.3)]">START</button>
+                    <button onclick="toggle()" id="btn" class="bg-yellow-500 text-black font-black px-8 py-4 rounded-2xl text-sm transition-all active:scale-90">START</button>
                 </div>
-                <div class="grid grid-cols-3 gap-2">
-                    <div class="bg-black/40 p-3 rounded-2xl text-center">
-                        <div class="text-[9px] text-zinc-500 uppercase">Hôm nay</div>
-                        <div id="posts" class="text-lg font-black text-white">0</div>
+                <div class="grid grid-cols-3 gap-3">
+                    <div class="bg-black/40 p-3 rounded-2xl border border-zinc-800 text-center">
+                        <p class="text-[9px] text-zinc-500 uppercase">Biến Động</p>
+                        <p id="stat-bd" class="text-lg font-black text-red-500">0</p>
                     </div>
-                    <div id="statusTag" class="bg-black/40 p-3 rounded-2xl text-center">
-                        <div class="text-[9px] text-zinc-500 uppercase">Trạng thái</div>
-                        <div id="sttText" class="text-[10px] font-black text-zinc-500 italic">OFFLINE</div>
+                    <div class="bg-black/40 p-3 rounded-2xl border border-zinc-800 text-center">
+                        <p class="text-[9px] text-zinc-500 uppercase">Ngày</p>
+                        <p id="stat-day" class="text-lg font-black text-green-500">0/100</p>
                     </div>
-                    <div class="bg-black/40 p-3 rounded-2xl text-center">
-                        <div class="text-[9px] text-zinc-500 uppercase">Biến động</div>
-                        <div id="vol" class="text-lg font-black text-red-500">0</div>
+                    <div class="bg-black/40 p-3 rounded-2xl border border-zinc-800 text-center">
+                        <p class="text-[9px] text-zinc-500 uppercase">Trạng Thái</p>
+                        <p id="sttText" class="text-[10px] font-black text-zinc-400 mt-2 italic">OFFLINE</p>
                     </div>
                 </div>
             </div>
 
-            <div class="bg-[#1e2329] rounded-3xl p-4 shadow-lg border border-zinc-800">
-                <h2 class="text-[11px] font-bold text-zinc-500 mb-3 flex items-center">📊 THỊ TRƯỜNG (Biến động > ${SETTINGS.VOL_LIMIT}%)</h2>
-                <div id="tb" class="space-y-2"></div>
+            <div class="bg-[#1e2329] rounded-[2rem] p-4 border border-zinc-800">
+                <h2 class="text-[11px] font-black text-zinc-500 mb-4 flex gap-2 items-center italic">📊 BẢNG BIẾN ĐỘNG CHI TIẾT</h2>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left text-[11px]">
+                        <thead><tr class="text-zinc-600 border-b border-zinc-800"><th class="pb-2">COIN</th><th class="pb-2">1M</th><th class="pb-2">5M</th><th class="pb-2 text-right">24H</th></tr></thead>
+                        <tbody id="tb-body"></tbody>
+                    </table>
+                </div>
             </div>
 
-            <div class="bg-black border border-zinc-800 rounded-3xl p-4">
-                <h2 class="text-[11px] font-bold text-zinc-500 mb-2">📜 LOG CHI TIẾT</h2>
-                <div id="lb" class="h-48 overflow-y-auto text-[11px] font-mono space-y-1 text-green-400"></div>
+            <div class="bg-black rounded-[2rem] p-5 border border-zinc-800">
+                <h2 class="text-[11px] font-black text-zinc-600 uppercase mb-3 tracking-widest">Log Chi Tiết</h2>
+                <div id="lb" class="h-60 overflow-y-auto text-[10px] font-mono space-y-2 text-zinc-400"></div>
             </div>
         </div>
-
         <script>
-            async function toggle() { const res = await fetch('/api/toggle'); }
+            async function toggle() { await fetch('/api/toggle'); }
             async function update() {
                 const res = await fetch('/api/status'); const d = await res.json();
                 document.getElementById('btn').innerText = d.isRunning ? "STOP" : "START";
-                document.getElementById('btn').className = d.isRunning ? "bg-red-500 text-white font-black px-6 py-3 rounded-2xl text-sm" : "bg-yellow-500 text-black font-black px-6 py-3 rounded-2xl text-sm";
-                document.getElementById('posts').innerText = d.postsToday;
-                document.getElementById('vol').innerText = d.stats.biendong;
-                
-                const sttBox = document.getElementById('sttText');
-                if(!d.isRunning) { sttBox.innerText = "OFFLINE"; sttBox.className="text-[10px] font-black text-zinc-500"; }
-                else if(d.isPaused) { sttBox.innerText = "WAITING..."; sttBox.className="text-[10px] font-black text-orange-500 animate-pulse"; }
-                else { sttBox.innerText = "RUNNING"; sttBox.className="text-[10px] font-black text-green-500"; }
-
-                document.getElementById('lb').innerHTML = d.logs.map(l => \`<div class="border-l-2 border-zinc-800 pl-2">\${l}</div>\`).join('');
-                document.getElementById('tb').innerHTML = d.table.map(v => \`
-                    <div class="flex justify-between items-center bg-black/20 p-2 rounded-xl border border-zinc-900">
-                        <span class="font-bold text-sm">\${v.s.replace('USDT','')}</span>
-                        <div class="flex gap-4 items-center">
-                            <span class="\${v.c1>=0?'text-green-500':'text-red-500'} font-bold">1m: \${v.c1}%</span>
-                            <span class="bg-zinc-800 px-2 py-1 rounded text-[10px] text-white">24h: \${v.d1}%</span>
-                        </div>
-                    </div>\`).join('');
+                document.getElementById('btn').className = d.isRunning ? "bg-red-500 text-white font-black px-8 py-4 rounded-2xl text-sm" : "bg-yellow-500 text-black font-black px-8 py-4 rounded-2xl text-sm";
+                document.getElementById('stat-bd').innerText = d.stats.biendong;
+                document.getElementById('stat-day').innerText = d.postsToday + "/100";
+                const stt = document.getElementById('sttText');
+                if(!d.isRunning) { stt.innerText = "OFFLINE"; stt.className="text-[10px] font-black text-zinc-500 uppercase"; }
+                else if(d.isPaused) { stt.innerText = "PAUSED (LIMIT)"; stt.className="text-[10px] font-black text-orange-500 animate-pulse"; }
+                else { stt.innerText = "RUNNING"; stt.className="text-[10px] font-black text-green-500"; }
+                document.getElementById('lb').innerHTML = d.logs.map(l => \`<div class="border-l-2 border-zinc-800 pl-2 opacity-80">\${l}</div>\`).join('');
+                document.getElementById('tb-body').innerHTML = d.table.map(v => \`
+                    <tr class="border-b border-zinc-800/30"><td class="py-3 font-black text-white italic">\${v.s.replace('USDT','')}</td>
+                    <td class="font-bold \${v.c1>=0?'text-green-500':'text-red-500'}">\${v.c1}%</td>
+                    <td class="text-zinc-500">\${v.c5}%</td><td class="text-right text-zinc-400 font-bold">\${v.d1}%</td></tr>\`).join('');
             }
             setInterval(update, 2000);
         </script>
