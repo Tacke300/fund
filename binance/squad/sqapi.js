@@ -17,8 +17,8 @@ const binance = new Binance().options({
 const SETTINGS = {
     SQUARE_URL: "https://www.binance.com/bapi/composite/v1/public/pgc/openApi/content/add",
     VOL_LIMIT: 7.0,    
-    MAX_TOTAL: 50,     
-    MIN_GAP: 10000,    
+    MAX_TOTAL: 100,     
+    MIN_GAP: 6000,    
 };
 
 // --- NGÂN HÀNG DỮ LIỆU: 4 PHẦN x 100 CÂU ---
@@ -95,6 +95,7 @@ function calculateChange(pArr, min) {
     return parseFloat((((pArr[pArr.length - 1].p - start.p) / start.p) * 100).toFixed(2));
 }
 
+// Logic cập nhật giá và kiểm tra biến động
 async function updatePriceLogic(s, p, now) {
     if (!state.coinData[s]) {
         state.coinData[s] = { symbol: s, prices: [{p, t: now}] };
@@ -132,15 +133,18 @@ async function postToSquare(symbol, changeText, type) {
         state.stats[type]++;
         state.lastPostTime = Date.now();
         state.postedTodaySymbols.add(symbol);
-        addLog(`✅ [POST] ${symbol} | Lý do: ${changeText} | Ngày: ${state.postsToday}/50`);
+        addLog(`✅ [POST] ${symbol} | Lý do: ${changeText} | SL: ${state.postsToday}`);
     } catch (e) { addLog(`❌ Lỗi API Square: ${e.message}`); }
 }
 
+// Logic 23h-0h: Nếu chưa đủ bài, quét Vol bù cho hết chỉ tiêu
 async function checkNightFill() {
     if (!state.isRunning) return;
     const now = new Date();
-    if (now.getHours() === 23 && state.postsToday < SETTINGS.MAX_TOTAL) {
-        addLog(`🌙 Đang là 23h, chưa đủ 50 bài. Đang quét Top Vol...`);
+    const hour = now.getHours();
+    
+    if (hour === 23 && state.postsToday < SETTINGS.MAX_TOTAL) {
+        addLog(`🌙 23h: Đang đăng bù bằng Top Volume (Còn thiếu ${SETTINGS.MAX_TOTAL - state.postsToday} bài)...`);
         try {
             const tickers = await binance.futures24hrTicker();
             const topVol = tickers
@@ -149,13 +153,13 @@ async function checkNightFill() {
 
             for (let coin of topVol) {
                 if (state.postsToday >= SETTINGS.MAX_TOTAL) break;
-                await postToSquare(coin.symbol, "Top Volume Đêm", 'vol');
-                await new Promise(r => setTimeout(r, 2500)); 
+                await postToSquare(coin.symbol, "Top Vol Đêm", 'vol');
+                await new Promise(r => setTimeout(r, 3000)); 
             }
         } catch (e) { addLog("❌ Lỗi quét Vol đêm"); }
     }
     
-    if (now.getHours() === 0 && now.getMinutes() === 0) {
+    if (hour === 0 && now.getMinutes() === 0) {
         state.postsToday = 0;
         state.stats = { biendong: 0, vol: 0 };
         state.postedTodaySymbols.clear();
@@ -165,17 +169,16 @@ async function checkNightFill() {
 
 setInterval(checkNightFill, 60000);
 
-// PHƯƠNG PHÁP FIX LỖI CUỐI CÙNG: Dùng WebSocket thô kết nối trực tiếp vào Binance Stream
+// Fix WebSocket thô: Đọc đúng format JSON stream !ticker@arr
 function initWS() {
-    addLog("⚡ Engine Luffy V3 (Direct WS Mode) Starting...");
-    
-    // Kết nối trực tiếp vào stream giá toàn bộ thị trường Futures của Binance
+    addLog("⚡ Engine Luffy V3 Starting...");
     const ws = new WebSocket('wss://fstream.binance.com/ws/!ticker@arr');
 
-    ws.on('open', () => addLog("🔗 Đã kết nối WebSocket Binance thành công!"));
+    ws.on('open', () => addLog("🔗 Kết nối Binance Stream thành công!"));
     ws.on('message', (data) => {
-        const tickers = JSON.parse(data);
-        tickers.forEach(t => {
+        const rawTickers = JSON.parse(data);
+        rawTickers.forEach(t => {
+            // Stream thô trả về symbol ở key 's' và giá hiện tại ở key 'c'
             if (t.s.endsWith('USDT')) {
                 updatePriceLogic(t.s, parseFloat(t.c), Date.now());
             }
@@ -184,17 +187,18 @@ function initWS() {
 
     ws.on('error', (e) => addLog(`⚠️ Lỗi WS: ${e.message}`));
     ws.on('close', () => {
-        addLog("🔄 Mất kết nối WS. Đang thử lại sau 5s...");
+        addLog("🔄 Mất kết nối WS. Reconnect sau 5s...");
         setTimeout(initWS, 5000);
     });
 }
 
 const app = express();
 app.get('/api/status', (req, res) => {
+    // Chỉ lấy những coin có biến động thực tế để hiển thị bảng
     const table = Object.values(state.coinData)
         .filter(v => v.live)
         .sort((a, b) => Math.abs(b.live.c5) - Math.abs(a.live.c5))
-        .slice(0, 20)
+        .slice(0, 25)
         .map(v => ({ s: v.symbol, c1: v.live.c1, c5: v.live.c5 }));
     res.json({ ...state, table });
 });
@@ -210,10 +214,10 @@ app.get('/', (req, res) => {
                     <h1 style="font-family:'Orbitron'" class="text-xl font-black text-yellow-500 italic">LUFFY PRO V3</h1>
                     <button onclick="fetch('/api/toggle')" id="btn" class="px-6 py-2 rounded-xl font-bold transition-all text-sm shadow-lg">START</button>
                 </div>
-                <div class="grid grid-cols-3 gap-2 text-center font-mono">
-                    <div class="bg-black/40 p-2 rounded-xl text-red-500 font-bold" id="s1">0</div>
-                    <div class="bg-black/40 p-2 rounded-xl text-green-500 font-bold" id="s2">0</div>
-                    <div class="bg-black/40 p-2 rounded-xl text-blue-500 font-bold" id="st">0/50</div>
+                <div class="grid grid-cols-3 gap-2 text-center font-mono text-sm">
+                    <div class="bg-black/40 p-2 rounded-xl text-red-500 font-bold" id="s1">BD: 0</div>
+                    <div class="bg-black/40 p-2 rounded-xl text-green-500 font-bold" id="s2">VOL: 0</div>
+                    <div class="bg-black/40 p-2 rounded-xl text-blue-500 font-bold" id="st">0</div>
                 </div>
             </div>
             <div class="bg-[#1e2329] rounded-2xl flex-1 overflow-hidden flex flex-col mb-3 border border-white/5">
@@ -234,7 +238,7 @@ app.get('/', (req, res) => {
                     btn.className = d.isRunning ? "px-6 py-2 rounded-xl font-bold bg-red-500 text-white" : "px-6 py-2 rounded-xl font-bold bg-yellow-500 text-black";
                     document.getElementById('s1').innerText = "BD: " + d.stats.biendong;
                     document.getElementById('s2').innerText = "VOL: " + d.stats.vol;
-                    document.getElementById('st').innerText = d.postsToday + "/50";
+                    document.getElementById('st').innerText = d.postsToday;
                     if (d.logs.length > 0) document.getElementById('lb').innerHTML = d.logs.map(l => \`<div>\${l}</div>\`).join('');
                     const tbody = document.getElementById('tb');
                     tbody.innerHTML = d.table.map(v => \`
