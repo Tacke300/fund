@@ -94,9 +94,7 @@ async function getPriceAt7AM(symbol) {
     try {
         const sevenAM = new Date();
         sevenAM.setHours(7, 0, 0, 0);
-        // Nếu hiện tại chưa tới 7h sáng của ngày mới, lấy giá lúc bot khởi chạy (now)
         if (Date.now() < sevenAM.getTime()) return null; 
-
         const ticks = await binance.futuresCandles(symbol, "1m", { startTime: sevenAM.getTime(), limit: 1 });
         return ticks.length > 0 ? parseFloat(ticks[0][1]) : null;
     } catch (e) { return null; }
@@ -111,7 +109,7 @@ function calculateChange(pArr, min) {
 
 async function updatePriceLogic(s, p, now) {
     if (!state.coinData[s]) {
-        const p7am = await getPriceAt7AM(s) || p; // Nếu không có 7AM, dùng giá lúc bot chạy
+        const p7am = await getPriceAt7AM(s) || p;
         state.coinData[s] = { symbol: s, prices: [{p, t: now}], p7am };
     }
     
@@ -174,19 +172,16 @@ async function postTypeVol() {
 
 setInterval(() => { if (state.isRunning) postTypeVol(); }, 600000);
 
+// FIX TRIỆT ĐỂ LỖI toLowerCase: Sử dụng futuresAllTickerStream 
 function initWS() {
     addLog("⚡ Engine Luffy Pro v2 Starting...");
-    // FIX TRIỆT ĐỂ LỖI: binance.futuresTickerStream(false, (tickers) => { ... })
-    // Tham số đầu tiên phải là false nếu muốn stream toàn bộ thị trường
-    binance.futuresTickerStream(false, (tickers) => {
+    binance.futuresAllTickerStream((tickers) => {
         if (Array.isArray(tickers)) {
             tickers.forEach(t => {
                 if (t.symbol && t.symbol.endsWith('USDT')) {
                     updatePriceLogic(t.symbol, parseFloat(t.close), Date.now());
                 }
             });
-        } else if (tickers && tickers.symbol) {
-            updatePriceLogic(tickers.symbol, parseFloat(tickers.close), Date.now());
         }
     });
 }
@@ -219,7 +214,6 @@ app.get('/', (req, res) => {
                     <div class="bg-black/40 p-2 rounded-xl"><div class="text-[8px] text-zinc-500 uppercase">TOTAL</div><div id="st" class="text-xs font-bold text-blue-500">0</div></div>
                 </div>
             </div>
-
             <div class="bg-[#1e2329] rounded-2xl flex-1 overflow-hidden flex flex-col mb-3 border border-white/5 shadow-xl">
                 <div class="p-3 bg-white/5 text-[10px] font-bold text-yellow-500 flex justify-between uppercase">
                     <span>Thị trường Realtime</span>
@@ -234,7 +228,6 @@ app.get('/', (req, res) => {
                     </table>
                 </div>
             </div>
-
             <div id="lb" class="h-28 bg-black/80 rounded-xl p-3 text-[9px] font-mono overflow-y-auto text-zinc-400 border border-white/5"></div>
         </div>
         <script>
@@ -244,18 +237,15 @@ app.get('/', (req, res) => {
                     const d = await res.json();
                     const btn = document.getElementById('btn');
                     btn.innerText = d.isRunning ? "STOP ENGINE" : "START ENGINE";
-                    btn.className = d.isRunning ? "px-6 py-2 rounded-xl font-bold bg-red-500/20 text-red-500 border border-red-500/50 shadow-[0_0_15px_rgba(239,68,68,0.3)]" : "px-6 py-2 rounded-xl font-bold bg-yellow-500 text-black shadow-lg";
-                    
+                    btn.className = d.isRunning ? "px-6 py-2 rounded-xl font-bold bg-red-500/20 text-red-500 border border-red-500/50" : "px-6 py-2 rounded-xl font-bold bg-yellow-500 text-black";
                     document.getElementById('s1').innerText = d.stats.biendong;
                     document.getElementById('s2').innerText = d.stats.day;
                     document.getElementById('s3').innerText = d.stats.vol;
                     document.getElementById('st').innerText = d.postsToday;
-                    
                     if (d.logs.length > 0) document.getElementById('lb').innerHTML = d.logs.map(l => \`<div>\${l}</div>\`).join('');
-                    
                     const tbody = document.getElementById('tb');
                     tbody.innerHTML = d.table.map(v => \`
-                        <tr class="border-b border-white/5 hover:bg-white/5 transition-colors">
+                        <tr class="border-b border-white/5 hover:bg-white/5">
                             <td class="p-3 font-bold text-zinc-100">\${v.s.replace('USDT','')}</td>
                             <td class="text-right p-3 \${Math.abs(v.c1)>=3?'text-red-500 font-bold':'text-zinc-400'}">\${v.c1}%</td>
                             <td class="text-right p-3 \${Math.abs(v.c5)>=5?'text-red-400 font-bold':'text-zinc-400'}">\${v.c5}%</td>
