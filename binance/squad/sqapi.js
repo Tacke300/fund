@@ -190,7 +190,7 @@ app.get('/', (req, res) => {
         <script>
             function updateTimer(lastTime) {
                 if (!lastTime) return "--:--";
-                const next = lastTime + (15 * 60000);
+                const next = lastTime + (10 * 60000);
                 const diff = next - Date.now();
                 if (diff <= 0) return "READY";
                 const m = Math.floor(diff / 60000);
