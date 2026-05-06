@@ -15,11 +15,11 @@
     </style>
 </head>
 <body class="p-2 space-y-3">
+    <!-- 1. TÀI KHOẢN & STATS -->
     <div class="card grid grid-cols-2 gap-4">
         <div class="space-y-1">
             <p class="text-[9px] text-zinc-500 uppercase">Tài khoản</p>
             <div class="flex justify-between"><span>Ví:</span> <b id="totalWallet">0.00</b></div>
-            <!-- Dòng mới thêm: Số dư khả dụng -->
             <div class="flex justify-between text-zinc-400"><span>Khả dụng:</span> <b id="availBalance">0.00</b></div>
             <div class="flex justify-between"><span>Unl PnL:</span> <b id="unrealizedPnL">0.00</b></div>
         </div>
@@ -31,7 +31,7 @@
         </div>
     </div>
 
-    <!-- Các phần khác giữ nguyên ... -->
+    <!-- 2. CẤU HÌNH (Đã đưa lên trên) -->
     <div class="card grid grid-cols-3 gap-2">
         <div><p class="text-[9px] text-zinc-500">VỐN</p><input id="invValue"></div>
         <div><p class="text-[9px] text-zinc-500">MAX POS</p><input id="maxPositions"></div>
@@ -45,8 +45,16 @@
         </div>
     </div>
 
+    <!-- 3. LOGS -->
+    <div id="logs" class="card h-[120px] overflow-y-auto text-[10px] text-zinc-400 space-y-1 font-mono"></div>
+
+    <!-- 4. BLACKLIST -->
     <div class="card flex flex-wrap gap-2 min-h-[25px]" id="blacklist-display"></div>
 
+    <!-- 5. VỊ THẾ ĐANG MỞ (Đã đưa xuống dưới) -->
+    <div id="pos-list" class="space-y-2"></div>
+
+    <!-- 6. KÈO TIỀM NĂNG -->
     <div class="card">
         <table class="w-full text-left text-[11px]">
             <tr class="text-zinc-500 border-b border-zinc-800">
@@ -55,9 +63,6 @@
             <tbody id="candidate-list"></tbody>
         </table>
     </div>
-
-    <div id="logs" class="card h-[120px] overflow-y-auto text-[10px] text-zinc-400 space-y-1 font-mono"></div>
-    <div id="pos-list" class="space-y-2"></div>
 
     <script>
         function fmtTime(s) {
@@ -73,7 +78,6 @@
                 
                 if(d.wallet) {
                     document.getElementById('totalWallet').innerText = d.wallet.totalWalletBalance;
-                    // Hiển thị số dư khả dụng từ API trả về
                     document.getElementById('availBalance').innerText = d.wallet.availableBalance;
                     document.getElementById('unrealizedPnL').innerText = d.wallet.totalUnrealizedProfit;
                     document.getElementById('unrealizedPnL').className = parseFloat(d.wallet.totalUnrealizedProfit) >= 0 ? 'up' : 'down';
