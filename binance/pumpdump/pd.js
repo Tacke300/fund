@@ -22,7 +22,7 @@ let botSettings = { isRunning: false, maxPositions: 3, invValue: "1%", minVol: 6
 let status = { botLogs: [], exchangeInfo: null, candidatesList: [], isReady: false, blackList: {}, botClosedCount: 0, botPnLClosed: 0 };
 let botActivePositions = new Map();
 let timestampOffset = 0; 
-let openingSymbols = new Set(); // <--- CHỐT CHẶN 1: Chống vượt Max Pos
+let openingSymbols = new Set(); 
 
 function addBotLog(msg, type = 'info') {
     const time = new Date().toLocaleTimeString('vi-VN', { hour12: false });
@@ -46,16 +46,45 @@ async function binancePrivate(endpoint, method = 'GET', data = {}) {
     }
 }
 
-// 1. HÀM DỌN DẸP LỆNH MA (CHỐNG LỖI 4130)
-async function clearAndVerify(symbol, side) {
+/**
+ * 1. QUY TRÌNH XÓA VÀ XÁC NHẬN (DELAY 3S + 3S)
+ */
+async function hardClearOrders(symbol, side) {
     try {
+        addBotLog(`🗑️ [${symbol}] Bắt đầu quy trình xóa lệnh chờ...`);
+        // Lệnh xóa tất cả
         await binancePrivate('/fapi/v1/allOpenOrders', 'DELETE', { symbol });
-        await new Promise(r => setTimeout(r, 1000));
+        
+        addBotLog(`⏳ [${symbol}] Đợi 3 giây để sàn xử lý lệnh xóa...`);
+        await new Promise(r => setTimeout(r, 3000));
+
+        // Kiểm tra lại xem còn lệnh nào không
+        const openOrders = await binancePrivate('/fapi/v1/openOrders', 'GET', { symbol });
+        const remain = openOrders.filter(o => o.positionSide === side);
+
+        if (remain.length > 0) {
+            addBotLog(`⚠️ [${symbol}] Phát hiện lệnh chưa xóa sạch, đang xóa cưỡng chế...`, "warning");
+            for (const order of remain) {
+                await binancePrivate('/fapi/v1/order', 'DELETE', { symbol, orderId: order.orderId });
+            }
+            await new Promise(r => setTimeout(r, 2000));
+        } else {
+            addBotLog(`✅ [${symbol}] Xác nhận đã sạch lệnh chờ.`);
+        }
+
+        addBotLog(`⏳ [${symbol}] Đợi thêm 3 giây ổn định trước khi cài mới...`);
+        await new Promise(r => setTimeout(r, 3000));
+        
         return true;
-    } catch (e) { return true; }
+    } catch (e) {
+        addBotLog(`❌ [${symbol}] Lỗi khi xóa lệnh: ${e.message}`, "error");
+        return true; 
+    }
 }
 
-// 2. HÀM SYNC TP/SL (TRẢ VỀ ĐÚNG ĐỊNH DẠNG CŨ)
+/**
+ * 2. CÀI ĐẶT TP/SL (FIX THEO YÊU CẦU XÓA - ĐỢI - CÀI)
+ */
 async function syncTPSL(symbol, side, entry, info) {
     const isShort = (side === 'SHORT');
     const tpPrice = (entry * (isShort ? (1 - botSettings.posTP / 100) : (1 + botSettings.posTP / 100))).toFixed(info.pricePrecision);
@@ -63,39 +92,45 @@ async function syncTPSL(symbol, side, entry, info) {
     const sideClose = isShort ? 'buy' : 'sell';
 
     try {
-        await clearAndVerify(symbol, side);
-        await exchange.createOrder(symbol, 'TAKE_PROFIT_MARKET', sideClose, undefined, undefined, { 
-            positionSide: side, stopPrice: tpPrice, closePosition: true 
+        // Thực hiện quy trình Xóa 3s -> Xác nhận -> Đợi 3s
+        await hardClearOrders(symbol, side);
+
+        // Cài đặt lệnh mới (Sử dụng closePosition: 'true' cho Hedge Mode)
+        await exchange.createOrder(symbol, 'TAKE_PROFIT_MARKET', sideClose, 1, undefined, { 
+            positionSide: side, stopPrice: tpPrice, closePosition: 'true' 
         });
+        
         await new Promise(r => setTimeout(r, 1000));
-        await exchange.createOrder(symbol, 'STOP_MARKET', sideClose, undefined, undefined, { 
-            positionSide: side, stopPrice: slPrice, closePosition: true 
+        
+        await exchange.createOrder(symbol, 'STOP_MARKET', sideClose, 1, undefined, { 
+            positionSide: side, stopPrice: slPrice, closePosition: 'true' 
         });
-        addBotLog(`✨ [${symbol}] Đã cài TP:${tpPrice} SL:${slPrice}`, "success");
+
+        addBotLog(`✨ [${symbol}] Đã cài lại TP:${tpPrice} SL:${slPrice}`, "success");
         return { tp: Number(tpPrice), sl: Number(slPrice) };
     } catch (e) {
-        addBotLog(`❌ [${symbol}] Lỗi đặt TP/SL: ${e.message}`, "error");
-        throw e;
+        addBotLog(`❌ [${symbol}] Lỗi cài TP/SL: ${e.message}`, "error");
+        throw e; 
     }
 }
 
-// 3. MỞ VỊ THẾ (GIỮ NGUYÊN TOÀN BỘ BIẾN GỐC)
+/**
+ * 3. MỞ VỊ THẾ / DCA
+ */
 async function openPosition(symbol, isDCA = false, candidateData = null) {
     const posKey = `${symbol}_SHORT`;
     if (!isDCA && (botActivePositions.has(posKey) || openingSymbols.has(symbol))) return;
-    
-    openingSymbols.add(symbol); // <--- KHÓA SLOT NGAY LẬP TỨC
+    openingSymbols.add(symbol); 
 
     try {
         const info = status.exchangeInfo[symbol];
-        const ticker = await binanceApi.get(`/fapi/v1/ticker/price?symbol=${symbol}`);
-        const currentPrice = parseFloat(ticker.data.price);
+        const currentPrice = await binanceApi.get(`/fapi/v1/ticker/price?symbol=${symbol}`).then(res => parseFloat(res.data.price));
         
         let currentPos = botActivePositions.get(posKey);
         let marginToUse = 0, currentDCA = 0, firstMargin = 0;
 
         if (isDCA && currentPos) {
-            currentPos.isProcessing = true;
+            currentPos.isProcessing = true; 
             firstMargin = currentPos.firstMargin;
             marginToUse = firstMargin * 1.03; 
             currentDCA = currentPos.dcaCount + 1;
@@ -123,25 +158,25 @@ async function openPosition(symbol, isDCA = false, candidateData = null) {
             if (upPos && Math.abs(parseFloat(upPos.positionAmt)) > 0) {
                 const finalEntry = parseFloat(upPos.entryPrice);
                 const finalQty = Math.abs(parseFloat(upPos.positionAmt));
+
                 const sync = await syncTPSL(symbol, 'SHORT', finalEntry, info);
                 
-                // <--- TRẢ VỀ ĐÚNG CÁC BIẾN CŨ CỦA M ĐỂ DASHBOARD VÀ LOOP CHẠY
                 botActivePositions.set(posKey, { 
                     symbol, side: 'SHORT', entryPrice: finalEntry, qty: finalQty, tp: sync.tp, sl: sync.sl, 
                     margin: (finalQty * finalEntry / info.maxLeverage), firstMargin, dcaCount: currentDCA, 
-                    isProcessing: false, hedgeOpened: false, markPrice: currentPrice, pnl: 0, priceDev: 0
+                    isProcessing: false, 
+                    hedgeOpened: false
                 });
             }
         }
     } catch (e) {
-        addBotLog(`🚨 [${symbol}] LỖI: ${e.message}`, "error");
-        if(botActivePositions.has(posKey)) botActivePositions.get(posKey).isProcessing = false;
+        addBotLog(`🚨 [${symbol}] LỖI HỆ THỐNG: ${e.message}`, "error");
+        if (isDCA && botActivePositions.has(posKey)) botActivePositions.get(posKey).isProcessing = false;
     } finally {
-        openingSymbols.delete(symbol); // <--- GIẢI PHÓNG SLOT
+        openingSymbols.delete(symbol);
     }
 }
 
-// 4. CÁC HÀM CÒN LẠI GIỮ NGUYÊN 100% TỪ CODE GỐC CỦA M
 async function trackClosedPnL(symbol, closedTime, lastBotPos) {
     try {
         await new Promise(r => setTimeout(r, 4000));
@@ -176,24 +211,23 @@ async function priceMonitorLoop() {
     setTimeout(priceMonitorLoop, 1000);
 }
 
-// 5. MAIN LOOP: SỬA ĐÚNG LOGIC CHẶN VƯỢT MAX POS
 async function mainLoop() {
     if (!status.isReady || !botSettings.isRunning) return;
     try {
         const posRisk = await binancePrivate('/fapi/v2/positionRisk');
         const activeShorts = posRisk.filter(p => p.positionSide === 'SHORT' && Math.abs(parseFloat(p.positionAmt)) > 0);
-        
         for (let [key, botPos] of botActivePositions) {
-            if (botPos.isProcessing) continue;
-            if (botPos.priceDev >= botSettings.dcaStep && botPos.dcaCount < botSettings.maxDCA) { 
+            if (botPos.isProcessing) continue; 
+            const realPos = activeShorts.find(p => p.symbol === botPos.symbol);
+            if (!realPos) continue;
+            const pEntry = parseFloat(realPos.entryPrice);
+            const pMark = parseFloat(realPos.markPrice);
+            const priceDev = ((pMark - pEntry) / pEntry) * 100;
+            if (priceDev >= botSettings.dcaStep && botPos.dcaCount < botSettings.maxDCA) { 
                 await openPosition(botPos.symbol, true); 
             }
         }
-
-        // <--- CHỐT CHẶN 2: Tính tổng Lệnh đã mở + Lệnh đang mở để so sánh với Max Position
-        const totalPositionsBusy = activeShorts.length + openingSymbols.size;
-
-        if (totalPositionsBusy < botSettings.maxPositions && openingSymbols.size === 0) {
+        if (activeShorts.length < botSettings.maxPositions && openingSymbols.size === 0) {
             const keo = status.candidatesList.find(c => {
                 const info = status.exchangeInfo[c.symbol];
                 const hasVol = [c.c1, c.c5].some(v => Math.abs(parseFloat(v)) >= parseFloat(botSettings.minVol));
@@ -216,7 +250,7 @@ async function init() {
             tempInfo[s.symbol] = { quantityPrecision: s.quantityPrecision, pricePrecision: s.pricePrecision, stepSize: parseFloat(lot.stepSize), maxLeverage: brk ? brk.brackets[0].initialLeverage : 20 };
         });
         status.exchangeInfo = tempInfo; status.isReady = true;
-        addBotLog("👿 LUFFY GỐC - FIXED MAX POS", "success"); priceMonitorLoop();
+        addBotLog("👿 LUFFY READY - SAFE SYNC PROTOCOL (6S DELAY)", "success"); priceMonitorLoop();
     } catch (e) { setTimeout(init, 5000); }
 }
 
