@@ -19,7 +19,7 @@ const exchange = new ccxt.binance({
 });
 
 let botSettings = { isRunning: false, maxPositions: 3, invValue: "1%", minVol: 6.5, posTP: 0.5, posSL: 50.0, dcaStep: 10.0, maxDCA: 4 };
-let status = { botLogs: [], exchangeInfo: null, candidatesList: [], isReady: false, blackList: {}, botClosedCount: 0, botPnLClosed: 0 };
+let status = { botLogs: [], exchangeInfo: {}, candidatesList: [], isReady: false, blackList: {}, botClosedCount: 0, botPnLClosed: 0 };
 let botActivePositions = new Map();
 let timestampOffset = 0; 
 let openingSymbols = new Set(); 
@@ -46,7 +46,7 @@ async function binancePrivate(endpoint, method = 'GET', data = {}) {
     }
 }
 
-// Quy trình xóa lệnh chờ 3s + 3s xác nhận
+// CHIẾN THUẬT: XÓA 3S -> ĐỢI -> XÁC NHẬN -> ĐỢI 3S -> CÀI
 async function hardClearOrders(symbol, side) {
     try {
         addBotLog(`🗑️ [${symbol}] Xóa lệnh chờ...`);
@@ -59,7 +59,7 @@ async function hardClearOrders(symbol, side) {
             for (const order of remain) { await binancePrivate('/fapi/v1/order', 'DELETE', { symbol, orderId: order.orderId }); }
             await new Promise(r => setTimeout(r, 1000));
         }
-        addBotLog(`✅ [${symbol}] Đã sạch lệnh. Đợi 3s cài lại...`);
+        addBotLog(`✅ [${symbol}] Đã xác nhận xóa lệnh chờ.`);
         await new Promise(r => setTimeout(r, 3000));
         return true;
     } catch (e) { return true; }
@@ -76,7 +76,7 @@ async function syncTPSL(symbol, side, entry, info) {
         await exchange.createOrder(symbol, 'TAKE_PROFIT_MARKET', sideClose, 1, undefined, { positionSide: side, stopPrice: tpPrice, closePosition: 'true' });
         await new Promise(r => setTimeout(r, 500));
         await exchange.createOrder(symbol, 'STOP_MARKET', sideClose, 1, undefined, { positionSide: side, stopPrice: slPrice, closePosition: 'true' });
-        addBotLog(`✨ [${symbol}] Cài TP/SL mới thành công`, "success");
+        addBotLog(`✨ [${symbol}] Cài TP/SL hoàn tất`, "success");
         return { tp: Number(tpPrice), sl: Number(slPrice) };
     } catch (e) { throw e; }
 }
@@ -88,6 +88,8 @@ async function openPosition(symbol, isDCA = false) {
 
     try {
         const info = status.exchangeInfo[symbol];
+        if (!info) return;
+
         const currentPrice = await binanceApi.get(`/fapi/v1/ticker/price?symbol=${symbol}`).then(res => parseFloat(res.data.price));
         let currentPos = botActivePositions.get(posKey);
         let marginToUse = 0, currentDCA = 0, firstMargin = 0;
@@ -132,21 +134,7 @@ async function openPosition(symbol, isDCA = false) {
     } finally { openingSymbols.delete(symbol); }
 }
 
-async function trackClosedPnL(symbol, closedTime, lastBotPos) {
-    try {
-        await new Promise(r => setTimeout(r, 4000));
-        const trades = await binancePrivate('/fapi/v1/userTrades', 'GET', { symbol, limit: 10 });
-        const relevantTrades = trades.filter(t => Math.abs(t.time - closedTime) < 40000 && t.positionSide === lastBotPos.side);
-        const rawPnL = relevantTrades.reduce((sum, t) => sum + parseFloat(t.realizedPnl), 0);
-        const fee = (lastBotPos.qty * lastBotPos.entryPrice) * 0.0008; 
-        status.botClosedCount++; 
-        status.botPnLClosed += (rawPnL - fee);
-        addBotLog(`✅ CHỐT ${symbol} | PnL: ${(rawPnL - fee).toFixed(2)}$`, "success");
-    } catch (e) {}
-}
-
 async function priceMonitorLoop() {
-    if (!status.isReady) { setTimeout(priceMonitorLoop, 1000); return; }
     try {
         const posRisk = await binancePrivate('/fapi/v2/positionRisk');
         const now = Date.now();
@@ -154,14 +142,16 @@ async function priceMonitorLoop() {
             const realPos = posRisk.find(p => p.symbol === botPos.symbol && p.positionSide === botPos.side);
             if (!realPos || Math.abs(parseFloat(realPos.positionAmt)) === 0) {
                 status.blackList[botPos.symbol] = now + (15 * 60 * 1000);
-                trackClosedPnL(botPos.symbol, now, botPos); botActivePositions.delete(key);
+                status.botClosedCount++;
+                botActivePositions.delete(key);
+                addBotLog(`✅ Đã chốt ${botPos.symbol}`, "success");
             } else {
                 botPos.markPrice = parseFloat(realPos.markPrice); 
                 botPos.pnl = parseFloat(realPos.unRealizedProfit);
             }
         }
     } catch (e) {}
-    setTimeout(priceMonitorLoop, 1000);
+    setTimeout(priceMonitorLoop, 1500);
 }
 
 async function mainLoop() {
@@ -210,27 +200,31 @@ setInterval(() => {
 }, 2000);
 
 const APP = express(); APP.use(express.json()); APP.use(express.static(__dirname));
+
 APP.get('/api/status', async (req, res) => {
     try {
-        const acc = await binancePrivate('/fapi/v2/account');
+        const acc = await binancePrivate('/fapi/v2/account').catch(() => null);
         const bl = {}; 
         Object.entries(status.blackList).forEach(([s, t]) => { 
             const left = Math.ceil((t - Date.now()) / 1000);
             if(left > 0) bl[s] = left; 
         });
-        // Trả về cấu trúc mà HTML đang mong đợi
+
         res.json({ 
             botSettings, 
             activePositions: Array.from(botActivePositions.values()), 
             status: { ...status, blackList: bl }, 
-            wallet: { 
+            wallet: acc ? { 
                 totalWalletBalance: parseFloat(acc.totalWalletBalance).toFixed(2), 
                 availableBalance: parseFloat(acc.availableBalance).toFixed(2), 
                 totalUnrealizedProfit: parseFloat(acc.totalUnrealizedProfit).toFixed(2) 
-            } 
+            } : { totalWalletBalance: "0.00", availableBalance: "0.00", totalUnrealizedProfit: "0.00" }
         });
-    } catch (e) { res.status(500).json({ error: e.message }); }
+    } catch (e) {
+        res.json({ botSettings, activePositions: [], status, wallet: { totalWalletBalance: "0.00", availableBalance: "0.00", totalUnrealizedProfit: "0.00" } });
+    }
 });
+
 APP.post('/api/settings', (req, res) => { botSettings = { ...botSettings, ...req.body }; res.json({ success: true }); });
 APP.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
 APP.listen(9001);
