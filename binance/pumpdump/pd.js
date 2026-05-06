@@ -19,7 +19,7 @@ const exchange = new ccxt.binance({
 });
 
 let botSettings = { isRunning: false, maxPositions: 3, invValue: "1%", minVol: 6.5, posTP: 0.5, posSL: 50.0, dcaStep: 10.0, maxDCA: 4 };
-let status = { botLogs: [], exchangeInfo: {}, candidatesList: [], isReady: false, blackList: {}, botClosedCount: 0, botPnLClosed: 0 };
+let status = { botLogs: [], exchangeInfo: {}, candidatesList: [], isReady: false, blackList: {}, botClosedCount: 0, botPnLClosed: 0, publicIP: "Đang kiểm tra..." };
 let botActivePositions = new Map();
 let timestampOffset = 0; 
 let openingSymbols = new Set(); 
@@ -31,13 +31,24 @@ function addBotLog(msg, type = 'info') {
     console.log(`[${time}] ${msg}`);
 }
 
-// Bắt buộc sync time trước khi làm mọi việc khác
+// Kiểm tra IP của VPS
+async function checkIP() {
+    try {
+        const res = await axios.get('https://ifconfig.me/ip', { timeout: 5000 });
+        status.publicIP = res.data.trim();
+        addBotLog(`🌐 IP Hiện tại của VPS: ${status.publicIP}`, "success");
+    } catch (e) {
+        status.publicIP = "Không thể lấy IP";
+        addBotLog(`⚠️ Không thể kiểm tra IP: ${e.message}`, "warning");
+    }
+}
+
 async function syncTime() { 
     try { 
         const res = await axios.get('https://fapi.binance.com/fapi/v1/time'); 
         timestampOffset = res.data.serverTime - Date.now(); 
-        addBotLog("🕒 Đã đồng bộ thời gian với Binance.");
-    } catch (e) { addBotLog("❌ Lỗi đồng bộ thời gian: " + e.message, "error"); } 
+        addBotLog(`🕒 Sync Time OK (Offset: ${timestampOffset}ms)`);
+    } catch (e) { addBotLog(`❌ Lỗi Sync Time: ${e.message}`, "error"); } 
 }
 
 async function binancePrivate(endpoint, method = 'GET', data = {}) {
@@ -48,30 +59,35 @@ async function binancePrivate(endpoint, method = 'GET', data = {}) {
         const response = await binanceApi({ method, url: `${endpoint}?${query}&signature=${signature}` });
         return response.data;
     } catch (error) {
-        const msg = error.response?.data?.msg || error.message;
-        if (error.response?.data?.code === -1021) {
-            await syncTime();
-        }
-        throw new Error(msg);
+        const errorData = error.response?.data;
+        const statusCode = error.response?.status;
+        const errorMsg = errorData ? `[${errorData.code}] ${errorData.msg}` : error.message;
+        
+        addBotLog(`🚨 API Error ${method} ${endpoint}: ${errorMsg} (Status: ${statusCode})`, "error");
+        
+        if (errorData?.code === -1021) await syncTime();
+        throw new Error(errorMsg);
     }
 }
 
-// CHIẾN THUẬT: XÓA 3S -> XÁC NHẬN -> ĐỢI 3S -> CÀI
+// QUY TRÌNH XÓA 3S -> XÁC NHẬN -> ĐỢI 3S
 async function hardClearOrders(symbol, side) {
     try {
-        addBotLog(`🗑️ [${symbol}] Xóa lệnh chờ...`);
+        addBotLog(`🗑️ [${symbol}] Đang xóa tất cả lệnh chờ...`);
         await binancePrivate('/fapi/v1/allOpenOrders', 'DELETE', { symbol });
+        
+        addBotLog(`⏳ [${symbol}] Nghỉ 3s chờ sàn cập nhật...`);
         await new Promise(r => setTimeout(r, 3000));
 
         const openOrders = await binancePrivate('/fapi/v1/openOrders', 'GET', { symbol });
         const remain = openOrders.filter(o => o.positionSide === side);
         if (remain.length > 0) {
+            addBotLog(`⚠️ [${symbol}] Còn sót ${remain.length} lệnh, xóa thủ công...`);
             for (const order of remain) { 
                 await binancePrivate('/fapi/v1/order', 'DELETE', { symbol, orderId: order.orderId }); 
             }
-            await new Promise(r => setTimeout(r, 1000));
         }
-        addBotLog(`✅ [${symbol}] Đã sạch lệnh. Đang nghỉ 3s...`);
+        addBotLog(`✅ [${symbol}] Xóa sạch. Đợi 3s trước khi cài TP/SL mới...`);
         await new Promise(r => setTimeout(r, 3000));
         return true;
     } catch (e) { return true; }
@@ -85,15 +101,18 @@ async function syncTPSL(symbol, side, entry, info) {
 
     try {
         await hardClearOrders(symbol, side);
+        
+        addBotLog(`🎯 [${symbol}] Đang cài TP: ${tpPrice}...`);
         await exchange.createOrder(symbol, 'TAKE_PROFIT_MARKET', sideClose, 1, undefined, { positionSide: side, stopPrice: tpPrice, closePosition: 'true' });
+        
         await new Promise(r => setTimeout(r, 800));
+        
+        addBotLog(`🛑 [${symbol}] Đang cài SL: ${slPrice}...`);
         await exchange.createOrder(symbol, 'STOP_MARKET', sideClose, 1, undefined, { positionSide: side, stopPrice: slPrice, closePosition: 'true' });
-        addBotLog(`✨ [${symbol}] Cài TP/SL xong.`, "success");
+        
+        addBotLog(`✨ [${symbol}] Đã cài xong TP/SL mới.`, "success");
         return { tp: Number(tpPrice), sl: Number(slPrice) };
-    } catch (e) { 
-        addBotLog(`❌ [${symbol}] Lỗi cài TP/SL: ${e.message}`, "error");
-        throw e; 
-    }
+    } catch (e) { throw e; }
 }
 
 async function openPosition(symbol, isDCA = false) {
@@ -105,6 +124,7 @@ async function openPosition(symbol, isDCA = false) {
         const info = status.exchangeInfo[symbol];
         if (!info) return;
 
+        addBotLog(`🔍 [${symbol}] Đang chuẩn bị ${isDCA ? 'DCA' : 'Mở lệnh'}...`);
         const currentPrice = await binanceApi.get(`/fapi/v1/ticker/price?symbol=${symbol}`).then(res => parseFloat(res.data.price));
         let marginToUse = 0, currentDCA = 0, firstMargin = 0;
         let currentPos = botActivePositions.get(posKey);
@@ -129,7 +149,7 @@ async function openPosition(symbol, isDCA = false) {
         const order = await exchange.createOrder(symbol, 'market', 'sell', qtyNum.toFixed(info.quantityPrecision), undefined, { positionSide: 'SHORT' });
 
         if (order) {
-            addBotLog(`🚀 [${symbol}] Khớp lệnh. Đang dọn dẹp...`);
+            addBotLog(`💰 [${symbol}] Khớp lệnh Market. Chờ 4s để sync vị thế...`);
             await new Promise(r => setTimeout(r, 4000));
             const posRisk = await binancePrivate('/fapi/v2/positionRisk', 'GET', { symbol });
             const upPos = posRisk.find(p => p.positionSide === 'SHORT');
@@ -145,7 +165,6 @@ async function openPosition(symbol, isDCA = false) {
             }
         }
     } catch (e) {
-        addBotLog(`🚨 [${symbol}] Mở lệnh lỗi: ${e.message}`, "error");
         if (isDCA && botActivePositions.has(posKey)) botActivePositions.get(posKey).isProcessing = false;
     } finally { openingSymbols.delete(symbol); }
 }
@@ -160,7 +179,7 @@ async function priceMonitorLoop() {
                 status.blackList[botPos.symbol] = now + (15 * 60 * 1000);
                 status.botClosedCount++;
                 botActivePositions.delete(key);
-                addBotLog(`✅ Đã đóng vị thế ${botPos.symbol}`, "success");
+                addBotLog(`✅ Đã chốt vị thế ${botPos.symbol}`, "success");
             } else {
                 botPos.markPrice = parseFloat(realPos.markPrice); 
                 botPos.pnl = parseFloat(realPos.unRealizedProfit);
@@ -192,8 +211,10 @@ async function mainLoop() {
 }
 
 async function init() {
+    addBotLog("🚀 Đang khởi động hệ thống...");
+    await checkIP();
+    await syncTime();
     try {
-        await syncTime();
         await exchange.loadMarkets();
         const infoRes = await binanceApi.get('/fapi/v1/exchangeInfo');
         const brkRes = await binancePrivate('/fapi/v1/leverageBracket');
@@ -205,10 +226,10 @@ async function init() {
         });
         status.exchangeInfo = tempInfo; 
         status.isReady = true;
-        addBotLog("👿 LUFFY CONNECTED & READY", "success");
+        addBotLog("👿 LUFFY BOT ONLINE - ĐÃ SẴN SÀNG", "success");
         priceMonitorLoop();
     } catch (e) { 
-        addBotLog("⚠️ Khởi tạo thất bại: " + e.message, "error");
+        addBotLog("⚠️ Lỗi khởi động: " + e.message, "error");
         setTimeout(init, 5000); 
     }
 }
@@ -234,9 +255,7 @@ APP.get('/api/status', async (req, res) => {
                 availableBalance: parseFloat(acc.availableBalance).toFixed(2), 
                 totalUnrealizedProfit: parseFloat(acc.totalUnrealizedProfit).toFixed(2) 
             };
-        } catch (e) {
-            // Log lỗi riêng cho API /status nếu muốn
-        }
+        } catch (e) {}
 
         const bl = {}; 
         Object.entries(status.blackList).forEach(([s, t]) => { 
