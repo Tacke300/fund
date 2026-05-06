@@ -46,45 +46,25 @@ async function binancePrivate(endpoint, method = 'GET', data = {}) {
     }
 }
 
-/**
- * 1. QUY TRÌNH XÓA VÀ XÁC NHẬN (DELAY 3S + 3S)
- */
+// Quy trình xóa lệnh chờ 3s + 3s xác nhận
 async function hardClearOrders(symbol, side) {
     try {
-        addBotLog(`🗑️ [${symbol}] Bắt đầu quy trình xóa lệnh chờ...`);
-        // Lệnh xóa tất cả
+        addBotLog(`🗑️ [${symbol}] Xóa lệnh chờ...`);
         await binancePrivate('/fapi/v1/allOpenOrders', 'DELETE', { symbol });
-        
-        addBotLog(`⏳ [${symbol}] Đợi 3 giây để sàn xử lý lệnh xóa...`);
         await new Promise(r => setTimeout(r, 3000));
 
-        // Kiểm tra lại xem còn lệnh nào không
         const openOrders = await binancePrivate('/fapi/v1/openOrders', 'GET', { symbol });
         const remain = openOrders.filter(o => o.positionSide === side);
-
         if (remain.length > 0) {
-            addBotLog(`⚠️ [${symbol}] Phát hiện lệnh chưa xóa sạch, đang xóa cưỡng chế...`, "warning");
-            for (const order of remain) {
-                await binancePrivate('/fapi/v1/order', 'DELETE', { symbol, orderId: order.orderId });
-            }
-            await new Promise(r => setTimeout(r, 2000));
-        } else {
-            addBotLog(`✅ [${symbol}] Xác nhận đã sạch lệnh chờ.`);
+            for (const order of remain) { await binancePrivate('/fapi/v1/order', 'DELETE', { symbol, orderId: order.orderId }); }
+            await new Promise(r => setTimeout(r, 1000));
         }
-
-        addBotLog(`⏳ [${symbol}] Đợi thêm 3 giây ổn định trước khi cài mới...`);
+        addBotLog(`✅ [${symbol}] Đã sạch lệnh. Đợi 3s cài lại...`);
         await new Promise(r => setTimeout(r, 3000));
-        
         return true;
-    } catch (e) {
-        addBotLog(`❌ [${symbol}] Lỗi khi xóa lệnh: ${e.message}`, "error");
-        return true; 
-    }
+    } catch (e) { return true; }
 }
 
-/**
- * 2. CÀI ĐẶT TP/SL (FIX THEO YÊU CẦU XÓA - ĐỢI - CÀI)
- */
 async function syncTPSL(symbol, side, entry, info) {
     const isShort = (side === 'SHORT');
     const tpPrice = (entry * (isShort ? (1 - botSettings.posTP / 100) : (1 + botSettings.posTP / 100))).toFixed(info.pricePrecision);
@@ -92,32 +72,16 @@ async function syncTPSL(symbol, side, entry, info) {
     const sideClose = isShort ? 'buy' : 'sell';
 
     try {
-        // Thực hiện quy trình Xóa 3s -> Xác nhận -> Đợi 3s
         await hardClearOrders(symbol, side);
-
-        // Cài đặt lệnh mới (Sử dụng closePosition: 'true' cho Hedge Mode)
-        await exchange.createOrder(symbol, 'TAKE_PROFIT_MARKET', sideClose, 1, undefined, { 
-            positionSide: side, stopPrice: tpPrice, closePosition: 'true' 
-        });
-        
-        await new Promise(r => setTimeout(r, 1000));
-        
-        await exchange.createOrder(symbol, 'STOP_MARKET', sideClose, 1, undefined, { 
-            positionSide: side, stopPrice: slPrice, closePosition: 'true' 
-        });
-
-        addBotLog(`✨ [${symbol}] Đã cài lại TP:${tpPrice} SL:${slPrice}`, "success");
+        await exchange.createOrder(symbol, 'TAKE_PROFIT_MARKET', sideClose, 1, undefined, { positionSide: side, stopPrice: tpPrice, closePosition: 'true' });
+        await new Promise(r => setTimeout(r, 500));
+        await exchange.createOrder(symbol, 'STOP_MARKET', sideClose, 1, undefined, { positionSide: side, stopPrice: slPrice, closePosition: 'true' });
+        addBotLog(`✨ [${symbol}] Cài TP/SL mới thành công`, "success");
         return { tp: Number(tpPrice), sl: Number(slPrice) };
-    } catch (e) {
-        addBotLog(`❌ [${symbol}] Lỗi cài TP/SL: ${e.message}`, "error");
-        throw e; 
-    }
+    } catch (e) { throw e; }
 }
 
-/**
- * 3. MỞ VỊ THẾ / DCA
- */
-async function openPosition(symbol, isDCA = false, candidateData = null) {
+async function openPosition(symbol, isDCA = false) {
     const posKey = `${symbol}_SHORT`;
     if (!isDCA && (botActivePositions.has(posKey) || openingSymbols.has(symbol))) return;
     openingSymbols.add(symbol); 
@@ -125,7 +89,6 @@ async function openPosition(symbol, isDCA = false, candidateData = null) {
     try {
         const info = status.exchangeInfo[symbol];
         const currentPrice = await binanceApi.get(`/fapi/v1/ticker/price?symbol=${symbol}`).then(res => parseFloat(res.data.price));
-        
         let currentPos = botActivePositions.get(posKey);
         let marginToUse = 0, currentDCA = 0, firstMargin = 0;
 
@@ -149,42 +112,33 @@ async function openPosition(symbol, isDCA = false, candidateData = null) {
         const order = await exchange.createOrder(symbol, 'market', 'sell', qtyNum.toFixed(info.quantityPrecision), undefined, { positionSide: 'SHORT' });
 
         if (order) {
-            addBotLog(`🚀 [${symbol}] Khớp lệnh ${isDCA ? 'DCA' : 'OPEN'}. Đợi sync...`);
-            await new Promise(r => setTimeout(r, 4000)); 
-
+            await new Promise(r => setTimeout(r, 3000));
             const posRisk = await binancePrivate('/fapi/v2/positionRisk', 'GET', { symbol });
             const upPos = posRisk.find(p => p.positionSide === 'SHORT');
-            
             if (upPos && Math.abs(parseFloat(upPos.positionAmt)) > 0) {
                 const finalEntry = parseFloat(upPos.entryPrice);
                 const finalQty = Math.abs(parseFloat(upPos.positionAmt));
-
                 const sync = await syncTPSL(symbol, 'SHORT', finalEntry, info);
-                
                 botActivePositions.set(posKey, { 
                     symbol, side: 'SHORT', entryPrice: finalEntry, qty: finalQty, tp: sync.tp, sl: sync.sl, 
                     margin: (finalQty * finalEntry / info.maxLeverage), firstMargin, dcaCount: currentDCA, 
-                    isProcessing: false, 
-                    hedgeOpened: false
+                    leverage: info.maxLeverage, isProcessing: false, pnl: 0, markPrice: currentPrice
                 });
             }
         }
     } catch (e) {
-        addBotLog(`🚨 [${symbol}] LỖI HỆ THỐNG: ${e.message}`, "error");
+        addBotLog(`🚨 [${symbol}] Lỗi: ${e.message}`, "error");
         if (isDCA && botActivePositions.has(posKey)) botActivePositions.get(posKey).isProcessing = false;
-    } finally {
-        openingSymbols.delete(symbol);
-    }
+    } finally { openingSymbols.delete(symbol); }
 }
 
 async function trackClosedPnL(symbol, closedTime, lastBotPos) {
     try {
         await new Promise(r => setTimeout(r, 4000));
         const trades = await binancePrivate('/fapi/v1/userTrades', 'GET', { symbol, limit: 10 });
-        const relevantTrades = trades.filter(t => Math.abs(t.time - closedTime) < 30000 && t.positionSide === lastBotPos.side);
+        const relevantTrades = trades.filter(t => Math.abs(t.time - closedTime) < 40000 && t.positionSide === lastBotPos.side);
         const rawPnL = relevantTrades.reduce((sum, t) => sum + parseFloat(t.realizedPnl), 0);
-        const totalVolume = lastBotPos.qty * lastBotPos.entryPrice;
-        const fee = totalVolume * 0.001; 
+        const fee = (lastBotPos.qty * lastBotPos.entryPrice) * 0.0008; 
         status.botClosedCount++; 
         status.botPnLClosed += (rawPnL - fee);
         addBotLog(`✅ CHỐT ${symbol} | PnL: ${(rawPnL - fee).toFixed(2)}$`, "success");
@@ -204,7 +158,6 @@ async function priceMonitorLoop() {
             } else {
                 botPos.markPrice = parseFloat(realPos.markPrice); 
                 botPos.pnl = parseFloat(realPos.unRealizedProfit);
-                botPos.priceDev = botPos.entryPrice ? ((botPos.markPrice - botPos.entryPrice) / botPos.entryPrice) * 100 : 0;
             }
         }
     } catch (e) {}
@@ -214,26 +167,20 @@ async function priceMonitorLoop() {
 async function mainLoop() {
     if (!status.isReady || !botSettings.isRunning) return;
     try {
-        const posRisk = await binancePrivate('/fapi/v2/positionRisk');
-        const activeShorts = posRisk.filter(p => p.positionSide === 'SHORT' && Math.abs(parseFloat(p.positionAmt)) > 0);
         for (let [key, botPos] of botActivePositions) {
             if (botPos.isProcessing) continue; 
-            const realPos = activeShorts.find(p => p.symbol === botPos.symbol);
-            if (!realPos) continue;
-            const pEntry = parseFloat(realPos.entryPrice);
-            const pMark = parseFloat(realPos.markPrice);
-            const priceDev = ((pMark - pEntry) / pEntry) * 100;
+            const priceDev = ((botPos.markPrice - botPos.entryPrice) / botPos.entryPrice) * 100;
             if (priceDev >= botSettings.dcaStep && botPos.dcaCount < botSettings.maxDCA) { 
                 await openPosition(botPos.symbol, true); 
             }
         }
-        if (activeShorts.length < botSettings.maxPositions && openingSymbols.size === 0) {
+        if (botActivePositions.size < botSettings.maxPositions && openingSymbols.size === 0) {
             const keo = status.candidatesList.find(c => {
                 const info = status.exchangeInfo[c.symbol];
                 const hasVol = [c.c1, c.c5].some(v => Math.abs(parseFloat(v)) >= parseFloat(botSettings.minVol));
-                return info && info.maxLeverage >= 20 && (status.blackList[c.symbol] || 0) < Date.now() && !activeShorts.some(p => p.symbol === c.symbol) && hasVol;
+                return info && (status.blackList[c.symbol] || 0) < Date.now() && !botActivePositions.has(`${c.symbol}_SHORT`) && hasVol;
             });
-            if (keo) await openPosition(keo.symbol, false, keo);
+            if (keo) await openPosition(keo.symbol, false);
         }
     } catch (e) {}
 }
@@ -250,7 +197,7 @@ async function init() {
             tempInfo[s.symbol] = { quantityPrecision: s.quantityPrecision, pricePrecision: s.pricePrecision, stepSize: parseFloat(lot.stepSize), maxLeverage: brk ? brk.brackets[0].initialLeverage : 20 };
         });
         status.exchangeInfo = tempInfo; status.isReady = true;
-        addBotLog("👿 LUFFY READY - SAFE SYNC PROTOCOL (6S DELAY)", "success"); priceMonitorLoop();
+        addBotLog("👿 LUFFY CONNECTED", "success"); priceMonitorLoop();
     } catch (e) { setTimeout(init, 5000); }
 }
 
@@ -266,9 +213,23 @@ const APP = express(); APP.use(express.json()); APP.use(express.static(__dirname
 APP.get('/api/status', async (req, res) => {
     try {
         const acc = await binancePrivate('/fapi/v2/account');
-        const bl = {}; Object.entries(status.blackList).forEach(([s, t]) => { if(t > Date.now()) bl[s] = Math.ceil((t-Date.now())/1000); });
-        res.json({ botSettings, activePositions: Array.from(botActivePositions.values()), status: { ...status, blackList: bl }, wallet: { totalWalletBalance: parseFloat(acc.totalWalletBalance).toFixed(2), availableBalance: parseFloat(acc.availableBalance).toFixed(2), totalUnrealizedProfit: parseFloat(acc.totalUnrealizedProfit).toFixed(2) } });
-    } catch (e) { res.json({ status }); }
+        const bl = {}; 
+        Object.entries(status.blackList).forEach(([s, t]) => { 
+            const left = Math.ceil((t - Date.now()) / 1000);
+            if(left > 0) bl[s] = left; 
+        });
+        // Trả về cấu trúc mà HTML đang mong đợi
+        res.json({ 
+            botSettings, 
+            activePositions: Array.from(botActivePositions.values()), 
+            status: { ...status, blackList: bl }, 
+            wallet: { 
+                totalWalletBalance: parseFloat(acc.totalWalletBalance).toFixed(2), 
+                availableBalance: parseFloat(acc.availableBalance).toFixed(2), 
+                totalUnrealizedProfit: parseFloat(acc.totalUnrealizedProfit).toFixed(2) 
+            } 
+        });
+    } catch (e) { res.status(500).json({ error: e.message }); }
 });
 APP.post('/api/settings', (req, res) => { botSettings = { ...botSettings, ...req.body }; res.json({ success: true }); });
 APP.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
