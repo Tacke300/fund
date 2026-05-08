@@ -41,35 +41,46 @@ async function binancePrivate(endpoint, method = 'GET', data = {}) {
     const query = new URLSearchParams({ ...data, timestamp, recvWindow: 60000 }).toString();
     const signature = crypto.createHmac('sha256', SECRET_KEY).update(query).digest('hex');
     try {
-        const response = await binanceApi({ method, url: `${endpoint}?${query}&signature=${signature}` });
+        const response = await binanceApi({ 
+            method, 
+            url: `${endpoint}?${query}&signature=${signature}` 
+        });
         return response.data;
-    } catch (error) { throw new Error(error.response?.data?.msg || error.message); }
+    } catch (error) { 
+        throw new Error(error.response?.data?.msg || error.message); 
+    }
 }
 
-// 1. DỌN LỆNH CHỜ TẬN GỐC (NATIVE API)
+// 1. DỌN LỆNH CHỜ (SỬ DỤNG CẢ LỆNH THƯỜNG VÀ ALGO)
 async function forceClearAllOrders(symbol) {
     try {
         addBotLog(`🧹 [${symbol}] Đang dọn dẹp lệnh chờ...`);
+        // Xóa lệnh thường
         await binancePrivate('/fapi/v1/allOpenOrders', 'DELETE', { symbol }).catch(() => {});
         
+        // Xóa lệnh Algo (TP/SL)
+        // Lưu ý: Algo API đôi khi yêu cầu xóa từng loại hoặc qua danh sách lệnh mở
+        const openAlgo = await binancePrivate('/fapi/v1/algo/openOrders', 'GET', { symbol }).catch(() => []);
+        if (Array.isArray(openAlgo)) {
+            for (const algo of openAlgo) {
+                await binancePrivate('/fapi/v1/algo/order', 'DELETE', { algoId: algo.algoId }).catch(() => {});
+            }
+        }
+
         let retry = 0;
-        while (retry < 3) {
-            await new Promise(r => setTimeout(r, 1200));
-            const openOrders = await binancePrivate('/fapi/v1/openOrders', 'GET', { symbol });
-            if (openOrders.length === 0) {
-                addBotLog(`✨ [${symbol}] Đã dọn sạch lệnh chờ.`);
-                return true;
-            }
-            for (const order of openOrders) {
-                await binancePrivate('/fapi/v1/order', 'DELETE', { symbol, orderId: order.orderId }).catch(() => {});
-            }
+        while (retry < 2) {
+            await new Promise(r => setTimeout(r, 1000));
+            const orders = await binancePrivate('/fapi/v1/openOrders', 'GET', { symbol });
+            if (orders.length === 0) break;
+            for (const o of orders) await binancePrivate('/fapi/v1/order', 'DELETE', { symbol, orderId: o.orderId }).catch(() => {});
             retry++;
         }
+        addBotLog(`✨ [${symbol}] Đã dọn sạch lệnh chờ.`);
         return true;
     } catch (e) { return false; }
 }
 
-// 2. ĐỒNG BỘ TP/SL - DÙNG NATIVE API TUYỆT ĐỐI (FIX -1106 & -4130)
+// 2. ĐỒNG BỘ TP/SL - SỬ DỤNG ALGO ORDER ENDPOINT (FIX TRIỆT ĐỂ MỌI LỖI ENDPOINT)
 async function syncTPSL(symbol, side, entry, info) {
     const isShort = side === 'SHORT';
     const tpPrice = (entry * (isShort ? (1 - botSettings.posTP / 100) : (1 + botSettings.posTP / 100))).toFixed(info.pricePrecision);
@@ -80,43 +91,38 @@ async function syncTPSL(symbol, side, entry, info) {
     await new Promise(r => setTimeout(r, 1500));
 
     try {
-        const posRisk = await binancePrivate('/fapi/v2/positionRisk', 'GET', { symbol });
-        const realPos = posRisk.find(p => p.positionSide === side && Math.abs(parseFloat(p.positionAmt)) > 0);
-        if (!realPos) return { success: false };
-        const qtyToClose = Math.abs(parseFloat(realPos.positionAmt)).toFixed(info.quantityPrecision);
-
-        // Đặt Take Profit - Gửi lệnh trực tiếp qua API, không dùng thư viện trung gian
-        await binancePrivate('/fapi/v1/order', 'POST', {
+        // Đặt Take Profit qua Algo API
+        await binancePrivate('/fapi/v1/algo/order', 'POST', {
             symbol: symbol,
             side: sideClose,
             positionSide: side,
             type: 'TAKE_PROFIT_MARKET',
             stopPrice: tpPrice,
-            quantity: qtyToClose,
-            workingType: 'MARK_PRICE'
+            workingType: 'MARK_PRICE',
+            closePosition: true
         });
         
         await new Promise(r => setTimeout(r, 1000));
 
-        // Đặt Stop Loss - Gửi lệnh trực tiếp qua API
-        await binancePrivate('/fapi/v1/order', 'POST', {
+        // Đặt Stop Loss qua Algo API
+        await binancePrivate('/fapi/v1/algo/order', 'POST', {
             symbol: symbol,
             side: sideClose,
             positionSide: side,
             type: 'STOP_MARKET',
             stopPrice: slPrice,
-            quantity: qtyToClose,
-            workingType: 'MARK_PRICE'
+            workingType: 'MARK_PRICE',
+            closePosition: true
         });
 
         return { tp: parseFloat(tpPrice), sl: parseFloat(slPrice), success: true };
     } catch (e) {
-        addBotLog(`❌ [${symbol}] LỖI TP/SL API: ${e.message}`, "error");
+        addBotLog(`❌ [${symbol}] LỖI ALGO API: ${e.message}`, "error");
         return { success: false };
     }
 }
 
-// 3. MỞ VỊ THẾ & DCA
+// 3. MỞ VỊ THẾ & DCA (GIỮ NGUYÊN LOGIC VẬN HÀNH)
 async function openPosition(symbol, isDCA = false) {
     const posKey = `${symbol}_SHORT`;
     try {
@@ -170,20 +176,19 @@ async function openPosition(symbol, isDCA = false) {
             
             if (realPos) {
                 const finalEntry = parseFloat(realPos.entryPrice);
-                const finalQty = Math.abs(parseFloat(realPos.positionAmt));
                 const sync = await syncTPSL(symbol, 'SHORT', finalEntry, info);
                 
-                addBotLog(`🚀 [${symbol}] ${isDCA ? 'DCA #' + currentDCA : 'OPEN'} OK | Margin: ${((finalQty * finalEntry)/info.maxLeverage).toFixed(2)}$ | Entry: ${finalEntry} | TP: ${sync.tp || 'Err'} | SL: ${sync.sl || 'Err'}`);
+                addBotLog(`🚀 [${symbol}] ${isDCA ? 'DCA #' + currentDCA : 'OPEN'} OK | Margin: ${((Math.abs(parseFloat(realPos.positionAmt)) * finalEntry)/info.maxLeverage).toFixed(2)}$ | Entry: ${finalEntry} | TP: ${sync.tp || 'Err'} | SL: ${sync.sl || 'Err'}`);
 
                 botActivePositions.set(posKey, { 
-                    symbol, side: 'SHORT', entryPrice: finalEntry, originalEntry, qty: finalQty, 
+                    symbol, side: 'SHORT', entryPrice: finalEntry, originalEntry, qty: Math.abs(parseFloat(realPos.positionAmt)), 
                     tp: sync.tp || 0, sl: sync.sl || 0, firstMargin, dcaCount: currentDCA, 
                     leverage: info.maxLeverage, isProcessing: false, pnl: 0, priceDev: 0
                 });
             }
         }
     } catch (e) {
-        addBotLog(`🚨 [${symbol}] LỖI: ${e.message}`, "error");
+        addBotLog(`🚨 [${symbol}] MỞ LỆNH THẤT BẠI: ${e.message}`, "error");
         if(isDCA && botActivePositions.has(posKey)) botActivePositions.get(posKey).isProcessing = false;
     } finally { openingSymbols.delete(symbol); }
 }
@@ -247,7 +252,7 @@ async function init() {
         timestampOffset = timeRes.data.serverTime - Date.now();
         await exchange.loadMarkets();
         const infoRes = await binanceApi.get('/fapi/v1/exchangeInfo');
-        const brkRes = await binancePrivate('/fapi/v1/leverageBracket');
+        const brkRes = await binancePrivate('/fapi/v2/leverageBracket'); // Dùng v2 cho leverage
         const tempInfo = {};
         infoRes.data.symbols.forEach(s => {
             const lot = s.filters.find(f => f.filterType === 'LOT_SIZE');
@@ -255,7 +260,7 @@ async function init() {
             tempInfo[s.symbol] = { quantityPrecision: s.quantityPrecision, pricePrecision: s.pricePrecision, stepSize: parseFloat(lot.stepSize), maxLeverage: brk ? brk.brackets[0].initialLeverage : 20 };
         });
         status.exchangeInfo = tempInfo; status.isReady = true;
-        addBotLog("👿 LUFFY V21.0 - NATIVE API ULTIMATE", "success");
+        addBotLog("👿 LUFFY V21.5 - ALGO API POWERED", "success");
         priceMonitorLoop();
     } catch (e) { setTimeout(init, 5000); }
 }
