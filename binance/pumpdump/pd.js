@@ -69,7 +69,7 @@ async function forceClearAllOrders(symbol) {
     } catch (e) { return false; }
 }
 
-// 2. ĐỒNG BỘ TP/SL - CHIẾN THUẬT REDUCE_ONLY (FIX TRIỆT ĐỂ 4130)
+// 2. ĐỒNG BỘ TP/SL - CHIẾN THUẬT "QTY-MATCH" (FIX TRIỆT ĐỂ -4130 & -1106)
 async function syncTPSL(symbol, side, entry, info) {
     const isShort = side === 'SHORT';
     const tpPrice = (entry * (isShort ? (1 - botSettings.posTP / 100) : (1 + botSettings.posTP / 100))).toFixed(info.pricePrecision);
@@ -80,23 +80,23 @@ async function syncTPSL(symbol, side, entry, info) {
     await new Promise(r => setTimeout(r, 1500));
 
     try {
-        // Lấy Qty thực tế để đặt lệnh ReduceOnly chính xác
+        // Lấy chính xác khối lượng đang có
         const posRisk = await binancePrivate('/fapi/v2/positionRisk', 'GET', { symbol });
         const realPos = posRisk.find(p => p.positionSide === side && Math.abs(parseFloat(p.positionAmt)) > 0);
         
         if (!realPos) return { success: false };
         const qtyToClose = Math.abs(parseFloat(realPos.positionAmt)).toFixed(info.quantityPrecision);
 
-        // Đặt TP bằng ReduceOnly
+        // Đặt TP: Không dùng closePosition, không dùng reduceOnly
         await exchange.createOrder(symbol, 'TAKE_PROFIT_MARKET', sideClose, qtyToClose, undefined, { 
-            positionSide: side, stopPrice: tpPrice, reduceOnly: true, workingType: 'MARK_PRICE' 
+            positionSide: side, stopPrice: tpPrice, workingType: 'MARK_PRICE' 
         });
         
         await new Promise(r => setTimeout(r, 1000));
 
-        // Đặt SL bằng ReduceOnly
+        // Đặt SL: Không dùng closePosition, không dùng reduceOnly
         await exchange.createOrder(symbol, 'STOP_MARKET', sideClose, qtyToClose, undefined, { 
-            positionSide: side, stopPrice: slPrice, reduceOnly: true, workingType: 'MARK_PRICE' 
+            positionSide: side, stopPrice: slPrice, workingType: 'MARK_PRICE' 
         });
 
         return { tp: parseFloat(tpPrice), sl: parseFloat(slPrice), success: true };
@@ -152,7 +152,7 @@ async function openPosition(symbol, isDCA = false) {
 
         if (order) {
             const waitTime = isDCA ? 8000 : 5000;
-            addBotLog(`⏳ [${symbol}] Đang đợi ${waitTime/1000}s để cập nhật vị thế...`);
+            addBotLog(`⏳ [${symbol}] Đang đợi ${waitTime/1000}s cập nhật dữ liệu...`);
             await new Promise(r => setTimeout(r, waitTime)); 
             
             const posDataUpdate = await binancePrivate('/fapi/v2/positionRisk', 'GET', { symbol });
@@ -178,7 +178,6 @@ async function openPosition(symbol, isDCA = false) {
     } finally { openingSymbols.delete(symbol); }
 }
 
-// --- GIỮ NGUYÊN CÁC HÀM CÒN LẠI ---
 async function priceMonitorLoop() {
     if (!status.isReady) { setTimeout(priceMonitorLoop, 1000); return; }
     try {
@@ -246,7 +245,7 @@ async function init() {
             tempInfo[s.symbol] = { quantityPrecision: s.quantityPrecision, pricePrecision: s.pricePrecision, stepSize: parseFloat(lot.stepSize), maxLeverage: brk ? brk.brackets[0].initialLeverage : 20 };
         });
         status.exchangeInfo = tempInfo; status.isReady = true;
-        addBotLog("👿 LUFFY V20.5 - NO-4130 FIX", "success");
+        addBotLog("👿 LUFFY V20.6 - STABLE QTY", "success");
         priceMonitorLoop();
     } catch (e) { setTimeout(init, 5000); }
 }
