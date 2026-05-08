@@ -46,7 +46,7 @@ async function binancePrivate(endpoint, method = 'GET', data = {}) {
     } catch (error) { throw new Error(error.response?.data?.msg || error.message); }
 }
 
-// 1. DỌN LỆNH CHỜ TẬN GỐC
+// 1. DỌN LỆNH CHỜ TẬN GỐC (NATIVE API)
 async function forceClearAllOrders(symbol) {
     try {
         addBotLog(`🧹 [${symbol}] Đang dọn dẹp lệnh chờ...`);
@@ -69,7 +69,7 @@ async function forceClearAllOrders(symbol) {
     } catch (e) { return false; }
 }
 
-// 2. ĐỒNG BỘ TP/SL - CHIẾN THUẬT "QTY-MATCH" (FIX TRIỆT ĐỂ -4130 & -1106)
+// 2. ĐỒNG BỘ TP/SL - DÙNG NATIVE API TUYỆT ĐỐI (FIX -1106 & -4130)
 async function syncTPSL(symbol, side, entry, info) {
     const isShort = side === 'SHORT';
     const tpPrice = (entry * (isShort ? (1 - botSettings.posTP / 100) : (1 + botSettings.posTP / 100))).toFixed(info.pricePrecision);
@@ -80,28 +80,38 @@ async function syncTPSL(symbol, side, entry, info) {
     await new Promise(r => setTimeout(r, 1500));
 
     try {
-        // Lấy chính xác khối lượng đang có
         const posRisk = await binancePrivate('/fapi/v2/positionRisk', 'GET', { symbol });
         const realPos = posRisk.find(p => p.positionSide === side && Math.abs(parseFloat(p.positionAmt)) > 0);
-        
         if (!realPos) return { success: false };
         const qtyToClose = Math.abs(parseFloat(realPos.positionAmt)).toFixed(info.quantityPrecision);
 
-        // Đặt TP: Không dùng closePosition, không dùng reduceOnly
-        await exchange.createOrder(symbol, 'TAKE_PROFIT_MARKET', sideClose, qtyToClose, undefined, { 
-            positionSide: side, stopPrice: tpPrice, workingType: 'MARK_PRICE' 
+        // Đặt Take Profit - Gửi lệnh trực tiếp qua API, không dùng thư viện trung gian
+        await binancePrivate('/fapi/v1/order', 'POST', {
+            symbol: symbol,
+            side: sideClose,
+            positionSide: side,
+            type: 'TAKE_PROFIT_MARKET',
+            stopPrice: tpPrice,
+            quantity: qtyToClose,
+            workingType: 'MARK_PRICE'
         });
         
         await new Promise(r => setTimeout(r, 1000));
 
-        // Đặt SL: Không dùng closePosition, không dùng reduceOnly
-        await exchange.createOrder(symbol, 'STOP_MARKET', sideClose, qtyToClose, undefined, { 
-            positionSide: side, stopPrice: slPrice, workingType: 'MARK_PRICE' 
+        // Đặt Stop Loss - Gửi lệnh trực tiếp qua API
+        await binancePrivate('/fapi/v1/order', 'POST', {
+            symbol: symbol,
+            side: sideClose,
+            positionSide: side,
+            type: 'STOP_MARKET',
+            stopPrice: slPrice,
+            quantity: qtyToClose,
+            workingType: 'MARK_PRICE'
         });
 
         return { tp: parseFloat(tpPrice), sl: parseFloat(slPrice), success: true };
     } catch (e) {
-        addBotLog(`❌ [${symbol}] LỖI TP/SL: ${e.message}`, "error");
+        addBotLog(`❌ [${symbol}] LỖI TP/SL API: ${e.message}`, "error");
         return { success: false };
     }
 }
@@ -245,7 +255,7 @@ async function init() {
             tempInfo[s.symbol] = { quantityPrecision: s.quantityPrecision, pricePrecision: s.pricePrecision, stepSize: parseFloat(lot.stepSize), maxLeverage: brk ? brk.brackets[0].initialLeverage : 20 };
         });
         status.exchangeInfo = tempInfo; status.isReady = true;
-        addBotLog("👿 LUFFY V20.6 - STABLE QTY", "success");
+        addBotLog("👿 LUFFY V21.0 - NATIVE API ULTIMATE", "success");
         priceMonitorLoop();
     } catch (e) { setTimeout(init, 5000); }
 }
