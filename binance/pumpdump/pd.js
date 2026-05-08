@@ -1,7 +1,3 @@
-// ===============================
-// 👿 LUFFY V18 - FIX FULL TPSL
-// ===============================
-
 import express from 'express';
 import http from 'http';
 import crypto from 'crypto';
@@ -34,16 +30,14 @@ const exchange = new ccxt.binance({
     }
 });
 
-let timestampOffset = 0;
-
 let botSettings = {
     isRunning: false,
     maxPositions: 3,
     invValue: "1%",
     minVol: 6.5,
     posTP: 0.5,
-    posSL: 50,
-    dcaStep: 10,
+    posSL: 50.0,
+    dcaStep: 10.0,
     maxDCA: 4
 };
 
@@ -58,6 +52,7 @@ let status = {
 };
 
 let botActivePositions = new Map();
+let timestampOffset = 0;
 let openingSymbols = new Set();
 
 function addBotLog(msg, type = 'info') {
@@ -120,15 +115,7 @@ async function binancePrivate(
     }
 }
 
-
-// ====================================
-// XÓA TP/SL CŨ
-// ====================================
-
-async function clearAllOldTPSL(
-    symbol,
-    side = 'SHORT'
-) {
+async function clearAllOldTPSL(symbol, side = 'SHORT') {
 
     try {
 
@@ -164,7 +151,7 @@ async function clearAllOldTPSL(
                 );
 
                 addBotLog(
-                    `🧹 [${symbol}] Xóa ${o.type}`
+                    `🧹 [${symbol}] Xóa ${o.type} #${o.orderId}`
                 );
 
             } catch (err) {
@@ -219,43 +206,31 @@ async function clearAllOldTPSL(
     }
 }
 
+async function syncTPSL(symbol, side, entry, info) {
 
-// ====================================
-// SET TP/SL
-// ====================================
+    const isShort = (side === 'SHORT');
 
-async function syncTPSL(
-    symbol,
-    side,
-    entry,
-    info
-) {
+    const tpPrice = (
+        entry *
+        (
+            isShort
+                ? (1 - botSettings.posTP / 100)
+                : (1 + botSettings.posTP / 100)
+        )
+    ).toFixed(info.pricePrecision);
+
+    const slPrice = (
+        entry *
+        (
+            isShort
+                ? (1 + botSettings.posSL / 100)
+                : (1 - botSettings.posSL / 100)
+        )
+    ).toFixed(info.pricePrecision);
+
+    const sideClose = isShort ? 'buy' : 'sell';
 
     try {
-
-        const isShort = side === 'SHORT';
-
-        const tpPrice = (
-            entry *
-            (
-                isShort
-                    ? (1 - botSettings.posTP / 100)
-                    : (1 + botSettings.posTP / 100)
-            )
-        ).toFixed(info.pricePrecision);
-
-        const slPrice = (
-            entry *
-            (
-                isShort
-                    ? (1 + botSettings.posSL / 100)
-                    : (1 - botSettings.posSL / 100)
-            )
-        ).toFixed(info.pricePrecision);
-
-        const sideClose = isShort
-            ? 'buy'
-            : 'sell';
 
         const cleaned = await clearAllOldTPSL(
             symbol,
@@ -316,7 +291,7 @@ async function syncTPSL(
     } catch (e) {
 
         addBotLog(
-            `❌ [${symbol}] TP/SL FAIL: ${e.message}`,
+            `❌ [${symbol}] Lỗi TP/SL: ${e.message}`,
             'error'
         );
 
@@ -327,15 +302,7 @@ async function syncTPSL(
     }
 }
 
-
-// ====================================
-// OPEN POSITION
-// ====================================
-
-async function openPosition(
-    symbol,
-    isDCA = false
-) {
+async function openPosition(symbol, isDCA = false) {
 
     const posKey = `${symbol}_SHORT`;
 
@@ -482,8 +449,12 @@ async function openPosition(
                     info
                 );
 
+                const logResult = sync.success
+                    ? `✨ TP/SL OK`
+                    : `❌ TP/SL FAIL`;
+
                 addBotLog(
-                    `🚀 [${symbol}] ${isDCA ? 'DCA' : 'OPEN'} | Entry ${finalEntry} | Margin ${finalMargin.toFixed(2)}$`
+                    `🚀 [${symbol}] ${isDCA ? 'DCA' : 'OPEN'} Khớp: Entry ${finalEntry} | Margin: ${finalMargin.toFixed(2)}$ | ${logResult}`
                 );
 
                 botActivePositions.set(posKey, {
@@ -512,22 +483,203 @@ async function openPosition(
             'error'
         );
 
-    } finally {
-
-        openingSymbols.delete(symbol);
-
         if (
+            isDCA &&
             botActivePositions.has(posKey)
         ) {
             botActivePositions.get(posKey).isProcessing = false;
         }
+
+    } finally {
+
+        openingSymbols.delete(symbol);
     }
 }
 
+async function trackClosedPnL(symbol, lastBotPos) {
 
-// ====================================
-// INIT
-// ====================================
+    try {
+
+        await sleep(5000);
+
+        const trades = await binancePrivate(
+            '/fapi/v1/userTrades',
+            'GET',
+            {
+                symbol,
+                limit: 20
+            }
+        );
+
+        const now = Date.now();
+
+        const recentTrades = trades.filter(t =>
+            (now - t.time) < 60000
+        );
+
+        const rawPnL = recentTrades.reduce(
+            (sum, t) =>
+                sum + parseFloat(t.realizedPnl),
+            0
+        );
+
+        const totalVolume =
+            lastBotPos.qty *
+            lastBotPos.entryPrice;
+
+        const estimatedFee =
+            totalVolume * 0.001;
+
+        const finalPnL =
+            rawPnL - estimatedFee;
+
+        status.botClosedCount++;
+        status.botPnLClosed += finalPnL;
+
+        addBotLog(
+            `✅ CHỐT ${symbol} | PnL: ${finalPnL.toFixed(2)}$`,
+            'success'
+        );
+
+    } catch (e) {}
+}
+
+async function priceMonitorLoop() {
+
+    if (!status.isReady) {
+        setTimeout(priceMonitorLoop, 1000);
+        return;
+    }
+
+    try {
+
+        const posRisk = await binancePrivate(
+            '/fapi/v2/positionRisk'
+        );
+
+        const now = Date.now();
+
+        for (let [key, botPos] of botActivePositions) {
+
+            const realPos = posRisk.find(p =>
+                p.symbol === botPos.symbol &&
+                p.positionSide === botPos.side
+            );
+
+            if (
+                !realPos ||
+                Math.abs(parseFloat(realPos.positionAmt)) === 0
+            ) {
+
+                status.blackList[botPos.symbol] =
+                    now + (15 * 60 * 1000);
+
+                trackClosedPnL(
+                    botPos.symbol,
+                    botPos
+                );
+
+                botActivePositions.delete(key);
+
+            } else {
+
+                botPos.markPrice = parseFloat(
+                    realPos.markPrice
+                );
+
+                botPos.pnl = parseFloat(
+                    realPos.unRealizedProfit
+                );
+
+                botPos.priceDev =
+                    (
+                        (
+                            botPos.markPrice -
+                            botPos.entryPrice
+                        ) /
+                        botPos.entryPrice
+                    ) * 100;
+            }
+        }
+
+    } catch (e) {}
+
+    setTimeout(priceMonitorLoop, 1000);
+}
+
+async function mainLoop() {
+
+    if (
+        !status.isReady ||
+        !botSettings.isRunning
+    ) return;
+
+    try {
+
+        const now = Date.now();
+
+        Object.keys(status.blackList)
+            .forEach(s => {
+
+                if (
+                    status.blackList[s] < now
+                ) {
+                    delete status.blackList[s];
+                }
+            });
+
+        for (let [key, botPos] of botActivePositions) {
+
+            if (botPos.isProcessing) {
+                continue;
+            }
+
+            if (
+                botPos.priceDev >= botSettings.dcaStep &&
+                botPos.dcaCount < botSettings.maxDCA
+            ) {
+
+                await openPosition(
+                    botPos.symbol,
+                    true
+                );
+            }
+        }
+
+        if (
+            botActivePositions.size < botSettings.maxPositions &&
+            openingSymbols.size === 0
+        ) {
+
+            const keo = status.candidatesList.find(c => {
+
+                const info =
+                    status.exchangeInfo[c.symbol];
+
+                const hasVol =
+                    Math.abs(parseFloat(c.c1)) >= parseFloat(botSettings.minVol) ||
+                    Math.abs(parseFloat(c.c5)) >= parseFloat(botSettings.minVol);
+
+                return (
+                    info &&
+                    info.maxLeverage >= 20 &&
+                    !status.blackList[c.symbol] &&
+                    !botActivePositions.has(`${c.symbol}_SHORT`) &&
+                    hasVol
+                );
+            });
+
+            if (keo) {
+
+                await openPosition(
+                    keo.symbol,
+                    false
+                );
+            }
+        }
+
+    } catch (e) {}
+}
 
 async function init() {
 
@@ -582,9 +734,11 @@ async function init() {
         status.isReady = true;
 
         addBotLog(
-            '👿 LUFFY V18 READY',
-            'success'
+            "👿 LUFFY V18.0 FIX TPSL",
+            "success"
         );
+
+        priceMonitorLoop();
 
     } catch (e) {
 
@@ -594,12 +748,106 @@ async function init() {
 
 init();
 
+setInterval(mainLoop, 3000);
+
+setInterval(() => {
+
+    http.get(
+        'http://127.0.0.1:9000/api/data',
+        res => {
+
+            let d = '';
+
+            res.on('data', c => d += c);
+
+            res.on('end', () => {
+
+                try {
+
+                    status.candidatesList =
+                        JSON.parse(d).live || [];
+
+                } catch (e) {}
+            });
+        }
+    ).on('error', () => {});
+
+}, 2000);
+
 const APP = express();
 
 APP.use(express.json());
 
+APP.use(express.static(__dirname));
+
+APP.get('/api/status', async (req, res) => {
+
+    try {
+
+        const acc = await binancePrivate(
+            '/fapi/v2/account'
+        );
+
+        const bl = {};
+
+        Object.entries(status.blackList)
+            .forEach(([s, t]) => {
+
+                if (t > Date.now()) {
+
+                    bl[s] = Math.ceil(
+                        (t - Date.now()) / 1000
+                    );
+                }
+            });
+
+        res.json({
+            botSettings,
+            activePositions: Array.from(
+                botActivePositions.values()
+            ),
+            status: {
+                ...status,
+                blackList: bl
+            },
+            wallet: {
+                totalWalletBalance: parseFloat(
+                    acc.totalWalletBalance
+                ).toFixed(2),
+
+                availableBalance: parseFloat(
+                    acc.availableBalance
+                ).toFixed(2),
+
+                totalUnrealizedProfit: parseFloat(
+                    acc.totalUnrealizedProfit
+                ).toFixed(2)
+            }
+        });
+
+    } catch (e) {
+
+        res.json({ status });
+    }
+});
+
+APP.post('/api/settings', (req, res) => {
+
+    botSettings = {
+        ...botSettings,
+        ...req.body
+    };
+
+    res.json({
+        success: true
+    });
+});
+
 APP.get('/', (req, res) => {
-    res.send('LUFFY V18 RUNNING');
+
+    res.sendFile(
+        path.join(__dirname, 'index.html')
+    );
 });
 
 APP.listen(9001);
