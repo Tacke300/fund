@@ -1,194 +1,110 @@
 <!DOCTYPE html>
-<html lang="vi">
+<html>
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Bot Trade Control Panel</title>
+    <title>Bot Control Panel</title>
     <style>
-        :root {
-            --bg: #1a1a1a; --card: #2d2d2d; --text: #e0e0e0;
-            --blue: #3498db; --red: #e74c3c; --green: #2ecc71; --orange: #f39c12; --gray: #95a5a6;
-        }
-        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: var(--bg); color: var(--text); margin: 0; padding: 20px; }
-        .container { max-width: 1000px; margin: auto; }
-        .card { background: var(--card); padding: 15px; border-radius: 8px; margin-bottom: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.3); }
-        h3 { margin-top: 0; border-bottom: 1px solid #444; padding-bottom: 10px; color: var(--blue); }
-        
-        /* Grid cho cấu hình */
-        .config-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
-        .config-item label { display: block; font-size: 12px; margin-bottom: 5px; color: #aaa; }
-        .config-item input { width: 90%; padding: 8px; border-radius: 4px; border: 1px solid #444; background: #1a1a1a; color: white; }
-        
-        /* Phần Test Nhanh */
-        .test-box { display: flex; gap: 10px; align-items: center; }
-        .test-box input { padding: 8px; border-radius: 4px; border: 1px solid #444; background: #1a1a1a; color: white; flex: 1; }
-        
-        /* Nút bấm */
-        .btn { padding: 8px 12px; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; color: white; transition: 0.2s; }
-        .btn:hover { opacity: 0.8; }
-        .btn-blue { background: var(--blue); }
-        .btn-red { background: var(--red); }
-        .btn-green { background: var(--green); }
-        .btn-orange { background: var(--orange); }
-        .btn-gray { background: var(--gray); }
-        
-        /* Bảng vị thế */
-        table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 13px; }
+        body { font-family: sans-serif; background: #1a1a1a; color: white; padding: 20px; }
+        .card { background: #2d2d2d; padding: 15px; border-radius: 8px; margin-bottom: 20px; }
+        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+        input { background: #1a1a1a; color: white; border: 1px solid #444; padding: 8px; border-radius: 4px; }
+        button { padding: 10px; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; }
+        .btn-blue { background: #3498db; color: white; }
+        .btn-red { background: #e74c3c; color: white; }
+        .btn-green { background: #2ecc71; color: white; }
+        .btn-orange { background: #f39c12; color: white; }
+        .btn-gray { background: #95a5a6; color: white; }
+        table { width: 100%; border-collapse: collapse; margin-top: 10px; }
         th, td { padding: 10px; text-align: left; border-bottom: 1px solid #444; }
-        th { background: #383838; }
-        .pnl-pos { color: var(--green); font-weight: bold; }
-        .pnl-neg { color: var(--red); font-weight: bold; }
-        .action-group { display: flex; gap: 5px; flex-wrap: wrap; }
     </style>
 </head>
 <body>
 
-<div class="container">
+    <!-- 1. CẤU HÌNH LÊN ĐẦU -->
     <div class="card">
-        <h3>⚙️ Cấu Hình Bot</h3>
-        <div class="config-grid" id="configForm">
-            <div class="config-item">
-                <label>Vốn/Lệnh (USDT hoặc %)</label>
-                <input type="text" id="invValue" placeholder="1%">
-            </div>
-            <div class="config-item">
-                <label>Max Lệnh</label>
-                <input type="number" id="maxPositions" step="1">
-            </div>
-            <div class="config-item">
-                <label>DCA Step (%)</label>
-                <input type="number" id="dcaStep" step="0.1">
-            </div>
-            <div class="config-item">
-                <label>Max DCA</label>
-                <input type="number" id="maxDCA" step="1">
-            </div>
-            <div style="grid-column: 1 / -1; margin-top: 10px; display: flex; gap: 10px;">
-                <button class="btn btn-blue" onclick="saveSettings()">Lưu Cấu Hình</button>
-                <button id="btnToggleBot" class="btn btn-green" onclick="toggleBot()">Bật Bot</button>
-            </div>
+        <h3>⚙️ Cấu Hình</h3>
+        <div class="grid">
+            <input type="text" id="invValue" placeholder="Vốn (1% hoặc số)">
+            <input type="number" id="maxPositions" placeholder="Max Lệnh">
+            <input type="number" id="dcaStep" placeholder="DCA Step %">
+            <button class="btn-blue" onclick="saveSettings()">Lưu Cài Đặt</button>
         </div>
     </div>
 
+    <!-- 2. TEST DƯỚI CẤU HÌNH -->
     <div class="card">
-        <h3>🧪 Test Lệnh & TPSL</h3>
-        <div class="test-box">
-            <input type="text" id="testSymbol" placeholder="Nhập Symbol (Ví dụ: BTCUSDT)">
-            <button class="btn btn-blue" onclick="apiAction('open')">Mở Lệnh</button>
-            <button class="btn btn-red" onclick="apiAction('close')">Đóng Lệnh</button>
+        <h3>🧪 Test & Điều Khiển</h3>
+        <div style="display: flex; gap: 10px; margin-bottom: 15px;">
+            <input type="text" id="symInput" placeholder="Symbol (Vd: BTCUSDT)" style="flex:1">
+            <button class="btn-blue" onclick="doAction('open')">MỞ</button>
+            <button class="btn-red" onclick="doAction('close')">ĐÓNG</button>
         </div>
-        <div class="action-group" style="margin-top: 15px; justify-content: center; background: #383838; padding: 10px; border-radius: 5px;">
-            <span style="font-size: 13px; align-self: center;">Công cụ TPSL:</span>
-            <button class="btn btn-gray" onclick="apiAction('delete')">Xóa TP/SL</button>
-            <button class="btn btn-green" onclick="apiAction('setup')">Cài TP/SL</button>
-            <button class="btn btn-orange" onclick="apiAction('reset')">Xóa & Cài Lại (10-15%)</button>
+        <div class="grid">
+            <button class="btn-gray" onclick="doAction('clear_tpsl')">XÓA TP/SL</button>
+            <button class="btn-green" onclick="doAction('set_tpsl')">CÀI TP/SL</button>
+            <button class="btn-orange" onclick="doAction('dca')">RESET (XÓA + CÀI)</button>
         </div>
     </div>
 
+    <!-- 3. VỊ THẾ -->
     <div class="card">
-        <h3>📊 Vị Thế Đang Chạy</h3>
-        <div style="overflow-x: auto;">
-            <table>
-                <thead>
-                    <tr>
-                        <th>Symbol</th>
-                        <th>Entry</th>
-                        <th>Mark</th>
-                        <th>PNL ($)</th>
-                        <th>DCA</th>
-                        <th>Hành Động</th>
-                    </tr>
-                </thead>
-                <tbody id="posTable">
-                    </tbody>
-            </table>
-        </div>
+        <h3>📊 Vị Thế Đang Mở</h3>
+        <table id="posTable">
+            <thead>
+                <tr>
+                    <th>Symbol</th>
+                    <th>Entry</th>
+                    <th>PNL</th>
+                    <th>Hành Động</th>
+                </tr>
+            </thead>
+            <tbody></tbody>
+        </table>
     </div>
-</div>
 
-<script>
-    let isRunning = false;
+    <script>
+        async function doAction(action) {
+            const symbol = document.getElementById('symInput').value.toUpperCase();
+            if(!symbol && action !== 'save') return alert("Nhập symbol");
+            await fetch('/api/test', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ action, symbol })
+            });
+        }
 
-    async function refreshStatus() {
-        try {
+        async function saveSettings() {
+            const body = {
+                invValue: document.getElementById('invValue').value,
+                maxPositions: parseInt(document.getElementById('maxPositions').value),
+                dcaStep: parseFloat(document.getElementById('dcaStep').value)
+            };
+            await fetch('/api/settings', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(body)
+            });
+            alert("Đã lưu!");
+        }
+
+        setInterval(async () => {
             const res = await fetch('/api/status');
             const data = await res.json();
-            
-            // Cập nhật nút bật/tắt bot
-            isRunning = data.botSettings.isRunning;
-            const btn = document.getElementById('btnToggleBot');
-            btn.innerText = isRunning ? "Dừng Bot" : "Bật Bot";
-            btn.className = isRunning ? "btn btn-red" : "btn btn-green";
-
-            // Cập nhật bảng vị thế
-            const tbody = document.getElementById('posTable');
+            const tbody = document.querySelector('#posTable tbody');
             tbody.innerHTML = data.activePositions.map(p => `
                 <tr>
-                    <td><b>${p.symbol}</b></td>
+                    <td>${p.symbol}</td>
                     <td>${p.entryPrice}</td>
-                    <td>${p.markPrice || 0}</td>
-                    <td class="${p.pnl >= 0 ? 'pnl-pos' : 'pnl-neg'}">${p.pnl.toFixed(2)}</td>
-                    <td>${p.dcaCount}</td>
-                    <td>
-                        <div class="action-group">
-                            <button class="btn btn-orange" onclick="rowAction('reset', '${p.symbol}')">Reset TP/SL</button>
-                            <button class="btn btn-red" onclick="rowAction('close', '${p.symbol}')">Đóng</button>
-                        </div>
-                    </td>
+                    <td style="color:${p.pnl >=0 ? '#2ecc71':'#e74c3c'}">${p.pnl.toFixed(2)}</td>
+                    <td><button class="btn-red" onclick="rowClose('${p.symbol}')">Đóng</button></td>
                 </tr>
             `).join('');
+        }, 2000);
 
-        } catch (e) { console.error("Lỗi cập nhật:", e); }
-    }
-
-    async function apiAction(action) {
-        const symbol = document.getElementById('testSymbol').value.toUpperCase();
-        if(!symbol) return alert("Vui lòng nhập Symbol");
-        
-        await fetch('/api/test', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ action, symbol })
-        });
-        alert(`Đã gửi yêu cầu: ${action} cho ${symbol}`);
-    }
-
-    async function rowAction(action, symbol) {
-        await fetch('/api/test', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ action, symbol })
-        });
-    }
-
-    async function saveSettings() {
-        const settings = {
-            invValue: document.getElementById('invValue').value,
-            maxPositions: parseInt(document.getElementById('maxPositions').value),
-            dcaStep: parseFloat(document.getElementById('dcaStep').value),
-            maxDCA: parseInt(document.getElementById('maxDCA').value)
-        };
-        await fetch('/api/settings', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify(settings)
-        });
-        alert("Đã lưu cấu hình!");
-    }
-
-    async function toggleBot() {
-        await fetch('/api/settings', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ isRunning: !isRunning })
-        });
-        refreshStatus();
-    }
-
-    // Tự động load dữ liệu
-    setInterval(refreshStatus, 1000);
-    window.onload = refreshStatus;
-</script>
-
+        async function rowClose(symbol) {
+            document.getElementById('symInput').value = symbol;
+            doAction('close');
+        }
+    </script>
 </body>
 </html>
