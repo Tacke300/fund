@@ -13,7 +13,6 @@
         .bl-tag { background: rgba(239, 68, 68, 0.1); border: 1px solid #ef4444; padding: 2px 5px; border-radius: 3px; color: #ef4444; font-size: 10px; display: flex; gap: 5px; }
         .bl-time { font-weight: bold; color: #fff; }
         .btn-test { font-size: 8px; padding: 4px 1px; border-radius: 2px; font-weight: bold; transition: all 0.2s; text-align: center; }
-        .btn-test:active { transform: scale(0.95); opacity: 0.7; }
     </style>
 </head>
 <body class="p-2 space-y-3">
@@ -33,18 +32,16 @@
         </div>
     </div>
 
-    <!-- 2. CẤU HÌNH (Đã bỏ DCA%) -->
-    <div class="card grid grid-cols-2 gap-2">
+    <!-- 2. CẤU HÌNH -->
+    <div class="card grid grid-cols-5 gap-2">
         <div><p class="text-[9px] text-zinc-500 uppercase">Vốn</p><input id="invValue"></div>
-        <div><p class="text-[9px] text-zinc-500 uppercase">Max Pos</p><input id="maxPositions"></div>
+        <div><p class="text-[9px] text-zinc-500 uppercase">Max</p><input id="maxPositions"></div>
         <div><p class="text-[9px] text-zinc-500 uppercase">Vol%</p><input id="minVol"></div>
-        <div class="grid grid-cols-2 gap-2 col-span-1">
-            <div><p class="text-[9px] text-green-500 uppercase">TP%</p><input id="posTP"></div>
-            <div><p class="text-[9px] text-red-500 uppercase">SL%</p><input id="posSL"></div>
-        </div>
-        <div class="col-span-2 grid grid-cols-2 gap-2 mt-1">
+        <div><p class="text-[9px] text-green-500 uppercase">TP%</p><input id="posTP"></div>
+        <div><p class="text-[9px] text-red-500 uppercase">SL%</p><input id="posSL"></div>
+        <div class="col-span-5 grid grid-cols-2 gap-2 mt-1">
             <button id="runBtn" onclick="toggle()" class="py-2 font-bold border rounded uppercase"></button>
-            <button onclick="save()" class="py-2 bg-zinc-800 text-white font-bold rounded border border-zinc-600 uppercase">Lưu Cấu Hình</button>
+            <button onclick="save()" class="py-2 bg-zinc-800 text-white font-bold rounded border border-zinc-600 uppercase">Lưu</button>
         </div>
     </div>
 
@@ -68,56 +65,34 @@
     <div id="logs" class="card h-[120px] overflow-y-auto text-[10px] text-zinc-400 space-y-1 font-mono"></div>
 
     <script>
-        async function callTest(action, symbol, mode = null) {
-            try {
-                await fetch('/api/test', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({ action, symbol, mode })
-                });
-            } catch (e) { console.error("Action error:", e); }
-        }
-
-        function fmtTime(s) {
-            const m = Math.floor(s / 60);
-            const sec = s % 60;
-            return `${m}:${sec < 10 ? '0' : ''}${sec}`;
-        }
+        function fmtTime(s) { return `${Math.floor(s/60)}:${(s%60).toString().padStart(2,'0')}`; }
 
         async function sync() {
             try {
-                const r = await fetch('/api/status'); 
-                const d = await r.json();
+                const r = await fetch('/api/status'); const d = await r.json();
                 
-                if(d.wallet) {
-                    document.getElementById('totalWallet').innerText = d.wallet.totalWalletBalance;
-                    document.getElementById('availBalance').innerText = d.wallet.availableBalance;
-                    document.getElementById('unrealizedPnL').innerText = d.wallet.totalUnrealizedProfit;
-                    document.getElementById('unrealizedPnL').className = parseFloat(d.wallet.totalUnrealizedProfit) >= 0 ? 'up' : 'down';
-                }
+                document.getElementById('totalWallet').innerText = d.wallet.totalWalletBalance;
+                document.getElementById('availBalance').innerText = d.wallet.availableBalance;
+                document.getElementById('unrealizedPnL').innerText = d.wallet.totalUnrealizedProfit;
+                document.getElementById('unrealizedPnL').className = parseFloat(d.wallet.totalUnrealizedProfit) >= 0 ? 'up' : 'down';
                 
                 document.getElementById('openCount').innerText = d.activePositions.length;
                 document.getElementById('closedCount').innerText = d.status.botClosedCount;
                 document.getElementById('closedPnL').innerText = d.status.botPnLClosed.toFixed(2);
-                document.getElementById('closedPnL').className = d.status.botPnLClosed >= 0 ? 'up' : 'down';
 
-                const blEntries = Object.entries(d.status.blackList);
-                document.getElementById('blacklist-display').innerHTML = blEntries.map(([s, sec]) => `
-                    <span class="bl-tag">
-                        ${s.replace('USDT','')} <span class="bl-time">${fmtTime(sec)}</span>
-                    </span>`).join('');
+                document.getElementById('blacklist-display').innerHTML = Object.entries(d.status.blackList).map(([s, sec]) => sec > 0 ? `
+                    <span class="bl-tag">${s.replace('USDT','')} <span class="bl-time">${fmtTime(sec)}</span></span>` : '').join('');
 
                 document.getElementById('candidate-list').innerHTML = d.status.candidatesList.slice(0,10).map(c => `
-                    <tr class="border-b border-zinc-900" onclick="callTest('open', '${c.symbol}')" style="cursor:pointer">
+                    <tr class="border-b border-zinc-900">
                         <td class="py-1 font-bold">${c.symbol.replace('USDT','')}</td>
                         <td align="right" class="${parseFloat(c.c1)>=0?'up':'down'}">${c.c1}%</td>
                         <td align="right" class="${parseFloat(c.c5)>=0?'up':'down'}">${c.c5}%</td>
                         <td align="right" class="${parseFloat(c.c15)>=0?'up':'down'}">${c.c15}%</td>
                     </tr>`).join('');
 
-                // RENDER VỊ THẾ
                 document.getElementById('pos-list').innerHTML = d.activePositions.map(p => `
-                    <div class="card border-l-2 border-red-500 bg-zinc-950 p-2 space-y-2">
+                    <div class="card border-l-2 border-red-500 bg-zinc-950 p-2">
                         <div class="flex justify-between items-center">
                             <div>
                                 <div class="font-bold text-white uppercase">${p.symbol} <span class="text-[10px] text-zinc-600">x${p.leverage}</span></div>
@@ -125,21 +100,7 @@
                             </div>
                             <div class="text-right">
                                 <div class="${p.pnl>=0?'up':'down'} font-black text-sm">${p.pnl.toFixed(2)}$</div>
-                                <div class="text-[9px] text-zinc-600">${p.priceDev.toFixed(2)}%</div>
-                            </div>
-                        </div>
-                        <div class="space-y-1">
-                            <div class="grid grid-cols-5 gap-1">
-                                <button onclick="callTest('clear', '${p.symbol}', 1)" class="btn-test bg-zinc-800 text-zinc-400">XÓA M1</button>
-                                <button onclick="callTest('clear', '${p.symbol}', 2)" class="btn-test bg-zinc-800 text-zinc-400">XÓA M2</button>
-                                <button onclick="callTest('clear', '${p.symbol}', 3)" class="btn-test bg-zinc-800 text-zinc-400">XÓA M3</button>
-                                <button onclick="callTest('clear', '${p.symbol}', 4)" class="btn-test bg-zinc-700 text-blue-400">XÓA M4</button>
-                                <button onclick="callTest('clear', '${p.symbol}', 5)" class="btn-test bg-zinc-700 text-yellow-400">XÓA M5</button>
-                            </div>
-                            <div class="grid grid-cols-3 gap-1">
-                                <button onclick="callTest('set_only', '${p.symbol}')" class="btn-test bg-zinc-800 text-green-500 py-1.5">CÀI TP</button>
-                                <button onclick="callTest('reset_cycle', '${p.symbol}')" class="btn-test bg-orange-950 text-orange-400 py-1.5">RESET</button>
-                                <button onclick="callTest('close', '${p.symbol}')" class="btn-test bg-red-950 text-red-500 py-1.5">ĐÓNG</button>
+                                <div class="text-[9px] text-zinc-600">${p.priceDev.toFixed(2)}% | DCA: ${p.dcaCount}</div>
                             </div>
                         </div>
                     </div>`).join('');
@@ -164,7 +125,7 @@
                 posSL: parseFloat(document.getElementById('posSL').value)
             };
             await fetch('/api/settings', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body) });
-            alert("ĐÃ LƯU CẤU HÌNH");
+            alert("LƯU XONG");
         }
 
         setInterval(sync, 1000);
