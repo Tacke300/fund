@@ -3,25 +3,21 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>LUFFY BOT - CONTROL PANEL</title>
+    <title>LUFFY BOT</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         body { background: #000; color: #eee; font-family: monospace; font-size: 12px; }
         .card { background: #111; border: 1px solid #222; padding: 10px; border-radius: 4px; }
         .up { color: #00ff88; } .down { color: #ff4444; }
         input { background: #000; border: 1px solid #333; color: #fff; padding: 5px; text-align: center; border-radius: 3px; width: 100%; outline: none; }
-        input:focus { border-color: #555; }
         .bl-tag { background: rgba(239, 68, 68, 0.1); border: 1px solid #ef4444; padding: 2px 5px; border-radius: 3px; color: #ef4444; font-size: 10px; display: flex; gap: 5px; }
         .bl-time { font-weight: bold; color: #fff; }
-        .btn-test { font-size: 9px; padding: 6px 2px; border-radius: 2px; font-weight: bold; transition: all 0.2s; text-align: center; }
+        .btn-test { font-size: 8px; padding: 4px 1px; border-radius: 2px; font-weight: bold; transition: all 0.2s; text-align: center; }
         .btn-test:active { transform: scale(0.95); opacity: 0.7; }
-        ::-webkit-scrollbar { width: 4px; }
-        ::-webkit-scrollbar-thumb { background: #333; }
     </style>
 </head>
 <body class="p-2 space-y-3">
-
-    <!-- 1. TÀI KHOẢN & STATS -->
+    <!-- 1. TÀI KHOẢN -->
     <div class="card grid grid-cols-2 gap-4">
         <div class="space-y-1">
             <p class="text-[9px] text-zinc-500 uppercase">Tài khoản</p>
@@ -37,35 +33,26 @@
         </div>
     </div>
 
-    <!-- 2. CẤU HÌNH HỆ THỐNG -->
+    <!-- 2. CẤU HÌNH -->
     <div class="card grid grid-cols-3 gap-2">
         <div><p class="text-[9px] text-zinc-500 uppercase">Vốn</p><input id="invValue"></div>
         <div><p class="text-[9px] text-zinc-500 uppercase">Max Pos</p><input id="maxPositions"></div>
         <div><p class="text-[9px] text-zinc-500 uppercase">Vol%</p><input id="minVol"></div>
-        <div><p class="text-[9px] text-green-500 uppercase">Tp%</p><input id="posTP"></div>
-        <div><p class="text-[9px] text-red-500 uppercase">Sl%</p><input id="posSL"></div>
-        <div><p class="text-[9px] text-yellow-500 uppercase">Dca%</p><input id="dcaStep"></div>
+        <div><p class="text-[9px] text-green-500 uppercase">TP%</p><input id="posTP"></div>
+        <div><p class="text-[9px] text-red-500 uppercase">SL%</p><input id="posSL"></div>
+        <div><p class="text-[9px] text-yellow-500 uppercase">DCA%</p><input id="dcaStep"></div>
         <div class="col-span-3 grid grid-cols-2 gap-2 mt-1">
-            <button id="runBtn" onclick="toggle()" class="py-2 font-bold border rounded uppercase">--</button>
+            <button id="runBtn" onclick="toggle()" class="py-2 font-bold border rounded uppercase"></button>
             <button onclick="save()" class="py-2 bg-zinc-800 text-white font-bold rounded border border-zinc-600 uppercase">Lưu Cấu Hình</button>
         </div>
     </div>
 
-    <!-- 3. QUẢN TRỊ TEST NHANH (MỚI) -->
-    <div class="card space-y-2 border-blue-900/30">
-        <div class="flex justify-between items-center">
-            <p class="text-[9px] text-blue-500 uppercase font-bold">Điều khiển thủ công</p>
-            <span class="text-[8px] text-zinc-600 italic">Nhập symbol rồi chọn lệnh</span>
-        </div>
+    <!-- 3. QUẢN TRỊ TEST -->
+    <div class="card space-y-2">
+        <p class="text-[9px] text-blue-500 font-bold uppercase">Quản trị nhanh</p>
         <div class="flex gap-2">
             <input id="testSymbol" placeholder="SYMBOL (VÍ DỤ: BTC)" class="flex-1 !text-left px-2 uppercase font-bold text-blue-400">
-            <button onclick="manualAction('open')" class="bg-blue-600 hover:bg-blue-500 text-white px-3 py-1 rounded font-bold text-[10px]">MỞ LỆNH</button>
-        </div>
-        <div class="grid grid-cols-4 gap-1">
-            <button onclick="manualAction('clear', 1)" class="btn-test bg-zinc-800 text-zinc-400">XÓA M1</button>
-            <button onclick="manualAction('set_only')" class="btn-test bg-zinc-800 text-green-500">CÀI TP</button>
-            <button onclick="manualAction('reset_cycle')" class="btn-test bg-orange-950 text-orange-400">RESET</button>
-            <button onclick="manualAction('close')" class="btn-test bg-red-950 text-red-500">ĐÓNG</button>
+            <button onclick="manualOpen()" class="bg-blue-600 text-white px-3 py-1 rounded font-bold text-[10px]">MỞ LONG</button>
         </div>
     </div>
 
@@ -78,11 +65,9 @@
     <!-- 6. KÈO TIỀM NĂNG -->
     <div class="card">
         <table class="w-full text-left text-[11px]">
-            <thead>
-                <tr class="text-zinc-500 border-b border-zinc-800">
-                    <th class="pb-1">SYMBOL</th><th align="right" class="pb-1">1M</th><th align="right" class="pb-1">5M</th><th align="right" class="pb-1">15M</th>
-                </tr>
-            </thead>
+            <tr class="text-zinc-500 border-b border-zinc-800">
+                <th>SYMBOL</th><th align="right">1M</th><th align="right">5M</th><th align="right">15M</th>
+            </tr>
             <tbody id="candidate-list"></tbody>
         </table>
     </div>
@@ -91,29 +76,22 @@
     <div id="logs" class="card h-[120px] overflow-y-auto text-[10px] text-zinc-400 space-y-1 font-mono"></div>
 
     <script>
-        // --- HÀM GỌI API GỐC ---
         async function callTest(action, symbol, mode = null) {
             try {
-                const res = await fetch('/api/test', {
+                await fetch('/api/test', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({ action, symbol, mode })
                 });
-                return await res.json();
             } catch (e) { console.error("Action error:", e); }
         }
 
-        // --- HÀM CHO PHẦN TEST NHANH ---
-        async function manualAction(action, mode = null) {
-            let symbol = document.getElementById('testSymbol').value.trim().toUpperCase();
-            if (!symbol) {
-                alert("Vui lòng nhập Symbol (Ví dụ: BTC)");
-                return;
-            }
-            if (!symbol.endsWith('USDT')) symbol += 'USDT';
-            
-            await callTest(action, symbol, mode);
-            document.getElementById('testSymbol').value = ""; // Clear input sau khi bấm
+        async function manualOpen() {
+            let s = document.getElementById('testSymbol').value.toUpperCase();
+            if(!s) return;
+            if(!s.endsWith('USDT')) s += 'USDT';
+            await callTest('open', s);
+            document.getElementById('testSymbol').value = "";
         }
 
         function fmtTime(s) {
@@ -122,46 +100,40 @@
             return `${m}:${sec < 10 ? '0' : ''}${sec}`;
         }
 
-        // --- ĐỒNG BỘ DỮ LIỆU ---
         async function sync() {
             try {
                 const r = await fetch('/api/status'); 
                 const d = await r.json();
                 
-                // Cập nhật Wallet
                 if(d.wallet) {
                     document.getElementById('totalWallet').innerText = d.wallet.totalWalletBalance;
                     document.getElementById('availBalance').innerText = d.wallet.availableBalance;
-                    const pnl = parseFloat(d.wallet.totalUnrealizedProfit);
-                    document.getElementById('unrealizedPnL').innerText = pnl.toFixed(2);
-                    document.getElementById('unrealizedPnL').className = pnl >= 0 ? 'up' : 'down';
+                    document.getElementById('unrealizedPnL').innerText = d.wallet.totalUnrealizedProfit;
+                    document.getElementById('unrealizedPnL').className = parseFloat(d.wallet.totalUnrealizedProfit) >= 0 ? 'up' : 'down';
                 }
                 
-                // Cập nhật Bot Stats
                 document.getElementById('openCount').innerText = d.activePositions.length;
                 document.getElementById('closedCount').innerText = d.status.botClosedCount;
                 document.getElementById('closedPnL').innerText = d.status.botPnLClosed.toFixed(2);
                 document.getElementById('closedPnL').className = d.status.botPnLClosed >= 0 ? 'up' : 'down';
 
-                // Render Blacklist
                 const blEntries = Object.entries(d.status.blackList);
                 document.getElementById('blacklist-display').innerHTML = blEntries.map(([s, sec]) => `
                     <span class="bl-tag">
                         ${s.replace('USDT','')} <span class="bl-time">${fmtTime(sec)}</span>
                     </span>`).join('');
 
-                // Render Kèo tiềm năng
                 document.getElementById('candidate-list').innerHTML = d.status.candidatesList.slice(0,10).map(c => `
-                    <tr class="border-b border-zinc-900 hover:bg-zinc-900" onclick="callTest('open', '${c.symbol}')" style="cursor:pointer">
+                    <tr class="border-b border-zinc-900" onclick="callTest('open', '${c.symbol}')" style="cursor:pointer">
                         <td class="py-1 font-bold">${c.symbol.replace('USDT','')}</td>
                         <td align="right" class="${parseFloat(c.c1)>=0?'up':'down'}">${c.c1}%</td>
                         <td align="right" class="${parseFloat(c.c5)>=0?'up':'down'}">${c.c5}%</td>
                         <td align="right" class="${parseFloat(c.c15)>=0?'up':'down'}">${c.c15}%</td>
                     </tr>`).join('');
 
-                // Render Vị thế đang mở
+                // RENDER VỊ THẾ VỚI 5 NÚT XÓA CHI TIẾT
                 document.getElementById('pos-list').innerHTML = d.activePositions.map(p => `
-                    <div class="card border-l-2 ${p.pnl>=0?'border-green-500':'border-red-500'} bg-zinc-950 p-2 space-y-2">
+                    <div class="card border-l-2 border-red-500 bg-zinc-950 p-2 space-y-2">
                         <div class="flex justify-between items-center">
                             <div>
                                 <div class="font-bold text-white uppercase">${p.symbol} <span class="text-[10px] text-zinc-600">x${p.leverage}</span></div>
@@ -172,34 +144,31 @@
                                 <div class="text-[9px] text-zinc-600">${p.priceDev.toFixed(2)}%</div>
                             </div>
                         </div>
-                        <div class="grid grid-cols-5 gap-1">
-                            <button onclick="callTest('clear', '${p.symbol}', 1)" class="btn-test bg-zinc-800 text-zinc-400">XÓA M1</button>
-                            <button onclick="callTest('clear', '${p.symbol}', 2)" class="btn-test bg-zinc-800 text-blue-400">XÓA M2</button>
-                            <button onclick="callTest('set_only', '${p.symbol}')" class="btn-test bg-zinc-800 text-green-500">CÀI TP</button>
-                            <button onclick="callTest('reset_cycle', '${p.symbol}')" class="btn-test bg-orange-950 text-orange-400">RESET</button>
-                            <button onclick="callTest('close', '${p.symbol}')" class="btn-test bg-red-950 text-red-500">ĐÓNG</button>
+                        <div class="space-y-1">
+                            <div class="grid grid-cols-5 gap-1">
+                                <button onclick="callTest('clear', '${p.symbol}', 1)" class="btn-test bg-zinc-800 text-zinc-400">XÓA M1</button>
+                                <button onclick="callTest('clear', '${p.symbol}', 2)" class="btn-test bg-zinc-800 text-zinc-400">XÓA M2</button>
+                                <button onclick="callTest('clear', '${p.symbol}', 3)" class="btn-test bg-zinc-800 text-zinc-400">XÓA M3</button>
+                                <button onclick="callTest('clear', '${p.symbol}', 4)" class="btn-test bg-zinc-700 text-blue-400">XÓA M4</button>
+                                <button onclick="callTest('clear', '${p.symbol}', 5)" class="btn-test bg-zinc-700 text-yellow-400">XÓA M5</button>
+                            </div>
+                            <div class="grid grid-cols-3 gap-1">
+                                <button onclick="callTest('set_only', '${p.symbol}')" class="btn-test bg-zinc-800 text-green-500 py-1.5">CÀI TP</button>
+                                <button onclick="callTest('reset_cycle', '${p.symbol}')" class="btn-test bg-orange-950 text-orange-400 py-1.5">RESET</button>
+                                <button onclick="callTest('close', '${p.symbol}')" class="btn-test bg-red-950 text-red-500 py-1.5">ĐÓNG</button>
+                            </div>
                         </div>
                     </div>`).join('');
 
-                // Logs & Button Run
-                document.getElementById('logs').innerHTML = d.status.botLogs.slice().reverse().map(l => `<div>[${l.time}] ${l.msg}</div>`).join('');
-                const isRunning = d.botSettings.isRunning;
-                document.getElementById('runBtn').innerText = isRunning ? "STOP BOT" : "START BOT";
-                document.getElementById('runBtn').className = isRunning 
-                    ? "py-2 rounded border-red-500 text-red-500 bg-red-950/20 font-bold uppercase" 
-                    : "py-2 rounded border-green-500 text-green-500 bg-green-950/20 font-bold uppercase";
+                document.getElementById('logs').innerHTML = d.status.botLogs.map(l => `<div>[${l.time}] ${l.msg}</div>`).join('');
+                document.getElementById('runBtn').innerText = d.botSettings.isRunning ? "STOP BOT" : "START BOT";
+                document.getElementById('runBtn').className = d.botSettings.isRunning ? "py-2 rounded border-red-500 text-red-500 bg-red-950/20" : "py-2 rounded border-green-500 text-green-500 bg-green-950/20";
             } catch (e) {}
         }
 
-        // --- ĐIỀU KHIỂN ---
         async function toggle() {
             const r = await fetch('/api/status'); const d = await r.json();
-            await fetch('/api/settings', { 
-                method: 'POST', 
-                headers: {'Content-Type': 'application/json'}, 
-                body: JSON.stringify({ isRunning: !d.botSettings.isRunning }) 
-            });
-            sync();
+            await fetch('/api/settings', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ isRunning: !d.botSettings.isRunning }) });
         }
 
         async function save() {
@@ -215,7 +184,6 @@
             alert("ĐÃ LƯU CẤU HÌNH");
         }
 
-        // Khởi tạo
         setInterval(sync, 1000);
         window.onload = () => {
             fetch('/api/status').then(r => r.json()).then(d => {
@@ -226,7 +194,6 @@
                 document.getElementById('posSL').value = d.botSettings.posSL;
                 document.getElementById('dcaStep').value = d.botSettings.dcaStep;
             });
-            sync();
         }
     </script>
 </body>
