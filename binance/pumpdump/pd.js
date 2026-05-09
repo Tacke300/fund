@@ -29,12 +29,12 @@ let botActivePositions = new Map();
 let timestampOffset = 0; 
 let openingSymbols = new Set();
 
-// ============ LOCK SYSTEM - NGĂN RACE CONDITION & DCA OVERLAP ============
+// ============ LOCK SYSTEM ============
 const positionLocks = new Map();
 const dcaCleanupLocks = new Map();
 const MAX_RETRIES = 3;
 const RETRY_BASE_DELAY = 1000;
-const BLACKLIST_DURATION = 15 * 60 * 1000; // 15 phút
+const BLACKLIST_DURATION = 15 * 60 * 1000;
 
 // ============ UTILITY: RETRY WITH EXPONENTIAL BACKOFF ============
 async function retryWithBackoff(fn, functionName = 'API Call', maxRetries = MAX_RETRIES) {
@@ -122,7 +122,7 @@ async function binancePrivate(endpoint, method = 'GET', data = {}) {
     }, `binancePrivate(${endpoint})`);
 }
 
-// ============ WAIT UNTIL ALL ORDERS CLEARED - WITH TIMEOUT ============
+// ============ WAIT UNTIL ALL ORDERS CLEARED ============
 async function waitUntilAllOrdersCleared(symbol, maxWaitTime = 15000) {
     const startTime = Date.now();
     let lastOrderCount = -1;
@@ -153,7 +153,7 @@ async function waitUntilAllOrdersCleared(symbol, maxWaitTime = 15000) {
     return false;
 }
 
-// ============ 1. DỌN LỆNH CHỜ TẬN GỐC - DÙNG NATIVE API ĐỂ NHANH ============
+// ============ 1. DỌN LỆNH CHỜ ============
 async function forceClearAllOrders(symbol) {
     try {
         addBotLog(`🧹 [${symbol}] Đang dọn dẹp lệnh chờ...`);
@@ -183,7 +183,7 @@ async function forceClearAllOrders(symbol) {
     }
 }
 
-// ============ 2. VERIFY ALGO ORDERS EXIST (TP/SL) ============
+// ============ 2. VERIFY TPSL ORDERS EXIST ============
 async function verifyTPSLOrders(symbol, side, maxAttempts = 5) {
     let attempts = 0;
     
@@ -214,7 +214,7 @@ async function verifyTPSLOrders(symbol, side, maxAttempts = 5) {
     return false;
 }
 
-// ============ 3. ĐẶT TP/SL MỚI - DÙNG ALGO ORDER API ============
+// ============ 3. ĐẶT TP/SL MỚI - DÙNG CCXT ============
 async function syncTPSL(symbol, side, entry, info, isDCA = false) {
     const isShort = side === 'SHORT';
     const tpPrice = (entry * (isShort ? (1 - botSettings.posTP / 100) : (1 + botSettings.posTP / 100))).toFixed(info.pricePrecision);
@@ -242,29 +242,23 @@ async function syncTPSL(symbol, side, entry, info, isDCA = false) {
         addBotLog(`⏳ [${symbol}] ${isDCA ? '[DCA]' : ''} Bước 3: Đợi sàn cập nhật (2 giây)...`);
         await new Promise(r => setTimeout(r, 2000));
 
-        // BƯỚC 4: Đặt TP - DÙNG ALGO ORDER API
+        // BƯỚC 4: Đặt TP - DÙNG CCXT
         addBotLog(`📍 [${symbol}] ${isDCA ? '[DCA]' : ''} Bước 4: Đặt TP @ ${tpPrice}...`);
-        await binancePrivate('/fapi/v1/conditionalOrder', 'POST', {
-            symbol,
-            side: sideClose,
+        await exchange.createOrder(symbol, 'TAKE_PROFIT_MARKET', sideClose, undefined, undefined, {
             positionSide: side,
-            type: 'TAKE_PROFIT_MARKET',
             stopPrice: tpPrice,
-            closePosition: 'true',
+            closePosition: true,
             workingType: 'MARK_PRICE'
         });
         
         await new Promise(r => setTimeout(r, 800));
 
-        // BƯỚC 5: Đặt SL - DÙNG ALGO ORDER API
+        // BƯỚC 5: Đặt SL - DÙNG CCXT
         addBotLog(`📍 [${symbol}] ${isDCA ? '[DCA]' : ''} Bước 5: Đặt SL @ ${slPrice}...`);
-        await binancePrivate('/fapi/v1/conditionalOrder', 'POST', {
-            symbol,
-            side: sideClose,
+        await exchange.createOrder(symbol, 'STOP_MARKET', sideClose, undefined, undefined, {
             positionSide: side,
-            type: 'STOP_MARKET',
             stopPrice: slPrice,
-            closePosition: 'true',
+            closePosition: true,
             workingType: 'MARK_PRICE'
         });
 
@@ -288,7 +282,7 @@ async function syncTPSL(symbol, side, entry, info, isDCA = false) {
     }
 }
 
-// ============ 4. MỞ VỊ THẾ & DCA - CÓ LOCK SYSTEM ============
+// ============ 4. MỞ VỊ THẾ & DCA ============
 async function openPosition(symbol, isDCA = false) {
     const posKey = `${symbol}_SHORT`;
     
@@ -408,7 +402,7 @@ async function openPosition(symbol, isDCA = false) {
     }
 }
 
-// ============ PRICE MONITOR LOOP - OPTIMIZED ============
+// ============ PRICE MONITOR LOOP ============
 async function priceMonitorLoop() {
     if (!status.isReady) { 
         setTimeout(priceMonitorLoop, 1000); 
@@ -522,7 +516,7 @@ async function init() {
         
         status.exchangeInfo = tempInfo;
         status.isReady = true;
-        addBotLog("👿 LUFFY V20.4 - ALGO ORDER API FIXED", "success");
+        addBotLog("👿 LUFFY V20.5 - CCXT FOR TPSL ORDERS", "success");
         priceMonitorLoop();
     } catch (e) { 
         addBotLog(`❌ Init error: ${e.message}`, "error");
