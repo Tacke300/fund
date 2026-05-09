@@ -1,109 +1,176 @@
 <!DOCTYPE html>
-<html>
+<html lang="vi">
 <head>
     <meta charset="UTF-8">
-    <title>Bot Control Panel</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>LUFFY BOT</title>
+    <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        body { font-family: sans-serif; background: #1a1a1a; color: white; padding: 20px; }
-        .card { background: #2d2d2d; padding: 15px; border-radius: 8px; margin-bottom: 20px; }
-        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
-        input { background: #1a1a1a; color: white; border: 1px solid #444; padding: 8px; border-radius: 4px; }
-        button { padding: 10px; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; }
-        .btn-blue { background: #3498db; color: white; }
-        .btn-red { background: #e74c3c; color: white; }
-        .btn-green { background: #2ecc71; color: white; }
-        .btn-orange { background: #f39c12; color: white; }
-        .btn-gray { background: #95a5a6; color: white; }
-        table { width: 100%; border-collapse: collapse; margin-top: 10px; }
-        th, td { padding: 10px; text-align: left; border-bottom: 1px solid #444; }
+        body { background: #000; color: #eee; font-family: monospace; font-size: 12px; }
+        .card { background: #111; border: 1px solid #222; padding: 10px; border-radius: 4px; }
+        .up { color: #00ff88; } .down { color: #ff4444; }
+        input { background: #000; border: 1px solid #333; color: #fff; padding: 5px; text-align: center; border-radius: 3px; width: 100%; outline: none; }
+        .bl-tag { background: rgba(239, 68, 68, 0.1); border: 1px solid #ef4444; padding: 2px 5px; border-radius: 3px; color: #ef4444; font-size: 10px; display: flex; gap: 5px; }
+        .bl-time { font-weight: bold; color: #fff; }
+        .btn-test { font-size: 9px; padding: 4px 2px; border-radius: 2px; font-weight: bold; transition: all 0.2s; }
+        .btn-test:active { transform: scale(0.95); opacity: 0.7; }
     </style>
 </head>
-<body>
-
-    <!-- 1. CẤU HÌNH LÊN ĐẦU -->
-    <div class="card">
-        <h3>⚙️ Cấu Hình</h3>
-        <div class="grid">
-            <input type="text" id="invValue" placeholder="Vốn (1% hoặc số)">
-            <input type="number" id="maxPositions" placeholder="Max Lệnh">
-            <input type="number" id="dcaStep" placeholder="DCA Step %">
-            <button class="btn-blue" onclick="saveSettings()">Lưu Cài Đặt</button>
+<body class="p-2 space-y-3">
+    <!-- 1. TÀI KHOẢN & STATS -->
+    <div class="card grid grid-cols-2 gap-4">
+        <div class="space-y-1">
+            <p class="text-[9px] text-zinc-500 uppercase">Tài khoản</p>
+            <div class="flex justify-between"><span>Ví:</span> <b id="totalWallet">0.00</b></div>
+            <div class="flex justify-between text-zinc-400"><span>Khả dụng:</span> <b id="availBalance">0.00</b></div>
+            <div class="flex justify-between"><span>Unl PnL:</span> <b id="unrealizedPnL">0.00</b></div>
+        </div>
+        <div class="space-y-1 border-l border-zinc-800 pl-4">
+            <p class="text-[9px] text-zinc-500 uppercase">Bot Stats</p>
+            <div class="flex justify-between"><span>Đang mở:</span> <b id="openCount" class="text-yellow-500">0</b></div>
+            <div class="flex justify-between"><span>Đã chốt:</span> <b id="closedCount">0</b></div>
+            <div class="flex justify-between"><span>PnL chốt:</span> <b id="closedPnL">0.00</b></div>
         </div>
     </div>
 
-    <!-- 2. TEST DƯỚI CẤU HÌNH -->
-    <div class="card">
-        <h3>🧪 Test & Điều Khiển</h3>
-        <div style="display: flex; gap: 10px; margin-bottom: 15px;">
-            <input type="text" id="symInput" placeholder="Symbol (Vd: BTCUSDT)" style="flex:1">
-            <button class="btn-blue" onclick="doAction('open')">MỞ</button>
-            <button class="btn-red" onclick="doAction('close')">ĐÓNG</button>
-        </div>
-        <div class="grid">
-            <button class="btn-gray" onclick="doAction('clear_tpsl')">XÓA TP/SL</button>
-            <button class="btn-green" onclick="doAction('set_tpsl')">CÀI TP/SL</button>
-            <button class="btn-orange" onclick="doAction('dca')">RESET (XÓA + CÀI)</button>
+    <!-- 2. CẤU HÌNH -->
+    <div class="card grid grid-cols-3 gap-2">
+        <div><p class="text-[9px] text-zinc-500">VỐN</p><input id="invValue"></div>
+        <div><p class="text-[9px] text-zinc-500">MAX POS</p><input id="maxPositions"></div>
+        <div><p class="text-[9px] text-zinc-500">VOL%</p><input id="minVol"></div>
+        <div><p class="text-[9px] text-green-500">TP%</p><input id="posTP"></div>
+        <div><p class="text-[9px] text-red-500">SL%</p><input id="posSL"></div>
+        <div><p class="text-[9px] text-yellow-500">DCA%</p><input id="dcaStep"></div>
+        <div class="col-span-3 grid grid-cols-2 gap-2 mt-1">
+            <button id="runBtn" onclick="toggle()" class="py-2 font-bold border rounded"></button>
+            <button onclick="save()" class="py-2 bg-zinc-800 text-white font-bold rounded border border-zinc-600">LƯU CẤU HÌNH</button>
         </div>
     </div>
 
-    <!-- 3. VỊ THẾ -->
+    <!-- 4. BLACKLIST -->
+    <div class="card flex flex-wrap gap-2 min-h-[25px]" id="blacklist-display"></div>
+
+    <!-- 5. VỊ THẾ ĐANG MỞ -->
+    <div id="pos-list" class="space-y-2"></div>
+
+    <!-- 6. KÈO TIỀM NĂNG -->
     <div class="card">
-        <h3>📊 Vị Thế Đang Mở</h3>
-        <table id="posTable">
-            <thead>
-                <tr>
-                    <th>Symbol</th>
-                    <th>Entry</th>
-                    <th>PNL</th>
-                    <th>Hành Động</th>
-                </tr>
-            </thead>
-            <tbody></tbody>
+        <table class="w-full text-left text-[11px]">
+            <tr class="text-zinc-500 border-b border-zinc-800">
+                <th>SYMBOL</th><th align="right">1M</th><th align="right">5M</th><th align="right">15M</th>
+            </tr>
+            <tbody id="candidate-list"></tbody>
         </table>
     </div>
 
+    <!-- 3. LOGS -->
+    <div id="logs" class="card h-[120px] overflow-y-auto text-[10px] text-zinc-400 space-y-1 font-mono"></div>
+
     <script>
-        async function doAction(action) {
-            const symbol = document.getElementById('symInput').value.toUpperCase();
-            if(!symbol && action !== 'save') return alert("Nhập symbol");
-            await fetch('/api/test', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ action, symbol })
-            });
+        // HÀM GỌI API ĐIỀU KHIỂN
+        async function callTest(action, symbol, mode = null) {
+            try {
+                await fetch('/api/test', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ action, symbol, mode })
+                });
+            } catch (e) { console.error("Action error:", e); }
         }
 
-        async function saveSettings() {
-            const body = {
+        function fmtTime(s) {
+            const m = Math.floor(s / 60);
+            const sec = s % 60;
+            return `${m}:${sec < 10 ? '0' : ''}${sec}`;
+        }
+
+        async function sync() {
+            try {
+                const r = await fetch('/api/status'); 
+                const d = await r.json();
+                
+                if(d.wallet) {
+                    document.getElementById('totalWallet').innerText = d.wallet.totalWalletBalance;
+                    document.getElementById('availBalance').innerText = d.wallet.availableBalance;
+                    document.getElementById('unrealizedPnL').innerText = d.wallet.totalUnrealizedProfit;
+                    document.getElementById('unrealizedPnL').className = parseFloat(d.wallet.totalUnrealizedProfit) >= 0 ? 'up' : 'down';
+                }
+                
+                document.getElementById('openCount').innerText = d.activePositions.length;
+                document.getElementById('closedCount').innerText = d.status.botClosedCount;
+                document.getElementById('closedPnL').innerText = d.status.botPnLClosed.toFixed(2);
+                document.getElementById('closedPnL').className = d.status.botPnLClosed >= 0 ? 'up' : 'down';
+
+                const blEntries = Object.entries(d.status.blackList);
+                document.getElementById('blacklist-display').innerHTML = blEntries.map(([s, sec]) => `
+                    <span class="bl-tag">
+                        ${s.replace('USDT','')} <span class="bl-time">${fmtTime(sec)}</span>
+                    </span>`).join('');
+
+                document.getElementById('candidate-list').innerHTML = d.status.candidatesList.slice(0,10).map(c => `
+                    <tr class="border-b border-zinc-900" onclick="callTest('open', '${c.symbol}')" style="cursor:pointer">
+                        <td class="py-1 font-bold">${c.symbol.replace('USDT','')}</td>
+                        <td align="right" class="${parseFloat(c.c1)>=0?'up':'down'}">${c.c1}%</td>
+                        <td align="right" class="${parseFloat(c.c5)>=0?'up':'down'}">${c.c5}%</td>
+                        <td align="right" class="${parseFloat(c.c15)>=0?'up':'down'}">${c.c15}%</td>
+                    </tr>`).join('');
+
+                // RENDER VỊ THẾ VỚI 5 NÚT ĐIỀU KHIỂN
+                document.getElementById('pos-list').innerHTML = d.activePositions.map(p => `
+                    <div class="card border-l-2 border-red-500 bg-zinc-950 p-2 space-y-2">
+                        <div class="flex justify-between items-center">
+                            <div>
+                                <div class="font-bold text-white uppercase">${p.symbol} <span class="text-[10px] text-zinc-600">x${p.leverage}</span></div>
+                                <div class="text-[9px] text-zinc-500">Entry: ${p.entryPrice} | TP: ${p.tp}</div>
+                            </div>
+                            <div class="text-right">
+                                <div class="${p.pnl>=0?'up':'down'} font-black text-sm">${p.pnl.toFixed(2)}$</div>
+                                <div class="text-[9px] text-zinc-600">${p.priceDev.toFixed(2)}%</div>
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-5 gap-1">
+                            <button onclick="callTest('clear', '${p.symbol}', 1)" class="btn-test bg-zinc-800 text-zinc-400">XÓA M1</button>
+                            <button onclick="callTest('clear', '${p.symbol}', 2)" class="btn-test bg-zinc-800 text-blue-400">XÓA M2</button>
+                            <button onclick="callTest('set_only', '${p.symbol}')" class="btn-test bg-zinc-800 text-green-500">CÀI TP</button>
+                            <button onclick="callTest('reset_cycle', '${p.symbol}')" class="btn-test bg-orange-950 text-orange-400">RESET</button>
+                            <button onclick="callTest('close', '${p.symbol}')" class="btn-test bg-red-950 text-red-500">ĐÓNG</button>
+                        </div>
+                    </div>`).join('');
+
+                document.getElementById('logs').innerHTML = d.status.botLogs.map(l => `<div>[${l.time}] ${l.msg}</div>`).join('');
+                document.getElementById('runBtn').innerText = d.botSettings.isRunning ? "STOP BOT" : "START BOT";
+                document.getElementById('runBtn').className = d.botSettings.isRunning ? "py-2 rounded border-red-500 text-red-500 bg-red-950/20" : "py-2 rounded border-green-500 text-green-500 bg-green-950/20";
+            } catch (e) {}
+        }
+
+        async function toggle() {
+            const r = await fetch('/api/status'); const d = await r.json();
+            await fetch('/api/settings', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ isRunning: !d.botSettings.isRunning }) });
+        }
+
+        async function save() {
+            const body = { 
                 invValue: document.getElementById('invValue').value,
                 maxPositions: parseInt(document.getElementById('maxPositions').value),
+                minVol: parseFloat(document.getElementById('minVol').value),
+                posTP: parseFloat(document.getElementById('posTP').value),
+                posSL: parseFloat(document.getElementById('posSL').value),
                 dcaStep: parseFloat(document.getElementById('dcaStep').value)
             };
-            await fetch('/api/settings', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify(body)
-            });
-            alert("Đã lưu!");
+            await fetch('/api/settings', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body) });
+            alert("ĐÃ LƯU CẤU HÌNH");
         }
 
-        setInterval(async () => {
-            const res = await fetch('/api/status');
-            const data = await res.json();
-            const tbody = document.querySelector('#posTable tbody');
-            tbody.innerHTML = data.activePositions.map(p => `
-                <tr>
-                    <td>${p.symbol}</td>
-                    <td>${p.entryPrice}</td>
-                    <td style="color:${p.pnl >=0 ? '#2ecc71':'#e74c3c'}">${p.pnl.toFixed(2)}</td>
-                    <td><button class="btn-red" onclick="rowClose('${p.symbol}')">Đóng</button></td>
-                </tr>
-            `).join('');
-        }, 2000);
-
-        async function rowClose(symbol) {
-            document.getElementById('symInput').value = symbol;
-            doAction('close');
+        setInterval(sync, 1000);
+        window.onload = () => {
+            fetch('/api/status').then(r => r.json()).then(d => {
+                document.getElementById('invValue').value = d.botSettings.invValue;
+                document.getElementById('maxPositions').value = d.botSettings.maxPositions;
+                document.getElementById('minVol').value = d.botSettings.minVol;
+                document.getElementById('posTP').value = d.botSettings.posTP;
+                document.getElementById('posSL').value = d.botSettings.posSL;
+                document.getElementById('dcaStep').value = d.botSettings.dcaStep;
+            });
         }
     </script>
 </body>
