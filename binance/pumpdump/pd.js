@@ -50,27 +50,33 @@ async function binancePrivate(endpoint, method = 'GET', data = {}) {
     }
 }
 
-// ============ 3 CÁCH XÓA LỆNH CHỜ (NEW) ============
+// ============ 5 CÁCH XÓA LỆNH CHỜ (UPDATED) ============
 async function clearOrders(symbol, mode = 1) {
     try {
-        if (mode === 1) { // Cách 1: CCXT cancelAllOrders
+        if (mode === 1) { // Cách 1: CCXT cancelAllOrders (SHORT side)
             await exchange.cancelAllOrders(symbol, { positionSide: 'SHORT' });
-            addBotLog(`🗑️ [${symbol}] Mode 1: CCXT Cancel All`);
-        } else if (mode === 2) { // Cách 2: API Binance Gốc (Xóa từng lệnh)
+            addBotLog(`🗑️ [${symbol}] M1: CCXT Cancel All SHORT`);
+        } else if (mode === 2) { // Cách 2: API Binance Gốc (Xóa từng lệnh bằng ID)
             const orders = await binancePrivate('/fapi/v1/openOrders', 'GET', { symbol });
             const shorts = orders.filter(o => o.positionSide === 'SHORT');
             for (const o of shorts) {
                 await binancePrivate('/fapi/v1/order', 'DELETE', { symbol, orderId: o.orderId });
             }
-            addBotLog(`🗑️ [${symbol}] Mode 2: Native API Delete x${shorts.length}`);
-        } else { // Cách 3: CCXT Fetch + Cancel thủ công
+            addBotLog(`🗑️ [${symbol}] M2: Native API Delete x${shorts.length}`);
+        } else if (mode === 3) { // Cách 3: CCXT Fetch + Cancel thủ công
             const openOrders = await exchange.fetchOpenOrders(symbol);
             for (const o of openOrders) {
                 if (o.info.positionSide === 'SHORT') await exchange.cancelOrder(o.id, symbol);
             }
-            addBotLog(`🗑️ [${symbol}] Mode 3: CCXT Fetch & Manual Cancel`);
+            addBotLog(`🗑️ [${symbol}] M3: CCXT Manual Loop`);
+        } else if (mode === 4) { // Cách 4: Native API AllOpenOrders (Xóa sạch Symbol)
+            await binancePrivate('/fapi/v1/allOpenOrders', 'DELETE', { symbol });
+            addBotLog(`🗑️ [${symbol}] M4: Native API Bulk Clear`);
+        } else if (mode === 5) { // Cách 5: CCXT Force Global Cancel
+            await exchange.cancelAllOrders(symbol);
+            addBotLog(`🗑️ [${symbol}] M5: CCXT Force Global`);
         }
-    } catch (e) { addBotLog(`🚨 Lỗi xóa lệnh: ${e.message}`, "error"); }
+    } catch (e) { addBotLog(`🚨 Lỗi xóa (M${mode}): ${e.message}`, "error"); }
 }
 
 // ============ TPSL LOGIC ============
@@ -154,7 +160,7 @@ async function openPosition(symbol, isDCA = false, manualData = null) {
                     firstMargin: isDCA ? cp.firstMargin : marginToUse,
                     dcaCount: isDCA ? cp.dcaCount + 1 : 0, 
                     isProcessing: false, pnl: 0, markPrice: currentPrice,
-                    tpslStep: 10 // Khởi tạo mức xoay vòng TP
+                    tpslStep: 10 
                 });
             }
         }
@@ -231,7 +237,7 @@ async function init() {
         });
         status.exchangeInfo = tempInfo;
         status.isReady = true;
-        addBotLog("👿 LUFFY V21.4 - FULL CODE READY", "success");
+        addBotLog("👿 LUFFY 5-MODE CLEAR READY", "success");
         priceMonitorLoop();
     } catch (e) { setTimeout(init, 5000); }
 }
@@ -295,9 +301,8 @@ APP.post('/api/test', async (req, res) => {
         }
 
         if (action === 'reset_cycle' && pos) {
-            await clearOrders(symbol, 2); // Xóa bằng API gốc
+            await clearOrders(symbol, 2); 
             await new Promise(r => setTimeout(r, 1000));
-            // Toggle TP: 10 -> 15 -> 10
             pos.tpslStep = (pos.tpslStep === 10) ? 15 : 10;
             const newSync = await syncTPSL(symbol, 'SHORT', pos.entryPrice, info, pos.tpslStep, botSettings.posSL);
             pos.tp = newSync.tp; pos.sl = newSync.sl;
