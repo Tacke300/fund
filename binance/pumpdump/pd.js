@@ -122,14 +122,14 @@ async function binancePrivate(endpoint, method = 'GET', data = {}) {
     }, `binancePrivate(${endpoint})`);
 }
 
-// ============ WAIT UNTIL ALL ORDERS CLEARED ============
+// ============ WAIT UNTIL ALL ORDERS CLEARED - DÙNG CCXT ============
 async function waitUntilAllOrdersCleared(symbol, maxWaitTime = 15000) {
     const startTime = Date.now();
     let lastOrderCount = -1;
     
     while (Date.now() - startTime < maxWaitTime) {
         try {
-            const openOrders = await binancePrivate('/fapi/v1/openOrders', 'GET', { symbol });
+            const openOrders = await exchange.fetchOpenOrders(symbol);
             const openOrdersCount = openOrders.length;
             
             if (openOrdersCount === 0) {
@@ -153,26 +153,27 @@ async function waitUntilAllOrdersCleared(symbol, maxWaitTime = 15000) {
     return false;
 }
 
-// ============ 1. DỌN LỆNH CHỜ ============
+// ============ 1. DỌN LỆNH CHỜ - DÙNG CCXT ============
 async function forceClearAllOrders(symbol) {
     try {
         addBotLog(`🧹 [${symbol}] Đang dọn dẹp lệnh chờ...`);
-        await binancePrivate('/fapi/v1/allOpenOrders', 'DELETE', { symbol }).catch(() => {});
+        
+        const openOrders = await exchange.fetchOpenOrders(symbol);
+        for (const order of openOrders) {
+            try {
+                await exchange.cancelOrder(order['id'], symbol);
+            } catch (e) {
+                addBotLog(`⚠️ [${symbol}] Không thể xóa order ${order['id']}: ${e.message}`, "warning");
+            }
+        }
         
         let retry = 0;
         while (retry < 3) {
             await new Promise(r => setTimeout(r, 500));
-            const openOrders = await binancePrivate('/fapi/v1/openOrders', 'GET', { symbol });
-            if (openOrders.length === 0) {
+            const remainingOrders = await exchange.fetchOpenOrders(symbol);
+            if (remainingOrders.length === 0) {
                 addBotLog(`✨ [${symbol}] Đã dọn sạch lệnh chờ.`);
                 return true;
-            }
-            for (const order of openOrders) {
-                try {
-                    await binancePrivate('/fapi/v1/order', 'DELETE', { symbol, orderId: order.orderId });
-                } catch (e) {
-                    addBotLog(`⚠️ [${symbol}] Không thể xóa order ${order.orderId}: ${e.message}`, "warning");
-                }
             }
             retry++;
         }
@@ -183,20 +184,22 @@ async function forceClearAllOrders(symbol) {
     }
 }
 
-// ============ 2. VERIFY TPSL ORDERS EXIST ============
+// ============ 2. VERIFY TPSL ORDERS EXIST - DÙNG CCXT ============
 async function verifyTPSLOrders(symbol, side, maxAttempts = 5) {
     let attempts = 0;
     
     while (attempts < maxAttempts) {
         try {
-            const openOrders = await binancePrivate('/fapi/v1/openOrders', 'GET', { symbol });
+            const openOrders = await exchange.fetchOpenOrders(symbol);
             const tpslOrders = openOrders.filter(o => 
-                ['TAKE_PROFIT_MARKET', 'STOP_MARKET'].includes(o.type) && 
-                o.positionSide === side
+                ['TAKE_PROFIT_MARKET', 'STOP_MARKET'].includes(o['type']) && 
+                o['info']?.positionSide === side
             );
             
             if (tpslOrders.length >= 2) {
-                addBotLog(`✅ [${symbol}] Xác nhận TPSL orders: TP=${tpslOrders.filter(o => o.type === 'TAKE_PROFIT_MARKET').length}, SL=${tpslOrders.filter(o => o.type === 'STOP_MARKET').length}`);
+                const tpCount = tpslOrders.filter(o => o['type'] === 'TAKE_PROFIT_MARKET').length;
+                const slCount = tpslOrders.filter(o => o['type'] === 'STOP_MARKET').length;
+                addBotLog(`✅ [${symbol}] Xác nhận TPSL orders: TP=${tpCount}, SL=${slCount}`);
                 return true;
             }
             
@@ -226,7 +229,7 @@ async function syncTPSL(symbol, side, entry, info, isDCA = false) {
     }
 
     try {
-        // BƯỚC 1: Buộc dọn sạch lệnh cũ
+        // BƯỚC 1: Buộc dọn sạch lệnh cũ - DÙNG CCXT
         addBotLog(`🧹 [${symbol}] ${isDCA ? '[DCA]' : ''} Bước 1: Dọn sạch lệnh chờ cũ...`);
         await forceClearAllOrders(symbol);
         
@@ -262,7 +265,7 @@ async function syncTPSL(symbol, side, entry, info, isDCA = false) {
             workingType: 'MARK_PRICE'
         });
 
-        // BƯỚC 6: Xác nhận TPSL
+        // BƯỚC 6: Xác nhận TPSL - DÙNG CCXT
         addBotLog(`✅ [${symbol}] ${isDCA ? '[DCA]' : ''} Bước 6: Xác nhận TPSL...`);
         const verified = await verifyTPSLOrders(symbol, side, 5);
         
@@ -384,7 +387,10 @@ async function openPosition(symbol, isDCA = false) {
                 } else {
                     addBotLog(`❌ [${symbol}] ${isDCA ? '[DCA #' + currentDCA + ']' : ''} Không thể set TP/SL, đóng vị thế`, "error");
                     try {
-                        await binancePrivate('/fapi/v1/allOpenOrders', 'DELETE', { symbol });
+                        const openOrders = await exchange.fetchOpenOrders(symbol);
+                        for (const order of openOrders) {
+                            await exchange.cancelOrder(order['id'], symbol);
+                        }
                     } catch (e) {}
                 }
             } else {
@@ -516,7 +522,7 @@ async function init() {
         
         status.exchangeInfo = tempInfo;
         status.isReady = true;
-        addBotLog("👿 LUFFY V20.5 - CCXT FOR TPSL ORDERS", "success");
+        addBotLog("👿 LUFFY V20.6 - CCXT VERIFY FIX", "success");
         priceMonitorLoop();
     } catch (e) { 
         addBotLog(`❌ Init error: ${e.message}`, "error");
