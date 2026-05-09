@@ -2,159 +2,193 @@
 <html lang="vi">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>LUFFY BOT</title>
-    <script src="https://cdn.tailwindcss.com"></script>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bot Trade Control Panel</title>
     <style>
-        body { background: #000; color: #eee; font-family: monospace; font-size: 12px; }
-        .card { background: #111; border: 1px solid #222; padding: 10px; border-radius: 4px; }
-        .up { color: #00ff88; } .down { color: #ff4444; }
-        input { background: #000; border: 1px solid #333; color: #fff; padding: 5px; text-align: center; border-radius: 3px; width: 100%; outline: none; }
-        .bl-tag { background: rgba(239, 68, 68, 0.1); border: 1px solid #ef4444; padding: 2px 5px; border-radius: 3px; color: #ef4444; font-size: 10px; display: flex; gap: 5px; }
-        .bl-time { font-weight: bold; color: #fff; }
+        :root {
+            --bg: #1a1a1a; --card: #2d2d2d; --text: #e0e0e0;
+            --blue: #3498db; --red: #e74c3c; --green: #2ecc71; --orange: #f39c12; --gray: #95a5a6;
+        }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: var(--bg); color: var(--text); margin: 0; padding: 20px; }
+        .container { max-width: 1000px; margin: auto; }
+        .card { background: var(--card); padding: 15px; border-radius: 8px; margin-bottom: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.3); }
+        h3 { margin-top: 0; border-bottom: 1px solid #444; padding-bottom: 10px; color: var(--blue); }
+        
+        /* Grid cho cấu hình */
+        .config-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+        .config-item label { display: block; font-size: 12px; margin-bottom: 5px; color: #aaa; }
+        .config-item input { width: 90%; padding: 8px; border-radius: 4px; border: 1px solid #444; background: #1a1a1a; color: white; }
+        
+        /* Phần Test Nhanh */
+        .test-box { display: flex; gap: 10px; align-items: center; }
+        .test-box input { padding: 8px; border-radius: 4px; border: 1px solid #444; background: #1a1a1a; color: white; flex: 1; }
+        
+        /* Nút bấm */
+        .btn { padding: 8px 12px; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; color: white; transition: 0.2s; }
+        .btn:hover { opacity: 0.8; }
+        .btn-blue { background: var(--blue); }
+        .btn-red { background: var(--red); }
+        .btn-green { background: var(--green); }
+        .btn-orange { background: var(--orange); }
+        .btn-gray { background: var(--gray); }
+        
+        /* Bảng vị thế */
+        table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 13px; }
+        th, td { padding: 10px; text-align: left; border-bottom: 1px solid #444; }
+        th { background: #383838; }
+        .pnl-pos { color: var(--green); font-weight: bold; }
+        .pnl-neg { color: var(--red); font-weight: bold; }
+        .action-group { display: flex; gap: 5px; flex-wrap: wrap; }
     </style>
 </head>
-<body class="p-2 space-y-3">
-    <!-- 1. TÀI KHOẢN & STATS -->
-    <div class="card grid grid-cols-2 gap-4">
-        <div class="space-y-1">
-            <p class="text-[9px] text-zinc-500 uppercase">Tài khoản</p>
-            <div class="flex justify-between"><span>Ví:</span> <b id="totalWallet">0.00</b></div>
-            <div class="flex justify-between text-zinc-400"><span>Khả dụng:</span> <b id="availBalance">0.00</b></div>
-            <div class="flex justify-between"><span>Unl PnL:</span> <b id="unrealizedPnL">0.00</b></div>
-        </div>
-        <div class="space-y-1 border-l border-zinc-800 pl-4">
-            <p class="text-[9px] text-zinc-500 uppercase">Bot Stats</p>
-            <div class="flex justify-between"><span>Đang mở:</span> <b id="openCount" class="text-yellow-500">0</b></div>
-            <div class="flex justify-between"><span>Đã chốt:</span> <b id="closedCount">0</b></div>
-            <div class="flex justify-between"><span>PnL chốt:</span> <b id="closedPnL">0.00</b></div>
-        </div>
-    </div>
+<body>
 
-    <!-- 2. CẤU HÌNH (Đã đưa lên trên) -->
-    <div class="card grid grid-cols-3 gap-2">
-        <div><p class="text-[9px] text-zinc-500">VỐN</p><input id="invValue"></div>
-        <div><p class="text-[9px] text-zinc-500">MAX POS</p><input id="maxPositions"></div>
-        <div><p class="text-[9px] text-zinc-500">VOL%</p><input id="minVol"></div>
-        <div><p class="text-[9px] text-green-500">TP%</p><input id="posTP"></div>
-        <div><p class="text-[9px] text-red-500">SL%</p><input id="posSL"></div>
-        <div><p class="text-[9px] text-yellow-500">DCA%</p><input id="dcaStep"></div>
-        <div class="col-span-3 grid grid-cols-2 gap-2 mt-1">
-            <button id="runBtn" onclick="toggle()" class="py-2 font-bold border rounded"></button>
-            <button onclick="save()" class="py-2 bg-zinc-800 text-white font-bold rounded border border-zinc-600">LƯU CẤU HÌNH</button>
-        </div>
-    </div>
-
-    <!-- 4. BLACKLIST -->
-    <div class="card flex flex-wrap gap-2 min-h-[25px]" id="blacklist-display"></div>
-
-    <!-- 5. VỊ THẾ ĐANG MỞ (Đã đưa xuống dưới) -->
-    <div id="pos-list" class="space-y-2"></div>
-
-    <!-- 6. KÈO TIỀM NĂNG -->
+<div class="container">
     <div class="card">
-        <table class="w-full text-left text-[11px]">
-            <tr class="text-zinc-500 border-b border-zinc-800">
-                <th>SYMBOL</th><th align="right">1M</th><th align="right">5M</th><th align="right">15M</th>
-            </tr>
-            <tbody id="candidate-list"></tbody>
-        </table>
+        <h3>⚙️ Cấu Hình Bot</h3>
+        <div class="config-grid" id="configForm">
+            <div class="config-item">
+                <label>Vốn/Lệnh (USDT hoặc %)</label>
+                <input type="text" id="invValue" placeholder="1%">
+            </div>
+            <div class="config-item">
+                <label>Max Lệnh</label>
+                <input type="number" id="maxPositions" step="1">
+            </div>
+            <div class="config-item">
+                <label>DCA Step (%)</label>
+                <input type="number" id="dcaStep" step="0.1">
+            </div>
+            <div class="config-item">
+                <label>Max DCA</label>
+                <input type="number" id="maxDCA" step="1">
+            </div>
+            <div style="grid-column: 1 / -1; margin-top: 10px; display: flex; gap: 10px;">
+                <button class="btn btn-blue" onclick="saveSettings()">Lưu Cấu Hình</button>
+                <button id="btnToggleBot" class="btn btn-green" onclick="toggleBot()">Bật Bot</button>
+            </div>
+        </div>
     </div>
 
-    <!-- 3. LOGS -->
-    <div id="logs" class="card h-[120px] overflow-y-auto text-[10px] text-zinc-400 space-y-1 font-mono"></div>
+    <div class="card">
+        <h3>🧪 Test Lệnh & TPSL</h3>
+        <div class="test-box">
+            <input type="text" id="testSymbol" placeholder="Nhập Symbol (Ví dụ: BTCUSDT)">
+            <button class="btn btn-blue" onclick="apiAction('open')">Mở Lệnh</button>
+            <button class="btn btn-red" onclick="apiAction('close')">Đóng Lệnh</button>
+        </div>
+        <div class="action-group" style="margin-top: 15px; justify-content: center; background: #383838; padding: 10px; border-radius: 5px;">
+            <span style="font-size: 13px; align-self: center;">Công cụ TPSL:</span>
+            <button class="btn btn-gray" onclick="apiAction('delete')">Xóa TP/SL</button>
+            <button class="btn btn-green" onclick="apiAction('setup')">Cài TP/SL</button>
+            <button class="btn btn-orange" onclick="apiAction('reset')">Xóa & Cài Lại (10-15%)</button>
+        </div>
+    </div>
 
-    <script>
-        function fmtTime(s) {
-            const m = Math.floor(s / 60);
-            const sec = s % 60;
-            return `${m}:${sec < 10 ? '0' : ''}${sec}`;
-        }
+    <div class="card">
+        <h3>📊 Vị Thế Đang Chạy</h3>
+        <div style="overflow-x: auto;">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Symbol</th>
+                        <th>Entry</th>
+                        <th>Mark</th>
+                        <th>PNL ($)</th>
+                        <th>DCA</th>
+                        <th>Hành Động</th>
+                    </tr>
+                </thead>
+                <tbody id="posTable">
+                    </tbody>
+            </table>
+        </div>
+    </div>
+</div>
 
-        async function sync() {
-            try {
-                const r = await fetch('/api/status'); 
-                const d = await r.json();
-                
-                if(d.wallet) {
-                    document.getElementById('totalWallet').innerText = d.wallet.totalWalletBalance;
-                    document.getElementById('availBalance').innerText = d.wallet.availableBalance;
-                    document.getElementById('unrealizedPnL').innerText = d.wallet.totalUnrealizedProfit;
-                    document.getElementById('unrealizedPnL').className = parseFloat(d.wallet.totalUnrealizedProfit) >= 0 ? 'up' : 'down';
-                }
-                
-                document.getElementById('openCount').innerText = d.activePositions.length;
-                document.getElementById('closedCount').innerText = d.status.botClosedCount;
-                document.getElementById('closedPnL').innerText = d.status.botPnLClosed.toFixed(2);
-                document.getElementById('closedPnL').className = d.status.botPnLClosed >= 0 ? 'up' : 'down';
+<script>
+    let isRunning = false;
 
-                const blEntries = Object.entries(d.status.blackList);
-                document.getElementById('blacklist-display').innerHTML = blEntries.map(([s, sec]) => `
-                    <span class="bl-tag">
-                        ${s.replace('USDT','')} <span class="bl-time">${fmtTime(sec)}</span>
-                    </span>`).join('');
+    async function refreshStatus() {
+        try {
+            const res = await fetch('/api/status');
+            const data = await res.json();
+            
+            // Cập nhật nút bật/tắt bot
+            isRunning = data.botSettings.isRunning;
+            const btn = document.getElementById('btnToggleBot');
+            btn.innerText = isRunning ? "Dừng Bot" : "Bật Bot";
+            btn.className = isRunning ? "btn btn-red" : "btn btn-green";
 
-                document.getElementById('candidate-list').innerHTML = d.status.candidatesList.slice(0,10).map(c => `
-                    <tr class="border-b border-zinc-900">
-                        <td class="py-1 font-bold">${c.symbol.replace('USDT','')}</td>
-                        <td align="right" class="${parseFloat(c.c1)>=0?'up':'down'}">${c.c1}%</td>
-                        <td align="right" class="${parseFloat(c.c5)>=0?'up':'down'}">${c.c5}%</td>
-                        <td align="right" class="${parseFloat(c.c15)>=0?'up':'down'}">${c.c15}%</td>
-                    </tr>`).join('');
-
-                document.getElementById('pos-list').innerHTML = d.activePositions.map(p => `
-                    <div class="card border-l-2 ${p.side==='SHORT'?'border-red-500':'border-green-500'} flex justify-between items-center bg-zinc-950">
-                        <div>
-                            <div class="font-bold text-white uppercase">${p.symbol} <span class="text-[9px] text-zinc-500 italic">x${p.leverage}</span></div>
-                            <div class="text-[10px] text-zinc-300">
-                                Entry: ${p.entryPrice} | Margin: ${p.margin.toFixed(2)}$
-                            </div>
-                            <div class="text-[9px] text-zinc-500">
-                                TP: ${p.tp} | SL: ${p.sl} | DCA: <span class="text-yellow-500">${p.dcaCount}/${d.botSettings.maxDCA}</span>
-                            </div>
+            // Cập nhật bảng vị thế
+            const tbody = document.getElementById('posTable');
+            tbody.innerHTML = data.activePositions.map(p => `
+                <tr>
+                    <td><b>${p.symbol}</b></td>
+                    <td>${p.entryPrice}</td>
+                    <td>${p.markPrice || 0}</td>
+                    <td class="${p.pnl >= 0 ? 'pnl-pos' : 'pnl-neg'}">${p.pnl.toFixed(2)}</td>
+                    <td>${p.dcaCount}</td>
+                    <td>
+                        <div class="action-group">
+                            <button class="btn btn-orange" onclick="rowAction('reset', '${p.symbol}')">Reset TP/SL</button>
+                            <button class="btn btn-red" onclick="rowAction('close', '${p.symbol}')">Đóng</button>
                         </div>
-                        <div class="text-right">
-                            <div class="text-white font-bold">${parseFloat(p.markPrice || 0).toFixed(4)}</div>
-                            <div class="${p.pnl>=0?'up':'down'} font-black text-sm">${p.pnl.toFixed(2)}$</div>
-                            <div class="text-[9px] text-zinc-500">${((p.pnl/(p.margin*p.leverage))*100).toFixed(2)}%</div>
-                        </div>
-                    </div>`).join('');
+                    </td>
+                </tr>
+            `).join('');
 
-                document.getElementById('logs').innerHTML = d.status.botLogs.map(l => `<div>[${l.time}] ${l.msg}</div>`).join('');
-                document.getElementById('runBtn').innerText = d.botSettings.isRunning ? "STOP BOT" : "START BOT";
-                document.getElementById('runBtn').className = d.botSettings.isRunning ? "py-2 rounded border-red-500 text-red-500 bg-red-950/20" : "py-2 rounded border-green-500 text-green-500 bg-green-950/20";
-            } catch (e) {}
-        }
+        } catch (e) { console.error("Lỗi cập nhật:", e); }
+    }
 
-        async function toggle() {
-            const r = await fetch('/api/status'); const d = await r.json();
-            await fetch('/api/settings', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ isRunning: !d.botSettings.isRunning }) });
-        }
+    async function apiAction(action) {
+        const symbol = document.getElementById('testSymbol').value.toUpperCase();
+        if(!symbol) return alert("Vui lòng nhập Symbol");
+        
+        await fetch('/api/test', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ action, symbol })
+        });
+        alert(`Đã gửi yêu cầu: ${action} cho ${symbol}`);
+    }
 
-        async function save() {
-            const body = { 
-                invValue: document.getElementById('invValue').value,
-                maxPositions: parseInt(document.getElementById('maxPositions').value),
-                minVol: parseFloat(document.getElementById('minVol').value),
-                posTP: parseFloat(document.getElementById('posTP').value),
-                posSL: parseFloat(document.getElementById('posSL').value),
-                dcaStep: parseFloat(document.getElementById('dcaStep').value)
-            };
-            await fetch('/api/settings', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body) });
-            alert("ĐÃ LƯU");
-        }
+    async function rowAction(action, symbol) {
+        await fetch('/api/test', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ action, symbol })
+        });
+    }
 
-        setInterval(sync, 1000);
-        window.onload = () => {
-            fetch('/api/status').then(r => r.json()).then(d => {
-                document.getElementById('invValue').value = d.botSettings.invValue;
-                document.getElementById('maxPositions').value = d.botSettings.maxPositions;
-                document.getElementById('minVol').value = d.botSettings.minVol;
-                document.getElementById('posTP').value = d.botSettings.posTP;
-                document.getElementById('posSL').value = d.botSettings.posSL;
-                document.getElementById('dcaStep').value = d.botSettings.dcaStep;
-            });
-        }
-    </script>
+    async function saveSettings() {
+        const settings = {
+            invValue: document.getElementById('invValue').value,
+            maxPositions: parseInt(document.getElementById('maxPositions').value),
+            dcaStep: parseFloat(document.getElementById('dcaStep').value),
+            maxDCA: parseInt(document.getElementById('maxDCA').value)
+        };
+        await fetch('/api/settings', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(settings)
+        });
+        alert("Đã lưu cấu hình!");
+    }
+
+    async function toggleBot() {
+        await fetch('/api/settings', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ isRunning: !isRunning })
+        });
+        refreshStatus();
+    }
+
+    // Tự động load dữ liệu
+    setInterval(refreshStatus, 1000);
+    window.onload = refreshStatus;
+</script>
+
 </body>
 </html>
