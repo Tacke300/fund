@@ -51,11 +51,13 @@ async function binancePrivate(endpoint, method = 'GET', data = {}) {
     }
 }
 
-// ============ FIX 2 & 3: DETECT LỆNH QUA ALL_ORDERS ============
+// ============ FIX 2: COMBINE OPEN + ALL ORDERS ============
 async function getGhostOrders(symbol) {
     try {
-        const all = await binancePrivate('/fapi/v1/allOrders', 'GET', { symbol, limit: 100 });
-        // Lọc các lệnh TP/SL còn sống (NEW/PARTIALLY_FILLED)
+        const open = await binancePrivate('/fapi/v1/openOrders', 'GET', { symbol });
+        if (open.length > 0) return open;
+
+        const all = await binancePrivate('/fapi/v1/allOrders', 'GET', { symbol, limit: 50 });
         return all.filter(o => 
             (o.type === 'STOP_MARKET' || o.type === 'TAKE_PROFIT_MARKET') && 
             (o.status === 'NEW' || o.status === 'PARTIALLY_FILLED')
@@ -63,40 +65,34 @@ async function getGhostOrders(symbol) {
     } catch (e) { return []; }
 }
 
-// ============ FIX 4 & 6: CLEAR LỆNH VỚI LOCK TRÌ HOÃN ============
+// ============ FIX 4: CANCEL OPTIMIZED ============
 async function clearOrders(symbol, mode = 4) {
     if (clearingSymbols.has(symbol)) return;
     clearingSymbols.add(symbol);
 
     try {
         const ghost = await getGhostOrders(symbol);
-        addBotLog(`📌 [${symbol}] Detect: ${ghost.length} ghost orders`, "warning");
-
-        if (mode === 2) {
+        if (mode === 2 && ghost.length > 0) {
             for (const o of ghost) {
                 try { await binancePrivate('/fapi/v1/order', 'DELETE', { symbol, orderId: o.orderId }); } catch(e){}
             }
-        } else if (mode === 4) {
-            await binancePrivate('/fapi/v1/allOpenOrders', 'DELETE', { symbol });
         } else {
-            // Các mode khác dự phòng
-            await exchange.cancelAllOrders(symbol, { positionSide: 'SHORT' });
+            // Mode 4 mặc định mạnh nhất của Binance
+            await binancePrivate('/fapi/v1/allOpenOrders', 'DELETE', { symbol });
         }
-
-        await new Promise(r => setTimeout(r, 4000)); // FIX 5: Chờ engine release
-        const after = await getGhostOrders(symbol);
-        addBotLog(`📌 [${symbol}] After Clear: ${after.length} left`, after.length === 0 ? "success" : "error");
-
+        await new Promise(r => setTimeout(r, 2000));
+        addBotLog(`✅ [${symbol}] Clear executed.`, "warning");
     } catch (e) {
         addBotLog(`🚨 [${symbol}] Clear Error: ${e.message}`, "error");
     } finally {
-        // FIX 6: Unlock trễ 5s để tránh race condition
-        setTimeout(() => { clearingSymbols.delete(symbol); }, 5000);
+        // Khóa thêm 3s sau khi lệnh chạy xong để Engine kịp thở
+        setTimeout(() => { clearingSymbols.delete(symbol); }, 3000);
     }
 }
 
-// ============ FIX 1: TPSL CHUẨN HEDGE MODE ============
+// ============ FIX 1, 5, 6: TPSL ROLLBACK + CCXT PARAMS FIX ============
 async function syncTPSL(symbol, side, entry, info, customTP = null, customSL = null) {
+    // Nếu đang dọn dẹp, thoát ra để DCA gọi lại sau
     if (clearingSymbols.has(symbol)) return { tp: 0, sl: 0 };
 
     const isShort = side === 'SHORT';
@@ -107,21 +103,31 @@ async function syncTPSL(symbol, side, entry, info, customTP = null, customSL = n
     const sideClose = isShort ? 'BUY' : 'SELL';
 
     try {
-        // BỎ reduceOnly, DÙNG closePosition + priceProtect cho Hedge Mode
-        const params = { positionSide: side, closePosition: true, workingType: 'MARK_PRICE', priceProtect: true };
+        // FIX 1: Merge stopPrice vào params (Param thứ 6 của CCXT)
+        // FIX 5: Bỏ priceProtect để tránh bị Reject ngẫu nhiên
+        const baseParams = { positionSide: side, closePosition: true, workingType: 'MARK_PRICE' };
         
-        const orderTP = await exchange.createOrder(symbol, 'TAKE_PROFIT_MARKET', sideClose, undefined, undefined, params, { stopPrice: tpPrice });
-        const orderSL = await exchange.createOrder(symbol, 'STOP_MARKET', sideClose, undefined, undefined, params, { stopPrice: slPrice });
+        addBotLog(`🎯 [${symbol}] Đang đặt TPSL mới...`);
 
-        addBotLog(`🎯 [${symbol}] TPSL Ready: TP ${tpPrice}, SL ${slPrice}`, "success");
+        const orderTP = await exchange.createOrder(symbol, 'TAKE_PROFIT_MARKET', sideClose, undefined, undefined, { 
+            ...baseParams, stopPrice: tpPrice 
+        });
+
+        const orderSL = await exchange.createOrder(symbol, 'STOP_MARKET', sideClose, undefined, undefined, { 
+            ...baseParams, stopPrice: slPrice 
+        });
+
+        addBotLog(`✅ [${symbol}] TPSL Sync: TP ${tpPrice}, SL ${slPrice}`, "success");
         return { tp: parseFloat(tpPrice), sl: parseFloat(slPrice) };
     } catch (e) {
-        addBotLog(`❌ [${symbol}] Lỗi TPSL: ${e.message}`, "error");
+        // FIX 6: Rollback nếu lỗi 1 nửa
+        addBotLog(`🚨 [${symbol}] Lỗi đặt TPSL: ${e.message}. Rollback...`, "error");
+        await clearOrders(symbol, 4); 
         return { tp: 0, sl: 0 };
     }
 }
 
-// ============ QUẢN LÝ VỊ THẾ + FIX 7 (CLEAR TRƯỚC DCA) ============
+// ============ FIX 3: DCA SMART WAIT ============
 async function openPosition(symbol, isDCA = false, manualData = null) {
     if (openingSymbols.has(symbol) || clearingSymbols.has(symbol)) return;
     const posKey = `${symbol}_SHORT`;
@@ -133,11 +139,13 @@ async function openPosition(symbol, isDCA = false, manualData = null) {
         const currentPrice = parseFloat(ticker.data.price);
         let cp = botActivePositions.get(posKey);
 
-        // FIX 7: Nếu là DCA, phải quét sạch TPSL cũ trước khi bồi thêm volume
         if (isDCA && cp) {
-            addBotLog(`🔄 [${symbol}] DCA Detected: Cleaning old TPSL...`);
+            addBotLog(`🔄 [${symbol}] DCA Cleaning...`);
             await clearOrders(symbol, 4);
-            await new Promise(r => setTimeout(r, 4000));
+            // FIX 3: Đợi cho đến khi unlock thật sự
+            while (clearingSymbols.has(symbol)) {
+                await new Promise(r => setTimeout(r, 500));
+            }
         }
 
         let marginToUse = manualData ? manualData.margin : 0;
@@ -165,11 +173,12 @@ async function openPosition(symbol, isDCA = false, manualData = null) {
             
             if (realP) {
                 const finalEntry = parseFloat(realP.entryPrice);
+                const currentQty = Math.abs(parseFloat(realP.positionAmt));
                 const sync = await syncTPSL(symbol, 'SHORT', finalEntry, info, manualData?.tp, manualData?.sl);
                 
                 botActivePositions.set(posKey, { 
-                    symbol, side: 'SHORT', entryPrice: finalEntry, qty: Math.abs(parseFloat(realP.positionAmt)), 
-                    tp: sync.tp, sl: sync.sl, margin: (Math.abs(parseFloat(realP.positionAmt)) * finalEntry) / info.maxLeverage,
+                    symbol, side: 'SHORT', entryPrice: finalEntry, qty: currentQty, 
+                    tp: sync.tp, sl: sync.sl, margin: (currentQty * finalEntry) / info.maxLeverage,
                     leverage: info.maxLeverage, firstMargin: isDCA ? cp.firstMargin : marginToUse,
                     dcaCount: isDCA ? cp.dcaCount + 1 : 0, isProcessing: false, pnl: 0, markPrice: currentPrice, tpslStep: 10 
                 });
@@ -179,7 +188,8 @@ async function openPosition(symbol, isDCA = false, manualData = null) {
     finally { openingSymbols.delete(symbol); }
 }
 
-// ... (Các MonitorLoop và MainLoop giữ nguyên cấu trúc cũ) ...
+// ... MonitorLoop và MainLoop giữ nguyên cấu trúc ...
+
 async function priceMonitorLoop() {
     if (!status.isReady) { setTimeout(priceMonitorLoop, 1000); return; }
     try {
@@ -189,7 +199,7 @@ async function priceMonitorLoop() {
 
         for (let [key, botPos] of botActivePositions) {
             if (!exchangeKeys.has(key)) {
-                addBotLog(`📉 [${botPos.symbol}] Position Closed. Force Cleaning...`);
+                addBotLog(`📉 [${botPos.symbol}] Position CLOSED. Cleaning...`);
                 await clearOrders(botPos.symbol, 4);
                 status.blackList[botPos.symbol] = Date.now() + BLACKLIST_DURATION;
                 botActivePositions.delete(key);
@@ -236,7 +246,7 @@ async function init() {
         });
         status.exchangeInfo = tempInfo;
         status.isReady = true;
-        addBotLog("👿 LUFFY V6 ONLINE - HEDGE STABLE READY", "success");
+        addBotLog("💎 LUFFY V7 ONLINE - STABLE ARCHITECTURE", "success");
         priceMonitorLoop();
     } catch (e) { setTimeout(init, 5000); }
 }
@@ -269,19 +279,19 @@ APP.post('/api/test', async (req, res) => {
     const pos = botActivePositions.get(posKey);
     const info = status.exchangeInfo[symbol];
 
-    if (clearingSymbols.has(symbol) && action !== 'clear') return res.status(400).json({ error: 'Đang clear...' });
+    if (clearingSymbols.has(symbol) && action !== 'clear') return res.status(400).json({ error: 'System locked...' });
 
     try {
         if (action === 'open') await openPosition(symbol, false, { margin: 0.5, tp: 10, sl: 50 });
         if (action === 'clear') await clearOrders(symbol, parseInt(mode) || 4);
         if (action === 'set_only' && pos) {
             await clearOrders(symbol, 4);
-            await new Promise(r => setTimeout(r, 4000));
+            while (clearingSymbols.has(symbol)) await new Promise(r => setTimeout(r, 500));
             await syncTPSL(symbol, 'SHORT', pos.entryPrice, info);
         }
         if (action === 'reset_cycle' && pos) {
             await clearOrders(symbol, 4); 
-            await new Promise(r => setTimeout(r, 4000));
+            while (clearingSymbols.has(symbol)) await new Promise(r => setTimeout(r, 500));
             pos.tpslStep = (pos.tpslStep === 10) ? 15 : 10;
             const newSync = await syncTPSL(symbol, 'SHORT', pos.entryPrice, info, pos.tpslStep, botSettings.posSL);
             pos.tp = newSync.tp; pos.sl = newSync.sl;
