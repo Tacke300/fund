@@ -30,10 +30,11 @@ let timestampOffset = 0;
 let openingSymbols = new Set();
 
 // ============ LOCK SYSTEM - NGĂN RACE CONDITION & DCA OVERLAP ============
-const positionLocks = new Map(); // Lock toàn bộ quá trình mở vị thế
-const dcaCleanupLocks = new Map(); // Lock riêng cho DCA cleanup
+const positionLocks = new Map();
+const dcaCleanupLocks = new Map();
 const MAX_RETRIES = 3;
 const RETRY_BASE_DELAY = 1000;
+const BLACKLIST_DURATION = 15 * 60 * 1000; // 15 phút
 
 // ============ UTILITY: RETRY WITH EXPONENTIAL BACKOFF ============
 async function retryWithBackoff(fn, functionName = 'API Call', maxRetries = MAX_RETRIES) {
@@ -55,7 +56,7 @@ async function retryWithBackoff(fn, functionName = 'API Call', maxRetries = MAX_
 // ============ UTILITY: POSITION LOCK ============
 async function acquirePositionLock(symbol) {
     const posKey = `${symbol}_SHORT`;
-    const timeout = 120000; // 120 seconds timeout
+    const timeout = 120000;
     const startTime = Date.now();
     
     while (positionLocks.has(posKey)) {
@@ -182,7 +183,7 @@ async function forceClearAllOrders(symbol) {
     }
 }
 
-// ============ 2. VERIFY TPSL ORDERS EXIST ============
+// ============ 2. VERIFY ALGO ORDERS EXIST (TP/SL) ============
 async function verifyTPSLOrders(symbol, side, maxAttempts = 5) {
     let attempts = 0;
     
@@ -213,14 +214,13 @@ async function verifyTPSLOrders(symbol, side, maxAttempts = 5) {
     return false;
 }
 
-// ============ 3. ĐẶT TP/SL MỚI - CÓ LOCK DCA CLEANUP ============
+// ============ 3. ĐẶT TP/SL MỚI - DÙNG ALGO ORDER API ============
 async function syncTPSL(symbol, side, entry, info, isDCA = false) {
     const isShort = side === 'SHORT';
     const tpPrice = (entry * (isShort ? (1 - botSettings.posTP / 100) : (1 + botSettings.posTP / 100))).toFixed(info.pricePrecision);
     const slPrice = (entry * (isShort ? (1 + botSettings.posSL / 100) : (1 - botSettings.posSL / 100))).toFixed(info.pricePrecision);
     const sideClose = isShort ? 'BUY' : 'SELL';
 
-    // Nếu là DCA, acquire DCA cleanup lock để đảm bảo không overlap
     if (isDCA) {
         await acquireDCACleanupLock(symbol);
     }
@@ -242,9 +242,9 @@ async function syncTPSL(symbol, side, entry, info, isDCA = false) {
         addBotLog(`⏳ [${symbol}] ${isDCA ? '[DCA]' : ''} Bước 3: Đợi sàn cập nhật (2 giây)...`);
         await new Promise(r => setTimeout(r, 2000));
 
-        // BƯỚC 4: Đặt TP
+        // BƯỚC 4: Đặt TP - DÙNG ALGO ORDER API
         addBotLog(`📍 [${symbol}] ${isDCA ? '[DCA]' : ''} Bước 4: Đặt TP @ ${tpPrice}...`);
-        await binancePrivate('/fapi/v1/order', 'POST', {
+        await binancePrivate('/fapi/v1/conditionalOrder', 'POST', {
             symbol,
             side: sideClose,
             positionSide: side,
@@ -256,9 +256,9 @@ async function syncTPSL(symbol, side, entry, info, isDCA = false) {
         
         await new Promise(r => setTimeout(r, 800));
 
-        // BƯỚC 5: Đặt SL
+        // BƯỚC 5: Đặt SL - DÙNG ALGO ORDER API
         addBotLog(`📍 [${symbol}] ${isDCA ? '[DCA]' : ''} Bước 5: Đặt SL @ ${slPrice}...`);
-        await binancePrivate('/fapi/v1/order', 'POST', {
+        await binancePrivate('/fapi/v1/conditionalOrder', 'POST', {
             symbol,
             side: sideClose,
             positionSide: side,
@@ -293,14 +293,14 @@ async function openPosition(symbol, isDCA = false) {
     const posKey = `${symbol}_SHORT`;
     
     try {
-        // Acquire lock to prevent race condition
         await acquirePositionLock(symbol);
 
         const posRisk = await binancePrivate('/fapi/v2/positionRisk', 'GET', { symbol });
         const hasPosOnExchange = posRisk.find(p => p.positionSide === 'SHORT' && Math.abs(parseFloat(p.positionAmt)) > 0);
 
         if (!isDCA && hasPosOnExchange) {
-            addBotLog(`⚠️ [${symbol}] Đã có vị thế SHORT trên sàn, bỏ qua`, "warning");
+            addBotLog(`⚠️ [${symbol}] Đã có vị thế SHORT trên sàn, thêm vào blacklist 15p`, "warning");
+            status.blackList[symbol] = Date.now() + BLACKLIST_DURATION;
             return;
         }
 
@@ -318,7 +318,8 @@ async function openPosition(symbol, isDCA = false) {
             cp.isProcessing = true;
         } else {
             if (botActivePositions.has(posKey)) {
-                addBotLog(`⚠️ [${symbol}] Đã có vị thế trong botActivePositions`, "warning");
+                addBotLog(`⚠️ [${symbol}] Đã có vị thế trong botActivePositions, thêm vào blacklist 15p`, "warning");
+                status.blackList[symbol] = Date.now() + BLACKLIST_DURATION;
                 return;
             }
             if (openingSymbols.has(symbol)) {
@@ -338,7 +339,6 @@ async function openPosition(symbol, isDCA = false) {
             firstMargin = cp.firstMargin;
             originalEntry = cp.originalEntry || cp.entryPrice;
             currentDCA = cp.dcaCount + 1;
-            // HỆ SỐ X MARGIN = 1.0 (không nhân thêm)
             marginToUse = firstMargin * 1.0;
             addBotLog(`💎 [${symbol}] [DCA #${currentDCA}] Margin: ${marginToUse.toFixed(2)}$ | Price: ${currentPrice}`, "info");
         } else {
@@ -374,7 +374,6 @@ async function openPosition(symbol, isDCA = false) {
                 
                 addBotLog(`🚀 [${symbol}] ${isDCA ? '[DCA #' + currentDCA + ']' : '[OPEN]'} Lệnh thực hiện OK | Entry: ${finalEntry} | Qty: ${finalQty}`);
                 
-                // ĐẶT TP/SL - QUAN TRỌNG: CÓ LOCK DCA
                 const sync = await syncTPSL(symbol, 'SHORT', finalEntry, info, isDCA);
                 
                 if (sync.success) {
@@ -385,6 +384,9 @@ async function openPosition(symbol, isDCA = false) {
                         tp: sync.tp || 0, sl: sync.sl || 0, firstMargin, dcaCount: currentDCA, 
                         leverage: info.maxLeverage, isProcessing: false, pnl: 0, priceDev: 0
                     });
+                    
+                    status.blackList[symbol] = Date.now() + BLACKLIST_DURATION;
+                    addBotLog(`🔒 [${symbol}] Khóa trong blacklist 15 phút (tránh spam)`, "success");
                 } else {
                     addBotLog(`❌ [${symbol}] ${isDCA ? '[DCA #' + currentDCA + ']' : ''} Không thể set TP/SL, đóng vị thế`, "error");
                     try {
@@ -422,18 +424,14 @@ async function priceMonitorLoop() {
             const realPos = posRisk.find(p => p.symbol === botPos.symbol && p.positionSide === botPos.side);
             
             if (!realPos || Math.abs(parseFloat(realPos.positionAmt)) === 0) {
-                // Vị thế đã đóng
-                status.blackList[botPos.symbol] = now + (10 * 60 * 1000);
                 closedPositions.push({ key, symbol: botPos.symbol, pos: botPos });
             } else {
-                // Cập nhật vị thế
                 botPos.markPrice = parseFloat(realPos.markPrice); 
                 botPos.pnl = parseFloat(realPos.unRealizedProfit);
                 botPos.priceDev = ((botPos.markPrice - botPos.entryPrice) / botPos.entryPrice) * 100;
             }
         }
 
-        // Xử lý các vị thế đã đóng (async)
         for (const closed of closedPositions) {
             trackClosedPnL(closed.symbol, closed.pos).then(() => {
                 botActivePositions.delete(closed.key);
@@ -467,13 +465,18 @@ async function mainLoop() {
     if (!status.isReady || !botSettings.isRunning) return;
     
     try {
-        // Dọn sạch blacklist
         const now = Date.now();
+        let removedCount = 0;
         Object.keys(status.blackList).forEach(s => { 
-            if(status.blackList[s] < now) delete status.blackList[s]; 
+            if(status.blackList[s] < now) {
+                delete status.blackList[s];
+                removedCount++;
+            }
         });
+        if (removedCount > 0) {
+            addBotLog(`✨ Xóa ${removedCount} symbol(s) khỏi blacklist`, "info");
+        }
 
-        // Kiểm tra DCA
         for (let [key, botPos] of botActivePositions) {
             if (botPos.isProcessing) continue;
             if (botPos.dcaCount < botSettings.maxDCA && botPos.priceDev >= botSettings.dcaStep) {
@@ -481,7 +484,6 @@ async function mainLoop() {
             }
         }
 
-        // Mở vị thế mới
         if (botActivePositions.size < botSettings.maxPositions && openingSymbols.size === 0) {
             const keo = status.candidatesList.find(c => {
                 const info = status.exchangeInfo[c.symbol];
@@ -520,28 +522,13 @@ async function init() {
         
         status.exchangeInfo = tempInfo;
         status.isReady = true;
-        addBotLog("👿 LUFFY V20.2 - DCA FIX WITH SEQUENTIAL CLEANUP", "success");
+        addBotLog("👿 LUFFY V20.4 - ALGO ORDER API FIXED", "success");
         priceMonitorLoop();
     } catch (e) { 
         addBotLog(`❌ Init error: ${e.message}`, "error");
         setTimeout(init, 5000); 
     }
 }
-
-// ============ CLEANUP BLACKLIST ============
-setInterval(() => {
-    const now = Date.now();
-    let cleaned = 0;
-    Object.keys(status.blackList).forEach(symbol => {
-        if (status.blackList[symbol] < now) {
-            delete status.blackList[symbol];
-            cleaned++;
-        }
-    });
-    if (cleaned > 0) {
-        addBotLog(`✨ Xóa ${cleaned} symbol(s) khỏi blacklist`, "info");
-    }
-}, 30000);
 
 // ============ ERROR HANDLERS ============
 process.on('unhandledRejection', (reason, promise) => {
