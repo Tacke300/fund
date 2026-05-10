@@ -28,7 +28,7 @@ const exchange = new ccxt.binance({
     options: { defaultType: 'future', dualSidePosition: true, adjustForTimeDifference: true, recvWindow: 60000 } 
 });
 
-let botSettings = { isRunning: false, maxPositions: 3, invValue: "1%", minVol: 6.5, posTP: 0.5, posSL: 50.0, dcaStep: 10.0, maxDCA: 4 };
+let botSettings = { isRunning: false, maxPositions: 3, invValue: "1%", minVol: 6.5, posTP: 1.234, posSL: 10.0, dcaStep: 10.0, maxDCA: 4 };
 let status = { 
     botLogs: [], 
     exchangeInfo: null, 
