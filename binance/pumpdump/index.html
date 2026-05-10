@@ -16,6 +16,18 @@
     </style>
 </head>
 <body class="p-2 space-y-3">
+    <!-- 2. CẤU HÌNH -->
+    <div class="card grid grid-cols-5 gap-2">
+        <div><p class="text-[9px] text-zinc-500 uppercase">Vốn</p><input id="invValue"></div>
+        <div><p class="text-[9px] text-zinc-500 uppercase">Max</p><input id="maxPositions"></div>
+        <div><p class="text-[9px] text-zinc-500 uppercase">Vol%</p><input id="minVol"></div>
+        <div><p class="text-[9px] text-green-500 uppercase">TP%</p><input id="posTP"></div>
+        <div><p class="text-[9px] text-red-500 uppercase">SL%</p><input id="posSL"></div>
+        <div class="col-span-5 grid grid-cols-2 gap-2 mt-1">
+            <button id="runBtn" onclick="toggle()" class="py-2 font-bold border rounded uppercase"></button>
+            <button onclick="save()" class="py-2 bg-zinc-800 text-white font-bold rounded border border-zinc-600 uppercase">Lưu</button>
+        </div>
+    </div>
     <!-- 1. TÀI KHOẢN -->
     <div class="card grid grid-cols-2 gap-4">
         <div class="space-y-1">
@@ -32,18 +44,7 @@
         </div>
     </div>
 
-    <!-- 2. CẤU HÌNH -->
-    <div class="card grid grid-cols-5 gap-2">
-        <div><p class="text-[9px] text-zinc-500 uppercase">Vốn</p><input id="invValue"></div>
-        <div><p class="text-[9px] text-zinc-500 uppercase">Max</p><input id="maxPositions"></div>
-        <div><p class="text-[9px] text-zinc-500 uppercase">Vol%</p><input id="minVol"></div>
-        <div><p class="text-[9px] text-green-500 uppercase">TP%</p><input id="posTP"></div>
-        <div><p class="text-[9px] text-red-500 uppercase">SL%</p><input id="posSL"></div>
-        <div class="col-span-5 grid grid-cols-2 gap-2 mt-1">
-            <button id="runBtn" onclick="toggle()" class="py-2 font-bold border rounded uppercase"></button>
-            <button onclick="save()" class="py-2 bg-zinc-800 text-white font-bold rounded border border-zinc-600 uppercase">Lưu</button>
-        </div>
-    </div>
+    
 
     <!-- 4. BLACKLIST -->
     <div class="card flex flex-wrap gap-2 min-h-[25px]" id="blacklist-display"></div>
