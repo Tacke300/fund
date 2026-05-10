@@ -9,7 +9,7 @@ import ccxt from 'ccxt';
 
 // --- CONFIG DỄ SỬA ---
 const FINAL_LONG_MULTIPLIER = 20; // Hệ số Margin cho lệnh Long cuối cùng
-const SL_REENTRY_DELAY = 1500;   // Delay 1.5s sau khi dính SL
+const SL_REENTRY_DELAY = 3500;   // Delay 1.5s sau khi dính SL
 // ---------------------
 
 const __filename = fileURLToPath(import.meta.url);
