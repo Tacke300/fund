@@ -53,20 +53,18 @@ async function clearOrders(symbol, mode = 1) {
     try {
         if (mode === 1) {
             await exchange.cancelAllOrders(symbol, { positionSide: 'SHORT' });
-            addBotLog(`🗑️ [${symbol}] Mode 1: CCXT Cancel All`);
-        } else if (mode === 2) {
+        } else if (mode === 2 || mode === 4) {
             const orders = await binancePrivate('/fapi/v1/openOrders', 'GET', { symbol });
             const shorts = orders.filter(o => o.positionSide === 'SHORT');
             for (const o of shorts) {
                 await binancePrivate('/fapi/v1/order', 'DELETE', { symbol, orderId: o.orderId });
             }
-            addBotLog(`🗑️ [${symbol}] Mode 2: Native API Delete x${shorts.length}`);
+            addBotLog(`🗑️ [${symbol}] Đã xóa sạch TPSL cũ (Mode 4)`);
         } else {
             const openOrders = await exchange.fetchOpenOrders(symbol);
             for (const o of openOrders) {
                 if (o.info.positionSide === 'SHORT') await exchange.cancelOrder(o.id, symbol);
             }
-            addBotLog(`🗑️ [${symbol}] Mode 3: CCXT Fetch & Manual Cancel`);
         }
     } catch (e) { addBotLog(`🚨 Lỗi xóa lệnh: ${e.message}`, "error"); }
 }
@@ -82,21 +80,30 @@ async function syncTPSL(symbol, side, entry, info, qty, customTP = null, customS
     const finalQty = parseFloat(qty).toFixed(info.quantityPrecision);
 
     try {
+        // 1. Clear cũ
+        await clearOrders(symbol, 4);
+        // 2. Delay để sàn đồng bộ
+        await new Promise(r => setTimeout(r, 2000));
+
+        // 3. Đặt mới với reduceOnly
         await exchange.createOrder(symbol, 'TAKE_PROFIT_MARKET', sideClose, finalQty, undefined, {
             positionSide: side, 
             stopPrice: tpPrice, 
-            workingType: 'MARK_PRICE'
-        });
-        await exchange.createOrder(symbol, 'STOP_MARKET', sideClose, finalQty, undefined, {
-            positionSide: side, 
-            stopPrice: slPrice, 
+            reduceOnly: true,
             workingType: 'MARK_PRICE'
         });
 
-        addBotLog(`🎯 [${symbol}] TPSL: TP ${tpPrice} (${tpP}%) | SL ${slPrice}`, "success");
+        await exchange.createOrder(symbol, 'STOP_MARKET', sideClose, finalQty, undefined, {
+            positionSide: side, 
+            stopPrice: slPrice, 
+            reduceOnly: true,
+            workingType: 'MARK_PRICE'
+        });
+
+        addBotLog(`🎯 [${symbol}] Re-Sync TPSL (ReduceOnly): TP ${tpPrice} | SL ${slPrice}`, "success");
         return { tp: parseFloat(tpPrice), sl: parseFloat(slPrice) };
     } catch (e) {
-        addBotLog(`❌ [${symbol}] Lỗi TPSL: ${e.message}`, "error");
+        addBotLog(`❌ [${symbol}] Lỗi cài ReduceOnly TPSL: ${e.message}`, "error");
         return { tp: 0, sl: 0 };
     }
 }
@@ -138,13 +145,15 @@ async function openPosition(symbol, isDCA = false, manualData = null) {
         const order = await exchange.createOrder(symbol, 'MARKET', 'SELL', qtyNum.toFixed(info.quantityPrecision), undefined, { positionSide: 'SHORT' });
 
         if (order) {
-            await new Promise(r => setTimeout(r, 2000));
+            await new Promise(r => setTimeout(r, 2500));
             const pRisk = await binancePrivate('/fapi/v2/positionRisk', 'GET', { symbol });
             const realP = pRisk.find(p => p.positionSide === 'SHORT' && Math.abs(parseFloat(p.positionAmt)) > 0);
             
             if (realP) {
                 const finalEntry = parseFloat(realP.entryPrice);
                 const finalQty = Math.abs(parseFloat(realP.positionAmt));
+                
+                // Đồng bộ TPSL với reduceOnly
                 const sync = await syncTPSL(symbol, 'SHORT', finalEntry, info, finalQty, manualData?.tp, manualData?.sl);
                 
                 botActivePositions.set(posKey, { 
@@ -231,7 +240,7 @@ async function init() {
         });
         status.exchangeInfo = tempInfo;
         status.isReady = true;
-        addBotLog("👿 LUFFY V21.4 - FULL CODE READY", "success");
+        addBotLog("👿 LUFFY V21.4 - REDUCE-ONLY READY", "success");
         priceMonitorLoop();
     } catch (e) { setTimeout(init, 5000); }
 }
@@ -292,8 +301,6 @@ APP.post('/api/test', async (req, res) => {
         }
 
         if (action === 'reset_cycle' && pos) {
-            await clearOrders(symbol, 2);
-            await new Promise(r => setTimeout(r, 1000));
             pos.tpslStep = (pos.tpslStep === 10) ? 15 : 10;
             const newSync = await syncTPSL(symbol, 'SHORT', pos.entryPrice, info, pos.qty, pos.tpslStep, botSettings.posSL);
             pos.tp = newSync.tp; pos.sl = newSync.sl;
