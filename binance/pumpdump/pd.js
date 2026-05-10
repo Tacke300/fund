@@ -7,10 +7,8 @@ import path from 'path';
 import { API_KEY, SECRET_KEY } from './config.js';
 import ccxt from 'ccxt';
 
-// --- CONFIG DỄ SỬA ---
-const FINAL_LONG_MULTIPLIER = 20; // Hệ số Margin cho lệnh Long cuối cùng
-const SL_REENTRY_DELAY = 5000;   // Delay 1.5s sau khi dính SL
-// ---------------------
+const FINAL_LONG_MULTIPLIER = 20; 
+const SL_REENTRY_DELAY = 5000;   
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -35,7 +33,7 @@ let status = {
     candidatesList: [], 
     isReady: false, 
     blackList: {}, 
-    permBlock: new Set(), // Chặn vĩnh viễn coin lev thấp trong phiên chạy này
+    permBlock: new Set(), 
     botClosedCount: 0, 
     botPnLClosed: 0 
 };
@@ -102,13 +100,12 @@ async function openPosition(symbol, dcaData = null) {
     const side = isFinalLong ? 'LONG' : 'SHORT';
     const posKey = `${symbol}_${side}`;
     
-    if (openingSymbols.has(symbol)) return;
+    if (!dcaData && openingSymbols.has(symbol)) return;
     openingSymbols.add(symbol);
 
     try {
         const info = status.exchangeInfo[symbol];
         
-        // --- CHẶN COIN LEV THẤP VÀO PERM BLOCK ---
         if (info.maxLeverage < 20) {
             addBotLog(`🚫 [${symbol}] MaxLev ${info.maxLeverage} < 20. Chặn vĩnh viễn tới khi reset PM2.`, "warning");
             status.permBlock.add(symbol);
@@ -148,8 +145,8 @@ async function openPosition(symbol, dcaData = null) {
                 
                 let tp, sl;
                 if (isFinalLong) {
-                    tp = entry * 1.10; // TP 10% cho Long
-                    sl = entry * 0.90; // SL 10% cho Long
+                    tp = entry * 1.10; 
+                    sl = entry * 0.90; 
                 } else {
                     const avgEntry = dcaData ? ( (dcaData.prevAvgEntry * dcaData.prevQty) + (entry * qty) ) / (dcaData.prevQty + qty) : entry;
                     tp = avgEntry * (1 - botSettings.posTP / 100);
@@ -194,7 +191,9 @@ async function priceMonitorLoop() {
         for (let [key, botPos] of botActivePositions) {
             const isShort = botPos.side === 'SHORT';
             if (!exchangeKeys.has(key)) {
-                // ĐỢI 1.5S GIẢM LAG SÀN TRƯỚC KHI XỬ LÝ RE-ENTRY
+                if (openingSymbols.has(botPos.symbol)) continue;
+                openingSymbols.add(botPos.symbol);
+
                 await new Promise(r => setTimeout(r, SL_REENTRY_DELAY));
 
                 const userTrades = await binancePrivate('/fapi/v1/userTrades', 'GET', { symbol: botPos.symbol, limit: 5 });
@@ -210,6 +209,7 @@ async function priceMonitorLoop() {
                     addBotLog(`💰 [${botPos.symbol}] Chốt lời: ${netPnl.toFixed(2)} USDT. Blacklist 15p.`, "success");
                     status.blackList[botPos.symbol] = Date.now() + BLACKLIST_DURATION;
                     botActivePositions.delete(key);
+                    openingSymbols.delete(botPos.symbol);
                 } else {
                     addBotLog(`📉 [${botPos.symbol}] Dính SL: ${netPnl.toFixed(2)} USDT. Đang chuẩn bị DCA...`, "warning");
                     
@@ -239,6 +239,7 @@ async function priceMonitorLoop() {
                         });
                     } else {
                         botActivePositions.delete(key);
+                        openingSymbols.delete(botPos.symbol);
                     }
                 }
             } else {
@@ -260,8 +261,8 @@ async function mainLoop() {
         if (botActivePositions.size < botSettings.maxPositions && openingSymbols.size === 0) {
             const entry = status.candidatesList.find(c => {
                 const volOK = Math.abs(parseFloat(c.c1)) >= botSettings.minVol || Math.abs(parseFloat(c.c5)) >= botSettings.minVol;
-                // THÊM CHẶN PERMBLOCK VÀ BLACKLIST
-                return volOK && !status.blackList[c.symbol] && !status.permBlock.has(c.symbol) && !botActivePositions.has(`${c.symbol}_SHORT`);
+                const hasAnyPos = botActivePositions.has(`${c.symbol}_SHORT`) || botActivePositions.has(`${c.symbol}_LONG`);
+                return volOK && !status.blackList[c.symbol] && !status.permBlock.has(c.symbol) && !hasAnyPos && !openingSymbols.has(c.symbol);
             });
             if (entry) await openPosition(entry.symbol);
         }
@@ -289,7 +290,7 @@ async function init() {
         });
         status.exchangeInfo = tempInfo;
         status.isReady = true;
-        addBotLog(`👿 LUFFY V22.1 - LONG x${FINAL_LONG_MULTIPLIER} & DELAY 1.5S READY`, "success");
+        addBotLog(`👿 LUFFY V22.1 - LONG x${FINAL_LONG_MULTIPLIER} & DELAY 5S READY`, "success");
         priceMonitorLoop();
     } catch (e) { setTimeout(init, 5000); }
 }
