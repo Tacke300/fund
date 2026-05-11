@@ -28,7 +28,27 @@ let state = {
 };
 
 
+// Khai báo biến này ở đầu file cùng với các biến khác
+let lastResetDay = new Date(new Date().getTime() + (7 * 60 * 60 * 1000)).getUTCDate();
 
+function checkResetAt7AM() {
+    const now = new Date();
+    // Chuyển giờ hiện tại sang giờ VN (GMT+7)
+    const vnTime = new Date(now.getTime() + (7 * 60 * 60 * 1000));
+    const vnDay = vnTime.getUTCDate();
+    const vnHour = vnTime.getUTCHours();
+
+    // Nếu đã sang ngày mới theo giờ VN VÀ giờ đã từ 7h sáng trở đi
+    if (vnDay !== lastResetDay && vnHour >= 7) {
+        lastResetDay = vnDay;
+        dailyPostCount = 0;
+        postedCoinsToday.clear();
+        addLog("HỆ THỐNG: Đã đến 7h sáng - Reset số liệu bài đăng ngày mới.");
+    }
+}
+
+// Kiểm tra mỗi phút một lần
+setInterval(checkResetAt7AM, 60000);
 
 function formatPrice(num) {
     if (num === null || num === undefined || isNaN(num)) return "0";
