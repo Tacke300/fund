@@ -1284,9 +1284,10 @@ const BANK = {
 };
 // --- GIỮ NGUYÊN PHẦN KHAI BÁO BIẾN ĐẦU FILE (PORT, BANK, logs, postedCoinsToday...) ---
  
-// --- ĐẢM 
+// --- 
 // ==========================================
-// PHẦN CÁC HÀM XỬ LÝ VÀ GIAO DIỆN (DÁN TỪ ĐÂY ĐẾN HẾT FILE)
+// CHỈ DÁN ĐOẠN DƯỚI NÀY VÀO CUỐI FILE 
+// (THAY THẾ TỪ DÒNG FUNCTION GETRANDOMITEM ĐẾN HẾT)
 // ==========================================
 
 function getRandomItem(arr) {
@@ -1312,7 +1313,7 @@ async function getAllFutureCoins() {
 
 // 2. Hàm tạo bài viết hoàn chỉnh
 async function generateFinalPost(coinData) {
-    if (!isRunning) {
+    if (typeof isRunning !== 'undefined' && !isRunning) {
         addLog("CẢNH BÁO: Bot đang ở trạng thái STOP.");
         return null;
     }
@@ -1328,12 +1329,11 @@ async function generateFinalPost(coinData) {
     const side = (coinData.change || 0) >= 0 ? "LONG" : "SHORT";
     const entryRaw = coinData.price || 0;
     
-    // Sử dụng hàm formatPrice sẵn có trong file của bạn
-    const entry = typeof formatPrice === 'function' ? formatPrice(entryRaw) : entryRaw;
+    const entry = formatPrice(entryRaw);
     const tpRaw = side === "LONG" ? entryRaw * 1.05 : entryRaw * 0.95;
     const slRaw = side === "LONG" ? entryRaw * 0.90 : entryRaw * 1.10;
-    const tp = typeof formatPrice === 'function' ? formatPrice(tpRaw) : tpRaw.toFixed(6);
-    const sl = typeof formatPrice === 'function' ? formatPrice(slRaw) : slRaw.toFixed(6);
+    const tp = formatPrice(tpRaw);
+    const sl = formatPrice(slRaw);
 
     const p1 = side === "LONG" ? getRandomItem(BANK.TREND_UP) : getRandomItem(BANK.TREND_DOWN);
     const p2 = getRandomItem(BANK.P1);
@@ -1357,7 +1357,7 @@ async function generateFinalPost(coinData) {
     const hashtags = `#${symbol}USDT $${symbol}USDT ${otherCoins.map(c => `#${c}USDT`).join(' ')}`;
     
     postedCoinsToday.add(symbol);
-    dailyPostCount++;
+    if (typeof dailyPostCount !== 'undefined') dailyPostCount++;
     
     addLog(`HOÀN TẤT: Đã tạo xong nội dung cho ${symbol}.`);
     return `${p1}\n\n${signalPart}\n\n${p2}\n\n${p3}\n\n${p4}\n\n${p5}\n\n${hashtags}`;
@@ -1369,9 +1369,11 @@ app.use(express.json());
 // API điều khiển START/STOP
 app.post('/control', (req, res) => {
     const { action } = req.body;
-    isRunning = (action === 'start');
-    addLog(`HỆ THỐNG: ${isRunning ? 'START' : 'STOP'}`);
-    res.json({ success: true, isRunning });
+    if (typeof isRunning !== 'undefined') {
+        isRunning = (action === 'start');
+        addLog(`HỆ THỐNG: ${isRunning ? 'START' : 'STOP'}`);
+    }
+    res.json({ success: true, isRunning: (typeof isRunning !== 'undefined' ? isRunning : true) });
 });
 
 // API tạo bài đăng
@@ -1388,6 +1390,9 @@ app.post('/generate-post', async (req, res) => {
 
 // Giao diện Web Control Center
 app.get('/', (req, res) => {
+    const currentStatus = (typeof isRunning !== 'undefined' ? isRunning : true);
+    const currentCount = (typeof dailyPostCount !== 'undefined' ? dailyPostCount : 0);
+    
     res.send(`
         <body style="font-family:sans-serif; background:#121212; color:#eee; padding:20px;">
             <h2 style="color:#00ff88;">SQUAD AI - CONTROL CENTER v3.0</h2>
@@ -1397,8 +1402,8 @@ app.get('/', (req, res) => {
                 <button onclick="testPost()" style="background:#3498db; color:white; border:none; padding:12px 25px; cursor:pointer; border-radius:5px; font-weight:bold;">TEST POST BTC</button>
             </div>
             <div style="display:flex; gap:20px; margin-bottom:10px;">
-                <p>Trạng thái: <b style="color:${isRunning ? '#2ecc71' : '#e74c3c'}">${isRunning ? 'ĐANG CHẠY' : 'DỪNG'}</b></p>
-                <p>Bài đăng hôm nay: <b>${dailyPostCount}</b></p>
+                <p>Trạng thái: <b style="color:${currentStatus ? '#2ecc71' : '#e74c3c'}">${currentStatus ? 'ĐANG CHẠY' : 'DỪNG'}</b></p>
+                <p>Bài đăng hôm nay: <b>${currentCount}</b></p>
             </div>
             <p>Coins đã đăng: <i style="color:#aaa;">${Array.from(postedCoinsToday).join(', ') || 'Chưa có'}</i></p>
             <hr style="opacity:0.1"/>
@@ -1419,7 +1424,7 @@ app.get('/', (req, res) => {
                     });
                     const data = await res.json();
                     if(data.success) { alert("Tạo bài thành công! Xem Log."); location.reload(); }
-                    else { alert("Thất bại!"); }
+                    else { alert("Thất bại (Trùng hoặc Bot Stop)!"); }
                 }
             </script>
         </body>
@@ -1427,4 +1432,3 @@ app.get('/', (req, res) => {
 });
 
 app.listen(PORT, () => addLog(`Hệ thống Control Center khởi chạy tại Port ${PORT}`));
-
