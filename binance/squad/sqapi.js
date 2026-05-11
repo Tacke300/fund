@@ -1284,7 +1284,9 @@ const BANK = {
     ]
 };
 // --- GIỮ NGUYÊN 
-// 2. Hàm tạo bài viết và TỰ ĐỘNG ĐĂNG lên Squad
+// 2. Hàm tạo bài viết và TỰ 
+
+// 2. Hàm tạo bài viết và thực hiện ĐĂNG LÊN SQUAD
 async function generateFinalPost(coinData) {
     if (typeof isRunning !== 'undefined' && !isRunning) {
         addLog("HỆ THỐNG: Bot đang STOP, không xử lý.");
@@ -1292,7 +1294,6 @@ async function generateFinalPost(coinData) {
     }
 
     const symbol = coinData.symbol.replace('USDT', '').toUpperCase();
-    
     if (postedCoinsToday.has(symbol)) {
         addLog(`THẤT BẠI: ${symbol} đã đăng rồi.`);
         return null;
@@ -1301,6 +1302,7 @@ async function generateFinalPost(coinData) {
     try {
         addLog(`BẮT ĐẦU xử lý nội dung cho: ${symbol}...`);
 
+        // Tạo nội dung (giữ nguyên logic của bạn)
         const side = (coinData.change || 0) >= 0 ? "LONG" : "SHORT";
         const entryRaw = coinData.price || 0;
         const entry = formatPrice(entryRaw);
@@ -1325,27 +1327,29 @@ async function generateFinalPost(coinData) {
         
         const finalContent = `${p1}\n\n${signalPart}\n\n${p2}\n\n${p3}\n\n${p4}\n\n${p5}\n\n${hashtags}`;
 
-        // --- ĐOẠN QUAN TRỌNG: GỬI LÊN SQUAD ---
+        // --- ĐOẠN QUAN TRỌNG: LỆNH ĐĂNG BÀI LÊN SQUAD ---
         addLog(`Đang gửi bài viết ${symbol} lên Squad API...`);
         
-        const squadResponse = await axios.post('https://api.squad.vn/v1/posts', {
-            apiKey: SQUAD_API_KEY, // Sử dụng key đã khai báo đầu file
+        const squadResponse = await axios.post('https://api.binance.me/squad/v1/post/create', {
+            apiKey: SQUAD_API_KEY, 
             content: finalContent,
+            symbol: `${symbol}USDT`,
             type: "text"
         }, { timeout: 10000 });
 
-        if (squadResponse.data && squadResponse.data.success) {
+        // Kiểm tra phản hồi từ Squad
+        if (squadResponse.data && (squadResponse.data.success || squadResponse.data.code === 200)) {
             postedCoinsToday.add(symbol);
             if (typeof dailyPostCount !== 'undefined') dailyPostCount++;
-            addLog(`THÀNH CÔNG: Đã đăng bài ${symbol} lên Squad.`);
+            addLog(`THÀNH CÔNG: Đã đăng bài ${symbol} lên Squad thành công!`);
             return finalContent;
         } else {
-            addLog(`THẤT BẠI khi gửi lên Squad: ${JSON.stringify(squadResponse.data)}`);
+            addLog(`LỖI SQUAD: Sàn trả về lỗi: ${JSON.stringify(squadResponse.data)}`);
             return null;
         }
 
     } catch (err) {
-        addLog(`LỖI HỆ THỐNG khi xử lý ${symbol}: ` + err.message);
+        addLog(`LỖI HỆ THỐNG: Không thể kết nối Squad API (${err.message})`);
         return null;
     }
 }
@@ -1361,10 +1365,10 @@ app.post('/control', (req, res) => {
     res.json({ success: true, isRunning });
 });
 
-// API nhận tín hiệu từ TradingView hoặc Bot giá
+// API nhận tín hiệu
 app.post('/generate-post', async (req, res) => {
     const content = await generateFinalPost(req.body);
-    if (!content) return res.status(400).json({ success: false, msg: "Lỗi đăng bài" });
+    if (!content) return res.status(400).json({ success: false, msg: "Đăng bài thất bại" });
     res.json({ success: true, content });
 });
 
@@ -1372,11 +1376,11 @@ app.get('/', (req, res) => {
     const status = (typeof isRunning !== 'undefined' ? isRunning : true);
     res.send(`
         <body style="font-family:sans-serif; background:#121212; color:#eee; padding:20px;">
-            <h2 style="color:#00ff88;">SQUAD AI - CONTROL CENTER v3.8</h2>
+            <h2 style="color:#00ff88;">SQUAD AI - CONTROL CENTER v4.0</h2>
             <div style="margin-bottom:20px; background:#1e1e1e; padding:15px; border-radius:8px; border:1px solid #333;">
                 <button onclick="control('start')" style="background:#2ecc71; color:white; border:none; padding:12px 25px; cursor:pointer; border-radius:5px; font-weight:bold; margin-right:10px;">START BOT</button>
                 <button onclick="control('stop')" style="background:#e74c3c; color:white; border:none; padding:12px 25px; cursor:pointer; border-radius:5px; font-weight:bold; margin-right:10px;">STOP BOT</button>
-                <button onclick="testPost()" style="background:#3498db; color:white; border:none; padding:12px 25px; cursor:pointer; border-radius:5px; font-weight:bold;">TEST POST BTC</button>
+                <button onclick="testPost()" style="background:#3498db; color:white; border:none; padding:12px 25px; cursor:pointer; border-radius:5px; font-weight:bold;">TEST ĐĂNG BÀI BTC</button>
             </div>
             <p>Trạng thái: <b style="color:${status ? '#2ecc71' : '#e74c3c'}">${status ? 'ĐANG CHẠY' : 'DỪNG'}</b> | Đã đăng: <b>${dailyPostCount}</b></p>
             <hr style="opacity:0.1"/>
@@ -1395,8 +1399,8 @@ app.get('/', (req, res) => {
                         body:JSON.stringify({symbol:'BTCUSDT', price:69000, change:2.0}) 
                     });
                     const data = await res.json();
-                    if(data.success) { alert("Đã gửi lệnh đăng bài TEST lên Squad!"); location.reload(); }
-                    else { alert("Lỗi! Check log đen."); location.reload(); }
+                    if(data.success) { alert("Bot đã gửi bài lên Squad! Hãy kiểm tra trên app."); location.reload(); }
+                    else { alert("Lỗi đăng bài! Kiểm tra log đen để xem lý do sàn từ chối."); location.reload(); }
                 }
             </script>
         </body>
