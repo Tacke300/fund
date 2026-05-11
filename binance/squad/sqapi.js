@@ -6,8 +6,8 @@ import cron from 'node-cron';
 // --- 1. CẤU HÌNH HỆ THỐNG ---
 const PORT = 8888;
 const SQUAD_API_KEY = "8d794c11cc794c958c2c65924c54f2dd"; 
-const MAX_POSTS = 150000;    // Tối đa 50 bài/ngày
-const DELAY_MINUTES = 0.25;   // Nghỉ 3 phút giữa mỗi lần đăng
+const MAX_POSTS = 100;    // Tối đa 50 bài/ngày
+const DELAY_MINUTES = 14;   // Nghỉ 3 phút giữa mỗi lần đăng
 
 // --- 2. BIẾN QUẢN LÝ ---
 let isRunning = true;
