@@ -1282,28 +1282,29 @@ const BANK = {
         "🌸 Mong sắc xanh rực rỡ của crypto sẽ mang lại cho bạn một tương lai tươi sáng."
     ]
 };
-// Hàm hỗ trợ lấy ngẫu nhiên
+// --- GIỮ NGUYÊN PHẦN KHAI BÁO BIẾN ĐẦU FILE (PORT, BANK, logs, postedCoinsToday...) ---
+
 function getRandomItem(arr) {
     if (!arr || arr.length === 0) return "";
     return arr[Math.floor(Math.random() * arr.length)];
 }
 
-// 1. Hàm tự động lấy danh sách coin Futures từ Binance
+// 1. Hàm lấy danh sách coin từ Binance
 async function getAllFutureCoins() {
     try {
         const response = await axios.get('https://fapi.binance.com/fapi/v1/exchangeInfo');
         return response.data.symbols
             .filter(s => s.quoteAsset === 'USDT' && s.status === 'TRADING')
-            .map(s => s.baseAsset); // Trả về ["BTC", "ETH", ...]
+            .map(s => s.baseAsset);
     } catch (error) {
         addLog("Lỗi lấy danh sách coin từ Binance: " + error.message);
         return ["BTC", "ETH", "BNB", "SOL", "XRP"]; 
     }
 }
 
-// 2. Hàm tạo bài viết (Đã sửa logic Hashtag và thêm USDT)
+// 2. Hàm tạo bài viết với Hashtag tự động (1 #CoinUSDT $CoinUSDT + 4 random)
 async function generateFinalPost(coinData) {
-    const symbol = coinData.symbol.replace('USDT', '').toUpperCase(); // Lấy mã coin gốc (BTC, ETH)
+    const symbol = coinData.symbol.replace('USDT', '').toUpperCase();
     
     if (postedCoinsToday.has(symbol)) {
         addLog(`SKIP: ${symbol} đã đăng. Chờ 00:00.`);
@@ -1314,9 +1315,11 @@ async function generateFinalPost(coinData) {
     const entryRaw = coinData.price || 0;
     const tpRaw = side === "LONG" ? entryRaw * 1.05 : entryRaw * 0.95;
     const slRaw = side === "LONG" ? entryRaw * 0.90 : entryRaw * 1.10;
-    const entry = formatPrice(entryRaw);
-    const tp = formatPrice(tpRaw);
-    const sl = formatPrice(slRaw);
+    
+    // Sử dụng hàm formatPrice sẵn có trong file của bạn
+    const entry = typeof formatPrice === 'function' ? formatPrice(entryRaw) : entryRaw;
+    const tp = typeof formatPrice === 'function' ? formatPrice(tpRaw) : tpRaw.toFixed(6);
+    const sl = typeof formatPrice === 'function' ? formatPrice(slRaw) : slRaw.toFixed(6);
 
     const p1 = side === "LONG" ? getRandomItem(BANK.TREND_UP) : getRandomItem(BANK.TREND_DOWN);
     const p2 = getRandomItem(BANK.P1);
@@ -1330,31 +1333,31 @@ async function generateFinalPost(coinData) {
         `${getRandomItem(RANDOM_ICONS)} TP: ${tp} | SL: ${sl}`
     ].join('\n');
 
-    // --- LOGIC HASHTAG MỚI ---
+    // Logic lấy 4 hashtag coin ngẫu nhiên từ sàn
     const allCoins = await getAllFutureCoins();
     const otherCoins = allCoins
         .filter(c => c !== symbol)
         .sort(() => 0.5 - Math.random())
-        .slice(0, 4); // Lấy 4 con ngẫu nhiên
+        .slice(0, 4);
 
     const primaryHashtags = `#${symbol}USDT $${symbol}USDT`;
     const randomHashtags = otherCoins.map(c => `#${c}USDT`).join(' ');
     const hashtags = `${primaryHashtags} ${randomHashtags}`;
-    // -------------------------
     
     postedCoinsToday.add(symbol);
     return `${p1}\n\n${signalPart}\n\n${p2}\n\n${p3}\n\n${p4}\n\n${p5}\n\n${hashtags}`;
 }
 
+// --- PHẦN SERVER (Thay thế đoạn app.post và app.listen cũ) ---
+
 const app = express();
 app.use(express.json());
 
-// Sửa endpoint này thành async để đợi lấy dữ liệu từ sàn
 app.post('/generate-post', async (req, res) => {
     try {
         const coinData = req.body; 
-        const content = await generateFinalPost(coinData); // Phải có await ở đây
-        if (!content) return res.status(400).json({ success: false });
+        const content = await generateFinalPost(coinData);
+        if (!content) return res.status(400).json({ success: false, message: "Đã đăng hoặc lỗi" });
         
         addLog(`SUCCESS: ${coinData.symbol}`);
         res.json({ success: true, content });
@@ -1377,4 +1380,4 @@ app.get('/', (req, res) => {
     `);
 });
 
-app.listen(PORT, () => addLog(`Bot chạy trên Port ${PORT}`));{PORT}`));
+app.listen(PORT, () => addLog(`Bot chạy trên Port ${PORT}`));
