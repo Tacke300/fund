@@ -19,7 +19,13 @@ const postedCoinsToday = new Set();
 const RANDOM_ICONS = ["🔥", "📈", "💹", "🚀", "💎", "⚡", "🌟", "🟢", "🏆", "👑", "🎯", "💰", "🔔", "🛰️", "🆙", "🛸", "🔭", "🥇", "🏹", "🌋"];
 
 
-
+let state = {
+    isRunning: true,
+    totalPosts: 0,
+    lastPostTime: 0,
+    postedSymbols: new Set(),
+    logs: []
+};
 
 
 function addLog(msg) {
