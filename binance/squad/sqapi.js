@@ -1327,43 +1327,38 @@ async function getDynamicHashtags(mainSymbol) {
         return `#${mainSymbol}USDT $${mainSymbol}USDT`;
     }
 }
-
 async function generateFinalPost(coinData) {
-    if (!isRunning) return { success: false, msg: "Bot Stop" };
+    if (!isRunning) return { success: false, msg: "Bot đang STOP" };
     if (dailyPostCount >= MAX_POSTS) {
-        addLog("HỆ THỐNG: Đạt giới hạn bài đăng ngày.");
-        return { success: false, msg: "Hết lượt" };
+        addLog("HỆ THỐNG: Đã đạt giới hạn MAX_POSTS");
+        return { success: false, msg: "Hết lượt đăng ngày" };
     }
     
     const now = Date.now();
-    const diff = (now - lastPostTime) / 60000;
-    if (diff < DELAY_MINUTES) {
-        const wait = Math.ceil(DELAY_MINUTES * 60 - (now - lastPostTime) / 1000);
-        return { success: false, msg: `Chờ ${wait}s` };
+    const diffMin = (now - lastPostTime) / 60000;
+    if (diffMin < DELAY_MINUTES) {
+        const waitSec = Math.ceil((DELAY_MINUTES * 60) - (now - lastPostTime) / 1000);
+        return { success: false, msg: `Đang delay, chờ ${waitSec}s` };
     }
 
     const symbol = coinData.symbol.replace('USDT', '').toUpperCase();
-    if (postedCoinsToday.has(symbol)) return { success: false, msg: "Đã đăng rồi" };
+    if (postedCoinsToday.has(symbol)) return { success: false, msg: "Coin này đã đăng hôm nay" };
 
     try {
-        // LẤY GIÁ THỰC TẾ TẠI THỜI ĐIỂM ĐĂNG BÀI
         const tickerRes = await axios.get(`https://fapi.binance.com/fapi/v1/ticker/24hr?symbol=${symbol}USDT`);
         const realPrice = parseFloat(tickerRes.data.lastPrice);
         const realChange = parseFloat(tickerRes.data.priceChangePercent);
 
-        addLog(`Đang soạn bài: ${symbol} (Biến động: ${realChange}%)`);
         const side = (realChange >= 0) ? "LONG" : "SHORT";
-        
         const entry = realPrice;
         const tp = side === "LONG" ? entry * 1.05 : entry * 0.95;
         const sl = side === "LONG" ? entry * 0.90 : entry * 1.10;
-
         const hashtags = await getDynamicHashtags(symbol);
         
         const content = [
             getRandomItem(side === "LONG" ? BANK.TREND_UP : BANK.TREND_DOWN),
             `\n${getRandomItem(RANDOM_ICONS)} ${side} $${symbol}\nEntry: ${formatPrice(entry)}\nTP: ${formatPrice(tp)} | SL: ${formatPrice(sl)}`,
-            `\n${getRandomItem(BANK.P1)}\n${getRandomItem(BANK.P2)}\n${getRandomItem(BANK.P3)}\n${getRandomItem(BANK.P4)}`, // ĐÃ GẮN P4 Ở ĐÂY
+            `\n${getRandomItem(BANK.P1)}\n${getRandomItem(BANK.P2)}\n${getRandomItem(BANK.P3)}\n${getRandomItem(BANK.P4)}`,
             `\n${hashtags}`
         ].join('\n');
 
@@ -1371,63 +1366,51 @@ async function generateFinalPost(coinData) {
             bodyTextOnly: content,
             symbolList: [{ symbol: `${symbol}USDT`, type: "FUTURES" }]
         }, { 
-            headers: { 
-                "X-Square-OpenAPI-Key": SQUAD_API_KEY, 
-                "Content-Type": "application/json" 
-            } 
+            headers: { "X-Square-OpenAPI-Key": SQUAD_API_KEY, "Content-Type": "application/json" } 
         });
 
         dailyPostCount++;
         lastPostTime = Date.now();
         postedCoinsToday.add(symbol);
-        addLog(`✅ THÀNH CÔNG: ${symbol} (${dailyPostCount}/${MAX_POSTS})`);
+        addLog(`✅ ĐÃ ĐĂNG: ${symbol} (${dailyPostCount}/${MAX_POSTS})`);
         return { success: true };
-
     } catch (e) {
-        const errorMsg = e.response?.data?.message || e.message;
-        addLog(`❌ THẤT BẠI ${symbol}: ${errorMsg}`);
-        return { success: false, msg: errorMsg };
+        const err = e.response?.data?.message || e.message;
+        addLog(`❌ LỖI ${symbol}: ${err}`);
+        return { success: false, msg: err };
     }
 }
 
-// --- LOGIC XEN KẼ TĂNG/GIẢM KHI START ---
-let nextMode = "MAX_UP"; // Bắt đầu bằng con tăng mạnh nhất
-
+// --- LOGIC QUÉT XEN KẼ (CHỈ CHẠY KHI START) ---
+let nextSide = "UP"; 
 async function autoScanner() {
     if (!isRunning) return;
 
+    // Check delay dựa trên biến DELAY_MINUTES ở đầu file
+    const now = Date.now();
+    if ((now - lastPostTime) / 60000 < DELAY_MINUTES) return;
+
     try {
         const res = await axios.get('https://fapi.binance.com/fapi/v1/ticker/24hr');
-        const allCoins = res.data.filter(c => c.symbol.endsWith('USDT') && !postedCoinsToday.has(c.symbol.replace('USDT', '')));
+        const list = res.data.filter(c => c.symbol.endsWith('USDT') && !postedCoinsToday.has(c.symbol.replace('USDT', '')));
 
-        let targetCoin = null;
-
-        if (nextMode === "MAX_UP") {
-            // Lấy con tăng mạnh nhất chưa đăng
-            targetCoin = allCoins
-                .filter(c => parseFloat(c.priceChangePercent) > 0)
-                .sort((a, b) => parseFloat(b.priceChangePercent) - parseFloat(a.priceChangePercent))[0];
-            
-            if (targetCoin) nextMode = "MAX_DOWN"; // Lần tới tìm con giảm
+        let target = null;
+        if (nextSide === "UP") {
+            target = list.filter(c => parseFloat(c.priceChangePercent) > 0)
+                         .sort((a, b) => parseFloat(b.priceChangePercent) - parseFloat(a.priceChangePercent))[0];
+            if (target) nextSide = "DOWN";
         } else {
-            // Lấy con giảm mạnh nhất chưa đăng
-            targetCoin = allCoins
-                .filter(c => parseFloat(c.priceChangePercent) < 0)
-                .sort((a, b) => parseFloat(a.priceChangePercent) - parseFloat(b.priceChangePercent))[0];
-            
-            if (targetCoin) nextMode = "MAX_UP"; // Lần tới tìm con tăng
+            target = list.filter(c => parseFloat(c.priceChangePercent) < 0)
+                         .sort((a, b) => parseFloat(a.priceChangePercent) - parseFloat(b.priceChangePercent))[0];
+            if (target) nextSide = "UP";
         }
 
-        if (targetCoin) {
-            await generateFinalPost({ symbol: targetCoin.symbol });
-        }
-    } catch (e) {
-        console.error("Lỗi Auto Scanner:", e.message);
-    }
+        if (target) await generateFinalPost({ symbol: target.symbol });
+    } catch (e) {}
 }
 
-// Kiểm tra quét mỗi 30 giây khi bấm START
-setInterval(autoScanner, 30000);
+// Quét nhanh để nhận diện lệnh Start kịp thời, nhưng việc đăng bài vẫn bị chặn bởi DELAY_MINUTES trong generateFinalPost
+setInterval(autoScanner, 10000);
 
 const app = express();
 app.use(express.json());
@@ -1435,17 +1418,14 @@ app.use(express.json());
 app.get('/api/prices', async (req, res) => {
     try {
         const response = await axios.get('https://fapi.binance.com/fapi/v1/ticker/24hr');
-        const data = response.data
-            .filter(i => i.symbol.endsWith('USDT'))
-            .sort((a, b) => Math.abs(b.priceChangePercent) - Math.abs(a.priceChangePercent))
-            .slice(0, 10);
-        res.json(data);
+        res.json(response.data.filter(i => i.symbol.endsWith('USDT'))
+            .sort((a, b) => Math.abs(b.priceChangePercent) - Math.abs(a.priceChangePercent)).slice(0, 10));
     } catch (e) { res.json([]); }
 });
 
 app.post('/control', (req, res) => {
     isRunning = (req.body.action === 'start');
-    addLog(`HỆ THỐNG: ${isRunning ? 'START (Chế độ xen kẽ Tăng/Giảm)' : 'STOP'}`);
+    addLog(`HỆ THỐNG: ${isRunning ? 'STARTING...' : 'STOPPED'}`);
     res.json({ success: true });
 });
 
@@ -1459,74 +1439,54 @@ app.get('/', (req, res) => {
         <body style="background:#121212; color:#eee; font-family:sans-serif; padding:20px;">
             <h2 style="color:#00ff88;">SQUAD CONTROL CENTER</h2>
             <div style="background:#1e1e1e; padding:15px; border-radius:8px; border:1px solid #333; margin-bottom:15px;">
-                <button onclick="ctrl('start')" style="background:#2ecc71; color:white; border:none; padding:10px 20px; border-radius:5px; font-weight:bold; cursor:pointer;">START</button>
-                <button onclick="ctrl('stop')" style="background:#e74c3c; color:white; border:none; padding:10px 20px; border-radius:5px; font-weight:bold; cursor:pointer;">STOP</button>
+                <button onclick="ctrl('start')" style="background:#2ecc71; color:white; border:none; padding:10px 20px; border-radius:5px; font-weight:bold; cursor:pointer;">START BOT</button>
+                <button onclick="ctrl('stop')" style="background:#e74c3c; color:white; border:none; padding:10px 20px; border-radius:5px; font-weight:bold; cursor:pointer;">STOP BOT</button>
                 <button onclick="test()" style="background:#3498db; color:white; border:none; padding:10px 20px; border-radius:5px; font-weight:bold; cursor:pointer;">TEST BTC</button>
             </div>
-
             <div style="display:flex; gap:20px; margin-bottom:15px;">
-                <p>Trạng thái: <b style="color:\${isRunning ? '#2ecc71' : '#e74c3c'}">\${isRunning ? 'RUNNING' : 'STOPPED'}</b></p>
-                <p>Hôm nay: <b>\${dailyPostCount} / \${MAX_POSTS}</b></p>
+                <p>Status: <b id="stt-text" style="color:${isRunning ? '#2ecc71' : '#e74c3c'}">${isRunning ? 'RUNNING' : 'STOPPED'}</b></p>
+                <p>Today: <b>${dailyPostCount} / ${MAX_POSTS}</b></p>
+                <p>Config Delay: <b>${DELAY_MINUTES} min</b></p>
             </div>
-
             <div style="display:grid; grid-template-columns: 1fr 1fr; gap:20px;">
                 <div id="logs" style="background:black; color:#00ff00; padding:15px; height:450px; overflow-y:auto; font-family:monospace; border:1px solid #333; font-size:12px;">
-                    \${logs.map(l => \`<div style="border-bottom:1px solid #111; padding:3px 0;">\${l}</div>\`).join('')}
+                    ${logs.map(l => `<div>${l}</div>`).join('')}
                 </div>
-                
                 <div style="background:#1e1e1e; padding:15px; border-radius:8px; border:1px solid #333;">
-                    <h3 style="margin-top:0; color:#3498db;">BẢNG GIÁ REALTIME (7H SÁNG)</h3>
-                    <table style="width:100%; text-align:left; border-collapse:collapse;">
-                        <thead>
-                            <tr style="color:#888; border-bottom:1px solid #333;">
-                                <th style="padding:10px 0;">Symbol</th>
-                                <th>Price</th>
-                                <th>Change (7AM)</th>
-                            </tr>
-                        </thead>
+                    <table style="width:100%; text-align:left; border-collapse:collapse; font-size:12px;">
+                        <thead><tr style="color:#888; border-bottom:1px solid #333;"><th style="padding:10px 0;">Symbol</th><th>Price</th><th>Change</th></tr></thead>
                         <tbody id="price-body"></tbody>
                     </table>
                 </div>
             </div>
-
             <script>
                 async function ctrl(action) {
                     await fetch('/control', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({action}) });
-                    location.reload();
+                    setTimeout(() => location.reload(), 500);
                 }
                 async function test() {
-                    const res = await fetch('/generate-post', { 
-                        method:'POST', 
-                        headers:{'Content-Type':'application/json'}, 
-                        body:JSON.stringify({symbol:'BTCUSDT'}) 
-                    });
+                    const res = await fetch('/generate-post', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({symbol:'BTCUSDT'}) });
                     const data = await res.json();
-                    if(!data.success) alert("Thông báo: " + data.msg);
-                    else location.reload();
+                    if(!data.success) alert(data.msg); else location.reload();
                 }
-
                 async function updatePrices() {
                     try {
                         const res = await fetch('/api/prices');
                         const data = await res.json();
-                        const html = data.map(coin => {
-                            const change = parseFloat(coin.priceChangePercent);
-                            const color = change >= 0 ? '#2ecc71' : '#e74c3c';
-                            return \`<tr style="border-bottom:1px solid #222; color:\${color}">
+                        document.getElementById('price-body').innerHTML = data.map(coin => {
+                            const c = parseFloat(coin.priceChangePercent);
+                            return \`<tr style="border-bottom:1px solid #222; color:\${c >= 0 ? '#2ecc71' : '#e74c3c'}">
                                 <td style="padding:8px 0; font-weight:bold;">\${coin.symbol}</td>
                                 <td>\${parseFloat(coin.lastPrice).toFixed(4)}</td>
-                                <td>\${change >= 0 ? '+' : ''}\${change}%</td>
+                                <td>\${c >= 0 ? '+' : ''}\${c}%</td>
                             </tr>\`;
                         }).join('');
-                        document.getElementById('price-body').innerHTML = html;
                     } catch(e) {}
                 }
-                setInterval(updatePrices, 1000);
-                updatePrices();
+                setInterval(updatePrices, 3000); updatePrices();
             </script>
         </body>
     `);
 });
 
-app.listen(PORT, () => addLog(`Hệ thống chạy tại Port \${PORT}`));
-
+app.listen(PORT, () => addLog(`Server running on Port ${PORT}`));
