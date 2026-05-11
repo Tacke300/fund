@@ -1293,7 +1293,7 @@ const BANK = {
 // --- GIỮ 
 
 // --- 1. 
-
+// --- HÀM TRỢ GIÚP ---
 function getRandomItem(arr) {
     return (arr && arr.length > 0) ? arr[Math.floor(Math.random() * arr.length)] : "";
 }
@@ -1308,9 +1308,12 @@ function addLog(msg) {
     console.log(logMsg);
 }
 
+// Hàm format giá (Chỉ giữ 1 hàm duy nhất này)
 function formatPrice(num) {
     if (!num || isNaN(num)) return "0.00";
-    return num < 1 ? num.toFixed(6) : num.toLocaleString('en-US', { minimumFractionDigits: 2 });
+    if (num < 0.0001) return num.toFixed(8);
+    if (num < 1) return num.toFixed(6);
+    return num.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
 // Lấy coin từ sàn làm hashtag: 1 chính + 3 phụ
@@ -1342,7 +1345,7 @@ async function generateFinalPost(coinData) {
     const now = Date.now();
     const diff = (now - lastPostTime) / 60000;
     if (diff < DELAY_MINUTES) {
-        return { success: false, msg: "Đang trong thời gian nghỉ" };
+        return { success: false, msg: `Chờ delay (${Math.ceil(DELAY_MINUTES - diff)}p)` };
     }
 
     const symbol = coinData.symbol.replace('USDT', '').toUpperCase();
@@ -1363,7 +1366,7 @@ async function generateFinalPost(coinData) {
         const content = [
             getRandomItem(side === "LONG" ? BANK.TREND_UP : BANK.TREND_DOWN),
             `\n${getRandomItem(RANDOM_ICONS)} ${side} $${symbol}\nEntry: ${formatPrice(entry)}\nTP: ${formatPrice(tp)} | SL: ${formatPrice(sl)}`,
-            `\n${getRandomItem(BANK.P1)}\n${getRandomItem(BANK.P2)}\n${getRandomItem(BANK.P3)}\n${getRandomItem(BANK.P4)}`, // ĐÃ THÊM P4
+            `\n${getRandomItem(BANK.P1)}\n${getRandomItem(BANK.P2)}\n${getRandomItem(BANK.P3)}\n${getRandomItem(BANK.P4)}`,
             `\n${hashtags}`
         ].join('\n');
 
@@ -1386,28 +1389,33 @@ async function generateFinalPost(coinData) {
     }
 }
 
-// --- HÀM TỰ ĐỘNG QUÉT (GIÚP NÚT START CÓ TÁC DỤNG) ---
-async function autoScanner() {
+// --- HÀM TỰ ĐỘNG VẢ BÀI (AUTO RUN) ---
+async function autoRunScanner() {
     if (!isRunning) return;
     
+    const now = Date.now();
+    const diff = (now - lastPostTime) / 60000;
+    if (diff < DELAY_MINUTES) return; // Chưa hết delay thì không quét
+
     try {
         const res = await axios.get('https://fapi.binance.com/fapi/v1/ticker/24hr');
-        // Tìm con nào biến động mạnh nhất (tăng hoặc giảm) chưa đăng
+        // Lấy con nào biến động mạnh nhất (tăng/giảm đều được) mà chưa đăng
         const topCoin = res.data
             .filter(c => c.symbol.endsWith('USDT'))
             .filter(c => !postedCoinsToday.has(c.symbol.replace('USDT', '')))
             .sort((a, b) => Math.abs(parseFloat(b.priceChangePercent)) - Math.abs(parseFloat(a.priceChangePercent)))[0];
 
         if (topCoin) {
+            addLog(`[AUTO] Phát hiện mục tiêu: ${topCoin.symbol}`);
             await generateFinalPost({ symbol: topCoin.symbol });
         }
     } catch (e) {
-        console.error("Lỗi quét tự động:", e.message);
+        console.error("Lỗi Auto Scanner:", e.message);
     }
 }
 
-// Quét thị trường mỗi 30 giây khi bấm START
-setInterval(autoScanner, 30000);
+// Check mỗi 20 giây để vả bài ngay khi hết delay
+setInterval(autoRunScanner, 20000);
 
 const app = express();
 app.use(express.json());
@@ -1425,7 +1433,7 @@ app.get('/api/prices', async (req, res) => {
 
 app.post('/control', (req, res) => {
     isRunning = (req.body.action === 'start');
-    addLog(`HỆ THỐNG: ${isRunning ? 'BOT ĐÃ START - TỰ ĐỘNG QUÉT MỖI 30S' : 'BOT ĐÃ STOP'}`);
+    addLog(`HỆ THỐNG: ${isRunning ? 'START - BOT ĐANG QUÉT' : 'STOP'}`);
     res.json({ success: true });
 });
 
@@ -1444,13 +1452,13 @@ app.get('/', (req, res) => {
                 <button onclick="test()" style="background:#3498db; color:white; border:none; padding:10px 20px; border-radius:5px; font-weight:bold; cursor:pointer;">TEST BTC</button>
             </div>
             <div style="display:flex; gap:20px; margin-bottom:15px;">
-                <p>Trạng thái: <b style="color:${isRunning ? '#2ecc71' : '#e74c3c'}">${isRunning ? 'RUNNING' : 'STOPPED'}</b></p>
-                <p>Hôm nay: <b>${dailyPostCount} / ${MAX_POSTS}</b></p>
-                <p>Delay: <b>${DELAY_MINUTES} phút</b></p>
+                <p>Trạng thái: <b style="color:\${isRunning ? '#2ecc71' : '#e74c3c'}">\${isRunning ? 'RUNNING' : 'STOPPED'}</b></p>
+                <p>Hôm nay: <b>\${dailyPostCount} / \${MAX_POSTS}</b></p>
+                <p>Delay: <b>\${DELAY_MINUTES} phút</b></p>
             </div>
             <div style="display:grid; grid-template-columns: 1fr 1fr; gap:20px;">
                 <div id="logs" style="background:black; color:#00ff00; padding:15px; height:450px; overflow-y:auto; font-family:monospace; border:1px solid #333; font-size:12px;">
-                    ${logs.map(l => `<div style="border-bottom:1px solid #111; padding:3px 0;">${l}</div>`).join('')}
+                    \${logs.map(l => \`<div style=\"border-bottom:1px solid #111; padding:3px 0;\">\${l}</div>\`).join('')}
                 </div>
                 <div style="background:#1e1e1e; padding:15px; border-radius:8px; border:1px solid #333;">
                     <h3 style="margin-top:0; color:#3498db;">BẢNG GIÁ REALTIME (7H SÁNG)</h3>
@@ -1491,4 +1499,4 @@ app.get('/', (req, res) => {
     `);
 });
 
-app.listen(PORT, () => addLog(`Hệ thống chạy tại Port ${PORT}`));
+app.listen(PORT, () => addLog(`Hệ thống chạy tại Port \${PORT}`));
