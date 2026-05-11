@@ -1284,11 +1284,10 @@ const BANK = {
 };
 // --- GIỮ NGUYÊN PHẦN KHAI BÁO BIẾN ĐẦU FILE (PORT, BANK, logs, postedCoinsToday...) ---
  
-// --- ĐẢM BẢO ĐÃ CÓ CÁC BIẾN NÀY Ở ĐẦU FILE HOẶC DÁN ĐOẠN NÀY ---
-let isRunning = true;
-let dailyPostCount = 0;
-const postedCoinsToday = new Set();
-// -----------------------------------------------------------
+// --- ĐẢM 
+// ==========================================
+// PHẦN CÁC HÀM XỬ LÝ VÀ GIAO DIỆN (DÁN TỪ ĐÂY ĐẾN HẾT FILE)
+// ==========================================
 
 function getRandomItem(arr) {
     if (!arr || arr.length === 0) return "";
@@ -1314,13 +1313,13 @@ async function getAllFutureCoins() {
 // 2. Hàm tạo bài viết hoàn chỉnh
 async function generateFinalPost(coinData) {
     if (!isRunning) {
-        addLog("CẢNH BÁO: Bot đang ở trạng thái STOP, không tạo bài.");
+        addLog("CẢNH BÁO: Bot đang ở trạng thái STOP.");
         return null;
     }
 
     const symbol = coinData.symbol.replace('USDT', '').toUpperCase();
     if (postedCoinsToday.has(symbol)) {
-        addLog(`BỎ QUA: ${symbol} đã có trong danh sách đăng hôm nay.`);
+        addLog(`BỎ QUA: ${symbol} đã đăng hôm nay.`);
         return null;
     }
 
@@ -1329,7 +1328,7 @@ async function generateFinalPost(coinData) {
     const side = (coinData.change || 0) >= 0 ? "LONG" : "SHORT";
     const entryRaw = coinData.price || 0;
     
-    // Sử dụng hàm formatPrice của bạn nếu có, không thì dùng mặc định
+    // Sử dụng hàm formatPrice sẵn có trong file của bạn
     const entry = typeof formatPrice === 'function' ? formatPrice(entryRaw) : entryRaw;
     const tpRaw = side === "LONG" ? entryRaw * 1.05 : entryRaw * 0.95;
     const slRaw = side === "LONG" ? entryRaw * 0.90 : entryRaw * 1.10;
@@ -1360,7 +1359,7 @@ async function generateFinalPost(coinData) {
     postedCoinsToday.add(symbol);
     dailyPostCount++;
     
-    addLog(`HOÀN TẤT: Đã tạo xong nội dung và bộ hashtag cho ${symbol}.`);
+    addLog(`HOÀN TẤT: Đã tạo xong nội dung cho ${symbol}.`);
     return `${p1}\n\n${signalPart}\n\n${p2}\n\n${p3}\n\n${p4}\n\n${p5}\n\n${hashtags}`;
 }
 
@@ -1403,9 +1402,9 @@ app.get('/', (req, res) => {
             </div>
             <p>Coins đã đăng: <i style="color:#aaa;">${Array.from(postedCoinsToday).join(', ') || 'Chưa có'}</i></p>
             <hr style="opacity:0.1"/>
-            <h3>NHẬT KÝ CHI TIẾT (LOGS):</h3>
-            <div id="logs" style="background:#000; padding:15px; border:1px solid #333; height:400px; overflow-y:scroll; font-family:'Courier New', monospace; color:#00ff00; font-size:13px; line-height:1.5;">
-                ${logs.map(l => `<div style="margin-bottom:5px; border-bottom:1px solid #111;">${l}</div>`).join('')}
+            <h3>NHẬT KÝ CHI TIẾT:</h3>
+            <div id="logs" style="background:#000; padding:15px; border:1px solid #333; height:400px; overflow-y:scroll; font-family:monospace; color:#00ff00; font-size:13px;">
+                ${logs.map(l => `<div style="border-bottom:1px solid #111;">${l}</div>`).join('')}
             </div>
             <script>
                 async function control(action) {
@@ -1416,16 +1415,11 @@ app.get('/', (req, res) => {
                     const res = await fetch('/generate-post', { 
                         method:'POST', 
                         headers:{'Content-Type':'application/json'}, 
-                        body:JSON.stringify({symbol:'BTCUSDT', price:65250.50, change:1.2}) 
+                        body:JSON.stringify({symbol:'BTCUSDT', price:65250, change:1.5}) 
                     });
                     const data = await res.json();
-                    if(data.success) {
-                        alert("Tạo bài TEST thành công! Xem nội dung trong log.");
-                        location.reload();
-                    } else {
-                        alert("Thất bại: Bot đang STOP hoặc coin này đã đăng.");
-                        location.reload();
-                    }
+                    if(data.success) { alert("Tạo bài thành công! Xem Log."); location.reload(); }
+                    else { alert("Thất bại!"); }
                 }
             </script>
         </body>
@@ -1433,3 +1427,4 @@ app.get('/', (req, res) => {
 });
 
 app.listen(PORT, () => addLog(`Hệ thống Control Center khởi chạy tại Port ${PORT}`));
+
