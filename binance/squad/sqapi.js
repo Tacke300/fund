@@ -1284,6 +1284,11 @@ const BANK = {
 };
 // --- GIỮ NGUYÊN PHẦN KHAI BÁO BIẾN ĐẦU FILE (PORT, BANK, logs, postedCoinsToday...) ---
  
+// --- ĐẢM BẢO ĐÃ CÓ CÁC BIẾN NÀY Ở ĐẦU FILE HOẶC DÁN ĐOẠN NÀY ---
+let isRunning = true;
+let dailyPostCount = 0;
+const postedCoinsToday = new Set();
+// -----------------------------------------------------------
 
 function getRandomItem(arr) {
     if (!arr || arr.length === 0) return "";
@@ -1322,9 +1327,14 @@ async function generateFinalPost(coinData) {
     addLog(`Đang xử lý nội dung cho: ${symbol}...`);
 
     const side = (coinData.change || 0) >= 0 ? "LONG" : "SHORT";
-    const entry = coinData.price || 0;
-    const tp = side === "LONG" ? (entry * 1.05).toFixed(6) : (entry * 0.95).toFixed(6);
-    const sl = side === "LONG" ? (entry * 0.90).toFixed(6) : (entry * 1.10).toFixed(6);
+    const entryRaw = coinData.price || 0;
+    
+    // Sử dụng hàm formatPrice của bạn nếu có, không thì dùng mặc định
+    const entry = typeof formatPrice === 'function' ? formatPrice(entryRaw) : entryRaw;
+    const tpRaw = side === "LONG" ? entryRaw * 1.05 : entryRaw * 0.95;
+    const slRaw = side === "LONG" ? entryRaw * 0.90 : entryRaw * 1.10;
+    const tp = typeof formatPrice === 'function' ? formatPrice(tpRaw) : tpRaw.toFixed(6);
+    const sl = typeof formatPrice === 'function' ? formatPrice(slRaw) : slRaw.toFixed(6);
 
     const p1 = side === "LONG" ? getRandomItem(BANK.TREND_UP) : getRandomItem(BANK.TREND_DOWN);
     const p2 = getRandomItem(BANK.P1);
@@ -1338,7 +1348,7 @@ async function generateFinalPost(coinData) {
         `${getRandomItem(RANDOM_ICONS)} TP: ${tp} | SL: ${sl}`
     ].join('\n');
 
-    // Tạo Hashtag theo quy tắc mới
+    // Tạo Hashtag: 1 #CoinUSDT $CoinUSDT + 4 cái random (có USDT)
     const allCoins = await getAllFutureCoins();
     const otherCoins = allCoins
         .filter(c => c !== symbol)
@@ -1357,7 +1367,7 @@ async function generateFinalPost(coinData) {
 const app = express();
 app.use(express.json());
 
-// API điều khiển
+// API điều khiển START/STOP
 app.post('/control', (req, res) => {
     const { action } = req.body;
     isRunning = (action === 'start');
@@ -1377,7 +1387,7 @@ app.post('/generate-post', async (req, res) => {
     }
 });
 
-// Giao diện Web
+// Giao diện Web Control Center
 app.get('/', (req, res) => {
     res.send(`
         <body style="font-family:sans-serif; background:#121212; color:#eee; padding:20px;">
@@ -1403,31 +1413,20 @@ app.get('/', (req, res) => {
                     location.reload();
                 }
                 async function testPost() {
-                    const btn = event.target;
-                    btn.innerText = "ĐANG TẠO...";
-                    btn.disabled = true;
-                    try {
-                        const res = await fetch('/generate-post', { 
-                            method:'POST', 
-                            headers:{'Content-Type':'application/json'}, 
-                            body:JSON.stringify({symbol:'BTCUSDT', price:65250.50, change:1.2}) 
-                        });
-                        const data = await res.json();
-                        if(data.success) {
-                            alert("Tạo bài TEST thành công! Xem nội dung trong log.");
-                            location.reload();
-                        } else {
-                            alert("Thất bại: Bot đang STOP hoặc coin này đã đăng.");
-                            location.reload();
-                        }
-                    } catch(e) {
-                        alert("Lỗi kết nối server.");
+                    const res = await fetch('/generate-post', { 
+                        method:'POST', 
+                        headers:{'Content-Type':'application/json'}, 
+                        body:JSON.stringify({symbol:'BTCUSDT', price:65250.50, change:1.2}) 
+                    });
+                    const data = await res.json();
+                    if(data.success) {
+                        alert("Tạo bài TEST thành công! Xem nội dung trong log.");
+                        location.reload();
+                    } else {
+                        alert("Thất bại: Bot đang STOP hoặc coin này đã đăng.");
                         location.reload();
                     }
                 }
-                // Tự động cuộn xuống cuối log
-                const logDiv = document.getElementById('logs');
-                logDiv.scrollTop = 0; 
             </script>
         </body>
     `);
