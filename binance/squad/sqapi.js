@@ -1308,49 +1308,35 @@ function addLog(msg) {
     console.log(logMsg);
 }
 
-function formatPrice(num) {
-    if (!num || isNaN(num)) return "0.00";
-    return num < 1 ? num.toFixed(6) : num.toLocaleString('en-US', { minimumFractionDigits: 2 });
-}
-
-// Lấy coin từ sàn: Đảm bảo 1 chính + 2 phụ (Tổng = 3 mỗi loại)
+// Lấy coin từ sàn làm hashtag: 1 chính + 3 phụ
 async function getDynamicHashtags(mainSymbol) {
     try {
         const res = await axios.get('https://fapi.binance.com/fapi/v1/exchangeInfo');
-        const otherCoins = res.data.symbols
+        const coins = res.data.symbols
             .filter(s => s.quoteAsset === 'USDT' && s.baseAsset !== mainSymbol)
             .map(s => s.baseAsset)
             .sort(() => 0.5 - Math.random())
-            .slice(0, 2); // Lấy thêm 2 con phụ thôi
+            .slice(0, 3);
         
-        // Tạo danh sách Hashtag (#) - Tổng 3 cái
-        let hashTags = [`#${mainSymbol}USDT`, ...otherCoins.map(c => `#${c}USDT`)].join(' ');
+        let mainTag = `#${mainSymbol}USDT $${mainSymbol}USDT`;
+        let subTags = coins.map(c => `#${c}USDT $${c}USDT`).join(' ');
         
-        // Tạo danh sách Cashtag ($) - Tổng 3 cái
-        let cashTags = [`$${mainSymbol}USDT`, ...otherCoins.map(c => `$${c}USDT`)].join(' ');
-        
-        return `${hashTags}\n${cashTags}`;
+        return `${mainTag} ${subTags}`;
     } catch (e) {
-        return `#${mainSymbol}USDT\n$${mainSymbol}USDT`;
+        return `#${mainSymbol}USDT $${mainSymbol}USDT`;
     }
-}
-
-async function getRealPrice(symbol) {
-    try {
-        const res = await axios.get(`https://fapi.binance.com/fapi/v1/ticker/24hr?symbol=${symbol}USDT`);
-        return {
-            price: parseFloat(res.data.lastPrice),
-            change: parseFloat(res.data.priceChangePercent)
-        };
-    } catch (e) { return { price: 0, change: 0 }; }
 }
 
 async function generateFinalPost(coinData) {
     if (!isRunning) return { success: false, msg: "Bot Stop" };
-    if (dailyPostCount >= MAX_POSTS) return { success: false, msg: "Hết lượt" };
+    if (dailyPostCount >= MAX_POSTS) {
+        addLog("HỆ THỐNG: Đạt giới hạn bài đăng ngày.");
+        return { success: false, msg: "Hết lượt" };
+    }
     
     const now = Date.now();
-    if ((now - lastPostTime) / 60000 < DELAY_MINUTES) {
+    const diff = (now - lastPostTime) / 60000;
+    if (diff < DELAY_MINUTES) {
         const wait = Math.ceil(DELAY_MINUTES * 60 - (now - lastPostTime) / 1000);
         return { success: false, msg: `Chờ ${wait}s` };
     }
@@ -1359,30 +1345,35 @@ async function generateFinalPost(coinData) {
     if (postedCoinsToday.has(symbol)) return { success: false, msg: "Đã đăng rồi" };
 
     try {
-        const market = await getRealPrice(symbol);
-        if (market.price === 0) throw new Error("Lỗi lấy giá sàn");
+        // LẤY GIÁ THỰC TẾ TẠI THỜI ĐIỂM ĐĂNG BÀI
+        const tickerRes = await axios.get(`https://fapi.binance.com/fapi/v1/ticker/24hr?symbol=${symbol}USDT`);
+        const realPrice = parseFloat(tickerRes.data.lastPrice);
+        const realChange = parseFloat(tickerRes.data.priceChangePercent); // So với 7h sáng VN
 
-        const entry = market.price;
-        const side = market.change >= 0 ? "LONG" : "SHORT";
+        addLog(`Đang soạn bài: ${symbol} (Giá sàn: ${realPrice})`);
+        const side = (realChange >= 0) ? "LONG" : "SHORT";
         
-        // TP/SL 5% và 10%
+        const entry = realPrice;
         const tp = side === "LONG" ? entry * 1.05 : entry * 0.95;
         const sl = side === "LONG" ? entry * 0.90 : entry * 1.10;
 
-        const tagSection = await getDynamicHashtags(symbol);
+        const hashtags = await getDynamicHashtags(symbol);
         
         const content = [
             getRandomItem(side === "LONG" ? BANK.TREND_UP : BANK.TREND_DOWN),
             `\n${getRandomItem(RANDOM_ICONS)} ${side} $${symbol}\nEntry: ${formatPrice(entry)}\nTP: ${formatPrice(tp)} | SL: ${formatPrice(sl)}`,
             `\n${getRandomItem(BANK.P1)}\n${getRandomItem(BANK.P2)}\n${getRandomItem(BANK.P3)}`,
-            `\n${tagSection}`
+            `\n${hashtags}`
         ].join('\n');
 
         await axios.post("https://www.binance.com/bapi/composite/v1/public/pgc/openApi/content/add", {
             bodyTextOnly: content,
             symbolList: [{ symbol: `${symbol}USDT`, type: "FUTURES" }]
         }, { 
-            headers: { "X-Square-OpenAPI-Key": SQUAD_API_KEY, "Content-Type": "application/json" } 
+            headers: { 
+                "X-Square-OpenAPI-Key": SQUAD_API_KEY, 
+                "Content-Type": "application/json" 
+            } 
         });
 
         dailyPostCount++;
@@ -1390,29 +1381,32 @@ async function generateFinalPost(coinData) {
         postedCoinsToday.add(symbol);
         addLog(`✅ THÀNH CÔNG: ${symbol} (${dailyPostCount}/${MAX_POSTS})`);
         return { success: true };
+
     } catch (e) {
-        addLog(`❌ THẤT BẠI ${symbol}: ${e.message}`);
-        return { success: false, msg: e.message };
+        const errorMsg = e.response?.data?.message || e.message;
+        addLog(`❌ THẤT BẠI ${symbol}: ${errorMsg}`);
+        return { success: false, msg: errorMsg };
     }
 }
 
-
+const app = express();
 app.use(express.json());
 
+// API phục vụ bảng giá realtime trên HTML
 app.get('/api/prices', async (req, res) => {
     try {
         const response = await axios.get('https://fapi.binance.com/fapi/v1/ticker/24hr');
-        const topCoins = response.data
+        const data = response.data
             .filter(i => i.symbol.endsWith('USDT'))
             .sort((a, b) => Math.abs(b.priceChangePercent) - Math.abs(a.priceChangePercent))
             .slice(0, 10);
-        res.json(topCoins);
+        res.json(data);
     } catch (e) { res.json([]); }
 });
 
 app.post('/control', (req, res) => {
     isRunning = (req.body.action === 'start');
-    addLog(`LỆNH: ${isRunning ? 'START' : 'STOP'}`);
+    addLog(`HỆ THỐNG: ${isRunning ? 'START' : 'STOP'}`);
     res.json({ success: true });
 });
 
@@ -1430,20 +1424,28 @@ app.get('/', (req, res) => {
                 <button onclick="ctrl('stop')" style="background:#e74c3c; color:white; border:none; padding:10px 20px; border-radius:5px; font-weight:bold; cursor:pointer;">STOP</button>
                 <button onclick="test()" style="background:#3498db; color:white; border:none; padding:10px 20px; border-radius:5px; font-weight:bold; cursor:pointer;">TEST BTC</button>
             </div>
-            
+
             <div style="display:flex; gap:20px; margin-bottom:15px;">
-                <div style="flex:1; background:black; padding:15px; border:1px solid #333; border-radius:8px;">
-                    <h3>NHẬT KÝ</h3>
-                    <div id="logs" style="height:300px; overflow-y:auto; font-family:monospace; color:#00ff00; font-size:12px;">
-                        \${logs.map(l => \`<div style=\"border-bottom:1px solid #111; padding:3px 0;\">\${l}</div>\`).join('')}
-                    </div>
+                <p>Trạng thái: <b style="color:${isRunning ? '#2ecc71' : '#e74c3c'}">${isRunning ? 'RUNNING' : 'STOPPED'}</b></p>
+                <p>Hôm nay: <b>${dailyPostCount} / ${MAX_POSTS}</b></p>
+            </div>
+
+            <div style="display:grid; grid-template-columns: 1fr 1fr; gap:20px;">
+                <div id="logs" style="background:black; color:#00ff00; padding:15px; height:450px; overflow-y:auto; font-family:monospace; border:1px solid #333; font-size:12px;">
+                    ${logs.map(l => `<div style="border-bottom:1px solid #111; padding:3px 0;">${l}</div>`).join('')}
                 </div>
                 
-                <div style="flex:1; background:black; padding:15px; border:1px solid #333; border-radius:8px;">
-                    <h3>GIÁ REALTIME (TỪ 7H SÁNG)</h3>
-                    <table style="width:100%; font-size:12px; text-align:left;">
-                        <thead><tr style="color:#888;"><th>Symbol</th><th>Price</th><th>24h %</th></tr></thead>
-                        <tbody id="price-table"></tbody>
+                <div style="background:#1e1e1e; padding:15px; border-radius:8px; border:1px solid #333;">
+                    <h3 style="margin-top:0; color:#3498db;">BẢNG GIÁ REALTIME (7H SÁNG)</h3>
+                    <table style="width:100%; text-align:left; border-collapse:collapse;">
+                        <thead>
+                            <tr style="color:#888; border-bottom:1px solid #333;">
+                                <th style="padding:10px 0;">Symbol</th>
+                                <th>Price</th>
+                                <th>Change (7AM)</th>
+                            </tr>
+                        </thead>
+                        <tbody id="price-body"></tbody>
                     </table>
                 </div>
             </div>
@@ -1463,25 +1465,28 @@ app.get('/', (req, res) => {
                     if(!data.success) alert("Thông báo: " + data.msg);
                     else location.reload();
                 }
+
                 async function updatePrices() {
                     try {
                         const res = await fetch('/api/prices');
                         const data = await res.json();
-                        document.getElementById('price-table').innerHTML = data.map(coin => {
-                            const color = coin.priceChangePercent >= 0 ? '#2ecc71' : '#e74c3c';
-                            return \`<tr style=\"color:\${color}\">
-                                <td>\${coin.symbol}</td>
+                        const html = data.map(coin => {
+                            const change = parseFloat(coin.priceChangePercent);
+                            const color = change >= 0 ? '#2ecc71' : '#e74c3c';
+                            return \`<tr style=\"border-bottom:1px solid #222; color:\${color}\">
+                                <td style=\"padding:8px 0; font-weight:bold;\">\${coin.symbol}</td>
                                 <td>\${parseFloat(coin.lastPrice).toFixed(4)}</td>
-                                <td>\${coin.priceChangePercent}%</td>
+                                <td>\${change >= 0 ? '+' : ''}\${change}%</td>
                             </tr>\`;
                         }).join('');
+                        document.getElementById('price-body').innerHTML = html;
                     } catch(e) {}
                 }
-                setInterval(updatePrices, 5000);
+                setInterval(updatePrices, 3000); // Cập nhật mỗi 3 giây
                 updatePrices();
             </script>
         </body>
     `);
 });
 
-app.listen(PORT, () => addLog(`Server running tại Port ${PORT}`));
+app.listen(PORT, () => addLog(`Hệ thống chạy tại Port ${PORT}`));
