@@ -1308,14 +1308,7 @@ function addLog(msg) {
     console.log(logMsg);
 }
 
-// Hàm format giá (Chỉ giữ 1 hàm duy nhất này)
-function formatPrice(num) {
-    if (!num || isNaN(num)) return "0.00";
-    if (num < 0.0001) return num.toFixed(8);
-    if (num < 1) return num.toFixed(6);
-    return num.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-}
-
+/
 // Lấy coin từ sàn làm hashtag: 1 chính + 3 phụ
 async function getDynamicHashtags(mainSymbol) {
     try {
@@ -1345,7 +1338,8 @@ async function generateFinalPost(coinData) {
     const now = Date.now();
     const diff = (now - lastPostTime) / 60000;
     if (diff < DELAY_MINUTES) {
-        return { success: false, msg: `Chờ delay (${Math.ceil(DELAY_MINUTES - diff)}p)` };
+        const wait = Math.ceil(DELAY_MINUTES * 60 - (now - lastPostTime) / 1000);
+        return { success: false, msg: `Chờ ${wait}s` };
     }
 
     const symbol = coinData.symbol.replace('USDT', '').toUpperCase();
@@ -1356,7 +1350,9 @@ async function generateFinalPost(coinData) {
         const realPrice = parseFloat(tickerRes.data.lastPrice);
         const realChange = parseFloat(tickerRes.data.priceChangePercent);
 
+        addLog(`Đang soạn bài: ${symbol} (Giá sàn: ${realPrice})`);
         const side = (realChange >= 0) ? "LONG" : "SHORT";
+        
         const entry = realPrice;
         const tp = side === "LONG" ? entry * 1.05 : entry * 0.95;
         const sl = side === "LONG" ? entry * 0.90 : entry * 1.10;
@@ -1366,7 +1362,7 @@ async function generateFinalPost(coinData) {
         const content = [
             getRandomItem(side === "LONG" ? BANK.TREND_UP : BANK.TREND_DOWN),
             `\n${getRandomItem(RANDOM_ICONS)} ${side} $${symbol}\nEntry: ${formatPrice(entry)}\nTP: ${formatPrice(tp)} | SL: ${formatPrice(sl)}`,
-            `\n${getRandomItem(BANK.P1)}\n${getRandomItem(BANK.P2)}\n${getRandomItem(BANK.P3)}\n${getRandomItem(BANK.P4)}`,
+            `\n${getRandomItem(BANK.P1)}\n${getRandomItem(BANK.P2)}\n${getRandomItem(BANK.P3)}\n${getRandomItem(BANK.P4)}`, // ĐÃ GẮN P4
             `\n${hashtags}`
         ].join('\n');
 
@@ -1380,8 +1376,9 @@ async function generateFinalPost(coinData) {
         dailyPostCount++;
         lastPostTime = Date.now();
         postedCoinsToday.add(symbol);
-        addLog(`✅ THÀNH CÔNG: ${symbol} (Giá: ${entry}) - [${dailyPostCount}/${MAX_POSTS}]`);
+        addLog(`✅ THÀNH CÔNG: ${symbol} (${dailyPostCount}/${MAX_POSTS})`);
         return { success: true };
+
     } catch (e) {
         const errorMsg = e.response?.data?.message || e.message;
         addLog(`❌ THẤT BẠI ${symbol}: ${errorMsg}`);
@@ -1389,33 +1386,41 @@ async function generateFinalPost(coinData) {
     }
 }
 
-// --- HÀM TỰ ĐỘNG VẢ BÀI (AUTO RUN) ---
-async function autoRunScanner() {
+// --- LOGIC QUÉT TỰ ĐỘNG: XEN KẼ TĂNG/GIẢM THEO THỨ TỰ MẠNH NHẤT ---
+let nextSide = "LONG"; // Bắt đầu bằng con tăng mạnh nhất
+
+async function autoScanner() {
     if (!isRunning) return;
-    
-    const now = Date.now();
-    const diff = (now - lastPostTime) / 60000;
-    if (diff < DELAY_MINUTES) return; // Chưa hết delay thì không quét
 
     try {
         const res = await axios.get('https://fapi.binance.com/fapi/v1/ticker/24hr');
-        // Lấy con nào biến động mạnh nhất (tăng/giảm đều được) mà chưa đăng
-        const topCoin = res.data
-            .filter(c => c.symbol.endsWith('USDT'))
-            .filter(c => !postedCoinsToday.has(c.symbol.replace('USDT', '')))
-            .sort((a, b) => Math.abs(parseFloat(b.priceChangePercent)) - Math.abs(parseFloat(a.priceChangePercent)))[0];
+        const available = res.data.filter(c => c.symbol.endsWith('USDT') && !postedCoinsToday.has(c.symbol.replace('USDT', '')));
 
-        if (topCoin) {
-            addLog(`[AUTO] Phát hiện mục tiêu: ${topCoin.symbol}`);
-            await generateFinalPost({ symbol: topCoin.symbol });
+        let target = null;
+        if (nextSide === "LONG") {
+            // Tìm con tăng mạnh nhất
+            target = available
+                .filter(c => parseFloat(c.priceChangePercent) > 0)
+                .sort((a, b) => parseFloat(b.priceChangePercent) - parseFloat(a.priceChangePercent))[0];
+            if (target) nextSide = "SHORT"; // Lần tới tìm con giảm
+        } else {
+            // Tìm con giảm mạnh nhất
+            target = available
+                .filter(c => parseFloat(c.priceChangePercent) < 0)
+                .sort((a, b) => parseFloat(a.priceChangePercent) - parseFloat(b.priceChangePercent))[0];
+            if (target) nextSide = "LONG"; // Lần tới tìm con tăng
+        }
+
+        if (target) {
+            await generateFinalPost({ symbol: target.symbol });
         }
     } catch (e) {
         console.error("Lỗi Auto Scanner:", e.message);
     }
 }
 
-// Check mỗi 20 giây để vả bài ngay khi hết delay
-setInterval(autoRunScanner, 20000);
+// Chạy quét mỗi 30 giây khi Start
+setInterval(autoScanner, 30000);
 
 const app = express();
 app.use(express.json());
@@ -1433,7 +1438,7 @@ app.get('/api/prices', async (req, res) => {
 
 app.post('/control', (req, res) => {
     isRunning = (req.body.action === 'start');
-    addLog(`HỆ THỐNG: ${isRunning ? 'START - BOT ĐANG QUÉT' : 'STOP'}`);
+    addLog(`HỆ THỐNG: \${isRunning ? 'START - ĐANG QUÉT XEN KẼ TĂNG/GIẢM' : 'STOP'}`);
     res.json({ success: true });
 });
 
@@ -1447,14 +1452,13 @@ app.get('/', (req, res) => {
         <body style="background:#121212; color:#eee; font-family:sans-serif; padding:20px;">
             <h2 style="color:#00ff88;">SQUAD CONTROL CENTER</h2>
             <div style="background:#1e1e1e; padding:15px; border-radius:8px; border:1px solid #333; margin-bottom:15px;">
-                <button onclick="ctrl('start')" style="background:#2ecc71; color:white; border:none; padding:10px 20px; border-radius:5px; font-weight:bold; cursor:pointer;">START (AUTO)</button>
+                <button onclick="ctrl('start')" style="background:#2ecc71; color:white; border:none; padding:10px 20px; border-radius:5px; font-weight:bold; cursor:pointer;">START</button>
                 <button onclick="ctrl('stop')" style="background:#e74c3c; color:white; border:none; padding:10px 20px; border-radius:5px; font-weight:bold; cursor:pointer;">STOP</button>
                 <button onclick="test()" style="background:#3498db; color:white; border:none; padding:10px 20px; border-radius:5px; font-weight:bold; cursor:pointer;">TEST BTC</button>
             </div>
             <div style="display:flex; gap:20px; margin-bottom:15px;">
                 <p>Trạng thái: <b style="color:\${isRunning ? '#2ecc71' : '#e74c3c'}">\${isRunning ? 'RUNNING' : 'STOPPED'}</b></p>
                 <p>Hôm nay: <b>\${dailyPostCount} / \${MAX_POSTS}</b></p>
-                <p>Delay: <b>\${DELAY_MINUTES} phút</b></p>
             </div>
             <div style="display:grid; grid-template-columns: 1fr 1fr; gap:20px;">
                 <div id="logs" style="background:black; color:#00ff00; padding:15px; height:450px; overflow-y:auto; font-family:monospace; border:1px solid #333; font-size:12px;">
@@ -1462,7 +1466,7 @@ app.get('/', (req, res) => {
                 </div>
                 <div style="background:#1e1e1e; padding:15px; border-radius:8px; border:1px solid #333;">
                     <h3 style="margin-top:0; color:#3498db;">BẢNG GIÁ REALTIME (7H SÁNG)</h3>
-                    <table style="width:100%; text-align:left; border-collapse:collapse;">
+                    <table style="width:100%; text-align:left; border-collapse:collapse; font-size:12px;">
                         <thead><tr style="color:#888; border-bottom:1px solid #333;"><th style="padding:10px 0;">Symbol</th><th>Price</th><th>Change</th></tr></thead>
                         <tbody id="price-body"></tbody>
                     </table>
@@ -1487,7 +1491,7 @@ app.get('/', (req, res) => {
                             return \`<tr style=\"border-bottom:1px solid #222; color:\${change >= 0 ? '#2ecc71' : '#e74c3c'}\">
                                 <td style=\"padding:8px 0; font-weight:bold;\">\${coin.symbol}</td>
                                 <td>\${parseFloat(coin.lastPrice).toFixed(4)}</td>
-                                <td>\${change}%</td>
+                                <td>\${change >= 0 ? '+' : ''}\${change}%</td>
                             </tr>\`;
                         }).join('');
                     } catch(e) {}
