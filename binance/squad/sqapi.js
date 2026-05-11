@@ -7,7 +7,7 @@ import cron from 'node-cron';
 const PORT = 8888;
 const SQUAD_API_KEY = "8d794c11cc794c958c2c65924c54f2dd"; 
 const MAX_POSTS = 150;    // Tối đa 50 bài/ngày
-const POST_DELAY_MINUTES = 0.3;   // Nghỉ 3 phút giữa mỗi lần đăng
+const DELAY_MINUTES = 0.3;   // Nghỉ 3 phút giữa mỗi lần đăng
 
 // --- 2. BIẾN QUẢN LÝ ---
 let isRunning = true;
