@@ -1302,101 +1302,104 @@ const BANK = {
 
 
 
-
 function getRandomItem(arr) {
     return arr[Math.floor(Math.random() * arr.length)];
 }
 
-// Lấy coin từ Binance để làm Hashtag
-async function getAllFutureCoins() {
+// Lấy coin từ sàn làm Hashtag
+async function getHashtags(mainSymbol) {
     try {
         const res = await axios.get('https://fapi.binance.com/fapi/v1/exchangeInfo');
-        return res.data.symbols.filter(s => s.quoteAsset === 'USDT').map(s => s.baseAsset);
-    } catch (e) { return ["BTC", "ETH", "SOL"]; }
+        const coins = res.data.symbols
+            .filter(s => s.quoteAsset === 'USDT' && s.baseAsset !== mainSymbol)
+            .map(s => s.baseAsset)
+            .sort(() => 0.5 - Math.random())
+            .slice(0, 4);
+        return `#${mainSymbol}USDT $${mainSymbol}USDT ` + coins.map(c => `#${c}USDT`).join(' ');
+    } catch (e) { return `#${mainSymbol}USDT`; }
 }
 
-// --- 4. LOGIC ĐĂNG BÀI CHÍNH ---
-async function generateFinalPost(coinData) {
-    if (!isRunning) return { success: false, msg: "Bot Stop" };
-    if (dailyPostCount >= MAX_POST_PER_DAY) return { success: false, msg: "Hết giới hạn ngày" };
+// --- LOGIC ĐĂNG BÀI (DÙNG LINK THÀNH CÔNG) ---
+async function postToSquad(coinData) {
+    if (!state.isRunning) return { success: false, msg: "Bot đang dừng" };
+    if (state.totalPosts >= MAX_POSTS) return { success: false, msg: "Hết giới hạn ngày" };
     
     const now = Date.now();
-    if ((now - lastPostTime) < POST_DELAY_MINUTES * 60000) {
-        const wait = Math.ceil((POST_DELAY_MINUTES * 60000 - (now - lastPostTime)) / 1000);
-        addLog(`CHỜ: Cần đợi thêm ${wait} giây nữa.`);
+    if ((now - state.lastPostTime) < DELAY_MINUTES * 60000) {
+        const wait = Math.ceil((DELAY_MINUTES * 60000 - (now - state.lastPostTime)) / 1000);
         return { success: false, msg: `Chờ ${wait}s` };
     }
 
     const symbol = coinData.symbol.replace('USDT', '').toUpperCase();
-    if (postedCoinsToday.has(symbol)) {
-        addLog(`TRÙNG: ${symbol} đã đăng rồi.`);
-        return { success: false, msg: "Trùng coin" };
-    }
+    if (state.postedSymbols.has(symbol)) return { success: false, msg: "Đã đăng rồi" };
 
     try {
-        addLog(`ĐANG XỬ LÝ: ${symbol}`);
+        addLog(`Đang soạn bài cho ${symbol}...`);
         const side = (coinData.change >= 0) ? "LONG" : "SHORT";
-        const signalPart = `${getRandomItem(RANDOM_ICONS)} ${side} $${symbol}\nEntry: ${formatPrice(coinData.price)}`;
+        const hashtags = await getHashtags(symbol);
         
-        const allCoins = await getAllFutureCoins();
-        const randomTags = allCoins.sort(() => 0.5 - Math.random()).slice(0, 4);
-        const hashtags = `\n\n#${symbol}USDT $${symbol}USDT ${randomTags.map(c => `#${c}USDT`).join(' ')}`;
-        
-        const finalContent = `${getRandomItem(side === "LONG" ? BANK.TREND_UP : BANK.TREND_DOWN)}\n\n${signalPart}\n\n${getRandomItem(BANK.P1)}\n\n${getRandomItem(BANK.P2)}\n${getRandomItem(BANK.P3)}${hashtags}`;
+        const content = [
+            getRandomItem(side === "LONG" ? BANK.TREND_UP : BANK.TREND_DOWN),
+            `\n${getRandomItem(RANDOM_ICONS)} ${side} $${symbol}\nEntry: ${coinData.price}`,
+            `\n${getRandomItem(BANK.P1)}\n${getRandomItem(BANK.P2)}\n${getRandomItem(BANK.P3)}`,
+            `\n${hashtags}`
+        ].join('\n');
 
-        // GỬI LÊN SQUAD (Dùng Endpoint CMS của Binance Square)
-        const squadRes = await axios.post('https://www.binance.com/bapi/composite/v1/public/cms/squad/post/create', {
-            apiKey: SQUAD_API_KEY,
-            content: finalContent,
-            symbol: `${symbol}USDT`,
-            type: "text"
-        }, { timeout: 10000 });
+        // SỬ DỤNG LINK VÀ CẤU TRÚC BẠN VỪA GỬI (ĐÃ TEST THÀNH CÔNG)
+        await axios.post("https://www.binance.com/bapi/composite/v1/public/pgc/openApi/content/add", {
+            bodyTextOnly: content,
+            symbolList: [{ symbol: `${symbol}USDT`, type: "FUTURES" }]
+        }, { 
+            headers: { 
+                "X-Square-OpenAPI-Key": SQUAD_API_KEY, 
+                "Content-Type": "application/json" 
+            } 
+        });
 
-        if (squadRes.data && (squadRes.data.success || squadRes.data.code === '000000')) {
-            postedCoinsToday.add(symbol);
-            dailyPostCount++;
-            lastPostTime = Date.now();
-            addLog(`THÀNH CÔNG: Đã đăng ${symbol} (#${dailyPostCount})`);
-            return { success: true, content: finalContent };
-        } else {
-            addLog(`SÀN TỪ CHỐI: ${JSON.stringify(squadRes.data)}`);
-            return { success: false, msg: "Sàn từ chối" };
-        }
-    } catch (err) {
-        addLog(`LỖI KẾT NỐI: ${err.message}`);
-        return { success: false, msg: "Lỗi kết nối" };
+        state.totalPosts++;
+        state.lastPostTime = Date.now();
+        state.postedSymbols.add(symbol);
+        addLog(`✅ THÀNH CÔNG: ${symbol} (#${state.totalPosts})`);
+        return { success: true };
+
+    } catch (e) {
+        const errorMsg = e.response?.data?.message || e.message;
+        addLog(`❌ THẤT BẠI ${symbol}: ${errorMsg}`);
+        return { success: false, msg: errorMsg };
     }
 }
 
-// --- 5. SERVER ---
+// --- SERVER ---
 const app = express();
 app.use(express.json());
 
 app.post('/control', (req, res) => {
-    isRunning = (req.body.action === 'start');
-    addLog(`HỆ THỐNG: ${isRunning ? 'START' : 'STOP'}`);
+    state.isRunning = (req.body.action === 'start');
+    addLog(`HỆ THỐNG: ${state.isRunning ? 'START' : 'STOP'}`);
     res.json({ success: true });
 });
 
 app.post('/generate-post', async (req, res) => {
-    const result = await generateFinalPost(req.body);
+    const result = await postToSquad(req.body);
     res.json(result);
 });
 
 app.get('/', (req, res) => {
     res.send(`
         <body style="background:#121212; color:#eee; font-family:sans-serif; padding:20px;">
-            <h2>SQUAD AI CONTROL PANEL</h2>
-            <button onclick="ctrl('start')" style="background:#2ecc71; color:white; border:none; padding:10px 20px; border-radius:5px; font-weight:bold; cursor:pointer;">START</button>
-            <button onclick="ctrl('stop')" style="background:#e74c3c; color:white; border:none; padding:10px 20px; border-radius:5px; font-weight:bold; cursor:pointer;">STOP</button>
-            <button onclick="test()" style="background:#3498db; color:white; border:none; padding:10px 20px; border-radius:5px; font-weight:bold; cursor:pointer;">TEST BTC</button>
-            <div style="margin-top:15px; display:flex; gap:20px;">
-                <p>Bot: <b style="color:${isRunning ? '#2ecc71' : '#e74c3c'}">${isRunning ? 'RUNNING' : 'STOPPED'}</b></p>
-                <p>Đã đăng: <b>${dailyPostCount} / ${MAX_POST_PER_DAY}</b></p>
-                <p>Delay: <b>${POST_DELAY_MINUTES}p</b></p>
+            <h2>SQUAD AI PRO - CONTROL PANEL</h2>
+            <div style="margin-bottom:15px;">
+                <button onclick="ctrl('start')" style="background:#2ecc71; color:white; border:none; padding:10px 20px; border-radius:5px; font-weight:bold; cursor:pointer;">START</button>
+                <button onclick="ctrl('stop')" style="background:#e74c3c; color:white; border:none; padding:10px 20px; border-radius:5px; font-weight:bold; cursor:pointer;">STOP</button>
+                <button onclick="test()" style="background:#3498db; color:white; border:none; padding:10px 20px; border-radius:5px; font-weight:bold; cursor:pointer;">TEST ĐĂNG BTC</button>
             </div>
-            <div id="logs" style="background:black; color:#00ff00; padding:10px; height:400px; overflow-y:auto; font-family:monospace; border:1px solid #333; margin-top:10px;">
-                ${logs.map(l => `<div>${l}</div>`).join('')}
+            <div style="display:flex; gap:20px; background:#1e1e1e; padding:10px; border-radius:5px;">
+                <p>Bot: <b style="color:${state.isRunning ? '#2ecc71' : '#e74c3c'}">${state.isRunning ? 'RUNNING' : 'STOPPED'}</b></p>
+                <p>Hôm nay: <b>${state.totalPosts} / ${MAX_POSTS}</b></p>
+                <p>Nghỉ: <b>${DELAY_MINUTES}p</b></p>
+            </div>
+            <div id="logs" style="background:black; color:#00ff00; padding:15px; height:400px; overflow-y:auto; font-family:monospace; border:1px solid #333; margin-top:15px; font-size:13px;">
+                ${state.logs.map(l => `<div style="border-bottom:1px solid #111; padding:3px 0;">${l}</div>`).join('')}
             </div>
             <script>
                 async function ctrl(action) {
@@ -1419,9 +1422,10 @@ app.get('/', (req, res) => {
 });
 
 cron.schedule('0 0 * * *', () => {
-    postedCoinsToday.clear();
-    dailyPostCount = 0;
-    addLog("HỆ THỐNG: Đã reset bộ đếm ngày mới.");
+    state.postedSymbols.clear();
+    state.totalPosts = 0;
+    addLog("HỆ THỐNG: Reset bộ đếm ngày mới.");
 });
 
-app.listen(PORT, () => addLog(`Server running at http://localhost:${PORT}`));
+app.listen(PORT, () => addLog(`Server running at Port ${PORT}`));
+
