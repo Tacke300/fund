@@ -1,13 +1,20 @@
 const PORT = 9000;
+const PORT_UI = 1997; // Cổng riêng để đẩy dữ liệu lên HTML
 const HISTORY_FILE = './history_db.json';
 const LEVERAGE_FILE = './leverage_cache.json';
 const COOLDOWN_MINUTES = 15;
 const MAX_HOLD_MINUTES = 555555;
-import WebSocket from 'ws';
+import WebSocket, { WebSocketServer } from 'ws';
 import express from 'express';
 import fs from 'fs';
 import fetch from 'node-fetch';
 const app = express();
+
+// Khởi tạo WebSocket Server cho Giao diện
+const wssUI = new WebSocketServer({ port: PORT_UI });
+let uiClient = null;
+wssUI.on('connection', (ws) => { uiClient = ws; });
+
 let coinData = {};
 let historyMap = new Map();
 let symbolMaxLeverage = {};
@@ -43,10 +50,8 @@ const now = Date.now();
 let start = pArr.find(i => i.t >= (now - min * 60000)) || pArr[0];
 return parseFloat((((pArr[pArr.length - 1].p - start.p) / start.p) * 100).toFixed(2));
 }
-// --- 3 PHƯƠNG PHÁP DỰ PHÒNG ---
-// PP3: Bootstrap - Lấy nến cũ lấp đầy mảng ngay lập tức
+
 async function bootstrapData() {
-console.log("LOG: [PP3] Đang kéo nến lịch sử để tính biến động ngay lập tức...");
 try {
 const res = await fetch('https://fapi.binance.com/fapi/v1/ticker/price');
 const tickers = await res.json();
@@ -57,9 +62,9 @@ const kData = await kRes.json();
 if(!coinData[t.symbol]) coinData[t.symbol] = { symbol: t.symbol, prices: [] };
 coinData[t.symbol].prices = kData.map(k => ({ p: parseFloat(k[4]), t: parseInt(k[0]) }));
 }
-console.log("LOG: [PP3] Hoàn tất nạp dữ liệu mồi.");
 } catch (e) { console.log("LOG: [PP3] Lỗi: " + e.message); }
 }
+
 function updatePriceLogic(s, p, now) {
 if (!coinData[s]) coinData[s] = { symbol: s, prices: [] };
 coinData[s].prices.push({ p, t: now });
@@ -68,6 +73,17 @@ const c1 = calculateChange(coinData[s].prices, 1);
 const c5 = calculateChange(coinData[s].prices, 5);  
 const c15 = calculateChange(coinData[s].prices, 15);  
 coinData[s].live = { c1, c5, c15, currentPrice: p };  
+
+// ĐẨY DỮ LIỆU THẲNG LÊN UI QUA WEBSOCKET (REAL-TIME 0.1s - 0.2s)
+if (uiClient && uiClient.readyState === WebSocket.OPEN) {
+    const all = Array.from(historyMap.values());
+    const topData = Object.entries(coinData).filter(([, v]) => v.live).map(([s, v]) => ({ symbol: s, ...v.live })).sort((a,b) => Math.abs(b.c1) - Math.abs(a.c1)).slice(0, 15);
+    uiClient.send(JSON.stringify({
+        allPrices: Object.fromEntries(Object.entries(coinData).filter(([,v])=>v.live).map(([s, v]) => [s, v.live.currentPrice])),
+        live: topData,
+        pending: all.filter(h => h.status === 'PENDING').sort((a,b)=>b.startTime-a.startTime)
+    }));
+}
 
 const pending = Array.from(historyMap.values()).find(h => h.symbol === s && h.status === 'PENDING');  
 if (pending) {  
@@ -82,17 +98,6 @@ if (pending) {
         lastTradeClosed[s] = now;   
         fs.writeFileSync(HISTORY_FILE, JSON.stringify(Array.from(historyMap.values())));   
         return;  
-    }  
-    const totalDiffFromEntry = ((p - pending.snapPrice) / pending.snapPrice) * 100;  
-    const nextDcaThreshold = (pending.dcaCount + 1) * pending.slTarget;  
-    const triggerDCA = pending.type === 'LONG' ? totalDiffFromEntry <= -nextDcaThreshold : totalDiffFromEntry >= nextDcaThreshold;  
-    if (triggerDCA && !actionQueue.find(q => q.id === s)) {  
-        actionQueue.push({ id: s, priority: 1, action: () => {  
-            const newCount = pending.dcaCount + 1;  
-            const newAvg = ((pending.avgPrice * (pending.dcaCount + 1)) + p) / (newCount + 1);  
-            pending.dcaHistory.push({ t: Date.now(), p: p, avg: newAvg });  
-            pending.avgPrice = newAvg; pending.dcaCount = newCount;  
-        }});  
     }  
 } else if (Math.max(Math.abs(c1), Math.abs(c5), Math.abs(c15)) >= currentMinVol && !(lastTradeClosed[s] && (now - lastTradeClosed[s] < COOLDOWN_MINUTES * 60000))) {  
     if (!actionQueue.find(q => q.id === s)) {  
@@ -110,171 +115,84 @@ if (pending) {
 }  
 }
 
-// Sửa lại đoạn này để lấy giá real-time từng giây (@ticker) thay vì gói tổng hợp 2s
 async function initWS() {
-  try {
-    const res = await fetch('https://fapi.binance.com/fapi/v1/ticker/price');
-    const tickers = await res.json();
-    const symbols = tickers.filter(t => t.symbol.endsWith('USDT')).slice(0, 100).map(t => t.symbol.toLowerCase());
-    
-    // Đăng ký stream ticker riêng cho từng đồng để lấy update 0.5s - 1s
-    const streamString = symbols.map(s => `${s}@ticker`).join('/');
-    const ws = new WebSocket(`wss://fstream.binance.com/stream?streams=${streamString}`);
-
-    ws.on('message', (data) => {
-      const msg = JSON.parse(data);
-      if (msg.data) {
-        updatePriceLogic(msg.data.s, parseFloat(msg.data.c), Date.now());
-      }
-    });
-    ws.on('close', () => setTimeout(initWS, 500));
-    ws.on('error', () => ws.terminate());
-  } catch (e) {
-    setTimeout(initWS, 2000);
-  }
-}
-
-async function fallbackAPI() {
-try {
 const res = await fetch('https://fapi.binance.com/fapi/v1/ticker/price');
-const data = await res.json();
-const now = Date.now();
-data.forEach(t => { if(t.symbol.endsWith('USDT')) updatePriceLogic(t.symbol, parseFloat(t.price), now); });
-} catch (e) {}
-setTimeout(fallbackAPI, 1000); 
+const tickers = await res.json();
+const symbols = tickers.filter(t => t.symbol.endsWith('USDT')).slice(0, 50).map(t => t.symbol.toLowerCase());
+const streamString = symbols.map(s => `${s}@ticker`).join('/');
+const ws = new WebSocket(`wss://fstream.binance.com/stream?streams=${streamString}`);
+ws.on('message', (data) => {
+    const msg = JSON.parse(data);
+    if(msg.data) updatePriceLogic(msg.data.s, parseFloat(msg.data.c), Date.now());
+});
+ws.on('close', () => setTimeout(initWS, 500));
 }
+
 app.get('/api/config', (req, res) => {
 currentTP = parseFloat(req.query.tp); currentSL = parseFloat(req.query.sl); currentMinVol = parseFloat(req.query.vol); tradeMode = req.query.mode || 'FOLLOW';
 res.sendStatus(200);
 });
-app.get('/api/data', (req, res) => {
-const all = Array.from(historyMap.values());
-const topData = Object.entries(coinData).filter(([, v]) => v.live).map(([s, v]) => ({ symbol: s, ...v.live })).sort((a,b) => Math.abs(b.c1) - Math.abs(a.c1)).slice(0, 15);
-res.json({
-allPrices: Object.fromEntries(Object.entries(coinData).filter(([,v])=>v.live).map(([s, v]) => [s, v.live.currentPrice])),
-live: topData,
-pending: all.filter(h => h.status === 'PENDING').sort((a,b)=>b.startTime-a.startTime),
-history: all.filter(h => h.status !== 'PENDING').sort((a,b)=>b.endTime-a.endTime)
-});
-});
-// --- BẢN FULL HTML LUFFY ---
+
 app.get('/gui', (req, res) => {
 res.send(`
-<!DOCTYPE html>
-<html>
-<head>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <style>
-        .up { color: #02c076; }
-        .down { color: #f84960; }
-        .bg-card { background: #1e2329; }
-        .glow-yellow { box-shadow: 0 0 15px rgba(252, 213, 53, 0.1); }
-        .text-gray-custom { color: #848e9c; }
-        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 100; justify-content: center; align-items: center; }
-    </style>
-</head>
-<body class="bg-[#0b0e11] text-[#ebebeb] font-sans">
-<div id="detailModal" class="modal">  
-    <div class="bg-card p-6 rounded-lg w-11/12 max-w-2xl border border-zinc-700 relative">  
-        <button onclick="closeModal('detailModal')" class="absolute top-2 right-4 text-2xl text-gray-custom hover:text-white">&times;</button>  
-        <h2 id="modalTitle" class="text-yellow-500 font-bold mb-4 uppercase"></h2>  
-        <div class="overflow-x-auto"><table class="w-full text-[10px] text-left"><thead class="text-gray-custom border-b border-zinc-800"><tr><th>Lần</th><th>Thời gian</th><th>Giá DCA</th><th>Giá TB</th><th>Margin</th><th>Lev</th><th>TP sau DCA</th></tr></thead><tbody id="modalBody"></tbody></table></div>  
-    </div>  
-</div>  
+<!DOCTYPE html><html><head><script src="https://cdn.tailwindcss.com"></script><style>.up{color:#02c076}.down{color:#f84960}.bg-card{background:#1e2329}</style></head>
+<body class="bg-[#0b0e11] text-[#ebebeb] p-4">
+    <div id="setup" class="bg-card p-4 rounded mb-4">
+        <button onclick="start()" class="w-full bg-yellow-500 text-black font-bold p-2 rounded">BẬT WEBSOCKET UI (0.2s)</button>
+    </div>
+    <div class="flex justify-between items-end mb-4">
+        <div><div class="text-xs uppercase text-gray-400">Equity</div><span id="displayBal" class="text-3xl font-bold">0.00</span></div>
+        <div class="text-right"><div class="text-xs uppercase text-gray-400">Unrealized PnL</div><div id="unPnl" class="text-xl font-bold">0.00</div></div>
+    </div>
+    <div class="bg-card p-4 rounded mb-4">
+        <table class="w-full text-[10px] text-left">
+            <thead><tr class="text-gray-500"><th>Coin</th><th>Price</th><th>1M%</th><th>5M%</th><th>15M%</th></tr></thead>
+            <tbody id="marketBody"></tbody>
+        </table>
+    </div>
+    <div class="bg-card p-4 rounded">
+        <table class="w-full text-[10px] text-left">
+            <thead><tr class="text-gray-500"><th>Pair</th><th>DCA</th><th>Entry/Live</th><th>ROI%</th></tr></thead>
+            <tbody id="pendingBody"></tbody>
+        </table>
+    </div>
 
-<div class="p-4 bg-[#0b0e11] sticky top-0 z-50 border-b border-zinc-800">  
-    <div id="setup" class="grid grid-cols-2 gap-3 mb-4 bg-card p-3 rounded-lg glow-yellow">  
-        <div><label class="text-[10px] text-gray-custom ml-1 uppercase font-bold">Vốn khởi tạo ($)</label><input id="balanceInp" type="number" class="p-2 rounded w-full text-yellow-500 font-bold outline-none text-sm bg-zinc-900 border border-zinc-700"></div>  
-        <div><label class="text-[10px] text-gray-custom ml-1 uppercase font-bold">Margin per Trade</label><input id="marginInp" type="text" class="p-2 rounded w-full text-yellow-500 font-bold outline-none text-sm bg-zinc-900 border border-zinc-700"></div>  
-        <div class="col-span-2 grid grid-cols-4 gap-2 border-t border-zinc-800 pt-3 mt-1">  
-            <div><label class="text-[10px] text-gray-custom ml-1 uppercase">TP (%)</label><input id="tpInp" type="number" step="0.1" class="p-2 rounded w-full outline-none text-sm bg-zinc-900 border border-zinc-700"></div>  
-            <div><label class="text-[10px] text-gray-custom ml-1 uppercase">DCA (%)</label><input id="slInp" type="number" step="0.1" class="p-2 rounded w-full outline-none text-sm bg-zinc-900 border border-zinc-700"></div>  
-            <div><label class="text-[10px] text-gray-custom ml-1 uppercase">Min Vol (%)</label><input id="volInp" type="number" step="0.1" class="p-2 rounded w-full outline-none text-sm bg-zinc-900 border border-zinc-700"></div>  
-            <div><label class="text-[10px] text-gray-custom ml-1 uppercase">Chế độ</label>  
-                <select id="modeInp" class="p-2 rounded w-full outline-none text-sm bg-zinc-900 border border-zinc-700">  
-                    <option value="FOLLOW">THUẬN (FOLLOW)</option>  
-                    <option value="REVERSE">NGƯỢC (REVERSE)</option>  
-                </select>  
-            </div>  
-        </div>  
-        <button onclick="start()" class="col-span-2 bg-[#fcd535] hover:bg-[#ffe066] text-black py-2.5 rounded-md font-bold uppercase text-xs mt-2">Lưu cấu hình & Khởi chạy hệ thống</button>  
-    </div>  
+<script>
+let socket;
+let initialBal = 1000;
+let marginVal = "10%";
 
-    <div id="active" class="hidden flex justify-between items-center mb-4">  
-        <div class="font-bold italic text-white text-xl tracking-tighter">BINANCE <span class="text-[#fcd535]">LUFFY PRO</span></div>  
-        <div class="text-[#fcd535] font-black italic text-sm border border-[#fcd535] px-2 py-1 rounded cursor-pointer" onclick="stop()">STOP ENGINE</div>  
-    </div>  
+function start() {
+    // KẾT NỐI WEBSOCKET UI ĐỂ NHẬN DỮ LIỆU PUSH TỪ SERVER
+    socket = new WebSocket('ws://' + window.location.hostname + ':9001');
+    socket.onmessage = (event) => {
+        const d = JSON.parse(event.data);
+        renderData(d);
+    };
+    document.getElementById('setup').style.display = 'none';
+}
 
-    <div class="flex justify-between items-end mb-3">  
-        <div><div class="text-gray-custom text-[11px] uppercase font-bold tracking-widest mb-1">Equity (Real-time)</div><span id="displayBal" class="text-4xl font-bold text-white tracking-tighter">0.00</span><span class="text-sm text-gray-custom ml-1">USDT</span></div>  
-        <div class="text-right"><div class="text-gray-custom text-[11px] uppercase font-bold mb-1">PnL Tạm tính</div><div id="unPnl" class="text-xl font-bold">0.00</div></div>  
-    </div>  
-</div>  
+function renderData(d) {
+    document.getElementById('marketBody').innerHTML = d.live.map(m => \`
+        <tr class="border-b border-zinc-800"><td class="py-1 font-bold">\${m.symbol}</td><td class="text-yellow-500">\${m.currentPrice.toFixed(4)}</td><td class="\${m.c1>=0?'up':'down'}">\${m.c1}%</td><td class="\${m.c5>=0?'up':'down'}">\${m.c5}%</td><td class="\${m.c15>=0?'up':'down'}">\${m.c15}%</td></tr>
+    \`).join('');
 
-<div class="px-4 mt-5"><div class="bg-card rounded-xl p-4 shadow-lg">  
-    <div class="text-[11px] font-bold text-yellow-500 mb-3 uppercase italic tracking-widest">Biến động Market (Real-time)</div>  
-    <div class="overflow-x-auto"><table class="w-full text-[10px] text-left"><thead class="text-gray-custom border-b border-zinc-800 uppercase"><tr><th>Coin</th><th>Giá Hiện Tại</th><th class="text-center">1M (%)</th><th class="text-center">5M (%)</th><th class="text-center">15M (%)</th></tr></thead><tbody id="marketBody"></tbody></table></div>  
-</div></div>  
+    let unPnl = 0;
+    document.getElementById('pendingBody').innerHTML = d.pending.map(h => {
+        let lp = d.allPrices[h.symbol] || h.avgPrice;
+        let roi = (h.type === 'LONG' ? (lp-h.avgPrice)/h.avgPrice : (h.avgPrice-lp)/h.avgPrice) * 100 * (h.maxLev || 20);
+        unPnl += (initialBal * 0.1) * roi / 100;
+        return \`<tr class="border-b border-zinc-800"><td>\${h.symbol}</td><td>\${h.dcaCount}</td><td>\${h.avgPrice.toFixed(4)} / \${lp.toFixed(4)}</td><td class="\${roi>=0?'up':'down'} font-bold">\${roi.toFixed(2)}%</td></tr>\`;
+    }).join('');
 
-<div class="px-4 mt-5"><div class="bg-card rounded-xl p-4 shadow-lg">  
-    <div class="text-[11px] font-bold text-white mb-3 uppercase tracking-wider flex items-center"><span class="w-2 h-2 bg-green-500 rounded-full mr-2 animate-pulse"></span> Vị thế đang mở</div>  
-    <div class="overflow-x-auto"><table class="w-full text-[10px] text-left"><thead class="text-gray-custom uppercase border-b border-zinc-800"><tr><th>Pair</th><th>DCA</th><th>Margin</th><th>Entry/Live</th><th>Avg Price</th><th class="text-right">PnL (ROI%)</th></tr></thead><tbody id="pendingBody"></tbody></table></div>  
-</div></div>  
-
-<script>  
-let running = false, initialBal = 1000, lastRawData = null;  
-const saved = JSON.parse(localStorage.getItem('luffy_state') || '{}');  
-document.getElementById('balanceInp').value = saved.initialBal || 1000;  
-document.getElementById('marginInp').value = saved.marginVal || "10%";  
-document.getElementById('tpInp').value = saved.tp || 0.5;  
-document.getElementById('slInp').value = saved.sl || 10.0;  
-document.getElementById('volInp').value = saved.vol || 5.0;  
-document.getElementById('modeInp').value = saved.mode || "FOLLOW";  
-
-if(saved.running) {  
-    running = true; initialBal = saved.initialBal;  
-    document.getElementById('setup').classList.add('hidden'); document.getElementById('active').classList.remove('hidden');  
-}  
-
-function fPrice(p) { return parseFloat(p).toFixed(4); }  
-function start() {  
-    localStorage.setItem('luffy_state', JSON.stringify({ running: true, initialBal: parseFloat(document.getElementById('balanceInp').value), marginVal: document.getElementById('marginInp').value, tp: document.getElementById('tpInp').value, sl: document.getElementById('slInp').value, vol: document.getElementById('volInp').value, mode: document.getElementById('modeInp').value }));  
-    location.reload();  
-}  
-function stop() { let s = JSON.parse(localStorage.getItem('luffy_state')); s.running = false; localStorage.setItem('luffy_state', JSON.stringify(s)); location.reload(); }  
-
-async function update() {  
-    try {  
-        const res = await fetch('/api/data'); const d = await res.json(); lastRawData = d;  
-        let mVal = document.getElementById('marginInp').value, mNum = parseFloat(mVal);  
-          
-        document.getElementById('marketBody').innerHTML = (d.live || []).map(m => \`  
-            <tr class="border-b border-zinc-800/30 text-[11px]"><td class="font-bold text-white py-2">\${m.symbol}</td><td class="text-yellow-500 font-mono">\${fPrice(m.currentPrice)}</td><td class="text-center font-bold \${m.c1>=0?'up':'down'}">\${m.c1}%</td><td class="text-center font-bold \${m.c5>=0?'up':'down'}">\${m.c5}%</td><td class="text-center font-bold \${m.c15>=0?'up':'down'}">\${m.c15}%</td></tr>\`).join('');  
-
-        let unPnl = 0;  
-        document.getElementById('pendingBody').innerHTML = (d.pending || []).map(h => {  
-            let lp = d.allPrices[h.symbol] || h.avgPrice;  
-            let marginBase = mVal.includes('%') ? (initialBal * mNum / 100) : mNum;  
-            let totalMargin = marginBase * (h.dcaCount + 1);  
-            let roi = (h.type === 'LONG' ? (lp-h.avgPrice)/h.avgPrice : (h.avgPrice-lp)/h.avgPrice) * 100 * (h.maxLev || 20);  
-            let pnl = totalMargin * roi / 100; unPnl += pnl;  
-            return \`<tr class="border-b border-zinc-800"><td class="text-white font-bold">\${h.symbol} <span class="text-[8px] px-1 \${h.type==='LONG'?'bg-green-600':'bg-red-600'} rounded">\${h.type}</span></td><td class="text-yellow-500 font-bold">\${h.dcaCount}</td><td>\${totalMargin.toFixed(1)}</td><td>\${fPrice(h.snapPrice)}<br><b class="text-green-400">\${fPrice(lp)}</b></td><td>\${fPrice(h.avgPrice)}</td><td class="text-right font-bold \${pnl>=0?'up':'down'}">\${pnl.toFixed(2)}<br>\${roi.toFixed(1)}%</td></tr>\`;  
-        }).join('');  
-
-        if(running) {  
-            document.getElementById('displayBal').innerText = (initialBal + unPnl).toFixed(2);  
-            document.getElementById('unPnl').innerText = (unPnl >= 0 ? '+' : '') + unPnl.toFixed(2);  
-            document.getElementById('unPnl').className = 'text-xl font-bold ' + (unPnl >= 0 ? 'up' : 'down');  
-        }  
-    } catch(e) {}  
-}  
-// CHỖ NÀY: Sửa từ 500 thành 200 để GUI nhảy mượt
-setInterval(update, 200);  
-</script></body></html>`);  
+    document.getElementById('displayBal').innerText = (initialBal + unPnl).toFixed(2);
+    document.getElementById('unPnl').innerText = unPnl.toFixed(2);
+    document.getElementById('unPnl').className = 'text-xl font-bold ' + (unPnl >= 0 ? 'up' : 'down');
+}
+</script></body></html>`);
 });
+
 app.listen(PORT, '0.0.0.0', async () => {
-console.log(`🚀 LUFFY ENGINE READY: http://localhost:${PORT}/gui`);
-await bootstrapData();
-initWS();
-fallbackAPI();
+    await bootstrapData();
+    initWS();
 });
