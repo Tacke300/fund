@@ -1284,9 +1284,14 @@ const BANK = {
     ]
 };
 // --- GIỮ NGUYÊN 
-// 2. Hàm tạo bài viết 
+// 2. Hàm tạo 
 
-// --- KHAI BÁO CÁC BIẾN CẦN THIẾT (NẾU ĐẦU FILE CHƯA CÓ) ---
+// --- CẤU HÌNH GIỚI HẠN & TỐC ĐỘ ---
+const MAX_POST_PER_DAY = 150;    // Số bài tối đa 1 ngày
+const POST_DELAY_MINUTES = 0.5;  // Khoảng cách tối thiểu giữa 2 bài (phút)
+let lastPostTime = 0;          // Lưu mốc thời gian đăng bài cuối
+
+// Khai báo biến hệ thống nếu chưa có
 if (typeof isRunning === 'undefined') var isRunning = true;
 if (typeof dailyPostCount === 'undefined') var dailyPostCount = 0;
 
@@ -1295,7 +1300,7 @@ function getRandomItem(arr) {
     return arr[Math.floor(Math.random() * arr.length)];
 }
 
-// 1. Lấy danh sách coin từ Binance
+// 1. Lấy coin từ Binance
 async function getAllFutureCoins() {
     try {
         const response = await axios.get('https://fapi.binance.com/fapi/v1/exchangeInfo', { timeout: 5000 });
@@ -1308,22 +1313,36 @@ async function getAllFutureCoins() {
     }
 }
 
-// 2. Hàm tạo nội dung và thực hiện ĐĂNG LÊN SQUAD
+// 2. Hàm xử lý ĐĂNG BÀI
 async function generateFinalPost(coinData) {
+    // Kiểm tra trạng thái Bot
     if (!isRunning) {
         addLog("HỆ THỐNG: Bot đang STOP.");
         return null;
     }
 
+    // Kiểm tra giới hạn số bài trong ngày
+    if (dailyPostCount >= MAX_POST_PER_DAY) {
+        addLog(`CẢNH BÁO: Đã đạt giới hạn ${MAX_POST_PER_DAY} bài/ngày. Dừng đăng.`);
+        return null;
+    }
+
+    // Kiểm tra tốc độ đăng (Delay)
+    const now = Date.now();
+    const timeSinceLastPost = (now - lastPostTime) / 1000 / 60; // quy ra phút
+    if (timeSinceLastPost < POST_DELAY_MINUTES) {
+        addLog(`CHỜ: Mới đăng bài cách đây ${timeSinceLastPost.toFixed(1)} phút. Cần chờ thêm.`);
+        return null;
+    }
+
     const symbol = coinData.symbol.replace('USDT', '').toUpperCase();
     if (postedCoinsToday.has(symbol)) {
-        addLog(`SKIP: ${symbol} đã đăng rồi.`);
+        addLog(`SKIP: ${symbol} đã đăng hôm nay.`);
         return null;
     }
 
     try {
         addLog(`Đang tạo nội dung cho: ${symbol}...`);
-
         const side = (coinData.change || 0) >= 0 ? "LONG" : "SHORT";
         const entryRaw = coinData.price || 0;
         const entry = formatPrice(entryRaw);
@@ -1339,29 +1358,32 @@ async function generateFinalPost(coinData) {
         const allCoins = await getAllFutureCoins();
         const otherCoins = allCoins.filter(c => c !== symbol).sort(() => 0.5 - Math.random()).slice(0, 4);
         const hashtags = `\n#${symbol}USDT $${symbol}USDT ${otherCoins.map(c => `#${c}USDT`).join(' ')}`;
-        
         const finalContent = content + hashtags;
 
-        // --- LỆNH ĐĂNG BÀI LÊN SQUAD ---
+        // --- FIX LỖI 404: CẬP NHẬT ENDPOINT SQUAD CHUẨN ---
         addLog(`Đang gửi bài ${symbol} lên Squad...`);
-        const squadRes = await axios.post('https://api.binance.me/squad/v1/post/create', {
+        // Lưu ý: Endpoint này phụ thuộc vào API tài liệu Squad của bạn cung cấp
+        const squadRes = await axios.post('https://www.binance.com/bapi/composite/v1/public/cms/squad/post/create', {
             apiKey: SQUAD_API_KEY,
             content: finalContent,
-            symbol: `${symbol}USDT`,
-            type: "text"
-        }, { timeout: 10000 });
+            symbol: `${symbol}USDT`
+        }, { 
+            headers: { 'Content-Type': 'application/json' },
+            timeout: 15000 
+        });
 
-        if (squadRes.data && (squadRes.data.success || squadRes.data.code === 200)) {
+        if (squadRes.data && (squadRes.data.success || squadRes.data.code === '000000')) {
             postedCoinsToday.add(symbol);
             dailyPostCount++;
-            addLog(`THÀNH CÔNG: Đã đăng bài ${symbol} lên Squad.`);
+            lastPostTime = Date.now(); // Cập nhật thời gian đăng bài cuối
+            addLog(`THÀNH CÔNG: Đã đăng bài ${symbol} (#${dailyPostCount}).`);
             return finalContent;
         } else {
-            addLog(`LỖI SQUAD: ${JSON.stringify(squadRes.data)}`);
+            addLog(`LỖI TỪ SÀN: ${JSON.stringify(squadRes.data)}`);
             return null;
         }
     } catch (err) {
-        addLog(`LỖI HỆ THỐNG: ${err.message}`);
+        addLog(`LỖI KẾT NỐI (404/Timeout): Kiểm tra lại Endpoint hoặc Key.`);
         return null;
     }
 }
@@ -1384,13 +1406,17 @@ app.post('/generate-post', async (req, res) => {
 app.get('/', (req, res) => {
     res.send(`
         <body style="font-family:sans-serif; background:#121212; color:#eee; padding:20px;">
-            <h2 style="color:#00ff88;">SQUAD AI - DASHBOARD</h2>
-            <div style="margin-bottom:20px;">
-                <button onclick="control('start')" style="background:#2ecc71; color:white; border:none; padding:10px 20px; cursor:pointer; border-radius:5px;">START</button>
-                <button onclick="control('stop')" style="background:#e74c3c; color:white; border:none; padding:10px 20px; cursor:pointer; border-radius:5px;">STOP</button>
-                <button onclick="testPost()" style="background:#3498db; color:white; border:none; padding:10px 20px; cursor:pointer; border-radius:5px;">TEST BTC</button>
+            <h2 style="color:#00ff88;">SQUAD AI - DASHBOARD v4.5</h2>
+            <div style="margin-bottom:20px; background:#1e1e1e; padding:15px; border-radius:8px;">
+                <button onclick="control('start')" style="background:#2ecc71; color:white; border:none; padding:10px 20px; cursor:pointer; border-radius:5px; font-weight:bold;">START</button>
+                <button onclick="control('stop')" style="background:#e74c3c; color:white; border:none; padding:10px 20px; cursor:pointer; border-radius:5px; font-weight:bold;">STOP</button>
+                <button onclick="testPost()" style="background:#3498db; color:white; border:none; padding:10px 20px; cursor:pointer; border-radius:5px; font-weight:bold;">TEST ĐĂNG BTC</button>
             </div>
-            <p>Trạng thái: <b style="color:${isRunning ? '#2ecc71' : '#e74c3c'}">${isRunning ? 'RUNNING' : 'STOPPED'}</b> | Đã đăng: <b>${dailyPostCount}</b></p>
+            <div style="display:flex; gap:20px;">
+                <p>Trạng thái: <b style="color:${isRunning ? '#2ecc71' : '#e74c3c'}">${isRunning ? 'RUNNING' : 'STOPPED'}</b></p>
+                <p>Hôm nay: <b>${dailyPostCount} / ${MAX_POST_PER_DAY}</b> bài</p>
+                <p>Delay: <b>${POST_DELAY_MINUTES} phút</b></p>
+            </div>
             <hr style="opacity:0.1"/>
             <div id="logs" style="background:#000; padding:15px; border:1px solid #333; height:400px; overflow-y:scroll; font-family:monospace; color:#00ff00;">
                 ${logs.map(l => `<div>${l}</div>`).join('')}
@@ -1407,7 +1433,7 @@ app.get('/', (req, res) => {
                         body:JSON.stringify({symbol:'BTCUSDT', price:65000, change:1.5}) 
                     });
                     const data = await res.json();
-                    alert(data.success ? "Đã gửi lên Squad!" : "Thất bại! Check log đen.");
+                    alert(data.success ? "Lệnh đăng bài đã gửi!" : "Thất bại (Check Delay hoặc Log)");
                     location.reload();
                 }
             </script>
