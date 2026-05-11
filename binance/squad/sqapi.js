@@ -1521,7 +1521,7 @@ app.get('/', (req, res) => {
                         document.getElementById('price-body').innerHTML = html;
                     } catch(e) {}
                 }
-                setInterval(updatePrices, 3000);
+                setInterval(updatePrices, 1000);
                 updatePrices();
             </script>
         </body>
