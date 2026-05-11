@@ -129,7 +129,7 @@ function initWS() {
         const now = Date.now();
         tickers.forEach(t => updatePriceLogic(t.s, parseFloat(t.c), now));
     });
-    ws.on('close', () => setTimeout(initWS, 3000));
+    ws.on('close', () => setTimeout(initWS, 500));
 }
 
 // PP2: API Polling (Chạy song song để chống lag WS)
@@ -140,7 +140,7 @@ async function fallbackAPI() {
         const now = Date.now();
         data.forEach(t => { if(t.symbol.endsWith('USDT')) updatePriceLogic(t.symbol, parseFloat(t.price), now); });
     } catch (e) {}
-    setTimeout(fallbackAPI, 2500);
+    setTimeout(fallbackAPI, 500);
 }
 
 app.get('/api/config', (req, res) => {
