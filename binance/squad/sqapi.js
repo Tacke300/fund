@@ -1,15 +1,24 @@
+
 import express from 'express';
 import axios from 'axios';
 import cron from 'node-cron';
 
+// --- 1. CẤU HÌNH HỆ THỐNG ---
 const PORT = 8888;
 const SQUAD_API_KEY = "8d794c11cc794c958c2c65924c54f2dd"; 
+const MAX_POST_PER_DAY = 150;    // Tối đa 50 bài/ngày
+const POST_DELAY_MINUTES = 0.3;   // Nghỉ 3 phút giữa mỗi lần đăng
 
+// --- 2. BIẾN QUẢN LÝ ---
 let isRunning = true;
 let dailyPostCount = 0;
+let lastPostTime = 0;
 let logs = [];
-let lastPostTime = 0; 
 const postedCoinsToday = new Set();
+
+const RANDOM_ICONS = ["🔥", "📈", "💹", "🚀", "💎", "⚡", "🌟", "🟢", "🏆", "👑", "🎯", "💰", "🔔", "🛰️", "🆙", "🛸", "🔭", "🥇", "🏹", "🌋"];
+
+
 
 
 
@@ -1288,29 +1297,17 @@ const BANK = {
 };
 // --- GIỮ 
 
-// --- 1. CẤU 
+// --- 1. 
 
-// CẤU HÌNH TỐC ĐỘ ĐĂNG
-const MAX_POST_PER_DAY = 150; 
-const POST_DELAY_MINUTES = 0.3; 
 
-function addLog(msg) {
-    const time = new Date().toLocaleTimeString();
-    const logMsg = `[${time}] ${msg}`;
-    logs.unshift(logMsg);
-    if (logs.length > 100) logs.pop();
-    console.log(logMsg);
-}
 
-function formatPrice(num) {
-    if (!num || isNaN(num)) return "0.00";
-    return num < 1 ? num.toFixed(6) : num.toLocaleString('en-US', { minimumFractionDigits: 2 });
-}
+
 
 function getRandomItem(arr) {
-    return (arr && arr.length > 0) ? arr[Math.floor(Math.random() * arr.length)] : "";
+    return arr[Math.floor(Math.random() * arr.length)];
 }
 
+// Lấy coin từ Binance để làm Hashtag
 async function getAllFutureCoins() {
     try {
         const res = await axios.get('https://fapi.binance.com/fapi/v1/exchangeInfo');
@@ -1318,81 +1315,113 @@ async function getAllFutureCoins() {
     } catch (e) { return ["BTC", "ETH", "SOL"]; }
 }
 
+// --- 4. LOGIC ĐĂNG BÀI CHÍNH ---
 async function generateFinalPost(coinData) {
-    if (!isRunning) return null;
-    if (dailyPostCount >= MAX_POST_PER_DAY) { addLog("Hết lượt đăng hôm nay"); return null; }
+    if (!isRunning) return { success: false, msg: "Bot Stop" };
+    if (dailyPostCount >= MAX_POST_PER_DAY) return { success: false, msg: "Hết giới hạn ngày" };
     
     const now = Date.now();
     if ((now - lastPostTime) < POST_DELAY_MINUTES * 60000) {
-        addLog(`Chờ thêm ${((POST_DELAY_MINUTES * 60000 - (now - lastPostTime)) / 1000).toFixed(0)}s`);
-        return null;
+        const wait = Math.ceil((POST_DELAY_MINUTES * 60000 - (now - lastPostTime)) / 1000);
+        addLog(`CHỜ: Cần đợi thêm ${wait} giây nữa.`);
+        return { success: false, msg: `Chờ ${wait}s` };
     }
 
     const symbol = coinData.symbol.replace('USDT', '').toUpperCase();
-    if (postedCoinsToday.has(symbol)) return null;
+    if (postedCoinsToday.has(symbol)) {
+        addLog(`TRÙNG: ${symbol} đã đăng rồi.`);
+        return { success: false, msg: "Trùng coin" };
+    }
 
     try {
-        addLog(`Đang xử lý: ${symbol}`);
+        addLog(`ĐANG XỬ LÝ: ${symbol}`);
         const side = (coinData.change >= 0) ? "LONG" : "SHORT";
-        const content = `${getRandomItem(side === "LONG" ? BANK.TREND_UP : BANK.TREND_DOWN)}\n\n🚀 ${side} $${symbol}\nEntry: ${formatPrice(coinData.price)}\n\n${getRandomItem(BANK.P1)}\n\n#${symbol}USDT`;
+        const signalPart = `${getRandomItem(RANDOM_ICONS)} ${side} $${symbol}\nEntry: ${formatPrice(coinData.price)}`;
+        
+        const allCoins = await getAllFutureCoins();
+        const randomTags = allCoins.sort(() => 0.5 - Math.random()).slice(0, 4);
+        const hashtags = `\n\n#${symbol}USDT $${symbol}USDT ${randomTags.map(c => `#${c}USDT`).join(' ')}`;
+        
+        const finalContent = `${getRandomItem(side === "LONG" ? BANK.TREND_UP : BANK.TREND_DOWN)}\n\n${signalPart}\n\n${getRandomItem(BANK.P1)}\n\n${getRandomItem(BANK.P2)}\n${getRandomItem(BANK.P3)}${hashtags}`;
 
-        // FIX LỖI 404: Dùng Endpoint của Binance Square (Squad)
-        // Lưu ý: Endpoint này có thể thay đổi tùy theo tài liệu API Squad bạn có
-        const res = await axios.post('https://www.binance.com/bapi/composite/v1/public/cms/squad/post/create', {
+        // GỬI LÊN SQUAD (Dùng Endpoint CMS của Binance Square)
+        const squadRes = await axios.post('https://www.binance.com/bapi/composite/v1/public/cms/squad/post/create', {
             apiKey: SQUAD_API_KEY,
-            content: content,
-            symbol: `${symbol}USDT`
+            content: finalContent,
+            symbol: `${symbol}USDT`,
+            type: "text"
         }, { timeout: 10000 });
 
-        if (res.data && (res.data.success || res.data.code === '000000')) {
+        if (squadRes.data && (squadRes.data.success || squadRes.data.code === '000000')) {
             postedCoinsToday.add(symbol);
             dailyPostCount++;
             lastPostTime = Date.now();
-            addLog(`THÀNH CÔNG: Đã đăng ${symbol}`);
-            return content;
+            addLog(`THÀNH CÔNG: Đã đăng ${symbol} (#${dailyPostCount})`);
+            return { success: true, content: finalContent };
         } else {
-            addLog(`SÀN TỪ CHỐI: ${JSON.stringify(res.data)}`);
-            return null;
+            addLog(`SÀN TỪ CHỐI: ${JSON.stringify(squadRes.data)}`);
+            return { success: false, msg: "Sàn từ chối" };
         }
     } catch (err) {
-        addLog(`LỖI GỬI BÀI: ${err.message}`);
-        return null;
+        addLog(`LỖI KẾT NỐI: ${err.message}`);
+        return { success: false, msg: "Lỗi kết nối" };
     }
 }
 
+// --- 5. SERVER ---
 const app = express();
 app.use(express.json());
 
 app.post('/control', (req, res) => {
     isRunning = (req.body.action === 'start');
-    addLog(`LỆNH: ${isRunning ? 'START' : 'STOP'}`);
+    addLog(`HỆ THỐNG: ${isRunning ? 'START' : 'STOP'}`);
     res.json({ success: true });
 });
 
 app.post('/generate-post', async (req, res) => {
-    const content = await generateFinalPost(req.body);
-    res.json({ success: !!content });
+    const result = await generateFinalPost(req.body);
+    res.json(result);
 });
 
 app.get('/', (req, res) => {
     res.send(`
         <body style="background:#121212; color:#eee; font-family:sans-serif; padding:20px;">
-            <h2>SQUAD CONTROL PANEL</h2>
-            <button onclick="send('start')" style="background:green; color:white; padding:10px;">START</button>
-            <button onclick="send('stop')" style="background:red; color:white; padding:10px;">STOP</button>
-            <p>Trạng thái: <b>${isRunning ? 'RUNNING' : 'STOPPED'}</b> | Đã đăng: <b>${dailyPostCount}</b></p>
-            <div id="logs" style="background:black; color:lime; padding:10px; height:300px; overflow-y:auto; font-family:monospace;">
+            <h2>SQUAD AI CONTROL PANEL</h2>
+            <button onclick="ctrl('start')" style="background:#2ecc71; color:white; border:none; padding:10px 20px; border-radius:5px; font-weight:bold; cursor:pointer;">START</button>
+            <button onclick="ctrl('stop')" style="background:#e74c3c; color:white; border:none; padding:10px 20px; border-radius:5px; font-weight:bold; cursor:pointer;">STOP</button>
+            <button onclick="test()" style="background:#3498db; color:white; border:none; padding:10px 20px; border-radius:5px; font-weight:bold; cursor:pointer;">TEST BTC</button>
+            <div style="margin-top:15px; display:flex; gap:20px;">
+                <p>Bot: <b style="color:${isRunning ? '#2ecc71' : '#e74c3c'}">${isRunning ? 'RUNNING' : 'STOPPED'}</b></p>
+                <p>Đã đăng: <b>${dailyPostCount} / ${MAX_POST_PER_DAY}</b></p>
+                <p>Delay: <b>${POST_DELAY_MINUTES}p</b></p>
+            </div>
+            <div id="logs" style="background:black; color:#00ff00; padding:10px; height:400px; overflow-y:auto; font-family:monospace; border:1px solid #333; margin-top:10px;">
                 ${logs.map(l => `<div>${l}</div>`).join('')}
             </div>
             <script>
-                async function send(action) {
+                async function ctrl(action) {
                     await fetch('/control', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({action}) });
                     location.reload();
+                }
+                async function test() {
+                    const res = await fetch('/generate-post', { 
+                        method:'POST', 
+                        headers:{'Content-Type':'application/json'}, 
+                        body:JSON.stringify({symbol:'BTCUSDT', price:65000, change:1.5}) 
+                    });
+                    const data = await res.json();
+                    if(!data.success) alert("Lỗi: " + data.msg);
+                    else location.reload();
                 }
             </script>
         </body>
     `);
 });
 
-app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+cron.schedule('0 0 * * *', () => {
+    postedCoinsToday.clear();
+    dailyPostCount = 0;
+    addLog("HỆ THỐNG: Đã reset bộ đếm ngày mới.");
+});
 
+app.listen(PORT, () => addLog(`Server running at http://localhost:${PORT}`));
