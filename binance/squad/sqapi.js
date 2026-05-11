@@ -1293,7 +1293,8 @@ const BANK = {
 // --- GIỮ 
 
 // --- 1. 
-// --- HÀM TRỢ GIÚP ---
+// --- HÀM TRỢ GIÚP --
+// --- GIỮ NGUYÊN CÁC HÀM TIỆN ÍCH CỦA ÔNG ---
 function getRandomItem(arr) {
     return (arr && arr.length > 0) ? arr[Math.floor(Math.random() * arr.length)] : "";
 }
@@ -1308,7 +1309,6 @@ function addLog(msg) {
     console.log(logMsg);
 }
 
-/
 // Lấy coin từ sàn làm hashtag: 1 chính + 3 phụ
 async function getDynamicHashtags(mainSymbol) {
     try {
@@ -1346,11 +1346,12 @@ async function generateFinalPost(coinData) {
     if (postedCoinsToday.has(symbol)) return { success: false, msg: "Đã đăng rồi" };
 
     try {
+        // LẤY GIÁ THỰC TẾ TẠI THỜI ĐIỂM ĐĂNG BÀI
         const tickerRes = await axios.get(`https://fapi.binance.com/fapi/v1/ticker/24hr?symbol=${symbol}USDT`);
         const realPrice = parseFloat(tickerRes.data.lastPrice);
         const realChange = parseFloat(tickerRes.data.priceChangePercent);
 
-        addLog(`Đang soạn bài: ${symbol} (Giá sàn: ${realPrice})`);
+        addLog(`Đang soạn bài: ${symbol} (Biến động: ${realChange}%)`);
         const side = (realChange >= 0) ? "LONG" : "SHORT";
         
         const entry = realPrice;
@@ -1362,7 +1363,7 @@ async function generateFinalPost(coinData) {
         const content = [
             getRandomItem(side === "LONG" ? BANK.TREND_UP : BANK.TREND_DOWN),
             `\n${getRandomItem(RANDOM_ICONS)} ${side} $${symbol}\nEntry: ${formatPrice(entry)}\nTP: ${formatPrice(tp)} | SL: ${formatPrice(sl)}`,
-            `\n${getRandomItem(BANK.P1)}\n${getRandomItem(BANK.P2)}\n${getRandomItem(BANK.P3)}\n${getRandomItem(BANK.P4)}`, // ĐÃ GẮN P4
+            `\n${getRandomItem(BANK.P1)}\n${getRandomItem(BANK.P2)}\n${getRandomItem(BANK.P3)}\n${getRandomItem(BANK.P4)}`, // ĐÃ GẮN P4 Ở ĐÂY
             `\n${hashtags}`
         ].join('\n');
 
@@ -1370,7 +1371,10 @@ async function generateFinalPost(coinData) {
             bodyTextOnly: content,
             symbolList: [{ symbol: `${symbol}USDT`, type: "FUTURES" }]
         }, { 
-            headers: { "X-Square-OpenAPI-Key": SQUAD_API_KEY, "Content-Type": "application/json" } 
+            headers: { 
+                "X-Square-OpenAPI-Key": SQUAD_API_KEY, 
+                "Content-Type": "application/json" 
+            } 
         });
 
         dailyPostCount++;
@@ -1386,40 +1390,43 @@ async function generateFinalPost(coinData) {
     }
 }
 
-// --- LOGIC QUÉT TỰ ĐỘNG: XEN KẼ TĂNG/GIẢM THEO THỨ TỰ MẠNH NHẤT ---
-let nextSide = "LONG"; // Bắt đầu bằng con tăng mạnh nhất
+// --- LOGIC XEN KẼ TĂNG/GIẢM KHI START ---
+let nextMode = "MAX_UP"; // Bắt đầu bằng con tăng mạnh nhất
 
 async function autoScanner() {
     if (!isRunning) return;
 
     try {
         const res = await axios.get('https://fapi.binance.com/fapi/v1/ticker/24hr');
-        const available = res.data.filter(c => c.symbol.endsWith('USDT') && !postedCoinsToday.has(c.symbol.replace('USDT', '')));
+        const allCoins = res.data.filter(c => c.symbol.endsWith('USDT') && !postedCoinsToday.has(c.symbol.replace('USDT', '')));
 
-        let target = null;
-        if (nextSide === "LONG") {
-            // Tìm con tăng mạnh nhất
-            target = available
+        let targetCoin = null;
+
+        if (nextMode === "MAX_UP") {
+            // Lấy con tăng mạnh nhất chưa đăng
+            targetCoin = allCoins
                 .filter(c => parseFloat(c.priceChangePercent) > 0)
                 .sort((a, b) => parseFloat(b.priceChangePercent) - parseFloat(a.priceChangePercent))[0];
-            if (target) nextSide = "SHORT"; // Lần tới tìm con giảm
+            
+            if (targetCoin) nextMode = "MAX_DOWN"; // Lần tới tìm con giảm
         } else {
-            // Tìm con giảm mạnh nhất
-            target = available
+            // Lấy con giảm mạnh nhất chưa đăng
+            targetCoin = allCoins
                 .filter(c => parseFloat(c.priceChangePercent) < 0)
                 .sort((a, b) => parseFloat(a.priceChangePercent) - parseFloat(b.priceChangePercent))[0];
-            if (target) nextSide = "LONG"; // Lần tới tìm con tăng
+            
+            if (targetCoin) nextMode = "MAX_UP"; // Lần tới tìm con tăng
         }
 
-        if (target) {
-            await generateFinalPost({ symbol: target.symbol });
+        if (targetCoin) {
+            await generateFinalPost({ symbol: targetCoin.symbol });
         }
     } catch (e) {
         console.error("Lỗi Auto Scanner:", e.message);
     }
 }
 
-// Chạy quét mỗi 30 giây khi Start
+// Kiểm tra quét mỗi 30 giây khi bấm START
 setInterval(autoScanner, 30000);
 
 const app = express();
@@ -1438,7 +1445,7 @@ app.get('/api/prices', async (req, res) => {
 
 app.post('/control', (req, res) => {
     isRunning = (req.body.action === 'start');
-    addLog(`HỆ THỐNG: \${isRunning ? 'START - ĐANG QUÉT XEN KẼ TĂNG/GIẢM' : 'STOP'}`);
+    addLog(`HỆ THỐNG: ${isRunning ? 'START (Chế độ xen kẽ Tăng/Giảm)' : 'STOP'}`);
     res.json({ success: true });
 });
 
@@ -1456,44 +1463,62 @@ app.get('/', (req, res) => {
                 <button onclick="ctrl('stop')" style="background:#e74c3c; color:white; border:none; padding:10px 20px; border-radius:5px; font-weight:bold; cursor:pointer;">STOP</button>
                 <button onclick="test()" style="background:#3498db; color:white; border:none; padding:10px 20px; border-radius:5px; font-weight:bold; cursor:pointer;">TEST BTC</button>
             </div>
+
             <div style="display:flex; gap:20px; margin-bottom:15px;">
                 <p>Trạng thái: <b style="color:\${isRunning ? '#2ecc71' : '#e74c3c'}">\${isRunning ? 'RUNNING' : 'STOPPED'}</b></p>
                 <p>Hôm nay: <b>\${dailyPostCount} / \${MAX_POSTS}</b></p>
             </div>
+
             <div style="display:grid; grid-template-columns: 1fr 1fr; gap:20px;">
                 <div id="logs" style="background:black; color:#00ff00; padding:15px; height:450px; overflow-y:auto; font-family:monospace; border:1px solid #333; font-size:12px;">
-                    \${logs.map(l => \`<div style=\"border-bottom:1px solid #111; padding:3px 0;\">\${l}</div>\`).join('')}
+                    \${logs.map(l => \`<div style="border-bottom:1px solid #111; padding:3px 0;">\${l}</div>\`).join('')}
                 </div>
+                
                 <div style="background:#1e1e1e; padding:15px; border-radius:8px; border:1px solid #333;">
                     <h3 style="margin-top:0; color:#3498db;">BẢNG GIÁ REALTIME (7H SÁNG)</h3>
-                    <table style="width:100%; text-align:left; border-collapse:collapse; font-size:12px;">
-                        <thead><tr style="color:#888; border-bottom:1px solid #333;"><th style="padding:10px 0;">Symbol</th><th>Price</th><th>Change</th></tr></thead>
+                    <table style="width:100%; text-align:left; border-collapse:collapse;">
+                        <thead>
+                            <tr style="color:#888; border-bottom:1px solid #333;">
+                                <th style="padding:10px 0;">Symbol</th>
+                                <th>Price</th>
+                                <th>Change (7AM)</th>
+                            </tr>
+                        </thead>
                         <tbody id="price-body"></tbody>
                     </table>
                 </div>
             </div>
+
             <script>
                 async function ctrl(action) {
                     await fetch('/control', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({action}) });
                     location.reload();
                 }
                 async function test() {
-                    const res = await fetch('/generate-post', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({symbol:'BTCUSDT'}) });
+                    const res = await fetch('/generate-post', { 
+                        method:'POST', 
+                        headers:{'Content-Type':'application/json'}, 
+                        body:JSON.stringify({symbol:'BTCUSDT'}) 
+                    });
                     const data = await res.json();
-                    if(!data.success) alert(data.msg); else location.reload();
+                    if(!data.success) alert("Thông báo: " + data.msg);
+                    else location.reload();
                 }
+
                 async function updatePrices() {
                     try {
                         const res = await fetch('/api/prices');
                         const data = await res.json();
-                        document.getElementById('price-body').innerHTML = data.map(coin => {
+                        const html = data.map(coin => {
                             const change = parseFloat(coin.priceChangePercent);
-                            return \`<tr style=\"border-bottom:1px solid #222; color:\${change >= 0 ? '#2ecc71' : '#e74c3c'}\">
-                                <td style=\"padding:8px 0; font-weight:bold;\">\${coin.symbol}</td>
+                            const color = change >= 0 ? '#2ecc71' : '#e74c3c';
+                            return \`<tr style="border-bottom:1px solid #222; color:\${color}">
+                                <td style="padding:8px 0; font-weight:bold;">\${coin.symbol}</td>
                                 <td>\${parseFloat(coin.lastPrice).toFixed(4)}</td>
                                 <td>\${change >= 0 ? '+' : ''}\${change}%</td>
                             </tr>\`;
                         }).join('');
+                        document.getElementById('price-body').innerHTML = html;
                     } catch(e) {}
                 }
                 setInterval(updatePrices, 3000);
@@ -1504,3 +1529,4 @@ app.get('/', (req, res) => {
 });
 
 app.listen(PORT, () => addLog(`Hệ thống chạy tại Port \${PORT}`));
+
