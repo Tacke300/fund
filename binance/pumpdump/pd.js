@@ -32,6 +32,7 @@ let status = { botLogs: [], exchangeInfo: null, candidatesList: [], isReady: fal
 let botActivePositions = new Map();
 let isProcessingDCA = new Set(); 
 let timestampOffset = 0; 
+// BIẾN QUAN TRỌNG ĐỂ HIỆN SỐ DƯ
 let walletInfo = { totalWalletBalance: "0.00", availableBalance: "0.00", totalUnrealizedProfit: "0.00" };
 
 function addBotLog(msg, type = 'info') {
@@ -84,6 +85,7 @@ async function openPosition(symbol, dcaData = null) {
         const ticker = await binanceApi.get(`/fapi/v1/ticker/price?symbol=${symbol}`);
         const currentPrice = parseFloat(ticker.data.price);
         
+        // TÍNH TOÁN VỐN DỰA TRÊN WALLETINFO MỚI NHẤT
         let marginToUse = dcaData ? dcaData.margin : (botSettings.invValue.toString().includes('%') ? (parseFloat(walletInfo.availableBalance) * parseFloat(botSettings.invValue.replace('%','')) / 100) : parseFloat(botSettings.invValue));
         let qtyNum = Math.ceil(((marginToUse * info.maxLeverage) / currentPrice) / info.stepSize) * info.stepSize;
         if ((qtyNum * currentPrice) < 5.5) qtyNum = Math.ceil(6.5 / currentPrice / info.stepSize) * info.stepSize;
@@ -117,7 +119,7 @@ async function openPosition(symbol, dcaData = null) {
                     tp: sync.tp, sl: sync.sl, margin: marginToUse, firstEntry, firstMargin: dcaData ? dcaData.firstMargin : marginToUse,
                     dcaCount: dcaData ? dcaData.dcaCount : 0, historyEntries, pnl: 0, priceDev: 0, leverage: info.maxLeverage
                 });
-                addBotLog(`✅ [${symbol}] ${isFinalLong ? 'ĐẢO LONG' : 'VÀO LỆNH'} - TBC: ${avgEntry.toFixed(info.pricePrecision)}`, "success");
+                addBotLog(`✅ [${symbol}] ${isFinalLong ? 'ĐẢO LONG' : 'SHORT DCA ' + (dcaData?.dcaCount || 0)} - Entry: ${entryActual}`, "success");
             }
         }
     } catch (e) { addBotLog(`🚨 Lỗi mở lệnh: ${e.message}`, "error"); } 
@@ -127,6 +129,7 @@ async function openPosition(symbol, dcaData = null) {
 async function priceMonitorLoop() {
     if (!status.isReady) { setTimeout(priceMonitorLoop, 1000); return; }
     try {
+        // CẬP NHẬT SỐ DƯ TÀI KHOẢN LIÊN TỤC LÊN DASHBOARD
         const acc = await binancePrivate('/fapi/v2/account');
         walletInfo = { 
             totalWalletBalance: parseFloat(acc.totalWalletBalance).toFixed(2), 
@@ -145,6 +148,7 @@ async function priceMonitorLoop() {
                     let bPos = botActivePositions.get(key);
                     bPos.pnl = parseFloat(p.unRealizedProfit);
                     const markPrice = parseFloat(p.markPrice);
+                    // TÍNH % ĐỘ LỆCH GIÁ ĐỂ HIỆN DASHBOARD
                     bPos.priceDev = bPos.side === 'SHORT' ? ((bPos.entryPrice - markPrice) / bPos.entryPrice * 100) : ((markPrice - bPos.entryPrice) / bPos.entryPrice * 100);
                 }
             }
@@ -162,7 +166,7 @@ async function priceMonitorLoop() {
                 status.botPnLClosed += rPnl; status.botClosedCount++;
 
                 if (rPnl > 0) {
-                    addBotLog(`💰 [${botPos.symbol}] CHỐT LÃI: ${rPnl.toFixed(2)}$`, "success");
+                    addBotLog(`💰 [${botPos.symbol}] TAKE PROFIT: +${rPnl.toFixed(2)}$`, "success");
                     status.blackList[botPos.symbol] = Date.now() + BLACKLIST_DURATION;
                     botActivePositions.delete(key);
                 } else {
@@ -187,7 +191,7 @@ async function priceMonitorLoop() {
                 }
             }
         }
-    } catch (e) {}
+    } catch (e) { console.log("Monitor Error:", e.message); }
     setTimeout(priceMonitorLoop, 1000);
 }
 
@@ -213,7 +217,7 @@ async function init() {
             temp[s.symbol] = { quantityPrecision: s.quantityPrecision, pricePrecision: s.pricePrecision, stepSize: parseFloat(lot.stepSize), maxLeverage: b ? b.brackets[0].initialLeverage : 20 };
         });
         status.exchangeInfo = temp; status.isReady = true;
-        addBotLog("🚀 LUFFY BOT STARTED - UI SYNCED");
+        addBotLog("🔥 LUFFY BOT ONLINE - ĐÃ FIX SỐ DƯ");
         priceMonitorLoop();
     } catch (e) { setTimeout(init, 5000); }
 }
@@ -228,6 +232,7 @@ setInterval(() => {
 }, 2000);
 
 const APP = express(); APP.use(express.json()); APP.use(express.static(__dirname));
+// API QUAN TRỌNG TRẢ DỮ LIỆU VỀ HTML
 APP.get('/api/status', (req, res) => {
     const bl = {}; const now = Date.now();
     Object.keys(status.blackList).forEach(s => { const r = Math.floor((status.blackList[s] - now) / 1000); if (r > 0) bl[s] = r; else delete status.blackList[s]; });
