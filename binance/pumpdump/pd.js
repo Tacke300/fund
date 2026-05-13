@@ -109,7 +109,7 @@ async function openPosition(symbol, dcaData = null) {
                 const firstEntry = dcaData ? dcaData.firstEntry : entryActual;
                 const dcaCount = dcaData ? dcaData.dcaCount : 0;
                 
-                let tp = side === 'SHORT' ? entryActual * (1 - botSettings.posTP/100) : entryActual * 1.05;
+                let tp = side === 'SHORT' ? entryActual * (1 - botSettings.posTP/100) : entryActual * 1.1;
                 let sl = side === 'SHORT' ? firstEntry + (firstEntry * botSettings.posSL/100) : entryActual * 0.90;
 
                 const sync = await syncTPSL(symbol, side, info, tp, sl);
