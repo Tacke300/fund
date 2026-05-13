@@ -32,7 +32,6 @@ let status = { botLogs: [], exchangeInfo: null, candidatesList: [], isReady: fal
 let botActivePositions = new Map();
 let isProcessingDCA = new Set(); 
 let timestampOffset = 0; 
-let openingSymbols = new Set();
 
 function addBotLog(msg, type = 'info') {
     const time = new Date().toLocaleTimeString('vi-VN', { hour12: false });
@@ -65,7 +64,7 @@ async function syncTPSL(symbol, side, info, tpPrice, slPrice) {
     const slStr = parseFloat(slPrice).toFixed(info.pricePrecision);
     try {
         await clearOrders(symbol, side);
-        await new Promise(r => setTimeout(r, 1500));
+        await new Promise(r => setTimeout(r, 1000));
         await exchange.createOrder(symbol, 'TAKE_PROFIT_MARKET', sideClose, undefined, undefined, { positionSide: side, stopPrice: tpStr, closePosition: true, workingType: 'MARK_PRICE' });
         await exchange.createOrder(symbol, 'STOP_MARKET', sideClose, undefined, undefined, { positionSide: side, stopPrice: slStr, closePosition: true, workingType: 'MARK_PRICE' });
         return { tp: parseFloat(tpStr), sl: parseFloat(slStr) };
@@ -84,11 +83,7 @@ async function openPosition(symbol, dcaData = null) {
         const ticker = await binanceApi.get(`/fapi/v1/ticker/price?symbol=${symbol}`);
         const currentPrice = parseFloat(ticker.data.price);
         
-        let marginToUse = dcaData ? dcaData.margin : 
-            (botSettings.invValue.toString().includes('%') 
-            ? (parseFloat((await binancePrivate('/fapi/v2/account')).availableBalance) * parseFloat(botSettings.invValue.replace('%','')) / 100) 
-            : parseFloat(botSettings.invValue));
-
+        let marginToUse = dcaData ? dcaData.margin : (botSettings.invValue.toString().includes('%') ? (parseFloat((await binancePrivate('/fapi/v2/account')).availableBalance) * parseFloat(botSettings.invValue.replace('%','')) / 100) : parseFloat(botSettings.invValue));
         let qtyNum = Math.ceil(((marginToUse * info.maxLeverage) / currentPrice) / info.stepSize) * info.stepSize;
         if ((qtyNum * currentPrice) < 5.5) qtyNum = Math.ceil(6.5 / currentPrice / info.stepSize) * info.stepSize;
 
@@ -103,96 +98,87 @@ async function openPosition(symbol, dcaData = null) {
 
             if (realP) {
                 const entryActual = parseFloat(realP.entryPrice);
-                const qty = Math.abs(parseFloat(realP.positionAmt));
                 const firstEntry = dcaData ? dcaData.firstEntry : entryActual;
-                
                 let historyEntries = dcaData ? [...dcaData.historyEntries] : [];
-                if (dcaData && dcaData.isJump) {
+                
+                if (dcaData?.isJump) {
                     const priceStep = firstEntry * (botSettings.posSL / 100);
-                    for (let i = dcaData.prevCount + 1; i < dcaData.dcaCount; i++) {
-                        historyEntries.push(firstEntry + (i * priceStep));
-                    }
+                    for (let i = dcaData.prevCount + 1; i < dcaData.dcaCount; i++) { historyEntries.push(firstEntry + (i * priceStep)); }
                 }
                 historyEntries.push(entryActual);
 
                 const avgEntry = historyEntries.reduce((a, b) => a + b, 0) / historyEntries.length;
-                const priceStepVal = firstEntry * (botSettings.posSL / 100);
-
                 let tp = isFinalLong ? entryActual * 1.10 : avgEntry * (1 - (botSettings.posTP / 100));
-                let sl = isFinalLong ? entryActual * 0.90 : entryActual + priceStepVal; 
+                let sl = isFinalLong ? entryActual * 0.90 : entryActual + (firstEntry * (botSettings.posSL / 100));
 
                 const sync = await syncTPSL(symbol, side, info, tp, sl);
                 botActivePositions.set(posKey, { 
-                    symbol, side, entryPrice: entryActual, qty, 
-                    tp: sync.tp, sl: sync.sl, margin: marginToUse,
-                    firstEntry: firstEntry, firstMargin: dcaData ? dcaData.firstMargin : marginToUse,
-                    dcaCount: dcaData ? dcaData.dcaCount : 0, 
-                    historyEntries: historyEntries, markPrice: currentPrice,
-                    pnl: 0, priceDev: 0 // Khởi tạo lại pnl và độ lệch giá
+                    symbol, side, entryPrice: entryActual, qty: Math.abs(parseFloat(realP.positionAmt)), 
+                    tp: sync.tp, sl: sync.sl, margin: marginToUse, firstEntry, firstMargin: dcaData ? dcaData.firstMargin : marginToUse,
+                    dcaCount: dcaData ? dcaData.dcaCount : 0, historyEntries, pnl: 0, priceDev: 0
                 });
-                addBotLog(`✅ [${symbol}] ${isFinalLong ? 'ĐẢO LONG' : 'DCA '+ (dcaData?.dcaCount || 0)} - TBC: ${avgEntry.toFixed(info.pricePrecision)}`, "success");
+                addBotLog(`✅ [${symbol}] ${isFinalLong ? 'ĐẢO LONG' : 'VÀO LỆNH'} - TBC: ${avgEntry.toFixed(info.pricePrecision)}`, "success");
             }
         }
-    } catch (e) { addBotLog(`🚨 Lỗi: ${e.message}`, "error"); } 
-    finally { setTimeout(() => { isProcessingDCA.delete(symbol); openingSymbols.delete(symbol); }, 1000); }
+    } catch (e) { addBotLog(`🚨 Lỗi mở lệnh: ${e.message}`, "error"); } 
+    finally { isProcessingDCA.delete(symbol); }
 }
 
 async function priceMonitorLoop() {
     if (!status.isReady) { setTimeout(priceMonitorLoop, 1000); return; }
     try {
         const posRisk = await binancePrivate('/fapi/v2/positionRisk');
-        const exchangeKeys = new Set();
-        posRisk.forEach(p => { if (Math.abs(parseFloat(p.positionAmt)) > 0) exchangeKeys.add(`${p.symbol}_${p.positionSide}`); });
+        const activeKeys = new Set();
+        
+        posRisk.forEach(p => {
+            const amt = Math.abs(parseFloat(p.positionAmt));
+            if (amt > 0) {
+                const key = `${p.symbol}_${p.positionSide}`;
+                activeKeys.add(key);
+                if (botActivePositions.has(key)) {
+                    let bPos = botActivePositions.get(key);
+                    bPos.markPrice = parseFloat(p.markPrice);
+                    bPos.pnl = parseFloat(p.unRealizedProfit);
+                    bPos.priceDev = ((bPos.markPrice - bPos.entryPrice) / bPos.entryPrice * 100).toFixed(2);
+                }
+            }
+        });
 
         for (let [key, botPos] of botActivePositions) {
-            const p = posRisk.find(x => `${x.symbol}_${x.positionSide}` === key);
-            
-            if (!exchangeKeys.has(key)) {
+            if (!activeKeys.has(key)) {
                 if (isProcessingDCA.has(botPos.symbol)) continue;
                 await new Promise(r => setTimeout(r, SL_REENTRY_DELAY));
-                const userTrades = await binancePrivate('/fapi/v1/userTrades', 'GET', { symbol: botPos.symbol, limit: 5 });
-                const lastTrade = userTrades.sort((a, b) => b.time - a.time)[0];
-                if (!lastTrade) continue;
+                const trades = await binancePrivate('/fapi/v1/userTrades', 'GET', { symbol: botPos.symbol, limit: 5 });
+                const last = trades.sort((a,b) => b.time - a.time)[0];
+                if (!last) continue;
 
-                const realPnl = parseFloat(lastTrade.realizedPnl);
-                status.botPnLClosed += realPnl; status.botClosedCount++;
+                const rPnl = parseFloat(last.realizedPnl);
+                status.botPnLClosed += rPnl; status.botClosedCount++;
 
-                if (realPnl > 0) {
-                    addBotLog(`💰 [${botPos.symbol}] Take Profit!`, "success");
+                if (rPnl > 0) {
+                    addBotLog(`💰 [${botPos.symbol}] LÃI: ${rPnl.toFixed(2)}$`, "success");
                     status.blackList[botPos.symbol] = Date.now() + BLACKLIST_DURATION;
                     botActivePositions.delete(key);
                 } else {
                     if (botPos.side === 'SHORT') {
                         const ticker = await binanceApi.get(`/fapi/v1/ticker/price?symbol=${botPos.symbol}`);
-                        const nowPrice = parseFloat(ticker.data.price);
-                        const priceStep = botPos.firstEntry * (botSettings.posSL / 100);
-                        let targetStep = Math.floor((nowPrice - botPos.firstEntry) / priceStep);
-                        let nextCount = Math.max(botPos.dcaCount + 1, targetStep);
+                        const nowP = parseFloat(ticker.data.price);
+                        const step = botPos.firstEntry * (botSettings.posSL / 100);
+                        let jumpStep = Math.max(botPos.dcaCount + 1, Math.floor((nowP - botPos.firstEntry) / step));
                         
-                        if (nextCount <= botSettings.maxDCA) {
-                            const nextMargin = botPos.firstMargin * (nextCount + 1) * 1.1; 
+                        if (jumpStep <= botSettings.maxDCA) {
                             botActivePositions.delete(key);
-                            await openPosition(botPos.symbol, {
-                                dcaCount: nextCount, prevCount: botPos.dcaCount,
-                                margin: nextMargin, firstMargin: botPos.firstMargin,
-                                firstEntry: botPos.firstEntry, historyEntries: botPos.historyEntries,
-                                isJump: nextCount > (botPos.dcaCount + 1), isFinalLong: false
+                            await openPosition(botPos.symbol, { 
+                                dcaCount: jumpStep, prevCount: botPos.dcaCount, margin: botPos.firstMargin * (jumpStep + 1) * 1.1,
+                                firstMargin: botPos.firstMargin, firstEntry: botPos.firstEntry, historyEntries: botPos.historyEntries,
+                                isJump: jumpStep > (botPos.dcaCount + 1)
                             });
                         } else {
                             botActivePositions.delete(key);
-                            await openPosition(botPos.symbol, {
-                                dcaCount: botSettings.maxDCA + 1, margin: botPos.firstMargin * FINAL_LONG_MULTIPLIER,
-                                firstMargin: botPos.firstMargin, firstEntry: botPos.firstEntry,
-                                historyEntries: botPos.historyEntries, isFinalLong: true
-                            });
+                            await openPosition(botPos.symbol, { isFinalLong: true, margin: botPos.firstMargin * FINAL_LONG_MULTIPLIER, firstMargin: botPos.firstMargin, firstEntry: botPos.firstEntry, historyEntries: botPos.historyEntries });
                         }
                     } else { botActivePositions.delete(key); }
                 }
-            } else {
-                // CẬP NHẬT UNREALIZED PNL VÀ PRICE DEV CHO DASHBOARD
-                botPos.markPrice = parseFloat(p.markPrice);
-                botPos.pnl = parseFloat(p.unRealizedProfit);
-                botPos.priceDev = ((botPos.markPrice - botPos.entryPrice) / botPos.entryPrice * 100).toFixed(2);
             }
         }
     } catch (e) {}
@@ -202,33 +188,28 @@ async function priceMonitorLoop() {
 async function mainLoop() {
     if (!status.isReady || !botSettings.isRunning) return;
     if (botActivePositions.size < botSettings.maxPositions && isProcessingDCA.size === 0) {
-        const entry = status.candidatesList.find(c => {
-            const volOK = Math.abs(parseFloat(c.c1)) >= botSettings.minVol;
-            const hasPos = botActivePositions.has(`${c.symbol}_SHORT`) || botActivePositions.has(`${c.symbol}_LONG`);
-            return volOK && !status.blackList[c.symbol] && !hasPos && !isProcessingDCA.has(c.symbol);
+        const candidate = status.candidatesList.find(c => {
+            return Math.abs(parseFloat(c.c1)) >= botSettings.minVol && !status.blackList[c.symbol] && !botActivePositions.has(`${c.symbol}_SHORT`) && !isProcessingDCA.has(c.symbol);
         });
-        if (entry) await openPosition(entry.symbol);
+        if (candidate) await openPosition(candidate.symbol);
     }
 }
 
 async function init() {
     try {
-        const timeRes = await axios.get('https://fapi.binance.com/fapi/v1/time');
-        timestampOffset = timeRes.data.serverTime - Date.now();
+        const time = await axios.get('https://fapi.binance.com/fapi/v1/time');
+        timestampOffset = time.data.serverTime - Date.now();
         await exchange.loadMarkets();
-        const infoRes = await binanceApi.get('/fapi/v1/exchangeInfo');
-        const brkRes = await binancePrivate('/fapi/v1/leverageBracket');
-        const tempInfo = {};
-        infoRes.data.symbols.forEach(s => {
+        const info = await binanceApi.get('/fapi/v1/exchangeInfo');
+        const brk = await binancePrivate('/fapi/v1/leverageBracket');
+        const temp = {};
+        info.data.symbols.forEach(s => {
             const lot = s.filters.find(f => f.filterType === 'LOT_SIZE');
-            const brk = brkRes.find(b => b.symbol === s.symbol);
-            tempInfo[s.symbol] = { 
-                quantityPrecision: s.quantityPrecision, pricePrecision: s.pricePrecision, 
-                stepSize: parseFloat(lot.stepSize), maxLeverage: brk ? brk.brackets[0].initialLeverage : 20 
-            };
+            const b = brk.find(x => x.symbol === s.symbol);
+            temp[s.symbol] = { quantityPrecision: s.quantityPrecision, pricePrecision: s.pricePrecision, stepSize: parseFloat(lot.stepSize), maxLeverage: b ? b.brackets[0].initialLeverage : 20 };
         });
-        status.exchangeInfo = tempInfo; status.isReady = true;
-        addBotLog(`👺 LUFFY BOT RECONNECTED - PNL FIXED`, "success");
+        status.exchangeInfo = temp; status.isReady = true;
+        addBotLog("🚀 BOT DASHBOARD RECONNECTED");
         priceMonitorLoop();
     } catch (e) { setTimeout(init, 5000); }
 }
@@ -246,20 +227,12 @@ const APP = express(); APP.use(express.json()); APP.use(express.static(__dirname
 APP.get('/api/status', async (req, res) => {
     try {
         const acc = await binancePrivate('/fapi/v2/account');
-        const blSecs = {}; const now = Date.now();
-        Object.keys(status.blackList).forEach(s => { 
-            const rem = Math.floor((status.blackList[s] - now) / 1000); 
-            if (rem > 0) blSecs[s] = rem; else delete status.blackList[s]; 
-        });
+        const bl = {}; const now = Date.now();
+        Object.keys(status.blackList).forEach(s => { const r = Math.floor((status.blackList[s] - now) / 1000); if (r > 0) bl[s] = r; else delete status.blackList[s]; });
         res.json({ 
             botSettings, activePositions: Array.from(botActivePositions.values()), 
-            status: { ...status, blackList: blSecs, permBlock: Array.from(status.permBlock) }, 
-            wallet: { 
-                totalWalletBalance: parseFloat(acc.totalWalletBalance).toFixed(2), 
-                availableBalance: parseFloat(acc.availableBalance).toFixed(2), 
-                totalUnrealizedProfit: parseFloat(acc.totalUnrealizedProfit).toFixed(2), 
-                botPnLClosed: status.botPnLClosed.toFixed(2) 
-            }
+            status: { ...status, blackList: bl, permBlock: Array.from(status.permBlock) }, 
+            wallet: { totalWalletBalance: parseFloat(acc.totalWalletBalance).toFixed(2), availableBalance: parseFloat(acc.availableBalance).toFixed(2), totalUnrealizedProfit: parseFloat(acc.totalUnrealizedProfit).toFixed(2), botPnLClosed: status.botPnLClosed.toFixed(2) }
         });
     } catch (e) { res.json({ status }); }
 });
