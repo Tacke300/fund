@@ -148,7 +148,7 @@ async function openPosition(symbol, dcaData = null) {
         
         console.log(`[THÔNG SỐ TÍNH TOÁN] Vốn (Margin): ${margin.toFixed(2)}$ | Đòn bẩy (Leverage): x${info.maxLeverage} | Khối lượng (Qty): ${qty}`);
         
-        // Cài đòn bẩy
+        // Cài đòn bẩy trước khi vào vị thế
         await binanceRequest('POST', '/fapi/v1/leverage', { symbol, leverage: info.maxLeverage });
         
         // Khớp lệnh Market vị thế
@@ -166,13 +166,13 @@ async function openPosition(symbol, dcaData = null) {
                 const entry = parseFloat(p.entryPrice);
                 const firstE = dcaData ? dcaData.firstEntry : entry;
                 
-                // Tính toán chính xác giá TP/SL
+                // Tính toán chính xác giá TP/SL dựa trên giá vào lệnh đầu tiên (firstEntry) và giá entry trung bình hiện tại
                 let tp = (side === 'LONG') ? entry * 1.10 : entry * (1 - botSettings.posTP / 100);
                 let sl = (side === 'LONG') ? entry * 0.90 : firstE + (firstE * botSettings.posSL / 100);
                 
                 addBotLog(`📊 [VỊ THẾ MỞ THÀNH CÔNG] ${symbol} | Side: ${side} | DCA Lần: ${currentDCALevel} | Giá TB (Entry): ${entry} | Ký Quỹ (Margin): ${margin.toFixed(2)}$ | Đích TP: ${tp.toFixed(info.pricePrecision)} | Đích SL: ${sl.toFixed(info.pricePrecision)}`);
                 
-                // Thực thi đặt lệnh chặn TP/SL lên Binance
+                // Thực thi đặt lệnh chặn TP/SL lên Binance qua Endpoint Algo API mới
                 await syncTPSL(symbol, side, info, tp, sl);
                 
                 botActivePositions.set(`${symbol}_${side}`, { 
@@ -194,11 +194,11 @@ async function openPosition(symbol, dcaData = null) {
     }
 }
 
-// HÀM ĐỒNG BỘ ĐẶT LỆNH TP/SL LÊN SÀN (ĐÃ CÓ LOG THÀNH CÔNG/THẤT BẠI CHI TIẾT)
+// HÀM ĐỒNG BỘ ĐẶT LỆNH TP/SL SỬ DỤNG ENDPOINT ALGO API SỬA TRIỆT ĐỂ LỖI ĐẦU CUỐI
 async function syncTPSL(symbol, side, info, tp, sl) {
     const sideClose = side === 'SHORT' ? 'BUY' : 'SELL';
     
-    // 1. Dọn dẹp lệnh cũ
+    // 1. Dọn dẹp lệnh cũ (Sử dụng endpoint thông thường để hủy các lệnh cũ của coin)
     try {
         const orders = await binanceRequest('GET', '/fapi/v1/openOrders', { symbol });
         const targetOrders = orders.filter(o => o.positionSide === side && (o.type === 'TAKE_PROFIT_MARKET' || o.type === 'STOP_MARKET'));
@@ -210,38 +210,38 @@ async function syncTPSL(symbol, side, info, tp, sl) {
         console.log(`⚠️ Không dọn dẹp được lệnh cũ (Có thể trống): ${e.msg || e.message}`);
     }
 
-    // 2. Đặt lệnh TAKE_PROFIT_MARKET lên sàn
+    // 2. Đặt lệnh TAKE_PROFIT_MARKET thông qua API ALGO
     try {
-        await binanceRequest('POST', '/fapi/v1/order', { 
+        await binanceRequest('POST', '/fapi/v1/algo/order', { 
             symbol, 
             side: sideClose, 
             positionSide: side, 
             type: 'TAKE_PROFIT_MARKET', 
             stopPrice: tp.toFixed(info.pricePrecision), 
-            closePosition: 'true',       // Bắt buộc là String 'true'
+            closePosition: 'true',       
             workingType: 'MARK_PRICE',
-            priceProtect: 'TRUE'         // Chống quét râu ảo
+            priceProtect: 'TRUE'         
         });
-        console.log(`🎯 [TP SÀN: THÀNH CÔNG] Đã đặt lệnh Chốt Lời cho ${symbol} tại giá Mark: ${tp.toFixed(info.pricePrecision)}`);
+        console.log(`🎯 [TP SÀN ALGO: THÀNH CÔNG] Đã đặt lệnh Chốt Lời cho ${symbol} tại giá Mark: ${tp.toFixed(info.pricePrecision)}`);
     } catch (e) {
-        addBotLog(`❌ [TP SÀN: THẤT BẠI] Lỗi đặt TP cho ${symbol}: ${e.msg || e.message}`, 'error');
+        addBotLog(`❌ [TP SÀN ALGO: THẤT BẠI] Lỗi đặt TP cho ${symbol}: ${e.msg || e.message}`, 'error');
     }
 
-    // 3. Đặt lệnh STOP_MARKET lên sàn
+    // 3. Đặt lệnh STOP_MARKET thông qua API ALGO
     try {
-        await binanceRequest('POST', '/fapi/v1/order', { 
+        await binanceRequest('POST', '/fapi/v1/algo/order', { 
             symbol, 
             side: sideClose, 
             positionSide: side, 
             type: 'STOP_MARKET', 
             stopPrice: sl.toFixed(info.pricePrecision), 
-            closePosition: 'true',       // Bắt buộc là String 'true'
+            closePosition: 'true',       
             workingType: 'MARK_PRICE',
             priceProtect: 'TRUE'
         });
-        console.log(`🛑 [SL SÀN: THÀNH CÔNG] Đã đặt lệnh Cắt Lỗ cho ${symbol} tại giá Mark: ${sl.toFixed(info.pricePrecision)}`);
+        console.log(`🛑 [SL SÀN ALGO: THÀNH CÔNG] Đã đặt lệnh Cắt Lỗ cho ${symbol} tại giá Mark: ${sl.toFixed(info.pricePrecision)}`);
     } catch (e) {
-        addBotLog(`❌ [SL SÀN: THẤT BẠI] Lỗi đặt SL cho ${symbol}: ${e.msg || e.message}`, 'error');
+        addBotLog(`❌ [SL SÀN ALGO: THẤT BẠI] Lỗi đặt SL cho ${symbol}: ${e.msg || e.message}`, 'error');
     }
 }
 
@@ -272,7 +272,7 @@ async function init() {
         status.exchangeInfo = temp; 
         status.isReady = true; 
         priceMonitor();
-        addBotLog(`🚀 Hệ thống đã sẵn sàng và theo dõi log vị thế chi tiết!`);
+        addBotLog(`🚀 Hệ thống đã sẵn sàng và chạy đúng logic gốc kèm API Algo mới!`);
     } catch (e) { 
         console.error("❌ Hệ thống khởi tạo thất bại:", e.message); 
         setTimeout(init, 5000); 
@@ -287,18 +287,21 @@ setInterval(() => {
     }).on('error', () => {});
 }, 1500);
 
+// VÒNG LẶP QUÉT VÀ LỌC MỞ LỆNH CHUẨN LOGIC GỐC
 setInterval(() => {
     if (!status.isReady || !botSettings.isRunning) return;
     if (botActivePositions.size < botSettings.maxPositions && isProcessingDCA.size === 0) {
+        
         const can = status.candidatesList.find(c => {
             const info = status.exchangeInfo[c.symbol];
             return (
-                Math.abs(c.c1) >= botSettings.minVol &&
-                !status.blackList[c.symbol] &&
-                !botActivePositions.has(`${c.symbol}_SHORT`) &&
-                info && info.maxLeverage >= 20
+                Math.abs(c.c1) >= botSettings.minVol &&        
+                !status.blackList[c.symbol] &&                 
+                !botActivePositions.has(`${c.symbol}_SHORT`) && 
+                info && info.maxLeverage >= 20                 // CHỈ CHẤP NHẬN COIN CÓ MAX LEVERAGE TỪ 20 TRỞ LÊN
             );
         });
+        
         if (can) openPosition(can.symbol);
     }
 }, 3000);
