@@ -48,25 +48,6 @@ async function binanceRequest(method, endpoint, data = {}) {
     }
 }
 
-// HÀM GỬI LỆNH ALGO RIÊNG BIỆT - ĐÚNG CHUẨN ĐỊNH DẠNG BINANCE FUTURES ALGO
-async function sendAlgoOrder(data = {}) {
-    const timestamp = Date.now() + serverTimeOffset;
-    const queryData = { ...data, timestamp, recvWindow: 10000 };
-    const queryString = new URLSearchParams(queryData).toString();
-    const signature = crypto.createHmac('sha256', SECRET_KEY).update(queryString).digest('hex');
-    
-    try {
-        const response = await axios({
-            method: 'POST',
-            url: `https://fapi.binance.com/fapi/v1/algo/order?${queryString}&signature=${signature}`,
-            headers: { 'X-MBX-APIKEY': API_KEY, 'Content-Type': 'application/x-www-form-urlencoded' }
-        });
-        return response.data;
-    } catch (e) {
-        throw e.response?.data || e;
-    }
-}
-
 async function priceMonitor() {
     if (!status.isReady) return setTimeout(priceMonitor, 1000);
     try {
@@ -97,7 +78,7 @@ async function priceMonitor() {
                     addBotLog(`💰 [KẾT QUẢ: THÀNH CÔNG] Đã CHỐT LỜI ${b.symbol} (${b.side}) | Tổng PnL: ${totalR.toFixed(2)}$ | Khóa 15 phút.`, 'success');
                 } else {
                     addBotLog(`❌ [KẾT QUẢ: THẤT BẠI] Lệnh SHORT ${b.symbol} dính SL lỗ: ${totalR.toFixed(2)}$`, 'error');
-                    const ticker = await axios.get(`https://fapi.binance.com/fapi/v1/ticker/price?symbol=${b.symbol}`);
+                    const ticker = await axios.get('https://fapi.binance.com/fapi/v1/ticker/price?symbol=' + b.symbol);
                     const currentPrice = parseFloat(ticker.data.price);
                     
                     const jump = Math.max(b.dcaCount + 1, Math.floor((currentPrice - b.firstEntry) / (b.firstEntry * botSettings.posSL / 100)));
@@ -161,7 +142,7 @@ async function openPosition(symbol, dcaData = null) {
             console.log(`⚠️ Ép Margin tối thiểu lên: ${margin.toFixed(4)}$ để bảo vệ Vol sàn (>6.5$)`);
         }
         
-        const ticker = await axios.get(`https://fapi.binance.com/fapi/v1/ticker/price?symbol=${symbol}`);
+        const ticker = await axios.get('https://fapi.binance.com/fapi/v1/ticker/price?symbol=' + symbol);
         const price = parseFloat(ticker.data.price);
         let qty = (Math.ceil(((margin * info.maxLeverage) / price) / info.stepSize) * info.stepSize).toFixed(info.quantityPrecision);
         
@@ -202,18 +183,18 @@ async function openPosition(symbol, dcaData = null) {
             }
         }
     } catch (e) { 
-        addBotLog(`❌ [THẤT BẠI TOÀN TẬP] Lỗi quy trình mở lệnh: ${JSON.stringify(e)}`, 'error'); 
+        addBotLog(`❌ [THẤT BẠI TOÀN TẬP] Lỗi quy trình mở lệnh: ${e.msg || e.message || JSON.stringify(e)}`, 'error'); 
     } finally { 
         console.log(`====================================================================\n`);
         setTimeout(() => isProcessingDCA.delete(symbol), 2000); 
     }
 }
 
-// HÀM ĐỒNG BỘ ĐẶT LỆNH TP/SL CHUẨN ĐỊNH DẠNG ALGO
+// HÀM ĐỒNG BỘ ĐẶT LỆNH TP/SL QUAY LẠI ENDPOINT GỐC - SỬA ĐỊNH DẠNG THAM SỐ CHUẨN ĐIỀU KIỆN
 async function syncTPSL(symbol, side, info, tp, sl) {
     const sideClose = side === 'SHORT' ? 'BUY' : 'SELL';
     
-    // 1. Dọn dẹp lệnh thường cũ tránh xung đột chéo vị thế
+    // 1. Dọn dẹp lệnh cũ tránh xung đột chéo vị thế
     try {
         const orders = await binanceRequest('GET', '/fapi/v1/openOrders', { symbol });
         const targetOrders = orders.filter(o => o.positionSide === side && (o.type === 'TAKE_PROFIT_MARKET' || o.type === 'STOP_MARKET'));
@@ -225,40 +206,38 @@ async function syncTPSL(symbol, side, info, tp, sl) {
         console.log(`⚠️ Không dọn dẹp được lệnh cũ: ${e.msg || e.message}`);
     }
 
-    // 2. Đặt lệnh TAKE_PROFIT_MARKET thông qua API ALGO CHUẨN
+    // 2. Đặt lệnh TAKE_PROFIT_MARKET 
     try {
-        await sendAlgoOrder({ 
+        await binanceRequest('POST', '/fapi/v1/order', { 
             symbol, 
             side: sideClose, 
             positionSide: side, 
-            algoType: 'TAKE_PROFIT_MARKET', 
-            triggerPrice: tp.toFixed(info.pricePrecision), // API Algo yêu cầu triggerPrice thay vì stopPrice
-            closePosition: 'true',       
+            type: 'TAKE_PROFIT_MARKET', 
+            stopPrice: tp.toFixed(info.pricePrecision), 
+            closePosition: 'true', // Ép buộc giữ nguyên string 'true' chặn đóng toàn bộ vị thế
             workingType: 'MARK_PRICE',
             priceProtect: 'TRUE'         
         });
-        console.log(`🎯 [TP SÀN ALGO: THÀNH CÔNG] Đã đặt lệnh Chốt Lời cho ${symbol} tại giá Mark: ${tp.toFixed(info.pricePrecision)}`);
+        console.log(`🎯 [TP SÀN: THÀNH CÔNG] Đã đặt lệnh Chốt Lời cho ${symbol} tại giá Mark: ${tp.toFixed(info.pricePrecision)}`);
     } catch (e) {
-        const errMsg = e.msg || e.message || JSON.stringify(e);
-        addBotLog(`❌ [TP SÀN ALGO: THẤT BẠI] Lỗi đặt TP cho ${symbol}: ${errMsg}`, 'error');
+        addBotLog(`❌ [TP SÀN: THẤT BẠI] Lỗi đặt TP cho ${symbol}: ${e.msg || e.message || JSON.stringify(e)}`, 'error');
     }
 
-    // 3. Đặt lệnh STOP_MARKET thông qua API ALGO CHUẨN
+    // 3. Đặt lệnh STOP_MARKET 
     try {
-        await sendAlgoOrder({ 
+        await binanceRequest('POST', '/fapi/v1/order', { 
             symbol, 
             side: sideClose, 
             positionSide: side, 
-            algoType: 'STOP_MARKET', 
-            triggerPrice: sl.toFixed(info.pricePrecision), // API Algo yêu cầu triggerPrice thay vì stopPrice
+            type: 'STOP_MARKET', 
+            stopPrice: sl.toFixed(info.pricePrecision), 
             closePosition: 'true',       
             workingType: 'MARK_PRICE',
             priceProtect: 'TRUE'
         });
-        console.log(`🛑 [SL SÀN ALGO: THÀNH CÔNG] Đã đặt lệnh Cắt Lỗ cho ${symbol} tại giá Mark: ${sl.toFixed(info.pricePrecision)}`);
+        console.log(`🛑 [SL SÀN: THÀNH CÔNG] Đã đặt lệnh Cắt Lỗ cho ${symbol} tại giá Mark: ${sl.toFixed(info.pricePrecision)}`);
     } catch (e) {
-        const errMsg = e.msg || e.message || JSON.stringify(e);
-        addBotLog(`❌ [SL SÀN ALGO: THẤT BẠI] Lỗi đặt SL cho ${symbol}: ${errMsg}`, 'error');
+        addBotLog(`❌ [SL SÀN: THẤT BẠI] Lỗi đặt SL cho ${symbol}: ${e.msg || e.message || JSON.stringify(e)}`, 'error');
     }
 }
 
@@ -289,7 +268,7 @@ async function init() {
         status.exchangeInfo = temp; 
         status.isReady = true; 
         priceMonitor();
-        addBotLog(`🚀 Hệ thống đã sẵn sàng và chạy đúng logic gốc kèm API Algo mới!`);
+        addBotLog(`🚀 Hệ thống đã quay trở về endpoint chính thức, sẵn sàng theo dõi log!`);
     } catch (e) { 
         console.error("❌ Hệ thống khởi tạo thất bại:", e.message); 
         setTimeout(init, 5000); 
