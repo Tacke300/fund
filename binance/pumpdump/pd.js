@@ -26,7 +26,7 @@ const exchange = new ccxt.binance({
 
 let botSettings = { isRunning: false, maxPositions: 3, invValue: "1%", minVol: 6.5, posTP: 1.2, posSL: 10.0, maxDCA: MAX_DCA_LEVEL };
 let status = { botLogs: [], candidatesList: [], blackList: {}, botClosedCount: 0, botPnLClosed: 0, exchangeInfo: null, isReady: false };
-let botActivePositions = new Map(); // ĐÂY LÀ DANH SÁCH DUY NHẤT BOT QUẢN LÝ
+let botActivePositions = new Map();
 let isProcessingDCA = new Set();
 let timestampOffset = 0;
 
@@ -54,55 +54,36 @@ async function binancePrivate(endpoint, method = 'GET', data = {}) {
     }
 }
 
-// --- MONITOR CHỈ QUẢN LÝ LỆNH CỦA BOT ---
 async function priceMonitor() {
     if (!status.isReady) return setTimeout(priceMonitor, 1000);
     try {
-        // Lấy tất cả vị thế từ sàn nhưng CHỈ XỬ LÝ NHỮNG GÌ BOT ĐANG GIỮ
         const posRisk = await binancePrivate('/fapi/v2/positionRisk');
-        
         for (let [key, b] of botActivePositions) {
-            // Tìm chính xác vị thế bot đang giữ trên sàn (dựa vào Symbol và Side)
             const realP = posRisk.find(p => `${p.symbol}_${p.positionSide}` === key && Math.abs(parseFloat(p.positionAmt)) > 0);
-            
             if (realP) {
                 const currentQty = Math.abs(parseFloat(realP.positionAmt));
                 const markP = parseFloat(realP.markPrice);
-                
                 b.pnl = parseFloat(realP.unRealizedProfit);
                 b.priceDev = ((markP - b.entryPrice) / b.entryPrice) * 100;
-
-                // Reset bộ đếm an toàn nếu size thay đổi (DCA thành công)
-                if (b.currentQty !== currentQty) { 
-                    b.currentQty = currentQty; 
-                    b.hitTime = null; 
-                }
-
-                // Chốt chặn 30s
+                if (b.currentQty !== currentQty) { b.currentQty = currentQty; b.hitTime = null; }
                 const hitTP = (b.side === 'SHORT' && markP <= b.tp) || (b.side === 'LONG' && markP >= b.tp);
                 const hitSL = (b.side === 'SHORT' && markP >= b.sl) || (b.side === 'LONG' && markP <= b.sl);
-
                 if (hitTP || hitSL) {
                     if (!b.hitTime) b.hitTime = Date.now();
                     if (Date.now() - b.hitTime > 30000) {
-                        addBotLog(`⚠️ ${b.symbol} (Bot) treo >30s. Đóng khẩn cấp!`, "warn");
+                        addBotLog(`⚠️ ${b.symbol} treo >30s. Đóng khẩn cấp!`, "warn");
                         await exchange.createOrder(b.symbol, 'MARKET', b.side === 'SHORT' ? 'BUY' : 'SELL', currentQty, undefined, { positionSide: b.side });
                     }
                 } else { b.hitTime = null; }
             } else {
-                // VỊ THẾ KHÔNG CÒN TRÊN SÀN -> KẾT THÚC HOẶC DCA
                 if (isProcessingDCA.has(b.symbol)) continue;
-
                 const trades = await binancePrivate('/fapi/v1/userTrades', 'GET', { symbol: b.symbol, limit: 10 });
                 const recent = trades.filter(t => t.time > (Date.now() + timestampOffset - 20000));
                 let totalR = 0, totalV = 0;
                 recent.forEach(t => { totalR += parseFloat(t.realizedPnl); totalV += (parseFloat(t.price) * parseFloat(t.qty)); });
                 const fee = totalV * 0.001; const netPnl = totalR - fee;
-
                 botActivePositions.delete(key);
-                status.botClosedCount++; 
-                status.botPnLClosed += netPnl;
-
+                status.botClosedCount++; status.botPnLClosed += netPnl;
                 if (netPnl > 0 || b.side === 'LONG') {
                     status.blackList[b.symbol] = Date.now() + (15 * 60 * 1000);
                     addBotLog(`💰 BOT CHỐT ${b.symbol} | Net: ${netPnl.toFixed(2)}$`);
@@ -114,25 +95,30 @@ async function priceMonitor() {
                 }
             }
         }
-    } catch (e) { console.error("Monitor Err:", e.message); }
+    } catch (e) {}
     setTimeout(priceMonitor, 1000);
 }
 
-// --- CÁC HÀM API & KHỞI TẠO (GIỮ NGUYÊN NHƯNG LỌC DỮ LIỆU) ---
 const APP = express(); APP.use(express.json()); APP.use(express.static(__dirname));
 
 APP.get('/api/status', async (req, res) => {
-    const acc = await binancePrivate('/fapi/v2/account').catch(() => null);
-    res.json({ 
-        botSettings, 
-        activePositions: Array.from(botActivePositions.values()), // CHỈ TRẢ VỀ LỆNH CỦA BOT
-        status, 
-        wallet: acc ? { 
-            totalWalletBalance: parseFloat(acc.totalWalletBalance).toFixed(2), 
-            availableBalance: parseFloat(acc.availableBalance).toFixed(2), 
-            totalUnrealizedProfit: Array.from(botActivePositions.values()).reduce((s, p) => s + p.pnl, 0).toFixed(2) // PNL CHỈ TÍNH LỆNH BOT
-        } : { availableBalance: "ERR" } 
-    });
+    try {
+        const acc = await binancePrivate('/fapi/v2/account');
+        const botUnrealizedPnL = Array.from(botActivePositions.values()).reduce((s, p) => s + p.pnl, 0);
+        
+        res.json({ 
+            botSettings, 
+            activePositions: Array.from(botActivePositions.values()),
+            status, 
+            wallet: { 
+                totalWalletBalance: parseFloat(acc.totalWalletBalance).toFixed(2), 
+                availableBalance: parseFloat(acc.availableBalance).toFixed(2), 
+                totalUnrealizedProfit: botUnrealizedPnL.toFixed(2) // Chỉ hiện PnL của bot
+            } 
+        });
+    } catch (e) {
+        res.json({ botSettings, activePositions: Array.from(botActivePositions.values()), status, wallet: { availableBalance: "Đang tải..." } });
+    }
 });
 
 APP.post('/api/settings', (req, res) => { 
@@ -200,7 +186,7 @@ async function init() {
         const temp = {};
         info.data.symbols.forEach(s => {
             const b = brk.find(x => x.symbol === s.symbol);
-            temp[s.symbol] = { quantityPrecision: s.quantityPrecision, pricePrecision: s.pricePrecision, stepSize: parseFloat(s.filters.find(f => f.filterType === 'LOT_SIZE').stepSize), maxLeverage: b?.brackets[0]?.initialLeverage || 20 };
+            temp[s.symbol] = { quantityPrecision: s.quantityPrecision, pricePrecision: s.pricePrecision, stepSize: parseFloat(s.filters.find(f => f.filterType === f.filterType).stepSize || 0.001), maxLeverage: b?.brackets[0]?.initialLeverage || 20 };
         });
         status.exchangeInfo = temp; status.isReady = true; priceMonitor();
         addBotLog(`🚀 Bot Ready (IPv4: ${ipRes.data.ip})`);
