@@ -153,7 +153,7 @@ async function openPosition(symbol, dcaData = null) {
         const orderNotional = margin * info.maxLeverage;
         if (orderNotional < info.minNotional) {
             margin = (info.minNotional + 0.5) / info.maxLeverage;
-            console.log(`⚠️ Volume vị thế (${orderNotional.toFixed(2)}$) nhỏ hơn Min Notional quy định (${info.minNotional}$). Ép Ký Quỹ lên: ${margin.toFixed(4)}$`);
+            console.log(`⚠️ Volume vị thế (${orderNotional.toFixed(2)}$) nhỏ hơn Min Notional quy định (${info.minNotional}$). Ép Ký Quy lên: ${margin.toFixed(4)}$`);
         }
         
         const ticker = await axios.get('https://fapi.binance.com/fapi/v1/ticker/price?symbol=' + symbol);
@@ -200,7 +200,7 @@ async function openPosition(symbol, dcaData = null) {
                 
                 addBotLog(`📊 [MỞ VỊ THẾ THÀNH CÔNG] ${symbol} | Giá Entry TB: ${entry} (Gốc: ${firstE}) | Đích TP: ${tp.toFixed(info.pricePrecision)} | Đích SL: ${sl.toFixed(info.pricePrecision)}`);
                 
-                // ĐẢO LÊN TRƯỚC: Lưu dữ liệu vào Map trước để syncTPSL lấy được khối lượng currentQty thực tế
+                // ĐẢO LÊN TRƯỚC: Lưu dữ liệu vào Map trước để hàm syncTPSL lấy được khối lượng vị thế
                 botActivePositions.set(`${symbol}_${positionSideParam}`, { 
                     symbol, side, entryPrice: entry, tp, sl, 
                     dcaCount: currentDCALevel, 
@@ -209,7 +209,7 @@ async function openPosition(symbol, dcaData = null) {
                     currentQty: Math.abs(parseFloat(p.positionAmt)), pnl: 0, priceDev: 0 
                 });
                 
-                // Gọi đặt lệnh TP/SL sau khi Map đã lưu dữ liệu thành công
+                // Gọi đặt lệnh TP/SL sau khi Map đã sẵn sàng dữ liệu
                 await syncTPSL(symbol, side, info, tp, sl);
             } else {
                 addBotLog(`❌ [THẤT BẠI] Lệnh MARKET đã khớp nhưng vòng lặp đồng bộ không tìm thấy vị thế ${symbol} trên sàn.`, 'error');
@@ -234,8 +234,11 @@ async function syncTPSL(symbol, side, info, tp, sl) {
         return;
     }
 
-    // Lấy Qty thực tế từ vị thế và ép chặt precision tránh lỗi vỡ phần thập phân
-    const qty = Number(pos.currentQty.toFixed(info.quantityPrecision));
+    // FIX CHỐNG LỖI PRECISION: Tính toán Qty làm tròn chuẩn theo quy định stepSize của từng tài sản rác/meme
+    const qty = parseFloat(
+        (Math.floor(pos.currentQty / info.stepSize) * info.stepSize)
+        .toFixed(info.quantityPrecision)
+    );
 
     try {
         const orders = await binanceRequest('GET', '/fapi/v1/openOrders', { symbol });
@@ -252,13 +255,12 @@ async function syncTPSL(symbol, side, info, tp, sl) {
         console.log(`⚠️ Lỗi dọn dẹp lệnh cũ của ${symbol}:`, e.msg || e.message);
     }
 
-    // ÉP LUẬT MỚI BINANCE: Không dùng closePosition, dùng quantity thật + reduceOnly: 'true' (dạng string)
+    // FIX HEDGE MODE: Không dùng reduceOnly, không dùng closePosition. Chỉ cần quantity + positionSide là đủ hiểu.
     const baseParam = {
         symbol,
         side: sideClose,
         positionSide: positionSideParam,
         quantity: qty,
-        reduceOnly: 'true', 
         workingType: 'MARK_PRICE'
     };
 
