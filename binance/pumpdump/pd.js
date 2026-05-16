@@ -102,7 +102,7 @@ function runLocked(symbol, asyncTask) {
 }
 
 // ====================================================================
-// NETWORKING CONTROL WITH RATE LIMIT (FIXED ERROR OBJECT)
+// NETWORKING CONTROL WITH RATE LIMIT
 // ====================================================================
 let lastRequestTime = Date.now();
 async function binanceRequest(method, endpoint, data = {}) {
@@ -150,7 +150,7 @@ async function binanceRequest(method, endpoint, data = {}) {
 }
 
 // ====================================================================
-// WEBSOCKET ENGINE TÁCH LUỒNG ĐỘC LẬP (WATCHDOG 90S)
+// WEBSOCKET ENGINE
 // ====================================================================
 async function initWebSocketEngine() {
     try {
@@ -229,7 +229,7 @@ function handleUserDataEvent(e) {
 // CORE TRIGGERS & WATCHDOG 10S FAILSAFE FOR POSITION CLOSURE
 // ====================================================================
 function handleGlobalMarkPriceEvent(dataArr) {
-    if (!status.isReady || !botSettings.isRunning) return; // KHÓA CHẶT: Bot tắt thì không check giá chốt
+    if (!status.isReady || !botSettings.isRunning) return; 
     for (const item of dataArr) {
         const longKey = `${item.s}_LONG`; const shortKey = `${item.s}_SHORT`;
         if (botActivePositions.has(longKey)) checkPriceThresholdAndTriggerFailsafe(longKey, parseFloat(item.p));
@@ -248,7 +248,6 @@ async function checkPriceThresholdAndTriggerFailsafe(key, markP) {
     if (isPriceBreached) {
         b.isClosing = true; 
         botActivePositions.set(key, b);
-        
         addBotLog(`⚠️ [🚨 TOUCH TRIGGER] Phát hiện giá ${b.symbol} chạm vạch (${markP}). Kích hoạt bộ đếm Failsafe Watchdog 10 giây...`);
         
         setTimeout(() => {
@@ -256,7 +255,7 @@ async function checkPriceThresholdAndTriggerFailsafe(key, markP) {
                 const freshCheck = botActivePositions.get(key);
                 if (freshCheck) {
                     addBotLog(`⏰ [FAILSAFE TIMEOUT] Quá 10 giây vị thế ${b.symbol} chưa biến mất. Tiến hành dập thẳng lệnh MARKET để giải thoát!`, 'warning');
-                    const ok = await closePositionMarket(b, "FAILSAFE_10S_TIMEOUT");
+                    const ok = await closePositionMarket(freshCheck, "FAILSAFE_10S_TIMEOUT");
                     if (ok) { 
                         botActivePositions.delete(key); 
                         saveBotStateToDisk(); 
@@ -281,7 +280,7 @@ async function executePositionClosureAccounting(symbol, positionSideParam, key, 
         if (totalR > (-b.firstMargin * 0.05)) {
             botActivePositions.delete(key);
             status.blackList[symbol] = Date.now() + (15 * 60 * 1000); 
-            addBotLog(`💰 [WIN CHỐT LỜI] ${symbol} [${b.side}] | PnL: ${totalR.toFixed(2)}$`, 'success');
+            addBotLog(`💰 [WIN CHỐT LỜI] ${symbol} [${b.side}] | PnL: ${totalR.toFixed(2)}$ | Đã đẩy vào Blacklist 15m.`, 'success');
         } else {
             addBotLog(`❌ [LOSS DÍNH SL] Vị thế ${symbol} [${b.side}] cắt lỗ: ${totalR.toFixed(2)}$`);
             const freshRisk = await binanceRequest('GET', '/fapi/v2/positionRisk', { symbol }).catch(() => []);
@@ -291,7 +290,7 @@ async function executePositionClosureAccounting(symbol, positionSideParam, key, 
             const distance = b.side === 'SHORT' ? currentPrice - b.firstEntry : b.firstEntry - currentPrice;
             botActivePositions.delete(key);
 
-            if (distance > 0 && botSettings.isRunning) { // Chỉ DCA tiếp nếu cấu hình bot đang bật
+            if (distance > 0 && botSettings.isRunning) { 
                 const jump = Math.max(b.dcaCount + 1, Math.floor(distance / (b.firstEntry * botSettings.posSL / 100)));
                 if (jump <= botSettings.maxDCA) {
                     addBotLog(`🔄 [DCA ENGINE] Tăng cấp bổ sung vốn lên mức [${jump}/${botSettings.maxDCA}] cho ${symbol}`);
@@ -337,15 +336,8 @@ async function closePositionMarket(pos, reason = "FAILSAFE") {
 }
 
 async function openPosition(symbol, dcaData = null) {
-    if (!status.exchangeInfo[symbol]) {
-        addBotLog(`❌ Không tìm thấy thông tin cấu hình exchangeInfo cho ${symbol}`, 'error');
-        return;
-    }
-    // KHÓA CHẶT: Nếu chưa bấm Start (isRunning = false), không cho phép mở lệnh mới dưới bất kỳ hình thức nào
-    if (!botSettings.isRunning) {
-        addBotLog(`⚠️ Tránh mở lệnh ${symbol} vì trạng thái hệ thống đang STOP.`);
-        return;
-    }
+    if (!status.exchangeInfo[symbol]) return;
+    if (!botSettings.isRunning) return;
 
     const isLong = dcaData ? dcaData.isFinalLong || dcaData.side === 'LONG' : false;
     const side = isLong ? 'LONG' : 'SHORT';
@@ -353,7 +345,6 @@ async function openPosition(symbol, dcaData = null) {
     const orderSideParam = isLong ? 'BUY' : 'SELL';
     const currentDCALevel = dcaData ? dcaData.dcaCount : 0;
     
-    addBotLog(`🎬 Bắt đầu luồng mở lệnh cho ${symbol} [${side}] - Cấp: ${currentDCALevel}`);
     try {
         const info = status.exchangeInfo[symbol];
         const acc = await binanceRequest('GET', '/fapi/v2/account');
@@ -365,17 +356,20 @@ async function openPosition(symbol, dcaData = null) {
         
         const freshRisk = await binanceRequest('GET', '/fapi/v2/positionRisk', { symbol });
         const symbolRisk = freshRisk.find(x => x.positionSide === positionSideParam) || freshRisk[0];
-        if (!symbolRisk) {
-            throw new Error(`Không lấy được thông tin positionRisk cụ thể cho side ${positionSideParam}`);
-        }
+        if (!symbolRisk) return;
         
         const price = parseFloat(symbolRisk.markPrice);
-        if (!price || price === 0) {
-            throw new Error(`Giá MarkPrice của sàn trả về bằng 0 hoặc không hợp lệ: ${symbolRisk.markPrice}`);
-        }
+        if (!price || price === 0) return;
         
         let qty = Number(((margin * info.maxLeverage) / price).toFixed(getPrecision(info.stepSize)));
-        if (qty <= 0) qty = info.stepSize;
+        
+        // [FIX - Chặn đứng SPAM LỖI 1102]: Kiểm tra nếu số lượng không đủ điều kiện tối thiểu, hủy bỏ luôn luồng bắn lệnh
+        if (isNaN(qty) || qty <= 0) {
+            console.log(`[BỎ QUA TÍN HIỆU] ${symbol} khối lượng tính toán (${qty}) quá bé, không thể vào lệnh.`);
+            return;
+        }
+
+        addBotLog(`🎬 Kích hoạt mở vị thế thực tế cho ${symbol} [${side}] - Qty: ${qty}`);
 
         if (!leverageCache.has(symbol)) {
             await binanceRequest('POST', '/fapi/v1/leverage', { symbol, leverage: info.maxLeverage }).catch(() => {});
@@ -391,7 +385,6 @@ async function openPosition(symbol, dcaData = null) {
         if (order?.orderId) {
             let p = null;
             await new Promise(r => setTimeout(r, 1000));
-            
             for (let i = 0; i < 3; i++) {
                 const pRisk = await binanceRequest('GET', '/fapi/v2/positionRisk', { symbol }).catch(() => []);
                 p = pRisk.find(x => x.positionSide === positionSideParam && Math.abs(parseFloat(x.positionAmt)) > 0);
@@ -413,12 +406,11 @@ async function openPosition(symbol, dcaData = null) {
                 
                 botActivePositions.set(`${symbol}_${positionSideParam}`, currentLocalPosition);
                 saveBotStateToDisk();
-                
                 await cascadeSyncTPSLEngine(symbol, side, info, tp, sl);
             }
         }
     } catch (e) { 
-        addBotLog(`❌ Lỗi luồng vào lệnh ${symbol}: ${e.stack || e.message || JSON.stringify(e)}`, 'error'); 
+        addBotLog(`❌ Lỗi luồng vào lệnh ${symbol}: ${e.message || JSON.stringify(e)}`, 'error'); 
     }
 }
 
@@ -432,12 +424,7 @@ async function cascadeSyncTPSLEngine(symbol, side, info, tp, sl) {
     
     let localData = botActivePositions.get(localPosKey);
     if (!localData) return;
-
-    // KHÓA CHẶT: Chỉ được phép tương tác rải TP/SL lên sàn khi bot đang bật chạy!
-    if (!botSettings.isRunning) {
-        addBotLog(`⚠️ Chặn đồng bộ TP/SL của mã ${symbol} lên sàn vì nút bấm đang STOP.`);
-        return;
-    }
+    if (!botSettings.isRunning) return;
 
     try {
         const orders = await binanceRequest('GET', '/fapi/v1/openOrders', { symbol }).catch(() => []);
@@ -445,67 +432,33 @@ async function cascadeSyncTPSLEngine(symbol, side, info, tp, sl) {
         for (const o of targetOrders) { 
             await binanceRequest('DELETE', '/fapi/v1/order', { symbol, orderId: o.orderId }).catch(() => null); 
         }
-    } catch (e) {
-        console.error(`⚠️ [CLEANUP WARN] Không dọn được lệnh cũ cho ${symbol}:`, e.message);
-    }
+    } catch (e) { console.error(`⚠️ Không dọn được lệnh cũ cho ${symbol}:`, e.message); }
 
     const targetTPPrice = Number(tp.toFixed(info.pricePrecision));
     const targetSLPrice = Number(sl.toFixed(info.pricePrecision));
 
     const batchParams = [
-        { 
-            symbol, side: sideClose, positionSide: positionSideParam, 
-            type: 'TAKE_PROFIT_MARKET', stopPrice: targetTPPrice.toString(), 
-            closePosition: 'true', workingType: 'MARK_PRICE' 
-        },
-        { 
-            symbol, side: sideClose, positionSide: positionSideParam, 
-            type: 'STOP_MARKET', stopPrice: targetSLPrice.toString(), 
-            closePosition: 'true', workingType: 'MARK_PRICE' 
-        }
+        { symbol, side: sideClose, positionSide: positionSideParam, type: 'TAKE_PROFIT_MARKET', stopPrice: targetTPPrice.toString(), closePosition: 'true', workingType: 'MARK_PRICE' },
+        { symbol, side: sideClose, positionSide: positionSideParam, type: 'STOP_MARKET', stopPrice: targetSLPrice.toString(), closePosition: 'true', workingType: 'MARK_PRICE' }
     ];
     const singleBase = { symbol, side: sideClose, positionSide: positionSideParam, closePosition: 'true', workingType: 'MARK_PRICE' };
 
-    addBotLog(`🚀 [BOMBER MODE] Phệt thẳng song song 3 cách đặt TP(${targetTPPrice})/SL(${targetSLPrice}) cho ${symbol}...`);
+    addBotLog(`🚀 [BOMBER MODE] Phệt song song TP(${targetTPPrice})/SL(${targetSLPrice}) cho ${symbol}...`);
 
     const tasks = [
-        binanceRequest('POST', '/fapi/v1/batchOrders', { batchOrders: JSON.stringify(batchParams) })
-            .then(() => { addBotLog(`🎯 [CÁCH 1 DONE] Lệnh mảng Batch Orders của ${symbol} đã nạp lên sàn.`); return true; })
-            .catch((e) => { console.error(`❌ [CÁCH 1 REJECTED] Batch từ chối:`, e.message); return false; }),
-
-        binanceRequest('POST', '/fapi/v1/order', { ...singleBase, type: 'TAKE_PROFIT_MARKET', stopPrice: targetTPPrice.toString() })
-            .then(() => { addBotLog(`🎯 [CÁCH 2 DONE] Lệnh lẻ Single TP của ${symbol} đã nạp lên sàn.`); return true; })
-            .catch((e) => { console.error(`❌ [CÁCH 2 REJECTED] Single TP từ chối:`, e.message); return false; }),
-
-        binanceRequest('POST', '/fapi/v1/order', { ...singleBase, type: 'STOP_MARKET', stopPrice: targetSLPrice.toString() })
-            .then(() => { addBotLog(`🎯 [CÁCH 3 DONE] Lệnh lẻ Single SL của ${symbol} đã nạp lên sàn.`); return true; })
-            .catch((e) => { console.error(`❌ [CÁCH 3 REJECTED] Single SL từ chối:`, e.message); return false; })
+        binanceRequest('POST', '/fapi/v1/batchOrders', { batchOrders: JSON.stringify(batchParams) }).then(() => true).catch(() => false),
+        binanceRequest('POST', '/fapi/v1/order', { ...singleBase, type: 'TAKE_PROFIT_MARKET', stopPrice: targetTPPrice.toString() }).then(() => true).catch(() => false),
+        binanceRequest('POST', '/fapi/v1/order', { ...singleBase, type: 'STOP_MARKET', stopPrice: targetSLPrice.toString() }).then(() => true).catch(() => false)
     ];
 
     const results = await Promise.all(tasks);
-    
-    const batchOk = results[0];
-    const tpOk = results[1];
-    const slOk = results[2];
-
-    if (batchOk) {
-        localData.tpSlMode = 0; 
-    } else if (tpOk && slOk) {
-        localData.tpSlMode = 1; 
-    } else if (tpOk || slOk) {
-        localData.tpSlMode = 2; 
-        addBotLog(`⚠️ [PARTIAL RUN] Chỉ 1 trong 2 lệnh Single sống sót cho ${symbol}.`, 'warning');
-    } else {
-        localData.tpSlMode = 3; 
-        addBotLog(`🚨 [ALL METHODS REJECTED] Toàn bộ 3 phương án rải TP/SL đều tạch đối với ${symbol}. Đã giao nhiệm vụ quét giá cho Software Monitor.`, 'warning');
-    }
-
+    localData.tpSlMode = results[0] ? 0 : (results[1] && results[2] ? 1 : 2);
     botActivePositions.set(localPosKey, localData);
     saveBotStateToDisk();
 }
 
 // ====================================================================
-// POSITION RECONCILIATION ENGINE
+// POSITION RECONCILIATION ENGINE (FIX KẸT VỊ THẾ)
 // ====================================================================
 async function runPositionReconciliationEngine() {
     addBotLog("🔍 [RECONCILIATION] Thực thi rà soát trạng thái đối soát sàn...");
@@ -513,6 +466,17 @@ async function runPositionReconciliationEngine() {
         const posRisk = await binanceRequest('GET', '/fapi/v2/positionRisk');
         const activeOnChainPositions = posRisk.filter(p => Math.abs(parseFloat(p.positionAmt)) > 0);
         
+        // Quét tất cả các vị thế đang lưu cục bộ trong bộ nhớ RAM của Bot
+        for (const [key, localPos] of botActivePositions.entries()) {
+            // [FIX CHÍNH]: Nếu bộ nhớ RAM đang giữ vị thế, nhưng sàn báo vị thế này ĐÃ ĐÓNG (không có trên OnChain)
+            const existsOnChain = activeOnChainPositions.some(p => `${p.symbol}_${p.positionSide}` === key);
+            if (!existsOnChain) {
+                addBotLog(`🚨 [ĐỒNG BỘ KHẨN CẤP] Phát hiện ${localPos.symbol} đã đóng trên sàn nhưng bot vẫn giữ. Đẩy vào luồng tính toán chốt sổ!`, 'warning');
+                // Gọi thẳng hàm xử lý đóng tài khoản để xóa RAM, ghi log kế toán và tự động ném vào Blacklist 15 phút
+                await executePositionClosureAccounting(localPos.symbol, key.split('_')[1], key, localPos);
+            }
+        }
+
         for (const p of activeOnChainPositions) {
             const key = `${p.symbol}_${p.positionSide}`;
             const currentAmt = Math.abs(parseFloat(p.positionAmt));
@@ -520,13 +484,9 @@ async function runPositionReconciliationEngine() {
             if (!botActivePositions.has(key)) {
                 const lastOrders = await binanceRequest('GET', '/fapi/v1/allOrders', { symbol: p.symbol, limit: 10 }).catch(() => []);
                 const hasBotTag = lastOrders.some(o => o.clientOrderId && o.clientOrderId.startsWith('bot-'));
+                if (!hasBotTag) continue; 
 
-                if (!hasBotTag) {
-                    console.log(`🛡️  Bỏ qua vị thế mở thủ công bằng tay của User: ${p.symbol}`);
-                    continue; 
-                }
-
-                if (botSettings.isRunning) { // Chỉ tự động dọn lệnh thừa khi hệ thống đang chạy
+                if (botSettings.isRunning) { 
                     const tempPos = { symbol: p.symbol, side: p.positionSide === 'BOTH' ? (parseFloat(p.positionAmt) > 0 ? 'LONG' : 'SHORT') : p.positionSide, currentQty: currentAmt };
                     await closePositionMarket(tempPos, "RECONCILIATION_ORPHAN");
                 }
@@ -536,29 +496,21 @@ async function runPositionReconciliationEngine() {
                 botActivePositions.set(key, b);
                 
                 const info = status.exchangeInfo[p.symbol];
-                // KHÓA CHẶT: Đối soát định kỳ chỉ được rải lại TP/SL khi bot đang START
                 if (info && botSettings.isRunning) await cascadeSyncTPSLEngine(p.symbol, b.side, info, b.tp, b.sl);
             }
-        }
-        for (const [key] of botActivePositions.entries()) {
-            if (!activeOnChainPositions.some(p => `${p.symbol}_${p.positionSide}` === key)) botActivePositions.delete(key);
         }
         saveBotStateToDisk();
     } catch (e) {}
 }
 
 // ====================================================================
-// SYSTEM INITS, ROUTES & [FIX] SERVE HTML STATIC FILES
+// SYSTEM INITS, ROUTES & SERVE HTML STATIC FILES
 // ====================================================================
 const APP = express(); 
 APP.use(express.json());
-
-// [FIX QUAN TRỌNG]: Mở luồng serve giao diện tĩnh từ thư mục gốc của bot
 APP.use(express.static(__dirname));
 
-APP.get('/', (req, res) => {
-    res.sendFile(path.join(__dirname, 'index.html'));
-});
+APP.get('/', (req, res) => { res.sendFile(path.join(__dirname, 'index.html')); });
 
 APP.get('/api/status', async (req, res) => {
     let walletData = { totalWalletBalance: "0.00", availableBalance: "0.00", totalUnrealizedProfit: "0.00" };
@@ -573,7 +525,7 @@ APP.get('/api/status', async (req, res) => {
 APP.post('/api/settings', (req, res) => { 
     botSettings = { ...botSettings, ...req.body }; 
     saveBotStateToDisk(); 
-    addBotLog(`🎛️  Cập nhật cấu hình: Trạng thái chạy = ${botSettings.isRunning.toString().toUpperCase()}`);
+    addBotLog(`🎛️ Cập nhật trạng thái chạy = ${botSettings.isRunning.toString().toUpperCase()}`);
     res.json({ success: true }); 
 });
 
@@ -604,24 +556,25 @@ async function init() {
         await runPositionReconciliationEngine();
         await initWebSocketEngine();
         
-        addBotLog(`🚀 [PRODUCTION V3.7 WORKING] Đã vá lỗi khóa lệnh tĩnh & Mở cổng HTML.`);
+        addBotLog(`🚀 [PRODUCTION V3.8 WORKED] Đã vá kẹt vị thế & Triệt tiêu spam log.`);
     } catch (e) { setTimeout(init, 5000); }
 }
 init();
 
+// Luồng rà soát định kỳ 15s/lần tự động giải quyết các xung đột
+setInterval(() => {
+    if (status.isReady) runPositionReconciliationEngine();
+}, 15000);
+
 // Quét mở lệnh từ danh sách tín hiệu candidatesList
 setInterval(() => {
-    if (!status.isReady || !botSettings.isRunning) return; // Khóa chặt luồng tìm lệnh mới
+    if (!status.isReady || !botSettings.isRunning) return; 
     if (botActivePositions.size >= botSettings.maxPositions || openingSymbols.size > 0) return;
 
     const can = status.candidatesList.find(c => {
         const info = status.exchangeInfo[c.symbol];
         if (!info || info.maxLeverage < 20 || Math.abs(c.c1) < botSettings.minVol || status.blackList[c.symbol]) return false;
-        
-        if (c.spreadPct > 0.15 || (c.openInterest && c.openInterest < 5000000)) {
-            return false; 
-        }
-
+        if (c.spreadPct > 0.15 || (c.openInterest && c.openInterest < 5000000)) return false; 
         return !botActivePositions.has(`${c.symbol}_${c.c1 > 0 ? 'LONG' : 'SHORT'}`);
     });
 
