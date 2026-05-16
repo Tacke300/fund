@@ -18,7 +18,6 @@ const binanceApi = axios.create({
     headers: { 'X-MBX-APIKEY': API_KEY, 'Content-Type': 'application/x-www-form-urlencoded' } 
 });
 
-// CẤU HÌNH MẶC ĐỊNH: Set cứng Vốn đầu 1$ và Max DCA = 3
 let botSettings = { 
     isRunning: false, 
     maxPositions: 3, 
@@ -47,11 +46,10 @@ function getPrecision(stepSize) {
     return step.split('.')[1].replace(/0+$/, '').length;
 }
 
-// Hàm ghi nhật ký hệ thống siêu ngắn gọn
 function addBotLog(msg, type = 'info') {
     const time = new Date().toLocaleTimeString('vi-VN', { hour12: false });
     status.botLogs.unshift({ time, msg, type });
-    if (status.botLogs.length > 30) status.botLogs.pop(); 
+    if (status.botLogs.length > 50) status.botLogs.pop(); // Giữ tối đa 50 log cho giao diện cào về hiển thị
     console.log(`[${time}] [${type.toUpperCase()}] ${msg}`);
 }
 
@@ -213,14 +211,12 @@ async function executePositionClosureAccounting(symbol, positionSideParam, key, 
     botActivePositions.delete(key); 
     saveBotStateToDisk();
 
-    // BƯỚC 1: ĐÓNG BĂNG 3 GIÂY ĐỂ ĐỢI SÀN HOÀN TẤT KHỚP LỆNH
     await new Promise(r => setTimeout(r, 3000));
 
     let totalRealizedPnl = 0;
     let isConfirmedClosed = false;
     let retryCount = 0;
 
-    // BƯỚC 2: KHÓA LUỒNG XÁC THỰC - BẮT BUỘC PHẢI NHẬN ĐƯỢC PNL THỰC TẾ TRƯỚC KHI DCA
     while (!isConfirmedClosed && retryCount < 10) {
         try {
             const trades = await binanceRequest('GET', '/fapi/v1/userTrades', { symbol, limit: 10 }).catch(() => []);
@@ -244,7 +240,7 @@ async function executePositionClosureAccounting(symbol, positionSideParam, key, 
 
         if (!isConfirmedClosed) {
             retryCount++;
-            await new Promise(r => setTimeout(r, 1000)); // Treo luồng thêm 1 giây để tái kiểm tra
+            await new Promise(r => setTimeout(r, 1000));
         }
     }
 
@@ -254,7 +250,6 @@ async function executePositionClosureAccounting(symbol, positionSideParam, key, 
         return;
     }
 
-    // BƯỚC 3: XỬ LÝ DÒNG TIỀN SAU XÁC THỰC
     if (totalRealizedPnl > (-b.firstMargin * 0.05)) {
         status.blackList[symbol] = Date.now() + (15 * 60 * 1000); 
         addBotLog(`💰 [WIN] ${symbol} chốt lời: ${totalRealizedPnl.toFixed(2)}$ | Thả xích Blacklist 15p.`, 'success');
@@ -263,12 +258,10 @@ async function executePositionClosureAccounting(symbol, positionSideParam, key, 
         
         const nextDcaLevel = b.dcaCount + 1;
         if (nextDcaLevel <= botSettings.maxDCA) {
-            // CÔNG THỨC CẤP SỐ CỘNG VÔ CỰC: Margin Gốc + Tầng DCA hiện tại
             const nextMargin = b.firstMargin + nextDcaLevel; 
             addBotLog(`🔄 [DCA] Kích hoạt tầng [${nextDcaLevel}/${botSettings.maxDCA}] | Vốn nhồi: ${nextMargin}$ cho ${symbol}`);
             await openPosition(symbol, { ...b, dcaCount: nextDcaLevel, margin: nextMargin });
         } else {
-            // PHÒNG VỆ SẬP GÃY CHUỖI SHORT: QUAY XE LẬT KÈO SANG LONG X20 VỐN GỐC
             addBotLog(`🚨 [QUAY XE] Hạ tầng SHORT sập. Đảo ngược vị thế, vã LONG x20 vốn gốc vào ${symbol}!`);
             await openPosition(symbol, { ...b, side: 'LONG', isFinalLong: true, dcaCount: 0, margin: b.firstMargin * 20 });
         }
@@ -279,7 +272,6 @@ async function executePositionClosureAccounting(symbol, positionSideParam, key, 
 async function openPosition(symbol, dcaData = null) {
     if (!status.exchangeInfo[symbol] || !botSettings.isRunning) return;
 
-    // Mặc định luôn là SHORT. Chỉ LONG khi có cờ cứu hộ dữ liệu từ hàm quay xe
     const isLong = dcaData ? (dcaData.isFinalLong || dcaData.side === 'LONG') : false; 
     const side = isLong ? 'LONG' : 'SHORT';
     
@@ -308,7 +300,7 @@ async function openPosition(symbol, dcaData = null) {
         if (order?.orderId) {
             await new Promise(r => setTimeout(r, 500));
             const pRisk = await binanceRequest('GET', '/fapi/v2/positionRisk', { symbol }).catch(() => []);
-            const p = pRisk.find(x => x.positionSide === (status.isHedgeMode ? side : 'BOTH') && Math.abs(parseFloat(x.positionAmt)) > 0);
+            const p = pRisk.find(x => x.positionSide === (status.isHedgeMode ? side : 'BOTH slide') && Math.abs(parseFloat(x.positionAmt)) > 0);
             
             if (p) {
                 const entry = parseFloat(p.entryPrice);
@@ -351,18 +343,79 @@ async function runPositionReconciliationEngine() {
     } catch (e) {}
 }
 
+// =========================================================================
+// 🌐 TRẢ LẠI NGUYÊN VẸN CÁC ROUTE API PHỤC VỤ CHO GIAO DIỆN HTML DASHBOARD
+// =========================================================================
 const APP = express(); 
 APP.use(express.json());
-APP.get('/', (req, res) => res.send('Bot is running mượt như Sunsilk!'));
+APP.use(express.urlencoded({ extended: true }));
+
+// Cho phép gọi cross-origin nếu giao diện chạy cổng khác
+APP.use((req, res, next) => {
+    res.header("Access-Control-Allow-Origin", "*");
+    res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept");
+    res.header("Access-Control-Allow-Methods", "GET, POST, OPTIONS, PUT, PATCH, DELETE");
+    next();
+});
+
+APP.get('/', (req, res) => res.send('Bot Server is running mượt mà!'));
+
+// API đồng bộ dữ liệu giao diện chính
 APP.get('/api/status', async (req, res) => {
     let walletData = { totalWalletBalance: "0.00", availableBalance: "0.00", totalUnrealizedProfit: "0.00" };
     try {
         const acc = await binanceRequest('GET', '/fapi/v2/account');
         const botUnrealizedPnL = Array.from(botActivePositions.values()).reduce((sum, p) => sum + (p.pnl || 0), 0);
-        walletData = { totalWalletBalance: parseFloat(acc.totalWalletBalance).toFixed(2), availableBalance: parseFloat(acc.availableBalance).toFixed(2), totalUnrealizedProfit: botUnrealizedPnL.toFixed(2) };
+        walletData = { 
+            totalWalletBalance: parseFloat(acc.totalWalletBalance).toFixed(2), 
+            availableBalance: parseFloat(acc.availableBalance).toFixed(2), 
+            totalUnrealizedProfit: botUnrealizedPnL.toFixed(2) 
+        };
     } catch (e) {}
-    res.json({ botSettings, activePositions: Array.from(botActivePositions.values()), wallet: walletData });
+    res.json({ 
+        botSettings, 
+        activePositions: Array.from(botActivePositions.values()), 
+        wallet: walletData, 
+        botLogs: status.botLogs, 
+        blackList: status.blackList 
+    });
 });
+
+// API cập nhật cấu hình động từ các nút bấm/ô nhập trên giao diện HTML
+APP.post('/api/settings', (req, res) => {
+    try {
+        const { maxPositions, invValue, minVol, posTP, posSL, maxDCA } = req.body;
+        if (maxPositions !== undefined) botSettings.maxPositions = parseInt(maxPositions);
+        if (invValue !== undefined) botSettings.invValue = invValue.toString();
+        if (minVol !== undefined) botSettings.minVol = parseFloat(minVol);
+        if (posTP !== undefined) botSettings.posTP = parseFloat(posTP);
+        if (posSL !== undefined) botSettings.posSL = parseFloat(posSL);
+        if (maxDCA !== undefined) botSettings.maxDCA = parseInt(maxDCA);
+        
+        saveBotStateToDisk();
+        addBotLog("⚙️ Cấu hình đã được cập nhật từ Giao diện.", "info");
+        res.json({ success: true, botSettings });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// API Nút khởi động / Tạm dừng hệ thống
+APP.post('/api/toggle', (req, res) => {
+    botSettings.isRunning = !botSettings.isRunning;
+    saveBotStateToDisk();
+    addBotLog(`🕹 Trạng thái hệ thống chuyển sang: ${botSettings.isRunning ? 'RUNNING' : 'STOPPED'}`, 'warning');
+    res.json({ success: true, isRunning: botSettings.isRunning });
+});
+
+// API Nút xóa thủ công danh sách đen (Clear Blacklist) từ Dashboard
+APP.post('/api/clear-blacklist', (req, res) => {
+    status.blackList = {};
+    saveBotStateToDisk();
+    addBotLog("🧹 Đã làm sạch toàn bộ danh sách Blacklist từ Giao diện.", "info");
+    res.json({ success: true });
+});
+// =========================================================================
 
 async function init() {
     try {
@@ -370,7 +423,7 @@ async function init() {
             const parsed = JSON.parse(fs.readFileSync(STATE_FILE_PATH, 'utf8'));
             if (parsed.botActivePositions) botActivePositions = new Map(parsed.botActivePositions);
             if (parsed.blackList) status.blackList = parsed.blackList;
-            if (parsed.botSettings) botSettings = parsed.botSettings;
+            if (parsed.botSettings) botSettings = parsed.blackList ? { ...botSettings, ...parsed.botSettings } : botSettings;
         }
     } catch (e) {}
     
