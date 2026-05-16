@@ -5,7 +5,6 @@ import axios from 'axios';
 import { fileURLToPath } from 'url';
 import path from 'path';
 import fs from 'fs'; 
-import WebSocket from 'ws';
 import { API_KEY, SECRET_KEY } from './config.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -14,7 +13,7 @@ const STATE_FILE_PATH = path.join(__dirname, 'bot_state_persistent.json');
 
 const binanceApi = axios.create({ 
     baseURL: 'https://fapi.binance.com', 
-    timeout: 5000, // Giảm timeout xuống 5s để giải phóng thread nhanh nếu sàn nghẽn
+    timeout: 5000, 
     headers: { 'X-MBX-APIKEY': API_KEY, 'Content-Type': 'application/x-www-form-urlencoded' } 
 });
 
@@ -25,16 +24,13 @@ let status = { botLogs: [], candidatesList: [], blackList: {}, botClosedCount: 0
 let botActivePositions = new Map(); 
 let openingSymbols = new Set();     
 let serverTimeOffset = 0;
-let listenKey = null;
-let userWsInstance = null;
 
 // ====================================================================
-// STORAGE ENGINE - FIX CHẶT LỖI MẤT TRÍ NHỚ KHI RESTART PM2
+// STORAGE ENGINE - BẢO TOÀN TRẠNG THÁI KHI RESTART PM2
 // ====================================================================
 function saveBotStateToDisk() {
     try {
         const state = {
-            // Chuyển Map thành mảng cặp [key, value] chuẩn để lưu được vào JSON
             botActivePositions: Array.from(botActivePositions.entries()),
             blackList: status.blackList,
             botClosedCount: status.botClosedCount,
@@ -42,9 +38,7 @@ function saveBotStateToDisk() {
             botSettings
         };
         fs.writeFileSync(STATE_FILE_PATH, JSON.stringify(state, null, 2), 'utf8');
-    } catch (e) {
-        // Im lặng hoàn toàn không spam log khi lỗi ghi file cục bộ
-    }
+    } catch (e) {}
 }
 
 function loadBotStateFromDisk() {
@@ -52,29 +46,21 @@ function loadBotStateFromDisk() {
         if (fs.existsSync(STATE_FILE_PATH)) {
             const raw = fs.readFileSync(STATE_FILE_PATH, 'utf8');
             if (!raw || raw.trim() === "") return;
-            
             const parsed = JSON.parse(raw);
-            
-            // Khôi phục lại Map từ Array cặp trùng chuẩn xác
             if (parsed.botActivePositions && Array.isArray(parsed.botActivePositions)) {
                 botActivePositions = new Map(parsed.botActivePositions);
             }
-            
             status.blackList = parsed.blackList || {};
             status.botClosedCount = parsed.botClosedCount || 0;
             status.botPnLClosed = parsed.botPnLClosed || 0;
             if (parsed.botSettings) botSettings = { ...botSettings, ...parsed.botSettings };
-            
-            addBotLog(`💾 [RECOVERY] PM2 Khởi động lại thành công. Đã phục hồi ${botActivePositions.size} vị thế cũ từ ổ đĩa!`, 'success');
+            addBotLog(`💾 [RECOVERY] Đã nạp lại ${botActivePositions.size} vị thế bot từ file cấu hình cũ.`, 'success');
         }
     } catch (e) {
-        addBotLog("⚠️ Không thể đọc file trạng thái cũ (File lỗi hoặc trống). Khởi tạo dữ liệu mới.", "warning");
+        addBotLog("⚠️ Không thể đọc file trạng thái cũ, dùng cấu hình mặc định.", "warning");
     }
 }
 
-// ====================================================================
-// SYSTEM UTILS
-// ====================================================================
 function getPrecision(stepSize) {
     const step = stepSize.toString();
     return step.includes('.') ? step.split('.')[1].replace(/0+$/, '').length : 0;
@@ -83,10 +69,11 @@ function getPrecision(stepSize) {
 function addBotLog(msg, type = 'info') {
     const time = new Date().toLocaleTimeString('vi-VN', { hour12: false });
     status.botLogs.unshift({ time, msg, type });
-    if (status.botLogs.length > 50) status.botLogs.pop(); // Giới hạn 50 log trên UI cho nhẹ ram
+    if (status.botLogs.length > 40) status.botLogs.pop();
     console.log(`[${time}] [${type.toUpperCase()}] ${msg}`);
 }
 
+// Hàm format đếm ngược trả dữ liệu sạch về cho API (để file index.html của ông bóc tách)
 function getReadableBlacklist() {
     const now = Date.now();
     let readable = {};
@@ -126,7 +113,7 @@ async function binanceRequest(method, endpoint, data = {}) {
 }
 
 // ====================================================================
-// TRADE CORE (ĐỘC LẬP HOÀN TOÀN LỆNH TAY)
+// TRADE CORE - ĐỘC LẬP VỚI LỆNH TAY TRÊN SÀN
 // ====================================================================
 async function openPosition(symbol, side) {
     if (!status.isReady || !botSettings.isRunning) return;
@@ -148,6 +135,7 @@ async function openPosition(symbol, side) {
 
         if (isNaN(qty) || qty <= 0) return;
 
+        // Đóng dấu nhận diện vị thế của bot bằng clientOrderId riêng biệt
         const botOrderId = `bot-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
 
         const order = await binanceRequest('POST', '/fapi/v1/order', {
@@ -157,25 +145,23 @@ async function openPosition(symbol, side) {
         if (order && order.orderId) {
             addBotLog(`🎯 BOT VÀO LỆNH THÀNH CÔNG: ${symbol} [${side}]`, 'success');
             botActivePositions.set(`${symbol}_${positionSide}`, {
-                symbol, side, entryPrice: price, dcaCount: 0, botOrderId, timestamp: Date.now()
+                symbol, side, entryPrice: price, botOrderId, timestamp: Date.now()
             });
             saveBotStateToDisk();
         }
     } catch (e) {
-        status.blackList[symbol] = Date.now() + 2 * 60000; // Lỗi thì khóa ngắn 2 phút thôi
+        status.blackList[symbol] = Date.now() + 2 * 60000;
     }
 }
 
-// Luồng đối soát kế toán chạy ngầm: KHÔNG CÓ MỘT CHỮ LOG NÀO ĐỂ TRÁNH SPAM
+// Rà soát kế toán ngầm - IM LẶNG TUYỆT ĐỐI KHÔNG IN LOG BẨN CONSOLE
 async function reconciliationEngine() {
     if (!status.isReady) return;
     try {
         const posRisk = await binanceRequest('GET', '/fapi/v2/positionRisk');
         const onChain = posRisk.filter(p => Math.abs(parseFloat(p.positionAmt)) > 0);
-
         let stateChanged = false;
 
-        // Nếu trong file ghi nhớ có vị thế, nhưng trên sàn đã biến mất (Khớp TP/SL ngầm hoặc ai đó bấm đóng tay)
         for (const [key, local] of botActivePositions.entries()) {
             const stillExists = onChain.some(p => `${p.symbol}_${p.positionSide}` === key);
             if (!stillExists) {
@@ -183,23 +169,15 @@ async function reconciliationEngine() {
                 stateChanged = true;
             }
         }
-
-        if (stateChanged) {
-            saveBotStateToDisk();
-        }
-    } catch (e) {
-        // Lỗi mạng ngầm tự bỏ qua, không in ra màn hình làm bẩn log
-    }
+        if (stateChanged) saveBotStateToDisk();
+    } catch (e) {}
 }
 
-// ====================================================================
-// LUỒNG QUÉT CHẠY SONG SONG TỐC ĐỘ CAO (FAST SCANNER 1S)
-// ====================================================================
+// Luồng xử lý quét tín hiệu tốc độ cao 1 giây
 async function fastScanner() {
     if (!status.isReady || !botSettings.isRunning) return;
     if (botActivePositions.size >= botSettings.maxPositions) return;
 
-    // Lọc cực nhanh các ứng viên hợp lệ
     const validCandidates = status.candidatesList.filter(c => {
         if (!status.exchangeInfo[c.symbol] || status.blackList[c.symbol] || openingSymbols.has(c.symbol)) return false;
         if (Math.abs(c.c1) < botSettings.minVol) return false;
@@ -210,30 +188,31 @@ async function fastScanner() {
     });
 
     if (validCandidates.length > 0) {
-        // Ưu tiên con giật mạnh nhất
         const target = validCandidates.sort((a, b) => Math.abs(b.c1) - Math.abs(a.c1))[0];
-        
         openingSymbols.add(target.symbol);
-        runPositionLocked(target.symbol, target.c1 > 0 ? 'LONG' : 'SHORT');
-    }
-}
-
-// Khóa token tạm thời để tránh luồng 1s click đúp lệnh cho cùng 1 con
-async function runPositionLocked(symbol, side) {
-    try {
-        await openPosition(symbol, side);
-    } finally {
-        openingSymbols.delete(symbol);
+        try {
+            await openPosition(target.symbol, target.c1 > 0 ? 'LONG' : 'SHORT');
+        } finally {
+            openingSymbols.delete(target.symbol);
+        }
     }
 }
 
 // ====================================================================
-// API ENDPOINTS & EXPRESS SERVER
+// EXPRESS SERVER - GỌI ĐÚNG FILE INDEX.HTML GỐC CỦA ÔNG
 // ====================================================================
 const APP = express();
 APP.use(express.json());
+
+// Chỉ định Express lấy tài nguyên tĩnh từ thư mục hiện tại
 APP.use(express.static(__dirname));
 
+// TRẢ VỀ ĐÚNG FILE INDEX.HTML CỦA ÔNG
+APP.get('/', (req, res) => {
+    res.sendFile(path.join(__dirname, 'index.html'));
+});
+
+// Endpoint API để file index.html của ông fetch gọi lấy data realtime
 APP.get('/api/status', (req, res) => {
     res.json({
         botSettings,
@@ -249,47 +228,31 @@ APP.post('/api/settings', (req, res) => {
 });
 
 async function init() {
-    loadBotStateFromDisk(); // Đọc bộ nhớ cũ lên trước khi nạp API sàn
+    loadBotStateFromDisk();
     try {
         const info = await axios.get('https://fapi.binance.com/fapi/v1/exchangeInfo');
         info.data.symbols.forEach(s => {
             const lot = s.filters.find(f => f.filterType === 'LOT_SIZE');
-            if (lot) {
-                status.exchangeInfo[s.symbol] = { stepSize: parseFloat(lot.stepSize) };
-            }
+            if (lot) status.exchangeInfo[s.symbol] = { stepSize: parseFloat(lot.stepSize) };
         });
-        
         const posMode = await binanceRequest('GET', '/fapi/v1/positionSide/dual').catch(() => ({dualSidePosition: true}));
         status.isHedgeMode = posMode.dualSidePosition;
-        
         status.isReady = true;
-        addBotLog("🚀 BOT V3.9.3 PRODUCTION ĐÃ KHỞI CHẠY - ĐÃ KHÓA LOG RÁC & CỨU DỮ LIỆU PM2.", "success");
-    } catch (e) { 
-        setTimeout(init, 4000); 
-    }
+        addBotLog("🚀 BOT ENGINE V3.9.5 KHỞI CHẠY THÀNH CÔNG - ĐÃ TRẢ LẠI FILE INDEX.HTML GỐC.", "success");
+    } catch (e) { setTimeout(init, 4000); }
 }
 
 init();
 
-// Luồng quét 1s
+// Kích hoạt toàn bộ luồng xử lý ngầm định kỳ
 setInterval(fastScanner, 1000);
-
-// Luồng kéo data từ cổng 9000 (Đã bọc chống sập)
-setInterval(() => {
-    http.get('http://127.0.0.1:9000/api/data', res => {
-        let d = ''; 
-        res.on('data', c => d += c);
-        res.on('end', () => { 
-            try { 
-                status.candidatesList = JSON.parse(d).live || []; 
-            } catch(e) {} 
-        });
-    }).on('error', () => {
-        // Cổng 9000 mất kết nối tạm thời? Bot tự lờ đi để bảo toàn tính ổn định, không báo crash bẩn console.
-    });
-}, 1000);
-
-// Luồng rà soát ngầm (Tuyệt đối im lặng): 10 giây/lần
 setInterval(reconciliationEngine, 10000);
 
-APP.listen(9001, () => console.log('🌐 Web dashboard chạy tại: http://localhost:9001'));
+setInterval(() => {
+    http.get('http://127.0.0.1:9000/api/data', res => {
+        let d = ''; res.on('data', c => d += c);
+        res.on('end', () => { try { status.candidatesList = JSON.parse(d).live || []; } catch(e){} });
+    }).on('error', () => {});
+}, 1000);
+
+APP.listen(9001, () => console.log('🌐 Web dashboard đang đọc file index.html tại cổng 9001'));
