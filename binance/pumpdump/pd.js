@@ -69,7 +69,6 @@ function saveBotStateToDisk() {
     } catch (e) {}
 }
 
-// Bộ đếm ngược thời gian thực dạng văn bản gửi qua API status
 function getReadableBlacklist() {
     const now = Date.now();
     let readable = {};
@@ -280,7 +279,8 @@ async function executePositionClosureAccounting(symbol, positionSideParam, key, 
             botActivePositions.delete(key);
 
             if (distance > 0 && botSettings.isRunning) { 
-                const jump = Math.max(b.dcaCount + 1, Math.floor(distance / (b.firstEntry * botSettings.posSL / 100)));
+                // CHỈNH SỬA PHẦN JUMP DCA: Thay Math.floor thành Math.ceil theo yêu cầu bản 3
+                const jump = Math.max(b.dcaCount + 1, Math.ceil(distance / (b.firstEntry * botSettings.posSL / 100)));
                 if (jump <= botSettings.maxDCA) {
                     const newMultiplier = Math.pow(2, jump);
                     addBotLog(`🔄 [DCA] Nâng cấp vốn lên mức [${jump}/${botSettings.maxDCA}] (Hệ số x${newMultiplier}) cho ${symbol}`);
@@ -323,7 +323,6 @@ async function closePositionMarket(pos, reason = "FAILSAFE") {
     return false;
 }
 
-// THAY THẾ TOÀN BỘ BẰNG HÀM ĐỒNG BỘ TP/SL BATCH ĐÃ TỐI ƯU HÓA
 async function syncTPSL(symbol, side, info, tpPrice, slPrice) {
     const sideClose = side === 'SHORT' ? 'BUY' : 'SELL';
     const positionSideParam = status.isHedgeMode ? side : 'BOTH';
@@ -362,7 +361,6 @@ async function openPosition(symbol, dcaData = null) {
     const side = isLong ? 'LONG' : 'SHORT';
     const positionSideParam = status.isHedgeMode ? side : 'BOTH';
     const orderSideParam = isLong ? 'BUY' : 'SELL';
-    const currentDCALevel = dcaData ? dcaData.dcaCount : 0;
     
     try {
         const info = status.exchangeInfo[symbol];
@@ -405,22 +403,48 @@ async function openPosition(symbol, dcaData = null) {
             }
             
             if (p) {
+                // ===== THAY THẾ TOÀN BỘ PHẦN TÍNH TP/SL THEO KIỂU BẢN 3 DYNAMIC =====
                 const entry = parseFloat(p.entryPrice);
                 const firstE = (dcaData && dcaData.firstEntry) ? dcaData.firstEntry : entry;
-                let tp = isLong ? entry * (1 + botSettings.posTP / 100) : entry * (1 - botSettings.posTP / 100);
-                let sl = isLong ? entry * (1 - botSettings.posSL / 100) : firstE + (firstE * botSettings.posSL / 100);
-                
+                const dcaLevel = dcaData ? dcaData.dcaCount : 0;
+
+                let tp;
+                let sl;
+
+                if (isLong) {
+                    // LONG TP luôn bám theo entry mới
+                    tp = entry * (1 + botSettings.posTP / 100);
+                    // LONG SL giãn theo first entry và cấp độ dcaLevel
+                    sl = firstE - (firstE * (((dcaLevel + 1) * botSettings.posSL) / 100));
+                } else {
+                    // SHORT TP luôn bám theo entry mới
+                    tp = entry * (1 - botSettings.posTP / 100);
+                    // SHORT SL giãn theo first entry và cấp độ dcaLevel
+                    sl = firstE + (firstE * (((dcaLevel + 1) * botSettings.posSL) / 100));
+                }
+
                 const currentLocalPosition = { 
-                    symbol, side, entryPrice: entry, tp, sl, dcaCount: currentDCALevel, 
-                    leverage: info.maxLeverage, firstEntry: firstE, firstMargin: (dcaData && dcaData.firstMargin) ? dcaData.firstMargin : margin, 
-                    currentQty: Math.abs(parseFloat(p.positionAmt)), pnl: 0, priceDev: 0, tpSlMode: null, isClosing: false 
+                    symbol,
+                    side,
+                    entryPrice: entry,
+                    tp,
+                    sl,
+                    dcaCount: dcaLevel,
+                    leverage: info.maxLeverage,
+                    firstEntry: firstE,
+                    firstMargin: (dcaData && dcaData.firstMargin) ? dcaData.firstMargin : margin,
+                    currentQty: Math.abs(parseFloat(p.positionAmt)),
+                    pnl: 0,
+                    priceDev: 0,
+                    tpSlMode: "FIRST_ENTRY_DYNAMIC",
+                    isClosing: false 
                 };
+                // ===================================================================
                 
                 botActivePositions.set(`${symbol}_${positionSideParam}`, currentLocalPosition);
                 saveBotStateToDisk();
-                addBotLog(`🎬 Mở vị thế thành công: ${symbol} [${side}] | Qty: ${qty} | Khởi chạy cụm TP/SL.`);
+                addBotLog(`🎬 Mở vị thế thành công: ${symbol} [${side}] (DCA ${dcaLevel}) | Entry: ${entry} | Khởi chạy cụm TP/SL giãn.`);
                 
-                // Trực tiếp kích hoạt gọi hàm đồng bộ batch orders mới tối ưu tốc độ cao
                 await syncTPSL(symbol, side, info, tp, sl);
             }
         }
@@ -453,7 +477,6 @@ async function runPositionReconciliationEngine() {
                 }
             }
         }
-        // Loại bỏ hoàn toàn cơ chế can thiệp nạp bậy lệnh không tag hoặc kill nhầm vị thế tay
         saveBotStateToDisk();
     } catch (e) {}
 }
@@ -515,7 +538,7 @@ async function init() {
         await runPositionReconciliationEngine();
         await initWebSocketEngine();
         
-        addBotLog(`🚀 [V3.9.8 FINAL] Đã tích hợp Batch TPSL tối ưu | Độc lập hoàn toàn lệnh mở tay trên sàn.`);
+        addBotLog(`🚀 [V3.9.9 DYNAMIC] Đã tích hợp cấu trúc TP/SL Bản 3 giãn cách nâng cấp.`);
     } catch (e) { setTimeout(init, 5000); }
 }
 init();
@@ -524,16 +547,12 @@ setInterval(() => {
     if (status.isReady) runPositionReconciliationEngine();
 }, 25000);
 
-// ====================================================================
-// TĂNG TỐC QUYẾT ĐỊNH VÀO LỆNH TRONG 1 GIÂY
-// ====================================================================
 setInterval(() => {
     if (!status.isReady || !botSettings.isRunning) return; 
     if (botActivePositions.size >= botSettings.maxPositions || openingSymbols.size > 0) return;
 
     const can = status.candidatesList.find(c => {
         const info = status.exchangeInfo[c.symbol];
-        // Bỏ hoàn toàn rào cản cũ, chỉ kiểm tra điều kiện căn bản để quét Vol 0.1% siêu nhạy
         if (!info || info.maxLeverage < 20 || Math.abs(c.c1) < botSettings.minVol || status.blackList[c.symbol]) return false;
         return !botActivePositions.has(`${c.symbol}_${c.c1 > 0 ? 'LONG' : 'SHORT'}`);
     });
