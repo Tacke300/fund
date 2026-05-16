@@ -18,6 +18,7 @@ const binanceApi = axios.create({
     headers: { 'X-MBX-APIKEY': API_KEY, 'Content-Type': 'application/x-www-form-urlencoded' } 
 });
 
+// Object cấu hình gốc - Set mặc định maxDCA = 3 theo yêu cầu vị thế
 let botSettings = { 
     isRunning: false, 
     maxPositions: 3, 
@@ -28,7 +29,18 @@ let botSettings = {
     maxDCA: 3 
 };
 
-let status = { botLogs: [], candidatesList: [], blackList: {}, exchangeInfo: {}, isReady: false, isHedgeMode: true };
+// Object status chứa các thông số đếm để mapping chuẩn với file HTML của ông
+let status = { 
+    botLogs: [], 
+    candidatesList: [], 
+    blackList: {}, 
+    exchangeInfo: {}, 
+    isReady: false, 
+    isHedgeMode: true,
+    botClosedCount: 0,      // Khớp map HTML d.status.botClosedCount
+    botPnLClosed: 0.00      // Khớp map HTML d.status.botPnLClosed
+};
+
 let botActivePositions = new Map(); 
 let openingSymbols = new Set();     
 let symbolMutexes = new Map();      
@@ -49,7 +61,7 @@ function getPrecision(stepSize) {
 function addBotLog(msg, type = 'info') {
     const time = new Date().toLocaleTimeString('vi-VN', { hour12: false });
     status.botLogs.unshift({ time, msg, type });
-    if (status.botLogs.length > 50) status.botLogs.pop(); // Giữ tối đa 50 log cho giao diện cào về hiển thị
+    if (status.botLogs.length > 30) status.botLogs.pop(); 
     console.log(`[${time}] [${type.toUpperCase()}] ${msg}`);
 }
 
@@ -58,7 +70,9 @@ function saveBotStateToDisk() {
         fs.writeFileSync(STATE_FILE_PATH, JSON.stringify({
             botActivePositions: Array.from(botActivePositions.entries()),
             blackList: status.blackList,
-            botSettings
+            botSettings,
+            botClosedCount: status.botClosedCount,
+            botPnLClosed: status.botPnLClosed
         }, null, 2), 'utf8');
     } catch (e) {}
 }
@@ -217,6 +231,7 @@ async function executePositionClosureAccounting(symbol, positionSideParam, key, 
     let isConfirmedClosed = false;
     let retryCount = 0;
 
+    // KHÓA LUỒNG XÁC THỰC LẤY PNL THỰC TẾ
     while (!isConfirmedClosed && retryCount < 10) {
         try {
             const trades = await binanceRequest('GET', '/fapi/v1/userTrades', { symbol, limit: 10 }).catch(() => []);
@@ -246,23 +261,29 @@ async function executePositionClosureAccounting(symbol, positionSideParam, key, 
 
     if (!isConfirmedClosed) {
         addBotLog(`🚨 [TIMEOUT] Không lấy được PnL cho ${symbol}. Khóa bảo vệ tài khoản!`, 'error');
-        status.blackList[symbol] = Date.now() + (5 * 60 * 1000); 
+        status.blackList[symbol] = Math.floor((Date.now() + (5 * 60 * 1000)) / 1000); 
         return;
     }
 
+    // Cộng dồn vào Stats hiển thị lên giao diện
+    status.botClosedCount += 1;
+    status.botPnLClosed += totalRealizedPnl;
+
     if (totalRealizedPnl > (-b.firstMargin * 0.05)) {
-        status.blackList[symbol] = Date.now() + (15 * 60 * 1000); 
-        addBotLog(`💰 [WIN] ${symbol} chốt lời: ${totalRealizedPnl.toFixed(2)}$ | Thả xích Blacklist 15p.`, 'success');
+        status.blackList[symbol] = Math.floor((Date.now() + (15 * 60 * 1000)) / 1000); 
+        addBotLog(`💰 [WIN] ${symbol} chốt lời: +${totalRealizedPnl.toFixed(2)}$`, 'success');
     } else {
         addBotLog(`❌ [SL CUT] ${symbol} dính SL lỗ thực tế: ${totalRealizedPnl.toFixed(2)}$`);
         
         const nextDcaLevel = b.dcaCount + 1;
         if (nextDcaLevel <= botSettings.maxDCA) {
+            // CÔNG THỨC CẤP SỐ CỘNG VỐN NHỒI
             const nextMargin = b.firstMargin + nextDcaLevel; 
             addBotLog(`🔄 [DCA] Kích hoạt tầng [${nextDcaLevel}/${botSettings.maxDCA}] | Vốn nhồi: ${nextMargin}$ cho ${symbol}`);
             await openPosition(symbol, { ...b, dcaCount: nextDcaLevel, margin: nextMargin });
         } else {
-            addBotLog(`🚨 [QUAY XE] Hạ tầng SHORT sập. Đảo ngược vị thế, vã LONG x20 vốn gốc vào ${symbol}!`);
+            // ĐẢO VỊ THẾ KHI GÃY CHUỖI VẪN GIỮ NGUYÊN
+            addBotLog(`🚨 [QUAY XE] Đảo vị thế, tổng lực vã LONG x20 vốn gốc vào ${symbol}!`);
             await openPosition(symbol, { ...b, side: 'LONG', isFinalLong: true, dcaCount: 0, margin: b.firstMargin * 20 });
         }
     }
@@ -300,7 +321,7 @@ async function openPosition(symbol, dcaData = null) {
         if (order?.orderId) {
             await new Promise(r => setTimeout(r, 500));
             const pRisk = await binanceRequest('GET', '/fapi/v2/positionRisk', { symbol }).catch(() => []);
-            const p = pRisk.find(x => x.positionSide === (status.isHedgeMode ? side : 'BOTH slide') && Math.abs(parseFloat(x.positionAmt)) > 0);
+            const p = pRisk.find(x => x.positionSide === (status.isHedgeMode ? side : 'BOTH'} && Math.abs(parseFloat(x.positionAmt)) > 0);
             
             if (p) {
                 const entry = parseFloat(p.entryPrice);
@@ -319,14 +340,15 @@ async function openPosition(symbol, dcaData = null) {
                 botActivePositions.set(`${symbol}_${status.isHedgeMode ? side : 'BOTH'}`, { 
                     symbol, side, entryPrice: entry, tp, sl, dcaCount: dcaLevel,
                     firstEntry: firstE, firstMargin: (dcaData && dcaData.firstMargin) ? dcaData.firstMargin : margin,
-                    currentQty: Math.abs(parseFloat(p.positionAmt)), pnl: 0, priceDev: 0, isClosing: false
+                    currentQty: Math.abs(parseFloat(p.positionAmt)), pnl: 0, priceDev: 0, isClosing: false,
+                    leverage: info.maxLeverage // Trả thêm thuộc tính này để HTML hiển thị xLeverage gần tên Coin
                 });
                 saveBotStateToDisk();
                 addBotLog(`🎬 [MỞ] vị thế ${symbol} [${side}] (Tầng DCA: ${dcaLevel}) | Vốn: ${margin}$`);
             }
         }
     } catch (e) { 
-        status.blackList[symbol] = Date.now() + (5 * 60 * 1000); 
+        status.blackList[symbol] = Math.floor((Date.now() + (5 * 60 * 1000)) / 1000); 
     }
 }
 
@@ -343,24 +365,13 @@ async function runPositionReconciliationEngine() {
     } catch (e) {}
 }
 
-// =========================================================================
-// 🌐 TRẢ LẠI NGUYÊN VẸN CÁC ROUTE API PHỤC VỤ CHO GIAO DIỆN HTML DASHBOARD
-// =========================================================================
 const APP = express(); 
 APP.use(express.json());
-APP.use(express.urlencoded({ extended: true }));
+APP.use(express.static(path.join(__dirname))); // Đọc file index.html tại thư mục chạy bot
 
-// Cho phép gọi cross-origin nếu giao diện chạy cổng khác
-APP.use((req, res, next) => {
-    res.header("Access-Control-Allow-Origin", "*");
-    res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept");
-    res.header("Access-Control-Allow-Methods", "GET, POST, OPTIONS, PUT, PATCH, DELETE");
-    next();
-});
-
-APP.get('/', (req, res) => res.send('Bot Server is running mượt mà!'));
-
-// API đồng bộ dữ liệu giao diện chính
+// =========================================================================
+// 🌐 ENDPOINT 1: TRẢ DỮ LIỆU ĐÚNG ĐỊNH DẠNG CÂY OBJECT HTML YÊU CẦU
+// =========================================================================
 APP.get('/api/status', async (req, res) => {
     let walletData = { totalWalletBalance: "0.00", availableBalance: "0.00", totalUnrealizedProfit: "0.00" };
     try {
@@ -372,50 +383,42 @@ APP.get('/api/status', async (req, res) => {
             totalUnrealizedProfit: botUnrealizedPnL.toFixed(2) 
         };
     } catch (e) {}
+
+    // Xử lý đếm lùi thời gian chặn blacklist trước khi đẩy về UI (Đổi mốc timestamp thành số giây đếm ngược)
+    const nowSec = Math.floor(Date.now() / 1000);
+    const renderBlacklist = {};
+    for (const [sym, endSec] of Object.entries(status.blackList)) {
+        const remain = endSec - nowSec;
+        if (remain > 0) {
+            renderBlacklist[sym] = remain;
+        }
+    }
+
     res.json({ 
         botSettings, 
         activePositions: Array.from(botActivePositions.values()), 
-        wallet: walletData, 
-        botLogs: status.botLogs, 
-        blackList: status.blackList 
+        wallet: walletData,
+        status: {
+            botLogs: status.botLogs,
+            candidatesList: status.candidatesList,
+            blackList: renderBlacklist,
+            botClosedCount: status.botClosedCount,
+            botPnLClosed: status.botPnLClosed
+        }
     });
 });
 
-// API cập nhật cấu hình động từ các nút bấm/ô nhập trên giao diện HTML
+// =========================================================================
+// 🌐 ENDPOINT 2: POST ĐỂ NHẬN LỆNH LƯU VÀ TOGGLE RUNNING TỪ HTML
+// =========================================================================
 APP.post('/api/settings', (req, res) => {
-    try {
-        const { maxPositions, invValue, minVol, posTP, posSL, maxDCA } = req.body;
-        if (maxPositions !== undefined) botSettings.maxPositions = parseInt(maxPositions);
-        if (invValue !== undefined) botSettings.invValue = invValue.toString();
-        if (minVol !== undefined) botSettings.minVol = parseFloat(minVol);
-        if (posTP !== undefined) botSettings.posTP = parseFloat(posTP);
-        if (posSL !== undefined) botSettings.posSL = parseFloat(posSL);
-        if (maxDCA !== undefined) botSettings.maxDCA = parseInt(maxDCA);
-        
+    if (req.body) {
+        botSettings = { ...botSettings, ...req.body };
         saveBotStateToDisk();
-        addBotLog("⚙️ Cấu hình đã được cập nhật từ Giao diện.", "info");
-        res.json({ success: true, botSettings });
-    } catch (err) {
-        res.status(500).json({ success: false, error: err.message });
+        addBotLog(`⚙️ Cập nhật cấu hình hệ thống thành công.`);
     }
-});
-
-// API Nút khởi động / Tạm dừng hệ thống
-APP.post('/api/toggle', (req, res) => {
-    botSettings.isRunning = !botSettings.isRunning;
-    saveBotStateToDisk();
-    addBotLog(`🕹 Trạng thái hệ thống chuyển sang: ${botSettings.isRunning ? 'RUNNING' : 'STOPPED'}`, 'warning');
-    res.json({ success: true, isRunning: botSettings.isRunning });
-});
-
-// API Nút xóa thủ công danh sách đen (Clear Blacklist) từ Dashboard
-APP.post('/api/clear-blacklist', (req, res) => {
-    status.blackList = {};
-    saveBotStateToDisk();
-    addBotLog("🧹 Đã làm sạch toàn bộ danh sách Blacklist từ Giao diện.", "info");
     res.json({ success: true });
 });
-// =========================================================================
 
 async function init() {
     try {
@@ -423,7 +426,9 @@ async function init() {
             const parsed = JSON.parse(fs.readFileSync(STATE_FILE_PATH, 'utf8'));
             if (parsed.botActivePositions) botActivePositions = new Map(parsed.botActivePositions);
             if (parsed.blackList) status.blackList = parsed.blackList;
-            if (parsed.botSettings) botSettings = parsed.blackList ? { ...botSettings, ...parsed.botSettings } : botSettings;
+            if (parsed.botSettings) botSettings = { ...botSettings, ...parsed.botSettings };
+            if (parsed.botClosedCount) status.botClosedCount = parsed.botClosedCount;
+            if (parsed.botPnLClosed) status.botPnLClosed = parsed.botPnLClosed;
         }
     } catch (e) {}
     
@@ -450,7 +455,7 @@ async function init() {
         status.exchangeInfo = temp; status.isReady = true; 
         await runPositionReconciliationEngine();
         await initWebSocketEngine();
-        addBotLog(`🚀 [SYSTEM READY] AUTO SHORT - Cấp số cộng Margin - Max DCA: ${botSettings.maxDCA}.`);
+        addBotLog(`🚀 [SYSTEM READY] AUTO SHORT - Cấp số cộng Margin.`);
     } catch (e) { setTimeout(init, 4000); }
 }
 init();
