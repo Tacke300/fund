@@ -18,7 +18,6 @@ const binanceApi = axios.create({
     headers: { 'X-MBX-APIKEY': API_KEY, 'Content-Type': 'application/x-www-form-urlencoded' } 
 });
 
-// Object cấu hình gốc - Set mặc định maxDCA = 3 theo yêu cầu vị thế
 let botSettings = { 
     isRunning: false, 
     maxPositions: 3, 
@@ -29,7 +28,6 @@ let botSettings = {
     maxDCA: 3 
 };
 
-// Object status chứa các thông số đếm để mapping chuẩn với file HTML của ông
 let status = { 
     botLogs: [], 
     candidatesList: [], 
@@ -37,8 +35,8 @@ let status = {
     exchangeInfo: {}, 
     isReady: false, 
     isHedgeMode: true,
-    botClosedCount: 0,      // Khớp map HTML d.status.botClosedCount
-    botPnLClosed: 0.00      // Khớp map HTML d.status.botPnLClosed
+    botClosedCount: 0,      
+    botPnLClosed: 0.00      
 };
 
 let botActivePositions = new Map(); 
@@ -118,7 +116,14 @@ async function binanceRequest(method, endpoint, data = {}) {
 
 async function initWebSocketEngine() {
     try {
-        if (userWsInstance) { try { userWsInstance.terminate(); } catch(e){} }
+        // SỬA LỖI WS TERMINATE: Kiểm tra trạng thái OPEN/CONNECTING trước khi đóng
+        if (userWsInstance) { 
+            try { 
+                if (userWsInstance.readyState === WebSocket.OPEN || userWsInstance.readyState === WebSocket.CONNECTING) {
+                    userWsInstance.terminate(); 
+                }
+            } catch(e){} 
+        }
         const res = await binanceRequest('POST', '/fapi/v1/listenKey');
         listenKey = res.listenKey;
 
@@ -128,29 +133,35 @@ async function initWebSocketEngine() {
             lastUserWsTime = Date.now();
             try { handleUserDataEvent(JSON.parse(rawData)); } catch (e) {}
         });
-        userWsInstance.on('close', () => setTimeout(initWebSocketEngine, 2000));
+        userWsInstance.on('close', () => setTimeout(initWebSocketEngine, 4000));
 
-        if (markWsInstance) { try { markWsInstance.terminate(); } catch(e){} }
+        if (markWsInstance) { 
+            try { 
+                if (markWsInstance.readyState === WebSocket.OPEN || markWsInstance.readyState === WebSocket.CONNECTING) {
+                    markWsInstance.terminate(); 
+                }
+            } catch(e){} 
+        }
         markWsInstance = new WebSocket(`wss://fstream.binance.com/ws/!markPrice@arr`);
         lastMarkWsTime = Date.now();
         markWsInstance.on('message', (rawData) => {
             lastMarkWsTime = Date.now();
             try { handleGlobalMarkPriceEvent(JSON.parse(rawData)); } catch (e) {}
         });
-        markWsInstance.on('close', () => setTimeout(initWebSocketEngine, 2000));
+        markWsInstance.on('close', () => setTimeout(initWebSocketEngine, 4000));
     } catch (e) {
-        setTimeout(initWebSocketEngine, 3000);
+        setTimeout(initWebSocketEngine, 5000);
     }
 }
 
 setInterval(() => {
     if (!status.isReady) return;
     const now = Date.now();
-    if (now - lastUserWsTime > 15000 || now - lastMarkWsTime > 15000) {
+    if (now - lastUserWsTime > 30000 || now - lastMarkWsTime > 30000) {
         lastUserWsTime = now; lastMarkWsTime = now;
         initWebSocketEngine();
     }
-}, 5000);
+}, 10000);
 
 setInterval(async () => {
     if (listenKey) await binanceRequest('PUT', '/fapi/v1/listenKey').catch(() => initWebSocketEngine());
@@ -207,7 +218,7 @@ function checkAndTriggerMarketClose(key, markP) {
             const sideClose = b.side === 'SHORT' ? 'BUY' : 'SELL';
             const cleanQty = Number(b.currentQty.toFixed(getPrecision(info.stepSize)));
             
-            addBotLog(`🎯 [TRIG] ${b.symbol} chạm ngưỡng nội bộ (${markP}). Dập lệnh MARKET!`, 'warning');
+            addBotLog(`🎯 [TRIG] ${b.symbol} chạm ngưỡng nội bộ (${markP}). Kích hoạt lệnh chốt MARKET!`, 'warning');
             try {
                 await binanceRequest('POST', '/fapi/v1/order', {
                     symbol: b.symbol, side: sideClose, positionSide: status.isHedgeMode ? b.side : 'BOTH',
@@ -231,7 +242,6 @@ async function executePositionClosureAccounting(symbol, positionSideParam, key, 
     let isConfirmedClosed = false;
     let retryCount = 0;
 
-    // KHÓA LUỒNG XÁC THỰC LẤY PNL THỰC TẾ
     while (!isConfirmedClosed && retryCount < 10) {
         try {
             const trades = await binanceRequest('GET', '/fapi/v1/userTrades', { symbol, limit: 10 }).catch(() => []);
@@ -260,30 +270,27 @@ async function executePositionClosureAccounting(symbol, positionSideParam, key, 
     }
 
     if (!isConfirmedClosed) {
-        addBotLog(`🚨 [TIMEOUT] Không lấy được PnL cho ${symbol}. Khóa bảo vệ tài khoản!`, 'error');
+        addBotLog(`🚨 [TIMEOUT] Không lấy được PnL cho ${symbol}. Chặn bot vào mã này tạm thời!`, 'error');
         status.blackList[symbol] = Math.floor((Date.now() + (5 * 60 * 1000)) / 1000); 
         return;
     }
 
-    // Cộng dồn vào Stats hiển thị lên giao diện
     status.botClosedCount += 1;
     status.botPnLClosed += totalRealizedPnl;
 
     if (totalRealizedPnl > (-b.firstMargin * 0.05)) {
         status.blackList[symbol] = Math.floor((Date.now() + (15 * 60 * 1000)) / 1000); 
-        addBotLog(`💰 [WIN] ${symbol} chốt lời: +${totalRealizedPnl.toFixed(2)}$`, 'success');
+        addBotLog(`💰 [WIN] ${symbol} chốt lời thành công: +${totalRealizedPnl.toFixed(2)}$`, 'success');
     } else {
-        addBotLog(`❌ [SL CUT] ${symbol} dính SL lỗ thực tế: ${totalRealizedPnl.toFixed(2)}$`);
+        addBotLog(`❌ [SL CUT] ${symbol} dính SL cắt lỗ thực tế: ${totalRealizedPnl.toFixed(2)}$`);
         
         const nextDcaLevel = b.dcaCount + 1;
         if (nextDcaLevel <= botSettings.maxDCA) {
-            // CÔNG THỨC CẤP SỐ CỘNG VỐN NHỒI
             const nextMargin = b.firstMargin + nextDcaLevel; 
             addBotLog(`🔄 [DCA] Kích hoạt tầng [${nextDcaLevel}/${botSettings.maxDCA}] | Vốn nhồi: ${nextMargin}$ cho ${symbol}`);
             await openPosition(symbol, { ...b, dcaCount: nextDcaLevel, margin: nextMargin });
         } else {
-            // ĐẢO VỊ THẾ KHI GÃY CHUỖI VẪN GIỮ NGUYÊN
-            addBotLog(`🚨 [QUAY XE] Đảo vị thế, tổng lực vã LONG x20 vốn gốc vào ${symbol}!`);
+            addBotLog(`🚨 [QUAY XE] Đảo vị thế, tổng lực vào lệnh LONG x20 vốn gốc với mã ${symbol}!`);
             await openPosition(symbol, { ...b, side: 'LONG', isFinalLong: true, dcaCount: 0, margin: b.firstMargin * 20 });
         }
     }
@@ -313,6 +320,7 @@ async function openPosition(symbol, dcaData = null) {
             leverageCache.add(symbol);
         }
         
+        // CHỈ ĐẶT LỆNH MARKET ĐỂ MỞ VỊ THẾ - KHÔNG ĐẶT THÊM LỆNH PHỤ TP/SL GÂY LỖI -4120
         const order = await binanceRequest('POST', '/fapi/v1/order', { 
             symbol, side: isLong ? 'BUY' : 'SELL', positionSide: status.isHedgeMode ? side : 'BOTH', 
             type: 'MARKET', quantity: qty
@@ -321,7 +329,8 @@ async function openPosition(symbol, dcaData = null) {
         if (order?.orderId) {
             await new Promise(r => setTimeout(r, 500));
             const pRisk = await binanceRequest('GET', '/fapi/v2/positionRisk', { symbol }).catch(() => []);
-            const p = pRisk.find(x => x.positionSide === (status.isHedgeMode ? side : 'BOTH'} && Math.abs(parseFloat(x.positionAmt)) > 0);
+            // SỬA LỖI CÚ PHÁP: Đã đóng đúng dấu ngoặc tròn tại điểm này
+            const p = pRisk.find(x => x.positionSide === (status.isHedgeMode ? side : 'BOTH') && Math.abs(parseFloat(x.positionAmt)) > 0);
             
             if (p) {
                 const entry = parseFloat(p.entryPrice);
@@ -341,10 +350,10 @@ async function openPosition(symbol, dcaData = null) {
                     symbol, side, entryPrice: entry, tp, sl, dcaCount: dcaLevel,
                     firstEntry: firstE, firstMargin: (dcaData && dcaData.firstMargin) ? dcaData.firstMargin : margin,
                     currentQty: Math.abs(parseFloat(p.positionAmt)), pnl: 0, priceDev: 0, isClosing: false,
-                    leverage: info.maxLeverage // Trả thêm thuộc tính này để HTML hiển thị xLeverage gần tên Coin
+                    leverage: info.maxLeverage 
                 });
                 saveBotStateToDisk();
-                addBotLog(`🎬 [MỞ] vị thế ${symbol} [${side}] (Tầng DCA: ${dcaLevel}) | Vốn: ${margin}$`);
+                addBotLog(`🎬 [MỞ VỊ THẾ] ${symbol} [${side}] (Tầng DCA: ${dcaLevel}) | Vốn: ${margin}$`);
             }
         }
     } catch (e) { 
@@ -367,11 +376,8 @@ async function runPositionReconciliationEngine() {
 
 const APP = express(); 
 APP.use(express.json());
-APP.use(express.static(path.join(__dirname))); // Đọc file index.html tại thư mục chạy bot
+APP.use(express.static(path.join(__dirname))); 
 
-// =========================================================================
-// 🌐 ENDPOINT 1: TRẢ DỮ LIỆU ĐÚNG ĐỊNH DẠNG CÂY OBJECT HTML YÊU CẦU
-// =========================================================================
 APP.get('/api/status', async (req, res) => {
     let walletData = { totalWalletBalance: "0.00", availableBalance: "0.00", totalUnrealizedProfit: "0.00" };
     try {
@@ -384,7 +390,6 @@ APP.get('/api/status', async (req, res) => {
         };
     } catch (e) {}
 
-    // Xử lý đếm lùi thời gian chặn blacklist trước khi đẩy về UI (Đổi mốc timestamp thành số giây đếm ngược)
     const nowSec = Math.floor(Date.now() / 1000);
     const renderBlacklist = {};
     for (const [sym, endSec] of Object.entries(status.blackList)) {
@@ -408,9 +413,6 @@ APP.get('/api/status', async (req, res) => {
     });
 });
 
-// =========================================================================
-// 🌐 ENDPOINT 2: POST ĐỂ NHẬN LỆNH LƯU VÀ TOGGLE RUNNING TỪ HTML
-// =========================================================================
 APP.post('/api/settings', (req, res) => {
     if (req.body) {
         botSettings = { ...botSettings, ...req.body };
