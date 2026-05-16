@@ -4,7 +4,7 @@ import crypto from 'crypto';
 import axios from 'axios';
 import { fileURLToPath } from 'url';
 import path from 'path';
-import fs from 'fs'; // Tích hợp module file hệ thống để ghi Raw Log Debug
+import fs from 'fs'; 
 import { API_KEY, SECRET_KEY } from './config.js';
 
 const MAX_DCA_LEVEL = 3; 
@@ -24,7 +24,7 @@ let botActivePositions = new Map();
 let isProcessingDCA = new Set();
 let leverageCache = new Set(); 
 let serverTimeOffset = 0;
-let isOpeningPosition = false; // FIX BUG RACE CONDITION: Khóa Global chống double open lệnh trùng
+let isOpeningPosition = false; 
 
 function getPrecision(stepSize) {
     const step = stepSize.toString();
@@ -32,12 +32,11 @@ function getPrecision(stepSize) {
     return step.split('.')[1].replace(/0+$/, '').length;
 }
 
-// HÀM GHI RAW LOG DEBUG RA FILE CHUYÊN DỤNG ĐỂ SOI MÃ LỖI BINANCE (-2019, -2021, -4164...)
 function writeRawDebugLog(type, endpoint, payload, responseOrError, latency) {
     const logTime = new Date().toISOString();
     const dataToLog = {
         time: logTime,
-        type: type, // 'REQUEST_SUCCESS' hoặc 'REQUEST_ERROR'
+        type: type, 
         endpoint: endpoint,
         requestData: payload,
         latencyMs: latency,
@@ -70,15 +69,12 @@ async function binanceRequest(method, endpoint, data = {}) {
     try {
         const response = await binanceApi({ method, url });
         const latency = Date.now() - startTime;
-        
-        // Ghi Log thành công ra file
         writeRawDebugLog('SUCCESS', endpoint, data, response.data, latency);
         return response.data;
     } catch (e) {
         const latency = Date.now() - startTime;
         const errorPayload = e.response?.data || { message: e.message, code: 'NETWORK_OR_TIMEOUT' };
         
-        // Ghi Log lỗi chi tiết kẹp full raw response/error code
         writeRawDebugLog('ERROR', endpoint, data, errorPayload, latency);
 
         if (errorPayload.code === -1021) {
@@ -90,6 +86,34 @@ async function binanceRequest(method, endpoint, data = {}) {
     }
 }
 
+// HÀM ĐÓNG VỊ THẾ KHẨN CẤP / FAILSAFE CANH BẰNG PHẦN MỀM (PP3 & PP4)
+async function closePositionMarket(pos, reason = "FAILSAFE") {
+    const sideClose = pos.side === 'SHORT' ? 'BUY' : 'SELL';
+    const positionSideParam = status.isHedgeMode ? pos.side : 'BOTH';
+    
+    try {
+        addBotLog(`🚨 [HÀNH ĐỘNG KHẨN CẤP] Tiến hành gọi lệnh MARKET giải phóng vị thế ${pos.symbol} Lý do: ${reason}`);
+        
+        const res = await binanceRequest('POST', '/fapi/v1/order', {
+            symbol: pos.symbol,
+            side: sideClose,
+            positionSide: positionSideParam,
+            type: 'MARKET',
+            quantity: pos.currentQty,
+            reduceOnly: 'true'
+        });
+        
+        if (res) {
+            console.log(`✅ [THÀNH CÔNG] Lệnh MARKET cứu nguy đã được sàn khớp hoàn toàn cho ${pos.symbol}`);
+            return true;
+        }
+    } catch (e) {
+        console.error(`❌ [THẤT BẠI CHÍ MẠNG] Không thể đóng MARKET khẩn cấp cho ${pos.symbol}:`, e);
+        addBotLog(`🚨 [BÁO ĐỘNG ĐỎ] CHÁY TÀI KHOẢN TIỀM ẨN! Lệnh MARKET khẩn cấp cho ${pos.symbol} bị từ chối!`, 'error');
+    }
+    return false;
+}
+
 async function priceMonitor() {
     if (!status.isReady) return setTimeout(priceMonitor, 1000);
     try {
@@ -99,7 +123,6 @@ async function priceMonitor() {
         for (let [key, b] of botActivePositions) {
             let realP = posRisk.find(p => `${p.symbol}_${p.positionSide}` === key && Math.abs(parseFloat(p.positionAmt)) > 0);
             
-            // FIX BUG BINANCE LAG (MỤC 3): Nếu không tìm thấy vị thế, bắt buộc phải đợi 1.5s và gọi check lại lần nữa chống DCA oan
             if (!realP) {
                 await new Promise(r => setTimeout(r, 1500));
                 const recheckPosRisk = await binanceRequest('GET', '/fapi/v2/positionRisk').catch(() => null);
@@ -107,7 +130,7 @@ async function priceMonitor() {
                 if (recheckPosRisk) {
                     realP = recheckPosRisk.find(p => `${p.symbol}_${p.positionSide}` === key && Math.abs(parseFloat(p.positionAmt)) > 0);
                     if (realP) {
-                        console.log(`🛡️ [BẢO VỆ CAP] Sàn lag hụt vị thế ảo của ${b.symbol}. Đã cứu nguy thành công, chặn đứng chuỗi DCA sai lệch!`);
+                        console.log(`🛡️ [BẢO VỆ CAP] Sàn lag hụt vị thế ảo của ${b.symbol}. Đã chặn đứng chuỗi DCA sai lệch.`);
                     }
                 }
             }
@@ -120,11 +143,41 @@ async function priceMonitor() {
                     ? ((b.entryPrice - markP) / b.entryPrice) * 100
                     : ((markP - b.entryPrice) / b.entryPrice) * 100;
 
+                // TẦNG 3 (PP3 - SOFTWARE PROTECTION): Tự động so khớp giá xử lý thủ công bằng code nếu các tầng trên fail
+                if (b.tpSlMode === 3) {
+                    let triggerFailsafe = false;
+                    
+                    if (b.side === 'SHORT') {
+                        if (markP <= b.tp) {
+                            addBotLog(`🎯 [PP3 SOFTWARE] Vị thế SHORT ${b.symbol} chạm vùng giá TP cứng (${b.tp}). Kích hoạt đóng tay...`);
+                            triggerFailsafe = true;
+                        } else if (markP >= b.sl) {
+                            addBotLog(`🛑 [PP3 SOFTWARE] Vị thế SHORT ${b.symbol} chạm vùng giá SL cứng (${b.sl}). Kích hoạt đóng tay...`);
+                            triggerFailsafe = true;
+                        }
+                    } else if (b.side === 'LONG') {
+                        if (markP >= b.tp) {
+                            addBotLog(`🎯 [PP3 SOFTWARE] Vị thế LONG ${b.symbol} chạm vùng giá TP cứng (${b.tp}). Kích hoạt đóng tay...`);
+                            triggerFailsafe = true;
+                        } else if (markP <= b.sl) {
+                            addBotLog(`🛑 [PP3 SOFTWARE] Vị thế LONG ${b.symbol} chạm vùng giá SL cứng (${b.sl}). Kích hoạt đóng tay...`);
+                            triggerFailsafe = true;
+                        }
+                    }
+
+                    if (triggerFailsafe) {
+                        const closed = await closePositionMarket(b, "PP3_SOFTWARE_TRIGGER");
+                        if (closed) {
+                            botActivePositions.delete(key);
+                        }
+                        continue; 
+                    }
+                }
+
             } else {
                 if (isProcessingDCA.has(b.symbol)) continue;
                 
                 addBotLog(`⚠️ Vị thế ${b.symbol} (${b.side}) xác thực không còn trên sàn. Tiến hành check userTrades...`);
-                // FIX BUG LIMIT (MỤC 4): Nâng limit lên 50 lệnh để bảo toàn quét đủ khi dính chuỗi partial fill dồn dập
                 const trades = await binanceRequest('GET', '/fapi/v1/userTrades', { symbol: b.symbol, limit: 50 }).catch(() => []);
                 const recent = trades.filter(t => (Date.now() + serverTimeOffset - t.time) < 60000);
                 let totalR = 0; recent.forEach(t => totalR += parseFloat(t.realizedPnl));
@@ -142,14 +195,12 @@ async function priceMonitor() {
                     const ticker = await axios.get('https://fapi.binance.com/fapi/v1/ticker/price?symbol=' + b.symbol);
                     const currentPrice = parseFloat(ticker.data.price);
                     
-                    // FIX BUG MATH.ABS (MỤC 5): Tách biệt chiều tính toán khoảng cách giá cho lệnh SHORT để định vị chuẩn hướng thua lỗ
                     const distance = b.side === 'SHORT'
                         ? currentPrice - b.firstEntry
                         : b.firstEntry - currentPrice;
                     
                     botActivePositions.delete(key);
 
-                    // Chỉ tiến hành chuỗi logic DCA khi giá thực tế đi ngược hướng vị thế (distance > 0)
                     if (distance > 0) {
                         const jump = Math.max(
                             b.dcaCount + 1, 
@@ -164,7 +215,7 @@ async function priceMonitor() {
                             openPosition(b.symbol, { ...b, isFinalLong: true, margin: b.firstMargin * 20 });
                         }
                     } else {
-                        addBotLog(`⚠️ [CẢNH BÁO CAO ĐỘ] Giá đi đúng hướng có lãi nhưng userTrades trả về âm do phí hoặc lag dữ liệu. Chặn đứng lệnh DCA oan hại tài khoản!`);
+                        addBotLog(`⚠️ [CẢNH BÁO CAO ĐỘ] Giá đi đúng hướng có lãi nhưng hủy vị thế do lag dữ liệu. Chặn đứng lệnh DCA oan!`);
                     }
                 }
             }
@@ -200,10 +251,10 @@ APP.post('/api/settings', (req, res) => { botSettings = { ...botSettings, ...req
 async function openPosition(symbol, dcaData = null) {
     if (!status.exchangeInfo[symbol]) return;
     if (isProcessingDCA.has(symbol)) return;
-    if (isOpeningPosition) return; // Chặn đứng lệnh nếu cờ lock global đang bận xử lý
+    if (isOpeningPosition) return; 
     
     isProcessingDCA.add(symbol);
-    isOpeningPosition = true; // Bật Khóa Global bảo vệ luồng mở lệnh Market
+    isOpeningPosition = true; 
     
     const isLong = dcaData?.isFinalLong ? true : false;
     const side = isLong ? 'LONG' : 'SHORT';
@@ -279,15 +330,20 @@ async function openPosition(symbol, dcaData = null) {
                 
                 addBotLog(`📊 [MỞ VỊ THẾ THÀNH CÔNG] ${symbol} | Giá Entry TB: ${entry} (Gốc: ${firstE}) | Đích TP: ${tp.toFixed(info.pricePrecision)} | Đích SL: ${sl.toFixed(info.pricePrecision)}`);
                 
-                botActivePositions.set(`${symbol}_${positionSideParam}`, { 
+                // Khởi tạo Object cấu hình cục bộ lưu giữ trong bộ nhớ RAM, mặc định gán chế độ tpSlMode = 0 trước khi đồng bộ hóa
+                const currentLocalPosition = { 
                     symbol, side, entryPrice: entry, tp, sl, 
                     dcaCount: currentDCALevel, 
                     leverage: info.maxLeverage, firstEntry: firstE, 
                     firstMargin: dcaData ? dcaData.firstMargin : margin, 
-                    currentQty: Math.abs(parseFloat(p.positionAmt)), pnl: 0, priceDev: 0 
-                });
+                    currentQty: Math.abs(parseFloat(p.positionAmt)), pnl: 0, priceDev: 0,
+                    tpSlMode: 0 // Ghi nhận Mode TP/SL hiện hành để theo dõi qua API / Dashboard
+                };
                 
-                await syncTPSL(symbol, side, info, tp, sl);
+                botActivePositions.set(`${symbol}_${positionSideParam}`, currentLocalPosition);
+                
+                // Kích hoạt luồng Fallback Đa Tầng Cấu Hình Lệnh Điều Kiện Đóng Vị Thế
+                await cascadeSyncTPSL(symbol, side, info, tp, sl);
             } else {
                 addBotLog(`❌ [THẤT BẠI] Lệnh MARKET đã khớp nhưng vòng lặp đồng bộ không tìm thấy vị thế ${symbol} trên sàn.`, 'error');
             }
@@ -297,24 +353,27 @@ async function openPosition(symbol, dcaData = null) {
     } finally { 
         console.log(`====================================================================\n`);
         isProcessingDCA.delete(symbol); 
-        isOpeningPosition = false; // Xả Khóa Giải Phóng Luồng
+        isOpeningPosition = false; 
     }
 }
 
-async function syncTPSL(symbol, side, info, tp, sl) {
+// ENGINE XỬ LÝ HẠ CẤP RỦI RO ĐA TẦNG (PP1 -> PP2 -> PP3 -> PP4 EMERGENCY)
+async function cascadeSyncTPSL(symbol, side, info, tp, sl) {
     const positionSideParam = status.isHedgeMode ? side : 'BOTH';
     const sideClose = (side === 'SHORT') ? 'BUY' : 'SELL';
+    
+    const localPosKey = `${symbol}_${positionSideParam}`;
+    let localData = botActivePositions.get(localPosKey);
+    if (!localData) return;
 
     let realPos = null;
     try {
         const freshRisk = await binanceRequest('GET', '/fapi/v2/positionRisk', { symbol });
         realPos = freshRisk.find(x => x.positionSide === positionSideParam && Math.abs(parseFloat(x.positionAmt)) > 0);
-    } catch (e) {
-        console.log(`❌ Lỗi khi quét vị thế thực tế của ${symbol}:`, e.msg || e.message);
-    }
+    } catch (e) { console.log(`❌ Lỗi quét xác minh thực tế ${symbol}:`, e.msg || e.message); }
 
     if (!realPos) {
-        console.log(`❌ [HỦY BỎ] Không tìm thấy vị thế thực tế của ${symbol} trên sàn. Bỏ qua đặt cài đặt TP/SL.`);
+        console.log(`❌ [HỦY BỎ] Không thấy vị thế thực tế trên sàn. Chặn cấu hình TP/SL.`);
         return;
     }
 
@@ -322,68 +381,111 @@ async function syncTPSL(symbol, side, info, tp, sl) {
     const precision = getPrecision(info.stepSize);
     const qty = Number((Math.floor(currentAmt / info.stepSize) * info.stepSize).toFixed(precision));
 
-    const localMapData = botActivePositions.get(`${symbol}_${positionSideParam}`);
-    if (localMapData) {
-        localMapData.currentQty = qty;
-        botActivePositions.set(`${symbol}_${positionSideParam}`, localMapData);
-    }
+    localData.currentQty = qty;
+    botActivePositions.set(localPosKey, localData);
 
-    // DỌN DẸP TOÀN BỘ CÁC LỆNH CHỜ TP/SL CŨ
+    // DỌN DẸP LỆNH CHỜ CŨ CHỐNG XUNG ĐỘT ENGINE TRÙNG LẶP
     try {
         const orders = await binanceRequest('GET', '/fapi/v1/openOrders', { symbol });
         const targetOrders = orders.filter(o =>
             o.positionSide === positionSideParam &&
             (o.type === 'TAKE_PROFIT' || o.type === 'STOP' || o.type === 'TAKE_PROFIT_MARKET' || o.type === 'STOP_MARKET')
         );
-
         for (const o of targetOrders) {
             await binanceRequest('DELETE', '/fapi/v1/order', { symbol, orderId: o.orderId });
         }
-        console.log(`🧹 Đã dọn sạch ${targetOrders.length} lệnh TP/SL cũ của ${symbol}`);
-    } catch (e) {
-        console.log(`⚠️ Lỗi dọn dẹp lệnh cũ của ${symbol}:`, e.msg || e.message);
-    }
+        console.log(`🧹 Đã giải phóng sạch ${targetOrders.length} lệnh điều kiện treo cũ của ${symbol}`);
+    } catch (e) { console.log(`⚠️ Lỗi dọn dẹp lệnh cũ ${symbol}:`, e.msg || e.message); }
 
     await new Promise(r => setTimeout(r, 200));
 
     const targetTPPrice = Number(tp.toFixed(info.pricePrecision));
     const targetSLPrice = Number(sl.toFixed(info.pricePrecision));
 
-    // FIX BUG WORKINGTYPE (MỤC 2): Chuyển hoàn toàn sang CONTRACT_PRICE (Last Price) để đóng chính xác theo chart giá thật
-    const baseParam = {
+    // ====================================================================
+    // [PP1] TẦNG 1 — ƯU TIÊN HÀNG ĐẦU: NATIVE CLOSEPOSITION MARKET (Không quantity)
+    // ====================================================================
+    console.log(`[FLOW TP/SL] Trực xuất TẦNG 1 (PP1 - ClosePosition Market)...`);
+    const marketParams = {
         symbol,
         side: sideClose,
         positionSide: positionSideParam,
         closePosition: 'true',
-        workingType: 'CONTRACT_PRICE' 
+        workingType: 'CONTRACT_PRICE'
     };
 
-    // ĐẶT LỆNH TAKE PROFIT MARKET
+    let pp1Success = false;
     try {
-        const resTP = await binanceRequest('POST', '/fapi/v1/order', {
-            ...baseParam,
-            type: 'TAKE_PROFIT_MARKET',
-            stopPrice: targetTPPrice
-        });
-        if (resTP && resTP.orderId) {
-            console.log(`🎯 Đặt lệnh TP (ClosePosition-LastPrice) [OK] cho ${symbol} | Giá: ${targetTPPrice}`);
+        const resTP = await binanceRequest('POST', '/fapi/v1/order', { ...marketParams, type: 'TAKE_PROFIT_MARKET', stopPrice: targetTPPrice });
+        const resSL = await binanceRequest('POST', '/fapi/v1/order', { ...marketParams, type: 'STOP_MARKET', stopPrice: targetSLPrice });
+        
+        if (resTP && resSL) {
+            pp1Success = true;
+            localData.tpSlMode = 1;
+            botActivePositions.set(localPosKey, localData);
+            console.log(`✅ [PP1 THÀNH CÔNG] Đồng bộ TP/SL dạng Native ClosePosition OK cho ${symbol}.`);
+            return;
         }
-    } catch (e) {
-        addBotLog(`❌ [THẤT BẠI] Lỗi thiết lập TP Market cho ${symbol}: ${e.msg || e.message}`, 'error');
+    } catch (err) {
+        console.warn(`⚠️ [PP1 THẤT BẠI] Sàn từ chối cấu trúc lệnh Tầng 1 cho ${symbol}. Mã lỗi: ${err.code || JSON.stringify(err)}`);
     }
 
-    // ĐẶT LỆNH STOP MARKET
-    try {
-        const resSL = await binanceRequest('POST', '/fapi/v1/order', {
-            ...baseParam,
-            type: 'STOP_MARKET',
-            stopPrice: targetSLPrice
-        });
-        if (resSL && resSL.orderId) {
-            console.log(`🛑 Đặt lệnh SL (ClosePosition-LastPrice) [OK] cho ${symbol} | Giá: ${targetSLPrice}`);
+    // ====================================================================
+    // [PP2] TẦNG 2 — HẠ CẤP 1: REDUCE ONLY LIMIT TRIGGER ORDER (Cần kẹp quantity)
+    // ====================================================================
+    if (!pp1Success) {
+        console.log(`[FLOW TP/SL] Trực xuất TẦNG 2 (PP2 - ReduceOnly Limit Trigger)...`);
+        const limitTriggerParams = {
+            symbol,
+            side: sideClose,
+            positionSide: positionSideParam,
+            quantity: qty,
+            reduceOnly: 'true',
+            workingType: 'CONTRACT_PRICE',
+            timeInForce: 'GTC'
+        };
+
+        let pp2Success = false;
+        try {
+            const resTP = await binanceRequest('POST', '/fapi/v1/order', { ...limitTriggerParams, type: 'TAKE_PROFIT', stopPrice: targetTPPrice, price: targetTPPrice });
+            const resSL = await binanceRequest('POST', '/fapi/v1/order', { ...limitTriggerParams, type: 'STOP', stopPrice: targetSLPrice, price: targetSLPrice });
+            
+            if (resTP && resSL) {
+                pp2Success = true;
+                localData.tpSlMode = 2;
+                botActivePositions.set(localPosKey, localData);
+                console.log(`✅ [PP2 THÀNH CÔNG] Kích hoạt cấu trúc TP/SL Tầng 2 ReduceOnly GTC thành công cho ${symbol}.`);
+                return;
+            }
+        } catch (err) {
+            console.warn(`⚠️ [PP2 THẤT BẠI] Sàn tiếp tục từ chối cấu trúc lệnh Tầng 2 cho ${symbol}. Mã lỗi: ${err.code || JSON.stringify(err)}`);
         }
-    } catch (e) {
-        addBotLog(`❌ [THẤT BẠI] Lỗi thiết lập SL Market cho ${symbol}: ${e.msg || e.message}`, 'error');
+
+        // ====================================================================
+        // [PP3] TẦNG 3 — HẠ CẤP 2: SOFTWARE EMERGENCY MONITOR (Canh bằng phần mềm)
+        // ====================================================================
+        if (!pp2Success) {
+            addBotLog(`🚨 [CẢNH BÁO PP3] Sàn chặn toàn bộ API điều kiện của ${symbol}. Ép bot chuyển sang chế độ bảo vệ phần mềm Tầng 3!`, 'warning');
+            localData.tpSlMode = 3; // Kích hoạt cờ 3 để priceMonitor() chủ động so giá và gọi lệnh Market
+            botActivePositions.set(localPosKey, localData);
+            
+            // Xác thực xem cờ đã ghi nhận vào RAM thành công chưa để phòng vệ rủi ro trống bộ nhớ
+            const verifyData = botActivePositions.get(localPosKey);
+            if (verifyData && verifyData.tpSlMode === 3) {
+                console.log(`🛡️ [PP3 THÀNH CÔNG] Đã cấu hình khóa bảo vệ mềm thành công trong RAM cho Token ${symbol}.`);
+                return;
+            }
+
+            // ====================================================================
+            // [PP4] TẦNG 4 — ĐOÀN CUỐI BI THƯƠNG: EMERGENCY FORCE CLOSE MARKET IMMEDIATELY
+            // ====================================================================
+            // Nếu không ghi nổi dữ liệu vào RAM hoặc lỗi luồng bất định, bắt buộc phải cắt lệnh Market ngay lập tức, không cho phép vị thế Naked tự sinh tự diệt.
+            addBotLog(`🚨 [CHÍ MẠNG] Sập toàn bộ 3 tầng bảo vệ. Kích hoạt TẦNG KHẨN CẤP 4 ĐÓNG NGAY VỊ THẾ CỦA ${symbol}!`, 'error');
+            const forceClosed = await closePositionMarket(localData, "PP4_EMERGENCY_FORCE_CLOSE");
+            if (forceClosed) {
+                botActivePositions.delete(localPosKey);
+            }
+        }
     }
 }
 
@@ -431,7 +533,6 @@ async function init() {
 }
 init();
 
-// FIX BUG BLACKLIST MEMORY (MỤC 8): Quét dọn giải phóng bộ nhớ RAM cho mảng Blacklist định kỳ mỗi 60s
 setInterval(() => {
     const now = Date.now();
     for (const s in status.blackList) {
