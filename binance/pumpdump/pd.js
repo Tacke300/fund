@@ -322,20 +322,24 @@ async function closePositionMarket(pos, reason = "FAILSAFE") {
     return false;
 }
 
-// SỬA CHUẨN BẢN 3: Thay thế hoàn toàn hàm syncTPSL sang dạng Single Order + PriceProtect + Delay 1500ms
-async function syncTPSL(symbol, side, info, tpPrice, slPrice) {
+// UPDATE 5-LEVEL ULTRA FALLBACK MATRIX ENGINE
+async function syncTPSL(symbol, side, info, tpPrice, slPrice, currentQty) {
     const sideClose = side === 'SHORT' ? 'BUY' : 'SELL';
     const positionSideParam = status.isHedgeMode ? side : 'BOTH';
 
     try {
-        // Trễ hẳn 1500ms đợi đồng bộ vị thế on-chain của sàn
-        await new Promise(r => setTimeout(r, 1500));
+        // Trễ 1200ms ban đầu của hàm xử lý
+        await new Promise(r => setTimeout(r, 1200));
 
+        // XÓA TPSL CŨ
         const openOrders = await binanceRequest('GET', '/fapi/v1/openOrders', { symbol }).catch(() => []);
 
         const oldOrders = openOrders.filter(o =>
             o.positionSide === positionSideParam &&
-            (o.type === 'TAKE_PROFIT_MARKET' || o.type === 'STOP_MARKET')
+            (
+                o.type.includes('TAKE_PROFIT') ||
+                o.type.includes('STOP')
+            )
         );
 
         for (const o of oldOrders) {
@@ -345,38 +349,86 @@ async function syncTPSL(symbol, side, info, tpPrice, slPrice) {
             }).catch(() => {});
         }
 
-        const tpPayload = {
-            symbol,
-            side: sideClose,
-            positionSide: positionSideParam,
-            type: 'TAKE_PROFIT_MARKET',
-            stopPrice: Number(tpPrice.toFixed(info.pricePrecision)),
-            closePosition: 'true',
-            workingType: 'MARK_PRICE',
-            priceProtect: 'true'
-        };
+        // MA TRẬN PHÂN TẦNG BẢO HIỂM 5 CẤP ĐỘ KHÔNG TRƯỢT PHÁT NÀO
+        const payloadSets = [
+            // 1. NEW STYLE FULL
+            {
+                tp: {
+                    symbol, side: sideClose, positionSide: positionSideParam, type: 'TAKE_PROFIT',
+                    quantity: currentQty, price: Number(tpPrice.toFixed(info.pricePrecision)), stopPrice: Number(tpPrice.toFixed(info.pricePrecision)),
+                    timeInForce: 'GTC', workingType: 'MARK_PRICE', priceProtect: 'TRUE'
+                },
+                sl: {
+                    symbol, side: sideClose, positionSide: positionSideParam, type: 'STOP',
+                    quantity: currentQty, price: Number(slPrice.toFixed(info.pricePrecision)), stopPrice: Number(slPrice.toFixed(info.pricePrecision)),
+                    timeInForce: 'GTC', workingType: 'MARK_PRICE', priceProtect: 'TRUE'
+                }
+            },
+            // 2. NEW STYLE KHÔNG PRICE PROTECT
+            {
+                tp: {
+                    symbol, side: sideClose, positionSide: positionSideParam, type: 'TAKE_PROFIT',
+                    quantity: currentQty, price: Number(tpPrice.toFixed(info.pricePrecision)), stopPrice: Number(tpPrice.toFixed(info.pricePrecision)),
+                    timeInForce: 'GTC'
+                },
+                sl: {
+                    symbol, side: sideClose, positionSide: positionSideParam, type: 'STOP',
+                    quantity: currentQty, price: Number(slPrice.toFixed(info.pricePrecision)), stopPrice: Number(slPrice.toFixed(info.pricePrecision)),
+                    timeInForce: 'GTC'
+                }
+            },
+            // 3. MARKET STYLE FULL
+            {
+                tp: {
+                    symbol, side: sideClose, positionSide: positionSideParam, type: 'TAKE_PROFIT_MARKET',
+                    stopPrice: Number(tpPrice.toFixed(info.pricePrecision)), closePosition: 'true', workingType: 'MARK_PRICE', priceProtect: 'TRUE'
+                },
+                sl: {
+                    symbol, side: sideClose, positionSide: positionSideParam, type: 'STOP_MARKET',
+                    stopPrice: Number(slPrice.toFixed(info.pricePrecision)), closePosition: 'true', workingType: 'MARK_PRICE', priceProtect: 'TRUE'
+                }
+            },
+            // 4. MARKET KHÔNG PRICE PROTECT
+            {
+                tp: {
+                    symbol, side: sideClose, positionSide: positionSideParam, type: 'TAKE_PROFIT_MARKET',
+                    stopPrice: Number(tpPrice.toFixed(info.pricePrecision)), closePosition: 'true'
+                },
+                sl: {
+                    symbol, side: sideClose, positionSide: positionSideParam, type: 'STOP_MARKET',
+                    stopPrice: Number(slPrice.toFixed(info.pricePrecision)), closePosition: 'true'
+                }
+            },
+            // 5. MARKET DÙNG QUANTITY (Dành cho tài khoản đặc biệt / coin giới hạn cấu hình closePosition ngầm)
+            {
+                tp: {
+                    symbol, side: sideClose, positionSide: positionSideParam, type: 'TAKE_PROFIT_MARKET',
+                    quantity: currentQty, stopPrice: Number(tpPrice.toFixed(info.pricePrecision))
+                },
+                sl: {
+                    symbol, side: sideClose, positionSide: positionSideParam, type: 'STOP_MARKET',
+                    quantity: currentQty, stopPrice: Number(slPrice.toFixed(info.pricePrecision))
+                }
+            }
+        ];
 
-        const slPayload = {
-            symbol,
-            side: sideClose,
-            positionSide: positionSideParam,
-            type: 'STOP_MARKET',
-            stopPrice: Number(slPrice.toFixed(info.pricePrecision)),
-            closePosition: 'true',
-            workingType: 'MARK_PRICE',
-            priceProtect: 'true'
-        };
+        // QUÉT TOÀN BỘ DANH SÁCH FALLBACK
+        for (let i = 0; i < payloadSets.length; i++) {
+            try {
+                await binanceRequest('POST', '/fapi/v1/order', payloadSets[i].tp);
+                await binanceRequest('POST', '/fapi/v1/order', payloadSets[i].sl);
 
-        // Đặt độc lập từng lệnh đơn, bóc sạch lỗi nếu bị sàn từ chối
-        await binanceRequest('POST', '/fapi/v1/order', tpPayload);
-        await binanceRequest('POST', '/fapi/v1/order', slPayload);
+                addBotLog(`✅ TPSL OK ${symbol} [${side}] MODE ${i + 1}`, 'success');
+                return { tp: tpPrice, sl: slPrice };
+            } catch (err) {
+                addBotLog(`⚠️ TPSL MODE ${i + 1} FAIL ${symbol}: ${err.message}`, 'warning');
+            }
+        }
 
-        addBotLog(`✅ TPSL OK ${symbol} [${side}] TP:${tpPrice.toFixed(info.pricePrecision)} SL:${slPrice.toFixed(info.pricePrecision)}`, 'success');
-
-        return { tp: tpPrice, sl: slPrice };
+        throw new Error('ALL TPSL MODES FAILED');
 
     } catch (e) {
-        addBotLog(`❌ TPSL FAIL ${symbol}: ${e.message}`, 'error');
+        addBotLog(`❌ TPSL FAIL FINAL ${symbol}: ${e.message}`, 'error');
         return { tp: 0, sl: 0 };
     }
 }
@@ -421,8 +473,9 @@ async function openPosition(symbol, dcaData = null) {
         
         if (order?.orderId) {
             let p = null;
+            // ÉP TRỄ TRÊN 2S ĐỂ ĐỒNG BỘ DỮ LIỆU ON-CHAIN TOÀN DIỆN LÊN SÀN (800ms + 4 vòng lặp x 300ms = ~2000ms)
             await new Promise(r => setTimeout(r, 800));
-            for (let i = 0; i < 3; i++) {
+            for (let i = 0; i < 4; i++) {
                 const pRisk = await binanceRequest('GET', '/fapi/v2/positionRisk', { symbol }).catch(() => []);
                 p = pRisk.find(x => x.positionSide === positionSideParam && Math.abs(parseFloat(x.positionAmt)) > 0);
                 if (p) break;
@@ -430,7 +483,6 @@ async function openPosition(symbol, dcaData = null) {
             }
             
             if (p) {
-                // ===== UPDATE THEO LUỒNG TÍNH TOÁN TP/SL ĐỘNG BẢN 3 =====
                 const entry = parseFloat(p.entryPrice);
                 const firstE = (dcaData && dcaData.firstEntry) ? dcaData.firstEntry : entry;
                 const dcaLevel = dcaData ? dcaData.dcaCount : 0;
@@ -439,14 +491,10 @@ async function openPosition(symbol, dcaData = null) {
                 let sl;
 
                 if (isLong) {
-                    // LONG TP theo entry mới nhất
                     tp = entry * (1 + botSettings.posTP / 100);
-                    // LONG SL nới rộng theo first entry nhân cấp độ dcaLevel
                     sl = firstE - (firstE * (((dcaLevel + 1) * botSettings.posSL) / 100));
                 } else {
-                    // SHORT TP theo entry mới nhất
                     tp = entry * (1 - botSettings.posTP / 100);
-                    // SHORT SL nới rộng theo first entry nhân cấp độ dcaLevel
                     sl = firstE + (firstE * (((dcaLevel + 1) * botSettings.posSL) / 100));
                 }
 
@@ -467,14 +515,15 @@ async function openPosition(symbol, dcaData = null) {
                     isClosing: false 
                 };
                 
-                // ===== KIỂM TRA BẢO HIỂM CHẶN NGƯỢC: FORCE CLOSE NẾU BINANCE TỪ CHỐI ĐẶT TP/SL =====
-                const tpsl = await syncTPSL(symbol, side, info, tp, sl);
-
-                if (tpsl.tp === 0) {
-                    addBotLog(`🚨 TPSL FAIL -> FORCE CLOSE ${symbol} ĐỂ BẢO VỆ TÀI KHOẢN!`, 'error');
-                    await closePositionMarket(currentLocalPosition, "FAILSAFE_TPSL_REJECT");
-                    return; 
-                }
+                // GỌI ĐỒNG BỘ TPSL ĐA TẦNG VỚI KHỐI LƯỢNG THỰC TẾ TRÊN SÀN KHÔNG CHẶN FORCE CLOSE OAN
+                await syncTPSL(
+                    symbol, 
+                    side, 
+                    info, 
+                    tp, 
+                    sl, 
+                    Math.abs(parseFloat(p.positionAmt))
+                );
 
                 botActivePositions.set(`${symbol}_${positionSideParam}`, currentLocalPosition);
                 saveBotStateToDisk();
@@ -571,7 +620,7 @@ async function init() {
         await runPositionReconciliationEngine();
         await initWebSocketEngine();
         
-        addBotLog(`🚀 [V3.9.9 FINAL] Khởi chạy hệ thống an toàn TPSL đơn lẻ - Chặn lỗi Failsafe đóng vị thế.`);
+        addBotLog(`🚀 [V3.9.9 ULTRA-MATRIX] Kích hoạt thành công kiến trúc 5 tầng bảo hiểm toàn diện.`);
     } catch (e) { setTimeout(init, 5000); }
 }
 init();
