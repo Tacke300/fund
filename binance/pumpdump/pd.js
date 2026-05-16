@@ -19,9 +19,29 @@ const binanceApi = axios.create({
     headers: { 'X-MBX-APIKEY': API_KEY, 'Content-Type': 'application/x-www-form-urlencoded' } 
 });
 
-// SYSTEM STATES
-let botSettings = { isRunning: false, maxPositions: 3, invValue: "1%", minVol: 6.5, posTP: 1.2, posSL: 10.0, maxDCA: 5 };
-let status = { botLogs: [], candidatesList: [], blackList: {}, botClosedCount: 0, botPnLClosed: 0, exchangeInfo: {}, isReady: false, isHedgeMode: true };
+// ====================================================================
+// SYSTEM STATES (TRẠNG THÁI HỆ THỐNG TOÀN CỤC)
+// ====================================================================
+let botSettings = { 
+    isRunning: false, 
+    maxPositions: 3, 
+    invValue: "1%", 
+    minVol: 6.5, 
+    posTP: 1.2, 
+    posSL: 10.0, 
+    maxDCA: 5 
+};
+
+let status = { 
+    botLogs: [], 
+    candidatesList: [], 
+    blackList: {}, 
+    botClosedCount: 0, 
+    botPnLClosed: 0, 
+    exchangeInfo: {}, 
+    isReady: false, 
+    isHedgeMode: true 
+};
 
 let botActivePositions = new Map(); 
 let openingSymbols = new Set();     
@@ -36,7 +56,7 @@ let lastMarkWsTime = Date.now();
 const leverageCache = new Set();    
 
 // ====================================================================
-// UTILS & STORAGE
+// UTILS & STORAGE (TIỆN ÍCH VÀ LƯU TRỮ DỮ LIỆU)
 // ====================================================================
 function getPrecision(stepSize) {
     const step = stepSize.toString();
@@ -46,7 +66,14 @@ function getPrecision(stepSize) {
 
 function writeRawDebugLog(type, endpoint, payload, responseOrError, latency) {
     const logTime = new Date().toISOString();
-    fs.appendFile(LOG_FILE_PATH, JSON.stringify({ time: logTime, type, endpoint, requestData: payload, latencyMs: latency, result: responseOrError }) + '\n', () => {});
+    fs.appendFile(LOG_FILE_PATH, JSON.stringify({ 
+        time: logTime, 
+        type, 
+        endpoint, 
+        requestData: payload, 
+        latencyMs: latency, 
+        result: responseOrError 
+    }) + '\n', () => {});
 }
 
 function addBotLog(msg, type = 'info') {
@@ -95,7 +122,7 @@ function loadBotStateFromDisk() {
             if (parsed.botClosedCount) status.botClosedCount = parsed.botClosedCount;
             if (parsed.botPnLClosed) status.botPnLClosed = parsed.botPnLClosed;
             if (parsed.botSettings) botSettings = parsed.botSettings;
-            addBotLog("💾 [RECOVERY] Trạng thái hệ thống đã được phục hồi thành công.");
+            addBotLog("💾 [RECOVERY] Trạng thái hệ thống đã được phục hồi thành công từ đĩa.");
         }
     } catch (e) {}
 }
@@ -104,14 +131,14 @@ function runLocked(symbol, asyncTask) {
     if (!symbolMutexes.has(symbol)) symbolMutexes.set(symbol, Promise.resolve());
     const currentPromise = symbolMutexes.get(symbol);
     const nextPromise = currentPromise.then(async () => {
-        try { await asyncTask(); } catch (e) { console.error(`❌ Lỗi Mutex ${symbol}:`, e); }
+        try { await asyncTask(); } catch (e) { console.error(`❌ Lỗi Hàng đợi Mutex ${symbol}:`, e); }
     });
     symbolMutexes.set(symbol, nextPromise);
     return nextPromise;
 }
 
 // ====================================================================
-// RATE LIMIT NETWORK CONTROL
+// NETWORK CONTROL & RATE LIMIT (KIỂM SOÁT LUỒNG MẠNG TRÁNH BAN IP)
 // ====================================================================
 let lastRequestTime = Date.now();
 async function binanceRequest(method, endpoint, data = {}) {
@@ -127,7 +154,7 @@ async function binanceRequest(method, endpoint, data = {}) {
     const mergedData = { ...data, timestamp, recvWindow: 10000 };
     
     let queryString = '';
-    if (endpoint === '/fapi/v1/batchOrders' && mergedData.batchOrders) {
+    if ((endpoint === '/fapi/v1/batchOrders' || endpoint === '/fapi/v1/algo/order') && mergedData.batchOrders) {
         const baseQuery = `batchOrders=${encodeURIComponent(mergedData.batchOrders)}&timestamp=${mergedData.timestamp}&recvWindow=${mergedData.recvWindow}`;
         const signature = crypto.createHmac('sha256', SECRET_KEY).update(baseQuery).digest('hex');
         queryString = `${baseQuery}&signature=${signature}`;
@@ -159,7 +186,7 @@ async function binanceRequest(method, endpoint, data = {}) {
 }
 
 // ====================================================================
-// WEBSOCKET ENGINE
+// WEBSOCKET CORE ENGINE & WATCHDOG (ĐỘNG CƠ ĐỒNG BỘ DỮ LIỆU)
 // ====================================================================
 async function initWebSocketEngine() {
     try {
@@ -193,7 +220,7 @@ setInterval(() => {
     if (!status.isReady) return;
     const now = Date.now();
     if (now - lastUserWsTime > 90000 || now - lastMarkWsTime > 90000) {
-        addBotLog("🚨 [WATCHDOG] Trùng luồng stream mất kết nối ngầm. Đang reset lại WS...", "error");
+        addBotLog("🚨 [WATCHDOG] Stream mất kết nối ngầm (Ping/Pong Drop). Đang tái khởi động lại WS...", "error");
         lastUserWsTime = now; lastMarkWsTime = now;
         initWebSocketEngine();
     }
@@ -203,6 +230,7 @@ setInterval(async () => {
     if (listenKey) { await binanceRequest('PUT', '/fapi/v1/listenKey').catch(() => initWebSocketEngine()); }
 }, 20 * 60 * 1000);
 
+// TẦNG 5 (RECOVERY ENGINE - GIÁO ÁN 4): ACCOUNT_UPDATE WEBSOCKET SYNC
 function handleUserDataEvent(e) {
     if (e.e === 'ACCOUNT_UPDATE') {
         for (const p of e.a.P) {
@@ -222,10 +250,12 @@ function handleUserDataEvent(e) {
     }
 }
 
+// TẦNG 3 (LOCAL TPSL ENGINE - GIÁO ÁN 1): GIÁM SÁT REALTIME MARK PRICE WEBSOCKET
 function handleGlobalMarkPriceEvent(dataArr) {
     if (!status.isReady || !botSettings.isRunning) return; 
     for (const item of dataArr) {
-        const longKey = `${item.s}_LONG`; const shortKey = `${item.s}_SHORT`;
+        const longKey = `${item.s}_LONG`; 
+        const shortKey = `${item.s}_SHORT`;
         if (botActivePositions.has(longKey)) checkPriceThresholdAndTriggerFailsafe(longKey, parseFloat(item.p));
         if (botActivePositions.has(shortKey)) checkPriceThresholdAndTriggerFailsafe(shortKey, parseFloat(item.p));
     }
@@ -243,27 +273,46 @@ async function checkPriceThresholdAndTriggerFailsafe(key, markP) {
         b.isClosing = true; 
         botActivePositions.set(key, b);
         
+        // Nếu vị thế đang chạy thuần trên nền tảng Local Core do sàn lỗi chặn đặt lệnh
+        // Thì nổ súng ép dập ngay lập tức (100ms), ngược lại tạo trễ 9.5s xem sàn tự khớp được lệnh T1/T2 không
+        const dynamicDelay = b.deployedArchitecture === 'T3_LOCAL_ENGINE' ? 100 : 9500;
+
         setTimeout(() => {
             runLocked(b.symbol, async () => {
                 const freshCheck = botActivePositions.get(key);
                 if (freshCheck) {
-                    addBotLog(`⏰ [FAILSAFE] Vị thế ${b.symbol} chạm vạch quá 10s chưa mất. Khớp lệnh MARKET dập đóng luôn!`, 'warning');
-                    const ok = await closePositionMarket(freshCheck, "FAILSAFE_TIMEOUT");
-                    if (ok) { botActivePositions.delete(key); saveBotStateToDisk(); } 
-                    else { freshCheck.isClosing = false; botActivePositions.set(key, freshCheck); }
+                    const symbolInfo = status.exchangeInfo[b.symbol];
+                    const infoParam = {
+                        pricePrecision: symbolInfo.pricePrecision,
+                        quantityPrecision: getPrecision(symbolInfo.stepSize),
+                        isHedgeMode: status.isHedgeMode
+                    };
+
+                    addBotLog(`⏰ [T3 EXECUTOR] Ngưỡng giá vi phạm quá hạn mức an toàn. Kích hoạt TẦNG 4 dập vị thế!`, 'warning');
+                    const ok = await runFailsafeEmergencyClose(b.symbol, freshCheck.side, freshCheck.currentQty, infoParam);
+                    if (ok) { 
+                        botActivePositions.delete(key); 
+                        saveBotStateToDisk(); 
+                    } else { 
+                        freshCheck.isClosing = false; 
+                        botActivePositions.set(key, freshCheck); 
+                    }
                 }
             });
-        }, 10000);
+        }, dynamicDelay);
     }
 }
 
+// TẦNG 5 (RECOVERY ENGINE - GIÁO ÁN 3): QUÉT TRADES HÒA MẠNG QUYẾT TOÁN SỐ LIỆU THỰC TẾ
 async function executePositionClosureAccounting(symbol, positionSideParam, key, b) {
     try {
         const trades = await binanceRequest('GET', '/fapi/v1/userTrades', { symbol, limit: 30 }).catch(() => []);
         const recent = trades.filter(t => (Date.now() + serverTimeOffset - t.time) < 90000 && t.positionSide === positionSideParam);
-        let totalR = 0; recent.forEach(t => totalR += parseFloat(t.realizedPnl));
+        let totalR = 0; 
+        recent.forEach(t => totalR += parseFloat(t.realizedPnl));
         
-        status.botClosedCount++; status.botPnLClosed += totalR;
+        status.botClosedCount++; 
+        status.botPnLClosed += totalR;
 
         if (totalR > (-b.firstMargin * 0.05)) {
             botActivePositions.delete(key);
@@ -286,153 +335,277 @@ async function executePositionClosureAccounting(symbol, positionSideParam, key, 
                     await openPosition(symbol, { ...b, dcaCount: jump, margin: b.firstMargin * newMultiplier });
                 } else {
                     const reverseSide = b.side === 'SHORT' ? 'LONG' : 'SHORT';
-                    addBotLog(`🚨 [QUAY XE] Chạm trần maxDCA. Đảo ngược lệnh x20 margin gốc với ${symbol}`);
+                    addBotLog(`🚨 [QUAY XE] Chạm trần maxDCA. Đảo ngược lệnh x20 vốn gốc với ${symbol}`);
                     await openPosition(symbol, { ...b, side: reverseSide, isFinalLong: (reverseSide === 'LONG'), dcaCount: 0, margin: b.firstMargin * 20 });
                 }
             }
         }
-    } catch (e) { botActivePositions.delete(key); }
-    finally { saveBotStateToDisk(); }
-}
-
-// ====================================================================
-// ENGINE CORE TRADING
-// ====================================================================
-async function closePositionMarket(pos, reason = "FAILSAFE") {
-    const sideClose = pos.side === 'SHORT' ? 'BUY' : 'SELL';
-    const positionSideParam = status.isHedgeMode ? pos.side : 'BOTH';
-    try {
-        const freshRisk = await binanceRequest('GET', '/fapi/v2/positionRisk', { symbol: pos.symbol });
-        const realPos = freshRisk.find(p => p.positionSide === positionSideParam && Math.abs(parseFloat(p.positionAmt)) > 0);
-        if (!realPos) return true;
-
-        const freshQty = Math.abs(parseFloat(realPos.positionAmt));
-        const info = status.exchangeInfo[pos.symbol];
-        const finalExactQty = Number(freshQty.toFixed(getPrecision(info.stepSize)));
-
-        if (finalExactQty <= 0) return true;
-        const systemClientOrderId = `bot-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
-
-        const res = await binanceRequest('POST', '/fapi/v1/order', {
-            symbol: pos.symbol, side: sideClose, positionSide: positionSideParam,
-            type: 'MARKET', quantity: finalExactQty, newClientOrderId: systemClientOrderId
-        });
-        if (res?.orderId) return true;
-    } catch (e) {}
-    return false;
-}
-
-// UPDATE 5-LEVEL ULTRA FALLBACK MATRIX ENGINE
-async function syncTPSL(symbol, side, info, tpPrice, slPrice, currentQty) {
-    const sideClose = side === 'SHORT' ? 'BUY' : 'SELL';
-    const positionSideParam = status.isHedgeMode ? side : 'BOTH';
-
-    try {
-        // Trễ 1200ms ban đầu của hàm xử lý
-        await new Promise(r => setTimeout(r, 1200));
-
-        // XÓA TPSL CŨ
-        const openOrders = await binanceRequest('GET', '/fapi/v1/openOrders', { symbol }).catch(() => []);
-
-        const oldOrders = openOrders.filter(o =>
-            o.positionSide === positionSideParam &&
-            (
-                o.type.includes('TAKE_PROFIT') ||
-                o.type.includes('STOP')
-            )
-        );
-
-        for (const o of oldOrders) {
-            await binanceRequest('DELETE', '/fapi/v1/order', {
-                symbol,
-                orderId: o.orderId
-            }).catch(() => {});
-        }
-
-        // MA TRẬN PHÂN TẦNG BẢO HIỂM 5 CẤP ĐỘ KHÔNG TRƯỢT PHÁT NÀO
-        const payloadSets = [
-            // 1. NEW STYLE FULL
-            {
-                tp: {
-                    symbol, side: sideClose, positionSide: positionSideParam, type: 'TAKE_PROFIT',
-                    quantity: currentQty, price: Number(tpPrice.toFixed(info.pricePrecision)), stopPrice: Number(tpPrice.toFixed(info.pricePrecision)),
-                    timeInForce: 'GTC', workingType: 'MARK_PRICE', priceProtect: 'TRUE'
-                },
-                sl: {
-                    symbol, side: sideClose, positionSide: positionSideParam, type: 'STOP',
-                    quantity: currentQty, price: Number(slPrice.toFixed(info.pricePrecision)), stopPrice: Number(slPrice.toFixed(info.pricePrecision)),
-                    timeInForce: 'GTC', workingType: 'MARK_PRICE', priceProtect: 'TRUE'
-                }
-            },
-            // 2. NEW STYLE KHÔNG PRICE PROTECT
-            {
-                tp: {
-                    symbol, side: sideClose, positionSide: positionSideParam, type: 'TAKE_PROFIT',
-                    quantity: currentQty, price: Number(tpPrice.toFixed(info.pricePrecision)), stopPrice: Number(tpPrice.toFixed(info.pricePrecision)),
-                    timeInForce: 'GTC'
-                },
-                sl: {
-                    symbol, side: sideClose, positionSide: positionSideParam, type: 'STOP',
-                    quantity: currentQty, price: Number(slPrice.toFixed(info.pricePrecision)), stopPrice: Number(slPrice.toFixed(info.pricePrecision)),
-                    timeInForce: 'GTC'
-                }
-            },
-            // 3. MARKET STYLE FULL
-            {
-                tp: {
-                    symbol, side: sideClose, positionSide: positionSideParam, type: 'TAKE_PROFIT_MARKET',
-                    stopPrice: Number(tpPrice.toFixed(info.pricePrecision)), closePosition: 'true', workingType: 'MARK_PRICE', priceProtect: 'TRUE'
-                },
-                sl: {
-                    symbol, side: sideClose, positionSide: positionSideParam, type: 'STOP_MARKET',
-                    stopPrice: Number(slPrice.toFixed(info.pricePrecision)), closePosition: 'true', workingType: 'MARK_PRICE', priceProtect: 'TRUE'
-                }
-            },
-            // 4. MARKET KHÔNG PRICE PROTECT
-            {
-                tp: {
-                    symbol, side: sideClose, positionSide: positionSideParam, type: 'TAKE_PROFIT_MARKET',
-                    stopPrice: Number(tpPrice.toFixed(info.pricePrecision)), closePosition: 'true'
-                },
-                sl: {
-                    symbol, side: sideClose, positionSide: positionSideParam, type: 'STOP_MARKET',
-                    stopPrice: Number(slPrice.toFixed(info.pricePrecision)), closePosition: 'true'
-                }
-            },
-            // 5. MARKET DÙNG QUANTITY (Dành cho tài khoản đặc biệt / coin giới hạn cấu hình closePosition ngầm)
-            {
-                tp: {
-                    symbol, side: sideClose, positionSide: positionSideParam, type: 'TAKE_PROFIT_MARKET',
-                    quantity: currentQty, stopPrice: Number(tpPrice.toFixed(info.pricePrecision))
-                },
-                sl: {
-                    symbol, side: sideClose, positionSide: positionSideParam, type: 'STOP_MARKET',
-                    quantity: currentQty, stopPrice: Number(slPrice.toFixed(info.pricePrecision))
-                }
-            }
-        ];
-
-        // QUÉT TOÀN BỘ DANH SÁCH FALLBACK
-        for (let i = 0; i < payloadSets.length; i++) {
-            try {
-                await binanceRequest('POST', '/fapi/v1/order', payloadSets[i].tp);
-                await binanceRequest('POST', '/fapi/v1/order', payloadSets[i].sl);
-
-                addBotLog(`✅ TPSL OK ${symbol} [${side}] MODE ${i + 1}`, 'success');
-                return { tp: tpPrice, sl: slPrice };
-            } catch (err) {
-                addBotLog(`⚠️ TPSL MODE ${i + 1} FAIL ${symbol}: ${err.message}`, 'warning');
-            }
-        }
-
-        throw new Error('ALL TPSL MODES FAILED');
-
-    } catch (e) {
-        addBotLog(`❌ TPSL FAIL FINAL ${symbol}: ${e.message}`, 'error');
-        return { tp: 0, sl: 0 };
+    } catch (e) { 
+        botActivePositions.delete(key); 
+    } finally { 
+        saveBotStateToDisk(); 
     }
 }
 
+// ====================================================================
+// ARCHITECTURE LEVEL 1: NORMAL ORDER ROUTER BACKBONE
+// ====================================================================
+async function executeBackboneT1(symbol, sideClose, positionSideParam, info, price, type) {
+    const formattedPrice = Number(price.toFixed(info.pricePrecision));
+    const isTP = type === 'TAKE_PROFIT';
+    
+    const syllabusPool = [
+        // Giáo án 1 & 6: TAKE_PROFIT / STOP (Limit Trigger kiểu mới) + Mark Price + Price Protect đầy đủ
+        {
+            type: isTP ? 'TAKE_PROFIT' : 'STOP',
+            price: formattedPrice, stopPrice: formattedPrice,
+            workingType: 'MARK_PRICE', priceProtect: 'TRUE', timeInForce: 'GTC'
+        },
+        // Giáo án 2 & 8: TAKE_PROFIT_MARKET / STOP_MARKET + closePosition=true + priceProtect=true
+        {
+            type: isTP ? 'TAKE_PROFIT_MARKET' : 'STOP_MARKET',
+            stopPrice: formattedPrice, closePosition: 'true',
+            workingType: 'MARK_PRICE', priceProtect: 'TRUE'
+        },
+        // Giáo án 3 & 9: Loại bỏ PriceProtect hoàn toàn (Tránh sàn từ chối do quét giá mạnh chênh lệch)
+        {
+            type: isTP ? 'TAKE_PROFIT_MARKET' : 'STOP_MARKET',
+            stopPrice: formattedPrice, closePosition: 'true'
+        },
+        // Giáo án 4 & 5: Dạng Quantity mode thủ công kết hợp ReduceOnly (Hỗ trợ tài khoản chạy chế độ One-Way)
+        {
+            type: isTP ? 'TAKE_PROFIT_MARKET' : 'STOP_MARKET',
+            stopPrice: formattedPrice, reduceOnly: 'true'
+        },
+        // Giáo án 7: Ép sử dụng CONTRACT_PRICE (Last Price) thay thế hoàn toàn cho MARK_PRICE cục bộ
+        {
+            type: isTP ? 'TAKE_PROFIT_MARKET' : 'STOP_MARKET',
+            stopPrice: formattedPrice, closePosition: 'true', workingType: 'CONTRACT_PRICE'
+        }
+    ];
+
+    for (let index = 0; index < syllabusPool.length; index++) {
+        try {
+            const basePayload = {
+                symbol,
+                side: sideClose,
+                positionSide: positionSideParam,
+                ...syllabusPool[index]
+            };
+            
+            // Nếu giáo án yêu cầu khai báo khối lượng rõ ràng thay vì đóng tự động
+            if (!basePayload.closePosition && !basePayload.reduceOnly) {
+                basePayload.quantity = info.currentQty;
+            }
+
+            const res = await binanceRequest('POST', '/fapi/v1/order', basePayload);
+            if (res.orderId) {
+                addBotLog(`[TẦNG 1 OK] Khớp Giáo án ${index + 1} cho ${symbol} (${type})`, 'success');
+                return true;
+            }
+        } catch (err) {
+            addBotLog(`[⚠️ TẦNG 1 FAIL] Giáo án ${index + 1} bị Reject: ${err.message}`, 'warning');
+        }
+    }
+    return false;
+}
+
+// ====================================================================
+// ARCHITECTURE LEVEL 2: ALGO ORDER ENGINE BACKBONE
+// ====================================================================
+async function executeBackboneT2(symbol, sideClose, positionSideParam, info, price, type) {
+    const formattedPrice = Number(price.toFixed(info.pricePrecision));
+    const isTP = type === 'TAKE_PROFIT';
+
+    const algoSyllabus = [
+        // Giáo án 1, 3, 5, 6: Cổng thuật toán Algo chuẩn hóa sử dụng MARK_PRICE trigger kết hợp giảm vị thế tự động
+        {
+            algoType: isTP ? 'TAKE_PROFIT_MARKET' : 'STOP_MARKET',
+            triggerPrice: formattedPrice,
+            workingType: 'MARK_PRICE',
+            reduceOnly: 'true'
+        },
+        // Giáo án 2 & 4: Kịch bản rẽ nhánh Algo sử dụng LAST_PRICE (CONTRACT_PRICE) làm điểm kích hoạt
+        {
+            algoType: isTP ? 'TAKE_PROFIT_MARKET' : 'STOP_MARKET',
+            triggerPrice: formattedPrice,
+            workingType: 'CONTRACT_PRICE',
+            reduceOnly: 'true'
+        }
+    ];
+
+    for (let index = 0; index < algoSyllabus.length; index++) {
+        try {
+            const payload = {
+                symbol,
+                side: sideClose,
+                positionSide: positionSideParam,
+                quantity: info.currentQty,
+                ...algoSyllabus[index]
+            };
+
+            const res = await binanceRequest('POST', '/fapi/v1/algo/order', payload);
+            if (res.algoId) {
+                addBotLog(`[TẦNG 2 ALGO OK] Kích hoạt thành công Giáo án Algo ${index + 1} cho ${symbol}`, 'success');
+                return true;
+            }
+        } catch (err) {
+            addBotLog(`[⚠️ TẦNG 2 FAIL] Giáo án Algo ${index + 1} bị loại bỏ: ${err.message}`, 'warning');
+        }
+    }
+    return false;
+}
+
+// ====================================================================
+// ARCHITECTURE LEVEL 4: FAILSAFE DESTRUCTION ENGINE
+// ====================================================================
+async function runFailsafeEmergencyClose(symbol, side, currentQty, info) {
+    addBotLog(`🚨🚨 [KÍCH HOẠT T4 FAILSAFE] Bắt đầu tổng tấn công đóng vị thế cưỡng chế cho ${symbol}`, 'error');
+    const sideClose = side === 'SHORT' ? 'BUY' : 'SELL';
+    const positionSideParam = info.isHedgeMode ? side : 'BOTH';
+    const cleanQty = Number(currentQty.toFixed(info.quantityPrecision));
+
+    if (cleanQty <= 0) return true;
+
+    // Giáo án 1: Ném thẳng lệnh MARKET hủy diệt vị thế bất chấp trượt giá
+    try {
+        const marketRes = await binanceRequest('POST', '/fapi/v1/order', {
+            symbol, side: sideClose, positionSide: positionSideParam,
+            type: 'MARKET', quantity: cleanQty
+        });
+        if (marketRes.orderId) { 
+            addBotLog(`💥 [FAILSAFE T4-G1] San phẳng vị thế bằng lệnh MARKET thành công!`, 'success'); 
+            return true; 
+        }
+    } catch (e) { 
+        addBotLog(`❌ [FAILSAFE T4-G1] Lệnh MARKET thất bại: ${e.message}`, 'error'); 
+    }
+
+    // Giáo án 2: Quét giá nhanh qua cấu trúc lệnh LIMIT - IOC (Immediate Or Cancel) với Slippage 1%
+    try {
+        const currentPriceRisk = await binanceRequest('GET', '/fapi/v2/positionRisk', { symbol }).catch(() => []);
+        const markPrice = parseFloat(currentPriceRisk[0]?.markPrice || 0);
+        if (markPrice > 0) {
+            const slippageFactor = sideClose === 'BUY' ? 1.01 : 0.99;
+            const iocPrice = Number((markPrice * slippageFactor).toFixed(info.pricePrecision));
+
+            const iocRes = await binanceRequest('POST', '/fapi/v1/order', {
+                symbol, side: sideClose, positionSide: positionSideParam,
+                type: 'LIMIT', quantity: cleanQty, price: iocPrice,
+                timeInForce: 'IOC'
+            });
+            if (iocRes.orderId) { 
+                addBotLog(`💥 [FAILSAFE T4-G2] Ép đóng vị thế bằng cấu trúc lệnh IOC thành công!`, 'success'); 
+                return true; 
+            }
+        }
+    } catch (e) { 
+        addBotLog(`❌ [FAILSAFE T4-G2] Lệnh IOC thất bại: ${e.message}`, 'error'); 
+    }
+
+    // Giáo án 3: Lệnh LIMIT - FOK (Fill Or Kill) ép khớp toàn bộ khối lượng hoặc tự hủy lập tức với Slippage 1.5%
+    try {
+        const currentPriceRisk = await binanceRequest('GET', '/fapi/v2/positionRisk', { symbol }).catch(() => []);
+        const markPrice = parseFloat(currentPriceRisk[0]?.markPrice || 0);
+        if (markPrice > 0) {
+            const slippageFactor = sideClose === 'BUY' ? 1.015 : 0.985;
+            const fokPrice = Number((markPrice * slippageFactor).toFixed(info.pricePrecision));
+
+            const fokRes = await binanceRequest('POST', '/fapi/v1/order', {
+                symbol, side: sideClose, positionSide: positionSideParam,
+                type: 'LIMIT', quantity: cleanQty, price: fokPrice,
+                timeInForce: 'FOK'
+            });
+            if (fokRes.orderId) { 
+                addBotLog(`💥 [FAILSAFE T4-G3] Hấp thụ toàn bộ thanh khoản qua lệnh FOK thành công!`, 'success'); 
+                return true; 
+            }
+        }
+    } catch (e) { 
+        addBotLog(`❌ [FAILSAFE T4-G4] Lệnh FOK thất bại: ${e.message}`, 'error'); 
+    }
+
+    // Giáo án 4: Kỹ thuật Xẻ nhỏ cấu trúc khối lượng thành 4 mảnh (Slicing Position) xử lý nghẽn lệnh lớn
+    try {
+        addBotLog(`⚡ [FAILSAFE T4-G4] Phân rã khối lượng tổng thể thành 4 phần nhỏ nhằm xả hàng cứu trợ...`, 'warning');
+        const sliceQty = Number((cleanQty / 4).toFixed(info.quantityPrecision));
+        if (sliceQty > 0) {
+            for (let chunk = 1; chunk <= 4; chunk++) {
+                await binanceRequest('POST', '/fapi/v1/order', {
+                    symbol, side: sideClose, positionSide: positionSideParam,
+                    type: 'MARKET', quantity: sliceQty
+                }).catch(() => addBotLog(`Lỗi thanh khoản khi xả mảnh thứ ${chunk}`));
+            }
+            return true;
+        }
+    } catch (e) {}
+
+    return false;
+}
+
+// ROUTER ĐIỀU PHỐI ĐA KIẾN TRÚC TOÀN DIỆN THAY THẾ TOÀN BỘ BẢN CŨ
+async function syncTPSLMultiArchitecture(symbol, side, info, tpPrice, slPrice, currentQty) {
+    const sideClose = side === 'SHORT' ? 'BUY' : 'SELL';
+    const positionSideParam = info.isHedgeMode ? side : 'BOTH';
+
+    const payloadInfo = {
+        currentQty,
+        pricePrecision: info.pricePrecision,
+        quantityPrecision: info.quantityPrecision
+    };
+
+    try {
+        // TẦNG 5 (RECOVERY ENGINE - GIÁO ÁN 2): ĐỒNG BỘ VÀ XOÁ TOÀN BỘ LỆNH ĐIỀU KIỆN MA ĐANG TREO TRÊN SÀN
+        const openOrders = await binanceRequest('GET', '/fapi/v1/openOrders', { symbol }).catch(() => []);
+        const oldOrders = openOrders.filter(o => o.positionSide === positionSideParam && (o.type.includes('TAKE_PROFIT') || o.type.includes('STOP')));
+        
+        for (const o of oldOrders) {
+            await binanceRequest('DELETE', '/fapi/v1/order', { symbol, orderId: o.orderId }).catch(() => {});
+        }
+
+        addBotLog(`🔄 Triển khai cấu trúc bảo vệ đa nền tảng cho ${symbol} | Khối lượng: ${currentQty}`);
+
+        // --------------------------------------------------------------------
+        // TẦNG 1: KIẾN TRÚC HỆ THỐNG CỔNG LỆNH THƯỜNG (NORMAL ORDER ENGINE)
+        // --------------------------------------------------------------------
+        addBotLog(`[TUYẾN 1] Kích hoạt Tầng 1: Normal Conditional API Router...`);
+        const t1TpOk = await executeBackboneT1(symbol, sideClose, positionSideParam, payloadInfo, tpPrice, 'TAKE_PROFIT');
+        const t1SlOk = await executeBackboneT1(symbol, sideClose, positionSideParam, payloadInfo, slPrice, 'STOP');
+
+        if (t1TpOk && t1SlOk) {
+            addBotLog(`🎯 [HOÀN THÀNH V1] Lưới bảo hiểm vị thế cấu hình AN TOÀN trên cổng T1.`, 'success');
+            return { tp: tpPrice, sl: slPrice, architecture: 'T1_NORMAL' };
+        }
+
+        // --------------------------------------------------------------------
+        // TẦNG 2: KIẾN TRÚC CỔNG THUẬT TOÁN ĐỘC LẬP (ALGO API ENGINE)
+        // --------------------------------------------------------------------
+        addBotLog(`🚨 [MẤT BẢO VỆ T1] Chuyển đổi cơ sở hạ tầng sang TẦNG 2: Algo Order API Core...`, 'error');
+        const t2TpOk = await executeBackboneT2(symbol, sideClose, positionSideParam, payloadInfo, tpPrice, 'TAKE_PROFIT');
+        const t2SlOk = await executeBackboneT2(symbol, sideClose, positionSideParam, payloadInfo, slPrice, 'STOP');
+
+        if (t2TpOk && t2SlOk) {
+            addBotLog(`🎯 [HOÀN THÀNH V2] Trục vớt vị thế thành công thông qua hạ tầng T2 ALGO.`, 'success');
+            return { tp: tpPrice, sl: slPrice, architecture: 'T2_ALGO' };
+        }
+
+        // --------------------------------------------------------------------
+        // TẦNG 3: KIẾN TRÚC GIÁM SÁT ĐƠN TUYẾN NỘI BỘ (LOCAL WS CORE)
+        // --------------------------------------------------------------------
+        addBotLog(`🚨🚨 [SẬP GÃY TOÀN BỘ CỔNG ĐIỀU KIỆN CỦA SÀN] Khởi động chế độ phòng vệ TẦNG 3.`, 'error');
+        addBotLog(`🎯 [CẤT CÁNH T3] Chuyển giao toàn quyền giám sát cho Local Websocket Core Engine. Bot tự quản lý ngưỡng giá va chạm nội bộ!`, 'warning');
+        
+        return { tp: tpPrice, sl: slPrice, architecture: 'T3_LOCAL_ENGINE' };
+
+    } catch (globalError) {
+        addBotLog(`💥 Hệ thống phòng vệ Đa kiến trúc bị đứt gãy nghiêm trọng: ${globalError.message}`, 'error');
+        return { tp: 0, sl: 0, architecture: 'BROKEN' };
+    }
+}
+
+// ====================================================================
+// CORE POSITION OPENING ENGINE (CƠ CHẾ MỞ LỆNH VÀ KIỂM TRA ON-CHAIN)
+// ====================================================================
 async function openPosition(symbol, dcaData = null) {
     if (!status.exchangeInfo[symbol] || !botSettings.isRunning) return;
 
@@ -473,7 +646,7 @@ async function openPosition(symbol, dcaData = null) {
         
         if (order?.orderId) {
             let p = null;
-            // ÉP TRỄ TRÊN 2S ĐỂ ĐỒNG BỘ DỮ LIỆU ON-CHAIN TOÀN DIỆN LÊN SÀN (800ms + 4 vòng lặp x 300ms = ~2000ms)
+            // ÉP TRỄ PHÒNG THỦ TRÊN 2S ĐỒNG BỘ DỮ LIỆU ON-CHAIN TOÀN DIỆN LÊN SÀN (800ms gốc + 4 vòng x 300ms = 2000ms thực tế)
             await new Promise(r => setTimeout(r, 800));
             for (let i = 0; i < 4; i++) {
                 const pRisk = await binanceRequest('GET', '/fapi/v2/positionRisk', { symbol }).catch(() => []);
@@ -512,32 +685,42 @@ async function openPosition(symbol, dcaData = null) {
                     pnl: 0,
                     priceDev: 0,
                     tpSlMode: "FIRST_ENTRY_DYNAMIC",
-                    isClosing: false 
+                    isClosing: false,
+                    deployedArchitecture: 'NONE'
                 };
                 
-                // GỌI ĐỒNG BỘ TPSL ĐA TẦNG VỚI KHỐI LƯỢNG THỰC TẾ TRÊN SÀN KHÔNG CHẶN FORCE CLOSE OAN
-                await syncTPSL(
+                const extendedInfoParam = {
+                    pricePrecision: info.pricePrecision,
+                    quantityPrecision: getPrecision(info.stepSize),
+                    isHedgeMode: status.isHedgeMode
+                };
+
+                // KÍCH HOẠT QUÉT ĐA KIẾN TRÚC ĐA TẦNG CHO COIN MỚI/CŨ/LAUNCHPOOL/SPECIAL PAIR
+                const protectionStatus = await syncTPSLMultiArchitecture(
                     symbol, 
                     side, 
-                    info, 
+                    extendedInfoParam, 
                     tp, 
                     sl, 
                     Math.abs(parseFloat(p.positionAmt))
                 );
 
+                // Đồng bộ hóa trạng thái hạ tầng thực tế vào cấu trúc lưu trữ của bot
+                currentLocalPosition.deployedArchitecture = protectionStatus.architecture;
+
                 botActivePositions.set(`${symbol}_${positionSideParam}`, currentLocalPosition);
                 saveBotStateToDisk();
-                addBotLog(`🎬 Quản lý vị thế thành công: ${symbol} [${side}] (DCA ${dcaLevel}) | Entry mới: ${entry}`);
+                addBotLog(`🎬 Giám sát thành công vị thế: ${symbol} [${side}] (DCA ${dcaLevel}) | Cơ sở hạ tầng bảo vệ: ${protectionStatus.architecture}`);
             }
         }
     } catch (e) { 
         status.blackList[symbol] = Date.now() + (5 * 60 * 1000); 
-        addBotLog(`🚨 [MỞ LỆNH LỖI] Đẩy ${symbol} vào Blacklist lỗi 5m để tránh nghẽn.`, 'error'); 
+        addBotLog(`🚨 [MỞ LỆNH LỖI VỊ THẾ] Đẩy ngay ${symbol} vào Blacklist 5m tránh nghẽn vòng lặp.`, 'error'); 
     }
 }
 
 // ====================================================================
-// ĐỘC LẬP TUYỆT ĐỐI VỚI LỆNH TAY TRÊN SÀN
+// TẦNG 5: RECOVERY ENGINE - GIÁO ÁN 1 & 2 (HÒA MẠNG DỮ LIỆU ĐỘC LẬP)
 // ====================================================================
 async function runPositionReconciliationEngine() {
     try {
@@ -547,7 +730,7 @@ async function runPositionReconciliationEngine() {
         for (const [key, localPos] of botActivePositions.entries()) {
             const existsOnChain = activeOnChainPositions.some(p => `${p.symbol}_${p.positionSide}` === key);
             if (!existsOnChain) {
-                addBotLog(`🚨 [LỆCH VỊ THẾ KHẨN CẤP] Phát hiện ${localPos.symbol} của bot trên sàn đã biến mất, giải phóng bộ nhớ!`, 'warning');
+                addBotLog(`🚨 [RECOVERY CẮT LỆNH MA] Phát hiện vị thế ${localPos.symbol} trên sàn đã biến mất, giải phóng bộ nhớ!`, 'warning');
                 await executePositionClosureAccounting(localPos.symbol, key.split('_')[1], key, localPos);
             } else {
                 const p = activeOnChainPositions.find(x => `${x.symbol}_${x.positionSide}` === key);
@@ -564,20 +747,26 @@ async function runPositionReconciliationEngine() {
 }
 
 // ====================================================================
-// INIT SYSTEM
+// WEB UI & ENDPOINTS (GIAO DIỆN QUẢN LÝ HTTP VÀ REALTIME MONITOR)
 // ====================================================================
 const APP = express(); 
 APP.use(express.json());
 APP.use(express.static(__dirname));
 
-APP.get('/', (req, res) => { res.sendFile(path.join(__dirname, 'index.html')); });
+APP.get('/', (req, res) => { 
+    res.sendFile(path.join(__dirname, 'index.html')); 
+});
 
 APP.get('/api/status', async (req, res) => {
     let walletData = { totalWalletBalance: "0.00", availableBalance: "0.00", totalUnrealizedProfit: "0.00" };
     try {
         const acc = await binanceRequest('GET', '/fapi/v2/account');
         const botUnrealizedPnL = Array.from(botActivePositions.values()).reduce((s, p) => s + (p.pnl || 0), 0);
-        walletData = { totalWalletBalance: parseFloat(acc.totalWalletBalance).toFixed(2), availableBalance: parseFloat(acc.availableBalance).toFixed(2), totalUnrealizedProfit: botUnrealizedPnL.toFixed(2) };
+        walletData = { 
+            totalWalletBalance: parseFloat(acc.totalWalletBalance).toFixed(2), 
+            availableBalance: parseFloat(acc.availableBalance).toFixed(2), 
+            totalUnrealizedProfit: botUnrealizedPnL.toFixed(2) 
+        };
     } catch (e) {}
     
     res.json({ 
@@ -594,6 +783,9 @@ APP.post('/api/settings', (req, res) => {
     res.json({ success: true }); 
 });
 
+// ====================================================================
+// INITIALIZATION KICKSTART (KÍCH HOẠT HỆ THỐNG TOÀN DIỆN)
+// ====================================================================
 async function init() {
     loadBotStateFromDisk(); 
     try {
@@ -613,22 +805,34 @@ async function init() {
             const notionalFilter = s.filters.find(f => f.filterType === 'MIN_NOTIONAL');
             const minNotionalValue = notionalFilter ? parseFloat(notionalFilter.notional || notionalFilter.minNotional) : 5.0;
 
-            temp[s.symbol] = { quantityPrecision: s.quantityPrecision, pricePrecision: s.pricePrecision, stepSize: parseFloat(lot.stepSize), minNotional: minNotionalValue, maxLeverage: b?.brackets[0]?.initialLeverage || 20 };
+            temp[s.symbol] = { 
+                quantityPrecision: s.quantityPrecision, 
+                pricePrecision: s.pricePrecision, 
+                stepSize: parseFloat(lot.stepSize), 
+                minNotional: minNotionalValue, 
+                maxLeverage: b?.brackets[0]?.initialLeverage || 20 
+            };
         });
         
-        status.exchangeInfo = temp; status.isReady = true; 
+        status.exchangeInfo = temp; 
+        status.isReady = true; 
+        
         await runPositionReconciliationEngine();
         await initWebSocketEngine();
         
-        addBotLog(`🚀 [V3.9.9 ULTRA-MATRIX] Kích hoạt thành công kiến trúc 5 tầng bảo hiểm toàn diện.`);
-    } catch (e) { setTimeout(init, 5000); }
+        addBotLog(`🚀 [ENTERPRISE COMPLETE] Toàn bộ hạ tầng phòng thủ 5 Tầng 24 Giáo án đã hoạt động.`);
+    } catch (e) { 
+        setTimeout(init, 5000); 
+    }
 }
 init();
 
+// HỆ THỐNG ĐỒNG BỘ ĐỊNH KỲ CHỐNG LỆCH TRẠNG THÁI ON-CHAIN (TẦNG 5)
 setInterval(() => {
     if (status.isReady) runPositionReconciliationEngine();
 }, 25000);
 
+// VÒNG LẶP QUÉT TÌM KIẾM CƠ HỘI VÀ VÀO LỆNH THẦN TỐC
 setInterval(() => {
     if (!status.isReady || !botSettings.isRunning) return; 
     if (botActivePositions.size >= botSettings.maxPositions || openingSymbols.size > 0) return;
@@ -648,24 +852,32 @@ setInterval(() => {
             openingSymbols.add(can.symbol);
             try { 
                 await openPosition(can.symbol, { isFinalLong: (targetSide === 'LONG'), side: targetSide, dcaCount: 0 }); 
-            } 
-            finally { openingSymbols.delete(can.symbol); }
+            } finally { 
+                openingSymbols.delete(can.symbol); 
+            }
         });
     }
 }, 1000); 
 
+// TẦNG 3 (LOCAL ENGINE - GIÁO ÁN 4): REST POLLING FALLBACK GIÁM SÁT KHI WEBSOCKET TRỄ HOẶC ĐỨT NGHẼN
 setInterval(() => {
     http.get('http://127.0.0.1:9000/api/data', res => {
-        let d = ''; res.on('data', c => d += c);
-        res.on('end', () => { try { status.candidatesList = JSON.parse(d).live || []; } catch(e){} });
+        let d = ''; 
+        res.on('data', c => d += c);
+        res.on('end', () => { 
+            try { 
+                status.candidatesList = JSON.parse(d).live || []; 
+            } catch(e){} 
+        });
     }).on('error', () => {});
 }, 800);
 
+// GIẢI PHÓNG KÝ TỰ KHỎI DANH SÁCH BLACKLIST ĐỊNH KỲ
 setInterval(() => {
     const now = Date.now();
     for (const s in status.blackList) { if (status.blackList[s] < now) delete status.blackList[s]; }
 }, 20000);
 
 APP.listen(9001, () => {
-    console.log('🌐 Web UI hoạt động tại địa chỉ: http://localhost:9001');
+    console.log('🌐 Giao diện Web Monitor hoạt động tại: http://localhost:9001');
 });
