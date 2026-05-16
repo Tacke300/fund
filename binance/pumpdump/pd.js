@@ -279,7 +279,6 @@ async function executePositionClosureAccounting(symbol, positionSideParam, key, 
             botActivePositions.delete(key);
 
             if (distance > 0 && botSettings.isRunning) { 
-                // CHỈNH SỬA PHẦN JUMP DCA: Thay Math.floor thành Math.ceil theo yêu cầu bản 3
                 const jump = Math.max(b.dcaCount + 1, Math.ceil(distance / (b.firstEntry * botSettings.posSL / 100)));
                 if (jump <= botSettings.maxDCA) {
                     const newMultiplier = Math.pow(2, jump);
@@ -323,33 +322,61 @@ async function closePositionMarket(pos, reason = "FAILSAFE") {
     return false;
 }
 
+// SỬA CHUẨN BẢN 3: Thay thế hoàn toàn hàm syncTPSL sang dạng Single Order + PriceProtect + Delay 1500ms
 async function syncTPSL(symbol, side, info, tpPrice, slPrice) {
     const sideClose = side === 'SHORT' ? 'BUY' : 'SELL';
     const positionSideParam = status.isHedgeMode ? side : 'BOTH';
 
     try {
+        // Trễ hẳn 1500ms đợi đồng bộ vị thế on-chain của sàn
+        await new Promise(r => setTimeout(r, 1500));
+
         const openOrders = await binanceRequest('GET', '/fapi/v1/openOrders', { symbol }).catch(() => []);
-        const botOrdersToCancel = openOrders.filter(o => 
-            o.positionSide === positionSideParam && 
+
+        const oldOrders = openOrders.filter(o =>
+            o.positionSide === positionSideParam &&
             (o.type === 'TAKE_PROFIT_MARKET' || o.type === 'STOP_MARKET')
         );
 
-        if (botOrdersToCancel.length > 0) {
-            const orderIdList = botOrdersToCancel.map(o => o.orderId);
-            await binanceRequest('DELETE', '/fapi/v1/batchOrders', {
+        for (const o of oldOrders) {
+            await binanceRequest('DELETE', '/fapi/v1/order', {
                 symbol,
-                orderIds: JSON.stringify(orderIdList)
+                orderId: o.orderId
             }).catch(() => {});
         }
 
-        const batchParams = [
-            { symbol, side: sideClose, positionSide: positionSideParam, type: 'TAKE_PROFIT_MARKET', stopPrice: Number(tpPrice.toFixed(info.pricePrecision)).toString(), closePosition: 'true', workingType: 'MARK_PRICE' },
-            { symbol, side: sideClose, positionSide: positionSideParam, type: 'STOP_MARKET', stopPrice: Number(slPrice.toFixed(info.pricePrecision)).toString(), closePosition: 'true', workingType: 'MARK_PRICE' }
-        ];
+        const tpPayload = {
+            symbol,
+            side: sideClose,
+            positionSide: positionSideParam,
+            type: 'TAKE_PROFIT_MARKET',
+            stopPrice: Number(tpPrice.toFixed(info.pricePrecision)),
+            closePosition: 'true',
+            workingType: 'MARK_PRICE',
+            priceProtect: 'true'
+        };
 
-        await binanceRequest('POST', '/fapi/v1/batchOrders', { batchOrders: JSON.stringify(batchParams) });
+        const slPayload = {
+            symbol,
+            side: sideClose,
+            positionSide: positionSideParam,
+            type: 'STOP_MARKET',
+            stopPrice: Number(slPrice.toFixed(info.pricePrecision)),
+            closePosition: 'true',
+            workingType: 'MARK_PRICE',
+            priceProtect: 'true'
+        };
+
+        // Đặt độc lập từng lệnh đơn, bóc sạch lỗi nếu bị sàn từ chối
+        await binanceRequest('POST', '/fapi/v1/order', tpPayload);
+        await binanceRequest('POST', '/fapi/v1/order', slPayload);
+
+        addBotLog(`✅ TPSL OK ${symbol} [${side}] TP:${tpPrice.toFixed(info.pricePrecision)} SL:${slPrice.toFixed(info.pricePrecision)}`, 'success');
+
         return { tp: tpPrice, sl: slPrice };
+
     } catch (e) {
+        addBotLog(`❌ TPSL FAIL ${symbol}: ${e.message}`, 'error');
         return { tp: 0, sl: 0 };
     }
 }
@@ -403,7 +430,7 @@ async function openPosition(symbol, dcaData = null) {
             }
             
             if (p) {
-                // ===== THAY THẾ TOÀN BỘ PHẦN TÍNH TP/SL THEO KIỂU BẢN 3 DYNAMIC =====
+                // ===== UPDATE THEO LUỒNG TÍNH TOÁN TP/SL ĐỘNG BẢN 3 =====
                 const entry = parseFloat(p.entryPrice);
                 const firstE = (dcaData && dcaData.firstEntry) ? dcaData.firstEntry : entry;
                 const dcaLevel = dcaData ? dcaData.dcaCount : 0;
@@ -412,14 +439,14 @@ async function openPosition(symbol, dcaData = null) {
                 let sl;
 
                 if (isLong) {
-                    // LONG TP luôn bám theo entry mới
+                    // LONG TP theo entry mới nhất
                     tp = entry * (1 + botSettings.posTP / 100);
-                    // LONG SL giãn theo first entry và cấp độ dcaLevel
+                    // LONG SL nới rộng theo first entry nhân cấp độ dcaLevel
                     sl = firstE - (firstE * (((dcaLevel + 1) * botSettings.posSL) / 100));
                 } else {
-                    // SHORT TP luôn bám theo entry mới
+                    // SHORT TP theo entry mới nhất
                     tp = entry * (1 - botSettings.posTP / 100);
-                    // SHORT SL giãn theo first entry và cấp độ dcaLevel
+                    // SHORT SL nới rộng theo first entry nhân cấp độ dcaLevel
                     sl = firstE + (firstE * (((dcaLevel + 1) * botSettings.posSL) / 100));
                 }
 
@@ -439,13 +466,19 @@ async function openPosition(symbol, dcaData = null) {
                     tpSlMode: "FIRST_ENTRY_DYNAMIC",
                     isClosing: false 
                 };
-                // ===================================================================
                 
+                // ===== KIỂM TRA BẢO HIỂM CHẶN NGƯỢC: FORCE CLOSE NẾU BINANCE TỪ CHỐI ĐẶT TP/SL =====
+                const tpsl = await syncTPSL(symbol, side, info, tp, sl);
+
+                if (tpsl.tp === 0) {
+                    addBotLog(`🚨 TPSL FAIL -> FORCE CLOSE ${symbol} ĐỂ BẢO VỆ TÀI KHOẢN!`, 'error');
+                    await closePositionMarket(currentLocalPosition, "FAILSAFE_TPSL_REJECT");
+                    return; 
+                }
+
                 botActivePositions.set(`${symbol}_${positionSideParam}`, currentLocalPosition);
                 saveBotStateToDisk();
-                addBotLog(`🎬 Mở vị thế thành công: ${symbol} [${side}] (DCA ${dcaLevel}) | Entry: ${entry} | Khởi chạy cụm TP/SL giãn.`);
-                
-                await syncTPSL(symbol, side, info, tp, sl);
+                addBotLog(`🎬 Quản lý vị thế thành công: ${symbol} [${side}] (DCA ${dcaLevel}) | Entry mới: ${entry}`);
             }
         }
     } catch (e) { 
@@ -538,7 +571,7 @@ async function init() {
         await runPositionReconciliationEngine();
         await initWebSocketEngine();
         
-        addBotLog(`🚀 [V3.9.9 DYNAMIC] Đã tích hợp cấu trúc TP/SL Bản 3 giãn cách nâng cấp.`);
+        addBotLog(`🚀 [V3.9.9 FINAL] Khởi chạy hệ thống an toàn TPSL đơn lẻ - Chặn lỗi Failsafe đóng vị thế.`);
     } catch (e) { setTimeout(init, 5000); }
 }
 init();
