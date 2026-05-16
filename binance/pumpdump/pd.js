@@ -102,7 +102,7 @@ function runLocked(symbol, asyncTask) {
 }
 
 // ====================================================================
-// NETWORKING CONTROL WITH RATE LIMIT
+// NETWORKING CONTROL WITH RATE LIMIT (FIXED ERROR OBJECT)
 // ====================================================================
 let lastRequestTime = Date.now();
 async function binanceRequest(method, endpoint, data = {}) {
@@ -136,12 +136,16 @@ async function binanceRequest(method, endpoint, data = {}) {
     } catch (e) {
         const errorPayload = e.response?.data || { message: e.message, code: 'NETWORK_ERROR' };
         writeRawDebugLog('ERROR', endpoint, data, errorPayload, Date.now() - startTime);
+        
         if (errorPayload.code === -1021) {
             const t = await axios.get('https://fapi.binance.com/fapi/v1/time');
             serverTimeOffset = t.data.serverTime - Date.now();
             return binanceRequest(method, endpoint, data);
         }
-        throw errorPayload;
+        
+        const errInstance = new Error(typeof errorPayload === 'object' ? JSON.stringify(errorPayload) : String(errorPayload));
+        errInstance.raw = errorPayload;
+        throw errInstance;
     }
 }
 
@@ -188,7 +192,6 @@ async function initWebSocketEngine() {
     }
 }
 
-// [FIX PHỤ] Tăng thời gian Watchdog lên 90s để tránh hiện tượng reset quá hung hãn khi sàn ít biến động
 setInterval(() => {
     if (!status.isReady) return;
     const now = Date.now();
@@ -220,42 +223,53 @@ function handleUserDataEvent(e) {
             }
         }
     }
-    if (e.e === 'ORDER_TRADE_UPDATE' && ['FILLED', 'EXPIRED', 'CANCELED'].includes(e.o.X)) {
-        const key = `${e.o.s}_${e.o.ps}`;
-        if (botActivePositions.has(key) && ['STOP_MARKET', 'TAKE_PROFIT_MARKET'].includes(e.o.o)) {
-            runLocked(e.o.s, async () => { await verifyOpenOrdersOnChain(e.o.s, e.o.ps); });
-        }
-    }
 }
 
+// ====================================================================
+// CORE TRIGGERS & WATCHDOG 10S FAILSAFE FOR POSITION CLOSURE
+// ====================================================================
 function handleGlobalMarkPriceEvent(dataArr) {
     if (!status.isReady) return;
     for (const item of dataArr) {
         const longKey = `${item.s}_LONG`; const shortKey = `${item.s}_SHORT`;
-        if (botActivePositions.has(longKey)) processSoftwareTriggerForPrice(longKey, parseFloat(item.p));
-        if (botActivePositions.has(shortKey)) processSoftwareTriggerForPrice(shortKey, parseFloat(item.p));
+        if (botActivePositions.has(longKey)) checkPriceThresholdAndTriggerFailsafe(longKey, parseFloat(item.p));
+        if (botActivePositions.has(shortKey)) checkPriceThresholdAndTriggerFailsafe(shortKey, parseFloat(item.p));
     }
 }
 
-async function processSoftwareTriggerForPrice(key, markP) {
+async function checkPriceThresholdAndTriggerFailsafe(key, markP) {
     const b = botActivePositions.get(key);
-    if (!b || b.tpSlMode !== 3 || b.isClosing) return; 
+    if (!b || b.isClosing) return; 
 
-    let trigger = false;
-    if (b.side === 'SHORT' && (markP <= b.tp || markP >= b.sl)) trigger = true;
-    if (b.side === 'LONG' && (markP >= b.tp || markP <= b.sl)) trigger = true;
+    let isPriceBreached = false;
+    if (b.side === 'SHORT' && (markP <= b.tp || markP >= b.sl)) isPriceBreached = true;
+    if (b.side === 'LONG' && (markP >= b.tp || markP <= b.sl)) isPriceBreached = true;
 
-    if (trigger) {
-        b.isClosing = true; botActivePositions.set(key, b);
-        runLocked(b.symbol, async () => {
-            const exist = botActivePositions.get(key);
-            if (exist && exist.tpSlMode === 3) {
-                addBotLog(`🎯 [PP3 SOFTWARE TRIGGER] Kích hoạt lệnh thị trường giải thoát ${b.symbol} tại giá: ${markP}`);
-                const ok = await closePositionMarket(b, "PP3_EXEC");
-                if (ok) { botActivePositions.delete(key); saveBotStateToDisk(); } 
-                else { b.isClosing = false; botActivePositions.set(key, b); }
-            }
-        });
+    if (isPriceBreached) {
+        b.isClosing = true; 
+        botActivePositions.set(key, b);
+        
+        addBotLog(`⚠️ [🚨 TOUCH TRIGGER] Phát hiện giá ${b.symbol} chạm vạch (${markP}). Kích hoạt bộ đếm Failsafe Watchdog 10 giây...`);
+        
+        // Đợi 10 giây để lệnh on-chain của sàn tự khớp
+        setTimeout(() => {
+            runLocked(b.symbol, async () => {
+                const freshCheck = botActivePositions.get(key);
+                // Nếu sau 10s vị thế này vẫn còn nằm trong bộ nhớ cục bộ -> Lệnh sàn bị lỗi/chưa khớp -> Cưỡng chế Market thẳng tay!
+                if (freshCheck) {
+                    addBotLog(`⏰ [FAILSAFE TIMEOUT] Quá 10 giây vị thế ${b.symbol} chưa biến mất. Tiến hành dập thẳng lệnh MARKET để giải thoát!`, 'warning');
+                    const ok = await closePositionMarket(b, "FAILSAFE_10S_TIMEOUT");
+                    if (ok) { 
+                        botActivePositions.delete(key); 
+                        saveBotStateToDisk(); 
+                    } else {
+                        // Thất bại thì mở khóa để vòng quét tiếp theo xử lý lại
+                        freshCheck.isClosing = false;
+                        botActivePositions.set(key, freshCheck);
+                    }
+                }
+            });
+        }, 10000);
     }
 }
 
@@ -321,12 +335,15 @@ async function closePositionMarket(pos, reason = "FAILSAFE") {
             type: 'MARKET', quantity: finalExactQty, newClientOrderId: systemClientOrderId
         });
         if (res?.orderId) return true;
-    } catch (e) { console.error(`❌ Cưỡng chế đóng lệnh Market thất bại cho ${pos.symbol}:`, e); }
+    } catch (e) { console.error(`❌ Cưỡng chế đóng lệnh Market thất bại cho ${pos.symbol}:`, e.message || e); }
     return false;
 }
 
 async function openPosition(symbol, dcaData = null) {
-    if (!status.exchangeInfo[symbol]) return;
+    if (!status.exchangeInfo[symbol]) {
+        addBotLog(`❌ Không tìm thấy thông tin cấu hình exchangeInfo cho ${symbol}`, 'error');
+        return;
+    }
     const isLong = dcaData ? dcaData.isFinalLong || dcaData.side === 'LONG' : false;
     const side = isLong ? 'LONG' : 'SHORT';
     const positionSideParam = status.isHedgeMode ? side : 'BOTH';
@@ -339,12 +356,20 @@ async function openPosition(symbol, dcaData = null) {
         const acc = await binanceRequest('GET', '/fapi/v2/account');
         let margin = dcaData ? dcaData.margin : (botSettings.invValue.toString().includes('%') ? (parseFloat(acc.availableBalance) * parseFloat(botSettings.invValue) / 100) : parseFloat(botSettings.invValue));
         
-        if (margin * info.maxLeverage < info.minNotional) margin = (info.minNotional + 0.5) / info.maxLeverage;
+        if (margin * info.maxLeverage < info.minNotional) {
+            margin = (info.minNotional + 0.5) / info.maxLeverage;
+        }
         
-        const freshRisk = await binanceRequest('GET', '/fapi/v2/positionRisk', { symbol }).catch(() => []);
+        const freshRisk = await binanceRequest('GET', '/fapi/v2/positionRisk', { symbol });
         const symbolRisk = freshRisk.find(x => x.positionSide === positionSideParam) || freshRisk[0];
-        const price = symbolRisk ? parseFloat(symbolRisk.markPrice) : 0;
-        if (price === 0) return;
+        if (!symbolRisk) {
+            throw new Error(`Không lấy được thông tin positionRisk cụ thể cho side ${positionSideParam}`);
+        }
+        
+        const price = parseFloat(symbolRisk.markPrice);
+        if (!price || price === 0) {
+            throw new Error(`Giá MarkPrice của sàn trả về bằng 0 hoặc không hợp lệ: ${symbolRisk.markPrice}`);
+        }
         
         let qty = Number(((margin * info.maxLeverage) / price).toFixed(getPrecision(info.stepSize)));
         if (qty <= 0) qty = info.stepSize;
@@ -389,11 +414,13 @@ async function openPosition(symbol, dcaData = null) {
                 await cascadeSyncTPSLEngine(symbol, side, info, tp, sl);
             }
         }
-    } catch (e) { addBotLog(`❌ Lỗi luồng vào lệnh ${symbol}: ${e.message}`, 'error'); }
+    } catch (e) { 
+        addBotLog(`❌ Lỗi luồng vào lệnh ${symbol}: ${e.stack || e.message || JSON.stringify(e)}`, 'error'); 
+    }
 }
 
 // ====================================================================
-// [REFACTOR V3.2] CHUẨN HOÁ TP/SL HEDGE MODE & KHÔNG NUỐT LOG LỖI
+// [FIX TRIỆT ĐỂ V3.6] CHIẾN THUẬT BOMBER - PHỆT THẲNG 3 CÁCH KHÔNG ĐIỀU KIỆN
 // ====================================================================
 async function cascadeSyncTPSLEngine(symbol, side, info, tp, sl) {
     const positionSideParam = status.isHedgeMode ? side : 'BOTH';
@@ -403,117 +430,81 @@ async function cascadeSyncTPSLEngine(symbol, side, info, tp, sl) {
     let localData = botActivePositions.get(localPosKey);
     if (!localData) return;
 
-    // Clean trigger cũ bám đuôi vị thế
+    // Bước 1: Quét sạch các trigger cũ ngáng đường (Bọc catch chống tạch luồng)
     try {
-        const orders = await binanceRequest('GET', '/fapi/v1/openOrders', { symbol });
-        const targetOrders = orders.filter(o => o.positionSide === positionSideParam && ['TAKE_PROFIT', 'STOP', 'TAKE_PROFIT_MARKET', 'STOP_MARKET'].includes(o.type));
+        const orders = await binanceRequest('GET', '/fapi/v1/openOrders', { symbol }).catch(() => []);
+        const targetOrders = orders.filter(o => o.positionSide === positionSideParam && ['TAKE_PROFIT_MARKET', 'STOP_MARKET'].includes(o.type));
         for (const o of targetOrders) { 
             await binanceRequest('DELETE', '/fapi/v1/order', { symbol, orderId: o.orderId }).catch(() => null); 
         }
-        await new Promise(r => setTimeout(r, 500));
     } catch (e) {
-        console.error(`⚠️ Lỗi dọn dẹp lệnh cũ cho ${symbol}:`, e);
+        console.error(`⚠️ [CLEANUP WARN] Không dọn được lệnh cũ cho ${symbol}:`, e.message);
     }
 
     const targetTPPrice = Number(tp.toFixed(info.pricePrecision));
     const targetSLPrice = Number(sl.toFixed(info.pricePrecision));
 
-    let verifiedOnChain = false;
-
-    // Vòng lặp Retry 3 lần
-    for (let retry = 0; retry < 3; retry++) {
-        try {
-            // [FIX CORE] Dùng closePosition: 'true' chuẩn Hedge Mode, xoá bỏ hoàn toàn quantity & reduceOnly
-            const batchParams = [
-                { 
-                    symbol, side: sideClose, positionSide: positionSideParam, 
-                    type: 'TAKE_PROFIT_MARKET', stopPrice: targetTPPrice.toString(), 
-                    closePosition: 'true', workingType: 'MARK_PRICE' 
-                },
-                { 
-                    symbol, side: sideClose, positionSide: positionSideParam, 
-                    type: 'STOP_MARKET', stopPrice: targetSLPrice.toString(), 
-                    closePosition: 'true', workingType: 'MARK_PRICE' 
-                }
-            ];
-
-            const resBatch = await binanceRequest('POST', '/fapi/v1/batchOrders', { batchOrders: JSON.stringify(batchParams) });
-            
-            if (Array.isArray(resBatch)) {
-                resBatch.forEach((res, index) => {
-                    if (res.code && res.code !== 0) {
-                        console.error(`❌ [BATCH SUB-ORDER REJECT] Lệnh ${index === 0 ? 'TP' : 'SL'} bị sàn từ chối:`, JSON.stringify(res));
-                    }
-                });
-            }
-
-            verifiedOnChain = await verifyOpenOrdersOnChain(symbol, positionSideParam);
-            if (verifiedOnChain) {
-                localData.tpSlMode = 0;
-                addBotLog(`🎯 [BATCH SUCCESS] Đồng bộ TP/SL Hedge Mode lên sàn thành công (${symbol})`);
-                break; 
-            }
-        } catch (err) {
-            // [FIX LOG] In toàn bộ nguyên nhân reject dạng JSON chuỗi để debug, tuyệt đối không giấu lỗi
-            console.error(`❌ [TPSL ENGINE BATCH FAILED] Thử nghiệm lần ${retry + 1} lỗi:`, JSON.stringify(err));
+    // Khởi tạo các tham số chuẩn cho lệnh đóng vị thế (Hedge Mode & One-Way)
+    const batchParams = [
+        { 
+            symbol, side: sideClose, positionSide: positionSideParam, 
+            type: 'TAKE_PROFIT_MARKET', stopPrice: targetTPPrice.toString(), 
+            closePosition: 'true', workingType: 'MARK_PRICE' 
+        },
+        { 
+            symbol, side: sideClose, positionSide: positionSideParam, 
+            type: 'STOP_MARKET', stopPrice: targetSLPrice.toString(), 
+            closePosition: 'true', workingType: 'MARK_PRICE' 
         }
+    ];
+    const singleBase = { symbol, side: sideClose, positionSide: positionSideParam, closePosition: 'true', workingType: 'MARK_PRICE' };
 
-        // Dự phòng Single Order nếu Batch sập
-        if (!verifiedOnChain) {
-            try {
-                // [FIX CORE FALLBACK] Áp dụng đồng bộ cấu trúc closePosition: 'true' cho lệnh đơn lẻ
-                const singleBase = { symbol, side: sideClose, positionSide: positionSideParam, closePosition: 'true', workingType: 'MARK_PRICE' };
-                
-                await binanceRequest('POST', '/fapi/v1/order', { ...singleBase, type: 'TAKE_PROFIT_MARKET', stopPrice: targetTPPrice })
-                    .catch((e) => console.error("❌ [SINGLE TP ERROR]:", JSON.stringify(e)));
-                    
-                await binanceRequest('POST', '/fapi/v1/order', { ...singleBase, type: 'STOP_MARKET', stopPrice: targetSLPrice })
-                    .catch((e) => console.error("❌ [SINGLE SL ERROR]:", JSON.stringify(e)));
-                
-                verifiedOnChain = await verifyOpenOrdersOnChain(symbol, positionSideParam);
-                if (verifiedOnChain) {
-                    localData.tpSlMode = 1;
-                    addBotLog(`🎯 [SINGLE SUCCESS] Đồng bộ TP/SL đơn lẻ thành công cho ${symbol}`);
-                    break;
-                }
-            } catch (err) {
-                console.error(`❌ [TPSL FALLBACK EXCEPTION]:`, JSON.stringify(err));
-            }
-        }
+    addBotLog(`🚀 [BOMBER MODE] Phệt thẳng song song 3 cách đặt TP(${targetTPPrice})/SL(${targetSLPrice}) cho ${symbol}...`);
 
-        if (!verifiedOnChain && retry < 2) {
-            await new Promise(r => setTimeout(r, 800));
-        }
-    }
+    // Tạo mảng chứa tất cả các Promise để kích hoạt đồng thời, bỏ qua cơ chế đứng đợi check kết quả
+    const tasks = [
+        // Cách 1: Gửi lệnh mảng Batch
+        binanceRequest('POST', '/fapi/v1/batchOrders', { batchOrders: JSON.stringify(batchParams) })
+            .then(() => { addBotLog(`🎯 [CÁCH 1 DONE] Lệnh mảng Batch Orders của ${symbol} đã nạp lên sàn.`); return true; })
+            .catch((e) => { console.error(`❌ [CÁCH 1 REJECTED] Batch từ chối:`, e.message); return false; }),
 
-    if (!verifiedOnChain) {
+        // Cách 2: Gửi lệnh lẻ TAKE_PROFIT_MARKET
+        binanceRequest('POST', '/fapi/v1/order', { ...singleBase, type: 'TAKE_PROFIT_MARKET', stopPrice: targetTPPrice.toString() })
+            .then(() => { addBotLog(`🎯 [CÁCH 2 DONE] Lệnh lẻ Single TP của ${symbol} đã nạp lên sàn.`); return true; })
+            .catch((e) => { console.error(`❌ [CÁCH 2 REJECTED] Single TP từ chối:`, e.message); return false; }),
+
+        // Cách 3: Gửi lệnh lẻ STOP_MARKET
+        binanceRequest('POST', '/fapi/v1/order', { ...singleBase, type: 'STOP_MARKET', stopPrice: targetSLPrice.toString() })
+            .then(() => { addBotLog(`🎯 [CÁCH 3 DONE] Lệnh lẻ Single SL của ${symbol} đã nạp lên sàn.`); return true; })
+            .catch((e) => { console.error(`❌ [CÁCH 3 REJECTED] Single SL từ chối:`, e.message); return false; })
+    ];
+
+    // Chạy đồng thời toàn bộ 3 cách để tối ưu tốc độ băng thông
+    const results = await Promise.all(tasks);
+    
+    const batchOk = results[0];
+    const tpOk = results[1];
+    const slOk = results[2];
+
+    if (batchOk) {
+        localData.tpSlMode = 0; 
+    } else if (tpOk && slOk) {
+        localData.tpSlMode = 1; 
+    } else if (tpOk || slOk) {
+        localData.tpSlMode = 2; 
+        addBotLog(`⚠️ [PARTIAL RUN] Chỉ 1 trong 2 lệnh Single sống sót cho ${symbol}.`, 'warning');
+    } else {
         localData.tpSlMode = 3; 
-        addBotLog(`🚨 [MODE 3 ACTIVATED] Không thể setup TP/SL on-chain sau 3 lần rải lệnh. Hạ cấp sang Software Protection (Mode 3)`, 'warning');
+        addBotLog(`🚨 [ALL METHODS REJECTED] Toàn bộ 3 phương án rải TP/SL đều tạch đối với ${symbol}. Đã giao nhiệm vụ quét giá cho Software Monitor.`, 'warning');
     }
 
     botActivePositions.set(localPosKey, localData);
     saveBotStateToDisk();
 }
 
-// [FIX VERIFY] Loại bỏ hoàn toàn bộ lọc o.status === 'NEW', tránh bỏ sót lệnh do sàn cập nhật bất đồng bộ
-async function verifyOpenOrdersOnChain(symbol, positionSideParam) {
-    try {
-        const openOrders = await binanceRequest('GET', '/fapi/v1/openOrders', { symbol });
-        const triggers = openOrders.filter(o => 
-            o.positionSide === positionSideParam && 
-            ['STOP_MARKET', 'TAKE_PROFIT_MARKET'].includes(o.type)
-        );
-
-        const hasTP = triggers.some(o => o.type === 'TAKE_PROFIT_MARKET');
-        const hasSL = triggers.some(o => o.type === 'STOP_MARKET');
-
-        return hasTP && hasSL;
-    } catch (e) { 
-        console.error(`❌ [VERIFY SYSTEM FAILED] Lỗi gọi dữ liệu kiểm tra On-Chain:`, JSON.stringify(e));
-        return false; 
-    }
-}
-
+// ====================================================================
+// POSITION RECONCILIATION ENGINE
+// ====================================================================
 async function runPositionReconciliationEngine() {
     addBotLog("🔍 [RECONCILIATION] Thực thi rà soát trạng thái đối soát sàn...");
     try {
@@ -595,7 +586,7 @@ async function init() {
         await runPositionReconciliationEngine();
         await initWebSocketEngine();
         
-        addBotLog(`🚀 [PRODUCTION V3.2 READY] Vá triệt để lỗi đồng bộ Hedge Mode.`);
+        addBotLog(`🚀 [PRODUCTION V3.6 FULL READY] Đã cấu hình Bomber Mode kèm Failsafe Watchdog 10s.`);
     } catch (e) { setTimeout(init, 5000); }
 }
 init();
