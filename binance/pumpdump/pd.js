@@ -29,16 +29,13 @@ function addBotLog(msg, type = 'info') {
     console.log(`[${time}] ${msg}`);
 }
 
-// HÀM REQUEST CHUẨN - XỬ LÝ ĐÚNG KIỂU DỮ LIỆU ĐỂ KHÔNG BỊ SÀN REJECT
 async function binanceRequest(method, endpoint, data = {}) {
     const timestamp = Date.now() + serverTimeOffset;
     const mergedData = { ...data, timestamp, recvWindow: 10000 };
     
-    // URLSearchParams dùng để tạo chuỗi ký (Signature)
     const queryForSign = new URLSearchParams(mergedData).toString();
     const signature = crypto.createHmac('sha256', SECRET_KEY).update(queryForSign).digest('hex');
     
-    // Gửi tham số urlencoded dạng object sạch qua axios để giữ nguyên kiểu dữ liệu gốc (Boolean/Number)
     const finalParams = { ...mergedData, signature };
     const queryString = new URLSearchParams(finalParams).toString();
     const url = `${endpoint}?${queryString}`;
@@ -80,7 +77,6 @@ async function priceMonitor() {
                 status.botClosedCount++; 
                 status.botPnLClosed += totalR;
 
-                // FIX LỖI 4: Chỉ xét Thắng (Win) đưa vào blacklist khi số tiền thực nhận > 0
                 if (totalR > 0) {
                     botActivePositions.delete(key);
                     status.blackList[b.symbol] = Date.now() + (15 * 60 * 1000);
@@ -93,7 +89,6 @@ async function priceMonitor() {
                     
                     const jump = Math.max(b.dcaCount + 1, Math.floor((currentPrice - b.firstEntry) / (b.firstEntry * botSettings.posSL / 100)));
                     
-                    // FIX LỖI 5: Xóa key khỏi danh sách theo theo dõi NGAY LẬP TỨC trước khi gọi hàm DCA để chặn đứng race condition
                     botActivePositions.delete(key);
 
                     if (jump <= botSettings.maxDCA) {
@@ -139,7 +134,6 @@ async function openPosition(symbol, dcaData = null) {
     if (isProcessingDCA.has(symbol)) return;
     isProcessingDCA.add(symbol);
     
-    // Cấu hình side chuẩn xác dựa trên tài khoản Hedge Mode
     const isLong = dcaData?.isFinalLong ? true : false;
     const side = isLong ? 'LONG' : 'SHORT';
     const positionSideParam = status.isHedgeMode ? side : 'BOTH';
@@ -156,7 +150,6 @@ async function openPosition(symbol, dcaData = null) {
         
         let margin = dcaData ? dcaData.margin : (botSettings.invValue.toString().includes('%') ? (parseFloat(acc.availableBalance) * parseFloat(botSettings.invValue) / 100) : parseFloat(botSettings.invValue));
         
-        // FIX LỖI 7: Kiểm tra cấu hình MIN_NOTIONAL động của riêng từng Token sàn quy định
         const orderNotional = margin * info.maxLeverage;
         if (orderNotional < info.minNotional) {
             margin = (info.minNotional + 0.5) / info.maxLeverage;
@@ -166,7 +159,6 @@ async function openPosition(symbol, dcaData = null) {
         const ticker = await axios.get('https://fapi.binance.com/fapi/v1/ticker/price?symbol=' + symbol);
         const price = parseFloat(ticker.data.price);
         
-        // FIX LỖI 6: Chuẩn hóa làm tròn Quantity, dẹp bỏ hoàn toàn lỗi vỡ precision thập phân
         let rawQty = (margin * info.maxLeverage) / price;
         let qty = Number((Math.ceil(rawQty / info.stepSize) * info.stepSize).toFixed(info.quantityPrecision));
         
@@ -186,7 +178,6 @@ async function openPosition(symbol, dcaData = null) {
         if (order) {
             console.log(`✅ Lệnh MARKET khớp thành công. Đang quét xác thực trạng thái vị thế...`);
             
-            // FIX LỖI 8: Chạy vòng lặp Poll vị thế thực tế (Max 10 lần mỗi 300ms) để chống lỗi đặt bừa TP/SL khi sàn chưa cập nhật xong
             let p = null;
             for (let i = 0; i < 10; i++) {
                 await new Promise(r => setTimeout(r, 300));
@@ -203,12 +194,13 @@ async function openPosition(symbol, dcaData = null) {
                 const firstE = dcaData ? dcaData.firstEntry : entry;
                 
                 let tp = isLong ? entry * 1.10 : entry * (1 - botSettings.posTP / 100);
+                
+                // GIỮ NGUYÊN TƯ DUY MARTINGALE: SL cố định tính theo giá của entry đầu tiên (firstEntry)
                 let sl = isLong ? entry * 0.90 : firstE + (firstE * botSettings.posSL / 100);
                 
-                addBotLog(`📊 [MỞ VỊ THẾ THÀNH CÔNG] ${symbol} | Giá Entry: ${entry} | Đích TP: ${tp.toFixed(info.pricePrecision)} | Đích SL: ${sl.toFixed(info.pricePrecision)}`);
+                addBotLog(`📊 [MỞ VỊ THẾ THÀNH CÔNG] ${symbol} | Giá Entry TB: ${entry} (Gốc: ${firstE}) | Đích TP: ${tp.toFixed(info.pricePrecision)} | Đích SL: ${sl.toFixed(info.pricePrecision)}`);
                 
-                await syncTPSL(symbol, side, info, tp, sl);
-                
+                // ĐẢO LÊN TRƯỚC: Lưu dữ liệu vào Map trước để syncTPSL lấy được khối lượng currentQty thực tế
                 botActivePositions.set(`${symbol}_${positionSideParam}`, { 
                     symbol, side, entryPrice: entry, tp, sl, 
                     dcaCount: currentDCALevel, 
@@ -216,6 +208,9 @@ async function openPosition(symbol, dcaData = null) {
                     firstMargin: dcaData ? dcaData.firstMargin : margin, 
                     currentQty: Math.abs(parseFloat(p.positionAmt)), pnl: 0, priceDev: 0 
                 });
+                
+                // Gọi đặt lệnh TP/SL sau khi Map đã lưu dữ liệu thành công
+                await syncTPSL(symbol, side, info, tp, sl);
             } else {
                 addBotLog(`❌ [THẤT BẠI] Lệnh MARKET đã khớp nhưng vòng lặp đồng bộ không tìm thấy vị thế ${symbol} trên sàn.`, 'error');
             }
@@ -224,7 +219,6 @@ async function openPosition(symbol, dcaData = null) {
         addBotLog(`❌ [LỖI QUY TRÌNH] Quy trình mở vị thế thất bại: ${e.msg || e.message || JSON.stringify(e)}`, 'error'); 
     } finally { 
         console.log(`====================================================================\n`);
-        // FIX LỖI 9: Giải phóng biến hàng chờ trong finally để tránh tuyệt đối rò rỉ bộ nhớ hoặc kẹt luồng lệnh
         isProcessingDCA.delete(symbol); 
     }
 }
@@ -233,16 +227,16 @@ async function syncTPSL(symbol, side, info, tp, sl) {
     const positionSideParam = status.isHedgeMode ? side : 'BOTH';
     const sideClose = (side === 'SHORT') ? 'BUY' : 'SELL';
 
-    // Cấu hình tham số chuẩn hóa: Sử dụng boolean thực tế, gỡ bỏ hoàn toàn priceProtect
-    const baseParam = {
-        symbol,
-        side: sideClose,
-        positionSide: positionSideParam,
-        closePosition: true, 
-        workingType: 'MARK_PRICE'
-    };
+    const pos = botActivePositions.get(`${symbol}_${positionSideParam}`);
 
-    // 1. DỌN DẸP LỆNH ĐIỀU KIỆN CŨ ĐỂ TRÁNH XUNG ĐỘT VỊ THẾ
+    if (!pos) {
+        console.log(`❌ Không tìm thấy dữ liệu vị thế trong Map để đặt TP/SL cho ${symbol}`);
+        return;
+    }
+
+    // Lấy Qty thực tế từ vị thế và ép chặt precision tránh lỗi vỡ phần thập phân
+    const qty = Number(pos.currentQty.toFixed(info.quantityPrecision));
+
     try {
         const orders = await binanceRequest('GET', '/fapi/v1/openOrders', { symbol });
         const targetOrders = orders.filter(o =>
@@ -253,12 +247,22 @@ async function syncTPSL(symbol, side, info, tp, sl) {
         for (const o of targetOrders) {
             await binanceRequest('DELETE', '/fapi/v1/order', { symbol, orderId: o.orderId });
         }
-        console.log(`🧹 Đã dọn sạch ${targetOrders.length} lệnh cài đặt TP/SL cũ của ${symbol}`);
+        console.log(`🧹 Đã dọn sạch ${targetOrders.length} lệnh TP/SL cũ của ${symbol}`);
     } catch (e) {
-        console.log(`⚠️ Lỗi dọn dẹp lệnh cũ của ${symbol}: ${e.msg || e.message}`);
+        console.log(`⚠️ Lỗi dọn dẹp lệnh cũ của ${symbol}:`, e.msg || e.message);
     }
 
-    // 2. ĐẶT LỆNH TAKE PROFIT (FIX LỖI 1 & 2)
+    // ÉP LUẬT MỚI BINANCE: Không dùng closePosition, dùng quantity thật + reduceOnly: 'true' (dạng string)
+    const baseParam = {
+        symbol,
+        side: sideClose,
+        positionSide: positionSideParam,
+        quantity: qty,
+        reduceOnly: 'true', 
+        workingType: 'MARK_PRICE'
+    };
+
+    // ĐẶT LỆNH TAKE PROFIT
     try {
         const resTP = await binanceRequest('POST', '/fapi/v1/order', {
             ...baseParam,
@@ -266,15 +270,13 @@ async function syncTPSL(symbol, side, info, tp, sl) {
             stopPrice: Number(tp.toFixed(info.pricePrecision))
         });
         if (resTP && resTP.orderId) {
-            console.log(`🎯 Đặt lệnh TP [OK] cho ${symbol} | OrderID: ${resTP.orderId}`);
-        } else {
-            console.log(`🚨 [CẢNH BÁO] Lệnh TP gửi thành công nhưng sàn không trả về OrderID!`);
+            console.log(`🎯 Đặt lệnh TP [OK] cho ${symbol} | Mức giá: ${tp.toFixed(info.pricePrecision)} | OrderID: ${resTP.orderId}`);
         }
     } catch (e) {
-        console.log(`❌ Đặt lệnh TP [FAIL] cho ${symbol}:`, e.msg || e.message || e);
+        addBotLog(`❌ Đặt lệnh TP ${symbol} thất bại: ${e.msg || e.message || JSON.stringify(e)}`, 'error');
     }
 
-    // 3. ĐẶT LỆNH STOP LOSS (FIX LỖI 1 & 2)
+    // ĐẶT LỆNH STOP LOSS
     try {
         const resSL = await binanceRequest('POST', '/fapi/v1/order', {
             ...baseParam,
@@ -282,12 +284,10 @@ async function syncTPSL(symbol, side, info, tp, sl) {
             stopPrice: Number(sl.toFixed(info.pricePrecision))
         });
         if (resSL && resSL.orderId) {
-            console.log(`🛑 Đặt lệnh SL [OK] cho ${symbol} | OrderID: ${resSL.orderId}`);
-        } else {
-            console.log(`🚨 [CẢNH BÁO] Lệnh SL gửi thành công nhưng sàn không trả về OrderID!`);
+            console.log(`🛑 Đặt lệnh SL [OK] cho ${symbol} | Mức giá: ${sl.toFixed(info.pricePrecision)} | OrderID: ${resSL.orderId}`);
         }
     } catch (e) {
-        console.log(`❌ Đặt lệnh SL [FAIL] cho ${symbol}:`, e.msg || e.message || e);
+        addBotLog(`❌ Đặt lệnh SL ${symbol} thất bại: ${e.msg || e.message || JSON.stringify(e)}`, 'error');
     }
 }
 
@@ -300,7 +300,6 @@ async function init() {
         const t = await axios.get('https://fapi.binance.com/fapi/v1/time');
         serverTimeOffset = t.data.serverTime - Date.now();
         
-        // FIX LỖI 3: Check đồng bộ trạng thái tài khoản thực tế trên sàn
         const posMode = await binanceRequest('GET', '/fapi/v1/positionSide/dual');
         status.isHedgeMode = posMode.dualSidePosition;
         console.log(`⚙️ [TÀI KHOẢN] Chế độ vị thế: ${status.isHedgeMode ? 'HEDGE MODE (Phòng hộ)' : 'ONE-WAY MODE (Một chiều)'}`);
@@ -343,7 +342,6 @@ setInterval(() => {
     }).on('error', () => {});
 }, 1500);
 
-// FIX LỖI 1: Luồng quét và lọc tín hiệu vào lệnh chuẩn chỉnh cho Hedge Mode
 setInterval(() => {
     if (!status.isReady || !botSettings.isRunning) return;
     if (botActivePositions.size >= botSettings.maxPositions || isProcessingDCA.size > 0) return;
@@ -354,7 +352,6 @@ setInterval(() => {
         if (Math.abs(c.c1) < botSettings.minVol) return false;
         if (status.blackList[c.symbol]) return false;
 
-        // Quét tìm Key chuẩn xác trong Map lưu vị thế
         const hasLong = botActivePositions.has(`${c.symbol}_LONG`);
         const hasShort = botActivePositions.has(`${c.symbol}_SHORT`);
         const hasBoth = botActivePositions.has(`${c.symbol}_BOTH`);
