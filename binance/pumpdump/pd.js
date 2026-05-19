@@ -121,7 +121,7 @@ async function priceMonitor() {
     setTimeout(priceMonitor, 1000);
 }
 
-// --- CÁC HÀM API & KHỞI TẠO (GIỮ NGUYÊN NHƯNG LỌC DỮ LIỆU) ---
+// --- CÁC HÀM API & KHỞI TẠO ---
 const APP = express(); APP.use(express.json()); APP.use(express.static(__dirname));
 
 APP.get('/api/status', async (req, res) => {
@@ -260,6 +260,16 @@ setInterval(() => {
 
 setInterval(() => {
     if (!status.isReady || !botSettings.isRunning) return;
+
+    // --- TỰ ĐỘNG DỌN DẸP BLACKLIST SAU KHI HẾT HẠN 15 PHÚT ---
+    const now = Date.now();
+    for (const symbol in status.blackList) {
+        if (now > status.blackList[symbol]) {
+            delete status.blackList[symbol]; 
+        }
+    }
+    // --------------------------------------------------------
+
     if (botActivePositions.size < botSettings.maxPositions && isProcessingDCA.size === 0) {
         // KIỂM TRA CHẶN: Thêm điều kiện lọc bỏ các coin nằm trong danh sách chặn vĩnh viễn permanentBlacklist
         const can = status.candidatesList.find(c => 
