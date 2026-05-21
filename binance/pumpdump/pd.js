@@ -24,7 +24,6 @@ const exchange = new ccxt.binance({
     options: { defaultType: 'future', dualSidePosition: true, recvWindow: 10000, adjustForTimeDifference: true } 
 });
 
-// SỬA: Hạ minVol mặc định xuống 5.5
 let botSettings = { isRunning: false, maxPositions: 3, invValue: "1%", minVol: 5.5, posTP: 1.2, posSL: 10.0, maxDCA: MAX_DCA_LEVEL };
 let status = { botLogs: [], candidatesList: [], blackList: {}, permanentBlacklist: {}, botClosedCount: 0, botPnLClosed: 0, exchangeInfo: null, isReady: false };
 let botActivePositions = new Map(); // ĐÂY LÀ DANH SÁCH DUY NHẤT BOT QUẢN LÝ
@@ -91,17 +90,16 @@ async function priceMonitor() {
                 if (isProcessingDCA.has(b.symbol)) continue;
 
                 const targetRisk = posRisk.find(p => p.symbol === b.symbol);
-                if (!targetRisk) continue;
+                if (!targetRisk) {
+                    botActivePositions.delete(key);
+                    continue;
+                }
                 const currentMarkPrice = parseFloat(targetRisk.markPrice);
 
-                // SỬA: Tăng tỷ lệ trượt giá kiểm tra lên 1% (1.01 và 0.99)
                 const isPriceHitTP = (b.side === 'SHORT' && currentMarkPrice <= (b.tp * 1.01)) || (b.side === 'LONG' && currentMarkPrice >= (b.tp * 0.99));
                 const isPriceHitSL = (b.side === 'SHORT' && currentMarkPrice >= (b.sl * 0.99)) || (b.side === 'LONG' && currentMarkPrice <= (b.sl * 1.01));
-
-                // SỬA: Tính khoảng cách phần trăm thực tế từ giá hiện tại đến mốc SL
                 const slDistance = Math.abs((currentMarkPrice - b.sl) / b.sl) * 100;
 
-                // SỬA: Nếu không chạm TP/SL trong vùng 1% HOẶC khoảng cách đến SL lớn hơn 2% -> Chắc chắn do ông ĐÓNG TAY
                 if ((!isPriceHitTP && !isPriceHitSL) || slDistance > 2.0) {
                     status.blackList[b.symbol] = Date.now() + (15 * 60 * 1000);
                     botActivePositions.delete(key);
@@ -140,15 +138,23 @@ const APP = express(); APP.use(express.json()); APP.use(express.static(__dirname
 
 APP.get('/api/status', async (req, res) => {
     const acc = await binancePrivate('/fapi/v2/account').catch(() => null);
+    
+    // SỬA GỐC: Bảo vệ cấu trúc JSON phản hồi, không bao giờ để bị trả về cấu trúc lỗi gây lạc dữ liệu UI
+    const walletData = acc ? { 
+        totalWalletBalance: parseFloat(acc.totalWalletBalance).toFixed(2), 
+        availableBalance: parseFloat(acc.availableBalance).toFixed(2), 
+        totalUnrealizedProfit: Array.from(botActivePositions.values()).reduce((s, p) => s + p.pnl, 0).toFixed(2) 
+    } : { 
+        totalWalletBalance: "0.00", 
+        availableBalance: "0.00", 
+        totalUnrealizedProfit: "0.00" 
+    };
+
     res.json({ 
         botSettings, 
         activePositions: Array.from(botActivePositions.values()), 
         status, 
-        wallet: acc ? { 
-            totalWalletBalance: parseFloat(acc.totalWalletBalance).toFixed(2), 
-            availableBalance: parseFloat(acc.availableBalance).toFixed(2), 
-            totalUnrealizedProfit: Array.from(botActivePositions.values()).reduce((s, p) => s + p.pnl, 0).toFixed(2) 
-        } : { availableBalance: "ERR" } 
+        wallet: walletData
     });
 });
 
@@ -170,7 +176,6 @@ async function openPosition(symbol, dcaData = null) {
         const acc = await binancePrivate('/fapi/v2/account');
         let margin = dcaData ? dcaData.margin : (botSettings.invValue.toString().includes('%') ? (parseFloat(acc.availableBalance) * parseFloat(botSettings.invValue) / 100) : parseFloat(botSettings.invValue));
         
-        // SỬA: Hạ mức volume tối thiểu xuống 5.5
         if ((margin * info.maxLeverage) < 5.5) margin = 5.5 / info.maxLeverage;
         
         const ticker = await binanceApi.get(`/fapi/v1/ticker/price?symbol=${symbol}`);
