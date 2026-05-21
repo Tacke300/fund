@@ -26,7 +26,7 @@ const exchange = new ccxt.binance({
 
 let botSettings = { isRunning: false, maxPositions: 3, invValue: "1%", minVol: 5.5, posTP: 1.2, posSL: 10.0, maxDCA: MAX_DCA_LEVEL };
 let status = { botLogs: [], candidatesList: [], blackList: {}, permanentBlacklist: {}, botClosedCount: 0, botPnLClosed: 0, exchangeInfo: null, isReady: false };
-let botActivePositions = new Map(); // ĐÂY LÀ DANH SÁCH DUY NHẤT BOT QUẢN LÝ
+let botActivePositions = new Map(); // DANH SÁCH DUY NHẤT BOT QUẢN LÝ
 let isProcessingDCA = new Set();
 let timestampOffset = 0;
 
@@ -136,26 +136,29 @@ async function priceMonitor() {
 // --- CÁC HÀM API & KHỞI TẠO ---
 const APP = express(); APP.use(express.json()); APP.use(express.static(__dirname));
 
+// TRẢ LẠI LUỒNG GỐC 100%: Gọi trực tiếp realtime từ sàn, không đệm, không fake số bậy
 APP.get('/api/status', async (req, res) => {
-    const acc = await binancePrivate('/fapi/v2/account').catch(() => null);
-    
-    // SỬA GỐC: Bảo vệ cấu trúc JSON phản hồi, không bao giờ để bị trả về cấu trúc lỗi gây lạc dữ liệu UI
-    const walletData = acc ? { 
-        totalWalletBalance: parseFloat(acc.totalWalletBalance).toFixed(2), 
-        availableBalance: parseFloat(acc.availableBalance).toFixed(2), 
-        totalUnrealizedProfit: Array.from(botActivePositions.values()).reduce((s, p) => s + p.pnl, 0).toFixed(2) 
-    } : { 
-        totalWalletBalance: "0.00", 
-        availableBalance: "0.00", 
-        totalUnrealizedProfit: "0.00" 
-    };
-
-    res.json({ 
-        botSettings, 
-        activePositions: Array.from(botActivePositions.values()), 
-        status, 
-        wallet: walletData
-    });
+    try {
+        const acc = await binancePrivate('/fapi/v2/account');
+        res.json({ 
+            botSettings, 
+            activePositions: Array.from(botActivePositions.values()), 
+            status, 
+            wallet: { 
+                totalWalletBalance: parseFloat(acc.totalWalletBalance).toFixed(2), 
+                availableBalance: parseFloat(acc.availableBalance).toFixed(2), 
+                totalUnrealizedProfit: Array.from(botActivePositions.values()).reduce((s, p) => s + p.pnl, 0).toFixed(2) 
+            } 
+        });
+    } catch (e) {
+        // Fallback tối thiểu phòng trường hợp lỗi kết nối nhất thời, giữ nguyên các trường cấu trúc gốc
+        res.json({ 
+            botSettings, 
+            activePositions: Array.from(botActivePositions.values()), 
+            status, 
+            wallet: { totalWalletBalance: "ERR", availableBalance: "ERR", totalUnrealizedProfit: "0.00" } 
+        });
+    }
 });
 
 APP.post('/api/settings', (req, res) => { 
