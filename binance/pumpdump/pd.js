@@ -58,7 +58,7 @@ async function binancePrivate(endpoint, method = 'GET', data = {}) {
 async function priceMonitor() {
     if (!status.isReady) return setTimeout(priceMonitor, 1000);
     
-    // CHẶN: Nếu tắt bot (isRunning = false) thì dừng monitor hoàn toàn, không quét vị thế bậy bạ
+    // ĐIỀU KIỆN 1: Nếu bot bấm stop (isRunning = false) thì dừng monitor không chạy tiếp xuống dưới
     if (!botSettings.isRunning) return setTimeout(priceMonitor, 1000);
 
     try {
@@ -97,45 +97,30 @@ async function priceMonitor() {
                 // VỊ THẾ KHÔNG CÒN TRÊN SÀN -> KẾT THÚC HOẶC DCA
                 if (isProcessingDCA.has(b.symbol)) continue;
 
-                // --- KIỂM TRA GIÁ THỰC TẾ (CÓ SAI SỐ) ĐỂ PHÁT HIỆN ĐÓNG TAY ---
+                // ĐIỀU KIỆN 2: Lấy giá sàn hiện tại để đối chiếu xem có phải ông đóng tay không
                 const targetRisk = posRisk.find(p => p.symbol === b.symbol);
-                if (!targetRisk) continue; // Không lấy được data sàn của token này thì bỏ qua vòng này để an toàn
-
+                if (!targetRisk) continue; 
                 const currentMarkPrice = parseFloat(targetRisk.markPrice);
-                const SLIPPAGE_TOLERANCE = 0.002; // Ngưỡng chênh lệch cho phép 0.2% do trượt giá khi sàn quét lệnh nhanh
 
-                // Tính toán biên độ giá chấp nhận có sai số
-                const tpThresholdLo = b.tp * (1 - SLIPPAGE_TOLERANCE);
-                const tpThresholdHi = b.tp * (1 + SLIPPAGE_TOLERANCE);
-                const slThresholdLo = b.sl * (1 - SLIPPAGE_TOLERANCE);
-                const slThresholdHi = b.sl * (1 + SLIPPAGE_TOLERANCE);
+                // Cho phép sai số chênh lệch 0.2% do sàn quét giá nhanh bị trượt (slippage)
+                const isPriceHitTP = (b.side === 'SHORT' && currentMarkPrice <= (b.tp * 1.002)) || (b.side === 'LONG' && currentMarkPrice >= (b.tp * 0.998));
+                const isPriceHitSL = (b.side === 'SHORT' && currentMarkPrice >= (b.sl * 0.998)) || (b.side === 'LONG' && currentMarkPrice <= (b.sl * 1.002));
 
-                // Check điều kiện chạm mốc (Chỉ cần lọt vào vùng quét hoặc vượt qua hẳn mốc do nến giật)
-                const isPriceHitTP = (b.side === 'SHORT' && currentMarkPrice <= tpThresholdHi) || 
-                                     (b.side === 'LONG' && currentMarkPrice >= tpThresholdLo);
-                                     
-                const isPriceHitSL = (b.side === 'SHORT' && currentMarkPrice >= slThresholdLo) || 
-                                     (b.side === 'LONG' && currentMarkPrice <= slThresholdHi);
-
-                // Nếu vị thế mất nhưng giá thị trường hoàn toàn NẰM NGOÀI vùng quét TP/SL -> Người dùng đóng bằng tay
+                // Nếu vị thế đã mất mà GIÁ CHƯA CHẠM cả TP lẫn SL (có tính sai số) -> Chắc chắn ông đóng tay
                 if (!isPriceHitTP && !isPriceHitSL) {
-                    addBotLog(`🚨 Phát hiện ĐÓNG TAY cặp ${b.symbol} (Giá sàn: ${currentMarkPrice} chưa chạm mốc TP:${b.tp} / SL:${b.sl}). Đưa vào Blacklist!`, "warn");
-                    
-                    // Quét dọn các lệnh TP/SL mồ côi còn sót lại trên sàn của vị thế này
+                    addBotLog(`🚨 Phát hiện đóng tay trên sàn cặp ${b.symbol}! Hủy lệnh treo và đưa vào Blacklist.`, "warn");
                     try {
-                        const openOrders = await binancePrivate('/fapi/v1/openOrders', 'GET', { symbol: b.symbol });
-                        for (const o of openOrders.filter(o => o.positionSide === b.side)) {
+                        const orders = await binancePrivate('/fapi/v1/openOrders', 'GET', { symbol: b.symbol });
+                        for (const o of orders.filter(o => o.positionSide === b.side)) {
                             await binancePrivate('/fapi/v1/order', 'DELETE', { symbol: b.symbol, orderId: o.orderId });
                         }
-                    } catch (err) { console.error("Lỗi dọn lệnh thừa khi đóng tay:", err.message); }
-
-                    // Phạt đưa thẳng vào Blacklist 15 phút, giải phóng bộ nhớ quản lý và BỎ QUA KHÔNG DCA
+                    } catch (err) { console.error("Lỗi xóa lệnh thừa:", err.message); }
+                    
                     status.blackList[b.symbol] = Date.now() + (15 * 60 * 1000);
                     botActivePositions.delete(key);
-                    continue; 
+                    continue; // Bỏ qua toàn bộ phần trade và DCA bên dưới của token này
                 }
 
-                // --- NẾU ĐÃ VƯỢT QUA BỘ LỌC ĐÓNG TAY (SÀN QUÉT THẬT) -> TIẾP TỤC XỬ LÝ LOGIC GỐC ---
                 const trades = await binancePrivate('/fapi/v1/userTrades', 'GET', { symbol: b.symbol, limit: 10 });
                 const recent = trades.filter(t => t.time > (Date.now() + timestampOffset - 20000));
                 let totalR = 0, totalV = 0;
@@ -146,8 +131,7 @@ async function priceMonitor() {
                 status.botClosedCount++; 
                 status.botPnLClosed += netPnl;
 
-                // Nếu kiểm tra thấy chạm vùng TP (hoặc PnL dương) thì chốt lời đưa vào Blacklist
-                if (isPriceHitTP || netPnl > 0 || b.side === 'LONG') {
+                if (netPnl > 0 || b.side === 'LONG') {
                     status.blackList[b.symbol] = Date.now() + (15 * 60 * 1000);
                     addBotLog(`💰 BOT CHỐT ${b.symbol} | Net: ${netPnl.toFixed(2)}$`);
                 } else {
@@ -200,7 +184,7 @@ async function openPosition(symbol, dcaData = null) {
         await new Promise(r => setTimeout(r, 1000));
         const acc = await binancePrivate('/fapi/v2/account');
         let margin = dcaData ? dcaData.margin : (botSettings.invValue.toString().includes('%') ? (parseFloat(acc.availableBalance) * parseFloat(botSettings.invValue) / 100) : parseFloat(botSettings.invValue));
-        if ((margin * info.maxLeverage) < 5.5) margin = 5.5 / info.maxLeverage;
+        if ((margin * info.maxLeverage) < 6.5) margin = 6.5 / info.maxLeverage;
         const ticker = await binanceApi.get(`/fapi/v1/ticker/price?symbol=${symbol}`);
         let qty = Math.ceil(((margin * info.maxLeverage) / parseFloat(ticker.data.price)) / info.stepSize) * info.stepSize;
         await exchange.setLeverage(info.maxLeverage, symbol);
