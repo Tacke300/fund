@@ -58,15 +58,13 @@ async function binancePrivate(endpoint, method = 'GET', data = {}) {
 async function priceMonitor() {
     if (!status.isReady) return setTimeout(priceMonitor, 1000);
     
-    // [SỬA CHỖ 1]: Nếu bot bấm stop thì dừng hẳn monitor, không check giá hay DCA lệnh cũ nữa
+    // [SỬA CHỖ 1]: Dừng monitor hoàn toàn nếu bot đang ở trạng thái STOP
     if (!botSettings.isRunning) return setTimeout(priceMonitor, 1000);
 
     try {
-        // Lấy tất cả vị thế từ sàn nhưng CHỈ XỬ LÝ NHỮNG GÌ BOT ĐANG GIỮ
         const posRisk = await binancePrivate('/fapi/v2/positionRisk');
         
         for (let [key, b] of botActivePositions) {
-            // Tìm chính xác vị thế bot đang giữ trên sàn (dựa vào Symbol và Side)
             const realP = posRisk.find(p => `${p.symbol}_${p.positionSide}` === key && Math.abs(parseFloat(p.positionAmt)) > 0);
             
             if (realP) {
@@ -76,13 +74,11 @@ async function priceMonitor() {
                 b.pnl = parseFloat(realP.unRealizedProfit);
                 b.priceDev = ((markP - b.entryPrice) / b.entryPrice) * 100;
 
-                // Reset bộ đếm an toàn nếu size thay đổi (DCA thành công)
                 if (b.currentQty !== currentQty) { 
                     b.currentQty = currentQty; 
                     b.hitTime = null; 
                 }
 
-                // Chốt chặn 30s
                 const hitTP = (b.side === 'SHORT' && markP <= b.tp) || (b.side === 'LONG' && markP >= b.tp);
                 const hitSL = (b.side === 'SHORT' && markP >= b.sl) || (b.side === 'LONG' && markP <= b.sl);
 
@@ -94,10 +90,9 @@ async function priceMonitor() {
                     }
                 } else { b.hitTime = null; }
             } else {
-                // VỊ THẾ KHÔNG CÒN TRÊN SÀN -> KẾT THÚC HOẶC DCA
                 if (isProcessingDCA.has(b.symbol)) continue;
 
-                // [SỬA CHỖ 2]: Kiểm tra xem có phải đóng tay không trước khi xử lý PnL hoặc DCA
+                // [SỬA CHỖ 2]: Kiểm tra nếu không chạm mốc giá TP/SL vật lý của bot thì là do đóng tay -> Blacklist, xóa bộ nhớ và thoát luôn
                 const targetRisk = posRisk.find(p => p.symbol === b.symbol);
                 if (!targetRisk) continue;
                 const currentMarkPrice = parseFloat(targetRisk.markPrice);
@@ -106,17 +101,9 @@ async function priceMonitor() {
                 const isPriceHitSL = (b.side === 'SHORT' && currentMarkPrice >= (b.sl * 0.998)) || (b.side === 'LONG' && currentMarkPrice <= (b.sl * 1.002));
 
                 if (!isPriceHitTP && !isPriceHitSL) {
-                    addBotLog(`🚨 Phát hiện đóng tay trên sàn cặp ${b.symbol}! Hủy lệnh treo và đưa vào Blacklist.`, "warn");
-                    try {
-                        const orders = await binancePrivate('/fapi/v1/openOrders', 'GET', { symbol: b.symbol });
-                        for (const o of orders.filter(o => o.positionSide === b.side)) {
-                            await binancePrivate('/fapi/v1/order', 'DELETE', { symbol: b.symbol, orderId: o.orderId });
-                        }
-                    } catch (err) { console.error("Lỗi xóa lệnh thừa:", err.message); }
-                    
                     status.blackList[b.symbol] = Date.now() + (15 * 60 * 1000);
                     botActivePositions.delete(key);
-                    continue; // Thoát ra, không chạy xuống phần tính toán ăn thua hay mở DCA tiếp bên dưới
+                    continue;
                 }
 
                 const trades = await binancePrivate('/fapi/v1/userTrades', 'GET', { symbol: b.symbol, limit: 10 });
@@ -133,7 +120,6 @@ async function priceMonitor() {
                     status.blackList[b.symbol] = Date.now() + (15 * 60 * 1000);
                     addBotLog(`💰 BOT CHỐT ${b.symbol} | Net: ${netPnl.toFixed(2)}$`);
                 } else {
-                    // Xử lý khi dính SL vật lý trên sàn -> bot tự nhảy cấp DCA kế tiếp dựa theo bộ nhớ lịch sử
                     const jump = b.dcaCount + 1;
                     if (jump <= botSettings.maxDCA) {
                         openPosition(b.symbol, { ...b, dcaCount: jump, margin: b.firstMargin * (jump + 1) });
@@ -154,12 +140,12 @@ APP.get('/api/status', async (req, res) => {
     const acc = await binancePrivate('/fapi/v2/account').catch(() => null);
     res.json({ 
         botSettings, 
-        activePositions: Array.from(botActivePositions.values()), // CHỈ TRẢ VỀ LỆNH CỦA BOT
+        activePositions: Array.from(botActivePositions.values()), 
         status, 
         wallet: acc ? { 
             totalWalletBalance: parseFloat(acc.totalWalletBalance).toFixed(2), 
             availableBalance: parseFloat(acc.availableBalance).toFixed(2), 
-            totalUnrealizedProfit: Array.from(botActivePositions.values()).reduce((s, p) => s + p.pnl, 0).toFixed(2) // PNL CHỈ TÍNH LỆNH BOT
+            totalUnrealizedProfit: Array.from(botActivePositions.values()).reduce((s, p) => s + p.pnl, 0).toFixed(2) 
         } : { availableBalance: "ERR" } 
     });
 });
@@ -169,7 +155,6 @@ APP.post('/api/settings', (req, res) => {
     botSettings.maxDCA = parseInt(botSettings.maxDCA);
     botSettings.maxPositions = parseInt(botSettings.maxPositions);
     botSettings.minVol = parseFloat(botSettings.minVol);
-    addBotLog(`⚙️ Cấu hình mới: Run=${botSettings.isRunning}, MaxDCA=${botSettings.maxDCA}`, "success");
     res.json({ success: true }); 
 });
 
@@ -200,7 +185,6 @@ async function openPosition(symbol, dcaData = null) {
                 let currentAccumulatedQty = qty;
                 let currentAccumulatedCost = qty * entry;
 
-                // THUẬT TOÁN TỰ TÍNH TOÁN GIÁ TRUNG BÌNH GIẢ LẬP DỰA TRÊN LỊCH SỬ KHỐI LƯỢNG ĐÃ QUA
                 if (dcaData) {
                     currentAccumulatedQty = dcaData.virtualTotalQty + qty;
                     currentAccumulatedCost = dcaData.virtualTotalCost + (qty * entry);
@@ -212,10 +196,7 @@ async function openPosition(symbol, dcaData = null) {
                     tp = entry * 1.10;
                     sl = entry * 0.90;
                 } else {
-                    // 1. Lệnh TP tính chuẩn xác từ GIÁ TRUNG BÌNH GIẢ LẬP TÍCH LŨY
                     tp = virtualAvgEntry * (1 - botSettings.posTP / 100);
-                    
-                    // 2. Lệnh SL tịnh tiến tăng dần cố định +10%, +20%, +30%... từ GIÁ ENTRY ĐẦU TIÊN
                     sl = firstE + (firstE * (botSettings.posSL * (dcaCount + 1)) / 100);
                 }
 
@@ -225,8 +206,8 @@ async function openPosition(symbol, dcaData = null) {
                     dcaCount: dcaCount, leverage: info.maxLeverage, firstEntry: firstE, 
                     firstMargin: dcaData ? dcaData.firstMargin : margin, currentMargin: margin, 
                     currentQty: qty,
-                    virtualTotalQty: currentAccumulatedQty,   // Lưu bộ nhớ tổng khối lượng tích lũy giả lập
-                    virtualTotalCost: currentAccumulatedCost, // Lưu bộ nhớ tổng chi phí tích lũy giả lập
+                    virtualTotalQty: currentAccumulatedQty,
+                    virtualTotalCost: currentAccumulatedCost,
                     dcaHistory: dcaData ? [...dcaData.dcaHistory, entry] : [entry], 
                     pnl: 0, priceDev: 0, hitTime: null 
                 });
@@ -263,7 +244,6 @@ async function init() {
             const b = brk.find(x => x.symbol === s.symbol);
             const maxLev = b?.brackets[0]?.initialLeverage || 20;
 
-            // CHẶN VĨNH VIỄN: Đòn bẩy tối đa dưới x20 thì đưa vào blacklist vĩnh viễn và bỏ qua
             if (maxLev < 20) {
                 status.permanentBlacklist[s.symbol] = true;
                 return;
@@ -287,17 +267,14 @@ setInterval(() => {
 setInterval(() => {
     if (!status.isReady || !botSettings.isRunning) return;
 
-    // --- TỰ ĐỘNG DỌN DẸP BLACKLIST SAU KHI HẾT HẠN 15 PHÚT ---
     const now = Date.now();
     for (const symbol in status.blackList) {
         if (now > status.blackList[symbol]) {
             delete status.blackList[symbol]; 
         }
     }
-    // --------------------------------------------------------
 
     if (botActivePositions.size < botSettings.maxPositions && isProcessingDCA.size === 0) {
-        // KIỂM TRA CHẶN: Thêm điều kiện lọc bỏ các coin nằm trong danh sách chặn vĩnh viễn permanentBlacklist
         const can = status.candidatesList.find(c => 
             Math.abs(c.c1) >= botSettings.minVol && 
             !status.blackList[c.symbol] && 
