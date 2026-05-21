@@ -58,7 +58,7 @@ async function binancePrivate(endpoint, method = 'GET', data = {}) {
 async function priceMonitor() {
     if (!status.isReady) return setTimeout(priceMonitor, 1000);
     
-    // ĐIỀU KIỆN 1: Nếu bot bấm stop (isRunning = false) thì dừng monitor không chạy tiếp xuống dưới
+    // [SỬA CHỖ 1]: Nếu bot bấm stop thì dừng hẳn monitor, không check giá hay DCA lệnh cũ nữa
     if (!botSettings.isRunning) return setTimeout(priceMonitor, 1000);
 
     try {
@@ -97,16 +97,14 @@ async function priceMonitor() {
                 // VỊ THẾ KHÔNG CÒN TRÊN SÀN -> KẾT THÚC HOẶC DCA
                 if (isProcessingDCA.has(b.symbol)) continue;
 
-                // ĐIỀU KIỆN 2: Lấy giá sàn hiện tại để đối chiếu xem có phải ông đóng tay không
+                // [SỬA CHỖ 2]: Kiểm tra xem có phải đóng tay không trước khi xử lý PnL hoặc DCA
                 const targetRisk = posRisk.find(p => p.symbol === b.symbol);
-                if (!targetRisk) continue; 
+                if (!targetRisk) continue;
                 const currentMarkPrice = parseFloat(targetRisk.markPrice);
 
-                // Cho phép sai số chênh lệch 0.2% do sàn quét giá nhanh bị trượt (slippage)
                 const isPriceHitTP = (b.side === 'SHORT' && currentMarkPrice <= (b.tp * 1.002)) || (b.side === 'LONG' && currentMarkPrice >= (b.tp * 0.998));
                 const isPriceHitSL = (b.side === 'SHORT' && currentMarkPrice >= (b.sl * 0.998)) || (b.side === 'LONG' && currentMarkPrice <= (b.sl * 1.002));
 
-                // Nếu vị thế đã mất mà GIÁ CHƯA CHẠM cả TP lẫn SL (có tính sai số) -> Chắc chắn ông đóng tay
                 if (!isPriceHitTP && !isPriceHitSL) {
                     addBotLog(`🚨 Phát hiện đóng tay trên sàn cặp ${b.symbol}! Hủy lệnh treo và đưa vào Blacklist.`, "warn");
                     try {
@@ -118,7 +116,7 @@ async function priceMonitor() {
                     
                     status.blackList[b.symbol] = Date.now() + (15 * 60 * 1000);
                     botActivePositions.delete(key);
-                    continue; // Bỏ qua toàn bộ phần trade và DCA bên dưới của token này
+                    continue; // Thoát ra, không chạy xuống phần tính toán ăn thua hay mở DCA tiếp bên dưới
                 }
 
                 const trades = await binancePrivate('/fapi/v1/userTrades', 'GET', { symbol: b.symbol, limit: 10 });
