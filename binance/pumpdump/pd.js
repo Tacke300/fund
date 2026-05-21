@@ -11,6 +11,8 @@ import ccxt from 'ccxt';
 // CẤU HÌNH NHANH
 // ==========================================
 const MAX_DCA_LEVEL = 3; 
+const MARGIN_PROTECT_LIMIT = 50;  // Dưới 50% khả dụng -> Kích hoạt bảo vệ, chặn quét lệnh mới
+const MARGIN_RECOVER_LIMIT = 60;   // Đạt lại từ 60% trở lên -> Tháo xích bảo vệ, tiếp tục quét
 // ==========================================
 
 const __filename = fileURLToPath(import.meta.url);
@@ -29,6 +31,7 @@ let status = { botLogs: [], candidatesList: [], blackList: {}, permanentBlacklis
 let botActivePositions = new Map(); // DANH SÁCH DUY NHẤT BOT QUẢN LÝ
 let isProcessingDCA = new Set();
 let timestampOffset = 0;
+let isMarginProtected = false; // Biến trạng thái theo dõi chốt chặn bảo vệ ký quỹ
 
 function addBotLog(msg, type = 'info') {
     const time = new Date().toLocaleTimeString('vi-VN', { hour12: false });
@@ -161,18 +164,16 @@ async function priceMonitor() {
 const APP = express(); APP.use(express.json()); APP.use(express.static(__dirname));
 
 APP.get('/api/status', async (req, res) => {
-    // Thay đổi hoàn toàn phương thức bốc dữ liệu từ ví qua endpoint tinh gọn /fapi/v2/balance
-    const balances = await binancePrivate('/fapi/v2/balance').catch(() => null);
-    const usdt = Array.isArray(balances) ? balances.find(b => b.asset === 'USDT') : null;
+    const acc = await binancePrivate('/fapi/v2/account').catch(() => null);
     
     res.json({ 
         botSettings, 
         activePositions: Array.from(botActivePositions.values()), 
         status, 
-        wallet: usdt ? { 
-            totalWalletBalance: parseFloat(usdt.balance || 0).toFixed(2), 
-            availableBalance: parseFloat(usdt.availableBalance || 0).toFixed(2), 
-            totalUnrealizedProfit: parseFloat(usdt.crossUnrealizedProfit || 0).toFixed(2) 
+        wallet: acc ? { 
+            totalWalletBalance: parseFloat(acc.totalMarginBalance || 0).toFixed(2), 
+            availableBalance: parseFloat(acc.availableBalance || 0).toFixed(2), 
+            totalUnrealizedProfit: parseFloat(acc.totalUnrealizedProfit || 0).toFixed(2) 
         } : { totalWalletBalance: "0.00", availableBalance: "ERR", totalUnrealizedProfit: "0.00" } 
     });
 });
@@ -189,16 +190,19 @@ APP.post('/api/settings', (req, res) => {
 async function openPosition(symbol, dcaData = null) {
     if (isProcessingDCA.has(symbol)) return;
     isProcessingDCA.add(symbol);
+    
+    const isDCAorLong = dcaData !== null; // Kiểm tra luồng miễn trừ
     const side = dcaData?.isFinalLong ? 'LONG' : 'SHORT';
+    
     try {
         const info = status.exchangeInfo[symbol];
         await new Promise(r => setTimeout(r, 1000));
         
-        // Cập nhật lấy số dư khả dụng đồng bộ qua endpoint balance trong hàm mở lệnh
-        const balances = await binancePrivate('/fapi/v2/balance').catch(() => null);
-        const usdt = Array.isArray(balances) ? balances.find(b => b.asset === 'USDT') : null;
-        const availableUsdt = usdt ? parseFloat(usdt.availableBalance || 0) : 0;
-        
+        const acc = await binancePrivate('/fapi/v2/account');
+        if (!acc) throw new Error("Không lấy được thông tin tài khoản từ sàn.");
+
+        const availableUsdt = parseFloat(acc.availableBalance || 0);
+
         let margin = dcaData ? dcaData.margin : (botSettings.invValue.toString().includes('%') ? (availableUsdt * parseFloat(botSettings.invValue) / 100) : parseFloat(botSettings.invValue));
         if ((margin * info.maxLeverage) < 6.5) margin = 6.5 / info.maxLeverage;
         const ticker = await binanceApi.get(`/fapi/v1/ticker/price?symbol=${symbol}`);
@@ -265,8 +269,9 @@ async function syncTPSL(symbol, side, info, tpPrice, slPrice) {
 
 async function init() {
     try {
-        const ipRes = await axios.get('https://api.ipify.org?format=json').catch(() => ({ data: { ip: "Lỗi" } }));
-        console.log(`\n🌍 Bạn đang truy cập = IP: ${ipRes.data.ip}`);
+        // Ép lấy chuẩn định dạng IPv4 không bị dính lai IPv6
+        const ipRes = await axios.get('https://api4.ipify.org?format=json').catch(() => ({ data: { ip: "Lỗi bốc IP" } }));
+        console.log(`\n🌍 Bạn đang truy cập = IPv4: ${ipRes.data.ip}`);
         const t = await axios.get('https://fapi.binance.com/fapi/v1/time');
         timestampOffset = t.data.serverTime - Date.now();
         await exchange.loadMarkets();
@@ -297,7 +302,8 @@ setInterval(() => {
     }).on('error', () => {});
 }, 1500);
 
-setInterval(() => {
+// --- VÒNG LẶP QUÉT TÌM COIN MỞ VỊ THẾ MỚI ---
+setInterval(async () => {
     if (!status.isReady || !botSettings.isRunning) return;
 
     const now = Date.now();
@@ -306,6 +312,31 @@ setInterval(() => {
             delete status.blackList[symbol]; 
         }
     }
+
+    // Xử lý logic Vùng đệm Bảo vệ Margin trước khi quét tìm coin
+    const acc = await binancePrivate('/fapi/v2/account').catch(() => null);
+    if (acc) {
+        const totalWallet = parseFloat(acc.totalMarginBalance || 0);
+        const availableUsdt = parseFloat(acc.availableBalance || 0);
+        
+        if (totalWallet > 0) {
+            const availPercent = (availableUsdt / totalWallet) * 100;
+
+            // Kịch bản 1: Đang chạy bình thường mà tụt xuống dưới mức giới hạn bảo vệ
+            if (!isMarginProtected && availPercent < MARGIN_PROTECT_LIMIT) {
+                isMarginProtected = true;
+                addBotLog(`🚨 KÍCH HOẠT BẢO VỆ MARGIN: Khả dụng (${availPercent.toFixed(1)}%) < ${MARGIN_PROTECT_LIMIT}%. Tạm dừng quét lệnh mới!`, "error");
+            } 
+            // Kịch bản 2: Đang bị khóa bảo vệ nhưng margin đã phục hồi vượt ngưỡng thiết lập
+            else if (isMarginProtected && availPercent >= MARGIN_RECOVER_LIMIT) {
+                isMarginProtected = false;
+                addBotLog(`🛡️ MARGIN PHỤC HỒI: Khả dụng (${availPercent.toFixed(1)}%) >= ${MARGIN_RECOVER_LIMIT}%. Tiếp tục quét lệnh mới.`, "success");
+            }
+        }
+    }
+
+    // Nếu đang dính trạng thái bảo vệ ký quỹ -> chặn hoàn toàn luồng quét lệnh mới bên dưới
+    if (isMarginProtected) return;
 
     if (botActivePositions.size < botSettings.maxPositions && isProcessingDCA.size === 0) {
         const can = status.candidatesList.find(c => 
