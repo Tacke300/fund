@@ -58,7 +58,6 @@ async function binancePrivate(endpoint, method = 'GET', data = {}) {
 async function priceMonitor() {
     if (!status.isReady) return setTimeout(priceMonitor, 1000);
     try {
-        // CHỐT CHẶN 1: BẤM STOP TRÊN UI -> BUÔNG LỆNH KHÔNG QUẢN LÝ NỮA
         if (!botSettings.isRunning && botActivePositions.size > 0) {
             addBotLog(`🛑 Bot đã STOP. Tiến hành hủy TP/SL treo và xóa bộ nhớ theo dõi...`, "warn");
             for (let [key, b] of botActivePositions) {
@@ -103,7 +102,6 @@ async function priceMonitor() {
                     }
                 } else { b.hitTime = null; }
             } else {
-                // CHỐT CHẶN 2: PHÁT HIỆN VỊ THẾ KHÔNG CÒN TRÊN SÀN
                 if (isProcessingDCA.has(b.symbol)) continue;
 
                 const trades = await binancePrivate('/fapi/v1/userTrades', 'GET', { symbol: b.symbol, limit: 5 });
@@ -121,7 +119,7 @@ async function priceMonitor() {
                 try {
                     const openOrders = await binancePrivate('/fapi/v1/openOrders', 'GET', { symbol: b.symbol });
                     for (const o of openOrders.filter(o => o.positionSide === b.side)) {
-                        await binancePrivate('/fapi/v1/order', 'DELETE', { symbol: b.symbol, orderId: o.orderId });
+                        await binancePrivate('/fapi/v1/order', 'DELETE', { symbol, orderId: o.orderId });
                     }
                 } catch(e){}
 
@@ -163,16 +161,18 @@ async function priceMonitor() {
 const APP = express(); APP.use(express.json()); APP.use(express.static(__dirname));
 
 APP.get('/api/status', async (req, res) => {
-    const acc = await binancePrivate('/fapi/v2/account').catch(() => null);
+    // Thay đổi hoàn toàn phương thức bốc dữ liệu từ ví qua endpoint tinh gọn /fapi/v2/balance
+    const balances = await binancePrivate('/fapi/v2/balance').catch(() => null);
+    const usdt = Array.isArray(balances) ? balances.find(b => b.asset === 'USDT') : null;
     
     res.json({ 
         botSettings, 
         activePositions: Array.from(botActivePositions.values()), 
         status, 
-        wallet: acc ? { 
-            totalWalletBalance: parseFloat(acc.totalWalletBalance || 0).toFixed(2), 
-            availableBalance: parseFloat(acc.availableBalance || 0).toFixed(2), 
-            totalUnrealizedProfit: Array.from(botActivePositions.values()).reduce((s, p) => s + p.pnl, 0).toFixed(2) 
+        wallet: usdt ? { 
+            totalWalletBalance: parseFloat(usdt.balance || 0).toFixed(2), 
+            availableBalance: parseFloat(usdt.availableBalance || 0).toFixed(2), 
+            totalUnrealizedProfit: parseFloat(usdt.crossUnrealizedProfit || 0).toFixed(2) 
         } : { totalWalletBalance: "0.00", availableBalance: "ERR", totalUnrealizedProfit: "0.00" } 
     });
 });
@@ -193,8 +193,11 @@ async function openPosition(symbol, dcaData = null) {
     try {
         const info = status.exchangeInfo[symbol];
         await new Promise(r => setTimeout(r, 1000));
-        const acc = await binancePrivate('/fapi/v2/account');
-        const availableUsdt = acc ? parseFloat(acc.availableBalance || 0) : 0;
+        
+        // Cập nhật lấy số dư khả dụng đồng bộ qua endpoint balance trong hàm mở lệnh
+        const balances = await binancePrivate('/fapi/v2/balance').catch(() => null);
+        const usdt = Array.isArray(balances) ? balances.find(b => b.asset === 'USDT') : null;
+        const availableUsdt = usdt ? parseFloat(usdt.availableBalance || 0) : 0;
         
         let margin = dcaData ? dcaData.margin : (botSettings.invValue.toString().includes('%') ? (availableUsdt * parseFloat(botSettings.invValue) / 100) : parseFloat(botSettings.invValue));
         if ((margin * info.maxLeverage) < 6.5) margin = 6.5 / info.maxLeverage;
