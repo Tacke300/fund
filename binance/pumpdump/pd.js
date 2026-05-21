@@ -164,15 +164,14 @@ const APP = express(); APP.use(express.json()); APP.use(express.static(__dirname
 
 APP.get('/api/status', async (req, res) => {
     const acc = await binancePrivate('/fapi/v2/account').catch(() => null);
-    const usdtAsset = acc && acc.assets ? acc.assets.find(a => a.asset === 'USDT') : null;
     
     res.json({ 
         botSettings, 
         activePositions: Array.from(botActivePositions.values()), 
         status, 
-        wallet: usdtAsset ? { 
-            totalWalletBalance: parseFloat(usdtAsset.walletBalance).toFixed(2), 
-            availableBalance: parseFloat(usdtAsset.availableBalance).toFixed(2), 
+        wallet: acc ? { 
+            totalWalletBalance: parseFloat(acc.totalWalletBalance || 0).toFixed(2), 
+            availableBalance: parseFloat(acc.availableBalance || 0).toFixed(2), 
             totalUnrealizedProfit: Array.from(botActivePositions.values()).reduce((s, p) => s + p.pnl, 0).toFixed(2) 
         } : { totalWalletBalance: "0.00", availableBalance: "ERR", totalUnrealizedProfit: "0.00" } 
     });
@@ -195,8 +194,7 @@ async function openPosition(symbol, dcaData = null) {
         const info = status.exchangeInfo[symbol];
         await new Promise(r => setTimeout(r, 1000));
         const acc = await binancePrivate('/fapi/v2/account');
-        const usdtAsset = acc && acc.assets ? acc.assets.find(a => a.asset === 'USDT') : null;
-        const availableUsdt = usdtAsset ? parseFloat(usdtAsset.availableBalance) : 0;
+        const availableUsdt = acc ? parseFloat(acc.availableBalance || 0) : 0;
         
         let margin = dcaData ? dcaData.margin : (botSettings.invValue.toString().includes('%') ? (availableUsdt * parseFloat(botSettings.invValue) / 100) : parseFloat(botSettings.invValue));
         if ((margin * info.maxLeverage) < 6.5) margin = 6.5 / info.maxLeverage;
