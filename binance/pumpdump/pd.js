@@ -52,7 +52,7 @@ setInterval(() => {
     }
 }, 5000);
 
-// --- PRICE MONITOR & SỬA BẪY LOG ĐÓNG LỆNH ---
+// --- PRICE MONITOR & CHÍNH XÁC LUỒNG DCA KHI LỖ ---
 async function priceMonitor() {
     if (!status.isReady || isMonitorRunning) return setTimeout(priceMonitor, 1000);
     isMonitorRunning = true;
@@ -91,6 +91,7 @@ async function priceMonitor() {
                     }
                 } else { b.hitTime = null; }
             } else {
+                // Vị thế đã biến mất trên sàn
                 if (isProcessingDCA.has(b.symbol)) continue;
                 await new Promise(r => setTimeout(r, 800));
 
@@ -106,26 +107,35 @@ async function priceMonitor() {
                 recent.forEach(t => { totalR += parseFloat(t.realizedPnl); totalV += (parseFloat(t.price) * parseFloat(t.qty)); lastPrice = parseFloat(t.price); });
                 const netPnl = totalR - (totalV * 0.0004);
 
-                // Khắc phục bẫy sai nhãn: So sánh khoảng cách toán học giữa giá khớp thực tế và mốc cấu hình
-                let reason = "ĐÓNG TAY (USER_MANUAL)";
-                if (recent.length > 0) {
-                    if (Math.abs(lastPrice - b.sl) / b.sl < 0.012) reason = "DÍNH CẮT LỖ (STOP_LOSS_MARKET)";
-                    else if (Math.abs(lastPrice - b.tp) / b.tp < 0.012) reason = "CẮT LỜI THÀNH CÔNG (TAKE_PROFIT_MARKET)";
-                }
-
                 botActivePositions.delete(key);
                 status.botClosedCount++; status.botPnLClosed += netPnl;
-                status.blackList[b.symbol] = Date.now() + (15 * 60 * 1000);
 
-                console.log(`\n📦 [CHI TIẾT ĐÓNG LỆNH]\n- Cặp Coin: ${b.symbol} | Hướng: ${b.side}\n- Nguyên nhân: ${reason}\n- Số lần đã DCA: ${b.dcaCount}/${botSettings.maxDCA}\n- Giá vào trung bình ảo: ${b.virtualTotalCost > 0 ? (b.virtualTotalCost / b.virtualTotalQty).toFixed(5) : b.entryPrice}\n- Giá khớp đóng thực tế: ${lastPrice}\n- Mức độ trượt giá: ${reason === "DÍNH CẮT LỖ (STOP_LOSS_MARKET)" ? Math.abs(((lastPrice - b.sl) / b.sl) * 100).toFixed(2) + '%' : 'Không dính'}\n- Tổng PnL ròng (đã trừ phí): ${netPnl.toFixed(4)}$\n`);
-                addBotLog(`📦 Đóng ${b.symbol} | PnL: ${netPnl.toFixed(2)}$ | Lý do: ${reason}`, netPnl > 0 ? "success" : "error");
+                // TÁCH BIỆT LOGIC PHÂN LOẠI ĐÓNG LỆNH CHUẨN XÁC THEO LỖ / LÃI TRÊN SÀN
+                if (netPnl >= 0) {
+                    // LUỒNG ĂN TP (LÃI): Cho vào blacklist ngay lập tức, KHÔNG DCA. Bất kể SHORT hay LONG.
+                    status.blackList[b.symbol] = Date.now() + (15 * 60 * 1000);
 
-                if (netPnl < 0 && b.side === 'SHORT' && reason === "DÍNH CẮT LỖ (STOP_LOSS_MARKET)") {
-                    const jump = b.dcaCount + 1;
-                    if (jump <= botSettings.maxDCA) {
-                        openPosition(b.symbol, { ...b, dcaCount: jump, margin: b.firstMargin * (jump + 1) });
-                    } else {
-                        openPosition(b.symbol, { ...b, isFinalLong: true, margin: b.firstMargin * 10 });
+                    console.log(`\n📦 [CHI TIẾT ĐÓNG LỆNH - CHỐT LỜI THÀNH CÔNG]\n- Cặp Coin: ${b.symbol} | Hướng: ${b.side}\n- Trạng thái: HIT TAKE PROFIT\n- Số lần đã DCA: ${b.dcaCount}/${botSettings.maxDCA}\n- Giá vào trung bình ảo: ${b.virtualTotalCost > 0 ? (b.virtualTotalCost / b.virtualTotalQty).toFixed(5) : b.entryPrice}\n- Giá khớp đóng thực tế: ${lastPrice}\n- Tổng PnL ròng (đã trừ phí): ${netPnl.toFixed(4)}$ (LÃI)\n`);
+                    addBotLog(`📦 Chốt lời thành công ${b.symbol} (${b.side}) | PnL: +${netPnl.toFixed(2)}$`, "success");
+
+                } else {
+                    // LUỒNG DÍNH SL (LỖ):
+                    if (b.side === 'LONG') {
+                        // Nếu là lệnh LONG cứu máy mà dính SL (Thua lỗ) -> Blacklist luôn
+                        status.blackList[b.symbol] = Date.now() + (15 * 60 * 1000);
+                    }
+
+                    console.log(`\n📦 [CHI TIẾT ĐÓNG LỆNH - DÍNH CẮT LỖ / KÍCH HOẠT CHUỖI]\n- Cặp Coin: ${b.symbol} | Hướng: ${b.side}\n- Trạng thái: HIT STOP LOSS\n- Số lần đã DCA: ${b.dcaCount}/${botSettings.maxDCA}\n- Giá vào trung bình ảo: ${b.virtualTotalCost > 0 ? (b.virtualTotalCost / b.virtualTotalQty).toFixed(5) : b.entryPrice}\n- Giá khớp đóng thực tế: ${lastPrice}\n- Tổng PnL ròng (đã trừ phí): ${netPnl.toFixed(4)}$ (LỖ)\n`);
+                    addBotLog(`📦 Dính StopLoss ${b.symbol} (${b.side}) | PnL: ${netPnl.toFixed(2)}$`, "error");
+
+                    // Chỉ kích hoạt luồng DCA / Đảo LONG nếu đây là lệnh SHORT và kết quả bị lỗ
+                    if (b.side === 'SHORT') {
+                        const jump = b.dcaCount + 1;
+                        if (jump <= botSettings.maxDCA) {
+                            openPosition(b.symbol, { ...b, dcaCount: jump, margin: b.firstMargin * (jump + 1) });
+                        } else {
+                            openPosition(b.symbol, { ...b, isFinalLong: true, margin: b.firstMargin * 10 });
+                        }
                     }
                 }
             }
@@ -269,7 +279,7 @@ setInterval(async () => {
     if (isMarginProtected) return;
 
     if (botActivePositions.size < botSettings.maxPositions && isProcessingDCA.size === 0) {
-        const can = status.candidatesList.find(c => Math.abs(c.c1) >= botSettings.minVol && !status.blackList[c.symbol] && !status.permanentBlacklist[c.symbol] && !botActivePositions.has(`${c.symbol}_SHORT`));
+        const can = status.candidatesList.find(c => Math.abs(c.c1) >= botSettings.minVol && !status.blackList[c.symbol] && !status.permanentBlacklist[c.symbol] && !botActivePositions.has(`${c.symbol}_SHORT`) && !botActivePositions.has(`${c.symbol}_LONG`));
         if (can) openPosition(can.symbol);
     }
 }, 3000);
