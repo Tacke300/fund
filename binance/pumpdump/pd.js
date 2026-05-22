@@ -110,25 +110,23 @@ async function priceMonitor() {
                 botActivePositions.delete(key);
                 status.botClosedCount++; status.botPnLClosed += netPnl;
 
-                // TÁCH BIỆT LOGIC PHÂN LOẠI ĐÓNG LỆNH CHUẨN XÁC THEO LỖ / LÃI TRÊN SÀN
                 if (netPnl >= 0) {
-                    // LUỒNG ĂN TP (LÃI): Cho vào blacklist ngay lập tức, KHÔNG DCA. Bất kể SHORT hay LONG.
+                    // LUỒNG ĂN CHỐT LỜI: Cho vào blacklist ngay lập tức, KHÔNG DCA.
                     status.blackList[b.symbol] = Date.now() + (15 * 60 * 1000);
 
-                    console.log(`\n📦 [CHI TIẾT ĐÓNG LỆNH - CHỐT LỜI THÀNH CÔNG]\n- Cặp Coin: ${b.symbol} | Hướng: ${b.side}\n- Trạng thái: HIT TAKE PROFIT\n- Số lần đã DCA: ${b.dcaCount}/${botSettings.maxDCA}\n- Giá vào trung bình ảo: ${b.virtualTotalCost > 0 ? (b.virtualTotalCost / b.virtualTotalQty).toFixed(5) : b.entryPrice}\n- Giá khớp đóng thực tế: ${lastPrice}\n- Tổng PnL ròng (đã trừ phí): ${netPnl.toFixed(4)}$ (LÃI)\n`);
+                    console.log(`\n📦 [CHI TIẾT ĐÓNG LỆNH - CHỐT LỜI THÀNH CÔNG]\n- Cặp Coin: ${b.symbol} | Hướng: ${b.side}\n- Trạng thái: HIT TAKE PROFIT (CHỐT LỜI)\n- Số lần đã DCA: ${b.dcaCount}/${botSettings.maxDCA}\n- Giá vào trung bình ảo: ${b.virtualTotalCost > 0 ? (b.virtualTotalCost / b.virtualTotalQty).toFixed(5) : b.entryPrice}\n- Giá khớp đóng thực tế: ${lastPrice}\n- Tổng PnL ròng (đã trừ phí): ${netPnl.toFixed(4)}$ (LÃI)\n`);
                     addBotLog(`📦 Chốt lời thành công ${b.symbol} (${b.side}) | PnL: +${netPnl.toFixed(2)}$`, "success");
 
                 } else {
-                    // LUỒNG DÍNH SL (LỖ):
+                    // LUỒNG DÍNH DỪNG LỖ (SL):
                     if (b.side === 'LONG') {
-                        // Nếu là lệnh LONG cứu máy mà dính SL (Thua lỗ) -> Blacklist luôn
                         status.blackList[b.symbol] = Date.now() + (15 * 60 * 1000);
                     }
 
-                    console.log(`\n📦 [CHI TIẾT ĐÓNG LỆNH - DÍNH CẮT LỖ / KÍCH HOẠT CHUỖI]\n- Cặp Coin: ${b.symbol} | Hướng: ${b.side}\n- Trạng thái: HIT STOP LOSS\n- Số lần đã DCA: ${b.dcaCount}/${botSettings.maxDCA}\n- Giá vào trung bình ảo: ${b.virtualTotalCost > 0 ? (b.virtualTotalCost / b.virtualTotalQty).toFixed(5) : b.entryPrice}\n- Giá khớp đóng thực tế: ${lastPrice}\n- Tổng PnL ròng (đã trừ phí): ${netPnl.toFixed(4)}$ (LỖ)\n`);
-                    addBotLog(`📦 Dính StopLoss ${b.symbol} (${b.side}) | PnL: ${netPnl.toFixed(2)}$`, "error");
+                    console.log(`\n📦 [CHI TIẾT ĐÓNG LỆNH - DỪNG LỖ / KÍCH HOẠT CHUỖI CỨU LỆNH]\n- Cặp Coin: ${b.symbol} | Hướng: ${b.side}\n- Trạng thái: HIT STOP LOSS (DỪNG LỖ)\n- Số lần đã DCA: ${b.dcaCount}/${botSettings.maxDCA}\n- Giá vào trung bình ảo: ${b.virtualTotalCost > 0 ? (b.virtualTotalCost / b.virtualTotalQty).toFixed(5) : b.entryPrice}\n- Giá khớp đóng thực tế: ${lastPrice}\n- Tổng PnL ròng (đã trừ phí): ${netPnl.toFixed(4)}$ (LỖ)\n`);
+                    addBotLog(`📦 Dừng lỗ vị thế ${b.symbol} (${b.side}) | PnL: ${netPnl.toFixed(2)}$`, "error");
 
-                    // Chỉ kích hoạt luồng DCA / Đảo LONG nếu đây là lệnh SHORT và kết quả bị lỗ
+                    // Bất kể margin tổng tài khoản ra sao, luồng tự cứu (DCA/LONG) của vị thế cũ ĐƯỢC PHÉP CHẠY LẬP TỨC
                     if (b.side === 'SHORT') {
                         const jump = b.dcaCount + 1;
                         if (jump <= botSettings.maxDCA) {
@@ -175,7 +173,7 @@ async function openPosition(symbol, dcaData = null) {
         const actualMargin = (qty * curPrice) / info.maxLeverage;
         await exchange.setLeverage(info.maxLeverage, symbol);
 
-        addBotLog(`📡 [KHỞI TẠO VỊ THẾ] ${symbol} | Lồng: ${isDCA ? (dcaData.isFinalLong ? 'LONG CỨU' : 'DCA ' + dcaData.dcaCount) : 'MỞ MỚI'} | Vol: ${(qty * curPrice).toFixed(2)}$ | Ép Min: ${isForcedMin ? 'BẬT' : 'TẮT'}`);
+        addBotLog(`📡 [KHỞI TẠO VỊ THẾ] ${symbol} | Luồng: ${isDCA ? (dcaData.isFinalLong ? 'LONG CỨU MÁY' : 'DCA CẤP ' + dcaData.dcaCount) : 'MỞ MỚI'} | Vol: ${(qty * curPrice).toFixed(2)}$ | Ép Min: ${isForcedMin ? 'BẬT' : 'TẮT'}`);
 
         const order = await exchange.createOrder(symbol, 'MARKET', side === 'SHORT' ? 'SELL' : 'BUY', qty.toFixed(info.quantityPrecision), undefined, { positionSide: side });
         
@@ -200,7 +198,7 @@ async function openPosition(symbol, dcaData = null) {
                     dcaHistory: isDCA ? [...dcaData.dcaHistory, entry] : [entry], pnl: 0, priceDev: 0, hitTime: null 
                 });
                 
-                console.log(`\n🎯 [THÔNG SỐ VỊ THẾ HOẠT ĐỘNG]\n- Cặp: ${symbol} | Entry: ${entry} | Mốc TP: ${sync.tp.toFixed(info.pricePrecision)} | Mốc SL: ${sync.sl.toFixed(info.pricePrecision)}\n- Tích lũy ảo: Vol=${(vQty * curPrice).toFixed(2)}$, EntryTB=${vAvg.toFixed(5)}\n`);
+                console.log(`\n🎯 [THÔNG SỐ VỊ THẾ HOẠT ĐỘNG]\n- Cặp: ${symbol} | Entry: ${entry} | Mốc Chốt Lời (TP): ${sync.tp.toFixed(info.pricePrecision)} | Mốc Dừng Lỗ (SL): ${sync.sl.toFixed(info.pricePrecision)}\n- Tích lũy ảo: Vol=${(vQty * curPrice).toFixed(2)}$, EntryTB=${vAvg.toFixed(5)}\n`);
             }
         }
     } catch (e) { addBotLog(`❌ Thất bại mở vị thế ${symbol}: ${e.message}`, "error"); }
@@ -268,16 +266,18 @@ setInterval(async () => {
             const availPercent = (availUsdt / totalWallet) * 100;
             if (!isMarginProtected && availPercent < MARGIN_PROTECT_LIMIT) {
                 isMarginProtected = true;
-                addBotLog(`🚨 [CẢNH BÁO KÝ QUỸ] Đóng băng quét mới. Khả dụng: ${availPercent.toFixed(1)}%`, "error");
+                addBotLog(`🚨 [CẢNH BÁO KÝ QUỸ] Số dư khả dụng thấp (${availPercent.toFixed(1)}%). ĐÓNG BĂNG quét mở lệnh MỚI từ Candidates.`, "error");
             } else if (isMarginProtected && availPercent >= MARGIN_RECOVER_LIMIT) {
                 isMarginProtected = false;
-                addBotLog(`🛡️ [HỒI PHỤC KÝ QUỸ] Giải phóng quét lệnh. Khả dụng: ${availPercent.toFixed(1)}%`, "success");
+                addBotLog(`🛡️ [HỒI PHỤC KÝ QUỸ] Số dư phục hồi (${availPercent.toFixed(1)}%). MỞ LẠI luồng quét lệnh mới.`, "success");
             }
         }
     }
 
+    // NẾU BỊ BẢO VỆ MARGIN: Chỉ return chặn đứng việc vào lệnh MỚI từ candidates.
     if (isMarginProtected) return;
 
+    // Chỉ khi tài khoản an toàn mới cho bốc Candidates mở thêm cặp coin mới
     if (botActivePositions.size < botSettings.maxPositions && isProcessingDCA.size === 0) {
         const can = status.candidatesList.find(c => Math.abs(c.c1) >= botSettings.minVol && !status.blackList[c.symbol] && !status.permanentBlacklist[c.symbol] && !botActivePositions.has(`${c.symbol}_SHORT`) && !botActivePositions.has(`${c.symbol}_LONG`));
         if (can) openPosition(can.symbol);
