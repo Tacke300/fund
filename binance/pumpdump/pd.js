@@ -7,7 +7,7 @@ import path from 'path';
 import { API_KEY, SECRET_KEY } from './config.js';
 import ccxt from 'ccxt';
 
-const MAX_DCA_LEVEL = 3;
+const MAX_DCA_LEVEL = 2;
 const MARGIN_PROTECT_LIMIT = 50; 
 const MARGIN_RECOVER_LIMIT = 60; 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -125,7 +125,7 @@ async function priceMonitor() {
                     if (jump <= botSettings.maxDCA) {
                         openPosition(b.symbol, { ...b, dcaCount: jump, margin: b.firstMargin * (jump + 1) });
                     } else {
-                        openPosition(b.symbol, { ...b, isFinalLong: true, margin: b.firstMargin * 20 });
+                        openPosition(b.symbol, { ...b, isFinalLong: true, margin: b.firstMargin * 10 });
                     }
                 }
             }
