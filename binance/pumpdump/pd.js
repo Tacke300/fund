@@ -10,7 +10,7 @@ import ccxt from 'ccxt';
 // =========================================================================
 // CẤU HÌNH NHANH - CÁC THÔNG SỐ CỐ ĐỊNH HỆ THỐNG
 // =========================================================================
-const MAX_DCA_LEVEL = 3;           // Số lần DCA tối đa cho một cặp vị thế
+const MAX_DCA_LEVEL = 2;           // Số lần DCA tối đa cho một cặp vị thế
 const MARGIN_PROTECT_LIMIT = 50;    // Dưới 50% Khả dụng/Ví -> Ngừng quét lệnh mới
 const MARGIN_RECOVER_LIMIT = 60;    // Đạt lại từ 60% Khả dụng trở lên -> Tiếp tục quét lại
 // =========================================================================
@@ -60,7 +60,7 @@ async function binancePrivate(endpoint, method = 'GET', data = {}) {
     }
 }
 
-// --- TÁCH BIỆT HOÀN TOÀN LUỒNG QUẢN LÝ BLACKLIST (FIX LỖI ĐÔNG CỨNG MÃI TRÊN HTML) ---
+// --- TÁCH BIỆT HOÀN TOÀN LUỒNG QUẢN LÝ BLACKLIST ---
 setInterval(() => {
     const now = Date.now();
     for (const symbol in status.blackList) {
@@ -69,7 +69,7 @@ setInterval(() => {
             addBotLog(`🔄 Hết thời gian phạt: ${symbol} được giải phóng khỏi Blacklist.`, "success");
         }
     }
-}, 5000); // Cứ mỗi 5 giây quét dọn dẹp bộ nhớ một lần độc lập
+}, 5000);
 
 // --- MONITOR THEO DÕI GIÁ VÀ XỬ LÝ LỆNH ĐÓNG/DCA ---
 async function priceMonitor() {
@@ -179,7 +179,7 @@ async function priceMonitor() {
                         openPosition(b.symbol, { ...b, dcaCount: jump, margin: b.firstMargin * (jump + 1) });
                     } else {
                         // Vượt cấp DCA tối đa -> Kích hoạt lệnh LONG bảo vệ tài khoản cứu giá
-                        openPosition(b.symbol, { ...b, isFinalLong: true, margin: b.firstMargin * 20 });
+                        openPosition(b.symbol, { ...b, isFinalLong: true, margin: b.firstMargin * 10 });
                     }
                 }
             }
@@ -410,21 +410,27 @@ setInterval(async () => {
     }
 }, 3000);
 
-// --- LUỒNG THEO DÕI SỰ THAY ĐỔI IP (Quét định kỳ mỗi 10 giây) ---
+// --- LUỒNG THEO DÕI SỰ THAY ĐỔI IP (Quét định kỳ mỗi 30 giây, chỉ log khi thực sự ĐỔI IP) ---
 setInterval(async () => {
     if (!status.isReady) return;
     try {
         const ipCheckRes = await axios.get('https://api4.ipify.org?format=json', { timeout: 5000 });
         const newIP = ipCheckRes.data.ip;
         
+        // Mốc khởi tạo ban đầu (nếu init chưa bốc kịp)
+        if (!currentBotIP && newIP) {
+            currentBotIP = newIP;
+            return;
+        }
+
+        // CHỈ PHÁT LOG KHI IP ĐÃ KHÁC IP CŨ
         if (currentBotIP && newIP && newIP !== currentBotIP) {
             addBotLog(`⚠️ [CẢNH BÁO MẠNG] IPv4 của bot đã bị THAY ĐỔI! Cũ: ${currentBotIP} -> Mới: ${newIP}`, "warn");
-            currentBotIP = newIP; // Cập nhật lại IP mới làm mốc theo dõi tiếp theo
+            currentBotIP = newIP;
         }
     } catch (err) {
-        // Ghi log nhẹ ra terminal nếu lỗi mạng không bốc được IP tạm thời, tránh spam botLogs trên web
-        console.error(`[MẠNG] Không thể kiểm tra IP định kỳ: ${err.message}`);
+        // Im lặng khi lỗi mạng cục bộ hoặc timeout, tránh ghi log rác ra terminal PM2
     }
-}, 10000); // 10 giây kiểm tra một lần
+}, 30000);
 
 APP.listen(9001);
