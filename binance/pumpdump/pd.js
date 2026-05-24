@@ -236,8 +236,8 @@ async function openPosition(symbol, dcaData = null) {
 
                 let tp = 0, sl = 0;
                 if (side === 'LONG') {
-                    tp = entry * 1.10;
-                    sl = entry * 0.90;
+                    tp = entry * 1.05;
+                    sl = entry * 0.95;
                 } else {
                     // Dùng giá trung bình cộng đơn giản để tính mốc TP ăn dày hơn
                     tp = simpleAvgEntry * (1 - botSettings.posTP / 100);
