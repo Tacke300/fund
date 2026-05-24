@@ -130,7 +130,7 @@ async function priceMonitor() {
                 const allOrders = await binancePrivate('/fapi/v1/allOrders', 'GET', { symbol: b.symbol, limit: 10 });
                 const closedById = allOrders.find(o => o.positionSide === b.side && o.status === 'FILLED' && (o.type === 'STOP_MARKET' || o.type === 'TAKE_PROFIT_MARKET'));
 
-                let reasonOfClose = "ĐÓNG TAY (USER_MANUAL)"; 
+                let reasonOfClose = "ĐÓNG TAY HOẶC ÉP ĐÓNG NGOÀI HỆ THỐNG (MANUAL_CLOSE)"; 
                 if (closedById) {
                     reasonOfClose = closedById.type === 'STOP_MARKET' ? "DÍNH CẮT LỖ (STOP_LOSS_MARKET)" : "CẮT LỜI THÀNH CÔNG (TAKE_PROFIT_MARKET)";
                 }
@@ -165,20 +165,22 @@ async function priceMonitor() {
                 // LOG CHI TIẾT KHI ĐÓNG VỊ THẾ
                 addBotLog(`📦 [CHI TIẾT ĐÓNG LỆNH]
 - Cặp Coin: ${b.symbol} | Hướng: ${b.side}
-- Nguyên nhân: ${reasonOfClose}
+- Nguyên nhân nhận diện: ${reasonOfClose}
 - Số lần đã DCA: ${b.dcaCount}/${botSettings.maxDCA}
 - Giá vào trung bình ảo: ${b.virtualTotalCost > 0 ? (b.virtualTotalCost / b.virtualTotalQty).toFixed(5) : b.entryPrice}
 - Giá khớp đóng thực tế: ${avgClosePrice.toFixed(5)}
 - Mức độ trượt giá so với mốc cài đặt: ${closedById?.type === 'STOP_MARKET' ? Math.abs(((avgClosePrice - b.sl) / b.sl) * 100).toFixed(2) + '%' : 'Không dính'}
 - Tổng PnL ròng (đã trừ phí sàn): ${netPnl.toFixed(4)}$`, netPnl > 0 ? "success" : "error");
 
-                // Kích hoạt luồng DCA nếu đóng lỗ do lệnh SHORT thường bị dính SL
-                if (netPnl < 0 && b.side === 'SHORT' && reasonOfClose === "DÍNH CẮT LỖ (STOP_LOSS_MARKET)") {
+                // THAY ĐỔI TẠI ĐÂY: Loại bỏ điều kiện kiểm tra reasonOfClose. Cứ lệnh SHORT đóng bị LỖ (netPnl < 0) là DCA.
+                if (netPnl < 0 && b.side === 'SHORT') {
                     const jump = b.dcaCount + 1;
                     if (jump <= botSettings.maxDCA) {
+                        addBotLog(`🔄 Kích hoạt luồng lệnh DCA cấp ${jump} cho cặp ${b.symbol}`, "warn");
                         openPosition(b.symbol, { ...b, dcaCount: jump, margin: b.firstMargin * (jump + 1) });
                     } else {
                         // Vượt cấp DCA tối đa -> Kích hoạt lệnh LONG bảo vệ tài khoản cứu giá
+                        addBotLog(`🚨 Vượt quá cấp DCA tối đa. Kích hoạt vị thế LONG cứu lệnh cho ${b.symbol}`, "error");
                         openPosition(b.symbol, { ...b, isFinalLong: true, margin: b.firstMargin * 10 });
                     }
                 }
