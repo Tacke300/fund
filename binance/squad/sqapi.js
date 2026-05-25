@@ -1335,23 +1335,9 @@ function addLog(msg) {
     console.log(logMsg);
 }
 
-// Lấy coin từ sàn làm hashtag: 1 chính + 3 phụ
 async function getDynamicHashtags(mainSymbol) {
-    try {
-        const res = await axios.get('https://fapi.binance.com/fapi/v1/exchangeInfo');
-        const coins = res.data.symbols
-            .filter(s => s.quoteAsset === 'USDT' && s.baseAsset !== mainSymbol)
-            .map(s => s.baseAsset)
-            .sort(() => 0.5 - Math.random())
-            .slice(0, 3);
-        
-        let mainTag = `#${mainSymbol}USDT $${mainSymbol}USDT`;
-        let subTags = coins.map(c => `#${c}USDT $${c}USDT`).join(' ');
-        
-        return `${mainTag} ${subTags}`;
-    } catch (e) {
-        return `#${mainSymbol}USDT $${mainSymbol}USDT`;
-    }
+    // Chỉ giữ lại đúng tag và cashtag của coin chính, bỏ hoàn toàn phần quét coin phụ
+    return `#${mainSymbol}USDT $${mainSymbol}USDT`;
 }
 async function generateFinalPost(coinData) {
     if (!isRunning) return { success: false, msg: "Bot đang STOP" };
