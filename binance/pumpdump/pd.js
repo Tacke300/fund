@@ -11,8 +11,8 @@ import ccxt from 'ccxt';
 // CẤU HÌNH NHANH - CÁC THÔNG SỐ CỐ ĐỊNH HỆ THỐNG
 // =========================================================================
 const MAX_DCA_LEVEL = 2;           // Số lần DCA tối đa cho một cặp vị thế
-const MARGIN_PROTECT_LIMIT = 50;    // Dưới 50% Khả dụng/Ví -> Ngừng quét lệnh mới
-const MARGIN_RECOVER_LIMIT = 60;    // Đạt lại từ 60% Khả dụng trở lên -> Tiếp tục quét lại
+const MARGIN_PROTECT_LIMIT = 60;    // Dưới 50% Khả dụng/Ví -> Ngừng quét lệnh mới
+const MARGIN_RECOVER_LIMIT = 70;    // Đạt lại từ 60% Khả dụng trở lên -> Tiếp tục quét lại
 // =========================================================================
 
 const __filename = fileURLToPath(import.meta.url);
