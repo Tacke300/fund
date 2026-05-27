@@ -38,9 +38,8 @@ let isProcessingDCA = new Set();
 let timestampOffset = 0;
 let isMarginProtected = false; 
 
-let currentBotIP = null;
+let currentBotIP = null; // IP Gốc hệ thống
 
-// CODE GỐC: Hàm ghi log hệ thống
 function addBotLog(msg, type = 'info') {
     const time = new Date().toLocaleTimeString('vi-VN', { hour12: false });
     status.botLogs.unshift({ time, msg, type });
@@ -48,7 +47,6 @@ function addBotLog(msg, type = 'info') {
     console.log(`[${time}] ${msg}`);
 }
 
-// CODE GỐC: Hàm ký và gọi API Binance thuần
 async function binancePrivate(endpoint, method = 'GET', data = {}) {
     try {
         const timestamp = Date.now() + timestampOffset;
@@ -66,7 +64,7 @@ async function binancePrivate(endpoint, method = 'GET', data = {}) {
     }
 }
 
-// CODE GỐC: Luồng tự động giải phóng Blacklist từng giây
+// --- LUỒNG QUẢN LÝ BLACKLIST ĐẾM NGƯỢC ---
 setInterval(() => {
     const now = Date.now();
     for (const symbol in status.blackList) {
@@ -77,7 +75,7 @@ setInterval(() => {
     }
 }, 1000);
 
-// CODE GỐC: Monitor theo dõi vị thế thực tế, ép đóng lệnh treo >30s, check TP/SL
+// --- MONITOR THEO DÕI GIÁ VÀ XỬ LÝ LỆNH ĐÓNG/DCA ---
 async function priceMonitor() {
     if (!status.isReady) return setTimeout(priceMonitor, 1000);
     try {
@@ -159,7 +157,6 @@ async function priceMonitor() {
                 status.botClosedCount++; 
                 status.botPnLClosed += netPnl;
 
-                // LOGIC BLACKLIST CHU KỲ (ĐÃ SỬA THEO Ý MÀY)
                 const isFinalLong = b.isFinalLong === true; 
                 if (netPnl > 0) {
                     status.blackList[b.symbol] = Date.now() + (15 * 60 * 1000);
@@ -189,7 +186,7 @@ async function priceMonitor() {
     setTimeout(priceMonitor, 1000);
 }
 
-// CODE GỐC: Hàm tính kích thước lệnh (lot size), tính toán margin khả dụng và bắn lệnh MARKET
+// --- LUỒNG TÍNH TOÁN VÀ ĐẶT LỆNH ---
 async function openPosition(symbol, dcaData = null) {
     if (isProcessingDCA.has(symbol)) return;
     isProcessingDCA.add(symbol); 
@@ -277,7 +274,6 @@ async function openPosition(symbol, dcaData = null) {
     }
 }
 
-// CODE GỐC: Hàm đồng bộ lệnh dừng giới hạn TP/SL lên Binance
 async function syncTPSL(symbol, side, info, tpPrice, slPrice) {
     const sideClose = side === 'SHORT' ? 'BUY' : 'SELL';
     try {
@@ -290,7 +286,6 @@ async function syncTPSL(symbol, side, info, tpPrice, slPrice) {
     } catch (e) { return { tp: 0, sl: 0 }; }
 }
 
-// CODE GỐC: Cấu hình Web API cho Dashboard điều khiển bot
 const APP = express(); APP.use(express.json()); APP.use(express.static(__dirname));
 
 APP.get('/api/status', async (req, res) => {
@@ -328,13 +323,14 @@ APP.post('/api/settings', (req, res) => {
     res.json({ success: true }); 
 });
 
-// CODE GỐC: Hàm tải cấu hình đòn bẩy tối đa cho phép của tất cả các đồng coin trên sàn giao dịch Binance
+// --- SỬA TẬN GỐC: KHỞI TẠO IP CHUẨN XÁC KHI START PM2 ---
 async function init() {
     try {
-        const ipRes = await axios.get('https://api4.ipify.org?format=json').catch(() => ({ data: { ip: "Không bốc được IP" } }));
-        currentBotIP = ipRes.data.ip;
-        console.log(`\n🌍 IP: ${currentBotIP}`);
-        addBotLog(`🌍 IP: ${currentBotIP}`, "success");
+        const ipRes = await axios.get('https://api4.ipify.org?format=json', { timeout: 8000 }).catch(() => ({ data: { ip: "127.0.0.1" } }));
+        currentBotIP = ipRes.data.ip; // 🔥 ĐÃ GHIM CỐ ĐỊNH IP GỐC KHI START LÊN
+        
+        console.log(`\n🌍 IP INITIALIZED: ${currentBotIP}`);
+        addBotLog(`🌍 IP START: ${currentBotIP}`, "success"); // Chỉ ghi log 1 lần duy nhất lúc start bot
         
         const t = await axios.get('https://fapi.binance.com/fapi/v1/time');
         timestampOffset = t.data.serverTime - Date.now();
@@ -356,7 +352,6 @@ async function init() {
 
 init();
 
-// CODE GỐC: Cổng đồng bộ dữ liệu liên tục từ Luffy Server (Port 9000) về
 setInterval(() => {
     http.get('http://127.0.0.1:9000/api/data', res => {
         let d = ''; res.on('data', c => d += c);
@@ -364,7 +359,6 @@ setInterval(() => {
     }).on('error', () => {});
 }, 1500);
 
-// CODE GỐC + ĐÃ SỬA LUỒNG QUÉT CHỌN COIN (1P HOẶC 5P ĐỦ MINVOL)
 setInterval(async () => {
     if (!status.isReady || !botSettings.isRunning) return;
 
@@ -388,7 +382,6 @@ setInterval(async () => {
     if (isMarginProtected) return;
 
     if (botActivePositions.size < botSettings.maxPositions && isProcessingDCA.size === 0) {
-        // Đã sửa quét điều kiện c1 HOẶC c5
         const can = status.candidatesList.find(c => 
             (Math.abs(c.c1) >= botSettings.minVol || Math.abs(c.c5) >= botSettings.minVol) && 
             !status.blackList[c.symbol] && 
@@ -398,30 +391,25 @@ setInterval(async () => {
         );
         
         if (can) {
-            // Đã cập nhật in đầy đủ cả 3 khung
             addBotLog(`🎯 [MỤC TIÊU] Phát hiện ${can.symbol} đạt điều kiện! Chi tiết biến động -> M1: ${can.c1}% | M5: ${can.c5}% | M15: ${can.c15}%`, "info");
             openPosition(can.symbol);
         }
     }
 }, 3000);
 
-// CODE GỐC: Luồng kiểm tra IP thay đổi đột ngột chống rớt mạng
+// --- SỬA TẬN GỐC: LUỒNG THEO DÕI SỰ THAY ĐỔI IP THỰC TẾ ---
 setInterval(async () => {
-    if (!status.isReady) return;
+    if (!status.isReady || !currentBotIP) return; // Nếu chưa init xong IP gốc thì bỏ qua không check chéo
     try {
         const ipCheckRes = await axios.get('https://api4.ipify.org?format=json', { timeout: 5000 });
         const newIP = ipCheckRes.data.ip;
         
-        if (!currentBotIP && newIP) {
-            currentBotIP = newIP;
-            return;
+        // Chỉ in log khi bốc được IP mới và IP mới này KHÁC hoàn toàn với IP hệ thống đang chạy
+        if (newIP && newIP !== currentBotIP) {
+            addBotLog(`⚠️ [NETWORK] IP CHANGE DETECTED! Cũ: ${currentBotIP} -> Mới: ${newIP}`, "warn");
+            currentBotIP = newIP; // Cập nhật lại IP mới làm mốc đối chiếu tiếp theo
         }
-
-        if (currentBotIP && newIP && newIP !== currentBotIP) {
-            addBotLog(`⚠️ [NETWORK] IP CHANGE! Cũ: ${currentBotIP} -> Mới: ${newIP}`, "warn");
-            currentBotIP = newIP;
-        }
-    } catch (err) {}
+    } catch (err) {} // Chặn hoàn toàn log rác nếu API check IP bị timeout/nghẽn mạng cục bộ
 }, 30000);
 
 APP.listen(9001);
