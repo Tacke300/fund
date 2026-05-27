@@ -239,7 +239,6 @@ async function openPosition(symbol, dcaData = null) {
                     sl = firstE + (firstE * (botSettings.posSL * (dcaCount + 1)) / 100);
                 }
 
-                // VÁ LỖI 4131 (PERCENT_PRICE)
                 const sync = await syncTPSL(symbol, side, info, tp, sl);
                 botActivePositions.set(`${symbol}_${side}`, { 
                     symbol, side, entryPrice: entry, tp: sync.tp, sl: sync.sl, 
@@ -319,7 +318,7 @@ APP.post('/api/settings', (req, res) => {
 
 async function init() {
     try {
-        const res = await binanceApi.get('/fapi/v1/ip').catch(() => ({ data: { ip: "171.224.178." } })); 
+        const res = await binanceApi.get('/fapi/v1/ip'); 
         console.log(`\n🌍 IP: ${res.data.ip}`);
         addBotLog(`🌍 IP: ${res.data.ip}`, "success");
         
@@ -350,9 +349,6 @@ setInterval(() => {
     }).on('error', () => {});
 }, 1500);
 
-// =========================================================================
-// MẢNG 9 ĐÃ ĐỒNG BỘ ĐÚNG CÁC TRƯỜNG DỮ LIỆU CỦA SERVER (c1, c2, c3)
-// =========================================================================
 setInterval(async () => {
     if (!status.isReady || !botSettings.isRunning) return;
 
@@ -376,7 +372,6 @@ setInterval(async () => {
     if (isMarginProtected) return;
     if (botActivePositions.size >= botSettings.maxPositions) return;
 
-    // Đổi logic check điều kiện: Lấy đúng c1 (1M) và c2 (5M) từ Server gửi qua để so sánh minVol
     const validCandidates = status.candidatesList.filter(c => {
         return (Math.abs(c.c1 || 0) >= botSettings.minVol || Math.abs(c.c2 || 0) >= botSettings.minVol) && 
                !status.blackList[c.symbol] && 
@@ -388,7 +383,6 @@ setInterval(async () => {
     for (const can of validCandidates) {
         if (botActivePositions.size >= botSettings.maxPositions) break;
 
-        // In log chính xác theo cấu trúc biến động thực tế [1M: c1 | 5M: c2 | 15M: c3]
         addBotLog(`🎯 Đủ ĐK mở lệnh: ${can.symbol} | Biến động 3 khung [1M: ${can.c1}% | 5M: ${can.c2 || 0}% | 15M: ${can.c3 || 0}%]`, "info");
 
         openPosition(can.symbol);
