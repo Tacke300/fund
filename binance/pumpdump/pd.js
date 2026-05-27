@@ -168,6 +168,7 @@ async function priceMonitor() {
                 status.botClosedCount++; 
                 status.botPnLClosed += netPnl;
 
+                // FIX CHU KỲ TRADING CHUẨN:
                 if (b.isFinalLong || netPnl > 0) {
                     status.blackList[b.symbol] = Date.now() + (15 * 60 * 1000);
                 }
@@ -259,7 +260,7 @@ async function openPosition(symbol, dcaData = null) {
                     sl = firstE + (firstE * (botSettings.posSL * (dcaCount + 1)) / 100);
                 }
 
-                // Cập nhật giá trị TP/SL thực tế từ sàn trả về sau khi lọc lỗi PERCENT_PRICE
+                // FIX PERCENT_PRICE: Thử sai nâng hạ biên độ khi tạo lệnh điều kiện rào TP/SL sàn Binance
                 const sync = await syncTPSL(symbol, side, info, tp, sl);
                 botActivePositions.set(`${symbol}_${side}`, { 
                     symbol, side, entryPrice: entry, tp: sync.tp, sl: sync.sl, 
@@ -282,21 +283,15 @@ async function openPosition(symbol, dcaData = null) {
     }
 }
 
-// CHỨC NĂNG CẢI TIẾN: Sửa lỗi lọc PERCENT_PRICE bằng cơ chế tự động hạ/nới biên độ nếu sàn từ chối
 async function syncTPSL(symbol, side, info, tpPrice, slPrice) {
     const sideClose = side === 'SHORT' ? 'BUY' : 'SELL';
     let currentTp = tpPrice;
     let currentSl = slPrice;
-
-    // Tiến hành xóa sạch lệnh cũ trước khi rải lệnh mới
     try {
         const orders = await binancePrivate('/fapi/v1/openOrders', 'GET', { symbol });
-        for (const o of orders.filter(o => o.positionSide === side)) {
-            await binancePrivate('/fapi/v1/order', 'DELETE', { symbol, orderId: o.orderId }).catch(()=>{});
-        }
+        for (const o of orders.filter(o => o.positionSide === side)) await binancePrivate('/fapi/v1/order', 'DELETE', { symbol, orderId: o.orderId }).catch(()=>{});
     } catch(e){}
 
-    // Vòng lặp thử sai tối đa 3 lần nếu dính PERCENT_PRICE từ sàn Binance
     for (let i = 0; i < 3; i++) {
         try {
             await new Promise(r => setTimeout(r, 500));
@@ -305,18 +300,14 @@ async function syncTPSL(symbol, side, info, tpPrice, slPrice) {
             return { tp: currentTp, sl: currentSl }; 
         } catch (e) {
             if (e.message.includes('-4131') || e.message.includes('PERCENT_PRICE')) {
-                // Nếu bị sàn ép bộ lọc PERCENT_PRICE -> Tiến hành nới biên độ TP/SL an toàn thêm 0.5% để sàn duyệt thông qua
                 if (side === 'SHORT') {
-                    currentTp = currentTp * 0.995; // Ép TP sâu hơn xuống dưới
-                    currentSl = currentSl * 1.005; // Đẩy SL cao lên trên
+                    currentTp = currentTp * 0.995; 
+                    currentSl = currentSl * 1.005; 
                 } else {
                     currentTp = currentTp * 1.005; 
                     currentSl = currentSl * 0.995;
                 }
-                console.log(`⚠️ [PERCENT_PRICE Fix] Thử lại thiết lập TP/SL lần ${i+1} cho ${symbol}`);
-            } else {
-                break; // Gặp lỗi hệ thống khác thì dừng luồng thử sai
-            }
+            } else { break; }
         }
     }
     return { tp: tpPrice, sl: slPrice };
@@ -327,6 +318,7 @@ async function syncTPSL(symbol, side, info, tpPrice, slPrice) {
 // =========================================================================
 const APP = express(); APP.use(express.json()); APP.use(express.static(__dirname));
 
+// SỬA ĐỔI CHÍNH TẠI ĐÂY: Bot tự tính toán chuyển mốc Blacklist thô thành chuỗi đếm ngược trực quan MM:SS gửi lên HTML UI
 APP.get('/api/status', async (req, res) => {
     const acc = await binancePrivate('/fapi/v2/account').catch(() => null);
     
@@ -337,6 +329,7 @@ APP.get('/api/status', async (req, res) => {
         if (timeLeft > 0) {
             const minutes = Math.floor(timeLeft / 60000);
             const seconds = Math.floor((timeLeft % 60000) / 1000);
+            // Ép chuỗi hiển thị đúng chuẩn đồng hồ đếm ngược dạng trực quan (Ví dụ: 14:05)
             formattedBlacklist[symbol] = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
         }
     }
@@ -346,7 +339,7 @@ APP.get('/api/status', async (req, res) => {
         activePositions: Array.from(botActivePositions.values()), 
         status: {
             ...status,
-            blackList: formattedBlacklist 
+            blackList: formattedBlacklist // Ghi đè truyền cấu trúc dạng MM:SS lên thẳng HTML hiển thị
         }, 
         wallet: acc ? { 
             totalWalletBalance: parseFloat(acc.totalMarginBalance || 0).toFixed(2), 
@@ -428,6 +421,7 @@ setInterval(async () => {
     if (isMarginProtected) return;
     if (botActivePositions.size >= botSettings.maxPositions) return;
 
+    // FIX CHẶN NUỐT SỐ 0: Kiểm tra chặt chẽ điều kiện để không bỏ lỡ tín hiệu
     const validCandidates = status.candidatesList.filter(c => {
         const matchM1 = c.c1 !== undefined && c.c1 !== null && Math.abs(c.c1) >= botSettings.minVol; 
         const matchM5 = c.c2 !== undefined && c.c2 !== null && Math.abs(c.c2) >= botSettings.minVol; 
@@ -442,7 +436,6 @@ setInterval(async () => {
     for (const can of validCandidates) {
         if (botActivePositions.size >= botSettings.maxPositions) break;
 
-        // FIX LỖI HIỂN THỊ %: Kiểm tra nghiêm ngặt kiểu dữ liệu để không nuốt mất số 0 từ cổng 9000 trả sang
         const volM1 = (can.c1 !== undefined && can.c1 !== null) ? `${can.c1}%` : 'N/A';
         const volM5 = (can.c2 !== undefined && can.c2 !== null) ? `${can.c2}%` : 'N/A';
         const volM15 = (can.c3 !== undefined && can.c3 !== null) ? `${can.c3}%` : 'N/A';
