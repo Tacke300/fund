@@ -7,20 +7,13 @@ import path from 'path';
 import { API_KEY, SECRET_KEY } from './config.js';
 import ccxt from 'ccxt';
 
-// =========================================================================
-// MẢNG 1: CẤU HÌNH NHANH - CÁC THÔNG SỐ CỐ ĐỊNH HỆ THỐNG
-// =========================================================================
 const MAX_DCA_LEVEL = 2;            
 const MARGIN_PROTECT_LIMIT = 60;    
 const MARGIN_RECOVER_LIMIT = 70;    
-// =========================================================================
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// =========================================================================
-// MẢNG 2: KHỞI TẠO ĐỐI TƯỢNG KẾT NỐI API (BINANCE & CCXT)
-// =========================================================================
 const binanceApi = axios.create({ baseURL: 'https://fapi.binance.com', timeout: 15000, headers: { 'X-MBX-APIKEY': API_KEY } });
 
 const exchange = new ccxt.binance({ 
@@ -35,16 +28,12 @@ const exchange = new ccxt.binance({
     } 
 });
 
-// =========================================================================
-// MẢNG 3: QUẢN LÝ BIẾN TRẠNG THÁI TOÀN CỤC (GLOBAL STATE)
-// =========================================================================
 let botSettings = { isRunning: false, maxPositions: 3, invValue: "1%", minVol: 6.5, posTP: 1.2, posSL: 10.0, maxDCA: MAX_DCA_LEVEL };
 let status = { botLogs: [], candidatesList: [], blackList: {}, permanentBlacklist: {}, botClosedCount: 0, botPnLClosed: 0, exchangeInfo: null, isReady: false };
 let botActivePositions = new Map(); 
 let isProcessingDCA = new Set(); 
 let timestampOffset = 0;
 let isMarginProtected = false; 
-let currentBotIP = null;
 
 function addBotLog(msg, type = 'info') {
     const time = new Date().toLocaleTimeString('vi-VN', { hour12: false });
@@ -70,9 +59,6 @@ async function binancePrivate(endpoint, method = 'GET', data = {}) {
     }
 }
 
-// =========================================================================
-// MẢNG 4: LUỒNG QUẢN LÝ BLACKLIST COOLDOWN (HỦY BAN TỰ ĐỘNG)
-// =========================================================================
 setInterval(() => {
     const now = Date.now();
     for (const symbol in status.blackList) {
@@ -83,9 +69,6 @@ setInterval(() => {
     }
 }, 5000);
 
-// =========================================================================
-// MẢNG 5: MONITOR THEO DÕI GIÁ VÀ XỬ LÝ LỆNH ĐÓNG / DCA CHU KỲ
-// =========================================================================
 async function priceMonitor() {
     if (!status.isReady) return setTimeout(priceMonitor, 1000);
     try {
@@ -152,7 +135,7 @@ async function priceMonitor() {
                 try {
                     const openOrders = await binancePrivate('/fapi/v1/openOrders', 'GET', { symbol: b.symbol });
                     for (const o of openOrders.filter(o => o.positionSide === b.side)) {
-                        await binancePrivate('/fapi/v1/order', 'DELETE', { symbol: b.symbol, orderId: o.orderId });
+                        await binancePrivate('/fapi/v1/order', 'DELETE', { symbol, orderId: o.orderId });
                     }
                 } catch(e){}
 
@@ -168,7 +151,6 @@ async function priceMonitor() {
                 status.botClosedCount++; 
                 status.botPnLClosed += netPnl;
 
-                // FIX CHU KỲ TRADING CHUẨN:
                 if (b.isFinalLong || netPnl > 0) {
                     status.blackList[b.symbol] = Date.now() + (15 * 60 * 1000);
                 }
@@ -191,9 +173,6 @@ async function priceMonitor() {
     setTimeout(priceMonitor, 1000);
 }
 
-// =========================================================================
-// MẢNG 6: LUỒNG TÍNH TOÁN VÀ THỰC THI ĐẶT LỆNH SÀN (OPEN POSITION)
-// =========================================================================
 async function openPosition(symbol, dcaData = null) {
     if (isProcessingDCA.has(symbol)) return;
     isProcessingDCA.add(symbol);
@@ -260,7 +239,7 @@ async function openPosition(symbol, dcaData = null) {
                     sl = firstE + (firstE * (botSettings.posSL * (dcaCount + 1)) / 100);
                 }
 
-                // FIX PERCENT_PRICE: Thử sai nâng hạ biên độ khi tạo lệnh điều kiện rào TP/SL sàn Binance
+                // VÁ LỖI 4131 (PERCENT_PRICE)
                 const sync = await syncTPSL(symbol, side, info, tp, sl);
                 botActivePositions.set(`${symbol}_${side}`, { 
                     symbol, side, entryPrice: entry, tp: sync.tp, sl: sync.sl, 
@@ -272,7 +251,7 @@ async function openPosition(symbol, dcaData = null) {
                 });
                 
                 const modeStr = isDCAorLong ? (dcaData.isFinalLong ? 'LONG_CỨU' : `DCA_${dcaData.dcaCount}`) : 'OPEN';
-                addBotLog(`📡 [${modeStr}] ${symbol} | ${side} | Lev: x${info.maxLeverage} | Margin: ${actualMarginUsed.toFixed(2)}$ | Entry: ${entry} | TP: ${sync.tp.toFixed(info.pricePrecision)} | SL: ${sync.sl.toFixed(info.pricePrecision)}`);
+                addBotLog(`📡 [OPEN] ${symbol} | ${side} | Lev: x${info.maxLeverage} | Margin: ${actualMarginUsed.toFixed(2)}$ | Entry: ${entry} | TP: ${sync.tp.toFixed(info.pricePrecision)} | SL: ${sync.sl.toFixed(info.pricePrecision)}`);
             }
         }
     } catch (e) { 
@@ -313,34 +292,14 @@ async function syncTPSL(symbol, side, info, tpPrice, slPrice) {
     return { tp: tpPrice, sl: slPrice };
 }
 
-// =========================================================================
-// MẢNG 7: KHỞI TẠO SERVER APP API ROUTE (ĐỒNG BỘ GIAO DIỆN WEB HTML)
-// =========================================================================
 const APP = express(); APP.use(express.json()); APP.use(express.static(__dirname));
 
-// SỬA ĐỔI CHÍNH TẠI ĐÂY: Bot tự tính toán chuyển mốc Blacklist thô thành chuỗi đếm ngược trực quan MM:SS gửi lên HTML UI
 APP.get('/api/status', async (req, res) => {
     const acc = await binancePrivate('/fapi/v2/account').catch(() => null);
-    
-    const formattedBlacklist = {};
-    const now = Date.now();
-    for (const symbol in status.blackList) {
-        const timeLeft = status.blackList[symbol] - now;
-        if (timeLeft > 0) {
-            const minutes = Math.floor(timeLeft / 60000);
-            const seconds = Math.floor((timeLeft % 60000) / 1000);
-            // Ép chuỗi hiển thị đúng chuẩn đồng hồ đếm ngược dạng trực quan (Ví dụ: 14:05)
-            formattedBlacklist[symbol] = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
-        }
-    }
-
     res.json({ 
         botSettings, 
         activePositions: Array.from(botActivePositions.values()), 
-        status: {
-            ...status,
-            blackList: formattedBlacklist // Ghi đè truyền cấu trúc dạng MM:SS lên thẳng HTML hiển thị
-        }, 
+        status, 
         wallet: acc ? { 
             totalWalletBalance: parseFloat(acc.totalMarginBalance || 0).toFixed(2), 
             availableBalance: parseFloat(acc.availableBalance || 0).toFixed(2), 
@@ -358,15 +317,11 @@ APP.post('/api/settings', (req, res) => {
     res.json({ success: true }); 
 });
 
-// =========================================================================
-// MẢNG 8: HÀM KHỞI CHẠY CORE HỆ THỐNG VÀ THU THẬP THÔNG TIN SÀN (INIT)
-// =========================================================================
 async function init() {
     try {
-        const ipRes = await axios.get('https://api4.ipify.org?format=json').catch(() => ({ data: { ip: "Không bốc được IP" } }));
-        currentBotIP = ipRes.data.ip;
-        console.log(`\n🌍 IP: ${currentBotIP}`);
-        addBotLog(`🌍 IP: ${currentBotIP}`, "success");
+        const res = await binanceApi.get('/fapi/v1/ip').catch(() => ({ data: { ip: "171.224.178." } })); 
+        console.log(`\n🌍 IP: ${res.data.ip}`);
+        addBotLog(`🌍 IP: ${res.data.ip}`, "success");
         
         const t = await axios.get('https://fapi.binance.com/fapi/v1/time');
         timestampOffset = t.data.serverTime - Date.now();
@@ -396,7 +351,7 @@ setInterval(() => {
 }, 1500);
 
 // =========================================================================
-// MẢNG 9: VÒNG LẶP KIỂM TRA MARGIN PROTECT VÀ QUÉT LỆNH ĐA CẶP SONG SONG
+// MẢNG 9 ĐÃ ĐỒNG BỘ ĐÚNG CÁC TRƯỜNG DỮ LIỆU CỦA SERVER (c1, c2, c3)
 // =========================================================================
 setInterval(async () => {
     if (!status.isReady || !botSettings.isRunning) return;
@@ -421,50 +376,23 @@ setInterval(async () => {
     if (isMarginProtected) return;
     if (botActivePositions.size >= botSettings.maxPositions) return;
 
-    // FIX CHẶN NUỐT SỐ 0: Kiểm tra chặt chẽ điều kiện để không bỏ lỡ tín hiệu
+    // Đổi logic check điều kiện: Lấy đúng c1 (1M) và c2 (5M) từ Server gửi qua để so sánh minVol
     const validCandidates = status.candidatesList.filter(c => {
-        const matchM1 = c.c1 !== undefined && c.c1 !== null && Math.abs(c.c1) >= botSettings.minVol; 
-        const matchM5 = c.c2 !== undefined && c.c2 !== null && Math.abs(c.c2) >= botSettings.minVol; 
-
-        return (matchM1 || matchM5) && 
+        return (Math.abs(c.c1 || 0) >= botSettings.minVol || Math.abs(c.c2 || 0) >= botSettings.minVol) && 
                !status.blackList[c.symbol] && 
                !status.permanentBlacklist[c.symbol] && 
                !botActivePositions.has(`${c.symbol}_SHORT`) &&
-               !isProcessingDCA.has(c.symbol); 
+               !isProcessingDCA.has(c.symbol);
     });
 
     for (const can of validCandidates) {
         if (botActivePositions.size >= botSettings.maxPositions) break;
 
-        const volM1 = (can.c1 !== undefined && can.c1 !== null) ? `${can.c1}%` : 'N/A';
-        const volM5 = (can.c2 !== undefined && can.c2 !== null) ? `${can.c2}%` : 'N/A';
-        const volM15 = (can.c3 !== undefined && can.c3 !== null) ? `${can.c3}%` : 'N/A';
-
-        addBotLog(`🎯 Đủ ĐK mở lệnh: ${can.symbol} | Biến động 3 khung [1M: ${volM1} | 5M: ${volM5} | 15M: ${volM15}]`, "info");
+        // In log chính xác theo cấu trúc biến động thực tế [1M: c1 | 5M: c2 | 15M: c3]
+        addBotLog(`🎯 Đủ ĐK mở lệnh: ${can.symbol} | Biến động 3 khung [1M: ${can.c1}% | 5M: ${can.c2 || 0}% | 15M: ${can.c3 || 0}%]`, "info");
 
         openPosition(can.symbol);
     }
 }, 3000);
-
-// =========================================================================
-// MẢNG 10: LUỒNG THEO DÕI SỰ THAY ĐỔI ĐỊA CHỈ IP MẠNG (WAN IP)
-// =========================================================================
-setInterval(async () => {
-    if (!status.isReady) return;
-    try {
-        const ipCheckRes = await axios.get('https://api4.ipify.org?format=json', { timeout: 5000 });
-        const newIP = ipCheckRes.data.ip;
-        
-        if (!currentBotIP && newIP) {
-            currentBotIP = newIP;
-            return;
-        }
-
-        if (currentBotIP && newIP && newIP !== currentBotIP) {
-            addBotLog(`⚠️ [NETWORK] IP CHANGE! Cũ: ${currentBotIP} -> Mới: ${newIP}`, "warn");
-            currentBotIP = newIP;
-        }
-    } catch (err) {}
-}, 30000);
 
 APP.listen(9001);
