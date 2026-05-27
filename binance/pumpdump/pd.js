@@ -8,9 +8,9 @@ import { API_KEY, SECRET_KEY } from './config.js';
 import ccxt from 'ccxt';
 
 // =========================================================================
-// MẢNG 1: CẤU HÌNH NHANH - CÁC THÔNG SỐ CỐ ĐỊNH HỆ THỐNG
+// CẤU HÌNH NHANH - CÁC THÔNG SỐ CỐ ĐỊNH HỆ THỐNG
 // =========================================================================
-const MAX_DCA_LEVEL = 2;            // Số lần DCA tối đa cho một cặp vị thế trước khi Long cứu
+const MAX_DCA_LEVEL = 2;           // Số lần DCA tối đa cho một cặp vị thế
 const MARGIN_PROTECT_LIMIT = 60;    // Dưới 60% Khả dụng/Ví -> Ngừng quét lệnh mới
 const MARGIN_RECOVER_LIMIT = 70;    // Đạt lại từ 70% Khả dụng trở lên -> Tiếp tục quét lại
 // =========================================================================
@@ -18,11 +18,7 @@ const MARGIN_RECOVER_LIMIT = 70;    // Đạt lại từ 70% Khả dụng trở 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// =========================================================================
-// MẢNG 2: KHỞI TẠO ĐỐI TƯỢNG KẾT NỐI API (BINANCE & CCXT)
-// =========================================================================
 const binanceApi = axios.create({ baseURL: 'https://fapi.binance.com', timeout: 15000, headers: { 'X-MBX-APIKEY': API_KEY } });
-
 const exchange = new ccxt.binance({ 
     apiKey: API_KEY, 
     secret: SECRET_KEY, 
@@ -30,23 +26,21 @@ const exchange = new ccxt.binance({
     options: { 
         defaultType: 'future', 
         dualSidePosition: true, 
-        recvWindow: 60000, // Tăng lên 60s tránh lỗi lệch thời gian hệ thống hệ thống (Timestamp/RecvWindow)
+        recvWindow: 60000, // ĐÃ TĂNG LÊN 60K CHỐNG LỆCH TIME CHO CCXT
         adjustForTimeDifference: true 
     } 
 });
 
-// =========================================================================
-// MẢNG 3: QUẢN LÝ BIẾN TRẠNG THÁI TOÀN CỤC (GLOBAL STATE)
-// =========================================================================
 let botSettings = { isRunning: false, maxPositions: 3, invValue: "1%", minVol: 6.5, posTP: 1.2, posSL: 10.0, maxDCA: MAX_DCA_LEVEL };
 let status = { botLogs: [], candidatesList: [], blackList: {}, permanentBlacklist: {}, botClosedCount: 0, botPnLClosed: 0, exchangeInfo: null, isReady: false };
 let botActivePositions = new Map(); 
-let isProcessingDCA = new Set(); // Chỉ khóa cục bộ coin đang xử lý, không khóa toàn hệ thống
+let isProcessingDCA = new Set();
 let timestampOffset = 0;
 let isMarginProtected = false; 
+
 let currentBotIP = null;
 
-// CHỨC NĂNG: Ghi nhật ký hoạt động hệ thống, đồng bộ hiển thị Terminal NodeJS và UI HTML
+// CODE GỐC: Hàm ghi log hệ thống
 function addBotLog(msg, type = 'info') {
     const time = new Date().toLocaleTimeString('vi-VN', { hour12: false });
     status.botLogs.unshift({ time, msg, type });
@@ -54,11 +48,11 @@ function addBotLog(msg, type = 'info') {
     console.log(`[${time}] ${msg}`);
 }
 
-// CHỨC NĂNG: Xử lý ký mã hóa chữ ký HMAC-SHA256 phục vụ gọi API riêng tư Binance
+// CODE GỐC: Hàm ký và gọi API Binance thuần
 async function binancePrivate(endpoint, method = 'GET', data = {}) {
     try {
         const timestamp = Date.now() + timestampOffset;
-        const query = new URLSearchParams({ ...data, timestamp, recvWindow: 10000 }).toString();
+        const query = new URLSearchParams({ ...data, timestamp, recvWindow: 60000 }).toString(); // ĐÃ TĂNG LÊN 60K CHO API THUẦN
         const signature = crypto.createHmac('sha256', SECRET_KEY).update(query).digest('hex');
         const response = await binanceApi({ method, url: `${endpoint}?${query}&signature=${signature}` });
         return response.data;
@@ -72,24 +66,18 @@ async function binancePrivate(endpoint, method = 'GET', data = {}) {
     }
 }
 
-// =========================================================================
-// MẢNG 4: LUỒNG QUẢN LÝ BLACKLIST COOLDOWN (HỦY BAN TỰ ĐỘNG)
-// =========================================================================
-// CHỨC NĂNG: Chạy ngầm định kỳ giải phóng coin ra khỏi danh sách cấm khi hết 15 phút đếm ngược
+// CODE GỐC: Luồng tự động giải phóng Blacklist từng giây
 setInterval(() => {
     const now = Date.now();
     for (const symbol in status.blackList) {
         if (now > status.blackList[symbol]) {
             delete status.blackList[symbol];
-            addBotLog(`🔄 Unban Blacklist: ${symbol}`, "success");
+            addBotLog(`🔄 Unban Blacklist: ${symbol} (Đã hết thời gian phạt 15 phút)`, "success");
         }
     }
-}, 5000);
+}, 1000);
 
-// =========================================================================
-// MẢNG 5: MONITOR THEO DÕI GIÁ VÀ XỬ LÝ LỆNH ĐÓNG / DCA CHU KỲ
-// =========================================================================
-// CHỨC NĂNG: Quản lý vòng đời lệnh mở, quét khẩn cấp cứu treo lệnh, và kiểm soát logic đóng chu kỳ chính xác
+// CODE GỐC: Monitor theo dõi vị thế thực tế, ép đóng lệnh treo >30s, check TP/SL
 async function priceMonitor() {
     if (!status.isReady) return setTimeout(priceMonitor, 1000);
     try {
@@ -115,7 +103,6 @@ async function priceMonitor() {
             const realP = posRisk.find(p => `${p.symbol}_${p.positionSide}` === key && Math.abs(parseFloat(p.positionAmt)) > 0);
             
             if (realP) {
-                // --- THỐNG KÊ VỊ THẾ ĐANG CHẠY ---
                 const currentQty = Math.abs(parseFloat(realP.positionAmt));
                 const markP = parseFloat(realP.markPrice);
                 
@@ -138,7 +125,6 @@ async function priceMonitor() {
                     }
                 } else { b.hitTime = null; }
             } else {
-                // --- XỬ LÝ KHI VỊ THẾ ĐÓNG ---
                 if (isProcessingDCA.has(b.symbol)) continue;
 
                 await new Promise(r => setTimeout(r, 1000));
@@ -173,26 +159,28 @@ async function priceMonitor() {
                 status.botClosedCount++; 
                 status.botPnLClosed += netPnl;
 
-                // FIX LOGIC THEO CHU KỲ: 
-                // 1. Chỉ lệnh LỆNH CỨU kết thúc (Bất kể TP hay SL) mới đưa vào Blacklist 15p.
-                // 2. Lệnh Đầu + Lệnh DCA: CHỈ khi CHỐT LỜI thành công (netPnl > 0) mới kết thúc chu kỳ -> Cho vào Blacklist 15p.
-                // 3. Nếu dính Cắt lỗ (SL) ở lệnh đầu/DCA -> KHÔNG block, giữ mạch chạy lệnh DCA/Long cứu tiếp theo.
-                if (b.isFinalLong || netPnl > 0) {
+                // LOGIC BLACKLIST CHU KỲ (ĐÃ SỬA THEO Ý MÀY)
+                const isFinalLong = b.isFinalLong === true; 
+                if (netPnl > 0) {
                     status.blackList[b.symbol] = Date.now() + (15 * 60 * 1000);
+                } else {
+                    if (isFinalLong) {
+                        status.blackList[b.symbol] = Date.now() + (15 * 60 * 1000);
+                    } else {
+                        addBotLog(`🔄 ${b.symbol} dính SL vị thế SHORT. Tiếp tục chuỗi lệnh, KHÔNG đưa vào Blacklist.`, "warn");
+                    }
                 }
 
                 const logType = netPnl > 0 ? "💰 [CHỐT LỜI]" : "📉 [CẮT LỖ]";
                 const logStatus = netPnl > 0 ? "success" : "error";
                 addBotLog(`${logType} ${b.symbol} | ${b.side} | DCA: ${b.dcaCount}/${botSettings.maxDCA} | ClosePrice: ${avgClosePrice.toFixed(5)} | PnL: ${netPnl.toFixed(4)}$ | Type: ${reasonOfClose}`, logStatus);
 
-                // TIẾP TỤC CHU KỲ trading NẾU LỆNH GỐC DÍNH SL CẮT LỖ
                 if (netPnl < 0 && b.side === 'SHORT') {
                     const jump = b.dcaCount + 1;
                     if (jump <= botSettings.maxDCA) {
                         openPosition(b.symbol, { ...b, dcaCount: jump, margin: b.firstMargin * (jump + 1) });
                     } else {
-                        // Kích hoạt vị thế cuối cùng của chu kỳ: LỆNH LONG CỨU (Đánh dấu bằng cờ isFinalLong)
-                        openPosition(b.symbol, { ...b, isFinalLong: true, dcaCount: jump, margin: b.firstMargin * 10 });
+                        openPosition(b.symbol, { ...b, isFinalLong: true, margin: b.firstMargin * 10 });
                     }
                 }
             }
@@ -201,13 +189,10 @@ async function priceMonitor() {
     setTimeout(priceMonitor, 1000);
 }
 
-// =========================================================================
-// MẢNG 6: LUỒNG TÍNH TOÁN VÀ THỰC THI ĐẶT LỆNH SÀN (OPEN POSITION)
-// =========================================================================
-// CHỨC NĂNG: Tính toán size, đặt lệnh MARKET, tạo lệnh điều kiện bảo vệ TP/SL
+// CODE GỐC: Hàm tính kích thước lệnh (lot size), tính toán margin khả dụng và bắn lệnh MARKET
 async function openPosition(symbol, dcaData = null) {
     if (isProcessingDCA.has(symbol)) return;
-    isProcessingDCA.add(symbol);
+    isProcessingDCA.add(symbol); 
     
     const isDCAorLong = dcaData !== null;
     const side = dcaData?.isFinalLong ? 'LONG' : 'SHORT';
@@ -277,8 +262,8 @@ async function openPosition(symbol, dcaData = null) {
                     dcaCount: dcaCount, leverage: info.maxLeverage, firstEntry: firstE, 
                     firstMargin: dcaData ? dcaData.firstMargin : actualMarginUsed, currentMargin: actualMarginUsed, 
                     currentQty: qty, virtualTotalQty: qty, virtualTotalCost: qty * entry, 
-                    dcaHistory: dcaHistory, pnl: 0, priceDev: 0, hitTime: null,
-                    isFinalLong: dcaData ? dcaData.isFinalLong : false // Lưu cờ đánh dấu trạng thái cứu để quản lý chu kỳ đóng
+                    dcaHistory: dcaHistory, isFinalLong: dcaData?.isFinalLong || false,
+                    pnl: 0, priceDev: 0, hitTime: null 
                 });
                 
                 const modeStr = isDCAorLong ? (dcaData.isFinalLong ? 'LONG_CỨU' : `DCA_${dcaData.dcaCount}`) : 'OPEN';
@@ -286,14 +271,13 @@ async function openPosition(symbol, dcaData = null) {
             }
         }
     } catch (e) { 
-        const errorMsg = e.response?.data?.msg || e.message;
-        addBotLog(`❌ Lỗi mở lệnh ${symbol}: ${errorMsg}`, "error"); 
+        addBotLog(`❌ Lỗi vị thế ${symbol}: ${e.message}`, "error"); 
     } finally { 
         setTimeout(() => isProcessingDCA.delete(symbol), 2000); 
     }
 }
 
-// CHỨC NĂNG: Đồng bộ treo sẵn lệnh chốt lời, dừng lỗ tự động lên sàn giao dịch Binance
+// CODE GỐC: Hàm đồng bộ lệnh dừng giới hạn TP/SL lên Binance
 async function syncTPSL(symbol, side, info, tpPrice, slPrice) {
     const sideClose = side === 'SHORT' ? 'BUY' : 'SELL';
     try {
@@ -306,34 +290,27 @@ async function syncTPSL(symbol, side, info, tpPrice, slPrice) {
     } catch (e) { return { tp: 0, sl: 0 }; }
 }
 
-// =========================================================================
-// MẢNG 7: KHỞI TẠO SERVER APP API ROUTE (ĐỒNG BỘ GIAO DIỆN WEB HTML)
-// =========================================================================
+// CODE GỐC: Cấu hình Web API cho Dashboard điều khiển bot
 const APP = express(); APP.use(express.json()); APP.use(express.static(__dirname));
 
-// API ROUTE: Đọc trạng thái đồng bộ UI Web -> FIX biến đổi dãy số Blacklist thành mốc MM:SS đếm ngược
 APP.get('/api/status', async (req, res) => {
     const acc = await binancePrivate('/fapi/v2/account').catch(() => null);
     
-    // Tạo danh sách Blacklist đếm ngược định dạng MM:SS gửi trực tiếp lên giao diện HTML
-    const formattedBlacklist = {};
+    const visualBlacklist = {};
     const now = Date.now();
-    for (const symbol in status.blackList) {
-        const timeLeft = status.blackList[symbol] - now;
-        if (timeLeft > 0) {
-            const minutes = Math.floor(timeLeft / 60000);
-            const seconds = Math.floor((timeLeft % 60000) / 1000);
-            formattedBlacklist[symbol] = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+    for (const s in status.blackList) {
+        const remainingTime = status.blackList[s] - now;
+        if (remainingTime > 0) {
+            const m = Math.floor(remainingTime / 60000);
+            const sRemainder = Math.floor((remainingTime % 60000) / 1000);
+            visualBlacklist[s] = `${m}m ${sRemainder}s`;
         }
     }
 
     res.json({ 
         botSettings, 
         activePositions: Array.from(botActivePositions.values()), 
-        status: {
-            ...status,
-            blackList: formattedBlacklist // Ghi đè cấu trúc đếm ngược thời gian hỗ trợ HTML hiển thị
-        }, 
+        status: { ...status, blackList: visualBlacklist }, 
         wallet: acc ? { 
             totalWalletBalance: parseFloat(acc.totalMarginBalance || 0).toFixed(2), 
             availableBalance: parseFloat(acc.availableBalance || 0).toFixed(2), 
@@ -351,9 +328,7 @@ APP.post('/api/settings', (req, res) => {
     res.json({ success: true }); 
 });
 
-// =========================================================================
-// MẢNG 8: HÀM KHỞI CHẠY CORE HỆ THỐNG VÀ THU THẬP THÔNG TIN SÀN (INIT)
-// =========================================================================
+// CODE GỐC: Hàm tải cấu hình đòn bẩy tối đa cho phép của tất cả các đồng coin trên sàn giao dịch Binance
 async function init() {
     try {
         const ipRes = await axios.get('https://api4.ipify.org?format=json').catch(() => ({ data: { ip: "Không bốc được IP" } }));
@@ -381,7 +356,7 @@ async function init() {
 
 init();
 
-// CHỨC NĂNG: Lấy dữ liệu Candidates phân tích được từ cổng luồng quét tín hiệu 9000
+// CODE GỐC: Cổng đồng bộ dữ liệu liên tục từ Luffy Server (Port 9000) về
 setInterval(() => {
     http.get('http://127.0.0.1:9000/api/data', res => {
         let d = ''; res.on('data', c => d += c);
@@ -389,10 +364,7 @@ setInterval(() => {
     }).on('error', () => {});
 }, 1500);
 
-// =========================================================================
-// MẢNG 9: VÒNG LẶP KIỂM TRA MARGIN PROTECT VÀ QUÉT LỆNH ĐA CẶP SONG SONG
-// =========================================================================
-// CHỨC NĂNG CẢI TIẾN: Quét độc lập không block chùm, bắt trọn coin đủ Vol m1 hoặc m5, in log biến động 3 khung rõ ràng
+// CODE GỐC + ĐÃ SỬA LUỒNG QUÉT CHỌN COIN (1P HOẶC 5P ĐỦ MINVOL)
 setInterval(async () => {
     if (!status.isReady || !botSettings.isRunning) return;
 
@@ -415,40 +387,25 @@ setInterval(async () => {
 
     if (isMarginProtected) return;
 
-    // Kiểm tra slot trống vị thế của hệ thống trước khi quét lệnh mới
-    if (botActivePositions.size >= botSettings.maxPositions) return;
-
-    // FIX CHÍ MẠNG TẠI ĐÂY: Sửa điều kiện lọc từ c.c2 sang c.c5 để đồng bộ với key thô của server gốc
-    const validCandidates = status.candidatesList.filter(c => {
-        const matchM1 = c.c1 && Math.abs(c.c1) >= botSettings.minVol; // c1: khung m1
-        const matchM5 = c.c5 && Math.abs(c.c5) >= botSettings.minVol; // FIX: Đổi c.c2 -> c.c5 theo đúng cấu trúc server đổ về
-
-        return (matchM1 || matchM5) && 
-               !status.blackList[c.symbol] && 
-               !status.permanentBlacklist[c.symbol] && 
-               !botActivePositions.has(`${c.symbol}_SHORT`) &&
-               !isProcessingDCA.has(c.symbol);
-    });
-
-    // Thực thi mở vị thế tuần tự cho các coin đạt chuẩn tín hiệu đa khung
-    for (const can of validCandidates) {
-        if (botActivePositions.size >= botSettings.maxPositions) break;
-
-        // FIX CHÍ MẠNG TẠI ĐÂY: Đồng bộ bốc đúng key c5 và c15 từ server để log không còn bị trơ 0%
-        const volM1 = can.c1 ? `${can.c1}%` : '0%';
-        const volM5 = can.c5 ? `${can.c5}%` : '0%';   // FIX: Đổi can.c2 -> can.c5
-        const volM15 = can.c15 ? `${can.c15}%` : '0%'; // FIX: Đổi can.c3 -> can.c15
-
-        // Ghi log chi tiết thông số biến động 3 khung ngay khi lệnh được kích hoạt để kiểm soát đầu vào
-        addBotLog(`🎯 Đủ ĐK mở lệnh: ${can.symbol} | Biến động 3 khung [1M: ${volM1} | 5M: ${volM5} | 15M: ${volM15}]`, "info");
-
-        openPosition(can.symbol);
+    if (botActivePositions.size < botSettings.maxPositions && isProcessingDCA.size === 0) {
+        // Đã sửa quét điều kiện c1 HOẶC c5
+        const can = status.candidatesList.find(c => 
+            (Math.abs(c.c1) >= botSettings.minVol || Math.abs(c.c5) >= botSettings.minVol) && 
+            !status.blackList[c.symbol] && 
+            !status.permanentBlacklist[c.symbol] && 
+            !botActivePositions.has(`${c.symbol}_SHORT`) &&
+            !botActivePositions.has(`${c.symbol}_LONG`)
+        );
+        
+        if (can) {
+            // Đã cập nhật in đầy đủ cả 3 khung
+            addBotLog(`🎯 [MỤC TIÊU] Phát hiện ${can.symbol} đạt điều kiện! Chi tiết biến động -> M1: ${can.c1}% | M5: ${can.c5}% | M15: ${can.c15}%`, "info");
+            openPosition(can.symbol);
+        }
     }
 }, 3000);
 
-// =========================================================================
-// MẢNG 10: LUỒNG THEO DÕI SỰ THAY ĐỔI ĐỊA CHỈ IP MẠNG (WAN IP)
-// =========================================================================
+// CODE GỐC: Luồng kiểm tra IP thay đổi đột ngột chống rớt mạng
 setInterval(async () => {
     if (!status.isReady) return;
     try {
