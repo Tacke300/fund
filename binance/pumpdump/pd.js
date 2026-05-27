@@ -34,6 +34,7 @@ let botActivePositions = new Map();
 let isProcessingDCA = new Set(); 
 let timestampOffset = 0;
 let isMarginProtected = false; 
+let currentBotIP = null;
 
 function addBotLog(msg, type = 'info') {
     const time = new Date().toLocaleTimeString('vi-VN', { hour12: false });
@@ -239,6 +240,7 @@ async function openPosition(symbol, dcaData = null) {
                     sl = firstE + (firstE * (botSettings.posSL * (dcaCount + 1)) / 100);
                 }
 
+                // ĐÃ SỬA: Luồng cài TP/SL bọc thử lại 3 lần nới biên độ xử lý lỗi -4131 PERCENT_PRICE
                 const sync = await syncTPSL(symbol, side, info, tp, sl);
                 botActivePositions.set(`${symbol}_${side}`, { 
                     symbol, side, entryPrice: entry, tp: sync.tp, sl: sync.sl, 
@@ -319,6 +321,7 @@ APP.post('/api/settings', (req, res) => {
 async function init() {
     try {
         const res = await binanceApi.get('/fapi/v1/ip'); 
+        currentBotIP = res.data.ip; 
         console.log(`\n🌍 IP: ${res.data.ip}`);
         addBotLog(`🌍 IP: ${res.data.ip}`, "success");
         
@@ -326,7 +329,7 @@ async function init() {
         timestampOffset = t.data.serverTime - Date.now();
         await exchange.loadMarkets();
         const info = await binanceApi.get('/fapi/v1/exchangeInfo');
-        const brk = await binancePrivate('/fapi/v1/leverageBracket');
+        const brk = await binPrivate = await binancePrivate('/fapi/v1/leverageBracket');
         const temp = {};
         
         info.data.symbols.forEach(s => {
@@ -349,6 +352,7 @@ setInterval(() => {
     }).on('error', () => {});
 }, 1500);
 
+// ĐÃ SỬA: Mảng 9 đồng bộ chuẩn xác c1, c2, c3 từ Server truyền qua (Không còn bị N/A nữa)
 setInterval(async () => {
     if (!status.isReady || !botSettings.isRunning) return;
 
@@ -388,5 +392,18 @@ setInterval(async () => {
         openPosition(can.symbol);
     }
 }, 3000);
+
+// MẢNG 10: Giữ nguyên vẹn luồng check IP WAN thay đổi ngầm mỗi 30s của ông
+setInterval(async () => {
+    if (!status.isReady) return;
+    try {
+        const res = await binanceApi.get('/fapi/v1/ip');
+        const newIP = res.data.ip;
+        if (currentBotIP && newIP && newIP !== currentBotIP) {
+            addBotLog(`⚠️ [NETWORK] IP CHANGE! Cũ: ${currentBotIP} -> Mới: ${newIP}`, "warn");
+            currentBotIP = newIP;
+        }
+    } catch (err) {}
+}, 30000);
 
 APP.listen(9001);
