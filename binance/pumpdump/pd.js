@@ -294,40 +294,16 @@ async function openPosition(symbol, dcaData = null) {
 }
 
 // CHỨC NĂNG: Đồng bộ treo sẵn lệnh chốt lời, dừng lỗ tự động lên sàn giao dịch Binance
-// ĐÃ CẢI TIẾN: Thêm vòng lặp sửa lỗi -4131 PERCENT_PRICE bằng cách tự nới biên độ 0.5% nếu sàn từ chối
 async function syncTPSL(symbol, side, info, tpPrice, slPrice) {
     const sideClose = side === 'SHORT' ? 'BUY' : 'SELL';
-    let currentTp = tpPrice;
-    let currentSl = slPrice;
-
     try {
         const orders = await binancePrivate('/fapi/v1/openOrders', 'GET', { symbol });
-        for (const o of orders.filter(o => o.positionSide === side)) {
-            await binancePrivate('/fapi/v1/order', 'DELETE', { symbol, orderId: o.orderId });
-        }
-    } catch(e){}
-
-    for (let i = 0; i < 3; i++) {
-        try {
-            await new Promise(r => setTimeout(r, 500));
-            await exchange.createOrder(symbol, 'TAKE_PROFIT_MARKET', sideClose, undefined, undefined, { positionSide: side, stopPrice: currentTp.toFixed(info.pricePrecision), closePosition: true, workingType: 'MARK_PRICE' });
-            await exchange.createOrder(symbol, 'STOP_MARKET', sideClose, undefined, undefined, { positionSide: side, stopPrice: currentSl.toFixed(info.pricePrecision), closePosition: true, workingType: 'MARK_PRICE' });
-            return { tp: currentTp, sl: currentSl };
-        } catch (e) {
-            if (e.message.includes('-4131') || e.message.includes('PERCENT_PRICE')) {
-                if (side === 'SHORT') {
-                    currentTp = currentTp * 0.995; 
-                    currentSl = currentSl * 1.005; 
-                } else {
-                    currentTp = currentTp * 1.005; 
-                    currentSl = currentSl * 0.995;
-                }
-            } else {
-                break;
-            }
-        }
-    }
-    return { tp: tpPrice, sl: slPrice };
+        for (const o of orders.filter(o => o.positionSide === side)) await binancePrivate('/fapi/v1/order', 'DELETE', { symbol, orderId: o.orderId });
+        await new Promise(r => setTimeout(r, 600));
+        await exchange.createOrder(symbol, 'TAKE_PROFIT_MARKET', sideClose, undefined, undefined, { positionSide: side, stopPrice: tpPrice.toFixed(info.pricePrecision), closePosition: true, workingType: 'MARK_PRICE' });
+        await exchange.createOrder(symbol, 'STOP_MARKET', sideClose, undefined, undefined, { positionSide: side, stopPrice: slPrice.toFixed(info.pricePrecision), closePosition: true, workingType: 'MARK_PRICE' });
+        return { tp: tpPrice, sl: slPrice };
+    } catch (e) { return { tp: 0, sl: 0 }; }
 }
 
 // =========================================================================
@@ -406,19 +382,17 @@ async function init() {
 init();
 
 // CHỨC NĂNG: Lấy dữ liệu Candidates phân tích được từ cổng luồng quét tín hiệu 9000
-// ĐÃ SỬA: Ép chu kỳ quét dữ liệu server xuống 0.1s (100ms)
 setInterval(() => {
     http.get('http://127.0.0.1:9000/api/data', res => {
         let d = ''; res.on('data', c => d += c);
         res.on('end', () => { try { status.candidatesList = JSON.parse(d).live || []; } catch(e){} });
     }).on('error', () => {});
-}, 100);
+}, 1500);
 
 // =========================================================================
 // MẢNG 9: VÒNG LẶP KIỂM TRA MARGIN PROTECT VÀ QUÉT LỆNH ĐA CẶP SONG SONG
 // =========================================================================
 // CHỨC NĂNG CẢI TIẾN: Quét độc lập không block chùm, bắt trọn coin đủ Vol m1 hoặc m5, in log biến động 3 khung rõ ràng
-// ĐÃ SỬA: Ép chu kỳ check điều kiện và kiểm tra Margin bảo vệ xuống 0.1s (100ms)
 setInterval(async () => {
     if (!status.isReady || !botSettings.isRunning) return;
 
@@ -444,33 +418,33 @@ setInterval(async () => {
     // Kiểm tra slot trống vị thế của hệ thống trước khi quét lệnh mới
     if (botActivePositions.size >= botSettings.maxPositions) return;
 
-    // CẢI TIẾN LUỒNG: Lọc ra TẤT CẢ các coin đủ điều kiện minVol trên khung m1 HOẶC khung m5
+    // FIX CHÍ MẠNG TẠI ĐÂY: Sửa điều kiện lọc từ c.c2 sang c.c5 để đồng bộ với key thô của server gốc
     const validCandidates = status.candidatesList.filter(c => {
         const matchM1 = c.c1 && Math.abs(c.c1) >= botSettings.minVol; // c1: khung m1
-        const matchM5 = c.c2 && Math.abs(c.c2) >= botSettings.minVol; // c2: khung m5
+        const matchM5 = c.c5 && Math.abs(c.c5) >= botSettings.minVol; // FIX: Đổi c.c2 -> c.c5 theo đúng cấu trúc server đổ về
 
         return (matchM1 || matchM5) && 
-               !status.blackList[c.symbol] && // Lúc này HTML truyền về chuỗi đếm ngược, nhưng bộ nhớ trong code gốc vẫn nhận dạng key tồn tại để chặn
+               !status.blackList[c.symbol] && 
                !status.permanentBlacklist[c.symbol] && 
                !botActivePositions.has(`${c.symbol}_SHORT`) &&
-               !isProcessingDCA.has(c.symbol); // Không khóa toàn hệ thống, coin nào xử lý xong tự động giải phóng quét tiếp coin khác
+               !isProcessingDCA.has(c.symbol);
     });
 
     // Thực thi mở vị thế tuần tự cho các coin đạt chuẩn tín hiệu đa khung
     for (const can of validCandidates) {
         if (botActivePositions.size >= botSettings.maxPositions) break;
 
-        // Trích xuất dữ liệu biến động 3 khung thời gian hỗ trợ log đối soát giao diện HTML
+        // FIX CHÍ MẠNG TẠI ĐÂY: Đồng bộ bốc đúng key c5 và c15 từ server để log không còn bị trơ 0%
         const volM1 = can.c1 ? `${can.c1}%` : '0%';
-        const volM5 = can.c2 ? `${can.c2}%` : '0%';
-        const volM15 = can.c3 ? `${can.c3}%` : '0%';
+        const volM5 = can.c5 ? `${can.c5}%` : '0%';   // FIX: Đổi can.c2 -> can.c5
+        const volM15 = can.c15 ? `${can.c15}%` : '0%'; // FIX: Đổi can.c3 -> can.c15
 
-        // CẢI TIẾN: Ghi log chi tiết thông số biến động 3 khung ngay khi lệnh được kích hoạt để kiểm soát đầu vào
+        // Ghi log chi tiết thông số biến động 3 khung ngay khi lệnh được kích hoạt để kiểm soát đầu vào
         addBotLog(`🎯 Đủ ĐK mở lệnh: ${can.symbol} | Biến động 3 khung [1M: ${volM1} | 5M: ${volM5} | 15M: ${volM15}]`, "info");
 
         openPosition(can.symbol);
     }
-}, 100);
+}, 3000);
 
 // =========================================================================
 // MẢNG 10: LUỒNG THEO DÕI SỰ THAY ĐỔI ĐỊA CHỈ IP MẠNG (WAN IP)
