@@ -115,7 +115,7 @@
                     document.getElementById('blacklist-display').innerHTML = '<span class="text-zinc-600 text-[10px] uppercase">Không có token bị blacklist</span>';
                 } else {
                     document.getElementById('blacklist-display').innerHTML = entries.map(([s, secondsLeft]) => `
-                        <span class="bl-tag">🏴‍☠️ ${s.replace('USDT','')} <span class="bl-time">${fmtTime(secondsLeft)}</span></span>`
+                        <span class="bl-tag">🏴‍☠️ ${s.replace('USDT','')}</span>`
                     ).join('');
                 }
 
