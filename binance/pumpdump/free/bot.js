@@ -63,7 +63,7 @@ if (currentApiKey && currentSecretKey) {
     binanceApi.defaults.headers['X-MBX-APIKEY'] = currentApiKey;
 }
 
-let botSettings = { isRunning: false, maxPositions: 3, invValue: "0.06", minVol: 2, posTP: 2.1, posSL: 2.0, maxDCA: MAX_DCA_LEVEL };
+let botSettings = { isRunning: false, maxPositions: 3, invValue: "0.01%", minVol: 2, posTP: 2.1, posSL: 2.0, maxDCA: MAX_DCA_LEVEL };
 let status = { botLogs: [], candidatesList: [], blackList: {}, permanentBlacklist: {}, botClosedCount: 0, botPnLClosed: 0, exchangeInfo: null, isReady: false };
 let botActivePositions = new Map(); 
 let isProcessingDCA = new Set();
@@ -185,8 +185,11 @@ async function priceMonitor() {
                     if (Date.now() - b.hitTime > 30000) {
                         addBotLog(`⚠️ Treo lệnh >30s tại ${b.symbol}. Ép đóng MARKET!`, "warn");
                         await exchange.createOrder(b.symbol, 'MARKET', b.side === 'SHORT' ? 'BUY' : 'SELL', currentQty, undefined, { positionSide: b.side });
+                        b.hitTime = null;
                     }
-                } else { b.hitTime = null; }
+                } else { 
+                    b.hitTime = null; 
+                }
             } else {
                 if (isProcessingDCA.has(b.symbol)) continue;
 
@@ -202,13 +205,6 @@ async function priceMonitor() {
 
                 const trades = await binancePrivate('/fapi/v1/userTrades', 'GET', { symbol: b.symbol, limit: 10 });
                 const recent = trades.filter(t => t.time > (Date.now() + timestampOffset - 45000));
-                
-                try {
-                    const openOrders = await binancePrivate('/fapi/v1/openOrders', 'GET', { symbol: b.symbol });
-                    for (const o of openOrders.filter(o => o.positionSide === b.side)) {
-                        await binancePrivate('/fapi/v1/order', 'DELETE', { symbol: b.symbol, orderId: o.orderId });
-                    }
-                } catch(e){}
 
                 let totalR = 0, totalV = 0, avgClosePrice = 0;
                 if (recent.length > 0) {
