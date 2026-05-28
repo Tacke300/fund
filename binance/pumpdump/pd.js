@@ -7,9 +7,13 @@ import path from 'path';
 import { API_KEY, SECRET_KEY } from './config.js';
 import ccxt from 'ccxt';
 
-const MAX_DCA_LEVEL = 2;           
-const MARGIN_PROTECT_LIMIT = 60;    
-const MARGIN_RECOVER_LIMIT = 70;    
+// =========================================================================
+// CẤU HÌNH NHANH - CÁC THÔNG SỐ CỐ ĐỊNH HỆ THỐNG
+// =========================================================================
+const MAX_DCA_LEVEL = 2;           // Số lần DCA tối đa cho một cặp vị thế
+const MARGIN_PROTECT_LIMIT = 60;    // Dưới 60% Khả dụng/Ví -> Ngừng quét lệnh mới
+const MARGIN_RECOVER_LIMIT = 70;    // Đạt lại từ 70% Khả dụng trở lên -> Tiếp tục quét lại
+// =========================================================================
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -33,6 +37,7 @@ let botActivePositions = new Map();
 let isProcessingDCA = new Set();
 let timestampOffset = 0;
 let isMarginProtected = false; 
+
 let currentBotIP = null; 
 
 function addBotLog(msg, type = 'info') {
@@ -59,34 +64,36 @@ async function binancePrivate(endpoint, method = 'GET', data = {}) {
     }
 }
 
+// --- LUỒNG QUẢN LÝ BLACKLIST ---
 setInterval(() => {
     const now = Date.now();
     for (const symbol in status.blackList) {
         if (now > status.blackList[symbol]) {
             delete status.blackList[symbol];
-            addBotLog(`🔄 Unban Blacklist: ${symbol}`, "success");
+            addBotLog(`🔄 Unban Blacklist: ${symbol} (Đã hết thời gian phạt 15 phút)`, "success");
         }
     }
 }, 1000);
 
+// --- MONITOR THEO DÕI GIÁ VÀ XỬ LÝ LỆNH ĐÓNG/DCA ---
 async function priceMonitor() {
-    if (!status.isReady) return setTimeout(priceMonitor, 2000);
+    if (!status.isReady) return setTimeout(priceMonitor, 1000);
     try {
         if (!botSettings.isRunning && botActivePositions.size > 0) {
-            addBotLog(`🛑 Bot STOP. Hủy lệnh đang treo...`, "warn");
+            addBotLog(`🛑 Bot STOP. Hủy toàn bộ TP/SL đang treo...`, "warn");
             for (let [key, b] of botActivePositions) {
                 try {
                     const orders = await binancePrivate('/fapi/v1/openOrders', 'GET', { symbol: b.symbol });
                     for (const o of orders.filter(o => o.positionSide === b.side)) {
                         await binancePrivate('/fapi/v1/order', 'DELETE', { symbol: b.symbol, orderId: o.orderId });
                     }
-                } catch (err) { console.error(err.message); }
+                } catch (err) { console.error(`Lỗi hủy: ${b.symbol}`, err.message); }
             }
             botActivePositions.clear();
             isProcessingDCA.clear();
         }
 
-        if (!botSettings.isRunning) return setTimeout(priceMonitor, 2000);
+        if (!botSettings.isRunning) return setTimeout(priceMonitor, 1000);
 
         const posRisk = await binancePrivate('/fapi/v2/positionRisk');
         
@@ -111,7 +118,7 @@ async function priceMonitor() {
                 if (hitTP || hitSL) {
                     if (!b.hitTime) b.hitTime = Date.now();
                     if (Date.now() - b.hitTime > 30000) {
-                        addBotLog(`⚠️ Ép đóng MARKET ${b.symbol}`, "warn");
+                        addBotLog(`⚠️ Treo lệnh >30s tại ${b.symbol}. Ép đóng MARKET!`, "warn");
                         await exchange.createOrder(b.symbol, 'MARKET', b.side === 'SHORT' ? 'BUY' : 'SELL', currentQty, undefined, { positionSide: b.side });
                     }
                 } else { b.hitTime = null; }
@@ -146,11 +153,6 @@ async function priceMonitor() {
                 const fee = totalV * 0.0005; 
                 const netPnl = totalR - fee;
 
-                let accumulatedLoss = b.accumulatedLoss || 0;
-                if (netPnl < 0 && b.side === 'SHORT') {
-                    accumulatedLoss += Math.abs(netPnl);
-                }
-
                 botActivePositions.delete(key);
                 status.botClosedCount++; 
                 status.botPnLClosed += netPnl;
@@ -162,24 +164,26 @@ async function priceMonitor() {
                     if (isFinalLong) {
                         status.blackList[b.symbol] = Date.now() + (15 * 60 * 1000);
                     } else {
-                        addBotLog(`🔄 ${b.symbol} dính SL SHORT. Tiếp tục chuỗi.`, "warn");
+                        addBotLog(`🔄 ${b.symbol} dính SL vị thế SHORT. Tiếp tục chuỗi lệnh, KHÔNG đưa vào Blacklist.`, "warn");
                     }
                 }
 
                 const logType = netPnl > 0 ? "💰 [CHỐT LỜI]" : "📉 [CẮT LỖ]";
                 const logStatus = netPnl > 0 ? "success" : "error";
-                addBotLog(`${logType} ${b.symbol} | ${b.side} | DCA: ${b.dcaCount}/${botSettings.maxDCA} | Close: ${avgClosePrice.toFixed(5)} | PnL: ${netPnl.toFixed(4)}$`, logStatus);
+                addBotLog(`${logType} ${b.symbol} | ${b.side} | DCA: ${b.dcaCount}/${botSettings.maxDCA} | ClosePrice: ${avgClosePrice.toFixed(5)} | PnL: ${netPnl.toFixed(4)}$ | Type: ${reasonOfClose}`, logStatus);
 
                 if (netPnl < 0 && b.side === 'SHORT') {
                     const jump = b.dcaCount + 1;
+                    // Tích luỹ số tiền lỗ thực tế đã chốt của chuỗi lệnh SHORT này (lấy trị tuyệt đối để thành số dương)
+                    const currentAccumulatedLoss = (b.totalLossAccumulated || 0) + Math.abs(netPnl);
+
                     if (jump <= botSettings.maxDCA) {
+                        // Kế thừa khối lượng lệnh đầu tiên (firstQty), số lãi mong muốn gốc (firstProfitUsdt) và tổng lỗ tích luỹ
                         openPosition(b.symbol, { 
                             ...b, 
                             dcaCount: jump, 
                             margin: b.firstMargin * Math.pow(2, jump),
-                            accumulatedLoss: accumulatedLoss, 
-                            firstQty: b.firstQty || b.currentQty, 
-                            firstPrice: b.firstPrice || b.entryPrice 
+                            totalLossAccumulated: currentAccumulatedLoss
                         });
                     } else {
                         openPosition(b.symbol, { ...b, isFinalLong: true, margin: b.firstMargin * 10 });
@@ -187,13 +191,11 @@ async function priceMonitor() {
                 }
             }
         }
-        setTimeout(priceMonitor, 1500);
-    } catch (e) { 
-        console.error("Monitor Err:", e.message); 
-        setTimeout(priceMonitor, 5000); 
-    }
+    } catch (e) { console.error("Monitor Err:", e.message); }
+    setTimeout(priceMonitor, 1000);
 }
 
+// --- LUỒNG TÍNH TOÁN VÀ ĐẶT LỆNH ---
 async function openPosition(symbol, dcaData = null) {
     if (isProcessingDCA.has(symbol)) return;
     isProcessingDCA.add(symbol); 
@@ -206,7 +208,7 @@ async function openPosition(symbol, dcaData = null) {
         await new Promise(r => setTimeout(r, 1000));
         
         const acc = await binancePrivate('/fapi/v2/account');
-        if (!acc) throw new Error("Không lấy dữ liệu tài khoản");
+        if (!acc) throw new Error("Không lấy được dữ liệu tài khoản.");
 
         const availableUsdt = parseFloat(acc.availableBalance || 0);
         const ticker = await binanceApi.get(`/fapi/v1/ticker/price?symbol=${symbol}`);
@@ -236,7 +238,7 @@ async function openPosition(symbol, dcaData = null) {
         const actualMarginUsed = (qty * currentPrice) / info.maxLeverage;
         await exchange.setLeverage(info.maxLeverage, symbol);
 
-        const order = await exchange.createOrder(symbol, 'MARKET', side === 'SHORT' ? 'BUY' : 'SELL', qty.toFixed(info.quantityPrecision), undefined, { positionSide: side });
+        const order = await exchange.createOrder(symbol, 'MARKET', side === 'SHORT' ? 'SELL' : 'BUY', qty.toFixed(info.quantityPrecision), undefined, { positionSide: side });
         
         if (order) {
             await new Promise(r => setTimeout(r, 1500));
@@ -252,26 +254,26 @@ async function openPosition(symbol, dcaData = null) {
                 const simpleAvgEntry = sumPrices / dcaHistory.length;
 
                 let tp = 0, sl = 0;
+                let firstQty = dcaData ? dcaData.firstQty : qty;
+                let firstProfitUsdt = dcaData ? dcaData.firstProfitUsdt : (qty * entry * (botSettings.posTP / 100));
+                let accumulatedLoss = dcaData ? dcaData.totalLossAccumulated : 0;
+
                 if (side === 'LONG') {
                     tp = entry * 1.15;
                     sl = entry * 0.85;
                 } else {
-                    if (dcaCount === 0) {
-                        tp = simpleAvgEntry * (1 - botSettings.posTP / 100);
-                    } else {
-                        const firstQty = dcaData.firstQty || qty;
-                        const firstPrice = dcaData.firstPrice || entry;
-                        const baseTargetPnL = firstQty * firstPrice * (botSettings.posTP / 100); 
-                        const scaledTargetPnL = baseTargetPnL * (dcaCount + 1);
-                        const totalLossToRecover = dcaData.accumulatedLoss || 0;
-                        const requiredProfit = totalLossToRecover + scaledTargetPnL;
+                    // =========================================================================
+                    // SỬA ĐỔI CHÍNH LÊN LOGIC TP LŨY TIẾN THEO YÊU CẦU:
+                    // Tổng PnL Gross cần thu về = Tổng số lỗ đã dính trước đó + (Hệ số nhân * Số tiền lãi lệnh gốc)
+                    // Hệ số nhân: Lệnh đầu (DCA 0) = x1 | DCA 1 = x2 | DCA 2 = x3 | ... | DCA N = x(N+1)
+                    // =========================================================================
+                    const multiplier = dcaCount + 1;
+                    const totalTargetGrossProfit = accumulatedLoss + (multiplier * firstProfitUsdt);
 
-                        tp = entry - (requiredProfit / qty);
+                    // Tính giá TP từ Giá trung bình dịch xuống dưới (Do vị thế SHORT)
+                    tp = simpleAvgEntry - (totalTargetGrossProfit / qty);
 
-                        if (tp <= 0 || tp >= entry) {
-                            tp = entry * (1 - botSettings.posTP / 100);
-                        }
-                    }
+                    // Giữ nguyên cấu trúc Stop Loss luỹ tiến cho Short
                     sl = firstE + (firstE * (botSettings.posSL * (dcaCount + 1)) / 100);
                 }
 
@@ -283,13 +285,13 @@ async function openPosition(symbol, dcaData = null) {
                     currentQty: qty, virtualTotalQty: qty, virtualTotalCost: qty * entry, 
                     dcaHistory: dcaHistory, isFinalLong: dcaData?.isFinalLong || false,
                     pnl: 0, priceDev: 0, hitTime: null,
-                    accumulatedLoss: dcaData ? dcaData.accumulatedLoss : 0, 
-                    firstQty: dcaData ? dcaData.firstQty : qty,
-                    firstPrice: dcaData ? dcaData.firstPrice : entry
+                    firstQty: firstQty,
+                    firstProfitUsdt: firstProfitUsdt,
+                    totalLossAccumulated: accumulatedLoss
                 });
                 
                 const modeStr = isDCAorLong ? (dcaData.isFinalLong ? 'LONG_CỨU' : `DCA_${dcaData.dcaCount}`) : 'OPEN';
-                addBotLog(`📡 [${modeStr}] ${symbol} | Margin: ${actualMarginUsed.toFixed(2)}$ | Entry: ${entry} | TP: ${sync.tp.toFixed(info.pricePrecision)} | SL: ${sync.sl.toFixed(info.pricePrecision)}`);
+                addBotLog(`📡 [${modeStr}] ${symbol} | ${side} | Lev: x${info.maxLeverage} | Margin: ${actualMarginUsed.toFixed(2)}$ | Entry: ${entry} | TP: ${sync.tp.toFixed(info.pricePrecision)} | SL: ${sync.sl.toFixed(info.pricePrecision)}`);
             }
         }
     } catch (e) { 
@@ -315,6 +317,7 @@ const APP = express(); APP.use(express.json()); APP.use(express.static(__dirname
 
 APP.get('/api/status', async (req, res) => {
     const acc = await binancePrivate('/fapi/v2/account').catch(() => null);
+    
     const visualBlacklist = {};
     const now = Date.now();
     for (const s in status.blackList) {
@@ -343,7 +346,7 @@ APP.post('/api/settings', (req, res) => {
     botSettings.maxDCA = parseInt(botSettings.maxDCA);
     botSettings.maxPositions = parseInt(botSettings.maxPositions);
     botSettings.minVol = parseFloat(botSettings.minVol);
-    addBotLog(`⚙️ Cập nhật cấu hình.`, "success");
+    addBotLog(`⚙️ Cập nhật cấu hình thành công.`, "success");
     res.json({ success: true }); 
 });
 
@@ -369,7 +372,7 @@ async function init() {
             temp[s.symbol] = { quantityPrecision: s.quantityPrecision, pricePrecision: s.pricePrecision, stepSize: parseFloat(s.filters.find(f => f.filterType === 'LOT_SIZE').stepSize), maxLeverage: maxLev };
         });
         status.exchangeInfo = temp; status.isReady = true; priceMonitor();
-        addBotLog(`🚀 Monitor sẵn sàng.`);
+        addBotLog(`🚀 Hệ thống monitor sẵn sàng.`);
     } catch (e) { setTimeout(init, 5000); }
 }
 
@@ -394,10 +397,10 @@ setInterval(async () => {
             const availPercent = (availableUsdt / totalWallet) * 100;
             if (!isMarginProtected && availPercent < MARGIN_PROTECT_LIMIT) {
                 isMarginProtected = true;
-                addBotLog(`🚨 [MARGIN_WARN] Đóng băng quét. Khả dụng: ${availPercent.toFixed(1)}%`, "error");
+                addBotLog(`🚨 [MARGIN_WARN] Đóng băng quét mới. Khả dụng: ${availPercent.toFixed(1)}%`, "error");
             } else if (isMarginProtected && availPercent >= MARGIN_RECOVER_LIMIT) {
                 isMarginProtected = false;
-                addBotLog(`🛡️ [MARGIN_OK] Tiếp tục quét. Khả dụng: ${availPercent.toFixed(1)}%`, "success");
+                addBotLog(`🛡️ [MARGIN_OK] Tiếp tục quét lệnh. Khả dụng: ${availPercent.toFixed(1)}%`, "success");
             }
         }
     }
@@ -414,7 +417,7 @@ setInterval(async () => {
         );
         
         if (can) {
-            addBotLog(`🎯 [MỤC TIÊU] ${can.symbol}`, "info");
+            addBotLog(`🎯 [MỤC TIÊU] Phát hiện ${can.symbol} đạt điều kiện! Chi tiết biến động -> M1: ${can.c1}% | M5: ${can.c5}% | M15: ${can.c15}%`, "info");
             openPosition(can.symbol);
         }
     }
@@ -427,7 +430,7 @@ setInterval(async () => {
         const newIP = ipCheckRes.data.ip;
         
         if (newIP && newIP !== currentBotIP) {
-            addBotLog(`⚠️ [NETWORK] IP CHANGE! Cũ: ${currentBotIP} -> Mới: ${newIP}`, "warn");
+            addBotLog(`⚠️ [NETWORK] IP CHANGE DETECTED! Cũ: ${currentBotIP} -> Mới: ${newIP}`, "warn");
             currentBotIP = newIP; 
         }
     } catch (err) {} 
