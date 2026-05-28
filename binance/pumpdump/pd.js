@@ -18,20 +18,32 @@ const MARGIN_RECOVER_LIMIT = 70;    // Đạt lại từ 70% Khả dụng trở 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const binanceApi = axios.create({ baseURL: 'https://fapi.binance.com', timeout: 15000, headers: { 'X-MBX-APIKEY': API_KEY } });
-const exchange = new ccxt.binance({ 
-    apiKey: API_KEY, 
-    secret: SECRET_KEY, 
-    enableRateLimit: true, 
-    options: { 
-        defaultType: 'future', 
-        dualSidePosition: true, 
-        recvWindow: 60000, // ĐÃ TĂNG LÊN 60K CHỐNG LỆCH TIME CHO CCXT
-        adjustForTimeDifference: true 
-    } 
-});
+// Chuyển các cấu hình Key thành biến có thể thay đổi động
+let currentApiKey = API_KEY;
+let currentSecretKey = SECRET_KEY;
 
-let botSettings = { isRunning: false, maxPositions: 3, invValue: "1%", minVol: 6.5, posTP: 1.2, posSL: 10.0, maxDCA: MAX_DCA_LEVEL };
+const binanceApi = axios.create({ baseURL: 'https://fapi.binance.com', timeout: 15000 });
+// Cập nhật header ban đầu cho axios
+binanceApi.defaults.headers['X-MBX-APIKEY'] = currentApiKey;
+
+let exchange;
+function initCCXT() {
+    exchange = new ccxt.binance({ 
+        apiKey: currentApiKey, 
+        secret: currentSecretKey, 
+        enableRateLimit: true, 
+        options: { 
+            defaultType: 'future', 
+            dualSidePosition: true, 
+            recvWindow: 60000, // ĐÃ TĂNG LÊN 60K CHỐNG LỆCH TIME CHO CCXT
+            adjustForTimeDifference: true 
+        } 
+    });
+}
+// Khởi tạo ccxt lần đầu tiên
+initCCXT();
+
+let botSettings = { isRunning: false, maxPositions: 300, invValue: "0.1%", minVol: 5, posTP: 2.1, posSL: 10.0, maxDCA: MAX_DCA_LEVEL };
 let status = { botLogs: [], candidatesList: [], blackList: {}, permanentBlacklist: {}, botClosedCount: 0, botPnLClosed: 0, exchangeInfo: null, isReady: false };
 let botActivePositions = new Map(); 
 let isProcessingDCA = new Set();
@@ -51,7 +63,7 @@ async function binancePrivate(endpoint, method = 'GET', data = {}) {
     try {
         const timestamp = Date.now() + timestampOffset;
         const query = new URLSearchParams({ ...data, timestamp, recvWindow: 60000 }).toString(); // ĐÃ TĂNG LÊN 60K CHO API THUẦN
-        const signature = crypto.createHmac('sha256', SECRET_KEY).update(query).digest('hex');
+        const signature = crypto.createHmac('sha256', currentSecretKey).update(query).digest('hex');
         const response = await binanceApi({ method, url: `${endpoint}?${query}&signature=${signature}` });
         return response.data;
     } catch (e) {
@@ -315,6 +327,18 @@ APP.get('/api/status', async (req, res) => {
 });
 
 APP.post('/api/settings', (req, res) => { 
+    // Nếu HTML truyền API Key lên, cập nhật vào hệ thống
+    if (req.body.apiKey !== undefined && req.body.secretKey !== undefined) {
+        currentApiKey = req.body.apiKey.trim();
+        currentSecretKey = req.body.secretKey.trim();
+        
+        // Đồng bộ lại API KEY cho Axios và CCXT
+        binanceApi.defaults.headers['X-MBX-APIKEY'] = currentApiKey;
+        initCCXT();
+        
+        addBotLog(`⚙️ Đã cập nhật và đồng bộ API Key mới từ HTML thành công.`, "success");
+    }
+
     botSettings = { ...botSettings, ...req.body }; 
     botSettings.maxDCA = parseInt(botSettings.maxDCA);
     botSettings.maxPositions = parseInt(botSettings.maxPositions);
@@ -326,6 +350,11 @@ APP.post('/api/settings', (req, res) => {
 // --- SỬA TẬN GỐC: KHỞI TẠO IP CHUẨN XÁC KHI START PM2 ---
 async function init() {
     try {
+        console.log("\n=================================================================");
+        console.log("Chào mừng bạn đến với Moncey_D_Luffy chúc bạn luôn rực rỡ !!!");
+        console.log("=================================================================\n");
+        addBotLog(`✨ Chào mừng bạn đến với Moncey_D_Luffy chúc bạn luôn rực rỡ !!!`, "success");
+
         const ipRes = await axios.get('https://api4.ipify.org?format=json', { timeout: 8000 }).catch(() => ({ data: { ip: "127.0.0.1" } }));
         currentBotIP = ipRes.data.ip; // 🔥 ĐÃ GHIM CỐ ĐỊNH IP GỐC KHI START LÊN
         
@@ -412,4 +441,4 @@ setInterval(async () => {
     } catch (err) {} // Chặn hoàn toàn log rác nếu API check IP bị timeout/nghẽn mạng cục bộ
 }, 30000);
 
-APP.listen(9001);
+APP.listen(1111);
