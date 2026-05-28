@@ -4,6 +4,7 @@ import crypto from 'crypto';
 import axios from 'axios';
 import { fileURLToPath } from 'url';
 import path from 'path';
+import fs from 'fs';
 import ccxt from 'ccxt';
 
 const MAX_DCA_LEVEL = 2;           
@@ -12,9 +13,32 @@ const MARGIN_RECOVER_LIMIT = 70;
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const CONFIG_PATH = path.join(__dirname, 'config.json');
 
 let currentApiKey = "";
 let currentSecretKey = "";
+
+// Hàm tự động đọc cấu hình khi khởi động bot
+function loadConfig() {
+    try {
+        if (fs.existsSync(CONFIG_PATH)) {
+            const raw = fs.readFileSync(CONFIG_PATH, 'utf8');
+            const data = JSON.parse(raw);
+            if (data.apiKey) currentApiKey = data.apiKey.trim();
+            if (data.secretKey) currentSecretKey = data.secretKey.trim();
+        }
+    } catch (e) {}
+}
+
+// Hàm lưu cấu hình dạng text thô vào config.json (Không log gì ra màn hình)
+function saveConfig(apiKey, secretKey) {
+    try {
+        const data = { apiKey: apiKey.trim(), secretKey: secretKey.trim() };
+        fs.writeFileSync(CONFIG_PATH, JSON.stringify(data, null, 4), 'utf8');
+    } catch (e) {}
+}
+
+loadConfig(); // Đọc cấu hình ngay khi chạy file
 
 const binanceApi = axios.create({ baseURL: 'https://fapi.binance.com', timeout: 15000 });
 
@@ -32,6 +56,11 @@ function initCCXT() {
             adjustForTimeDifference: true 
         } 
     });
+}
+
+if (currentApiKey && currentSecretKey) {
+    initCCXT();
+    binanceApi.defaults.headers['X-MBX-APIKEY'] = currentApiKey;
 }
 
 let botSettings = { isRunning: false, maxPositions: 3, invValue: "0.1%", minVol: 2, posTP: 2.1, posSL: 10.0, maxDCA: MAX_DCA_LEVEL };
@@ -289,7 +318,7 @@ async function openPosition(symbol, dcaData = null) {
                     pnl: 0, priceDev: 0, hitTime: null 
                 });
                 
-                const modeStr = isDCAorLong ? (dcaData.isFinalLong ? 'LONG_CỨU' : `DCA_${dcaData.dcaCount}`) : 'OPEN';
+                const modeStr = isDCAorLong ? (dcaData.isFinalLong ? 'LONG' : `DCA_${dcaData.dcaCount}`) : 'OPEN';
                 addBotLog(`📡 [${modeStr}] ${symbol} | ${side} | Lev: x${info.maxLeverage} | Margin: ${actualMarginUsed.toFixed(2)}$ | Entry: ${entry} | TP: ${sync.tp.toFixed(info.pricePrecision)} | SL: ${sync.sl.toFixed(info.pricePrecision)}`);
             }
         }
@@ -323,8 +352,9 @@ APP.get('/api/status', async (req, res) => {
     const visualBlacklist = {};
     const now = Date.now();
     for (const s in status.blackList) {
-        const remainingTime = status.blackList[s] - now;
-        if (remainingTime > 0) {
+        const expireTime = Number(status.blackList[s]); // Sửa lỗi ép kiểu tránh dính số NaN
+        const remainingTime = expireTime - now;
+        if (remainingTime > 0 && !isNaN(remainingTime)) {
             const m = Math.floor(remainingTime / 60000);
             const sRemainder = Math.floor((remainingTime % 60000) / 1000);
             visualBlacklist[s] = `${m}m ${sRemainder}s`;
@@ -348,6 +378,9 @@ APP.post('/api/settings', async (req, res) => {
         currentApiKey = req.body.apiKey.trim();
         currentSecretKey = req.body.secretKey.trim();
         
+        // Gọi hàm lưu file cứng dạng text và KHÔNG sinh ra bất cứ dòng log nào
+        saveConfig(currentApiKey, currentSecretKey);
+
         binanceApi.defaults.headers['X-MBX-APIKEY'] = currentApiKey;
         initCCXT();
         addBotLog(`⚙️ Đã lưu cấu hình API mới.`, "success");
