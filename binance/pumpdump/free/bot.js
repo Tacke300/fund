@@ -4,7 +4,7 @@ import crypto from 'crypto';
 import axios from 'axios';
 import { fileURLToPath } from 'url';
 import path from 'path';
-import fs from 'fs'; // Thêm module quản lý file để lưu cấu hình vĩnh viễn
+import fs from 'fs'; 
 import { API_KEY, SECRET_KEY } from './config.js';
 import ccxt from 'ccxt';
 
@@ -18,7 +18,7 @@ const MARGIN_RECOVER_LIMIT = 70;    // Đạt lại từ 70% Khả dụng trở 
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const SETTINGS_FILE = path.join(__dirname, 'bot_settings.json'); // Đường dẫn lưu file cấu hình
+const SETTINGS_FILE = path.join(__dirname, 'bot_settings.json');
 
 const binanceApi = axios.create({ baseURL: 'https://fapi.binance.com', timeout: 15000, headers: { 'X-MBX-APIKEY': API_KEY } });
 const exchange = new ccxt.binance({ 
@@ -33,33 +33,25 @@ const exchange = new ccxt.binance({
     } 
 });
 
-// Cấu hình mặc định ban đầu (Sẽ bị ghi đè nếu có file bot_settings.json)
-let botSettings = { isRunning: false, maxPositions: 3000, invValue: "0.15%", minVol: 5, posTP: 2, posSL: 10.0, maxDCA: MAX_DCA_LEVEL };
+let botSettings = { isRunning: false, maxPositions: 3, invValue: "1%", minVol: 6.5, posTP: 1.2, posSL: 10.0, maxDCA: MAX_DCA_LEVEL };
 
-// --- HÀM TỰ ĐỘNG ĐỌC/GHI CẤU HÌNH ĐỂ KHÔNG MẤT THÔNG SỐ ---
+// Tự động tải cấu hình lưu trữ vĩnh viễn
 function loadSettings() {
     try {
         if (fs.existsSync(SETTINGS_FILE)) {
             const data = fs.readFileSync(SETTINGS_FILE, 'utf8');
             botSettings = JSON.stringify(data) !== '{}' ? JSON.parse(data) : botSettings;
-            console.log("💾 [SETTINGS] Đã tải thành công cấu hình cũ từ file bot_settings.json");
+            console.log("💾 [SETTINGS] Đã tải thành công cấu hình từ file bot_settings.json");
         } else {
-            saveSettings(); // Nếu chưa có file thì tự tạo mới dữ liệu mặc định
+            saveSettings();
         }
-    } catch (e) {
-        console.error("❌ Lỗi đọc file cấu hình:", e.message);
-    }
+    } catch (e) { console.error("❌ Lỗi đọc file cấu hình:", e.message); }
 }
 
 function saveSettings() {
-    try {
-        fs.writeFileSync(SETTINGS_FILE, JSON.stringify(botSettings, null, 4), 'utf8');
-    } catch (e) {
-        console.error("❌ Lỗi ghi file cấu hình:", e.message);
-    }
+    try { fs.writeFileSync(SETTINGS_FILE, JSON.stringify(botSettings, null, 4), 'utf8'); } catch (e) { console.error("❌ Lỗi ghi file cấu hình:", e.message); }
 }
 
-// Khởi tạo đọc cấu hình cũ ngay lập tức khi mở Bot
 loadSettings();
 
 let status = { botLogs: [], candidatesList: [], blackList: {}, permanentBlacklist: {}, botClosedCount: 0, botPnLClosed: 0, exchangeInfo: null, isReady: false };
@@ -67,7 +59,6 @@ let botActivePositions = new Map();
 let isProcessingDCA = new Set();
 let timestampOffset = 0;
 let isMarginProtected = false; 
-
 let currentBotIP = null; 
 
 function addBotLog(msg, type = 'info') {
@@ -105,10 +96,119 @@ setInterval(() => {
     }
 }, 1000);
 
-// --- MONITOR THEO DÕI GIÁ VÀ XỬ LÝ LỆNH ĐÓNG/DCA ---
+// --- HÀM XỬ LÝ RIÊNG BIỆT CHO TỪNG COIN (TRÁNH DELAY CHÉO) ---
+async function processSinglePositionMonitor(key, b, posRisk) {
+    try {
+        // Tìm trạng thái vị thế thực tế trên sàn của coin này
+        const realP = posRisk.find(p => `${p.symbol}_${p.positionSide}` === key && Math.abs(parseFloat(p.positionAmt)) > 0);
+        
+        if (realP) {
+            // Trường hợp 1: Vị thế vẫn đang mở -> Theo dõi giá, TP, SL
+            const currentQty = Math.abs(parseFloat(realP.positionAmt));
+            const markP = parseFloat(realP.markPrice);
+            
+            b.pnl = parseFloat(realP.unRealizedProfit);
+            b.priceDev = ((markP - b.entryPrice) / b.entryPrice) * 100;
+
+            if (b.currentQty !== currentQty) { 
+                b.currentQty = currentQty; 
+                b.hitTime = null; 
+            }
+
+            const hitTP = (b.side === 'SHORT' && markP <= b.tp) || (b.side === 'LONG' && markP >= b.tp);
+            const hitSL = (b.side === 'SHORT' && markP >= b.sl) || (b.side === 'LONG' && markP <= b.sl);
+
+            if (hitTP || hitSL) {
+                if (!b.hitTime) b.hitTime = Date.now();
+                if (Date.now() - b.hitTime > 30000) {
+                    addBotLog(`⚠️ Treo lệnh >30s tại ${b.symbol}. Ép đóng MARKET!`, "warn");
+                    await exchange.createOrder(b.symbol, 'MARKET', b.side === 'SHORT' ? 'BUY' : 'SELL', currentQty, undefined, { positionSide: b.side });
+                }
+            } else { b.hitTime = null; }
+        } else {
+            // Trường hợp 2: Không thấy vị thế trên sàn -> Kiểm tra lịch sử giao dịch thực tế
+            if (isProcessingDCA.has(b.symbol)) return;
+
+            // Chờ 1.5 giây để sàn ghi nhận lịch sử khớp lệnh (Trades) ổn định
+            await new Promise(r => setTimeout(r, 1500));
+
+            const trades = await binancePrivate('/fapi/v1/userTrades', 'GET', { symbol: b.symbol, limit: 10 }).catch(() => []);
+            const recent = trades.filter(t => t.time > (Date.now() + timestampOffset - 60000));
+            
+            // 👉 ĐIỀU KIỆN TIÊN QUYẾT: Nếu không thấy lịch sử khớp chốt thật từ sàn, thoát ngay (Bỏ qua lỗi lag mất vị thế ảo)
+            if (recent.length === 0) return;
+
+            let totalR = 0, totalV = 0, avgClosePrice = 0;
+            recent.forEach(t => { 
+                totalR += parseFloat(t.realizedPnl); 
+                totalV += (parseFloat(t.price) * parseFloat(t.qty)); 
+            });
+            avgClosePrice = totalV / recent.reduce((acc, t) => acc + parseFloat(t.qty), 0);
+            
+            const fee = totalV * 0.0005; 
+            const netPnl = totalR - fee;
+
+            // Xác định nguyên nhân đóng lệnh thực từ lệnh đã khớp
+            const allOrders = await binancePrivate('/fapi/v1/allOrders', 'GET', { symbol: b.symbol, limit: 10 }).catch(() => []);
+            const closedById = allOrders.find(o => o.positionSide === b.side && o.status === 'FILLED' && (o.type === 'STOP_MARKET' || o.type === 'TAKE_PROFIT_MARKET'));
+
+            let reasonOfClose = closedById ? (closedById.type === 'STOP_MARKET' ? "SL_MARKET" : "TP_MARKET") : (netPnl > 0 ? "TP_MANUAL" : "SL_MANUAL");
+
+            // Dọn dẹp các lệnh treo TP/SL cũ còn sót lại của coin này
+            try {
+                const openOrders = await binancePrivate('/fapi/v1/openOrders', 'GET', { symbol: b.symbol });
+                for (const o of openOrders.filter(o => o.positionSide === b.side)) {
+                    await binancePrivate('/fapi/v1/order', 'DELETE', { symbol: b.symbol, orderId: o.orderId });
+                }
+            } catch(e){}
+
+            // Cập nhật trạng thái tổng quát
+            botActivePositions.delete(key);
+            status.botClosedCount++; 
+            status.botPnLClosed += netPnl;
+
+            const isFinalLong = b.isFinalLong === true; 
+            if (netPnl > 0) {
+                status.blackList[b.symbol] = Date.now() + (15 * 60 * 1000);
+            } else {
+                if (isFinalLong) {
+                    status.blackList[b.symbol] = Date.now() + (15 * 60 * 1000);
+                } else {
+                    addBotLog(`🔄 ${b.symbol} dính SL vị thế SHORT. Tiếp tục chuỗi lệnh, KHÔNG đưa vào Blacklist.`, "warn");
+                }
+            }
+
+            const logType = netPnl > 0 ? "💰 [CHỐT LỜI]" : "📉 [CẮT LỖ]";
+            const logStatus = netPnl > 0 ? "success" : "error";
+            addBotLog(`${logType} ${b.symbol} | ${b.side} | DCA: ${b.dcaCount}/${botSettings.maxDCA} | ClosePrice: ${avgClosePrice.toFixed(5)} | PnL: ${netPnl.toFixed(4)}$ | Type: ${reasonOfClose}`, logStatus);
+
+            // Kích hoạt chuỗi DCA dựa trên kết quả PnL âm thực tế từ sàn
+            if (netPnl < 0 && b.side === 'SHORT') {
+                const jump = b.dcaCount + 1;
+                const currentAccumulatedLoss = (b.totalLossAccumulated || 0) + Math.abs(netPnl);
+
+                if (jump <= botSettings.maxDCA) {
+                    openPosition(b.symbol, { 
+                        ...b, 
+                        dcaCount: jump, 
+                        margin: b.firstMargin * Math.pow(2, jump),
+                        totalLossAccumulated: currentAccumulatedLoss
+                    });
+                } else {
+                    openPosition(b.symbol, { ...b, isFinalLong: true, margin: b.firstMargin * 10 });
+                }
+            }
+        }
+    } catch (err) {
+        console.error(`❌ Lỗi xử lý luồng riêng của ${b.symbol}:`, err.message);
+    }
+}
+
+// --- MONITOR THEO DÕI GIÁ (ĐÃ TÁCH LUỒNG SONG SONG) ---
 async function priceMonitor() {
     if (!status.isReady) return setTimeout(priceMonitor, 1000);
     try {
+        // Nếu tắt bot mà vẫn còn lệnh mở -> Dọn dẹp hàng loạt
         if (!botSettings.isRunning && botActivePositions.size > 0) {
             addBotLog(`🛑 Bot STOP. Hủy toàn bộ TP/SL đang treo...`, "warn");
             for (let [key, b] of botActivePositions) {
@@ -125,101 +225,19 @@ async function priceMonitor() {
 
         if (!botSettings.isRunning) return setTimeout(priceMonitor, 1000);
 
-        const posRisk = await binancePrivate('/fapi/v2/positionRisk');
+        // Lấy danh sách vị thế gộp một lần từ sàn
+        const posRisk = await binancePrivate('/fapi/v2/positionRisk').catch(() => null);
         
-        for (let [key, b] of botActivePositions) {
-            const realP = posRisk.find(p => `${p.symbol}_${p.positionSide}` === key && Math.abs(parseFloat(p.positionAmt)) > 0);
-            
-            if (realP) {
-                const currentQty = Math.abs(parseFloat(realP.positionAmt));
-                const markP = parseFloat(realP.markPrice);
-                
-                b.pnl = parseFloat(realP.unRealizedProfit);
-                b.priceDev = ((markP - b.entryPrice) / b.entryPrice) * 100;
-
-                if (b.currentQty !== currentQty) { 
-                    b.currentQty = currentQty; 
-                    b.hitTime = null; 
-                }
-
-                const hitTP = (b.side === 'SHORT' && markP <= b.tp) || (b.side === 'LONG' && markP >= b.tp);
-                const hitSL = (b.side === 'SHORT' && markP >= b.sl) || (b.side === 'LONG' && markP <= b.sl);
-
-                if (hitTP || hitSL) {
-                    if (!b.hitTime) b.hitTime = Date.now();
-                    if (Date.now() - b.hitTime > 30000) {
-                        addBotLog(`⚠️ Treo lệnh >30s tại ${b.symbol}. Ép đóng MARKET!`, "warn");
-                        await exchange.createOrder(b.symbol, 'MARKET', b.side === 'SHORT' ? 'BUY' : 'SELL', currentQty, undefined, { positionSide: b.side });
-                    }
-                } else { b.hitTime = null; }
-            } else {
-                if (isProcessingDCA.has(b.symbol)) continue;
-
-                await new Promise(r => setTimeout(r, 1000));
-
-                const allOrders = await binancePrivate('/fapi/v1/allOrders', 'GET', { symbol: b.symbol, limit: 10 });
-                const closedById = allOrders.find(o => o.positionSide === b.side && o.status === 'FILLED' && (o.type === 'STOP_MARKET' || o.type === 'TAKE_PROFIT_MARKET'));
-
-                let reasonOfClose = "MANUAL"; 
-                if (closedById) {
-                    reasonOfClose = closedById.type === 'STOP_MARKET' ? "SL_MARKET" : "TP_MARKET";
-                }
-
-                const trades = await binancePrivate('/fapi/v1/userTrades', 'GET', { symbol: b.symbol, limit: 10 });
-                const recent = trades.filter(t => t.time > (Date.now() + timestampOffset - 45000));
-                
-                try {
-                    const openOrders = await binancePrivate('/fapi/v1/openOrders', 'GET', { symbol: b.symbol });
-                    for (const o of openOrders.filter(o => o.positionSide === b.side)) {
-                        await binancePrivate('/fapi/v1/order', 'DELETE', { symbol: b.symbol, orderId: o.orderId });
-                    }
-                } catch(e){}
-
-                let totalR = 0, totalV = 0, avgClosePrice = 0;
-                if (recent.length > 0) {
-                    recent.forEach(t => { totalR += parseFloat(t.realizedPnl); totalV += (parseFloat(t.price) * parseFloat(t.qty)); });
-                    avgClosePrice = totalV / recent.reduce((acc, t) => acc + parseFloat(t.qty), 0);
-                }
-                const fee = totalV * 0.0005; 
-                const netPnl = totalR - fee;
-
-                botActivePositions.delete(key);
-                status.botClosedCount++; 
-                status.botPnLClosed += netPnl;
-
-                const isFinalLong = b.isFinalLong === true; 
-                if (netPnl > 0) {
-                    status.blackList[b.symbol] = Date.now() + (15 * 60 * 1000);
-                } else {
-                    if (isFinalLong) {
-                        status.blackList[b.symbol] = Date.now() + (15 * 60 * 1000);
-                    } else {
-                        addBotLog(`🔄 ${b.symbol} dính SL vị thế SHORT. Tiếp tục chuỗi lệnh, KHÔNG đưa vào Blacklist.`, "warn");
-                    }
-                }
-
-                const logType = netPnl > 0 ? "💰 [CHỐT LỜI]" : "📉 [CẮT LỖ]";
-                const logStatus = netPnl > 0 ? "success" : "error";
-                addBotLog(`${logType} ${b.symbol} | ${b.side} | DCA: ${b.dcaCount}/${botSettings.maxDCA} | ClosePrice: ${avgClosePrice.toFixed(5)} | PnL: ${netPnl.toFixed(4)}$ | Type: ${reasonOfClose}`, logStatus);
-
-                if (netPnl < 0 && b.side === 'SHORT') {
-                    const jump = b.dcaCount + 1;
-                    const currentAccumulatedLoss = (b.totalLossAccumulated || 0) + Math.abs(netPnl);
-
-                    if (jump <= botSettings.maxDCA) {
-                        openPosition(b.symbol, { 
-                            ...b, 
-                            dcaCount: jump, 
-                            margin: b.firstMargin * Math.pow(2, jump),
-                            totalLossAccumulated: currentAccumulatedLoss
-                        });
-                    } else {
-                        openPosition(b.symbol, { ...b, isFinalLong: true, margin: b.firstMargin * 10 });
-                    }
-                }
+        if (posRisk && botActivePositions.size > 0) {
+            const promises = [];
+            // 👉 TÁCH LUỒNG SONG SONG: Kích hoạt đồng thời tiến trình cho mọi coin đang quản lý
+            for (let [key, b] of botActivePositions) {
+                promises.push(processSinglePositionMonitor(key, b, posRisk));
             }
+            // Đợi tất cả các luồng xử lý xong cùng nhau, không luồng nào chặn luồng nào
+            await Promise.all(promises);
         }
-    } catch (e) { console.error("Monitor Err:", e.message); }
+    } catch (e) { console.error("Monitor Toàn Cục Err:", e.message); }
     setTimeout(priceMonitor, 1000);
 }
 
@@ -336,7 +354,6 @@ const APP = express(); APP.use(express.json()); APP.use(express.static(__dirname
 
 APP.get('/api/status', async (req, res) => {
     const acc = await binancePrivate('/fapi/v2/account').catch(() => null);
-    
     const visualBlacklist = {};
     const now = Date.now();
     for (const s in status.blackList) {
@@ -366,7 +383,7 @@ APP.post('/api/settings', (req, res) => {
     botSettings.maxPositions = parseInt(botSettings.maxPositions);
     botSettings.minVol = parseFloat(botSettings.minVol);
     
-    saveSettings(); // GHI ĐÈ FILE KHI CÓ THAY ĐỔI TỪ GIAO DIỆN WEB UI
+    saveSettings(); 
     
     addBotLog(`⚙️ Cập nhật & Tự động sao lưu cấu hình vĩnh viễn thành công.`, "success");
     res.json({ success: true }); 
@@ -458,7 +475,7 @@ setInterval(async () => {
     } catch (err) {} 
 }, 30000);
 
-// Thay đổi sang cổng 1111 theo yêu cầu của bạn
+// Chạy ứng dụng trên cổng 1111
 APP.listen(1111, () => {
     console.log("⚡ Bot Server running at http://localhost:1111");
 });
