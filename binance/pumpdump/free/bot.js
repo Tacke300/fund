@@ -70,9 +70,10 @@ let timestampOffset = 0;
 let isMarginProtected = false; 
 let currentBotIP = null;
 
-// Biến toàn cục lưu cache số dư để tăng tốc bot và tránh spam API /account
+// Khai báo lại các biến lưu bộ đệm tài khoản, bổ sung thêm unrealized profit cho HTML
 let cachedAvailableBalance = 0;
 let cachedTotalWalletBalance = 0;
+let cachedTotalUnrealizedProfit = 0; 
 
 function addBotLog(msg, type = 'info') {
     const time = new Date().toLocaleTimeString('vi-VN', { hour12: false });
@@ -245,7 +246,7 @@ async function priceMonitor() {
             }
         }
     } catch (e) { console.error("Monitor Err:", e.message); }
-    setTimeout(priceMonitor, 400); // Tăng tốc độ quét kiểm tra giá (400ms)
+    setTimeout(priceMonitor, 400); 
 }
 
 async function openPosition(symbol, dcaData = null) {
@@ -257,11 +258,8 @@ async function openPosition(symbol, dcaData = null) {
     
     try {
         const info = status.exchangeInfo[symbol];
-        
-        // Loại bỏ 1000ms trì hoãn vô nghĩa để bắt giá tức thời
         const availableUsdt = cachedAvailableBalance;
         
-        // Tận dụng dữ liệu từ danh sách CandidatesList hoặc lấy trực tiếp từ ticker nhanh nhất có thể
         let currentPrice = 0;
         const targetCandidate = status.candidatesList.find(c => c.symbol === symbol);
         if (targetCandidate && targetCandidate.price) {
@@ -294,7 +292,6 @@ async function openPosition(symbol, dcaData = null) {
 
         const actualMarginUsed = (qty * currentPrice) / info.maxLeverage;
         
-        // Gộp lệnh Set Leverage và Tạo Order thành các Promise chạy song song
         const orderPromise = exchange.createOrder(symbol, 'MARKET', side === 'SHORT' ? 'SELL' : 'BUY', qty.toFixed(info.quantityPrecision), undefined, { positionSide: side });
         const [, order] = await Promise.all([
             exchange.setLeverage(info.maxLeverage, symbol).catch(() => {}),
@@ -302,7 +299,6 @@ async function openPosition(symbol, dcaData = null) {
         ]);
         
         if (order) {
-            // Lấy giá Entry chuẩn xác trực tiếp từ phản hồi của lệnh đã khớp thay vì kéo và chờ đợi API positionRisk
             const entry = order.price ? parseFloat(order.price) : currentPrice;
             
             const firstE = dcaData ? dcaData.firstEntry : entry;
@@ -336,7 +332,6 @@ async function openPosition(symbol, dcaData = null) {
                 sl = firstE + (firstE * (botSettings.posSL * (dcaCount + 1)) / 100);
             }
 
-            // Gọi đồng thời 2 lệnh đặt TP và SL cùng một lúc để tối ưu vận tốc (Không xóa TP/SL cũ)
             const sideClose = side === 'SHORT' ? 'BUY' : 'SELL';
             Promise.all([
                 exchange.createOrder(symbol, 'TAKE_PROFIT_MARKET', sideClose, undefined, undefined, { positionSide: side, stopPrice: tp.toFixed(info.pricePrecision), closePosition: true, workingType: 'MARK_PRICE' }),
@@ -361,7 +356,7 @@ async function openPosition(symbol, dcaData = null) {
     } catch (e) { 
         addBotLog(`❌ Lỗi vị thế ${symbol}: ${e.message}`, "error"); 
     } finally { 
-        isProcessingDCA.delete(symbol); // Giải phóng tài nguyên ngay lập tức
+        isProcessingDCA.delete(symbol); 
     }
 }
 
@@ -380,6 +375,7 @@ APP.get('/api/status', async (req, res) => {
         }
     }
 
+    // Trả về đầy đủ các trường dữ liệu wallet chuẩn xác như thiết kế ban đầu
     res.json({ 
         botSettings, 
         activePositions: Array.from(botActivePositions.values()), 
@@ -387,7 +383,7 @@ APP.get('/api/status', async (req, res) => {
         wallet: { 
             totalWalletBalance: cachedTotalWalletBalance.toFixed(2), 
             availableBalance: cachedAvailableBalance.toFixed(2), 
-            totalUnrealizedProfit: "0.00" 
+            totalUnrealizedProfit: cachedTotalUnrealizedProfit.toFixed(2) // Khôi phục trường này về HTML
         } 
     });
 });
@@ -444,7 +440,6 @@ async function init() {
 
 init();
 
-// Rút ngắn interval cập nhật từ Scanner xuống 800ms để bắt tín hiệu tức thì
 setInterval(() => {
     http.get('http://127.0.0.1:9000/api/data', res => {
         let d = ''; res.on('data', c => d += c);
@@ -452,7 +447,6 @@ setInterval(() => {
     }).on('error', () => {});
 }, 800);
 
-// Nơi gộp kiểm tra tài khoản (Hạ chu kỳ xuống 2 giây để cập nhật nhanh số dư khả dụng)
 setInterval(async () => {
     if (!status.isReady || !botSettings.isRunning || !currentApiKey || !currentSecretKey) return;
 
@@ -460,6 +454,7 @@ setInterval(async () => {
     if (acc) {
         cachedTotalWalletBalance = parseFloat(acc.totalMarginBalance || 0);
         cachedAvailableBalance = parseFloat(acc.availableBalance || 0);
+        cachedTotalUnrealizedProfit = parseFloat(acc.totalUnrealizedProfit || 0); // Đã lưu thêm giá trị pnl ngầm này
         
         if (cachedTotalWalletBalance > 0) {
             const availPercent = (cachedAvailableBalance / cachedTotalWalletBalance) * 100;
