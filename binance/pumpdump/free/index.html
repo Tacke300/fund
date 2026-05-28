@@ -48,12 +48,12 @@
 
             <div class="grid grid-cols-2 gap-2">
                 <div>
-                    <p class="text-[9px] text-zinc-500 uppercase mb-1">Margin (Đòn bẩy)</p>
-                    <input id="margin" type="number" placeholder="Ví dụ: 10, 20...">
-                </div>
-                <div>
                     <p class="text-[9px] text-zinc-500 uppercase mb-1">Max Position (Vị thế tối đa)</p>
                     <input id="maxPos" type="number" placeholder="Số vị thế tối đa...">
+                </div>
+                <div>
+                    <p class="text-[9px] text-zinc-500 uppercase mb-1">Số lần Max DCA</p>
+                    <input id="maxDca" type="number" placeholder="Số lần gồng tối đa...">
                 </div>
             </div>
 
@@ -68,18 +68,14 @@
                 </div>
             </div>
 
-            <div class="grid grid-cols-3 gap-2">
+            <div class="grid grid-cols-2 gap-2">
                 <div>
                     <p class="text-[9px] text-zinc-500 uppercase mb-1">Long TP (%)</p>
-                    <input id="longTp" type="number" step="any" placeholder="TP riêng Long">
+                    <input id="longTp" type="number" step="any" placeholder="TP riêng cho lệnh Long...">
                 </div>
                 <div>
                     <p class="text-[9px] text-zinc-500 uppercase mb-1">Long SL (%)</p>
-                    <input id="longSl" type="number" step="any" placeholder="SL riêng Long">
-                </div>
-                <div>
-                    <p class="text-[9px] text-zinc-500 uppercase mb-1">Số lần Max DCA</p>
-                    <input id="maxDca" type="number" placeholder="Số lần gồng...">
+                    <input id="longSl" type="number" step="any" placeholder="SL riêng cho lệnh Long...">
                 </div>
             </div>
         </div>
@@ -155,13 +151,12 @@
             return {
                 capital: document.getElementById('capital').value.trim(),
                 volVolatility: parseFloat(document.getElementById('volVolatility').value) || 0,
-                margin: parseInt(document.getElementById('margin').value) || 0,
                 maxPos: parseInt(document.getElementById('maxPos').value) || 0,
+                maxDca: parseInt(document.getElementById('maxDca').value) || 0,
                 tp: parseFloat(document.getElementById('tp').value) || 0,
                 sl: parseFloat(document.getElementById('sl').value) || 0,
                 longTp: parseFloat(document.getElementById('longTp').value) || 0,
-                longSl: parseFloat(document.getElementById('longSl').value) || 0,
-                maxDca: parseInt(document.getElementById('maxDca').value) || 0
+                longSl: parseFloat(document.getElementById('longSl').value) || 0
             };
         }
 
@@ -238,13 +233,12 @@
                 if (d.botSettings) {
                     if (d.botSettings.capital !== undefined) document.getElementById('capital').value = d.botSettings.capital;
                     if (d.botSettings.volVolatility !== undefined) document.getElementById('volVolatility').value = d.botSettings.volVolatility;
-                    if (d.botSettings.margin !== undefined) document.getElementById('margin').value = d.botSettings.margin;
                     if (d.botSettings.maxPos !== undefined) document.getElementById('maxPos').value = d.botSettings.maxPos;
+                    if (d.botSettings.maxDca !== undefined) document.getElementById('maxDca').value = d.botSettings.maxDca;
                     if (d.botSettings.tp !== undefined) document.getElementById('tp').value = d.botSettings.tp;
                     if (d.botSettings.sl !== undefined) document.getElementById('sl').value = d.botSettings.sl;
                     if (d.botSettings.longTp !== undefined) document.getElementById('longTp').value = d.botSettings.longTp;
                     if (d.botSettings.longSl !== undefined) document.getElementById('longSl').value = d.botSettings.longSl;
-                    if (d.botSettings.maxDca !== undefined) document.getElementById('maxDca').value = d.botSettings.maxDca;
                     
                     updateUIState(d.botSettings.isRunning);
                 }
