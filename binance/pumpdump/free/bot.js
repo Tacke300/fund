@@ -11,16 +11,16 @@ const MARGIN_PROTECT_LIMIT = 60;
 const MARGIN_RECOVER_LIMIT = 70;    
 
 const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__dirname);
+const __dirname = path.dirname(__filename);
 
-let currentApiKey = API_KEY;
-let currentSecretKey = SECRET_KEY;
+let currentApiKey = "";
+let currentSecretKey = "";
 
 const binanceApi = axios.create({ baseURL: 'https://fapi.binance.com', timeout: 15000 });
-binanceApi.defaults.headers['X-MBX-APIKEY'] = currentApiKey;
 
-let exchange;
+let exchange = null;
 function initCCXT() {
+    if (!currentApiKey || !currentSecretKey) return;
     exchange = new ccxt.binance({ 
         apiKey: currentApiKey, 
         secret: currentSecretKey, 
@@ -33,7 +33,6 @@ function initCCXT() {
         } 
     });
 }
-initCCXT();
 
 let botSettings = { isRunning: false, maxPositions: 3, invValue: "0.1%", minVol: 5, posTP: 2.1, posSL: 10.0, maxDCA: MAX_DCA_LEVEL };
 let status = { botLogs: [], candidatesList: [], blackList: {}, permanentBlacklist: {}, botClosedCount: 0, botPnLClosed: 0, exchangeInfo: null, isReady: false };
@@ -289,6 +288,9 @@ async function syncTPSL(symbol, side, info, tpPrice, slPrice) {
 const APP = express(); APP.use(express.json()); APP.use(express.static(__dirname));
 
 APP.get('/api/status', async (req, res) => {
+    if (!currentApiKey || !currentSecretKey) {
+        return res.json({ botSettings, activePositions: [], status, wallet: { totalWalletBalance: "0.00", availableBalance: "NO_API", totalUnrealizedProfit: "0.00" } });
+    }
     const acc = await binancePrivate('/fapi/v2/account').catch(() => null);
     
     const visualBlacklist = {};
@@ -322,14 +324,14 @@ APP.post('/api/settings', (req, res) => {
         binanceApi.defaults.headers['X-MBX-APIKEY'] = currentApiKey;
         initCCXT();
         
-        addBotLog(`⚙️ Đã cập nhật và đồng bộ API Key mới từ HTML thành công.`, "success");
+        addBotLog(`⚙️ Đã lưu cấu hình API mới.`, "success");
     }
 
     botSettings = { ...botSettings, ...req.body }; 
-    botSettings.maxDCA = parseInt(botSettings.maxDCA);
-    botSettings.maxPositions = parseInt(botSettings.maxPositions);
-    botSettings.minVol = parseFloat(botSettings.minVol);
-    addBotLog(`⚙️ Cập nhật cấu hình thành công.`, "success");
+    if (req.body.maxDCA !== undefined) botSettings.maxDCA = parseInt(botSettings.maxDCA);
+    if (req.body.maxPositions !== undefined) botSettings.maxPositions = parseInt(botSettings.maxPositions);
+    if (req.body.minVol !== undefined) botSettings.minVol = parseFloat(botSettings.minVol);
+    
     res.json({ success: true }); 
 });
 
@@ -346,6 +348,12 @@ async function init() {
         console.log(`\n🌍 IP INITIALIZED: ${currentBotIP}`);
         addBotLog(`🌍 IP START: ${currentBotIP}`, "success"); 
         
+        if (!currentApiKey || !currentSecretKey) {
+            addBotLog(`⚠️ Hệ thống đang chờ cấu hình API từ HTML...`, "warn");
+            status.isReady = true;
+            return;
+        }
+
         const t = await axios.get('https://fapi.binance.com/fapi/v1/time');
         timestampOffset = t.data.serverTime - Date.now();
         await exchange.loadMarkets();
@@ -374,7 +382,7 @@ setInterval(() => {
 }, 1500);
 
 setInterval(async () => {
-    if (!status.isReady || !botSettings.isRunning) return;
+    if (!status.isReady || !botSettings.isRunning || !currentApiKey || !currentSecretKey) return;
 
     const acc = await binancePrivate('/fapi/v2/account').catch(() => null);
     if (acc) {
