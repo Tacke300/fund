@@ -31,7 +31,18 @@ const exchange = new ccxt.binance({
     } 
 });
 
-let botSettings = { isRunning: false, maxPositions: 3, invValue: "1%", minVol: 6.5, posTP: 1.2, posSL: 10.0, maxDCA: MAX_DCA_LEVEL };
+// Thay đổi duy nhất ở dòng này trong bot.js:
+let botSettings = { 
+    isRunning: false, 
+    capital: "0.05%", 
+    volVolatility: 5, 
+    maxPos: 300, 
+    maxDca: 2, 
+    tp: 1.2, 
+    sl: 10.0, 
+    longTp: 15, 
+    longSl: 15 
+};
 let status = { botLogs: [], candidatesList: [], blackList: {}, permanentBlacklist: {}, botClosedCount: 0, botPnLClosed: 0, exchangeInfo: null, isReady: false };
 let botActivePositions = new Map(); 
 let isProcessingDCA = new Set();
