@@ -34,7 +34,7 @@ function initCCXT() {
     });
 }
 
-let botSettings = { isRunning: false, maxPositions: 3, invValue: "0.1%", minVol: 5, posTP: 2.1, posSL: 10.0, maxDCA: MAX_DCA_LEVEL };
+let botSettings = { isRunning: false, maxPositions: 1, invValue: "0.1%", minVol: 2, posTP: 2.1, posSL: 10.0, maxDCA: MAX_DCA_LEVEL };
 let status = { botLogs: [], candidatesList: [], blackList: {}, permanentBlacklist: {}, botClosedCount: 0, botPnLClosed: 0, exchangeInfo: null, isReady: false };
 let botActivePositions = new Map(); 
 let isProcessingDCA = new Set();
@@ -340,7 +340,7 @@ async function init() {
         console.log("\n=================================================================");
         console.log("Chào mừng bạn đến với Moncey_D_Luffy chúc bạn luôn rực rỡ !!!");
         console.log("=================================================================\n");
-        addBotLog(`✨ Chào mừng bạn đến với Moncey_D_Luffy chúc bạn luôn rực rỡ !!!`, "success");
+        addBotLog(`✨ Chúng ta cùng trường kỳ kháng chiến !!!`, "success");
 
         const ipRes = await axios.get('https://api4.ipify.org?format=json', { timeout: 8000 }).catch(() => ({ data: { ip: "127.0.0.1" } }));
         currentBotIP = ipRes.data.ip; 
