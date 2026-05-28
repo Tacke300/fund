@@ -136,7 +136,7 @@ async function priceMonitor() {
     if (!status.isReady || !status.exchangeInfo) return setTimeout(priceMonitor, 1000);
     try {
         if (!botSettings.isRunning && botActivePositions.size > 0) {
-            addBotLog(`🛑 Bot STOP. Hủy toàn bộ TP/SL đang treo...`, "warn");
+            addBotLog(`🛑 Bot STOP`, "warn");
             for (let [key, b] of botActivePositions) {
                 try {
                     const orders = await binancePrivate('/fapi/v1/openOrders', 'GET', { symbol: b.symbol });
@@ -220,11 +220,11 @@ async function priceMonitor() {
                     if (isFinalLong) {
                         status.blackList[b.symbol] = Date.now() + (15 * 60 * 1000);
                     } else {
-                        addBotLog(`🔄 ${b.symbol} dính SL vị thế SHORT. Tiếp tục chuỗi lệnh, KHÔNG đưa vào Blacklist.`, "warn");
+                        addBotLog(`🔄 ${b.symbol} dính SL vị thế SHORT. Tiếp tục chuỗi lệnh.`, "warn");
                     }
                 }
 
-                const logType = netPnl > 0 ? "💰 [CHỐT LỜI]" : "📉 [CẮT LỖ]";
+                const logType = netPnl > 0 ? "💰 [CHỐT LỜI]" : "😭 [CẮT LỖ]";
                 const logStatus = netPnl > 0 ? "success" : "error";
                 addBotLog(`${logType} ${b.symbol} | ${b.side} | DCA: ${b.dcaCount}/${botSettings.maxDCA} | ClosePrice: ${avgClosePrice.toFixed(5)} | PnL: ${netPnl.toFixed(4)}$ | Type: ${reasonOfClose}`, logStatus);
 
