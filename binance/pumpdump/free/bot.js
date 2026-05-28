@@ -62,7 +62,7 @@ if (currentApiKey && currentSecretKey) {
     binanceApi.defaults.headers['X-MBX-APIKEY'] = currentApiKey;
 }
 
-let botSettings = { isRunning: false, maxPositions: 3000, invValue: "0.1%", minVol: 5, posTP: 2.1, posSL: 10.0, maxDCA: MAX_DCA_LEVEL };
+let botSettings = { isRunning: false, maxPositions: 3000, invValue: "0.15%", minVol: 5, posTP: 2.1, posSL: 10.0, maxDCA: MAX_DCA_LEVEL };
 let status = { botLogs: [], candidatesList: [], blackList: {}, permanentBlacklist: {}, botClosedCount: 0, botPnLClosed: 0, exchangeInfo: null, isReady: false };
 let botActivePositions = new Map(); 
 let isProcessingDCA = new Set();
@@ -98,6 +98,7 @@ async function binancePrivate(endpoint, method = 'GET', data = {}) {
     }
 }
 
+// --- FIX HOÀN TOÀN GIỐNG BẢN 2: Bỏ hoàn toàn CCXT loadMarkets gây nghẽn ---
 async function fetchExchangeData() {
     if (!botSettings.isRunning) {
         status.isReady = false;
@@ -106,11 +107,6 @@ async function fetchExchangeData() {
     try {
         const t = await axios.get('https://fapi.binance.com/fapi/v1/time');
         timestampOffset = t.data.serverTime - Date.now();
-        
-        // CHỈNH SỬA: Bảo vệ chống crash nếu CCXT chưa kịp khởi tạo thành công khi nhấn Start bot
-        if (exchange) {
-            await exchange.loadMarkets().catch(() => {});
-        }
         
         const info = await binanceApi.get('/fapi/v1/exchangeInfo');
         const brk = await binancePrivate('/fapi/v1/leverageBracket');
@@ -148,7 +144,7 @@ setInterval(() => {
     }
 }, 1000);
 
-// --- HÀM ĐỒNG BỘ TP/SL CHUẨN HOÁ SỬ DỤNG BINANCE PRIVATE (KHÔNG DÙNG CCXT GÂY LỖI TREO) ---
+// --- HÀM ĐỒNG BỘ TP/SL SỬ DỤNG BINANCE PRIVATE API ---
 async function syncTPSL(symbol, side, info, tpPrice, slPrice) {
     const sideClose = side === 'SHORT' ? 'BUY' : 'SELL';
     try {
@@ -158,7 +154,6 @@ async function syncTPSL(symbol, side, info, tpPrice, slPrice) {
         }
         await new Promise(r => setTimeout(r, 600));
         
-        // Đặt lệnh TP qua Binance Private API
         await binancePrivate('/fapi/v1/order', 'POST', {
             symbol,
             side: sideClose,
@@ -169,7 +164,6 @@ async function syncTPSL(symbol, side, info, tpPrice, slPrice) {
             workingType: 'MARK_PRICE'
         });
 
-        // Đặt lệnh SL qua Binance Private API
         await binancePrivate('/fapi/v1/order', 'POST', {
             symbol,
             side: sideClose,
@@ -245,10 +239,10 @@ async function priceMonitor() {
             } else {
                 if (isProcessingDCA.has(b.symbol)) continue;
 
-                // [LOGIC BẢN 2] Ngủ 1 giây để chống race condition của API
+                // [LOGIC BẢN 2] Ngủ 1 giây chống race condition
                 await new Promise(r => setTimeout(r, 1000));
 
-                // [LOGIC BẢN 2] Kiểm tra lịch sử đơn hàng xem có đúng là dính TP/SL thật không
+                // [LOGIC BẢN 2] Kiểm tra trạng thái FILLED thực tế trong lịch sử đơn hàng
                 const allOrders = await binancePrivate('/fapi/v1/allOrders', 'GET', { symbol: b.symbol, limit: 10 });
                 const closedById = allOrders.find(o => o.positionSide === b.side && o.status === 'FILLED' && (o.type === 'STOP_MARKET' || o.type === 'TAKE_PROFIT_MARKET'));
 
@@ -260,7 +254,7 @@ async function priceMonitor() {
                 const trades = await binancePrivate('/fapi/v1/userTrades', 'GET', { symbol: b.symbol, limit: 10 });
                 const recent = trades.filter(t => t.time > (Date.now() + timestampOffset - 45000));
 
-                // [LOGIC BẢN 2] Dọn sạch triệt để các lệnh điều kiện cũ còn sót lại trên sàn
+                // [LOGIC BẢN 2] Dọn sạch triệt để lệnh treo cũ
                 try {
                     const openOrders = await binancePrivate('/fapi/v1/openOrders', 'GET', { symbol: b.symbol });
                     for (const o of openOrders.filter(o => o.positionSide === b.side)) {
@@ -326,7 +320,7 @@ async function priceMonitor() {
     setTimeout(priceMonitor, 400); 
 }
 
-// --- HÀM VÀO LỆNH THUẦN BINANCE PRIVATE THEO BẢN 1 CŨ ---
+// --- HÀM VÀO LỆNH THUẦN BINANCE PRIVATE API ---
 async function openPosition(symbol, dcaData = null) {
     if (isProcessingDCA.has(symbol)) return;
     isProcessingDCA.add(symbol); 
@@ -370,7 +364,6 @@ async function openPosition(symbol, dcaData = null) {
 
         const actualMarginUsed = (qty * currentPrice) / info.maxLeverage;
         
-        // Đặt Đòn bẩy và Lệnh Market hoàn toàn bằng BinancePrivate tránh xung đột bất đồng bộ của CCXT lúc khởi động
         await binancePrivate('/fapi/v1/leverage', 'POST', { symbol, leverage: info.maxLeverage }).catch(() => {});
         const order = await binancePrivate('/fapi/v1/order', 'POST', {
             symbol,
@@ -381,7 +374,7 @@ async function openPosition(symbol, dcaData = null) {
         });
         
         if (order) {
-            // [LOGIC BẢN 2] Chờ 1.5 giây để vị thế khớp hoàn toàn trước khi lấy thông tin
+            // [LOGIC BẢN 2] Trì hoãn 1.5 giây để cập nhật dữ liệu mạng lưới trước khi đồng bộ vị thế
             await new Promise(r => setTimeout(r, 1500));
             const pRisk = await binancePrivate('/fapi/v2/positionRisk', 'GET', { symbol });
             const p = pRisk.find(x => x.positionSide === side && Math.abs(parseFloat(x.positionAmt)) > 0);
@@ -418,7 +411,6 @@ async function openPosition(symbol, dcaData = null) {
                     sl = firstE + (firstE * (botSettings.posSL * (dcaCount + 1)) / 100);
                 }
 
-                // [LOGIC BẢN 2] Đồng bộ hoá dọn dẹp lệnh cũ đặt lệnh mới an toàn
                 const sync = await syncTPSL(symbol, side, info, tp, sl);
 
                 botActivePositions.set(`${symbol}_${side}`, { 
