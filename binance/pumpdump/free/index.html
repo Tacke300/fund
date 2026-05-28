@@ -78,12 +78,17 @@
             </div>
         </div>
 
-        <div id="action-area" class="grid grid-cols-2 gap-2">
-            <button id="saveBtn" onclick="justSave()" class="py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-bold rounded border border-zinc-700 uppercase text-xs transition-all tracking-wider">
-                Chỉ Lưu Cấu Hình
-            </button>
-            <button id="startBtn" onclick="startBot()" class="py-2 bg-green-600 hover:bg-green-700 text-white font-black rounded border border-green-500 uppercase text-xs transition-all tracking-wider shadow-lg shadow-green-950/50">
-                START BOT
+        <div id="action-area" class="space-y-2">
+            <div class="grid grid-cols-2 gap-2">
+                <button id="saveBtn" onclick="justSave()" class="py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-bold rounded border border-zinc-700 uppercase text-xs transition-all tracking-wider">
+                    Chỉ Lưu Cấu Hình
+                </button>
+                <button id="startBtn" onclick="startBot()" class="py-2 bg-green-600 hover:bg-green-700 text-white font-black rounded border border-green-500 uppercase text-xs transition-all tracking-wider shadow-lg shadow-green-950/50">
+                    START BOT
+                </button>
+            </div>
+            <button id="panicBtn" onclick="panicCloseAllOnExchange()" class="w-full py-2 bg-amber-950/40 text-amber-500 hover:bg-amber-900/60 hover:text-amber-400 font-bold rounded border border-amber-800 uppercase text-[11px] tracking-wide transition-all">
+                ⚠️ ĐÓNG TOÀN BỘ VỊ THẾ & LỆNH TREO TRÊN SÀN
             </button>
         </div>
 
@@ -113,7 +118,6 @@
         <span class="text-zinc-600 text-[10px] uppercase">Không có token bị blacklist</span>
     </div>
 
-    <!-- VÙNG HIỂN THỊ VỊ THẾ CHI TIẾT THEO YÊU CẦU -->
     <div id="pos-list" class="space-y-2"></div>
 
     <div class="card">
@@ -188,7 +192,6 @@
                         <td align="right" class="${parseFloat(c.c15)>=0?'up':'down'}">${c.c15}%</td>
                     </tr>`).join('');
 
-                // UPDATE KHU VỰC VỊ THẾ ĐANG MỞ HIỂN THỊ ĐẦY ĐỦ MARGIN, ENTRY, TP, SL, GIÁ HIỆN TẠI
                 document.getElementById('pos-list').innerHTML = d.activePositions.map(p => {
                     const sideColor = p.side === 'LONG' ? 'border-green-500' : 'border-red-500';
                     const sideTxtColor = p.side === 'LONG' ? 'text-green-400' : 'text-red-400';
@@ -232,9 +235,9 @@
                 if (ipLog) {
                     document.getElementById('bot-ip').innerText = `IP: ${ipLog.msg.replace("🌍 IP START:", "").trim()}`;
                 } else {
-                    document.getElementById('bot-ip').innerText = `IP: 127.0.0.1 (Local)`;
+                    document.getElementById('bot-ip').innerText = `IP: 171.224.178.88`;
                 }
-            } catch (e) { document.getElementById('bot-ip').innerText = `IP: Lỗi kết nối`; }
+            } catch (e) { document.getElementById('bot-ip').innerText = `IP: 171.224.178.88`; }
         }
 
         async function loadKeysFromServer() {
@@ -282,7 +285,19 @@
             } catch(e) { alert("Lỗi kết nối server!"); }
         }
 
-        // ĐẨY TỐC ĐỘ REFRESH LÊN 400MS ĐỂ GIÁ VÀ PNL NHẢY LIÊN TỤC KHÔNG TRỄ
+        async function panicCloseAllOnExchange() {
+            if (!confirm("⚠️ CẢNH BÁO: Bạn có chắc chắn muốn ĐÓNG SẠCH TOÀN BỘ vị thế đang mở và lệnh treo trên sàn Binance bằng lệnh Market không?")) return;
+            try {
+                const res = await fetch('/api/panic-close-all', { method: 'POST' });
+                const data = await res.json();
+                if (data.success) {
+                    alert("⚡ Hệ thống đã gửi lệnh dọn dẹp sàn thành công!");
+                } else {
+                    alert("❌ Lỗi: " + data.error);
+                }
+            } catch (e) { alert("Lỗi kết nối server!"); }
+        }
+
         setInterval(sync, 400);
         window.onload = () => {
             loadKeysFromServer();
