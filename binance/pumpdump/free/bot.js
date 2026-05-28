@@ -15,8 +15,8 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const CONFIG_PATH = path.join(__dirname, 'config.json');
 
-let currentApiKey = "";
-let currentSecretKey = "";
+let currentApiKey = "DtAVt7AlWbd5RKf0359UcITPn0l0cw18QXrab1ZstbF2unYlK9EnfnU4nxhwMSxA";
+let currentSecretKey = "BOBPnbdTEjU6exB56O9cDsuAivGfFIziHKcvSoJ1eJQfMBb73NGMuYDBZdXJfb3H";
 let hasLoggedSyncError = false;
 
 function loadConfig() {
@@ -62,7 +62,7 @@ if (currentApiKey && currentSecretKey) {
     binanceApi.defaults.headers['X-MBX-APIKEY'] = currentApiKey;
 }
 
-let botSettings = { isRunning: false, maxPositions: 3000, invValue: "0.15%", minVol: 5, posTP: 2.1, posSL: 10.0, maxDCA: MAX_DCA_LEVEL };
+let botSettings = { isRunning: false, maxPositions: 3000, invValue: "0.1%", minVol: 5, posTP: 2.1, posSL: 10.0, maxDCA: MAX_DCA_LEVEL };
 let status = { botLogs: [], candidatesList: [], blackList: {}, permanentBlacklist: {}, botClosedCount: 0, botPnLClosed: 0, exchangeInfo: null, isReady: false };
 let botActivePositions = new Map(); 
 let isProcessingDCA = new Set();
@@ -106,7 +106,12 @@ async function fetchExchangeData() {
     try {
         const t = await axios.get('https://fapi.binance.com/fapi/v1/time');
         timestampOffset = t.data.serverTime - Date.now();
-        await exchange.loadMarkets();
+        
+        // CHỈNH SỬA: Bảo vệ chống crash nếu CCXT chưa kịp khởi tạo thành công khi nhấn Start bot
+        if (exchange) {
+            await exchange.loadMarkets().catch(() => {});
+        }
+        
         const info = await binanceApi.get('/fapi/v1/exchangeInfo');
         const brk = await binancePrivate('/fapi/v1/leverageBracket');
         const temp = {};
@@ -143,7 +148,7 @@ setInterval(() => {
     }
 }, 1000);
 
-// --- HÀM ĐỒNG BỘ TP/SL ĐƯỢC MANG TỪ BẢN 2 SANG ---
+// --- HÀM ĐỒNG BỘ TP/SL CHUẨN HOÁ SỬ DỤNG BINANCE PRIVATE (KHÔNG DÙNG CCXT GÂY LỖI TREO) ---
 async function syncTPSL(symbol, side, info, tpPrice, slPrice) {
     const sideClose = side === 'SHORT' ? 'BUY' : 'SELL';
     try {
@@ -152,8 +157,29 @@ async function syncTPSL(symbol, side, info, tpPrice, slPrice) {
             await binancePrivate('/fapi/v1/order', 'DELETE', { symbol, orderId: o.orderId });
         }
         await new Promise(r => setTimeout(r, 600));
-        await exchange.createOrder(symbol, 'TAKE_PROFIT_MARKET', sideClose, undefined, undefined, { positionSide: side, stopPrice: tpPrice.toFixed(info.pricePrecision), closePosition: true, workingType: 'MARK_PRICE' });
-        await exchange.createOrder(symbol, 'STOP_MARKET', sideClose, undefined, undefined, { positionSide: side, stopPrice: slPrice.toFixed(info.pricePrecision), closePosition: true, workingType: 'MARK_PRICE' });
+        
+        // Đặt lệnh TP qua Binance Private API
+        await binancePrivate('/fapi/v1/order', 'POST', {
+            symbol,
+            side: sideClose,
+            positionSide: side,
+            type: 'TAKE_PROFIT_MARKET',
+            stopPrice: tpPrice.toFixed(info.pricePrecision),
+            closePosition: 'true',
+            workingType: 'MARK_PRICE'
+        });
+
+        // Đặt lệnh SL qua Binance Private API
+        await binancePrivate('/fapi/v1/order', 'POST', {
+            symbol,
+            side: sideClose,
+            positionSide: side,
+            type: 'STOP_MARKET',
+            stopPrice: slPrice.toFixed(info.pricePrecision),
+            closePosition: 'true',
+            workingType: 'MARK_PRICE'
+        });
+
         return { tp: tpPrice, sl: slPrice };
     } catch (e) { 
         return { tp: tpPrice, sl: slPrice }; 
@@ -204,7 +230,13 @@ async function priceMonitor() {
                     if (!b.hitTime) b.hitTime = Date.now();
                     if (Date.now() - b.hitTime > 30000) {
                         addBotLog(`⚠️ Treo lệnh >30s tại ${b.symbol}. Ép đóng MARKET!`, "warn");
-                        await exchange.createOrder(b.symbol, 'MARKET', b.side === 'SHORT' ? 'BUY' : 'SELL', currentQty, undefined, { positionSide: b.side });
+                        await binancePrivate('/fapi/v1/order', 'POST', {
+                            symbol: b.symbol,
+                            side: b.side === 'SHORT' ? 'BUY' : 'SELL',
+                            positionSide: b.side,
+                            type: 'MARKET',
+                            quantity: currentQty.toString()
+                        });
                         b.hitTime = null;
                     }
                 } else { 
@@ -274,7 +306,7 @@ async function priceMonitor() {
                         openPosition(b.symbol, { 
                             ...b, 
                             dcaCount: jump, 
-                            margin: b.firstMargin * Math.pow(2, jump), // Sử dụng công thức lũy tiến của Bản 2
+                            margin: b.firstMargin * Math.pow(2, jump), 
                             accumulatedLoss: accumulatedLoss,
                             firstQty: b.firstQty || b.currentQty,
                             firstPrice: b.firstPrice || b.entryPrice
@@ -294,7 +326,7 @@ async function priceMonitor() {
     setTimeout(priceMonitor, 400); 
 }
 
-// --- HÀM VÀO LỆNH ĐƯỢC ĐỒNG BỘ LUỒNG DELAY VÀ SYNC TP/SL CỦA BẢN 2 ---
+// --- HÀM VÀO LỆNH THUẦN BINANCE PRIVATE THEO BẢN 1 CŨ ---
 async function openPosition(symbol, dcaData = null) {
     if (isProcessingDCA.has(symbol)) return;
     isProcessingDCA.add(symbol); 
@@ -338,14 +370,18 @@ async function openPosition(symbol, dcaData = null) {
 
         const actualMarginUsed = (qty * currentPrice) / info.maxLeverage;
         
-        const orderPromise = exchange.createOrder(symbol, 'MARKET', side === 'SHORT' ? 'SELL' : 'BUY', qty.toFixed(info.quantityPrecision), undefined, { positionSide: side });
-        const [, order] = await Promise.all([
-            exchange.setLeverage(info.maxLeverage, symbol).catch(() => {}),
-            orderPromise
-        ]);
+        // Đặt Đòn bẩy và Lệnh Market hoàn toàn bằng BinancePrivate tránh xung đột bất đồng bộ của CCXT lúc khởi động
+        await binancePrivate('/fapi/v1/leverage', 'POST', { symbol, leverage: info.maxLeverage }).catch(() => {});
+        const order = await binancePrivate('/fapi/v1/order', 'POST', {
+            symbol,
+            side: side === 'SHORT' ? 'SELL' : 'BUY',
+            positionSide: side,
+            type: 'MARKET',
+            quantity: qty.toFixed(info.quantityPrecision)
+        });
         
         if (order) {
-            // [LOGIC BẢN 2] Chờ 1.5 giây để vị thế khớp hoàn toàn và cập nhật lên mạng lưới trước khi lấy thông tin
+            // [LOGIC BẢN 2] Chờ 1.5 giây để vị thế khớp hoàn toàn trước khi lấy thông tin
             await new Promise(r => setTimeout(r, 1500));
             const pRisk = await binancePrivate('/fapi/v2/positionRisk', 'GET', { symbol });
             const p = pRisk.find(x => x.positionSide === side && Math.abs(parseFloat(x.positionAmt)) > 0);
@@ -361,7 +397,6 @@ async function openPosition(symbol, dcaData = null) {
 
                 let tp = 0, sl = 0;
                 let firstQty = dcaData ? dcaData.firstQty : qty;
-                // Áp dụng tính toán mục tiêu gross profit nâng cao của Bản 2
                 let firstProfitUsdt = dcaData ? dcaData.firstProfitUsdt : (qty * entry * (botSettings.posTP / 100));
                 let totalLossToRecover = dcaData ? dcaData.accumulatedLoss : 0;
 
@@ -383,7 +418,7 @@ async function openPosition(symbol, dcaData = null) {
                     sl = firstE + (firstE * (botSettings.posSL * (dcaCount + 1)) / 100);
                 }
 
-                // [LOGIC BẢN 2] Sử dụng hàm syncTPSL đồng bộ chuẩn hóa để dọn dẹp và đặt lệnh mới
+                // [LOGIC BẢN 2] Đồng bộ hoá dọn dẹp lệnh cũ đặt lệnh mới an toàn
                 const sync = await syncTPSL(symbol, side, info, tp, sl);
 
                 botActivePositions.set(`${symbol}_${side}`, { 
@@ -406,7 +441,6 @@ async function openPosition(symbol, dcaData = null) {
     } catch (e) { 
         addBotLog(`❌ Lỗi vị thế ${symbol}: ${e.message}`, "error"); 
     } finally { 
-        // Thay đổi nhỏ giống bản 2 để giữ an toàn trạng thái luồng xử lý
         setTimeout(() => isProcessingDCA.delete(symbol), 2000); 
     }
 }
