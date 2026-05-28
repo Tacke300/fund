@@ -18,10 +18,8 @@ const CONFIG_PATH = path.join(__dirname, 'config.json');
 let currentApiKey = "";
 let currentSecretKey = "";
 
-// Biến cờ hiệu chặn spam log lỗi đồng bộ dữ liệu
 let hasLoggedSyncError = false;
 
-// Hàm tự động đọc cấu hình khi khởi động bot
 function loadConfig() {
     try {
         if (fs.existsSync(CONFIG_PATH)) {
@@ -33,7 +31,6 @@ function loadConfig() {
     } catch (e) {}
 }
 
-// Hàm lưu cấu hình dạng text thô vào config.json (Không log gì ra màn hình)
 function saveConfig(apiKey, secretKey) {
     try {
         const data = { apiKey: apiKey.trim(), secretKey: secretKey.trim() };
@@ -41,7 +38,7 @@ function saveConfig(apiKey, secretKey) {
     } catch (e) {}
 }
 
-loadConfig(); // Đọc cấu hình ngay khi chạy file
+loadConfig(); 
 
 const binanceApi = axios.create({ baseURL: 'https://fapi.binance.com', timeout: 15000 });
 
@@ -99,7 +96,6 @@ async function binancePrivate(endpoint, method = 'GET', data = {}) {
 }
 
 async function fetchExchangeData() {
-    // Nếu bot không ở trạng thái chạy, hủy luôn tiến trình đồng bộ dữ liệu
     if (!botSettings.isRunning) {
         status.isReady = false;
         return;
@@ -124,10 +120,9 @@ async function fetchExchangeData() {
         });
         status.exchangeInfo = temp;
         status.isReady = true;
-        hasLoggedSyncError = false; // Reset cờ lỗi khi kết nối thành công thành công
+        hasLoggedSyncError = false; 
         addBotLog(`🚀 Hệ thống dữ liệu thị trường đã đồng bộ và sẵn sàng.`);
     } catch (e) {
-        // Chỉ log lỗi 1 lần duy nhất, ngăn chặn spam liên tục khi mất mạng hoặc sai key
         if (!hasLoggedSyncError) {
             addBotLog(`❌ Lỗi đồng bộ dữ liệu Binance, hệ thống sẽ tự động thử lại ngầm...`, "error");
             hasLoggedSyncError = true;
@@ -223,6 +218,11 @@ async function priceMonitor() {
                 const fee = totalV * 0.0005; 
                 const netPnl = totalR - fee;
 
+                let accumulatedLoss = b.accumulatedLoss || 0;
+                if (netPnl < 0 && b.side === 'SHORT') {
+                    accumulatedLoss += Math.abs(netPnl);
+                }
+
                 botActivePositions.delete(key);
                 status.botClosedCount++; 
                 status.botPnLClosed += netPnl;
@@ -245,9 +245,21 @@ async function priceMonitor() {
                 if (netPnl < 0 && b.side === 'SHORT') {
                     const jump = b.dcaCount + 1;
                     if (jump <= botSettings.maxDCA) {
-                        openPosition(b.symbol, { ...b, dcaCount: jump, margin: b.firstMargin * (jump + 1) });
+                        openPosition(b.symbol, { 
+                            ...b, 
+                            dcaCount: jump, 
+                            margin: b.firstMargin * (jump + 1),
+                            accumulatedLoss: accumulatedLoss,
+                            firstQty: b.firstQty || b.currentQty,
+                            firstPrice: b.firstPrice || b.entryPrice
+                        });
                     } else {
-                        openPosition(b.symbol, { ...b, isFinalLong: true, margin: b.firstMargin * 10 });
+                        openPosition(b.symbol, { 
+                            ...b, 
+                            isFinalLong: true, 
+                            margin: b.firstMargin * 10,
+                            accumulatedLoss: accumulatedLoss
+                        });
                     }
                 }
             }
@@ -315,10 +327,25 @@ async function openPosition(symbol, dcaData = null) {
 
                 let tp = 0, sl = 0;
                 if (side === 'LONG') {
-                    tp = entry * 1.05;
-                    sl = entry * 0.95;
+                    tp = entry * 1.15;
+                    sl = entry * 0.85;
                 } else {
-                    tp = simpleAvgEntry * (1 - botSettings.posTP / 100);
+                    if (dcaCount === 0) {
+                        tp = simpleAvgEntry * (1 - botSettings.posTP / 100);
+                    } else {
+                        const firstQty = dcaData.firstQty || qty;
+                        const firstPrice = dcaData.firstPrice || entry;
+                        const baseTargetPnL = firstQty * firstPrice * (botSettings.posTP / 100); 
+                        const scaledTargetPnL = baseTargetPnL * (dcaCount + 1);
+                        const totalLossToRecover = dcaData.accumulatedLoss || 0;
+                        const requiredProfit = totalLossToRecover + scaledTargetPnL;
+
+                        tp = entry - (requiredProfit / qty);
+
+                        if (tp <= 0 || tp >= entry) {
+                            tp = entry * (1 - botSettings.posTP / 100);
+                        }
+                    }
                     sl = firstE + (firstE * (botSettings.posSL * (dcaCount + 1)) / 100);
                 }
 
@@ -329,7 +356,10 @@ async function openPosition(symbol, dcaData = null) {
                     firstMargin: dcaData ? dcaData.firstMargin : actualMarginUsed, currentMargin: actualMarginUsed, 
                     currentQty: qty, virtualTotalQty: qty, virtualTotalCost: qty * entry, 
                     dcaHistory: dcaHistory, isFinalLong: dcaData?.isFinalLong || false,
-                    pnl: 0, priceDev: 0, hitTime: null 
+                    pnl: 0, priceDev: 0, hitTime: null,
+                    accumulatedLoss: dcaData ? dcaData.accumulatedLoss : 0,
+                    firstQty: dcaData ? dcaData.firstQty : qty,
+                    firstPrice: dcaData ? dcaData.firstPrice : entry
                 });
                 
                 const modeStr = isDCAorLong ? (dcaData.isFinalLong ? 'LONG' : `DCA_${dcaData.dcaCount}`) : 'OPEN';
@@ -399,14 +429,12 @@ APP.post('/api/settings', async (req, res) => {
         addBotLog(`⚙️ Đã lưu cấu hình API mới.`, "success");
         
         status.isReady = false; 
-        hasLoggedSyncError = false; // Reset trạng thái lỗi khi đổi API Key
+        hasLoggedSyncError = false; 
     }
 
-    // Đón nhận trạng thái thay đổi isRunning từ HTML chuyển lên
     if (req.body.isRunning !== undefined) {
         botSettings.isRunning = req.body.isRunning;
         
-        // CHỈ ĐỒNG BỘ KHI BẤM START (isRunning === true)
         if (botSettings.isRunning && currentApiKey && currentSecretKey) {
             status.isReady = false;
             fetchExchangeData(); 
@@ -443,7 +471,6 @@ async function init() {
             return;
         }
 
-        // Bỏ việc gọi fetchExchangeData() tự động tại đây để tránh spam lỗi khi chưa bấm START.
     } catch (e) { setTimeout(init, 5000); }
 }
 
