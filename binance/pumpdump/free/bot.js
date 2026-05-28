@@ -96,16 +96,20 @@ setInterval(() => {
     }
 }, 1000);
 
-// --- HÀM XỬ LÝ RIÊNG BIỆT CHO TỪNG COIN (CÓ KHÓA AN TOÀN GIÁ + KHÔNG MANUAL) ---
+// --- HÀM XỬ LÝ RIÊNG BIỆT CHO TỪNG COIN (TỐI ƯU TỐC ĐỘ + CHECK CHẶT CHẼ) ---
 async function processSinglePositionMonitor(key, b, posRisk) {
     try {
-        const realP = posRisk.find(p => `${p.symbol}_${p.positionSide}` === key && Math.abs(parseFloat(p.positionAmt)) > 0);
+        // Lấy thông tin vị thế thực tế và GIÁ MARK thực tế từ mảng posRisk tập trung
+        const realP = posRisk.find(p => `${p.symbol}_${p.positionSide}` === key);
+        const hasPositionReal = realP && Math.abs(parseFloat(realP.positionAmt)) > 0;
         
-        if (realP) {
-            // --- VỊ THẾ ĐANG MỞ: THEO DÕI BÌNH THƯỜNG ---
+        if (hasPositionReal) {
+            // --- TRƯỜNG HỢP 1: VỊ THẾ ĐANG MỞ ---
             const currentQty = Math.abs(parseFloat(realP.positionAmt));
             const markP = parseFloat(realP.markPrice);
             
+            // Cập nhật liên tục các thông số động nhảy thời gian thực
+            b.currentPrice = markP; 
             b.pnl = parseFloat(realP.unRealizedProfit);
             b.priceDev = ((markP - b.entryPrice) / b.entryPrice) * 100;
 
@@ -125,37 +129,34 @@ async function processSinglePositionMonitor(key, b, posRisk) {
                 }
             } else { b.hitTime = null; }
         } else {
-            // --- VỊ THẾ BẰNG 0: KHÓA AN TOÀN KIỂM TRA CHẶT CHẼ ---
+            // --- TRƯỜNG HỢP 2: VỊ THẾ BẰNG 0 (ĐÃ BỊ CHỐT HOẶC CHƯA KHỚP) ---
             if (isProcessingDCA.has(b.symbol)) return;
 
-            // 1. Lấy giá hiện tại đối chiếu trước khi đưa ra quyết định
-            const ticker = await binanceApi.get(`/fapi/v1/ticker/price?symbol=${b.symbol}`).catch(() => null);
-            if (!ticker) return;
-            const currentMarkPrice = parseFloat(ticker.data.price);
+            // Lấy giá Mark cuối cùng từ hệ thống sàn cung cấp để đối chiếu vùng giá
+            if (!realP) return;
+            const lastMarkPrice = parseFloat(realP.markPrice);
 
-            // 🛡️ KHÓA AN TOÀN BẰNG GIÁ: Giá chưa tới vùng SL/TP cài đặt thì tuyệt đối KHÔNG đóng lệnh ảo
-            const priceHitTP = (b.side === 'SHORT' && currentMarkPrice <= b.tp) || (b.side === 'LONG' && currentMarkPrice >= b.tp);
-            const priceHitSL = (b.side === 'SHORT' && currentMarkPrice >= b.sl) || (b.side === 'LONG' && currentMarkPrice <= b.sl);
+            // 🛡️ KHÓA AN TOÀN BẰNG GIÁ: Giá thị trường phải lọt vào vùng SL hoặc TP thì mới xử lý tiếp
+            const priceHitTP = (b.side === 'SHORT' && lastMarkPrice <= b.tp) || (b.side === 'LONG' && lastMarkPrice >= b.tp);
+            const priceHitSL = (b.side === 'SHORT' && lastMarkPrice >= b.sl) || (b.side === 'LONG' && lastMarkPrice <= b.sl);
 
             if (!priceHitTP && !priceHitSL) {
-                return; // Thoát ngay lập tức, giữ nguyên trạng thái theo dõi
+                return; // Giá chưa chạm vùng chốt -> Vị thế ảo hoặc lag sàn, giữ nguyên không thao tác dữ liệu
             }
 
-            // 2. Chờ sàn ghi nhận dữ liệu
-            await new Promise(r => setTimeout(r, 1500));
+            // Chờ 1.2 giây để sàn Binance kết xuất đồng bộ xong trạng thái Order
+            await new Promise(r => setTimeout(r, 1200));
 
-            // 3. Quét lịch sử lệnh trên sàn - CHỈ CHẤP NHẬN LỆNH CỦA BOT ĐÃ KHỚP (FILLED)
-            const allOrders = await binancePrivate('/fapi/v1/allOrders', 'GET', { symbol: b.symbol, limit: 10 }).catch(() => []);
+            // Quét lịch sử Order xem có đúng là hệ thống chốt tự động (FILLED) không
+            const allOrders = await binancePrivate('/fapi/v1/allOrders', 'GET', { symbol: b.symbol, limit: 8 }).catch(() => []);
             const closedById = allOrders.find(o => o.positionSide === b.side && o.status === 'FILLED' && (o.type === 'STOP_MARKET' || o.type === 'TAKE_PROFIT_MARKET'));
 
-            // 🚫 BỎ HOÀN TOÀN MANUAL: Nếu không tìm thấy lệnh chốt hệ thống được FILLED thực tế -> Không làm gì cả
-            if (!closedById) {
-                return; 
-            }
+            // 🚫 KHÔNG XỬ LÝ LỆNH ẢO: Nếu lệnh chốt hệ thống không tồn tại, thoát ra kiểm tra lại vòng sau
+            if (!closedById) return; 
 
             let reasonOfClose = closedById.type === 'STOP_MARKET' ? "SL_MARKET" : "TP_MARKET";
 
-            // 4. Lấy PnL thực tế từ lịch sử khớp lệnh
+            // Lấy PnL thực tế phát sinh của giao dịch
             const trades = await binancePrivate('/fapi/v1/userTrades', 'GET', { symbol: b.symbol, limit: 10 }).catch(() => []);
             const recent = trades.filter(t => t.time > (Date.now() + timestampOffset - 60000));
             if (recent.length === 0) return;
@@ -168,7 +169,7 @@ async function processSinglePositionMonitor(key, b, posRisk) {
             avgClosePrice = totalV / recent.reduce((acc, t) => acc + parseFloat(t.qty), 0);
             const netPnl = totalR - (totalV * 0.0005);
 
-            // Dọn dẹp các lệnh chốt cũ còn sót lại
+            // Dọn sạch các lệnh Stop bảo vệ cũ còn treo
             try {
                 const openOrders = await binancePrivate('/fapi/v1/openOrders', 'GET', { symbol: b.symbol });
                 for (const o of openOrders.filter(o => o.positionSide === b.side)) {
@@ -176,7 +177,7 @@ async function processSinglePositionMonitor(key, b, posRisk) {
                 }
             } catch(e){}
 
-            // Xóa bộ nhớ vị thế cũ
+            // Giải phóng bộ nhớ cục bộ của bot
             botActivePositions.delete(key);
             status.botClosedCount++; 
             status.botPnLClosed += netPnl;
@@ -195,7 +196,7 @@ async function processSinglePositionMonitor(key, b, posRisk) {
             const logStatus = netPnl > 0 ? "success" : "error";
             addBotLog(`${logType} ${b.symbol} | ${b.side} | DCA: ${b.dcaCount}/${botSettings.maxDCA} | ClosePrice: ${avgClosePrice.toFixed(5)} | PnL: ${netPnl.toFixed(4)}$ | Type: ${reasonOfClose}`, logStatus);
 
-            // Kích hoạt chuỗi lệnh DCA khi có PnL lỗ thực tế từ lệnh SL chính thống
+            // Khởi động chu kỳ DCA kế tiếp khi xác thực lỗ thực tế
             if (netPnl < 0 && b.side === 'SHORT') {
                 const jump = b.dcaCount + 1;
                 const currentAccumulatedLoss = (b.totalLossAccumulated || 0) + Math.abs(netPnl);
@@ -237,11 +238,11 @@ async function priceMonitor() {
 
         if (!botSettings.isRunning) return setTimeout(priceMonitor, 1000);
 
+        // Lấy danh sách trạng thái gộp một lần (Tiết kiệm Rate Limit tối đa)
         const posRisk = await binancePrivate('/fapi/v2/positionRisk').catch(() => null);
         
         if (posRisk && botActivePositions.size > 0) {
             const promises = [];
-            // Bắn bất đồng bộ song song cho toàn bộ coin, tránh nghẽn chéo mạng
             for (let [key, b] of botActivePositions) {
                 promises.push(processSinglePositionMonitor(key, b, posRisk));
             }
@@ -326,7 +327,7 @@ async function openPosition(symbol, dcaData = null) {
 
                 const sync = await syncTPSL(symbol, side, info, tp, sl);
                 botActivePositions.set(`${symbol}_${side}`, { 
-                    symbol, side, entryPrice: entry, tp: sync.tp, sl: sync.sl, 
+                    symbol, side, entryPrice: entry, tp: sync.tp, sl: sync.sl, currentPrice: currentPrice,
                     dcaCount: dcaCount, leverage: info.maxLeverage, firstEntry: firstE, 
                     firstMargin: dcaData ? dcaData.firstMargin : actualMarginUsed, currentMargin: actualMarginUsed, 
                     currentQty: qty, virtualTotalQty: qty, virtualTotalCost: qty * entry, 
@@ -362,6 +363,7 @@ async function syncTPSL(symbol, side, info, tpPrice, slPrice) {
 
 const APP = express(); APP.use(express.json()); APP.use(express.static(__dirname));
 
+// Đã tích hợp đầy đủ: Entry, TP, SL, CurrentPrice (Giá hiện tại) cho Web UI hiển thị liền
 APP.get('/api/status', async (req, res) => {
     const acc = await binancePrivate('/fapi/v2/account').catch(() => null);
     const visualBlacklist = {};
@@ -377,7 +379,18 @@ APP.get('/api/status', async (req, res) => {
 
     res.json({ 
         botSettings, 
-        activePositions: Array.from(botActivePositions.values()), 
+        activePositions: Array.from(botActivePositions.values()).map(p => ({
+            symbol: p.symbol,
+            side: p.side,
+            entryPrice: p.entryPrice,
+            tp: p.tp,
+            sl: p.sl,
+            currentPrice: p.currentPrice || p.entryPrice, // Đảm bảo luôn có giá hiện tại nhảy liên tục
+            pnl: p.pnl,
+            priceDev: p.priceDev,
+            dcaCount: p.dcaCount,
+            margin: p.currentMargin
+        })), 
         status: { ...status, blackList: visualBlacklist }, 
         wallet: acc ? { 
             totalWalletBalance: parseFloat(acc.totalMarginBalance || 0).toFixed(2), 
