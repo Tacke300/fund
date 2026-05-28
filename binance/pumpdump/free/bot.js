@@ -18,6 +18,9 @@ const CONFIG_PATH = path.join(__dirname, 'config.json');
 let currentApiKey = "";
 let currentSecretKey = "";
 
+// Biến cờ hiệu chặn spam log lỗi đồng bộ dữ liệu
+let hasLoggedSyncError = false;
+
 // Hàm tự động đọc cấu hình khi khởi động bot
 function loadConfig() {
     try {
@@ -96,6 +99,12 @@ async function binancePrivate(endpoint, method = 'GET', data = {}) {
 }
 
 async function fetchExchangeData() {
+    // Nếu bot không ở trạng thái chạy, hủy luôn tiến trình đồng bộ dữ liệu
+    if (!botSettings.isRunning) {
+        status.isReady = false;
+        return;
+    }
+
     try {
         const t = await axios.get('https://fapi.binance.com/fapi/v1/time');
         timestampOffset = t.data.serverTime - Date.now();
@@ -115,9 +124,14 @@ async function fetchExchangeData() {
         });
         status.exchangeInfo = temp;
         status.isReady = true;
+        hasLoggedSyncError = false; // Reset cờ lỗi khi kết nối thành công thành công
         addBotLog(`🚀 Hệ thống dữ liệu thị trường đã đồng bộ và sẵn sàng.`);
     } catch (e) {
-        addBotLog(`❌ Lỗi đồng bộ dữ liệu Binance, thử lại sau 5 giây...`, "error");
+        // Chỉ log lỗi 1 lần duy nhất, ngăn chặn spam liên tục khi mất mạng hoặc sai key
+        if (!hasLoggedSyncError) {
+            addBotLog(`❌ Lỗi đồng bộ dữ liệu Binance, hệ thống sẽ tự động thử lại ngầm...`, "error");
+            hasLoggedSyncError = true;
+        }
         setTimeout(fetchExchangeData, 5000);
     }
 }
@@ -352,7 +366,7 @@ APP.get('/api/status', async (req, res) => {
     const visualBlacklist = {};
     const now = Date.now();
     for (const s in status.blackList) {
-        const expireTime = Number(status.blackList[s]); // Sửa lỗi ép kiểu tránh dính số NaN
+        const expireTime = Number(status.blackList[s]); 
         const remainingTime = expireTime - now;
         if (remainingTime > 0 && !isNaN(remainingTime)) {
             const m = Math.floor(remainingTime / 60000);
@@ -378,7 +392,6 @@ APP.post('/api/settings', async (req, res) => {
         currentApiKey = req.body.apiKey.trim();
         currentSecretKey = req.body.secretKey.trim();
         
-        // Gọi hàm lưu file cứng dạng text và KHÔNG sinh ra bất cứ dòng log nào
         saveConfig(currentApiKey, currentSecretKey);
 
         binanceApi.defaults.headers['X-MBX-APIKEY'] = currentApiKey;
@@ -386,13 +399,26 @@ APP.post('/api/settings', async (req, res) => {
         addBotLog(`⚙️ Đã lưu cấu hình API mới.`, "success");
         
         status.isReady = false; 
-        fetchExchangeData();
+        hasLoggedSyncError = false; // Reset trạng thái lỗi khi đổi API Key
     }
 
-    botSettings = { ...botSettings, ...req.body }; 
-    if (req.body.maxDCA !== undefined) botSettings.maxDCA = parseInt(botSettings.maxDCA);
-    if (req.body.maxPositions !== undefined) botSettings.maxPositions = parseInt(botSettings.maxPositions);
-    if (req.body.minVol !== undefined) botSettings.minVol = parseFloat(botSettings.minVol);
+    // Đón nhận trạng thái thay đổi isRunning từ HTML chuyển lên
+    if (req.body.isRunning !== undefined) {
+        botSettings.isRunning = req.body.isRunning;
+        
+        // CHỈ ĐỒNG BỘ KHI BẤM START (isRunning === true)
+        if (botSettings.isRunning && currentApiKey && currentSecretKey) {
+            status.isReady = false;
+            fetchExchangeData(); 
+        }
+    }
+
+    if (req.body.maxDCA !== undefined) botSettings.maxDCA = parseInt(req.body.maxDCA);
+    if (req.body.maxPositions !== undefined) botSettings.maxPositions = parseInt(req.body.maxPositions);
+    if (req.body.minVol !== undefined) botSettings.minVol = parseFloat(req.body.minVol);
+    if (req.body.invValue !== undefined) botSettings.invValue = req.body.invValue;
+    if (req.body.posTP !== undefined) botSettings.posTP = parseFloat(req.body.posTP);
+    if (req.body.posSL !== undefined) botSettings.posSL = parseFloat(req.body.posSL);
     
     res.json({ success: true }); 
 });
@@ -417,7 +443,7 @@ async function init() {
             return;
         }
 
-        await fetchExchangeData();
+        // Bỏ việc gọi fetchExchangeData() tự động tại đây để tránh spam lỗi khi chưa bấm START.
     } catch (e) { setTimeout(init, 5000); }
 }
 
