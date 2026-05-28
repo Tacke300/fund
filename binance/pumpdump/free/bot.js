@@ -11,7 +11,6 @@ const MAX_DCA_LEVEL = 2;
 const MARGIN_PROTECT_LIMIT = 60;    
 const MARGIN_RECOVER_LIMIT = 70;    
 
-// --- SỬA LỖI CRASH: Khởi tạo biến môi trường lên hàng đầu trước khi gọi loadConfig ---
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const CONFIG_PATH = path.join(__dirname, 'config.json');
@@ -63,7 +62,7 @@ if (currentApiKey && currentSecretKey) {
     binanceApi.defaults.headers['X-MBX-APIKEY'] = currentApiKey;
 }
 
-let botSettings = { isRunning: false, maxPositions: 3000, invValue: "0.14%", minVol: 5, posTP: 2.1, posSL: 10.0, maxDCA: MAX_DCA_LEVEL };
+let botSettings = { isRunning: false, maxPositions: 3000, invValue: "0.1%", minVol: 5, posTP: 2.1, posSL: 10.0, maxDCA: MAX_DCA_LEVEL };
 let status = { botLogs: [], candidatesList: [], blackList: {}, permanentBlacklist: {}, botClosedCount: 0, botPnLClosed: 0, exchangeInfo: null, isReady: false };
 let botActivePositions = new Map(); 
 let isProcessingDCA = new Set();
@@ -99,6 +98,7 @@ async function binancePrivate(endpoint, method = 'GET', data = {}) {
     }
 }
 
+// --- ĐÃ SỬA: Khôi phục endpoint leverageBracket về chuẩn v1 ---
 async function fetchExchangeData() {
     if (!botSettings.isRunning) {
         status.isReady = false;
@@ -109,7 +109,9 @@ async function fetchExchangeData() {
         timestampOffset = t.data.serverTime - Date.now();
         await exchange.loadMarkets();
         const info = await binanceApi.get('/fapi/v1/exchangeInfo');
-        const brk = await binancePrivate('/fapi/v2/leverageBracket');
+        
+        // SỬA TẠI ĐÂY: Trả về v1 để lấy bậc ký quỹ không bị crash lỗi 404
+        const brk = await binancePrivate('/fapi/v1/leverageBracket');
         const temp = {};
         
         info.data.symbols.forEach(s => {
@@ -127,7 +129,7 @@ async function fetchExchangeData() {
         addBotLog(`🚀 Hệ thống dữ liệu thị trường đã đồng bộ và sẵn sàng.`);
     } catch (e) {
         if (!hasLoggedSyncError) {
-            addBotLog(`❌ Lỗi đồng bộ dữ liệu Binance, hệ thống sẽ tự động thử lại ngầm...`, "error");
+            addBotLog(`❌ Lỗi đồng bộ dữ liệu Binance (${e.message}), đang thử lại...`, "error");
             hasLoggedSyncError = true;
         }
         setTimeout(fetchExchangeData, 5000);
@@ -144,7 +146,6 @@ setInterval(() => {
     }
 }, 1000);
 
-// --- SỬA LỖI ĐÓNG LUNG TUNG: Thiết kế lại Price Monitor chuẩn chỉnh logic bảo vệ ---
 async function priceMonitor() {
     if (!status.isReady || !status.exchangeInfo) return setTimeout(priceMonitor, 400);
     try {
@@ -162,7 +163,6 @@ async function priceMonitor() {
             const realP = posRisk.find(p => `${p.symbol}_${p.positionSide}` === key && Math.abs(parseFloat(p.positionAmt)) > 0);
             
             if (realP) {
-                // Vị thế vẫn đang mở trên Binance -> Chỉ cập nhật thông số hiển thị
                 b.pnl = parseFloat(realP.unRealizedProfit);
                 const markP = parseFloat(realP.markPrice);
                 b.priceDev = b.side === 'SHORT' 
@@ -173,12 +173,10 @@ async function priceMonitor() {
                 if (b.currentQty !== currentQty) { 
                     b.currentQty = currentQty; 
                 }
-                b.hitTime = null; // Reset bộ đếm thời gian treo
+                b.hitTime = null; 
             } else {
-                // VỊ THẾ ĐÃ BIẾN MẤT TRÊN BINANCE (Đã khớp TP hoặc SL thật từ sàn)
                 if (isProcessingDCA.has(b.symbol)) continue;
 
-                // Chờ 1 nhịp siêu ngắn để dữ liệu khớp lệnh đồng bộ hoàn tất
                 const trades = await binancePrivate('/fapi/v1/userTrades', 'GET', { symbol: b.symbol, limit: 5 });
                 const recent = trades.filter(t => t.time > (Date.now() + timestampOffset - 30000));
 
@@ -216,9 +214,8 @@ async function priceMonitor() {
 
                 const logType = netPnl > 0 ? "💰 [CHỐT LỜI]" : "😭 [CẮT LỖ]";
                 const logStatus = netPnl > 0 ? "success" : "error";
-                addBotLog(`${logType} ${b.symbol} | ${b.side} | DCA: ${b.dcaCount}/${botSettings.maxDCA} | ClosePrice: ${avgClosePrice > 0 ? avgClosePrice : "MARKET"} | PnL: ${netPnl.toFixed(4)}$`, logStatus);
+                addBotLog(`${logType} ${b.symbol} | ${b.side} | DCA: ${b.dcaCount}/${botSettings.maxDCA} | ClosePrice: ${avgClosePrice > 0 ? avgClosePrice.toFixed(5) : "MARKET"} | PnL: ${netPnl.toFixed(4)}$`, logStatus);
 
-                // Kích hoạt chuỗi hành động DCA nếu lệnh SHORT dính cắt lỗ
                 if (netPnl < 0 && b.side === 'SHORT') {
                     const jump = b.dcaCount + 1;
                     if (jump <= botSettings.maxDCA) {
