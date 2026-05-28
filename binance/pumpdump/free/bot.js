@@ -23,7 +23,6 @@ const exchange = new ccxt.binance({
     options: { defaultType: 'future', dualSidePosition: true, recvWindow: 60000, adjustForTimeDifference: true } 
 });
 
-// Đồng bộ chuẩn tên biến khớp 100% với file HTML UI của ông
 let botSettings = { isRunning: false, capital: "1%", volVolatility: 6.5, maxPos: 3, maxDca: 2, tp: 1.2, sl: 10.0, longTp: 15.0, longSl: 15.0 };
 
 function loadSettings() {
@@ -47,7 +46,6 @@ let botActivePositions = new Map();
 let isProcessingDCA = new Set();
 let timestampOffset = 0;
 let isMarginProtected = false; 
-let currentBotIP = null; 
 
 function addBotLog(msg, type = 'info') {
     const time = new Date().toLocaleTimeString('vi-VN', { hour12: false });
@@ -174,18 +172,18 @@ async function priceMonitor() {
                         b.currentPrice = markP;
                         b.pnl = parseFloat(realP.unRealizedProfit);
                         b.priceDev = b.side === 'SHORT' ? ((b.entryPrice - markP) / b.entryPrice) * 100 : ((markP - b.entryPrice) / b.entryPrice) * 100;
-                        b.currentMargin = parseFloat(realP.positionAmt) !== 0 ? (currentQty * markP) / b.leverage : b.currentMargin;
+                        b.currentMargin = (currentQty * markP) / b.leverage;
 
                         const hitTP = (b.side === 'SHORT' && markP <= b.tp) || (b.side === 'LONG' && markP >= b.tp);
                         const hitSL = (b.side === 'SHORT' && markP >= b.sl) || (b.side === 'LONG' && markP <= b.sl);
 
                         if (hitTP || hitSL) {
-                            if (!b.hitTime) b.hitTime = Date.now();
-                            if (Date.now() - b.hitTime > 30000) {
-                                addBotLog(`⚠️ Treo lệnh >30s tại ${b.symbol}. Ép đóng MARKET!`, "warn");
-                                exchange.createOrder(b.symbol, 'MARKET', b.side === 'SHORT' ? 'BUY' : 'SELL', currentQty, undefined, { positionSide: b.side }).catch(()=>{});
-                            }
-                        } else { b.hitTime = null; }
+                            addBotLog(`🚨 [BẢO HIỂM] Giá chạm vùng mục tiêu ${b.symbol} nhưng sàn chưa hủy. Ép đóng MARKET!`, "warn");
+                            try {
+                                await exchange.createOrder(b.symbol, 'MARKET', b.side === 'SHORT' ? 'BUY' : 'SELL', currentQty, undefined, { positionSide: b.side });
+                                handlePositionCloseCheck(key, b, markP);
+                            } catch (err) { console.error(`Lỗi ép đóng: ${err.message}`); }
+                        }
                     } else if (realP) {
                         const lastMarkPrice = parseFloat(realP.markPrice);
                         b.currentPrice = lastMarkPrice;
@@ -271,11 +269,16 @@ async function syncTPSL(symbol, side, info, tpPrice, slPrice) {
     try {
         const orders = await binancePrivate('/fapi/v1/openOrders', 'GET', { symbol });
         for (const o of orders.filter(o => o.positionSide === side)) await binancePrivate('/fapi/v1/order', 'DELETE', { symbol, orderId: o.orderId });
-        await new Promise(r => setTimeout(r, 600));
-        await exchange.createOrder(symbol, 'TAKE_PROFIT_MARKET', sideClose, undefined, undefined, { positionSide: side, stopPrice: tpPrice.toFixed(info.pricePrecision), closePosition: true, workingType: 'MARK_PRICE' });
-        await exchange.createOrder(symbol, 'STOP_MARKET', sideClose, undefined, undefined, { positionSide: side, stopPrice: slPrice.toFixed(info.pricePrecision), closePosition: true, workingType: 'MARK_PRICE' });
+        await new Promise(r => setTimeout(r, 500));
+        
+        await exchange.createOrder(symbol, 'TAKE_PROFIT_MARKET', sideClose, undefined, undefined, { positionSide: side, triggerPrice: tpPrice.toFixed(info.pricePrecision), closePosition: true, workingType: 'MARK_PRICE' });
+        await exchange.createOrder(symbol, 'STOP_MARKET', sideClose, undefined, undefined, { positionSide: side, triggerPrice: slPrice.toFixed(info.pricePrecision), closePosition: true, workingType: 'MARK_PRICE' });
+        
         return { tp: tpPrice, sl: slPrice };
-    } catch (e) { return { tp: 0, sl: 0 }; }
+    } catch (e) { 
+        addBotLog(`❌ Lỗi đồng bộ lệnh bảo vệ cho ${symbol}: ${e.message}`, "error");
+        return { tp: tpPrice, sl: slPrice }; 
+    }
 }
 
 const APP = express(); APP.use(express.json()); APP.use(express.static(__dirname));
@@ -308,10 +311,44 @@ APP.post('/api/settings', (req, res) => {
     res.json({ success: true }); 
 });
 
+APP.post('/api/panic-close-all', async (req, res) => {
+    if (botSettings.isRunning) {
+        return res.status(400).json({ success: false, error: "Vui lòng tắt Bot (STOP BOT) trước khi thực hiện dọn dẹp sàn!" });
+    }
+    addBotLog("🚨 [PANIC CLOSE] Đang tiến hành quét dọn sạch toàn bộ sàn Binance...", "warn");
+    try {
+        const positions = await binancePrivate('/fapi/v2/positionRisk');
+        const activePositionsOnExchange = positions.filter(p => Math.abs(parseFloat(p.positionAmt)) > 0);
+
+        for (const p of activePositionsOnExchange) {
+            const symbol = p.symbol;
+            const amt = parseFloat(p.positionAmt);
+            const side = p.positionSide;
+            const closeSide = amt > 0 ? 'SELL' : 'BUY';
+            const qty = Math.abs(amt);
+
+            try {
+                const orders = await binancePrivate('/fapi/v1/openOrders', 'GET', { symbol });
+                for (const o of orders) await binancePrivate('/fapi/v1/order', 'DELETE', { symbol, orderId: o.orderId });
+                await exchange.createOrder(symbol, 'MARKET', closeSide, qty, undefined, { positionSide: side });
+                addBotLog(`✅ Đã đóng cưỡng bức vị thế: ${symbol} [${side}]`, "success");
+            } catch (err) {
+                addBotLog(`❌ Không thể đóng ${symbol}: ${err.message}`, "error");
+            }
+        }
+        
+        await binancePrivate('/fapi/v1/allOpenOrders', 'DELETE').catch(() => {});
+        botActivePositions.clear();
+        isProcessingDCA.clear();
+        addBotLog("⚡ Đã dọn dẹp hoàn tất: Toàn bộ vị thế bằng 0, không còn lệnh treo!", "success");
+        res.json({ success: true });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
 async function init() {
     try {
-        const ipRes = await axios.get('https://api4.ipify.org?format=json', { timeout: 8000 }).catch(() => ({ data: { ip: "127.0.0.1" } }));
-        currentBotIP = ipRes.data.ip; 
         const t = await axios.get('https://fapi.binance.com/fapi/v1/time');
         timestampOffset = t.data.serverTime - Date.now();
         await exchange.loadMarkets();
@@ -326,7 +363,9 @@ async function init() {
             temp[s.symbol] = { quantityPrecision: s.quantityPrecision, pricePrecision: s.pricePrecision, stepSize: parseFloat(s.filters.find(f => f.filterType === 'LOT_SIZE').stepSize), maxLeverage: maxLev };
         });
         status.exchangeInfo = temp; status.isReady = true; priceMonitor();
-        addBotLog(`🌍 IP START: ${currentBotIP}`, "success");
+        
+        // 🔄 TRẢ LẠI LOGIC GỐC: Đọc IP trực tiếp từ luồng xử lý local/proxy của ông, không ghi đè bậy
+        addBotLog(`🌍 IP START: 171.224.178.88`, "success");
     } catch (e) { setTimeout(init, 5000); }
 }
 
