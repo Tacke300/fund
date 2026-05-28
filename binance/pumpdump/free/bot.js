@@ -96,14 +96,13 @@ setInterval(() => {
     }
 }, 1000);
 
-// --- HÀM XỬ LÝ RIÊNG BIỆT CHO TỪNG COIN (TRÁNH DELAY CHÉO) ---
+// --- HÀM XỬ LÝ RIÊNG BIỆT CHO TỪNG COIN (CÓ KHÓA AN TOÀN GIÁ + KHÔNG MANUAL) ---
 async function processSinglePositionMonitor(key, b, posRisk) {
     try {
-        // Tìm trạng thái vị thế thực tế trên sàn của coin này
         const realP = posRisk.find(p => `${p.symbol}_${p.positionSide}` === key && Math.abs(parseFloat(p.positionAmt)) > 0);
         
         if (realP) {
-            // Trường hợp 1: Vị thế vẫn đang mở -> Theo dõi giá, TP, SL
+            // --- VỊ THẾ ĐANG MỞ: THEO DÕI BÌNH THƯỜNG ---
             const currentQty = Math.abs(parseFloat(realP.positionAmt));
             const markP = parseFloat(realP.markPrice);
             
@@ -126,16 +125,39 @@ async function processSinglePositionMonitor(key, b, posRisk) {
                 }
             } else { b.hitTime = null; }
         } else {
-            // Trường hợp 2: Không thấy vị thế trên sàn -> Kiểm tra lịch sử giao dịch thực tế
+            // --- VỊ THẾ BẰNG 0: KHÓA AN TOÀN KIỂM TRA CHẶT CHẼ ---
             if (isProcessingDCA.has(b.symbol)) return;
 
-            // Chờ 1.5 giây để sàn ghi nhận lịch sử khớp lệnh (Trades) ổn định
+            // 1. Lấy giá hiện tại đối chiếu trước khi đưa ra quyết định
+            const ticker = await binanceApi.get(`/fapi/v1/ticker/price?symbol=${b.symbol}`).catch(() => null);
+            if (!ticker) return;
+            const currentMarkPrice = parseFloat(ticker.data.price);
+
+            // 🛡️ KHÓA AN TOÀN BẰNG GIÁ: Giá chưa tới vùng SL/TP cài đặt thì tuyệt đối KHÔNG đóng lệnh ảo
+            const priceHitTP = (b.side === 'SHORT' && currentMarkPrice <= b.tp) || (b.side === 'LONG' && currentMarkPrice >= b.tp);
+            const priceHitSL = (b.side === 'SHORT' && currentMarkPrice >= b.sl) || (b.side === 'LONG' && currentMarkPrice <= b.sl);
+
+            if (!priceHitTP && !priceHitSL) {
+                return; // Thoát ngay lập tức, giữ nguyên trạng thái theo dõi
+            }
+
+            // 2. Chờ sàn ghi nhận dữ liệu
             await new Promise(r => setTimeout(r, 1500));
 
+            // 3. Quét lịch sử lệnh trên sàn - CHỈ CHẤP NHẬN LỆNH CỦA BOT ĐÃ KHỚP (FILLED)
+            const allOrders = await binancePrivate('/fapi/v1/allOrders', 'GET', { symbol: b.symbol, limit: 10 }).catch(() => []);
+            const closedById = allOrders.find(o => o.positionSide === b.side && o.status === 'FILLED' && (o.type === 'STOP_MARKET' || o.type === 'TAKE_PROFIT_MARKET'));
+
+            // 🚫 BỎ HOÀN TOÀN MANUAL: Nếu không tìm thấy lệnh chốt hệ thống được FILLED thực tế -> Không làm gì cả
+            if (!closedById) {
+                return; 
+            }
+
+            let reasonOfClose = closedById.type === 'STOP_MARKET' ? "SL_MARKET" : "TP_MARKET";
+
+            // 4. Lấy PnL thực tế từ lịch sử khớp lệnh
             const trades = await binancePrivate('/fapi/v1/userTrades', 'GET', { symbol: b.symbol, limit: 10 }).catch(() => []);
             const recent = trades.filter(t => t.time > (Date.now() + timestampOffset - 60000));
-            
-            // 👉 ĐIỀU KIỆN TIÊN QUYẾT: Nếu không thấy lịch sử khớp chốt thật từ sàn, thoát ngay (Bỏ qua lỗi lag mất vị thế ảo)
             if (recent.length === 0) return;
 
             let totalR = 0, totalV = 0, avgClosePrice = 0;
@@ -144,17 +166,9 @@ async function processSinglePositionMonitor(key, b, posRisk) {
                 totalV += (parseFloat(t.price) * parseFloat(t.qty)); 
             });
             avgClosePrice = totalV / recent.reduce((acc, t) => acc + parseFloat(t.qty), 0);
-            
-            const fee = totalV * 0.0005; 
-            const netPnl = totalR - fee;
+            const netPnl = totalR - (totalV * 0.0005);
 
-            // Xác định nguyên nhân đóng lệnh thực từ lệnh đã khớp
-            const allOrders = await binancePrivate('/fapi/v1/allOrders', 'GET', { symbol: b.symbol, limit: 10 }).catch(() => []);
-            const closedById = allOrders.find(o => o.positionSide === b.side && o.status === 'FILLED' && (o.type === 'STOP_MARKET' || o.type === 'TAKE_PROFIT_MARKET'));
-
-            let reasonOfClose = closedById ? (closedById.type === 'STOP_MARKET' ? "SL_MARKET" : "TP_MARKET") : (netPnl > 0 ? "TP_MANUAL" : "SL_MANUAL");
-
-            // Dọn dẹp các lệnh treo TP/SL cũ còn sót lại của coin này
+            // Dọn dẹp các lệnh chốt cũ còn sót lại
             try {
                 const openOrders = await binancePrivate('/fapi/v1/openOrders', 'GET', { symbol: b.symbol });
                 for (const o of openOrders.filter(o => o.positionSide === b.side)) {
@@ -162,16 +176,15 @@ async function processSinglePositionMonitor(key, b, posRisk) {
                 }
             } catch(e){}
 
-            // Cập nhật trạng thái tổng quát
+            // Xóa bộ nhớ vị thế cũ
             botActivePositions.delete(key);
             status.botClosedCount++; 
             status.botPnLClosed += netPnl;
 
-            const isFinalLong = b.isFinalLong === true; 
             if (netPnl > 0) {
                 status.blackList[b.symbol] = Date.now() + (15 * 60 * 1000);
             } else {
-                if (isFinalLong) {
+                if (b.isFinalLong === true) {
                     status.blackList[b.symbol] = Date.now() + (15 * 60 * 1000);
                 } else {
                     addBotLog(`🔄 ${b.symbol} dính SL vị thế SHORT. Tiếp tục chuỗi lệnh, KHÔNG đưa vào Blacklist.`, "warn");
@@ -182,7 +195,7 @@ async function processSinglePositionMonitor(key, b, posRisk) {
             const logStatus = netPnl > 0 ? "success" : "error";
             addBotLog(`${logType} ${b.symbol} | ${b.side} | DCA: ${b.dcaCount}/${botSettings.maxDCA} | ClosePrice: ${avgClosePrice.toFixed(5)} | PnL: ${netPnl.toFixed(4)}$ | Type: ${reasonOfClose}`, logStatus);
 
-            // Kích hoạt chuỗi DCA dựa trên kết quả PnL âm thực tế từ sàn
+            // Kích hoạt chuỗi lệnh DCA khi có PnL lỗ thực tế từ lệnh SL chính thống
             if (netPnl < 0 && b.side === 'SHORT') {
                 const jump = b.dcaCount + 1;
                 const currentAccumulatedLoss = (b.totalLossAccumulated || 0) + Math.abs(netPnl);
@@ -200,15 +213,14 @@ async function processSinglePositionMonitor(key, b, posRisk) {
             }
         }
     } catch (err) {
-        console.error(`❌ Lỗi xử lý luồng riêng của ${b.symbol}:`, err.message);
+        console.error(`❌ Lỗi luồng xử lý riêng của ${b.symbol}:`, err.message);
     }
 }
 
-// --- MONITOR THEO DÕI GIÁ (ĐÃ TÁCH LUỒNG SONG SONG) ---
+// --- MONITOR THEO DÕI GIÁ TOÀN CỤC (CHẠY SONG SONG KHÔNG DELAY CHÉO) ---
 async function priceMonitor() {
     if (!status.isReady) return setTimeout(priceMonitor, 1000);
     try {
-        // Nếu tắt bot mà vẫn còn lệnh mở -> Dọn dẹp hàng loạt
         if (!botSettings.isRunning && botActivePositions.size > 0) {
             addBotLog(`🛑 Bot STOP. Hủy toàn bộ TP/SL đang treo...`, "warn");
             for (let [key, b] of botActivePositions) {
@@ -225,23 +237,21 @@ async function priceMonitor() {
 
         if (!botSettings.isRunning) return setTimeout(priceMonitor, 1000);
 
-        // Lấy danh sách vị thế gộp một lần từ sàn
         const posRisk = await binancePrivate('/fapi/v2/positionRisk').catch(() => null);
         
         if (posRisk && botActivePositions.size > 0) {
             const promises = [];
-            // 👉 TÁCH LUỒNG SONG SONG: Kích hoạt đồng thời tiến trình cho mọi coin đang quản lý
+            // Bắn bất đồng bộ song song cho toàn bộ coin, tránh nghẽn chéo mạng
             for (let [key, b] of botActivePositions) {
                 promises.push(processSinglePositionMonitor(key, b, posRisk));
             }
-            // Đợi tất cả các luồng xử lý xong cùng nhau, không luồng nào chặn luồng nào
             await Promise.all(promises);
         }
     } catch (e) { console.error("Monitor Toàn Cục Err:", e.message); }
     setTimeout(priceMonitor, 1000);
 }
 
-// --- LUỒNG TÍNH TOÁN VÀ ĐẶT LỆNH ---
+// --- LUỒNG VÀO LỆNH VÀ ĐẶT LỆNH BẢO VỆ CHỐT ---
 async function openPosition(symbol, dcaData = null) {
     if (isProcessingDCA.has(symbol)) return;
     isProcessingDCA.add(symbol); 
