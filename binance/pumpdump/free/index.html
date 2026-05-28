@@ -21,7 +21,6 @@
 </head>
 <body class="p-2 space-y-3 max-w-2xl mx-auto">
 
-    <!-- 1. LOGO ĐẦU TRANG -->
     <div class="logo-container my-1 select-none">
         <h1 class="text-2xl font-black tracking-widest text-red-500 font-serif drop-shadow-[0_2px_10px_rgba(239,68,68,0.4)]">
             🏴‍☠️ MONCEY D. LUFFY
@@ -34,31 +33,66 @@
         </p>
     </div>
 
-    <!-- 2. KHU VỰC ĐIỀU KHIỂN & CẤU HÌNH BIẾN ĐỔI GIAO DIỆN -->
     <div class="card space-y-3">
-        <!-- Khung nhập API (Sẽ ẩn hoàn toàn khi Bot đang chạy) -->
-        <div id="config-area" class="grid grid-cols-2 gap-2">
-            <div>
-                <p class="text-[9px] text-zinc-500 uppercase mb-1">Binance API Key</p>
-                <input id="apiKey" type="password" placeholder="Nhập API Key...">
+        <div id="config-area" class="space-y-2">
+            <div class="grid grid-cols-2 gap-2">
+                <div>
+                    <p class="text-[9px] text-zinc-500 uppercase mb-1">Vốn (Ví dụ: 100$ hoặc 5%)</p>
+                    <input id="capital" type="text" placeholder="Nhập số vốn ($ hoặc %)...">
+                </div>
+                <div>
+                    <p class="text-[9px] text-zinc-500 uppercase mb-1">Vol biến động</p>
+                    <input id="volVolatility" type="number" step="any" placeholder="Nhập vol biến động...">
+                </div>
             </div>
-            <div>
-                <p class="text-[9px] text-zinc-500 uppercase mb-1">Binance Secret Key</p>
-                <input id="secretKey" type="password" placeholder="Nhập Secret Key...">
+
+            <div class="grid grid-cols-2 gap-2">
+                <div>
+                    <p class="text-[9px] text-zinc-500 uppercase mb-1">Margin (Đòn bẩy)</p>
+                    <input id="margin" type="number" placeholder="Ví dụ: 10, 20...">
+                </div>
+                <div>
+                    <p class="text-[9px] text-zinc-500 uppercase mb-1">Max Position (Vị thế tối đa)</p>
+                    <input id="maxPos" type="number" placeholder="Số vị thế tối đa...">
+                </div>
+            </div>
+
+            <div class="grid grid-cols-2 gap-2">
+                <div>
+                    <p class="text-[9px] text-zinc-500 uppercase mb-1">Take Profit (TP %)</p>
+                    <input id="tp" type="number" step="any" placeholder="Mục tiêu chốt lời...">
+                </div>
+                <div>
+                    <p class="text-[9px] text-zinc-500 uppercase mb-1">Stop Loss (SL %)</p>
+                    <input id="sl" type="number" step="any" placeholder="Mức dừng lỗ...">
+                </div>
+            </div>
+
+            <div class="grid grid-cols-3 gap-2">
+                <div>
+                    <p class="text-[9px] text-zinc-500 uppercase mb-1">Long TP (%)</p>
+                    <input id="longTp" type="number" step="any" placeholder="TP riêng Long">
+                </div>
+                <div>
+                    <p class="text-[9px] text-zinc-500 uppercase mb-1">Long SL (%)</p>
+                    <input id="longSl" type="number" step="any" placeholder="SL riêng Long">
+                </div>
+                <div>
+                    <p class="text-[9px] text-zinc-500 uppercase mb-1">Số lần Max DCA</p>
+                    <input id="maxDca" type="number" placeholder="Số lần gồng...">
+                </div>
             </div>
         </div>
 
-        <!-- Hàng nút bấm thông minh -->
         <div id="action-area" class="grid grid-cols-2 gap-2">
             <button id="saveBtn" onclick="justSave()" class="py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-bold rounded border border-zinc-700 uppercase text-xs transition-all tracking-wider">
-                Chỉ Lưu Key
+                Chỉ Lưu Cấu Hình
             </button>
             <button id="startBtn" onclick="startBot()" class="py-2 bg-green-600 hover:bg-green-700 text-white font-black rounded border border-green-500 uppercase text-xs transition-all tracking-wider shadow-lg shadow-green-950/50">
                 START BOT
             </button>
         </div>
 
-        <!-- Nút STOP TO ĐÙNG (Mặc định ẩn, chỉ hiện khi Bot đang chạy) -->
         <div id="stop-area" class="hidden">
             <button onclick="stopBot()" class="w-full py-4 bg-red-600 hover:bg-red-700 text-white text-base font-black rounded border-2 border-red-400 uppercase tracking-widest transition-all shadow-xl shadow-red-950/80 animate-pulse">
                 🛑 STOP BOT
@@ -66,7 +100,6 @@
         </div>
     </div>
 
-    <!-- 3. TÀI KHOẢN & THỐNG KÊ -->
     <div class="card grid grid-cols-2 gap-4">
         <div class="space-y-1">
             <p class="text-[9px] text-zinc-500 uppercase">Tài khoản</p>
@@ -82,15 +115,12 @@
         </div>
     </div>
 
-    <!-- 4. BLACKLIST ĐẾM NGƯỢC -->
     <div class="card flex flex-wrap gap-2 min-h-[35px] items-center" id="blacklist-display">
         <span class="text-zinc-600 text-[10px] uppercase">Không có token bị blacklist</span>
     </div>
 
-    <!-- 5. VỊ THẾ ĐANG MỞ -->
     <div id="pos-list" class="space-y-2"></div>
 
-    <!-- 6. KÈO TIỀM NĂNG -->
     <div class="card">
         <table class="w-full text-left text-[11px]">
             <tr class="text-zinc-500 border-b border-zinc-800">
@@ -100,7 +130,6 @@
         </table>
     </div>
 
-    <!-- 7. LOGS -->
     <div id="logs" class="card h-[130px] overflow-y-auto text-[10px] text-zinc-400 space-y-1 font-mono"></div>
 
     <script>
@@ -119,6 +148,21 @@
                 actionArea.classList.remove('hidden');
                 stopArea.classList.add('hidden');
             }
+        }
+
+        // Đọc toàn bộ dữ liệu từ form nhập liệu để đóng gói gửi đi
+        function getConfigData() {
+            return {
+                capital: document.getElementById('capital').value.trim(),
+                volVolatility: parseFloat(document.getElementById('volVolatility').value) || 0,
+                margin: parseInt(document.getElementById('margin').value) || 0,
+                maxPos: parseInt(document.getElementById('maxPos').value) || 0,
+                tp: parseFloat(document.getElementById('tp').value) || 0,
+                sl: parseFloat(document.getElementById('sl').value) || 0,
+                longTp: parseFloat(document.getElementById('longTp').value) || 0,
+                longSl: parseFloat(document.getElementById('longSl').value) || 0,
+                maxDca: parseInt(document.getElementById('maxDca').value) || 0
+            };
         }
 
         async function sync() {
@@ -187,39 +231,53 @@
             }
         }
 
-        // ĐỒNG BỘ KEY TỪ SERVER VỀ HTML (Bất kỳ máy nào mở lên cũng tự lấy được key đã lưu trên server)
+        // ĐỒNG BỘ CẤU HÌNH TỪ SERVER VỀ HTML (Khi load trang tự điền dữ liệu cũ)
         async function loadKeysFromServer() {
             try {
                 const r = await fetch('/api/status'); const d = await r.json();
                 if (d.botSettings) {
-                    if (d.botSettings.apiKey) document.getElementById('apiKey').value = d.botSettings.apiKey;
-                    if (d.botSettings.secretKey) document.getElementById('secretKey').value = d.botSettings.secretKey;
+                    if (d.botSettings.capital !== undefined) document.getElementById('capital').value = d.botSettings.capital;
+                    if (d.botSettings.volVolatility !== undefined) document.getElementById('volVolatility').value = d.botSettings.volVolatility;
+                    if (d.botSettings.margin !== undefined) document.getElementById('margin').value = d.botSettings.margin;
+                    if (d.botSettings.maxPos !== undefined) document.getElementById('maxPos').value = d.botSettings.maxPos;
+                    if (d.botSettings.tp !== undefined) document.getElementById('tp').value = d.botSettings.tp;
+                    if (d.botSettings.sl !== undefined) document.getElementById('sl').value = d.botSettings.sl;
+                    if (d.botSettings.longTp !== undefined) document.getElementById('longTp').value = d.botSettings.longTp;
+                    if (d.botSettings.longSl !== undefined) document.getElementById('longSl').value = d.botSettings.longSl;
+                    if (d.botSettings.maxDca !== undefined) document.getElementById('maxDca').value = d.botSettings.maxDca;
+                    
                     updateUIState(d.botSettings.isRunning);
                 }
             } catch (e) {}
         }
 
-        // CHỨC NĂNG 1: CHỈ LƯU KEY LÊN SERVER
+        // CHỨC NĂNG 1: CHỈ LƯU CẤU HÌNH LÊN SERVER
         async function justSave() {
-            const apiKey = document.getElementById('apiKey').value.trim();
-            const secretKey = document.getElementById('secretKey').value.trim();
-            if (!apiKey || !secretKey) { return alert("Vui lòng nhập đủ Key trước khi lưu!"); }
+            const config = getConfigData();
+            if (!config.capital) { return alert("Vui lòng nhập thông số vốn trước khi lưu!"); }
             
             try {
-                const res = await fetch('/api/settings', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ apiKey, secretKey }) });
+                const res = await fetch('/api/settings', { 
+                    method: 'POST', 
+                    headers: {'Content-Type': 'application/json'}, 
+                    body: JSON.stringify(config) 
+                });
                 const data = await res.json();
-                if(data.success) alert("Đã lưu API Key vào hệ thống Server thành công!");
+                if(data.success) alert("Đã lưu cấu hình vào hệ thống Server thành công!");
             } catch(e) { alert("Lỗi kết nối server!"); }
         }
 
         // CHỨC NĂNG 2: BẤM START BOT
         async function startBot() {
-            const apiKey = document.getElementById('apiKey').value.trim();
-            const secretKey = document.getElementById('secretKey').value.trim();
-            if (!apiKey || !secretKey) { return alert("Thiếu cấu hình API Key và Secret Key để chạy Bot!"); }
+            const config = getConfigData();
+            if (!config.capital) { return alert("Thiếu cấu hình thông số Vốn để chạy Bot!"); }
 
             try {
-                const res = await fetch('/api/settings', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ apiKey, secretKey, isRunning: true }) });
+                const res = await fetch('/api/settings', { 
+                    method: 'POST', 
+                    headers: {'Content-Type': 'application/json'}, 
+                    body: JSON.stringify({ ...config, isRunning: true }) 
+                });
                 const data = await res.json();
                 if(data.success) {
                     updateUIState(true);
@@ -240,7 +298,7 @@
 
         setInterval(sync, 1000);
         window.onload = () => {
-            loadKeysFromServer(); // Gọi Server lấy Key đổ ra Form khi tải trang
+            loadKeysFromServer(); // Gọi Server lấy cấu hình đổ ra Form khi tải trang
             setTimeout(getRealBotIP, 1200);
         }
     </script>
