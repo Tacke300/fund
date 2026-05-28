@@ -12,8 +12,6 @@
         input { background: #000; border: 1px solid #333; color: #fff; padding: 6px; text-align: left; padding-left: 8px; border-radius: 3px; width: 100%; outline: none; font-size: 11px; }
         input:focus { border-color: #ef4444; }
         .bl-tag { background: rgba(239, 68, 68, 0.1); border: 1px solid #ef4444; padding: 2px 5px; border-radius: 3px; color: #ef4444; font-size: 10px; display: flex; gap: 5px; align-items: center; }
-        
-        /* Chữ nghệ thuật đầu trang */
         .logo-container { text-align: center; background: linear-gradient(180deg, #1c1917 0%, #000 100%); border: 1px solid #292524; padding: 15px 10px; border-radius: 6px; position: relative; overflow: hidden; }
         .logo-container::before { content: ''; position: absolute; top: 0; left: 0; width: 100%; height: 2px; background: linear-gradient(90deg, transparent, #ef4444, transparent); animation: laser 3s linear infinite; }
         @keyframes laser { 0% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }
@@ -115,6 +113,7 @@
         <span class="text-zinc-600 text-[10px] uppercase">Không có token bị blacklist</span>
     </div>
 
+    <!-- VÙNG HIỂN THỊ VỊ THẾ CHI TIẾT THEO YÊU CẦU -->
     <div id="pos-list" class="space-y-2"></div>
 
     <div class="card">
@@ -129,7 +128,6 @@
     <div id="logs" class="card h-[130px] overflow-y-auto text-[10px] text-zinc-400 space-y-1 font-mono"></div>
 
     <script>
-        // Hàm thay đổi trạng thái UI dựa trên biến trạng thái hệ thống
         function updateUIState(isRunning) {
             const configArea = document.getElementById('config-area');
             const actionArea = document.getElementById('action-area');
@@ -146,7 +144,6 @@
             }
         }
 
-        // Đọc toàn bộ dữ liệu từ form nhập liệu để đóng gói gửi đi
         function getConfigData() {
             return {
                 capital: document.getElementById('capital').value.trim(),
@@ -163,8 +160,6 @@
         async function sync() {
             try {
                 const r = await fetch('/api/status'); const d = await r.json();
-                
-                // Đồng bộ trạng thái hiển thị giao diện từ dữ liệu thực tế của Server
                 updateUIState(d.botSettings.isRunning);
 
                 document.getElementById('totalWallet').innerText = d.wallet.totalWalletBalance;
@@ -180,7 +175,7 @@
                 if (entries.length === 0) {
                     document.getElementById('blacklist-display').innerHTML = '<span class="text-zinc-600 text-[10px] uppercase">Không có token bị blacklist</span>';
                 } else {
-                    document.getElementById('blacklist-display').innerHTML = entries.map(([s, secondsLeft]) => `
+                    document.getElementById('blacklist-display').innerHTML = entries.map(([s]) => `
                         <span class="bl-tag">🏴‍☠️ ${s.replace('USDT','')}</span>`
                     ).join('');
                 }
@@ -193,19 +188,38 @@
                         <td align="right" class="${parseFloat(c.c15)>=0?'up':'down'}">${c.c15}%</td>
                     </tr>`).join('');
 
-                document.getElementById('pos-list').innerHTML = d.activePositions.map(p => `
-                    <div class="card border-l-2 border-red-500 bg-zinc-950 p-2">
-                        <div class="flex justify-between items-center">
+                // UPDATE KHU VỰC VỊ THẾ ĐANG MỞ HIỂN THỊ ĐẦY ĐỦ MARGIN, ENTRY, TP, SL, GIÁ HIỆN TẠI
+                document.getElementById('pos-list').innerHTML = d.activePositions.map(p => {
+                    const sideColor = p.side === 'LONG' ? 'border-green-500' : 'border-red-500';
+                    const sideTxtColor = p.side === 'LONG' ? 'text-green-400' : 'text-red-400';
+                    return `
+                    <div class="card border-l-2 ${sideColor} bg-zinc-950 p-2">
+                        <div class="flex justify-between items-center mb-1">
                             <div>
-                                <div class="font-bold text-white uppercase">${p.symbol} <span class="text-[10px] text-zinc-600">x${p.leverage}</span></div>
-                                <div class="text-[9px] text-zinc-500">Entry: ${p.entryPrice} | TP: ${p.tp}</div>
+                                <span class="font-bold text-white text-sm uppercase">${p.symbol}</span>
+                                <span class="text-[10px] ${sideTxtColor} font-bold ml-1">${p.side}</span>
+                                <span class="text-[10px] text-zinc-500 ml-1">x${p.leverage}</span>
                             </div>
                             <div class="text-right">
-                                <div class="${p.pnl>=0?'up':'down'} font-black text-sm">${p.pnl.toFixed(2)}$</div>
-                                <div class="text-[9px] text-zinc-600">${p.priceDev.toFixed(2)}% | DCA: ${p.dcaCount}</div>
+                                <span class="text-zinc-400 font-bold">Margin:</span>
+                                <span class="text-yellow-500 font-bold">${(p.currentMargin || p.firstMargin).toFixed(2)}$</span>
                             </div>
                         </div>
-                    </div>`).join('');
+                        <div class="grid grid-cols-2 gap-1 text-[11px] text-zinc-400 border-t border-zinc-900 pt-1">
+                            <div>Entry: <span class="text-zinc-200">${p.entryPrice}</span></div>
+                            <div class="text-right">Giá Now: <span class="text-blue-400 font-bold">${p.currentPrice}</span></div>
+                            <div>TP: <span class="text-green-400">${p.tp.toFixed(5)}</span></div>
+                            <div class="text-right">SL: <span class="text-red-400">${p.sl.toFixed(5)}</span></div>
+                        </div>
+                        <div class="flex justify-between items-center mt-1 border-t border-zinc-900 pt-1">
+                            <span class="text-[10px] text-zinc-500">DCA: <b class="text-zinc-300">${p.dcaCount}</b></span>
+                            <div class="text-right">
+                                <b class="${p.pnl>=0?'up':'down'} text-sm">${p.pnl.toFixed(2)}$</b>
+                                <span class="text-[10px] text-zinc-500 ml-1">(${p.priceDev.toFixed(2)}%)</span>
+                            </div>
+                        </div>
+                    </div>`;
+                }).join('');
 
                 document.getElementById('logs').innerHTML = d.status.botLogs.map(l => `<div>[${l.time}] ${l.msg}</div>`).join('');
             } catch (e) {}
@@ -216,17 +230,13 @@
                 const r = await fetch('/api/status'); const d = await r.json();
                 const ipLog = d.status.botLogs.find(l => l.msg.includes("🌍 IP START:"));
                 if (ipLog) {
-                    const extractedIP = ipLog.msg.replace("🌍 IP START:", "").trim();
-                    document.getElementById('bot-ip').innerText = `IP: ${extractedIP}`;
+                    document.getElementById('bot-ip').innerText = `IP: ${ipLog.msg.replace("🌍 IP START:", "").trim()}`;
                 } else {
                     document.getElementById('bot-ip').innerText = `IP: 127.0.0.1 (Local)`;
                 }
-            } catch (e) {
-                document.getElementById('bot-ip').innerText = `IP: Lỗi kết nối`;
-            }
+            } catch (e) { document.getElementById('bot-ip').innerText = `IP: Lỗi kết nối`; }
         }
 
-        // ĐỒNG BỘ CẤU HÌNH TỪ SERVER VỀ HTML (Khi load trang tự điền dữ liệu cũ)
         async function loadKeysFromServer() {
             try {
                 const r = await fetch('/api/status'); const d = await r.json();
@@ -239,60 +249,43 @@
                     if (d.botSettings.sl !== undefined) document.getElementById('sl').value = d.botSettings.sl;
                     if (d.botSettings.longTp !== undefined) document.getElementById('longTp').value = d.botSettings.longTp;
                     if (d.botSettings.longSl !== undefined) document.getElementById('longSl').value = d.botSettings.longSl;
-                    
                     updateUIState(d.botSettings.isRunning);
                 }
             } catch (e) {}
         }
 
-        // CHỨC NĂNG 1: CHỈ LƯU CẤU HÌNH LÊN SERVER
         async function justSave() {
             const config = getConfigData();
-            if (!config.capital) { return alert("Vui lòng nhập thông số vốn trước khi lưu!"); }
-            
+            if (!config.capital) return alert("Vui lòng nhập thông số vốn trước khi lưu!");
             try {
-                const res = await fetch('/api/settings', { 
-                    method: 'POST', 
-                    headers: {'Content-Type': 'application/json'}, 
-                    body: JSON.stringify(config) 
-                });
+                const res = await fetch('/api/settings', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(config) });
                 const data = await res.json();
-                if(data.success) alert("Đã lưu cấu hình vào hệ thống Server thành công!");
+                if(data.success) alert("Đã lưu cấu hình thành công!");
             } catch(e) { alert("Lỗi kết nối server!"); }
         }
 
-        // CHỨC NĂNG 2: BẤM START BOT
         async function startBot() {
             const config = getConfigData();
-            if (!config.capital) { return alert("Thiếu cấu hình thông số Vốn để chạy Bot!"); }
-
+            if (!config.capital) return alert("Thiếu cấu hình thông số Vốn để chạy Bot!");
             try {
-                const res = await fetch('/api/settings', { 
-                    method: 'POST', 
-                    headers: {'Content-Type': 'application/json'}, 
-                    body: JSON.stringify({ ...config, isRunning: true }) 
-                });
+                const res = await fetch('/api/settings', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ ...config, isRunning: true }) });
                 const data = await res.json();
-                if(data.success) {
-                    updateUIState(true);
-                }
+                if(data.success) updateUIState(true);
             } catch(e) { alert("Lỗi kết nối server!"); }
         }
 
-        // CHỨC NĂNG 3: BẤM STOP BOT
         async function stopBot() {
             try {
                 const res = await fetch('/api/settings', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ isRunning: false }) });
                 const data = await res.json();
-                if(data.success) {
-                    updateUIState(false);
-                }
+                if(data.success) updateUIState(false);
             } catch(e) { alert("Lỗi kết nối server!"); }
         }
 
-        setInterval(sync, 1000);
+        // ĐẨY TỐC ĐỘ REFRESH LÊN 400MS ĐỂ GIÁ VÀ PNL NHẢY LIÊN TỤC KHÔNG TRỄ
+        setInterval(sync, 400);
         window.onload = () => {
-            loadKeysFromServer(); // Gọi Server lấy cấu hình đổ ra Form khi tải trang
+            loadKeysFromServer();
             setTimeout(getRealBotIP, 1200);
         }
     </script>
