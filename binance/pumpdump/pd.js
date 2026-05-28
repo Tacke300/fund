@@ -7,23 +7,17 @@ import path from 'path';
 import { API_KEY, SECRET_KEY } from './config.js';
 import ccxt from 'ccxt';
 
-// =========================================================================
-// CẤU HÌNH NHANH - CÁC THÔNG SỐ CỐ ĐỊNH HỆ THỐNG
-// =========================================================================
-const MAX_DCA_LEVEL = 2;           // Số lần DCA tối đa cho một cặp vị thế
-const MARGIN_PROTECT_LIMIT = 60;    // Dưới 60% Khả dụng/Ví -> Ngừng quét lệnh mới
-const MARGIN_RECOVER_LIMIT = 70;    // Đạt lại từ 70% Khả dụng trở lên -> Tiếp tục quét lại
-// =========================================================================
+const MAX_DCA_LEVEL = 2;           
+const MARGIN_PROTECT_LIMIT = 60;    
+const MARGIN_RECOVER_LIMIT = 70;    
 
 const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+const __dirname = path.dirname(__dirname);
 
-// Chuyển các cấu hình Key thành biến có thể thay đổi động
 let currentApiKey = API_KEY;
 let currentSecretKey = SECRET_KEY;
 
 const binanceApi = axios.create({ baseURL: 'https://fapi.binance.com', timeout: 15000 });
-// Cập nhật header ban đầu cho axios
 binanceApi.defaults.headers['X-MBX-APIKEY'] = currentApiKey;
 
 let exchange;
@@ -35,22 +29,20 @@ function initCCXT() {
         options: { 
             defaultType: 'future', 
             dualSidePosition: true, 
-            recvWindow: 60000, // ĐÃ TĂNG LÊN 60K CHỐNG LỆCH TIME CHO CCXT
+            recvWindow: 60000, 
             adjustForTimeDifference: true 
         } 
     });
 }
-// Khởi tạo ccxt lần đầu tiên
 initCCXT();
 
-let botSettings = { isRunning: false, maxPositions: 300, invValue: "0.1%", minVol: 5, posTP: 2.1, posSL: 10.0, maxDCA: MAX_DCA_LEVEL };
+let botSettings = { isRunning: false, maxPositions: 3, invValue: "0.1%", minVol: 5, posTP: 2.1, posSL: 10.0, maxDCA: MAX_DCA_LEVEL };
 let status = { botLogs: [], candidatesList: [], blackList: {}, permanentBlacklist: {}, botClosedCount: 0, botPnLClosed: 0, exchangeInfo: null, isReady: false };
 let botActivePositions = new Map(); 
 let isProcessingDCA = new Set();
 let timestampOffset = 0;
 let isMarginProtected = false; 
-
-let currentBotIP = null; // IP Gốc hệ thống
+let currentBotIP = null;
 
 function addBotLog(msg, type = 'info') {
     const time = new Date().toLocaleTimeString('vi-VN', { hour12: false });
@@ -62,7 +54,7 @@ function addBotLog(msg, type = 'info') {
 async function binancePrivate(endpoint, method = 'GET', data = {}) {
     try {
         const timestamp = Date.now() + timestampOffset;
-        const query = new URLSearchParams({ ...data, timestamp, recvWindow: 60000 }).toString(); // ĐÃ TĂNG LÊN 60K CHO API THUẦN
+        const query = new URLSearchParams({ ...data, timestamp, recvWindow: 60000 }).toString(); 
         const signature = crypto.createHmac('sha256', currentSecretKey).update(query).digest('hex');
         const response = await binanceApi({ method, url: `${endpoint}?${query}&signature=${signature}` });
         return response.data;
@@ -76,7 +68,6 @@ async function binancePrivate(endpoint, method = 'GET', data = {}) {
     }
 }
 
-// --- LUỒNG QUẢN LÝ BLACKLIST ĐẾM NGƯỢC ---
 setInterval(() => {
     const now = Date.now();
     for (const symbol in status.blackList) {
@@ -87,7 +78,6 @@ setInterval(() => {
     }
 }, 1000);
 
-// --- MONITOR THEO DÕI GIÁ VÀ XỬ LÝ LỆNH ĐÓNG/DCA ---
 async function priceMonitor() {
     if (!status.isReady) return setTimeout(priceMonitor, 1000);
     try {
@@ -198,7 +188,6 @@ async function priceMonitor() {
     setTimeout(priceMonitor, 1000);
 }
 
-// --- LUỒNG TÍNH TOÁN VÀ ĐẶT LỆNH ---
 async function openPosition(symbol, dcaData = null) {
     if (isProcessingDCA.has(symbol)) return;
     isProcessingDCA.add(symbol); 
@@ -327,12 +316,10 @@ APP.get('/api/status', async (req, res) => {
 });
 
 APP.post('/api/settings', (req, res) => { 
-    // Nếu HTML truyền API Key lên, cập nhật vào hệ thống
     if (req.body.apiKey !== undefined && req.body.secretKey !== undefined) {
         currentApiKey = req.body.apiKey.trim();
         currentSecretKey = req.body.secretKey.trim();
         
-        // Đồng bộ lại API KEY cho Axios và CCXT
         binanceApi.defaults.headers['X-MBX-APIKEY'] = currentApiKey;
         initCCXT();
         
@@ -347,7 +334,6 @@ APP.post('/api/settings', (req, res) => {
     res.json({ success: true }); 
 });
 
-// --- SỬA TẬN GỐC: KHỞI TẠO IP CHUẨN XÁC KHI START PM2 ---
 async function init() {
     try {
         console.log("\n=================================================================");
@@ -356,10 +342,10 @@ async function init() {
         addBotLog(`✨ Chào mừng bạn đến với Moncey_D_Luffy chúc bạn luôn rực rỡ !!!`, "success");
 
         const ipRes = await axios.get('https://api4.ipify.org?format=json', { timeout: 8000 }).catch(() => ({ data: { ip: "127.0.0.1" } }));
-        currentBotIP = ipRes.data.ip; // 🔥 ĐÃ GHIM CỐ ĐỊNH IP GỐC KHI START LÊN
+        currentBotIP = ipRes.data.ip; 
         
         console.log(`\n🌍 IP INITIALIZED: ${currentBotIP}`);
-        addBotLog(`🌍 IP START: ${currentBotIP}`, "success"); // Chỉ ghi log 1 lần duy nhất lúc start bot
+        addBotLog(`🌍 IP START: ${currentBotIP}`, "success"); 
         
         const t = await axios.get('https://fapi.binance.com/fapi/v1/time');
         timestampOffset = t.data.serverTime - Date.now();
@@ -375,7 +361,7 @@ async function init() {
             temp[s.symbol] = { quantityPrecision: s.quantityPrecision, pricePrecision: s.pricePrecision, stepSize: parseFloat(s.filters.find(f => f.filterType === 'LOT_SIZE').stepSize), maxLeverage: maxLev };
         });
         status.exchangeInfo = temp; status.isReady = true; priceMonitor();
-        addBotLog(`🚀 Hệ thống monitor sẵn sàng.`);
+        addBotLog(`🚀 Hệ thống Moncey_D_Luffy_Bot sẵn sàng.`);
     } catch (e) { setTimeout(init, 5000); }
 }
 
@@ -426,19 +412,17 @@ setInterval(async () => {
     }
 }, 3000);
 
-// --- SỬA TẬN GỐC: LUỒNG THEO DÕI SỰ THAY ĐỔI IP THỰC TẾ ---
 setInterval(async () => {
-    if (!status.isReady || !currentBotIP) return; // Nếu chưa init xong IP gốc thì bỏ qua không check chéo
+    if (!status.isReady || !currentBotIP) return; 
     try {
         const ipCheckRes = await axios.get('https://api4.ipify.org?format=json', { timeout: 5000 });
         const newIP = ipCheckRes.data.ip;
         
-        // Chỉ in log khi bốc được IP mới và IP mới này KHÁC hoàn toàn với IP hệ thống đang chạy
         if (newIP && newIP !== currentBotIP) {
             addBotLog(`⚠️ [NETWORK] IP CHANGE DETECTED! Cũ: ${currentBotIP} -> Mới: ${newIP}`, "warn");
-            currentBotIP = newIP; // Cập nhật lại IP mới làm mốc đối chiếu tiếp theo
+            currentBotIP = newIP; 
         }
-    } catch (err) {} // Chặn hoàn toàn log rác nếu API check IP bị timeout/nghẽn mạng cục bộ
+    } catch (err) {} 
 }, 30000);
 
 APP.listen(1111);
