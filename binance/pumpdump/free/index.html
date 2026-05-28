@@ -12,7 +12,6 @@
         input { background: #000; border: 1px solid #333; color: #fff; padding: 6px; text-align: left; padding-left: 8px; border-radius: 3px; width: 100%; outline: none; font-size: 11px; }
         input:focus { border-color: #ef4444; }
         .bl-tag { background: rgba(239, 68, 68, 0.1); border: 1px solid #ef4444; padding: 2px 5px; border-radius: 3px; color: #ef4444; font-size: 10px; display: flex; gap: 5px; align-items: center; }
-        .bl-time { font-weight: bold; color: #fff; background: #3b0712; padding: 0 3px; border-radius: 2px; }
         
         /* Chữ nghệ thuật đầu trang */
         .logo-container { text-align: center; background: linear-gradient(180deg, #1c1917 0%, #000 100%); border: 1px solid #292524; padding: 15px 10px; border-radius: 6px; position: relative; overflow: hidden; }
@@ -34,20 +33,31 @@
         </p>
     </div>
 
-    <div class="card space-y-2">
-        <div class="grid grid-cols-2 gap-2">
+    <div class="card space-y-3">
+        <div id="config-area" class="grid grid-cols-2 gap-2">
             <div>
                 <p class="text-[9px] text-zinc-500 uppercase mb-1">Binance API Key</p>
-                <input id="apiKey" type="password" placeholder="Nhập API Key...">
+                <input id="apiKey" type="password" placeholder="Nhập API Key..." oninput="saveToLocal()">
             </div>
             <div>
                 <p class="text-[9px] text-zinc-500 uppercase mb-1">Binance Secret Key</p>
-                <input id="secretKey" type="password" placeholder="Nhập Secret Key...">
+                <input id="secretKey" type="password" placeholder="Nhập Secret Key..." oninput="saveToLocal()">
             </div>
         </div>
-        <div class="grid grid-cols-2 gap-2 pt-1">
-            <button onclick="saveAndStart()" class="py-2 bg-red-600 hover:bg-red-700 text-white font-black rounded border border-red-500 uppercase text-xs transition-all tracking-wider shadow-lg shadow-red-950/50">Lưu & Start</button>
-            <button id="runBtn" onclick="toggle()" class="py-2 font-bold border rounded uppercase text-xs transition-all tracking-wider"></button>
+
+        <div id="action-area" class="grid grid-cols-2 gap-2">
+            <button id="saveBtn" onclick="justSave()" class="py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-bold rounded border border-zinc-700 uppercase text-xs transition-all tracking-wider">
+                Chỉ Lưu Key
+            </button>
+            <button id="startBtn" onclick="startBot()" class="py-2 bg-green-600 hover:bg-green-700 text-white font-black rounded border border-green-500 uppercase text-xs transition-all tracking-wider shadow-lg shadow-green-950/50">
+                START BOT
+            </button>
+        </div>
+
+        <div id="stop-area" class="hidden">
+            <button onclick="stopBot()" class="w-full py-4 bg-red-600 hover:bg-red-700 text-white text-base font-black rounded border-2 border-red-400 uppercase tracking-widest transition-all shadow-xl shadow-red-950/80 animate-pulse">
+                🛑 STOP BOT
+            </button>
         </div>
     </div>
 
@@ -84,30 +94,43 @@
     <div id="logs" class="card h-[130px] overflow-y-auto text-[10px] text-zinc-400 space-y-1 font-mono"></div>
 
     <script>
-        // Sửa hàm hiển thị đếm ngược định dạng mm:ss chuẩn xác từ số giây nguyên bản
-        function fmtTime(totalSeconds) { 
-            if (totalSeconds <= 0) return "0:00";
-            const m = Math.floor(totalSeconds / 60); 
-            const s = totalSeconds % 60;
-            return `${m}:${s.toString().padStart(2, '0')}`; 
+        // Lưu trữ cục bộ vào Trình duyệt của máy đang truy cập (F5 không mất)
+        function saveToLocal() {
+            localStorage.setItem('luffy_apiKey', document.getElementById('apiKey').value.trim());
+            localStorage.setItem('luffy_secretKey', document.getElementById('secretKey').value.trim());
+        }
+
+        // Tải dữ liệu cũ đã lưu từ bộ nhớ trình duyệt lên ô nhập liệu
+        function loadFromLocal() {
+            const savedKey = localStorage.getItem('luffy_apiKey');
+            const savedSecret = localStorage.getItem('luffy_secretKey');
+            if (savedKey) document.getElementById('apiKey').value = savedKey;
+            if (savedSecret) document.getElementById('secretKey').value = savedSecret;
+        }
+
+        // Hàm thay đổi trạng thái UI dựa trên biến trạng thái hệ thống
+        function updateUIState(isRunning) {
+            const configArea = document.getElementById('config-area');
+            const actionArea = document.getElementById('action-area');
+            const stopArea = document.getElementById('stop-area');
+
+            if (isRunning) {
+                configArea.classList.add('hidden');
+                actionArea.classList.add('hidden');
+                stopArea.classList.remove('hidden');
+            } else {
+                configArea.classList.remove('hidden');
+                actionArea.classList.remove('hidden');
+                stopArea.classList.add('hidden');
+            }
         }
 
         async function sync() {
             try {
                 const r = await fetch('/api/status'); const d = await r.json();
                 
-                // ĐỒNG BỘ IP THỰC TẾ CỦA BOT TỪ SERVER TRẢ VỀ
-                if (d.status && d.status.botLogs) {
-                    // Vì endpoint /api/status trả về object `status` chứa dữ liệu hệ thống,
-                    // Ta có thể bổ sung trả thêm biến IP hoặc nếu file bot.js của bạn chỉ gom IP vào log 
-                    // thì cách hay nhất là lấy IP trực tiếp nếu bot.js chưa gửi. 
-                    // Tuy nhiên, để tối ưu tôi kiểm tra nếu server có trả về IP (hoặc d.status)
-                }
-                
-                // Bot trả về object status chứa logs, candidatesList... 
-                // Ta sẽ cập nhật IP từ dữ liệu gốc của bot qua API phản hồi.
-                // Do cấu trúc API status của file bot cũ chưa đính kèm biến IP trực tiếp vào json trả về, 
-                // nhưng đừng lo, lát nữa ở cuối function sync() tôi xử lý lấy IP chuẩn từ API.
+                // Đồng bộ trạng thái hiển thị giao diện từ dữ liệu thực tế của Server
+                updateUIState(d.botSettings.isRunning);
 
                 document.getElementById('totalWallet').innerText = d.wallet.totalWalletBalance;
                 document.getElementById('availBalance').innerText = d.wallet.availableBalance;
@@ -118,7 +141,6 @@
                 document.getElementById('closedCount').innerText = d.status.botClosedCount;
                 document.getElementById('closedPnL').innerText = d.status.botPnLClosed.toFixed(2);
 
-                // Đồng bộ và render đếm ngược thời gian Blacklist thực tế
                 const entries = Object.entries(d.status.blackList);
                 if (entries.length === 0) {
                     document.getElementById('blacklist-display').innerHTML = '<span class="text-zinc-600 text-[10px] uppercase">Không có token bị blacklist</span>';
@@ -151,18 +173,12 @@
                     </div>`).join('');
 
                 document.getElementById('logs').innerHTML = d.status.botLogs.map(l => `<div>[${l.time}] ${l.msg}</div>`).join('');
-                
-                // Cập nhật giao diện nút Stop
-                document.getElementById('runBtn').innerText = d.botSettings.isRunning ? "STOP BOT" : "BOT ĐANG TẮT";
-                document.getElementById('runBtn').className = d.botSettings.isRunning ? "py-2 rounded border-red-500 text-red-500 bg-red-950/20 cursor-pointer" : "py-2 rounded border-zinc-700 text-zinc-500 bg-zinc-900 cursor-not-allowed";
             } catch (e) {}
         }
 
-        // Lấy IP chuẩn của bot từ log hệ thống hoặc từ server ngầm
         async function getRealBotIP() {
             try {
                 const r = await fetch('/api/status'); const d = await r.json();
-                // Tìm dòng log chứa IP START để trích xuất IP chuẩn của bot ra ngoài giao diện
                 const ipLog = d.status.botLogs.find(l => l.msg.includes("🌍 IP START:"));
                 if (ipLog) {
                     const extractedIP = ipLog.msg.replace("🌍 IP START:", "").trim();
@@ -175,42 +191,51 @@
             }
         }
 
-        async function toggle() {
-            const r = await fetch('/api/status'); const d = await r.json();
-            if (d.botSettings.isRunning) {
-                await fetch('/api/settings', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ isRunning: false }) });
-            }
-        }
-
-        async function saveAndStart() {
+        // CHỨC NĂNG 1: CHỈ LƯU KEY (Không kích hoạt Bot chạy)
+        async function justSave() {
             const apiKey = document.getElementById('apiKey').value.trim();
             const secretKey = document.getElementById('secretKey').value.trim();
-
-            if (!apiKey || !secretKey) {
-                alert("Vui lòng điền đủ API Key và Secret Key!");
-                return;
-            }
-
-            const body = { apiKey, secretKey, isRunning: true };
-
+            if (!apiKey || !secretKey) { return alert("Vui lòng nhập đủ Key trước khi lưu!"); }
+            
+            saveToLocal(); // Lưu vào trình duyệt máy hiện tại
             try {
-                const res = await fetch('/api/settings', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body) });
+                const res = await fetch('/api/settings', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ apiKey, secretKey }) });
+                const data = await res.json();
+                if(data.success) alert("Đã lưu API Key vào hệ thống thành công!");
+            } catch(e) { alert("Lỗi kết nối server!"); }
+        }
+
+        // CHỨC NĂNG 2: BẤM START BOT (Ẩn cấu hình, hiện nút STOP to đùng)
+        async function startBot() {
+            const apiKey = document.getElementById('apiKey').value.trim();
+            const secretKey = document.getElementById('secretKey').value.trim();
+            if (!apiKey || !secretKey) { return alert("Thiếu cấu hình API Key và Secret Key để chạy Bot!"); }
+
+            saveToLocal();
+            try {
+                const res = await fetch('/api/settings', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ apiKey, secretKey, isRunning: true }) });
                 const data = await res.json();
                 if(data.success) {
-                    alert("HỆ THỐNG ĐÃ LƯU KEY VÀ KÍCH HOẠT LUFFY BOT CHẠY!");
+                    updateUIState(true);
                 }
-            } catch(e) {
-                alert("Lỗi kết nối server!");
-            }
+            } catch(e) { alert("Lỗi kết nối server!"); }
+        }
+
+        // CHỨC NĂNG 3: BẤM STOP BOT (Hiện lại cấu hình cũ để chỉnh sửa)
+        async function stopBot() {
+            try {
+                const res = await fetch('/api/settings', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ isRunning: false }) });
+                const data = await res.json();
+                if(data.success) {
+                    updateUIState(false);
+                }
+            } catch(e) { alert("Lỗi kết nối server!"); }
         }
 
         setInterval(sync, 1000);
         window.onload = () => {
-            setTimeout(getRealBotIP, 1200); // Trích xuất IP thực tế của bot sau khi dữ liệu nạp xong
-            fetch('/api/status').then(r => r.json()).then(d => {
-                if (d.botSettings.apiKey) document.getElementById('apiKey').value = d.botSettings.apiKey;
-                if (d.botSettings.secretKey) document.getElementById('secretKey').value = d.botSettings.secretKey;
-            }).catch(() => {});
+            loadFromLocal(); // Tự động điền API Key cũ nếu máy này đã từng nhập trước đó
+            setTimeout(getRealBotIP, 1200);
         }
     </script>
 </body>
