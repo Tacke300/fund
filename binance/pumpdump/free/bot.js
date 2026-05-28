@@ -4,7 +4,6 @@ import crypto from 'crypto';
 import axios from 'axios';
 import { fileURLToPath } from 'url';
 import path from 'path';
-import { API_KEY, SECRET_KEY } from './config.js';
 import ccxt from 'ccxt';
 
 const MAX_DCA_LEVEL = 2;           
