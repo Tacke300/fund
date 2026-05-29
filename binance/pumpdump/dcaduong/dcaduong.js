@@ -1,5 +1,7 @@
 import express from 'express';
 import ccxt from 'ccxt';
+import WebSocket from 'ws';
+import fetch from 'node-fetch';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { API_KEY, SECRET_KEY } from './config.js';
@@ -28,7 +30,7 @@ const exchange = new ccxt.binance({
 let botSettings = {
     isRunning: false,
     capital: 5,
-    volVolatility: 5,
+    volVolatility: 6.5,
     maxPos: 5,
     tp: 0.5,
     sl: 10,
@@ -51,8 +53,8 @@ let stats = {
 let logs = [];
 
 let realtimePrice = {};
-let priceHistory = {};
 let coinData = {};
+let priceCache = {};
 
 let positions = new Map();
 
@@ -72,7 +74,9 @@ function addLog(msg, symbol = '') {
         logs.pop();
     }
 
-    console.log(`[${log.time}] ${symbol} ${msg}`);
+    console.log(
+        `[${log.time}] ${symbol} ${msg}`
+    );
 }
 
 async function updateWallet() {
@@ -102,17 +106,23 @@ async function updateWallet() {
 
     } catch (e) {
 
-        addLog(`⛔ WALLET ${e.message}`);
+        addLog(
+            `⛔ WALLET ${e.message}`
+        );
     }
 }
 
-async function setCross(symbol) {
+async function setCross(pair) {
 
     try {
 
         await exchange.setMarginMode(
             'cross',
-            symbol
+            pair
+        );
+
+        addLog(
+            `✅ CROSS ${pair}`
         );
 
     } catch (e) {}
@@ -149,7 +159,18 @@ function buildPosition(
 
         lev: botSettings.leverage,
 
-        margin: 'CROSS',
+        marginMode: 'CROSS',
+
+        margin:
+            parseFloat(
+                (
+                    (
+                        qty * price
+                    )
+                    /
+                    botSettings.leverage
+                ).toFixed(2)
+            ),
 
         qty,
 
@@ -237,7 +258,7 @@ async function openPosition(
         positions.set(key, pos);
 
         addLog(
-            `🔔OPEN ${symbol} ${side} CROSS ${botSettings.leverage}x ENTRY ${price.toFixed(6)} TP ${pos.tp.toFixed(6)} SL ${pos.sl.toFixed(6)} DCA ${pos.dcaLevel} NEXT ${pos.nextDcaPrice.toFixed(6)}`,
+            `🔔OPEN ${symbol} ${side} ${pos.margin}$ CROSS ${botSettings.leverage}x ENTRY ${price.toFixed(6)} AVG ${pos.avg.toFixed(6)} TP ${pos.tp.toFixed(6)} SL ${pos.sl.toFixed(6)} DCA ${pos.dcaLevel} NEXT ${pos.nextDcaPrice.toFixed(6)} 1M ${snap.c1}% 5M ${snap.c5}% 15M ${snap.c15}%`,
             symbol
         );
 
@@ -275,6 +296,8 @@ function updatePositions() {
                     /
                     pos.entryInitial
                 ) * 100
+                *
+                pos.lev
 
                 :
 
@@ -286,7 +309,9 @@ function updatePositions() {
                     )
                     /
                     pos.entryInitial
-                ) * 100;
+                ) * 100
+                *
+                pos.lev;
 
         const tpHit =
 
@@ -327,7 +352,7 @@ function updatePositions() {
             stats.totalPnl += pos.pnl;
 
             addLog(
-                `💲TP ${pos.symbol} PNL ${pos.pnl.toFixed(2)}%`,
+                `💲TP ${pos.symbol} PRICE ${price.toFixed(6)} PNL ${pos.pnl.toFixed(2)}%`,
                 pos.symbol
             );
 
@@ -343,7 +368,7 @@ function updatePositions() {
             stats.totalPnl += pos.pnl;
 
             addLog(
-                `❌SL ${pos.symbol} LOSS ${Math.abs(pos.pnl).toFixed(2)}% PRICE ${price.toFixed(6)} PNL ${pos.pnl.toFixed(2)}%`,
+                `❌SL ${pos.symbol} PRICE ${price.toFixed(6)} LOSS ${pos.pnl.toFixed(2)}%`,
                 pos.symbol
             );
 
@@ -353,7 +378,7 @@ function updatePositions() {
         }
 
         if (
-            Math.abs(pos.pnl) <= 0.15
+            Math.abs(pos.pnl) <= 0.2
             &&
             pos.dcaLevel > 0
         ) {
@@ -418,107 +443,126 @@ function updatePositions() {
     }
 }
 
-async function updatePrices() {
+async function startMarketStream() {
 
-    try {
+    const res =
+        await fetch(
+            'https://fapi.binance.com/fapi/v1/ticker/price'
+        );
 
-        const tickers =
-            await exchange.fetchTickers();
+    const tickers =
+        await res.json();
 
-        const now =
-            Date.now();
+    const symbols =
 
-        for (const [symbol, ticker] of Object.entries(tickers)) {
+        tickers
 
-            if (!symbol.includes('/USDT')) continue;
+            .filter(
+                t =>
+                    t.symbol.endsWith('USDT')
+            )
 
-            const coin =
-                symbol.split('/')[0];
+            .slice(0, 120)
+
+            .map(
+                t =>
+                    `${t.symbol.toLowerCase()}@ticker`
+            );
+
+    const ws =
+        new WebSocket(
+            `wss://fstream.binance.com/stream?streams=${symbols.join('/')}`
+        );
+
+    ws.on('open', () => {
+
+        addLog(
+            '📡 FAST WS CONNECTED'
+        );
+    });
+
+    ws.on('message', raw => {
+
+        try {
+
+            const msg =
+                JSON.parse(raw);
+
+            if (!msg.data) return;
+
+            const t =
+                msg.data;
+
+            const symbol =
+                t.s.replace(
+                    'USDT',
+                    ''
+                );
 
             const price =
-                ticker.last || 0;
+                parseFloat(t.c);
 
-            realtimePrice[coin] = price;
+            const now =
+                Date.now();
 
-            if (!priceHistory[coin]) {
-                priceHistory[coin] = [];
+            realtimePrice[symbol] =
+                price;
+
+            if (!priceCache[symbol]) {
+                priceCache[symbol] = [];
             }
 
-            priceHistory[coin].push({
-                time: now,
-                price
+            priceCache[symbol].push({
+                p: price,
+                t: now
             });
 
-            priceHistory[coin] =
-                priceHistory[coin].filter(
-                    x =>
-                        now - x.time
-                        <=
-                        15 * 60 * 1000
-                );
+            if (
+                priceCache[symbol].length
+                >
+                1200
+            ) {
+                priceCache[symbol].shift();
+            }
 
-            const history =
-                priceHistory[coin];
+            const calc = min => {
 
-            const getOldPrice = (ms) => {
+                const arr =
+                    priceCache[symbol];
 
                 const old =
-                    history.find(
-                        h =>
-                            now - h.time >= ms
+                    arr.find(
+                        x =>
+                            x.t >=
+                            (
+                                now
+                                -
+                                min * 60000
+                            )
                     );
 
-                return old?.price || price;
+                if (!old) return 0;
+
+                return (
+                    (
+                        (
+                            price - old.p
+                        )
+                        /
+                        old.p
+                    ) * 100
+                );
             };
 
-            const p1 =
-                getOldPrice(
-                    60 * 1000
-                );
+            const c1 = calc(1);
+            const c5 = calc(5);
+            const c15 = calc(15);
 
-            const p5 =
-                getOldPrice(
-                    5 * 60 * 1000
-                );
+            coinData[symbol] = {
 
-            const p15 =
-                getOldPrice(
-                    15 * 60 * 1000
-                );
+                symbol,
 
-            const c1 =
-                (
-                    (
-                        price - p1
-                    ) / p1
-                ) * 100;
-
-            const c5 =
-                (
-                    (
-                        price - p5
-                    ) / p5
-                ) * 100;
-
-            const c15 =
-                (
-                    (
-                        price - p15
-                    ) / p15
-                ) * 100;
-
-            const volatilityScore =
-                Math.abs(c1)
-                +
-                Math.abs(c5)
-                +
-                Math.abs(c15);
-
-            coinData[coin] = {
-
-                symbol: coin,
-
-                price,
+                currentPrice: price,
 
                 c1,
 
@@ -526,26 +570,27 @@ async function updatePrices() {
 
                 c15,
 
-                volatilityScore
+                volatilityScore:
+                    Math.abs(c1)
+                    +
+                    Math.abs(c5)
+                    +
+                    Math.abs(c15)
             };
 
             if (
                 botSettings.isRunning
                 &&
                 Math.abs(c15)
-                >=
-                botSettings.volVolatility
+                >= botSettings.volVolatility
             ) {
 
                 openPosition(
-                    coin,
-
+                    symbol,
                     c15 >= 0
                         ? 'LONG'
                         : 'SHORT',
-
                     price,
-
                     {
                         c1: c1.toFixed(2),
                         c5: c5.toFixed(2),
@@ -553,21 +598,26 @@ async function updatePrices() {
                     }
                 );
             }
-        }
 
-        updatePositions();
+        } catch (e) {}
+    });
 
-    } catch (e) {
+    ws.on('close', () => {
 
         addLog(
-            `⛔ PRICE ${e.message}`
+            '❌ WS CLOSED'
         );
-    }
 
-    setTimeout(
-        updatePrices,
-        1000
-    );
+        setTimeout(
+            startMarketStream,
+            1000
+        );
+    });
+
+    ws.on('error', () => {
+
+        ws.close();
+    });
 }
 
 app.get('/api/status', (req, res) => {
@@ -625,7 +675,7 @@ app.post('/api/start', (req, res) => {
     botSettings.isRunning = true;
 
     addLog(
-        `🚀 BOT STARTED`
+        '🚀 BOT STARTED'
     );
 
     res.json({
@@ -638,7 +688,7 @@ app.post('/api/stop', (req, res) => {
     botSettings.isRunning = false;
 
     addLog(
-        `🛑 BOT STOPPED`
+        '🛑 BOT STOPPED'
     );
 
     res.json({
@@ -651,7 +701,7 @@ app.post('/api/closeall', (req, res) => {
     positions.clear();
 
     addLog(
-        `🧹 ALL POSITIONS CLOSED`
+        '🧹 ALL POSITIONS CLOSED'
     );
 
     res.json({
@@ -667,7 +717,7 @@ app.post('/api/config', (req, res) => {
     };
 
     addLog(
-        `⚙ CONFIG UPDATED`
+        '⚙ CONFIG UPDATED'
     );
 
     res.json({
@@ -678,16 +728,21 @@ app.post('/api/config', (req, res) => {
 app.listen(PORT, async () => {
 
     addLog(
-        `🚀 BOT READY`
+        '🚀 BOT READY'
     );
 
     updateWallet();
 
-    updatePrices();
+    startMarketStream();
 
     setInterval(
         updateWallet,
         5000
+    );
+
+    setInterval(
+        updatePositions,
+        100
     );
 
     console.log(
