@@ -11,6 +11,9 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 app.use(express.json());
 
+// Khai báo thư mục static để load HTML/CSS/JS giao diện
+app.use(express.static(__dirname));
+
 const exchange = new ccxt.binance({
     apiKey: API_KEY,
     secret: SECRET_KEY,
@@ -18,61 +21,57 @@ const exchange = new ccxt.binance({
     options: { defaultType: 'future', hedgeMode: true, recvWindow: 60000, adjustForTimeDifference: true }
 });
 
-let botSettings = { isRunning: false, capital: 5, volVolatility: 6.5, maxPos: 3, tp: 1.2, sl: 10 };
+let botSettings = { isRunning: false, capital: 5, volVolatility: 6.5, maxPos: 3, tp: 0.5, sl: 10 };
 let coinData = {};
 let positions = new Map();
+let status = { botLogs: [] };
+let walletCache = { totalWalletBalance: '0.00', availableBalance: '0.00', totalUnrealizedProfit: '0.00' };
 let exchangeInfo = {};
+const recentLogs = new Set();
 
 function toCCXTSymbol(symbol) { return symbol.replace('USDT', '/USDT:USDT'); }
 
-function addLog(msg, symbol = '') {
-    console.log(`[${new Date().toLocaleTimeString('vi-VN', { hour12: false })}] ${symbol} ${msg}`);
+function addLog(msg, symbol = '', side = '') {
+    const time = new Date().toLocaleTimeString('vi-VN', { hour12: false });
+    status.botLogs.unshift({ time, msg, symbol, side });
+    if (status.botLogs.length > 300) status.botLogs.pop();
+    console.log(`[${time}] ${symbol} ${side} ${msg}`);
 }
 
 async function loadExchangeInfo() {
-    const markets = await exchange.loadMarkets();
-    for (const [k, v] of Object.entries(markets)) {
-        if (!k.includes('/USDT:USDT')) continue;
-        exchangeInfo[k] = { pricePrecision: v.precision?.price || 4, stepSize: v.limits?.amount?.min || 0.001 };
-    }
+    try {
+        const markets = await exchange.loadMarkets();
+        for (const [k, v] of Object.entries(markets)) {
+            if (!k.includes('/USDT:USDT')) continue;
+            exchangeInfo[k] = { pricePrecision: v.precision?.price || 4, minCost: 5.5 };
+        }
+    } catch (e) { addLog(`EXCHANGE ERR: ${e.message}`); }
 }
 
-// Logic gửi TP/SL lên sàn 100% bằng CONTRACT_PRICE
-async function syncTPSL(symbol, side, tpPrice, slPrice) {
-    const pair = toCCXTSymbol(symbol);
-    const closeSide = side === 'LONG' ? 'SELL' : 'BUY';
-    const info = exchangeInfo[pair];
-
+// Gửi TP/SL lên sàn bằng CONTRACT_PRICE (Giá khớp thực tế)
+async function syncTPSL(pair, side, tp, sl) {
     try {
-        const openOrders = await exchange.fetchOpenOrders(pair);
-        for (const o of openOrders) {
-            if (o.info.positionSide === side && (o.type === 'TAKE_PROFIT_MARKET' || o.type === 'STOP_MARKET')) {
-                await exchange.cancelOrder(o.id, pair);
-            }
-        }
-
-        await exchange.createOrder(pair, 'TAKE_PROFIT_MARKET', closeSide, undefined, undefined, {
-            positionSide: side,
-            stopPrice: tpPrice.toFixed(info.pricePrecision),
-            closePosition: true,
-            workingType: 'CONTRACT_PRICE' 
+        const closeSide = side === 'LONG' ? 'SELL' : 'BUY';
+        const precision = exchangeInfo[pair]?.pricePrecision || 4;
+        const orders = await exchange.fetchOpenOrders(pair);
+        for (const o of orders) { if (o.info.positionSide === side) await exchange.cancelOrder(o.id, pair); }
+        
+        await exchange.createOrder(pair, 'TAKE_PROFIT_MARKET', closeSide, undefined, undefined, { 
+            positionSide: side, stopPrice: tp.toFixed(precision), closePosition: true, workingType: 'CONTRACT_PRICE' 
         });
-
-        await exchange.createOrder(pair, 'STOP_MARKET', closeSide, undefined, undefined, {
-            positionSide: side,
-            stopPrice: slPrice.toFixed(info.pricePrecision),
-            closePosition: true,
-            workingType: 'CONTRACT_PRICE'
+        await exchange.createOrder(pair, 'STOP_MARKET', closeSide, undefined, undefined, { 
+            positionSide: side, stopPrice: sl.toFixed(precision), closePosition: true, workingType: 'CONTRACT_PRICE' 
         });
-        addLog(`SYNC TP:${tpPrice.toFixed(info.pricePrecision)} SL:${slPrice.toFixed(info.pricePrecision)}`, symbol);
-    } catch (e) { addLog(`TPSL ERROR: ${e.message}`, symbol); }
+    } catch (e) { addLog(`TPSL ERR: ${e.message}`, pair, side); }
 }
 
 async function openPosition(symbol, side, price) {
     if (!botSettings.isRunning || positions.size >= botSettings.maxPos) return;
     const pair = toCCXTSymbol(symbol);
-    const qty = parseFloat(((botSettings.capital * 20) / price).toFixed(3));
+    const key = `${symbol}${side}`;
+    if (positions.has(key)) return;
     
+    let qty = parseFloat(((botSettings.capital * 20) / price).toFixed(3));
     try {
         await exchange.setLeverage(20, pair);
         await exchange.createOrder(pair, 'MARKET', side === 'LONG' ? 'BUY' : 'SELL', qty, undefined, { positionSide: side });
@@ -80,35 +79,39 @@ async function openPosition(symbol, side, price) {
         const tp = side === 'LONG' ? price * (1 + botSettings.tp / 100) : price * (1 - botSettings.tp / 100);
         const sl = side === 'LONG' ? price * (1 - botSettings.sl / 100) : price * (1 + botSettings.sl / 100);
         
-        await syncTPSL(symbol, side, tp, sl);
-        positions.set(`${symbol}${side}`, { symbol, side, tp, sl });
-        addLog(`OPENED ${side} @ ${price}`, symbol);
-    } catch (e) { addLog(`OPEN ERROR: ${e.message}`, symbol); }
+        await syncTPSL(pair, side, tp, sl);
+        positions.set(key, { symbol, side, qty, tp, sl });
+        addLog(`OPENED ${side} @ ${price}`, symbol, side);
+    } catch (e) { addLog(`OPEN ERR: ${e.message}`, symbol, side); }
 }
 
-// Logic quét biến động nến 1 phút
+// Quét biến động nến 1 phút
 async function initWS() {
     try {
-        const markets = Object.keys(exchangeInfo);
-        for (const m of markets) {
-            const ohlcv = await exchange.fetchOHLCV(m, '1m', undefined, 15);
-            const close = ohlcv[14][4];
+        for (const pair of Object.keys(exchangeInfo)) {
+            const ohlcv = await exchange.fetchOHLCV(pair, '1m', undefined, 15);
             const open = ohlcv[0][4];
-            const vol = Math.abs((close - open) / open * 100);
-            if (vol >= botSettings.volVolatility) {
-                const s = m.replace('/USDT:USDT', 'USDT');
-                await openPosition(s, close > open ? 'LONG' : 'SHORT', close);
+            const close = ohlcv[14][4];
+            const vol = ((close - open) / open) * 100;
+            if (Math.abs(vol) >= botSettings.volVolatility) {
+                const s = pair.replace('/USDT:USDT', 'USDT');
+                await openPosition(s, vol >= 0 ? 'LONG' : 'SHORT', close);
             }
         }
     } catch (e) { }
     setTimeout(initWS, 5000);
 }
 
+// Route load file HTML gốc
+app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
+
 app.post('/api/config', (req, res) => { botSettings = { ...botSettings, ...req.body }; res.json({ ok: true }); });
-app.post('/api/start', (req, res) => { botSettings.isRunning = true; res.json({ ok: true }); });
+app.post('/api/start', (req, res) => { botSettings.isRunning = true; addLog('BOT START'); res.json({ ok: true }); });
+app.post('/api/stop', (req, res) => { botSettings.isRunning = false; addLog('BOT STOP'); res.json({ ok: true }); });
+app.get('/api/status', async (req, res) => { res.json({ botStatus: botSettings.isRunning, positions: Array.from(positions.values()), status }); });
 
 app.listen(PORT, async () => {
+    console.log(`Bot running on http://localhost:${PORT}`);
     await loadExchangeInfo();
     initWS();
-    console.log(`Bot running on ${PORT}`);
 });
