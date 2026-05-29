@@ -8,13 +8,13 @@ import { API_KEY, SECRET_KEY } from './config.js';
 
 const PORT = 1114;
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-
-const STATE_FILE = './bot_state.json';
+const STATE_FILE = './state.json';
 
 const app = express();
 app.use(express.json());
 app.use(express.static(__dirname));
 
+// ================= BINANCE =================
 const exchange = new ccxt.binance({
     apiKey: API_KEY,
     secret: SECRET_KEY,
@@ -22,33 +22,24 @@ const exchange = new ccxt.binance({
     options: { defaultType: 'future' }
 });
 
-// ===================== STATE =====================
-
+// ================= STATE =================
 let state = loadState();
 
 function defaultState() {
     return {
-        botSettings: {
-            isRunning: false,
-            capital: 5,
-            volVolatility: 6,
-            maxPos: 5,
-            tp: 0.5,
-            sl: 10,
-            leverage: 20,
-            dcaPercent: 10
-        },
+        botStatus: 'STOPPED',
         wallet: {},
         logs: [],
-        coinData: {},
-        priceHistory: {},
-        realtimePrice: {},
+        market: [],
         positions: [],
         stats: {
+            openPositions: 0,
             totalClosed: 0,
-            totalPnl: 0,
-            totalDca: 0
-        }
+            totalDca: 0,
+            totalPnl: 0
+        },
+        coinData: {},
+        priceHistory: {}
     };
 }
 
@@ -57,83 +48,78 @@ function loadState() {
         if (fs.existsSync(STATE_FILE)) {
             return JSON.parse(fs.readFileSync(STATE_FILE));
         }
-    } catch (e) {}
+    } catch {}
     return defaultState();
 }
 
 function saveState() {
     try {
-        fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2));
-    } catch (e) {}
+        fs.writeFileSync(STATE_FILE, JSON.stringify(state));
+    } catch {}
 }
 
-// ===================== LOG =====================
-
-function log(msg) {
+// ================= LOG =================
+function log(msg, symbol = '') {
     state.logs.unshift({
-        t: new Date().toLocaleTimeString(),
-        msg
+        time: new Date().toLocaleTimeString('vi-VN'),
+        msg,
+        symbol
     });
+
     if (state.logs.length > 200) state.logs.pop();
 }
 
-// ===================== WALLET =====================
-
+// ================= WALLET =================
 async function syncWallet() {
     try {
         const b = await exchange.fetchBalance();
+
         state.wallet = {
-            total: b.info.totalMarginBalance,
-            free: b.info.availableBalance,
-            pnl: b.info.totalUnrealizedProfit
+            totalWalletBalance: b.total?.USDT || b.info?.totalWalletBalance || 0,
+            availableBalance: b.free?.USDT || b.info?.availableBalance || 0,
+            totalUnrealizedProfit: b.info?.totalUnrealizedProfit || 0
         };
-    } catch (e) {}
+
+    } catch (e) {
+        log('wallet error ' + e.message);
+    }
 }
 
-// ===================== PRICE CHANGE =====================
-
+// ================= PRICE CHANGE =================
 function calcChange(arr, min) {
     if (!arr || arr.length < 2) return 0;
 
     const now = Date.now();
-    const from = arr.find(x => x.t >= now - min * 60000) || arr[0];
+    const start = arr.find(x => x.t >= now - min * 60000) || arr[0];
 
-    const last = arr[arr.length - 1];
-
-    return ((last.p - from.p) / from.p) * 100;
+    return ((arr[arr.length - 1].p - start.p) / start.p) * 100;
 }
 
-// ===================== WS =====================
-
+// ================= WS =================
 async function startWS() {
 
     const res = await fetch('https://fapi.binance.com/fapi/v1/ticker/price');
     const tickers = await res.json();
 
-    const symbols = tickers
+    const streams = tickers
         .filter(t => t.symbol.endsWith('USDT'))
-        .slice(0, 150)
+        .slice(0, 120)
         .map(t => t.symbol.toLowerCase() + '@ticker');
 
     const ws = new WebSocket(
-        `wss://fstream.binance.com/stream?streams=${symbols.join('/')}`
+        `wss://fstream.binance.com/stream?streams=${streams.join('/')}`
     );
 
     ws.on('open', () => log('WS CONNECTED'));
 
     ws.on('message', (raw) => {
-
         const msg = JSON.parse(raw);
         if (!msg.data) return;
 
         const t = msg.data;
-
-        // 🔥 FIX: giữ nguyên USDT KEY
-        const symbol = t.s; // BTCUSDT
+        const symbol = t.s;
         const price = parseFloat(t.c);
         const now = Date.now();
-
-        state.realtimePrice[symbol] = price;
 
         if (!state.priceHistory[symbol]) {
             state.priceHistory[symbol] = [];
@@ -141,8 +127,9 @@ async function startWS() {
 
         state.priceHistory[symbol].push({ p: price, t: now });
 
-        if (state.priceHistory[symbol].length > 1000)
+        if (state.priceHistory[symbol].length > 1000) {
             state.priceHistory[symbol].shift();
+        }
 
         const c1 = calcChange(state.priceHistory[symbol], 1);
         const c5 = calcChange(state.priceHistory[symbol], 5);
@@ -150,69 +137,108 @@ async function startWS() {
 
         state.coinData[symbol] = {
             symbol,
-            currentPrice: price,
+            price,
             c1,
             c5,
             c15,
-            vol: Math.abs(c1) + Math.abs(c5) + Math.abs(c15)
+            snapshot: { c1, c5, c15 }
         };
-
-        saveState();
     });
 
     ws.on('close', () => setTimeout(startWS, 1000));
 }
 
-// ===================== API =====================
+// ================= MARKET TOP 10 =================
+function buildMarket() {
 
+    const arr = Object.values(state.coinData || []);
+
+    state.market = arr
+        .sort((a, b) =>
+            (Math.abs(b.c1) + Math.abs(b.c5) + Math.abs(b.c15)) -
+            (Math.abs(a.c1) + Math.abs(a.c5) + Math.abs(a.c15))
+        )
+        .slice(0, 10);
+}
+
+// ================= POSITION UPDATE =================
+function updatePositionsLive() {
+
+    state.stats.openPositions = state.positions.length;
+
+    for (let p of state.positions) {
+
+        const price = state.coinData[p.symbol]?.price || p.entryInitial;
+
+        const diff = ((price - p.entryInitial) / p.entryInitial) * 100;
+
+        p.currentPrice = price;
+
+        p.pnl =
+            p.side === 'LONG'
+                ? diff * p.lev
+                : -diff * p.lev;
+    }
+}
+
+// ================= LOOP FAST =================
+setInterval(() => {
+    buildMarket();
+    updatePositionsLive();
+}, 200);
+
+// ================= WALLET LOOP =================
+setInterval(syncWallet, 5000);
+
+// ================= SAVE =================
+setInterval(saveState, 3000);
+
+// ================= API =================
 app.get('/api/status', (req, res) => {
 
-    const top10 = Object.values(state.coinData)
-        .sort((a, b) => b.vol - a.vol)
-        .slice(0, 10);
-
     res.json({
-        botStatus: state.botSettings.isRunning ? 'RUNNING' : 'STOP',
+        botStatus: state.botStatus,
+
         wallet: state.wallet,
+
         logs: state.logs,
-        market: top10,
-        positions: state.positions,
-        stats: state.stats,
-        config: state.botSettings,
-        realtimePrice: state.realtimePrice
+
+        market: state.market,
+
+        activePositions: state.positions,
+
+        stats: state.stats
     });
 });
 
+// ================= BOT CONTROL =================
 app.post('/api/start', (req, res) => {
-    state.botSettings.isRunning = true;
+    state.botStatus = 'RUNNING';
     log('BOT START');
-    saveState();
     res.json({ ok: true });
 });
 
 app.post('/api/stop', (req, res) => {
-    state.botSettings.isRunning = false;
+    state.botStatus = 'STOPPED';
     log('BOT STOP');
-    saveState();
     res.json({ ok: true });
 });
 
 app.post('/api/config', (req, res) => {
-    state.botSettings = { ...state.botSettings, ...req.body };
+    state.config = { ...state.config, ...req.body };
     log('CONFIG UPDATED');
-    saveState();
     res.json({ ok: true });
 });
 
-// ===================== LOOP =====================
+app.post('/api/closeall', (req, res) => {
+    state.positions = [];
+    log('CLOSE ALL');
+    res.json({ ok: true });
+});
 
-setInterval(syncWallet, 5000);
-
-setInterval(() => {
-    saveState();
-}, 3000);
-
+// ================= START =================
 app.listen(PORT, () => {
-    log(`SERVER RUN ${PORT}`);
+    console.log(`RUN http://localhost:${PORT}`);
+    log('SERVER START');
     startWS();
 });
